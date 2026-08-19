@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { cpSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -38,12 +38,50 @@ function readInputArray(script: string, name: string) {
 }
 
 function readDockerCopySources(dockerfile: string) {
-	return dockerfile.split("\n").flatMap((line) => {
-		const tokens = line.trim().split(/\s+/);
-		if (tokens[0] !== "COPY" || tokens[1]?.startsWith("--from=")) {
+	const instructions: string[] = [];
+	let current = "";
+
+	for (const rawLine of dockerfile.split("\n")) {
+		const trimmed = rawLine.trim();
+		if (!current && (!trimmed || trimmed.startsWith("#"))) {
+			continue;
+		}
+		const continued = /\\\s*$/.test(trimmed);
+		current += `${current ? " " : ""}${trimmed.replace(/\\\s*$/, "")}`;
+		if (!continued) {
+			instructions.push(current.trim());
+			current = "";
+		}
+	}
+	if (current) {
+		instructions.push(current.trim());
+	}
+
+	return instructions.flatMap((instruction) => {
+		if (!/^COPY\s/i.test(instruction)) {
 			return [];
 		}
-		return tokens.slice(1, -1);
+		let payload = instruction.replace(/^COPY\s+/i, "").trim();
+		while (payload.startsWith("--")) {
+			const flag = payload.match(/^(--\S+)(?:\s+|$)/)?.[1];
+			if (!flag) {
+				break;
+			}
+			if (flag === "--from" || flag.startsWith("--from=")) {
+				return [];
+			}
+			payload = payload.slice(flag.length).trimStart();
+		}
+
+		if (payload.startsWith("[")) {
+			const paths = JSON.parse(payload) as string[];
+			return paths.slice(0, -1);
+		}
+
+		const paths = [...payload.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)].map(
+			(match) => match[1] ?? match[2] ?? match[3],
+		);
+		return paths.slice(0, -1);
 	});
 }
 
@@ -70,6 +108,14 @@ function readWorkflowFilter(workflow: string, name: string) {
 	);
 	expect(block, `${name} workflow filter must be declared`).not.toBeNull();
 	return [...(block?.[1].matchAll(/- '([^']+)'/g) ?? [])].map(
+		(match) => match[1],
+	);
+}
+
+function readWorkflowPushPaths(workflow: string) {
+	const block = workflow.match(/^ {4}paths:\n((?: {6}- "[^"]+"\n)+)/m);
+	expect(block, "push.paths must be declared").not.toBeNull();
+	return [...(block?.[1].matchAll(/- "([^"]+)"/g) ?? [])].map(
 		(match) => match[1],
 	);
 }
@@ -171,6 +217,54 @@ describe("CRM API production auth build", () => {
 		expect(crmLock).not.toContain('"@better-auth/drizzle-adapter"');
 	});
 
+	it("parses shell, multiline, JSON and flagged Docker COPY instructions", () => {
+		const dockerfile = String.raw`
+COPY one two /dest/
+COPY three \
+     four \
+     /dest/
+COPY ["json-one", "json two", "/dest/"]
+COPY --chown=1000:1000 --chmod=755 flagged /dest/
+COPY --from=builder /compiled /dest/
+`;
+
+		expect(readDockerCopySources(dockerfile)).toEqual([
+			"one",
+			"two",
+			"three",
+			"four",
+			"json-one",
+			"json two",
+			"flagged",
+		]);
+	});
+
+	it("detects untracked files inside a CRM build input", () => {
+		const probe = join(serverRoot, ".deploy-untracked-probe");
+		try {
+			writeFileSync(probe, "probe");
+			const result = Bun.spawnSync({
+				cmd: [
+					"git",
+					"ls-files",
+					"--others",
+					"--exclude-standard",
+					"--",
+					":(top)apps/crm/apps/server/",
+				],
+				cwd: crmRoot,
+				stderr: "pipe",
+				stdout: "pipe",
+			});
+			expect(result.exitCode).toBe(0);
+			expect(new TextDecoder().decode(result.stdout)).toContain(
+				"apps/server/.deploy-untracked-probe",
+			);
+		} finally {
+			rmSync(probe, { force: true });
+		}
+	});
+
 	it("uses the monorepo root context in every legacy CRM deploy build", async () => {
 		const deployScript = await readFile(deployScriptPath, "utf8");
 
@@ -215,6 +309,7 @@ describe("CRM API production auth build", () => {
 			expect(deployScript).toContain(
 				`git diff --quiet "$COMPARE_MODE" HEAD -- "\${${name}[@]}"`,
 			);
+			expect(deployScript).toContain(`has_untracked_inputs "\${${name}[@]}"`);
 		}
 	});
 
@@ -226,6 +321,9 @@ describe("CRM API production auth build", () => {
 		]);
 		const serverFilter = readWorkflowFilter(workflow, "crm-api");
 		const webFilter = readWorkflowFilter(workflow, "crm-web");
+		const pushPaths = readWorkflowPushPaths(workflow);
+
+		expect(pushPaths).toContain(".dockerignore");
 
 		expectWorkflowFilterCovers(serverFilter, [
 			...readDockerCopySources(serverDockerfile),

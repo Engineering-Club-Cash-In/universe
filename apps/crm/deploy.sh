@@ -15,6 +15,9 @@ NC='\033[0m' # No Color
 
 ECR_REGISTRY="public.ecr.aws/a6w8m2u2"
 REGION="us-east-1"
+
+# Supersets conservadores de los inputs Docker: pueden reconstruir de más ante
+# archivos ignorados/no-runtime, pero nunca deben omitir una imagen afectada.
 SERVER_BUILD_INPUTS=(
     ":(top).dockerignore"
     ":(top)apps/crm/apps/server/"
@@ -43,6 +46,10 @@ WEB_BUILD_INPUTS=(
     ":(top)packages/email/"
 )
 
+has_untracked_inputs() {
+    [ -n "$(git ls-files --others --exclude-standard -- "$@")" ]
+}
+
 # Default: check uncommitted changes, or compare with ref if provided
 COMPARE_MODE="${1:-uncommitted}"
 
@@ -57,7 +64,7 @@ if [ "$COMPARE_MODE" = "uncommitted" ]; then
 
     # Check for changes in every input consumed by the server image
     SERVER_CHANGED=false
-    if git diff --quiet HEAD -- "${SERVER_BUILD_INPUTS[@]}" && git diff --quiet --cached -- "${SERVER_BUILD_INPUTS[@]}"; then
+    if git diff --quiet HEAD -- "${SERVER_BUILD_INPUTS[@]}" && git diff --quiet --cached -- "${SERVER_BUILD_INPUTS[@]}" && ! has_untracked_inputs "${SERVER_BUILD_INPUTS[@]}"; then
         echo -e "${YELLOW}⏭️  No uncommitted changes in server${NC}"
     else
         echo -e "${GREEN}✓ Uncommitted changes detected in server${NC}"
@@ -66,7 +73,7 @@ if [ "$COMPARE_MODE" = "uncommitted" ]; then
 
     # Check for changes in every input consumed by the web image
     WEB_CHANGED=false
-    if git diff --quiet HEAD -- "${WEB_BUILD_INPUTS[@]}" && git diff --quiet --cached -- "${WEB_BUILD_INPUTS[@]}"; then
+    if git diff --quiet HEAD -- "${WEB_BUILD_INPUTS[@]}" && git diff --quiet --cached -- "${WEB_BUILD_INPUTS[@]}" && ! has_untracked_inputs "${WEB_BUILD_INPUTS[@]}"; then
         echo -e "${YELLOW}⏭️  No uncommitted changes in web${NC}"
     else
         echo -e "${GREEN}✓ Uncommitted changes detected in web${NC}"

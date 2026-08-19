@@ -1,6 +1,6 @@
+import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, test } from "bun:test";
 import {
 	canAutoAttachBankStatementDocuments,
 	getBankStatementOpportunityDocumentType,
@@ -112,7 +112,7 @@ describe("bank statement opportunity documents", () => {
 			"const creditCapacity = calculateCreditCapacity",
 		);
 		const persistedAnalysisIndex = source.indexOf(
-			"fullAnalysis: JSON.stringify(analysis)",
+			"fullAnalysis: JSON.stringify(",
 		);
 		const attachmentWriteIndex = source.indexOf(
 			"const { key } = await uploadFileToR2(",
@@ -123,6 +123,30 @@ describe("bank statement opportunity documents", () => {
 		expect(attachmentWriteIndex).toBeGreaterThan(persistedAnalysisIndex);
 	});
 
+	test("attaches the statements that do not fit the checklist instead of dropping them", () => {
+		const source = readFileSync(
+			join(import.meta.dir, "../routers/bank-analysis.ts"),
+			"utf8",
+		);
+
+		// El análisis acepta hasta 9 archivos y la IA los usa todos, así que los
+		// que no caben en las 3 casillas se adjuntan igual, fuera del checklist.
+		expect(source).toContain(
+			"const extraFiles = downloadedFiles.slice(\n\t\t\t\t\t\t\tBANK_STATEMENT_OPPORTUNITY_DOCUMENT_TYPES.length,\n\t\t\t\t\t\t);",
+		);
+		expect(source).toContain("savedExtraDocumentIds.push(newDocument.id)");
+	});
+
+	test("records which files the analysis actually read", () => {
+		const source = readFileSync(
+			join(import.meta.dir, "../routers/bank-analysis.ts"),
+			"utf8",
+		);
+
+		expect(source).toContain("const analyzedFiles = downloadedFiles.map(");
+		expect(source).toContain("archivos_analizados: analyzedFiles");
+	});
+
 	test("keeps non-upload roles analyzing while skipping auto-attachments", () => {
 		const source = readFileSync(
 			join(import.meta.dir, "../routers/bank-analysis.ts"),
@@ -131,10 +155,14 @@ describe("bank statement opportunity documents", () => {
 		const permissionCheckIndex = source.indexOf(
 			"canAutoAttachBankStatementDocuments({",
 		);
-		const enableAttachmentsIndex = source.indexOf("opportunityForDocuments = {");
+		const enableAttachmentsIndex = source.indexOf(
+			"opportunityForDocuments = {",
+		);
 
 		expect(permissionCheckIndex).toBeGreaterThan(-1);
 		expect(enableAttachmentsIndex).toBeGreaterThan(permissionCheckIndex);
-		expect(source).not.toContain('message: "No tienes permiso para subir documentos"');
+		expect(source).not.toContain(
+			'message: "No tienes permiso para subir documentos"',
+		);
 	});
 });

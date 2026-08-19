@@ -57,7 +57,6 @@ export const agendaCobrosRouter = {
 				casoCobroId: agendaCobrosSnapshotItems.casoCobroId,
 				motivoAgenda: agendaCobrosSnapshotItems.motivoAgenda,
 				bucketSnapshot: agendaCobrosSnapshotItems.bucketSnapshot,
-				clienteNombre: clients.contactPerson,
 				promesaCumplida: agendaCobrosSnapshotItems.promesaCumplida,
 				promesaCumplidaEn: agendaCobrosSnapshotItems.promesaCumplidaEn,
 			})
@@ -66,15 +65,6 @@ export const agendaCobrosRouter = {
 				agendaCobrosSnapshots,
 				eq(agendaCobrosSnapshotItems.snapshotId, agendaCobrosSnapshots.id),
 			)
-			.leftJoin(
-				casosCobros,
-				eq(agendaCobrosSnapshotItems.casoCobroId, casosCobros.id),
-			)
-			.leftJoin(
-				contratosFinanciamiento,
-				eq(casosCobros.contratoId, contratosFinanciamiento.id),
-			)
-			.leftJoin(clients, eq(contratosFinanciamiento.clientId, clients.id))
 			.where(
 				and(
 					eq(agendaCobrosSnapshots.fechaGt, fecha),
@@ -82,6 +72,57 @@ export const agendaCobrosRouter = {
 				),
 			);
 		if (items.length === 0) return { fecha, items: [] };
+
+		// Resolver el cliente por SIFCO, no solo por casoCobroId: un item D-0
+		// siempre nace con casoCobroId=null en agenda-cobros-source.ts, así
+		// que un join directo por casoCobroId deja el nombre en null para TODO
+		// item D-0 (y para cualquier crédito donde D-0 ganó la deduplicación)
+		// aunque el crédito sí tenga caso CRM vinculado — mismo fallback por
+		// SIFCO que ya usa getCumplimientoAgendaDetalle (Codex, PR #1332).
+		const sifcosClientes = [
+			...new Set(items.map((item) => item.numeroCreditoSifco)),
+		];
+		const casosParaCliente = sifcosClientes.length
+			? await db
+					.select({
+						id: casosCobros.id,
+						numeroCreditoSifco: casosCobros.numeroCreditoSifco,
+						contratoId: casosCobros.contratoId,
+						activo: casosCobros.activo,
+						updatedAt: casosCobros.updatedAt,
+					})
+					.from(casosCobros)
+					.where(inArray(casosCobros.numeroCreditoSifco, sifcosClientes))
+			: [];
+		const casoPorSifcoCliente = agruparCasosVigentesPorSifco(casosParaCliente);
+		const contratoIdsCliente = [
+			...new Set(
+				[...casoPorSifcoCliente.values()]
+					.map((caso) => caso.contratoId)
+					.filter((id): id is string => id !== null),
+			),
+		];
+		const contratosCliente = contratoIdsCliente.length
+			? await db
+					.select({
+						id: contratosFinanciamiento.id,
+						clienteNombre: clients.contactPerson,
+					})
+					.from(contratosFinanciamiento)
+					.leftJoin(clients, eq(contratosFinanciamiento.clientId, clients.id))
+					.where(inArray(contratosFinanciamiento.id, contratoIdsCliente))
+			: [];
+		const clienteNombrePorContratoAgenda = new Map(
+			contratosCliente.map((c) => [c.id, c.clienteNombre]),
+		);
+		const clienteNombrePorSifco = new Map(
+			[...casoPorSifcoCliente.entries()].map(([sifco, caso]) => [
+				sifco,
+				caso.contratoId
+					? (clienteNombrePorContratoAgenda.get(caso.contratoId) ?? null)
+					: null,
+			]),
+		);
 
 		// Ventana de fecha empujada al SQL (no en JS): con miles de contactos
 		// históricos por caso, traer todo y filtrar en memoria no escala.
@@ -132,6 +173,8 @@ export const agendaCobrosRouter = {
 				const cerrado = cerradoPorSifco.get(item.numeroCreditoSifco);
 				return {
 					...item,
+					clienteNombre:
+						clienteNombrePorSifco.get(item.numeroCreditoSifco) ?? null,
 					atendido: cerrado?.atendido ?? false,
 					atendidoEn: cerrado?.atendidoEn ?? null,
 					resultadoContacto: cerrado?.resultadoContacto ?? null,

@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import {
+  formatearRazonLiquidacion,
   getApiErrorMessage,
   getBatchFailedCredits,
   getLiquidationFailureReasons,
@@ -307,7 +308,7 @@ export function TableInvestors() {
                   .join(", ");
                 return `• Pendiente de autorización para devolución a CUBE${sifcos ? `: ${sifcos}` : ""}`;
               }
-              return `• ${e.razon}`;
+              return `• ${formatearRazonLiquidacion(e.razon)}`;
             }).join("\n");
             if ((data.liquidaciones_creadas ?? 0) > 0) {
               toast.warning(

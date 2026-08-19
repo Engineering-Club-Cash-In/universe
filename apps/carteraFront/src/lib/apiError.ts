@@ -95,16 +95,38 @@ export type LiquidationFailureReason = {
   creditos_bloqueados?: Array<{ numero_credito_sifco?: string }>;
 };
 
+/**
+ * `razon` de liquidateByInvestorId puede cargar `error.message` crudo de una
+ * excepción (Postgres, driver, etc.) cuando el fallo no es una regla de
+ * negocio conocida. Mismo criterio que extraerDetalle: nunca se muestra un
+ * crudo técnico al usuario.
+ */
+export function formatearRazonLiquidacion(razon: string): string {
+  const trimmed = razon.trim();
+  if (!trimmed || esDetalleTecnicoCrudo(trimmed)) {
+    return "Error interno al procesar este crédito, contacta soporte";
+  }
+  return traducirDetalleTecnico(trimmed);
+}
+
 export function getLiquidationFailureReasons(error: unknown): LiquidationFailureReason[] {
   if (!(error instanceof AxiosError)) return [];
 
   const data = error.response?.data as { errores?: unknown } | undefined;
   if (!Array.isArray(data?.errores)) return [];
 
-  return data.errores.filter((item): item is LiquidationFailureReason => {
-    if (!item || typeof item !== "object") return false;
-    return typeof (item as { razon?: unknown }).razon === "string";
-  });
+  const vistos = new Set<string>();
+  const razones: LiquidationFailureReason[] = [];
+  for (const item of data.errores) {
+    if (!item || typeof item !== "object") continue;
+    const razon = (item as { razon?: unknown }).razon;
+    if (typeof razon !== "string" || !razon.trim()) continue;
+    const formateada = formatearRazonLiquidacion(razon);
+    if (vistos.has(formateada)) continue;
+    vistos.add(formateada);
+    razones.push({ ...(item as LiquidationFailureReason), razon: formateada });
+  }
+  return razones;
 }
 
 export function getPendingReturnWarningMessage(error: unknown): string | null {

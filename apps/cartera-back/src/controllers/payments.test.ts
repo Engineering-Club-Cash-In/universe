@@ -200,7 +200,7 @@ mock.module("../utils/comprasAjuste", () => ({
   obtenerSumaComprasCompletadasMesActual: mock(() => Promise.resolve(mockSumaComprasCompletadasMesActual)),
 }));
 
-const { calcularYRegistrarPagosEspejo, armarInversionistasPago } = await import("./payments");
+const { calcularYRegistrarPagosEspejo, armarInversionistasPago, aplicarRepartoCongelado } = await import("./payments");
 
 describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
   beforeEach(() => {
@@ -1025,5 +1025,88 @@ describe("armarInversionistasPago (interés CUBE del desglose)", () => {
     // Solo CUBE: la parte del redirigido ya está dentro del desglose de CUBE.
     expect(out).toHaveLength(1);
     expect(out[0].inversionistaId).toBe(86);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 🔒 aplicarRepartoCongelado: quién cobra el interés de un pago ya facturado
+// cuando el roster del crédito cambió entre el parcial y el cierre de la cuota.
+// ─────────────────────────────────────────────────────────────────────────────
+describe("aplicarRepartoCongelado (reparto de interés de un pago ya facturado)", () => {
+  const splitVivo = (entradas: [number, string, string][]) =>
+    new Map(
+      entradas.map(([id, interes, iva]) => [
+        id,
+        {
+          inversionista_id: id,
+          abono_interes: new Big(interes),
+          abono_iva_12: new Big(iva),
+        },
+      ])
+    );
+
+  it("sin congelado: devuelve el reparto vivo intacto (pagos anteriores al sellado)", () => {
+    const vivo = splitVivo([[6, "9.24", "0"], [86, "42.90", "0"]]);
+    const { split, salidos } = aplicarRepartoCongelado({
+      congelado: [],
+      splitVivo: vivo,
+      idsEnElCredito: new Set([6, 86]),
+    });
+
+    expect(split).toBe(vivo); // misma referencia: no se toca nada
+    expect(salidos).toHaveLength(0);
+  });
+
+  it("mismo roster: el congelado pisa el cálculo vivo (6.42 facturado, no 9.24)", () => {
+    const { split, salidos } = aplicarRepartoCongelado({
+      congelado: [
+        { inversionista_id: 6, abono_interes: "6.42", abono_iva_12: "0.00", porcentaje_participacion: "80" },
+        { inversionista_id: 86, abono_interes: "42.90", abono_iva_12: "0.00", porcentaje_participacion: "0" },
+      ],
+      splitVivo: splitVivo([[6, "9.24", "0"], [86, "40.08", "0"]]),
+      idsEnElCredito: new Set([6, 86]),
+    });
+
+    expect(split.get(6)!.abono_interes.toFixed(2)).toBe("6.42");
+    expect(split.get(86)!.abono_interes.toFixed(2)).toBe("42.90");
+    expect(salidos).toHaveLength(0);
+  });
+
+  it("inversionista que SALIÓ del crédito: conserva su parte facturada, con capital 0", () => {
+    // A (id 6) estaba al facturar; después una compra de cartera lo sacó y entró B (id 7).
+    const { split, salidos } = aplicarRepartoCongelado({
+      congelado: [
+        { inversionista_id: 6, abono_interes: "6.42", abono_iva_12: "0.00", porcentaje_participacion: "80" },
+        { inversionista_id: 86, abono_interes: "42.90", abono_iva_12: "0.00", porcentaje_participacion: "0" },
+      ],
+      splitVivo: splitVivo([[7, "9.24", "0"], [86, "40.08", "0"]]),
+      idsEnElCredito: new Set([7, 86]),
+    });
+
+    // El que salió no se pierde: sale en `salidos` para que se le escriba su pci.
+    expect(salidos).toHaveLength(1);
+    expect(salidos[0].inversionista_id).toBe(6);
+    expect(salidos[0].abono_interes.toFixed(2)).toBe("6.42");
+    expect(salidos[0].porcentaje_participacion).toBe("80");
+
+    // Y el que ENTRÓ después no cobra interés de este pago: si cobrara, esa misma
+    // parte se pagaría dos veces (a él por el roster vivo y a A por el congelado).
+    expect(split.has(7)).toBe(false);
+  });
+
+  it("inversionista que ENTRÓ después de la factura: interés 0, no hereda la parte del que salió", () => {
+    const { split } = aplicarRepartoCongelado({
+      congelado: [
+        { inversionista_id: 86, abono_interes: "48.05", abono_iva_12: "0.00", porcentaje_participacion: "0" },
+      ],
+      splitVivo: splitVivo([[7, "9.24", "0"], [86, "40.08", "0"]]),
+      idsEnElCredito: new Set([7, 86]),
+    });
+
+    expect(split.has(7)).toBe(false); // el caller lo resuelve como Big(0)
+    expect(split.get(86)!.abono_interes.toFixed(2)).toBe("48.05");
+    // Suma total = exactamente lo facturado, sin fugas ni duplicados.
+    const total = [...split.values()].reduce((a, r) => a.plus(r.abono_interes), new Big(0));
+    expect(total.toFixed(2)).toBe("48.05");
   });
 });

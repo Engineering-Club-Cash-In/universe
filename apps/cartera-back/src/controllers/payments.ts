@@ -26,7 +26,7 @@ import {
 import { updateMora } from "./latefee";
 import { calcularAjusteCompras, obtenerSumaComprasMesAnterior, obtenerSumaComprasPendientes, obtenerSumaComprasCompletadasMesActual } from "../utils/comprasAjuste";
 import { calcularFactoresProrrateoInteresV2 } from "../cofidi/prorrateoPciInteres";
-import { calcularSplitInteresPci } from "../cofidi/splitInteresPci";
+import { calcularSplitInteresPci, type InvSplitRow } from "../cofidi/splitInteresPci";
 import { t } from "elysia";
 import { calcularResumenAbonosCuota } from "./registerPaymentPolicy";
 
@@ -1058,6 +1058,75 @@ export async function insertPagosCreditoInversionistas(
   return filas;
 }
 
+// Fila del reparto congelado al facturar (pagos_credito_inversionistas_facturado).
+export type FilaRepartoCongelado = {
+  inversionista_id: number | string;
+  abono_interes: string | number;
+  abono_iva_12: string | number;
+  porcentaje_participacion?: string | number | null;
+};
+
+/**
+ * 🔒 Aplica el reparto de interés CONGELADO al facturar sobre el que se acaba de
+ * calcular con el roster vivo.
+ *
+ * Es reemplazo TOTAL, no fila por fila. Si solo se pisaran los inversionistas que
+ * siguen en el crédito:
+ *   - al que entró en lugar de uno que se fue ya se le calculó esa misma parte
+ *     con el roster de hoy → el interés se pagaría dos veces;
+ *   - al que se fue no le quedaría fila de pci → nunca se le liquidaría lo que
+ *     sí se le facturó.
+ *
+ * Regla: quien no estaba el día de la factura no recibe interés de ese pago
+ * (aunque hoy esté en el crédito), y quien estaba lo recibe aunque ya se haya
+ * ido. El CAPITAL no se toca acá: ese sí va con el roster vivo.
+ *
+ * Sin congelado devuelve el reparto vivo tal cual (pagos anteriores al sellado).
+ */
+export function aplicarRepartoCongelado(args: {
+  congelado: FilaRepartoCongelado[];
+  splitVivo: Map<number, InvSplitRow>;
+  idsEnElCredito: Set<number>;
+}): {
+  split: Map<number, InvSplitRow>;
+  salidos: {
+    inversionista_id: number;
+    abono_interes: Big;
+    abono_iva_12: Big;
+    porcentaje_participacion: string;
+  }[];
+} {
+  if (args.congelado.length === 0) {
+    return { split: args.splitVivo, salidos: [] };
+  }
+
+  const split = new Map<number, InvSplitRow>();
+  const salidos: {
+    inversionista_id: number;
+    abono_interes: Big;
+    abono_iva_12: Big;
+    porcentaje_participacion: string;
+  }[] = [];
+
+  for (const row of args.congelado) {
+    const invId = Number(row.inversionista_id);
+    const abono_interes = new Big(row.abono_interes ?? 0);
+    const abono_iva_12 = new Big(row.abono_iva_12 ?? 0);
+    split.set(invId, { inversionista_id: invId, abono_interes, abono_iva_12 });
+
+    if (!args.idsEnElCredito.has(invId)) {
+      salidos.push({
+        inversionista_id: invId,
+        abono_interes,
+        abono_iva_12,
+        porcentaje_participacion: String(row.porcentaje_participacion ?? "0"),
+      });
+    }
+  }
+
+  return { split, salidos };
+}
+
 type InvestorPaymentDb = Pick<
   typeof db,
   "query" | "select" | "insert" | "update" | "execute"
@@ -1245,24 +1314,21 @@ export async function insertPagosCreditoInversionistasV2(
   //     de los DTEs ya emitidos. El CAPITAL sí sigue repartiéndose con el roster
   //     vivo (es lo correcto: se abona sobre la posición actual).
   const congeladoRes = await txOrDb.execute(sql`
-    SELECT inversionista_id, abono_interes, abono_iva_12
+    SELECT inversionista_id, abono_interes, abono_iva_12, porcentaje_participacion
     FROM cartera.pagos_credito_inversionistas_facturado
     WHERE pago_id = ${pago_id}
   `);
-  const congeladoRows = ((congeladoRes as any).rows ?? []) as {
-    inversionista_id: number | string;
-    abono_interes: string | number;
-    abono_iva_12: string | number;
-  }[];
-  for (const row of congeladoRows) {
-    const invId = Number(row.inversionista_id);
-    if (!splitPorInv.has(invId)) continue; // ya no está en el crédito → se ignora
-    splitPorInv.set(invId, {
-      inversionista_id: invId,
-      abono_interes: new Big(row.abono_interes ?? 0),
-      abono_iva_12: new Big(row.abono_iva_12 ?? 0),
+  const congeladoRows = ((congeladoRes as any).rows ?? []) as FilaRepartoCongelado[];
+
+  const { split: repartoInteres, salidos: congeladosSalidos } =
+    aplicarRepartoCongelado({
+      congelado: congeladoRows,
+      splitVivo: splitPorInv,
+      idsEnElCredito: new Set(
+        inversionistasWithName.map((inv) => inv.inversionista_id)
+      ),
     });
-  }
+
   if (congeladoRows.length > 0) {
     console.log(
       `🔒 Pago ${pago_id}: interés tomado del reparto congelado al facturar (${congeladoRows.length} inversionista(s)), no del roster actual.`
@@ -1282,10 +1348,12 @@ export async function insertPagosCreditoInversionistasV2(
     // Capital: SIEMPRE por porcentaje general (sin cambios respecto al flujo original).
     const abonoCapitalInv = pagoAbonoCapital.times(porcentajeGeneral);
 
-    // Interés / IVA: resultado de la función pura.
-    const split = splitPorInv.get(inv.inversionista_id)!;
-    const abonoInteresInv = split.abono_interes;
-    const abonoIvaInv = split.abono_iva_12;
+    // Interés / IVA: resultado de la función pura, o del congelado si lo hay.
+    // Puede faltar: con reparto congelado, quien entró al crédito DESPUÉS de la
+    // factura no recibe interés de este pago (sí capital, que es del roster vivo).
+    const split = repartoInteres.get(inv.inversionista_id);
+    const abonoInteresInv = split?.abono_interes ?? new Big(0);
+    const abonoIvaInv = split?.abono_iva_12 ?? new Big(0);
 
     // Solo actualizar monto_aportado si hubo abono a capital
     if (abonoCapitalInv.gt(0)) {
@@ -1312,6 +1380,28 @@ export async function insertPagosCreditoInversionistasV2(
       cuota: currentPago.cuota ?? "0",
       estado_liquidacion: "NO_LIQUIDADO" as const,
     });
+  }
+
+  // 6c. 🔒 Inversionistas que estaban el día de la factura y ya NO están en el
+  //     crédito (compra de cartera, reemplazo). Sin esto su parte facturada se
+  //     perdería: el loop de arriba solo recorre el roster vivo, así que no
+  //     tendrían fila de pci y nunca se les liquidaría lo que se les facturó.
+  //     Capital 0 — ya no tienen posición sobre la cual abonar.
+  for (const salido of congeladosSalidos) {
+    inserts.push({
+      pago_id,
+      inversionista_id: salido.inversionista_id,
+      credito_id,
+      abono_capital: "0",
+      abono_interes: salido.abono_interes.toString(),
+      abono_iva_12: salido.abono_iva_12.toString(),
+      porcentaje_participacion: salido.porcentaje_participacion,
+      cuota: currentPago.cuota ?? "0",
+      estado_liquidacion: "NO_LIQUIDADO" as const,
+    });
+    console.log(
+      `🔒 Pago ${pago_id}: inversionista ${salido.inversionista_id} ya no está en el crédito pero se le facturó — se conserva su fila de pci con capital 0.`
+    );
   }
 
   // 7. Insertar/upsert en pagos_credito_inversionistas
@@ -2176,9 +2266,10 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
           )
         )`);
       } else {
-        // Con reparto real (pci) O parcial simulable donde este inversionista
-        // participa y NO está redirigido a CUBE — así el filtro ve los mismos
-        // pagos cuyo detalle ya muestra la fila simulada (Codex P2, PR #1137).
+        // Con reparto real (pci), O congelado al facturar, O parcial simulable
+        // donde este inversionista participa y NO está redirigido a CUBE — así el
+        // filtro ve los mismos pagos cuyo detalle ya muestra su fila
+        // (Codex P2, PR #1137; Codex P2, PR #1335).
         whereClauses.push(`
           (
             EXISTS (
@@ -2186,6 +2277,20 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
               FROM cartera.pagos_credito_inversionistas pci2
               WHERE pci2.pago_id = p.pago_id
               AND pci2.inversionista_id = '${inversionistaId}'
+            )
+            OR (
+              -- Congelado: se mira el roster del día de la factura, no el de hoy.
+              -- Si el inversionista salió del crédito después, el detalle igual
+              -- muestra su fila (viene del congelado) y el filtro tiene que
+              -- encontrar el pago. Mismas condiciones que usa el detalle:
+              -- validated y sin reparto real todavía.
+              p.validation_status = 'validated'
+              AND NOT EXISTS (SELECT 1 FROM cartera.pagos_credito_inversionistas pci3
+                              WHERE pci3.pago_id = p.pago_id)
+              AND EXISTS (SELECT 1 FROM cartera.pagos_credito_inversionistas_facturado f_flt
+                          WHERE f_flt.pago_id = p.pago_id
+                            AND f_flt.inversionista_id = '${inversionistaId}'
+                            AND f_flt.redirigido_a_cube = false)
             )
             OR (
               ${pagoSimulableSQL}
@@ -2615,8 +2720,14 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
               !((r as any).pendienteFacturar ?? false),
             banderaReinversion: (r as any).banderaReinversion ?? false,
             // 🔒 Si el pago se facturó siendo parcial, su reparto quedó sellado
-            //    ese día: manda sobre la simulación.
-            congelado: congeladoByPago.get(Number(r.pagoId)) ?? null,
+            //    ese día: manda sobre la simulación. Se exige 'validated' igual
+            //    que la simulación — un pago reseteado se revirtió y mostrar lo
+            //    que se le facturó sería volver a contarlo. NO se le aplica el
+            //    gate de compra de cartera pendiente: el congelado es de antes.
+            congelado:
+              (r as any).validation_status === "validated"
+                ? congeladoByPago.get(Number(r.pagoId)) ?? null
+                : null,
           })
         : pciRows;
 
@@ -2806,6 +2917,24 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         ${sql.raw(whereSQL)}
         AND ${sql.raw(pagoSimulableSQL)}
       ),
+      -- Base de los pagos YA congelados. NO usa pagoSimulableSQL a propósito: ese
+      -- gate excluye créditos con compra de cartera pendiente, y la compra pudo
+      -- abrirse DESPUÉS de facturar. El detalle igual muestra el congelado (es lo
+      -- que se facturó), así que el resumen tiene que verlo o se despega de las
+      -- filas listadas (Codex P2, PR #1335). Se conservan las condiciones que el
+      -- detalle sí aplica: validated y sin reparto real todavía.
+      pfc AS (
+        SELECT p.pago_id
+        FROM cartera.pagos_credito p
+        LEFT JOIN cartera.creditos c ON c.credito_id = p.credito_id
+        LEFT JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
+        ${sql.raw(whereSQL)}
+        AND p.validation_status = 'validated'
+        AND NOT EXISTS (SELECT 1 FROM cartera.pagos_credito_inversionistas pci_c
+                        WHERE pci_c.pago_id = p.pago_id)
+        AND EXISTS (SELECT 1 FROM cartera.pagos_credito_inversionistas_facturado f_c
+                    WHERE f_c.pago_id = p.pago_id)
+      ),
       aportes AS (
         SELECT ci.credito_id, SUM(ci.monto_aportado::numeric) AS total
         FROM cartera.creditos_inversionistas ci
@@ -2822,8 +2951,8 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
                SUM(f.abono_interes::numeric) AS interes,
                SUM(f.abono_iva_12::numeric) AS iva,
                SUM(f.monto_aportado::numeric) AS aporte
-        FROM pf
-        JOIN cartera.pagos_credito_inversionistas_facturado f ON f.pago_id = pf.pago_id
+        FROM pfc
+        JOIN cartera.pagos_credito_inversionistas_facturado f ON f.pago_id = pfc.pago_id
         JOIN cartera.inversionistas i ON i.inversionista_id = f.inversionista_id
         WHERE UPPER(TRIM(i.nombre)) NOT LIKE '%CUBE INVESTMENTS%'
           AND f.redirigido_a_cube = false

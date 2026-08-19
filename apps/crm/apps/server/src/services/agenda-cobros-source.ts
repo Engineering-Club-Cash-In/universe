@@ -11,7 +11,11 @@ import {
 } from "drizzle-orm";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
-import { casosCobros, contactosCobros } from "../db/schema/cobros";
+import {
+	casosCobros,
+	contactosCobros,
+	contactosCobrosAudit,
+} from "../db/schema/cobros";
 import {
 	type AgendaSnapshotItemFuente,
 	deduplicarAgenda,
@@ -247,6 +251,7 @@ export async function obtenerColaOperacionAsesor(
 			? Promise.resolve([])
 			: db
 					.select({
+						id: contactosCobros.id,
 						casoCobroId: contactosCobros.casoCobroId,
 						estadoPromesa: contactosCobros.estadoPromesa,
 						fechaProximoContacto: contactosCobros.fechaProximoContacto,
@@ -293,6 +298,55 @@ export async function obtenerColaOperacionAsesor(
 					.groupBy(contactosCobros.casoCobroId),
 	]);
 
+	// createdAt < hoy solo confirma que la FILA existía al boundary — no que
+	// su fechaProximoContacto era el mismo valor de hoy. Una promesa editada
+	// esta mañana (edicion_promesa, único UPDATE manual sobre esta tabla,
+	// ver routers/cobros.ts) pudo mover la fecha prometida DENTRO o FUERA
+	// del día capturado; leer el valor actual reconstruye mal el universo de
+	// las 00:00 GT. contactos_cobros_audit ya guarda fechaProximoContacto de
+	// ANTES de cada edición (payloadEdicionManual) — se trae la más antigua
+	// edición posterior a `hoy` por promesa (la que retrocede justo hasta el
+	// boundary) y se usa ESE valor en vez del actual (Codex PR #1331).
+	const idsPromesas = promesas.map((p) => p.id);
+	const edicionesPostBoundary =
+		idsPromesas.length === 0
+			? []
+			: await db
+					.select({
+						contactoId: contactosCobrosAudit.contactoId,
+						editadoEn: contactosCobrosAudit.editadoEn,
+						valoresAnteriores: contactosCobrosAudit.valoresAnteriores,
+					})
+					.from(contactosCobrosAudit)
+					.where(
+						and(
+							inArray(contactosCobrosAudit.contactoId, idsPromesas),
+							eq(contactosCobrosAudit.accion, "edicion_promesa"),
+							eq(contactosCobrosAudit.origen, "manual"),
+							gte(contactosCobrosAudit.editadoEn, hoy),
+						),
+					);
+	// Ordenado ascendente por editadoEn: la primera entrada que se guarda por
+	// contactoId es la edición MÁS ANTIGUA posterior al boundary — sus
+	// valoresAnteriores son el estado justo antes de esa edición, es decir,
+	// el que tenía la fila a las 00:00 GT (si hubo varias ediciones ese día,
+	// las siguientes ya no retroceden hasta el boundary).
+	const fechaPrometidaOriginalPorContacto = new Map<string, Date | null>();
+	for (const edicion of [...edicionesPostBoundary].sort(
+		(a, b) => a.editadoEn.getTime() - b.editadoEn.getTime(),
+	)) {
+		if (fechaPrometidaOriginalPorContacto.has(edicion.contactoId)) continue;
+		const valorPrevio = edicion.valoresAnteriores as {
+			fechaProximoContacto: string | null;
+		} | null;
+		fechaPrometidaOriginalPorContacto.set(
+			edicion.contactoId,
+			valorPrevio?.fechaProximoContacto
+				? new Date(valorPrevio.fechaProximoContacto)
+				: null,
+		);
+	}
+
 	const promesasPorCaso = new Map<
 		string,
 		Array<{
@@ -310,10 +364,18 @@ export async function obtenerColaOperacionAsesor(
 			promesa.estadoPromesa === "cumplida"
 				? "pendiente"
 				: (promesa.estadoPromesa ?? "pendiente");
+		// Si se editó después del boundary, usar la fecha ANTERIOR a esa
+		// edición (la que tenía a las 00:00 GT), no la actual.
+		const fechaPrometidaBoundary = fechaPrometidaOriginalPorContacto.has(
+			promesa.id,
+		)
+			? fechaPrometidaOriginalPorContacto.get(promesa.id)
+			: promesa.fechaProximoContacto;
+		if (!fechaPrometidaBoundary) continue;
 		const lista = promesasPorCaso.get(promesa.casoCobroId) ?? [];
 		lista.push({
 			estadoPromesa,
-			fechaPrometida: promesa.fechaProximoContacto as Date,
+			fechaPrometida: fechaPrometidaBoundary,
 			fechaAlerta: promesa.fechaAlerta,
 		});
 		promesasPorCaso.set(promesa.casoCobroId, lista);

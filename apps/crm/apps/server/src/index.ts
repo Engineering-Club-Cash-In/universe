@@ -1477,13 +1477,14 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 	// checkPromesasPago se guarda en una promesa module-level: el catch-up de
 	// agenda de cobros (más abajo) la espera antes de cerrar snapshots, mismo
 	// motivo que el encadenado del timer normal de medianoche (Codex PR #1330).
-	let checkPromesasPagoBoot: Promise<CheckPromesasResumen | void> =
-		Promise.resolve();
-	setTimeout(() => {
-		checkSeguimientosVencidos().catch(console.error);
-		procesarSeguimientosRecurrentes().catch(console.error);
-		checkPromesasPagoBoot = checkPromesasPago().catch(console.error);
-	}, 10_000);
+	const checkPromesasPagoBoot: Promise<CheckPromesasResumen | void> =
+		new Promise((resolve) => {
+			setTimeout(() => {
+				checkSeguimientosVencidos().catch(console.error);
+				procesarSeguimientosRecurrentes().catch(console.error);
+				resolve(checkPromesasPago().catch(console.error));
+			}, 10_000);
+		});
 
 	// Recordatorios Premora (CC2-11): diario a las 8:00 GT (= 14:00 UTC, GT no
 	// tiene DST). También corre al boot (abajo): la tabla recordatorios_premora
@@ -1740,26 +1741,17 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 	// Si el boot cae EXACTO entre 00:00 y 00:04:59 GT, scheduleAtMidnightGT ya
 	// movió su timer a mañana (next <= now) y este catch-up, sin más, se
 	// hubiera quedado callado hasta el próximo boot — perdiendo cierre de ayer
-	// Y captura de hoy por un día entero. En ese caso se agenda el resto exacto
-	// hasta las 00:05 GT en vez de omitir.
+	// Y captura de hoy por un día entero. Reusa esperarHasta0005GT() (mismo
+	// piso que el timer normal) en vez de una condición de hora manual: un
+	// boot en cualquier otro momento del día (p. ej. 23:00 GT, mientras
+	// procesarMoras todavía no corrió) NO debe capturar de inmediato — debe
+	// esperar a la próxima barrera de 00:05 GT como cualquier otra corrida.
 	setTimeout(async () => {
-		const bootNow = new Date();
-		const horaGT = (bootNow.getUTCHours() + 18) % 24;
-		const minutoGT = bootNow.getUTCMinutes();
-		const yaPasaronLas0005GT = horaGT > 0 || minutoGT >= 5;
-		if (yaPasaronLas0005GT) {
-			const resumenPromesas = await checkPromesasPagoBoot;
-			if (resumenPromesas) logSiErroresPromesas(resumenPromesas);
-			await ejecutarAgendaCobrosDiaria().catch(console.error);
-		} else {
-			const proximaVentana = new Date();
-			proximaVentana.setUTCHours(6, 5, 0, 0);
-			setTimeout(async () => {
-				const resumenPromesas = await checkPromesasPagoBoot;
-				if (resumenPromesas) logSiErroresPromesas(resumenPromesas);
-				await ejecutarAgendaCobrosDiaria().catch(console.error);
-			}, proximaVentana.getTime() - bootNow.getTime());
-		}
+		await checkPromesasPagoBoot;
+		await esperarHasta0005GT();
+		const resumenPromesas = await checkPromesasPagoBoot;
+		if (resumenPromesas) logSiErroresPromesas(resumenPromesas);
+		await ejecutarAgendaCobrosDiaria().catch(console.error);
 	}, 30_000);
 }
 

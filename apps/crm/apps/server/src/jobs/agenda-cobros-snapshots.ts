@@ -22,6 +22,10 @@ const AGENDA_COBROS_LOCK = [1, 4] as const;
 // #1331): un asesor con 16k+ créditos planificados rompía el INSERT completo
 // y hacía ROLLBACK del snapshot entero.
 const CHUNK_SIZE_SNAPSHOT_ITEMS = 1000;
+const RETRY_DELAYS_CAPTURE_AGENDA_MS = [5 * 60_000, 15 * 60_000, 30 * 60_000];
+
+const esperar = (ms: number): Promise<void> =>
+	new Promise((resolve) => setTimeout(resolve, ms));
 
 interface RawClient {
 	query<T extends object = Record<string, unknown>>(
@@ -307,4 +311,32 @@ export async function ejecutarAgendaCobrosDiaria(
 		}
 		lockClient.release();
 	}
+}
+
+export async function reintentarCapturaAgenda<T>(
+	ejecutar: () => Promise<T>,
+	esperarReintento: (ms: number) => Promise<void> = esperar,
+): Promise<T> {
+	for (let intento = 0; ; intento++) {
+		try {
+			return await ejecutar();
+		} catch (error) {
+			const demora = RETRY_DELAYS_CAPTURE_AGENDA_MS[intento];
+			if (demora === undefined) throw error;
+			console.error(
+				`[AgendaCobrosSnapshot] Captura falló; reintento ${intento + 1}/${RETRY_DELAYS_CAPTURE_AGENDA_MS.length} en ${demora / 60_000} min:`,
+				error,
+			);
+			await esperarReintento(demora);
+		}
+	}
+}
+
+export function ejecutarAgendaCobrosDiariaConReintentos(
+	fechaHoyGT = toDateStrGT(new Date()),
+	opciones: { asesorId?: string } = {},
+): Promise<void> {
+	return reintentarCapturaAgenda(() =>
+		ejecutarAgendaCobrosDiaria(fechaHoyGT, opciones),
+	);
 }

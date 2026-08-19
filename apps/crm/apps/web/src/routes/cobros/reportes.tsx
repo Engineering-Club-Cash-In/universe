@@ -81,7 +81,7 @@ type MoraSnapshotAsesor = {
 	asesorId: number;
 	nombre: string;
 	totalEnMora: { cantidad: number; sumaMora: string };
-} & Partial<Record<(typeof ETAPAS)[number]["key"], MoraBucket>>;
+} & Partial<Record<(typeof ETAPAS_MORA_KEYS)[number], MoraBucket>>;
 
 function todayGTISO() {
 	return new Date().toLocaleDateString("sv-SE", {
@@ -481,7 +481,8 @@ function TabMora({
 									>
 										<td className="px-4 py-3 font-medium">{asesor.nombre}</td>
 										{ETAPAS.map((etapa) => {
-											const bucket = asesor[etapa.key];
+											const bucket =
+												asesor[etapa.key as (typeof ETAPAS_MORA_KEYS)[number]];
 											return (
 												<td key={etapa.key} className="px-4 py-3 text-right">
 													{bucket && bucket.cantidad > 0 ? (

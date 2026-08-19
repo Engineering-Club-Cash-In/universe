@@ -35,6 +35,7 @@ import { carteraBackClient } from "./cartera-back-client";
 
 const PAGE_SIZE_SNAPSHOT = 200;
 const MAX_PAGES_PER_DAY = 10_000;
+const SIFCO_ENRICHMENT_CHUNK_SIZE = 1000;
 
 export interface AsesorAgenda {
 	userId: string;
@@ -52,6 +53,31 @@ export type FetchAgendaPage = (
 		data: Pick<CarteraCuotaProximaVencer, "numero_credito_sifco" | "bucket">[];
 	}
 >;
+
+export function dividirSifcosParaEnriquecimiento(
+	sifcos: readonly string[],
+): string[][] {
+	const chunks: string[][] = [];
+	for (
+		let inicio = 0;
+		inicio < sifcos.length;
+		inicio += SIFCO_ENRICHMENT_CHUNK_SIZE
+	) {
+		chunks.push(sifcos.slice(inicio, inicio + SIFCO_ENRICHMENT_CHUNK_SIZE));
+	}
+	return chunks;
+}
+
+export async function consultarSifcosEnChunks<T>(
+	sifcos: readonly string[],
+	consultarChunk: (sifcosChunk: readonly string[]) => Promise<readonly T[]>,
+): Promise<T[]> {
+	const resultados: T[] = [];
+	for (const sifcosChunk of dividirSifcosParaEnriquecimiento(sifcos)) {
+		resultados.push(...(await consultarChunk(sifcosChunk)));
+	}
+	return resultados;
+}
 
 const normalizarEmail = (email: string | null | undefined): string | null =>
 	email?.trim().toLowerCase() || null;
@@ -519,22 +545,32 @@ export async function obtenerAgendaTodosAsesores(
 		console.error(
 			`[AgendaCobrosSnapshot] Reintentando ${asesoresFallidos.length} asesor(es) con fallo transitorio: ${asesoresFallidos.map((a) => a.nombre).join(", ")}`,
 		);
+		const asesoresConFalloPersistente: AsesorAgenda[] = [];
 		for (const asesor of asesoresFallidos) {
-			await intentarAgendaAsesor(asesor);
+			if (!(await intentarAgendaAsesor(asesor))) {
+				asesoresConFalloPersistente.push(asesor);
+			}
+		}
+		if (asesoresConFalloPersistente.length > 0) {
+			throw new Error(
+				`[AgendaCobrosSnapshot] Falló captura completa; asesores sin agenda tras reintento: ${asesoresConFalloPersistente.map((asesor) => asesor.userId).join(", ")}`,
+			);
 		}
 	}
 
 	const sifcos = [...new Set(agendas.map((item) => item.numeroCreditoSifco))];
 	if (sifcos.length === 0) return [];
-	const casos = await db
-		.select({
-			id: casosCobros.id,
-			numeroCreditoSifco: casosCobros.numeroCreditoSifco,
-			activo: casosCobros.activo,
-			updatedAt: casosCobros.updatedAt,
-		})
-		.from(casosCobros)
-		.where(inArray(casosCobros.numeroCreditoSifco, sifcos));
+	const casos = await consultarSifcosEnChunks(sifcos, (sifcosChunk) =>
+		db
+			.select({
+				id: casosCobros.id,
+				numeroCreditoSifco: casosCobros.numeroCreditoSifco,
+				activo: casosCobros.activo,
+				updatedAt: casosCobros.updatedAt,
+			})
+			.from(casosCobros)
+			.where(inArray(casosCobros.numeroCreditoSifco, sifcosChunk)),
+	);
 	const casoPorSifco = agruparCasosVigentesPorSifco(casos);
 	return agendas.map((item) => ({
 		...item,

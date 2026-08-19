@@ -9,7 +9,10 @@ type MoraSnapshotAsesor = {
 	nombre: string;
 	totalEnMora: { cantidad: number; sumaMora: string };
 } & Partial<
-	Record<"mora_30" | "mora_60" | "mora_90" | "mora_120_plus", MoraBucket>
+	Record<
+		"mora_30" | "mora_60" | "mora_90" | "mora_120" | "mora_120_plus",
+		MoraBucket
+	>
 >;
 
 type MoraRecoveryAsesor = {

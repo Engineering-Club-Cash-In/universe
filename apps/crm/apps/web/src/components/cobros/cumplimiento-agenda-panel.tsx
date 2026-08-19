@@ -304,6 +304,11 @@ export function CumplimientoAgendaPanel() {
 				<div className="flex justify-center py-16 text-gray-500">
 					<Loader2 className="mr-2 h-5 w-5 animate-spin" /> Cargando…
 				</div>
+			) : query.isError ? (
+				<Card className="p-8 text-center text-red-600">
+					No se pudo cargar el cumplimiento de agenda. Reintentá en unos
+					segundos.
+				</Card>
 			) : filas.length === 0 ? (
 				<Card className="p-8 text-center text-gray-500">
 					Sin snapshots para fecha seleccionada.

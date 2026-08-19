@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, lt, max } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lt, max } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
@@ -15,6 +15,7 @@ import {
 	type MotivoAgenda,
 	ventanaDiaGuatemala,
 } from "../lib/agenda-cobros-snapshot";
+import { agruparCasosVigentesPorSifco } from "../lib/caso-vigente";
 import { toDateStrGT } from "../lib/guatemala-month-window";
 import { cobrosProcedure, cobrosSupervisorProcedure } from "../lib/orpc";
 
@@ -186,7 +187,6 @@ export const agendaCobrosRouter = {
 					id: agendaCobrosSnapshotItems.id,
 					numeroCreditoSifco: agendaCobrosSnapshotItems.numeroCreditoSifco,
 					casoCobroId: agendaCobrosSnapshotItems.casoCobroId,
-					clienteNombre: clients.contactPerson,
 					bucketSnapshot: agendaCobrosSnapshotItems.bucketSnapshot,
 					motivoAgenda: agendaCobrosSnapshotItems.motivoAgenda,
 					atendido: agendaCobrosSnapshotItems.atendido,
@@ -207,15 +207,6 @@ export const agendaCobrosRouter = {
 					eq(agendaCobrosSnapshotItems.snapshotId, agendaCobrosSnapshots.id),
 				)
 				.leftJoin(
-					casosCobros,
-					eq(agendaCobrosSnapshotItems.casoCobroId, casosCobros.id),
-				)
-				.leftJoin(
-					contratosFinanciamiento,
-					eq(casosCobros.contratoId, contratosFinanciamiento.id),
-				)
-				.leftJoin(clients, eq(contratosFinanciamiento.clientId, clients.id))
-				.leftJoin(
 					contactosCobros,
 					eq(agendaCobrosSnapshotItems.contactoCobroId, contactosCobros.id),
 				)
@@ -232,10 +223,69 @@ export const agendaCobrosRouter = {
 					asc(agendaCobrosSnapshotItems.numeroCreditoSifco),
 				);
 
+			// Resolver el cliente por SIFCO, no solo por casoCobroId: un item D-0
+			// siempre nace con casoCobroId=null en agenda-cobros-source.ts, así
+			// que un join directo por casoCobroId deja el nombre en null para
+			// TODO item D-0 (y para cualquier crédito donde D-0 ganó la
+			// deduplicación) aunque el crédito sí tenga caso CRM vinculado —
+			// mismo fallback por SIFCO que ya usa cerrarItemsAgenda arriba
+			// (Codex, PR #1332).
+			const sifcos = [...new Set(items.map((item) => item.numeroCreditoSifco))];
+			const casos = sifcos.length
+				? await db
+						.select({
+							id: casosCobros.id,
+							numeroCreditoSifco: casosCobros.numeroCreditoSifco,
+							contratoId: casosCobros.contratoId,
+							activo: casosCobros.activo,
+							updatedAt: casosCobros.updatedAt,
+						})
+						.from(casosCobros)
+						.where(inArray(casosCobros.numeroCreditoSifco, sifcos))
+				: [];
+			const casoPorSifco = agruparCasosVigentesPorSifco(casos);
+			const contratoIds = [
+				...new Set(
+					[...casoPorSifco.values()]
+						.map((caso) => caso.contratoId)
+						.filter((id): id is string => id !== null),
+				),
+			];
+			const contratos = contratoIds.length
+				? await db
+						.select({
+							id: contratosFinanciamiento.id,
+							clienteNombre: clients.contactPerson,
+						})
+						.from(contratosFinanciamiento)
+						.leftJoin(clients, eq(contratosFinanciamiento.clientId, clients.id))
+						.where(inArray(contratosFinanciamiento.id, contratoIds))
+				: [];
+			const clienteNombrePorContrato = new Map(
+				contratos.map((c) => [c.id, c.clienteNombre]),
+			);
+
 			return {
 				fecha: input.fecha,
 				asesorId: input.asesorId,
-				items: items.map((item) => ({ ...item, pendiente: !item.atendido })),
+				items: items.map((item) => {
+					const contratoId = casoPorSifco.get(
+						item.numeroCreditoSifco,
+					)?.contratoId;
+					return {
+						...item,
+						clienteNombre: contratoId
+							? (clienteNombrePorContrato.get(contratoId) ?? null)
+							: null,
+						// Completado = atendido POR CONTACTO o promesa_cumplida POR PAGO
+						// real — mismo criterio que usa el cierre nocturno para
+						// total_atendidos/total_pendientes
+						// (jobs/agenda-cobros-snapshots.ts). Derivarlo solo de
+						// `atendido` contradecía el resumen para un item pagado sin
+						// contacto el mismo día (Codex, PR #1332).
+						pendiente: !item.atendido && !item.promesaCumplida,
+					};
+				}),
 			};
 		}),
 };

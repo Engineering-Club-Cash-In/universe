@@ -1746,10 +1746,29 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 	// boot en cualquier otro momento del día (p. ej. 23:00 GT, mientras
 	// procesarMoras todavía no corrió) NO debe capturar de inmediato — debe
 	// esperar a la próxima barrera de 00:05 GT como cualquier otra corrida.
+	//
+	// Si el boot ocurrió ANTES de medianoche GT, checkPromesasPagoBoot quedó
+	// resuelta horas antes del cierre (p. ej. boot 20:00 GT → promesa resuelta
+	// 20:00:10) y scheduleAtMidnightGT SÍ va a correr su propio
+	// checkPromesasPago() fresco a las 00:00 GT — pero ambos callbacks
+	// convergen cerca de las 00:05 GT y compiten por el mismo advisory lock en
+	// ejecutarAgendaCobrosDiaria; si este catch-up ganara el lock, cerraría el
+	// snapshot con la reconciliación stale del boot, perdiendo pagos/promesas
+	// resueltos entre el boot y medianoche (Codex PR #1331). Por eso, si el
+	// boot fue antes de medianoche, se descarta checkPromesasPagoBoot para el
+	// cierre y se corre un checkPromesasPago() nuevo DESPUÉS de la barrera.
+	const bootAntesDeMedianocheGT = (() => {
+		const ahora = new Date();
+		const proximaMedianocheGT = new Date();
+		proximaMedianocheGT.setUTCHours(6, 0, 0, 0);
+		return proximaMedianocheGT > ahora;
+	})();
 	setTimeout(async () => {
 		await checkPromesasPagoBoot;
 		await esperarHasta0005GT();
-		const resumenPromesas = await checkPromesasPagoBoot;
+		const resumenPromesas = bootAntesDeMedianocheGT
+			? await checkPromesasPago().catch(console.error)
+			: await checkPromesasPagoBoot;
 		if (resumenPromesas) logSiErroresPromesas(resumenPromesas);
 		await ejecutarAgendaCobrosDiaria().catch(console.error);
 	}, 30_000);

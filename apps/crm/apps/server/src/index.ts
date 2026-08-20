@@ -13,6 +13,7 @@ import {
 } from "./controllers/bot";
 import {
 	buscarClienteBotCobros,
+	confirmarBoletaBotCobros,
 	estadoDeCuentaBotCobros,
 	infoCreditoBotCobros,
 	leerBoletaBotCobros,
@@ -40,6 +41,7 @@ import {
 import type { db } from "./db";
 import { ejecutarAgendaCobrosDiariaConReintentos } from "./jobs/agenda-cobros-snapshots";
 import { purgarBoletasSinConfirmar } from "./jobs/bot-cobros-purga";
+import { reconciliarBoletasColgadas } from "./jobs/bot-cobros-reconciliacion";
 import { generarCierreDiario } from "./jobs/cierre-diario-asesores";
 import {
 	checkSeguimientosVencidos,
@@ -1058,11 +1060,17 @@ app.post(
 );
 
 // Paso 4 · lee la boleta que sube el cliente. NO registra el pago: devuelve lo
-// que se entendió para que confirme (el registro es el servicio 6, PR B).
+// que se entendió para que confirme.
 app.post(
 	"/api/bot/cobros/boleta/leer",
 	autenticarBotCobros,
 	leerBoletaBotCobros,
+);
+// Paso 4 · el cliente confirmó. ACÁ SÍ se registra el pago en cartera.
+app.post(
+	"/api/bot/cobros/boleta/confirmar",
+	autenticarBotCobros,
+	confirmarBoletaBotCobros,
 );
 
 // Documentación de esos dos endpoints, para SimpleTech. Va SIN API key —no
@@ -1525,6 +1533,27 @@ async function correrPurgaDeBoletas(): Promise<void> {
 // Un intervalo no es una garantía de retención si el proceso no llega a cumplirlo.
 void correrPurgaDeBoletas();
 setInterval(correrPurgaDeBoletas, 24 * 60 * 60 * 1000);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// La reconciliación de confirmaciones colgadas va FUERA por la misma razón.
+//
+// Del otro lado hay un cliente cuyo pago quedó en el aire: no sabemos si se
+// registró, así que no puede reintentar ni recibir una respuesta. Dejar esto
+// atado a la bandera de tareas programadas —hoy en `false`— significaría que en
+// esta rama nadie lo destraba nunca.
+//
+// Solo lee de cartera y actualiza el borrador; jamás reintenta el pago.
+// Ver 04-validacion-de-boleta.md §4.1.
+// ═══════════════════════════════════════════════════════════════════════════
+async function correrReconciliacionDeBoletas(): Promise<void> {
+	try {
+		await reconciliarBoletasColgadas();
+	} catch (error) {
+		console.error("Error en la reconciliación de boletas del bot:", error);
+	}
+}
+
+setInterval(correrReconciliacionDeBoletas, 5 * 60 * 1000);
 
 if (TAREAS_PROGRAMADAS_ACTIVAS) {
 	// checkPromesasPago traga sus propios errores de persistencia por SIFCO

@@ -692,6 +692,36 @@ export const insertPayment = async ({ body, set }: any) => {
       credito_id,
     ]);
 
+    // Ids de las filas de `pagos_credito` que este request crea o actualiza.
+    //
+    // Una boleta que cubre tres cuotas atrasadas genera TRES pagos, cada uno
+    // con su id, y hasta ahora la respuesta no devolvía ninguno: solo el
+    // resumen (cuotas completas/parciales, monto aplicado). Quien registraba el
+    // pago no tenía forma de volver a encontrarlo.
+    //
+    // Lo pide el bot de cobros para el circuito de vuelta —cuando conta valida,
+    // el evento trae un `pago_id` que hay que saber de quién es—, pero el campo
+    // sirve para cualquiera. Es **aditivo**: el formulario de carteraFront lo
+    // ignora y nada de la aplicación del pago cambia por juntar los ids.
+    const pagosCreados: number[] = [];
+    const anotarPago = (id?: number | null) => {
+      if (typeof id === "number" && !pagosCreados.includes(id)) {
+        pagosCreados.push(id);
+      }
+    };
+
+    // Envoltorio de `insertarPago` que además anota el id. Se usa en lugar de
+    // la función pelada para que la única diferencia en cada sitio de llamada
+    // sea el nombre: este archivo mueve dinero y un diff de reindentación
+    // esconde los cambios de verdad.
+    const insertarPagoAnotado = async (
+      params: Parameters<typeof insertarPago>[0],
+    ) => {
+      const fila = await insertarPago(params);
+      anotarPago(fila?.pago_id);
+      return fila;
+    };
+
     // 2. Preparar datos
     const urlCompletas = prepararURLsBoletas(url_boletas);
     const boletasExistentes = numeroAutorizacion && banco_id 
@@ -794,7 +824,7 @@ export const insertPayment = async ({ body, set }: any) => {
     const otrosBig = new Big(otros ?? 0);
 
     if (montoBoleta.eq(otrosBig)) {
-      await insertarPago({
+      await insertarPagoAnotado({
         numero_credito_sifco: credito.numero_credito_sifco,
         numero_cuota: cuotaApagar,
         cuotaId: cuotaIdPagoEspecial,
@@ -845,7 +875,7 @@ export const insertPayment = async ({ body, set }: any) => {
       if (resultadoMora.pagoCompleto && resultadoMora.moraPagada) {
         moraBig = new Big(resultadoMora.montoAplicadoMora);
         if (disponible_restante.lte(0)) {
-          await insertarPago({
+          await insertarPagoAnotado({
             numero_credito_sifco: credito.numero_credito_sifco,
             numero_cuota: cuotaApagar,
             cuotaId: cuotaIdPagoEspecial,
@@ -867,7 +897,7 @@ export const insertPayment = async ({ body, set }: any) => {
       }
       if (!resultadoMora.moraPagada && resultadoMora.pagoParcial) {
         if (disponible_restante.lte(0)) {
-          await insertarPago({
+          await insertarPagoAnotado({
             numero_credito_sifco: credito.numero_credito_sifco,
             numero_cuota: cuotaApagar,
             cuotaId: cuotaIdPagoEspecial,
@@ -890,7 +920,9 @@ export const insertPayment = async ({ body, set }: any) => {
         return {
           success: true,
           message: `Pago parcial de mora aplicado. Saldo pendiente de mora: $${resultadoMora.saldoMoraRestante}. Por favor, cancele la mora pendiente para continuar con el pago de cuotas.`,
-          pagos: [],
+          // Salía siempre vacío aunque el bloque de arriba SÍ hubiera escrito
+          // una fila: quien registró el pago no tenía cómo encontrarla.
+          pagos: pagosCreados,
           saldo_a_favor: disponible.toString(),
         };
       }
@@ -898,7 +930,7 @@ export const insertPayment = async ({ body, set }: any) => {
 
     if (!resultadoMora.moraPagada && resultadoMora.montoAplicadoMora > 0) {
       if (disponible_restante.lte(0)) {
-        await insertarPago({
+        await insertarPagoAnotado({
           numero_credito_sifco: credito.numero_credito_sifco,
           numero_cuota: cuotaApagar,
           cuotaId: cuotaIdPagoEspecial,
@@ -919,7 +951,7 @@ export const insertPayment = async ({ body, set }: any) => {
       return {
         success: true,
         message: `Pago parcial de mora aplicado. Saldo pendiente de mora: $${resultadoMora.saldoMoraRestante}. Por favor, cancele la mora pendiente para continuar con el pago de cuotas.`,
-        pagos: [],
+        pagos: pagosCreados,
         saldo_a_favor: disponible.toString(),
       };
     }
@@ -1903,6 +1935,11 @@ export const insertPayment = async ({ body, set }: any) => {
           // correcto) y los rubros planos se netean contra objetivos+Σmonto_
           // aplicado, no contra estos saldos.
           //
+          // La fila que esta vuelta creó o pisó. Una boleta que alcanza para
+          // tres cuotas pasa por acá tres veces, y cada pasada es un pago con
+          // su propio id: por eso `pagos` es una lista y no un id.
+          anotarPago(pagoInsertado?.pago_id);
+
           // Se omite si la cuota no absorbió nada: un pago que no tocó la
           // cuota tampoco debe reescribirle los saldos de sus filas.
           if (!filaParcialOmitida) {
@@ -2110,6 +2147,7 @@ export const insertPayment = async ({ body, set }: any) => {
         .returning();
 
       console.log(`✅ Pago registrado: ID ${pagoInsertado.pago_id}`);
+      anotarPago(pagoInsertado.pago_id);
 
       // 3️⃣ Insertar boletas si existen
       if (urlCompletas && urlCompletas.length > 0) {
@@ -2152,6 +2190,7 @@ export const insertPayment = async ({ body, set }: any) => {
         success: true,
         message:
           "Abono directo a capital registrado exitosamente (pendiente de validación)",
+        pagos: pagosCreados,
         pago: {
           pago_id: pagoInsertado.pago_id,
           abono_capital: abonoCapital.toString(),
@@ -2247,7 +2286,7 @@ export const insertPayment = async ({ body, set }: any) => {
       // reversa posible del convenio. El disponible sigue yendo a saldo a
       // favor: el registro del convenio no consume la boleta.
       if (new Big(estamparPagoConvenio.pendiente()).gt(0)) {
-        await insertarPago({
+        await insertarPagoAnotado({
           numero_credito_sifco: credito.numero_credito_sifco,
           numero_cuota: cuotaApagar,
           cuotaId: cuotaIdPagoEspecial,
@@ -2283,6 +2322,7 @@ export const insertPayment = async ({ body, set }: any) => {
       return {
         success: true,
         message: "Pago realizado exitosamente",
+        pagos: pagosCreados,
         detalle: {
           cuotas_pagadas_completas: cuotas_completas,
           cuotas_pagadas_parciales: cuotas_parciales,

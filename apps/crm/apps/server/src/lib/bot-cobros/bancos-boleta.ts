@@ -181,3 +181,18 @@ export function bancoValido(id: number): boolean {
 		(b) => b.id === id,
 	);
 }
+
+/**
+ * El nombre del banco, para poder repetírselo al cliente al confirmar.
+ *
+ * `null` si el id no está en el catálogo, que no debería pasar después de
+ * `bancoValido` — pero devolver `null` es mejor que inventar un nombre.
+ */
+export function nombreDeBanco(id: number | null): string | null {
+	if (id === null) return null;
+
+	return (
+		[...BANCOS_BOLETA, ...BANCOS_SIN_ID_UNIVERSAL].find((b) => b.id === id)
+			?.nombre ?? null
+	);
+}

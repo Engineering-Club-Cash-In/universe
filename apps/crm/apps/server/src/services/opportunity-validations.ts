@@ -506,18 +506,23 @@ async function ejecutarValidacionesInterno({
 	}
 
 	// 1. RENAP: sincronizar datos de identidad en renap_info
-	const renapResultado = await conReintento(
-		() =>
-			conTimeout(
-				() => getOnlyRenapInfoController(dpi),
-				TIMEOUT_RENAP_MS,
-				() => ({
-					success: false as const,
-					message: "RENAP no respondió",
-					error: null,
-				}),
-			),
-		(r) => r.success,
+	// Encolado por DPI: `renapinfo` tiene el DPI como llave primaria y el
+	// controller hace select + insert, así que dos validaciones simultáneas del
+	// mismo lead pueden chocar con violación de llave
+	const renapResultado = await enFilaPorDpi(dpi, () =>
+		conReintento(
+			() =>
+				conTimeout(
+					() => getOnlyRenapInfoController(dpi),
+					TIMEOUT_RENAP_MS,
+					() => ({
+						success: false as const,
+						message: "RENAP no respondió",
+						error: null,
+					}),
+				),
+			(r) => r.success,
+		),
 	);
 
 	const renapResumen = renapResultado.success

@@ -359,7 +359,12 @@ export function RenapBuroValidation({
 							</div>
 
 							{detalleRenapAbierto && data.detalleRenap && (
-								<div className="mt-3 border-t pt-3">
+								<div className="mt-3 space-y-2 border-t pt-3">
+									<p className="text-muted-foreground text-xs">
+										Datos actuales de RENAP para este DPI. Se refrescan cada vez
+										que se consulta, así que pueden diferir de los que devolvió
+										esta ejecución.
+									</p>
 									<FilasDetalle
 										filas={[
 											["Nombre", data.detalleRenap.nombreCompleto],

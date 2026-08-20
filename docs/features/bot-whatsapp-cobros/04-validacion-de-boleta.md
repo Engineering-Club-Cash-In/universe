@@ -935,9 +935,23 @@ Tres PR a `COBROS-02`, en este orden:
 | **B** | `/boleta/confirmar` con la máquina de estados (§4.1) + job de reconciliación. **En cartera:** `pagos_reversiones` y su registro en `reversePayment` (incluye pasarle el `user` del token al handler), `usuario_id` en `/credito/resumen`, la lista de `pagos` en la respuesta de `newPayment`, `GET /pagos-por-boleta` y `GET /pagos/estado?ids=…` | Sí, contra la instancia de dev de cartera. |
 | **C** | Endpoint de eventos + emisión desde `aplicar-pago`, `revalidatePayment`, `reversePayment`, `revertPaymentToPending` y `false-payment` + job de respaldo (§6) + agrupación por boleta + WhatsApp + notificación al asesor | Necesita coordinar deploy de las dos apps. |
 
-**Los cambios en cartera del PR B son aditivos**: una tabla nueva con un INSERT dentro de una
-transacción que ya existe, un campo nuevo en dos respuestas y dos endpoints de lectura.
-Ninguno cambia cómo se aplica un pago.
+**Los cambios en cartera del PR B son aditivos**: una tabla nueva, un campo nuevo en dos
+respuestas y dos endpoints de lectura. Ninguno cambia cómo se aplica un pago.
+
+> ⚠️ **El registro de la reversión son DOS escrituras, no una.** Es lo único de este plan que
+> se puede implementar mal leyendo rápido:
+>
+> 1. **`iniciada`** — **fuera** de la transacción (conexión propia), apenas pasa el portero
+>    `revertirAbonoCapitalEspejo` y **antes** de los `delete`, copiando ahí las URLs de las
+>    boletas.
+> 2. **`completada`** — **dentro** de la transacción, al final, marcando de paso como
+>    `superada` cualquier `iniciada` previa del mismo pago.
+>
+> Con un solo INSERT transaccional, una falla después de `updateMora`,
+> `reverseConvenioPayment` o el helper de inversionistas —los tres escriben con el `db`
+> global— revierte el registro **pero no sus efectos**: queda un pago a medio revertir y sin
+> ninguna alarma, que es exactamente lo que esta tabla venía a evitar. Ver
+> [D-36](./DECISIONES.md#d-36--las-reversiones-dejan-registro).
 
 > La migración de `pagos_reversiones` queda escrita y **la corre Daniel**, como todas.
 

@@ -1091,6 +1091,52 @@ export class CarteraBackClient {
 	}
 
 	/**
+	 * Cuánto le falta a una cuota, contando los abonos parciales que ya tiene.
+	 *
+	 * `/credito/resumen` dice cuál es la cuota que toca y cuánto vale, pero no
+	 * si ya le abonaron la mitad. Sin esto, el bot le diría a un cliente que su
+	 * boleta de Q3,000 no cubre una cuota de Q6,000 que en realidad ya está
+	 * pagada a medias.
+	 *
+	 * Devuelve `null` si cartera no pudo responder: es un dato para adornar el
+	 * mensaje, no para bloquear el flujo.
+	 */
+	async getSaldoCuota(
+		numeroSifco: string,
+		numeroCuota: number,
+	): Promise<string | null> {
+		try {
+			const respuesta = await this.request<{
+				success: boolean;
+				saldo_pendiente?: string | number;
+			}>(
+				`/abonos-cuota/${encodeURIComponent(numeroSifco)}/${numeroCuota}`,
+				{ method: "GET" },
+				false,
+				// Timeout corto y SIN reintentos, y no es una optimización: esta
+				// consulta corre con la boleta ya reservada y la imagen ya subida.
+				// Con la configuración por defecto —cuatro intentos de 30 s más
+				// backoff— una caída de cartera estiraría `/boleta/leer` más allá de
+				// los 2 minutos en que una reserva se da por muerta, y un reintento
+				// del integrador barrería la fila viva de esta misma petición.
+				//
+				// Es un dato para adornar el mensaje: si no está, se sigue sin él.
+				5_000,
+				false,
+			);
+
+			if (!respuesta?.success || respuesta.saldo_pendiente === undefined) {
+				return null;
+			}
+
+			return String(respuesta.saldo_pendiente);
+		} catch (error) {
+			console.error("[CarteraBackClient] getSaldoCuota:", error);
+			return null;
+		}
+	}
+
+	/**
 	 * Genera el estado de cuenta del crédito y devuelve su URL.
 	 *
 	 * Es el mismo documento que descarga el botón "Descargar Estado de Cuenta"

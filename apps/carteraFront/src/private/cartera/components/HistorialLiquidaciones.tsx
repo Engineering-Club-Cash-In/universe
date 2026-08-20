@@ -1,7 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useMemo, useCallback } from "react";
 import { usePersistedState } from "../hooks/usePersistedState";
-import { getApiErrorMessage } from "@/lib/apiError";
+import {
+  getApiErrorMessage,
+  getBatchFailedCredits,
+  getPendingReturnWarningMessage,
+} from "@/lib/apiError";
+import { matchesSearch } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import {
@@ -400,8 +405,7 @@ export function HistorialLiquidaciones() {
       result = result.filter((item) => item.estado_liquidacion_resumen === estadoFiltro);
     }
     if (search.trim()) {
-      const q = search.toLowerCase();
-      result = result.filter((item) => item.nombre.toLowerCase().includes(q));
+      result = result.filter((item) => matchesSearch(item.nombre, search));
     }
     return result;
   }, [data, search, estadoFiltro]);
@@ -456,11 +460,29 @@ export function HistorialLiquidaciones() {
           }
         },
         onError: (err: any) => {
+          const warning = getPendingReturnWarningMessage(err);
+          const fallidos = getBatchFailedCredits(err);
           setResultadoModal({
             nombre,
             inversionistaId,
-            errorMsg: err?.message ?? "Error al generar los pagos",
+            ...(fallidos.length > 0
+              ? {
+                  response: {
+                    success: false,
+                    message: "",
+                    inversionistaId,
+                    totalCreditosProcesados: 0,
+                    totalCreditosFallidos: fallidos.length,
+                    data: [],
+                    fallidos,
+                  },
+                }
+              : {}),
+            errorMsg: warning ?? getApiErrorMessage(err, "Error al generar los pagos"),
           });
+          if (warning) {
+            toast.warning("Generación bloqueada", { description: warning, duration: 12000 });
+          }
         },
         onSettled: () => setGenerandoId(null),
       });

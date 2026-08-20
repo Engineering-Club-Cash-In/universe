@@ -51,7 +51,7 @@ export interface Subtotal {
   total_abono_interes: number;
   total_abono_iva: number;
   total_isr: number;
-  /** Interés neto de impuestos (×0.81) si descuenta_impuestos; null si no. */
+  /** Interés neto de impuestos (×0.93, solo ISR) si descuenta_impuestos; null si no. */
   total_neto_impuestos?: number | null;
   total_cuota: number;
   total_cuota_sin_reinversion: number;

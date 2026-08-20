@@ -190,7 +190,7 @@ export const CalculatorCredit = ({ standalone = false }: CalculatorCreditProps) 
                     </div>
                   </div>
                   <p className="text-xs text-white/40 mt-3 text-center">
-                    Seguro y GPS incluido en cuota, plazo: usado hasta 60 meses y nuevo hasta 84 meses.
+                    Seguro y GPS incluido en cuota, plazo: 5+ hasta 7 años.
                   </p>
                   <p className="text-xs text-white/40 mt-3 text-center">
                     *Esta calculadora es una estimación referencial y puede variar según la evaluación y las condiciones finales del crédito.

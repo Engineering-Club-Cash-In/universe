@@ -66,6 +66,7 @@ import {
 	generateQuotationPdf,
 } from "@/lib/generate-pdf";
 import {
+	formatInsuranceProviderLabel,
 	formatQuotationClientName,
 	formatVehicleWithClient,
 } from "@/lib/quotation-display";
@@ -2070,27 +2071,15 @@ function QuoterPage() {
 											</div>
 										)}
 									</quoterForm.Field>
-									{quoterForm.state.values.insuranceProvider === "gyt" ? (
+									{formatInsuranceProviderLabel(
+										quoterForm.state.values.insuranceProvider,
+									) ? (
 										<p className="text-muted-foreground text-xs">
-											Seguro: GyT. Actual Excel: Q
-											{quoterForm.state.values.excelCurrentInsuranceCost.toFixed(
-												2,
-											)}{" "}
-											/ CRM: Q
-											{quoterForm.state.values.customerInsuranceCost.toFixed(2)}{" "}
-											/ GyT: Q
-											{quoterForm.state.values.internalInsuranceCost.toFixed(2)}
-											. Diferencia a membresía: Q
-											{quoterForm.state.values.insuranceSavingsToMembership.toFixed(
-												2,
+											{formatInsuranceProviderLabel(
+												quoterForm.state.values.insuranceProvider,
 											)}
-											.
 										</p>
-									) : (
-										<p className="text-muted-foreground text-xs">
-											Seguro: Universales
-										</p>
-									)}
+									) : null}
 									{quoterForm.state.values.membershipAdjustmentCategory ? (
 										<p className="text-muted-foreground text-xs">
 											Membresía: ajuste automático {""}

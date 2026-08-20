@@ -53,6 +53,12 @@ import {
 } from "../utils/investorLiquidationSummary";
 import { addInvestorToCredit } from "./addInvestorToCredit";
 import { calcularExpiracionCompraCartera, startOfDayGT } from "../utils/functions/businessDays";
+import {
+  buildPendingReturnAuthorizationWarning,
+  PendingReturnAuthorizationError,
+  PENDING_RETURN_AUTHORIZATION_CODE,
+  type PendingReturnBlockedCredit,
+} from "../utils/pendingReturnGuard";
 
 // ============================================
 // 🆕 TIPOS Y CONFIGURACIÓN PARA CONSULTAS ORIGINALES/ESPEJO
@@ -1357,6 +1363,10 @@ export async function resumeInvestor(
     return { inversionistas: [], page, perPage, totalItems: 0, totalPages: 0 };
   }
 
+  // `creditosInfo` ya trae en bloque las mismas columnas que antes se releían con una
+  // consulta por crédito dentro del map de abajo; se indexa para resolverlas en memoria.
+  const creditoInfoPorId = new Map(creditosInfo.map((c) => [c.credito_id, c]));
+
   // 🚀 Paginación sobre créditos
   const totalItems = creditosIds.length;
   const totalPages = Math.ceil(totalItems / perPage);
@@ -1422,23 +1432,9 @@ export async function resumeInvestor(
       // Procesar créditos del inversionista
       const creditosData = await Promise.all(
         creditosDeInv.map(async (c) => {
-          // 📌 Obtener info del crédito
-          const [credito] = await db
-            .select({
-              numero_credito_sifco: creditos.numero_credito_sifco,
-              nombre_usuario: usuarios.nombre,
-              nit_usuario: usuarios.nit,
-              capital: creditos.capital,
-              fecha_creacion: creditos.fecha_creacion,
-              porcentaje_interes: creditos.porcentaje_interes,
-              plazo: creditos.plazo,
-              cuota_interes: creditos.cuota_interes,
-              iva12: creditos.iva_12,
-            })
-            .from(creditos)
-            .leftJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
-            .where(eq(creditos.credito_id, c.credito_id))
-            .limit(1);
+          // 📌 Info del crédito: sale del bloque `creditosInfo` ya consultado arriba
+          // (mismas columnas, mismo filtro) en vez de una consulta por crédito.
+          const credito = creditoInfoPorId.get(c.credito_id);
 
           // 📌 Pagos (liquidados o no según el parámetro)
           // 🔥 NUEVO: Consultar según tipo (originales, espejos o ambas)
@@ -1544,7 +1540,6 @@ export async function resumeInvestor(
           const mes = fechaParaMes
             ? dayjs(fechaParaMes).format('MMMM') // 🔥 Esto da el mes correcto
             : null;
-            console.log("Fecha para mes:", fechaParaMes, "→ Mes:", mes);
        // 🆕 CORRECCIÓN: Cálculo según emite_factura
               if (descImp) {
                 abonoGeneralInteres = descImp.neto;
@@ -1651,7 +1646,7 @@ export async function resumeInvestor(
                 mes, // 🔥 AHORA USA LA FECHA DE LA CUOTA
                 abono_capital: formatValue(abono_capital.toString()),
                 // abono_interes queda SIEMPRE en bruto: el front lo devuelve tal cual a
-                // /recalcularPagosEspejo y netearlo aquí corrompería el espejo (×0.81
+                // /recalcularPagosEspejo y netearlo aquí corrompería el espejo (×0.93
                 // por guardado). El neto por pago viaja en abonoGeneralInteres.
                 abono_interes: formatValue(abono_interes.toString()),
                 abono_iva: formatValue((descImp ? descImp.iva.round(2) : abono_iva).toString()),
@@ -1737,7 +1732,7 @@ export async function resumeInvestor(
             porcentaje_inversionista: c.porcentaje_inversionista,
             cuota_inversionista: formatValue(c.cuota_inversionista),
             credito_inversionista_espejo_id: (c as any).credito_inversionista_espejo_id ?? null,
-            plazo: credito.plazo,
+            plazo: credito?.plazo,
             pagos: pagos_detalle,
             total_abono_capital: formatValue(total_abono_capital.toString()),
             total_abono_interes: formatValue(
@@ -3280,7 +3275,7 @@ export async function ejecutarReinversionAutomatica(
     `  📊 Moda porcentaje inversión: ${modaInversion}%, cash in: ${modaCashIn}%`,
   );
 
-  const reinversionResult = await addInvestorToCredit({
+  const reinversionResult = (await addInvestorToCredit({
     body: {
       inversionista_id: inv_id,
       monto_aportado: montoReinvertido,
@@ -3289,11 +3284,31 @@ export async function ejecutarReinversionAutomatica(
       tipo_operacion: "reinversion",
     },
     set: { status: 200 },
-  });
+  })) as any;
 
-  console.log(`  ✅ Reinversión automática completada inv ${inv_id}.`);
+  // `success: false` es un rollback total (ver addInvestorToCredit: el throw
+  // de contención vive DENTRO de la tx). `success: true` con
+  // `monto_sin_asignar > 0` es éxito parcial: algunos créditos se saltaron
+  // por contención y quedó remanente sin colocar. Ambos casos deben loguearse
+  // fuerte — antes de este chequeo se logueaba "✅ completada" siempre,
+  // incluso cuando la reinversión completa se había perdido.
+  const huboFalla = reinversionResult?.success === false;
+  const huboRemanente =
+    reinversionResult?.success === true &&
+    Number(reinversionResult?.monto_sin_asignar ?? 0) > 0;
+
+  if (huboFalla || huboRemanente) {
+    console.error(
+      `  ❌ Reinversión automática inv ${inv_id} por Q${montoReinvertido.toFixed(2)} NO se completó del todo:`,
+      reinversionResult,
+    );
+  } else {
+    console.log(`  ✅ Reinversión automática completada inv ${inv_id}.`);
+  }
+
   return {
     skipped: false,
+    ok: !huboFalla && !huboRemanente,
     moda_inversion: modaInversion,
     moda_cash_in: modaCashIn,
     monto: montoReinvertido,
@@ -3736,7 +3751,7 @@ export async function getInvestorMirrorSummary(
       const pagoNetoEspejo = abono_capital.plus(interesTotal);
       sg.total_cuota_sin_reinversion = sg.total_cuota_sin_reinversion.plus(pagoNetoEspejo);
       // 🔑 Reinversión Neta (Fuente de Verdad)
-      // Con descuenta_impuestos la reinversión ya viene neteada (0.81): no repetir descuento.
+      // Con descuenta_impuestos la reinversión ya viene neteada (solo ISR): no repetir descuento.
       const isrReinvMirror = descImp || inv.emite_factura ? new Big(0) : reinvInteres.times(0.07);
       const netReinvMirror = reinvCapital.plus(reinvInteres).minus(isrReinvMirror);
       const netReinvIntMirror = reinvInteres.minus(isrReinvMirror);
@@ -3818,7 +3833,7 @@ export async function getInvestorMirrorSummary(
     subtotal: {
       total_abono_capital:      formatValue(sg.total_abono_capital.round(2).toString()),
       // Mismo orden de redondeo que getInvestorTotalsGlobales para no diferir por
-      // centavos con la liquidación persistida: interés neto = 0.81×bruto (sin
+      // centavos con la liquidación persistida: interés neto = 0.93×bruto (solo ISR, sin
       // redondear el bruto antes), IVA = round(bruto,2)×0.12, ISR = 0.07×bruto.
       total_abono_interes:      formatValue(
         descuentoImpuestos(sg.gross_interes_neteado).neto
@@ -3853,6 +3868,27 @@ export const liquidateByInvestorSchema = z.object({
   inversionista_id: z.number().optional(),
   fecha_liquidacion: z.string().datetime().optional(),
 });
+
+export const orderUniqueCreditIds = (creditoIds: number[]): number[] =>
+  [...new Set(creditoIds)].sort((a, b) => a - b);
+
+export async function lockPendingReturnCreditsForLiquidation(
+  tx: any,
+  creditoIds: number[],
+) {
+  const orderedCreditIds = orderUniqueCreditIds(creditoIds);
+  return tx
+    .select({
+      creditoId: creditos.credito_id,
+      numeroCreditoSifco: creditos.numero_credito_sifco,
+      estadoDevolucion: creditos.estado_devolucion,
+    })
+    .from(creditos)
+    .where(inArray(creditos.credito_id, orderedCreditIds))
+    .orderBy(creditos.credito_id)
+    .for("no key update");
+}
+
 export async function liquidateByInvestorId(inversionista_id?: number, fechaLiquidacion?: Date) {
   // Verificar si ya hay una liquidación en proceso para este inversionista (o masiva)
   const lockExistente = await db
@@ -3939,6 +3975,8 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
   const errores: Array<{
     inversionista_id: number;
     razon: string;
+    code?: string;
+    creditos_bloqueados?: PendingReturnBlockedCredit[];
   }> = [];
 
   for (const inv_id of inversionistasALiquidar) {
@@ -3977,8 +4015,14 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
           credito_id: pagos_credito_inversionistas_espejo.credito_id,
           abono_capital: pagos_credito_inversionistas_espejo.abono_capital,
           abono_capital_id: pagos_credito_inversionistas_espejo.abono_capital_id,
+          numero_credito_sifco: creditos.numero_credito_sifco,
+          estado_devolucion: creditos.estado_devolucion,
         })
         .from(pagos_credito_inversionistas_espejo)
+        .innerJoin(
+          creditos,
+          eq(pagos_credito_inversionistas_espejo.credito_id, creditos.credito_id),
+        )
         .where(
           and(
             eq(pagos_credito_inversionistas_espejo.inversionista_id, inv_id),
@@ -3989,6 +4033,31 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
       if (pagosNoLiquidados.length === 0) {
         console.log(`  ⚠️ Inversionista ${inv_id} sin pagos para liquidar`);
         errores.push({ inversionista_id: inv_id, razon: "Sin pagos para liquidar" });
+        inversionistasSaltados++;
+        continue;
+      }
+
+      const pendingReturnWarning = buildPendingReturnAuthorizationWarning(
+        pagosNoLiquidados.map((pago) => ({
+          creditoId: pago.credito_id,
+          numeroCreditoSifco: pago.numero_credito_sifco,
+          estadoDevolucion: pago.estado_devolucion,
+        })),
+      );
+
+      if (pendingReturnWarning) {
+        // Deliberado: liquidación es todo-o-nada por inversionista. Un crédito
+        // bloqueado detiene sus demás pagos para no producir una liquidación
+        // parcial ni dejar totales/boleta representando solo parte del período.
+        console.warn(
+          `  ⚠️ Inversionista ${inv_id} no liquidado: ${pendingReturnWarning.creditos_bloqueados.length} crédito(s) en PENDIENTE_AUTORIZACION`,
+        );
+        errores.push({
+          inversionista_id: inv_id,
+          razon: pendingReturnWarning.message,
+          code: pendingReturnWarning.code,
+          creditos_bloqueados: pendingReturnWarning.creditos_bloqueados,
+        });
         inversionistasSaltados++;
         continue;
       }
@@ -4009,6 +4078,19 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
       // es atómico: si algo falla en el medio, se revierten todos los cambios y
       // el estado queda exactamente como estaba antes de empezar.
       const { liquidacion, updateResult, debeReinvertir, montoReinvertido } = await db.transaction(async (tx) => {
+        // Revalida bajo lock dentro de misma transacción que liquida. Esto evita
+        // cambio a PENDIENTE_AUTORIZACION después del pre-chequeo.
+        const creditoIdsPagos = pagosNoLiquidados.map((pago) => pago.credito_id);
+        const creditosBloqueados = await lockPendingReturnCreditsForLiquidation(
+          tx,
+          creditoIdsPagos,
+        );
+
+        const warningActualizado = buildPendingReturnAuthorizationWarning(creditosBloqueados);
+        if (warningActualizado) {
+          throw new PendingReturnAuthorizationError(warningActualizado);
+        }
+
 
         // Paso 4a: Se crea el registro formal de liquidación con los totales calculados
         // (capital, interés, IVA, reinversión). Este registro es el comprobante oficial.
@@ -4460,6 +4542,17 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
                 break;
               }
 
+              // Éxito parcial: `success: true` pero quedó remanente sin
+              // colocar por contención (ver ejecutarReinversionAutomatica).
+              // No se aborta el resto de llamadasReinversion —son montos
+              // independientes (capital/interés/etc)— pero no puede quedar
+              // en silencio como si se hubiera colocado todo.
+              const remanente = Number((reinversionResult as any)?.monto_sin_asignar ?? 0);
+              if (remanente > 0) {
+                console.error(`  ⚠️ Reinversión [${r.etiqueta}] quedó con Q${remanente.toFixed(2)} sin colocar por contención:`, reinversionResult);
+                continue;
+              }
+
               console.log(`  ✅ Reinversión [${r.etiqueta}] completada por Q${r.monto.toFixed(2)}:`, reinversionResult);
             }
           } catch (reinvError) {
@@ -4685,10 +4778,19 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
 
       totalPagosLiquidados += updateResult.rowCount ?? 0;
       totalLiquidaciones++;
-    } catch (error) {
+    } catch (error: any) {
       console.error(`  ❌ Error procesando inversionista ${inv_id}:`, error);
       const msg = error instanceof Error ? error.message : "Error desconocido";
-      errores.push({ inversionista_id: inv_id, razon: msg });
+      errores.push(
+        error?.code === PENDING_RETURN_AUTHORIZATION_CODE
+          ? {
+              inversionista_id: inv_id,
+              razon: msg,
+              code: error.code,
+              creditos_bloqueados: error.creditos_bloqueados,
+            }
+          : { inversionista_id: inv_id, razon: msg },
+      );
       inversionistasSaltados++;
     }
   }
@@ -6767,7 +6869,7 @@ interface InversionistaResumen {
   total_abono_interes: number;
   total_abono_iva: number;
   total_isr: number;
-  /** Interés neto de impuestos (×0.81) si descuenta_impuestos; null si no. */
+  /** Interés neto de impuestos (×0.93, solo ISR) si descuenta_impuestos; null si no. */
   total_neto_impuestos: number | null;
   total_abono_general_interes: number;
   total_a_recibir_sin_reinversion: number;
@@ -7017,7 +7119,7 @@ async function consultarResumenGlobalPorEstadoPago(
     + ${pe.abono_interes}
     + CASE
         WHEN ${inversionistas.descuenta_impuestos}
-          THEN -(${pe.abono_interes} * 0.19)
+          THEN -(${pe.abono_interes} * 0.07)
         WHEN ${inversionistas.emite_factura}
           THEN ${pe.abono_iva_12}
         ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
@@ -7070,7 +7172,7 @@ async function consultarResumenGlobalPorEstadoPago(
         ${pe.abono_interes}
         + CASE
             WHEN ${inversionistas.descuenta_impuestos}
-              THEN -(${pe.abono_interes} * 0.19)
+              THEN -(${pe.abono_interes} * 0.07)
             WHEN ${inversionistas.emite_factura}
               THEN ${pe.abono_iva_12}
             ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
@@ -7081,7 +7183,7 @@ async function consultarResumenGlobalPorEstadoPago(
         + ${pe.abono_interes}
         + CASE
             WHEN ${inversionistas.descuenta_impuestos}
-              THEN -(${pe.abono_interes} * 0.19)
+              THEN -(${pe.abono_interes} * 0.07)
             WHEN ${inversionistas.emite_factura}
               THEN ${pe.abono_iva_12}
             ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
@@ -7092,19 +7194,19 @@ async function consultarResumenGlobalPorEstadoPago(
         WHEN 'reinversion_capital' THEN COALESCE(SUM(${pe.abono_capital}), 0)
         WHEN 'reinversion_interes' THEN COALESCE(SUM(
           ${pe.abono_interes}
-          - CASE WHEN ${inversionistas.descuenta_impuestos} THEN (${pe.abono_interes} * 0.19) WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
+          - CASE WHEN ${inversionistas.descuenta_impuestos} THEN (${pe.abono_interes} * 0.07) WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
         ), 0)
         WHEN 'reinversion_total' THEN COALESCE(SUM(
           ${pe.abono_capital} + ${pe.abono_interes}
-          - CASE WHEN ${inversionistas.descuenta_impuestos} THEN (${pe.abono_interes} * 0.19) WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
+          - CASE WHEN ${inversionistas.descuenta_impuestos} THEN (${pe.abono_interes} * 0.07) WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
         ), 0)
         WHEN 'reinversion_combinada' THEN COALESCE(SUM(
           CASE ${ce.tipo_reinversion}
             WHEN 'reinversion_capital' THEN ${pe.abono_capital}
             WHEN 'reinversion_interes' THEN ${pe.abono_interes}
-              - CASE WHEN ${inversionistas.descuenta_impuestos} THEN (${pe.abono_interes} * 0.19) WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
+              - CASE WHEN ${inversionistas.descuenta_impuestos} THEN (${pe.abono_interes} * 0.07) WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
             WHEN 'reinversion_total' THEN ${pe.abono_capital} + ${pe.abono_interes}
-              - CASE WHEN ${inversionistas.descuenta_impuestos} THEN (${pe.abono_interes} * 0.19) WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
+              - CASE WHEN ${inversionistas.descuenta_impuestos} THEN (${pe.abono_interes} * 0.07) WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
             ELSE 0
           END
         ), 0)
@@ -7116,7 +7218,7 @@ async function consultarResumenGlobalPorEstadoPago(
             + ${pe.abono_interes}
             + CASE
                 WHEN ${inversionistas.descuenta_impuestos}
-                  THEN -(${pe.abono_interes} * 0.19)
+                  THEN -(${pe.abono_interes} * 0.07)
                 WHEN ${inversionistas.emite_factura}
                   THEN ${pe.abono_iva_12}
                 ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
@@ -7129,7 +7231,7 @@ async function consultarResumenGlobalPorEstadoPago(
             + ${pe.abono_interes}
             + CASE
                 WHEN ${inversionistas.descuenta_impuestos}
-                  THEN -(${pe.abono_interes} * 0.19)
+                  THEN -(${pe.abono_interes} * 0.07)
                 WHEN ${inversionistas.emite_factura}
                   THEN ${pe.abono_iva_12}
                 ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
@@ -7146,7 +7248,7 @@ async function consultarResumenGlobalPorEstadoPago(
           + ${pe.abono_interes}
           + CASE
               WHEN ${inversionistas.descuenta_impuestos}
-                THEN -(${pe.abono_interes} * 0.19)
+                THEN -(${pe.abono_interes} * 0.07)
               WHEN ${inversionistas.emite_factura}
                 THEN ${pe.abono_iva_12}
               ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
@@ -7157,19 +7259,19 @@ async function consultarResumenGlobalPorEstadoPago(
             WHEN 'reinversion_capital' THEN COALESCE(SUM(${pe.abono_capital}), 0)
             WHEN 'reinversion_interes' THEN COALESCE(SUM(
               ${pe.abono_interes}
-              - CASE WHEN ${inversionistas.descuenta_impuestos} THEN (${pe.abono_interes} * 0.19) WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
+              - CASE WHEN ${inversionistas.descuenta_impuestos} THEN (${pe.abono_interes} * 0.07) WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
             ), 0)
             WHEN 'reinversion_total' THEN COALESCE(SUM(
               ${pe.abono_capital} + ${pe.abono_interes}
-              - CASE WHEN ${inversionistas.descuenta_impuestos} THEN (${pe.abono_interes} * 0.19) WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
+              - CASE WHEN ${inversionistas.descuenta_impuestos} THEN (${pe.abono_interes} * 0.07) WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
             ), 0)
             WHEN 'reinversion_combinada' THEN COALESCE(SUM(
               CASE ${ce.tipo_reinversion}
                 WHEN 'reinversion_capital' THEN ${pe.abono_capital}
                 WHEN 'reinversion_interes' THEN ${pe.abono_interes}
-                  - CASE WHEN ${inversionistas.descuenta_impuestos} THEN (${pe.abono_interes} * 0.19) WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
+                  - CASE WHEN ${inversionistas.descuenta_impuestos} THEN (${pe.abono_interes} * 0.07) WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
                 WHEN 'reinversion_total' THEN ${pe.abono_capital} + ${pe.abono_interes}
-                  - CASE WHEN ${inversionistas.descuenta_impuestos} THEN (${pe.abono_interes} * 0.19) WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
+                  - CASE WHEN ${inversionistas.descuenta_impuestos} THEN (${pe.abono_interes} * 0.07) WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
                 ELSE 0
               END
             ), 0)
@@ -7181,7 +7283,7 @@ async function consultarResumenGlobalPorEstadoPago(
                 + ${pe.abono_interes}
                 + CASE
                     WHEN ${inversionistas.descuenta_impuestos}
-                      THEN -(${pe.abono_interes} * 0.19)
+                      THEN -(${pe.abono_interes} * 0.07)
                     WHEN ${inversionistas.emite_factura}
                       THEN ${pe.abono_iva_12}
                     ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
@@ -7194,7 +7296,7 @@ async function consultarResumenGlobalPorEstadoPago(
                 + ${pe.abono_interes}
                 + CASE
                     WHEN ${inversionistas.descuenta_impuestos}
-                      THEN -(${pe.abono_interes} * 0.19)
+                      THEN -(${pe.abono_interes} * 0.07)
                     WHEN ${inversionistas.emite_factura}
                       THEN ${pe.abono_iva_12}
                     ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
@@ -7211,7 +7313,7 @@ async function consultarResumenGlobalPorEstadoPago(
           + ${pe.abono_interes}
           + CASE
               WHEN ${inversionistas.descuenta_impuestos}
-                THEN -(${pe.abono_interes} * 0.19)
+                THEN -(${pe.abono_interes} * 0.07)
               WHEN ${inversionistas.emite_factura}
                 THEN ${pe.abono_iva_12}
               ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
@@ -7221,7 +7323,7 @@ async function consultarResumenGlobalPorEstadoPago(
           ${pe.abono_interes}
           + CASE
               WHEN ${inversionistas.descuenta_impuestos}
-                THEN -(${pe.abono_interes} * 0.19)
+                THEN -(${pe.abono_interes} * 0.07)
               WHEN ${inversionistas.emite_factura}
                 THEN ${pe.abono_iva_12}
               ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
@@ -7242,7 +7344,7 @@ async function consultarResumenGlobalPorEstadoPago(
           CASE ${ce.tipo_reinversion}
             WHEN 'reinversion_total' THEN 0
             WHEN 'reinversion_capital' THEN (
-              ${pe.abono_interes} + CASE WHEN ${inversionistas.descuenta_impuestos}   THEN -(${pe.abono_interes} * 0.19) WHEN ${inversionistas.emite_factura} THEN ${pe.abono_iva_12} ELSE -ROUND(${pe.abono_interes} * 0.07, 2) END
+              ${pe.abono_interes} + CASE WHEN ${inversionistas.descuenta_impuestos}   THEN -(${pe.abono_interes} * 0.07) WHEN ${inversionistas.emite_factura} THEN ${pe.abono_iva_12} ELSE -ROUND(${pe.abono_interes} * 0.07, 2) END
             )
             WHEN 'reinversion_interes' THEN (
               ${pe.abono_capital} + CASE WHEN ${inversionistas.descuenta_impuestos}   THEN 0 WHEN ${inversionistas.emite_factura} THEN ${pe.abono_iva_12} ELSE -ROUND(${pe.abono_interes} * 0.07, 2) END
@@ -7250,7 +7352,7 @@ async function consultarResumenGlobalPorEstadoPago(
             WHEN 'reinversion_excedente' THEN 0
             WHEN 'reinversion_variable' THEN 0
             ELSE (
-               ${pe.abono_capital} + ${pe.abono_interes} + CASE WHEN ${inversionistas.descuenta_impuestos}   THEN -(${pe.abono_interes} * 0.19) WHEN ${inversionistas.emite_factura} THEN ${pe.abono_iva_12} ELSE -ROUND(${pe.abono_interes} * 0.07, 2) END
+               ${pe.abono_capital} + ${pe.abono_interes} + CASE WHEN ${inversionistas.descuenta_impuestos}   THEN -(${pe.abono_interes} * 0.07) WHEN ${inversionistas.emite_factura} THEN ${pe.abono_iva_12} ELSE -ROUND(${pe.abono_interes} * 0.07, 2) END
             )
           END
         ), 0)
@@ -7261,7 +7363,7 @@ async function consultarResumenGlobalPorEstadoPago(
             + ${pe.abono_interes}
             + CASE
                 WHEN ${inversionistas.descuenta_impuestos}
-                  THEN -(${pe.abono_interes} * 0.19)
+                  THEN -(${pe.abono_interes} * 0.07)
                 WHEN ${inversionistas.emite_factura}
                   THEN ${pe.abono_iva_12}
                 ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
@@ -7274,7 +7376,7 @@ async function consultarResumenGlobalPorEstadoPago(
                 + ${pe.abono_interes}
                 + CASE
                     WHEN ${inversionistas.descuenta_impuestos}
-                      THEN -(${pe.abono_interes} * 0.19)
+                      THEN -(${pe.abono_interes} * 0.07)
                     WHEN ${inversionistas.emite_factura}
                       THEN ${pe.abono_iva_12}
                     ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
@@ -7289,7 +7391,7 @@ async function consultarResumenGlobalPorEstadoPago(
               + ${pe.abono_interes}
               + CASE
                   WHEN ${inversionistas.descuenta_impuestos}
-                    THEN -(${pe.abono_interes} * 0.19)
+                    THEN -(${pe.abono_interes} * 0.07)
                   WHEN ${inversionistas.emite_factura}
                     THEN ${pe.abono_iva_12}
                   ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
@@ -7301,7 +7403,7 @@ async function consultarResumenGlobalPorEstadoPago(
           + ${pe.abono_interes}
           + CASE
               WHEN ${inversionistas.descuenta_impuestos}
-                THEN -(${pe.abono_interes} * 0.19)
+                THEN -(${pe.abono_interes} * 0.07)
               WHEN ${inversionistas.emite_factura}
                 THEN ${pe.abono_iva_12}
               ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
@@ -7395,16 +7497,16 @@ async function consultarResumenGlobalDesdeLiquidaciones(
     total_abono_capital: sql<number>`COALESCE(SUM(${liquidaciones.total_capital}), 0)`,
     // Interés en BRUTO por consistencia con la fuente "pagos": en las liquidaciones
     // neteadas (snapshot=true) total_interes ya es neto, se reconstruye el bruto
-    // sumándole IVA+ISR; las viejas ya están en bruto.
+    // sumándole el ISR (solo ISR se resta); las viejas ya están en bruto.
     total_abono_interes: sql<number>`COALESCE(SUM(
       CASE WHEN ${liquidaciones.descuenta_impuestos}
-        THEN ${liquidaciones.total_interes} + ${liquidaciones.total_iva} + ${liquidaciones.total_isr}
+        THEN ${liquidaciones.total_interes} + ${liquidaciones.total_isr}
         ELSE ${liquidaciones.total_interes}
       END
     ), 0)`,
     total_abono_iva: sql<number>`COALESCE(SUM(${liquidaciones.total_iva}), 0)`,
     total_isr: sql<number>`COALESCE(SUM(${liquidaciones.total_isr}), 0)`,
-    // Neto real: en las neteadas el total_interes persistido YA es el neto (×0.81);
+    // Neto real: en las neteadas el total_interes persistido YA es el neto (×0.93, solo ISR);
     // en las viejas (bruto) es interes + iva − isr. Condicionado POR liquidación.
     total_abono_general_interes: sql<number>`COALESCE(SUM(
       CASE WHEN ${liquidaciones.descuenta_impuestos}
@@ -7506,7 +7608,7 @@ function mapResumenRow(
     numero_cuenta: inv.numero_cuenta,
     cuentas_extra,
     total_abono_capital: convert(inv.total_abono_capital),
-    // "Interés" queda en BRUTO para que la fila se lea sola (100 − 12 − 7 = 81);
+    // "Interés" queda en BRUTO para que la fila se lea sola (100 − 7 ISR = 93);
     // el neto vive en total_neto_impuestos y total_abono_general_interes.
     // Fuente "pagos": el SUM viene bruto, se usa tal cual. Fuente "liquidaciones":
     // el SQL ya reconstruyó el bruto por liquidación (snapshot) → pasa directo.
@@ -8367,7 +8469,7 @@ async function generateAchTransferenciasWorkbook(
   });
 
   rows.forEach((inv) => {
-    // Redondeo explícito: con descuenta_impuestos el SQL resta int*0.19 sin ROUND
+    // Redondeo explícito: con descuenta_impuestos el SQL resta int*0.07 (solo ISR) sin ROUND
     // y total_cuota puede venir con 4 decimales; este Excel va al banco.
     const valor = Number((Number(inv.total_cuota) || 0).toFixed(2));
     if (valor === 0) return;
@@ -8475,7 +8577,7 @@ async function generateTransferenciasWorkbook(
   });
 
   rows.forEach((inv) => {
-    // Redondeo explícito: con descuenta_impuestos el SQL resta int*0.19 sin ROUND
+    // Redondeo explícito: con descuenta_impuestos el SQL resta int*0.07 (solo ISR) sin ROUND
     // y total_cuota puede venir con 4 decimales; este Excel va al banco.
     const valor = Number((Number(inv.total_cuota) || 0).toFixed(2));
     if (valor === 0) return;
@@ -8741,7 +8843,7 @@ export async function getLiquidaciones({
           tasa_interes: Number(new Big(pago.porcentaje_interes_credito ?? 1.5)),
           abono_capital: formatValue(abono_capital.toString()),
           // Interés por pago en bruto (igual que resumeInvestor); el neto se ve en
-          // la cuota (capital + interés − IVA − ISR) y en los totales.
+          // la cuota (capital + interés − ISR) y en los totales.
           abono_interes: formatValue(abono_interes.toString()),
           abono_iva: formatValue((descImp ? descImp.iva.round(2) : abono_iva).toString()),
           isr: formatValue((descImp ? descImp.isr.round(2) : isr).toString()),
@@ -9959,7 +10061,7 @@ export async function simularInversionista(
           const iva = cuota._raw_iva;
           const isr = cuota._raw_isr;
           const interesNeto = inv.descuenta_impuestos === true
-            ? intBruto.minus(iva).minus(isr)
+            ? intBruto.minus(isr)
             : inv.emite_factura ? intBruto.plus(iva) : intBruto.minus(isr);
           const prev = totalBrutoPorMes.get(key) ?? new Big(0);
           totalBrutoPorMes.set(key, prev.plus(cap).plus(interesNeto));
@@ -9992,7 +10094,7 @@ export async function simularInversionista(
         const iva = cuota._raw_iva;
         const isr = cuota._raw_isr;
         const interesNeto = inv.descuenta_impuestos === true
-          ? intBruto.minus(iva).minus(isr)
+          ? intBruto.minus(isr)
           : inv.emite_factura
           ? intBruto.plus(iva)
           : intBruto.minus(isr);

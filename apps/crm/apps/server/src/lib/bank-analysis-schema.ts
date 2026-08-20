@@ -46,6 +46,10 @@ export const bankStatementAnalysisSchema = z.object({
 		})
 		.nullable()
 		.catch(null),
+	estados_cuenta_detectados: z.number().int().min(1).nullable().catch(null),
+	// La IA solo detecta la moneda; el servidor convierte a quetzales (no le pedimos
+	// que multiplique, porque no tiene forma de conocer el tipo de cambio).
+	moneda: z.enum(["GTQ", "USD", "MIXTA"]),
 });
 
 export type BankStatementAnalysis = z.infer<typeof bankStatementAnalysisSchema>;
@@ -87,6 +91,18 @@ Eres un analista de capacidad de pago para una financiera que otorga créditos p
      - dia: Día del mes (1-31) para la cuota, típicamente poco después de un ingreso recurrente detectado, para no caer donde el dinero ya se gastó. En quincena, prioriza la que deje más liquidez. Devuelve días reales, no valores fijos.
      - porcentaje: Qué tan recomendado es ese día frente a los otros dos (0-100, entero). El primero debe tener el porcentaje más alto.
    - justificacion: 1-2 frases explicando el orden de los 3 candidatos según el patrón detectado. Si el ingreso es irregular, elige los 3 días más conservadores y acláralo; no inventes precisión.
+
+5. **estados_cuenta_detectados**: Cuenta cuántos ESTADOS DE CUENTA (documentos) DISTINTOS te fueron proporcionados en total, sin importar cuántos archivos PDF se subieron ni cuántos meses cubren.
+   - Un solo archivo PDF puede contener varios estados de cuenta consecutivos fusionados en un solo documento. Detecta el inicio de cada uno por señales como: una portada o encabezado nuevo, el nombre del banco/logo repitiéndose desde la primera página, un número de cuenta o periodo declarado que reinicia, o un salto que no continúa cronológicamente al estado anterior. Cuenta cada uno como un documento distinto.
+   - Si dos estados de cuenta se traslapan en fechas (ej. uno cubre enero a marzo y otro cubre solo marzo), igual cuentan como 2 estados de cuenta distintos: NO los fusiones en uno solo por compartir mes.
+   - Devuelve el número REAL que identificaste, sin limitarlo artificialmente.
+
+6. **moneda**: La moneda en la que están expresadas TODAS las cifras que devuelves.
+   **NUNCA conviertas montos de una moneda a otra.** Reporta los valores exactamente como aparecen impresos en los estados de cuenta; la conversión la hace el sistema después.
+   - "GTQ": todos los estados de cuenta están en quetzales.
+   - "USD": todos los estados de cuenta están en dólares.
+   - "MIXTA": hay estados de cuenta en quetzales y otros en dólares al mismo tiempo.
+   Identifica la moneda por el símbolo o código impreso en el documento (Q, GTQ, Q., $, US$, USD) y por el tipo de cuenta declarado (ej. "MONETARIA DOLARES", "AHORRO USD"). Si el documento no lo indica en ninguna parte, asume "GTQ".
 
 ## IMPORTANTE: Múltiples cuentas bancarias del mismo titular
 

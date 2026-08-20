@@ -15,6 +15,7 @@ import { insuranceRouter } from "./insurance";
 import { investorDocumentsRouter } from "./investor-documents";
 import { juridicoDashboardRouter } from "./juridico-dashboard";
 import { legalContractsRouter } from "./legal-contracts";
+import { licenseVerificationRouter } from "./license-verification";
 import { locationsRouter } from "./locations";
 import { messagingRouter } from "./messaging";
 import { miniagentRouter } from "./miniagent";
@@ -95,6 +96,11 @@ export const crmAppRouter = {
 	updateCoDebtor: crmRouter.updateCoDebtor,
 	deleteCoDebtor: crmRouter.deleteCoDebtor,
 	getConsolidatedCreditAnalysis: crmRouter.getConsolidatedCreditAnalysis,
+	// Verificación de QR del reverso de licencia contra Tránsito (Maicon)
+	verifyLicenseQr: licenseVerificationRouter.verifyLicenseQr,
+	listLicenseVerifications: licenseVerificationRouter.listLicenseVerifications,
+	getLicenseVerificationById:
+		licenseVerificationRouter.getLicenseVerificationById,
 };
 
 /**
@@ -449,6 +455,9 @@ export const proyeccionRouter = {
 	getInvestorsCartera: investorDocumentsRouter.getInvestorsCartera,
 	getSimulacionInversionista:
 		investorDocumentsRouter.getSimulacionInversionista,
+	// Contabilidad: reporte de pagos no liquidados. Va aquí y no en
+	// reportsAppRouter porque ahí el tipo del cliente queda truncado.
+	getReporteNoLiquidados: accountingRouter.getReporteNoLiquidados,
 };
 
 // Merged AppRouter type to avoid serialization limit

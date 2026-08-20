@@ -1,6 +1,29 @@
 import Big from "big.js";
+import z from "zod";
 
 type BigInput = number | string | Big;
+
+// Schema del body de /newPayment. Vive en este módulo puro (sin conexión a
+// BD) para que los tests puedan importarlo sin levantar la base.
+export const pagoSchema = z.object({
+  credito_id: z.number().int().positive(),
+  usuario_id: z.number().int().positive(),
+  monto_boleta: z.number().min(0),
+  fecha_pago: z.string(),
+  llamada: z.string().optional(),
+  renuevo_o_nuevo: z.string().optional(),
+  otros: z.number().min(0).optional(),
+  // Mismo tope que valida el form del front (hooks/registerPayment.ts).
+  observaciones: z.string().max(500).optional(),
+  abono_directo_capital: z.number().min(0).optional(),
+  cuotaApagar: z.number().int(),
+  url_boletas: z.array(z.string()),
+  banco_id: z.number().int().positive().optional(),
+  numeroAutorizacion: z.string().optional(),
+  registerBy: z.string().min(1),
+  fecha_boleta: z.string(),
+  origen_pago: z.enum(["transferencia", "cheque", "boleta"]).optional().default("transferencia"),
+});
 
 export const CREDIT_PENDING_CANCELLATION_ERROR = {
   code: "CREDIT_PENDING_CANCELLATION",

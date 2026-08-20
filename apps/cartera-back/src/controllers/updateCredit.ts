@@ -19,7 +19,9 @@ import {
   creditos,
   creditos_inversionistas,
   creditos_inversionistas_espejo,
+  compras_credito_inversionista,
   cuotas_credito,
+  inversionistas as inversionistasTable,
   pagos_credito,
   usuarios,
   historial_devolucion_credito,
@@ -438,6 +440,12 @@ const creditUpdateSchema = z.object({
         porcentaje_inversion: z.number().min(0).max(100),
         fecha_inicio_participacion: z.string().optional(),
         cuota_inversionista: z.number().min(0).optional(),
+        // Inversionista agregado DESDE la edición del crédito (no estaba antes).
+        // Obliga a declarar la operación para registrarla en
+        // compras_credito_inversionista — sin ese registro la liquidación
+        // descuadra (calcular pagos espejo data las compras por ahí).
+        es_nuevo: z.boolean().optional(),
+        tipo_operacion: z.enum(["compra_cartera", "reinversion"]).optional(),
       }),
     )
     .min(0)
@@ -451,6 +459,10 @@ const creditUpdateSchema = z.object({
         porcentaje_inversion: z.number().min(0).max(100),
         fecha_inicio_participacion: z.string().optional(),
         cuota_inversionista: z.number().min(0).optional(),
+        // El front sincroniza el espejo desde el padre para nuevos; estos
+        // campos viajan también aquí pero la lógica solo lee los del padre.
+        es_nuevo: z.boolean().optional(),
+        tipo_operacion: z.enum(["compra_cartera", "reinversion"]).optional(),
       }),
     )
     .min(0)
@@ -469,6 +481,7 @@ const creditUpdateSchema = z.object({
   formato_credito: z.string().max(50).optional(),
   permite_abono_capital: z.boolean().optional(),
   no_amortiza_capital: z.boolean().optional(),
+  excluir_compras: z.boolean().optional(),
   estado_devolucion: z.enum(['NO_APLICA', 'PENDIENTE_AUTORIZACION', 'VERIFICADO', 'RECHAZADO', 'COMPLETADO']).optional(),
   motivo_devolucion: z.string().optional(),
   bandera_reinversion: z.boolean().optional(),
@@ -517,6 +530,292 @@ const validateInvestorsPercentages = (
     }
   }
   return { success: true };
+};
+
+// ========================================
+// INVERSIONISTAS NUEVOS DESDE LA EDICIÓN
+// ========================================
+// La edición hace nuke & rebuild de creditos_inversionistas(_espejo), así que
+// históricamente se podía "colar" un inversionista nuevo sin registrar la
+// operación en compras_credito_inversionista — y sin ese registro el calcular
+// pagos espejo no sabe datar la compra y la liquidación descuadra (por eso el
+// botón estuvo deshabilitado en el front).
+//
+// Reglas:
+//   1. Todo inversionista del payload que NO esté hoy en el crédito debe venir
+//      declarado con es_nuevo + tipo_operacion. Si no, 400 (era el bug).
+//   2. Un es_nuevo no puede estar HOY en el crédito (padre o espejo). Eso es
+//      justo lo que ataja el borrar-y-volver-a-agregar en la misma edición: la
+//      validación corre antes del nuke & rebuild, así que el borrado sigue en
+//      la DB y cae acá. En cambio el historial (compras viejas, pagos espejo
+//      de participaciones ya cerradas) NO bloquea: que un inversionista salga
+//      del crédito y más adelante vuelva a entrar es rotación normal de pool y
+//      necesita su propio registro de compra.
+//   3. Como máximo UNA compra_cartera puede quedar pendiente de facturar por
+//      crédito: cofidi prorratea el interés del pago con una sola fecha de
+//      corte (operacionesPendientesFacturar[0]) y las demás se le pierden.
+//   4. Si el crédito está excluido de compras, no entra NINGÚN inversionista
+//      nuevo desde acá — ni compra_cartera ni reinversion. Sin esta regla el
+//      modal de edición sería una puerta trasera al filtro de
+//      getCreditCandidates y al guard manual de addInvestorToCredit. Incluye
+//      las reinversiones porque un es_nuevo con tipo_operacion "reinversion"
+//      puede ser alguien que hoy NO está en el crédito (rotación de pool: salió
+//      y vuelve), o sea capital nuevo entrando igual que una compra.
+export type InversionistaNuevoValidado = {
+  inversionista_id: number;
+  monto_aportado: number;
+  tipo_operacion: "compra_cartera" | "reinversion";
+  fecha_inicio_participacion?: string;
+};
+
+export const validarInversionistasNuevos = async (
+  credito_id: number,
+  inversionistas: NonNullable<CreditUpdateData["inversionistas"]>,
+  inversionistas_espejo: CreditUpdateData["inversionistas_espejo"],
+  set: SetContext,
+  // Valor EFECTIVO de excluir_compras tras aplicar este request: en una misma
+  // edición se puede prender el flag y agregar una compra, así que no alcanza
+  // con mirar el estado actual del crédito.
+  excluirComprasEfectivo: boolean = false,
+): Promise<
+  | { success: true; nuevos: InversionistaNuevoValidado[] }
+  | { success: false; error: { message: string; [key: string]: unknown } }
+> => {
+  const fail = (message: string, extra?: Record<string, unknown>) => {
+    set.status = 400;
+    return { success: false as const, error: { message, ...extra } };
+  };
+
+  // Sin duplicados dentro del propio payload (agregarlo dos veces = colarlo).
+  const idsPayload = inversionistas.map((i) => i.inversionista_id);
+  const duplicado = idsPayload.find((id, ix) => idsPayload.indexOf(id) !== ix);
+  if (duplicado !== undefined) {
+    return fail(
+      `El inversionista con ID ${duplicado} aparece más de una vez en la lista.`,
+      { inversionista_id: duplicado },
+    );
+  }
+
+  const [padreActual, espejoActual] = await Promise.all([
+    db
+      .select({ inversionista_id: creditos_inversionistas.inversionista_id })
+      .from(creditos_inversionistas)
+      .where(eq(creditos_inversionistas.credito_id, credito_id)),
+    db
+      .select({ inversionista_id: creditos_inversionistas_espejo.inversionista_id })
+      .from(creditos_inversionistas_espejo)
+      .where(eq(creditos_inversionistas_espejo.credito_id, credito_id)),
+  ]);
+  const idsPadreActual = new Set(padreActual.map((r) => r.inversionista_id));
+  const idsEspejoActual = new Set(espejoActual.map((r) => r.inversionista_id));
+
+  const declaradosNuevos = inversionistas.filter((i) => i.es_nuevo === true);
+
+  // Regla 1: nadie entra al crédito sin declararse nuevo. Aplica al padre y al
+  // espejo (el espejo nuevo viene sincronizado desde el padre por el front).
+  for (const inv of inversionistas) {
+    if (!inv.es_nuevo && !idsPadreActual.has(inv.inversionista_id)) {
+      return fail(
+        `El inversionista con ID ${inv.inversionista_id} no participa en este crédito. ` +
+          `Para agregarlo, usá "Agregar Inversionista" e indicá si es compra de cartera o reinversión.`,
+        { inversionista_id: inv.inversionista_id },
+      );
+    }
+  }
+  const idsDeclarados = new Set(declaradosNuevos.map((i) => i.inversionista_id));
+  for (const inv of inversionistas_espejo ?? []) {
+    // Un espejo cuyo ID ya está en el PADRE actual no es un colado: es el
+    // backfill legítimo del modal para créditos importados (processFromExcelFull
+    // omite el espejo a propósito y la edición lo reconstruye desde el padre).
+    // Solo se rechaza al que no está en NINGUNA de las dos tablas ni viene
+    // declarado como nuevo.
+    if (
+      !idsEspejoActual.has(inv.inversionista_id) &&
+      !idsPadreActual.has(inv.inversionista_id) &&
+      !idsDeclarados.has(inv.inversionista_id)
+    ) {
+      return fail(
+        `El inversionista con ID ${inv.inversionista_id} no participa en este crédito ` +
+          `(ni en el padre ni en el espejo) y no viene declarado como nuevo.`,
+        { inversionista_id: inv.inversionista_id },
+      );
+    }
+  }
+
+  if (declaradosNuevos.length === 0) return { success: true, nuevos: [] };
+
+  // Datos mínimos del nuevo.
+  for (const inv of declaradosNuevos) {
+    if (!inv.tipo_operacion) {
+      return fail(
+        `El inversionista nuevo con ID ${inv.inversionista_id} no indica tipo de operación (compra de cartera o reinversión).`,
+        { inversionista_id: inv.inversionista_id },
+      );
+    }
+    if (!(Number(inv.monto_aportado) > 0)) {
+      return fail(
+        `El inversionista nuevo con ID ${inv.inversionista_id} debe tener un monto aportado mayor a 0.`,
+        { inversionista_id: inv.inversionista_id },
+      );
+    }
+  }
+
+  // Regla 2: el "nuevo" no puede estar hoy en el crédito. El que se borró de la
+  // lista en esta misma edición todavía está en la DB (la validación corre
+  // antes del rebuild), así que cae acá. El que participó y ya salió, no: puede
+  // volver a entrar.
+  for (const inv of declaradosNuevos) {
+    if (
+      idsPadreActual.has(inv.inversionista_id) ||
+      idsEspejoActual.has(inv.inversionista_id)
+    ) {
+      return fail(
+        `El inversionista con ID ${inv.inversionista_id} ya participa en este crédito; ` +
+          `no puede agregarse como nuevo (aunque se borre de la lista y se vuelva a agregar).`,
+        { inversionista_id: inv.inversionista_id },
+      );
+    }
+  }
+
+  // Regla 3: una sola compra_cartera pendiente de facturar por crédito.
+  // El flujo nuevo de intereses de cofidi (routers/cofidi.ts) prorratea el
+  // interés del pago con UNA fecha de corte — toma operacionesPendientesFacturar[0]
+  // y las demás quedan sin prorratear (se facturan bajo la distribución vieja y
+  // el pendiente se arrastra al siguiente pago). Así que ni dos compras en la
+  // misma edición ni una compra encima de otra que todavía no cerró ciclo.
+  // Las reinversiones no cuentan: nacen con pendiente_facturar=false.
+  const nuevasCompras = declaradosNuevos.filter(
+    (inv) => inv.tipo_operacion === "compra_cartera",
+  );
+
+  // Regla 4: crédito excluido de compras. Se evalúa antes que la Regla 3 porque
+  // no necesita ir a la DB. Aplica a TODO inversionista nuevo, no solo a
+  // compra_cartera: en este endpoint un es_nuevo con tipo_operacion
+  // "reinversion" puede ser alguien que no está hoy en el crédito (la Regla 2
+  // solo prohíbe a quien ya participa), o sea capital nuevo entrando. Mismo
+  // criterio que getCreditCandidates, que saca el crédito del buscador entero.
+  if (excluirComprasEfectivo && declaradosNuevos.length > 0) {
+    return fail(
+      `Este crédito está excluido de las compras a inversionistas; no se le puede ` +
+        `agregar capital de inversionistas nuevos. Desmarcá "Excluir de compras a ` +
+        `inversionistas" si querés asignarlo.`,
+      { inversionistas_ids: declaradosNuevos.map((i) => i.inversionista_id) },
+    );
+  }
+
+  if (nuevasCompras.length > 1) {
+    return fail(
+      `Solo se puede agregar una compra de cartera a la vez en este crédito ` +
+        `(llegaron ${nuevasCompras.length}). Agregá una, esperá a que se facture el ` +
+        `siguiente pago y luego agregá la otra. Las reinversiones sí pueden ir juntas.`,
+      { inversionistas_ids: nuevasCompras.map((i) => i.inversionista_id) },
+    );
+  }
+  if (nuevasCompras.length === 1) {
+    const [pendiente] = await db
+      .select({ inversionista_id: compras_credito_inversionista.inversionista_id })
+      .from(compras_credito_inversionista)
+      .where(
+        and(
+          eq(compras_credito_inversionista.credito_id, credito_id),
+          eq(compras_credito_inversionista.pendiente_facturar, true),
+        ),
+      )
+      .limit(1);
+    if (pendiente) {
+      return fail(
+        `Este crédito ya tiene una compra pendiente de facturar (inversionista ` +
+          `${pendiente.inversionista_id}). Hay que esperar a que el siguiente pago la ` +
+          `facture antes de agregar otra compra de cartera.`,
+        {
+          inversionista_id: nuevasCompras[0].inversionista_id,
+          compra_pendiente_inversionista_id: pendiente.inversionista_id,
+        },
+      );
+    }
+  }
+
+  return {
+    success: true,
+    nuevos: declaradosNuevos.map((inv) => ({
+      inversionista_id: inv.inversionista_id,
+      monto_aportado: Number(inv.monto_aportado),
+      tipo_operacion: inv.tipo_operacion!,
+      fecha_inicio_participacion: inv.fecha_inicio_participacion,
+    })),
+  };
+};
+
+// Registra en compras_credito_inversionista la entrada de cada inversionista
+// nuevo, replicando el estado FINAL que deja el flujo normal (addInvestorToCredit
+// + completeEspejo) al aceptar la operación — aquí no hay paso de aceptación,
+// así que el registro nace ya completado:
+//   - status "completado" (el espejo del nuevo también nace "completado", que es
+//     el default de la tabla, así que no queda nada pendiente ni se activa
+//     bandera_reinversion).
+//   - compra_cartera: fecha_completada anclada a la fecha de inicio de
+//     participación a mediodía UTC — igual que completeEspejo — para que caiga
+//     en el mismo mes que lee el calcular pagos espejo (calcularAjusteCompras /
+//     obtenerSumaComprasMesAnterior). pendiente_facturar=true para que cofidi
+//     prorratee el interés del primer pago bajo la nueva distribución.
+//   - reinversion: fecha_completada = ahora y sin factura (pendiente_facturar
+//     false), igual que completeEspejo.
+//
+// Corre con el MISMO dbInstance (transacción) que el rebuild de padre/espejo:
+// participación y registro de compra entran o no entran juntos. Si esto falla,
+// el rollback deshace el rebuild y el reintento con el mismo payload vuelve a
+// pasar la validación (el nuevo no quedó a medias dentro del crédito).
+export const registrarComprasInversionistasNuevos = async (
+  credito_id: number,
+  nuevos: InversionistaNuevoValidado[],
+  dbInstance: typeof db = db,
+) => {
+  if (nuevos.length === 0) return;
+
+  // tipo_reinversion informativo del registro: la modalidad global del
+  // inversionista (mismo fallback que usa addInvestorToCredit cuando no viene).
+  const filasInv = await dbInstance
+    .select({
+      inversionista_id: inversionistasTable.inversionista_id,
+      tipo_reinversion: inversionistasTable.tipo_reinversion,
+    })
+    .from(inversionistasTable)
+    .where(
+      inArray(
+        inversionistasTable.inversionista_id,
+        nuevos.map((n) => n.inversionista_id),
+      ),
+    );
+  const tipoReinvPorId = new Map(filasInv.map((r) => [r.inversionista_id, r.tipo_reinversion]));
+
+  const ahora = new Date();
+  await dbInstance.insert(compras_credito_inversionista).values(
+    nuevos.map((n) => {
+      const esCompra = n.tipo_operacion === "compra_cartera";
+      // Anclar a mediodía UTC para que la conversión a hora GT (UTC-6) no
+      // cruce la frontera de día (mismo truco que completeEspejo).
+      const ymd = n.fecha_inicio_participacion
+        ? new Date(n.fecha_inicio_participacion).toISOString().split("T")[0]
+        : null;
+      const fechaCompletada = esCompra && ymd ? new Date(`${ymd}T12:00:00Z`) : ahora;
+      return {
+        credito_id,
+        inversionista_id: n.inversionista_id,
+        monto_aportado: n.monto_aportado.toString(),
+        tipo_operacion: n.tipo_operacion,
+        tipo_reinversion: tipoReinvPorId.get(n.inversionista_id) ?? null,
+        status: "completado" as const,
+        fecha_completada: fechaCompletada,
+        pendiente_facturar: esCompra,
+        updated_at: ahora,
+      };
+    }),
+  );
+
+  console.log(
+    `🧾 [COMPRAS] Registradas ${nuevos.length} operación(es) en compras_credito_inversionista para crédito ${credito_id}:`,
+    nuevos.map((n) => `inv ${n.inversionista_id} ${n.tipo_operacion} Q${n.monto_aportado}`).join(", "),
+  );
 };
 
 /**
@@ -1031,6 +1330,7 @@ export const updateCredit = async ({ body, set, request }: any) => {
       formato_credito,
       permite_abono_capital,
       no_amortiza_capital,
+      excluir_compras,
       estado_devolucion,
       motivo_devolucion,
       bandera_reinversion,
@@ -1038,22 +1338,11 @@ export const updateCredit = async ({ body, set, request }: any) => {
       ...fieldsToUpdate
     } = parseResult.data;
 
-    // 2. Buscar el crédito actual
+    // 2. Buscar el crédito actual (editable sin importar el status)
     const [current] = await db
       .select()
       .from(creditos)
-      .where(
-        and(
-          eq(creditos.credito_id, credito_id),
-          inArray(creditos.statusCredit, [
-            "ACTIVO",
-            "MOROSO",
-            "PENDIENTE_CANCELACION",
-            "EN_CONVENIO",
-            "INCOBRABLE"
-          ]),
-        ),
-      )
+      .where(eq(creditos.credito_id, credito_id))
       .limit(1);
 
     if (!current) {
@@ -1061,9 +1350,45 @@ export const updateCredit = async ({ body, set, request }: any) => {
       return { message: "Credit not found" };
     }
 
+    // Estados de cierre: el crédito se puede editar, pero su calendario de
+    // pagos es historia congelada — la cancelación deja los pagos no pagados
+    // en paymentFalse=true con restantes en 0 (credits.ts) y el caído conserva
+    // solo el desembolso de cuota 0 (fallenCredits.ts), ancla de
+    // repararTotalRestante. Re-proyectarlos resucitaría deuda fantasma.
+    const esCreditoFinalizado =
+      current.statusCredit === "CANCELADO" || current.statusCredit === "CAIDO";
+
+    // 3.0. En un crédito finalizado no entran inversionistas nuevos: la compra
+    // o reinversión crearía una participación "viva" (con su fila en
+    // compras_credito_inversionista que facturación trata como vigente) sobre
+    // una deuda que ya no existe.
+    const traeInversionistasNuevos =
+      (inversionistas ?? []).some((inv) => inv.es_nuevo) ||
+      (inversionistas_espejo ?? []).some((inv) => inv.es_nuevo);
+    if (traeInversionistasNuevos && esCreditoFinalizado) {
+      set.status = 400;
+      return {
+        message: `No se pueden registrar inversionistas nuevos en un crédito ${current.statusCredit}`,
+      };
+    }
+
+    // En créditos finalizados la participación de inversionistas es historia
+    // congelada: las listas del payload se IGNORAN (el front las manda siempre
+    // al editar) — ni se validan ni se reconstruyen. La cancelación dejó esos
+    // saldos en 0 y el rebuild (delete+insert) los reviviría con el
+    // monto_aportado del body; investor.ts los suma sin filtrar status.
+    if (
+      esCreditoFinalizado &&
+      ((inversionistas?.length ?? 0) > 0 ||
+        (inversionistas_espejo?.length ?? 0) > 0)
+    ) {
+      console.log(
+        `⚠️ Crédito ${current.statusCredit}: inversionistas del payload ignorados (participación congelada)`,
+      );
+    }
 
     // 3. Validar inversionistas
-    if (inversionistas && inversionistas.length > 0) {
+    if (!esCreditoFinalizado && inversionistas && inversionistas.length > 0) {
       const percentagesValidation = validateInvestorsPercentages(
         inversionistas as any,
         set,
@@ -1074,7 +1399,7 @@ export const updateCredit = async ({ body, set, request }: any) => {
     }
 
     // 3.1. Validar inversionistas espejo si existen
-    if (inversionistas_espejo && inversionistas_espejo.length > 0) {
+    if (!esCreditoFinalizado && inversionistas_espejo && inversionistas_espejo.length > 0) {
       const mirrorValidation = validateInvestorsPercentages(
         inversionistas_espejo as any,
         set
@@ -1082,6 +1407,31 @@ export const updateCredit = async ({ body, set, request }: any) => {
       if (!mirrorValidation.success) {
         return mirrorValidation.error;
       }
+    }
+
+    // 3.2. Inversionistas nuevos: nadie entra al crédito sin declararse
+    // (es_nuevo + tipo_operacion) y sin haber sido validado contra el
+    // historial. Corre ANTES de cualquier mutación: si falla, no se tocó nada.
+    // Se valida también cuando solo viene el espejo, para que nadie se cuele
+    // por esa lista.
+    let inversionistasNuevos: InversionistaNuevoValidado[] = [];
+    if (
+      !esCreditoFinalizado &&
+      ((inversionistas && inversionistas.length > 0) ||
+        (inversionistas_espejo && inversionistas_espejo.length > 0))
+    ) {
+      const nuevosValidation = await validarInversionistasNuevos(
+        credito_id,
+        inversionistas ?? [],
+        inversionistas_espejo,
+        set,
+        // El request manda si trae el flag; si no, vale el estado actual.
+        excluir_compras ?? current.excluir_compras,
+      );
+      if (!nuevosValidation.success) {
+        return nuevosValidation.error;
+      }
+      inversionistasNuevos = nuevosValidation.nuevos;
     }
 
     // 3.5 Actualizar datos del usuario si se enviaron
@@ -1126,6 +1476,9 @@ export const updateCredit = async ({ body, set, request }: any) => {
     }
     if (no_amortiza_capital !== undefined) {
       updateFields.no_amortiza_capital = no_amortiza_capital;
+    }
+    if (excluir_compras !== undefined) {
+      updateFields.excluir_compras = excluir_compras;
     }
     if (estado_devolucion !== undefined) {
       if (estado_devolucion !== current.estado_devolucion) {
@@ -1232,8 +1585,10 @@ export const updateCredit = async ({ body, set, request }: any) => {
 
 
 
-      // Actualizar "otros" en la cuota inicial si cambió
-      if (otrosModificado) {
+      // Actualizar "otros" en la cuota inicial si cambió.
+      // En créditos finalizados NO: la cuota 0 es historia congelada (en un
+      // CAIDO es el único pago que sobrevive, ancla de repararTotalRestante).
+      if (otrosModificado && !esCreditoFinalizado) {
         await updateInitialQuotaOtros(credito_id, fieldsToUpdate.otros);
       }
 
@@ -1275,7 +1630,15 @@ export const updateCredit = async ({ body, set, request }: any) => {
     // 8.1 Si la cuota cambió, sincronizar cuotas pendientes y recalcular
     // cuotas de inversionistas (solo si NO vinieron en el body — si vinieron,
     // el bloque siguiente las maneja con la cuota nueva).
-    if (willChangeCuota) {
+    // En créditos finalizados NO se re-proyecta: updateInstallments selecciona
+    // pagado=false sin excluir paymentFalse=true, así que reescribiría los
+    // restantes que la cancelación dejó en 0 (o el desembolso del caído).
+    if (willChangeCuota && esCreditoFinalizado) {
+      console.log(
+        `⚠️ Crédito ${current.statusCredit}: cuota actualizada solo en el crédito, calendario congelado (no se re-proyectan pagos ni cuotas de inversionistas)`,
+      );
+    }
+    if (willChangeCuota && !esCreditoFinalizado) {
       const sifco = numero_credito_sifco ?? current.numero_credito_sifco;
       const cuotaNuevaNum = Number(updateFields.cuota);
 
@@ -1344,71 +1707,95 @@ export const updateCredit = async ({ body, set, request }: any) => {
       }
     }
 
-    // 9. Actualizar inversionistas (Principal)
-    let parentCuotas: Map<number, string> = new Map();
-    if (inversionistas && inversionistas.length > 0) {
-      parentCuotas = await updateInvestors(
-        credito_id,
-        inversionistas,
-        updateFields,
-        current,
-        numero_credito_sifco ?? current.numero_credito_sifco,
-        Number(updateFields.seguro_10_cuotas ?? current.seguro_10_cuotas),
-        Number(updateFields.membresias_pago ?? current.membresias_pago),
-        Number(updateFields.gps ?? current.gps),
-        creditos_inversionistas // Explicit target
-      );
-    }
-
-    // 10. Actualizar inversionistas (Espejo)
+    // 9-10.5. Rebuild de inversionistas (padre + espejo) y registro de las
+    // compras de los nuevos, TODO en una sola transacción: si el registro de
+    // compras falla después del rebuild, el rollback deshace también el rebuild.
+    // Sin eso quedaba el inversionista nuevo dentro del crédito sin su fila en
+    // compras_credito_inversionista (liquidación descuadrada) y el reintento con
+    // el mismo payload rebotaba en la validación, porque el "nuevo" ya figuraba
+    // como participante.
     console.log(`🪞 [ESPEJO] inversionistas_espejo recibidos: ${JSON.stringify(inversionistas_espejo?.length ?? 'undefined')}`);
-    if (inversionistas_espejo && inversionistas_espejo.length > 0) {
-      // 🔒 Sincronización forzada solo de cuota_inversionista desde el padre.
-      // El monto_aportado del espejo se respeta tal como viene del frontend
-      // porque representa el saldo vivo del inversionista (capital - abonos)
-      // y puede divergir del padre cuando ya hubo abonos a capital.
-      const principalCuotas = new Map(
-        (inversionistas || []).map((inv) => [inv.inversionista_id, inv.cuota_inversionista ?? 0])
-      );
-
-      const espejoSincronizado = inversionistas_espejo.map((inv) => ({
-        ...inv,
-        cuota_inversionista: principalCuotas.get(inv.inversionista_id) ?? inv.cuota_inversionista,
-      }));
-
-      console.log(`🪞 [ESPEJO] Iniciando updateInvestors para credito_id=${credito_id} con ${espejoSincronizado.length} inversionistas`);
-      try {
-        const espejoUserId = extractUserId(request);
-        const runEspejoUpdate = async (dbInstance: typeof db) =>
-          updateInvestors(
-            credito_id,
-            espejoSincronizado,
-            updateFields,
-            current,
-            numero_credito_sifco ?? current.numero_credito_sifco,
-            Number(updateFields.seguro_10_cuotas ?? current.seguro_10_cuotas),
-            Number(updateFields.membresias_pago ?? current.membresias_pago),
-            Number(updateFields.gps ?? current.gps),
-            creditos_inversionistas_espejo,
-            parentCuotas,
-            dbInstance,
-          );
-
-        if (espejoUserId) {
-          await withAuditContext(espejoUserId, runEspejoUpdate);
-        } else {
-          await runEspejoUpdate(db);
-        }
-        console.log(`🪞 [ESPEJO] ✅ updateInvestors completado para espejo`);
-      } catch (espejoError) {
-        console.error(`🪞 [ESPEJO] ❌ Error en updateInvestors espejo:`, espejoError);
-        throw espejoError;
+    const runInvestorRebuild = async (tx: typeof db) => {
+      // 9. Actualizar inversionistas (Principal)
+      let parentCuotasTx: Map<number, string> = new Map();
+      if (inversionistas && inversionistas.length > 0) {
+        parentCuotasTx = await updateInvestors(
+          credito_id,
+          inversionistas,
+          updateFields,
+          current,
+          numero_credito_sifco ?? current.numero_credito_sifco,
+          Number(updateFields.seguro_10_cuotas ?? current.seguro_10_cuotas),
+          Number(updateFields.membresias_pago ?? current.membresias_pago),
+          Number(updateFields.gps ?? current.gps),
+          creditos_inversionistas, // Explicit target
+          undefined,
+          tx,
+        );
       }
-    } else {
-      console.log(`🪞 [ESPEJO] ⚠️ Bloque saltado: inversionistas_espejo está vacío o undefined`);
+
+      // 10. Actualizar inversionistas (Espejo)
+      if (inversionistas_espejo && inversionistas_espejo.length > 0) {
+        // 🔒 Sincronización forzada solo de cuota_inversionista desde el padre.
+        // El monto_aportado del espejo se respeta tal como viene del frontend
+        // porque representa el saldo vivo del inversionista (capital - abonos)
+        // y puede divergir del padre cuando ya hubo abonos a capital.
+        const principalCuotas = new Map(
+          (inversionistas || []).map((inv) => [inv.inversionista_id, inv.cuota_inversionista ?? 0])
+        );
+
+        const espejoSincronizado = inversionistas_espejo.map((inv) => ({
+          ...inv,
+          cuota_inversionista: principalCuotas.get(inv.inversionista_id) ?? inv.cuota_inversionista,
+        }));
+
+        console.log(`🪞 [ESPEJO] Iniciando updateInvestors para credito_id=${credito_id} con ${espejoSincronizado.length} inversionistas`);
+        await updateInvestors(
+          credito_id,
+          espejoSincronizado,
+          updateFields,
+          current,
+          numero_credito_sifco ?? current.numero_credito_sifco,
+          Number(updateFields.seguro_10_cuotas ?? current.seguro_10_cuotas),
+          Number(updateFields.membresias_pago ?? current.membresias_pago),
+          Number(updateFields.gps ?? current.gps),
+          creditos_inversionistas_espejo,
+          parentCuotasTx,
+          tx,
+        );
+        console.log(`🪞 [ESPEJO] ✅ updateInvestors completado para espejo`);
+      } else {
+        console.log(`🪞 [ESPEJO] ⚠️ Bloque saltado: inversionistas_espejo está vacío o undefined`);
+      }
+
+      // 10.5. Registrar en compras_credito_inversionista la entrada de cada
+      // inversionista nuevo (ya validado en 3.2). Va DESPUÉS del rebuild para
+      // que el registro refleje la participación que acaba de materializarse,
+      // pero dentro de la misma tx: o entran los dos o no entra ninguno.
+      await registrarComprasInversionistasNuevos(credito_id, inversionistasNuevos, tx);
+    };
+
+    if (
+      !esCreditoFinalizado &&
+      ((inversionistas && inversionistas.length > 0) ||
+        (inversionistas_espejo && inversionistas_espejo.length > 0) ||
+        inversionistasNuevos.length > 0)
+    ) {
+      try {
+        // withAuditContext ya abre su propia transacción (setea
+        // app.current_user_id para los triggers de auditoría); sin usuario, una
+        // transacción pelada.
+        const espejoUserId = extractUserId(request);
+        if (espejoUserId) {
+          await withAuditContext(espejoUserId, runInvestorRebuild);
+        } else {
+          await db.transaction(async (tx) => runInvestorRebuild(tx as unknown as typeof db));
+        }
+      } catch (investorError) {
+        console.error(`🪞 [ESPEJO] ❌ Error actualizando inversionistas:`, investorError);
+        throw investorError;
+      }
     }
-
-
 
     set.status = 200;
     return updatedCredit;

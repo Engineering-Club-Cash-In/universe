@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import Big from "big.js";
+import { lockPoolMock } from "../testMocks";
 
 // Configuración de variables de entorno ficticias para evitar que fallen los imports de paquetes internos (ej. email)
 process.env.RESEND_API_KEY = "test-resend-key";
@@ -41,9 +42,13 @@ mock.module("../../database/index", () => {
   };
 
   return {
+    client: {},
     db: {
       select: mockSelectChain
-    }
+    },
+    // Requerido por la cadena de imports (investor → addInvestorToCredit →
+    // creditoEspejoLock), aunque estos tests no lo usen. Ver testMocks.ts.
+    lockPool: lockPoolMock
   };
 });
 

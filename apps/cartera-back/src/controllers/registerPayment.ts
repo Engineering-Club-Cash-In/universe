@@ -16,7 +16,7 @@ import {
 } from "../database/db";
 import { eq, and, lt, lte, asc, desc, sql, gt, or, ne, inArray } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import { updateMora } from "./latefee";
+import { desactivarMoraSiCreditoAlDia, updateMora } from "./latefee";
 import { insertPagosCreditoInversionistas, insertPagosCreditoInversionistasV2 } from "./payments";
 import { processAndReplaceCreditInvestors } from "./investor"; 
 import { processConvenioPayment } from "./paymentAgreement";
@@ -49,6 +49,7 @@ import {
   shouldIncobrableInstallmentBePaid,
   shouldMarkInstallmentPaymentPaid,
   sumarAplicadoACuota,
+  pagoSchema,
 } from "./registerPaymentPolicy";
 import {
   PAYMENT_ADVISORY_LOCK_NAMESPACE,
@@ -61,25 +62,6 @@ const CUOTA_INTEGRITY_ERROR_PREFIX = "Inconsistencia de integridad:";
 // ========================================
 // TIPOS E INTERFACES
 // ========================================
-
-const pagoSchema = z.object({
-  credito_id: z.number().int().positive(),
-  usuario_id: z.number().int().positive(),
-  monto_boleta: z.number().min(0),
-  fecha_pago: z.string(),
-  llamada: z.string().optional(),
-  renuevo_o_nuevo: z.string().optional(),
-  otros: z.number().min(0).optional(),
-  observaciones: z.string().optional(),
-  abono_directo_capital: z.number().min(0).optional(),
-  cuotaApagar: z.number().int(),
-  url_boletas: z.array(z.string()),
-  banco_id: z.number().int().positive().optional(),
-  numeroAutorizacion: z.string().optional(),
-  registerBy: z.string().min(1),
-  fecha_boleta: z.string(),
-  origen_pago: z.enum(["transferencia", "cheque", "boleta"]).optional().default("transferencia"),
-});
 
 type PagoData = z.infer<typeof pagoSchema>;
 
@@ -807,6 +789,7 @@ export const insertPayment = async ({ body, set }: any) => {
         registerBy: registerBy ?? "",
         fecha_boleta,
         monto_aplicado: pagoEspecialCuota.montoAplicado,
+        observaciones,
       });
     }
 
@@ -858,6 +841,7 @@ export const insertPayment = async ({ body, set }: any) => {
             registerBy: registerBy ?? "",
             fecha_boleta,
             monto_aplicado: pagoEspecialCuota.montoAplicado,
+            observaciones,
           });
         }
         console.log(
@@ -880,6 +864,7 @@ export const insertPayment = async ({ body, set }: any) => {
             registerBy: registerBy ?? "",
             fecha_boleta,
             monto_aplicado: pagoEspecialCuota.montoAplicado,
+            observaciones,
           });
         }
         return {
@@ -906,6 +891,7 @@ export const insertPayment = async ({ body, set }: any) => {
           registerBy: registerBy ?? "",
           fecha_boleta,
           monto_aplicado: pagoEspecialCuota.montoAplicado,
+          observaciones,
         });
       }
       return {
@@ -2253,6 +2239,7 @@ export const insertPayment = async ({ body, set }: any) => {
           fecha_boleta,
           monto_aplicado: pagoEspecialCuota.montoAplicado,
           pagoConvenio: Number(estamparPagoConvenio()),
+          observaciones,
         });
       }
 
@@ -2369,6 +2356,7 @@ interface InsertarPagoParams {
   fecha_boleta?: string;
   monto_aplicado: number;
   pagoConvenio?: number;
+  observaciones?: string;
 }
 export async function insertarPago({
   numero_credito_sifco,
@@ -2384,7 +2372,8 @@ export async function insertarPago({
   registerBy,
   fecha_boleta,
   monto_aplicado,
-  pagoConvenio = 0
+  pagoConvenio = 0,
+  observaciones = ""
 }: InsertarPagoParams) {
   console.log(
     `Insertando pago para crédito SIFCO: ${numero_credito_sifco}, cuota: ${numero_cuota}, mora: ${mora}, otros: ${otros}`
@@ -2519,7 +2508,7 @@ export async function insertarPago({
       seguro_facturado: creditData.seguro_10_cuotas?.toString() ?? "0",
       gps_facturado: creditData.gps?.toString() ?? "0",
       reserva: "0",
-      observaciones: "",
+      observaciones: observaciones,
       validationStatus: "pending",
       fecha_boleta: fecha_boleta,
       banco_id: banco_id ?? undefined,
@@ -2628,11 +2617,18 @@ async function aplicarPagoAlCreditoSinLock(pago_id: number) {
       };
     }
     if (pago.validationStatus === "capital") {
-      return applyCapitalPaymentAndBuildResponse(
+      const resultadoCapital = await applyCapitalPaymentAndBuildResponse(
         pago,
         pago_id,
         aplicarAbonoCapitalInversionistas
       );
+      // Un abono directo a capital puede dejar el crédito sin capital: la
+      // regla sinCapital debe apagar la mora aquí mismo (igual que haría el
+      // cron esa noche). Post-commit del abono; barato si no hay mora activa.
+      if (resultadoCapital?.success && pago.credito_id !== null) {
+        await desactivarMoraSiCreditoAlDia(pago.credito_id);
+      }
+      return resultadoCapital;
     }
     if (pago.validationStatus === "reset") {
       if (pago.credito_id === null) {
@@ -2682,9 +2678,22 @@ async function aplicarPagoAlCreditoSinLock(pago_id: number) {
     // completo y el reintento parte de cero — sin capital doble-descontado ni
     // distribuciones a medias. Aquí adentro NO hay llamadas externas (la
     // facturación con SAT vive en otro endpoint), así que la tx es corta.
-    return await db.transaction(async (tx) =>
+    const resultado = await db.transaction(async (tx) =>
       aplicarPagoNormalEnTx(tx as unknown as AplicarPagoTx, pago, pago_id)
     );
+
+    // POST-COMMIT: si el pago dejó el crédito al día, apagar la mora que el
+    // cron pudo crear mientras la boleta esperaba validación (si no, queda
+    // activa y el crédito MOROSO hasta la corrida nocturna). Va FUERA de la
+    // transacción a propósito: el helper lee/escribe por el pool global (otra
+    // conexión), así que dentro de la tx leería el snapshot viejo (no-op) y
+    // su UPDATE a creditos chocaría con el row lock de la tx (bloqueo mutuo).
+    // Nunca lanza, así que no puede tirar una aplicación ya commiteada.
+    if (resultado?.success) {
+      await desactivarMoraSiCreditoAlDia(pago.credito_id);
+    }
+
+    return resultado;
   } catch (error) {
     console.error("❌ Error al aplicar pago al crédito:", error);
     throw error;

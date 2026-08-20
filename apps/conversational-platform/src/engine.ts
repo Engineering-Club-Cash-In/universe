@@ -9,6 +9,7 @@ import type {
   EngineCommand,
   EngineError,
   EngineTransition,
+  ExecuteActionPayload,
   ExpressionAst,
   RunStateSnapshot,
   SendMessagePayload,
@@ -117,19 +118,13 @@ export function resumeRun(input: ResumeRunInput): EngineTransition {
     return transition(fallbackState, [], [], [engineError("INVALID_RESOLUTION", { reason: "invalid resolution" })]);
   }
 
-  const mapper = resolveOutcomeMapper(input.manifest.outcomeMappingVersion, input.manifest.outcomeMappingHash);
-  if (mapper === undefined) {
-    return transition(fallbackState, [], [], [engineError("OUTCOME_MAPPER_NOT_FOUND", { version: input.manifest.outcomeMappingVersion })]);
-  }
-
   const consumed = input.runState.consumedContinuations[input.resolution.effectContinuationId];
   if (consumed !== undefined) {
-    const outcome = mapper.map(input.resolution.ledgerState);
     if (
       consumed.logicalEffectId === input.resolution.logicalEffectId &&
       consumed.payloadHash === input.resolution.payloadHash &&
       consumed.ledgerState === input.resolution.ledgerState &&
-      outcome === consumed.outcome
+      consumed.businessResultCode === input.resolution.businessResultCode
     ) {
       return transition(
         fallbackState,
@@ -152,6 +147,10 @@ export function resumeRun(input: ResumeRunInput): EngineTransition {
   }
 
   const continuation = input.runState.waitingContinuation;
+  const mapper = resolveOutcomeMapper(continuation.outcomeMappingVersion, continuation.outcomeMappingHash);
+  if (mapper === undefined) {
+    return transition(fallbackState, [], [], [engineError("OUTCOME_MAPPER_NOT_FOUND", { version: continuation.outcomeMappingVersion })]);
+  }
   if (
     continuation.effectContinuationId !== input.resolution.effectContinuationId ||
     continuation.awaitedLogicalEffectId !== input.resolution.logicalEffectId ||
@@ -162,20 +161,32 @@ export function resumeRun(input: ResumeRunInput): EngineTransition {
     return transition(fallbackState, [], [], [engineError("CONTINUATION_MISMATCH", { effectContinuationId: input.resolution.effectContinuationId })]);
   }
 
-  const outcome = mapper.map(input.resolution.ledgerState);
+  const outcome = mapper.map(input.resolution, continuation.businessResultCodes ?? []);
   if (outcome === undefined || !isConsumableLedgerState(input.resolution.ledgerState)) {
     return transition(fallbackState, [], [], [engineError("NON_CONSUMABLE_EFFECT_STATE", { ledgerState: input.resolution.ledgerState })]);
   }
 
-  const nextStepId = continuation.terminalOutcomeTransitions[outcome];
+  const nextStepId = continuation.terminalOutcomeTransitions[outcome as keyof typeof continuation.terminalOutcomeTransitions];
+  if (typeof nextStepId !== "string") {
+    return transition(fallbackState, [], [], [engineError("CONTINUATION_MISMATCH", { outcome })]);
+  }
+  const consumedSnapshot = input.resolution.businessResultCode === undefined
+    ? {
+        outcome,
+        ledgerState: input.resolution.ledgerState,
+        logicalEffectId: input.resolution.logicalEffectId,
+        payloadHash: input.resolution.payloadHash,
+      }
+    : {
+        outcome,
+        ledgerState: input.resolution.ledgerState,
+        logicalEffectId: input.resolution.logicalEffectId,
+        payloadHash: input.resolution.payloadHash,
+        businessResultCode: input.resolution.businessResultCode,
+      };
   const consumedContinuations = {
     ...cloneConsumedContinuations(input.runState.consumedContinuations),
-    [continuation.effectContinuationId]: {
-      outcome,
-      ledgerState: input.resolution.ledgerState,
-      logicalEffectId: input.resolution.logicalEffectId,
-      payloadHash: input.resolution.payloadHash,
-    },
+    [continuation.effectContinuationId]: consumedSnapshot,
   };
   const resumedState: RunStateSnapshot = cloneAndFreeze({
     runId: input.runState.runId,
@@ -303,6 +314,73 @@ function activateStep(manifest: CompiledManifest, state: RunStateSnapshot, step:
         },
       });
     }
+    case "execute_action": {
+      const descriptor = manifest.actionDescriptors.find(
+        (candidate) => candidate.actionKey === step.actionRef.actionKey && candidate.actionVersion === step.actionRef.actionVersion,
+      );
+      if (descriptor === undefined) {
+        const error = engineError("MANIFEST_INTEGRITY_FAILED", { reason: "action descriptor missing", actionKey: step.actionRef.actionKey }, step.id);
+        accumulator.errors.push(error);
+        accumulator.auditFacts.push({ type: "RUN_FAILED", stepId: step.id, details: { reason: error.code } });
+        return failState({ ...state, activationOrdinal }, error.code);
+      }
+      const payload: ExecuteActionPayload = cloneAndFreeze({
+        subjectId: step.subjectId,
+        conversationId: step.conversationId,
+        input: deepClone(step.input),
+        purpose: descriptor.purpose,
+        dataClasses: deepClone(descriptor.dataClasses),
+      });
+      const commandOrdinal = 0;
+      const logicalEffectId = hashCanonical("logical-effect", { flowRunId: state.runId, stepId: step.id, activationOrdinal, commandKind: "EXECUTE_ACTION", commandOrdinal });
+      const effectContinuationId = hashCanonical("effect-continuation", { flowRunId: state.runId, stepId: step.id, activationOrdinal, commandOrdinal });
+      const payloadHash = hashCanonical("payload", { kind: "EXECUTE_ACTION", payload });
+      const command: EngineCommand = cloneAndFreeze({
+        kind: "EXECUTE_ACTION",
+        blocking: true,
+        completionMode: "ON_EFFECT_TERMINAL",
+        logicalEffectId,
+        effectContinuationId,
+        commandOrdinal,
+        activationOrdinal,
+        stepId: step.id,
+        actionRef: deepClone(step.actionRef),
+        retryPolicy: deepClone(descriptor.retryPolicy),
+        reconcileMode: descriptor.reconcileMode,
+        effectGuarantee: descriptor.effectGuarantee,
+        payload,
+        payloadHash,
+        outcomeMappingVersion: step.outcomeMappingVersion,
+        outcomeMappingHash: step.outcomeMappingHash,
+        businessResultCodes: deepClone(step.businessResultCodes),
+      });
+      accumulator.commands.push(command);
+      accumulator.auditFacts.push({ type: "COMMAND_EMITTED", stepId: step.id, details: { logicalEffectId, effectContinuationId } });
+      accumulator.auditFacts.push({ type: "CONTINUATION_WAITING", stepId: step.id, details: { effectContinuationId } });
+      return cloneAndFreeze({
+        runId: state.runId,
+        manifestHash: manifest.manifestHash,
+        status: "WAITING_EFFECT",
+        currentStepId: step.id,
+        variables: cloneVariables(state.variables),
+        activationOrdinal,
+        consumedContinuations: cloneConsumedContinuations(state.consumedContinuations),
+        waitingContinuation: {
+          effectContinuationId,
+          awaitedLogicalEffectId: logicalEffectId,
+          expectedPayloadHash: payloadHash,
+          outcomeMappingVersion: step.outcomeMappingVersion,
+          outcomeMappingHash: step.outcomeMappingHash,
+          state: "WAITING",
+          terminalOutcomeTransitions: {
+            succeeded: step.transitions.succeeded,
+            business_error: step.transitions.business_error,
+            technical_error: step.transitions.technical_error,
+          },
+          businessResultCodes: deepClone(step.businessResultCodes),
+        },
+      });
+    }
     case "end":
       accumulator.auditFacts.push({ type: "RUN_COMPLETED", stepId: step.id, details: { activationOrdinal: String(activationOrdinal) } });
       return cloneAndFreeze({
@@ -425,30 +503,58 @@ function validateRunState(state: unknown, manifest: CompiledManifest): { readonl
 }
 
 function isExpectedWaitingContinuation(value: unknown, state: Record<string, unknown>, manifest: CompiledManifest): boolean {
-  if (!isRecord(value) || !hasExactKeys(value, ["awaitedLogicalEffectId", "effectContinuationId", "expectedPayloadHash", "outcomeMappingHash", "outcomeMappingVersion", "state", "terminalOutcomeTransitions"])) return false;
-  if (!isRecord(value.terminalOutcomeTransitions) || !hasExactKeys(value.terminalOutcomeTransitions, ["failed", "requested"])) return false;
+  if (!isRecord(value)) return false;
   const step = manifest.steps.find((candidate) => candidate.id === state.currentStepId);
-  if (step?.type !== "send_message") return false;
-  if (value.terminalOutcomeTransitions.requested !== step.transitions.requested || value.terminalOutcomeTransitions.failed !== step.transitions.failed) return false;
+  if (step?.type !== "send_message" && step?.type !== "execute_action") return false;
+  const expectedKeys = step.type === "execute_action"
+    ? ["awaitedLogicalEffectId", "businessResultCodes", "effectContinuationId", "expectedPayloadHash", "outcomeMappingHash", "outcomeMappingVersion", "state", "terminalOutcomeTransitions"]
+    : ["awaitedLogicalEffectId", "effectContinuationId", "expectedPayloadHash", "outcomeMappingHash", "outcomeMappingVersion", "state", "terminalOutcomeTransitions"];
+  if (!hasExactKeys(value, expectedKeys) || !isRecord(value.terminalOutcomeTransitions)) return false;
+  if (step.type === "send_message") {
+    if (!hasExactKeys(value.terminalOutcomeTransitions, ["failed", "requested"])) return false;
+    if (value.terminalOutcomeTransitions.requested !== step.transitions.requested || value.terminalOutcomeTransitions.failed !== step.transitions.failed) return false;
+    if (value.outcomeMappingVersion !== step.outcomeMappingVersion || value.outcomeMappingVersion !== manifest.outcomeMappingVersion) return false;
+    if (value.outcomeMappingHash !== step.outcomeMappingHash || value.outcomeMappingHash !== manifest.outcomeMappingHash) return false;
+  } else {
+    if (!hasExactKeys(value.terminalOutcomeTransitions, ["business_error", "succeeded", "technical_error"])) return false;
+    if (
+      value.terminalOutcomeTransitions.succeeded !== step.transitions.succeeded
+      || value.terminalOutcomeTransitions.business_error !== step.transitions.business_error
+      || value.terminalOutcomeTransitions.technical_error !== step.transitions.technical_error
+      || value.outcomeMappingVersion !== step.outcomeMappingVersion
+      || value.outcomeMappingHash !== step.outcomeMappingHash
+      || !Array.isArray(value.businessResultCodes)
+      || JSON.stringify(value.businessResultCodes) !== JSON.stringify(step.businessResultCodes)
+    ) return false;
+  }
   const stepIds = new Set(manifest.steps.map((candidate) => candidate.id));
-  if (!stepIds.has(step.transitions.requested) || !stepIds.has(step.transitions.failed)) return false;
-  if (value.outcomeMappingVersion !== step.outcomeMappingVersion || value.outcomeMappingVersion !== manifest.outcomeMappingVersion) return false;
-  if (value.outcomeMappingHash !== step.outcomeMappingHash || value.outcomeMappingHash !== manifest.outcomeMappingHash) return false;
+  for (const target of Object.values(value.terminalOutcomeTransitions)) if (typeof target !== "string" || !stepIds.has(target)) return false;
   if (value.state !== "WAITING") return false;
   if (typeof state.runId !== "string" || !isSafeString(state.runId) || typeof state.currentStepId !== "string" || !Number.isSafeInteger(state.activationOrdinal)) return false;
   const activationOrdinal = state.activationOrdinal;
   const commandOrdinal = 0;
-  const logicalEffectId = hashCanonical("logical-effect", { flowRunId: state.runId, stepId: state.currentStepId, activationOrdinal, commandKind: "SEND_MESSAGE", commandOrdinal });
+  const commandKind = step.type === "send_message" ? "SEND_MESSAGE" : "EXECUTE_ACTION";
+  const logicalEffectId = hashCanonical("logical-effect", { flowRunId: state.runId, stepId: state.currentStepId, activationOrdinal, commandKind, commandOrdinal });
   const effectContinuationId = hashCanonical("effect-continuation", { flowRunId: state.runId, stepId: state.currentStepId, activationOrdinal, commandOrdinal });
-  const expectedPayloadHash = hashCanonical("payload", { kind: "SEND_MESSAGE", payload: { contentVersionId: step.content.contentVersionId, text: step.content.text } });
+  const payload = step.type === "send_message"
+    ? { contentVersionId: step.content.contentVersionId, text: step.content.text }
+    : actionPayloadForStep(step, manifest);
+  if (payload === undefined) return false;
+  const expectedPayloadHash = hashCanonical("payload", { kind: commandKind, payload });
   return value.awaitedLogicalEffectId === logicalEffectId && value.effectContinuationId === effectContinuationId && value.expectedPayloadHash === expectedPayloadHash;
 }
 
 function isConsumedRecord(value: unknown): boolean {
   if (!isRecord(value)) return false;
   for (const [key, consumed] of Object.entries(value)) {
-    if (!isHashIdentifier(key) || !isRecord(consumed) || !hasExactKeys(consumed, ["ledgerState", "logicalEffectId", "outcome", "payloadHash"])) return false;
-    if ((consumed.outcome !== "requested" && consumed.outcome !== "failed") || !isConsumableLedgerState(consumed.ledgerState) || !isHashIdentifier(consumed.logicalEffectId) || !isHashIdentifier(consumed.payloadHash)) return false;
+    if (!isHashIdentifier(key) || !isRecord(consumed)) return false;
+    const expectedKeys = consumed.businessResultCode === undefined
+      ? ["ledgerState", "logicalEffectId", "outcome", "payloadHash"]
+      : ["businessResultCode", "ledgerState", "logicalEffectId", "outcome", "payloadHash"];
+    if (!hasExactKeys(consumed, expectedKeys)) return false;
+    if (!isEffectOutcome(consumed.outcome) || !isConsumableLedgerState(consumed.ledgerState) || !isHashIdentifier(consumed.logicalEffectId) || !isHashIdentifier(consumed.payloadHash)) return false;
+    if (consumed.businessResultCode !== undefined && !isSafeIdentifier(consumed.businessResultCode)) return false;
+    if ((consumed.outcome === "business_error") !== (consumed.businessResultCode !== undefined)) return false;
   }
   return true;
 }
@@ -490,7 +596,11 @@ function hasExactKeys(value: Record<string, unknown>, expectedKeys: readonly str
 }
 
 function isValidResolution(value: unknown): value is EffectResolution {
-  if (!isRecord(value) || !hasExactKeys(value, ["effectContinuationId", "ledgerState", "logicalEffectId", "payloadHash"])) return false;
+  if (!isRecord(value)) return false;
+  const expectedKeys = value.businessResultCode === undefined
+    ? ["effectContinuationId", "ledgerState", "logicalEffectId", "payloadHash"]
+    : ["businessResultCode", "effectContinuationId", "ledgerState", "logicalEffectId", "payloadHash"];
+  if (!hasExactKeys(value, expectedKeys)) return false;
   return (
     typeof value.effectContinuationId === "string" &&
     isSafeString(value.effectContinuationId) &&
@@ -498,8 +608,32 @@ function isValidResolution(value: unknown): value is EffectResolution {
     isSafeString(value.logicalEffectId) &&
     typeof value.payloadHash === "string" &&
     isSafeString(value.payloadHash) &&
+    (value.businessResultCode === undefined || isSafeIdentifier(value.businessResultCode)) &&
+    (value.businessResultCode === undefined || value.ledgerState === "CONFIRMED") &&
     (isConsumableLedgerState(value.ledgerState) || value.ledgerState === "UNKNOWN" || value.ledgerState === "RECONCILING" || value.ledgerState === "MANUAL_REVIEW" || value.ledgerState === "NOT_APPLIED" || value.ledgerState === "CANCELLED_BEFORE_DISPATCH")
   );
+}
+
+function actionPayloadForStep(step: Extract<CompiledStep, { readonly type: "execute_action" }>, manifest: CompiledManifest): ExecuteActionPayload | undefined {
+  const descriptor = manifest.actionDescriptors.find(
+    (candidate) => candidate.actionKey === step.actionRef.actionKey && candidate.actionVersion === step.actionRef.actionVersion,
+  );
+  if (descriptor === undefined) return undefined;
+  return {
+    subjectId: step.subjectId,
+    conversationId: step.conversationId,
+    input: deepClone(step.input),
+    purpose: descriptor.purpose,
+    dataClasses: deepClone(descriptor.dataClasses),
+  };
+}
+
+function isEffectOutcome(value: unknown): boolean {
+  return value === "requested" || value === "failed" || value === "succeeded" || value === "business_error" || value === "technical_error";
+}
+
+function isSafeIdentifier(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && isSafeString(value) && !isReservedName(value);
 }
 
 function isValidBudget(transitionBudget: number): boolean {

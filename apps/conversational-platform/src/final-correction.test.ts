@@ -86,6 +86,7 @@ function rehashManifest(draft: MutableManifest): CompiledManifest {
     expressionExecutorHash: draft.expressionExecutorHash,
     outcomeMappingVersion: draft.outcomeMappingVersion,
     outcomeMappingHash: draft.outcomeMappingHash,
+    actionDescriptors: draft.actionDescriptors,
     stepHandlers: draft.stepHandlers,
     steps: draft.steps,
   };

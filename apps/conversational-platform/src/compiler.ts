@@ -8,8 +8,15 @@ import {
   isReservedName,
   isSafeString,
 } from "./canonical";
-import { SEND_MESSAGE_OUTCOME_MAPPING_HASH, SEND_MESSAGE_OUTCOME_MAPPING_VERSION } from "./outcome-mapping";
+import { validateActionDescriptorIntegrity, validateTypedRecordAgainstSchema, type ActionRegistry } from "./action-registry";
+import {
+  EXECUTE_ACTION_OUTCOME_MAPPING_HASH,
+  EXECUTE_ACTION_OUTCOME_MAPPING_VERSION,
+  SEND_MESSAGE_OUTCOME_MAPPING_HASH,
+  SEND_MESSAGE_OUTCOME_MAPPING_VERSION,
+} from "./outcome-mapping";
 import type {
+  ActionDescriptor,
   CompileError,
   CompileResult,
   ConditionBranchDefinition,
@@ -35,6 +42,7 @@ const SHA256_HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
 
 const ROOT_FIELDS = new Set(["schemaVersion", "flowId", "flowVersion", "entryStepId", "steps"]);
 const MANIFEST_FIELDS = [
+  "actionDescriptors",
   "canonicalCodecHash",
   "canonicalCodecVersion",
   "definitionHash",
@@ -58,8 +66,13 @@ const STEP_FIELDS: Readonly<Record<StepHandlerManifest["stepType"], ReadonlySet<
   set_variable: unionSet(COMMON_STEP_FIELDS, ["variable", "value", "next"]),
   condition: unionSet(COMMON_STEP_FIELDS, ["branches"]),
   send_message: unionSet(COMMON_STEP_FIELDS, ["content", "transitions"]),
+  execute_action: unionSet(COMMON_STEP_FIELDS, ["actionKey", "actionVersion", "subjectId", "conversationId", "input", "transitions"]),
   end: COMMON_STEP_FIELDS,
 };
+
+export interface CompileDefinitionOptions {
+  readonly actionRegistry?: ActionRegistry;
+}
 
 interface ParsedExpression {
   readonly expression: ExpressionAst;
@@ -76,9 +89,9 @@ interface ManifestValidationResult {
   readonly errors: readonly string[];
 }
 
-export function compileDefinition(definition: unknown): CompileResult {
+export function compileDefinition(definition: unknown, options: CompileDefinitionOptions = {}): CompileResult {
   try {
-    return compileDefinitionUnsafe(definition);
+    return compileDefinitionUnsafe(definition, options);
   } catch (caught) {
     return {
       ok: false,
@@ -105,9 +118,10 @@ export function validateManifestIntegrity(manifest: unknown): ManifestValidation
     if (!isSafeIdentifier(manifest.flowId) || !isSafeIdentifier(manifest.flowVersion) || !isSafeIdentifier(manifest.entryStepId)) errors.push("identity");
     if (!isSha256Id(manifest.manifestHash)) errors.push("manifestHash");
     if (!isSha256Id(manifest.definitionHash)) errors.push("definitionHash");
-    if (!Array.isArray(manifest.stepHandlers) || !Array.isArray(manifest.steps)) errors.push("arrays");
+    if (!Array.isArray(manifest.actionDescriptors) || !Array.isArray(manifest.stepHandlers) || !Array.isArray(manifest.steps)) errors.push("arrays");
 
-    const expectedHandlers = stepHandlers();
+    const hasExecuteAction = Array.isArray(manifest.steps) && manifest.steps.some((step) => isRecord(step) && step.type === "execute_action");
+    const expectedHandlers = stepHandlers(hasExecuteAction);
     if (Array.isArray(manifest.stepHandlers)) {
       for (const handlerValue of manifest.stepHandlers) {
         if (!isRecord(handlerValue) || !hasExactKeys(handlerValue, STEP_HANDLER_FIELDS)) errors.push("stepHandler fields");
@@ -117,8 +131,29 @@ export function validateManifestIntegrity(manifest: unknown): ManifestValidation
       }
     }
 
+    const actionDescriptors = new Map<string, ActionDescriptor>();
+    if (Array.isArray(manifest.actionDescriptors)) {
+      const manifestActionDescriptors = manifest.actionDescriptors;
+      for (const descriptor of manifestActionDescriptors) {
+        if (!validateActionDescriptorIntegrity(descriptor)) {
+          errors.push("actionDescriptor");
+          continue;
+        }
+        const key = actionDescriptorKey(descriptor.actionKey, descriptor.actionVersion);
+        if (actionDescriptors.has(key)) errors.push("duplicate actionDescriptor");
+        actionDescriptors.set(key, descriptor);
+      }
+      if (!manifestActionDescriptors.every((descriptor, index) => {
+        if (index === 0 || !validateActionDescriptorIntegrity(descriptor)) return index === 0;
+        const previous = manifestActionDescriptors[index - 1];
+        return validateActionDescriptorIntegrity(previous)
+          && compareStrings(`${previous.actionKey}\u0000${previous.actionVersion}`, `${descriptor.actionKey}\u0000${descriptor.actionVersion}`) < 0;
+      })) errors.push("actionDescriptor order");
+      if (!hasExecuteAction && manifestActionDescriptors.length > 0) errors.push("unused actionDescriptor");
+    }
+
     if (Array.isArray(manifest.steps) && typeof manifest.entryStepId === "string") {
-      validateCompiledSteps(manifest.steps, manifest.entryStepId, errors);
+      validateCompiledSteps(manifest.steps, manifest.entryStepId, errors, actionDescriptors);
     }
 
     if (errors.length === 0) {
@@ -139,7 +174,7 @@ export function computeManifestHash(manifestWithoutHashValue: Omit<CompiledManif
   return hashCanonical("manifest", manifestWithoutHashValue);
 }
 
-function compileDefinitionUnsafe(definition: unknown): CompileResult {
+function compileDefinitionUnsafe(definition: unknown, options: CompileDefinitionOptions): CompileResult {
   const root = parseDefinitionRoot(definition);
   if (!root.ok) {
     return { ok: false, errors: root.errors };
@@ -164,10 +199,11 @@ function compileDefinitionUnsafe(definition: unknown): CompileResult {
 
   const transitions = new Map<string, string[]>();
   const compiledSteps: CompiledStep[] = [];
+  const actionDescriptors = new Map<string, ActionDescriptor>();
 
   for (const [index, step] of normalized.steps.entries()) {
     if (duplicateIds.has(step.id)) continue;
-    const compiled = compileStep(step, index, errors);
+    const compiled = compileStep(step, index, errors, options.actionRegistry, actionDescriptors);
     if (compiled !== undefined) {
       compiledSteps.push(compiled);
       transitions.set(step.id, transitionTargets(compiled));
@@ -210,7 +246,8 @@ function compileDefinitionUnsafe(definition: unknown): CompileResult {
     expressionExecutorHash: EXPRESSION_EXECUTOR_HASH,
     outcomeMappingVersion: SEND_MESSAGE_OUTCOME_MAPPING_VERSION,
     outcomeMappingHash: SEND_MESSAGE_OUTCOME_MAPPING_HASH,
-    stepHandlers: stepHandlers(),
+    actionDescriptors: [...actionDescriptors.values()].sort((left, right) => compareStrings(`${left.actionKey}\u0000${left.actionVersion}`, `${right.actionKey}\u0000${right.actionVersion}`)),
+    stepHandlers: stepHandlers(compiledSteps.some((step) => step.type === "execute_action")),
     steps: compiledSteps,
   };
   const manifest: CompiledManifest = { ...withoutHash, manifestHash: computeManifestHash(withoutHash) };
@@ -304,6 +341,30 @@ function parseStepRoot(rawStep: unknown, index: number): { readonly step?: FlowS
         step: { id, type, content: rawStep.content, transitions: rawStep.transitions },
         errors: [],
       };
+    case "execute_action":
+      if (
+        !isSafeIdentifier(rawStep.actionKey)
+        || !isExactVersion(rawStep.actionVersion)
+        || !isSafeIdentifier(rawStep.subjectId)
+        || !isSafeIdentifier(rawStep.conversationId)
+        || !isTypedRecord(rawStep.input)
+        || !isExecuteActionTransitions(rawStep.transitions)
+      ) {
+        return { errors: [error("INVALID_STEP_SHAPE", `$.steps[${index}]`, { stepId: id, stepType: type })] };
+      }
+      return {
+        step: {
+          id,
+          type,
+          actionKey: rawStep.actionKey,
+          actionVersion: rawStep.actionVersion,
+          subjectId: rawStep.subjectId,
+          conversationId: rawStep.conversationId,
+          input: cloneAndFreeze(deepClone(rawStep.input)),
+          transitions: rawStep.transitions,
+        },
+        errors: [],
+      };
     case "end":
       return { step: { id, type }, errors: [] };
   }
@@ -330,8 +391,14 @@ function parseBranches(rawBranches: readonly unknown[], stepIndex: number, stepI
   return branches;
 }
 
-function compileStep(step: FlowStepDefinition, index: number, errors: CompileError[]): CompiledStep | undefined {
-  const handlerManifest = stepHandlers().find((candidate) => candidate.stepType === step.type);
+function compileStep(
+  step: FlowStepDefinition,
+  index: number,
+  errors: CompileError[],
+  actionRegistry: ActionRegistry | undefined,
+  actionDescriptors: Map<string, ActionDescriptor>,
+): CompiledStep | undefined {
+  const handlerManifest = stepHandlers(true).find((candidate) => candidate.stepType === step.type);
   if (handlerManifest === undefined) {
     errors.push(error("UNSUPPORTED_STEP_TYPE", `$.steps[${index}].type`, { stepId: step.id, stepType: step.type }));
     return undefined;
@@ -385,6 +452,63 @@ function compileStep(step: FlowStepDefinition, index: number, errors: CompileErr
         completionMode: "ON_EFFECT_TERMINAL",
         outcomeMappingVersion: SEND_MESSAGE_OUTCOME_MAPPING_VERSION,
         outcomeMappingHash: SEND_MESSAGE_OUTCOME_MAPPING_HASH,
+        blockingCommandCount: 1,
+      };
+    }
+    case "execute_action": {
+      if (
+        typeof step.actionKey !== "string"
+        || typeof step.actionVersion !== "string"
+        || typeof step.subjectId !== "string"
+        || typeof step.conversationId !== "string"
+        || !isTypedRecord(step.input)
+        || !isExecuteActionTransitions(step.transitions)
+      ) {
+        errors.push(error("INVALID_STEP_SHAPE", `$.steps[${index}]`, { stepId: step.id, stepType: step.type }));
+        return undefined;
+      }
+      if (actionRegistry === undefined) {
+        errors.push(error("ACTION_REGISTRY_REQUIRED", `$.steps[${index}].actionKey`, { stepId: step.id, actionKey: step.actionKey, actionVersion: step.actionVersion }));
+        return undefined;
+      }
+      const descriptor = actionRegistry.resolve(step.actionKey, step.actionVersion);
+      if (descriptor === undefined || !validateActionDescriptorIntegrity(descriptor)) {
+        errors.push(error("ACTION_DEPENDENCY_NOT_FOUND", `$.steps[${index}].actionVersion`, { stepId: step.id, actionKey: step.actionKey, actionVersion: step.actionVersion }));
+        return undefined;
+      }
+      if (!validateTypedRecordAgainstSchema(step.input, descriptor.inputSchema)) {
+        errors.push(error("ACTION_INPUT_SCHEMA_MISMATCH", `$.steps[${index}].input`, { stepId: step.id, actionKey: step.actionKey, actionVersion: step.actionVersion }));
+        return undefined;
+      }
+      const key = actionDescriptorKey(descriptor.actionKey, descriptor.actionVersion);
+      const existing = actionDescriptors.get(key);
+      if (existing !== undefined && existing.actionHash !== descriptor.actionHash) {
+        errors.push(error("ACTION_DEPENDENCY_NOT_FOUND", `$.steps[${index}].actionVersion`, { stepId: step.id, reason: "immutable descriptor conflict" }));
+        return undefined;
+      }
+      actionDescriptors.set(key, descriptor);
+      return {
+        ...base,
+        type: "execute_action",
+        actionRef: {
+          actionKey: descriptor.actionKey,
+          actionVersion: descriptor.actionVersion,
+          actionHash: descriptor.actionHash,
+          adapter: descriptor.adapter,
+          policy: descriptor.policy,
+        },
+        subjectId: step.subjectId,
+        conversationId: step.conversationId,
+        input: cloneAndFreeze(deepClone(step.input)),
+        transitions: {
+          succeeded: step.transitions.succeeded,
+          business_error: step.transitions.business_error,
+          technical_error: step.transitions.technical_error,
+        },
+        completionMode: "ON_EFFECT_TERMINAL",
+        outcomeMappingVersion: EXECUTE_ACTION_OUTCOME_MAPPING_VERSION,
+        outcomeMappingHash: EXECUTE_ACTION_OUTCOME_MAPPING_HASH,
+        businessResultCodes: descriptor.businessResultCodes,
         blockingCommandCount: 1,
       };
     }
@@ -508,8 +632,14 @@ function readsForExpression(expression: ExpressionAst): Readonly<Record<string, 
   }
 }
 
-function validateCompiledSteps(rawSteps: readonly unknown[], entryStepId: string, errors: string[]): void {
+function validateCompiledSteps(
+  rawSteps: readonly unknown[],
+  entryStepId: string,
+  errors: string[],
+  actionDescriptors: ReadonlyMap<string, ActionDescriptor>,
+): void {
   const ids = new Set<string>();
+  const usedActionDescriptors = new Set<string>();
   const compiledSteps = rawSteps.filter(isRecord) as unknown as CompiledStep[];
   const transitions = new Map<string, string[]>();
   for (const rawStep of rawSteps) {
@@ -520,7 +650,7 @@ function validateCompiledSteps(rawSteps: readonly unknown[], entryStepId: string
     if (!isSafeIdentifier(rawStep.id)) errors.push("step id");
     if (ids.has(rawStep.id)) errors.push("duplicate step id");
     ids.add(rawStep.id);
-    const handlerManifest = stepHandlers().find((candidate) => candidate.stepType === rawStep.type);
+    const handlerManifest = stepHandlers(true).find((candidate) => candidate.stepType === rawStep.type);
     if (handlerManifest === undefined || rawStep.stepHandlerKey !== handlerManifest.stepHandlerKey || rawStep.stepHandlerVersion !== handlerManifest.stepHandlerVersion || rawStep.implementationCompatibilityId !== handlerManifest.implementationCompatibilityId || rawStep.handlerHash !== handlerManifest.handlerHash) errors.push(`handler ${rawStep.id}`);
     const step = rawStep as unknown as CompiledStep;
     switch (step.type) {
@@ -560,6 +690,35 @@ function validateCompiledSteps(rawSteps: readonly unknown[], entryStepId: string
           errors.push(`send_message ${step.id}`);
         transitions.set(step.id, [step.transitions.requested, step.transitions.failed]);
         break;
+      case "execute_action": {
+        const descriptor = isRecord(step.actionRef)
+          && typeof step.actionRef.actionKey === "string"
+          && typeof step.actionRef.actionVersion === "string"
+          ? actionDescriptors.get(actionDescriptorKey(step.actionRef.actionKey, step.actionRef.actionVersion))
+          : undefined;
+        if (
+          !hasExactKeys(rawStep, [...COMMON_COMPILED_STEP_FIELDS, "actionRef", "businessResultCodes", "completionMode", "conversationId", "input", "outcomeMappingHash", "outcomeMappingVersion", "subjectId", "transitions"])
+          || step.blockingCommandCount !== 1
+          || step.completionMode !== "ON_EFFECT_TERMINAL"
+          || step.outcomeMappingVersion !== EXECUTE_ACTION_OUTCOME_MAPPING_VERSION
+          || step.outcomeMappingHash !== EXECUTE_ACTION_OUTCOME_MAPPING_HASH
+          || descriptor === undefined
+          || !isResolvedActionReference(step.actionRef, descriptor)
+          || !isSafeIdentifier(step.subjectId)
+          || !isSafeIdentifier(step.conversationId)
+          || !validateTypedRecordAgainstSchema(step.input, descriptor.inputSchema)
+          || !isExecuteActionTransitions(step.transitions)
+          || JSON.stringify(step.businessResultCodes) !== JSON.stringify(descriptor.businessResultCodes)
+        ) {
+          errors.push(`execute_action ${step.id}`);
+        } else {
+          usedActionDescriptors.add(actionDescriptorKey(descriptor.actionKey, descriptor.actionVersion));
+        }
+        transitions.set(step.id, isExecuteActionTransitions(step.transitions)
+          ? [step.transitions.succeeded, step.transitions.business_error, step.transitions.technical_error]
+          : []);
+        break;
+      }
       case "end":
         if (!hasExactKeys(rawStep, COMMON_COMPILED_STEP_FIELDS) || step.blockingCommandCount !== 0) errors.push(`end ${step.id}`);
         transitions.set(step.id, []);
@@ -573,6 +732,7 @@ function validateCompiledSteps(rawSteps: readonly unknown[], entryStepId: string
   if (hasAnyCycle(transitions)) errors.push("cycle");
   if (ids.has(entryStepId) && !hasReachableEnd(entryStepId, compiledSteps, transitions)) errors.push("reachable end");
   if (ids.has(entryStepId) && validateDataflow(entryStepId, compiledSteps, transitions).length > 0) errors.push("dataflow");
+  if (usedActionDescriptors.size !== actionDescriptors.size) errors.push("unused actionDescriptor");
 }
 
 function manifestWithoutHash(manifest: CompiledManifest): Omit<CompiledManifest, "manifestHash"> {
@@ -589,6 +749,7 @@ function manifestWithoutHash(manifest: CompiledManifest): Omit<CompiledManifest,
     expressionExecutorHash: manifest.expressionExecutorHash,
     outcomeMappingVersion: manifest.outcomeMappingVersion,
     outcomeMappingHash: manifest.outcomeMappingHash,
+    actionDescriptors: deepClone(manifest.actionDescriptors),
     stepHandlers: deepClone(manifest.stepHandlers),
     steps: deepClone(manifest.steps),
   };
@@ -602,6 +763,8 @@ function transitionTargets(step: CompiledStep): string[] {
       return step.branches.map((branch) => branch.next);
     case "send_message":
       return [step.transitions.requested, step.transitions.failed];
+    case "execute_action":
+      return [step.transitions.succeeded, step.transitions.business_error, step.transitions.technical_error];
     case "end":
       return [];
   }
@@ -688,6 +851,32 @@ function isTransitions(value: unknown): value is Readonly<Record<"requested" | "
   return isRecord(value) && Object.keys(value).sort().join(",") === "failed,requested" && isSafeIdentifier(value.requested) && isSafeIdentifier(value.failed);
 }
 
+function isExecuteActionTransitions(value: unknown): value is Readonly<Record<"succeeded" | "business_error" | "technical_error", string>> {
+  return isRecord(value)
+    && Object.keys(value).sort().join(",") === "business_error,succeeded,technical_error"
+    && isSafeIdentifier(value.succeeded)
+    && isSafeIdentifier(value.business_error)
+    && isSafeIdentifier(value.technical_error);
+}
+
+function isTypedRecord(value: unknown): value is Readonly<Record<string, TypedValue>> {
+  if (!isRecord(value)) return false;
+  for (const [key, item] of Object.entries(value)) {
+    if (!isSafeUserVariable(key) || !isTypedValue(item)) return false;
+  }
+  return true;
+}
+
+function isResolvedActionReference(value: unknown, descriptor: ActionDescriptor): boolean {
+  return isRecord(value)
+    && hasExactKeys(value, ["actionHash", "actionKey", "actionVersion", "adapter", "policy"])
+    && value.actionKey === descriptor.actionKey
+    && value.actionVersion === descriptor.actionVersion
+    && value.actionHash === descriptor.actionHash
+    && JSON.stringify(value.adapter) === JSON.stringify(descriptor.adapter)
+    && JSON.stringify(value.policy) === JSON.stringify(descriptor.policy);
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
@@ -709,11 +898,15 @@ function isCompareOperator(value: unknown): value is "eq" | "neq" | "gt" | "gte"
 }
 
 function isSupportedStepType(value: unknown): value is StepHandlerManifest["stepType"] {
-  return value === "set_variable" || value === "condition" || value === "send_message" || value === "end";
+  return value === "set_variable" || value === "condition" || value === "send_message" || value === "execute_action" || value === "end";
 }
 
 function isSafeIdentifier(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && isSafeString(value) && !isReservedName(value);
+}
+
+function isExactVersion(value: unknown): value is string {
+  return isSafeIdentifier(value) && value !== "latest";
 }
 
 function isSha256Id(value: unknown): value is string {
@@ -724,13 +917,15 @@ function isSafeUserVariable(value: unknown): value is string {
   return isSafeIdentifier(value);
 }
 
-function stepHandlers(): readonly StepHandlerManifest[] {
-  return cloneAndFreeze([
+function stepHandlers(includeExecuteAction = false): readonly StepHandlerManifest[] {
+  const handlers = [
     handler("set_variable", "ON_PERSIST", 0),
     handler("condition", "ON_PERSIST", 0),
     handler("send_message", "ON_EFFECT_TERMINAL", 1),
-    handler("end", "ON_PERSIST", 0),
-  ]);
+  ];
+  if (includeExecuteAction) handlers.push(handler("execute_action", "ON_EFFECT_TERMINAL", 1));
+  handlers.push(handler("end", "ON_PERSIST", 0));
+  return cloneAndFreeze(handlers);
 }
 
 function handler(stepType: StepHandlerManifest["stepType"], completionMode: StepHandlerManifest["completionMode"], blockingCommandCount: StepHandlerManifest["blockingCommandCount"]): StepHandlerManifest {
@@ -748,6 +943,14 @@ function handler(stepType: StepHandlerManifest["stepType"], completionMode: Step
 
 function unionSet(base: ReadonlySet<string>, extra: readonly string[]): ReadonlySet<string> {
   return new Set([...base, ...extra]);
+}
+
+function actionDescriptorKey(actionKey: string, actionVersion: string): string {
+  return `${actionKey}\u0000${actionVersion}`;
+}
+
+function compareStrings(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function error(code: CompileError["code"], path: string, details: Readonly<Record<string, string>>, stepId?: string): CompileError {

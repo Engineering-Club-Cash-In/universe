@@ -35,7 +35,12 @@ export interface FlowStepDefinition {
   readonly next?: string;
   readonly branches?: readonly ConditionBranchDefinition[];
   readonly content?: MessageContentDefinition;
-  readonly transitions?: Readonly<Partial<Record<"requested" | "failed", string>>>;
+  readonly actionKey?: string;
+  readonly actionVersion?: string;
+  readonly subjectId?: string;
+  readonly conversationId?: string;
+  readonly input?: Readonly<Record<string, TypedValue>>;
+  readonly transitions?: Readonly<Partial<Record<"requested" | "failed" | "succeeded" | "business_error" | "technical_error", string>>>;
 }
 
 export interface FlowDefinition {
@@ -62,6 +67,9 @@ export type CompileErrorCode =
   | "TRANSITION_TARGET_NOT_FOUND"
   | "CYCLE_NOT_SUPPORTED"
   | "NO_REACHABLE_END"
+  | "ACTION_REGISTRY_REQUIRED"
+  | "ACTION_DEPENDENCY_NOT_FOUND"
+  | "ACTION_INPUT_SCHEMA_MISMATCH"
   | "INTERNAL_MANIFEST_INVALID";
 
 export interface CompileError {
@@ -72,7 +80,7 @@ export interface CompileError {
 }
 
 export interface StepHandlerManifest {
-  readonly stepType: "set_variable" | "condition" | "send_message" | "end";
+  readonly stepType: "set_variable" | "condition" | "send_message" | "execute_action" | "end";
   readonly stepHandlerKey: string;
   readonly stepHandlerVersion: string;
   readonly implementationCompatibilityId: string;
@@ -81,11 +89,11 @@ export interface StepHandlerManifest {
   readonly blockingCommandCount: 0 | 1;
 }
 
-export type CompiledStep = CompiledSetVariableStep | CompiledConditionStep | CompiledSendMessageStep | CompiledEndStep;
+export type CompiledStep = CompiledSetVariableStep | CompiledConditionStep | CompiledSendMessageStep | CompiledExecuteActionStep | CompiledEndStep;
 
 export interface CompiledStepBase {
   readonly id: string;
-  readonly type: "set_variable" | "condition" | "send_message" | "end";
+  readonly type: "set_variable" | "condition" | "send_message" | "execute_action" | "end";
   readonly stepHandlerKey: string;
   readonly stepHandlerVersion: string;
   readonly implementationCompatibilityId: string;
@@ -122,6 +130,83 @@ export interface CompiledSendMessageStep extends CompiledStepBase {
   readonly outcomeMappingHash: string;
 }
 
+export type ActionSensitivity = "NON_SENSITIVE" | "SENSITIVE" | "PRIVILEGED";
+export type ReconcileMode = "READ_ONLY" | "WEBHOOK_ONLY" | "MUTATING";
+export type EffectGuarantee = "RECEIVER_DEDUP" | "RECONCILABLE" | "AT_LEAST_ONCE" | "AT_MOST_ONCE" | "MANUAL_ON_AMBIGUITY";
+
+export interface ActionSchemaField {
+  readonly name: string;
+  readonly type: TypedValue["type"];
+  readonly required: boolean;
+}
+
+export interface ActionSchema {
+  readonly schemaVersion: "typed-record/v1";
+  readonly fields: readonly ActionSchemaField[];
+  readonly additionalProperties: false;
+}
+
+export interface ActionRetryPolicy {
+  readonly retryPolicyKey: string;
+  readonly retryPolicyVersion: string;
+  readonly retryPolicyHash: string;
+  readonly maxAttempts: number;
+}
+
+export interface ActionAdapterReference {
+  readonly adapterKey: string;
+  readonly adapterVersion: string;
+  readonly implementationCompatibilityId: "fake-action-adapter/v1";
+  readonly adapterHash: string;
+}
+
+export interface ActionPolicyReference {
+  readonly policyKey: string;
+  readonly policyVersion: string;
+  readonly policyHash: string;
+}
+
+export interface ActionDescriptor {
+  readonly descriptorVersion: "action-descriptor/v1";
+  readonly actionKey: string;
+  readonly actionVersion: string;
+  readonly actionHash: string;
+  readonly inputSchema: ActionSchema;
+  readonly inputSchemaHash: string;
+  readonly outputSchema: ActionSchema;
+  readonly outputSchemaHash: string;
+  readonly sensitivity: ActionSensitivity;
+  readonly purpose: string;
+  readonly dataClasses: readonly string[];
+  readonly retryPolicy: ActionRetryPolicy;
+  readonly reconcileMode: ReconcileMode;
+  readonly effectGuarantee: EffectGuarantee;
+  readonly adapter: ActionAdapterReference;
+  readonly policy: ActionPolicyReference;
+  readonly businessResultCodes: readonly string[];
+}
+
+export interface ResolvedActionReference {
+  readonly actionKey: string;
+  readonly actionVersion: string;
+  readonly actionHash: string;
+  readonly adapter: ActionAdapterReference;
+  readonly policy: ActionPolicyReference;
+}
+
+export interface CompiledExecuteActionStep extends CompiledStepBase {
+  readonly type: "execute_action";
+  readonly actionRef: ResolvedActionReference;
+  readonly subjectId: string;
+  readonly conversationId: string;
+  readonly input: Readonly<Record<string, TypedValue>>;
+  readonly transitions: Readonly<Record<"succeeded" | "business_error" | "technical_error", string>>;
+  readonly completionMode: "ON_EFFECT_TERMINAL";
+  readonly outcomeMappingVersion: "execute-action-terminal-v1";
+  readonly outcomeMappingHash: string;
+  readonly businessResultCodes: readonly string[];
+}
+
 export interface CompiledEndStep extends CompiledStepBase {
   readonly type: "end";
 }
@@ -140,6 +225,7 @@ export interface CompiledManifest {
   readonly expressionExecutorHash: string;
   readonly outcomeMappingVersion: "send-message-terminal-v1";
   readonly outcomeMappingHash: string;
+  readonly actionDescriptors: readonly ActionDescriptor[];
   readonly stepHandlers: readonly StepHandlerManifest[];
   readonly steps: readonly CompiledStep[];
 }
@@ -150,17 +236,21 @@ export interface EffectContinuationSnapshot {
   readonly effectContinuationId: string;
   readonly awaitedLogicalEffectId: string;
   readonly expectedPayloadHash: string;
-  readonly outcomeMappingVersion: "send-message-terminal-v1";
+  readonly outcomeMappingVersion: "send-message-terminal-v1" | "execute-action-terminal-v1";
   readonly outcomeMappingHash: string;
   readonly state: "WAITING";
-  readonly terminalOutcomeTransitions: Readonly<Record<"requested" | "failed", string>>;
+  readonly terminalOutcomeTransitions:
+    | Readonly<Record<"requested" | "failed", string>>
+    | Readonly<Record<"succeeded" | "business_error" | "technical_error", string>>;
+  readonly businessResultCodes?: readonly string[];
 }
 
 export interface ConsumedContinuationSnapshot {
-  readonly outcome: "requested" | "failed";
+  readonly outcome: "requested" | "failed" | "succeeded" | "business_error" | "technical_error";
   readonly ledgerState: ConsumableEffectLedgerState;
   readonly logicalEffectId: string;
   readonly payloadHash: string;
+  readonly businessResultCode?: string;
 }
 
 export interface RunStateSnapshot {
@@ -219,7 +309,7 @@ export interface SendMessagePayload {
   readonly text: string;
 }
 
-export interface EngineCommand {
+export interface SendMessageCommand {
   readonly kind: "SEND_MESSAGE";
   readonly blocking: true;
   readonly completionMode: "ON_EFFECT_TERMINAL";
@@ -234,6 +324,36 @@ export interface EngineCommand {
   readonly outcomeMappingHash: string;
 }
 
+export interface ExecuteActionPayload {
+  readonly subjectId: string;
+  readonly conversationId: string;
+  readonly input: Readonly<Record<string, TypedValue>>;
+  readonly purpose: string;
+  readonly dataClasses: readonly string[];
+}
+
+export interface ExecuteActionCommand {
+  readonly kind: "EXECUTE_ACTION";
+  readonly blocking: true;
+  readonly completionMode: "ON_EFFECT_TERMINAL";
+  readonly logicalEffectId: string;
+  readonly effectContinuationId: string;
+  readonly commandOrdinal: 0;
+  readonly activationOrdinal: number;
+  readonly stepId: string;
+  readonly actionRef: ResolvedActionReference;
+  readonly retryPolicy: ActionRetryPolicy;
+  readonly reconcileMode: ReconcileMode;
+  readonly effectGuarantee: EffectGuarantee;
+  readonly payload: ExecuteActionPayload;
+  readonly payloadHash: string;
+  readonly outcomeMappingVersion: "execute-action-terminal-v1";
+  readonly outcomeMappingHash: string;
+  readonly businessResultCodes: readonly string[];
+}
+
+export type EngineCommand = SendMessageCommand | ExecuteActionCommand;
+
 export type ConsumableEffectLedgerState = "CONFIRMED" | "DENIED" | "FAILED_PERMANENT";
 export type NonConsumableEffectLedgerState = "UNKNOWN" | "RECONCILING" | "MANUAL_REVIEW" | "NOT_APPLIED" | "CANCELLED_BEFORE_DISPATCH";
 
@@ -242,6 +362,7 @@ export interface EffectResolution {
   readonly logicalEffectId: string;
   readonly payloadHash: string;
   readonly ledgerState: ConsumableEffectLedgerState | NonConsumableEffectLedgerState;
+  readonly businessResultCode?: string;
 }
 
 export interface EngineTransition {

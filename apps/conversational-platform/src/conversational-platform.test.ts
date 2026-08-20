@@ -313,4 +313,27 @@ describe("conversational-platform phase 1 pure engine", () => {
     expect(failed.nextRunState.status).toBe("COMPLETED");
     expect(failed.nextRunState.consumedContinuations[resolution.effectContinuationId]?.outcome).toBe("failed");
   });
+
+  test("send_message rejects action-only business result codes", () => {
+    const manifest = requireManifest();
+    const waiting = startRun({ manifest, runId: "run-message-business-code", transitionBudget: 10 });
+    const command = waiting.commands[0];
+    if (command === undefined) throw new Error("Expected command");
+
+    const result = resumeRun({
+      manifest,
+      runState: waiting.nextRunState,
+      resolution: {
+        effectContinuationId: command.effectContinuationId,
+        logicalEffectId: command.logicalEffectId,
+        payloadHash: command.payloadHash,
+        ledgerState: "CONFIRMED",
+        businessResultCode: "NOT_APPLICABLE",
+      },
+      transitionBudget: 10,
+    });
+
+    expect(result.nextRunState).toEqual(waiting.nextRunState);
+    expect(result.errors.map((error) => error.code)).toContain("NON_CONSUMABLE_EFFECT_STATE");
+  });
 });

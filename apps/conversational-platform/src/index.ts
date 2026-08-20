@@ -1,28 +1,54 @@
 export { canonicalizeForHash, hashCanonical, stableHash } from "./canonical";
-export { compileDefinition, validateManifestIntegrity } from "./compiler";
+export { createActionDescriptor, FAKE_ACTION_ADAPTER_COMPATIBILITY_ID, SimulationActionRegistry, validateActionDescriptorIntegrity, type ActionRegistry, type CreateActionDescriptorInput } from "./action-registry";
+export { FakeActionAdapter, NetworkDenySimulator, type ExecuteActionAttempt, type FakeActionAdapterInput, type FakeActionObservation, type SimulationDispatchResult } from "./action-simulator";
+export { compileDefinition, validateManifestIntegrity, type CompileDefinitionOptions } from "./compiler";
 export { resumeRun, startRun, type ResumeRunInput, type StartRunInput } from "./engine";
-export { RecordingEffectSink } from "./effect-sink";
+export { RecordingEffectSink, type RecordedEffectAttempt, type RecordedEffectEntry, type RecordedEffectState } from "./effect-sink";
+export {
+  FakeTrustedClaimRepository,
+  VersionedPolicyEngine,
+  createPolicyBundle,
+  type AssuranceLevel,
+  type AuthorizationDecision,
+  type AuthorizationDecisionInput,
+  type CreatePolicyBundleInput,
+  type PolicyBundle,
+  type TrustedClaim,
+} from "./policy-engine";
 export type {
+  ActionAdapterReference,
+  ActionDescriptor,
+  ActionPolicyReference,
+  ActionRetryPolicy,
+  ActionSchema,
+  ActionSchemaField,
+  ActionSensitivity,
   AuditFact,
   CompileError,
   CompileErrorCode,
   CompileResult,
   CompiledConditionStep,
   CompiledManifest,
+  CompiledExecuteActionStep,
   CompiledSendMessageStep,
   CompiledStep,
   ConsumableEffectLedgerState,
   EffectContinuationSnapshot,
   EffectResolution,
+  EffectGuarantee,
   EngineCommand,
   EngineError,
   EngineErrorCode,
   EngineTransition,
+  ExecuteActionCommand,
+  ExecuteActionPayload,
   ExpressionAst,
   FlowDefinition,
   FlowStepDefinition,
   MessageContentDefinition,
   NonConsumableEffectLedgerState,
+  ReconcileMode,
+  ResolvedActionReference,
   RunStateSnapshot,
   RunStatus,
   TypedValue,

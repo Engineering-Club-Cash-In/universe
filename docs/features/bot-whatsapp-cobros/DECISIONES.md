@@ -894,15 +894,22 @@ servidor que descarga cualquier URL que le pasen es un SSRF: sirve para pedirle 
 propia red lo que el atacante no alcanza desde afuera (metadatos del cloud, servicios
 internos, bases de datos sin puerto público).
 
-**Decisión.** La descarga pasa por cinco filtros, y falla cerrada:
+**Decisión.** La descarga pasa por seis filtros, y falla cerrada:
 
 1. **Solo `https`.**
 2. **Dominio en allowlist** (`BOT_COBROS_DOMINIOS_IMAGEN`, coma-separado). Fuera de la lista →
    `400 URL_NO_PERMITIDA`.
-3. **No se siguen redirecciones hacia IP privadas** (`10.*`, `172.16-31.*`, `192.168.*`,
+3. **El dominio permitido tiene que resolver a una dirección pública.** La allowlist mira el
+   texto del host; esto mira a dónde apunta. Un subdominio nuestro mal configurado, o el DNS de
+   SimpleTech comprometido, dejaría un nombre autorizado apuntando a `10.0.0.5` y la lista
+   estaría conforme. Si cualquiera de las direcciones que devuelve el DNS es privada, no se
+   sale. *(No cubre un rebinding con el tiempo exacto: entre resolver y conectar hay una
+   segunda resolución. Cerrar eso pide conectarse a la IP validada llevando el nombre aparte
+   para el SNI, que `fetch` no permite sin un dispatcher propio.)*
+4. **No se siguen redirecciones hacia IP privadas** (`10.*`, `172.16-31.*`, `192.168.*`,
    `127.*`, `169.254.*`, IPv6 local).
-4. **Timeout de 15 s** y **tope de 8 MB**, cortando el stream al pasarse.
-5. **El content-type se verifica contra el contenido**, no contra la cabecera: JPG, PNG, WEBP
+5. **Timeout de 15 s** y **tope de 8 MB**, cortando el stream al pasarse.
+6. **El content-type se verifica contra el contenido**, no contra la cabecera: JPG, PNG, WEBP
    o PDF por sus magic bytes, igual que el análisis bancario valida el `%PDF`.
 
 **Alternativa descartada:** que SimpleTech suba el archivo en `multipart/form-data`. Es más

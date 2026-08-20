@@ -1,0 +1,89 @@
+data_dir: /var/lib/vector
+
+sources:
+  container_logs:
+    type: docker_logs
+    docker_host: unix:///var/run/docker.sock
+    exclude_containers:
+      - vector
+
+transforms:
+  reject_known_secrets:
+    type: filter
+    inputs:
+      - container_logs
+    condition: |-
+      message = string(.message) ?? ""
+      !match(message, r'(?i)decoded jwt|authorization\s*:\s*bearer|begin (rsa |ec )?private key')
+
+  normalize_and_redact:
+    type: remap
+    inputs:
+      - reject_known_secrets
+    source: |-
+      original_message = string(.message) ?? ""
+      parsed, parse_error = parse_json(original_message)
+      if parse_error == null && is_object(parsed) {
+        . = merge!(., parsed)
+      }
+
+      if !exists(.timestamp) {
+        .timestamp = now()
+      }
+      .message = string(.message) ?? original_message
+      .host = __LOG_HOST_JSON__
+      .environment = __ENVIRONMENT_JSON__
+      .container_name = string(.container_name) ?? "unknown"
+      .service = string(.service) ?? string(.label."com.docker.compose.service") ?? .container_name
+      .level = downcase(string(.level) ?? "info")
+      .schema_version = string(.schema_version) ?? "1"
+
+      del(.authorization)
+      del(.Authorization)
+      del(.headers.authorization)
+      del(.headers.Authorization)
+      del(.headers.cookie)
+      del(.cookie)
+      del(.cookies)
+      del(.password)
+      del(.token)
+      del(.access_token)
+      del(.refresh_token)
+      del(.api_key)
+      del(.apiKey)
+      del(.dpi)
+      del(.nit)
+      del(.phone)
+      del(.telefono)
+      del(.email)
+      del(.file)
+      del(.files)
+      del(.request.body)
+      del(.response.body)
+
+sinks:
+  victoria_logs:
+    type: elasticsearch
+    inputs:
+      - normalize_and_redact
+    endpoints:
+      - __VICTORIALOGS_ENDPOINT_JSON__
+    api_version: v8
+    compression: gzip
+    auth:
+      strategy: basic
+      user: __INGEST_USERNAME_JSON__
+      password: __INGEST_PASSWORD_JSON__
+    healthcheck:
+      enabled: true
+    query:
+      _msg_field: message
+      _time_field: timestamp
+      _stream_fields: service,environment,host,container_name
+      ignore_fields: label,source_type,stream
+    buffer:
+      type: disk
+      max_size: 536870912
+      when_full: drop_newest
+    request:
+      timeout_secs: 10

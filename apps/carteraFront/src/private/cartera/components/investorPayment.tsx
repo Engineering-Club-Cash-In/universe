@@ -61,9 +61,16 @@ export function CrearBoletaInversionista({
   const { investors = [] } = useCatalogs() as { investors: Investor[] };
 
   // 🔥 CAMBIADO: Usa inversionistaId (que puede ser el predeterminado o el seleccionado)
-  const { data } = useGetBoletasPendientes(inversionistaId || inversionistaPredeterminado?.id);
+  const { data, refetch: refetchBoletasPendientes } = useGetBoletasPendientes(
+    inversionistaId || inversionistaPredeterminado?.id,
+    open,
+  );
   const pendientes = data?.data ?? [];
   const tienePendientes = pendientes.length > 0;
+
+  useEffect(() => {
+    if (open) void refetchBoletasPendientes();
+  }, [open, refetchBoletasPendientes]);
 
   useEffect(() => {
     if (inversionistaPredeterminado?.id) {
@@ -162,6 +169,11 @@ export function CrearBoletaInversionista({
                     {b.boleta.monto_boleta && (
                       <div className="text-xs text-gray-600">
                         Monto: Q{Number(b.boleta.monto_boleta).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                      </div>
+                    )}
+                    {b.boleta.notas && (
+                      <div className="mt-1 text-xs text-red-700 whitespace-pre-line">
+                        {b.boleta.notas}
                       </div>
                     )}
                   </div>

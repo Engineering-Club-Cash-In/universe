@@ -1,12 +1,19 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import Big from "big.js";
-import { lockPoolMock } from "../utils/testMocks";
 
 // Let's create simple test flags/mocks we can dynamically adjust per test case
 let mockCreditosInversionistaEspejo: any[] = [];
 let mockCuotasCreditoWithPagos: any[] = [];
 let mockPagosPendientesEspejo: any[] = [];
 let mockHistoricoLiquidacionesEspejo: any[] = [];
+let mockLockedCreditRows: any[] | null = null;
+let mockCreditLockCalls = 0;
+let mockLockPoolConnectCalls = 0;
+let mockLockReleaseCalls = 0;
+let mockDbTransactionCalls = 0;
+let mockLockQueries: string[] = [];
+let mockInsertCalls = 0;
+let mockInsertError: Error | null = null;
 
 // For compras_credito_inversionista mock
 let mockComprasCreditoInversionista: any[] = [];
@@ -39,8 +46,12 @@ mock.module("../database/index", () => {
         return Promise.resolve(mockComprasCreditoInversionista);
       }
 
-      const promise = Promise.resolve(mockHistoricoLiquidacionesEspejo);
-      Object.assign(promise, { orderBy });
+      const rows = tableName.includes("creditos")
+        ? (mockLockedCreditRows ?? mockCreditosInversionistaEspejo)
+        : mockHistoricoLiquidacionesEspejo;
+      const promise = Promise.resolve(rows);
+      const forUpdate = () => Promise.resolve(rows);
+      Object.assign(promise, { orderBy, for: forUpdate });
       return promise;
     };
 
@@ -71,10 +82,9 @@ mock.module("../database/index", () => {
       select: mock((fields: any) => {
         const isSelectNoFields = !fields || Object.keys(fields).length === 0;
         let isMainQuery = false;
-        if (fields && typeof fields === "object" && "creditoId" in fields) {
+        if (fields && typeof fields === "object" && "inversionistaId" in fields) {
           isMainQuery = true;
         }
-
         // Check if query selects fields from compras_credito_inversionista
         let detectedTableName = "";
         if (fields) {
@@ -103,11 +113,16 @@ mock.module("../database/index", () => {
           }
         };
       }),
-      insert: mock(() => ({
-        values: () => ({
-          returning: () => Promise.resolve([{ id: 801 }])
-        })
-      })),
+      insert: mock(() => {
+        mockInsertCalls++;
+        return {
+          values: () => ({
+            returning: () => mockInsertError
+              ? Promise.reject(mockInsertError)
+              : Promise.resolve([{ id: 801 }])
+          })
+        };
+      }),
       update: mock(() => ({
         set: () => ({
           where: () => Promise.resolve()
@@ -117,7 +132,10 @@ mock.module("../database/index", () => {
       // de los abonos en una transacción, para que no puedan quedar sueltos.
       // El mock corre el callback con el mismo `db`: acá no se prueba el
       // rollback, solo que el flujo siga funcionando.
-      transaction: mock(async (cb: any) => cb(mockDbInstance)),
+      transaction: mock(async (cb: any) => {
+        mockDbTransactionCalls++;
+        return cb(mockDbInstance);
+      }),
       query: {
         creditos_inversionistas_espejo: {
           findMany: mock(() => Promise.resolve(
@@ -154,12 +172,35 @@ mock.module("../database/index", () => {
       }
   };
 
-  // Requerido por la cadena de imports (addInvestorToCredit → creditoEspejoLock),
-  // aunque estos tests no lo usen. Ver testMocks.ts.
+  const mockLockConnection = {
+    query: mock(async (queryText: string) => {
+      mockLockQueries.push(queryText);
+      if (/FOR (?:NO KEY )?UPDATE|FOR SHARE/.test(queryText)) {
+        mockCreditLockCalls++;
+        return {
+          rows: mockLockedCreditRows ?? mockCreditosInversionistaEspejo.map((credito) => ({
+            creditoId: credito.creditoId,
+            numeroCreditoSifco: credito.numeroCreditoSifco,
+            estadoDevolucion: credito.estadoDevolucion,
+          })),
+        };
+      }
+      return { rows: [] };
+    }),
+    release: mock(() => {
+      mockLockReleaseCalls++;
+    }),
+  };
+
   return {
     client: {},
     db: mockDbInstance,
-    lockPool: lockPoolMock,
+    lockPool: {
+      connect: mock(async () => {
+        mockLockPoolConnectCalls++;
+        return mockLockConnection;
+      }),
+    },
   };
 });
 
@@ -200,7 +241,12 @@ mock.module("../utils/comprasAjuste", () => ({
   obtenerSumaComprasCompletadasMesActual: mock(() => Promise.resolve(mockSumaComprasCompletadasMesActual)),
 }));
 
-const { calcularYRegistrarPagosEspejo, armarInversionistasPago, aplicarRepartoCongelado } = await import("./payments");
+const {
+  calcularYRegistrarPagosEspejo,
+  armarInversionistasPago,
+  aplicarRepartoCongelado,
+  insertPagosCreditoInversionistas,
+} = await import("./payments");
 
 describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
   beforeEach(() => {
@@ -213,6 +259,187 @@ describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
     mockMontoRestarCalculo = new Big(0);
     mockSumaComprasPendientes = new Big(0);
     mockSumaComprasCompletadasMesActual = new Big(0);
+    mockLockedCreditRows = null;
+    mockCreditLockCalls = 0;
+    mockLockPoolConnectCalls = 0;
+    mockLockReleaseCalls = 0;
+    mockDbTransactionCalls = 0;
+    mockLockQueries = [];
+    mockInsertCalls = 0;
+    mockInsertError = null;
+  });
+
+  it("bloquea toda la generación si un crédito está pendiente de autorización para devolución", async () => {
+    mockCreditosInversionistaEspejo = [
+      {
+        creditoId: 101,
+        inversionistaId: 99,
+        montoAportado: "10000.00000000",
+        porcentajeParticipacion: "50.00",
+        fechaInicioParticipacion: "2026-05-15",
+        numeroCreditoSifco: "CRED-101",
+        estadoDevolucion: "NO_APLICA",
+        statusCredit: "ACTIVO",
+        capital: "20000.00",
+        deudaTotal: "22000.00",
+        cuota: "1000.00",
+      },
+      {
+        creditoId: 102,
+        inversionistaId: 99,
+        montoAportado: "8000.00000000",
+        porcentajeParticipacion: "40.00",
+        fechaInicioParticipacion: "2026-05-15",
+        numeroCreditoSifco: "CRED-102",
+        estadoDevolucion: "PENDIENTE_AUTORIZACION",
+        statusCredit: "MOROSO",
+        capital: "20000.00",
+        deudaTotal: "22000.00",
+        cuota: "1000.00",
+      },
+    ];
+
+    const result = await calcularYRegistrarPagosEspejo(
+      99,
+      new Date("2026-06-10T12:00:00.000Z"),
+    );
+
+    expect(result).toEqual({
+      success: false,
+      warning: true,
+      code: "CREDIT_PENDING_RETURN_AUTHORIZATION",
+      message:
+        "No se puede continuar porque hay créditos pendientes de autorización para devolución a CUBE.",
+      creditos_bloqueados: [
+        {
+          credito_id: 102,
+          numero_credito_sifco: "CRED-102",
+          estado_devolucion: "PENDIENTE_AUTORIZACION",
+        },
+      ],
+      data: [],
+    });
+    expect(mockInsertCalls).toBe(0);
+  });
+
+  it("revalida bajo lock antes de insertar si estado cambia durante generación", async () => {
+    mockCreditosInversionistaEspejo = [
+      {
+        creditoId: 101,
+        inversionistaId: 99,
+        montoAportado: "10000.00000000",
+        porcentajeParticipacion: "50.00",
+        fechaInicioParticipacion: "2026-05-15",
+        numeroCreditoSifco: "CRED-101",
+        estadoDevolucion: "NO_APLICA",
+        capital: "20000.00",
+        deudaTotal: "22000.00",
+        statusCredit: "ACTIVO",
+        cuota: "1000.00",
+      },
+      {
+        creditoId: 102,
+        inversionistaId: 99,
+        montoAportado: "10000.00000000",
+        porcentajeParticipacion: "40.00",
+        fechaInicioParticipacion: "2026-05-15",
+        numeroCreditoSifco: "CRED-102",
+        estadoDevolucion: "NO_APLICA",
+        capital: "20000.00",
+        deudaTotal: "22000.00",
+        statusCredit: "ACTIVO",
+        cuota: "1000.00",
+      },
+    ];
+    mockLockedCreditRows = [
+      {
+        creditoId: 101,
+        numeroCreditoSifco: "CRED-101",
+        estadoDevolucion: "PENDIENTE_AUTORIZACION",
+      },
+    ];
+    mockCuotasCreditoWithPagos = [
+      {
+        cuotaId: 501,
+        numeroCuota: 1,
+        fechaVencimiento: "2026-06-15",
+        pagadoCuota: false,
+        liquidadoInversionistas: false,
+        pagoId: 301,
+        fechaPago: new Date("2026-06-05"),
+        montoBoleta: "1000.00",
+        abonoCapital: "800.00",
+        abonoInteres: "200.00",
+        abonoIva: "24.00",
+        validationStatus: "validated",
+      },
+    ];
+    mockHistoricoLiquidacionesEspejo = [
+      { monto_aportado: "10000.00000000", fecha: new Date("2026-05-15") },
+    ];
+
+    const result = await calcularYRegistrarPagosEspejo(
+      99,
+      new Date("2026-06-10T12:00:00.000Z"),
+    );
+
+    expect(result).toEqual({
+      success: false,
+      warning: true,
+      code: "CREDIT_PENDING_RETURN_AUTHORIZATION",
+      message:
+        "No se puede continuar porque hay créditos pendientes de autorización para devolución a CUBE.",
+      creditos_bloqueados: [
+        {
+          credito_id: 101,
+          numero_credito_sifco: "CRED-101",
+          estado_devolucion: "PENDIENTE_AUTORIZACION",
+        },
+      ],
+      data: [],
+    });
+    expect(mockCreditLockCalls).toBe(1);
+    expect(mockLockPoolConnectCalls).toBe(1);
+    expect(mockLockReleaseCalls).toBe(1);
+    expect(mockDbTransactionCalls).toBe(0);
+    expect(mockLockQueries).toEqual([
+      "BEGIN",
+      expect.stringMatching(/ORDER BY credito_id\s+FOR NO KEY UPDATE/),
+      "ROLLBACK",
+    ]);
+    expect(mockInsertCalls).toBe(0);
+  });
+
+  it("no aplica guard tardío al flujo legacy que actualiza balances", async () => {
+    mockCreditosInversionistaEspejo = [
+      {
+        creditoId: 101,
+        inversionistaId: 99,
+        montoAportado: "10000.00000000",
+        porcentajeParticipacion: "50.00",
+        fechaInicioParticipacion: "2026-05-15",
+        numeroCreditoSifco: "CRED-101",
+        estadoDevolucion: "NO_APLICA",
+        capital: "20000.00",
+        deudaTotal: "22000.00",
+        statusCredit: "ACTIVO",
+        cuota: "1000.00",
+      },
+    ];
+    mockLockedCreditRows = [
+      {
+        creditoId: 101,
+        numeroCreditoSifco: "CRED-101",
+        estadoDevolucion: "PENDIENTE_AUTORIZACION",
+      },
+    ];
+
+    await insertPagosCreditoInversionistas(301, 101, false, false, true, 99);
+
+    expect(mockCreditLockCalls).toBe(0);
+    expect(mockLockPoolConnectCalls).toBe(0);
+    expect(mockDbTransactionCalls).toBe(1);
+    expect(mockInsertCalls).toBe(1);
   });
 
   it("1. Nuevo inversionista con compra de cartera en mes actual → sin pagos", async () => {
@@ -240,6 +467,7 @@ describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
     const result = await calcularYRegistrarPagosEspejo(99, new Date("2026-06-10T12:00:00.000Z"));
     expect(result.success).toBeTrue();
     expect(result.totalCreditosProcesados).toBe(0);
+    expect(result.pagosGenerados).toBeFalse();
   });
 
   it("2. Inversionista existente con compra en mes anterior (ej. mayo) → genera pagos", async () => {
@@ -291,6 +519,63 @@ describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
     const result = await calcularYRegistrarPagosEspejo(99, new Date("2026-06-10T12:00:00.000Z"));
     expect(result.success).toBeTrue();
     expect(result.totalCreditosProcesados).toBe(1);
+    expect(mockLockPoolConnectCalls).toBe(1);
+    expect(mockLockReleaseCalls).toBe(1);
+    expect(mockLockQueries).toEqual([
+      "BEGIN",
+      expect.stringMatching(/ORDER BY credito_id\s+FOR NO KEY UPDATE/),
+      "COMMIT",
+    ]);
+  });
+
+  it("reporta success=false cuando todos los créditos del lote fallan", async () => {
+    mockCreditosInversionistaEspejo = [
+      {
+        creditoId: 101,
+        inversionistaId: 99,
+        montoAportado: "10000.00000000",
+        porcentajeParticipacion: "50.00",
+        fechaInicioParticipacion: "2026-05-15",
+        numeroCreditoSifco: "CRED-101",
+        capital: "20000.00",
+        deudaTotal: "22000.00",
+        statusCredit: "ACTIVO",
+        cuota: "1000.00",
+      },
+    ];
+    mockCuotasCreditoWithPagos = [
+      {
+        cuotaId: 501,
+        numeroCuota: 1,
+        fechaVencimiento: "2026-06-15",
+        pagadoCuota: false,
+        liquidadoInversionistas: false,
+        pagoId: 301,
+        fechaPago: new Date("2026-06-05"),
+        montoBoleta: "1000.00",
+        abonoCapital: "800.00",
+        abonoInteres: "200.00",
+        abonoIva: "24.00",
+        validationStatus: "validated",
+      },
+    ];
+    mockHistoricoLiquidacionesEspejo = [
+      { monto_aportado: "10000.00000000", fecha: new Date("2026-05-15") },
+    ];
+    mockInsertError = new Error("insert espejo falló");
+
+    const result = await calcularYRegistrarPagosEspejo(
+      99,
+      new Date("2026-06-10T12:00:00.000Z"),
+    );
+
+    expect(result).toMatchObject({
+      success: false,
+      totalCreditosProcesados: 0,
+      totalCreditosFallidos: 1,
+      pagosGenerados: false,
+      fallidos: [expect.objectContaining({ creditoId: 101 })],
+    });
   });
 
   it("3. Self-compra (compras pendientes) → paga sobre monto ajustado", async () => {

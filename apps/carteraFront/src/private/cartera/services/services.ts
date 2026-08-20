@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import api from "@/Provider/interceptor";
+import { esDetalleTecnicoCrudo } from "@/lib/apiError";
 import type { PagoFormValues } from "../hooks/registerPayment";
 import type { ReactNode } from "react";
 import type { InstallmentContributionSummary } from "./installmentContribution";
@@ -1043,6 +1044,12 @@ export async function getInvestorTotalsService(
 // ============================================================
 // calcularPagosEspejo — POST /calcularPagosEspejo
 // ============================================================
+export interface PendingReturnBlockedCredit {
+  credito_id: number;
+  numero_credito_sifco: string;
+  estado_devolucion: "PENDIENTE_AUTORIZACION";
+}
+
 export interface CalcularPagosEspejoResponse {
   success: boolean;
   message: string;
@@ -1089,7 +1096,11 @@ export function formatMensajeFallido(mensaje: string): string {
   if (match) {
     return ERROR_MESSAGES[match[1]] ?? "Error al procesar el crédito. Contacta soporte.";
   }
-  return mensaje;
+  const trimmed = mensaje.trim();
+  if (!trimmed || esDetalleTecnicoCrudo(trimmed)) {
+    return "Error al procesar el crédito. Contacta soporte.";
+  }
+  return trimmed;
 }
 
 // ============================================================
@@ -1247,9 +1258,18 @@ export interface LiquidateByInvestorRequest {
 export interface LiquidateByInvestorResponse {
   message: string;
   updatedCount: number;
+  success?: boolean;
+  warning?: boolean;
+  code?: string;
+  creditos_bloqueados?: PendingReturnBlockedCredit[];
   liquidaciones_creadas?: number;
   inversionistas_saltados?: number;
-  errores?: Array<{ inversionista_id: number; razon: string }>;
+  errores?: Array<{
+    inversionista_id: number;
+    razon: string;
+    code?: string;
+    creditos_bloqueados?: PendingReturnBlockedCredit[];
+  }>;
 }
 export async function liquidateByInvestorService(
   data: LiquidateByInvestorRequest

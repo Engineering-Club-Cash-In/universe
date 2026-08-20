@@ -54,7 +54,7 @@ decidido.
 | # | Paso | Alcance | Estado | Doc |
 | --- | --- | --- | --- | --- |
 | 1 | Identificación y acceso | 2 servicios en el CRM: buscar cliente + OTP por SMS, y validar código + listar créditos | 🔵 **Los dos servicios implementados y desplegados en dev.** El SMS no sale hasta que el proveedor habilite la IP del servidor; mientras tanto se prueba en modo simulado ([D-21](./DECISIONES.md#d-21--modo-simulado-mientras-el-sms-no-sale)) | [`01-…`](./01-identificacion-y-acceso.md) |
-| 2 | Menú del crédito | Info del crédito, y el ruteo a las 6 gestiones | 🟡 **En definición** (notas de reunión 2026-08-13) | [`02-…`](./02-menu-del-credito.md) |
+| 2 | Menú del crédito | Info del crédito, estado de cuenta, cuentas de pago, y el ruteo a las gestiones | 🔵 **Info del crédito y estado de cuenta implementados y desplegados en dev.** Falta `cuentasPago` ([D-37](./DECISIONES.md#d-37--las-cuentas-de-pago-viajan-con-la-info-del-crédito)) | [`02-…`](./02-menu-del-credito.md) |
 | 3 | Realizar un pago | Link de Pagalo, Nexa, menú dinámico de pago | 🟡 **En definición** | [`03-…`](./03-metodos-de-pago.md) |
 | 4 | Pago con boleta | Lectura de la boleta con IA, confirmación, registro en cartera y notificación del resultado | 🟢 **Contrato cerrado, sin implementar** (2026-08-19) | [`04-…`](./04-validacion-de-boleta.md) |
 | 5 | Convenio y promesa de pago | Selección de rubros, plazo, documento | 🔴 **Bloqueado** — requiere aprobación de gerencia (2026-08-13) | [`05-…`](./05-convenio-y-promesa.md) · [D-15](./DECISIONES.md#d-15--convenio-y-promesa-de-pago-bloqueados) |

@@ -104,11 +104,38 @@ cuota, cuánto falta y en qué pago va: es lo primero que pregunta un cliente en
       "convenio": null,
       "asesor": { "nombre": "Octavio Rosales", "telefono": "35111822" },
       "mensajes": { "titulo": "…", "resumen": "…", "completo": "…" },
-      "vehiculo": { "placa": "P-319JJL", "marca": "Toyota", "modelo": "Corolla", "anio": 2015 }
+      "vehiculo": { "placa": "P-319JJL", "marca": "Toyota", "modelo": "Corolla", "anio": 2015 },
+      "cuentasPago": {
+        "texto": "🏦 *Cuentas para tu pago*\n\nTodas a nombre de *CUBE INVESTMENTS, S.A.* (monetarias):\n\n• *Banco Industrial* — 5520029876\n• *Banco Agromercantil (BAM)* — 3020123033\n• *Banco G&T Continental* — 01300039945\n• *Banrural* — 3394002346",
+        "cuentas": [
+          { "banco": "Banco Industrial",        "bancoId": 1,  "numero": "5520029876",  "titular": "CUBE INVESTMENTS, S.A.", "tipo": "monetaria" },
+          { "banco": "Banco Agromercantil (BAM)","bancoId": 16, "numero": "3020123033",  "titular": "CUBE INVESTMENTS, S.A.", "tipo": "monetaria" },
+          { "banco": "Banco G&T Continental",   "bancoId": 19, "numero": "01300039945", "titular": "CUBE INVESTMENTS, S.A.", "tipo": "monetaria" },
+          { "banco": "Banrural",                "bancoId": 2,  "numero": "3394002346",  "titular": "CUBE INVESTMENTS, S.A.", "tipo": "monetaria" }
+        ]
+      }
     }
   }
 }
 ```
+
+### `cuentasPago` · las cuentas viajan con la info del crédito
+
+Cuando el cliente elige pagar, el bot tiene que responderle **a dónde deposita**. Eso no
+merece un servicio aparte: son cuatro cuentas que casi nunca cambian, así que viajan en la
+misma respuesta que ya se pide para armar el menú
+([D-37](./DECISIONES.md#d-37--las-cuentas-de-pago-viajan-con-la-info-del-crédito)).
+
+- **`texto`** es lo que el bot muestra **literal, sin armar nada**. Ya viene con los saltos de
+  línea y la negrita de WhatsApp (un asterisco).
+- **`cuentas`** es el mismo dato en estructura, y no es decorativo: con él se compara la
+  **cuenta destino que se lee de la boleta** (§paso 4) contra las nuestras.
+
+**No se escriben dos veces.** Los números ya viven en `COBROS_CUENTAS_PAGO`
+(`lib/cobros-plantillas.ts`), que es lo que se le manda hoy al cliente en los recordatorios de
+cobros. El bot **deriva su texto de la misma constante**, con una prueba que fija la cadena de
+las plantillas para que refactorizarla no cambie ni una coma de los mensajes que ya salen a
+producción. Si mañana cambia una cuenta, se toca un solo archivo.
 
 ### De dónde sale cada dato
 
@@ -122,6 +149,7 @@ cuota, cuánto falta y en qué pago va: es lo primero que pregunta un cliente en
 | Convenio | cartera | `null` si no tiene |
 | Vehículo | CRM (`vehicles`) | `null` si no tiene: **se responde igual** |
 | Asesor | cartera (`asesores`) | Nombre y teléfono, para que el cliente sepa con quién hablar |
+| Cuentas de pago | **constante del CRM** | Las mismas cuatro de los recordatorios de cobros; no se consulta nada |
 
 ### `cuotaActual` y `proximaFechaPago` no son lo mismo
 

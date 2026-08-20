@@ -18,10 +18,18 @@ conciliación), [CC2-45 · CB-109](https://clubcashin.atlassian.net/browse/CC2-4
 
 ## 1. Qué hace
 
-El cliente manda la foto de su boleta por WhatsApp. Nosotros la leemos con IA, le mostramos
-lo que entendimos **para que confirme**, y solo si confirma registramos el pago en cartera —
-por el mismo endpoint que usa el formulario de contabilidad, y en el mismo estado: pendiente
-de validación. Cuando conta lo resuelve, cartera nos avisa y el CRM le escribe al cliente.
+El bot le muestra las cuentas de la empresa —que ya venían en la info del crédito, sin una
+llamada extra—, el cliente manda la foto de su boleta, nosotros la leemos con IA y le
+mostramos lo que entendimos **para que confirme**. Solo si confirma registramos el pago en
+cartera, por el mismo endpoint que usa el formulario de contabilidad y en el mismo estado:
+pendiente de validación. Cuando conta lo resuelve, cartera nos avisa y el CRM le escribe al
+cliente.
+
+> **Las cuentas no son un servicio nuevo.** Viajan en `cuentasPago` dentro de
+> `/credito/info`, con un `texto` que el bot muestra literal
+> ([paso 2](./02-menu-del-credito.md#cuentaspago--las-cuentas-viajan-con-la-info-del-crédito)).
+> El mismo dato en estructura sirve para comparar contra la cuenta destino que se lee de la
+> boleta.
 
 ```mermaid
 sequenceDiagram
@@ -32,6 +40,8 @@ sequenceDiagram
     participant CB as cartera-back
     participant K as Contabilidad
 
+    Note over S,C: El bot ya tiene las cuentas: vinieron en la info del crédito (`cuentasPago`)
+    S-->>C: "Depositá a estas cuentas y mandame tu boleta"
     C->>S: Envía foto de la boleta
     S->>CRM: POST /boleta/leer  {referencia, numeroSifco, imagenUrl}
     CRM->>CRM: verificarAcceso (D-24)
@@ -145,7 +155,7 @@ el árbol de gerencia:
 | `banco` | **Sí** | `banco: null` + `camposFaltantes: ["banco"]` + `bancosSugeridos` para que el cliente elija. |
 | `fechaBoleta` | No | Se usa **hoy** y se avisa en `camposFaltantes`. |
 | `numeroAutorizacion` | No | Va vacío. En cartera es opcional. |
-| `cuentaDestino` | No | Solo informativa: se guarda y se le muestra a conta. Hoy **no se valida** — ver §13. |
+| `cuentaDestino` | No | Se compara contra las cuatro cuentas de `cuentasPago` — ver §13. |
 | `observaciones` | No | Lo que el modelo haya podido leer de más (concepto, referencia). |
 
 **`confianza`** resume la lectura para que el bot module el mensaje: `alta` (todo leído),
@@ -274,21 +284,29 @@ escrito— y tampoco le dice al cliente "pago recibido". Lo que hace es:
 - **notificar a contabilidad y al asesor** para que revisen si el monto quedó completo;
 - al cliente, un mensaje neutro: *"estamos procesando tu pago, te avisamos"*.
 
-**Y por qué "no existe" tampoco significa "reintentá".** `reversePayment` **borra las filas de
-`boletas`** del pago, y si era un parcial con hermanos en la misma cuota borra también la fila
-de `pagos_credito`; en el otro caso la resetea a `no_required` con `numeroAutorizacion = ''` y
-`banco_id = NULL`. O sea que buscar por `r2_key` y no encontrar nada tiene **dos** lecturas
-posibles: que no se registró, o que se registró y conta ya lo revirtió.
+**Y "no existe" no siempre significa "no se registró".** `reversePayment` **borra las filas de
+`boletas`** del pago, y si era un parcial con hermanos borra también la de `pagos_credito`. Sin
+más información, no encontrar nada tendría dos lecturas —no se registró, o se registró y ya lo
+revirtieron— y devolver el borrador a `leida` en esa duda significa dejar que el cliente
+reconfirme **un pago que contabilidad acaba de rechazar**.
 
-Devolver el borrador a `leida` en esa ambigüedad significa dejar que el cliente vuelva a
-confirmar **un pago que contabilidad acaba de rechazar**. Por eso el borrador pasa a
-`revision_manual` con aviso a conta y al asesor: equivocarse hacia "que lo mire un humano"
-cuesta un minuto de alguien; equivocarse hacia "reintentá" mete plata que no existe.
+Eso se resuelve con el **registro de reversiones**
+([D-36](./DECISIONES.md#d-36--las-reversiones-dejan-registro)): antes de borrar, cartera
+guarda una fila con el pago, sus montos y **las URLs de las boletas que va a borrar**. Con eso
+la consulta ya no es ambigua:
 
-> El único camino que sí libera el borrador es el normal: si **cartera respondió con error**,
-> el CRM lo sabe en el mismo request, responde `PAGO_NO_REGISTRADO` y deja el borrador en
-> `leida`. La reconciliación solo actúa cuando **no hubo respuesta**, que es justo el caso en
-> que no se puede saber.
+| Lo que se encuentra buscando por `r2_key` | Qué era | Qué se hace |
+| --- | --- | --- |
+| Filas vivas en `boletas` | Se registró | `confirmada_a_verificar` (puede estar incompleto: §5.2) |
+| Nada vivo, **pero sí una reversión** | Se registró y ya lo rechazaron | Se cierra la boleta como **rechazada** y se le avisa al cliente |
+| Nada de nada | No se registró | Vuelve a `leida`: el cliente puede confirmar de nuevo |
+
+`revision_manual` queda solo para lo que no encaje en esas tres, que a esta altura es un
+caso raro de verdad.
+
+> El camino normal ni siquiera llega acá: si **cartera respondió con error**, el CRM lo sabe
+> en el mismo request, responde `PAGO_NO_REGISTRADO` y deja el borrador en `leida`. La
+> reconciliación solo actúa cuando **no hubo respuesta**.
 
 Que `insertPayment` no sea atómico es un problema de cartera que ya existía y excede este
 feature; acá solo se evita que el bot lo convierta en un pago a medias silencioso
@@ -498,26 +516,26 @@ app que mueve el dinero—, el CRM **se encarga de no depender del aviso**:
 | **Rápido** | El webhook `/pagos/evento` | Siempre que salga bien: el cliente se entera en segundos. |
 | **Red de seguridad** | Un job del CRM revisa las boletas confirmadas que tienen pagos sin resolver y le **pregunta a cartera** en qué `validation_status` están | Cada hora. Si alguno ya no está `pending`, se procesa como si el evento hubiera llegado. |
 
-**El job pregunta por `pago_id`, no por la boleta.** Es una distinción que importa: una
-reversión **borra la fila de `boletas`** en cartera (y a veces el `pagos_credito` entero), así
-que preguntar "¿qué pasó con la boleta tal?" devolvería silencio justo en el caso que más
-necesitamos avisar. Los `pago_id` ya los tenemos en `bot_cobros_boleta_pagos`, y con ellos la
-respuesta es inequívoca:
+**El job pregunta por `pago_id`, no por la boleta.** Una reversión borra la fila de `boletas`,
+así que preguntar "¿qué pasó con la boleta tal?" devolvería silencio justo en el caso que más
+urge avisar. Los `pago_id` ya los tenemos en `bot_cobros_boleta_pagos`, y con ellos la
+respuesta es directa:
 
 | Lo que devuelve cartera para ese `pago_id` | Cómo se interpreta |
 | --- | --- |
 | `validated` / `capital_validated` | **validado** |
 | `pending` | sigue esperando, no se hace nada |
 | `payment_false = true` | **marcado falso** |
-| **la fila no existe** | **revertido** — `reversePayment` la borró |
-| `no_required` con `numeroAutorizacion = ''` y `banco_id = NULL` | **revertido** — es la firma exacta que deja el reset de `reversePayment` |
+| Aparece en `pagos_reversiones` | **revertido**, con fecha, usuario y motivo |
 
-Las dos últimas filas son el **acta de defunción** que cartera no guarda en ningún lado: no
-hay tabla de reversiones ni log, así que el estado se deduce de lo que la reversión deja
-atrás. Funciona porque preguntamos por un `pago_id` puntual que sabemos que existió.
+Esa última fila es la que existe gracias a
+[D-36](./DECISIONES.md#d-36--las-reversiones-dejan-registro). Antes de tenerla había que
+**deducir** el rechazo de lo que la reversión dejaba atrás —una fila ausente, o reseteada a
+`no_required` con `numeroAutorizacion` vacío y `banco_id` en `NULL`—, que funcionaba pero era
+adivinar el motivo de una muerte por la posición del cuerpo. Ahora hay acta.
 
-Eso pide un endpoint de lectura más: `GET /pagos/estado?ids=48213,48214`, que devuelve por
-cada id `{ existe, validation_status, payment_false, banco_id, numero_autorizacion }`.
+Eso pide un endpoint de lectura: `GET /pagos/estado?ids=48213,48214`, que devuelve por cada id
+`{ existe, validation_status, payment_false, revertido: { fecha, usuario, motivo } | null }`.
 
 Nada se pierde: el webhook adelanta el aviso, el job
 garantiza que ocurra ([D-35](./DECISIONES.md#d-35--el-webhook-adelanta-el-aviso-el-job-lo-garantiza)).
@@ -624,6 +642,34 @@ export const boletaPagoSchema = z.object({
 
 `esBoletaDePago: false` → `422 BOLETA_ILEGIBLE`, con mensaje de que mande la foto del
 comprobante. Sin eso, una selfie devuelve campos vacíos y el cliente no entiende qué pasó.
+
+### Una boleta real, para calibrar el prompt
+
+Depósito monetario de Banrural hecho en un agente bancario, que es de los formatos más
+comunes. Lo que hay que sacar y lo que hay que esquivar:
+
+```
+BANRURAL                                    ← el banco (logo)
+DEPOSITO MONETARIO
+  No. DE CUENTA:      3394002346            ← cuentaDestino  ✅ es una de las nuestras
+  POR UN VALOR DE:    Q500.00               ← monto
+  NOMBRE DE CUENTA:   CUBE INVESTMENTS      ← confirma que la cuenta es nuestra
+  NUMERO DE DEPOSITO: 524075550             ← numeroAutorizacion
+  FECHA:              27/4/2026 4:18.05 PM  ← fechaBoleta
+  Oficina: 1136900        Usuario: 609370220   ← ruido: NO son la autorización
+  Banco de Desarrollo Rural S.A. …            ← el MISMO banco, con su otro nombre
+```
+
+Tres cosas que el prompt tiene que decir explícitamente, porque las tres se equivocan solas:
+
+| Trampa | Qué pasa si no se aclara |
+| --- | --- |
+| **Cuatro números que se parecen** | El modelo puede tomar la oficina o el usuario como número de autorización. Hay que nombrarle la etiqueta exacta: *"número de depósito, de documento, de autorización o de referencia"*, y decirle que **no** use cuenta, oficina ni usuario. |
+| **Las fechas son DD/MM** | `27/4/2026` no tiene vuelta, pero `4/5/2026` es **4 de mayo**, no 5 de abril. Sin la regla, el modelo asume formato gringo la mitad de las veces. |
+| **El banco aparece con dos nombres** | El encabezado dice `BANRURAL` y el pie `Banco de Desarrollo Rural S.A.` — que son justo las dos filas duplicadas del catálogo. Los alias tienen que cubrir los dos, y por eso el mapeo no es por parecido de texto. |
+
+Y una observación de negocio: esta boleta es de abril, cuatro meses vieja. Cae en la regla de
+los 90 días de §13 — se registra igual, pero la observación se lo dice a conta.
 
 ### Mapeo del banco
 
@@ -844,7 +890,8 @@ en párrafos.
 | `fechaBoleta` futura | Se usa **hoy** y se anota en observaciones. Una boleta no puede ser de mañana. |
 | `fechaBoleta` de más de 90 días | Se registra, pero la observación se lo dice a conta. |
 | Crédito `CANCELADO` / `INCOBRABLE` | No se acepta la boleta: al asesor. |
-| Cuenta destino | Se guarda y se muestra; **no se valida**. La lista de cuentas de Cash In no vive en el monorepo — ver §15. |
+| Cuenta destino **no reconocida** | Se registra igual, pero la observación se lo dice a conta y se avisa al asesor. **No se bloquea**: puede ser una cuenta vieja, o que el modelo leyó mal el número. Al cliente no se le dice "pagaste mal". |
+| Cuenta destino reconocida | Se anota cuál de las cuatro fue, para que conta la concilie más rápido. |
 | Sin cuota pendiente | `resumen.cuota_actual` en `null` → el crédito no tiene a qué aplicar. Al asesor. |
 
 ---
@@ -855,12 +902,16 @@ Tres PR a `COBROS-02`, en este orden:
 
 | PR | Alcance | Se puede probar solo |
 | --- | --- | --- |
+| **0** | `cuentasPago` en `/credito/info` (endpoint que ya existe) + Swagger | Sí, y es chico: desbloquea a SimpleTech para armar el mensaje de "dónde depositar". |
 | **A** | Tablas + `/boleta/leer` + descarga con allowlist + lectura con IA + **copia a R2** + mapeo de bancos + Swagger | Sí: devuelve datos y deja el archivo, no registra pago. |
-| **B** | `/boleta/confirmar` con la máquina de estados (§4.1) + job de reconciliación. **En cartera:** `usuario_id` en `/credito/resumen`, la lista de `pagos` en la respuesta de `newPayment`, `GET /pagos-por-boleta` y `GET /pagos/estado?ids=…` | Sí, contra la instancia de dev de cartera. |
+| **B** | `/boleta/confirmar` con la máquina de estados (§4.1) + job de reconciliación. **En cartera:** `pagos_reversiones` y su registro dentro de `reversePayment`, `usuario_id` en `/credito/resumen`, la lista de `pagos` en la respuesta de `newPayment`, `GET /pagos-por-boleta` y `GET /pagos/estado?ids=…` | Sí, contra la instancia de dev de cartera. |
 | **C** | Endpoint de eventos + emisión desde `aplicar-pago`, `revalidatePayment`, `reversePayment`, `revertPaymentToPending` y `false-payment` + job de respaldo (§6) + agrupación por boleta + WhatsApp + notificación al asesor | Necesita coordinar deploy de las dos apps. |
 
-**Los cuatro cambios en cartera del PR B son aditivos**: un campo nuevo en dos respuestas que
-ya existen y dos endpoints de lectura. Ninguno toca el camino de escritura de un pago.
+**Los cambios en cartera del PR B son aditivos**: una tabla nueva con un INSERT dentro de una
+transacción que ya existe, un campo nuevo en dos respuestas y dos endpoints de lectura.
+Ninguno cambia cómo se aplica un pago.
+
+> La migración de `pagos_reversiones` queda escrita y **la corre Daniel**, como todas.
 
 Cada PR lleva su parte del Swagger en el mismo commit
 ([D-23](./DECISIONES.md#d-23--la-documentación-de-la-api-es-swagger-y-es-obligatoria)) y suma
@@ -871,27 +922,19 @@ en verde sin estar documentando nada.
 
 ## 15. Pendientes
 
-**Bloquean el arranque del bot, no el desarrollo:**
+**Nada bloquea el arranque.** Las dos cosas que faltaban se cerraron el 2026-08-19:
 
-- **Qué cuentas de la empresa se le muestran** antes de pedirle la boleta. Es texto fijo que
-  puede vivir en SimpleTech o salir de un endpoint; hay que decidirlo con Cobros.
-
-**Decisión de fondo, antes del PR C:**
-
-- **[D-36](./DECISIONES.md#d-36--simplificar-cartera-en-vez-de-compensarla) · ¿Arreglamos
-  cartera en vez de rodearla?** Media docena de piezas de este contrato existen solo para
-  compensar que `insertPayment` no es transaccional y que `reversePayment` borra sin dejar
-  rastro. La opción barata —darle historial a las reversiones— se lleva puestas las dos más
-  feas y arregla un hueco de auditoría que ya existía. Está planteada con las tres opciones y
-  su costo.
+| Era | Cómo quedó |
+| --- | --- |
+| Qué cuentas se le muestran al cliente | Las cuatro de `COBROS_CUENTAS_PAGO`, viajando en `cuentasPago` dentro de `/credito/info` ([D-37](./DECISIONES.md#d-37--las-cuentas-de-pago-viajan-con-la-info-del-crédito)) |
+| Validar la cuenta destino de la boleta | Ahora se puede: se compara contra esas mismas cuatro (§13) |
+| ¿Arreglamos cartera o la rodeamos? | Se hace el registro de reversiones ([D-36](./DECISIONES.md#d-36--las-reversiones-dejan-registro)); `insertPayment` transaccional **no** |
 
 **Se pueden trabajar después:**
 
 - **Ingreso manual de datos** (doc de gerencia §3): que el cliente escriba monto y fecha en
   vez de mandar otra foto. Queda fuera de v1 a propósito (D-26). Si entra, es un `origen:
   "manual"` en `/confirmar` y una revisión obligatoria de conta.
-- **Validar la cuenta destino** contra las cuentas de Cash In, para detectar boletas que
-  pagaron a otra empresa antes de que un contador las abra.
 - **¿Notificamos solo los pagos del bot?** v1 sí: solo esos. Extenderlo a todos los pagos
   (que cualquier cliente reciba WhatsApp cuando conta valide su boleta) es una decisión de
   Cobros, no técnica — el circuito ya quedaría montado.

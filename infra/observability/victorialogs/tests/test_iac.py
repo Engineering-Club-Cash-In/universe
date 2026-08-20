@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import stat
 import subprocess
@@ -14,6 +15,7 @@ VMAUTH_TEMPLATE = ROOT / "central" / "config" / "vmauth.template.yaml"
 AGENT_COMPOSE = ROOT / "agent" / "compose.yaml"
 VECTOR_TEMPLATE = ROOT / "agent" / "config" / "vector.template.yaml"
 RENDER = ROOT / "scripts" / "render-config.py"
+VERIFY_SECRET_ISOLATION = ROOT / "scripts" / "verify-secret-isolation.py"
 RENDER_DOCKERFILE = ROOT / "config-renderer.Dockerfile"
 SPEC = ROOT / "SPEC.md"
 GITIGNORE = ROOT / ".gitignore"
@@ -230,6 +232,51 @@ class RendererTests(unittest.TestCase):
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertNotIn(shared, result.stdout + result.stderr)
+    def test_secret_isolation_gate_accepts_clean_inspect(self) -> None:
+        self.assertTrue(VERIFY_SECRET_ISOLATION.is_file())
+        with tempfile.TemporaryDirectory() as tmp:
+            inspect_path = Path(tmp) / "inspect.json"
+            inspect_path.write_text(
+                '[{"Name":"/vmauth","Config":{"Env":["PATH=/bin"]}},'
+                '{"Name":"/victoria-logs","Config":{"Env":[]}}]',
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [sys.executable, str(VERIFY_SECRET_ISOLATION), str(inspect_path)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("secret_environment_isolation=PASS", result.stdout)
+
+    def test_secret_isolation_gate_rejects_name_without_printing_value(self) -> None:
+        self.assertTrue(VERIFY_SECRET_ISOLATION.is_file())
+        canary = "SYNTHETIC_SECRET_MUST_NOT_BE_PRINTED"
+        with tempfile.TemporaryDirectory() as tmp:
+            inspect_path = Path(tmp) / "inspect.json"
+            inspect_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "Name": "/vmauth",
+                            "Config": {
+                                "Env": [f"VMAUTH_QUERY_PASSWORD={canary}"]
+                            },
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [sys.executable, str(VERIFY_SECRET_ISOLATION), str(inspect_path)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("VMAUTH_QUERY_PASSWORD", result.stderr)
+            self.assertNotIn(canary, result.stdout + result.stderr)
 
 
 if __name__ == "__main__":

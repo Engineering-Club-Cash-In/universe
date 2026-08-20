@@ -137,7 +137,9 @@ Cada servicio mantiene rotación local (`max-size`/`max-file`) aunque Vector est
 - `vmauth` mantiene credenciales separadas por lectura e ingesta.
 - Cada servidor emisor recibe credencial revocable propia en la incorporación gradual.
 - Coolify almacena los valores secretos; Compose los materializa como archivos `/run/secrets` para un `config-init` efímero.
+- Coolify `v4.3.9` no detecta automáticamente en UI las variables usadas solo por `secrets.*.environment`; se crean manualmente como runtime-only y el despliegue de staging debe pasar `verify-secret-isolation.py` antes de exponer dominio o usar datos reales.
 - El init genera configuraciones runtime con modo `0600` en volúmenes internos; ningún secreto ni archivo runtime vive en Git.
+- Los volúmenes de configuración se consideran almacenamiento secreto, se excluyen de backups genéricos y se regeneran al rotar credenciales.
 - VictoriaLogs no expone puertos del host.
 - Los endpoints internos y métricas se consultan solo desde red administrativa.
 - Las imágenes se fijan por versión y digest amd64.

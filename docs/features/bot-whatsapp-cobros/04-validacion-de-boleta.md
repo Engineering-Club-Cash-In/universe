@@ -316,12 +316,16 @@ ambigua:
 | Lo que se encuentra buscando por `r2_key` | Qué era | Estado final del borrador |
 | --- | --- | --- |
 | Filas vivas en `boletas` | Se registró | **`confirmada_a_verificar`** (puede estar incompleto: §5.2) |
-| Nada vivo, y una reversión **`completada`** | Se registró y ya lo rechazaron | **`rechazada`** — y se le avisa al cliente |
-| Nada vivo, y una reversión **`iniciada`** | Una reversión quedó a medias en cartera | **`revision_manual`** — nadie puede decidir esto solo |
+| Nada vivo, y **alguna** reversión `completada` | Se registró y ya lo rechazaron | **`rechazada`** — y se le avisa al cliente |
+| Nada vivo, y solo reversiones `iniciada` | Una reversión quedó a medias en cartera | **`revision_manual`** — nadie puede decidir esto solo |
 | Nada de nada | No se registró | **`leida`** — el cliente puede confirmar de nuevo |
 
 Esa es la lista completa: **cuatro respuestas, cuatro transiciones**, sin zona gris. La
 tercera fila existe por cómo es `reversePayment` — ver [D-36](./DECISIONES.md#d-36--las-reversiones-dejan-registro).
+
+**Si un pago tiene varias reversiones** —falló una y alguien la reintentó—, manda la
+`completada`: una sola que haya terminado bien alcanza para cerrar la boleta como rechazada.
+Las `iniciada` de intentos previos quedan marcadas `superada` y ya no alarman.
 
 > El camino normal ni siquiera llega acá: si **cartera respondió con error**, el CRM lo sabe
 > en el mismo request, responde `PAGO_NO_REGISTRADO` y deja el borrador en `leida`. La
@@ -928,7 +932,7 @@ Tres PR a `COBROS-02`, en este orden:
 | --- | --- | --- |
 | **0** | `cuentasPago` en `/credito/info` (endpoint que ya existe) + Swagger | Sí, y es chico: desbloquea a SimpleTech para armar el mensaje de "dónde depositar". |
 | **A** | Tablas + `/boleta/leer` + descarga con allowlist + lectura con IA + **copia a R2** + mapeo de bancos + Swagger | Sí: devuelve datos y deja el archivo, no registra pago. |
-| **B** | `/boleta/confirmar` con la máquina de estados (§4.1) + job de reconciliación. **En cartera:** `pagos_reversiones` y su registro dentro de `reversePayment`, `usuario_id` en `/credito/resumen`, la lista de `pagos` en la respuesta de `newPayment`, `GET /pagos-por-boleta` y `GET /pagos/estado?ids=…` | Sí, contra la instancia de dev de cartera. |
+| **B** | `/boleta/confirmar` con la máquina de estados (§4.1) + job de reconciliación. **En cartera:** `pagos_reversiones` y su registro en `reversePayment` (incluye pasarle el `user` del token al handler), `usuario_id` en `/credito/resumen`, la lista de `pagos` en la respuesta de `newPayment`, `GET /pagos-por-boleta` y `GET /pagos/estado?ids=…` | Sí, contra la instancia de dev de cartera. |
 | **C** | Endpoint de eventos + emisión desde `aplicar-pago`, `revalidatePayment`, `reversePayment`, `revertPaymentToPending` y `false-payment` + job de respaldo (§6) + agrupación por boleta + WhatsApp + notificación al asesor | Necesita coordinar deploy de las dos apps. |
 
 **Los cambios en cartera del PR B son aditivos**: una tabla nueva con un INSERT dentro de una
@@ -956,6 +960,11 @@ en verde sin estar documentando nada.
 
 **Se pueden trabajar después:**
 
+- **El campo "motivo" al revertir un pago.** `pagos_reversiones` lo tiene listo, pero hoy nada
+  lo llena: la pantalla de conta en carteraFront no pide una razón. Sin ese input, la tabla
+  responde *quién y cuándo*, no *por qué*. Es un input y un campo en el body — pero es otra
+  pantalla y otro dueño, así que se pide aparte
+  ([D-36](./DECISIONES.md#d-36--las-reversiones-dejan-registro)).
 - **Ingreso manual de datos** (doc de gerencia §3): que el cliente escriba monto y fecha en
   vez de mandar otra foto. Queda fuera de v1 a propósito (D-26). Si entra, es un `origen:
   "manual"` en `/confirmar` y una revisión obligatoria de conta.

@@ -1144,24 +1144,31 @@ extra entre las dos apps.
 `banco_id = NULL`—. Preguntar "¿qué pasó con la boleta tal?" devolvería silencio **justo en
 el caso que más urge avisar**: el rechazo.
 
-Como en cartera no hay tabla de reversiones ni log de la acción, el estado se **deduce de lo
-que la reversión deja atrás**, y por eso hay que preguntar por un `pago_id` puntual que
-sabemos que existió:
+> ⚠️ **Actualizado por [D-36](#d-36--las-reversiones-dejan-registro).** Cuando se escribió
+> esta decisión, cartera no tenía tabla de reversiones, así que el rechazo había que
+> **deducirlo** de lo que la reversión dejaba atrás: una fila ausente, o una reseteada a
+> `no_required` con `numeroAutorizacion` vacío y `banco_id` en `NULL`. Con
+> `pagos_reversiones` eso ya no se deduce, **se consulta**. Lo que sigue vigente de acá es la
+> idea del segundo camino; la tabla de abajo es la versión buena:
 
-| Lo que devuelve cartera | Interpretación |
+| Lo que devuelve cartera para ese `pago_id` | Interpretación |
 | --- | --- |
 | `validated` / `capital_validated` | validado |
 | `pending` | sigue esperando |
 | `payment_false = true` | marcado falso |
-| la fila **no existe** | **revertido** |
-| `no_required` + `numeroAutorizacion = ''` + `banco_id = NULL` | **revertido** (firma del reset) |
+| Reversión **`completada`** | **revertido**, con fecha y usuario |
+| Reversión **`iniciada`** | quedó a medias: alerta a conta, **no** es un rechazo |
 
-Las dos últimas son el acta de defunción que cartera no escribe.
+**La reconciliación de D-34 tenía la misma trampa**, que sí busca por `r2_key`: "no hay filas"
+podía significar "no se registró" **o** "se registró y ya lo revirtieron", y devolver el
+borrador a `leida` en esa duda dejaría que el cliente reconfirme un pago que contabilidad
+acaba de rechazar.
 
-**Y la misma trampa aplica a la reconciliación de D-34**, que sí busca por `r2_key`: "no hay
-filas" puede significar "no se registró" **o** "se registró y ya lo revirtieron". Por eso ese
-borrador nunca vuelve solo a `leida` — va a `revision_manual`. Devolverlo a `leida` sería
-dejar que el cliente reconfirme un pago que contabilidad acaba de rechazar.
+**Eso también lo resolvió D-36.** Consultando `pagos_reversiones` la respuesta deja de ser
+ambigua, y la lista de transiciones definitiva —cuatro respuestas, cuatro estados— vive en
+[§4.1 del paso 4](./04-validacion-de-boleta.md#41-qué-pasa-si-el-bot-reintenta-el-mismo-boletaid).
+Un "no hay nada de nada" **sí** vuelve a `leida`; `revision_manual` queda para la reversión a
+medias.
 
 ---
 
@@ -1236,6 +1243,9 @@ CREATE TABLE cartera.pagos_reversiones (
   reversion_id             serial PRIMARY KEY,
   -- 'iniciada' se escribe FUERA de la transacción, antes de tocar nada;
   -- 'completada' se marca DENTRO, al final. Ver "las dos marcas" abajo.
+  --   iniciada   → se empezó a revertir (fuera de la tx)
+  --   completada → se revirtió de verdad (dentro de la tx)
+  --   superada   → intento fallido que un reintento posterior ya resolvió
   estado                   text NOT NULL DEFAULT 'iniciada',
   -- Sin FK a propósito: la fila de pagos_credito puede desaparecer, y este
   -- registro tiene que sobrevivirla. Ese es todo el punto.
@@ -1251,14 +1261,17 @@ CREATE TABLE cartera.pagos_reversiones (
   -- Las boletas que la reversión está por borrar. Es lo que permite buscar
   -- después por la r2_key y saber que ese comprobante existió.
   urls_boletas             text[],
-  motivo                   text,
-  usuario_email            text,
+  motivo                   text,           -- opcional en v1; ver "quién y por qué"
+  usuario_email            text NOT NULL,   -- sale del token, nunca del body
   revertido_en             timestamp NOT NULL DEFAULT now(),
   snapshot                 jsonb          -- la fila completa, por si algún día hace falta
 );
-CREATE INDEX ON cartera.pagos_reversiones (pago_id);
+CREATE INDEX ON cartera.pagos_reversiones (pago_id, estado);
 CREATE INDEX ON cartera.pagos_reversiones (credito_id);
 ```
+
+**No lleva unique por `pago_id`**: varios intentos sobre el mismo pago son legítimos, y
+justamente el historial de los intentos es parte de lo que se quiere ver.
 
 ### Las dos marcas, porque la reversión no es del todo transaccional
 
@@ -1292,6 +1305,45 @@ Del lado del bot, la diferencia es una regla dura: **`iniciada` NO es un rechazo
 que solo encuentra una reversión `iniciada` va a `revision_manual`, no a `rechazada`: no se le
 puede decir a un cliente que su pago se rechazó cuando ni siquiera sabemos si se revirtió.
 
+### Reintentos: qué pasa cuando hay varias filas del mismo pago
+
+Una reversión que falla deja su fila en `iniciada`. Si alguien la reintenta y esta vez sale
+bien, el mismo `pago_id` termina con **dos** filas —una `iniciada` y una `completada`—, y sin
+una regla las dos respuestas de §4.1 aplicarían a la vez: `revision_manual` por una,
+`rechazada` por la otra.
+
+La regla es **por estado, no por fecha**, y son dos líneas:
+
+1. **Si existe alguna `completada` para ese `pago_id`, esa manda.** La reversión terminó; los
+   intentos anteriores son historia.
+2. Al escribir el `completada`, **las `iniciada` previas de ese pago pasan a `superada`** en
+   la misma transacción. Si el reintento también falla, siguen en `iniciada` y siguen
+   alarmando.
+
+Así la lista de reversiones a medias —`iniciada` sin `completada` posterior— **se limpia
+sola** cuando alguien arregla el problema, y no hay que ir a marcar nada a mano.
+
+### Quién y por qué
+
+Los dos campos de auditoría tienen que salir de algún lado, y hoy no salen de ninguno:
+`reversePaymentSchema` acepta **solo `credito_id` y `pago_id`**, el handler ignora el `user`
+que el middleware ya deriva del token, y el front no manda ningún motivo.
+
+| Campo | De dónde sale | ¿Obligatorio? |
+| --- | --- | --- |
+| `usuario_email` | Del **token**, vía el `user` que `authMiddleware` ya inyecta en el contexto (trae `id`, `email`, `role`) | **Sí** |
+| `motivo` | Un campo nuevo en el body, opcional | **No en v1** |
+
+**`usuario_email` no se acepta por el body, nunca.** Un campo de auditoría que lo llena quien
+ejecuta la acción no audita nada. Sale del token, que ya está verificado; solo hay que
+agregar `user` a la firma del handler —hay precedente en `payments.ts:1501`— y es cero trabajo
+del lado del front.
+
+**`motivo` queda opcional a propósito.** Ponerlo obligatorio implica un input nuevo en la
+pantalla de conta en carteraFront, y eso es otro trabajo, con otro dueño. Mientras no exista,
+hay que decirlo sin adornos: **la tabla responde "quién y cuándo", no "por qué"**. El campo
+queda listo para el día que se agregue el input, que es lo que hay que pedirle a Cobros.
+
 **Las URLs de las boletas se copian en el `iniciada`**, antes de los `delete`. Después ya no
 existirían.
 
@@ -1317,7 +1369,8 @@ Era adivinar el motivo de una muerte por la posición del cuerpo. Ahora hay acta
 Hoy, en producción, **nadie puede saber qué pagos se revirtieron ni quién lo hizo**: la
 reversión borra las boletas y, si era un parcial con hermanos, la fila entera del pago. No hay
 log ni tabla. Cualquier pregunta del tipo "¿qué pasó con este pago que estaba y ya no está?"
-hoy no tiene respuesta. Esta tabla la da, y el bot solo fue la excusa para verlo.
+hoy no tiene respuesta. Esta tabla da **qué, cuándo y quién** — y el *por qué* el día que el
+`motivo` tenga dónde escribirse. El bot solo fue la excusa para verlo.
 
 ---
 

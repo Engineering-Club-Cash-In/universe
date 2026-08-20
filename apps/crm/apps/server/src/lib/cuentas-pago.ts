@@ -138,7 +138,9 @@ export type ResultadoCuenta =
  * de alertas falsas al asesor, que es la forma más rápida de que deje de
  * mirarlas.
  */
-export function reconocerCuenta(leida: string | null | undefined): ResultadoCuenta {
+export function reconocerCuenta(
+	leida: string | null | undefined,
+): ResultadoCuenta {
 	const digitos = normalizarCuenta(leida ?? "");
 
 	if (digitos.length < MINIMO_DIGITOS) return { estado: "ilegible" };
@@ -146,7 +148,9 @@ export function reconocerCuenta(leida: string | null | undefined): ResultadoCuen
 	for (const cuenta of CUENTAS_PAGO) {
 		const nuestra = normalizarCuenta(cuenta.numero);
 		const [larga, corta] =
-			nuestra.length >= digitos.length ? [nuestra, digitos] : [digitos, nuestra];
+			nuestra.length >= digitos.length
+				? [nuestra, digitos]
+				: [digitos, nuestra];
 
 		if (corta.length >= MINIMO_DIGITOS && larga.endsWith(corta)) {
 			return { estado: "reconocida", cuenta };

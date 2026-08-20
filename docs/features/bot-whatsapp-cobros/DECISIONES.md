@@ -1234,6 +1234,9 @@ producción— y no para simplificar el bot. La 3 queda para cuando el job horar
 ```sql
 CREATE TABLE cartera.pagos_reversiones (
   reversion_id             serial PRIMARY KEY,
+  -- 'iniciada' se escribe FUERA de la transacción, antes de tocar nada;
+  -- 'completada' se marca DENTRO, al final. Ver "las dos marcas" abajo.
+  estado                   text NOT NULL DEFAULT 'iniciada',
   -- Sin FK a propósito: la fila de pagos_credito puede desaparecer, y este
   -- registro tiene que sobrevivirla. Ese es todo el punto.
   pago_id                  integer NOT NULL,
@@ -1257,18 +1260,54 @@ CREATE INDEX ON cartera.pagos_reversiones (pago_id);
 CREATE INDEX ON cartera.pagos_reversiones (credito_id);
 ```
 
-**El INSERT va dentro de la transacción que `reversePayment` ya abre**, y **antes** de los
-`delete`: si no, las URLs de las boletas ya no existirían para copiarlas. Si la reversión
-falla, el registro se va con ella — que es lo correcto.
+### Las dos marcas, porque la reversión no es del todo transaccional
+
+La primera versión de esta decisión decía "el INSERT va dentro de la transacción que
+`reversePayment` ya abre; si la reversión falla, el registro se va con ella". **Eso era falso**,
+y lo dice el propio código de cartera en un comentario (`reversePayment.ts:156-166`):
+
+> *"de acá para adelante hay tres cosas que escriben FUERA de esta transacción (usan el `db`
+> global, no el `tx`): `updateMora`, `reverseConvenioPayment` y
+> `processAndReplaceCreditInvestorsReverse`. Si el portero tirara después de ellas, el
+> rollback NO las desharía."*
+
+O sea que existe una ventana en la que **la mora ya se devolvió, el convenio ya cambió y el
+inversionista ya se ajustó, pero el pago no quedó revertido** — y con un INSERT puramente
+transaccional, además, sin ninguna huella de que eso pasó. Es la peor combinación: un
+desastre invisible.
+
+Por eso el registro se escribe en **dos momentos**:
+
+| Marca | Dónde se escribe | Qué significa |
+| --- | --- | --- |
+| **`iniciada`** | **Fuera** de la transacción, apenas pasa el portero (`revertirAbonoCapitalEspejo`) y **antes** de los `delete` | "Se empezó a revertir este pago". Sobrevive al rollback **a propósito**. |
+| **`completada`** | **Dentro** de la transacción, al final | "Se revirtió de verdad". Commitea junto con la reversión. |
+
+- **Todo salió bien** → la fila queda `completada`. Es el caso normal.
+- **Falló a mitad** → la fila queda `iniciada` para siempre, y **eso es exactamente la
+  alarma**: la lista de reversiones a medias que hoy no existe. Alguien tiene que mirar ese
+  crédito.
+
+Del lado del bot, la diferencia es una regla dura: **`iniciada` NO es un rechazo.** Una boleta
+que solo encuentra una reversión `iniciada` va a `revision_manual`, no a `rechazada`: no se le
+puede decir a un cliente que su pago se rechazó cuando ni siquiera sabemos si se revirtió.
+
+**Las URLs de las boletas se copian en el `iniciada`**, antes de los `delete`. Después ya no
+existirían.
 
 **Solo lo escribe `reversePayment`**, que es el único destructivo. `revertPaymentToPending` y
 `false-payment` no borran nada, así que su rastro se sigue viendo en la propia fila del pago.
+
+**Lo que esto no arregla.** Que esos tres helpers escriban fuera de la transacción sigue
+siendo un problema de cartera, y meterlos adentro es el mismo refactor de `updateMora` (13
+llamadas, 6 archivos) que ya se descartó en la opción 2. Lo que cambia es que ahora **queda
+registrado**: pasamos de una inconsistencia silenciosa a una con nombre, fecha y crédito.
 
 ### Qué se lleva puesto del contrato del paso 4
 
 | Antes | Ahora |
 | --- | --- |
-| Deducir "revertido" de una fila ausente, o de la firma `no_required` + autorización vacía + `banco_id NULL` | Una consulta: ¿aparece en `pagos_reversiones`? |
+| Deducir "revertido" de una fila ausente, o de la firma `no_required` + autorización vacía + `banco_id NULL` | Una consulta: ¿aparece en `pagos_reversiones` como `completada`? |
 | `revision_manual` cada vez que la reconciliación no encontraba nada (porque "nada" era ambiguo) | Solo para lo que no encaje en las tres respuestas posibles |
 
 Era adivinar el motivo de una muerte por la posición del cuerpo. Ahora hay acta.

@@ -122,7 +122,8 @@ sesión: es dato nuestro, y si lo mandara el bot se podría reiniciar para salta
       "monto": "6264.10",
       "fechaBoleta": "2026-08-18",
       "numeroAutorizacion": "123456789",
-      "cuentaDestino": "***4587",
+      "cuentaDestino": "3394002346",
+      "cuentaReconocida": { "banco": "Banrural", "bancoId": 2, "titular": "CUBE INVESTMENTS, S.A." },
       "observaciones": null
     },
     "camposFaltantes": [],
@@ -155,7 +156,7 @@ el árbol de gerencia:
 | `banco` | **Sí** | `banco: null` + `camposFaltantes: ["banco"]` + `bancosSugeridos` para que el cliente elija. |
 | `fechaBoleta` | No | Se usa **hoy** y se avisa en `camposFaltantes`. |
 | `numeroAutorizacion` | No | Va vacío. En cartera es opcional. |
-| `cuentaDestino` | No | Se compara contra las cuatro cuentas de `cuentasPago` — ver §13. |
+| `cuentaDestino` | No | Número **completo**, solo dígitos. Se compara contra las cuatro de `cuentasPago` — ver abajo y §13. |
 | `observaciones` | No | Lo que el modelo haya podido leer de más (concepto, referencia). |
 
 **`confianza`** resume la lectura para que el bot module el mensaje: `alta` (todo leído),
@@ -167,6 +168,25 @@ mora primero y después las cuotas, de la más vieja a la más nueva. Con eso, e
 crédito y los abonos parciales de la cuota actual alcanzan para decirle al cliente a dónde va
 su dinero, pero **la aplicación real la hace cartera al validar** el pago. Por eso viaja
 `estimado: true` y el mensaje dice "se aplicará", no "se aplicó".
+
+### Cómo se compara la cuenta destino
+
+Se piden **todos los dígitos**, no los últimos cuatro: la boleta los imprime completos y son
+**nuestras** cuentas, no las del cliente — no hay nada que enmascarar. Aun así, la comparación
+nunca es literal:
+
+1. De los dos lados se dejan **solo dígitos** (se van espacios, guiones y puntos).
+2. Coinciden si uno es **sufijo** del otro, con al menos **6 dígitos** en común.
+3. Si lo leído tiene menos de 6 dígitos, **no se compara**: queda `cuentaReconocida: null` con
+   `motivo: "ilegible"`, que **no** es lo mismo que "no es nuestra".
+
+El sufijo no es pereza, resuelve dos casos reales: el **cero inicial** de la cuenta de G&T
+(`01300039945`), que los modelos comen a menudo, y las boletas que imprimen la cuenta
+parcialmente. Comparar strings a secas marcaría como ajenos depósitos que sí fueron a nuestra
+cuenta, y el asesor recibiría alertas de algo que estaba bien.
+
+Cuando reconoce, `cuentaReconocida` dice cuál de las cuatro fue — eso le ahorra a conta buscar
+en qué banco entró el dinero.
 
 ### Errores
 
@@ -264,12 +284,9 @@ Un reintento sobre un borrador en `confirmando` **no vuelve a llamar a cartera**
 `409 CONFIRMACION_EN_CURSO`.
 
 **Y para no dejarlo colgado**, un job de reconciliación revisa los borradores que llevan más
-de 5 minutos en `confirmando` y le pregunta a cartera si esa boleta existe — la busca por la
-`r2_key`, que es única y quedó en la tabla `boletas` de cartera:
-
-- **existe** → se guardan los `pago_id` encontrados y el borrador pasa a
-  **`confirmada_a_verificar`**, no a `confirmada`;
-- **no existe** → el borrador pasa a **`revision_manual`**. **No vuelve a `leida`.**
+de 5 minutos en `confirmando` y le pregunta a cartera qué pasó con esa boleta, buscándola por
+la `r2_key`. **La tabla del final de esta sección es la única lista de transiciones**: dice
+qué hacer con cada una de las cuatro respuestas posibles.
 
 **Por qué "a verificar" y no "lista".** `insertPayment` **no es transaccional**: escribe las
 filas de `pagos_credito` y de `boletas` una por una contra el `db` global, sin envolver el
@@ -291,18 +308,20 @@ revirtieron— y devolver el borrador a `leida` en esa duda significa dejar que 
 reconfirme **un pago que contabilidad acaba de rechazar**.
 
 Eso se resuelve con el **registro de reversiones**
-([D-36](./DECISIONES.md#d-36--las-reversiones-dejan-registro)): antes de borrar, cartera
-guarda una fila con el pago, sus montos y **las URLs de las boletas que va a borrar**. Con eso
-la consulta ya no es ambigua:
+([D-36](./DECISIONES.md#d-36--las-reversiones-dejan-registro)): antes de borrar, cartera guarda
+una fila con el pago, sus montos y **las URLs de las boletas que va a borrar**, y la marca
+`completada` recién cuando la reversión terminó de verdad. Con eso la consulta ya no es
+ambigua:
 
-| Lo que se encuentra buscando por `r2_key` | Qué era | Qué se hace |
+| Lo que se encuentra buscando por `r2_key` | Qué era | Estado final del borrador |
 | --- | --- | --- |
-| Filas vivas en `boletas` | Se registró | `confirmada_a_verificar` (puede estar incompleto: §5.2) |
-| Nada vivo, **pero sí una reversión** | Se registró y ya lo rechazaron | Se cierra la boleta como **rechazada** y se le avisa al cliente |
-| Nada de nada | No se registró | Vuelve a `leida`: el cliente puede confirmar de nuevo |
+| Filas vivas en `boletas` | Se registró | **`confirmada_a_verificar`** (puede estar incompleto: §5.2) |
+| Nada vivo, y una reversión **`completada`** | Se registró y ya lo rechazaron | **`rechazada`** — y se le avisa al cliente |
+| Nada vivo, y una reversión **`iniciada`** | Una reversión quedó a medias en cartera | **`revision_manual`** — nadie puede decidir esto solo |
+| Nada de nada | No se registró | **`leida`** — el cliente puede confirmar de nuevo |
 
-`revision_manual` queda solo para lo que no encaje en esas tres, que a esta altura es un
-caso raro de verdad.
+Esa es la lista completa: **cuatro respuestas, cuatro transiciones**, sin zona gris. La
+tercera fila existe por cómo es `reversePayment` — ver [D-36](./DECISIONES.md#d-36--las-reversiones-dejan-registro).
 
 > El camino normal ni siquiera llega acá: si **cartera respondió con error**, el CRM lo sabe
 > en el mismo request, responde `PAGO_NO_REGISTRADO` y deja el borrador en `leida`. La
@@ -526,7 +545,8 @@ respuesta es directa:
 | `validated` / `capital_validated` | **validado** |
 | `pending` | sigue esperando, no se hace nada |
 | `payment_false = true` | **marcado falso** |
-| Aparece en `pagos_reversiones` | **revertido**, con fecha, usuario y motivo |
+| Aparece en `pagos_reversiones` como **`completada`** | **revertido**, con fecha, usuario y motivo |
+| Aparece como **`iniciada`** | Una reversión quedó a medias en cartera: **alerta a conta**, y al cliente **no** se le dice que se rechazó ([D-36](./DECISIONES.md#d-36--las-reversiones-dejan-registro)) |
 
 Esa última fila es la que existe gracias a
 [D-36](./DECISIONES.md#d-36--las-reversiones-dejan-registro). Antes de tenerla había que
@@ -535,7 +555,7 @@ Esa última fila es la que existe gracias a
 adivinar el motivo de una muerte por la posición del cuerpo. Ahora hay acta.
 
 Eso pide un endpoint de lectura: `GET /pagos/estado?ids=48213,48214`, que devuelve por cada id
-`{ existe, validation_status, payment_false, revertido: { fecha, usuario, motivo } | null }`.
+`{ existe, validation_status, payment_false, reversion: { estado, fecha, usuario, motivo } | null }`.
 
 Nada se pierde: el webhook adelanta el aviso, el job
 garantiza que ocurra ([D-35](./DECISIONES.md#d-35--el-webhook-adelanta-el-aviso-el-job-lo-garantiza)).
@@ -631,7 +651,8 @@ export const boletaPagoSchema = z.object({
   monto: z.string().optional().describe("Monto total en quetzales, solo dígitos y punto"),
   fechaBoleta: z.string().optional().describe("Fecha de la operación en formato YYYY-MM-DD"),
   numeroAutorizacion: z.string().optional().describe("No. de autorización, documento o referencia"),
-  cuentaDestino: z.string().optional().describe("Cuenta que recibe, últimos 4 dígitos"),
+  cuentaDestino: z.string().optional().describe("Cuenta que recibe, COMPLETA y solo dígitos, tal como está impresa"),
+  nombreCuentaDestino: z.string().optional().describe("A nombre de quién está la cuenta que recibe"),
   tipoOperacion: z.string().optional().describe("depósito, transferencia, cheque…"),
   observaciones: z.string().optional().describe("Concepto o descripción si aparece"),
   esBoletaDePago: z.boolean().describe("false si la imagen no es un comprobante bancario"),
@@ -777,9 +798,11 @@ CREATE TABLE bot_cobros_boletas (
   numero_autorizacion text,
   cuenta_destino      text,
   confianza           text,
-  estado              text NOT NULL,           -- leida | confirmando | confirmada |
-                                               -- confirmada_a_verificar | revision_manual |
-                                               -- descartada | fallida
+  -- Máquina de estados completa (§4.1):
+  --   leida ─► confirmando ─► confirmada | confirmada_a_verificar | rechazada
+  --                        └► revision_manual  (nadie puede decidir solo)
+  --   leida ─► descartada  (venció sin confirmar)   leida ─► fallida (cartera la rechazó)
+  estado              text NOT NULL,
   motivo_fallo        text,
   confirmando_desde   timestamptz,             -- para el job de reconciliación (§4.1)
   notificado_cliente_at timestamptz,           -- un mensaje por boleta, no por pago (§6)
@@ -890,8 +913,9 @@ en párrafos.
 | `fechaBoleta` futura | Se usa **hoy** y se anota en observaciones. Una boleta no puede ser de mañana. |
 | `fechaBoleta` de más de 90 días | Se registra, pero la observación se lo dice a conta. |
 | Crédito `CANCELADO` / `INCOBRABLE` | No se acepta la boleta: al asesor. |
-| Cuenta destino **no reconocida** | Se registra igual, pero la observación se lo dice a conta y se avisa al asesor. **No se bloquea**: puede ser una cuenta vieja, o que el modelo leyó mal el número. Al cliente no se le dice "pagaste mal". |
-| Cuenta destino reconocida | Se anota cuál de las cuatro fue, para que conta la concilie más rápido. |
+| Cuenta destino **reconocida** | Se anota cuál de las cuatro fue, para que conta concilie más rápido. |
+| Cuenta destino **ilegible** (menos de 6 dígitos leídos) | No se dice nada: no se pudo verificar, que no es lo mismo que estar mal. |
+| Cuenta destino **no reconocida** | Se registra igual, pero la observación se lo dice a conta y se avisa al asesor. **No se bloquea**: puede ser una cuenta vieja o un número mal leído. Al cliente **no** se le dice "pagaste mal". |
 | Sin cuota pendiente | `resumen.cuota_actual` en `null` → el crédito no tiene a qué aplicar. Al asesor. |
 
 ---

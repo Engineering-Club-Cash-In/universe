@@ -1,5 +1,5 @@
 import { createClientFromEnv, isNotFoundError } from "@repo/infornet";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { getOnlyRenapInfoController } from "../controllers/bot";
 import { infornetController } from "../controllers/buro";
 import { db } from "../db";
@@ -18,11 +18,7 @@ import { normalizarDpi, validarDpi } from "../utils/cui-validation";
 const REINTENTOS_AUTOMATICOS = 1;
 const ESPERA_ENTRE_REINTENTOS_MS = 800;
 
-/**
- * Cota para la consulta a RENAP: su `fetch` no lleva `AbortSignal` y el
- * controller es compartido con el bot, así que el límite se aplica acá para
- * que la aprobación no quede colgada indefinidamente (req. #5).
- */
+/** El `fetch` de RENAP no lleva `AbortSignal`, así que la cota se aplica acá */
 const TIMEOUT_RENAP_MS = 30_000;
 
 const MENSAJE_SIN_REGISTRO_BURO = "Sin registro en el buró de Infornet";
@@ -99,6 +95,8 @@ export type EstadoValidacionesOportunidad = {
 	buro: ValidacionOportunidad | null;
 	buroVigente: boolean;
 	aprobacionBloqueada: boolean;
+	/** Declara origen bot pero no hay evidencia de que el bot la validara */
+	origenBotSinEvidencia: boolean;
 	/** El resultado mostrado se ejecutó con un DPI distinto al que tiene hoy el lead */
 	dpiDesactualizado: boolean;
 	/** DPI con el que se ejecutó la última validación */
@@ -111,11 +109,7 @@ export type EstadoValidacionesOportunidad = {
 const esperar = (ms: number) =>
 	new Promise((resolve) => setTimeout(resolve, ms));
 
-/**
- * Corta la espera de una fuente externa que no responde. La promesa original
- * sigue corriendo (no se puede abortar desde acá), pero su resultado ya no
- * mantiene al analista esperando.
- */
+/** Corta la espera; la promesa original sigue corriendo pero ya no bloquea */
 async function conTimeout<T>(
 	ejecutar: () => Promise<T>,
 	ms: number,
@@ -135,10 +129,7 @@ async function conTimeout<T>(
 	}
 }
 
-/**
- * Ejecuta una función y reintenta una vez si el resultado no es exitoso
- * (fallos transitorios de las fuentes externas).
- */
+/** Reintenta una vez ante fallos transitorios de las fuentes externas */
 async function conReintento<T>(
 	ejecutar: () => Promise<T>,
 	esExitoso: (resultado: T) => boolean,
@@ -155,16 +146,7 @@ async function conReintento<T>(
 	return resultado;
 }
 
-/**
- * `obtenerEstudioPorDPI` reporta con el mismo mensaje a la persona que no
- * tiene registro en Infornet y a la consulta que reventó: `buscarCodigoPersona`
- * se traga la excepción y devuelve `null` en ambos casos (`buro.ts:150-173`).
- *
- * Sin esa distinción un cliente sin historial crediticio quedaba bloqueado
- * para siempre en el gate 30%→40%. Como `buro.ts` pertenece al flujo del bot y
- * no se toca, la clasificación se hace acá repitiendo la búsqueda contra el
- * mismo paquete `@repo/infornet`, y solo en la ruta de fallo.
- */
+/** `buro.ts` usa el mismo mensaje para "sin registro" y para un fallo real */
 async function clasificarFalloInfornet(
 	dpi: string,
 ): Promise<"tecnico" | "sin_registro"> {
@@ -177,10 +159,7 @@ async function clasificarFalloInfornet(
 
 		return personas.length === 0 ? "sin_registro" : "tecnico";
 	} catch (error) {
-		// Infornet NO devuelve una lista vacía cuando no tiene a la persona:
-		// lanza el código 00002 ("Ninguna entidad encontrada"). Cualquier otro
-		// error —conexión, límite de consultas, falta de autorización— sí es
-		// técnico y debe bloquear.
+		// Sin registro llega como excepción 00002, no como lista vacía
 		return isNotFoundError(error) ? "sin_registro" : "tecnico";
 	}
 }
@@ -232,26 +211,80 @@ async function cargarOportunidadConLead(opportunityId: string): Promise<{
 	return row ?? null;
 }
 
-function esExentaPorBot(oportunidad: {
+/** Evidencia de que el bot validó: importa que existan, no que sigan vigentes */
+async function tieneEvidenciaDelBot(leadDpi: string | null): Promise<boolean> {
+	if (!leadDpi) return false;
+
+	const dpi = normalizarDpi(leadDpi);
+
+	const [sincronizadoEnRenap] = await db
+		.select({ dpi: renapInfo.dpi })
+		.from(renapInfo)
+		.where(eqDpi(renapInfo.dpi, dpi))
+		.limit(1);
+
+	if (!sincronizadoEnRenap) return false;
+
+	const [estudioDelBuro] = await db
+		.select({ dpi: infornetPersonaCache.dpi })
+		.from(infornetPersonaCache)
+		.where(eq(infornetPersonaCache.dpi, dpi))
+		.limit(1);
+
+	return Boolean(estudioDelBuro);
+}
+
+export type ResolucionExencion = {
+	exento: boolean;
+	/** Dice ser del bot pero no hay rastro de que las validaciones corrieran */
+	origenBotSinEvidencia: boolean;
+};
+
+/** Único punto donde se resuelve la exención; lo usan el servicio y el gate */
+export async function resolverExencionPorBot(oportunidad: {
 	source: LeadSource | null;
 	leadSource: LeadSource | null;
-}): boolean {
-	return isOpportunityFromSource(
+	leadDpi: string | null;
+}): Promise<ResolucionExencion> {
+	const declaraOrigenBot = isOpportunityFromSource(
 		oportunidad.source,
 		"Whatsapp",
 		oportunidad.leadSource ?? "other",
 	);
+
+	if (!declaraOrigenBot) {
+		return { exento: false, origenBotSinEvidencia: false };
+	}
+
+	const conEvidencia = await tieneEvidenciaDelBot(oportunidad.leadDpi);
+
+	return { exento: conEvidencia, origenBotSinEvidencia: !conEvidencia };
 }
 
-/**
- * Ejecuta las validaciones de RENAP y Buró (Infornet) para una oportunidad
- * cuyo origen NO es el bot de WhatsApp, registrando cada resultado en la
- * bitácora `opportunity_validations`.
- *
- * Las oportunidades del bot quedan exentas (ya fueron validadas por su flujo)
- * y no generan registros ni llamadas a las fuentes externas.
- */
-export async function ejecutarValidaciones({
+/** Mutex por oportunidad: evita consultas duplicadas a Infornet, que se facturan */
+async function conLockDeOportunidad<T>(
+	opportunityId: string,
+	ejecutar: () => Promise<T>,
+): Promise<T> {
+	return db.transaction(async (tx) => {
+		await tx.execute(
+			sql`select pg_advisory_xact_lock(hashtextextended(${opportunityId}, 0))`,
+		);
+		return ejecutar();
+	});
+}
+
+/** Valida RENAP y Buró para oportunidades no-bot y registra el resultado */
+export async function ejecutarValidaciones(parametros: {
+	opportunityId: string;
+	userId?: string | null;
+}): Promise<ResultadoEjecucionValidaciones> {
+	return conLockDeOportunidad(parametros.opportunityId, () =>
+		ejecutarValidacionesInterno(parametros),
+	);
+}
+
+async function ejecutarValidacionesInterno({
 	opportunityId,
 	userId,
 }: {
@@ -270,7 +303,9 @@ export async function ejecutarValidaciones({
 		};
 	}
 
-	if (esExentaPorBot(oportunidad)) {
+	const exencion = await resolverExencionPorBot(oportunidad);
+
+	if (exencion.exento) {
 		return {
 			exento: true,
 			faltaDpi: false,
@@ -288,9 +323,7 @@ export async function ejecutarValidaciones({
 		};
 	}
 
-	// El DPI se valida antes de salir a RENAP: `getOnlyRenapInfoController` no lo
-	// hace (a diferencia del controller completo del bot), y un DPI mal tipeado
-	// termina en un 400 de Centinela con un mensaje genérico en inglés.
+	// `getOnlyRenapInfoController` no valida el formato; un DPI malo revienta en Centinela
 	const dpiValidado = validarDpi(oportunidad.leadDpi);
 
 	if (!dpiValidado.valid) {
@@ -347,8 +380,7 @@ export async function ejecutarValidaciones({
 			ejecutadoPor: userId ?? null,
 		});
 
-		// Infornet exige que el DPI exista en renap_info; si hay una
-		// sincronización previa se puede continuar con el buró.
+		// Infornet exige el DPI en renap_info: con sincronización previa se continúa
 		const [renapPrevio] = await db
 			.select({ dpi: renapInfo.dpi })
 			.from(renapInfo)
@@ -376,12 +408,8 @@ export async function ejecutarValidaciones({
 		});
 	}
 
-	// 2. Buró (Infornet): obtiene el estudio (usa el caché de 30 días si
-	// está vigente) y evalúa el veredicto.
-	//
-	// El fallo se clasifica ANTES de reintentar: el reintento existe para
-	// fallos transitorios, y volver a consultar no va a hacer aparecer a una
-	// persona que Infornet no tiene registrada.
+	// 2. Buró: usa el caché de 30 días. El fallo se clasifica ANTES de reintentar,
+	// porque reconsultar no hace aparecer a quien Infornet no tiene
 	let estudio = await infornetController.obtenerEstudioPorDPI(dpi);
 	let buroSinRegistro = false;
 
@@ -421,8 +449,7 @@ export async function ejecutarValidaciones({
 		return {
 			exento: false,
 			faltaDpi: false,
-			// Sin registro no es un fallo de la fuente: la persona simplemente no
-			// tiene historial crediticio, así que no bloquea la aprobación.
+			// Sin registro no es fallo de la fuente: no bloquea
 			errorTecnico: !buroSinRegistro,
 			sinRegistroBuro: buroSinRegistro,
 			mensaje: buroSinRegistro ? undefined : `Buró: ${mensajeBuro}`,
@@ -438,9 +465,7 @@ export async function ejecutarValidaciones({
 		};
 	}
 
-	// `analizarRiesgo` vuelve a pedir el estudio internamente (buro.ts:297); con
-	// el caché recién escrito eso no cuesta otra llamada a Infornet. Se reusa tal
-	// cual para no duplicar acá la fórmula de score/nivel/alertas.
+	// `analizarRiesgo` repite la consulta pero pega en el caché recién escrito
 	const analisisRiesgo = await infornetController.analizarRiesgo(dpi);
 	const veredicto = evaluarBuro(analisisRiesgo);
 
@@ -512,10 +537,7 @@ export async function ejecutarValidaciones({
 	};
 }
 
-/**
- * Lo que quedó guardado de RENAP para ese DPI. No consulta la API: lee la
- * tabla que el propio flujo sincroniza.
- */
+/** Lee `renapinfo`, no consulta la API */
 async function obtenerDetalleRenap(dpi: string): Promise<DetalleRenap | null> {
 	const [fila] = await db
 		.select()
@@ -547,10 +569,7 @@ async function obtenerDetalleRenap(dpi: string): Promise<DetalleRenap | null> {
 	};
 }
 
-/**
- * Resumen del estudio de Infornet que quedó en caché. Tampoco consulta la API:
- * solo expone lo que ya se guardó.
- */
+/** Lee el caché de Infornet, no consulta la API */
 async function obtenerDetalleBuro(dpi: string): Promise<DetalleBuro | null> {
 	const [fila] = await db
 		.select()
@@ -574,10 +593,7 @@ async function obtenerDetalleBuro(dpi: string): Promise<DetalleBuro | null> {
 	};
 }
 
-/**
- * Consulta el estado de las validaciones de una oportunidad: exención del
- * bot, DPI faltante y últimos resultados de RENAP/Buró de la bitácora.
- */
+/** Estado de las validaciones: exención, DPI y últimos resultados de la bitácora */
 export async function getValidaciones({
 	opportunityId,
 }: {
@@ -589,7 +605,9 @@ export async function getValidaciones({
 		throw new OportunidadNoEncontradaError();
 	}
 
-	if (esExentaPorBot(oportunidad)) {
+	const exencion = await resolverExencionPorBot(oportunidad);
+
+	if (exencion.exento) {
 		return {
 			exento: true,
 			faltaDpi: false,
@@ -598,6 +616,7 @@ export async function getValidaciones({
 			buro: null,
 			buroVigente: false,
 			aprobacionBloqueada: false,
+			origenBotSinEvidencia: false,
 			dpiDesactualizado: false,
 			dpiValidado: null,
 			detalleRenap: null,
@@ -618,9 +637,7 @@ export async function getValidaciones({
 		? new Date(buro.expiraEn) > new Date()
 		: false;
 
-	// Un error de RENAP solo bloquea cuando abortó antes del buró; si el buró
-	// alcanzó a correr (había sincronización previa en renap_info) la
-	// aprobación sigue habilitada.
+	// RENAP en error solo bloquea si abortó antes del buró
 	const aprobacionBloqueada = buro
 		? buro.estado === "error"
 		: renap?.estado === "error";
@@ -629,16 +646,13 @@ export async function getValidaciones({
 		? normalizarDpi(oportunidad.leadDpi)
 		: null;
 
-	// Si le cambiaron el DPI al lead después de validar, el resultado que se
-	// muestra pertenece a otra persona. No bloquea nada (el gate revalida con el
-	// DPI vigente), pero el analista tiene que verlo.
+	// DPI cambiado: el resultado es de otra persona. No bloquea, pero se avisa
 	const dpiValidado = buro?.dpi ?? renap?.dpi ?? null;
 	const dpiDesactualizado = Boolean(
 		dpiValidado && dpiActual && dpiValidado !== dpiActual,
 	);
 
-	// El detalle se arma con el DPI que se validó, para que coincida con el
-	// veredicto que se está mostrando.
+	// El detalle usa el DPI validado, para que coincida con el veredicto mostrado
 	const [detalleRenap, detalleBuro] = dpiValidado
 		? await Promise.all([
 				obtenerDetalleRenap(dpiValidado),
@@ -654,6 +668,7 @@ export async function getValidaciones({
 		buro,
 		buroVigente,
 		aprobacionBloqueada: aprobacionBloqueada ?? false,
+		origenBotSinEvidencia: exencion.origenBotSinEvidencia,
 		dpiDesactualizado,
 		dpiValidado,
 		detalleRenap,

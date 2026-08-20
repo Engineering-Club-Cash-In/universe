@@ -75,7 +75,6 @@ import {
 	getMissingLeadFieldsForContracts,
 } from "../lib/lead-helpers";
 import { canSyncNitToOpportunity } from "../lib/lead-nit-sync";
-import { isOpportunityFromSource } from "../lib/lead-opportunity-source";
 import { getLeadSourceLabel } from "../lib/lead-sources";
 import { getStageVehicleRequirementError } from "../lib/opportunity-stage-guard";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
@@ -93,7 +92,10 @@ import {
 } from "../lib/vehicle-helpers";
 import { carteraBackClient } from "../services/cartera-back-client";
 import { scoreLead } from "../services/lead-scoring";
-import { ejecutarValidaciones } from "../services/opportunity-validations";
+import {
+	ejecutarValidaciones,
+	resolverExencionPorBot,
+} from "../services/opportunity-validations";
 import type { StatusCreditEnum } from "../types/cartera-back";
 import { validarDpi } from "../utils/cui-validation";
 import { createNotification } from "./notifications";
@@ -416,8 +418,7 @@ export function buildCarteraMatchedClientRows(params: {
 	const rows: MatchedClientRow[] = [];
 	const leadOpportunities = params.opportunityOwnerId
 		? params.leadOpportunities.filter(
-				(opportunity) =>
-					opportunity.assignedTo === params.opportunityOwnerId,
+				(opportunity) => opportunity.assignedTo === params.opportunityOwnerId,
 			)
 		: params.leadOpportunities;
 
@@ -434,12 +435,12 @@ export function buildCarteraMatchedClientRows(params: {
 			rowId: `${params.lead.id}-${sifco}`,
 			opportunities: leadOpportunities,
 			creditAnalysis: matchingOpportunity
-				? (params.creditAnalysisByOpportunityId.get(matchingOpportunity.id) ?? null)
+				? (params.creditAnalysisByOpportunityId.get(matchingOpportunity.id) ??
+					null)
 				: null,
 			totalClosedValue: getCarteraCreditAmount(credit),
-			closedOpportunitiesCount: leadOpportunities.filter(
-				(opp) => opp.isClosed,
-			).length,
+			closedOpportunitiesCount: leadOpportunities.filter((opp) => opp.isClosed)
+				.length,
 			crmMatchStatus: "matched",
 			carteraCredit: buildCarteraOnlyClientRow(credit).carteraCredit,
 		});
@@ -1342,9 +1343,12 @@ export const crmRouter = {
 					maxPayment: z.number().min(0).optional(),
 					maxCreditAmount: z.number().min(0).optional(),
 				})
-				.refine((data) => data.coDebtorId || (data.leadId && data.opportunityId), {
-					message: "Debe proporcionar leadId y opportunityId, o coDebtorId",
-				})
+				.refine(
+					(data) => data.coDebtorId || (data.leadId && data.opportunityId),
+					{
+						message: "Debe proporcionar leadId y opportunityId, o coDebtorId",
+					},
+				)
 				.refine((data) => !(data.leadId && data.coDebtorId), {
 					message: "No puede guardar un lead y un co-deudor a la vez",
 				}),
@@ -1505,9 +1509,12 @@ export const crmRouter = {
 					opportunityId: z.string().uuid().optional(),
 					coDebtorId: z.string().uuid().optional(),
 				})
-				.refine((data) => data.coDebtorId || (data.leadId && data.opportunityId), {
-					message: "Debe proporcionar leadId y opportunityId, o coDebtorId",
-				})
+				.refine(
+					(data) => data.coDebtorId || (data.leadId && data.opportunityId),
+					{
+						message: "Debe proporcionar leadId y opportunityId, o coDebtorId",
+					},
+				)
 				.refine((data) => !(data.leadId && data.coDebtorId), {
 					message: "No puede resetear un lead y un co-deudor a la vez",
 				}),
@@ -3127,13 +3134,15 @@ export const crmRouter = {
 			// después de los chequeos de etapa y estado para no gastar llamadas
 			// a las fuentes externas en aprobaciones que igual van a fallar.
 			if (input.approved && !input.bypassValidation) {
-				const exentaPorBot = isOpportunityFromSource(
-					opportunity[0].source,
-					"Whatsapp",
-					opportunity[0].leadSource ?? "other",
-				);
+				// La exención se resuelve en el servicio: `source` es editable por el
+				// usuario, así que además exige evidencia de que el bot validó.
+				const exencion = await resolverExencionPorBot({
+					source: opportunity[0].source,
+					leadSource: opportunity[0].leadSource,
+					leadDpi: opportunity[0].leadDpi,
+				});
 
-				if (!exentaPorBot) {
+				if (!exencion.exento) {
 					// El DPI como texto es obligatorio en la ficha del lead,
 					// en paralelo al documento DPI exigido arriba
 					if (!opportunity[0].leadDpi) {
@@ -6366,7 +6375,10 @@ export const crmRouter = {
 					)
 					.map((ca) => [
 						ca.opportunityId,
-						{ leadId: ca.leadId, suggestedPaymentDays: ca.suggestedPaymentDays },
+						{
+							leadId: ca.leadId,
+							suggestedPaymentDays: ca.suggestedPaymentDays,
+						},
 					]),
 			);
 

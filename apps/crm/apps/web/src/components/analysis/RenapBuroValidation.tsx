@@ -30,6 +30,8 @@ type EstadoValidacion = "aprobado" | "rechazado" | "error" | "sin_registro";
 
 interface RenapBuroValidationProps {
 	opportunityId: string;
+	/** Avisa a la página cuándo hay una validación en curso, para no dejar aprobar mientras tanto */
+	onEjecucionChange?: (ejecutando: boolean) => void;
 }
 
 const alertaLabels: Record<string, string> = {
@@ -129,6 +131,7 @@ function formatearFecha(fecha: string | Date | null | undefined): string {
 
 export function RenapBuroValidation({
 	opportunityId,
+	onEjecucionChange,
 }: RenapBuroValidationProps) {
 	const [isExecuting, setIsExecuting] = useState(false);
 	const [detalleRenapAbierto, setDetalleRenapAbierto] = useState(false);
@@ -148,6 +151,7 @@ export function RenapBuroValidation({
 		if (isExecuting) return;
 		try {
 			setIsExecuting(true);
+			onEjecucionChange?.(true);
 			const resultado = await client.ejecutarValidacionesRenapBuro({
 				opportunityId,
 			});
@@ -165,8 +169,9 @@ export function RenapBuroValidation({
 			);
 		} finally {
 			setIsExecuting(false);
+			onEjecucionChange?.(false);
 		}
-	}, [isExecuting, opportunityId, refetch]);
+	}, [isExecuting, opportunityId, refetch, onEjecucionChange]);
 
 	// Auto-ejecutar al abrir la página si nunca se han validado. Con un
 	// resultado previo (aunque esté vencido o con error) se deja al analista
@@ -270,6 +275,18 @@ export function RenapBuroValidation({
 							El cliente no tiene DPI capturado en su ficha. Es obligatorio para
 							aprobar el análisis: captúralo en el detalle del lead y vuelve a
 							esta página.
+						</AlertDescription>
+					</Alert>
+				)}
+
+				{data.origenBotSinEvidencia && (
+					<Alert className="border-blue-300 bg-blue-50 dark:bg-blue-950/30">
+						<Info className="h-4 w-4" />
+						<AlertTitle>Origen WhatsApp sin validación previa</AlertTitle>
+						<AlertDescription>
+							La oportunidad tiene origen WhatsApp, pero no hay registro de que
+							el bot haya ejecutado RENAP y Buró para este cliente, así que se
+							valida como cualquier otra.
 						</AlertDescription>
 					</Alert>
 				)}

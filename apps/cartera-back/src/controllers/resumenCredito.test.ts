@@ -12,6 +12,7 @@ const base: InsumosResumen = {
   credito: {
     credito_id: 1,
     numero_credito_sifco: "01010214120240",
+    usuario_id: 1049,
     capital: "198252.40",
     cuota: "5891.15",
     plazo: 84,

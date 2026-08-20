@@ -1067,7 +1067,7 @@ export const especificacionBotCobros = {
 				description: [
 					"Descarga la foto, la lee con IA y devuelve **lo que entendimos** para que el cliente confirme.",
 					"",
-					"⚠️ **Este endpoint NO registra el pago.** Eso lo hace `/boleta/confirmar`, que todavía no está disponible.",
+					"⚠️ **Este endpoint NO registra el pago.** Eso lo hace `/boleta/confirmar`, con el `boletaId` que devuelve acá.",
 					"",
 					"**Qué pasa por dentro, en orden:** se comprueba que el crédito sea de quien pregunta → se descarga la imagen (única vez que salimos a tu nube) → se lee con IA → se guarda en nuestro almacenamiento → se cruza con el crédito.",
 					"",
@@ -1424,6 +1424,356 @@ export const especificacionBotCobros = {
 												codigo: "ALMACENAMIENTO_NO_DISPONIBLE",
 												mensaje:
 													"No pudimos guardar tu boleta en este momento. Intenta de nuevo en unos minutos.",
+											},
+										},
+									},
+									SERVICIO_NO_DISPONIBLE: {
+										summary: "El servidor no tiene configurada la API key",
+										value: {
+											success: false,
+											error: {
+												codigo: "SERVICIO_NO_DISPONIBLE",
+												mensaje:
+													"El servicio no está disponible en este momento.",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		"/api/bot/cobros/boleta/confirmar": {
+			post: {
+				tags: ["Pago con boleta"],
+				summary: "El cliente confirmó: registra el pago",
+				description: [
+					"Registra el pago en cartera con los datos del borrador que dejó `/boleta/leer`.",
+					"",
+					"**Lo único que se manda además del `boletaId` es `bancoId`**, y solo cuando la lectura no reconoció el banco o el cliente lo corrigió. El monto, la fecha y la autorización **no se aceptan por el request**: salen del borrador. Es la diferencia entre que el monto lo dicte la boleta y que lo dicte quien está del otro lado del chat.",
+					"",
+					"**Si el cliente dice que los datos están mal, no llames acá:** pedile otra foto y volvé a `/boleta/leer`. Ese es el reintento.",
+					"",
+					"**El pago queda en validación de contabilidad**, no acreditado. Cuando lo validen te avisamos por el canal de notificaciones.",
+					"",
+					"| Campo | Nota |",
+					"| --- | --- |",
+					"| `pagoIds` | Es una **lista**. Una boleta que alcanza para dos cuotas atrasadas crea dos pagos, cada uno con su id. Puede venir **vacía** y eso no es un error: el pago quedó registrado igual y lo estamos terminando de identificar por dentro |",
+					"| `cuotasCubiertas` | Los números de cuota que tocó el pago |",
+					"| `estado` | Siempre `en_validacion` en esta respuesta |",
+					"| `mensajes` | Ya escritos para el chat, se pegan tal cual |",
+					"",
+					"### Reintentar el mismo `boletaId`",
+					"",
+					"**Nunca crea un segundo pago.** Según en qué punto esté el borrador vas a recibir:",
+					"",
+					"| Situación | Respuesta |",
+					"| --- | --- |",
+					"| Ya se registró | `409 BOLETA_YA_CONFIRMADA`, **con los `pagoIds` en `data`** |",
+					"| Hay una confirmación a medias | `409 CONFIRMACION_EN_CURSO`. Esperá unos minutos y volvé a preguntar |",
+					"| No contestamos a tiempo | `503 CARTERA_NO_DISPONIBLE`. **No reintentes automáticamente**: lo estamos verificando por dentro y te avisamos |",
+				].join("\n"),
+				operationId: "confirmarBoleta",
+				requestBody: {
+					required: true,
+					content: {
+						"application/json": {
+							schema: {
+								type: "object",
+								required: ["referencia", "numeroSifco", "boletaId"],
+								properties: {
+									referencia: {
+										type: "string",
+										format: "uuid",
+										description: "La misma del paso 1, ya canjeada.",
+									},
+									numeroSifco: {
+										type: "string",
+										description: "El crédito que eligió en el menú.",
+									},
+									boletaId: {
+										type: "string",
+										format: "uuid",
+										description: "El que devolvió `/boleta/leer`.",
+									},
+									bancoId: {
+										type: "integer",
+										description:
+											"Solo si `lectura.banco` vino en `null` o el cliente lo corrigió. Se toma de `bancosSugeridos`.",
+									},
+								},
+							},
+							example: {
+								referencia: "3b530493-1d4e-4f6a-9b7c-2e5d8a1f0c33",
+								numeroSifco: "01010214113290",
+								boletaId: "b3d1f0a4-77c2-4c19-9a56-0f2b8e4d1a90",
+								bancoId: 2,
+							},
+						},
+					},
+				},
+				responses: {
+					"200": {
+						description:
+							"El pago quedó registrado y en validación de contabilidad.",
+						content: {
+							"application/json": {
+								example: {
+									success: true,
+									data: {
+										pagoIds: [48213, 48214],
+										cuotasCubiertas: [3, 4],
+										estado: "en_validacion",
+										monto: "12528.20",
+										banco: "Banco Industrial",
+										fechaBoleta: "2026-08-18",
+										numeroAutorizacion: "123456789",
+										mensajes: {
+											titulo: "✅ *Pago recibido · Q12,528.20*",
+											resumen:
+												"✅ *Pago recibido · Q12,528.20*\n\nEstá en validación. Te avisamos cuando se acredite.",
+											completo:
+												"✅ *Pago recibido · Q12,528.20*\n\nYa registramos tu pago. Nuestro equipo de contabilidad tiene que validar los fondos.\n\n📲 Te avisamos por este mismo medio cuando quede acreditado.",
+										},
+									},
+								},
+							},
+						},
+					},
+					"400": {
+						description: "Faltan datos, o el banco no sirve.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								examples: {
+									PARAMETROS_INVALIDOS: {
+										summary: "Falta referencia, crédito o boletaId",
+										value: {
+											success: false,
+											error: {
+												codigo: "PARAMETROS_INVALIDOS",
+												mensaje: "Faltan datos para registrar tu pago.",
+											},
+										},
+									},
+									BANCO_REQUERIDO: {
+										summary:
+											"No se reconoció el banco y no vino `bancoId`. Pedile al cliente que elija de `bancosSugeridos`",
+										value: {
+											success: false,
+											error: {
+												codigo: "BANCO_REQUERIDO",
+												mensaje: "Necesitamos saber de qué banco es tu boleta.",
+											},
+										},
+									},
+									BANCO_INVALIDO: {
+										summary: "Ese `bancoId` no está en el catálogo",
+										value: {
+											success: false,
+											error: {
+												codigo: "BANCO_INVALIDO",
+												mensaje: "Ese banco no está en nuestra lista.",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					"401": {
+						description: "La sesión no sirve. **Ruteá por `codigo`.**",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								examples: {
+									SESION_VENCIDA: {
+										summary: "Pasaron 30 min desde que validó el código",
+										value: {
+											success: false,
+											error: {
+												codigo: "SESION_VENCIDA",
+												mensaje:
+													"Por seguridad tu sesión expiró. Vuelve a identificarte para continuar.",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					"404": {
+						description: "No encontramos el borrador o el crédito.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								examples: {
+									BORRADOR_NO_ENCONTRADO: {
+										summary:
+											"Ese `boletaId` no existe o es de otra conversación",
+										value: {
+											success: false,
+											error: {
+												codigo: "BORRADOR_NO_ENCONTRADO",
+												mensaje:
+													"No encontramos esa boleta. Mándanos la foto de nuevo, por favor.",
+											},
+										},
+									},
+									CREDITO_SIN_DATOS: {
+										summary: "Está en el CRM pero no en cartera",
+										value: {
+											success: false,
+											error: {
+												codigo: "CREDITO_SIN_DATOS",
+												mensaje:
+													"No pudimos consultar la información de ese crédito. Por favor contacta a soporte.",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					"409": {
+						description:
+							"El borrador no está en condiciones de registrarse. **Ninguno de estos crea un pago nuevo.**",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								examples: {
+									BOLETA_YA_CONFIRMADA: {
+										summary:
+											"Ya se registró. Los `pagoIds` vienen en `data` — no vuelvas a llamar",
+										value: {
+											success: false,
+											error: {
+												codigo: "BOLETA_YA_CONFIRMADA",
+												mensaje:
+													"Ese pago ya lo registramos. Está en validación y te avisamos cuando se acredite.",
+											},
+											data: { pagoIds: [48213, 48214] },
+										},
+									},
+									CONFIRMACION_EN_CURSO: {
+										summary:
+											"Hay otra confirmación de ESTA misma boleta a medio camino",
+										value: {
+											success: false,
+											error: {
+												codigo: "CONFIRMACION_EN_CURSO",
+												mensaje:
+													"Ya estamos registrando ese pago. Dame un momento y te confirmo.",
+											},
+										},
+									},
+									BOLETA_DUPLICADA: {
+										summary:
+											"Esa referencia ya figura registrada. **No le digas al cliente que está duplicada**: lo revisa un asesor",
+										value: {
+											success: false,
+											error: {
+												codigo: "BOLETA_DUPLICADA",
+												mensaje:
+													"Necesitamos revisar tu boleta antes de aplicarla. Tu asesor te va a contactar.",
+											},
+										},
+									},
+									BORRADOR_NO_CONFIRMABLE: {
+										summary:
+											"El borrador quedó en un estado del que no se sale reintentando. El estado va en `data`",
+										value: {
+											success: false,
+											error: {
+												codigo: "BORRADOR_NO_CONFIRMABLE",
+												mensaje:
+													"Esa boleta ya no se puede registrar. Tu asesor te va a ayudar.",
+											},
+											data: { estado: "rechazada" },
+										},
+									},
+									CREDITO_NO_ACEPTA_BOLETA: {
+										summary: "El crédito se quedó sin ninguna cuota abierta",
+										value: {
+											success: false,
+											error: {
+												codigo: "CREDITO_NO_ACEPTA_BOLETA",
+												mensaje:
+													"Este crédito no puede recibir pagos por este medio. Tu asesor te va a ayudar.",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					"410": {
+						description:
+							"Pasaron más de 15 minutos desde la lectura. Pedile la foto de nuevo y volvé a `/boleta/leer`.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								example: {
+									success: false,
+									error: {
+										codigo: "BORRADOR_VENCIDO",
+										mensaje:
+											"Pasó demasiado tiempo desde que nos mandaste tu boleta. Mándanos la foto de nuevo, por favor.",
+									},
+								},
+							},
+						},
+					},
+					"500": {
+						description: "Error inesperado.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								example: {
+									success: false,
+									error: {
+										codigo: "ERROR_INTERNO",
+										mensaje:
+											"Ocurrió un error. Intenta de nuevo en unos minutos.",
+									},
+								},
+							},
+						},
+					},
+					"502": {
+						description:
+							"Cartera rechazó el pago. **No se registró nada** y el cliente puede volver a confirmar.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								example: {
+									success: false,
+									error: {
+										codigo: "PAGO_NO_REGISTRADO",
+										mensaje:
+											"No pudimos registrar tu pago en este momento. Intenta de nuevo en unos minutos.",
+									},
+								},
+							},
+						},
+					},
+					"503": {
+						description:
+							"⚠️ **No sabemos si el pago se registró.** No reintentes automáticamente: lo verificamos por dentro en los próximos minutos y el resultado te llega por el canal de notificaciones.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								examples: {
+									CARTERA_NO_DISPONIBLE: {
+										summary: "Cartera no respondió a tiempo",
+										value: {
+											success: false,
+											error: {
+												codigo: "CARTERA_NO_DISPONIBLE",
+												mensaje:
+													"Estamos verificando tu pago. En unos minutos te confirmamos por este medio.",
 											},
 										},
 									},

@@ -296,6 +296,11 @@ leida  ──(se marca)──►  confirmando  ──(cartera respondió)──�
 Un reintento sobre un borrador en `confirmando` **no vuelve a llamar a cartera**: responde
 `409 CONFIRMACION_EN_CURSO`.
 
+Y un reintento sobre un borrador que ya murió —`fallida`, `rechazada`, `revision_manual`,
+`descartada`— responde `409 BORRADOR_NO_CONFIRMABLE` con el estado en `data`. Son callejones
+distintos, pero ninguno se destraba reintentando la confirmación: decirle al cliente "probá
+otra vez" sería mandarlo a chocar contra la misma pared.
+
 **Y para no dejarlo colgado**, un job de reconciliación revisa los borradores que llevan más
 de 5 minutos en `confirmando` y le pregunta a cartera qué pasó con esa boleta, buscándola por
 la `r2_key`. **La tabla del final de esta sección es la única lista de transiciones**: dice
@@ -331,10 +336,30 @@ ambigua:
 | Filas vivas en `boletas` | Se registró | **`confirmada_a_verificar`** (puede estar incompleto: §5.2) |
 | Nada vivo, y **alguna** reversión `completada` | Se registró y ya lo rechazaron | **`rechazada`** — y se le avisa al cliente |
 | Nada vivo, y solo reversiones `iniciada` | Una reversión quedó a medias en cartera | **`revision_manual`** — nadie puede decidir esto solo |
-| Nada de nada | No se registró | **`leida`** — el cliente puede confirmar de nuevo |
+| Nada de nada, **y cartera confirma que no hay un pago suyo en vuelo** | No se registró | **`leida`** — el cliente puede confirmar de nuevo |
 
 Esa es la lista completa: **cuatro respuestas, cuatro transiciones**, sin zona gris. La
 tercera fila existe por cómo es `reversePayment` — ver [D-36](./DECISIONES.md#d-36--las-reversiones-dejan-registro).
+
+**La cuarta lleva una condición de más, y no es un detalle.** Que el CRM se haya cansado de
+esperar **no cancela nada** del lado de cartera: `insertPayment` toma un advisory lock por
+crédito como primera cosa y puede quedarse minutos esperándolo si hay otro pago del mismo
+crédito adelante. Todo ese tiempo el request original sigue vivo y va a escribir cuando le
+toque el turno. "No encontré filas" prueba que **todavía** no se registró, no que no se vaya a
+registrar.
+
+Devolver el borrador a `leida` en esa duda habilita un segundo `newPayment` mientras el
+primero sigue en cola: **dos pagos reales**, que es exactamente lo que toda esta máquina existe
+para evitar. Por eso `GET /pagos-por-boleta` acepta un `credito_id` opcional y responde además
+`operacion_en_curso`, mirando `pg_locks`: si no hay ninguna fila de advisory lock para ese
+crédito —ni tomada ni esperando— no hay ningún `insertPayment` en vuelo, y recién ahí se
+reabre. Con `true`, o sin el dato, el borrador se queda en `confirmando` y se reintenta en la
+corrida siguiente.
+
+**Y una válvula de escape.** Un borrador que lleva **24 horas** en `confirmando` pasa a
+`revision_manual`: significa que cartera lleva un día sin poder contestar o que hay un pago
+trabado desde ayer, y las dos cosas necesitan a una persona. Sin ese tope se reintentarían para
+siempre y en silencio.
 
 **Si un pago tiene varias reversiones** —falló una y alguien la reintentó—, manda la
 `completada`: una sola que haya terminado bien alcanza para cerrar la boleta como rechazada.
@@ -348,8 +373,8 @@ Que `insertPayment` no sea atómico es un problema de cartera que ya existía y 
 feature; acá solo se evita que el bot lo convierta en un pago a medias silencioso
 ([D-34](./DECISIONES.md#d-34--la-confirmación-se-protege-con-estado-no-con-idempotency-key)).
 
-Eso necesita un endpoint de lectura en cartera (`GET /pagos-por-boleta?url=…`), que es
-aditivo y no toca el camino de escritura. **No se mete una idempotency key en `newPayment`**:
+Eso necesita un endpoint de lectura en cartera (`GET /pagos-por-boleta?url=…&credito_id=…`),
+que es aditivo y no toca el camino de escritura. **No se mete una idempotency key en `newPayment`**:
 ese endpoint mueve dinero y ya fue decisión no meterle idempotencia
 ([D-34](./DECISIONES.md#d-34--la-confirmación-se-protege-con-estado-no-con-idempotency-key)).
 
@@ -363,6 +388,7 @@ ese endpoint mueve dinero y ya fue decisión no meterle idempotencia
 | 401 | `REFERENCIA_INVALIDA` / `SESION_VENCIDA` | Igual que arriba. |
 | 404 | `BORRADOR_NO_ENCONTRADO` | El `boletaId` no existe o es de otra sesión. |
 | 410 | `BORRADOR_VENCIDO` | Pasaron más de 15 minutos desde la lectura. Pedir la foto de nuevo. |
+| 409 | `BORRADOR_NO_CONFIRMABLE` | El borrador quedó en un estado del que no se sale reintentando: `fallida`, `rechazada`, `revision_manual`, `descartada`. El estado va en `data`. |
 | 409 | `BOLETA_YA_CONFIRMADA` | Ese borrador ya se registró. Va con los `pagoIds` en `data` — **no se registra otro pago**. |
 | 409 | `CONFIRMACION_EN_CURSO` | Hay una confirmación a medias de este mismo borrador (§4.1). Se responde sin volver a llamar a cartera. |
 | 409 | `BOLETA_DUPLICADA` | Misma autorización + banco ya registrada. Ver §9. |

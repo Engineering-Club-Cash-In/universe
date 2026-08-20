@@ -1470,6 +1470,18 @@ export class CarteraBackValidationError extends CarteraBackError {
 export interface ResumenCreditoResponse {
 	numero_credito_sifco: string;
 	credito_id: number;
+	/**
+	 * El **cliente dueño del crédito** en `cartera.usuarios`.
+	 *
+	 * No es el asesor ni un usuario del CRM: `newPayment` lo exige en el body y
+	 * viene con el crédito, así que no hay nada que emparejar de este lado.
+	 *
+	 * Opcional en el tipo porque cartera lo agregó en la capa B del bot: una
+	 * instancia sin desplegar todavía responde sin el campo, y eso tiene que
+	 * fallar donde se usa —con un mensaje claro— y no en un `undefined` que
+	 * viaja hasta el body del pago.
+	 */
+	usuario_id?: number;
 	status_credito: string;
 	/** Capital original del crédito. */
 	capital: string;
@@ -1510,4 +1522,104 @@ export interface ResumenCreditoResponse {
 	numero_poliza: string | null;
 	/** El asesor que lleva el crédito. `null` si no tiene asignado. */
 	asesor: { nombre: string; telefono: string | null } | null;
+}
+
+// ============================================================================
+// Registrar un pago (`POST /newPayment`) y rastrearlo después
+// ============================================================================
+
+/**
+ * El body de `newPayment`, tal como lo arma el formulario de contabilidad.
+ *
+ * El bot manda exactamente los mismos campos: no hay ruta especial ni forma
+ * especial de registrar un pago que venga de WhatsApp. Ver §5 del contrato.
+ */
+export interface RegistrarPagoInput {
+	credito_id: number;
+	/** El **cliente** dueño del crédito, no el asesor. Sale de `/credito/resumen`. */
+	usuario_id: number;
+	monto_boleta: number;
+	/** Hoy, en Guatemala. Igual que el formulario. */
+	fecha_pago: string;
+	/** La de la boleta; si no se pudo leer, hoy. */
+	fecha_boleta: string;
+	/** La cuota más vieja sin pagar. Quien registra NO elige cuota. */
+	cuotaApagar: number;
+	url_boletas: string[];
+	banco_id?: number;
+	numeroAutorizacion?: string;
+	origen_pago?: "transferencia" | "cheque" | "boleta";
+	observaciones?: string;
+	otros?: number;
+	abono_directo_capital?: number;
+	/** Texto libre. Identifica el pago en el historial. */
+	registerBy: string;
+}
+
+export type RegistrarPagoResultado =
+	| {
+			ok: true;
+			/**
+			 * Los pagos que se crearon. Una boleta que cubre tres cuotas atrasadas
+			 * genera tres filas, cada una con su id.
+			 *
+			 * Puede venir vacío contra una instancia de cartera vieja: eso NO
+			 * significa que el pago no se registró.
+			 */
+			pagoIds: number[];
+			detalle: Record<string, unknown> | null;
+	  }
+	| {
+			/** Cartera dijo que no. El pago no existe y se sabe. */
+			ok: false;
+			motivo: "rechazado";
+			status: number;
+			mensaje: string;
+	  }
+	| {
+			/**
+			 * Cartera no contestó. **No se sabe si el pago existe**, y esa duda es
+			 * lo que obliga a la máquina de estados de §4.1.
+			 */
+			ok: false;
+			motivo: "sin_respuesta";
+	  };
+
+/** Una fila de `pagos_credito`, como la devuelven las lecturas de rastreo. */
+export interface EstadoPagoCartera {
+	pago_id: number;
+	credito_id: number | null;
+	numero_cuota: number | null;
+	monto_aplicado: string | null;
+	monto_boleta: string | null;
+	validation_status: string | null;
+	pagado: boolean | null;
+	payment_false: boolean | null;
+}
+
+/** Una fila de `cartera.pagos_reversiones` (D-36). */
+export interface ReversionCartera {
+	reversion_id: number;
+	pago_id: number;
+	/** `iniciada` NO es un rechazo: es una reversión que quedó a medias. */
+	estado: string;
+	usuario_email: string;
+	motivo: string | null;
+	revertido_en: string | null;
+}
+
+export interface PagosPorBoletaResponse {
+	success?: boolean;
+	/** Filas vivas: la boleta existe y su pago también. */
+	pagos: EstadoPagoCartera[];
+	/** Reversiones que mencionan esa URL. Desambigua el "no encuentro nada". */
+	reversiones: ReversionCartera[];
+	/**
+	 * Hay un `insertPayment` de ese crédito **en vuelo** ahora mismo.
+	 *
+	 * `null` o ausente si no se preguntó (sin `creditoId`), o si cartera todavía
+	 * no tiene el campo. **Con la duda, se trata como `true`**: es lo único que
+	 * prueba que un request que se cortó del lado del CRM ya no puede escribir.
+	 */
+	operacion_en_curso?: boolean | null;
 }

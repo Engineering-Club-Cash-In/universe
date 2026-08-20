@@ -1,4 +1,4 @@
-import { db } from "../database/index";
+import { db, lockPool } from "../database/index";
 import {
   creditos,
   pagos_credito,
@@ -29,6 +29,11 @@ import { calcularFactoresProrrateoInteresV2 } from "../cofidi/prorrateoPciIntere
 import { calcularSplitInteresPci, type InvSplitRow } from "../cofidi/splitInteresPci";
 import { t } from "elysia";
 import { calcularResumenAbonosCuota } from "./registerPaymentPolicy";
+import {
+  buildPendingReturnAuthorizationWarning,
+  PendingReturnAuthorizationError,
+  PENDING_RETURN_AUTHORIZATION_CODE,
+} from "../utils/pendingReturnGuard";
 
 export const crearResumenAbonosCuota = (input: Parameters<
   typeof calcularResumenAbonosCuota
@@ -46,6 +51,60 @@ export const crearResumenAbonosCuota = (input: Parameters<
 // Se redefine local (igual que investor.ts) para no acoplar la carga de este módulo
 // con assignCapital. Toda compra de cartera se le hace a Cube.
 const CUBE_ID = 86;
+
+type PendingReturnLockRow = {
+  creditoId: number;
+  numeroCreditoSifco: string;
+  estadoDevolucion: string | null;
+};
+
+async function withPendingReturnCreditLocks<T>(
+  creditoIds: number[],
+  callback: () => Promise<T>,
+): Promise<T> {
+  if (creditoIds.length === 0) return callback();
+
+  const connection = await lockPool.connect();
+  let transactionStarted = false;
+
+  try {
+    await connection.query("BEGIN");
+    transactionStarted = true;
+
+    const { rows: creditosRevalidados } = await connection.query<PendingReturnLockRow>(
+      `SELECT
+        credito_id AS "creditoId",
+        numero_credito_sifco AS "numeroCreditoSifco",
+        estado_devolucion AS "estadoDevolucion"
+      FROM cartera.creditos
+      WHERE credito_id = ANY($1::int[])
+      ORDER BY credito_id
+      FOR NO KEY UPDATE`,
+      [creditoIds],
+    );
+
+    const warningRevalidado = buildPendingReturnAuthorizationWarning(creditosRevalidados);
+    if (warningRevalidado) {
+      throw new PendingReturnAuthorizationError(warningRevalidado);
+    }
+
+    const result = await callback();
+    await connection.query("COMMIT");
+    transactionStarted = false;
+    return result;
+  } catch (error) {
+    if (transactionStarted) {
+      try {
+        await connection.query("ROLLBACK");
+      } catch (rollbackError) {
+        console.error("❌ Error revirtiendo locks de devolución:", rollbackError);
+      }
+    }
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
 
 export const pagoSchema = z.object({
   credito_id: z.number().int().positive(),
@@ -1815,9 +1874,14 @@ export async function falsePayment(pago_id: number, credito_id: number) {
   console.log(
     `Falsificando pago con ID: ${pago_id} para crédito ID: ${credito_id}`
   );
-  // updateCredito=false → NO actualiza creditos_inversionistas_espejo (monto_aportado).
-  // Falsear un pago no debe descontar el aporte del crédito/espejo.
-  insertPagosCreditoInversionistas(pago_id, credito_id, true, false, false); // excludeCube=true, cuotaPagada=false, updateCredito=false
+  // Mismo guard que obtenerCreditosConPagosPendientes/calcularYRegistrarPagosEspejo:
+  // un crédito en PENDIENTE_AUTORIZACION no debe generar pagos espejo, ni siquiera
+  // "falsos", mientras la devolución a CUBE sigue sin resolver.
+  await withPendingReturnCreditLocks([credito_id], async () => {
+    // updateCredito=false → NO actualiza creditos_inversionistas_espejo (monto_aportado).
+    // Falsear un pago no debe descontar el aporte del crédito/espejo.
+    await insertPagosCreditoInversionistas(pago_id, credito_id, true, false, false); // excludeCube=true, cuotaPagada=false, updateCredito=false
+  });
   // Actualizar el estado del pago a falso
   const result = await db
     .update(pagos_credito)
@@ -3187,6 +3251,7 @@ export async function obtenerCreditosConPagosPendientes(
         capital: creditos.capital,
         deudaTotal: creditos.deudatotal,
         statusCredit: creditos.statusCredit,
+        estadoDevolucion: creditos.estado_devolucion,
         usuarioId: creditos.usuario_id,
         cuota: creditos.cuota,
         interes: creditos.cuota_interes,
@@ -3213,8 +3278,32 @@ export async function obtenerCreditosConPagosPendientes(
       creditosInversionista.length
     );
 
+    // Igual que calcularYRegistrarPagosEspejo: si vamos a generar pagos, un crédito
+    // con devolución a CUBE pendiente de autorización bloquea todo el lote. Sin esto,
+    // este endpoint podía generar pagos y descontar capital al inversionista mientras
+    // la devolución seguía sin resolver (bypass del guard agregado en el flujo normal).
+    if (generateFalsePayment) {
+      const pendingReturnWarning = buildPendingReturnAuthorizationWarning(
+        creditosInversionista.map((credito) => ({
+          creditoId: credito.creditoId,
+          numeroCreditoSifco: credito.numeroCreditoSifco,
+          estadoDevolucion: credito.estadoDevolucion,
+        })),
+      );
+
+      if (pendingReturnWarning) {
+        console.warn(
+          `⚠️ Generación bloqueada: ${pendingReturnWarning.creditos_bloqueados.length} crédito(s) en PENDIENTE_AUTORIZACION`,
+        );
+        return { success: false as const, ...pendingReturnWarning, data: [] };
+      }
+    }
+
     // 2️⃣ PASO 2: Por cada crédito, buscar la PRIMERA cuota NO LIQUIDADA
-    const creditosConPagos = await Promise.all(
+    const creditoIds = [
+      ...new Set(creditosInversionista.map((credito) => credito.creditoId)),
+    ].sort((a, b) => a - b);
+    const procesarCreditos = () => Promise.all(
       creditosInversionista.map(async (credito) => {
 
         // 🆕 PASO 0: Verificar si ESTE CRÉDITO tiene pagos pendientes de liquidar
@@ -3458,6 +3547,14 @@ export async function obtenerCreditosConPagosPendientes(
       })
     );
 
+    // La generación real (generateFalsePayment=true) revalida bajo lock transaccional,
+    // igual que calcularYRegistrarPagosEspejo: si la devolución cambió entre la lectura
+    // de arriba y este punto, se bloquea todo antes de crear el primer pago. La lectura
+    // simple (generateFalsePayment=false) no necesita el lock.
+    const creditosConPagos = generateFalsePayment
+      ? await withPendingReturnCreditLocks(creditoIds, procesarCreditos)
+      : await procesarCreditos();
+
     // 6️⃣ PASO 6: Filtrar nulls
     const creditosConCuotasPendientes = creditosConPagos.filter(
       (c) => c !== null
@@ -3477,6 +3574,16 @@ export async function obtenerCreditosConPagosPendientes(
     };
   } catch (error: any) {
     console.error("❌ Error en obtenerCreditosConPagosPendientes:", error);
+    if (error?.code === PENDING_RETURN_AUTHORIZATION_CODE) {
+      return {
+        success: false as const,
+        warning: true as const,
+        code: PENDING_RETURN_AUTHORIZATION_CODE,
+        message: error.message,
+        creditos_bloqueados: error.creditos_bloqueados,
+        data: [],
+      };
+    }
     return {
       success: false,
       error: error.message,
@@ -3562,6 +3669,7 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
         capital: creditos.capital,
         deudaTotal: creditos.deudatotal,
         statusCredit: creditos.statusCredit,
+        estadoDevolucion: creditos.estado_devolucion,
         cuota: creditos.cuota,
       })
       .from(creditos_inversionistas_espejo)
@@ -3587,14 +3695,42 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
       `📊 Créditos encontrados: ${creditosInversionista.length}`
     );
 
+    const pendingReturnWarning = buildPendingReturnAuthorizationWarning(
+      creditosInversionista.map((credito) => ({
+        creditoId: credito.creditoId,
+        numeroCreditoSifco: credito.numeroCreditoSifco,
+        estadoDevolucion: credito.estadoDevolucion,
+      })),
+    );
+
+    if (pendingReturnWarning) {
+      console.warn(
+        `⚠️ Generación bloqueada: ${pendingReturnWarning.creditos_bloqueados.length} crédito(s) en PENDIENTE_AUTORIZACION`,
+      );
+      return { success: false as const, ...pendingReturnWarning, data: [] };
+    }
+
     // Paso 2: Por cada crédito encontrado, se busca la primera cuota que aún no
     // le ha sido pagada al inversionista. Se procesa una cuota a la vez para evitar
     // registrar pagos duplicados o fuera de orden.
-    const resultados = await Promise.all(
-      creditosInversionista.map(async (credito) => {
-        console.log(
-          `\n🔍 Verificando crédito ${credito.creditoId}...`
-        );
+    //
+    // El lock es del LOTE completo, no de cada insert. FOR NO KEY UPDATE bloquea
+    // cambios concurrentes al estado y serializa generaciones solapadas, pero es
+    // compatible con el KEY SHARE que toman los FK al insertar pagos espejo desde
+    // otra conexión. Si la devolución cambió antes del lock, esta revalidación
+    // bloquea todo antes de crear el primer pago.
+    const creditoIds = [
+      ...new Set(
+        creditosInversionista.map((credito) => credito.creditoId),
+      ),
+    ].sort((a, b) => a - b);
+    const resultados = await withPendingReturnCreditLocks(
+      creditoIds,
+      () => Promise.all(
+        creditosInversionista.map(async (credito) => {
+          console.log(
+            `\n🔍 Verificando crédito ${credito.creditoId}...`
+          );
 
         // Si ya existe un pago generado y pendiente de liquidar para este crédito,
         // se omite para no duplicarlo. Hay que liquidar primero antes de generar otro.
@@ -3793,7 +3929,8 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
             mensaje: err?.message ?? "Error desconocido",
           };
         }
-      })
+        }),
+      ),
     );
 
     const procesados = resultados.filter((r) => r !== null && !("error" in r));
@@ -3803,19 +3940,43 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
       `\n✅ [calcularYRegistrarPagosEspejo] Completado. Procesados: ${procesados.length}, Fallidos: ${fallidos.length}`
     );
 
+    const falloTotal = fallidos.length > 0 && procesados.length === 0;
+    if (falloTotal) {
+      return {
+        success: false as const,
+        error: "No se pudo generar ningún pago espejo del lote.",
+        inversionistaId,
+        totalCreditosProcesados: procesados.length,
+        totalCreditosFallidos: fallidos.length,
+        pagosGenerados: false,
+        data: procesados,
+        fallidos,
+      };
+    }
+
     return {
-      success: true,
+      success: true as const,
       inversionistaId,
       totalCreditosProcesados: procesados.length,
       totalCreditosFallidos: fallidos.length,
-      pagosGenerados: true,
+      pagosGenerados: procesados.length > 0,
       data: procesados,
       fallidos,
     };
   } catch (error: any) {
     console.error("❌ Error en calcularYRegistrarPagosEspejo:", error);
+    if (error?.code === PENDING_RETURN_AUTHORIZATION_CODE) {
+      return {
+        success: false as const,
+        warning: true as const,
+        code: PENDING_RETURN_AUTHORIZATION_CODE,
+        message: error.message,
+        creditos_bloqueados: error.creditos_bloqueados,
+        data: [],
+      };
+    }
     return {
-      success: false,
+      success: false as const,
       error: error.message,
       data: [],
     };

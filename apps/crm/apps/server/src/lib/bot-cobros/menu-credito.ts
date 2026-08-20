@@ -23,6 +23,7 @@ import { db } from "../../db";
 import { otps } from "../../db/schema/otp";
 import { carteraBackClient } from "../../services/cartera-back-client";
 import { type CreditoBot, listarCreditosDeCliente } from "./buscar-cliente";
+import { cuentasParaBot, type CuentasPagoBot } from "../cuentas-pago";
 import { armarMensajes, type MensajesCredito } from "./mensajes-credito";
 
 /**
@@ -117,6 +118,15 @@ export type InfoCreditoBot = {
 		modelo: string;
 		anio: number;
 	} | null;
+	/**
+	 * Dónde puede depositar el cliente.
+	 *
+	 * Viaja acá y no en un servicio propio porque son cuatro líneas que casi
+	 * nunca cambian, y el bot ya está llamando a este endpoint para armar el
+	 * menú (D-37). `texto` se muestra literal; `cuentas` sirve para cruzar la
+	 * cuenta destino que se lee de una boleta.
+	 */
+	cuentasPago: CuentasPagoBot;
 	/**
 	 * Los mismos datos, ya escritos para mandar al chat.
 	 *
@@ -283,6 +293,7 @@ export async function obtenerInfoCredito(
 				: null,
 			asesor: resumen.asesor,
 			vehiculo: credito.vehiculo,
+			cuentasPago: cuentasParaBot(),
 			// Se rellena abajo: necesita el objeto completo.
 			mensajes: { titulo: "", resumen: "", completo: "" },
 		},

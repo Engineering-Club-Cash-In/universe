@@ -17,6 +17,8 @@
  * `plantillas_mensaje` en la BD (ver RFC en el archivo del front).
  */
 
+import { textoCuentasPlantilla } from "./cuentas-pago";
+
 export interface VariablesPlantilla {
 	clienteNombre: string;
 	fechaPago: string;
@@ -102,9 +104,12 @@ export function interpolar(
  * Cuentas de pago (mismo texto que la bienvenida). Las plantillas premora las
  * incluyen porque el criterio de CC2-11 pide "link de pago o cuentas de pago";
  * cuando exista el link de pago se agrega como variable.
+ *
+ * Los números salen de `cuentas-pago.ts`, que es la única fuente: el bot de
+ * WhatsApp muestra las mismas cuentas con otro formato. El texto que se arma acá
+ * es idéntico al que se escribía a mano, y hay una prueba que lo fija.
  */
-export const COBROS_CUENTAS_PAGO =
-	"A continuación, le compartimos los números de cuenta para realizar su depósito o transferencia: - CUBE INVESTMENTS, S.A. (monetaria) No. 5520029876 BANCO INDUSTRIAL (BI) / CUBE INVESTMENTS, S.A. (monetaria) No. 3020123033 BANCO AGROMERCANTIL (BAM) / CUBE INVESTMENTS, S.A. (monetaria) No. 01300039945 BANCO GyT CONTINENTAL / CUBE INVESTMENTS, S.A. (monetaria) No. 3394002346 BANRURAL";
+export const COBROS_CUENTAS_PAGO = textoCuentasPlantilla();
 
 export const PLANTILLAS_MENSAJES: PlantillaMensaje[] = [
 	{
@@ -115,7 +120,7 @@ export const PLANTILLAS_MENSAJES: PlantillaMensaje[] = [
 		// 5 bloques; SimpleTech colapsa a template `mensaje4parametros`.
 		cuerpo: `Hola {clienteNombre}, Le saludamos cordialmente de Clubcashin.com para recordarle sobre el pago de su crédito, el cual debe realizarse el {fechaPago}. Sus cuotas son por un monto de Q{cuotaMensual}.
 
-A continuación, le compartimos los números de cuenta para realizar su depósito o transferencia: - CUBE INVESTMENTS, S.A. (monetaria) No. 5520029876 BANCO INDUSTRIAL (BI) / CUBE INVESTMENTS, S.A. (monetaria) No. 3020123033 BANCO AGROMERCANTIL (BAM) / CUBE INVESTMENTS, S.A. (monetaria) No. 01300039945 BANCO GyT CONTINENTAL / CUBE INVESTMENTS, S.A. (monetaria) No. 3394002346 BANRURAL
+${COBROS_CUENTAS_PAGO}
 
 Por favor, envíe su boleta o comprobante de pago al {telefonoAsesor} para aplicarlo a su cuenta. Si tiene alguna duda o consulta, estamos a su disposición.
 

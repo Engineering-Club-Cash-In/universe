@@ -15,6 +15,7 @@ import {
 	buscarClienteBotCobros,
 	estadoDeCuentaBotCobros,
 	infoCreditoBotCobros,
+	leerBoletaBotCobros,
 	listarCreditosBotCobros,
 } from "./controllers/bot-cobros";
 import { infornetController } from "./controllers/buro";
@@ -1006,6 +1007,14 @@ app.post(
 	"/api/bot/cobros/credito/estado-cuenta",
 	autenticarBotCobros,
 	estadoDeCuentaBotCobros,
+);
+
+// Paso 4 · lee la boleta que sube el cliente. NO registra el pago: devuelve lo
+// que se entendió para que confirme (el registro es el servicio 6, PR B).
+app.post(
+	"/api/bot/cobros/boleta/leer",
+	autenticarBotCobros,
+	leerBoletaBotCobros,
 );
 
 // Documentación de esos dos endpoints, para SimpleTech. Va SIN API key —no

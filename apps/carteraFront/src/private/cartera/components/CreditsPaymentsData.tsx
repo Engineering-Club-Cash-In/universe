@@ -46,6 +46,7 @@ import { useReport } from "../hooks/reports";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { matchesSearch } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { usePaymentAgreements,useTogglePaymentAgreementStatus } from "../hooks/paymentagreement";
@@ -582,7 +583,10 @@ export function ListaCreditosPagos() {
                 </button>
               </PopoverTrigger>
               <PopoverContent className="w-[--radix-popover-trigger-width] p-0 bg-white border border-blue-200 shadow-lg" align="start">
-                <Command className="bg-white text-gray-900">
+                <Command
+                  className="bg-white text-gray-900"
+                  filter={(value, search) => (matchesSearch(value, search) ? 1 : 0)}
+                >
                   <CommandInput placeholder="Buscar inversionista..." />
                   <CommandList className="max-h-[250px]">
                     <CommandEmpty>No se encontró inversionista.</CommandEmpty>

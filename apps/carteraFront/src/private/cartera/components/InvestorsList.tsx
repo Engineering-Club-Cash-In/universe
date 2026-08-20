@@ -2,6 +2,7 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { matchesSearch } from "@/lib/utils";
 import { Plus, Trash2, BookCopy, Wallet, ChevronsUpDown, Check, Calculator, Loader2 } from "lucide-react";
 import { useRef, useState, useEffect, Fragment } from "react";
 import { Combobox, Transition } from "@headlessui/react";
@@ -404,10 +405,10 @@ export function InvestorsList({
                     >
                       <Combobox.Options className="absolute z-50 mt-2 w-full max-h-60 overflow-auto rounded-xl bg-white py-2 shadow-2xl border-2 border-blue-200 focus:outline-none">
                         {(() => {
-                          const q = (investorQueries[index] || "").toLowerCase();
+                          const q = investorQueries[index] || "";
                           const filtered = q === ""
                             ? opcionesFila
-                            : opcionesFila.filter((o) => o.nombre.toLowerCase().includes(q));
+                            : opcionesFila.filter((o) => matchesSearch(o.nombre, q));
                           if (filtered.length === 0) {
                             return (
                               <div className="relative cursor-default select-none py-4 px-4 text-center text-gray-500 text-sm">
@@ -678,10 +679,10 @@ export function InvestorsList({
                             >
                               <Combobox.Options className="absolute z-50 mt-2 w-full max-h-60 overflow-auto rounded-xl bg-white py-2 shadow-2xl border-2 border-purple-200 focus:outline-none">
                                 {(() => {
-                                  const q = (mirrorQueries[index] || "").toLowerCase();
+                                  const q = mirrorQueries[index] || "";
                                   const filtered = q === ""
                                     ? investorsOptions
-                                    : investorsOptions.filter((o) => o.nombre.toLowerCase().includes(q));
+                                    : investorsOptions.filter((o) => matchesSearch(o.nombre, q));
                                   if (filtered.length === 0) {
                                     return (
                                       <div className="relative cursor-default select-none py-4 px-4 text-center text-gray-500 text-sm">

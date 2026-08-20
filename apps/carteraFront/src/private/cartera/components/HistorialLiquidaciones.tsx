@@ -6,6 +6,7 @@ import {
   getBatchFailedCredits,
   getPendingReturnWarningMessage,
 } from "@/lib/apiError";
+import { matchesSearch } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import {
@@ -404,8 +405,7 @@ export function HistorialLiquidaciones() {
       result = result.filter((item) => item.estado_liquidacion_resumen === estadoFiltro);
     }
     if (search.trim()) {
-      const q = search.toLowerCase();
-      result = result.filter((item) => item.nombre.toLowerCase().includes(q));
+      result = result.filter((item) => matchesSearch(item.nombre, search));
     }
     return result;
   }, [data, search, estadoFiltro]);

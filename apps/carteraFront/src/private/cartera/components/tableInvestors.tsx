@@ -6,6 +6,7 @@ import {
   getLiquidationFailureReasons,
   getPendingReturnWarningMessage,
 } from "@/lib/apiError";
+import { matchesSearch } from "@/lib/utils";
 import {
   Check,
   CheckCircle,
@@ -515,9 +516,7 @@ export function TableInvestors() {
   const filteredInvestors =
     query === ""
       ? investors
-      : investors.filter((inv) =>
-          inv.nombre.toLowerCase().includes(query.toLowerCase())
-        );
+      : investors.filter((inv) => matchesSearch(inv.nombre, query));
 
   // 🆕 Efecto para activar Modo Borrador automático (Optimizado)
   // Se reducen las dependencias para evitar renders infinitos.
@@ -2731,8 +2730,8 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
           }
         }}
       >
-        <DialogContent className="!bg-white sm:max-w-xl z-[60] border border-gray-200 shadow-2xl rounded-2xl">
-          <DialogHeader>
+        <DialogContent className="!bg-white sm:max-w-xl z-[60] border border-gray-200 shadow-2xl rounded-2xl max-h-[90vh] flex flex-col overflow-hidden">
+          <DialogHeader className="shrink-0">
             <DialogTitle className="text-lg font-bold text-gray-900">
               {compraCarteraTipoOperacion === "reinversion"
                 ? "Reinversión"
@@ -2744,7 +2743,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 : "Ingresa el monto y los porcentajes"}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-2">
+          <div className="space-y-4 py-2 flex-1 overflow-y-auto min-h-0 pr-1">
             <div className="grid grid-cols-2 gap-2 p-1 bg-gray-100 rounded-xl">
               <button
                 type="button"
@@ -3067,7 +3066,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
               </div>
             )}
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0">
             <button
               type="button"
               onClick={() => {

@@ -3,10 +3,11 @@
  * Endpoint REST directo para usar desde Postman
  */
 
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
-import { leads, opportunities, salesStages } from "../db/schema/crm";
+import { coDebtors, leads, opportunities, salesStages } from "../db/schema/crm";
+import { licenseQrVerifications } from "../db/schema/license-verification";
 import { vehicles } from "../db/schema/vehicles";
 import { carteraBackClient } from "../services/cartera-back-client";
 
@@ -542,6 +543,43 @@ export async function limpiarMigracion(): Promise<CleanupResult> {
 
 	// Usar transacción para asegurar que todo se elimine o nada
 	return await db.transaction(async (tx) => {
+		// 0. Verificaciones de licencia de estos leads/oportunidades (y sus
+		// co-deudores) primero — sus FK a leads/co_debtors son NO ACTION, así
+		// que si quedara alguna, el delete de abajo revienta la transacción.
+		const targetOpportunityIds = (
+			await tx
+				.select({ id: opportunities.id })
+				.from(opportunities)
+				.where(eq(opportunities.status, "migrate"))
+		).map((o) => o.id);
+		const targetLeadIds = (
+			await tx.select({ id: leads.id }).from(leads).where(eq(leads.status, "migrate"))
+		).map((l) => l.id);
+
+		const targetCoDebtorIds =
+			targetOpportunityIds.length > 0
+				? (
+						await tx
+							.select({ id: coDebtors.id })
+							.from(coDebtors)
+							.where(inArray(coDebtors.opportunityId, targetOpportunityIds))
+					).map((c) => c.id)
+				: [];
+
+		// Nunca un .where() vacío/undefined acá — eso borraría la tabla entera.
+		const verificationConditions = [
+			targetLeadIds.length > 0
+				? inArray(licenseQrVerifications.leadId, targetLeadIds)
+				: null,
+			targetCoDebtorIds.length > 0
+				? inArray(licenseQrVerifications.coDebtorId, targetCoDebtorIds)
+				: null,
+		].filter((c) => c !== null);
+
+		if (verificationConditions.length > 0) {
+			await tx.delete(licenseQrVerifications).where(or(...verificationConditions));
+		}
+
 		// 1. Eliminar oportunidades migradas (tienen FK a leads y vehicles)
 		const deletedOpportunities = await tx
 			.delete(opportunities)

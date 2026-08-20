@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Combobox, Transition } from "@headlessui/react";
+import { matchesSearch } from "@/lib/utils";
 import {
   Check,
   ChevronsUpDown,
@@ -132,16 +133,16 @@ export function CuentasExtraInversionistaManager() {
 
   // Búsqueda libre (numero_cuenta, motivo, nombre inversionista, nombre banco)
   const cuentasFiltradas = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = search.trim();
     if (!q) return cuentas;
     return cuentas.filter((c) => {
       const inv = investorById.get(c.inversionista_id)?.nombre ?? "";
       const bn = bancoById.get(c.banco_id) ?? "";
       return (
-        c.numero_cuenta.toLowerCase().includes(q) ||
-        c.motivo_cuenta.toLowerCase().includes(q) ||
-        inv.toLowerCase().includes(q) ||
-        bn.toLowerCase().includes(q)
+        matchesSearch(c.numero_cuenta, q) ||
+        matchesSearch(c.motivo_cuenta, q) ||
+        matchesSearch(inv, q) ||
+        matchesSearch(bn, q)
       );
     });
   }, [cuentas, search, investorById, bancoById]);
@@ -742,9 +743,7 @@ function InvestorCombobox({
   const filtered =
     query === ""
       ? investors
-      : investors.filter((i) =>
-          i.nombre.toLowerCase().includes(query.toLowerCase())
-        );
+      : investors.filter((i) => matchesSearch(i.nombre, query));
 
   return (
     <Combobox
@@ -868,9 +867,7 @@ function BancoCombobox({
   const filtered =
     query === ""
       ? bancos
-      : bancos.filter((b) =>
-          b.nombre.toLowerCase().includes(query.toLowerCase())
-        );
+      : bancos.filter((b) => matchesSearch(b.nombre, query));
 
   return (
     <Combobox

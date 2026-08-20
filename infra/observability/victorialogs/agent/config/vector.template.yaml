@@ -25,12 +25,17 @@ transforms:
       original_message = string(original_event.message) ?? ""
       parsed_value, parse_error = parse_json(original_message)
       parsed = {}
+      parsed_is_object = false
       if parse_error == null && is_object(parsed_value) {
         parsed = object!(parsed_value)
+        parsed_is_object = true
       }
 
       event_timestamp = to_string(parsed.timestamp) ?? to_string(original_event.timestamp) ?? to_string(now())
-      message = string(parsed.message) ?? original_message
+      message = original_message
+      if parsed_is_object {
+        message = string(parsed.message) ?? string(parsed.event) ?? "structured event"
+      }
       container_name = string(original_event.container_name) ?? "unknown"
       service = string(parsed.service) ?? string(original_event.label."com.docker.compose.service") ?? container_name
       level = downcase(string(parsed.level) ?? "info")
@@ -157,3 +162,22 @@ tests:
               assert!(!exists(.customer))
               assert!(!exists(.email))
               assert!(!exists(.phone))
+
+  - name: structured event without message never forwards raw JSON
+    inputs:
+      - insert_at: normalize_and_redact
+        type: log
+        log_fields:
+          message: '{"event":"login.attempt","token":"must-not-leak","customer":{"email":"person@example.com"}}'
+          container_name: auth-service-1
+    outputs:
+      - extract_from: normalize_and_redact
+        conditions:
+          - type: vrl
+            source: |-
+              assert_eq!(.message, "login.attempt")
+              assert_eq!(.event, "login.attempt")
+              assert!(!contains!(.message, "must-not-leak"))
+              assert!(!contains!(.message, "person@example.com"))
+              assert!(!exists(.token))
+              assert!(!exists(.customer))

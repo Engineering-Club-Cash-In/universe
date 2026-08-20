@@ -25,6 +25,8 @@ export type DatosMensajeBoleta = {
 	cuotaDe: number | null;
 	saldoCuota: string | null;
 	mora: string | null;
+	/** Si la boleta ni alcanza para la mora, a la cuota no le llega nada. */
+	cubreMora: boolean;
 	cubreCuota: boolean;
 	camposFaltantes: string[];
 };
@@ -61,7 +63,11 @@ export function armarMensajesBoleta(datos: DatosMensajeBoleta): MensajesBoleta {
 			detalle.push(`   A tu cuota ${datos.cuotaNumero} de ${datos.cuotaDe}`);
 		}
 
-		if (datos.saldoCuota) {
+		// Si ni siquiera alcanza para la mora, decir "falta X de la cuota" sería
+		// engañoso: a la cuota no le llega nada.
+		if (!datos.cubreMora) {
+			detalle.push("   Este pago se aplica todo a tu mora.");
+		} else if (datos.saldoCuota) {
 			detalle.push(
 				datos.cubreCuota
 					? "   ✅ Cubre la cuota completa"

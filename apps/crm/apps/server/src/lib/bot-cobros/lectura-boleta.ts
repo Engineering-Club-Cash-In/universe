@@ -195,10 +195,30 @@ export function fechaBoletaValida(
 	fecha: string | undefined,
 	hoy: string,
 ): { fecha: string; corregida: boolean } {
-	if (!fecha || !/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
+	if (!fecha || !esFechaDeCalendario(fecha)) {
 		return { fecha: hoy, corregida: true };
 	}
 	if (fecha > hoy) return { fecha: hoy, corregida: true };
 
 	return { fecha, corregida: false };
+}
+
+/**
+ * ¿Existe ese día en el calendario?
+ *
+ * Con solo mirar la forma (`\d{4}-\d{2}-\d{2}`), un `2026-02-31` del modelo
+ * pasaría el filtro, ordenaría antes que hoy y llegaría hasta el `INSERT` — donde
+ * Postgres lo rechaza y convierte una lectura recuperable en un 500, con la
+ * imagen ya subida a R2 y sin borrador que la referencie.
+ *
+ * Se compara ida y vuelta: `new Date("2026-02-31")` da el 3 de marzo, así que al
+ * volver a serializarlo no coincide y se descarta.
+ */
+export function esFechaDeCalendario(fecha: string): boolean {
+	if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return false;
+
+	const parsed = new Date(`${fecha}T00:00:00Z`);
+	if (Number.isNaN(parsed.getTime())) return false;
+
+	return parsed.toISOString().slice(0, 10) === fecha;
 }

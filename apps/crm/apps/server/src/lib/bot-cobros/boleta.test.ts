@@ -11,11 +11,12 @@ import {
 	normalizarNombreBanco,
 	reconocerBanco,
 } from "./bancos-boleta";
-import { hoyGuatemala } from "./boleta";
+import { estimarAplicacion, hoyGuatemala } from "./boleta";
 import { esDireccionPrivada, urlPermitida } from "./descarga-imagen";
 import {
 	type BoletaLeida,
 	calcularConfianza,
+	esFechaDeCalendario,
 	fechaBoletaValida,
 	montoALimpio,
 } from "./lectura-boleta";
@@ -202,6 +203,7 @@ describe("el mensaje que confirma el cliente", () => {
 		cuotaDe: 84,
 		saldoCuota: "5891.15",
 		mora: "1178.23",
+		cubreMora: true,
 		cubreCuota: false,
 		camposFaltantes: [] as string[],
 	};
@@ -238,6 +240,15 @@ describe("el mensaje que confirma el cliente", () => {
 		);
 	});
 
+	test("si no alcanza ni para la mora, no habla de la cuota", () => {
+		// Decir "falta Q5,891.15 de tu cuota" cuando a la cuota no le llega nada
+		// es una promesa falsa disfrazada de dato.
+		const m = armarMensajesBoleta({ ...base, cubreMora: false });
+
+		expect(m.completo).toContain("Este pago se aplica todo a tu mora");
+		expect(m.completo).not.toContain("Falta de esa cuota");
+	});
+
 	test("avisa sin tecnicismos cuando faltó leer algo", () => {
 		const m = armarMensajesBoleta({
 			...base,
@@ -252,5 +263,94 @@ describe("el mensaje que confirma el cliente", () => {
 		const m = armarMensajesBoleta(base);
 		expect(m.resumen.endsWith("¿Está correcto?")).toBe(true);
 		expect(m.completo.endsWith("¿Está correcto?")).toBe(true);
+	});
+});
+
+describe("a dónde va el dinero de la boleta", () => {
+	test("la mora se descuenta ANTES de mirar la cuota", () => {
+		// Q6,000 con Q1,000 de mora y una cuota de Q5,500: a la cuota le llegan
+		// Q5,000, así que NO la cubre. Sin restar la mora, el mensaje le
+		// prometería al cliente algo que no va a pasar.
+		const r = estimarAplicacion({
+			monto: 6000,
+			mora: "1000",
+			saldoCuota: "5500",
+			numeroCuota: 8,
+		});
+
+		expect(r.cubreMora).toBe(true);
+		expect(r.paraCuota).toBe("5000.00");
+		expect(r.cubreCuota).toBe(false);
+		expect(r.orden).toEqual(["mora", "cuota_8"]);
+	});
+
+	test("sin mora, todo el monto va a la cuota", () => {
+		const r = estimarAplicacion({
+			monto: 6000,
+			mora: null,
+			saldoCuota: "5500",
+			numeroCuota: 8,
+		});
+
+		expect(r.cubreMora).toBe(true);
+		expect(r.paraCuota).toBe("6000.00");
+		expect(r.cubreCuota).toBe(true);
+		expect(r.excedente).toBe("500.00");
+		expect(r.orden).toEqual(["cuota_8"]);
+	});
+
+	test("si no alcanza ni para la mora, a la cuota no le llega nada", () => {
+		const r = estimarAplicacion({
+			monto: 500,
+			mora: "1178.23",
+			saldoCuota: "5891.15",
+			numeroCuota: 8,
+		});
+
+		expect(r.cubreMora).toBe(false);
+		expect(r.paraCuota).toBe("0.00");
+		expect(r.cubreCuota).toBe(false);
+	});
+
+	test("sin saldo de cuota no se afirma que la cubre", () => {
+		const r = estimarAplicacion({
+			monto: 9999,
+			mora: null,
+			saldoCuota: null,
+			numeroCuota: 8,
+		});
+
+		expect(r.cubreCuota).toBe(false);
+		expect(r.excedente).toBe("0.00");
+	});
+
+	test("va siempre marcada como estimación", () => {
+		expect(
+			estimarAplicacion({
+				monto: 100,
+				mora: null,
+				saldoCuota: null,
+				numeroCuota: 1,
+			}).estimado,
+		).toBe(true);
+	});
+});
+
+describe("fechas que existen en el calendario", () => {
+	test("un 31 de febrero no pasa", () => {
+		// El modelo devuelve esto de vez en cuando. Con solo mirar la forma,
+		// llegaría hasta el INSERT y Postgres lo convertiría en un 500 — con la
+		// imagen ya subida y sin borrador que la referencie.
+		expect(esFechaDeCalendario("2026-02-31")).toBe(false);
+		expect(fechaBoletaValida("2026-02-31", "2026-08-20").corregida).toBe(true);
+	});
+
+	test("un mes 13 tampoco", () => {
+		expect(esFechaDeCalendario("2026-13-01")).toBe(false);
+	});
+
+	test("una fecha real sí", () => {
+		expect(esFechaDeCalendario("2026-02-28")).toBe(true);
+		expect(esFechaDeCalendario("2024-02-29")).toBe(true); // bisiesto
 	});
 });

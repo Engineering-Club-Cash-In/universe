@@ -126,6 +126,42 @@ export function urlPermitida(url: string): boolean {
 	return permitidos.some((d) => host === d || host.endsWith(`.${d}`));
 }
 
+/** Se lanza al pasar el tope, para distinguirlo de un corte de red. */
+class DemasiadoGrande extends Error {}
+
+/**
+ * Baja el cuerpo de a trozos y aborta apenas se pasa del tope.
+ *
+ * Se cancela el stream además de cortar el bucle: sin el `cancel()` el servidor
+ * remoto seguiría mandando bytes que ya nadie va a leer.
+ */
+async function leerConTope(respuesta: Response, tope: number): Promise<Buffer> {
+	const stream = respuesta.body;
+	if (!stream) return Buffer.alloc(0);
+
+	const lector = stream.getReader();
+	const trozos: Uint8Array[] = [];
+	let acumulado = 0;
+
+	try {
+		while (true) {
+			const { done, value } = await lector.read();
+			if (done) break;
+			if (!value) continue;
+
+			acumulado += value.byteLength;
+			if (acumulado > tope) throw new DemasiadoGrande();
+
+			trozos.push(value);
+		}
+	} finally {
+		// Si salimos por el tope, esto le corta el chorro al otro lado.
+		await lector.cancel().catch(() => {});
+	}
+
+	return Buffer.concat(trozos);
+}
+
 export async function descargarBoleta(url: string): Promise<ResultadoDescarga> {
 	if (!urlPermitida(url)) return { ok: false, codigo: "URL_NO_PERMITIDA" };
 
@@ -158,17 +194,22 @@ export async function descargarBoleta(url: string): Promise<ResultadoDescarga> {
 		return { ok: false, codigo: "ARCHIVO_MUY_GRANDE" };
 	}
 
+	// ── Se lee por trozos y se corta al pasarse ────────────────────────────────
+	// `arrayBuffer()` bajaría el cuerpo ENTERO antes de poder medirlo: una
+	// respuesta sin `content-length` —o con uno mentiroso— alojada en un dominio
+	// permitido nos haría reservar cientos de megas en memoria para recién
+	// después decir "pesa demasiado". El tope tiene que frenar la descarga, no
+	// describirla.
 	let buffer: Buffer;
 	try {
-		buffer = Buffer.from(await respuesta.arrayBuffer());
-	} catch {
+		buffer = await leerConTope(respuesta, MAXIMO_BYTES);
+	} catch (error) {
+		if (error instanceof DemasiadoGrande) {
+			return { ok: false, codigo: "ARCHIVO_MUY_GRANDE" };
+		}
 		return { ok: false, codigo: "IMAGEN_NO_DESCARGABLE" };
 	}
 
-	// El de verdad: se mide lo que llegó, no lo que dijeron que iba a llegar.
-	if (buffer.length > MAXIMO_BYTES) {
-		return { ok: false, codigo: "ARCHIVO_MUY_GRANDE" };
-	}
 	if (buffer.length === 0)
 		return { ok: false, codigo: "IMAGEN_NO_DESCARGABLE" };
 

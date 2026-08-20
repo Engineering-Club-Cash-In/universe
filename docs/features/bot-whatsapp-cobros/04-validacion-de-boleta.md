@@ -164,10 +164,15 @@ el árbol de gerencia:
 esto — es para el texto.
 
 **`aplicacion` es una estimación y lo dice.** Cartera aplica el dinero en un orden fijo: la
-mora primero y después las cuotas, de la más vieja a la más nueva. Con eso, el resumen del
-crédito y los abonos parciales de la cuota actual alcanzan para decirle al cliente a dónde va
-su dinero, pero **la aplicación real la hace cartera al validar** el pago. Por eso viaja
-`estimado: true` y el mensaje dice "se aplicará", no "se aplicó".
+mora primero y después las cuotas, de la más vieja a la más nueva — y por eso `cubreCuota`
+se calcula sobre `paraCuota`, que es lo que **queda después de la mora**: con una boleta de
+Q6,000, Q1,000 de mora y una cuota de Q5,500, a la cuota le llegan Q5,000, y decir que la
+cubre sería prometerle al cliente algo que no va a pasar.
+
+Con eso, el resumen del crédito y los abonos parciales de la cuota actual alcanzan para
+decirle al cliente a dónde va su dinero, pero **la aplicación real la hace cartera al
+validar** el pago. Por eso viaja `estimado: true` y el mensaje dice "se aplicará", no
+"se aplicó".
 
 ### Cómo se compara la cuenta destino
 

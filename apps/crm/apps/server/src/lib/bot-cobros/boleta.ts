@@ -6,10 +6,13 @@
  * ─────────────────────────────────────────────────────────────────────────────
  * EL ORDEN DE ESTE ARCHIVO ES EL CONTRATO, NO UNA PREFERENCIA:
  *
- *   verificar acceso → contar intentos → descargar → ¿duplicada? → LEER CON IA
- *   → subir a R2 → cruzar con el crédito → guardar borrador
+ *   verificar acceso → descargar → ¿duplicada? → APARTAR EL INTENTO
+ *   → leer con IA → subir a R2 → cruzar con el crédito → completar el borrador
  *
- * Dos cosas que parecen detalles y no lo son:
+ * Tres cosas que parecen detalles y no lo son:
+ *   · El intento se aparta ANTES de llamar al modelo, con la fila del OTP
+ *     bloqueada. Así una lectura ilegible también gasta su intento, y cuatro
+ *     peticiones simultáneas no se saltan el tope (ver `reservarIntento`).
  *   · La IA corre ANTES de subir a R2. Si el modelo dice que la foto no es un
  *     comprobante, no se sube nada y el bucket no se llena de selfies.
  *   · La imagen se copia a NUESTRO R2 acá, al leer, y no al confirmar. Las URLs
@@ -21,6 +24,7 @@
 import { and, eq, gt, sql } from "drizzle-orm";
 import { db } from "../../db";
 import { botCobrosBoletas } from "../../db/schema/bot-cobros-boletas";
+import { otps } from "../../db/schema/otp";
 import { carteraBackClient } from "../../services/cartera-back-client";
 import { reconocerCuenta } from "../cuentas-pago";
 import { bancosSugeridos, reconocerBanco } from "./bancos-boleta";
@@ -32,7 +36,7 @@ import {
 	montoALimpio,
 } from "./lectura-boleta";
 import { armarMensajesBoleta, type MensajesBoleta } from "./mensajes-boleta";
-import { verificarAcceso } from "./menu-credito";
+import { type IdentidadSesion, verificarAcceso } from "./menu-credito";
 
 /** Tope de lecturas por sesión (D-27). Al cuarto, con su asesor. */
 const MAXIMO_INTENTOS = 3;
@@ -92,7 +96,13 @@ export type BoletaLeidaBot = {
 		cuota: { numero: number; de: number; fechaVencimiento: string } | null;
 		saldoCuota: string | null;
 		mora: string | null;
+		/** En qué orden lo va a aplicar cartera: la mora primero, si la hay. */
+		orden: string[];
+		/** Lo que le queda a la cuota DESPUÉS de la mora. */
+		paraCuota: string;
+		cubreMora: boolean;
 		cubreCuota: boolean;
+		excedente: string;
 	};
 	mensajes: MensajesBoleta;
 };
@@ -112,12 +122,72 @@ export function hoyGuatemala(ahora: Date = new Date()): string {
 }
 
 /**
- * Cuántas lecturas lleva esta sesión.
+ * Aparta un intento de esta sesión, o dice que ya no quedan.
  *
- * Se cuenta sobre los borradores del mismo OTP, que es dato nuestro: si el
- * número de intento viniera del bot, mandar siempre `intento: 1` anularía el
- * tope.
+ * ─────────────────────────────────────────────────────────────────────────────
+ * NO ES "CONTAR Y DESPUÉS INSERTAR": ESO NO FRENA NADA.
+ *
+ * Entre el `count` y el `insert` hay una ventana, y cuatro peticiones
+ * simultáneas —un reintento del bot, un doble toque del cliente— leerían las
+ * cuatro un contador en 0, harían cuatro llamadas a Gemini y recién después
+ * insertarían. El tope de tres existe justamente para acotar ese costo.
+ *
+ * Por eso se cuenta y se inserta **dentro de una transacción con la fila del OTP
+ * bloqueada**: la segunda petición espera a que la primera termine y ve el
+ * contador ya movido. Es el mismo candado que usa la validación del código.
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * La fila se crea ANTES de llamar al modelo, así que una lectura ilegible
+ * también gasta su intento — que es el punto: si no, un cliente puede mandar
+ * treinta selfies y hacernos pagar treinta lecturas sin llegar nunca al tope.
  */
+async function reservarIntento(
+	identidad: IdentidadSesion,
+	datos: {
+		numeroSifco: string;
+		creditoId: number;
+		imagenUrl: string;
+		hash: string;
+	},
+): Promise<{ ok: true; boletaId: string; intento: number } | { ok: false }> {
+	return db.transaction(async (tx) => {
+		await tx
+			.select({ id: otps.id })
+			.from(otps)
+			.where(eq(otps.id, identidad.otpId))
+			.for("update");
+
+		const [conteo] = await tx
+			.select({ total: sql<number>`count(*)::int` })
+			.from(botCobrosBoletas)
+			.where(eq(botCobrosBoletas.otpId, identidad.otpId));
+
+		const previos = conteo?.total ?? 0;
+		if (previos >= MAXIMO_INTENTOS) return { ok: false as const };
+
+		const [fila] = await tx
+			.insert(botCobrosBoletas)
+			.values({
+				otpId: identidad.otpId,
+				leadId: identidad.leadId,
+				coDebtorId: identidad.coDebtorId,
+				numeroSifco: datos.numeroSifco,
+				creditoId: datos.creditoId,
+				intento: previos + 1,
+				imagenOrigenUrl: datos.imagenUrl,
+				hashImagen: datos.hash,
+				// Todavía no hay nada leído; se llena al terminar.
+				lectura: {},
+				estado: "leyendo",
+				expiraEn: new Date(Date.now() + VIGENCIA_BORRADOR_MINUTOS * 60_000),
+			})
+			.returning({ id: botCobrosBoletas.id });
+
+		return { ok: true as const, boletaId: fila.id, intento: previos + 1 };
+	});
+}
+
+/** Cuántas lecturas lleva la sesión. Solo para no bajar una foto de gusto. */
 async function contarIntentos(otpId: string): Promise<number> {
 	const [fila] = await db
 		.select({ total: sql<number>`count(*)::int` })
@@ -125,6 +195,50 @@ async function contarIntentos(otpId: string): Promise<number> {
 		.where(eq(botCobrosBoletas.otpId, otpId));
 
 	return fila?.total ?? 0;
+}
+
+/**
+ * Estima a dónde va a ir el dinero, en el orden en que cartera lo aplica.
+ *
+ * **La mora va primero, siempre.** Sin descontarla, una boleta de Q6,000 con
+ * Q1,000 de mora y una cuota de Q5,500 se anunciaría como "cubre tu cuota"
+ * cuando a la cuota solo le llegan Q5,000. Es una promesa de plata al cliente:
+ * no puede salir de una resta que no se hizo.
+ *
+ * Es una **estimación** y viaja marcada como tal: la aplicación de verdad la
+ * hace cartera cuando contabilidad valida el pago.
+ */
+export function estimarAplicacion(entrada: {
+	monto: number;
+	mora: string | null;
+	saldoCuota: string | null;
+	numeroCuota: number;
+}) {
+	const mora = entrada.mora === null ? 0 : Number(entrada.mora);
+	const saldoCuota =
+		entrada.saldoCuota === null ? null : Number(entrada.saldoCuota);
+
+	const aMora = Math.min(entrada.monto, Math.max(mora, 0));
+	const cubreMora = mora <= 0 || entrada.monto >= mora;
+
+	const paraCuota = Math.round((entrada.monto - aMora) * 100) / 100;
+	const cubreCuota = saldoCuota !== null && paraCuota >= saldoCuota;
+
+	const excedente =
+		saldoCuota !== null && cubreCuota
+			? Math.round((paraCuota - saldoCuota) * 100) / 100
+			: 0;
+
+	const orden = [...(mora > 0 ? ["mora"] : []), `cuota_${entrada.numeroCuota}`];
+
+	return {
+		estimado: true as const,
+		orden,
+		paraCuota: paraCuota.toFixed(2),
+		cubreMora,
+		cubreCuota,
+		excedente: excedente.toFixed(2),
+	};
 }
 
 /**
@@ -203,16 +317,56 @@ export async function leerBoleta(input: {
 		};
 	}
 
-	// 6 · Leer. Un solo intento: si falla, el cliente manda otra foto (D-25).
+	// 6 · Apartar el intento ANTES de gastar la llamada al modelo. Acá el tope
+	// es de verdad: la fila queda escrita pase lo que pase después.
+	const reserva = await reservarIntento(identidad, {
+		numeroSifco: input.numeroSifco,
+		creditoId: resumen.credito_id,
+		imagenUrl: input.imagenUrl,
+		hash: descarga.hash,
+	});
+	if (!reserva.ok) return { ok: false, codigo: "DEMASIADOS_INTENTOS" };
+
+	// 7 · Leer. Un solo intento: si falla, el cliente manda otra foto (D-25).
 	const lectura = await leerBoletaConIA(descarga);
-	if (!lectura.ok) return { ok: false, codigo: lectura.codigo };
+
+	if (!lectura.ok) {
+		// El modelo no respondió: es problema NUESTRO, así que se devuelve el
+		// intento borrando la reserva. El cliente no tiene por qué pagar nuestra
+		// caída con uno de sus tres tiros (D-27).
+		await db
+			.delete(botCobrosBoletas)
+			.where(eq(botCobrosBoletas.id, reserva.boletaId));
+		return { ok: false, codigo: lectura.codigo };
+	}
 
 	const leida = lectura.lectura;
 
 	// Sin monto no hay pago, y una imagen que no es un comprobante tampoco.
+	// Esto SÍ gasta el intento: el modelo respondió y la lectura se pagó.
 	const monto = montoALimpio(leida.monto);
-	if (!leida.esBoletaDePago || monto === null) {
-		return { ok: false, codigo: "BOLETA_ILEGIBLE" };
+	const fueraDeRango = monto !== null && monto > MONTO_MAXIMO;
+
+	if (!leida.esBoletaDePago || monto === null || fueraDeRango) {
+		await db
+			.update(botCobrosBoletas)
+			.set({
+				lectura: leida,
+				estado: "fallida",
+				motivoFallo: fueraDeRango ? "monto fuera de rango" : "no se pudo leer",
+				updatedAt: new Date(),
+			})
+			.where(eq(botCobrosBoletas.id, reserva.boletaId));
+
+		return {
+			ok: false,
+			codigo: "BOLETA_ILEGIBLE",
+			datos: {
+				intento: reserva.intento,
+				intentosRestantes: MAXIMO_INTENTOS - reserva.intento,
+				...(fueraDeRango ? { montoLeido: monto } : {}),
+			},
+		};
 	}
 	if (monto > MONTO_MAXIMO) {
 		return {
@@ -254,24 +408,22 @@ export async function leerBoleta(input: {
 		resumen.cuota_actual.numero,
 	);
 
-	const cubreCuota = saldoCuota !== null && monto >= Number(saldoCuota);
+	// La mora se aplica ANTES que la cuota: la estimación tiene que restarla o
+	// le prometeríamos al cliente algo que no va a pasar.
+	const aplicacion = estimarAplicacion({
+		monto,
+		mora: resumen.mora?.monto ?? null,
+		saldoCuota,
+		numeroCuota: resumen.cuota_actual.numero,
+	});
 
-	// 9 · Guardar el borrador. Lo que el bot recibe es su id, no los datos:
-	// para confirmar solo va a poder mandar ese id (D-26).
-	const expiraEn = new Date(Date.now() + VIGENCIA_BORRADOR_MINUTOS * 60_000);
-
+	// 9 · Completar el borrador que se reservó en el paso 6. Lo que el bot
+	// recibe es su id, no los datos: para confirmar solo va a poder mandar ese
+	// id (D-26).
 	const [fila] = await db
-		.insert(botCobrosBoletas)
-		.values({
-			otpId: identidad.otpId,
-			leadId: identidad.leadId,
-			coDebtorId: identidad.coDebtorId,
-			numeroSifco: input.numeroSifco,
-			creditoId: resumen.credito_id,
-			intento: intentosPrevios + 1,
-			imagenOrigenUrl: input.imagenUrl,
+		.update(botCobrosBoletas)
+		.set({
 			r2Key,
-			hashImagen: descarga.hash,
 			lectura: leida,
 			bancoId: banco?.id ?? null,
 			monto: monto.toFixed(2),
@@ -280,9 +432,13 @@ export async function leerBoleta(input: {
 			cuentaDestino: leida.cuentaDestino ?? null,
 			confianza: calcularConfianza(leida, banco !== null),
 			estado: "leida",
-			expiraEn,
+			updatedAt: new Date(),
 		})
-		.returning({ id: botCobrosBoletas.id });
+		.where(eq(botCobrosBoletas.id, reserva.boletaId))
+		.returning({
+			id: botCobrosBoletas.id,
+			expiraEn: botCobrosBoletas.expiraEn,
+		});
 
 	const mensajes = armarMensajesBoleta({
 		monto: monto.toFixed(2),
@@ -293,7 +449,8 @@ export async function leerBoleta(input: {
 		cuotaDe: resumen.cuota_actual.de,
 		saldoCuota,
 		mora: resumen.mora?.monto ?? null,
-		cubreCuota,
+		cubreMora: aplicacion.cubreMora,
+		cubreCuota: aplicacion.cubreCuota,
 		camposFaltantes,
 	});
 
@@ -301,9 +458,9 @@ export async function leerBoleta(input: {
 		ok: true,
 		boleta: {
 			boletaId: fila.id,
-			intento: intentosPrevios + 1,
-			intentosRestantes: MAXIMO_INTENTOS - (intentosPrevios + 1),
-			expiraEn: expiraEn.toISOString(),
+			intento: reserva.intento,
+			intentosRestantes: MAXIMO_INTENTOS - reserva.intento,
+			expiraEn: fila.expiraEn.toISOString(),
 			lectura: {
 				banco: banco
 					? { id: banco.id, nombre: banco.nombre, leido: leida.banco ?? null }
@@ -328,7 +485,7 @@ export async function leerBoleta(input: {
 			camposFaltantes,
 			confianza: calcularConfianza(leida, banco !== null),
 			aplicacion: {
-				estimado: true,
+				...aplicacion,
 				cuota: {
 					numero: resumen.cuota_actual.numero,
 					de: resumen.cuota_actual.de,
@@ -336,7 +493,6 @@ export async function leerBoleta(input: {
 				},
 				saldoCuota,
 				mora: resumen.mora?.monto ?? null,
-				cubreCuota,
 			},
 			mensajes,
 		},

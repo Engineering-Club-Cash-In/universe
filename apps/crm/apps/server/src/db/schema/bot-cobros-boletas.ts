@@ -31,6 +31,7 @@ import { otps } from "./otp";
 /**
  * Estados del borrador. La máquina completa vive en §4.1 del contrato:
  *
+ *   leyendo ─► leida | fallida   (la lectura con IA: ver `reservarIntento`)
  *   leida ─► confirmando ─► confirmada | confirmada_a_verificar | rechazada
  *                        └► revision_manual   (nadie puede decidir solo)
  *   leida ─► descartada  (venció sin confirmar)
@@ -41,6 +42,9 @@ import { otps } from "./otp";
  * una migración con lock.
  */
 export type EstadoBoletaBot =
+	// La fila se crea en `leyendo` para apartar el intento ANTES de llamar al
+	// modelo; si la lectura sirve pasa a `leida`, y si no a `fallida`.
+	| "leyendo"
 	| "leida"
 	| "confirmando"
 	| "confirmada"

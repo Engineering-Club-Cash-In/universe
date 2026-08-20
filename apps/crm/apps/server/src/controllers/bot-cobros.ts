@@ -34,7 +34,7 @@ import { enviarOtp, validarOtp } from "../lib/bot-cobros/otp";
 type RespuestaError = {
 	codigo: string;
 	mensaje: string;
-	estado: 400 | 401 | 404 | 409 | 413 | 422 | 429 | 500 | 503;
+	estado: 400 | 401 | 404 | 409 | 413 | 422 | 429 | 500 | 502 | 503;
 };
 
 /**
@@ -429,6 +429,16 @@ export async function leerBoletaBotCobros(c: Context) {
 						codigo: "URL_NO_PERMITIDA",
 						mensaje: "No pudimos abrir esa imagen.",
 						estado: 400,
+					});
+				// El CDN de SimpleTech falló: la sesión del cliente sigue siendo
+				// válida, así que NO se le puede decir que empiece de nuevo. Sin
+				// este caso caía en el `default` y salía un 401.
+				case "IMAGEN_NO_DESCARGABLE":
+					return error(c, {
+						codigo: "IMAGEN_NO_DESCARGABLE",
+						mensaje:
+							"No pudimos descargar tu imagen. Intenta mandarla de nuevo, por favor.",
+						estado: 502,
 					});
 				case "ARCHIVO_MUY_GRANDE":
 					return error(c, {

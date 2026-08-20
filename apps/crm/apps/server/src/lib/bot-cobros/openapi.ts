@@ -1037,7 +1037,7 @@ export const especificacionBotCobros = {
 					"| `lectura.cuentaReconocida` | Cuál de nuestras cuentas recibió el dinero. `null` NO significa que esté mal: puede ser que el número se leyera incompleto |",
 					"| `camposFaltantes` | Qué no se pudo leer. Si trae `fechaBoleta`, se usó la fecha de hoy |",
 					"| `confianza` | `alta` / `media` / `baja`. Es para modular el mensaje, no para ramificar |",
-					"| `aplicacion` | A dónde va a ir el dinero. **Es una estimación** (`estimado: true`): la aplicación real la hace contabilidad al validar |",
+					"| `aplicacion` | A dónde va a ir el dinero, **en el orden en que se aplica: la mora primero**. `paraCuota` es lo que le queda a la cuota DESPUÉS de la mora, y `cubreCuota` se calcula con eso. **Es una estimación** (`estimado: true`): la aplicación real la hace contabilidad al validar |",
 					"| `mensajes` | Los mismos datos ya escritos para el chat, en tres formatos. Se pegan tal cual |",
 				].join("\n"),
 				operationId: "leerBoleta",
@@ -1110,7 +1110,11 @@ export const especificacionBotCobros = {
 											},
 											saldoCuota: "5891.15",
 											mora: "1178.23",
+											orden: ["mora", "cuota_8"],
+											paraCuota: "0.00",
+											cubreMora: false,
 											cubreCuota: false,
+											excedente: "0.00",
 										},
 										mensajes: {
 											titulo: "🧾 *Boleta recibida · Q500.00*",
@@ -1246,6 +1250,23 @@ export const especificacionBotCobros = {
 													"Este crédito no puede recibir pagos por este medio. Tu asesor te va a ayudar.",
 											},
 										},
+									},
+								},
+							},
+						},
+					},
+					"502": {
+						description:
+							"El CDN de la imagen falló. **La sesión sigue siendo válida**: no hay que reiniciar nada, alcanza con volver a mandar la foto.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								example: {
+									success: false,
+									error: {
+										codigo: "IMAGEN_NO_DESCARGABLE",
+										mensaje:
+											"No pudimos descargar tu imagen. Intenta mandarla de nuevo, por favor.",
 									},
 								},
 							},

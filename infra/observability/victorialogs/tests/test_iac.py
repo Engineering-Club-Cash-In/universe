@@ -75,6 +75,8 @@ class StaticIacContractTests(unittest.TestCase):
 
     def test_vector_has_defense_in_depth_redaction(self) -> None:
         vector = self.read(VECTOR_TEMPLATE).lower()
+        self.assertNotIn("merge!(., parsed)", vector)
+        allowlist = vector.split("optional_string_fields = [", 1)[1].split("]", 1)[0]
         for sensitive_name in (
             "authorization",
             "cookie",
@@ -85,8 +87,11 @@ class StaticIacContractTests(unittest.TestCase):
             "nit",
             "phone",
             "email",
+            "customer",
+            "request.body",
+            "response.body",
         ):
-            self.assertIn(sensitive_name, vector)
+            self.assertNotIn(f'"{sensitive_name}"', allowlist)
 
     def test_agent_uses_read_only_socket_proxy(self) -> None:
         agent = self.read(AGENT_COMPOSE)
@@ -102,6 +107,11 @@ class StaticIacContractTests(unittest.TestCase):
         self.assertIn('BIND_CONFIG: "/shared/docker-proxy.sock mode 660"', agent)
         self.assertNotIn('expose:\n      - "2375"', agent)
         self.assertNotIn("${CONTAINER_SOCKET_PATH", agent.split("  vector:", 1)[1])
+        self.assertIn("container_name: cci-vector-agent", agent)
+        self.assertIn("exclude_containers:\n      - cci-vector-agent", vector)
+        self.assertIn("healthcheck:\n      enabled: false", vector)
+        self.assertNotIn("merge!(., parsed)", vector)
+        self.assertIn("clean_event", vector)
         self.assertIn("docker_host: unix:///shared/docker-proxy.sock", vector)
 
     def test_runtime_config_is_generated_from_compose_secrets(self) -> None:

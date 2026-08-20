@@ -68,6 +68,7 @@ services:
         max-file: "3"
 
   vector:
+    container_name: cci-vector-agent
     image: timberio/vector:0.57.0-debian@sha256:959cde6edd73686d3af9edea4e2fd52ddb03e29725aa25c8cf9c6635c0ce5703
     command:
       - --config

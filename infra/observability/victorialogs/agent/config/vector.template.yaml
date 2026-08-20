@@ -5,7 +5,7 @@ sources:
     type: docker_logs
     docker_host: unix:///shared/docker-proxy.sock
     exclude_containers:
-      - vector
+      - cci-vector-agent
 
 transforms:
   reject_known_secrets:
@@ -14,52 +14,98 @@ transforms:
       - container_logs
     condition: |-
       message = string(.message) ?? ""
-      !match(message, r'(?i)decoded jwt|authorization\s*:\s*bearer|begin (rsa |ec )?private key')
+      !match(message, r'(?i)decoded jwt|authorization\s*:\s*bearer|begin (rsa |ec )?private key|eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.|[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}')
 
   normalize_and_redact:
     type: remap
     inputs:
       - reject_known_secrets
     source: |-
-      original_message = string(.message) ?? ""
-      parsed, parse_error = parse_json(original_message)
-      if parse_error == null && is_object(parsed) {
-        . = merge!(., parsed)
+      original_event = .
+      original_message = string(original_event.message) ?? ""
+      parsed_value, parse_error = parse_json(original_message)
+      parsed = {}
+      if parse_error == null && is_object(parsed_value) {
+        parsed = object!(parsed_value)
       }
 
-      if !exists(.timestamp) {
-        .timestamp = now()
-      }
-      .message = string(.message) ?? original_message
-      .host = __LOG_HOST_JSON__
-      .environment = __ENVIRONMENT_JSON__
-      .container_name = string(.container_name) ?? "unknown"
-      .service = string(.service) ?? string(.label."com.docker.compose.service") ?? .container_name
-      .level = downcase(string(.level) ?? "info")
-      .schema_version = string(.schema_version) ?? "1"
+      event_timestamp = to_string(parsed.timestamp) ?? to_string(original_event.timestamp) ?? to_string(now())
+      message = string(parsed.message) ?? original_message
+      container_name = string(original_event.container_name) ?? "unknown"
+      service = string(parsed.service) ?? string(original_event.label."com.docker.compose.service") ?? container_name
+      level = downcase(string(parsed.level) ?? "info")
+      event_name = string(parsed.event) ?? "application.log"
+      schema_version = string(parsed.schema_version) ?? "1"
 
-      del(.authorization)
-      del(.Authorization)
-      del(.headers.authorization)
-      del(.headers.Authorization)
-      del(.headers.cookie)
-      del(.cookie)
-      del(.cookies)
-      del(.password)
-      del(.token)
-      del(.access_token)
-      del(.refresh_token)
-      del(.api_key)
-      del(.apiKey)
-      del(.dpi)
-      del(.nit)
-      del(.phone)
-      del(.telefono)
-      del(.email)
-      del(.file)
-      del(.files)
-      del(.request.body)
-      del(.response.body)
+      clean_event = {
+        "timestamp": event_timestamp,
+        "message": message,
+        "host": __LOG_HOST_JSON__,
+        "environment": __ENVIRONMENT_JSON__,
+        "container_name": container_name,
+        "service": service,
+        "level": level,
+        "event": event_name,
+        "schema_version": schema_version,
+        "http": {}
+      }
+
+      optional_string_fields = [
+        "request_id",
+        "trace_id",
+        "operation_id",
+        "version",
+        "error_type",
+        "job_id",
+        "stage",
+        "axios_code"
+      ]
+      for_each(optional_string_fields) -> |_index, field| {
+        value = get!(parsed, [field])
+        value_string = string(value) ?? null
+        if value_string != null {
+          clean_event = set!(clean_event, [field], value_string)
+        }
+      }
+
+      duration_ms = to_int(get!(parsed, ["duration_ms"])) ?? null
+      if duration_ms != null {
+        clean_event.duration_ms = duration_ms
+      }
+
+      online = to_bool(get!(parsed, ["online"])) ?? null
+      if online != null {
+        clean_event.online = online
+      }
+
+      http_method_value = get!(parsed, ["http.method"])
+      if http_method_value == null {
+        http_method_value = get!(parsed, ["http", "method"])
+      }
+      http_method = string(http_method_value) ?? null
+      if http_method != null {
+        clean_event.http.method = http_method
+      }
+
+      http_route_value = get!(parsed, ["http.route"])
+      if http_route_value == null {
+        http_route_value = get!(parsed, ["http", "route"])
+      }
+      http_route = string(http_route_value) ?? null
+      if http_route != null {
+        clean_event.http.route = http_route
+      }
+
+      http_status_value = get!(parsed, ["http.status_code"])
+      if http_status_value == null {
+        http_status_value = get!(parsed, ["http", "status_code"])
+      }
+      http_status = to_int(http_status_value) ?? null
+      if http_status != null {
+        clean_event.http.status_code = http_status
+      }
+
+      . = clean_event
 
 sinks:
   victoria_logs:
@@ -75,7 +121,7 @@ sinks:
       user: __INGEST_USERNAME_JSON__
       password: __INGEST_PASSWORD_JSON__
     healthcheck:
-      enabled: true
+      enabled: false
     query:
       _msg_field: message
       _time_field: timestamp
@@ -87,3 +133,27 @@ sinks:
       when_full: drop_newest
     request:
       timeout_secs: 10
+
+tests:
+  - name: structured events only emit allowlisted fields
+    inputs:
+      - insert_at: normalize_and_redact
+        type: log
+        log_fields:
+          message: '{"message":"safe failure","service":"cartera-back","request_id":"req-safe-1","password":"forbidden","token":"forbidden","customer":{"email":"person@example.com","phone":"55555555"},"http":{"route":"/payments/:id","status_code":500}}'
+          container_name: cartera-back-1
+    outputs:
+      - extract_from: normalize_and_redact
+        conditions:
+          - type: vrl
+            source: |-
+              assert_eq!(.message, "safe failure")
+              assert_eq!(.service, "cartera-back")
+              assert_eq!(.request_id, "req-safe-1")
+              assert_eq!(.http.route, "/payments/:id")
+              assert_eq!(.http.status_code, 500)
+              assert!(!exists(.password))
+              assert!(!exists(.token))
+              assert!(!exists(.customer))
+              assert!(!exists(.email))
+              assert!(!exists(.phone))

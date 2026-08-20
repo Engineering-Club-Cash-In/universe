@@ -71,6 +71,8 @@ VMAUTH_IMAGE=$(python -c 'import re,sys; text=open(sys.argv[1]).read(); print(re
 
 podman run --rm -v "$TMP_DIR/container-agent/vector.yaml:/etc/vector/vector.yaml:ro,Z" \
   "docker.io/$VECTOR_IMAGE" validate --no-environment /etc/vector/vector.yaml
+podman run --rm -v "$TMP_DIR/container-agent/vector.yaml:/etc/vector/vector.yaml:ro,Z" \
+  "docker.io/$VECTOR_IMAGE" test /etc/vector/vector.yaml
 podman run --rm -v "$TMP_DIR/container-central/vmauth.yaml:/etc/vmauth/vmauth.yaml:ro,Z" \
   "docker.io/$VMAUTH_IMAGE" -auth.config=/etc/vmauth/vmauth.yaml -dryRun
 

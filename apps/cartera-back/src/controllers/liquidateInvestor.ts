@@ -11,6 +11,10 @@ import {
 import Big from "big.js";
 import fs from "fs";
 import path from "path/win32";
+import {
+  buildPendingReturnAuthorizationWarningFromErrors,
+  formatPendingReturnAuthorizationNote,
+} from "../utils/pendingReturnGuard";
 
 // 📊 INTERFACE PARA EL INPUT
 interface LiquidarCuotasInput {
@@ -1485,9 +1489,34 @@ export async function createBoleta(
     //    Si falla, la boleta queda PENDIENTE para reintentar
     const { liquidateByInvestorId } = await import("./investor");
     const fechaLiquidacion = data.fecha_liquidacion ? new Date(data.fecha_liquidacion) : undefined;
-    liquidateByInvestorId(data.inversionista_id, fechaLiquidacion).catch((err) => {
-      console.error(`❌ [Background] Error liquidando inversionista ${data.inversionista_id} post-boleta:`, err);
-    });
+    void liquidateByInvestorId(data.inversionista_id, fechaLiquidacion)
+      .then(async (result) => {
+        const warning = buildPendingReturnAuthorizationWarningFromErrors(result.errores);
+        if (!warning) return;
+
+        const blockingNote = formatPendingReturnAuthorizationNote(warning);
+        // Append atómico contra el valor actual en DB, no el snapshot en memoria
+        // de cuando se creó la boleta: si alguien edita `notas` vía PATCH
+        // /boletas/:id mientras esta liquidación en background sigue corriendo,
+        // un SET con el snapshot viejo pisaría esa edición concurrente.
+        await db
+          .update(boletasPagoInversionista)
+          .set({
+            notas: sql`CASE
+              WHEN ${boletasPagoInversionista.notas} IS NULL OR trim(${boletasPagoInversionista.notas}) = ''
+                THEN ${blockingNote}
+              ELSE trim(${boletasPagoInversionista.notas}) || ${`\n\n${blockingNote}`}
+            END`,
+          })
+          .where(eq(boletasPagoInversionista.boleta_id, nuevaBoleta.boleta_id));
+
+        console.warn(
+          `⚠️ [Background] Boleta ${nuevaBoleta.boleta_id} quedó PENDIENTE por devolución CUBE: ${blockingNote}`,
+        );
+      })
+      .catch((err) => {
+        console.error(`❌ [Background] Error liquidando inversionista ${data.inversionista_id} post-boleta:`, err);
+      });
 
     console.log("========== BOLETA CREADA, LIQUIDACION EN BACKGROUND ==========\n");
 

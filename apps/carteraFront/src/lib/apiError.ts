@@ -60,7 +60,106 @@ const MENSAJE_SIN_INFORMACION = /^internal server error$/i;
 const MENSAJES_POR_CODIGO: Record<string, string> = {
   CREDIT_PENDING_CANCELLATION:
     "No se puede registrar el pago porque el crédito está pendiente de cancelación.",
+  CREDIT_PENDING_RETURN_AUTHORIZATION:
+    "Hay créditos pendientes de autorización para devolución a CUBE.",
 };
+
+export type BatchFailedCredit = {
+  creditoId: number;
+  numeroCreditoSifco: string;
+  mensaje: string;
+};
+
+export function getBatchFailedCredits(error: unknown): BatchFailedCredit[] {
+  if (!(error instanceof AxiosError)) return [];
+
+  const data = error.response?.data as {
+    fallidos?: unknown;
+  } | undefined;
+
+  if (!Array.isArray(data?.fallidos)) return [];
+
+  return data.fallidos.filter((fallido): fallido is BatchFailedCredit => {
+    if (!fallido || typeof fallido !== "object") return false;
+    const row = fallido as Partial<BatchFailedCredit>;
+    return typeof row.creditoId === "number"
+      && typeof row.numeroCreditoSifco === "string"
+      && typeof row.mensaje === "string"
+      && row.mensaje.trim().length > 0;
+  });
+}
+
+export type LiquidationFailureReason = {
+  inversionista_id?: number;
+  razon: string;
+  code?: string;
+  creditos_bloqueados?: Array<{ numero_credito_sifco?: string }>;
+};
+
+/**
+ * `razon` de liquidateByInvestorId puede cargar `error.message` crudo de una
+ * excepción (Postgres, driver, etc.) cuando el fallo no es una regla de
+ * negocio conocida. Mismo criterio que extraerDetalle: nunca se muestra un
+ * crudo técnico al usuario.
+ */
+export function formatearRazonLiquidacion(razon: string): string {
+  const trimmed = razon.trim();
+  if (!trimmed || esDetalleTecnicoCrudo(trimmed)) {
+    return "Error interno al procesar este crédito, contacta soporte";
+  }
+  return traducirDetalleTecnico(trimmed);
+}
+
+export function getLiquidationFailureReasons(error: unknown): LiquidationFailureReason[] {
+  if (!(error instanceof AxiosError)) return [];
+
+  const data = error.response?.data as { errores?: unknown } | undefined;
+  if (!Array.isArray(data?.errores)) return [];
+
+  const vistos = new Set<string>();
+  const razones: LiquidationFailureReason[] = [];
+  for (const item of data.errores) {
+    if (!item || typeof item !== "object") continue;
+    const razon = (item as { razon?: unknown }).razon;
+    if (typeof razon !== "string" || !razon.trim()) continue;
+    const formateada = formatearRazonLiquidacion(razon);
+    if (vistos.has(formateada)) continue;
+    vistos.add(formateada);
+    razones.push({ ...(item as LiquidationFailureReason), razon: formateada });
+  }
+  return razones;
+}
+
+export function getPendingReturnWarningMessage(error: unknown): string | null {
+  if (!(error instanceof AxiosError)) return null;
+
+  const data = error.response?.data as {
+    code?: unknown;
+    creditos_bloqueados?: Array<{ numero_credito_sifco?: unknown }>;
+    errores?: Array<{ code?: unknown; razon?: unknown }>;
+  } | undefined;
+
+  if (data?.code !== "CREDIT_PENDING_RETURN_AUTHORIZATION") return null;
+
+  const sifcos = (data.creditos_bloqueados ?? [])
+    .map((credit) => credit.numero_credito_sifco)
+    .filter((sifco): sifco is string => typeof sifco === "string" && sifco.length > 0);
+
+  const otrasInconsistencias = [...new Set(
+    (data.errores ?? [])
+      .filter((item) => item?.code !== "CREDIT_PENDING_RETURN_AUTHORIZATION")
+      .map((item) => item?.razon)
+      .filter((razon): razon is string => typeof razon === "string" && razon.trim().length > 0)
+      .map((razon) => razon.trim())
+      .filter((razon) => !esDetalleTecnicoCrudo(razon)),
+  )];
+
+  const base = MENSAJES_POR_CODIGO.CREDIT_PENDING_RETURN_AUTHORIZATION;
+  const warning = sifcos.length > 0 ? `${base} Créditos: ${sifcos.join(", ")}.` : base;
+  return otrasInconsistencias.length > 0
+    ? `${warning} Otras inconsistencias: ${otrasInconsistencias.join("; ")}.`
+    : warning;
+}
 
 /**
  * Firmas de errores técnicos que nunca deben mostrarse al usuario.
@@ -77,7 +176,7 @@ const DETALLE_TECNICO = [
   /fetch failed|socket|connection|timeout/i,
 ];
 
-function esDetalleTecnicoCrudo(detail: string): boolean {
+export function esDetalleTecnicoCrudo(detail: string): boolean {
   return DETALLE_TECNICO.some((patron) => patron.test(detail));
 }
 
@@ -138,6 +237,10 @@ function extraerDetalle(data: unknown): string | undefined {
  */
 export function getApiErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof AxiosError) {
+    const pendingReturnWarning = getPendingReturnWarningMessage(error);
+    if (pendingReturnWarning) {
+      return `${fallback}: ${pendingReturnWarning}`;
+    }
     if (error.code === "ECONNABORTED") {
       return `${fallback}: El servidor tardó demasiado en responder, intenta de nuevo`;
     }

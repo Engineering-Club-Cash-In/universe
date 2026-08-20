@@ -774,15 +774,34 @@ export const especificacionBotCobros = {
 						},
 					},
 					"503": {
-						description: "El servidor no tiene configurada la API key.",
+						description:
+							"No se pudo responder ahora mismo. **Se puede reintentar**: ninguno de los dos es culpa del cliente ni de su crédito.",
 						content: {
 							"application/json": {
 								schema: { $ref: "#/components/schemas/RespuestaError" },
-								example: {
-									success: false,
-									error: {
-										codigo: "SERVICIO_NO_DISPONIBLE",
-										mensaje: "El servicio no está disponible en este momento.",
+								examples: {
+									CARTERA_NO_DISPONIBLE: {
+										summary:
+											"El sistema de cartera no contestó. Volvé a intentar en unos minutos",
+										value: {
+											success: false,
+											error: {
+												codigo: "CARTERA_NO_DISPONIBLE",
+												mensaje:
+													"No pudimos consultar tu crédito en este momento. Intenta de nuevo en unos minutos.",
+											},
+										},
+									},
+									SERVICIO_NO_DISPONIBLE: {
+										summary: "El servidor no tiene configurada la API key",
+										value: {
+											success: false,
+											error: {
+												codigo: "SERVICIO_NO_DISPONIBLE",
+												mensaje:
+													"El servicio no está disponible en este momento.",
+											},
+										},
 									},
 								},
 							},

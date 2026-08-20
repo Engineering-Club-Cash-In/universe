@@ -245,6 +245,17 @@ export async function infoCreditoBotCobros(c: Context) {
 							"No pudimos consultar la información de ese crédito. Por favor contacta a soporte.",
 						estado: 404,
 					});
+				// Problema NUESTRO, no del cliente ni de su crédito: cartera no
+				// contestó. Va 503 y no 500 para que el bot lo trate como algo
+				// transitorio y le diga que vuelva a intentar, en vez de mandarlo a
+				// soporte por una caída que dura cinco minutos.
+				case "CARTERA_NO_DISPONIBLE":
+					return error(c, {
+						codigo: "CARTERA_NO_DISPONIBLE",
+						mensaje:
+							"No pudimos consultar tu crédito en este momento. Intenta de nuevo en unos minutos.",
+						estado: 503,
+					});
 				default:
 					return error(c, {
 						codigo: "REFERENCIA_INVALIDA",

@@ -7,6 +7,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { rutaInexistente } from "../../services/cartera-back-client";
 import { sesionVigente } from "./menu-credito";
 
 const CANJE = new Date("2026-08-18T15:00:00.000Z");
@@ -36,5 +37,32 @@ describe("sesionVigente", () => {
 	// Reloj torcido o dato manipulado: no puede volverse una sesión eterna.
 	test("un canje en el futuro NO vale", () => {
 		expect(sesionVigente(CANJE, enMinutos(-5))).toBe(false);
+	});
+});
+
+describe("un 404 de cartera no siempre significa lo mismo", () => {
+	// El caso que costó media hora de logs: el CRM apuntaba a una instancia de
+	// cartera construida desde `develop`, que no tiene `/credito/resumen`. Elysia
+	// respondía su 404 por defecto y el bot lo convertía en un `500 ERROR_INTERNO`
+	// con el stack crudo — sin decir en ningún lado qué ruta faltaba.
+	test("el 404 pelado de Elysia es una ruta que no existe", () => {
+		expect(rutaInexistente(404, { error: "NOT_FOUND" })).toBe(true);
+	});
+
+	// Los 404 de negocio mandan `codigo` a propósito, justamente para esto.
+	test("un 404 con codigo es un dato que no existe, no una ruta", () => {
+		expect(
+			rutaInexistente(404, {
+				message: "Crédito no encontrado",
+				codigo: "CREDITO_NO_ENCONTRADO",
+			}),
+		).toBe(false);
+
+		expect(rutaInexistente(404, { codigo: "SIN_MOVIMIENTOS" })).toBe(false);
+	});
+
+	test("nada que no sea un 404 cuenta", () => {
+		expect(rutaInexistente(500, { error: "NOT_FOUND" })).toBe(false);
+		expect(rutaInexistente(404, {})).toBe(false);
 	});
 });

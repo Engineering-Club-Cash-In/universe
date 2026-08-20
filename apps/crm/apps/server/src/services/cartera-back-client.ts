@@ -176,6 +176,30 @@ const REPORTE_NO_LIQUIDADOS_TIMEOUT_MS = Number.parseInt(
 // callers puedan chequear `err.status === 404` en vez de parsear el mensaje.
 // `handleError()` lo respeta explícitamente (no lo reescribe) para que el
 // status sobreviva hasta el caller final.
+/**
+ * ¿Ese 404 es "no existe el dato" o "no existe la ruta"?
+ *
+ * Los endpoints de cartera que tienen un 404 **de negocio** mandan un `codigo`
+ * a propósito (`CREDITO_NO_ENCONTRADO`, `SIN_MOVIMIENTOS`…). El 404 pelado con
+ * `{ error: "NOT_FOUND" }` es el que Elysia devuelve cuando la ruta no está
+ * registrada.
+ *
+ * Distinguirlos importa porque significan cosas opuestas para quien llama: uno
+ * es un crédito que no se migró —respuesta normal, se sigue— y el otro es un
+ * despliegue desalineado, que no se arregla reintentando ni cambiando de
+ * crédito.
+ */
+export function rutaInexistente(
+	status: number,
+	payload: { error?: string; message?: string; codigo?: string } = {},
+): boolean {
+	return (
+		status === 404 &&
+		payload.error === "NOT_FOUND" &&
+		payload.codigo === undefined
+	);
+}
+
 export class CarteraBackHttpError extends Error {
 	constructor(
 		message: string,
@@ -837,6 +861,21 @@ export class CarteraBackClient {
 								res.status,
 								errorData,
 							);
+						}
+
+						// ⚠️ Un 404 SIN `codigo` y con `error: "NOT_FOUND"` no es un dato
+						// que no existe: es **la ruta** que no existe.
+						//
+						// Es el 404 por defecto de Elysia (`NotFoundError`), así que
+						// significa que la instancia de cartera-back del otro lado no
+						// tiene ese endpoint — típicamente porque está construida desde
+						// una rama que no lo trae. Sin este mensaje, el error que llega
+						// es `HTTP 404: NOT_FOUND` sin decir siquiera qué se pidió, y
+						// diagnosticarlo cuesta media hora de leer logs.
+						if (rutaInexistente(res.status, errorData)) {
+							const detalle = `cartera-back no tiene la ruta ${endpoint.split("?")[0]} (404 NOT_FOUND de Elysia). La instancia en ${this.config.baseUrl} está construida desde una rama que no incluye ese endpoint.`;
+							console.error(`[CarteraBackClient] ${detalle}`);
+							throw new CarteraBackHttpError(detalle, res.status, errorData);
 						}
 
 						throw new CarteraBackHttpError(

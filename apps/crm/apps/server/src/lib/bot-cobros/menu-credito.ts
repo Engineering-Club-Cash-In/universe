@@ -147,7 +147,13 @@ export type ResultadoInfoCredito =
 				| "REFERENCIA_INVALIDA"
 				| "SESION_VENCIDA"
 				| "CREDITO_NO_ES_DEL_CLIENTE"
-				| "CREDITO_SIN_DATOS";
+				| "CREDITO_SIN_DATOS"
+				/**
+				 * Cartera no pudo contestar. **Es distinto de `CREDITO_SIN_DATOS`**:
+				 * ahí el crédito no está en cartera y la respuesta es definitiva;
+				 * acá el problema es nuestro y reintentar en un rato puede servir.
+				 */
+				| "CARTERA_NO_DISPONIBLE";
 	  };
 
 /**
@@ -239,7 +245,23 @@ export async function obtenerInfoCredito(
 
 	const credito = acceso.credito;
 
-	const resumen = await carteraBackClient.getResumenCredito(numeroSifco);
+	let resumen: Awaited<ReturnType<typeof carteraBackClient.getResumenCredito>>;
+	try {
+		resumen = await carteraBackClient.getResumenCredito(numeroSifco);
+	} catch (error) {
+		// Cartera no contestó, o contestó algo que no sabemos leer.
+		//
+		// Antes esto se propagaba y salía un `500 ERROR_INTERNO` con el stack
+		// crudo en el log. Pero que cartera esté caída —o desplegada desde una
+		// rama sin el endpoint— NO es un error interno del CRM: es una
+		// dependencia que no está, y al cliente hay que decirle que vuelva a
+		// intentar, no que "ocurrió un error".
+		console.error(
+			`[BotCobros] no se pudo consultar el crédito ${numeroSifco} en cartera:`,
+			error instanceof Error ? error.message : error,
+		);
+		return { ok: false, codigo: "CARTERA_NO_DISPONIBLE" };
+	}
 
 	// El crédito existe en el CRM pero cartera no lo tiene: pasa con los que
 	// nunca se migraron. No es un error del servicio.

@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+  esPagoDelBotCobros,
+  notificarEventoPagoBot,
+} from "../services/crm.service";
 import { eq, and, or } from "drizzle-orm";
 import Big from "big.js";
 import { db } from "../database";
@@ -115,6 +119,9 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
           credito_id,
           numero_credito_sifco: creditData.numero_credito_sifco,
           cuota: creditData.cuota,
+          // Para el circuito de vuelta del bot: sale de acá porque es donde la
+          // fila del pago está leída.
+          registerBy: pago.registerBy,
           message: "Inversiones reversadas exitosamente (el pago ya estaba pendiente)"
         };
       }
@@ -258,9 +265,25 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
         facturasAnuladas,
         facturasConError,
         numero_credito_sifco: creditData.numero_credito_sifco,
-        cuota: creditData.cuota
+        cuota: creditData.cuota,
+        registerBy: pago.registerBy,
       };
     });
+
+    // 🤖 Circuito de vuelta del bot.
+    //
+    // Este evento NO siempre es silencio: si al cliente ya se le dijo que su
+    // pago estaba acreditado, callarse lo deja creyendo algo que dejó de ser
+    // cierto. Quién decide eso es el CRM, que es el único que sabe qué se le
+    // escribió; acá solo se avisa que pasó.
+    if (esPagoDelBotCobros(result?.registerBy)) {
+      await notificarEventoPagoBot({
+        pagoId: pago_id,
+        creditoId: credito_id,
+        numeroSifco: result?.numero_credito_sifco ?? null,
+        evento: "regresado_a_pendiente",
+      });
+    }
 
     set.status = 200;
     return {

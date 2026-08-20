@@ -146,3 +146,87 @@ export function mensajesPagoRegistrado(monto: string): MensajesBoleta {
 		completo: cuerpo.join("\n"),
 	};
 }
+
+/**
+ * "Ya está acreditado."
+ *
+ * Es el mensaje que justifica todo el circuito de vuelta: un pago validado del
+ * que el cliente nunca se entera es peor que no tener circuito.
+ */
+export function mensajesPagoValidado(datos: {
+	monto: string;
+	cuotas: number[];
+}): MensajesBoleta {
+	const titulo = `✅ *Pago acreditado · ${quetzales(datos.monto)}*`;
+
+	const cuerpo = [titulo, ""];
+
+	if (datos.cuotas.length === 1) {
+		cuerpo.push(`Tu pago ya se aplicó a tu cuota ${datos.cuotas[0]}.`);
+	} else if (datos.cuotas.length > 1) {
+		const lista = datos.cuotas.join(", ");
+		cuerpo.push(`Tu pago ya se aplicó a tus cuotas ${lista}.`);
+	} else {
+		cuerpo.push("Tu pago ya quedó aplicado a tu crédito.");
+	}
+
+	cuerpo.push("", "¡Gracias por tu pago! 🙌");
+
+	return {
+		titulo,
+		resumen: [titulo, "", "Tu pago ya quedó aplicado."].join("\n"),
+		completo: cuerpo.join("\n"),
+	};
+}
+
+/**
+ * "No pudimos acreditarlo."
+ *
+ * **Sin detalle técnico y sin culpar al cliente.** Puede ser una boleta que no
+ * cuadró, un depósito que no llegó, o un error nuestro: el cliente no puede
+ * hacer nada con esa distinción, y arriesgarse a decirle "tu boleta era falsa"
+ * cuando fue un problema de conciliación es un daño que no se repara. La salida
+ * es siempre la misma: su asesor.
+ */
+export function mensajesPagoRechazado(monto: string): MensajesBoleta {
+	const titulo = `⚠️ *No pudimos acreditar tu pago de ${quetzales(monto)}*`;
+
+	const cuerpo = [
+		titulo,
+		"",
+		"Tu pago necesita una revisión antes de aplicarse a tu crédito.",
+		"",
+		"📞 Tu asesor se va a comunicar con vos para resolverlo.",
+	];
+
+	return {
+		titulo,
+		resumen: [titulo, "", "Tu asesor te va a contactar."].join("\n"),
+		completo: cuerpo.join("\n"),
+	};
+}
+
+/**
+ * "Lo estamos revisando otra vez."
+ *
+ * Solo se manda si al cliente YA se le había dicho que estaba acreditado.
+ * Callarse ahí lo dejaría creyendo algo que dejó de ser cierto; si nunca se le
+ * dijo nada, para él no cambió nada y no hay por qué preocuparlo.
+ */
+export function mensajesPagoEnRevision(monto: string): MensajesBoleta {
+	const titulo = `🔎 *Estamos revisando de nuevo tu pago de ${quetzales(monto)}*`;
+
+	const cuerpo = [
+		titulo,
+		"",
+		"Tu pago volvió a revisión de nuestro equipo de contabilidad.",
+		"",
+		"📲 Te avisamos por este mismo medio en cuanto quede resuelto.",
+	];
+
+	return {
+		titulo,
+		resumen: [titulo, "", "Te avisamos cuando quede resuelto."].join("\n"),
+		completo: cuerpo.join("\n"),
+	};
+}

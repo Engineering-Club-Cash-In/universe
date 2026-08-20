@@ -19,6 +19,7 @@ import {
 	leerBoletaBotCobros,
 	listarCreditosBotCobros,
 } from "./controllers/bot-cobros";
+import { eventoPagoBotCobros } from "./controllers/bot-cobros-eventos";
 import { infornetController } from "./controllers/buro";
 import { processCsvLeads } from "./controllers/csv";
 import { livenessController } from "./controllers/liveness";
@@ -42,13 +43,17 @@ import type { db } from "./db";
 import { ejecutarAgendaCobrosDiariaConReintentos } from "./jobs/agenda-cobros-snapshots";
 import { purgarBoletasSinConfirmar } from "./jobs/bot-cobros-purga";
 import { reconciliarBoletasColgadas } from "./jobs/bot-cobros-reconciliacion";
+import { recuperarEventosPerdidos } from "./jobs/bot-cobros-respaldo";
 import { generarCierreDiario } from "./jobs/cierre-diario-asesores";
 import {
 	checkSeguimientosVencidos,
 	procesarSeguimientosRecurrentes,
 } from "./jobs/cobros-notifications";
 import { auth } from "./lib/auth";
-import { autenticarBotCobros } from "./lib/bot-cobros/auth";
+import {
+	autenticarBotCobros,
+	autenticarCarteraWebhook,
+} from "./lib/bot-cobros/auth";
 import { docsBotCobros, openapiBotCobros } from "./lib/bot-cobros/docs";
 import { createContext } from "./lib/context";
 import { toDateStrGT } from "./lib/guatemala-month-window";
@@ -1073,6 +1078,18 @@ app.post(
 	confirmarBoletaBotCobros,
 );
 
+// Circuito de vuelta · lo llama CARTERA, no SimpleTech.
+//
+// Va con `autenticarCarteraWebhook` y no con la llave del bot, a propósito:
+// este endpoint dispara mensajes de WhatsApp a clientes, y quien puede
+// consultar un crédito no tiene por qué poder hacer que le escribamos a su
+// dueño. Por lo mismo NO está en el Swagger del bot.
+app.post(
+	"/api/bot/cobros/pagos/evento",
+	autenticarCarteraWebhook,
+	eventoPagoBotCobros,
+);
+
 // Documentación de esos dos endpoints, para SimpleTech. Va SIN API key —no
 // expone datos, y pedirla impediría que Swagger UI cargue el documento— pero
 // solo responde con BOT_COBROS_DOCS=true, que se prende únicamente en la
@@ -1554,6 +1571,27 @@ async function correrReconciliacionDeBoletas(): Promise<void> {
 }
 
 setInterval(correrReconciliacionDeBoletas, 5 * 60 * 1000);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// La red de seguridad del circuito de vuelta (D-35), también fuera del bloque.
+//
+// Cartera emite el aviso con try/catch: si el CRM está caído en ese segundo,
+// ese evento NO vuelve nunca. Y el aviso ES el producto — un pago validado del
+// que el cliente jamás se entera deja en mentira el "te avisamos cuando se
+// acredite" con el que se cerró la conversación.
+//
+// Cada hora le pregunta a cartera por los pagos sin resolver. Es idempotente
+// contra el webhook: si el aviso sí llegó, no manda un segundo WhatsApp.
+// ═══════════════════════════════════════════════════════════════════════════
+async function correrRespaldoDeEventos(): Promise<void> {
+	try {
+		await recuperarEventosPerdidos();
+	} catch (error) {
+		console.error("Error en el respaldo de eventos del bot:", error);
+	}
+}
+
+setInterval(correrRespaldoDeEventos, 60 * 60 * 1000);
 
 if (TAREAS_PROGRAMADAS_ACTIVAS) {
 	// checkPromesasPago traga sus propios errores de persistencia por SIFCO

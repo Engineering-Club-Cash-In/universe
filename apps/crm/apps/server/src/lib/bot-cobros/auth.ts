@@ -87,3 +87,47 @@ export async function autenticarBotCobros(
 
 	await next();
 }
+
+/**
+ * Autenticación del circuito de vuelta (cartera → CRM).
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * ES OTRA LLAVE, Y NO POR PROLIJIDAD.
+ *
+ * La del bot la tiene SimpleTech, un tercero, y sirve para *consultar*. Esta
+ * dispara **mensajes de WhatsApp a clientes**: quien puede preguntar por un
+ * crédito no tiene por qué poder hacer que le escribamos a su dueño diciéndole
+ * que su pago se acreditó.
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * Va por `x-api-key` y no por `Authorization: Bearer` porque del otro lado está
+ * cartera-back, no el motor del bot (§6 del contrato del paso 4).
+ */
+export async function autenticarCarteraWebhook(
+	c: Context,
+	next: () => Promise<void>,
+) {
+	const esperada = process.env.CARTERA_WEBHOOK_API_KEY;
+
+	// Falla cerrado, igual que la del bot.
+	if (!esperada) {
+		console.error(
+			"[BotCobros] CARTERA_WEBHOOK_API_KEY no está configurada; se rechaza el evento",
+		);
+		return c.json(
+			{ success: false, error: { codigo: "SERVICIO_NO_DISPONIBLE" } },
+			503,
+		);
+	}
+
+	const recibida = (c.req.header("x-api-key") ?? "").trim();
+
+	if (!recibida || !sonIguales(recibida, esperada)) {
+		console.warn(
+			"[BotCobros] Evento de cartera rechazado por API key inválida",
+		);
+		return c.json({ success: false, error: { codigo: "NO_AUTORIZADO" } }, 401);
+	}
+
+	await next();
+}

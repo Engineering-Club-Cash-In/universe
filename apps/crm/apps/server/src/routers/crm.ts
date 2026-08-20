@@ -75,6 +75,7 @@ import {
 	getMissingLeadFieldsForContracts,
 } from "../lib/lead-helpers";
 import { canSyncNitToOpportunity } from "../lib/lead-nit-sync";
+import { isOpportunityFromSource } from "../lib/lead-opportunity-source";
 import { getLeadSourceLabel } from "../lib/lead-sources";
 import { getStageVehicleRequirementError } from "../lib/opportunity-stage-guard";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
@@ -92,6 +93,7 @@ import {
 } from "../lib/vehicle-helpers";
 import { carteraBackClient } from "../services/cartera-back-client";
 import { scoreLead } from "../services/lead-scoring";
+import { ejecutarValidaciones } from "../services/opportunity-validations";
 import type { StatusCreditEnum } from "../types/cartera-back";
 import { validarDpi } from "../utils/cui-validation";
 import { createNotification } from "./notifications";
@@ -2937,6 +2939,9 @@ export const crmRouter = {
 					stageId: opportunities.stageId,
 					notes: opportunities.notes,
 					leadId: opportunities.leadId,
+					source: opportunities.source,
+					leadSource: leads.source,
+					leadDpi: leads.dpi,
 					clientType: leads.clientType,
 					analysisStatus: opportunities.analysisStatus,
 					analysisRejectionCount: opportunities.analysisRejectionCount,
@@ -3115,6 +3120,47 @@ export const crmRouter = {
 				throw new ORPCError("BAD_REQUEST", {
 					message: `Estado de análisis inválido: ${opportunity[0].analysisStatus}. Solo se pueden revisar oportunidades con estado 'pending' o 'resubmitted'.`,
 				});
+			}
+
+			// Validaciones RENAP + Buró para oportunidades que NO provienen del
+			// bot de WhatsApp (el bot ya las ejecuta en su propio flujo). Va
+			// después de los chequeos de etapa y estado para no gastar llamadas
+			// a las fuentes externas en aprobaciones que igual van a fallar.
+			if (input.approved && !input.bypassValidation) {
+				const exentaPorBot = isOpportunityFromSource(
+					opportunity[0].source,
+					"Whatsapp",
+					opportunity[0].leadSource ?? "other",
+				);
+
+				if (!exentaPorBot) {
+					// El DPI como texto es obligatorio en la ficha del lead,
+					// en paralelo al documento DPI exigido arriba
+					if (!opportunity[0].leadDpi) {
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								"Para aprobar el análisis, el cliente debe tener su número de DPI capturado en la ficha del lead.",
+						});
+					}
+
+					const resultadoValidaciones = await ejecutarValidaciones({
+						opportunityId: input.opportunityId,
+						userId: context.userId,
+					});
+
+					// Un fallo técnico (API caída, timeout, sin respuesta) sí
+					// bloquea: ninguna oportunidad no-bot pasa a 40% sin
+					// validación ejecutada con veredicto
+					if (resultadoValidaciones.errorTecnico) {
+						throw new ORPCError("BAD_REQUEST", {
+							message: `No se pudo completar la validación de Buró/RENAP: ${resultadoValidaciones.mensaje ?? "error desconocido"}. Intenta nuevamente o contacta al administrador.`,
+						});
+					}
+
+					// Ni el rechazo del buró ni la ausencia de registro bloquean:
+					// quedan en la bitácora y visibles en la página de análisis
+					// para que el analista decida bajo su criterio
+				}
 			}
 
 			// Get the next stage (40% - Cierre de propuesta) for approval

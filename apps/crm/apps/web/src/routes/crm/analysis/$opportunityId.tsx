@@ -11,6 +11,7 @@ import {
 import { useState } from "react";
 import { toast } from "sonner";
 import { AnalysisChecklistView } from "@/components/analysis/AnalysisChecklistView";
+import { RenapBuroValidation } from "@/components/analysis/RenapBuroValidation";
 import { DocumentValidationChecklist } from "@/components/document-validation-checklist";
 import {
 	LeadDetailModal,
@@ -505,6 +506,9 @@ function OpportunityDocumentsPage() {
 					checklist.refetch();
 				}}
 			/>
+
+			{/* Validaciones RENAP y Buró (oportunidades fuera del bot de WhatsApp) */}
+			<RenapBuroValidation opportunityId={opportunityId} />
 
 			{/* Document Validation */}
 			<DocumentValidationChecklist opportunityId={opportunityId} />

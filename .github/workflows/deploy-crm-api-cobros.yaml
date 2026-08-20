@@ -1,12 +1,20 @@
-name: Deploy CRM API (cobros)
+name: Deploy COBROS-02 (CRM API + cartera-back)
 
-# Construye y empuja la imagen del CRM API de la rama COBROS-02 al ECR público y
-# dispara el redeploy en Coolify. Es la instancia que consume el bot de WhatsApp
-# de SimpleTech, separada del CRM API principal para no arrastrarle cambios en
-# curso.
+# Construye y empuja las imágenes de la rama COBROS-02 al ECR público y dispara
+# el redeploy en Coolify. Dos apps, cada una con su instancia aparte, separadas
+# de las principales para no arrastrarles cambios en curso:
+#   - CRM API: la que consume el bot de WhatsApp de SimpleTech.
+#   - cartera-back: sirve contra el schema sandbox `cartera_cobros2` (el
+#     rediseño de buckets/asesores de COBROS-02), no contra `cartera`.
 #
-# Hace lo mismo que apps/crm/apps/server/deployServer.sh (Dockerfile del server,
-# contexto en la raíz del monorepo), pero automático y con tag por commit.
+# Sin paths-filter a propósito: cualquier push que toque los paths de
+# CUALQUIERA de las dos apps reconstruye y redespliega LAS DOS. Es dev, y
+# separar el filtro no valía la complejidad — el costo es que un push que solo
+# toca cartera también reinicia el CRM API de SimpleTech unos segundos.
+#
+# Hace lo mismo que apps/crm/apps/server/deployServer.sh y
+# apps/cartera-back/deploy-dev.sh (mismos Dockerfiles), pero automático y con
+# tag por commit.
 #
 # Ver docs/features/bot-whatsapp-cobros/despliegue-dev.md
 on:
@@ -18,34 +26,25 @@ on:
       - "packages/simpletech/**"
       - "packages/infornet/**"
       - "packages/email/**"
+      - "apps/cartera-back/**"
+      - "package.json"
+      - "bun.lock"
       - ".github/workflows/deploy-crm-api-cobros.yaml"
   workflow_dispatch: {} # permite dispararlo a mano desde la pestaña Actions
 
 env:
   AWS_REGION: us-east-1
   ECR_REGISTRY: public.ecr.aws/a6w8m2u2
-  IMAGEN: cci/crm-api-cobros
 
 permissions:
   contents: read
 
-# La concurrencia va a nivel de workflow, no del job que despliega: si estuviera
-# solo en `desplegar`, un push viejo que todavía está verificando no se cancela,
-# y al terminar —después de que el nuevo ya desplegó— publicaría su imagen
-# encima, dejando `latest` apuntando a un commit anterior.
-#
-# (En deploy-cartera-dev.yaml la concurrencia sí va por job, porque ese workflow
-# construye dos apps distintas y un push que solo toca el front no debe cancelar
-# un deploy del back en curso. Acá hay una sola app.)
-concurrency:
-  group: deploy-crm-api-cobros
-  cancel-in-progress: true
-
 jobs:
+  # ─── CRM API ────────────────────────────────────────────────────────────
   # 1) Barrera barata antes de publicar: la API la consume un tercero, así que
   # no conviene subir una imagen que ni compila.
-  verificar:
-    name: Tipos y pruebas
+  verificar-crm:
+    name: CRM API · Tipos y pruebas
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -70,10 +69,21 @@ jobs:
         run: bun test src/lib/bot-cobros/
 
   # 2) Imagen → cci/crm-api-cobros:latest
-  desplegar:
-    name: Construir y desplegar
-    needs: verificar
+  desplegar-crm:
+    name: CRM API · Construir y desplegar
+    needs: verificar-crm
     runs-on: ubuntu-latest
+    # Por job (no global, ver nota al final del archivo): un push viejo que
+    # todavía está verificando esta app no debe cancelarse por un push que
+    # solo tocó cartera-back, y viceversa. Dentro de esta app sí debe
+    # cancelar: si estuviera solo en este job y no en `verificar-crm`, un run
+    # viejo que todavía verifica publicaría su imagen encima al terminar,
+    # dejando `latest` en un commit anterior.
+    concurrency:
+      group: deploy-cobros02-crm
+      cancel-in-progress: true
+    env:
+      IMAGEN: cci/crm-api-cobros
     steps:
       - uses: actions/checkout@v4
 
@@ -102,3 +112,76 @@ jobs:
           curl --fail-with-body --request GET \
             "${{ secrets.COOLIFY_WEBHOOK_CRM_API_COBROS }}" \
             --header "Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}"
+
+  # ─── cartera-back ───────────────────────────────────────────────────────
+  # 3) Barrera barata: solo tsc, sin tests. La mayoría de los tests de
+  # cartera-back necesitan SUPABASE_DB_URL/JWT_SECRET reales para no reventar
+  # en el import (no hay fixtures/mocks para correrlos en CI); meterlos aquí
+  # tal cual rompería el gate por falta de env, no por un bug real.
+  verificar-cartera:
+    name: cartera-back · Tipos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # cartera-back SÍ es workspace de la raíz (workspaces: ["apps/*"] en el
+      # package.json raíz) y no tiene lockfile propio: se instala desde la
+      # raíz, igual que hace su Dockerfile (`bun install` desde /usr/src/app).
+      - name: Instalar dependencias
+        run: bun install
+
+      - name: Revisar tipos
+        working-directory: apps/cartera-back
+        run: bunx tsc --noEmit
+
+  # 4) Imagen → cci/cartera-api-cobros:latest
+  desplegar-cartera:
+    name: cartera-back · Construir y desplegar
+    needs: verificar-cartera
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-cobros02-cartera
+      cancel-in-progress: true
+    env:
+      IMAGEN: cci/cartera-api-cobros
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar credenciales de AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login a ECR Public (podman)
+        run: |
+          aws ecr-public get-login-password --region $AWS_REGION \
+            | podman login --username AWS --password-stdin public.ecr.aws
+
+      # Contexto en la raíz del monorepo: el Dockerfile copia packages/email y
+      # apps/cartera-back (igual que deploy-prod.yaml, a diferencia de
+      # deploy-dev.sh que usa `../..` desde dentro de la app).
+      - name: Construir y empujar
+        run: |
+          podman build -f apps/cartera-back/Dockerfile . \
+            -t $ECR_REGISTRY/$IMAGEN:latest \
+            -t $ECR_REGISTRY/$IMAGEN:${{ github.sha }}
+          podman push $ECR_REGISTRY/$IMAGEN:latest
+          podman push $ECR_REGISTRY/$IMAGEN:${{ github.sha }}
+
+      - name: Redeploy en Coolify
+        run: |
+          curl --fail-with-body --request GET \
+            "${{ secrets.COOLIFY_WEBHOOK_CARTERA_API_COBROS }}" \
+            --header "Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}"
+
+# Nota sobre concurrencia: acá va por job (agrupada por app: cobros02-crm /
+# cobros02-cartera), a diferencia de la versión anterior de este archivo que
+# la tenía a nivel de workflow cuando solo existía el CRM API. Con dos apps
+# independientes, un grupo global haría que un push que solo toca cartera
+# cancele un deploy del CRM API en curso (y viceversa). El patrón por-app es
+# el mismo que usa deploy-cartera-dev.yaml.

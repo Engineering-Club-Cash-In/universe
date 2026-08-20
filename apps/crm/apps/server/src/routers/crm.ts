@@ -3139,6 +3139,7 @@ export const crmRouter = {
 				const exencion = await resolverExencionPorBot({
 					source: opportunity[0].source,
 					leadSource: opportunity[0].leadSource,
+					leadId: opportunity[0].leadId,
 					leadDpi: opportunity[0].leadDpi,
 				});
 

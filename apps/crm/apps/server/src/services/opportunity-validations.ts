@@ -1,10 +1,10 @@
 import { createClientFromEnv, isNotFoundError } from "@repo/infornet";
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, gt } from "drizzle-orm";
 import { getOnlyRenapInfoController } from "../controllers/bot";
 import { infornetController } from "../controllers/buro";
 import { db } from "../db";
 import { infornetPersonaCache } from "../db/schema/buro";
-import { leads, opportunities } from "../db/schema/crm";
+import { leads, magicUrls, opportunities } from "../db/schema/crm";
 import { renapInfo } from "../db/schema/renap";
 import { opportunityValidations } from "../db/schema/validations";
 import { evaluarBuro } from "../lib/buro-evaluation";
@@ -195,12 +195,14 @@ async function registrarValidacion(valores: {
 async function cargarOportunidadConLead(opportunityId: string): Promise<{
 	source: LeadSource | null;
 	leadSource: LeadSource | null;
+	leadId: string | null;
 	leadDpi: string | null;
 } | null> {
 	const [row] = await db
 		.select({
 			source: opportunities.source,
 			leadSource: leads.source,
+			leadId: opportunities.leadId,
 			leadDpi: leads.dpi,
 		})
 		.from(opportunities)
@@ -211,32 +213,42 @@ async function cargarOportunidadConLead(opportunityId: string): Promise<{
 	return row ?? null;
 }
 
-/** Evidencia de que el bot validó: importa que existan, no que sigan vigentes */
-async function tieneEvidenciaDelBot(leadDpi: string | null): Promise<boolean> {
-	if (!leadDpi) return false;
+/**
+ * El magic URL solo lo escribe el bot (`bot.ts:595,888`), así que su presencia
+ * prueba que el lead pasó por ese flujo. Se exige además que el estudio del
+ * buró siga vigente: uno vencido ya no sirve como veredicto.
+ */
+async function elBotValidoAlLead(
+	leadId: string | null,
+	leadDpi: string | null,
+): Promise<boolean> {
+	if (!leadId || !leadDpi) return false;
 
-	const dpi = normalizarDpi(leadDpi);
-
-	const [sincronizadoEnRenap] = await db
-		.select({ dpi: renapInfo.dpi })
-		.from(renapInfo)
-		.where(eqDpi(renapInfo.dpi, dpi))
+	const [magicUrl] = await db
+		.select({ id: magicUrls.id })
+		.from(magicUrls)
+		.where(eq(magicUrls.leadId, leadId))
 		.limit(1);
 
-	if (!sincronizadoEnRenap) return false;
+	if (!magicUrl) return false;
 
-	const [estudioDelBuro] = await db
+	const [estudioVigente] = await db
 		.select({ dpi: infornetPersonaCache.dpi })
 		.from(infornetPersonaCache)
-		.where(eq(infornetPersonaCache.dpi, dpi))
+		.where(
+			and(
+				eq(infornetPersonaCache.dpi, normalizarDpi(leadDpi)),
+				gt(infornetPersonaCache.expiraEn, new Date()),
+			),
+		)
 		.limit(1);
 
-	return Boolean(estudioDelBuro);
+	return Boolean(estudioVigente);
 }
 
 export type ResolucionExencion = {
 	exento: boolean;
-	/** Dice ser del bot pero no hay rastro de que las validaciones corrieran */
+	/** Declara origen bot pero el bot no lo validó, o el veredicto venció */
 	origenBotSinEvidencia: boolean;
 };
 
@@ -244,6 +256,7 @@ export type ResolucionExencion = {
 export async function resolverExencionPorBot(oportunidad: {
 	source: LeadSource | null;
 	leadSource: LeadSource | null;
+	leadId: string | null;
 	leadDpi: string | null;
 }): Promise<ResolucionExencion> {
 	const declaraOrigenBot = isOpportunityFromSource(
@@ -256,22 +269,41 @@ export async function resolverExencionPorBot(oportunidad: {
 		return { exento: false, origenBotSinEvidencia: false };
 	}
 
-	const conEvidencia = await tieneEvidenciaDelBot(oportunidad.leadDpi);
+	const validadaPorElBot = await elBotValidoAlLead(
+		oportunidad.leadId,
+		oportunidad.leadDpi,
+	);
 
-	return { exento: conEvidencia, origenBotSinEvidencia: !conEvidencia };
+	return {
+		exento: validadaPorElBot,
+		origenBotSinEvidencia: !validadaPorElBot,
+	};
 }
 
-/** Mutex por oportunidad: evita consultas duplicadas a Infornet, que se facturan */
-async function conLockDeOportunidad<T>(
+const validacionesEnCurso = new Map<
+	string,
+	Promise<ResultadoEjecucionValidaciones>
+>();
+
+/**
+ * Reusa la validación en curso de la misma oportunidad en vez de disparar otra.
+ * Vive en memoria a propósito: un lock en la base retendría una conexión del
+ * pool durante las llamadas externas.
+ */
+function conMutexDeOportunidad(
 	opportunityId: string,
-	ejecutar: () => Promise<T>,
-): Promise<T> {
-	return db.transaction(async (tx) => {
-		await tx.execute(
-			sql`select pg_advisory_xact_lock(hashtextextended(${opportunityId}, 0))`,
-		);
-		return ejecutar();
+	ejecutar: () => Promise<ResultadoEjecucionValidaciones>,
+): Promise<ResultadoEjecucionValidaciones> {
+	const enCurso = validacionesEnCurso.get(opportunityId);
+	if (enCurso) return enCurso;
+
+	const validacion = ejecutar().finally(() => {
+		validacionesEnCurso.delete(opportunityId);
 	});
+
+	validacionesEnCurso.set(opportunityId, validacion);
+
+	return validacion;
 }
 
 /** Valida RENAP y Buró para oportunidades no-bot y registra el resultado */
@@ -279,7 +311,7 @@ export async function ejecutarValidaciones(parametros: {
 	opportunityId: string;
 	userId?: string | null;
 }): Promise<ResultadoEjecucionValidaciones> {
-	return conLockDeOportunidad(parametros.opportunityId, () =>
+	return conMutexDeOportunidad(parametros.opportunityId, () =>
 		ejecutarValidacionesInterno(parametros),
 	);
 }

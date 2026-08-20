@@ -68,7 +68,7 @@ export const opportunityValidations = pgTable(
 		/** Si el estudio salió del caché (30 días) o de la API de Infornet */
 		fuenteDeDatos: text("fuente_de_datos"),
 
-		/** Vigencia del resultado (copiada del caché de Infornet cuando aplica) */
+		/** Vigencia del resultado: del caché de Infornet, o 30 días si no hay registro */
 		expiraEn: timestamp("expira_en"),
 
 		/** Usuario que disparó la ejecución (null si fue el sistema) */

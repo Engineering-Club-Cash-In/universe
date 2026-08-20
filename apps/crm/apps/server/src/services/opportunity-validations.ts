@@ -29,6 +29,9 @@ const MENSAJE_SIN_REGISTRO_BURO = "Sin registro en el buró de Infornet";
 
 const MENSAJE_TIMEOUT_RENAP = "RENAP no respondió";
 
+/** Un "sin registro" vale lo mismo que un estudio: si Infornet no tiene a la persona hoy, tampoco mañana */
+const VIGENCIA_SIN_REGISTRO_MS = 30 * 24 * 60 * 60 * 1000;
+
 /** Mensaje de Infornet que no distingue "sin registro" de un fallo real */
 const ERROR_INFORNET_AMBIGUO = "Persona no encontrada en Infornet";
 
@@ -616,6 +619,9 @@ async function ejecutarValidacionesInterno({
 			tipo: "buro",
 			estado: estadoBuro,
 			mensaje: mensajeBuro,
+			expiraEn: buroSinRegistro
+				? new Date(Date.now() + VIGENCIA_SIN_REGISTRO_MS)
+				: null,
 			ejecutadoPor: userId ?? null,
 		});
 

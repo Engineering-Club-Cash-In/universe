@@ -203,6 +203,8 @@ describe("el mensaje que confirma el cliente", () => {
 		cuotaDe: 84,
 		saldoCuota: "5891.15",
 		mora: "1178.23",
+		moraPorConfirmar: false,
+		paraCuota: "3000.00",
 		cubreMora: true,
 		cubreCuota: false,
 		camposFaltantes: [] as string[],
@@ -235,18 +237,44 @@ describe("el mensaje que confirma el cliente", () => {
 		expect(
 			armarMensajesBoleta({ ...base, cubreCuota: true }).completo,
 		).toContain("Cubre la cuota completa");
+		// El faltante se calcula DESPUÉS de aplicar el pago: Q5,891.15 − Q3,000.
 		expect(armarMensajesBoleta(base).completo).toContain(
-			"Falta de esa cuota: Q5,891.15",
+			"Después de este pago te faltarán: Q2,891.15",
 		);
 	});
 
+	test("nunca muestra el saldo de la cuota como si el pago no existiera", () => {
+		// Decirle "te faltan Q5,891.15" a alguien que acaba de abonar Q3,000 se
+		// lee como que su pago no sirvió de nada.
+		expect(armarMensajesBoleta(base).completo).not.toContain("Q5,891.15");
+	});
+
+	test("con mora por confirmar no promete nada de la cuota", () => {
+		// Hay mora pero cartera no puede citar el monto: cualquier cuenta que
+		// hagamos sobre la cuota sería inventada.
+		const m = armarMensajesBoleta({
+			...base,
+			moraPorConfirmar: true,
+			paraCuota: null,
+			cubreMora: false,
+		});
+
+		expect(m.completo).toContain("Tu asesor te confirma el monto exacto");
+		expect(m.completo).not.toContain("Cubre la cuota completa");
+		expect(m.completo).not.toContain("te faltarán");
+	});
+
 	test("si no alcanza ni para la mora, no habla de la cuota", () => {
-		// Decir "falta Q5,891.15 de tu cuota" cuando a la cuota no le llega nada
-		// es una promesa falsa disfrazada de dato.
-		const m = armarMensajesBoleta({ ...base, cubreMora: false });
+		// Decir "te faltan Q2,891.15 de tu cuota" cuando a la cuota no le llega
+		// nada es una promesa falsa disfrazada de dato.
+		const m = armarMensajesBoleta({
+			...base,
+			cubreMora: false,
+			paraCuota: "0.00",
+		});
 
 		expect(m.completo).toContain("Este pago se aplica todo a tu mora");
-		expect(m.completo).not.toContain("Falta de esa cuota");
+		expect(m.completo).not.toContain("te faltarán");
 	});
 
 	test("avisa sin tecnicismos cuando faltó leer algo", () => {
@@ -274,6 +302,7 @@ describe("a dónde va el dinero de la boleta", () => {
 		const r = estimarAplicacion({
 			monto: 6000,
 			mora: "1000",
+			moraPorConfirmar: false,
 			saldoCuota: "5500",
 			numeroCuota: 8,
 		});
@@ -288,6 +317,7 @@ describe("a dónde va el dinero de la boleta", () => {
 		const r = estimarAplicacion({
 			monto: 6000,
 			mora: null,
+			moraPorConfirmar: false,
 			saldoCuota: "5500",
 			numeroCuota: 8,
 		});
@@ -303,6 +333,7 @@ describe("a dónde va el dinero de la boleta", () => {
 		const r = estimarAplicacion({
 			monto: 500,
 			mora: "1178.23",
+			moraPorConfirmar: false,
 			saldoCuota: "5891.15",
 			numeroCuota: 8,
 		});
@@ -316,6 +347,7 @@ describe("a dónde va el dinero de la boleta", () => {
 		const r = estimarAplicacion({
 			monto: 9999,
 			mora: null,
+			moraPorConfirmar: false,
 			saldoCuota: null,
 			numeroCuota: 8,
 		});
@@ -324,11 +356,30 @@ describe("a dónde va el dinero de la boleta", () => {
 		expect(r.excedente).toBe("0.00");
 	});
 
+	test("con mora por confirmar NO se estima: null no es cero", () => {
+		// Cartera devuelve mora: null cuando la foto de la mora quedó vieja. Si
+		// eso se leyera como "no tiene mora", el bot anunciaría que todo el
+		// dinero va a la cuota mientras cartera descuenta un monto desconocido.
+		const r = estimarAplicacion({
+			monto: 6000,
+			mora: null,
+			moraPorConfirmar: true,
+			saldoCuota: "5500",
+			numeroCuota: 8,
+		});
+
+		expect(r.moraPorConfirmar).toBe(true);
+		expect(r.paraCuota).toBeNull();
+		expect(r.cubreCuota).toBe(false);
+		expect(r.orden).toEqual(["mora", "cuota_8"]);
+	});
+
 	test("va siempre marcada como estimación", () => {
 		expect(
 			estimarAplicacion({
 				monto: 100,
 				mora: null,
+				moraPorConfirmar: false,
 				saldoCuota: null,
 				numeroCuota: 1,
 			}).estimado,

@@ -162,7 +162,19 @@ async function leerConTope(respuesta: Response, tope: number): Promise<Buffer> {
 	return Buffer.concat(trozos);
 }
 
-export async function descargarBoleta(url: string): Promise<ResultadoDescarga> {
+/**
+ * Cuántos saltos se permiten en toda la descarga.
+ *
+ * El contador viaja en la recursión a propósito: si cada llamada empezara de
+ * cero, una cadena de redirecciones —o un bucle— se seguiría persiguiendo para
+ * siempre, y encima con un timeout nuevo de 15 s en cada vuelta.
+ */
+const MAXIMO_SALTOS = 1;
+
+export async function descargarBoleta(
+	url: string,
+	saltos = 0,
+): Promise<ResultadoDescarga> {
 	if (!urlPermitida(url)) return { ok: false, codigo: "URL_NO_PERMITIDA" };
 
 	let respuesta: Response;
@@ -178,12 +190,16 @@ export async function descargarBoleta(url: string): Promise<ResultadoDescarga> {
 	}
 
 	if (respuesta.status >= 300 && respuesta.status < 400) {
+		if (saltos >= MAXIMO_SALTOS) {
+			return { ok: false, codigo: "IMAGEN_NO_DESCARGABLE" };
+		}
+
 		const destino = respuesta.headers.get("location");
 		// Se permite UN salto, y solo si el destino vuelve a pasar los filtros.
 		if (!destino || !urlPermitida(new URL(destino, url).toString())) {
 			return { ok: false, codigo: "URL_NO_PERMITIDA" };
 		}
-		return descargarBoleta(new URL(destino, url).toString());
+		return descargarBoleta(new URL(destino, url).toString(), saltos + 1);
 	}
 
 	if (!respuesta.ok) return { ok: false, codigo: "IMAGEN_NO_DESCARGABLE" };

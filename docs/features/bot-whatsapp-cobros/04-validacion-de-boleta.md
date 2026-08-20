@@ -134,6 +134,8 @@ sesión: es dato nuestro, y si lo mandara el bot se podría reiniciar para salta
       "saldoCuota": "6264.10",
       "mora": "59849.54",
       "orden": ["mora", "cuota_3"],
+      "moraPorConfirmar": false,
+      "paraCuota": "0.00",
       "cubreMora": false,
       "cubreCuota": false,
       "excedente": "0.00"
@@ -168,6 +170,12 @@ mora primero y después las cuotas, de la más vieja a la más nueva — y por e
 se calcula sobre `paraCuota`, que es lo que **queda después de la mora**: con una boleta de
 Q6,000, Q1,000 de mora y una cuota de Q5,500, a la cuota le llegan Q5,000, y decir que la
 cubre sería prometerle al cliente algo que no va a pasar.
+
+**Y si `moraPorConfirmar` viene en `true`, no se estima nada.** Cartera devuelve `mora: null`
+cuando su foto quedó vieja —tiene mora, pero el monto no es citable—, y leer ese `null` como
+"no tiene mora" haría que el bot anuncie que todo el dinero va a la cuota mientras cartera
+descuenta antes una cantidad que ni nosotros conocemos. En ese caso `paraCuota` va en `null`,
+`cubreCuota` en `false`, y el mensaje manda al cliente con su asesor.
 
 Con eso, el resumen del crédito y los abonos parciales de la cuota actual alcanzan para
 decirle al cliente a dónde va su dinero, pero **la aplicación real la hace cartera al

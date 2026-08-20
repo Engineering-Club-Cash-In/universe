@@ -25,6 +25,10 @@ export type DatosMensajeBoleta = {
 	cuotaDe: number | null;
 	saldoCuota: string | null;
 	mora: string | null;
+	/** true = hay mora pero no se sabe cuánta; no se promete nada de la cuota. */
+	moraPorConfirmar: boolean;
+	/** Lo que le llega a la cuota después de la mora. `null` si no se sabe. */
+	paraCuota: string | null;
 	/** Si la boleta ni alcanza para la mora, a la cuota no le llega nada. */
 	cubreMora: boolean;
 	cubreCuota: boolean;
@@ -63,16 +67,28 @@ export function armarMensajesBoleta(datos: DatosMensajeBoleta): MensajesBoleta {
 			detalle.push(`   A tu cuota ${datos.cuotaNumero} de ${datos.cuotaDe}`);
 		}
 
-		// Si ni siquiera alcanza para la mora, decir "falta X de la cuota" sería
-		// engañoso: a la cuota no le llega nada.
-		if (!datos.cubreMora) {
-			detalle.push("   Este pago se aplica todo a tu mora.");
-		} else if (datos.saldoCuota) {
+		if (datos.moraPorConfirmar) {
+			// Hay mora, pero cartera no puede decir cuánta ahora mismo. Prometer
+			// "cubre tu cuota" acá sería inventar: no sabemos cuánto se descuenta
+			// antes.
 			detalle.push(
-				datos.cubreCuota
-					? "   ✅ Cubre la cuota completa"
-					: `   Falta de esa cuota: ${quetzales(datos.saldoCuota)}`,
+				"   Primero se cubre tu mora. Tu asesor te confirma el monto exacto.",
 			);
+		} else if (!datos.cubreMora) {
+			// Si ni siquiera alcanza para la mora, decir "falta X de la cuota"
+			// sería engañoso: a la cuota no le llega nada.
+			detalle.push("   Este pago se aplica todo a tu mora.");
+		} else if (datos.cubreCuota) {
+			detalle.push("   ✅ Cubre la cuota completa");
+		} else if (datos.saldoCuota && datos.paraCuota) {
+			// El faltante es DESPUÉS de aplicar este pago. Mostrar el saldo previo
+			// —"faltan Q6,000"— justo cuando el cliente acaba de abonar Q3,000 se
+			// lee como que su pago no sirvió de nada.
+			const falta = Math.max(
+				0,
+				Number(datos.saldoCuota) - Number(datos.paraCuota),
+			);
+			detalle.push(`   Después de este pago te faltarán: ${quetzales(falta)}`);
 		}
 	}
 

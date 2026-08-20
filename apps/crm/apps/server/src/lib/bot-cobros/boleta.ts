@@ -98,8 +98,10 @@ export type BoletaLeidaBot = {
 		mora: string | null;
 		/** En qué orden lo va a aplicar cartera: la mora primero, si la hay. */
 		orden: string[];
-		/** Lo que le queda a la cuota DESPUÉS de la mora. */
-		paraCuota: string;
+		/** true = hay mora pero su monto no se puede citar; no se estima nada. */
+		moraPorConfirmar: boolean;
+		/** Lo que le queda a la cuota DESPUÉS de la mora. `null` si no se sabe. */
+		paraCuota: string | null;
 		cubreMora: boolean;
 		cubreCuota: boolean;
 		excedente: string;
@@ -149,7 +151,10 @@ async function reservarIntento(
 		imagenUrl: string;
 		hash: string;
 	},
-): Promise<{ ok: true; boletaId: string; intento: number } | { ok: false }> {
+): Promise<
+	| { ok: true; boletaId: string; intento: number }
+	| { ok: false; motivo: "sin_intentos" | "repetida"; boletaId?: string }
+> {
 	return db.transaction(async (tx) => {
 		await tx
 			.select({ id: otps.id })
@@ -163,7 +168,33 @@ async function reservarIntento(
 			.where(eq(botCobrosBoletas.otpId, identidad.otpId));
 
 		const previos = conteo?.total ?? 0;
-		if (previos >= MAXIMO_INTENTOS) return { ok: false as const };
+		if (previos >= MAXIMO_INTENTOS) {
+			return { ok: false as const, motivo: "sin_intentos" as const };
+		}
+
+		// El chequeo de duplicado de más arriba corre sin candado: dos entregas
+		// simultáneas de la MISMA imagen lo pasan las dos y terminan gastando dos
+		// intentos y dos lecturas de Gemini por el mismo archivo. Repetirlo acá
+		// —ya con la fila del OTP bloqueada— es lo que lo serializa de verdad.
+		const [gemela] = await tx
+			.select({ id: botCobrosBoletas.id })
+			.from(botCobrosBoletas)
+			.where(
+				and(
+					eq(botCobrosBoletas.otpId, identidad.otpId),
+					eq(botCobrosBoletas.hashImagen, datos.hash),
+					gt(botCobrosBoletas.createdAt, sql`now() - interval '24 hours'`),
+				),
+			)
+			.limit(1);
+
+		if (gemela) {
+			return {
+				ok: false as const,
+				motivo: "repetida" as const,
+				boletaId: gemela.id,
+			};
+		}
 
 		const [fila] = await tx
 			.insert(botCobrosBoletas)
@@ -211,9 +242,32 @@ async function contarIntentos(otpId: string): Promise<number> {
 export function estimarAplicacion(entrada: {
 	monto: number;
 	mora: string | null;
+	/**
+	 * true = tiene mora activa pero cartera NO puede citar el monto ahora.
+	 *
+	 * Es distinto de no tener mora, y confundirlos es caro: con la bandera
+	 * levantada `mora` viene en `null`, y tratarlo como cero haría que el bot
+	 * anuncie que todo el dinero va a la cuota cuando cartera va a descontar
+	 * antes una cantidad que ni nosotros conocemos.
+	 */
+	moraPorConfirmar: boolean;
 	saldoCuota: string | null;
 	numeroCuota: number;
 }) {
+	// No se estima lo que no se puede sostener: se dice que hay mora, que no se
+	// sabe cuánta, y no se afirma que la cuota quede cubierta.
+	if (entrada.moraPorConfirmar) {
+		return {
+			estimado: true as const,
+			moraPorConfirmar: true,
+			orden: ["mora", `cuota_${entrada.numeroCuota}`],
+			paraCuota: null,
+			cubreMora: false,
+			cubreCuota: false,
+			excedente: "0.00",
+		};
+	}
+
 	const mora = entrada.mora === null ? 0 : Number(entrada.mora);
 	const saldoCuota =
 		entrada.saldoCuota === null ? null : Number(entrada.saldoCuota);
@@ -233,6 +287,7 @@ export function estimarAplicacion(entrada: {
 
 	return {
 		estimado: true as const,
+		moraPorConfirmar: false,
 		orden,
 		paraCuota: paraCuota.toFixed(2),
 		cubreMora,
@@ -325,7 +380,15 @@ export async function leerBoleta(input: {
 		imagenUrl: input.imagenUrl,
 		hash: descarga.hash,
 	});
-	if (!reserva.ok) return { ok: false, codigo: "DEMASIADOS_INTENTOS" };
+	if (!reserva.ok) {
+		return reserva.motivo === "repetida"
+			? {
+					ok: false,
+					codigo: "BOLETA_DUPLICADA",
+					datos: { boletaId: reserva.boletaId },
+				}
+			: { ok: false, codigo: "DEMASIADOS_INTENTOS" };
+	}
 
 	// 7 · Leer. Un solo intento: si falla, el cliente manda otra foto (D-25).
 	const lectura = await leerBoletaConIA(descarga);
@@ -389,6 +452,13 @@ export async function leerBoleta(input: {
 		r2Key = subida.filename ?? subida.url;
 	} catch (error) {
 		console.error("[BotCobros] subida de boleta a R2:", error);
+		// Igual que con el lector: es problema NUESTRO, así que se devuelve el
+		// intento. Si la reserva quedara viva, reintentar con la MISMA foto
+		// chocaría contra el control de duplicados y el cliente quedaría trabado
+		// entre un 503 que le dice "probá de nuevo" y un 409 que se lo impide.
+		await db
+			.delete(botCobrosBoletas)
+			.where(eq(botCobrosBoletas.id, reserva.boletaId));
 		return { ok: false, codigo: "ALMACENAMIENTO_NO_DISPONIBLE" };
 	}
 
@@ -413,6 +483,7 @@ export async function leerBoleta(input: {
 	const aplicacion = estimarAplicacion({
 		monto,
 		mora: resumen.mora?.monto ?? null,
+		moraPorConfirmar: resumen.mora_por_confirmar,
 		saldoCuota,
 		numeroCuota: resumen.cuota_actual.numero,
 	});
@@ -449,6 +520,8 @@ export async function leerBoleta(input: {
 		cuotaDe: resumen.cuota_actual.de,
 		saldoCuota,
 		mora: resumen.mora?.monto ?? null,
+		moraPorConfirmar: aplicacion.moraPorConfirmar,
+		paraCuota: aplicacion.paraCuota,
 		cubreMora: aplicacion.cubreMora,
 		cubreCuota: aplicacion.cubreCuota,
 		camposFaltantes,

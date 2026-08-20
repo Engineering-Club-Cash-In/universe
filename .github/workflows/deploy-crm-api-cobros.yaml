@@ -114,33 +114,13 @@ jobs:
             --header "Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}"
 
   # ─── cartera-back ───────────────────────────────────────────────────────
-  # 3) Barrera barata: solo tsc, sin tests. La mayoría de los tests de
-  # cartera-back necesitan SUPABASE_DB_URL/JWT_SECRET reales para no reventar
-  # en el import (no hay fixtures/mocks para correrlos en CI); meterlos aquí
-  # tal cual rompería el gate por falta de env, no por un bug real.
-  verificar-cartera:
-    name: cartera-back · Tipos
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      # cartera-back SÍ es workspace de la raíz (workspaces: ["apps/*"] en el
-      # package.json raíz) y no tiene lockfile propio: se instala desde la
-      # raíz, igual que hace su Dockerfile (`bun install` desde /usr/src/app).
-      - name: Instalar dependencias
-        run: bun install
-
-      - name: Revisar tipos
-        working-directory: apps/cartera-back
-        run: bunx tsc --noEmit
-
-  # 4) Imagen → cci/cartera-api-cobros:latest
+  # Sin job de tipos/tests separado: deploy-cartera-dev.yaml tampoco lo tiene
+  # para esta app — el `bun install` real ocurre dentro del Dockerfile (ver
+  # Dockerfile paso 2). La única barrera antes de publicar es el smoke test
+  # de Puppeteer dentro de la imagen ya construida, mismo patrón que ese
+  # workflow.
   desplegar-cartera:
     name: cartera-back · Construir y desplegar
-    needs: verificar-cartera
     runs-on: ubuntu-latest
     concurrency:
       group: deploy-cobros02-cartera
@@ -170,6 +150,8 @@ jobs:
           podman build -f apps/cartera-back/Dockerfile . \
             -t $ECR_REGISTRY/$IMAGEN:latest \
             -t $ECR_REGISTRY/$IMAGEN:${{ github.sha }}
+          echo "Running cartera-back Puppeteer smoke test inside the built image"
+          podman run --rm $ECR_REGISTRY/$IMAGEN:${{ github.sha }} bun run smoke:puppeteer
           podman push $ECR_REGISTRY/$IMAGEN:latest
           podman push $ECR_REGISTRY/$IMAGEN:${{ github.sha }}
 

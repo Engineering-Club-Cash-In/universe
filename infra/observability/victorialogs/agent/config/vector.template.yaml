@@ -3,7 +3,7 @@ data_dir: /var/lib/vector
 sources:
   container_logs:
     type: docker_logs
-    docker_host: unix:///var/run/docker.sock
+    docker_host: unix:///shared/docker-proxy.sock
     exclude_containers:
       - vector
 

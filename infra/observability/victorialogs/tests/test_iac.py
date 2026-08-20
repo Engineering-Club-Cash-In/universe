@@ -88,6 +88,22 @@ class StaticIacContractTests(unittest.TestCase):
         ):
             self.assertIn(sensitive_name, vector)
 
+    def test_agent_uses_read_only_socket_proxy(self) -> None:
+        agent = self.read(AGENT_COMPOSE)
+        vector = self.read(VECTOR_TEMPLATE)
+        self.assertRegex(
+            agent,
+            r"tecnativa/docker-socket-proxy:v0\.5\.0@sha256:[a-f0-9]{64}",
+        )
+        self.assertIn("POST: \"0\"", agent)
+        self.assertIn("CONTAINERS: \"1\"", agent)
+        self.assertIn("EVENTS: \"1\"", agent)
+        self.assertIn("INFO: \"1\"", agent)
+        self.assertIn('BIND_CONFIG: "/shared/docker-proxy.sock mode 660"', agent)
+        self.assertNotIn('expose:\n      - "2375"', agent)
+        self.assertNotIn("${CONTAINER_SOCKET_PATH", agent.split("  vector:", 1)[1])
+        self.assertIn("docker_host: unix:///shared/docker-proxy.sock", vector)
+
     def test_runtime_config_is_generated_from_compose_secrets(self) -> None:
         central = self.read(CENTRAL_COMPOSE)
         agent = self.read(AGENT_COMPOSE)

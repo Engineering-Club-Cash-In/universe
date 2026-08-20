@@ -127,7 +127,7 @@ Si el navegador está offline, conserva una cola pequeña con TTL y la entrega a
 
 Vector usa buffer de disco de 512 MiB y `drop_newest` al agotarse. La caída de VictoriaLogs no puede aplicar backpressure sobre la aplicación. Deben alertarse errores de envío y eventos descartados.
 
-El acceso al socket de contenedores es configurable. En Podman rootless se usa el socket del usuario; en hosts Coolify se usa `/var/run/docker.sock`. Debe evaluarse un socket proxy de solo lectura como hardening posterior.
+Vector no recibe el socket del runtime. Se conecta por un Unix socket compartido a `docker-socket-proxy`, que permite únicamente consultas `CONTAINERS`, `EVENTS`, `INFO`, `PING` y `VERSION`, con `POST=0`. El proxy es el único contenedor que monta el socket configurable y no publica ningún puerto. En Podman rootless se usa el socket del usuario; en hosts Coolify se usa `/var/run/docker.sock`.
 
 Cada servicio mantiene rotación local (`max-size`/`max-file`) aunque Vector esté activo.
 

@@ -5,7 +5,7 @@ Infraestructura versionada para desplegar VictoriaLogs detrás del proxy adminis
 ## Alcance de este directorio
 
 - `central/`: VictoriaLogs y `vmauth`; no contiene proxy TLS.
-- `agent/`: Vector para cada servidor de aplicaciones.
+- `agent/`: Vector y un socket proxy allowlist para cada servidor de aplicaciones.
 - `scripts/`: render seguro, validación y operaciones.
 - `tests/`: gates estáticos y de seguridad.
 - `SPEC.md`: decisiones de arquitectura v1.1.
@@ -111,7 +111,7 @@ python scripts/render-config.py agent \
   --environment staging
 ```
 
-Para Podman rootless, copiar `agent/.env.example` a `agent/.env` y configurar `CONTAINER_SOCKET_PATH` con el socket real del usuario. En Coolify se conserva `/var/run/docker.sock`.
+Para Podman rootless, copiar `agent/.env.example` a `agent/.env` y configurar `CONTAINER_SOCKET_PATH` con el socket real del usuario. En Coolify se conserva `/var/run/docker.sock`. Solo `docker-socket-proxy` monta el socket; Vector consume su API HTTP allowlist con operaciones POST deshabilitadas.
 
 En Coolify el agente se crea como un segundo recurso Docker Compose con la misma Base Directory y Docker Compose Location `/agent/compose.yaml`. Sus variables se marcan runtime-only y no se asigna dominio público al servicio Vector.
 

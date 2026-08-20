@@ -6,6 +6,7 @@
  *
  * Servicio 1 · POST /api/bot/cobros/buscar-cliente → identifica y manda el OTP
  * Servicio 2 · POST /api/bot/cobros/creditos      → valida el OTP y lista créditos
+ * Servicio 5 · POST /api/bot/cobros/boleta/leer   → lee la boleta con IA (paso 4)
  *
  * Todas las respuestas siguen el mismo formato:
  *   éxito → { success: true, data: {...} }
@@ -15,6 +16,7 @@
 
 import type { Context } from "hono";
 import { db } from "../db";
+import { leerBoleta } from "../lib/bot-cobros/boleta";
 import {
 	buscarCliente,
 	listarCreditosDeCliente,
@@ -32,7 +34,7 @@ import { enviarOtp, validarOtp } from "../lib/bot-cobros/otp";
 type RespuestaError = {
 	codigo: string;
 	mensaje: string;
-	estado: 400 | 401 | 404 | 429 | 500 | 503;
+	estado: 400 | 401 | 404 | 409 | 413 | 422 | 429 | 500 | 502 | 503;
 };
 
 /**
@@ -342,6 +344,167 @@ export async function estadoDeCuentaBotCobros(c: Context) {
 			codigo: "ERROR_INTERNO",
 			mensaje:
 				"No pudimos generar tu estado de cuenta en este momento. Intenta de nuevo en unos minutos.",
+			estado: 500,
+		});
+	}
+}
+
+/**
+ * Servicio 5 · Lee la boleta que subió el cliente (paso 4).
+ *
+ * NO registra el pago: devuelve lo que entendimos para que el cliente confirme.
+ * El registro es el servicio 6.
+ *
+ * Contrato: docs/features/bot-whatsapp-cobros/04-validacion-de-boleta.md
+ */
+export async function leerBoletaBotCobros(c: Context) {
+	try {
+		const body = await c.req.json<{
+			referencia?: unknown;
+			numeroSifco?: unknown;
+			imagenUrl?: unknown;
+		}>();
+
+		const referencia = String(body.referencia ?? "").trim();
+		const numeroSifco = String(body.numeroSifco ?? "").trim();
+		const imagenUrl = String(body.imagenUrl ?? "").trim();
+
+		if (!referencia || !numeroSifco || !imagenUrl) {
+			return error(c, {
+				codigo: "PARAMETROS_INVALIDOS",
+				mensaje: "Faltan datos para leer tu boleta.",
+				estado: 400,
+			});
+		}
+
+		const resultado = await leerBoleta({ referencia, numeroSifco, imagenUrl });
+
+		if (!resultado.ok) {
+			const datos = resultado.datos ?? {};
+
+			switch (resultado.codigo) {
+				case "SESION_VENCIDA":
+					return error(c, {
+						codigo: "SESION_VENCIDA",
+						mensaje:
+							"Por seguridad tu sesión expiró. Vuelve a identificarte para continuar.",
+						estado: 401,
+					});
+				case "CREDITO_NO_ES_DEL_CLIENTE":
+					return error(c, {
+						codigo: "CREDITO_NO_ENCONTRADO",
+						mensaje: "No encontramos ese crédito.",
+						estado: 404,
+					});
+				case "CREDITO_SIN_DATOS":
+					return error(c, {
+						codigo: "CREDITO_SIN_DATOS",
+						mensaje:
+							"No pudimos consultar la información de ese crédito. Por favor contacta a soporte.",
+						estado: 404,
+					});
+				// El crédito existe pero no está para recibir pagos, o no le queda
+				// ninguna cuota abierta. No es culpa del cliente ni de la foto: va
+				// con su asesor antes de que suba nada.
+				case "CREDITO_NO_ACEPTA_BOLETA":
+					return error(
+						c,
+						{
+							codigo: "CREDITO_NO_ACEPTA_BOLETA",
+							mensaje:
+								"Este crédito no puede recibir pagos por este medio. Tu asesor te va a ayudar.",
+							estado: 409,
+						},
+						datos,
+					);
+				case "DEMASIADOS_INTENTOS":
+					return error(c, {
+						codigo: "DEMASIADOS_INTENTOS",
+						mensaje:
+							"Ya intentamos leer tu boleta varias veces. Tu asesor te va a ayudar a registrarla.",
+						estado: 429,
+					});
+				case "URL_NO_PERMITIDA":
+					return error(c, {
+						codigo: "URL_NO_PERMITIDA",
+						mensaje: "No pudimos abrir esa imagen.",
+						estado: 400,
+					});
+				// El CDN de SimpleTech falló: la sesión del cliente sigue siendo
+				// válida, así que NO se le puede decir que empiece de nuevo. Sin
+				// este caso caía en el `default` y salía un 401.
+				case "IMAGEN_NO_DESCARGABLE":
+					return error(c, {
+						codigo: "IMAGEN_NO_DESCARGABLE",
+						mensaje:
+							"No pudimos descargar tu imagen. Intenta mandarla de nuevo, por favor.",
+						estado: 502,
+					});
+				case "ARCHIVO_MUY_GRANDE":
+					return error(c, {
+						codigo: "ARCHIVO_MUY_GRANDE",
+						mensaje:
+							"La imagen pesa demasiado. Mandanos una foto más liviana, por favor.",
+						estado: 413,
+					});
+				case "ARCHIVO_NO_SOPORTADO":
+					return error(c, {
+						codigo: "ARCHIVO_NO_SOPORTADO",
+						mensaje:
+							"Ese archivo no lo podemos leer. Mandanos una foto (JPG o PNG) o el PDF de tu boleta.",
+						estado: 422,
+					});
+				case "BOLETA_ILEGIBLE":
+					return error(
+						c,
+						{
+							codigo: "BOLETA_ILEGIBLE",
+							mensaje:
+								"No pudimos leer tu boleta. Mandanos otra foto donde se vean bien el monto y la fecha.",
+							estado: 422,
+						},
+						datos,
+					);
+				case "BOLETA_DUPLICADA":
+					return error(
+						c,
+						{
+							codigo: "BOLETA_DUPLICADA",
+							mensaje: "Esa boleta ya nos la habías mandado.",
+							estado: 409,
+						},
+						datos,
+					);
+				// Problema nuestro, no del cliente: por eso NO le gasta un intento.
+				case "LECTOR_NO_DISPONIBLE":
+					return error(c, {
+						codigo: "LECTOR_NO_DISPONIBLE",
+						mensaje:
+							"No pudimos leer tu boleta en este momento. Intenta de nuevo en unos minutos.",
+						estado: 503,
+					});
+				case "ALMACENAMIENTO_NO_DISPONIBLE":
+					return error(c, {
+						codigo: "ALMACENAMIENTO_NO_DISPONIBLE",
+						mensaje:
+							"No pudimos guardar tu boleta en este momento. Intenta de nuevo en unos minutos.",
+						estado: 503,
+					});
+				default:
+					return error(c, {
+						codigo: "REFERENCIA_INVALIDA",
+						mensaje: "No encontramos tu solicitud. Comienza de nuevo.",
+						estado: 401,
+					});
+			}
+		}
+
+		return c.json({ success: true, data: resultado.boleta });
+	} catch (err) {
+		console.error("[BotCobros] leer-boleta:", err);
+		return error(c, {
+			codigo: "ERROR_INTERNO",
+			mensaje: "Ocurrió un error. Intenta de nuevo en unos minutos.",
 			estado: 500,
 		});
 	}

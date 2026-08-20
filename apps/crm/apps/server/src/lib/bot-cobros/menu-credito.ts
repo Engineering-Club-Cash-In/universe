@@ -22,8 +22,8 @@ import { and, eq } from "drizzle-orm";
 import { db } from "../../db";
 import { otps } from "../../db/schema/otp";
 import { carteraBackClient } from "../../services/cartera-back-client";
+import { type CuentasPagoBot, cuentasParaBot } from "../cuentas-pago";
 import { type CreditoBot, listarCreditosDeCliente } from "./buscar-cliente";
-import { cuentasParaBot, type CuentasPagoBot } from "../cuentas-pago";
 import { armarMensajes, type MensajesCredito } from "./mensajes-credito";
 
 /**
@@ -178,8 +178,14 @@ export type ResultadoInfoCredito =
  * el crédito de un tercero.
  * ─────────────────────────────────────────────────────────────────────────────
  */
+export type IdentidadSesion = {
+	otpId: string;
+	leadId: string | null;
+	coDebtorId: string | null;
+};
+
 type ResultadoAcceso =
-	| { ok: true; credito: CreditoBot }
+	| { ok: true; credito: CreditoBot; identidad: IdentidadSesion }
 	| {
 			ok: false;
 			codigo:
@@ -195,7 +201,7 @@ type ResultadoAcceso =
  * las que vengan). Si alguna se salta esto, la API key sola alcanzaría para
  * pedir datos de cualquier crédito.
  */
-async function verificarAcceso(
+export async function verificarAcceso(
 	referencia: string,
 	numeroSifco: string,
 ): Promise<ResultadoAcceso> {
@@ -236,7 +242,18 @@ async function verificarAcceso(
 
 	if (!credito) return { ok: false, codigo: "CREDITO_NO_ES_DEL_CLIENTE" };
 
-	return { ok: true, credito };
+	// La identidad se devuelve además del crédito porque la boleta la guarda en
+	// su propia fila: si un día se purga este OTP, el aviso de contabilidad
+	// tiene que seguir sabiendo a quién avisarle.
+	return {
+		ok: true,
+		credito,
+		identidad: {
+			otpId: otp.id,
+			leadId: otp.leadId,
+			coDebtorId: otp.coDebtorId,
+		},
+	};
 }
 
 export async function obtenerInfoCredito(

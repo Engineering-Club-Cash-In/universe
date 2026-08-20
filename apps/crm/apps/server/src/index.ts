@@ -15,6 +15,7 @@ import {
 	buscarClienteBotCobros,
 	estadoDeCuentaBotCobros,
 	infoCreditoBotCobros,
+	leerBoletaBotCobros,
 	listarCreditosBotCobros,
 } from "./controllers/bot-cobros";
 import { infornetController } from "./controllers/buro";
@@ -38,6 +39,7 @@ import {
 } from "./controllers/vehicles";
 import type { db } from "./db";
 import { ejecutarAgendaCobrosDiariaConReintentos } from "./jobs/agenda-cobros-snapshots";
+import { purgarBoletasSinConfirmar } from "./jobs/bot-cobros-purga";
 import { generarCierreDiario } from "./jobs/cierre-diario-asesores";
 import {
 	checkSeguimientosVencidos,
@@ -1008,6 +1010,14 @@ app.post(
 	estadoDeCuentaBotCobros,
 );
 
+// Paso 4 · lee la boleta que sube el cliente. NO registra el pago: devuelve lo
+// que se entendió para que confirme (el registro es el servicio 6, PR B).
+app.post(
+	"/api/bot/cobros/boleta/leer",
+	autenticarBotCobros,
+	leerBoletaBotCobros,
+);
+
 // Documentación de esos dos endpoints, para SimpleTech. Va SIN API key —no
 // expone datos, y pedirla impediría que Swagger UI cargue el documento— pero
 // solo responde con BOT_COBROS_DOCS=true, que se prende únicamente en la
@@ -1460,6 +1470,20 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 			);
 		}
 	}
+
+	// Retención de los borradores de boleta del bot (D-14): una vez al día.
+	// Guardan PII —URL de origen, identidad, hash y la extracción cruda del
+	// modelo— y el contrato les da 7 días si nunca llegaron a ser un pago.
+	setInterval(
+		async () => {
+			try {
+				await purgarBoletasSinConfirmar();
+			} catch (error) {
+				console.error("Error en la purga de boletas del bot:", error);
+			}
+		},
+		24 * 60 * 60 * 1000,
+	);
 
 	// Job periódico de notificaciones de cobros (cada hora)
 	setInterval(

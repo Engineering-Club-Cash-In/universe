@@ -1016,6 +1016,391 @@ export const especificacionBotCobros = {
 				},
 			},
 		},
+		"/api/bot/cobros/boleta/leer": {
+			post: {
+				tags: ["Pago con boleta"],
+				summary: "Lee la boleta que mandó el cliente",
+				description: [
+					"Descarga la foto, la lee con IA y devuelve **lo que entendimos** para que el cliente confirme.",
+					"",
+					"⚠️ **Este endpoint NO registra el pago.** Eso lo hace `/boleta/confirmar`, que todavía no está disponible.",
+					"",
+					"**Qué pasa por dentro, en orden:** se comprueba que el crédito sea de quien pregunta → se descarga la imagen (única vez que salimos a tu nube) → se lee con IA → se guarda en nuestro almacenamiento → se cruza con el crédito.",
+					"",
+					"**Si el cliente dice que los datos están mal, no se corrigen: pedile otra foto y volvé a llamar acá.** Eso cuenta como el intento 2. Al cuarto, el endpoint responde `429` y hay que pasarlo con un asesor.",
+					"",
+					"| Campo | Nota |",
+					"| --- | --- |",
+					"| `boletaId` | El identificador del borrador. Es lo **único** que se manda para confirmar: el monto no viaja en el request, sale de acá |",
+					"| `expiraEn` | El borrador vive 15 minutos. Después hay que pedir la foto de nuevo |",
+					"| `lectura.banco` | `null` si no lo reconocimos. Ahí viene `bancosSugeridos` para que el cliente elija de una lista |",
+					"| `lectura.cuentaReconocida` | Cuál de nuestras cuentas recibió el dinero. `null` NO significa que esté mal: puede ser que el número se leyera incompleto |",
+					"| `camposFaltantes` | Qué no se pudo leer. Si trae `fechaBoleta`, se usó la fecha de hoy |",
+					"| `confianza` | `alta` / `media` / `baja`. Es para modular el mensaje, no para ramificar |",
+					"| `aplicacion` | A dónde va a ir el dinero, **en el orden en que se aplica: la mora primero**. `paraCuota` es lo que le queda a la cuota DESPUÉS de la mora, y `cubreCuota` se calcula con eso. Si `moraPorConfirmar` viene en `true`, hay mora pero **no se puede citar el monto**: ahí `paraCuota` es `null` y no se afirma nada sobre la cuota. **Es una estimación** (`estimado: true`): la aplicación real la hace contabilidad al validar |",
+					"| `mensajes` | Los mismos datos ya escritos para el chat, en tres formatos. Se pegan tal cual |",
+				].join("\n"),
+				operationId: "leerBoleta",
+				requestBody: {
+					required: true,
+					content: {
+						"application/json": {
+							schema: {
+								type: "object",
+								required: ["referencia", "numeroSifco", "imagenUrl"],
+								properties: {
+									referencia: {
+										type: "string",
+										format: "uuid",
+										description: "La misma del paso 1, ya canjeada.",
+									},
+									numeroSifco: {
+										type: "string",
+										description: "El crédito que eligió en el menú.",
+									},
+									imagenUrl: {
+										type: "string",
+										format: "uri",
+										description:
+											"URL https de la imagen. El dominio tiene que estar en la lista permitida; avisanos si cambian de CDN.",
+									},
+								},
+							},
+							example: {
+								referencia: "3b530493-1d4e-4f6a-9b7c-2e5d8a1f0c33",
+								numeroSifco: "01010214113290",
+								imagenUrl: "https://cdn.simpletech.gt/media/abc123.jpg",
+							},
+						},
+					},
+				},
+				responses: {
+					"200": {
+						description: "Se leyó la boleta. Falta que el cliente confirme.",
+						content: {
+							"application/json": {
+								example: {
+									success: true,
+									data: {
+										boletaId: "b3d1f0a4-77c2-4c19-9a56-0f2b8e4d1a90",
+										intento: 1,
+										intentosRestantes: 2,
+										expiraEn: "2026-08-20T21:15:00.000Z",
+										lectura: {
+											banco: { id: 2, nombre: "Banrural", leido: "BANRURAL" },
+											monto: "500.00",
+											fechaBoleta: "2026-04-27",
+											numeroAutorizacion: "524075550",
+											cuentaDestino: "3394002346",
+											cuentaReconocida: {
+												banco: "Banrural",
+												bancoId: 2,
+												titular: "CUBE INVESTMENTS, S.A.",
+											},
+											observaciones: null,
+										},
+										camposFaltantes: [],
+										confianza: "alta",
+										aplicacion: {
+											estimado: true,
+											cuota: {
+												numero: 8,
+												de: 84,
+												fechaVencimiento: "2026-07-30",
+											},
+											saldoCuota: "5891.15",
+											mora: "1178.23",
+											orden: ["mora", "cuota_8"],
+											moraPorConfirmar: false,
+											paraCuota: "0.00",
+											cubreMora: false,
+											cubreCuota: false,
+											excedente: "0.00",
+										},
+										mensajes: {
+											titulo: "🧾 *Boleta recibida · Q500.00*",
+											resumen:
+												"🧾 *Boleta recibida · Q500.00*\n\n💵 Monto: *Q500.00*\n🏦 Banco: Banrural\n📅 Fecha: 27 de abril de 2026\n🔢 No. de autorización: 524075550\n\n¿Está correcto?",
+											completo:
+												"🧾 *Boleta recibida · Q500.00*\n\n💵 Monto: *Q500.00*\n🏦 Banco: Banrural\n📅 Fecha: 27 de abril de 2026\n🔢 No. de autorización: 524075550\n\n📄 *Cómo se va a aplicar*\n   1. A tu mora de Q1,178.23\n   2. A tu cuota 8 de 84\n   Falta de esa cuota: Q5,891.15\n\n¿Está correcto?",
+										},
+									},
+								},
+							},
+						},
+					},
+					"400": {
+						description: "Faltan datos, o la URL no se puede abrir.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								examples: {
+									PARAMETROS_INVALIDOS: {
+										summary: "Falta referencia, crédito o imagen",
+										value: {
+											success: false,
+											error: {
+												codigo: "PARAMETROS_INVALIDOS",
+												mensaje: "Faltan datos para leer tu boleta.",
+											},
+										},
+									},
+									URL_NO_PERMITIDA: {
+										summary: "No es https, o el dominio no está permitido",
+										value: {
+											success: false,
+											error: {
+												codigo: "URL_NO_PERMITIDA",
+												mensaje: "No pudimos abrir esa imagen.",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					"401": {
+						description: "La sesión no sirve. **Ruteá por `codigo`.**",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								examples: {
+									SESION_VENCIDA: {
+										summary: "Pasaron 30 min desde que validó el código",
+										value: {
+											success: false,
+											error: {
+												codigo: "SESION_VENCIDA",
+												mensaje:
+													"Por seguridad tu sesión expiró. Vuelve a identificarte para continuar.",
+											},
+										},
+									},
+									REFERENCIA_INVALIDA: {
+										summary: "La referencia no existe o nunca se canjeó",
+										value: {
+											success: false,
+											error: {
+												codigo: "REFERENCIA_INVALIDA",
+												mensaje:
+													"No encontramos tu solicitud. Comienza de nuevo.",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					"404": {
+						description:
+							"El crédito no es de esa persona, o no está en cartera.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								examples: {
+									CREDITO_NO_ENCONTRADO: {
+										summary: "Ese crédito no es del cliente",
+										value: {
+											success: false,
+											error: {
+												codigo: "CREDITO_NO_ENCONTRADO",
+												mensaje: "No encontramos ese crédito.",
+											},
+										},
+									},
+									CREDITO_SIN_DATOS: {
+										summary: "Está en el CRM pero no en cartera",
+										value: {
+											success: false,
+											error: {
+												codigo: "CREDITO_SIN_DATOS",
+												mensaje:
+													"No pudimos consultar la información de ese crédito. Por favor contacta a soporte.",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					"409": {
+						description:
+							"Boleta repetida, o el crédito no puede recibir pagos.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								examples: {
+									BOLETA_DUPLICADA: {
+										summary: "Es la MISMA foto que ya mandó en esta sesión",
+										value: {
+											success: false,
+											error: {
+												codigo: "BOLETA_DUPLICADA",
+												mensaje: "Esa boleta ya nos la habías mandado.",
+											},
+										},
+									},
+									CREDITO_NO_ACEPTA_BOLETA: {
+										summary:
+											"Cancelado, incobrable, o sin ninguna cuota abierta",
+										value: {
+											success: false,
+											error: {
+												codigo: "CREDITO_NO_ACEPTA_BOLETA",
+												mensaje:
+													"Este crédito no puede recibir pagos por este medio. Tu asesor te va a ayudar.",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					"502": {
+						description:
+							"El CDN de la imagen falló. **La sesión sigue siendo válida**: no hay que reiniciar nada, alcanza con volver a mandar la foto.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								example: {
+									success: false,
+									error: {
+										codigo: "IMAGEN_NO_DESCARGABLE",
+										mensaje:
+											"No pudimos descargar tu imagen. Intenta mandarla de nuevo, por favor.",
+									},
+								},
+							},
+						},
+					},
+					"413": {
+						description: "La imagen pesa más de 8 MB.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								example: {
+									success: false,
+									error: {
+										codigo: "ARCHIVO_MUY_GRANDE",
+										mensaje:
+											"La imagen pesa demasiado. Mandanos una foto más liviana, por favor.",
+									},
+								},
+							},
+						},
+					},
+					"422": {
+						description:
+							"El archivo no se puede leer, o la foto no es un comprobante. **Gasta un intento.**",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								examples: {
+									BOLETA_ILEGIBLE: {
+										summary: "No se leyó ni el monto, o no es una boleta",
+										value: {
+											success: false,
+											error: {
+												codigo: "BOLETA_ILEGIBLE",
+												mensaje:
+													"No pudimos leer tu boleta. Mandanos otra foto donde se vean bien el monto y la fecha.",
+											},
+										},
+									},
+									ARCHIVO_NO_SOPORTADO: {
+										summary: "No es JPG, PNG, WEBP ni PDF",
+										value: {
+											success: false,
+											error: {
+												codigo: "ARCHIVO_NO_SOPORTADO",
+												mensaje:
+													"Ese archivo no lo podemos leer. Mandanos una foto (JPG o PNG) o el PDF de tu boleta.",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					"429": {
+						description: "Se acabaron los tres intentos de esta sesión.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								example: {
+									success: false,
+									error: {
+										codigo: "DEMASIADOS_INTENTOS",
+										mensaje:
+											"Ya intentamos leer tu boleta varias veces. Tu asesor te va a ayudar a registrarla.",
+									},
+								},
+							},
+						},
+					},
+					"500": {
+						description: "Error inesperado.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								example: {
+									success: false,
+									error: {
+										codigo: "ERROR_INTERNO",
+										mensaje:
+											"Ocurrió un error. Intenta de nuevo en unos minutos.",
+									},
+								},
+							},
+						},
+					},
+					"503": {
+						description:
+							"Problema **nuestro**, no del cliente: por eso NO le gasta un intento. Se puede reintentar con la misma foto.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								examples: {
+									LECTOR_NO_DISPONIBLE: {
+										summary: "El lector de boletas no respondió",
+										value: {
+											success: false,
+											error: {
+												codigo: "LECTOR_NO_DISPONIBLE",
+												mensaje:
+													"No pudimos leer tu boleta en este momento. Intenta de nuevo en unos minutos.",
+											},
+										},
+									},
+									ALMACENAMIENTO_NO_DISPONIBLE: {
+										summary: "No se pudo guardar la imagen",
+										value: {
+											success: false,
+											error: {
+												codigo: "ALMACENAMIENTO_NO_DISPONIBLE",
+												mensaje:
+													"No pudimos guardar tu boleta en este momento. Intenta de nuevo en unos minutos.",
+											},
+										},
+									},
+									SERVICIO_NO_DISPONIBLE: {
+										summary: "El servidor no tiene configurada la API key",
+										value: {
+											success: false,
+											error: {
+												codigo: "SERVICIO_NO_DISPONIBLE",
+												mensaje:
+													"El servicio no está disponible en este momento.",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
 	},
 } as const;
 

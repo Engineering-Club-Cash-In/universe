@@ -134,6 +134,8 @@ sesión: es dato nuestro, y si lo mandara el bot se podría reiniciar para salta
       "saldoCuota": "6264.10",
       "mora": "59849.54",
       "orden": ["mora", "cuota_3"],
+      "moraPorConfirmar": false,
+      "paraCuota": "0.00",
       "cubreMora": false,
       "cubreCuota": false,
       "excedente": "0.00"
@@ -164,10 +166,21 @@ el árbol de gerencia:
 esto — es para el texto.
 
 **`aplicacion` es una estimación y lo dice.** Cartera aplica el dinero en un orden fijo: la
-mora primero y después las cuotas, de la más vieja a la más nueva. Con eso, el resumen del
-crédito y los abonos parciales de la cuota actual alcanzan para decirle al cliente a dónde va
-su dinero, pero **la aplicación real la hace cartera al validar** el pago. Por eso viaja
-`estimado: true` y el mensaje dice "se aplicará", no "se aplicó".
+mora primero y después las cuotas, de la más vieja a la más nueva — y por eso `cubreCuota`
+se calcula sobre `paraCuota`, que es lo que **queda después de la mora**: con una boleta de
+Q6,000, Q1,000 de mora y una cuota de Q5,500, a la cuota le llegan Q5,000, y decir que la
+cubre sería prometerle al cliente algo que no va a pasar.
+
+**Y si `moraPorConfirmar` viene en `true`, no se estima nada.** Cartera devuelve `mora: null`
+cuando su foto quedó vieja —tiene mora, pero el monto no es citable—, y leer ese `null` como
+"no tiene mora" haría que el bot anuncie que todo el dinero va a la cuota mientras cartera
+descuenta antes una cantidad que ni nosotros conocemos. En ese caso `paraCuota` va en `null`,
+`cubreCuota` en `false`, y el mensaje manda al cliente con su asesor.
+
+Con eso, el resumen del crédito y los abonos parciales de la cuota actual alcanzan para
+decirle al cliente a dónde va su dinero, pero **la aplicación real la hace cartera al
+validar** el pago. Por eso viaja `estimado: true` y el mensaje dice "se aplicará", no
+"se aplicó".
 
 ### Cómo se compara la cuenta destino
 
@@ -744,7 +757,7 @@ dos veces porque no vio la respuesta. Se detecta así, en este orden:
 
 | Señal | Cuándo se usa | Qué pasa |
 | --- | --- | --- |
-| **Hash de la imagen** (`sha256` del archivo) | Siempre | Si esta sesión ya confirmó una boleta con el mismo hash → `409 BOLETA_DUPLICADA`. Es **la misma foto**: no hay falso positivo posible. |
+| **Hash de la imagen** (`sha256` del archivo) | Siempre, salvo si el borrador ya venció | Si esta sesión ya mandó la misma imagen → `409 BOLETA_DUPLICADA`. Es **la misma foto**: no hay falso positivo posible. |
 | Banco + monto + autorización | **Solo si la autorización no viene vacía** | Cubre al cliente que sacó dos fotos distintas del mismo comprobante. |
 
 **El segundo control no corre sin autorización, y es a propósito.** Dos depósitos legítimos
@@ -754,6 +767,13 @@ campos vacíos también "coinciden" y el segundo pago quedaría rechazado por du
 válido. Comparar `NULL` con `NULL` no es evidencia de nada.
 
 El hash sí cubre ese caso sin equivocarse: dos depósitos distintos son dos fotos distintas.
+
+**Un borrador vencido deja de bloquear.** El borrador vive 15 minutos y la sesión 30: si el
+cliente se toma su tiempo y el borrador caduca, lo que se espera es que mande su boleta otra
+vez — pero el control mira 24 horas hacia atrás, así que reenviar **la única boleta que
+tiene** chocaba contra un `BOLETA_DUPLICADA` sin salida. Solo se excluyen los borradores
+vencidos **sin confirmar**: uno confirmado, o en camino de serlo, sigue bloqueando su imagen,
+que es cuando el duplicado es de verdad.
 
 **2. El de cartera, que tiene un falso positivo conocido — y un agujero.** `newPayment`
 rechaza con 409 si existe cualquier pago con la misma `(numeroAutorizacion, banco_id)` **en
@@ -803,6 +823,7 @@ CREATE TABLE bot_cobros_boletas (
   cuenta_destino      text,
   confianza           text,
   -- Máquina de estados completa (§4.1):
+  --   leyendo ─► leida | fallida   (la lectura con IA; ver el recuadro)
   --   leida ─► confirmando ─► confirmada | confirmada_a_verificar | rechazada
   --                        └► revision_manual  (nadie puede decidir solo)
   --   leida ─► descartada  (venció sin confirmar)   leida ─► fallida (cartera la rechazó)
@@ -842,6 +863,23 @@ CREATE TABLE bot_cobros_pago_eventos (
 );
 ```
 
+> **`leyendo` es cómo se aparta el intento.** La fila se crea **antes** de llamar
+> al modelo, con la fila del OTP bloqueada, y recién después pasa a `leida` (o a
+> `fallida` si la foto no se pudo leer). Sin eso quedan dos agujeros: una lectura
+> ilegible no gastaría intento —treinta selfies, treinta lecturas pagadas, nunca
+> el tope— y cuatro peticiones simultáneas leerían todas el mismo contador antes
+> de que ninguna escriba.
+>
+> Un fallo **nuestro** —el lector o R2 caídos— borra la reserva: el cliente no
+> paga nuestra caída con uno de sus tres tiros
+> ([D-27](./DECISIONES.md#d-27--tres-intentos-por-sesión-y-los-cuenta-el-crm)).
+>
+> **Y una lectura que queda colgada se recupera sola.** Si el proceso muere entre
+> la reserva y el resultado —un deploy justo mientras corre Gemini—, esa fila no
+> la limpia nadie: contaría contra el tope y bloquearía esa misma foto por hash.
+> Las reservas de más de **2 minutos** se barren al empezar la lectura siguiente,
+> dentro de la misma transacción que toma el candado.
+
 **`bot_cobros_boleta_pagos` es el puente.** El unique sobre `pago_id` es lo que permite que,
 cuando cartera avise que el pago 48213 se validó, el CRM sepa **de qué boleta** era, de qué
 cliente y a qué teléfono escribirle — y también cuántos pagos hermanos faltan por resolver
@@ -865,7 +903,8 @@ ellos en la tabla `boletas`.
 > mientras viva su pago; es la única prueba de por qué hay una boleta en cartera que nadie del
 > equipo subió.
 
-**Retención.** Los borradores **sin confirmar** se purgan a los **7 días** con el resto de la
+**Retención.** Un job diario (`jobs/bot-cobros-purga.ts`) borra los borradores **sin
+confirmar** a los **7 días** con el resto de la
 limpieza de PII ([D-14](./DECISIONES.md#d-14--retención-de-pii-y-logs)) — y esa purga no puede
 llegarles por cascada desde `otps` (recuadro de arriba). Los confirmados se
 conservan mientras exista el pago: son la trazabilidad de por qué hay una boleta en cartera
@@ -916,7 +955,7 @@ en párrafos.
 | `monto > Q1,000,000` | No se registra: al asesor. Es un error de lectura mucho más probable que un pago real. |
 | `fechaBoleta` futura | Se usa **hoy** y se anota en observaciones. Una boleta no puede ser de mañana. |
 | `fechaBoleta` de más de 90 días | Se registra, pero la observación se lo dice a conta. |
-| Crédito `CANCELADO` / `INCOBRABLE` | No se acepta la boleta: al asesor. |
+| Crédito que no esté `ACTIVO`, `MOROSO` o `EN_CONVENIO` | No se acepta la boleta: al asesor. Es lista **blanca**: `registerPayment` de cartera solo admite esos tres más `INCOBRABLE` —que acá se excluye a propósito— y con una lista negra un estado no enumerado (`CAIDO`) llegaba hasta la confirmación para que cartera lo rechazara ahí. |
 | Cuenta destino **reconocida** | Se anota cuál de las cuatro fue, para que conta concilie más rápido. |
 | Cuenta destino **ilegible** (menos de 6 dígitos leídos) | No se dice nada: no se pudo verificar, que no es lo mismo que estar mal. |
 | Cuenta destino **no reconocida** | Se registra igual, pero la observación se lo dice a conta y se avisa al asesor. **No se bloquea**: puede ser una cuenta vieja o un número mal leído. Al cliente **no** se le dice "pagaste mal". |

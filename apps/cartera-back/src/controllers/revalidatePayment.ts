@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+  esPagoDelBotCobros,
+  notificarEventoPagoBot,
+} from "../services/crm.service";
 import { eq, and, ne } from "drizzle-orm";
 import Big from "big.js";
 import { db } from "../database";
@@ -218,7 +222,11 @@ export const revalidatePayment = async ({ body, set }: any) => {
         credito_id,
         nuevoCapital: nuevo_capital.toString(),
         numero_credito_sifco: credito.numero_credito_sifco,
-        cuota: credito.cuota
+        cuota: credito.cuota,
+        // Para saber si hay que avisarle al bot de cobros. Sale de acá porque
+        // es donde la fila del pago está leída; afuera habría que ir a buscarla
+        // de nuevo.
+        registerBy: pago.registerBy,
       };
       })
     );
@@ -226,6 +234,17 @@ export const revalidatePayment = async ({ body, set }: any) => {
     if ("success" in result && result.success === false) {
       set.status = 400;
       return result;
+    }
+
+    // 🤖 Circuito de vuelta del bot: "Revalidar" también acredita el pago, así
+    // que para el cliente significa lo mismo que el botón de conta. Nunca tira.
+    if (esPagoDelBotCobros(result?.registerBy)) {
+      await notificarEventoPagoBot({
+        pagoId: pago_id,
+        creditoId: credito_id,
+        numeroSifco: result?.numero_credito_sifco ?? null,
+        evento: "validado",
+      });
     }
 
     set.status = 200;

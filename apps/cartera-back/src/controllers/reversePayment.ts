@@ -22,6 +22,10 @@ import {
   registrarReversionIniciada,
 } from "./registroReversiones";
 import { updateMora } from "./latefee";
+import {
+  esPagoDelBotCobros,
+  notificarEventoPagoBot,
+} from "../services/crm.service";
 import { SATClientService } from "../cofidi/satClientService";
 import { CLUB_CASHIN_CONFIG, SAT_CONFIG } from "../utils/functions/const";
 import { esPagoAplicado } from "../utils/paymentStatus";
@@ -785,6 +789,22 @@ export const reversePayment = async ({ body, set, user }: any) => {
     console.log(
       "\n✅ ========== REVERSIÓN COMPLETADA EXITOSAMENTE ==========\n",
     );
+
+    // 🤖 Circuito de vuelta del bot: ESTE es el rechazo de una boleta.
+    //
+    // No `false-payment`: revertir es el único camino que devuelve la mora que
+    // el registro descontó (§5.1), y es lo que conta usa hoy en carteraFront.
+    // Nunca tira (D-28).
+    if (esPagoDelBotCobros(result.pago?.registerBy)) {
+      await notificarEventoPagoBot({
+        pagoId: pago_id,
+        creditoId: credito_id,
+        numeroSifco: result.creditData?.creditos?.numero_credito_sifco ?? null,
+        evento: "revertido",
+        motivo: motivo ?? null,
+        usuario: usuarioEmail,
+      });
+    }
 
     set.status = 200;
     return {

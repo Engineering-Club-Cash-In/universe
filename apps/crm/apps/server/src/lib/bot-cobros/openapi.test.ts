@@ -21,6 +21,23 @@ import { codigosDocumentados, especificacionBotCobros } from "./openapi";
 /** Los archivos que le responden al bot. Si aparece otro, va en esta lista. */
 const FUENTES = ["../../controllers/bot-cobros.ts", "./auth.ts"];
 
+/**
+ * Rutas que cuelgan de `/api/bot/cobros/` pero **no las llama SimpleTech**.
+ *
+ * Comparten prefijo por comodidad de despliegue, nada más. Documentarlas en la
+ * spec del bot sería entregarle a un tercero el mapa de una puerta que no le
+ * corresponde — y peor: `/pagos/evento` dispara mensajes de WhatsApp a
+ * clientes, así que va con otra llave (`autenticarCarteraWebhook`).
+ *
+ * La lista es explícita a propósito. Agregar algo acá tiene que costar la
+ * molestia de escribirlo y justificarlo; si la excepción fuera un patrón, el
+ * candado dejaría de servir en una semana.
+ */
+const RUTAS_QUE_NO_SON_DE_SIMPLETECH = new Set([
+	// La llama cartera-back cuando contabilidad valida o revierte un pago (§6).
+	"/api/bot/cobros/pagos/evento",
+]);
+
 /** `codigo: "LO_QUE_SEA"` — la forma en que se declara un error en el código. */
 function codigosEnElCodigo(): Set<string> {
 	const encontrados = new Set<string>();
@@ -61,13 +78,13 @@ describe("la spec no se desincroniza del código", () => {
 			"utf-8",
 		);
 
-		const montadas = new Set(
-			[...index.matchAll(/app\.post\(\s*"(\/api\/bot\/cobros\/[^"]+)"/g)].map(
-				([, ruta]) => ruta,
-			),
-		);
+		const montadas = [
+			...index.matchAll(/app\.post\(\s*"(\/api\/bot\/cobros\/[^"]+)"/g),
+		]
+			.map(([, ruta]) => ruta)
+			.filter((ruta) => !RUTAS_QUE_NO_SON_DE_SIMPLETECH.has(ruta));
 
-		expect([...montadas].sort()).toEqual(
+		expect([...new Set(montadas)].sort()).toEqual(
 			Object.keys(especificacionBotCobros.paths).sort(),
 		);
 	});

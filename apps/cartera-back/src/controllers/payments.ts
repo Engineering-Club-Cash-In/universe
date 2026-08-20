@@ -1,4 +1,8 @@
 import { db } from "../database/index";
+import {
+  esPagoDelBotCobros,
+  notificarEventoPagoBot,
+} from "../services/crm.service";
 import { CARTERA_SCHEMA, SQL_CARTERA_SCHEMA } from "../database/db/schema";
 import {
   creditos,
@@ -1718,6 +1722,30 @@ export async function falsePayment(pago_id: number, credito_id: number) {
     throw new Error(
       "No payment found to mark as false with the given criteria"
     );
+  }
+
+  // 🤖 Circuito de vuelta del bot.
+  //
+  // ⚠️ Marcar falso NO restaura la mora —solo pone `pagado: false` y
+  // `paymentFalse: true`—, así que el crédito queda con la mora que descontó
+  // una boleta que se acaba de descartar. Por eso el CRM lo trata como ALERTA
+  // al asesor y no le escribe al cliente: no es un rechazo bien hecho, es un
+  // desajuste contable que alguien tiene que mirar (D-32).
+  //
+  // Se relee la fila porque el UPDATE de arriba no devuelve columnas y acá no
+  // había ninguna lectura previa del pago.
+  const [pago] = await db
+    .select({ registerBy: pagos_credito.registerBy })
+    .from(pagos_credito)
+    .where(eq(pagos_credito.pago_id, pago_id))
+    .limit(1);
+
+  if (esPagoDelBotCobros(pago?.registerBy)) {
+    await notificarEventoPagoBot({
+      pagoId: pago_id,
+      creditoId: credito_id,
+      evento: "marcado_falso",
+    });
   }
 
   return {

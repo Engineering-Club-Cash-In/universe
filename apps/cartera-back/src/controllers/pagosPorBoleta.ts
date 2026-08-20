@@ -352,31 +352,92 @@ export async function buscarPagosPorBoleta(
   return armarResultado(pagos, reversiones, true, huerfanos);
 }
 
+/** Un pago con lo que se sepa de su reversión, si la hubo. */
+export type EstadoDePago = PagoDeBoleta & {
+  /**
+   * La reversión que manda para ese pago, o `null`.
+   *
+   * Manda la `completada` si existe; si no, la `iniciada` más reciente — que
+   * **no es un rechazo** sino una reversión a medias (D-36).
+   */
+  reversion: ReversionDeBoleta | null;
+};
+
 /**
  * En qué estado están estos pagos ahora mismo.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * NO ALCANZA CON `validation_status`, Y ESA ES LA RAZÓN DE ESTE ENDPOINT.
+ *
+ * `reversePayment` deja el pago reseteado en `no_required`, que es un estado
+ * "aplicado". Quien mire solo esa columna leería un pago revertido como
+ * validado — y le diría al cliente "tu pago fue acreditado" justo después de
+ * que se lo rechazaron. Por eso cada fila viaja con su reversión al lado.
+ * ─────────────────────────────────────────────────────────────────────────────
  *
  * Un pago que ya no existe simplemente no viene en la respuesta: quien pregunta
  * tiene que poder distinguir "sigue pendiente" de "desapareció", y devolver una
  * fila inventada con estado nulo confundiría las dos cosas.
  */
-export async function estadoDePagos(ids: number[]): Promise<PagoDeBoleta[]> {
+export async function estadoDePagos(ids: number[]): Promise<EstadoDePago[]> {
   if (ids.length === 0) return [];
 
-  return db
-    .select({
-      pago_id: pagos_credito.pago_id,
-      credito_id: pagos_credito.credito_id,
-      numero_cuota: cuotas_credito.numero_cuota,
-      monto_aplicado: pagos_credito.monto_aplicado,
-      monto_boleta: pagos_credito.monto_boleta,
-      validation_status: pagos_credito.validationStatus,
-      pagado: pagos_credito.pagado,
-      payment_false: pagos_credito.paymentFalse,
-    })
-    .from(pagos_credito)
-    .leftJoin(
-      cuotas_credito,
-      eq(cuotas_credito.cuota_id, pagos_credito.cuota_id),
-    )
-    .where(inArray(pagos_credito.pago_id, ids));
+  const [filas, reversiones] = await Promise.all([
+    db
+      .select({
+        pago_id: pagos_credito.pago_id,
+        credito_id: pagos_credito.credito_id,
+        numero_cuota: cuotas_credito.numero_cuota,
+        monto_aplicado: pagos_credito.monto_aplicado,
+        monto_boleta: pagos_credito.monto_boleta,
+        validation_status: pagos_credito.validationStatus,
+        pagado: pagos_credito.pagado,
+        payment_false: pagos_credito.paymentFalse,
+      })
+      .from(pagos_credito)
+      .leftJoin(
+        cuotas_credito,
+        eq(cuotas_credito.cuota_id, pagos_credito.cuota_id),
+      )
+      .where(inArray(pagos_credito.pago_id, ids)),
+
+    // Se consulta por los ids pedidos, NO por los que aparecieron arriba: un
+    // pago borrado por su reversión no está en `pagos_credito` y es justamente
+    // del que más urge saber.
+    db
+      .select({
+        reversion_id: pagos_reversiones.reversion_id,
+        pago_id: pagos_reversiones.pago_id,
+        estado: pagos_reversiones.estado,
+        usuario_email: pagos_reversiones.usuario_email,
+        motivo: pagos_reversiones.motivo,
+        revertido_en: pagos_reversiones.revertido_en,
+      })
+      .from(pagos_reversiones)
+      .where(inArray(pagos_reversiones.pago_id, ids))
+      .orderBy(desc(pagos_reversiones.reversion_id)),
+  ]);
+
+  const porPago = new Map<number, ReversionDeBoleta>();
+  for (const r of reversiones) {
+    const normalizada: ReversionDeBoleta = {
+      ...r,
+      revertido_en: r.revertido_en
+        ? new Date(r.revertido_en).toISOString()
+        : null,
+    };
+
+    const previa = porPago.get(r.pago_id);
+    // Una `completada` desplaza a cualquier otra: la reversión terminó y los
+    // intentos anteriores son historia.
+    if (!previa || normalizada.estado === "completada") {
+      if (previa?.estado === "completada") continue;
+      porPago.set(r.pago_id, normalizada);
+    }
+  }
+
+  return filas.map((f) => ({
+    ...f,
+    reversion: porPago.get(f.pago_id) ?? null,
+  }));
 }

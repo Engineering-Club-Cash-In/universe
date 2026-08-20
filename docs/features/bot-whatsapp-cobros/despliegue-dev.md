@@ -83,6 +83,7 @@ O dejar que el pipeline (§3) construya la primera y crear la app en Coolify des
    | `BOT_COBROS_DOCS` | `true` | Publica el Swagger en `/api/bot/cobros/docs`. **Solo acá**: en el CRM de producción corre el mismo binario y no hay razón para publicarlo |
    | `BOT_COBROS_DOMINIOS_IMAGEN` | el dominio del CDN de SimpleTech | **Obligatoria para el pago con boleta.** Ver abajo |
    | `GOOGLE_GENERATIVE_AI_API_KEY` | la del CRM de dev | Gemini es quien lee la boleta |
+   | `CARTERA_WEBHOOK_API_KEY` | una llave nueva | **Obligatoria para el circuito de vuelta.** Ver abajo |
    | `SMS_TOKEN`, `SMS_API_KEY` | las de siempre | Para cuando se apague la de arriba |
    | `CORS_ORIGIN` | el dominio de dev | |
 
@@ -93,6 +94,31 @@ O dejar que el pipeline (§3) construya la primera y crear la app en Coolify des
 8. **Deploy.**
 9. Copiar el **webhook de redeploy** (Coolify → la app → Webhooks) y guardarlo en GitHub como
    secret `COOLIFY_WEBHOOK_CRM_API_COBROS`. El secret `COOLIFY_TOKEN` ya existe en el repo.
+
+### `CARTERA_WEBHOOK_API_KEY` va en las DOS apps, y con el mismo valor
+
+Es la llave del circuito de vuelta: cartera-back la manda en `x-api-key` cuando le avisa al
+CRM que contabilidad validó o revirtió un pago, y el CRM la compara. Si falta en cualquiera de
+los dos lados, **el cliente nunca se entera de que su pago se acreditó** — y no se ve como un
+error, se ve como silencio.
+
+```bash
+openssl rand -hex 32   # el MISMO valor en las dos apps
+```
+
+| App | Variable | Sin ella |
+| --- | --- | --- |
+| CRM API (esta instancia) | `CARTERA_WEBHOOK_API_KEY` | Responde `503` a cartera y ningún evento se procesa |
+| cartera-back (dev) | `CARTERA_WEBHOOK_API_KEY` + `CRM_API_URL` apuntando a esta instancia | Ni siquiera intenta avisar; queda un `[BotCobros] sin CARTERA_WEBHOOK_API_KEY…` en su log |
+
+**Es una llave distinta a `BOT_COBROS_API_KEY` a propósito.** Esa la tiene SimpleTech —un
+tercero— y sirve para *consultar*. Esta dispara **mensajes de WhatsApp a clientes**: quien
+puede preguntar por un crédito no tiene por qué poder hacer que le escribamos a su dueño
+diciéndole que su pago se acreditó.
+
+Si se olvida, no todo se pierde: el job de respaldo del CRM le pregunta a cartera cada hora
+por los pagos sin resolver, así que el aviso llega igual — con hasta una hora de retraso
+([D-35](./DECISIONES.md#d-35--el-webhook-adelanta-el-aviso-el-job-lo-garantiza)).
 
 ### Sin `BOT_COBROS_DOMINIOS_IMAGEN` el bot no lee ni una boleta
 

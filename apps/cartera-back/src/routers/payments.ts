@@ -29,6 +29,10 @@ import { ajustarCuotasConSIFCO, marcarCuotasPagadasHastaNumero, procesarPagosSIF
 import { updateInstallments, updateAllInstallments } from "../controllers/updateCredit";
 import { esPagoAplicado } from "../utils/paymentStatus";
 import { getApplyPaymentHttpStatus } from "../controllers/registerPaymentPolicy";
+import {
+  esPagoDelBotCobros,
+  notificarEventoPagoBot,
+} from "../services/crm.service";
 
 export const liquidatePaymentsSchema = z.object({
   pago_id: z.number().int().positive(),
@@ -624,6 +628,23 @@ export const paymentRouter = new Elysia()
 
       // Aplicar el pago
       const resultado = await aplicarPagoAlCredito(pagoId);
+
+      // 🤖 Circuito de vuelta del bot de cobros.
+      //
+      // ESTE es el botón "Validar Pago" que aprieta contabilidad —no
+      // /revalidatePayment, que es la acción de ADMIN—, así que si el aviso
+      // colgara solo de aquél, el caso normal (conta valida la boleta y el
+      // cliente nunca se entera) se perdería entero.
+      //
+      // Va después de aplicar y nunca tira: un WhatsApp caído no puede tumbar
+      // la validación de un pago (D-28).
+      if (resultado?.success && esPagoDelBotCobros(pagoExiste.registerBy)) {
+        await notificarEventoPagoBot({
+          pagoId,
+          creditoId: pagoExiste.credito_id,
+          evento: "validado",
+        });
+      }
 
       set.status = getApplyPaymentHttpStatus(resultado);
       return resultado;

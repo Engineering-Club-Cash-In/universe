@@ -176,3 +176,91 @@ export async function getVehiclesBySifcoMap(
 
   return vehicles;
 }
+
+// ============================================
+// 🤖 Circuito de vuelta del bot de cobros
+// ============================================
+
+/**
+ * Los cinco caminos que puede tomar un pago después de registrarse. Cada uno
+ * corresponde a un botón que contabilidad aprieta en carteraFront.
+ */
+export type EventoPagoBot =
+  | "validado"
+  | "revertido"
+  | "regresado_a_pendiente"
+  | "marcado_falso";
+
+export interface EventoPagoBotInput {
+  pagoId: number;
+  creditoId?: number | null;
+  numeroSifco?: string | null;
+  evento: EventoPagoBot;
+  motivo?: string | null;
+  usuario?: string | null;
+}
+
+/**
+ * Le avisa al CRM que un pago cambió de estado, para que el bot le escriba al
+ * cliente que subió la boleta.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * NUNCA TIRA, NUNCA BLOQUEA (D-28).
+ *
+ * Un WhatsApp caído no puede tumbar la validación de un pago: contabilidad está
+ * haciendo su trabajo y el aviso es un efecto secundario. Try/catch, log y
+ * seguir — el mismo patrón que `notifyPayInvestors`.
+ *
+ * El costo de eso es que un aviso se puede perder si el CRM está caído justo en
+ * ese segundo. Se acepta a propósito: del lado del CRM hay un job que cada hora
+ * pregunta por los pagos sin resolver, así que el webhook **adelanta** el aviso
+ * y el job lo **garantiza** (D-35). Montar un outbox con reintentos acá adentro
+ * —tabla y worker nuevos dentro de la app que mueve el dinero— era el precio
+ * que no valía la pena.
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * Va con `CARTERA_WEBHOOK_API_KEY`, que es **otra** llave que la del bot: quien
+ * puede consultar créditos no tiene por qué poder disparar mensajes a clientes.
+ */
+export async function notificarEventoPagoBot(
+  input: EventoPagoBotInput,
+): Promise<void> {
+  const apiKey = process.env.CARTERA_WEBHOOK_API_KEY;
+
+  if (!apiKey || !CRM_API_URL) {
+    // Sin configuración no se intenta, pero se deja rastro: si esto aparece en
+    // los logs de producción, los clientes no se están enterando de sus pagos.
+    console.warn(
+      `[BotCobros] sin CARTERA_WEBHOOK_API_KEY o CRM_API_URL: no se avisó el evento '${input.evento}' del pago ${input.pagoId}`,
+    );
+    return;
+  }
+
+  try {
+    await crmApi.post(
+      "/api/bot/cobros/pagos/evento",
+      { ...input, ocurridoEn: new Date().toISOString() },
+      { headers: { "x-api-key": apiKey } },
+    );
+  } catch (error: any) {
+    const msg = error?.response?.data?.message ?? error?.message ?? "desconocido";
+    console.error(
+      `[BotCobros] no se pudo avisar el evento '${input.evento}' del pago ${input.pagoId}: ${msg}`,
+    );
+  }
+}
+
+/**
+ * ¿Este pago lo subió un cliente por el bot?
+ *
+ * El CRM sabe contestar que no (`PAGO_NO_ES_DEL_BOT`) y responde 200, así que
+ * avisar de todos los pagos sería correcto — pero serían miles de POST inútiles
+ * en el camino caliente de contabilidad, cada uno con su timeout. El filtro es
+ * una comparación de texto sobre un dato que ya tenemos en la mano.
+ *
+ * El CRM igual conserva su chequeo: acá se filtra por eficiencia, no por
+ * seguridad, y las dos puntas tienen que poder defenderse solas.
+ */
+export function esPagoDelBotCobros(registerBy: string | null | undefined): boolean {
+  return (registerBy ?? "").trim().toLowerCase() === "bot-cobros@clubcashin.com";
+}

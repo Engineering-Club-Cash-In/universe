@@ -581,6 +581,13 @@ Respuesta siempre `200`, aunque no se haya notificado:
 los pagos. **No es un error**: si respondiéramos 4xx, cartera lo trataría como fallo y
 llenaría los logs de contabilidad de rojo.
 
+**Aun así, cartera filtra antes de llamar.** El CRM sabe contestar que no, pero avisar de
+*todos* los pagos del sistema serían miles de POST inútiles en el camino caliente de
+contabilidad, cada uno con su timeout. Cartera compara `registerBy` contra
+`bot-cobros@clubcashin.com` —un dato que ya tiene leído en la mano— y solo llama cuando
+corresponde. El chequeo del CRM **se conserva igual**: acá se filtra por eficiencia, no por
+seguridad, y las dos puntas tienen que poder defenderse solas.
+
 ### Del lado de cartera
 
 Los controladores emiten el aviso **después de que la transacción hizo commit**, con el
@@ -622,7 +629,11 @@ Esa última fila es la que existe gracias a
 adivinar el motivo de una muerte por la posición del cuerpo. Ahora hay acta.
 
 Eso pide un endpoint de lectura: `GET /pagos/estado?ids=48213,48214`, que devuelve por cada id
-`{ existe, validation_status, payment_false, reversion: { estado, fecha, usuario, motivo } | null }`.
+`{ validation_status, payment_false, numero_cuota, …, reversion: { estado, revertido_en,
+usuario_email, motivo } | null }`. Un pago que ya no existe **no viene en la respuesta** —
+"desapareció" y "sigue pendiente" no son lo mismo, y una fila inventada con estado nulo las
+confundiría—; su reversión se busca entonces por la `r2_key`, que es el único caso en que el
+job hace una segunda llamada.
 
 Nada se pierde: el webhook adelanta el aviso, el job
 garantiza que ocurra ([D-35](./DECISIONES.md#d-35--el-webhook-adelanta-el-aviso-el-job-lo-garantiza)).

@@ -1600,6 +1600,17 @@ export type RegistrarPagoResultado =
 			mensaje?: string;
 	  };
 
+/** Una fila de `cartera.pagos_reversiones` (D-36). */
+export interface ReversionCartera {
+	reversion_id: number;
+	pago_id: number;
+	/** `iniciada` NO es un rechazo: es una reversión que quedó a medias. */
+	estado: string;
+	usuario_email: string;
+	motivo: string | null;
+	revertido_en: string | null;
+}
+
 /** Una fila de `pagos_credito`, como la devuelven las lecturas de rastreo. */
 export interface EstadoPagoCartera {
 	pago_id: number;
@@ -1610,17 +1621,16 @@ export interface EstadoPagoCartera {
 	validation_status: string | null;
 	pagado: boolean | null;
 	payment_false: boolean | null;
-}
-
-/** Una fila de `cartera.pagos_reversiones` (D-36). */
-export interface ReversionCartera {
-	reversion_id: number;
-	pago_id: number;
-	/** `iniciada` NO es un rechazo: es una reversión que quedó a medias. */
-	estado: string;
-	usuario_email: string;
-	motivo: string | null;
-	revertido_en: string | null;
+	/**
+	 * La reversión que manda para ese pago, si la hubo.
+	 *
+	 * Viene solo de `GET /pagos/estado`, y sin ella `validation_status` miente:
+	 * `reversePayment` deja el pago en `no_required`, que es un estado
+	 * "aplicado". Leer solo esa columna haría que un pago revertido pase por
+	 * validado y el cliente reciba un "tu pago fue acreditado" justo después de
+	 * que se lo rechazaron.
+	 */
+	reversion?: ReversionCartera | null;
 }
 
 export interface PagosPorBoletaResponse {

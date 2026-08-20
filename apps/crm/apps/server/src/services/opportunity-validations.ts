@@ -27,6 +27,8 @@ const TIMEOUT_RENAP_MS = 30_000;
 
 const MENSAJE_SIN_REGISTRO_BURO = "Sin registro en el buró de Infornet";
 
+const MENSAJE_TIMEOUT_RENAP = "RENAP no respondió";
+
 /** Mensaje de Infornet que no distingue "sin registro" de un fallo real */
 const ERROR_INFORNET_AMBIGUO = "Persona no encontrada en Infornet";
 
@@ -137,15 +139,15 @@ async function conTimeout<T>(
 	}
 }
 
-/** Reintenta una vez ante fallos transitorios de las fuentes externas */
+/** Reintenta una vez ante fallos transitorios; `noReintentar` corta el ciclo */
 async function conReintento<T>(
 	ejecutar: () => Promise<T>,
-	esExitoso: (resultado: T) => boolean,
+	noReintentar: (resultado: T) => boolean,
 ): Promise<T> {
 	let resultado = await ejecutar();
 	for (
 		let intento = 0;
-		intento < REINTENTOS_AUTOMATICOS && !esExitoso(resultado);
+		intento < REINTENTOS_AUTOMATICOS && !noReintentar(resultado);
 		intento++
 	) {
 		await esperar(ESPERA_ENTRE_REINTENTOS_MS);
@@ -517,11 +519,13 @@ async function ejecutarValidacionesInterno({
 					TIMEOUT_RENAP_MS,
 					() => ({
 						success: false as const,
-						message: "RENAP no respondió",
+						message: MENSAJE_TIMEOUT_RENAP,
 						error: null,
 					}),
 				),
-			(r) => r.success,
+			// El timeout deja la petición original en vuelo: reintentar la
+			// duplicaría y ambas escribirían en renapinfo
+			(r) => r.success || r.message === MENSAJE_TIMEOUT_RENAP,
 		),
 	);
 

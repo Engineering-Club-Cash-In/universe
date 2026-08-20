@@ -97,7 +97,7 @@ import {
 	resolverExencionPorBot,
 } from "../services/opportunity-validations";
 import type { StatusCreditEnum } from "../types/cartera-back";
-import { validarDpi } from "../utils/cui-validation";
+import { normalizarDpi, validarDpi } from "../utils/cui-validation";
 import { createNotification } from "./notifications";
 
 const CLIENT_CREDIT_CARTERA_STATUSES = [
@@ -3172,6 +3172,25 @@ export const crmRouter = {
 					if (resultadoValidaciones.errorTecnico) {
 						throw new ORPCError("BAD_REQUEST", {
 							message: `No se pudo completar la validación de Buró/RENAP: ${resultadoValidaciones.mensaje ?? "error desconocido"}. Intenta nuevamente o contacta al administrador.`,
+						});
+					}
+
+					// El DPI pudo cambiar mientras corrían las validaciones: el
+					// veredicto sería de otra persona
+					const [leadActual] = await db
+						.select({ dpi: leads.dpi })
+						.from(opportunities)
+						.leftJoin(leads, eq(opportunities.leadId, leads.id))
+						.where(eq(opportunities.id, input.opportunityId))
+						.limit(1);
+
+					if (
+						normalizarDpi(leadActual?.dpi ?? "") !==
+						normalizarDpi(opportunity[0].leadDpi)
+					) {
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								"El DPI del cliente cambió mientras se ejecutaban las validaciones. Vuelve a ejecutarlas antes de aprobar.",
 						});
 					}
 

@@ -4,6 +4,7 @@ import {
 	CheckCircle2,
 	ChevronDown,
 	ChevronUp,
+	FileWarning,
 	Info,
 	Loader2,
 	RefreshCw,
@@ -173,15 +174,16 @@ export function RenapBuroValidation({
 		}
 	}, [isExecuting, opportunityId, refetch, onEjecucionChange]);
 
-	// Auto-ejecutar al abrir la página si nunca se han validado. Con un
-	// resultado previo (aunque esté vencido o con error) se deja al analista
-	// decidir con el botón, para no gastar consultas al buró en cada visita.
+	// Auto-ejecuta solo si la oportunidad espera análisis, hay consentimiento y
+	// nunca se validó. Con un resultado previo decide el analista con el botón.
 	useEffect(() => {
 		const data = validacionesQuery.data;
 		if (
 			data &&
 			!data.exento &&
 			!data.faltaDpi &&
+			!data.faltaConsentimiento &&
+			data.enAnalisisPendiente &&
 			!data.buro &&
 			!autoEjecutado.current &&
 			!isExecuting
@@ -275,6 +277,18 @@ export function RenapBuroValidation({
 							El cliente no tiene DPI capturado en su ficha. Es obligatorio para
 							aprobar el análisis: captúralo en el detalle del lead y vuelve a
 							esta página.
+						</AlertDescription>
+					</Alert>
+				)}
+
+				{data.faltaConsentimiento && (
+					<Alert className="border-amber-300 bg-amber-50 dark:bg-amber-950/30">
+						<FileWarning className="h-4 w-4" />
+						<AlertTitle>Falta la cláusula de consentimiento</AlertTitle>
+						<AlertDescription>
+							Este tipo de cliente requiere la cláusula firmada antes de
+							consultar el buró, así que la validación no se ejecuta sola. Subí
+							el documento o ejecutala manualmente bajo tu criterio.
 						</AlertDescription>
 					</Alert>
 				)}

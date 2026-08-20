@@ -3110,8 +3110,15 @@ export const crmRouter = {
 			}
 
 			// Validate analysisStatus is in a valid state for approval/rejection
-			const validStatusesForReview = ["pending", "resubmitted"];
-			if (!validStatusesForReview.includes(opportunity[0].analysisStatus)) {
+			const validStatusesForReview: ("pending" | "resubmitted")[] = [
+				"pending",
+				"resubmitted",
+			];
+			if (
+				!validStatusesForReview.some(
+					(estado) => estado === opportunity[0].analysisStatus,
+				)
+			) {
 				if (opportunity[0].analysisStatus === "approved") {
 					throw new ORPCError("BAD_REQUEST", {
 						message:
@@ -3156,6 +3163,7 @@ export const crmRouter = {
 					const resultadoValidaciones = await ejecutarValidaciones({
 						opportunityId: input.opportunityId,
 						userId: context.userId,
+						reusarVigente: true,
 					});
 
 					// Un fallo técnico (API caída, timeout, sin respuesta) sí
@@ -3206,12 +3214,18 @@ export const crmRouter = {
 
 			if (input.approved || input.reason || !input.approved) {
 				// Build where clause with optional optimistic locking
+				// Solo se actualiza si sigue pendiente: dos aprobaciones simultáneas
+				// no pueden duplicar historial de etapa ni notificaciones
 				const whereClause = input.expectedUpdatedAt
 					? and(
 							eq(opportunities.id, input.opportunityId),
 							eq(opportunities.updatedAt, new Date(input.expectedUpdatedAt)),
+							inArray(opportunities.analysisStatus, validStatusesForReview),
 						)
-					: eq(opportunities.id, input.opportunityId);
+					: and(
+							eq(opportunities.id, input.opportunityId),
+							inArray(opportunities.analysisStatus, validStatusesForReview),
+						);
 
 				// Update opportunity with analysisStatus
 				const updatedRows = await db
@@ -3233,7 +3247,7 @@ export const crmRouter = {
 					.returning();
 
 				// Check for concurrent modification
-				if (updatedRows.length === 0 && input.expectedUpdatedAt) {
+				if (updatedRows.length === 0) {
 					throw new ORPCError("CONFLICT", {
 						message:
 							"La oportunidad fue modificada por otro usuario. Por favor recarga la página e intenta de nuevo.",

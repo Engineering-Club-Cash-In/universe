@@ -5,6 +5,10 @@ import { infornetController } from "../controllers/buro";
 import { db } from "../db";
 import { infornetPersonaCache } from "../db/schema/buro";
 import { leads, magicUrls, opportunities } from "../db/schema/crm";
+import {
+	documentRequirementsByClientType,
+	opportunityDocuments,
+} from "../db/schema/documents";
 import { renapInfo } from "../db/schema/renap";
 import { opportunityValidations } from "../db/schema/validations";
 import { evaluarBuro } from "../lib/buro-evaluation";
@@ -97,6 +101,10 @@ export type EstadoValidacionesOportunidad = {
 	aprobacionBloqueada: boolean;
 	/** Declara origen bot pero no hay evidencia de que el bot la validara */
 	origenBotSinEvidencia: boolean;
+	/** El tipo de cliente exige cláusula de consentimiento y todavía no está cargada */
+	faltaConsentimiento: boolean;
+	/** Espera decisión de análisis; si no, no se valida sola */
+	enAnalisisPendiente: boolean;
 	/** El resultado mostrado se ejecutó con un DPI distinto al que tiene hoy el lead */
 	dpiDesactualizado: boolean;
 	/** DPI con el que se ejecutó la última validación */
@@ -197,6 +205,9 @@ async function cargarOportunidadConLead(opportunityId: string): Promise<{
 	leadSource: LeadSource | null;
 	leadId: string | null;
 	leadDpi: string | null;
+	clientType: string | null;
+	creditType: string;
+	analysisStatus: string;
 } | null> {
 	const [row] = await db
 		.select({
@@ -204,6 +215,9 @@ async function cargarOportunidadConLead(opportunityId: string): Promise<{
 			leadSource: leads.source,
 			leadId: opportunities.leadId,
 			leadDpi: leads.dpi,
+			clientType: leads.clientType,
+			creditType: opportunities.creditType,
+			analysisStatus: opportunities.analysisStatus,
 		})
 		.from(opportunities)
 		.leftJoin(leads, eq(opportunities.leadId, leads.id))
@@ -280,6 +294,108 @@ export async function resolverExencionPorBot(oportunidad: {
 	};
 }
 
+const DOCUMENTO_CONSENTIMIENTO = "clausula_consentimiento";
+
+/** Estados en los que la oportunidad espera decisión de análisis */
+const ESTADOS_EN_ANALISIS = ["pending", "resubmitted"];
+
+/** Consultar el buró sin la cláusula firmada no corresponde; se lee del catálogo, no se asume el tipo de cliente */
+export async function faltaConsentimientoDelTitular(
+	opportunityId: string,
+	clientType: string | null,
+	creditType: string,
+): Promise<boolean> {
+	const [exigido] = await db
+		.select({ tipo: documentRequirementsByClientType.documentType })
+		.from(documentRequirementsByClientType)
+		.where(
+			and(
+				eq(
+					documentRequirementsByClientType.clientType,
+					(clientType ?? "individual") as "individual",
+				),
+				eq(
+					documentRequirementsByClientType.creditType,
+					creditType as "autocompra",
+				),
+				eq(
+					documentRequirementsByClientType.documentType,
+					DOCUMENTO_CONSENTIMIENTO,
+				),
+				eq(documentRequirementsByClientType.required, true),
+			),
+		)
+		.limit(1);
+
+	if (!exigido) return false;
+
+	const [cargado] = await db
+		.select({ id: opportunityDocuments.id })
+		.from(opportunityDocuments)
+		.where(
+			and(
+				eq(opportunityDocuments.opportunityId, opportunityId),
+				eq(opportunityDocuments.documentType, DOCUMENTO_CONSENTIMIENTO),
+			),
+		)
+		.limit(1);
+
+	return !cargado;
+}
+
+const filaPorDpi = new Map<string, Promise<unknown>>();
+
+/** El caché de Infornet es por DPI: dos oportunidades de la misma persona se encolan para no pagar dos veces */
+function enFilaPorDpi<T>(dpi: string, ejecutar: () => Promise<T>): Promise<T> {
+	const anterior = filaPorDpi.get(dpi) ?? Promise.resolve();
+	const propia = anterior.then(ejecutar, ejecutar);
+	const marcador = propia.catch(() => undefined);
+
+	filaPorDpi.set(dpi, marcador);
+	marcador.finally(() => {
+		if (filaPorDpi.get(dpi) === marcador) filaPorDpi.delete(dpi);
+	});
+
+	return propia;
+}
+
+/** Veredicto ya registrado para ese DPI y todavía vigente: evita re-consultar al aprobar */
+async function veredictoVigente(
+	opportunityId: string,
+	dpi: string,
+): Promise<ResultadoEjecucionValidaciones | null> {
+	const [ultimo] = await db
+		.select()
+		.from(opportunityValidations)
+		.where(
+			and(
+				eq(opportunityValidations.opportunityId, opportunityId),
+				eq(opportunityValidations.tipo, "buro"),
+				eq(opportunityValidations.dpi, dpi),
+				gt(opportunityValidations.expiraEn, new Date()),
+			),
+		)
+		.orderBy(desc(opportunityValidations.ejecutadoAt))
+		.limit(1);
+
+	if (!ultimo) return null;
+
+	return {
+		exento: false,
+		faltaDpi: false,
+		errorTecnico: false,
+		sinRegistroBuro: false,
+		buro: {
+			estado: ultimo.estado,
+			mensaje: ultimo.mensaje,
+			scoreRiesgo: ultimo.scoreRiesgo,
+			nivelRiesgo: ultimo.nivelRiesgo,
+			alertas: ultimo.alertas,
+			fuenteDeDatos: ultimo.fuenteDeDatos,
+		},
+	};
+}
+
 const validacionesEnCurso = new Map<
 	string,
 	Promise<ResultadoEjecucionValidaciones>
@@ -310,6 +426,8 @@ function conMutexDeOportunidad(
 export async function ejecutarValidaciones(parametros: {
 	opportunityId: string;
 	userId?: string | null;
+	/** El gate reusa un veredicto vigente; el botón manual siempre re-consulta */
+	reusarVigente?: boolean;
 }): Promise<ResultadoEjecucionValidaciones> {
 	return conMutexDeOportunidad(parametros.opportunityId, () =>
 		ejecutarValidacionesInterno(parametros),
@@ -319,9 +437,11 @@ export async function ejecutarValidaciones(parametros: {
 async function ejecutarValidacionesInterno({
 	opportunityId,
 	userId,
+	reusarVigente,
 }: {
 	opportunityId: string;
 	userId?: string | null;
+	reusarVigente?: boolean;
 }): Promise<ResultadoEjecucionValidaciones> {
 	const oportunidad = await cargarOportunidadConLead(opportunityId);
 
@@ -379,6 +499,11 @@ async function ejecutarValidacionesInterno({
 	}
 
 	const dpi = dpiValidado.dpiLimpio;
+
+	if (reusarVigente) {
+		const vigente = await veredictoVigente(opportunityId, dpi);
+		if (vigente) return vigente;
+	}
 
 	// 1. RENAP: sincronizar datos de identidad en renap_info
 	const renapResultado = await conReintento(
@@ -442,23 +567,30 @@ async function ejecutarValidacionesInterno({
 
 	// 2. Buró: usa el caché de 30 días. El fallo se clasifica ANTES de reintentar,
 	// porque reconsultar no hace aparecer a quien Infornet no tiene
-	let estudio = await infornetController.obtenerEstudioPorDPI(dpi);
-	let buroSinRegistro = false;
+	const consultaBuro = await enFilaPorDpi(dpi, async () => {
+		let resultado = await infornetController.obtenerEstudioPorDPI(dpi);
+		let sinRegistro = false;
 
-	if (!estudio.success) {
-		buroSinRegistro =
-			estudio.error === ERROR_INFORNET_AMBIGUO &&
-			(await clasificarFalloInfornet(dpi)) === "sin_registro";
+		if (!resultado.success) {
+			sinRegistro =
+				resultado.error === ERROR_INFORNET_AMBIGUO &&
+				(await clasificarFalloInfornet(dpi)) === "sin_registro";
 
-		for (
-			let intento = 0;
-			intento < REINTENTOS_AUTOMATICOS && !estudio.success && !buroSinRegistro;
-			intento++
-		) {
-			await esperar(ESPERA_ENTRE_REINTENTOS_MS);
-			estudio = await infornetController.obtenerEstudioPorDPI(dpi);
+			for (
+				let intento = 0;
+				intento < REINTENTOS_AUTOMATICOS && !resultado.success && !sinRegistro;
+				intento++
+			) {
+				await esperar(ESPERA_ENTRE_REINTENTOS_MS);
+				resultado = await infornetController.obtenerEstudioPorDPI(dpi);
+			}
 		}
-	}
+
+		return { resultado, sinRegistro };
+	});
+
+	const estudio = consultaBuro.resultado;
+	const buroSinRegistro = consultaBuro.sinRegistro;
 
 	if (!estudio.success) {
 		const mensajeCrudo =
@@ -601,8 +733,11 @@ async function obtenerDetalleRenap(dpi: string): Promise<DetalleRenap | null> {
 	};
 }
 
-/** Lee el caché de Infornet, no consulta la API */
-async function obtenerDetalleBuro(dpi: string): Promise<DetalleBuro | null> {
+/** Lee el caché de Infornet, no consulta la API. Solo devuelve el estudio que produjo el veredicto guardado */
+async function obtenerDetalleBuro(
+	dpi: string,
+	expiraEnAuditado: Date | null,
+): Promise<DetalleBuro | null> {
 	const [fila] = await db
 		.select()
 		.from(infornetPersonaCache)
@@ -610,6 +745,14 @@ async function obtenerDetalleBuro(dpi: string): Promise<DetalleBuro | null> {
 		.limit(1);
 
 	if (!fila) return null;
+
+	// Otra oportunidad pudo refrescar el estudio despues de este veredicto
+	if (
+		!expiraEnAuditado ||
+		fila.expiraEn.getTime() !== new Date(expiraEnAuditado).getTime()
+	) {
+		return null;
+	}
 
 	return {
 		codigoPersona: fila.codigoPersona,
@@ -649,6 +792,8 @@ export async function getValidaciones({
 			buroVigente: false,
 			aprobacionBloqueada: false,
 			origenBotSinEvidencia: false,
+			faltaConsentimiento: false,
+			enAnalisisPendiente: false,
 			dpiDesactualizado: false,
 			dpiValidado: null,
 			detalleRenap: null,
@@ -670,9 +815,11 @@ export async function getValidaciones({
 		: false;
 
 	// RENAP en error solo bloquea si abortó antes del buró
-	const aprobacionBloqueada = buro
-		? buro.estado === "error"
-		: renap?.estado === "error";
+	// Si el RENAP más reciente falló después del último buró, ese veredicto ya no representa el estado actual
+	const renapEsPosterior =
+		renap && (!buro || renap.ejecutadoAt > buro.ejecutadoAt);
+	const aprobacionBloqueada =
+		buro?.estado === "error" || (renapEsPosterior && renap?.estado === "error");
 
 	const dpiActual = oportunidad.leadDpi
 		? normalizarDpi(oportunidad.leadDpi)
@@ -688,7 +835,7 @@ export async function getValidaciones({
 	const [detalleRenap, detalleBuro] = dpiValidado
 		? await Promise.all([
 				obtenerDetalleRenap(dpiValidado),
-				obtenerDetalleBuro(dpiValidado),
+				obtenerDetalleBuro(dpiValidado, buro?.expiraEn ?? null),
 			])
 		: [null, null];
 
@@ -701,6 +848,14 @@ export async function getValidaciones({
 		buroVigente,
 		aprobacionBloqueada: aprobacionBloqueada ?? false,
 		origenBotSinEvidencia: exencion.origenBotSinEvidencia,
+		faltaConsentimiento: await faltaConsentimientoDelTitular(
+			opportunityId,
+			oportunidad.clientType,
+			oportunidad.creditType,
+		),
+		enAnalisisPendiente: ESTADOS_EN_ANALISIS.includes(
+			oportunidad.analysisStatus,
+		),
 		dpiDesactualizado,
 		dpiValidado,
 		detalleRenap,

@@ -40,6 +40,7 @@ import type {
 	CreditoBucketResponse,
 	CreditoDetailResponse,
 	CreditoDirectoResponse,
+	EstadoPagoCartera,
 	FacturarGenericoInput,
 	FacturarGenericoResponse,
 	GetAdvisorsParams,
@@ -56,8 +57,11 @@ import type {
 	InversionistaReporte,
 	LiquidatePagosInversionistasInput,
 	PaginatedResponse,
+	PagosPorBoletaResponse,
 	PoolPorAsesorRow,
 	PromesaActivaCredito,
+	RegistrarPagoInput,
+	RegistrarPagoResultado,
 	ResumenCreditoResponse,
 	ResumenGlobalInversionista,
 	ReversePagoInput,
@@ -1132,6 +1136,127 @@ export class CarteraBackClient {
 			return String(respuesta.saldo_pendiente);
 		} catch (error) {
 			console.error("[CarteraBackClient] getSaldoCuota:", error);
+			return null;
+		}
+	}
+
+	/**
+	 * Registra un pago en cartera. **Es el que mueve dinero.**
+	 *
+	 * ─────────────────────────────────────────────────────────────────────────
+	 * NO SE REINTENTA. NUNCA.
+	 *
+	 * `insertPayment` no es transaccional: un timeout puede significar que el
+	 * pago se escribió igual, entero o a medias. Un reintento automático crea un
+	 * SEGUNDO pago real, y el control de duplicados de cartera no lo frena —solo
+	 * corre cuando vienen `numeroAutorizacion` y `banco_id` a la vez, y hay
+	 * boletas que no traen autorización—.
+	 *
+	 * Por eso, ante un timeout, este método **falla** y quien lo llamó tiene que
+	 * ir a preguntar qué pasó (`getPagosPorBoleta`), que es exactamente lo que
+	 * hace el job de reconciliación del bot.
+	 * ─────────────────────────────────────────────────────────────────────────
+	 *
+	 * Contrato: docs/features/bot-whatsapp-cobros/04-validacion-de-boleta.md §5
+	 */
+	async registrarPago(
+		pago: RegistrarPagoInput,
+	): Promise<RegistrarPagoResultado> {
+		try {
+			const respuesta = await this.request<{
+				success?: boolean;
+				message?: string;
+				pagos?: number[];
+				detalle?: Record<string, unknown>;
+			}>(
+				"/newPayment",
+				{ method: "POST", body: JSON.stringify(pago) },
+				false,
+				undefined,
+				// Explícito, aunque el default de los POST ya sea `false`: acá el
+				// reintento no es "una llamada de más", es un pago de más.
+				false,
+			);
+
+			return {
+				ok: true,
+				// Cartera devuelve la lista desde la capa B del bot. Una instancia
+				// sin desplegar todavía responde sin el campo, y eso NO es un error:
+				// el pago se registró igual. Se sigue sin ids y la reconciliación
+				// los busca por la r2_key.
+				pagoIds: Array.isArray(respuesta?.pagos) ? respuesta.pagos : [],
+				detalle: respuesta?.detalle ?? null,
+			};
+		} catch (error) {
+			// Cartera contestó que no: el pago NO se registró y se sabe. Es el
+			// único caso en que quien llamó puede dejar todo como estaba.
+			if (error instanceof CarteraBackHttpError) {
+				return {
+					ok: false,
+					motivo: "rechazado",
+					status: error.status,
+					mensaje: error.payload.message ?? error.message,
+				};
+			}
+
+			// Cartera no contestó. Acá NO se sabe si el pago existe, y esa
+			// diferencia es todo el diseño de §4.1: el borrador se queda en
+			// `confirmando` y lo resuelve la reconciliación.
+			console.error("[CarteraBackClient] registrarPago sin respuesta:", error);
+			return { ok: false, motivo: "sin_respuesta" };
+		}
+	}
+
+	/**
+	 * Qué pasó con una boleta, buscándola por su key de R2.
+	 *
+	 * Es el puente de emergencia cuando `registrarPago` no contestó: la key es
+	 * única y quedó guardada del lado de cartera, en la tabla `boletas`.
+	 *
+	 * Devuelve también las **reversiones** que mencionan esa URL, y sin eso la
+	 * respuesta sería ambigua: `reversePayment` borra las filas de `boletas`, así
+	 * que "no encuentro nada" puede ser "no se registró" o "se registró y ya lo
+	 * rechazaron" (D-36).
+	 */
+	async getPagosPorBoleta(
+		r2Key: string,
+		creditoId?: number,
+	): Promise<PagosPorBoletaResponse | null> {
+		try {
+			// Con el crédito, cartera contesta además si hay un pago suyo
+			// ejecutándose ahora mismo. Sin ese dato, "no encontré filas" no
+			// alcanza para reabrir nada.
+			const credito = creditoId === undefined ? "" : `&credito_id=${creditoId}`;
+
+			return await this.request<PagosPorBoletaResponse>(
+				`/pagos-por-boleta?url=${encodeURIComponent(r2Key)}${credito}`,
+				{ method: "GET" },
+				false,
+			);
+		} catch (error) {
+			console.error("[CarteraBackClient] getPagosPorBoleta:", error);
+			return null;
+		}
+	}
+
+	/**
+	 * En qué estado están estos pagos ahora mismo.
+	 *
+	 * Un pago que ya no existe no viene en la respuesta — no viene con estado
+	 * nulo, que sería otra cosa.
+	 */
+	async getEstadoPagos(ids: number[]): Promise<EstadoPagoCartera[] | null> {
+		if (ids.length === 0) return [];
+
+		try {
+			const respuesta = await this.request<{
+				success?: boolean;
+				pagos?: EstadoPagoCartera[];
+			}>(`/pagos/estado?ids=${ids.join(",")}`, { method: "GET" }, false);
+
+			return respuesta?.pagos ?? [];
+		} catch (error) {
+			console.error("[CarteraBackClient] getEstadoPagos:", error);
 			return null;
 		}
 	}

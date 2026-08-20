@@ -37,6 +37,15 @@ import { hoyGtISO } from "../lib/buckets-classification";
 export type ResumenCredito = {
 	numero_credito_sifco: string;
 	credito_id: number;
+	/**
+	 * El **cliente dueño del crédito** en `cartera.usuarios` — no el asesor, ni
+	 * un usuario del CRM.
+	 *
+	 * Lo pide `newPayment`, que lo exige en el body: sin esto, quien registra un
+	 * pago tiene que ir a buscarlo a otro endpoint. El asesor del crédito viaja
+	 * aparte, en `asesor`, y no entra en el pago.
+	 */
+	usuario_id: number;
 	status_credito: string;
 	/** Capital original del crédito, tal como se otorgó. */
 	capital: string;
@@ -239,6 +248,7 @@ export async function obtenerResumenCredito(
 		.select({
 			credito_id: creditos.credito_id,
 			numero_credito_sifco: creditos.numero_credito_sifco,
+			usuario_id: creditos.usuario_id,
 			capital: creditos.capital,
 			cuota: creditos.cuota,
 			plazo: creditos.plazo,
@@ -359,6 +369,7 @@ export type InsumosResumen = {
 	credito: {
 		credito_id: number;
 		numero_credito_sifco: string;
+		usuario_id: number;
 		capital: string | null;
 		cuota: string | null;
 		plazo: number;
@@ -450,6 +461,7 @@ export function armarResumen(insumos: InsumosResumen): ResumenCredito {
 	return {
 		numero_credito_sifco: credito.numero_credito_sifco,
 		credito_id: credito.credito_id,
+		usuario_id: credito.usuario_id,
 		status_credito: credito.statusCredit,
 		capital: new Big(credito.capital ?? 0).toFixed(2),
 		// Un crédito sobrepagado daría negativo; se muestra 0 antes que un saldo

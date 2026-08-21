@@ -390,26 +390,34 @@ function enFilaPorDpi<T>(dpi: string, ejecutar: () => Promise<T>): Promise<T> {
 	return propia;
 }
 
-/** Veredicto ya registrado para ese DPI y todavía vigente: evita re-consultar al aprobar */
+/** Veredicto vigente para ese DPI, salvo que haya un intento posterior fallido: evita re-consultar al aprobar */
 async function veredictoVigente(
 	opportunityId: string,
 	dpi: string,
 ): Promise<ResultadoEjecucionValidaciones | null> {
-	const [ultimo] = await db
+	const filas = await db
 		.select()
 		.from(opportunityValidations)
 		.where(
 			and(
 				eq(opportunityValidations.opportunityId, opportunityId),
-				eq(opportunityValidations.tipo, "buro"),
 				eq(opportunityValidations.dpi, dpi),
-				gt(opportunityValidations.expiraEn, new Date()),
 			),
 		)
-		.orderBy(desc(opportunityValidations.ejecutadoAt))
-		.limit(1);
+		.orderBy(desc(opportunityValidations.ejecutadoAt));
 
-	if (!ultimo) return null;
+	const ultimo = filas.find((f) => f.tipo === "buro");
+	const ultimoRenap = filas.find((f) => f.tipo === "renap");
+
+	// Mismo criterio que `aprobacionBloqueada`: las filas de error no llevan
+	// `expiraEn`, así que sin esto el gate aprobaría lo que la UI marca bloqueado
+	const renapEsPosterior =
+		ultimoRenap && (!ultimo || ultimoRenap.ejecutadoAt > ultimo.ejecutadoAt);
+
+	if (ultimo?.estado === "error") return null;
+	if (renapEsPosterior && ultimoRenap?.estado === "error") return null;
+
+	if (!ultimo?.expiraEn || ultimo.expiraEn <= new Date()) return null;
 
 	return {
 		exento: false,

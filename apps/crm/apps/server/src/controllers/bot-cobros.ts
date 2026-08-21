@@ -16,6 +16,7 @@
 import type { Context } from "hono";
 import { db } from "../db";
 import {
+	aplanarCreditos,
 	buscarCliente,
 	listarCreditosDeCliente,
 } from "../lib/bot-cobros/buscar-cliente";
@@ -459,7 +460,10 @@ export async function listarCreditosBotCobros(c: Context) {
 			});
 		}
 
-		return c.json({ success: true, data: { creditos: lista } });
+		// Además del arreglo van las etiquetas numeradas y su SIFCO al lado: el
+		// motor del bot no recorre arreglos, arma el menú con una plantilla por
+		// cantidad de opciones.
+		return c.json({ success: true, data: aplanarCreditos(lista) });
 	} catch (err) {
 		console.error("[BotCobros] creditos:", err);
 		return error(c, {

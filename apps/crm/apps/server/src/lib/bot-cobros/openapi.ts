@@ -358,6 +358,16 @@ export const especificacionBotCobros = {
 					"",
 					"El cliente ve **todos los créditos donde aparece**, sea como titular o como codeudor. El campo `etiqueta` viene armado para usarlo tal cual en el menú del chat.",
 					"",
+					"**Para armar el menú sin recorrer el arreglo:** la misma información va repetida plana dentro de `data`.",
+					"",
+					"| Campo | Para qué |",
+					"| --- | --- |",
+					"| `cantidadCreditos` | Cuántas opciones tiene el menú. Si es `1`, no hay nada que preguntar: seguí directo con ese crédito. |",
+					"| `etiqueta1` … `etiquetaN` | El texto de cada opción, en orden. |",
+					"| `numeroSifco1` … `numeroSifcoN` | El número de crédito de esa misma opción. |",
+					"",
+					"El número de la clave es la posición en el menú: si el cliente elige la **opción 2**, el crédito que hay que mandar en las llamadas siguientes es el de `numeroSifco2`. El orden es fijo y `creditos` sigue trayendo lo mismo, por si preferís recorrerlo.",
+					"",
 					"El código **vence a los 5 minutos**, sirve **una sola vez** y se bloquea al **tercer** intento fallido.",
 				].join("\n"),
 				operationId: "listarCreditos",
@@ -395,6 +405,11 @@ export const especificacionBotCobros = {
 								example: {
 									success: true,
 									data: {
+										cantidadCreditos: 2,
+										etiqueta1: "MAZDA CX-5 GRAND TOURING AWD 2016 · P-247JYT",
+										numeroSifco1: "01010214113290",
+										etiqueta2: "TOYOTA YARIS 2019 · P-882BFR",
+										numeroSifco2: "01010214117590",
 										creditos: [
 											{
 												numeroSifco: "01010214113290",
@@ -405,6 +420,16 @@ export const especificacionBotCobros = {
 													marca: "MAZDA",
 													modelo: "CX-5 GRAND TOURING AWD",
 													anio: 2016,
+												},
+											},
+											{
+												numeroSifco: "01010214117590",
+												etiqueta: "TOYOTA YARIS 2019 · P-882BFR",
+												vehiculo: {
+													placa: "P-882BFR",
+													marca: "TOYOTA",
+													modelo: "YARIS",
+													anio: 2019,
 												},
 											},
 										],

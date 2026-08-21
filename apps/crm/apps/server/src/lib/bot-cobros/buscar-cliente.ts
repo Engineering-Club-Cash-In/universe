@@ -373,7 +373,11 @@ export async function listarCreditosDeCliente(
 				inArray(opportunities.status, [...ESTADOS_CON_CREDITO]),
 				or(...condiciones),
 			),
-		);
+		)
+		// Orden fijo: las opciones del menú van numeradas (`etiqueta1`,
+		// `etiqueta2`, …) y sin ORDER BY Postgres puede devolverlas en otro orden
+		// entre una consulta y otra.
+		.orderBy(asc(opportunities.numeroSifco));
 
 	const creditos: CreditoBot[] = [];
 
@@ -411,6 +415,44 @@ export async function listarCreditosDeCliente(
 	}
 
 	return creditos;
+}
+
+/**
+ * Los mismos créditos, servidos planos para el motor del bot.
+ *
+ * SimpleTech arma el menú del chat con una plantilla por cantidad de opciones
+ * y le cuesta recorrer un arreglo, así que además de `creditos` van las mismas
+ * etiquetas numeradas —`etiqueta1`, `etiqueta2`, …— con su número SIFCO al
+ * lado. Cuando el cliente elige la opción 2, `numeroSifco2` es lo que hay que
+ * mandar de vuelta a `/credito/info`.
+ *
+ * `cantidadCreditos` es lo que decide a qué menú entra: con uno solo se salta
+ * la pregunta, con dos o más la hace.
+ *
+ * El arreglo `creditos` queda igual que siempre: nadie que ya lo lea tiene que
+ * cambiar nada.
+ */
+export type CreditosParaElMenu = {
+	cantidadCreditos: number;
+	creditos: CreditoBot[];
+} & Record<`etiqueta${number}`, string> &
+	Record<`numeroSifco${number}`, string>;
+
+export function aplanarCreditos(creditos: CreditoBot[]): CreditosParaElMenu {
+	const plano: CreditosParaElMenu = {
+		cantidadCreditos: creditos.length,
+		creditos,
+	};
+
+	creditos.forEach((credito, indice) => {
+		// Numeradas desde 1: el cliente contesta "2" para la segunda opción, y el
+		// orden es el mismo del arreglo.
+		const posicion = indice + 1;
+		plano[`etiqueta${posicion}`] = credito.etiqueta;
+		plano[`numeroSifco${posicion}`] = credito.numeroSifco;
+	});
+
+	return plano;
 }
 
 /** Punto de entrada: deduce qué mandó el cliente y lo busca donde corresponde. */

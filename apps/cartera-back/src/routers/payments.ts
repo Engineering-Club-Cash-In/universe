@@ -31,7 +31,7 @@ import { esPagoAplicado } from "../utils/paymentStatus";
 import { getApplyPaymentHttpStatus } from "../controllers/registerPaymentPolicy";
 import {
   esPagoDelBotCobros,
-  notificarEventoPagoBot,
+  emitirEventoPagoBot,
 } from "../services/crm.service";
 
 export const liquidatePaymentsSchema = z.object({
@@ -639,7 +639,7 @@ export const paymentRouter = new Elysia()
       // Va después de aplicar y nunca tira: un WhatsApp caído no puede tumbar
       // la validación de un pago (D-28).
       if (resultado?.success && esPagoDelBotCobros(pagoExiste.registerBy)) {
-        await notificarEventoPagoBot({
+        emitirEventoPagoBot({
           pagoId,
           creditoId: pagoExiste.credito_id,
           evento: "validado",

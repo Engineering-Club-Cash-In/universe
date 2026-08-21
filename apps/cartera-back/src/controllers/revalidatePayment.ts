@@ -1,7 +1,7 @@
 import { z } from "zod";
 import {
   esPagoDelBotCobros,
-  notificarEventoPagoBot,
+  emitirEventoPagoBot,
 } from "../services/crm.service";
 import { eq, and, ne } from "drizzle-orm";
 import Big from "big.js";
@@ -239,7 +239,7 @@ export const revalidatePayment = async ({ body, set }: any) => {
     // 🤖 Circuito de vuelta del bot: "Revalidar" también acredita el pago, así
     // que para el cliente significa lo mismo que el botón de conta. Nunca tira.
     if (esPagoDelBotCobros(result?.registerBy)) {
-      await notificarEventoPagoBot({
+      emitirEventoPagoBot({
         pagoId: pago_id,
         creditoId: credito_id,
         numeroSifco: result?.numero_credito_sifco ?? null,

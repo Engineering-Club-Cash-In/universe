@@ -1,7 +1,7 @@
 import { z } from "zod";
 import {
   esPagoDelBotCobros,
-  notificarEventoPagoBot,
+  emitirEventoPagoBot,
 } from "../services/crm.service";
 import { eq, and, or } from "drizzle-orm";
 import Big from "big.js";
@@ -277,7 +277,7 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
     // cierto. Quién decide eso es el CRM, que es el único que sabe qué se le
     // escribió; acá solo se avisa que pasó.
     if (esPagoDelBotCobros(result?.registerBy)) {
-      await notificarEventoPagoBot({
+      emitirEventoPagoBot({
         pagoId: pago_id,
         creditoId: credito_id,
         numeroSifco: result?.numero_credito_sifco ?? null,

@@ -119,15 +119,30 @@ export function eventoSegunCartera(
 	pago: EstadoPagoCartera | undefined,
 	/** Cuando no vino ninguna fila del pago, la reversión puede venir aparte. */
 	reversionSuelta?: ReversionCartera | null,
+	/** El último evento que ya registramos de este pago, si hay. */
+	ultimoConocido?: EventoPago,
 ): { evento: EventoPago; ocurridoEn?: string } | null {
 	const reversion = pago?.reversion ?? reversionSuelta ?? null;
 
-	// ⚠️ La reversión manda sobre el estado de la fila.
+	// ⚠️ Un pago VALIDADO manda sobre su reversión histórica.
 	//
-	// `reversePayment` deja el pago reseteado en `no_required`, que es un estado
-	// "aplicado": mirar solo `validation_status` haría que un pago revertido se
-	// leyera como validado y el cliente recibiera un "tu pago fue acreditado"
-	// justo después de que se lo rechazaron.
+	// `reversePayment` resetea la fila a `no_required`: si hoy está `validated`
+	// es porque alguien la REVALIDÓ después de revertirla, y ese es el estado
+	// vigente. Sin este orden, la reversión `completada` de hace semanas ganaba
+	// para siempre y el respaldo le decía "tu pago se rechazó" a un cliente
+	// cuyo pago está validado ahora mismo.
+	if (
+		pago &&
+		pago.payment_false !== true &&
+		(pago.validation_status === "validated" ||
+			pago.validation_status === "capital_validated")
+	) {
+		return { evento: "validado" };
+	}
+
+	// La reversión manda sobre el resto de estados de la fila: el reset a
+	// `no_required` se ve "aplicado", y sin esto un pago revertido se leería
+	// como si nada.
 	if (reversion?.estado === "completada") {
 		return {
 			evento: "revertido",
@@ -145,16 +160,29 @@ export function eventoSegunCartera(
 
 	if (pago.payment_false === true) return { evento: "marcado_falso" };
 
+	// `pending` no siempre es "sigue esperando": si lo último que supimos fue
+	// que estaba resuelto, este pending ES una transición —el webhook de
+	// `revertPaymentToPending` que se perdió— y callarse deja al cliente
+	// creyendo un desenlace que ya no existe.
 	if (
-		pago.validation_status === "validated" ||
-		pago.validation_status === "capital_validated"
+		pago.validation_status === "pending" &&
+		ultimoConocido !== undefined &&
+		ultimoConocido !== "regresado_a_pendiente" &&
+		RESUELVEN_LOCAL.has(ultimoConocido)
 	) {
-		return { evento: "validado" };
+		return { evento: "regresado_a_pendiente" };
 	}
 
-	// `pending` (y cualquier otro): sigue esperando a contabilidad.
+	// `pending` sin historia (y cualquier otro): sigue esperando a conta.
 	return null;
 }
+
+/** Copia local de los eventos que cierran un ciclo (evita import circular). */
+const RESUELVEN_LOCAL = new Set<EventoPago>([
+	"validado",
+	"revertido",
+	"marcado_falso",
+]);
 
 export async function recuperarEventosPerdidos(): Promise<ResultadoRespaldo> {
 	// Los pagos sin resolver de boletas que todavía esperan desenlace.
@@ -209,7 +237,21 @@ export async function recuperarEventosPerdidos(): Promise<ResultadoRespaldo> {
 		avisosReintentados: 0,
 	};
 
+	// Lote vacío = se llegó al final del barrido: la próxima corrida arranca de
+	// cero. Sin esto, un último lote de exactamente 200 dejaba el cursor en el
+	// tope para siempre y los de abajo no se volvían a mirar nunca.
+	if (pendientes.length === 0) {
+		cursorDeBarrido = 0;
+	}
+
 	if (pendientes.length > 0) {
+		// El instante de la FOTO, tomado ANTES de pedirla. Es el `ocurrido_en` de
+		// todo evento deducido sin fecha propia: si se estampara al procesar, una
+		// lectura vieja podría quedar "más nueva" que un webhook real que llegó
+		// mientras el lote se recorría, y el guard de eventos tardíos dejaría
+		// pasar el dato viejo encima del bueno.
+		const observadoEn = new Date().toISOString();
+
 		const estados = await carteraBackClient.getEstadoPagos(
 			pendientes.map((p) => p.pagoId),
 		);
@@ -255,7 +297,11 @@ export async function recuperarEventosPerdidos(): Promise<ResultadoRespaldo> {
 						).find((r) => r.pago_id === pendiente.pagoId) ?? null)
 					: null;
 
-			const deduccion = eventoSegunCartera(pago, reversionSuelta);
+			const deduccion = eventoSegunCartera(
+				pago,
+				reversionSuelta,
+				yaSabido.get(pendiente.pagoId),
+			);
 
 			// Una reversión a medias no se traduce en evento, pero tampoco se
 			// ignora: alguien tiene que mirar ese crédito.
@@ -293,7 +339,7 @@ export async function recuperarEventosPerdidos(): Promise<ResultadoRespaldo> {
 				evento: deduccion.evento,
 				usuario: null,
 				motivo: null,
-				ocurridoEn: deduccion.ocurridoEn ?? new Date().toISOString(),
+				ocurridoEn: deduccion.ocurridoEn ?? observadoEn,
 			});
 
 			if (procesado.motivo !== "EVENTO_REPETIDO") {

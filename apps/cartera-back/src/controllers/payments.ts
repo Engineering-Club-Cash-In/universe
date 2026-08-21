@@ -1,7 +1,7 @@
 import { db } from "../database/index";
 import {
   esPagoDelBotCobros,
-  notificarEventoPagoBot,
+  emitirEventoPagoBot,
 } from "../services/crm.service";
 import { CARTERA_SCHEMA, SQL_CARTERA_SCHEMA } from "../database/db/schema";
 import {
@@ -1741,7 +1741,7 @@ export async function falsePayment(pago_id: number, credito_id: number) {
     .limit(1);
 
   if (esPagoDelBotCobros(pago?.registerBy)) {
-    await notificarEventoPagoBot({
+    emitirEventoPagoBot({
       pagoId: pago_id,
       creditoId: credito_id,
       evento: "marcado_falso",

@@ -24,7 +24,7 @@ import {
 import { updateMora } from "./latefee";
 import {
   esPagoDelBotCobros,
-  notificarEventoPagoBot,
+  emitirEventoPagoBot,
 } from "../services/crm.service";
 import { SATClientService } from "../cofidi/satClientService";
 import { CLUB_CASHIN_CONFIG, SAT_CONFIG } from "../utils/functions/const";
@@ -796,7 +796,7 @@ export const reversePayment = async ({ body, set, user }: any) => {
     // el registro descontó (§5.1), y es lo que conta usa hoy en carteraFront.
     // Nunca tira (D-28).
     if (esPagoDelBotCobros(result.pago?.registerBy)) {
-      await notificarEventoPagoBot({
+      emitirEventoPagoBot({
         pagoId: pago_id,
         creditoId: credito_id,
         numeroSifco: result.creditData?.creditos?.numero_credito_sifco ?? null,

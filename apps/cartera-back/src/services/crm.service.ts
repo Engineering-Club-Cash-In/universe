@@ -222,6 +222,23 @@ export interface EventoPagoBotInput {
  * Va con `CARTERA_WEBHOOK_API_KEY`, que es **otra** llave que la del bot: quien
  * puede consultar créditos no tiene por qué poder disparar mensajes a clientes.
  */
+/**
+ * Dispara el aviso SIN esperar la respuesta.
+ *
+ * El evento se emite después del commit: el pago ya está aplicado (o
+ * revertido) pase lo que pase con el aviso. Esperar al CRM acá significaba
+ * que con el CRM lento cada acción de contabilidad —validar, revertir,
+ * marcar falso— se quedaba colgada hasta el timeout de axios (10 s) para
+ * responder un éxito que ya había ocurrido. El job de respaldo del CRM
+ * existe justamente para que este aviso pueda perderse sin consecuencias.
+ *
+ * `notificarEventoPagoBot` nunca rechaza (catch interno), así que el `void`
+ * no deja promesas huérfanas sin manejar.
+ */
+export function emitirEventoPagoBot(input: EventoPagoBotInput): void {
+  void notificarEventoPagoBot(input);
+}
+
 export async function notificarEventoPagoBot(
   input: EventoPagoBotInput,
 ): Promise<void> {

@@ -166,3 +166,72 @@ describe("el desenlace de la boleta, no el de cada pago (§6)", () => {
 		expect(desenlaceDeLaBoleta(["marcado_falso"])).toBe("rechazado");
 	});
 });
+
+describe("una reversión vieja no pisa una revalidación (§6)", () => {
+	const conReversion = (validation_status: string) =>
+		({
+			pago_id: 48213,
+			credito_id: 122330,
+			numero_cuota: 8,
+			monto_aplicado: "500.00",
+			monto_boleta: "500.00",
+			validation_status,
+			pagado: true,
+			payment_false: false,
+			reversion: {
+				reversion_id: 3,
+				pago_id: 48213,
+				estado: "completada",
+				usuario_email: "conta@clubcashin.com",
+				motivo: null,
+				revertido_en: "2026-08-01T10:00:00.000Z",
+			},
+		}) as Parameters<typeof eventoSegunCartera>[0];
+
+	// reversePayment resetea a no_required: si hoy está validated es porque
+	// alguien REVALIDÓ después. Ese es el estado vigente, no la reversión.
+	test("validated con reversión completada es validado, no revertido", () => {
+		expect(eventoSegunCartera(conReversion("validated"))?.evento).toBe(
+			"validado",
+		);
+	});
+
+	test("no_required con reversión completada sigue siendo revertido", () => {
+		expect(eventoSegunCartera(conReversion("no_required"))?.evento).toBe(
+			"revertido",
+		);
+	});
+});
+
+describe("pending puede ser una transición (§6)", () => {
+	const pendiente = {
+		pago_id: 48213,
+		credito_id: 122330,
+		numero_cuota: 8,
+		monto_aplicado: "500.00",
+		monto_boleta: "500.00",
+		validation_status: "pending",
+		pagado: false,
+		payment_false: false,
+	} as Parameters<typeof eventoSegunCartera>[0];
+
+	// Lo último que supimos fue "validado" y ahora está pending: ese es el
+	// webhook de revertPaymentToPending que se perdió.
+	test("pending después de validado es regresado_a_pendiente", () => {
+		expect(eventoSegunCartera(pendiente, null, "validado")?.evento).toBe(
+			"regresado_a_pendiente",
+		);
+	});
+
+	test("pending sin historia sigue siendo silencio", () => {
+		expect(eventoSegunCartera(pendiente)).toBeNull();
+		expect(eventoSegunCartera(pendiente, null, undefined)).toBeNull();
+	});
+
+	// Ya sabíamos que estaba pendiente: no hay transición que contar.
+	test("pending después de regresado_a_pendiente no re-emite", () => {
+		expect(
+			eventoSegunCartera(pendiente, null, "regresado_a_pendiente"),
+		).toBeNull();
+	});
+});

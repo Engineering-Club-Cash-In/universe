@@ -9,7 +9,7 @@
 import { describe, expect, test } from "bun:test";
 import {
 	decidirDestino,
-	sePuedeReabrir,
+	carteraDescartaOperacionEnVuelo,
 } from "../../jobs/bot-cobros-reconciliacion";
 import { esRechazoDefinitivo } from "../../services/cartera-back-client";
 import { nombreDeBanco } from "./bancos-boleta";
@@ -41,79 +41,43 @@ function reversion(estado: string) {
 	};
 }
 
-describe("las cuatro respuestas de la reconciliación (§4.1)", () => {
-	test("hay filas vivas: se registró, pero puede estar incompleto", () => {
-		const r = decidirDestino({ pagos: [pago()], reversiones: [] });
-
-		// A verificar y NO "confirmada": `insertPayment` no es transaccional, así
-		// que encontrar filas prueba que ALGO se escribió, no que se escribió todo.
-		expect(r.estado).toBe("confirmada_a_verificar");
+describe("las respuestas de la reconciliación (§4.1)", () => {
+	test("con pagos vivos, la boleta queda a verificar", () => {
+		expect(
+			decidirDestino({ pagos: [pago()] }).estado,
+		).toBe("confirmada_a_verificar");
 	});
 
-	test("nada vivo y una reversión completada: lo rechazaron", () => {
-		const r = decidirDestino({
-			pagos: [],
-			reversiones: [reversion("completada")],
-		});
-
-		expect(r.estado).toBe("rechazada");
+	// Una fila anulada no es un pago vivo.
+	test("un pago marcado falso no cuenta como vivo", () => {
+		expect(
+			decidirDestino({ pagos: [pago({ payment_false: true })] }).estado,
+		).toBe("revision_manual");
 	});
 
-	// La regla dura de D-36: `iniciada` NO es un rechazo. No se le puede decir a
-	// un cliente que su pago se rechazó cuando ni sabemos si se revirtió.
-	test("solo una reversión iniciada: nadie decide esto solo", () => {
-		const r = decidirDestino({
-			pagos: [],
-			reversiones: [reversion("iniciada")],
-		});
-
-		expect(r.estado).toBe("revision_manual");
-	});
-
-	test("nada de nada: no se registró, el cliente puede confirmar de nuevo", () => {
-		const r = decidirDestino({ pagos: [], reversiones: [] });
-
-		expect(r.estado).toBe("leida");
-		expect(r.motivo).toBe("");
-	});
-
-	// Si un intento falló y el reintento salió bien, el mismo pago queda con dos
-	// filas. Manda la `completada`: la reversión terminó.
-	test("con una completada y una iniciada, manda la completada", () => {
-		const r = decidirDestino({
-			pagos: [],
-			reversiones: [reversion("iniciada"), reversion("completada")],
-		});
-
-		expect(r.estado).toBe("rechazada");
-	});
-
-	test("una fila anulada no cuenta como pago vivo", () => {
-		const r = decidirDestino({
-			pagos: [pago({ payment_false: true })],
-			reversiones: [reversion("completada")],
-		});
-
-		expect(r.estado).toBe("rechazada");
+	// ⚠️ Sin acta de reversiones ni de intentos (cartera se toca solo con
+	// lecturas, D-38), "no encuentro nada" es indistinguible de "se registró y
+	// una reversión interna borró las filas". La asimetría decide: un borrador
+	// de más en revisión manual cuesta minutos; una reapertura equivocada
+	// cuesta plata del cliente.
+	test("nada de nada NUNCA se reabre solo: revisión manual", () => {
+		expect(decidirDestino({ pagos: [] }).estado).toBe("revision_manual");
 	});
 });
 
-// Que el CRM se haya cansado de esperar no cancela nada del lado de cartera:
-// `insertPayment` puede estar minutos esperando el advisory lock del crédito y
-// va a escribir cuando le toque. Reabrir en esa duda son dos pagos reales.
-describe("cuándo se puede reabrir un borrador colgado", () => {
+describe("cuándo se decide en vez de esperar", () => {
 	test("solo con un 'no hay nada en vuelo' explícito", () => {
-		expect(sePuedeReabrir(false)).toBe(true);
+		expect(carteraDescartaOperacionEnVuelo(false)).toBe(true);
 	});
 
-	test("con una operación en vuelo, no se reabre", () => {
-		expect(sePuedeReabrir(true)).toBe(false);
+	test("con una operación en vuelo, se espera", () => {
+		expect(carteraDescartaOperacionEnVuelo(true)).toBe(false);
 	});
 
 	// Cartera vieja, o no se preguntó. La duda vale lo mismo que un sí.
 	test("sin respuesta al respecto, tampoco", () => {
-		expect(sePuedeReabrir(null)).toBe(false);
-		expect(sePuedeReabrir(undefined)).toBe(false);
+		expect(carteraDescartaOperacionEnVuelo(null)).toBe(false);
+		expect(carteraDescartaOperacionEnVuelo(undefined)).toBe(false);
 	});
 });
 
@@ -218,118 +182,27 @@ describe("qué respuesta de cartera prueba que el pago no existe", () => {
 	});
 });
 
-describe("un vacío no siempre significa que no hay pago", () => {
-	// El hueco concreto: `insertPayment` escribe `pagos_credito` y después
-	// `boletas`. Si revienta en el medio, el pago existe y su URL no, así que
-	// buscar por r2_key devuelve vacío sobre un pago que SÍ está.
-	test("con un pago del bot sin boleta, no se reabre: va a revisión manual", () => {
-		expect(
-			decidirDestino({
-				pagos: [],
-				reversiones: [],
-				huerfanos: [pago({ pago_id: 91111 })],
-			}).estado,
-		).toBe("revision_manual");
+
+
+describe("un pago huérfano frena la reapertura con nombre y apellido", () => {
+	// insertPayment escribe el pago antes que su boleta: un pago del bot sin
+	// boleta colgando es la firma de un registro que murió entre los dos.
+	test("con huérfano, el motivo nombra el pago", () => {
+		const destino = decidirDestino({
+			pagos: [],
+			huerfanos: [pago({ pago_id: 91111 })],
+		});
+		expect(destino.estado).toBe("revision_manual");
+		expect(destino.motivo).toContain("91111");
 	});
 
-	test("el motivo nombra el pago, para que quien lo revise sepa cuál mirar", () => {
-		expect(
-			decidirDestino({
-				pagos: [],
-				reversiones: [],
-				huerfanos: [pago({ pago_id: 91111 })],
-			}).motivo,
-		).toContain("91111");
-	});
-
-	// Una fila anulada no es un pago vivo: no puede bloquear el reintento.
-	test("un huérfano marcado falso no cuenta", () => {
-		expect(
-			decidirDestino({
-				pagos: [],
-				reversiones: [],
-				huerfanos: [pago({ payment_false: true })],
-			}).estado,
-		).toBe("leida");
-	});
-
-	// Contra una instancia de cartera que todavía no manda el campo, el
-	// comportamiento no cambia: lo que frena ahí es `operacion_en_curso`.
-	test("sin el campo, se sigue decidiendo como antes", () => {
-		expect(decidirDestino({ pagos: [], reversiones: [] }).estado).toBe("leida");
-	});
-});
-
-describe("un registro que murió a medias no se reabre", () => {
-	// `insertPayment` escribe la mora y el convenio ANTES del pago: un acta
-	// `iniciado` sin completar prueba que algo alcanzó a moverse.
-	test("con un acta iniciada, revisión manual", () => {
-		expect(
-			decidirDestino({
-				pagos: [],
-				reversiones: [],
-				intentos: [
-					{
-						intento_id: 7,
-						estado: "iniciado",
-						credito_id: 122330,
-						creado_en: null,
-					},
-				],
-			}).estado,
-		).toBe("revision_manual");
-	});
-
-	test("el motivo nombra el intento", () => {
-		expect(
-			decidirDestino({
-				pagos: [],
-				reversiones: [],
-				intentos: [
-					{
-						intento_id: 7,
-						estado: "iniciado",
-						credito_id: 122330,
-						creado_en: null,
-					},
-				],
-			}).motivo,
-		).toContain("7");
-	});
-
-	// Un acta completada es un registro que terminó bien: no bloquea nada.
-	test("un acta completada no cuenta", () => {
-		expect(
-			decidirDestino({
-				pagos: [],
-				reversiones: [],
-				intentos: [
-					{
-						intento_id: 7,
-						estado: "completado",
-						credito_id: 122330,
-						creado_en: null,
-					},
-				],
-			}).estado,
-		).toBe("leida");
-	});
-
-	// El acta manda incluso sobre los huérfanos: es evidencia más temprana.
-	test("acta iniciada + pagos vivos: ganan los pagos", () => {
-		expect(
-			decidirDestino({
-				pagos: [pago()],
-				reversiones: [],
-				intentos: [
-					{
-						intento_id: 7,
-						estado: "iniciado",
-						credito_id: 122330,
-						creado_en: null,
-					},
-				],
-			}).estado,
-		).toBe("confirmada_a_verificar");
+	test("un huérfano anulado no cuenta", () => {
+		// Sigue siendo revision_manual (nada se reabre solo), pero por el motivo
+		// genérico, no por el huérfano.
+		const destino = decidirDestino({
+			pagos: [],
+			huerfanos: [pago({ payment_false: true })],
+		});
+		expect(destino.motivo).not.toContain("boleta asociada");
 	});
 });

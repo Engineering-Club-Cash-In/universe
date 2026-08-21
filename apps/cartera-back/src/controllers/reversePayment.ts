@@ -17,10 +17,6 @@ import {
 } from "../database/db";
 import { processAndReplaceCreditInvestorsReverse } from "./investor";
 import { revertirAbonoCapitalEspejo } from "./abonosCapital";
-import {
-  marcarReversionCompletada,
-  registrarReversionIniciada,
-} from "./registroReversiones";
 import { updateMora } from "./latefee";
 import { SATClientService } from "../cofidi/satClientService";
 import { CLUB_CASHIN_CONFIG, SAT_CONFIG } from "../utils/functions/const";
@@ -43,13 +39,6 @@ import {
 export const reversePaymentSchema = z.object({
   credito_id: z.number().int().positive(),
   pago_id: z.number().int().positive(),
-  // Opcional en v1 (D-36): la pantalla de conta todavía no pide una razón, así
-  // que el registro responde "quién y cuándo", no "por qué". El campo queda
-  // listo para el día que exista el input.
-  //
-  // `usuario_email` NO se acepta acá, nunca: sale del token. Un campo de
-  // auditoría que llena quien ejecuta la acción no audita nada.
-  motivo: z.string().trim().min(1).max(500).optional(),
 });
 
 // ============================================================================
@@ -69,7 +58,7 @@ export const reversePaymentSchema = z.object({
  * @param set - Handler de respuesta HTTP
  * @returns Objeto con el resultado de la operación
  */
-export const reversePayment = async ({ body, set, user }: any) => {
+export const reversePayment = async ({ body, set }: any) => {
   try {
     console.log("\n🔄 ========== INICIO REVERSIÓN DE PAGO ==========");
 
@@ -84,13 +73,7 @@ export const reversePayment = async ({ body, set, user }: any) => {
         errors: parseResult.error.flatten().fieldErrors,
       };
     }
-    const { credito_id, pago_id, motivo } = parseResult.data;
-
-    // El email sale del token que `authMiddleware` ya verificó. Si por lo que
-    // sea no viene, se deja constancia de eso en vez de dejar el campo vacío:
-    // "no se supo quién" es un dato, "" no es nada.
-    const usuarioEmail: string = user?.email ?? "desconocido";
-
+    const { credito_id, pago_id } = parseResult.data;
     console.log(`📋 Crédito ID: ${credito_id}`);
     console.log(`🧾 Pago ID: ${pago_id}`);
 
@@ -187,35 +170,6 @@ export const reversePayment = async ({ body, set, user }: any) => {
       // revertir pero la mora, el convenio y el saldo del inversionista ya
       // habrían cambiado. Se aborta antes de tocar nada.
       const reversionEspejo = await revertirAbonoCapitalEspejo(pago_id, tx);
-
-      // ======================================================================
-      // 4️⃣.6️⃣ ACTA DE DEFUNCIÓN — MARCA `iniciada` (D-36)
-      // ======================================================================
-      // Va acá por las dos razones que la hacen útil:
-      //
-      //   · **Antes de los `delete`**, porque copia las URLs de las boletas y
-      //     después ya no existirían. Sin ellas, un comprobante revertido es
-      //     indistinguible de uno que nunca se registró.
-      //   · **Fuera de esta transacción** (usa el `db` global, no el `tx`), para
-      //     que sobreviva al rollback. Justo debajo hay tres cosas que escriben
-      //     fuera —updateMora, reverseConvenioPayment y el helper de
-      //     inversionistas—: si una falla después de ellas, la mora ya se
-      //     devolvió y el pago NO quedó revertido. Esta fila, colgada en
-      //     `iniciada` para siempre, es la única señal de que eso pasó.
-      const reversionId = await registrarReversionIniciada(
-        {
-          pago_id,
-          credito_id,
-          cuota_id: pago.cuota_id ?? null,
-          monto_aplicado: pago.monto_aplicado ?? null,
-          mora: pago.mora ?? null,
-          validationStatus: pago.validationStatus ?? null,
-          numeroAutorizacion: pago.numeroAutorizacion ?? null,
-          banco_id: pago.banco_id ?? null,
-        },
-        usuarioEmail,
-        motivo,
-      );
 
       // ======================================================================
       // 5️⃣ RECALCULAR VALORES DEL CRÉDITO (solo si cuota está pagada)
@@ -740,14 +694,6 @@ export const reversePayment = async ({ body, set, user }: any) => {
       } else {
         console.log("\n⏭️ Pago eliminado - no se limpian duplicados");
       }
-
-      // ======================================================================
-      // ✅ ACTA DE DEFUNCIÓN — MARCA `completada` (D-36)
-      // ======================================================================
-      // Dentro de la transacción y al final: commitea junto con la reversión,
-      // así que solo dice "se revirtió de verdad" cuando de verdad se revirtió.
-      // De paso deja en `superada` cualquier `iniciada` previa de este pago.
-      await marcarReversionCompletada(tx, pago_id, reversionId);
 
       // ======================================================================
       // ✅ RETORNAR DATOS DE LA TRANSACCIÓN

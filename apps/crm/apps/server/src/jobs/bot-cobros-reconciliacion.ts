@@ -45,7 +45,7 @@
  * Contrato: docs/features/bot-whatsapp-cobros/04-validacion-de-boleta.md (§4.1)
  */
 
-import { and, eq, isNotNull, lt, sql } from "drizzle-orm";
+import { and, asc, eq, isNotNull, lt, sql } from "drizzle-orm";
 import { db } from "../db";
 import {
 	botCobrosBoletaPagos,
@@ -53,11 +53,7 @@ import {
 	type EstadoBoletaBot,
 } from "../db/schema/bot-cobros-boletas";
 import { carteraBackClient } from "../services/cartera-back-client";
-import type {
-	EstadoPagoCartera,
-	IntentoBoletaCartera,
-	ReversionCartera,
-} from "../types/cartera-back";
+import type { EstadoPagoCartera } from "../types/cartera-back";
 
 /**
  * Cuánto se le da a una confirmación antes de ir a preguntar.
@@ -85,9 +81,7 @@ const HORAS_PARA_REVISION_MANUAL = 24;
 export type ResultadoReconciliacion = {
 	revisados: number;
 	confirmadasAVerificar: number;
-	rechazadas: number;
 	revisionManual: number;
-	devueltasALeida: number;
 	/** Se dejaron como estaban: cartera no contestó, o el pago sigue en vuelo. */
 	sinResolver: number;
 };
@@ -100,11 +94,8 @@ export type ResultadoReconciliacion = {
  */
 export function decidirDestino(respuesta: {
 	pagos: EstadoPagoCartera[];
-	reversiones: ReversionCartera[];
 	/** Pagos del bot en ese crédito sin ninguna boleta que los señale. */
 	huerfanos?: EstadoPagoCartera[];
-	/** Actas de registro del bot que quedaron `iniciado` para esta URL. */
-	intentos?: IntentoBoletaCartera[];
 }): { estado: EstadoBoletaBot; motivo: string } {
 	// Las filas anuladas (`paymentFalse`) no son un pago vivo: existen para dejar
 	// rastro de algo que se dio por no hecho.
@@ -117,62 +108,13 @@ export function decidirDestino(respuesta: {
 		};
 	}
 
-	// Basta UNA reversión terminada para cerrar la boleta como rechazada: los
-	// intentos anteriores son historia (D-36).
-	if (respuesta.reversiones.some((r) => r.estado === "completada")) {
-		return {
-			estado: "rechazada",
-			motivo: "El pago se registró y contabilidad lo revirtió.",
-		};
-	}
-
-	// ⚠️ `iniciada` NO es un rechazo. Es una reversión que quedó a medias en
-	// cartera: la mora, el convenio o el inversionista pueden haberse movido sin
-	// que el pago quedara revertido. No se le puede decir a un cliente que su
-	// pago se rechazó cuando ni siquiera sabemos si se revirtió.
-	if (respuesta.reversiones.some((r) => r.estado === "iniciada")) {
-		return {
-			estado: "revision_manual",
-			motivo:
-				"Hay una reversión a medias en cartera para esta boleta: nadie puede decidir esto solo.",
-		};
-	}
-
-	// ─────────────────────────────────────────────────────────────────────────
-	// UN ACTA `iniciado` SIN COMPLETAR = UN REGISTRO QUE MURIÓ A MEDIAS.
-	//
-	// `insertPayment` escribe la mora y el convenio ANTES de la primera fila
-	// del pago. Si revienta en esa ventana no queda pago, ni boleta, ni
-	// reversión que lo delate — solo el acta que cartera escribe antes de
-	// mutar nada. Reabrir acá haría que el reintento aplique la boleta entera
-	// sobre una mora ya descontada.
-	// ─────────────────────────────────────────────────────────────────────────
-	const intentosAMedias = (respuesta.intentos ?? []).filter(
-		(i) => i.estado === "iniciado",
-	);
-
-	if (intentosAMedias.length > 0) {
-		return {
-			estado: "revision_manual",
-			motivo:
-				`Cartera tiene ${intentosAMedias.length} intento(s) de registro de esta boleta que empezaron a escribir y nadie completó ` +
-				`(${intentosAMedias.map((i) => i.intento_id).join(", ")}). ` +
-				"La mora o el convenio pueden haberse movido sin que el pago exista. Revisar el crédito antes de dejar reintentar.",
-		};
-	}
-
 	// ─────────────────────────────────────────────────────────────────────────
 	// NO HABER ENCONTRADO LA BOLETA NO ES LO MISMO QUE NO HABER PAGO.
 	//
 	// `insertPayment` escribe la fila de `pagos_credito` primero y la de
-	// `boletas` después. Si revienta en el medio —el 500 que ahora se trata como
-	// indeterminado—, el pago existe y su URL no se escribió nunca: buscar por
-	// `r2_key` devuelve vacío sobre un pago que SÍ está, el borrador vuelve a
-	// `leida` y el cliente confirma otra vez. Dos pagos reales.
-	//
-	// Un pago del bot en ese crédito sin ninguna boleta colgando es exactamente
-	// esa firma. No se decide sola: se manda a revisión manual, porque tampoco
-	// se puede asegurar que ese huérfano sea de ESTA boleta.
+	// `boletas` después. Si revienta en el medio, el pago existe y su URL no se
+	// escribió nunca: buscar por `r2_key` devuelve vacío sobre un pago que SÍ
+	// está. Un pago del bot sin boleta colgando es exactamente esa firma.
 	// ─────────────────────────────────────────────────────────────────────────
 	const huerfanos = (respuesta.huerfanos ?? []).filter(
 		(p) => p.payment_false !== true,
@@ -188,9 +130,27 @@ export function decidirDestino(respuesta: {
 		};
 	}
 
+	// ─────────────────────────────────────────────────────────────────────────
+	// "NADA DE NADA" TAMPOCO SE REABRE SOLO: LO MIRA UNA PERSONA.
+	//
+	// Cartera se toca únicamente con endpoints nuevos de lectura (D-38), así
+	// que no hay acta de reversiones ni de intentos que desambigüe este vacío.
+	// Sin esa evidencia, "no encuentro nada" tiene tres lecturas posibles y dos
+	// son peligrosas:
+	//
+	//   · no se registró nada            → reabrir sería correcto;
+	//   · se registró y una reversión    → reabrir = SEGUNDO pago real;
+	//     interna borró las filas
+	//   · la mora/convenio se movió y el → reabrir = boleta entera sobre una
+	//     500 llegó antes del pago         mora ya descontada.
+	//
+	// Un borrador de más en revisión manual cuesta minutos de una persona; una
+	// reapertura equivocada cuesta plata del cliente. La asimetría decide.
+	// ─────────────────────────────────────────────────────────────────────────
 	return {
-		estado: "leida",
-		motivo: "",
+		estado: "revision_manual",
+		motivo:
+			"La confirmación no obtuvo respuesta y cartera no muestra ningún pago para esta boleta. Verificar en cartera antes de dejar que el cliente reintente.",
 	};
 }
 
@@ -236,13 +196,23 @@ async function marcarSiLlevaDemasiado(
  * para ese crédito. `null` y `undefined` —no se preguntó, o la instancia de
  * cartera todavía no tiene el campo— cuentan como "puede haberla".
  *
- * Es una línea, pero es la que separa "el cliente espera cinco minutos más" de
- * "el cliente paga dos veces", así que va con nombre y con prueba.
+ * Decide entre ESPERAR y DECIDIR: con un pago en vuelo (o la duda), la boleta
+ * se deja para la corrida siguiente en vez de mandarla a revisión manual por
+ * un vacío que está a segundos de dejar de serlo. Es una línea, pero va con
+ * nombre y con prueba.
  */
-export function sePuedeReabrir(
+export function carteraDescartaOperacionEnVuelo(
 	operacionEnCurso: boolean | null | undefined,
 ): boolean {
 	return operacionEnCurso === false;
+}
+
+/** Manda la boleta al final de la fila de la próxima corrida (rotación). */
+async function marcarIntento(boletaId: string): Promise<void> {
+	await db
+		.update(botCobrosBoletas)
+		.set({ updatedAt: new Date() })
+		.where(eq(botCobrosBoletas.id, boletaId));
 }
 
 export async function reconciliarBoletasColgadas(): Promise<ResultadoReconciliacion> {
@@ -265,14 +235,17 @@ export async function reconciliarBoletasColgadas(): Promise<ResultadoReconciliac
 				),
 			),
 		)
+		// La menos tocada primero. Cada intento —resuelva o no— actualiza
+		// `updated_at`, así que las que cartera no puede contestar se van al
+		// final de la fila en vez de monopolizar el tope de cada corrida y
+		// dejar a las demás esperando su turno para siempre.
+		.orderBy(asc(botCobrosBoletas.updatedAt))
 		.limit(MAXIMO_POR_CORRIDA);
 
 	const resumen: ResultadoReconciliacion = {
 		revisados: colgadas.length,
 		confirmadasAVerificar: 0,
-		rechazadas: 0,
 		revisionManual: 0,
-		devueltasALeida: 0,
 		sinResolver: 0,
 	};
 
@@ -293,41 +266,32 @@ export async function reconciliarBoletasColgadas(): Promise<ResultadoReconciliac
 		// rato más es infinitamente mejor que decidir a ciegas.
 		if (!respuesta) {
 			await marcarSiLlevaDemasiado(boleta.id, horasColgado, resumen);
+			await marcarIntento(boleta.id);
 			resumen.sinResolver++;
 			continue;
 		}
 
 		const destino = decidirDestino({
 			pagos: respuesta.pagos ?? [],
-			reversiones: respuesta.reversiones ?? [],
 			huerfanos: respuesta.huerfanos ?? [],
-			// Con un insertPayment en vuelo, su acta está `iniciado` legítimamente:
-			// se espera a que suelte el lock antes de leerla como evidencia.
-			intentos: sePuedeReabrir(respuesta.operacion_en_curso)
-				? (respuesta.intentos ?? [])
-				: [],
 		});
 
-		// ⚠️ Antes de reabrir, la prueba positiva.
+		// ⚠️ Con un pago en vuelo, se espera.
 		//
-		// Solo la cuarta transición —"no se registró"— necesita esto: las otras
-		// tres se apoyan en algo que ya existe (filas vivas, una reversión), y un
-		// pago en vuelo no las contradice. Reabrir, en cambio, habilita un
-		// segundo `newPayment`, y si el primero todavía está esperando el
-		// advisory lock terminan siendo dos pagos reales.
+		// "Nada de nada" con un `insertPayment` esperando el advisory lock no es
+		// un caso para una persona: es un pago que está por escribirse. Mandarlo
+		// a revisión manual ahora sería darle trabajo al asesor por una boleta
+		// que en la corrida siguiente va a tener sus pagos a la vista.
 		//
 		// `undefined` —cartera vieja, o no se preguntó— cuenta como "puede estar
-		// en curso". Con la duda no se reabre: el costo de esperar otros cinco
-		// minutos es que el cliente espera; el de equivocarse es que paga dos
-		// veces.
+		// en curso": con la duda también se espera.
 		if (
-			destino.estado === "leida" &&
-			!sePuedeReabrir(respuesta.operacion_en_curso)
+			destino.estado === "revision_manual" &&
+			(respuesta.pagos ?? []).length === 0 &&
+			!carteraDescartaOperacionEnVuelo(respuesta.operacion_en_curso)
 		) {
-			console.warn(
-				`[BotCobrosReconciliacion] la boleta ${boleta.id} no tiene pagos, pero hay una operación en vuelo (o no se pudo saber): no se reabre.`,
-			);
 			await marcarSiLlevaDemasiado(boleta.id, horasColgado, resumen);
+			await marcarIntento(boleta.id);
 			resumen.sinResolver++;
 			continue;
 		}
@@ -351,12 +315,7 @@ export async function reconciliarBoletasColgadas(): Promise<ResultadoReconciliac
 				.onConflictDoNothing();
 		}
 
-		// Una boleta que vuelve a `leida` con el borrador ya vencido no le sirve
-		// a nadie —el cliente no podría confirmarla— y quedaría bloqueando su
-		// propia foto por hash. Se marca descartada, que es lo que de verdad es.
-		const venció = boleta.expiraEn.getTime() <= Date.now();
-		const estadoFinal: EstadoBoletaBot =
-			destino.estado === "leida" && venció ? "descartada" : destino.estado;
+		const estadoFinal: EstadoBoletaBot = destino.estado;
 
 		await db
 			.update(botCobrosBoletas)
@@ -377,17 +336,14 @@ export async function reconciliarBoletasColgadas(): Promise<ResultadoReconciliac
 
 		if (estadoFinal === "confirmada_a_verificar")
 			resumen.confirmadasAVerificar++;
-		else if (estadoFinal === "rechazada") resumen.rechazadas++;
-		else if (estadoFinal === "revision_manual") resumen.revisionManual++;
-		else resumen.devueltasALeida++;
+		else resumen.revisionManual++;
 	}
 
 	if (resumen.revisados > 0) {
 		console.log(
 			`[BotCobrosReconciliacion] ${resumen.revisados} borrador(es) colgado(s): ` +
-				`${resumen.confirmadasAVerificar} a verificar, ${resumen.rechazadas} rechazada(s), ` +
-				`${resumen.revisionManual} a revisión manual, ${resumen.devueltasALeida} devuelta(s), ` +
-				`${resumen.sinResolver} sin resolver.`,
+				`${resumen.confirmadasAVerificar} a verificar, ` +
+				`${resumen.revisionManual} a revisión manual, ${resumen.sinResolver} sin resolver.`,
 		);
 	}
 

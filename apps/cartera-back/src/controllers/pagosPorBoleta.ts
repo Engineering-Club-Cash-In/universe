@@ -22,8 +22,6 @@ import {
   boletas,
   cuotas_credito,
   pagos_credito,
-  pagos_intentos_boleta,
-  pagos_reversiones,
 } from "../database/db/schema";
 import type { PaymentAdvisoryLockConnection } from "../utils/paymentAdvisoryLock";
 import {
@@ -44,32 +42,9 @@ export type PagoDeBoleta = {
   payment_false: boolean | null;
 };
 
-export type ReversionDeBoleta = {
-  reversion_id: number;
-  pago_id: number;
-  estado: string;
-  usuario_email: string;
-  motivo: string | null;
-  revertido_en: string | null;
-};
-
-export type IntentoDeBoleta = {
-  intento_id: number;
-  estado: string;
-  credito_id: number;
-  creado_en: string | null;
-};
-
 export type ResultadoPagosPorBoleta = {
   /** Filas de `boletas` que siguen vivas con esa URL, con su pago. */
   pagos: PagoDeBoleta[];
-  /**
-   * Reversiones que mencionan esa URL en `urls_boletas`.
-   *
-   * Es lo que desambigua el "no encuentro nada": sin esto, una boleta borrada
-   * por una reversión y una que nunca se registró se ven exactamente igual.
-   */
-  reversiones: ReversionDeBoleta[];
   /**
    * Hay un `insertPayment` **en vuelo** para ese crédito ahora mismo.
    *
@@ -80,15 +55,6 @@ export type ResultadoPagosPorBoleta = {
    * `hayOtroBackendEnElLock`.
    */
   operacion_en_curso: boolean | null;
-  /**
-   * Actas de registro del bot que quedaron `iniciado` para esa URL.
-   *
-   * `insertPayment` escribe la mora y el convenio ANTES de la primera fila de
-   * `pagos_credito`. Si revienta en esa ventana no queda pago, ni boleta, ni
-   * reversión — solo el acta. Un `iniciado` sin completar es la prueba de que
-   * un registro murió a medias, y esa boleta no se puede reabrir a ciegas.
-   */
-  intentos: IntentoDeBoleta[];
   /**
    * Pagos del bot en ese crédito que **no tienen ninguna boleta colgando**.
    *
@@ -150,47 +116,6 @@ function leerPagosDeLaBoleta(clave: string) {
       sql`${boletas.url_boleta} = ${clave}
           OR ${boletas.url_boleta} LIKE ${`%${comoLiteralEnLike(clave)}`} ESCAPE '\\'`,
     );
-}
-
-function leerReversionesDeLaBoleta(clave: string) {
-  return db
-    .select({
-      reversion_id: pagos_reversiones.reversion_id,
-      pago_id: pagos_reversiones.pago_id,
-      estado: pagos_reversiones.estado,
-      usuario_email: pagos_reversiones.usuario_email,
-      motivo: pagos_reversiones.motivo,
-      revertido_en: pagos_reversiones.revertido_en,
-    })
-    .from(pagos_reversiones)
-    .where(
-      sql`EXISTS (
-        SELECT 1 FROM unnest(${pagos_reversiones.urls_boletas}) u
-        WHERE u = ${clave}
-           OR u LIKE ${`%${comoLiteralEnLike(clave)}`} ESCAPE '\\'
-      )`,
-    )
-    .orderBy(desc(pagos_reversiones.reversion_id));
-}
-
-/** Las actas de intento que mencionan esa URL y nadie completó. */
-function leerIntentosDeLaBoleta(clave: string) {
-  return db
-    .select({
-      intento_id: pagos_intentos_boleta.intento_id,
-      estado: pagos_intentos_boleta.estado,
-      credito_id: pagos_intentos_boleta.credito_id,
-      creado_en: pagos_intentos_boleta.creado_en,
-    })
-    .from(pagos_intentos_boleta)
-    .where(
-      sql`${pagos_intentos_boleta.estado} = 'iniciado' AND EXISTS (
-        SELECT 1 FROM unnest(${pagos_intentos_boleta.urls_boletas}) u
-        WHERE u = ${clave}
-           OR u LIKE ${`%${comoLiteralEnLike(clave)}`} ESCAPE '\\'
-      )`,
-    )
-    .orderBy(desc(pagos_intentos_boleta.intento_id));
 }
 
 /**
@@ -292,33 +217,19 @@ function leerHuerfanosDelBot(creditoId: number) {
         sql`NOT EXISTS (
           SELECT 1 FROM ${boletas} b WHERE b.pago_id = ${pagos_credito.pago_id}
         )`,
-        sql`NOT EXISTS (
-          SELECT 1 FROM ${pagos_reversiones} r
-          WHERE r.pago_id = ${pagos_credito.pago_id}
-        )`,
       ),
     );
 }
 
 function armarResultado(
   pagos: PagoDeBoleta[],
-  reversiones: Awaited<ReturnType<typeof leerReversionesDeLaBoleta>>,
   enCurso: boolean | null,
   huerfanos: PagoDeBoleta[] = [],
-  intentos: Awaited<ReturnType<typeof leerIntentosDeLaBoleta>> = [],
 ): ResultadoPagosPorBoleta {
   return {
     pagos,
-    reversiones: reversiones.map((r) => ({
-      ...r,
-      revertido_en: r.revertido_en ? new Date(r.revertido_en).toISOString() : null,
-    })),
     operacion_en_curso: enCurso,
     huerfanos,
-    intentos: intentos.map((i) => ({
-      ...i,
-      creado_en: i.creado_en ? new Date(i.creado_en).toISOString() : null,
-    })),
   };
 }
 
@@ -338,12 +249,7 @@ export async function buscarPagosPorBoleta(
   // `operacion_en_curso: null` avisa que la prueba positiva no está: quien
   // reconcilie con esta respuesta no puede reabrir nada.
   if (creditoId === undefined) {
-    const [pagos, reversiones, intentos] = await Promise.all([
-      leerPagosDeLaBoleta(clave),
-      leerReversionesDeLaBoleta(clave),
-      leerIntentosDeLaBoleta(clave),
-    ]);
-    return armarResultado(pagos, reversiones, null, [], intentos);
+    return armarResultado(await leerPagosDeLaBoleta(clave), null);
   }
 
   // ───────────────────────────────────────────────────────────────────────
@@ -366,19 +272,15 @@ export async function buscarPagosPorBoleta(
   const observado = await tryWithPaymentAdvisoryLock(
     creditoId,
     async (lockConn) => {
-      const [pagos, reversiones, huerfanos, intentos] = await Promise.all([
+      const [pagos, huerfanos] = await Promise.all([
         leerPagosDeLaBoleta(clave),
-        leerReversionesDeLaBoleta(clave),
         leerHuerfanosDelBot(creditoId),
-        leerIntentosDeLaBoleta(clave),
       ]);
 
       return armarResultado(
         pagos,
-        reversiones,
         await hayOtroBackendEnElLock(creditoId, lockConn),
         huerfanos,
-        intentos,
       );
     },
   );
@@ -388,41 +290,10 @@ export async function buscarPagosPorBoleta(
   // No se pudo tomar: hay un `insertPayment` adentro AHORA MISMO. No hace falta
   // sincronizar nada más, la respuesta ya es la que frena la reconciliación.
   // Las filas van igual, para que el log del bot muestre lo que había.
-  const [pagos, reversiones, huerfanos, intentos] = await Promise.all([
+  const [pagos, huerfanos] = await Promise.all([
     leerPagosDeLaBoleta(clave),
-    leerReversionesDeLaBoleta(clave),
     leerHuerfanosDelBot(creditoId),
-    leerIntentosDeLaBoleta(clave),
   ]);
 
-  return armarResultado(pagos, reversiones, true, huerfanos, intentos);
-}
-
-/**
- * En qué estado están estos pagos ahora mismo.
- *
- * Un pago que ya no existe simplemente no viene en la respuesta: quien pregunta
- * tiene que poder distinguir "sigue pendiente" de "desapareció", y devolver una
- * fila inventada con estado nulo confundiría las dos cosas.
- */
-export async function estadoDePagos(ids: number[]): Promise<PagoDeBoleta[]> {
-  if (ids.length === 0) return [];
-
-  return db
-    .select({
-      pago_id: pagos_credito.pago_id,
-      credito_id: pagos_credito.credito_id,
-      numero_cuota: cuotas_credito.numero_cuota,
-      monto_aplicado: pagos_credito.monto_aplicado,
-      monto_boleta: pagos_credito.monto_boleta,
-      validation_status: pagos_credito.validationStatus,
-      pagado: pagos_credito.pagado,
-      payment_false: pagos_credito.paymentFalse,
-    })
-    .from(pagos_credito)
-    .leftJoin(
-      cuotas_credito,
-      eq(cuotas_credito.cuota_id, pagos_credito.cuota_id),
-    )
-    .where(inArray(pagos_credito.pago_id, ids));
+  return armarResultado(pagos, true, huerfanos);
 }

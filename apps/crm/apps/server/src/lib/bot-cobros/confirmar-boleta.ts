@@ -465,16 +465,18 @@ export async function confirmarBoleta(input: {
 
 	// 10 · Se registró. Ahora hay que poder volver a encontrarlo.
 	//
-	// Cartera devuelve los ids desde esta misma capa, pero una instancia sin
-	// desplegar todavía responde sin el campo. Ahí se buscan por la r2_key, que
-	// es lo mismo que hace la reconciliación.
-	let pagoIds = resultado.pagoIds;
-	if (pagoIds.length === 0 && borrador.r2Key) {
+	// Los ids salen de buscar la r2_key en cartera —el mismo puente que usa la
+	// reconciliación—. `newPayment` no devuelve los ids a propósito: eso habría
+	// exigido tocar `insertPayment`, y cartera se toca solo con endpoints
+	// nuevos de lectura (D-38).
+	let pagos: { pago_id: number; numero_cuota: number | null }[] = [];
+	if (borrador.r2Key) {
 		const porBoleta = await carteraBackClient.getPagosPorBoleta(borrador.r2Key);
-		pagoIds = (porBoleta?.pagos ?? [])
+		pagos = (porBoleta?.pagos ?? [])
 			.filter((p) => p.payment_false !== true)
-			.map((p) => p.pago_id);
+			.map((p) => ({ pago_id: p.pago_id, numero_cuota: p.numero_cuota }));
 	}
+	const pagoIds = pagos.map((p) => p.pago_id);
 
 	// ⚠️ SIN IDS NO SE CIERRA LA BOLETA, aunque el pago se haya registrado bien.
 	//
@@ -510,18 +512,13 @@ export async function confirmarBoleta(input: {
 	// muere entre las dos escrituras, un borrador en `confirmando` con sus pagos
 	// ya guardados lo resuelve la reconciliación, mientras que uno `confirmada`
 	// sin pagos sería un pago sin dueño.
-	const estados = await carteraBackClient.getEstadoPagos(pagoIds);
-	const porId = new Map(
-		(estados ?? []).map((p) => [p.pago_id, p.numero_cuota]),
-	);
-
 	await db
 		.insert(botCobrosBoletaPagos)
 		.values(
-			pagoIds.map((pagoId) => ({
+			pagos.map((p) => ({
 				boletaId: borrador.id,
-				pagoId,
-				numeroCuota: porId.get(pagoId) ?? null,
+				pagoId: p.pago_id,
+				numeroCuota: p.numero_cuota,
 			})),
 		)
 		// El unique global por `pago_id` es lo que permite que un evento entrante
@@ -529,10 +526,12 @@ export async function confirmarBoleta(input: {
 		.onConflictDoNothing();
 
 	const cuotasCubiertas: number[] = [];
-	for (const pagoId of pagoIds) {
-		const cuota = porId.get(pagoId);
-		if (typeof cuota === "number" && !cuotasCubiertas.includes(cuota)) {
-			cuotasCubiertas.push(cuota);
+	for (const p of pagos) {
+		if (
+			typeof p.numero_cuota === "number" &&
+			!cuotasCubiertas.includes(p.numero_cuota)
+		) {
+			cuotasCubiertas.push(p.numero_cuota);
 		}
 	}
 

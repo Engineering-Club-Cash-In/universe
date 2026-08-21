@@ -15,7 +15,6 @@
     unique,
     bigint,
     index,
-    jsonb,
   } from "drizzle-orm/pg-core";
   import { sql } from "drizzle-orm";
   export enum CategoriaUsuario {
@@ -789,103 +788,6 @@
     url_boleta: varchar("url_boleta", { length: 255 }).notNull(), // URL imagen
     created_at: timestamp("created_at").defaultNow(), // opcional, para seguimiento
   });
-
-  // ====================================================================
-  // pagos_reversiones — D-36
-  // ====================================================================
-  // El acta de defunción de un pago revertido.
-  //
-  // `reversePayment` borra las boletas y, si el pago era un parcial con
-  // hermanos, la fila entera de `pagos_credito`. Sin esta tabla, "no encuentro
-  // el pago" tiene dos lecturas opuestas —nunca se registró, o se registró y ya
-  // lo revirtieron— y no hay forma de distinguirlas.
-  //
-  // ⚠️ SON DOS ESCRITURAS, y el orden es el diseño (ver reversePayment.ts):
-  //   · `iniciada`   se inserta FUERA de la transacción, antes de los delete.
-  //                  Sobrevive al rollback A PROPÓSITO: es la única huella de
-  //                  una reversión que se cayó a mitad, cuando la mora, el
-  //                  convenio o el inversionista ya se movieron (esos tres
-  //                  escriben con el `db` global, no con el `tx`).
-  //   · `completada` se inserta DENTRO, al final. Commitea con la reversión.
-  //
-  // Una fila que se quedó en `iniciada` ES la alarma.
-  export const pagos_reversiones = customSchema.table(
-    "pagos_reversiones",
-    {
-      reversion_id: serial("reversion_id").primaryKey(),
-      estado: text("estado").notNull().default("iniciada"),
-
-      // Sin FK a propósito: la fila del pago puede desaparecer y este registro
-      // tiene que sobrevivirla. Ese es todo el punto.
-      pago_id: integer("pago_id").notNull(),
-      credito_id: integer("credito_id").notNull(),
-      cuota_id: integer("cuota_id"),
-      numero_cuota: integer("numero_cuota"),
-
-      monto: numeric("monto", { precision: 18, scale: 2 }),
-      mora_devuelta: numeric("mora_devuelta", { precision: 18, scale: 2 }),
-      validation_status_previo: text("validation_status_previo"),
-      numero_autorizacion: text("numero_autorizacion"),
-      banco_id: integer("banco_id"),
-
-      // Las boletas que la reversión está por borrar. Después ya no existirían,
-      // y son las que permiten reconocer el comprobante más tarde.
-      urls_boletas: text("urls_boletas").array(),
-
-      // Opcional en v1: la pantalla de conta todavía no pide una razón.
-      motivo: text("motivo"),
-      // Del token, NUNCA del body.
-      usuario_email: text("usuario_email").notNull(),
-
-      revertido_en: timestamp("revertido_en").notNull().defaultNow(),
-      snapshot: jsonb("snapshot"),
-    },
-    (t) => ({
-      porPagoYEstado: index("idx_pagos_reversiones_pago_estado").on(
-        t.pago_id,
-        t.estado,
-      ),
-      porCredito: index("idx_pagos_reversiones_credito").on(t.credito_id),
-    }),
-  );
-
-  // ====================================================================
-  // pagos_intentos_boleta — evidencia de un registro que quedó a medias
-  // ====================================================================
-  // `insertPayment` NO es transaccional y escribe cosas ANTES de la primera
-  // fila de `pagos_credito`: la mora (updateMora) y el convenio. Si revienta en
-  // esa ventana responde 500 sin que exista pago ni boleta que lo delate, y la
-  // reconciliación del bot leería "acá no pasó nada" y dejaría reintentar — con
-  // la mora ya descontada una vez.
-  //
-  // Esta tabla es el acta del intento: se escribe `iniciado` ANTES de la
-  // primera mutación (solo para pagos del bot) y `completado` al final. Un
-  // `iniciado` que nadie completó = un registro que murió a medias, y esa
-  // boleta va a revisión manual en vez de reabrirse.
-  // ====================================================================
-  export const pagos_intentos_boleta = customSchema.table(
-    "pagos_intentos_boleta",
-    {
-      intento_id: serial("intento_id").primaryKey(),
-      estado: text("estado").notNull().default("iniciado"),
-
-      credito_id: integer("credito_id").notNull(),
-      register_by: text("register_by").notNull(),
-      monto_boleta: numeric("monto_boleta", { precision: 18, scale: 2 }),
-
-      // Las URLs del request: son el puente con el borrador del CRM.
-      urls_boletas: text("urls_boletas").array().notNull(),
-
-      creado_en: timestamp("creado_en").notNull().defaultNow(),
-      completado_en: timestamp("completado_en"),
-    },
-    (t) => ({
-      porCreditoYEstado: index("idx_pagos_intentos_credito_estado").on(
-        t.credito_id,
-        t.estado,
-      ),
-    }),
-  );
 
   // ====================================================================
   // modalidad_facturacion_spread

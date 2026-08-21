@@ -20,10 +20,7 @@ import { creditos, pagos_credito, usuarios } from "../database/db";
 import { enviarReciboPagoWhatsappBestEffort } from "../services/reciboPagoWhatsapp";
 import { revalidatePayment } from "../controllers/revalidatePayment";
 import { reversePayment } from "../controllers/reversePayment";
-import {
-  buscarPagosPorBoleta,
-  estadoDePagos,
-} from "../controllers/pagosPorBoleta";
+import { buscarPagosPorBoleta } from "../controllers/pagosPorBoleta";
 import { revertPaymentToPending } from "../controllers/revertPaymentToPending";
 import { processInvestors } from "../controllers/processInvestors";
 import { ajustarCuotasConSIFCO, marcarCuotasPagadasHastaNumero, procesarPagosSIFCODesdeJSON } from "../controllers/migratePayments";
@@ -83,34 +80,6 @@ export const paymentRouter = new Elysia()
       return { success: false, message: "Error consultando la boleta" };
     }
   })
-  .get("/pagos/estado", async ({ query, set }: any) => {
-    // Un id que no es número se descarta en vez de tumbar la consulta: la lista
-    // viene de otro sistema y un `NaN` en el `IN` haría fallar todo el lote.
-    const ids = String(query?.ids ?? "")
-      .split(",")
-      .map((x: string) => Number(x.trim()))
-      .filter((x: number) => Number.isInteger(x) && x > 0);
-
-    if (ids.length === 0) {
-      set.status = 400;
-      return { success: false, message: "Falta el parámetro 'ids'" };
-    }
-
-    // Tope defensivo: es un GET público del back y el `IN` crece con la lista.
-    if (ids.length > 200) {
-      set.status = 400;
-      return { success: false, message: "Máximo 200 ids por consulta" };
-    }
-
-    try {
-      return { success: true, pagos: await estadoDePagos(ids) };
-    } catch (error) {
-      console.error("[/pagos/estado] Error:", error);
-      set.status = 500;
-      return { success: false, message: "Error consultando los pagos" };
-    }
-  })
-
   // Endpoint para editar un pago (abonos, restantes, mora, otros, etc.)
   .patch("/editPayment/:pagoId", async ({ params, body, set }: any) => {
     const pagoId = Number(params.pagoId);

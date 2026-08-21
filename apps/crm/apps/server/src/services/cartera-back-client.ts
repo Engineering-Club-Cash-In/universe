@@ -1211,7 +1211,6 @@ export class CarteraBackClient {
 			const respuesta = await this.request<{
 				success?: boolean;
 				message?: string;
-				pagos?: number[];
 				detalle?: Record<string, unknown>;
 			}>(
 				"/newPayment",
@@ -1225,11 +1224,6 @@ export class CarteraBackClient {
 
 			return {
 				ok: true,
-				// Cartera devuelve la lista desde la capa B del bot. Una instancia
-				// sin desplegar todavía responde sin el campo, y eso NO es un error:
-				// el pago se registró igual. Se sigue sin ids y la reconciliación
-				// los busca por la r2_key.
-				pagoIds: Array.isArray(respuesta?.pagos) ? respuesta.pagos : [],
 				detalle: respuesta?.detalle ?? null,
 			};
 		} catch (error) {
@@ -1308,27 +1302,7 @@ export class CarteraBackClient {
 		}
 	}
 
-	/**
-	 * En qué estado están estos pagos ahora mismo.
-	 *
-	 * Un pago que ya no existe no viene en la respuesta — no viene con estado
-	 * nulo, que sería otra cosa.
-	 */
-	async getEstadoPagos(ids: number[]): Promise<EstadoPagoCartera[] | null> {
-		if (ids.length === 0) return [];
 
-		try {
-			const respuesta = await this.request<{
-				success?: boolean;
-				pagos?: EstadoPagoCartera[];
-			}>(`/pagos/estado?ids=${ids.join(",")}`, { method: "GET" }, false);
-
-			return respuesta?.pagos ?? [];
-		} catch (error) {
-			console.error("[CarteraBackClient] getEstadoPagos:", error);
-			return null;
-		}
-	}
 
 	/**
 	 * Genera el estado de cuenta del crédito y devuelve su URL.

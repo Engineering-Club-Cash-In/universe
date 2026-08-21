@@ -1560,13 +1560,11 @@ export type RegistrarPagoResultado =
 	| {
 			ok: true;
 			/**
-			 * Los pagos que se crearon. Una boleta que cubre tres cuotas atrasadas
-			 * genera tres filas, cada una con su id.
-			 *
-			 * Puede venir vacío contra una instancia de cartera vieja: eso NO
-			 * significa que el pago no se registró.
+			 * `newPayment` no devuelve los ids de los pagos que creó — eso habría
+			 * exigido tocar `insertPayment`, y cartera se toca solo con endpoints
+			 * nuevos de lectura (D-38). Los ids se buscan por la r2_key con
+			 * `getPagosPorBoleta`, que es el mismo puente de la reconciliación.
 			 */
-			pagoIds: number[];
 			detalle: Record<string, unknown> | null;
 	  }
 	| {
@@ -1612,23 +1610,10 @@ export interface EstadoPagoCartera {
 	payment_false: boolean | null;
 }
 
-/** Una fila de `cartera.pagos_reversiones` (D-36). */
-export interface ReversionCartera {
-	reversion_id: number;
-	pago_id: number;
-	/** `iniciada` NO es un rechazo: es una reversión que quedó a medias. */
-	estado: string;
-	usuario_email: string;
-	motivo: string | null;
-	revertido_en: string | null;
-}
-
 export interface PagosPorBoletaResponse {
 	success?: boolean;
 	/** Filas vivas: la boleta existe y su pago también. */
 	pagos: EstadoPagoCartera[];
-	/** Reversiones que mencionan esa URL. Desambigua el "no encuentro nada". */
-	reversiones: ReversionCartera[];
 	/**
 	 * Hay un `insertPayment` de ese crédito **en vuelo** ahora mismo.
 	 *
@@ -1651,22 +1636,5 @@ export interface PagosPorBoletaResponse {
 	 * reabre**, igual que con `operacion_en_curso`.
 	 */
 	huerfanos?: EstadoPagoCartera[];
-	/**
-	 * Actas de registro del bot que quedaron `iniciado` para esa URL.
-	 *
-	 * `insertPayment` escribe la mora y el convenio ANTES de la primera fila
-	 * del pago: si revienta en esa ventana no queda pago, ni boleta, ni
-	 * reversión — solo el acta. Con una a la vista, el borrador no se reabre.
-	 *
-	 * Ausente contra una instancia de cartera vieja.
-	 */
-	intentos?: IntentoBoletaCartera[];
 }
 
-/** Un acta de intento de registro, como la devuelve `/pagos-por-boleta`. */
-export interface IntentoBoletaCartera {
-	intento_id: number;
-	estado: string;
-	credito_id: number;
-	creado_en: string | null;
-}

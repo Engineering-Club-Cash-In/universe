@@ -23,11 +23,6 @@ import { processConvenioPayment } from "./paymentAgreement";
 import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
 import { recalcularPagosCredito } from "./updateCredit";
 import {
-  marcarIntentoCompletado,
-  REGISTRADO_POR_EL_BOT,
-  registrarIntentoIniciado,
-} from "./registroIntentos";
-import {
   applyCapitalPaymentAndBuildResponse,
   calcularSaldoNetoCuota,
   crearEstampadorPagoConvenio,
@@ -650,10 +645,6 @@ export const insertPayment = async ({ body, set }: any) => {
   // 🔒 Conexión dedicada para el advisory lock (se libera en finally).
   let lockConn: PaymentAdvisoryLockConnection | undefined;
   let lockedCreditoId: number | undefined;
-  // El acta del intento (solo pagos del bot): iniciado antes de la primera
-  // mutación, completado en el finally si no hubo error. Ver registroIntentos.
-  let intentoBoletaId: number | undefined;
-  let intentoFallo = false;
   try {
     // 1. Validar schema
     const parseResult = pagoSchema.safeParse(body);
@@ -701,36 +692,6 @@ export const insertPayment = async ({ body, set }: any) => {
       credito_id,
     ]);
 
-    // Ids de las filas de `pagos_credito` que este request crea o actualiza.
-    //
-    // Una boleta que cubre tres cuotas atrasadas genera TRES pagos, cada uno
-    // con su id, y hasta ahora la respuesta no devolvía ninguno: solo el
-    // resumen (cuotas completas/parciales, monto aplicado). Quien registraba el
-    // pago no tenía forma de volver a encontrarlo.
-    //
-    // Lo pide el bot de cobros para el circuito de vuelta —cuando conta valida,
-    // el evento trae un `pago_id` que hay que saber de quién es—, pero el campo
-    // sirve para cualquiera. Es **aditivo**: el formulario de carteraFront lo
-    // ignora y nada de la aplicación del pago cambia por juntar los ids.
-    const pagosCreados: number[] = [];
-    const anotarPago = (id?: number | null) => {
-      if (typeof id === "number" && !pagosCreados.includes(id)) {
-        pagosCreados.push(id);
-      }
-    };
-
-    // Envoltorio de `insertarPago` que además anota el id. Se usa en lugar de
-    // la función pelada para que la única diferencia en cada sitio de llamada
-    // sea el nombre: este archivo mueve dinero y un diff de reindentación
-    // esconde los cambios de verdad.
-    const insertarPagoAnotado = async (
-      params: Parameters<typeof insertarPago>[0],
-    ) => {
-      const fila = await insertarPago(params);
-      anotarPago(fila?.pago_id);
-      return fila;
-    };
-
     // 2. Preparar datos
     const urlCompletas = prepararURLsBoletas(url_boletas);
     const boletasExistentes = numeroAutorizacion && banco_id 
@@ -758,20 +719,6 @@ export const insertPayment = async ({ body, set }: any) => {
           })),
         };
       }
-    // El acta del intento, ANTES de la primera mutación. Este flujo escribe la
-    // mora y el convenio antes que el pago: si revienta en esa ventana, sin el
-    // acta no queda nada que le diga a la reconciliación del bot que acá SÍ
-    // pasó algo. Si el acta misma falla se aborta — todavía no se escribió
-    // nada, así que ese 500 es de los seguros.
-    if (registerBy === REGISTRADO_POR_EL_BOT) {
-      intentoBoletaId = await registrarIntentoIniciado({
-        credito_id,
-        register_by: registerBy,
-        monto_boleta,
-        urls_boletas: urlCompletas ?? [],
-      });
-    }
-
     // 4. Calcular disponible
     const montoBoleta = new Big(monto_boleta);
 
@@ -847,7 +794,7 @@ export const insertPayment = async ({ body, set }: any) => {
     const otrosBig = new Big(otros ?? 0);
 
     if (montoBoleta.eq(otrosBig)) {
-      await insertarPagoAnotado({
+      await insertarPago({
         numero_credito_sifco: credito.numero_credito_sifco,
         numero_cuota: cuotaApagar,
         cuotaId: cuotaIdPagoEspecial,
@@ -898,7 +845,7 @@ export const insertPayment = async ({ body, set }: any) => {
       if (resultadoMora.pagoCompleto && resultadoMora.moraPagada) {
         moraBig = new Big(resultadoMora.montoAplicadoMora);
         if (disponible_restante.lte(0)) {
-          await insertarPagoAnotado({
+          await insertarPago({
             numero_credito_sifco: credito.numero_credito_sifco,
             numero_cuota: cuotaApagar,
             cuotaId: cuotaIdPagoEspecial,
@@ -920,7 +867,7 @@ export const insertPayment = async ({ body, set }: any) => {
       }
       if (!resultadoMora.moraPagada && resultadoMora.pagoParcial) {
         if (disponible_restante.lte(0)) {
-          await insertarPagoAnotado({
+          await insertarPago({
             numero_credito_sifco: credito.numero_credito_sifco,
             numero_cuota: cuotaApagar,
             cuotaId: cuotaIdPagoEspecial,
@@ -943,9 +890,7 @@ export const insertPayment = async ({ body, set }: any) => {
         return {
           success: true,
           message: `Pago parcial de mora aplicado. Saldo pendiente de mora: $${resultadoMora.saldoMoraRestante}. Por favor, cancele la mora pendiente para continuar con el pago de cuotas.`,
-          // Salía siempre vacío aunque el bloque de arriba SÍ hubiera escrito
-          // una fila: quien registró el pago no tenía cómo encontrarla.
-          pagos: pagosCreados,
+          pagos: [],
           saldo_a_favor: disponible.toString(),
         };
       }
@@ -953,7 +898,7 @@ export const insertPayment = async ({ body, set }: any) => {
 
     if (!resultadoMora.moraPagada && resultadoMora.montoAplicadoMora > 0) {
       if (disponible_restante.lte(0)) {
-        await insertarPagoAnotado({
+        await insertarPago({
           numero_credito_sifco: credito.numero_credito_sifco,
           numero_cuota: cuotaApagar,
           cuotaId: cuotaIdPagoEspecial,
@@ -974,7 +919,7 @@ export const insertPayment = async ({ body, set }: any) => {
       return {
         success: true,
         message: `Pago parcial de mora aplicado. Saldo pendiente de mora: $${resultadoMora.saldoMoraRestante}. Por favor, cancele la mora pendiente para continuar con el pago de cuotas.`,
-        pagos: pagosCreados,
+        pagos: [],
         saldo_a_favor: disponible.toString(),
       };
     }
@@ -1958,11 +1903,6 @@ export const insertPayment = async ({ body, set }: any) => {
           // correcto) y los rubros planos se netean contra objetivos+Σmonto_
           // aplicado, no contra estos saldos.
           //
-          // La fila que esta vuelta creó o pisó. Una boleta que alcanza para
-          // tres cuotas pasa por acá tres veces, y cada pasada es un pago con
-          // su propio id: por eso `pagos` es una lista y no un id.
-          anotarPago(pagoInsertado?.pago_id);
-
           // Se omite si la cuota no absorbió nada: un pago que no tocó la
           // cuota tampoco debe reescribirle los saldos de sus filas.
           if (!filaParcialOmitida) {
@@ -2170,7 +2110,6 @@ export const insertPayment = async ({ body, set }: any) => {
         .returning();
 
       console.log(`✅ Pago registrado: ID ${pagoInsertado.pago_id}`);
-      anotarPago(pagoInsertado.pago_id);
 
       // 3️⃣ Insertar boletas si existen
       if (urlCompletas && urlCompletas.length > 0) {
@@ -2213,7 +2152,6 @@ export const insertPayment = async ({ body, set }: any) => {
         success: true,
         message:
           "Abono directo a capital registrado exitosamente (pendiente de validación)",
-        pagos: pagosCreados,
         pago: {
           pago_id: pagoInsertado.pago_id,
           abono_capital: abonoCapital.toString(),
@@ -2309,7 +2247,7 @@ export const insertPayment = async ({ body, set }: any) => {
       // reversa posible del convenio. El disponible sigue yendo a saldo a
       // favor: el registro del convenio no consume la boleta.
       if (new Big(estamparPagoConvenio.pendiente()).gt(0)) {
-        await insertarPagoAnotado({
+        await insertarPago({
           numero_credito_sifco: credito.numero_credito_sifco,
           numero_cuota: cuotaApagar,
           cuotaId: cuotaIdPagoEspecial,
@@ -2345,7 +2283,6 @@ export const insertPayment = async ({ body, set }: any) => {
       return {
         success: true,
         message: "Pago realizado exitosamente",
-        pagos: pagosCreados,
         detalle: {
           cuotas_pagadas_completas: cuotas_completas,
           cuotas_pagadas_parciales: cuotas_parciales,
@@ -2358,9 +2295,6 @@ export const insertPayment = async ({ body, set }: any) => {
     }
   } catch (error) {
     console.error("[insertPayment] Error:", error);
-    // El acta queda `iniciado`: no se sabe qué alcanzó a escribirse, y esa duda
-    // es exactamente lo que el acta existe para contar.
-    intentoFallo = true;
     if ((error as { code?: string }).code === CREDIT_PENDING_CANCELLATION_ERROR.code) {
       set.status = 409;
       return {
@@ -2383,13 +2317,6 @@ export const insertPayment = async ({ body, set }: any) => {
       error: error instanceof Error ? error.message : String(error),
     };
   } finally {
-    // El acta se cierra solo si el flujo llegó al final sin reventar. Nunca
-    // rompe nada: si esta marca se pierde, quedan los pagos vivos a la vista y
-    // la reconciliación resuelve por ellos.
-    if (intentoBoletaId !== undefined && !intentoFallo) {
-      await marcarIntentoCompletado(intentoBoletaId);
-    }
-
     // 🔓 Liberar el advisory lock y devolver la conexión al pool, pase lo que pase.
     if (lockConn) {
       try {

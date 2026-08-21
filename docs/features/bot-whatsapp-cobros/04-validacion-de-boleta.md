@@ -320,68 +320,41 @@ escrito— y tampoco le dice al cliente "pago recibido". Lo que hace es:
 - al cliente, un mensaje neutro: *"estamos procesando tu pago, te avisamos"*.
 
 **Y "no existe" no siempre significa "no se registró".** `reversePayment` **borra las filas de
-`boletas`** del pago, y si era un parcial con hermanos borra también la de `pagos_credito`. Sin
-más información, no encontrar nada tendría dos lecturas —no se registró, o se registró y ya lo
-revirtieron— y devolver el borrador a `leida` en esa duda significa dejar que el cliente
-reconfirme **un pago que contabilidad acaba de rechazar**.
+`boletas`** del pago, y si era un parcial con hermanos borra también la de `pagos_credito`. Y
+`insertPayment` escribe la mora y el convenio ANTES de la primera fila del pago, y la fila del
+pago ANTES que la de su boleta: un 500 en cualquiera de esas ventanas deja rastros sin nada que
+los señale por la URL.
 
-Eso se resuelve con el **registro de reversiones**
-([D-36](./DECISIONES.md#d-36--las-reversiones-dejan-registro)): antes de borrar, cartera guarda
-una fila con el pago, sus montos y **las URLs de las boletas que va a borrar**, y la marca
-`completada` recién cuando la reversión terminó de verdad. Con eso la consulta ya no es
-ambigua:
+Cartera **no guarda actas de nada de esto a propósito**: se toca únicamente con endpoints
+nuevos de lectura ([D-38](./DECISIONES.md#d-38--cartera-solo-se-toca-con-endpoints-nuevos)).
+Sin esa evidencia, "no encuentro nada" es ambiguo — y la regla que decide es la asimetría de
+costos: **un borrador de más en revisión manual cuesta minutos de una persona; una reapertura
+equivocada cuesta plata del cliente.**
 
 | Lo que se encuentra buscando por `r2_key` | Qué era | Estado final del borrador |
 | --- | --- | --- |
 | Filas vivas en `boletas` | Se registró | **`confirmada_a_verificar`** (puede estar incompleto: §5.2) |
-| Nada vivo, y **alguna** reversión `completada` | Se registró y ya lo rechazaron | **`rechazada`** — y se le avisa al cliente |
-| Nada vivo, y solo reversiones `iniciada` | Una reversión quedó a medias en cartera | **`revision_manual`** — nadie puede decidir esto solo |
-| Nada de nada, **y cartera confirma que no hay un pago suyo en vuelo ni pagos del bot huérfanos** | No se registró | **`leida`** — el cliente puede confirmar de nuevo |
-| Nada vivo, pero el crédito tiene **pagos del bot sin boleta** | Se escribió el pago y no su boleta | **`revision_manual`** |
+| Nada vivo, pero el crédito tiene **pagos del bot sin boleta** | Se escribió el pago y no su boleta | **`revision_manual`** — con los `pago_id` en el motivo |
+| Nada de nada, y **hay un pago del crédito en vuelo** (o no se pudo saber) | Puede estar por escribirse | **se espera** a la corrida siguiente |
+| Nada de nada, sin nada en vuelo | No se sabe: pudo no registrarse, o registrarse y que una reversión interna borrara las filas | **`revision_manual`** |
 
-Esa es la lista completa: **cuatro respuestas, cuatro transiciones**, sin zona gris. La
-tercera fila existe por cómo es `reversePayment` — ver [D-36](./DECISIONES.md#d-36--las-reversiones-dejan-registro).
+**El borrador NUNCA vuelve solo a `leida`.** El único camino de regreso automático es que
+cartera responda un **4xx** en el request original (ver el recuadro de abajo): ahí sí se sabe
+que no se escribió nada.
 
-**La cuarta lleva una condición de más, y no es un detalle.** Que el CRM se haya cansado de
-esperar **no cancela nada** del lado de cartera: `insertPayment` toma un advisory lock por
-crédito como primera cosa y puede quedarse minutos esperándolo si hay otro pago del mismo
-crédito adelante. Todo ese tiempo el request original sigue vivo y va a escribir cuando le
-toque el turno. "No encontré filas" prueba que **todavía** no se registró, no que no se vaya a
-registrar.
-
-Devolver el borrador a `leida` en esa duda habilita un segundo `newPayment` mientras el
-primero sigue en cola: **dos pagos reales**, que es exactamente lo que toda esta máquina existe
-para evitar. Por eso `GET /pagos-por-boleta` acepta un `credito_id` opcional y responde además
-`operacion_en_curso`, mirando `pg_locks`: si no hay ninguna fila de advisory lock para ese
-crédito —ni tomada ni esperando— no hay ningún `insertPayment` en vuelo, y recién ahí se
-reabre. Con `true`, o sin el dato, el borrador se queda en `confirmando` y se reintenta en la
-corrida siguiente.
-
-**Las dos observaciones van bajo el lock, tomado con `pg_try_advisory_lock`.** Sueltas se
-pueden intercalar: la consulta de la boleta toma su snapshot antes de que el pago escriba, el
-`insertPayment` termina y suelta el lock, y recién entonces se mira `pg_locks`. Las dos
-respuestas son ciertas por separado y juntas dicen "no se registró nada y no hay nada
-corriendo" sobre un pago que sí existe. Se intenta tomar el lock **sin esperar**: si está
-ocupado, la respuesta ya es `operacion_en_curso: true` —que es la que frena la reconciliación—
-y el job nunca se queda trabado detrás de un pago lento.
-
-**Y hay una segunda condición para la cuarta fila, por el mismo motivo.** `insertPayment`
-escribe la fila de `pagos_credito` **antes** que las de `boletas`. Si revienta en el medio —el
-500 que ahora se trata como indeterminado—, el pago existe y su URL no se escribió nunca:
-buscar por `r2_key` devuelve vacío sobre un pago que **sí está**. Por eso `/pagos-por-boleta`
-devuelve además los `huerfanos`: pagos del bot en ese crédito, de las últimas 24 h, sin
-ninguna boleta colgando y sin reversión que los explique. Si aparece alguno, el borrador va a
-`revision_manual` en vez de a `leida` — no se puede asegurar que ese huérfano sea de esta
-boleta, y decidirlo mal cuesta un pago de más.
+**"En vuelo" es una prueba de verdad, no una adivinanza.** Que el CRM se haya cansado de
+esperar no cancela nada del lado de cartera: `insertPayment` toma un advisory lock por crédito
+como primera cosa y puede quedarse minutos esperándolo. Por eso `GET /pagos-por-boleta` acepta
+un `credito_id` opcional y responde `operacion_en_curso` mirando `pg_locks` — y las
+observaciones van **bajo el lock**, tomado con `pg_try_advisory_lock` sin esperar: sueltas, la
+consulta de la boleta podía tomar su snapshot antes de que el pago escribiera y la de
+`pg_locks` correr después de que soltara, y las dos juntas decían "acá no pasó nada" sobre un
+pago real.
 
 **Y una válvula de escape.** Un borrador que lleva **24 horas** en `confirmando` pasa a
 `revision_manual`: significa que cartera lleva un día sin poder contestar o que hay un pago
 trabado desde ayer, y las dos cosas necesitan a una persona. Sin ese tope se reintentarían para
 siempre y en silencio.
-
-**Si un pago tiene varias reversiones** —falló una y alguien la reintentó—, manda la
-`completada`: una sola que haya terminado bien alcanza para cerrar la boleta como rechazada.
-Las `iniciada` de intentos previos quedan marcadas `superada` y ya no alarman.
 
 > El camino normal ni siquiera llega acá: si **cartera respondió 4xx**, el CRM lo sabe en el
 > mismo request, responde `PAGO_NO_REGISTRADO` y deja el borrador en `leida`. Todas las
@@ -1023,28 +996,12 @@ Tres PR a `COBROS-02`, en este orden:
 | --- | --- | --- |
 | **0** | `cuentasPago` en `/credito/info` (endpoint que ya existe) + Swagger | Sí, y es chico: desbloquea a SimpleTech para armar el mensaje de "dónde depositar". |
 | **A** | Tablas + `/boleta/leer` + descarga con allowlist + lectura con IA + **copia a R2** + mapeo de bancos + Swagger | Sí: devuelve datos y deja el archivo, no registra pago. |
-| **B** | `/boleta/confirmar` con la máquina de estados (§4.1) + job de reconciliación. **En cartera:** `pagos_reversiones` y su registro en `reversePayment` (incluye pasarle el `user` del token al handler), `usuario_id` en `/credito/resumen`, la lista de `pagos` en la respuesta de `newPayment`, `GET /pagos-por-boleta` y `GET /pagos/estado?ids=…` | Sí, contra la instancia de dev de cartera. |
-| **C** | Endpoint de eventos + emisión desde `aplicar-pago`, `revalidatePayment`, `reversePayment`, `revertPaymentToPending` y `false-payment` + job de respaldo (§6) + agrupación por boleta + WhatsApp + notificación al asesor | Necesita coordinar deploy de las dos apps. |
+| **B** | `/boleta/confirmar` con la máquina de estados (§4.1) + job de reconciliación. **En cartera, solo endpoints nuevos de lectura (D-38):** `usuario_id` en `/credito/resumen`, `GET /pagos-por-boleta` y el DELETE de archivos huérfanos para la purga | Sí, contra la instancia de dev de cartera. |
+| **C** | El botón "Pago no válido" de conta (carteraFront + endpoint nuevo en cartera que reversa **llamando al `reversePayment` existente sin tocarlo** y avisa al CRM) + el endpoint de eventos del CRM + WhatsApp al cliente + notificación al asesor | Necesita coordinar deploy de las dos apps. |
 
-**Los cambios en cartera del PR B son aditivos**: una tabla nueva, un campo nuevo en dos
-respuestas y dos endpoints de lectura. Ninguno cambia cómo se aplica un pago.
-
-> ⚠️ **El registro de la reversión son DOS escrituras, no una.** Es lo único de este plan que
-> se puede implementar mal leyendo rápido:
->
-> 1. **`iniciada`** — **fuera** de la transacción (conexión propia), apenas pasa el portero
->    `revertirAbonoCapitalEspejo` y **antes** de los `delete`, copiando ahí las URLs de las
->    boletas.
-> 2. **`completada`** — **dentro** de la transacción, al final, marcando de paso como
->    `superada` cualquier `iniciada` previa del mismo pago.
->
-> Con un solo INSERT transaccional, una falla después de `updateMora`,
-> `reverseConvenioPayment` o el helper de inversionistas —los tres escriben con el `db`
-> global— revierte el registro **pero no sus efectos**: queda un pago a medio revertir y sin
-> ninguna alarma, que es exactamente lo que esta tabla venía a evitar. Ver
-> [D-36](./DECISIONES.md#d-36--las-reversiones-dejan-registro).
-
-> La migración de `pagos_reversiones` queda escrita y **la corre Daniel**, como todas.
+**Los cambios en cartera son aditivos, y es una regla, no una casualidad (D-38)**: endpoints
+nuevos, un campo nuevo en una respuesta de lectura, y ni una línea dentro de `insertPayment`,
+`reversePayment` ni ningún otro camino que mueva dinero.
 
 Cada PR lleva su parte del Swagger en el mismo commit
 ([D-23](./DECISIONES.md#d-23--la-documentación-de-la-api-es-swagger-y-es-obligatoria)) y suma
@@ -1061,15 +1018,12 @@ en verde sin estar documentando nada.
 | --- | --- |
 | Qué cuentas se le muestran al cliente | Las cuatro de `COBROS_CUENTAS_PAGO`, viajando en `cuentasPago` dentro de `/credito/info` ([D-37](./DECISIONES.md#d-37--las-cuentas-de-pago-viajan-con-la-info-del-crédito)) |
 | Validar la cuenta destino de la boleta | Ahora se puede: se compara contra esas mismas cuatro (§13) |
-| ¿Arreglamos cartera o la rodeamos? | Se hace el registro de reversiones ([D-36](./DECISIONES.md#d-36--las-reversiones-dejan-registro)); `insertPayment` transaccional **no** |
+| ¿Arreglamos cartera o la rodeamos? | Ninguna de las dos: cartera se toca solo con endpoints nuevos (D-38) y la ambigüedad la absorbe la revisión manual |
 
 **Se pueden trabajar después:**
 
-- **El campo "motivo" al revertir un pago.** `pagos_reversiones` lo tiene listo, pero hoy nada
-  lo llena: la pantalla de conta en carteraFront no pide una razón. Sin ese input, la tabla
-  responde *quién y cuándo*, no *por qué*. Es un input y un campo en el body — pero es otra
-  pantalla y otro dueño, así que se pide aparte
-  ([D-36](./DECISIONES.md#d-36--las-reversiones-dejan-registro)).
+- ~~El campo "motivo" al revertir un pago~~ — resuelto por otro camino: el botón "Pago no
+  válido" (capa C) pide el motivo como parte del rechazo explícito.
 - **Ingreso manual de datos** (doc de gerencia §3): que el cliente escriba monto y fecha en
   vez de mandar otra foto. Queda fuera de v1 a propósito (D-26). Si entra, es un `origen:
   "manual"` en `/confirmar` y una revisión obligatoria de conta.

@@ -4338,7 +4338,13 @@ export const cobrosRouter = {
 					// Un solo comprobante por pago — el form solo permite adjuntar 1
 					// archivo, así que un array más largo no corresponde a ningún caso
 					// de uso real y solo ampliaría la superficie de ataque.
-					urlBoletas: z.array(z.string().min(1).max(500)).max(1).default([]),
+					// CB-128 (fix): mínimo 1 — carteraFront ya rechaza el submit sin
+					// comprobante adjunto (mismo requisito de negocio que
+					// registerPayment.ts espera para dejar rastro contable). El
+					// frontend de la Ficha 360 valida esto también, pero sin el
+					// mínimo acá cualquier caller directo (otro cliente, un bug
+					// futuro) podía mover dinero sin comprobante.
+					urlBoletas: z.array(z.string().min(1).max(500)).min(1).max(1),
 				})
 				// CB-128 (fix): otros y abonoDirectoCapital se validaban
 				// independientes, cada uno solo >=0 — sin tope contra
@@ -4634,10 +4640,22 @@ export const cobrosRouter = {
 						false,
 					);
 					const margenMs = 5 * 1000;
+					// CB-128 (fix): pagos_credito.fecha_pago es un `timestamp` de
+					// Postgres SIN zona horaria (a diferencia de otras columnas del
+					// mismo schema que sí declaran withTimezone: true) —
+					// cartera-back escribe el reloj de Guatemala tal cual, y el
+					// driver lo devuelve interpretándolo como UTC. Sin corregir
+					// esto, un pago aplicado a las 04:00 hora Guatemala se leía
+					// como 04:00 UTC (que en realidad es 10:00 GT) — 6 horas
+					// "en el pasado" respecto al antesDeCrearPago real, muy fuera
+					// del margen de 5s. Se suma el offset de Guatemala (UTC-6, sin
+					// horario de verano) para recuperar el instante UTC real.
+					const OFFSET_GUATEMALA_MS = 6 * 60 * 60 * 1000;
 					const nuevos = pagos.filter((p) => {
 						if (p.registerBy !== context.userId) return false;
 						if (p.pago_id > pagoIdMaximoPrevio) return true;
-						const fechaPagoMs = new Date(p.fecha_pago).getTime();
+						const fechaPagoMs =
+							new Date(p.fecha_pago).getTime() + OFFSET_GUATEMALA_MS;
 						return (
 							Number.isFinite(fechaPagoMs) &&
 							fechaPagoMs >= antesDeCrearPago.getTime() - margenMs

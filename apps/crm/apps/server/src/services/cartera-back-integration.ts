@@ -343,6 +343,14 @@ async function resolverPagoRecienCreado(
 	antesDeCrearPago: Date,
 ): Promise<CarteraPagoCredito | null> {
 	const margenMs = 5 * 1000;
+	// CB-128 (fix): pagos_credito.fecha_pago es un `timestamp` de Postgres SIN
+	// zona horaria — cartera-back escribe el reloj de Guatemala tal cual, y
+	// el driver lo devuelve interpretándolo como UTC. Sin corregir esto, un
+	// pago aplicado a las 04:00 hora Guatemala se leía como 04:00 UTC (en
+	// realidad 10:00 GT) — 6 horas "en el pasado" respecto a antesDeCrearPago
+	// real, muy fuera del margen de 5s. Se suma el offset de Guatemala
+	// (UTC-6, sin horario de verano) para recuperar el instante UTC real.
+	const OFFSET_GUATEMALA_MS = 6 * 60 * 60 * 1000;
 	const buscar = async () => {
 		// Sin cache: con CARTERA_BACK_ENABLE_CACHE activado y lag de
 		// replicación, una respuesta cacheada sin el pago recién creado hacía
@@ -355,7 +363,8 @@ async function resolverPagoRecienCreado(
 		const nuevos = pagos.filter((p) => {
 			if (p.registerBy !== registerBy) return false;
 			if (p.pago_id > pagoIdMaximoPrevio) return true;
-			const fechaPagoMs = new Date(p.fecha_pago).getTime();
+			const fechaPagoMs =
+				new Date(p.fecha_pago).getTime() + OFFSET_GUATEMALA_MS;
 			return (
 				Number.isFinite(fechaPagoMs) &&
 				fechaPagoMs >= antesDeCrearPago.getTime() - margenMs

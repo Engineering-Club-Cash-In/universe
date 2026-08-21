@@ -91,14 +91,15 @@ En Coolify:
 Coolify `v4.3.9` conserva la sección superior `secrets`, pero su UI todavía no detecta automáticamente variables usadas únicamente por `secrets.*.environment`. Deben crearse manualmente como variables bloqueadas y runtime-only. Antes de exponer el dominio o incorporar datos reales:
 
 1. desplegar solamente en staging con credenciales sintéticas;
-2. obtener `docker inspect` de `config-init`, `vmauth` y `victoria-logs` en un archivo JSON protegido;
+2. obtener `docker inspect` de **todos** los contenedores del proyecto central usando la lista de `docker ps -a`, no solo contenedores running; el JSON protegido debe incluir `config-init`, `vmauth` y `victoria-logs` con sus labels Compose;
 3. ejecutar:
 
 ```bash
-python scripts/verify-secret-isolation.py /ruta/protegida/inspect.json
+chmod 600 /ruta/protegida/inspect.json
+python scripts/verify-secret-isolation.py central /ruta/protegida/inspect.json
 ```
 
-4. exigir `secret_environment_isolation=PASS`;
+4. exigir `secret_environment_isolation=PASS stack=central services_checked=3`; un JSON vacío, un servicio ausente o un `config-init` omitido falla de forma cerrada;
 5. verificar por nombre —sin imprimir valores— que ningún contenedor tenga `VMAUTH_*` o `VECTOR_INGEST_*` en `Config.Env`;
 6. comprobar que únicamente `vmauth:8427` tenga dominio y que no existan `ports` para VictoriaLogs.
 
@@ -121,6 +122,8 @@ CONTAINER_SOCKET_PATH
 
 Las dos primeras son secretas. `config-init` genera `vector.yaml` en el volumen interno antes de iniciar Vector. El endpoint debe terminar en `/insert/elasticsearch/`.
 
+Por seguridad, Vector no reenvía texto libre de `message`. Para eventos JSON usa como `message` únicamente un `event` validado; un evento estructurado sin nombre válido se convierte en `application.log` y una línea no JSON en `unstructured.log`. La información diagnóstica debe expresarse mediante campos allowlisted, no interpolarse en mensajes.
+
 Para render manual local pueden crearse `agent/secrets/ingest_username` y `agent/secrets/ingest_password`, y luego ejecutar:
 
 ```bash
@@ -135,7 +138,13 @@ python scripts/render-config.py agent \
 
 Para Podman rootless, copiar `agent/.env.example` a `agent/.env` y configurar `CONTAINER_SOCKET_PATH` con el socket real del usuario. En Coolify se conserva `/var/run/docker.sock`. Solo `docker-socket-proxy` monta el socket; Vector consume su API HTTP allowlist con operaciones POST deshabilitadas.
 
-En Coolify el agente se crea como un segundo recurso Docker Compose con la misma Base Directory y Docker Compose Location `/agent/compose.yaml`. Sus variables se marcan runtime-only y no se asigna dominio público al servicio Vector.
+En Coolify el agente se crea como un segundo recurso Docker Compose con la misma Base Directory y Docker Compose Location `/agent/compose.yaml`. Sus variables se marcan runtime-only y no se asigna dominio público al servicio Vector. Antes de usar datos reales, el `docker inspect` protegido de todos los contenedores del proyecto agente debe incluir `config-init`, `docker-socket-proxy` y `vector`, y pasar:
+
+```bash
+python scripts/verify-secret-isolation.py agent /ruta/protegida/agent-inspect.json
+```
+
+El resultado exigido es `secret_environment_isolation=PASS stack=agent services_checked=3`.
 
 ## Operación segura
 

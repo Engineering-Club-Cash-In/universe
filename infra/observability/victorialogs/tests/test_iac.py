@@ -78,6 +78,9 @@ class StaticIacContractTests(unittest.TestCase):
     def test_vector_has_defense_in_depth_redaction(self) -> None:
         vector = self.read(VECTOR_TEMPLATE).lower()
         self.assertNotIn("merge!(., parsed)", vector)
+        self.assertNotIn("string(parsed.message)", vector)
+        self.assertNotIn("message = original_message", vector)
+        self.assertIn("message = event_name", vector)
         allowlist = vector.split("optional_string_fields = [", 1)[1].split("]", 1)[0]
         for sensitive_name in (
             "authorization",
@@ -232,23 +235,47 @@ class RendererTests(unittest.TestCase):
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertNotIn(shared, result.stdout + result.stderr)
-    def test_secret_isolation_gate_accepts_clean_inspect(self) -> None:
+
+    def test_secret_isolation_gate_accepts_complete_clean_inspect(self) -> None:
         self.assertTrue(VERIFY_SECRET_ISOLATION.is_file())
-        with tempfile.TemporaryDirectory() as tmp:
-            inspect_path = Path(tmp) / "inspect.json"
-            inspect_path.write_text(
-                '[{"Name":"/vmauth","Config":{"Env":["PATH=/bin"]}},'
-                '{"Name":"/victoria-logs","Config":{"Env":[]}}]',
-                encoding="utf-8",
-            )
-            result = subprocess.run(
-                [sys.executable, str(VERIFY_SECRET_ISOLATION), str(inspect_path)],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("secret_environment_isolation=PASS", result.stdout)
+        stacks = {
+            "central": ("config-init", "victoria-logs", "vmauth"),
+            "agent": ("config-init", "docker-socket-proxy", "vector"),
+        }
+        for stack, services in stacks.items():
+            with self.subTest(stack=stack), tempfile.TemporaryDirectory() as tmp:
+                inspect_path = Path(tmp) / "inspect.json"
+                inspect_path.write_text(
+                    json.dumps(
+                        [
+                            {
+                                "Name": f"/observability-{service}-1",
+                                "Config": {
+                                    "Env": ["PATH=/bin"],
+                                    "Labels": {
+                                        "com.docker.compose.service": service
+                                    },
+                                },
+                            }
+                            for service in services
+                        ]
+                    ),
+                    encoding="utf-8",
+                )
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        str(VERIFY_SECRET_ISOLATION),
+                        stack,
+                        str(inspect_path),
+                    ],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("secret_environment_isolation=PASS", result.stdout)
+                self.assertIn("services_checked=3", result.stdout)
 
     def test_secret_isolation_gate_rejects_name_without_printing_value(self) -> None:
         self.assertTrue(VERIFY_SECRET_ISOLATION.is_file())
@@ -259,17 +286,30 @@ class RendererTests(unittest.TestCase):
                 json.dumps(
                     [
                         {
-                            "Name": "/vmauth",
+                            "Name": f"/observability-{service}-1",
                             "Config": {
-                                "Env": [f"VMAUTH_QUERY_PASSWORD={canary}"]
+                                "Env": (
+                                    [f"VMAUTH_QUERY_PASSWORD={canary}"]
+                                    if service == "vmauth"
+                                    else []
+                                ),
+                                "Labels": {
+                                    "com.docker.compose.service": service
+                                },
                             },
                         }
+                        for service in ("config-init", "victoria-logs", "vmauth")
                     ]
                 ),
                 encoding="utf-8",
             )
             result = subprocess.run(
-                [sys.executable, str(VERIFY_SECRET_ISOLATION), str(inspect_path)],
+                [
+                    sys.executable,
+                    str(VERIFY_SECRET_ISOLATION),
+                    "central",
+                    str(inspect_path),
+                ],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -277,6 +317,60 @@ class RendererTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("VMAUTH_QUERY_PASSWORD", result.stderr)
             self.assertNotIn(canary, result.stdout + result.stderr)
+
+    def test_secret_isolation_gate_rejects_empty_inspect(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            inspect_path = Path(tmp) / "inspect.json"
+            inspect_path.write_text("[]", encoding="utf-8")
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(VERIFY_SECRET_ISOLATION),
+                    "central",
+                    str(inspect_path),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("missing_services=config-init,victoria-logs,vmauth", result.stderr)
+            self.assertNotIn("PASS", result.stdout + result.stderr)
+
+    def test_secret_isolation_gate_rejects_missing_exited_config_init(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            inspect_path = Path(tmp) / "inspect.json"
+            inspect_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "Name": f"/observability-{service}-1",
+                            "Config": {
+                                "Env": [],
+                                "Labels": {
+                                    "com.docker.compose.service": service
+                                },
+                            },
+                        }
+                        for service in ("victoria-logs", "vmauth")
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(VERIFY_SECRET_ISOLATION),
+                    "central",
+                    str(inspect_path),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("missing_services=config-init", result.stderr)
+            self.assertNotIn("PASS", result.stdout + result.stderr)
 
 
 if __name__ == "__main__":

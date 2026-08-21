@@ -32,14 +32,18 @@ transforms:
       }
 
       event_timestamp = to_string(parsed.timestamp) ?? to_string(original_event.timestamp) ?? to_string(now())
-      message = original_message
+      event_name = "unstructured.log"
       if parsed_is_object {
-        message = string(parsed.message) ?? string(parsed.event) ?? "structured event"
+        event_name = "application.log"
+        event_candidate = string(parsed.event) ?? null
+        if event_candidate != null && match!(event_candidate, r'^[a-z][a-z0-9_.-]{0,79}$') {
+          event_name = event_candidate
+        }
       }
+      message = event_name
       container_name = string(original_event.container_name) ?? "unknown"
       service = string(parsed.service) ?? string(original_event.label."com.docker.compose.service") ?? container_name
       level = downcase(string(parsed.level) ?? "info")
-      event_name = string(parsed.event) ?? "application.log"
       schema_version = string(parsed.schema_version) ?? "1"
 
       clean_event = {
@@ -145,14 +149,16 @@ tests:
       - insert_at: normalize_and_redact
         type: log
         log_fields:
-          message: '{"message":"safe failure","service":"cartera-back","request_id":"req-safe-1","password":"forbidden","token":"forbidden","customer":{"email":"person@example.com","phone":"55555555"},"http":{"route":"/payments/:id","status_code":500}}'
+          message: '{"message":"login failed password=hunter2","event":"payment.failed","service":"cartera-back","request_id":"req-safe-1","password":"forbidden","token":"forbidden","customer":{"email":"person@example.com","phone":"55555555"},"http":{"route":"/payments/:id","status_code":500}}'
           container_name: cartera-back-1
     outputs:
       - extract_from: normalize_and_redact
         conditions:
           - type: vrl
             source: |-
-              assert_eq!(.message, "safe failure")
+              assert_eq!(.message, "payment.failed")
+              assert_eq!(.event, "payment.failed")
+              assert!(!contains!(.message, "hunter2"))
               assert_eq!(.service, "cartera-back")
               assert_eq!(.request_id, "req-safe-1")
               assert_eq!(.http.route, "/payments/:id")
@@ -181,3 +187,35 @@ tests:
               assert!(!contains!(.message, "person@example.com"))
               assert!(!exists(.token))
               assert!(!exists(.customer))
+
+  - name: unstructured messages never forward free text
+    inputs:
+      - insert_at: normalize_and_redact
+        type: log
+        log_fields:
+          message: 'login failed password=CANARY_PASSWORD_VALUE_123456'
+          container_name: auth-service-1
+    outputs:
+      - extract_from: normalize_and_redact
+        conditions:
+          - type: vrl
+            source: |-
+              assert_eq!(.message, "unstructured.log")
+              assert_eq!(.event, "unstructured.log")
+              assert!(!contains!(.message, "CANARY_PASSWORD_VALUE_123456"))
+
+  - name: invalid event names cannot become messages
+    inputs:
+      - insert_at: normalize_and_redact
+        type: log
+        log_fields:
+          message: '{"event":"login.failed password=CANARY_PASSWORD_VALUE_123456","message":"ignored"}'
+          container_name: auth-service-1
+    outputs:
+      - extract_from: normalize_and_redact
+        conditions:
+          - type: vrl
+            source: |-
+              assert_eq!(.message, "application.log")
+              assert_eq!(.event, "application.log")
+              assert!(!contains!(.message, "CANARY_PASSWORD_VALUE_123456"))

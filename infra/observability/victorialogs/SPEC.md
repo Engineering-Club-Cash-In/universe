@@ -61,8 +61,8 @@ Campos obligatorios:
 - `level`: `debug`, `info`, `warn`, `error` o `fatal`;
 - `service`;
 - `environment`;
-- `message`;
-- `event`: nombre estable;
+- `message`: texto estable derivado exclusivamente de `event`; nunca texto libre del payload;
+- `event`: identificador validado contra `^[a-z][a-z0-9_.-]{0,79}$`;
 - `schema_version`.
 
 Campos de correlación cuando apliquen:

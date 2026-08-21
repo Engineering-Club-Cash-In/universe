@@ -387,13 +387,36 @@ export async function createPagoInCarteraBack(
 			...credito.cuotasPendientes,
 			...credito.cuotasAtrasadas,
 		];
-		const cuotaResuelta = params.cuota_id
+		let cuotaResuelta = params.cuota_id
 			? todasLasCuotas.find((c) => c.cuota_id === params.cuota_id)
 			: undefined;
 		if (params.cuota_id && !cuotaResuelta) {
 			throw new Error(
 				`cuota_id ${params.cuota_id} no corresponde a ninguna cuota del crédito ${params.credito_numero_sifco}`,
 			);
+		}
+		// CB-128 (fix): cuota_id es opcional en el input público de este caller
+		// (registrarPago, el endpoint del bot) — omitirlo dejaba cuotaApagar en
+		// 0 más abajo, que se guarda tal cual como numero_cuota en varias
+		// escrituras de cartera-back (registerPayment.ts), corrompiendo el
+		// registro con una cuota inexistente. Cuando no se especifica, se
+		// resuelve la misma "cuota pagable" que usa la Ficha 360 (mismo
+		// criterio que cardInfo.tsx de carteraFront): la más antigua de
+		// atrasadas+pendientes que no esté ya validada — nunca se salta deuda
+		// anterior.
+		if (!params.cuota_id) {
+			const pagables = [...credito.cuotasAtrasadas, ...credito.cuotasPendientes]
+				.sort((a, b) => a.numero_cuota - b.numero_cuota)
+				.filter((c) => {
+					const status: string | null | undefined = c.validationStatus;
+					return status !== "validated" && status !== "capital_validated";
+				});
+			cuotaResuelta = pagables[0];
+			if (!cuotaResuelta) {
+				throw new Error(
+					`No se encontró una cuota pendiente para pagar en el crédito ${params.credito_numero_sifco}`,
+				);
+			}
 		}
 
 		const pagoInput: CreatePagoInput = {

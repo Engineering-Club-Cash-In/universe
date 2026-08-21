@@ -868,6 +868,13 @@ export interface CarteraPagoCreditoInversionista {
 	estado_liquidacion: EstadoLiquidacionEnum;
 	cuota: string; // decimal(18,2)
 	inversionista?: CarteraInversionista;
+	// CB-128 (fix): /paymentByCredit expone el nombre PLANO en cada fila de
+	// pagosInversionistas (confirmado en
+	// cartera-back/src/controllers/payments.ts:225-231: `{...pi, nombre:
+	// inversionistaInfo[...].nombre}`), no anidado dentro de `inversionista`
+	// — ese campo objeto solo existe en otros endpoints. Leer
+	// pi.inversionista?.nombre acá siempre daba undefined.
+	nombre?: string;
 }
 
 export interface LiquidatePagosInversionistasInput {

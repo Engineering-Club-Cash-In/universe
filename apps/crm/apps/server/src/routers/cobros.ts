@@ -4520,19 +4520,23 @@ export const cobrosRouter = {
 						registerBy: context.userId,
 					});
 				} catch (error) {
-					// CB-128 (fix): CarteraBackHttpError significa que cartera-back
-					// SÍ respondió con un rechazo real (4xx/5xx) — ahí un
-					// BAD_REQUEST normal es correcto, el dinero nunca se movió.
-					// Cualquier OTRO error (timeout de AbortSignal, conexión
-					// caída, "fetch failed") significa que la respuesta nunca
-					// llegó, pero el POST /newPayment pudo haber sido procesado
-					// igual del lado de cartera-back (el propio cliente HTTP ya
-					// documenta esto: "un método mutante puede haberse ejecutado
-					// igual aunque el cliente no vea la respuesta"). Tratar este
-					// caso como un BAD_REQUEST normal invitaba al asesor a
-					// reintentar creyendo que no pasó nada, duplicando el pago
-					// si en realidad sí se había aplicado.
-					if (error instanceof CarteraBackHttpError) {
+					// CB-128 (fix): solo un 4xx de CarteraBackHttpError es un
+					// rechazo DEFINITIVO (validación fallida, boleta duplicada,
+					// etc.) — ahí cartera-back respondió antes de escribir nada y
+					// un BAD_REQUEST normal es correcto. Un 5xx (o cualquier otro
+					// error: timeout de AbortSignal, conexión caída, "fetch
+					// failed") es un resultado INCIERTO: registerPayment.ts hace
+					// escrituras no transaccionales (ej. insertarPago antes del
+					// update de saldo_a_favor, ver línea ~2250-2271) — un fallo
+					// DESPUÉS de esa escritura devuelve un 500 aunque el pago ya
+					// se haya insertado. Tratar un 5xx igual que un 4xx invitaba
+					// al asesor a reintentar creyendo que no pasó nada, duplicando
+					// el pago si en realidad sí se había aplicado parcialmente.
+					if (
+						error instanceof CarteraBackHttpError &&
+						error.status >= 400 &&
+						error.status < 500
+					) {
 						throw new ORPCError("BAD_REQUEST", {
 							message: `Error registrando pago: ${error.message}`,
 						});
@@ -4540,7 +4544,7 @@ export const cobrosRouter = {
 					const message =
 						error instanceof Error ? error.message : String(error);
 					console.error(
-						"[registrarPagoCompleto] Fallo de transporte llamando a /newPayment — resultado incierto, el pago pudo haberse aplicado:",
+						"[registrarPagoCompleto] Resultado incierto llamando a /newPayment (fallo de transporte o 5xx) — el pago pudo haberse aplicado parcialmente:",
 						error,
 					);
 					throw new ORPCError("INTERNAL_SERVER_ERROR", {
@@ -4777,7 +4781,7 @@ export const cobrosRouter = {
 						distribucionInversionistas: pago.pagos_inversionistas?.map(
 							(pi) => ({
 								inversionistaId: pi.inversionista_id,
-								inversionistaNombre: pi.inversionista?.nombre,
+								inversionistaNombre: pi.nombre,
 								abonoCapital: pi.abono_capital,
 								abonoInteres: pi.abono_interes,
 								abonoIva: pi.abono_iva_12,

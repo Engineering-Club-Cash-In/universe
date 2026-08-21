@@ -24,7 +24,7 @@
  * Decisión: docs/features/bot-whatsapp-cobros/DECISIONES.md (D-36)
  */
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, lt } from "drizzle-orm";
 import { db } from "../database";
 import {
   boletas,
@@ -135,9 +135,15 @@ export async function marcarReversionCompletada(
     .set({ estado: "completada" })
     .where(eq(pagos_reversiones.reversion_id, reversionId));
 
-  // Los intentos anteriores que quedaron colgados ya no son un problema
-  // abierto: este reintento los resolvió. La fila de arriba ya no es `iniciada`,
-  // así que este UPDATE no se pisa a sí mismo.
+  // Los intentos ANTERIORES que quedaron colgados ya no son un problema
+  // abierto: este reintento los resolvió.
+  //
+  // El `<` no es decorativo. Sin él, dos reversiones del mismo pago que se
+  // solapan terminan mal: la que completa primero apaga también la fila
+  // `iniciada` que la otra —todavía corriendo— acaba de insertar. Si esa
+  // segunda después falla a medias, su alarma ya está apagada y la tabla dice
+  // que no quedó ninguna reversión sin terminar, que es exactamente lo que esta
+  // tabla existe para no decir (D-36).
   await ejecutor
     .update(pagos_reversiones)
     .set({ estado: "superada" })
@@ -145,6 +151,7 @@ export async function marcarReversionCompletada(
       and(
         eq(pagos_reversiones.pago_id, pagoId),
         eq(pagos_reversiones.estado, "iniciada"),
+        lt(pagos_reversiones.reversion_id, reversionId),
       ),
     );
 }

@@ -88,6 +88,21 @@ export type ResultadoPagosPorBoleta = {
 };
 
 /**
+ * Deja el texto listo para un `LIKE` sin que se le escapen comodines.
+ *
+ * La clave viene del request. Sin esto, `url=%` hace que el patrón calce con
+ * TODA la tabla y el endpoint —que es de diagnóstico— devuelva los pagos de
+ * todas las boletas del sistema. `_` es igual de malo en pequeño: calza con
+ * cualquier carácter.
+ *
+ * Se escapa también la barra invertida, que es el carácter de escape: sin eso,
+ * una clave terminada en `\\` dejaría el patrón mal formado.
+ */
+function comoLiteralEnLike(texto: string): string {
+  return texto.replace(/([\\%_])/g, "\\$1");
+}
+
+/**
  * Los pagos vivos que cuelgan de esa URL.
  *
  * Se busca por **sufijo** además de por igualdad: quien registró el pago pudo
@@ -115,7 +130,8 @@ function leerPagosDeLaBoleta(clave: string) {
       eq(cuotas_credito.cuota_id, pagos_credito.cuota_id),
     )
     .where(
-      sql`${boletas.url_boleta} = ${clave} OR ${boletas.url_boleta} LIKE ${`%${clave}`}`,
+      sql`${boletas.url_boleta} = ${clave}
+          OR ${boletas.url_boleta} LIKE ${`%${comoLiteralEnLike(clave)}`} ESCAPE '\\'`,
     );
 }
 
@@ -133,7 +149,8 @@ function leerReversionesDeLaBoleta(clave: string) {
     .where(
       sql`EXISTS (
         SELECT 1 FROM unnest(${pagos_reversiones.urls_boletas}) u
-        WHERE u = ${clave} OR u LIKE ${`%${clave}`}
+        WHERE u = ${clave}
+           OR u LIKE ${`%${comoLiteralEnLike(clave)}`} ESCAPE '\\'
       )`,
     )
     .orderBy(desc(pagos_reversiones.reversion_id));

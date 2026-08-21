@@ -207,6 +207,15 @@ describe("qué respuesta de cartera prueba que el pago no existe", () => {
 		expect(esRechazoDefinitivo(200)).toBe(false);
 		expect(esRechazoDefinitivo(302)).toBe(false);
 	});
+
+	// No es un rango de 400 a 499: un intermediario puede cortar con 408 o 499
+	// DESPUÉS de haber despachado el request, y cartera escribir el pago igual.
+	test("un 4xx que cartera no emite tampoco prueba nada", () => {
+		expect(esRechazoDefinitivo(408)).toBe(false); // timeout de un proxy
+		expect(esRechazoDefinitivo(499)).toBe(false); // el cliente cortó
+		expect(esRechazoDefinitivo(429)).toBe(false); // rate limit del borde
+		expect(esRechazoDefinitivo(413)).toBe(false);
+	});
 });
 
 describe("un vacío no siempre significa que no hay pago", () => {

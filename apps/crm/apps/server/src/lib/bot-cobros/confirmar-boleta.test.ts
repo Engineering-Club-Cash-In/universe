@@ -259,3 +259,77 @@ describe("un vacío no siempre significa que no hay pago", () => {
 		expect(decidirDestino({ pagos: [], reversiones: [] }).estado).toBe("leida");
 	});
 });
+
+describe("un registro que murió a medias no se reabre", () => {
+	// `insertPayment` escribe la mora y el convenio ANTES del pago: un acta
+	// `iniciado` sin completar prueba que algo alcanzó a moverse.
+	test("con un acta iniciada, revisión manual", () => {
+		expect(
+			decidirDestino({
+				pagos: [],
+				reversiones: [],
+				intentos: [
+					{
+						intento_id: 7,
+						estado: "iniciado",
+						credito_id: 122330,
+						creado_en: null,
+					},
+				],
+			}).estado,
+		).toBe("revision_manual");
+	});
+
+	test("el motivo nombra el intento", () => {
+		expect(
+			decidirDestino({
+				pagos: [],
+				reversiones: [],
+				intentos: [
+					{
+						intento_id: 7,
+						estado: "iniciado",
+						credito_id: 122330,
+						creado_en: null,
+					},
+				],
+			}).motivo,
+		).toContain("7");
+	});
+
+	// Un acta completada es un registro que terminó bien: no bloquea nada.
+	test("un acta completada no cuenta", () => {
+		expect(
+			decidirDestino({
+				pagos: [],
+				reversiones: [],
+				intentos: [
+					{
+						intento_id: 7,
+						estado: "completado",
+						credito_id: 122330,
+						creado_en: null,
+					},
+				],
+			}).estado,
+		).toBe("leida");
+	});
+
+	// El acta manda incluso sobre los huérfanos: es evidencia más temprana.
+	test("acta iniciada + pagos vivos: ganan los pagos", () => {
+		expect(
+			decidirDestino({
+				pagos: [pago()],
+				reversiones: [],
+				intentos: [
+					{
+						intento_id: 7,
+						estado: "iniciado",
+						credito_id: 122330,
+						creado_en: null,
+					},
+				],
+			}).estado,
+		).toBe("confirmada_a_verificar");
+	});
+});

@@ -850,6 +850,44 @@
   );
 
   // ====================================================================
+  // pagos_intentos_boleta — evidencia de un registro que quedó a medias
+  // ====================================================================
+  // `insertPayment` NO es transaccional y escribe cosas ANTES de la primera
+  // fila de `pagos_credito`: la mora (updateMora) y el convenio. Si revienta en
+  // esa ventana responde 500 sin que exista pago ni boleta que lo delate, y la
+  // reconciliación del bot leería "acá no pasó nada" y dejaría reintentar — con
+  // la mora ya descontada una vez.
+  //
+  // Esta tabla es el acta del intento: se escribe `iniciado` ANTES de la
+  // primera mutación (solo para pagos del bot) y `completado` al final. Un
+  // `iniciado` que nadie completó = un registro que murió a medias, y esa
+  // boleta va a revisión manual en vez de reabrirse.
+  // ====================================================================
+  export const pagos_intentos_boleta = customSchema.table(
+    "pagos_intentos_boleta",
+    {
+      intento_id: serial("intento_id").primaryKey(),
+      estado: text("estado").notNull().default("iniciado"),
+
+      credito_id: integer("credito_id").notNull(),
+      register_by: text("register_by").notNull(),
+      monto_boleta: numeric("monto_boleta", { precision: 18, scale: 2 }),
+
+      // Las URLs del request: son el puente con el borrador del CRM.
+      urls_boletas: text("urls_boletas").array().notNull(),
+
+      creado_en: timestamp("creado_en").notNull().defaultNow(),
+      completado_en: timestamp("completado_en"),
+    },
+    (t) => ({
+      porCreditoYEstado: index("idx_pagos_intentos_credito_estado").on(
+        t.credito_id,
+        t.estado,
+      ),
+    }),
+  );
+
+  // ====================================================================
   // modalidad_facturacion_spread
   // ====================================================================
   // Catálogo fijo de "tasas promocionales": por rango de monto_aportado Y

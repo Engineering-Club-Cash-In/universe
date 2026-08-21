@@ -22,6 +22,7 @@ import {
   boletas,
   cuotas_credito,
   pagos_credito,
+  pagos_intentos_boleta,
   pagos_reversiones,
 } from "../database/db/schema";
 import type { PaymentAdvisoryLockConnection } from "../utils/paymentAdvisoryLock";
@@ -52,6 +53,13 @@ export type ReversionDeBoleta = {
   revertido_en: string | null;
 };
 
+export type IntentoDeBoleta = {
+  intento_id: number;
+  estado: string;
+  credito_id: number;
+  creado_en: string | null;
+};
+
 export type ResultadoPagosPorBoleta = {
   /** Filas de `boletas` que siguen vivas con esa URL, con su pago. */
   pagos: PagoDeBoleta[];
@@ -72,6 +80,15 @@ export type ResultadoPagosPorBoleta = {
    * `hayOtroBackendEnElLock`.
    */
   operacion_en_curso: boolean | null;
+  /**
+   * Actas de registro del bot que quedaron `iniciado` para esa URL.
+   *
+   * `insertPayment` escribe la mora y el convenio ANTES de la primera fila de
+   * `pagos_credito`. Si revienta en esa ventana no queda pago, ni boleta, ni
+   * reversión — solo el acta. Un `iniciado` sin completar es la prueba de que
+   * un registro murió a medias, y esa boleta no se puede reabrir a ciegas.
+   */
+  intentos: IntentoDeBoleta[];
   /**
    * Pagos del bot en ese crédito que **no tienen ninguna boleta colgando**.
    *
@@ -154,6 +171,26 @@ function leerReversionesDeLaBoleta(clave: string) {
       )`,
     )
     .orderBy(desc(pagos_reversiones.reversion_id));
+}
+
+/** Las actas de intento que mencionan esa URL y nadie completó. */
+function leerIntentosDeLaBoleta(clave: string) {
+  return db
+    .select({
+      intento_id: pagos_intentos_boleta.intento_id,
+      estado: pagos_intentos_boleta.estado,
+      credito_id: pagos_intentos_boleta.credito_id,
+      creado_en: pagos_intentos_boleta.creado_en,
+    })
+    .from(pagos_intentos_boleta)
+    .where(
+      sql`${pagos_intentos_boleta.estado} = 'iniciado' AND EXISTS (
+        SELECT 1 FROM unnest(${pagos_intentos_boleta.urls_boletas}) u
+        WHERE u = ${clave}
+           OR u LIKE ${`%${comoLiteralEnLike(clave)}`} ESCAPE '\\'
+      )`,
+    )
+    .orderBy(desc(pagos_intentos_boleta.intento_id));
 }
 
 /**
@@ -268,6 +305,7 @@ function armarResultado(
   reversiones: Awaited<ReturnType<typeof leerReversionesDeLaBoleta>>,
   enCurso: boolean | null,
   huerfanos: PagoDeBoleta[] = [],
+  intentos: Awaited<ReturnType<typeof leerIntentosDeLaBoleta>> = [],
 ): ResultadoPagosPorBoleta {
   return {
     pagos,
@@ -277,6 +315,10 @@ function armarResultado(
     })),
     operacion_en_curso: enCurso,
     huerfanos,
+    intentos: intentos.map((i) => ({
+      ...i,
+      creado_en: i.creado_en ? new Date(i.creado_en).toISOString() : null,
+    })),
   };
 }
 
@@ -296,11 +338,12 @@ export async function buscarPagosPorBoleta(
   // `operacion_en_curso: null` avisa que la prueba positiva no está: quien
   // reconcilie con esta respuesta no puede reabrir nada.
   if (creditoId === undefined) {
-    const [pagos, reversiones] = await Promise.all([
+    const [pagos, reversiones, intentos] = await Promise.all([
       leerPagosDeLaBoleta(clave),
       leerReversionesDeLaBoleta(clave),
+      leerIntentosDeLaBoleta(clave),
     ]);
-    return armarResultado(pagos, reversiones, null);
+    return armarResultado(pagos, reversiones, null, [], intentos);
   }
 
   // ───────────────────────────────────────────────────────────────────────
@@ -323,10 +366,11 @@ export async function buscarPagosPorBoleta(
   const observado = await tryWithPaymentAdvisoryLock(
     creditoId,
     async (lockConn) => {
-      const [pagos, reversiones, huerfanos] = await Promise.all([
+      const [pagos, reversiones, huerfanos, intentos] = await Promise.all([
         leerPagosDeLaBoleta(clave),
         leerReversionesDeLaBoleta(clave),
         leerHuerfanosDelBot(creditoId),
+        leerIntentosDeLaBoleta(clave),
       ]);
 
       return armarResultado(
@@ -334,6 +378,7 @@ export async function buscarPagosPorBoleta(
         reversiones,
         await hayOtroBackendEnElLock(creditoId, lockConn),
         huerfanos,
+        intentos,
       );
     },
   );
@@ -343,13 +388,14 @@ export async function buscarPagosPorBoleta(
   // No se pudo tomar: hay un `insertPayment` adentro AHORA MISMO. No hace falta
   // sincronizar nada más, la respuesta ya es la que frena la reconciliación.
   // Las filas van igual, para que el log del bot muestre lo que había.
-  const [pagos, reversiones, huerfanos] = await Promise.all([
+  const [pagos, reversiones, huerfanos, intentos] = await Promise.all([
     leerPagosDeLaBoleta(clave),
     leerReversionesDeLaBoleta(clave),
     leerHuerfanosDelBot(creditoId),
+    leerIntentosDeLaBoleta(clave),
   ]);
 
-  return armarResultado(pagos, reversiones, true, huerfanos);
+  return armarResultado(pagos, reversiones, true, huerfanos, intentos);
 }
 
 /**

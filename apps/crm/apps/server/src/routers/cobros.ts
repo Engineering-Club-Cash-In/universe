@@ -4250,6 +4250,19 @@ export const cobrosRouter = {
 			});
 
 			if (!result.success) {
+				// CB-128 (fix): resultadoIncierto distingue un rechazo DEFINITIVO
+				// (4xx — cartera-back respondió antes de escribir nada, seguro
+				// reintentar) de un resultado INCIERTO (timeout, 5xx —
+				// registerPayment.ts hace escrituras no transaccionales, el pago
+				// pudo haberse aplicado igual). Sin esta distinción, cualquier
+				// fallo se veía como un BAD_REQUEST normal, invitando al bot/
+				// usuario a reintentar y duplicar el pago si ya se había
+				// procesado.
+				if (result.resultadoIncierto) {
+					throw new ORPCError("INTERNAL_SERVER_ERROR", {
+						message: `No se pudo confirmar si el pago se registró en cartera-back (${result.error}). NO reintentes de inmediato — verifica antes de volver a intentarlo.`,
+					});
+				}
 				throw new ORPCError("BAD_REQUEST", {
 					message: `Error registrando pago: ${result.error}`,
 				});
@@ -4336,9 +4349,20 @@ export const cobrosRouter = {
 				// respaldara. Se exige que la suma de ambos no exceda el monto
 				// real de la boleta.
 				.refine(
-					(data) =>
-						(data.otros ?? 0) + (data.abonoDirectoCapital ?? 0) <=
-						data.montoBoleta,
+					(data) => {
+						// CB-128 (fix): comparación en centavos enteros, no floats
+						// directos — 32.02 + 91.43 da 123.45000000000002 en JS
+						// (aritmética binaria), así que comparar contra 123.45 con
+						// <= rechazaba un pago legítimo donde los montos cuadran
+						// exacto. Math.round del total en centavos evita el error
+						// de redondeo acumulado.
+						const centavos = (n: number) => Math.round(n * 100);
+						return (
+							centavos(data.otros ?? 0) +
+								centavos(data.abonoDirectoCapital ?? 0) <=
+							centavos(data.montoBoleta)
+						);
+					},
 					{
 						message:
 							"La suma de 'Otros' y el abono directo a capital no puede exceder el monto de la boleta",

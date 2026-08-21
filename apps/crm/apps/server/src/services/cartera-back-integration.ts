@@ -18,7 +18,7 @@ import type {
 	CreateCreditoInput,
 	CreatePagoInput,
 } from "../types/cartera-back";
-import { carteraBackClient } from "./cartera-back-client";
+import { CarteraBackHttpError, carteraBackClient } from "./cartera-back-client";
 
 // ============================================================================
 // FEATURE FLAGS
@@ -308,6 +308,8 @@ export interface CreatePagoResult {
 	success: boolean;
 	pago_id?: number;
 	error?: string;
+	/** true cuando el resultado real es desconocido (timeout, 5xx, fallo de transporte) — el pago pudo haberse aplicado igual. El caller NO debe invitar a reintentar. */
+	resultadoIncierto?: boolean;
 }
 
 // CB-128: fallback cuando /newPayment no trae pago_id inline. Filtro primario:
@@ -360,6 +362,11 @@ export async function createPagoInCarteraBack(
 	}
 
 	const startTime = Date.now();
+	// CB-128 (fix): declarado antes del try para que el catch general (más
+	// abajo) pueda leerlo — se marca true solo si createPago falló con algo
+	// que no sea un 4xx definitivo (ver el try/catch interno alrededor de la
+	// llamada real, dentro de la transacción).
+	let resultadoIncierto = false;
 
 	try {
 		// CB-128: pagoSchema en cartera-back exige credito_id/usuario_id
@@ -461,7 +468,20 @@ export async function createPagoInCarteraBack(
 				0,
 			);
 
-			respuesta = await carteraBackClient.createPago(pagoInput);
+			try {
+				respuesta = await carteraBackClient.createPago(pagoInput);
+			} catch (error) {
+				if (
+					!(
+						error instanceof CarteraBackHttpError &&
+						error.status >= 400 &&
+						error.status < 500
+					)
+				) {
+					resultadoIncierto = true;
+				}
+				throw error;
+			}
 			// soloInformativo (mora parcial insuficiente, etc.) no es un rechazo —
 			// cartera-back sí insertó el pago, ver comentario en createPago.
 			if (!respuesta.success && !respuesta.soloInformativo) {
@@ -582,7 +602,7 @@ export async function createPagoInCarteraBack(
 
 		console.error("[CarteraBackSync] Failed to create payment:", errorMessage);
 
-		return { success: false, error: errorMessage };
+		return { success: false, error: errorMessage, resultadoIncierto };
 	}
 }
 

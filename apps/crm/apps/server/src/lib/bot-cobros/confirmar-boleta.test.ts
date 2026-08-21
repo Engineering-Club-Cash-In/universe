@@ -208,3 +208,45 @@ describe("qué respuesta de cartera prueba que el pago no existe", () => {
 		expect(esRechazoDefinitivo(302)).toBe(false);
 	});
 });
+
+describe("un vacío no siempre significa que no hay pago", () => {
+	// El hueco concreto: `insertPayment` escribe `pagos_credito` y después
+	// `boletas`. Si revienta en el medio, el pago existe y su URL no, así que
+	// buscar por r2_key devuelve vacío sobre un pago que SÍ está.
+	test("con un pago del bot sin boleta, no se reabre: va a revisión manual", () => {
+		expect(
+			decidirDestino({
+				pagos: [],
+				reversiones: [],
+				huerfanos: [pago({ pago_id: 91111 })],
+			}).estado,
+		).toBe("revision_manual");
+	});
+
+	test("el motivo nombra el pago, para que quien lo revise sepa cuál mirar", () => {
+		expect(
+			decidirDestino({
+				pagos: [],
+				reversiones: [],
+				huerfanos: [pago({ pago_id: 91111 })],
+			}).motivo,
+		).toContain("91111");
+	});
+
+	// Una fila anulada no es un pago vivo: no puede bloquear el reintento.
+	test("un huérfano marcado falso no cuenta", () => {
+		expect(
+			decidirDestino({
+				pagos: [],
+				reversiones: [],
+				huerfanos: [pago({ payment_false: true })],
+			}).estado,
+		).toBe("leida");
+	});
+
+	// Contra una instancia de cartera que todavía no manda el campo, el
+	// comportamiento no cambia: lo que frena ahí es `operacion_en_curso`.
+	test("sin el campo, se sigue decidiendo como antes", () => {
+		expect(decidirDestino({ pagos: [], reversiones: [] }).estado).toBe("leida");
+	});
+});

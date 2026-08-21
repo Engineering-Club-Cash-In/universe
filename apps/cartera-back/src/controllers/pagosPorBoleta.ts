@@ -16,7 +16,7 @@
  * Contrato: docs/features/bot-whatsapp-cobros/04-validacion-de-boleta.md (§4.1)
  */
 
-import { desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../database";
 import {
   boletas,
@@ -72,6 +72,19 @@ export type ResultadoPagosPorBoleta = {
    * `hayOtroBackendEnElLock`.
    */
   operacion_en_curso: boolean | null;
+  /**
+   * Pagos del bot en ese crédito que **no tienen ninguna boleta colgando**.
+   *
+   * `insertPayment` escribe la fila de `pagos_credito` primero y las de
+   * `boletas` después. Si revienta en el medio, el pago existe pero la URL —el
+   * único puente que tiene el bot para volver a encontrarlo— no se escribió
+   * nunca. Buscar por `r2_key` devuelve vacío sobre un pago que SÍ está.
+   *
+   * Con esto, ese vacío deja de ser prueba de que no se registró nada.
+   *
+   * `[]` si no se preguntó (sin `credito_id`).
+   */
+  huerfanos: PagoDeBoleta[];
 };
 
 /**
@@ -170,10 +183,74 @@ async function hayOtroBackendEnElLock(
   return Boolean(res?.rows?.[0]?.en_curso);
 }
 
+/**
+ * Con quién registra sus pagos el bot de cobros.
+ *
+ * Va copiado del CRM (`REGISTRADO_POR` en `lib/bot-cobros/confirmar-boleta.ts`)
+ * y no se puede cambiar de un solo lado: es lo que permite reconocer un pago
+ * del bot cuando el puente de la URL se perdió.
+ */
+const REGISTRADO_POR_EL_BOT = "bot-cobros@clubcashin.com";
+
+/**
+ * Cuánto para atrás se buscan huérfanos.
+ *
+ * El hueco entre escribir el pago y escribir su boleta son milisegundos, así
+ * que un huérfano nuevo aparece enseguida. El tope existe para que una anomalía
+ * vieja del mismo crédito no bloquee para siempre a un cliente que quiere
+ * reintentar. Coincide a propósito con las 24 h a las que el bot manda el
+ * borrador a revisión manual: pasado ese punto ya lo mira una persona.
+ */
+const HORAS_DE_BUSQUEDA_DE_HUERFANOS = 24;
+
+/**
+ * Pagos del bot en este crédito que quedaron sin boleta que los señale.
+ *
+ * Se descartan los que tienen una reversión: `reversePayment` borra las filas
+ * de `boletas`, así que un pago revertido se ve exactamente igual que uno que
+ * nunca llegó a escribir la suya. Contarlo como huérfano dejaría el crédito
+ * bloqueado por un rechazo normal.
+ */
+function leerHuerfanosDelBot(creditoId: number) {
+  return db
+    .select({
+      pago_id: pagos_credito.pago_id,
+      credito_id: pagos_credito.credito_id,
+      numero_cuota: cuotas_credito.numero_cuota,
+      monto_aplicado: pagos_credito.monto_aplicado,
+      monto_boleta: pagos_credito.monto_boleta,
+      validation_status: pagos_credito.validationStatus,
+      pagado: pagos_credito.pagado,
+      payment_false: pagos_credito.paymentFalse,
+    })
+    .from(pagos_credito)
+    .leftJoin(
+      cuotas_credito,
+      eq(cuotas_credito.cuota_id, pagos_credito.cuota_id),
+    )
+    .where(
+      and(
+        eq(pagos_credito.credito_id, creditoId),
+        eq(pagos_credito.registerBy, REGISTRADO_POR_EL_BOT),
+        sql`${pagos_credito.createdAt} > now() - interval '${sql.raw(
+          String(HORAS_DE_BUSQUEDA_DE_HUERFANOS),
+        )} hours'`,
+        sql`NOT EXISTS (
+          SELECT 1 FROM ${boletas} b WHERE b.pago_id = ${pagos_credito.pago_id}
+        )`,
+        sql`NOT EXISTS (
+          SELECT 1 FROM ${pagos_reversiones} r
+          WHERE r.pago_id = ${pagos_credito.pago_id}
+        )`,
+      ),
+    );
+}
+
 function armarResultado(
   pagos: PagoDeBoleta[],
   reversiones: Awaited<ReturnType<typeof leerReversionesDeLaBoleta>>,
   enCurso: boolean | null,
+  huerfanos: PagoDeBoleta[] = [],
 ): ResultadoPagosPorBoleta {
   return {
     pagos,
@@ -182,6 +259,7 @@ function armarResultado(
       revertido_en: r.revertido_en ? new Date(r.revertido_en).toISOString() : null,
     })),
     operacion_en_curso: enCurso,
+    huerfanos,
   };
 }
 
@@ -228,15 +306,17 @@ export async function buscarPagosPorBoleta(
   const observado = await tryWithPaymentAdvisoryLock(
     creditoId,
     async (lockConn) => {
-      const [pagos, reversiones] = await Promise.all([
+      const [pagos, reversiones, huerfanos] = await Promise.all([
         leerPagosDeLaBoleta(clave),
         leerReversionesDeLaBoleta(clave),
+        leerHuerfanosDelBot(creditoId),
       ]);
 
       return armarResultado(
         pagos,
         reversiones,
         await hayOtroBackendEnElLock(creditoId, lockConn),
+        huerfanos,
       );
     },
   );
@@ -246,12 +326,13 @@ export async function buscarPagosPorBoleta(
   // No se pudo tomar: hay un `insertPayment` adentro AHORA MISMO. No hace falta
   // sincronizar nada más, la respuesta ya es la que frena la reconciliación.
   // Las filas van igual, para que el log del bot muestre lo que había.
-  const [pagos, reversiones] = await Promise.all([
+  const [pagos, reversiones, huerfanos] = await Promise.all([
     leerPagosDeLaBoleta(clave),
     leerReversionesDeLaBoleta(clave),
+    leerHuerfanosDelBot(creditoId),
   ]);
 
-  return armarResultado(pagos, reversiones, true);
+  return armarResultado(pagos, reversiones, true, huerfanos);
 }
 
 /**

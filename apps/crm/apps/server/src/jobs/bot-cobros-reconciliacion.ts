@@ -100,6 +100,8 @@ export type ResultadoReconciliacion = {
 export function decidirDestino(respuesta: {
 	pagos: EstadoPagoCartera[];
 	reversiones: ReversionCartera[];
+	/** Pagos del bot en ese crédito sin ninguna boleta que los señale. */
+	huerfanos?: EstadoPagoCartera[];
 }): { estado: EstadoBoletaBot; motivo: string } {
 	// Las filas anuladas (`paymentFalse`) no son un pago vivo: existen para dejar
 	// rastro de algo que se dio por no hecho.
@@ -130,6 +132,33 @@ export function decidirDestino(respuesta: {
 			estado: "revision_manual",
 			motivo:
 				"Hay una reversión a medias en cartera para esta boleta: nadie puede decidir esto solo.",
+		};
+	}
+
+	// ─────────────────────────────────────────────────────────────────────────
+	// NO HABER ENCONTRADO LA BOLETA NO ES LO MISMO QUE NO HABER PAGO.
+	//
+	// `insertPayment` escribe la fila de `pagos_credito` primero y la de
+	// `boletas` después. Si revienta en el medio —el 500 que ahora se trata como
+	// indeterminado—, el pago existe y su URL no se escribió nunca: buscar por
+	// `r2_key` devuelve vacío sobre un pago que SÍ está, el borrador vuelve a
+	// `leida` y el cliente confirma otra vez. Dos pagos reales.
+	//
+	// Un pago del bot en ese crédito sin ninguna boleta colgando es exactamente
+	// esa firma. No se decide sola: se manda a revisión manual, porque tampoco
+	// se puede asegurar que ese huérfano sea de ESTA boleta.
+	// ─────────────────────────────────────────────────────────────────────────
+	const huerfanos = (respuesta.huerfanos ?? []).filter(
+		(p) => p.payment_false !== true,
+	);
+
+	if (huerfanos.length > 0) {
+		return {
+			estado: "revision_manual",
+			motivo:
+				`No se encontró la boleta en cartera, pero el crédito tiene ${huerfanos.length} pago(s) del bot ` +
+				`sin boleta asociada (${huerfanos.map((p) => p.pago_id).join(", ")}). ` +
+				"Puede ser este mismo pago, escrito antes de que fallara el registro de su boleta. Verificar antes de dejar que el cliente reintente.",
 		};
 	}
 
@@ -245,6 +274,7 @@ export async function reconciliarBoletasColgadas(): Promise<ResultadoReconciliac
 		const destino = decidirDestino({
 			pagos: respuesta.pagos ?? [],
 			reversiones: respuesta.reversiones ?? [],
+			huerfanos: respuesta.huerfanos ?? [],
 		});
 
 		// ⚠️ Antes de reabrir, la prueba positiva.

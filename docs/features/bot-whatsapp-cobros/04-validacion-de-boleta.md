@@ -704,6 +704,22 @@ con todos sus pagos resueltos, y sin haberle contado al cliente el desenlace que
 Cubre los tres casos: el envío que falló, el proceso que se cayó con el reclamo tomado (lo
 levanta el vencimiento) y el desenlace que cambió después de haber escrito.
 
+**`en_revision` es un desenlace más, no un caso aparte.** El mensaje de
+`regresado_a_pendiente` pasa por el mismo reclamo que los otros dos. Antes se mandaba suelto:
+se limpiaban los campos de notificación y después se enviaba, así que un envío fallido dejaba
+el evento procesado, la boleta sin memoria de qué se le había contado, y nada que lo
+reintentara —el respaldo ve un pago pendiente y no emite evento, y el webhook repetido choca
+contra el unique—. El cliente se quedaba creyendo que su pago seguía acreditado. Contándolo
+como desenlace, el job lo detecta solo: `desenlace_notificado = 'validado'` con la boleta de
+vuelta con pagos sin resolver es una corrección pendiente.
+
+**Y el barrido no mira solo los pagos sin resolver.** Una reversión puede llegar semanas
+después de la validación, y su webhook se puede perder igual que el primero; con el puente ya
+marcado como resuelto, nadie volvía a preguntar por ese pago nunca. El barrido incluye también
+los pagos ya resueltos de boletas creadas en los últimos 30 días. Para no llenar la tabla de
+eventos con una fila por hora, solo se emite lo que **cambió** respecto del último evento
+registrado de ese pago.
+
 **El barrido de pagos sin resolver lleva cursor.** Un pago se queda sin resolver todo lo que
 conta tarde en validarlo, o sea días: es el estado normal de la cola, no una anomalía. Con más
 de 200 acumulados, un `LIMIT` sin orden puede devolver el mismo lote cada hora y los pagos que

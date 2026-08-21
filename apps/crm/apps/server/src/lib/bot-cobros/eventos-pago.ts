@@ -23,7 +23,7 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-import { and, eq, isNull, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "../../db";
 import {
 	botCobrosBoletaPagos,
@@ -162,8 +162,37 @@ export async function avisarAlAsesor(datos: {
 	numeroSifco: string | null;
 	titulo: string;
 	descripcion: string;
+	/**
+	 * No repetir si ya salió una con este mismo título en las últimas N horas.
+	 *
+	 * Para las alertas que nacen de una CONDICIÓN y no de un hecho: mientras la
+	 * condición siga ahí, el job la vuelve a ver en cada corrida. Sin esto, una
+	 * reversión trabada le manda al asesor la misma notificación cada hora hasta
+	 * que alguien la destrabe, que es la mejor forma de que deje de leerlas.
+	 *
+	 * El título tiene que identificar el caso —incluir el pago, no solo el
+	 * crédito—, si no dos problemas distintos se tapan entre sí.
+	 */
+	noRepetirPorHoras?: number;
 }): Promise<void> {
 	try {
+		if (datos.noRepetirPorHoras) {
+			const [reciente] = await db
+				.select({ id: notifications.id })
+				.from(notifications)
+				.where(
+					and(
+						eq(notifications.titulo, datos.titulo),
+						sql`${notifications.createdAt} > now() - interval '${sql.raw(
+							String(datos.noRepetirPorHoras),
+						)} hours'`,
+					),
+				)
+				.limit(1);
+
+			if (reciente) return;
+		}
+
 		const usuarioSistema = await resolverUsuarioSistemaCobros();
 		if (!usuarioSistema) {
 			console.error(
@@ -359,39 +388,26 @@ async function manejarDesenlace(
 		}
 
 		// Sí se le dijo. Callarse ahora lo deja creyendo algo que dejó de ser
-		// cierto, así que se le escribe Y se reabre el ciclo de la boleta: el
-		// `notificado_cliente_at` vuelve a null para que el desenlace siguiente
-		// también le llegue.
-		const telefono = await telefonoDeLaBoleta(boleta);
-		await db
-			.update(botCobrosBoletas)
-			.set({
-				notificadoClienteAt: null,
-				// Y el desenlace contado, si no la boleta arrancaría el ciclo nuevo
-				// creyendo que ya le contó algo que ahora no es cierto.
-				desenlaceNotificado: null,
-				avisoReclamadoEn: null,
-				updatedAt: new Date(),
-			})
-			.where(eq(botCobrosBoletas.id, boleta.id));
-
+		// cierto.
+		//
+		// Este mensaje va por el MISMO reclamo que el del desenlace final, y no
+		// suelto a un lado como estaba. Antes se limpiaban los dos campos de
+		// notificación y después se mandaba: si el envío fallaba, el evento ya
+		// figuraba procesado, la boleta ya no recordaba qué se le había contado y
+		// no quedaba nada que lo reintentara —el respaldo ve un pago pendiente y no
+		// emite evento; el webhook repetido choca contra el unique—. El cliente se
+		// quedaba, para siempre, creyendo que su pago estaba acreditado.
+		//
+		// Contándolo como un desenlace más (`en_revision`), el reintento sale
+		// gratis: mientras `desenlace_notificado` siga diciendo `validado` con la
+		// boleta de vuelta en revisión, el job sabe que le debemos el mensaje.
 		await avisarAlAsesor({
 			numeroSifco,
 			titulo: `Pago del bot regresado a pendiente · ${numeroSifco ?? "sin SIFCO"}`,
 			descripcion: `El pago ${entrada.pagoId} (Q${monto}) volvió a la cola de validación. Al cliente YA se le había dicho que estaba acreditado, así que se le avisó que vuelve a revisión.`,
 		});
 
-		if (!telefono) return { notificado: false, motivo: "SIN_TELEFONO" };
-
-		const salio = await escribirleAlCliente(
-			telefono,
-			mensajesPagoEnRevision(monto).completo,
-		);
-
-		return {
-			notificado: salio,
-			motivo: salio ? null : "ENVIO_FALLIDO",
-		};
+		return avisarEnRevision(boleta);
 	}
 
 	// ── `validado` / `revertido`: hay que esperar a los hermanos ──────────────
@@ -400,6 +416,130 @@ async function manejarDesenlace(
 		motivo: entrada.motivo ?? null,
 		numeroSifco,
 		yaAvisoAlAsesor,
+	});
+}
+
+/**
+ * Lo último que se le contó al cliente sobre esta boleta.
+ *
+ * `en_revision` es un desenlace más y no un estado aparte a propósito: es lo
+ * que permite que el mensaje de `regresado_a_pendiente` se reintente por el
+ * mismo camino que los otros dos, en vez de perderse si el envío falla.
+ */
+export type DesenlaceContado = "validado" | "rechazado" | "en_revision";
+
+/**
+ * Reclamar → mandar → marcar. El único lugar que le escribe al cliente.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * EL DERECHO A MANDAR SE TOMA ANTES DE ENVIAR, Y ES UN ARRENDAMIENTO.
+ *
+ * Leer `boleta.notificadoClienteAt` no alcanzaba: cuando los eventos de los
+ * últimos pagos hermanos entran a la vez, los dos handlers cargan la boleta con
+ * el campo en `null`, los dos ven que no queda nadie pendiente y los dos pasan
+ * el chequeo antes de que ninguno haya escrito. Dos WhatsApp iguales.
+ *
+ * El UPDATE condicional lo decide la base: gana quien lo corra primero y el
+ * otro se lleva cero filas. Pero la marca que se toma es `aviso_reclamado_en` y
+ * NO `notificado_cliente_at`, por dos razones:
+ *
+ *   · Un proceso que muere entre reclamar y enviar no ejecuta ningún `catch`,
+ *     así que no suelta nada. Si la marca significara "entregado", esa boleta
+ *     quedaba notificada para siempre sin que el cliente hubiera recibido nada.
+ *     Esta caduca, y el job de respaldo la vuelve a tomar.
+ *   · `notificado_cliente_at` tiene que seguir significando exactamente "esto
+ *     se le entregó".
+ *
+ * Y se reclama **por desenlace**, no por boleta: un pago validado que conta
+ * revierte después cambia lo que hay que decirle. Con la condición vieja —"¿ya
+ * se le dijo algo?"— ese segundo mensaje no salía nunca.
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+async function mandarAvisoAlCliente(
+	boleta: typeof botCobrosBoletas.$inferSelect,
+	queContar: DesenlaceContado,
+	opciones: {
+		/** Corre solo si el reclamo salió: así no se duplica con cada reintento. */
+		antesDeEnviar?: () => Promise<void>;
+		armarMensaje: () => string;
+		/** Qué hacer cuando no hay a dónde escribir. */
+		alNoHaberTelefono?: () => Promise<void>;
+	},
+): Promise<ResultadoEvento> {
+	const reclamada = await db
+		.update(botCobrosBoletas)
+		.set({ avisoReclamadoEn: new Date(), updatedAt: new Date() })
+		.where(
+			and(
+				eq(botCobrosBoletas.id, boleta.id),
+				// Todavía no se le contó ESTO.
+				or(
+					isNull(botCobrosBoletas.notificadoClienteAt),
+					sql`${botCobrosBoletas.desenlaceNotificado} IS DISTINCT FROM ${queContar}`,
+				),
+				// Y nadie más lo está mandando ahora mismo.
+				or(
+					isNull(botCobrosBoletas.avisoReclamadoEn),
+					sql`${botCobrosBoletas.avisoReclamadoEn} < now() - interval '${sql.raw(
+						String(MINUTOS_DE_RECLAMO),
+					)} minutes'`,
+				),
+			),
+		)
+		.returning({ id: botCobrosBoletas.id });
+
+	if (reclamada.length === 0) {
+		return { notificado: false, motivo: "EVENTO_REPETIDO" };
+	}
+
+	const marcarContado = () =>
+		db
+			.update(botCobrosBoletas)
+			.set({
+				notificadoClienteAt: new Date(),
+				desenlaceNotificado: queContar,
+				avisoReclamadoEn: null,
+				updatedAt: new Date(),
+			})
+			.where(eq(botCobrosBoletas.id, boleta.id));
+
+	await opciones.antesDeEnviar?.();
+
+	const telefono = await telefonoDeLaBoleta(boleta);
+	if (!telefono) {
+		// El lead se borró y no hay a dónde escribir. El ciclo se cierra igual
+		// —se marca esto como contado— porque reintentarlo cada hora solo
+		// repetiría la misma alerta: no hay teléfono nuevo que aparezca solo.
+		await marcarContado();
+		await opciones.alNoHaberTelefono?.();
+		return { notificado: false, motivo: "SIN_TELEFONO" };
+	}
+
+	const salio = await escribirleAlCliente(telefono, opciones.armarMensaje());
+
+	if (!salio) {
+		// El envío se cayó (SimpleTech, red, timeout). Se suelta solo el reclamo:
+		// `desenlace_notificado` se queda como estaba, que es lo que le dice al
+		// job de respaldo que todavía le debemos este mensaje.
+		await db
+			.update(botCobrosBoletas)
+			.set({ avisoReclamadoEn: null, updatedAt: new Date() })
+			.where(eq(botCobrosBoletas.id, boleta.id));
+
+		return { notificado: false, motivo: "ENVIO_FALLIDO" };
+	}
+
+	// Salió: recién ACÁ se escribe "entregado", con qué fue lo que se entregó.
+	await marcarContado();
+	return { notificado: true, motivo: null };
+}
+
+/** "Tu pago vuelve a revisión", con reintento si el envío falla. */
+async function avisarEnRevision(
+	boleta: typeof botCobrosBoletas.$inferSelect,
+): Promise<ResultadoEvento> {
+	return mandarAvisoAlCliente(boleta, "en_revision", {
+		armarMensaje: () => mensajesPagoEnRevision(boleta.monto ?? "0").completo,
 	});
 }
 
@@ -434,6 +574,11 @@ async function avisarDesenlaceAlCliente(
 
 	const pendientes = pagos.filter((p) => p.resueltoEn === null);
 	if (pendientes.length > 0) {
+		// La boleta volvió a revisión y al cliente se le había dicho que estaba
+		// acreditado: le debemos la corrección, aunque este evento no cierre nada.
+		if (boleta.desenlaceNotificado === "validado") {
+			return avisarEnRevision(boleta);
+		}
 		return { notificado: false, motivo: "FALTAN_PAGOS_POR_RESOLVER" };
 	}
 
@@ -460,136 +605,67 @@ async function avisarDesenlaceAlCliente(
 		})
 		.where(eq(botCobrosBoletas.id, boleta.id));
 
-	// ─────────────────────────────────────────────────────────────────────────
-	// EL DERECHO A MANDAR SE TOMA ANTES DE ENVIAR, Y ES UN ARRENDAMIENTO.
-	//
-	// Leer `boleta.notificadoClienteAt` no alcanzaba: cuando los eventos de los
-	// últimos pagos hermanos entran a la vez, los dos handlers cargan la boleta
-	// con el campo en `null`, los dos ven que no queda nadie pendiente y los dos
-	// pasan el chequeo antes de que ninguno haya escrito. Dos WhatsApp iguales.
-	//
-	// El UPDATE condicional lo decide la base: gana quien lo corra primero y el
-	// otro se lleva cero filas. Pero la marca que se toma es `aviso_reclamado_en`
-	// y NO `notificado_cliente_at`, por dos razones:
-	//
-	//   · Un proceso que muere entre reclamar y enviar no ejecuta ningún
-	//     `catch`, así que no suelta nada. Si la marca significara "entregado",
-	//     esa boleta quedaba notificada para siempre sin que el cliente hubiera
-	//     recibido nada. Esta caduca, y el job de respaldo la vuelve a tomar.
-	//   · `notificado_cliente_at` tiene que seguir significando exactamente
-	//     "esto se le entregó", que es de lo que depende `regresado_a_pendiente`
-	//     para decidir si callarse o escribir.
-	//
-	// Y se reclama **por desenlace**, no por boleta: un pago validado que conta
-	// revierte después cambia lo que hay que decirle. Con la condición vieja
-	// —"¿ya se le dijo algo?"— ese segundo mensaje no salía nunca, y la boleta
-	// quedaba `rechazada` con el cliente creyendo que su pago se acreditó.
-	// ─────────────────────────────────────────────────────────────────────────
-	const reclamada = await db
-		.update(botCobrosBoletas)
-		.set({ avisoReclamadoEn: new Date(), updatedAt: new Date() })
-		.where(
-			and(
-				eq(botCobrosBoletas.id, boleta.id),
-				// Todavía no se le contó ESTE desenlace.
-				or(
-					isNull(botCobrosBoletas.notificadoClienteAt),
-					sql`${botCobrosBoletas.desenlaceNotificado} IS DISTINCT FROM ${desenlace}`,
-				),
-				// Y nadie más lo está mandando ahora mismo.
-				or(
-					isNull(botCobrosBoletas.avisoReclamadoEn),
-					sql`${botCobrosBoletas.avisoReclamadoEn} < now() - interval '${sql.raw(
-						String(MINUTOS_DE_RECLAMO),
-					)} minutes'`,
-				),
-			),
-		)
-		.returning({ id: botCobrosBoletas.id });
-
-	if (reclamada.length === 0) {
-		return { notificado: false, motivo: "EVENTO_REPETIDO" };
-	}
-
-	// A partir de acá la boleta está reclamada: todo camino que no termine en un
-	// envío exitoso tiene que soltarla.
-	const soltarLaBoleta = () =>
-		db
-			.update(botCobrosBoletas)
-			.set({ avisoReclamadoEn: null, updatedAt: new Date() })
-			.where(eq(botCobrosBoletas.id, boleta.id));
-
-	if (desenlace === "rechazado" && !contexto.yaAvisoAlAsesor) {
-		await avisarAlAsesor({
-			numeroSifco,
-			titulo: `Boleta del bot rechazada · ${numeroSifco ?? "sin SIFCO"}`,
-			descripcion:
-				`Se revirtió el pago de Q${monto} que el cliente subió por WhatsApp` +
-				`${contexto.usuario ? ` (por ${contexto.usuario})` : ""}` +
-				`${contexto.motivo ? `. Motivo: ${contexto.motivo}` : ""}. ` +
-				"Al cliente se le avisó que su asesor lo va a contactar.",
-		});
-	}
-
-	const telefono = await telefonoDeLaBoleta(boleta);
-	if (!telefono) {
-		// El lead se borró y no hay a dónde escribir. El hecho NO se pierde: se
-		// notifica al asesor en vez de dejarlo sin nadie.
-		//
-		// El ciclo se cierra igual —se marca este desenlace como contado— porque
-		// reintentarlo cada hora solo repetiría esta misma alerta. No hay
-		// teléfono nuevo que vaya a aparecer solo.
-		await db
-			.update(botCobrosBoletas)
-			.set({
-				notificadoClienteAt: new Date(),
-				desenlaceNotificado: desenlace,
-				avisoReclamadoEn: null,
-				updatedAt: new Date(),
-			})
-			.where(eq(botCobrosBoletas.id, boleta.id));
-
-		await avisarAlAsesor({
-			numeroSifco,
-			titulo: `Sin teléfono para avisarle al cliente · ${numeroSifco ?? "sin SIFCO"}`,
-			descripcion: `La boleta ${boleta.id} (Q${monto}) quedó ${desenlace}, pero no se pudo resolver un teléfono del cliente. Avisarle por otro medio.`,
-		});
-		return { notificado: false, motivo: "SIN_TELEFONO" };
-	}
-
 	const cuotas = pagos
 		.map((p) => p.numeroCuota)
 		.filter((c): c is number => typeof c === "number")
 		.sort((a, b) => a - b);
 
-	const mensaje =
-		desenlace === "validado"
-			? mensajesPagoValidado({ monto, cuotas }).completo
-			: mensajesPagoRechazado(monto).completo;
+	return mandarAvisoAlCliente(boleta, desenlace, {
+		antesDeEnviar: async () => {
+			if (desenlace !== "rechazado" || contexto.yaAvisoAlAsesor) return;
 
-	const salio = await escribirleAlCliente(telefono, mensaje);
+			await avisarAlAsesor({
+				numeroSifco,
+				titulo: `Boleta del bot rechazada · ${numeroSifco ?? "sin SIFCO"}`,
+				descripcion:
+					`Se revirtió el pago de Q${monto} que el cliente subió por WhatsApp` +
+					`${contexto.usuario ? ` (por ${contexto.usuario})` : ""}` +
+					`${contexto.motivo ? `. Motivo: ${contexto.motivo}` : ""}. ` +
+					"Al cliente se le avisó que su asesor lo va a contactar.",
+			});
+		},
+		armarMensaje: () =>
+			desenlace === "validado"
+				? mensajesPagoValidado({ monto, cuotas }).completo
+				: mensajesPagoRechazado(monto).completo,
+		alNoHaberTelefono: async () => {
+			// El lead se borró y no hay a dónde escribir. El hecho NO se pierde: se
+			// notifica al asesor en vez de dejarlo sin nadie.
+			await avisarAlAsesor({
+				numeroSifco,
+				titulo: `Sin teléfono para avisarle al cliente · ${numeroSifco ?? "sin SIFCO"}`,
+				descripcion: `La boleta ${boleta.id} (Q${monto}) quedó ${desenlace}, pero no se pudo resolver un teléfono del cliente. Avisarle por otro medio.`,
+			});
+		},
+	});
+}
 
-	if (!salio) {
-		// El envío se cayó (SimpleTech, red, timeout). Se suelta el reclamo para
-		// que el job de respaldo lo vuelva a intentar: sin esto la boleta quedaba
-		// resuelta y notificada sin que el cliente hubiera recibido nada, y no
-		// había camino que la volviera a mirar.
-		await soltarLaBoleta();
-		return { notificado: false, motivo: "ENVIO_FALLIDO" };
-	}
+/**
+ * El último evento registrado de cada pago, para el job de respaldo.
+ *
+ * Es el guardarraíl de preguntarle a cartera por pagos que YA se resolvieron:
+ * sin él, un pago validado hace tres semanas se traduciría en un evento
+ * `validado` nuevo en cada corrida —el `ocurrido_en` lo pone el job, así que el
+ * unique no lo frena— y la tabla de eventos crecería una fila por hora y por
+ * pago. Solo interesa lo que CAMBIÓ.
+ */
+export async function ultimoEventoDePagos(
+	ids: number[],
+): Promise<Map<number, EventoPago>> {
+	if (ids.length === 0) return new Map();
 
-	// Salió: recién ACÁ se escribe "entregado", con qué fue lo que se entregó.
-	await db
-		.update(botCobrosBoletas)
-		.set({
-			notificadoClienteAt: new Date(),
-			desenlaceNotificado: desenlace,
-			avisoReclamadoEn: null,
-			updatedAt: new Date(),
+	const filas = await db
+		.select({
+			pagoId: botCobrosPagoEventos.pagoId,
+			evento: botCobrosPagoEventos.evento,
 		})
-		.where(eq(botCobrosBoletas.id, boleta.id));
+		.from(botCobrosPagoEventos)
+		.where(inArray(botCobrosPagoEventos.pagoId, ids))
+		.orderBy(botCobrosPagoEventos.ocurridoEn);
 
-	return { notificado: true, motivo: null };
+	const porPago = new Map<number, EventoPago>();
+	for (const fila of filas) porPago.set(fila.pagoId, fila.evento as EventoPago);
+	return porPago;
 }
 
 /**

@@ -21,7 +21,18 @@
  * Contrato: docs/features/bot-whatsapp-cobros/04-validacion-de-boleta.md (§6)
  */
 
-import { and, asc, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
+import {
+	and,
+	asc,
+	eq,
+	gt,
+	inArray,
+	isNotNull,
+	isNull,
+	lt,
+	or,
+	sql,
+} from "drizzle-orm";
 import { db } from "../db";
 import {
 	botCobrosBoletaPagos,
@@ -33,6 +44,7 @@ import {
 	type EventoPago,
 	procesarEventoPago,
 	reintentarAvisoAlCliente,
+	ultimoEventoDePagos,
 } from "../lib/bot-cobros/eventos-pago";
 import { carteraBackClient } from "../services/cartera-back-client";
 import type {
@@ -45,6 +57,19 @@ const ESPERANDO: EstadoBoletaBot[] = ["confirmada", "confirmada_a_verificar"];
 
 /** Tope por corrida: si hay más, se atienden a la hora siguiente. */
 const MAXIMO_POR_CORRIDA = 200;
+
+/**
+ * Hasta cuándo se le sigue preguntando a cartera por una boleta ya resuelta.
+ *
+ * Una reversión puede llegar semanas después de la validación, así que "ya
+ * resolví esta boleta" no es motivo para dejar de mirarla. Pasado el mes, el
+ * costo de preguntar por todo el histórico cada hora deja de valer la pena y
+ * un cambio tan tardío es un caso para una persona.
+ */
+const DIAS_QUE_SE_SIGUE_MIRANDO = 30;
+
+/** Cada cuánto se repite una alerta cuya condición sigue presente. */
+const HORAS_ENTRE_ALERTAS_REPETIDAS = 24;
 
 /**
  * Por dónde iba el barrido de pagos sin resolver.
@@ -147,9 +172,31 @@ export async function recuperarEventosPerdidos(): Promise<ResultadoRespaldo> {
 		)
 		.where(
 			and(
-				isNull(botCobrosBoletaPagos.resueltoEn),
-				inArray(botCobrosBoletas.estado, ESPERANDO),
 				gt(botCobrosBoletaPagos.pagoId, cursorDeBarrido),
+				or(
+					// Los que todavía esperan desenlace.
+					and(
+						isNull(botCobrosBoletaPagos.resueltoEn),
+						inArray(botCobrosBoletas.estado, ESPERANDO),
+					),
+					// Y los YA resueltos de boletas recientes.
+					//
+					// Un pago validado que conta revierte después es un cambio de
+					// estado más, y su webhook se puede perder igual que el primero.
+					// Mirando solo los pendientes, ese cliente se quedaba creyendo
+					// que su pago se acreditó: el puente ya estaba resuelto, así que
+					// nadie volvía a preguntar por él nunca.
+					//
+					// El corte va por `created_at` de la boleta y no por
+					// `updated_at`, que estos mismos jobs tocan: si no, una boleta
+					// se quedaría en la ventana para siempre.
+					and(
+						isNotNull(botCobrosBoletaPagos.resueltoEn),
+						sql`${botCobrosBoletas.createdAt} > now() - interval '${sql.raw(
+							String(DIAS_QUE_SE_SIGUE_MIRANDO),
+						)} days'`,
+					),
+				),
 			),
 		)
 		.orderBy(asc(botCobrosBoletaPagos.pagoId))
@@ -183,6 +230,9 @@ export async function recuperarEventosPerdidos(): Promise<ResultadoRespaldo> {
 		}
 
 		const porId = new Map(estados.map((e) => [e.pago_id, e]));
+		// Lo que ya sabíamos de cada pago. Solo se emite lo que cambió: ver
+		// `ultimoEventoDePagos`.
+		const yaSabido = await ultimoEventoDePagos(pendientes.map((p) => p.pagoId));
 
 		for (const pendiente of pendientes) {
 			const pago = porId.get(pendiente.pagoId);
@@ -207,15 +257,27 @@ export async function recuperarEventosPerdidos(): Promise<ResultadoRespaldo> {
 				(pago?.reversion ?? reversionSuelta)?.estado === "iniciada";
 
 			if (!deduccion && aMedias) {
+				// El pago se queda sin resolver a propósito, así que esta misma
+				// condición vuelve a aparecer en cada corrida. Sin el tope, el
+				// asesor recibe la misma notificación cada hora hasta que alguien
+				// destrabe la reversión — y deja de leerlas. El título lleva el
+				// `pago_id` para que dos problemas distintos no se tapen.
 				await avisarAlAsesor({
 					numeroSifco: pendiente.numeroSifco,
-					titulo: `Reversión a medias en cartera · ${pendiente.numeroSifco}`,
+					titulo: `Reversión a medias en cartera · ${pendiente.numeroSifco} · pago ${pendiente.pagoId}`,
 					descripcion: `El pago ${pendiente.pagoId} tiene una reversión que quedó en 'iniciada': no se sabe si se revirtió de verdad. Al cliente NO se le dijo nada. Revisar el crédito.`,
+					noRepetirPorHoras: HORAS_ENTRE_ALERTAS_REPETIDAS,
 				});
 				continue;
 			}
 
 			if (!deduccion) continue;
+
+			// Cartera dice lo mismo que ya teníamos: no pasó nada nuevo. Emitirlo
+			// igual metería una fila por hora en la tabla de eventos, porque el
+			// `ocurrido_en` de una deducción sin fecha lo pone este job y el unique
+			// no la reconoce como repetida.
+			if (yaSabido.get(pendiente.pagoId) === deduccion.evento) continue;
 
 			// Se procesa por el MISMO camino que el webhook: idempotente, así que
 			// si el aviso sí había llegado, esto no manda un segundo WhatsApp.
@@ -304,38 +366,48 @@ async function reintentarAvisosDebidos(): Promise<number> {
 		.where(
 			and(
 				inArray(botCobrosBoletas.estado, PUEDEN_DEBER_MENSAJE),
-				// Le debemos el mensaje si nunca se le mandó ninguno, o si el
-				// desenlace que tiene la boleta ahora no es el que se le contó.
-				// Lo segundo pasa cuando conta revierte un pago que ya se había
-				// validado: la boleta cambia de `confirmada` a `rechazada` y hay
-				// que volver a escribirle.
-				sql`(
-					${botCobrosBoletas.notificadoClienteAt} IS NULL
-					OR ${botCobrosBoletas.desenlaceNotificado} IS DISTINCT FROM (
-						CASE WHEN ${botCobrosBoletas.estado} = 'rechazada'
-							THEN 'rechazado' ELSE 'validado' END
-					)
-				)`,
-				// Y que no lo esté mandando alguien más en este momento. El
-				// reclamo caduca: un proceso que se cayó entre reclamar y enviar
-				// no soltó nada, y sin este vencimiento esa boleta no volvería a
-				// mirarse nunca.
+				// Que no lo esté mandando alguien más en este momento. El reclamo
+				// caduca: un proceso que se cayó entre reclamar y enviar no soltó
+				// nada, y sin este vencimiento esa boleta no volvería a mirarse.
 				sql`(
 					${botCobrosBoletas.avisoReclamadoEn} IS NULL
 					OR ${botCobrosBoletas.avisoReclamadoEn} < now() - interval '${sql.raw(
 						String(MINUTOS_DE_RECLAMO_VENCIDO),
 					)} minutes'
 				)`,
-				// Con pagos, y ninguno sin resolver. Las dos condiciones hacen
-				// falta: sin la primera entrarían las boletas que todavía no
-				// generaron ningún pago, y para esas no hay nada que avisar.
+				// Con pagos: una boleta que todavía no generó ninguno no tiene nada
+				// que avisar.
 				sql`EXISTS (
 					SELECT 1 FROM bot_cobros_boleta_pagos p
 					WHERE p.boleta_id = ${botCobrosBoletas.id}
 				)`,
-				sql`NOT EXISTS (
-					SELECT 1 FROM bot_cobros_boleta_pagos p
-					WHERE p.boleta_id = ${botCobrosBoletas.id} AND p.resuelto_en IS NULL
+				// Y dos formas de deberle un mensaje:
+				sql`(
+					(
+						-- (a) Ya no falta ningún pago, y el desenlace que tiene la
+						-- boleta no es el que se le contó. Cubre el envío que falló y
+						-- el pago validado que conta revirtió después.
+						NOT EXISTS (
+							SELECT 1 FROM bot_cobros_boleta_pagos p
+							WHERE p.boleta_id = ${botCobrosBoletas.id} AND p.resuelto_en IS NULL
+						)
+						AND (
+							${botCobrosBoletas.notificadoClienteAt} IS NULL
+							OR ${botCobrosBoletas.desenlaceNotificado} IS DISTINCT FROM (
+								CASE WHEN ${botCobrosBoletas.estado} = 'rechazada'
+									THEN 'rechazado' ELSE 'validado' END
+							)
+						)
+					)
+					OR (
+						-- (b) Le dijimos "acreditado" y la boleta volvió a revisión.
+						-- Le debemos la corrección, aunque todavía no haya desenlace.
+						${botCobrosBoletas.desenlaceNotificado} = 'validado'
+						AND EXISTS (
+							SELECT 1 FROM bot_cobros_boleta_pagos p
+							WHERE p.boleta_id = ${botCobrosBoletas.id} AND p.resuelto_en IS NULL
+						)
+					)
 				)`,
 			),
 		)

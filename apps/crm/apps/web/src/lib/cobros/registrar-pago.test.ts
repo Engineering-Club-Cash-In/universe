@@ -45,7 +45,7 @@ describe("getConvenioAplicado", () => {
 });
 
 describe("calcularDistribucionPago", () => {
-	test("el convenio es catch-up informativo y NO se resta de lo disponible para la cuota normal (regla de negocio 06-ago-2026, igual que cartera-back/carteraFront)", () => {
+	test("el convenio se resta de lo disponible antes de pasar a la cuota normal (igual que PagoForm.tsx de carteraFront, líneas 297-311)", () => {
 		const { distribucion, montoRestante } = calcularDistribucionPago({
 			montoBoleta: 1000,
 			otros: 0,
@@ -63,12 +63,12 @@ describe("calcularDistribucionPago", () => {
 			item.concepto.startsWith("4. Cuota #"),
 		);
 
-		// La boleta completa (1000) cuenta para ambos conceptos en paralelo:
-		// el convenio se topa a 800 (mínimo entre cuotaConvenio y disponible),
-		// y la cuota normal sigue viendo el disponible completo (1000) porque
-		// cartera-back no resta el convenio del disponible que paga cuotas.
+		// El convenio se topa a 800 y se resta de montoRestante; la cuota
+		// normal solo ve lo que sobra (200). El resto (800) no cabe en la
+		// cuota, así que queda 0 disponible tras la cuota — no se cascada a
+		// otras cuotas pendientes, solo a la seleccionada.
 		expect(convenio?.monto).toBe(800);
-		expect(cuota?.monto).toBe(1000);
+		expect(cuota?.monto).toBe(200);
 		expect(montoRestante).toBe(0);
 	});
 
@@ -87,9 +87,8 @@ describe("calcularDistribucionPago", () => {
 			"1. Otros",
 			"2. Mora",
 			"3. Cuota Convenio",
-			"4. Cuota #3",
 		]);
-		expect(distribucion.map((item) => item.monto)).toEqual([100, 50, 350, 350]);
+		expect(distribucion.map((item) => item.monto)).toEqual([100, 50, 350]);
 	});
 
 	test("sin convenio activo, toda la boleta tras otros/mora va a la cuota", () => {

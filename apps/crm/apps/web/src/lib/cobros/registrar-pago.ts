@@ -88,13 +88,14 @@ export function calcularDistribucionPago(params: {
 	}
 
 	if (cuotaConvenio > 0) {
-		// El convenio es solo informativo: cartera-back lo registra como
-		// catch-up en paralelo pero NO lo resta del disponible que sigue
-		// pagando cuotas corrientes — la boleta completa (tras otros/mora)
-		// cuenta para ambos (registerPayment.ts:927-938, regla de negocio
-		// 06-ago-2026). No es doble conteo real: son dos efectos distintos
-		// de la misma boleta, igual que lo muestra carteraFront.
+		// Mismo comportamiento que PagoForm.tsx de carteraFront (líneas
+		// 297-298): el convenio SÍ se resta de montoRestante antes de pasar a
+		// la cuota normal, y solo se cascada a una cuota (el resto queda como
+		// excedente/nuevo saldo a favor). No se cascada a múltiples cuotas
+		// pendientes aunque cartera-back lo haga internamente — replica el
+		// mismo alcance que ve tesorería hoy desde su propia pantalla.
 		const montoConv = getConvenioAplicado(montoRestante, 0, 0, cuotaConvenio);
+		montoRestante -= montoConv;
 		distribucion.push({ concepto: "3. Cuota Convenio", monto: montoConv });
 	}
 

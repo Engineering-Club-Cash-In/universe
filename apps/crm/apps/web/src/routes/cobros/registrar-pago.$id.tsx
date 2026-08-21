@@ -97,7 +97,14 @@ function RegistrarPagoPage() {
 		"transferencia" | "cheque" | "boleta" | ""
 	>("");
 	const [numeroAutorizacion, setNumeroAutorizacion] = useState("");
-	const [fechaBoleta, setFechaBoleta] = useState<Date | undefined>(new Date());
+	// CB-128: el default no puede ser new Date() (día calendario del
+	// navegador) — en un offset adelantado (ej. UTC+14) preseleccionaría un
+	// día que en Guatemala aún no llega, y el cutoff de fecha futura lo
+	// marcaría disabled sin que el asesor entienda por qué. Se inicializa
+	// directo desde el día calendario GT.
+	const [fechaBoleta, setFechaBoleta] = useState<Date | undefined>(
+		() => new Date(`${aFechaISO_GT(new Date())}T12:00:00`),
+	);
 	const [observaciones, setObservaciones] = useState("");
 	const [archivo, setArchivo] = useState<File | null>(null);
 	const [confirmacionAbierta, setConfirmacionAbierta] = useState(false);
@@ -393,6 +400,13 @@ function RegistrarPagoPage() {
 		}
 		if (!fechaBoleta) {
 			toast.error("Selecciona la fecha de la boleta");
+			return;
+		}
+		// CB-128: segunda capa de defensa además del disabled del Calendar —
+		// evita registrar una fecha de boleta posterior al día calendario GT
+		// aunque fechaBoleta llegue con un valor inválido por otra vía.
+		if (aFechaISO(fechaBoleta) > hoyGT) {
+			toast.error("La fecha de la boleta no puede ser futura");
 			return;
 		}
 		if (!archivo) {

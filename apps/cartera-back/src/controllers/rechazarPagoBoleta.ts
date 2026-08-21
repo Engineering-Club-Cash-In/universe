@@ -33,6 +33,7 @@ import {
   esPagoDelBotCobros,
   notificarRechazoPagoBot,
 } from "../services/crm.service";
+import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import { reversePayment } from "./reversePayment";
 
 export const rechazarPagoBoletaSchema = z.object({
@@ -178,110 +179,152 @@ export const rechazarPagoBoleta = async ({ body, set, user }: any) => {
     ...new Set([pago_id, ...hermanos.map((h) => h.pago_id)]),
   ].sort((a, b) => b - a); // el más nuevo primero, como en un reverso a mano
 
-  // El saldo a favor se fotografía ANTES de los reversos, porque el reverso
-  // de siempre tiene un doble descuento cuando la boleta creó varias filas:
-  // `registerPayment` estampa el monto COMPLETO de la boleta en cada fila
-  // (misma familia que el bug del pago_convenio duplicado) y cada llamada a
-  // `reversePayment` resta ese monto entero de `usuarios.saldo_a_favor`. Con
-  // N hermanos, la misma boleta se descuenta N veces y puede comerse un saldo
-  // a favor que el cliente tenía de antes. Con la foto, al final se deja el
-  // saldo como lo habría dejado UNA sola reversión — el mismo cálculo que
-  // hace `reversePayment` (resta con piso en cero), sin inventar contabilidad
-  // nueva ni tocarlo (D-38).
-  let saldoAntesDeRevertir: string | null = null;
-  if (pagosARevertir.length > 1 && credito?.usuario_id) {
+  // 1 · Los reversos, con el handler de siempre — TODO EL LOTE bajo el mismo
+  // candado por crédito que toma `insertPayment`. Sin él, un pago entrando al
+  // mismo crédito entre la foto del saldo y su escritura final se pisaría en
+  // silencio (los reversos pasan minutos en facturas e inversionistas). Un
+  // pago de OTRO crédito del mismo usuario todavía puede colarse: esa
+  // exposición ya la tiene `reversePayment` solo —lee y escribe el saldo sin
+  // ningún candado por usuario— y este endpoint no la agranda ni la achica.
+  //
+  // Sobre el saldo a favor, dos hechos del sistema que este endpoint NO puede
+  // arreglar sin tocar lo que D-38 prohíbe: `registerPayment` le acredita al
+  // saldo solo el SOBRANTE de la boleta (lo que no cupo en cuotas), pero
+  // estampa el monto COMPLETO en cada fila, y cada `reversePayment` resta ese
+  // monto entero (con piso en cero). O sea: hasta UNA reversión puede restar
+  // de más, y N hermanos restarían N veces. Cuánto aportó la boleta de verdad
+  // no es reconstruible (no se persiste, y armarlo desde monto_aplicado/mora/
+  // convenio sería inventar contabilidad sobre estampas con bugs conocidos).
+  // Lo único que no inventa nada: dejar el efecto neto EXACTO de una reversión
+  // del sistema. Se fotografía el saldo después del PRIMER reverso y al final
+  // se restaura ahí — los N−1 descuentos extra desaparecen y el resultado es
+  // el mismo que conta obtiene hoy reversando un pago de una sola fila. Si
+  // `reversePayment` corrige su fórmula algún día, esto la hereda gratis.
+  type CorteAMedias = {
+    resultadoReverso: unknown;
+    revertidos: number[];
+    saldoRestaurado: boolean;
+    pagoFallido: number;
+  };
+
+  const leerSaldo = async (): Promise<string | null> => {
+    if (!credito?.usuario_id) return null;
     const [duenio] = await db
       .select({ saldo_a_favor: usuarios.saldo_a_favor })
       .from(usuarios)
       .where(eq(usuarios.usuario_id, credito.usuario_id))
       .limit(1);
-    saldoAntesDeRevertir = duenio?.saldo_a_favor ?? null;
-  }
+    return duenio?.saldo_a_favor ?? null;
+  };
 
-  // 1 · Los reversos, con el handler de siempre. `setInterno` captura su
-  // estado sin ensuciar el nuestro: si uno falla, se corta ahí, se informa
-  // qué quedó a medias y NO se avisa nada — el mensaje de "no se acreditó"
-  // solo puede salir cuando ya no queda nada aplicado.
-  const revertidos: number[] = [];
-  for (const id of pagosARevertir) {
-    const setInterno: { status?: number } = {};
-    const resultadoReverso = await reversePayment({
-      body: { credito_id, pago_id: id },
-      set: setInterno,
-    });
+  const resultadoLote = await withPaymentAdvisoryLock(
+    credito_id,
+    async (): Promise<{ corte: CorteAMedias } | { revertidos: number[] }> => {
+      const conCorreccion =
+        pagosARevertir.length > 1 && Boolean(credito?.usuario_id);
+      const saldoAntesDeRevertir = conCorreccion ? await leerSaldo() : null;
+      let saldoTrasPrimerReverso: string | null = null;
 
-    if (setInterno.status && setInterno.status >= 400) {
-      set.status = setInterno.status;
+      const revertidos: number[] = [];
+      for (const id of pagosARevertir) {
+        const setInterno: { status?: number } = {};
+        const resultadoReverso = await reversePayment({
+          body: { credito_id, pago_id: id },
+          set: setInterno,
+        });
 
-      // El corte a medias también arregla el saldo — RESTAURÁNDOLO, no
-      // restando: los k reversos que sí salieron ya restaron k veces la
-      // boleta, así que se vuelve a la foto (deducción neta CERO en este
-      // intento) y el descuento único queda para el intento que complete la
-      // boleta. Si acá se restara, el reintento la restaría OTRA vez: los
-      // hermanos ya reversados pierden sus filas de `boletas` y el próximo
-      // request ni los ve. Con esto, cada camino descuenta la boleta
-      // exactamente una vez: completo de un tiro (corrección de abajo),
-      // o parcial+reintento (neta cero ahora, una resta al completar —
-      // incluso si al reintento le queda un solo hermano y el descuento lo
-      // hace el propio reversePayment).
-      let saldoRestaurado = true;
-      if (
-        revertidos.length > 0 &&
-        saldoAntesDeRevertir !== null &&
-        credito?.usuario_id
-      ) {
-        try {
-          await db
-            .update(usuarios)
-            .set({ saldo_a_favor: saldoAntesDeRevertir })
-            .where(eq(usuarios.usuario_id, credito.usuario_id));
-        } catch (error) {
-          saldoRestaurado = false;
-          console.error(
-            `[RechazarPagoBoleta] no se pudo restaurar el saldo a favor tras el corte a medias:`,
-            error,
-          );
+        if (setInterno.status && setInterno.status >= 400) {
+          set.status = setInterno.status;
+
+          // El corte a medias arregla el saldo RESTAURÁNDOLO a la foto
+          // inicial: deducción neta CERO en este intento, y el descuento
+          // único queda para el intento que complete la boleta. Si acá se
+          // restara algo, el reintento restaría OTRA vez — los hermanos ya
+          // reversados pierden sus filas de `boletas` y el próximo request
+          // ni los ve. Cada camino descuenta la boleta exactamente una vez:
+          // completo de un tiro (corrección de abajo), o parcial+reintento
+          // (neta cero ahora, una resta al completar — incluso si al
+          // reintento le queda un solo hermano y el descuento lo hace el
+          // propio reversePayment).
+          let saldoRestaurado = true;
+          if (
+            revertidos.length > 0 &&
+            saldoAntesDeRevertir !== null &&
+            credito?.usuario_id
+          ) {
+            try {
+              await db
+                .update(usuarios)
+                .set({ saldo_a_favor: saldoAntesDeRevertir })
+                .where(eq(usuarios.usuario_id, credito.usuario_id));
+            } catch (error) {
+              saldoRestaurado = false;
+              console.error(
+                `[RechazarPagoBoleta] no se pudo restaurar el saldo a favor tras el corte a medias:`,
+                error,
+              );
+            }
+          }
+
+          return {
+            corte: {
+              resultadoReverso,
+              revertidos,
+              saldoRestaurado,
+              pagoFallido: id,
+            },
+          };
+        }
+        revertidos.push(id);
+
+        // La foto que manda: lo que el PRIMER reverso dejó en el saldo.
+        if (conCorreccion && revertidos.length === 1) {
+          saldoTrasPrimerReverso = await leerSaldo();
         }
       }
 
-      return {
-        ...(typeof resultadoReverso === "object" ? resultadoReverso : {}),
-        success: false,
-        message: revertidos.length
-          ? `⚠️ Se revirtieron los pagos ${revertidos.join(", ")} pero el ${id} falló: la boleta quedó a medias, NO se notificó al cliente.${
-              saldoRestaurado
-                ? " El saldo a favor quedó restaurado (la boleta se descuenta cuando se complete el rechazo)."
-                : " ⚠️ Y NO se pudo restaurar el saldo a favor: revisalo a mano antes de reintentar."
-            } Resolvé el pago ${id} y volvé a rechazar.`
-          : `El reverso del pago ${id} falló: no se revirtió nada ni se notificó al cliente.`,
-        pagos_revertidos: revertidos,
-        pago_fallido: id,
-      };
-    }
-    revertidos.push(id);
+      // La corrección del doble descuento: el saldo vuelve a lo que dejó el
+      // primer reverso, como si los hermanos nunca lo hubieran tocado.
+      if (
+        conCorreccion &&
+        saldoTrasPrimerReverso !== null &&
+        credito?.usuario_id
+      ) {
+        await db
+          .update(usuarios)
+          .set({ saldo_a_favor: saldoTrasPrimerReverso })
+          .where(eq(usuarios.usuario_id, credito.usuario_id));
+
+        console.log(
+          `[RechazarPagoBoleta] saldo a favor restaurado a Q${saldoTrasPrimerReverso} (lo que dejó el primer reverso; los otros ${revertidos.length - 1} no lo tocan)`,
+        );
+      }
+
+      return { revertidos };
+    },
+  );
+
+  if ("corte" in resultadoLote) {
+    const { resultadoReverso, revertidos, saldoRestaurado, pagoFallido } =
+      resultadoLote.corte;
+    return {
+      ...(typeof resultadoReverso === "object" && resultadoReverso !== null
+        ? resultadoReverso
+        : {}),
+      success: false,
+      message: revertidos.length
+        ? `⚠️ Se revirtieron los pagos ${revertidos.join(", ")} pero el ${pagoFallido} falló: la boleta quedó a medias, NO se notificó al cliente.${
+            saldoRestaurado
+              ? " El saldo a favor quedó restaurado (la boleta se descuenta cuando se complete el rechazo)."
+              : " ⚠️ Y NO se pudo restaurar el saldo a favor: revisalo a mano antes de reintentar."
+          } Resolvé el pago ${pagoFallido} y volvé a rechazar.`
+        : `El reverso del pago ${pagoFallido} falló: no se revirtió nada ni se notificó al cliente.`,
+      pagos_revertidos: revertidos,
+      pago_fallido: pagoFallido,
+    };
   }
 
-  // La corrección del doble descuento (ver la foto de arriba): los N reversos
-  // restaron N veces el monto de la boleta; acá el saldo queda en lo que UNA
-  // reversión habría dejado: max(0, saldo_inicial - monto_boleta).
-  if (
-    pagosARevertir.length > 1 &&
-    saldoAntesDeRevertir !== null &&
-    credito?.usuario_id
-  ) {
-    const montoBoleta = new Big(pago.monto_boleta ?? 0);
-    let saldoCorregido = new Big(saldoAntesDeRevertir).minus(montoBoleta);
-    if (saldoCorregido.lt(0)) saldoCorregido = new Big(0);
-
-    await db
-      .update(usuarios)
-      .set({ saldo_a_favor: saldoCorregido.toString() })
-      .where(eq(usuarios.usuario_id, credito.usuario_id));
-
-    console.log(
-      `[RechazarPagoBoleta] saldo a favor corregido a Q${saldoCorregido.toString()} (una sola resta de la boleta, no ${pagosARevertir.length})`,
-    );
-  }
+  const revertidos = resultadoLote.revertidos;
 
   // 2 · El aviso, esperando la respuesta: es el punto del botón. Si no llega,
   // los reversos YA ESTÁN HECHOS y eso se le dice a conta con todas las letras —

@@ -510,15 +510,22 @@ cualquiera— y hace dos cosas, en este orden:
    reversaría Q0 y le avisaría al cliente por una boleta que ya se resolvió por otro
    camino (409; el front tampoco ofrece el botón sobre `no_required`). Si un reverso del medio falla, se
    informa qué quedó a medias y **no se avisa nada**: el mensaje solo puede salir cuando ya
-   no queda nada aplicado. Y como `registerPayment` estampa el monto COMPLETO de la boleta
-   en cada fila y cada `reversePayment` resta ese monto entero de `usuarios.saldo_a_favor`
-   (misma familia que el bug del pago_convenio duplicado), reversar N hermanos descontaría
-   la misma boleta N veces: el endpoint fotografía el saldo antes de empezar y al final lo
-   deja en lo que UNA sola reversión habría dejado — `max(0, saldo_inicial − monto_boleta)`,
-   el mismo cálculo del reverso, sin tocarlo (D-38). Y si el lote se corta a medias, el
-   saldo se **restaura** a la foto (deducción neta cero en ese intento): el descuento único
-   queda para el intento que complete la boleta, porque los hermanos ya reversados pierden
-   sus filas de `boletas` y un reintento que restara de nuevo la descontaría dos veces.
+   no queda nada aplicado. Todo el lote corre **bajo el candado por crédito de
+   `insertPayment`**, y el saldo a favor se corrige sin inventar ninguna fórmula: como
+   `registerPayment` le acredita al saldo solo el SOBRANTE de la boleta pero estampa el
+   monto COMPLETO en cada fila (misma familia que el bug del pago_convenio duplicado), y
+   cada `reversePayment` resta ese monto entero, reversar N hermanos descontaría la boleta
+   N veces — y cuánto aportó de verdad no es reconstruible. Lo único que no inventa nada:
+   el endpoint fotografía el saldo **después del primer reverso** y al final lo restaura
+   ahí — el efecto neto es EXACTAMENTE el de una reversión del sistema (piso en cero
+   incluido), el mismo que conta obtiene hoy con un pago de una sola fila, y si
+   `reversePayment` corrige su fórmula algún día esto la hereda gratis (D-38). Si el lote
+   se corta a medias, el saldo se **restaura** a la foto inicial (deducción neta cero en
+   ese intento): el descuento único queda para el intento que complete la boleta, porque
+   los hermanos ya reversados pierden sus filas de `boletas` y un reintento que restara de
+   nuevo la descontaría dos veces. Un pago de OTRO crédito del mismo usuario sigue pudiendo
+   colarse entre foto y escritura: esa exposición ya la tiene `reversePayment` solo (no hay
+   candado por usuario en cartera) — paridad, no regresión.
 2. **Le avisa al CRM** (`POST /api/bot/cobros/pagos/evento`, llave `CARTERA_WEBHOOK_API_KEY`
    por `x-api-key`), **esperando la respuesta**: avisar es el punto del botón, y conta ve en
    pantalla si el WhatsApp salió. Si el CRM no contesta, el reverso YA está hecho y el toast

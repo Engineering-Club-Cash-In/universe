@@ -605,9 +605,9 @@ export const especificacionBotCobros = {
 					"| `moraPorConfirmar` | `true` = tiene mora pero su monto no se puede citar. El saldo lo refresca un job a las 23:59: entre que el cliente paga y esa corrida, la cifra guardada no cuadra. Antes que decirle un número equivocado, no se manda ninguno — conviene ofrecerle hablar con su asesor |",
 					"| `convenio` | `null` si no tiene |",
 					"| `asesor` | Con quién puede hablar el cliente sobre este crédito. `telefono` puede venir vacío |",
-					"| `mensajes` | **Los mismos datos ya escritos para el chat**, en tres formatos: `titulo` (una línea), `resumen` (lo accionable) y `completo` (todo). Se pueden pegar tal cual — traen emojis y negrita de WhatsApp (`*así*`). Los campos de arriba siguen estando para lo que necesites ramificar |",
+					"| `mensajes` | **Los mismos datos ya escritos para el chat**, en tres formatos: `titulo` (una línea), `resumen` (lo accionable) y `completo` (todo). Se pueden pegar tal cual — van SIN emojis (el motor del bot no los procesa) y con negrita de WhatsApp (`*así*`). Los campos de arriba siguen estando para lo que necesites ramificar |",
 					"| `vehiculo` | `null` si el crédito no tiene vehículo registrado — se responde igual, no es error |",
-					"| `cuentasPago` | **Dónde deposita el cliente.** `texto` se muestra literal (ya trae emojis, saltos y negrita); `cuentas` es lo mismo en estructura. Son fijas: no cambian entre créditos ni entre clientes |",
+					"| `cuentasPago` | **Dónde deposita el cliente.** `texto` se muestra literal (sin emojis, con saltos y negrita); `cuentas` es lo mismo en estructura. Son fijas: no cambian entre créditos ni entre clientes |",
 				].join("\n"),
 				operationId: "infoCredito",
 				requestBody: {
@@ -680,7 +680,7 @@ export const especificacionBotCobros = {
 											},
 											cuentasPago: {
 												texto:
-													"🏦 *Cuentas para tu pago*\n\nTodas a nombre de *CUBE INVESTMENTS, S.A.* (monetarias):\n\n• *Banco Industrial* — 5520029876\n• *Banco Agromercantil (BAM)* — 3020123033\n• *Banco G&T Continental* — 01300039945\n• *Banrural* — 3394002346",
+													"*Cuentas para tu pago*\n\nTodas a nombre de *CUBE INVESTMENTS, S.A.* (monetarias):\n\n• *Banco Industrial* — 5520029876\n• *Banco Agromercantil (BAM)* — 3020123033\n• *Banco G&T Continental* — 01300039945\n• *Banrural* — 3394002346",
 												cuentas: [
 													{
 														banco: "Banco Industrial",
@@ -714,11 +714,11 @@ export const especificacionBotCobros = {
 											},
 											mensajes: {
 												titulo:
-													"⚠️ *MAZDA CX-5 GRAND TOURING AWD 2016 · P-247JYT*",
+													"*MAZDA CX-5 GRAND TOURING AWD 2016 · P-247JYT*",
 												resumen:
-													"⚠️ *MAZDA CX-5 GRAND TOURING AWD 2016 · P-247JYT*\n📄 Cuota 8 de 84 · Q5,891.15\n⚠️ Tenés 2 cuotas atrasadas\n📅 Próximo pago: 30 de agosto de 2026",
+													"*MAZDA CX-5 GRAND TOURING AWD 2016 · P-247JYT*\nCuota 8 de 84 · Q5,891.15\nTenés 2 cuotas atrasadas\nPróximo pago: 30 de agosto de 2026",
 												completo:
-													"⚠️ *MAZDA CX-5 GRAND TOURING AWD 2016 · P-247JYT*\n\n💵 Monto del crédito: Q198,252.40\n📄 Cuota mensual: Q5,891.15\n🔢 Vas en la cuota 8 de 84\n⚠️ Tenés *2 cuotas atrasadas*\n📅 Próxima fecha de pago: 30 de agosto de 2026\n\n🤝 *Tu convenio de pago*\n   Cuota del convenio: Q981.86\n   Llevás 1 de 6 pagos\n   Te falta: Q4,909.29\n\n🚙 Vehículo: MAZDA CX-5 GRAND TOURING AWD 2016\n   Placa: P-247JYT\n\n👤 Tu asesor: Erik Rivas\n   📞 35111822",
+													"*MAZDA CX-5 GRAND TOURING AWD 2016 · P-247JYT*\n\nMonto del crédito: Q198,252.40\nCuota mensual: Q5,891.15\nVas en la cuota 8 de 84\nTenés *2 cuotas atrasadas*\nPróxima fecha de pago: 30 de agosto de 2026\n\n*Tu convenio de pago*\n   Cuota del convenio: Q981.86\n   Llevás 1 de 6 pagos\n   Te falta: Q4,909.29\n\nVehículo: MAZDA CX-5 GRAND TOURING AWD 2016\n   Placa: P-247JYT\n\nTu asesor: Erik Rivas\n   Tel. 35111822",
 											},
 										},
 									},
@@ -1162,11 +1162,11 @@ export const especificacionBotCobros = {
 											excedente: "0.00",
 										},
 										mensajes: {
-											titulo: "🧾 *Boleta recibida · Q500.00*",
+											titulo: "*Boleta recibida · Q500.00*",
 											resumen:
-												"🧾 *Boleta recibida · Q500.00*\n\n💵 Monto: *Q500.00*\n🏦 Banco: Banrural\n📅 Fecha: 27 de abril de 2026\n🔢 No. de autorización: 524075550\n\n¿Está correcto?",
+												"*Boleta recibida · Q500.00*\n\nMonto: *Q500.00*\nBanco: Banrural\nFecha: 27 de abril de 2026\nNo. de autorización: 524075550\n\n¿Está correcto?",
 											completo:
-												"🧾 *Boleta recibida · Q500.00*\n\n💵 Monto: *Q500.00*\n🏦 Banco: Banrural\n📅 Fecha: 27 de abril de 2026\n🔢 No. de autorización: 524075550\n\n📄 *Cómo se va a aplicar*\n   1. A tu mora de Q1,178.23\n   2. A tu cuota 8 de 84\n   Falta de esa cuota: Q5,891.15\n\n¿Está correcto?",
+												"*Boleta recibida · Q500.00*\n\nMonto: *Q500.00*\nBanco: Banrural\nFecha: 27 de abril de 2026\nNo. de autorización: 524075550\n\n*Cómo se va a aplicar*\n   1. A tu mora de Q1,178.23\n   2. A tu cuota 8 de 84\n   Falta de esa cuota: Q5,891.15\n\n¿Está correcto?",
 										},
 									},
 								},
@@ -1532,11 +1532,11 @@ export const especificacionBotCobros = {
 										fechaBoleta: "2026-08-18",
 										numeroAutorizacion: "123456789",
 										mensajes: {
-											titulo: "✅ *Pago recibido · Q12,528.20*",
+											titulo: "*Pago recibido · Q12,528.20*",
 											resumen:
-												"✅ *Pago recibido · Q12,528.20*\n\nEstá en validación. Te avisamos cuando se acredite.",
+												"*Pago recibido · Q12,528.20*\n\nEstá en validación. Te avisamos cuando se acredite.",
 											completo:
-												"✅ *Pago recibido · Q12,528.20*\n\nYa registramos tu pago. Nuestro equipo de contabilidad tiene que validar los fondos.\n\n📲 Te avisamos por este mismo medio cuando quede acreditado.",
+												"*Pago recibido · Q12,528.20*\n\nYa registramos tu pago. Nuestro equipo de contabilidad tiene que validar los fondos.\n\nTe avisamos por este mismo medio cuando quede acreditado.",
 										},
 									},
 								},

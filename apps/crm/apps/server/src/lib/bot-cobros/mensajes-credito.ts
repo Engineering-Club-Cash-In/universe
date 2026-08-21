@@ -87,82 +87,82 @@ export function armarMensajes(info: InfoCreditoBot): MensajesCredito {
 
 	// El vehículo es lo que el cliente reconoce como "su crédito"; si no lo hay,
 	// `etiqueta` ya trae el nombre del titular como alternativa (paso 1).
-	const titulo = `${atrasado ? "⚠️" : "🚗"} *${info.etiqueta}*`;
+	const titulo = `*${info.etiqueta}*`;
 
 	// ── Resumen ────────────────────────────────────────────────────────────────
 	const lineasResumen = [titulo];
 
 	if (info.cuotaActual) {
 		lineasResumen.push(
-			`📄 Cuota ${info.cuotaActual.numero} de ${info.cuotaActual.de} · ${quetzales(info.cuotaMensual)}`,
+			`Cuota ${info.cuotaActual.numero} de ${info.cuotaActual.de} · ${quetzales(info.cuotaMensual)}`,
 		);
 	}
 
 	if (atrasado) {
 		lineasResumen.push(
-			`⚠️ Tenés ${pluralCuotas(info.cuotasAtrasadas)} atrasada${info.cuotasAtrasadas === 1 ? "" : "s"}`,
+			`Tenés ${pluralCuotas(info.cuotasAtrasadas)} atrasada${info.cuotasAtrasadas === 1 ? "" : "s"}`,
 		);
 	}
 
 	if (info.mora) {
-		lineasResumen.push(`💰 Mora: ${quetzales(info.mora.monto)}`);
+		lineasResumen.push(`Mora: ${quetzales(info.mora.monto)}`);
 	}
 
 	if (info.proximaFechaPago) {
 		lineasResumen.push(
-			`📅 Próximo pago: ${fechaLegible(info.proximaFechaPago)}`,
+			`Próximo pago: ${fechaLegible(info.proximaFechaPago)}`,
 		);
 	} else if (info.cuotaActual?.vencida) {
 		// Todas las cuotas vencidas y ninguna futura: no hay próxima fecha que
 		// ofrecer, pero callarlo dejaría el mensaje sin cierre.
 		lineasResumen.push(
-			`📅 Tu cuota venció el ${fechaLegible(info.cuotaActual.fechaVencimiento)}`,
+			`Tu cuota venció el ${fechaLegible(info.cuotaActual.fechaVencimiento)}`,
 		);
 	}
 
 	// ── Completo ───────────────────────────────────────────────────────────────
 	const lineas = [titulo, ""];
 
-	lineas.push(`💵 Monto del crédito: ${quetzales(info.capitalActivo)}`);
-	lineas.push(`📄 Cuota mensual: ${quetzales(info.cuotaMensual)}`);
+	lineas.push(`Monto del crédito: ${quetzales(info.capitalActivo)}`);
+	lineas.push(`Cuota mensual: ${quetzales(info.cuotaMensual)}`);
 
 	if (info.cuotaActual) {
 		lineas.push(
-			`🔢 Vas en la cuota ${info.cuotaActual.numero} de ${info.cuotaActual.de}`,
+			`Vas en la cuota ${info.cuotaActual.numero} de ${info.cuotaActual.de}`,
 		);
 	}
 
 	if (atrasado) {
 		lineas.push(
-			`⚠️ Tenés *${pluralCuotas(info.cuotasAtrasadas)} atrasada${info.cuotasAtrasadas === 1 ? "" : "s"}*`,
+			`Tenés *${pluralCuotas(info.cuotasAtrasadas)} atrasada${info.cuotasAtrasadas === 1 ? "" : "s"}*`,
 		);
 	} else {
-		lineas.push("✅ Estás al día con tus cuotas");
+		lineas.push("Estás al día con tus cuotas");
 	}
 
 	if (info.mora) {
-		lineas.push(`💰 Monto en mora: *${quetzales(info.mora.monto)}*`);
+		lineas.push(`Monto en mora: *${quetzales(info.mora.monto)}*`);
 	} else if (info.moraPorConfirmar) {
 		// La foto de la mora quedó vieja: antes que decir un monto equivocado, se
 		// lo manda con su asesor.
 		lineas.push(
-			"💰 Tenés un cargo por mora pendiente de confirmar; tu asesor te lo puede detallar",
+			"Tenés un cargo por mora pendiente de confirmar; tu asesor te lo puede detallar",
 		);
 	}
 
 	if (info.proximaFechaPago) {
 		lineas.push(
-			`📅 Próxima fecha de pago: ${fechaLegible(info.proximaFechaPago)}`,
+			`Próxima fecha de pago: ${fechaLegible(info.proximaFechaPago)}`,
 		);
 	} else if (info.cuotaActual?.vencida) {
 		lineas.push(
-			`📅 Tu cuota venció el ${fechaLegible(info.cuotaActual.fechaVencimiento)}`,
+			`Tu cuota venció el ${fechaLegible(info.cuotaActual.fechaVencimiento)}`,
 		);
 	}
 
 	if (info.convenio) {
 		lineas.push("");
-		lineas.push("🤝 *Tu convenio de pago*");
+		lineas.push("*Tu convenio de pago*");
 		lineas.push(
 			`   Cuota del convenio: ${quetzales(info.convenio.cuotaMensual)}`,
 		);
@@ -175,7 +175,7 @@ export function armarMensajes(info: InfoCreditoBot): MensajesCredito {
 	if (info.vehiculo) {
 		lineas.push("");
 		lineas.push(
-			`🚙 Vehículo: ${info.vehiculo.marca} ${info.vehiculo.modelo} ${info.vehiculo.anio}`.replace(
+			`Vehículo: ${info.vehiculo.marca} ${info.vehiculo.modelo} ${info.vehiculo.anio}`.replace(
 				/\s+/g,
 				" ",
 			),
@@ -188,10 +188,10 @@ export function armarMensajes(info: InfoCreditoBot): MensajesCredito {
 
 	if (info.asesor) {
 		lineas.push("");
-		lineas.push(`👤 Tu asesor: ${info.asesor.nombre}`);
+		lineas.push(`Tu asesor: ${info.asesor.nombre}`);
 
 		if (info.asesor.telefono) {
-			lineas.push(`   📞 ${info.asesor.telefono}`);
+			lineas.push(`   Tel. ${info.asesor.telefono}`);
 		}
 	}
 

@@ -115,7 +115,7 @@ export function textoCuentasWhatsapp(): string {
 	const lineas = CUENTAS_PAGO.map((c) => `• *${c.banco}* — ${c.numero}`);
 
 	return [
-		"🏦 *Cuentas para tu pago*",
+		"*Cuentas para tu pago*",
 		"",
 		`Todas a nombre de *${CUENTAS_PAGO[0].titular}* (monetarias):`,
 		"",

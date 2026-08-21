@@ -43,7 +43,7 @@ export type DatosMensajeBoleta = {
  * lee como que su pago no sirvió de nada.
  */
 function cierreDeCuota(datos: DatosMensajeBoleta): string[] {
-	if (datos.cubreCuota) return ["   ✅ Cubre la cuota completa"];
+	if (datos.cubreCuota) return ["   Cubre la cuota completa"];
 
 	if (!datos.saldoCuota || !datos.paraCuota) return [];
 
@@ -61,14 +61,14 @@ function cierreDeCuota(datos: DatosMensajeBoleta): string[] {
 export function armarMensajesBoleta(datos: DatosMensajeBoleta): MensajesBoleta {
 	const monto = quetzales(datos.monto);
 
-	const titulo = `🧾 *Boleta recibida · ${monto}*`;
+	const titulo = `*Boleta recibida · ${monto}*`;
 
-	const lineas: string[] = [`💵 Monto: *${monto}*`];
+	const lineas: string[] = [`Monto: *${monto}*`];
 
-	if (datos.banco) lineas.push(`🏦 Banco: ${datos.banco}`);
-	lineas.push(`📅 Fecha: ${fechaLegible(datos.fechaBoleta)}`);
+	if (datos.banco) lineas.push(`Banco: ${datos.banco}`);
+	lineas.push(`Fecha: ${fechaLegible(datos.fechaBoleta)}`);
 	if (datos.numeroAutorizacion) {
-		lineas.push(`🔢 No. de autorización: ${datos.numeroAutorizacion}`);
+		lineas.push(`No. de autorización: ${datos.numeroAutorizacion}`);
 	}
 
 	const resumen = [titulo, "", ...lineas, "", "¿Está correcto?"].join("\n");
@@ -85,7 +85,7 @@ export function armarMensajesBoleta(datos: DatosMensajeBoleta): MensajesBoleta {
 	if (datos.cuotaNumero && datos.cuotaDe) {
 		const aLaCuota = `A tu cuota ${datos.cuotaNumero} de ${datos.cuotaDe}`;
 
-		detalle.push("", "📄 *Cómo se va a aplicar*");
+		detalle.push("", "*Cómo se va a aplicar*");
 
 		if (datos.moraPorConfirmar) {
 			// Hay mora, pero cartera no puede decir cuánta ahora mismo: se dice el
@@ -115,7 +115,7 @@ export function armarMensajesBoleta(datos: DatosMensajeBoleta): MensajesBoleta {
 	if (datos.camposFaltantes.length > 0) {
 		detalle.push(
 			"",
-			"⚠️ No pudimos leer todo de tu boleta. Revisá que los datos de arriba estén correctos.",
+			"No pudimos leer todo de tu boleta. Revisá que los datos de arriba estén correctos.",
 		);
 	}
 
@@ -126,14 +126,14 @@ export function armarMensajesBoleta(datos: DatosMensajeBoleta): MensajesBoleta {
 
 /** "Ya la recibimos, ahora la revisa contabilidad." */
 export function mensajesPagoRegistrado(monto: string): MensajesBoleta {
-	const titulo = `✅ *Pago recibido · ${quetzales(monto)}*`;
+	const titulo = `*Pago recibido · ${quetzales(monto)}*`;
 
 	const cuerpo = [
 		titulo,
 		"",
 		"Ya registramos tu pago. Nuestro equipo de contabilidad tiene que validar los fondos.",
 		"",
-		"📲 Te avisamos por este mismo medio cuando quede acreditado.",
+		"Te avisamos por este mismo medio cuando quede acreditado.",
 	];
 
 	return {
@@ -156,14 +156,14 @@ export function mensajesPagoRegistrado(monto: string): MensajesBoleta {
  * ⚠️ Texto pendiente de revisión de marketing, como todos los del bot.
  */
 export function mensajesPagoRechazado(monto: string): MensajesBoleta {
-	const titulo = `⚠️ *No pudimos acreditar tu pago de ${quetzales(monto)}*`;
+	const titulo = `*No pudimos acreditar tu pago de ${quetzales(monto)}*`;
 
 	const cuerpo = [
 		titulo,
 		"",
 		"Tu pago necesita una revisión antes de aplicarse a tu crédito.",
 		"",
-		"📞 Tu asesor se va a comunicar con vos para resolverlo.",
+		"Tu asesor se va a comunicar con vos para resolverlo.",
 	];
 
 	return {

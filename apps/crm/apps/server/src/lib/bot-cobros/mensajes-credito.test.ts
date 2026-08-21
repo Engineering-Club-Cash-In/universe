@@ -69,13 +69,12 @@ describe("fechaLegible", () => {
 describe("cliente al día", () => {
 	const m = armarMensajes(base);
 
-	test("el título no lo alarma", () => {
-		expect(m.titulo).toBe("🚗 *Toyota Corolla 2015 · P-319JJL*");
-		expect(m.titulo).not.toContain("⚠️");
+	test("el título es la etiqueta, sin emojis (el motor del bot no los procesa)", () => {
+		expect(m.titulo).toBe("*Toyota Corolla 2015 · P-319JJL*");
 	});
 
 	test("se lo dice explícitamente", () => {
-		expect(m.completo).toContain("✅ Estás al día con tus cuotas");
+		expect(m.completo).toContain("Estás al día con tus cuotas");
 	});
 
 	test("el resumen trae cuota y próxima fecha", () => {
@@ -103,8 +102,9 @@ describe("cliente atrasado", () => {
 		mora: { monto: "598.52", cuotasAtrasadas: 3 },
 	});
 
-	test("el título avisa", () => {
-		expect(m.titulo).toContain("⚠️");
+	test("el título es la etiqueta (el aviso va en las líneas, no en emojis)", () => {
+		expect(m.titulo).toBe("*Toyota Corolla 2015 · P-319JJL*");
+		expect(m.completo).toContain("atrasada");
 	});
 
 	test("dice cuántas debe y cuánto es la mora", () => {
@@ -167,7 +167,7 @@ describe("detalles que se notan", () => {
 			},
 		});
 
-		expect(m.completo).toContain("🤝 *Tu convenio de pago*");
+		expect(m.completo).toContain("*Tu convenio de pago*");
 		expect(m.completo).toContain("Q981.86");
 		expect(m.completo).toContain("Llevás 1 de 6 pagos");
 	});

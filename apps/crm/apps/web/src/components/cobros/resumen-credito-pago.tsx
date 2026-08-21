@@ -105,7 +105,10 @@ export function ResumenCreditoPago({
 										variant="outline"
 										className="gap-1 text-orange-600 text-xs"
 									>
-										<AlertTriangle className="h-3 w-3" /> Pendiente
+										<AlertTriangle className="h-3 w-3" />
+										{cuotaActualStatus === "pending"
+											? "Pendiente de revisión"
+											: "Pendiente"}
 									</Badge>
 								)}
 							</div>
@@ -241,7 +244,9 @@ export function ConvenioActivoCard({
 								}`}
 							>
 								#{c.numero_cuota}{" "}
-								{new Date(c.fecha_vencimiento).toLocaleDateString("es-GT")}
+								{new Date(`${c.fecha_vencimiento}T12:00:00`).toLocaleDateString(
+									"es-GT",
+								)}
 							</span>
 						))}
 					</div>

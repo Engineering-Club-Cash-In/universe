@@ -101,7 +101,7 @@ export function DistribucionPagoDetalle({
 						= Total Disponible:
 					</span>
 					<span className="font-extrabold text-green-700 dark:text-green-400">
-						Q{(montoBoleta + saldoAFavor).toFixed(2)}
+						Q{montoBoleta.toFixed(2)}
 					</span>
 				</div>
 			</div>

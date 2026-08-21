@@ -4358,8 +4358,16 @@ export const cobrosRouter = {
 					fechaBoleta: z.string().datetime(),
 					otros: z.number().nonnegative().optional(),
 					abonoDirectoCapital: z.number().nonnegative().optional(),
-					bancoId: z.number().int().positive().optional(),
-					origenPago: z.enum(["transferencia", "cheque", "boleta"]).optional(),
+					// CB-128 (fix): antes opcionales — carteraFront (pagoSchema en
+					// hooks/registerPayment.ts:44-47) ya exige ambos como requisito
+					// de negocio real. Sin esto, un caller que se saltara la UI
+					// podía registrar un pago sin banco (cartera-back acepta
+					// banco_id ausente) y con origen_pago inventado por
+					// cartera-back (default "transferencia" cuando falta, ver
+					// registerPayment.ts:81) — dato contable falso persistido sin
+					// que el pago real haya sido por transferencia.
+					bancoId: z.number().int().positive(),
+					origenPago: z.enum(["transferencia", "cheque", "boleta"]),
 					numeroAutorizacion: z.string().max(100).optional(),
 					observaciones: z.string().max(2000).optional(),
 					// Un solo comprobante por pago — el form solo permite adjuntar 1

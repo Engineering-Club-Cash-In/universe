@@ -356,6 +356,14 @@ crédito —ni tomada ni esperando— no hay ningún `insertPayment` en vuelo, y
 reabre. Con `true`, o sin el dato, el borrador se queda en `confirmando` y se reintenta en la
 corrida siguiente.
 
+**Las dos observaciones van bajo el lock, tomado con `pg_try_advisory_lock`.** Sueltas se
+pueden intercalar: la consulta de la boleta toma su snapshot antes de que el pago escriba, el
+`insertPayment` termina y suelta el lock, y recién entonces se mira `pg_locks`. Las dos
+respuestas son ciertas por separado y juntas dicen "no se registró nada y no hay nada
+corriendo" sobre un pago que sí existe. Se intenta tomar el lock **sin esperar**: si está
+ocupado, la respuesta ya es `operacion_en_curso: true` —que es la que frena la reconciliación—
+y el job nunca se queda trabado detrás de un pago lento.
+
 **Y una válvula de escape.** Un borrador que lleva **24 horas** en `confirmando` pasa a
 `revision_manual`: significa que cartera lleva un día sin poder contestar o que hay un pago
 trabado desde ayer, y las dos cosas necesitan a una persona. Sin ese tope se reintentarían para
@@ -365,9 +373,15 @@ siempre y en silencio.
 `completada`: una sola que haya terminado bien alcanza para cerrar la boleta como rechazada.
 Las `iniciada` de intentos previos quedan marcadas `superada` y ya no alarman.
 
-> El camino normal ni siquiera llega acá: si **cartera respondió con error**, el CRM lo sabe
-> en el mismo request, responde `PAGO_NO_REGISTRADO` y deja el borrador en `leida`. La
-> reconciliación solo actúa cuando **no hubo respuesta**.
+> El camino normal ni siquiera llega acá: si **cartera respondió 4xx**, el CRM lo sabe en el
+> mismo request, responde `PAGO_NO_REGISTRADO` y deja el borrador en `leida`. Todas las
+> validaciones que devuelven 400/404/409 corren antes de la primera escritura, así que un 4xx
+> prueba que el pago no existe.
+>
+> **Un 5xx no cuenta como respuesta.** `insertPayment` termina en un `catch` que responde 500
+> ante cualquier excepción del procesamiento, y como no es transaccional puede haber escrito
+> una parte del pago antes de reventar. Un 500 se trata igual que un timeout: el borrador se
+> queda en `confirmando` y lo resuelve la reconciliación.
 
 Que `insertPayment` no sea atómico es un problema de cartera que ya existía y excede este
 feature; acá solo se evita que el bot lo convierta en un pago a medias silencioso

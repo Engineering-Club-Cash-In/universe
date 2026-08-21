@@ -288,16 +288,14 @@ function RegistrarPagoPage() {
 				fechaPago: aFechaISO_GT(new Date()),
 				// El Calendar produce un Date a medianoche LOCAL del navegador del
 				// asesor — convertir esa medianoche directo a ISO corre el día en
-				// cualquier offset distinto de UTC negativo puro (ej. UTC+2
-				// retrocede al día anterior). Se reconstruye el Date anclado a
-				// mediodía LOCAL del mismo día calendario (aFechaISO ya usa
-				// componentes locales, no UTC) antes de convertir a ISO — el
-				// resultado sigue siendo z.string().datetime() válido (con Z),
-				// mismo día calendario que el asesor seleccionó sin importar su
-				// timezone.
-				fechaBoleta: new Date(
-					`${aFechaISO(fechaBoleta)}T12:00:00`,
-				).toISOString(),
+				// cualquier offset positivo. Anclar a mediodía LOCAL antes de
+				// convertir tampoco alcanza: en UTC+13/+14 (Samoa, Kiribati, NZ en
+				// horario de verano) el mediodía local sigue cayendo en el día UTC
+				// anterior. Se construye el instante directo en UTC a partir de los
+				// componentes de fecha (aFechaISO ya da el día calendario LOCAL del
+				// asesor en YYYY-MM-DD) — sin pasar por ningún Date que interprete
+				// hora local, así que ningún offset puede correr el día.
+				fechaBoleta: `${aFechaISO(fechaBoleta)}T12:00:00.000Z`,
 				otros: otrosNum || undefined,
 				bancoId: Number(bancoId),
 				origenPago: origenPago,
@@ -375,6 +373,17 @@ function RegistrarPagoPage() {
 		}
 		if (!archivo) {
 			toast.error("Adjunta la boleta o comprobante de pago");
+			return;
+		}
+		// CB-128: mismos límites de registrarPagoCompleto (cobros.ts:4371-4372)
+		// — sin este chequeo acá, el submit subía la boleta y recién el backend
+		// rechazaba, dejando el archivo huérfano en storage.
+		if (numeroAutorizacion.length > 100) {
+			toast.error("El número de autorización no puede superar 100 caracteres");
+			return;
+		}
+		if (observaciones.length > 2000) {
+			toast.error("Las observaciones no pueden superar 2000 caracteres");
 			return;
 		}
 		setConfirmacionAbierta(true);
@@ -526,6 +535,7 @@ function RegistrarPagoPage() {
 										value={numeroAutorizacion}
 										onChange={(e) => setNumeroAutorizacion(e.target.value)}
 										placeholder="Ej: 123456789"
+										maxLength={100}
 									/>
 								</div>
 
@@ -580,6 +590,7 @@ function RegistrarPagoPage() {
 									onChange={(e) => setObservaciones(e.target.value)}
 									placeholder="Notas adicionales..."
 									rows={3}
+									maxLength={2000}
 								/>
 							</div>
 						</CardContent>

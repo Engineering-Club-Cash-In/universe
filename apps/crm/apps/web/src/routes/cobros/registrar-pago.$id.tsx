@@ -54,6 +54,15 @@ import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/cobros/registrar-pago/$id")({
 	component: RegistrarPagoPage,
+	// CB-128: preserva el "tipo" con que se llegó (mismo search param que
+	// $id.tsx) para no perder el contexto de navegación al volver — un id de
+	// tipo=contrato es el numeroSifco, no un casoCobroId, y $id.tsx decide con
+	// tipo qué queries correr (ej. getRecuperacionVehiculo solo si tipo ===
+	// "caso"). Forzar siempre "caso" al volver rompía esa distinción para
+	// callers como cobros/reportes.tsx que enlazan con tipo=contrato.
+	validateSearch: (search: Record<string, unknown>) => ({
+		tipo: (search.tipo as "caso" | "contrato") || "caso",
+	}),
 });
 
 interface UploadBoletaResponse {
@@ -72,6 +81,7 @@ interface UploadBoletaResponse {
  */
 function RegistrarPagoPage() {
 	const { id } = Route.useParams();
+	const { tipo } = Route.useSearch();
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 
@@ -235,7 +245,7 @@ function RegistrarPagoPage() {
 	}, [cuotaPagable, cuotaActualNumero, todasLasCuotas]);
 
 	function volverAlCredito() {
-		navigate({ to: "/cobros/$id", params: { id }, search: { tipo: "caso" } });
+		navigate({ to: "/cobros/$id", params: { id }, search: { tipo } });
 	}
 
 	const registrarPagoMutation = useMutation({
@@ -430,11 +440,11 @@ function RegistrarPagoPage() {
 	return (
 		<div className="container mx-auto max-w-5xl space-y-6 p-6">
 			<div className="flex items-center gap-2 text-muted-foreground text-sm">
-				<Link to="/cobros/$id" params={{ id }} search={{ tipo: "caso" }}>
+				<Link to="/cobros/$id" params={{ id }} search={{ tipo }}>
 					Cobros
 				</Link>
 				<span>/</span>
-				<Link to="/cobros/$id" params={{ id }} search={{ tipo: "caso" }}>
+				<Link to="/cobros/$id" params={{ id }} search={{ tipo }}>
 					Crédito {numeroCreditoSifco || "..."}
 				</Link>
 				<span>/</span>

@@ -43,8 +43,10 @@ día; si no está escrito, no está decidido.
 | [D-33](#d-33--una-boleta-son-varios-pagos-y-una-sola-notificación) | Una boleta son varios pagos, y una sola notificación | 🟢 |
 | [D-34](#d-34--la-confirmación-se-protege-con-estado-no-con-idempotency-key) | La confirmación se protege con estado, no con idempotency key | 🟢 |
 | [D-35](#d-35--el-webhook-adelanta-el-aviso-el-job-lo-garantiza) | El webhook adelanta el aviso, el job lo garantiza | 🟢 |
-| [D-36](#d-36--las-reversiones-dejan-registro) | Las reversiones dejan registro | 🟢 |
+| [D-36](#d-36--las-reversiones-dejan-registro) | Las reversiones dejan registro | ⚫ reemplazada por D-38 |
 | [D-37](#d-37--las-cuentas-de-pago-viajan-con-la-info-del-crédito) | Las cuentas de pago viajan con la info del crédito | 🟢 |
+| [D-38](#d-38--cartera-solo-se-toca-con-endpoints-nuevos) | Cartera solo se toca con endpoints nuevos | 🟢 |
+| [D-39](#d-39--el-rechazo-es-un-botón-explícito-no-se-infiere-del-reverso) | El rechazo es un botón explícito | 🟢 |
 
 ---
 
@@ -1181,7 +1183,13 @@ medias.
 
 ## D-36 · Las reversiones dejan registro
 
-**Estado:** 🟢 **Cerrada · 2026-08-19** — planteada y decidida por Daniel: *"me gusta la idea
+**Estado:** ⚫ **Reemplazada por [D-38](#d-38--cartera-solo-se-toca-con-endpoints-nuevos) · 2026-08-21.**
+El acta de reversiones exigía escribir dentro de `reversePayment` — el camino que mueve
+dinero— y eso quedó prohibido. La ambigüedad que esta tabla resolvía la absorbe ahora la
+revisión manual (§4.1) y el rechazo explícito del botón de conta (D-39). Se conserva el texto
+por el análisis de `reversePayment`, que sigue siendo cierto.
+
+**Estado original:** 🟢 Cerrada · 2026-08-19 — planteada y decidida por Daniel: *"me gusta la idea
 de llevar un registro de los pagos revertidos, literal es una tabla más"*
 
 **Contexto.** Buena parte de la maquinaria de este contrato —el estado
@@ -1423,3 +1431,59 @@ que despliegue.
 que fija la cadena que hoy usan las plantillas: refactorizarla no puede cambiar ni una coma de
 los mensajes que ya salen a producción. Si mañana cambia una cuenta, se toca un archivo y se
 enteran los dos canales.
+
+---
+
+## D-38 · Cartera solo se toca con endpoints nuevos
+
+**Estado:** 🟢 **Cerrada · 2026-08-21** — decidida por Daniel: *"no podemos tocar cosas que ya
+estaban, solo ir agregando […] lo único que tenía que hacer cartera es recibir la info y luego
+mandar a notificar"*
+
+**Contexto.** Las primeras versiones del paso 4 modificaban `insertPayment` (lista de `pagos`
+en la respuesta, acta de intentos), `reversePayment` (acta de reversiones, firma con `user`) y
+otros caminos que mueven dinero. Cada modificación era defendible sola; juntas convertían el
+feature en una intervención de cirugía sobre el core contable, con la superficie de revisión y
+de riesgo que eso implica.
+
+**La regla.** Para el bot de cobros, cartera-back se toca así y solo así:
+
+- **endpoints nuevos** (lectura, o acciones nuevas como el botón de D-39 que **llaman** a los
+  handlers existentes sin modificarlos);
+- **campos nuevos en respuestas de lectura** (como `usuario_id` en `/credito/resumen`);
+- **nada** dentro de `insertPayment`, `reversePayment`, `revalidatePayment`,
+  `revertPaymentToPending`, `falsePayment` ni ningún otro camino que aplique o revierta plata.
+
+**Lo que se paga a cambio, con los ojos abiertos.** Sin actas del lado de cartera, la
+reconciliación pierde evidencia: "no encuentro nada" queda ambiguo y el borrador va a
+**revisión manual** en vez de reabrirse solo (§4.1). Un borrador de más en manual cuesta
+minutos de una persona; una reapertura equivocada cuesta plata del cliente — la asimetría
+paga la regla.
+
+---
+
+## D-39 · El rechazo es un botón explícito, no se infiere del reverso
+
+**Estado:** 🟢 **Cerrada · 2026-08-21** — planteada por Daniel: *"al momento de reversar
+podría ser un movimiento interno […] mejor otra opción en el front que diga: pago no válido,
+notificar al cliente y asesor"*
+
+**Contexto.** El diseño anterior le avisaba al cliente "tu pago se rechazó" cuando cartera
+emitía un evento de `reversePayment`. Pero en este sistema el reverso es una herramienta de
+**reparación interna** que se usa todo el tiempo —cuadres de pools, renumeraciones,
+reaplicaciones, correcciones de espejo—, así que el evento no distingue "tu boleta era mala"
+de "movimos plata por dentro". Toda la maquinaria que intentaba compensarlo (orden de
+webhooks, reversión-vs-revalidación, `pending` como transición) era complejidad tratando de
+**adivinar la intención** desde la mecánica contable.
+
+**La decisión.** La intención se declara, no se adivina:
+
+- En carteraFront, sobre un pago del bot (`registerby = bot-cobros@clubcashin.com`), conta y
+  ADMIN ven el botón **"Pago no válido — notificar al cliente"**. Pide un **motivo**, reversa
+  el pago (llamando al `reversePayment` existente, sin tocarlo — D-38) y le avisa al CRM.
+- Ese aviso es **el único** mensaje automático que el bot le manda al cliente sobre el destino
+  de su pago: *"necesitamos revisar tu pago"* + notificación al asesor.
+- El aviso de **pago validado** no es de este feature: lo está construyendo otra persona del
+  equipo, y acá no se emite nada al validar.
+- Los reversos normales, `revertPaymentToPending` y `false-payment` vuelven a ser lo que
+  siempre fueron: movimientos internos que no le hablan a ningún cliente.

@@ -22,6 +22,7 @@ import {
 	buscarCliente,
 	listarCreditosDeCliente,
 } from "../lib/bot-cobros/buscar-cliente";
+import { confirmarBoleta } from "../lib/bot-cobros/confirmar-boleta";
 import {
 	elegirTelefonoParaOtp,
 	telefonoEstaRegistrado,
@@ -35,7 +36,7 @@ import { enviarOtp, validarOtp } from "../lib/bot-cobros/otp";
 type RespuestaError = {
 	codigo: string;
 	mensaje: string;
-	estado: 400 | 401 | 404 | 409 | 413 | 422 | 429 | 500 | 502 | 503;
+	estado: 400 | 401 | 404 | 409 | 410 | 413 | 422 | 429 | 500 | 502 | 503;
 };
 
 /**
@@ -514,6 +515,229 @@ export async function leerBoletaBotCobros(c: Context) {
 		return c.json({ success: true, data: resultado.boleta });
 	} catch (err) {
 		console.error("[BotCobros] leer-boleta:", err);
+		return error(c, {
+			codigo: "ERROR_INTERNO",
+			mensaje: "Ocurrió un error. Intenta de nuevo en unos minutos.",
+			estado: 500,
+		});
+	}
+}
+
+/**
+ * Servicio 6 · El cliente dijo que sí: se registra el pago en cartera.
+ *
+ * **Lo único que el bot puede mandar además del `boletaId` es `bancoId`**, y
+ * solo cuando la lectura no lo reconoció o el cliente lo corrigió. El monto, la
+ * fecha y la autorización salen del borrador (D-26). Si el cliente dice que los
+ * datos están mal, el bot no corrige: le pide otra foto y vuelve a
+ * `/boleta/leer`.
+ */
+export async function confirmarBoletaBotCobros(c: Context) {
+	try {
+		const body = await c.req.json<{
+			referencia?: unknown;
+			numeroSifco?: unknown;
+			boletaId?: unknown;
+			bancoId?: unknown;
+		}>();
+
+		const referencia = String(body.referencia ?? "").trim();
+		const numeroSifco = String(body.numeroSifco ?? "").trim();
+		const boletaId = String(body.boletaId ?? "").trim();
+
+		if (!referencia || !numeroSifco || !boletaId) {
+			return error(c, {
+				codigo: "PARAMETROS_INVALIDOS",
+				mensaje: "Faltan datos para registrar tu pago.",
+				estado: 400,
+			});
+		}
+
+		// El `bancoId` es lo ÚNICO que este request puede corregir (D-26), así
+		// que hay que separar dos cosas que antes se trataban igual:
+		//
+		//   · ausente, `null` o `""` → "no lo corrijo": se usa el del borrador.
+		//   · presente pero ilegible → una corrección que no se entiende.
+		//
+		// Meter la segunda en la primera es lo peligroso: el cliente manda el
+		// banco justamente porque la lectura lo reconoció mal, y volver al del
+		// borrador registra el pago contra el banco que estaba corrigiendo. Sin
+		// error visible para nadie.
+		let bancoId: number | undefined;
+		const bancoCrudo = body.bancoId;
+		const mandoBanco =
+			bancoCrudo !== undefined &&
+			bancoCrudo !== null &&
+			String(bancoCrudo).trim() !== "";
+
+		if (mandoBanco) {
+			const numero = Number(String(bancoCrudo).trim());
+
+			if (!Number.isInteger(numero) || numero <= 0) {
+				return error(c, {
+					codigo: "BANCO_INVALIDO",
+					mensaje: "Ese banco no está en nuestra lista.",
+					estado: 400,
+				});
+			}
+
+			bancoId = numero;
+		}
+
+		const resultado = await confirmarBoleta({
+			referencia,
+			numeroSifco,
+			boletaId,
+			bancoId,
+		});
+
+		if (!resultado.ok) {
+			const datos = resultado.datos ?? {};
+
+			switch (resultado.codigo) {
+				case "SESION_VENCIDA":
+					return error(c, {
+						codigo: "SESION_VENCIDA",
+						mensaje:
+							"Por seguridad tu sesión expiró. Vuelve a identificarte para continuar.",
+						estado: 401,
+					});
+				case "CREDITO_NO_ES_DEL_CLIENTE":
+					return error(c, {
+						codigo: "CREDITO_NO_ENCONTRADO",
+						mensaje: "No encontramos ese crédito.",
+						estado: 404,
+					});
+				case "CREDITO_SIN_DATOS":
+					return error(c, {
+						codigo: "CREDITO_SIN_DATOS",
+						mensaje:
+							"No pudimos consultar la información de ese crédito. Por favor contacta a soporte.",
+						estado: 404,
+					});
+				case "CREDITO_NO_ACEPTA_BOLETA":
+					return error(
+						c,
+						{
+							codigo: "CREDITO_NO_ACEPTA_BOLETA",
+							mensaje:
+								"Este crédito no puede recibir pagos por este medio. Tu asesor te va a ayudar.",
+							estado: 409,
+						},
+						datos,
+					);
+				case "BORRADOR_NO_ENCONTRADO":
+					return error(c, {
+						codigo: "BORRADOR_NO_ENCONTRADO",
+						mensaje:
+							"No encontramos esa boleta. Mándanos la foto de nuevo, por favor.",
+						estado: 404,
+					});
+				case "BORRADOR_VENCIDO":
+					return error(c, {
+						codigo: "BORRADOR_VENCIDO",
+						mensaje:
+							"Pasó demasiado tiempo desde que nos mandaste tu boleta. Mándanos la foto de nuevo, por favor.",
+						estado: 410,
+					});
+				// Ni se puede confirmar ni se destraba reintentando: el estado va en
+				// `data` para que el bot pueda ramificar y para poder contarlos.
+				case "BORRADOR_NO_CONFIRMABLE":
+					return error(
+						c,
+						{
+							codigo: "BORRADOR_NO_CONFIRMABLE",
+							mensaje:
+								"Esa boleta ya no se puede registrar. Tu asesor te va a ayudar.",
+							estado: 409,
+						},
+						datos,
+					);
+				// Va con los `pagoIds`: el pago ya está y NO se registra otro.
+				case "BOLETA_YA_CONFIRMADA":
+					return error(
+						c,
+						{
+							codigo: "BOLETA_YA_CONFIRMADA",
+							mensaje:
+								"Ese pago ya lo registramos. Está en validación y te avisamos cuando se acredite.",
+							estado: 409,
+						},
+						datos,
+					);
+				case "CONFIRMACION_EN_CURSO":
+					return error(c, {
+						codigo: "CONFIRMACION_EN_CURSO",
+						mensaje:
+							"Ya estamos registrando ese pago. Dame un momento y te confirmo.",
+						estado: 409,
+					});
+				// ⚠️ Al cliente NO se le dice que su boleta está duplicada.
+				//
+				// Cuando el 409 viene de cartera, su chequeo compara (autorización,
+				// banco) en TODO el sistema sin mirar el crédito, y las referencias de
+				// BAC y G&T se repiten entre clientes distintos: en producción hay 79
+				// bloqueos por esto, 27 contra el crédito de otra persona. Decirle a
+				// un cliente que ya pagó cuando no es cierto es peor que no decir
+				// nada (§9).
+				case "BOLETA_DUPLICADA":
+					return error(
+						c,
+						{
+							codigo: "BOLETA_DUPLICADA",
+							mensaje:
+								"Necesitamos revisar tu boleta antes de aplicarla. Tu asesor te va a contactar.",
+							estado: 409,
+						},
+						datos,
+					);
+				case "BANCO_REQUERIDO":
+					return error(c, {
+						codigo: "BANCO_REQUERIDO",
+						mensaje: "Necesitamos saber de qué banco es tu boleta.",
+						estado: 400,
+					});
+				case "BANCO_INVALIDO":
+					return error(c, {
+						codigo: "BANCO_INVALIDO",
+						mensaje: "Ese banco no está en nuestra lista.",
+						estado: 400,
+					});
+				// Cartera dijo que no: el pago NO quedó registrado y el cliente
+				// puede volver a confirmar.
+				case "PAGO_NO_REGISTRADO":
+					return error(
+						c,
+						{
+							codigo: "PAGO_NO_REGISTRADO",
+							mensaje:
+								"No pudimos registrar tu pago en este momento. Intenta de nuevo en unos minutos.",
+							estado: 502,
+						},
+						datos,
+					);
+				// Cartera no contestó: NO se sabe si el pago existe, así que no se
+				// le puede decir al cliente "intentá de nuevo" sin más. El mensaje
+				// lo deja en manos nuestras a propósito.
+				case "CARTERA_NO_DISPONIBLE":
+					return error(c, {
+						codigo: "CARTERA_NO_DISPONIBLE",
+						mensaje:
+							"Estamos verificando tu pago. En unos minutos te confirmamos por este medio.",
+						estado: 503,
+					});
+				default:
+					return error(c, {
+						codigo: "REFERENCIA_INVALIDA",
+						mensaje: "No encontramos tu solicitud. Comienza de nuevo.",
+						estado: 401,
+					});
+			}
+		}
+
+		return c.json({ success: true, data: resultado.boleta });
+	} catch (err) {
+		console.error("[BotCobros] confirmar-boleta:", err);
 		return error(c, {
 			codigo: "ERROR_INTERNO",
 			mensaje: "Ocurrió un error. Intenta de nuevo en unos minutos.",

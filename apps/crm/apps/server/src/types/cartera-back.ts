@@ -1470,6 +1470,18 @@ export class CarteraBackValidationError extends CarteraBackError {
 export interface ResumenCreditoResponse {
 	numero_credito_sifco: string;
 	credito_id: number;
+	/**
+	 * El **cliente dueño del crédito** en `cartera.usuarios`.
+	 *
+	 * No es el asesor ni un usuario del CRM: `newPayment` lo exige en el body y
+	 * viene con el crédito, así que no hay nada que emparejar de este lado.
+	 *
+	 * Opcional en el tipo porque cartera lo agregó en la capa B del bot: una
+	 * instancia sin desplegar todavía responde sin el campo, y eso tiene que
+	 * fallar donde se usa —con un mensaje claro— y no en un `undefined` que
+	 * viaja hasta el body del pago.
+	 */
+	usuario_id?: number;
 	status_credito: string;
 	/** Capital original del crédito. */
 	capital: string;
@@ -1511,3 +1523,118 @@ export interface ResumenCreditoResponse {
 	/** El asesor que lleva el crédito. `null` si no tiene asignado. */
 	asesor: { nombre: string; telefono: string | null } | null;
 }
+
+// ============================================================================
+// Registrar un pago (`POST /newPayment`) y rastrearlo después
+// ============================================================================
+
+/**
+ * El body de `newPayment`, tal como lo arma el formulario de contabilidad.
+ *
+ * El bot manda exactamente los mismos campos: no hay ruta especial ni forma
+ * especial de registrar un pago que venga de WhatsApp. Ver §5 del contrato.
+ */
+export interface RegistrarPagoInput {
+	credito_id: number;
+	/** El **cliente** dueño del crédito, no el asesor. Sale de `/credito/resumen`. */
+	usuario_id: number;
+	monto_boleta: number;
+	/** Hoy, en Guatemala. Igual que el formulario. */
+	fecha_pago: string;
+	/** La de la boleta; si no se pudo leer, hoy. */
+	fecha_boleta: string;
+	/** La cuota más vieja sin pagar. Quien registra NO elige cuota. */
+	cuotaApagar: number;
+	url_boletas: string[];
+	banco_id?: number;
+	numeroAutorizacion?: string;
+	origen_pago?: "transferencia" | "cheque" | "boleta";
+	observaciones?: string;
+	otros?: number;
+	abono_directo_capital?: number;
+	/** Texto libre. Identifica el pago en el historial. */
+	registerBy: string;
+}
+
+export type RegistrarPagoResultado =
+	| {
+			ok: true;
+			/**
+			 * `newPayment` no devuelve los ids de los pagos que creó — eso habría
+			 * exigido tocar `insertPayment`, y cartera se toca solo con endpoints
+			 * nuevos de lectura (D-38). Los ids se buscan por la r2_key con
+			 * `getPagosPorBoleta`, que es el mismo puente de la reconciliación.
+			 */
+			detalle: Record<string, unknown> | null;
+	  }
+	| {
+			/**
+			 * Cartera dijo que no **antes de escribir nada**: crédito inexistente,
+			 * boleta duplicada, cuota ya cubierta, schema inválido. El pago no
+			 * existe y se sabe, así que quien llamó puede dejar todo como estaba.
+			 *
+			 * Solo los 4xx entran acá. Un 5xx NO: `insertPayment` responde 500
+			 * desde un catch que envuelve todo el procesamiento, y como no es
+			 * transaccional puede haber escrito filas antes de reventar.
+			 */
+			ok: false;
+			motivo: "rechazado";
+			status: number;
+			mensaje: string;
+	  }
+	| {
+			/**
+			 * **No se sabe si el pago existe**, y esa duda es lo que obliga a la
+			 * máquina de estados de §4.1. Dos formas de llegar acá:
+			 *
+			 * - Cartera no contestó (timeout, red).
+			 * - Contestó 5xx, que es lo mismo con más pasos: el error pudo ocurrir
+			 *   con parte del pago ya escrita.
+			 */
+			ok: false;
+			motivo: "sin_respuesta";
+			/** Lo que se sepa, para el log. No cambia qué hace quien llama. */
+			status?: number;
+			mensaje?: string;
+	  };
+
+/** Una fila de `pagos_credito`, como la devuelven las lecturas de rastreo. */
+export interface EstadoPagoCartera {
+	pago_id: number;
+	credito_id: number | null;
+	numero_cuota: number | null;
+	monto_aplicado: string | null;
+	monto_boleta: string | null;
+	validation_status: string | null;
+	pagado: boolean | null;
+	payment_false: boolean | null;
+}
+
+export interface PagosPorBoletaResponse {
+	success?: boolean;
+	/** Filas vivas: la boleta existe y su pago también. */
+	pagos: EstadoPagoCartera[];
+	/**
+	 * Hay un `insertPayment` de ese crédito **en vuelo** ahora mismo.
+	 *
+	 * `null` o ausente si no se preguntó (sin `creditoId`), o si cartera todavía
+	 * no tiene el campo. **Con la duda, se trata como `true`**: es lo único que
+	 * prueba que un request que se cortó del lado del CRM ya no puede escribir.
+	 */
+	operacion_en_curso?: boolean | null;
+	/**
+	 * Pagos del bot en ese crédito que quedaron **sin ninguna boleta** que los
+	 * señale.
+	 *
+	 * `insertPayment` escribe la fila de `pagos_credito` primero y las de
+	 * `boletas` después: si revienta en el medio, el pago existe pero el único
+	 * puente que tiene el bot para encontrarlo —la URL— no se escribió nunca.
+	 * Sin este campo, ese vacío se leía como "no se registró nada" y el
+	 * borrador volvía a `leida`.
+	 *
+	 * Ausente contra una instancia de cartera vieja. **Con la duda no se
+	 * reabre**, igual que con `operacion_en_curso`.
+	 */
+	huerfanos?: EstadoPagoCartera[];
+}
+

@@ -20,6 +20,7 @@ import { creditos, pagos_credito, usuarios } from "../database/db";
 import { enviarReciboPagoWhatsappBestEffort } from "../services/reciboPagoWhatsapp";
 import { revalidatePayment } from "../controllers/revalidatePayment";
 import { reversePayment } from "../controllers/reversePayment";
+import { buscarPagosPorBoleta } from "../controllers/pagosPorBoleta";
 import { revertPaymentToPending } from "../controllers/revertPaymentToPending";
 import { processInvestors } from "../controllers/processInvestors";
 import { ajustarCuotasConSIFCO, marcarCuotasPagadasHastaNumero, procesarPagosSIFCODesdeJSON } from "../controllers/migratePayments";
@@ -49,6 +50,36 @@ export const paymentRouter = new Elysia()
   .post("/revalidatePayment", revalidatePayment)
   .post("/processInvestors", processInvestors)
 
+  // ── Dos lecturas para reconstruir qué pasó con un pago ────────────────────
+  // No escriben nada. Existen porque `insertPayment` no es transaccional: si el
+  // request se corta, quien lo llamó no sabe si el pago se registró, si quedó a
+  // medias, o si no se registró nada — y reintentar "por si acaso" crea un
+  // segundo pago real. Ver 04-validacion-de-boleta.md §4.1.
+  .get("/pagos-por-boleta", async ({ query, set }: any) => {
+    const url = String(query?.url ?? "").trim();
+    if (!url) {
+      set.status = 400;
+      return { success: false, message: "Falta el parámetro 'url'" };
+    }
+
+    // Opcional: con el crédito se puede además responder si hay un pago suyo
+    // ejecutándose ahora mismo, que es lo único que prueba que un request que
+    // se cortó ya no puede escribir. Ver `hayOtroBackendEnElLock`.
+    const creditoCrudo = Number(query?.credito_id);
+    const creditoId =
+      Number.isInteger(creditoCrudo) && creditoCrudo > 0
+        ? creditoCrudo
+        : undefined;
+
+    try {
+      const resultado = await buscarPagosPorBoleta(url, creditoId);
+      return { success: true, ...resultado };
+    } catch (error) {
+      console.error("[/pagos-por-boleta] Error:", error);
+      set.status = 500;
+      return { success: false, message: "Error consultando la boleta" };
+    }
+  })
   // Endpoint para editar un pago (abonos, restantes, mora, otros, etc.)
   .patch("/editPayment/:pagoId", async ({ params, body, set }: any) => {
     const pagoId = Number(params.pagoId);

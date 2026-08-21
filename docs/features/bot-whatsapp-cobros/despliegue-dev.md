@@ -231,6 +231,8 @@ Las corre el usuario, sobre **green-tree**:
 | `0035_bot_cobros_otp_origen.sql` | columna `origen` — **sin esto los servicios no validan ningún código** |
 | `0037_bot_cobros_boletas.sql` | tablas `bot_cobros_boletas` y compañía — **sin esto `/boleta/leer` revienta con `relation does not exist` en la primera consulta** (paso 4, capa A) |
 
+En cartera no hay migraciones que correr: se toca solo con endpoints nuevos de lectura (D-38).
+
 Y los datos de prueba: `apps/crm/apps/server/src/db/seeds/bot-cobros-pruebas.sql`
 (ver [`pruebas-equipo-it.md`](./pruebas-equipo-it.md)).
 

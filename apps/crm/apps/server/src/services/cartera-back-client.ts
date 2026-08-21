@@ -40,6 +40,7 @@ import type {
 	CreditoBucketResponse,
 	CreditoDetailResponse,
 	CreditoDirectoResponse,
+	EstadoPagoCartera,
 	FacturarGenericoInput,
 	FacturarGenericoResponse,
 	GetAdvisorsParams,
@@ -56,8 +57,11 @@ import type {
 	InversionistaReporte,
 	LiquidatePagosInversionistasInput,
 	PaginatedResponse,
+	PagosPorBoletaResponse,
 	PoolPorAsesorRow,
 	PromesaActivaCredito,
+	RegistrarPagoInput,
+	RegistrarPagoResultado,
 	ResumenCreditoResponse,
 	ResumenGlobalInversionista,
 	ReversePagoInput,
@@ -179,6 +183,37 @@ const REPORTE_NO_LIQUIDADOS_TIMEOUT_MS = Number.parseInt(
 // callers puedan chequear `err.status === 404` en vez de parsear el mensaje.
 // `handleError()` lo respeta explícitamente (no lo reescribe) para que el
 // status sobreviva hasta el caller final.
+/**
+ * ¿Ese estado HTTP prueba que el pago NO llegó a escribirse?
+ *
+ * Es una lista blanca, no un rango, y la diferencia importa. Estos tres son los
+ * que emite `insertPayment` desde sus validaciones, que corren ANTES de la
+ * primera escritura: schema inválido, crédito inexistente, crédito bloqueado,
+ * usuario inexistente, boleta duplicada, cuota ya cubierta. Un `4xx` de esa
+ * lista es un "no" firme y quien llamó puede dejar todo como estaba.
+ *
+ * "Todos los 4xx" no servía: un intermediario —proxy, balanceador, el runtime
+ * del cliente— puede devolver 408 o 499 DESPUÉS de haber despachado el
+ * request, y cartera seguir adelante y escribir el pago igual. Contarlo como
+ * rechazo devuelve el borrador a `leida` y habilita una segunda confirmación.
+ *
+ * Un 5xx tampoco prueba nada: `insertPayment` responde 500 desde un catch que
+ * envuelve todo el procesamiento y no es transaccional, así que el error pudo
+ * ocurrir con parte del pago YA escrita.
+ *
+ * Todo lo que no esté acá se trata como indeterminado y lo resuelve la
+ * reconciliación. Es más lento y nunca cobra de más.
+ */
+const ESTADOS_DE_RECHAZO_ANTES_DE_ESCRIBIR = new Set([
+	400, // el schema del pago no pasó
+	404, // crédito o usuario que no existe
+	409, // crédito bloqueado, boleta duplicada, cuota ya cubierta
+]);
+
+export function esRechazoDefinitivo(status: number): boolean {
+	return ESTADOS_DE_RECHAZO_ANTES_DE_ESCRIBIR.has(status);
+}
+
 /**
  * ¿Ese 404 es "no existe el dato" o "no existe la ruta"?
  *
@@ -1149,6 +1184,125 @@ export class CarteraBackClient {
 			return null;
 		}
 	}
+
+	/**
+	 * Registra un pago en cartera. **Es el que mueve dinero.**
+	 *
+	 * ─────────────────────────────────────────────────────────────────────────
+	 * NO SE REINTENTA. NUNCA.
+	 *
+	 * `insertPayment` no es transaccional: un timeout puede significar que el
+	 * pago se escribió igual, entero o a medias. Un reintento automático crea un
+	 * SEGUNDO pago real, y el control de duplicados de cartera no lo frena —solo
+	 * corre cuando vienen `numeroAutorizacion` y `banco_id` a la vez, y hay
+	 * boletas que no traen autorización—.
+	 *
+	 * Por eso, ante un timeout, este método **falla** y quien lo llamó tiene que
+	 * ir a preguntar qué pasó (`getPagosPorBoleta`), que es exactamente lo que
+	 * hace el job de reconciliación del bot.
+	 * ─────────────────────────────────────────────────────────────────────────
+	 *
+	 * Contrato: docs/features/bot-whatsapp-cobros/04-validacion-de-boleta.md §5
+	 */
+	async registrarPago(
+		pago: RegistrarPagoInput,
+	): Promise<RegistrarPagoResultado> {
+		try {
+			const respuesta = await this.request<{
+				success?: boolean;
+				message?: string;
+				detalle?: Record<string, unknown>;
+			}>(
+				"/newPayment",
+				{ method: "POST", body: JSON.stringify(pago) },
+				false,
+				undefined,
+				// Explícito, aunque el default de los POST ya sea `false`: acá el
+				// reintento no es "una llamada de más", es un pago de más.
+				false,
+			);
+
+			return {
+				ok: true,
+				detalle: respuesta?.detalle ?? null,
+			};
+		} catch (error) {
+			if (error instanceof CarteraBackHttpError) {
+				const mensaje = error.payload.message ?? error.message;
+
+				// Un 4xx sí es un "no" definitivo: TODAS las validaciones de
+				// `insertPayment` que devuelven 400/404/409 —schema, crédito
+				// inexistente, boleta duplicada, cuota ya cubierta— corren antes de
+				// la primera escritura. El pago no existe y quien llamó puede dejar
+				// todo como estaba.
+				if (esRechazoDefinitivo(error.status)) {
+					return {
+						ok: false,
+						motivo: "rechazado",
+						status: error.status,
+						mensaje,
+					};
+				}
+
+				// Un 5xx NO. `insertPayment` termina en un catch que responde 500
+				// ante CUALQUIER excepción del procesamiento, y como no es
+				// transaccional puede haber escrito una parte del pago antes de
+				// reventar. Tratarlo como rechazo devolvía el borrador a `leida` y
+				// habilitaba una segunda confirmación: un pago real de más, que es
+				// justo lo que este archivo dice en mayúsculas que no puede pasar.
+				console.error(
+					`[CarteraBackClient] registrarPago devolvió ${error.status}; el pago puede haber quedado escrito a medias:`,
+					mensaje,
+				);
+				return {
+					ok: false,
+					motivo: "sin_respuesta",
+					status: error.status,
+					mensaje,
+				};
+			}
+
+			// Cartera no contestó. Acá tampoco se sabe si el pago existe, y esa
+			// duda es todo el diseño de §4.1: el borrador se queda en
+			// `confirmando` y lo resuelve la reconciliación.
+			console.error("[CarteraBackClient] registrarPago sin respuesta:", error);
+			return { ok: false, motivo: "sin_respuesta" };
+		}
+	}
+
+	/**
+	 * Qué pasó con una boleta, buscándola por su key de R2.
+	 *
+	 * Es el puente de emergencia cuando `registrarPago` no contestó: la key es
+	 * única y quedó guardada del lado de cartera, en la tabla `boletas`.
+	 *
+	 * Devuelve también las **reversiones** que mencionan esa URL, y sin eso la
+	 * respuesta sería ambigua: `reversePayment` borra las filas de `boletas`, así
+	 * que "no encuentro nada" puede ser "no se registró" o "se registró y ya lo
+	 * rechazaron" (D-36).
+	 */
+	async getPagosPorBoleta(
+		r2Key: string,
+		creditoId?: number,
+	): Promise<PagosPorBoletaResponse | null> {
+		try {
+			// Con el crédito, cartera contesta además si hay un pago suyo
+			// ejecutándose ahora mismo. Sin ese dato, "no encontré filas" no
+			// alcanza para reabrir nada.
+			const credito = creditoId === undefined ? "" : `&credito_id=${creditoId}`;
+
+			return await this.request<PagosPorBoletaResponse>(
+				`/pagos-por-boleta?url=${encodeURIComponent(r2Key)}${credito}`,
+				{ method: "GET" },
+				false,
+			);
+		} catch (error) {
+			console.error("[CarteraBackClient] getPagosPorBoleta:", error);
+			return null;
+		}
+	}
+
+
 
 	/**
 	 * Genera el estado de cuenta del crédito y devuelve su URL.

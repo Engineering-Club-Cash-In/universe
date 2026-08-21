@@ -7,7 +7,6 @@ import { authMiddleware } from "./midleware";
 import { SATClientService } from "../cofidi/satClientService";
 import { DTEService } from "../cofidi/dteService";
 import { generarPDFFacturaEnBackground } from "../utils/functions/facturaPdf";
-import { enviarReciboPagoWhatsappBestEffort } from "../services/reciboPagoWhatsapp";
 import {
   cuentaParaRubroInv,
   decidirRubroInteresInversionistas,
@@ -181,7 +180,6 @@ if (facturasExistentes.length > 0) {
 
           capital_credito: creditos.capital,
           bandera_reinversion: creditos.bandera_reinversion,
-          numero_credito_sifco: creditos.numero_credito_sifco,
 
           usuario_id: usuarios.usuario_id,
           nombre: usuarios.nombre,
@@ -2065,23 +2063,12 @@ if (facturasExistentes.length > 0) {
         );
       }
 
-      // ============================================
-      // 📲 ENVIAR RECIBO DE PAGO POR WHATSAPP (fire-and-forget)
-      //    Cubre tanto facturación con DTE como pago solo-capital (ambos son
-      //    un pago válido con recibo). No se espera acá: nunca debe agregar
-      //    latencia ni afectar la respuesta de facturación si falla —
-      //    enviarReciboPagoWhatsappBestEffort ya nunca lanza.
-      // ============================================
-      void enviarReciboPagoWhatsappBestEffort({
-        pagoId: pago_id,
-        numeroSifco: pagoData.numero_credito_sifco,
-        clienteNombre: pagoData.nombre,
-      }).catch((error) => {
-        console.error(
-          `⚠️ No se pudo enviar recibo de pago por WhatsApp para pago ${pago_id} (NO afecta la facturación):`,
-          error instanceof Error ? error.message : error,
-        );
-      });
+      // El recibo de pago por WhatsApp (CB-113) se dispara en /aplicar-pago,
+      // no acá: el flujo "Validar y Facturar" del front llama ese endpoint
+      // primero (mismo pago_id) y duplicaría el envío si también mandáramos
+      // aquí. NOTA: "Generar Factura" standalone (pago validado en una sesión
+      // anterior) no pasa por /aplicar-pago en este request, así que ese caso
+      // puntual no dispara WhatsApp — decisión consciente, no bug.
 
       // Pago solo-capital (sin DTE que emitir y sin errores): no es fallo.
       // El desglose ya quedó guardado arriba (capital de CUBE).

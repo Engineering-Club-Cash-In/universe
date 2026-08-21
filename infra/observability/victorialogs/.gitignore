@@ -1,10 +1,7 @@
 central/runtime/
 central/secrets/
-agent/runtime/
-agent/secrets/
 .env
 *.local
 __pycache__/
 *.py[cod]
 !central/.env.example
-!agent/.env.example

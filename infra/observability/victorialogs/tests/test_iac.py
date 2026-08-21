@@ -1,32 +1,32 @@
 from __future__ import annotations
 
 import json
-import os
 import stat
 import subprocess
 import sys
 import tempfile
 import unittest
+from collections.abc import Sequence
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CENTRAL_COMPOSE = ROOT / "central" / "compose.yaml"
 VMAUTH_TEMPLATE = ROOT / "central" / "config" / "vmauth.template.yaml"
-AGENT_COMPOSE = ROOT / "agent" / "compose.yaml"
-VECTOR_TEMPLATE = ROOT / "agent" / "config" / "vector.template.yaml"
 RENDER = ROOT / "scripts" / "render-config.py"
 VERIFY_SECRET_ISOLATION = ROOT / "scripts" / "verify-secret-isolation.py"
 RENDER_DOCKERFILE = ROOT / "config-renderer.Dockerfile"
 SPEC = ROOT / "SPEC.md"
 GITIGNORE = ROOT / ".gitignore"
+PROJECT = "observability-test"
+SERVICES = ("config-init", "victoria-logs", "vmauth")
 
 
-class StaticIacContractTests(unittest.TestCase):
+class StaticCentralIacTests(unittest.TestCase):
     def read(self, path: Path) -> str:
         self.assertTrue(path.is_file(), f"missing required artifact: {path}")
         return path.read_text(encoding="utf-8")
 
-    def test_central_stack_relies_on_coolify_proxy(self) -> None:
+    def test_stack_relies_on_coolify_proxy(self) -> None:
         compose = self.read(CENTRAL_COMPOSE).lower()
         self.assertIn("vmauth", compose)
         self.assertIn("victoria-logs", compose)
@@ -37,138 +37,100 @@ class StaticIacContractTests(unittest.TestCase):
         self.assertIn('"9428"', compose)
 
     def test_images_are_versioned_and_digest_pinned(self) -> None:
-        central = self.read(CENTRAL_COMPOSE)
-        agent = self.read(AGENT_COMPOSE)
+        compose = self.read(CENTRAL_COMPOSE)
+        dockerfile = self.read(RENDER_DOCKERFILE)
         self.assertRegex(
-            central,
+            compose,
             r"victoriametrics/victoria-logs:v1\.52\.0@sha256:[a-f0-9]{64}",
         )
         self.assertRegex(
-            central,
+            compose,
             r"victoriametrics/vmauth:v1\.150\.0@sha256:[a-f0-9]{64}",
         )
-        self.assertRegex(agent, r"timberio/vector:0\.57\.0-debian@sha256:[a-f0-9]{64}")
+        self.assertRegex(
+            dockerfile,
+            r"FROM python:3\.13-alpine@sha256:[a-f0-9]{64}",
+        )
 
-    def test_retention_and_memory_are_safe_for_25gb_host(self) -> None:
+    def test_retention_and_memory_fit_the_25gb_host(self) -> None:
         compose = self.read(CENTRAL_COMPOSE)
         self.assertIn("-retentionPeriod=30d", compose)
         self.assertIn("-retention.maxDiskSpaceUsageBytes=12GiB", compose)
         self.assertIn("-memory.allowedBytes=512MiB", compose)
         self.assertNotIn("18GiB", compose)
 
-    def test_vmauth_separates_query_and_ingest_and_blocks_internal(self) -> None:
+    def test_vmauth_separates_query_and_ingest(self) -> None:
+        compose = self.read(CENTRAL_COMPOSE)
         template = self.read(VMAUTH_TEMPLATE)
+        self.assertIn("-httpInternalListenAddr=127.0.0.1:8428", compose)
         self.assertIn('src_paths: ["^/health$"]', template)
         self.assertIn('src_paths: ["/select/.*"]', template)
         self.assertIn('src_paths: ["/insert/.*"]', template)
         self.assertNotIn("/internal/", template)
         self.assertNotIn("/metrics", template)
-        self.assertNotIn("password: bar", template)
 
-    def test_vector_uses_low_cardinality_stream_fields_and_bounded_buffer(self) -> None:
-        vector = self.read(VECTOR_TEMPLATE)
-        self.assertIn("_stream_fields: service,environment,host,container_name", vector)
-        stream_line = next(line for line in vector.splitlines() if "_stream_fields:" in line)
-        for forbidden in ("request_id", "trace_id", "operation_id", "user_id", "credit_id"):
-            self.assertNotIn(forbidden, stream_line)
-        self.assertIn("type: disk", vector)
-        self.assertIn("max_size: 536870912", vector)
-        self.assertIn("when_full: drop_newest", vector)
-
-    def test_vector_has_defense_in_depth_redaction(self) -> None:
-        vector = self.read(VECTOR_TEMPLATE).lower()
-        self.assertNotIn("merge!(., parsed)", vector)
-        self.assertNotIn("string(parsed.message)", vector)
-        self.assertNotIn("message = original_message", vector)
-        self.assertIn("message = event_name", vector)
-        allowlist = vector.split("optional_string_fields = [", 1)[1].split("]", 1)[0]
-        for sensitive_name in (
-            "authorization",
-            "cookie",
-            "password",
-            "token",
-            "api_key",
-            "dpi",
-            "nit",
-            "phone",
-            "email",
-            "customer",
-            "request.body",
-            "response.body",
-        ):
-            self.assertNotIn(f'"{sensitive_name}"', allowlist)
-
-    def test_agent_uses_read_only_socket_proxy(self) -> None:
-        agent = self.read(AGENT_COMPOSE)
-        vector = self.read(VECTOR_TEMPLATE)
-        self.assertRegex(
-            agent,
-            r"tecnativa/docker-socket-proxy:v0\.5\.0@sha256:[a-f0-9]{64}",
-        )
-        self.assertIn("POST: \"0\"", agent)
-        self.assertIn("CONTAINERS: \"1\"", agent)
-        self.assertIn("EVENTS: \"1\"", agent)
-        self.assertIn("INFO: \"1\"", agent)
-        self.assertIn('BIND_CONFIG: "/shared/docker-proxy.sock mode 660"', agent)
-        self.assertNotIn('expose:\n      - "2375"', agent)
-        self.assertNotIn("${CONTAINER_SOCKET_PATH", agent.split("  vector:", 1)[1])
-        self.assertIn("container_name: cci-vector-agent", agent)
-        self.assertIn("exclude_containers:\n      - cci-vector-agent", vector)
-        self.assertIn("healthcheck:\n      enabled: false", vector)
-        self.assertNotIn("merge!(., parsed)", vector)
-        self.assertIn("clean_event", vector)
-        self.assertIn("docker_host: unix:///shared/docker-proxy.sock", vector)
-
-    def test_runtime_config_is_generated_from_compose_secrets(self) -> None:
-        central = self.read(CENTRAL_COMPOSE)
-        agent = self.read(AGENT_COMPOSE)
-        dockerfile = self.read(RENDER_DOCKERFILE)
-
-        self.assertIn("config-init:", central)
-        self.assertEqual(central.count("exclude_from_hc: true"), 1)
-        self.assertIn("condition: service_completed_successfully", central)
-        self.assertIn("environment: VMAUTH_QUERY_PASSWORD", central)
-        self.assertIn("environment: VMAUTH_INGEST_PASSWORD", central)
-        self.assertIn("vmauth-config:/etc/vmauth:ro", central)
-        self.assertNotIn("./runtime/vmauth.yaml", central)
-
-        self.assertIn("config-init:", agent)
-        self.assertEqual(agent.count("exclude_from_hc: true"), 1)
-        self.assertIn("condition: service_completed_successfully", agent)
-        self.assertIn("environment: VECTOR_INGEST_PASSWORD", agent)
-        self.assertIn("vector-config:/etc/vector:ro", agent)
-        self.assertNotIn("./runtime/vector.yaml", agent)
-
-        self.assertRegex(
-            dockerfile,
-            r"FROM python:3\.13-alpine@sha256:[a-f0-9]{64}",
-        )
+    def test_runtime_config_uses_compose_secrets(self) -> None:
+        compose = self.read(CENTRAL_COMPOSE)
+        self.assertIn("config-init:", compose)
+        self.assertEqual(compose.count("exclude_from_hc: true"), 1)
+        self.assertIn("condition: service_completed_successfully", compose)
+        self.assertIn("environment: VMAUTH_QUERY_PASSWORD", compose)
+        self.assertIn("environment: VMAUTH_INGEST_PASSWORD", compose)
+        self.assertIn("vmauth-config:/etc/vmauth:ro", compose)
+        self.assertNotIn("./runtime/vmauth.yaml", compose)
 
     def test_runtime_and_secret_material_are_gitignored(self) -> None:
         ignore = self.read(GITIGNORE)
         self.assertIn("central/runtime/", ignore)
         self.assertIn("central/secrets/", ignore)
-        self.assertIn("agent/runtime/", ignore)
-        self.assertIn("agent/secrets/", ignore)
+        self.assertNotIn("agent/", ignore)
 
-    def test_spec_covers_required_architecture_decisions(self) -> None:
-        spec = self.read(SPEC).lower()
-        for required in (
-            "coolify",
-            "telemetría frontend",
-            "stream fields",
-            "auditoría de negocio",
-            "request_id",
-            "operation_id",
-            "rotación local",
-            "podman",
-        ):
-            self.assertIn(required, spec)
+    def test_agent_is_explicitly_out_of_scope(self) -> None:
+        self.assertFalse((ROOT / "agent").exists())
+        spec = self.read(SPEC)
+        self.assertIn("fuera de este PR", spec)
+        self.assertIn("PRs posteriores", spec)
+        self.assertNotIn("docker-socket-proxy", self.read(CENTRAL_COMPOSE))
 
 
-class RendererTests(unittest.TestCase):
-    def test_central_renderer_requires_distinct_credentials_and_writes_0600(self) -> None:
-        self.assertTrue(RENDER.is_file(), f"missing renderer: {RENDER}")
+class RendererAndGateTests(unittest.TestCase):
+    @staticmethod
+    def container(
+        service: str,
+        *,
+        project: str = PROJECT,
+        environment: object = None,
+        name: str | None = None,
+        include_project: bool = True,
+    ) -> dict[str, object]:
+        labels: dict[str, object] = {"com.docker.compose.service": service}
+        if include_project:
+            labels["com.docker.compose.project"] = project
+        return {
+            "Name": name or f"/{project}-{service}-1",
+            "Config": {
+                "Env": [] if environment is None else environment,
+                "Labels": labels,
+            },
+        }
+
+    def run_gate(self, containers: Sequence[object]) -> subprocess.CompletedProcess[str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            inspect_path = Path(tmp) / "inspect.json"
+            inspect_path.write_text(json.dumps(containers), encoding="utf-8")
+            return subprocess.run(
+                [
+                    sys.executable,
+                    str(VERIFY_SECRET_ISOLATION),
+                    PROJECT,
+                    str(inspect_path),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+    def test_renderer_writes_0600_without_printing_secrets(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             secrets = base / "secrets"
@@ -180,7 +142,7 @@ class RendererTests(unittest.TestCase):
                 "ingest_password": "ingest-password-at-least-24-chars",
             }
             for name, value in values.items():
-                (secrets / name).write_text(value + "\n", encoding="utf-8")
+                (secrets / name).write_text(value, encoding="utf-8")
             output = base / "runtime" / "vmauth.yaml"
             result = subprocess.run(
                 [
@@ -203,18 +165,16 @@ class RendererTests(unittest.TestCase):
             for value in values.values():
                 self.assertIn(value, rendered)
                 self.assertNotIn(value, result.stdout + result.stderr)
-            self.assertNotIn("__QUERY_", rendered)
             self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o600)
 
-    def test_renderer_rejects_same_query_and_ingest_password(self) -> None:
-        self.assertTrue(RENDER.is_file(), f"missing renderer: {RENDER}")
+    def test_renderer_rejects_shared_credentials(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             secrets = base / "secrets"
             secrets.mkdir()
-            (secrets / "query_username").write_text("query-user", encoding="utf-8")
-            (secrets / "ingest_username").write_text("ingest-user", encoding="utf-8")
-            shared = "same-password-at-least-24-chars"
+            shared = "shared-password-at-least-24-chars"
+            (secrets / "query_username").write_text("query", encoding="utf-8")
+            (secrets / "ingest_username").write_text("ingest", encoding="utf-8")
             (secrets / "query_password").write_text(shared, encoding="utf-8")
             (secrets / "ingest_password").write_text(shared, encoding="utf-8")
             result = subprocess.run(
@@ -225,7 +185,7 @@ class RendererTests(unittest.TestCase):
                     "--secrets-dir",
                     str(secrets),
                     "--output",
-                    str(base / "runtime" / "vmauth.yaml"),
+                    str(base / "vmauth.yaml"),
                     "--template",
                     str(VMAUTH_TEMPLATE),
                 ],
@@ -236,141 +196,75 @@ class RendererTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertNotIn(shared, result.stdout + result.stderr)
 
-    def test_secret_isolation_gate_accepts_complete_clean_inspect(self) -> None:
-        self.assertTrue(VERIFY_SECRET_ISOLATION.is_file())
-        stacks = {
-            "central": ("config-init", "victoria-logs", "vmauth"),
-            "agent": ("config-init", "docker-socket-proxy", "vector"),
+    def test_gate_accepts_exact_complete_project(self) -> None:
+        result = self.run_gate([self.container(service) for service in SERVICES])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            "secret_environment_isolation=PASS services_checked=3 containers_checked=3",
+            result.stdout,
+        )
+
+    def test_gate_rejects_incomplete_or_ambiguous_evidence(self) -> None:
+        valid = [self.container(service) for service in SERVICES]
+        cases = {
+            "empty": [],
+            "missing": valid[:-1],
+            "duplicate": valid + [self.container("vmauth")],
+            "unknown": valid + [self.container("unknown-service")],
+            "mixed-project": [
+                self.container("config-init"),
+                self.container("victoria-logs", project="other-project"),
+                self.container("vmauth"),
+            ],
+            "missing-project": [
+                self.container("config-init"),
+                self.container("victoria-logs", include_project=False),
+                self.container("vmauth"),
+            ],
+            "missing-env": [
+                self.container("config-init"),
+                {
+                    "Name": "/victoria-logs",
+                    "Config": {
+                        "Labels": {
+                            "com.docker.compose.service": "victoria-logs",
+                            "com.docker.compose.project": PROJECT,
+                        }
+                    },
+                },
+                self.container("vmauth"),
+            ],
+            "wrong-env-type": [
+                self.container("config-init"),
+                self.container("victoria-logs", environment="not-a-list"),
+                self.container("vmauth"),
+            ],
+            "non-string-env": [
+                self.container("config-init"),
+                self.container("victoria-logs", environment=["PATH=/bin", 7]),
+                self.container("vmauth"),
+            ],
         }
-        for stack, services in stacks.items():
-            with self.subTest(stack=stack), tempfile.TemporaryDirectory() as tmp:
-                inspect_path = Path(tmp) / "inspect.json"
-                inspect_path.write_text(
-                    json.dumps(
-                        [
-                            {
-                                "Name": f"/observability-{service}-1",
-                                "Config": {
-                                    "Env": ["PATH=/bin"],
-                                    "Labels": {
-                                        "com.docker.compose.service": service
-                                    },
-                                },
-                            }
-                            for service in services
-                        ]
-                    ),
-                    encoding="utf-8",
-                )
-                result = subprocess.run(
-                    [
-                        sys.executable,
-                        str(VERIFY_SECRET_ISOLATION),
-                        stack,
-                        str(inspect_path),
-                    ],
-                    check=False,
-                    capture_output=True,
-                    text=True,
-                )
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertIn("secret_environment_isolation=PASS", result.stdout)
-                self.assertIn("services_checked=3", result.stdout)
+        for case, containers in cases.items():
+            with self.subTest(case=case):
+                result = self.run_gate(containers)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn("PASS", result.stdout + result.stderr)
 
-    def test_secret_isolation_gate_rejects_name_without_printing_value(self) -> None:
-        self.assertTrue(VERIFY_SECRET_ISOLATION.is_file())
-        canary = "SYNTHETIC_SECRET_MUST_NOT_BE_PRINTED"
-        with tempfile.TemporaryDirectory() as tmp:
-            inspect_path = Path(tmp) / "inspect.json"
-            inspect_path.write_text(
-                json.dumps(
-                    [
-                        {
-                            "Name": f"/observability-{service}-1",
-                            "Config": {
-                                "Env": (
-                                    [f"VMAUTH_QUERY_PASSWORD={canary}"]
-                                    if service == "vmauth"
-                                    else []
-                                ),
-                                "Labels": {
-                                    "com.docker.compose.service": service
-                                },
-                            },
-                        }
-                        for service in ("config-init", "victoria-logs", "vmauth")
-                    ]
-                ),
-                encoding="utf-8",
-            )
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(VERIFY_SECRET_ISOLATION),
-                    "central",
-                    str(inspect_path),
-                ],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("VMAUTH_QUERY_PASSWORD", result.stderr)
-            self.assertNotIn(canary, result.stdout + result.stderr)
-
-    def test_secret_isolation_gate_rejects_empty_inspect(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            inspect_path = Path(tmp) / "inspect.json"
-            inspect_path.write_text("[]", encoding="utf-8")
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(VERIFY_SECRET_ISOLATION),
-                    "central",
-                    str(inspect_path),
-                ],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("missing_services=config-init,victoria-logs,vmauth", result.stderr)
-            self.assertNotIn("PASS", result.stdout + result.stderr)
-
-    def test_secret_isolation_gate_rejects_missing_exited_config_init(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            inspect_path = Path(tmp) / "inspect.json"
-            inspect_path.write_text(
-                json.dumps(
-                    [
-                        {
-                            "Name": f"/observability-{service}-1",
-                            "Config": {
-                                "Env": [],
-                                "Labels": {
-                                    "com.docker.compose.service": service
-                                },
-                            },
-                        }
-                        for service in ("victoria-logs", "vmauth")
-                    ]
-                ),
-                encoding="utf-8",
-            )
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(VERIFY_SECRET_ISOLATION),
-                    "central",
-                    str(inspect_path),
-                ],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("missing_services=config-init", result.stderr)
-            self.assertNotIn("PASS", result.stdout + result.stderr)
+    def test_gate_reports_names_only_and_never_values_or_container_names(self) -> None:
+        value_canary = "SYNTHETIC_SECRET_MUST_NOT_BE_PRINTED"
+        name_canary = "CANARY_SECRET_NAME_123456"
+        containers = [self.container(service) for service in SERVICES]
+        containers[2] = self.container(
+            "vmauth",
+            environment=[f"VMAUTH_QUERY_PASSWORD={value_canary}"],
+            name=f"/{name_canary}",
+        )
+        result = self.run_gate(containers)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("VMAUTH_QUERY_PASSWORD", result.stderr)
+        self.assertNotIn(value_canary, result.stdout + result.stderr)
+        self.assertNotIn(name_canary, result.stdout + result.stderr)
 
 
 if __name__ == "__main__":

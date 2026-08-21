@@ -1,47 +1,46 @@
-# VictoriaLogs IaC
+# VictoriaLogs central IaC
 
-Infraestructura versionada para desplegar VictoriaLogs detrás del proxy administrado por Coolify y recolectar logs con Vector.
+Infraestructura versionada para desplegar **VictoriaLogs single-node** y `vmauth` detrás del dominio, TLS y reverse proxy administrados por Coolify.
 
-## Alcance de este directorio
+## Alcance
 
-- `central/`: VictoriaLogs y `vmauth`; no contiene proxy TLS.
-- `agent/`: Vector y un socket proxy allowlist para cada servidor de aplicaciones.
-- `scripts/`: render seguro, validación y operaciones.
-- `tests/`: gates estáticos y de seguridad.
-- `LOG_INVENTORY.md`: conteo y clasificación de 4,151 llamadas productivas de Cartera.
-- `SPEC.md`: decisiones de arquitectura v1.1.
+Incluye:
 
-Ningún comando de este directorio despliega producción automáticamente.
+- `central/`: VictoriaLogs y `vmauth`, sin proxy propio;
+- `config-renderer.Dockerfile` y `scripts/render-config.py`: generación segura de `vmauth.yaml` desde secretos runtime;
+- `scripts/validate.sh`: pruebas y validación reproducible con Podman;
+- `scripts/smoke-local.sh`: smoke funcional de salud, autenticación, ingesta y consulta;
+- `scripts/verify-secret-isolation.py`: gate fail-closed para un deployment central de staging;
+- `LOG_INVENTORY.md`: inventario de logging de Cartera;
+- `SPEC.md`: decisiones y límites de esta fase.
+
+No incluye Vector, acceso al socket de contenedores, recolección de stdout, logger de aplicaciones, telemetría frontend ni despliegue en producción. Esos cambios se entregan en PRs posteriores y no deben desplegarse implícitamente desde este directorio.
 
 ## Prerrequisitos locales
 
-- Podman 6 o superior.
-- Proveedor Compose accesible mediante `podman compose`.
+- Podman 6 o superior;
+- proveedor Compose accesible mediante `podman compose`;
 - Python 3.11 o superior.
-- Credenciales de prueba no productivas para smoke tests.
 
 ## Validación
 
-Asegurar que el socket rootless esté activo y ejecutar el gate completo:
-
 ```bash
-systemctl --user start podman.socket
 infra/observability/victorialogs/scripts/validate.sh
 ```
 
-El gate ejecuta las pruebas, renderiza configuraciones sintéticas, valida ambos Compose con Podman y usa los binarios fijados de Vector y `vmauth`.
+El gate ejecuta pruebas Python, renderiza configuración con secretos sintéticos, valida el Compose central, construye el renderer y ejecuta `vmauth -dryRun`.
 
-El smoke funcional local requiere credenciales sintéticas en `central/secrets/` y se ejecuta sin depender de la red Compose del host:
+Smoke funcional local:
 
 ```bash
 infra/observability/victorialogs/scripts/smoke-local.sh
 ```
 
-Liga los puertos únicamente a `127.0.0.1`, prueba aislamiento read/write, ingiere un evento seguro, lo consulta y elimina los contenedores/volumen al terminar.
+El smoke liga puertos únicamente a `127.0.0.1`, comprueba salud, aislamiento read/write, ingesta y consulta, y limpia todos los recursos temporales.
 
-## Configuración central
+## Secretos centrales
 
-En Coolify definir como secretos:
+Definir en Coolify como variables bloqueadas y runtime-only, nunca como build args:
 
 ```text
 VMAUTH_QUERY_USERNAME
@@ -50,18 +49,9 @@ VMAUTH_INGEST_USERNAME
 VMAUTH_INGEST_PASSWORD
 ```
 
-Compose los convierte en archivos temporales para `config-init`; el servicio genera `vmauth.yaml` en un volumen interno y termina antes de arrancar `vmauth`. Las contraseñas deben tener al menos 24 caracteres y lectura/ingesta deben usar credenciales distintas.
+Compose las materializa como archivos `/run/secrets` para `config-init`. Las contraseñas deben tener al menos 24 caracteres; lectura e ingesta deben usar usuarios y contraseñas distintas.
 
-Para render manual local se pueden crear, fuera de Git:
-
-```text
-central/secrets/query_username
-central/secrets/query_password
-central/secrets/ingest_username
-central/secrets/ingest_password
-```
-
-Y ejecutar:
+Render manual local, siempre fuera de Git:
 
 ```bash
 python scripts/render-config.py central \
@@ -70,86 +60,48 @@ python scripts/render-config.py central \
   --output central/runtime/vmauth.yaml
 ```
 
-En Coolify:
+## Despliegue en Coolify
 
-1. seleccionar build pack **Docker Compose** (no Raw Compose);
-2. usar Coolify `v4.3.9` o volver a validar este procedimiento con la versión instalada;
-3. Base Directory: `/infra/observability/victorialogs`;
-4. Docker Compose Location: `/central/compose.yaml`;
-5. crear las cuatro variables como bloqueadas y runtime-only; nunca build args;
-6. persistir los volúmenes `victoria-logs-data` y `vmauth-config`;
-7. asignar el dominio al servicio `vmauth`, puerto `8427`;
-8. habilitar HTTPS en Coolify;
-9. healthcheck HTTP `/health`;
-10. no exponer `victoria-logs:9428`;
-11. verificar límites y espacio antes de iniciar.
+1. Usar build pack **Docker Compose**, no Raw Compose.
+2. Base Directory: `/infra/observability/victorialogs`.
+3. Docker Compose Location: `/central/compose.yaml`.
+4. Persistir `victoria-logs-data` y `vmauth-config`.
+5. Asignar dominio únicamente a `vmauth:8427` y habilitar HTTPS. El listener nativo de administración queda limitado a `127.0.0.1:8428` dentro del contenedor.
+6. Configurar healthcheck `/health`.
+7. No exponer `victoria-logs:9428`.
+8. Mantener retención de 30 días y máximo de datos de 12 GiB.
 
-`config-init` usa `exclude_from_hc: true`, extensión documentada por Coolify para servicios one-shot. Por eso la validación local debe ejecutarse mediante `scripts/validate.sh`, que retira únicamente esa extensión en una copia temporal antes de llamar a Podman Compose.
+Coolify administra dominio, TLS y reverse proxy. Este IaC no incluye Caddy, Nginx ni Traefik.
 
-### Gate obligatorio de secretos en staging
+`config-init` usa `exclude_from_hc: true`, extensión de Coolify para servicios one-shot. `scripts/validate.sh` elimina solo esa extensión en una copia temporal para validar con Podman Compose.
 
-Coolify `v4.3.9` conserva la sección superior `secrets`, pero su UI todavía no detecta automáticamente variables usadas únicamente por `secrets.*.environment`. Deben crearse manualmente como variables bloqueadas y runtime-only. Antes de exponer el dominio o incorporar datos reales:
+## Gate obligatorio de staging
 
-1. desplegar solamente en staging con credenciales sintéticas;
-2. obtener `docker inspect` de **todos** los contenedores del proyecto central usando la lista de `docker ps -a`, no solo contenedores running; el JSON protegido debe incluir `config-init`, `vmauth` y `victoria-logs` con sus labels Compose;
-3. ejecutar:
+Coolify `v4.3.9` conserva la sección Compose `secrets`, pero no detecta automáticamente en UI variables usadas únicamente por `secrets.*.environment`. Antes de exponer dominio o usar credenciales reales:
+
+1. desplegar con credenciales sintéticas;
+2. obtener `docker inspect` de **todos** los contenedores del proyecto mediante `docker ps -a`, incluyendo el `config-init` detenido;
+3. proteger el archivo y ejecutar con el nombre exacto de `com.docker.compose.project`:
 
 ```bash
 chmod 600 /ruta/protegida/inspect.json
-python scripts/verify-secret-isolation.py central /ruta/protegida/inspect.json
+python scripts/verify-secret-isolation.py NOMBRE_PROYECTO_COMPOSE /ruta/protegida/inspect.json
 ```
 
-4. exigir `secret_environment_isolation=PASS stack=central services_checked=3`; un JSON vacío, un servicio ausente o un `config-init` omitido falla de forma cerrada;
-5. verificar por nombre —sin imprimir valores— que ningún contenedor tenga `VMAUTH_*` o `VECTOR_INGEST_*` en `Config.Env`;
-6. comprobar que únicamente `vmauth:8427` tenga dominio y que no existan `ports` para VictoriaLogs.
-
-Si el gate falla, el despliegue se detiene. No se corrige mediante build args. Se cambia a archivos secretos administrados por el host y montados exclusivamente en `config-init`, o se actualiza Coolify a una versión cuya modalidad haya sido verificada.
-
-Los volúmenes `vmauth-config` y `vector-config` contienen configuración con credenciales en claro. Se excluyen de backups genéricos, se restringen a administradores del host y se regeneran mediante redeploy al rotar credenciales.
-
-## Configuración del agente
-
-En cada recurso Coolify del agente definir:
+El único resultado aceptable es:
 
 ```text
-VECTOR_INGEST_USERNAME
-VECTOR_INGEST_PASSWORD
-VICTORIALOGS_ENDPOINT
-LOG_HOST
-LOG_ENVIRONMENT
-CONTAINER_SOCKET_PATH
+secret_environment_isolation=PASS services_checked=3 containers_checked=3
 ```
 
-Las dos primeras son secretas. `config-init` genera `vector.yaml` en el volumen interno antes de iniciar Vector. El endpoint debe terminar en `/insert/elasticsearch/`.
+El gate rechaza JSON vacío o malformado, servicios ausentes/duplicados/desconocidos, mezcla de proyectos, labels faltantes, `Config.Env` ausente o mal tipado y cualquier credencial sensible presente en `Config.Env`. Los errores identifican índices y nombres de variables, nunca valores ni nombres de contenedor.
 
-Por seguridad, Vector no reenvía texto libre de `message`. Para eventos JSON usa como `message` únicamente un `event` validado; un evento estructurado sin nombre válido se convierte en `application.log` y una línea no JSON en `unstructured.log`. La información diagnóstica debe expresarse mediante campos allowlisted, no interpolarse en mensajes.
-
-Para render manual local pueden crearse `agent/secrets/ingest_username` y `agent/secrets/ingest_password`, y luego ejecutar:
-
-```bash
-python scripts/render-config.py agent \
-  --secrets-dir agent/secrets \
-  --template agent/config/vector.template.yaml \
-  --output agent/runtime/vector.yaml \
-  --endpoint https://logs.example.com/insert/elasticsearch/ \
-  --host app-server-01 \
-  --environment staging
-```
-
-Para Podman rootless, copiar `agent/.env.example` a `agent/.env` y configurar `CONTAINER_SOCKET_PATH` con el socket real del usuario. En Coolify se conserva `/var/run/docker.sock`. Solo `docker-socket-proxy` monta el socket; Vector consume su API HTTP allowlist con operaciones POST deshabilitadas.
-
-En Coolify el agente se crea como un segundo recurso Docker Compose con la misma Base Directory y Docker Compose Location `/agent/compose.yaml`. Sus variables se marcan runtime-only y no se asigna dominio público al servicio Vector. Antes de usar datos reales, el `docker inspect` protegido de todos los contenedores del proyecto agente debe incluir `config-init`, `docker-socket-proxy` y `vector`, y pasar:
-
-```bash
-python scripts/verify-secret-isolation.py agent /ruta/protegida/agent-inspect.json
-```
-
-El resultado exigido es `secret_environment_isolation=PASS stack=agent services_checked=3`.
+Si falla, se detiene el despliegue. No se corrige usando build args.
 
 ## Operación segura
 
-- No almacenar secretos en variables versionadas.
+- El volumen `vmauth-config` contiene credenciales en claro: restringirlo a administradores, excluirlo de backups genéricos y regenerarlo al rotar credenciales.
 - No publicar `/internal/*` ni `/metrics`.
-- No usar `podman compose up` contra producción desde una estación local.
-- El primer despliegue es staging y requiere siete días de medición.
+- No ejecutar Compose contra producción desde una estación local.
+- El primer deployment debe ser staging y requiere aprobación explícita.
 - R2 permanece deshabilitado hasta aprobar y probar backup/restore.

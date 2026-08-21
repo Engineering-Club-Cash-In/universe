@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Fail if inspect evidence is incomplete or exposes credentials."""
+"""Verify complete secret-isolation evidence for the central stack."""
 
 from __future__ import annotations
 
 import json
-import re
 import sys
 from pathlib import Path
 
@@ -13,14 +12,8 @@ SENSITIVE_ENV_NAMES = {
     "VMAUTH_QUERY_PASSWORD",
     "VMAUTH_INGEST_USERNAME",
     "VMAUTH_INGEST_PASSWORD",
-    "VECTOR_INGEST_USERNAME",
-    "VECTOR_INGEST_PASSWORD",
 }
-
-EXPECTED_SERVICES = {
-    "central": {"config-init", "victoria-logs", "vmauth"},
-    "agent": {"config-init", "docker-socket-proxy", "vector"},
-}
+EXPECTED_SERVICES = {"config-init", "victoria-logs", "vmauth"}
 
 
 def load_inspect(path: Path) -> list[object]:
@@ -33,89 +26,92 @@ def load_inspect(path: Path) -> list[object]:
     return data
 
 
-def identify_service(item: dict[object, object], expected: set[str]) -> str | None:
+def validate_container(
+    item: object, index: int, expected_project: str
+) -> tuple[str, list[str]]:
+    if not isinstance(item, dict):
+        raise ValueError(f"entry={index} reason=container-is-not-object")
     config = item.get("Config")
     if not isinstance(config, dict):
-        return None
-
+        raise ValueError(f"entry={index} reason=config-is-not-object")
     labels = config.get("Labels")
-    if isinstance(labels, dict):
-        compose_service = labels.get("com.docker.compose.service")
-        if isinstance(compose_service, str) and compose_service in expected:
-            return compose_service
+    if not isinstance(labels, dict):
+        raise ValueError(f"entry={index} reason=labels-is-not-object")
 
-    name = item.get("Name")
-    if not isinstance(name, str):
-        return None
-    safe_name = name.lstrip("/")
-    for service in expected:
-        if safe_name == service or re.search(
-            rf"(?:^|-){re.escape(service)}-\d+$", safe_name
-        ):
-            return service
-    return None
+    service = labels.get("com.docker.compose.service")
+    if not isinstance(service, str) or not service:
+        raise ValueError(f"entry={index} reason=service-label-is-not-string")
+    if service not in EXPECTED_SERVICES:
+        raise ValueError(f"entry={index} reason=unknown-compose-service")
+
+    project = labels.get("com.docker.compose.project")
+    if not isinstance(project, str) or not project:
+        raise ValueError(f"entry={index} reason=project-label-is-not-string")
+    if project != expected_project:
+        raise ValueError(f"entry={index} reason=unexpected-compose-project")
+
+    environment = config.get("Env")
+    if not isinstance(environment, list):
+        raise ValueError(f"entry={index} reason=env-is-not-list")
+    if not all(isinstance(entry, str) for entry in environment):
+        raise ValueError(f"entry={index} reason=env-entry-is-not-string")
+    return service, environment
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 3 or argv[1] not in EXPECTED_SERVICES:
+    if len(argv) != 3 or not argv[1]:
         print(
-            "usage: verify-secret-isolation.py central|agent INSPECT.json",
+            "usage: verify-secret-isolation.py PROJECT INSPECT.json",
             file=sys.stderr,
         )
         return 2
 
-    stack = argv[1]
-    expected = EXPECTED_SERVICES[stack]
+    expected_project = argv[1]
     try:
         containers = load_inspect(Path(argv[2]))
     except ValueError as error:
         print(str(error), file=sys.stderr)
         return 2
 
-    leaks: list[tuple[str, str]] = []
-    found_services: set[str] = set()
-    for item in containers:
-        if not isinstance(item, dict):
+    counts = {service: 0 for service in EXPECTED_SERVICES}
+    invalid: list[str] = []
+    leaks: list[tuple[int, str]] = []
+    for index, item in enumerate(containers):
+        try:
+            service, environment = validate_container(item, index, expected_project)
+        except ValueError as error:
+            invalid.append(str(error))
             continue
-        name = item.get("Name")
-        safe_name = name.lstrip("/") if isinstance(name, str) else "unknown-container"
-        service = identify_service(item, expected)
-        if service is not None:
-            found_services.add(service)
-
-        config = item.get("Config")
-        if not isinstance(config, dict):
-            continue
-        environment = config.get("Env")
-        if not isinstance(environment, list):
-            continue
+        counts[service] += 1
+        if counts[service] > 1:
+            invalid.append(f"service={service} reason=duplicate-compose-service")
         for entry in environment:
-            if not isinstance(entry, str):
-                continue
             variable_name = entry.split("=", 1)[0]
             if variable_name in SENSITIVE_ENV_NAMES:
-                leaks.append((safe_name, variable_name))
+                leaks.append((index, variable_name))
 
-    missing = expected - found_services
+    if invalid:
+        for detail in invalid:
+            print(f"invalid inspect evidence: {detail}", file=sys.stderr)
+        return 1
+    missing = {service for service, count in counts.items() if count == 0}
     if missing:
         print(
             "incomplete inspect evidence: missing_services=" + ",".join(sorted(missing)),
             file=sys.stderr,
         )
         return 1
-
     if leaks:
-        for container_name, variable_name in sorted(set(leaks)):
+        for index, variable_name in sorted(set(leaks)):
             print(
-                f"secret environment leak: container={container_name} variable={variable_name}",
+                f"secret environment leak: entry={index} variable={variable_name}",
                 file=sys.stderr,
             )
         return 1
 
     print(
         "secret_environment_isolation=PASS "
-        f"stack={stack} services_checked={len(found_services)} "
-        f"containers_checked={len(containers)}"
+        f"services_checked={len(counts)} containers_checked={len(containers)}"
     )
     return 0
 

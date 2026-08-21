@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render runtime configs without committing or printing secrets."""
+"""Render the central vmauth runtime config without printing secrets."""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ import tempfile
 from pathlib import Path
 
 MIN_PASSWORD_LENGTH = 24
-ENVIRONMENTS = {"production", "staging", "development", "uat"}
 
 
 def read_value(path: Path, *, secret: bool = False) -> str:
@@ -82,51 +81,14 @@ def render_central(args: argparse.Namespace) -> None:
     atomic_write(Path(args.output), rendered)
 
 
-def render_agent(args: argparse.Namespace) -> None:
-    if args.environment not in ENVIRONMENTS:
-        raise ValueError(f"unsupported environment: {args.environment}")
-    if not re.fullmatch(r"https://[^\s/]+(?:/[^\s]*)?", args.endpoint):
-        raise ValueError("endpoint must be an HTTPS URL")
-    if not args.endpoint.rstrip("/").endswith("/insert/elasticsearch"):
-        raise ValueError("endpoint must end in /insert/elasticsearch/")
-    if not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", args.host):
-        raise ValueError("host contains unsupported characters")
-
-    secrets = Path(args.secrets_dir)
-    username = read_value(secrets / "ingest_username")
-    password = read_value(secrets / "ingest_password", secret=True)
-    template = Path(args.template).read_text(encoding="utf-8")
-    rendered = replace_all(
-        template,
-        {
-            "__LOG_HOST_JSON__": args.host,
-            "__ENVIRONMENT_JSON__": args.environment,
-            "__VICTORIALOGS_ENDPOINT_JSON__": args.endpoint,
-            "__INGEST_USERNAME_JSON__": username,
-            "__INGEST_PASSWORD_JSON__": password,
-        },
-    )
-    atomic_write(Path(args.output), rendered)
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-
     central = commands.add_parser("central")
     central.add_argument("--secrets-dir", required=True)
     central.add_argument("--template", required=True)
     central.add_argument("--output", required=True)
     central.set_defaults(handler=render_central)
-
-    agent = commands.add_parser("agent")
-    agent.add_argument("--secrets-dir", required=True)
-    agent.add_argument("--template", required=True)
-    agent.add_argument("--output", required=True)
-    agent.add_argument("--endpoint", required=True)
-    agent.add_argument("--host", required=True)
-    agent.add_argument("--environment", required=True)
-    agent.set_defaults(handler=render_agent)
     return parser
 
 

@@ -248,7 +248,14 @@ async function elBotValidoAlLead(
 	const [otpCompletado] = await db
 		.select({ id: otps.id })
 		.from(otps)
-		.where(and(eq(otps.leadId, leadId), eq(otps.used, true)))
+		.where(
+			and(
+				eq(otps.leadId, leadId),
+				eq(otps.used, true),
+				// El DPI del lead pudo cambiar: un OTP de otro DPI no sirve como evidencia
+				eqDpi(otps.dpi, leadDpi),
+			),
+		)
 		.limit(1);
 
 	if (!otpCompletado) return false;

@@ -1286,7 +1286,7 @@ export const especificacionBotCobros = {
 									},
 									CREDITO_NO_ACEPTA_BOLETA: {
 										summary:
-											"Cancelado, incobrable, o sin ninguna cuota abierta",
+											"Cancelado, incobrable, o sin ninguna cuota abierta (incluye el convenio con las ordinarias cerradas: hoy sale por el asesor)",
 										value: {
 											success: false,
 											error: {

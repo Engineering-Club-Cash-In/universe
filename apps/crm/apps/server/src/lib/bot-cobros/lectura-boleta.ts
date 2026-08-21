@@ -266,7 +266,7 @@ function interpretarSeparadores(texto: string): string | null {
 export function montoALimpio(monto: string | undefined): number | null {
 	if (!monto) return null;
 
-	// ⚠️ Un monto con signo se RECHAZA, no se le borra el signo.
+	// ⚠️ Un monto negativo se RECHAZA, no se le borra el signo.
 	//
 	// Limpiando "todo lo que no sea dígito", un "-Q500.00" se convertía en 500 y
 	// se registraba como un pago de Q500. Pero un negativo en un comprobante no
@@ -274,6 +274,11 @@ export function montoALimpio(monto: string | undefined): number | null {
 	// lectura, y las tres cosas significan lo contrario de lo que quedaría
 	// guardado. Cae en `BOLETA_ILEGIBLE` y el cliente manda otra foto.
 	if (/[-+−–—]/.test(monto)) return null;
+
+	// Y en notación contable el negativo no lleva signo: va entre paréntesis.
+	// `(Q500.00)` es -500 en cualquier estado de cuenta bancario, y sin esto los
+	// paréntesis se iban con el resto de los símbolos y quedaba un pago de Q500.
+	if (/\(\s*[^()]*\d[^()]*\s*\)/.test(monto)) return null;
 
 	// Se quita el símbolo, los espacios y un separador que quedó colgando al
 	// final ("1500." es 1500, no algo que valga la pena rechazar).

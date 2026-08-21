@@ -45,6 +45,7 @@ import {
 } from "./jobs/cobros-notifications";
 import { auth } from "./lib/auth";
 import { autenticarBotCobros } from "./lib/bot-cobros/auth";
+import { autenticarNotificacionesCarteraBack } from "./lib/notifications-api-key-auth";
 import { docsBotCobros, openapiBotCobros } from "./lib/bot-cobros/docs";
 import { createContext } from "./lib/context";
 import { toDateStrGT } from "./lib/guatemala-month-window";
@@ -1027,6 +1028,62 @@ app.post("/api/notifications/pay-investors", async (c) => {
 		return c.json({ error: err.message || "Error al crear notificación" }, 500);
 	}
 });
+
+// Endpoint para que cartera-back mande el recibo de un pago por WhatsApp
+// (CB-113), justo después de facturarlo. Servidor-a-servidor: autenticado
+// con API key, no con sesión de usuario.
+app.post(
+	"/api/notifications/recibo-pago-whatsapp",
+	autenticarNotificacionesCarteraBack,
+	async (c) => {
+		try {
+			const body = await c.req.json<{
+				pagoId?: number;
+				numeroSifco?: string;
+				reciboUrl?: string;
+				clienteNombre?: string;
+				numeroCuota?: number | null;
+				asesorNombre?: string | null;
+				asesorTelefono?: string | null;
+			}>();
+
+			if (!body.pagoId || !body.numeroSifco || !body.reciboUrl) {
+				return c.json(
+					{
+						success: false,
+						error: "Los campos 'pagoId', 'numeroSifco' y 'reciboUrl' son requeridos",
+					},
+					400,
+				);
+			}
+
+			const { sendReciboPagoWhatsapp } = await import(
+				"./services/send-recibo-pago-whatsapp"
+			);
+
+			const resultado = await sendReciboPagoWhatsapp({
+				pagoId: body.pagoId,
+				numeroSifco: body.numeroSifco,
+				reciboUrl: body.reciboUrl,
+				clienteNombre: body.clienteNombre ?? "",
+				numeroCuota: body.numeroCuota ?? null,
+				asesorNombre: body.asesorNombre ?? null,
+				asesorTelefono: body.asesorTelefono ?? null,
+			});
+
+			return c.json(
+				{ success: resultado.sent, ...resultado },
+				resultado.sent ? 200 : 502,
+			);
+		} catch (err: any) {
+			console.error("[ReciboPagoWhatsapp] Error:", err);
+			return c.json(
+				{ success: false, error: err.message || "Error al enviar el recibo" },
+				500,
+			);
+		}
+	},
+);
 
 // Bot de WhatsApp de cobros (SimpleTech).
 // A diferencia de /info/* (bot de ventas), estos endpoints exponen datos de

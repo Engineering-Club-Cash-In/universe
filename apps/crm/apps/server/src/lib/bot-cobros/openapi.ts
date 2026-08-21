@@ -607,6 +607,7 @@ export const especificacionBotCobros = {
 					"| `asesor` | Con quién puede hablar el cliente sobre este crédito. `telefono` puede venir vacío |",
 					"| `mensajes` | **Los mismos datos ya escritos para el chat**, en tres formatos: `titulo` (una línea), `resumen` (lo accionable) y `completo` (todo). Se pueden pegar tal cual — traen emojis y negrita de WhatsApp (`*así*`). Los campos de arriba siguen estando para lo que necesites ramificar |",
 					"| `vehiculo` | `null` si el crédito no tiene vehículo registrado — se responde igual, no es error |",
+					"| `cuentasPago` | **Dónde deposita el cliente.** `texto` se muestra literal (ya trae emojis, saltos y negrita); `cuentas` es lo mismo en estructura. Son fijas: no cambian entre créditos ni entre clientes |",
 				].join("\n"),
 				operationId: "infoCredito",
 				requestBody: {
@@ -676,6 +677,40 @@ export const especificacionBotCobros = {
 												marca: "MAZDA",
 												modelo: "CX-5 GRAND TOURING AWD",
 												anio: 2016,
+											},
+											cuentasPago: {
+												texto:
+													"🏦 *Cuentas para tu pago*\n\nTodas a nombre de *CUBE INVESTMENTS, S.A.* (monetarias):\n\n• *Banco Industrial* — 5520029876\n• *Banco Agromercantil (BAM)* — 3020123033\n• *Banco G&T Continental* — 01300039945\n• *Banrural* — 3394002346",
+												cuentas: [
+													{
+														banco: "Banco Industrial",
+														bancoId: 1,
+														numero: "5520029876",
+														titular: "CUBE INVESTMENTS, S.A.",
+														tipo: "monetaria",
+													},
+													{
+														banco: "Banco Agromercantil (BAM)",
+														bancoId: 16,
+														numero: "3020123033",
+														titular: "CUBE INVESTMENTS, S.A.",
+														tipo: "monetaria",
+													},
+													{
+														banco: "Banco G&T Continental",
+														bancoId: 19,
+														numero: "01300039945",
+														titular: "CUBE INVESTMENTS, S.A.",
+														tipo: "monetaria",
+													},
+													{
+														banco: "Banrural",
+														bancoId: 2,
+														numero: "3394002346",
+														titular: "CUBE INVESTMENTS, S.A.",
+														tipo: "monetaria",
+													},
+												],
 											},
 											mensajes: {
 												titulo:

@@ -7,6 +7,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { cuentasParaBot } from "../cuentas-pago";
 import { armarMensajes, fechaLegible, quetzales } from "./mensajes-credito";
 import type { InfoCreditoBot } from "./menu-credito";
 
@@ -28,6 +29,8 @@ const base: InfoCreditoBot = {
 	moraPorConfirmar: false,
 	convenio: null,
 	asesor: { nombre: "Octavio Rosales", telefono: "35111822" },
+	// Fijas para todos los créditos; los mensajes no las usan, pero el tipo sí.
+	cuentasPago: cuentasParaBot(),
 	vehiculo: {
 		placa: "P-319JJL",
 		marca: "Toyota",

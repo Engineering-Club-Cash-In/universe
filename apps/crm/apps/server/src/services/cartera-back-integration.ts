@@ -582,6 +582,18 @@ export async function createPagoInCarteraBack(
 				}
 			}
 			if (!pagoId) {
+				// CB-128 (fix): resultadoIncierto no se marcaba en este punto —
+				// createPago ya tuvo éxito (pasamos el chequeo de success/
+				// soloInformativo arriba sin lanzar), así que el pago SÍ se
+				// aplicó en cartera-back; solo falló resolver a qué pago_id
+				// corresponde. El path gemelo en routers/cobros.ts sí trataba
+				// este caso como resultado incierto (ORPCError
+				// INTERNAL_SERVER_ERROR con "NO reintentes"); acá el Error
+				// plano caía en el catch general con resultadoIncierto=false
+				// (su default), y el caller (registrarPago) lo veía como un
+				// BAD_REQUEST normal — invitando al bot/asesor a reintentar un
+				// pago que ya se había aplicado.
+				resultadoIncierto = true;
 				throw new Error(
 					"cartera-back confirmó el pago pero no se pudo resolver su pago_id",
 				);
@@ -603,6 +615,10 @@ export async function createPagoInCarteraBack(
 		});
 
 		if (!pagoId) {
+			// Guard de tipos — inalcanzable en la práctica (el throw de arriba,
+			// dentro de la transacción, ya cubre este caso), pero se marca
+			// resultadoIncierto igual por si el control flow cambia.
+			resultadoIncierto = true;
 			throw new Error(
 				"cartera-back confirmó el pago pero no se pudo resolver su pago_id",
 			);

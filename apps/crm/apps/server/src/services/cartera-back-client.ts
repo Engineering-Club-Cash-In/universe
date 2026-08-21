@@ -1498,7 +1498,20 @@ export class CarteraBackClient {
 						}))
 				: [];
 		} catch (error) {
-			if (error instanceof CarteraBackHttpError && error.status === 404) {
+			// CB-128 (fix): un 404 por status solo no basta — rutaInexistente()
+			// ya existe justo para distinguir el 404 de negocio real (crédito
+			// sin pagos, con `codigo` presente) del 404 de infraestructura que
+			// Elysia devuelve cuando la ruta no está registrada en este deploy
+			// de cartera-back (rollback, rama sin el endpoint). Tratar CUALQUIER
+			// 404 como "sin pagos" hacía que un deploy desalineado anulara en
+			// silencio el guard de duplicados y el snapshot de pagoIdMaximoPrevio
+			// (que dependen de esta lista): con "sin pagos" siempre, ningún
+			// duplicado se detecta nunca, y el snapshot es siempre 0.
+			if (
+				error instanceof CarteraBackHttpError &&
+				error.status === 404 &&
+				!rutaInexistente(error.status, error.payload)
+			) {
 				return [];
 			}
 			throw error;

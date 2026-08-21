@@ -135,6 +135,13 @@ function RegistrarPagoPage() {
 
 	const credito = creditoQuery.data;
 	const convenioActivo = credito?.convenioActivo;
+	// CB-128: cartera-back rechaza el pago en /newPayment si el crédito está
+	// PENDIENTE_CANCELACION (registerPaymentPolicy.ts), pero solo DESPUÉS de
+	// subir la boleta — bloquear acá evita el archivo huérfano y el
+	// formulario en vano. CANCELADO tampoco tiene cuotas pagables (dead end).
+	const statusBloqueado =
+		credito?.credito.statusCredit === "PENDIENTE_CANCELACION" ||
+		credito?.credito.statusCredit === "CANCELADO";
 	const bancoOptions: ComboboxOption[] = useMemo(
 		() =>
 			(bancosQuery.data ?? []).map((b) => ({
@@ -395,6 +402,14 @@ function RegistrarPagoPage() {
 					<CardContent className="flex items-center justify-center gap-2 py-12 text-muted-foreground text-sm">
 						<Loader2 className="h-4 w-4 animate-spin" />
 						Cargando crédito...
+					</CardContent>
+				</Card>
+			) : credito && statusBloqueado ? (
+				<Card>
+					<CardContent className="py-12 text-center text-muted-foreground text-sm">
+						{credito.credito.statusCredit === "PENDIENTE_CANCELACION"
+							? "Este crédito está pendiente de cancelación y no admite nuevos pagos."
+							: "Este crédito está cancelado y no admite nuevos pagos."}
 					</CardContent>
 				</Card>
 			) : credito ? (

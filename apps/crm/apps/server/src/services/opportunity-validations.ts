@@ -271,8 +271,20 @@ export type ResolucionExencion = {
 	origenBotSinEvidencia: boolean;
 };
 
+/** Una oportunidad ya validada no vuelve a ser exenta: escondería su propio veredicto */
+async function yaTieneBitacora(opportunityId: string): Promise<boolean> {
+	const [fila] = await db
+		.select({ id: opportunityValidations.id })
+		.from(opportunityValidations)
+		.where(eq(opportunityValidations.opportunityId, opportunityId))
+		.limit(1);
+
+	return Boolean(fila);
+}
+
 /** Único punto donde se resuelve la exención; lo usan el servicio y el gate */
 export async function resolverExencionPorBot(oportunidad: {
+	opportunityId: string;
 	source: LeadSource | null;
 	leadSource: LeadSource | null;
 	leadId: string | null;
@@ -285,6 +297,11 @@ export async function resolverExencionPorBot(oportunidad: {
 	);
 
 	if (!declaraOrigenBot) {
+		return { exento: false, origenBotSinEvidencia: false };
+	}
+
+	// Si ya se validó, el veredicto es de esta oportunidad y tiene que verse
+	if (await yaTieneBitacora(oportunidad.opportunityId)) {
 		return { exento: false, origenBotSinEvidencia: false };
 	}
 
@@ -346,6 +363,27 @@ export async function faltaConsentimientoDelTitular(
 		.limit(1);
 
 	return !cargado;
+}
+
+type ResultadoRenap = Awaited<ReturnType<typeof getOnlyRenapInfoController>>;
+
+const renapEnCurso = new Map<string, Promise<ResultadoRenap>>();
+
+/**
+ * Una sola llamada a RENAP en vuelo por DPI. `renapinfo` se escribe con
+ * select-then-insert sobre su llave primaria, y el timeout libera al que espera sin cortar la petición
+ */
+function renapCompartido(dpi: string): Promise<ResultadoRenap> {
+	const enCurso = renapEnCurso.get(dpi);
+	if (enCurso) return enCurso;
+
+	const consulta = getOnlyRenapInfoController(dpi).finally(() => {
+		renapEnCurso.delete(dpi);
+	});
+
+	renapEnCurso.set(dpi, consulta);
+
+	return consulta;
 }
 
 const filaPorDpi = new Map<string, Promise<unknown>>();
@@ -460,7 +498,10 @@ async function ejecutarValidacionesInterno({
 		};
 	}
 
-	const exencion = await resolverExencionPorBot(oportunidad);
+	const exencion = await resolverExencionPorBot({
+		opportunityId,
+		...oportunidad,
+	});
 
 	if (exencion.exento) {
 		return {
@@ -511,25 +552,19 @@ async function ejecutarValidacionesInterno({
 	}
 
 	// 1. RENAP: sincronizar datos de identidad en renap_info
-	// Encolado por DPI: `renapinfo` tiene el DPI como llave primaria y el
-	// controller hace select + insert, así que dos validaciones simultáneas del
-	// mismo lead pueden chocar con violación de llave
-	const renapResultado = await enFilaPorDpi(dpi, () =>
-		conReintento(
-			() =>
-				conTimeout(
-					() => getOnlyRenapInfoController(dpi),
-					TIMEOUT_RENAP_MS,
-					() => ({
-						success: false as const,
-						message: MENSAJE_TIMEOUT_RENAP,
-						error: null,
-					}),
-				),
-			// El timeout deja la petición original en vuelo: reintentar la
-			// duplicaría y ambas escribirían en renapinfo
-			(r) => r.success || r.message === MENSAJE_TIMEOUT_RENAP,
-		),
+	const renapResultado = await conReintento(
+		() =>
+			conTimeout(
+				() => renapCompartido(dpi),
+				TIMEOUT_RENAP_MS,
+				() => ({
+					success: false as const,
+					message: MENSAJE_TIMEOUT_RENAP,
+					error: null,
+				}),
+			),
+		// El timeout deja la petición original en vuelo: reintentar la duplicaría
+		(r) => r.success || r.message === MENSAJE_TIMEOUT_RENAP,
 	);
 
 	const renapResumen = renapResultado.success
@@ -795,7 +830,10 @@ export async function getValidaciones({
 		throw new OportunidadNoEncontradaError();
 	}
 
-	const exencion = await resolverExencionPorBot(oportunidad);
+	const exencion = await resolverExencionPorBot({
+		opportunityId,
+		...oportunidad,
+	});
 
 	if (exencion.exento) {
 		return {

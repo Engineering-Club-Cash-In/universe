@@ -3144,6 +3144,7 @@ export const crmRouter = {
 				// La exención se resuelve en el servicio: `source` es editable por el
 				// usuario, así que además exige evidencia de que el bot validó.
 				const exencion = await resolverExencionPorBot({
+					opportunityId: input.opportunityId,
 					source: opportunity[0].source,
 					leadSource: opportunity[0].leadSource,
 					leadId: opportunity[0].leadId,

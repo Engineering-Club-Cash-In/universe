@@ -137,7 +137,8 @@ export function RenapBuroValidation({
 	const [isExecuting, setIsExecuting] = useState(false);
 	const [detalleRenapAbierto, setDetalleRenapAbierto] = useState(false);
 	const [detalleBuroAbierto, setDetalleBuroAbierto] = useState(false);
-	const autoEjecutado = useRef(false);
+	/** Qué oportunidad se auto-ejecutó: la ruta reusa el componente al navegar */
+	const autoEjecutadaPara = useRef<string | null>(null);
 
 	const validacionesQuery = useQuery({
 		...orpc.getValidacionesOportunidad.queryOptions({
@@ -185,13 +186,18 @@ export function RenapBuroValidation({
 			!data.faltaConsentimiento &&
 			data.enAnalisisPendiente &&
 			!data.buro &&
-			!autoEjecutado.current &&
+			autoEjecutadaPara.current !== opportunityId &&
 			!isExecuting
 		) {
-			autoEjecutado.current = true;
+			autoEjecutadaPara.current = opportunityId;
 			ejecutarValidaciones();
 		}
-	}, [validacionesQuery.data, isExecuting, ejecutarValidaciones]);
+	}, [
+		validacionesQuery.data,
+		isExecuting,
+		ejecutarValidaciones,
+		opportunityId,
+	]);
 
 	if (validacionesQuery.isLoading) {
 		return (

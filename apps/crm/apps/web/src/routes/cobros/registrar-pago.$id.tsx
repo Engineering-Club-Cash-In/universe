@@ -12,7 +12,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { DistribucionPagoDetalle } from "@/components/cobros/distribucion-pago-detalle";
-import { aFechaISO_GT } from "@/components/cobros/historial/formato";
+import { aFechaISO, aFechaISO_GT } from "@/components/cobros/historial/formato";
 import {
 	ConvenioActivoCard,
 	ResumenCreditoPago,
@@ -226,6 +226,8 @@ function RegistrarPagoPage() {
 			if (!cuotaSeleccionada) throw new Error("Selecciona una cuota a pagar");
 			if (!fechaBoleta) throw new Error("Selecciona la fecha de la boleta");
 			if (!credito) throw new Error("No se pudo cargar el crédito");
+			if (!bancoId) throw new Error("Selecciona el banco");
+			if (!origenPago) throw new Error("Selecciona el origen del pago");
 
 			let urlBoletas: string[] = [];
 			if (archivo) {
@@ -277,10 +279,21 @@ function RegistrarPagoPage() {
 				// UTC): toISOString().split("T")[0] corría el día después de las
 				// 18:00 hora GT (UTC-6), registrando el pago con fecha de mañana.
 				fechaPago: aFechaISO_GT(new Date()),
-				fechaBoleta: fechaBoleta.toISOString(),
+				// El Calendar produce un Date a medianoche LOCAL del navegador del
+				// asesor — convertir esa medianoche directo a ISO corre el día en
+				// cualquier offset distinto de UTC negativo puro (ej. UTC+2
+				// retrocede al día anterior). Se reconstruye el Date anclado a
+				// mediodía LOCAL del mismo día calendario (aFechaISO ya usa
+				// componentes locales, no UTC) antes de convertir a ISO — el
+				// resultado sigue siendo z.string().datetime() válido (con Z),
+				// mismo día calendario que el asesor seleccionó sin importar su
+				// timezone.
+				fechaBoleta: new Date(
+					`${aFechaISO(fechaBoleta)}T12:00:00`,
+				).toISOString(),
 				otros: otrosNum || undefined,
-				bancoId: bancoId ? Number(bancoId) : undefined,
-				origenPago: origenPago || undefined,
+				bancoId: Number(bancoId),
+				origenPago: origenPago,
 				numeroAutorizacion: normalizeForSubmit(numeroAutorizacion) || undefined,
 				observaciones: normalizeForSubmit(observaciones) || undefined,
 				urlBoletas,
@@ -517,6 +530,7 @@ function RegistrarPagoPage() {
 												mode="single"
 												selected={fechaBoleta}
 												onSelect={setFechaBoleta}
+												disabled={{ after: new Date() }}
 											/>
 										</PopoverContent>
 									</Popover>

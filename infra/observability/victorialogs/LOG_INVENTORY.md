@@ -14,6 +14,15 @@
 
 El total incluye llamadas ejecutables de consola y logging ad hoc. En backend también incluye `python.print`, `logger.*`, timers y tablas; excluye dependencias, builds, coverage, datos/fixtures generados y archivos clasificados como prueba.
 
+> **Corrección posterior (21 de agosto de 2026):** las 248 llamadas `logger.info/error/debug`
+> de la tabla backend pertenecen a `src/migration/procesar_creditos.py`, no a TypeScript.
+> Ese archivo contiene además 90 llamadas `logger.warn` que el conteo original omitió.
+> Por tanto, al excluir scripts Python locales/manuales, el baseline histórico de
+> TypeScript backend era 3,080 matches textuales, de los cuales dos eran `console.*`
+> comentados en `src/controllers/credits.ts`; el baseline ejecutable es 3,078. Python contiene 1,014 llamadas observadas:
+> 676 `print` y 338 `logger.*`. La clasificación original de 4,151 se conserva como
+> resultado histórico, pero no se considera reconciliación exhaustiva del código actual.
+
 ## Acción recomendada
 
 | Acción | Backend | Frontend | Total | Proporción |
@@ -38,7 +47,9 @@ El total incluye llamadas ejecutables de consola y logging ad hoc. En backend ta
 | `logger.info` | 191 |
 | `logger.error` | 56 |
 | `logger.debug` | 1 |
-| **Total** | **4,004** |
+| `logger.warn` (omitido del total original) | 90 |
+| **Total original reportado** | **4,004** |
+| **Total backend ejecutable reconciliado** | **4,092** |
 
 ### Hotspots backend
 

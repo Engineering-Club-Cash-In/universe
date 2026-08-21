@@ -4729,10 +4729,40 @@ export const cobrosRouter = {
 				// pago igual (fallback de pagoId) — ahí sí se sabe cuál cuota
 				// cerró de verdad.
 				if (!pagoId) {
-					let pagoEncontrado = await buscarPagoNuevo();
+					// CB-128 (fix): createPago YA tuvo éxito en este punto (el
+					// dinero se movió) — si buscarPagoNuevo() en sí LANZA (timeout
+					// o 5xx de getPagosByCredito agotando sus reintentos internos),
+					// eso es distinto de "no encontrado todavía": un throw sin
+					// capturar acá se propaga fuera de la transacción como error
+					// genérico, saltándose el mensaje explícito "NO reintentes" de
+					// abajo — el asesor ve un fallo de servidor normal y puede
+					// reintentar un pago que ya se aplicó. Se trata un fallo del
+					// primer intento como "no encontrado todavía" (se sigue al
+					// retry de 1.5s); un fallo del segundo intento si es un
+					// resultado incierto real.
+					let pagoEncontrado:
+						| Awaited<ReturnType<typeof buscarPagoNuevo>>
+						| undefined;
+					try {
+						pagoEncontrado = await buscarPagoNuevo();
+					} catch {
+						pagoEncontrado = undefined;
+					}
 					if (!pagoEncontrado) {
 						await new Promise((resolve) => setTimeout(resolve, 1500));
-						pagoEncontrado = await buscarPagoNuevo();
+						try {
+							pagoEncontrado = await buscarPagoNuevo();
+						} catch (error) {
+							const message =
+								error instanceof Error ? error.message : String(error);
+							console.error(
+								"[registrarPagoCompleto] Resultado incierto: createPago tuvo éxito pero buscarPagoNuevo falló dos veces (timeout/5xx):",
+								error,
+							);
+							throw new ORPCError("INTERNAL_SERVER_ERROR", {
+								message: `El pago se registró en cartera-back pero el CRM no pudo confirmar su referencia (${message}). NO reintentes el pago — contacta a soporte para verificar antes de volver a registrarlo.`,
+							});
+						}
 					}
 					pagoId = pagoEncontrado?.pago_id;
 					if (pagoEncontrado?.numero_cuota != null) {

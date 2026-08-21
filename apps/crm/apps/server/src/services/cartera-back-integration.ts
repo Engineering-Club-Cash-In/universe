@@ -372,10 +372,32 @@ async function resolverPagoRecienCreado(
 		});
 		return nuevos.sort((a, b) => b.pago_id - a.pago_id)[0] ?? null;
 	};
-	const primerIntento = await buscar();
+	// CB-128 (fix): createPago YA tuvo éxito cuando se llega a esta función
+	// (el dinero se movió) — si buscar() en sí LANZA (timeout o 5xx de
+	// getPagosByCredito agotando sus reintentos internos), eso es distinto
+	// de "no encontrado todavía". Sin este try/catch, un throw del primer
+	// intento se propagaba sin darle chance al retry de 1.5s, y un throw del
+	// segundo intento se propagaba fuera de esta función saltándose el
+	// mensaje explícito "NO reintentes" que arma el caller cuando
+	// resolverPagoRecienCreado devuelve null — el asesor veía un error
+	// genérico y podía reintentar un pago que ya se había aplicado.
+	let primerIntento: CarteraPagoCredito | null;
+	try {
+		primerIntento = await buscar();
+	} catch {
+		primerIntento = null;
+	}
 	if (primerIntento) return primerIntento;
 	await new Promise((resolve) => setTimeout(resolve, 1500));
-	return buscar();
+	try {
+		return await buscar();
+	} catch (error) {
+		console.error(
+			"[resolverPagoRecienCreado] Resultado incierto: createPago tuvo éxito pero buscar() falló dos veces (timeout/5xx):",
+			error,
+		);
+		return null;
+	}
 }
 
 export async function createPagoInCarteraBack(

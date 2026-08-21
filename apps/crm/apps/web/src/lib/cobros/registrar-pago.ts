@@ -89,9 +89,12 @@ export function calcularDistribucionPago(params: {
 
 	if (cuotaConvenio > 0) {
 		// El convenio es solo informativo: cartera-back lo registra como
-		// catch-up pero NO lo resta del disponible que sigue pagando cuotas
-		// corrientes (registerPayment.ts:927-938, regla de negocio 06-ago-2026).
-		const montoConv = Math.min(montoRestante, cuotaConvenio);
+		// catch-up en paralelo pero NO lo resta del disponible que sigue
+		// pagando cuotas corrientes — la boleta completa (tras otros/mora)
+		// cuenta para ambos (registerPayment.ts:927-938, regla de negocio
+		// 06-ago-2026). No es doble conteo real: son dos efectos distintos
+		// de la misma boleta, igual que lo muestra carteraFront.
+		const montoConv = getConvenioAplicado(montoRestante, 0, 0, cuotaConvenio);
 		distribucion.push({ concepto: "3. Cuota Convenio", monto: montoConv });
 	}
 

@@ -16,7 +16,8 @@ import { exportPagosConInversionistasExcel, exportPagosAdvisorExcel, exportPagos
 import { actualizarCuentaPago, aplicarPagoAlCredito, insertPayment, aplicarMontoAPago, editarPago } from "../controllers/registerPayment";
 import { eq } from "drizzle-orm";
 import { db } from "../database";
-import { creditos, pagos_credito } from "../database/db";
+import { creditos, pagos_credito, usuarios } from "../database/db";
+import { enviarReciboPagoWhatsappBestEffort } from "../services/reciboPagoWhatsapp";
 import { revalidatePayment } from "../controllers/revalidatePayment";
 import { reversePayment } from "../controllers/reversePayment";
 import { revertPaymentToPending } from "../controllers/revertPaymentToPending";
@@ -564,6 +565,36 @@ export const paymentRouter = new Elysia()
       const resultado = await aplicarPagoAlCredito(pagoId);
 
       set.status = getApplyPaymentHttpStatus(resultado);
+
+      // Fire-and-forget: enviar recibo de pago por WhatsApp (CB-113) sin
+      // bloquear la respuesta de validar-pago. enviarReciboPagoWhatsappBestEffort
+      // nunca lanza, pero el lookup de numeroSifco/nombre sí puede fallar (DB) —
+      // el .catch() es solo para dejar el motivo en el log, nunca afecta la respuesta.
+      if ((resultado as { success?: boolean }).success && pagoExiste.credito_id) {
+        void db
+          .select({
+            numeroSifco: creditos.numero_credito_sifco,
+            nombre: usuarios.nombre,
+          })
+          .from(creditos)
+          .innerJoin(usuarios, eq(usuarios.usuario_id, creditos.usuario_id))
+          .where(eq(creditos.credito_id, pagoExiste.credito_id))
+          .limit(1)
+          .then(([datosCliente]) =>
+            enviarReciboPagoWhatsappBestEffort({
+              pagoId,
+              numeroSifco: datosCliente?.numeroSifco ?? null,
+              clienteNombre: datosCliente?.nombre ?? "",
+            }),
+          )
+          .catch((error) => {
+            console.error(
+              `⚠️ No se pudo enviar recibo de pago por WhatsApp para pago ${pagoId} (NO afecta la validación):`,
+              error instanceof Error ? error.message : error,
+            );
+          });
+      }
+
       return resultado;
 
     } catch (error) {

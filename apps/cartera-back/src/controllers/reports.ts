@@ -1390,11 +1390,14 @@ export async function generateReciboPagoPDF(pagoId: number) {
       c.numero_credito_sifco,
       u.nombre AS usuario_nombre,
       u.nit AS usuario_nit,
-      cq.numero_cuota
+      cq.numero_cuota,
+      a.nombre AS asesor_nombre,
+      a.telefono AS asesor_telefono
     FROM ${SQL_CARTERA_SCHEMA}.pagos_credito p
     INNER JOIN ${SQL_CARTERA_SCHEMA}.creditos c ON c.credito_id = p.credito_id
     INNER JOIN ${SQL_CARTERA_SCHEMA}.usuarios u ON u.usuario_id = c.usuario_id
     LEFT JOIN ${SQL_CARTERA_SCHEMA}.cuotas_credito cq ON cq.cuota_id = p.cuota_id
+    LEFT JOIN ${SQL_CARTERA_SCHEMA}.asesores a ON a.asesor_id = c.asesor_id
     WHERE p.pago_id = ${pagoId}
   `);
 
@@ -1631,14 +1634,18 @@ export async function generateReciboPagoPDF(pagoId: number) {
 
   // 3️⃣ Generar PDF con Puppeteer
   const browser = await launchBrowser();
-  const page = await browser.newPage();
-  await page.setContent(html, { waitUntil: "networkidle0" });
-  const pdfData = await page.pdf({
-    format: "A4",
-    printBackground: true,
-    margin: { top: "10mm", bottom: "10mm", left: "10mm", right: "10mm" },
-  });
-  await browser.close();
+  let pdfData: Buffer | Uint8Array;
+  try {
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: "networkidle0" });
+    pdfData = await page.pdf({
+      format: "A4",
+      printBackground: true,
+      margin: { top: "10mm", bottom: "10mm", left: "10mm", right: "10mm" },
+    });
+  } finally {
+    await browser.close();
+  }
 
   // 4️⃣ Subir a R2
   const fileBuffer = Buffer.from(pdfData);
@@ -1664,7 +1671,12 @@ export async function generateReciboPagoPDF(pagoId: number) {
   const url = `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`;
   console.log("✅ Recibo de pago PDF subido:", url);
 
-  return { pdfUrl: url };
+  return {
+    pdfUrl: url,
+    numeroCuota: pago.numero_cuota != null ? Number(pago.numero_cuota) : null,
+    asesorNombre: pago.asesor_nombre ?? null,
+    asesorTelefono: pago.asesor_telefono ?? null,
+  };
 }
 
 export async function getPagosByVencimiento({

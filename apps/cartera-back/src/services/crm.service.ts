@@ -6,6 +6,12 @@ if (!CRM_API_URL) {
   console.warn("[WARN] CRM_API_URL is not set in env — CRM notifications will fail");
 }
 
+if (!process.env.CARTERA_BACK_API_KEY) {
+  console.warn(
+    "[WARN] CARTERA_BACK_API_KEY is not set in env — recibo de pago por WhatsApp fallará (401 del CRM)",
+  );
+}
+
 const crmApi = axios.create({
   baseURL: CRM_API_URL,
   headers: {
@@ -65,6 +71,75 @@ export async function notifyPayInvestors(
     return {
       success: false,
       message: `Error enviando notificación al CRM: ${msg}`,
+      error: msg,
+    };
+  }
+}
+
+// ============================================
+// 📄 Enviar recibo de pago por WhatsApp
+// ============================================
+export interface NotifyReciboPagoWhatsappInput {
+  pagoId: number;
+  numeroSifco: string;
+  reciboUrl: string;
+  clienteNombre: string;
+  numeroCuota?: number | null;
+  asesorNombre?: string | null;
+  asesorTelefono?: string | null;
+}
+
+export interface NotifyReciboPagoWhatsappResponse {
+  success: boolean;
+  message: string;
+  data?: any;
+  error?: string;
+}
+
+/**
+ * Envía al cliente, por WhatsApp, el recibo de comprobante del pago recién
+ * facturado. Fire-and-forget desde el caller: nunca lanza, siempre devuelve
+ * un resultado tipado para no afectar la respuesta de facturación si falla.
+ */
+export async function notifyReciboPagoWhatsapp(
+  input: NotifyReciboPagoWhatsappInput,
+): Promise<NotifyReciboPagoWhatsappResponse> {
+  try {
+    const { data } = await crmApi.post(
+      "/api/notifications/recibo-pago-whatsapp",
+      {
+        pagoId: input.pagoId,
+        numeroSifco: input.numeroSifco,
+        reciboUrl: input.reciboUrl,
+        clienteNombre: input.clienteNombre,
+        numeroCuota: input.numeroCuota ?? null,
+        asesorNombre: input.asesorNombre ?? null,
+        asesorTelefono: input.asesorTelefono ?? null,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.CARTERA_BACK_API_KEY}`,
+        },
+      },
+    );
+
+    if (!data?.sent) {
+      const msg = data?.mensaje ?? "El CRM no pudo enviar el recibo por WhatsApp";
+      console.error(`❌ Error enviando recibo de pago por WhatsApp: ${msg}`);
+      return { success: false, message: msg, error: msg, data };
+    }
+
+    return {
+      success: true,
+      message: "Recibo de pago enviado por WhatsApp correctamente",
+      data,
+    };
+  } catch (error: any) {
+    const msg = error?.response?.data?.message ?? error?.message ?? "Error desconocido";
+    console.error(`❌ Error enviando recibo de pago por WhatsApp: ${msg}`);
+    return {
+      success: false,
+      message: `Error enviando recibo de pago por WhatsApp: ${msg}`,
       error: msg,
     };
   }

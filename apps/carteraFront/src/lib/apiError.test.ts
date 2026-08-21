@@ -1,5 +1,6 @@
-import { describe, expect, it } from "bun:test";
+import { beforeAll, describe, expect, it } from "bun:test";
 import { AxiosError } from "axios";
+import { z } from "zod";
 import {
   getApiErrorMessage,
   getBatchFailedCredits,
@@ -283,4 +284,55 @@ describe("getApiErrorMessage — detalle por campo del backend", () => {
       "No se pudo registrar el pago: No se puede registrar el pago porque el crédito está pendiente de cancelación.",
     );
   });
+});
+
+describe("mensajes por defecto de zod que llegan del backend", () => {
+  // El backend NO instala el errorMap en español, así que sus errores de
+  // validación viajan con el texto por defecto de zod. Se fuerza ese mapa acá
+  // para no depender del orden en que corran los otros archivos de test.
+  beforeAll(() => {
+    z.setErrorMap(z.defaultErrorMap);
+  });
+
+  const CASOS: Array<[string, z.ZodTypeAny, unknown]> = [
+    ["z.number().positive()", z.number().positive(), 0],
+    ["z.number().int().positive()", z.number().int().positive(), 0],
+    ["z.number().negative()", z.number().negative(), 0],
+    ["z.number().nonnegative()", z.number().nonnegative(), -1],
+    ["z.number().min(0.01)", z.number().min(0.01), 0],
+    ["z.number().max(100)", z.number().max(100), 101],
+    ["z.number().lt(10)", z.number().lt(10), 10],
+    ["z.number().gt(10)", z.number().gt(10), 10],
+    ["z.number().int()", z.number().int(), 1.5],
+    ["z.number().finite()", z.number().finite(), Infinity],
+    ["z.number().multipleOf(5)", z.number().multipleOf(5), 3],
+    ["z.string().min(1)", z.string().min(1), ""],
+    ["z.string().min(5)", z.string().min(5), "ab"],
+    ["z.string().max(500)", z.string().max(500), "x".repeat(501)],
+    ["z.string().length(3)", z.string().length(3), "abcd"],
+    ["z.string().email()", z.string().email(), "no-es-mail"],
+    ["z.array().min(1)", z.array(z.string()).min(1), []],
+    ["z.array().max(2)", z.array(z.string()).max(2), ["a", "b", "c"]],
+    ["z.enum()", z.enum(["transferencia", "cheque"]), "efectivo"],
+    ["campo faltante", z.number(), undefined],
+    ["number recibe string", z.number(), ""],
+    ["string recibe number", z.string(), 1],
+  ];
+
+  const EN_INGLES = /must contain|must be|Expected |Required|Invalid input|Invalid enum/i;
+
+  for (const [nombre, schema, valor] of CASOS) {
+    it(`traduce el mensaje de ${nombre}`, () => {
+      const parsed = schema.safeParse(valor);
+      expect(parsed.success).toBe(false);
+      if (parsed.success) return;
+
+      const crudo = parsed.error.issues[0].message;
+      const mostrado = getApiErrorMessage(new Error(crudo), "No se pudo guardar");
+
+      // Si no hay regla, getApiErrorMessage devuelve el texto tal cual.
+      expect(mostrado).not.toBe(`No se pudo guardar: ${crudo}`);
+      expect(mostrado).not.toMatch(EN_INGLES);
+    });
+  }
 });

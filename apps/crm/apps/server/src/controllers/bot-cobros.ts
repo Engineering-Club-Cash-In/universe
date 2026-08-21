@@ -553,12 +553,36 @@ export async function confirmarBoletaBotCobros(c: Context) {
 			});
 		}
 
-		// Un `bancoId` que no es número se trata como no enviado: el catálogo lo
-		// valida después, y así "banco_id": "" del bot no se convierte en un NaN
-		// que viaje hasta cartera.
-		const bancoCrudo = Number(body.bancoId);
-		const bancoId =
-			Number.isInteger(bancoCrudo) && bancoCrudo > 0 ? bancoCrudo : undefined;
+		// El `bancoId` es lo ÚNICO que este request puede corregir (D-26), así
+		// que hay que separar dos cosas que antes se trataban igual:
+		//
+		//   · ausente, `null` o `""` → "no lo corrijo": se usa el del borrador.
+		//   · presente pero ilegible → una corrección que no se entiende.
+		//
+		// Meter la segunda en la primera es lo peligroso: el cliente manda el
+		// banco justamente porque la lectura lo reconoció mal, y volver al del
+		// borrador registra el pago contra el banco que estaba corrigiendo. Sin
+		// error visible para nadie.
+		let bancoId: number | undefined;
+		const bancoCrudo = body.bancoId;
+		const mandoBanco =
+			bancoCrudo !== undefined &&
+			bancoCrudo !== null &&
+			String(bancoCrudo).trim() !== "";
+
+		if (mandoBanco) {
+			const numero = Number(String(bancoCrudo).trim());
+
+			if (!Number.isInteger(numero) || numero <= 0) {
+				return error(c, {
+					codigo: "BANCO_INVALIDO",
+					mensaje: "Ese banco no está en nuestra lista.",
+					estado: 400,
+				});
+			}
+
+			bancoId = numero;
+		}
 
 		const resultado = await confirmarBoleta({
 			referencia,

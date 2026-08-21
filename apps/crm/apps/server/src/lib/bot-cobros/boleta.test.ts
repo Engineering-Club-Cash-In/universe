@@ -126,6 +126,34 @@ describe("de dónde se acepta descargar (SSRF)", () => {
 		expect(esDireccionPrivada("8.8.8.8")).toBe(false);
 	});
 
+	// Una IPv4 se puede escribir como IPv6 y sigue siendo la misma máquina. Si
+	// un dominio de la allowlist tuviera un AAAA así, el filtro lo dejaba pasar
+	// y el SSRF quedaba abierto de nuevo.
+	test("una IPv4 privada disfrazada de IPv6 tampoco pasa", () => {
+		expect(esDireccionPrivada("::ffff:127.0.0.1")).toBe(true);
+		expect(esDireccionPrivada("::ffff:10.0.0.5")).toBe(true);
+		// Los metadatos del cloud, en la forma hexadecimal (169.254.169.254).
+		expect(esDireccionPrivada("::ffff:a9fe:a9fe")).toBe(true);
+		// Y en corchetes, como viene de una URL.
+		expect(esDireccionPrivada("[::ffff:169.254.169.254]")).toBe(true);
+		// Una pública disfrazada sigue siendo pública: el filtro no bloquea todo.
+		expect(esDireccionPrivada("::ffff:8.8.8.8")).toBe(false);
+	});
+
+	test("los rangos IPv6 propios siguen bloqueados", () => {
+		expect(esDireccionPrivada("fd00::1")).toBe(true);
+		expect(esDireccionPrivada("fe80::1")).toBe(true);
+		expect(esDireccionPrivada("::")).toBe(true);
+		expect(esDireccionPrivada("2001:4860:4860::8888")).toBe(false);
+	});
+
+	// `/^f[cd]/` daba por privado cualquier host que empezara con esas letras.
+	// Fallaba cerrado, pero un CDN llamado así no se podía usar nunca.
+	test("un dominio no es privado por empezar como un rango IPv6", () => {
+		expect(esDireccionPrivada("fdn-cdn.com")).toBe(false);
+		expect(esDireccionPrivada("fc-imagenes.net")).toBe(false);
+	});
+
 	// No basta con mirar el texto del host: la allowlist puede estar conforme y
 	// el nombre apuntar adentro. Estos dos casos no salen a la red de verdad
 	// —`localhost` sale de /etc/hosts y `.invalid` no resuelve nunca—, así que

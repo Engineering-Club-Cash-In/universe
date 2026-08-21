@@ -14,6 +14,7 @@
 
 import { createHash } from "node:crypto";
 import { lookup } from "node:dns/promises";
+import { BlockList, isIP } from "node:net";
 
 /** Dominios permitidos, coma-separados. Sin esto no se descarga nada. */
 const ENV_DOMINIOS = "BOT_COBROS_DOMINIOS_IMAGEN";
@@ -80,30 +81,52 @@ function dominiosPermitidos(): string[] {
  *
  * Se comprueba sobre el host de la URL: si alguien manda `http://169.254.169.254`
  * —los metadatos de AWS— o un `10.x` de la red interna, no se sale a buscarlo.
+ *
+ * La clasificación la hace `BlockList` de Node y no una expresión regular
+ * escrita a mano, por dos cosas que la regular no veía:
+ *
+ * - **Las IPv4 escritas como IPv6.** `::ffff:127.0.0.1` y `::ffff:7f00:1` SON
+ *   127.0.0.1, pero no calzaban ni con los prefijos IPv6 ni con el punteado, y
+ *   pasaban por públicas: un AAAA así en un dominio de la allowlist reabría el
+ *   SSRF que todo este archivo existe para cerrar. `BlockList` normaliza esa
+ *   forma y la compara contra las reglas IPv4.
+ * - **Los nombres que empiezan igual que un rango.** `/^f[cd]/` daba por
+ *   privado cualquier dominio que arrancara con `fc` o `fd`. Fallaba cerrado,
+ *   así que no era un hueco, pero era falso.
  */
+const RANGOS_PRIVADOS = (() => {
+	const lista = new BlockList();
+
+	lista.addSubnet("0.0.0.0", 8);
+	lista.addSubnet("10.0.0.0", 8);
+	lista.addSubnet("127.0.0.0", 8);
+	lista.addSubnet("100.64.0.0", 10); // CGNAT
+	lista.addSubnet("169.254.0.0", 16); // metadatos de la nube
+	lista.addSubnet("172.16.0.0", 12);
+	lista.addSubnet("192.168.0.0", 16);
+
+	lista.addAddress("::", "ipv6"); // sin especificar
+	lista.addAddress("::1", "ipv6");
+	lista.addSubnet("fc00::", 7, "ipv6"); // únicas locales
+	lista.addSubnet("fe80::", 10, "ipv6"); // link-local
+
+	return lista;
+})();
+
 export function esDireccionPrivada(host: string): boolean {
 	const h = host.toLowerCase().replace(/^\[|\]$/g, "");
 
 	if (h === "localhost" || h.endsWith(".local") || h.endsWith(".internal")) {
 		return true;
 	}
-	// IPv6 local: ::1, fc00::/7 (únicas locales), fe80::/10 (link-local).
-	if (h === "::1" || /^f[cd]/.test(h) || /^fe[89ab]/.test(h)) return true;
 
-	const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
-	if (!ipv4) return false;
+	const version = isIP(h);
 
-	const [a, b] = [Number(ipv4[1]), Number(ipv4[2])];
+	// No es una IP sino un nombre: quién puede resolverlo lo decide la allowlist
+	// de dominios, y a dónde apunta de verdad lo revisa `destinoResuelto()`.
+	if (version === 0) return false;
 
-	return (
-		a === 10 ||
-		a === 127 ||
-		a === 0 ||
-		(a === 172 && b >= 16 && b <= 31) ||
-		(a === 192 && b === 168) ||
-		(a === 169 && b === 254) ||
-		(a === 100 && b >= 64 && b <= 127)
-	);
+	return RANGOS_PRIVADOS.check(h, version === 4 ? "ipv4" : "ipv6");
 }
 
 /** ¿La URL pasa los filtros de forma? (sin salir a la red todavía) */

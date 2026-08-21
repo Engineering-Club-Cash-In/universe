@@ -356,6 +356,22 @@ function RegistrarPagoPage() {
 			toast.error("Selecciona una cuota a pagar");
 			return;
 		}
+		// CB-128: mientras getAbonosCuotaParaPago carga o falla, abonosYaHechos
+		// cae a 0 por el fallback (abonosCuotaQuery.data ?? null) — si la cuota
+		// sí tiene abonos previos, la vista previa de distribución mostraría un
+		// monto de cuota más alto del real. cartera-back igual calcula bien el
+		// pago server-side, pero el asesor vería una distribución incorrecta
+		// antes de confirmar.
+		if (abonosCuotaQuery.isLoading) {
+			toast.error("Cargando abonos previos de la cuota, espera un momento");
+			return;
+		}
+		if (abonosCuotaQuery.isError) {
+			toast.error(
+				"No se pudieron cargar los abonos previos de la cuota, intenta de nuevo",
+			);
+			return;
+		}
 		if (!montoBoletaNum || montoBoletaNum <= 0) {
 			toast.error("Indica el monto de la boleta");
 			return;

@@ -385,8 +385,8 @@ ese endpoint mueve dinero y ya fue decisión no meterle idempotencia
 | 401 | `REFERENCIA_INVALIDA` / `SESION_VENCIDA` | Igual que arriba. |
 | 404 | `BORRADOR_NO_ENCONTRADO` | El `boletaId` no existe o es de otra sesión. |
 | 410 | `BORRADOR_VENCIDO` | Pasaron más de 15 minutos desde la lectura. Pedir la foto de nuevo. |
-| 409 | `BORRADOR_NO_CONFIRMABLE` | El borrador quedó en un estado del que no se sale reintentando: `fallida`, `rechazada`, `revision_manual`, `descartada`. El estado va en `data`. |
-| 409 | `BOLETA_YA_CONFIRMADA` | Ese borrador ya se registró. Va con los `pagoIds` en `data` — **no se registra otro pago**. |
+| 409 | `BORRADOR_NO_CONFIRMABLE` | El borrador quedó en un estado del que no se sale reintentando: `confirmada_a_verificar`, `fallida`, `rechazada`, `revision_manual`, `descartada`. El estado va en `data`. `confirmada_a_verificar` viene por acá **a propósito**: la reconciliación probó que algo se escribió, no que se escribió todo (§4.1) — al cliente no se le dice que el pago entró. |
+| 409 | `BOLETA_YA_CONFIRMADA` | Ese borrador ya se registró **completo** (`confirmada`). Va con los `pagoIds` en `data` — **no se registra otro pago**. |
 | 409 | `CONFIRMACION_EN_CURSO` | Hay una confirmación a medias de este mismo borrador (§4.1). Se responde sin volver a llamar a cartera. |
 | 409 | `BOLETA_DUPLICADA` | Misma autorización + banco ya registrada. Ver §9. |
 | 502 | `PAGO_NO_REGISTRADO` | Cartera respondió error al insertar. |
@@ -790,6 +790,15 @@ campos vacíos también "coinciden" y el segundo pago quedaría rechazado por du
 válido. Comparar `NULL` con `NULL` no es evidencia de nada.
 
 El hash sí cubre ese caso sin equivocarse: dos depósitos distintos son dos fotos distintas.
+
+**Y el segundo control corre dos veces: una para cortar rápido y otra para decidir.** Dos
+borradores distintos de la misma boleta —la misma foto recortada distinto pasa el control del
+hash— pueden llegar a confirmarse a la vez, y si apuntan a dos créditos del mismo cliente los
+candados de cartera (que van por crédito) tampoco los frenan. Por eso el chequeo de
+banco + monto + autorización que vale es el que corre **adentro de la transacción de la
+marca**, detrás de un `pg_advisory_xact_lock` por (sesión, autorización): el segundo en llegar
+espera a que el primero commitee su `confirmando` y recién entonces mira. El del paso 5 es
+solo el atajo que evita gastar el viaje a cartera.
 
 **Un borrador vencido deja de bloquear.** El borrador vive 15 minutos y la sesión 30: si el
 cliente se toma su tiempo y el borrador caduca, lo que se espera es que mande su boleta otra

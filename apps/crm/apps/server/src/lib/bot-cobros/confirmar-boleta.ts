@@ -35,7 +35,6 @@ import { db } from "../../db";
 import {
 	botCobrosBoletaPagos,
 	botCobrosBoletas,
-	type EstadoBoletaBot,
 } from "../../db/schema/bot-cobros-boletas";
 import { carteraBackClient } from "../../services/cartera-back-client";
 import { reconocerCuenta } from "../cuentas-pago";
@@ -43,6 +42,9 @@ import { bancoValido, nombreDeBanco } from "./bancos-boleta";
 import { creditoAceptaBoleta, hoyGuatemala } from "./boleta";
 import { type MensajesBoleta, mensajesPagoRegistrado } from "./mensajes-boleta";
 import { verificarAcceso } from "./menu-credito";
+
+/** `db` o la transacción de la marca: el control de gemelas corre en los dos. */
+type Ejecutor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /** Quién queda registrado como autor del pago. Es el filtro del circuito de vuelta. */
 export const REGISTRADO_POR = "bot-cobros@clubcashin.com";
@@ -87,11 +89,6 @@ export type ResultadoConfirmarBoleta =
 			datos?: Record<string, unknown>;
 	  };
 
-/** Estados desde los que ya no se puede confirmar, y por qué. */
-const YA_REGISTRADOS: EstadoBoletaBot[] = [
-	"confirmada",
-	"confirmada_a_verificar",
-];
 
 /**
  * La observación que ve contabilidad.
@@ -156,16 +153,19 @@ export function armarObservaciones(datos: {
  * pago quedaría rechazado siendo válido. Comparar `NULL` con `NULL` no es
  * evidencia de nada.
  */
-async function yaRegistradaEnLaSesion(borrador: {
-	id: string;
-	otpId: string | null;
-	bancoId: number | null;
-	monto: string | null;
-	numeroAutorizacion: string | null;
-}): Promise<string | null> {
+async function yaRegistradaEnLaSesion(
+	borrador: {
+		id: string;
+		otpId: string | null;
+		bancoId: number | null;
+		monto: string | null;
+		numeroAutorizacion: string | null;
+	},
+	ejecutor: Ejecutor = db,
+): Promise<string | null> {
 	if (!borrador.numeroAutorizacion || !borrador.otpId) return null;
 
-	const [gemela] = await db
+	const [gemela] = await ejecutor
 		.select({ id: botCobrosBoletas.id })
 		.from(botCobrosBoletas)
 		.where(
@@ -240,7 +240,13 @@ export async function confirmarBoleta(input: {
 	if (!borrador) return { ok: false, codigo: "BORRADOR_NO_ENCONTRADO" };
 
 	// 3 · ¿En qué estado está? Es la primera mitad de la máquina de §4.1.
-	if (YA_REGISTRADOS.includes(borrador.estado)) {
+	//
+	// Solo `confirmada` responde "ya quedó registrada". `confirmada_a_verificar`
+	// NO va por acá: lo puso la reconciliación al encontrar filas vivas, y eso
+	// prueba que **algo** se escribió, no que se escribió todo (§4.1). Responder
+	// BOLETA_YA_CONFIRMADA haría que el bot le jure al cliente que su pago entró
+	// cuando puede estar a medias — cae abajo, como no-confirmable.
+	if (borrador.estado === "confirmada") {
 		const pagos = await pagosDeLaBoleta(borrador.id);
 		return {
 			ok: false,
@@ -256,11 +262,12 @@ export async function confirmarBoleta(input: {
 	}
 
 	if (borrador.estado !== "leida") {
-		// `fallida`, `rechazada`, `revision_manual`, `descartada`, `leyendo`: son
-		// callejones distintos, pero ninguno se destraba reintentando la
-		// confirmación, y decirle al cliente "probá otra vez" sería mandarlo a
-		// chocar contra la misma pared. El estado viaja en `datos` para que el
-		// bot elija el mensaje y para poder contarlos.
+		// `confirmada_a_verificar`, `fallida`, `rechazada`, `revision_manual`,
+		// `descartada`, `leyendo`: son callejones distintos, pero ninguno se
+		// destraba reintentando la confirmación, y decirle al cliente "probá
+		// otra vez" sería mandarlo a chocar contra la misma pared. El estado
+		// viaja en `datos` para que el bot elija el mensaje y para poder
+		// contarlos.
 		return {
 			ok: false,
 			codigo: "BORRADOR_NO_CONFIRMABLE",
@@ -281,7 +288,9 @@ export async function confirmarBoleta(input: {
 		return { ok: false, codigo: "BANCO_REQUERIDO" };
 	}
 
-	// 5 · El segundo control de duplicados (§9).
+	// 5 · El segundo control de duplicados (§9). Este es el chequeo RÁPIDO,
+	// para cortar antes de gastar el viaje a cartera del paso 6; el que decide
+	// de verdad corre adentro de la marca (paso 7), detrás del candado.
 	const gemela = await yaRegistradaEnLaSesion({
 		id: borrador.id,
 		otpId: borrador.otpId,
@@ -343,21 +352,65 @@ export async function confirmarBoleta(input: {
 
 	// 7 · LA MARCA. Antes de salir a cartera, y condicionada al estado: dos
 	// peticiones simultáneas entran acá y solo una gana.
-	const [tomado] = await db
-		.update(botCobrosBoletas)
-		.set({
-			estado: "confirmando",
-			bancoId,
-			confirmandoDesde: new Date(),
-			updatedAt: new Date(),
-		})
-		.where(
-			and(
-				eq(botCobrosBoletas.id, borrador.id),
-				eq(botCobrosBoletas.estado, "leida"),
-			),
-		)
-		.returning({ id: botCobrosBoletas.id });
+	//
+	// Pero el UPDATE condicionado solo frena al gemelo de ESTE borrador. Dos
+	// borradores DISTINTOS de la misma boleta —la misma foto subida dos veces
+	// recortada distinto pasa el control del hash— pueden cruzar el paso 5 a la
+	// vez, y si apuntan a dos créditos del mismo cliente, cartera tampoco los
+	// frena: sus candados van por crédito. Por eso el control de gemelas se
+	// repite ACÁ, en la misma transacción que la marca y detrás de un candado
+	// por (sesión, autorización): el segundo en llegar espera a que el primero
+	// commitee su `confirmando`, y recién entonces mira. El candado es de
+	// transacción (`pg_advisory_xact_lock`): se suelta solo al commitear, no
+	// hay camino que lo deje tomado.
+	const marca = await db.transaction(async (tx) => {
+		if (borrador.otpId && borrador.numeroAutorizacion) {
+			await tx.execute(
+				sql`SELECT pg_advisory_xact_lock(8766, hashtext(${`${borrador.otpId}:${borrador.numeroAutorizacion}`}))`,
+			);
+			const gemelaEnSerio = await yaRegistradaEnLaSesion(
+				{
+					id: borrador.id,
+					otpId: borrador.otpId,
+					bancoId,
+					monto: borrador.monto,
+					numeroAutorizacion: borrador.numeroAutorizacion,
+				},
+				tx,
+			);
+			if (gemelaEnSerio) {
+				return { gemela: gemelaEnSerio, tomado: undefined };
+			}
+		}
+
+		const [fila] = await tx
+			.update(botCobrosBoletas)
+			.set({
+				estado: "confirmando",
+				bancoId,
+				confirmandoDesde: new Date(),
+				updatedAt: new Date(),
+			})
+			.where(
+				and(
+					eq(botCobrosBoletas.id, borrador.id),
+					eq(botCobrosBoletas.estado, "leida"),
+				),
+			)
+			.returning({ id: botCobrosBoletas.id });
+
+		return { gemela: null, tomado: fila };
+	});
+
+	if (marca.gemela) {
+		return {
+			ok: false,
+			codigo: "BOLETA_DUPLICADA",
+			datos: { boletaId: marca.gemela },
+		};
+	}
+
+	const tomado = marca.tomado;
 
 	if (!tomado) {
 		// La perdió: otra petición ya está adentro o ya terminó.
@@ -367,12 +420,21 @@ export async function confirmarBoleta(input: {
 			.where(eq(botCobrosBoletas.id, borrador.id))
 			.limit(1);
 
-		if (ahora && YA_REGISTRADOS.includes(ahora.estado)) {
+		if (ahora?.estado === "confirmada") {
 			const pagos = await pagosDeLaBoleta(borrador.id);
 			return {
 				ok: false,
 				codigo: "BOLETA_YA_CONFIRMADA",
 				datos: { pagoIds: pagos.map((p) => p.pagoId) },
+			};
+		}
+		// Cualquier otro estado terminal —incluido `confirmada_a_verificar`— va
+		// como no-confirmable: mismo criterio que el paso 3.
+		if (ahora && ahora.estado !== "confirmando") {
+			return {
+				ok: false,
+				codigo: "BORRADOR_NO_CONFIRMABLE",
+				datos: { estado: ahora.estado },
 			};
 		}
 		return { ok: false, codigo: "CONFIRMACION_EN_CURSO" };

@@ -1472,6 +1472,7 @@ export const especificacionBotCobros = {
 					"| Situación | Respuesta |",
 					"| --- | --- |",
 					"| Ya se registró | `409 BOLETA_YA_CONFIRMADA`, **con los `pagoIds` en `data`** |",
+					"| Se registró pero lo estamos verificando | `409 BORRADOR_NO_CONFIRMABLE` con `data.estado = \"confirmada_a_verificar\"`. **No le digas al cliente que su pago entró**: puede estar aplicado a medias y lo está revisando una persona |",
 					"| Hay una confirmación a medias | `409 CONFIRMACION_EN_CURSO`. Esperá unos minutos y volvé a preguntar |",
 					"| No contestamos a tiempo | `503 CARTERA_NO_DISPONIBLE`. **No reintentes automáticamente**: lo estamos verificando por dentro y te avisamos |",
 				].join("\n"),

@@ -598,6 +598,12 @@ export interface CreditoDirectoResponse {
 	cuotasPagadas: CarteraCuotaCredito[];
 	cuotasPendientes: CarteraCuotaCredito[];
 	cuotasAtrasadas: CarteraCuotaCredito[];
+	/**
+	 * Cuotas con pago completo que contabilidad aún no valida. Opcional:
+	 * una cartera vieja no manda la lista, y eso solo significa que esas
+	 * cuotas no se muestran (el comportamiento anterior).
+	 */
+	cuotasEnValidacion?: CarteraCuotaCredito[];
 	moraActual: string; // decimal viene como string
 	mora?: CarteraMoraCredito | null;
 	convenioActivo?: CarteraConvenio | null;

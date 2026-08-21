@@ -332,6 +332,58 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       )
       .orderBy(cuotas_credito.numero_cuota);
 
+    // 5.b · Cuotas EN VALIDACIÓN: tienen un pago completo (pagado=true en
+    // pagos_credito) que contabilidad todavía no valida, así que la cuota
+    // (cuotas_credito.pagado) sigue en false. Las dos consultas de arriba las
+    // excluyen A PROPÓSITO —no son deuda exigible ni cuota saldada— pero sin
+    // esta lista el consumidor (el estado de cuenta del CRM) las hacía
+    // desaparecer del calendario. Lista ADITIVA: quien no la conoce la ignora.
+    const cuotasEnValidacion = await db
+      .select({
+        cuota_id: cuotas_credito.cuota_id,
+        credito_id: cuotas_credito.credito_id,
+        numero_cuota: cuotas_credito.numero_cuota,
+        fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+        pagado: cuotas_credito.pagado,
+        createdAt: cuotas_credito.createdAt,
+        validationStatus: pagos_credito.validationStatus,
+        pago_id: pagos_credito.pago_id,
+        cuota: pagos_credito.cuota,
+        monto_boleta: pagos_credito.monto_boleta,
+        abono_capital: pagos_credito.abono_capital,
+        abono_interes: pagos_credito.abono_interes,
+        abono_iva_12: pagos_credito.abono_iva_12,
+        abono_interes_ci: pagos_credito.abono_interes_ci,
+        abono_iva_ci: pagos_credito.abono_iva_ci,
+        abono_seguro: pagos_credito.abono_seguro,
+        abono_gps: pagos_credito.abono_gps,
+        abono_membresias: pagos_credito.membresias_mes,
+        capital_restante: pagos_credito.capital_restante,
+        interes_restante: pagos_credito.interes_restante,
+        iva_12_restante: pagos_credito.iva_12_restante,
+        seguro_restante: pagos_credito.seguro_restante,
+        gps_restante: pagos_credito.gps_restante,
+        membresias_restante: pagos_credito.membresias,
+        pago_mora: pagos_credito.mora,
+        pago_otros: pagos_credito.otros,
+      })
+      .from(cuotas_credito)
+      .innerJoin(
+        pagos_credito,
+        and(
+          eq(pagos_credito.cuota_id, cuotas_credito.cuota_id),
+          eq(pagos_credito.validationStatus, "pending"),
+          eq(pagos_credito.pagado, true)
+        )
+      )
+      .where(
+        and(
+          eq(cuotas_credito.credito_id, creditoId),
+          eq(cuotas_credito.pagado, false)
+        )
+      )
+      .orderBy(cuotas_credito.numero_cuota);
+
     const moraActual = await db
       .select()
       .from(moras_credito)
@@ -406,6 +458,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         cuotaActualStatus: null,
         cuotasPendientes,
         cuotasAtrasadas,
+        cuotasEnValidacion,
         cuotasPagadas,
         moraActual: moraActual.length > 0 ? moraActual[0].monto_mora : 0,
         mora: moraActual.length > 0 ? moraActual[0] : null,
@@ -533,6 +586,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       cuotaActualStatus,
       cuotasPendientes,
       cuotasAtrasadas,
+      cuotasEnValidacion,
       cuotasPagadas,
       moraActual: moraActual.length > 0 ? moraActual[0].monto_mora : 0,
       mora: moraActual.length > 0 ? moraActual[0] : null,

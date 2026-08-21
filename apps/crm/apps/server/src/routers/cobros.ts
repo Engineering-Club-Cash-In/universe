@@ -3492,6 +3492,14 @@ export const cobrosRouter = {
 							...(creditoCompleto.cuotasPagadas || []),
 							...(creditoCompleto.cuotasPendientes || []),
 							...(creditoCompleto.cuotasAtrasadas || []),
+							// Cuotas con pago completo que conta aún no valida: cartera las
+							// excluye de pendientes/atrasadas (no son deuda exigible) y sin
+							// esto desaparecían del calendario. El flag distingue el estado
+							// en el mapper; una cartera vieja no manda la lista y todo sigue.
+							...(creditoCompleto.cuotasEnValidacion || []).map((c: any) => ({
+								...c,
+								en_validacion: true,
+							})),
 						];
 
 						// Eliminar duplicados basándose en numero_cuota
@@ -3538,7 +3546,11 @@ export const cobrosRouter = {
 									fechaPago: cuota.pagado ? cuota.fecha_vencimiento : null,
 									montoPagado: montoPagadoReal,
 									montoMora: montoMora.toString(),
-									estadoMora: cuota.pagado ? "pagado" : "pendiente",
+									estadoMora: cuota.pagado
+										? "pagado"
+										: cuota.en_validacion
+											? "en_validacion"
+											: "pendiente",
 									diasMora: 0,
 									detallesPago: cuota.pagado
 										? {

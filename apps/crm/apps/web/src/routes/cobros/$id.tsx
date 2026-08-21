@@ -2794,12 +2794,21 @@ function RouteComponent() {
 														// DEFAULT_BUCKETS haría de ese catálogo un cajón de
 														// sastre, y "pendiente" caería en BUCKET_DESCONOCIDO.
 														const esPagada = cuota.estadoMora === "pagado";
+														// Pago completo esperando a conta: no es deuda (por eso
+														// cartera no la lista como pendiente) pero tampoco está
+														// saldada — sin este estado la cuota desaparecía.
+														const enValidacion =
+															cuota.estadoMora === "en_validacion";
 														const estadoBadge = esPagada
 															? "bg-green-100 text-green-800"
-															: "bg-yellow-100 text-yellow-800";
+															: enValidacion
+																? "bg-blue-100 text-blue-800"
+																: "bg-yellow-100 text-yellow-800";
 														const estadoLabel = esPagada
 															? "Pagado"
-															: "Pendiente";
+															: enValidacion
+																? "Pendiente de validar"
+																: "Pendiente";
 														const tieneMora = Number(cuota.montoMora) > 0;
 														const pagoConMora = esPagada && tieneMora; // Pagado pero con mora
 
@@ -2897,8 +2906,16 @@ function RouteComponent() {
 																				Estado:
 																			</span>
 																			<br />
-																			<span className="text-red-600">
-																				Pendiente de pago
+																			<span
+																				className={
+																					enValidacion
+																						? "text-blue-600"
+																						: "text-red-600"
+																				}
+																			>
+																				{enValidacion
+																					? "Pago recibido, en validación"
+																					: "Pendiente de pago"}
 																			</span>
 																			{tieneMora && (
 																				<span className="block font-medium text-red-600 text-xs">

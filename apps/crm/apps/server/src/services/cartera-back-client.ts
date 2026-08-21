@@ -773,6 +773,13 @@ export class CarteraBackClient {
 		useCache = false,
 		timeoutMs?: number,
 		retryOnFailure?: boolean,
+		/**
+		 * `false` = esta llamada ni abre ni consulta el circuit breaker
+		 * compartido. SOLO para lecturas opcionales cuyo fallo ya se traga el
+		 * caller: cinco fallos de un adorno no pueden dejar 60 segundos sin
+		 * cartera a las llamadas que sí importan.
+		 */
+		usarCircuitBreaker = true,
 	): Promise<T> {
 		const url = `${this.config.baseUrl}${endpoint}`;
 		const cacheKey = `${options.method || "GET"}:${url}:${JSON.stringify(options.body || {})}`;
@@ -815,7 +822,10 @@ export class CarteraBackClient {
 
 		for (let attempt = 0; attempt <= this.config.retryAttempts; attempt++) {
 			try {
-				const response = await this.circuitBreaker.execute(async () => {
+				const ejecutar = usarCircuitBreaker
+					? <R>(fn: () => Promise<R>) => this.circuitBreaker.execute(fn)
+					: <R>(fn: () => Promise<R>) => fn();
+				const response = await ejecutar(async () => {
 					const requestOptions = await buildRequestOptions();
 					const res = await this.config.fetchTransport(url, requestOptions);
 
@@ -1122,6 +1132,10 @@ export class CarteraBackClient {
 				//
 				// Es un dato para adornar el mensaje: si no está, se sigue sin él.
 				5_000,
+				false,
+				// Fuera del circuit breaker compartido: cinco boletas seguidas con
+				// este adorno fallando abrían el breaker 60 s y tumbaban también
+				// getResumenCredito y todo lo demás que sí bloquea el flujo.
 				false,
 			);
 

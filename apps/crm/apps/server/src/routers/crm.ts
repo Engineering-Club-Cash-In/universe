@@ -3140,6 +3140,10 @@ export const crmRouter = {
 			// bot de WhatsApp (el bot ya las ejecuta en su propio flujo). Va
 			// después de los chequeos de etapa y estado para no gastar llamadas
 			// a las fuentes externas en aprobaciones que igual van a fallar.
+			// Queda en null salvo que se valide: solo entonces el UPDATE de
+			// aprobación se condiciona a que el lead siga teniendo ese DPI
+			let dpiVerificado: string | null = null;
+
 			if (input.approved && !input.bypassValidation) {
 				// La exención se resuelve en el servicio: `source` es editable por el
 				// usuario, así que además exige evidencia de que el bot validó.
@@ -3195,6 +3199,10 @@ export const crmRouter = {
 						});
 					}
 
+					// La aprobación se condiciona a este DPI: si cambia entre esta
+					// verificación y el UPDATE, la escritura no afecta filas y falla
+					dpiVerificado = normalizarDpi(opportunity[0].leadDpi ?? "");
+
 					// Ni el rechazo del buró ni la ausencia de registro bloquean:
 					// quedan en la bitácora y visibles en la página de análisis
 					// para que el analista decida bajo su criterio
@@ -3236,7 +3244,7 @@ export const crmRouter = {
 				// Build where clause with optional optimistic locking
 				// Solo se actualiza si sigue pendiente: dos aprobaciones simultáneas
 				// no pueden duplicar historial de etapa ni notificaciones
-				const whereClause = input.expectedUpdatedAt
+				const condicionesBase = input.expectedUpdatedAt
 					? and(
 							eq(opportunities.id, input.opportunityId),
 							eq(opportunities.updatedAt, new Date(input.expectedUpdatedAt)),
@@ -3246,6 +3254,21 @@ export const crmRouter = {
 							eq(opportunities.id, input.opportunityId),
 							inArray(opportunities.analysisStatus, validStatusesForReview),
 						);
+
+				// Cuando hubo validaciones, el chequeo de DPI queda dentro del
+				// mismo UPDATE: si el lead cambia de DPI entre la verificación y
+				// la escritura, no se afecta ninguna fila y la aprobación falla
+				// en vez de aprobar con el veredicto de otra persona
+				const whereClause = dpiVerificado
+					? and(
+							condicionesBase,
+							sql`exists (
+								select 1 from ${leads}
+								where ${leads.id} = ${opportunities.leadId}
+									and ${eqDpi(leads.dpi, dpiVerificado)}
+							)`,
+						)
+					: condicionesBase;
 
 				// Update opportunity with analysisStatus
 				const updatedRows = await db
@@ -3268,6 +3291,25 @@ export const crmRouter = {
 
 				// Check for concurrent modification
 				if (updatedRows.length === 0) {
+					// Con el chequeo atómico de DPI, 0 filas también significa que el
+					// DPI del lead cambió después de validar: se relee para dar el
+					// mensaje correcto en vez del de conflicto genérico
+					if (dpiVerificado) {
+						const [leadAlMomento] = await db
+							.select({ dpi: leads.dpi })
+							.from(opportunities)
+							.leftJoin(leads, eq(opportunities.leadId, leads.id))
+							.where(eq(opportunities.id, input.opportunityId))
+							.limit(1);
+
+						if (normalizarDpi(leadAlMomento?.dpi ?? "") !== dpiVerificado) {
+							throw new ORPCError("BAD_REQUEST", {
+								message:
+									"El DPI del cliente cambió mientras se aprobaba. Vuelve a ejecutar las validaciones antes de aprobar.",
+							});
+						}
+					}
+
 					throw new ORPCError("CONFLICT", {
 						message:
 							"La oportunidad fue modificada por otro usuario. Por favor recarga la página e intenta de nuevo.",

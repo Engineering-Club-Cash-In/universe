@@ -244,8 +244,14 @@ export function PaymentsTable() {
   const [pagoIdParaVerFacturas, setPagoIdParaVerFacturas] = useState<
     number | null
   >(null);
-  const { handleReverse, reversePago, handleRevertToPending, revertPaymentToPending, handleRevalidatePayment, revalidatePayment, handleProcessInvestors, processInvestors } = usePagoForm();
+  const { handleReverse, reversePago, handleRechazarBoleta, rechazarBoleta, handleRevertToPending, revertPaymentToPending, handleRevalidatePayment, revalidatePayment, handleProcessInvestors, processInvestors } = usePagoForm();
   const [isCollapsed, setIsCollapsed] = useState(true);
+  // Modal del botón "Pago no válido" (bot de cobros, D-39).
+  const [rechazoBoleta, setRechazoBoleta] = useState<{
+    pagoId: number;
+    creditoId: number;
+  } | null>(null);
+  const [motivoRechazo, setMotivoRechazo] = useState("");
   const [isDownloadingExcel, setIsDownloadingExcel] = useState(false);
   const [isDownloadingAdvisor, setIsDownloadingAdvisor] = useState(false);
   const isMobile = useIsMobile();
@@ -1410,6 +1416,44 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                         : "Generar Factura"}
                     </button>
 
+                    {/* Pago no válido (bot de cobros, D-39): reversa Y le
+                        avisa al cliente por WhatsApp. Solo aparece en pagos
+                        que subió el cliente por el bot; el reverso normal de
+                        al lado sigue siendo un movimiento interno que no le
+                        habla a nadie. */}
+                    {pago.registerBy === "bot-cobros@clubcashin.com" && (
+                      <button
+                        className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded font-bold shadow flex items-center gap-1"
+                        onClick={() =>
+                          setRechazoBoleta({
+                            pagoId: pago.pagoId,
+                            creditoId: pago.credito?.creditoId || 0,
+                          })
+                        }
+                        disabled={
+                          rechazarBoleta.isPending ||
+                          !["ADMIN", "CONTA"].includes(user?.role ?? "")
+                        }
+                        title={
+                          !["ADMIN", "CONTA"].includes(user?.role ?? "")
+                            ? "Solo ADMIN y CONTA"
+                            : "Reversa el pago y le avisa al cliente que su boleta no es válida"
+                        }
+                      >
+                        {rechazarBoleta.isPending ? (
+                          <>
+                            <Loader2 className="animate-spin w-4 h-4" />
+                            Rechazando...
+                          </>
+                        ) : (
+                          <>
+                            <Undo2 className="w-4 h-4" />
+                            Pago no válido
+                          </>
+                        )}
+                      </button>
+                    )}
+
                     {/* Revertir */}
                     <button
                       className="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1 rounded font-bold shadow flex items-center gap-1"
@@ -2529,6 +2573,60 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
           refetch();
         }}
       />
+
+      {/* Modal del rechazo del bot: pide el motivo, que es obligatorio — es
+          la diferencia entre este botón y un reverso cualquiera. */}
+      {rechazoBoleta && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+            <h3 className="text-lg font-bold mb-2">
+              Rechazar pago del bot y avisar al cliente
+            </h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Esto <b>reversa el pago</b> y le manda un WhatsApp al cliente
+              avisando que su boleta no pudo acreditarse. Si solo necesitás
+              corregir algo interno, usá &quot;Revertir&quot;: ese no le habla
+              al cliente.
+            </p>
+            <label className="block text-sm font-semibold mb-1">
+              Motivo (obligatorio)
+            </label>
+            <textarea
+              className="w-full border rounded p-2 text-sm mb-4"
+              rows={3}
+              placeholder="Ej.: la boleta no aparece en el estado de cuenta del banco"
+              value={motivoRechazo}
+              onChange={(e) => setMotivoRechazo(e.target.value)}
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                className="px-3 py-1 rounded border"
+                onClick={() => {
+                  setRechazoBoleta(null);
+                  setMotivoRechazo("");
+                }}
+              >
+                Cancelar
+              </button>
+              <button
+                className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded font-bold disabled:opacity-50"
+                disabled={motivoRechazo.trim().length < 5}
+                onClick={() => {
+                  handleRechazarBoleta(
+                    rechazoBoleta.pagoId,
+                    rechazoBoleta.creditoId,
+                    motivoRechazo.trim(),
+                  );
+                  setRechazoBoleta(null);
+                  setMotivoRechazo("");
+                }}
+              >
+                Rechazar y notificar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

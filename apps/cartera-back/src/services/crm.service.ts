@@ -251,3 +251,77 @@ export async function getVehiclesBySifcoMap(
 
   return vehicles;
 }
+
+// ============================================================================
+// Bot de cobros · el rechazo explícito (D-39)
+// ============================================================================
+
+/**
+ * Con quién registra sus pagos el bot de cobros.
+ *
+ * Va copiado del CRM (`REGISTRADO_POR` en `lib/bot-cobros/confirmar-boleta.ts`)
+ * y no se puede cambiar de un solo lado: es lo que permite reconocer un pago
+ * del bot desde cartera.
+ */
+export const REGISTRADO_POR_EL_BOT = "bot-cobros@clubcashin.com";
+
+export function esPagoDelBotCobros(
+  registerBy: string | null | undefined,
+): boolean {
+  return registerBy === REGISTRADO_POR_EL_BOT;
+}
+
+export type RechazoPagoBotInput = {
+  pagoId: number;
+  creditoId: number;
+  numeroSifco: string | null;
+  motivo: string;
+  /** Quién apretó el botón, del token — nunca del body. */
+  usuario: string | null;
+};
+
+/**
+ * Le avisa al CRM que conta rechazó una boleta del bot (D-39).
+ *
+ * ES EL ÚNICO aviso al cliente de todo el circuito: "pago validado" lo maneja
+ * otro equipo, y los reversos normales son movimientos internos que no le
+ * hablan a nadie. Por eso este SÍ se espera (`await`) y devuelve si llegó:
+ * el botón existe para notificar, y conta tiene que ver en pantalla si el
+ * aviso salió o tiene que avisar por otro medio.
+ */
+export async function notificarRechazoPagoBot(
+  input: RechazoPagoBotInput,
+): Promise<boolean> {
+  const apiKey = process.env.CARTERA_WEBHOOK_API_KEY;
+
+  if (!apiKey || !CRM_API_URL) {
+    console.error(
+      `[BotCobros] sin CARTERA_WEBHOOK_API_KEY o CRM_API_URL: no se avisó el rechazo del pago ${input.pagoId}`,
+    );
+    return false;
+  }
+
+  try {
+    const { data } = await crmApi.post(
+      "/api/bot/cobros/pagos/evento",
+      {
+        pagoId: input.pagoId,
+        creditoId: input.creditoId,
+        numeroSifco: input.numeroSifco,
+        evento: "rechazado",
+        motivo: input.motivo,
+        usuario: input.usuario,
+        ocurridoEn: new Date().toISOString(),
+      },
+      { headers: { "x-api-key": apiKey } },
+    );
+    return data?.success === true;
+  } catch (error: any) {
+    const msg =
+      error?.response?.data?.message ?? error?.message ?? "desconocido";
+    console.error(
+      `[BotCobros] no se pudo avisar el rechazo del pago ${input.pagoId}: ${msg}`,
+    );
+    return false;
+  }
+}

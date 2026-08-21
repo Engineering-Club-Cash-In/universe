@@ -106,10 +106,20 @@ export const botCobrosBoletas = pgTable(
 
 		/** Para el job de reconciliación de los 5 minutos (§4.1). */
 		confirmandoDesde: timestamp("confirmando_desde", { withTimezone: true }),
-		/** Un mensaje por boleta, no por pago (§6). */
+		/** Un mensaje por boleta, no por pago (§6). Significa "esto se le ENTREGÓ". */
 		notificadoClienteAt: timestamp("notificado_cliente_at", {
 			withTimezone: true,
 		}),
+		/**
+		 * Alguien está mandando el aviso **ahora mismo**. Es un arrendamiento: vence.
+		 *
+		 * El derecho a mandar se toma antes de enviar, para que dos llamadas
+		 * simultáneas no manden dos WhatsApp iguales. Pero si el proceso muere
+		 * entre reclamar y enviar, nadie suelta la marca: por eso la marca no es
+		 * `notificado_cliente_at` —que significaría "entregado"— sino esta, que
+		 * caduca. Pasado el plazo, el job de respaldo la vuelve a tomar.
+		 */
+		avisoReclamadoEn: timestamp("aviso_reclamado_en", { withTimezone: true }),
 
 		expiraEn: timestamp("expira_en", { withTimezone: true }).notNull(),
 		createdAt: timestamp("created_at", { withTimezone: true })

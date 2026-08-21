@@ -21,6 +21,20 @@ import { codigosDocumentados, especificacionBotCobros } from "./openapi";
 /** Los archivos que le responden al bot. Si aparece otro, va en esta lista. */
 const FUENTES = ["../../controllers/bot-cobros.ts", "./auth.ts"];
 
+/**
+ * Endpoints montados bajo `/api/bot/cobros/` que NO consume SimpleTech.
+ *
+ * El candado compara la spec contra lo montado en `index.ts`; estas rutas las
+ * llama cartera-back con su propia llave y documentárselas a un tercero sería
+ * abrirle una puerta que no le corresponde. Cada entrada nueva acá tiene la
+ * molestia de escribirse y justificarse; si la excepción fuera un patrón, el
+ * candado dejaría de servir en una semana.
+ */
+const RUTAS_QUE_NO_SON_DE_SIMPLETECH = new Set([
+	// El aviso del botón "Pago no válido" de conta (D-39): lo llama cartera.
+	"/api/bot/cobros/pagos/evento",
+]);
+
 /** `codigo: "LO_QUE_SEA"` — la forma en que se declara un error en el código. */
 function codigosEnElCodigo(): Set<string> {
 	const encontrados = new Set<string>();
@@ -62,9 +76,9 @@ describe("la spec no se desincroniza del código", () => {
 		);
 
 		const montadas = new Set(
-			[...index.matchAll(/app\.post\(\s*"(\/api\/bot\/cobros\/[^"]+)"/g)].map(
-				([, ruta]) => ruta,
-			),
+			[...index.matchAll(/app\.post\(\s*"(\/api\/bot\/cobros\/[^"]+)"/g)]
+				.map(([, ruta]) => ruta)
+				.filter((ruta) => !RUTAS_QUE_NO_SON_DE_SIMPLETECH.has(ruta)),
 		);
 
 		expect([...montadas].sort()).toEqual(

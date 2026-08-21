@@ -4579,10 +4579,30 @@ export const cobrosRouter = {
 					// se haya insertado. Tratar un 5xx igual que un 4xx invitaba
 					// al asesor a reintentar creyendo que no pasó nada, duplicando
 					// el pago si en realidad sí se había aplicado parcialmente.
+					//
+					// CB-128 (fix): excepción dentro de los 4xx — el 409 de "abono
+					// directo a capital no aplicado" (registerPayment.ts:2193-2200,
+					// debeRechazarAbonoCapitalNoAplicado) NO es limpio: antes de
+					// llegar a ese guard, procesarPagoMora ya pudo haber pagado
+					// mora activa (línea ~828) y/o processConvenioPayment ya pudo
+					// haber acreditado el convenio (línea ~941) — ninguna de esas
+					// escrituras está en transacción del lado de cartera-back. Un
+					// asesor que reintenta tras este 409 puede encontrar la mora
+					// ya pagada sin entender por qué. Cartera-back no expone un
+					// código de máquina para distinguir este 409 de otros (solo
+					// manda `message` en texto libre), así que se detecta por un
+					// fragmento estable del mensaje — frágil si el texto cambia
+					// del lado de cartera-back, pero cierra el hueco real hoy.
+					const esRechazoAbonoCapitalConEfectosSecundarios =
+						error instanceof CarteraBackHttpError &&
+						error.status === 409 &&
+						error.message.includes("abono directo a capital");
+
 					if (
 						error instanceof CarteraBackHttpError &&
 						error.status >= 400 &&
-						error.status < 500
+						error.status < 500 &&
+						!esRechazoAbonoCapitalConEfectosSecundarios
 					) {
 						throw new ORPCError("BAD_REQUEST", {
 							message: `Error registrando pago: ${error.message}`,
@@ -4591,7 +4611,7 @@ export const cobrosRouter = {
 					const message =
 						error instanceof Error ? error.message : String(error);
 					console.error(
-						"[registrarPagoCompleto] Resultado incierto llamando a /newPayment (fallo de transporte o 5xx) — el pago pudo haberse aplicado parcialmente:",
+						"[registrarPagoCompleto] Resultado incierto llamando a /newPayment (fallo de transporte, 5xx, o 409 de abono a capital con posibles efectos secundarios ya aplicados):",
 						error,
 					);
 					throw new ORPCError("INTERNAL_SERVER_ERROR", {

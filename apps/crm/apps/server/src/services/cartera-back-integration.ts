@@ -507,11 +507,23 @@ export async function createPagoInCarteraBack(
 			try {
 				respuesta = await carteraBackClient.createPago(pagoInput);
 			} catch (error) {
+				// CB-128 (fix): mismo caso que registrarPagoCompleto — el 409 de
+				// "abono directo a capital no aplicado" (registerPayment.ts:
+				// 2193-2200) puede llegar DESPUÉS de que procesarPagoMora y/o
+				// processConvenioPayment ya escribieron (pagaron mora, acreditaron
+				// convenio), sin transacción del lado de cartera-back. No es un
+				// 4xx limpio para efectos de "seguro reintentar".
+				const esRechazoAbonoCapitalConEfectosSecundarios =
+					error instanceof CarteraBackHttpError &&
+					error.status === 409 &&
+					error.message.includes("abono directo a capital");
+
 				if (
 					!(
 						error instanceof CarteraBackHttpError &&
 						error.status >= 400 &&
-						error.status < 500
+						error.status < 500 &&
+						!esRechazoAbonoCapitalConEfectosSecundarios
 					)
 				) {
 					resultadoIncierto = true;

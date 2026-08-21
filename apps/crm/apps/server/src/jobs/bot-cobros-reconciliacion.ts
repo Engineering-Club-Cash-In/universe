@@ -312,7 +312,18 @@ export async function reconciliarBoletasColgadas(): Promise<ResultadoReconciliac
 						numeroCuota: p.numero_cuota,
 					})),
 				)
-				.onConflictDoNothing();
+				// Reasigna, no ignora: cartera recicla pago_id (los reversos dejan
+				// la fila en `no_required` y `registerPayment` la pisa después). El
+				// amarre es de la boleta más nueva — mismo criterio que al
+				// confirmar.
+				.onConflictDoUpdate({
+					target: botCobrosBoletaPagos.pagoId,
+					set: {
+						boletaId: sql`excluded.boleta_id`,
+						numeroCuota: sql`excluded.numero_cuota`,
+						resueltoEn: null,
+					},
+				});
 		}
 
 		const estadoFinal: EstadoBoletaBot = destino.estado;

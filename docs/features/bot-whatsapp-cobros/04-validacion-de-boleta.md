@@ -510,7 +510,10 @@ cualquiera— y hace dos cosas, en este orden:
    (misma familia que el bug del pago_convenio duplicado), reversar N hermanos descontaría
    la misma boleta N veces: el endpoint fotografía el saldo antes de empezar y al final lo
    deja en lo que UNA sola reversión habría dejado — `max(0, saldo_inicial − monto_boleta)`,
-   el mismo cálculo del reverso, sin tocarlo (D-38).
+   el mismo cálculo del reverso, sin tocarlo (D-38). Y si el lote se corta a medias, el
+   saldo se **restaura** a la foto (deducción neta cero en ese intento): el descuento único
+   queda para el intento que complete la boleta, porque los hermanos ya reversados pierden
+   sus filas de `boletas` y un reintento que restara de nuevo la descontaría dos veces.
 2. **Le avisa al CRM** (`POST /api/bot/cobros/pagos/evento`, llave `CARTERA_WEBHOOK_API_KEY`
    por `x-api-key`), **esperando la respuesta**: avisar es el punto del botón, y conta ve en
    pantalla si el WhatsApp salió. Si el CRM no contesta, el reverso YA está hecho y el toast
@@ -831,7 +834,13 @@ CREATE TABLE bot_cobros_pago_eventos (
 > Las reservas de más de **2 minutos** se barren al empezar la lectura siguiente,
 > dentro de la misma transacción que toma el candado.
 
-**`bot_cobros_boleta_pagos` es el puente.** El unique sobre `pago_id` es lo que permite que,
+**`bot_cobros_boleta_pagos` es el puente, y el amarre es de la boleta MÁS NUEVA.** Cartera
+**recicla** los `pago_id`: un reverso completo deja la fila de `pagos_credito` en
+`no_required` en vez de borrarla, y `registerPayment` pisa esos placeholders para pagos
+posteriores. Por eso el insert del puente (al confirmar y al reconciliar) **reasigna en
+conflicto** (`ON CONFLICT (pago_id) DO UPDATE`) en vez de ignorar: si el amarre viejo se
+quedara, el rechazo de una boleta nueva que heredó el id encontraría a la vieja —ya
+notificada— y el cliente no se enteraría nunca. El unique sobre `pago_id` es lo que permite que,
 cuando cartera avise que el pago 48213 se validó, el CRM sepa **de qué boleta** era, de qué
 cliente y a qué teléfono escribirle — y también cuántos pagos hermanos faltan por resolver
 antes de mandar el mensaje (§6).

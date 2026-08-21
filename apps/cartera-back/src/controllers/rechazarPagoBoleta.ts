@@ -192,11 +192,47 @@ export const rechazarPagoBoleta = async ({ body, set, user }: any) => {
 
     if (setInterno.status && setInterno.status >= 400) {
       set.status = setInterno.status;
+
+      // El corte a medias también arregla el saldo — RESTAURÁNDOLO, no
+      // restando: los k reversos que sí salieron ya restaron k veces la
+      // boleta, así que se vuelve a la foto (deducción neta CERO en este
+      // intento) y el descuento único queda para el intento que complete la
+      // boleta. Si acá se restara, el reintento la restaría OTRA vez: los
+      // hermanos ya reversados pierden sus filas de `boletas` y el próximo
+      // request ni los ve. Con esto, cada camino descuenta la boleta
+      // exactamente una vez: completo de un tiro (corrección de abajo),
+      // o parcial+reintento (neta cero ahora, una resta al completar —
+      // incluso si al reintento le queda un solo hermano y el descuento lo
+      // hace el propio reversePayment).
+      let saldoRestaurado = true;
+      if (
+        revertidos.length > 0 &&
+        saldoAntesDeRevertir !== null &&
+        credito?.usuario_id
+      ) {
+        try {
+          await db
+            .update(usuarios)
+            .set({ saldo_a_favor: saldoAntesDeRevertir })
+            .where(eq(usuarios.usuario_id, credito.usuario_id));
+        } catch (error) {
+          saldoRestaurado = false;
+          console.error(
+            `[RechazarPagoBoleta] no se pudo restaurar el saldo a favor tras el corte a medias:`,
+            error,
+          );
+        }
+      }
+
       return {
         ...(typeof resultadoReverso === "object" ? resultadoReverso : {}),
         success: false,
         message: revertidos.length
-          ? `⚠️ Se revirtieron los pagos ${revertidos.join(", ")} pero el ${id} falló: la boleta quedó a medias, NO se notificó al cliente. Resolvé el pago ${id}, revisá el saldo a favor del cliente (cada reverso resta la boleta completa) y volvé a rechazar.`
+          ? `⚠️ Se revirtieron los pagos ${revertidos.join(", ")} pero el ${id} falló: la boleta quedó a medias, NO se notificó al cliente.${
+              saldoRestaurado
+                ? " El saldo a favor quedó restaurado (la boleta se descuenta cuando se complete el rechazo)."
+                : " ⚠️ Y NO se pudo restaurar el saldo a favor: revisalo a mano antes de reintentar."
+            } Resolvé el pago ${id} y volvé a rechazar.`
           : `El reverso del pago ${id} falló: no se revirtió nada ni se notificó al cliente.`,
         pagos_revertidos: revertidos,
         pago_fallido: id,

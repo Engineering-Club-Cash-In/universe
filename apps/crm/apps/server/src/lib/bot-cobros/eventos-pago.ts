@@ -245,7 +245,10 @@ export async function procesarRechazoPago(
 	entrada: EntradaRechazo,
 ): Promise<ResultadoEvento> {
 	// 1 · ¿De quién es este pago? El unique global sobre `pago_id` del puente
-	// es lo que permite la pregunta.
+	// es lo que permite la pregunta. Y contesta con la boleta MÁS NUEVA: como
+	// cartera recicla pago_id (los reversos dejan la fila en `no_required` y
+	// `registerPayment` la pisa), el amarre se reasigna al confirmar/reconciliar
+	// — sin eso, este lookup devolvería una boleta vieja ya notificada.
 	const [puente] = await db
 		.select({ boletaId: botCobrosBoletaPagos.boletaId })
 		.from(botCobrosBoletaPagos)

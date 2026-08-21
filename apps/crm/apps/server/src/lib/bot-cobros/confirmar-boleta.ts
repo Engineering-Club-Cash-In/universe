@@ -584,8 +584,20 @@ export async function confirmarBoleta(input: {
 			})),
 		)
 		// El unique global por `pago_id` es lo que permite que un evento entrante
-		// encuentre su boleta; si un id ya estuviera amarrado, no se pisa nada.
-		.onConflictDoNothing();
+		// encuentre su boleta — pero cartera RECICLA los pago_id: un reverso
+		// completo deja la fila de `pagos_credito` en `no_required` en vez de
+		// borrarla, y `registerPayment` pisa esos placeholders para pagos
+		// posteriores. Si el amarre viejo se quedara, el rechazo de la boleta
+		// nueva encontraría a la vieja (ya notificada) y el cliente no se
+		// enteraría nunca. El amarre pertenece a la boleta MÁS NUEVA.
+		.onConflictDoUpdate({
+			target: botCobrosBoletaPagos.pagoId,
+			set: {
+				boletaId: sql`excluded.boleta_id`,
+				numeroCuota: sql`excluded.numero_cuota`,
+				resueltoEn: null,
+			},
+		});
 
 	const cuotasCubiertas: number[] = [];
 	for (const p of pagos) {

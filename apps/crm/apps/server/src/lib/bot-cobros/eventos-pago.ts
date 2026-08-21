@@ -303,12 +303,25 @@ async function manejarDesenlace(
 	const numeroSifco = boleta.numeroSifco ?? entrada.numeroSifco ?? null;
 	const monto = boleta.monto ?? "0";
 
-	// ── `marcado_falso`: al asesor y a nadie más ──────────────────────────────
+	// ── `marcado_falso`: alerta al asesor SIEMPRE ────────────────────────────
 	// `false-payment` NO restaura la mora —solo pone `pagado: false` y
 	// `paymentFalse: true`—, así que el crédito queda con la mora que descontó
-	// una boleta que se descartó. Eso es un problema contable que alguien tiene
-	// que arreglar a mano, no una noticia para el cliente.
-	if (entrada.evento === "marcado_falso") {
+	// una boleta que se descartó. Es un problema contable que alguien tiene que
+	// arreglar a mano.
+	//
+	// **Esto NO corta el flujo.** Antes retornaba acá, y el resultado dependía
+	// del orden en que cartera mandara los eventos de una boleta con varios
+	// pagos: si el `marcado_falso` llegaba último, al cliente no se le decía
+	// nada; si llegaba antes que un `validado`, el conjunto se resolvía como
+	// rechazado y sí recibía el mensaje. Mismo estado final, dos comunicaciones
+	// distintas según qué webhook ganó la carrera.
+	//
+	// Ahora son dos cosas separadas: la alerta contable sale siempre que llegue
+	// un `marcado_falso`, y lo que se le dice al cliente lo decide el CONJUNTO
+	// más abajo, igual que para cualquier otro evento.
+	const yaAvisoAlAsesor = entrada.evento === "marcado_falso";
+
+	if (yaAvisoAlAsesor) {
 		await avisarAlAsesor({
 			numeroSifco,
 			titulo: `⚠️ Boleta del bot marcada como falsa · ${numeroSifco ?? "sin SIFCO"}`,
@@ -316,8 +329,6 @@ async function manejarDesenlace(
 				`El pago ${entrada.pagoId} (Q${monto}, subido por el cliente vía WhatsApp) se marcó como falso. ` +
 				"Ojo: marcar falso NO devuelve la mora que el registro descontó, así que el crédito puede haber quedado con la mora de menos. Revisar y, si corresponde, revertir el pago.",
 		});
-
-		return { notificado: false, motivo: "SOLO_ASESOR" };
 	}
 
 	// ── `regresado_a_pendiente`: depende de qué se le dijo antes ──────────────
@@ -368,6 +379,34 @@ async function manejarDesenlace(
 	}
 
 	// ── `validado` / `revertido`: hay que esperar a los hermanos ──────────────
+	return avisarDesenlaceAlCliente(boleta, {
+		usuario: entrada.usuario ?? null,
+		motivo: entrada.motivo ?? null,
+		numeroSifco,
+		yaAvisoAlAsesor,
+	});
+}
+
+/**
+ * El mensaje final de una boleta: uno solo, y solo cuando ya no falta nada.
+ *
+ * Sale de acá tanto el camino del webhook como el reintento del job de
+ * respaldo, y por eso vuelve a leer el estado en vez de confiar en lo que traía
+ * el evento: entre que se registró y que se llegó hasta acá pudo pasar de todo.
+ */
+async function avisarDesenlaceAlCliente(
+	boleta: typeof botCobrosBoletas.$inferSelect,
+	contexto: {
+		usuario: string | null;
+		motivo: string | null;
+		numeroSifco: string | null;
+		/** Ya se le mandó una alerta al asesor en esta misma pasada. */
+		yaAvisoAlAsesor: boolean;
+	},
+): Promise<ResultadoEvento> {
+	const { numeroSifco } = contexto;
+	const monto = boleta.monto ?? "0";
+
 	const pagos = await db
 		.select({
 			pagoId: botCobrosBoletaPagos.pagoId,
@@ -385,11 +424,6 @@ async function manejarDesenlace(
 	// Todos resueltos: el desenlace sale del CONJUNTO, no de este evento.
 	const ultimos = await ultimoEventoPorPago(boleta.id);
 	const desenlace = desenlaceDeLaBoleta(ultimos);
-
-	// Un solo mensaje por boleta, aunque hayan sido tres pagos.
-	if (boleta.notificadoClienteAt) {
-		return { notificado: false, motivo: "EVENTO_REPETIDO" };
-	}
 
 	if (desenlace === "incompleto") {
 		// No debería pasar con todos resueltos, pero si pasa no se inventa un
@@ -410,14 +444,49 @@ async function manejarDesenlace(
 		})
 		.where(eq(botCobrosBoletas.id, boleta.id));
 
-	if (desenlace === "rechazado") {
+	// ─────────────────────────────────────────────────────────────────────────
+	// UN MENSAJE POR BOLETA, Y EL DERECHO A MANDARLO SE TOMA ANTES DE ENVIAR.
+	//
+	// Leer `boleta.notificadoClienteAt` no alcanzaba: cuando los eventos de los
+	// últimos pagos hermanos entran a la vez, los dos handlers cargan la boleta
+	// con el campo en `null`, los dos ven que no queda nadie pendiente y los dos
+	// pasan el chequeo antes de que ninguno haya escrito. Dos WhatsApp iguales.
+	//
+	// El UPDATE condicional lo decide la base: gana el primero que lo corra y el
+	// segundo se lleva cero filas. Si después el envío falla, se devuelve la
+	// marca para que el job de respaldo lo reintente.
+	// ─────────────────────────────────────────────────────────────────────────
+	const reclamada = await db
+		.update(botCobrosBoletas)
+		.set({ notificadoClienteAt: new Date(), updatedAt: new Date() })
+		.where(
+			and(
+				eq(botCobrosBoletas.id, boleta.id),
+				isNull(botCobrosBoletas.notificadoClienteAt),
+			),
+		)
+		.returning({ id: botCobrosBoletas.id });
+
+	if (reclamada.length === 0) {
+		return { notificado: false, motivo: "EVENTO_REPETIDO" };
+	}
+
+	// A partir de acá la boleta está reclamada: todo camino que no termine en un
+	// envío exitoso tiene que soltarla.
+	const soltarLaBoleta = () =>
+		db
+			.update(botCobrosBoletas)
+			.set({ notificadoClienteAt: null, updatedAt: new Date() })
+			.where(eq(botCobrosBoletas.id, boleta.id));
+
+	if (desenlace === "rechazado" && !contexto.yaAvisoAlAsesor) {
 		await avisarAlAsesor({
 			numeroSifco,
 			titulo: `Boleta del bot rechazada · ${numeroSifco ?? "sin SIFCO"}`,
 			descripcion:
 				`Se revirtió el pago de Q${monto} que el cliente subió por WhatsApp` +
-				`${entrada.usuario ? ` (por ${entrada.usuario})` : ""}` +
-				`${entrada.motivo ? `. Motivo: ${entrada.motivo}` : ""}. ` +
+				`${contexto.usuario ? ` (por ${contexto.usuario})` : ""}` +
+				`${contexto.motivo ? `. Motivo: ${contexto.motivo}` : ""}. ` +
 				"Al cliente se le avisó que su asesor lo va a contactar.",
 		});
 	}
@@ -426,6 +495,9 @@ async function manejarDesenlace(
 	if (!telefono) {
 		// El lead se borró y no hay a dónde escribir. El hecho NO se pierde: se
 		// notifica al asesor en vez de dejarlo sin nadie.
+		//
+		// La boleta NO se suelta: no hay a quién escribirle, así que reintentarlo
+		// cada hora solo repetiría esta misma alerta.
 		await avisarAlAsesor({
 			numeroSifco,
 			titulo: `Sin teléfono para avisarle al cliente · ${numeroSifco ?? "sin SIFCO"}`,
@@ -446,16 +518,44 @@ async function manejarDesenlace(
 
 	const salio = await escribirleAlCliente(telefono, mensaje);
 
-	// Solo se marca notificado si de verdad salió: si no, el job de respaldo lo
-	// vuelve a intentar en la próxima corrida.
-	if (salio) {
-		await db
-			.update(botCobrosBoletas)
-			.set({ notificadoClienteAt: new Date(), updatedAt: new Date() })
-			.where(eq(botCobrosBoletas.id, boleta.id));
+	if (!salio) {
+		// El envío se cayó (SimpleTech, red, timeout). Se devuelve la marca para
+		// que el job de respaldo lo vuelva a intentar: sin esto la boleta quedaba
+		// resuelta y notificada sin que el cliente hubiera recibido nada, y no
+		// había camino que la volviera a mirar.
+		await soltarLaBoleta();
+		return { notificado: false, motivo: "ENVIO_FALLIDO" };
 	}
 
-	return { notificado: salio, motivo: salio ? null : "ENVIO_FALLIDO" };
+	return { notificado: true, motivo: null };
+}
+
+/**
+ * Reintento del aviso al cliente, para el job de respaldo.
+ *
+ * Una boleta con todos sus pagos resueltos y `notificado_cliente_at` en `null`
+ * es una a la que le debemos el mensaje: o el envío falló, o el proceso se cayó
+ * entre reclamarla y mandarlo.
+ */
+export async function reintentarAvisoAlCliente(
+	boletaId: string,
+): Promise<ResultadoEvento> {
+	const [boleta] = await db
+		.select()
+		.from(botCobrosBoletas)
+		.where(eq(botCobrosBoletas.id, boletaId))
+		.limit(1);
+
+	if (!boleta) return { notificado: false, motivo: "PAGO_NO_ES_DEL_BOT" };
+
+	return avisarDesenlaceAlCliente(boleta, {
+		usuario: null,
+		motivo: null,
+		numeroSifco: boleta.numeroSifco ?? null,
+		// El asesor ya recibió lo suyo en la pasada que falló; acá solo se
+		// reintenta el mensaje al cliente.
+		yaAvisoAlAsesor: true,
+	});
 }
 
 /**

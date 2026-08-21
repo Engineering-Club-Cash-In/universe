@@ -12,7 +12,7 @@ import type {
 	EstadoPagoCartera,
 	ReversionCartera,
 } from "../../types/cartera-back";
-import { desenlaceDeLaBoleta } from "./eventos-pago";
+import { desenlaceDeLaBoleta, type EventoPago } from "./eventos-pago";
 
 function pago(extra: Partial<EstadoPagoCartera> = {}): EstadoPagoCartera {
 	return {
@@ -55,7 +55,9 @@ describe("cómo se lee lo que cartera sabe del pago (§6)", () => {
 	});
 
 	test("pending todavía no es nada: no se le escribe al cliente", () => {
-		expect(eventoSegunCartera(pago({ validation_status: "pending" }))).toBeNull();
+		expect(
+			eventoSegunCartera(pago({ validation_status: "pending" })),
+		).toBeNull();
 	});
 
 	test("paymentFalse es marcado falso", () => {
@@ -85,7 +87,10 @@ describe("cómo se lee lo que cartera sabe del pago (§6)", () => {
 	test("una reversión iniciada NO es un rechazo: no produce evento", () => {
 		expect(
 			eventoSegunCartera(
-				pago({ validation_status: "no_required", reversion: reversion("iniciada") }),
+				pago({
+					validation_status: "no_required",
+					reversion: reversion("iniciada"),
+				}),
 			),
 		).toBeNull();
 	});
@@ -119,7 +124,9 @@ describe("el desenlace de la boleta, no el de cada pago (§6)", () => {
 	});
 
 	test("un marcado falso también arrastra al conjunto", () => {
-		expect(desenlaceDeLaBoleta(["validado", "marcado_falso"])).toBe("rechazado");
+		expect(desenlaceDeLaBoleta(["validado", "marcado_falso"])).toBe(
+			"rechazado",
+		);
 	});
 
 	test("con algo sin resolver todavía, no hay desenlace", () => {
@@ -130,5 +137,32 @@ describe("el desenlace de la boleta, no el de cada pago (§6)", () => {
 
 	test("sin eventos no se inventa nada", () => {
 		expect(desenlaceDeLaBoleta([])).toBe("incompleto");
+	});
+
+	// ─────────────────────────────────────────────────────────────────────────
+	// El mismo estado final NO puede producir dos comunicaciones distintas.
+	//
+	// Los eventos de una boleta con varios pagos llegan por webhooks separados y
+	// el orden no está garantizado. Antes esto sí cambiaba lo que recibía el
+	// cliente: `marcado_falso` cortaba el flujo, así que si llegaba último no se
+	// le decía nada, y si llegaba antes de un `validado` el conjunto se resolvía
+	// como rechazo y sí le llegaba el mensaje.
+	// ─────────────────────────────────────────────────────────────────────────
+	test("el orden en que lleguen los eventos no cambia el desenlace", () => {
+		const combinaciones: EventoPago[][] = [
+			["marcado_falso", "validado"],
+			["validado", "marcado_falso"],
+			["revertido", "validado", "validado"],
+			["validado", "revertido", "validado"],
+			["validado", "validado", "revertido"],
+		];
+
+		for (const eventos of combinaciones) {
+			expect(desenlaceDeLaBoleta(eventos)).toBe("rechazado");
+		}
+	});
+
+	test("un solo pago marcado falso también es rechazo del conjunto", () => {
+		expect(desenlaceDeLaBoleta(["marcado_falso"])).toBe("rechazado");
 	});
 });

@@ -160,21 +160,38 @@ Ver [D-21](./DECISIONES.md#d-21--modo-simulado-mientras-el-sms-no-sale).
 ## 3. El pipeline
 
 `.github/workflows/deploy-crm-api-cobros.yaml`, modelado sobre `deploy-cartera-dev.yaml` y
-sobre lo que hace `apps/crm/apps/server/deployServer.sh` a mano.
+sobre lo que hacen `apps/crm/apps/server/deployServer.sh` y `apps/cartera-back/deploy-dev.sh`
+a mano. Despliega **dos apps**, cada una a su instancia de Coolify:
+
+| App | Imagen | Secret del webhook |
+| --- | --- | --- |
+| CRM API (la que consume SimpleTech) | `cci/crm-api-cobros` | `COOLIFY_WEBHOOK_CRM_API_COBROS` |
+| cartera-back (contra el schema `cartera_cobros2`) | `cci/cartera-api-cobros` | `COOLIFY_WEBHOOK_CARTERA_API_COBROS` |
 
 | | |
 | --- | --- |
-| **Cuándo corre** | Push a `COBROS-02` que toque `apps/crm/apps/server/**` o los paquetes que usa (`sms`, `simpletech`, `infornet`, `email`). También a mano desde Actions |
-| **Qué hace** | Revisa tipos y corre las pruebas del bot → construye la imagen → la empuja como `latest` y como el SHA del commit → dispara el redeploy en Coolify |
-| **Secrets** | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `COOLIFY_TOKEN` (ya existen) y **`COOLIFY_WEBHOOK_CRM_API_COBROS`** (hay que crearlo) |
+| **Cuándo corre** | Push a `COBROS-02` que toque cualquiera de las dos apps. También a mano desde Actions |
+| **Qué hace** | CRM API: revisa tipos y corre las pruebas del bot → construye → empuja → redeploy. cartera-back: construye → smoke test de Puppeteer dentro de la imagen → empuja → redeploy |
+| **Secrets** | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `COOLIFY_TOKEN` y los dos webhooks de la tabla de arriba |
+
+**Cada app se construye solo si su código cambió.** Un job `cambios`
+(`dorny/paths-filter`) mira qué tocó el push y los demás se saltan solos; en `workflow_dispatch`
+se construyen las dos, que para eso sirve el disparo manual. Antes se reconstruían siempre
+ambas, así que un commit que solo tocaba cartera reiniciaba también el CRM API mientras
+SimpleTech lo estaba probando.
+
+El filtro compara contra el **commit anterior de `COBROS-02`**, no contra `main`: la rama
+lleva meses de trabajo aparte y contra `main` todo push saldría como que cambió todo.
 
 El tag con el SHA permite volver atrás sin reconstruir: en Coolify se cambia la imagen a
-`…/cci/crm-api-cobros:<sha>` y se redespliega.
+`…/<imagen>:<sha>` y se redespliega.
 
-La concurrencia va **a nivel de workflow**: un push nuevo cancela el run anterior completo,
-incluida la verificación. Si estuviera solo en el job que despliega, un push viejo que
-todavía está verificando no se cancelaría y, al terminar —después de que el nuevo ya
-desplegó—, publicaría su imagen encima y dejaría `latest` apuntando a un commit anterior.
+La concurrencia va **por app** (`deploy-cobros02-crm` / `deploy-cobros02-cartera`): un push
+nuevo cancela el run anterior *de esa misma app*, incluida su verificación, pero no toca el
+deploy de la otra. Dentro de una app tiene que cubrir también la verificación: si el grupo
+estuviera solo en el job que publica, un run viejo que todavía verifica no se cancelaría y,
+al terminar —después de que el nuevo ya desplegó—, publicaría su imagen encima y dejaría
+`latest` en un commit anterior.
 
 La verificación de tipos y pruebas va **antes** de publicar a propósito: esta API la consume
 un tercero y una imagen rota se nota del lado de ellos.

@@ -7,10 +7,10 @@ name: Deploy COBROS-02 (CRM API + cartera-back)
 #   - cartera-back: sirve contra el schema sandbox `cartera_cobros2` (el
 #     rediseño de buckets/asesores de COBROS-02), no contra `cartera`.
 #
-# Sin paths-filter a propósito: cualquier push que toque los paths de
-# CUALQUIERA de las dos apps reconstruye y redespliega LAS DOS. Es dev, y
-# separar el filtro no valía la complejidad — el costo es que un push que solo
-# toca cartera también reinicia el CRM API de SimpleTech unos segundos.
+# Cada app se construye SOLO si su código cambió: el job `cambios` mira qué
+# tocó el push y los demás se saltan solos. Antes se reconstruían las dos
+# siempre, así que un commit que solo tocaba cartera reiniciaba también el CRM
+# API que está usando SimpleTech. Mismo patrón que deploy-cartera-dev.yaml.
 #
 # Hace lo mismo que apps/crm/apps/server/deployServer.sh y
 # apps/cartera-back/deploy-dev.sh (mismos Dockerfiles), pero automático y con
@@ -40,11 +40,48 @@ permissions:
   contents: read
 
 jobs:
+  # 0) Qué app tocó este push. Sin esto, cualquier commit reconstruye las dos.
+  cambios:
+    name: Detectar cambios
+    runs-on: ubuntu-latest
+    outputs:
+      crm: ${{ steps.filtro.outputs.crm }}
+      cartera: ${{ steps.filtro.outputs.cartera }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filtro
+        with:
+          # Comparar contra el commit anterior de ESTA rama; sin esto compara
+          # contra la default (main) y, como COBROS-02 lleva meses de trabajo
+          # aparte, todo push "cambiaría" las dos apps.
+          base: ${{ github.ref }}
+          # El workflow entra en los dos filtros: si cambia cómo se construye o
+          # se despliega, hay que rehacer ambas imágenes para probarlo.
+          filters: |
+            crm:
+              - 'apps/crm/apps/server/**'
+              - 'packages/sms/**'
+              - 'packages/simpletech/**'
+              - 'packages/infornet/**'
+              - 'packages/email/**'
+              - '.github/workflows/deploy-crm-api-cobros.yaml'
+            cartera:
+              - 'apps/cartera-back/**'
+              - 'packages/email/**'
+              - 'package.json'
+              - 'bun.lock'
+              - '.github/workflows/deploy-crm-api-cobros.yaml'
+
   # ─── CRM API ────────────────────────────────────────────────────────────
   # 1) Barrera barata antes de publicar: la API la consume un tercero, así que
   # no conviene subir una imagen que ni compila.
   verificar-crm:
     name: CRM API · Tipos y pruebas
+    needs: cambios
+    # En dispatch manual no hay diff que mirar: se construye igual, que para eso
+    # sirve — forzar un redeploy después de un run fallido.
+    if: needs.cambios.outputs.crm == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -71,7 +108,8 @@ jobs:
   # 2) Imagen → cci/crm-api-cobros:latest
   desplegar-crm:
     name: CRM API · Construir y desplegar
-    needs: verificar-crm
+    needs: [cambios, verificar-crm]
+    if: needs.cambios.outputs.crm == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     # Por job (no global, ver nota al final del archivo): un push viejo que
     # todavía está verificando esta app no debe cancelarse por un push que
@@ -121,6 +159,8 @@ jobs:
   # workflow.
   desplegar-cartera:
     name: cartera-back · Construir y desplegar
+    needs: cambios
+    if: needs.cambios.outputs.cartera == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     concurrency:
       group: deploy-cobros02-cartera

@@ -1501,7 +1501,7 @@ export const especificacionBotCobros = {
 									bancoId: {
 										type: "integer",
 										description:
-											"Solo si `lectura.banco` vino en `null` o el cliente lo corrigió. Se toma de `bancosSugeridos`.",
+											"Solo si `lectura.banco` vino en `null` o el cliente lo corrigió. Se toma de `bancosSugeridos`. **Omitilo (o mandá `null`) si no hay corrección**: un valor que no sea un id del catálogo responde `BANCO_INVALIDO`, no se ignora — si el cliente está corrigiendo el banco, caer de vuelta en el que la lectura reconoció mal registraría el pago contra el banco equivocado.",
 									},
 								},
 							},

@@ -1,4 +1,5 @@
 import {
+	Banknote,
 	Mail,
 	MapPin,
 	MessageSquare,
@@ -19,6 +20,10 @@ export const ESTADOS_CONTACTO = [
 	{ value: "rechaza_pagar", label: "Rechaza pagar" },
 	{ value: "no_contesta", label: "No contesta" },
 	{ value: "numero_equivocado", label: "Número equivocado" },
+	// CB-128: gestión que registra registrarPagoCompleto (Ficha 360 →
+	// "Registrar pago") — sin esto etiquetaEstado() caía en "—" y la fila no
+	// se distinguía de una gestión de llamada/contacto normal.
+	{ value: "pago_registrado", label: "Pago registrado" },
 ] as const;
 
 export const METODOS_CONTACTO = [
@@ -28,6 +33,10 @@ export const METODOS_CONTACTO = [
 	{ value: "email", label: "Email", icono: Mail },
 	{ value: "visita_domicilio", label: "Visita", icono: MapPin },
 	{ value: "carta_notarial", label: "Carta notarial", icono: Send },
+	// CB-128: mismo motivo que arriba — sin esto la columna "Tipo" mostraba
+	// "—" para un pago registrado desde la Ficha 360, indistinguible de una
+	// gestión sin tipo.
+	{ value: "pago", label: "Pago", icono: Banknote },
 ] as const;
 
 export const ROLES_FILTRABLES = [

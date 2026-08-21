@@ -73,6 +73,10 @@ const ESTADOS_CONTACTO = [
 	"promesa_pago",
 	"acuerdo_parcial",
 	"rechaza_pagar",
+	// CB-128: gestión que registra registrarPagoCompleto (Ficha 360 →
+	// "Registrar pago") — el filtro del historial (components/cobros/
+	// historial/formato.ts) ya la ofrece como opción seleccionable.
+	"pago_registrado",
 ] as const;
 
 /** Espejo del enum `metodo_contacto`. */
@@ -83,6 +87,8 @@ const METODOS_CONTACTO = [
 	"email",
 	"visita_domicilio",
 	"carta_notarial",
+	// CB-128: mismo motivo que arriba.
+	"pago",
 ] as const;
 
 const filtrosSchema = z.object({

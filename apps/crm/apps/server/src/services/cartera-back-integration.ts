@@ -364,12 +364,37 @@ export async function createPagoInCarteraBack(
 			params.credito_numero_sifco,
 		);
 
+		// CB-128 (fix): cuota_id es el PK autoincremental GLOBAL de
+		// cuotas_credito (serial, compartido por todos los créditos del
+		// sistema), pero cartera-back interpreta cuotaApagar como
+		// numero_cuota (secuencial 1,2,3... por crédito — ver
+		// registerPayment.ts:363, `WHERE numero_cuota >= cuotaApagar`).
+		// Mandar cuota_id directo como cuotaApagar (ej. 48213) hace que ese
+		// filtro no encuentre ninguna cuota pendiente en un crédito que
+		// nunca llega a esa magnitud de numero_cuota — el pago se pierde o
+		// se aplica a la cuota equivocada. Se resuelve el numero_cuota real
+		// buscando el cuota_id recibido entre las cuotas del crédito ya
+		// cargado arriba.
+		const todasLasCuotas = [
+			...credito.cuotasPagadas,
+			...credito.cuotasPendientes,
+			...credito.cuotasAtrasadas,
+		];
+		const cuotaResuelta = params.cuota_id
+			? todasLasCuotas.find((c) => c.cuota_id === params.cuota_id)
+			: undefined;
+		if (params.cuota_id && !cuotaResuelta) {
+			throw new Error(
+				`cuota_id ${params.cuota_id} no corresponde a ninguna cuota del crédito ${params.credito_numero_sifco}`,
+			);
+		}
+
 		const pagoInput: CreatePagoInput = {
 			credito_numero_sifco: params.credito_numero_sifco,
 			credito_id: credito.credito.credito_id,
 			usuario_id: credito.usuario.usuario_id,
 			cuota_id: params.cuota_id,
-			cuotaApagar: params.cuota_id ?? 0,
+			cuotaApagar: cuotaResuelta?.numero_cuota ?? 0,
 			fecha_pago: params.fecha_pago,
 			fecha_boleta: params.fecha_pago,
 			monto_boleta: params.monto_boleta,

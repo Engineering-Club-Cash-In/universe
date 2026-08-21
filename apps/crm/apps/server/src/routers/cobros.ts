@@ -4395,141 +4395,186 @@ export const cobrosRouter = {
 				0,
 			);
 
-			// CB-128: fix mínimo de duplicado — un doble-click o un retry tras
-			// timeout de red (el asesor no vio la respuesta, pero cartera-back sí
-			// recibió el POST) puede reenviar el mismo pago. No hay idempotency
-			// key real todavía (deuda pendiente), pero esto cubre el caso común:
-			// mismo caso + misma cuota pedida + mismo monto ya registrado en los
-			// últimos 2 minutos → se asume que es el mismo submit repetido y se
-			// bloquea ANTES de mover dinero en cartera-back.
-			const dosMinutosAtras = new Date(Date.now() - 2 * 60 * 1000);
-			const [duplicadoReciente] = await db
-				.select({ id: pagoReferences.id })
-				.from(pagoReferences)
-				.where(
-					and(
-						eq(pagoReferences.casoCobroId, input.casoCobroId),
-						eq(pagoReferences.cuotaNumero, input.cuotaApagar),
-						eq(pagoReferences.montoBoleta, input.montoBoleta.toString()),
-						gte(pagoReferences.registradoEn, dosMinutosAtras),
-					),
-				)
-				.limit(1);
+			// CB-128: chequeo de duplicado + creación del pago + guarda de
+			// referencia van dentro de la MISMA transacción, serializados con un
+			// advisory lock por caso+cuota — un read-then-write plano (SELECT
+			// "¿existe duplicado?" seguido de un INSERT más abajo) deja abierta
+			// una ventana real: dos requests casi simultáneos (doble-click con
+			// latencia de red, o timeout+retry mientras el primero sigue en
+			// vuelo) pueden pasar el SELECT antes de que cualquiera inserte,
+			// y ambos terminan llamando a createPago. El lock hace que el
+			// segundo request espere a que el primero termine ESTA transacción
+			// completa (incluida la llamada HTTP a cartera-back) antes de
+			// correr su propio chequeo — para entonces la fila del primero ya
+			// existe. No es una idempotency key real (deuda pendiente), pero
+			// cierra la ventana de carrera en vez de solo reducirla.
+			//
+			// hashtext(text) da un int32 determinístico — mismo caso+cuota
+			// siempre generan el mismo lock id, sin colisionar con locks de
+			// otras features (namespace propio vía el prefijo "pago:").
+			const lockKey = `pago:${input.casoCobroId}:${input.cuotaApagar}`;
 
-			if (duplicadoReciente) {
-				throw new ORPCError("BAD_REQUEST", {
-					message:
-						"Ya se registró un pago igual (mismo caso, cuota y monto) hace menos de 2 minutos. Si no fue un envío duplicado, espera un momento antes de reintentar.",
-				});
-			}
-
-			let respuesta: Awaited<ReturnType<typeof carteraBackClient.createPago>>;
-			try {
-				respuesta = await carteraBackClient.createPago({
-					credito_numero_sifco: input.numeroSifco,
-					credito_id: creditoReal.credito.credito_id,
-					usuario_id: creditoReal.usuario.usuario_id,
-					cuotaApagar: input.cuotaApagar,
-					monto_boleta: input.montoBoleta,
-					fecha_pago: input.fechaPago,
-					fecha_boleta: input.fechaBoleta,
-					otros: input.otros,
-					abono_directo_capital: input.abonoDirectoCapital,
-					banco_id: input.bancoId,
-					origen_pago: input.origenPago,
-					numeroAutorizacion: input.numeroAutorizacion,
-					observaciones: input.observaciones,
-					url_boletas: input.urlBoletas,
-					registerBy: context.userId,
-				});
-			} catch (error) {
-				const message = error instanceof Error ? error.message : String(error);
-				throw new ORPCError("BAD_REQUEST", {
-					message: `Error registrando pago: ${message}`,
-				});
-			}
-
-			// CB-128: soloInformativo=true (mora parcial insuficiente, saldo a
-			// favor, etc.) NO es un error — cartera-back sí insertó la fila del
-			// pago, solo avisa que no alcanzó a cerrar la cuota (mismo mensaje que
-			// carteraFront muestra como notificación de éxito, no como rechazo).
-			// success===false explícito SÍ es un rechazo real (validación fallida,
-			// boleta duplicada, etc.) y ahí sí se bloquea.
-			if (!respuesta.success && !respuesta.soloInformativo) {
-				throw new ORPCError("BAD_REQUEST", {
-					message: `Error registrando pago: ${respuesta.message ?? "cartera-back rechazó el pago"}`,
-				});
-			}
-
-			// CB-128: /newPayment no siempre trae pago_id inline (el camino normal
-			// de pago no lo incluye, solo la rama de abono directo a capital) — se
-			// resuelve consultando el pago recién creado por SIFCO cuando falta.
-			// Filtro primario: registerBy === mi userId — cierra el race condition
-			// de dos asesores pagando el mismo crédito casi al mismo tiempo (antes
-			// se tomaba "el pago_id más alto de los nuevos" a ciegas, que podía ser
-			// el pago del OTRO asesor si ambos insertaron en la misma ventana).
-			// pago_id > snapshot se mantiene como filtro extra por si el mismo
-			// usuario ya tenía pagos previos con el mismo registerBy (reintentos
-			// fallidos anteriores, por ejemplo). Segundo intento con espera corta
-			// cubre lag de replicación entre el insert de /newPayment y la lectura
-			// de /paymentByCredit.
-			const buscarPagoNuevo = async () => {
-				const pagos = await carteraBackClient.getPagosByCredito(
-					input.numeroSifco,
-				);
-				const nuevos = pagos.filter(
-					(p) =>
-						p.pago_id > pagoIdMaximoPrevio && p.registerBy === context.userId,
-				);
-				return nuevos.sort((a, b) => b.pago_id - a.pago_id)[0];
-			};
-			let pagoId = respuesta.pago_id;
-			// CB-128: cartera-back puede cascadear el pago a una cuota distinta a
-			// la pedida (ej. pide pagar la 5, el sistema cierra 5 y 6 si alcanza) —
-			// el camino normal de /newPayment solo devuelve un CONTADOR de cuotas
-			// cerradas, no sus números, así que no hay forma de saberlo desde la
-			// respuesta directa. Se guarda input.cuotaApagar por default (la cuota
-			// pedida) y se corrige con el numero_cuota real SOLO cuando se tuvo que
-			// consultar el pago igual (fallback de pagoId) — ahí sí se sabe cuál
-			// cuota cerró de verdad.
+			let respuesta:
+				| Awaited<ReturnType<typeof carteraBackClient.createPago>>
+				| undefined;
+			let pagoId: number | undefined;
 			let cuotaNumeroReal = input.cuotaApagar;
-			if (!pagoId) {
-				let pagoEncontrado = await buscarPagoNuevo();
-				if (!pagoEncontrado) {
-					await new Promise((resolve) => setTimeout(resolve, 1500));
-					pagoEncontrado = await buscarPagoNuevo();
-				}
-				pagoId = pagoEncontrado?.pago_id;
-				if (pagoEncontrado?.numero_cuota != null) {
-					cuotaNumeroReal = pagoEncontrado.numero_cuota;
-				}
-			}
-			if (!pagoId) {
-				// El dinero YA se movió en cartera-back (createPago tuvo éxito) —
-				// solo falló resolver la referencia local. Mensaje explícito para
-				// que el asesor NO reintente (duplicaría el pago) sino que avise a
-				// soporte para reconciliar manualmente.
-				throw new ORPCError("INTERNAL_SERVER_ERROR", {
-					message:
-						"El pago se registró en cartera-back pero el CRM no pudo confirmar su referencia. NO reintentes el pago — contacta a soporte para verificar antes de volver a registrarlo.",
-				});
-			}
+			let pagoRef: { id: string } | undefined;
 
-			// Referencia local del pago — misma tabla que ya usa registrarPago/
-			// createPagoInCarteraBack arriba.
-			const [pagoRef] = await db
-				.insert(pagoReferences)
-				.values({
-					carteraPagoId: pagoId,
-					numeroCreditoSifco: input.numeroSifco,
-					cuotaNumero: cuotaNumeroReal,
-					montoBoleta: input.montoBoleta.toString(),
-					fechaPago: new Date(input.fechaPago),
-					casoCobroId: input.casoCobroId,
-					registradoPor: context.userId,
-					syncStatus: "synced",
-				})
-				.returning();
+			await db.transaction(async (tx) => {
+				await tx.execute(
+					sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`,
+				);
+
+				const dosMinutosAtras = new Date(Date.now() - 2 * 60 * 1000);
+				const [duplicadoReciente] = await tx
+					.select({ id: pagoReferences.id })
+					.from(pagoReferences)
+					.where(
+						and(
+							eq(pagoReferences.casoCobroId, input.casoCobroId),
+							eq(pagoReferences.cuotaNumero, input.cuotaApagar),
+							eq(pagoReferences.montoBoleta, input.montoBoleta.toString()),
+							gte(pagoReferences.registradoEn, dosMinutosAtras),
+						),
+					)
+					.limit(1);
+
+				if (duplicadoReciente) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"Ya se registró un pago igual (mismo caso, cuota y monto) hace menos de 2 minutos. Si no fue un envío duplicado, espera un momento antes de reintentar.",
+					});
+				}
+
+				try {
+					respuesta = await carteraBackClient.createPago({
+						credito_numero_sifco: input.numeroSifco,
+						credito_id: creditoReal.credito.credito_id,
+						usuario_id: creditoReal.usuario.usuario_id,
+						cuotaApagar: input.cuotaApagar,
+						monto_boleta: input.montoBoleta,
+						fecha_pago: input.fechaPago,
+						fecha_boleta: input.fechaBoleta,
+						otros: input.otros,
+						abono_directo_capital: input.abonoDirectoCapital,
+						banco_id: input.bancoId,
+						origen_pago: input.origenPago,
+						numeroAutorizacion: input.numeroAutorizacion,
+						observaciones: input.observaciones,
+						url_boletas: input.urlBoletas,
+						registerBy: context.userId,
+					});
+				} catch (error) {
+					const message =
+						error instanceof Error ? error.message : String(error);
+					throw new ORPCError("BAD_REQUEST", {
+						message: `Error registrando pago: ${message}`,
+					});
+				}
+
+				// CB-128: soloInformativo=true (mora parcial insuficiente, saldo a
+				// favor, etc.) NO es un error — cartera-back sí insertó la fila del
+				// pago, solo avisa que no alcanzó a cerrar la cuota (mismo mensaje
+				// que carteraFront muestra como notificación de éxito, no como
+				// rechazo). success===false explícito SÍ es un rechazo real
+				// (validación fallida, boleta duplicada, etc.) y ahí sí se bloquea.
+				if (!respuesta.success && !respuesta.soloInformativo) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: `Error registrando pago: ${respuesta.message ?? "cartera-back rechazó el pago"}`,
+					});
+				}
+
+				// CB-128: /newPayment no siempre trae pago_id inline (el camino
+				// normal de pago no lo incluye, solo la rama de abono directo a
+				// capital) — se resuelve consultando el pago recién creado por
+				// SIFCO cuando falta. Filtro primario: registerBy === mi userId —
+				// cierra el race condition de dos asesores pagando el mismo
+				// crédito casi al mismo tiempo (antes se tomaba "el pago_id más
+				// alto de los nuevos" a ciegas, que podía ser el pago del OTRO
+				// asesor si ambos insertaron en la misma ventana). pago_id >
+				// snapshot se mantiene como filtro extra por si el mismo usuario
+				// ya tenía pagos previos con el mismo registerBy (reintentos
+				// fallidos anteriores, por ejemplo). Segundo intento con espera
+				// corta cubre lag de replicación entre el insert de /newPayment y
+				// la lectura de /paymentByCredit.
+				const buscarPagoNuevo = async () => {
+					const pagos = await carteraBackClient.getPagosByCredito(
+						input.numeroSifco,
+					);
+					const nuevos = pagos.filter(
+						(p) =>
+							p.pago_id > pagoIdMaximoPrevio && p.registerBy === context.userId,
+					);
+					return nuevos.sort((a, b) => b.pago_id - a.pago_id)[0];
+				};
+				pagoId = respuesta.pago_id;
+				// CB-128: cartera-back puede cascadear el pago a una cuota
+				// distinta a la pedida (ej. pide pagar la 5, el sistema cierra 5
+				// y 6 si alcanza) — el camino normal de /newPayment solo devuelve
+				// un CONTADOR de cuotas cerradas, no sus números, así que no hay
+				// forma de saberlo desde la respuesta directa. Se guarda
+				// input.cuotaApagar por default (la cuota pedida) y se corrige
+				// con el numero_cuota real SOLO cuando se tuvo que consultar el
+				// pago igual (fallback de pagoId) — ahí sí se sabe cuál cuota
+				// cerró de verdad.
+				if (!pagoId) {
+					let pagoEncontrado = await buscarPagoNuevo();
+					if (!pagoEncontrado) {
+						await new Promise((resolve) => setTimeout(resolve, 1500));
+						pagoEncontrado = await buscarPagoNuevo();
+					}
+					pagoId = pagoEncontrado?.pago_id;
+					if (pagoEncontrado?.numero_cuota != null) {
+						cuotaNumeroReal = pagoEncontrado.numero_cuota;
+					}
+				}
+				if (!pagoId) {
+					// El dinero YA se movió en cartera-back (createPago tuvo
+					// éxito) — solo falló resolver la referencia local. Mensaje
+					// explícito para que el asesor NO reintente (duplicaría el
+					// pago) sino que avise a soporte para reconciliar
+					// manualmente.
+					throw new ORPCError("INTERNAL_SERVER_ERROR", {
+						message:
+							"El pago se registró en cartera-back pero el CRM no pudo confirmar su referencia. NO reintentes el pago — contacta a soporte para verificar antes de volver a registrarlo.",
+					});
+				}
+
+				// Referencia local del pago — misma tabla que ya usa
+				// registrarPago/createPagoInCarteraBack arriba.
+				try {
+					[pagoRef] = await tx
+						.insert(pagoReferences)
+						.values({
+							carteraPagoId: pagoId,
+							numeroCreditoSifco: input.numeroSifco,
+							cuotaNumero: cuotaNumeroReal,
+							montoBoleta: input.montoBoleta.toString(),
+							fechaPago: new Date(input.fechaPago),
+							casoCobroId: input.casoCobroId,
+							registradoPor: context.userId,
+							syncStatus: "synced",
+						})
+						.returning();
+				} catch (error) {
+					// El dinero YA se movió en cartera-back (createPago tuvo
+					// éxito) — solo falló guardar la referencia local (ej. error
+					// transitorio de conexión a la DB del CRM). Sin esta fila
+					// tampoco existe ancla para el chequeo de duplicado de
+					// arriba, así que un reintento del asesor duplicaría el pago
+					// real — mismo mensaje explícito "NO reintentes" que el caso
+					// hermano de arriba (pagoId no resuelto).
+					console.error(
+						"[registrarPagoCompleto] Pago confirmado en cartera-back pero falló el insert de pagoReferences:",
+						error,
+					);
+					throw new ORPCError("INTERNAL_SERVER_ERROR", {
+						message:
+							"El pago se registró en cartera-back pero el CRM no pudo guardar su referencia. NO reintentes el pago — contacta a soporte para verificar antes de volver a registrarlo.",
+					});
+				}
+			});
 
 			// Anotar la gestión en contactos_cobros — best-effort: el pago ya se
 			// confirmó en cartera-back (el dinero ya se movió), así que un fallo
@@ -4573,7 +4618,7 @@ export const cobrosRouter = {
 				success: true,
 				pago_id: pagoId,
 				gestionRegistrada,
-				message: respuesta.message ?? "Pago registrado exitosamente",
+				message: respuesta?.message ?? "Pago registrado exitosamente",
 			};
 		}),
 

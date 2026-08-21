@@ -327,7 +327,14 @@ async function resolverPagoRecienCreado(
 	registerBy: string,
 ): Promise<CarteraPagoCredito | null> {
 	const buscar = async () => {
-		const pagos = await carteraBackClient.getPagosByCredito(numeroCreditoSifco);
+		// Sin cache: con CARTERA_BACK_ENABLE_CACHE activado y lag de
+		// replicación, una respuesta cacheada sin el pago recién creado hacía
+		// que el retry de 1.5s pegara contra la MISMA respuesta stale en vez
+		// de volver a consultar cartera-back.
+		const pagos = await carteraBackClient.getPagosByCredito(
+			numeroCreditoSifco,
+			false,
+		);
 		const nuevos = pagos.filter(
 			(p) => p.pago_id > pagoIdMaximoPrevio && p.registerBy === registerBy,
 		);
@@ -406,9 +413,12 @@ export async function createPagoInCarteraBack(
 
 		// Snapshot ANTES de crear el pago — único ancla confiable para
 		// reconocer "el pago recién creado" si /newPayment no trae pago_id
-		// inline (ver comentario en resolverPagoIdRecienCreado).
+		// inline (ver comentario en resolverPagoIdRecienCreado). Sin cache:
+		// un snapshot stale corre el riesgo de subestimar el pago_id máximo
+		// real.
 		const pagosPrevios = await carteraBackClient.getPagosByCredito(
 			params.credito_numero_sifco,
+			false,
 		);
 		const pagoIdMaximoPrevio = pagosPrevios.reduce(
 			(max, p) => Math.max(max, p.pago_id),

@@ -1449,7 +1449,10 @@ export class CarteraBackClient {
 		return response.data ?? null;
 	}
 
-	async getPagosByCredito(numeroSifco: string): Promise<CarteraPagoCredito[]> {
+	async getPagosByCredito(
+		numeroSifco: string,
+		useCache = true,
+	): Promise<CarteraPagoCredito[]> {
 		// CB-128: /paymentByCredit devuelve un array DIRECTO (`return pagos;` en
 		// cartera-back/src/routers/payments.ts:95, no envuelto en
 		// CarteraBackApiResponse<T>), y cada elemento va anidado como
@@ -1459,11 +1462,20 @@ export class CarteraBackClient {
 		// así que `response.data` daba undefined y el fallback de pago_id en
 		// createPago nunca encontraba nada. El endpoint responde 404 (no 200
 		// con []) si el crédito no tiene pagos — se trata como lista vacía.
+		//
+		// CB-128 (fix): useCache=false es obligatorio para quien resuelve un
+		// pago recién creado (registrarPagoCompleto/resolverPagoRecienCreado)
+		// — con cache activado (CARTERA_BACK_ENABLE_CACHE=true) y lag de
+		// replicación en cartera-back, el primer intento post-pago podía
+		// cachear una respuesta que TODAVÍA no incluye la fila nueva, y el
+		// retry de 1.5s pegaba contra esa MISMA respuesta cacheada (hasta 5
+		// min de TTL) en vez de volver a consultar — el fallback de pago_id
+		// fallaba sistemáticamente aunque el dinero ya se hubiera movido.
 		try {
 			const response = await this.request<Array<{ pago: CarteraPagoCredito }>>(
 				`/paymentByCredit?numero_credito_sifco=${encodeURIComponent(numeroSifco)}&excel=false`,
 				{ method: "GET" },
-				true, // use cache
+				useCache,
 			);
 			return Array.isArray(response)
 				? response.map((fila) => fila.pago).filter(Boolean)

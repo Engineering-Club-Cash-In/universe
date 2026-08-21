@@ -4377,8 +4377,12 @@ export const cobrosRouter = {
 				// mira "el más alto de la lista actual" agarra un pago VIEJO con
 				// toda confianza cuando /newPayment no trae pago_id inline —
 				// pagoReferences y la gestión en contactos_cobros quedan apuntando
-				// al pago equivocado, sin ningún error que lo delate.
-				carteraBackClient.getPagosByCredito(input.numeroSifco),
+				// al pago equivocado, sin ningún error que lo delate. Sin cache
+				// (false): con CARTERA_BACK_ENABLE_CACHE activado, un snapshot
+				// cacheado desactualizado corre el riesgo de subestimar el
+				// pago_id máximo real y confundir un pago viejo con el nuevo más
+				// abajo.
+				carteraBackClient.getPagosByCredito(input.numeroSifco, false),
 			]);
 			if (
 				creditoReal.credito.credito_id !== input.creditoId ||
@@ -4397,22 +4401,32 @@ export const cobrosRouter = {
 
 			// CB-128: chequeo de duplicado + creación del pago + guarda de
 			// referencia van dentro de la MISMA transacción, serializados con un
-			// advisory lock por caso+cuota — un read-then-write plano (SELECT
-			// "¿existe duplicado?" seguido de un INSERT más abajo) deja abierta
-			// una ventana real: dos requests casi simultáneos (doble-click con
+			// advisory lock — un read-then-write plano (SELECT "¿existe
+			// duplicado?" seguido de un INSERT más abajo) deja abierta una
+			// ventana real: dos requests casi simultáneos (doble-click con
 			// latencia de red, o timeout+retry mientras el primero sigue en
-			// vuelo) pueden pasar el SELECT antes de que cualquiera inserte,
-			// y ambos terminan llamando a createPago. El lock hace que el
-			// segundo request espere a que el primero termine ESTA transacción
-			// completa (incluida la llamada HTTP a cartera-back) antes de
-			// correr su propio chequeo — para entonces la fila del primero ya
-			// existe. No es una idempotency key real (deuda pendiente), pero
-			// cierra la ventana de carrera en vez de solo reducirla.
+			// vuelo) pueden pasar el SELECT antes de que cualquiera inserte, y
+			// ambos terminan llamando a createPago. El lock hace que el segundo
+			// request espere a que el primero termine ESTA transacción completa
+			// (incluida la llamada HTTP a cartera-back) antes de correr su
+			// propio chequeo — para entonces la fila del primero ya existe. No
+			// es una idempotency key real (deuda pendiente), pero cierra la
+			// ventana de carrera en vez de solo reducirla.
 			//
-			// hashtext(text) da un int32 determinístico — mismo caso+cuota
-			// siempre generan el mismo lock id, sin colisionar con locks de
-			// otras features (namespace propio vía el prefijo "pago:").
-			const lockKey = `pago:${input.casoCobroId}:${input.cuotaApagar}`;
+			// CB-128 (fix): scoped por CASO solamente, no por caso+cuota. Un
+			// lock por cuota permitía que el mismo asesor pagara dos cuotas del
+			// mismo crédito en paralelo (locks distintos, sin serializar entre
+			// sí) — ambos requests comparten el mismo snapshot
+			// pagoIdMaximoPrevio (calculado antes de cualquier lock) y el mismo
+			// registerBy, así que el fallback de arriba podía resolver el
+			// pago_id de UNO al otro, produciendo una referencia cruzada o un
+			// choque contra el UNIQUE de carteraPagoId. Serializar por caso
+			// completo cierra ese cruce también.
+			//
+			// hashtext(text) da un int32 determinístico — mismo caso siempre
+			// genera el mismo lock id, sin colisionar con locks de otras
+			// features (namespace propio vía el prefijo "pago:").
+			const lockKey = `pago:${input.casoCobroId}`;
 
 			let respuesta:
 				| Awaited<ReturnType<typeof carteraBackClient.createPago>>
@@ -4426,6 +4440,17 @@ export const cobrosRouter = {
 					sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`,
 				);
 
+				// CB-128 (fix): sin cuotaNumero en la comparación — cartera-back
+				// puede cascadear el pago a una cuota distinta a la pedida (ver
+				// más abajo), y la fila guardada usa cuotaNumero REAL, no la
+				// pedida. Comparar contra input.cuotaApagar dejaba pasar un
+				// retry exacto de la request original después de una cascada
+				// (la fila real tiene un cuotaNumero distinto, el chequeo nunca
+				// la encontraba). Comparar solo por caso+monto es más
+				// conservador — bloquea cualquier pago del mismo monto en el
+				// mismo caso dentro de 2 minutos, sin importar a qué cuota cayó
+				// cada uno — pero un asesor legítimo casi nunca repite el mismo
+				// monto exacto en el mismo caso en ese lapso.
 				const dosMinutosAtras = new Date(Date.now() - 2 * 60 * 1000);
 				const [duplicadoReciente] = await tx
 					.select({ id: pagoReferences.id })
@@ -4433,7 +4458,6 @@ export const cobrosRouter = {
 					.where(
 						and(
 							eq(pagoReferences.casoCobroId, input.casoCobroId),
-							eq(pagoReferences.cuotaNumero, input.cuotaApagar),
 							eq(pagoReferences.montoBoleta, input.montoBoleta.toString()),
 							gte(pagoReferences.registradoEn, dosMinutosAtras),
 						),
@@ -4499,8 +4523,13 @@ export const cobrosRouter = {
 				// corta cubre lag de replicación entre el insert de /newPayment y
 				// la lectura de /paymentByCredit.
 				const buscarPagoNuevo = async () => {
+					// Sin cache: ver comentario en el snapshot de pagoIdMaximoPrevio
+					// arriba — con cache, el retry de 1.5s podía pegar contra la
+					// misma respuesta stale del primer intento en vez de volver a
+					// consultar cartera-back.
 					const pagos = await carteraBackClient.getPagosByCredito(
 						input.numeroSifco,
+						false,
 					);
 					const nuevos = pagos.filter(
 						(p) =>

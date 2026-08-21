@@ -4303,26 +4303,45 @@ export const cobrosRouter = {
 	// del asesor — el requisito de negocio que originó este endpoint.
 	registrarPagoCompleto: cobrosProcedure
 		.input(
-			z.object({
-				casoCobroId: z.string().uuid(),
-				numeroSifco: z.string(),
-				creditoId: z.number().int().positive(),
-				usuarioId: z.number().int().positive(),
-				cuotaApagar: z.number().int().positive(),
-				montoBoleta: z.number().positive(),
-				fechaPago: z.string().date(),
-				fechaBoleta: z.string().datetime(),
-				otros: z.number().nonnegative().optional(),
-				abonoDirectoCapital: z.number().nonnegative().optional(),
-				bancoId: z.number().int().positive().optional(),
-				origenPago: z.enum(["transferencia", "cheque", "boleta"]).optional(),
-				numeroAutorizacion: z.string().max(100).optional(),
-				observaciones: z.string().max(2000).optional(),
-				// Un solo comprobante por pago — el form solo permite adjuntar 1
-				// archivo, así que un array más largo no corresponde a ningún caso
-				// de uso real y solo ampliaría la superficie de ataque.
-				urlBoletas: z.array(z.string().min(1).max(500)).max(1).default([]),
-			}),
+			z
+				.object({
+					casoCobroId: z.string().uuid(),
+					numeroSifco: z.string(),
+					creditoId: z.number().int().positive(),
+					usuarioId: z.number().int().positive(),
+					cuotaApagar: z.number().int().positive(),
+					montoBoleta: z.number().positive(),
+					fechaPago: z.string().date(),
+					fechaBoleta: z.string().datetime(),
+					otros: z.number().nonnegative().optional(),
+					abonoDirectoCapital: z.number().nonnegative().optional(),
+					bancoId: z.number().int().positive().optional(),
+					origenPago: z.enum(["transferencia", "cheque", "boleta"]).optional(),
+					numeroAutorizacion: z.string().max(100).optional(),
+					observaciones: z.string().max(2000).optional(),
+					// Un solo comprobante por pago — el form solo permite adjuntar 1
+					// archivo, así que un array más largo no corresponde a ningún caso
+					// de uso real y solo ampliaría la superficie de ataque.
+					urlBoletas: z.array(z.string().min(1).max(500)).max(1).default([]),
+				})
+				// CB-128 (fix): otros y abonoDirectoCapital se validaban
+				// independientes, cada uno solo >=0 — sin tope contra
+				// montoBoleta. Cartera-back trata abono_directo_capital como un
+				// monto INDEPENDIENTE (no descontado del recibo real): un
+				// recibo de Q100 con abonoDirectoCapital=1000 aplicaba los
+				// Q1000 completos a capital sin que el comprobante real los
+				// respaldara. Se exige que la suma de ambos no exceda el monto
+				// real de la boleta.
+				.refine(
+					(data) =>
+						(data.otros ?? 0) + (data.abonoDirectoCapital ?? 0) <=
+						data.montoBoleta,
+					{
+						message:
+							"La suma de 'Otros' y el abono directo a capital no puede exceder el monto de la boleta",
+						path: ["abonoDirectoCapital"],
+					},
+				),
 		)
 		.handler(async ({ input, context }) => {
 			const [caso] = await db
@@ -4413,20 +4432,24 @@ export const cobrosRouter = {
 			// es una idempotency key real (deuda pendiente), pero cierra la
 			// ventana de carrera en vez de solo reducirla.
 			//
-			// CB-128 (fix): scoped por CASO solamente, no por caso+cuota. Un
-			// lock por cuota permitía que el mismo asesor pagara dos cuotas del
-			// mismo crédito en paralelo (locks distintos, sin serializar entre
-			// sí) — ambos requests comparten el mismo snapshot
-			// pagoIdMaximoPrevio (calculado antes de cualquier lock) y el mismo
-			// registerBy, así que el fallback de arriba podía resolver el
-			// pago_id de UNO al otro, produciendo una referencia cruzada o un
-			// choque contra el UNIQUE de carteraPagoId. Serializar por caso
-			// completo cierra ese cruce también.
+			// CB-128 (fix): scoped por CRÉDITO (SIFCO), no por casoCobroId. Un
+			// mismo SIFCO puede tener varias filas en casosCobros — no hay
+			// índice único sobre numero_credito_sifco (ver lib/caso-vigente.ts:
+			// duplicados posibles por reaperturas, migraciones, altas
+			// manuales). Un lock/chequeo por casoCobroId dejaba pasar dos
+			// requests "duplicados" de facto (mismo crédito real, mismo monto)
+			// si cada uno llegaba con el casoCobroId de un caso distinto del
+			// mismo SIFCO — ni el lock los serializaba entre sí, ni el chequeo
+			// de duplicado veía la fila del otro caso. También cierra el cruce
+			// de antes: el mismo asesor pagando dos cuotas del mismo crédito
+			// en paralelo comparte el mismo snapshot pagoIdMaximoPrevio y el
+			// mismo registerBy, así que el fallback podía resolver el pago_id
+			// de UNO al otro sin este lock serializándolos.
 			//
-			// hashtext(text) da un int32 determinístico — mismo caso siempre
+			// hashtext(text) da un int32 determinístico — mismo SIFCO siempre
 			// genera el mismo lock id, sin colisionar con locks de otras
 			// features (namespace propio vía el prefijo "pago:").
-			const lockKey = `pago:${input.casoCobroId}`;
+			const lockKey = `pago:${input.numeroSifco}`;
 
 			let respuesta:
 				| Awaited<ReturnType<typeof carteraBackClient.createPago>>
@@ -4440,24 +4463,26 @@ export const cobrosRouter = {
 					sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`,
 				);
 
-				// CB-128 (fix): sin cuotaNumero en la comparación — cartera-back
-				// puede cascadear el pago a una cuota distinta a la pedida (ver
-				// más abajo), y la fila guardada usa cuotaNumero REAL, no la
-				// pedida. Comparar contra input.cuotaApagar dejaba pasar un
-				// retry exacto de la request original después de una cascada
-				// (la fila real tiene un cuotaNumero distinto, el chequeo nunca
-				// la encontraba). Comparar solo por caso+monto es más
+				// CB-128 (fix): comparación por numeroCreditoSifco, no
+				// casoCobroId (ver comentario del lockKey arriba — un mismo
+				// SIFCO puede tener varios casosCobros). También sin
+				// cuotaNumero: cartera-back puede cascadear el pago a una
+				// cuota distinta a la pedida (ver más abajo), y la fila
+				// guardada usa cuotaNumero REAL, no la pedida — comparar
+				// contra input.cuotaApagar dejaba pasar un retry exacto tras
+				// una cascada. Comparar solo por SIFCO+monto es más
 				// conservador — bloquea cualquier pago del mismo monto en el
-				// mismo caso dentro de 2 minutos, sin importar a qué cuota cayó
-				// cada uno — pero un asesor legítimo casi nunca repite el mismo
-				// monto exacto en el mismo caso en ese lapso.
+				// mismo crédito dentro de 2 minutos, sin importar a qué cuota
+				// ni casoCobroId cayó cada uno — pero un asesor legítimo casi
+				// nunca repite el mismo monto exacto en el mismo crédito en
+				// ese lapso.
 				const dosMinutosAtras = new Date(Date.now() - 2 * 60 * 1000);
 				const [duplicadoReciente] = await tx
 					.select({ id: pagoReferences.id })
 					.from(pagoReferences)
 					.where(
 						and(
-							eq(pagoReferences.casoCobroId, input.casoCobroId),
+							eq(pagoReferences.numeroCreditoSifco, input.numeroSifco),
 							eq(pagoReferences.montoBoleta, input.montoBoleta.toString()),
 							gte(pagoReferences.registradoEn, dosMinutosAtras),
 						),

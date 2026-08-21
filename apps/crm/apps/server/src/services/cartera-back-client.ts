@@ -29,6 +29,7 @@ import type {
 	CarteraCuotasProximasResponse,
 	CarteraInversionista,
 	CarteraPagoCredito,
+	CarteraPagoCreditoInversionista,
 	CarteraStatsResponse,
 	CarteraUsuario,
 	CreateBoletaInput,
@@ -1472,13 +1473,29 @@ export class CarteraBackClient {
 		// min de TTL) en vez de volver a consultar — el fallback de pago_id
 		// fallaba sistemáticamente aunque el dinero ya se hubiera movido.
 		try {
-			const response = await this.request<Array<{ pago: CarteraPagoCredito }>>(
+			const response = await this.request<
+				Array<{
+					pago: CarteraPagoCredito;
+					pagosInversionistas?: CarteraPagoCreditoInversionista[];
+				}>
+			>(
 				`/paymentByCredit?numero_credito_sifco=${encodeURIComponent(numeroSifco)}&excel=false`,
 				{ method: "GET" },
 				useCache,
 			);
+			// CB-128 (fix): la distribución a inversionistas viene en la
+			// propiedad EXTERNA `pagosInversionistas` de cada fila, no anidada
+			// dentro de `pago` — un aplanado que solo copiaba `fila.pago`
+			// descartaba esta distribución en silencio, y
+			// getHistorialPagosCarteraBack (que espera
+			// pago.pagos_inversionistas) siempre veía `undefined` ahí.
 			return Array.isArray(response)
-				? response.map((fila) => fila.pago).filter(Boolean)
+				? response
+						.filter((fila) => fila.pago)
+						.map((fila) => ({
+							...fila.pago,
+							pagos_inversionistas: fila.pagosInversionistas,
+						}))
 				: [];
 		} catch (error) {
 			if (error instanceof CarteraBackHttpError && error.status === 404) {

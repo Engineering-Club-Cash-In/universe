@@ -256,6 +256,7 @@ Las corre el usuario, sobre **green-tree**:
 | `0034_bot_cobros_otp_sin_dpi.sql` | `dpi` nullable — sin esto, el 18% de clientes sin DPI no puede recibir código |
 | `0035_bot_cobros_otp_origen.sql` | columna `origen` — **sin esto los servicios no validan ningún código** |
 | `0037_bot_cobros_boletas.sql` | tablas `bot_cobros_boletas` y compañía — **sin esto `/boleta/leer` revienta con `relation does not exist` en la primera consulta** (paso 4, capa A) |
+| `0038_bot_cobros_aviso_reclamado.sql` | reclamo con vencimiento + desenlace notificado (paso 4, capa C) — **con backfill**: sin él, el primer job tras el deploy le manda un WhatsApp a cada cliente ya avisado |
 
 Y en **cartera** (sandbox `cartera_cobros2`), de `apps/cartera-back/drizzle/cobros-02/`:
 

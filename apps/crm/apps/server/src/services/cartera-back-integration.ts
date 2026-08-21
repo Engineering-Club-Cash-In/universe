@@ -312,22 +312,37 @@ export interface CreatePagoResult {
 	resultadoIncierto?: boolean;
 }
 
-// CB-128: fallback cuando /newPayment no trae pago_id inline. Filtro primario:
-// registerBy === mi userId — cierra el race condition de dos asesores pagando
-// el mismo crédito casi al mismo tiempo (antes se tomaba "el pago_id más alto
-// de los nuevos" a ciegas, que podía ser el pago del OTRO asesor si ambos
-// insertaron en la misma ventana; /paymentByCredit ahora expone registerBy).
-// pago_id > snapshot (pagoIdMaximoPrevio) se mantiene como filtro extra por si
-// el mismo usuario ya tenía pagos previos con el mismo registerBy. Reintenta
-// una vez con espera corta para cubrir lag de replicación.
+// CB-128: fallback cuando /newPayment no trae pago_id inline. Filtro
+// obligatorio: registerBy === mi userId — cierra el race condition de dos
+// asesores pagando el mismo crédito casi al mismo tiempo (antes se tomaba "el
+// pago_id más alto de los nuevos" a ciegas, que podía ser el pago del OTRO
+// asesor si ambos insertaron en la misma ventana; /paymentByCredit ahora
+// expone registerBy).
+//
+// CB-128 (fix): "es reciente" ya no es solo pago_id > snapshot — también
+// acepta fecha_pago >= antesDeCrearPago (con margen por reloj no
+// sincronizado). Cartera-back a veces CIERRA una cuota pisando (UPDATE) el
+// placeholder no_required que cada cuota ya trae desde que se generó el
+// calendario de pagos, en vez de insertar una fila nueva ("comportamiento
+// histórico para el caso normal", ver registerPayment.ts:1576-1604 y
+// destinoSobrescribible) — es el camino MÁS COMÚN para un pago normal al día
+// (cuota sin abonos parciales previos), no un caso raro. Ahí el pago_id NUNCA
+// supera el snapshot (la fila ya existía antes del pago), así que el filtro
+// original nunca la encontraba sin importar cuántos retries se hicieran.
+// fecha_pago se guarda con el timestamp real de aplicación (hora de
+// Guatemala con segundos), sirve como ancla alternativa. Reintenta una vez
+// con espera corta para cubrir lag de replicación.
+//
 // Devuelve el pago completo (no solo el id) — quien llama necesita también
-// numero_cuota real, porque cartera-back puede cascadear el pago a una cuota
-// distinta a la pedida y el camino normal de /newPayment no lo reporta.
+// numero_cuota real, porque cartera-back puede cascadear el pago a otra
+// cuota y el camino normal de /newPayment no lo reporta.
 async function resolverPagoRecienCreado(
 	numeroCreditoSifco: string,
 	pagoIdMaximoPrevio: number,
 	registerBy: string,
+	antesDeCrearPago: Date,
 ): Promise<CarteraPagoCredito | null> {
+	const margenMs = 5 * 1000;
 	const buscar = async () => {
 		// Sin cache: con CARTERA_BACK_ENABLE_CACHE activado y lag de
 		// replicación, una respuesta cacheada sin el pago recién creado hacía
@@ -337,9 +352,15 @@ async function resolverPagoRecienCreado(
 			numeroCreditoSifco,
 			false,
 		);
-		const nuevos = pagos.filter(
-			(p) => p.pago_id > pagoIdMaximoPrevio && p.registerBy === registerBy,
-		);
+		const nuevos = pagos.filter((p) => {
+			if (p.registerBy !== registerBy) return false;
+			if (p.pago_id > pagoIdMaximoPrevio) return true;
+			const fechaPagoMs = new Date(p.fecha_pago).getTime();
+			return (
+				Number.isFinite(fechaPagoMs) &&
+				fechaPagoMs >= antesDeCrearPago.getTime() - margenMs
+			);
+		});
 		return nuevos.sort((a, b) => b.pago_id - a.pago_id)[0] ?? null;
 	};
 	const primerIntento = await buscar();
@@ -468,6 +489,12 @@ export async function createPagoInCarteraBack(
 				0,
 			);
 
+			// CB-128 (fix): ver comentario largo en resolverPagoRecienCreado —
+			// necesario porque cartera-back a veces UPDATE-ea el placeholder
+			// no_required de la cuota en vez de insertar una fila nueva, y ahí
+			// el pago_id nunca supera pagoIdMaximoPrevio.
+			const antesDeCrearPago = new Date();
+
 			try {
 				respuesta = await carteraBackClient.createPago(pagoInput);
 			} catch (error) {
@@ -499,6 +526,7 @@ export async function createPagoInCarteraBack(
 					params.credito_numero_sifco,
 					pagoIdMaximoPrevio,
 					params.userId,
+					antesDeCrearPago,
 				);
 				pagoId = pagoEncontrado?.pago_id;
 				if (pagoEncontrado?.numero_cuota != null) {

@@ -4525,6 +4525,23 @@ export const cobrosRouter = {
 					});
 				}
 
+				// CB-128 (fix): timestamp tomado justo ANTES de llamar a createPago
+				// — necesario porque cartera-back a veces CIERRA una cuota
+				// pisando (UPDATE) el placeholder no_required que cada cuota ya
+				// trae desde que se generó el calendario de pagos ("comportamiento
+				// histórico para el caso normal", ver registerPayment.ts:1576-1604
+				// y destinoSobrescribible) en vez de insertar una fila nueva. En
+				// ese camino el pago_id NO cambia — sigue siendo el del
+				// placeholder viejo, que ya estaba incluido en pagoIdMaximoPrevio
+				// — así que el filtro pago_id > snapshot nunca lo encuentra, sin
+				// importar cuántos retries se hagan (el ID jamás va a cambiar).
+				// Es el camino MÁS COMÚN para un pago normal al día (cuota sin
+				// abonos parciales previos), no un caso raro. fecha_pago en
+				// cartera-back se guarda con el timestamp real de aplicación
+				// (hora de Guatemala con segundos), así que sirve como ancla
+				// alternativa cuando el pago_id no ayuda.
+				const antesDeCrearPago = new Date();
+
 				try {
 					respuesta = await carteraBackClient.createPago({
 						credito_numero_sifco: input.numeroSifco,
@@ -4591,16 +4608,22 @@ export const cobrosRouter = {
 				// CB-128: /newPayment no siempre trae pago_id inline (el camino
 				// normal de pago no lo incluye, solo la rama de abono directo a
 				// capital) — se resuelve consultando el pago recién creado por
-				// SIFCO cuando falta. Filtro primario: registerBy === mi userId —
-				// cierra el race condition de dos asesores pagando el mismo
-				// crédito casi al mismo tiempo (antes se tomaba "el pago_id más
-				// alto de los nuevos" a ciegas, que podía ser el pago del OTRO
-				// asesor si ambos insertaron en la misma ventana). pago_id >
-				// snapshot se mantiene como filtro extra por si el mismo usuario
-				// ya tenía pagos previos con el mismo registerBy (reintentos
-				// fallidos anteriores, por ejemplo). Segundo intento con espera
-				// corta cubre lag de replicación entre el insert de /newPayment y
-				// la lectura de /paymentByCredit.
+				// SIFCO cuando falta. Filtro obligatorio: registerBy === mi
+				// userId — cierra el race condition de dos asesores pagando el
+				// mismo crédito casi al mismo tiempo (antes se tomaba "el pago_id
+				// más alto de los nuevos" a ciegas, que podía ser el pago del
+				// OTRO asesor si ambos insertaron en la misma ventana).
+				//
+				// CB-128 (fix): "es reciente" ya NO es solo pago_id > snapshot —
+				// también acepta fecha_pago >= antesDeCrearPago (con 5s de
+				// margen por reloj no sincronizado entre CRM y cartera-back).
+				// Cuando cartera-back UPDATE-ea el placeholder no_required en
+				// vez de insertar (ver comentario en antesDeCrearPago arriba), el
+				// pago_id nunca supera el snapshot — sin esta segunda condición
+				// el fallback fallaba siempre para ese camino, que es el más
+				// común. Segundo intento con espera corta cubre lag de
+				// replicación entre el insert/update de /newPayment y la lectura
+				// de /paymentByCredit.
 				const buscarPagoNuevo = async () => {
 					// Sin cache: ver comentario en el snapshot de pagoIdMaximoPrevio
 					// arriba — con cache, el retry de 1.5s podía pegar contra la
@@ -4610,10 +4633,16 @@ export const cobrosRouter = {
 						input.numeroSifco,
 						false,
 					);
-					const nuevos = pagos.filter(
-						(p) =>
-							p.pago_id > pagoIdMaximoPrevio && p.registerBy === context.userId,
-					);
+					const margenMs = 5 * 1000;
+					const nuevos = pagos.filter((p) => {
+						if (p.registerBy !== context.userId) return false;
+						if (p.pago_id > pagoIdMaximoPrevio) return true;
+						const fechaPagoMs = new Date(p.fecha_pago).getTime();
+						return (
+							Number.isFinite(fechaPagoMs) &&
+							fechaPagoMs >= antesDeCrearPago.getTime() - margenMs
+						);
+					});
 					return nuevos.sort((a, b) => b.pago_id - a.pago_id)[0];
 				};
 				pagoId = respuesta.pago_id;

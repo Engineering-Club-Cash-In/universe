@@ -202,13 +202,6 @@ export async function recuperarEventosPerdidos(): Promise<ResultadoRespaldo> {
 		.orderBy(asc(botCobrosBoletaPagos.pagoId))
 		.limit(MAXIMO_POR_CORRIDA);
 
-	// El lote vino corto: se llegó al final de la cola y la próxima corrida
-	// arranca desde el principio. Si vino lleno, se sigue desde el último.
-	cursorDeBarrido =
-		pendientes.length < MAXIMO_POR_CORRIDA
-			? 0
-			: (pendientes[pendientes.length - 1]?.pagoId ?? 0);
-
 	const resultado: ResultadoRespaldo = {
 		pagosRevisados: pendientes.length,
 		eventosRecuperados: 0,
@@ -221,13 +214,26 @@ export async function recuperarEventosPerdidos(): Promise<ResultadoRespaldo> {
 			pendientes.map((p) => p.pagoId),
 		);
 
-		// Cartera no contestó: no se hace nada. Se vuelve a intentar en una hora.
+		// Cartera no contestó. El cursor NO se mueve: si avanzara, este lote no
+		// se volvería a mirar hasta que el barrido diera la vuelta entera, y con
+		// cola grande eso son horas de avisos parados. Y NO se retorna: lo de
+		// abajo —los reintentos de aviso y la alerta de las boletas a medias—
+		// trabaja solo con datos del CRM y no tiene por qué caerse porque cartera
+		// esté caída.
 		if (estados === null) {
 			console.warn(
-				"[BotCobrosRespaldo] cartera no respondió: se reintenta en la próxima corrida",
+				"[BotCobrosRespaldo] cartera no respondió: el barrido se reintenta en la próxima corrida desde el mismo punto",
 			);
-			return { ...resultado, pagosRevisados: 0 };
+			resultado.pagosRevisados = 0;
+			return terminar(resultado);
 		}
+
+		// El barrido llegó a destino: recién ahora se mueve el cursor. Lote corto
+		// = se llegó al final de la cola y la próxima corrida arranca de cero.
+		cursorDeBarrido =
+			pendientes.length < MAXIMO_POR_CORRIDA
+				? 0
+				: (pendientes[pendientes.length - 1]?.pagoId ?? 0);
 
 		const porId = new Map(estados.map((e) => [e.pago_id, e]));
 		// Lo que ya sabíamos de cada pago. Solo se emite lo que cambió: ver
@@ -296,6 +302,20 @@ export async function recuperarEventosPerdidos(): Promise<ResultadoRespaldo> {
 		}
 	}
 
+	return terminar(resultado);
+}
+
+/**
+ * Las pasadas que solo miran datos del CRM, y el log.
+ *
+ * Están acá y no al final del cuerpo porque tienen que correr **también cuando
+ * cartera no contesta**: un aviso que falló, o una boleta cuyo reclamo venció
+ * porque el proceso se cayó, se reintentan con lo que ya está en la base. Que
+ * cartera esté caída no es motivo para dejar a esos clientes sin su mensaje.
+ */
+async function terminar(
+	resultado: ResultadoRespaldo,
+): Promise<ResultadoRespaldo> {
 	resultado.avisosReintentados = await reintentarAvisosDebidos();
 	resultado.boletasAMedias = await avisarBoletasAMedias();
 

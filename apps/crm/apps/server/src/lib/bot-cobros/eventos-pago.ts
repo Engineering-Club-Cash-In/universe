@@ -23,7 +23,7 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "../../db";
 import {
 	botCobrosBoletaPagos,
@@ -306,7 +306,33 @@ export async function procesarEventoPago(
 		return { notificado: false, motivo: "EVENTO_REPETIDO" };
 	}
 
-	// 3 · Se marca —o se desmarca— el pago.
+	// 3 · ¿Este evento sigue siendo el último que se sabe de este pago?
+	//
+	// Los webhooks no llegan en orden. Un `regresado_a_pendiente` viejo que
+	// aparece después de un `validado` más nuevo desharía el estado materializado
+	// —limpia el `resuelto_en`— y le mandaría a un cliente ya avisado un "tu pago
+	// vuelve a revisión" sobre algo que ya se resolvió. El evento queda guardado
+	// igual, que es lo que importa para la auditoría; lo que no se hace es dejar
+	// que un dato viejo pise al nuevo.
+	const [masNuevo] = await db
+		.select({ ocurridoEn: botCobrosPagoEventos.ocurridoEn })
+		.from(botCobrosPagoEventos)
+		.where(
+			and(
+				eq(botCobrosPagoEventos.pagoId, entrada.pagoId),
+				gt(botCobrosPagoEventos.ocurridoEn, new Date(entrada.ocurridoEn)),
+			),
+		)
+		.limit(1);
+
+	if (masNuevo) {
+		console.warn(
+			`[BotCobrosEventos] evento ${entrada.evento} del pago ${entrada.pagoId} llegó tarde (hay uno posterior): se registra y no se aplica.`,
+		);
+		return { notificado: false, motivo: "EVENTO_REPETIDO" };
+	}
+
+	// 4 · Se marca —o se desmarca— el pago.
 	if (RESUELVEN.has(entrada.evento)) {
 		await db
 			.update(botCobrosBoletaPagos)

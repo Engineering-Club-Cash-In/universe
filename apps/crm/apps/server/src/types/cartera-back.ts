@@ -1570,7 +1570,15 @@ export type RegistrarPagoResultado =
 			detalle: Record<string, unknown> | null;
 	  }
 	| {
-			/** Cartera dijo que no. El pago no existe y se sabe. */
+			/**
+			 * Cartera dijo que no **antes de escribir nada**: crédito inexistente,
+			 * boleta duplicada, cuota ya cubierta, schema inválido. El pago no
+			 * existe y se sabe, así que quien llamó puede dejar todo como estaba.
+			 *
+			 * Solo los 4xx entran acá. Un 5xx NO: `insertPayment` responde 500
+			 * desde un catch que envuelve todo el procesamiento, y como no es
+			 * transaccional puede haber escrito filas antes de reventar.
+			 */
 			ok: false;
 			motivo: "rechazado";
 			status: number;
@@ -1578,11 +1586,18 @@ export type RegistrarPagoResultado =
 	  }
 	| {
 			/**
-			 * Cartera no contestó. **No se sabe si el pago existe**, y esa duda es
-			 * lo que obliga a la máquina de estados de §4.1.
+			 * **No se sabe si el pago existe**, y esa duda es lo que obliga a la
+			 * máquina de estados de §4.1. Dos formas de llegar acá:
+			 *
+			 * - Cartera no contestó (timeout, red).
+			 * - Contestó 5xx, que es lo mismo con más pasos: el error pudo ocurrir
+			 *   con parte del pago ya escrita.
 			 */
 			ok: false;
 			motivo: "sin_respuesta";
+			/** Lo que se sepa, para el log. No cambia qué hace quien llama. */
+			status?: number;
+			mensaje?: string;
 	  };
 
 /** Una fila de `pagos_credito`, como la devuelven las lecturas de rastreo. */

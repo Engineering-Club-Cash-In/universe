@@ -11,6 +11,7 @@ import {
 	decidirDestino,
 	sePuedeReabrir,
 } from "../../jobs/bot-cobros-reconciliacion";
+import { esRechazoDefinitivo } from "../../services/cartera-back-client";
 import { nombreDeBanco } from "./bancos-boleta";
 import { armarObservaciones } from "./confirmar-boleta";
 
@@ -179,5 +180,31 @@ describe("el banco que se le repite al cliente", () => {
 	test("un id que no existe da null en vez de un nombre inventado", () => {
 		expect(nombreDeBanco(9999)).toBeNull();
 		expect(nombreDeBanco(null)).toBeNull();
+	});
+});
+
+describe("qué respuesta de cartera prueba que el pago no existe", () => {
+	// Las validaciones que devuelven 4xx corren antes de la primera escritura.
+	test("un 4xx es un no firme: el borrador puede volver a `leida`", () => {
+		expect(esRechazoDefinitivo(400)).toBe(true); // schema inválido
+		expect(esRechazoDefinitivo(404)).toBe(true); // crédito inexistente
+		expect(esRechazoDefinitivo(409)).toBe(true); // boleta duplicada
+	});
+
+	// El caso que costaba un pago de más: `insertPayment` no es transaccional y
+	// su catch responde 500 después de cualquier excepción, así que el 500 puede
+	// llegar con filas ya escritas. Reabrir el borrador ahí crea un segundo pago
+	// real.
+	test("un 5xx NO prueba nada: se queda en `confirmando`", () => {
+		expect(esRechazoDefinitivo(500)).toBe(false);
+		expect(esRechazoDefinitivo(502)).toBe(false); // el proxy de Coolify
+		expect(esRechazoDefinitivo(503)).toBe(false);
+		expect(esRechazoDefinitivo(504)).toBe(false); // timeout del gateway
+	});
+
+	// Un 2xx/3xx no llega a este camino, pero si llegara tampoco es un rechazo.
+	test("nada por debajo de 400 es un rechazo", () => {
+		expect(esRechazoDefinitivo(200)).toBe(false);
+		expect(esRechazoDefinitivo(302)).toBe(false);
 	});
 });

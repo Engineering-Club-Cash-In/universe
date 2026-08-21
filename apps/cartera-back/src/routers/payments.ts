@@ -66,7 +66,7 @@ export const paymentRouter = new Elysia()
 
     // Opcional: con el crédito se puede además responder si hay un pago suyo
     // ejecutándose ahora mismo, que es lo único que prueba que un request que
-    // se cortó ya no puede escribir. Ver `operacionDePagoEnCurso`.
+    // se cortó ya no puede escribir. Ver `hayOtroBackendEnElLock`.
     const creditoCrudo = Number(query?.credito_id);
     const creditoId =
       Number.isInteger(creditoCrudo) && creditoCrudo > 0

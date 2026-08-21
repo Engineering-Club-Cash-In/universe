@@ -1,5 +1,5 @@
 /**
- * Dos lecturas para reconstruir qué pasó con un pago. Ninguna escribe nada.
+ * Lecturas para reconstruir qué pasó con un pago. Ninguna escribe nada.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * PARA QUÉ: `insertPayment` NO ES TRANSACCIONAL.
@@ -10,7 +10,7 @@
  * SEGUNDO pago real, y el chequeo de duplicados de cartera no lo frena: solo
  * corre cuando vienen `numeroAutorizacion` y `banco_id` a la vez.
  *
- * Con estas dos consultas la pregunta se contesta en vez de adivinarse.
+ * Con estas consultas la pregunta se contesta en vez de adivinarse.
  * ─────────────────────────────────────────────────────────────────────────────
  *
  * Contrato: docs/features/bot-whatsapp-cobros/04-validacion-de-boleta.md (§4.1)
@@ -24,7 +24,11 @@ import {
   pagos_credito,
   pagos_reversiones,
 } from "../database/db/schema";
-import { PAYMENT_ADVISORY_LOCK_NAMESPACE } from "../utils/paymentAdvisoryLock";
+import type { PaymentAdvisoryLockConnection } from "../utils/paymentAdvisoryLock";
+import {
+  PAYMENT_ADVISORY_LOCK_NAMESPACE,
+  tryWithPaymentAdvisoryLock,
+} from "../utils/paymentAdvisoryLock";
 
 export type PagoDeBoleta = {
   pago_id: number;
@@ -65,13 +69,65 @@ export type ResultadoPagosPorBoleta = {
    *
    * Sin este dato, "no encontré nada" tampoco alcanza: que el cliente HTTP se
    * haya cansado de esperar no cancela nada del lado del servidor. Ver
-   * `operacionDePagoEnCurso`.
+   * `hayOtroBackendEnElLock`.
    */
   operacion_en_curso: boolean | null;
 };
 
 /**
- * ¿Hay un pago de ese crédito ejecutándose en este preciso momento?
+ * Los pagos vivos que cuelgan de esa URL.
+ *
+ * Se busca por **sufijo** además de por igualdad: quien registró el pago pudo
+ * haber mandado la key pelada (`boleta-bot-123.jpg`) y cartera guarda la URL
+ * completa, o al revés. Comparar solo por `=` haría que una boleta que SÍ existe
+ * se reporte como inexistente — y eso, del lado del bot, se traduce en dejar
+ * que el cliente confirme de nuevo un pago que ya está registrado.
+ */
+function leerPagosDeLaBoleta(clave: string) {
+  return db
+    .select({
+      pago_id: pagos_credito.pago_id,
+      credito_id: pagos_credito.credito_id,
+      numero_cuota: cuotas_credito.numero_cuota,
+      monto_aplicado: pagos_credito.monto_aplicado,
+      monto_boleta: pagos_credito.monto_boleta,
+      validation_status: pagos_credito.validationStatus,
+      pagado: pagos_credito.pagado,
+      payment_false: pagos_credito.paymentFalse,
+    })
+    .from(boletas)
+    .innerJoin(pagos_credito, eq(pagos_credito.pago_id, boletas.pago_id))
+    .leftJoin(
+      cuotas_credito,
+      eq(cuotas_credito.cuota_id, pagos_credito.cuota_id),
+    )
+    .where(
+      sql`${boletas.url_boleta} = ${clave} OR ${boletas.url_boleta} LIKE ${`%${clave}`}`,
+    );
+}
+
+function leerReversionesDeLaBoleta(clave: string) {
+  return db
+    .select({
+      reversion_id: pagos_reversiones.reversion_id,
+      pago_id: pagos_reversiones.pago_id,
+      estado: pagos_reversiones.estado,
+      usuario_email: pagos_reversiones.usuario_email,
+      motivo: pagos_reversiones.motivo,
+      revertido_en: pagos_reversiones.revertido_en,
+    })
+    .from(pagos_reversiones)
+    .where(
+      sql`EXISTS (
+        SELECT 1 FROM unnest(${pagos_reversiones.urls_boletas}) u
+        WHERE u = ${clave} OR u LIKE ${`%${clave}`}
+      )`,
+    )
+    .orderBy(desc(pagos_reversiones.reversion_id));
+}
+
+/**
+ * ¿Hay OTRO backend en el lock de este crédito, además de nosotros?
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * QUE EL CLIENTE HTTP SE HAYA CANSADO DE ESPERAR NO CANCELA NADA ACÁ.
@@ -84,30 +140,49 @@ export type ResultadoPagosPorBoleta = {
  * Entonces "busqué la boleta y no encontré filas" **no prueba** que el pago no
  * se vaya a registrar: puede que todavía no le haya tocado. Quien reconcilie a
  * ciegas y habilite un segundo intento termina con dos pagos reales.
- *
- * El lock sí es una prueba positiva: si no hay ninguna fila en `pg_locks` para
- * ese crédito —ni tomada ni esperando—, no hay ningún `insertPayment` en vuelo.
  * ─────────────────────────────────────────────────────────────────────────────
  *
  * `pg_advisory_lock(a, b)` con dos enteros se ve en `pg_locks` como
  * `classid = a`, `objid = b`, `objsubid = 2`. Se miran también los NO
- * concedidos: un backend esperando el lock es exactamente una operación en
- * vuelo.
+ * concedidos: un backend encolado esperando el lock es exactamente una
+ * operación en vuelo — todavía no escribió nada, pero lo va a hacer en cuanto
+ * lo soltemos.
+ *
+ * Se pregunta desde la conexión que sostiene el lock, así que hay que descontar
+ * el propio `pid`: si no, la respuesta sería siempre `true`.
  */
-export async function operacionDePagoEnCurso(
+async function hayOtroBackendEnElLock(
   creditoId: number,
+  lockConn: PaymentAdvisoryLockConnection,
 ): Promise<boolean> {
-  const filas = await db.execute<{ en_curso: boolean }>(sql`
-    SELECT EXISTS (
-      SELECT 1 FROM pg_locks
-      WHERE locktype = 'advisory'
-        AND classid = ${PAYMENT_ADVISORY_LOCK_NAMESPACE}
-        AND objid = ${creditoId}
-        AND objsubid = 2
-    ) AS en_curso
-  `);
+  const res = (await lockConn.query(
+    `SELECT EXISTS (
+       SELECT 1 FROM pg_locks
+       WHERE locktype = 'advisory'
+         AND classid = $1
+         AND objid = $2
+         AND objsubid = 2
+         AND pid <> pg_backend_pid()
+     ) AS en_curso`,
+    [PAYMENT_ADVISORY_LOCK_NAMESPACE, creditoId],
+  )) as { rows?: { en_curso?: boolean }[] };
 
-  return Boolean((filas.rows as { en_curso: boolean }[])[0]?.en_curso);
+  return Boolean(res?.rows?.[0]?.en_curso);
+}
+
+function armarResultado(
+  pagos: PagoDeBoleta[],
+  reversiones: Awaited<ReturnType<typeof leerReversionesDeLaBoleta>>,
+  enCurso: boolean | null,
+): ResultadoPagosPorBoleta {
+  return {
+    pagos,
+    reversiones: reversiones.map((r) => ({
+      ...r,
+      revertido_en: r.revertido_en ? new Date(r.revertido_en).toISOString() : null,
+    })),
+    operacion_en_curso: enCurso,
+  };
 }
 
 /**
@@ -115,12 +190,6 @@ export async function operacionDePagoEnCurso(
  *
  * La URL es la key de R2 y es única, así que sirve de puente cuando el `pago_id`
  * se perdió con la respuesta.
- *
- * Se busca por **sufijo** además de por igualdad: quien registró el pago pudo
- * haber mandado la key pelada (`boleta-bot-123.jpg`) y cartera guarda la URL
- * completa, o al revés. Comparar solo por `=` haría que una boleta que SÍ existe
- * se reporte como inexistente — y eso, del lado del bot, se traduce en dejar
- * que el cliente confirme de nuevo un pago que ya está registrado.
  */
 export async function buscarPagosPorBoleta(
   url: string,
@@ -128,59 +197,61 @@ export async function buscarPagosPorBoleta(
 ): Promise<ResultadoPagosPorBoleta> {
   const clave = url.trim();
 
-  const [filas, reversiones, enCurso] = await Promise.all([
-    db
-      .select({
-        pago_id: pagos_credito.pago_id,
-        credito_id: pagos_credito.credito_id,
-        numero_cuota: cuotas_credito.numero_cuota,
-        monto_aplicado: pagos_credito.monto_aplicado,
-        monto_boleta: pagos_credito.monto_boleta,
-        validation_status: pagos_credito.validationStatus,
-        pagado: pagos_credito.pagado,
-        payment_false: pagos_credito.paymentFalse,
-      })
-      .from(boletas)
-      .innerJoin(pagos_credito, eq(pagos_credito.pago_id, boletas.pago_id))
-      .leftJoin(
-        cuotas_credito,
-        eq(cuotas_credito.cuota_id, pagos_credito.cuota_id),
-      )
-      .where(
-        sql`${boletas.url_boleta} = ${clave} OR ${boletas.url_boleta} LIKE ${`%${clave}`}`,
-      ),
+  // Sin crédito no hay lock con qué sincronizar. Se contesta lo que se pueda y
+  // `operacion_en_curso: null` avisa que la prueba positiva no está: quien
+  // reconcilie con esta respuesta no puede reabrir nada.
+  if (creditoId === undefined) {
+    const [pagos, reversiones] = await Promise.all([
+      leerPagosDeLaBoleta(clave),
+      leerReversionesDeLaBoleta(clave),
+    ]);
+    return armarResultado(pagos, reversiones, null);
+  }
 
-    db
-      .select({
-        reversion_id: pagos_reversiones.reversion_id,
-        pago_id: pagos_reversiones.pago_id,
-        estado: pagos_reversiones.estado,
-        usuario_email: pagos_reversiones.usuario_email,
-        motivo: pagos_reversiones.motivo,
-        revertido_en: pagos_reversiones.revertido_en,
-      })
-      .from(pagos_reversiones)
-      .where(
-        sql`EXISTS (
-          SELECT 1 FROM unnest(${pagos_reversiones.urls_boletas}) u
-          WHERE u = ${clave} OR u LIKE ${`%${clave}`}
-        )`,
-      )
-      .orderBy(desc(pagos_reversiones.reversion_id)),
+  // ───────────────────────────────────────────────────────────────────────
+  // Las dos observaciones van BAJO EL LOCK, y no es una precaución de más.
+  //
+  // Sueltas, se pueden intercalar así:
+  //
+  //   1. La consulta de la boleta toma su snapshot        → no hay filas
+  //   2. El `insertPayment` original escribe y comitea
+  //   3. Suelta el lock
+  //   4. `operacionDePagoEnCurso` mira `pg_locks`         → no hay nadie
+  //
+  // Las dos respuestas son ciertas por separado, y juntas dicen "no se
+  // registró nada y no hay nada corriendo" sobre un pago que SÍ existe. El
+  // bot reabre el borrador y el cliente paga dos veces.
+  //
+  // Con el lock en la mano eso no puede pasar: nadie termina en el medio,
+  // porque para llegar a escribir tienen que pasar por acá primero.
+  // ───────────────────────────────────────────────────────────────────────
+  const observado = await tryWithPaymentAdvisoryLock(
+    creditoId,
+    async (lockConn) => {
+      const [pagos, reversiones] = await Promise.all([
+        leerPagosDeLaBoleta(clave),
+        leerReversionesDeLaBoleta(clave),
+      ]);
 
-    creditoId === undefined
-      ? Promise.resolve(null)
-      : operacionDePagoEnCurso(creditoId),
+      return armarResultado(
+        pagos,
+        reversiones,
+        await hayOtroBackendEnElLock(creditoId, lockConn),
+      );
+    },
+  );
+
+  if (observado.obtenido) return observado.valor;
+
+  // No se pudo tomar: hay un `insertPayment` adentro AHORA MISMO. No hace falta
+  // sincronizar nada más, la respuesta ya es la que frena la reconciliación.
+  // Las filas van igual, para que el log del bot muestre lo que había.
+  const [pagos, reversiones] = await Promise.all([
+    leerPagosDeLaBoleta(clave),
+    leerReversionesDeLaBoleta(clave),
   ]);
 
-  return {
-    pagos: filas,
-    reversiones: reversiones.map((r) => ({
-      ...r,
-      revertido_en: r.revertido_en ? new Date(r.revertido_en).toISOString() : null,
-    })),
-    operacion_en_curso: enCurso,
-  };
+  return armarResultado(pagos, reversiones, true);
 }
 
 /**

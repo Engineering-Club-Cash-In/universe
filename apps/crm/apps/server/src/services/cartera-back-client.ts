@@ -184,6 +184,23 @@ const REPORTE_NO_LIQUIDADOS_TIMEOUT_MS = Number.parseInt(
 // `handleError()` lo respeta explícitamente (no lo reescribe) para que el
 // status sobreviva hasta el caller final.
 /**
+ * ¿Ese estado HTTP prueba que el pago NO llegó a escribirse?
+ *
+ * Solo los 4xx. Todas las validaciones de `insertPayment` que devuelven
+ * 400/404/409 —schema inválido, crédito inexistente, crédito bloqueado, boleta
+ * duplicada, cuota ya cubierta— corren ANTES de la primera escritura, así que
+ * un 4xx es un "no" firme y quien llamó puede dejar todo como estaba.
+ *
+ * Un 5xx no prueba nada: `insertPayment` responde 500 desde un catch que
+ * envuelve todo el procesamiento y no es transaccional, así que el error pudo
+ * ocurrir con parte del pago YA escrita. Tratarlo como rechazo es habilitar un
+ * segundo pago real.
+ */
+export function esRechazoDefinitivo(status: number): boolean {
+	return status >= 400 && status < 500;
+}
+
+/**
  * ¿Ese 404 es "no existe el dato" o "no existe la ruta"?
  *
  * Los endpoints de cartera que tienen un 404 **de negocio** mandan un `codigo`
@@ -1188,19 +1205,43 @@ export class CarteraBackClient {
 				detalle: respuesta?.detalle ?? null,
 			};
 		} catch (error) {
-			// Cartera contestó que no: el pago NO se registró y se sabe. Es el
-			// único caso en que quien llamó puede dejar todo como estaba.
 			if (error instanceof CarteraBackHttpError) {
+				const mensaje = error.payload.message ?? error.message;
+
+				// Un 4xx sí es un "no" definitivo: TODAS las validaciones de
+				// `insertPayment` que devuelven 400/404/409 —schema, crédito
+				// inexistente, boleta duplicada, cuota ya cubierta— corren antes de
+				// la primera escritura. El pago no existe y quien llamó puede dejar
+				// todo como estaba.
+				if (esRechazoDefinitivo(error.status)) {
+					return {
+						ok: false,
+						motivo: "rechazado",
+						status: error.status,
+						mensaje,
+					};
+				}
+
+				// Un 5xx NO. `insertPayment` termina en un catch que responde 500
+				// ante CUALQUIER excepción del procesamiento, y como no es
+				// transaccional puede haber escrito una parte del pago antes de
+				// reventar. Tratarlo como rechazo devolvía el borrador a `leida` y
+				// habilitaba una segunda confirmación: un pago real de más, que es
+				// justo lo que este archivo dice en mayúsculas que no puede pasar.
+				console.error(
+					`[CarteraBackClient] registrarPago devolvió ${error.status}; el pago puede haber quedado escrito a medias:`,
+					mensaje,
+				);
 				return {
 					ok: false,
-					motivo: "rechazado",
+					motivo: "sin_respuesta",
 					status: error.status,
-					mensaje: error.payload.message ?? error.message,
+					mensaje,
 				};
 			}
 
-			// Cartera no contestó. Acá NO se sabe si el pago existe, y esa
-			// diferencia es todo el diseño de §4.1: el borrador se queda en
+			// Cartera no contestó. Acá tampoco se sabe si el pago existe, y esa
+			// duda es todo el diseño de §4.1: el borrador se queda en
 			// `confirmando` y lo resuelve la reconciliación.
 			console.error("[CarteraBackClient] registrarPago sin respuesta:", error);
 			return { ok: false, motivo: "sin_respuesta" };

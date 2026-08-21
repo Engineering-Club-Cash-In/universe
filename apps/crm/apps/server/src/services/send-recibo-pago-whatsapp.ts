@@ -17,7 +17,7 @@
  * tipado, nunca como una excepción.
  */
 
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db";
 import { casosCobros, contratosFinanciamiento } from "../db/schema/cobros";
 import { clients, leads, opportunities } from "../db/schema/crm";
@@ -98,7 +98,14 @@ async function cargarCasoPorSifco(numeroSifco: string): Promise<DatosCaso | null
 		)
 		.leftJoin(vehicles, eq(contratosFinanciamiento.vehicleId, vehicles.id))
 		.where(eq(casosCobros.numeroCreditoSifco, numeroSifco))
-		.orderBy(desc(casosCobros.activo), desc(casosCobros.updatedAt))
+		// `activo` es nullable — con DESC simple Postgres pone NULL antes que
+		// true (NULLS FIRST es el default), así que un caso con activo=NULL le
+		// ganaría a uno activo=true. coalesce(activo,false) trata NULL como
+		// inactivo, igual que el criterio de `caso-vigente.ts`.
+		.orderBy(
+			desc(sql`coalesce(${casosCobros.activo}, false)`),
+			desc(casosCobros.updatedAt),
+		)
 		.limit(1);
 
 	// `sync-casos-cobros.ts` guarda el placeholder "Sin teléfono" cuando no

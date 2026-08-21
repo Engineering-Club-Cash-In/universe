@@ -229,6 +229,7 @@ Las corre el usuario, sobre **green-tree**:
 | `0033_bot_cobros_otp_codeudor.sql` | ✅ aplicada |
 | `0034_bot_cobros_otp_sin_dpi.sql` | `dpi` nullable — sin esto, el 18% de clientes sin DPI no puede recibir código |
 | `0035_bot_cobros_otp_origen.sql` | columna `origen` — **sin esto los servicios no validan ningún código** |
+| `0037_bot_cobros_boletas.sql` | tablas `bot_cobros_boletas` y compañía — **sin esto `/boleta/leer` revienta con `relation does not exist` en la primera consulta** (paso 4, capa A) |
 
 Y los datos de prueba: `apps/crm/apps/server/src/db/seeds/bot-cobros-pruebas.sql`
 (ver [`pruebas-equipo-it.md`](./pruebas-equipo-it.md)).

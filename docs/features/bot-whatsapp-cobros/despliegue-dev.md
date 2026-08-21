@@ -231,6 +231,13 @@ Las corre el usuario, sobre **green-tree**:
 | `0035_bot_cobros_otp_origen.sql` | columna `origen` — **sin esto los servicios no validan ningún código** |
 | `0037_bot_cobros_boletas.sql` | tablas `bot_cobros_boletas` y compañía — **sin esto `/boleta/leer` revienta con `relation does not exist` en la primera consulta** (paso 4, capa A) |
 
+Y en **cartera** (sandbox `cartera_cobros2`), de `apps/cartera-back/drizzle/cobros-02/`:
+
+| Migración | Qué hace |
+| --- | --- |
+| `0008_pagos_reversiones.sql` | acta de las reversiones (D-36) — sin esto la reconciliación no distingue "no se registró" de "se registró y lo rechazaron" |
+| `0009_pagos_intentos_boleta.sql` | acta del intento de registro — sin esto un 500 antes de la primera fila del pago se lee como "acá no pasó nada" y se reabre |
+
 Y los datos de prueba: `apps/crm/apps/server/src/db/seeds/bot-cobros-pruebas.sql`
 (ver [`pruebas-equipo-it.md`](./pruebas-equipo-it.md)).
 

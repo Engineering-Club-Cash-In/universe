@@ -81,6 +81,8 @@ O dejar que el pipeline (§3) construya la primera y crear la app en Coolify des
    | `TEST_MESSAGE` | `false` | Para que cada quien reciba su propio código |
    | `BOT_COBROS_OTP_SIMULADO` | `true` | **Necesaria hoy.** El SMS no sale: la IP de esta instancia no está en la whitelist del proveedor. Con esto el código es siempre `4321`. Ver abajo |
    | `BOT_COBROS_DOCS` | `true` | Publica el Swagger en `/api/bot/cobros/docs`. **Solo acá**: en el CRM de producción corre el mismo binario y no hay razón para publicarlo |
+   | `BOT_COBROS_DOMINIOS_IMAGEN` | el dominio del CDN de SimpleTech | **Obligatoria para el pago con boleta.** Ver abajo |
+   | `GOOGLE_GENERATIVE_AI_API_KEY` | la del CRM de dev | Gemini es quien lee la boleta |
    | `SMS_TOKEN`, `SMS_API_KEY` | las de siempre | Para cuando se apague la de arriba |
    | `CORS_ORIGIN` | el dominio de dev | |
 
@@ -91,6 +93,26 @@ O dejar que el pipeline (§3) construya la primera y crear la app en Coolify des
 8. **Deploy.**
 9. Copiar el **webhook de redeploy** (Coolify → la app → Webhooks) y guardarlo en GitHub como
    secret `COOLIFY_WEBHOOK_CRM_API_COBROS`. El secret `COOLIFY_TOKEN` ya existe en el repo.
+
+### Sin `BOT_COBROS_DOMINIOS_IMAGEN` el bot no lee ni una boleta
+
+La descarga de la imagen **falla cerrada** ([D-29](./DECISIONES.md#d-29--la-imagen-se-descarga-con-allowlist)):
+si la variable viene vacía, la allowlist queda vacía y `POST /boleta/leer` responde
+`URL_NO_PERMITIDA` a **todas** las URLs, incluidas las buenas. Es a propósito —una allowlist
+que se ignora cuando nadie la configuró no es una allowlist—, pero significa que desplegar
+sin esta variable deja el paso 4 muerto y con un error que suena a culpa de SimpleTech.
+
+Va el **host del CDN desde donde SimpleTech sirve las fotos**, sin `https://` ni ruta, varios
+separados por coma. Se lo pedimos a ellos: es el mismo dominio de la `imagenUrl` que mandan en
+el request. Los subdominios se aceptan solos (poner `simpletech.gt` cubre `cdn.simpletech.gt`).
+
+```
+BOT_COBROS_DOMINIOS_IMAGEN=cdn.simpletech.gt
+```
+
+Para verificar que quedó bien, mandar un `/boleta/leer` con una `imagenUrl` real: si contesta
+`URL_NO_PERMITIDA`, el dominio no está en la lista. En los logs del arranque no se ve nada,
+porque la variable se lee en cada descarga y no al levantar.
 
 ### 🚨 Las tareas programadas están apagadas EN EL CÓDIGO
 
@@ -207,6 +229,7 @@ Las corre el usuario, sobre **green-tree**:
 | `0033_bot_cobros_otp_codeudor.sql` | ✅ aplicada |
 | `0034_bot_cobros_otp_sin_dpi.sql` | `dpi` nullable — sin esto, el 18% de clientes sin DPI no puede recibir código |
 | `0035_bot_cobros_otp_origen.sql` | columna `origen` — **sin esto los servicios no validan ningún código** |
+| `0037_bot_cobros_boletas.sql` | tablas `bot_cobros_boletas` y compañía — **sin esto `/boleta/leer` revienta con `relation does not exist` en la primera consulta** (paso 4, capa A) |
 
 Y los datos de prueba: `apps/crm/apps/server/src/db/seeds/bot-cobros-pruebas.sql`
 (ver [`pruebas-equipo-it.md`](./pruebas-equipo-it.md)).

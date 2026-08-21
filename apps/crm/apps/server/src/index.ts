@@ -15,6 +15,7 @@ import {
 	buscarClienteBotCobros,
 	estadoDeCuentaBotCobros,
 	infoCreditoBotCobros,
+	leerBoletaBotCobros,
 	listarCreditosBotCobros,
 } from "./controllers/bot-cobros";
 import { infornetController } from "./controllers/buro";
@@ -38,6 +39,7 @@ import {
 } from "./controllers/vehicles";
 import type { db } from "./db";
 import { ejecutarAgendaCobrosDiariaConReintentos } from "./jobs/agenda-cobros-snapshots";
+import { purgarBoletasSinConfirmar } from "./jobs/bot-cobros-purga";
 import { generarCierreDiario } from "./jobs/cierre-diario-asesores";
 import {
 	checkSeguimientosVencidos,
@@ -1112,6 +1114,14 @@ app.post(
 	estadoDeCuentaBotCobros,
 );
 
+// Paso 4 · lee la boleta que sube el cliente. NO registra el pago: devuelve lo
+// que se entendió para que confirme (el registro es el servicio 6, PR B).
+app.post(
+	"/api/bot/cobros/boleta/leer",
+	autenticarBotCobros,
+	leerBoletaBotCobros,
+);
+
 // Documentación de esos dos endpoints, para SimpleTech. Va SIN API key —no
 // expone datos, y pedirla impediría que Swagger UI cargue el documento— pero
 // solo responde con BOT_COBROS_DOCS=true, que se prende únicamente en la
@@ -1543,6 +1553,35 @@ if (!TAREAS_PROGRAMADAS_ACTIVAS) {
 		"[Jobs] ⚠️  Tareas programadas DESACTIVADAS en el código (rama COBROS-02): esta instancia levanta solo la API. Si ves esto en el CRM principal, el FIXME de index.ts llegó a producción.",
 	);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// La purga de boletas del bot va FUERA del bloque de arriba, a propósito.
+//
+// No es un job de negocio: es una obligación de retención. Esas filas guardan
+// la URL de origen del cliente, a qué lead pertenece, el hash de su imagen y la
+// extracción cruda del modelo, y el contrato les da 7 días. Dejarla adentro del
+// `if` la volvía decorativa —la bandera está en `false` en esta rama— y la PII
+// se quedaba para siempre.
+//
+// Es seguro que corra siempre: solo borra filas de este feature que nunca
+// llegaron a ser un pago (ver `bot-cobros-purga.ts`).
+// ═══════════════════════════════════════════════════════════════════════════
+async function correrPurgaDeBoletas(): Promise<void> {
+	try {
+		await purgarBoletasSinConfirmar();
+	} catch (error) {
+		console.error("Error en la purga de boletas del bot:", error);
+	}
+}
+
+// Una vez al arrancar, y de ahí cada 24 h.
+//
+// Sin la del arranque, la retención dependía de que el proceso viviera 24 horas
+// seguidas: en dev se redespliega varias veces al día, así que el temporizador
+// se reiniciaba antes de disparar y los borradores con PII no se borraban NUNCA.
+// Un intervalo no es una garantía de retención si el proceso no llega a cumplirlo.
+void correrPurgaDeBoletas();
+setInterval(correrPurgaDeBoletas, 24 * 60 * 60 * 1000);
 
 if (TAREAS_PROGRAMADAS_ACTIVAS) {
 	// checkPromesasPago traga sus propios errores de persistencia por SIFCO

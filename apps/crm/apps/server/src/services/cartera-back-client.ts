@@ -773,6 +773,13 @@ export class CarteraBackClient {
 		useCache = false,
 		timeoutMs?: number,
 		retryOnFailure?: boolean,
+		/**
+		 * `false` = esta llamada ni abre ni consulta el circuit breaker
+		 * compartido. SOLO para lecturas opcionales cuyo fallo ya se traga el
+		 * caller: cinco fallos de un adorno no pueden dejar 60 segundos sin
+		 * cartera a las llamadas que sí importan.
+		 */
+		usarCircuitBreaker = true,
 	): Promise<T> {
 		const url = `${this.config.baseUrl}${endpoint}`;
 		const cacheKey = `${options.method || "GET"}:${url}:${JSON.stringify(options.body || {})}`;
@@ -815,7 +822,10 @@ export class CarteraBackClient {
 
 		for (let attempt = 0; attempt <= this.config.retryAttempts; attempt++) {
 			try {
-				const response = await this.circuitBreaker.execute(async () => {
+				const ejecutar = usarCircuitBreaker
+					? <R>(fn: () => Promise<R>) => this.circuitBreaker.execute(fn)
+					: <R>(fn: () => Promise<R>) => fn();
+				const response = await ejecutar(async () => {
 					const requestOptions = await buildRequestOptions();
 					const res = await this.config.fetchTransport(url, requestOptions);
 
@@ -1087,6 +1097,56 @@ export class CarteraBackClient {
 				return null;
 			}
 			throw error;
+		}
+	}
+
+	/**
+	 * Cuánto le falta a una cuota, contando los abonos parciales que ya tiene.
+	 *
+	 * `/credito/resumen` dice cuál es la cuota que toca y cuánto vale, pero no
+	 * si ya le abonaron la mitad. Sin esto, el bot le diría a un cliente que su
+	 * boleta de Q3,000 no cubre una cuota de Q6,000 que en realidad ya está
+	 * pagada a medias.
+	 *
+	 * Devuelve `null` si cartera no pudo responder: es un dato para adornar el
+	 * mensaje, no para bloquear el flujo.
+	 */
+	async getSaldoCuota(
+		numeroSifco: string,
+		numeroCuota: number,
+	): Promise<string | null> {
+		try {
+			const respuesta = await this.request<{
+				success: boolean;
+				saldo_pendiente?: string | number;
+			}>(
+				`/abonos-cuota/${encodeURIComponent(numeroSifco)}/${numeroCuota}`,
+				{ method: "GET" },
+				false,
+				// Timeout corto y SIN reintentos, y no es una optimización: esta
+				// consulta corre con la boleta ya reservada y la imagen ya subida.
+				// Con la configuración por defecto —cuatro intentos de 30 s más
+				// backoff— una caída de cartera estiraría `/boleta/leer` más allá de
+				// los 2 minutos en que una reserva se da por muerta, y un reintento
+				// del integrador barrería la fila viva de esta misma petición.
+				//
+				// Es un dato para adornar el mensaje: si no está, se sigue sin él.
+				5_000,
+				false,
+				// Fuera del circuit breaker compartido: cinco boletas seguidas con
+				// este adorno fallando abrían el breaker 60 s y tumbaban también
+				// getResumenCredito y todo lo demás que sí bloquea el flujo.
+				false,
+			);
+
+			if (!respuesta?.success || respuesta.saldo_pendiente === undefined) {
+				return null;
+			}
+
+			return String(respuesta.saldo_pendiente);
+		} catch (error) {
+			console.error("[CarteraBackClient] getSaldoCuota:", error);
+			return null;
 		}
 	}
 
@@ -2432,6 +2492,33 @@ export class CarteraBackClient {
 		}
 
 		return response.json();
+	}
+
+	/**
+	 * Borra de R2 el archivo de una boleta del bot que nunca llegó a ser pago.
+	 *
+	 * Cartera se niega (409) si la llave respalda un pago registrado, así que
+	 * llamarlo de más es seguro. Devuelve `true` solo cuando el archivo ya no
+	 * existe del otro lado (borrado ahora, o 409 = no era nuestro para borrar:
+	 * en ese caso la fila del CRM tampoco debe purgarse — devuelve `false`).
+	 */
+	async deleteArchivoBoletaHuerfano(r2Key: string): Promise<boolean> {
+		try {
+			await this.request(
+				`/upload/boleta-huerfana?key=${encodeURIComponent(r2Key)}`,
+				{ method: "DELETE" },
+				false,
+				10_000,
+				false,
+			);
+			return true;
+		} catch (error) {
+			console.error(
+				`[CarteraBackClient] deleteArchivoBoletaHuerfano ${r2Key}:`,
+				error,
+			);
+			return false;
+		}
 	}
 
 	async createBoleta(

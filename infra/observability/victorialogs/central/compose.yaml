@@ -94,10 +94,10 @@ volumes:
 
 secrets:
   query_username:
-    environment: VMAUTH_QUERY_USERNAME
+    file: ${VICTORIALOGS_SECRETS_DIR:-./secrets}/query_username
   query_password:
-    environment: VMAUTH_QUERY_PASSWORD
+    file: ${VICTORIALOGS_SECRETS_DIR:-./secrets}/query_password
   ingest_username:
-    environment: VMAUTH_INGEST_USERNAME
+    file: ${VICTORIALOGS_SECRETS_DIR:-./secrets}/ingest_username
   ingest_password:
-    environment: VMAUTH_INGEST_PASSWORD
+    file: ${VICTORIALOGS_SECRETS_DIR:-./secrets}/ingest_password

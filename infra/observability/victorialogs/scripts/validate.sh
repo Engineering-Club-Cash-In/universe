@@ -18,14 +18,7 @@ openssl rand -hex 24 > "$TMP_DIR/central-secrets/query_password"
 printf '%s' 'ingest-validation' > "$TMP_DIR/central-secrets/ingest_username"
 openssl rand -hex 24 > "$TMP_DIR/central-secrets/ingest_password"
 
-export VMAUTH_QUERY_USERNAME
-VMAUTH_QUERY_USERNAME=$(<"$TMP_DIR/central-secrets/query_username")
-export VMAUTH_QUERY_PASSWORD
-VMAUTH_QUERY_PASSWORD=$(<"$TMP_DIR/central-secrets/query_password")
-export VMAUTH_INGEST_USERNAME
-VMAUTH_INGEST_USERNAME=$(<"$TMP_DIR/central-secrets/ingest_username")
-export VMAUTH_INGEST_PASSWORD
-VMAUTH_INGEST_PASSWORD=$(<"$TMP_DIR/central-secrets/ingest_password")
+export VICTORIALOGS_SECRETS_DIR="$TMP_DIR/central-secrets"
 
 python "$BASE/scripts/render-config.py" central \
   --secrets-dir "$TMP_DIR/central-secrets" \
@@ -37,6 +30,14 @@ podman compose -f "$TMP_DIR/central.compose.yaml" config >/dev/null
 
 RENDER_IMAGE=localhost/cci/victorialogs-config-renderer:validation
 podman build -f "$BASE/config-renderer.Dockerfile" -t "$RENDER_IMAGE" "$BASE" >/dev/null
+
+BUILD_CONTEXT_CHECK="$TMP_DIR/build-context-check"
+python -c 'from pathlib import Path; import shutil,sys; source=Path(sys.argv[1]); target=Path(sys.argv[2]); shutil.copytree(source, target); canaries=(target/"central/secrets/build-context-canary", target/"central/runtime/build-context-canary", target/".env"); [path.parent.mkdir(parents=True, exist_ok=True) for path in canaries]; [path.write_text("BUILD_CONTEXT_SECRET_CANARY") for path in canaries]; (target/"Dockerfile.context-check").write_text("ARG RENDER_IMAGE\nFROM ${RENDER_IMAGE}\nCOPY . /context\nRUN test ! -e /context/central/secrets/build-context-canary \\\n && test ! -e /context/central/runtime/build-context-canary \\\n && test ! -e /context/.env\n")' "$BASE" "$BUILD_CONTEXT_CHECK"
+podman build \
+  --build-arg "RENDER_IMAGE=$RENDER_IMAGE" \
+  -f "$BUILD_CONTEXT_CHECK/Dockerfile.context-check" \
+  "$BUILD_CONTEXT_CHECK" >/dev/null
+
 podman run --rm --read-only --cap-drop=all --security-opt=no-new-privileges \
   -v "$TMP_DIR/central-secrets:/run/secrets:ro,Z" \
   -v "$TMP_DIR/container-central:/runtime:Z" \

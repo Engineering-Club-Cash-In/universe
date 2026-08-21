@@ -62,6 +62,7 @@ import { Route as CrmReportesMetaColocacionRouteImport } from './routes/crm/repo
 import { Route as CrmReportesEfectividadPorEtapaRouteImport } from './routes/crm/reportes/efectividad-por-etapa'
 import { Route as CrmAnalysisOpportunityIdRouteImport } from './routes/crm/analysis/$opportunityId'
 import { Route as CrmAdminMiniagentRouteImport } from './routes/crm/admin/miniagent'
+import { Route as CobrosRegistrarPagoIdRouteImport } from './routes/cobros/registrar-pago.$id'
 
 const NotificationsRoute = NotificationsRouteImport.update({
   id: '/notifications',
@@ -336,6 +337,11 @@ const CrmAdminMiniagentRoute = CrmAdminMiniagentRouteImport.update({
   path: '/crm/admin/miniagent',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CobrosRegistrarPagoIdRoute = CobrosRegistrarPagoIdRouteImport.update({
+  id: '/cobros/registrar-pago/$id',
+  path: '/cobros/registrar-pago/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -379,6 +385,7 @@ export interface FileRoutesByFullPath {
   '/inversiones/': typeof InversionesIndexRoute
   '/juridico/': typeof JuridicoIndexRoute
   '/vehicles/': typeof VehiclesIndexRoute
+  '/cobros/registrar-pago/$id': typeof CobrosRegistrarPagoIdRoute
   '/crm/admin/miniagent': typeof CrmAdminMiniagentRoute
   '/crm/analysis/$opportunityId': typeof CrmAnalysisOpportunityIdRoute
   '/crm/reportes/efectividad-por-etapa': typeof CrmReportesEfectividadPorEtapaRoute
@@ -434,6 +441,7 @@ export interface FileRoutesByTo {
   '/inversiones': typeof InversionesIndexRoute
   '/juridico': typeof JuridicoIndexRoute
   '/vehicles': typeof VehiclesIndexRoute
+  '/cobros/registrar-pago/$id': typeof CobrosRegistrarPagoIdRoute
   '/crm/admin/miniagent': typeof CrmAdminMiniagentRoute
   '/crm/analysis/$opportunityId': typeof CrmAnalysisOpportunityIdRoute
   '/crm/reportes/efectividad-por-etapa': typeof CrmReportesEfectividadPorEtapaRoute
@@ -490,6 +498,7 @@ export interface FileRoutesById {
   '/inversiones/': typeof InversionesIndexRoute
   '/juridico/': typeof JuridicoIndexRoute
   '/vehicles/': typeof VehiclesIndexRoute
+  '/cobros/registrar-pago/$id': typeof CobrosRegistrarPagoIdRoute
   '/crm/admin/miniagent': typeof CrmAdminMiniagentRoute
   '/crm/analysis/$opportunityId': typeof CrmAnalysisOpportunityIdRoute
   '/crm/reportes/efectividad-por-etapa': typeof CrmReportesEfectividadPorEtapaRoute
@@ -547,6 +556,7 @@ export interface FileRouteTypes {
     | '/inversiones/'
     | '/juridico/'
     | '/vehicles/'
+    | '/cobros/registrar-pago/$id'
     | '/crm/admin/miniagent'
     | '/crm/analysis/$opportunityId'
     | '/crm/reportes/efectividad-por-etapa'
@@ -602,6 +612,7 @@ export interface FileRouteTypes {
     | '/inversiones'
     | '/juridico'
     | '/vehicles'
+    | '/cobros/registrar-pago/$id'
     | '/crm/admin/miniagent'
     | '/crm/analysis/$opportunityId'
     | '/crm/reportes/efectividad-por-etapa'
@@ -657,6 +668,7 @@ export interface FileRouteTypes {
     | '/inversiones/'
     | '/juridico/'
     | '/vehicles/'
+    | '/cobros/registrar-pago/$id'
     | '/crm/admin/miniagent'
     | '/crm/analysis/$opportunityId'
     | '/crm/reportes/efectividad-por-etapa'
@@ -713,6 +725,7 @@ export interface RootRouteChildren {
   InversionesIndexRoute: typeof InversionesIndexRoute
   JuridicoIndexRoute: typeof JuridicoIndexRoute
   VehiclesIndexRoute: typeof VehiclesIndexRoute
+  CobrosRegistrarPagoIdRoute: typeof CobrosRegistrarPagoIdRoute
   CrmAdminMiniagentRoute: typeof CrmAdminMiniagentRoute
   CrmAnalysisOpportunityIdRoute: typeof CrmAnalysisOpportunityIdRoute
   CrmReportesEfectividadPorEtapaRoute: typeof CrmReportesEfectividadPorEtapaRoute
@@ -1100,6 +1113,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CrmAdminMiniagentRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/cobros/registrar-pago/$id': {
+      id: '/cobros/registrar-pago/$id'
+      path: '/cobros/registrar-pago/$id'
+      fullPath: '/cobros/registrar-pago/$id'
+      preLoaderRoute: typeof CobrosRegistrarPagoIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -1145,6 +1165,7 @@ const rootRouteChildren: RootRouteChildren = {
   InversionesIndexRoute: InversionesIndexRoute,
   JuridicoIndexRoute: JuridicoIndexRoute,
   VehiclesIndexRoute: VehiclesIndexRoute,
+  CobrosRegistrarPagoIdRoute: CobrosRegistrarPagoIdRoute,
   CrmAdminMiniagentRoute: CrmAdminMiniagentRoute,
   CrmAnalysisOpportunityIdRoute: CrmAnalysisOpportunityIdRoute,
   CrmReportesEfectividadPorEtapaRoute: CrmReportesEfectividadPorEtapaRoute,

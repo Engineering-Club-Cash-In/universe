@@ -2697,14 +2697,25 @@ function RouteComponent() {
 						<div className="space-y-6 lg:col-span-2">
 							{/* Historial de Pagos */}
 							<Card>
-								<CardHeader>
-									<CardTitle className="flex items-center gap-2">
-										<Banknote className="h-5 w-5" />
-										Historial de Cuotas
-									</CardTitle>
-									<CardDescription>
-										Estado de todas las cuotas del contrato de financiamiento
-									</CardDescription>
+								<CardHeader className="flex flex-row items-start justify-between gap-4">
+									<div>
+										<CardTitle className="flex items-center gap-2">
+											<Banknote className="h-5 w-5" />
+											Historial de Cuotas
+										</CardTitle>
+										<CardDescription>
+											Estado de todas las cuotas del contrato de financiamiento
+										</CardDescription>
+									</div>
+									<Button size="sm" asChild>
+										<Link
+											to="/cobros/registrar-pago/$id"
+											params={{ id }}
+											search={{ tipo }}
+										>
+											Registrar pago
+										</Link>
+									</Button>
 								</CardHeader>
 								<CardContent>
 									{cuotas.length === 0 ? (

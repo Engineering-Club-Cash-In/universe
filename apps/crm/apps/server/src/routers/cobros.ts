@@ -30,10 +30,8 @@ import {
 	contactosCobros,
 	contratosFinanciamiento,
 	conveniosPago,
-	estadoContactoEnum,
 	estadoMoraEnum,
 	metasMoraCobros,
-	metodoContactoEnum,
 	recuperacionesVehiculo,
 } from "../db/schema/cobros";
 import { cobrosSendLogs } from "../db/schema/cobros-send-logs";
@@ -453,17 +451,18 @@ async function autoCrearDatosMigrate({
 // (Codex, PR #1147) para poder testear los .refine() de promesa_pago
 // (rango/mora obligatorio, fecha obligatoria) sin depender de DB/contexto —
 // antes vivía inline dentro de .input(), sin forma de importarlo en un test.
-// CB-128: "pago_registrado" es un estado SENTINELA que solo debe llegar a
-// contactosCobros vía registrarPagoCompleto (junto con pagoReferenceId,
-// después de confirmar el pago real en cartera-back) — nunca como input
-// libre de un asesor. Sin esta exclusión, estadoContactoEnum.enumValues
-// (que sí lo incluye desde este PR) dejaba que createContactoCobros
-// aceptara ese valor como cualquier otro: una fila fabricada, sin
-// pagoReferenceId y sin haber pasado por cartera-back, quedaría
-// indistinguible de un pago real en cualquier reporte/historial que
-// filtre por este estado. Se enumera explícito (en vez de derivar con
-// .filter()) para que agregar un estado nuevo al enum de la DB no lo
-// vuelva seleccionable acá por accidente sin decisión explícita.
+// CB-128: "pago_registrado"/"pago" son un estado y un método SENTINELA que
+// solo deben llegar a contactosCobros vía registrarPagoCompleto (junto con
+// pagoReferenceId, después de confirmar el pago real en cartera-back) —
+// nunca como input libre de un asesor. Sin esta exclusión,
+// estadoContactoEnum.enumValues/metodoContactoEnum.enumValues (que sí los
+// incluyen desde este PR) dejaban que createContactoCobros aceptara esos
+// valores como cualquier otro: una fila fabricada, sin pagoReferenceId y
+// sin haber pasado por cartera-back, quedaría indistinguible de un pago
+// real en cualquier reporte/historial que filtre por estado o método. Se
+// enumeran explícitos (en vez de derivar con .filter()) para que agregar
+// un valor nuevo a cualquiera de los dos enums de la DB no lo vuelva
+// seleccionable acá por accidente sin decisión explícita.
 const ESTADOS_CONTACTO_SELECCIONABLES = [
 	"contactado",
 	"no_contesta",
@@ -472,11 +471,19 @@ const ESTADOS_CONTACTO_SELECCIONABLES = [
 	"acuerdo_parcial",
 	"rechaza_pagar",
 ] as const;
+const METODOS_CONTACTO_SELECCIONABLES = [
+	"llamada",
+	"whatsapp",
+	"sms",
+	"email",
+	"visita_domicilio",
+	"carta_notarial",
+] as const;
 
 export const createContactoCobrosSchema = z
 	.object({
 		casoCobroId: z.string().uuid(),
-		metodoContacto: z.enum(metodoContactoEnum.enumValues),
+		metodoContacto: z.enum(METODOS_CONTACTO_SELECCIONABLES),
 		estadoContacto: z.enum(ESTADOS_CONTACTO_SELECCIONABLES),
 		duracionLlamada: z.number().optional(),
 		comentarios: z.string().min(1, "Los comentarios son requeridos"),

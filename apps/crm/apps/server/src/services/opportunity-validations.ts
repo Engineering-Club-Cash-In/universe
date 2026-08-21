@@ -4,11 +4,12 @@ import { getOnlyRenapInfoController } from "../controllers/bot";
 import { infornetController } from "../controllers/buro";
 import { db } from "../db";
 import { infornetPersonaCache } from "../db/schema/buro";
-import { leads, magicUrls, opportunities } from "../db/schema/crm";
+import { leads, opportunities } from "../db/schema/crm";
 import {
 	documentRequirementsByClientType,
 	opportunityDocuments,
 } from "../db/schema/documents";
+import { otps } from "../db/schema/otp";
 import { renapInfo } from "../db/schema/renap";
 import { opportunityValidations } from "../db/schema/validations";
 import { evaluarBuro } from "../lib/buro-evaluation";
@@ -233,9 +234,10 @@ async function cargarOportunidadConLead(opportunityId: string): Promise<{
 }
 
 /**
- * El magic URL solo lo escribe el bot (`bot.ts:595,888`), así que su presencia
- * prueba que el lead pasó por ese flujo. Se exige además que el estudio del
- * buró siga vigente: uno vencido ya no sirve como veredicto.
+ * El OTP se marca usado en `/info/validate-otp`, el paso inmediatamente
+ * anterior a la consulta al buró, y `otpController` solo lo usa el flujo del
+ * bot. Prueba que ese flujo llegó al buró, cosa que el magic URL no hace:
+ * se crea antes, en el paso de RENAP. Se exige además estudio vigente.
  */
 async function elBotValidoAlLead(
 	leadId: string | null,
@@ -243,13 +245,13 @@ async function elBotValidoAlLead(
 ): Promise<boolean> {
 	if (!leadId || !leadDpi) return false;
 
-	const [magicUrl] = await db
-		.select({ id: magicUrls.id })
-		.from(magicUrls)
-		.where(eq(magicUrls.leadId, leadId))
+	const [otpCompletado] = await db
+		.select({ id: otps.id })
+		.from(otps)
+		.where(and(eq(otps.leadId, leadId), eq(otps.used, true)))
 		.limit(1);
 
-	if (!magicUrl) return false;
+	if (!otpCompletado) return false;
 
 	const [estudioVigente] = await db
 		.select({ dpi: infornetPersonaCache.dpi })

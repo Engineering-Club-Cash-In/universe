@@ -438,7 +438,15 @@ export async function createPagoInCarteraBack(
 		// resuelve la cuota REAL que cerró (puede diferir de cuota_id pedida si
 		// cartera-back cascadea el pago).
 		let pagoId = respuesta.pago_id;
-		let cuotaNumeroReal = params.cuota_id || 0;
+		// CB-128 (fix): se inicializa con el numero_cuota YA resuelto arriba
+		// (cuotaResuelta), no con params.cuota_id crudo — cuota_id es el PK
+		// global de cuotas_credito, no el numero_cuota que espera
+		// pagoReferences.cuotaNumero (mismo bug que se corrigió arriba para
+		// el payload de cartera-back). Cuando /newPayment trae pago_id
+		// inline (rama de abono directo a capital) el fallback de abajo se
+		// salta, así que sin este fix la referencia quedaba guardada con el
+		// PK global (ej. 48213) en vez del número de cuota real (ej. 5).
+		let cuotaNumeroReal = cuotaResuelta?.numero_cuota ?? 0;
 		if (!pagoId) {
 			const pagoEncontrado = await resolverPagoRecienCreado(
 				params.credito_numero_sifco,

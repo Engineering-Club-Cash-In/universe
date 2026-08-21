@@ -4384,25 +4384,7 @@ export const cobrosRouter = {
 			// aplicaba a la cuenta equivocada. Se resuelven server-side desde el
 			// SIFCO ya validado y se ignora lo que mandó el cliente.
 			//
-			// Corre en paralelo con el snapshot de abajo — son independientes
-			// entre sí (uno valida crédito/usuario, el otro solo necesita el
-			// SIFCO), así que no hace falta esperar uno para pedir el otro.
-			const [creditoReal, pagosPrevios] = await Promise.all([
-				carteraBackClient.getCredito(input.numeroSifco),
-				// CB-128: snapshot del pago_id más alto ANTES de crear el pago — es
-				// el único ancla confiable para reconocer "el pago recién creado"
-				// después. Sin esto, en un crédito con pagos previos la lista de
-				// getPagosByCredito nunca viene vacía, así que un fallback que solo
-				// mira "el más alto de la lista actual" agarra un pago VIEJO con
-				// toda confianza cuando /newPayment no trae pago_id inline —
-				// pagoReferences y la gestión en contactos_cobros quedan apuntando
-				// al pago equivocado, sin ningún error que lo delate. Sin cache
-				// (false): con CARTERA_BACK_ENABLE_CACHE activado, un snapshot
-				// cacheado desactualizado corre el riesgo de subestimar el
-				// pago_id máximo real y confundir un pago viejo con el nuevo más
-				// abajo.
-				carteraBackClient.getPagosByCredito(input.numeroSifco, false),
-			]);
+			const creditoReal = await carteraBackClient.getCredito(input.numeroSifco);
 			if (
 				creditoReal.credito.credito_id !== input.creditoId ||
 				creditoReal.usuario.usuario_id !== input.usuarioId
@@ -4412,11 +4394,6 @@ export const cobrosRouter = {
 						"El crédito o usuario enviado no corresponde al crédito consultado — refresca la página e intenta de nuevo",
 				});
 			}
-
-			const pagoIdMaximoPrevio = pagosPrevios.reduce(
-				(max, p) => Math.max(max, p.pago_id),
-				0,
-			);
 
 			// CB-128: chequeo de duplicado + creación del pago + guarda de
 			// referencia van dentro de la MISMA transacción, serializados con un
@@ -4461,6 +4438,31 @@ export const cobrosRouter = {
 			await db.transaction(async (tx) => {
 				await tx.execute(
 					sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`,
+				);
+
+				// CB-128 (fix): snapshot del pago_id más alto tomado DESPUÉS de
+				// adquirir el lock, no antes. Tomarlo antes (como en un intento
+				// previo) dejaba una ventana: dos pagos de MONTOS distintos
+				// para el mismo crédito y mismo asesor, corriendo casi
+				// simultáneos, calculaban el mismo snapshot compartido antes de
+				// que cualquiera entrara al lock. El primero en adquirir el
+				// lock crea su pago; si el segundo request necesita el
+				// fallback de pago_id (porque /newPayment no lo trajo inline)
+				// y hay lag de replicación, buscarPagoNuevo del segundo podía
+				// ver solo el pago del PRIMERO (con pago_id > snapshot
+				// compartido) y tomarlo como propio — vinculando la referencia
+				// al pago equivocado o chocando contra el UNIQUE de
+				// carteraPagoId. Al recalcularlo ya con el lock en mano, cada
+				// request ve el estado real justo antes de SU propio pago,
+				// sin importar cuántos otros pagos del mismo crédito ya
+				// pasaron por el lock antes.
+				const pagosPrevios = await carteraBackClient.getPagosByCredito(
+					input.numeroSifco,
+					false,
+				);
+				const pagoIdMaximoPrevio = pagosPrevios.reduce(
+					(max, p) => Math.max(max, p.pago_id),
+					0,
 				);
 
 				// CB-128 (fix): comparación por numeroCreditoSifco, no

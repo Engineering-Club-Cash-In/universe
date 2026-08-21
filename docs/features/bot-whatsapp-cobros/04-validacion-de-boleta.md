@@ -538,7 +538,7 @@ disparar mensajes de WhatsApp.
 | `validado` | `POST /revalidatePayment` — "Revalidar", solo ADMIN | Lo mismo. |
 | `revertido` | `POST /reversePayment` | **Este es el rechazo.** WhatsApp al cliente + notificación al asesor. |
 | `regresado_a_pendiente` | `POST /revertPaymentToPending` | Depende de si al cliente ya se le dijo que estaba acreditado — ver abajo. |
-| `marcado_falso` | `POST /false-payment` | Solo notificación al asesor, **marcada como alerta**: ver el recuadro. |
+| `marcado_falso` | `POST /false-payment` | Alerta al asesor por la mora **siempre**, y al cliente lo que decida el conjunto (§6): ver el recuadro. |
 
 > **La validación normal es `/aplicar-pago`, no `/revalidatePayment`.** El botón "Validar
 > Pago" de `paymentsTable.tsx` llama a `pagosService.aplicarPago(pagoId)`, que pega en
@@ -567,9 +567,20 @@ disparar mensajes de WhatsApp.
 >
 > `false-payment` **no restaura la mora** — solo pone `pagado: false, paymentFalse: true`. En
 > la UI ni siquiera está cableado a un botón del flujo de boletas de cliente. Si aun así llega
-> un evento `marcado_falso`, el CRM no le escribe al cliente: levanta una alerta al asesor
-> diciendo que ese crédito quedó con la mora descontada por una boleta que se descartó.
+> un evento `marcado_falso`, el CRM levanta una alerta al asesor diciendo que ese crédito quedó
+> con la mora descontada por una boleta que se descartó.
 > Ver [D-32](./DECISIONES.md#d-32--registrar-una-boleta-ya-mueve-la-mora-y-por-eso-el-rechazo-es-revertir).
+>
+> **Esa alerta es lo único propio de `marcado_falso`.** El mensaje al cliente lo decide la
+> regla del conjunto de §6, igual que para cualquier otro evento: para él, un pago marcado
+> falso y uno revertido son lo mismo —su boleta no se acreditó—, y las dos cosas terminan en
+> *"necesitamos revisar tu pago"*.
+>
+> No siempre fue así: `marcado_falso` cortaba el flujo y no llegaba a la regla del conjunto.
+> Eso hacía que **el orden de llegada de los webhooks decidiera qué recibía el cliente** —si
+> el `marcado_falso` llegaba último, silencio; si llegaba antes que un `validado` de la misma
+> boleta, mensaje de rechazo—. El mismo estado final no puede producir dos comunicaciones
+> distintas.
 
 Respuesta siempre `200`, aunque no se haya notificado:
 
@@ -668,6 +679,26 @@ La regla es **un mensaje por boleta, cuando ya no falte ninguno**:
    - alguno `revertido` o `marcado_falso` → *"necesitamos revisar tu pago"* + asesor.
 4. Si a las **24 h** la boleta sigue con pagos resueltos y pagos sin resolver, se notifica
    **solo al asesor** (nunca al cliente): algo quedó a medias en la validación.
+
+**El derecho a mandar ese mensaje se toma antes de enviarlo**, con un `UPDATE` condicional
+sobre `notificado_cliente_at` (`WHERE … IS NULL`). Leer el campo y después escribirlo no
+alcanza: cuando los eventos de los últimos pagos hermanos entran a la vez, los dos handlers
+lo leen en `null`, los dos ven que no queda nadie pendiente y los dos mandan. Gana quien corra
+el `UPDATE` primero; el otro se lleva cero filas y se calla.
+
+**Y si el envío falla, la marca se devuelve.** El evento ya está registrado y el pago ya
+quedó resuelto, así que sin eso la boleta terminaba resuelta y "notificada" sin que el cliente
+hubiera recibido nada, y no había camino de vuelta: el barrido del job solo mira pagos *sin
+resolver*, un webhook repetido sale por `EVENTO_REPETIDO` y la alerta de las 24 h exige pagos a
+medias. El job de respaldo tiene ahora una pasada aparte para esto: boletas con **todos** sus
+pagos resueltos y `notificado_cliente_at` en `null` son las que nos deben el mensaje. Cubre
+también el proceso que se cae entre reclamar la boleta y mandar el WhatsApp.
+
+**El barrido de pagos sin resolver lleva cursor.** Un pago se queda sin resolver todo lo que
+conta tarde en validarlo, o sea días: es el estado normal de la cola, no una anomalía. Con más
+de 200 acumulados, un `LIMIT` sin orden puede devolver el mismo lote cada hora y los pagos que
+entren después no se revisan nunca. Cada corrida sigue donde quedó la anterior y vuelve a
+empezar al llegar al final.
 
 ---
 

@@ -21,7 +21,7 @@
  * Contrato: docs/features/bot-whatsapp-cobros/04-validacion-de-boleta.md (§6)
  */
 
-import { and, eq, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
 import { db } from "../db";
 import {
 	botCobrosBoletaPagos,
@@ -32,6 +32,7 @@ import {
 	avisarAlAsesor,
 	type EventoPago,
 	procesarEventoPago,
+	reintentarAvisoAlCliente,
 } from "../lib/bot-cobros/eventos-pago";
 import { carteraBackClient } from "../services/cartera-back-client";
 import type {
@@ -46,6 +47,28 @@ const ESPERANDO: EstadoBoletaBot[] = ["confirmada", "confirmada_a_verificar"];
 const MAXIMO_POR_CORRIDA = 200;
 
 /**
+ * Por dónde iba el barrido de pagos sin resolver.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * SIN ESTO, LOS MISMOS 200 SE MIRAN PARA SIEMPRE Y EL RESTO NUNCA.
+ *
+ * Un pago se queda sin resolver todo el tiempo que conta tarde en validarlo, o
+ * sea días. No es una anomalía: es el estado normal de la cola. En cuanto haya
+ * más de `MAXIMO_POR_CORRIDA` acumulados, un `LIMIT` sin orden puede devolver
+ * el mismo lote cada hora —Postgres no promete ningún orden— y los pagos que
+ * entren después no se revisan nunca. Justo los nuevos son los que más urgen.
+ *
+ * Con el cursor, cada corrida sigue donde quedó la anterior y vuelve a empezar
+ * al llegar al final: todo pago se mira dentro de `total / 200` corridas.
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * Vive en memoria a propósito: un reinicio lo devuelve a cero y el barrido
+ * arranca de nuevo desde el principio, que es correcto —solo pierde el lugar,
+ * nunca una fila—. Una tabla de checkpoint para esto sería mucho aparato.
+ */
+let cursorDeBarrido = 0;
+
+/**
  * A partir de acá, una boleta a medias deja de ser un retraso y es un problema.
  *
  * §6: si a las 24 h la boleta sigue con pagos resueltos **y** pagos sin
@@ -58,6 +81,7 @@ export type ResultadoRespaldo = {
 	pagosRevisados: number;
 	eventosRecuperados: number;
 	boletasAMedias: number;
+	avisosReintentados: number;
 };
 
 /**
@@ -125,14 +149,24 @@ export async function recuperarEventosPerdidos(): Promise<ResultadoRespaldo> {
 			and(
 				isNull(botCobrosBoletaPagos.resueltoEn),
 				inArray(botCobrosBoletas.estado, ESPERANDO),
+				gt(botCobrosBoletaPagos.pagoId, cursorDeBarrido),
 			),
 		)
+		.orderBy(asc(botCobrosBoletaPagos.pagoId))
 		.limit(MAXIMO_POR_CORRIDA);
+
+	// El lote vino corto: se llegó al final de la cola y la próxima corrida
+	// arranca desde el principio. Si vino lleno, se sigue desde el último.
+	cursorDeBarrido =
+		pendientes.length < MAXIMO_POR_CORRIDA
+			? 0
+			: (pendientes[pendientes.length - 1]?.pagoId ?? 0);
 
 	const resultado: ResultadoRespaldo = {
 		pagosRevisados: pendientes.length,
 		eventosRecuperados: 0,
 		boletasAMedias: 0,
+		avisosReintentados: 0,
 	};
 
 	if (pendientes.length > 0) {
@@ -200,17 +234,92 @@ export async function recuperarEventosPerdidos(): Promise<ResultadoRespaldo> {
 		}
 	}
 
+	resultado.avisosReintentados = await reintentarAvisosDebidos();
 	resultado.boletasAMedias = await avisarBoletasAMedias();
 
-	if (resultado.eventosRecuperados > 0 || resultado.boletasAMedias > 0) {
+	if (
+		resultado.eventosRecuperados > 0 ||
+		resultado.boletasAMedias > 0 ||
+		resultado.avisosReintentados > 0
+	) {
 		console.log(
 			`[BotCobrosRespaldo] ${resultado.pagosRevisados} pago(s) revisado(s), ` +
 				`${resultado.eventosRecuperados} evento(s) que el webhook no entregó, ` +
+				`${resultado.avisosReintentados} aviso(s) al cliente reintentado(s), ` +
 				`${resultado.boletasAMedias} boleta(s) a medias avisada(s).`,
 		);
 	}
 
 	return resultado;
+}
+
+/**
+ * Estados en los que una boleta puede deberle todavía el mensaje al cliente.
+ *
+ * `rechazada` y `confirmada` son estados FINALES: el desenlace ya se calculó y
+ * se escribió. Que sigan sin `notificado_cliente_at` significa que el mensaje
+ * no salió.
+ */
+const PUEDEN_DEBER_MENSAJE: EstadoBoletaBot[] = [
+	"confirmada",
+	"confirmada_a_verificar",
+	"rechazada",
+];
+
+/**
+ * Boletas resueltas del todo a las que nunca les salió el mensaje.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * UN ENVÍO FALLIDO NO TENÍA QUIÉN LO REINTENTARA.
+ *
+ * El evento se registra y el pago queda marcado como resuelto ANTES de mandar
+ * el WhatsApp. Si el envío se cae, la boleta queda con todos sus pagos
+ * resueltos y sin notificar, y ahí no llegaba nadie: el barrido de arriba solo
+ * mira pagos SIN resolver, el webhook repetido sale por `EVENTO_REPETIDO` y la
+ * alerta de las 24 h exige que haya pagos a medias. El cliente se quedaba sin
+ * enterarse, para siempre, de algo que sí pasó.
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * Cubre también el hueco de haber reclamado la boleta y caerse antes de
+ * mandar: `avisarDesenlaceAlCliente` suelta la marca cuando el envío falla,
+ * pero un proceso que muere en el medio no suelta nada, y esa boleta vuelve a
+ * aparecer acá en la corrida siguiente.
+ */
+async function reintentarAvisosDebidos(): Promise<number> {
+	const debidas = await db
+		.select({ id: botCobrosBoletas.id })
+		.from(botCobrosBoletas)
+		.where(
+			and(
+				inArray(botCobrosBoletas.estado, PUEDEN_DEBER_MENSAJE),
+				isNull(botCobrosBoletas.notificadoClienteAt),
+				// Con pagos, y ninguno sin resolver. Las dos condiciones hacen
+				// falta: sin la primera entrarían las boletas que todavía no
+				// generaron ningún pago, y para esas no hay nada que avisar.
+				sql`EXISTS (
+					SELECT 1 FROM bot_cobros_boleta_pagos p
+					WHERE p.boleta_id = ${botCobrosBoletas.id}
+				)`,
+				sql`NOT EXISTS (
+					SELECT 1 FROM bot_cobros_boleta_pagos p
+					WHERE p.boleta_id = ${botCobrosBoletas.id} AND p.resuelto_en IS NULL
+				)`,
+			),
+		)
+		// La que hace más rato que no se toca, primero. Cada intento actualiza
+		// `updated_at`, así que las que fallan se van al final de la fila y no
+		// tapan a las demás.
+		.orderBy(asc(botCobrosBoletas.updatedAt))
+		.limit(MAXIMO_POR_CORRIDA);
+
+	let salieron = 0;
+
+	for (const boleta of debidas) {
+		const resultado = await reintentarAvisoAlCliente(boleta.id);
+		if (resultado.notificado) salieron++;
+	}
+
+	return salieron;
 }
 
 /**

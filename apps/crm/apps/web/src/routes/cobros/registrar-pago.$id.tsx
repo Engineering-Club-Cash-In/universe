@@ -21,10 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
-import {
-	CurrencyInput,
-	normalizeForSubmit,
-} from "@/components/ui/currency-input";
+import { CurrencyInput } from "@/components/ui/currency-input";
 import {
 	Dialog,
 	DialogContent,
@@ -135,6 +132,12 @@ function RegistrarPagoPage() {
 
 	const credito = creditoQuery.data;
 	const convenioActivo = credito?.convenioActivo;
+	// CB-128: el cutoff de "fecha futura" debe usar el día calendario de
+	// GUATEMALA, no el del reloj del navegador — fechaPago ya se manda con
+	// aFechaISO_GT(new Date()) al confirmar, así que un asesor en un offset
+	// adelantado (ej. UTC+14, donde "hoy" del navegador ya es "mañana" en GT)
+	// no debe poder seleccionar una fechaBoleta posterior al fechaPago real.
+	const hoyGT = aFechaISO_GT(new Date());
 	// CB-128: cartera-back rechaza el pago en /newPayment si el crédito está
 	// PENDIENTE_CANCELACION (registerPaymentPolicy.ts), pero solo DESPUÉS de
 	// subir la boleta — bloquear acá evita el archivo huérfano y el
@@ -299,8 +302,13 @@ function RegistrarPagoPage() {
 				otros: otrosNum || undefined,
 				bancoId: Number(bancoId),
 				origenPago: origenPago,
-				numeroAutorizacion: normalizeForSubmit(numeroAutorizacion) || undefined,
-				observaciones: normalizeForSubmit(observaciones) || undefined,
+				// normalizeForSubmit es para valores de moneda (trata el texto como
+				// intPart.decPart) — aplicarlo a texto libre trunca todo después del
+				// segundo punto ("Ref. 123. confirmado" → "Ref. 123") o corrompe un
+				// texto que empieza con punto (".pendiente" → "0.pendiente"). Estos
+				// campos solo necesitan trim + undefined si quedan vacíos.
+				numeroAutorizacion: numeroAutorizacion.trim() || undefined,
+				observaciones: observaciones.trim() || undefined,
 				urlBoletas,
 			});
 		},
@@ -562,7 +570,7 @@ function RegistrarPagoPage() {
 												mode="single"
 												selected={fechaBoleta}
 												onSelect={setFechaBoleta}
-												disabled={{ after: new Date() }}
+												disabled={(dia) => aFechaISO(dia) > hoyGT}
 											/>
 										</PopoverContent>
 									</Popover>

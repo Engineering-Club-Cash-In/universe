@@ -3,7 +3,7 @@
  * High-level functions for integrating CRM operations with cartera-back
  */
 
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "../db";
 import {
 	carteraBackReferences,
@@ -411,72 +411,102 @@ export async function createPagoInCarteraBack(
 			registerBy: params.userId,
 		};
 
-		// Snapshot ANTES de crear el pago — único ancla confiable para
-		// reconocer "el pago recién creado" si /newPayment no trae pago_id
-		// inline (ver comentario en resolverPagoIdRecienCreado). Sin cache:
-		// un snapshot stale corre el riesgo de subestimar el pago_id máximo
-		// real.
-		const pagosPrevios = await carteraBackClient.getPagosByCredito(
-			params.credito_numero_sifco,
-			false,
-		);
-		const pagoIdMaximoPrevio = pagosPrevios.reduce(
-			(max, p) => Math.max(max, p.pago_id),
-			0,
-		);
-
-		const respuesta = await carteraBackClient.createPago(pagoInput);
-		// soloInformativo (mora parcial insuficiente, etc.) no es un rechazo —
-		// cartera-back sí insertó el pago, ver comentario en createPago.
-		if (!respuesta.success && !respuesta.soloInformativo) {
-			throw new Error(respuesta.message || "cartera-back rechazó el pago");
-		}
-
-		// CB-128: /newPayment no siempre trae pago_id inline (ver comentario en
-		// cartera-back-client.ts:createPago) — se resuelve consultando el pago
-		// recién creado por SIFCO cuando no vino en la respuesta directa. También
-		// resuelve la cuota REAL que cerró (puede diferir de cuota_id pedida si
-		// cartera-back cascadea el pago).
-		let pagoId = respuesta.pago_id;
-		// CB-128 (fix): se inicializa con el numero_cuota YA resuelto arriba
-		// (cuotaResuelta), no con params.cuota_id crudo — cuota_id es el PK
-		// global de cuotas_credito, no el numero_cuota que espera
-		// pagoReferences.cuotaNumero (mismo bug que se corrigió arriba para
-		// el payload de cartera-back). Cuando /newPayment trae pago_id
-		// inline (rama de abono directo a capital) el fallback de abajo se
-		// salta, así que sin este fix la referencia quedaba guardada con el
-		// PK global (ej. 48213) en vez del número de cuota real (ej. 5).
+		// CB-128 (fix): mismo advisory lock por SIFCO que registrarPagoCompleto
+		// (routers/cobros.ts) — este caller (usado por el endpoint registrarPago
+		// del bot de WhatsApp) nunca tuvo ninguna serialización. Dos pagos
+		// concurrentes del mismo asesor para el mismo crédito calculaban el
+		// mismo snapshot pagoIdMaximoPrevio y podían resolver el pago_id de
+		// uno al otro. El snapshot se toma DESPUÉS de adquirir el lock, dentro
+		// de la misma transacción — mismo razonamiento que en cobros.ts.
+		let pagoId: number | undefined;
 		let cuotaNumeroReal = cuotaResuelta?.numero_cuota ?? 0;
-		if (!pagoId) {
-			const pagoEncontrado = await resolverPagoRecienCreado(
-				params.credito_numero_sifco,
-				pagoIdMaximoPrevio,
-				params.userId,
+		let respuesta:
+			| Awaited<ReturnType<typeof carteraBackClient.createPago>>
+			| undefined;
+
+		await db.transaction(async (tx) => {
+			await tx.execute(
+				sql`SELECT pg_advisory_xact_lock(hashtext(${`pago:${params.credito_numero_sifco}`}))`,
 			);
-			pagoId = pagoEncontrado?.pago_id;
-			if (pagoEncontrado?.numero_cuota != null) {
-				cuotaNumeroReal = pagoEncontrado.numero_cuota;
+
+			const pagosPrevios = await carteraBackClient.getPagosByCredito(
+				params.credito_numero_sifco,
+				false,
+			);
+			const pagoIdMaximoPrevio = pagosPrevios.reduce(
+				(max, p) => Math.max(max, p.pago_id),
+				0,
+			);
+
+			respuesta = await carteraBackClient.createPago(pagoInput);
+			// soloInformativo (mora parcial insuficiente, etc.) no es un rechazo —
+			// cartera-back sí insertó el pago, ver comentario en createPago.
+			if (!respuesta.success && !respuesta.soloInformativo) {
+				throw new Error(respuesta.message || "cartera-back rechazó el pago");
 			}
-		}
+
+			// CB-128: /newPayment no siempre trae pago_id inline (ver comentario
+			// en cartera-back-client.ts:createPago) — se resuelve consultando el
+			// pago recién creado por SIFCO cuando no vino en la respuesta
+			// directa. También resuelve la cuota REAL que cerró (puede diferir
+			// de cuota_id pedida si cartera-back cascadea el pago).
+			pagoId = respuesta.pago_id;
+			if (!pagoId) {
+				const pagoEncontrado = await resolverPagoRecienCreado(
+					params.credito_numero_sifco,
+					pagoIdMaximoPrevio,
+					params.userId,
+				);
+				pagoId = pagoEncontrado?.pago_id;
+				if (pagoEncontrado?.numero_cuota != null) {
+					cuotaNumeroReal = pagoEncontrado.numero_cuota;
+				}
+			} else {
+				// CB-128 (fix): pago_id inline significa que cartera-back tomó
+				// la rama de abono directo a capital — ahí NO respeta
+				// cuotaApagar, se vincula a ultimaCuotaPagada (u otro fallback
+				// interno, ver registerPayment.ts:2016-2019), que puede ser una
+				// cuota distinta a la pedida. Asumir cuotaResuelta guardaba la
+				// cuota equivocada en pagoReferences y en el comentario de
+				// gestión generado. Se busca el pago por su pago_id YA conocido
+				// (sin esperar el retry de resolverPagoRecienCreado, que es
+				// para cuando no se conoce el id) para leer su numero_cuota
+				// real.
+				const pagos = await carteraBackClient.getPagosByCredito(
+					params.credito_numero_sifco,
+					false,
+				);
+				const pagoVinculado = pagos.find((p) => p.pago_id === pagoId);
+				if (pagoVinculado?.numero_cuota != null) {
+					cuotaNumeroReal = pagoVinculado.numero_cuota;
+				}
+			}
+			if (!pagoId) {
+				throw new Error(
+					"cartera-back confirmó el pago pero no se pudo resolver su pago_id",
+				);
+			}
+
+			// Store reference in CRM
+			const referenceData: NewPagoReference = {
+				carteraPagoId: pagoId,
+				numeroCreditoSifco: params.credito_numero_sifco,
+				cuotaNumero: cuotaNumeroReal,
+				montoBoleta: params.monto_boleta.toString(),
+				fechaPago: new Date(params.fecha_pago),
+				casoCobroId: params.casoCobroId || null,
+				registradoPor: params.userId,
+				syncStatus: "synced",
+			};
+
+			await tx.insert(pagoReferences).values(referenceData);
+		});
+
 		if (!pagoId) {
 			throw new Error(
 				"cartera-back confirmó el pago pero no se pudo resolver su pago_id",
 			);
 		}
-
-		// Store reference in CRM
-		const referenceData: NewPagoReference = {
-			carteraPagoId: pagoId,
-			numeroCreditoSifco: params.credito_numero_sifco,
-			cuotaNumero: cuotaNumeroReal,
-			montoBoleta: params.monto_boleta.toString(),
-			fechaPago: new Date(params.fecha_pago),
-			casoCobroId: params.casoCobroId || null,
-			registradoPor: params.userId,
-			syncStatus: "synced",
-		};
-
-		await db.insert(pagoReferences).values(referenceData);
 
 		// Log success
 		await logSyncOperation({

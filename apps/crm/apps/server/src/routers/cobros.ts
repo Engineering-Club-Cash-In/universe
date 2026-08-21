@@ -4584,6 +4584,24 @@ export const cobrosRouter = {
 					if (pagoEncontrado?.numero_cuota != null) {
 						cuotaNumeroReal = pagoEncontrado.numero_cuota;
 					}
+				} else {
+					// CB-128 (fix): pago_id inline significa que cartera-back tomó
+					// la rama de abono directo a capital — ahí NO respeta
+					// cuotaApagar, se vincula a ultimaCuotaPagada (u otro
+					// fallback interno, ver registerPayment.ts:2016-2019), que
+					// puede ser una cuota distinta a la pedida. Asumir
+					// input.cuotaApagar guardaba la cuota equivocada en
+					// pagoReferences y en el comentario de gestión generado. Se
+					// busca el pago por su pago_id YA conocido para leer su
+					// numero_cuota real.
+					const pagos = await carteraBackClient.getPagosByCredito(
+						input.numeroSifco,
+						false,
+					);
+					const pagoVinculado = pagos.find((p) => p.pago_id === pagoId);
+					if (pagoVinculado?.numero_cuota != null) {
+						cuotaNumeroReal = pagoVinculado.numero_cuota;
+					}
 				}
 				if (!pagoId) {
 					// El dinero YA se movió en cartera-back (createPago tuvo

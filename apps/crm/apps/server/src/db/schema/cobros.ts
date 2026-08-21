@@ -45,6 +45,12 @@ export const estadoMoraEnum = pgEnum("estado_mora", [
 // Nota: el orden de este array es cosmético. `ADD VALUE` sin BEFORE/AFTER
 // agrega la etiqueta al FINAL del orden de sort de Postgres; nadie hace
 // ORDER BY sobre esta columna, así que la divergencia es inocua.
+// CB-128: "pago" se agregó al mismo enum (no uno aparte) por el mismo motivo
+// que "sms" arriba — es la columna de 4 lugares y partirla obligaría a
+// mantener catálogos de canal en paralelo. No es un canal de contacto real:
+// marca la fila que el asesor crea al registrar un pago desde la Ficha 360
+// (ver estadoContacto = 'pago_registrado' más abajo), donde metodoContacto
+// no tiene un canal que reportar pero la columna es NOT NULL.
 export const metodoContactoEnum = pgEnum("metodo_contacto", [
 	"llamada",
 	"whatsapp",
@@ -52,6 +58,7 @@ export const metodoContactoEnum = pgEnum("metodo_contacto", [
 	"email",
 	"visita_domicilio",
 	"carta_notarial",
+	"pago",
 ]);
 
 // CB-025: catálogo de resultados PROVISIONAL — "Definición de listo" del
@@ -67,6 +74,12 @@ export const metodoContactoEnum = pgEnum("metodo_contacto", [
 // valores, considerar migrar esta columna de enum a texto libre + lista de
 // valores válidos en TypeScript en ese momento — mucho más barato de cambiar
 // después que un pgEnum.
+// CB-128: "pago_registrado" marca la fila que se crea automáticamente cuando
+// el asesor registra un pago desde la Ficha 360 (mismo endpoint que hoy
+// integra con cartera-back). No es un resultado de contacto real — es la
+// forma de que el pago aparezca en Historial/Cumplimiento de agenda igual
+// que cualquier otra gestión, sin duplicar esa lógica en una tabla aparte
+// (ver pagoReferenceId en contactosCobros más abajo).
 export const estadoContactoEnum = pgEnum("estado_contacto", [
 	"contactado",
 	"no_contesta",
@@ -74,6 +87,7 @@ export const estadoContactoEnum = pgEnum("estado_contacto", [
 	"promesa_pago",
 	"acuerdo_parcial",
 	"rechaza_pagar",
+	"pago_registrado",
 ]);
 
 // CB-020: estado de cumplimiento de una promesa de pago (solo aplica a filas
@@ -301,6 +315,13 @@ export const contactosCobros = pgTable(
 		// recordatorios automáticos de arriba, o cartera-back no respondió al
 		// crearla.
 		bucketSnapshot: integer("bucket_snapshot"),
+
+		// CB-128: solo se llena cuando estadoContacto = 'pago_registrado' — apunta
+		// a la fila de pago_references (schema cartera-back.ts) con el detalle
+		// financiero (monto, cuota, banco...) que esta tabla no tiene por qué
+		// duplicar. Sin `.references()` a propósito: cartera-back.ts importa de
+		// este archivo, no al revés, y una FK acá crearía un ciclo de import.
+		pagoReferenceId: uuid("pago_reference_id"),
 
 		createdAt: timestamp("created_at").notNull().defaultNow(),
 		// CB-128: última escritura sobre la fila. Dato TÉCNICO, no de negocio: lo

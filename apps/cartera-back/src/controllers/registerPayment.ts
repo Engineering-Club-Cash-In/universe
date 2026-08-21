@@ -651,6 +651,7 @@ export const insertPayment = async ({ body, set }: any) => {
     if (!parseResult.success) {
       set.status = 400;
       return {
+        success: false,
         message: "Validation failed",
         errors: parseResult.error.flatten().fieldErrors,
       };
@@ -882,7 +883,12 @@ export const insertPayment = async ({ body, set }: any) => {
             monto_aplicado: pagoEspecialCuota.montoAplicado,
           });
         }
+        // success:true explícito — este return es un 200 real (el pago SÍ se
+        // insertó arriba), solo informa que quedó parcial y no cerró cuota.
+        // Sin este campo, un consumidor que valide `success` (a diferencia de
+        // carteraFront, que solo lee `message`) lo confunde con un rechazo.
         return {
+          success: true,
           message: `Pago parcial de mora aplicado. Saldo pendiente de mora: $${resultadoMora.saldoMoraRestante}. Por favor, cancele la mora pendiente para continuar con el pago de cuotas.`,
           pagos: [],
           saldo_a_favor: disponible.toString(),
@@ -908,7 +914,10 @@ export const insertPayment = async ({ body, set }: any) => {
           monto_aplicado: pagoEspecialCuota.montoAplicado,
         });
       }
+      // Mismo motivo que el return de arriba: 200 real, pago insertado,
+      // success:true explícito para no leerse como rechazo.
       return {
+        success: true,
         message: `Pago parcial de mora aplicado. Saldo pendiente de mora: $${resultadoMora.saldoMoraRestante}. Por favor, cancele la mora pendiente para continuar con el pago de cuotas.`,
         pagos: [],
         saldo_a_favor: disponible.toString(),
@@ -2303,6 +2312,7 @@ export const insertPayment = async ({ body, set }: any) => {
 
     set.status = 500;
     return {
+      success: false,
       message: "Internal server error",
       error: error instanceof Error ? error.message : String(error),
     };

@@ -20,17 +20,18 @@ import {
 import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
-import { carteraBackReferences } from "../db/schema/cartera-back";
+import {
+	carteraBackReferences,
+	pagoReferences,
+} from "../db/schema/cartera-back";
 import {
 	casosCobros,
 	cierreDiarioCreditoCobros,
 	contactosCobros,
 	contratosFinanciamiento,
 	conveniosPago,
-	estadoContactoEnum,
 	estadoMoraEnum,
 	metasMoraCobros,
-	metodoContactoEnum,
 	recuperacionesVehiculo,
 } from "../db/schema/cobros";
 import { cobrosSendLogs } from "../db/schema/cobros-send-logs";
@@ -127,7 +128,10 @@ import {
 	buscarAsesorCarteraPorEmail,
 	obtenerPaginaAgenda,
 } from "../services/agenda-cobros-source";
-import { carteraBackClient } from "../services/cartera-back-client";
+import {
+	CarteraBackHttpError,
+	carteraBackClient,
+} from "../services/cartera-back-client";
 import {
 	createPagoInCarteraBack,
 	getCreditoReferenceByNumeroSifco,
@@ -447,11 +451,40 @@ async function autoCrearDatosMigrate({
 // (Codex, PR #1147) para poder testear los .refine() de promesa_pago
 // (rango/mora obligatorio, fecha obligatoria) sin depender de DB/contexto —
 // antes vivía inline dentro de .input(), sin forma de importarlo en un test.
+// CB-128: "pago_registrado"/"pago" son un estado y un método SENTINELA que
+// solo deben llegar a contactosCobros vía registrarPagoCompleto (junto con
+// pagoReferenceId, después de confirmar el pago real en cartera-back) —
+// nunca como input libre de un asesor. Sin esta exclusión,
+// estadoContactoEnum.enumValues/metodoContactoEnum.enumValues (que sí los
+// incluyen desde este PR) dejaban que createContactoCobros aceptara esos
+// valores como cualquier otro: una fila fabricada, sin pagoReferenceId y
+// sin haber pasado por cartera-back, quedaría indistinguible de un pago
+// real en cualquier reporte/historial que filtre por estado o método. Se
+// enumeran explícitos (en vez de derivar con .filter()) para que agregar
+// un valor nuevo a cualquiera de los dos enums de la DB no lo vuelva
+// seleccionable acá por accidente sin decisión explícita.
+const ESTADOS_CONTACTO_SELECCIONABLES = [
+	"contactado",
+	"no_contesta",
+	"numero_equivocado",
+	"promesa_pago",
+	"acuerdo_parcial",
+	"rechaza_pagar",
+] as const;
+const METODOS_CONTACTO_SELECCIONABLES = [
+	"llamada",
+	"whatsapp",
+	"sms",
+	"email",
+	"visita_domicilio",
+	"carta_notarial",
+] as const;
+
 export const createContactoCobrosSchema = z
 	.object({
 		casoCobroId: z.string().uuid(),
-		metodoContacto: z.enum(metodoContactoEnum.enumValues),
-		estadoContacto: z.enum(estadoContactoEnum.enumValues),
+		metodoContacto: z.enum(METODOS_CONTACTO_SELECCIONABLES),
+		estadoContacto: z.enum(ESTADOS_CONTACTO_SELECCIONABLES),
 		duracionLlamada: z.number().optional(),
 		comentarios: z.string().min(1, "Los comentarios son requeridos"),
 		acuerdosAlcanzados: z.string().optional(),
@@ -4244,6 +4277,19 @@ export const cobrosRouter = {
 			});
 
 			if (!result.success) {
+				// CB-128 (fix): resultadoIncierto distingue un rechazo DEFINITIVO
+				// (4xx — cartera-back respondió antes de escribir nada, seguro
+				// reintentar) de un resultado INCIERTO (timeout, 5xx —
+				// registerPayment.ts hace escrituras no transaccionales, el pago
+				// pudo haberse aplicado igual). Sin esta distinción, cualquier
+				// fallo se veía como un BAD_REQUEST normal, invitando al bot/
+				// usuario a reintentar y duplicar el pago si ya se había
+				// procesado.
+				if (result.resultadoIncierto) {
+					throw new ORPCError("INTERNAL_SERVER_ERROR", {
+						message: `No se pudo confirmar si el pago se registró en cartera-back (${result.error}). NO reintentes de inmediato — verifica antes de volver a intentarlo.`,
+					});
+				}
 				throw new ORPCError("BAD_REQUEST", {
 					message: `Error registrando pago: ${result.error}`,
 				});
@@ -4253,6 +4299,623 @@ export const cobrosRouter = {
 				success: true,
 				pago_id: result.pago_id,
 				message: "Pago registrado exitosamente",
+			};
+		}),
+
+	// CB-128: crédito con cuotas/mora/convenio/saldo a favor para poblar el
+	// form "registrar pago" de la Ficha 360 — mismo endpoint y shape que ya
+	// consume carteraFront (getCreditoByNumero) vía getCredito().
+	getCreditoParaPago: cobrosProcedure
+		.input(z.object({ numeroSifco: z.string() }))
+		.handler(async ({ input }) => {
+			// CB-128: sin cache — el asesor necesita mora/atrasadas/saldo a favor
+			// reales al momento de cobrar, no una copia de hasta 5 min de vieja.
+			return carteraBackClient.getCredito(input.numeroSifco, false);
+		}),
+
+	// Catálogo de bancos para el selector del form de pago.
+	getBancosParaPago: cobrosProcedure.handler(async () => {
+		return carteraBackClient.getBancos();
+	}),
+
+	// Abonos parciales ya hechos a una cuota puntual — insumo del cálculo de
+	// excedente (Otros → Mora → Convenio → Cuota), igual que registerPayment.ts
+	// en carteraFront.
+	getAbonosCuotaParaPago: cobrosProcedure
+		.input(z.object({ numeroSifco: z.string(), numeroCuota: z.number().int() }))
+		.handler(async ({ input }) => {
+			return carteraBackClient.getAbonosCuota(
+				input.numeroSifco,
+				input.numeroCuota,
+			);
+		}),
+
+	// Promesa de pago vigente del crédito (o null), para el mismo aviso que
+	// muestra carteraFront en el detalle del crédito.
+	getPromesaActivaParaPago: cobrosProcedure
+		.input(z.object({ creditoId: z.number().int() }))
+		.handler(async ({ input }) => {
+			return carteraBackClient.getPromesaActivaPorCredito(input.creditoId);
+		}),
+
+	// CB-128: registro de pago "igual a carteraFront" desde la Ficha 360 —
+	// arma el payload completo que espera pagoSchema en cartera-back (a
+	// diferencia de registrarPago arriba, que es el subset mínimo del bot de
+	// WhatsApp) y, al confirmarse el pago, además anota la gestión en
+	// contactos_cobros para que aparezca en Historial/Cumplimiento de agenda
+	// del asesor — el requisito de negocio que originó este endpoint.
+	registrarPagoCompleto: cobrosProcedure
+		.input(
+			z
+				.object({
+					casoCobroId: z.string().uuid(),
+					numeroSifco: z.string(),
+					creditoId: z.number().int().positive(),
+					usuarioId: z.number().int().positive(),
+					cuotaApagar: z.number().int().positive(),
+					montoBoleta: z.number().positive(),
+					fechaPago: z.string().date(),
+					fechaBoleta: z.string().datetime(),
+					otros: z.number().nonnegative().optional(),
+					abonoDirectoCapital: z.number().nonnegative().optional(),
+					// CB-128 (fix): antes opcionales — carteraFront (pagoSchema en
+					// hooks/registerPayment.ts:44-47) ya exige ambos como requisito
+					// de negocio real. Sin esto, un caller que se saltara la UI
+					// podía registrar un pago sin banco (cartera-back acepta
+					// banco_id ausente) y con origen_pago inventado por
+					// cartera-back (default "transferencia" cuando falta, ver
+					// registerPayment.ts:81) — dato contable falso persistido sin
+					// que el pago real haya sido por transferencia.
+					bancoId: z.number().int().positive(),
+					origenPago: z.enum(["transferencia", "cheque", "boleta"]),
+					numeroAutorizacion: z.string().max(100).optional(),
+					observaciones: z.string().max(2000).optional(),
+					// Un solo comprobante por pago — el form solo permite adjuntar 1
+					// archivo, así que un array más largo no corresponde a ningún caso
+					// de uso real y solo ampliaría la superficie de ataque.
+					// CB-128 (fix): mínimo 1 — carteraFront ya rechaza el submit sin
+					// comprobante adjunto (mismo requisito de negocio que
+					// registerPayment.ts espera para dejar rastro contable). El
+					// frontend de la Ficha 360 valida esto también, pero sin el
+					// mínimo acá cualquier caller directo (otro cliente, un bug
+					// futuro) podía mover dinero sin comprobante.
+					urlBoletas: z.array(z.string().min(1).max(500)).min(1).max(1),
+				})
+				// CB-128 (fix): otros y abonoDirectoCapital se validaban
+				// independientes, cada uno solo >=0 — sin tope contra
+				// montoBoleta. Cartera-back trata abono_directo_capital como un
+				// monto INDEPENDIENTE (no descontado del recibo real): un
+				// recibo de Q100 con abonoDirectoCapital=1000 aplicaba los
+				// Q1000 completos a capital sin que el comprobante real los
+				// respaldara. Se exige que la suma de ambos no exceda el monto
+				// real de la boleta.
+				.refine(
+					(data) => {
+						// CB-128 (fix): comparación en centavos enteros, no floats
+						// directos — 32.02 + 91.43 da 123.45000000000002 en JS
+						// (aritmética binaria), así que comparar contra 123.45 con
+						// <= rechazaba un pago legítimo donde los montos cuadran
+						// exacto. Math.round del total en centavos evita el error
+						// de redondeo acumulado.
+						const centavos = (n: number) => Math.round(n * 100);
+						return (
+							centavos(data.otros ?? 0) +
+								centavos(data.abonoDirectoCapital ?? 0) <=
+							centavos(data.montoBoleta)
+						);
+					},
+					{
+						message:
+							"La suma de 'Otros' y el abono directo a capital no puede exceder el monto de la boleta",
+						path: ["abonoDirectoCapital"],
+					},
+				),
+		)
+		.handler(async ({ input, context }) => {
+			const [caso] = await db
+				.select({
+					id: casosCobros.id,
+					numeroCreditoSifco: casosCobros.numeroCreditoSifco,
+				})
+				.from(casosCobros)
+				.where(eq(casosCobros.id, input.casoCobroId))
+				.limit(1);
+
+			if (!caso) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Caso de cobro no encontrado",
+				});
+			}
+
+			// CB-128: sin este guard, un casoCobroId de un caso distinto al crédito
+			// que se está pagando (tab desactualizado, request manipulado) paga el
+			// crédito B pero anota la gestión en el historial del caso A —
+			// corrompe el historial de ambos créditos.
+			if (caso.numeroCreditoSifco !== input.numeroSifco) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"El caso de cobro no corresponde al crédito que se está pagando",
+				});
+			}
+
+			if (!isCarteraBackPaymentsEnabled()) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración de pagos con cartera-back no está habilitada",
+				});
+			}
+
+			// CB-128: creditoId/usuarioId vienen del cliente (cache de React Query
+			// puede quedar stale, o el request se puede manipular) y cartera-back
+			// los usa DIRECTO para aplicar fondos y abonar saldo_a_favor — sin
+			// validarlos, un numeroSifco correcto (pasa el guard de arriba) podía
+			// viajar con creditoId/usuarioId de OTRO crédito/usuario y la plata se
+			// aplicaba a la cuenta equivocada. Se resuelven server-side desde el
+			// SIFCO ya validado y se ignora lo que mandó el cliente.
+			//
+			const creditoReal = await carteraBackClient.getCredito(input.numeroSifco);
+			if (
+				creditoReal.credito.credito_id !== input.creditoId ||
+				creditoReal.usuario.usuario_id !== input.usuarioId
+			) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"El crédito o usuario enviado no corresponde al crédito consultado — refresca la página e intenta de nuevo",
+				});
+			}
+
+			// CB-128: chequeo de duplicado + creación del pago + guarda de
+			// referencia van dentro de la MISMA transacción, serializados con un
+			// advisory lock — un read-then-write plano (SELECT "¿existe
+			// duplicado?" seguido de un INSERT más abajo) deja abierta una
+			// ventana real: dos requests casi simultáneos (doble-click con
+			// latencia de red, o timeout+retry mientras el primero sigue en
+			// vuelo) pueden pasar el SELECT antes de que cualquiera inserte, y
+			// ambos terminan llamando a createPago. El lock hace que el segundo
+			// request espere a que el primero termine ESTA transacción completa
+			// (incluida la llamada HTTP a cartera-back) antes de correr su
+			// propio chequeo — para entonces la fila del primero ya existe. No
+			// es una idempotency key real (deuda pendiente), pero cierra la
+			// ventana de carrera en vez de solo reducirla.
+			//
+			// CB-128 (fix): scoped por CRÉDITO (SIFCO), no por casoCobroId. Un
+			// mismo SIFCO puede tener varias filas en casosCobros — no hay
+			// índice único sobre numero_credito_sifco (ver lib/caso-vigente.ts:
+			// duplicados posibles por reaperturas, migraciones, altas
+			// manuales). Un lock/chequeo por casoCobroId dejaba pasar dos
+			// requests "duplicados" de facto (mismo crédito real, mismo monto)
+			// si cada uno llegaba con el casoCobroId de un caso distinto del
+			// mismo SIFCO — ni el lock los serializaba entre sí, ni el chequeo
+			// de duplicado veía la fila del otro caso. También cierra el cruce
+			// de antes: el mismo asesor pagando dos cuotas del mismo crédito
+			// en paralelo comparte el mismo snapshot pagoIdMaximoPrevio y el
+			// mismo registerBy, así que el fallback podía resolver el pago_id
+			// de UNO al otro sin este lock serializándolos.
+			//
+			// hashtext(text) da un int32 determinístico — mismo SIFCO siempre
+			// genera el mismo lock id, sin colisionar con locks de otras
+			// features (namespace propio vía el prefijo "pago:").
+			const lockKey = `pago:${input.numeroSifco}`;
+
+			let respuesta:
+				| Awaited<ReturnType<typeof carteraBackClient.createPago>>
+				| undefined;
+			let pagoId: number | undefined;
+			let cuotaNumeroReal = input.cuotaApagar;
+			let pagoRef: { id: string } | undefined;
+
+			await db.transaction(async (tx) => {
+				await tx.execute(
+					sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`,
+				);
+
+				// CB-128 (fix): snapshot del pago_id más alto tomado DESPUÉS de
+				// adquirir el lock, no antes. Tomarlo antes (como en un intento
+				// previo) dejaba una ventana: dos pagos de MONTOS distintos
+				// para el mismo crédito y mismo asesor, corriendo casi
+				// simultáneos, calculaban el mismo snapshot compartido antes de
+				// que cualquiera entrara al lock. El primero en adquirir el
+				// lock crea su pago; si el segundo request necesita el
+				// fallback de pago_id (porque /newPayment no lo trajo inline)
+				// y hay lag de replicación, buscarPagoNuevo del segundo podía
+				// ver solo el pago del PRIMERO (con pago_id > snapshot
+				// compartido) y tomarlo como propio — vinculando la referencia
+				// al pago equivocado o chocando contra el UNIQUE de
+				// carteraPagoId. Al recalcularlo ya con el lock en mano, cada
+				// request ve el estado real justo antes de SU propio pago,
+				// sin importar cuántos otros pagos del mismo crédito ya
+				// pasaron por el lock antes.
+				const pagosPrevios = await carteraBackClient.getPagosByCredito(
+					input.numeroSifco,
+					false,
+				);
+				const pagoIdMaximoPrevio = pagosPrevios.reduce(
+					(max, p) => Math.max(max, p.pago_id),
+					0,
+				);
+
+				// CB-128 (fix): comparación por numeroCreditoSifco, no
+				// casoCobroId (ver comentario del lockKey arriba — un mismo
+				// SIFCO puede tener varios casosCobros). También sin
+				// cuotaNumero: cartera-back puede cascadear el pago a una
+				// cuota distinta a la pedida (ver más abajo), y la fila
+				// guardada usa cuotaNumero REAL, no la pedida — comparar
+				// contra input.cuotaApagar dejaba pasar un retry exacto tras
+				// una cascada. Comparar solo por SIFCO+monto es más
+				// conservador — bloquea cualquier pago del mismo monto en el
+				// mismo crédito dentro de 2 minutos, sin importar a qué cuota
+				// ni casoCobroId cayó cada uno — pero un asesor legítimo casi
+				// nunca repite el mismo monto exacto en el mismo crédito en
+				// ese lapso.
+				const dosMinutosAtras = new Date(Date.now() - 2 * 60 * 1000);
+				const [duplicadoReciente] = await tx
+					.select({ id: pagoReferences.id })
+					.from(pagoReferences)
+					.where(
+						and(
+							eq(pagoReferences.numeroCreditoSifco, input.numeroSifco),
+							eq(pagoReferences.montoBoleta, input.montoBoleta.toString()),
+							gte(pagoReferences.registradoEn, dosMinutosAtras),
+						),
+					)
+					.limit(1);
+
+				if (duplicadoReciente) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"Ya se registró un pago igual (mismo caso, cuota y monto) hace menos de 2 minutos. Si no fue un envío duplicado, espera un momento antes de reintentar.",
+					});
+				}
+
+				// CB-128 (fix): timestamp tomado justo ANTES de llamar a createPago
+				// — necesario porque cartera-back a veces CIERRA una cuota
+				// pisando (UPDATE) el placeholder no_required que cada cuota ya
+				// trae desde que se generó el calendario de pagos ("comportamiento
+				// histórico para el caso normal", ver registerPayment.ts:1576-1604
+				// y destinoSobrescribible) en vez de insertar una fila nueva. En
+				// ese camino el pago_id NO cambia — sigue siendo el del
+				// placeholder viejo, que ya estaba incluido en pagoIdMaximoPrevio
+				// — así que el filtro pago_id > snapshot nunca lo encuentra, sin
+				// importar cuántos retries se hagan (el ID jamás va a cambiar).
+				// Es el camino MÁS COMÚN para un pago normal al día (cuota sin
+				// abonos parciales previos), no un caso raro. fecha_pago en
+				// cartera-back se guarda con el timestamp real de aplicación
+				// (hora de Guatemala con segundos), así que sirve como ancla
+				// alternativa cuando el pago_id no ayuda.
+				const antesDeCrearPago = new Date();
+
+				try {
+					respuesta = await carteraBackClient.createPago({
+						credito_numero_sifco: input.numeroSifco,
+						credito_id: creditoReal.credito.credito_id,
+						usuario_id: creditoReal.usuario.usuario_id,
+						cuotaApagar: input.cuotaApagar,
+						monto_boleta: input.montoBoleta,
+						fecha_pago: input.fechaPago,
+						fecha_boleta: input.fechaBoleta,
+						otros: input.otros,
+						abono_directo_capital: input.abonoDirectoCapital,
+						banco_id: input.bancoId,
+						origen_pago: input.origenPago,
+						numeroAutorizacion: input.numeroAutorizacion,
+						observaciones: input.observaciones,
+						url_boletas: input.urlBoletas,
+						registerBy: context.userId,
+					});
+				} catch (error) {
+					// CB-128 (fix): solo un 4xx de CarteraBackHttpError es un
+					// rechazo DEFINITIVO (validación fallida, boleta duplicada,
+					// etc.) — ahí cartera-back respondió antes de escribir nada y
+					// un BAD_REQUEST normal es correcto. Un 5xx (o cualquier otro
+					// error: timeout de AbortSignal, conexión caída, "fetch
+					// failed") es un resultado INCIERTO: registerPayment.ts hace
+					// escrituras no transaccionales (ej. insertarPago antes del
+					// update de saldo_a_favor, ver línea ~2250-2271) — un fallo
+					// DESPUÉS de esa escritura devuelve un 500 aunque el pago ya
+					// se haya insertado. Tratar un 5xx igual que un 4xx invitaba
+					// al asesor a reintentar creyendo que no pasó nada, duplicando
+					// el pago si en realidad sí se había aplicado parcialmente.
+					//
+					// CB-128 (fix): excepción dentro de los 4xx — el 409 de "abono
+					// directo a capital no aplicado" (registerPayment.ts:2193-2200,
+					// debeRechazarAbonoCapitalNoAplicado) NO es limpio: antes de
+					// llegar a ese guard, procesarPagoMora ya pudo haber pagado
+					// mora activa (línea ~828) y/o processConvenioPayment ya pudo
+					// haber acreditado el convenio (línea ~941) — ninguna de esas
+					// escrituras está en transacción del lado de cartera-back. Un
+					// asesor que reintenta tras este 409 puede encontrar la mora
+					// ya pagada sin entender por qué. Cartera-back no expone un
+					// código de máquina para distinguir este 409 de otros (solo
+					// manda `message` en texto libre), así que se detecta por un
+					// fragmento estable del mensaje — frágil si el texto cambia
+					// del lado de cartera-back, pero cierra el hueco real hoy.
+					const esRechazoAbonoCapitalConEfectosSecundarios =
+						error instanceof CarteraBackHttpError &&
+						error.status === 409 &&
+						error.message.includes("abono directo a capital");
+
+					if (
+						error instanceof CarteraBackHttpError &&
+						error.status >= 400 &&
+						error.status < 500 &&
+						!esRechazoAbonoCapitalConEfectosSecundarios
+					) {
+						throw new ORPCError("BAD_REQUEST", {
+							message: `Error registrando pago: ${error.message}`,
+						});
+					}
+					const message =
+						error instanceof Error ? error.message : String(error);
+					console.error(
+						"[registrarPagoCompleto] Resultado incierto llamando a /newPayment (fallo de transporte, 5xx, o 409 de abono a capital con posibles efectos secundarios ya aplicados):",
+						error,
+					);
+					throw new ORPCError("INTERNAL_SERVER_ERROR", {
+						message: `No se pudo confirmar si el pago se registró en cartera-back (${message}). NO reintentes de inmediato — contacta a soporte para verificar antes de volver a intentarlo.`,
+					});
+				}
+
+				// CB-128: soloInformativo=true (mora parcial insuficiente, saldo a
+				// favor, etc.) NO es un error — cartera-back sí insertó la fila del
+				// pago, solo avisa que no alcanzó a cerrar la cuota (mismo mensaje
+				// que carteraFront muestra como notificación de éxito, no como
+				// rechazo). success===false explícito SÍ es un rechazo real
+				// (validación fallida, boleta duplicada, etc.) y ahí sí se bloquea.
+				if (!respuesta.success && !respuesta.soloInformativo) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: `Error registrando pago: ${respuesta.message ?? "cartera-back rechazó el pago"}`,
+					});
+				}
+
+				// CB-128: /newPayment no siempre trae pago_id inline (el camino
+				// normal de pago no lo incluye, solo la rama de abono directo a
+				// capital) — se resuelve consultando el pago recién creado por
+				// SIFCO cuando falta. Filtro obligatorio: registerBy === mi
+				// userId — cierra el race condition de dos asesores pagando el
+				// mismo crédito casi al mismo tiempo (antes se tomaba "el pago_id
+				// más alto de los nuevos" a ciegas, que podía ser el pago del
+				// OTRO asesor si ambos insertaron en la misma ventana).
+				//
+				// CB-128 (fix): "es reciente" ya NO es solo pago_id > snapshot —
+				// también acepta fecha_pago >= antesDeCrearPago (con 5s de
+				// margen por reloj no sincronizado entre CRM y cartera-back).
+				// Cuando cartera-back UPDATE-ea el placeholder no_required en
+				// vez de insertar (ver comentario en antesDeCrearPago arriba), el
+				// pago_id nunca supera el snapshot — sin esta segunda condición
+				// el fallback fallaba siempre para ese camino, que es el más
+				// común. Segundo intento con espera corta cubre lag de
+				// replicación entre el insert/update de /newPayment y la lectura
+				// de /paymentByCredit.
+				const buscarPagoNuevo = async () => {
+					// Sin cache: ver comentario en el snapshot de pagoIdMaximoPrevio
+					// arriba — con cache, el retry de 1.5s podía pegar contra la
+					// misma respuesta stale del primer intento en vez de volver a
+					// consultar cartera-back.
+					const pagos = await carteraBackClient.getPagosByCredito(
+						input.numeroSifco,
+						false,
+					);
+					const margenMs = 5 * 1000;
+					// CB-128 (fix): pagos_credito.fecha_pago es un `timestamp` de
+					// Postgres SIN zona horaria (a diferencia de otras columnas del
+					// mismo schema que sí declaran withTimezone: true) —
+					// cartera-back escribe el reloj de Guatemala tal cual, y el
+					// driver lo devuelve interpretándolo como UTC. Sin corregir
+					// esto, un pago aplicado a las 04:00 hora Guatemala se leía
+					// como 04:00 UTC (que en realidad es 10:00 GT) — 6 horas
+					// "en el pasado" respecto al antesDeCrearPago real, muy fuera
+					// del margen de 5s. Se suma el offset de Guatemala (UTC-6, sin
+					// horario de verano) para recuperar el instante UTC real.
+					const OFFSET_GUATEMALA_MS = 6 * 60 * 60 * 1000;
+					const nuevos = pagos.filter((p) => {
+						if (p.registerBy !== context.userId) return false;
+						if (p.pago_id > pagoIdMaximoPrevio) return true;
+						const fechaPagoMs =
+							new Date(p.fecha_pago).getTime() + OFFSET_GUATEMALA_MS;
+						return (
+							Number.isFinite(fechaPagoMs) &&
+							fechaPagoMs >= antesDeCrearPago.getTime() - margenMs
+						);
+					});
+					return nuevos.sort((a, b) => b.pago_id - a.pago_id)[0];
+				};
+				pagoId = respuesta.pago_id;
+				// CB-128: cartera-back puede cascadear el pago a una cuota
+				// distinta a la pedida (ej. pide pagar la 5, el sistema cierra 5
+				// y 6 si alcanza) — el camino normal de /newPayment solo devuelve
+				// un CONTADOR de cuotas cerradas, no sus números, así que no hay
+				// forma de saberlo desde la respuesta directa. Se guarda
+				// input.cuotaApagar por default (la cuota pedida) y se corrige
+				// con el numero_cuota real SOLO cuando se tuvo que consultar el
+				// pago igual (fallback de pagoId) — ahí sí se sabe cuál cuota
+				// cerró de verdad.
+				if (!pagoId) {
+					// CB-128 (fix): createPago YA tuvo éxito en este punto (el
+					// dinero se movió) — si buscarPagoNuevo() en sí LANZA (timeout
+					// o 5xx de getPagosByCredito agotando sus reintentos internos),
+					// eso es distinto de "no encontrado todavía": un throw sin
+					// capturar acá se propaga fuera de la transacción como error
+					// genérico, saltándose el mensaje explícito "NO reintentes" de
+					// abajo — el asesor ve un fallo de servidor normal y puede
+					// reintentar un pago que ya se aplicó. Se trata un fallo del
+					// primer intento como "no encontrado todavía" (se sigue al
+					// retry de 1.5s); un fallo del segundo intento si es un
+					// resultado incierto real.
+					let pagoEncontrado:
+						| Awaited<ReturnType<typeof buscarPagoNuevo>>
+						| undefined;
+					try {
+						pagoEncontrado = await buscarPagoNuevo();
+					} catch {
+						pagoEncontrado = undefined;
+					}
+					if (!pagoEncontrado) {
+						await new Promise((resolve) => setTimeout(resolve, 1500));
+						try {
+							pagoEncontrado = await buscarPagoNuevo();
+						} catch (error) {
+							const message =
+								error instanceof Error ? error.message : String(error);
+							console.error(
+								"[registrarPagoCompleto] Resultado incierto: createPago tuvo éxito pero buscarPagoNuevo falló dos veces (timeout/5xx):",
+								error,
+							);
+							throw new ORPCError("INTERNAL_SERVER_ERROR", {
+								message: `El pago se registró en cartera-back pero el CRM no pudo confirmar su referencia (${message}). NO reintentes el pago — contacta a soporte para verificar antes de volver a registrarlo.`,
+							});
+						}
+					}
+					pagoId = pagoEncontrado?.pago_id;
+					if (pagoEncontrado?.numero_cuota != null) {
+						cuotaNumeroReal = pagoEncontrado.numero_cuota;
+					}
+				} else {
+					// CB-128 (fix): pago_id inline significa que cartera-back tomó
+					// la rama de abono directo a capital — ahí NO respeta
+					// cuotaApagar, se vincula a ultimaCuotaPagada (u otro
+					// fallback interno, ver registerPayment.ts:2016-2019), que
+					// puede ser una cuota distinta a la pedida. Asumir
+					// input.cuotaApagar guardaba la cuota equivocada en
+					// pagoReferences y en el comentario de gestión generado. Se
+					// busca el pago por su pago_id YA conocido para leer su
+					// numero_cuota real. Mismo retry con espera corta que la
+					// rama hermana de arriba (!pagoId) — el mismo lag de
+					// replicación entre el insert de /newPayment y la lectura
+					// de /paymentByCredit aplica acá igual: una sola lectura sin
+					// reintentar podía no encontrar el pago_id ya conocido y
+					// dejar cuotaNumeroReal silenciosamente en input.cuotaApagar
+					// (la cuota pedida, que en esta rama es justamente la que NO
+					// hay que asumir).
+					const buscarPagoVinculado = async () => {
+						const pagos = await carteraBackClient.getPagosByCredito(
+							input.numeroSifco,
+							false,
+						);
+						return pagos.find((p) => p.pago_id === pagoId);
+					};
+					// CB-128 (fix): createPago YA tuvo éxito en esta rama (pago_id
+					// vino inline, dinero movido) — a diferencia de la rama
+					// hermana (!pagoId), acá nunca hubo un throw explícito de "NO
+					// reintentes" al final, así que un buscarPagoVinculado() que
+					// LANZA (timeout/5xx de getPagosByCredito) se propagaba sin
+					// ningún mensaje de resultado incierto — el asesor veía un
+					// error genérico y podía reintentar un abono a capital ya
+					// aplicado. Un fallo se trata como "no encontrado" (se sigue
+					// con cuotaResuelta/input.cuotaApagar como fallback, igual
+					// que si getPagosByCredito nunca hubiera devuelto ese pago);
+					// no hace falta bloquear el pago por esto — cuotaNumeroReal
+					// simplemente no se corrige y sigue con su valor por default.
+					let pagoVinculado: Awaited<ReturnType<typeof buscarPagoVinculado>>;
+					try {
+						pagoVinculado = await buscarPagoVinculado();
+					} catch {
+						pagoVinculado = undefined;
+					}
+					if (!pagoVinculado) {
+						await new Promise((resolve) => setTimeout(resolve, 1500));
+						try {
+							pagoVinculado = await buscarPagoVinculado();
+						} catch (error) {
+							console.error(
+								"[registrarPagoCompleto] No se pudo resolver la cuota real del abono a capital tras 2 intentos (timeout/5xx) — se mantiene la cuota pedida como fallback:",
+								error,
+							);
+							pagoVinculado = undefined;
+						}
+					}
+					if (pagoVinculado?.numero_cuota != null) {
+						cuotaNumeroReal = pagoVinculado.numero_cuota;
+					}
+				}
+				if (!pagoId) {
+					// El dinero YA se movió en cartera-back (createPago tuvo
+					// éxito) — solo falló resolver la referencia local. Mensaje
+					// explícito para que el asesor NO reintente (duplicaría el
+					// pago) sino que avise a soporte para reconciliar
+					// manualmente.
+					throw new ORPCError("INTERNAL_SERVER_ERROR", {
+						message:
+							"El pago se registró en cartera-back pero el CRM no pudo confirmar su referencia. NO reintentes el pago — contacta a soporte para verificar antes de volver a registrarlo.",
+					});
+				}
+
+				// Referencia local del pago — misma tabla que ya usa
+				// registrarPago/createPagoInCarteraBack arriba.
+				try {
+					[pagoRef] = await tx
+						.insert(pagoReferences)
+						.values({
+							carteraPagoId: pagoId,
+							numeroCreditoSifco: input.numeroSifco,
+							cuotaNumero: cuotaNumeroReal,
+							montoBoleta: input.montoBoleta.toString(),
+							fechaPago: new Date(input.fechaPago),
+							casoCobroId: input.casoCobroId,
+							registradoPor: context.userId,
+							syncStatus: "synced",
+						})
+						.returning();
+				} catch (error) {
+					// El dinero YA se movió en cartera-back (createPago tuvo
+					// éxito) — solo falló guardar la referencia local (ej. error
+					// transitorio de conexión a la DB del CRM). Sin esta fila
+					// tampoco existe ancla para el chequeo de duplicado de
+					// arriba, así que un reintento del asesor duplicaría el pago
+					// real — mismo mensaje explícito "NO reintentes" que el caso
+					// hermano de arriba (pagoId no resuelto).
+					console.error(
+						"[registrarPagoCompleto] Pago confirmado en cartera-back pero falló el insert de pagoReferences:",
+						error,
+					);
+					throw new ORPCError("INTERNAL_SERVER_ERROR", {
+						message:
+							"El pago se registró en cartera-back pero el CRM no pudo guardar su referencia. NO reintentes el pago — contacta a soporte para verificar antes de volver a registrarlo.",
+					});
+				}
+			});
+
+			// Anotar la gestión en contactos_cobros — best-effort: el pago ya se
+			// confirmó en cartera-back (el dinero ya se movió), así que un fallo
+			// acá no debe revertirlo ni impedir devolver éxito al asesor. Pero SÍ
+			// hay que avisarle que la gestión no quedó registrada — de lo
+			// contrario el objetivo original del feature (que el pago cuente para
+			// Historial de gestiones y Cumplimiento de agenda) se pierde en
+			// silencio detrás de un toast de éxito sin ninguna señal.
+			let gestionRegistrada = true;
+			try {
+				const bucketSnapshot = await capturarBucketSnapshot(input.casoCobroId);
+				const partesComentario = [
+					`Pago de Q${input.montoBoleta.toFixed(2)} registrado (cuota ${cuotaNumeroReal})`,
+					cuotaNumeroReal !== input.cuotaApagar
+						? `cascadeado desde cuota ${input.cuotaApagar} solicitada`
+						: null,
+					input.numeroAutorizacion
+						? `autorización ${input.numeroAutorizacion}`
+						: null,
+					input.observaciones,
+				].filter(Boolean);
+
+				await db.insert(contactosCobros).values({
+					casoCobroId: input.casoCobroId,
+					metodoContacto: "pago",
+					estadoContacto: "pago_registrado",
+					comentarios: partesComentario.join(" — "),
+					realizadoPor: context.userId,
+					bucketSnapshot,
+					pagoReferenceId: pagoRef?.id,
+				});
+			} catch (error) {
+				gestionRegistrada = false;
+				console.error(
+					"[registrarPagoCompleto] Pago confirmado en cartera-back pero falló el registro de la gestión en contactos_cobros:",
+					error,
+				);
+			}
+
+			return {
+				success: true,
+				pago_id: pagoId,
+				gestionRegistrada,
+				message: respuesta?.message ?? "Pago registrado exitosamente",
 			};
 		}),
 
@@ -4299,7 +4962,7 @@ export const cobrosRouter = {
 						distribucionInversionistas: pago.pagos_inversionistas?.map(
 							(pi) => ({
 								inversionistaId: pi.inversionista_id,
-								inversionistaNombre: pi.inversionista?.nombre,
+								inversionistaNombre: pi.nombre,
 								abonoCapital: pi.abono_capital,
 								abonoInteres: pi.abono_interes,
 								abonoIva: pi.abono_iva_12,

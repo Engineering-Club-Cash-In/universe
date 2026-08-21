@@ -59,6 +59,7 @@ import {
 } from "./routers/index";
 import { investmentsRouter } from "./routers/investments";
 import externalContractsRouter from "./routes/external-contracts";
+import { carteraBackClient } from "./services/cartera-back-client";
 import { checkCobrosAlertas } from "./services/check-cobros-alertas";
 import {
 	type CheckPromesasResumen,
@@ -307,6 +308,52 @@ app.post("/api/upload-vehicle-photo", async (c) => {
 	} catch (error) {
 		console.error("Error uploading vehicle photo:", error);
 		return c.json({ error: "Error al subir la foto" }, 500);
+	}
+});
+
+// CB-128: boleta/comprobante del form "registrar pago" (Ficha 360). Reenvía
+// el archivo server-to-server al mismo endpoint POST /upload que usa
+// carteraFront — el bucket R2 y las credenciales de cartera-back nunca las ve
+// el browser del CRM, mismo patrón de proxy que ya siguen los uploads de
+// vehículo de arriba.
+app.post("/api/upload-boleta-pago", async (c) => {
+	try {
+		const context = await createContext({ context: c });
+
+		if (!context.session?.user?.id) {
+			return c.json({ error: "No autorizado" }, 401);
+		}
+
+		const userRole = context.session.user.role;
+		if (!userRole || !PERMISSIONS.canAccessCobros(userRole)) {
+			return c.json({ error: "No tienes permiso para registrar pagos" }, 403);
+		}
+
+		const formData = await c.req.formData();
+		const file = formData.get("file") as File;
+
+		if (!file) {
+			return c.json({ error: "Falta el archivo de la boleta" }, 400);
+		}
+
+		const { validateFile } = await import("./lib/storage");
+		const validation = validateFile(file);
+		if (!validation.valid) {
+			console.error("Boleta de pago rechazada:", {
+				fileName: file.name,
+				fileType: file.type,
+				fileSize: file.size,
+				error: validation.error,
+			});
+			return c.json({ error: validation.error }, 400);
+		}
+
+		const { filename } = await carteraBackClient.uploadFile(file, file.name);
+
+		return c.json({ success: true, data: { filename } });
+	} catch (error) {
+		console.error("Error uploading boleta de pago:", error);
+		return c.json({ error: "Error al subir la boleta" }, 500);
 	}
 });
 

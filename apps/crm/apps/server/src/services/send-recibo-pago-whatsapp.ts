@@ -17,9 +17,10 @@
  * tipado, nunca como una excepción.
  */
 
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "../db";
 import { casosCobros, contratosFinanciamiento } from "../db/schema/cobros";
+import { clients, leads, opportunities } from "../db/schema/crm";
 import { vehicles } from "../db/schema/vehicles";
 import { user } from "../db/schema/auth";
 import { ROLES } from "../lib/roles";
@@ -70,6 +71,16 @@ interface DatosCaso {
 	vehiculoPlaca: string | null;
 }
 
+/**
+ * `casos_cobros` solo existe para créditos en mora (`diasMora > 0`, ver
+ * `sync-casos-cobros.ts`), así que un cliente al día nunca tiene fila ahí.
+ * Fallback: `opportunities` (ganada/migrada) → `leads.phone`, la misma
+ * fuente que ya usa el bot de cobros para cualquier crédito activo
+ * (`bot-cobros/buscar-cliente.ts`). El vehículo se resuelve vía
+ * `clients.opportunityId` → `contratosFinanciamiento`, cuando existe.
+ */
+const ESTADOS_CON_CREDITO = ["won", "migrate"] as const;
+
 async function cargarCasoPorSifco(numeroSifco: string): Promise<DatosCaso | null> {
 	const [row] = await db
 		.select({
@@ -87,10 +98,39 @@ async function cargarCasoPorSifco(numeroSifco: string): Promise<DatosCaso | null
 		)
 		.leftJoin(vehicles, eq(contratosFinanciamiento.vehicleId, vehicles.id))
 		.where(eq(casosCobros.numeroCreditoSifco, numeroSifco))
-		.orderBy(desc(casosCobros.createdAt))
+		.orderBy(desc(casosCobros.activo), desc(casosCobros.updatedAt))
 		.limit(1);
 
-	return row ?? null;
+	if (row) return row;
+
+	const [fallback] = await db
+		.select({
+			telefonoPrincipal: leads.phone,
+			vehiculoMarca: vehicles.make,
+			vehiculoModelo: vehicles.model,
+			vehiculoYear: vehicles.year,
+			vehiculoPlaca: vehicles.licensePlate,
+		})
+		.from(opportunities)
+		.innerJoin(leads, eq(leads.id, opportunities.leadId))
+		.leftJoin(clients, eq(clients.opportunityId, opportunities.id))
+		.leftJoin(
+			contratosFinanciamiento,
+			eq(contratosFinanciamiento.clientId, clients.id),
+		)
+		.leftJoin(vehicles, eq(vehicles.id, contratosFinanciamiento.vehicleId))
+		.where(
+			and(
+				eq(opportunities.numeroSifco, numeroSifco),
+				inArray(opportunities.status, [...ESTADOS_CON_CREDITO]),
+			),
+		)
+		.orderBy(desc(opportunities.updatedAt))
+		.limit(1);
+
+	if (!fallback) return null;
+
+	return { ...fallback, telefonoAlternativo: null };
 }
 
 /** Envío disparado por el propio sistema: se atribuye al primer cobros_supervisor. */

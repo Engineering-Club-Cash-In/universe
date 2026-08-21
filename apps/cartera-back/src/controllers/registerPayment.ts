@@ -1,4 +1,5 @@
 import Big from "big.js";
+import { validationFailed } from "../constants/errorCodes";
 import z from "zod";
 import { db, lockPool } from "../database";
 import { withCapitalContext, setCapitalSource } from "../utils/withAuditContext";
@@ -632,10 +633,7 @@ export const insertPayment = async ({ body, set }: any) => {
     const parseResult = pagoSchema.safeParse(body);
     if (!parseResult.success) {
       set.status = 400;
-      return {
-        message: "Validation failed",
-        errors: parseResult.error.flatten().fieldErrors,
-      };
+      return validationFailed(parseResult.error.flatten().fieldErrors);
     }
 
     const {

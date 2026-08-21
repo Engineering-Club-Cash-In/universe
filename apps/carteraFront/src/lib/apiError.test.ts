@@ -183,3 +183,104 @@ describe("getApiErrorMessage", () => {
     ]);
   });
 });
+
+describe("getApiErrorMessage — detalle por campo del backend", () => {
+  /** Arma el AxiosError como lo entrega axios ante un 400 del backend. */
+  function errorCon(data: unknown, status = 400) {
+    return new AxiosError(
+      `Request failed with status code ${status}`,
+      "ERR_BAD_REQUEST",
+      undefined,
+      undefined,
+      { status, statusText: "Bad Request", headers: {}, config: {} as never, data },
+    );
+  }
+
+  it("muestra qué campo falló en vez del genérico de 'Validation failed'", () => {
+    const error = errorCon({
+      message: "Validation failed",
+      errors: { otros: ["Expected number, received string"] },
+    });
+
+    expect(getApiErrorMessage(error, "No se pudo registrar el pago")).toBe(
+      "No se pudo registrar el pago:\n• Otros: Debe ser un número válido",
+    );
+  });
+
+  it("lista varios campos con sus etiquetas amigables", () => {
+    const error = errorCon({
+      message: "Validation failed",
+      errors: {
+        banco_id: ["Required"],
+        monto_boleta: ["Number must be greater than or equal to 0.01"],
+      },
+    });
+
+    expect(getApiErrorMessage(error, "No se pudo registrar el pago")).toBe(
+      "No se pudo registrar el pago:\n" +
+        "• Banco: Este campo es obligatorio\n" +
+        "• Monto Boleta: Debe ser mayor o igual a 0.01",
+    );
+  });
+
+  it("entiende la forma flatten() completa bajo 'issues'", () => {
+    const error = errorCon({
+      message: "[ERROR] Parámetros inválidos",
+      issues: { formErrors: [], fieldErrors: { creditId: ["Expected number, received nan"] } },
+    });
+
+    expect(getApiErrorMessage(error, "No se pudo actualizar el crédito")).toBe(
+      "No se pudo actualizar el crédito:\n• Credit Id: Debe ser un número válido",
+    );
+  });
+
+  it("descarta los crudos técnicos que vengan dentro de errors", () => {
+    const error = errorCon({
+      message: "Validation failed",
+      errors: { _db: ["PostgresError: duplicate key violates constraint"] },
+    });
+
+    expect(getApiErrorMessage(error, "No se pudo registrar el pago")).toBe(
+      "No se pudo registrar el pago: Los datos enviados no son válidos, revisa los campos e intenta de nuevo",
+    );
+  });
+
+  it("un 'errors' vacío cae al mensaje traducido de siempre", () => {
+    const error = errorCon({ message: "Validation failed", errors: {} });
+
+    expect(getApiErrorMessage(error, "No se pudo registrar el pago")).toBe(
+      "No se pudo registrar el pago: Los datos enviados no son válidos, revisa los campos e intenta de nuevo",
+    );
+  });
+
+  it("ignora un `errors` que trae un crudo en string, no un mapa de campos", () => {
+    // updateDueDate.ts:283 y :390 responden así; el guard de tipo debe dejarlos
+    // pasar por el camino de siempre en vez de intentar formatearlos.
+    const error = errorCon(
+      {
+        message: "Error interno del servidor",
+        errors: "TypeError: cannot read properties of undefined",
+      },
+      500,
+    );
+
+    expect(getApiErrorMessage(error, "No se pudo actualizar la fecha")).toBe(
+      "No se pudo actualizar la fecha: Error interno del servidor",
+    );
+  });
+
+  it("el código de negocio sigue ganando sobre el detalle por campo", () => {
+    const error = errorCon(
+      {
+        code: "CREDIT_PENDING_CANCELLATION",
+        message: "Validation failed",
+        errors: { otros: ["Required"] },
+      },
+      409,
+    );
+
+    expect(getApiErrorMessage(error, "No se pudo registrar el pago")).toBe(
+      "No se pudo registrar el pago: No se puede registrar el pago porque el crédito está pendiente de cancelación.",
+    );
+  });
+});

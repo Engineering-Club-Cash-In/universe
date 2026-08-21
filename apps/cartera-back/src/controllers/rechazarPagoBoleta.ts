@@ -73,6 +73,7 @@ export const rechazarPagoBoleta = async ({ body, set, user }: any) => {
       registerBy: pagos_credito.registerBy,
       credito_id: pagos_credito.credito_id,
       monto_boleta: pagos_credito.monto_boleta,
+      validation_status: pagos_credito.validationStatus,
     })
     .from(pagos_credito)
     .where(eq(pagos_credito.pago_id, pago_id))
@@ -122,6 +123,25 @@ export const rechazarPagoBoleta = async ({ body, set, user }: any) => {
   )
     .map((f) => f.url)
     .filter((url): url is string => url !== null && url.trim() !== "");
+
+  // Un pago del bot SIN boleta viva puede ser dos cosas, y solo una se
+  // rechaza. El huérfano legítimo de §4.1 (insertPayment murió antes de
+  // escribir su fila de `boletas`) tiene monto y estado aplicables. Pero un
+  // "Revertir" normal también deja esta silueta: borra las filas de `boletas`
+  // y resetea el pago a `no_required` con monto 0 — con `registerBy` todavía
+  // diciendo bot. Rechazar ESO reversaría Q0 y le mandaría al cliente el
+  // aviso de una boleta que ya se resolvió por otro camino.
+  if (urlsDeLaBoleta.length === 0) {
+    const montoDelPago = new Big(pago.monto_boleta ?? 0);
+    if (pago.validation_status === "no_required" || montoDelPago.lte(0)) {
+      set.status = 409;
+      return {
+        success: false,
+        message:
+          "Ese pago ya no respalda ninguna boleta viva (probablemente ya se revirtió por el camino normal): no hay nada que rechazar ni que avisar.",
+      };
+    }
+  }
 
   // Sin filas de `boletas` (un huérfano de §4.1) no hay con qué buscar
   // hermanos: se reversa solo el pago señalado.

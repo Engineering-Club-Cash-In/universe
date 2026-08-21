@@ -381,12 +381,18 @@ export async function avisarRechazoAlCliente(
 	);
 
 	if (!salio) {
-		// El envío se cayó. Se suelta el reclamo: el job de respaldo lo vuelve a
-		// intentar cada hora mientras la boleta siga rechazada y sin notificar.
-		await db
-			.update(botCobrosBoletas)
-			.set({ avisoReclamadoEn: null, updatedAt: new Date() })
-			.where(eq(botCobrosBoletas.id, boleta.id));
+		// El envío se cayó — pero "se cayó" incluye la respuesta PERDIDA: un
+		// timeout después de que SimpleTech aceptó el mensaje se ve igual que un
+		// rechazo, y el WhatsApp puede estar ya en el teléfono del cliente. Por
+		// eso el reclamo NO se suelta: se deja vencer solo (10 min). Soltarlo
+		// acá habilitaría un reenvío inmediato —conta re-apretando, el job—
+		// sobre un mensaje que quizás ya llegó. El costo es que un fallo
+		// definitivo también espera esos minutos, y no importa: el job corre
+		// cada hora de todos modos. Sin una llave de idempotencia del lado de
+		// SimpleTech (su API de templates no acepta ninguna), el duplicado no
+		// se puede eliminar del todo — solo espaciar y acotar; el aviso es
+		// at-least-once a propósito: repetirle "tu boleta no era válida" al
+		// cliente es molesto, pero dejarlo creyendo que su pago entró es peor.
 		return { notificado: false, motivo: "ENVIO_FALLIDO" };
 	}
 

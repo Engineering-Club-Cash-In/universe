@@ -1420,8 +1420,11 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                         avisa al cliente por WhatsApp. Solo aparece en pagos
                         que subió el cliente por el bot; el reverso normal de
                         al lado sigue siendo un movimiento interno que no le
-                        habla a nadie. */}
-                    {pago.registerBy === "bot-cobros@clubcashin.com" && (
+                        habla a nadie. Un `no_required` es un placeholder que
+                        un reverso ya vació (registerBy queda del bot): no hay
+                        boleta viva que rechazar. */}
+                    {pago.registerBy === "bot-cobros@clubcashin.com" &&
+                      pago.validationStatus !== "no_required" && (
                       <button
                         className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded font-bold shadow flex items-center gap-1"
                         onClick={() =>
@@ -2081,6 +2084,71 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                             </DropdownMenuItem>
 
                             <DropdownMenuSeparator className="bg-gray-200 my-1" />
+
+                            {/* Pago no válido (bot de cobros, D-39): reversa
+                                Y le avisa al cliente por WhatsApp. Mismo gate
+                                que en la vista mobile: solo pagos del bot con
+                                boleta viva (no placeholders `no_required`).
+                                El "Revertir Pago" de abajo sigue siendo un
+                                movimiento interno que no le habla a nadie. */}
+                            {pago.registerBy === "bot-cobros@clubcashin.com" &&
+                              pago.validationStatus !== "no_required" && (
+                                <>
+                                  <DropdownMenuItem
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (
+                                        ["ADMIN", "CONTA"].includes(
+                                          user?.role ?? "",
+                                        )
+                                      ) {
+                                        setRechazoBoleta({
+                                          pagoId: pago.pagoId,
+                                          creditoId:
+                                            pago.credito?.creditoId || 0,
+                                        });
+                                      }
+                                    }}
+                                    disabled={
+                                      rechazarBoleta.isPending ||
+                                      !["ADMIN", "CONTA"].includes(
+                                        user?.role ?? "",
+                                      )
+                                    }
+                                    className={`cursor-pointer py-2.5 px-3 flex items-center rounded-lg transition ${
+                                      !["ADMIN", "CONTA"].includes(
+                                        user?.role ?? "",
+                                      )
+                                        ? "opacity-50 text-gray-400 bg-gray-50"
+                                        : "text-red-700 hover:text-red-900 hover:bg-red-50"
+                                    }`}
+                                  >
+                                    <Undo2
+                                      className={`w-4 h-4 mr-2 flex-shrink-0 ${
+                                        !["ADMIN", "CONTA"].includes(
+                                          user?.role ?? "",
+                                        )
+                                          ? "text-gray-400"
+                                          : "text-red-600"
+                                      }`}
+                                    />
+                                    <span className="font-semibold">
+                                      {rechazarBoleta.isPending
+                                        ? "Rechazando..."
+                                        : "Pago no válido"}
+                                    </span>
+                                    {!["ADMIN", "CONTA"].includes(
+                                      user?.role ?? "",
+                                    ) && (
+                                      <span className="ml-auto text-xs text-gray-400 font-normal">
+                                        ADMIN/CONTA
+                                      </span>
+                                    )}
+                                  </DropdownMenuItem>
+
+                                  <DropdownMenuSeparator className="bg-gray-200 my-1" />
+                                </>
+                              )}
 
                             {/* Revertir Pago */}
                             <DropdownMenuItem

@@ -503,7 +503,12 @@ cualquiera— y hace dos cosas, en este orden:
    la URL en `boletas`: una boleta que alcanzó para dos cuotas creó dos filas (§5.2), y
    reversar solo la seleccionada dejaría a las otras aplicadas mientras el cliente lee "tu
    pago no se acreditó". Si la URL también respalda pagos que no son del bot o de otro
-   crédito, se corta entero con 409 y lo ve una persona. Si un reverso del medio falla, se
+   crédito, se corta entero con 409 y lo ve una persona. Y un pago del bot **sin** boleta
+   viva solo se acepta si parece el huérfano legítimo de §4.1 (monto > 0 y estado
+   aplicable): un "Revertir" normal deja la misma silueta —filas de `boletas` borradas,
+   pago en `no_required` con monto 0 y `registerBy` todavía del bot— y rechazar eso
+   reversaría Q0 y le avisaría al cliente por una boleta que ya se resolvió por otro
+   camino (409; el front tampoco ofrece el botón sobre `no_required`). Si un reverso del medio falla, se
    informa qué quedó a medias y **no se avisa nada**: el mensaje solo puede salir cuando ya
    no queda nada aplicado. Y como `registerPayment` estampa el monto COMPLETO de la boleta
    en cada fila y cada `reversePayment` resta ese monto entero de `usuarios.saldo_a_favor`
@@ -534,6 +539,16 @@ sobre `aviso_reclamado_en` — una marca que **vence** a los 10 minutos. No pued
 `notificado_cliente_at` (que significa "esto se le **entregó**" y se escribe recién después
 del envío): un proceso que muere entre reclamar y enviar no ejecuta ningún catch, y esa boleta
 quedaría "notificada" sin que el cliente hubiera recibido nada.
+
+**El aviso al cliente es at-least-once a propósito.** La API de templates de SimpleTech no
+acepta ninguna llave de idempotencia, así que un proceso que muere después de que el
+proveedor aceptó el mensaje pero antes de escribir `notificado_cliente_at` —o un timeout
+que se comió la respuesta de un envío que sí salió— no se puede distinguir de un envío que
+nunca ocurrió. La regla que queda: ante un fallo el reclamo **no se suelta** (se deja vencer
+solo), para que ni un re-apriete de conta ni el job reenvíen de inmediato un mensaje que
+quizás ya llegó; el duplicado no se elimina, se espacia y se acota. La asimetría de costos
+decide: repetirle "tu boleta no era válida" al cliente es molesto; dejarlo creyendo que su
+pago entró es peor.
 
 **La red de seguridad es un job horario mínimo** que cobra las dos deudas: barre las boletas
 `rechazada` sin `notificado_cliente_at` y con el reclamo vencido para reintentar el mensaje

@@ -374,27 +374,6 @@ export async function faltaConsentimientoDelTitular(
 	return !cargado;
 }
 
-type ResultadoRenap = Awaited<ReturnType<typeof getOnlyRenapInfoController>>;
-
-const renapEnCurso = new Map<string, Promise<ResultadoRenap>>();
-
-/**
- * Una sola llamada a RENAP en vuelo por DPI. `renapinfo` se escribe con
- * select-then-insert sobre su llave primaria, y el timeout libera al que espera sin cortar la petición
- */
-function renapCompartido(dpi: string): Promise<ResultadoRenap> {
-	const enCurso = renapEnCurso.get(dpi);
-	if (enCurso) return enCurso;
-
-	const consulta = getOnlyRenapInfoController(dpi).finally(() => {
-		renapEnCurso.delete(dpi);
-	});
-
-	renapEnCurso.set(dpi, consulta);
-
-	return consulta;
-}
-
 const filaPorDpi = new Map<string, Promise<unknown>>();
 
 /** El caché de Infornet es por DPI: dos oportunidades de la misma persona se encolan para no pagar dos veces */
@@ -455,21 +434,24 @@ const validacionesEnCurso = new Map<
 
 /**
  * Reusa la validación en curso de la misma oportunidad en vez de disparar otra.
+ * La llave incluye el DPI: si el lead cambia de DPI mientras corre una
+ * validación, el resultado en curso pertenece a otra persona y reusarlo
+ * podría aprobar una identidad que nunca se validó.
  * Vive en memoria a propósito: un lock en la base retendría una conexión del
  * pool durante las llamadas externas.
  */
 function conMutexDeOportunidad(
-	opportunityId: string,
+	clave: string,
 	ejecutar: () => Promise<ResultadoEjecucionValidaciones>,
 ): Promise<ResultadoEjecucionValidaciones> {
-	const enCurso = validacionesEnCurso.get(opportunityId);
+	const enCurso = validacionesEnCurso.get(clave);
 	if (enCurso) return enCurso;
 
 	const validacion = ejecutar().finally(() => {
-		validacionesEnCurso.delete(opportunityId);
+		validacionesEnCurso.delete(clave);
 	});
 
-	validacionesEnCurso.set(opportunityId, validacion);
+	validacionesEnCurso.set(clave, validacion);
 
 	return validacion;
 }
@@ -481,7 +463,14 @@ export async function ejecutarValidaciones(parametros: {
 	/** El gate reusa un veredicto vigente; el botón manual siempre re-consulta */
 	reusarVigente?: boolean;
 }): Promise<ResultadoEjecucionValidaciones> {
-	return conMutexDeOportunidad(parametros.opportunityId, () =>
+	// El DPI se lee antes del mutex para que la llave lo incluya: reusar una
+	// validación en curso solo es seguro si ambas llamadas ven el mismo DPI
+	const oportunidad = await cargarOportunidadConLead(parametros.opportunityId);
+	const claveDpi = oportunidad?.leadDpi
+		? normalizarDpi(oportunidad.leadDpi)
+		: "sin-dpi";
+
+	return conMutexDeOportunidad(`${parametros.opportunityId}:${claveDpi}`, () =>
 		ejecutarValidacionesInterno(parametros),
 	);
 }
@@ -560,11 +549,13 @@ async function ejecutarValidacionesInterno({
 		if (vigente) return vigente;
 	}
 
-	// 1. RENAP: sincronizar datos de identidad en renap_info
+	// 1. RENAP: sincronizar datos de identidad en renap_info.
+	// El single-flight por DPI vive en `getOnlyRenapInfoController`,
+	// compartido con los demás callers (portal, lead público)
 	const renapResultado = await conReintento(
 		() =>
 			conTimeout(
-				() => renapCompartido(dpi),
+				() => getOnlyRenapInfoController(dpi),
 				TIMEOUT_RENAP_MS,
 				() => ({
 					success: false as const,

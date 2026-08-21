@@ -21,7 +21,7 @@ import {
 import { getOpenOpportunityBySource } from "@/lib/lead-opportunity";
 import { generateUniqueFilename, uploadFileFromUrlToR2 } from "@/lib/storage";
 import { db } from "../db";
-import { validarDpi } from "../utils/cui-validation";
+import { normalizarDpi, validarDpi } from "../utils/cui-validation";
 import { otpController } from "./otp";
 
 // Type for document type enum
@@ -1048,18 +1048,10 @@ export async function hasPassedLiveness(
 	};
 }
 /**
- * 📄 Controller: getOnlyRenapInfoController
- *
- * Fetches RENAP data by DPI, inserts or updates the `renap_info` table,
- * and returns the normalized RENAP data.
- *
- * ⚠️ This controller does NOT create or update leads.
- *
- * @param dpi - The citizen's DPI (unique identifier in RENAP).
- * @returns {Promise<{ success: boolean; message: string; data?: any; error?: any }>}
- * A standardized response object with success status, message, and optional data/error.
+ * Implementación de `getOnlyRenapInfoController`; la exportación pública le
+ * agrega el single-flight por DPI.
  */
-export const getOnlyRenapInfoController = async (dpi: string) => {
+const getOnlyRenapInfoControllerInterno = async (dpi: string) => {
 	console.log(`[DEBUG] Starting RENAP-only process for DPI: ${dpi}`);
 
 	try {
@@ -1175,4 +1167,40 @@ export const getOnlyRenapInfoController = async (dpi: string) => {
 			error: error?.message || error,
 		};
 	}
+};
+
+type ResultadoRenapInfo = Awaited<
+	ReturnType<typeof getOnlyRenapInfoControllerInterno>
+>;
+
+const renapInfoEnCurso = new Map<string, Promise<ResultadoRenapInfo>>();
+
+/**
+ * 📄 Controller: getOnlyRenapInfoController
+ *
+ * Fetches RENAP data by DPI, inserts or updates the `renap_info` table,
+ * and returns the normalized RENAP data.
+ *
+ * ⚠️ This controller does NOT create or update leads.
+ *
+ * Una sola llamada a RENAP en vuelo por DPI, compartida por todos los
+ * callers 
+ * @param dpi - The citizen's DPI (unique identifier in RENAP).
+ * @returns {Promise<{ success: boolean; message: string; data?: any; error?: any }>}
+ * A standardized response object with success status, message, and optional data/error.
+ */
+export const getOnlyRenapInfoController = (
+	dpi: string,
+): Promise<ResultadoRenapInfo> => {
+	const clave = normalizarDpi(dpi);
+	const enCurso = renapInfoEnCurso.get(clave);
+	if (enCurso) return enCurso;
+
+	const consulta = getOnlyRenapInfoControllerInterno(dpi).finally(() => {
+		renapInfoEnCurso.delete(clave);
+	});
+
+	renapInfoEnCurso.set(clave, consulta);
+
+	return consulta;
 };

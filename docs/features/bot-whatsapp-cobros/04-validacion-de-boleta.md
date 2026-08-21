@@ -498,8 +498,14 @@ contables que no le hablan a ningún cliente.
 válido"**. Pide un **motivo obligatorio** —es la diferencia entre este botón y un reverso
 cualquiera— y hace dos cosas, en este orden:
 
-1. **Reversa el pago**, llamando al `reversePayment` existente **sin tocarlo** (D-38). Si el
-   reverso falla, no se avisa nada y el error se muestra tal cual.
+1. **Reversa TODOS los pagos de la boleta**, llamando al `reversePayment` existente **sin
+   tocarlo** (D-38), uno por uno del más nuevo al más viejo. Los hermanos se encuentran por
+   la URL en `boletas`: una boleta que alcanzó para dos cuotas creó dos filas (§5.2), y
+   reversar solo la seleccionada dejaría a las otras aplicadas mientras el cliente lee "tu
+   pago no se acreditó". Si la URL también respalda pagos que no son del bot o de otro
+   crédito, se corta entero con 409 y lo ve una persona. Si un reverso del medio falla, se
+   informa qué quedó a medias y **no se avisa nada**: el mensaje solo puede salir cuando ya
+   no queda nada aplicado.
 2. **Le avisa al CRM** (`POST /api/bot/cobros/pagos/evento`, llave `CARTERA_WEBHOOK_API_KEY`
    por `x-api-key`), **esperando la respuesta**: avisar es el punto del botón, y conta ve en
    pantalla si el WhatsApp salió. Si el CRM no contesta, el reverso YA está hecho y el toast

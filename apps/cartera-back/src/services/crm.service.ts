@@ -315,7 +315,11 @@ export async function notificarRechazoPagoBot(
       },
       { headers: { "x-api-key": apiKey } },
     );
-    return data?.success === true;
+    // `success` solo dice que el CRM procesó el evento; si el WhatsApp salió
+    // viene aparte, en `notificado` — y con motivo: SIN_TELEFONO o un envío
+    // fallido también son 200. Mirar solo `success` haría que conta vea
+    // "cliente notificado" sobre un mensaje que nunca salió.
+    return data?.success === true && data?.notificado === true;
   } catch (error: any) {
     const msg =
       error?.response?.data?.message ?? error?.message ?? "desconocido";

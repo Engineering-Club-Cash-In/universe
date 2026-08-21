@@ -10,18 +10,19 @@
  * colgarse de él. Este endpoint existe para el único caso en que conta quiere
  * decirle algo al cliente: "tu boleta no era válida".
  *
- * Hace dos cosas, en este orden: reversa el pago LLAMANDO AL `reversePayment`
- * EXISTENTE —sin tocarlo, D-38— y le avisa al CRM, esperando la respuesta,
- * porque avisar es el punto de todo el botón.
+ * Hace dos cosas, en este orden: reversa TODOS los pagos de la boleta —una
+ * boleta que cubrió dos cuotas creó dos filas— LLAMANDO AL `reversePayment`
+ * EXISTENTE por cada uno, sin tocarlo (D-38), y le avisa al CRM esperando la
+ * respuesta, porque avisar es el punto de todo el botón.
  * ─────────────────────────────────────────────────────────────────────────────
  *
  * Solo ADMIN y CONTA, igual que el resto de acciones contables sobre pagos.
  */
 
-import { eq } from "drizzle-orm";
+import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../database";
-import { creditos, pagos_credito } from "../database/db/schema";
+import { boletas, creditos, pagos_credito } from "../database/db/schema";
 import {
   esPagoDelBotCobros,
   notificarRechazoPagoBot,
@@ -96,21 +97,85 @@ export const rechazarPagoBoleta = async ({ body, set, user }: any) => {
     .where(eq(creditos.credito_id, credito_id))
     .limit(1);
 
-  // 1 · El reverso, con el handler de siempre. `setInterno` captura su estado
-  // sin ensuciar el nuestro: si falla, se propaga tal cual y NO se avisa nada.
-  const setInterno: { status?: number } = {};
-  const resultadoReverso = await reversePayment({
-    body: { credito_id, pago_id },
-    set: setInterno,
-  });
+  // La boleta es UNA pero sus pagos pueden ser VARIOS: una boleta que alcanza
+  // para dos cuotas atrasadas crea dos filas de `pagos_credito`, cada una
+  // colgada de la misma URL. Rechazar "el pago" es rechazar la boleta entera:
+  // reversar solo la fila seleccionada dejaría a las hermanas aplicadas
+  // mientras el cliente recibe "tu pago no se acreditó" — mora y saldo
+  // mintiendo en direcciones opuestas. Se buscan los hermanos por la URL.
+  const urlsDeLaBoleta = (
+    await db
+      .select({ url: boletas.url_boleta })
+      .from(boletas)
+      .where(and(eq(boletas.pago_id, pago_id), isNotNull(boletas.url_boleta)))
+  )
+    .map((f) => f.url)
+    .filter((url): url is string => url !== null && url.trim() !== "");
 
-  if (setInterno.status && setInterno.status >= 400) {
-    set.status = setInterno.status;
-    return resultadoReverso;
+  // Sin filas de `boletas` (un huérfano de §4.1) no hay con qué buscar
+  // hermanos: se reversa solo el pago señalado.
+  const hermanos = urlsDeLaBoleta.length
+    ? await db
+        .selectDistinct({
+          pago_id: boletas.pago_id,
+          registerBy: pagos_credito.registerBy,
+          credito_id: pagos_credito.credito_id,
+        })
+        .from(boletas)
+        .innerJoin(pagos_credito, eq(pagos_credito.pago_id, boletas.pago_id))
+        .where(inArray(boletas.url_boleta, urlsDeLaBoleta))
+    : [];
+
+  // Si la misma URL cuelga de un pago que NO es del bot o de OTRO crédito,
+  // este botón no tiene autoridad para reversarlo — y reversar solo una parte
+  // es justo el estado mentiroso de arriba. Se corta entero y lo ve una
+  // persona.
+  const fueraDeAlcance = hermanos.filter(
+    (h) => !esPagoDelBotCobros(h.registerBy) || h.credito_id !== credito_id,
+  );
+  if (fueraDeAlcance.length > 0) {
+    set.status = 409;
+    return {
+      success: false,
+      message:
+        "La boleta de ese pago también respalda pagos que no son del bot o son de otro crédito: revisalo manualmente antes de rechazar.",
+      pagos_fuera_de_alcance: fueraDeAlcance.map((h) => h.pago_id),
+    };
+  }
+
+  const pagosARevertir = [
+    ...new Set([pago_id, ...hermanos.map((h) => h.pago_id)]),
+  ].sort((a, b) => b - a); // el más nuevo primero, como en un reverso a mano
+
+  // 1 · Los reversos, con el handler de siempre. `setInterno` captura su
+  // estado sin ensuciar el nuestro: si uno falla, se corta ahí, se informa
+  // qué quedó a medias y NO se avisa nada — el mensaje de "no se acreditó"
+  // solo puede salir cuando ya no queda nada aplicado.
+  const revertidos: number[] = [];
+  for (const id of pagosARevertir) {
+    const setInterno: { status?: number } = {};
+    const resultadoReverso = await reversePayment({
+      body: { credito_id, pago_id: id },
+      set: setInterno,
+    });
+
+    if (setInterno.status && setInterno.status >= 400) {
+      set.status = setInterno.status;
+      return {
+        ...(typeof resultadoReverso === "object" ? resultadoReverso : {}),
+        success: false,
+        message: revertidos.length
+          ? `⚠️ Se revirtieron los pagos ${revertidos.join(", ")} pero el ${id} falló: la boleta quedó a medias, NO se notificó al cliente. Resolvé el pago ${id} y volvé a rechazar.`
+          : `El reverso del pago ${id} falló: no se revirtió nada ni se notificó al cliente.`,
+        pagos_revertidos: revertidos,
+        pago_fallido: id,
+      };
+    }
+    revertidos.push(id);
   }
 
   // 2 · El aviso, esperando la respuesta: es el punto del botón. Si no llega,
-  // el reverso YA ESTÁ HECHO y eso se le dice a conta con todas las letras —
+  // los reversos YA ESTÁN HECHOS y eso se le dice a conta con todas las letras —
   // le toca avisar por otro medio, no apretar de nuevo.
   const notificado = await notificarRechazoPagoBot({
     pagoId: pago_id,
@@ -120,12 +185,18 @@ export const rechazarPagoBoleta = async ({ body, set, user }: any) => {
     usuario: user.email ?? user.nombre ?? null,
   });
 
+  const cuantos =
+    revertidos.length === 1
+      ? "Pago revertido"
+      : `${revertidos.length} pagos de la boleta revertidos`;
+
   return {
     success: true,
     message: notificado
-      ? "Pago revertido y cliente notificado."
-      : "⚠️ Pago revertido, pero NO se pudo notificar al cliente: avisale por otro medio (el CRM no respondió).",
+      ? `${cuantos} y cliente notificado.`
+      : `⚠️ ${cuantos}, pero NO se pudo notificar al cliente: avisale por otro medio.`,
     notificacion_enviada: notificado,
+    pagos_revertidos: revertidos,
     motivo,
   };
 };

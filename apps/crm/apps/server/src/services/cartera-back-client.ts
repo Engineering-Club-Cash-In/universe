@@ -186,18 +186,32 @@ const REPORTE_NO_LIQUIDADOS_TIMEOUT_MS = Number.parseInt(
 /**
  * ¿Ese estado HTTP prueba que el pago NO llegó a escribirse?
  *
- * Solo los 4xx. Todas las validaciones de `insertPayment` que devuelven
- * 400/404/409 —schema inválido, crédito inexistente, crédito bloqueado, boleta
- * duplicada, cuota ya cubierta— corren ANTES de la primera escritura, así que
- * un 4xx es un "no" firme y quien llamó puede dejar todo como estaba.
+ * Es una lista blanca, no un rango, y la diferencia importa. Estos tres son los
+ * que emite `insertPayment` desde sus validaciones, que corren ANTES de la
+ * primera escritura: schema inválido, crédito inexistente, crédito bloqueado,
+ * usuario inexistente, boleta duplicada, cuota ya cubierta. Un `4xx` de esa
+ * lista es un "no" firme y quien llamó puede dejar todo como estaba.
  *
- * Un 5xx no prueba nada: `insertPayment` responde 500 desde un catch que
+ * "Todos los 4xx" no servía: un intermediario —proxy, balanceador, el runtime
+ * del cliente— puede devolver 408 o 499 DESPUÉS de haber despachado el
+ * request, y cartera seguir adelante y escribir el pago igual. Contarlo como
+ * rechazo devuelve el borrador a `leida` y habilita una segunda confirmación.
+ *
+ * Un 5xx tampoco prueba nada: `insertPayment` responde 500 desde un catch que
  * envuelve todo el procesamiento y no es transaccional, así que el error pudo
- * ocurrir con parte del pago YA escrita. Tratarlo como rechazo es habilitar un
- * segundo pago real.
+ * ocurrir con parte del pago YA escrita.
+ *
+ * Todo lo que no esté acá se trata como indeterminado y lo resuelve la
+ * reconciliación. Es más lento y nunca cobra de más.
  */
+const ESTADOS_DE_RECHAZO_ANTES_DE_ESCRIBIR = new Set([
+	400, // el schema del pago no pasó
+	404, // crédito o usuario que no existe
+	409, // crédito bloqueado, boleta duplicada, cuota ya cubierta
+]);
+
 export function esRechazoDefinitivo(status: number): boolean {
-	return status >= 400 && status < 500;
+	return ESTADOS_DE_RECHAZO_ANTES_DE_ESCRIBIR.has(status);
 }
 
 /**

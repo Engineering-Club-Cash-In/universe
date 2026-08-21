@@ -711,11 +711,27 @@ async function ejecutarValidacionesInterno({
 		};
 	}
 
+	// `guardarEnCache` se traga los errores de base: sin fila vigente el estudio no quedó persistido
 	const [cacheRow] = await db
 		.select({ expiraEn: infornetPersonaCache.expiraEn })
 		.from(infornetPersonaCache)
-		.where(eq(infornetPersonaCache.dpi, dpi))
+		.where(
+			and(
+				eq(infornetPersonaCache.dpi, dpi),
+				gt(infornetPersonaCache.expiraEn, new Date()),
+			),
+		)
 		.limit(1);
+
+	if (!cacheRow) {
+		console.warn(
+			`⚠️ El estudio de ${dpi} no quedó en caché; el veredicto se guarda con vigencia propia`,
+		);
+	}
+
+	// La consulta sí fue exitosa: el veredicto vale aunque el caché no lo respalde
+	const expiraEnBuro =
+		cacheRow?.expiraEn ?? new Date(Date.now() + VIGENCIA_SIN_REGISTRO_MS);
 
 	const fuenteDeDatos = estudio.fromCache ? "cache" : "api";
 	const estadoBuro = veredicto.pasoBuro ? "aprobado" : "rechazado";
@@ -730,7 +746,7 @@ async function ejecutarValidacionesInterno({
 		nivelRiesgo: analisisRiesgo?.nivelRiesgo ?? null,
 		alertas: analisisRiesgo?.alertas ?? null,
 		fuenteDeDatos,
-		expiraEn: cacheRow?.expiraEn ?? null,
+		expiraEn: expiraEnBuro,
 		ejecutadoPor: userId ?? null,
 	});
 

@@ -354,6 +354,13 @@ function RegistrarPagoPage() {
 			toast.error("Indica el monto de la boleta");
 			return;
 		}
+		// CB-128: mismo refine (en centavos enteros) que registrarPagoCompleto
+		// — sin este chequeo acá, el submit subía la boleta y recién el backend
+		// rechazaba, dejando el archivo huérfano en storage.
+		if (Math.round(otrosNum * 100) > Math.round(montoBoletaNum * 100)) {
+			toast.error('El monto de "Otros" no puede ser mayor que la boleta');
+			return;
+		}
 		if (!bancoId) {
 			toast.error("Selecciona el banco");
 			return;

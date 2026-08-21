@@ -3140,8 +3140,8 @@ export const crmRouter = {
 			// bot de WhatsApp (el bot ya las ejecuta en su propio flujo). Va
 			// después de los chequeos de etapa y estado para no gastar llamadas
 			// a las fuentes externas en aprobaciones que igual van a fallar.
-			// Queda en null salvo que se valide: solo entonces el UPDATE de
-			// aprobación se condiciona a que el lead siga teniendo ese DPI
+			// El UPDATE de aprobación se condiciona a que el lead siga teniendo
+			// este DPI, tanto si se validó como si quedó exenta
 			let dpiVerificado: string | null = null;
 
 			if (input.approved && !input.bypassValidation) {
@@ -3154,6 +3154,12 @@ export const crmRouter = {
 					leadId: opportunity[0].leadId,
 					leadDpi: opportunity[0].leadDpi,
 				});
+
+				// Vale para los dos caminos: el validado y el exento. Una oportunidad
+				// exenta siempre tiene DPI, porque la evidencia del bot lo exige
+				if (opportunity[0].leadDpi) {
+					dpiVerificado = normalizarDpi(opportunity[0].leadDpi);
+				}
 
 				if (!exencion.exento) {
 					// El DPI como texto es obligatorio en la ficha del lead,
@@ -3198,10 +3204,6 @@ export const crmRouter = {
 								"El DPI del cliente cambió mientras se ejecutaban las validaciones. Vuelve a ejecutarlas antes de aprobar.",
 						});
 					}
-
-					// La aprobación se condiciona a este DPI: si cambia entre esta
-					// verificación y el UPDATE, la escritura no afecta filas y falla
-					dpiVerificado = normalizarDpi(opportunity[0].leadDpi ?? "");
 
 					// Ni el rechazo del buró ni la ausencia de registro bloquean:
 					// quedan en la bitácora y visibles en la página de análisis

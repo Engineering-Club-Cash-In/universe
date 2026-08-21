@@ -15,12 +15,13 @@
  * Decisión: D-14 (retención de PII y logs)
  */
 
-import { and, inArray, lt, sql } from "drizzle-orm";
+import { and, eq, inArray, lt, sql } from "drizzle-orm";
 import { db } from "../db";
 import {
 	botCobrosBoletas,
 	type EstadoBoletaBot,
 } from "../db/schema/bot-cobros-boletas";
+import { carteraBackClient } from "../services/cartera-back-client";
 
 const DIAS_DE_RETENCION = 7;
 
@@ -42,9 +43,25 @@ const PURGABLES: EstadoBoletaBot[] = [
 	"descartada",
 ];
 
+/** Tope por corrida: lo que no entre hoy, entra mañana. */
+const MAXIMO_POR_CORRIDA = 200;
+
 export async function purgarBoletasSinConfirmar(): Promise<number> {
-	const borradas = await db
-		.delete(botCobrosBoletas)
+	// ─────────────────────────────────────────────────────────────────────────
+	// PRIMERO EL ARCHIVO, DESPUÉS LA FILA.
+	//
+	// La foto vive en R2 y la fila guarda la única llave para reclamarla:
+	// borrar la fila primero cumplía la retención en la base y dejaba la PII
+	// de verdad —la imagen— huérfana en el bucket para siempre. Si el borrado
+	// del archivo falla, la fila se queda y se reintenta en la corrida
+	// siguiente; al revés no hay reintento posible.
+	//
+	// Cartera se niega (409) a borrar una llave que respalde un pago, así que
+	// el orden es seguro incluso contra un dato cruzado.
+	// ─────────────────────────────────────────────────────────────────────────
+	const candidatas = await db
+		.select({ id: botCobrosBoletas.id, r2Key: botCobrosBoletas.r2Key })
+		.from(botCobrosBoletas)
 		.where(
 			and(
 				inArray(botCobrosBoletas.estado, PURGABLES),
@@ -61,13 +78,30 @@ export async function purgarBoletasSinConfirmar(): Promise<number> {
 				)`,
 			),
 		)
-		.returning({ id: botCobrosBoletas.id });
+		.limit(MAXIMO_POR_CORRIDA);
 
-	if (borradas.length > 0) {
+	let purgadas = 0;
+
+	for (const boleta of candidatas) {
+		// Muchas purgables no tienen archivo (la lectura falló antes de subir).
+		if (boleta.r2Key) {
+			const archivoFuera = await carteraBackClient.deleteArchivoBoletaHuerfano(
+				boleta.r2Key,
+			);
+			// No se pudo (cartera caída, o la llave respalda un pago): la fila se
+			// queda con su llave y se reintenta mañana.
+			if (!archivoFuera) continue;
+		}
+
+		await db.delete(botCobrosBoletas).where(eq(botCobrosBoletas.id, boleta.id));
+		purgadas++;
+	}
+
+	if (purgadas > 0) {
 		console.log(
-			`[BotCobrosPurga] ${borradas.length} borrador(es) de boleta sin confirmar, de más de ${DIAS_DE_RETENCION} días, eliminados.`,
+			`[BotCobrosPurga] ${purgadas} borrador(es) de boleta sin confirmar, de más de ${DIAS_DE_RETENCION} días, eliminados (archivo incluido).`,
 		);
 	}
 
-	return borradas.length;
+	return purgadas;
 }

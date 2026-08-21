@@ -2494,6 +2494,33 @@ export class CarteraBackClient {
 		return response.json();
 	}
 
+	/**
+	 * Borra de R2 el archivo de una boleta del bot que nunca llegó a ser pago.
+	 *
+	 * Cartera se niega (409) si la llave respalda un pago registrado, así que
+	 * llamarlo de más es seguro. Devuelve `true` solo cuando el archivo ya no
+	 * existe del otro lado (borrado ahora, o 409 = no era nuestro para borrar:
+	 * en ese caso la fila del CRM tampoco debe purgarse — devuelve `false`).
+	 */
+	async deleteArchivoBoletaHuerfano(r2Key: string): Promise<boolean> {
+		try {
+			await this.request(
+				`/upload/boleta-huerfana?key=${encodeURIComponent(r2Key)}`,
+				{ method: "DELETE" },
+				false,
+				10_000,
+				false,
+			);
+			return true;
+		} catch (error) {
+			console.error(
+				`[CarteraBackClient] deleteArchivoBoletaHuerfano ${r2Key}:`,
+				error,
+			);
+			return false;
+		}
+	}
+
 	async createBoleta(
 		input: CreateBoletaInput,
 	): Promise<BoletaPagoInversionista> {

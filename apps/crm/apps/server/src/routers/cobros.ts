@@ -130,7 +130,10 @@ import {
 	buscarAsesorCarteraPorEmail,
 	obtenerPaginaAgenda,
 } from "../services/agenda-cobros-source";
-import { carteraBackClient } from "../services/cartera-back-client";
+import {
+	CarteraBackHttpError,
+	carteraBackClient,
+} from "../services/cartera-back-client";
 import {
 	createPagoInCarteraBack,
 	getCreditoReferenceByNumeroSifco,
@@ -4517,10 +4520,31 @@ export const cobrosRouter = {
 						registerBy: context.userId,
 					});
 				} catch (error) {
+					// CB-128 (fix): CarteraBackHttpError significa que cartera-back
+					// SÍ respondió con un rechazo real (4xx/5xx) — ahí un
+					// BAD_REQUEST normal es correcto, el dinero nunca se movió.
+					// Cualquier OTRO error (timeout de AbortSignal, conexión
+					// caída, "fetch failed") significa que la respuesta nunca
+					// llegó, pero el POST /newPayment pudo haber sido procesado
+					// igual del lado de cartera-back (el propio cliente HTTP ya
+					// documenta esto: "un método mutante puede haberse ejecutado
+					// igual aunque el cliente no vea la respuesta"). Tratar este
+					// caso como un BAD_REQUEST normal invitaba al asesor a
+					// reintentar creyendo que no pasó nada, duplicando el pago
+					// si en realidad sí se había aplicado.
+					if (error instanceof CarteraBackHttpError) {
+						throw new ORPCError("BAD_REQUEST", {
+							message: `Error registrando pago: ${error.message}`,
+						});
+					}
 					const message =
 						error instanceof Error ? error.message : String(error);
-					throw new ORPCError("BAD_REQUEST", {
-						message: `Error registrando pago: ${message}`,
+					console.error(
+						"[registrarPagoCompleto] Fallo de transporte llamando a /newPayment — resultado incierto, el pago pudo haberse aplicado:",
+						error,
+					);
+					throw new ORPCError("INTERNAL_SERVER_ERROR", {
+						message: `No se pudo confirmar si el pago se registró en cartera-back (${message}). NO reintentes de inmediato — contacta a soporte para verificar antes de volver a intentarlo.`,
 					});
 				}
 
@@ -4593,12 +4617,26 @@ export const cobrosRouter = {
 					// input.cuotaApagar guardaba la cuota equivocada en
 					// pagoReferences y en el comentario de gestión generado. Se
 					// busca el pago por su pago_id YA conocido para leer su
-					// numero_cuota real.
-					const pagos = await carteraBackClient.getPagosByCredito(
-						input.numeroSifco,
-						false,
-					);
-					const pagoVinculado = pagos.find((p) => p.pago_id === pagoId);
+					// numero_cuota real. Mismo retry con espera corta que la
+					// rama hermana de arriba (!pagoId) — el mismo lag de
+					// replicación entre el insert de /newPayment y la lectura
+					// de /paymentByCredit aplica acá igual: una sola lectura sin
+					// reintentar podía no encontrar el pago_id ya conocido y
+					// dejar cuotaNumeroReal silenciosamente en input.cuotaApagar
+					// (la cuota pedida, que en esta rama es justamente la que NO
+					// hay que asumir).
+					const buscarPagoVinculado = async () => {
+						const pagos = await carteraBackClient.getPagosByCredito(
+							input.numeroSifco,
+							false,
+						);
+						return pagos.find((p) => p.pago_id === pagoId);
+					};
+					let pagoVinculado = await buscarPagoVinculado();
+					if (!pagoVinculado) {
+						await new Promise((resolve) => setTimeout(resolve, 1500));
+						pagoVinculado = await buscarPagoVinculado();
+					}
 					if (pagoVinculado?.numero_cuota != null) {
 						cuotaNumeroReal = pagoVinculado.numero_cuota;
 					}

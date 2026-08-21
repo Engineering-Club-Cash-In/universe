@@ -469,14 +469,22 @@ export async function createPagoInCarteraBack(
 				// cuota distinta a la pedida. Asumir cuotaResuelta guardaba la
 				// cuota equivocada en pagoReferences y en el comentario de
 				// gestión generado. Se busca el pago por su pago_id YA conocido
-				// (sin esperar el retry de resolverPagoRecienCreado, que es
-				// para cuando no se conoce el id) para leer su numero_cuota
-				// real.
-				const pagos = await carteraBackClient.getPagosByCredito(
-					params.credito_numero_sifco,
-					false,
-				);
-				const pagoVinculado = pagos.find((p) => p.pago_id === pagoId);
+				// para leer su numero_cuota real, con el mismo retry ante lag
+				// de replicación que resolverPagoRecienCreado usa para el caso
+				// hermano (sin id conocido) — una sola lectura sin reintentar
+				// podía dejar cuotaNumeroReal en cuotaResuelta silenciosamente.
+				const buscarPagoVinculado = async () => {
+					const pagos = await carteraBackClient.getPagosByCredito(
+						params.credito_numero_sifco,
+						false,
+					);
+					return pagos.find((p) => p.pago_id === pagoId);
+				};
+				let pagoVinculado = await buscarPagoVinculado();
+				if (!pagoVinculado) {
+					await new Promise((resolve) => setTimeout(resolve, 1500));
+					pagoVinculado = await buscarPagoVinculado();
+				}
 				if (pagoVinculado?.numero_cuota != null) {
 					cuotaNumeroReal = pagoVinculado.numero_cuota;
 				}

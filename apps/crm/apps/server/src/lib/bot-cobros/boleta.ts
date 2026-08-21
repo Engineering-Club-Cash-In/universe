@@ -565,34 +565,46 @@ export async function leerBoleta(input: {
 	// 9 · Completar el borrador que se reservó en el paso 6. Lo que el bot
 	// recibe es su id, no los datos: para confirmar solo va a poder mandar ese
 	// id (D-26).
-	const [fila] = await db
-		.update(botCobrosBoletas)
-		.set({
-			r2Key,
-			lectura: leida,
-			bancoId: banco?.id ?? null,
-			monto: monto.toFixed(2),
-			fechaBoleta: fecha.fecha,
-			numeroAutorizacion: leida.numeroAutorizacion ?? null,
-			cuentaDestino: leida.cuentaDestino ?? null,
-			confianza: calcularConfianza(leida, banco !== null),
-			estado: "leida",
-			updatedAt: new Date(),
-		})
-		.where(eq(botCobrosBoletas.id, reserva.boletaId))
-		.returning({
-			id: botCobrosBoletas.id,
-			expiraEn: botCobrosBoletas.expiraEn,
-		});
+	let fila: { id: string; expiraEn: Date } | undefined;
+	try {
+		[fila] = await db
+			.update(botCobrosBoletas)
+			.set({
+				r2Key,
+				lectura: leida,
+				bancoId: banco?.id ?? null,
+				monto: monto.toFixed(2),
+				fechaBoleta: fecha.fecha,
+				numeroAutorizacion: leida.numeroAutorizacion ?? null,
+				cuentaDestino: leida.cuentaDestino ?? null,
+				confianza: calcularConfianza(leida, banco !== null),
+				estado: "leida",
+				updatedAt: new Date(),
+			})
+			.where(eq(botCobrosBoletas.id, reserva.boletaId))
+			.returning({
+				id: botCobrosBoletas.id,
+				expiraEn: botCobrosBoletas.expiraEn,
+			});
+	} catch (error) {
+		// La imagen ya subió pero `r2Key` no llegó a ninguna fila: la purga
+		// busca por lo que dice la tabla, no listando R2, así que sin este
+		// borrado el comprobante (PII del cliente) quedaría huérfano para
+		// siempre. Mejor esfuerzo; el error original se propaga igual.
+		await carteraBackClient.deleteArchivoBoletaHuerfano(r2Key);
+		throw error;
+	}
 
 	// La reserva ya no está: la barrió una lectura posterior porque esta tardó
 	// más que la ventana. No se puede devolver un `boletaId` que no existe —el
 	// bot lo usaría para confirmar y no encontraría nada—, así que se responde
 	// como cualquier otro problema nuestro: reintentable y sin gastar intento.
+	// Mismo huérfano que arriba: nada referencia `r2Key`, se borra ya.
 	if (!fila) {
 		console.error(
 			`[BotCobros] la reserva ${reserva.boletaId} desapareció durante la lectura`,
 		);
+		await carteraBackClient.deleteArchivoBoletaHuerfano(r2Key);
 		return { ok: false, codigo: "LECTOR_NO_DISPONIBLE" };
 	}
 

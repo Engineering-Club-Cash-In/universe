@@ -76,7 +76,8 @@ El límite de 12 GiB conserva margen para SO, runtime de Coolify, proxy, imágen
 
 - Lectura e ingesta usan usuarios y contraseñas distintos.
 - Contraseñas mínimas de 24 caracteres.
-- Secretos solo runtime; nunca Git ni build args.
+- Secretos en archivos host regulares, propiedad de root y modo `0600`, fuera de Git y de los build args.
+- `VICTORIALOGS_SECRETS_DIR` es la única variable de despliegue y contiene una ruta no sensible.
 - `vmauth-config` se considera almacenamiento secreto y se regenera al rotar credenciales.
 - VictoriaLogs no publica puertos del host.
 - Coolify es responsable del dominio, TLS y reverse proxy.
@@ -84,7 +85,9 @@ El límite de 12 GiB conserva margen para SO, runtime de Coolify, proxy, imágen
 
 ### Gate de secretos de Coolify
 
-El gate recibe el nombre exacto del proyecto Compose y un `docker inspect` protegido. Exige exactamente un contenedor para cada servicio:
+El gate de archivos host exige el directorio privado, cuatro archivos regulares sin symlinks, permisos sin acceso de grupo/otros, propietario esperado, contraseñas mínimas y credenciales distintas.
+
+Después del deployment, el gate de `docker inspect` recibe el nombre exacto del proyecto Compose y evidencia protegida. Exige exactamente un contenedor para cada servicio:
 
 ```text
 config-init,victoria-logs,vmauth

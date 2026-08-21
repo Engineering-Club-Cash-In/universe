@@ -6,6 +6,7 @@ import {
   getCreditoByNumero,
   getAbonosCuotaService,
   liquidatePagosInversionistasService,
+  rechazarPagoBoletaService,
   reversePagosInversionistasService,
   revertPaymentToPendingService,
   revalidatePaymentService,
@@ -713,6 +714,7 @@ const handleAbonoOtros = () => {
     }
   }
   const reversePago = useReversePagosInversionistas();
+  const rechazarBoleta = useRechazarPagoBoleta();
   const revertPaymentToPending = useRevertPaymentToPending();
   const revalidatePayment = useRevalidatePayment();
   const processInvestors = useProcessInvestors();
@@ -739,6 +741,39 @@ const handleAbonoOtros = () => {
   // Handler:
   function handleReverse(pago_id: number, credito_id: number, reverseAccounting: boolean) {
     reversePago.mutate({ pago_id, credito_id, reverseAccounting }, {});
+  }
+
+  // El botón "Pago no válido" del bot de cobros (D-39): reversa con el
+  // endpoint nuevo de cartera —que llama al reverso de siempre— y le avisa al
+  // cliente por WhatsApp. El toast distingue si el aviso salió: si no salió,
+  // el reverso YA está hecho y hay que avisar por otro medio, no re-apretar.
+  function useRechazarPagoBoleta() {
+    return useMutation({
+      mutationFn: rechazarPagoBoletaService,
+      onSuccess: (data: any) => {
+        if (data?.notificacion_enviada) {
+          toast.success("Pago revertido y cliente notificado por WhatsApp");
+        } else {
+          toast.warning(
+            data?.message ??
+              "Pago revertido, pero NO se pudo notificar al cliente: avisale por otro medio",
+            { duration: 12000 },
+          );
+        }
+        queryClient.invalidateQueries({ queryKey: ["pagosByCredito"] });
+      },
+      onError: (err: any) => {
+        toast.error(getApiErrorMessage(err, "Error al rechazar el pago"));
+      },
+    });
+  }
+
+  function handleRechazarBoleta(
+    pago_id: number,
+    credito_id: number,
+    motivo: string,
+  ) {
+    rechazarBoleta.mutate({ pago_id, credito_id, motivo }, {});
   }
 
   // Handler:
@@ -839,6 +874,8 @@ async function handleResetCredito(montoIncobrable = 0) {
     handleLiquidar,
     liquidandoId,
     handleReverse,
+    handleRechazarBoleta,
+    rechazarBoleta,
     handleRevertToPending,
     handleRevalidatePayment,
     reversePago,

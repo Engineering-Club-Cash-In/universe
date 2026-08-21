@@ -485,153 +485,97 @@ dirían cosas distintas.
 
 ---
 
-## 6. Circuito de vuelta · cartera → CRM
+## 6. Circuito de vuelta · el rechazo explícito (D-39)
 
-### Endpoint (en el CRM)
+**La intención se declara, no se adivina.** En este sistema `reversePayment` es una
+herramienta de **reparación interna** —cuadres de pools, renumeraciones, reaplicaciones,
+correcciones de espejo— y no dice nada sobre la boleta del cliente. Ningún aviso puede
+colgarse de él, ni de `false-payment`, ni de `revertPaymentToPending`: son movimientos
+contables que no le hablan a ningún cliente.
 
-`POST /api/bot/cobros/pagos/evento`, autenticado con `x-api-key: $CARTERA_WEBHOOK_API_KEY`
-— **una llave distinta a la del bot**: quien puede consultar créditos no tiene por qué poder
-disparar mensajes de WhatsApp.
+**El único mensaje del circuito sale de un botón.** En carteraFront, sobre un pago del bot
+(`registerby = bot-cobros@clubcashin.com`), **ADMIN y CONTA** ven el botón **"Pago no
+válido"**. Pide un **motivo obligatorio** —es la diferencia entre este botón y un reverso
+cualquiera— y hace dos cosas, en este orden:
 
-```json
-{
-  "pagoId": 48213,
-  "creditoId": 987,
-  "numeroSifco": "01010214108330",
-  "evento": "validado",
-  "motivo": null,
-  "usuario": "conta@clubcashin.com",
-  "ocurridoEn": "2026-08-19T20:03:00.000Z"
-}
-```
+1. **Reversa TODOS los pagos de la boleta**, llamando al `reversePayment` existente **sin
+   tocarlo** (D-38), uno por uno del más nuevo al más viejo. Los hermanos se encuentran por
+   la URL en `boletas`: una boleta que alcanzó para dos cuotas creó dos filas (§5.2), y
+   reversar solo la seleccionada dejaría a las otras aplicadas mientras el cliente lee "tu
+   pago no se acreditó". Si la URL también respalda pagos que no son del bot o de otro
+   crédito, se corta entero con 409 y lo ve una persona. Y un pago del bot **sin** boleta
+   viva solo se acepta si parece el huérfano legítimo de §4.1 (monto > 0 y estado
+   aplicable): un "Revertir" normal deja la misma silueta —filas de `boletas` borradas,
+   pago en `no_required` con monto 0 y `registerBy` todavía del bot— y rechazar eso
+   reversaría Q0 y le avisaría al cliente por una boleta que ya se resolvió por otro
+   camino (409; el front tampoco ofrece el botón sobre `no_required`). Si un reverso del medio falla, se
+   informa qué quedó a medias y **no se avisa nada**: el mensaje solo puede salir cuando ya
+   no queda nada aplicado. Todo el lote corre **bajo el candado por crédito de
+   `insertPayment`**, y el saldo a favor se corrige sin inventar ninguna fórmula: como
+   `registerPayment` le acredita al saldo solo el SOBRANTE de la boleta pero estampa el
+   monto COMPLETO en cada fila (misma familia que el bug del pago_convenio duplicado), y
+   cada `reversePayment` resta ese monto entero, reversar N hermanos descontaría la boleta
+   N veces — y cuánto aportó de verdad no es reconstruible. Lo único que no inventa nada:
+   el endpoint fotografía el saldo **después del primer reverso** y al final lo restaura
+   ahí — el efecto neto es EXACTAMENTE el de una reversión del sistema (piso en cero
+   incluido), el mismo que conta obtiene hoy con un pago de una sola fila, y si
+   `reversePayment` corrige su fórmula algún día esto la hereda gratis (D-38). Si el lote
+   se corta a medias, el saldo se **restaura** a la foto inicial (deducción neta cero en
+   ese intento): el descuento único queda para el intento que complete la boleta, porque
+   los hermanos ya reversados pierden sus filas de `boletas` y un reintento que restara de
+   nuevo la descontaría dos veces. Un pago de OTRO crédito del mismo usuario sigue pudiendo
+   colarse entre foto y escritura: esa exposición ya la tiene `reversePayment` solo (no hay
+   candado por usuario en cartera) — paridad, no regresión.
+2. **Le avisa al CRM** (`POST /api/bot/cobros/pagos/evento`, llave `CARTERA_WEBHOOK_API_KEY`
+   por `x-api-key`), **esperando la respuesta**: avisar es el punto del botón, y conta ve en
+   pantalla si el WhatsApp salió. Si el CRM no contesta, el reverso YA está hecho y el toast
+   lo dice con todas las letras: avisar por otro medio, **no** re-apretar.
 
-| `evento` | Qué pasó en cartera | Qué hace el CRM |
-| --- | --- | --- |
-| `validado` | `GET /aplicar-pago` — **el botón "Validar Pago" de conta** | WhatsApp al **cliente**: pago acreditado. |
-| `validado` | `POST /revalidatePayment` — "Revalidar", solo ADMIN | Lo mismo. |
-| `revertido` | `POST /reversePayment` | **Este es el rechazo.** WhatsApp al cliente + notificación al asesor. |
-| `regresado_a_pendiente` | `POST /revertPaymentToPending` | Depende de si al cliente ya se le dijo que estaba acreditado — ver abajo. |
-| `marcado_falso` | `POST /false-payment` | Solo notificación al asesor, **marcada como alerta**: ver el recuadro. |
+Del lado del CRM, `procesarRechazoPago`:
 
-> **La validación normal es `/aplicar-pago`, no `/revalidatePayment`.** El botón "Validar
-> Pago" de `paymentsTable.tsx` llama a `pagosService.aplicarPago(pagoId)`, que pega en
-> `GET /aplicar-pago?pago_id=…` y de ahí a `aplicarPagoAlCredito`, que es quien mueve el pago
-> de `pending` a `validated`. `/revalidatePayment` es otra acción ("Revalidar", reservada a
-> ADMIN). Si el circuito colgara solo de `/revalidatePayment`, **el caso normal —conta valida
-> la boleta y el cliente nunca se entera— se perdería entero.**
+- registra el evento (`bot_cobros_pago_eventos`, unique por `pago_id + evento + ocurrido_en`);
+- marca la boleta `rechazada`;
+- alerta al asesor **una sola vez, con acta propia** (`notificado_asesor_at` en el evento):
+  la marca y la notificación van en una misma transacción —viven en la misma base—, así que
+  no hay ventana entre reclamar y entregar, y una alerta que falla en su intento queda
+  **debida** (acta en blanco) en vez de perderse para siempre;
+- y le escribe al cliente: *"no pudimos acreditar tu pago, tu asesor te va a contactar"*.
 
-> **`regresado_a_pendiente` no siempre es silencio.** `revertPaymentToPending` sirve
-> justamente para devolver a pendiente un pago **ya validado**. Si al cliente ya se le mandó
-> el "tu pago fue acreditado" (`bot_cobros_boletas.notificado_cliente_at` con valor), callarse
-> lo deja creyendo algo que dejó de ser cierto: se le vuelve a escribir —*"estamos revisando
-> de nuevo tu pago"*— y el ciclo de notificación de esa boleta se **reabre**. Si nunca se le
-> dijo nada, entonces sí: solo al asesor, porque para el cliente no cambió nada.
->
-> **Reabrir son dos campos, no uno.** Además de `notificado_cliente_at` en la boleta, hay que
-> limpiar el **`resuelto_en` de ese pago** en `bot_cobros_boleta_pagos`. Si quedara marcado
-> como resuelto, el job de respaldo —que solo mira pagos *sin resolver*— nunca vería la
-> revalidación posterior, y el ciclo que acabamos de reabrir se quedaría sin desenlace: el
-> cliente con un "estamos revisando de nuevo" que no termina nunca.
+**El derecho a mandar el WhatsApp se toma antes de enviarlo**, con un UPDATE condicional
+sobre `aviso_reclamado_en` — una marca que **vence** a los 10 minutos. No puede ser
+`notificado_cliente_at` (que significa "esto se le **entregó**" y se escribe recién después
+del envío): un proceso que muere entre reclamar y enviar no ejecuta ningún catch, y esa boleta
+quedaría "notificada" sin que el cliente hubiera recibido nada.
 
-> **Rechazar una boleta es "Revertir Pago", no "marcar falso".** Es lo que hace conta hoy en
-> carteraFront, y es el único camino que **devuelve la mora** que el registro descontó (§5.1):
-> `reversePayment` llama a `updateMora` con `INCREMENTO`. Funciona igual sobre un pago
-> `pending`, así que sirve para una boleta que nunca se validó.
->
-> `false-payment` **no restaura la mora** — solo pone `pagado: false, paymentFalse: true`. En
-> la UI ni siquiera está cableado a un botón del flujo de boletas de cliente. Si aun así llega
-> un evento `marcado_falso`, el CRM no le escribe al cliente: levanta una alerta al asesor
-> diciendo que ese crédito quedó con la mora descontada por una boleta que se descartó.
-> Ver [D-32](./DECISIONES.md#d-32--registrar-una-boleta-ya-mueve-la-mora-y-por-eso-el-rechazo-es-revertir).
+**El aviso al cliente es at-least-once a propósito.** La API de templates de SimpleTech no
+acepta ninguna llave de idempotencia, así que un proceso que muere después de que el
+proveedor aceptó el mensaje pero antes de escribir `notificado_cliente_at` —o un timeout
+que se comió la respuesta de un envío que sí salió— no se puede distinguir de un envío que
+nunca ocurrió. La regla que queda: ante un fallo el reclamo **no se suelta** (se deja vencer
+solo), para que ni un re-apriete de conta ni el job reenvíen de inmediato un mensaje que
+quizás ya llegó; el duplicado no se elimina, se espacia y se acota. La asimetría de costos
+decide: repetirle "tu boleta no era válida" al cliente es molesto; dejarlo creyendo que su
+pago entró es peor.
 
-Respuesta siempre `200`, aunque no se haya notificado:
+**La red de seguridad es un job horario mínimo** que cobra las dos deudas: barre las boletas
+`rechazada` sin `notificado_cliente_at` y con el reclamo vencido para reintentar el mensaje
+al cliente (rotando por `updated_at` para que las que fallan no monopolicen el tope), y los
+eventos `rechazado` con el acta del asesor en blanco (`notificado_asesor_at IS NULL`) para
+entregar la alerta que quedó debida — sin eso, el cliente leyó "tu asesor te va a contactar"
+y ningún asesor se enteró jamás.
 
-```json
-{ "success": true, "data": { "notificado": true, "motivo": null } }
-```
+> **El aviso de "pago validado" NO es de este feature.** Lo está construyendo otra persona
+> del equipo; acá no se emite nada cuando conta valida, y el bot cierra la conversación de la
+> boleta con el mensaje neutro de §5 ("estamos procesando tu pago").
 
-`motivo: "PAGO_NO_ES_DEL_BOT"` cuando el pago no salió del bot — que es el caso del 99% de
-los pagos. **No es un error**: si respondiéramos 4xx, cartera lo trataría como fallo y
-llenaría los logs de contabilidad de rojo.
+Respuesta del endpoint de eventos: siempre `200` con `notificado` y su motivo
+(`SIN_TELEFONO`, `ENVIO_FALLIDO`, `EVENTO_REPETIDO`, `PAGO_NO_ES_DEL_BOT`) — cartera los
+muestra, no los trata como error. Solo `EVENTO_DESCONOCIDO` y `PARAMETROS_INVALIDOS` son
+4xx: significan un llamador desactualizado.
 
-### Del lado de cartera
-
-Los controladores emiten el aviso **después de que la transacción hizo commit**, con el
-patrón que ya existe en `services/crm.service.ts` (`notifyPayInvestors`): try/catch propio,
-log y seguir. Un WhatsApp caído no puede tumbar la validación de un pago
-([D-28](./DECISIONES.md#d-28--el-aviso-a-whatsapp-nunca-rompe-la-acción-de-conta)).
-
-### El aviso se puede perder, y por eso hay un segundo camino
-
-"Try/catch, log y seguir" tiene un costo: si el CRM está caído justo en ese segundo, **ese
-evento no vuelve nunca**. Y no es un detalle cosmético — el aviso *es* el producto: un pago
-validado del que el cliente jamás se entera es peor que no tener circuito.
-
-En vez de montar un outbox con reintentos del lado de cartera —tabla nueva, job nuevo, en la
-app que mueve el dinero—, el CRM **se encarga de no depender del aviso**:
-
-| Camino | Qué es | Cuándo actúa |
-| --- | --- | --- |
-| **Rápido** | El webhook `/pagos/evento` | Siempre que salga bien: el cliente se entera en segundos. |
-| **Red de seguridad** | Un job del CRM revisa las boletas confirmadas que tienen pagos sin resolver y le **pregunta a cartera** en qué `validation_status` están | Cada hora. Si alguno ya no está `pending`, se procesa como si el evento hubiera llegado. |
-
-**El job pregunta por `pago_id`, no por la boleta.** Una reversión borra la fila de `boletas`,
-así que preguntar "¿qué pasó con la boleta tal?" devolvería silencio justo en el caso que más
-urge avisar. Los `pago_id` ya los tenemos en `bot_cobros_boleta_pagos`, y con ellos la
-respuesta es directa:
-
-| Lo que devuelve cartera para ese `pago_id` | Cómo se interpreta |
-| --- | --- |
-| `validated` / `capital_validated` | **validado** |
-| `pending` | sigue esperando, no se hace nada |
-| `payment_false = true` | **marcado falso** |
-| Aparece en `pagos_reversiones` como **`completada`** | **revertido**, con fecha, usuario y motivo |
-| Aparece como **`iniciada`** | Una reversión quedó a medias en cartera: **alerta a conta**, y al cliente **no** se le dice que se rechazó ([D-36](./DECISIONES.md#d-36--las-reversiones-dejan-registro)) |
-
-Esa última fila es la que existe gracias a
-[D-36](./DECISIONES.md#d-36--las-reversiones-dejan-registro). Antes de tenerla había que
-**deducir** el rechazo de lo que la reversión dejaba atrás —una fila ausente, o reseteada a
-`no_required` con `numeroAutorizacion` vacío y `banco_id` en `NULL`—, que funcionaba pero era
-adivinar el motivo de una muerte por la posición del cuerpo. Ahora hay acta.
-
-Eso pide un endpoint de lectura: `GET /pagos/estado?ids=48213,48214`, que devuelve por cada id
-`{ existe, validation_status, payment_false, reversion: { estado, fecha, usuario, motivo } | null }`.
-
-Nada se pierde: el webhook adelanta el aviso, el job
-garantiza que ocurra ([D-35](./DECISIONES.md#d-35--el-webhook-adelanta-el-aviso-el-job-lo-garantiza)).
-
-### A quién se le avisa
-
-- **Cliente:** al teléfono del CRM (el mismo criterio del OTP), con plantilla aprobada de
-  SimpleTech vía `sendWhatsappTemplate` — la infraestructura que ya usan los mensajes de
-  cobros y el de bienvenida. Es obligatorio que sea plantilla: pueden haber pasado más de
-  24 h desde el último mensaje del cliente.
-- **Asesor:** notificación del CRM (`createNotification`), asignada al `responsable` del caso
-  de cobros de ese crédito. Si el crédito no tiene caso o el caso no tiene responsable, la
-  notificación va **al rol `cobros`** en vez de perderse.
-
-### Idempotencia y agrupación
-
-Un pago se puede revertir y volver a validar; conta puede repetir una acción. Cada aviso se
-guarda en `bot_cobros_pago_eventos` con **unique `(pago_id, evento, ocurrido_en)`**: si el
-mismo evento llega dos veces con el mismo timestamp, se responde `notificado: false` y no se
-manda otro WhatsApp.
-
-**Y una boleta puede tener varios pagos (§5.2), así que llegarán varios eventos.** Conta
-valida las tres cuotas una por una: son tres eventos para una sola boleta. Mandarle tres
-WhatsApp al cliente por un solo pago sería ridículo.
-
-La regla es **un mensaje por boleta, cuando ya no falte ninguno**:
-
-1. Llega un evento → se registra y se marca ese pago como resuelto.
-2. Si **quedan pagos de la misma boleta sin resolver**, no se escribe nada todavía.
-3. Cuando **todos** están resueltos, sale **un** mensaje que refleja el conjunto:
-   - todos `validado` → *"tu pago fue acreditado"*;
-   - alguno `revertido` o `marcado_falso` → *"necesitamos revisar tu pago"* + asesor.
-4. Si a las **24 h** la boleta sigue con pagos resueltos y pagos sin resolver, se notifica
-   **solo al asesor** (nunca al cliente): algo quedó a medias en la validación.
-
----
+Este endpoint **no está en el Swagger del bot**: lo llama cartera con su propia llave, y
+documentárselo a SimpleTech sería abrirle una puerta que no le corresponde
+(`RUTAS_QUE_NO_SON_DE_SIMPLETECH` en el candado).
 
 ## 7. La imagen: de su nube a la nuestra
 
@@ -912,7 +856,13 @@ CREATE TABLE bot_cobros_pago_eventos (
 > Las reservas de más de **2 minutos** se barren al empezar la lectura siguiente,
 > dentro de la misma transacción que toma el candado.
 
-**`bot_cobros_boleta_pagos` es el puente.** El unique sobre `pago_id` es lo que permite que,
+**`bot_cobros_boleta_pagos` es el puente, y el amarre es de la boleta MÁS NUEVA.** Cartera
+**recicla** los `pago_id`: un reverso completo deja la fila de `pagos_credito` en
+`no_required` en vez de borrarla, y `registerPayment` pisa esos placeholders para pagos
+posteriores. Por eso el insert del puente (al confirmar y al reconciliar) **reasigna en
+conflicto** (`ON CONFLICT (pago_id) DO UPDATE`) en vez de ignorar: si el amarre viejo se
+quedara, el rechazo de una boleta nueva que heredó el id encontraría a la vieja —ya
+notificada— y el cliente no se enteraría nunca. El unique sobre `pago_id` es lo que permite que,
 cuando cartera avise que el pago 48213 se validó, el CRM sepa **de qué boleta** era, de qué
 cliente y a qué teléfono escribirle — y también cuántos pagos hermanos faltan por resolver
 antes de mandar el mensaje (§6).

@@ -19,6 +19,7 @@ import { db } from "../database";
 import { creditos, pagos_credito, usuarios } from "../database/db";
 import { enviarReciboPagoWhatsappBestEffort } from "../services/reciboPagoWhatsapp";
 import { revalidatePayment } from "../controllers/revalidatePayment";
+import { rechazarPagoBoleta } from "../controllers/rechazarPagoBoleta";
 import { reversePayment } from "../controllers/reversePayment";
 import { buscarPagosPorBoleta } from "../controllers/pagosPorBoleta";
 import { revertPaymentToPending } from "../controllers/revertPaymentToPending";
@@ -46,6 +47,9 @@ export const paymentRouter = new Elysia()
   // Endpoint para registrar pago (ya lo tienes)
   .post("/newPayment", insertPayment)
   .post("/reversePayment", reversePayment)
+  // El botón "Pago no válido" de conta (D-39): reversa con el handler de
+  // arriba —sin tocarlo— y notifica al cliente vía CRM. Solo pagos del bot.
+  .post("/rechazar-pago-boleta", rechazarPagoBoleta)
   .post("/revertPaymentToPending", revertPaymentToPending)
   .post("/revalidatePayment", revalidatePayment)
   .post("/processInvestors", processInvestors)

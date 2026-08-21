@@ -4782,3 +4782,22 @@ export const getPromesaActivaPorCredito = async (
   );
   return data?.data ?? null;
 };
+
+// Rechazar un pago del bot de cobros: reversa Y notifica al cliente (D-39).
+// Solo ADMIN/CONTA, y solo pagos con registerby del bot.
+export async function rechazarPagoBoletaService({
+  pago_id,
+  credito_id,
+  motivo,
+}: {
+  pago_id: number;
+  credito_id: number;
+  motivo: string;
+}) {
+  const res = await api.post(`${API_URL}/rechazar-pago-boleta`, {
+    pago_id,
+    credito_id,
+    motivo,
+  });
+  return res.data;
+}

@@ -146,3 +146,29 @@ export function mensajesPagoRegistrado(monto: string): MensajesBoleta {
 		completo: cuerpo.join("\n"),
 	};
 }
+
+/**
+ * "No pudimos acreditar tu pago." — el ÚNICO mensaje del circuito de vuelta.
+ *
+ * Sale solo del botón "Pago no válido" de conta (D-39). Sin detalle técnico ni
+ * motivo interno: la conversación sigue con el asesor, no con el bot.
+ *
+ * ⚠️ Texto pendiente de revisión de marketing, como todos los del bot.
+ */
+export function mensajesPagoRechazado(monto: string): MensajesBoleta {
+	const titulo = `⚠️ *No pudimos acreditar tu pago de ${quetzales(monto)}*`;
+
+	const cuerpo = [
+		titulo,
+		"",
+		"Tu pago necesita una revisión antes de aplicarse a tu crédito.",
+		"",
+		"📞 Tu asesor se va a comunicar con vos para resolverlo.",
+	];
+
+	return {
+		titulo,
+		resumen: [titulo, "", "Tu asesor te va a contactar."].join("\n"),
+		completo: cuerpo.join("\n"),
+	};
+}

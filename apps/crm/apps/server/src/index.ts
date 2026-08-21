@@ -19,6 +19,7 @@ import {
 	leerBoletaBotCobros,
 	listarCreditosBotCobros,
 } from "./controllers/bot-cobros";
+import { eventoPagoBotCobros } from "./controllers/bot-cobros-eventos";
 import { infornetController } from "./controllers/buro";
 import { processCsvLeads } from "./controllers/csv";
 import { livenessController } from "./controllers/liveness";
@@ -42,13 +43,17 @@ import type { db } from "./db";
 import { ejecutarAgendaCobrosDiariaConReintentos } from "./jobs/agenda-cobros-snapshots";
 import { purgarBoletasSinConfirmar } from "./jobs/bot-cobros-purga";
 import { reconciliarBoletasColgadas } from "./jobs/bot-cobros-reconciliacion";
+import { reintentarAvisosDeRechazo } from "./jobs/bot-cobros-respaldo";
 import { generarCierreDiario } from "./jobs/cierre-diario-asesores";
 import {
 	checkSeguimientosVencidos,
 	procesarSeguimientosRecurrentes,
 } from "./jobs/cobros-notifications";
 import { auth } from "./lib/auth";
-import { autenticarBotCobros } from "./lib/bot-cobros/auth";
+import {
+	autenticarBotCobros,
+	autenticarCarteraWebhook,
+} from "./lib/bot-cobros/auth";
 import { autenticarNotificacionesCarteraBack } from "./lib/notifications-api-key-auth";
 import { docsBotCobros, openapiBotCobros } from "./lib/bot-cobros/docs";
 import { createContext } from "./lib/context";
@@ -1135,6 +1140,19 @@ app.post(
 // solo responde con BOT_COBROS_DOCS=true, que se prende únicamente en la
 // instancia de dev del bot.
 app.get("/api/bot/cobros/docs", docsBotCobros);
+
+// Circuito de vuelta · lo llama CARTERA, no SimpleTech: es el aviso del botón
+// "Pago no válido" de conta (D-39), el ÚNICO evento del circuito.
+//
+// Va con `autenticarCarteraWebhook` y no con la llave del bot, a propósito:
+// este endpoint dispara mensajes de WhatsApp a clientes, y quien puede
+// consultar un crédito no tiene por qué poder hacer que le escribamos a su
+// dueño. Por lo mismo NO está en el Swagger del bot.
+app.post(
+	"/api/bot/cobros/pagos/evento",
+	autenticarCarteraWebhook,
+	eventoPagoBotCobros,
+);
 app.get("/api/bot/cobros/openapi.json", openapiBotCobros);
 
 // REST endpoint for public lead creation (for external web forms)
@@ -1611,6 +1629,19 @@ async function correrReconciliacionDeBoletas(): Promise<void> {
 }
 
 setInterval(correrReconciliacionDeBoletas, 5 * 60 * 1000);
+
+// El respaldo del rechazo (D-39), también fuera de la bandera: si el WhatsApp
+// del rechazo falló, el cliente sigue creyendo que su pago va bien. Cada hora
+// se barren las boletas rechazadas a las que se les debe el mensaje.
+async function correrRespaldoDeRechazos(): Promise<void> {
+	try {
+		await reintentarAvisosDeRechazo();
+	} catch (error) {
+		console.error("Error en el respaldo de rechazos del bot:", error);
+	}
+}
+
+setInterval(correrRespaldoDeRechazos, 60 * 60 * 1000);
 
 if (TAREAS_PROGRAMADAS_ACTIVAS) {
 	// checkPromesasPago traga sus propios errores de persistencia por SIFCO

@@ -4792,10 +4792,35 @@ export const cobrosRouter = {
 						);
 						return pagos.find((p) => p.pago_id === pagoId);
 					};
-					let pagoVinculado = await buscarPagoVinculado();
+					// CB-128 (fix): createPago YA tuvo éxito en esta rama (pago_id
+					// vino inline, dinero movido) — a diferencia de la rama
+					// hermana (!pagoId), acá nunca hubo un throw explícito de "NO
+					// reintentes" al final, así que un buscarPagoVinculado() que
+					// LANZA (timeout/5xx de getPagosByCredito) se propagaba sin
+					// ningún mensaje de resultado incierto — el asesor veía un
+					// error genérico y podía reintentar un abono a capital ya
+					// aplicado. Un fallo se trata como "no encontrado" (se sigue
+					// con cuotaResuelta/input.cuotaApagar como fallback, igual
+					// que si getPagosByCredito nunca hubiera devuelto ese pago);
+					// no hace falta bloquear el pago por esto — cuotaNumeroReal
+					// simplemente no se corrige y sigue con su valor por default.
+					let pagoVinculado: Awaited<ReturnType<typeof buscarPagoVinculado>>;
+					try {
+						pagoVinculado = await buscarPagoVinculado();
+					} catch {
+						pagoVinculado = undefined;
+					}
 					if (!pagoVinculado) {
 						await new Promise((resolve) => setTimeout(resolve, 1500));
-						pagoVinculado = await buscarPagoVinculado();
+						try {
+							pagoVinculado = await buscarPagoVinculado();
+						} catch (error) {
+							console.error(
+								"[registrarPagoCompleto] No se pudo resolver la cuota real del abono a capital tras 2 intentos (timeout/5xx) — se mantiene la cuota pedida como fallback:",
+								error,
+							);
+							pagoVinculado = undefined;
+						}
 					}
 					if (pagoVinculado?.numero_cuota != null) {
 						cuotaNumeroReal = pagoVinculado.numero_cuota;

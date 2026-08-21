@@ -594,10 +594,31 @@ export async function createPagoInCarteraBack(
 					);
 					return pagos.find((p) => p.pago_id === pagoId);
 				};
-				let pagoVinculado = await buscarPagoVinculado();
+				// CB-128 (fix): igual que en routers/cobros.ts — pagoId ya está
+				// resuelto en esta rama (vino inline, dinero ya movido), así que
+				// un buscarPagoVinculado() que lanza (timeout/5xx) no debe
+				// bloquear el pago ni marcar resultadoIncierto: solo se pierde la
+				// corrección de cuotaNumeroReal, que sigue con su valor por
+				// default (cuotaResuelta/params.cuota_id) como fallback
+				// aceptable — no un resultado incierto sobre si el dinero se
+				// movió.
+				let pagoVinculado: Awaited<ReturnType<typeof buscarPagoVinculado>>;
+				try {
+					pagoVinculado = await buscarPagoVinculado();
+				} catch {
+					pagoVinculado = undefined;
+				}
 				if (!pagoVinculado) {
 					await new Promise((resolve) => setTimeout(resolve, 1500));
-					pagoVinculado = await buscarPagoVinculado();
+					try {
+						pagoVinculado = await buscarPagoVinculado();
+					} catch (error) {
+						console.error(
+							"[createPagoInCarteraBack] No se pudo resolver la cuota real del abono a capital tras 2 intentos (timeout/5xx) — se mantiene la cuota resuelta como fallback:",
+							error,
+						);
+						pagoVinculado = undefined;
+					}
 				}
 				if (pagoVinculado?.numero_cuota != null) {
 					cuotaNumeroReal = pagoVinculado.numero_cuota;

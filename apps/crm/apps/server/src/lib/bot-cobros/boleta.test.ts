@@ -211,6 +211,19 @@ describe("limpiar lo que devuelve el modelo", () => {
 	// Un negativo en un comprobante no es un pago: es una nota de débito, una
 	// reversa o basura de la lectura. Borrarle el signo lo convertía en un pago
 	// de Q500 que el cliente confirmaba.
+	// En notación contable el negativo no lleva signo: va entre paréntesis.
+	// `(Q500.00)` es -500 en cualquier estado de cuenta, y los paréntesis se
+	// iban con el resto de los símbolos.
+	test("un negativo entre paréntesis tampoco pasa", () => {
+		expect(montoALimpio("(Q500.00)")).toBeNull();
+		expect(montoALimpio("(500)")).toBeNull();
+		expect(montoALimpio("( 1,250.50 )")).toBeNull();
+		expect(montoALimpio("Q(500)")).toBeNull();
+		// Sin dígitos adentro no es un monto entre paréntesis, es basura: cae
+		// igual, pero por el camino de siempre.
+		expect(montoALimpio("(abc)")).toBeNull();
+	});
+
 	test("un monto con signo se rechaza en vez de volverse positivo", () => {
 		expect(montoALimpio("-Q500.00")).toBeNull();
 		expect(montoALimpio("Q-500.00")).toBeNull();

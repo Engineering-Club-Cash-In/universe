@@ -420,6 +420,17 @@ export async function leerBoleta(input: {
 			datos: { estado: resumen.status_credito },
 		};
 	}
+	// Sin cuota abierta no hay a qué aplicar el pago: el bot nunca elige cuota,
+	// siempre usa la más vieja sin pagar, y `/boleta/confirmar` manda ese número
+	// a cartera.
+	//
+	// ⚠️ LIMITACIÓN CONOCIDA, NO UN DESCUIDO: esto también rechaza al crédito
+	// EN_CONVENIO cuyas cuotas ordinarias están todas cerradas, aunque el estado
+	// esté permitido arriba y cartera sí sepa registrar ese pago —tiene una
+	// rama que crea la fila del pago contra el convenio cuando no hay cuotas
+	// abiertas—. Para usarla habría que mandarle un `cuotaApagar` que el bot no
+	// tiene de dónde sacar, y elegirlo a ojo en el camino que mueve dinero no es
+	// una decisión de este PR. Esos clientes salen por el asesor.
 	if (!resumen.cuota_actual) {
 		return {
 			ok: false,

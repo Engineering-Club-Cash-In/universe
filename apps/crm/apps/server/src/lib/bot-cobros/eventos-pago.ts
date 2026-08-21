@@ -98,54 +98,120 @@ async function telefonoDeLaBoleta(boleta: {
 }
 
 /**
- * Le avisa al asesor por el CRM. Va al `responsable_cobros` del caso de ese
- * crédito; sin caso, la notificación queda para el rol. Nunca rompe el flujo
- * (D-28).
+ * Le avisa al asesor por el CRM, dejando ACTA (`notificado_asesor_at`).
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * LA ALERTA SE DEBE HASTA QUE SE ENTREGA, IGUAL QUE EL WHATSAPP.
+ *
+ * Antes iba atada a "el evento es nuevo": si ese único intento fallaba —el
+ * usuario sistema sin resolver, un error transitorio— el evento ya estaba
+ * insertado, el reintento veía un duplicado y la alerta no se debía nunca
+ * más. El cliente leía "tu asesor te va a contactar" y ningún asesor se
+ * enteraba jamás.
+ *
+ * Acá la marca y la notificación van EN LA MISMA TRANSACCIÓN (las dos viven
+ * en esta base): o quedan las dos o no queda ninguna. El claim condicional
+ * decide quién entrega cuando el webhook y el job de respaldo llegan a la
+ * vez, y no hace falta que venza — no hay ventana entre reclamar y entregar.
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * `true` = la alerta está entregada (por esta pasada o por otra anterior).
+ * `false` = sigue debida; el job de respaldo la reintenta.
  */
-export async function avisarAlAsesor(datos: {
-	numeroSifco: string | null;
-	titulo: string;
-	descripcion: string;
-}): Promise<void> {
+export async function alertarAsesorDelRechazo(
+	eventoId: string,
+): Promise<boolean> {
+	const [evento] = await db
+		.select()
+		.from(botCobrosPagoEventos)
+		.where(eq(botCobrosPagoEventos.id, eventoId))
+		.limit(1);
+
+	if (!evento) return false;
+	if (evento.notificadoAsesorAt) return true;
+
+	const [boleta] = evento.boletaId
+		? await db
+				.select({
+					monto: botCobrosBoletas.monto,
+					numeroSifco: botCobrosBoletas.numeroSifco,
+				})
+				.from(botCobrosBoletas)
+				.where(eq(botCobrosBoletas.id, evento.boletaId))
+				.limit(1)
+		: [];
+
+	const payload = (evento.payload ?? {}) as {
+		motivo?: string | null;
+		usuario?: string | null;
+	};
+	const monto = boleta?.monto ?? "0";
+	const numeroSifco = boleta?.numeroSifco ?? null;
+
+	const usuarioSistema = await resolverUsuarioSistemaCobros();
+	if (!usuarioSistema) {
+		console.error(
+			"[BotCobrosEventos] sin usuario sistema: la alerta al asesor queda debida",
+		);
+		return false;
+	}
+
+	// Va al `responsable_cobros` del caso de ese crédito; sin caso, queda para
+	// el rol.
+	const [caso] = numeroSifco
+		? await db
+				.select({
+					id: casosCobros.id,
+					responsable: casosCobros.responsableCobros,
+				})
+				.from(casosCobros)
+				.where(eq(casosCobros.numeroCreditoSifco, numeroSifco))
+				.limit(1)
+		: [];
+
 	try {
-		const usuarioSistema = await resolverUsuarioSistemaCobros();
-		if (!usuarioSistema) {
-			console.error(
-				"[BotCobrosEventos] sin usuario sistema: no se pudo notificar al asesor",
-			);
-			return;
-		}
+		return await db.transaction(async (tx) => {
+			const reclamado = await tx
+				.update(botCobrosPagoEventos)
+				.set({ notificadoAsesorAt: new Date() })
+				.where(
+					and(
+						eq(botCobrosPagoEventos.id, eventoId),
+						isNull(botCobrosPagoEventos.notificadoAsesorAt),
+					),
+				)
+				.returning({ id: botCobrosPagoEventos.id });
 
-		const [caso] = datos.numeroSifco
-			? await db
-					.select({
-						id: casosCobros.id,
-						responsable: casosCobros.responsableCobros,
-					})
-					.from(casosCobros)
-					.where(eq(casosCobros.numeroCreditoSifco, datos.numeroSifco))
-					.limit(1)
-			: [];
+			// Otro (webhook o job) la entregó mientras tanto: ya no se debe.
+			if (reclamado.length === 0) return true;
 
-		await db.insert(notifications).values({
-			titulo: datos.titulo,
-			descripcion: datos.descripcion,
-			type: "action_required",
-			status: "pending",
-			createdBy: usuarioSistema,
-			createdByRole: "cobros",
-			assignedToRole: "cobros",
-			assignedTo: caso?.responsable ?? null,
-			...(caso
-				? {
-						relatedEntityType: "collection_case" as const,
-						relatedEntityId: caso.id,
-						redirectPage: "cobros_detail" as const,
-					}
-				: {}),
+			await tx.insert(notifications).values({
+				titulo: `Boleta del bot rechazada por conta · ${numeroSifco ?? "sin SIFCO"}`,
+				descripcion:
+					`Contabilidad marcó como NO VÁLIDO el pago de Q${monto} que el cliente subió por WhatsApp` +
+					`${payload.usuario ? ` (${payload.usuario})` : ""}` +
+					`${payload.motivo ? `. Motivo: ${payload.motivo}` : ""}. ` +
+					"Al cliente se le avisa que su asesor lo va a contactar.",
+				type: "action_required",
+				status: "pending",
+				createdBy: usuarioSistema,
+				createdByRole: "cobros",
+				assignedToRole: "cobros",
+				assignedTo: caso?.responsable ?? null,
+				...(caso
+					? {
+							relatedEntityType: "collection_case" as const,
+							relatedEntityId: caso.id,
+							redirectPage: "cobros_detail" as const,
+						}
+					: {}),
+			});
+
+			return true;
 		});
 	} catch (error) {
 		console.error("[BotCobrosEventos] no se pudo notificar al asesor:", error);
+		return false;
 	}
 }
 
@@ -219,23 +285,29 @@ export async function procesarRechazoPago(
 		.set({ estado: "rechazada", updatedAt: new Date() })
 		.where(eq(botCobrosBoletas.id, boleta.id));
 
-	// 4 · La alerta al asesor va atada al EVENTO NUEVO, no al reclamo: si
-	// estuviera dentro del camino del mensaje, cada reintento tras un envío
-	// fallido le repetiría al asesor la misma notificación.
-	if (guardado.length > 0) {
-		const monto = boleta.monto ?? "0";
-		const numeroSifco = boleta.numeroSifco ?? null;
-
-		await avisarAlAsesor({
-			numeroSifco,
-			titulo: `Boleta del bot rechazada por conta · ${numeroSifco ?? "sin SIFCO"}`,
-			descripcion:
-				`Contabilidad marcó como NO VÁLIDO el pago de Q${monto} que el cliente subió por WhatsApp` +
-				`${entrada.usuario ? ` (${entrada.usuario})` : ""}` +
-				`${entrada.motivo ? `. Motivo: ${entrada.motivo}` : ""}. ` +
-				"Al cliente se le avisa que su asesor lo va a contactar.",
-		});
+	// 4 · La alerta al asesor va atada al EVENTO con acta propia
+	// (`notificado_asesor_at`), no a "el evento es nuevo": un evento insertado
+	// cuya alerta falló en su único intento quedaba sin asesor para siempre —
+	// el reintento veía el duplicado y este bloque no volvía a correr. El acta
+	// hace la deuda visible y el job de respaldo la cobra. Tampoco va atada al
+	// reclamo del mensaje: cada reintento de un envío fallido le repetiría al
+	// asesor la misma notificación.
+	let eventoId = guardado[0]?.id ?? null;
+	if (!eventoId) {
+		const [existente] = await db
+			.select({ id: botCobrosPagoEventos.id })
+			.from(botCobrosPagoEventos)
+			.where(
+				and(
+					eq(botCobrosPagoEventos.pagoId, entrada.pagoId),
+					eq(botCobrosPagoEventos.evento, "rechazado"),
+					eq(botCobrosPagoEventos.ocurridoEn, new Date(entrada.ocurridoEn)),
+				),
+			)
+			.limit(1);
+		eventoId = existente?.id ?? null;
 	}
+	if (eventoId) await alertarAsesorDelRechazo(eventoId);
 
 	return avisarRechazoAlCliente(boleta.id);
 }

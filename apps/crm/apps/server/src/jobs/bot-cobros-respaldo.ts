@@ -18,8 +18,14 @@
 
 import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "../db";
-import { botCobrosBoletas } from "../db/schema/bot-cobros-boletas";
-import { avisarRechazoAlCliente } from "../lib/bot-cobros/eventos-pago";
+import {
+	botCobrosBoletas,
+	botCobrosPagoEventos,
+} from "../db/schema/bot-cobros-boletas";
+import {
+	alertarAsesorDelRechazo,
+	avisarRechazoAlCliente,
+} from "../lib/bot-cobros/eventos-pago";
 
 /** Tope por corrida: lo que no entre en esta, entra en la siguiente. */
 const MAXIMO_POR_CORRIDA = 200;
@@ -34,6 +40,7 @@ const MINUTOS_DE_RECLAMO_VENCIDO = 10;
 export type ResultadoRespaldo = {
 	revisadas: number;
 	avisosReintentados: number;
+	alertasAsesorEntregadas: number;
 };
 
 /**
@@ -65,11 +72,10 @@ export async function reintentarAvisosDeRechazo(): Promise<ResultadoRespaldo> {
 	const resultado: ResultadoRespaldo = {
 		revisadas: debidas.length,
 		avisosReintentados: 0,
+		alertasAsesorEntregadas: 0,
 	};
 
 	for (const boleta of debidas) {
-		// El reintento solo le debe el mensaje al cliente: la alerta del asesor
-		// salió con el evento, una sola vez.
 		const enviado = await avisarRechazoAlCliente(boleta.id);
 		if (enviado.notificado) resultado.avisosReintentados++;
 		// Rotación: aunque no haya salido, la boleta ya quedó tocada por el
@@ -78,6 +84,38 @@ export async function reintentarAvisosDeRechazo(): Promise<ResultadoRespaldo> {
 			.update(botCobrosBoletas)
 			.set({ updatedAt: new Date() })
 			.where(eq(botCobrosBoletas.id, boleta.id));
+	}
+
+	// La OTRA deuda del rechazo: alertas al asesor con el acta en blanco
+	// (`notificado_asesor_at`). El caso que cubre: el evento se insertó pero su
+	// alerta falló en aquel único intento — sin esto, el cliente leyó "tu
+	// asesor te va a contactar" y ningún asesor se enteró jamás. No necesita
+	// reclamo que venza: la marca y la notificación van en una transacción
+	// dentro de `alertarAsesorDelRechazo`, no hay ventana entre las dos. Sin
+	// columna de rotación tampoco pasa nada: los eventos son pocos, el tope es
+	// amplio y una alerta que falla hoy reintenta en la corrida siguiente.
+	const alertasDebidas = await db
+		.select({ id: botCobrosPagoEventos.id })
+		.from(botCobrosPagoEventos)
+		.where(
+			and(
+				eq(botCobrosPagoEventos.evento, "rechazado"),
+				isNull(botCobrosPagoEventos.notificadoAsesorAt),
+			),
+		)
+		.orderBy(asc(botCobrosPagoEventos.createdAt))
+		.limit(MAXIMO_POR_CORRIDA);
+
+	for (const evento of alertasDebidas) {
+		if (await alertarAsesorDelRechazo(evento.id)) {
+			resultado.alertasAsesorEntregadas++;
+		}
+	}
+
+	if (resultado.alertasAsesorEntregadas > 0) {
+		console.log(
+			`[BotCobrosRespaldo] ${resultado.alertasAsesorEntregadas} alerta(s) de asesor que estaban debidas se entregaron.`,
+		);
 	}
 
 	if (resultado.avisosReintentados > 0) {

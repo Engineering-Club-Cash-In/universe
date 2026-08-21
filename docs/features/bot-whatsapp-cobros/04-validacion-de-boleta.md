@@ -505,7 +505,12 @@ cualquiera— y hace dos cosas, en este orden:
    pago no se acreditó". Si la URL también respalda pagos que no son del bot o de otro
    crédito, se corta entero con 409 y lo ve una persona. Si un reverso del medio falla, se
    informa qué quedó a medias y **no se avisa nada**: el mensaje solo puede salir cuando ya
-   no queda nada aplicado.
+   no queda nada aplicado. Y como `registerPayment` estampa el monto COMPLETO de la boleta
+   en cada fila y cada `reversePayment` resta ese monto entero de `usuarios.saldo_a_favor`
+   (misma familia que el bug del pago_convenio duplicado), reversar N hermanos descontaría
+   la misma boleta N veces: el endpoint fotografía el saldo antes de empezar y al final lo
+   deja en lo que UNA sola reversión habría dejado — `max(0, saldo_inicial − monto_boleta)`,
+   el mismo cálculo del reverso, sin tocarlo (D-38).
 2. **Le avisa al CRM** (`POST /api/bot/cobros/pagos/evento`, llave `CARTERA_WEBHOOK_API_KEY`
    por `x-api-key`), **esperando la respuesta**: avisar es el punto del botón, y conta ve en
    pantalla si el WhatsApp salió. Si el CRM no contesta, el reverso YA está hecho y el toast
@@ -515,7 +520,10 @@ Del lado del CRM, `procesarRechazoPago`:
 
 - registra el evento (`bot_cobros_pago_eventos`, unique por `pago_id + evento + ocurrido_en`);
 - marca la boleta `rechazada`;
-- alerta al asesor **una sola vez** (atada al evento nuevo, no al envío);
+- alerta al asesor **una sola vez, con acta propia** (`notificado_asesor_at` en el evento):
+  la marca y la notificación van en una misma transacción —viven en la misma base—, así que
+  no hay ventana entre reclamar y entregar, y una alerta que falla en su intento queda
+  **debida** (acta en blanco) en vez de perderse para siempre;
 - y le escribe al cliente: *"no pudimos acreditar tu pago, tu asesor te va a contactar"*.
 
 **El derecho a mandar el WhatsApp se toma antes de enviarlo**, con un UPDATE condicional
@@ -524,10 +532,12 @@ sobre `aviso_reclamado_en` — una marca que **vence** a los 10 minutos. No pued
 del envío): un proceso que muere entre reclamar y enviar no ejecuta ningún catch, y esa boleta
 quedaría "notificada" sin que el cliente hubiera recibido nada.
 
-**La red de seguridad es un job horario mínimo**: barre las boletas `rechazada` sin
-`notificado_cliente_at` y con el reclamo vencido, y reintenta solo el mensaje al cliente (la
-alerta del asesor ya salió con el evento). Rota por `updated_at` para que las que fallan no
-monopolicen el tope.
+**La red de seguridad es un job horario mínimo** que cobra las dos deudas: barre las boletas
+`rechazada` sin `notificado_cliente_at` y con el reclamo vencido para reintentar el mensaje
+al cliente (rotando por `updated_at` para que las que fallan no monopolicen el tope), y los
+eventos `rechazado` con el acta del asesor en blanco (`notificado_asesor_at IS NULL`) para
+entregar la alerta que quedó debida — sin eso, el cliente leyó "tu asesor te va a contactar"
+y ningún asesor se enteró jamás.
 
 > **El aviso de "pago validado" NO es de este feature.** Lo está construyendo otra persona
 > del equipo; acá no se emite nada cuando conta valida, y el bot cierra la conversación de la

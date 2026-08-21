@@ -19,10 +19,16 @@
  * Solo ADMIN y CONTA, igual que el resto de acciones contables sobre pagos.
  */
 
+import Big from "big.js";
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../database";
-import { boletas, creditos, pagos_credito } from "../database/db/schema";
+import {
+  boletas,
+  creditos,
+  pagos_credito,
+  usuarios,
+} from "../database/db/schema";
 import {
   esPagoDelBotCobros,
   notificarRechazoPagoBot,
@@ -66,6 +72,7 @@ export const rechazarPagoBoleta = async ({ body, set, user }: any) => {
     .select({
       registerBy: pagos_credito.registerBy,
       credito_id: pagos_credito.credito_id,
+      monto_boleta: pagos_credito.monto_boleta,
     })
     .from(pagos_credito)
     .where(eq(pagos_credito.pago_id, pago_id))
@@ -90,9 +97,13 @@ export const rechazarPagoBoleta = async ({ body, set, user }: any) => {
     return { success: false, message: "El pago no es de ese crédito." };
   }
 
-  // El SIFCO se lee ANTES del reverso, para el aviso.
+  // El SIFCO se lee ANTES del reverso, para el aviso. El dueño, para el
+  // saldo a favor de abajo.
   const [credito] = await db
-    .select({ numero_credito_sifco: creditos.numero_credito_sifco })
+    .select({
+      numero_credito_sifco: creditos.numero_credito_sifco,
+      usuario_id: creditos.usuario_id,
+    })
     .from(creditos)
     .where(eq(creditos.credito_id, credito_id))
     .limit(1);
@@ -147,6 +158,26 @@ export const rechazarPagoBoleta = async ({ body, set, user }: any) => {
     ...new Set([pago_id, ...hermanos.map((h) => h.pago_id)]),
   ].sort((a, b) => b - a); // el más nuevo primero, como en un reverso a mano
 
+  // El saldo a favor se fotografía ANTES de los reversos, porque el reverso
+  // de siempre tiene un doble descuento cuando la boleta creó varias filas:
+  // `registerPayment` estampa el monto COMPLETO de la boleta en cada fila
+  // (misma familia que el bug del pago_convenio duplicado) y cada llamada a
+  // `reversePayment` resta ese monto entero de `usuarios.saldo_a_favor`. Con
+  // N hermanos, la misma boleta se descuenta N veces y puede comerse un saldo
+  // a favor que el cliente tenía de antes. Con la foto, al final se deja el
+  // saldo como lo habría dejado UNA sola reversión — el mismo cálculo que
+  // hace `reversePayment` (resta con piso en cero), sin inventar contabilidad
+  // nueva ni tocarlo (D-38).
+  let saldoAntesDeRevertir: string | null = null;
+  if (pagosARevertir.length > 1 && credito?.usuario_id) {
+    const [duenio] = await db
+      .select({ saldo_a_favor: usuarios.saldo_a_favor })
+      .from(usuarios)
+      .where(eq(usuarios.usuario_id, credito.usuario_id))
+      .limit(1);
+    saldoAntesDeRevertir = duenio?.saldo_a_favor ?? null;
+  }
+
   // 1 · Los reversos, con el handler de siempre. `setInterno` captura su
   // estado sin ensuciar el nuestro: si uno falla, se corta ahí, se informa
   // qué quedó a medias y NO se avisa nada — el mensaje de "no se acreditó"
@@ -165,13 +196,35 @@ export const rechazarPagoBoleta = async ({ body, set, user }: any) => {
         ...(typeof resultadoReverso === "object" ? resultadoReverso : {}),
         success: false,
         message: revertidos.length
-          ? `⚠️ Se revirtieron los pagos ${revertidos.join(", ")} pero el ${id} falló: la boleta quedó a medias, NO se notificó al cliente. Resolvé el pago ${id} y volvé a rechazar.`
+          ? `⚠️ Se revirtieron los pagos ${revertidos.join(", ")} pero el ${id} falló: la boleta quedó a medias, NO se notificó al cliente. Resolvé el pago ${id}, revisá el saldo a favor del cliente (cada reverso resta la boleta completa) y volvé a rechazar.`
           : `El reverso del pago ${id} falló: no se revirtió nada ni se notificó al cliente.`,
         pagos_revertidos: revertidos,
         pago_fallido: id,
       };
     }
     revertidos.push(id);
+  }
+
+  // La corrección del doble descuento (ver la foto de arriba): los N reversos
+  // restaron N veces el monto de la boleta; acá el saldo queda en lo que UNA
+  // reversión habría dejado: max(0, saldo_inicial - monto_boleta).
+  if (
+    pagosARevertir.length > 1 &&
+    saldoAntesDeRevertir !== null &&
+    credito?.usuario_id
+  ) {
+    const montoBoleta = new Big(pago.monto_boleta ?? 0);
+    let saldoCorregido = new Big(saldoAntesDeRevertir).minus(montoBoleta);
+    if (saldoCorregido.lt(0)) saldoCorregido = new Big(0);
+
+    await db
+      .update(usuarios)
+      .set({ saldo_a_favor: saldoCorregido.toString() })
+      .where(eq(usuarios.usuario_id, credito.usuario_id));
+
+    console.log(
+      `[RechazarPagoBoleta] saldo a favor corregido a Q${saldoCorregido.toString()} (una sola resta de la boleta, no ${pagosARevertir.length})`,
+    );
   }
 
   // 2 · El aviso, esperando la respuesta: es el punto del botón. Si no llega,

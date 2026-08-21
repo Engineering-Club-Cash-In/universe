@@ -91,6 +91,22 @@ export function textoCuentasPlantilla(): string {
 }
 
 /**
+ * La misma información en lista, para el correo.
+ *
+ * Un correo no tiene el límite de las plantillas de SimpleTech, así que ahí las
+ * cuentas siempre fueron una por renglón. Reproduce carácter por carácter el
+ * texto que venía escrito a mano en `apps/web`, guion incluido — es el mismo
+ * criterio que `textoCuentasPlantilla`: no se toca la redacción de mensajes que
+ * ya salieron a producción.
+ */
+export function textoCuentasLista(): string {
+	return CUENTAS_PAGO.map(
+		(c) =>
+			`- ${c.titular} (${c.tipo}) No. ${c.numero} - ${c.etiquetaPlantilla}`,
+	).join("\n");
+}
+
+/**
  * Lo mismo, pero para leerse en un chat.
  *
  * Negrita de WhatsApp = **un** asterisco (con dos se ven los asteriscos).

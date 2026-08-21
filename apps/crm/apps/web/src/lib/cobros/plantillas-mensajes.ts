@@ -1,6 +1,20 @@
 /**
  * Plantillas de mensajes predefinidos para cobros (WhatsApp y Email).
  *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * LOS NÚMEROS DE CUENTA NO SE ESCRIBEN ACÁ.
+ *
+ * Salen de `apps/server/src/lib/cuentas-pago.ts`, que es la única fuente. Este
+ * archivo los tenía copiados a mano, y el texto que arma acá es el que el modal
+ * de envío masivo manda como `cuerpoEditado` — o sea que el servidor usa ESTE
+ * y no su propia plantilla. Con las cuentas duplicadas, cambiar una en el
+ * servidor dejaba a los clientes contactados desde el CRM depositando en una
+ * cuenta vieja, sin que nada avisara.
+ *
+ * `web` puede importar de `server` (ver `src/lib/roles.ts`), y este módulo es
+ * datos puros: no arrastra nada del backend al bundle.
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
  * RFC: Migrar a tabla `plantillas_mensaje` en DB para permitir edición
  * en caliente desde UI admin sin necesidad de deploy.
  * Esquema propuesto:
@@ -8,6 +22,11 @@
  *   - Seed inicial con estas 6 plantillas
  *   - Endpoint ORPC: listPlantillasMensaje
  */
+
+import {
+	textoCuentasLista,
+	textoCuentasPlantilla,
+} from "../../../../server/src/lib/cuentas-pago";
 
 export interface VariablesPlantilla {
 	clienteNombre: string;
@@ -165,10 +184,7 @@ Le saludamos cordialmente de Clubcashin.com para recordarle sobre el pago de su 
 
 A continuación, le compartimos los números de cuenta para realizar su depósito o transferencia:
 
-- CUBE INVESTMENTS, S.A. (monetaria) No. 5520029876 - BANCO INDUSTRIAL (BI)
-- CUBE INVESTMENTS, S.A. (monetaria) No. 3020123033 - BANCO AGROMERCANTIL (BAM)
-- CUBE INVESTMENTS, S.A. (monetaria) No. 01300039945 - BANCO GyT CONTINENTAL
-- CUBE INVESTMENTS, S.A. (monetaria) No. 3394002346 - BANRURAL
+${textoCuentasLista()}
 
 Por favor, envíe su boleta o comprobante de pago por este medio para aplicarlo a su cuenta.
 
@@ -181,7 +197,7 @@ Atentamente,
 Tel: {telefonoAsesor}.`,
 		cuerpoWhastapp: `Hola {clienteNombre}, Le saludamos cordialmente de Clubcashin.com para recordarle sobre el pago de su crédito, el cual debe realizarse el {fechaPago}. Sus cuotas son por un monto de Q{cuotaMensual}.
 
-A continuación, le compartimos los números de cuenta para realizar su depósito o transferencia: - CUBE INVESTMENTS, S.A. (monetaria) No. 5520029876 BANCO INDUSTRIAL (BI) / CUBE INVESTMENTS, S.A. (monetaria) No. 3020123033 BANCO AGROMERCANTIL (BAM) / CUBE INVESTMENTS, S.A. (monetaria) No. 01300039945 BANCO GyT CONTINENTAL / CUBE INVESTMENTS, S.A. (monetaria) No. 3394002346 BANRURAL
+${textoCuentasPlantilla()}
 
 Por favor, envíe su boleta o comprobante de pago al {telefonoAsesor} para aplicarlo a su cuenta. Si tiene alguna duda o consulta, estamos a su disposición.
 

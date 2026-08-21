@@ -110,6 +110,26 @@ export const botCobrosBoletas = pgTable(
 		notificadoClienteAt: timestamp("notificado_cliente_at", {
 			withTimezone: true,
 		}),
+		/**
+		 * Qué desenlace fue el que se le contó: `validado` o `rechazado`.
+		 *
+		 * Sin esto, `notificado_cliente_at` significaba "ya se le dijo algo" y
+		 * cerraba la boleta para siempre. Un pago validado que conta revierte
+		 * después cambia el desenlace, y el cliente tiene que enterarse: comparar
+		 * contra este campo es lo que distingue "ya se lo dije" de "le dije otra
+		 * cosa".
+		 */
+		desenlaceNotificado: text("desenlace_notificado"),
+		/**
+		 * Alguien está mandando el aviso **ahora mismo**. Es un arrendamiento: vence.
+		 *
+		 * El derecho a mandar se toma antes de enviar, para que dos eventos
+		 * hermanos simultáneos no manden dos WhatsApp iguales. Pero si el proceso
+		 * muere entre reclamar y enviar, nadie suelta la marca. Por eso la marca no
+		 * es `notificado_cliente_at` —que significaría "entregado"— sino esta, que
+		 * caduca: pasado el plazo la boleta vuelve a estar disponible.
+		 */
+		avisoReclamadoEn: timestamp("aviso_reclamado_en", { withTimezone: true }),
 
 		expiraEn: timestamp("expira_en", { withTimezone: true }).notNull(),
 		createdAt: timestamp("created_at", { withTimezone: true })

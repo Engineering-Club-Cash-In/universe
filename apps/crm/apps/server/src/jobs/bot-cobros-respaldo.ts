@@ -267,7 +267,14 @@ const PUEDEN_DEBER_MENSAJE: EstadoBoletaBot[] = [
 ];
 
 /**
- * Boletas resueltas del todo a las que nunca les salió el mensaje.
+ * Tiene que ser el mismo plazo que usa `avisarDesenlaceAlCliente` para tomar el
+ * reclamo. Si acá fuera más corto, este job le arrebataría la boleta a un envío
+ * que todavía está en curso.
+ */
+const MINUTOS_DE_RECLAMO_VENCIDO = 10;
+
+/**
+ * Boletas a las que les debemos el mensaje.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * UN ENVÍO FALLIDO NO TENÍA QUIÉN LO REINTENTARA.
@@ -280,10 +287,15 @@ const PUEDEN_DEBER_MENSAJE: EstadoBoletaBot[] = [
  * enterarse, para siempre, de algo que sí pasó.
  * ─────────────────────────────────────────────────────────────────────────────
  *
- * Cubre también el hueco de haber reclamado la boleta y caerse antes de
- * mandar: `avisarDesenlaceAlCliente` suelta la marca cuando el envío falla,
- * pero un proceso que muere en el medio no suelta nada, y esa boleta vuelve a
- * aparecer acá en la corrida siguiente.
+ * "Deber el mensaje" son tres casos, y los tres entran por acá:
+ *
+ * - El envío falló y se soltó el reclamo.
+ * - El proceso murió entre reclamar y enviar, así que no soltó nada. Lo levanta
+ *   el vencimiento del reclamo.
+ * - **El desenlace cambió después de haberle escrito.** Conta valida, se le
+ *   dice "acreditado", y más tarde revierte: la boleta pasa a `rechazada` y hay
+ *   que volver a escribirle. Con la condición vieja —"¿ya se le mandó algo?"—
+ *   ese cliente se quedaba creyendo que su pago estaba acreditado.
  */
 async function reintentarAvisosDebidos(): Promise<number> {
 	const debidas = await db
@@ -292,7 +304,28 @@ async function reintentarAvisosDebidos(): Promise<number> {
 		.where(
 			and(
 				inArray(botCobrosBoletas.estado, PUEDEN_DEBER_MENSAJE),
-				isNull(botCobrosBoletas.notificadoClienteAt),
+				// Le debemos el mensaje si nunca se le mandó ninguno, o si el
+				// desenlace que tiene la boleta ahora no es el que se le contó.
+				// Lo segundo pasa cuando conta revierte un pago que ya se había
+				// validado: la boleta cambia de `confirmada` a `rechazada` y hay
+				// que volver a escribirle.
+				sql`(
+					${botCobrosBoletas.notificadoClienteAt} IS NULL
+					OR ${botCobrosBoletas.desenlaceNotificado} IS DISTINCT FROM (
+						CASE WHEN ${botCobrosBoletas.estado} = 'rechazada'
+							THEN 'rechazado' ELSE 'validado' END
+					)
+				)`,
+				// Y que no lo esté mandando alguien más en este momento. El
+				// reclamo caduca: un proceso que se cayó entre reclamar y enviar
+				// no soltó nada, y sin este vencimiento esa boleta no volvería a
+				// mirarse nunca.
+				sql`(
+					${botCobrosBoletas.avisoReclamadoEn} IS NULL
+					OR ${botCobrosBoletas.avisoReclamadoEn} < now() - interval '${sql.raw(
+						String(MINUTOS_DE_RECLAMO_VENCIDO),
+					)} minutes'
+				)`,
 				// Con pagos, y ninguno sin resolver. Las dos condiciones hacen
 				// falta: sin la primera entrarían las boletas que todavía no
 				// generaron ningún pago, y para esas no hay nada que avisar.

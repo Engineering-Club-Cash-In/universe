@@ -680,19 +680,29 @@ La regla es **un mensaje por boleta, cuando ya no falte ninguno**:
 4. Si a las **24 h** la boleta sigue con pagos resueltos y pagos sin resolver, se notifica
    **solo al asesor** (nunca al cliente): algo quedó a medias en la validación.
 
-**El derecho a mandar ese mensaje se toma antes de enviarlo**, con un `UPDATE` condicional
-sobre `notificado_cliente_at` (`WHERE … IS NULL`). Leer el campo y después escribirlo no
-alcanza: cuando los eventos de los últimos pagos hermanos entran a la vez, los dos handlers
-lo leen en `null`, los dos ven que no queda nadie pendiente y los dos mandan. Gana quien corra
-el `UPDATE` primero; el otro se lleva cero filas y se calla.
+**El derecho a mandar ese mensaje se toma antes de enviarlo**, con un `UPDATE` condicional.
+Leer el campo y después escribirlo no alcanza: cuando los eventos de los últimos pagos
+hermanos entran a la vez, los dos handlers lo leen en `null`, los dos ven que no queda nadie
+pendiente y los dos mandan. Gana quien corra el `UPDATE` primero; el otro se lleva cero filas
+y se calla.
 
-**Y si el envío falla, la marca se devuelve.** El evento ya está registrado y el pago ya
-quedó resuelto, así que sin eso la boleta terminaba resuelta y "notificada" sin que el cliente
-hubiera recibido nada, y no había camino de vuelta: el barrido del job solo mira pagos *sin
-resolver*, un webhook repetido sale por `EVENTO_REPETIDO` y la alerta de las 24 h exige pagos a
-medias. El job de respaldo tiene ahora una pasada aparte para esto: boletas con **todos** sus
-pagos resueltos y `notificado_cliente_at` en `null` son las que nos deben el mensaje. Cubre
-también el proceso que se cae entre reclamar la boleta y mandar el WhatsApp.
+**La marca que se toma no es `notificado_cliente_at`, sino `aviso_reclamado_en`, y vence.**
+Un proceso que muere entre reclamar y enviar no ejecuta ningún `catch`, así que no suelta
+nada: si la marca significara "entregado", esa boleta quedaba notificada para siempre sin que
+el cliente hubiera recibido nada. `notificado_cliente_at` tiene que seguir queriendo decir
+exactamente *esto se le entregó* — es de lo que depende `regresado_a_pendiente` para decidir
+si callarse o escribir.
+
+**Y el reclamo es por desenlace, no por boleta.** Un pago validado que contabilidad revierte
+después cambia lo que hay que decirle: la boleta pasa de `confirmada` a `rechazada`. Con la
+condición vieja —"¿ya se le mandó algo?"— ese segundo mensaje no salía nunca y el cliente se
+quedaba creyendo que su pago se acreditó. Por eso `desenlace_notificado` guarda **qué** se le
+contó, y se compara contra el desenlace actual.
+
+**El job de respaldo tiene una pasada aparte para las boletas que deben el mensaje**: finales,
+con todos sus pagos resueltos, y sin haberle contado al cliente el desenlace que tienen ahora.
+Cubre los tres casos: el envío que falló, el proceso que se cayó con el reclamo tomado (lo
+levanta el vencimiento) y el desenlace que cambió después de haber escrito.
 
 **El barrido de pagos sin resolver lleva cursor.** Un pago se queda sin resolver todo lo que
 conta tarde en validarlo, o sea días: es el estado normal de la cola, no una anomalía. Con más

@@ -101,7 +101,14 @@ async function cargarCasoPorSifco(numeroSifco: string): Promise<DatosCaso | null
 		.orderBy(desc(casosCobros.activo), desc(casosCobros.updatedAt))
 		.limit(1);
 
-	if (row) return row;
+	// `sync-casos-cobros.ts` guarda el placeholder "Sin teléfono" cuando no
+	// pudo resolver el lead al crear el caso — sin este chequeo, ese caso
+	// "existe" pero nunca dispara el fallback de abajo y el envío termina en
+	// SIN_TELEFONO en vez de intentar leads.phone.
+	const tieneTelefonoValido =
+		row &&
+		(primerTelefono(row.telefonoPrincipal) ?? primerTelefono(row.telefonoAlternativo));
+	if (tieneTelefonoValido) return row;
 
 	const [fallback] = await db
 		.select({
@@ -128,7 +135,7 @@ async function cargarCasoPorSifco(numeroSifco: string): Promise<DatosCaso | null
 		.orderBy(desc(opportunities.updatedAt))
 		.limit(1);
 
-	if (!fallback) return null;
+	if (!fallback) return row ?? null;
 
 	return { ...fallback, telefonoAlternativo: null };
 }

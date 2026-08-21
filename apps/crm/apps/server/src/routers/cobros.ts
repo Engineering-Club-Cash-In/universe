@@ -139,6 +139,10 @@ import {
 	isCarteraBackPaymentsEnabled,
 } from "../services/cartera-back-integration";
 import {
+	type EstadoCuentaErrorCodigo,
+	sendEstadoCuentaWhatsapp,
+} from "../services/send-estado-cuenta-whatsapp";
+import {
 	getUltimasSincronizaciones,
 	sincronizarCasosCobros,
 } from "../services/sync-casos-cobros";
@@ -5762,6 +5766,28 @@ export const cobrosRouter = {
 			};
 		}),
 
+	enviarEstadoCuentaWhatsapp: cobrosProcedure
+		.input(z.object({ casoCobroId: z.string().min(1) }))
+		.handler(async ({ input, context }) => {
+			const resultado = await sendEstadoCuentaWhatsapp({
+				casoCobroId: input.casoCobroId,
+				userId: context.userId,
+				puedeVerTodos: PERMISSIONS.canViewAllCasosCobros(context.userRole),
+			});
+
+			if (!resultado.sent) {
+				throw new ORPCError(codigoEstadoCuentaAHttp(resultado.codigo), {
+					message: resultado.mensaje,
+				});
+			}
+
+			return {
+				success: true,
+				telefono: resultado.telefono,
+				templateMessageId: resultado.templateMessageId,
+			};
+		}),
+
 	enviarWhatsappMasivoCobros: cobrosProcedure
 		.input(
 			z.object({
@@ -7348,6 +7374,29 @@ export const cobrosRouter = {
 			return filas;
 		}),
 };
+
+/**
+ * Mapea los códigos de negocio de `sendEstadoCuentaWhatsapp` al código HTTP del
+ * `ORPCError`. Extraída como función pura y exportada para poder testear la
+ * tabla completa sin levantar el procedure.
+ */
+export function codigoEstadoCuentaAHttp(
+	codigo: EstadoCuentaErrorCodigo,
+): "NOT_FOUND" | "BAD_REQUEST" | "INTERNAL_SERVER_ERROR" {
+	switch (codigo) {
+		case "CASO_NO_ENCONTRADO":
+			return "NOT_FOUND";
+		case "SIN_SIFCO":
+		case "SIN_TELEFONO":
+		case "SIN_MOVIMIENTOS":
+		case "CREDITO_NO_ESTA_EN_CARTERA":
+			return "BAD_REQUEST";
+		case "ERROR_CARTERA":
+		case "ERROR_ENVIO":
+		case "ERROR_INTERNO":
+			return "INTERNAL_SERVER_ERROR";
+	}
+}
 
 /**
  * Resuelve el número SIFCO del caso de cobros (si existe).

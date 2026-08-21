@@ -747,6 +747,20 @@ function RouteComponent() {
 		}
 	};
 
+	// Mutación para enviar el estado de cuenta por WhatsApp
+	const enviarEstadoCuentaMutation = useMutation({
+		mutationFn: () =>
+			client.enviarEstadoCuentaWhatsapp({
+				casoCobroId: casoDetails.data?.id ?? "",
+			}),
+		onSuccess: (r) => {
+			toast.success(`Estado de cuenta enviado a ${r.telefono}`);
+		},
+		onError: (error: any) => {
+			toast.error(error.message || "No se pudo enviar el estado de cuenta");
+		},
+	});
+
 	// Mutación para actualizar vehículo
 	const updateVehicleMutation = useMutation({
 		mutationFn: (data: {
@@ -1426,6 +1440,48 @@ function RouteComponent() {
 											Promesa de Pago
 										</Button>
 									</ContactoModal>
+
+									<AlertDialog>
+										<AlertDialogTrigger asChild>
+											<Button
+												variant="outline"
+												className="flex items-center gap-2"
+												disabled={enviarEstadoCuentaMutation.isPending}
+											>
+												{enviarEstadoCuentaMutation.isPending ? (
+													<>
+														<Loader className="h-4 w-4 animate-spin" />
+														Enviando…
+													</>
+												) : (
+													<>
+														<FileText className="h-4 w-4 text-emerald-600" />
+														Enviar Estado de Cuenta
+													</>
+												)}
+											</Button>
+										</AlertDialogTrigger>
+										<AlertDialogContent>
+											<AlertDialogHeader>
+												<AlertDialogTitle>
+													¿Enviar estado de cuenta?
+												</AlertDialogTitle>
+												<AlertDialogDescription>
+													Se generará el estado de cuenta actualizado del
+													crédito y se enviará por WhatsApp al teléfono
+													registrado del cliente.
+												</AlertDialogDescription>
+											</AlertDialogHeader>
+											<AlertDialogFooter>
+												<AlertDialogCancel>Cancelar</AlertDialogCancel>
+												<AlertDialogAction
+													onClick={() => enviarEstadoCuentaMutation.mutate()}
+												>
+													Enviar
+												</AlertDialogAction>
+											</AlertDialogFooter>
+										</AlertDialogContent>
+									</AlertDialog>
 								</div>
 							</>
 						) : (

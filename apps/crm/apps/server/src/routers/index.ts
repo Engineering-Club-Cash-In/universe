@@ -488,6 +488,7 @@ export const disbursementRouter = {
 	getContractLinksMessage: messagingRouter.getContractLinksMessage,
 	getWhatsappLog: messagingRouter.getWhatsappLog,
 	updateWhatsappLog: messagingRouter.updateWhatsappLog,
+	enviarEstadoCuentaWhatsapp: cobrosRouter.enviarEstadoCuentaWhatsapp,
 
 	// Dashboard jurídico manual
 	getJuridicoDashboardSnapshot: juridicoDashboardRouter.getSnapshot,

@@ -1637,4 +1637,18 @@ export interface PagosPorBoletaResponse {
 	 * prueba que un request que se cortó del lado del CRM ya no puede escribir.
 	 */
 	operacion_en_curso?: boolean | null;
+	/**
+	 * Pagos del bot en ese crédito que quedaron **sin ninguna boleta** que los
+	 * señale.
+	 *
+	 * `insertPayment` escribe la fila de `pagos_credito` primero y las de
+	 * `boletas` después: si revienta en el medio, el pago existe pero el único
+	 * puente que tiene el bot para encontrarlo —la URL— no se escribió nunca.
+	 * Sin este campo, ese vacío se leía como "no se registró nada" y el
+	 * borrador volvía a `leida`.
+	 *
+	 * Ausente contra una instancia de cartera vieja. **Con la duda no se
+	 * reabre**, igual que con `operacion_en_curso`.
+	 */
+	huerfanos?: EstadoPagoCartera[];
 }

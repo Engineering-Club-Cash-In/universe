@@ -336,7 +336,8 @@ ambigua:
 | Filas vivas en `boletas` | Se registró | **`confirmada_a_verificar`** (puede estar incompleto: §5.2) |
 | Nada vivo, y **alguna** reversión `completada` | Se registró y ya lo rechazaron | **`rechazada`** — y se le avisa al cliente |
 | Nada vivo, y solo reversiones `iniciada` | Una reversión quedó a medias en cartera | **`revision_manual`** — nadie puede decidir esto solo |
-| Nada de nada, **y cartera confirma que no hay un pago suyo en vuelo** | No se registró | **`leida`** — el cliente puede confirmar de nuevo |
+| Nada de nada, **y cartera confirma que no hay un pago suyo en vuelo ni pagos del bot huérfanos** | No se registró | **`leida`** — el cliente puede confirmar de nuevo |
+| Nada vivo, pero el crédito tiene **pagos del bot sin boleta** | Se escribió el pago y no su boleta | **`revision_manual`** |
 
 Esa es la lista completa: **cuatro respuestas, cuatro transiciones**, sin zona gris. La
 tercera fila existe por cómo es `reversePayment` — ver [D-36](./DECISIONES.md#d-36--las-reversiones-dejan-registro).
@@ -363,6 +364,15 @@ respuestas son ciertas por separado y juntas dicen "no se registró nada y no ha
 corriendo" sobre un pago que sí existe. Se intenta tomar el lock **sin esperar**: si está
 ocupado, la respuesta ya es `operacion_en_curso: true` —que es la que frena la reconciliación—
 y el job nunca se queda trabado detrás de un pago lento.
+
+**Y hay una segunda condición para la cuarta fila, por el mismo motivo.** `insertPayment`
+escribe la fila de `pagos_credito` **antes** que las de `boletas`. Si revienta en el medio —el
+500 que ahora se trata como indeterminado—, el pago existe y su URL no se escribió nunca:
+buscar por `r2_key` devuelve vacío sobre un pago que **sí está**. Por eso `/pagos-por-boleta`
+devuelve además los `huerfanos`: pagos del bot en ese crédito, de las últimas 24 h, sin
+ninguna boleta colgando y sin reversión que los explique. Si aparece alguno, el borrador va a
+`revision_manual` en vez de a `leida` — no se puede asegurar que ese huérfano sea de esta
+boleta, y decidirlo mal cuesta un pago de más.
 
 **Y una válvula de escape.** Un borrador que lleva **24 horas** en `confirmando` pasa a
 `revision_manual`: significa que cartera lleva un día sin poder contestar o que hay un pago

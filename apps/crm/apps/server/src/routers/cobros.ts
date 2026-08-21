@@ -5772,6 +5772,7 @@ export const cobrosRouter = {
 			const resultado = await sendEstadoCuentaWhatsapp({
 				casoCobroId: input.casoCobroId,
 				userId: context.userId,
+				puedeVerTodos: PERMISSIONS.canViewAllCasosCobros(context.userRole),
 			});
 
 			if (!resultado.sent) {

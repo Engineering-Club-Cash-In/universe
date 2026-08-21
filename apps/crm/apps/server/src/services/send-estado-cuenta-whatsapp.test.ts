@@ -98,6 +98,23 @@ describe("sendEstadoCuentaWhatsapp", () => {
 		expect(calls.enviar).toBe(0);
 	});
 
+	test("propaga usuario y scope al cargar caso", async () => {
+		let scopeRecibido: unknown;
+		const { deps } = buildDeps({
+			cargarCaso: mock(async (...args: unknown[]) => {
+				scopeRecibido = args[1];
+				return null;
+			}),
+		});
+
+		await sendEstadoCuentaWhatsapp(
+			{ casoCobroId: CASO_ID, userId: "u1", puedeVerTodos: false },
+			deps,
+		);
+
+		expect(scopeRecibido).toEqual({ userId: "u1", puedeVerTodos: false });
+	});
+
 	test("cargar caso falla: ERROR_INTERNO, sin propagar excepción", async () => {
 		const { deps } = buildDeps({
 			cargarCaso: mock(async () => {

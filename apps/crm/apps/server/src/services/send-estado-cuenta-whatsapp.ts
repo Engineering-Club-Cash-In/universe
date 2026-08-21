@@ -12,7 +12,7 @@
  * un resultado tipado, nunca como una excepción.
  */
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "../db";
 import { casosCobros, contratosFinanciamiento } from "../db/schema/cobros";
 import { clients } from "../db/schema/crm";
@@ -53,6 +53,8 @@ const MENSAJES_ERROR: Record<EstadoCuentaErrorCodigo, string> = {
 export interface SendEstadoCuentaWhatsappParams {
 	casoCobroId: string;
 	userId: string;
+	/** Solo supervisor/admin pueden enviar estados de cuenta de cualquier caso. */
+	puedeVerTodos?: boolean;
 	/**
 	 * Si es true, el mensaje se manda SIEMPRE al primer teléfono de prueba
 	 * (`TEST_PHONES[0]`), nunca al del cliente real. En producción se llama
@@ -76,9 +78,21 @@ interface DatosCaso {
 	vehiculoPlaca: string | null;
 }
 
+interface EstadoCuentaScope {
+	userId: string;
+	puedeVerTodos: boolean;
+}
+
 async function cargarCasoDefault(
 	casoCobroId: string,
+	scope: EstadoCuentaScope,
 ): Promise<DatosCaso | null> {
+	const whereClause = scope.puedeVerTodos
+		? eq(casosCobros.id, casoCobroId)
+		: and(
+				eq(casosCobros.id, casoCobroId),
+				eq(casosCobros.responsableCobros, scope.userId),
+			);
 	const [row] = await db
 		.select({
 			numeroCreditoSifco: casosCobros.numeroCreditoSifco,
@@ -97,7 +111,7 @@ async function cargarCasoDefault(
 		)
 		.leftJoin(clients, eq(contratosFinanciamiento.clientId, clients.id))
 		.leftJoin(vehicles, eq(contratosFinanciamiento.vehicleId, vehicles.id))
-		.where(eq(casosCobros.id, casoCobroId))
+		.where(whereClause)
 		.limit(1);
 
 	return row ?? null;
@@ -128,7 +142,10 @@ export function construirMensajeEstadoCuenta(
 
 /** Deps inyectables solo para tests — en producción no se pasa nada. */
 export interface EstadoCuentaDeps {
-	cargarCaso?: (casoCobroId: string) => Promise<DatosCaso | null>;
+	cargarCaso?: (
+		casoCobroId: string,
+		scope: EstadoCuentaScope,
+	) => Promise<DatosCaso | null>;
 	obtenerUrl?: typeof carteraBackClient.getEstadoCuentaUrl;
 	enviar?: typeof sendWhatsappTemplate;
 	guardarLog?: typeof persistCobrosSendLog;
@@ -139,6 +156,10 @@ export async function sendEstadoCuentaWhatsapp(
 	deps: EstadoCuentaDeps = {},
 ): Promise<SendEstadoCuentaWhatsappResult> {
 	const { casoCobroId, userId } = params;
+	const scope: EstadoCuentaScope = {
+		userId,
+		puedeVerTodos: params.puedeVerTodos ?? false,
+	};
 	const cargarCaso = deps.cargarCaso ?? cargarCasoDefault;
 	const obtenerUrl =
 		deps.obtenerUrl ??
@@ -157,7 +178,7 @@ export async function sendEstadoCuentaWhatsapp(
 	// 1. Cargar el caso.
 	let caso: DatosCaso | null;
 	try {
-		caso = await cargarCaso(casoCobroId);
+		caso = await cargarCaso(casoCobroId, scope);
 	} catch (error) {
 		const msg = error instanceof Error ? error.message : String(error);
 		console.error(`${LOG_PREFIX} Error cargando caso ${casoCobroId}: ${msg}`);

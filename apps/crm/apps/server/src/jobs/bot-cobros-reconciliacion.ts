@@ -55,6 +55,7 @@ import {
 import { carteraBackClient } from "../services/cartera-back-client";
 import type {
 	EstadoPagoCartera,
+	IntentoBoletaCartera,
 	ReversionCartera,
 } from "../types/cartera-back";
 
@@ -102,6 +103,8 @@ export function decidirDestino(respuesta: {
 	reversiones: ReversionCartera[];
 	/** Pagos del bot en ese crédito sin ninguna boleta que los señale. */
 	huerfanos?: EstadoPagoCartera[];
+	/** Actas de registro del bot que quedaron `iniciado` para esta URL. */
+	intentos?: IntentoBoletaCartera[];
 }): { estado: EstadoBoletaBot; motivo: string } {
 	// Las filas anuladas (`paymentFalse`) no son un pago vivo: existen para dejar
 	// rastro de algo que se dio por no hecho.
@@ -132,6 +135,29 @@ export function decidirDestino(respuesta: {
 			estado: "revision_manual",
 			motivo:
 				"Hay una reversión a medias en cartera para esta boleta: nadie puede decidir esto solo.",
+		};
+	}
+
+	// ─────────────────────────────────────────────────────────────────────────
+	// UN ACTA `iniciado` SIN COMPLETAR = UN REGISTRO QUE MURIÓ A MEDIAS.
+	//
+	// `insertPayment` escribe la mora y el convenio ANTES de la primera fila
+	// del pago. Si revienta en esa ventana no queda pago, ni boleta, ni
+	// reversión que lo delate — solo el acta que cartera escribe antes de
+	// mutar nada. Reabrir acá haría que el reintento aplique la boleta entera
+	// sobre una mora ya descontada.
+	// ─────────────────────────────────────────────────────────────────────────
+	const intentosAMedias = (respuesta.intentos ?? []).filter(
+		(i) => i.estado === "iniciado",
+	);
+
+	if (intentosAMedias.length > 0) {
+		return {
+			estado: "revision_manual",
+			motivo:
+				`Cartera tiene ${intentosAMedias.length} intento(s) de registro de esta boleta que empezaron a escribir y nadie completó ` +
+				`(${intentosAMedias.map((i) => i.intento_id).join(", ")}). ` +
+				"La mora o el convenio pueden haberse movido sin que el pago exista. Revisar el crédito antes de dejar reintentar.",
 		};
 	}
 
@@ -275,6 +301,11 @@ export async function reconciliarBoletasColgadas(): Promise<ResultadoReconciliac
 			pagos: respuesta.pagos ?? [],
 			reversiones: respuesta.reversiones ?? [],
 			huerfanos: respuesta.huerfanos ?? [],
+			// Con un insertPayment en vuelo, su acta está `iniciado` legítimamente:
+			// se espera a que suelte el lock antes de leerla como evidencia.
+			intentos: sePuedeReabrir(respuesta.operacion_en_curso)
+				? (respuesta.intentos ?? [])
+				: [],
 		});
 
 		// ⚠️ Antes de reabrir, la prueba positiva.

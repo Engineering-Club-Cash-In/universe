@@ -1651,4 +1651,22 @@ export interface PagosPorBoletaResponse {
 	 * reabre**, igual que con `operacion_en_curso`.
 	 */
 	huerfanos?: EstadoPagoCartera[];
+	/**
+	 * Actas de registro del bot que quedaron `iniciado` para esa URL.
+	 *
+	 * `insertPayment` escribe la mora y el convenio ANTES de la primera fila
+	 * del pago: si revienta en esa ventana no queda pago, ni boleta, ni
+	 * reversión — solo el acta. Con una a la vista, el borrador no se reabre.
+	 *
+	 * Ausente contra una instancia de cartera vieja.
+	 */
+	intentos?: IntentoBoletaCartera[];
+}
+
+/** Un acta de intento de registro, como la devuelve `/pagos-por-boleta`. */
+export interface IntentoBoletaCartera {
+	intento_id: number;
+	estado: string;
+	credito_id: number;
+	creado_en: string | null;
 }

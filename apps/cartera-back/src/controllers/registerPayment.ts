@@ -23,6 +23,11 @@ import { processConvenioPayment } from "./paymentAgreement";
 import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
 import { recalcularPagosCredito } from "./updateCredit";
 import {
+  marcarIntentoCompletado,
+  REGISTRADO_POR_EL_BOT,
+  registrarIntentoIniciado,
+} from "./registroIntentos";
+import {
   applyCapitalPaymentAndBuildResponse,
   calcularSaldoNetoCuota,
   crearEstampadorPagoConvenio,
@@ -645,6 +650,10 @@ export const insertPayment = async ({ body, set }: any) => {
   // 🔒 Conexión dedicada para el advisory lock (se libera en finally).
   let lockConn: PaymentAdvisoryLockConnection | undefined;
   let lockedCreditoId: number | undefined;
+  // El acta del intento (solo pagos del bot): iniciado antes de la primera
+  // mutación, completado en el finally si no hubo error. Ver registroIntentos.
+  let intentoBoletaId: number | undefined;
+  let intentoFallo = false;
   try {
     // 1. Validar schema
     const parseResult = pagoSchema.safeParse(body);
@@ -749,6 +758,20 @@ export const insertPayment = async ({ body, set }: any) => {
           })),
         };
       }
+    // El acta del intento, ANTES de la primera mutación. Este flujo escribe la
+    // mora y el convenio antes que el pago: si revienta en esa ventana, sin el
+    // acta no queda nada que le diga a la reconciliación del bot que acá SÍ
+    // pasó algo. Si el acta misma falla se aborta — todavía no se escribió
+    // nada, así que ese 500 es de los seguros.
+    if (registerBy === REGISTRADO_POR_EL_BOT) {
+      intentoBoletaId = await registrarIntentoIniciado({
+        credito_id,
+        register_by: registerBy,
+        monto_boleta,
+        urls_boletas: urlCompletas ?? [],
+      });
+    }
+
     // 4. Calcular disponible
     const montoBoleta = new Big(monto_boleta);
 
@@ -2335,6 +2358,9 @@ export const insertPayment = async ({ body, set }: any) => {
     }
   } catch (error) {
     console.error("[insertPayment] Error:", error);
+    // El acta queda `iniciado`: no se sabe qué alcanzó a escribirse, y esa duda
+    // es exactamente lo que el acta existe para contar.
+    intentoFallo = true;
     if ((error as { code?: string }).code === CREDIT_PENDING_CANCELLATION_ERROR.code) {
       set.status = 409;
       return {
@@ -2357,6 +2383,13 @@ export const insertPayment = async ({ body, set }: any) => {
       error: error instanceof Error ? error.message : String(error),
     };
   } finally {
+    // El acta se cierra solo si el flujo llegó al final sin reventar. Nunca
+    // rompe nada: si esta marca se pierde, quedan los pagos vivos a la vista y
+    // la reconciliación resuelve por ellos.
+    if (intentoBoletaId !== undefined && !intentoFallo) {
+      await marcarIntentoCompletado(intentoBoletaId);
+    }
+
     // 🔓 Liberar el advisory lock y devolver la conexión al pool, pase lo que pase.
     if (lockConn) {
       try {

@@ -2063,6 +2063,13 @@ if (facturasExistentes.length > 0) {
         );
       }
 
+      // El recibo de pago por WhatsApp (CB-113) se dispara en /aplicar-pago,
+      // no acá: el flujo "Validar y Facturar" del front llama ese endpoint
+      // primero (mismo pago_id) y duplicaría el envío si también mandáramos
+      // aquí. NOTA: "Generar Factura" standalone (pago validado en una sesión
+      // anterior) no pasa por /aplicar-pago en este request, así que ese caso
+      // puntual no dispara WhatsApp — decisión consciente, no bug.
+
       // Pago solo-capital (sin DTE que emitir y sin errores): no es fallo.
       // El desglose ya quedó guardado arriba (capital de CUBE).
       if (facturasExitosas.length === 0) {

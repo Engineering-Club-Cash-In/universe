@@ -170,6 +170,11 @@ export const cobrosAppRouter = {
 	getDetallesCreditoCarteraBack: cobrosRouter.getDetallesCreditoCarteraBack,
 	// Cartera-back integration endpoints
 	registrarPago: cobrosRouter.registrarPago,
+	registrarPagoCompleto: cobrosRouter.registrarPagoCompleto,
+	getCreditoParaPago: cobrosRouter.getCreditoParaPago,
+	getBancosParaPago: cobrosRouter.getBancosParaPago,
+	getAbonosCuotaParaPago: cobrosRouter.getAbonosCuotaParaPago,
+	getPromesaActivaParaPago: cobrosRouter.getPromesaActivaParaPago,
 	getHistorialPagosCarteraBack: cobrosRouter.getHistorialPagosCarteraBack,
 	getCreditoCarteraBack: cobrosRouter.getCreditoCarteraBack,
 	sincronizarCasosCobros: cobrosRouter.sincronizarCasosCobros,

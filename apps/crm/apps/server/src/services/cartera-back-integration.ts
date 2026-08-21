@@ -307,8 +307,36 @@ export interface CreatePagoParams {
 export interface CreatePagoResult {
 	success: boolean;
 	pago_id?: number;
-	pago?: CarteraPagoCredito;
 	error?: string;
+}
+
+// CB-128: fallback cuando /newPayment no trae pago_id inline. Filtro primario:
+// registerBy === mi userId — cierra el race condition de dos asesores pagando
+// el mismo crédito casi al mismo tiempo (antes se tomaba "el pago_id más alto
+// de los nuevos" a ciegas, que podía ser el pago del OTRO asesor si ambos
+// insertaron en la misma ventana; /paymentByCredit ahora expone registerBy).
+// pago_id > snapshot (pagoIdMaximoPrevio) se mantiene como filtro extra por si
+// el mismo usuario ya tenía pagos previos con el mismo registerBy. Reintenta
+// una vez con espera corta para cubrir lag de replicación.
+// Devuelve el pago completo (no solo el id) — quien llama necesita también
+// numero_cuota real, porque cartera-back puede cascadear el pago a una cuota
+// distinta a la pedida y el camino normal de /newPayment no lo reporta.
+async function resolverPagoRecienCreado(
+	numeroCreditoSifco: string,
+	pagoIdMaximoPrevio: number,
+	registerBy: string,
+): Promise<CarteraPagoCredito | null> {
+	const buscar = async () => {
+		const pagos = await carteraBackClient.getPagosByCredito(numeroCreditoSifco);
+		const nuevos = pagos.filter(
+			(p) => p.pago_id > pagoIdMaximoPrevio && p.registerBy === registerBy,
+		);
+		return nuevos.sort((a, b) => b.pago_id - a.pago_id)[0] ?? null;
+	};
+	const primerIntento = await buscar();
+	if (primerIntento) return primerIntento;
+	await new Promise((resolve) => setTimeout(resolve, 1500));
+	return buscar();
 }
 
 export async function createPagoInCarteraBack(
@@ -327,23 +355,77 @@ export async function createPagoInCarteraBack(
 	const startTime = Date.now();
 
 	try {
-		// Create payment in cartera-back
+		// CB-128: pagoSchema en cartera-back exige credito_id/usuario_id
+		// numéricos (no el SIFCO) y cuotaApagar/registerBy/fecha_boleta/
+		// url_boletas — ninguno lo tenía este caller (nació para el bot de
+		// WhatsApp, que solo conoce el SIFCO). Se resuelven acá para no
+		// tocar la firma pública de CreatePagoParams que ya consume el bot.
+		const credito = await carteraBackClient.getCredito(
+			params.credito_numero_sifco,
+		);
+
 		const pagoInput: CreatePagoInput = {
 			credito_numero_sifco: params.credito_numero_sifco,
+			credito_id: credito.credito.credito_id,
+			usuario_id: credito.usuario.usuario_id,
 			cuota_id: params.cuota_id,
+			cuotaApagar: params.cuota_id ?? 0,
 			fecha_pago: params.fecha_pago,
+			fecha_boleta: params.fecha_pago,
 			monto_boleta: params.monto_boleta,
+			url_boletas: [],
 			numeroAutorizacion: params.numeroAutorizacion,
 			observaciones: params.observaciones,
+			registerBy: params.userId,
 		};
 
-		const pago = await carteraBackClient.createPago(pagoInput);
+		// Snapshot ANTES de crear el pago — único ancla confiable para
+		// reconocer "el pago recién creado" si /newPayment no trae pago_id
+		// inline (ver comentario en resolverPagoIdRecienCreado).
+		const pagosPrevios = await carteraBackClient.getPagosByCredito(
+			params.credito_numero_sifco,
+		);
+		const pagoIdMaximoPrevio = pagosPrevios.reduce(
+			(max, p) => Math.max(max, p.pago_id),
+			0,
+		);
+
+		const respuesta = await carteraBackClient.createPago(pagoInput);
+		// soloInformativo (mora parcial insuficiente, etc.) no es un rechazo —
+		// cartera-back sí insertó el pago, ver comentario en createPago.
+		if (!respuesta.success && !respuesta.soloInformativo) {
+			throw new Error(respuesta.message || "cartera-back rechazó el pago");
+		}
+
+		// CB-128: /newPayment no siempre trae pago_id inline (ver comentario en
+		// cartera-back-client.ts:createPago) — se resuelve consultando el pago
+		// recién creado por SIFCO cuando no vino en la respuesta directa. También
+		// resuelve la cuota REAL que cerró (puede diferir de cuota_id pedida si
+		// cartera-back cascadea el pago).
+		let pagoId = respuesta.pago_id;
+		let cuotaNumeroReal = params.cuota_id || 0;
+		if (!pagoId) {
+			const pagoEncontrado = await resolverPagoRecienCreado(
+				params.credito_numero_sifco,
+				pagoIdMaximoPrevio,
+				params.userId,
+			);
+			pagoId = pagoEncontrado?.pago_id;
+			if (pagoEncontrado?.numero_cuota != null) {
+				cuotaNumeroReal = pagoEncontrado.numero_cuota;
+			}
+		}
+		if (!pagoId) {
+			throw new Error(
+				"cartera-back confirmó el pago pero no se pudo resolver su pago_id",
+			);
+		}
 
 		// Store reference in CRM
 		const referenceData: NewPagoReference = {
-			carteraPagoId: pago.pago_id,
+			carteraPagoId: pagoId,
 			numeroCreditoSifco: params.credito_numero_sifco,
-			cuotaNumero: pago.cuota_id || 0,
+			cuotaNumero: cuotaNumeroReal,
 			montoBoleta: params.monto_boleta.toString(),
 			fechaPago: new Date(params.fecha_pago),
 			casoCobroId: params.casoCobroId || null,
@@ -357,10 +439,10 @@ export async function createPagoInCarteraBack(
 		await logSyncOperation({
 			operation: "create_payment",
 			entityType: "pago",
-			entityId: pago.pago_id.toString(),
+			entityId: pagoId.toString(),
 			status: "success",
 			requestPayload: JSON.stringify(pagoInput),
-			responsePayload: JSON.stringify(pago),
+			responsePayload: JSON.stringify(respuesta),
 			startedAt: new Date(startTime),
 			completedAt: new Date(),
 			durationMs: Date.now() - startTime,
@@ -369,13 +451,12 @@ export async function createPagoInCarteraBack(
 		});
 
 		console.log(
-			`[CarteraBackSync] Payment created successfully: ${pago.pago_id} for credit ${params.credito_numero_sifco}`,
+			`[CarteraBackSync] Payment created successfully: ${pagoId} for credit ${params.credito_numero_sifco}`,
 		);
 
 		return {
 			success: true,
-			pago_id: pago.pago_id,
-			pago,
+			pago_id: pagoId,
 		};
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error);

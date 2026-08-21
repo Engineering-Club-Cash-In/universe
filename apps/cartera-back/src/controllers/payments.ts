@@ -97,6 +97,7 @@ export async function getAllPagosWithCreditAndInversionistas(
         gps_restante: pagos_credito.gps_restante,
         total_restante: pagos_credito.total_restante,
         llamada: pagos_credito.llamada,
+        registerBy: pagos_credito.registerBy,
         fecha_pago: pagos_credito.fecha_pago,
         fecha_vencimiento: cuotas_credito.fecha_vencimiento,
         renuevo_o_nuevo: pagos_credito.renuevo_o_nuevo,

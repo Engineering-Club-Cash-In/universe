@@ -5,6 +5,7 @@
 
 import { z } from "zod";
 import type {
+	AbonosCuotaResponse,
 	AperturaDiaResponse,
 	AsesorHistorialResponse,
 	BoletaPagoInversionista,
@@ -55,6 +56,7 @@ import type {
 	LiquidatePagosInversionistasInput,
 	PaginatedResponse,
 	PoolPorAsesorRow,
+	PromesaActivaCredito,
 	ResumenCreditoResponse,
 	ResumenGlobalInversionista,
 	ReversePagoInput,
@@ -1156,13 +1158,23 @@ export class CarteraBackClient {
 		}
 	}
 
-	async getCredito(numeroSifco: string): Promise<CreditoDirectoResponse> {
+	async getCredito(
+		numeroSifco: string,
+		useCache = true,
+	): Promise<CreditoDirectoResponse> {
 		// El endpoint /credito NO usa el wrapper CarteraBackApiResponse
 		// Retorna los datos directamente
+		//
+		// CB-128: el flujo de "Registrar pago" (getCreditoParaPago,
+		// registrarPagoCompleto) pasa useCache=false a propósito — mora, cuotas
+		// atrasadas y saldo a favor tienen que ser el dato real en el momento de
+		// cobrar, no una copia de hasta 5 min de vieja. El resto de callers (listas,
+		// reportes, jobs) sigue cacheando por default: son de alto volumen y no
+		// necesitan precisión al segundo.
 		const response = await this.request<CreditoDirectoResponse>(
 			`/credito?numero_credito_sifco=${encodeURIComponent(numeroSifco)}`,
 			{ method: "GET" },
-			true, // use cache
+			useCache,
 		);
 		// Antes acá se hacía JSON.stringify(response, null, 2) del response
 		// COMPLETO: ~120 KB indentados escritos al log en cada llamada no
@@ -1335,17 +1347,64 @@ export class CarteraBackClient {
 	// PAGOS (PAYMENTS)
 	// ========================================================================
 
-	async createPago(input: CreatePagoInput): Promise<CarteraPagoCredito> {
-		this.cache.invalidate(`credito:${input.credito_numero_sifco}`);
-		this.cache.invalidate("pagos");
-		const response = await this.request<
-			CarteraBackApiResponse<CarteraPagoCredito>
-		>("/newPayment", {
+	// CB-128: /newPayment NO tiene un shape de respuesta uniforme — se
+	// confirmó leyendo cartera-back/src/controllers/registerPayment.ts
+	// completo. Tres formas distintas, todas con HTTP 2xx (this.request ya
+	// lanza si el status no es 2xx, así que llegar acá siempre es éxito HTTP):
+	//   1. Pago normal: {success: true, message, detalle, resumen} — sin pago_id.
+	//   2. Abono directo a capital: {success: true, message, pago: {pago_id, ...}}.
+	//   3. Informativo sin cerrar nada (mora parcial insuficiente, saldo a
+	//      favor, etc.): {message, pagos: [], saldo_a_favor} — SIN `success`
+	//      en absoluto. Un `!response.success` acá lo trataba como error y
+	//      reventaba con "Error registrando pago" cuando en realidad
+	//      cartera-back sí guardó el registro (mismo comportamiento que
+	//      carteraFront, que muestra este mismo mensaje como notificación de
+	//      éxito, no como error — confirmado contra la DB de dev).
+	// `success` se toma como true salvo que el body diga explícitamente false.
+	// El caso 3 (soloInformativo) ya no ocurre con el registerPayment.ts actual
+	// de cartera-back — todos sus returns mandan `success` explícito desde el
+	// fix de CB-128. Se deja el fallback a propósito: crm-server y cartera-back
+	// son deploys separados, y una versión más vieja de cartera-back (rollback,
+	// despliegue a medias) puede volver a mandar la respuesta sin `success`.
+	async createPago(input: CreatePagoInput): Promise<{
+		success: boolean;
+		message?: string;
+		pago_id?: number;
+		/** true cuando cartera-back respondió sin pago_id/success explícito — informativo (ej. mora parcial), no error. */
+		soloInformativo: boolean;
+	}> {
+		// CB-128: el patrón `credito:${sifco}` nunca hizo match — la key real de
+		// getCredito es `GET:<baseUrl>/credito?numero_credito_sifco=<sifco>:{}`,
+		// sin ese prefijo `credito:` en ningún lado. invalidate() nunca borraba
+		// nada y el modal reabierto en <5min veía mora/cuota vieja. El SIFCO
+		// solo (sin prefijo) sí aparece dentro de la URL real.
+		this.cache.invalidate(input.credito_numero_sifco);
+		// CB-128: "pagos" nunca hizo match — la URL real es /paymentByCredit
+		// (getPagosByCredito), sin la palabra "pagos". El fallback que resuelve
+		// pago_id vía getPagosByCredito (cuando /newPayment no lo trae inline,
+		// ej. mora parcial) leía una respuesta vieja cacheada y no encontraba el
+		// pago recién creado. invalidate() matchea por substring simple
+		// (key.includes(pattern)) — "paymentByCredit" sí aparece en esa URL.
+		this.cache.invalidate("paymentByCredit");
+		// credito_numero_sifco NO es parte de pagoSchema en cartera-back (que
+		// exige credito_id numérico) — viaja en el input solo para poder
+		// invalidar la cache por SIFCO arriba, y se descarta del body real.
+		const { credito_numero_sifco: _sifco, ...body } = input;
+		const response = await this.request<{
+			success?: boolean;
+			message?: string;
+			pago?: { pago_id: number };
+			pago_id?: number;
+		}>("/newPayment", {
 			method: "POST",
-			body: JSON.stringify(input),
+			body: JSON.stringify(body),
 		});
-		if (!response.data) throw new Error("No data returned from createPago");
-		return response.data;
+		return {
+			success: response.success ?? true,
+			message: response.message,
+			pago_id: response.pago_id ?? response.pago?.pago_id,
+			soloInformativo: response.success === undefined,
+		};
 	}
 
 	async reversePago(
@@ -1362,15 +1421,59 @@ export class CarteraBackClient {
 		return response.data || { success: false, message: "No response" };
 	}
 
-	async getPagosByCredito(numeroSifco: string): Promise<CarteraPagoCredito[]> {
-		const response = await this.request<
-			CarteraBackApiResponse<CarteraPagoCredito[]>
-		>(
-			`/paymentByCredit?numero_credito_sifco=${encodeURIComponent(numeroSifco)}&excel=false`,
+	// CB-128: abonos parciales ya hechos a una cuota puntual — el form
+	// "registrar pago" de la Ficha 360 lo usa para el mismo cálculo de
+	// excedente que ya hace carteraFront (registerPayment.ts). Endpoint sin
+	// wrapper CarteraBackApiResponse, igual que /credito.
+	async getAbonosCuota(
+		numeroSifco: string,
+		numeroCuota: number,
+	): Promise<AbonosCuotaResponse> {
+		const response = await this.request<AbonosCuotaResponse>(
+			`/abonos-cuota/${encodeURIComponent(numeroSifco)}/${numeroCuota}`,
 			{ method: "GET" },
-			true, // use cache
 		);
-		return response.data || [];
+		return response;
+	}
+
+	// CB-128: promesa de pago vigente de un crédito (o null) — mismo endpoint
+	// de solo lectura que ya consume carteraFront para el aviso "Promesa
+	// Pago: fecha" en el detalle del crédito.
+	async getPromesaActivaPorCredito(
+		creditoId: number,
+	): Promise<PromesaActivaCredito | null> {
+		const response = await this.request<{
+			success: boolean;
+			data: PromesaActivaCredito | null;
+		}>(`/promesas-pago/activa/${creditoId}`, { method: "GET" });
+		return response.data ?? null;
+	}
+
+	async getPagosByCredito(numeroSifco: string): Promise<CarteraPagoCredito[]> {
+		// CB-128: /paymentByCredit devuelve un array DIRECTO (`return pagos;` en
+		// cartera-back/src/routers/payments.ts:95, no envuelto en
+		// CarteraBackApiResponse<T>), y cada elemento va anidado como
+		// {pago: {...}, inversionistasData: [...], pagosInversionistas: [...]}
+		// — confirmado con curl real contra /paymentByCredit. El shape plano
+		// que este método asumía (CarteraPagoCredito directo) nunca coincidió,
+		// así que `response.data` daba undefined y el fallback de pago_id en
+		// createPago nunca encontraba nada. El endpoint responde 404 (no 200
+		// con []) si el crédito no tiene pagos — se trata como lista vacía.
+		try {
+			const response = await this.request<Array<{ pago: CarteraPagoCredito }>>(
+				`/paymentByCredit?numero_credito_sifco=${encodeURIComponent(numeroSifco)}&excel=false`,
+				{ method: "GET" },
+				true, // use cache
+			);
+			return Array.isArray(response)
+				? response.map((fila) => fila.pago).filter(Boolean)
+				: [];
+		} catch (error) {
+			if (error instanceof CarteraBackHttpError && error.status === 404) {
+				return [];
+			}
+			throw error;
+		}
 	}
 
 	async getPayments(

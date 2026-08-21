@@ -601,6 +601,16 @@ export interface CreditoDirectoResponse {
 	moraActual: string; // decimal viene como string
 	mora?: CarteraMoraCredito | null;
 	convenioActivo?: CarteraConvenio | null;
+	// CB-128: el endpoint real /credito SÍ devuelve estos 3 campos (confirmado
+	// contra registerPayment.ts de carteraFront, que los lee directo de
+	// result.cuotaActual/cuotaActualPagada/cuotaActualStatus) — faltaban en
+	// este tipo porque nadie los había necesitado hasta el resumen de "Registrar
+	// pago". cuotaActual puede venir como número plano o como objeto de cuota
+	// según el estado de migración del dato en cartera-back (mismo comentario
+	// "antes era número, ahora es objeto" que carteraFront ya maneja).
+	cuotaActual?: number | CarteraCuotaCredito;
+	cuotaActualPagada?: boolean;
+	cuotaActualStatus?: string | null;
 }
 
 export interface UpdateCreditoInput {
@@ -669,6 +679,8 @@ export interface CarteraPagoCredito {
 	pago_id: number;
 	credito_id: number;
 	cuota_id: number | null;
+	/** numero_cuota real de la fila cuotas_credito (join en getAllPagosWithCreditAndInversionistas) — puede diferir de la cuota que el asesor pidió pagar cuando cartera-back cascadea el pago a otra cuota. */
+	numero_cuota: number | null;
 	fecha_pago: string; // date
 	cuota: string; // decimal
 	cuota_interes: string; // decimal
@@ -701,21 +713,72 @@ export interface CarteraPagoCredito {
 	observaciones: string | null;
 	boletas?: CarteraBoleta[];
 	pagos_inversionistas?: CarteraPagoCreditoInversionista[];
+	/** userId del CRM (o identificador de quien registró) que mandó /newPayment — expuesto por /paymentByCredit desde CB-128. */
+	registerBy?: string;
 }
 
+// CB-128: shape completo de `pagoSchema` en
+// cartera-back/src/controllers/registerPayment.ts:65-82 — el subconjunto
+// anterior (solo 5 campos) alcanzaba para el registro mínimo del bot de
+// WhatsApp, pero el form "igual a carteraFront" de la Ficha 360 necesita que
+// cartera-back reciba los mismos campos que recibe desde carteraFront
+// (banco, origen de pago, boletas, abono a capital) para que corra la MISMA
+// lógica de cálculo (mora → convenio → cuota, excedente, etc.) sin que el CRM
+// la reimplemente.
 export interface CreatePagoInput {
+	/** numero_credito_sifco: se resuelve a credito_id server-side antes del POST. */
 	credito_numero_sifco: string;
-	cuota_id?: number;
-	fecha_pago: string; // ISO date string
+	credito_id: number;
+	usuario_id: number;
 	monto_boleta: number;
+	fecha_pago: string; // ISO date string
+	fecha_boleta: string; // ISO date string
+	cuotaApagar: number;
+	/** Requerido por cartera-back aunque venga vacío. */
+	url_boletas: string[];
+	otros?: number;
+	abono_directo_capital?: number;
+	banco_id?: number;
+	origen_pago?: "transferencia" | "cheque" | "boleta";
 	numeroAutorizacion?: string;
 	observaciones?: string;
-	// Los demás campos se calculan automáticamente en cartera-back
+	registerBy: string;
+	llamada?: string;
+	renuevo_o_nuevo?: string;
+	cuota_id?: number;
 }
 
 export interface ReversePagoInput {
 	pago_id: number;
 	credito_id: number;
+}
+
+/** GET /abonos-cuota/:sifco/:cuota — abonos parciales ya hechos a una cuota. */
+export interface AbonosCuotaResponse {
+	success: boolean;
+	numero_credito_sifco: string;
+	numero_cuota: number;
+	total_pagos: number;
+	abono_capital: string;
+	abono_iva_12: string;
+	abono_interes: string;
+	membresias_pago: string;
+	abono_seguro: string;
+	abono_gps: string;
+	/** Usados por getDisplayedPartialContribution (mismo cálculo que carteraFront). */
+	cuota_cerrada: boolean;
+	total_aplicado_cuota: string;
+	saldo_pendiente: string;
+	tiene_abono_parcial: boolean;
+}
+
+/** GET /promesas-pago/activa/:credito_id — null si no hay promesa vigente. */
+export interface PromesaActivaCredito {
+	id: number;
+	credito_id: number;
+	fecha_promesa: string;
+	activa: boolean;
+	[key: string]: unknown;
 }
 
 // ============================================================================

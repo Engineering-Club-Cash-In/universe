@@ -35,6 +35,8 @@ ENV PUPPETEER_CACHE_DIR=/usr/src/app/.cache/puppeteer \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chrome-for-testing
 
 ARG PUPPETEER_CHROME_VERSION=148.0.7778.97
+ARG CARTERA_LOG_ENVIRONMENT=production
+ENV LOG_ENVIRONMENT=${CARTERA_LOG_ENVIRONMENT}
 
 # 2. Preparar el Monorepo
 WORKDIR /usr/src/app

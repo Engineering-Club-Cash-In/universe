@@ -11,6 +11,8 @@ const manifestFile = new URL(
   import.meta.url,
 );
 const dockerfile = new URL('../../Dockerfile', import.meta.url);
+const productionDeploy = new URL('../../deploy.sh', import.meta.url);
+const developmentDeploy = new URL('../../deploy-dev.sh', import.meta.url);
 
 function executableConsoleCalls(source: string, path: string): number {
   const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
@@ -64,7 +66,16 @@ test('registerPayment emits the approved integrity anomaly event', () => {
 });
 
 test('the Cartera image includes the structured logger workspace package', () => {
-  expect(readFileSync(dockerfile, 'utf8')).toContain(
+  const source = readFileSync(dockerfile, 'utf8');
+  expect(source).toContain(
     'COPY packages/structured-logger ./packages/structured-logger',
+  );
+  expect(source).toContain('ARG CARTERA_LOG_ENVIRONMENT=production');
+  expect(source).toContain('ENV LOG_ENVIRONMENT=${CARTERA_LOG_ENVIRONMENT}');
+  expect(readFileSync(productionDeploy, 'utf8')).toContain(
+    '--build-arg CARTERA_LOG_ENVIRONMENT=production',
+  );
+  expect(readFileSync(developmentDeploy, 'utf8')).toContain(
+    '--build-arg CARTERA_LOG_ENVIRONMENT=development',
   );
 });

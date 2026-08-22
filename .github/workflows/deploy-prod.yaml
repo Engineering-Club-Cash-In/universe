@@ -75,6 +75,7 @@ jobs:
             cartera-back:
               - 'apps/cartera-back/**'
               - 'packages/email/**'
+              - 'packages/structured-logger/**'
               - 'package.json'
               - 'bun.lock'
             cartera-front:
@@ -162,8 +163,9 @@ jobs:
         if: matrix.app != 'legal-docs-blueprints'
         run: |
           # Contexto, Dockerfile e imagen por app (espejo de los deploy.sh)
+          BUILD_ARGS=()
           case "${{ matrix.app }}" in
-            cartera-back)    CTX=.                    FILE=apps/cartera-back/Dockerfile        IMAGE=cartera-back ;;
+            cartera-back)    CTX=.                    FILE=apps/cartera-back/Dockerfile        IMAGE=cartera-back ; BUILD_ARGS=(--build-arg CARTERA_LOG_ENVIRONMENT=production) ;;
             cartera-front)   CTX=apps/carteraFront    FILE=apps/carteraFront/Dockerfile        IMAGE=cartera-front ;;
             crm-api)         CTX=.                    FILE=apps/crm/apps/server/Dockerfile     IMAGE=cci/crm-api ;;
             crm-web)         CTX=.                    FILE=apps/crm/Dockerfile                 IMAGE=cci/crm-web ;;
@@ -174,7 +176,7 @@ jobs:
             investment)      CTX=apps/investment-calculator FILE=apps/investment-calculator/Dockerfile IMAGE=cci/investment ;;
             *) echo "App desconocida"; exit 1 ;;
           esac
-          podman build -f "$FILE" "$CTX" \
+          podman build "${BUILD_ARGS[@]}" -f "$FILE" "$CTX" \
             -t "$ECR_REGISTRY/$IMAGE:latest" \
             -t "$ECR_REGISTRY/$IMAGE:${{ github.sha }}"
 

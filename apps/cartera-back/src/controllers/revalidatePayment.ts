@@ -354,7 +354,6 @@ async function handleRevalidatePayment(
 
     return {
       message: "Internal server error",
-      error: "unknown",
     };
   }
 }

@@ -399,7 +399,6 @@ describe("revalidatePayment", () => {
     expect(set.status).toBe(500);
     expect(response).toEqual({
       message: "Internal server error",
-      error: "unknown",
     });
     expect(JSON.parse(lines[0]!)).toMatchObject({
       event: "payment.revalidation",
@@ -421,7 +420,6 @@ describe("revalidatePayment", () => {
     expect(set.status).toBe(500);
     expect(response).toEqual({
       message: "Internal server error",
-      error: "unknown",
     });
     expect(JSON.parse(lines[0]!)).toMatchObject({
       event: "payment.revalidation",

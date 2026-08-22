@@ -48,6 +48,10 @@ const sliceManifests = [
     file: 'SIXTH_SLICE_DISPOSITIONS.json',
     paths: new Set(['apps/cartera-back/src/controllers/latefee.ts']),
   },
+  {
+    file: 'SEVENTH_SLICE_DISPOSITIONS.json',
+    paths: new Set(['apps/cartera-back/src/controllers/updateDueDate.ts']),
+  },
 ] as const;
 const reviewedPaths = new Set(sliceManifests.flatMap(({ paths }) => [...paths]));
 

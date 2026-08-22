@@ -124,6 +124,58 @@ type CreditLateFeeResult =
       errorCode: "persistence_failed" | "unknown";
     }>;
 
+type DueDateOperation =
+  | "batch_update"
+  | "repair_missing_february"
+  | "change_start_date"
+  | "list_change_history"
+  | "single_update"
+  | "json_bulk_update";
+
+type CreditDueDateResult =
+  | Readonly<{ outcome: "completed"; operation: DueDateOperation; durationMs: number }>
+  | Readonly<{
+      outcome: "completed";
+      operation: DueDateOperation;
+      durationMs: number;
+      processedCount: number;
+      succeededCount: number;
+      failedCount: number;
+      skippedCount: number;
+    }>
+  | Readonly<{
+      outcome: "partially_completed";
+      operation: DueDateOperation;
+      durationMs: number;
+      processedCount: number;
+      succeededCount: number;
+      failedCount: number;
+      skippedCount: number;
+      reasonCode: "item_failures";
+    }>
+  | Readonly<{
+      outcome: "skipped";
+      operation: DueDateOperation;
+      durationMs: number;
+      processedCount: number;
+      succeededCount: number;
+      failedCount: number;
+      skippedCount: number;
+      reasonCode: "missing_payment_reference";
+    }>
+  | Readonly<{
+      outcome: "rejected";
+      operation: DueDateOperation;
+      durationMs: number;
+      reasonCode: "schema_invalid" | "credit_not_found" | "installments_not_found" | "paid_installment_conflict";
+    }>
+  | Readonly<{
+      outcome: "failed" | "partially_persisted";
+      operation: DueDateOperation;
+      durationMs: number;
+      errorCode: "unknown";
+    }>;
+
 function emitAuditWithoutAffectingControlFlow(emit: () => void): void {
   try {
     emit();
@@ -254,6 +306,69 @@ export function emitCreditLateFee(
         error_code: result.errorCode,
       });
     }
+  });
+}
+
+export function emitCreditDueDate(
+  result: CreditDueDateResult,
+  logger: CarteraStructuredLogger = carteraStructuredLogger,
+): void {
+  emitAuditWithoutAffectingControlFlow(() => {
+    if (result.outcome === "skipped") {
+      logger.emit("credit.due_date", "skipped", {
+        due_date_operation: result.operation,
+        duration_ms: result.durationMs,
+        processed_count: result.processedCount,
+        succeeded_count: result.succeededCount,
+        failed_count: result.failedCount,
+        skipped_count: result.skippedCount,
+        reason_code: result.reasonCode,
+      });
+      return;
+    }
+    if (result.outcome === "partially_completed") {
+      logger.emit("credit.due_date", "partially_completed", {
+        due_date_operation: result.operation,
+        duration_ms: result.durationMs,
+        processed_count: result.processedCount,
+        succeeded_count: result.succeededCount,
+        failed_count: result.failedCount,
+        skipped_count: result.skippedCount,
+        reason_code: result.reasonCode,
+      });
+      return;
+    }
+    if (result.outcome === "completed") {
+      if ("processedCount" in result) {
+        logger.emit("credit.due_date", "completed", {
+          due_date_operation: result.operation,
+          duration_ms: result.durationMs,
+          processed_count: result.processedCount,
+          succeeded_count: result.succeededCount,
+          failed_count: result.failedCount,
+          skipped_count: result.skippedCount,
+        });
+        return;
+      }
+      logger.emit("credit.due_date", "completed", {
+        due_date_operation: result.operation,
+        duration_ms: result.durationMs,
+      });
+      return;
+    }
+    if (result.outcome === "rejected") {
+      logger.emit("credit.due_date", "rejected", {
+        due_date_operation: result.operation,
+        duration_ms: result.durationMs,
+        reason_code: result.reasonCode,
+      });
+      return;
+    }
+    logger.emit("credit.due_date", result.outcome, {
+      due_date_operation: result.operation,
+      duration_ms: result.durationMs,
+      error_code: result.errorCode,
+    });
   });
 }
 

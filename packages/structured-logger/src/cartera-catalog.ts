@@ -143,6 +143,11 @@ export const carteraCatalog = {
       partially_applied: { level: 'warn', required: ['payment_kind', 'installment_closed', 'credit_closed', 'manual_action_required', 'duration_ms', 'reason_code'], optional: [] },
       failed: { level: 'error', required: ['payment_kind', 'installment_closed', 'credit_closed', 'manual_action_required', 'duration_ms', 'error_code'], optional: [] },
     } },
+    'payment.revalidation': { outcomes: {
+      completed: { level: 'info', required: ['credit_updated', 'installment_closed', 'duration_ms'], optional: [] },
+      rejected: { level: 'warn', required: ['credit_updated', 'installment_closed', 'duration_ms', 'reason_code'], optional: [] },
+      failed: { level: 'error', required: ['credit_updated', 'installment_closed', 'duration_ms', 'error_code'], optional: [] },
+    } },
     'payment.investor_distribution': { outcomes: {
       completed: { level: 'info', required: ['distribution_mode', 'fallback_applied', 'duration_ms'], optional: [] },
       fallback: { level: 'warn', required: ['distribution_mode', 'fallback_applied', 'duration_ms', 'reason_code'], optional: [] },

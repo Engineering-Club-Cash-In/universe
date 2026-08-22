@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, extname } from 'node:path';
 import ts from 'typescript';
 import { carteraCatalog } from '../src/cartera-catalog';
-import { parseFirstSliceManifest, type ManifestEntry } from './manifest-validator';
+import { parseSliceManifest, type ManifestEntry } from './manifest-validator';
 import { consoleMethod } from './console-call-detector';
 
 const repo = new URL('../../..', import.meta.url).pathname;
@@ -17,10 +17,20 @@ if (!commit || !output) {
 const consoleMethods = new Set(['log', 'error', 'warn', 'time', 'timeEnd', 'table']);
 const extensions = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs']);
 const excludedParts = new Set(['node_modules', 'dist', 'build', 'coverage', '.turbo']);
-const firstSlicePaths = new Set([
-  'apps/cartera-back/src/controllers/registerPayment.ts',
-  'apps/cartera-back/src/utils/functions/uploadsFiles.ts',
-]);
+const sliceManifests = [
+  {
+    file: 'FIRST_SLICE_DISPOSITIONS.json',
+    paths: new Set([
+      'apps/cartera-back/src/controllers/registerPayment.ts',
+      'apps/cartera-back/src/utils/functions/uploadsFiles.ts',
+    ]),
+  },
+  {
+    file: 'SECOND_SLICE_DISPOSITIONS.json',
+    paths: new Set(['apps/cartera-back/src/controllers/revalidatePayment.ts']),
+  },
+] as const;
+const reviewedPaths = new Set(sliceManifests.flatMap(({ paths }) => [...paths]));
 
 
 function git(args: string[]): string {
@@ -69,18 +79,20 @@ function key(path: string, line: number, method: string): string {
 
 function loadManifest(): ReadonlyMap<string, ManifestEntry> {
   if (commit !== targetCommit) return new Map();
-  const manifestPath = new URL('../references/FIRST_SLICE_DISPOSITIONS.json', import.meta.url);
-  const manifest = parseFirstSliceManifest(
-    JSON.parse(readFileSync(manifestPath, 'utf8')) as unknown,
-    carteraCatalog,
-    commit,
-    firstSlicePaths,
-  );
   const result = new Map<string, ManifestEntry>();
-  for (const entry of manifest.entries) {
-    const entryKey = key(entry.path, entry.line, entry.method);
-    if (result.has(entryKey)) throw new Error(`duplicate manifest entry: ${entryKey}`);
-    result.set(entryKey, entry);
+  for (const { file, paths } of sliceManifests) {
+    const manifestPath = new URL(`../references/${file}`, import.meta.url);
+    const manifest = parseSliceManifest(
+      JSON.parse(readFileSync(manifestPath, 'utf8')) as unknown,
+      carteraCatalog,
+      commit,
+      paths,
+    );
+    for (const entry of manifest.entries) {
+      const entryKey = key(entry.path, entry.line, entry.method);
+      if (result.has(entryKey)) throw new Error(`duplicate manifest entry: ${entryKey}`);
+      result.set(entryKey, entry);
+    }
   }
   return result;
 }
@@ -108,8 +120,8 @@ for (const path of paths) {
         const method = `console.${methodName}`;
         const entryKey = key(path, line, method);
         const decision = manifest.get(entryKey);
-        if (commit === targetCommit && firstSlicePaths.has(path) && !decision) {
-          throw new Error(`unreviewed first-slice call: ${entryKey}`);
+        if (commit === targetCommit && reviewedPaths.has(path) && !decision) {
+          throw new Error(`unreviewed slice call: ${entryKey}`);
         }
         if (decision) usedManifestEntries.add(entryKey);
         rows.push([
@@ -133,7 +145,7 @@ for (const path of paths) {
 
 if (commit === targetCommit && usedManifestEntries.size !== manifest.size) {
   const unused = [...manifest.keys()].filter((entryKey) => !usedManifestEntries.has(entryKey));
-  throw new Error(`stale first-slice manifest entries: ${unused.join(', ')}`);
+  throw new Error(`stale slice manifest entries: ${unused.join(', ')}`);
 }
 
 mkdirSync(dirname(output), { recursive: true });

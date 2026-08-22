@@ -11,6 +11,10 @@ const RESERVED_EVENT_FIELDS = new Set([
   'request_id', 'operation_id', 'run_id',
 ]);
 
+function hasOwn(record: object, field: PropertyKey): boolean {
+  return Object.prototype.hasOwnProperty.call(record, field);
+}
+
 export type Environment = 'local' | 'development' | 'staging' | 'production';
 export interface CorrelationContext {
   readonly request_id?: string;
@@ -209,7 +213,7 @@ function validateCatalog(catalog: EventCatalogDefinition): void {
       if (!SAFE_FIELD_PATTERN.test(outcome) || !['info', 'warn', 'error'].includes(definition.level) ||
         !Array.isArray(definition.required) || !Array.isArray(definition.optional)) fail('invalid_catalog', 'logger_config');
       const fields = [...definition.required, ...definition.optional];
-      if (fields.some((field) => typeof field !== 'string' || !Object.hasOwn(catalog.fields, field)) ||
+      if (fields.some((field) => typeof field !== 'string' || !hasOwn(catalog.fields, field)) ||
         new Set(fields).size !== fields.length) fail('invalid_catalog', 'logger_config');
       const constants = definition.constants ?? {};
       if (Object.keys(constants).some((field) => !fields.includes(field))) fail('invalid_catalog', 'logger_config');
@@ -287,10 +291,10 @@ function validatePayload(
     if (!allowed.has(field)) fail('extra_field', event, field);
   }
   for (const field of outcomeDefinition.required) {
-    if (!Object.hasOwn(payload, field)) fail('missing_field', event, field);
+    if (!hasOwn(payload, field)) fail('missing_field', event, field);
   }
   for (const field of allowed) {
-    if (!Object.hasOwn(payload, field)) continue;
+    if (!hasOwn(payload, field)) continue;
     const definition = catalog.fields[field];
     if (!definition) fail('undefined_field', event, field);
     validateField(definition, payload[field], event, field);
@@ -308,10 +312,10 @@ function validatePayload(
 
   for (const invariant of catalog.countInvariants) {
     const invariantFields = [invariant.total, ...invariant.parts, ...invariant.optionalParts];
-    const presentFields = invariantFields.filter((field) => Object.hasOwn(payload, field));
+    const presentFields = invariantFields.filter((field) => hasOwn(payload, field));
     if (presentFields.length === 0) continue;
     const mandatoryFields = [invariant.total, ...invariant.parts];
-    if (mandatoryFields.some((field) => !Object.hasOwn(payload, field))) {
+    if (mandatoryFields.some((field) => !hasOwn(payload, field))) {
       fail('count_invariant', event, invariant.total);
     }
     const total = payload[invariant.total];

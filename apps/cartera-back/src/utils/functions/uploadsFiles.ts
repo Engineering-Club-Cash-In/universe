@@ -11,13 +11,19 @@ export const s3 = new S3Client({
   },
 });
 
-export async function uploadFileController({ body, set }: any) {
+interface UploadFileControllerContext {
+  readonly body?: { readonly file?: unknown };
+  readonly set?: { status: number };
+}
+
+export async function uploadFileController({ body, set }: UploadFileControllerContext) {
+  if (!set) throw new TypeError("Missing response status context");
   try {
     // Elysia ya parseó el multipart. El archivo llega en `body.file` como un
     // File/Blob. NO usar `request.formData()` acá: el body ya fue consumido
     // por el parser interno de Elysia y tirar "ERR_BODY_ALREADY_USED".
     const file = body?.file;
-    console.log("Received file:", file);
+
 
     if (!file || !(file instanceof Blob)) {
       set.status = 400;
@@ -26,8 +32,8 @@ export async function uploadFileController({ body, set }: any) {
 
     // Obtener extensión
     let ext = "";
-    if ("name" in file) {
-      const parts = (file as any).name.split(".");
+    if ("name" in file && typeof file.name === "string") {
+      const parts = file.name.split(".");
       if (parts.length > 1) ext = "." + parts.pop();
     }
     const filename = `${uuidv4()}${ext}`;
@@ -47,7 +53,7 @@ export async function uploadFileController({ body, set }: any) {
     const url = `${filename}`;
     return { success: true, url, filename };
   } catch (error) {
-    console.error("Error uploading file:", error);
+
     set.status = 500;
     return { error: "Error uploading file" };
   }

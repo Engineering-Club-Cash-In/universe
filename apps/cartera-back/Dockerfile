@@ -44,6 +44,7 @@ COPY package.json bun.lock* ./
 
 # Copiar el paquete compartido y la app
 COPY packages/email ./packages/email
+COPY packages/structured-logger ./packages/structured-logger
 COPY apps/cartera-back ./apps/cartera-back
 
 # Instalamos desde la raíz para que resuelva los workspaces correctamente.

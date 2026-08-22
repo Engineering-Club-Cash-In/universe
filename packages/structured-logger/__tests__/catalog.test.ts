@@ -26,6 +26,7 @@ describe('carteraCatalog', () => {
       'payment.integrity_anomaly',
       'payment.investor_distribution',
       'payment.registration',
+      'payment.revalidation',
       'payment.reversal',
       'payment.upload',
       'service.lifecycle',

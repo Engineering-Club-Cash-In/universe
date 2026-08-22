@@ -209,6 +209,14 @@ Schema version: **1**
 | `failed` | `error` | `payment_kind`, `duration_ms`, `lock_state`, `error_code` | — | — |
 | `rejected` | `warn` | `payment_kind`, `duration_ms`, `lock_state`, `reason_code` | — | — |
 
+### `payment.revalidation`
+
+| Outcome | Level | Required | Optional | Constants |
+|---|---|---|---|---|
+| `completed` | `info` | `credit_updated`, `installment_closed`, `duration_ms` | — | — |
+| `failed` | `error` | `credit_updated`, `installment_closed`, `duration_ms`, `error_code` | — | — |
+| `rejected` | `warn` | `credit_updated`, `installment_closed`, `duration_ms`, `reason_code` | — | — |
+
 ### `payment.reversal`
 
 | Outcome | Level | Required | Optional | Constants |

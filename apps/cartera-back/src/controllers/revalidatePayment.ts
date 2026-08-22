@@ -12,6 +12,47 @@ import {
 } from "./registerPaymentPolicy";
 import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import { desactivarMoraSiCreditoAlDia } from "./latefee";
+import {
+  carteraStructuredLogger,
+  type CarteraStructuredLogger,
+} from "../utils/structuredLogger";
+
+type RevalidatePaymentContext = Readonly<Record<string, unknown>>;
+
+interface ResponseSetter {
+  status?: number | string;
+}
+
+interface RevalidatePaymentDependencies {
+  readonly logger?: CarteraStructuredLogger;
+  readonly clock?: () => number;
+}
+
+type RevalidationReasonCode =
+  | "payment_not_found"
+  | "payment_already_applied"
+  | "state_conflict";
+
+class RevalidationRejection extends Error {
+  constructor(
+    readonly reasonCode: RevalidationReasonCode,
+    readonly status: 404 | 409,
+  ) {
+    super(reasonCode);
+  }
+}
+
+class RevalidationIntegrityFailure extends Error {
+  readonly errorCode = "integrity_violation" as const;
+}
+
+function elapsedMilliseconds(clock: () => number, startedAt: number): number {
+  return Math.max(0, Math.min(86_400_000, Math.round(clock() - startedAt)));
+}
+
+function isResponseSetter(value: unknown): value is ResponseSetter {
+  return typeof value === "object" && value !== null;
+}
 
 // ============================================================================
 // SCHEMA DE VALIDACIÓN
@@ -24,13 +65,30 @@ export const revalidatePaymentSchema = z.object({
 // ============================================================================
 // FUNCIÓN PRINCIPAL: REVALIDAR PAGO
 // ============================================================================
-export const revalidatePayment = async ({ body, set }: any) => {
+async function handleRevalidatePayment(
+  context: RevalidatePaymentContext,
+  dependencies: RevalidatePaymentDependencies,
+) {
+  if (!isResponseSetter(context.set)) {
+    throw new Error("invalid revalidation handler context");
+  }
+  const body = context.body;
+  const set = context.set;
+  const logger = dependencies.logger ?? carteraStructuredLogger;
+  const clock = dependencies.clock ?? Date.now;
+  const startedAt = clock();
+  let creditUpdated = false;
+  let installmentClosed = false;
   try {
-    console.log("\n✅ ========== INICIO REVALIDACIÓN DE PAGO ==========");
-
     // 1️⃣ VALIDAR ENTRADA
     const parseResult = revalidatePaymentSchema.safeParse(body);
     if (!parseResult.success) {
+      logger.emit("payment.revalidation", "rejected", {
+        credit_updated: false,
+        installment_closed: false,
+        duration_ms: elapsedMilliseconds(clock, startedAt),
+        reason_code: "schema_invalid",
+      });
       set.status = 400;
       return {
         message: "Validation failed",
@@ -38,8 +96,6 @@ export const revalidatePayment = async ({ body, set }: any) => {
       };
     }
     const { credito_id, pago_id } = parseResult.data;
-    console.log(`📋 Crédito ID: ${credito_id}`);
-    console.log(`🧾 Pago ID: ${pago_id}`);
 
     // 🔥 TRANSACCIÓN ATÓMICA bajo el lock por crédito. El lock se espera en
     // el pool DEDICADO (withPaymentAdvisoryLock), NO dentro de la tx: antes,
@@ -61,14 +117,14 @@ export const revalidatePayment = async ({ body, set }: any) => {
         .limit(1);
 
       if (!pago) {
-        throw new Error(`Payment ${pago_id} not found`);
+        throw new RevalidationRejection("payment_not_found", 404);
       }
       
       if (esPagoAplicado(pago.validationStatus)) {
-        throw new Error(`Payment ${pago_id} is already validated`);
+        throw new RevalidationRejection("payment_already_applied", 409);
       }
       if (pago.validationStatus !== "pending" || pago.paymentFalse !== false) {
-        throw new Error(`Payment ${pago_id} is not pending revalidation`);
+        throw new RevalidationRejection("state_conflict", 409);
       }
 
       if (
@@ -87,11 +143,9 @@ export const revalidatePayment = async ({ body, set }: any) => {
         };
       }
 
-      console.log(`✅ Pago encontrado (Pendiente)`);
-
       // 3️⃣ OBTENER DATOS DEL CRÉDITO
       if (pago.credito_id === null) {
-        throw new Error(`El pago ${pago_id} no tiene un crédito asociado`);
+        throw new RevalidationIntegrityFailure();
       }
 
       const [credito] = await tx
@@ -101,10 +155,8 @@ export const revalidatePayment = async ({ body, set }: any) => {
         .limit(1);
 
       if (!credito) {
-        throw new Error(`Crédito ${pago.credito_id} no encontrado`);
+        throw new RevalidationIntegrityFailure();
       }
-
-      console.log("✅ Crédito encontrado");
 
       // 4️⃣ CALCULAR NUEVO CAPITAL (restar el abono_capital del pago)
       const capital_actual = new Big(credito.capital ?? 0);
@@ -143,10 +195,6 @@ export const revalidatePayment = async ({ body, set }: any) => {
         pagoIdEnValidacion: pago_id,
       });
 
-      console.log(`💰 Capital actual: ${capital_actual.toString()}`);
-      console.log(`💰 Abono capital del pago actual: ${abono_capital_actual.toString()}`);
-      console.log(`💰 Nuevo capital: ${nuevo_capital.toString()}`);
-
       // 5️⃣ CALCULAR NUEVA DEUDA TOTAL
       const cuota_interes = new Big(nuevo_capital)
         .times(new Big(credito.porcentaje_interes ?? 0).div(100))
@@ -164,10 +212,6 @@ export const revalidatePayment = async ({ body, set }: any) => {
         .plus(membresias_pago)
         .round(2);
 
-      console.log(`🔢 Nueva cuota interés: ${cuota_interes.toString()}`);
-      console.log(`🔢 Nuevo IVA 12%: ${iva_12.toString()}`);
-      console.log(`📊 Nueva deuda total: ${nueva_deuda_total.toString()}`);
-
       // 6️⃣ ACTUALIZAR EL CRÉDITO
       if (pago.credito_id !== null) {
         await setCapitalSource(tx, "PAGO");
@@ -180,7 +224,6 @@ export const revalidatePayment = async ({ body, set }: any) => {
             cuota_interes: cuota_interes.toString(),
           })
           .where(eq(creditos.credito_id, pago.credito_id));
-        console.log("✅ Crédito actualizado con nuevos valores");
       }
 
       // 7️⃣ VALIDAR EL PAGO y registrar fecha de aplicación
@@ -196,9 +239,8 @@ export const revalidatePayment = async ({ body, set }: any) => {
         )
         .returning({ pago_id: pagos_credito.pago_id });
       if (!validatedPayment) {
-        throw new Error(`Payment ${pago_id} changed during revalidation`);
+        throw new RevalidationRejection("state_conflict", 409);
       }
-      console.log("✅ Pago marcado como validado con fecha de aplicación");
 
       if (pago.cuota_id !== null && coberturaCuota.cuotaCompleta) {
         await tx
@@ -219,15 +261,25 @@ export const revalidatePayment = async ({ body, set }: any) => {
         credito_id,
         nuevoCapital: nuevo_capital.toString(),
         numero_credito_sifco: credito.numero_credito_sifco,
-        cuota: credito.cuota
+        cuota: credito.cuota,
+        installmentClosed: coberturaCuota.cuotaCompleta,
       };
       })
     );
 
     if ("success" in result && result.success === false) {
+      logger.emit("payment.revalidation", "rejected", {
+        credit_updated: false,
+        installment_closed: false,
+        duration_ms: elapsedMilliseconds(clock, startedAt),
+        reason_code: "state_conflict",
+      });
       set.status = 400;
       return result;
     }
+
+    creditUpdated = true;
+    installmentClosed = result.installmentClosed ?? false;
 
     // Igual que en aplicarPagoAlCredito: si la revalidación dejó el crédito
     // al día, apagar la mora nacida durante la ventana de validación. Va
@@ -237,30 +289,56 @@ export const revalidatePayment = async ({ body, set }: any) => {
       motivo: "Crédito se puso al día al revalidar pago",
     });
 
+    logger.emit("payment.revalidation", "completed", {
+      credit_updated: creditUpdated,
+      installment_closed: installmentClosed,
+      duration_ms: elapsedMilliseconds(clock, startedAt),
+    });
+
+    const { installmentClosed: _installmentClosed, ...responseData } = result;
+
     set.status = 200;
     return {
       message: "Payment revalidated successfully",
-      data: result,
+      data: responseData,
     };
-  } catch (error: any) {
-    console.error("\n❌ ========== ERROR EN REVALIDACIÓN ==========");
-    console.error(error);
-    
-    if (error.message.includes("not found")) {
-      set.status = 404;
-    } else if (
-      error.message.includes("already validated") ||
-      error.message.includes("not pending revalidation") ||
-      error.message.includes("changed during revalidation")
-    ) {
-      set.status = 409;
-    } else {
-      set.status = 500;
+  } catch (error: unknown) {
+    if (error instanceof RevalidationRejection) {
+      logger.emit("payment.revalidation", "rejected", {
+        credit_updated: false,
+        installment_closed: false,
+        duration_ms: elapsedMilliseconds(clock, startedAt),
+        reason_code: error.reasonCode,
+      });
+      set.status = error.status;
+      return {
+        message: "Internal server error",
+        error: error.reasonCode,
+      };
     }
+
+    logger.emit("payment.revalidation", "failed", {
+      credit_updated: creditUpdated,
+      installment_closed: installmentClosed,
+      duration_ms: elapsedMilliseconds(clock, startedAt),
+      error_code: error instanceof RevalidationIntegrityFailure
+        ? error.errorCode
+        : "unknown",
+    });
+    set.status = 500;
 
     return {
       message: "Internal server error",
-      error: error instanceof Error ? error.message : String(error),
+      error: "unknown",
     };
   }
-};
+}
+
+export function createRevalidatePayment(
+  dependencies: RevalidatePaymentDependencies = {},
+) {
+  return (context: RevalidatePaymentContext) =>
+    handleRevalidatePayment(context, dependencies);
+}
+
+export const revalidatePayment = createRevalidatePayment();

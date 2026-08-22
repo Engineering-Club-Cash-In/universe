@@ -34,7 +34,7 @@ function hasExactKeys(record: Readonly<Record<string, unknown>>, allowed: Readon
   return keys.length === allowed.size && keys.every((key) => allowed.has(key));
 }
 
-export function parseFirstSliceManifest(
+export function parseSliceManifest(
   value: unknown,
   catalog: EventCatalogDefinition,
   expectedCommit: string,
@@ -42,7 +42,7 @@ export function parseFirstSliceManifest(
 ): Manifest {
   const root = recordOf(value);
   if (!root || !hasExactKeys(root, new Set(['commit', 'entries'])) || root.commit !== expectedCommit || !Array.isArray(root.entries)) {
-    throw new Error('invalid first-slice manifest root');
+    throw new Error('invalid slice manifest root');
   }
   const entries: ManifestEntry[] = [];
   const keys = new Set<string>();
@@ -51,7 +51,7 @@ export function parseFirstSliceManifest(
     if (!entry || !hasExactKeys(entry, new Set([
       'path', 'line', 'method', 'classification', 'disposition',
       'event', 'outcome', 'rationale',
-    ]))) throw new Error('invalid first-slice manifest entry');
+    ]))) throw new Error('invalid slice manifest entry');
     const path = entry.path;
     const line = entry.line;
     const method = entry.method;
@@ -83,6 +83,8 @@ export function parseFirstSliceManifest(
     keys.add(entryKey);
     entries.push({ path, line, method, classification, disposition, event, outcome, rationale });
   }
-  if (entries.length === 0) throw new Error('empty first-slice manifest');
+  if (entries.length === 0) throw new Error('empty slice manifest');
   return { commit: expectedCommit, entries };
 }
+
+export const parseFirstSliceManifest = parseSliceManifest;

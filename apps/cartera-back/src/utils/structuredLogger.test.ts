@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   createCarteraStructuredLogger,
+  emitCreditCapitalContributionFailed,
   emitCreditCapitalPaymentAuditCompleted,
   emitCreditCapitalPaymentAuditDiagnosticCompleted,
   emitCreditCapitalPaymentAuditFailed,
@@ -137,5 +138,49 @@ describe('Cartera structured logger adapter', () => {
     for (const entry of entries) {
       for (const key of forbiddenKeys) expect(entry).not.toHaveProperty(key);
     }
+  });
+
+  test('emits bounded capital-contribution persistence failures and isolates sink errors', () => {
+    const lines: string[] = [];
+    const logger = createCarteraStructuredLogger({
+      environment: 'staging',
+      clock: () => new Date('2026-08-22T00:00:00.000Z'),
+      sink: (line) => lines.push(line),
+    });
+
+    emitCreditCapitalContributionFailed({ operation: 'create', durationMs: 12 }, logger);
+    emitCreditCapitalContributionFailed({ operation: 'update', durationMs: 20 }, logger);
+
+    expect(lines).toHaveLength(2);
+    expect(JSON.parse(lines[0] ?? '{}')).toMatchObject({
+      event: 'credit.capital_contribution',
+      outcome: 'failed',
+      level: 'error',
+      contribution_operation: 'create',
+      duration_ms: 12,
+      error_code: 'persistence_failed',
+    });
+    expect(JSON.parse(lines[1] ?? '{}')).toMatchObject({
+      event: 'credit.capital_contribution',
+      outcome: 'failed',
+      level: 'error',
+      contribution_operation: 'update',
+      duration_ms: 20,
+      error_code: 'persistence_failed',
+    });
+    for (const line of lines) {
+      const entry = JSON.parse(line) as Record<string, unknown>;
+      for (const key of ['credito_id', 'abono_id', 'inversionista_id', 'monto', 'message', 'stack', 'error']) {
+        expect(entry).not.toHaveProperty(key);
+      }
+    }
+
+    const broken = createCarteraStructuredLogger({
+      sink: () => { throw new Error('synthetic sink failure'); },
+    });
+    expect(() => emitCreditCapitalContributionFailed({
+      operation: 'create',
+      durationMs: 1,
+    }, broken)).not.toThrow();
   });
 });

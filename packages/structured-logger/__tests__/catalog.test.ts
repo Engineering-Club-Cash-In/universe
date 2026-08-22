@@ -10,6 +10,7 @@ describe('carteraCatalog', () => {
     expect(Object.keys(carteraCatalog.events).sort()).toEqual([
       'audit.persistence',
       'auth.jwt_validation',
+      'credit.capital_contribution',
       'credit.capital_payment_audit',
       'credit.creation',
       'credit.liquidation',
@@ -140,6 +141,23 @@ describe('carteraCatalog', () => {
           level: 'error',
           required: ['audit_operation', 'duration_ms', 'error_code'],
           optional: [],
+        },
+      },
+    });
+  });
+
+  test('defines a finite safe contract for capital-contribution persistence failures', () => {
+    expect(carteraCatalog.fields.contribution_operation).toEqual({
+      type: 'enum',
+      values: ['create', 'update'],
+    });
+    expect(carteraCatalog.events['credit.capital_contribution']).toEqual({
+      outcomes: {
+        failed: {
+          level: 'error',
+          required: ['contribution_operation', 'duration_ms', 'error_code'],
+          optional: [],
+          constants: { error_code: 'persistence_failed' },
         },
       },
     });

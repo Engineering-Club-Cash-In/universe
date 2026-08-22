@@ -33,10 +33,17 @@ type RevalidationReasonCode =
   | "payment_already_applied"
   | "state_conflict";
 
+type RevalidationPublicError =
+  | "No se encontró el pago"
+  | "El pago ya está validado"
+  | "El pago no está pendiente de revalidación"
+  | "El pago cambió durante la revalidación";
+
 class RevalidationRejection extends Error {
   constructor(
     readonly reasonCode: RevalidationReasonCode,
     readonly status: 404 | 409,
+    readonly publicError: RevalidationPublicError,
   ) {
     super(reasonCode);
   }
@@ -117,14 +124,26 @@ async function handleRevalidatePayment(
         .limit(1);
 
       if (!pago) {
-        throw new RevalidationRejection("payment_not_found", 404);
+        throw new RevalidationRejection(
+          "payment_not_found",
+          404,
+          "No se encontró el pago",
+        );
       }
       
       if (esPagoAplicado(pago.validationStatus)) {
-        throw new RevalidationRejection("payment_already_applied", 409);
+        throw new RevalidationRejection(
+          "payment_already_applied",
+          409,
+          "El pago ya está validado",
+        );
       }
       if (pago.validationStatus !== "pending" || pago.paymentFalse !== false) {
-        throw new RevalidationRejection("state_conflict", 409);
+        throw new RevalidationRejection(
+          "state_conflict",
+          409,
+          "El pago no está pendiente de revalidación",
+        );
       }
 
       if (
@@ -239,14 +258,20 @@ async function handleRevalidatePayment(
         )
         .returning({ pago_id: pagos_credito.pago_id });
       if (!validatedPayment) {
-        throw new RevalidationRejection("state_conflict", 409);
+        throw new RevalidationRejection(
+          "state_conflict",
+          409,
+          "El pago cambió durante la revalidación",
+        );
       }
 
+      let installmentClosed = false;
       if (pago.cuota_id !== null && coberturaCuota.cuotaCompleta) {
         await tx
           .update(cuotas_credito)
           .set({ pagado: true })
           .where(eq(cuotas_credito.cuota_id, pago.cuota_id));
+        installmentClosed = true;
       }
 
       await insertPagosCreditoInversionistasV2(
@@ -262,7 +287,7 @@ async function handleRevalidatePayment(
         nuevoCapital: nuevo_capital.toString(),
         numero_credito_sifco: credito.numero_credito_sifco,
         cuota: credito.cuota,
-        installmentClosed: coberturaCuota.cuotaCompleta,
+        installmentClosed,
       };
       })
     );
@@ -313,7 +338,7 @@ async function handleRevalidatePayment(
       set.status = error.status;
       return {
         message: "Internal server error",
-        error: error.reasonCode,
+        error: error.publicError,
       };
     }
 

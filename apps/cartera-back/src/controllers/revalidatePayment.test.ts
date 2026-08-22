@@ -314,7 +314,7 @@ describe("revalidatePayment", () => {
     expect(set.status).toBe(404);
     expect(response).toEqual({
       message: "Internal server error",
-      error: "payment_not_found",
+      error: "No se encontró el pago",
     });
     expect(JSON.parse(lines[0]!)).toMatchObject({
       event: "payment.revalidation",
@@ -338,7 +338,7 @@ describe("revalidatePayment", () => {
     expect(set.status).toBe(409);
     expect(response).toEqual({
       message: "Internal server error",
-      error: "payment_already_applied",
+      error: "El pago ya está validado",
     });
     expect(JSON.parse(lines[0]!)).toMatchObject({
       event: "payment.revalidation",
@@ -366,6 +366,25 @@ describe("revalidatePayment", () => {
       outcome: "rejected",
       reason_code: "state_conflict",
     });
+  });
+
+  it("no reporta cuota cerrada cuando el pago no tiene cuota asociada", async () => {
+    const pagoSinCuota = { ...pagoCompletoPendiente, cuota_id: null };
+    selectResults = [[pagoSinCuota], [credito]];
+    const lines: string[] = [];
+    const set = { status: 0 };
+    await createRevalidatePayment(loggingDependencies(lines))({
+      body: { credito_id: 10, pago_id: 30 },
+      set,
+    });
+
+    expect(set.status).toBe(200);
+    expect(JSON.parse(lines[0]!)).toMatchObject({
+      event: "payment.revalidation",
+      outcome: "completed",
+      installment_closed: false,
+    });
+    expect(updates.some((values) => values.pagado === true)).toBeFalse();
   });
 
   it("preserva 500 para integridad local faltante sin exponer el detalle", async () => {

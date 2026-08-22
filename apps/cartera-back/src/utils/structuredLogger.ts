@@ -52,6 +52,11 @@ interface CreditCapitalPaymentAuditFailed {
   readonly durationMs: number;
 }
 
+interface CreditCapitalContributionFailed {
+  readonly operation: "create" | "update";
+  readonly durationMs: number;
+}
+
 function emitAuditWithoutAffectingControlFlow(emit: () => void): void {
   try {
     emit();
@@ -98,6 +103,19 @@ export function emitCreditCapitalPaymentAuditFailed(
       audit_operation: result.operation,
       duration_ms: result.durationMs,
       error_code: "unknown",
+    });
+  });
+}
+
+export function emitCreditCapitalContributionFailed(
+  result: CreditCapitalContributionFailed,
+  logger: CarteraStructuredLogger = carteraStructuredLogger,
+): void {
+  emitAuditWithoutAffectingControlFlow(() => {
+    logger.emit("credit.capital_contribution", "failed", {
+      contribution_operation: result.operation,
+      duration_ms: result.durationMs,
+      error_code: "persistence_failed",
     });
   });
 }

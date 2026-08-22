@@ -29,6 +29,7 @@ Schema version: **1**
 | `auth_reason` | enum: missing, invalid, expired |
 | `change_set` | enum: terms, schedule, investors, status, mixed |
 | `commit_ref` | string max=40 pattern=^[0-9a-f]{7,40}$ |
+| `contribution_operation` | enum: create, update |
 | `credit_closed` | boolean |
 | `credit_state_transition` | enum: to_active, to_agreement, to_delinquent, unchanged |
 | `credit_type` | enum: new, renewal |
@@ -82,6 +83,12 @@ Schema version: **1**
 | Outcome | Level | Required | Optional | Constants |
 |---|---|---|---|---|
 | `rejected` | `warn` | `auth_reason` | — | — |
+
+### `credit.capital_contribution`
+
+| Outcome | Level | Required | Optional | Constants |
+|---|---|---|---|---|
+| `failed` | `error` | `contribution_operation`, `duration_ms`, `error_code` | — | `error_code=persistence_failed` |
 
 ### `credit.capital_payment_audit`
 

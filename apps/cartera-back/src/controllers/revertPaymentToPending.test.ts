@@ -24,16 +24,18 @@ const transaction = mock(async (callback: (value: typeof tx) => Promise<unknown>
 });
 const reverseInvestors = mock(() => Promise.resolve());
 const voidInvoice = mock(() => Promise.resolve(cofidiResult));
-
-mock.module("../database", () => ({ db: { transaction } }));
-mock.module("../utils/withAuditContext", () => ({ setCapitalSource: mock(() => Promise.resolve()) }));
-mock.module("./investor", () => ({ processAndReplaceCreditInvestorsReverse: reverseInvestors }));
-mock.module("./reversePayment", () => ({ anularFacturaEnCofidi: voidInvoice }));
-mock.module("../utils/structuredLogger", () => ({
-  emitPaymentReversalToPending: (event: Record<string, unknown>) => emitted.push(event),
-}));
-
-const { revertPaymentToPending } = await import("./revertPaymentToPending");
+process.env.SUPABASE_DB_URL ??= "postgresql://127.0.0.1:1/synthetic";
+process.env.RESEND_API_KEY ??= "synthetic-test-key";
+process.env.EMAIL_DOMAIN ??= "example.invalid";
+const { createRevertPaymentToPending } = await import("./revertPaymentToPending");
+type Dependencies = NonNullable<Parameters<typeof createRevertPaymentToPending>[0]>;
+const revertPaymentToPending = createRevertPaymentToPending({
+  runTransaction: transaction as unknown as Dependencies["runTransaction"],
+  reverseInvestors: reverseInvestors as unknown as Dependencies["reverseInvestors"],
+  voidInvoice: voidInvoice as unknown as Dependencies["voidInvoice"],
+  setCapitalSource: mock(() => Promise.resolve()) as unknown as Dependencies["setCapitalSource"],
+  emitTerminal: (event) => emitted.push(event),
+});
 
 const credit = {
   numero_credito_sifco: "SYNTHETIC-10",

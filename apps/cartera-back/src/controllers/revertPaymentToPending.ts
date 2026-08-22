@@ -37,8 +37,29 @@ export const revertPaymentToPendingSchema = z.object({
 // ============================================================================
 // HELPER: REVERTIR INVERSIONES
 // ============================================================================
-async function reverseAndCleanInvestors(tx: any, credito_id: number, pago_id: number) {
-  await processAndReplaceCreditInvestorsReverse(credito_id, pago_id);
+export interface RevertPaymentToPendingDependencies {
+  readonly runTransaction: typeof db.transaction;
+  readonly reverseInvestors: typeof processAndReplaceCreditInvestorsReverse;
+  readonly voidInvoice: typeof anularFacturaEnCofidi;
+  readonly setCapitalSource: typeof setCapitalSource;
+  readonly emitTerminal: typeof emitPaymentReversalToPending;
+}
+
+const defaultDependencies: RevertPaymentToPendingDependencies = {
+  runTransaction: db.transaction.bind(db),
+  reverseInvestors: processAndReplaceCreditInvestorsReverse,
+  voidInvoice: anularFacturaEnCofidi,
+  setCapitalSource,
+  emitTerminal: emitPaymentReversalToPending,
+};
+
+async function reverseAndCleanInvestors(
+  tx: any,
+  credito_id: number,
+  pago_id: number,
+  dependencies: RevertPaymentToPendingDependencies,
+) {
+  await dependencies.reverseInvestors(credito_id, pago_id);
   
   await tx
     .delete(pagos_credito_inversionistas)
@@ -48,13 +69,16 @@ async function reverseAndCleanInvestors(tx: any, credito_id: number, pago_id: nu
 // ============================================================================
 // FUNCIÓN PRINCIPAL: PASAR PAGO A PENDIENTE
 // ============================================================================
-export const revertPaymentToPending = async ({ body, set }: any) => {
+export function createRevertPaymentToPending(
+  dependencies: RevertPaymentToPendingDependencies = defaultDependencies,
+) {
+  return async ({ body, set }: any) => {
   const startedAt = safeNow();
   try {
     // 1️⃣ VALIDAR ENTRADA
     const parseResult = revertPaymentToPendingSchema.safeParse(body);
     if (!parseResult.success) {
-      emitPaymentReversalToPending({
+      dependencies.emitTerminal({
         outcome: "rejected",
         reasonCode: "schema_invalid",
         durationMs: elapsedMilliseconds(startedAt),
@@ -68,7 +92,7 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
     const { credito_id, pago_id } = parseResult.data;
 
     // 🔥 INICIAR TRANSACCIÓN ATÓMICA
-    const result = await db.transaction(async (tx) => {
+    const result = await dependencies.runTransaction(async (tx) => {
       // 2️⃣ OBTENER DATOS DEL PAGO
       const [pago] = await tx
         .select()
@@ -118,7 +142,7 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
       // y sí reconoce los abonos directos a capital.
 
       if (!pagoValidado) {
-        await reverseAndCleanInvestors(tx, credito_id, pago_id);
+        await reverseAndCleanInvestors(tx, credito_id, pago_id, dependencies);
 
         return {
           data: {
@@ -162,7 +186,7 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
           .plus(creditData.membresias_pago ?? 0);
 
 
-        await setCapitalSource(tx, "REVERSO");
+        await dependencies.setCapitalSource(tx, "REVERSO");
         await tx
           .update(creditos)
           .set({
@@ -176,7 +200,7 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
       }
 
       // 5️⃣ REVERTIR Y ELIMINAR INVERSIONES
-      await reverseAndCleanInvestors(tx, credito_id, pago_id);
+      await reverseAndCleanInvestors(tx, credito_id, pago_id, dependencies);
 
       // 6️⃣ ANULAR FACTURAS ELECTRÓNICAS
       const facturasDelPago = await tx
@@ -194,7 +218,7 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
 
       if (facturasDelPago.length > 0) {
         for (const factura of facturasDelPago) {
-          const resultadoCofidi = await anularFacturaEnCofidi({
+          const resultadoCofidi = await dependencies.voidInvoice({
             uuid: factura.uuid,
             motivo: `Reversión automática del pago ID: ${pago_id}`,
             factura: {
@@ -269,7 +293,7 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
       };
     });
 
-    emitPaymentReversalToPending({
+    dependencies.emitTerminal({
       outcome: result.completion.failedCount > 0 ? "partially_completed" : "completed",
       reversalPath: result.completion.reversalPath,
       processedCount: result.completion.processedCount,
@@ -290,13 +314,13 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
         ? "credit_not_found"
         : null;
     if (reasonCode) {
-      emitPaymentReversalToPending({
+      dependencies.emitTerminal({
         outcome: "rejected",
         reasonCode,
         durationMs: elapsedMilliseconds(startedAt),
       });
     } else {
-      emitPaymentReversalToPending({
+      dependencies.emitTerminal({
         outcome: "failed",
         errorCode: "unknown",
         durationMs: elapsedMilliseconds(startedAt),
@@ -316,4 +340,7 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
       error: error instanceof Error ? error.message : String(error),
     };
   }
-};
+  };
+}
+
+export const revertPaymentToPending = createRevertPaymentToPending();

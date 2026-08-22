@@ -46,8 +46,9 @@ test("third structured-log slice reconciles all six audit traces", () => {
   };
 
   expect(manifest.entries).toHaveLength(6);
-  expect(manifest.entries.filter(({ disposition }) => disposition === "remove")).toHaveLength(3);
+  expect(manifest.entries.filter(({ disposition }) => disposition === "remove")).toHaveLength(2);
   expect(manifest.entries.filter(({ disposition }) => disposition === "event")).toEqual([
+    expect.objectContaining({ event: "credit.capital_payment_audit", outcome: "partially_completed" }),
     expect.objectContaining({ event: "credit.capital_payment_audit", outcome: "completed" }),
     expect.objectContaining({ event: "credit.capital_payment_audit", outcome: "failed" }),
     expect.objectContaining({ event: "credit.capital_payment_audit", outcome: "failed" }),

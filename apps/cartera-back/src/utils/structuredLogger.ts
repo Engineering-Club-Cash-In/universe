@@ -66,7 +66,8 @@ export function emitCreditCapitalPaymentAuditCompleted(
   logger: CarteraStructuredLogger = carteraStructuredLogger,
 ): void {
   emitAuditWithoutAffectingControlFlow(() => {
-    logger.emit("credit.capital_payment_audit", "completed", {
+    const outcome = result.failedCount > 0 ? "partially_completed" : "completed";
+    logger.emit("credit.capital_payment_audit", outcome, {
       audit_operation: "query",
       processed_count: result.processedCount,
       succeeded_count: result.succeededCount,

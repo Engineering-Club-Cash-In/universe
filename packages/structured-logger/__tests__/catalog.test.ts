@@ -119,6 +119,17 @@ describe('carteraCatalog', () => {
           ],
           optional: [],
         },
+        partially_completed: {
+          level: 'warn',
+          required: [
+            'audit_operation',
+            'processed_count',
+            'succeeded_count',
+            'failed_count',
+            'duration_ms',
+          ],
+          optional: [],
+        },
         failed: {
           level: 'error',
           required: ['audit_operation', 'duration_ms', 'error_code'],

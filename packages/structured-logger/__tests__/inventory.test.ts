@@ -85,7 +85,7 @@ describe('Cartera log-call inventory', () => {
       path.endsWith('/src/routers/creditosNuevosConAbonos.ts'));
     expect(thirdSlice).toHaveLength(6);
     expect(thirdSlice.filter(({ disposition }) => disposition === 'unresolved')).toHaveLength(0);
-    expect(thirdSlice.filter(({ disposition }) => disposition === 'remove')).toHaveLength(3);
-    expect(thirdSlice.filter(({ disposition }) => disposition === 'event')).toHaveLength(3);
+    expect(thirdSlice.filter(({ disposition }) => disposition === 'remove')).toHaveLength(2);
+    expect(thirdSlice.filter(({ disposition }) => disposition === 'event')).toHaveLength(4);
   });
 });

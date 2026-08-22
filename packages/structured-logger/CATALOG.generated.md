@@ -89,6 +89,7 @@ Schema version: **1**
 |---|---|---|---|---|
 | `completed` | `info` | `audit_operation`, `processed_count`, `succeeded_count`, `failed_count`, `duration_ms` | — | — |
 | `failed` | `error` | `audit_operation`, `duration_ms`, `error_code` | — | — |
+| `partially_completed` | `warn` | `audit_operation`, `processed_count`, `succeeded_count`, `failed_count`, `duration_ms` | — | — |
 
 ### `credit.creation`
 

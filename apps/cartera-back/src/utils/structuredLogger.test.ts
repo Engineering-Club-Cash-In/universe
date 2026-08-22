@@ -72,27 +72,43 @@ describe('Cartera structured logger adapter', () => {
 
     emitCreditCapitalPaymentAuditCompleted({
       processedCount: 4,
+      succeededCount: 4,
+      failedCount: 0,
+      durationMs: 25,
+    }, logger);
+    emitCreditCapitalPaymentAuditCompleted({
+      processedCount: 4,
       succeededCount: 3,
       failedCount: 1,
-      durationMs: 25,
+      durationMs: 30,
     }, logger);
     emitCreditCapitalPaymentAuditFailed({
       operation: 'diagnostic',
       durationMs: 10,
     }, logger);
 
-    expect(lines).toHaveLength(2);
+    expect(lines).toHaveLength(3);
     expect(JSON.parse(lines[0] ?? '{}')).toMatchObject({
       event: 'credit.capital_payment_audit',
       outcome: 'completed',
       level: 'info',
       audit_operation: 'query',
       processed_count: 4,
-      succeeded_count: 3,
-      failed_count: 1,
+      succeeded_count: 4,
+      failed_count: 0,
       duration_ms: 25,
     });
     expect(JSON.parse(lines[1] ?? '{}')).toMatchObject({
+      event: 'credit.capital_payment_audit',
+      outcome: 'partially_completed',
+      level: 'warn',
+      audit_operation: 'query',
+      processed_count: 4,
+      succeeded_count: 3,
+      failed_count: 1,
+      duration_ms: 30,
+    });
+    expect(JSON.parse(lines[2] ?? '{}')).toMatchObject({
       event: 'credit.capital_payment_audit',
       outcome: 'failed',
       level: 'error',

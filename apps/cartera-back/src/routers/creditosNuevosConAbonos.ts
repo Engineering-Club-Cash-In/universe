@@ -3,7 +3,10 @@ import {
   getCreditosNuevosConAbonos,
   diagnosticoCreditosAbonos,
 } from "../controllers/creditosNuevosConAbonos";
-import { emitCreditCapitalPaymentAuditFailed } from "../utils/structuredLogger";
+import {
+  emitCreditCapitalPaymentAuditDiagnosticCompleted,
+  emitCreditCapitalPaymentAuditFailed,
+} from "../utils/structuredLogger";
 
 function elapsedMilliseconds(startedAt: number): number {
   return Math.max(0, Math.min(86_400_000, Math.round(Date.now() - startedAt)));
@@ -29,6 +32,9 @@ export const creditosNuevosConAbonosRouter = new Elysia()
     const startedAt = Date.now();
     try {
       const result = await diagnosticoCreditosAbonos();
+      emitCreditCapitalPaymentAuditDiagnosticCompleted({
+        durationMs: elapsedMilliseconds(startedAt),
+      });
       set.status = 200;
       return result;
     } catch (error) {

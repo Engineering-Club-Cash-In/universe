@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   createCarteraStructuredLogger,
   emitCreditCapitalPaymentAuditCompleted,
+  emitCreditCapitalPaymentAuditDiagnosticCompleted,
   emitCreditCapitalPaymentAuditFailed,
   emitRecoveredDuplicatePendingInstallment,
   resolveCarteraLogEnvironment,
@@ -56,6 +57,9 @@ describe('Cartera structured logger adapter', () => {
       failedCount: 0,
       durationMs: 1,
     }, logger)).not.toThrow();
+    expect(() => emitCreditCapitalPaymentAuditDiagnosticCompleted({
+      durationMs: 1,
+    }, logger)).not.toThrow();
     expect(() => emitCreditCapitalPaymentAuditFailed({
       operation: 'query',
       durationMs: 1,
@@ -82,12 +86,15 @@ describe('Cartera structured logger adapter', () => {
       failedCount: 1,
       durationMs: 30,
     }, logger);
+    emitCreditCapitalPaymentAuditDiagnosticCompleted({
+      durationMs: 12,
+    }, logger);
     emitCreditCapitalPaymentAuditFailed({
       operation: 'diagnostic',
       durationMs: 10,
     }, logger);
 
-    expect(lines).toHaveLength(3);
+    expect(lines).toHaveLength(4);
     expect(JSON.parse(lines[0] ?? '{}')).toMatchObject({
       event: 'credit.capital_payment_audit',
       outcome: 'completed',
@@ -109,6 +116,13 @@ describe('Cartera structured logger adapter', () => {
       duration_ms: 30,
     });
     expect(JSON.parse(lines[2] ?? '{}')).toMatchObject({
+      event: 'credit.capital_payment_audit',
+      outcome: 'diagnostic_completed',
+      level: 'info',
+      audit_operation: 'diagnostic',
+      duration_ms: 12,
+    });
+    expect(JSON.parse(lines[3] ?? '{}')).toMatchObject({
       event: 'credit.capital_payment_audit',
       outcome: 'failed',
       level: 'error',

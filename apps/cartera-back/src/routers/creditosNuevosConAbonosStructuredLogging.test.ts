@@ -61,6 +61,7 @@ test("third slice has no executable console calls and emits only finite audit ev
   }
   const sources = sourceFiles.map((file) => readFileSync(file, "utf8")).join("\n");
   expect(sources).toContain("emitCreditCapitalPaymentAuditCompleted");
+  expect(sources).toContain("emitCreditCapitalPaymentAuditDiagnosticCompleted");
   expect(sources).toContain("emitCreditCapitalPaymentAuditFailed");
   expect(sources).not.toContain("logger.emit(");
 });

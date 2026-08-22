@@ -77,6 +77,18 @@ export function emitCreditCapitalPaymentAuditCompleted(
   });
 }
 
+export function emitCreditCapitalPaymentAuditDiagnosticCompleted(
+  result: { readonly durationMs: number },
+  logger: CarteraStructuredLogger = carteraStructuredLogger,
+): void {
+  emitAuditWithoutAffectingControlFlow(() => {
+    logger.emit("credit.capital_payment_audit", "diagnostic_completed", {
+      audit_operation: "diagnostic",
+      duration_ms: result.durationMs,
+    });
+  });
+}
+
 export function emitCreditCapitalPaymentAuditFailed(
   result: CreditCapitalPaymentAuditFailed,
   logger: CarteraStructuredLogger = carteraStructuredLogger,

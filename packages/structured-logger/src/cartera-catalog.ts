@@ -184,6 +184,7 @@ export const carteraCatalog = {
     } },
     'credit.capital_payment_audit': { outcomes: {
       completed: { level: 'info', required: ['audit_operation', 'processed_count', 'succeeded_count', 'failed_count', 'duration_ms'], optional: [] },
+      diagnostic_completed: { level: 'info', required: ['audit_operation', 'duration_ms'], optional: [], constants: { audit_operation: 'diagnostic' } },
       partially_completed: { level: 'warn', required: ['audit_operation', 'processed_count', 'succeeded_count', 'failed_count', 'duration_ms'], optional: [] },
       failed: { level: 'error', required: ['audit_operation', 'duration_ms', 'error_code'], optional: [] },
     } },

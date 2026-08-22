@@ -119,6 +119,12 @@ describe('carteraCatalog', () => {
           ],
           optional: [],
         },
+        diagnostic_completed: {
+          level: 'info',
+          required: ['audit_operation', 'duration_ms'],
+          optional: [],
+          constants: { audit_operation: 'diagnostic' },
+        },
         partially_completed: {
           level: 'warn',
           required: [

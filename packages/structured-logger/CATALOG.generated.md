@@ -88,6 +88,7 @@ Schema version: **1**
 | Outcome | Level | Required | Optional | Constants |
 |---|---|---|---|---|
 | `completed` | `info` | `audit_operation`, `processed_count`, `succeeded_count`, `failed_count`, `duration_ms` | — | — |
+| `diagnostic_completed` | `info` | `audit_operation`, `duration_ms` | — | `audit_operation=diagnostic` |
 | `failed` | `error` | `audit_operation`, `duration_ms`, `error_code` | — | — |
 | `partially_completed` | `warn` | `audit_operation`, `processed_count`, `succeeded_count`, `failed_count`, `duration_ms` | — | — |
 

@@ -13,6 +13,7 @@ describe('carteraCatalog', () => {
       'credit.capital_contribution',
       'credit.capital_payment_audit',
       'credit.creation',
+      'credit.due_date',
       'credit.late_fee',
       'credit.liquidation',
       'credit.schedule_recalculation',
@@ -195,6 +196,47 @@ describe('carteraCatalog', () => {
         failed: {
           level: 'error',
           required: ['late_fee_operation', 'duration_ms', 'error_code'],
+          optional: [],
+        },
+      },
+    });
+  });
+
+  test('defines a finite safe contract for due-date maintenance', () => {
+    expect(carteraCatalog.fields.due_date_operation).toEqual({
+      type: 'enum',
+      values: ['batch_update', 'repair_missing_february', 'change_start_date', 'list_change_history', 'single_update', 'json_bulk_update'],
+    });
+    expect(carteraCatalog.events['credit.due_date']).toEqual({
+      outcomes: {
+        completed: {
+          level: 'info',
+          required: ['due_date_operation', 'duration_ms'],
+          optional: ['processed_count', 'succeeded_count', 'failed_count', 'skipped_count'],
+        },
+        skipped: {
+          level: 'info',
+          required: ['due_date_operation', 'processed_count', 'succeeded_count', 'failed_count', 'skipped_count', 'duration_ms', 'reason_code'],
+          optional: [],
+        },
+        partially_completed: {
+          level: 'warn',
+          required: ['due_date_operation', 'processed_count', 'succeeded_count', 'failed_count', 'skipped_count', 'duration_ms', 'reason_code'],
+          optional: [],
+        },
+        rejected: {
+          level: 'warn',
+          required: ['due_date_operation', 'duration_ms', 'reason_code'],
+          optional: [],
+        },
+        partially_persisted: {
+          level: 'error',
+          required: ['due_date_operation', 'duration_ms', 'error_code'],
+          optional: [],
+        },
+        failed: {
+          level: 'error',
+          required: ['due_date_operation', 'duration_ms', 'error_code'],
           optional: [],
         },
       },

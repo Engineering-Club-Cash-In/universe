@@ -13,6 +13,8 @@ const manifestFile = new URL(
 const dockerfile = new URL('../../Dockerfile', import.meta.url);
 const productionDeploy = new URL('../../deploy.sh', import.meta.url);
 const developmentDeploy = new URL('../../deploy-dev.sh', import.meta.url);
+const developmentWorkflow = new URL('../../../../.github/workflows/deploy-cartera-dev.yaml', import.meta.url);
+const productionWorkflow = new URL('../../../../.github/workflows/deploy-prod.yaml', import.meta.url);
 
 function executableConsoleCalls(source: string, path: string): number {
   const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
@@ -78,4 +80,13 @@ test('the Cartera image includes the structured logger workspace package', () =>
   expect(readFileSync(developmentDeploy, 'utf8')).toContain(
     '--build-arg CARTERA_LOG_ENVIRONMENT=development',
   );
+});
+
+test('Cartera workflows rebuild logger changes with the correct environment', () => {
+  const development = readFileSync(developmentWorkflow, 'utf8');
+  const production = readFileSync(productionWorkflow, 'utf8');
+  expect(development.match(/packages\/structured-logger\/\*\*/g)).toHaveLength(2);
+  expect(development).toContain('--build-arg CARTERA_LOG_ENVIRONMENT=development');
+  expect(production).toContain("- 'packages/structured-logger/**'");
+  expect(production).toContain('--build-arg CARTERA_LOG_ENVIRONMENT=production');
 });

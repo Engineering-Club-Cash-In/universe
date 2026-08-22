@@ -1,6 +1,10 @@
 import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { v4 as uuidv4 } from "uuid";
+import {
+  carteraStructuredLogger,
+  type CarteraStructuredLogger,
+} from "../structuredLogger";
 
 export const s3 = new S3Client({
   endpoint: process.env.R2_ENDPOINT,
@@ -11,13 +15,37 @@ export const s3 = new S3Client({
   },
 });
 
+interface UploadStorage {
+  send(command: PutObjectCommand): Promise<unknown>;
+}
+
+const uploadStorage: UploadStorage = {
+  send: (command) => s3.send(command),
+};
+
 interface UploadFileControllerContext {
   readonly body?: { readonly file?: unknown };
   readonly set?: { status: number };
+  readonly structuredLogger?: CarteraStructuredLogger;
+  readonly storage?: UploadStorage;
 }
 
-export async function uploadFileController({ body, set }: UploadFileControllerContext) {
+function resolveMimeFamily(file: Blob): "image" | "pdf" | "other" {
+  if (file.type.startsWith("image/")) return "image";
+  if (file.type === "application/pdf") return "pdf";
+  return "other";
+}
+
+export async function uploadFileController({
+  body,
+  set,
+  structuredLogger = carteraStructuredLogger,
+  storage = uploadStorage,
+}: UploadFileControllerContext) {
   if (!set) throw new TypeError("Missing response status context");
+  const startedAt = Date.now();
+  let mimeFamily: "image" | "pdf" | "other" = "other";
+  let r2Attempted = false;
   try {
     // Elysia ya parseó el multipart. El archivo llega en `body.file` como un
     // File/Blob. NO usar `request.formData()` acá: el body ya fue consumido
@@ -29,6 +57,7 @@ export async function uploadFileController({ body, set }: UploadFileControllerCo
       set.status = 400;
       return { error: "No file uploaded" };
     }
+    mimeFamily = resolveMimeFamily(file);
 
     // Obtener extensión
     let ext = "";
@@ -41,7 +70,8 @@ export async function uploadFileController({ body, set }: UploadFileControllerCo
     // Convertir Blob a Buffer
     const buffer = Buffer.from(await file.arrayBuffer());
 
-    await s3.send(
+    r2Attempted = true;
+    await storage.send(
       new PutObjectCommand({
         Bucket: process.env.R2_BUCKET,
         Key: filename,
@@ -52,8 +82,23 @@ export async function uploadFileController({ body, set }: UploadFileControllerCo
 
     const url = `${filename}`;
     return { success: true, url, filename };
-  } catch (error) {
-
+  } catch {
+    const duration_ms = Math.max(0, Date.now() - startedAt);
+    if (r2Attempted) {
+      structuredLogger.emit("integration.request", "failed", {
+        provider: "cloudflare_r2",
+        operation: "put_upload",
+        duration_ms,
+        attempt: 1,
+        retryable: false,
+        error_code: "unknown",
+      });
+    }
+    structuredLogger.emit("payment.upload", "failed", {
+      mime_family: mimeFamily,
+      duration_ms,
+      error_code: r2Attempted ? "persistence_failed" : "parse_failed",
+    });
     set.status = 500;
     return { error: "Error uploading file" };
   }

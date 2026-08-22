@@ -49,12 +49,17 @@ test('reconciles every approved first-slice disposition', () => {
     }[];
   };
   expect(manifest.entries).toHaveLength(189);
-  expect(manifest.entries.filter((entry) => entry.disposition === 'remove')).toHaveLength(188);
+  expect(manifest.entries.filter((entry) => entry.disposition === 'remove')).toHaveLength(187);
   expect(manifest.entries.filter((entry) => entry.disposition === 'event')).toEqual([
     expect.objectContaining({
       path: 'apps/cartera-back/src/controllers/registerPayment.ts',
       event: 'payment.integrity_anomaly',
       outcome: 'recovered',
+    }),
+    expect.objectContaining({
+      path: 'apps/cartera-back/src/utils/functions/uploadsFiles.ts',
+      event: 'payment.upload',
+      outcome: 'failed',
     }),
   ]);
   expect(manifest.entries.filter((entry) => entry.path.endsWith('/registerPayment.ts'))).toHaveLength(187);

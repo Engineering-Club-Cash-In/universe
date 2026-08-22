@@ -30,6 +30,7 @@ describe('carteraCatalog', () => {
       'payment.registration',
       'payment.revalidation',
       'payment.reversal',
+      'payment.reversal_to_pending',
       'payment.upload',
       'service.lifecycle',
     ]);

@@ -11,6 +11,20 @@ import {
 } from "../database/db";
 import { processAndReplaceCreditInvestorsReverse } from "./investor";
 import { anularFacturaEnCofidi } from "./reversePayment";
+import { emitPaymentReversalToPending } from "../utils/structuredLogger";
+
+function safeNow(): number {
+  try {
+    const value = Date.now();
+    return Number.isFinite(value) ? value : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function elapsedMilliseconds(startedAt: number): number {
+  return Math.max(0, Math.min(86_400_000, Math.round(safeNow() - startedAt)));
+}
 
 // ============================================================================
 // SCHEMA DE VALIDACIÓN
@@ -24,25 +38,27 @@ export const revertPaymentToPendingSchema = z.object({
 // HELPER: REVERTIR INVERSIONES
 // ============================================================================
 async function reverseAndCleanInvestors(tx: any, credito_id: number, pago_id: number) {
-  console.log("\n💼 ========== REVERSANDO INVERSIONES ==========");
   await processAndReplaceCreditInvestorsReverse(credito_id, pago_id);
   
   await tx
     .delete(pagos_credito_inversionistas)
     .where(eq(pagos_credito_inversionistas.pago_id, pago_id));
-  console.log("✅ Inversiones reversadas y eliminadas de BD");
 }
 
 // ============================================================================
 // FUNCIÓN PRINCIPAL: PASAR PAGO A PENDIENTE
 // ============================================================================
 export const revertPaymentToPending = async ({ body, set }: any) => {
+  const startedAt = safeNow();
   try {
-    console.log("\n🔄 ========== INICIO REVERSIÓN A PENDIENTE ==========");
-
     // 1️⃣ VALIDAR ENTRADA
     const parseResult = revertPaymentToPendingSchema.safeParse(body);
     if (!parseResult.success) {
+      emitPaymentReversalToPending({
+        outcome: "rejected",
+        reasonCode: "schema_invalid",
+        durationMs: elapsedMilliseconds(startedAt),
+      });
       set.status = 400;
       return {
         message: "Validation failed",
@@ -50,8 +66,6 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
       };
     }
     const { credito_id, pago_id } = parseResult.data;
-    console.log(`📋 Crédito ID: ${credito_id}`);
-    console.log(`🧾 Pago ID: ${pago_id}`);
 
     // 🔥 INICIAR TRANSACCIÓN ATÓMICA
     const result = await db.transaction(async (tx) => {
@@ -72,7 +86,6 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
       }
 
       const pagoValidado = pago.validationStatus === "validated";
-      console.log(`✅ Pago encontrado | Validado: ${pagoValidado}`);
 
       // 3️⃣ OBTENER DATOS DEL CRÉDITO
       const [creditData] = await tx
@@ -94,7 +107,6 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
         throw new Error("Credit not found or not active");
       }
 
-      console.log("✅ Crédito encontrado y activo");
 
       // Ojo: acá NO se revierten los abonos a capital del espejo. `pagoValidado`
       // solo reconoce `validated`, así que un `capital_validated` cae en el
@@ -106,16 +118,22 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
       // y sí reconoce los abonos directos a capital.
 
       if (!pagoValidado) {
-        console.log("ℹ️ El pago ya está en estado PENDIENTE. Solo se reversarán las inversiones.");
-        
         await reverseAndCleanInvestors(tx, credito_id, pago_id);
 
         return {
-          pago_id,
-          credito_id,
-          numero_credito_sifco: creditData.numero_credito_sifco,
-          cuota: creditData.cuota,
-          message: "Inversiones reversadas exitosamente (el pago ya estaba pendiente)"
+          data: {
+            pago_id,
+            credito_id,
+            numero_credito_sifco: creditData.numero_credito_sifco,
+            cuota: creditData.cuota,
+            message: "Inversiones reversadas exitosamente (el pago ya estaba pendiente)"
+          },
+          completion: {
+            reversalPath: "already_pending" as const,
+            processedCount: 0,
+            succeededCount: 0,
+            failedCount: 0,
+          },
         };
       }
 
@@ -126,22 +144,15 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
       let deudatotal = new Big(creditData.deudatotal ?? 0);
 
       if (pagoValidado) {
-        console.log("\n📊 ========== RECALCULANDO VALORES DEL CRÉDITO ==========");
-
         const capitalActual = new Big(creditData.capital ?? 0);
         const abonoCapital = new Big(pago.abono_capital ?? 0);
         nuevoCapital = capitalActual.plus(abonoCapital);
 
-        console.log(`💰 Capital actual: ${capitalActual.toString()}`);
-        console.log(`💵 Abono capital a reversar: ${abonoCapital.toString()}`);
-        console.log(`✅ Nuevo capital: ${nuevoCapital.toString()}`);
 
         const porcentajeInteres = new Big(creditData.porcentaje_interes ?? 0).div(100);
         cuota_interes = nuevoCapital.times(porcentajeInteres).round(2);
         iva_12 = cuota_interes.times(0.12).round(2);
 
-        console.log(`🔢 Nuevo interés: ${cuota_interes.toString()}`);
-        console.log(`🔢 Nuevo IVA: ${iva_12.toString()}`);
 
         deudatotal = nuevoCapital
           .plus(cuota_interes)
@@ -150,7 +161,6 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
           .plus(creditData.gps ?? 0)
           .plus(creditData.membresias_pago ?? 0);
 
-        console.log(`💳 Nueva deuda total: ${deudatotal.toString()}`);
 
         await setCapitalSource(tx, "REVERSO");
         await tx
@@ -163,14 +173,12 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
           })
           .where(eq(creditos.credito_id, credito_id));
 
-        console.log("✅ Crédito actualizado con nuevos valores");
       }
 
       // 5️⃣ REVERTIR Y ELIMINAR INVERSIONES
       await reverseAndCleanInvestors(tx, credito_id, pago_id);
 
       // 6️⃣ ANULAR FACTURAS ELECTRÓNICAS
-      console.log("\n🧾 ========== ANULANDO FACTURAS ELECTRÓNICAS ==========");
       const facturasDelPago = await tx
         .select()
         .from(facturas_electronicas)
@@ -186,8 +194,6 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
 
       if (facturasDelPago.length > 0) {
         for (const factura of facturasDelPago) {
-          console.log(`\n🧾 Procesando factura ${factura.serie}-${factura.numero} (${factura.uuid})`);
-
           const resultadoCofidi = await anularFacturaEnCofidi({
             uuid: factura.uuid,
             motivo: `Reversión automática del pago ID: ${pago_id}`,
@@ -210,8 +216,7 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
                 })
                 .where(eq(facturas_electronicas.factura_id, factura.factura_id));
 
-              console.log(`✅ Factura ${factura.serie}-${factura.numero} anulada correctamente`);
-              
+
               facturasAnuladas.push({
                 factura_id: factura.factura_id,
                 uuid: factura.uuid,
@@ -219,7 +224,6 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
                 numero: factura.numero,
               });
             } catch (dbError: any) {
-              console.error(`⚠️ Error al actualizar BD:`, dbError.message);
               facturasConError.push({
                 factura_id: factura.factura_id,
                 uuid: factura.uuid,
@@ -228,7 +232,6 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
               });
             }
            } else {
-             console.error(`❌ Error al anular en COFIDI:`, resultadoCofidi.mensaje);
              facturasConError.push({
                factura_id: factura.factura_id,
                uuid: factura.uuid,
@@ -237,11 +240,9 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
              });
           }
         }
-        console.log(`\n📊 Resumen anulación facturas: ✅ Anuladas: ${facturasAnuladas.length} | ❌ Con error: ${facturasConError.length}`);
       }
 
       // 7️⃣ ACTUALIZAR ESTADO DEL PAGO A PENDING Y ANULAR FECHA
-      console.log("\n🔄 ========== ACTUALIZANDO ESTADO DEL PAGO ==========");
       await tx
         .update(pagos_credito)
         .set({
@@ -249,28 +250,59 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
           fecha_aplicado: null,
         })
         .where(eq(pagos_credito.pago_id, pago_id));
-      console.log("✅ Pago marcado como pending y fecha_aplicado anulada");
-
       return {
-        pago_id,
-        credito_id,
-        nuevoCapital: nuevoCapital.toString(),
-        facturasAnuladas,
-        facturasConError,
-        numero_credito_sifco: creditData.numero_credito_sifco,
-        cuota: creditData.cuota
+        data: {
+          pago_id,
+          credito_id,
+          nuevoCapital: nuevoCapital.toString(),
+          facturasAnuladas,
+          facturasConError,
+          numero_credito_sifco: creditData.numero_credito_sifco,
+          cuota: creditData.cuota
+        },
+        completion: {
+          reversalPath: "validated_payment" as const,
+          processedCount: facturasDelPago.length,
+          succeededCount: facturasAnuladas.length,
+          failedCount: facturasConError.length,
+        },
       };
+    });
+
+    emitPaymentReversalToPending({
+      outcome: result.completion.failedCount > 0 ? "partially_completed" : "completed",
+      reversalPath: result.completion.reversalPath,
+      processedCount: result.completion.processedCount,
+      succeededCount: result.completion.succeededCount,
+      failedCount: result.completion.failedCount,
+      durationMs: elapsedMilliseconds(startedAt),
     });
 
     set.status = 200;
     return {
       message: "Payment reversed to pending successfully",
-      data: result,
+      data: result.data,
     };
   } catch (error: any) {
-    console.error("\n❌ ========== ERROR EN REVERSIÓN A PENDIENTE ==========");
-    console.error(error);
-    
+    const reasonCode = error?.message === "Payment not found"
+      ? "payment_not_found"
+      : error?.message === "Credit not found or not active"
+        ? "credit_not_found"
+        : null;
+    if (reasonCode) {
+      emitPaymentReversalToPending({
+        outcome: "rejected",
+        reasonCode,
+        durationMs: elapsedMilliseconds(startedAt),
+      });
+    } else {
+      emitPaymentReversalToPending({
+        outcome: "failed",
+        errorCode: "unknown",
+        durationMs: elapsedMilliseconds(startedAt),
+      });
+    }
+
     if (error.message === "Payment not found") {
       set.status = 404;
     } else if (error.message === "Credit not found or not active") {

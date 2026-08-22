@@ -57,6 +57,26 @@ interface CreditCapitalContributionFailed {
   readonly durationMs: number;
 }
 
+type PaymentReversalToPendingResult =
+  | Readonly<{
+      outcome: "completed" | "partially_completed";
+      reversalPath: "already_pending" | "validated_payment";
+      processedCount: number;
+      succeededCount: number;
+      failedCount: number;
+      durationMs: number;
+    }>
+  | Readonly<{
+      outcome: "rejected";
+      reasonCode: "schema_invalid" | "payment_not_found" | "credit_not_found";
+      durationMs: number;
+    }>
+  | Readonly<{
+      outcome: "failed";
+      errorCode: "unknown";
+      durationMs: number;
+    }>;
+
 function emitAuditWithoutAffectingControlFlow(emit: () => void): void {
   try {
     emit();
@@ -117,6 +137,37 @@ export function emitCreditCapitalContributionFailed(
       duration_ms: result.durationMs,
       error_code: "persistence_failed",
     });
+  });
+}
+
+export function emitPaymentReversalToPending(
+  result: PaymentReversalToPendingResult,
+  logger: CarteraStructuredLogger = carteraStructuredLogger,
+): void {
+  emitAuditWithoutAffectingControlFlow(() => {
+    if (result.outcome === "completed" || result.outcome === "partially_completed") {
+      logger.emit("payment.reversal_to_pending", result.outcome, {
+        reversal_path: result.reversalPath,
+        processed_count: result.processedCount,
+        succeeded_count: result.succeededCount,
+        failed_count: result.failedCount,
+        duration_ms: result.durationMs,
+      });
+      return;
+    }
+    if (result.outcome === "rejected") {
+      logger.emit("payment.reversal_to_pending", "rejected", {
+        duration_ms: result.durationMs,
+        reason_code: result.reasonCode,
+      });
+      return;
+    }
+    if (result.outcome === "failed") {
+      logger.emit("payment.reversal_to_pending", "failed", {
+        duration_ms: result.durationMs,
+        error_code: result.errorCode,
+      });
+    }
   });
 }
 

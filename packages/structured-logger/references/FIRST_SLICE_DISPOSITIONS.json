@@ -1,0 +1,1895 @@
+{
+  "commit": "56717ddef8f0bbd8c8633172c8ca2c85c248dfd7",
+  "entries": [
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 139,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 140,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 141,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 142,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 143,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 145,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 157,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 158,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 159,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 160,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 161,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 167,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 180,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 199,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 215,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 233,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 421,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 444,
+      "method": "console.warn",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "payment.integrity_anomaly",
+      "outcome": "recovered",
+      "rationale": "duplicate_pending_installment_deduplicated_and_processing_continues"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 451,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 454,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 528,
+      "method": "console.error",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "raw_error_duplicate_signal"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 688,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 690,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 822,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 826,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 847,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 934,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 954,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 955,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 958,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1187,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1203,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1204,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1210,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1211,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1216,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1219,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1224,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1228,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1229,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1234,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1237,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1242,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1246,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1247,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1252,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1255,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1260,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1264,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1265,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1270,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1273,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1278,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1282,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1283,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1288,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1291,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1296,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1300,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1301,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1306,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1309,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1314,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1317,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1318,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1319,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1320,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1321,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1322,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1323,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1324,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1327,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1337,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1341,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1342,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1346,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1347,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1351,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1357,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1359,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1360,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1365,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1366,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1404,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1550,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1551,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1559,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1613,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1750,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1776,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1852,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1953,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 1954,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 2081,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 2089,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 2093,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 2102,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 2105,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 2106,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 2122,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 2214,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 2254,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 2257,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 2275,
+      "method": "console.error",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "raw_error_duplicate_signal"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 2307,
+      "method": "console.error",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "raw_error_duplicate_signal"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 2378,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 2580,
+      "method": "console.error",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "raw_error_duplicate_signal"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 2591,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 2637,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 2698,
+      "method": "console.error",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "raw_error_duplicate_signal"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 2781,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 2836,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 2841,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 2866,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 2878,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 2893,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 2921,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 2922,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 2953,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 2977,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 2978,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 2979,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 2980,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3047,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3094,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3126,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3127,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3156,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3157,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3201,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3202,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3203,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3206,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3207,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3210,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3214,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3216,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3240,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3241,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3242,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3243,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3246,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3249,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3277,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3278,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3279,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3288,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3313,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3314,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3315,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3316,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3319,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3332,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3333,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3334,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3337,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3338,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3341,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3364,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3375,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3378,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3379,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3409,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3410,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3411,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3412,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3413,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3428,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3430,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3438,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3447,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3448,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3449,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3479,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3510,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3511,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3565,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3631,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3682,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3725,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3729,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3740,
+      "method": "console.error",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "raw_error_duplicate_signal"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3747,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 3826,
+      "method": "console.error",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "raw_error_duplicate_signal"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 4068,
+      "method": "console.error",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "raw_error_duplicate_signal"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 4206,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "debug_or_sensitive_intermediate_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/registerPayment.ts",
+      "line": 4214,
+      "method": "console.error",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "raw_error_duplicate_signal"
+    },
+    {
+      "path": "apps/cartera-back/src/utils/functions/uploadsFiles.ts",
+      "line": 20,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_binary_object"
+    },
+    {
+      "path": "apps/cartera-back/src/utils/functions/uploadsFiles.ts",
+      "line": 50,
+      "method": "console.error",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "raw_error_duplicate_signal"
+    }
+  ]
+}

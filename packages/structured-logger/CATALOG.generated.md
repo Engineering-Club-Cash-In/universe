@@ -25,6 +25,7 @@ Schema version: **1**
 | `anomaly_code` | enum: duplicate_pending_installment |
 | `assignment_mode` | enum: add, replace, process |
 | `attempt` | integer 1..10 |
+| `audit_operation` | enum: query, diagnostic |
 | `auth_reason` | enum: missing, invalid, expired |
 | `change_set` | enum: terms, schedule, investors, status, mixed |
 | `commit_ref` | string max=40 pattern=^[0-9a-f]{7,40}$ |
@@ -81,6 +82,13 @@ Schema version: **1**
 | Outcome | Level | Required | Optional | Constants |
 |---|---|---|---|---|
 | `rejected` | `warn` | `auth_reason` | — | — |
+
+### `credit.capital_payment_audit`
+
+| Outcome | Level | Required | Optional | Constants |
+|---|---|---|---|---|
+| `completed` | `info` | `audit_operation`, `processed_count`, `succeeded_count`, `failed_count`, `duration_ms` | — | — |
+| `failed` | `error` | `audit_operation`, `duration_ms`, `error_code` | — | — |
 
 ### `credit.creation`
 

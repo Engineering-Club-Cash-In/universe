@@ -10,6 +10,7 @@ describe('carteraCatalog', () => {
     expect(Object.keys(carteraCatalog.events).sort()).toEqual([
       'audit.persistence',
       'auth.jwt_validation',
+      'credit.capital_payment_audit',
       'credit.creation',
       'credit.liquidation',
       'credit.schedule_recalculation',
@@ -98,5 +99,32 @@ describe('carteraCatalog', () => {
   test('requires manual action for local invoice state inconsistencies', () => {
     expect(carteraCatalog.events['invoice.voiding'].outcomes.local_state_inconsistent.constants)
       .toEqual({ manual_action_required: true });
+  });
+
+  test('defines a finite safe contract for the capital-payment audit slice', () => {
+    expect(carteraCatalog.fields.audit_operation).toEqual({
+      type: 'enum',
+      values: ['query', 'diagnostic'],
+    });
+    expect(carteraCatalog.events['credit.capital_payment_audit']).toEqual({
+      outcomes: {
+        completed: {
+          level: 'info',
+          required: [
+            'audit_operation',
+            'processed_count',
+            'succeeded_count',
+            'failed_count',
+            'duration_ms',
+          ],
+          optional: [],
+        },
+        failed: {
+          level: 'error',
+          required: ['audit_operation', 'duration_ms', 'error_code'],
+          optional: [],
+        },
+      },
+    });
   });
 });

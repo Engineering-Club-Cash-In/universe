@@ -39,6 +39,7 @@ export const carteraCatalog = {
     credit_updated: { type: 'boolean' },
     investments_reversed: { type: 'boolean' },
     notification_attempted: { type: 'boolean' },
+    audit_operation: { type: 'enum', values: ['query', 'diagnostic'] },
     error_code: {
       type: 'enum',
       values: [
@@ -180,6 +181,10 @@ export const carteraCatalog = {
       created: { level: 'info', required: ['credit_type', 'investor_count', 'rubric_count', 'advisor_assignment_source', 'notification_attempted', 'duration_ms'], optional: [] },
       rejected: { level: 'warn', required: ['credit_type', 'investor_count', 'rubric_count', 'advisor_assignment_source', 'notification_attempted', 'duration_ms', 'reason_code'], optional: [] },
       failed: { level: 'error', required: ['credit_type', 'investor_count', 'rubric_count', 'advisor_assignment_source', 'notification_attempted', 'duration_ms', 'error_code'], optional: [] },
+    } },
+    'credit.capital_payment_audit': { outcomes: {
+      completed: { level: 'info', required: ['audit_operation', 'processed_count', 'succeeded_count', 'failed_count', 'duration_ms'], optional: [] },
+      failed: { level: 'error', required: ['audit_operation', 'duration_ms', 'error_code'], optional: [] },
     } },
     'credit.update': { outcomes: {
       completed: { level: 'info', required: ['change_set', 'duration_ms'], optional: [] },

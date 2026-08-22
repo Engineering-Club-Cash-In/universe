@@ -40,6 +40,55 @@ export function createCarteraStructuredLogger(options: CarteraStructuredLoggerOp
 
 export type CarteraStructuredLogger = ReturnType<typeof createCarteraStructuredLogger>;
 
+interface CreditCapitalPaymentAuditCompleted {
+  readonly processedCount: number;
+  readonly succeededCount: number;
+  readonly failedCount: number;
+  readonly durationMs: number;
+}
+
+interface CreditCapitalPaymentAuditFailed {
+  readonly operation: "query" | "diagnostic";
+  readonly durationMs: number;
+}
+
+function emitAuditWithoutAffectingControlFlow(emit: () => void): void {
+  try {
+    emit();
+  } catch {
+    // Observability stays fail-closed: no fallback text is emitted, and the
+    // audited endpoint keeps its historical response/control flow.
+  }
+}
+
+export function emitCreditCapitalPaymentAuditCompleted(
+  result: CreditCapitalPaymentAuditCompleted,
+  logger: CarteraStructuredLogger = carteraStructuredLogger,
+): void {
+  emitAuditWithoutAffectingControlFlow(() => {
+    logger.emit("credit.capital_payment_audit", "completed", {
+      audit_operation: "query",
+      processed_count: result.processedCount,
+      succeeded_count: result.succeededCount,
+      failed_count: result.failedCount,
+      duration_ms: result.durationMs,
+    });
+  });
+}
+
+export function emitCreditCapitalPaymentAuditFailed(
+  result: CreditCapitalPaymentAuditFailed,
+  logger: CarteraStructuredLogger = carteraStructuredLogger,
+): void {
+  emitAuditWithoutAffectingControlFlow(() => {
+    logger.emit("credit.capital_payment_audit", "failed", {
+      audit_operation: result.operation,
+      duration_ms: result.durationMs,
+      error_code: "unknown",
+    });
+  });
+}
+
 export function emitRecoveredDuplicatePendingInstallment(
   logger: CarteraStructuredLogger = carteraStructuredLogger,
 ): void {

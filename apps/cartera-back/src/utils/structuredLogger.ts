@@ -77,6 +77,53 @@ type PaymentReversalToPendingResult =
       durationMs: number;
     }>;
 
+type LateFeeOperation =
+  | "history"
+  | "deactivate"
+  | "create"
+  | "update"
+  | "process"
+  | "condone"
+  | "list"
+  | "bulk_condone";
+
+type LateFeeReasonCode =
+  | "schema_invalid"
+  | "invalid_late_fee_amount"
+  | "invalid_installment_count"
+  | "overdue_count_mismatch"
+  | "excluded_credit_state"
+  | "amount_out_of_range"
+  | "override_reason_missing"
+  | "user_not_found"
+  | "active_late_fee_not_found"
+  | "credit_not_found"
+  | "concurrent_run";
+
+type CreditLateFeeResult =
+  | Readonly<{ outcome: "completed"; operation: LateFeeOperation; durationMs: number }>
+  | Readonly<{
+      outcome: "completed";
+      operation: "process" | "list" | "bulk_condone";
+      durationMs: number;
+      processedCount: number;
+      succeededCount: number;
+      failedCount: number;
+      skippedCount: number;
+    }>
+  | Readonly<{
+      outcome: "skipped" | "rejected";
+      operation: LateFeeOperation;
+      durationMs: number;
+      reasonCode: LateFeeReasonCode;
+    }>
+  | Readonly<{
+      outcome: "degraded" | "failed";
+      operation: LateFeeOperation;
+      durationMs: number;
+      errorCode: "persistence_failed" | "unknown";
+    }>;
+
 function emitAuditWithoutAffectingControlFlow(emit: () => void): void {
   try {
     emit();
@@ -164,6 +211,45 @@ export function emitPaymentReversalToPending(
     }
     if (result.outcome === "failed") {
       logger.emit("payment.reversal_to_pending", "failed", {
+        duration_ms: result.durationMs,
+        error_code: result.errorCode,
+      });
+    }
+  });
+}
+
+export function emitCreditLateFee(
+  result: CreditLateFeeResult,
+  logger: CarteraStructuredLogger = carteraStructuredLogger,
+): void {
+  emitAuditWithoutAffectingControlFlow(() => {
+    if (result.outcome === "completed") {
+      const counts = "processedCount" in result
+        ? {
+            processed_count: result.processedCount,
+            succeeded_count: result.succeededCount,
+            failed_count: result.failedCount,
+            skipped_count: result.skippedCount,
+          }
+        : {};
+      logger.emit("credit.late_fee", "completed", {
+        late_fee_operation: result.operation,
+        duration_ms: result.durationMs,
+        ...counts,
+      });
+      return;
+    }
+    if (result.outcome === "skipped" || result.outcome === "rejected") {
+      logger.emit("credit.late_fee", result.outcome, {
+        late_fee_operation: result.operation,
+        duration_ms: result.durationMs,
+        reason_code: result.reasonCode,
+      });
+      return;
+    }
+    if (result.outcome === "degraded" || result.outcome === "failed") {
+      logger.emit("credit.late_fee", result.outcome, {
+        late_fee_operation: result.operation,
         duration_ms: result.durationMs,
         error_code: result.errorCode,
       });

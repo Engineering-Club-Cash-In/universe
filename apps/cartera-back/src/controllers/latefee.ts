@@ -6,6 +6,23 @@ import { toZonedTime } from "date-fns-tz";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import ExcelJS from "exceljs";
 import { stat } from "fs";
+import { emitCreditLateFee } from "../utils/structuredLogger";
+
+function safeNow(): number {
+  try {
+    return Date.now();
+  } catch {
+    return 0;
+  }
+}
+
+function elapsedMilliseconds(startedAt: number): number {
+  try {
+    return Math.max(0, Date.now() - startedAt);
+  } catch {
+    return 0;
+  }
+}
 
 type MoraEventoTipo =
   | "CREACION"
@@ -70,6 +87,7 @@ async function registrarHistorialMora(params: {
   // propaga y la tx puede reportar el fallo de verdad.
   propagarError?: boolean;
 }) {
+  const startedAt = safeNow();
   try {
     await (params.dbClient ?? db).insert(moras_historial).values({
       credito_id: params.credito_id,
@@ -92,7 +110,7 @@ async function registrarHistorialMora(params: {
       motivo: params.motivo ?? null,
     });
   } catch (err) {
-    console.error("[HISTORIAL] ⚠️  No se pudo registrar evento de mora:", err);
+    emitCreditLateFee({ outcome: "degraded", operation: "history", durationMs: elapsedMilliseconds(startedAt), errorCode: "persistence_failed" });
     if (params.propagarError) throw err;
   }
 }
@@ -152,6 +170,7 @@ export async function desactivarMoraSiCreditoAlDia(
   credito_id: number,
   opts: { motivo?: string; dbClient?: typeof db } = {},
 ): Promise<{ desactivada: boolean; error?: string }> {
+  const startedAt = safeNow();
   const dbi = opts.dbClient ?? db;
   try {
     // El índice único parcial moras_credito_uq_activa garantiza a lo sumo
@@ -283,10 +302,7 @@ export async function desactivarMoraSiCreditoAlDia(
 
     return { desactivada: apagada };
   } catch (error: any) {
-    console.error(
-      `[MORA] ⚠️  desactivarMoraSiCreditoAlDia(${credito_id}) falló (no rompe la validación del pago):`,
-      error,
-    );
+    emitCreditLateFee({ outcome: "failed", operation: "deactivate", durationMs: elapsedMilliseconds(startedAt), errorCode: "unknown" });
     return { desactivada: false, error: String(error?.message ?? error) };
   }
 }
@@ -319,22 +335,15 @@ export async function createMora({
   usuario_email?: string;
   override?: boolean;
 }) {
+  const startedAt = safeNow();
   const requestId = `${credito_id}-${Date.now()}`;
 
-  console.log(`
-╔════════════════════════════════════════════════════════════
-║ [CREATE MORA ENTRY] Request ID: ${requestId}
-║ Crédito ID: ${credito_id}
-║ Monto Mora: ${monto_mora}
-║ Cuotas Atrasadas: ${cuotas_atrasadas}
-║ Timestamp: ${new Date().toISOString()}
-╚════════════════════════════════════════════════════════════
-  `);
+
 
   try {
     // 🔥 VALIDACIÓN 1: Monto debe ser mayor a 0
     if (!monto_mora || monto_mora <= 0) {
-      console.log(`[${requestId}] ❌ RECHAZADO: Monto debe ser mayor a 0`);
+      emitCreditLateFee({ outcome: "rejected", operation: "create", durationMs: elapsedMilliseconds(startedAt), reasonCode: "invalid_late_fee_amount" });
       return {
         success: false,
         message: "[ERROR] Monto de mora debe ser mayor a 0",
@@ -345,7 +354,7 @@ export async function createMora({
     // cuotas=0 no cae en ningún bucket (30/60/90/120) de Mora Histórica y rompería el
     // invariante mora_total = Σbuckets. Antes se default-eaba a 0 silenciosamente.
     if (cuotas_atrasadas === undefined || cuotas_atrasadas === null || cuotas_atrasadas < 1) {
-      console.log(`[${requestId}] ❌ RECHAZADO: cuotas_atrasadas requerido (>=1)`);
+      emitCreditLateFee({ outcome: "rejected", operation: "create", durationMs: elapsedMilliseconds(startedAt), reasonCode: "invalid_installment_count" });
       return {
         success: false,
         message: "[ERROR] cuotas_atrasadas es requerido y debe ser >= 1",
@@ -358,6 +367,7 @@ export async function createMora({
       .from(creditos)
       .where(eq(creditos.credito_id, credito_id));
     if (!credito) {
+      emitCreditLateFee({ outcome: "rejected", operation: "create", durationMs: elapsedMilliseconds(startedAt), reasonCode: "credit_not_found" });
       return { success: false, message: `[ERROR] No se encontró crédito con credito_id=${credito_id}` };
     }
 
@@ -384,7 +394,7 @@ export async function createMora({
     // Si el cuotas_atrasadas enviado NO coincide con las cuotas vencidas reales, exigir override
     // (el caller no puede inflar el conteo para disparar el umbral del guard).
     if (cuotas_atrasadas !== cuotasReales && !override) {
-      console.log(`[${requestId}] ❌ RECHAZADO: cuotas_atrasadas=${cuotas_atrasadas} ≠ vencidas reales=${cuotasReales}`);
+      emitCreditLateFee({ outcome: "rejected", operation: "create", durationMs: elapsedMilliseconds(startedAt), reasonCode: "overdue_count_mismatch" });
       return {
         success: false,
         message: `[ERROR] cuotas_atrasadas=${cuotas_atrasadas} no coincide con las cuotas vencidas reales (${cuotasReales}). Envía override:true + motivo si es intencional.`,
@@ -401,7 +411,7 @@ export async function createMora({
     // morar uno de estos hay que sacarlo del estado excluido primero (como hace el teardown de
     // convenio, que lo pone MOROSO antes de llamar a createMora).
     if (estadoExcluido) {
-      console.log(`[${requestId}] ❌ RECHAZADO: status '${credito.statusCredit}' excluido de mora`);
+      emitCreditLateFee({ outcome: "rejected", operation: "create", durationMs: elapsedMilliseconds(startedAt), reasonCode: "excluded_credit_state" });
       return {
         success: false,
         message: `[ERROR] El crédito está en estado '${credito.statusCredit}' (excluido de mora): no se le puede registrar mora. Saca el crédito de ese estado primero si corresponde.`,
@@ -417,7 +427,7 @@ export async function createMora({
     // cualquier monto exige override.
     const esAbsurdo = esperado.gt(0) ? montoBig.gt(esperado.times(10)) : true;
     if (esAbsurdo && !override) {
-      console.log(`[${requestId}] ❌ RECHAZADO: monto ${monto_mora} fuera de rango (fórmula ${esperado.toFixed(2)})`);
+      emitCreditLateFee({ outcome: "rejected", operation: "create", durationMs: elapsedMilliseconds(startedAt), reasonCode: "amount_out_of_range" });
       return {
         success: false,
         message: `[ERROR] Monto Q${monto_mora} fuera de rango: la fórmula da Q${esperado.toFixed(2)} (capital Q${capitalBig.toFixed(2)} × 1.12% × ${cuotasReales} cuotas reales). Envía override:true + motivo si es intencional.`,
@@ -426,6 +436,7 @@ export async function createMora({
 
     // Cualquier override debe justificarse (rastro de auditoría).
     if (override && (!motivo || !motivo.trim())) {
+      emitCreditLateFee({ outcome: "rejected", operation: "create", durationMs: elapsedMilliseconds(startedAt), reasonCode: "override_reason_missing" });
       return { success: false, message: "[ERROR] override:true requiere 'motivo' (justificación)." };
     }
 
@@ -441,7 +452,7 @@ export async function createMora({
     }
 
     // 🔥 VERIFICAR SI YA EXISTE MORA ACTIVA (UPSERT)
-    console.log(`[${requestId}] 🔍 Verificando mora activa existente...`);
+
 
     const [moraExistente] = await db
       .select({
@@ -464,7 +475,7 @@ export async function createMora({
 
     if (moraExistente) {
       // 🔄 ACTUALIZAR MORA EXISTENTE
-      console.log(`[${requestId}] 🔄 Mora activa existente (ID: ${moraExistente.mora_id}), actualizando...`);
+
 
       monto_anterior = moraExistente.monto_mora;
       cuotas_anteriores = moraExistente.cuotas_atrasadas;
@@ -480,10 +491,10 @@ export async function createMora({
         .where(eq(moras_credito.mora_id, moraExistente.mora_id))
         .returning();
 
-      console.log(`[${requestId}] ✅ Mora actualizada: ID=${newMora.mora_id}`);
+
     } else {
       // 🔥 INSERTAR NUEVA MORA
-      console.log(`[${requestId}] 💰 Insertando nueva mora con monto ${monto_mora}...`);
+
 
       tipo_evento = "CREACION";
 
@@ -498,17 +509,17 @@ export async function createMora({
         })
         .returning();
 
-      console.log(`[${requestId}] ✅ Mora creada: ID=${newMora.mora_id}`);
+
     }
 
     // Actualizar status a MOROSO. Llegar aquí implica que el crédito NO está en estado
     // excluido (V3 ya los rechaza), así que es seguro marcarlo MOROSO.
-    console.log(`[${requestId}] 🔄 Actualizando status a MOROSO...`);
+
     await db
       .update(creditos)
       .set({ statusCredit: "MOROSO" })
       .where(eq(creditos.credito_id, credito_id));
-    console.log(`[${requestId}] ✅ Status actualizado a MOROSO`);
+
 
     await registrarHistorialMora({
       credito_id,
@@ -525,14 +536,7 @@ export async function createMora({
       motivo,
     });
 
-    console.log(`
-╔════════════════════════════════════════════════════════════
-║ [CREATE MORA SUCCESS] Request ID: ${requestId}
-║ Mora ID: ${newMora.mora_id}
-║ Status: MOROSO
-║ Timestamp: ${new Date().toISOString()}
-╚════════════════════════════════════════════════════════════
-    `);
+    emitCreditLateFee({ outcome: "completed", operation: "create", durationMs: elapsedMilliseconds(startedAt) });
 
     return {
       success: true,
@@ -541,15 +545,8 @@ export async function createMora({
     };
 
   } catch (error) {
-    console.error(`
-╔════════════════════════════════════════════════════════════
-║ [CREATE MORA ERROR] Request ID: ${requestId}
-║ Crédito ID: ${credito_id}
-║ Error: ${String(error)}
-║ Timestamp: ${new Date().toISOString()}
-╚════════════════════════════════════════════════════════════
-    `);
-    
+    emitCreditLateFee({ outcome: "failed", operation: "create", durationMs: elapsedMilliseconds(startedAt), errorCode: "unknown" });
+
     return {
       success: false,
       message: "[ERROR] Could not create mora",
@@ -558,7 +555,7 @@ export async function createMora({
   }
 }
 
- 
+
 /**
  * Update mora (penalty) for a credit using increments or decrements.
  *
@@ -594,7 +591,9 @@ export async function updateMora({
   activa?: boolean;
   usuario_email?: string;
 }) {
+  const startedAt = safeNow();
   if (monto_cambio < 0) {
+    emitCreditLateFee({ outcome: "rejected", operation: "update", durationMs: elapsedMilliseconds(startedAt), reasonCode: "invalid_late_fee_amount" });
     return { success: false, message: "[ERROR] monto_cambio debe ser >= 0 (usa el campo 'tipo' para indicar dirección)" };
   }
 
@@ -606,25 +605,19 @@ export async function updateMora({
       .from(creditos)
       .where(eq(creditos.numero_credito_sifco, numero_credito_sifco));
     if (!credito) {
+      emitCreditLateFee({ outcome: "rejected", operation: "update", durationMs: elapsedMilliseconds(startedAt), reasonCode: "credit_not_found" });
       return { success: false, message: `[ERROR] No se encontró crédito con numero_credito_sifco=${numero_credito_sifco}` };
     }
     targetCreditoId = credito.credito_id;
   }
   if (!targetCreditoId) {
+    emitCreditLateFee({ outcome: "rejected", operation: "update", durationMs: elapsedMilliseconds(startedAt), reasonCode: "schema_invalid" });
     return { success: false, message: "[ERROR] credito_id o numero_credito_sifco es requerido" };
   }
 
   const requestId = `${targetCreditoId}-${Date.now()}`;
 
-  console.log(`
-╔════════════════════════════════════════════════════════════
-║ [UPDATE MORA] Request ID: ${requestId}
-║ Crédito ID: ${credito_id}
-║ Tipo: ${tipo}
-║ Monto Cambio: ${monto_cambio}
-║ Timestamp: ${new Date().toISOString()}
-╚════════════════════════════════════════════════════════════
-  `);
+
 
   try {
     // Resolver usuario que ejecuta la acción (si vino email)
@@ -635,6 +628,7 @@ export async function updateMora({
         .from(platform_users)
         .where(eq(platform_users.email, usuario_email));
       if (!user) {
+        emitCreditLateFee({ outcome: "rejected", operation: "update", durationMs: elapsedMilliseconds(startedAt), reasonCode: "user_not_found" });
         return { success: false, message: "[ERROR] Usuario no encontrado" };
       }
       usuarioId = user.id;
@@ -715,9 +709,7 @@ export async function updateMora({
           .set({ statusCredit: newStatus })
           .where(eq(creditos.credito_id, targetCreditoId));
       } else {
-        console.log(
-          `[${requestId}] ⏭️ Status '${creditoActual?.statusCredit}' protegido (STATUS_EXCLUIDOS_MORA): no se cambia a ${newStatus}`,
-        );
+
       }
 
       return {
@@ -731,7 +723,7 @@ export async function updateMora({
     });
 
     if (result.kind === "not_found") {
-      console.log(`[${requestId}] ❌ No se encontró mora activa para este crédito`);
+      emitCreditLateFee({ outcome: "rejected", operation: "update", durationMs: elapsedMilliseconds(startedAt), reasonCode: "active_late_fee_not_found" });
       return { success: false, message: "[ERROR] Mora activa no encontrada para este crédito" };
     }
 
@@ -748,15 +740,7 @@ export async function updateMora({
       usuario_id: usuarioId,
     });
 
-    console.log(`
-╔════════════════════════════════════════════════════════════
-║ [UPDATE MORA SUCCESS] Request ID: ${requestId}
-║ Mora ID: ${result.updated.mora_id}
-║ Nuevo Monto: ${result.montoNuevo}
-║ Status Crédito: ${result.newStatus}
-║ Timestamp: ${new Date().toISOString()}
-╚════════════════════════════════════════════════════════════
-    `);
+    emitCreditLateFee({ outcome: "completed", operation: "update", durationMs: elapsedMilliseconds(startedAt) });
 
     return {
       success: true,
@@ -765,15 +749,7 @@ export async function updateMora({
     };
 
   } catch (error) {
-    console.error(`
-╔════════════════════════════════════════════════════════════
-║ [UPDATE MORA ERROR] Request ID: ${requestId}
-║ Crédito ID: ${credito_id}
-║ Error: ${String(error)}
-║ Timestamp: ${new Date().toISOString()}
-╚════════════════════════════════════════════════════════════
-    `);
-    
+    emitCreditLateFee({ outcome: "failed", operation: "update", durationMs: elapsedMilliseconds(startedAt), errorCode: "unknown" });
     return {
       success: false,
       message: "[ERROR] Could not update mora",
@@ -801,6 +777,7 @@ export async function updateMora({
 const PROCESAR_MORAS_LOCK_KEY = 728193;
 
 export async function procesarMoras() {
+  const startedAt = safeNow();
   // 🔒 Lock entre instancias: con varias réplicas del back, todas agendan el cron
   // (23:59 GT) y corrían EN PARALELO leyendo el mismo estado viejo → duplicaban
   // eventos en moras_historial y, peor, filas activa=true en moras_credito.
@@ -812,16 +789,16 @@ export async function procesarMoras() {
     const _lk = await lockConn.query("SELECT pg_try_advisory_lock($1) AS ok", [PROCESAR_MORAS_LOCK_KEY]);
     lockHeld = _lk.rows[0]?.ok === true;
     if (!lockHeld) {
-      console.log("[MORA] ⏭️  Otra instancia ya está procesando moras; se omite esta corrida.");
+      emitCreditLateFee({ outcome: "skipped", operation: "process", durationMs: elapsedMilliseconds(startedAt), reasonCode: "concurrent_run" });
       return { skipped: true, creadas: 0, recalculadas: 0, sinCambios: 0, desactivadas: 0, sinCapital: 0 };
     }
 
     const hoy = hoyGuatemala();
 
-    console.log("[INFO] Current Guatemala date (midnight):", hoy.toISOString());
-    console.log("\n╔════════════════════════════════════════════════════════════");
-    console.log("║ [JOB] 🚀 INICIANDO PROCESO DE MORAS (UPSERT)");
-    console.log("╚════════════════════════════════════════════════════════════\n");
+
+
+
+
 
     // 1. Get all installments WITH PROPER JOIN
     const cuotas = await db
@@ -852,12 +829,12 @@ export async function procesarMoras() {
       .from(cuotas_credito)
       .innerJoin(creditos, eq(cuotas_credito.credito_id, creditos.credito_id));
 
-    console.log(`[DEBUG] Total installments fetched: ${cuotas.length}`);
+
 
     // 2. Filter overdue installments (excluyendo estados que no aplican)
     const cuotasVencidas = cuotas.filter((c) => isOverdueInstallmentForMora(c, hoy));
 
-    console.log(`[DEBUG] Overdue installments found: ${cuotasVencidas.length}`);
+
 
     // 3. Group by credit (conteo de cuotas vencidas + capital del crédito,
     //    ya traído en el JOIN para evitar un SELECT por crédito dentro del loop).
@@ -868,7 +845,7 @@ export async function procesarMoras() {
       capitalPorCredito.set(cuota.credito_id, cuota.capital);
     }
 
-    console.log("[DEBUG] Grouping overdue installments by credit:", moraPorCredito);
+
 
     // 4. Cargar moras activas existentes para comparar (UPSERT real)
     const morasActivas = await db
@@ -892,6 +869,7 @@ export async function procesarMoras() {
     let sinCambios = 0;
     let desactivadas = 0;
     let sinCapital = 0;
+    let skippedInternally = 0;
 
     // 5. Procesar créditos CON cuotas vencidas → crear o recalcular
     for (const [creditoIdStr, cuotasAtrasadas] of Object.entries(moraPorCredito)) {
@@ -899,7 +877,7 @@ export async function procesarMoras() {
 
       const capitalStr = capitalPorCredito.get(creditoId);
       if (capitalStr === undefined) {
-        console.log(`[WARN] Credit ${creditoId} not found`);
+        skippedInternally++;
         continue;
       }
 
@@ -939,7 +917,7 @@ export async function procesarMoras() {
             motivo: "Crédito sin capital — no aplica mora",
           });
         }
-        console.log(`[SKIP] Credit #${creditoId} sin capital (${capitalStr}) — mora quitada`);
+
         continue;
       }
 
@@ -967,7 +945,7 @@ export async function procesarMoras() {
           // Índice único parcial moras_credito_uq_activa: otra corrida concurrente
           // ya creó la mora activa de este crédito → omitir (no duplicar).
           if (e?.code === "23505") {
-            console.log(`[SKIP] Credit #${creditoId} mora ya creada por otra instancia (índice único)`);
+            skippedInternally++;
             continue;
           }
           throw e;
@@ -992,7 +970,7 @@ export async function procesarMoras() {
         });
 
         creadas++;
-        console.log(`[CREATE] Credit #${creditoId} → mora Q${moraNuevaStr} (${cuotasAtrasadas} cuotas)`);
+
       } else {
         const cambioMonto = new Big(moraActual.monto_mora).cmp(moraNuevaStr) !== 0;
         const cambioCuotas = moraActual.cuotas_atrasadas !== cuotasAtrasadas;
@@ -1031,7 +1009,7 @@ export async function procesarMoras() {
         });
 
         recalculadas++;
-        console.log(`[UPDATE] Credit #${creditoId} → mora Q${moraActual.monto_mora} → Q${moraNuevaStr}`);
+
       }
     }
 
@@ -1075,26 +1053,33 @@ export async function procesarMoras() {
       });
 
       desactivadas++;
-      console.log(`[DEACTIVATE] Credit #${mora.credito_id} se puso al día → mora desactivada`);
+
     }
 
-    console.log("\n╔════════════════════════════════════════════════════════════");
-    console.log(`║ [JOB] ✅ FINISHED MORA PROCESSING`);
-    console.log(`║   Creadas: ${creadas}`);
-    console.log(`║   Recalculadas: ${recalculadas}`);
-    console.log(`║   Sin cambios: ${sinCambios}`);
-    console.log(`║   Desactivadas: ${desactivadas}`);
-    console.log(`║   Sin capital (omitidas): ${sinCapital}`);
-    console.log("╚════════════════════════════════════════════════════════════\n");
 
+
+
+
+
+
+
+
+
+    const succeededCount = creadas + recalculadas + sinCambios + desactivadas;
+    const skippedCount = sinCapital + skippedInternally;
+    emitCreditLateFee({
+      outcome: "completed",
+      operation: "process",
+      durationMs: elapsedMilliseconds(startedAt),
+      processedCount: succeededCount + skippedCount,
+      succeededCount,
+      failedCount: 0,
+      skippedCount,
+    });
     return { creadas, recalculadas, sinCambios, desactivadas, sinCapital };
 
   } catch (error: any) {
-    console.error("\n╔════════════════════════════════════════════════════════════");
-    console.error("║ [ERROR] ❌ FAILED TO PROCESS MORAS");
-    console.error("╚════════════════════════════════════════════════════════════");
-    console.error("[ERROR] Message:", error.message);
-    console.error("[ERROR] Stack trace:", error.stack);
+    emitCreditLateFee({ outcome: "failed", operation: "process", durationMs: elapsedMilliseconds(startedAt), errorCode: "unknown" });
     throw error;
   } finally {
     if (lockHeld) {
@@ -1125,6 +1110,7 @@ export async function condonarMora({
   motivo: string;
   usuario_email: string;
 }) {
+  const startedAt = safeNow();
   try {
     // 1. Buscar el usuario por email
     const [user] = await db
@@ -1133,6 +1119,7 @@ export async function condonarMora({
       .where(eq(platform_users.email, usuario_email));
 
     if (!user) {
+      emitCreditLateFee({ outcome: "rejected", operation: "condone", durationMs: elapsedMilliseconds(startedAt), reasonCode: "user_not_found" });
       return { success: false, message: "[ERROR] Usuario no encontrado" };
     }
 
@@ -1158,8 +1145,8 @@ export async function condonarMora({
       }
 
       const monto = moraActual.monto ?? "0";
-      console.log(`[INFO] Current mora amount for credit #${credito_id}: ${monto}`);
-      console.log(`[INFO] Condonation reason: ${motivo}`);
+
+
 
       // Re-check activa=true en el UPDATE como defensa extra: si dos tx
       // pasaran el SELECT FOR UPDATE en algún edge case raro, solo la primera
@@ -1197,6 +1184,7 @@ export async function condonarMora({
     });
 
     if (result.kind === "not_found") {
+      emitCreditLateFee({ outcome: "rejected", operation: "condone", durationMs: elapsedMilliseconds(startedAt), reasonCode: "active_late_fee_not_found" });
       return { success: false, message: "[ERROR] No hay mora activa para este crédito" };
     }
 
@@ -1211,6 +1199,7 @@ export async function condonarMora({
       motivo,
     });
 
+    emitCreditLateFee({ outcome: "completed", operation: "condone", durationMs: elapsedMilliseconds(startedAt) });
     return {
       success: true,
       message: `[SUCCESS] Mora condonada para crédito #${credito_id}`,
@@ -1218,6 +1207,7 @@ export async function condonarMora({
       condonacion: result.condonacion,
     };
   } catch (error) {
+    emitCreditLateFee({ outcome: "failed", operation: "condone", durationMs: elapsedMilliseconds(startedAt), errorCode: "unknown" });
     return {
       success: false,
       message: "[ERROR] No se pudo condonar la mora",
@@ -1225,7 +1215,7 @@ export async function condonarMora({
     };
   }
 }
- 
+
 
 /**
  * Obtener créditos con información de mora.
@@ -1375,6 +1365,8 @@ export async function getCondonacionesMora({
   fecha_hasta?: Date;
   excel?: boolean;
 }) {
+  const startedAt = safeNow();
+  try {
   // 1️⃣ Build filters
   const whereClauses: any[] = [];
 
@@ -1414,10 +1406,11 @@ export async function getCondonacionesMora({
     .innerJoin(asesores, eq(creditos.asesor_id, asesores.asesor_id))
     .innerJoin(platform_users, eq(moras_condonaciones.usuario_id, platform_users.id))
     .where(whereClauses.length > 0 ? and(...whereClauses) : undefined);
-console.log(query)
+
   const data = await query;
-    console.log("[DEBUG] Condonations found:", data);
+
   if (!excel) {
+    emitCreditLateFee({ outcome: "completed", operation: "list", durationMs: elapsedMilliseconds(startedAt), processedCount: data.length, succeededCount: data.length, failedCount: 0, skippedCount: 0 });
     return {
       success: true,
       count: data.length,
@@ -1471,11 +1464,16 @@ console.log(query)
 
   const url = `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`;
 
+  emitCreditLateFee({ outcome: "completed", operation: "list", durationMs: elapsedMilliseconds(startedAt), processedCount: data.length, succeededCount: data.length, failedCount: 0, skippedCount: 0 });
   return {
     success: true,
     excelUrl: url,
     count: data.length,
   };
+  } catch (error) {
+    emitCreditLateFee({ outcome: "failed", operation: "list", durationMs: elapsedMilliseconds(startedAt), errorCode: "unknown" });
+    throw error;
+  }
 }
 
 
@@ -1486,6 +1484,7 @@ export async function condonarTodasLasMoras({
   motivo: string;
   usuario_email: string;
 }) {
+  const startedAt = safeNow();
   try {
     // 1. Buscar el usuario por email
     const [user] = await db
@@ -1494,6 +1493,7 @@ export async function condonarTodasLasMoras({
       .where(eq(platform_users.email, usuario_email));
 
     if (!user) {
+      emitCreditLateFee({ outcome: "rejected", operation: "bulk_condone", durationMs: elapsedMilliseconds(startedAt), reasonCode: "user_not_found" });
       return { success: false, message: "[ERROR] Usuario no encontrado" };
     }
 
@@ -1513,9 +1513,10 @@ export async function condonarTodasLasMoras({
         )
       )
       .where(eq(creditos.statusCredit, "MOROSO"));
-      console.log(`[INFO] Found ${creditosMorosos.length} morose credits to condone`);
+
 
     if (creditosMorosos.length === 0) {
+      emitCreditLateFee({ outcome: "completed", operation: "bulk_condone", durationMs: elapsedMilliseconds(startedAt), processedCount: 0, succeededCount: 0, failedCount: 0, skippedCount: 0 });
       return {
         success: true,
         message: "[INFO] No hay créditos morosos para condonar",
@@ -1533,7 +1534,7 @@ export async function condonarTodasLasMoras({
       })
       .where(inArray(moras_credito.mora_id, moraIds));
 
-    
+
 
     // 5. Insertar registros masivos en moras_condonaciones
     const condonacionesData = creditosMorosos
@@ -1569,6 +1570,15 @@ export async function condonarTodasLasMoras({
         )
     );
 
+    emitCreditLateFee({
+      outcome: "completed",
+      operation: "bulk_condone",
+      durationMs: elapsedMilliseconds(startedAt),
+      processedCount: creditosMorosos.length,
+      succeededCount: condonacionesData.length,
+      failedCount: 0,
+      skippedCount: creditosMorosos.length - condonacionesData.length,
+    });
     return {
       success: true,
       message: `[SUCCESS] Se condonaron ${creditosMorosos.length} moras`,
@@ -1577,6 +1587,7 @@ export async function condonarTodasLasMoras({
       condonaciones,
     };
   } catch (error) {
+    emitCreditLateFee({ outcome: "failed", operation: "bulk_condone", durationMs: elapsedMilliseconds(startedAt), errorCode: "unknown" });
     return {
       success: false,
       message: "[ERROR] No se pudieron condonar las moras masivamente",

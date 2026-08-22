@@ -178,6 +178,25 @@ async function clasificarFalloInfornet(
 	}
 }
 
+/** `sin_registro` vigente para ese DPI: evita repetir la búsqueda de clasificación. Devuelve su vigencia para heredarla, nunca para renovarla */
+async function sinRegistroVigentePorDpi(dpi: string): Promise<Date | null> {
+	const [fila] = await db
+		.select({ expiraEn: opportunityValidations.expiraEn })
+		.from(opportunityValidations)
+		.where(
+			and(
+				eq(opportunityValidations.tipo, "buro"),
+				eq(opportunityValidations.estado, "sin_registro"),
+				eq(opportunityValidations.dpi, dpi),
+				gt(opportunityValidations.expiraEn, new Date()),
+			),
+		)
+		.orderBy(desc(opportunityValidations.expiraEn))
+		.limit(1);
+
+	return fila?.expiraEn ?? null;
+}
+
 async function registrarValidacion(valores: {
 	opportunityId: string;
 	dpi: string;
@@ -625,11 +644,16 @@ async function ejecutarValidacionesInterno({
 	const consultaBuro = await enFilaPorDpi(dpi, async () => {
 		let resultado = await infornetController.obtenerEstudioPorDPI(dpi);
 		let sinRegistro = false;
+		let expiraSinRegistro: Date | null = null;
 
 		if (!resultado.success) {
-			sinRegistro =
-				resultado.error === ERROR_INFORNET_AMBIGUO &&
-				(await clasificarFalloInfornet(dpi)) === "sin_registro";
+			// El intento contra Infornet siempre se hace; solo se reusa su clasificación
+			if (resultado.error === ERROR_INFORNET_AMBIGUO) {
+				expiraSinRegistro = await sinRegistroVigentePorDpi(dpi);
+				sinRegistro =
+					expiraSinRegistro !== null ||
+					(await clasificarFalloInfornet(dpi)) === "sin_registro";
+			}
 
 			for (
 				let intento = 0;
@@ -641,7 +665,7 @@ async function ejecutarValidacionesInterno({
 			}
 		}
 
-		return { resultado, sinRegistro };
+		return { resultado, sinRegistro, expiraSinRegistro };
 	});
 
 	const estudio = consultaBuro.resultado;
@@ -663,7 +687,8 @@ async function ejecutarValidacionesInterno({
 			estado: estadoBuro,
 			mensaje: mensajeBuro,
 			expiraEn: buroSinRegistro
-				? new Date(Date.now() + VIGENCIA_SIN_REGISTRO_MS)
+				? (consultaBuro.expiraSinRegistro ??
+					new Date(Date.now() + VIGENCIA_SIN_REGISTRO_MS))
 				: null,
 			ejecutadoPor: userId ?? null,
 		});

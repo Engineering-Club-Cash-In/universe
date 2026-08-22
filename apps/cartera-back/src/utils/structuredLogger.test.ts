@@ -5,6 +5,7 @@ import {
   emitCreditCapitalPaymentAuditCompleted,
   emitCreditCapitalPaymentAuditDiagnosticCompleted,
   emitCreditCapitalPaymentAuditFailed,
+  emitPaymentReversalToPending,
   emitRecoveredDuplicatePendingInstallment,
   resolveCarteraLogEnvironment,
 } from './structuredLogger';
@@ -182,5 +183,33 @@ describe('Cartera structured logger adapter', () => {
       operation: 'create',
       durationMs: 1,
     }, broken)).not.toThrow();
+  });
+
+  test('emits bounded reversal-to-pending terminal outcomes and isolates sink errors', () => {
+    const lines: string[] = [];
+    const logger = createCarteraStructuredLogger({
+      environment: 'staging',
+      clock: () => new Date('2026-08-22T00:00:00.000Z'),
+      sink: (line) => lines.push(line),
+    });
+
+    emitPaymentReversalToPending({ outcome: 'completed', reversalPath: 'already_pending', processedCount: 0, succeededCount: 0, failedCount: 0, durationMs: 4 }, logger);
+    emitPaymentReversalToPending({ outcome: 'partially_completed', reversalPath: 'validated_payment', processedCount: 2, succeededCount: 1, failedCount: 1, durationMs: 8 }, logger);
+    emitPaymentReversalToPending({ outcome: 'rejected', reasonCode: 'schema_invalid', durationMs: 1 }, logger);
+    emitPaymentReversalToPending({ outcome: 'failed', errorCode: 'unknown', durationMs: 9 }, logger);
+
+    expect(lines.map((line) => JSON.parse(line))).toEqual([
+      expect.objectContaining({ event: 'payment.reversal_to_pending', outcome: 'completed', level: 'info', reversal_path: 'already_pending', processed_count: 0, succeeded_count: 0, failed_count: 0, duration_ms: 4 }),
+      expect.objectContaining({ event: 'payment.reversal_to_pending', outcome: 'partially_completed', level: 'warn', reversal_path: 'validated_payment', processed_count: 2, succeeded_count: 1, failed_count: 1, duration_ms: 8 }),
+      expect.objectContaining({ event: 'payment.reversal_to_pending', outcome: 'rejected', level: 'warn', reason_code: 'schema_invalid', duration_ms: 1 }),
+      expect.objectContaining({ event: 'payment.reversal_to_pending', outcome: 'failed', level: 'error', error_code: 'unknown', duration_ms: 9 }),
+    ]);
+    for (const line of lines) {
+      const entry = JSON.parse(line) as Record<string, unknown>;
+      for (const key of ['credito_id', 'pago_id', 'factura_id', 'uuid', 'nit', 'monto', 'message', 'stack', 'error']) expect(entry).not.toHaveProperty(key);
+    }
+
+    const broken = createCarteraStructuredLogger({ sink: () => { throw new Error('synthetic sink failure'); } });
+    expect(() => emitPaymentReversalToPending({ outcome: 'failed', errorCode: 'unknown', durationMs: 1 }, broken)).not.toThrow();
   });
 });

@@ -65,7 +65,7 @@ describe('Cartera log-call inventory', () => {
 
   test('keeps all non-slice calls explicitly unresolved until reviewed', async () => {
     const target = await loadInventory('CARTERA_LOG_CALLS_56717dde.csv');
-    expect(target.filter(({ disposition }) => disposition === 'unresolved')).toHaveLength(2_853);
+    expect(target.filter(({ disposition }) => disposition === 'unresolved')).toHaveLength(2_799);
   });
 
   test('has no unresolved call in the payment revalidation slice', async () => {
@@ -107,5 +107,14 @@ describe('Cartera log-call inventory', () => {
     expect(fifthSlice.filter(({ disposition }) => disposition === 'unresolved')).toHaveLength(0);
     expect(fifthSlice.filter(({ disposition }) => disposition === 'remove')).toHaveLength(22);
     expect(fifthSlice.filter(({ disposition }) => disposition === 'event')).toHaveLength(4);
+  });
+
+  test('has no unresolved call in the late-fee domain slice', async () => {
+    const target = await loadInventory('CARTERA_LOG_CALLS_56717dde.csv');
+    const sixthSlice = target.filter(({ path }) => path.endsWith('/src/controllers/latefee.ts'));
+    expect(sixthSlice).toHaveLength(54);
+    expect(sixthSlice.filter(({ disposition }) => disposition === 'unresolved')).toHaveLength(0);
+    expect(sixthSlice.filter(({ disposition }) => disposition === 'remove')).toHaveLength(36);
+    expect(sixthSlice.filter(({ disposition }) => disposition === 'event')).toHaveLength(18);
   });
 });

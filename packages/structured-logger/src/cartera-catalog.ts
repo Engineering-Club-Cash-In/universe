@@ -42,6 +42,10 @@ export const carteraCatalog = {
     audit_operation: { type: 'enum', values: ['query', 'diagnostic'] },
     contribution_operation: { type: 'enum', values: ['create', 'update'] },
     reversal_path: { type: 'enum', values: ['already_pending', 'validated_payment'] },
+    late_fee_operation: {
+      type: 'enum',
+      values: ['history', 'deactivate', 'create', 'update', 'process', 'condone', 'list', 'bulk_condone'],
+    },
     error_code: {
       type: 'enum',
       values: [
@@ -59,6 +63,9 @@ export const carteraCatalog = {
         'agreement_already_active', 'payment_already_applied', 'no_investors',
         'purchase_exceeds_mirror', 'missing_participation_date', 'state_conflict',
         'provider_rejected', 'local_state_inconsistent', 'manual_reconciliation_required',
+        'invalid_late_fee_amount', 'invalid_installment_count', 'overdue_count_mismatch',
+        'excluded_credit_state', 'amount_out_of_range', 'override_reason_missing',
+        'user_not_found', 'active_late_fee_not_found', 'concurrent_run',
       ],
     },
     auth_reason: { type: 'enum', values: ['missing', 'invalid', 'expired'] },
@@ -192,6 +199,13 @@ export const carteraCatalog = {
     } },
     'credit.capital_contribution': { outcomes: {
       failed: { level: 'error', required: ['contribution_operation', 'duration_ms', 'error_code'], optional: [], constants: { error_code: 'persistence_failed' } },
+    } },
+    'credit.late_fee': { outcomes: {
+      completed: { level: 'info', required: ['late_fee_operation', 'duration_ms'], optional: ['processed_count', 'succeeded_count', 'failed_count', 'skipped_count'] },
+      skipped: { level: 'info', required: ['late_fee_operation', 'duration_ms', 'reason_code'], optional: [] },
+      rejected: { level: 'warn', required: ['late_fee_operation', 'duration_ms', 'reason_code'], optional: [] },
+      degraded: { level: 'warn', required: ['late_fee_operation', 'duration_ms', 'error_code'], optional: [] },
+      failed: { level: 'error', required: ['late_fee_operation', 'duration_ms', 'error_code'], optional: [] },
     } },
     'credit.capital_payment_audit': { outcomes: {
       completed: { level: 'info', required: ['audit_operation', 'processed_count', 'succeeded_count', 'failed_count', 'duration_ms'], optional: [] },

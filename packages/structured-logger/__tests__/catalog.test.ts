@@ -13,6 +13,7 @@ describe('carteraCatalog', () => {
       'credit.capital_contribution',
       'credit.capital_payment_audit',
       'credit.creation',
+      'credit.late_fee',
       'credit.liquidation',
       'credit.schedule_recalculation',
       'credit.update',
@@ -159,6 +160,42 @@ describe('carteraCatalog', () => {
           required: ['contribution_operation', 'duration_ms', 'error_code'],
           optional: [],
           constants: { error_code: 'persistence_failed' },
+        },
+      },
+    });
+  });
+
+  test('defines a finite safe contract for late-fee operations', () => {
+    expect(carteraCatalog.fields.late_fee_operation).toEqual({
+      type: 'enum',
+      values: ['history', 'deactivate', 'create', 'update', 'process', 'condone', 'list', 'bulk_condone'],
+    });
+    expect(carteraCatalog.events['credit.late_fee']).toEqual({
+      outcomes: {
+        completed: {
+          level: 'info',
+          required: ['late_fee_operation', 'duration_ms'],
+          optional: ['processed_count', 'succeeded_count', 'failed_count', 'skipped_count'],
+        },
+        skipped: {
+          level: 'info',
+          required: ['late_fee_operation', 'duration_ms', 'reason_code'],
+          optional: [],
+        },
+        rejected: {
+          level: 'warn',
+          required: ['late_fee_operation', 'duration_ms', 'reason_code'],
+          optional: [],
+        },
+        degraded: {
+          level: 'warn',
+          required: ['late_fee_operation', 'duration_ms', 'error_code'],
+          optional: [],
+        },
+        failed: {
+          level: 'error',
+          required: ['late_fee_operation', 'duration_ms', 'error_code'],
+          optional: [],
         },
       },
     });

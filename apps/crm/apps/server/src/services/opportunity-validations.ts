@@ -576,9 +576,7 @@ async function ejecutarValidacionesInterno({
 		if (vigente) return vigente;
 	}
 
-	// 1. RENAP: sincronizar datos de identidad en renap_info.
-	// El single-flight por DPI vive en `getOnlyRenapInfoController`,
-	// compartido con los demás callers (portal, lead público)
+	// 1. RENAP: sincronizar datos de identidad en renap_info
 	const renapResultado = await conReintento(
 		() =>
 			conTimeout(

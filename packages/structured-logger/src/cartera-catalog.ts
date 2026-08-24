@@ -41,6 +41,7 @@ export const carteraCatalog = {
     notification_attempted: { type: 'boolean' },
     audit_operation: { type: 'enum', values: ['query', 'diagnostic'] },
     contribution_operation: { type: 'enum', values: ['create', 'update'] },
+    reversal_path: { type: 'enum', values: ['already_pending', 'validated_payment'] },
     error_code: {
       type: 'enum',
       values: [
@@ -149,6 +150,12 @@ export const carteraCatalog = {
       completed: { level: 'info', required: ['credit_updated', 'installment_closed', 'duration_ms'], optional: [] },
       rejected: { level: 'warn', required: ['credit_updated', 'installment_closed', 'duration_ms', 'reason_code'], optional: [] },
       failed: { level: 'error', required: ['credit_updated', 'installment_closed', 'duration_ms', 'error_code'], optional: [] },
+    } },
+    'payment.reversal_to_pending': { outcomes: {
+      completed: { level: 'info', required: ['reversal_path', 'processed_count', 'succeeded_count', 'failed_count', 'duration_ms'], optional: [] },
+      partially_completed: { level: 'warn', required: ['reversal_path', 'processed_count', 'succeeded_count', 'failed_count', 'duration_ms'], optional: [] },
+      rejected: { level: 'warn', required: ['duration_ms', 'reason_code'], optional: [] },
+      failed: { level: 'error', required: ['duration_ms', 'error_code'], optional: [] },
     } },
     'payment.investor_distribution': { outcomes: {
       completed: { level: 'info', required: ['distribution_mode', 'fallback_applied', 'duration_ms'], optional: [] },

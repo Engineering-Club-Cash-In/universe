@@ -61,6 +61,7 @@ Schema version: **1**
 | `recovery_applied` | boolean |
 | `requested_state` | enum: active, inactive |
 | `retryable` | boolean |
+| `reversal_path` | enum: already_pending, validated_payment |
 | `route_template` | enum: /upload, /newPayment |
 | `rubric_count` | integer 0..1000000000 |
 | `skipped_count` | integer 0..1000000000 |
@@ -242,6 +243,15 @@ Schema version: **1**
 | `failed` | `error` | `previous_payment_state`, `credit_updated`, `investments_reversed`, `manual_action_required`, `duration_ms`, `error_code` | — | — |
 | `partially_completed` | `warn` | `previous_payment_state`, `credit_updated`, `investments_reversed`, `manual_action_required`, `duration_ms`, `reason_code` | — | — |
 | `rejected` | `warn` | `previous_payment_state`, `credit_updated`, `investments_reversed`, `manual_action_required`, `duration_ms`, `reason_code` | — | — |
+
+### `payment.reversal_to_pending`
+
+| Outcome | Level | Required | Optional | Constants |
+|---|---|---|---|---|
+| `completed` | `info` | `reversal_path`, `processed_count`, `succeeded_count`, `failed_count`, `duration_ms` | — | — |
+| `failed` | `error` | `duration_ms`, `error_code` | — | — |
+| `partially_completed` | `warn` | `reversal_path`, `processed_count`, `succeeded_count`, `failed_count`, `duration_ms` | — | — |
+| `rejected` | `warn` | `duration_ms`, `reason_code` | — | — |
 
 ### `payment.upload`
 

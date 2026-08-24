@@ -216,7 +216,8 @@ CREATE TABLE IF NOT EXISTS public.pagalo_payment_links (
   ),
   CONSTRAINT pagalo_payment_links_application_source_chk CHECK (
     is_application_source = false OR (
-      transaction_status = 'ACCEPT'
+      transaction_status IS NOT NULL
+      AND transaction_status = 'ACCEPT'
       AND pagalo_transaction_uuid IS NOT NULL
       AND transaction_amount IS NOT NULL
       AND paid_at IS NOT NULL

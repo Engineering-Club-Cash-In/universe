@@ -374,7 +374,8 @@ export const pagaloPaymentLinks = pgTable(
 		check(
 			"pagalo_payment_links_application_source_chk",
 			sql`${t.isApplicationSource} = false OR (
-				${t.transactionStatus} = 'ACCEPT'
+				${t.transactionStatus} IS NOT NULL
+				AND ${t.transactionStatus} = 'ACCEPT'
 				AND ${t.pagaloTransactionUuid} IS NOT NULL
 				AND ${t.transactionAmount} IS NOT NULL
 				AND ${t.paidAt} IS NOT NULL

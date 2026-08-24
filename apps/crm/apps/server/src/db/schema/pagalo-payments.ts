@@ -13,14 +13,20 @@
  *          │
  *          └──────────── 1 ── N pagalo_payment_events
  *
- * Negocio exige dos links independientes por grupo:
+ * Negocio parte el pago por rubro (D-48 del bot de cobros):
  *   - CAPITAL: no facturable.
- *   - MORA_INTERES: facturable.
+ *   - MORA_INTERES: facturable (interés, IVAs, seguro, GPS, membresías, mora).
  *
- * Pagar uno deja grupo PARTIALLY_PAID. Grupo pasa a READY_TO_APPLY únicamente
- * cuando ambos tipos tienen link ACCEPT marcado application_source y voucher
- * disponible. COMPLETED significa que cartera confirmó aplicación, no solo que
- * Págalo recibió ambas transacciones.
+ * Un grupo lleva los links cuyo monto es > 0: normalmente dos; UNO solo cuando
+ * la selección no tiene capital (solo-interés, insoluto) o es solo capital.
+ * Pagar uno de dos deja grupo PARTIALLY_PAID. Grupo pasa a READY_TO_APPLY
+ * únicamente cuando TODOS los links requeridos tienen ACCEPT marcado
+ * application_source y voucher disponible. COMPLETED significa que cartera
+ * confirmó aplicación, no solo que Págalo recibió las transacciones.
+ *
+ * Los grupos los crean dos orígenes (columna `origen`): el ASESOR desde la
+ * pantalla de cobros y el BOT de WhatsApp (D-45). En ambos casos el grupo
+ * guarda el asesor asignado del crédito (cartera_asesor_id).
  *
  * SEGURIDAD
  * ---------
@@ -71,6 +77,7 @@ export type PagaloPaymentGroupStatus =
 
 export type PagaloEnvironment = "STAGING" | "PRODUCTION";
 export type PagaloLinkType = "CAPITAL" | "MORA_INTERES";
+export type PagaloPaymentGroupOrigen = "ASESOR" | "BOT";
 
 export type PagaloPaymentLinkStatus =
 	| "CREATING"
@@ -130,6 +137,17 @@ export const pagaloPaymentGroups = pgTable(
 			.$type<PagaloEnvironment>()
 			.notNull(),
 		currency: varchar("currency", { length: 3 }).notNull().default("GTQ"),
+		/** Quién generó el grupo: la pantalla del asesor o el bot de WhatsApp (D-45). */
+		origen: text("origen")
+			.$type<PagaloPaymentGroupOrigen>()
+			.notNull()
+			.default("ASESOR"),
+		/**
+		 * Asesor asignado del crédito al momento de crear el grupo
+		 * (cartera.creditos.asesor_id). ID opaco de cartera-back: bases separadas,
+		 * sin FK local. Nullable: hay créditos sin asesor asignado.
+		 */
+		carteraAsesorId: integer("cartera_asesor_id"),
 
 		capitalTotal: numeric("capital_total", {
 			precision: 18,
@@ -213,13 +231,19 @@ export const pagaloPaymentGroups = pgTable(
 			"pagalo_payment_groups_environment_chk",
 			sql`${t.pagaloEnvironment} IN ('STAGING', 'PRODUCTION')`,
 		),
+		// Un lado puede ser 0 (grupo de un solo link, D-48); total > 0 junto con
+		// total_matches garantiza que al menos un lado existe.
 		check(
 			"pagalo_payment_groups_amounts_chk",
-			sql`${t.capitalTotal} > 0 AND ${t.facturableTotal} > 0 AND ${t.totalAmount} > 0`,
+			sql`${t.capitalTotal} >= 0 AND ${t.facturableTotal} >= 0 AND ${t.totalAmount} > 0`,
 		),
 		check(
 			"pagalo_payment_groups_total_matches_chk",
 			sql`${t.totalAmount} = ${t.capitalTotal} + ${t.facturableTotal}`,
+		),
+		check(
+			"pagalo_payment_groups_origen_chk",
+			sql`${t.origen} IN ('ASESOR', 'BOT')`,
 		),
 		check(
 			"pagalo_payment_groups_allocations_array_chk",

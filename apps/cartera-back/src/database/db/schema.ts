@@ -710,7 +710,9 @@
   // ------------------------
   // CRM conserva links, callbacks/polling, payloads Págalo, usuario creador y
   // voucher. Cartera NO duplica esa máquina: recibe una orden consolidada solo
-  // cuando los dos componentes (CAPITAL y MORA_INTERES) fueron aceptados.
+  // cuando TODOS los componentes del grupo fueron aceptados — dos links
+  // (CAPITAL y MORA_INTERES), o UNO solo cuando un lado es Q0 (selección sin
+  // capital o solo capital; D-48 del bot de cobros, decidido 2026-08-24).
   //
   // POR QUÉ ESTA CABECERA ES NECESARIA
   // ----------------------------------
@@ -772,27 +774,30 @@
         scale: 2,
       }).notNull(),
 
-      // Evidencia mínima de los dos ACCEPT. No son credenciales de integración.
+      // Evidencia mínima de los ACCEPT del grupo. No son credenciales de
+      // integración. NULL en el lado cuyo total es 0 (grupo de un solo link);
+      // los CHECK *_evidence_chk obligan evidencia completa cuando el monto
+      // existe y lado vacío cuando no.
       capital_transaction_uuid: varchar("capital_transaction_uuid", {
         length: 64,
-      }).notNull(),
+      }),
       facturable_transaction_uuid: varchar("facturable_transaction_uuid", {
         length: 64,
-      }).notNull(),
+      }),
       capital_external_identifier: varchar("capital_external_identifier", {
         length: 150,
-      }).notNull(),
+      }),
       facturable_external_identifier: varchar("facturable_external_identifier", {
         length: 150,
-      }).notNull(),
+      }),
       capital_request_id: varchar("capital_request_id", { length: 100 }),
       facturable_request_id: varchar("facturable_request_id", { length: 100 }),
       capital_request_auth: varchar("capital_request_auth", { length: 100 }),
       facturable_request_auth: varchar("facturable_request_auth", { length: 100 }),
-      capital_paid_at: timestamp("capital_paid_at", { withTimezone: true }).notNull(),
+      capital_paid_at: timestamp("capital_paid_at", { withTimezone: true }),
       facturable_paid_at: timestamp("facturable_paid_at", {
         withTimezone: true,
-      }).notNull(),
+      }),
 
       payload_hash: varchar("payload_hash", { length: 64 }).notNull(),
       status: text("status")
@@ -847,9 +852,11 @@
           'APPLIED', 'RETRYABLE_ERROR', 'REVIEW_REQUIRED'
         )`
       ),
+      // Un lado puede ser 0 (grupo de un solo link, D-48); total > 0 junto con
+      // total_matches garantiza que al menos un lado existe.
       check(
         "pagalo_payment_imports_amounts_chk",
-        sql`${t.capital_total} > 0 AND ${t.facturable_total} > 0 AND ${t.total_amount} > 0`
+        sql`${t.capital_total} >= 0 AND ${t.facturable_total} >= 0 AND ${t.total_amount} > 0`
       ),
       check(
         "pagalo_payment_imports_total_matches_chk",
@@ -863,6 +870,9 @@
         "pagalo_payment_imports_payload_hash_chk",
         sql`${t.payload_hash} ~ '^[0-9a-f]{64}$'`
       ),
+      // Con un lado NULL estos CHECK "pasan" (NULL <> x → NULL), que es justo
+      // lo que un grupo de un solo link necesita; con ambos presentes siguen
+      // impidiendo reutilizar la misma transacción en los dos roles.
       check(
         "pagalo_payment_imports_transactions_different_chk",
         sql`${t.capital_transaction_uuid} <> ${t.facturable_transaction_uuid}`
@@ -870,6 +880,41 @@
       check(
         "pagalo_payment_imports_external_ids_different_chk",
         sql`${t.capital_external_identifier} <> ${t.facturable_external_identifier}`
+      ),
+      // Coherencia por lado, explícita porque PostgreSQL acepta resultado NULL
+      // en un CHECK (misma lección de estado ACCEPT y expiración): monto > 0
+      // exige evidencia completa; monto = 0 exige el lado totalmente vacío.
+      check(
+        "pagalo_payment_imports_capital_evidence_chk",
+        sql`(
+          ${t.capital_total} > 0
+          AND ${t.capital_transaction_uuid} IS NOT NULL
+          AND ${t.capital_external_identifier} IS NOT NULL
+          AND ${t.capital_paid_at} IS NOT NULL
+        ) OR (
+          ${t.capital_total} = 0
+          AND ${t.capital_transaction_uuid} IS NULL
+          AND ${t.capital_external_identifier} IS NULL
+          AND ${t.capital_paid_at} IS NULL
+          AND ${t.capital_request_id} IS NULL
+          AND ${t.capital_request_auth} IS NULL
+        )`
+      ),
+      check(
+        "pagalo_payment_imports_facturable_evidence_chk",
+        sql`(
+          ${t.facturable_total} > 0
+          AND ${t.facturable_transaction_uuid} IS NOT NULL
+          AND ${t.facturable_external_identifier} IS NOT NULL
+          AND ${t.facturable_paid_at} IS NOT NULL
+        ) OR (
+          ${t.facturable_total} = 0
+          AND ${t.facturable_transaction_uuid} IS NULL
+          AND ${t.facturable_external_identifier} IS NULL
+          AND ${t.facturable_paid_at} IS NULL
+          AND ${t.facturable_request_id} IS NULL
+          AND ${t.facturable_request_auth} IS NULL
+        )`
       ),
     ]
   );

@@ -19,6 +19,7 @@ para que se sepa que se aplican como bloque cuando salga esa versión.
 | `0003_buckets_estado_mora.sql` | Agrega `buckets.estado_mora` (puente numero↔estadoMora: al_dia..mora_120_plus) + seed. Retira la duplicación con `config/moraBuckets.ts` (cartera-back) y el mirror en CRM. |
 | `0006_buckets_dias_sla.sql` | CB-020: agrega `buckets.dias_sla` (días para contactar desde que el crédito entra al bucket) + seed placeholder B1-B5 (B0 = NULL, sin SLA). Consumido por la Cola del Día del CRM (`GET /buckets/cola-dia`). |
 | `0007_promesas_pago_espejo.sql` | CB-030: tabla `promesas_pago_espejo`, copia local de promesas de pago vigentes sincronizada desde crm-server (contactos_cobros vive en otra DB). procesarMoras la consulta para congelar SOLO las cuotas prometidas (no el crédito completo) mientras la promesa esté vigente. |
+| `0008_pagalo_payment_imports.sql` | CB-028: ledger idempotente de grupos Págalo, validación crédito↔SIFCO, vínculo de N `pagos_credito` mediante `pagalo_import_id` y origen `pagalo`. Requiere los dos links CAPITAL/MORA_INTERES aceptados antes de aplicar pagos. |
 
 ## Asignación inicial (`asignacion/`) — carga de datos, NO schema
 

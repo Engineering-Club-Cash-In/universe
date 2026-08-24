@@ -29,7 +29,7 @@
 -- con schema distinto, reemplazar `cartera` conscientemente.
 -- ============================================================================
 
-ALTER TYPE public.origen_pago ADD VALUE IF NOT EXISTS 'pagalo';
+ALTER TYPE cartera.origen_pago ADD VALUE IF NOT EXISTS 'pagalo';
 
 -- FK compuesta de importación necesita identidad candidata compuesta. Aunque
 -- credito_id ya es PK y SIFCO ya es UNIQUE, este índice permite que PostgreSQL

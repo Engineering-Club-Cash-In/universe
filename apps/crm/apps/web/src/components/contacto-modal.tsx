@@ -366,6 +366,7 @@ export function ContactoModal({
 			estadoContacto: (esPromesa ? "promesa_pago" : "contactado") as
 				| "contactado"
 				| "no_contesta"
+				| "mensaje_enviado"
 				| "numero_equivocado"
 				| "promesa_pago"
 				| "acuerdo_parcial"
@@ -647,13 +648,14 @@ export function ContactoModal({
 	 */
 	const registrarTrasEnvio = (canal: string) => {
 		// Un envío saliente NO prueba que el cliente respondiera. Si el asesor no
-		// tocó el Resultado, se guarda como "no_contesta": `contactado` cuenta
-		// como respuesta en evaluarGestionTempranaB1 y un WhatsApp de una vía
-		// habría dado por respondida la gestión B1, apagando la alerta de los
-		// canales que faltaban (Codex). Si el asesor SÍ eligió un resultado
-		// (habló por WhatsApp y le contestaron), se respeta su elección.
+		// tocó el Resultado, se guarda como "mensaje_enviado": `contactado`
+		// contaría como respuesta en evaluarGestionTempranaB1 y un WhatsApp de
+		// una vía habría dado por respondida la gestión B1 (Codex) — y
+		// "no_contesta" también mentía: nadie dejó de contestar una llamada,
+		// solo se mandó un mensaje. Si el asesor SÍ eligió un resultado (habló
+		// por WhatsApp y le contestaron), se respeta su elección.
 		if (!form.getFieldMeta("estadoContacto")?.isTouched) {
-			form.setFieldValue("estadoContacto", "no_contesta");
+			form.setFieldValue("estadoContacto", "mensaje_enviado");
 		}
 		const actuales = String(form.getFieldValue("comentarios") ?? "").trim();
 		if (!actuales) {
@@ -1166,6 +1168,9 @@ export function ContactoModal({
 												</SelectItem>
 												<SelectItem value="no_contesta">
 													❌ No contestó
+												</SelectItem>
+												<SelectItem value="mensaje_enviado">
+													📤 Mensaje enviado (sin respuesta aún)
 												</SelectItem>
 												<SelectItem value="numero_equivocado">
 													📱 Número equivocado

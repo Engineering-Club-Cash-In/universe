@@ -69,6 +69,7 @@ import { PERMISSIONS, USER_ROLE_VALUES } from "../lib/roles";
 const ESTADOS_CONTACTO = [
 	"contactado",
 	"no_contesta",
+	"mensaje_enviado",
 	"numero_equivocado",
 	"promesa_pago",
 	"acuerdo_parcial",

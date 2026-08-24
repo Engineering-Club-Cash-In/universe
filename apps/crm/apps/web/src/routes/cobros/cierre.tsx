@@ -76,6 +76,7 @@ const BUCKET_LABEL: Record<number, string> = {
 const estadoLabel: Record<string, string> = {
 	contactado: "Contactado",
 	no_contesta: "No contesta",
+	mensaje_enviado: "Mensaje enviado",
 	numero_equivocado: "Número equivocado",
 	promesa_pago: "Promesa de pago",
 	acuerdo_parcial: "Acuerdo parcial",
@@ -95,6 +96,7 @@ function motivoNoEfectivo(
 	if (origen === "wsp_masivo") return "Envío masivo";
 	if (estadoContacto === "promesa_pago") return "Cuenta como promesa";
 	if (estadoContacto === "no_contesta") return "No contestó";
+	if (estadoContacto === "mensaje_enviado") return "Mensaje enviado, sin respuesta";
 	if (estadoContacto === "numero_equivocado") return "Número equivocado";
 	return "—";
 }

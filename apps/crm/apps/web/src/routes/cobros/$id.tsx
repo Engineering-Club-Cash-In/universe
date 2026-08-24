@@ -6,6 +6,7 @@ import {
 	Banknote,
 	CalendarClock,
 	Car,
+	ChevronDown,
 	ChevronLeft,
 	ChevronRight,
 	Clock,
@@ -27,6 +28,12 @@ import {
 	X,
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
 	etiquetaMetodoContacto,
 	evaluarGestionTempranaB1,
@@ -459,7 +466,30 @@ function RouteComponent() {
 	// Estados de paginación
 	const [contactosPage, setContactosPage] = useState(1);
 	const [cuotasPage, setCuotasPage] = useState(1);
-	const ITEMS_PER_PAGE = 20;
+	// Jerarquía de acciones: los canales viven en un dropdown y UN solo modal
+	// controlado (antes eran 6 copias del mismo bloque de props).
+	const [canalContacto, setCanalContacto] = useState<CanalContacto | null>(
+		null,
+	);
+	const [confirmarEstadoCuenta, setConfirmarEstadoCuenta] = useState(false);
+	/**
+ * Los canales del dropdown "Registrar Contacto". Todos abren el MISMO modal
+ * (ContactoModal) con su `metodoInicial`; agregar un canal nuevo es una fila
+ * acá, no otra copia del blob de props.
+ */
+const CANALES_CONTACTO = [
+	{ metodo: "llamada", label: "Registrar Llamada", Icono: Phone, color: "text-blue-600 dark:text-blue-400" },
+	{ metodo: "whatsapp", label: "WhatsApp", Icono: MessageCircle, color: "text-green-600 dark:text-green-400" },
+	{ metodo: "email", label: "Email", Icono: Mail, color: "text-indigo-600 dark:text-indigo-400" },
+	{ metodo: "sms", label: "SMS", Icono: MessageSquare, color: "text-amber-600 dark:text-amber-400" },
+	{ metodo: "visita_domicilio", label: "Visita", Icono: MapPin, color: "text-slate-600 dark:text-slate-400" },
+] as const;
+
+type CanalContacto =
+	| (typeof CANALES_CONTACTO)[number]["metodo"]
+	| "carta_notarial";
+
+const ITEMS_PER_PAGE = 20;
 
 	// Estado del modal de oportunidad
 	const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
@@ -906,6 +936,38 @@ function RouteComponent() {
 	const cuotas = historialPagos.data || [];
 	const recuperacion = recuperacionInfo.data;
 
+	// El bloque de props que comparten TODOS los modales de contacto: antes
+	// vivía copiado seis veces (uno por canal). El modal solo se monta cuando
+	// hay caso (caso.id), así que el `caso.id` de acá nunca viaja vacío.
+	const propsContacto = {
+		// Los modales solo se montan bajo `caso.id ? (...)`, así que el "" no
+		// viaja nunca — está solo para que el tipo cierre sin un cast.
+		casoCobroId: caso.id ?? "",
+		clienteNombre: caso.clienteNombre || "",
+		telefonoPrincipal: caso.telefonoPrincipal || "",
+		telefonoAlternativo: caso.telefonoAlternativo
+			? String(caso.telefonoAlternativo)
+			: undefined,
+		emailCliente: caso.emailContacto || "",
+		fechaPago: String(caso.diaPagoMensual || 15),
+		cuotaMensual: Number(caso.cuotaMensual || 0).toLocaleString(),
+		placa: caso.vehiculoPlaca || "",
+		marcaLineaModelo:
+			`${caso.vehiculoMarca || ""} ${caso.vehiculoModelo || ""} ${caso.vehiculoYear || ""}`.trim(),
+		montoAdeudado: (
+			Number(caso.montoEnMora || 0) +
+			Number(caso.cuotasVencidas || 0) * Number(caso.cuotaMensual || 0)
+		).toLocaleString("es-GT", {
+			minimumFractionDigits: 2,
+			maximumFractionDigits: 2,
+		}),
+		cuotasAtraso: caso.cuotasVencidas ?? 0,
+		estadoMora: caso.estadoMora || undefined,
+		fechaInicio: caso.fechaInicio || null,
+		nombreAsesor: caso.asesor?.nombre || "",
+		telefonoAsesor: caso.asesor?.telefono || "",
+	};
+
 	// Detectar si es vehículo migrado (todo N/A)
 	const isVehiculoMigrado =
 		caso.vehiculoMarca === "N/A" &&
@@ -1031,6 +1093,10 @@ function RouteComponent() {
 				label: "No Contesta",
 				color: "bg-yellow-100 text-yellow-800",
 			},
+			mensaje_enviado: {
+				label: "Mensaje enviado",
+				color: "bg-sky-100 text-sky-800",
+			},
 			acuerdo_parcial: {
 				label: "Acuerdo Parcial",
 				color: "bg-purple-100 text-purple-800",
@@ -1093,6 +1159,17 @@ function RouteComponent() {
 										{caso.numeroCreditoSifco}
 									</Badge>
 								)}
+								{matchingOpportunity && (
+									<Button
+										variant="ghost"
+										size="sm"
+										className="h-6 gap-1 px-2 text-blue-600 text-xs hover:text-blue-700 dark:text-blue-400"
+										onClick={handleOpenOpportunityDetail}
+									>
+										<Eye className="h-3.5 w-3.5" />
+										Ver detalle completo
+									</Button>
+								)}
 							</div>
 							<p className="text-muted-foreground text-sm">
 								{caso.vehiculoMarca} {caso.vehiculoModelo} {caso.vehiculoYear}
@@ -1127,259 +1204,40 @@ function RouteComponent() {
 						{/* Botones de Contacto - Solo si existe caso de cobros */}
 						{caso.id ? (
 							<>
-								<div className="flex gap-2">
-									<ContactoModal
-										casoCobroId={caso.id}
-										clienteNombre={caso.clienteNombre || ""}
-										telefonoPrincipal={caso.telefonoPrincipal || ""}
-										telefonoAlternativo={
-											caso.telefonoAlternativo
-												? String(caso.telefonoAlternativo)
-												: undefined
-										}
-										emailCliente={caso.emailContacto || ""}
-										metodoInicial="llamada"
-										fechaPago={String(caso.diaPagoMensual || 15)}
-										cuotaMensual={Number(
-											caso.cuotaMensual || 0,
-										).toLocaleString()}
-										placa={caso.vehiculoPlaca || ""}
-										marcaLineaModelo={`${caso.vehiculoMarca || ""} ${caso.vehiculoModelo || ""} ${caso.vehiculoYear || ""}`.trim()}
-										montoAdeudado={(
-											Number(caso.montoEnMora || 0) +
-											Number(caso.cuotasVencidas || 0) *
-												Number(caso.cuotaMensual || 0)
-										).toLocaleString("es-GT", {
-											minimumFractionDigits: 2,
-											maximumFractionDigits: 2,
-										})}
-										cuotasAtraso={caso.cuotasVencidas ?? 0}
-										estadoMora={caso.estadoMora || undefined}
-										fechaInicio={caso.fechaInicio || null}
-										nombreAsesor={caso.asesor?.nombre || ""}
-										telefonoAsesor={caso.asesor?.telefono || ""}
-									>
-										<Button
-											variant="outline"
-											className="flex items-center gap-2"
-										>
-											<Phone className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-											Registrar Llamada
-										</Button>
-									</ContactoModal>
+								<div className="flex flex-wrap justify-end gap-2">
+									{/* 1 · Los CANALES, en un solo dropdown: registrar una
+									    llamada, un WhatsApp, un email, un SMS o una visita es
+									    la misma acción por distinta vía — no cinco botones. */}
+									<DropdownMenu>
+										<DropdownMenuTrigger asChild>
+											<Button
+												variant="outline"
+												className="flex items-center gap-2"
+											>
+												<Phone className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+												Registrar Contacto
+												<ChevronDown className="h-3.5 w-3.5 opacity-60" />
+											</Button>
+										</DropdownMenuTrigger>
+										<DropdownMenuContent align="end">
+											{CANALES_CONTACTO.map(({ metodo, label, Icono, color }) => (
+												<DropdownMenuItem
+													key={metodo}
+													className="cursor-pointer"
+													onClick={() => setCanalContacto(metodo)}
+												>
+													<Icono className={`mr-2 h-4 w-4 ${color}`} />
+													{label}
+												</DropdownMenuItem>
+											))}
+										</DropdownMenuContent>
+									</DropdownMenu>
 
+									{/* 2 · Promesa de Pago: visible porque es una gestión con
+									    peso propio (CB-020: modal reducido — solo Detalles de
+									    la Conversación + fecha prometida obligatoria). */}
 									<ContactoModal
-										casoCobroId={caso.id}
-										clienteNombre={caso.clienteNombre || ""}
-										telefonoPrincipal={caso.telefonoPrincipal || ""}
-										telefonoAlternativo={
-											caso.telefonoAlternativo
-												? String(caso.telefonoAlternativo)
-												: undefined
-										}
-										emailCliente={caso.emailContacto || ""}
-										metodoInicial="whatsapp"
-										fechaPago={String(caso.diaPagoMensual || 15)}
-										cuotaMensual={Number(
-											caso.cuotaMensual || 0,
-										).toLocaleString()}
-										placa={caso.vehiculoPlaca || ""}
-										marcaLineaModelo={`${caso.vehiculoMarca || ""} ${caso.vehiculoModelo || ""} ${caso.vehiculoYear || ""}`.trim()}
-										montoAdeudado={(
-											Number(caso.montoEnMora || 0) +
-											Number(caso.cuotasVencidas || 0) *
-												Number(caso.cuotaMensual || 0)
-										).toLocaleString("es-GT", {
-											minimumFractionDigits: 2,
-											maximumFractionDigits: 2,
-										})}
-										cuotasAtraso={caso.cuotasVencidas ?? 0}
-										estadoMora={caso.estadoMora || undefined}
-										fechaInicio={caso.fechaInicio || null}
-										nombreAsesor={caso.asesor?.nombre || ""}
-										telefonoAsesor={caso.asesor?.telefono || ""}
-									>
-										<Button
-											variant="outline"
-											className="flex items-center gap-2"
-										>
-											<MessageCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
-											WhatsApp
-										</Button>
-									</ContactoModal>
-
-									<ContactoModal
-										casoCobroId={caso.id}
-										clienteNombre={caso.clienteNombre || ""}
-										telefonoPrincipal={caso.telefonoPrincipal || ""}
-										telefonoAlternativo={
-											caso.telefonoAlternativo
-												? String(caso.telefonoAlternativo)
-												: undefined
-										}
-										emailCliente={caso.emailContacto || ""}
-										metodoInicial="email"
-										fechaPago={String(caso.diaPagoMensual || 15)}
-										cuotaMensual={Number(
-											caso.cuotaMensual || 0,
-										).toLocaleString()}
-										placa={caso.vehiculoPlaca || ""}
-										marcaLineaModelo={`${caso.vehiculoMarca || ""} ${caso.vehiculoModelo || ""} ${caso.vehiculoYear || ""}`.trim()}
-										montoAdeudado={(
-											Number(caso.montoEnMora || 0) +
-											Number(caso.cuotasVencidas || 0) *
-												Number(caso.cuotaMensual || 0)
-										).toLocaleString("es-GT", {
-											minimumFractionDigits: 2,
-											maximumFractionDigits: 2,
-										})}
-										cuotasAtraso={caso.cuotasVencidas ?? 0}
-										estadoMora={caso.estadoMora || undefined}
-										fechaInicio={caso.fechaInicio || null}
-										nombreAsesor={caso.asesor?.nombre || ""}
-										telefonoAsesor={caso.asesor?.telefono || ""}
-									>
-										<Button
-											variant="outline"
-											className="flex items-center gap-2"
-										>
-											<Mail className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
-											Email
-										</Button>
-									</ContactoModal>
-
-									<ContactoModal
-										casoCobroId={caso.id}
-										clienteNombre={caso.clienteNombre || ""}
-										telefonoPrincipal={caso.telefonoPrincipal || ""}
-										telefonoAlternativo={
-											caso.telefonoAlternativo
-												? String(caso.telefonoAlternativo)
-												: undefined
-										}
-										emailCliente={caso.emailContacto || ""}
-										metodoInicial="sms"
-										fechaPago={String(caso.diaPagoMensual || 15)}
-										cuotaMensual={Number(
-											caso.cuotaMensual || 0,
-										).toLocaleString()}
-										placa={caso.vehiculoPlaca || ""}
-										marcaLineaModelo={`${caso.vehiculoMarca || ""} ${caso.vehiculoModelo || ""} ${caso.vehiculoYear || ""}`.trim()}
-										montoAdeudado={(
-											Number(caso.montoEnMora || 0) +
-											Number(caso.cuotasVencidas || 0) *
-												Number(caso.cuotaMensual || 0)
-										).toLocaleString("es-GT", {
-											minimumFractionDigits: 2,
-											maximumFractionDigits: 2,
-										})}
-										cuotasAtraso={caso.cuotasVencidas ?? 0}
-										estadoMora={caso.estadoMora || undefined}
-										fechaInicio={caso.fechaInicio || null}
-										nombreAsesor={caso.asesor?.nombre || ""}
-										telefonoAsesor={caso.asesor?.telefono || ""}
-									>
-										<Button
-											variant="outline"
-											className="flex items-center gap-2"
-										>
-											<MessageSquare className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-											SMS
-										</Button>
-									</ContactoModal>
-
-									<ContactoModal
-										casoCobroId={caso.id}
-										clienteNombre={caso.clienteNombre || ""}
-										telefonoPrincipal={caso.telefonoPrincipal || ""}
-										telefonoAlternativo={
-											caso.telefonoAlternativo
-												? String(caso.telefonoAlternativo)
-												: undefined
-										}
-										emailCliente={caso.emailContacto || ""}
-										metodoInicial="visita_domicilio"
-										fechaPago={String(caso.diaPagoMensual || 15)}
-										cuotaMensual={Number(
-											caso.cuotaMensual || 0,
-										).toLocaleString()}
-										placa={caso.vehiculoPlaca || ""}
-										marcaLineaModelo={`${caso.vehiculoMarca || ""} ${caso.vehiculoModelo || ""} ${caso.vehiculoYear || ""}`.trim()}
-										montoAdeudado={(
-											Number(caso.montoEnMora || 0) +
-											Number(caso.cuotasVencidas || 0) *
-												Number(caso.cuotaMensual || 0)
-										).toLocaleString("es-GT", {
-											minimumFractionDigits: 2,
-											maximumFractionDigits: 2,
-										})}
-										cuotasAtraso={caso.cuotasVencidas ?? 0}
-										estadoMora={caso.estadoMora || undefined}
-										fechaInicio={caso.fechaInicio || null}
-										nombreAsesor={caso.asesor?.nombre || ""}
-										telefonoAsesor={caso.asesor?.telefono || ""}
-									>
-										<Button
-											variant="outline"
-											className="flex items-center gap-2"
-										>
-											<MapPin className="h-4 w-4 text-slate-600 dark:text-slate-400" />
-											Visita
-										</Button>
-									</ContactoModal>
-
-									<ContactoModal
-										casoCobroId={caso.id}
-										clienteNombre={caso.clienteNombre || ""}
-										telefonoPrincipal={caso.telefonoPrincipal || ""}
-										telefonoAlternativo={
-											caso.telefonoAlternativo
-												? String(caso.telefonoAlternativo)
-												: undefined
-										}
-										emailCliente={caso.emailContacto || ""}
-										metodoInicial="carta_notarial"
-										fechaPago={String(caso.diaPagoMensual || 15)}
-										cuotaMensual={Number(
-											caso.cuotaMensual || 0,
-										).toLocaleString()}
-										placa={caso.vehiculoPlaca || ""}
-										marcaLineaModelo={`${caso.vehiculoMarca || ""} ${caso.vehiculoModelo || ""} ${caso.vehiculoYear || ""}`.trim()}
-										montoAdeudado={(
-											Number(caso.montoEnMora || 0) +
-											Number(caso.cuotasVencidas || 0) *
-												Number(caso.cuotaMensual || 0)
-										).toLocaleString("es-GT", {
-											minimumFractionDigits: 2,
-											maximumFractionDigits: 2,
-										})}
-										cuotasAtraso={caso.cuotasVencidas ?? 0}
-										estadoMora={caso.estadoMora || undefined}
-										fechaInicio={caso.fechaInicio || null}
-										nombreAsesor={caso.asesor?.nombre || ""}
-										telefonoAsesor={caso.asesor?.telefono || ""}
-									>
-										<Button
-											variant="outline"
-											className="flex items-center gap-2"
-										>
-											<FileText className="h-4 w-4 text-slate-600 dark:text-slate-400" />
-											Carta notarial
-										</Button>
-									</ContactoModal>
-
-									{/* CB-020: modal reducido — solo Detalles de la
-										    Conversación + fecha prometida (obligatoria). */}
-									<ContactoModal
-										casoCobroId={caso.id}
-										clienteNombre={caso.clienteNombre || ""}
-										telefonoPrincipal={caso.telefonoPrincipal || ""}
-										telefonoAlternativo={
-											caso.telefonoAlternativo
-												? String(caso.telefonoAlternativo)
-												: undefined
-										}
-										emailCliente={caso.emailContacto || ""}
+										{...propsContacto}
 										metodoInicial="llamada"
 										variante="promesa"
 										// Mismo criterio que el card "Total a Pagar" de arriba
@@ -1415,76 +1273,108 @@ function RouteComponent() {
 												: undefined
 										}
 										promesaActiva={promesaActiva}
-										fechaPago={String(caso.diaPagoMensual || 15)}
-										cuotaMensual={Number(
-											caso.cuotaMensual || 0,
-										).toLocaleString()}
-										placa={caso.vehiculoPlaca || ""}
-										marcaLineaModelo={`${caso.vehiculoMarca || ""} ${caso.vehiculoModelo || ""} ${caso.vehiculoYear || ""}`.trim()}
-										montoAdeudado={(
-											Number(caso.montoEnMora || 0) +
-											Number(caso.cuotasVencidas || 0) *
-												Number(caso.cuotaMensual || 0)
-										).toLocaleString("es-GT", {
-											minimumFractionDigits: 2,
-											maximumFractionDigits: 2,
-										})}
-										cuotasAtraso={caso.cuotasVencidas ?? 0}
-										estadoMora={caso.estadoMora || undefined}
-										fechaInicio={caso.fechaInicio || null}
-										nombreAsesor={caso.asesor?.nombre || ""}
-										telefonoAsesor={caso.asesor?.telefono || ""}
 									>
-										<Button className="flex items-center gap-2">
-											<HandCoins className="h-4 w-4" />
+										<Button
+											variant="outline"
+											className="flex items-center gap-2"
+										>
+											<HandCoins className="h-4 w-4 text-amber-600 dark:text-amber-400" />
 											Promesa de Pago
 										</Button>
 									</ContactoModal>
 
-									<AlertDialog>
-										<AlertDialogTrigger asChild>
+									{/* 3 · Lo demás — y lo que se venga a futuro — cabe acá
+									    sin estirar la fila. */}
+									<DropdownMenu>
+										<DropdownMenuTrigger asChild>
 											<Button
 												variant="outline"
 												className="flex items-center gap-2"
+											>
+												Más acciones
+												<ChevronDown className="h-3.5 w-3.5 opacity-60" />
+											</Button>
+										</DropdownMenuTrigger>
+										<DropdownMenuContent align="end">
+											<DropdownMenuItem
+												className="cursor-pointer"
+												onClick={() => setCanalContacto("carta_notarial")}
+											>
+												<FileText className="mr-2 h-4 w-4 text-slate-600 dark:text-slate-400" />
+												Carta notarial
+											</DropdownMenuItem>
+											<DropdownMenuItem
+												className="cursor-pointer"
 												disabled={enviarEstadoCuentaMutation.isPending}
+												onClick={() => setConfirmarEstadoCuenta(true)}
 											>
 												{enviarEstadoCuentaMutation.isPending ? (
-													<>
-														<Loader className="h-4 w-4 animate-spin" />
-														Enviando…
-													</>
+													<Loader className="mr-2 h-4 w-4 animate-spin" />
 												) : (
-													<>
-														<FileText className="h-4 w-4 text-emerald-600" />
-														Enviar Estado de Cuenta
-													</>
+													<FileText className="mr-2 h-4 w-4 text-emerald-600" />
 												)}
-											</Button>
-										</AlertDialogTrigger>
-										<AlertDialogContent>
-											<AlertDialogHeader>
-												<AlertDialogTitle>
-													¿Enviar estado de cuenta?
-												</AlertDialogTitle>
-												<AlertDialogDescription>
-													Se generará el estado de cuenta actualizado del
-													crédito y se enviará por WhatsApp al teléfono
-													registrado del cliente.
-												</AlertDialogDescription>
-											</AlertDialogHeader>
-											<AlertDialogFooter>
-												<AlertDialogCancel>Cancelar</AlertDialogCancel>
-												<AlertDialogAction
-													onClick={() => enviarEstadoCuentaMutation.mutate()}
-												>
-													Enviar
-												</AlertDialogAction>
-											</AlertDialogFooter>
-										</AlertDialogContent>
-									</AlertDialog>
+												{enviarEstadoCuentaMutation.isPending
+													? "Enviando estado de cuenta…"
+													: "Enviar Estado de Cuenta"}
+											</DropdownMenuItem>
+										</DropdownMenuContent>
+									</DropdownMenu>
+
+									{/* 4 · LA acción principal de la ficha. */}
+									<Button asChild className="flex items-center gap-2">
+										<Link
+											to="/cobros/registrar-pago/$id"
+											params={{ id }}
+											search={{ tipo }}
+										>
+											<Banknote className="h-4 w-4" />
+											Registrar Pago
+										</Link>
+									</Button>
 								</div>
+
+								{/* UN modal para todos los canales. El `key` remonta el
+								    formulario con el método recién elegido; cerrar = volver
+								    a null. */}
+								{canalContacto && (
+									<ContactoModal
+										key={canalContacto}
+										{...propsContacto}
+										metodoInicial={canalContacto}
+										open
+										onOpenChange={(abierto) => {
+											if (!abierto) setCanalContacto(null);
+										}}
+									/>
+								)}
+
+								<AlertDialog
+									open={confirmarEstadoCuenta}
+									onOpenChange={setConfirmarEstadoCuenta}
+								>
+									<AlertDialogContent>
+										<AlertDialogHeader>
+											<AlertDialogTitle>
+												¿Enviar estado de cuenta?
+											</AlertDialogTitle>
+											<AlertDialogDescription>
+												Se generará el estado de cuenta actualizado del
+												crédito y se enviará por WhatsApp al teléfono
+												registrado del cliente.
+											</AlertDialogDescription>
+										</AlertDialogHeader>
+										<AlertDialogFooter>
+											<AlertDialogCancel>Cancelar</AlertDialogCancel>
+											<AlertDialogAction
+												onClick={() => enviarEstadoCuentaMutation.mutate()}
+											>
+												Enviar
+											</AlertDialogAction>
+										</AlertDialogFooter>
+									</AlertDialogContent>
+								</AlertDialog>
 							</>
-						) : (
+												) : (
 							<div className="rounded-md border border-yellow-200 bg-yellow-50 p-4">
 								<p className="text-sm text-yellow-800">
 									Este crédito aún no tiene caso de cobros asignado. Se creará
@@ -1507,25 +1397,25 @@ function RouteComponent() {
 						</p>
 					</div>
 					<div>
-						<p className="text-muted-foreground text-xs">Saldo pendiente</p>
+						<p className="text-muted-foreground text-xs">Capital activo</p>
 						<p className="font-medium text-sm tabular-nums">
-							{caso.deudaTotal != null
-								? `Q${Number(caso.deudaTotal).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+							{caso.montoFinanciado != null
+								? `Q${Number(caso.montoFinanciado).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 								: "—"}
 						</p>
 					</div>
 					<div>
-						<p className="text-muted-foreground text-xs">Días en mora</p>
-						<p
-							className={`font-medium text-sm tabular-nums ${(caso.diasMoraMaximo ?? 0) > 0 ? "text-red-600 dark:text-red-400" : ""}`}
-						>
-							{caso.diasMoraMaximo ?? 0}
+						<p className="text-muted-foreground text-xs">Día de pago</p>
+						<p className="font-medium text-sm tabular-nums">
+							Día {caso.diaPagoMensual || 15} de cada mes
 						</p>
 					</div>
 					<div>
-						<p className="text-muted-foreground text-xs">Cuotas vencidas</p>
+						<p className="text-muted-foreground text-xs">Cuotas</p>
 						<p className="font-medium text-sm tabular-nums">
-							{caso.cuotasVencidas ?? 0}
+							{caso.cuotasRestantes != null
+								? `${caso.cuotasRestantes} de ${caso.numeroCuotas}`
+								: "—"}
 						</p>
 					</div>
 				</div>
@@ -2763,15 +2653,28 @@ function RouteComponent() {
 											Estado de todas las cuotas del contrato de financiamiento
 										</CardDescription>
 									</div>
-									<Button size="sm" asChild>
-										<Link
-											to="/cobros/registrar-pago/$id"
-											params={{ id }}
-											search={{ tipo }}
+									{/* Segundo punto de entrada del envío: quien está viendo
+									    el estado de cuenta es quien quiere mandarlo. Abre el
+									    MISMO diálogo de confirmación del header (un estado,
+									    una mutación — dos puertas). */}
+									{caso.id && (
+										<Button
+											size="sm"
+											variant="outline"
+											className="flex shrink-0 items-center gap-2"
+											disabled={enviarEstadoCuentaMutation.isPending}
+											onClick={() => setConfirmarEstadoCuenta(true)}
 										>
-											Registrar pago
-										</Link>
-									</Button>
+											{enviarEstadoCuentaMutation.isPending ? (
+												<Loader className="h-4 w-4 animate-spin" />
+											) : (
+												<FileText className="h-4 w-4 text-emerald-600" />
+											)}
+											{enviarEstadoCuentaMutation.isPending
+												? "Enviando…"
+												: "Enviar Estado de Cuenta"}
+										</Button>
+									)}
 								</CardHeader>
 								<CardContent>
 									{cuotas.length === 0 ? (
@@ -2929,6 +2832,69 @@ function RouteComponent() {
 																		</div>
 																	)}
 																</div>
+
+																{/* Los pagos que tocaron esta cuota, como en el
+																    historial de cartera pero resumido: una cuota puede
+																    recibir varios abonos parciales y lo que interesa
+																    es cuánto abonó cada uno. */}
+																{(cuota.pagos?.length ?? 0) > 0 && (
+																	<div className="mt-2 border-t pt-2">
+																		<p className="mb-1 font-medium text-muted-foreground text-xs">
+																			Pagos aplicados ({cuota.pagos.length})
+																		</p>
+																		<div className="space-y-1">
+																			{cuota.pagos.map((pago: any) => (
+																				<div
+																					key={pago.pagoId}
+																					className="flex flex-wrap items-center justify-between gap-2 rounded bg-muted/40 px-2 py-1 text-xs"
+																				>
+																					<span className="text-muted-foreground">
+																						#{pago.pagoId}
+																						{pago.fechaPago
+																							? ` · ${formatFechaLocal(pago.fechaPago)}`
+																							: ""}
+																					</span>
+																					<span className="font-medium tabular-nums">
+																						Q
+																						{Number(
+																							pago.montoAplicado ?? 0,
+																						).toLocaleString("es-GT", {
+																							minimumFractionDigits: 2,
+																							maximumFractionDigits: 2,
+																						})}
+																						{Number(pago.montoBoleta ?? 0) >
+																							Number(pago.montoAplicado ?? 0) && (
+																							<span className="ml-1 font-normal text-muted-foreground">
+																								de Q
+																								{Number(
+																									pago.montoBoleta,
+																								).toLocaleString("es-GT", {
+																									minimumFractionDigits: 2,
+																									maximumFractionDigits: 2,
+																								})}
+																							</span>
+																						)}
+																					</span>
+																					<Badge
+																						className={
+																							pago.estado === "validado"
+																								? "bg-green-100 text-green-800"
+																								: pago.estado === "en_validacion"
+																									? "bg-blue-100 text-blue-800"
+																									: "bg-amber-100 text-amber-800"
+																						}
+																					>
+																						{pago.estado === "validado"
+																							? "Validado"
+																							: pago.estado === "en_validacion"
+																								? "En validación"
+																								: "Abono parcial"}
+																					</Badge>
+																				</div>
+																			))}
+																		</div>
+																	</div>
+																)}
 
 																{/* Detalles de pago - Solo mostrar si está pagado y tiene detalles */}
 																{esPagada && cuota.detallesPago && (

@@ -470,6 +470,7 @@ async function autoCrearDatosMigrate({
 const ESTADOS_CONTACTO_SELECCIONABLES = [
 	"contactado",
 	"no_contesta",
+	"mensaje_enviado",
 	"numero_equivocado",
 	"promesa_pago",
 	"acuerdo_parcial",
@@ -3502,6 +3503,44 @@ export const cobrosRouter = {
 							})),
 						];
 
+						// Los PAGOS hijos por cuota, ANTES de deduplicar: el join de
+						// cartera trae una fila por (cuota, pago) y el Map de abajo se
+						// queda con una sola — tres abonos parciales a la misma cuota se
+						// veían como uno. Se filtran los recibos pre-sembrados (filas de
+						// pago sin monto): existen para cobrar después, no son abonos.
+						const pagosPorCuota = new Map<number, any[]>();
+						for (const fila of cuotasCombinadas) {
+							if (!fila.pago_id) continue;
+							const montoBoleta = Number(fila.monto_boleta ?? 0);
+							const montoAplicado = Number(fila.monto_aplicado ?? 0);
+							if (montoBoleta <= 0 && montoAplicado <= 0) continue;
+
+							const lista = pagosPorCuota.get(fila.numero_cuota) ?? [];
+							// La misma cuota puede venir en dos listas (atrasada Y
+							// pendiente): el pago se cuenta una vez.
+							if (lista.some((pago) => pago.pagoId === fila.pago_id)) continue;
+
+							const pagoCompleto = Boolean(
+								fila.pago_pagado ?? fila.pago_cuota_completa,
+							);
+							lista.push({
+								pagoId: fila.pago_id,
+								montoBoleta: fila.monto_boleta ?? null,
+								montoAplicado: fila.monto_aplicado ?? null,
+								fechaPago: fila.fecha_pago ?? null,
+								// validado = pagó completo y conta ya dio fe (o no hacía
+								// falta); en_validacion = completo esperando a conta;
+								// parcial = abonó pero la cuota sigue abierta.
+								estado: pagoCompleto
+									? fila.validationStatus === "pending"
+										? "en_validacion"
+										: "validado"
+									: "parcial",
+							});
+							lista.sort((a, b) => a.pagoId - b.pagoId);
+							pagosPorCuota.set(fila.numero_cuota, lista);
+						}
+
 						// Eliminar duplicados basándose en numero_cuota
 						// Prioridad: pagadas > atrasadas > pendientes
 						const cuotasUnicas = new Map<number, any>();
@@ -3551,6 +3590,7 @@ export const cobrosRouter = {
 										: cuota.en_validacion
 											? "en_validacion"
 											: "pendiente",
+									pagos: pagosPorCuota.get(cuota.numero_cuota) ?? [],
 									diasMora: 0,
 									detallesPago: cuota.pagado
 										? {

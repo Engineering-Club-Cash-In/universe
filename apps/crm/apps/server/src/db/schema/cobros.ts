@@ -83,6 +83,11 @@ export const metodoContactoEnum = pgEnum("metodo_contacto", [
 export const estadoContactoEnum = pgEnum("estado_contacto", [
 	"contactado",
 	"no_contesta",
+	// Un envío SALIENTE (WhatsApp/Email/SMS por API) registrado en automático:
+	// no prueba respuesta del cliente ("contactado" mentiría y apagaría la
+	// gestión B1) pero tampoco es "no_contesta" — nadie dejó de contestar una
+	// llamada, solo se mandó un mensaje. Migración 0039.
+	"mensaje_enviado",
 	"numero_equivocado",
 	"promesa_pago",
 	"acuerdo_parcial",

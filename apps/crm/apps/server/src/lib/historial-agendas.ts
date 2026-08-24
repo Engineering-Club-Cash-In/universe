@@ -416,5 +416,7 @@ export function esSinContacto(): SQL {
 	return or(
 		eq(contactosCobros.estadoContacto, "no_contesta"),
 		eq(contactosCobros.estadoContacto, "numero_equivocado"),
+		// Un mensaje saliente sin respuesta todavía no es contacto logrado.
+		eq(contactosCobros.estadoContacto, "mensaje_enviado"),
 	) as SQL;
 }

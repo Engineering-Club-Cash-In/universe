@@ -178,6 +178,9 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
 
         // 🔥 Campos de pagos_credito - ABONOS
         pago_id: pagos_credito.pago_id,
+        fecha_pago: pagos_credito.fecha_pago,
+        monto_aplicado: pagos_credito.monto_aplicado,
+        pago_pagado: pagos_credito.pagado,
         cuota: pagos_credito.cuota,
         monto_boleta: pagos_credito.monto_boleta,
         abono_capital: pagos_credito.abono_capital,
@@ -235,6 +238,9 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         createdAt: cuotas_credito.createdAt,
         validationStatus: pagos_credito.validationStatus,
         pago_id: pagos_credito.pago_id,
+        fecha_pago: pagos_credito.fecha_pago,
+        monto_aplicado: pagos_credito.monto_aplicado,
+        pago_pagado: pagos_credito.pagado,
         cuota: pagos_credito.cuota,
 
         monto_boleta: pagos_credito.monto_boleta,
@@ -286,8 +292,12 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         fecha_vencimiento: cuotas_credito.fecha_vencimiento,
         pagado: cuotas_credito.pagado,
         createdAt: cuotas_credito.createdAt,
+        validationStatus: pagos_credito.validationStatus,
         // 🔥 Campos de pagos_credito - ABONOS
         pago_id: pagos_credito.pago_id,
+        fecha_pago: pagos_credito.fecha_pago,
+        monto_aplicado: pagos_credito.monto_aplicado,
+        pago_pagado: pagos_credito.pagado,
         cuota: pagos_credito.cuota,
         monto_boleta: pagos_credito.monto_boleta,
         abono_capital: pagos_credito.abono_capital,
@@ -348,6 +358,9 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         createdAt: cuotas_credito.createdAt,
         validationStatus: pagos_credito.validationStatus,
         pago_id: pagos_credito.pago_id,
+        fecha_pago: pagos_credito.fecha_pago,
+        monto_aplicado: pagos_credito.monto_aplicado,
+        pago_pagado: pagos_credito.pagado,
         cuota: pagos_credito.cuota,
         monto_boleta: pagos_credito.monto_boleta,
         abono_capital: pagos_credito.abono_capital,

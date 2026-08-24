@@ -70,6 +70,8 @@ interface CasoPanel {
 	vehiculoYear?: number | null;
 	vehiculoPlaca?: string | null;
 	asesor?: { nombre?: string | null; telefono?: string | null } | null;
+	montoFinanciado?: string | number | null;
+	creditType?: string | null;
 }
 
 interface ContactoPanel {
@@ -105,6 +107,30 @@ const CANALES = [
 		color: "text-indigo-600 dark:text-indigo-400",
 	},
 ];
+
+/** Badges de resultado de gestión — mismos labels/colores que la Ficha 360. */
+const ESTADO_GESTION: Record<string, { label: string; color: string }> = {
+	contactado: { label: "Contactado", color: "bg-green-100 text-green-800" },
+	promesa_pago: { label: "Promesa de Pago", color: "bg-blue-100 text-blue-800" },
+	no_contesta: { label: "No Contesta", color: "bg-yellow-100 text-yellow-800" },
+	mensaje_enviado: {
+		label: "Mensaje enviado",
+		color: "bg-sky-100 text-sky-800",
+	},
+	acuerdo_parcial: {
+		label: "Acuerdo Parcial",
+		color: "bg-purple-100 text-purple-800",
+	},
+	rechaza_pagar: { label: "Rechaza Pagar", color: "bg-red-100 text-red-800" },
+	numero_equivocado: {
+		label: "Número Equivocado",
+		color: "bg-gray-100 text-gray-800",
+	},
+	pago_registrado: {
+		label: "Pago registrado",
+		color: "bg-emerald-100 text-emerald-800",
+	},
+};
 
 const ALERTA_LABEL: Record<string, string> = {
 	promesa_incumplida: "Promesa incumplida",
@@ -359,6 +385,14 @@ export function PanelGestionRapida({
 										{caso.cuotasRestantes ?? "—"}
 										{caso.numeroCuotas ? ` de ${caso.numeroCuotas}` : ""}
 									</Dato>
+									{Number(caso.cuotaConvenio ?? 0) > 0 && (
+										<Dato
+											label="Cuota convenio"
+											className="text-blue-700 dark:text-blue-400"
+										>
+											{money(caso.cuotaConvenio)}
+										</Dato>
+									)}
 								</div>
 							</div>
 
@@ -443,8 +477,98 @@ export function PanelGestionRapida({
 												</Button>
 											</ContactoModal>
 										))}
+										{/* Promesa: solo cuando NO hay una vigente — editar la
+										    activa es trabajo de ficha (CB-029), acá solo se
+										    levanta una nueva. */}
+										{!promesaActiva && (
+											<ContactoModal
+												casoCobroId={caso.id as string}
+												clienteNombre={caso.clienteNombre || ""}
+												telefonoPrincipal={caso.telefonoPrincipal || ""}
+												telefonoAlternativo={
+													caso.telefonoAlternativo || undefined
+												}
+												emailCliente={caso.emailContacto || ""}
+												metodoInicial="llamada"
+												variante="promesa"
+												montoSugerido={totalMes}
+												montoMora={Number(caso.montoEnMora ?? 0)}
+												esConvenio={Number(caso.cuotaConvenio ?? 0) > 0}
+												cuotaConvenio={
+													Number(caso.cuotaConvenio ?? 0) > 0
+														? Number(caso.cuotaConvenio)
+														: undefined
+												}
+												placa={caso.vehiculoPlaca || ""}
+												marcaLineaModelo={`${caso.vehiculoMarca ?? ""} ${caso.vehiculoModelo ?? ""} ${caso.vehiculoYear ?? ""}`.trim()}
+												cuotaMensual={Number(
+													caso.cuotaMensual || 0,
+												).toLocaleString()}
+												cuotasAtraso={caso.cuotasVencidas ?? 0}
+												estadoMora={caso.estadoMora || undefined}
+												montoAdeudado={money(totalMes).replace("Q", "")}
+												fechaPago={String(caso.diaPagoMensual || 15)}
+												fechaInicio={caso.fechaInicio || null}
+												nombreAsesor={caso.asesor?.nombre || ""}
+												telefonoAsesor={caso.asesor?.telefono || ""}
+											>
+												<Button
+													variant="outline"
+													size="sm"
+													className="h-8 text-xs"
+												>
+													<HandCoins className="mr-1.5 h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+													Promesa
+												</Button>
+											</ContactoModal>
+										)}
 									</div>
 								)}
+							</div>
+
+							{/* Contrato — los mismos datos de reojo de la ficha, para
+							    decidir sin abrirla. */}
+							<div className="rounded-lg border p-3">
+								<div className="mb-2 flex items-center gap-2">
+									<Banknote className="h-4 w-4 text-muted-foreground" />
+									<span className="font-medium text-sm">Contrato</span>
+								</div>
+								<div className="grid grid-cols-2 gap-3">
+									<Dato label="Asesor responsable">
+										{caso.asesor?.nombre ?? "Sin asignar"}
+									</Dato>
+									<Dato label="Capital activo">
+										{caso.montoFinanciado != null
+											? money(caso.montoFinanciado)
+											: "—"}
+									</Dato>
+									<Dato label="Día de pago">
+										Día {caso.diaPagoMensual || 15} de cada mes
+									</Dato>
+									<Dato label="Fecha de inicio">
+										{fechaGT(caso.fechaInicio)}
+									</Dato>
+									{caso.creditType && (
+										<Dato label="Tipo de crédito">
+											{caso.creditType === "autocompra"
+												? "Autocompra"
+												: "Sobre Vehículo"}
+										</Dato>
+									)}
+									<Dato
+										label="Próximo seguimiento"
+										className={
+											caso.proximoContacto &&
+											new Date(caso.proximoContacto) < new Date()
+												? "text-red-600 dark:text-red-400"
+												: ""
+										}
+									>
+										{caso.proximoContacto
+											? fechaGT(caso.proximoContacto)
+											: "Sin programar"}
+									</Dato>
+								</div>
 							</div>
 
 							{/* Alertas */}
@@ -516,12 +640,18 @@ export function PanelGestionRapida({
 								<ul className="space-y-2">
 									{ultimos.map((c) => (
 										<li key={c.id} className="border-l-2 pl-2.5">
-											<p className="text-xs">
+											<p className="flex flex-wrap items-center gap-1.5 text-xs">
 												<span className="font-medium">{c.realizadoPor}</span>
 												<span className="text-muted-foreground">
-													{" "}
 													· {fechaGT(c.fechaContacto)}
 												</span>
+												{ESTADO_GESTION[c.estadoContacto] && (
+													<Badge
+														className={`text-[10px] ${ESTADO_GESTION[c.estadoContacto].color}`}
+													>
+														{ESTADO_GESTION[c.estadoContacto].label}
+													</Badge>
+												)}
 											</p>
 											{c.comentarios && (
 												<p className="line-clamp-2 text-muted-foreground text-xs">
@@ -542,10 +672,29 @@ export function PanelGestionRapida({
 					<Button variant="outline" onClick={onClose}>
 						Cerrar
 					</Button>
-					<Button onClick={abrirFicha} disabled={!creditoId}>
-						<ExternalLink className="mr-1 h-4 w-4" />
-						Abrir Ficha 360
-					</Button>
+					<div className="flex gap-2">
+						{/* La misma primaria de la ficha, un click antes. */}
+						<Button
+							variant="outline"
+							disabled={!creditoId}
+							onClick={() => {
+								if (!creditoId) return;
+								onClose();
+								navigate({
+									to: "/cobros/registrar-pago/$id",
+									params: { id: creditoId },
+									search: { tipo: "caso" },
+								});
+							}}
+						>
+							<Banknote className="mr-1 h-4 w-4" />
+							Registrar Pago
+						</Button>
+						<Button onClick={abrirFicha} disabled={!creditoId}>
+							<ExternalLink className="mr-1 h-4 w-4" />
+							Abrir Ficha 360
+						</Button>
+					</div>
 				</div>
 			</SheetContent>
 		</Sheet>

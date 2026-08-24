@@ -71,5 +71,35 @@ test("late-fee callsites use only the finite safe application payload", () => {
     ts.forEachChild(node, visit);
   };
   visit(file);
-  expect(calls).toBe(32);
+  expect(calls).toBe(36);
+});
+
+test("late-fee guards cover credit lookup and lock acquisition failures", () => {
+  const source = readFileSync(controllerFile, "utf8");
+  const updateStart = source.indexOf("export async function updateMora");
+  const updateTry = source.indexOf("try {", updateStart);
+  const creditLookup = source.indexOf("const [credito] = await db", updateStart);
+  expect(updateStart).toBeGreaterThanOrEqual(0);
+  expect(updateTry).toBeGreaterThan(updateStart);
+  expect(updateTry).toBeLessThan(creditLookup);
+
+  const processStart = source.indexOf("export async function procesarMoras");
+  const processTry = source.indexOf("try {", processStart);
+  const connect = source.indexOf("await client.connect()", processStart);
+  expect(processTry).toBeGreaterThan(processStart);
+  expect(processTry).toBeLessThan(connect);
+  expect(source.slice(processStart, source.indexOf("export async function condonarMora")))
+    .toContain("if (lockConn)");
+});
+
+test("late-fee deactivation has a finite terminal for every normal result", () => {
+  const source = readFileSync(controllerFile, "utf8");
+  const start = source.indexOf("export async function desactivarMoraSiCreditoAlDia");
+  const end = source.indexOf("export async function createMora", start);
+  const body = source.slice(start, end);
+  expect(body).toContain('outcome: "skipped", operation: "deactivate"');
+  expect(body).toContain('reasonCode: "active_late_fee_not_found"');
+  expect(body).toContain('reasonCode: "excluded_credit_state"');
+  expect(body).toContain('reasonCode: "concurrent_run"');
+  expect(body).toContain('outcome: "completed", operation: "deactivate"');
 });

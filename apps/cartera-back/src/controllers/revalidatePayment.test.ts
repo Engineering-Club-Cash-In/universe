@@ -316,12 +316,15 @@ describe("revalidatePayment", () => {
       message: "Internal server error",
       error: "No se encontró el pago",
     });
-    expect(JSON.parse(lines[0]!)).toMatchObject({
+    const event = JSON.parse(lines[0]!) as Record<string, unknown>;
+    expect(event).toMatchObject({
       event: "payment.revalidation",
       outcome: "rejected",
       reason_code: "payment_not_found",
     });
-    expect(lines[0]).not.toContain("30");
+    for (const key of ["credito_id", "pago_id", "numero_credito_sifco"]) {
+      expect(event).not.toHaveProperty(key);
+    }
   });
 
   it("clasifica conflicto de estado con un código finito", async () => {

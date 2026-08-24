@@ -7,6 +7,7 @@ import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import ExcelJS from "exceljs";
 import { stat } from "fs";
 import { emitCreditLateFee } from "../utils/structuredLogger";
+import type { PoolClient } from "pg";
 
 function safeNow(): number {
   try {
@@ -191,6 +192,7 @@ export async function desactivarMoraSiCreditoAlDia(
       );
 
     if (!moraActiva) {
+      emitCreditLateFee({ outcome: "skipped", operation: "deactivate", durationMs: elapsedMilliseconds(startedAt), reasonCode: "active_late_fee_not_found" });
       return { desactivada: false };
     }
 
@@ -238,6 +240,7 @@ export async function desactivarMoraSiCreditoAlDia(
     });
 
     if (!decision.desactivarMora) {
+      emitCreditLateFee({ outcome: "skipped", operation: "deactivate", durationMs: elapsedMilliseconds(startedAt), reasonCode: "excluded_credit_state" });
       return { desactivada: false };
     }
 
@@ -300,6 +303,11 @@ export async function desactivarMoraSiCreditoAlDia(
       });
     });
 
+    if (apagada) {
+      emitCreditLateFee({ outcome: "completed", operation: "deactivate", durationMs: elapsedMilliseconds(startedAt) });
+    } else {
+      emitCreditLateFee({ outcome: "skipped", operation: "deactivate", durationMs: elapsedMilliseconds(startedAt), reasonCode: "concurrent_run" });
+    }
     return { desactivada: apagada };
   } catch (error: any) {
     emitCreditLateFee({ outcome: "failed", operation: "deactivate", durationMs: elapsedMilliseconds(startedAt), errorCode: "unknown" });
@@ -592,7 +600,8 @@ export async function updateMora({
   usuario_email?: string;
 }) {
   const startedAt = safeNow();
-  if (monto_cambio < 0) {
+  try {
+    if (monto_cambio < 0) {
     emitCreditLateFee({ outcome: "rejected", operation: "update", durationMs: elapsedMilliseconds(startedAt), reasonCode: "invalid_late_fee_amount" });
     return { success: false, message: "[ERROR] monto_cambio debe ser >= 0 (usa el campo 'tipo' para indicar dirección)" };
   }
@@ -619,7 +628,6 @@ export async function updateMora({
 
 
 
-  try {
     // Resolver usuario que ejecuta la acción (si vino email)
     let usuarioId: number | undefined;
     if (usuario_email) {
@@ -783,9 +791,10 @@ export async function procesarMoras() {
   // eventos en moras_historial y, peor, filas activa=true en moras_credito.
   // Tomamos un advisory lock en una conexión dedicada; si otra corrida ya lo tiene,
   // se omite esta. (El índice único parcial moras_credito_uq_activa es el respaldo duro.)
-  const lockConn = await client.connect();
+  let lockConn: PoolClient | undefined;
   let lockHeld = false;
   try {
+    lockConn = await client.connect();
     const _lk = await lockConn.query("SELECT pg_try_advisory_lock($1) AS ok", [PROCESAR_MORAS_LOCK_KEY]);
     lockHeld = _lk.rows[0]?.ok === true;
     if (!lockHeld) {
@@ -1082,14 +1091,16 @@ export async function procesarMoras() {
     emitCreditLateFee({ outcome: "failed", operation: "process", durationMs: elapsedMilliseconds(startedAt), errorCode: "unknown" });
     throw error;
   } finally {
-    if (lockHeld) {
-      try {
-        await lockConn.query("SELECT pg_advisory_unlock($1)", [PROCESAR_MORAS_LOCK_KEY]);
-      } catch {
-        /* el lock se libera solo al cerrar la sesión; no es crítico */
+    if (lockConn) {
+      if (lockHeld) {
+        try {
+          await lockConn.query("SELECT pg_advisory_unlock($1)", [PROCESAR_MORAS_LOCK_KEY]);
+        } catch {
+          /* el lock se libera solo al cerrar la sesión; no es crítico */
+        }
       }
+      lockConn.release();
     }
-    lockConn.release();
   }
 }
 

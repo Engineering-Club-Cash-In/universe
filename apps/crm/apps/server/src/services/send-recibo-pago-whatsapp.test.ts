@@ -25,7 +25,9 @@ const PAGO_ID = 42;
 const RECIBO_URL = "https://r2.example.com/recibo_pago_42.pdf";
 const SUPERVISOR_ID = "user-supervisor-1";
 
-function casoBase(overrides: Partial<Record<string, string | number | null>> = {}) {
+function casoBase(
+	overrides: Partial<Record<string, string | number | null>> = {},
+) {
 	return {
 		telefonoPrincipal: "30295849",
 		telefonoAlternativo: null,
@@ -37,7 +39,9 @@ function casoBase(overrides: Partial<Record<string, string | number | null>> = {
 	};
 }
 
-function baseParams(overrides: Partial<Parameters<typeof sendReciboPagoWhatsapp>[0]> = {}) {
+function baseParams(
+	overrides: Partial<Parameters<typeof sendReciboPagoWhatsapp>[0]> = {},
+) {
 	return {
 		pagoId: PAGO_ID,
 		numeroSifco: SIFCO,
@@ -49,9 +53,19 @@ function baseParams(overrides: Partial<Parameters<typeof sendReciboPagoWhatsapp>
 
 function buildDeps(overrides: Partial<ReciboPagoDeps> = {}): {
 	deps: ReciboPagoDeps;
-	calls: { cargarCaso: number; obtenerUsuarioSistema: number; enviar: number; guardarLog: number };
+	calls: {
+		cargarCaso: number;
+		obtenerUsuarioSistema: number;
+		enviar: number;
+		guardarLog: number;
+	};
 } {
-	const calls = { cargarCaso: 0, obtenerUsuarioSistema: 0, enviar: 0, guardarLog: 0 };
+	const calls = {
+		cargarCaso: 0,
+		obtenerUsuarioSistema: 0,
+		enviar: 0,
+		guardarLog: 0,
+	};
 
 	const deps: ReciboPagoDeps = {
 		cargarCaso: mock(async (_sifco: string) => {
@@ -62,6 +76,7 @@ function buildDeps(overrides: Partial<ReciboPagoDeps> = {}): {
 			calls.obtenerUsuarioSistema++;
 			return SUPERVISOR_ID;
 		}),
+		obtenerAsesor: mock(async () => null),
 		enviar: mock(async (_params: any) => {
 			calls.enviar++;
 			return {
@@ -277,7 +292,9 @@ describe("sendReciboPagoWhatsapp", () => {
 
 		await sendReciboPagoWhatsapp(baseParams(), deps);
 
-		expect(paramsRecibidos.message).toContain("TOYOTA RAV4 2017, placas P-507GFV");
+		expect(paramsRecibidos.message).toContain(
+			"TOYOTA RAV4 2017, placas P-507GFV",
+		);
 		expect(paramsRecibidos.message).not.toContain(SIFCO);
 	});
 
@@ -313,12 +330,18 @@ describe("sendReciboPagoWhatsapp", () => {
 		});
 
 		await sendReciboPagoWhatsapp(
-			baseParams({ numeroCuota: 7, asesorNombre: "Carlos Ruiz", asesorTelefono: "41234567" }),
+			baseParams({
+				numeroCuota: 7,
+				asesorNombre: "Carlos Ruiz",
+				asesorTelefono: "41234567",
+			}),
 			deps,
 		);
 
 		expect(paramsRecibidos.message).toContain("(cuota 7)");
-		expect(paramsRecibidos.message).toContain("llama a tu asesor Carlos Ruiz al 41234567");
+		expect(paramsRecibidos.message).toContain(
+			"llama a tu asesor Carlos Ruiz al 41234567",
+		);
 		expect(paramsRecibidos.message).not.toContain("comunícate con tu asesor");
 	});
 
@@ -333,6 +356,62 @@ describe("sendReciboPagoWhatsapp", () => {
 
 		await sendReciboPagoWhatsapp(baseParams({ asesorTelefono: null }), deps);
 
+		expect(paramsRecibidos.message).toContain("comunícate con tu asesor");
+	});
+
+	test("asesor recibido incompleto: consulta cartera y usa contacto completo", async () => {
+		let paramsRecibidos: any;
+		const obtenerAsesor = mock(async () => ({
+			nombre: "Ana Pérez",
+			telefono: "49998888",
+		}));
+		const { deps } = buildDeps({
+			obtenerAsesor,
+			enviar: mock(async (params: any) => {
+				paramsRecibidos = params;
+				return { success: true, templateMessageId: "msg-1" };
+			}),
+		});
+
+		await sendReciboPagoWhatsapp(
+			baseParams({ asesorNombre: "Carlos", asesorTelefono: null }),
+			deps,
+		);
+
+		expect(obtenerAsesor).toHaveBeenCalledWith(SIFCO);
+		expect(paramsRecibidos.message).toContain("Ana Pérez al 49998888");
+	});
+
+	test("asesor recibido completo: no consulta cartera", async () => {
+		const obtenerAsesor = mock(async () => ({
+			nombre: "Ignorado",
+			telefono: "00000000",
+		}));
+		const { deps } = buildDeps({ obtenerAsesor });
+
+		await sendReciboPagoWhatsapp(
+			baseParams({ asesorNombre: "Carlos Ruiz", asesorTelefono: "41234567" }),
+			deps,
+		);
+
+		expect(obtenerAsesor).not.toHaveBeenCalled();
+	});
+
+	test("fallo consultando asesor no bloquea recibo y usa cierre genérico", async () => {
+		let paramsRecibidos: any;
+		const { deps } = buildDeps({
+			obtenerAsesor: mock(async () => {
+				throw new Error("cartera caída");
+			}),
+			enviar: mock(async (params: any) => {
+				paramsRecibidos = params;
+				return { success: true, templateMessageId: "msg-1" };
+			}),
+		});
+
+		const resultado = await sendReciboPagoWhatsapp(baseParams(), deps);
+
+		expect(resultado.sent).toBe(true);
 		expect(paramsRecibidos.message).toContain("comunícate con tu asesor");
 	});
 });
@@ -378,25 +457,25 @@ describe("construirMensajeReciboPago", () => {
 		expect(msg).toContain("placas P-507GFV (cuota 7)");
 	});
 
-	test("con asesor con teléfono: cierre invita a llamar al asesor, no genérico", () => {
+	test("con asesor completo: cierre invita a llamar al asesor, no genérico", () => {
 		const msg = construirMensajeReciboPago(
 			"Juan Pérez",
 			{ marca: null, modelo: null, year: null, placa: null },
 			SIFCO,
-			{ asesorNombre: "Carlos Ruiz", asesorTelefono: "41234567" },
+			{ asesor: { nombre: "Carlos Ruiz", telefono: "41234567" } },
 		);
 		expect(msg).toContain("llama a tu asesor Carlos Ruiz al 41234567");
 		expect(msg).not.toContain("comunícate con tu asesor");
 	});
 
-	test("con asesor sin nombre: cierre usa solo el teléfono", () => {
+	test("sin asesor completo: cierre genérico", () => {
 		const msg = construirMensajeReciboPago(
 			"Juan Pérez",
 			{ marca: null, modelo: null, year: null, placa: null },
 			SIFCO,
-			{ asesorTelefono: "41234567" },
+			{ asesor: null },
 		);
-		expect(msg).toContain("llama a tu asesor al 41234567");
+		expect(msg).toContain("comunícate con tu asesor");
 	});
 
 	test("sin asesor: cierre genérico 'comunícate con tu asesor'", () => {

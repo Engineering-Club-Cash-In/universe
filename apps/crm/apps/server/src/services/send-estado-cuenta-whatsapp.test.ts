@@ -60,6 +60,7 @@ function buildDeps(overrides: Partial<EstadoCuentaDeps> = {}): {
 				url: "https://r2.example.com/estado_cuenta.pdf",
 			} as const;
 		}),
+		obtenerAsesor: mock(async () => null),
 		enviar: mock(async (_params: any) => {
 			calls.enviar++;
 			return {
@@ -370,6 +371,48 @@ describe("sendEstadoCuentaWhatsapp", () => {
 		expect(enviarPhone).toBe(getTestPhone(0));
 		expect(logResult.providerResponse.testMode).toBe(true);
 		expect(logResult.providerResponse.realTarget).toBe("30295849");
+	});
+
+	test("resuelve asesor desde cartera y lo incluye en el mensaje", async () => {
+		let paramsRecibidos: any;
+		const { deps } = buildDeps({
+			obtenerAsesor: mock(async () => ({
+				nombre: "Carlos Ruiz",
+				telefono: "41234567",
+			})),
+			enviar: mock(async (params: any) => {
+				paramsRecibidos = params;
+				return { success: true, templateMessageId: "msg-1" };
+			}),
+		});
+
+		await sendEstadoCuentaWhatsapp(
+			{ casoCobroId: CASO_ID, userId: "u1" },
+			deps,
+		);
+
+		expect(paramsRecibidos.message).toContain("Carlos Ruiz al 41234567");
+	});
+
+	test("fallo consultando asesor no bloquea estado de cuenta y usa cierre genérico", async () => {
+		let paramsRecibidos: any;
+		const { deps } = buildDeps({
+			obtenerAsesor: mock(async () => {
+				throw new Error("cartera caída");
+			}),
+			enviar: mock(async (params: any) => {
+				paramsRecibidos = params;
+				return { success: true, templateMessageId: "msg-1" };
+			}),
+		});
+
+		const resultado = await sendEstadoCuentaWhatsapp(
+			{ casoCobroId: CASO_ID, userId: "u1" },
+			deps,
+		);
+
+		expect(resultado.sent).toBe(true);
+		expect(paramsRecibidos.message).toContain("comunícate con tu asesor");
 	});
 });
 

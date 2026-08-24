@@ -21,6 +21,13 @@ import { persistCobrosSendLog } from "../lib/cobros-send-log";
 import { getTestPhone, isTestModeEnabled } from "../lib/messaging-test-mode";
 import { primerTelefono } from "../lib/phone-utils";
 import { sendWhatsappTemplate } from "../lib/simpletech";
+import {
+	type ContactoAsesor,
+	construirCierreAsesor,
+	type ObtenerAsesor,
+	obtenerAsesorCartera,
+	resolverContactoAsesor,
+} from "./asesor-whatsapp";
 import { carteraBackClient } from "./cartera-back-client";
 
 /** Template de WittyBots: header documento + 1 variable de body. */
@@ -129,6 +136,7 @@ export function construirMensajeEstadoCuenta(
 		placa: string | null;
 	},
 	numeroSifco: string,
+	asesor: ContactoAsesor | null = null,
 ): string {
 	const saludo = clienteNombre ? `Hola ${clienteNombre}` : "Hola";
 	const descripcionVehiculo = [vehiculo.marca, vehiculo.modelo, vehiculo.year]
@@ -137,7 +145,7 @@ export function construirMensajeEstadoCuenta(
 	const identificador = descripcionVehiculo
 		? ` de tu ${descripcionVehiculo}${vehiculo.placa ? `, placas ${vehiculo.placa}` : ""}`
 		: ` de tu crédito ${numeroSifco}`;
-	return `${saludo}, te compartimos el estado de cuenta${identificador} en el documento adjunto. Cualquier duda, escribinos por acá.`;
+	return `${saludo}, te compartimos el estado de cuenta${identificador} en el documento adjunto. ${construirCierreAsesor(asesor)}`;
 }
 
 /** Deps inyectables solo para tests — en producción no se pasa nada. */
@@ -147,6 +155,7 @@ export interface EstadoCuentaDeps {
 		scope: EstadoCuentaScope,
 	) => Promise<DatosCaso | null>;
 	obtenerUrl?: typeof carteraBackClient.getEstadoCuentaUrl;
+	obtenerAsesor?: ObtenerAsesor;
 	enviar?: typeof sendWhatsappTemplate;
 	guardarLog?: typeof persistCobrosSendLog;
 }
@@ -166,6 +175,7 @@ export async function sendEstadoCuentaWhatsapp(
 		carteraBackClient.getEstadoCuentaUrl.bind(carteraBackClient);
 	const enviar = deps.enviar ?? sendWhatsappTemplate;
 	const guardarLog = deps.guardarLog ?? persistCobrosSendLog;
+	const obtenerAsesor = deps.obtenerAsesor ?? obtenerAsesorCartera;
 
 	const fallo = (
 		codigo: EstadoCuentaErrorCodigo,
@@ -204,7 +214,7 @@ export async function sendEstadoCuentaWhatsapp(
 
 	let telefonoDestino: string;
 	if (testMode) {
-		telefonoDestino = getTestPhone(0);
+		telefonoDestino = getTestPhone(2);
 	} else {
 		if (!realPhone) {
 			console.log(
@@ -214,6 +224,7 @@ export async function sendEstadoCuentaWhatsapp(
 		}
 		telefonoDestino = realPhone;
 	}
+	const asesor = await resolverContactoAsesor(numeroSifco, null, obtenerAsesor);
 	const mensaje = construirMensajeEstadoCuenta(
 		caso.clienteNombre,
 		{
@@ -223,6 +234,7 @@ export async function sendEstadoCuentaWhatsapp(
 			placa: caso.vehiculoPlaca,
 		},
 		numeroSifco,
+		asesor,
 	);
 	const guardarFallo = async (
 		codigo: Exclude<

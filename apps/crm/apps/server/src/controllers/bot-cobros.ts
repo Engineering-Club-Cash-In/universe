@@ -23,6 +23,7 @@ import {
 	listarCreditosDeCliente,
 } from "../lib/bot-cobros/buscar-cliente";
 import { confirmarBoleta } from "../lib/bot-cobros/confirmar-boleta";
+import { anotarIdentidadBot } from "../lib/bot-cobros/historial";
 import {
 	elegirTelefonoParaOtp,
 	telefonoEstaRegistrado,
@@ -129,6 +130,15 @@ export async function buscarClienteBotCobros(c: Context) {
 		}
 
 		const { cliente, tipoBusqueda } = resultado;
+
+		// Para el historial (D-43): de acá en adelante ya sabemos de quién es la
+		// petición, y si el OTP no llega a emitirse el body no lo dice. El DPI
+		// viaja para `persona_hash` (se guarda hasheado, nunca en claro).
+		anotarIdentidadBot(c, {
+			leadId: cliente.leadId,
+			coDebtorId: cliente.coDebtorId,
+			dpi: cliente.dpi,
+		});
 
 		const telefonoDestino = elegirTelefonoParaOtp(cliente.telefonos);
 

@@ -348,6 +348,13 @@ function RegistrarPagoPage() {
 			queryClient.invalidateQueries(
 				orpc.getHistorialContactos.queryOptions({ input: { casoCobroId } }),
 			);
+			// La lista que PINTA la ficha es la paginada: sin esto, el contacto
+			// recién registrado no aparece hasta un refresh.
+			queryClient.invalidateQueries(
+				orpc.getHistorialContactosPaginado.queryOptions({
+					input: { casoCobroId },
+				}),
+			);
 			queryClient.invalidateQueries({
 				predicate: (query) =>
 					query.queryKey.some(

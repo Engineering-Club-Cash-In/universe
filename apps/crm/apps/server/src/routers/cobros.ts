@@ -14,12 +14,14 @@ import {
 	isNull,
 	lte,
 	max,
+	ne,
 	or,
 	sql,
 } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
+import { botCobrosInteracciones } from "../db/schema/bot-cobros-interacciones";
 import {
 	carteraBackReferences,
 	pagoReferences,
@@ -37,6 +39,7 @@ import {
 import { cobrosSendLogs } from "../db/schema/cobros-send-logs";
 import {
 	clients,
+	coDebtors,
 	leads,
 	opportunities,
 	PARENTESCO_VALUES,
@@ -55,6 +58,7 @@ import {
 	payloadEdicionManual,
 	registrarAuditContacto,
 } from "../lib/audit-contactos";
+import { hashPersona } from "../lib/bot-cobros/historial";
 import { agruparCasosVigentesPorSifco } from "../lib/caso-vigente";
 import {
 	deriveHasCapitalData,
@@ -80,6 +84,7 @@ import {
 	clasificarCreditoColaDia,
 	ordenColaDia,
 } from "../lib/cola-dia";
+import { eqDpi } from "../lib/dpi-lookup";
 import { fetchAllPages } from "../lib/fetch-all-pages";
 import { gtDateStrToDate, toDateStrGT } from "../lib/guatemala-month-window";
 import {
@@ -147,6 +152,7 @@ import {
 	sincronizarCasosCobros,
 } from "../services/sync-casos-cobros";
 import type { CreditoDirectoResponse } from "../types/cartera-back";
+import { normalizarDpi } from "../utils/cui-validation";
 import { createNotification } from "./notifications";
 
 // Helper: Obtener todos los créditos de todos los estados
@@ -699,6 +705,29 @@ async function capturarBucketSnapshot(
 		return null;
 	}
 }
+
+/** Una fila del historial del bot, lista para pintar (getActividadBot). */
+type ActividadBotInteraccion = {
+	id: string;
+	accion: string;
+	exito: boolean;
+	codigo: string | null;
+	numeroSifco: string | null;
+	detalle: Record<string, unknown>;
+	creadoEn: Date;
+};
+
+/** Una conversación completa del bot: la referencia del paso 1 y sus filas. */
+type ActividadBotSesion = {
+	/** Correlativo del CLIENTE, calculado al leer: "Referencia 1" = la más vieja. */
+	numero: number;
+	/** Solo el sufijo del uuid: el id completo es la llave de la sesión (D-44). */
+	referenciaSufijo: string;
+	inicio: Date;
+	operadoPor: "titular" | "codeudor";
+	codeudorNombre: string | null;
+	interacciones: ActividadBotInteraccion[];
+};
 
 export const cobrosRouter = {
 	// Dashboard de cobros - Vista general del embudo
@@ -1840,6 +1869,274 @@ export const cobrosRouter = {
 			return filas[0];
 		}),
 
+	// Actividad del cliente en el bot de WhatsApp, agrupada por referencia
+	// (CB-110). El agrupado y el correlativo los hace el server (D-44): la web
+	// pinta, no calcula. Se devuelven TODAS las sesiones del cliente —titular y
+	// codeudores—, no solo las del crédito de la ficha: el historial es del
+	// cliente, la ficha solo es la puerta.
+	// Contrato: docs/features/bot-whatsapp-cobros/06-historial-interacciones.md
+	getActividadBot: cobrosProcedure
+		.input(z.object({ casoCobroId: z.string().uuid() }))
+		.handler(async ({ input }) => {
+			const vacio = {
+				sesiones: [] as ActividadBotSesion[],
+				accesosFallidos: [] as ActividadBotInteraccion[],
+			};
+
+			const [caso] = await db
+				.select({ numeroSifco: casosCobros.numeroCreditoSifco })
+				.from(casosCobros)
+				.where(eq(casosCobros.id, input.casoCobroId))
+				.limit(1);
+
+			if (!caso?.numeroSifco) return vacio;
+
+			// El puente de siempre: numero_credito_sifco → oportunidad → lead.
+			const [opp] = await db
+				.select({ leadId: opportunities.leadId })
+				.from(opportunities)
+				.where(
+					and(
+						eq(opportunities.numeroSifco, caso.numeroSifco),
+						inArray(opportunities.status, ["won", "migrate"]),
+					),
+				)
+				.orderBy(desc(opportunities.createdAt))
+				.limit(1);
+
+			if (!opp?.leadId) return vacio;
+
+			// Los codeudores de sus oportunidades también operan el bot (D-11).
+			// Solo los de oportunidades won/migrate (Codex, PR #1411, 4ª ronda):
+			// el bot solo reconoce codeudores de créditos reales, y sin este
+			// filtro el codeudor de una oportunidad abierta o perdida colaría en
+			// esta ficha las sesiones de sus créditos verdaderos, que no tienen
+			// nada que ver con este cliente.
+			const codeudores = await db
+				.select({ id: coDebtors.id, dpi: coDebtors.dpi })
+				.from(coDebtors)
+				.innerJoin(opportunities, eq(opportunities.id, coDebtors.opportunityId))
+				.where(
+					and(
+						eq(opportunities.leadId, opp.leadId),
+						inArray(opportunities.status, ["won", "migrate"]),
+					),
+				);
+
+			// La asociación es por PERSONA, no por fila (Codex, PR #1411, 2ª
+			// ronda): la identificación guarda UNA fila de co_debtors —la del
+			// crédito más reciente, que puede ser de OTRO lead—, y una sesión que
+			// se queda en buscar/listar no trae SIFCO con el que rescatarla
+			// después. Del DPI de cada codeudor de este lead se sacan TODAS sus
+			// filas de codeudor en créditos reales, y también sus registros como
+			// lead (D-20: si su DPI es además un titular, la identificación lo
+			// trata como titular y la sesión queda colgada de ESE lead).
+			const dpisCodeudores = [
+				...new Set(
+					codeudores
+						.map((c) => (c.dpi ? normalizarDpi(c.dpi) : ""))
+						.filter(Boolean),
+				),
+			];
+
+			const codeudorIds = new Set(codeudores.map((c) => c.id));
+			const leadIds = new Set([opp.leadId]);
+
+			if (dpisCodeudores.length > 0) {
+				const comoCodeudorEnOtrosCreditos = await db
+					.selectDistinct({ id: coDebtors.id })
+					.from(coDebtors)
+					.innerJoin(
+						opportunities,
+						eq(opportunities.id, coDebtors.opportunityId),
+					)
+					.where(
+						and(
+							inArray(opportunities.status, ["won", "migrate"]),
+							or(...dpisCodeudores.map((d) => eqDpi(coDebtors.dpi, d))),
+						),
+					);
+				for (const fila of comoCodeudorEnOtrosCreditos) {
+					codeudorIds.add(fila.id);
+				}
+
+				const comoTitularEnOtrosCreditos = await db
+					.select({ id: leads.id })
+					.from(leads)
+					.where(or(...dpisCodeudores.map((d) => eqDpi(leads.dpi, d))));
+				for (const fila of comoTitularEnOtrosCreditos) {
+					leadIds.add(fila.id);
+				}
+			}
+
+			// Los créditos de ESTE lead (Codex, PR #1411): una persona que es
+			// codeudor en créditos de dos leads distintos queda guardada con la
+			// fila de co_debtors que eligió la identificación —la del crédito más
+			// reciente, que puede ser del OTRO lead—, así que filtrar solo por
+			// lead/codeudor escondía de esta ficha una gestión hecha sobre un
+			// crédito de este mismo cliente. El SIFCO de la interacción cierra ese
+			// hueco: si la gestión fue sobre un crédito de este lead, acá se ve.
+			const sifcosDelLead = (
+				await db
+					.select({ numeroSifco: opportunities.numeroSifco })
+					.from(opportunities)
+					.where(
+						and(
+							eq(opportunities.leadId, opp.leadId),
+							inArray(opportunities.status, ["won", "migrate"]),
+							isNotNull(opportunities.numeroSifco),
+						),
+					)
+			)
+				.map((o) => o.numeroSifco)
+				.filter((s): s is string => Boolean(s));
+
+			const condiciones = [
+				inArray(botCobrosInteracciones.leadId, [...leadIds]),
+			];
+			if (codeudorIds.size > 0) {
+				condiciones.push(
+					inArray(botCobrosInteracciones.coDebtorId, [...codeudorIds]),
+				);
+			}
+			if (sifcosDelLead.length > 0) {
+				condiciones.push(
+					inArray(botCobrosInteracciones.numeroSifco, sifcosDelLead),
+				);
+			}
+			// La rama por PERSONA (Codex, PR #1411, 4ª ronda): las de arriba
+			// dependen de filas de co_debtors/leads que pueden borrarse (SET NULL
+			// en los FKs); el hash del DPI identifica a la persona sin importar
+			// qué filas sigan vivas.
+			if (dpisCodeudores.length > 0) {
+				condiciones.push(
+					inArray(
+						botCobrosInteracciones.personaHash,
+						dpisCodeudores.map((d) => hashPersona(d)),
+					),
+				);
+			}
+
+			// El nombre del codeudor sale por join, no de un mapa del lead: el
+			// codeudor cruzado (el caso de arriba) no está entre los codeudores de
+			// este lead y su nombre se perdería.
+			const seleccionar = () =>
+				db
+					.select({
+						interaccion: botCobrosInteracciones,
+						codeudorNombre: coDebtors.fullName,
+					})
+					.from(botCobrosInteracciones)
+					.leftJoin(
+						coDebtors,
+						eq(coDebtors.id, botCobrosInteracciones.coDebtorId),
+					);
+
+			const filasBase = await seleccionar()
+				.where(or(...condiciones))
+				.orderBy(asc(botCobrosInteracciones.creadoEn));
+
+			// La llave de sesión es sesion_id (copia SIN FK que sobrevive a la
+			// purga del OTP — Codex, PR #1411); otp_id cubre filas anteriores a esa
+			// columna. Sin llave = la sesión nunca existió (acceso_fallido).
+			const llaveDeSesion = (f: (typeof filasBase)[number]) =>
+				f.interaccion.sesionId ?? f.interaccion.otpId;
+
+			// Cuando el match fue por SIFCO, la sesión puede tener filas que no
+			// calzan el filtro (buscar_cliente y listar_creditos no llevan SIFCO):
+			// se completa cada sesión tocada para no mostrar conversaciones a
+			// pedazos.
+			const llaves = [
+				...new Set(filasBase.map(llaveDeSesion).filter(Boolean)),
+			] as string[];
+
+			const filasDeSesiones =
+				llaves.length > 0
+					? await seleccionar()
+							.where(
+								or(
+									inArray(botCobrosInteracciones.sesionId, llaves),
+									inArray(botCobrosInteracciones.otpId, llaves),
+								),
+							)
+							.orderBy(asc(botCobrosInteracciones.creadoEn))
+					: [];
+
+			const porId = new Map(
+				[...filasBase, ...filasDeSesiones].map((f) => [f.interaccion.id, f]),
+			);
+			const filas = [...porId.values()].sort(
+				(a, b) =>
+					a.interaccion.creadoEn.getTime() - b.interaccion.creadoEn.getTime(),
+			);
+
+			const aInteraccion = (
+				fila: (typeof filas)[number],
+			): ActividadBotInteraccion => ({
+				id: fila.interaccion.id,
+				accion: fila.interaccion.accion,
+				exito: fila.interaccion.exito,
+				codigo: fila.interaccion.codigo,
+				numeroSifco: fila.interaccion.numeroSifco,
+				detalle: fila.interaccion.detalle ?? {},
+				creadoEn: fila.interaccion.creadoEn,
+			});
+
+			// Agrupar por sesión preservando el orden de llegada: así el índice
+			// del grupo ES el correlativo del cliente ("Referencia 1" = la más
+			// vieja, D-44). Las filas sin sesión (acceso_fallido) van aparte.
+			const porSesion = new Map<string, (typeof filas)[number][]>();
+			const sinSesion: (typeof filas)[number][] = [];
+
+			for (const fila of filas) {
+				const llave = llaveDeSesion(fila);
+				if (!llave) {
+					sinSesion.push(fila);
+					continue;
+				}
+				const grupo = porSesion.get(llave);
+				if (grupo) grupo.push(fila);
+				else porSesion.set(llave, [fila]);
+			}
+
+			const sesiones = [...porSesion.entries()].map(
+				([llave, grupo], indice): ActividadBotSesion => {
+					// El operador viene GRABADO (operado_por, Codex PR #1411): si la
+					// fila del codeudor se borra, su SET NULL limpia el FK y deducir
+					// de ahí volvía "titular" a un codeudor histórico. El fallback
+					// por FK cubre filas anteriores a la columna; el nombre puede
+					// venir null tras un borrado y la UI muestra "Codeudor" a secas.
+					const conCodeudor = grupo.find(
+						(f) =>
+							f.interaccion.operadoPor === "codeudor" ||
+							(!f.interaccion.operadoPor && f.interaccion.coDebtorId),
+					);
+
+					return {
+						numero: indice + 1,
+						// El uuid crudo no viaja al front: durante 30 minutos es la
+						// llave de la sesión (D-44). El sufijo alcanza para soporte.
+						referenciaSufijo: llave.slice(-6),
+						inicio: grupo[0].interaccion.creadoEn,
+						operadoPor: conCodeudor
+							? ("codeudor" as const)
+							: ("titular" as const),
+						codeudorNombre: conCodeudor?.codeudorNombre ?? null,
+						interacciones: grupo.map(aInteraccion),
+					};
+				},
+			);
+
+			// La más reciente primero, que es como se lee una ficha.
+			sesiones.reverse();
+			sinSesion.reverse();
+
+			return {
+				sesiones,
+				accesosFallidos: sinSesion.map(aInteraccion),
+			};
+		}),
+
 	// Obtener historial de contactos de un caso
 	getHistorialContactos: cobrosProcedure
 		.input(
@@ -1884,6 +2181,66 @@ export const cobrosRouter = {
 				.limit(input.limit);
 
 			return contactos;
+		}),
+
+	// El Historial de Contactos de la ficha, paginado DE VERDAD en el server:
+	// 10 por página, y el tamaño NO viaja en el input a propósito — si cada
+	// caller eligiera el suyo, esto volvería a ser el límite plano de siempre.
+	// Excluye promesa_pago porque las promesas viven en su propia tarjeta
+	// (CB-020). getHistorialContactos (arriba) queda para las derivaciones que
+	// necesitan la lista completa (promesas + regla B1), no para pintar listas.
+	getHistorialContactosPaginado: cobrosProcedure
+		.input(
+			z.object({
+				casoCobroId: z.string().uuid(),
+				pagina: z.number().int().min(1).default(1),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const POR_PAGINA = 10;
+
+			const filtro = and(
+				eq(contactosCobros.casoCobroId, input.casoCobroId),
+				ne(contactosCobros.estadoContacto, "promesa_pago"),
+			);
+
+			const [conteo] = await db
+				.select({ total: count() })
+				.from(contactosCobros)
+				.where(filtro);
+			const total = conteo?.total ?? 0;
+
+			const contactos = await db
+				.select({
+					id: contactosCobros.id,
+					fechaContacto: contactosCobros.fechaContacto,
+					metodoContacto: contactosCobros.metodoContacto,
+					estadoContacto: contactosCobros.estadoContacto,
+					duracionLlamada: contactosCobros.duracionLlamada,
+					comentarios: contactosCobros.comentarios,
+					acuerdosAlcanzados: contactosCobros.acuerdosAlcanzados,
+					compromisosPago: contactosCobros.compromisosPago,
+					requiereSeguimiento: contactosCobros.requiereSeguimiento,
+					fechaProximoContacto: contactosCobros.fechaProximoContacto,
+					fechaAlerta: contactosCobros.fechaAlerta,
+					proximoPaso: contactosCobros.proximoPaso,
+					realizadoPorId: contactosCobros.realizadoPor,
+					realizadoPor: user.name,
+				})
+				.from(contactosCobros)
+				.leftJoin(user, eq(contactosCobros.realizadoPor, user.id))
+				.where(filtro)
+				.orderBy(desc(contactosCobros.fechaContacto))
+				.limit(POR_PAGINA)
+				.offset((input.pagina - 1) * POR_PAGINA);
+
+			return {
+				contactos,
+				total,
+				pagina: input.pagina,
+				porPagina: POR_PAGINA,
+				totalPaginas: Math.max(1, Math.ceil(total / POR_PAGINA)),
+			};
 		}),
 
 	// CB-029 (dashboard): resumen simple de promesas de pago del EQUIPO (casos

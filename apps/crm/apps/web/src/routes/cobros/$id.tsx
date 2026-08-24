@@ -29,17 +29,12 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
 	etiquetaMetodoContacto,
 	evaluarGestionTempranaB1,
 	type ResultadoGestionB1,
 } from "server/src/lib/gestion-temprana-b1";
 import { toast } from "sonner";
+import { ActividadBot } from "@/components/cobros/actividad-bot";
 import { PromesaActivaBadge } from "@/components/cobros/promesa-activa-badge";
 import { ReferenciasView } from "@/components/cobros/ReferenciasView";
 import { SeguimientoRecurrenteModal } from "@/components/cobros/seguimiento-recurrente-modal";
@@ -70,6 +65,12 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -473,23 +474,48 @@ function RouteComponent() {
 	);
 	const [confirmarEstadoCuenta, setConfirmarEstadoCuenta] = useState(false);
 	/**
- * Los canales del dropdown "Registrar Contacto". Todos abren el MISMO modal
- * (ContactoModal) con su `metodoInicial`; agregar un canal nuevo es una fila
- * acá, no otra copia del blob de props.
- */
-const CANALES_CONTACTO = [
-	{ metodo: "llamada", label: "Registrar Llamada", Icono: Phone, color: "text-blue-600 dark:text-blue-400" },
-	{ metodo: "whatsapp", label: "WhatsApp", Icono: MessageCircle, color: "text-green-600 dark:text-green-400" },
-	{ metodo: "email", label: "Email", Icono: Mail, color: "text-indigo-600 dark:text-indigo-400" },
-	{ metodo: "sms", label: "SMS", Icono: MessageSquare, color: "text-amber-600 dark:text-amber-400" },
-	{ metodo: "visita_domicilio", label: "Visita", Icono: MapPin, color: "text-slate-600 dark:text-slate-400" },
-] as const;
+	 * Los canales del dropdown "Registrar Contacto". Todos abren el MISMO modal
+	 * (ContactoModal) con su `metodoInicial`; agregar un canal nuevo es una fila
+	 * acá, no otra copia del blob de props.
+	 */
+	const CANALES_CONTACTO = [
+		{
+			metodo: "llamada",
+			label: "Registrar Llamada",
+			Icono: Phone,
+			color: "text-blue-600 dark:text-blue-400",
+		},
+		{
+			metodo: "whatsapp",
+			label: "WhatsApp",
+			Icono: MessageCircle,
+			color: "text-green-600 dark:text-green-400",
+		},
+		{
+			metodo: "email",
+			label: "Email",
+			Icono: Mail,
+			color: "text-indigo-600 dark:text-indigo-400",
+		},
+		{
+			metodo: "sms",
+			label: "SMS",
+			Icono: MessageSquare,
+			color: "text-amber-600 dark:text-amber-400",
+		},
+		{
+			metodo: "visita_domicilio",
+			label: "Visita",
+			Icono: MapPin,
+			color: "text-slate-600 dark:text-slate-400",
+		},
+	] as const;
 
-type CanalContacto =
-	| (typeof CANALES_CONTACTO)[number]["metodo"]
-	| "carta_notarial";
+	type CanalContacto =
+		| (typeof CANALES_CONTACTO)[number]["metodo"]
+		| "carta_notarial";
 
-const ITEMS_PER_PAGE = 20;
+	const ITEMS_PER_PAGE = 20;
 
 	// Estado del modal de oportunidad
 	const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
@@ -536,15 +562,21 @@ const ITEMS_PER_PAGE = 20;
 		enabled: !!session && !!id,
 	});
 
-	// Obtener historial de contactos (solo para casos)
-	// CB-020 (Codex, PR #1147): getHistorialContactos aplica su límite ANTES
-	// de que este archivo separe promesa_pago del resto (ver `contactos` y
-	// `promesasPago` abajo) — con el default de 20, un caso con varias
-	// promesas dejaba el Historial general corto y perdía promesas viejas
-	// fuera de esa ventana en ambas listas. El server no filtra por tipo ni
-	// pagina de verdad (solo un límite plano) — hasta que eso se separe en
-	// el backend, subir el límite es el workaround práctico: cubre el caso
-	// real (decenas de contactos), no infinito.
+	// La lista que PINTA la tarjeta "Historial de Contactos": paginada de
+	// verdad en el server (10 por página, sin promesas — esas tienen su
+	// tarjeta). La página anterior se queda como placeholder mientras carga la
+	// nueva, para que el pager no parpadee.
+	const historialContactosPagina = useQuery({
+		...orpc.getHistorialContactosPaginado.queryOptions({
+			input: { casoCobroId: casoDetails.data?.id || "", pagina: contactosPage },
+		}),
+		enabled: !!session && !!casoDetails.data?.id,
+		placeholderData: (previa) => previa,
+	});
+
+	// La lista COMPLETA (limit 200), solo para las derivaciones que necesitan
+	// ver todo el historial: promesasPago (CB-020) y la regla B1 (CB-026). Las
+	// tarjetas ya no pintan de acá — eso es del paginado de arriba.
 	const historialContactos = useQuery({
 		...orpc.getHistorialContactos.queryOptions({
 			input: { casoCobroId: casoDetails.data?.id || "", limit: 200 },
@@ -887,6 +919,13 @@ const ITEMS_PER_PAGE = 20;
 			queryClient.invalidateQueries(
 				orpc.getHistorialContactos.queryOptions({ input: { casoCobroId } }),
 			);
+			// La lista que PINTA la ficha es la paginada: sin esto, el contacto
+			// recién registrado no aparece hasta un refresh.
+			queryClient.invalidateQueries(
+				orpc.getHistorialContactosPaginado.queryOptions({
+					input: { casoCobroId },
+				}),
+			);
 		},
 		onError: (err: any) => {
 			toast.error(err.message || "Error al ejecutar el job");
@@ -928,11 +967,11 @@ const ITEMS_PER_PAGE = 20;
 
 	// El guard de "Caso No Encontrado" (arriba) ya cortó si no hay datos.
 	const caso = casoDetails.data as CasoDetalle;
-	// CB-020: las promesas de pago viven SOLO en la tarjeta "Promesas de
-	// Pago" (ver promesasPago) — no en el Historial de Contactos general.
-	const contactos = (historialContactos.data || []).filter(
-		(c: any) => c.estadoContacto !== "promesa_pago",
-	);
+	// La página actual del Historial de Contactos, ya filtrada y cortada por el
+	// server (las promesas van en su propia tarjeta, CB-020).
+	const contactos = historialContactosPagina.data?.contactos ?? [];
+	const totalContactos = historialContactosPagina.data?.total ?? 0;
+	const contactosPorPagina = historialContactosPagina.data?.porPagina ?? 10;
 	const cuotas = historialPagos.data || [];
 	const recuperacion = recuperacionInfo.data;
 
@@ -1220,16 +1259,18 @@ const ITEMS_PER_PAGE = 20;
 											</Button>
 										</DropdownMenuTrigger>
 										<DropdownMenuContent align="end">
-											{CANALES_CONTACTO.map(({ metodo, label, Icono, color }) => (
-												<DropdownMenuItem
-													key={metodo}
-													className="cursor-pointer"
-													onClick={() => setCanalContacto(metodo)}
-												>
-													<Icono className={`mr-2 h-4 w-4 ${color}`} />
-													{label}
-												</DropdownMenuItem>
-											))}
+											{CANALES_CONTACTO.map(
+												({ metodo, label, Icono, color }) => (
+													<DropdownMenuItem
+														key={metodo}
+														className="cursor-pointer"
+														onClick={() => setCanalContacto(metodo)}
+													>
+														<Icono className={`mr-2 h-4 w-4 ${color}`} />
+														{label}
+													</DropdownMenuItem>
+												),
+											)}
 										</DropdownMenuContent>
 									</DropdownMenu>
 
@@ -1358,9 +1399,9 @@ const ITEMS_PER_PAGE = 20;
 												¿Enviar estado de cuenta?
 											</AlertDialogTitle>
 											<AlertDialogDescription>
-												Se generará el estado de cuenta actualizado del
-												crédito y se enviará por WhatsApp al teléfono
-												registrado del cliente.
+												Se generará el estado de cuenta actualizado del crédito
+												y se enviará por WhatsApp al teléfono registrado del
+												cliente.
 											</AlertDialogDescription>
 										</AlertDialogHeader>
 										<AlertDialogFooter>
@@ -1374,7 +1415,7 @@ const ITEMS_PER_PAGE = 20;
 									</AlertDialogContent>
 								</AlertDialog>
 							</>
-												) : (
+						) : (
 							<div className="rounded-md border border-yellow-200 bg-yellow-50 p-4">
 								<p className="text-sm text-yellow-800">
 									Este crédito aún no tiene caso de cobros asignado. Se creará
@@ -1430,12 +1471,12 @@ const ITEMS_PER_PAGE = 20;
 					<TabsTrigger value="resumen">Resumen</TabsTrigger>
 					<TabsTrigger value="historial">
 						Historial
-						{contactos.length > 0 && (
+						{totalContactos > 0 && (
 							<Badge
 								variant="secondary"
 								className="ml-1.5 h-4 px-1 text-[10px]"
 							>
-								{contactos.length}
+								{totalContactos}
 							</Badge>
 						)}
 					</TabsTrigger>
@@ -2276,108 +2317,117 @@ const ITEMS_PER_PAGE = 20;
 							</CardDescription>
 						</CardHeader>
 						<CardContent>
-							{contactos.length === 0 ? (
+							{historialContactosPagina.isLoading ? (
+								<div className="py-8 text-center text-muted-foreground">
+									Cargando historial de contactos…
+								</div>
+							) : historialContactosPagina.isError ? (
+								// Codex (PR #1411): un fallo de red/DB no es "no hay contactos".
+								<div className="flex flex-col items-center gap-2 py-8">
+									<p className="text-center text-muted-foreground">
+										No se pudo cargar el historial de contactos.
+									</p>
+									<Button
+										variant="outline"
+										size="sm"
+										onClick={() => historialContactosPagina.refetch()}
+									>
+										Reintentar
+									</Button>
+								</div>
+							) : totalContactos === 0 ? (
 								<div className="py-8 text-center text-muted-foreground">
 									No hay contactos registrados para este caso
 								</div>
 							) : (
 								<>
 									<div className="space-y-4">
-										{contactos
-											.slice(
-												(contactosPage - 1) * ITEMS_PER_PAGE,
-												contactosPage * ITEMS_PER_PAGE,
-											)
-											.map((contacto: any) => {
-												const estadoInfo = getEstadoContacto(
-													contacto.estadoContacto,
-												);
-												return (
-													<div
-														key={contacto.id}
-														className="rounded-lg border p-4"
-													>
-														<div className="mb-2 flex items-start justify-between">
-															<div className="flex items-center gap-2">
-																{getMetodoIcon(contacto.metodoContacto)}
-																<span className="font-medium">
-																	{etiquetaMetodoContacto(
-																		contacto.metodoContacto,
-																	)}
-																</span>
-																<Badge className={estadoInfo.color}>
-																	{estadoInfo.label}
-																</Badge>
-															</div>
-															<p className="text-muted-foreground text-sm">
-																{contacto.fechaContacto
-																	? new Date(
-																			contacto.fechaContacto,
-																		).toLocaleDateString("es-GT")
-																	: "Sin fecha"}
-															</p>
-														</div>
-														<p className="mb-2 text-sm">
-															{contacto.comentarios}
-														</p>
-														{contacto.acuerdosAlcanzados && (
-															<div className="rounded bg-blue-50 p-2 text-sm">
-																<span className="font-medium">Acuerdos: </span>
-																{contacto.acuerdosAlcanzados}
-															</div>
-														)}
-														{contacto.compromisosPago && (
-															<div className="mt-2 rounded bg-green-50 p-2 text-sm">
-																<span className="font-medium">
-																	Compromisos:{" "}
-																</span>
-																{contacto.compromisosPago}
-															</div>
-														)}
-														{contacto.fechaProximoContacto && (
-															<div className="mt-2 rounded bg-amber-50 p-2 text-sm">
-																<span className="font-medium">
-																	📅 Seguimiento programado:{" "}
-																</span>
-																{new Date(
-																	contacto.fechaProximoContacto,
-																).toLocaleDateString("es-GT")}
-															</div>
-														)}
-														{contacto.proximoPaso && (
-															<div className="mt-2 rounded bg-amber-50 p-2 text-sm">
-																<span className="font-medium">
-																	Próximo paso:{" "}
-																</span>
-																{contacto.proximoPaso}
-															</div>
-														)}
-														<div className="mt-2 flex items-center justify-between text-muted-foreground text-xs">
-															<span>
-																Por: {contacto.realizadoPor || "Sin asignar"}
+										{contactos.map((contacto: any) => {
+											const estadoInfo = getEstadoContacto(
+												contacto.estadoContacto,
+											);
+											return (
+												<div
+													key={contacto.id}
+													className="rounded-lg border p-4"
+												>
+													<div className="mb-2 flex items-start justify-between">
+														<div className="flex items-center gap-2">
+															{getMetodoIcon(contacto.metodoContacto)}
+															<span className="font-medium">
+																{etiquetaMetodoContacto(
+																	contacto.metodoContacto,
+																)}
 															</span>
-															{contacto.duracionLlamada && (
-																<span>
-																	Duración:{" "}
-																	{Math.floor(
-																		(contacto.duracionLlamada || 0) / 60,
-																	)}
-																	:
-																	{((contacto.duracionLlamada || 0) % 60)
-																		.toString()
-																		.padStart(2, "0")}{" "}
-																	min
-																</span>
-															)}
+															<Badge className={estadoInfo.color}>
+																{estadoInfo.label}
+															</Badge>
 														</div>
+														<p className="text-muted-foreground text-sm">
+															{contacto.fechaContacto
+																? new Date(
+																		contacto.fechaContacto,
+																	).toLocaleDateString("es-GT")
+																: "Sin fecha"}
+														</p>
 													</div>
-												);
-											})}
+													<p className="mb-2 text-sm">{contacto.comentarios}</p>
+													{contacto.acuerdosAlcanzados && (
+														<div className="rounded bg-blue-50 p-2 text-sm">
+															<span className="font-medium">Acuerdos: </span>
+															{contacto.acuerdosAlcanzados}
+														</div>
+													)}
+													{contacto.compromisosPago && (
+														<div className="mt-2 rounded bg-green-50 p-2 text-sm">
+															<span className="font-medium">Compromisos: </span>
+															{contacto.compromisosPago}
+														</div>
+													)}
+													{contacto.fechaProximoContacto && (
+														<div className="mt-2 rounded bg-amber-50 p-2 text-sm">
+															<span className="font-medium">
+																📅 Seguimiento programado:{" "}
+															</span>
+															{new Date(
+																contacto.fechaProximoContacto,
+															).toLocaleDateString("es-GT")}
+														</div>
+													)}
+													{contacto.proximoPaso && (
+														<div className="mt-2 rounded bg-amber-50 p-2 text-sm">
+															<span className="font-medium">
+																Próximo paso:{" "}
+															</span>
+															{contacto.proximoPaso}
+														</div>
+													)}
+													<div className="mt-2 flex items-center justify-between text-muted-foreground text-xs">
+														<span>
+															Por: {contacto.realizadoPor || "Sin asignar"}
+														</span>
+														{contacto.duracionLlamada && (
+															<span>
+																Duración:{" "}
+																{Math.floor(
+																	(contacto.duracionLlamada || 0) / 60,
+																)}
+																:
+																{((contacto.duracionLlamada || 0) % 60)
+																	.toString()
+																	.padStart(2, "0")}{" "}
+																min
+															</span>
+														)}
+													</div>
+												</div>
+											);
+										})}
 									</div>
 									<Pagination
 										currentPage={contactosPage}
-										totalItems={contactos.length}
-										itemsPerPage={ITEMS_PER_PAGE}
+										totalItems={totalContactos}
+										itemsPerPage={contactosPorPagina}
 										onPageChange={setContactosPage}
 									/>
 								</>
@@ -2635,6 +2685,16 @@ const ITEMS_PER_PAGE = 20;
 							)}
 						</CardContent>
 					</Card>
+
+					{/* Lo que el cliente hizo por su cuenta en el bot de WhatsApp,
+					    agrupado por referencia (CB-110). Solo se puede montar con
+					    caso.id: sin caso no hay puente hacia el lead. */}
+					{caso.id && (
+						<ActividadBot
+							casoCobroId={caso.id}
+							numeroSifcoCaso={caso.numeroCreditoSifco ?? id ?? null}
+						/>
+					)}
 				</TabsContent>
 
 				{/* ESTADO DE CUENTA — la deuda: cuotas, contrato y convenio. */}
@@ -2863,7 +2923,9 @@ const ITEMS_PER_PAGE = 20;
 																							maximumFractionDigits: 2,
 																						})}
 																						{Number(pago.montoBoleta ?? 0) >
-																							Number(pago.montoAplicado ?? 0) && (
+																							Number(
+																								pago.montoAplicado ?? 0,
+																							) && (
 																							<span className="ml-1 font-normal text-muted-foreground">
 																								de Q
 																								{Number(
@@ -2879,7 +2941,8 @@ const ITEMS_PER_PAGE = 20;
 																						className={
 																							pago.estado === "validado"
 																								? "bg-green-100 text-green-800"
-																								: pago.estado === "en_validacion"
+																								: pago.estado ===
+																										"en_validacion"
 																									? "bg-blue-100 text-blue-800"
 																									: "bg-amber-100 text-amber-800"
 																						}

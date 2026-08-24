@@ -116,6 +116,25 @@ construir la imagen. Sin documentar, **no despliega**.
 
 Ver [D-23](../../docs/features/bot-whatsapp-cobros/DECISIONES.md#d-23--la-documentación-de-la-api-es-swagger-y-es-obligatoria).
 
+### 📜 Endpoints del bot de cobros: TODOS dejan historial
+
+**Todo servicio del bot —presente y futuro— nace dentro del historial de interacciones**
+(regla general de [D-41](../../docs/features/bot-whatsapp-cobros/DECISIONES.md#d-41--el-registro-es-un-middleware-y-jamás-rompe-la-respuesta)).
+El middleware `historialBotCobros` está montado comodín sobre `/api/bot/cobros/*` en
+`index.ts`: un endpoint nuevo se registra solo, sin tocar nada.
+
+Al crear un servicio nuevo del bot:
+- **No hay que hacer nada** para que quede en el historial — ya cae.
+- Opcional pero recomendado: agregarle un **curador** (la allowlist de qué guardar en
+  `detalle`) en `apps/server/src/lib/bot-cobros/historial.ts`. Sin curador se registra
+  con acción/éxito/`codigo` y `detalle` vacío.
+- Quedar **fuera** del historial exige una entrada justificada en `RUTAS_SIN_HISTORIAL`
+  (mismo patrón que `RUTAS_QUE_NO_SON_DE_SIMPLETECH` del candado del Swagger).
+- **PII jamás en `detalle`**: ni códigos OTP, ni teléfonos completos, ni identificadores
+  crudos ([D-42](../../docs/features/bot-whatsapp-cobros/DECISIONES.md#d-42--qué-guarda-cada-interacción-y-qué-nunca)).
+
+Contrato completo: [`docs/features/bot-whatsapp-cobros/06-historial-interacciones.md`](../../docs/features/bot-whatsapp-cobros/06-historial-interacciones.md).
+
 ## Utilities
 - Always use zsh as the default shell
 - All texts must be in spanish when facing client side

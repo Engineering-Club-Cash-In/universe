@@ -44,6 +44,7 @@ decidido.
 | [`03-metodos-de-pago.md`](./03-metodos-de-pago.md) | **Paso 3**: link de Pagalo, Nexa y el menú de pago. |
 | [`04-validacion-de-boleta.md`](./04-validacion-de-boleta.md) | **Paso 4**: pago con boleta. Contrato cerrado: lectura con IA, confirmación, insert en cartera y el aviso de vuelta cuando conta valida. |
 | [`05-convenio-y-promesa.md`](./05-convenio-y-promesa.md) | **Paso 5**: congelado. Solo referencia hasta que gerencia apruebe. |
+| [`06-historial-interacciones.md`](./06-historial-interacciones.md) | **Transversal (CB-110)**: cada conversación del bot (la `referencia`) con sus interacciones, visible en la Ficha 360. Contrato cerrado e implementado (D-40…D-44); migración `0040` corrida el 2026-08-24. |
 | [`pruebas-equipo-it.md`](./pruebas-equipo-it.md) | Datos ficticios y mensajes para que el equipo de IT pruebe el bot en dev. |
 | **Swagger** (no es un archivo) | La referencia que usa SimpleTech: `GET /api/bot/cobros/docs` en la instancia de dev. Se genera del código y **se puede ejecutar** desde el navegador. Todo cambio en los endpoints va ahí en el mismo commit ([D-23](./DECISIONES.md#d-23--la-documentación-de-la-api-es-swagger-y-es-obligatoria)). |
 | [`DECISIONES.md`](./DECISIONES.md) | Registro de decisiones: abiertas, cerradas y por qué. |
@@ -76,7 +77,7 @@ decidido.
 | [CC2-43](https://clubcashin.atlassian.net/browse/CC2-43) | CB-107 · Enviar comprobante en el chat | Paso 4 |
 | [CC2-44](https://clubcashin.atlassian.net/browse/CC2-44) | CB-108 · Pago pendiente de conciliación | Paso 4 |
 | [CC2-45](https://clubcashin.atlassian.net/browse/CC2-45) | CB-109 · Conciliación automática | Paso 4 |
-| [CC2-46](https://clubcashin.atlassian.net/browse/CC2-46) | CB-110 · Ver interacciones del bot en el CRM | Transversal |
+| [CC2-46](https://clubcashin.atlassian.net/browse/CC2-46) | CB-110 · Ver interacciones del bot en el CRM | [`06-historial-interacciones.md`](./06-historial-interacciones.md) — contrato en revisión |
 | [CC2-22](https://clubcashin.atlassian.net/browse/CC2-22) | CB-100 · Número de WhatsApp independiente para cobranza | Prerrequisito de infraestructura |
 
 ## Glosario

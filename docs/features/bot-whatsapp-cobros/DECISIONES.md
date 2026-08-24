@@ -47,6 +47,11 @@ día; si no está escrito, no está decidido.
 | [D-37](#d-37--las-cuentas-de-pago-viajan-con-la-info-del-crédito) | Las cuentas de pago viajan con la info del crédito | 🟢 |
 | [D-38](#d-38--cartera-solo-se-toca-con-endpoints-nuevos) | Cartera solo se toca con endpoints nuevos | 🟢 |
 | [D-39](#d-39--el-rechazo-es-un-botón-explícito-no-se-infiere-del-reverso) | El rechazo es un botón explícito | 🟢 |
+| [D-40](#d-40--el-historial-vive-en-el-crm-en-su-propia-tabla) | El historial de interacciones vive en el CRM, en su propia tabla | 🟢 |
+| [D-41](#d-41--el-registro-es-un-middleware-y-jamás-rompe-la-respuesta) | El registro es un middleware, y jamás rompe la respuesta | 🟢 |
+| [D-42](#d-42--qué-guarda-cada-interacción-y-qué-nunca) | Qué guarda cada interacción (y qué nunca) | 🟢 |
+| [D-43](#d-43--los-intentos-fallidos-con-cliente-conocido-también-se-registran) | Los intentos fallidos con cliente conocido también se registran | 🟢 |
+| [D-44](#d-44--la-vista-por-referencia-con-correlativo-del-cliente) | La vista: por referencia, con correlativo del cliente | 🟢 |
 
 ---
 
@@ -1487,3 +1492,164 @@ webhooks, reversión-vs-revalidación, `pending` como transición) era complejid
   equipo, y acá no se emite nada al validar.
 - Los reversos normales, `revertPaymentToPending` y `false-payment` vuelven a ser lo que
   siempre fueron: movimientos internos que no le hablan a ningún cliente.
+
+---
+
+## D-40 · El historial vive en el CRM, en su propia tabla
+
+**Estado:** 🟢 **Cerrada · 2026-08-24** — confirmada por Daniel; feature del
+[historial de interacciones](./06-historial-interacciones.md) (CB-110)
+
+**Contexto.** La Ficha 360 tiene que mostrar todo lo que el cliente hizo en el bot,
+agrupado por la `referencia` de cada conversación. Ese dato hoy no existe en ningún lado:
+los handlers atienden y olvidan.
+
+**Opciones.**
+- **A) Tabla nueva en el CRM (`bot_cobros_interacciones`), escrita al atender cada
+  petición del bot.**
+- B) Derivar el historial de lo que ya se guarda (`otps` + `bot_cobros_boletas`), sin
+  tabla nueva.
+- C) Que SimpleTech nos mande su log de conversación y lo importemos.
+
+**Decisión: A.** El CRM es el punto de acceso único del bot ([D-01](#d-01--punto-de-acceso-único)):
+**todo** el tráfico ya pasa por ahí, así que registrar es interceptar lo que ya tenemos en
+la mano. B se descarta porque solo reconstruye búsquedas y boletas — las consultas de menú
+y estado de cuenta no dejan rastro, y los errores (códigos malos, bloqueos) tampoco; sería
+un historial con los huecos justo donde está lo interesante. C depende de un tercero, del
+canal y de su formato, y lo que queremos enseñar es **lo que nosotros servimos**, no lo que
+el bot conversó.
+
+**Cartera no participa.** Ni endpoint, ni columna, ni evento: [D-38](#d-38--cartera-solo-se-toca-con-endpoints-nuevos)
+ni siquiera se ejercita.
+
+---
+
+## D-41 · El registro es un middleware, y jamás rompe la respuesta
+
+**Estado:** 🟢 **Cerrada · 2026-08-24** — confirmada por Daniel
+
+**Contexto.** Decidido dónde se guarda (D-40), falta quién escribe la fila.
+
+**Opciones.**
+- **A) Un middleware de Hono sobre las rutas del bot**, que registra después de que el
+  handler respondió, con un **curador por acción** (la allowlist de D-42).
+- B) Una llamada explícita a `registrarInteraccion(...)` dentro de cada handler.
+
+**Decisión: A.** Con B, el primer endpoint nuevo que alguien agregue sin acordarse
+del registro (paso 3 trae varios) desaparece del historial en silencio — exactamente el
+tipo de convención-que-depende-de-acordarse que [D-23](#d-23--la-documentación-de-la-api-es-swagger-y-es-obligatoria)
+ya nos enseñó a no aceptar. El middleware cubre las rutas presentes y futuras por
+construcción: una ruta sin curador se registra igual (acción, éxito, `codigo`), solo que
+con `detalle` vacío — **segura por defecto**, porque lo que no está en una allowlist no se
+escribe.
+
+### 📜 Regla general (pedida por Daniel, 2026-08-24)
+
+**Todo servicio del bot —presente y futuro— nace dentro del historial.** El bot va a
+seguir creciendo, y esta regla no es por endpoint: el middleware se monta **comodín sobre
+`/api/bot/cobros/*`**, así que un servicio nuevo queda registrado sin que nadie haga nada.
+Lo excepcional es lo contrario: quedar FUERA del historial exige una entrada en la lista
+de exclusiones (`RUTAS_SIN_HISTORIAL`), con nombre y motivo — hoy solo `docs`,
+`openapi.json` (no los llama el cliente) y `pagos/evento` (lo llama cartera). El mismo
+patrón que `RUTAS_QUE_NO_SON_DE_SIMPLETECH` en el candado del Swagger: la excepción
+cuesta escribirse y justificarse.
+
+Al crear un servicio nuevo, lo único opcional es su **curador** (D-42): sin él, el
+servicio se registra igual con acción, éxito y `codigo`, pero con `detalle` vacío —
+seguro por defecto.
+
+**Las reglas duras** (espíritu de [D-28](#d-28--el-aviso-a-whatsapp-nunca-rompe-la-acción-de-conta)):
+
+1. El INSERT va **sin `await`**, con try/catch y log. El bot nunca espera al historial ni
+   ve un 500 por su culpa. Si la escritura falla, se pierde una fila de historial, no una
+   conversación.
+2. El middleware lee un **clon** de la respuesta; la que viaja al bot no se toca.
+3. **El contrato con SimpleTech no cambia en nada** — por eso el Swagger no se toca y
+   `openapi.test.ts` sigue en verde sin cambios.
+
+---
+
+## D-42 · Qué guarda cada interacción (y qué nunca)
+
+**Estado:** 🟢 **Cerrada · 2026-08-24** — confirmada por Daniel
+
+**Contexto.** El historial lo van a leer asesores en la Ficha 360, y [D-14](#d-14--retención-de-pii-y-logs)
+ya propone que la PII del bot se guarde hasheada o enmascarada. Guardar "todo el request y
+todo el response por si acaso" convertiría la tabla en el lugar donde la PII se acumula
+sin control.
+
+**Decisión: allowlist por acción, y nada más.** Cada acción tiene un curador que
+elige campos concretos (la tabla completa está en el
+[§2 del contrato](./06-historial-interacciones.md#2--qué-se-registra)); lo que no está en
+la lista **no se escribe**, incluido el caso de una ruta futura sin curador (`detalle`
+vacío).
+
+**Lo que nunca se guarda, con nombre:**
+
+- el **código OTP** — ni en éxito ni en error; ya es regla en logs ([D-16](#d-16--quién-valida-el-otp))
+  y el historial no es la excepción;
+- **teléfonos completos** — solo la máscara que el propio endpoint ya devuelve al bot;
+- el **identificador de búsqueda crudo** — se guarda el tipo (dpi/nit/placa) y la versión
+  enmascarada;
+- **URLs de imagen de WhatsApp** ni el cuerpo crudo de la lectura — la boleta completa ya
+  vive en `bot_cobros_boletas`; el historial solo lleva el `boletaId` que la enlaza;
+- cuerpos crudos de request/response.
+
+**Los errores sí se guardan** (`exito = false` + `codigo`): "probó tres códigos y se
+bloqueó" es información de cobranza, no ruido.
+
+**Retención: ninguna en v1.** Sin PII no hay qué purgar; la fila referencia al OTP con
+`SET NULL` para sobrevivir la purga que D-14 propone, igual que `bot_cobros_boletas`.
+
+---
+
+## D-43 · Los intentos fallidos con cliente conocido también se registran
+
+**Estado:** 🟢 **Cerrada · 2026-08-24** — confirmada por Daniel
+
+**Contexto.** La referencia nace cuando el OTP se emite. Pero hay caminos de
+`buscar-cliente` donde **el cliente se encontró y el OTP nunca salió**: `DEMASIADOS_ENVIOS`
+(se le acabaron los reenvíos) y `SIN_TELEFONO` (no hay móvil utilizable, [D-19](#d-19--a-qué-teléfono-se-manda-el-otp)).
+Sin referencia, esas peticiones no tienen sesión a la cual colgarse.
+
+**Opciones.**
+- **A) Registrarlas igual, con `otp_id NULL` y el lead/codeudor resuelto**, mostradas en
+  la ficha como "Intentos de acceso sin sesión", aparte de las referencias numeradas.
+- B) Registrar solo lo que tiene referencia.
+
+**Decisión: A.** "El cliente intentó entrar al bot y no pudo porque no tiene teléfono
+utilizable" es exactamente lo que un asesor necesita saber **antes** de mandarle el enlace
+del bot por enésima vez. Y no cuesta nada: el handler ya resolvió al lead para poder
+responder ese error.
+
+**Lo que NO se registra:** `CLIENTE_NO_ENCONTRADO` sin match. No hay lead, así que no hay
+ficha donde mostrarlo — y guardar términos de búsqueda de desconocidos es juntar PII de
+gente que ni es cliente.
+
+---
+
+## D-44 · La vista: por referencia, con correlativo del cliente
+
+**Estado:** 🟢 **Cerrada · 2026-08-24** — confirmada por Daniel
+
+**Contexto.** Cómo se le enseña esto al asesor en la Ficha 360.
+
+**Decisión.**
+
+1. **Agrupado por referencia, colapsado, la más reciente primero.** Cada grupo:
+   "Referencia N · fecha · quién operó · cuántas interacciones"; expandir muestra la línea
+   de tiempo de esa conversación.
+2. **El correlativo es del cliente y se calcula al leer** (orden de creación de la
+   sesión); no se guarda, así no hay contador que mantener ni que se desincronice.
+3. **El uuid crudo no se pinta.** Durante 30 minutos es la llave de la sesión
+   (`verificarAcceso`, [D-24](#d-24--el-menú-hereda-la-identidad-del-paso-1)); en la UI va
+   solo un sufijo truncado en un tooltip, para cruzar con soporte.
+4. **Se muestran todas las sesiones del cliente**, titular y codeudores de sus
+   oportunidades, etiquetando quién operó — con esto queda respondida la pregunta 2 de
+   [D-11](#d-11--quien-escribe-no-es-el-titular): sí queda registrado quién hizo cada
+   gestión.
+5. **Las interacciones de otros créditos del mismo cliente se ven igual**, marcadas con su
+   número SIFCO: la ficha es del caso, pero el historial es del cliente. Ocultarlas
+   escondería justo el patrón "sube boletas del crédito B para estirar el A".
+6. El agrupado y numerado lo hace **el server** (`getActividadBot`, ORPC protegido): la
+   web pinta, no calcula.

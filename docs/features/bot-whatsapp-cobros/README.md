@@ -45,6 +45,7 @@ decidido.
 | [`04-validacion-de-boleta.md`](./04-validacion-de-boleta.md) | **Paso 4**: pago con boleta. Contrato cerrado: lectura con IA, confirmación, insert en cartera y el aviso de vuelta cuando conta valida. |
 | [`05-convenio-y-promesa.md`](./05-convenio-y-promesa.md) | **Paso 5**: congelado. Solo referencia hasta que gerencia apruebe. |
 | [`06-historial-interacciones.md`](./06-historial-interacciones.md) | **Transversal (CB-110)**: cada conversación del bot (la `referencia`) con sus interacciones, visible en la Ficha 360. Contrato cerrado e implementado (D-40…D-44); migración `0040` corrida el 2026-08-24. |
+| [`07-pago-con-link.md`](./07-pago-con-link.md) | **Paso 3.1 (CB-105)**: pagar con link de Págalo. Investigación de la API, los dos servicios del bot (opciones + crear), verificación por poller y aplicación ya validada en cartera sobre la infraestructura de CB-028 (asesor, Jose). **Contrato revisado con Daniel** (D-45…D-51; falta D-47 y coordinar el modelo con Jose). |
 | [`pruebas-equipo-it.md`](./pruebas-equipo-it.md) | Datos ficticios y mensajes para que el equipo de IT pruebe el bot en dev. |
 | **Swagger** (no es un archivo) | La referencia que usa SimpleTech: `GET /api/bot/cobros/docs` en la instancia de dev. Se genera del código y **se puede ejecutar** desde el navegador. Todo cambio en los endpoints va ahí en el mismo commit ([D-23](./DECISIONES.md#d-23--la-documentación-de-la-api-es-swagger-y-es-obligatoria)). |
 | [`DECISIONES.md`](./DECISIONES.md) | Registro de decisiones: abiertas, cerradas y por qué. |
@@ -56,7 +57,7 @@ decidido.
 | --- | --- | --- | --- | --- |
 | 1 | Identificación y acceso | 2 servicios en el CRM: buscar cliente + OTP por SMS, y validar código + listar créditos | 🔵 **Los dos servicios implementados y desplegados en dev.** El SMS no sale hasta que el proveedor habilite la IP del servidor; mientras tanto se prueba en modo simulado ([D-21](./DECISIONES.md#d-21--modo-simulado-mientras-el-sms-no-sale)) | [`01-…`](./01-identificacion-y-acceso.md) |
 | 2 | Menú del crédito | Info del crédito, estado de cuenta, cuentas de pago, y el ruteo a las gestiones | 🔵 **Info del crédito y estado de cuenta implementados y desplegados en dev.** Falta `cuentasPago` ([D-37](./DECISIONES.md#d-37--las-cuentas-de-pago-viajan-con-la-info-del-crédito)) | [`02-…`](./02-menu-del-credito.md) |
-| 3 | Realizar un pago | Link de Pagalo, Nexa, menú dinámico de pago | 🟡 **En definición** | [`03-…`](./03-metodos-de-pago.md) |
+| 3 | Realizar un pago | Link de Pagalo, Nexa, menú dinámico de pago | 🟡 **Link de Págalo con contrato revisado** (D-45…D-51, 2026-08-24); Nexa sigue en definición | [`03-…`](./03-metodos-de-pago.md) · [`07-…`](./07-pago-con-link.md) |
 | 4 | Pago con boleta | Lectura de la boleta con IA, confirmación, registro en cartera y notificación del resultado | 🟢 **Contrato cerrado, sin implementar** (2026-08-19) | [`04-…`](./04-validacion-de-boleta.md) |
 | 5 | Convenio y promesa de pago | Selección de rubros, plazo, documento | 🔴 **Bloqueado** — requiere aprobación de gerencia (2026-08-13) | [`05-…`](./05-convenio-y-promesa.md) · [D-15](./DECISIONES.md#d-15--convenio-y-promesa-de-pago-bloqueados) |
 | 6 | Reglas transversales | Excedentes, notificaciones, escalamiento a agente | 🟡 Documentadas, sin implementar | [`00-…`](./00-arbol-de-decisiones.md#06--reglas-transversales) |

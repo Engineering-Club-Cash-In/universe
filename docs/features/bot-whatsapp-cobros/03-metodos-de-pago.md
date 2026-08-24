@@ -1,6 +1,7 @@
 # Paso 3 · Realizar un pago
 
-**Estado:** 🟡 En definición — notas de reunión (2026-08-13) + documento detallado
+**Estado:** 🟡 En definición — el link de Págalo ya tiene **contrato propuesto** en
+[`07-pago-con-link.md`](./07-pago-con-link.md) (2026-08-24); Nexa sigue en notas de reunión
 **Tickets:** [CC2-41 · CB-105](https://clubcashin.atlassian.net/browse/CC2-41) (link de pago),
 [CC2-42 · CB-106](https://clubcashin.atlassian.net/browse/CC2-42) (transferencia),
 [CC2-43 · CB-107](https://clubcashin.atlassian.net/browse/CC2-43) (comprobante)
@@ -29,6 +30,11 @@ mandara por correo.
 ---
 
 ## 2. Pagar con link de Pagalo
+
+> 📄 **Contrato detallado en [`07-pago-con-link.md`](./07-pago-con-link.md)** (2026-08-24):
+> investigación de la API de Págalo, los dos servicios del bot, el circuito de verificación
+> y aplicación (compartido con CB-028, el flujo del asesor), y las decisiones D-45…D-50.
+> Esta sección queda como resumen del paso.
 
 ### 2.1 Resumen previo
 
@@ -89,9 +95,12 @@ flowchart TD
 recibo y cómo quedó su capital, su mora y su cuota —si quedó algo pendiente o si abonó a una
 cuota siguiente. La notificación **no depende** de que el cliente conteste en el chat.
 
-> ❓ **Pendiente:** cómo nos enteramos de que pagó. Si es por webhook de Pagalo, el "¿lo
-> realizaste?" es solo cortesía; si no hay webhook, la confirmación del cliente es lo único
-> que tenemos y hay que conciliar a mano.
+> ✅ **Resuelto (investigación 2026-08-24):** Págalo **no tiene webhook firmado** — sus
+> callbacks son redirects del navegador del cliente. Nos enteramos con un **poller** que
+> verifica link pagado + transacción `ACCEPT` contra Págalo; los callbacks solo adelantan
+> el poll. El "¿lo realizaste?" queda de cortesía y no hay conciliación manual. Detalle en
+> [`07-pago-con-link.md` §3.4 y §5](./07-pago-con-link.md), decisión
+> [D-49](./DECISIONES.md#d-49--del-pago-nos-enteramos-nosotros-no-el-cliente).
 
 ---
 
@@ -132,17 +141,19 @@ lectura con IA, confirmación, registro en cartera y el aviso de vuelta cuando c
 
 ## 6. Pendientes de este paso
 
-- **Orden de las cuotas.** Se asume de la más antigua a la más reciente (no puede pagar la 5
-  dejando abierta la 3). Confirmar.
-- **Alcance de la mora obligatoria.** Con 3 cuotas atrasadas y eligiendo pagar 1: ¿toda la
-  mora acumulada o solo la de esa cuota?
-- **¿La cuota actual entra en el combo?** Cliente con atraso que quiere además adelantar la
-  cuota del mes en curso.
-- **Vigencia del link.** La mora crece a diario: un link generado ayer queda corto hoy.
-  Definir expiración y qué pasa al usar uno vencido.
-- **Fuente única del monto.** El monto que ve el cliente y el que va en el link deben salir
-  del mismo cálculo, una sola vez. En el módulo de cobros ya hay un problema conocido de
-  doble fuente del monto de mora; no replicarlo acá.
-- **Integración con Pagalo.** ¿API o generación manual? ¿Webhook de confirmación? ¿Quién
-  aplica el pago en cartera y en qué momento?
+- ~~**Orden de las cuotas.**~~ Confirmado: de la más antigua a la más reciente, sin cuotas
+  sueltas ([D-46](./DECISIONES.md#d-46--el-cliente-elige-cuántas-cuotas-el-crm-arma-el-monto)).
+- ~~**Alcance de la mora obligatoria.**~~ Resuelto: la mora va **completa** en toda opción
+  (y es lo único implementable: `moras_credito` guarda un monto por crédito, no por cuota).
+- ~~**¿La cuota actual entra en el combo?**~~ Sí — confirmado por Daniel (2026-08-24): el
+  cliente puede incluir también la próxima cuota por vencer.
+- ~~**Vigencia del link.**~~ Resuelto: **sin expiración por ahora**
+  ([D-51](./DECISIONES.md#d-51--los-links-no-expiran-por-ahora)) — si expira medio grupo
+  pagado, recuperarlo es peor que cobrar con un monto de hace días.
+- ~~**Fuente única del monto.**~~ Resuelto por diseño:
+  [D-47](./DECISIONES.md#d-47--fuente-única-del-monto-y-montoesperado) (`montoEsperado` +
+  recálculo con la misma función).
+- ~~**Integración con Pagalo.**~~ Resuelto: API V2 de Págalo, dos servicios del bot, poller
+  verificado y aplicación en cartera ya validada — todo en
+  [`07-pago-con-link.md`](./07-pago-con-link.md) (D-45, D-49, D-50).
 - **Timeout del "no contestó".** Después de cuánto tiempo se transborda a un agente.

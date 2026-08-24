@@ -83,6 +83,7 @@ import {
 	clasificarCreditoColaDia,
 	ordenColaDia,
 } from "../lib/cola-dia";
+import { eqDpi } from "../lib/dpi-lookup";
 import { fetchAllPages } from "../lib/fetch-all-pages";
 import { gtDateStrToDate, toDateStrGT } from "../lib/guatemala-month-window";
 import {
@@ -150,6 +151,7 @@ import {
 	sincronizarCasosCobros,
 } from "../services/sync-casos-cobros";
 import type { CreditoDirectoResponse } from "../types/cartera-back";
+import { normalizarDpi } from "../utils/cui-validation";
 import { createNotification } from "./notifications";
 
 // Helper: Obtener todos los créditos de todos los estados
@@ -1905,11 +1907,56 @@ export const cobrosRouter = {
 
 			// Los codeudores de sus oportunidades también operan el bot (D-11).
 			const codeudores = await db
-				.select({ id: coDebtors.id })
+				.select({ id: coDebtors.id, dpi: coDebtors.dpi })
 				.from(coDebtors)
 				.innerJoin(opportunities, eq(opportunities.id, coDebtors.opportunityId))
 				.where(eq(opportunities.leadId, opp.leadId));
-			const codeudorIds = codeudores.map((c) => c.id);
+
+			// La asociación es por PERSONA, no por fila (Codex, PR #1411, 2ª
+			// ronda): la identificación guarda UNA fila de co_debtors —la del
+			// crédito más reciente, que puede ser de OTRO lead—, y una sesión que
+			// se queda en buscar/listar no trae SIFCO con el que rescatarla
+			// después. Del DPI de cada codeudor de este lead se sacan TODAS sus
+			// filas de codeudor en créditos reales, y también sus registros como
+			// lead (D-20: si su DPI es además un titular, la identificación lo
+			// trata como titular y la sesión queda colgada de ESE lead).
+			const dpisCodeudores = [
+				...new Set(
+					codeudores
+						.map((c) => (c.dpi ? normalizarDpi(c.dpi) : ""))
+						.filter(Boolean),
+				),
+			];
+
+			const codeudorIds = new Set(codeudores.map((c) => c.id));
+			const leadIds = new Set([opp.leadId]);
+
+			if (dpisCodeudores.length > 0) {
+				const comoCodeudorEnOtrosCreditos = await db
+					.selectDistinct({ id: coDebtors.id })
+					.from(coDebtors)
+					.innerJoin(
+						opportunities,
+						eq(opportunities.id, coDebtors.opportunityId),
+					)
+					.where(
+						and(
+							inArray(opportunities.status, ["won", "migrate"]),
+							or(...dpisCodeudores.map((d) => eqDpi(coDebtors.dpi, d))),
+						),
+					);
+				for (const fila of comoCodeudorEnOtrosCreditos) {
+					codeudorIds.add(fila.id);
+				}
+
+				const comoTitularEnOtrosCreditos = await db
+					.select({ id: leads.id })
+					.from(leads)
+					.where(or(...dpisCodeudores.map((d) => eqDpi(leads.dpi, d))));
+				for (const fila of comoTitularEnOtrosCreditos) {
+					leadIds.add(fila.id);
+				}
+			}
 
 			// Los créditos de ESTE lead (Codex, PR #1411): una persona que es
 			// codeudor en créditos de dos leads distintos queda guardada con la
@@ -1933,10 +1980,12 @@ export const cobrosRouter = {
 				.map((o) => o.numeroSifco)
 				.filter((s): s is string => Boolean(s));
 
-			const condiciones = [eq(botCobrosInteracciones.leadId, opp.leadId)];
-			if (codeudorIds.length > 0) {
+			const condiciones = [
+				inArray(botCobrosInteracciones.leadId, [...leadIds]),
+			];
+			if (codeudorIds.size > 0) {
 				condiciones.push(
-					inArray(botCobrosInteracciones.coDebtorId, codeudorIds),
+					inArray(botCobrosInteracciones.coDebtorId, [...codeudorIds]),
 				);
 			}
 			if (sifcosDelLead.length > 0) {

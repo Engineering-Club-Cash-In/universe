@@ -13,6 +13,7 @@
 
 import { timingSafeEqual } from "node:crypto";
 import type { Context } from "hono";
+import { marcarBotAutenticado } from "./historial";
 
 /** Compara sin filtrar la respuesta por tiempo. */
 function sonIguales(a: string, b: string): boolean {
@@ -84,6 +85,11 @@ export async function autenticarBotCobros(
 			401,
 		);
 	}
+
+	// La llave es buena: recién ACÁ la petición puede dejar historial. El
+	// middleware comodín exige esta marca — filtrar códigos de error no prueba
+	// que la autenticación corrió (un 404/405 de Hono ni pasa por acá).
+	marcarBotAutenticado(c);
 
 	await next();
 }

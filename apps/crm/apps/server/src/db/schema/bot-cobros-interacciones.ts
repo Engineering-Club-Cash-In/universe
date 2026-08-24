@@ -92,5 +92,10 @@ export const botCobrosInteracciones = pgTable(
 		index("bot_cobros_interacciones_lead_idx").on(t.leadId, t.creadoEn),
 		index("bot_cobros_interacciones_otp_idx").on(t.otpId),
 		index("bot_cobros_interacciones_codebtor_idx").on(t.coDebtorId),
+		// La llave de agrupado que sobrevive a la purga (migración 0041).
+		index("bot_cobros_interacciones_sesion_idx").on(t.sesionId),
+		// La rama por SIFCO del lookup de la ficha (migración 0042): sin él, el
+		// OR obliga a barrer una tabla que crece con cada request y no se purga.
+		index("bot_cobros_interacciones_sifco_idx").on(t.numeroSifco),
 	],
 );

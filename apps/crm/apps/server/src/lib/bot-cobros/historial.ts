@@ -192,6 +192,26 @@ export function anotarIdentidadBot(c: Context, identidad: IdentidadBot): void {
 	identidadesAnotadas.set(c.req.raw, identidad);
 }
 
+/**
+ * Las requests cuya API key ya se verificó (Codex, PR #1411, 2ª ronda).
+ *
+ * Filtrar los códigos de autenticación no prueba que la autenticación CORRIÓ:
+ * un GET a una ruta POST-only, o una ruta futura no montada, terminan en el
+ * 404/405 pelado de Hono —sin pasar por `autenticarBotCobros`— y un body con
+ * una referencia real se habría registrado sin ninguna llave válida. La marca
+ * la pone el propio `autenticarBotCobros` justo antes de su `next()`, y sin
+ * ella el historial no escribe: solo se registra tráfico autenticado.
+ *
+ * Consecuencia deliberada para rutas futuras: un servicio del bot que no use
+ * `autenticarBotCobros` no deja historial — y un servicio del bot sin esa
+ * autenticación es un bug de todos modos (D-18).
+ */
+const requestsAutenticadas = new WeakSet<Request>();
+
+export function marcarBotAutenticado(c: Context): void {
+	requestsAutenticadas.add(c.req.raw);
+}
+
 export type InteraccionParaGuardar = {
 	accion: string;
 	exito: boolean;
@@ -270,6 +290,12 @@ export function armarInteraccion(entrada: {
  */
 export async function persistirInteraccion(
 	interaccion: InteraccionParaGuardar,
+	// El instante se captura SÍNCRONO en el middleware (Codex, PR #1411, 2ª
+	// ronda): el INSERT corre en background tras una o dos consultas de
+	// identidad, y con el DEFAULT now() dos peticiones seguidas del bot podían
+	// quedar invertidas en la línea de tiempo (y con ellas, el correlativo de
+	// "Referencia N").
+	registradaEn: Date,
 ): Promise<void> {
 	let otpId: string | null = null;
 	let leadId = interaccion.identidad?.leadId ?? null;
@@ -322,6 +348,7 @@ export async function persistirInteraccion(
 		codigo: interaccion.codigo,
 		numeroSifco: interaccion.numeroSifco,
 		detalle: interaccion.detalle,
+		creadoEn: registradaEn,
 	});
 }
 
@@ -352,6 +379,16 @@ export async function historialBotCobros(
 	try {
 		if (RUTAS_SIN_HISTORIAL.has(c.req.path)) return;
 
+		// Solo tráfico AUTENTICADO deja historial: sin la marca de
+		// `autenticarBotCobros` (llave rechazada, o un 404/405 de Hono que ni
+		// pasó por la autenticación), acá no se escribe nada.
+		if (!requestsAutenticadas.has(c.req.raw)) return;
+
+		// El instante de la interacción, capturado antes de soltar el trabajo
+		// al background: el orden de la línea de tiempo es el de las requests,
+		// no el de los INSERT.
+		const registradaEn = new Date();
+
 		// `c.req.json()` reusa el cache del handler; el clon deja intacta la
 		// respuesta que viaja al bot.
 		const cuerpo = await jsonSeguro(() => c.req.json());
@@ -369,7 +406,7 @@ export async function historialBotCobros(
 
 		// Sin await (D-41): si la escritura falla se pierde una fila de
 		// historial, no una conversación.
-		void persistirInteraccion(interaccion).catch((err) =>
+		void persistirInteraccion(interaccion, registradaEn).catch((err) =>
 			console.error("[BotCobros] No se pudo guardar la interacción:", err),
 		);
 	} catch (err) {

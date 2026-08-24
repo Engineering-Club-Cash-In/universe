@@ -100,7 +100,7 @@ export function createRevertPaymentToPending(
 ) {
   return async ({ body, set }: any) => {
   const startedAt = safeNow();
-  let hasExternalInvoiceVoid = false;
+  let externalInvoiceVoidCount = 0;
   let localInvoiceStateFailureCount = 0;
   try {
     // 1️⃣ VALIDAR ENTRADA
@@ -247,7 +247,7 @@ export function createRevertPaymentToPending(
           });
 
           if (resultadoCofidi.success && resultadoCofidi.anulado) {
-            hasExternalInvoiceVoid = true;
+            externalInvoiceVoidCount += 1;
             try {
               await tx
                 .update(facturas_electronicas)
@@ -314,7 +314,7 @@ export function createRevertPaymentToPending(
       };
     });
 
-    if (localInvoiceStateFailureCount === 0) hasExternalInvoiceVoid = false;
+    if (localInvoiceStateFailureCount === 0) externalInvoiceVoidCount = 0;
     const terminalOutcome = classifyRevertPendingTerminal({
       failedCount: result.completion.failedCount,
       localStateFailureCount: "localStateFailureCount" in result.completion
@@ -355,13 +355,13 @@ export function createRevertPaymentToPending(
         : error?.message === "Credit not found or not active"
           ? "credit_not_found"
           : null;
-    if (hasExternalInvoiceVoid || localInvoiceStateFailureCount > 0) {
+    if (externalInvoiceVoidCount > 0 || localInvoiceStateFailureCount > 0) {
       dependencies.emitTerminal({
         outcome: "local_state_inconsistent",
         reversalPath: "validated_payment",
-        processedCount: 1,
+        processedCount: Math.max(1, externalInvoiceVoidCount),
         succeededCount: 0,
-        failedCount: 1,
+        failedCount: Math.max(1, externalInvoiceVoidCount),
         errorCode: "persistence_failed",
         durationMs: elapsedMilliseconds(startedAt),
       });

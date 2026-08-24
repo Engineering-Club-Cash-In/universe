@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, mock, test } from "bun:test";
 
 const syntheticEnvironment = {
   SUPABASE_DB_URL: "postgresql://127.0.0.1:1/synthetic",
@@ -10,7 +10,7 @@ const previousEnvironment = Object.fromEntries(
 ) as Record<keyof typeof syntheticEnvironment, string | undefined>;
 Object.assign(process.env, syntheticEnvironment);
 
-const { reversePayment } = await import("./reversePayment");
+const { createReversePayment, reversePayment } = await import("./reversePayment");
 const { createCarteraStructuredLogger } = await import("../utils/structuredLogger");
 for (const key of Object.keys(syntheticEnvironment) as Array<keyof typeof syntheticEnvironment>) {
   const previous = previousEnvironment[key];
@@ -59,5 +59,164 @@ describe("reversePayment observability contract", () => {
     } finally {
       Date.now = originalNow;
     }
+  });
+});
+
+type ReversePaymentDependencies = NonNullable<Parameters<typeof createReversePayment>[0]>;
+
+const pendingPayment = {
+  pago_id: 30,
+  credito_id: 10,
+  cuota_id: null,
+  validationStatus: "pending",
+  registerBy: "synthetic-test",
+  mora: "0",
+  pagoConvenio: "0",
+  pagado: false,
+  capital_restante: "100",
+  interes_restante: "10",
+  iva_12_restante: "1.2",
+  seguro_restante: "0",
+  gps_restante: "0",
+  membresias: "0",
+  abono_capital: "0",
+  abono_interes: "0",
+  abono_iva_12: "0",
+  abono_seguro: "0",
+  abono_gps: "0",
+  membresias_pago: "0",
+  monto_boleta: "0",
+};
+const activeCredit = {
+  creditos: {
+    credito_id: 10,
+    usuario_id: 20,
+    statusCredit: "ACTIVO",
+    capital: "1000",
+    cuota_interes: "10",
+    iva_12: "1.2",
+    deudatotal: "1011.2",
+    porcentaje_interes: "1",
+    seguro_10_cuotas: "0",
+    gps: "0",
+    membresias_pago: "0",
+    cuota: "100",
+  },
+  usuarios: { usuario_id: 20 },
+};
+const user = { usuario_id: 20, saldo_a_favor: "0" };
+
+function createTransactionTx() {
+  const selectResults: unknown[][] = [[pendingPayment], [activeCredit], [user], []];
+  const takeRows = () => {
+    const rows = selectResults.shift() ?? [];
+    return Object.assign(Promise.resolve(rows), { limit: () => Promise.resolve(rows) });
+  };
+  return {
+    select: mock(() => ({
+      from: () => ({
+        innerJoin: () => ({ where: takeRows }),
+        where: takeRows,
+      }),
+    })),
+    update: mock(() => ({ set: () => ({ where: () => Promise.resolve() }) })),
+    delete: mock(() => ({ where: () => Promise.resolve() })),
+  };
+}
+
+function createPersistenceHarness(
+  reverseInvestors: ReversePaymentDependencies["reverseInvestors"],
+) {
+  const tx = createTransactionTx();
+  const runTransaction = mock(async (callback: (value: typeof tx) => Promise<unknown>) => {
+    await callback(tx);
+    throw new Error("synthetic later transaction failure");
+  });
+  const handler = createReversePayment({
+    runTransaction: runTransaction as unknown as ReversePaymentDependencies["runTransaction"],
+    reverseInvestors,
+    reverseCapitalPayment: mock(() => Promise.resolve(undefined)) as unknown as ReversePaymentDependencies["reverseCapitalPayment"],
+  });
+  return { handler, runTransaction };
+}
+
+describe("reversePayment global-persistence evidence", () => {
+  let lines: string[];
+  let logger: ReturnType<typeof createCarteraStructuredLogger>;
+
+  beforeEach(() => {
+    lines = [];
+    logger = createCarteraStructuredLogger({
+      environment: "staging",
+      clock: () => new Date("2026-08-24T00:00:00.000Z"),
+      sink: (line) => lines.push(line),
+    });
+  });
+
+  test("keeps an investor no-op followed by a transaction failure as an ordinary failure", async () => {
+    const reverseInvestors = mock(async (
+      _creditoId: number,
+      _pagoId: number,
+      _onPersisted?: () => void,
+    ) => []);
+    const { handler } = createPersistenceHarness(
+      reverseInvestors as unknown as ReversePaymentDependencies["reverseInvestors"],
+    );
+    const set = { status: 0 };
+
+    const response = await handler({
+      body: { credito_id: 10, pago_id: 30 },
+      set,
+      telemetryLogger: logger,
+    });
+
+    expect(reverseInvestors).toHaveBeenCalledWith(10, 30, expect.any(Function));
+    expect(set.status).toBe(500);
+    expect(response).toEqual({
+      message: "Internal server error",
+      error: "synthetic later transaction failure",
+    });
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0] ?? "{}")).toMatchObject({
+      event: "payment.reversal",
+      outcome: "failed",
+      manual_action_required: false,
+      error_code: "unknown",
+    });
+  });
+
+  test("preserves actual investor-write evidence when a later investor operation fails", async () => {
+    const reverseInvestors = mock(async (
+      _creditoId: number,
+      _pagoId: number,
+      onPersisted?: () => void,
+    ) => {
+      onPersisted?.();
+      throw new Error("synthetic later investor failure");
+    });
+    const { handler } = createPersistenceHarness(
+      reverseInvestors as unknown as ReversePaymentDependencies["reverseInvestors"],
+    );
+    const set = { status: 0 };
+
+    const response = await handler({
+      body: { credito_id: 10, pago_id: 30 },
+      set,
+      telemetryLogger: logger,
+    });
+
+    expect(reverseInvestors).toHaveBeenCalledWith(10, 30, expect.any(Function));
+    expect(set.status).toBe(500);
+    expect(response).toEqual({
+      message: "Internal server error",
+      error: "synthetic later investor failure",
+    });
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0] ?? "{}")).toMatchObject({
+      event: "payment.reversal",
+      outcome: "partially_completed",
+      manual_action_required: true,
+      reason_code: "local_state_inconsistent",
+    });
   });
 });

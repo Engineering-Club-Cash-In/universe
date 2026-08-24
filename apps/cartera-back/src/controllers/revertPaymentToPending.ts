@@ -84,8 +84,9 @@ async function reverseAndCleanInvestors(
   credito_id: number,
   pago_id: number,
   dependencies: RevertPaymentToPendingDependencies,
+  onInvestorsPersisted: () => void,
 ) {
-  await dependencies.reverseInvestors(credito_id, pago_id);
+  await dependencies.reverseInvestors(credito_id, pago_id, onInvestorsPersisted);
   
   await tx
     .delete(pagos_credito_inversionistas)
@@ -102,6 +103,9 @@ export function createRevertPaymentToPending(
   const startedAt = safeNow();
   let externalInvoiceVoidCount = 0;
   let localInvoiceStateFailureCount = 0;
+  let investorPersistence: {
+    readonly reversalPath: "already_pending" | "validated_payment";
+  } | undefined;
   try {
     // 1️⃣ VALIDAR ENTRADA
     const parseResult = revertPaymentToPendingSchema.safeParse(body);
@@ -160,7 +164,9 @@ export function createRevertPaymentToPending(
       // y sí reconoce los abonos directos a capital.
 
       if (!pagoValidado) {
-        await reverseAndCleanInvestors(tx, credito_id, pago_id, dependencies);
+        await reverseAndCleanInvestors(tx, credito_id, pago_id, dependencies, () => {
+          investorPersistence = { reversalPath: "already_pending" };
+        });
 
         return {
           data: {
@@ -218,7 +224,9 @@ export function createRevertPaymentToPending(
       }
 
       // 5️⃣ REVERTIR Y ELIMINAR INVERSIONES
-      await reverseAndCleanInvestors(tx, credito_id, pago_id, dependencies);
+      await reverseAndCleanInvestors(tx, credito_id, pago_id, dependencies, () => {
+        investorPersistence = { reversalPath: "validated_payment" };
+      });
 
       // 6️⃣ ANULAR FACTURAS ELECTRÓNICAS
       const facturasDelPago = await tx
@@ -355,10 +363,14 @@ export function createRevertPaymentToPending(
         : error?.message === "Credit not found or not active"
           ? "credit_not_found"
           : null;
-    if (externalInvoiceVoidCount > 0 || localInvoiceStateFailureCount > 0) {
+    if (
+      investorPersistence !== undefined
+      || externalInvoiceVoidCount > 0
+      || localInvoiceStateFailureCount > 0
+    ) {
       dependencies.emitTerminal({
         outcome: "local_state_inconsistent",
-        reversalPath: "validated_payment",
+        reversalPath: investorPersistence?.reversalPath ?? "validated_payment",
         processedCount: Math.max(1, externalInvoiceVoidCount),
         succeededCount: 0,
         failedCount: Math.max(1, externalInvoiceVoidCount),

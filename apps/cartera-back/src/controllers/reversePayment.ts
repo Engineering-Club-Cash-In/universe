@@ -40,6 +40,7 @@ import {
 } from "../utils/structuredLogger";
 import {
   classifyInvoiceVoidingBatch,
+  classifyPaymentReversalCompletion,
   classifyPaymentReversalFailure,
 } from "./reversePaymentTelemetry";
 
@@ -96,7 +97,22 @@ export const reversePaymentSchema = z.object({
  * @param set - Handler de respuesta HTTP
  * @returns Objeto con el resultado de la operación
  */
-export const reversePayment = async ({ body, set, telemetryLogger }: any) => {
+export interface ReversePaymentDependencies {
+  readonly runTransaction: typeof db.transaction;
+  readonly reverseInvestors: typeof processAndReplaceCreditInvestorsReverse;
+  readonly reverseCapitalPayment: typeof revertirAbonoCapitalEspejo;
+}
+
+const defaultDependencies: ReversePaymentDependencies = {
+  runTransaction: db.transaction.bind(db),
+  reverseInvestors: processAndReplaceCreditInvestorsReverse,
+  reverseCapitalPayment: revertirAbonoCapitalEspejo,
+};
+
+export function createReversePayment(
+  dependencies: ReversePaymentDependencies = defaultDependencies,
+) {
+  return async ({ body, set, telemetryLogger }: any) => {
   const startedAt = safeNow();
   let previousPaymentState: "applied" | "pending" | "unknown" = "unknown";
   let mayHaveGlobalPersistence = false;
@@ -129,7 +145,7 @@ export const reversePayment = async ({ body, set, telemetryLogger }: any) => {
     // ========================================================================
     // 🔥 INICIAR TRANSACCIÓN ATÓMICA
     // ========================================================================
-    const result = await db.transaction(async (tx) => {
+    const result = await dependencies.runTransaction(async (tx) => {
       // ======================================================================
       // 2️⃣ OBTENER DATOS DEL PAGO A REVERSAR
       // ======================================================================
@@ -216,7 +232,7 @@ export const reversePayment = async ({ body, set, telemetryLogger }: any) => {
       // después de ellas, el rollback NO las desharía: el pago quedaría sin
       // revertir pero la mora, el convenio y el saldo del inversionista ya
       // habrían cambiado. Se aborta antes de tocar nada.
-      const reversionEspejo = await revertirAbonoCapitalEspejo(pago_id, tx);
+      const reversionEspejo = await dependencies.reverseCapitalPayment(pago_id, tx);
 
       // ======================================================================
       // 4️⃣.6️⃣ LEER LAS FACTURAS ACTIVAS DEL PAGO (ANTES DE TOCARLO)
@@ -333,10 +349,12 @@ export const reversePayment = async ({ body, set, telemetryLogger }: any) => {
       // ======================================================================
       // 8️⃣ REVERSAR INVERSIONES ASOCIADAS AL PAGO
       // ======================================================================
-      mayHaveGlobalPersistence = true;
-      await processAndReplaceCreditInvestorsReverse(
+      await dependencies.reverseInvestors(
         credito_id,
         pago_id,
+        () => {
+          mayHaveGlobalPersistence = true;
+        },
       );
       investmentsReversed = true;
 
@@ -896,14 +914,33 @@ export const reversePayment = async ({ body, set, telemetryLogger }: any) => {
       },
     };
     set.status = 200;
-    emitPaymentReversal({
-      outcome: "completed",
+    const terminal = classifyPaymentReversalCompletion({
       previousPaymentState: result.pagoValidado ? "applied" : "pending",
       creditUpdated: result.pagoValidado,
       investmentsReversed,
-      manualActionRequired: false,
+      invoiceFailureCount: facturasConError.length,
       durationMs: elapsedMilliseconds(startedAt),
-    }, telemetryLogger);
+    });
+    if (terminal.outcome === "completed") {
+      emitPaymentReversal({
+        outcome: "completed",
+        previousPaymentState: terminal.previousPaymentState,
+        creditUpdated: terminal.creditUpdated,
+        investmentsReversed: terminal.investmentsReversed,
+        manualActionRequired: false,
+        durationMs: terminal.durationMs,
+      }, telemetryLogger);
+    } else {
+      emitPaymentReversal({
+        outcome: "partially_completed",
+        previousPaymentState: terminal.previousPaymentState,
+        creditUpdated: terminal.creditUpdated,
+        investmentsReversed: terminal.investmentsReversed,
+        manualActionRequired: true,
+        durationMs: terminal.durationMs,
+        reasonCode: terminal.reasonCode,
+      }, telemetryLogger);
+    }
     return response;
   } catch (error: unknown) {
     const errorMessage = caughtErrorMessage(error);
@@ -970,7 +1007,10 @@ export const reversePayment = async ({ body, set, telemetryLogger }: any) => {
       error: error instanceof Error ? error.message : String(error),
     };
   }
-};
+  };
+}
+
+export const reversePayment = createReversePayment();
 
 interface ReverseConvenioPaymentParams {
   credito_id: number;

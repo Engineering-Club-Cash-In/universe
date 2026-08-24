@@ -14,6 +14,38 @@ interface PaymentReversalFailureInput {
   readonly durationMs: number;
 }
 
+interface PaymentReversalCompletionInput {
+  readonly previousPaymentState: Exclude<PreviousPaymentState, "unknown">;
+  readonly creditUpdated: boolean;
+  readonly investmentsReversed: boolean;
+  readonly invoiceFailureCount: number;
+  readonly durationMs: number;
+}
+
+export function classifyPaymentReversalCompletion(
+  input: PaymentReversalCompletionInput,
+): Extract<PaymentReversalResult, { readonly outcome: "completed" | "partially_completed" }> {
+  const common = {
+    previousPaymentState: input.previousPaymentState,
+    creditUpdated: input.creditUpdated,
+    investmentsReversed: input.investmentsReversed,
+    durationMs: input.durationMs,
+  };
+  if (input.invoiceFailureCount > 0) {
+    return {
+      outcome: "partially_completed",
+      ...common,
+      manualActionRequired: true,
+      reasonCode: "manual_reconciliation_required",
+    };
+  }
+  return {
+    outcome: "completed",
+    ...common,
+    manualActionRequired: false,
+  };
+}
+
 export function classifyPaymentReversalFailure(
   input: PaymentReversalFailureInput,
 ): Exclude<PaymentReversalResult, { readonly outcome: "completed" }> {

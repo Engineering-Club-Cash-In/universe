@@ -1,10 +1,29 @@
 import { describe, expect, test } from "bun:test";
 import {
   classifyInvoiceVoidingBatch,
+  classifyPaymentReversalCompletion,
   classifyPaymentReversalFailure,
 } from "./reversePaymentTelemetry";
 
 describe("payment reversal telemetry classification", () => {
+  test("requires manual reconciliation when post-commit invoice voiding is incomplete", () => {
+    expect(classifyPaymentReversalCompletion({
+      previousPaymentState: "applied",
+      creditUpdated: true,
+      investmentsReversed: true,
+      invoiceFailureCount: 1,
+      durationMs: 11,
+    })).toEqual({
+      outcome: "partially_completed",
+      previousPaymentState: "applied",
+      creditUpdated: true,
+      investmentsReversed: true,
+      manualActionRequired: true,
+      durationMs: 11,
+      reasonCode: "manual_reconciliation_required",
+    });
+  });
+
   test("classifies known pre-effect rejections without raw errors", () => {
     expect(classifyPaymentReversalFailure({
       errorMessage: "Payment not found",

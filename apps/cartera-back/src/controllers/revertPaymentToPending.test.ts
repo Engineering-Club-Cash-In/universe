@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, mock, test } from "bun:test";
 
 const emitted: Array<Record<string, unknown>> = [];
 let transactionError: unknown;
+let transactionErrorAfterCallback: unknown;
+let investorReverseBehavior: "no_op" | "persist_then_fail";
 let selectResults: unknown[][] = [];
 let cofidiResult: Record<string, unknown> = { success: true, anulado: true };
 
@@ -20,9 +22,20 @@ const tx = {
 
 const transaction = mock(async (callback: (value: typeof tx) => Promise<unknown>) => {
   if (transactionError !== undefined) throw transactionError;
-  return callback(tx);
+  const result = await callback(tx);
+  if (transactionErrorAfterCallback !== undefined) throw transactionErrorAfterCallback;
+  return result;
 });
-const reverseInvestors = mock(() => Promise.resolve());
+const reverseInvestors = mock(async (
+  _creditoId: number,
+  _pagoId: number,
+  onPersisted?: () => void,
+) => {
+  if (investorReverseBehavior !== "no_op") onPersisted?.();
+  if (investorReverseBehavior === "persist_then_fail") {
+    throw new Error("synthetic later investor failure");
+  }
+});
 const voidInvoice = mock(() => Promise.resolve(cofidiResult));
 process.env.SUPABASE_DB_URL ??= "postgresql://127.0.0.1:1/synthetic";
 process.env.RESEND_API_KEY ??= "synthetic-test-key";
@@ -55,6 +68,8 @@ describe("revertPaymentToPending observability contract", () => {
   beforeEach(() => {
     emitted.length = 0;
     transactionError = undefined;
+    transactionErrorAfterCallback = undefined;
+    investorReverseBehavior = "no_op";
     selectResults = [];
     cofidiResult = { success: true, anulado: true };
     transaction.mockClear();
@@ -98,8 +113,39 @@ describe("revertPaymentToPending observability contract", () => {
         message: "Inversiones reversadas exitosamente (el pago ya estaba pendiente)",
       },
     });
-    expect(reverseInvestors).toHaveBeenCalledWith(10, 30);
+    expect(reverseInvestors).toHaveBeenCalledWith(10, 30, expect.any(Function));
     expect(emitted[0]).toMatchObject({ outcome: "completed", reversalPath: "already_pending", processedCount: 0, succeededCount: 0, failedCount: 0 });
+  });
+
+  test("keeps a transaction failure after an investor no-op as an ordinary failure", async () => {
+    selectResults = [[{ validationStatus: "pending" }], [credit]];
+    transactionErrorAfterCallback = new Error("synthetic commit failure");
+    const set = { status: 0 };
+
+    const response = await revertPaymentToPending({ body: { credito_id: 10, pago_id: 30 }, set });
+
+    expect(reverseInvestors).toHaveBeenCalledWith(10, 30, expect.any(Function));
+    expect(set.status).toBe(500);
+    expect(response).toEqual({ message: "Internal server error", error: "synthetic commit failure" });
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0]).toMatchObject({ outcome: "failed", errorCode: "unknown" });
+  });
+
+  test("classifies a later investor failure after one persisted write as local inconsistency", async () => {
+    selectResults = [[{ validationStatus: "pending" }], [credit]];
+    investorReverseBehavior = "persist_then_fail";
+    const set = { status: 0 };
+
+    const response = await revertPaymentToPending({ body: { credito_id: 10, pago_id: 30 }, set });
+
+    expect(set.status).toBe(500);
+    expect(response).toEqual({ message: "Internal server error", error: "synthetic later investor failure" });
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0]).toMatchObject({
+      outcome: "local_state_inconsistent",
+      reversalPath: "already_pending",
+      errorCode: "persistence_failed",
+    });
   });
 
   test("executes invoice processing and emits only aggregate partial counts", async () => {

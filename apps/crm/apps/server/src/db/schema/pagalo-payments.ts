@@ -226,7 +226,7 @@ export const pagaloPaymentGroups = pgTable(
 		check(
 			"pagalo_payment_groups_expiration_chk",
 			sql`(${t.expirationEnabled} = false AND ${t.expirationHours} IS NULL)
-				OR (${t.expirationEnabled} = true AND ${t.expirationHours} > 0)`,
+				OR (${t.expirationEnabled} = true AND ${t.expirationHours} IS NOT NULL AND ${t.expirationHours} > 0)`,
 		),
 		check(
 			"pagalo_payment_groups_dispatch_attempts_chk",

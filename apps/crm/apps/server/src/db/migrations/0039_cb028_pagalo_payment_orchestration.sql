@@ -105,7 +105,11 @@ CREATE TABLE IF NOT EXISTS public.pagalo_payment_groups (
   ),
   CONSTRAINT pagalo_payment_groups_expiration_chk CHECK (
     (expiration_enabled = false AND expiration_hours IS NULL)
-    OR (expiration_enabled = true AND expiration_hours > 0)
+    OR (
+      expiration_enabled = true
+      AND expiration_hours IS NOT NULL
+      AND expiration_hours > 0
+    )
   ),
   CONSTRAINT pagalo_payment_groups_dispatch_attempts_chk CHECK (
     dispatch_attempt_count >= 0

@@ -225,7 +225,7 @@ export type EventPayload<
 } & {
   readonly [K in Exclude<OptionalField<C, E, O>, ConstantField<C, E, O> | CountField<C>>]?: FieldValue<C['fields'][K]>;
 } & {
-  readonly [K in ConstantField<C, E, O>]: OutcomeConstants<C, E, O>[K];
+  readonly [K in ConstantField<C, E, O>]: OutcomeConstants<C, E, O>[K] & FieldValue<C['fields'][K]>;
 } & CountInvariantPayloads<C, E, O>;
 
 export type StructuredEvent = Readonly<Record<string, unknown>>;

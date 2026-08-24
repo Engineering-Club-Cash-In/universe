@@ -562,15 +562,21 @@ function RouteComponent() {
 		enabled: !!session && !!id,
 	});
 
-	// Obtener historial de contactos (solo para casos)
-	// CB-020 (Codex, PR #1147): getHistorialContactos aplica su límite ANTES
-	// de que este archivo separe promesa_pago del resto (ver `contactos` y
-	// `promesasPago` abajo) — con el default de 20, un caso con varias
-	// promesas dejaba el Historial general corto y perdía promesas viejas
-	// fuera de esa ventana en ambas listas. El server no filtra por tipo ni
-	// pagina de verdad (solo un límite plano) — hasta que eso se separe en
-	// el backend, subir el límite es el workaround práctico: cubre el caso
-	// real (decenas de contactos), no infinito.
+	// La lista que PINTA la tarjeta "Historial de Contactos": paginada de
+	// verdad en el server (10 por página, sin promesas — esas tienen su
+	// tarjeta). La página anterior se queda como placeholder mientras carga la
+	// nueva, para que el pager no parpadee.
+	const historialContactosPagina = useQuery({
+		...orpc.getHistorialContactosPaginado.queryOptions({
+			input: { casoCobroId: casoDetails.data?.id || "", pagina: contactosPage },
+		}),
+		enabled: !!session && !!casoDetails.data?.id,
+		placeholderData: (previa) => previa,
+	});
+
+	// La lista COMPLETA (limit 200), solo para las derivaciones que necesitan
+	// ver todo el historial: promesasPago (CB-020) y la regla B1 (CB-026). Las
+	// tarjetas ya no pintan de acá — eso es del paginado de arriba.
 	const historialContactos = useQuery({
 		...orpc.getHistorialContactos.queryOptions({
 			input: { casoCobroId: casoDetails.data?.id || "", limit: 200 },
@@ -913,6 +919,13 @@ function RouteComponent() {
 			queryClient.invalidateQueries(
 				orpc.getHistorialContactos.queryOptions({ input: { casoCobroId } }),
 			);
+			// La lista que PINTA la ficha es la paginada: sin esto, el contacto
+			// recién registrado no aparece hasta un refresh.
+			queryClient.invalidateQueries(
+				orpc.getHistorialContactosPaginado.queryOptions({
+					input: { casoCobroId },
+				}),
+			);
 		},
 		onError: (err: any) => {
 			toast.error(err.message || "Error al ejecutar el job");
@@ -954,11 +967,11 @@ function RouteComponent() {
 
 	// El guard de "Caso No Encontrado" (arriba) ya cortó si no hay datos.
 	const caso = casoDetails.data as CasoDetalle;
-	// CB-020: las promesas de pago viven SOLO en la tarjeta "Promesas de
-	// Pago" (ver promesasPago) — no en el Historial de Contactos general.
-	const contactos = (historialContactos.data || []).filter(
-		(c: any) => c.estadoContacto !== "promesa_pago",
-	);
+	// La página actual del Historial de Contactos, ya filtrada y cortada por el
+	// server (las promesas van en su propia tarjeta, CB-020).
+	const contactos = historialContactosPagina.data?.contactos ?? [];
+	const totalContactos = historialContactosPagina.data?.total ?? 0;
+	const contactosPorPagina = historialContactosPagina.data?.porPagina ?? 10;
 	const cuotas = historialPagos.data || [];
 	const recuperacion = recuperacionInfo.data;
 
@@ -1458,12 +1471,12 @@ function RouteComponent() {
 					<TabsTrigger value="resumen">Resumen</TabsTrigger>
 					<TabsTrigger value="historial">
 						Historial
-						{contactos.length > 0 && (
+						{totalContactos > 0 && (
 							<Badge
 								variant="secondary"
 								className="ml-1.5 h-4 px-1 text-[10px]"
 							>
-								{contactos.length}
+								{totalContactos}
 							</Badge>
 						)}
 					</TabsTrigger>
@@ -2304,108 +2317,99 @@ function RouteComponent() {
 							</CardDescription>
 						</CardHeader>
 						<CardContent>
-							{contactos.length === 0 ? (
+							{totalContactos === 0 ? (
 								<div className="py-8 text-center text-muted-foreground">
 									No hay contactos registrados para este caso
 								</div>
 							) : (
 								<>
 									<div className="space-y-4">
-										{contactos
-											.slice(
-												(contactosPage - 1) * ITEMS_PER_PAGE,
-												contactosPage * ITEMS_PER_PAGE,
-											)
-											.map((contacto: any) => {
-												const estadoInfo = getEstadoContacto(
-													contacto.estadoContacto,
-												);
-												return (
-													<div
-														key={contacto.id}
-														className="rounded-lg border p-4"
-													>
-														<div className="mb-2 flex items-start justify-between">
-															<div className="flex items-center gap-2">
-																{getMetodoIcon(contacto.metodoContacto)}
-																<span className="font-medium">
-																	{etiquetaMetodoContacto(
-																		contacto.metodoContacto,
-																	)}
-																</span>
-																<Badge className={estadoInfo.color}>
-																	{estadoInfo.label}
-																</Badge>
-															</div>
-															<p className="text-muted-foreground text-sm">
-																{contacto.fechaContacto
-																	? new Date(
-																			contacto.fechaContacto,
-																		).toLocaleDateString("es-GT")
-																	: "Sin fecha"}
-															</p>
-														</div>
-														<p className="mb-2 text-sm">
-															{contacto.comentarios}
-														</p>
-														{contacto.acuerdosAlcanzados && (
-															<div className="rounded bg-blue-50 p-2 text-sm">
-																<span className="font-medium">Acuerdos: </span>
-																{contacto.acuerdosAlcanzados}
-															</div>
-														)}
-														{contacto.compromisosPago && (
-															<div className="mt-2 rounded bg-green-50 p-2 text-sm">
-																<span className="font-medium">
-																	Compromisos:{" "}
-																</span>
-																{contacto.compromisosPago}
-															</div>
-														)}
-														{contacto.fechaProximoContacto && (
-															<div className="mt-2 rounded bg-amber-50 p-2 text-sm">
-																<span className="font-medium">
-																	📅 Seguimiento programado:{" "}
-																</span>
-																{new Date(
-																	contacto.fechaProximoContacto,
-																).toLocaleDateString("es-GT")}
-															</div>
-														)}
-														{contacto.proximoPaso && (
-															<div className="mt-2 rounded bg-amber-50 p-2 text-sm">
-																<span className="font-medium">
-																	Próximo paso:{" "}
-																</span>
-																{contacto.proximoPaso}
-															</div>
-														)}
-														<div className="mt-2 flex items-center justify-between text-muted-foreground text-xs">
-															<span>
-																Por: {contacto.realizadoPor || "Sin asignar"}
+										{contactos.map((contacto: any) => {
+											const estadoInfo = getEstadoContacto(
+												contacto.estadoContacto,
+											);
+											return (
+												<div
+													key={contacto.id}
+													className="rounded-lg border p-4"
+												>
+													<div className="mb-2 flex items-start justify-between">
+														<div className="flex items-center gap-2">
+															{getMetodoIcon(contacto.metodoContacto)}
+															<span className="font-medium">
+																{etiquetaMetodoContacto(
+																	contacto.metodoContacto,
+																)}
 															</span>
-															{contacto.duracionLlamada && (
-																<span>
-																	Duración:{" "}
-																	{Math.floor(
-																		(contacto.duracionLlamada || 0) / 60,
-																	)}
-																	:
-																	{((contacto.duracionLlamada || 0) % 60)
-																		.toString()
-																		.padStart(2, "0")}{" "}
-																	min
-																</span>
-															)}
+															<Badge className={estadoInfo.color}>
+																{estadoInfo.label}
+															</Badge>
 														</div>
+														<p className="text-muted-foreground text-sm">
+															{contacto.fechaContacto
+																? new Date(
+																		contacto.fechaContacto,
+																	).toLocaleDateString("es-GT")
+																: "Sin fecha"}
+														</p>
 													</div>
-												);
-											})}
+													<p className="mb-2 text-sm">{contacto.comentarios}</p>
+													{contacto.acuerdosAlcanzados && (
+														<div className="rounded bg-blue-50 p-2 text-sm">
+															<span className="font-medium">Acuerdos: </span>
+															{contacto.acuerdosAlcanzados}
+														</div>
+													)}
+													{contacto.compromisosPago && (
+														<div className="mt-2 rounded bg-green-50 p-2 text-sm">
+															<span className="font-medium">Compromisos: </span>
+															{contacto.compromisosPago}
+														</div>
+													)}
+													{contacto.fechaProximoContacto && (
+														<div className="mt-2 rounded bg-amber-50 p-2 text-sm">
+															<span className="font-medium">
+																📅 Seguimiento programado:{" "}
+															</span>
+															{new Date(
+																contacto.fechaProximoContacto,
+															).toLocaleDateString("es-GT")}
+														</div>
+													)}
+													{contacto.proximoPaso && (
+														<div className="mt-2 rounded bg-amber-50 p-2 text-sm">
+															<span className="font-medium">
+																Próximo paso:{" "}
+															</span>
+															{contacto.proximoPaso}
+														</div>
+													)}
+													<div className="mt-2 flex items-center justify-between text-muted-foreground text-xs">
+														<span>
+															Por: {contacto.realizadoPor || "Sin asignar"}
+														</span>
+														{contacto.duracionLlamada && (
+															<span>
+																Duración:{" "}
+																{Math.floor(
+																	(contacto.duracionLlamada || 0) / 60,
+																)}
+																:
+																{((contacto.duracionLlamada || 0) % 60)
+																	.toString()
+																	.padStart(2, "0")}{" "}
+																min
+															</span>
+														)}
+													</div>
+												</div>
+											);
+										})}
 									</div>
 									<Pagination
 										currentPage={contactosPage}
-										totalItems={contactos.length}
-										itemsPerPage={ITEMS_PER_PAGE}
+										totalItems={totalContactos}
+										itemsPerPage={contactosPorPagina}
 										onPageChange={setContactosPage}
 									/>
 								</>

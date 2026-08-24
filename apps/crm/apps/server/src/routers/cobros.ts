@@ -14,6 +14,7 @@ import {
 	isNull,
 	lte,
 	max,
+	ne,
 	or,
 	sql,
 } from "drizzle-orm";
@@ -2032,6 +2033,66 @@ export const cobrosRouter = {
 				.limit(input.limit);
 
 			return contactos;
+		}),
+
+	// El Historial de Contactos de la ficha, paginado DE VERDAD en el server:
+	// 10 por página, y el tamaño NO viaja en el input a propósito — si cada
+	// caller eligiera el suyo, esto volvería a ser el límite plano de siempre.
+	// Excluye promesa_pago porque las promesas viven en su propia tarjeta
+	// (CB-020). getHistorialContactos (arriba) queda para las derivaciones que
+	// necesitan la lista completa (promesas + regla B1), no para pintar listas.
+	getHistorialContactosPaginado: cobrosProcedure
+		.input(
+			z.object({
+				casoCobroId: z.string().uuid(),
+				pagina: z.number().int().min(1).default(1),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const POR_PAGINA = 10;
+
+			const filtro = and(
+				eq(contactosCobros.casoCobroId, input.casoCobroId),
+				ne(contactosCobros.estadoContacto, "promesa_pago"),
+			);
+
+			const [conteo] = await db
+				.select({ total: count() })
+				.from(contactosCobros)
+				.where(filtro);
+			const total = conteo?.total ?? 0;
+
+			const contactos = await db
+				.select({
+					id: contactosCobros.id,
+					fechaContacto: contactosCobros.fechaContacto,
+					metodoContacto: contactosCobros.metodoContacto,
+					estadoContacto: contactosCobros.estadoContacto,
+					duracionLlamada: contactosCobros.duracionLlamada,
+					comentarios: contactosCobros.comentarios,
+					acuerdosAlcanzados: contactosCobros.acuerdosAlcanzados,
+					compromisosPago: contactosCobros.compromisosPago,
+					requiereSeguimiento: contactosCobros.requiereSeguimiento,
+					fechaProximoContacto: contactosCobros.fechaProximoContacto,
+					fechaAlerta: contactosCobros.fechaAlerta,
+					proximoPaso: contactosCobros.proximoPaso,
+					realizadoPorId: contactosCobros.realizadoPor,
+					realizadoPor: user.name,
+				})
+				.from(contactosCobros)
+				.leftJoin(user, eq(contactosCobros.realizadoPor, user.id))
+				.where(filtro)
+				.orderBy(desc(contactosCobros.fechaContacto))
+				.limit(POR_PAGINA)
+				.offset((input.pagina - 1) * POR_PAGINA);
+
+			return {
+				contactos,
+				total,
+				pagina: input.pagina,
+				porPagina: POR_PAGINA,
+				totalPaginas: Math.max(1, Math.ceil(total / POR_PAGINA)),
+			};
 		}),
 
 	// CB-029 (dashboard): resumen simple de promesas de pago del EQUIPO (casos

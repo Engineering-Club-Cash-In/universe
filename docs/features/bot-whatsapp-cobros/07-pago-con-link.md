@@ -257,6 +257,7 @@ CREDITO_NO_ENCONTRADO` si no).
 | 409 | `CREDITO_NO_PAGABLE_POR_LINK` | Estado del crédito fuera del flujo: `EN_CONVENIO` ([D-15](./DECISIONES.md#d-15--convenio-y-promesa-de-pago-bloqueados)), `INCOBRABLE`, `CANCELADO`, `PENDIENTE_CANCELACION`, `CAIDO` |
 | 409 | `SIN_CUOTAS_QUE_PAGAR` | Nada vencido ni por vencer que ofrecer |
 | 409 | `PAGO_EN_PROCESO` | Hay un grupo Págalo **de cualquier origen** en vuelo post-pago (`READY_TO_APPLY`/`APPLYING`/`APPLICATION_FAILED`/`REVIEW_REQUIRED`) para este crédito — o uno **del asesor** con links vivos: no se ofrecen opciones calculadas sobre una deuda que está por cambiar — mismo candado que en `/crear` (§4.2) |
+| 409 | `PAGO_PARCIAL_EN_CURSO` | El grupo del bot está **`PARTIALLY_PAID`**: no se ofrecen opciones nuevas — el cliente elegiría una selección que `/crear` ignoraría (hallazgo de Codex: pediría 1 cuota y recibiría el componente de 3). El `data` del error trae **el link pendiente con su monto y los mensajes armados** («te falta el Pago 2 de 2 — Q X»), para que el bot lo reenvíe directo |
 
 ### 4.2 Servicio 2 — `POST /api/bot/cobros/pago-link/crear`
 
@@ -306,9 +307,18 @@ una sola si la selección no lleva capital o es solo capital** — y responde:
 | --- | --- | --- |
 | 409 | `MONTO_DESACTUALIZADO` | El recálculo no coincide con `montoEsperado`. El bot repite `/opciones` |
 | 200 | — (mismos links) | Grupo activo **sin pagos observados** y el recálculo da **el mismo desglose** (comparación contra el `allocations_snapshot` completo, no el total — dos deudas distintas pueden sumar lo mismo): se responden **los mismos links**. Con **desglose distinto**: se crea un **grupo NUEVO** con su propio snapshot, y el viejo se cancela con sus links `REPLACED` (siguen en el poll, [§3.5](#35-otras-notas-de-la-investigación)) — el snapshot de un grupo es **inmutable** (hallazgo de Codex): reemplazar links "adentro" del mismo grupo dejaría al `REPLACED` —aún cobrable afuera— sin la evidencia bajo la que se emitió, o a los links nuevos despachándose con un snapshot viejo |
-| 200 | — (link pendiente) | Grupo **`PARTIALLY_PAID`** (ya se observó un pago): se responde **el link pendiente de ese mismo grupo**, siempre — un grupo con dinero adentro **jamás se regenera** (reemplazarlo crearía de nuevo el componente ya pagado y mandaría el pago real a revisión); la deriva de mora la absorbe [D-52](./DECISIONES.md#d-52--si-la-mora-cambió-cuando-el-link-se-paga-mora-primero-y-se-avisa-el-faltante) al aplicar |
+| 200 | — (link pendiente) | Grupo **`PARTIALLY_PAID`** (ya se observó un pago): se responde **el link pendiente de ese mismo grupo**, siempre, **ignorando la selección enviada** — un grupo con dinero adentro **jamás se regenera** (reemplazarlo crearía de nuevo el componente ya pagado y mandaría el pago real a revisión); la deriva de mora la absorbe [D-52](./DECISIONES.md#d-52--si-la-mora-cambió-cuando-el-link-se-paga-mora-primero-y-se-avisa-el-faltante) al aplicar. En el flujo normal no se llega acá: `/opciones` ya intercepta este estado con `PAGO_PARCIAL_EN_CURSO` (§4.1) — esta rama cubre la conversación que quedó abierta con la pantalla de selección vieja |
 | 409 | `PAGO_EN_PROCESO` | Un grupo Págalo del crédito — **de cualquier origen, bot o asesor** (comparten poller y ledger; hallazgo de Codex) — está **en vuelo post-pago** (`READY_TO_APPLY`, `APPLYING` o `APPLICATION_FAILED`): el dinero ya entró y cartera todavía no aplica, así que el recálculo vería la deuda **vieja** y armaría un doble cobro. Respuesta: «tu pago se está aplicando, te llega tu recibo» — **jamás** links nuevos en esa ventana. `REVIEW_REQUIRED` responde el mismo código con mensaje de hablar con su asesor. Y un grupo **del asesor** con links vivos o dinero adentro (aunque nadie haya pagado aún) también responde este código — «tenés un pago por link en curso con tu asesor» — porque el bot **no cancela ni duplica la intención de un asesor**; las reglas de reuso/reemplazo de arriba aplican solo a grupos de origen `BOT` |
 | 502 | `PAGALO_NO_DISPONIBLE` | Págalo no respondió o falló creando el segundo link. **No queda ninguna intención a medias**: el grupo queda `CANCELLED` y el link que sí se creó se marca `REPLACED` (cancelarlo a mano en el panel). Mensaje al cliente: intentá más tarde o subí tu boleta |
+
+**La carrera de dos `/crear` la arbitra la base** (hallazgo de Codex): todo lo de arriba
+presupone "el grupo activo del crédito" en singular, pero dos requests concurrentes (retry
+de la plataforma, mensaje duplicado) podían ver ambos «no hay grupo» y emitir **dos juegos
+de links cobrables**. El índice único parcial `pagalo_payment_groups_credit_active_uq`
+(migración **0047**) permite **un solo grupo por crédito fuera de
+`COMPLETED`/`CANCELLED`**, de cualquier origen; el reemplazo (cancelar el viejo + crear el
+nuevo) corre en **una transacción**, y el perdedor de una carrera falla el INSERT, relee y
+responde los links del ganador.
 
 ### 4.3 La conversación termina al entregar los links
 

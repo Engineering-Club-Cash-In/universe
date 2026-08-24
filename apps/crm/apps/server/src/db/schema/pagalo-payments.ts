@@ -206,6 +206,13 @@ export const pagaloPaymentGroups = pgTable(
 			.defaultNow(),
 	},
 	(t) => [
+		// Una sola intención Págalo en vuelo por crédito, de cualquier origen:
+		// arbitra la carrera de dos /crear concurrentes — sin esto ambos ven
+		// "no hay grupo activo" y emiten dos juegos de links cobrables. El
+		// reemplazo (cancelar viejo + crear nuevo) va en UNA transacción.
+		uniqueIndex("pagalo_payment_groups_credit_active_uq")
+			.on(t.carteraCreditoId)
+			.where(sql`${t.status} NOT IN ('COMPLETED', 'CANCELLED')`),
 		index("pagalo_payment_groups_status_idx").on(t.status),
 		index("pagalo_payment_groups_credit_idx").on(
 			t.numeroCreditoSifco,

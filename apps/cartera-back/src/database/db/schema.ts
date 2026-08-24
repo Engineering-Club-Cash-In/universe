@@ -709,8 +709,10 @@
   // LÍMITE DE RESPONSABILIDAD
   // ------------------------
   // CRM conserva links, callbacks/polling, payloads Págalo, usuario creador y
-  // voucher. Cartera NO duplica esa máquina: recibe una orden consolidada solo
-  // cuando los dos componentes (CAPITAL y MORA_INTERES) fueron aceptados.
+  // voucher. Cartera NO duplica esa máquina: recibe una orden consolidada con
+  // MORA_INTERES ACCEPT obligatorio y CAPITAL ACCEPT opcional cuando
+  // capital_total = 0; por tanto contiene una o dos transacciones ACCEPT según
+  // corresponda.
   //
   // POR QUÉ ESTA CABECERA ES NECESARIA
   // ----------------------------------
@@ -740,8 +742,9 @@
    *
    * Montos son copia financiera mínima del snapshot aprobado. `payload_hash`
    * permite detectar bug/ataque donde mismo crm_group_id se reintenta con datos
-   * diferentes. UUIDs/identificadores de ambos links están en esta misma fila
-   * para mantener MVP en una sola tabla de cartera.
+   * diferentes. UUIDs/identificadores de una o dos transacciones ACCEPT están
+   * en esta misma fila para mantener MVP en una sola tabla de cartera. CAPITAL
+   * es nullable solo cuando la importación es mora-only.
    *
    * UNIQUE separados impiden reutilizar transacción en mismo rol. CRM además
    * protege pagalo_transaction_uuid globalmente; servicio de cartera debe
@@ -772,16 +775,17 @@
         scale: 2,
       }).notNull(),
 
-      // Evidencia mínima de los dos ACCEPT. No son credenciales de integración.
+      // Evidencia de una o dos transacciones ACCEPT. CAPITAL es nullable solo
+      // para mora-only; no son credenciales de integración.
       capital_transaction_uuid: varchar("capital_transaction_uuid", {
         length: 64,
-      }).notNull(),
+      }),
       facturable_transaction_uuid: varchar("facturable_transaction_uuid", {
         length: 64,
       }).notNull(),
       capital_external_identifier: varchar("capital_external_identifier", {
         length: 150,
-      }).notNull(),
+      }),
       facturable_external_identifier: varchar("facturable_external_identifier", {
         length: 150,
       }).notNull(),
@@ -789,7 +793,7 @@
       facturable_request_id: varchar("facturable_request_id", { length: 100 }),
       capital_request_auth: varchar("capital_request_auth", { length: 100 }),
       facturable_request_auth: varchar("facturable_request_auth", { length: 100 }),
-      capital_paid_at: timestamp("capital_paid_at", { withTimezone: true }).notNull(),
+      capital_paid_at: timestamp("capital_paid_at", { withTimezone: true }),
       facturable_paid_at: timestamp("facturable_paid_at", {
         withTimezone: true,
       }).notNull(),
@@ -849,7 +853,23 @@
       ),
       check(
         "pagalo_payment_imports_amounts_chk",
-        sql`${t.capital_total} > 0 AND ${t.facturable_total} > 0 AND ${t.total_amount} > 0`
+        sql`${t.capital_total} >= 0 AND ${t.facturable_total} > 0 AND ${t.total_amount} > 0`
+      ),
+      check(
+        "pagalo_payment_imports_capital_evidence_chk",
+        sql`(
+          ${t.capital_total} = 0
+          AND ${t.capital_transaction_uuid} IS NULL
+          AND ${t.capital_external_identifier} IS NULL
+          AND ${t.capital_request_id} IS NULL
+          AND ${t.capital_request_auth} IS NULL
+          AND ${t.capital_paid_at} IS NULL
+        ) OR (
+          ${t.capital_total} > 0
+          AND ${t.capital_transaction_uuid} IS NOT NULL
+          AND ${t.capital_external_identifier} IS NOT NULL
+          AND ${t.capital_paid_at} IS NOT NULL
+        )`
       ),
       check(
         "pagalo_payment_imports_total_matches_chk",
@@ -865,11 +885,11 @@
       ),
       check(
         "pagalo_payment_imports_transactions_different_chk",
-        sql`${t.capital_transaction_uuid} <> ${t.facturable_transaction_uuid}`
+        sql`${t.capital_transaction_uuid} IS NULL OR ${t.capital_transaction_uuid} <> ${t.facturable_transaction_uuid}`
       ),
       check(
         "pagalo_payment_imports_external_ids_different_chk",
-        sql`${t.capital_external_identifier} <> ${t.facturable_external_identifier}`
+        sql`${t.capital_external_identifier} IS NULL OR ${t.capital_external_identifier} <> ${t.facturable_external_identifier}`
       ),
     ]
   );

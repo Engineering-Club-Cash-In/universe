@@ -29,17 +29,12 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
 	etiquetaMetodoContacto,
 	evaluarGestionTempranaB1,
 	type ResultadoGestionB1,
 } from "server/src/lib/gestion-temprana-b1";
 import { toast } from "sonner";
+import { ActividadBot } from "@/components/cobros/actividad-bot";
 import { PromesaActivaBadge } from "@/components/cobros/promesa-activa-badge";
 import { ReferenciasView } from "@/components/cobros/ReferenciasView";
 import { SeguimientoRecurrenteModal } from "@/components/cobros/seguimiento-recurrente-modal";
@@ -70,6 +65,12 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -473,23 +474,48 @@ function RouteComponent() {
 	);
 	const [confirmarEstadoCuenta, setConfirmarEstadoCuenta] = useState(false);
 	/**
- * Los canales del dropdown "Registrar Contacto". Todos abren el MISMO modal
- * (ContactoModal) con su `metodoInicial`; agregar un canal nuevo es una fila
- * acá, no otra copia del blob de props.
- */
-const CANALES_CONTACTO = [
-	{ metodo: "llamada", label: "Registrar Llamada", Icono: Phone, color: "text-blue-600 dark:text-blue-400" },
-	{ metodo: "whatsapp", label: "WhatsApp", Icono: MessageCircle, color: "text-green-600 dark:text-green-400" },
-	{ metodo: "email", label: "Email", Icono: Mail, color: "text-indigo-600 dark:text-indigo-400" },
-	{ metodo: "sms", label: "SMS", Icono: MessageSquare, color: "text-amber-600 dark:text-amber-400" },
-	{ metodo: "visita_domicilio", label: "Visita", Icono: MapPin, color: "text-slate-600 dark:text-slate-400" },
-] as const;
+	 * Los canales del dropdown "Registrar Contacto". Todos abren el MISMO modal
+	 * (ContactoModal) con su `metodoInicial`; agregar un canal nuevo es una fila
+	 * acá, no otra copia del blob de props.
+	 */
+	const CANALES_CONTACTO = [
+		{
+			metodo: "llamada",
+			label: "Registrar Llamada",
+			Icono: Phone,
+			color: "text-blue-600 dark:text-blue-400",
+		},
+		{
+			metodo: "whatsapp",
+			label: "WhatsApp",
+			Icono: MessageCircle,
+			color: "text-green-600 dark:text-green-400",
+		},
+		{
+			metodo: "email",
+			label: "Email",
+			Icono: Mail,
+			color: "text-indigo-600 dark:text-indigo-400",
+		},
+		{
+			metodo: "sms",
+			label: "SMS",
+			Icono: MessageSquare,
+			color: "text-amber-600 dark:text-amber-400",
+		},
+		{
+			metodo: "visita_domicilio",
+			label: "Visita",
+			Icono: MapPin,
+			color: "text-slate-600 dark:text-slate-400",
+		},
+	] as const;
 
-type CanalContacto =
-	| (typeof CANALES_CONTACTO)[number]["metodo"]
-	| "carta_notarial";
+	type CanalContacto =
+		| (typeof CANALES_CONTACTO)[number]["metodo"]
+		| "carta_notarial";
 
-const ITEMS_PER_PAGE = 20;
+	const ITEMS_PER_PAGE = 20;
 
 	// Estado del modal de oportunidad
 	const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
@@ -1220,16 +1246,18 @@ const ITEMS_PER_PAGE = 20;
 											</Button>
 										</DropdownMenuTrigger>
 										<DropdownMenuContent align="end">
-											{CANALES_CONTACTO.map(({ metodo, label, Icono, color }) => (
-												<DropdownMenuItem
-													key={metodo}
-													className="cursor-pointer"
-													onClick={() => setCanalContacto(metodo)}
-												>
-													<Icono className={`mr-2 h-4 w-4 ${color}`} />
-													{label}
-												</DropdownMenuItem>
-											))}
+											{CANALES_CONTACTO.map(
+												({ metodo, label, Icono, color }) => (
+													<DropdownMenuItem
+														key={metodo}
+														className="cursor-pointer"
+														onClick={() => setCanalContacto(metodo)}
+													>
+														<Icono className={`mr-2 h-4 w-4 ${color}`} />
+														{label}
+													</DropdownMenuItem>
+												),
+											)}
 										</DropdownMenuContent>
 									</DropdownMenu>
 
@@ -1358,9 +1386,9 @@ const ITEMS_PER_PAGE = 20;
 												¿Enviar estado de cuenta?
 											</AlertDialogTitle>
 											<AlertDialogDescription>
-												Se generará el estado de cuenta actualizado del
-												crédito y se enviará por WhatsApp al teléfono
-												registrado del cliente.
+												Se generará el estado de cuenta actualizado del crédito
+												y se enviará por WhatsApp al teléfono registrado del
+												cliente.
 											</AlertDialogDescription>
 										</AlertDialogHeader>
 										<AlertDialogFooter>
@@ -1374,7 +1402,7 @@ const ITEMS_PER_PAGE = 20;
 									</AlertDialogContent>
 								</AlertDialog>
 							</>
-												) : (
+						) : (
 							<div className="rounded-md border border-yellow-200 bg-yellow-50 p-4">
 								<p className="text-sm text-yellow-800">
 									Este crédito aún no tiene caso de cobros asignado. Se creará
@@ -2635,6 +2663,16 @@ const ITEMS_PER_PAGE = 20;
 							)}
 						</CardContent>
 					</Card>
+
+					{/* Lo que el cliente hizo por su cuenta en el bot de WhatsApp,
+					    agrupado por referencia (CB-110). Solo se puede montar con
+					    caso.id: sin caso no hay puente hacia el lead. */}
+					{caso.id && (
+						<ActividadBot
+							casoCobroId={caso.id}
+							numeroSifcoCaso={caso.numeroCreditoSifco ?? id ?? null}
+						/>
+					)}
 				</TabsContent>
 
 				{/* ESTADO DE CUENTA — la deuda: cuotas, contrato y convenio. */}
@@ -2863,7 +2901,9 @@ const ITEMS_PER_PAGE = 20;
 																							maximumFractionDigits: 2,
 																						})}
 																						{Number(pago.montoBoleta ?? 0) >
-																							Number(pago.montoAplicado ?? 0) && (
+																							Number(
+																								pago.montoAplicado ?? 0,
+																							) && (
 																							<span className="ml-1 font-normal text-muted-foreground">
 																								de Q
 																								{Number(
@@ -2879,7 +2919,8 @@ const ITEMS_PER_PAGE = 20;
 																						className={
 																							pago.estado === "validado"
 																								? "bg-green-100 text-green-800"
-																								: pago.estado === "en_validacion"
+																								: pago.estado ===
+																										"en_validacion"
 																									? "bg-blue-100 text-blue-800"
 																									: "bg-amber-100 text-amber-800"
 																						}

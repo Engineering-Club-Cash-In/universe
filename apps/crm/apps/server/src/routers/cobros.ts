@@ -20,6 +20,7 @@ import {
 import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
+import { botCobrosInteracciones } from "../db/schema/bot-cobros-interacciones";
 import {
 	carteraBackReferences,
 	pagoReferences,
@@ -37,6 +38,7 @@ import {
 import { cobrosSendLogs } from "../db/schema/cobros-send-logs";
 import {
 	clients,
+	coDebtors,
 	leads,
 	opportunities,
 	PARENTESCO_VALUES,
@@ -699,6 +701,29 @@ async function capturarBucketSnapshot(
 		return null;
 	}
 }
+
+/** Una fila del historial del bot, lista para pintar (getActividadBot). */
+type ActividadBotInteraccion = {
+	id: string;
+	accion: string;
+	exito: boolean;
+	codigo: string | null;
+	numeroSifco: string | null;
+	detalle: Record<string, unknown>;
+	creadoEn: Date;
+};
+
+/** Una conversación completa del bot: la referencia del paso 1 y sus filas. */
+type ActividadBotSesion = {
+	/** Correlativo del CLIENTE, calculado al leer: "Referencia 1" = la más vieja. */
+	numero: number;
+	/** Solo el sufijo del uuid: el id completo es la llave de la sesión (D-44). */
+	referenciaSufijo: string;
+	inicio: Date;
+	operadoPor: "titular" | "codeudor";
+	codeudorNombre: string | null;
+	interacciones: ActividadBotInteraccion[];
+};
 
 export const cobrosRouter = {
 	// Dashboard de cobros - Vista general del embudo
@@ -1838,6 +1863,129 @@ export const cobrosRouter = {
 			}
 
 			return filas[0];
+		}),
+
+	// Actividad del cliente en el bot de WhatsApp, agrupada por referencia
+	// (CB-110). El agrupado y el correlativo los hace el server (D-44): la web
+	// pinta, no calcula. Se devuelven TODAS las sesiones del cliente —titular y
+	// codeudores—, no solo las del crédito de la ficha: el historial es del
+	// cliente, la ficha solo es la puerta.
+	// Contrato: docs/features/bot-whatsapp-cobros/06-historial-interacciones.md
+	getActividadBot: cobrosProcedure
+		.input(z.object({ casoCobroId: z.string().uuid() }))
+		.handler(async ({ input }) => {
+			const vacio = {
+				sesiones: [] as ActividadBotSesion[],
+				accesosFallidos: [] as ActividadBotInteraccion[],
+			};
+
+			const [caso] = await db
+				.select({ numeroSifco: casosCobros.numeroCreditoSifco })
+				.from(casosCobros)
+				.where(eq(casosCobros.id, input.casoCobroId))
+				.limit(1);
+
+			if (!caso?.numeroSifco) return vacio;
+
+			// El puente de siempre: numero_credito_sifco → oportunidad → lead.
+			const [opp] = await db
+				.select({ leadId: opportunities.leadId })
+				.from(opportunities)
+				.where(
+					and(
+						eq(opportunities.numeroSifco, caso.numeroSifco),
+						inArray(opportunities.status, ["won", "migrate"]),
+					),
+				)
+				.orderBy(desc(opportunities.createdAt))
+				.limit(1);
+
+			if (!opp?.leadId) return vacio;
+
+			// Los codeudores de sus oportunidades también operan el bot (D-11).
+			const codeudores = await db
+				.select({ id: coDebtors.id, nombre: coDebtors.fullName })
+				.from(coDebtors)
+				.innerJoin(opportunities, eq(opportunities.id, coDebtors.opportunityId))
+				.where(eq(opportunities.leadId, opp.leadId));
+
+			const nombrePorCodeudor = new Map(
+				codeudores.map((c) => [c.id, c.nombre]),
+			);
+			const codeudorIds = codeudores.map((c) => c.id);
+
+			const delCliente = eq(botCobrosInteracciones.leadId, opp.leadId);
+			const filas = await db
+				.select()
+				.from(botCobrosInteracciones)
+				.where(
+					codeudorIds.length > 0
+						? or(
+								delCliente,
+								inArray(botCobrosInteracciones.coDebtorId, codeudorIds),
+							)
+						: delCliente,
+				)
+				.orderBy(asc(botCobrosInteracciones.creadoEn));
+
+			const aInteraccion = (
+				fila: (typeof filas)[number],
+			): ActividadBotInteraccion => ({
+				id: fila.id,
+				accion: fila.accion,
+				exito: fila.exito,
+				codigo: fila.codigo,
+				numeroSifco: fila.numeroSifco,
+				detalle: fila.detalle ?? {},
+				creadoEn: fila.creadoEn,
+			});
+
+			// Agrupar por sesión (otp_id) preservando el orden de llegada: así el
+			// índice del grupo ES el correlativo del cliente ("Referencia 1" = la
+			// más vieja, D-44). Las filas sin sesión (acceso_fallido) van aparte.
+			const porSesion = new Map<string, (typeof filas)[number][]>();
+			const sinSesion: (typeof filas)[number][] = [];
+
+			for (const fila of filas) {
+				if (!fila.otpId) {
+					sinSesion.push(fila);
+					continue;
+				}
+				const grupo = porSesion.get(fila.otpId);
+				if (grupo) grupo.push(fila);
+				else porSesion.set(fila.otpId, [fila]);
+			}
+
+			const sesiones = [...porSesion.entries()].map(
+				([otpId, grupo], indice): ActividadBotSesion => {
+					const coDebtorId =
+						grupo.find((f) => f.coDebtorId)?.coDebtorId ?? null;
+
+					return {
+						numero: indice + 1,
+						// El uuid crudo no viaja al front: durante 30 minutos es la
+						// llave de la sesión (D-44). El sufijo alcanza para soporte.
+						referenciaSufijo: otpId.slice(-6),
+						inicio: grupo[0].creadoEn,
+						operadoPor: coDebtorId
+							? ("codeudor" as const)
+							: ("titular" as const),
+						codeudorNombre: coDebtorId
+							? (nombrePorCodeudor.get(coDebtorId) ?? null)
+							: null,
+						interacciones: grupo.map(aInteraccion),
+					};
+				},
+			);
+
+			// La más reciente primero, que es como se lee una ficha.
+			sesiones.reverse();
+			sinSesion.reverse();
+
+			return {
+				sesiones,
+				accesosFallidos: sinSesion.map(aInteraccion),
+			};
 		}),
 
 	// Obtener historial de contactos de un caso

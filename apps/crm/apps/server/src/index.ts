@@ -54,11 +54,12 @@ import {
 	autenticarBotCobros,
 	autenticarCarteraWebhook,
 } from "./lib/bot-cobros/auth";
-import { autenticarNotificacionesCarteraBack } from "./lib/notifications-api-key-auth";
 import { docsBotCobros, openapiBotCobros } from "./lib/bot-cobros/docs";
+import { historialBotCobros } from "./lib/bot-cobros/historial";
 import { createContext } from "./lib/context";
 import { toDateStrGT } from "./lib/guatemala-month-window";
 import { getTestPhone, isTestModeEnabled } from "./lib/messaging-test-mode";
+import { autenticarNotificacionesCarteraBack } from "./lib/notifications-api-key-auth";
 import { PERMISSIONS } from "./lib/roles";
 import { bucketCapacidadRouter } from "./routers/bucket-capacidad";
 import {
@@ -1060,7 +1061,8 @@ app.post(
 				return c.json(
 					{
 						success: false,
-						error: "Los campos 'pagoId', 'numeroSifco' y 'reciboUrl' son requeridos",
+						error:
+							"Los campos 'pagoId', 'numeroSifco' y 'reciboUrl' son requeridos",
 					},
 					400,
 				);
@@ -1098,6 +1100,13 @@ app.post(
 // A diferencia de /info/* (bot de ventas), estos endpoints exponen datos de
 // clientes con crédito, así que van autenticados con la API key del integrador.
 // Ver docs/features/bot-whatsapp-cobros/
+
+// Historial de interacciones para la Ficha 360 (CB-110, D-40/D-41). Es comodín
+// A PROPÓSITO: todo servicio del bot —incluido el que se monte acá abajo el
+// año que viene— deja su rastro sin que nadie haga nada. Quedar fuera exige
+// una entrada justificada en RUTAS_SIN_HISTORIAL (lib/bot-cobros/historial.ts).
+app.use("/api/bot/cobros/*", historialBotCobros);
+
 app.post(
 	"/api/bot/cobros/buscar-cliente",
 	autenticarBotCobros,

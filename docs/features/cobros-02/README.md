@@ -34,6 +34,7 @@ accountability medible (un asesor responde por su bucket, no por una lista hered
 | 3 | [Recordatorios automáticos](./03-recordatorios-automaticos.md) | Premora D-5…D-0, recordatorios de convenio, reducción para quien paga bien (CB-010) |
 | 4 | [Operación diaria](./04-operacion-diaria.md) | Apertura, cola del día, SLA, agenda, alertas, promesas, reasignación manual |
 | 5 | [Datos y ambientes](./05-datos-y-ambientes.md) | Dónde vive cada base, el sandbox `cartera_cobros2`, migraciones, trampas conocidas |
+| 6 | [Ficha 360 del crédito](./06-ficha-360.md) | La pantalla de trabajo del asesor: anatomía, fuentes de datos, registro de contactos, estado de cuenta y decisiones |
 | — | [**Runbook · Refrescar el sandbox**](./RUNBOOK-refrescar-sandbox.md) | Cómo poner el sandbox al día con producción sin perder el historial. Es también el ensayo del pase a producción |
 
 Y aparte, con documentación propia:

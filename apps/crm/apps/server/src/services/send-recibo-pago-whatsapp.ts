@@ -19,15 +19,22 @@
 
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db";
+import { user } from "../db/schema/auth";
 import { casosCobros, contratosFinanciamiento } from "../db/schema/cobros";
 import { clients, leads, opportunities } from "../db/schema/crm";
 import { vehicles } from "../db/schema/vehicles";
-import { user } from "../db/schema/auth";
-import { ROLES } from "../lib/roles";
 import { persistCobrosSendLog } from "../lib/cobros-send-log";
 import { getTestPhone, isTestModeEnabled } from "../lib/messaging-test-mode";
 import { primerTelefono } from "../lib/phone-utils";
+import { ROLES } from "../lib/roles";
 import { sendWhatsappTemplate } from "../lib/simpletech";
+import {
+	type ContactoAsesor,
+	construirCierreAsesor,
+	type ObtenerAsesor,
+	obtenerAsesorCartera,
+	resolverContactoAsesor,
+} from "./asesor-whatsapp";
 
 const TEMPLATE_NAME = "mensaje_adjunto";
 const LOG_PREFIX = "[ReciboPagoWhatsapp]";
@@ -81,7 +88,9 @@ interface DatosCaso {
  */
 const ESTADOS_CON_CREDITO = ["won", "migrate"] as const;
 
-async function cargarCasoPorSifco(numeroSifco: string): Promise<DatosCaso | null> {
+async function cargarCasoPorSifco(
+	numeroSifco: string,
+): Promise<DatosCaso | null> {
 	const [row] = await db
 		.select({
 			telefonoPrincipal: casosCobros.telefonoPrincipal,
@@ -114,7 +123,8 @@ async function cargarCasoPorSifco(numeroSifco: string): Promise<DatosCaso | null
 	// SIN_TELEFONO en vez de intentar leads.phone.
 	const tieneTelefonoValido =
 		row &&
-		(primerTelefono(row.telefonoPrincipal) ?? primerTelefono(row.telefonoAlternativo));
+		(primerTelefono(row.telefonoPrincipal) ??
+			primerTelefono(row.telefonoAlternativo));
 	if (tieneTelefonoValido) return row;
 
 	const [fallback] = await db
@@ -167,7 +177,7 @@ export function construirMensajeReciboPago(
 		placa: string | null;
 	},
 	numeroSifco: string,
-	extra: { numeroCuota?: number | null; asesorNombre?: string | null; asesorTelefono?: string | null } = {},
+	extra: { numeroCuota?: number | null; asesor?: ContactoAsesor | null } = {},
 ): string {
 	const saludo = clienteNombre ? `Hola ${clienteNombre}` : "Hola";
 	const descripcionVehiculo = [vehiculo.marca, vehiculo.modelo, vehiculo.year]
@@ -176,20 +186,17 @@ export function construirMensajeReciboPago(
 	const identificador = descripcionVehiculo
 		? ` de tu ${descripcionVehiculo}${vehiculo.placa ? `, placas ${vehiculo.placa}` : ""}`
 		: ` de tu crédito ${numeroSifco}`;
-	const cuota = extra.numeroCuota != null ? ` (cuota ${extra.numeroCuota})` : "";
+	const cuota =
+		extra.numeroCuota != null ? ` (cuota ${extra.numeroCuota})` : "";
 
-	const asesorTelefono = extra.asesorTelefono?.trim();
-	const cierre = asesorTelefono
-		? `Cualquier duda, llama a tu asesor${extra.asesorNombre ? ` ${extra.asesorNombre}` : ""} al ${asesorTelefono}.`
-		: "Cualquier duda, comunícate con tu asesor.";
-
-	return `${saludo}, te compartimos el recibo de tu pago${identificador}${cuota} en el documento adjunto. ${cierre}`;
+	return `${saludo}, te compartimos el recibo de tu pago${identificador}${cuota} en el documento adjunto. ${construirCierreAsesor(extra.asesor ?? null)}`;
 }
 
 /** Deps inyectables solo para tests — en producción no se pasa nada. */
 export interface ReciboPagoDeps {
 	cargarCaso?: (numeroSifco: string) => Promise<DatosCaso | null>;
 	obtenerUsuarioSistema?: () => Promise<string | null>;
+	obtenerAsesor?: ObtenerAsesor;
 	enviar?: typeof sendWhatsappTemplate;
 	guardarLog?: typeof persistCobrosSendLog;
 }
@@ -198,13 +205,24 @@ export async function sendReciboPagoWhatsapp(
 	params: SendReciboPagoWhatsappParams,
 	deps: ReciboPagoDeps = {},
 ): Promise<SendReciboPagoWhatsappResult> {
-	const { numeroSifco, reciboUrl, clienteNombre, pagoId, numeroCuota, asesorNombre, asesorTelefono } = params;
+	const {
+		numeroSifco,
+		reciboUrl,
+		clienteNombre,
+		pagoId,
+		numeroCuota,
+		asesorNombre,
+		asesorTelefono,
+	} = params;
 	const cargarCaso = deps.cargarCaso ?? cargarCasoPorSifco;
 	const obtenerUsuario = deps.obtenerUsuarioSistema ?? obtenerUsuarioSistema;
 	const enviar = deps.enviar ?? sendWhatsappTemplate;
 	const guardarLog = deps.guardarLog ?? persistCobrosSendLog;
+	const obtenerAsesor = deps.obtenerAsesor ?? obtenerAsesorCartera;
 
-	const fallo = (codigo: ReciboPagoErrorCodigo): SendReciboPagoWhatsappResult => ({
+	const fallo = (
+		codigo: ReciboPagoErrorCodigo,
+	): SendReciboPagoWhatsappResult => ({
 		sent: false,
 		codigo,
 		mensaje: MENSAJES_ERROR[codigo],
@@ -216,7 +234,9 @@ export async function sendReciboPagoWhatsapp(
 		caso = await cargarCaso(numeroSifco);
 	} catch (error) {
 		const msg = error instanceof Error ? error.message : String(error);
-		console.error(`${LOG_PREFIX} Error cargando caso para SIFCO ${numeroSifco}: ${msg}`);
+		console.error(
+			`${LOG_PREFIX} Error cargando caso para SIFCO ${numeroSifco}: ${msg}`,
+		);
 		return fallo("ERROR_INTERNO");
 	}
 	if (!caso) {
@@ -227,14 +247,17 @@ export async function sendReciboPagoWhatsapp(
 	// 2. Resolver teléfono.
 	const testMode = isTestModeEnabled();
 	const realPhone =
-		primerTelefono(caso.telefonoPrincipal) ?? primerTelefono(caso.telefonoAlternativo);
+		primerTelefono(caso.telefonoPrincipal) ??
+		primerTelefono(caso.telefonoAlternativo);
 
 	let telefonoDestino: string;
 	if (testMode) {
 		telefonoDestino = getTestPhone(2);
 	} else {
 		if (!realPhone) {
-			console.log(`${LOG_PREFIX} SIFCO ${numeroSifco} sin teléfono válido; se omite`);
+			console.log(
+				`${LOG_PREFIX} SIFCO ${numeroSifco} sin teléfono válido; se omite`,
+			);
 			return fallo("SIN_TELEFONO");
 		}
 		telefonoDestino = realPhone;
@@ -250,9 +273,16 @@ export async function sendReciboPagoWhatsapp(
 		return fallo("ERROR_INTERNO");
 	}
 	if (!createdBy) {
-		console.error(`${LOG_PREFIX} No hay usuario cobros_supervisor para atribuir el envío`);
+		console.error(
+			`${LOG_PREFIX} No hay usuario cobros_supervisor para atribuir el envío`,
+		);
 		return fallo("SIN_USUARIO_SISTEMA");
 	}
+	const asesor = await resolverContactoAsesor(
+		numeroSifco,
+		{ nombre: asesorNombre, telefono: asesorTelefono },
+		obtenerAsesor,
+	);
 
 	const mensaje = construirMensajeReciboPago(
 		clienteNombre,
@@ -263,7 +293,7 @@ export async function sendReciboPagoWhatsapp(
 			placa: caso.vehiculoPlaca,
 		},
 		numeroSifco,
-		{ numeroCuota, asesorNombre, asesorTelefono },
+		{ numeroCuota, asesor },
 	);
 
 	// 4. Enviar por WhatsApp.
@@ -314,7 +344,9 @@ export async function sendReciboPagoWhatsapp(
 	});
 
 	if (!result.success) {
-		console.error(`${LOG_PREFIX} Falló envío para pago ${pagoId}: ${result.error}`);
+		console.error(
+			`${LOG_PREFIX} Falló envío para pago ${pagoId}: ${result.error}`,
+		);
 		return fallo("ERROR_ENVIO");
 	}
 

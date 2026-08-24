@@ -55,7 +55,7 @@ Schema version: **1**
 | `notification_attempted` | boolean |
 | `operation` | enum: certify_document, lookup_internal_document, get_document, void_document, verify_document, lookup_taxpayer, list_clients, list_client_loans, get_loan_detail, list_installments, get_surcharges, get_statement, get_loan_info, bulk_sync, put_upload, put_invoice_pdf, create_signed_url, delete_object, fetch_invoice_logo, send_failed_invoice_report, write |
 | `payment_kind` | enum: normal, other_only, capital_only, agreement |
-| `previous_payment_state` | enum: applied, pending |
+| `previous_payment_state` | enum: applied, pending, unknown |
 | `processed_count` | integer 0..1000000000 |
 | `provider` | enum: cofidi_sat, cofidi_nit, sifco, cloudflare_r2, remote_asset, email_provider |
 | `reason_code` | enum: schema_invalid, duplicate_receipt, payment_not_found, credit_not_found, agreement_already_active, payment_already_applied, no_investors, purchase_exceeds_mirror, missing_participation_date, state_conflict, provider_rejected, local_state_inconsistent, manual_reconciliation_required, invalid_late_fee_amount, invalid_installment_count, overdue_count_mismatch, excluded_credit_state, amount_out_of_range, override_reason_missing, user_not_found, active_late_fee_not_found, concurrent_run, installments_not_found, paid_installment_conflict, item_failures, missing_payment_reference, overdue_installments_remain, capital_contribution_not_found |

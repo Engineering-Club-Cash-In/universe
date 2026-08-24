@@ -10,6 +10,8 @@ import {
   emitCreditCapitalPaymentAuditRejected,
   emitCreditLateFee,
   emitCreditDueDate,
+  emitInvoiceVoiding,
+  emitPaymentReversal,
   emitPaymentReversalToPending,
   emitRecoveredDuplicatePendingInstallment,
   resolveCarteraLogEnvironment,
@@ -311,5 +313,40 @@ describe('Cartera structured logger adapter', () => {
 
     const broken = createCarteraStructuredLogger({ sink: () => { throw new Error('synthetic sink failure'); } });
     expect(() => emitCreditDueDate({ outcome: 'failed', operation: 'json_bulk_update', durationMs: 1, errorCode: 'unknown' }, broken)).not.toThrow();
+  });
+
+  test('emits finite payment-reversal and invoice-voiding outcomes without business data', () => {
+    const lines: string[] = [];
+    const logger = createCarteraStructuredLogger({
+      environment: 'staging',
+      clock: () => new Date('2026-08-24T00:00:00.000Z'),
+      sink: (line) => lines.push(line),
+    });
+
+    emitPaymentReversal({ outcome: 'completed', previousPaymentState: 'applied', creditUpdated: true, investmentsReversed: true, manualActionRequired: false, durationMs: 9 }, logger);
+    emitPaymentReversal({ outcome: 'partially_completed', previousPaymentState: 'pending', creditUpdated: false, investmentsReversed: true, manualActionRequired: true, durationMs: 11, reasonCode: 'manual_reconciliation_required' }, logger);
+    emitPaymentReversal({ outcome: 'rejected', previousPaymentState: 'unknown', creditUpdated: false, investmentsReversed: false, manualActionRequired: false, durationMs: 1, reasonCode: 'schema_invalid' }, logger);
+    emitPaymentReversal({ outcome: 'failed', previousPaymentState: 'unknown', creditUpdated: false, investmentsReversed: false, manualActionRequired: false, durationMs: 2, errorCode: 'unknown' }, logger);
+    emitInvoiceVoiding({ outcome: 'completed', processedCount: 2, succeededCount: 2, failedCount: 0, manualActionRequired: false, durationMs: 4 }, logger);
+    emitInvoiceVoiding({ outcome: 'provider_rejected', processedCount: 2, succeededCount: 1, failedCount: 1, manualActionRequired: true, durationMs: 5, reasonCode: 'provider_rejected' }, logger);
+    emitInvoiceVoiding({ outcome: 'local_state_inconsistent', processedCount: 1, succeededCount: 0, failedCount: 1, manualActionRequired: true, durationMs: 6, errorCode: 'persistence_failed' }, logger);
+
+    expect(lines.map((line) => JSON.parse(line))).toEqual([
+      expect.objectContaining({ event: 'payment.reversal', outcome: 'completed', previous_payment_state: 'applied', credit_updated: true, investments_reversed: true, manual_action_required: false }),
+      expect.objectContaining({ event: 'payment.reversal', outcome: 'partially_completed', reason_code: 'manual_reconciliation_required', manual_action_required: true }),
+      expect.objectContaining({ event: 'payment.reversal', outcome: 'rejected', previous_payment_state: 'unknown', reason_code: 'schema_invalid' }),
+      expect.objectContaining({ event: 'payment.reversal', outcome: 'failed', previous_payment_state: 'unknown', error_code: 'unknown' }),
+      expect.objectContaining({ event: 'invoice.voiding', outcome: 'completed', voiding_mode: 'payment_reversal', provider: 'cofidi_sat', processed_count: 2, succeeded_count: 2, failed_count: 0 }),
+      expect.objectContaining({ event: 'invoice.voiding', outcome: 'provider_rejected', reason_code: 'provider_rejected', manual_action_required: true }),
+      expect.objectContaining({ event: 'invoice.voiding', outcome: 'local_state_inconsistent', error_code: 'persistence_failed', manual_action_required: true }),
+    ]);
+    for (const line of lines) {
+      const entry = JSON.parse(line) as Record<string, unknown>;
+      for (const key of ['credito_id', 'pago_id', 'factura_id', 'uuid', 'serie', 'numero', 'fecha', 'nit', 'xml', 'base64', 'monto', 'path', 'sql', 'message', 'stack', 'error']) expect(entry).not.toHaveProperty(key);
+    }
+
+    const broken = createCarteraStructuredLogger({ sink: () => { throw new Error('synthetic sink failure'); } });
+    expect(() => emitPaymentReversal({ outcome: 'failed', previousPaymentState: 'unknown', creditUpdated: false, investmentsReversed: false, manualActionRequired: false, durationMs: 1, errorCode: 'unknown' }, broken)).not.toThrow();
+    expect(() => emitInvoiceVoiding({ outcome: 'failed', processedCount: 1, succeededCount: 0, failedCount: 1, manualActionRequired: true, durationMs: 1, errorCode: 'unknown' }, broken)).not.toThrow();
   });
 });

@@ -107,7 +107,7 @@ export const carteraCatalog = {
     credit_state_transition: { type: 'enum', values: ['to_active', 'to_agreement', 'to_delinquent', 'unchanged'] },
     requested_state: { type: 'enum', values: ['active', 'inactive'] },
     late_fee_recreation: { type: 'enum', values: ['not_required', 'completed', 'failed'] },
-    previous_payment_state: { type: 'enum', values: ['applied', 'pending'] },
+    previous_payment_state: { type: 'enum', values: ['applied', 'pending', 'unknown'] },
     voiding_mode: { type: 'enum', values: ['single', 'batch', 'payment_reversal'] },
     credit_type: { type: 'enum', values: ['new', 'renewal'] },
     advisor_assignment_source: { type: 'enum', values: ['provided', 'derived', 'unassigned'] },

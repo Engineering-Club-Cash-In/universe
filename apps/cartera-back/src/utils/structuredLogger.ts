@@ -191,6 +191,82 @@ type CreditDueDateResult =
       errorCode: "unknown";
     }>;
 
+type PaymentReversalState = "applied" | "pending" | "unknown";
+
+export type PaymentReversalResult =
+  | Readonly<{
+      outcome: "completed";
+      previousPaymentState: Exclude<PaymentReversalState, "unknown">;
+      creditUpdated: boolean;
+      investmentsReversed: boolean;
+      manualActionRequired: false;
+      durationMs: number;
+    }>
+  | Readonly<{
+      outcome: "partially_completed";
+      previousPaymentState: PaymentReversalState;
+      creditUpdated: boolean;
+      investmentsReversed: boolean;
+      manualActionRequired: true;
+      durationMs: number;
+      reasonCode: "manual_reconciliation_required" | "local_state_inconsistent";
+    }>
+  | Readonly<{
+      outcome: "rejected";
+      previousPaymentState: PaymentReversalState;
+      creditUpdated: boolean;
+      investmentsReversed: boolean;
+      manualActionRequired: boolean;
+      durationMs: number;
+      reasonCode: "schema_invalid" | "payment_not_found" | "credit_not_found" | "state_conflict" | "user_not_found" | "manual_reconciliation_required";
+    }>
+  | Readonly<{
+      outcome: "failed";
+      previousPaymentState: PaymentReversalState;
+      creditUpdated: boolean;
+      investmentsReversed: boolean;
+      manualActionRequired: boolean;
+      durationMs: number;
+      errorCode: "persistence_failed" | "unknown";
+    }>;
+
+export type InvoiceVoidingResult =
+  | Readonly<{
+      outcome: "completed";
+      processedCount: number;
+      succeededCount: number;
+      failedCount: number;
+      manualActionRequired: false;
+      durationMs: number;
+    }>
+  | Readonly<{
+      outcome: "provider_rejected";
+      processedCount: number;
+      succeededCount: number;
+      failedCount: number;
+      manualActionRequired: true;
+      durationMs: number;
+      reasonCode: "provider_rejected";
+    }>
+  | Readonly<{
+      outcome: "local_state_inconsistent";
+      processedCount: number;
+      succeededCount: number;
+      failedCount: number;
+      manualActionRequired: true;
+      durationMs: number;
+      errorCode: "persistence_failed";
+    }>
+  | Readonly<{
+      outcome: "failed";
+      processedCount: number;
+      succeededCount: number;
+      failedCount: number;
+      manualActionRequired: boolean;
+      durationMs: number;
+      errorCode: "timeout" | "provider_unavailable" | "unknown";
+    }>;
+
 function emitAuditWithoutAffectingControlFlow(emit: () => void): void {
   try {
     emit();
@@ -431,6 +507,68 @@ export function emitCreditDueDate(
     logger.emit("credit.due_date", result.outcome, {
       due_date_operation: result.operation,
       duration_ms: result.durationMs,
+      error_code: result.errorCode,
+    });
+  });
+}
+
+export function emitPaymentReversal(
+  result: PaymentReversalResult,
+  logger: CarteraStructuredLogger = carteraStructuredLogger,
+): void {
+  emitAuditWithoutAffectingControlFlow(() => {
+    const common = {
+      previous_payment_state: result.previousPaymentState,
+      credit_updated: result.creditUpdated,
+      investments_reversed: result.investmentsReversed,
+      manual_action_required: result.manualActionRequired,
+      duration_ms: result.durationMs,
+    };
+    if (result.outcome === "completed") {
+      logger.emit("payment.reversal", "completed", common);
+      return;
+    }
+    if (result.outcome === "partially_completed" || result.outcome === "rejected") {
+      logger.emit("payment.reversal", result.outcome, {
+        ...common,
+        reason_code: result.reasonCode,
+      });
+      return;
+    }
+    logger.emit("payment.reversal", "failed", {
+      ...common,
+      error_code: result.errorCode,
+    });
+  });
+}
+
+export function emitInvoiceVoiding(
+  result: InvoiceVoidingResult,
+  logger: CarteraStructuredLogger = carteraStructuredLogger,
+): void {
+  emitAuditWithoutAffectingControlFlow(() => {
+    const common = {
+      voiding_mode: "payment_reversal" as const,
+      provider: "cofidi_sat" as const,
+      processed_count: result.processedCount,
+      succeeded_count: result.succeededCount,
+      failed_count: result.failedCount,
+      manual_action_required: result.manualActionRequired,
+      duration_ms: result.durationMs,
+    };
+    if (result.outcome === "completed") {
+      logger.emit("invoice.voiding", "completed", common);
+      return;
+    }
+    if (result.outcome === "provider_rejected") {
+      logger.emit("invoice.voiding", "provider_rejected", {
+        ...common,
+        reason_code: result.reasonCode,
+      });
+      return;
+    }
+    logger.emit("invoice.voiding", result.outcome, {
+      ...common,
       error_code: result.errorCode,
     });
   });

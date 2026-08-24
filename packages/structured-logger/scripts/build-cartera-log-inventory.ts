@@ -29,6 +29,33 @@ const sliceManifests = [
     file: 'SECOND_SLICE_DISPOSITIONS.json',
     paths: new Set(['apps/cartera-back/src/controllers/revalidatePayment.ts']),
   },
+  {
+    file: 'THIRD_SLICE_DISPOSITIONS.json',
+    paths: new Set([
+      'apps/cartera-back/src/controllers/creditosNuevosConAbonos.ts',
+      'apps/cartera-back/src/routers/creditosNuevosConAbonos.ts',
+    ]),
+  },
+  {
+    file: 'FOURTH_SLICE_DISPOSITIONS.json',
+    paths: new Set(['apps/cartera-back/src/controllers/abonosCapital.ts']),
+  },
+  {
+    file: 'FIFTH_SLICE_DISPOSITIONS.json',
+    paths: new Set(['apps/cartera-back/src/controllers/revertPaymentToPending.ts']),
+  },
+  {
+    file: 'SIXTH_SLICE_DISPOSITIONS.json',
+    paths: new Set(['apps/cartera-back/src/controllers/latefee.ts']),
+  },
+  {
+    file: 'SEVENTH_SLICE_DISPOSITIONS.json',
+    paths: new Set(['apps/cartera-back/src/controllers/updateDueDate.ts']),
+  },
+  {
+    file: 'EIGHTH_SLICE_DISPOSITIONS.json',
+    paths: new Set(['apps/cartera-back/src/controllers/reversePayment.ts']),
+  },
 ] as const;
 const reviewedPaths = new Set(sliceManifests.flatMap(({ paths }) => [...paths]));
 

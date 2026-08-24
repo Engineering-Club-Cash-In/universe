@@ -193,6 +193,43 @@ type CreditDueDateResult =
 
 type PaymentReversalState = "applied" | "pending" | "unknown";
 
+type JsonRecalculationOperation =
+  | "recalculate"
+  | "process_pools"
+  | "delete_credits"
+  | "update_investor_installments";
+
+export type CreditScheduleRecalculationResult = Readonly<{
+  outcome: "completed";
+  operation: JsonRecalculationOperation;
+  processedCount: number;
+  succeededCount: number;
+  failedCount: number;
+  skippedCount: number;
+  manualActionRequired: false;
+  durationMs: number;
+}> | Readonly<{
+  outcome: "partially_completed" | "rejected";
+  operation: JsonRecalculationOperation;
+  processedCount: number;
+  succeededCount: number;
+  failedCount: number;
+  skippedCount: number;
+  manualActionRequired: boolean;
+  durationMs: number;
+  reasonCode: "item_failures" | "no_actionable_items";
+}> | Readonly<{
+  outcome: "partially_persisted" | "failed";
+  operation: JsonRecalculationOperation;
+  processedCount: number;
+  succeededCount: number;
+  failedCount: number;
+  skippedCount: number;
+  manualActionRequired: boolean;
+  durationMs: number;
+  errorCode: "persistence_failed" | "unknown";
+}>;
+
 export type PaymentReversalResult =
   | Readonly<{
       outcome: "completed";
@@ -571,6 +608,41 @@ export function emitInvoiceVoiding(
       ...common,
       error_code: result.errorCode,
     });
+  });
+}
+
+export function emitCreditScheduleRecalculation(
+  result: CreditScheduleRecalculationResult,
+  logger: CarteraStructuredLogger = carteraStructuredLogger,
+): void {
+  emitAuditWithoutAffectingControlFlow(() => {
+    const common = {
+      recalculation_strategy: "from_json" as const,
+      recalculation_operation: result.operation,
+      processed_count: result.processedCount,
+      succeeded_count: result.succeededCount,
+      failed_count: result.failedCount,
+      skipped_count: result.skippedCount,
+      manual_action_required: result.manualActionRequired,
+      duration_ms: result.durationMs,
+    };
+    if (result.outcome === "completed") {
+      logger.emit("credit.schedule_recalculation", "completed", common);
+      return;
+    }
+    if (result.outcome === "partially_completed" || result.outcome === "rejected") {
+      logger.emit("credit.schedule_recalculation", result.outcome, {
+        ...common,
+        reason_code: result.reasonCode,
+      });
+      return;
+    }
+    if ("errorCode" in result) {
+      logger.emit("credit.schedule_recalculation", result.outcome, {
+        ...common,
+        error_code: result.errorCode,
+      });
+    }
   });
 }
 

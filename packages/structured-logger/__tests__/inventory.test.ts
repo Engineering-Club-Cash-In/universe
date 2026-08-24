@@ -65,7 +65,7 @@ describe('Cartera log-call inventory', () => {
 
   test('keeps all non-slice calls explicitly unresolved until reviewed', async () => {
     const target = await loadInventory('CARTERA_LOG_CALLS_56717dde.csv');
-    expect(target.filter(({ disposition }) => disposition === 'unresolved')).toHaveLength(2_664);
+    expect(target.filter(({ disposition }) => disposition === 'unresolved')).toHaveLength(2_579);
   });
 
   test('has no unresolved call in the payment revalidation slice', async () => {
@@ -134,5 +134,16 @@ describe('Cartera log-call inventory', () => {
     expect(eighthSlice.filter(({ disposition }) => disposition === 'unresolved')).toHaveLength(0);
     expect(eighthSlice.filter(({ disposition }) => disposition === 'remove')).toHaveLength(79);
     expect(eighthSlice.filter(({ disposition }) => disposition === 'event')).toHaveLength(4);
+  });
+
+  test('has no unresolved call in the JSON-recalculation domain slice', async () => {
+    const target = await loadInventory('CARTERA_LOG_CALLS_56717dde.csv');
+    const ninthSlice = target.filter(({ path }) =>
+      path.endsWith('/src/controllers/recalculateFromJson.ts')
+      || path.endsWith('/src/routers/recalculateFromJson.ts'));
+    expect(ninthSlice).toHaveLength(85);
+    expect(ninthSlice.filter(({ disposition }) => disposition === 'unresolved')).toHaveLength(0);
+    expect(ninthSlice.filter(({ disposition }) => disposition === 'remove')).toHaveLength(73);
+    expect(ninthSlice.filter(({ disposition }) => disposition === 'event')).toHaveLength(12);
   });
 });

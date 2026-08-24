@@ -56,6 +56,13 @@ const sliceManifests = [
     file: 'EIGHTH_SLICE_DISPOSITIONS.json',
     paths: new Set(['apps/cartera-back/src/controllers/reversePayment.ts']),
   },
+  {
+    file: 'NINTH_SLICE_DISPOSITIONS.json',
+    paths: new Set([
+      'apps/cartera-back/src/controllers/recalculateFromJson.ts',
+      'apps/cartera-back/src/routers/recalculateFromJson.ts',
+    ]),
+  },
 ] as const;
 const reviewedPaths = new Set(sliceManifests.flatMap(({ paths }) => [...paths]));
 

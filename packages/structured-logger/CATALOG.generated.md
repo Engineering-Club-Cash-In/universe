@@ -58,7 +58,8 @@ Schema version: **1**
 | `previous_payment_state` | enum: applied, pending, unknown |
 | `processed_count` | integer 0..1000000000 |
 | `provider` | enum: cofidi_sat, cofidi_nit, sifco, cloudflare_r2, remote_asset, email_provider |
-| `reason_code` | enum: schema_invalid, duplicate_receipt, payment_not_found, credit_not_found, agreement_already_active, payment_already_applied, no_investors, purchase_exceeds_mirror, missing_participation_date, state_conflict, provider_rejected, local_state_inconsistent, manual_reconciliation_required, invalid_late_fee_amount, invalid_installment_count, overdue_count_mismatch, excluded_credit_state, amount_out_of_range, override_reason_missing, user_not_found, active_late_fee_not_found, concurrent_run, installments_not_found, paid_installment_conflict, item_failures, missing_payment_reference, overdue_installments_remain, capital_contribution_not_found |
+| `reason_code` | enum: schema_invalid, duplicate_receipt, payment_not_found, credit_not_found, agreement_already_active, payment_already_applied, no_investors, purchase_exceeds_mirror, missing_participation_date, state_conflict, provider_rejected, local_state_inconsistent, manual_reconciliation_required, invalid_late_fee_amount, invalid_installment_count, overdue_count_mismatch, excluded_credit_state, amount_out_of_range, override_reason_missing, user_not_found, active_late_fee_not_found, concurrent_run, installments_not_found, paid_installment_conflict, item_failures, missing_payment_reference, overdue_installments_remain, capital_contribution_not_found, no_actionable_items |
+| `recalculation_operation` | enum: recalculate, process_pools, delete_credits, update_investor_installments |
 | `recalculation_strategy` | enum: single, bulk, from_json, migration |
 | `recovery_applied` | boolean |
 | `requested_state` | enum: active, inactive |
@@ -146,8 +147,11 @@ Schema version: **1**
 
 | Outcome | Level | Required | Optional | Constants |
 |---|---|---|---|---|
-| `completed` | `info` | `recalculation_strategy`, `affected_installment_count`, `duration_ms` | — | — |
-| `failed` | `error` | `recalculation_strategy`, `affected_installment_count`, `duration_ms`, `error_code` | — | — |
+| `completed` | `info` | `recalculation_strategy`, `recalculation_operation`, `processed_count`, `succeeded_count`, `failed_count`, `skipped_count`, `manual_action_required`, `duration_ms` | — | — |
+| `failed` | `error` | `recalculation_strategy`, `recalculation_operation`, `processed_count`, `succeeded_count`, `failed_count`, `skipped_count`, `manual_action_required`, `duration_ms`, `error_code` | — | — |
+| `partially_completed` | `warn` | `recalculation_strategy`, `recalculation_operation`, `processed_count`, `succeeded_count`, `failed_count`, `skipped_count`, `manual_action_required`, `duration_ms`, `reason_code` | — | — |
+| `partially_persisted` | `error` | `recalculation_strategy`, `recalculation_operation`, `processed_count`, `succeeded_count`, `failed_count`, `skipped_count`, `manual_action_required`, `duration_ms`, `error_code` | — | `manual_action_required=true` |
+| `rejected` | `warn` | `recalculation_strategy`, `recalculation_operation`, `processed_count`, `succeeded_count`, `failed_count`, `skipped_count`, `manual_action_required`, `duration_ms`, `reason_code` | — | — |
 
 ### `credit.update`
 

@@ -10,6 +10,7 @@ import {
   emitCreditCapitalPaymentAuditRejected,
   emitCreditLateFee,
   emitCreditDueDate,
+  emitCreditScheduleRecalculation,
   emitInvoiceVoiding,
   emitPaymentReversal,
   emitPaymentReversalToPending,
@@ -348,5 +349,31 @@ describe('Cartera structured logger adapter', () => {
     const broken = createCarteraStructuredLogger({ sink: () => { throw new Error('synthetic sink failure'); } });
     expect(() => emitPaymentReversal({ outcome: 'failed', previousPaymentState: 'unknown', creditUpdated: false, investmentsReversed: false, manualActionRequired: false, durationMs: 1, errorCode: 'unknown' }, broken)).not.toThrow();
     expect(() => emitInvoiceVoiding({ outcome: 'failed', processedCount: 1, succeededCount: 0, failedCount: 1, manualActionRequired: true, durationMs: 1, errorCode: 'unknown' }, broken)).not.toThrow();
+  });
+
+  test('emits finite JSON-recalculation terminals and isolates sink failures', () => {
+    const lines: string[] = [];
+    const logger = createCarteraStructuredLogger({
+      environment: 'staging',
+      clock: () => new Date('2026-08-24T00:00:00.000Z'),
+      sink: (line) => lines.push(line),
+    });
+
+    emitCreditScheduleRecalculation({ outcome: 'completed', operation: 'recalculate', processedCount: 2, succeededCount: 2, failedCount: 0, skippedCount: 0, manualActionRequired: false, durationMs: 8 }, logger);
+    emitCreditScheduleRecalculation({ outcome: 'partially_persisted', operation: 'delete_credits', processedCount: 2, succeededCount: 1, failedCount: 1, skippedCount: 0, manualActionRequired: true, durationMs: 9, errorCode: 'persistence_failed' }, logger);
+    emitCreditScheduleRecalculation({ outcome: 'rejected', operation: 'update_investor_installments', processedCount: 1, succeededCount: 0, failedCount: 0, skippedCount: 1, manualActionRequired: false, durationMs: 1, reasonCode: 'no_actionable_items' }, logger);
+
+    expect(lines.map((line) => JSON.parse(line))).toEqual([
+      expect.objectContaining({ event: 'credit.schedule_recalculation', outcome: 'completed', recalculation_strategy: 'from_json', recalculation_operation: 'recalculate', processed_count: 2, succeeded_count: 2, failed_count: 0, skipped_count: 0, manual_action_required: false }),
+      expect.objectContaining({ event: 'credit.schedule_recalculation', outcome: 'partially_persisted', recalculation_operation: 'delete_credits', error_code: 'persistence_failed', manual_action_required: true }),
+      expect.objectContaining({ event: 'credit.schedule_recalculation', outcome: 'rejected', recalculation_operation: 'update_investor_installments', reason_code: 'no_actionable_items' }),
+    ]);
+    for (const line of lines) {
+      const entry = JSON.parse(line) as Record<string, unknown>;
+      for (const key of ['credito_id', 'numero_credito', 'cuota_id', 'pago_id', 'fecha', 'monto', 'path', 'json', 'sql', 'message', 'stack', 'error']) expect(entry).not.toHaveProperty(key);
+    }
+
+    const broken = createCarteraStructuredLogger({ sink: () => { throw new Error('synthetic sink failure'); } });
+    expect(() => emitCreditScheduleRecalculation({ outcome: 'failed', operation: 'process_pools', processedCount: 0, succeededCount: 0, failedCount: 1, skippedCount: 0, manualActionRequired: false, durationMs: 0, errorCode: 'unknown' }, broken)).not.toThrow();
   });
 });

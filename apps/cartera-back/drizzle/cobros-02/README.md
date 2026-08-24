@@ -20,6 +20,9 @@ para que se sepa que se aplican como bloque cuando salga esa versión.
 | `0006_buckets_dias_sla.sql` | CB-020: agrega `buckets.dias_sla` (días para contactar desde que el crédito entra al bucket) + seed placeholder B1-B5 (B0 = NULL, sin SLA). Consumido por la Cola del Día del CRM (`GET /buckets/cola-dia`). |
 | `0007_promesas_pago_espejo.sql` | CB-030: tabla `promesas_pago_espejo`, copia local de promesas de pago vigentes sincronizada desde crm-server (contactos_cobros vive en otra DB). procesarMoras la consulta para congelar SOLO las cuotas prometidas (no el crédito completo) mientras la promesa esté vigente. |
 | `0008_pagalo_payment_imports.sql` | CB-028: ledger idempotente de grupos Págalo, validación crédito↔SIFCO, vínculo de N `pagos_credito` mediante `pagalo_import_id` y origen `pagalo`. Requiere los dos links CAPITAL/MORA_INTERES aceptados antes de aplicar pagos. |
+| `0009_pagalo_un_solo_link.sql` | CB-105: el ledger acepta grupos de **un solo link** (selección sin capital o solo capital — D-48 del bot): evidencia por lado nullable + CHECK de coherencia explícito (monto > 0 ⇒ evidencia completa; monto = 0 ⇒ lado vacío). Se aplica después de la 0008. |
+| `0009_pagalo_optional_capital.sql` | CB-028 (#1422): la versión **mora-only** del mismo ajuste, hecha en paralelo (solo capital opcional; exige `facturable_total > 0`). Compatible pero más restrictiva que la de CB-105. |
+| `0010_pagalo_solo_capital.sql` | CB-105: **estado final de las dos 0009 gemelas** (D-48, decisión de Daniel): re-afirma montos `>= 0` en ambos lados y lado facturable nullable con su CHECK de coherencia — la última palabra, corra lo que corra antes. |
 
 ## Asignación inicial (`asignacion/`) — carga de datos, NO schema
 

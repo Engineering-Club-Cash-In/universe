@@ -6,7 +6,9 @@
     integer,
     numeric,
     boolean,
+    check,
     date,
+    foreignKey,
     text,
     timestamp,
     pgSchema,
@@ -235,7 +237,14 @@
     aseguradora_id: integer("aseguradora_id").references(() => aseguradoras.id, {
       onDelete: "set null",
     }),
-  });
+  }, (t) => [
+    // Necesaria para FKs compuestas que deben demostrar que ID interno y
+    // número SIFCO identifican el mismo crédito, no dos créditos válidos.
+    unique("creditos_id_sifco_uq").on(
+      t.credito_id,
+      t.numero_credito_sifco
+    ),
+  ]);
   export const historial_devolucion_credito = customSchema.table("historial_devolucion_credito", {
     id: serial("id").primaryKey(),
     credito_id: integer("credito_id")
@@ -693,11 +702,186 @@
     monto: numeric("monto", { precision: 18, scale: 2 }).notNull().default("0"),
   });
 
+  // ====================================================================
+  // CB-028 — IMPORTACIÓN FINANCIERA DE GRUPOS PÁGALO
+  // ====================================================================
+  //
+  // LÍMITE DE RESPONSABILIDAD
+  // ------------------------
+  // CRM conserva links, callbacks/polling, payloads Págalo, usuario creador y
+  // voucher. Cartera NO duplica esa máquina: recibe una orden consolidada solo
+  // cuando los dos componentes (CAPITAL y MORA_INTERES) fueron aceptados.
+  //
+  // POR QUÉ ESTA CABECERA ES NECESARIA
+  // ----------------------------------
+  // Una intención CRM puede crear N filas de pagos_credito (una por cuota).
+  // Además, quien llama puede perder respuesta después de que cartera escribió
+  // y reintentar. `crm_group_id UNIQUE` permite responder con misma importación
+  // sin volver a acreditar dinero. La protección vive en la DB que aplica pago,
+  // no solo en CRM, porque no existe transacción distribuida entre ambas bases.
+  //
+  // IMPORTANTE PARA IMPLEMENTACIÓN FUTURA
+  // -------------------------------------
+  // Este schema habilita idempotencia, pero servicio debe crear cabecera y
+  // filas iniciales de pagos_credito dentro de UNA transacción de
+  // cartera, o reanudar explícitamente usando pagalo_import_id. `newPayment`
+  // actual no es transaccional; reintentar a ciegas sigue prohibido.
+  export type PagaloPaymentImportStatus =
+    | "RECEIVED"
+    | "CREATING_PAYMENTS"
+    | "PAYMENTS_CREATED"
+    | "APPLYING"
+    | "APPLIED"
+    | "RETRYABLE_ERROR"
+    | "REVIEW_REQUIRED";
+
+  /**
+   * Ledger: una fila por grupo CRM listo para aplicar.
+   *
+   * Montos son copia financiera mínima del snapshot aprobado. `payload_hash`
+   * permite detectar bug/ataque donde mismo crm_group_id se reintenta con datos
+   * diferentes. UUIDs/identificadores de ambos links están en esta misma fila
+   * para mantener MVP en una sola tabla de cartera.
+   *
+   * UNIQUE separados impiden reutilizar transacción en mismo rol. CRM además
+   * protege pagalo_transaction_uuid globalmente; servicio de cartera debe
+   * consultar ambas columnas bajo lock antes de insertar para impedir cruce de
+   * rol (CAPITAL de grupo A = MORA_INTERES de grupo B).
+   */
+  export const pagalo_payment_imports = customSchema.table(
+    "pagalo_payment_imports",
+    {
+      id: serial("id").primaryKey(),
+      // UUID opaco de pagalo_payment_groups en CRM; no hay FK entre bases.
+      crm_group_id: varchar("crm_group_id", { length: 36 }).notNull(),
+      credito_id: integer("credito_id").notNull(),
+      numero_credito_sifco: varchar("numero_credito_sifco", {
+        length: 40,
+      }).notNull(),
+      currency: varchar("currency", { length: 3 }).notNull().default("GTQ"),
+      capital_total: numeric("capital_total", {
+        precision: 18,
+        scale: 2,
+      }).notNull(),
+      facturable_total: numeric("facturable_total", {
+        precision: 18,
+        scale: 2,
+      }).notNull(),
+      total_amount: numeric("total_amount", {
+        precision: 18,
+        scale: 2,
+      }).notNull(),
+
+      // Evidencia mínima de los dos ACCEPT. No son credenciales de integración.
+      capital_transaction_uuid: varchar("capital_transaction_uuid", {
+        length: 64,
+      }).notNull(),
+      facturable_transaction_uuid: varchar("facturable_transaction_uuid", {
+        length: 64,
+      }).notNull(),
+      capital_external_identifier: varchar("capital_external_identifier", {
+        length: 150,
+      }).notNull(),
+      facturable_external_identifier: varchar("facturable_external_identifier", {
+        length: 150,
+      }).notNull(),
+      capital_request_id: varchar("capital_request_id", { length: 100 }),
+      facturable_request_id: varchar("facturable_request_id", { length: 100 }),
+      capital_request_auth: varchar("capital_request_auth", { length: 100 }),
+      facturable_request_auth: varchar("facturable_request_auth", { length: 100 }),
+      capital_paid_at: timestamp("capital_paid_at", { withTimezone: true }).notNull(),
+      facturable_paid_at: timestamp("facturable_paid_at", {
+        withTimezone: true,
+      }).notNull(),
+
+      payload_hash: varchar("payload_hash", { length: 64 }).notNull(),
+      status: text("status")
+        .$type<PagaloPaymentImportStatus>()
+        .notNull()
+        .default("RECEIVED"),
+
+      processing_started_at: timestamp("processing_started_at", {
+        withTimezone: true,
+      }),
+      payments_created_at: timestamp("payments_created_at", {
+        withTimezone: true,
+      }),
+      applied_at: timestamp("applied_at", { withTimezone: true }),
+      retry_count: integer("retry_count").notNull().default(0),
+      last_error_code: text("last_error_code"),
+      last_error_message: text("last_error_message"),
+      created_at: timestamp("created_at", { withTimezone: true })
+        .notNull()
+        .defaultNow(),
+      updated_at: timestamp("updated_at", { withTimezone: true })
+        .notNull()
+        .defaultNow(),
+    },
+    (t) => [
+      uniqueIndex("pagalo_payment_imports_crm_group_uq").on(t.crm_group_id),
+      uniqueIndex("pagalo_payment_imports_capital_tx_uq").on(
+        t.capital_transaction_uuid
+      ),
+      uniqueIndex("pagalo_payment_imports_facturable_tx_uq").on(
+        t.facturable_transaction_uuid
+      ),
+      uniqueIndex("pagalo_payment_imports_capital_external_uq").on(
+        t.capital_external_identifier
+      ),
+      uniqueIndex("pagalo_payment_imports_facturable_external_uq").on(
+        t.facturable_external_identifier
+      ),
+      // Impide acreditar un credito_id mientras auditoría nombra otro SIFCO.
+      // Cartera debe derivar el par desde creditos; DB valida misma identidad.
+      foreignKey({
+        name: "pagalo_payment_imports_credit_sifco_fk",
+        columns: [t.credito_id, t.numero_credito_sifco],
+        foreignColumns: [creditos.credito_id, creditos.numero_credito_sifco],
+      }).onDelete("restrict"),
+      index("pagalo_payment_imports_status_idx").on(t.status, t.updated_at),
+      index("pagalo_payment_imports_credit_idx").on(t.credito_id, t.created_at),
+      check(
+        "pagalo_payment_imports_status_chk",
+        sql`${t.status} IN (
+          'RECEIVED', 'CREATING_PAYMENTS', 'PAYMENTS_CREATED', 'APPLYING',
+          'APPLIED', 'RETRYABLE_ERROR', 'REVIEW_REQUIRED'
+        )`
+      ),
+      check(
+        "pagalo_payment_imports_amounts_chk",
+        sql`${t.capital_total} > 0 AND ${t.facturable_total} > 0 AND ${t.total_amount} > 0`
+      ),
+      check(
+        "pagalo_payment_imports_total_matches_chk",
+        sql`${t.total_amount} = ${t.capital_total} + ${t.facturable_total}`
+      ),
+      check(
+        "pagalo_payment_imports_retry_count_chk",
+        sql`${t.retry_count} >= 0`
+      ),
+      check(
+        "pagalo_payment_imports_payload_hash_chk",
+        sql`${t.payload_hash} ~ '^[0-9a-f]{64}$'`
+      ),
+      check(
+        "pagalo_payment_imports_transactions_different_chk",
+        sql`${t.capital_transaction_uuid} <> ${t.facturable_transaction_uuid}`
+      ),
+      check(
+        "pagalo_payment_imports_external_ids_different_chk",
+        sql`${t.capital_external_identifier} <> ${t.facturable_external_identifier}`
+      ),
+    ]
+  );
+
   // 3. Pagos de crédito
   export const origenPagoEnum = pgEnum('origen_pago', [
     'transferencia',
     'cheque',
     'boleta',
+    // Pago automático originado por DOS links Págalo ya aceptados. Detalle de
+    // idempotencia vive en pagalo_payment_imports, no en numeroAutorizacion.
+    'pagalo',
   ]);
 
   export const paymentValidationStatus = pgEnum('payment_validation_status', [
@@ -779,7 +963,15 @@
     monto_aplicado: numeric("monto_aplicado", { precision: 18, scale: 2 }).notNull(),
     fecha_aplicado: timestamp("fecha_aplicado"), // Fecha en que se aplicó el pago al crédito
     origen_pago: origenPagoEnum("origen_pago"),
-  });
+    // FK nullable: pagos históricos y otros orígenes no tienen importación.
+    // Varias filas pueden compartirla porque una operación cubre N cuotas.
+    pagalo_import_id: integer("pagalo_import_id").references(
+      () => pagalo_payment_imports.id,
+      { onDelete: "restrict" }
+    ),
+  }, (t) => [
+    index("pagos_credito_pagalo_import_idx").on(t.pagalo_import_id),
+  ]);
   export const boletas = customSchema.table("boletas", {
     id: serial("id").primaryKey(),
     pago_id: integer("pago_id")

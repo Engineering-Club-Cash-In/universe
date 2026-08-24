@@ -20,6 +20,7 @@ export * from "./miniagent-credentials";
 export * from "./notes";
 export * from "./notifications";
 export * from "./otp";
+export * from "./pagalo-payments";
 export * from "./premora-reduccion";
 export * from "./quotations";
 export * from "./recordatorios-convenio";

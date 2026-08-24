@@ -65,6 +65,16 @@ describe('Cartera log-call inventory', () => {
 
   test('keeps all non-slice calls explicitly unresolved until reviewed', async () => {
     const target = await loadInventory('CARTERA_LOG_CALLS_56717dde.csv');
-    expect(target.filter(({ disposition }) => disposition === 'unresolved')).toHaveLength(2_902);
+    expect(target.filter(({ disposition }) => disposition === 'unresolved')).toHaveLength(2_887);
+  });
+
+  test('has no unresolved call in the payment revalidation slice', async () => {
+    const target = await loadInventory('CARTERA_LOG_CALLS_56717dde.csv');
+    const secondSlice = target.filter(({ path }) =>
+      path.endsWith('/src/controllers/revalidatePayment.ts'));
+    expect(secondSlice).toHaveLength(15);
+    expect(secondSlice.filter(({ disposition }) => disposition === 'unresolved')).toHaveLength(0);
+    expect(secondSlice.filter(({ disposition }) => disposition === 'remove')).toHaveLength(13);
+    expect(secondSlice.filter(({ disposition }) => disposition === 'event')).toHaveLength(2);
   });
 });

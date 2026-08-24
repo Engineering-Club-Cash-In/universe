@@ -10,6 +10,11 @@ const logger = createStructuredLogger(carteraCatalog, {
 
 if (false) {
   logger.emit('payment.upload', 'stored', { mime_family: 'pdf', duration_ms: 1 });
+  logger.emit('payment.revalidation', 'completed', {
+    credit_updated: true,
+    installment_closed: false,
+    duration_ms: 1,
+  });
 
   // @ts-expect-error unknown event
   logger.emit('payment.unknown', 'stored', { mime_family: 'pdf', duration_ms: 1 });

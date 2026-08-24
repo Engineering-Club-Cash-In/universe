@@ -44,6 +44,7 @@ Schema version: **1**
 | `investments_reversed` | boolean |
 | `investor_count` | integer 0..1000000000 |
 | `job_name` | enum: process_late_fees, upsert_advisor_effectiveness, expire_portfolio_purchases, generate_monthly_close, verify_sat_invoices, report_failed_sat_invoices, generate_daily_invoice_snapshot |
+| `late_fee_operation` | enum: history, deactivate, create, update, process, condone, list, bulk_condone |
 | `late_fee_recreation` | enum: not_required, completed, failed |
 | `liquidation_mode` | enum: single, batch, credit |
 | `lock_state` | enum: not_attempted, acquired, failed |
@@ -56,7 +57,7 @@ Schema version: **1**
 | `previous_payment_state` | enum: applied, pending |
 | `processed_count` | integer 0..1000000000 |
 | `provider` | enum: cofidi_sat, cofidi_nit, sifco, cloudflare_r2, remote_asset, email_provider |
-| `reason_code` | enum: schema_invalid, duplicate_receipt, payment_not_found, credit_not_found, agreement_already_active, payment_already_applied, no_investors, purchase_exceeds_mirror, missing_participation_date, state_conflict, provider_rejected, local_state_inconsistent, manual_reconciliation_required |
+| `reason_code` | enum: schema_invalid, duplicate_receipt, payment_not_found, credit_not_found, agreement_already_active, payment_already_applied, no_investors, purchase_exceeds_mirror, missing_participation_date, state_conflict, provider_rejected, local_state_inconsistent, manual_reconciliation_required, invalid_late_fee_amount, invalid_installment_count, overdue_count_mismatch, excluded_credit_state, amount_out_of_range, override_reason_missing, user_not_found, active_late_fee_not_found, concurrent_run |
 | `recalculation_strategy` | enum: single, bulk, from_json, migration |
 | `recovery_applied` | boolean |
 | `requested_state` | enum: active, inactive |
@@ -107,6 +108,16 @@ Schema version: **1**
 | `created` | `info` | `credit_type`, `investor_count`, `rubric_count`, `advisor_assignment_source`, `notification_attempted`, `duration_ms` | — | — |
 | `failed` | `error` | `credit_type`, `investor_count`, `rubric_count`, `advisor_assignment_source`, `notification_attempted`, `duration_ms`, `error_code` | — | — |
 | `rejected` | `warn` | `credit_type`, `investor_count`, `rubric_count`, `advisor_assignment_source`, `notification_attempted`, `duration_ms`, `reason_code` | — | — |
+
+### `credit.late_fee`
+
+| Outcome | Level | Required | Optional | Constants |
+|---|---|---|---|---|
+| `completed` | `info` | `late_fee_operation`, `duration_ms` | `processed_count`, `succeeded_count`, `failed_count`, `skipped_count` | — |
+| `degraded` | `warn` | `late_fee_operation`, `duration_ms`, `error_code` | — | — |
+| `failed` | `error` | `late_fee_operation`, `duration_ms`, `error_code` | — | — |
+| `rejected` | `warn` | `late_fee_operation`, `duration_ms`, `reason_code` | — | — |
+| `skipped` | `info` | `late_fee_operation`, `duration_ms`, `reason_code` | — | — |
 
 ### `credit.liquidation`
 

@@ -5,6 +5,7 @@ import {
   emitCreditCapitalPaymentAuditCompleted,
   emitCreditCapitalPaymentAuditDiagnosticCompleted,
   emitCreditCapitalPaymentAuditFailed,
+  emitCreditLateFee,
   emitPaymentReversalToPending,
   emitRecoveredDuplicatePendingInstallment,
   resolveCarteraLogEnvironment,
@@ -211,5 +212,37 @@ describe('Cartera structured logger adapter', () => {
 
     const broken = createCarteraStructuredLogger({ sink: () => { throw new Error('synthetic sink failure'); } });
     expect(() => emitPaymentReversalToPending({ outcome: 'failed', errorCode: 'unknown', durationMs: 1 }, broken)).not.toThrow();
+  });
+
+  test('emits finite late-fee outcomes and isolates sink failures', () => {
+    const lines: string[] = [];
+    const logger = createCarteraStructuredLogger({
+      environment: 'staging',
+      clock: () => new Date('2026-08-22T00:00:00.000Z'),
+      sink: (line) => lines.push(line),
+    });
+
+    emitCreditLateFee({ outcome: 'completed', operation: 'create', durationMs: 12 }, logger);
+    emitCreditLateFee({ outcome: 'completed', operation: 'process', durationMs: 25, processedCount: 8, succeededCount: 6, failedCount: 0, skippedCount: 2 }, logger);
+    emitCreditLateFee({ outcome: 'skipped', operation: 'process', durationMs: 1, reasonCode: 'concurrent_run' }, logger);
+    emitCreditLateFee({ outcome: 'rejected', operation: 'update', durationMs: 2, reasonCode: 'active_late_fee_not_found' }, logger);
+    emitCreditLateFee({ outcome: 'degraded', operation: 'history', durationMs: 3, errorCode: 'persistence_failed' }, logger);
+    emitCreditLateFee({ outcome: 'failed', operation: 'condone', durationMs: 4, errorCode: 'unknown' }, logger);
+
+    expect(lines.map((line) => JSON.parse(line))).toEqual([
+      expect.objectContaining({ event: 'credit.late_fee', outcome: 'completed', level: 'info', late_fee_operation: 'create', duration_ms: 12 }),
+      expect.objectContaining({ event: 'credit.late_fee', outcome: 'completed', level: 'info', late_fee_operation: 'process', processed_count: 8, succeeded_count: 6, failed_count: 0, skipped_count: 2, duration_ms: 25 }),
+      expect.objectContaining({ event: 'credit.late_fee', outcome: 'skipped', level: 'info', late_fee_operation: 'process', reason_code: 'concurrent_run' }),
+      expect.objectContaining({ event: 'credit.late_fee', outcome: 'rejected', level: 'warn', late_fee_operation: 'update', reason_code: 'active_late_fee_not_found' }),
+      expect.objectContaining({ event: 'credit.late_fee', outcome: 'degraded', level: 'warn', late_fee_operation: 'history', error_code: 'persistence_failed' }),
+      expect.objectContaining({ event: 'credit.late_fee', outcome: 'failed', level: 'error', late_fee_operation: 'condone', error_code: 'unknown' }),
+    ]);
+    for (const line of lines) {
+      const entry = JSON.parse(line) as Record<string, unknown>;
+      for (const key of ['credito_id', 'mora_id', 'numero_credito_sifco', 'monto', 'capital', 'motivo', 'email', 'message', 'stack', 'error']) expect(entry).not.toHaveProperty(key);
+    }
+
+    const broken = createCarteraStructuredLogger({ sink: () => { throw new Error('synthetic sink failure'); } });
+    expect(() => emitCreditLateFee({ outcome: 'failed', operation: 'create', durationMs: 1, errorCode: 'unknown' }, broken)).not.toThrow();
   });
 });

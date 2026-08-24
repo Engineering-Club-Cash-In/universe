@@ -242,6 +242,8 @@ export const pagaloPaymentGroups = pgTable(
 		// total_matches garantiza que al menos un lado existe.
 		check(
 			"pagalo_payment_groups_amounts_chk",
+			// >= 0 en AMBOS lados (D-48, decisión de Daniel): mora-only (capital 0)
+			// Y solo-capital (facturable 0) — superset del mora-only del PR #1422.
 			sql`${t.capitalTotal} >= 0 AND ${t.facturableTotal} >= 0 AND ${t.totalAmount} > 0`,
 		),
 		check(

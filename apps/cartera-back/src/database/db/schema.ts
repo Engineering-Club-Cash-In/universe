@@ -711,8 +711,9 @@
   // CRM conserva links, callbacks/polling, payloads Págalo, usuario creador y
   // voucher. Cartera NO duplica esa máquina: recibe una orden consolidada solo
   // cuando TODOS los componentes del grupo fueron aceptados — dos links
-  // (CAPITAL y MORA_INTERES), o UNO solo cuando un lado es Q0 (selección sin
-  // capital o solo capital; D-48 del bot de cobros, decidido 2026-08-24).
+  // (CAPITAL y MORA_INTERES), o UNO solo cuando un lado es Q0: mora-only
+  // (capital 0) o solo-capital (facturable 0); D-48 del bot de cobros,
+  // decidido por Daniel 2026-08-24. Contiene una o dos transacciones ACCEPT.
   //
   // POR QUÉ ESTA CABECERA ES NECESARIA
   // ----------------------------------
@@ -742,8 +743,9 @@
    *
    * Montos son copia financiera mínima del snapshot aprobado. `payload_hash`
    * permite detectar bug/ataque donde mismo crm_group_id se reintenta con datos
-   * diferentes. UUIDs/identificadores de ambos links están en esta misma fila
-   * para mantener MVP en una sola tabla de cartera.
+   * diferentes. UUIDs/identificadores de una o dos transacciones ACCEPT están
+   * en esta misma fila para mantener MVP en una sola tabla de cartera. CAPITAL
+   * es nullable solo cuando la importación es mora-only.
    *
    * UNIQUE separados impiden reutilizar transacción en mismo rol. CRM además
    * protege pagalo_transaction_uuid globalmente; servicio de cartera debe
@@ -854,6 +856,9 @@
       ),
       // Un lado puede ser 0 (grupo de un solo link, D-48); total > 0 junto con
       // total_matches garantiza que al menos un lado existe.
+      // >= 0 en AMBOS lados (D-48, decisión de Daniel): mora-only (capital 0)
+      // Y solo-capital (facturable 0) — superset del mora-only del PR #1422.
+      // Los *_evidence_chk simétricos viven más abajo.
       check(
         "pagalo_payment_imports_amounts_chk",
         sql`${t.capital_total} >= 0 AND ${t.facturable_total} >= 0 AND ${t.total_amount} > 0`
@@ -875,11 +880,11 @@
       // impidiendo reutilizar la misma transacción en los dos roles.
       check(
         "pagalo_payment_imports_transactions_different_chk",
-        sql`${t.capital_transaction_uuid} <> ${t.facturable_transaction_uuid}`
+        sql`${t.capital_transaction_uuid} IS NULL OR ${t.capital_transaction_uuid} <> ${t.facturable_transaction_uuid}`
       ),
       check(
         "pagalo_payment_imports_external_ids_different_chk",
-        sql`${t.capital_external_identifier} <> ${t.facturable_external_identifier}`
+        sql`${t.capital_external_identifier} IS NULL OR ${t.capital_external_identifier} <> ${t.facturable_external_identifier}`
       ),
       // Coherencia por lado, explícita porque PostgreSQL acepta resultado NULL
       // en un CHECK (misma lección de estado ACCEPT y expiración): monto > 0

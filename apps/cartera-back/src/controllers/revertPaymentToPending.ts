@@ -35,6 +35,17 @@ export function classifyRevertPaymentCredit(
   return REVERSIBLE_CREDIT_STATES.has(credit.statusCredit ?? "") ? null : "state_conflict";
 }
 
+export function classifyRevertPendingTerminal({
+  failedCount,
+  localStateFailureCount,
+}: {
+  readonly failedCount: number;
+  readonly localStateFailureCount: number;
+}): "completed" | "partially_completed" | "local_state_inconsistent" {
+  if (localStateFailureCount > 0) return "local_state_inconsistent";
+  return failedCount > 0 ? "partially_completed" : "completed";
+}
+
 class RevertPaymentCreditRejection extends Error {
   constructor(readonly reasonCode: "credit_not_found" | "state_conflict") {
     super("Credit not found or not active");
@@ -89,6 +100,8 @@ export function createRevertPaymentToPending(
 ) {
   return async ({ body, set }: any) => {
   const startedAt = safeNow();
+  let hasExternalInvoiceVoid = false;
+  let localInvoiceStateFailureCount = 0;
   try {
     // 1️⃣ VALIDAR ENTRADA
     const parseResult = revertPaymentToPendingSchema.safeParse(body);
@@ -234,6 +247,7 @@ export function createRevertPaymentToPending(
           });
 
           if (resultadoCofidi.success && resultadoCofidi.anulado) {
+            hasExternalInvoiceVoid = true;
             try {
               await tx
                 .update(facturas_electronicas)
@@ -253,6 +267,7 @@ export function createRevertPaymentToPending(
                 numero: factura.numero,
               });
             } catch (dbError: any) {
+              localInvoiceStateFailureCount += 1;
               facturasConError.push({
                 factura_id: factura.factura_id,
                 uuid: factura.uuid,
@@ -294,18 +309,38 @@ export function createRevertPaymentToPending(
           processedCount: facturasDelPago.length,
           succeededCount: facturasAnuladas.length,
           failedCount: facturasConError.length,
+          localStateFailureCount: localInvoiceStateFailureCount,
         },
       };
     });
 
-    dependencies.emitTerminal({
-      outcome: result.completion.failedCount > 0 ? "partially_completed" : "completed",
-      reversalPath: result.completion.reversalPath,
-      processedCount: result.completion.processedCount,
-      succeededCount: result.completion.succeededCount,
+    if (localInvoiceStateFailureCount === 0) hasExternalInvoiceVoid = false;
+    const terminalOutcome = classifyRevertPendingTerminal({
       failedCount: result.completion.failedCount,
-      durationMs: elapsedMilliseconds(startedAt),
+      localStateFailureCount: "localStateFailureCount" in result.completion
+        ? (result.completion.localStateFailureCount ?? 0)
+        : 0,
     });
+    if (terminalOutcome === "local_state_inconsistent") {
+      dependencies.emitTerminal({
+        outcome: terminalOutcome,
+        reversalPath: result.completion.reversalPath,
+        processedCount: result.completion.processedCount,
+        succeededCount: result.completion.succeededCount,
+        failedCount: result.completion.failedCount,
+        errorCode: "persistence_failed",
+        durationMs: elapsedMilliseconds(startedAt),
+      });
+    } else {
+      dependencies.emitTerminal({
+        outcome: terminalOutcome,
+        reversalPath: result.completion.reversalPath,
+        processedCount: result.completion.processedCount,
+        succeededCount: result.completion.succeededCount,
+        failedCount: result.completion.failedCount,
+        durationMs: elapsedMilliseconds(startedAt),
+      });
+    }
 
     set.status = 200;
     return {
@@ -320,7 +355,17 @@ export function createRevertPaymentToPending(
         : error?.message === "Credit not found or not active"
           ? "credit_not_found"
           : null;
-    if (reasonCode) {
+    if (hasExternalInvoiceVoid || localInvoiceStateFailureCount > 0) {
+      dependencies.emitTerminal({
+        outcome: "local_state_inconsistent",
+        reversalPath: "validated_payment",
+        processedCount: 1,
+        succeededCount: 0,
+        failedCount: 1,
+        errorCode: "persistence_failed",
+        durationMs: elapsedMilliseconds(startedAt),
+      });
+    } else if (reasonCode) {
       dependencies.emitTerminal({
         outcome: "rejected",
         reasonCode,

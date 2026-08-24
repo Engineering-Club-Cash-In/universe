@@ -27,7 +27,7 @@ const voidInvoice = mock(() => Promise.resolve(cofidiResult));
 process.env.SUPABASE_DB_URL ??= "postgresql://127.0.0.1:1/synthetic";
 process.env.RESEND_API_KEY ??= "synthetic-test-key";
 process.env.EMAIL_DOMAIN ??= "example.invalid";
-const { createRevertPaymentToPending, classifyRevertPaymentCredit } = await import("./revertPaymentToPending");
+const { createRevertPaymentToPending, classifyRevertPaymentCredit, classifyRevertPendingTerminal } = await import("./revertPaymentToPending");
 type Dependencies = NonNullable<Parameters<typeof createRevertPaymentToPending>[0]>;
 const revertPaymentToPending = createRevertPaymentToPending({
   runTransaction: transaction as unknown as Dependencies["runTransaction"],
@@ -75,6 +75,12 @@ describe("revertPaymentToPending observability contract", () => {
     expect(classifyRevertPaymentCredit(undefined)).toBe("credit_not_found");
     expect(classifyRevertPaymentCredit({ statusCredit: "CANCELADO" })).toBe("state_conflict");
     expect(classifyRevertPaymentCredit({ statusCredit: "ACTIVO" })).toBeNull();
+  });
+
+  test("prioritizes local invoice inconsistency over provider partials", () => {
+    expect(classifyRevertPendingTerminal({ failedCount: 2, localStateFailureCount: 1 })).toBe("local_state_inconsistent");
+    expect(classifyRevertPendingTerminal({ failedCount: 1, localStateFailureCount: 0 })).toBe("partially_completed");
+    expect(classifyRevertPendingTerminal({ failedCount: 0, localStateFailureCount: 0 })).toBe("completed");
   });
 
   test("executes the transaction callback and preserves the already-pending body", async () => {

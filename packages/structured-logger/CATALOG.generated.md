@@ -276,6 +276,7 @@ Schema version: **1**
 |---|---|---|---|---|
 | `completed` | `info` | `reversal_path`, `processed_count`, `succeeded_count`, `failed_count`, `duration_ms` | — | — |
 | `failed` | `error` | `duration_ms`, `error_code` | — | — |
+| `local_state_inconsistent` | `error` | `reversal_path`, `processed_count`, `succeeded_count`, `failed_count`, `duration_ms`, `error_code` | — | `error_code=persistence_failed` |
 | `partially_completed` | `warn` | `reversal_path`, `processed_count`, `succeeded_count`, `failed_count`, `duration_ms` | — | — |
 | `rejected` | `warn` | `duration_ms`, `reason_code` | — | — |
 

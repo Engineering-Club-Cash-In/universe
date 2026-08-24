@@ -168,6 +168,7 @@ export const carteraCatalog = {
     'payment.reversal_to_pending': { outcomes: {
       completed: { level: 'info', required: ['reversal_path', 'processed_count', 'succeeded_count', 'failed_count', 'duration_ms'], optional: [] },
       partially_completed: { level: 'warn', required: ['reversal_path', 'processed_count', 'succeeded_count', 'failed_count', 'duration_ms'], optional: [] },
+      local_state_inconsistent: { level: 'error', required: ['reversal_path', 'processed_count', 'succeeded_count', 'failed_count', 'duration_ms', 'error_code'], optional: [], constants: { error_code: 'persistence_failed' } },
       rejected: { level: 'warn', required: ['duration_ms', 'reason_code'], optional: [] },
       failed: { level: 'error', required: ['duration_ms', 'error_code'], optional: [] },
     } },

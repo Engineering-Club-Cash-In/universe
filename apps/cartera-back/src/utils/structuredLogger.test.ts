@@ -227,12 +227,14 @@ describe('Cartera structured logger adapter', () => {
 
     emitPaymentReversalToPending({ outcome: 'completed', reversalPath: 'already_pending', processedCount: 0, succeededCount: 0, failedCount: 0, durationMs: 4 }, logger);
     emitPaymentReversalToPending({ outcome: 'partially_completed', reversalPath: 'validated_payment', processedCount: 2, succeededCount: 1, failedCount: 1, durationMs: 8 }, logger);
+    emitPaymentReversalToPending({ outcome: 'local_state_inconsistent', reversalPath: 'validated_payment', processedCount: 1, succeededCount: 0, failedCount: 1, errorCode: 'persistence_failed', durationMs: 7 }, logger);
     emitPaymentReversalToPending({ outcome: 'rejected', reasonCode: 'schema_invalid', durationMs: 1 }, logger);
     emitPaymentReversalToPending({ outcome: 'failed', errorCode: 'unknown', durationMs: 9 }, logger);
 
     expect(lines.map((line) => JSON.parse(line))).toEqual([
       expect.objectContaining({ event: 'payment.reversal_to_pending', outcome: 'completed', level: 'info', reversal_path: 'already_pending', processed_count: 0, succeeded_count: 0, failed_count: 0, duration_ms: 4 }),
       expect.objectContaining({ event: 'payment.reversal_to_pending', outcome: 'partially_completed', level: 'warn', reversal_path: 'validated_payment', processed_count: 2, succeeded_count: 1, failed_count: 1, duration_ms: 8 }),
+      expect.objectContaining({ event: 'payment.reversal_to_pending', outcome: 'local_state_inconsistent', level: 'error', reversal_path: 'validated_payment', processed_count: 1, succeeded_count: 0, failed_count: 1, error_code: 'persistence_failed', duration_ms: 7 }),
       expect.objectContaining({ event: 'payment.reversal_to_pending', outcome: 'rejected', level: 'warn', reason_code: 'schema_invalid', duration_ms: 1 }),
       expect.objectContaining({ event: 'payment.reversal_to_pending', outcome: 'failed', level: 'error', error_code: 'unknown', duration_ms: 9 }),
     ]);

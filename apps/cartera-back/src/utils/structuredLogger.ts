@@ -72,6 +72,15 @@ type PaymentReversalToPendingResult =
       durationMs: number;
     }>
   | Readonly<{
+      outcome: "local_state_inconsistent";
+      reversalPath: "already_pending" | "validated_payment";
+      processedCount: number;
+      succeededCount: number;
+      failedCount: number;
+      errorCode: "persistence_failed";
+      durationMs: number;
+    }>
+  | Readonly<{
       outcome: "rejected";
       reasonCode: "schema_invalid" | "payment_not_found" | "credit_not_found" | "state_conflict";
       durationMs: number;
@@ -295,6 +304,17 @@ export function emitPaymentReversalToPending(
         succeeded_count: result.succeededCount,
         failed_count: result.failedCount,
         duration_ms: result.durationMs,
+      });
+      return;
+    }
+    if (result.outcome === "local_state_inconsistent") {
+      logger.emit("payment.reversal_to_pending", "local_state_inconsistent", {
+        reversal_path: result.reversalPath,
+        processed_count: result.processedCount,
+        succeeded_count: result.succeededCount,
+        failed_count: result.failedCount,
+        duration_ms: result.durationMs,
+        error_code: result.errorCode,
       });
       return;
     }

@@ -32,3 +32,12 @@ test("fifth structured-log slice reconciles all reversal traces", () => {
 test("reversal-to-pending slice has no executable console calls", () => {
   expect(executableConsoleCalls(readFileSync(controllerFile, "utf8"))).toBe(0);
 });
+
+test("external invoice void evidence remains set until transaction commit", () => {
+  const source = readFileSync(controllerFile, "utf8");
+  expect(source.match(/hasExternalInvoiceVoid = false/g)).toHaveLength(2);
+  expect(source.indexOf("hasExternalInvoiceVoid = true")).toBeLessThan(
+    source.lastIndexOf("hasExternalInvoiceVoid = false"),
+  );
+  expect(source).toContain("if (localInvoiceStateFailureCount === 0) hasExternalInvoiceVoid = false");
+});

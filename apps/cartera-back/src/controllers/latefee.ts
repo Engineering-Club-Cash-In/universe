@@ -878,6 +878,7 @@ export async function procesarMoras() {
     let sinCambios = 0;
     let desactivadas = 0;
     let sinCapital = 0;
+    let desactivadasSinCapital = 0;
     let skippedInternally = 0;
 
     // 5. Procesar créditos CON cuotas vencidas → crear o recalcular
@@ -925,6 +926,8 @@ export async function procesarMoras() {
             porcentaje_mora: moraPrevia.porcentaje_mora,
             motivo: "Crédito sin capital — no aplica mora",
           });
+          desactivadas++;
+          desactivadasSinCapital++;
         }
 
         continue;
@@ -1075,7 +1078,7 @@ export async function procesarMoras() {
 
 
     const succeededCount = creadas + recalculadas + sinCambios + desactivadas;
-    const skippedCount = sinCapital + skippedInternally;
+    const skippedCount = (sinCapital - desactivadasSinCapital) + skippedInternally;
     emitCreditLateFee({
       outcome: "completed",
       operation: "process",

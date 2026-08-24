@@ -91,6 +91,8 @@ test("late-fee guards cover credit lookup and lock acquisition failures", () => 
   expect(processTry).toBeLessThan(connect);
   expect(source.slice(processStart, source.indexOf("export async function condonarMora")))
     .toContain("if (lockConn)");
+  expect(source).toContain("desactivadasSinCapital");
+  expect(source).toContain("sinCapital - desactivadasSinCapital");
 });
 
 test("late-fee deactivation has a finite terminal for every normal result", () => {

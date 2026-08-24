@@ -1,4 +1,5 @@
 import { AxiosError } from "axios";
+import { formatFieldErrors } from "./formErrors";
 
 /**
  * Traducciones de mensajes técnicos o en inglés conocidos. Se recorre en
@@ -15,10 +16,37 @@ const TRADUCCIONES: Array<{
     patron: /jwt|invalid signature|invalid token|token no proporcionado|token inválido/i,
     traduccion: "Tu sesión no es válida, vuelve a iniciar sesión",
   },
-  {
-    patron: /^Expected /,
-    traduccion: (m) => `Uno de los filtros o datos enviados no es válido (${m.input})`,
-  },
+  // Mensajes por defecto de zod que el backend reenvía crudos.
+  { patron: /^Required$/i, traduccion: "Este campo es obligatorio" },
+  { patron: /^Expected .*received (?:undefined|null)$/i, traduccion: "Este campo es obligatorio" },
+  { patron: /^Expected (?:number|integer)\b/i, traduccion: "Debe ser un número válido" },
+  { patron: /^Expected (?:array|object)\b/i, traduccion: "El formato enviado no es válido" },
+  { patron: /^Expected /i, traduccion: "El valor de este campo no es válido" },
+  { patron: /^Invalid input$/i, traduccion: "El valor de este campo no es válido" },
+  { patron: /^Invalid enum value/i, traduccion: "Debe seleccionar una opción válida" },
+  { patron: /^Invalid email/i, traduccion: "Correo electrónico inválido" },
+  { patron: /^Invalid url/i, traduccion: "URL inválida" },
+  { patron: /^Invalid (?:uuid|cuid|nanoid|ulid)/i, traduccion: "Identificador inválido" },
+  { patron: /^Invalid (?:date|datetime)/i, traduccion: "Fecha inválida" },
+  // Catch-all de invalid_string: el resto son formatos (regex, ip, startsWith...).
+  { patron: /^Invalid\b/i, traduccion: "El formato de este campo no es válido" },
+  // too_small / too_big de zod en todas sus formas. Las variantes "or equal to"
+  // van primero: si no, el patrón exclusivo captura "or" como si fuera el límite.
+  { patron: /^Number must be greater than or equal to (\S+)/i, traduccion: (m) => `Debe ser mayor o igual a ${m[1]}` },
+  { patron: /^Number must be less than or equal to (\S+)/i, traduccion: (m) => `No puede ser mayor a ${m[1]}` },
+  { patron: /^Number must be exactly(?: equal to)? (\S+)/i, traduccion: (m) => `Debe ser exactamente ${m[1]}` },
+  { patron: /^Number must be greater than (\S+)/i, traduccion: (m) => `Debe ser mayor a ${m[1]}` },
+  { patron: /^Number must be less than (\S+)/i, traduccion: (m) => `Debe ser menor a ${m[1]}` },
+  { patron: /^Number must be finite/i, traduccion: "Debe ser un número válido" },
+  { patron: /^Number must be a multiple of (\S+)/i, traduccion: (m) => `Debe ser múltiplo de ${m[1]}` },
+  { patron: /^String must contain at least 1 character/i, traduccion: "Este campo es obligatorio" },
+  { patron: /^String must contain (?:at least|over) (\d+) character/i, traduccion: (m) => `Debe tener al menos ${m[1]} caracteres` },
+  { patron: /^String must contain (?:at most|under) (\d+) character/i, traduccion: (m) => `Máximo ${m[1]} caracteres` },
+  { patron: /^String must contain exactly (\d+) character/i, traduccion: (m) => `Debe tener exactamente ${m[1]} caracteres` },
+  { patron: /^Array must contain (?:at least|more than) (\d+) element/i, traduccion: (m) => `Debe tener al menos ${m[1]} elemento(s)` },
+  { patron: /^Array must contain (?:at most|less than) (\d+) element/i, traduccion: (m) => `Máximo ${m[1]} elemento(s)` },
+  { patron: /^Array must contain exactly (\d+) element/i, traduccion: (m) => `Debe tener exactamente ${m[1]} elemento(s)` },
+  { patron: /^Date must be/i, traduccion: "La fecha está fuera del rango permitido" },
   { patron: /payment\s+(\d+)\s+not found/i, traduccion: (m) => `No se encontró el pago ${m[1]}` },
   { patron: /payment not found/i, traduccion: "No se encontró el pago" },
   { patron: /credit not found or not active/i, traduccion: "No se encontró el crédito o no está activo" },
@@ -32,6 +60,9 @@ const TRADUCCIONES: Array<{
     patron: /internal server error/i,
     traduccion: "Error interno del servidor, intenta de nuevo o contacta soporte",
   },
+  { patron: /^unknown error$/i, traduccion: "Ocurrió un error inesperado, contacta soporte" },
+  { patron: /failed to sync credit payments/i, traduccion: "No se pudieron sincronizar los pagos del crédito" },
+  { patron: /investor not found/i, traduccion: "No se encontró el inversionista" },
 ];
 
 function buscarTraduccion(detail: string): string | null {
@@ -181,6 +212,44 @@ export function esDetalleTecnicoCrudo(detail: string): boolean {
 }
 
 /**
+ * El backend manda el detalle por campo de zod en dos formas distintas:
+ *  - `errors`: `flatten().fieldErrors` -> { campo: ["mensaje", ...] }
+ *  - `issues`: `flatten()` completo -> { formErrors: [], fieldErrors: {...} }
+ * Ambas llegan con los mensajes por defecto de zod en inglés, así que cada uno
+ * pasa por TRADUCCIONES antes de mostrarse.
+ */
+function extraerErroresPorCampo(data: unknown): string | undefined {
+  const cuerpo = (data ?? {}) as { errors?: unknown; issues?: unknown };
+
+  const candidatos = [
+    cuerpo.errors,
+    (cuerpo.issues as { fieldErrors?: unknown } | undefined)?.fieldErrors,
+    cuerpo.issues,
+  ];
+
+  for (const candidato of candidatos) {
+    if (!candidato || typeof candidato !== "object" || Array.isArray(candidato)) continue;
+    // `issues` crudo con la forma { formErrors, fieldErrors } ya se cubrió arriba.
+    if ("fieldErrors" in candidato || "formErrors" in candidato) continue;
+
+    const traducidos: Record<string, string[]> = {};
+    for (const [campo, valor] of Object.entries(candidato as Record<string, unknown>)) {
+      const mensajes = (Array.isArray(valor) ? valor : [valor])
+        .filter((m): m is string => typeof m === "string" && m.trim().length > 0)
+        .map((m) => traducirDetalleTecnico(m.trim()))
+        .filter((m) => !esDetalleTecnicoCrudo(m));
+
+      if (mensajes.length > 0) traducidos[campo] = mensajes;
+    }
+
+    const texto = formatFieldErrors(traducidos, "");
+    if (texto) return texto;
+  }
+
+  return undefined;
+}
+
+/**
  * Decide qué texto del cuerpo del error se muestra al usuario, según la
  * convención del backend de cartera:
  *  - `message` / `mensaje`: texto curado (normalmente español), salvo cuando
@@ -211,6 +280,12 @@ function extraerDetalle(data: unknown): string | undefined {
     return MENSAJES_POR_CODIGO[code];
   }
 
+  // El detalle por campo es más útil que cualquier `message` genérico.
+  const porCampo = extraerErroresPorCampo(data);
+  if (porCampo) {
+    return porCampo;
+  }
+
   // `message` curado tiene prioridad, salvo que sea el genérico sin información.
   if (message && !MENSAJE_SIN_INFORMACION.test(message)) {
     return message;
@@ -227,6 +302,16 @@ function extraerDetalle(data: unknown): string | undefined {
     return mensaje;
   }
   return undefined;
+}
+
+/**
+ * El detalle por campo es una lista de viñetas: va en su propia línea para que
+ * se lea como lista y no pegada al fallback con dos puntos.
+ */
+function unirConDetalle(fallback: string, detalle: string): string {
+  return detalle.startsWith("• ")
+    ? fallback + ":\n" + detalle
+    : `${fallback}: ${detalle}`;
 }
 
 /**
@@ -250,7 +335,7 @@ export function getApiErrorMessage(error: unknown, fallback: string): string {
     const { status, data } = error.response;
     const detail = typeof data === "string" ? data : extraerDetalle(data);
     if (typeof detail === "string" && detail.trim()) {
-      return `${fallback}: ${traducirDetalleTecnico(detail.trim())}`;
+      return unirConDetalle(fallback, traducirDetalleTecnico(detail.trim()));
     }
     if (status === 401 || status === 403) {
       return `${fallback}: Tu sesión no es válida, vuelve a iniciar sesión`;

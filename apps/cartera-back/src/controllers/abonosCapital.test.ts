@@ -14,9 +14,16 @@ mock.module("../utils/comprasAjuste", () => ({
     Promise.resolve(new Big(pendientesPorInv[invId] ?? 0)),
 }));
 
-const { registrarCancelacionEspejo, revertirAbonoCapitalEspejo } = await import(
+const {
+  createAbonoCapital,
+  registrarCancelacionEspejo,
+  revertirAbonoCapitalEspejo,
+  updateAbonoCapital,
+} = await import(
   "./abonosCapital"
 );
+type CreateDependencies = NonNullable<Parameters<typeof createAbonoCapital>[1]>;
+type UpdateDependencies = NonNullable<Parameters<typeof updateAbonoCapital>[2]>;
 
 // Mock del handle de transacción (tx) de drizzle. Simula:
 //   tx.select().from().innerJoin().where()  -> filas del espejo
@@ -52,6 +59,179 @@ function makeTx(espejoRows: any[]) {
 
 beforeEach(() => {
   pendientesPorInv = {};
+});
+
+describe("structured persistence failures", () => {
+  it("preserves the failure response when the telemetry emitter throws", async () => {
+    const executor = {
+      insert: () => ({
+        values: () => ({
+          returning: () => Promise.reject(new Error("synthetic database detail")),
+        }),
+      }),
+    };
+
+    const result = await createAbonoCapital(
+      {
+        credito_id: 101,
+        inversionista_id: 202,
+        monto: "303.00",
+        tipo: "CAPITAL",
+      },
+      {
+        executor: executor as unknown as CreateDependencies["executor"],
+        emitFailure: () => { throw new Error("synthetic telemetry failure"); },
+        now: () => 100,
+      },
+    );
+
+    expect(result).toEqual({
+      success: false,
+      message: "Error al crear el abono a capital",
+      error: "synthetic database detail",
+      data: null,
+    });
+  });
+
+  it("preserves the failure response when the injected clock throws", async () => {
+    const events: { operation: "create" | "update"; durationMs: number }[] = [];
+    const executor = {
+      insert: () => ({
+        values: () => ({
+          returning: () => Promise.reject(new Error("synthetic database detail")),
+        }),
+      }),
+    };
+
+    const result = await createAbonoCapital(
+      {
+        credito_id: 101,
+        inversionista_id: 202,
+        monto: "303.00",
+        tipo: "CAPITAL",
+      },
+      {
+        executor: executor as unknown as CreateDependencies["executor"],
+        emitFailure: (event: { operation: "create" | "update"; durationMs: number }) => events.push(event),
+        now: () => { throw new Error("synthetic clock failure"); },
+      },
+    );
+
+    expect(result).toEqual({
+      success: false,
+      message: "Error al crear el abono a capital",
+      error: "synthetic database detail",
+      data: null,
+    });
+    expect(events).toEqual([{ operation: "create", durationMs: 0 }]);
+  });
+
+  it("does not widen the historical error field for non-Error rejections", async () => {
+    const executor = {
+      insert: () => ({
+        values: () => ({
+          returning: () => Promise.reject("synthetic raw rejection"),
+        }),
+      }),
+    };
+
+    const result = await createAbonoCapital(
+      {
+        credito_id: 101,
+        inversionista_id: 202,
+        monto: "303.00",
+        tipo: "CAPITAL",
+      },
+      {
+        executor: executor as unknown as CreateDependencies["executor"],
+        emitFailure: () => undefined,
+        now: () => 100,
+      },
+    );
+
+    expect(result).toEqual({
+      success: false,
+      message: "Error al crear el abono a capital",
+      error: undefined,
+      data: null,
+    });
+  });
+
+  it("classifies create failures without passing business data or raw errors", async () => {
+    const events: { operation: "create" | "update"; durationMs: number }[] = [];
+    let now = 100;
+    const executor = {
+      insert: () => ({
+        values: () => ({
+          returning: () => Promise.reject(new Error("synthetic database detail")),
+        }),
+      }),
+    };
+
+    const result = await createAbonoCapital(
+      {
+        credito_id: 101,
+        inversionista_id: 202,
+        monto: "303.00",
+        tipo: "CAPITAL",
+      },
+      {
+        executor: executor as unknown as CreateDependencies["executor"],
+        emitFailure: (event: { operation: "create" | "update"; durationMs: number }) => events.push(event),
+        now: () => {
+          const current = now;
+          now += 25;
+          return current;
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      success: false,
+      message: "Error al crear el abono a capital",
+      error: "synthetic database detail",
+      data: null,
+    });
+    expect(events).toEqual([{ operation: "create", durationMs: 25 }]);
+    expect(Object.keys(events[0] ?? {}).sort()).toEqual(["durationMs", "operation"]);
+  });
+
+  it("classifies update failures without passing the abono id, fields or raw error", async () => {
+    const events: { operation: "create" | "update"; durationMs: number }[] = [];
+    let now = 200;
+    const executor = {
+      update: () => ({
+        set: () => ({
+          where: () => ({
+            returning: () => Promise.reject(new Error("synthetic update detail")),
+          }),
+        }),
+      }),
+    };
+
+    const result = await updateAbonoCapital(
+      404,
+      { liquidado: true },
+      {
+        executor: executor as unknown as UpdateDependencies["executor"],
+        emitFailure: (event: { operation: "create" | "update"; durationMs: number }) => events.push(event),
+        now: () => {
+          const current = now;
+          now += 30;
+          return current;
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      success: false,
+      message: "Error al actualizar el abono a capital",
+      error: "synthetic update detail",
+      data: null,
+    });
+    expect(events).toEqual([{ operation: "update", durationMs: 30 }]);
+    expect(Object.keys(events[0] ?? {}).sort()).toEqual(["durationMs", "operation"]);
+  });
 });
 
 describe("registrarCancelacionEspejo", () => {

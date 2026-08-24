@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { matchesSearch } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import {
@@ -85,9 +86,7 @@ export function CrearBoletaInversionista({
   const filtered =
     query === ""
       ? investors
-      : investors.filter((i) =>
-          i.nombre.toLowerCase().includes(query.toLowerCase())
-        );
+      : investors.filter((i) => matchesSearch(i.nombre, query));
 
   const handleClose = () => {
     if (subiendo || createBoleta.isPending) return;

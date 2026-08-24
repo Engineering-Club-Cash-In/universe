@@ -22,6 +22,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { canEnterCancellationPaymentFlow } from "./cancellationPaymentFlow";
 import { useResetCredit } from "./resetCredit";
 import { getApiErrorMessage } from "@/lib/apiError";
+import { zodToFormikValidate } from "@/lib/formErrors";
 import { useAuth } from "@/Provider/authProvider";
 import { toast } from "sonner";
 import { getDisplayedPartialContribution } from "../services/installmentContribution";
@@ -49,17 +50,7 @@ export const pagoSchema = z.object({
 
 export type PagoFormValues = z.infer<typeof pagoSchema>;
  
-function zodToFormikValidate(schema: z.ZodSchema<any>) {
-  return (values: any) => {
-    const result = schema.safeParse(values);
-    if (result.success) return {};
-    const errors: Record<string, string> = {};
-    for (const issue of result.error.issues) {
-      errors[issue.path[0]] = issue.message;
-    }
-    return errors;
-  };
-}
+
 
 export function usePagoForm() {
   const queryClient = useQueryClient();

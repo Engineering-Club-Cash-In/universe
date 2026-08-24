@@ -1,0 +1,103 @@
+services:
+  config-init:
+    build:
+      context: ..
+      dockerfile: config-renderer.Dockerfile
+    image: cci/victorialogs-config-renderer:1.0.0
+    # Extensión Coolify: el init termina correctamente y no participa en healthchecks.
+    exclude_from_hc: true
+    command:
+      - central
+      - --secrets-dir
+      - /run/secrets
+      - --template
+      - /opt/iac/vmauth.template.yaml
+      - --output
+      - /runtime/vmauth.yaml
+    secrets:
+      - query_username
+      - query_password
+      - ingest_username
+      - ingest_password
+    volumes:
+      - vmauth-config:/runtime
+    restart: "no"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    mem_limit: 64m
+    cpus: 0.10
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  victoria-logs:
+    image: victoriametrics/victoria-logs:v1.52.0@sha256:8f2140dca110705916751b9cdf57c2309555b6f1cf2707be1ee1a774c8c1e1f9
+    command:
+      - -storageDataPath=/victoria-logs-data
+      - -retentionPeriod=30d
+      - -retention.maxDiskSpaceUsageBytes=12GiB
+      - -memory.allowedBytes=512MiB
+      - -httpListenAddr=:9428
+    expose:
+      - "9428"
+    volumes:
+      - victoria-logs-data:/victoria-logs-data
+    restart: unless-stopped
+    mem_limit: 768m
+    cpus: 0.80
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  vmauth:
+    image: victoriametrics/vmauth:v1.150.0@sha256:ad60659fadc0b7c364836e11d9cbffa14137ac8d95608cf5c71407d89f27c64f
+    command:
+      - -auth.config=/etc/vmauth/vmauth.yaml
+      - -httpListenAddr=:8427
+      - -httpInternalListenAddr=127.0.0.1:8428
+    expose:
+      - "8427"
+    volumes:
+      - vmauth-config:/etc/vmauth:ro
+    depends_on:
+      config-init:
+        condition: service_completed_successfully
+      victoria-logs:
+        condition: service_started
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    mem_limit: 96m
+    cpus: 0.20
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  victoria-logs-data:
+  vmauth-config:
+
+secrets:
+  query_username:
+    file: ${VICTORIALOGS_SECRETS_DIR:-./secrets}/query_username
+  query_password:
+    file: ${VICTORIALOGS_SECRETS_DIR:-./secrets}/query_password
+  ingest_username:
+    file: ${VICTORIALOGS_SECRETS_DIR:-./secrets}/ingest_username
+  ingest_password:
+    file: ${VICTORIALOGS_SECRETS_DIR:-./secrets}/ingest_password

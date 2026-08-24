@@ -1,0 +1,17 @@
+unauthorized_user:
+  url_map:
+    - src_paths: ["^/health$"]
+      url_prefix: ["http://victoria-logs:9428"]
+
+users:
+  - username: __QUERY_USERNAME_JSON__
+    password: __QUERY_PASSWORD_JSON__
+    url_map:
+      - src_paths: ["/select/.*"]
+        url_prefix: ["http://victoria-logs:9428"]
+
+  - username: __INGEST_USERNAME_JSON__
+    password: __INGEST_PASSWORD_JSON__
+    url_map:
+      - src_paths: ["/insert/.*"]
+        url_prefix: ["http://victoria-logs:9428"]

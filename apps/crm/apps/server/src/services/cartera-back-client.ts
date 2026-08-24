@@ -1136,6 +1136,30 @@ export class CarteraBackClient {
 	}
 
 	/**
+	 * Contacto del asesor para mensajes complementarios. Es información opcional:
+	 * no puede reintentar ni participar del breaker que protege operaciones de
+	 * cartera que sí bloquean el flujo.
+	 */
+	async getAsesorCredito(
+		numeroSifco: string,
+	): Promise<ResumenCreditoResponse["asesor"]> {
+		try {
+			const resumen = await this.request<Pick<ResumenCreditoResponse, "asesor">>(
+				`/credito/resumen?numero_credito_sifco=${encodeURIComponent(numeroSifco)}`,
+				{ method: "GET" },
+				false,
+				5_000,
+				false,
+				false,
+			);
+			return resumen?.asesor ?? null;
+		} catch (error) {
+			console.warn("[CarteraBackClient] getAsesorCredito:", error);
+			return null;
+		}
+	}
+
+	/**
 	 * Cuánto le falta a una cuota, contando los abonos parciales que ya tiene.
 	 *
 	 * `/credito/resumen` dice cuál es la cuota que toca y cuánto vale, pero no

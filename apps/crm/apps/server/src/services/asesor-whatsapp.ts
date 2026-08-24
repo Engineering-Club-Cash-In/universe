@@ -23,9 +23,7 @@ function contactoCompleto(
 export async function obtenerAsesorCartera(
 	numeroSifco: string,
 ): Promise<{ nombre: string | null; telefono: string | null } | null> {
-	return (
-		(await carteraBackClient.getResumenCredito(numeroSifco))?.asesor ?? null
-	);
+	return await carteraBackClient.getAsesorCredito(numeroSifco);
 }
 
 export async function resolverContactoAsesor(

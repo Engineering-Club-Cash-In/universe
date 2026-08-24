@@ -83,3 +83,45 @@ describe("CarteraBackClient.getEstadoCuentaUrl", () => {
 		expect(r).toEqual({ ok: false, motivo: "CREDITO_NO_ESTA_EN_CARTERA" });
 	});
 });
+
+describe("CarteraBackClient.getAsesorCredito", () => {
+	test("consulta el resumen y devuelve únicamente contacto de asesor", async () => {
+		const { client, requests } = buildClient(() =>
+			Response.json({
+				asesor: { nombre: "Carlos Ruiz", telefono: "41234567" },
+			}),
+		);
+
+		const asesor = await client.getAsesorCredito("SIFCO/2026 001");
+
+		expect(asesor).toEqual({ nombre: "Carlos Ruiz", telefono: "41234567" });
+		expect(requests).toEqual([
+			"http://cartera.test/credito/resumen?numero_credito_sifco=SIFCO%2F2026%20001",
+		]);
+	});
+
+	test("falla opcional: no reintenta ni abre circuit breaker", async () => {
+		const requests: string[] = [];
+		const fetchTransport = (async (input: RequestInfo | URL) => {
+			const url = String(input);
+			requests.push(url);
+			return url.endsWith("/health")
+				? Response.json({})
+				: Response.json({ error: "cartera caída" }, { status: 503 });
+		}) as typeof globalThis.fetch;
+		const client = new CarteraBackClient({
+			baseUrl: "http://cartera.test",
+			retryAttempts: 3,
+			circuitBreakerThreshold: 1,
+			accessTokenProvider: async () => "test-token",
+			fetchTransport,
+		});
+
+		await expect(client.getAsesorCredito("SIFCO-001")).resolves.toBeNull();
+		await expect(client.healthCheck()).resolves.toEqual({
+			status: "healthy",
+			circuitBreaker: "CLOSED",
+		});
+		expect(requests).toHaveLength(2);
+	});
+});

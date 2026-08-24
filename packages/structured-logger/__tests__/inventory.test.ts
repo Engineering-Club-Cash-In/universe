@@ -65,7 +65,7 @@ describe('Cartera log-call inventory', () => {
 
   test('keeps all non-slice calls explicitly unresolved until reviewed', async () => {
     const target = await loadInventory('CARTERA_LOG_CALLS_56717dde.csv');
-    expect(target.filter(({ disposition }) => disposition === 'unresolved')).toHaveLength(2_747);
+    expect(target.filter(({ disposition }) => disposition === 'unresolved')).toHaveLength(2_664);
   });
 
   test('has no unresolved call in the payment revalidation slice', async () => {
@@ -125,5 +125,14 @@ describe('Cartera log-call inventory', () => {
     expect(seventhSlice.filter(({ disposition }) => disposition === 'unresolved')).toHaveLength(0);
     expect(seventhSlice.filter(({ disposition }) => disposition === 'remove')).toHaveLength(44);
     expect(seventhSlice.filter(({ disposition }) => disposition === 'event')).toHaveLength(8);
+  });
+
+  test('has no unresolved call in the payment-reversal domain slice', async () => {
+    const target = await loadInventory('CARTERA_LOG_CALLS_56717dde.csv');
+    const eighthSlice = target.filter(({ path }) => path.endsWith('/src/controllers/reversePayment.ts'));
+    expect(eighthSlice).toHaveLength(83);
+    expect(eighthSlice.filter(({ disposition }) => disposition === 'unresolved')).toHaveLength(0);
+    expect(eighthSlice.filter(({ disposition }) => disposition === 'remove')).toHaveLength(79);
+    expect(eighthSlice.filter(({ disposition }) => disposition === 'event')).toHaveLength(4);
   });
 });

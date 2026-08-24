@@ -215,7 +215,7 @@ export const pagaloPaymentGroups = pgTable(
 		),
 		check(
 			"pagalo_payment_groups_amounts_chk",
-			sql`${t.capitalTotal} > 0 AND ${t.facturableTotal} > 0 AND ${t.totalAmount} > 0`,
+			sql`${t.capitalTotal} >= 0 AND ${t.facturableTotal} > 0 AND ${t.totalAmount} > 0`,
 		),
 		check(
 			"pagalo_payment_groups_total_matches_chk",

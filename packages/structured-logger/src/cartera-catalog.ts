@@ -46,6 +46,10 @@ export const carteraCatalog = {
       type: 'enum',
       values: ['history', 'deactivate', 'create', 'update', 'process', 'condone', 'list', 'bulk_condone'],
     },
+    due_date_operation: {
+      type: 'enum',
+      values: ['batch_update', 'repair_missing_february', 'change_start_date', 'list_change_history', 'single_update', 'json_bulk_update'],
+    },
     error_code: {
       type: 'enum',
       values: [
@@ -66,6 +70,8 @@ export const carteraCatalog = {
         'invalid_late_fee_amount', 'invalid_installment_count', 'overdue_count_mismatch',
         'excluded_credit_state', 'amount_out_of_range', 'override_reason_missing',
         'user_not_found', 'active_late_fee_not_found', 'concurrent_run',
+        'installments_not_found', 'paid_installment_conflict', 'item_failures',
+        'missing_payment_reference',
       ],
     },
     auth_reason: { type: 'enum', values: ['missing', 'invalid', 'expired'] },
@@ -206,6 +212,14 @@ export const carteraCatalog = {
       rejected: { level: 'warn', required: ['late_fee_operation', 'duration_ms', 'reason_code'], optional: [] },
       degraded: { level: 'warn', required: ['late_fee_operation', 'duration_ms', 'error_code'], optional: [] },
       failed: { level: 'error', required: ['late_fee_operation', 'duration_ms', 'error_code'], optional: [] },
+    } },
+    'credit.due_date': { outcomes: {
+      completed: { level: 'info', required: ['due_date_operation', 'duration_ms'], optional: ['processed_count', 'succeeded_count', 'failed_count', 'skipped_count'] },
+      skipped: { level: 'info', required: ['due_date_operation', 'processed_count', 'succeeded_count', 'failed_count', 'skipped_count', 'duration_ms', 'reason_code'], optional: [] },
+      partially_completed: { level: 'warn', required: ['due_date_operation', 'processed_count', 'succeeded_count', 'failed_count', 'skipped_count', 'duration_ms', 'reason_code'], optional: [] },
+      rejected: { level: 'warn', required: ['due_date_operation', 'duration_ms', 'reason_code'], optional: [] },
+      partially_persisted: { level: 'error', required: ['due_date_operation', 'duration_ms', 'error_code'], optional: [] },
+      failed: { level: 'error', required: ['due_date_operation', 'duration_ms', 'error_code'], optional: [] },
     } },
     'credit.capital_payment_audit': { outcomes: {
       completed: { level: 'info', required: ['audit_operation', 'processed_count', 'succeeded_count', 'failed_count', 'duration_ms'], optional: [] },

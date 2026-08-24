@@ -6,6 +6,7 @@ import {
   emitCreditCapitalPaymentAuditDiagnosticCompleted,
   emitCreditCapitalPaymentAuditFailed,
   emitCreditLateFee,
+  emitCreditDueDate,
   emitPaymentReversalToPending,
   emitRecoveredDuplicatePendingInstallment,
   resolveCarteraLogEnvironment,
@@ -244,5 +245,39 @@ describe('Cartera structured logger adapter', () => {
 
     const broken = createCarteraStructuredLogger({ sink: () => { throw new Error('synthetic sink failure'); } });
     expect(() => emitCreditLateFee({ outcome: 'failed', operation: 'create', durationMs: 1, errorCode: 'unknown' }, broken)).not.toThrow();
+  });
+
+  test('emits finite due-date outcomes and isolates sink failures', () => {
+    const lines: string[] = [];
+    const logger = createCarteraStructuredLogger({
+      environment: 'staging',
+      clock: () => new Date('2026-08-22T00:00:00.000Z'),
+      sink: (line) => lines.push(line),
+    });
+
+    emitCreditDueDate({ outcome: 'completed', operation: 'change_start_date', durationMs: 5 }, logger);
+    emitCreditDueDate({ outcome: 'completed', operation: 'json_bulk_update', durationMs: 10, processedCount: 8, succeededCount: 6, failedCount: 0, skippedCount: 2 }, logger);
+    emitCreditDueDate({ outcome: 'skipped', operation: 'repair_missing_february', durationMs: 6, processedCount: 2, succeededCount: 0, failedCount: 0, skippedCount: 2, reasonCode: 'missing_payment_reference' }, logger);
+    emitCreditDueDate({ outcome: 'partially_completed', operation: 'batch_update', durationMs: 8, processedCount: 3, succeededCount: 2, failedCount: 1, skippedCount: 0, reasonCode: 'item_failures' }, logger);
+    emitCreditDueDate({ outcome: 'rejected', operation: 'change_start_date', durationMs: 1, reasonCode: 'paid_installment_conflict' }, logger);
+    emitCreditDueDate({ outcome: 'failed', operation: 'list_change_history', durationMs: 2, errorCode: 'unknown' }, logger);
+    emitCreditDueDate({ outcome: 'partially_persisted', operation: 'change_start_date', durationMs: 9, errorCode: 'unknown' }, logger);
+
+    expect(lines.map((line) => JSON.parse(line))).toEqual([
+      expect.objectContaining({ event: 'credit.due_date', outcome: 'completed', level: 'info', due_date_operation: 'change_start_date', duration_ms: 5 }),
+      expect.objectContaining({ event: 'credit.due_date', outcome: 'completed', level: 'info', due_date_operation: 'json_bulk_update', processed_count: 8, succeeded_count: 6, failed_count: 0, skipped_count: 2 }),
+      expect.objectContaining({ event: 'credit.due_date', outcome: 'skipped', level: 'info', due_date_operation: 'repair_missing_february', processed_count: 2, succeeded_count: 0, failed_count: 0, skipped_count: 2, reason_code: 'missing_payment_reference' }),
+      expect.objectContaining({ event: 'credit.due_date', outcome: 'partially_completed', level: 'warn', due_date_operation: 'batch_update', processed_count: 3, succeeded_count: 2, failed_count: 1, skipped_count: 0, reason_code: 'item_failures' }),
+      expect.objectContaining({ event: 'credit.due_date', outcome: 'rejected', level: 'warn', due_date_operation: 'change_start_date', reason_code: 'paid_installment_conflict' }),
+      expect.objectContaining({ event: 'credit.due_date', outcome: 'failed', level: 'error', due_date_operation: 'list_change_history', error_code: 'unknown' }),
+      expect.objectContaining({ event: 'credit.due_date', outcome: 'partially_persisted', level: 'error', due_date_operation: 'change_start_date', error_code: 'unknown' }),
+    ]);
+    for (const line of lines) {
+      const entry = JSON.parse(line) as Record<string, unknown>;
+      for (const key of ['credito_id', 'cuota_id', 'pago_id', 'numero_credito_sifco', 'fecha', 'dia_pago', 'changed_by', 'razon', 'path', 'sql', 'message', 'stack', 'error']) expect(entry).not.toHaveProperty(key);
+    }
+
+    const broken = createCarteraStructuredLogger({ sink: () => { throw new Error('synthetic sink failure'); } });
+    expect(() => emitCreditDueDate({ outcome: 'failed', operation: 'json_bulk_update', durationMs: 1, errorCode: 'unknown' }, broken)).not.toThrow();
   });
 });

@@ -73,7 +73,7 @@ type PaymentReversalToPendingResult =
     }>
   | Readonly<{
       outcome: "rejected";
-      reasonCode: "schema_invalid" | "payment_not_found" | "credit_not_found";
+      reasonCode: "schema_invalid" | "payment_not_found" | "credit_not_found" | "state_conflict";
       durationMs: number;
     }>
   | Readonly<{

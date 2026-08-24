@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { eq, and, or } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import Big from "big.js";
 import { db } from "../database";
 import { setCapitalSource } from "../utils/withAuditContext";
@@ -24,6 +24,21 @@ function safeNow(): number {
 
 function elapsedMilliseconds(startedAt: number): number {
   return Math.max(0, Math.min(86_400_000, Math.round(safeNow() - startedAt)));
+}
+
+const REVERSIBLE_CREDIT_STATES = new Set(["ACTIVO", "MOROSO", "EN_CONVENIO"]);
+
+export function classifyRevertPaymentCredit(
+  credit: { readonly statusCredit?: string | null } | undefined,
+): "credit_not_found" | "state_conflict" | null {
+  if (!credit) return "credit_not_found";
+  return REVERSIBLE_CREDIT_STATES.has(credit.statusCredit ?? "") ? null : "state_conflict";
+}
+
+class RevertPaymentCreditRejection extends Error {
+  constructor(readonly reasonCode: "credit_not_found" | "state_conflict") {
+    super("Credit not found or not active");
+  }
 }
 
 // ============================================================================
@@ -115,21 +130,11 @@ export function createRevertPaymentToPending(
       const [creditData] = await tx
         .select()
         .from(creditos)
-        .where(
-          and(
-            eq(creditos.credito_id, credito_id),
-            or(
-              eq(creditos.statusCredit, "ACTIVO"),
-              eq(creditos.statusCredit, "MOROSO"),
-              eq(creditos.statusCredit, "EN_CONVENIO")
-            )
-          )
-        )
+        .where(eq(creditos.credito_id, credito_id))
         .limit(1);
 
-      if (!creditData) {
-        throw new Error("Credit not found or not active");
-      }
+      const creditRejection = classifyRevertPaymentCredit(creditData);
+      if (creditRejection) throw new RevertPaymentCreditRejection(creditRejection);
 
 
       // Ojo: acá NO se revierten los abonos a capital del espejo. `pagoValidado`
@@ -308,11 +313,13 @@ export function createRevertPaymentToPending(
       data: result.data,
     };
   } catch (error: any) {
-    const reasonCode = error?.message === "Payment not found"
-      ? "payment_not_found"
-      : error?.message === "Credit not found or not active"
-        ? "credit_not_found"
-        : null;
+    const reasonCode = error instanceof RevertPaymentCreditRejection
+      ? error.reasonCode
+      : error?.message === "Payment not found"
+        ? "payment_not_found"
+        : error?.message === "Credit not found or not active"
+          ? "credit_not_found"
+          : null;
     if (reasonCode) {
       dependencies.emitTerminal({
         outcome: "rejected",

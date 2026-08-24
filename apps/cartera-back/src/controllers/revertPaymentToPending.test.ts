@@ -27,7 +27,7 @@ const voidInvoice = mock(() => Promise.resolve(cofidiResult));
 process.env.SUPABASE_DB_URL ??= "postgresql://127.0.0.1:1/synthetic";
 process.env.RESEND_API_KEY ??= "synthetic-test-key";
 process.env.EMAIL_DOMAIN ??= "example.invalid";
-const { createRevertPaymentToPending } = await import("./revertPaymentToPending");
+const { createRevertPaymentToPending, classifyRevertPaymentCredit } = await import("./revertPaymentToPending");
 type Dependencies = NonNullable<Parameters<typeof createRevertPaymentToPending>[0]>;
 const revertPaymentToPending = createRevertPaymentToPending({
   runTransaction: transaction as unknown as Dependencies["runTransaction"],
@@ -38,6 +38,7 @@ const revertPaymentToPending = createRevertPaymentToPending({
 });
 
 const credit = {
+  statusCredit: "ACTIVO",
   numero_credito_sifco: "SYNTHETIC-10",
   cuota: "100.00",
   capital: "800.00",
@@ -68,6 +69,12 @@ describe("revertPaymentToPending observability contract", () => {
     expect(response).toEqual({ message: "Validation failed", errors: { credito_id: ["Required"], pago_id: ["Required"] } });
     expect(transaction).not.toHaveBeenCalled();
     expect(emitted[0]).toMatchObject({ outcome: "rejected", reasonCode: "schema_invalid" });
+  });
+
+  test("distinguishes missing credits from non-reversible credit states", () => {
+    expect(classifyRevertPaymentCredit(undefined)).toBe("credit_not_found");
+    expect(classifyRevertPaymentCredit({ statusCredit: "CANCELADO" })).toBe("state_conflict");
+    expect(classifyRevertPaymentCredit({ statusCredit: "ACTIVO" })).toBeNull();
   });
 
   test("executes the transaction callback and preserves the already-pending body", async () => {

@@ -1789,8 +1789,10 @@ rubros facturables y no facturables en un mismo cobro de tarjeta.
    "mora" en la descripción — asusta al cliente sin necesidad; el desglose real vive en
    el snapshot y en cartera.
 4. El grupo existe completo o no existe: si Págalo falla creando el segundo, el grupo
-   queda `CANCELLED` — nunca se le entrega al cliente media intención de pago. Pagar solo
-   uno deja el grupo `PARTIALLY_PAID` y nada se aplica en cartera hasta completarse.
+   queda `CANCELLED` — nunca se le entrega al cliente media intención de pago. En un grupo
+   de dos, pagar solo uno lo deja `PARTIALLY_PAID` y nada se aplica en cartera hasta
+   completarse; en un grupo de un solo link, ese único `ACCEPT` ya lo deja
+   `READY_TO_APPLY`.
 
 **Consecuencia UX asumida:** el cliente pasa (hasta) dos veces por el checkout de Págalo.
 Es el precio de no generar factura sobre capital; lo amortigua el mensaje armado que
@@ -1832,7 +1834,8 @@ herramienta de conciliación si algún día dudamos del poller.
 ([D-39](#d-39--el-rechazo-es-un-botón-explícito-no-se-infiere-del-reverso)). ¿El pago por
 link también?
 
-**Decisión: no.** Cuando el grupo llega a `READY_TO_APPLY` —ambos links con transacción
+**Decisión: no.** Cuando el grupo llega a `READY_TO_APPLY` —**todos los links requeridos
+del grupo** (dos, o uno solo cuando un lado es Q0, [D-48](#d-48--capital-en-un-link-todo-lo-demás-en-el-otro)) con transacción
 `ACCEPT` verificada contra Págalo y voucher guardado— el dispatcher lo manda a cartera y
 los `pagos_credito` se crean **ya validados**. No hay nada que un humano pueda revisar
 mejor que la evidencia del procesador: el monto es exacto (lo armamos nosotros), la
@@ -1861,7 +1864,7 @@ recalcula a las 23:59 GT y un link viejo queda corto). Pero un grupo son dos lin
 pasa si el cliente paga uno y el otro expira antes de que pague el segundo? Recuperar ese
 medio pago es un enredo sin salida fácil.
 
-**Decisión.** `expiration: false` en ambos links, **por ahora**. El escenario "pagó la
+**Decisión.** `expiration: false` en todos los links del grupo, **por ahora**. El escenario "pagó la
 mitad y la otra mitad ya no existe" es peor que el escenario "pagó con un monto de hace
 unos días".
 

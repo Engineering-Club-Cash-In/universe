@@ -80,20 +80,26 @@ cuotas que quiere pagar, pero siempre lo obligamos a pagar la mora"*.
 
 ### 2.4 Después de enviar el link
 
-Se le pide al cliente que avise cuando haya pagado.
+**La conversación termina al entregar los links** — el bot no le pregunta nada más
+([D-49](./DECISIONES.md#d-49--del-pago-nos-enteramos-nosotros-no-el-cliente)). El árbol
+original de gerencia traía un "¿Realizaste tu pago?" con transbordo a agente si el cliente
+no contestaba; **ese nodo ya no existe**: lo normal es pagar y cerrar el chat, y escalar a
+esos clientes sería transbordar justo a los que sí pagaron (lo señaló Codex en el PR
+#1421). Queda solo una **respuesta pasiva**: si el cliente escribe por su cuenta que ya
+pagó, el bot contesta genérico ("lo estamos verificando, te llega tu comprobante") sin
+disparar nada.
 
 ```mermaid
 flowchart TD
-    E[Link enviado] --> P{¿Realizaste tu pago?}
-    P -- Sí --> OK[« Hemos recibido tu pago »<br/>+ resumen del pago]
-    OK --> OA[Realizar otra acción con este crédito]
-    P -- No --> W[« Seguimos a la espera de tu pago »]
-    P -- No contesta --> AG[Transbordo a un agente]
+    E[Links enviados] --> FIN[Fin de la conversación]
+    FIN -.-> V[Poller verifica el pago<br/>con Págalo]
+    V -.-> N[Acuse al validar +<br/>recibo con saldos al aplicarse]
+    FIN -. cliente escribe « ya pagué » .-> R[Respuesta pasiva<br/>« lo estamos verificando »]
 ```
 
-**Regla importante:** si el cliente **paga, avise o no**, se le manda igual el mensaje con el
-recibo y cómo quedó su capital, su mora y su cuota —si quedó algo pendiente o si abonó a una
-cuota siguiente. La notificación **no depende** de que el cliente conteste en el chat.
+**Regla importante:** si el cliente **paga, avise o no**, le llegan igual el acuse y el
+recibo con cómo quedó su capital, su mora y su cuota. La notificación **no depende** de que
+el cliente conteste en el chat.
 
 > ✅ **Resuelto (investigación 2026-08-24):** Págalo **no tiene webhook firmado** — sus
 > callbacks son redirects del navegador del cliente. Nos enteramos con un **poller** que
@@ -135,7 +141,7 @@ lectura con IA, confirmación, registro en cartera y el aviso de vuelta cuando c
 | --- | --- |
 | **Excedentes** | Aplica a **Nexa y boleta**. Excedente **mayor a Q25** → se aplica directo a la siguiente cuota. **Menor a Q25** → se registra como otros ingresos. **Ya implementado** en `registerPayment.ts` de cartera para todo pago; no se reimplementa en el bot. |
 | **Notificación de resultado** | Todo pago acreditado genera mensaje con recibo y detalle de capital, mora y cuota. Si se rechaza, también se le avisa. |
-| **Escalamiento** | Falta de respuesta tras enviar el link de pago → agente humano. |
+| **Escalamiento** | El **silencio tras recibir el link NO escala** (§2.4: lo normal es pagar y cerrar el chat; se eliminó el transbordo del árbol original). A agente se va cuando el cliente **pide ayuda** o cuando un flujo falla, no por no contestar. |
 
 ---
 
@@ -156,4 +162,5 @@ lectura con IA, confirmación, registro en cartera y el aviso de vuelta cuando c
 - ~~**Integración con Pagalo.**~~ Resuelto: API V2 de Págalo, dos servicios del bot, poller
   verificado y aplicación en cartera ya validada — todo en
   [`07-pago-con-link.md`](./07-pago-con-link.md) (D-45, D-49, D-50).
-- **Timeout del "no contestó".** Después de cuánto tiempo se transborda a un agente.
+- ~~**Timeout del "no contestó".**~~ Ya no existe ese nodo: el silencio tras el link no
+  escala (§2.4, [D-49](./DECISIONES.md#d-49--del-pago-nos-enteramos-nosotros-no-el-cliente)).

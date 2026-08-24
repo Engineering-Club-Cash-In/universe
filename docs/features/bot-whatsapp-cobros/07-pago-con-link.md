@@ -256,7 +256,7 @@ CREDITO_NO_ENCONTRADO` si no).
 | 409 | `MORA_POR_CONFIRMAR` | La foto de `moras_credito` no coincide con las cuotas atrasadas (misma guarda del paso 2). **Sin mora confiable no se genera link**: se manda al cliente con su asesor antes que cobrarle una cifra equivocada |
 | 409 | `CREDITO_NO_PAGABLE_POR_LINK` | Estado del crédito fuera del flujo: `EN_CONVENIO` ([D-15](./DECISIONES.md#d-15--convenio-y-promesa-de-pago-bloqueados)), `INCOBRABLE`, `CANCELADO`, `PENDIENTE_CANCELACION`, `CAIDO` |
 | 409 | `SIN_CUOTAS_QUE_PAGAR` | Nada vencido ni por vencer que ofrecer |
-| 409 | `PAGO_EN_PROCESO` | Hay un grupo del bot **en vuelo post-pago** (`READY_TO_APPLY`/`APPLYING`/`APPLICATION_FAILED`/`REVIEW_REQUIRED`) para este crédito: no se ofrecen opciones calculadas sobre una deuda que está por cambiar — mismo candado que en `/crear` (§4.2) |
+| 409 | `PAGO_EN_PROCESO` | Hay un grupo Págalo **de cualquier origen** en vuelo post-pago (`READY_TO_APPLY`/`APPLYING`/`APPLICATION_FAILED`/`REVIEW_REQUIRED`) para este crédito — o uno **del asesor** con links vivos: no se ofrecen opciones calculadas sobre una deuda que está por cambiar — mismo candado que en `/crear` (§4.2) |
 
 ### 4.2 Servicio 2 — `POST /api/bot/cobros/pago-link/crear`
 
@@ -307,7 +307,7 @@ una sola si la selección no lleva capital o es solo capital** — y responde:
 | 409 | `MONTO_DESACTUALIZADO` | El recálculo no coincide con `montoEsperado`. El bot repite `/opciones` |
 | 200 | — (mismos links) | Grupo activo **sin pagos observados** y el recálculo da **el mismo desglose** (comparación contra el `allocations_snapshot` completo, no el total — dos deudas distintas pueden sumar lo mismo): se responden **los mismos links**. Con **desglose distinto**: se crea un **grupo NUEVO** con su propio snapshot, y el viejo se cancela con sus links `REPLACED` (siguen en el poll, [§3.5](#35-otras-notas-de-la-investigación)) — el snapshot de un grupo es **inmutable** (hallazgo de Codex): reemplazar links "adentro" del mismo grupo dejaría al `REPLACED` —aún cobrable afuera— sin la evidencia bajo la que se emitió, o a los links nuevos despachándose con un snapshot viejo |
 | 200 | — (link pendiente) | Grupo **`PARTIALLY_PAID`** (ya se observó un pago): se responde **el link pendiente de ese mismo grupo**, siempre — un grupo con dinero adentro **jamás se regenera** (reemplazarlo crearía de nuevo el componente ya pagado y mandaría el pago real a revisión); la deriva de mora la absorbe [D-52](./DECISIONES.md#d-52--si-la-mora-cambió-cuando-el-link-se-paga-mora-primero-y-se-avisa-el-faltante) al aplicar |
-| 409 | `PAGO_EN_PROCESO` | El crédito tiene un grupo del bot **en vuelo post-pago** (`READY_TO_APPLY`, `APPLYING` o `APPLICATION_FAILED`): el dinero ya entró y cartera todavía no aplica, así que el recálculo vería la deuda **vieja** y armaría un doble cobro (hallazgo de Codex). Respuesta: «tu pago se está aplicando, te llega tu recibo» — **jamás** links nuevos en esa ventana. `REVIEW_REQUIRED` responde el mismo código con mensaje de hablar con su asesor |
+| 409 | `PAGO_EN_PROCESO` | Un grupo Págalo del crédito — **de cualquier origen, bot o asesor** (comparten poller y ledger; hallazgo de Codex) — está **en vuelo post-pago** (`READY_TO_APPLY`, `APPLYING` o `APPLICATION_FAILED`): el dinero ya entró y cartera todavía no aplica, así que el recálculo vería la deuda **vieja** y armaría un doble cobro. Respuesta: «tu pago se está aplicando, te llega tu recibo» — **jamás** links nuevos en esa ventana. `REVIEW_REQUIRED` responde el mismo código con mensaje de hablar con su asesor. Y un grupo **del asesor** con links vivos o dinero adentro (aunque nadie haya pagado aún) también responde este código — «tenés un pago por link en curso con tu asesor» — porque el bot **no cancela ni duplica la intención de un asesor**; las reglas de reuso/reemplazo de arriba aplican solo a grupos de origen `BOT` |
 | 502 | `PAGALO_NO_DISPONIBLE` | Págalo no respondió o falló creando el segundo link. **No queda ninguna intención a medias**: el grupo queda `CANCELLED` y el link que sí se creó se marca `REPLACED` (cancelarlo a mano en el panel). Mensaje al cliente: intentá más tarde o subí tu boleta |
 
 ### 4.3 La conversación termina al entregar los links
@@ -366,10 +366,12 @@ y los reportes sepan de quién es cada link.
 6. **Un grupo con un pago adentro no se toca.** `PARTIALLY_PAID` solo puede completarse
    (o irse a revisión); y desde que el último link se paga hasta el `COMPLETED` de cartera
    (`READY_TO_APPLY`/`APPLYING`/`APPLICATION_FAILED`/`REVIEW_REQUIRED`) el crédito **no
-   recibe links nuevos** (`PAGO_EN_PROCESO`). Reemplazar links aplica únicamente a grupos
-   **sin ningún pago observado** — y nunca "adentro" del grupo: **cambiar el desglose es
-   crear un grupo nuevo**, porque el `allocations_snapshot` es inmutable y es la evidencia
-   de lo que cada link cobró.
+   recibe links nuevos** (`PAGO_EN_PROCESO`) — **sin importar el origen del grupo**, bot o
+   asesor: comparten poller y ledger, y el doble cobro es el mismo. Reemplazar links
+   aplica únicamente a grupos **de origen `BOT` sin ningún pago observado** (la intención
+   de un asesor no se cancela ni se duplica desde el bot) — y nunca "adentro" del grupo:
+   **cambiar el desglose es crear un grupo nuevo**, porque el `allocations_snapshot` es
+   inmutable y es la evidencia de lo que cada link cobró.
 7. **Sin pagos parciales.** Se pagan cuotas completas — por eso el reparto por rubro es
    determinista y ni el cliente ni conta tienen que decidir a qué se aplica qué.
 8. **La credencial de Págalo no toca disco**: ni en payloads guardados, ni en logs, ni en
@@ -413,10 +415,12 @@ de pruebas (recibidas). Quedan:
   `origen_pago = 'pagalo'` o no mandar el nuestro, pero uno solo.
 - **Revisión LIVE de Págalo:** agendar la revisión que exigen para entregar credenciales
   de producción (§3.1).
-- **Excedentes:** no aplican en este flujo — el monto lo armamos nosotros exacto, y las
-  cuotas con pago parcial se ofrecen por su **saldo** (§4.1), así que nunca se cobra de
-  más. Solo confirmar al implementar que el servicio de aplicación en cartera no re-active
-  la regla de Q25 por redondeos.
+- ~~**Excedentes.**~~ Resuelto (hallazgo de Codex): en el camino feliz no existen —monto
+  exacto, cuotas por su saldo (§4.1)— pero un link **viejo puede quedar grande** si otro
+  pago o una condonación achican la deuda antes de usarlo. La aplicación **revalida contra
+  los saldos vigentes** al observar el pago, y un link sobrado manda el grupo a
+  `REVIEW_REQUIRED`: el sobrante jamás se acomoda solo, ni con la regla de Q25 — detalle
+  en el espejo de [D-52](./DECISIONES.md#d-52--si-la-mora-cambió-cuando-el-link-se-paga-mora-primero-y-se-avisa-el-faltante).
 
 ---
 
@@ -455,7 +459,7 @@ La 0039 del CRM ya estaba aplicada en dev y la 0008 de cartera en el sandbox
 | --- | --- |
 | 10 | **Poller**: confirmar que él lo construye (su schema ya trae el lease), que verifica `ACCEPT` con `/payment/transaction/uuid` —nunca solo el status del link— y que barre también los `REPLACED` aún cobrables (§3.5; índice ampliado en la migración 0046) |
 | 11 | **Callbacks**: endpoint que solo adelanta `next_poll_at` — jamás escribe estado ([D-49](./DECISIONES.md#d-49--del-pago-nos-enteramos-nosotros-no-el-cliente)) |
-| 12 | **Aplicación en cartera**: transaccional (su propia nota: no reintentar `newPayment` a ciegas), `origen_pago = 'pagalo'`, voucher a `cartera.boletas`, sin re-activar la regla de excedentes Q25 por redondeos, usando los `*_restante` si la cuota venía a medias, y **la mora vigente se consume primero — solo con el dinero del link `MORA_INTERES`**, jamás con el del link `CAPITAL` ([D-52](./DECISIONES.md#d-52--si-la-mora-cambió-cuando-el-link-se-paga-mora-primero-y-se-avisa-el-faltante)) |
+| 12 | **Aplicación en cartera**: transaccional (su propia nota: no reintentar `newPayment` a ciegas), `origen_pago = 'pagalo'`, voucher a `cartera.boletas`, sin re-activar la regla de excedentes Q25 por redondeos, usando los `*_restante` si la cuota venía a medias, **revalidando contra los saldos vigentes** (un link viejo sobrado —la deuda se achicó— manda el grupo a `REVIEW_REQUIRED`, espejo de D-52), y **la mora vigente se consume primero — solo con el dinero del link `MORA_INTERES`**, jamás con el del link `CAPITAL` ([D-52](./DECISIONES.md#d-52--si-la-mora-cambió-cuando-el-link-se-paga-mora-primero-y-se-avisa-el-faltante)) |
 | 13 | **Notificación WhatsApp**: nosotros mandamos el recibo al validar con Págalo ([D-50](./DECISIONES.md#d-50--el-pago-por-link-nace-validado)) — coordinar con los recibos que cartera ya manda para que al cliente le llegue **uno** |
 | 14 | **Regeneración**: viejos → `REPLACED` + cancelación manual en el panel mientras no haya API ([D-51](./DECISIONES.md#d-51--los-links-no-expiran-por-ahora)). ¿Él ya le preguntó a Págalo si existe cancelar por API? |
 

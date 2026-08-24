@@ -1927,3 +1927,12 @@ descuadrando vouchers y facturación contra los montos de cada transacción.
 flujo del link (la regla de [D-46](#d-46--el-cliente-elige-cuántas-cuotas-el-crm-arma-el-monto)
 sigue: el cliente jamás elige montos) — y nunca pasa en silencio: siempre viene con la
 aclaración y el faltante en el WhatsApp del cliente.
+
+**El espejo: la deuda se achicó (hallazgo de Codex).** Sin expiración también pasa lo
+contrario: otro pago entra, o se condona mora, y el link viejo queda **grande** — su monto
+congelado excede lo que sus rubros pueden absorber. La aplicación **revalida contra los
+saldos vigentes al observar el pago**, y un link sobrado manda el grupo a
+**`REVIEW_REQUIRED`**: el sobrante **jamás se acomoda solo** — ni con la regla de Q25 de
+excedentes — porque a diferencia del faltante (que solo deja la cuota abierta), colocar
+plata de más exige decidir entre adelantar cuota, devolver u otros ingresos, y eso lo
+decide un humano con el cliente avisado.

@@ -64,7 +64,7 @@ export interface SendEstadoCuentaWhatsappParams {
 	puedeVerTodos?: boolean;
 	/**
 	 * Si es true, el mensaje se manda SIEMPRE al primer teléfono de prueba
-	 * (`TEST_PHONES[0]`), nunca al del cliente real. En producción se llama
+	 * (`TEST_PHONES[2]`), nunca al del cliente real. En producción se llama
 	 * SIN esto (el gate real es `TEST_MESSAGE`).
 	 */
 	toTestPhone?: boolean;

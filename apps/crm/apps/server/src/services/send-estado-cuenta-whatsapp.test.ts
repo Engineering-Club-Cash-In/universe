@@ -347,7 +347,7 @@ describe("sendEstadoCuentaWhatsapp", () => {
 		expect(calls.obtenerUrl).toBe(1);
 	});
 
-	test("TEST_MESSAGE=true: destino es TEST_PHONES[0] y el log guarda el teléfono real en realTarget", async () => {
+	test("TEST_MESSAGE=true: destino es TEST_PHONES[2] y el log guarda el teléfono real en realTarget", async () => {
 		process.env.TEST_MESSAGE = "true";
 		let enviarPhone: string | undefined;
 		let logResult: any;
@@ -367,8 +367,8 @@ describe("sendEstadoCuentaWhatsapp", () => {
 		);
 
 		expect(r.sent).toBe(true);
-		if (r.sent) expect(r.telefono).toBe(getTestPhone(0));
-		expect(enviarPhone).toBe(getTestPhone(0));
+		if (r.sent) expect(r.telefono).toBe(getTestPhone(2));
+		expect(enviarPhone).toBe(getTestPhone(2));
 		expect(logResult.providerResponse.testMode).toBe(true);
 		expect(logResult.providerResponse.realTarget).toBe("30295849");
 	});

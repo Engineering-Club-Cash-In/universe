@@ -40,6 +40,7 @@ import {
 	type AnyPgColumn,
 	boolean,
 	check,
+	foreignKey,
 	index,
 	integer,
 	jsonb,
@@ -48,6 +49,7 @@ import {
 	serial,
 	text,
 	timestamp,
+	unique,
 	uniqueIndex,
 	uuid,
 	varchar,
@@ -341,6 +343,8 @@ export const pagaloPaymentLinks = pgTable(
 			t.linkType,
 			t.generation,
 		),
+		// Clave candidata usada para amarrar event.link_id con mismo group_id.
+		unique("pagalo_payment_links_id_group_uq").on(t.id, t.groupId),
 		uniqueIndex("pagalo_payment_links_active_type_uq")
 			.on(t.groupId, t.linkType)
 			.where(sql`${t.status} IN ('CREATING', 'ACTIVE')`),
@@ -410,7 +414,8 @@ export const pagaloPaymentEvents = pgTable(
 		groupId: uuid("group_id")
 			.notNull()
 			.references(() => pagaloPaymentGroups.id),
-		linkId: uuid("link_id").references(() => pagaloPaymentLinks.id),
+		// Nullable para eventos del grupo que no pertenecen a un link concreto.
+		linkId: uuid("link_id"),
 		eventType: text("event_type").notNull(),
 		source: text("source").notNull(),
 		actorUserId: text("actor_user_id").references(() => user.id),
@@ -425,6 +430,13 @@ export const pagaloPaymentEvents = pgTable(
 			.defaultNow(),
 	},
 	(t) => [
+		// Si linkId existe, obliga que link pertenezca al groupId declarado.
+		// MATCH SIMPLE permite linkId NULL para eventos GROUP_CREATED/GROUP_READY.
+		foreignKey({
+			name: "pagalo_payment_events_link_group_fk",
+			columns: [t.linkId, t.groupId],
+			foreignColumns: [pagaloPaymentLinks.id, pagaloPaymentLinks.groupId],
+		}),
 		index("pagalo_payment_events_group_time_idx").on(t.groupId, t.occurredAt),
 		index("pagalo_payment_events_type_idx").on(t.eventType, t.occurredAt),
 		index("pagalo_payment_events_link_idx").on(t.linkId),

@@ -204,6 +204,9 @@ CREATE TABLE IF NOT EXISTS public.pagalo_payment_links (
   CONSTRAINT pagalo_payment_links_request_uuid_uq UNIQUE (pagalo_request_uuid),
   CONSTRAINT pagalo_payment_links_transaction_uuid_uq UNIQUE (pagalo_transaction_uuid),
   CONSTRAINT pagalo_payment_links_generation_uq UNIQUE (group_id, link_type, generation),
+  -- Clave candidata para FK compuesta de eventos. Impide auditar un link bajo
+  -- group_id distinto al grupo real del link.
+  CONSTRAINT pagalo_payment_links_id_group_uq UNIQUE (id, group_id),
   CONSTRAINT pagalo_payment_links_type_chk CHECK (
     link_type IN ('CAPITAL', 'MORA_INTERES')
   ),
@@ -279,7 +282,8 @@ CREATE INDEX IF NOT EXISTS pagalo_payment_links_poll_idx
 CREATE TABLE IF NOT EXISTS public.pagalo_payment_events (
   id                       serial PRIMARY KEY,
   group_id                 uuid NOT NULL REFERENCES public.pagalo_payment_groups(id),
-  link_id                  uuid REFERENCES public.pagalo_payment_links(id),
+  -- NULL para eventos propios del grupo; si existe se valida junto con group_id.
+  link_id                  uuid,
   event_type               text NOT NULL,
   source                   text NOT NULL,
   actor_user_id            text REFERENCES public."user"(id),
@@ -287,7 +291,11 @@ CREATE TABLE IF NOT EXISTS public.pagalo_payment_events (
   to_status                text,
   payload                  jsonb NOT NULL DEFAULT '{}'::jsonb,
   occurred_at              timestamp with time zone NOT NULL DEFAULT now(),
-  created_at               timestamp with time zone NOT NULL DEFAULT now()
+  created_at               timestamp with time zone NOT NULL DEFAULT now(),
+
+  CONSTRAINT pagalo_payment_events_link_group_fk
+    FOREIGN KEY (link_id, group_id)
+    REFERENCES public.pagalo_payment_links(id, group_id)
 );
 
 COMMENT ON TABLE public.pagalo_payment_events IS

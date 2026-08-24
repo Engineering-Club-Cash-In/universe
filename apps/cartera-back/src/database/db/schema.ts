@@ -8,6 +8,7 @@
     boolean,
     check,
     date,
+    foreignKey,
     text,
     timestamp,
     pgSchema,
@@ -236,7 +237,14 @@
     aseguradora_id: integer("aseguradora_id").references(() => aseguradoras.id, {
       onDelete: "set null",
     }),
-  });
+  }, (t) => [
+    // Necesaria para FKs compuestas que deben demostrar que ID interno y
+    // número SIFCO identifican el mismo crédito, no dos créditos válidos.
+    unique("creditos_id_sifco_uq").on(
+      t.credito_id,
+      t.numero_credito_sifco
+    ),
+  ]);
   export const historial_devolucion_credito = customSchema.table("historial_devolucion_credito", {
     id: serial("id").primaryKey(),
     credito_id: integer("credito_id")
@@ -746,9 +754,7 @@
       id: serial("id").primaryKey(),
       // UUID opaco de pagalo_payment_groups en CRM; no hay FK entre bases.
       crm_group_id: varchar("crm_group_id", { length: 36 }).notNull(),
-      credito_id: integer("credito_id")
-        .notNull()
-        .references(() => creditos.credito_id, { onDelete: "restrict" }),
+      credito_id: integer("credito_id").notNull(),
       numero_credito_sifco: varchar("numero_credito_sifco", {
         length: 40,
       }).notNull(),
@@ -825,6 +831,13 @@
       uniqueIndex("pagalo_payment_imports_facturable_external_uq").on(
         t.facturable_external_identifier
       ),
+      // Impide acreditar un credito_id mientras auditoría nombra otro SIFCO.
+      // Cartera debe derivar el par desde creditos; DB valida misma identidad.
+      foreignKey({
+        name: "pagalo_payment_imports_credit_sifco_fk",
+        columns: [t.credito_id, t.numero_credito_sifco],
+        foreignColumns: [creditos.credito_id, creditos.numero_credito_sifco],
+      }).onDelete("restrict"),
       index("pagalo_payment_imports_status_idx").on(t.status, t.updated_at),
       index("pagalo_payment_imports_credit_idx").on(t.credito_id, t.created_at),
       check(

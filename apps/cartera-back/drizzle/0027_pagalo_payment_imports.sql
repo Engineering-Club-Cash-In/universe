@@ -31,12 +31,17 @@
 
 ALTER TYPE public.origen_pago ADD VALUE IF NOT EXISTS 'pagalo';
 
+-- FK compuesta de importación necesita identidad candidata compuesta. Aunque
+-- credito_id ya es PK y SIFCO ya es UNIQUE, este índice permite que PostgreSQL
+-- valide ambos valores como un solo par y no como referencias independientes.
+CREATE UNIQUE INDEX IF NOT EXISTS creditos_id_sifco_uq
+  ON cartera.creditos(credito_id, numero_credito_sifco);
+
 CREATE TABLE IF NOT EXISTS cartera.pagalo_payment_imports (
   id                              serial PRIMARY KEY,
   -- UUID opaco de CRM; no existe FK entre bases.
   crm_group_id                    varchar(36) NOT NULL,
-  credito_id                      integer NOT NULL
-    REFERENCES cartera.creditos(credito_id) ON DELETE RESTRICT,
+  credito_id                      integer NOT NULL,
   numero_credito_sifco            varchar(40) NOT NULL,
   currency                        varchar(3) NOT NULL DEFAULT 'GTQ',
 
@@ -77,6 +82,10 @@ CREATE TABLE IF NOT EXISTS cartera.pagalo_payment_imports (
   CONSTRAINT pagalo_payment_imports_facturable_tx_uq UNIQUE (facturable_transaction_uuid),
   CONSTRAINT pagalo_payment_imports_capital_external_uq UNIQUE (capital_external_identifier),
   CONSTRAINT pagalo_payment_imports_facturable_external_uq UNIQUE (facturable_external_identifier),
+  CONSTRAINT pagalo_payment_imports_credit_sifco_fk
+    FOREIGN KEY (credito_id, numero_credito_sifco)
+    REFERENCES cartera.creditos(credito_id, numero_credito_sifco)
+    ON DELETE RESTRICT,
   CONSTRAINT pagalo_payment_imports_status_chk CHECK (
     status IN (
       'RECEIVED', 'CREATING_PAYMENTS', 'PAYMENTS_CREATED', 'APPLYING',

@@ -256,6 +256,7 @@ CREDITO_NO_ENCONTRADO` si no).
 | 409 | `MORA_POR_CONFIRMAR` | La foto de `moras_credito` no coincide con las cuotas atrasadas (misma guarda del paso 2). **Sin mora confiable no se genera link**: se manda al cliente con su asesor antes que cobrarle una cifra equivocada |
 | 409 | `CREDITO_NO_PAGABLE_POR_LINK` | Estado del crédito fuera del flujo: `EN_CONVENIO` ([D-15](./DECISIONES.md#d-15--convenio-y-promesa-de-pago-bloqueados)), `INCOBRABLE`, `CANCELADO`, `PENDIENTE_CANCELACION`, `CAIDO` |
 | 409 | `SIN_CUOTAS_QUE_PAGAR` | Nada vencido ni por vencer que ofrecer |
+| 409 | `PAGO_EN_PROCESO` | Hay un grupo del bot **en vuelo post-pago** (`READY_TO_APPLY`/`APPLYING`/`APPLICATION_FAILED`/`REVIEW_REQUIRED`) para este crédito: no se ofrecen opciones calculadas sobre una deuda que está por cambiar — mismo candado que en `/crear` (§4.2) |
 
 ### 4.2 Servicio 2 — `POST /api/bot/cobros/pago-link/crear`
 
@@ -304,7 +305,9 @@ una sola si la selección no lleva capital o es solo capital** — y responde:
 | HTTP | `codigo` | Cuándo |
 | --- | --- | --- |
 | 409 | `MONTO_DESACTUALIZADO` | El recálculo no coincide con `montoEsperado`. El bot repite `/opciones` |
-| 200 | — (links del grupo activo) | **Grupo `PARTIALLY_PAID`** (ya se observó un pago): se responde **el link pendiente de ese mismo grupo**, siempre — un grupo con dinero adentro **jamás se regenera** (hallazgo de Codex: reemplazarlo crearía de nuevo el componente ya pagado y mandaría el pago real a revisión); la deriva de mora la absorbe [D-52](./DECISIONES.md#d-52--si-la-mora-cambió-cuando-el-link-se-paga-mora-primero-y-se-avisa-el-faltante) al aplicar. **Grupo activo sin pagos observados**: mismo desglose → los mismos links (comparación contra el **`allocations_snapshot` completo**, no el total — dos deudas distintas pueden sumar lo mismo); desglose distinto → los viejos se marcan `REPLACED` (siguen en el poll, [§3.5](#35-otras-notas-de-la-investigación)) y se crean los nuevos |
+| 200 | — (mismos links) | Grupo activo **sin pagos observados** y el recálculo da **el mismo desglose** (comparación contra el `allocations_snapshot` completo, no el total — dos deudas distintas pueden sumar lo mismo): se responden **los mismos links**. Con **desglose distinto**: se crea un **grupo NUEVO** con su propio snapshot, y el viejo se cancela con sus links `REPLACED` (siguen en el poll, [§3.5](#35-otras-notas-de-la-investigación)) — el snapshot de un grupo es **inmutable** (hallazgo de Codex): reemplazar links "adentro" del mismo grupo dejaría al `REPLACED` —aún cobrable afuera— sin la evidencia bajo la que se emitió, o a los links nuevos despachándose con un snapshot viejo |
+| 200 | — (link pendiente) | Grupo **`PARTIALLY_PAID`** (ya se observó un pago): se responde **el link pendiente de ese mismo grupo**, siempre — un grupo con dinero adentro **jamás se regenera** (reemplazarlo crearía de nuevo el componente ya pagado y mandaría el pago real a revisión); la deriva de mora la absorbe [D-52](./DECISIONES.md#d-52--si-la-mora-cambió-cuando-el-link-se-paga-mora-primero-y-se-avisa-el-faltante) al aplicar |
+| 409 | `PAGO_EN_PROCESO` | El crédito tiene un grupo del bot **en vuelo post-pago** (`READY_TO_APPLY`, `APPLYING` o `APPLICATION_FAILED`): el dinero ya entró y cartera todavía no aplica, así que el recálculo vería la deuda **vieja** y armaría un doble cobro (hallazgo de Codex). Respuesta: «tu pago se está aplicando, te llega tu recibo» — **jamás** links nuevos en esa ventana. `REVIEW_REQUIRED` responde el mismo código con mensaje de hablar con su asesor |
 | 502 | `PAGALO_NO_DISPONIBLE` | Págalo no respondió o falló creando el segundo link. **No queda ninguna intención a medias**: el grupo queda `CANCELLED` y el link que sí se creó se marca `REPLACED` (cancelarlo a mano en el panel). Mensaje al cliente: intentá más tarde o subí tu boleta |
 
 ### 4.3 La conversación termina al entregar los links
@@ -361,8 +364,12 @@ y los reportes sepan de quién es cada link.
    lleva capital o es solo capital**. Si Págalo falla a media creación, el grupo se
    cancela: nunca se le entrega al cliente media intención de pago.
 6. **Un grupo con un pago adentro no se toca.** `PARTIALLY_PAID` solo puede completarse
-   (o irse a revisión); regenerar o reemplazar links aplica únicamente a grupos **sin
-   ningún pago observado**.
+   (o irse a revisión); y desde que el último link se paga hasta el `COMPLETED` de cartera
+   (`READY_TO_APPLY`/`APPLYING`/`APPLICATION_FAILED`/`REVIEW_REQUIRED`) el crédito **no
+   recibe links nuevos** (`PAGO_EN_PROCESO`). Reemplazar links aplica únicamente a grupos
+   **sin ningún pago observado** — y nunca "adentro" del grupo: **cambiar el desglose es
+   crear un grupo nuevo**, porque el `allocations_snapshot` es inmutable y es la evidencia
+   de lo que cada link cobró.
 7. **Sin pagos parciales.** Se pagan cuotas completas — por eso el reparto por rubro es
    determinista y ni el cliente ni conta tienen que decidir a qué se aplica qué.
 8. **La credencial de Págalo no toca disco**: ni en payloads guardados, ni en logs, ni en

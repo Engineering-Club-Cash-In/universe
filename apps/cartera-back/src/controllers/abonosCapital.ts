@@ -3,8 +3,51 @@ import { abonos_capital, creditos_inversionistas_espejo, inversionistas } from "
 import { db } from "../database";
 import Big from "big.js";
 import { obtenerSumaComprasPendientes } from "../utils/comprasAjuste";
+import { emitCreditCapitalContributionFailed } from "../utils/structuredLogger";
 
 type AbonoCapitalExecutor = Pick<typeof db, "select" | "insert">;
+type CreateAbonoCapitalExecutor = Pick<typeof db, "insert">;
+type UpdateAbonoCapitalExecutor = Pick<typeof db, "update">;
+type CapitalContributionFailure = {
+  readonly operation: "create" | "update";
+  readonly durationMs: number;
+};
+
+function safeNow(now: () => number): number {
+  try {
+    const value = now();
+    return Number.isFinite(value) ? value : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function elapsedMilliseconds(startedAt: number, now: () => number): number {
+  return Math.max(0, Math.min(86_400_000, Math.round(safeNow(now) - startedAt)));
+}
+
+function historicalErrorMessage(error: unknown): string | undefined {
+  if ((typeof error !== "object" && typeof error !== "function") || error === null) {
+    return undefined;
+  }
+  try {
+    const message = Reflect.get(error, "message");
+    return typeof message === "string" ? message : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function emitFailureWithoutAffectingControlFlow(
+  emitFailure: (result: CapitalContributionFailure) => void,
+  result: CapitalContributionFailure,
+): void {
+  try {
+    emitFailure(result);
+  } catch {
+    // Observability must not replace the historical persistence response.
+  }
+}
 
 export async function createAbonoCapital(data: {
   credito_id: number;
@@ -12,9 +55,18 @@ export async function createAbonoCapital(data: {
   monto: string;
   tipo: "CANCELACION" | "CAPITAL";
   liquidado?: boolean;
+}, dependencies: {
+  readonly executor: CreateAbonoCapitalExecutor;
+  readonly emitFailure: (result: CapitalContributionFailure) => void;
+  readonly now: () => number;
+} = {
+  executor: db,
+  emitFailure: emitCreditCapitalContributionFailed,
+  now: Date.now,
 }) {
+  const startedAt = safeNow(dependencies.now);
   try {
-    const [nuevoAbono] = await db
+    const [nuevoAbono] = await dependencies.executor
       .insert(abonos_capital)
       .values({
         credito_id: data.credito_id,
@@ -30,12 +82,15 @@ export async function createAbonoCapital(data: {
       message: "Abono a capital creado correctamente",
       data: nuevoAbono,
     };
-  } catch (error: any) {
-    console.error("Error al crear abono a capital:", error);
+  } catch (error: unknown) {
+    emitFailureWithoutAffectingControlFlow(dependencies.emitFailure, {
+      operation: "create",
+      durationMs: elapsedMilliseconds(startedAt, dependencies.now),
+    });
     return {
       success: false,
       message: "Error al crear el abono a capital",
-      error: error.message,
+      error: historicalErrorMessage(error),
       data: null,
     };
   }
@@ -326,10 +381,20 @@ export async function updateAbonoCapital(
     monto: string;
     tipo: "CANCELACION" | "CAPITAL";
     liquidado: boolean;
-  }>
+  }>,
+  dependencies: {
+    readonly executor: UpdateAbonoCapitalExecutor;
+    readonly emitFailure: (result: CapitalContributionFailure) => void;
+    readonly now: () => number;
+  } = {
+    executor: db,
+    emitFailure: emitCreditCapitalContributionFailed,
+    now: Date.now,
+  },
 ) {
+  const startedAt = safeNow(dependencies.now);
   try {
-    const [abonoActualizado] = await db
+    const [abonoActualizado] = await dependencies.executor
       .update(abonos_capital)
       .set({
         ...data,
@@ -351,12 +416,15 @@ export async function updateAbonoCapital(
       message: "Abono a capital actualizado correctamente",
       data: abonoActualizado,
     };
-  } catch (error: any) {
-    console.error("Error al actualizar abono a capital:", error);
+  } catch (error: unknown) {
+    emitFailureWithoutAffectingControlFlow(dependencies.emitFailure, {
+      operation: "update",
+      durationMs: elapsedMilliseconds(startedAt, dependencies.now),
+    });
     return {
       success: false,
       message: "Error al actualizar el abono a capital",
-      error: error.message,
+      error: historicalErrorMessage(error),
       data: null,
     };
   }

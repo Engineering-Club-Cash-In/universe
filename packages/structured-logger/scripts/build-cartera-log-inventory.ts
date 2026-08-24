@@ -36,6 +36,10 @@ const sliceManifests = [
       'apps/cartera-back/src/routers/creditosNuevosConAbonos.ts',
     ]),
   },
+  {
+    file: 'FOURTH_SLICE_DISPOSITIONS.json',
+    paths: new Set(['apps/cartera-back/src/controllers/abonosCapital.ts']),
+  },
 ] as const;
 const reviewedPaths = new Set(sliceManifests.flatMap(({ paths }) => [...paths]));
 

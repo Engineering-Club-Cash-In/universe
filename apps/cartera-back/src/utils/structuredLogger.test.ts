@@ -5,6 +5,7 @@ import {
   emitCreditCapitalPaymentAuditCompleted,
   emitCreditCapitalPaymentAuditDiagnosticCompleted,
   emitCreditCapitalPaymentAuditFailed,
+  emitCreditCapitalPaymentAuditRejected,
   emitCreditLateFee,
   emitCreditDueDate,
   emitPaymentReversalToPending,
@@ -97,8 +98,12 @@ describe('Cartera structured logger adapter', () => {
       operation: 'diagnostic',
       durationMs: 10,
     }, logger);
+    emitCreditCapitalPaymentAuditRejected({
+      operation: 'query',
+      durationMs: 2,
+    }, logger);
 
-    expect(lines).toHaveLength(4);
+    expect(lines).toHaveLength(5);
     expect(JSON.parse(lines[0] ?? '{}')).toMatchObject({
       event: 'credit.capital_payment_audit',
       outcome: 'completed',
@@ -133,6 +138,14 @@ describe('Cartera structured logger adapter', () => {
       audit_operation: 'diagnostic',
       duration_ms: 10,
       error_code: 'unknown',
+    });
+    expect(JSON.parse(lines[4] ?? '{}')).toMatchObject({
+      event: 'credit.capital_payment_audit',
+      outcome: 'rejected',
+      level: 'warn',
+      audit_operation: 'query',
+      duration_ms: 2,
+      reason_code: 'schema_invalid',
     });
     const entries = lines.map((line) => JSON.parse(line) as Record<string, unknown>);
     const forbiddenKeys = [

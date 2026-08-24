@@ -71,7 +71,7 @@ export const carteraCatalog = {
         'excluded_credit_state', 'amount_out_of_range', 'override_reason_missing',
         'user_not_found', 'active_late_fee_not_found', 'concurrent_run',
         'installments_not_found', 'paid_installment_conflict', 'item_failures',
-        'missing_payment_reference',
+        'missing_payment_reference', 'overdue_installments_remain',
       ],
     },
     auth_reason: { type: 'enum', values: ['missing', 'invalid', 'expired'] },
@@ -225,6 +225,7 @@ export const carteraCatalog = {
       completed: { level: 'info', required: ['audit_operation', 'processed_count', 'succeeded_count', 'failed_count', 'duration_ms'], optional: [] },
       diagnostic_completed: { level: 'info', required: ['audit_operation', 'duration_ms'], optional: [], constants: { audit_operation: 'diagnostic' } },
       partially_completed: { level: 'warn', required: ['audit_operation', 'processed_count', 'succeeded_count', 'failed_count', 'duration_ms'], optional: [] },
+      rejected: { level: 'warn', required: ['audit_operation', 'duration_ms', 'reason_code'], optional: [] },
       failed: { level: 'error', required: ['audit_operation', 'duration_ms', 'error_code'], optional: [] },
     } },
     'credit.update': { outcomes: {

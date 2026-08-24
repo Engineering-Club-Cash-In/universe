@@ -140,6 +140,11 @@ describe('carteraCatalog', () => {
           ],
           optional: [],
         },
+        rejected: {
+          level: 'warn',
+          required: ['audit_operation', 'duration_ms', 'reason_code'],
+          optional: [],
+        },
         failed: {
           level: 'error',
           required: ['audit_operation', 'duration_ms', 'error_code'],

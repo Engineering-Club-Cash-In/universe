@@ -99,7 +99,7 @@ test("late-fee deactivation has a finite terminal for every normal result", () =
   const body = source.slice(start, end);
   expect(body).toContain('outcome: "skipped", operation: "deactivate"');
   expect(body).toContain('reasonCode: "active_late_fee_not_found"');
-  expect(body).toContain('reasonCode: "excluded_credit_state"');
+  expect(body).toContain('reasonCode: "overdue_installments_remain"');
   expect(body).toContain('reasonCode: "concurrent_run"');
   expect(body).toContain('outcome: "completed", operation: "deactivate"');
 });

@@ -240,7 +240,7 @@ export async function desactivarMoraSiCreditoAlDia(
     });
 
     if (!decision.desactivarMora) {
-      emitCreditLateFee({ outcome: "skipped", operation: "deactivate", durationMs: elapsedMilliseconds(startedAt), reasonCode: "excluded_credit_state" });
+      emitCreditLateFee({ outcome: "skipped", operation: "deactivate", durationMs: elapsedMilliseconds(startedAt), reasonCode: "overdue_installments_remain" });
       return { desactivada: false };
     }
 

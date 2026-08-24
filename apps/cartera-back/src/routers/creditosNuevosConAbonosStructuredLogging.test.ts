@@ -63,5 +63,6 @@ test("third slice has no executable console calls and emits only finite audit ev
   expect(sources).toContain("emitCreditCapitalPaymentAuditCompleted");
   expect(sources).toContain("emitCreditCapitalPaymentAuditDiagnosticCompleted");
   expect(sources).toContain("emitCreditCapitalPaymentAuditFailed");
+  expect(sources).toContain("emitCreditCapitalPaymentAuditRejected");
   expect(sources).not.toContain("logger.emit(");
 });

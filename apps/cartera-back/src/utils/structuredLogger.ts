@@ -52,6 +52,11 @@ interface CreditCapitalPaymentAuditFailed {
   readonly durationMs: number;
 }
 
+interface CreditCapitalPaymentAuditRejected {
+  readonly operation: "query";
+  readonly durationMs: number;
+}
+
 interface CreditCapitalContributionFailed {
   readonly operation: "create" | "update";
   readonly durationMs: number;
@@ -98,7 +103,8 @@ type LateFeeReasonCode =
   | "user_not_found"
   | "active_late_fee_not_found"
   | "credit_not_found"
-  | "concurrent_run";
+  | "concurrent_run"
+  | "overdue_installments_remain";
 
 type CreditLateFeeResult =
   | Readonly<{ outcome: "completed"; operation: LateFeeOperation; durationMs: number }>
@@ -222,6 +228,19 @@ export function emitCreditCapitalPaymentAuditFailed(
       audit_operation: result.operation,
       duration_ms: result.durationMs,
       error_code: "unknown",
+    });
+  });
+}
+
+export function emitCreditCapitalPaymentAuditRejected(
+  result: CreditCapitalPaymentAuditRejected,
+  logger: CarteraStructuredLogger = carteraStructuredLogger,
+): void {
+  emitAuditWithoutAffectingControlFlow(() => {
+    logger.emit("credit.capital_payment_audit", "rejected", {
+      audit_operation: result.operation,
+      duration_ms: result.durationMs,
+      reason_code: "schema_invalid",
     });
   });
 }

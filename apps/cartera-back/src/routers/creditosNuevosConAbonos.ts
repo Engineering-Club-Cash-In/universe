@@ -6,6 +6,7 @@ import {
 import {
   emitCreditCapitalPaymentAuditDiagnosticCompleted,
   emitCreditCapitalPaymentAuditFailed,
+  emitCreditCapitalPaymentAuditRejected,
 } from "../utils/structuredLogger";
 
 function elapsedMilliseconds(startedAt: number): number {
@@ -57,12 +58,14 @@ export const creditosNuevosConAbonosRouter = new Elysia()
 
     if (fecha_desde && isNaN(Date.parse(fecha_desde))) {
       set.status = 400;
+      emitCreditCapitalPaymentAuditRejected({ operation: "query", durationMs: elapsedMilliseconds(startedAt) });
       return {
         message: "Parámetro 'fecha_desde' debe ser una fecha válida (YYYY-MM-DD)",
       };
     }
     if (fecha_hasta && isNaN(Date.parse(fecha_hasta))) {
       set.status = 400;
+      emitCreditCapitalPaymentAuditRejected({ operation: "query", durationMs: elapsedMilliseconds(startedAt) });
       return {
         message: "Parámetro 'fecha_hasta' debe ser una fecha válida (YYYY-MM-DD)",
       };

@@ -126,6 +126,10 @@ CREATE TABLE bot_cobros_interacciones (
 	-- La referencia = la sesión. SET NULL, nunca CASCADE: purgar un OTP vencido
 	-- (D-14) no puede llevarse el historial. Mismo criterio que bot_cobros_boletas.
 	otp_id uuid REFERENCES otps(id) ON DELETE SET NULL,
+	-- El MISMO id pero SIN FK (Codex, PR #1411): el SET NULL de arriba borra
+	-- otp_id con la purga, y sin esta copia las sesiones se desagrupaban. Es la
+	-- llave de agrupado de la ficha; NULL solo si la sesión nunca existió (D-43).
+	sesion_id uuid,
 	-- Identidad propia, resuelta al escribir, para sobrevivir a la purga y para
 	-- que la consulta de la ficha sea un WHERE lead_id = … sin joins acrobáticos.
 	lead_id uuid REFERENCES leads(id) ON DELETE SET NULL,
@@ -159,9 +163,24 @@ endpoint del bot, no va al Swagger): `getActividadBot({ casoId })`.
 2. Se juntan los codeudores de sus oportunidades.
 3. `bot_cobros_interacciones WHERE lead_id = ? OR co_debtor_id IN (…)`, ordenado por
    `creado_en`.
-4. Se agrupa por `otp_id` (las `acceso_fallido`, sin sesión, van a su propio grupo), se
-   numera por orden de primera interacción, y se devuelve listo para pintar: la web no
-   calcula nada.
+4. Se agrupa por `sesion_id` (las `acceso_fallido`, sin sesión, van a su propio grupo),
+   se numera por orden de primera interacción, y se devuelve listo para pintar: la web
+   no calcula nada.
+
+**Tres ajustes de la revisión de Codex (PR #1411):**
+
+- **La llave de agrupado es `sesion_id`, no `otp_id`**: la purga de OTPs (D-14) pone
+  `otp_id` en NULL vía el FK, y sin la copia sin FK las sesiones reales se desagrupaban
+  y caían a "intentos sin sesión". Migración `0041`.
+- **La consulta también matchea por SIFCO del lead**: una persona que es codeudor en
+  créditos de dos leads queda guardada con la fila de `co_debtors` que eligió la
+  identificación (la del crédito más reciente — puede ser del otro lead). Si la gestión
+  fue sobre un crédito de ESTE lead, su ficha la muestra igual; la sesión tocada se
+  completa con sus filas sin SIFCO (buscar/listar) para no mostrar conversaciones a
+  pedazos.
+- **Los rechazos de la autenticación no se registran** (`NO_AUTORIZADO`,
+  `SERVICIO_NO_DISPONIBLE`): el comodín envuelve también a `autenticarBotCobros`, y una
+  API key mala con una referencia real en el body no es una interacción del cliente.
 
 ## 6 · Lo que este feature NO es
 

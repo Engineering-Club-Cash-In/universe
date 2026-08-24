@@ -71,6 +71,18 @@ const ES_UUID =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
+ * Los códigos que emite la AUTENTICACIÓN (auth.ts), no el cliente (Codex,
+ * PR #1411). El middleware comodín envuelve también a `autenticarBotCobros`:
+ * sin este descarte, una petición rechazada por API key mala —pero con una
+ * `referencia` real en el body— se colgaría de la sesión del cliente como si
+ * él hubiera hecho algo, ensuciando la línea de tiempo que ve el asesor.
+ */
+const CODIGOS_DE_AUTENTICACION = new Set([
+	"NO_AUTORIZADO",
+	"SERVICIO_NO_DISPONIBLE",
+]);
+
+/**
  * Deja visibles solo los últimos 4 caracteres: suficiente para que el asesor
  * reconozca el dato, inútil para reconstruirlo (D-42).
  */
@@ -212,6 +224,9 @@ export function armarInteraccion(entrada: {
 	const data = (entrada.respuesta.data ?? {}) as Json;
 	const codigo = exito ? null : texto(error.codigo);
 
+	// Un rechazo de la autenticación no es una interacción del cliente.
+	if (codigo && CODIGOS_DE_AUTENTICACION.has(codigo)) return null;
+
 	// La referencia viaja en el body — salvo en buscar-cliente, donde nace en
 	// la respuesta. Se valida la forma: con basura no hay sesión que buscar.
 	const referenciaCruda =
@@ -297,6 +312,9 @@ export async function persistirInteraccion(
 
 	await db.insert(botCobrosInteracciones).values({
 		otpId,
+		// La copia SIN FK: es la llave de agrupado de la ficha y sobrevive a la
+		// purga del OTP, que a otp_id se lo lleva por SET NULL.
+		sesionId: otpId,
 		leadId,
 		coDebtorId,
 		accion: interaccion.accion,

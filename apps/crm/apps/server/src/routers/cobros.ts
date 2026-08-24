@@ -1905,75 +1905,142 @@ export const cobrosRouter = {
 
 			// Los codeudores de sus oportunidades también operan el bot (D-11).
 			const codeudores = await db
-				.select({ id: coDebtors.id, nombre: coDebtors.fullName })
+				.select({ id: coDebtors.id })
 				.from(coDebtors)
 				.innerJoin(opportunities, eq(opportunities.id, coDebtors.opportunityId))
 				.where(eq(opportunities.leadId, opp.leadId));
-
-			const nombrePorCodeudor = new Map(
-				codeudores.map((c) => [c.id, c.nombre]),
-			);
 			const codeudorIds = codeudores.map((c) => c.id);
 
-			const delCliente = eq(botCobrosInteracciones.leadId, opp.leadId);
-			const filas = await db
-				.select()
-				.from(botCobrosInteracciones)
-				.where(
-					codeudorIds.length > 0
-						? or(
-								delCliente,
-								inArray(botCobrosInteracciones.coDebtorId, codeudorIds),
-							)
-						: delCliente,
-				)
+			// Los créditos de ESTE lead (Codex, PR #1411): una persona que es
+			// codeudor en créditos de dos leads distintos queda guardada con la
+			// fila de co_debtors que eligió la identificación —la del crédito más
+			// reciente, que puede ser del OTRO lead—, así que filtrar solo por
+			// lead/codeudor escondía de esta ficha una gestión hecha sobre un
+			// crédito de este mismo cliente. El SIFCO de la interacción cierra ese
+			// hueco: si la gestión fue sobre un crédito de este lead, acá se ve.
+			const sifcosDelLead = (
+				await db
+					.select({ numeroSifco: opportunities.numeroSifco })
+					.from(opportunities)
+					.where(
+						and(
+							eq(opportunities.leadId, opp.leadId),
+							inArray(opportunities.status, ["won", "migrate"]),
+							isNotNull(opportunities.numeroSifco),
+						),
+					)
+			)
+				.map((o) => o.numeroSifco)
+				.filter((s): s is string => Boolean(s));
+
+			const condiciones = [eq(botCobrosInteracciones.leadId, opp.leadId)];
+			if (codeudorIds.length > 0) {
+				condiciones.push(
+					inArray(botCobrosInteracciones.coDebtorId, codeudorIds),
+				);
+			}
+			if (sifcosDelLead.length > 0) {
+				condiciones.push(
+					inArray(botCobrosInteracciones.numeroSifco, sifcosDelLead),
+				);
+			}
+
+			// El nombre del codeudor sale por join, no de un mapa del lead: el
+			// codeudor cruzado (el caso de arriba) no está entre los codeudores de
+			// este lead y su nombre se perdería.
+			const seleccionar = () =>
+				db
+					.select({
+						interaccion: botCobrosInteracciones,
+						codeudorNombre: coDebtors.fullName,
+					})
+					.from(botCobrosInteracciones)
+					.leftJoin(
+						coDebtors,
+						eq(coDebtors.id, botCobrosInteracciones.coDebtorId),
+					);
+
+			const filasBase = await seleccionar()
+				.where(or(...condiciones))
 				.orderBy(asc(botCobrosInteracciones.creadoEn));
+
+			// La llave de sesión es sesion_id (copia SIN FK que sobrevive a la
+			// purga del OTP — Codex, PR #1411); otp_id cubre filas anteriores a esa
+			// columna. Sin llave = la sesión nunca existió (acceso_fallido).
+			const llaveDeSesion = (f: (typeof filasBase)[number]) =>
+				f.interaccion.sesionId ?? f.interaccion.otpId;
+
+			// Cuando el match fue por SIFCO, la sesión puede tener filas que no
+			// calzan el filtro (buscar_cliente y listar_creditos no llevan SIFCO):
+			// se completa cada sesión tocada para no mostrar conversaciones a
+			// pedazos.
+			const llaves = [
+				...new Set(filasBase.map(llaveDeSesion).filter(Boolean)),
+			] as string[];
+
+			const filasDeSesiones =
+				llaves.length > 0
+					? await seleccionar()
+							.where(
+								or(
+									inArray(botCobrosInteracciones.sesionId, llaves),
+									inArray(botCobrosInteracciones.otpId, llaves),
+								),
+							)
+							.orderBy(asc(botCobrosInteracciones.creadoEn))
+					: [];
+
+			const porId = new Map(
+				[...filasBase, ...filasDeSesiones].map((f) => [f.interaccion.id, f]),
+			);
+			const filas = [...porId.values()].sort(
+				(a, b) =>
+					a.interaccion.creadoEn.getTime() - b.interaccion.creadoEn.getTime(),
+			);
 
 			const aInteraccion = (
 				fila: (typeof filas)[number],
 			): ActividadBotInteraccion => ({
-				id: fila.id,
-				accion: fila.accion,
-				exito: fila.exito,
-				codigo: fila.codigo,
-				numeroSifco: fila.numeroSifco,
-				detalle: fila.detalle ?? {},
-				creadoEn: fila.creadoEn,
+				id: fila.interaccion.id,
+				accion: fila.interaccion.accion,
+				exito: fila.interaccion.exito,
+				codigo: fila.interaccion.codigo,
+				numeroSifco: fila.interaccion.numeroSifco,
+				detalle: fila.interaccion.detalle ?? {},
+				creadoEn: fila.interaccion.creadoEn,
 			});
 
-			// Agrupar por sesión (otp_id) preservando el orden de llegada: así el
-			// índice del grupo ES el correlativo del cliente ("Referencia 1" = la
-			// más vieja, D-44). Las filas sin sesión (acceso_fallido) van aparte.
+			// Agrupar por sesión preservando el orden de llegada: así el índice
+			// del grupo ES el correlativo del cliente ("Referencia 1" = la más
+			// vieja, D-44). Las filas sin sesión (acceso_fallido) van aparte.
 			const porSesion = new Map<string, (typeof filas)[number][]>();
 			const sinSesion: (typeof filas)[number][] = [];
 
 			for (const fila of filas) {
-				if (!fila.otpId) {
+				const llave = llaveDeSesion(fila);
+				if (!llave) {
 					sinSesion.push(fila);
 					continue;
 				}
-				const grupo = porSesion.get(fila.otpId);
+				const grupo = porSesion.get(llave);
 				if (grupo) grupo.push(fila);
-				else porSesion.set(fila.otpId, [fila]);
+				else porSesion.set(llave, [fila]);
 			}
 
 			const sesiones = [...porSesion.entries()].map(
-				([otpId, grupo], indice): ActividadBotSesion => {
-					const coDebtorId =
-						grupo.find((f) => f.coDebtorId)?.coDebtorId ?? null;
+				([llave, grupo], indice): ActividadBotSesion => {
+					const conCodeudor = grupo.find((f) => f.interaccion.coDebtorId);
 
 					return {
 						numero: indice + 1,
 						// El uuid crudo no viaja al front: durante 30 minutos es la
 						// llave de la sesión (D-44). El sufijo alcanza para soporte.
-						referenciaSufijo: otpId.slice(-6),
-						inicio: grupo[0].creadoEn,
-						operadoPor: coDebtorId
+						referenciaSufijo: llave.slice(-6),
+						inicio: grupo[0].interaccion.creadoEn,
+						operadoPor: conCodeudor
 							? ("codeudor" as const)
 							: ("titular" as const),
-						codeudorNombre: coDebtorId
-							? (nombrePorCodeudor.get(coDebtorId) ?? null)
-							: null,
+						codeudorNombre: conCodeudor?.codeudorNombre ?? null,
 						interacciones: grupo.map(aInteraccion),
 					};
 				},

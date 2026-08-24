@@ -64,6 +64,27 @@ describe("la regla general: toda ruta del bot cae al historial", () => {
 		expect(interaccion?.detalle).toEqual({});
 	});
 
+	// Codex (PR #1411): el comodín envuelve también a la autenticación. Una
+	// petición rechazada por API key —aunque traiga una referencia real— no es
+	// una interacción del cliente y no puede ensuciar su línea de tiempo.
+	test("un rechazo de la autenticación NO se registra", () => {
+		for (const codigo of ["NO_AUTORIZADO", "SERVICIO_NO_DISPONIBLE"]) {
+			const interaccion = armarInteraccion({
+				ruta: "/api/bot/cobros/credito/info",
+				cuerpo: { referencia: REFERENCIA, numeroSifco: "115900" },
+				estado: codigo === "NO_AUTORIZADO" ? 401 : 503,
+				respuesta: {
+					success: false,
+					error: { codigo, mensaje: "…" },
+					data: { mensaje: "…", codigo },
+				},
+				identidad: null,
+			});
+
+			expect(interaccion).toBeNull();
+		}
+	});
+
 	test("las exclusiones son la lista explícita, no un patrón", () => {
 		expect(RUTAS_SIN_HISTORIAL.has("/api/bot/cobros/pagos/evento")).toBe(true);
 

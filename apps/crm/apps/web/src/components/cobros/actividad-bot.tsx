@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { orpc } from "@/utils/orpc";
 
@@ -245,6 +246,21 @@ export function ActividadBot({
 					<p className="py-6 text-center text-muted-foreground text-sm">
 						Cargando actividad del bot…
 					</p>
+				) : actividad.isError ? (
+					// Codex (PR #1411): un fallo de red/permiso NO es "nunca usó el
+					// bot" — decir eso convertiría un error nuestro en historial falso.
+					<div className="flex flex-col items-center gap-2 py-6">
+						<p className="text-center text-muted-foreground text-sm">
+							No se pudo cargar la actividad del bot.
+						</p>
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={() => actividad.refetch()}
+						>
+							Reintentar
+						</Button>
+					</div>
 				) : sesiones.length === 0 && accesosFallidos.length === 0 ? (
 					<p className="py-6 text-center text-muted-foreground text-sm">
 						Este cliente todavía no ha usado el bot de WhatsApp.

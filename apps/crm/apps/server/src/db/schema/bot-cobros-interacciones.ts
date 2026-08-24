@@ -42,6 +42,17 @@ export const botCobrosInteracciones = pgTable(
 		otpId: uuid("otp_id").references(() => otps.id, { onDelete: "set null" }),
 
 		/**
+		 * El MISMO id de la sesión, pero sin FK a propósito (Codex, PR #1411):
+		 * cuando la purga de D-14 borre el OTP, el `SET NULL` de arriba se lleva
+		 * `otp_id` — y sin esta copia, las interacciones de una sesión real se
+		 * desagrupaban y caían a "intentos sin sesión". Esta columna es la llave
+		 * de agrupado de la ficha y sobrevive a la purga; `otp_id` queda para el
+		 * join mientras el OTP viva. NULL solo cuando la sesión nunca existió
+		 * (`acceso_fallido`, D-43).
+		 */
+		sesionId: uuid("sesion_id"),
+
+		/**
 		 * Identidad propia, resuelta al escribir, para sobrevivir a la purga del
 		 * OTP y para que la consulta de la ficha sea un WHERE plano. Cuando operó
 		 * un codeudor, `lead_id` es el TITULAR de su crédito (resuelto vía su

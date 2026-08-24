@@ -2078,7 +2078,16 @@ export const cobrosRouter = {
 
 			const sesiones = [...porSesion.entries()].map(
 				([llave, grupo], indice): ActividadBotSesion => {
-					const conCodeudor = grupo.find((f) => f.interaccion.coDebtorId);
+					// El operador viene GRABADO (operado_por, Codex PR #1411): si la
+					// fila del codeudor se borra, su SET NULL limpia el FK y deducir
+					// de ahí volvía "titular" a un codeudor histórico. El fallback
+					// por FK cubre filas anteriores a la columna; el nombre puede
+					// venir null tras un borrado y la UI muestra "Codeudor" a secas.
+					const conCodeudor = grupo.find(
+						(f) =>
+							f.interaccion.operadoPor === "codeudor" ||
+							(!f.interaccion.operadoPor && f.interaccion.coDebtorId),
+					);
 
 					return {
 						numero: indice + 1,

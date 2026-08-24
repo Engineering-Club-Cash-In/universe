@@ -343,6 +343,9 @@ export async function persistirInteraccion(
 		sesionId: otpId,
 		leadId,
 		coDebtorId,
+		// Grabado, no deducido: si la fila del codeudor se borra después, el
+		// SET NULL limpia co_debtor_id y la deducción lo volvería "titular".
+		operadoPor: coDebtorId ? "codeudor" : "titular",
 		accion: interaccion.accion,
 		exito: interaccion.exito,
 		codigo: interaccion.codigo,
@@ -374,6 +377,12 @@ export async function historialBotCobros(
 	c: Context,
 	next: () => Promise<void>,
 ): Promise<void> {
+	// El instante de la interacción se captura ANTES del handler (Codex,
+	// PR #1411, 3ª ronda): la línea de tiempo ordena por cuándo el cliente
+	// ACTUÓ, no por qué handler terminó primero — una lectura de boleta lenta
+	// que empezó antes que un menú rápido tiene que aparecer antes.
+	const registradaEn = new Date();
+
 	await next();
 
 	try {
@@ -383,11 +392,6 @@ export async function historialBotCobros(
 		// `autenticarBotCobros` (llave rechazada, o un 404/405 de Hono que ni
 		// pasó por la autenticación), acá no se escribe nada.
 		if (!requestsAutenticadas.has(c.req.raw)) return;
-
-		// El instante de la interacción, capturado antes de soltar el trabajo
-		// al background: el orden de la línea de tiempo es el de las requests,
-		// no el de los INSERT.
-		const registradaEn = new Date();
 
 		// `c.req.json()` reusa el cache del handler; el clon deja intacta la
 		// respuesta que viaja al bot.

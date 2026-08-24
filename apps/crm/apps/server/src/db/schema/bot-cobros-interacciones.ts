@@ -73,6 +73,15 @@ export const botCobrosInteracciones = pgTable(
 		 * general de D-41) y agregar un valor a un enum en producción es una
 		 * migración con lock — mismo criterio que `bot_cobros_boletas.estado`.
 		 */
+		/**
+		 * Quién operó — "titular" o "codeudor" — GRABADO al escribir (Codex,
+		 * PR #1411): si la fila de `co_debtors` se borra después, su `SET NULL`
+		 * limpia `co_debtor_id`, y deducir el operador de ese FK convertía a un
+		 * codeudor borrado en "titular" — cambiaba la identidad histórica en vez
+		 * de solo perder el nombre.
+		 */
+		operadoPor: text("operado_por"),
+
 		accion: text("accion").notNull(),
 
 		exito: boolean("exito").notNull(),

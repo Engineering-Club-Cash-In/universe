@@ -19,7 +19,7 @@ function safeNow(): number {
 
 function elapsedMilliseconds(startedAt: number): number {
   try {
-    return Math.max(0, Date.now() - startedAt);
+    return Math.min(86_400_000, Math.max(0, Date.now() - startedAt));
   } catch {
     return 0;
   }

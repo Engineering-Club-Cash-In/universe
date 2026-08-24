@@ -209,10 +209,12 @@ export const updateDueDates = async ({
     const resultados: UpdateDueDatesResult["detalle"] = [];
     let exitosos = 0;
     let fallidos = 0;
+    let hasPartiallyPersistedItem = false;
 
     // 2. Procesar cada credito
     for (const creditoInput of creditosInput) {
       const { numero_credito_sifco, dia_pago } = creditoInput;
+      let itemPersisted = false;
 
 
       try {
@@ -301,12 +303,14 @@ export const updateDueDates = async ({
               .update(cuotas_credito)
               .set({ fecha_vencimiento: nuevaFecha })
               .where(eq(cuotas_credito.cuota_id, cuota.cuota_id));
+            itemPersisted = true;
 
             // También actualizar pagos_credito que tengan este cuota_id
             await db
               .update(pagos_credito)
               .set({ fecha_vencimiento: nuevaFecha })
               .where(eq(pagos_credito.cuota_id, cuota.cuota_id));
+            itemPersisted = false;
 
             cuotasActualizadas++;
           }
@@ -320,6 +324,7 @@ export const updateDueDates = async ({
         });
         exitosos++;
       } catch (error) {
+        if (itemPersisted) hasPartiallyPersistedItem = true;
         const errorMsg = error instanceof Error ? error.message : String(error);
 
         resultados.push({
@@ -335,45 +340,54 @@ export const updateDueDates = async ({
 
     set.status = 200;
     const processedCount = telemetryProcessedCount ?? creditosInput.length;
-    const terminal = classifyDueDateBatchTerminal({
-      operation: telemetryOperation,
-      processedCount,
-      succeededCount: exitosos,
-      failedCount: fallidos,
-      skippedCount: telemetrySkippedCount,
-    });
-    if (terminal.outcome === "skipped") {
+    if (hasPartiallyPersistedItem) {
       emitCreditDueDate({
-        outcome: terminal.outcome,
-        operation: terminal.operation,
+        outcome: "partially_persisted",
+        operation: telemetryOperation,
         durationMs: elapsedMilliseconds(startedAt),
-        processedCount: terminal.processedCount,
-        succeededCount: terminal.succeededCount,
-        failedCount: terminal.failedCount,
-        skippedCount: terminal.skippedCount,
-        reasonCode: terminal.reasonCode,
-      }, telemetryLogger);
-    } else if (terminal.outcome === "partially_completed") {
-      emitCreditDueDate({
-        outcome: terminal.outcome,
-        operation: terminal.operation,
-        durationMs: elapsedMilliseconds(startedAt),
-        processedCount: terminal.processedCount,
-        succeededCount: terminal.succeededCount,
-        failedCount: terminal.failedCount,
-        skippedCount: terminal.skippedCount,
-        reasonCode: terminal.reasonCode,
+        errorCode: "unknown",
       }, telemetryLogger);
     } else {
-      emitCreditDueDate({
-        outcome: terminal.outcome,
-        operation: terminal.operation,
-        durationMs: elapsedMilliseconds(startedAt),
-        processedCount: terminal.processedCount,
-        succeededCount: terminal.succeededCount,
-        failedCount: terminal.failedCount,
-        skippedCount: terminal.skippedCount,
-      }, telemetryLogger);
+      const terminal = classifyDueDateBatchTerminal({
+        operation: telemetryOperation,
+        processedCount,
+        succeededCount: exitosos,
+        failedCount: fallidos,
+        skippedCount: telemetrySkippedCount,
+      });
+      if (terminal.outcome === "skipped") {
+        emitCreditDueDate({
+          outcome: terminal.outcome,
+          operation: terminal.operation,
+          durationMs: elapsedMilliseconds(startedAt),
+          processedCount: terminal.processedCount,
+          succeededCount: terminal.succeededCount,
+          failedCount: terminal.failedCount,
+          skippedCount: terminal.skippedCount,
+          reasonCode: terminal.reasonCode,
+        }, telemetryLogger);
+      } else if (terminal.outcome === "partially_completed") {
+        emitCreditDueDate({
+          outcome: terminal.outcome,
+          operation: terminal.operation,
+          durationMs: elapsedMilliseconds(startedAt),
+          processedCount: terminal.processedCount,
+          succeededCount: terminal.succeededCount,
+          failedCount: terminal.failedCount,
+          skippedCount: terminal.skippedCount,
+          reasonCode: terminal.reasonCode,
+        }, telemetryLogger);
+      } else {
+        emitCreditDueDate({
+          outcome: terminal.outcome,
+          operation: terminal.operation,
+          durationMs: elapsedMilliseconds(startedAt),
+          processedCount: terminal.processedCount,
+          succeededCount: terminal.succeededCount,
+          failedCount: terminal.failedCount,
+          skippedCount: terminal.skippedCount,
+        }, telemetryLogger);
+      }
     }
     return {
       success: fallidos === 0,

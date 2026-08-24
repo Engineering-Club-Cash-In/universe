@@ -76,6 +76,7 @@ test("late-fee callsites use only the finite safe application payload", () => {
 
 test("late-fee guards cover credit lookup and lock acquisition failures", () => {
   const source = readFileSync(controllerFile, "utf8");
+  expect(source).toContain("Math.min(86_400_000");
   const updateStart = source.indexOf("export async function updateMora");
   const updateTry = source.indexOf("try {", updateStart);
   const creditLookup = source.indexOf("const [credito] = await db", updateStart);

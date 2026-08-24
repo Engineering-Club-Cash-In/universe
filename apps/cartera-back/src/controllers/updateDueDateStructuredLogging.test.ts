@@ -73,3 +73,10 @@ test("due-date callsites use only the finite safe application payload", () => {
   visit(file);
   expect(calls).toBeGreaterThan(0);
 });
+
+test("batch due-date writes report a split installment/payment persistence failure", () => {
+  const source = readFileSync(controllerFile, "utf8");
+  expect(source).toContain("hasPartiallyPersistedItem");
+  expect(source).toContain("itemPersisted");
+  expect(source).toContain('outcome: "partially_persisted"');
+});

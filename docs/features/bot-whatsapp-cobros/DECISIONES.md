@@ -1842,10 +1842,13 @@ intención de pago hasta ese momento: ningún estado intermedio del grupo toca c
 **Lo que sí queda para humanos:** los grupos `REVIEW_REQUIRED` (montos que no cuadran,
 links duplicados pagados, hash distinto en retry) — esos no se aplican solos jamás.
 
-**Consecuencia (precisada por Daniel):** la notificación de WhatsApp con el recibo **la
-mandamos nosotros al momento de validar el pago con Págalo** (el `ACCEPT` confirmado), sin
-esperar a nadie — y hay que verificar el envío de recibos que cartera ya hace hoy para no
-mandarle dos mensajes al cliente por el mismo pago.
+**Consecuencia (precisada por Daniel, afinada por Codex):** la notificación la mandamos
+**nosotros**, sin esperar a nadie, **en dos tiempos**: al validar cada `ACCEPT`, un
+**acuse de recibo que no afirma aplicación** («recibimos tu Pago 1 de 2, te falta el 2»),
+y el **recibo con saldos** solo cuando cartera confirma el grupo `COMPLETED` — antes de
+eso los saldos no han cambiado, y un `ACCEPT` puede terminar en fallo del dispatcher: un
+recibo adelantado le describiría al cliente una aplicación que no ocurrió. Sigue en pie
+verificar los recibos que cartera ya manda hoy para no duplicar el aviso.
 
 ---
 

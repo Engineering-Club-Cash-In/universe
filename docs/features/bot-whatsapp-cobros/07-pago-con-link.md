@@ -304,7 +304,7 @@ una sola si la selección no lleva capital o es solo capital** — y responde:
 | HTTP | `codigo` | Cuándo |
 | --- | --- | --- |
 | 409 | `MONTO_DESACTUALIZADO` | El recálculo no coincide con `montoEsperado`. El bot repite `/opciones` |
-| 200 | — (mismos links) | Ya hay un grupo del bot activo **con el mismo desglose** para ese crédito → se responden **los mismos links**, no se crean otros (idempotencia de conversación). La comparación es contra el **`allocations_snapshot` completo** (mismas cuotas, mismos montos por rubro y por link), no contra el total: dos deudas distintas pueden sumar lo mismo (hallazgo de Codex — un pago baja la cuota mientras la mora nueva compensa el total). Si el desglose difiere —aunque el total coincida—: los links viejos se marcan `REPLACED` (siguen en el poll y se cancelan a mano en el panel mientras no haya API, [§3.5](#35-otras-notas-de-la-investigación)) y se crean los nuevos |
+| 200 | — (links del grupo activo) | **Grupo `PARTIALLY_PAID`** (ya se observó un pago): se responde **el link pendiente de ese mismo grupo**, siempre — un grupo con dinero adentro **jamás se regenera** (hallazgo de Codex: reemplazarlo crearía de nuevo el componente ya pagado y mandaría el pago real a revisión); la deriva de mora la absorbe [D-52](./DECISIONES.md#d-52--si-la-mora-cambió-cuando-el-link-se-paga-mora-primero-y-se-avisa-el-faltante) al aplicar. **Grupo activo sin pagos observados**: mismo desglose → los mismos links (comparación contra el **`allocations_snapshot` completo**, no el total — dos deudas distintas pueden sumar lo mismo); desglose distinto → los viejos se marcan `REPLACED` (siguen en el poll, [§3.5](#35-otras-notas-de-la-investigación)) y se crean los nuevos |
 | 502 | `PAGALO_NO_DISPONIBLE` | Págalo no respondió o falló creando el segundo link. **No queda ninguna intención a medias**: el grupo queda `CANCELLED` y el link que sí se creó se marca `REPLACED` (cancelarlo a mano en el panel). Mensaje al cliente: intentá más tarde o subí tu boleta |
 
 ### 4.3 La conversación termina al entregar los links
@@ -339,7 +339,7 @@ una vez y le sirve a los dos orígenes. Reparto propuesto (confirmar con Jose):
 | **Callbacks** | `callback_accept/reject` apuntan a un endpoint nuestro que solo **adelanta** `next_poll_at` del link. Sin firma → jamás escriben estado (§3.4) | Jose (CB-028) |
 | **Dispatcher a cartera** | Reclama grupos `READY_TO_APPLY`, arma el payload normalizado + hash, llama al **servicio nuevo** de cartera que inserta en `pagalo_payment_imports` y crea los `pagos_credito` | Jose (CB-028) |
 | **Aplicación en cartera** | Idempotente por `crm_group_id`; los pagos nacen **validados** ([D-50](./DECISIONES.md#d-50--el-pago-por-link-nace-validado)) — no pasan por la bandeja de conta, a diferencia de la boleta ([D-39](./DECISIONES.md#d-39--el-rechazo-es-un-botón-explícito-no-se-infiere-del-reverso)). Dos cosas que Daniel pidió y **CB-028 ya trae previstas**: los `pagos_credito` van con **`origen_pago = 'pagalo'`** (el valor ya existe en el enum de cartera, lo agregó la migración 0008 — el mismo mecanismo con el que se distingue `boleta`/`transferencia`/`cheque`), y el **voucher de Págalo queda como boleta en `cartera.boletas`** ("Voucher sigue usando cartera.boletas", dice la propia migración): el pago queda con su comprobante como cualquier otro | Jose (CB-028) |
-| **Notificación al cliente** | **La mandamos nosotros, al validar el pago con Págalo** (decisión de Daniel 2026-08-24): confirmado el `ACCEPT`, sale el WhatsApp con el recibo y cómo quedó capital, mora y cuota — **avise o no avise el cliente** (regla del [Paso 3 §2.4](./03-metodos-de-pago.md#24-después-de-enviar-el-link)). Si la mora cambió entre generar y pagar, **el mismo mensaje trae la aclaración y cuánto falta para completar la cuota** ([D-52](./DECISIONES.md#d-52--si-la-mora-cambió-cuando-el-link-se-paga-mora-primero-y-se-avisa-el-faltante)). ⚠️ Cartera ya manda recibos de pago por WhatsApp al crear pagos: verificar y **no duplicar** el envío para este origen | Nosotros (bot) |
+| **Notificación al cliente** | **La mandamos nosotros, en dos tiempos** (decisión de Daniel, afinada por Codex): al validar cada `ACCEPT`, un **acuse de recibo que no afirma aplicación** — «recibimos tu Pago 1 de 2, te falta el 2» / «recibimos tu pago, lo estamos aplicando» —, y el **recibo con saldos** (capital, mora, cuota, y la aclaración del faltante de [D-52](./DECISIONES.md#d-52--si-la-mora-cambió-cuando-el-link-se-paga-mora-primero-y-se-avisa-el-faltante) si aplica) **solo cuando cartera confirma el grupo `COMPLETED`**: antes de eso los saldos no han cambiado, y un fallo del dispatcher volvería mentiroso al mensaje. Sigue sin depender de que el cliente avise (regla del [Paso 3 §2.4](./03-metodos-de-pago.md#24-después-de-enviar-el-link)) y sin esperar a ningún humano. ⚠️ Cartera ya manda recibos de pago por WhatsApp al crear pagos: verificar y **no duplicar** el envío para este origen | Nosotros (bot) |
 
 Lo que el flujo del bot le pide a ese circuito: que el grupo sepa su **origen** (bot o
 asesor) y lleve **el asesor asignado del crédito**, para que la notificación, la ficha 360
@@ -360,9 +360,12 @@ y los reportes sepan de quién es cada link.
 5. **El grupo completo o nada.** Normalmente dos links; **uno solo cuando la selección no
    lleva capital o es solo capital**. Si Págalo falla a media creación, el grupo se
    cancela: nunca se le entrega al cliente media intención de pago.
-6. **Sin pagos parciales.** Se pagan cuotas completas — por eso el reparto por rubro es
+6. **Un grupo con un pago adentro no se toca.** `PARTIALLY_PAID` solo puede completarse
+   (o irse a revisión); regenerar o reemplazar links aplica únicamente a grupos **sin
+   ningún pago observado**.
+7. **Sin pagos parciales.** Se pagan cuotas completas — por eso el reparto por rubro es
    determinista y ni el cliente ni conta tienen que decidir a qué se aplica qué.
-7. **La credencial de Págalo no toca disco**: ni en payloads guardados, ni en logs, ni en
+8. **La credencial de Págalo no toca disco**: ni en payloads guardados, ni en logs, ni en
    el historial.
 
 ---

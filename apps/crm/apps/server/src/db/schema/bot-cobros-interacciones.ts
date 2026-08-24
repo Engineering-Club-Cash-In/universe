@@ -74,6 +74,17 @@ export const botCobrosInteracciones = pgTable(
 		 * migración con lock — mismo criterio que `bot_cobros_boletas.estado`.
 		 */
 		/**
+		 * sha256 del DPI de quien se identificó, sin espacios (Codex, PR #1411,
+		 * 4ª ronda): la llave de PERSONA que sobrevive a los borrados. El cruce
+		 * del codeudor multi-lead dependía de que su fila de `co_debtors`
+		 * siguiera viva; con el hash, la ficha lo encuentra aunque la fila se
+		 * borre. Hasheado y no en claro porque esta tabla no guarda PII (D-42,
+		 * alineado con la propuesta de D-14). Null si la identificación no fue
+		 * por DPI (placa/NIT).
+		 */
+		personaHash: text("persona_hash"),
+
+		/**
 		 * Quién operó — "titular" o "codeudor" — GRABADO al escribir (Codex,
 		 * PR #1411): si la fila de `co_debtors` se borra después, su `SET NULL`
 		 * limpia `co_debtor_id`, y deducir el operador de ese FK convertía a un
@@ -106,5 +117,7 @@ export const botCobrosInteracciones = pgTable(
 		// La rama por SIFCO del lookup de la ficha (migración 0042): sin él, el
 		// OR obliga a barrer una tabla que crece con cada request y no se purga.
 		index("bot_cobros_interacciones_sifco_idx").on(t.numeroSifco),
+		// La rama por persona del mismo lookup (migración 0044).
+		index("bot_cobros_interacciones_persona_idx").on(t.personaHash),
 	],
 );

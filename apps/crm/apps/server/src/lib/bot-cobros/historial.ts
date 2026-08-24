@@ -23,6 +23,7 @@
  *      toca y `openapi.test.ts` sigue en verde sin cambios.
  */
 
+import { createHash } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import type { Context } from "hono";
 import { db } from "../../db";
@@ -81,6 +82,22 @@ const CODIGOS_DE_AUTENTICACION = new Set([
 	"NO_AUTORIZADO",
 	"SERVICIO_NO_DISPONIBLE",
 ]);
+
+/**
+ * La llave de PERSONA que sobrevive a los borrados (Codex, PR #1411, 4ª
+ * ronda): sha256 del DPI sin espacios (misma normalización que `eqDpi`).
+ *
+ * El vínculo del codeudor multi-lead con las fichas se resolvía por su fila
+ * de `co_debtors` — pero borrar esa fila limpia el FK vía SET NULL y la
+ * sesión desaparecía de todas las fichas menos la del `lead_id` guardado. El
+ * hash identifica a la persona sin importar qué filas sigan vivas, y va
+ * HASHEADO y no en claro porque esta tabla no guarda PII (D-42, alineado con
+ * la propuesta de D-14). Null cuando la identificación no fue por DPI
+ * (placa/NIT del titular): esos flujos no necesitan el cruce por persona.
+ */
+export function hashPersona(dpi: string): string {
+	return createHash("sha256").update(dpi.replace(/\s/g, "")).digest("hex");
+}
 
 /**
  * Deja visibles solo los últimos 4 caracteres: suficiente para que el asesor
@@ -184,6 +201,8 @@ const CURADORES: Record<
 export type IdentidadBot = {
 	leadId: string | null;
 	coDebtorId: string | null;
+	/** DPI de quien se identificó, si lo hubo: de acá sale `persona_hash`. */
+	dpi?: string | null;
 };
 
 const identidadesAnotadas = new WeakMap<Request, IdentidadBot>();
@@ -300,6 +319,7 @@ export async function persistirInteraccion(
 	let otpId: string | null = null;
 	let leadId = interaccion.identidad?.leadId ?? null;
 	let coDebtorId = interaccion.identidad?.coDebtorId ?? null;
+	let dpi = interaccion.identidad?.dpi ?? null;
 
 	if (interaccion.referencia) {
 		const [otp] = await db
@@ -307,6 +327,7 @@ export async function persistirInteraccion(
 				id: otps.id,
 				leadId: otps.leadId,
 				coDebtorId: otps.coDebtorId,
+				dpi: otps.dpi,
 			})
 			.from(otps)
 			.where(
@@ -318,6 +339,7 @@ export async function persistirInteraccion(
 			otpId = otp.id;
 			leadId = leadId ?? otp.leadId;
 			coDebtorId = coDebtorId ?? otp.coDebtorId;
+			dpi = dpi ?? otp.dpi;
 		}
 	}
 
@@ -346,6 +368,8 @@ export async function persistirInteraccion(
 		// Grabado, no deducido: si la fila del codeudor se borra después, el
 		// SET NULL limpia co_debtor_id y la deducción lo volvería "titular".
 		operadoPor: coDebtorId ? "codeudor" : "titular",
+		// La llave de persona que sobrevive a los borrados (sin PII: hasheada).
+		personaHash: dpi ? hashPersona(dpi) : null,
 		accion: interaccion.accion,
 		exito: interaccion.exito,
 		codigo: interaccion.codigo,

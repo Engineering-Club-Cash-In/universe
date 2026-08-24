@@ -58,6 +58,7 @@ import {
 	payloadEdicionManual,
 	registrarAuditContacto,
 } from "../lib/audit-contactos";
+import { hashPersona } from "../lib/bot-cobros/historial";
 import { agruparCasosVigentesPorSifco } from "../lib/caso-vigente";
 import {
 	deriveHasCapitalData,
@@ -1906,11 +1907,21 @@ export const cobrosRouter = {
 			if (!opp?.leadId) return vacio;
 
 			// Los codeudores de sus oportunidades también operan el bot (D-11).
+			// Solo los de oportunidades won/migrate (Codex, PR #1411, 4ª ronda):
+			// el bot solo reconoce codeudores de créditos reales, y sin este
+			// filtro el codeudor de una oportunidad abierta o perdida colaría en
+			// esta ficha las sesiones de sus créditos verdaderos, que no tienen
+			// nada que ver con este cliente.
 			const codeudores = await db
 				.select({ id: coDebtors.id, dpi: coDebtors.dpi })
 				.from(coDebtors)
 				.innerJoin(opportunities, eq(opportunities.id, coDebtors.opportunityId))
-				.where(eq(opportunities.leadId, opp.leadId));
+				.where(
+					and(
+						eq(opportunities.leadId, opp.leadId),
+						inArray(opportunities.status, ["won", "migrate"]),
+					),
+				);
 
 			// La asociación es por PERSONA, no por fila (Codex, PR #1411, 2ª
 			// ronda): la identificación guarda UNA fila de co_debtors —la del
@@ -1991,6 +2002,18 @@ export const cobrosRouter = {
 			if (sifcosDelLead.length > 0) {
 				condiciones.push(
 					inArray(botCobrosInteracciones.numeroSifco, sifcosDelLead),
+				);
+			}
+			// La rama por PERSONA (Codex, PR #1411, 4ª ronda): las de arriba
+			// dependen de filas de co_debtors/leads que pueden borrarse (SET NULL
+			// en los FKs); el hash del DPI identifica a la persona sin importar
+			// qué filas sigan vivas.
+			if (dpisCodeudores.length > 0) {
+				condiciones.push(
+					inArray(
+						botCobrosInteracciones.personaHash,
+						dpisCodeudores.map((d) => hashPersona(d)),
+					),
 				);
 			}
 

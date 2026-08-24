@@ -2317,7 +2317,25 @@ function RouteComponent() {
 							</CardDescription>
 						</CardHeader>
 						<CardContent>
-							{totalContactos === 0 ? (
+							{historialContactosPagina.isLoading ? (
+								<div className="py-8 text-center text-muted-foreground">
+									Cargando historial de contactos…
+								</div>
+							) : historialContactosPagina.isError ? (
+								// Codex (PR #1411): un fallo de red/DB no es "no hay contactos".
+								<div className="flex flex-col items-center gap-2 py-8">
+									<p className="text-center text-muted-foreground">
+										No se pudo cargar el historial de contactos.
+									</p>
+									<Button
+										variant="outline"
+										size="sm"
+										onClick={() => historialContactosPagina.refetch()}
+									>
+										Reintentar
+									</Button>
+								</div>
+							) : totalContactos === 0 ? (
 								<div className="py-8 text-center text-muted-foreground">
 									No hay contactos registrados para este caso
 								</div>

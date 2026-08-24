@@ -376,9 +376,12 @@ export const pagaloPaymentLinks = pgTable(
 			.on(t.groupId, t.linkType)
 			.where(sql`${t.isApplicationSource} = true`),
 		index("pagalo_payment_links_group_idx").on(t.groupId),
+		// REPLACED sigue en el barrido: sin expiración un link reemplazado sigue
+		// siendo cobrable, y sacarlo del poll volvería invisible un pago real
+		// (D-51). Sale del índice al observarse su destino (PAID/CANCELLED/EXPIRED).
 		index("pagalo_payment_links_poll_idx")
 			.on(t.nextPollAt)
-			.where(sql`${t.status} IN ('CREATING', 'ACTIVE')`),
+			.where(sql`${t.status} IN ('CREATING', 'ACTIVE', 'REPLACED')`),
 		check(
 			"pagalo_payment_links_type_chk",
 			sql`${t.linkType} IN ('CAPITAL', 'MORA_INTERES')`,

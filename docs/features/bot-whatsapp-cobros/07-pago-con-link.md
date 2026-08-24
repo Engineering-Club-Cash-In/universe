@@ -156,9 +156,13 @@ adelanta el aviso, el job lo garantiza*.
   (antes de liquidación) — es para incidentes, no del flujo. **No hay endpoint documentado
   para cancelar un link** ya creado (el estado 3 = cancelado existe, así que desde el panel
   de Págalo seguramente se puede a mano; por API no está en la colección — **preguntarles**).
-  Mientras tanto, un link que sobra se marca `REPLACED` en nuestro modelo y queda vivo en
-  Págalo; si alguien lo paga igual, el partial UNIQUE de CB-028 manda el caso a
-  `REVIEW_REQUIRED` en vez de aplicar dos veces.
+  Mientras tanto, un link que sobra se marca `REPLACED` en nuestro modelo, queda vivo en
+  Págalo **y justo por eso NO sale del poller** (hallazgo de Codex): se sigue consultando
+  —a cadencia más lenta— hasta observar su destino final: **pagado** (el partial UNIQUE de
+  CB-028 manda el grupo a `REVIEW_REQUIRED` en vez de aplicar dos veces), **cancelado** a
+  mano en el panel (→ `CANCELLED`, y ahí sí deja de consultarse) o **expirado** (→
+  `EXPIRED`). El índice parcial del poll incluye `REPLACED` (migración 0046) para que ese
+  barrido no cueste un full scan.
 - El estado de "listado de transacciones" (`/v1/integration/transactions`, con Bearer del
   `/v1/login`) filtra por `status_transaction`, fechas y página — es la herramienta de
   **conciliación de respaldo** si un día dudamos del poller.
@@ -300,7 +304,7 @@ una sola si la selección no lleva capital o es solo capital** — y responde:
 | HTTP | `codigo` | Cuándo |
 | --- | --- | --- |
 | 409 | `MONTO_DESACTUALIZADO` | El recálculo no coincide con `montoEsperado`. El bot repite `/opciones` |
-| 200 | — (mismos links) | Ya hay un grupo del bot **activo con el mismo monto** para ese crédito → se responden **los mismos links**, no se crean otros (idempotencia de conversación). Con **monto distinto**: los links viejos se marcan `REPLACED` (y se cancelan a mano en el panel de Págalo mientras no haya API, [§3.5](#35-otras-notas-de-la-investigación)) y se crean los nuevos |
+| 200 | — (mismos links) | Ya hay un grupo del bot activo **con el mismo desglose** para ese crédito → se responden **los mismos links**, no se crean otros (idempotencia de conversación). La comparación es contra el **`allocations_snapshot` completo** (mismas cuotas, mismos montos por rubro y por link), no contra el total: dos deudas distintas pueden sumar lo mismo (hallazgo de Codex — un pago baja la cuota mientras la mora nueva compensa el total). Si el desglose difiere —aunque el total coincida—: los links viejos se marcan `REPLACED` (siguen en el poll y se cancelan a mano en el panel mientras no haya API, [§3.5](#35-otras-notas-de-la-investigación)) y se crean los nuevos |
 | 502 | `PAGALO_NO_DISPONIBLE` | Págalo no respondió o falló creando el segundo link. **No queda ninguna intención a medias**: el grupo queda `CANCELLED` y el link que sí se creó se marca `REPLACED` (cancelarlo a mano en el panel). Mensaje al cliente: intentá más tarde o subí tu boleta |
 
 ### 4.3 La conversación termina al entregar los links
@@ -331,7 +335,7 @@ una vez y le sirve a los dos orígenes. Reparto propuesto (confirmar con Jose):
 
 | Pieza | Qué hace | Dueño |
 | --- | --- | --- |
-| **Poller de links** | Recorre links `ACTIVE` por `next_poll_at` (lease ya modelado): status del link → si `2`, transacción por `id_external` → exige `ACCEPT` → guarda evidencia + voucher → link `PAID`. Con ambos tipos pagados: grupo `READY_TO_APPLY` | Jose (CB-028) |
+| **Poller de links** | Recorre por `next_poll_at` los links `ACTIVE` **y los `REPLACED` aún cobrables** (a cadencia más lenta — §3.5; sin expiración, un link viejo pagado tiene que observarse): status del link → si `2`, transacción por `id_external` → exige `ACCEPT` → guarda evidencia + voucher → link `PAID`. Con todos los links requeridos pagados: grupo `READY_TO_APPLY`; un `REPLACED` pagado manda el grupo a `REVIEW_REQUIRED` | Jose (CB-028) |
 | **Callbacks** | `callback_accept/reject` apuntan a un endpoint nuestro que solo **adelanta** `next_poll_at` del link. Sin firma → jamás escriben estado (§3.4) | Jose (CB-028) |
 | **Dispatcher a cartera** | Reclama grupos `READY_TO_APPLY`, arma el payload normalizado + hash, llama al **servicio nuevo** de cartera que inserta en `pagalo_payment_imports` y crea los `pagos_credito` | Jose (CB-028) |
 | **Aplicación en cartera** | Idempotente por `crm_group_id`; los pagos nacen **validados** ([D-50](./DECISIONES.md#d-50--el-pago-por-link-nace-validado)) — no pasan por la bandeja de conta, a diferencia de la boleta ([D-39](./DECISIONES.md#d-39--el-rechazo-es-un-botón-explícito-no-se-infiere-del-reverso)). Dos cosas que Daniel pidió y **CB-028 ya trae previstas**: los `pagos_credito` van con **`origen_pago = 'pagalo'`** (el valor ya existe en el enum de cartera, lo agregó la migración 0008 — el mismo mecanismo con el que se distingue `boleta`/`transferencia`/`cheque`), y el **voucher de Págalo queda como boleta en `cartera.boletas`** ("Voucher sigue usando cartera.boletas", dice la propia migración): el pago queda con su comprobante como cualquier otro | Jose (CB-028) |
@@ -439,9 +443,9 @@ La 0039 del CRM ya estaba aplicada en dev y la 0008 de cartera en el sandbox
 
 | # | Qué |
 | --- | --- |
-| 10 | **Poller**: confirmar que él lo construye (su schema ya trae el lease) y que verifica `ACCEPT` con `/payment/transaction/uuid`, nunca solo el status del link |
+| 10 | **Poller**: confirmar que él lo construye (su schema ya trae el lease), que verifica `ACCEPT` con `/payment/transaction/uuid` —nunca solo el status del link— y que barre también los `REPLACED` aún cobrables (§3.5; índice ampliado en la migración 0046) |
 | 11 | **Callbacks**: endpoint que solo adelanta `next_poll_at` — jamás escribe estado ([D-49](./DECISIONES.md#d-49--del-pago-nos-enteramos-nosotros-no-el-cliente)) |
-| 12 | **Aplicación en cartera**: transaccional (su propia nota: no reintentar `newPayment` a ciegas), `origen_pago = 'pagalo'`, voucher a `cartera.boletas`, sin re-activar la regla de excedentes Q25 por redondeos, usando los `*_restante` si la cuota venía a medias, y **la mora vigente se consume primero** cuando el monto del link quedó corto ([D-52](./DECISIONES.md#d-52--si-la-mora-cambió-cuando-el-link-se-paga-mora-primero-y-se-avisa-el-faltante)) |
+| 12 | **Aplicación en cartera**: transaccional (su propia nota: no reintentar `newPayment` a ciegas), `origen_pago = 'pagalo'`, voucher a `cartera.boletas`, sin re-activar la regla de excedentes Q25 por redondeos, usando los `*_restante` si la cuota venía a medias, y **la mora vigente se consume primero — solo con el dinero del link `MORA_INTERES`**, jamás con el del link `CAPITAL` ([D-52](./DECISIONES.md#d-52--si-la-mora-cambió-cuando-el-link-se-paga-mora-primero-y-se-avisa-el-faltante)) |
 | 13 | **Notificación WhatsApp**: nosotros mandamos el recibo al validar con Págalo ([D-50](./DECISIONES.md#d-50--el-pago-por-link-nace-validado)) — coordinar con los recibos que cartera ya manda para que al cliente le llegue **uno** |
 | 14 | **Regeneración**: viejos → `REPLACED` + cancelación manual en el panel mientras no haya API ([D-51](./DECISIONES.md#d-51--los-links-no-expiran-por-ahora)). ¿Él ya le preguntó a Págalo si existe cancelar por API? |
 

@@ -1871,9 +1871,12 @@ unos días".
 2. **Regenerar no mata al viejo por API**: la colección de Págalo no documenta cómo
    cancelar un link (el estado 3 = cancelado existe, seguramente desde su panel — hay que
    preguntarles). Al generar links nuevos, los viejos se marcan `REPLACED` en nuestro
-   modelo y se cancelan **a mano en el panel** mientras no haya API. Si aun así alguien
-   paga un link viejo, el partial UNIQUE de CB-028 manda el grupo a `REVIEW_REQUIRED` en
-   vez de aplicar dos veces.
+   modelo y se cancelan **a mano en el panel** mientras no haya API. Un `REPLACED` **sigue
+   en el poll** hasta observar su destino final —pagado, cancelado o expirado— porque
+   sigue siendo cobrable: sacarlo del barrido volvería invisible un pago real (hallazgo de
+   Codex; el índice del poll se amplió en la migración 0046 del CRM). Si alguien paga un
+   link viejo, el partial UNIQUE de CB-028 manda el grupo a `REVIEW_REQUIRED` en vez de
+   aplicar dos veces.
 3. Cuando Págalo confirme si hay cancelación por API, esta decisión se revisa: expirar o
    cancelar al regenerar sería lo limpio.
 
@@ -1904,6 +1907,15 @@ aplicar; el dinero del cliente entra completo y la cuota queda con su faltante e
 trabajo de transparencia: en el mismo mensaje se le explica que su mora ya no era la de
 antes (y por qué) y se le dice **cuánto le falta para completar la cuota**, para que pueda
 generar otro link o pagar por otro medio.
+
+**Límite fiscal del "mora primero" (hallazgo de Codex).** Cada link paga **solo sus
+rubros**: la regla de consumir primero la mora aplica **dentro del dinero del link
+`MORA_INTERES`**, jamás cruzando lados. Si la mora nueva excede lo que ese link trae, el
+dinero del link `CAPITAL` **no** la cubre — se aplica íntegro a capital, como fue emitido,
+y el faltante queda en los rubros facturables. Cruzar lados haría que una transacción
+creada deliberadamente como no facturable pague un rubro facturable, deshaciendo la razón
+misma de los dos links ([D-48](#d-48--capital-en-un-link-todo-lo-demás-en-el-otro)) y
+descuadrando vouchers y facturación contra los montos de cada transacción.
 
 **Consecuencia asumida:** este es el **único** "pago parcial" que puede existir en el
 flujo del link (la regla de [D-46](#d-46--el-cliente-elige-cuántas-cuotas-el-crm-arma-el-monto)

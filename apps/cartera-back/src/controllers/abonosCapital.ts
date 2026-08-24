@@ -3,7 +3,11 @@ import { abonos_capital, creditos_inversionistas_espejo, inversionistas } from "
 import { db } from "../database";
 import Big from "big.js";
 import { obtenerSumaComprasPendientes } from "../utils/comprasAjuste";
-import { emitCreditCapitalContributionFailed } from "../utils/structuredLogger";
+import {
+  emitCreditCapitalContributionCompleted,
+  emitCreditCapitalContributionFailed,
+  emitCreditCapitalContributionRejected,
+} from "../utils/structuredLogger";
 
 type AbonoCapitalExecutor = Pick<typeof db, "select" | "insert">;
 type CreateAbonoCapitalExecutor = Pick<typeof db, "insert">;
@@ -76,6 +80,11 @@ export async function createAbonoCapital(data: {
         liquidado: data.liquidado ?? false,
       })
       .returning();
+
+    emitCreditCapitalContributionCompleted({
+      operation: "create",
+      durationMs: elapsedMilliseconds(startedAt, dependencies.now),
+    });
 
     return {
       success: true,
@@ -404,12 +413,21 @@ export async function updateAbonoCapital(
       .returning();
 
     if (!abonoActualizado) {
+      emitCreditCapitalContributionRejected({
+        operation: "update",
+        durationMs: elapsedMilliseconds(startedAt, dependencies.now),
+      });
       return {
         success: false,
         message: "Abono no encontrado",
         data: null,
       };
     }
+
+    emitCreditCapitalContributionCompleted({
+      operation: "update",
+      durationMs: elapsedMilliseconds(startedAt, dependencies.now),
+    });
 
     return {
       success: true,

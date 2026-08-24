@@ -2,6 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import {
   createCarteraStructuredLogger,
   emitCreditCapitalContributionFailed,
+  emitCreditCapitalContributionCompleted,
+  emitCreditCapitalContributionRejected,
   emitCreditCapitalPaymentAuditCompleted,
   emitCreditCapitalPaymentAuditDiagnosticCompleted,
   emitCreditCapitalPaymentAuditFailed,
@@ -166,8 +168,10 @@ describe('Cartera structured logger adapter', () => {
 
     emitCreditCapitalContributionFailed({ operation: 'create', durationMs: 12 }, logger);
     emitCreditCapitalContributionFailed({ operation: 'update', durationMs: 20 }, logger);
+    emitCreditCapitalContributionCompleted({ operation: 'create', durationMs: 5 }, logger);
+    emitCreditCapitalContributionRejected({ operation: 'update', durationMs: 6 }, logger);
 
-    expect(lines).toHaveLength(2);
+    expect(lines).toHaveLength(4);
     expect(JSON.parse(lines[0] ?? '{}')).toMatchObject({
       event: 'credit.capital_contribution',
       outcome: 'failed',
@@ -183,6 +187,19 @@ describe('Cartera structured logger adapter', () => {
       contribution_operation: 'update',
       duration_ms: 20,
       error_code: 'persistence_failed',
+    });
+    expect(JSON.parse(lines[2] ?? '{}')).toMatchObject({
+      event: 'credit.capital_contribution',
+      outcome: 'completed',
+      contribution_operation: 'create',
+      duration_ms: 5,
+    });
+    expect(JSON.parse(lines[3] ?? '{}')).toMatchObject({
+      event: 'credit.capital_contribution',
+      outcome: 'rejected',
+      contribution_operation: 'update',
+      duration_ms: 6,
+      reason_code: 'capital_contribution_not_found',
     });
     for (const line of lines) {
       const entry = JSON.parse(line) as Record<string, unknown>;

@@ -58,7 +58,7 @@ Schema version: **1**
 | `previous_payment_state` | enum: applied, pending |
 | `processed_count` | integer 0..1000000000 |
 | `provider` | enum: cofidi_sat, cofidi_nit, sifco, cloudflare_r2, remote_asset, email_provider |
-| `reason_code` | enum: schema_invalid, duplicate_receipt, payment_not_found, credit_not_found, agreement_already_active, payment_already_applied, no_investors, purchase_exceeds_mirror, missing_participation_date, state_conflict, provider_rejected, local_state_inconsistent, manual_reconciliation_required, invalid_late_fee_amount, invalid_installment_count, overdue_count_mismatch, excluded_credit_state, amount_out_of_range, override_reason_missing, user_not_found, active_late_fee_not_found, concurrent_run, installments_not_found, paid_installment_conflict, item_failures, missing_payment_reference, overdue_installments_remain |
+| `reason_code` | enum: schema_invalid, duplicate_receipt, payment_not_found, credit_not_found, agreement_already_active, payment_already_applied, no_investors, purchase_exceeds_mirror, missing_participation_date, state_conflict, provider_rejected, local_state_inconsistent, manual_reconciliation_required, invalid_late_fee_amount, invalid_installment_count, overdue_count_mismatch, excluded_credit_state, amount_out_of_range, override_reason_missing, user_not_found, active_late_fee_not_found, concurrent_run, installments_not_found, paid_installment_conflict, item_failures, missing_payment_reference, overdue_installments_remain, capital_contribution_not_found |
 | `recalculation_strategy` | enum: single, bulk, from_json, migration |
 | `recovery_applied` | boolean |
 | `requested_state` | enum: active, inactive |
@@ -91,7 +91,9 @@ Schema version: **1**
 
 | Outcome | Level | Required | Optional | Constants |
 |---|---|---|---|---|
+| `completed` | `info` | `contribution_operation`, `duration_ms` | — | — |
 | `failed` | `error` | `contribution_operation`, `duration_ms`, `error_code` | — | `error_code=persistence_failed` |
+| `rejected` | `warn` | `contribution_operation`, `duration_ms`, `reason_code` | — | — |
 
 ### `credit.capital_payment_audit`
 

@@ -72,6 +72,7 @@ export const carteraCatalog = {
         'user_not_found', 'active_late_fee_not_found', 'concurrent_run',
         'installments_not_found', 'paid_installment_conflict', 'item_failures',
         'missing_payment_reference', 'overdue_installments_remain',
+        'capital_contribution_not_found',
       ],
     },
     auth_reason: { type: 'enum', values: ['missing', 'invalid', 'expired'] },
@@ -204,6 +205,8 @@ export const carteraCatalog = {
       failed: { level: 'error', required: ['credit_type', 'investor_count', 'rubric_count', 'advisor_assignment_source', 'notification_attempted', 'duration_ms', 'error_code'], optional: [] },
     } },
     'credit.capital_contribution': { outcomes: {
+      completed: { level: 'info', required: ['contribution_operation', 'duration_ms'], optional: [] },
+      rejected: { level: 'warn', required: ['contribution_operation', 'duration_ms', 'reason_code'], optional: [] },
       failed: { level: 'error', required: ['contribution_operation', 'duration_ms', 'error_code'], optional: [], constants: { error_code: 'persistence_failed' } },
     } },
     'credit.late_fee': { outcomes: {

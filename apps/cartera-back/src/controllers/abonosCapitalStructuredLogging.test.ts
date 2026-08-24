@@ -52,5 +52,7 @@ test("capital-contribution slice has no executable console calls", () => {
   expect(executableConsoleCalls(controllerFile)).toBe(0);
   const source = readFileSync(controllerFile, "utf8");
   expect(source).toContain("emitCreditCapitalContributionFailed");
+  expect(source).toContain("emitCreditCapitalContributionCompleted");
+  expect(source).toContain("emitCreditCapitalContributionRejected");
   expect(source).not.toContain("logger.emit(");
 });

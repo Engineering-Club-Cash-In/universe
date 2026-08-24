@@ -245,6 +245,31 @@ export function emitCreditCapitalPaymentAuditRejected(
   });
 }
 
+export function emitCreditCapitalContributionCompleted(
+  result: CreditCapitalContributionFailed,
+  logger: CarteraStructuredLogger = carteraStructuredLogger,
+): void {
+  emitAuditWithoutAffectingControlFlow(() => {
+    logger.emit("credit.capital_contribution", "completed", {
+      contribution_operation: result.operation,
+      duration_ms: result.durationMs,
+    });
+  });
+}
+
+export function emitCreditCapitalContributionRejected(
+  result: CreditCapitalContributionFailed,
+  logger: CarteraStructuredLogger = carteraStructuredLogger,
+): void {
+  emitAuditWithoutAffectingControlFlow(() => {
+    logger.emit("credit.capital_contribution", "rejected", {
+      contribution_operation: result.operation,
+      duration_ms: result.durationMs,
+      reason_code: "capital_contribution_not_found",
+    });
+  });
+}
+
 export function emitCreditCapitalContributionFailed(
   result: CreditCapitalContributionFailed,
   logger: CarteraStructuredLogger = carteraStructuredLogger,

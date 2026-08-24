@@ -161,6 +161,16 @@ describe('carteraCatalog', () => {
     });
     expect(carteraCatalog.events['credit.capital_contribution']).toEqual({
       outcomes: {
+        completed: {
+          level: 'info',
+          required: ['contribution_operation', 'duration_ms'],
+          optional: [],
+        },
+        rejected: {
+          level: 'warn',
+          required: ['contribution_operation', 'duration_ms', 'reason_code'],
+          optional: [],
+        },
         failed: {
           level: 'error',
           required: ['contribution_operation', 'duration_ms', 'error_code'],

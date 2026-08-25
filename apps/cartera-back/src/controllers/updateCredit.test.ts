@@ -117,6 +117,41 @@ describe("recalcularPagosCredito — exclusión de pagos de reset", () => {
   });
 });
 
+describe("recalcularPagosCredito — numero_cuota se ignora", () => {
+  // La amortización siempre arranca del capital ACTUAL del crédito, así que
+  // "desde la cuota N, pagadas incluidas" reescribía splits ya validados con
+  // un capital ya reducido (o se saltaba la cuota reabierta si N era mayor).
+  // Caso real: crédito 3, cuota 17 reabierta por reversión, conta mandó 18.
+  it("genera exactamente el mismo WHERE con y sin numero_cuota", async () => {
+    await recalcularPagosCredito({
+      numero_credito_sifco: "01010214120190",
+      numero_cuota: 17,
+    });
+    await recalcularPagosCredito({ numero_credito_sifco: "01010214120190" });
+
+    expect(capturedWheres.length).toBe(2);
+    const conCuota = renderSql(capturedWheres[0]);
+    const sinCuota = renderSql(capturedWheres[1]);
+    expect(conCuota.sql).toBe(sinCuota.sql);
+    expect(conCuota.params).toEqual(sinCuota.params);
+  });
+
+  it("con numero_cuota nunca acota por cuota ni incluye pagos validados", async () => {
+    await recalcularPagosCredito({
+      numero_credito_sifco: "01010214120190",
+      numero_cuota: 1,
+    });
+
+    const q = renderSql(capturedWheres[0]);
+    // Sin el filtro `numero_cuota >= N` de antes…
+    expect(q.sql).not.toContain(">=");
+    expect(q.params).not.toContain(1);
+    // …y con el filtro de "solo lo no aplicado": pagado=false o pending vivo.
+    expect(q.params).toContain("pending");
+    expect(q.sql).toContain("pagado");
+  });
+});
+
 // Body espejo del fixture: sin cambios financieros, sin inversionistas.
 const baseBody = {
   credito_id: 794,

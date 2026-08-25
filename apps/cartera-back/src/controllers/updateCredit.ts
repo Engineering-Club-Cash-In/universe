@@ -10,7 +10,6 @@ import {
   asc,
   gt,
   lte,
-  gte,
   sql,
 } from "drizzle-orm";
 import jwt from "jsonwebtoken";
@@ -2376,10 +2375,19 @@ export const recalcularPagosCredito = async ({
   }
 
   // 2️⃣ Obtener pagos con su cuota
-  // Si numero_cuota está definido → desde esa cuota en adelante (pagadas y no pagadas)
-  // Si no → solo lo que AÚN NO SE APLICÓ al crédito: cuotas no pagadas y
-  // también pagos ya registrados como pagados pero SIN validar por conta
-  // (validationStatus='pending', vivos). Esos pagos no han movido capital ni
+  // `numero_cuota` YA NO ACOTA NADA (hotfix 2026-08-24). Antes, pasarlo
+  // recalculaba "desde esa cuota, pagadas y no pagadas": como la amortización
+  // siempre arranca del capital ACTUAL del crédito, ese modo solo era correcto
+  // cuando la cuota coincidía con la primera sin pagar (= el modo sin cuota).
+  // Con una cuota menor reescribía splits ya validados/facturados/distribuidos
+  // a inversionistas con un capital ya reducido; con una mayor se saltaba la
+  // cuota que la reversión acababa de reabrir (caso real: crédito 3, cuota 17,
+  // conta mandó 18). El front sigue enviando el número; se acepta y se ignora
+  // para no romper el contrato. Reparar historial pagado es trabajo de
+  // /reparar-total-restante.
+  // Se procesa siempre solo lo que AÚN NO SE APLICÓ al crédito: cuotas no
+  // pagadas y también pagos ya registrados como pagados pero SIN validar por
+  // conta (validationStatus='pending', vivos). Esos pagos no han movido capital ni
   // distribuido a inversionistas — su reparto guardado recién se aplica al
   // validarse, así que refrescarlo aquí es seguro y necesario: si quedaran
   // fuera, conta validaría el split viejo (interés pre-abono).
@@ -2413,31 +2421,30 @@ export const recalcularPagosCredito = async ({
     ),
   );
 
-  const whereConditions =
-    numero_cuota !== undefined
-      ? and(
-          eq(pagos_credito.credito_id, credito.credito_id),
-          gte(cuotas_credito.numero_cuota, numero_cuota),
-          filaNoEsAbonoCapitalNiCierre,
-        )
-      : and(
-          eq(pagos_credito.credito_id, credito.credito_id),
-          filaNoEsAbonoCapitalNiCierre,
-          or(
-            eq(pagos_credito.pagado, false),
-            // Pagos registrados sin validar: solo con monto_aplicado > 0.
-            // Los recibos especiales de solo mora/otros/convenio se guardan
-            // pagado=true con monto_aplicado=0 — no son pago de cuota, no
-            // tienen split que refrescar, y reescribirlos aquí los volvería
-            // recibos de cuota (incluso volteando su pagado).
-            and(
-              eq(pagos_credito.pagado, true),
-              eq(pagos_credito.validationStatus, "pending"),
-              eq(pagos_credito.paymentFalse, false),
-              gt(pagos_credito.monto_aplicado, "0"),
-            ),
-          ),
-        );
+  if (numero_cuota !== undefined) {
+    console.warn(
+      `⚠️ recalcularPagosCredito: numero_cuota=${numero_cuota} recibido para ${numero_credito_sifco} — se ignora; solo se recalculan cuotas no pagadas y pagos pendientes de validar.`,
+    );
+  }
+
+  const whereConditions = and(
+    eq(pagos_credito.credito_id, credito.credito_id),
+    filaNoEsAbonoCapitalNiCierre,
+    or(
+      eq(pagos_credito.pagado, false),
+      // Pagos registrados sin validar: solo con monto_aplicado > 0.
+      // Los recibos especiales de solo mora/otros/convenio se guardan
+      // pagado=true con monto_aplicado=0 — no son pago de cuota, no
+      // tienen split que refrescar, y reescribirlos aquí los volvería
+      // recibos de cuota (incluso volteando su pagado).
+      and(
+        eq(pagos_credito.pagado, true),
+        eq(pagos_credito.validationStatus, "pending"),
+        eq(pagos_credito.paymentFalse, false),
+        gt(pagos_credito.monto_aplicado, "0"),
+      ),
+    ),
+  );
 
   const rows = await db
     .select()

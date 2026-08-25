@@ -56,8 +56,26 @@ export function ListadoPage() {
 	const { data: session } = authClient.useSession();
 	const casosQuery = useQuery(orpc.getCasos.queryOptions({ input: {} }));
 
+	// El servidor acota los cerrados a una ventana de retención. Ofrecer años
+	// anteriores solo devuelve listados vacíos sin explicación, así que el
+	// selector se limita a lo que el payload realmente alcanza.
+	const aniosDisponibles = useMemo(() => {
+		const actual = new Date().getFullYear();
+		let minimo = actual;
+		for (const caso of casosQuery.data ?? []) {
+			for (const entrada of caso.historial) {
+				minimo = Math.min(minimo, new Date(entrada.fecha).getFullYear());
+			}
+		}
+		return Array.from({ length: actual - minimo + 1 }, (_, i) => actual - i);
+	}, [casosQuery.data]);
+
+	const anioVigente = aniosDisponibles.includes(anio)
+		? anio
+		: (aniosDisponibles[0] ?? anio);
+
 	const hayPeriodo = periodo !== TODO_EL_TIEMPO;
-	const ventana = hayPeriodo ? ventanaDelMes(anio, Number(periodo)) : null;
+	const ventana = hayPeriodo ? ventanaDelMes(anioVigente, Number(periodo)) : null;
 
 	// Sin período cuenta la etapa actual; con período, la llegada dentro del mes.
 	const coincidencia = useMemo(
@@ -184,7 +202,7 @@ export function ListadoPage() {
 						</select>
 						{hayPeriodo && (
 							<select
-								value={anio}
+								value={anioVigente}
 								onChange={(e) =>
 									cambiarFiltro(() => {
 										setAnio(Number(e.target.value));
@@ -193,7 +211,7 @@ export function ListadoPage() {
 								}
 								className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-900"
 							>
-								{[anio - 1, anio, anio + 1].map((valor) => (
+								{aniosDisponibles.map((valor) => (
 									<option key={valor} value={valor}>
 										{valor}
 									</option>

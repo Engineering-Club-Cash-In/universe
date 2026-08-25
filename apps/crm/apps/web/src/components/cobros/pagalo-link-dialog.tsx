@@ -17,11 +17,21 @@ export function PagaloLinkDialog({ casoCobroId, numeroSifco, creditoId }: { caso
 	const credit = useQuery({ ...orpc.getCreditoParaPago.queryOptions({ input: { numeroSifco } }), enabled: open && !!numeroSifco });
 	const data = credit.data as any;
 	const cuotas = useMemo(() => {
-		const vencidas = [...(data?.cuotasAtrasadas ?? [])].sort((a: any, b: any) => a.numero_cuota - b.numero_cuota);
-		const proxima = [...(data?.cuotasPendientes ?? [])]
+		const sinDuplicados = (items: any[]) => {
+			const porNumero = new Map<number, any>();
+			for (const cuota of items) {
+				const actual = porNumero.get(cuota.numero_cuota);
+				if (!actual || Number(cuota.pago_id ?? 0) > Number(actual.pago_id ?? 0)) porNumero.set(cuota.numero_cuota, cuota);
+			}
+			return [...porNumero.values()];
+		};
+		const vencidas = sinDuplicados(data?.cuotasAtrasadas ?? [])
+			.filter((cuota: any) => cuota.numero_cuota > 0)
+			.sort((a: any, b: any) => a.numero_cuota - b.numero_cuota);
+		const proxima = sinDuplicados(data?.cuotasPendientes ?? [])
 			.filter((cuota: any) => cuota.numero_cuota > 0)
 			.sort((a: any, b: any) => a.numero_cuota - b.numero_cuota)[0];
-		return proxima ? [...vencidas, proxima] : vencidas;
+		return sinDuplicados(proxima ? [...vencidas, proxima] : vencidas);
 	}, [data]);
 	useEffect(() => {
 		if (open && credit.isSuccess) setSelected(cuotas.map((cuota: any) => cuota.cuota_id));

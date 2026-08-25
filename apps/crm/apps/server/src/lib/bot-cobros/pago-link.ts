@@ -880,12 +880,25 @@ export async function crearPagoLink(
 			const ganador = evaluarGrupo(
 				await grupoActivoDelCredito(carteraCreditoId),
 			);
+			// Los links del ganador solo se devuelven si son EXACTAMENTE la
+			// selección que este cliente eligió (mismo snapshot); si el otro
+			// /crear armó otra cosa, el monto que vio ya no aplica y se le
+			// vuelven a mostrar las opciones (hallazgo de Codex).
 			if (ganador.tipo === "reusable" && linksVivos(ganador.grupo).length > 0) {
-				return respuestaConLinks(
-					ganador.grupo.id,
-					ganador.grupo.totalAmount,
-					linksParaElBot(ganador.grupo),
-				);
+				if (
+					ganador.grupo.status === "PENDING_PAYMENT" &&
+					mismaSeleccion(
+						ganador.grupo.allocationsSnapshot,
+						opcion.calculo.allocations,
+					)
+				) {
+					return respuestaConLinks(
+						ganador.grupo.id,
+						ganador.grupo.totalAmount,
+						linksParaElBot(ganador.grupo),
+					);
+				}
+				return { ok: false, codigo: "MONTO_DESACTUALIZADO" };
 			}
 			if (ganador.tipo === "parcial") {
 				return respuestaConLinks(
@@ -914,7 +927,6 @@ export async function crearPagoLink(
 	).filter(([, monto]) => monto !== "0.00");
 	const titulo = titulosDe(componentes.length);
 	const cliente = createPagaloClient(config);
-	const nombre = (ctx.credito.usuario?.nombre ?? "").trim();
 	const links: LinkParaElBot[] = [];
 	const creados: string[] = [];
 
@@ -932,10 +944,11 @@ export async function crearPagoLink(
 			type_request: "SP" as const,
 			n_quotas: false,
 			expiration: false as const,
-			client: {
-				first_name: nombre.split(" ")[0] || "Cliente",
-				last_name: nombre.split(" ").slice(1).join(" ") || "Club Cash In",
-			},
+			// Sin contacto: el bot no tiene correo ni dirección del cliente, y
+			// mandar el objeto a medias lo rechaza Págalo (exige nombre, apellido,
+			// teléfono, correo y país). Con `{}` el cliente los llena en el
+			// checkout — flujo documentado (§3.2). Hallazgo de Codex.
+			client: {},
 			products: [
 				{
 					product_uuid: 0,

@@ -85,9 +85,13 @@ export function ListadoPage() {
 	}, [casosQuery.data, busqueda, pasoFiltro, pctFiltro, ventana, coincidencia]);
 
 	const totalPaginas = Math.max(1, Math.ceil(filtrados.length / porPagina));
+
+	// El listado se refresca solo cada minuto: si los resultados encogen, la
+	// página vigente puede quedar fuera de rango y mostrar un tramo vacío.
+	const paginaActual = Math.min(pagina, totalPaginas);
 	const visibles = filtrados.slice(
-		(pagina - 1) * porPagina,
-		pagina * porPagina,
+		(paginaActual - 1) * porPagina,
+		paginaActual * porPagina,
 	);
 
 	const conteoPorPaso = useMemo(() => {
@@ -182,7 +186,10 @@ export function ListadoPage() {
 							<select
 								value={anio}
 								onChange={(e) =>
-									cambiarFiltro(() => setAnio(Number(e.target.value)))
+									cambiarFiltro(() => {
+										setAnio(Number(e.target.value));
+										setPctFiltro(null);
+									})
 								}
 								className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-900"
 							>
@@ -383,8 +390,8 @@ export function ListadoPage() {
 						<nav className="flex flex-wrap items-center justify-between gap-3 pt-1 pb-2">
 							<div className="flex items-center gap-2">
 								<p className="text-slate-500 text-xs tabular-nums">
-									{(pagina - 1) * porPagina + 1}–
-									{Math.min(pagina * porPagina, filtrados.length)} de{" "}
+									{(paginaActual - 1) * porPagina + 1}–
+									{Math.min(paginaActual * porPagina, filtrados.length)} de{" "}
 									{filtrados.length}
 								</p>
 								<select
@@ -405,22 +412,20 @@ export function ListadoPage() {
 							<div className="flex items-center gap-2">
 								<button
 									type="button"
-									onClick={() => setPagina((p) => Math.max(1, p - 1))}
-									disabled={pagina === 1}
+									onClick={() => setPagina(Math.max(1, paginaActual - 1))}
+									disabled={paginaActual === 1}
 									className="flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-slate-700 text-sm transition hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-white"
 								>
 									<ChevronLeft className="h-4 w-4" />
 									<span className="hidden sm:inline">Anterior</span>
 								</button>
 								<span className="text-slate-600 text-sm tabular-nums">
-									{pagina} / {totalPaginas}
+									{paginaActual} / {totalPaginas}
 								</span>
 								<button
 									type="button"
-									onClick={() =>
-										setPagina((p) => Math.min(totalPaginas, p + 1))
-									}
-									disabled={pagina >= totalPaginas}
+									onClick={() => setPagina(Math.min(totalPaginas, paginaActual + 1))}
+									disabled={paginaActual >= totalPaginas}
 									className="flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-slate-700 text-sm transition hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-white"
 								>
 									<span className="hidden sm:inline">Siguiente</span>

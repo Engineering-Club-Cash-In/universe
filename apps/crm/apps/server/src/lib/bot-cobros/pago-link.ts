@@ -643,9 +643,11 @@ function respuestaConLinks(
 	const lineas = links
 		.map((l) => `*${l.titulo}* — ${quetzales(l.monto)}\n${l.url}`)
 		.join("\n\n");
+	// Con un solo link se cita el monto DEL LINK, no el del grupo: en un grupo
+	// parcialmente pagado el link pendiente vale solo lo que falta (Codex).
 	const completo =
 		links.length === 1
-			? `💳 *Tu link de pago*\n\nPagá ${quetzales(montoTotal)} acá:\n${links[0]?.url}\n\nEn cuanto se confirme te mandamos tu recibo por acá. No necesitás avisarnos.`
+			? `💳 *Tu link de pago*\n\nPagá ${quetzales(links[0]?.monto ?? montoTotal)} acá:\n${links[0]?.url}\n\nEn cuanto se confirme te mandamos tu recibo por acá. No necesitás avisarnos.`
 			: `💳 *Tus links de pago*\n\nTu pago de ${quetzales(montoTotal)} se divide en ${links.length} partes. Pagá *todas*, en el orden que querás:\n\n${lineas}\n\nEn cuanto se confirmen te mandamos tu recibo por acá. No necesitás avisarnos.`;
 	return {
 		ok: true as const,
@@ -661,8 +663,23 @@ function respuestaConLinks(
 	};
 }
 
+/**
+ * Comparación ESTRUCTURAL del snapshot: jsonb no conserva el orden de las
+ * llaves, así que un `JSON.stringify` directo rechazaba snapshots idénticos y
+ * un simple retry emitía un segundo juego de links (hallazgo de Codex).
+ */
+const canonico = (v: unknown): unknown =>
+	Array.isArray(v)
+		? v.map(canonico)
+		: v && typeof v === "object"
+			? Object.fromEntries(
+					Object.keys(v as object)
+						.sort()
+						.map((k) => [k, canonico((v as Record<string, unknown>)[k])]),
+				)
+			: v;
 const mismaSeleccion = (a: unknown, b: PagaloAllocation[]) =>
-	JSON.stringify(a) === JSON.stringify(b);
+	JSON.stringify(canonico(a)) === JSON.stringify(canonico(b));
 
 /** El grupo que íbamos a reemplazar cambió debajo nuestro (entró un pago). */
 class ReemplazoInvalido extends Error {}

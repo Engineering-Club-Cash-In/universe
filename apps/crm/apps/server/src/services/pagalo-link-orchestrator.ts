@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, notInArray } from "drizzle-orm";
 import { db } from "../db";
 import { casosCobros } from "../db/schema/cobros";
 import { leads, opportunities } from "../db/schema/crm";
@@ -8,11 +8,18 @@ import {
 	pagaloPaymentGroups,
 	pagaloPaymentLinks,
 } from "../db/schema/pagalo-payments";
-import { buildPagaloAllocations, type PagaloInstallment } from "../lib/pagalo-allocations";
+import {
+	buildPagaloAllocations,
+	type PagaloInstallment,
+} from "../lib/pagalo-allocations";
 import { assertPagaloInstallmentSelection } from "../lib/pagalo-selection";
 import { primerTelefono } from "../lib/phone-utils";
 import { carteraBackClient } from "./cartera-back-client";
-import { createPagaloClient, getPagaloSandboxConfig, toPagaloProviderAmount } from "./pagalo-client";
+import {
+	createPagaloClient,
+	getPagaloSandboxConfig,
+	toPagaloProviderAmount,
+} from "./pagalo-client";
 
 type CreatePagaloLinksInput = {
 	casoCobroId: string;
@@ -25,7 +32,8 @@ type CreatePagaloLinksInput = {
 const pickString = (value: unknown, names: string[]): string | undefined => {
 	if (!value || typeof value !== "object") return undefined;
 	for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-		if (names.includes(key.toLowerCase()) && typeof child === "string" && child) return child;
+		if (names.includes(key.toLowerCase()) && typeof child === "string" && child)
+			return child;
 		const nested = pickString(child, names);
 		if (nested) return nested;
 	}
@@ -44,10 +52,16 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 	const proximaPendiente = [...credit.cuotasPendientes]
 		.filter((cuota) => cuota.numero_cuota > 0)
 		.sort((a, b) => a.numero_cuota - b.numero_cuota)[0];
-	const cuotasDisponibles = proximaPendiente ? [...vencidas, proximaPendiente] : vencidas;
-	const selectable = cuotasDisponibles.filter((cuota) => input.cuotaIds.includes(cuota.cuota_id));
+	const cuotasDisponibles = proximaPendiente
+		? [...vencidas, proximaPendiente]
+		: vencidas;
+	const selectable = cuotasDisponibles.filter((cuota) =>
+		input.cuotaIds.includes(cuota.cuota_id),
+	);
 	if (selectable.length !== input.cuotaIds.length) {
-		throw new Error("Una cuota Págalo ya no está vencida o no pertenece al crédito.");
+		throw new Error(
+			"Una cuota Págalo ya no está vencida o no pertenece al crédito.",
+		);
 	}
 	assertPagaloInstallmentSelection(
 		selectable.map((cuota) => cuota.numero_cuota),
@@ -71,9 +85,17 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 		installments.length > 0
 			? installments
 			: credit.cuotasAtrasadas[0]
-				? [{ cuotaId: credit.cuotasAtrasadas[0].cuota_id, numeroCuota: credit.cuotasAtrasadas[0].numero_cuota }]
+				? [
+						{
+							cuotaId: credit.cuotasAtrasadas[0].cuota_id,
+							numeroCuota: credit.cuotasAtrasadas[0].numero_cuota,
+						},
+					]
 				: [];
-	const calculation = buildPagaloAllocations({ installments: installmentsForCalculation, mora: credit.moraActual });
+	const calculation = buildPagaloAllocations({
+		installments: installmentsForCalculation,
+		mora: credit.moraActual,
+	});
 
 	// Datos de contacto: casos_cobros es la fuente principal; leads (vía
 	// opportunities.numeroSifco) rellena lo que falte. cartera-back no expone
@@ -105,11 +127,15 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 		.where(eq(opportunities.numeroSifco, input.numeroSifco))
 		.limit(1);
 
-	const telefono = primerTelefono(caso?.telefonoPrincipal ?? leadInfo?.phone)?.replace(/\D/g, "");
+	const telefono = primerTelefono(
+		caso?.telefonoPrincipal ?? leadInfo?.phone,
+	)?.replace(/\D/g, "");
 	const email = caso?.emailContacto || leadInfo?.email;
 	const location = caso?.direccionContacto || leadInfo?.direccion;
 	if (!telefono || !email || !location) {
-		throw new Error("Págalo requiere teléfono, correo y dirección reales del cliente.");
+		throw new Error(
+			"Págalo requiere teléfono, correo y dirección reales del cliente.",
+		);
 	}
 	const clientContact = {
 		phone: telefono,
@@ -122,31 +148,44 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 
 	const config = getPagaloSandboxConfig();
 	const client = createPagaloClient(config);
-	const grupoEnRevision = await db
+	// Cualquier grupo ACTIVO del crédito —en revisión, esperando pago, o uno
+	// que el BOT creó desde WhatsApp— se devuelve tal cual en vez de intentar
+	// otro insert: el índice único parcial (un grupo activo por crédito) lo
+	// rechazaría y salía como error interno (hallazgo de Codex, PR #1445).
+	const grupoActivo = await db
 		.select({
 			groupId: pagaloPaymentGroups.id,
+			status: pagaloPaymentGroups.status,
+			origen: pagaloPaymentGroups.origen,
 			capitalTotal: pagaloPaymentGroups.capitalTotal,
 			facturableTotal: pagaloPaymentGroups.facturableTotal,
 			totalAmount: pagaloPaymentGroups.totalAmount,
 			linkType: pagaloPaymentLinks.linkType,
+			linkStatus: pagaloPaymentLinks.status,
 			paymentUrl: pagaloPaymentLinks.paymentUrl,
 		})
 		.from(pagaloPaymentGroups)
-		.leftJoin(pagaloPaymentLinks, eq(pagaloPaymentLinks.groupId, pagaloPaymentGroups.id))
-		.where(and(
-			eq(pagaloPaymentGroups.carteraCreditoId, input.creditoId),
-			eq(pagaloPaymentGroups.status, "REVIEW_REQUIRED"),
-		));
-	if (grupoEnRevision.length > 0) {
-		const group = grupoEnRevision[0]!;
+		.leftJoin(
+			pagaloPaymentLinks,
+			eq(pagaloPaymentLinks.groupId, pagaloPaymentGroups.id),
+		)
+		.where(
+			and(
+				eq(pagaloPaymentGroups.carteraCreditoId, input.creditoId),
+				notInArray(pagaloPaymentGroups.status, ["COMPLETED", "CANCELLED"]),
+			),
+		);
+	if (grupoActivo.length > 0) {
+		const group = grupoActivo[0]!;
 		return {
 			groupId: group.groupId,
-			status: "REVIEW_REQUIRED" as const,
+			status: group.status,
+			origen: group.origen,
 			capitalTotal: group.capitalTotal,
 			facturableTotal: group.facturableTotal,
 			totalAmount: group.totalAmount,
-			links: grupoEnRevision.flatMap((link) =>
-				link.linkType && link.paymentUrl
+			links: grupoActivo.flatMap((link) =>
+				link.linkType && link.paymentUrl && link.linkStatus === "ACTIVE"
 					? [{ linkType: link.linkType, paymentUrl: link.paymentUrl }]
 					: [],
 			),
@@ -180,12 +219,18 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 			source: "ASESOR",
 			actorUserId: input.requestedBy,
 			toStatus: "LINKS_PENDING",
-			payload: { capitalTotal: calculation.capitalTotal, facturableTotal: calculation.facturableTotal },
+			payload: {
+				capitalTotal: calculation.capitalTotal,
+				facturableTotal: calculation.facturableTotal,
+			},
 		});
 		return created;
 	});
 
-	const links = [] as Array<{ linkType: "CAPITAL" | "MORA_INTERES"; paymentUrl: string }>;
+	const links = [] as Array<{
+		linkType: "CAPITAL" | "MORA_INTERES";
+		paymentUrl: string;
+	}>;
 	for (const component of [
 		["CAPITAL", calculation.capitalTotal] as const,
 		["MORA_INTERES", calculation.facturableTotal] as const,
@@ -204,10 +249,20 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 			expiration: false as const,
 			client: {
 				first_name: credit.usuario.nombre?.split(" ")[0] || "Cliente",
-				last_name: credit.usuario.nombre?.split(" ").slice(1).join(" ") || "Cashin",
+				last_name:
+					credit.usuario.nombre?.split(" ").slice(1).join(" ") || "Cashin",
 				...clientContact,
 			},
-			products: [{ product_uuid: 0, name: linkType, product_name: linkType, amount: providerAmount, quantity: 1, subtotal: providerAmount }],
+			products: [
+				{
+					product_uuid: 0,
+					name: linkType,
+					product_name: linkType,
+					amount: providerAmount,
+					quantity: 1,
+					subtotal: providerAmount,
+				},
+			],
 		};
 		const [stored] = await db
 			.insert(pagaloPaymentLinks)
@@ -224,23 +279,66 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 		if (!stored) throw new Error("No se pudo persistir link Págalo.");
 		try {
 			const response = await client.createPaymentRequest(requestPayload);
-			const paymentUrl = pickString(response, ["payment_url", "paymenturl", "url", "link"]);
+			const paymentUrl = pickString(response, [
+				"payment_url",
+				"paymenturl",
+				"url",
+				"link",
+			]);
 			const requestUuid = pickString(response, ["uuid", "request_uuid"]);
-			if (!paymentUrl || !requestUuid) throw new Error("Págalo no devolvió URL y UUID de request.");
+			if (!paymentUrl || !requestUuid)
+				throw new Error("Págalo no devolvió URL y UUID de request.");
 			await db.transaction(async (tx) => {
-				await tx.update(pagaloPaymentLinks).set({
-					status: "ACTIVE", paymentUrl, pagaloRequestUuid: requestUuid,
-					responsePayload: response, activatedAt: new Date(), nextPollAt: new Date(), updatedAt: new Date(),
-				}).where(eq(pagaloPaymentLinks.id, stored.id));
-				await tx.insert(pagaloPaymentEvents).values({ groupId: group.id, linkId: stored.id, eventType: "LINK_ACTIVE", source: "PAGALO", actorUserId: input.requestedBy, fromStatus: "CREATING", toStatus: "ACTIVE", payload: { linkType } });
+				await tx
+					.update(pagaloPaymentLinks)
+					.set({
+						status: "ACTIVE",
+						paymentUrl,
+						pagaloRequestUuid: requestUuid,
+						responsePayload: response,
+						activatedAt: new Date(),
+						nextPollAt: new Date(),
+						updatedAt: new Date(),
+					})
+					.where(eq(pagaloPaymentLinks.id, stored.id));
+				await tx.insert(pagaloPaymentEvents).values({
+					groupId: group.id,
+					linkId: stored.id,
+					eventType: "LINK_ACTIVE",
+					source: "PAGALO",
+					actorUserId: input.requestedBy,
+					fromStatus: "CREATING",
+					toStatus: "ACTIVE",
+					payload: { linkType },
+				});
 			});
 			links.push({ linkType, paymentUrl });
 		} catch (error) {
-			await db.update(pagaloPaymentLinks).set({ status: "ERROR", errorCode: error instanceof Error ? error.name : "PAGALO_ERROR", errorMessage: error instanceof Error ? error.message : String(error), updatedAt: new Date() }).where(eq(pagaloPaymentLinks.id, stored.id));
-			await db.update(pagaloPaymentGroups).set({ status: "REVIEW_REQUIRED", updatedAt: new Date() }).where(eq(pagaloPaymentGroups.id, group.id));
+			await db
+				.update(pagaloPaymentLinks)
+				.set({
+					status: "ERROR",
+					errorCode: error instanceof Error ? error.name : "PAGALO_ERROR",
+					errorMessage: error instanceof Error ? error.message : String(error),
+					updatedAt: new Date(),
+				})
+				.where(eq(pagaloPaymentLinks.id, stored.id));
+			await db
+				.update(pagaloPaymentGroups)
+				.set({ status: "REVIEW_REQUIRED", updatedAt: new Date() })
+				.where(eq(pagaloPaymentGroups.id, group.id));
 			throw error;
 		}
 	}
-	await db.update(pagaloPaymentGroups).set({ status: "PENDING_PAYMENT", updatedAt: new Date() }).where(eq(pagaloPaymentGroups.id, group.id));
-	return { groupId: group.id, capitalTotal: calculation.capitalTotal, facturableTotal: calculation.facturableTotal, totalAmount: calculation.totalAmount, links };
+	await db
+		.update(pagaloPaymentGroups)
+		.set({ status: "PENDING_PAYMENT", updatedAt: new Date() })
+		.where(eq(pagaloPaymentGroups.id, group.id));
+	return {
+		groupId: group.id,
+		capitalTotal: calculation.capitalTotal,
+		facturableTotal: calculation.facturableTotal,
+		totalAmount: calculation.totalAmount,
+		links,
+	};
 }

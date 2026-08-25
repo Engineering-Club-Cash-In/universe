@@ -599,9 +599,12 @@ export interface CreditoDirectoResponse {
 	cuotasPendientes: CarteraCuotaCredito[];
 	cuotasAtrasadas: CarteraCuotaCredito[];
 	/**
-	 * Cuotas con pago completo que contabilidad aún no valida. Opcional:
-	 * una cartera vieja no manda la lista, y eso solo significa que esas
-	 * cuotas no se muestran (el comportamiento anterior).
+	 * Cuotas con un pago que contabilidad aún no valida: el pago COMPLETO
+	 * (`pago_pagado=true`) o un ABONO PARCIAL (`pago_pagado=false`) — sin la
+	 * segunda, una cuota futura con abono en bandeja no estaba en ninguna
+	 * lista y desaparecía del estado de cuenta. Opcional: una cartera vieja
+	 * no manda la lista, y eso solo significa que esas cuotas no se muestran
+	 * (el comportamiento anterior).
 	 */
 	cuotasEnValidacion?: CarteraCuotaCredito[];
 	moraActual: string; // decimal viene como string
@@ -1643,4 +1646,3 @@ export interface PagosPorBoletaResponse {
 	 */
 	huerfanos?: EstadoPagoCartera[];
 }
-

@@ -3850,10 +3850,13 @@ export const cobrosRouter = {
 							...(creditoCompleto.cuotasPagadas || []),
 							...(creditoCompleto.cuotasPendientes || []),
 							...(creditoCompleto.cuotasAtrasadas || []),
-							// Cuotas con pago completo que conta aún no valida: cartera las
-							// excluye de pendientes/atrasadas (no son deuda exigible) y sin
-							// esto desaparecían del calendario. El flag distingue el estado
-							// en el mapper; una cartera vieja no manda la lista y todo sigue.
+							// Cuotas con un pago que conta aún no valida: cartera las
+							// excluye de pendientes (y de atrasadas si el pago es completo)
+							// y sin esto desaparecían del calendario. Trae tanto el pago
+							// COMPLETO como el ABONO PARCIAL pending (una cuota futura con
+							// Q450 abonados no estaba en ninguna lista); el mapper distingue
+							// por `pago_pagado`. Una cartera vieja no manda la lista y todo
+							// sigue.
 							...(creditoCompleto.cuotasEnValidacion || []).map((c: any) => ({
 								...c,
 								en_validacion: true,
@@ -3942,9 +3945,12 @@ export const cobrosRouter = {
 									fechaPago: cuota.pagado ? cuota.fecha_vencimiento : null,
 									montoPagado: montoPagadoReal,
 									montoMora: montoMora.toString(),
+									// en_validacion solo si el pago en bandeja es COMPLETO: un
+									// abono parcial pending deja la cuota pendiente (el abono se
+									// ve en `pagos`, con estado "parcial").
 									estadoMora: cuota.pagado
 										? "pagado"
-										: cuota.en_validacion
+										: cuota.en_validacion && cuota.pago_pagado
 											? "en_validacion"
 											: "pendiente",
 									pagos: pagosPorCuota.get(cuota.numero_cuota) ?? [],

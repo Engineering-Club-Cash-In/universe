@@ -342,12 +342,16 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       )
       .orderBy(cuotas_credito.numero_cuota);
 
-    // 5.b · Cuotas EN VALIDACIÓN: tienen un pago completo (pagado=true en
-    // pagos_credito) que contabilidad todavía no valida, así que la cuota
-    // (cuotas_credito.pagado) sigue en false. Las dos consultas de arriba las
-    // excluyen A PROPÓSITO —no son deuda exigible ni cuota saldada— pero sin
-    // esta lista el consumidor (el estado de cuenta del CRM) las hacía
-    // desaparecer del calendario. Lista ADITIVA: quien no la conoce la ignora.
+    // 5.b · Cuotas EN VALIDACIÓN: tienen un pago que contabilidad todavía no
+    // valida, así que la cuota (cuotas_credito.pagado) sigue en false. Las dos
+    // consultas de arriba las excluyen A PROPÓSITO —un pago completo no es
+    // deuda exigible, y `cuotasPendientes` salta cualquier cuota con un pago
+    // pending para que "la próxima cuota" avance— pero sin esta lista el
+    // consumidor (el estado de cuenta del CRM) las hacía desaparecer del
+    // calendario. Entran tanto el pago COMPLETO (pagado=true) como el ABONO
+    // PARCIAL pending (pagado=false): una cuota futura con un abono en bandeja
+    // no estaba en ninguna lista y se esfumaba de la Ficha 360. El consumidor
+    // distingue por `pago_pagado`. Lista ADITIVA: quien no la conoce la ignora.
     const cuotasEnValidacion = await db
       .select({
         cuota_id: cuotas_credito.cuota_id,
@@ -385,8 +389,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         pagos_credito,
         and(
           eq(pagos_credito.cuota_id, cuotas_credito.cuota_id),
-          eq(pagos_credito.validationStatus, "pending"),
-          eq(pagos_credito.pagado, true)
+          eq(pagos_credito.validationStatus, "pending")
         )
       )
       .where(

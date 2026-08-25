@@ -10,7 +10,6 @@ import {
   asc,
   gt,
   lte,
-  gte,
   sql,
 } from "drizzle-orm";
 import jwt from "jsonwebtoken";
@@ -2376,10 +2375,19 @@ export const recalcularPagosCredito = async ({
   }
 
   // 2️⃣ Obtener pagos con su cuota
-  // Si numero_cuota está definido → desde esa cuota en adelante (pagadas y no pagadas)
-  // Si no → solo lo que AÚN NO SE APLICÓ al crédito: cuotas no pagadas y
-  // también pagos ya registrados como pagados pero SIN validar por conta
-  // (validationStatus='pending', vivos). Esos pagos no han movido capital ni
+  // `numero_cuota` YA NO ACOTA NADA (hotfix 2026-08-24). Antes, pasarlo
+  // recalculaba "desde esa cuota, pagadas y no pagadas": como la amortización
+  // siempre arranca del capital ACTUAL del crédito, ese modo solo era correcto
+  // cuando la cuota coincidía con la primera sin pagar (= el modo sin cuota).
+  // Con una cuota menor reescribía splits ya validados/facturados/distribuidos
+  // a inversionistas con un capital ya reducido; con una mayor se saltaba la
+  // cuota que la reversión acababa de reabrir (caso real: crédito 3, cuota 17,
+  // conta mandó 18). El front sigue enviando el número; se acepta y se ignora
+  // para no romper el contrato. Reparar historial pagado es trabajo de
+  // /reparar-total-restante.
+  // Se procesa siempre solo lo que AÚN NO SE APLICÓ al crédito: cuotas no
+  // pagadas y también pagos ya registrados como pagados pero SIN validar por
+  // conta (validationStatus='pending', vivos). Esos pagos no han movido capital ni
   // distribuido a inversionistas — su reparto guardado recién se aplica al
   // validarse, así que refrescarlo aquí es seguro y necesario: si quedaran
   // fuera, conta validaría el split viejo (interés pre-abono).
@@ -2413,31 +2421,30 @@ export const recalcularPagosCredito = async ({
     ),
   );
 
-  const whereConditions =
-    numero_cuota !== undefined
-      ? and(
-          eq(pagos_credito.credito_id, credito.credito_id),
-          gte(cuotas_credito.numero_cuota, numero_cuota),
-          filaNoEsAbonoCapitalNiCierre,
-        )
-      : and(
-          eq(pagos_credito.credito_id, credito.credito_id),
-          filaNoEsAbonoCapitalNiCierre,
-          or(
-            eq(pagos_credito.pagado, false),
-            // Pagos registrados sin validar: solo con monto_aplicado > 0.
-            // Los recibos especiales de solo mora/otros/convenio se guardan
-            // pagado=true con monto_aplicado=0 — no son pago de cuota, no
-            // tienen split que refrescar, y reescribirlos aquí los volvería
-            // recibos de cuota (incluso volteando su pagado).
-            and(
-              eq(pagos_credito.pagado, true),
-              eq(pagos_credito.validationStatus, "pending"),
-              eq(pagos_credito.paymentFalse, false),
-              gt(pagos_credito.monto_aplicado, "0"),
-            ),
-          ),
-        );
+  if (numero_cuota !== undefined) {
+    console.warn(
+      `⚠️ recalcularPagosCredito: numero_cuota=${numero_cuota} recibido para ${numero_credito_sifco} — se ignora; solo se recalculan cuotas no pagadas y pagos pendientes de validar.`,
+    );
+  }
+
+  const whereConditions = and(
+    eq(pagos_credito.credito_id, credito.credito_id),
+    filaNoEsAbonoCapitalNiCierre,
+    or(
+      eq(pagos_credito.pagado, false),
+      // Pagos registrados sin validar: solo con monto_aplicado > 0.
+      // Los recibos especiales de solo mora/otros/convenio se guardan
+      // pagado=true con monto_aplicado=0 — no son pago de cuota, no
+      // tienen split que refrescar, y reescribirlos aquí los volvería
+      // recibos de cuota (incluso volteando su pagado).
+      and(
+        eq(pagos_credito.pagado, true),
+        eq(pagos_credito.validationStatus, "pending"),
+        eq(pagos_credito.paymentFalse, false),
+        gt(pagos_credito.monto_aplicado, "0"),
+      ),
+    ),
+  );
 
   const rows = await db
     .select()
@@ -2449,6 +2456,31 @@ export const recalcularPagosCredito = async ({
   if (rows.length === 0) {
     console.log(`⚠️ No hay pagos para actualizar en crédito ${numero_credito_sifco}`);
     return;
+  }
+
+  // Contexto de solo lectura: parciales VALIDADOS vivos de las cuotas
+  // seleccionadas, aunque tengan pagado=true (cuando un pending cierra la
+  // cuota, insertPayment marca pagado=true a TODAS sus filas y el WHERE de
+  // arriba dejaría fuera al validado). Nunca se escriben (ver esValidadoVivo);
+  // solo netean el saldo de la cuota y restauran su capital.
+  const cuotaIdsSeleccionadas = [...new Set(rows.map((r) => r.cuotas_credito.cuota_id))];
+  const pagoIdsSeleccionados = new Set(rows.map((r) => r.pagos_credito.pago_id));
+  const contextoValidados = await db
+    .select()
+    .from(pagos_credito)
+    .innerJoin(cuotas_credito, eq(pagos_credito.cuota_id, cuotas_credito.cuota_id))
+    .where(
+      and(
+        eq(pagos_credito.credito_id, credito.credito_id),
+        inArray(pagos_credito.cuota_id, cuotaIdsSeleccionadas),
+        eq(pagos_credito.validationStatus, "validated"),
+        eq(pagos_credito.paymentFalse, false),
+        ne(pagos_credito.registerBy, "system_reset"),
+      ),
+    )
+    .orderBy(asc(cuotas_credito.numero_cuota), asc(pagos_credito.pago_id));
+  for (const r of contextoValidados) {
+    if (!pagoIdsSeleccionados.has(r.pagos_credito.pago_id)) rows.push(r);
   }
 
   // 3️⃣ Agrupar pagos por cuota_id
@@ -2481,6 +2513,20 @@ export const recalcularPagosCredito = async ({
   // recibos quedarían con capital_restante/abono_capital negativos.
   if (capitalEnMemoria.lt(0)) capitalEnMemoria = new Big(0);
 
+  // Parciales VALIDADOS vivos: su capital YA se descontó de creditos.capital
+  // al validarse, en TODAS las cuotas abiertas (un parcial puede caer en una
+  // cuota posterior mientras las anteriores siguen abiertas). Se restaura
+  // completo ANTES de amortizar la primera cuota: así cada cuota se proyecta
+  // desde el mismo principal con que se sembró, el neteo de rem.capital resta
+  // el capital validado una sola vez y la cadena queda igual a la sembrada.
+  const esValidadoVivo = (p: (typeof rows)[number]["pagos_credito"]) =>
+    p.validationStatus === "validated" && !p.paymentFalse;
+  for (const r of rows) {
+    if (esValidadoVivo(r.pagos_credito)) {
+      capitalEnMemoria = capitalEnMemoria.plus(r.pagos_credito.abono_capital ?? 0);
+    }
+  }
+
   // 5️⃣ Procesar cada cuota en orden
   const actualizaciones: { pago_id: number; datos: Record<string, unknown> }[] = [];
 
@@ -2491,6 +2537,8 @@ export const recalcularPagosCredito = async ({
   for (const [, { numero_cuota: numCuota, pagos }] of cuotasOrdenadas) {
     // Cuota 0 (desembolso) no se recalcula
     if (numCuota === 0) continue;
+
+    const validadosVivos = pagos.filter(esValidadoVivo);
 
     // Amortización de esta cuota
     const interesMes = capitalEnMemoria.times(porcentajeInteres).round(2);
@@ -2554,6 +2602,24 @@ export const recalcularPagosCredito = async ({
       rem.membresias.eq(0) &&
       rem.capital.eq(0);
 
+    // Pagos VALIDADOS por conta: un parcial validado de una cuota aún abierta
+    // sigue `pagado=false` hasta que la cuota cierre (ver registerPayment),
+    // así que el WHERE de arriba lo trae. Pero su capital ya se descontó del
+    // crédito, su split ya se distribuyó a inversionistas y ya se facturó:
+    // NO se reescribe. Solo consume el saldo de la cuota con los abonos que
+    // tiene guardados, y lo hace ANTES del loop porque las filas sembradas
+    // (fecha_pago null) se ordenan primero y su snapshot debe salir ya neto
+    // — el mismo neteo que hace registerPayment al recibir el siguiente pago.
+    const noNeg = (b: Big) => (b.lt(0) ? new Big(0) : b);
+    for (const v of validadosVivos) {
+      rem.interes = noNeg(rem.interes.minus(v.abono_interes ?? 0));
+      rem.iva = noNeg(rem.iva.minus(v.abono_iva_12 ?? 0));
+      rem.seguro = noNeg(rem.seguro.minus(v.abono_seguro ?? 0));
+      rem.gps = noNeg(rem.gps.minus(v.abono_gps ?? 0));
+      rem.membresias = noNeg(rem.membresias.minus(v.membresias_pago ?? 0));
+      rem.capital = noNeg(rem.capital.minus(v.abono_capital ?? 0));
+    }
+
     for (const pago of pagosOrdenados) {
       // Pagos ANULADOS (paymentFalse): conservan monto_aplicado, pero esa
       // plata ya no existe — no debe consumir el saldo de la cuota ni marcar
@@ -2562,6 +2628,16 @@ export const recalcularPagosCredito = async ({
       // saldo vigente). No se excluyen del SELECT a propósito: tras anular,
       // esta fila suele ser el destino que el próximo registro sobreescribe,
       // y así cascadea contra el saldo nuevo en vez del sembrado viejo.
+      // Pagos VALIDADOS por conta: un parcial validado de una cuota aún
+      // abierta sigue `pagado=false` hasta que la cuota cierre (ver
+      // registerPayment), así que el WHERE de arriba lo trae. Pero su capital
+      // ya se descontó del crédito, su split ya se distribuyó a inversionistas
+      // y ya se facturó: NO se reescribe. Solo consume el saldo de la cuota
+      // con los abonos que tiene guardados, para que los hermanos pendientes /
+      // sembrados se siembren sobre el neto (mismo neteo que hace
+      // registerPayment al recibir el siguiente pago de esa cuota).
+      if (esValidadoVivo(pago)) continue;
+
       const montoAplicado = pago.paymentFalse
         ? new Big(0)
         : new Big(pago.monto_aplicado ?? 0);

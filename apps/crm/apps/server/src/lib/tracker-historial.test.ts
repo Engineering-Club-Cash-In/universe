@@ -54,14 +54,31 @@ describe("construirHistorial", () => {
 		expect(treinta?.fecha).toBe("2026-03-05T10:00:00.000Z");
 	});
 
-	test("no duplica la entrada inicial si el historial ya cubre esa etapa", () => {
+	test("un retorno a la etapa inicial no pisa la fecha de creación", () => {
+		// Nace en 20%, sube a 30% y regresa a 20%: la primera vez que estuvo en
+		// 20% fue al crearse, no el día del retroceso.
+		const historial = construirHistorial(
+			[
+				evento("2026-03-05T10:00:00.000Z", 30, 20),
+				evento("2026-03-20T10:00:00.000Z", 20, 30),
+			],
+			{ createdAt: CREADO, closurePercentage: 20 },
+		);
+
+		const veinte = historial.find((h) => h.porcentaje === 20);
+		expect(veinte?.fecha).toBe(CREADO.toISOString());
+	});
+
+	test("una transición hacia la etapa inicial no la duplica ni la readata", () => {
+		// El origen del evento dice que ya estaba en 20% antes de esa transición,
+		// o sea desde que se creó.
 		const historial = construirHistorial(
 			[evento("2026-03-05T10:00:00.000Z", 20, 20)],
 			{ createdAt: CREADO, closurePercentage: 20 },
 		);
 
 		expect(historial).toHaveLength(1);
-		expect(historial[0].fecha).toBe("2026-03-05T10:00:00.000Z");
+		expect(historial[0].fecha).toBe(CREADO.toISOString());
 	});
 
 	test("ordena por porcentaje aunque los eventos lleguen desordenados", () => {

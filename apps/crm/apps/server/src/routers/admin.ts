@@ -14,21 +14,42 @@ import { ROLES, USER_ROLE_VALUES } from "../lib/roles";
  * editarlo, para que asignar agencias nunca requiera SQL a mano.
  */
 async function asignarAgencias(userId: string, companyIds: string[]) {
-	const existentes = await db
-		.select({ id: companies.id })
-		.from(companies)
-		.where(inArray(companies.id, companyIds));
+	// En una transacción: si el insert falla —por ejemplo si borran una agencia
+	// justo después de validarla— el socio se quedaría sin ninguna membresía y
+	// sin poder entrar, en vez de conservar la asignación que ya tenía.
+	await db.transaction(async (tx) => {
+		const [objetivo] = await tx
+			.select({ role: user.role })
+			.from(user)
+			.where(eq(user.id, userId))
+			.for("update")
+			.limit(1);
 
-	if (existentes.length !== companyIds.length) {
-		throw new ORPCError("BAD_REQUEST", {
-			message: "Alguna de las agencias seleccionadas ya no existe",
-		});
-	}
+		if (!objetivo) {
+			throw new ORPCError("NOT_FOUND", { message: "Usuario no encontrado" });
+		}
+		if (objetivo.role !== ROLES.PARTNER) {
+			throw new ORPCError("BAD_REQUEST", {
+				message: "Solo los usuarios de predio/agencia llevan agencias",
+			});
+		}
 
-	await db.delete(partnerMembers).where(eq(partnerMembers.userId, userId));
-	await db
-		.insert(partnerMembers)
-		.values(companyIds.map((companyId) => ({ userId, companyId })));
+		const existentes = await tx
+			.select({ id: companies.id })
+			.from(companies)
+			.where(inArray(companies.id, companyIds));
+
+		if (existentes.length !== companyIds.length) {
+			throw new ORPCError("BAD_REQUEST", {
+				message: "Alguna de las agencias seleccionadas ya no existe",
+			});
+		}
+
+		await tx.delete(partnerMembers).where(eq(partnerMembers.userId, userId));
+		await tx
+			.insert(partnerMembers)
+			.values(companyIds.map((companyId) => ({ userId, companyId })));
+	});
 }
 
 export const adminRouter = {
@@ -63,21 +84,27 @@ export const adminRouter = {
 		const membresias = await db
 			.select({
 				userId: partnerMembers.userId,
+				companyId: partnerMembers.companyId,
 				agencia: companies.name,
 			})
 			.from(partnerMembers)
 			.innerJoin(companies, eq(companies.id, partnerMembers.companyId));
 
-		const agenciasPorUsuario = new Map<string, string[]>();
+		const agenciasPorUsuario = new Map<
+			string,
+			{ id: string; nombre: string }[]
+		>();
 		for (const m of membresias) {
 			const lista = agenciasPorUsuario.get(m.userId) ?? [];
-			lista.push(m.agencia.trim());
+			lista.push({ id: m.companyId, nombre: m.agencia.trim() });
 			agenciasPorUsuario.set(m.userId, lista);
 		}
 
 		return users.map((u) => ({
 			...u,
-			agencias: (agenciasPorUsuario.get(u.id) ?? []).sort(),
+			agencias: (agenciasPorUsuario.get(u.id) ?? []).sort((a, b) =>
+				a.nombre.localeCompare(b.nombre),
+			),
 		}));
 	}),
 
@@ -114,26 +141,33 @@ export const adminRouter = {
 				}
 			}
 
-			const updatedUser = await db
-				.update(user)
-				.set({
-					role: input.role,
-					updatedAt: new Date(),
-				})
-				.where(eq(user.id, input.userId))
-				.returning();
+			// El rol y la limpieza de membresías van juntos: si el borrado fallara
+			// después de cambiar el rol, al devolverle el rol de socio recuperaría
+			// agencias viejas sin que nadie las reasigne.
+			const updatedUser = await db.transaction(async (tx) => {
+				const actualizado = await tx
+					.update(user)
+					.set({
+						role: input.role,
+						updatedAt: new Date(),
+					})
+					.where(eq(user.id, input.userId))
+					.returning();
 
-			// Si deja de ser socio, sus agencias se van con el rol: si no, al
-			// devolverle el rol recuperaría accesos viejos sin que nadie lo note.
-			if (input.role !== ROLES.PARTNER) {
-				await db
-					.delete(partnerMembers)
-					.where(eq(partnerMembers.userId, input.userId));
-			}
+				if (actualizado.length === 0) {
+					throw new ORPCError("NOT_FOUND", {
+						message: "Usuario no encontrado",
+					});
+				}
 
-			if (updatedUser.length === 0) {
-				throw new ORPCError("NOT_FOUND", { message: "Usuario no encontrado" });
-			}
+				if (input.role !== ROLES.PARTNER) {
+					await tx
+						.delete(partnerMembers)
+						.where(eq(partnerMembers.userId, input.userId));
+				}
+
+				return actualizado;
+			});
 
 			return updatedUser[0];
 		}),
@@ -270,21 +304,8 @@ export const adminRouter = {
 			}),
 		)
 		.handler(async ({ input }) => {
-			const [objetivo] = await db
-				.select({ id: user.id, role: user.role })
-				.from(user)
-				.where(eq(user.id, input.userId))
-				.limit(1);
-
-			if (!objetivo) {
-				throw new ORPCError("NOT_FOUND", { message: "Usuario no encontrado" });
-			}
-			if (objetivo.role !== ROLES.PARTNER) {
-				throw new ORPCError("BAD_REQUEST", {
-					message: "Solo los usuarios de predio/agencia llevan agencias",
-				});
-			}
-
+			// La verificación de rol vive dentro de asignarAgencias, junto al
+			// bloqueo de la fila, para que no se pueda colar un cambio de rol.
 			await asignarAgencias(input.userId, input.companyIds);
 			return { success: true };
 		}),

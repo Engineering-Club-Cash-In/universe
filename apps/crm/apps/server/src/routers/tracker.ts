@@ -93,10 +93,14 @@ function descripcionVehiculo(fila: Fila) {
 		.join(" ");
 }
 
-function estadoDeCaso(status: string, paso: PasoTracker): EstadoCaso {
+// El desembolso lo confirma el cierre de la oportunidad, no la etapa: al
+// aprobar el checklist la oportunidad pasa a 100% pero sigue `open` mientras
+// contabilidad ejecuta el pago. Anunciar "desembolsado" ahí sería mentirle al
+// socio, así que un 100% abierto se muestra como en proceso.
+function estadoDeCaso(status: string): EstadoCaso {
 	if (status === "lost") return "rechazado";
 	if (status === "on_hold") return "en_pausa";
-	if (status === "won" || paso === 5) return "desembolsado";
+	if (status === "won") return "desembolsado";
 	return "en_proceso";
 }
 
@@ -160,7 +164,7 @@ function aCaso(fila: Fila, historial: EntradaHistorial[]): CasoTracker {
 		monto: fila.value === null ? null : Number(fila.value),
 		pasoActual,
 		porcentaje: fila.closurePercentage,
-		estado: estadoDeCaso(fila.status, pasoActual),
+		estado: estadoDeCaso(fila.status),
 		cerrado: fila.status === "won" || fila.status === "lost",
 		actualizadoAt: fila.updatedAt.toISOString(),
 		historial,

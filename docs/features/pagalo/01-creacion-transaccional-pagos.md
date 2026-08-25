@@ -11,11 +11,13 @@ montos correctos y vouchers propios, una llamada idempotente a Cartera crea:
 - una fila `pagalo_payment_imports`;
 - una o varias filas `pagos_credito`, según distribución normal del motor;
 - `pagalo_import_id` en todas las filas creadas o reutilizadas por operación;
-- `origen_pago='pagalo'`, `banco_id=NULL` y estado `pending`;
+- `origen_pago='pagalo'`, `banco_id=NULL` y estado `validated`;
 - filas `boletas` con uno o dos vouchers requeridos;
-- estado final `PAYMENTS_CREATED` en importación.
+- estado final `APPLIED` en importación.
 
-No se valida pago, no se factura y no se marca importación `APPLIED`.
+Pago nace validado porque `ACCEPT` y voucher ya fueron verificados. No pasa por
+bandeja humana: validación y estado final `APPLIED` ocurren antes del mismo
+commit atómico de importación.
 
 ## 2. Regla de reutilización
 
@@ -36,6 +38,8 @@ export async function procesarRegistroPago(
 
 `ejecutarRegistroPago` contiene lógica existente de `insertPayment`, cambiando
 acceso global `db` por executor recibido. No altera orden, fórmulas ni reglas.
+Para Págalo recibe además presupuestos inmutables por lado; no puede tratar dos
+transacciones como una bolsa única de dinero.
 
 `insertPayment` queda como adaptador Elysia:
 
@@ -66,6 +70,10 @@ return withPaymentLock(command.creditoId, () =>
       tx,
     );
     await marcarPagosCreados(imported.id, tx);
+    for (const paymentId of result.payment_ids) {
+      await validarPagoRegistrado(paymentId, tx);
+    }
+    await marcarImportacionApplied(imported.id, tx);
     return result;
   }),
 );
@@ -85,6 +93,7 @@ processConvenioPayment(input, executor);
 insertarPago(input, executor);
 insertarBoletas(input, executor);
 getPagosDelMesActual(creditoId, executor);
+validarPagoRegistrado(pagoId, executor);
 ```
 
 Si helper ya abre transacción, adopta mismo patrón: usa transacción recibida o
@@ -93,6 +102,18 @@ escribirse con mismo executor, no después de commit separado.
 
 Retornos HTTP dejan de vivir dentro del motor. Errores de dominio tipados
 provocan rollback y adaptador conserva códigos/mensajes actuales de `/newPayment`.
+
+`validarPagoRegistrado` se extrae del cuerpo interno de `revalidatePayment`:
+actualiza capital/restantes, marca cuota cuando corresponde y distribuye
+inversionistas. Págalo primero registra filas como `pending` dentro de la
+transacción privada y después invoca este helper para cada fila, antes de
+commit. Así ninguna fila Págalo pending queda visible y al commit todas salen
+`validated`, sin saltar efectos existentes de revalidación.
+
+`marcarImportacionApplied` corre después de validar todas las filas y, en el
+mismo `tx`, escribe `status='APPLIED'`, `payments_created_at` si falta y
+`applied_at`. `PAYMENTS_CREATED` puede existir solo como estado transitorio no
+observable fuera de esa transacción; nunca es respuesta final de importación.
 
 ## 4. Contrato CRM → Cartera
 
@@ -154,9 +175,9 @@ Request normalizado:
 }
 ```
 
-Para mora sola, `capital_total` es `"0.00"`, allocations no contiene CAPITAL y
-`capital` es `null`. `facturable` conserva transacción y único voucher real. No
-se fabrica evidencia CAPITAL vacía.
+Para grupo de un link, lado Q0.00 no tiene allocation, fuente ni voucher. Puede
+ser mora-only (`capital_total="0.00"`, `capital=null`) o solo-capital
+(`facturable_total="0.00"`, `facturable=null`). Nunca se fabrica evidencia Q0.
 
 `payload_hash` se calcula en CRM sobre JSON canónico con orden fijo de campos y
 allocations. Cartera reconstruye hash antes de aceptar. Headers, tokens y datos
@@ -167,7 +188,7 @@ Respuesta nueva:
 ```json
 {
   "success": true,
-  "status": "PAYMENTS_CREATED",
+  "status": "APPLIED",
   "import_id": 42,
   "payment_ids": [1001, 1002],
   "idempotent_replay": false
@@ -182,16 +203,17 @@ Retry exacto responde `200` con mismos ids e `idempotent_replay=true`.
 const registro: RegistroPagoInput = {
   credito_id: command.credito_id,
   usuario_id: credito.usuario_id, // siempre resuelto en Cartera
+  // Total solo para auditoría/cabecera; no autoriza mezclar presupuestos.
   monto_boleta: decimal(command.total_amount),
   fecha_pago: hoyGuatemala(),
   fecha_boleta: fechaMayorRequerida(
     command.capital?.paid_at,
-    command.facturable.paid_at,
+    command.facturable?.paid_at,
   ),
   cuotaApagar: command.cuota_inicial,
   url_boletas: compactar([
     command.capital?.voucher_storage_key,
-    command.facturable.voucher_storage_key,
+    command.facturable?.voucher_storage_key,
   ]),
   banco_id: undefined,
   numeroAutorizacion: undefined,
@@ -201,13 +223,35 @@ const registro: RegistroPagoInput = {
   abono_directo_capital: 0,
   registerBy: "pagalo@clubcashin.com",
   pagalo_import_id: imported.id,
+  pagalo_componentes: {
+    capital: command.capital
+      ? {
+          disponible: decimal(command.capital_total),
+          allocations: allocationsDe(command, "CAPITAL"),
+          voucher_storage_key: command.capital.voucher_storage_key,
+        }
+      : undefined,
+    facturable: command.facturable
+      ? {
+          disponible: decimal(command.facturable_total),
+          allocations: allocationsDe(command, "MORA_INTERES"),
+          voucher_storage_key: command.facturable.voucher_storage_key,
+        }
+      : undefined,
+  },
 };
 ```
 
 `usuario_id` del request no se confía ni se necesita; Cartera lo deriva desde
 crédito. URLs externas tampoco se aceptan: solo keys esperadas de almacenamiento
-propio. `registerPayment` agrega base pública e inserta ambas en `boletas` para
-cada pago resultante, igual que hoy hace con comprobantes múltiples.
+propio. `pagalo_componentes` es contrato interno; no se agrega al schema público
+de `/newPayment`.
+
+Motor consume `facturable.disponible` primero para mora viva y luego solo para
+rubros facturables de sus allocations. Motor consume `capital.disponible` solo
+para CAPITAL. Jamás cruza presupuesto, voucher, transacción o rubro entre lados.
+Mora mayor al snapshot deja faltante; no toma dinero CAPITAL. Si un componente
+queda sobrado porque deuda bajó, se aborta y grupo pasa `REVIEW_REQUIRED`.
 
 ## 6. Invariantes dentro del lock
 
@@ -215,27 +259,30 @@ Antes de primera escritura financiera:
 
 1. Crédito existe y `(credito_id, numero_credito_sifco)` coincide.
 2. Moneda es `GTQ`.
-3. Capital es no negativo, facturable/total son positivos y
+3. Capital y facturable son no negativos, total es positivo y
    `capital + facturable = total` en centavos.
-4. Allocations suman encabezados; CAPITAL existe si y solo si capital es mayor
-   que cero.
+4. Allocations y fuente existen si y solo si su lado es mayor que cero.
 5. CAPITAL solo contiene rubros no facturables; MORA_INTERES, facturables.
 6. UUIDs e identificadores requeridos son distintos y no aparecen en ningún rol
    de importaciones previas.
 7. `payload_hash` coincide con comando canónico.
-8. Cuota inicial y allocations todavía son compatibles con deuda viva.
+8. Cuota inicial y allocations todavía son compatibles con deuda viva. Mora que
+   creció no invalida pago: se consume primero únicamente desde MORA_INTERES;
+   link sobrado por deuda achicada sí requiere revisión.
 9. Voucher keys requeridas son no vacías, distintas cuando hay dos y pertenecen
    al prefijo del grupo.
+10. Suma consumida por lado nunca excede presupuesto Págalo; mora usa solo
+    presupuesto `MORA_INTERES`.
 
-Fallo de 1–9 crea o actualiza importación como `REVIEW_REQUIRED` sin pagos. No
+Fallo de 1–10 crea o actualiza importación como `REVIEW_REQUIRED` sin pagos. No
 se llama motor con datos ambiguos.
 
 ## 7. Idempotencia y fallos
 
 | Situación | Resultado |
 | --- | --- |
-| Grupo nuevo válido | Crea importación y pagos; `PAYMENTS_CREATED`. |
-| Retry mismo grupo/hash | Devuelve importación y pagos existentes. |
+| Grupo nuevo válido | Crea importación, pagos y validación; `APPLIED`. |
+| Retry mismo grupo/hash | Devuelve importación `APPLIED` y pagos existentes. |
 | Mismo grupo, hash diferente | `409 PAYLOAD_MISMATCH`; `REVIEW_REQUIRED`. |
 | UUID/identificador reutilizado | `409 TRANSACTION_ALREADY_IMPORTED`. |
 | Regla financiera rechaza antes de escribir | Rollback completo; importación queda para revisión. |
@@ -286,18 +333,21 @@ Inyectar error después de cada familia de escritura y comprobar cero cambios:
 - después de primer `pagos_credito` en operación multicuota;
 - después de insertar boletas;
 - antes de actualizar saldo a favor;
-- antes de marcar importación `PAYMENTS_CREATED`.
+- antes de marcar importación `APPLIED`.
 
 ### Págalo
 
-- ACCEPT requeridos crean importación y N pagos `pending`.
+- ACCEPT requeridos crean importación `APPLIED` y N pagos `validated`; helper
+  extraído de revalidación corre dentro de misma transacción antes de commit.
 - Todos pagos tienen mismo `pagalo_import_id`, origen `pagalo` y banco nulo.
 - Cada pago expone uno o dos vouchers requeridos mediante `boletas`.
 - Retry exacto no crea filas adicionales.
 - Hash distinto y transacción reutilizada no crean pagos.
-- Mora sola con un ACCEPT crea fila especial sin marcar cuota pagada.
-- Operación con capital no puede importarse con una sola transacción ACCEPT.
-- Drift de crédito/cuotas termina `REVIEW_REQUIRED`.
+- Mora-only o solo-capital con un ACCEPT crea flujo de un link.
+- Operación de dos lados no puede importarse con una sola transacción ACCEPT.
+- Link sobrado por deuda achicada termina `REVIEW_REQUIRED`; mora crecida se
+  consume primero desde MORA_INTERES e informa faltante.
+- Presupuesto CAPITAL nunca cubre mora aunque componente facturable se agote.
 
 ## 10. Criterio de cierre
 
@@ -307,5 +357,6 @@ Slice termina cuando:
 2. pruebas de rollback cubren familias de efectos;
 3. endpoint Págalo crea pagos multicuota e idempotentes en sandbox;
 4. Ficha 360 y bot siguen registrando pagos mediante mismo endpoint;
-5. ningún código de creación de links, polling, WhatsApp, validación o factura se
-   incluye en este slice.
+5. validación y distribución existentes se ejecutan por helpers extraídos dentro
+   de transacción; ningún código de creación de links, polling, WhatsApp ni
+   facturación nueva se incluye en este slice.

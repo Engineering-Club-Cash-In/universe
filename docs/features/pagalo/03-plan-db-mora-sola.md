@@ -1,10 +1,17 @@
-# Págalo: mora sola — Implementation Plan
+# Págalo: grupos de un link — plan histórico
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Permitir grupos Págalo con solo `MORA_INTERES`, sin link ni evidencia CAPITAL ficticia, preservando importaciones de dos links.
+**Goal:** Documento histórico del primer correctivo mora-only. Estado final lo
+define PR #1421: cualquiera de ambos lados puede ser Q0; usar 0048/0010.
 
-**Architecture:** Nuevas migraciones correctivas, porque `0039` y `0008` ya corrieron. CRM deriva links requeridos desde `capital_total`; Cartera permite evidencia CAPITAL nula únicamente si ese total es cero. Drizzle replica constraints.
+**Architecture:** Este plan fue subsumido por migraciones simétricas 0048 (CRM)
+y 0010 (Cartera). No usar 0045/0009 como fuente final de esquema.
+
+> **Reemplazado.** Las tareas históricas que siguen describen alcance
+> mora-only y no son instrucciones de implementación. Para estado vigente usar
+> `0048_pagalo_lado_facturable_opcional.sql`,
+> `0010_pagalo_solo_capital.sql` y D-48 del contrato compartido del bot.
 
 **Tech Stack:** PostgreSQL, Drizzle ORM, TypeScript, Bun.
 

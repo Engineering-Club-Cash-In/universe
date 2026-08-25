@@ -18,7 +18,8 @@ Primera versión permite:
 - ver desglose exacto antes de generar;
 - generar uno o dos links según componentes con monto positivo.
 
-Cuotas futuras quedan documentadas como fase posterior y no se implementan.
+También puede incluir próxima cuota por vencer; cuotas futuras arbitrarias no se
+implementan.
 
 ## 2. Selector
 
@@ -37,6 +38,7 @@ Al abrir:
    parcial;
 8. asesor puede quitar todas las cuotas y conservar solo Mora;
 9. si no existe mora, debe quedar al menos una cuota seleccionada.
+10. próxima cuota por vencer puede agregarse al final del rango consecutivo.
 
 Ejemplo con cuotas 11, 12 y 13 vencidas:
 
@@ -60,7 +62,7 @@ Link CAPITAL · No facturable
   Capital cuota #12                     Q1,750.00
   Subtotal CAPITAL                      Q3,550.00
 
-Link MORA E INTERÉS · Facturable
+Link 2 · Facturable
   Interés cuota #11                       Q350.00
   IVA/rubros facturables cuota #11         Q42.00
   Interés cuota #12                       Q340.00
@@ -74,14 +76,23 @@ Total a pagar                            Q4,472.80
 Para mora sola:
 
 ```text
-Link MORA E INTERÉS · Facturable          Q150.00
+Link de pago                               Q150.00
 Total a pagar                             Q150.00
 Se generará 1 link de pago
 ```
 
-Bloque CAPITAL no se muestra cuando subtotal es cero. Botón final cambia texto:
+Para solo-capital, por ejemplo cuota parcialmente cubierta cuyos rubros
+facturables ya llegaron a cero:
 
-- `Generar 1 link de pago` para mora sola;
+```text
+Link de pago                             Q1,800.00
+Total a pagar                            Q1,800.00
+Se generará 1 link de pago
+```
+
+Solo se muestran bloques con subtotal positivo. Botón final cambia texto:
+
+- `Generar 1 link de pago` para mora sola o solo-capital;
 - `Generar 2 links de pago` cuando existen ambos componentes.
 
 ## 4. Cálculo y fuente de verdad
@@ -101,8 +112,9 @@ total_amount     = capital_total + facturable_total
 Tipos requeridos se derivan de montos, sin columna duplicada:
 
 ```text
-capital_total = 0  → MORA_INTERES
-capital_total > 0  → CAPITAL + MORA_INTERES
+capital_total = 0, facturable_total > 0  → MORA_INTERES
+capital_total > 0, facturable_total = 0  → CAPITAL
+capital_total > 0, facturable_total > 0  → CAPITAL + MORA_INTERES
 ```
 
 ## 5. Creación y envío
@@ -129,8 +141,9 @@ cancelar request pendiente. Hasta obtener contrato oficial:
 
 - CRM no marca `CANCELLED` alegando cancelación solo local;
 - no genera reemplazo que deje URL vieja todavía cobrable;
-- si cliente paga monto desactualizado, grupo pasa `REVIEW_REQUIRED`;
-- no se aplica como mora parcial ni se manda sobrante a cuota/saldo.
+- mora que creció se consume primero desde dinero MORA_INTERES y recibo avisa
+  faltante de cuota;
+- solo link sobrado porque deuda se achicó pasa `REVIEW_REQUIRED`.
 
 Si proveedor confirma cancelación:
 
@@ -146,20 +159,19 @@ Las migraciones correctivas fueron creadas localmente y están pendientes de
 ejecución manual en DEV; este documento no afirma que se hayan aplicado.
 Las migraciones originales no se reescriben: CRM `0039` y Cartera `0008`.
 
-- CRM: nueva `0045_cb028_pagalo_optional_capital.sql`;
-- Cartera: nueva `drizzle/cobros-02/0009_pagalo_optional_capital.sql`,
-  transaccional y segura de re-ejecutar.
+- CRM: `0048_pagalo_lado_facturable_opcional.sql` re-afirma ambos lados Q0;
+- Cartera: `0010_pagalo_solo_capital.sql` re-afirma nulabilidad/evidencia de
+  ambos lados. Reemplazan alcance de correctivos locales `0045/0009`.
 
-CRM permite `capital_total = 0`, conserva `facturable_total > 0` y no requiere
-fila CAPITAL inexistente. Cartera vuelve nullable evidencia CAPITAL y agrega
-constraint de forma:
+CRM y Cartera permiten cualquiera de los lados en Q0 y requieren evidencia solo
+del lado con monto positivo:
 
 ```text
-capital_total = 0
-  → campos capital_* NULL
+lado = 0
+  → campos de evidencia del lado NULL
 
-capital_total > 0
-  → transaction_uuid, external_identifier y paid_at CAPITAL obligatorios
+lado > 0
+  → transaction_uuid, external_identifier y paid_at del lado obligatorios
 ```
 
 Índices UNIQUE de campos CAPITAL permanecen: PostgreSQL admite múltiples NULL.
@@ -173,11 +185,12 @@ Motor existente ya representa pago solo mora mediante fila especial:
 - `monto_aplicado` y rubros de cuota quedan en cero;
 - cuota asociada no se marca pagada;
 - voucher queda en `boletas`;
-- fila queda `validation_status='pending'` y `origen_pago='pagalo'`;
+- fila queda `validation_status='validated'` y `origen_pago='pagalo'`;
 - `pagalo_import_id` enlaza importación idempotente.
 
-Antes de invocarlo para Págalo, Cartera exige bajo lock que mora viva coincida
-exactamente con snapshot pagado. Motor Págalo no usa rama parcial existente.
+Antes de invocarlo, Cartera revalida saldo vivo. Si mora creció, dinero del
+link MORA_INTERES la consume primero y recibo informa faltante; si link queda
+sobrado por deuda achicada, grupo pasa `REVIEW_REQUIRED`.
 
 Prueba de caracterización vigente:
 
@@ -197,19 +210,23 @@ flujo Págalo listo end-to-end.
 2. Mora mayor que cero siempre forma parte de selección con cuotas.
 3. Todas las cuotas pueden quitarse y mora sola sigue siendo válida.
 4. Mora sola crea un grupo, un link, un voucher y una fuente ACCEPT.
-5. Cuotas crean un grupo y dos links; un ACCEPT deja grupo parcial.
-6. Desglose mostrado coincide en centavos con payload y snapshot guardados.
-7. Fallo creando segundo link no envía primero al cliente.
-8. Diferencia de mora antes de generar bloquea operación y refresca modal.
-9. Diferencia tras pago deja `REVIEW_REQUIRED`, sin pago automático.
-10. Doble submit/retry no crea grupos o links duplicados.
+5. Cuotas crean uno o dos links según subtotales positivos; dos links requieren
+   dos ACCEPT y un solo link queda listo con su único ACCEPT.
+6. Cuota parcialmente pagada con saldo solo CAPITAL crea un link CAPITAL, un
+   voucher y una fuente ACCEPT; no muestra bloque facturable.
+7. Desglose mostrado coincide en centavos con payload y snapshot guardados.
+8. Fallo creando segundo link no envía primero al cliente.
+9. Diferencia de mora antes de generar bloquea operación y refresca modal.
+10. Mora crecida se aplica primero desde MORA_INTERES e informa faltante; solo
+   deuda achicada con link sobrado deja `REVIEW_REQUIRED`.
+11. Doble submit/retry no crea grupos o links duplicados.
 
 ## 10. Fuera de alcance
 
-- cuotas futuras;
+- cuotas futuras arbitrarias;
 - pagos parciales;
 - edición manual de montos;
 - expiración automática;
 - cancelación remota hasta contrato oficial;
 - producción;
-- validación contable, facturación y aplicación a inversionistas.
+- validación manual, facturación nueva o aplicación a inversionistas alternativa.

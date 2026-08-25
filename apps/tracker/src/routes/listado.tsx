@@ -13,6 +13,7 @@ import { BarraPasos } from "@/components/barra-pasos";
 import { authClient, cerrarSesion } from "@/lib/auth-client";
 import {
 	type Caso,
+	anioEnGuatemala,
 	coincidenciaEnPaso,
 	ESTADOS,
 	PASOS,
@@ -46,7 +47,7 @@ const TODO_EL_TIEMPO = "todo";
 export function ListadoPage() {
 	const ahora = new Date();
 	const [periodo, setPeriodo] = useState<string>(TODO_EL_TIEMPO);
-	const [anio, setAnio] = useState(ahora.getFullYear());
+	const [anio, setAnio] = useState(anioEnGuatemala(ahora));
 	const [busqueda, setBusqueda] = useState("");
 	const [pasoFiltro, setPasoFiltro] = useState<number | null>(null);
 	const [pctFiltro, setPctFiltro] = useState<number | null>(null);
@@ -60,11 +61,11 @@ export function ListadoPage() {
 	// anteriores solo devuelve listados vacíos sin explicación, así que el
 	// selector se limita a lo que el payload realmente alcanza.
 	const aniosDisponibles = useMemo(() => {
-		const actual = new Date().getFullYear();
+		const actual = anioEnGuatemala(new Date());
 		let minimo = actual;
 		for (const caso of casosQuery.data ?? []) {
 			for (const entrada of caso.historial) {
-				minimo = Math.min(minimo, new Date(entrada.fecha).getFullYear());
+				minimo = Math.min(minimo, anioEnGuatemala(entrada.fecha));
 			}
 		}
 		return Array.from({ length: actual - minimo + 1 }, (_, i) => actual - i);
@@ -340,6 +341,26 @@ export function ListadoPage() {
 					<div className="flex items-center justify-center py-16 text-slate-500">
 						<Loader2 className="mr-2 h-5 w-5 animate-spin" />
 						Cargando casos...
+					</div>
+				) : casosQuery.isError ? (
+					<div className="rounded-xl border border-slate-200 bg-white py-16 text-center">
+						<p className="font-medium text-slate-900">
+							No se pudieron cargar tus casos
+						</p>
+						<p className="mt-1 text-slate-500 text-sm">
+							{casosQuery.error.message}
+						</p>
+						<button
+							type="button"
+							onClick={() => casosQuery.refetch()}
+							disabled={casosQuery.isFetching}
+							className="mt-4 inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 font-medium text-slate-700 text-sm transition hover:bg-slate-50 disabled:opacity-60"
+						>
+							{casosQuery.isFetching && (
+								<Loader2 className="h-4 w-4 animate-spin" />
+							)}
+							Reintentar
+						</button>
 					</div>
 				) : filtrados.length === 0 ? (
 					<div className="rounded-xl border border-slate-200 border-dashed bg-white py-16 text-center">

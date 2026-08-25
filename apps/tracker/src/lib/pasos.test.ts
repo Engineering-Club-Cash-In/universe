@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
 	type Caso,
+	anioEnGuatemala,
 	coincidenciaEnPaso,
 	tuvoAvanceEn,
 	ventanaDelMes,
@@ -114,5 +115,24 @@ describe("tuvoAvanceEn", () => {
 
 		expect(tuvoAvanceEn(c, ABRIL)).toBe(true);
 		expect(tuvoAvanceEn(c, ventanaDelMes(2026, 5))).toBe(false);
+	});
+});
+
+describe("anioEnGuatemala", () => {
+	test("usa el mismo borde UTC-6 que ventanaDelMes", () => {
+		// 06:00Z del 1 de enero es medianoche en Guatemala: ahí empieza el año.
+		expect(anioEnGuatemala("2026-01-01T06:00:00.000Z")).toBe(2026);
+		expect(anioEnGuatemala("2026-01-01T05:59:59.000Z")).toBe(2025);
+	});
+
+	test("coincide con el inicio de la ventana de enero", () => {
+		const enero = ventanaDelMes(2026, 1);
+		expect(anioEnGuatemala(new Date(enero.inicio))).toBe(2026);
+		expect(anioEnGuatemala(new Date(enero.inicio - 1))).toBe(2025);
+	});
+
+	test("una marca de fin de año se atribuye al año que corresponde en Guatemala", () => {
+		// 31 de diciembre 20:00 GT, aunque en UTC ya sea 1 de enero.
+		expect(anioEnGuatemala("2027-01-01T02:00:00.000Z")).toBe(2026);
 	});
 });

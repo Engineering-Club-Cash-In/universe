@@ -26,6 +26,12 @@ export function ventanaDelMes(anio: number, mes: number): Ventana {
 	};
 }
 
+
+export function anioEnGuatemala(fecha: Date | string): number {
+	const t = typeof fecha === "string" ? new Date(fecha).getTime() : fecha.getTime();
+	return new Date(t - 6 * 60 * 60 * 1000).getUTCFullYear();
+}
+
 function dentroDeVentana(fecha: string, ventana: Ventana) {
 	const t = new Date(fecha).getTime();
 	return t >= ventana.inicio && t < ventana.fin;

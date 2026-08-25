@@ -27,6 +27,9 @@ const fakeCredito = {
 // Fila que devuelve el select del crédito; cada test puede reemplazarla (p. ej.
 // statusCredit CANCELADO) y beforeEach la regresa al fixture base.
 let creditoActual: any = fakeCredito;
+// Filas que devuelve el select de pagos (vacío = early return del recálculo).
+let pagosActuales: any[] = [];
+const capturedUpdates: { vals: any; cond: any }[] = [];
 const dbMock = {
   select: () => ({
     from: () => ({
@@ -39,11 +42,23 @@ const dbMock = {
       innerJoin: () => ({
         where: (cond: any) => {
           capturedWheres.push(cond);
-          return { orderBy: () => Promise.resolve([]) };
+          return { orderBy: () => Promise.resolve(pagosActuales) };
         },
       }),
     }),
   }),
+  // recalcularPagosCredito escribe dentro de db.transaction(tx => tx.update…)
+  transaction: async (fn: any) =>
+    fn({
+      update: () => ({
+        set: (vals: any) => ({
+          where: (cond: any) => {
+            capturedUpdates.push({ vals, cond });
+            return Promise.resolve();
+          },
+        }),
+      }),
+    }),
   // update del crédito: .set(vals).where().returning()
   update: () => ({
     set: (vals: any) => ({
@@ -65,6 +80,8 @@ const renderSql = (cond: any) => new PgDialect().sqlToQuery(cond);
 beforeEach(() => {
   capturedWheres.length = 0;
   capturedCreditWheres.length = 0;
+  capturedUpdates.length = 0;
+  pagosActuales = [];
   creditoActual = fakeCredito;
 });
 
@@ -149,6 +166,61 @@ describe("recalcularPagosCredito — numero_cuota se ignora", () => {
     // …y con el filtro de "solo lo no aplicado": pagado=false o pending vivo.
     expect(q.params).toContain("pending");
     expect(q.sql).toContain("pagado");
+  });
+});
+
+describe("recalcularPagosCredito — pagos validados no se reescriben", () => {
+  const cuota18 = { cuota_id: 74540, numero_cuota: 18, pagado: false };
+  const filaSembrada = {
+    pago_id: 74540,
+    cuota_id: 74540,
+    validationStatus: "no_required",
+    pagado: false,
+    paymentFalse: false,
+    monto_aplicado: "0",
+    fecha_pago: null,
+  };
+  // Parcial ya validado por conta sobre la cuota abierta: su capital ya se
+  // descontó del crédito y su split ya se distribuyó a inversionistas.
+  const parcialValidado = {
+    pago_id: 156048,
+    cuota_id: 74540,
+    validationStatus: "validated",
+    pagado: false,
+    paymentFalse: false,
+    monto_aplicado: "112",
+    fecha_pago: "2026-08-21",
+    abono_interes: "100",
+    abono_iva_12: "12",
+    abono_seguro: "0",
+    abono_gps: "0",
+    membresias_pago: "0",
+    abono_capital: "0",
+  };
+
+  it("usa el parcial validado solo como contexto y siembra al hermano sobre el neto", async () => {
+    pagosActuales = [
+      { pagos_credito: parcialValidado, cuotas_credito: cuota18 },
+      { pagos_credito: filaSembrada, cuotas_credito: cuota18 },
+    ];
+
+    await recalcularPagosCredito({ numero_credito_sifco: "01010214120190" });
+
+    // Solo se escribe la fila sembrada; el validado queda intacto.
+    expect(capturedUpdates.length).toBe(1);
+    const idsEscritos = capturedUpdates.map((u) => renderSql(u.cond).params).flat();
+    expect(idsEscritos).toContain(74540);
+    expect(idsEscritos).not.toContain(156048);
+
+    // Fixture: capital 18493.39 × 1.5% = 277.40 de interés, IVA 33.29.
+    // El sembrado queda neto de lo que el validado ya abonó (100 y 12).
+    const vals = capturedUpdates[0].vals;
+    expect(vals.interes_restante).toBe("177.4");
+    expect(vals.iva_12_restante).toBe("21.29");
+    expect(vals.seguro_restante).toBe("260.93");
+    expect(vals.membresias).toBe("399.73");
+    expect(vals.abono_interes).toBe("0");
+    expect(vals.pagado).toBe(false);
   });
 });
 

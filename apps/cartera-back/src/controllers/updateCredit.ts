@@ -2561,6 +2561,26 @@ export const recalcularPagosCredito = async ({
       rem.membresias.eq(0) &&
       rem.capital.eq(0);
 
+    // Pagos VALIDADOS por conta: un parcial validado de una cuota aún abierta
+    // sigue `pagado=false` hasta que la cuota cierre (ver registerPayment),
+    // así que el WHERE de arriba lo trae. Pero su capital ya se descontó del
+    // crédito, su split ya se distribuyó a inversionistas y ya se facturó:
+    // NO se reescribe. Solo consume el saldo de la cuota con los abonos que
+    // tiene guardados, y lo hace ANTES del loop porque las filas sembradas
+    // (fecha_pago null) se ordenan primero y su snapshot debe salir ya neto
+    // — el mismo neteo que hace registerPayment al recibir el siguiente pago.
+    const esValidadoVivo = (p: (typeof pagos)[number]) =>
+      p.validationStatus === "validated" && !p.paymentFalse;
+    const noNeg = (b: Big) => (b.lt(0) ? new Big(0) : b);
+    for (const v of pagosOrdenados.filter(esValidadoVivo)) {
+      rem.interes = noNeg(rem.interes.minus(v.abono_interes ?? 0));
+      rem.iva = noNeg(rem.iva.minus(v.abono_iva_12 ?? 0));
+      rem.seguro = noNeg(rem.seguro.minus(v.abono_seguro ?? 0));
+      rem.gps = noNeg(rem.gps.minus(v.abono_gps ?? 0));
+      rem.membresias = noNeg(rem.membresias.minus(v.membresias_pago ?? 0));
+      rem.capital = noNeg(rem.capital.minus(v.abono_capital ?? 0));
+    }
+
     for (const pago of pagosOrdenados) {
       // Pagos ANULADOS (paymentFalse): conservan monto_aplicado, pero esa
       // plata ya no existe — no debe consumir el saldo de la cuota ni marcar
@@ -2569,6 +2589,16 @@ export const recalcularPagosCredito = async ({
       // saldo vigente). No se excluyen del SELECT a propósito: tras anular,
       // esta fila suele ser el destino que el próximo registro sobreescribe,
       // y así cascadea contra el saldo nuevo en vez del sembrado viejo.
+      // Pagos VALIDADOS por conta: un parcial validado de una cuota aún
+      // abierta sigue `pagado=false` hasta que la cuota cierre (ver
+      // registerPayment), así que el WHERE de arriba lo trae. Pero su capital
+      // ya se descontó del crédito, su split ya se distribuyó a inversionistas
+      // y ya se facturó: NO se reescribe. Solo consume el saldo de la cuota
+      // con los abonos que tiene guardados, para que los hermanos pendientes /
+      // sembrados se siembren sobre el neto (mismo neteo que hace
+      // registerPayment al recibir el siguiente pago de esa cuota).
+      if (esValidadoVivo(pago)) continue;
+
       const montoAplicado = pago.paymentFalse
         ? new Big(0)
         : new Big(pago.monto_aplicado ?? 0);

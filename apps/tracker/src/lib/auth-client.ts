@@ -10,3 +10,8 @@ export const authClient = createAuthClient({
 		credentials: "include",
 	},
 });
+
+export async function cerrarSesion() {
+	await authClient.signOut();
+	window.location.href = "/login";
+}

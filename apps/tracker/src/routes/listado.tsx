@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { BarraPasos } from "@/components/barra-pasos";
-import { authClient } from "@/lib/auth-client";
+import { authClient, cerrarSesion } from "@/lib/auth-client";
 import {
 	type Caso,
 	coincidenciaEnPaso,
@@ -154,6 +154,14 @@ export function ListadoPage() {
 		return [...conteo.entries()].sort(([a], [b]) => a - b);
 	}, [casosQuery.data, pasoFiltro, coincidencia]);
 
+	useEffect(() => {
+		if (pasoFiltro === null || pctFiltro === null) return;
+		if (!porcentajesDelPaso.some(([pct]) => pct === pctFiltro)) {
+			setPctFiltro(null);
+			setPagina(1);
+		}
+	}, [porcentajesDelPaso, pasoFiltro, pctFiltro]);
+
 	const cambiarFiltro = (accion: () => void) => {
 		accion();
 		setPagina(1);
@@ -173,7 +181,7 @@ export function ListadoPage() {
 					</div>
 					<button
 						type="button"
-						onClick={() => authClient.signOut()}
+						onClick={() => cerrarSesion()}
 						className="flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-slate-700 text-sm transition hover:bg-slate-50"
 					>
 						<LogOut className="h-4 w-4" />

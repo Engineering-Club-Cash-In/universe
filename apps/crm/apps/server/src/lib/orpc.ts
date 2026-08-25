@@ -690,6 +690,15 @@ const requirePartnerAccess = o.middleware(async ({ context, next }) => {
 		});
 	}
 
+	// Suspender a un socio no revoca sus sesiones, y esta instancia no lleva el
+	// plugin admin que lo verificaría: sin este chequeo seguiría leyendo hasta
+	// que la sesión expire.
+	if (userData[0]?.banned) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "Esta cuenta está suspendida",
+		});
+	}
+
 	const companyIds = await resolvePartnerScope(userId);
 	if (companyIds.length === 0) {
 		throw new ORPCError("FORBIDDEN", {

@@ -104,6 +104,7 @@ app.use(
 				process.env.CORS_ORIGIN,
 				process.env.FRONT_URL,
 				process.env.TALLER_URL,
+				process.env.TRACKER_URL,
 			].filter((o): o is string => Boolean(o && o !== "*"));
 
 			if (origin && allowedOrigins.includes(origin)) {

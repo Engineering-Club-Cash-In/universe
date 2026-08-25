@@ -96,6 +96,24 @@ export const adminRouter = {
 				});
 			}
 
+			// Los socios se crean con correo externo. Si pasan a un rol interno hay
+			// que exigirles el mismo dominio que en el alta, o quedaría una identidad
+			// externa con acceso al CRM.
+			if (input.role !== ROLES.PARTNER) {
+				const [objetivo] = await db
+					.select({ email: user.email })
+					.from(user)
+					.where(eq(user.id, input.userId))
+					.limit(1);
+
+				if (objetivo && !objetivo.email.endsWith("@clubcashin.com")) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"Este correo es externo: solo puede tener el rol de predio/agencia",
+					});
+				}
+			}
+
 			const updatedUser = await db
 				.update(user)
 				.set({

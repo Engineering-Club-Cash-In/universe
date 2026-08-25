@@ -4,6 +4,7 @@ import { db } from "../database";
 import { creditos, cuotas_credito, pagos_credito } from "../database/db";
 import { consultarEstadoCuentaPrestamo } from "../services/sifcoIntegrations";
 import { updateInstallments } from "./updateCredit";
+import { countPersistedRows } from "./persistenceEvidence";
 
 interface AjustarCuotasConSIFCOParams {
   numero_credito_sifco: string;
@@ -327,12 +328,14 @@ interface MarcarCuotasPagadasParams {
   numero_credito_sifco: string;
   hasta_cuota: number;
   fecha_primer_pago?: string; // e.g. "2026-01-30 00:00:00"
+  onPersisted?: () => void;
 }
 
 export const marcarCuotasPagadasHastaNumero = async ({
   numero_credito_sifco,
   hasta_cuota,
   fecha_primer_pago,
+  onPersisted,
 }: MarcarCuotasPagadasParams): Promise<void> => {
 
   /* =====================================================
@@ -464,7 +467,7 @@ export const marcarCuotasPagadasHastaNumero = async ({
   const cuotasParaActualizar: any[] = [];
   const pagosParaActualizar: any[] = [];
 
-  await db.transaction(async (tx) => {
+  const persistedWriteCount = await db.transaction(async (tx) => {
     for (const row of cuotasConPagos) {
       const esPagada = row.numero_cuota <= hasta_cuota;
 
@@ -574,15 +577,26 @@ export const marcarCuotasPagadasHastaNumero = async ({
       }
     }
 
-    await Promise.all([
+    const updatedRows = await Promise.all([
       ...cuotasParaActualizar.map(({ cuota_id, data }) =>
         tx.update(cuotas_credito).set(data).where(eq(cuotas_credito.cuota_id, cuota_id))
+          .returning({ cuota_id: cuotas_credito.cuota_id })
       ),
       ...pagosParaActualizar.map(({ pago_id, data }) =>
         tx.update(pagos_credito).set(data).where(eq(pagos_credito.pago_id, pago_id))
+          .returning({ pago_id: pagos_credito.pago_id })
       ),
     ]);
+    return countPersistedRows(updatedRows);
   });
+
+  if (persistedWriteCount > 0) {
+    try {
+      onPersisted?.();
+    } catch {
+      // Persistence observers cannot alter the historical payment flow.
+    }
+  }
 
   console.log(`✅ Cuotas marcadas correctamente hasta la ${hasta_cuota}`);
 

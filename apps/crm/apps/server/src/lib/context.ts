@@ -1,6 +1,7 @@
 import type { Context as HonoContext } from "hono";
 import { auth } from "./auth";
 import { partnerAuth } from "./partner-auth";
+import { ROLES } from "./roles";
 
 export type CreateContextOptions = {
 	context: HonoContext;
@@ -31,10 +32,18 @@ export async function createContext({
 	const traeCookieDeSocio = cookie.includes("partner-auth.");
 	const traeCookieDelCrm = cookie.includes("better-auth.");
 
-	const [session, partnerSession] = await Promise.all([
+	const [sessionCruda, partnerSession] = await Promise.all([
 		traeCookieDelCrm ? auth.api.getSession({ headers }) : null,
 		traeCookieDeSocio ? partnerAuth.api.getSession({ headers }) : null,
 	]);
+
+	// Las dos instancias comparten la tabla `session` y el secreto, así que un
+	// token de socio renombrado a la cookie del CRM resuelve como sesión válida.
+	// `protectedProcedure` no mira roles, de modo que sin esto un socio alcanzaría
+	// todas esas rutas. El descarte va aquí porque es el único punto por el que
+	// pasan tanto el RPC como las rutas REST.
+	const session =
+		sessionCruda?.user?.role === ROLES.PARTNER ? null : sessionCruda;
 
 	if (!session && traeCookieDelCrm) {
 		console.warn(

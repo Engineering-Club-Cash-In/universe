@@ -20,6 +20,10 @@ import {
 	listarCreditosBotCobros,
 } from "./controllers/bot-cobros";
 import { eventoPagoBotCobros } from "./controllers/bot-cobros-eventos";
+import {
+	crearPagoLinkBotCobros,
+	opcionesPagoLinkBotCobros,
+} from "./controllers/bot-cobros-pago-link";
 import { infornetController } from "./controllers/buro";
 import { processCsvLeads } from "./controllers/csv";
 import { livenessController } from "./controllers/liveness";
@@ -1142,6 +1146,20 @@ app.post(
 	"/api/bot/cobros/boleta/confirmar",
 	autenticarBotCobros,
 	confirmarBoletaBotCobros,
+);
+
+// Paso 3 · pago con link de Págalo (CB-105). Montados y documentados ANTES de
+// tener lógica para que SimpleTech arme el árbol contra el contrato; hoy
+// responden 501 NO_IMPLEMENTADO (ver controllers/bot-cobros-pago-link.ts).
+app.post(
+	"/api/bot/cobros/pago-link/opciones",
+	autenticarBotCobros,
+	opcionesPagoLinkBotCobros,
+);
+app.post(
+	"/api/bot/cobros/pago-link/crear",
+	autenticarBotCobros,
+	crearPagoLinkBotCobros,
 );
 
 // Documentación de esos dos endpoints, para SimpleTech. Va SIN API key —no

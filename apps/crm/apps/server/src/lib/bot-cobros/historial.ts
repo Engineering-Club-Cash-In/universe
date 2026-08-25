@@ -52,6 +52,8 @@ const ACCIONES: Record<string, string> = {
 	"/api/bot/cobros/credito/estado-cuenta": "estado_cuenta",
 	"/api/bot/cobros/boleta/leer": "boleta_leer",
 	"/api/bot/cobros/boleta/confirmar": "boleta_confirmar",
+	"/api/bot/cobros/pago-link/opciones": "pago_link_opciones",
+	"/api/bot/cobros/pago-link/crear": "pago_link_crear",
 };
 
 /**

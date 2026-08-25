@@ -99,6 +99,19 @@ export const especificacionBotCobros = {
 			description:
 				"Paso 2 del bot: la información del crédito que el cliente eligió.",
 		},
+		{
+			name: "Pago con boleta",
+			description:
+				"Paso 4 del bot: el cliente sube la foto de su depósito y confirma lo que leímos.",
+		},
+		{
+			name: "Pago con link",
+			description: [
+				"Paso 3 del bot: el cliente elige cuántas cuotas paga y recibe **uno o dos links de pago** (Págalo). Ahí termina la conversación: del pago nos enteramos nosotros y le avisamos por WhatsApp.",
+				"",
+				"⏳ **Contrato publicado por adelantado.** Los dos servicios ya están montados para que el árbol del bot se pueda armar contra este documento, pero **todavía responden `501 NO_IMPLEMENTADO`**. Cuando la lógica esté lista, las respuestas serán exactamente las documentadas acá. Contrato completo: `docs/features/bot-whatsapp-cobros/07-pago-con-link.md`.",
+			].join("\n"),
+		},
 	],
 	components: {
 		securitySchemes: {
@@ -1472,7 +1485,7 @@ export const especificacionBotCobros = {
 					"| Situación | Respuesta |",
 					"| --- | --- |",
 					"| Ya se registró | `409 BOLETA_YA_CONFIRMADA`, **con los `pagoIds` en `data`** |",
-					"| Se registró pero lo estamos verificando | `409 BORRADOR_NO_CONFIRMABLE` con `data.estado = \"confirmada_a_verificar\"`. **No le digas al cliente que su pago entró**: puede estar aplicado a medias y lo está revisando una persona |",
+					'| Se registró pero lo estamos verificando | `409 BORRADOR_NO_CONFIRMABLE` con `data.estado = "confirmada_a_verificar"`. **No le digas al cliente que su pago entró**: puede estar aplicado a medias y lo está revisando una persona |',
 					"| Hay una confirmación a medias | `409 CONFIRMACION_EN_CURSO`. Esperá unos minutos y volvé a preguntar |",
 					"| No contestamos a tiempo | `503 CARTERA_NO_DISPONIBLE`. **No reintentes automáticamente**: lo estamos verificando por dentro y te avisamos |",
 				].join("\n"),
@@ -1788,6 +1801,693 @@ export const especificacionBotCobros = {
 													"El servicio no está disponible en este momento.",
 											},
 										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		"/api/bot/cobros/pago-link/opciones": {
+			post: {
+				tags: ["Pago con link"],
+				summary: "Servicio 7 · Opciones de pago con link",
+				description: [
+					"Le dice al bot **cuántas cuotas puede pagar el cliente** y cuánto cuesta cada opción, para que le muestre un select.",
+					"",
+					"Mismo control de acceso que `/credito/info`: la `referencia` del paso 1, viva (30 min), y un crédito de esa persona.",
+					"",
+					"**Cómo se arman las opciones:**",
+					"- **Al día** → una sola opción (`cuotas: 1`, la cuota actual, sin mora). No hace falta mostrar select.",
+					"- **Con atraso** → una opción por cada acumulado desde la cuota más vieja (`1…N`), más una que agrega la **próxima cuota por vencer** (`N+1`). No se eligen cuotas sueltas.",
+					"- **La mora nunca es opcional**: va completa en toda opción con atraso.",
+					"- **No hay pagos parciales**: cada opción paga cuotas completas. Si una cuota ya traía un pago parcial, la opción ofrece **lo que le falta**.",
+					"",
+					"`mensajes` viene armado para el chat: **no concatenes nada**. `montoTotal` y los desgloses son strings con dos decimales; `etiqueta` es el texto de cada opción del select.",
+					"",
+					"Después de que el cliente elige, llamá a `/pago-link/crear` con `cuotas` y el `montoTotal` de esa opción como `montoEsperado`.",
+				].join("\n"),
+				operationId: "opcionesPagoLink",
+				requestBody: {
+					required: true,
+					content: {
+						"application/json": {
+							schema: {
+								type: "object",
+								required: ["referencia", "numeroSifco"],
+								properties: {
+									referencia: {
+										type: "string",
+										format: "uuid",
+										description: "La que devolvió el servicio 1.",
+									},
+									numeroSifco: {
+										type: "string",
+										description: "El crédito que eligió el cliente.",
+									},
+								},
+							},
+							example: {
+								referencia: "3b530493-eff1-492d-8394-26adf5b5e211",
+								numeroSifco: "01010214124000",
+							},
+						},
+					},
+				},
+				responses: {
+					"200": {
+						description: "Las opciones que se le ofrecen al cliente.",
+						content: {
+							"application/json": {
+								examples: {
+									con_atraso: {
+										summary:
+											"Crédito con 3 cuotas atrasadas (3 acumulados + la próxima)",
+										value: {
+											success: true,
+											data: {
+												resumen: {
+													alDia: false,
+													cuotasAtrasadas: 3,
+													cuotaMensual: "2464.63",
+													mora: "1250.00",
+												},
+												opciones: [
+													{
+														cuotas: 1,
+														etiqueta: "1 cuota + mora — Q3,714.63",
+														montoTotal: "3714.63",
+														desglose: { cuotas: "2464.63", mora: "1250.00" },
+													},
+													{
+														cuotas: 2,
+														etiqueta: "2 cuotas + mora — Q6,179.26",
+														montoTotal: "6179.26",
+														desglose: { cuotas: "4929.26", mora: "1250.00" },
+													},
+													{
+														cuotas: 3,
+														etiqueta: "3 cuotas + mora — Q8,643.89",
+														montoTotal: "8643.89",
+														desglose: { cuotas: "7393.89", mora: "1250.00" },
+													},
+													{
+														cuotas: 4,
+														etiqueta:
+															"3 cuotas + la próxima + mora — Q11,108.52",
+														montoTotal: "11108.52",
+														desglose: { cuotas: "9858.52", mora: "1250.00" },
+													},
+												],
+												mensajes: {
+													titulo: "💳 Pago con link",
+													resumen:
+														"Tenés 3 cuotas atrasadas y Q1,250.00 de mora. Elegí cuántas cuotas querés pagar:",
+													completo:
+														"💳 *Pago con link*\n\nTenés 3 cuotas atrasadas y Q1,250.00 de mora.\n\nElegí cuántas cuotas querés pagar. La mora va incluida en todas las opciones.",
+												},
+											},
+										},
+									},
+									al_dia: {
+										summary: "Crédito al día: una sola opción, sin mora",
+										value: {
+											success: true,
+											data: {
+												resumen: {
+													alDia: true,
+													cuotasAtrasadas: 0,
+													cuotaMensual: "2464.63",
+													mora: "0.00",
+												},
+												opciones: [
+													{
+														cuotas: 1,
+														etiqueta: "Cuota de septiembre — Q2,464.63",
+														montoTotal: "2464.63",
+														desglose: { cuotas: "2464.63", mora: "0.00" },
+													},
+												],
+												mensajes: {
+													titulo: "💳 Pago con link",
+													resumen:
+														"Estás al día. Tu próxima cuota vence el 30/09/2026: Q2,464.63.",
+													completo:
+														"💳 *Pago con link*\n\nEstás al día 🎉\n\nTu próxima cuota vence el 30/09/2026 y es de Q2,464.63. ¿La pagás con link?",
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					"400": {
+						description: "Falta la referencia o el número de crédito.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								example: {
+									success: false,
+									error: {
+										codigo: "PARAMETROS_INVALIDOS",
+										mensaje: "Faltan datos para armar tu pago.",
+									},
+								},
+							},
+						},
+					},
+					"401": {
+						description: "La referencia no sirve, o pasaron los 30 minutos.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								examples: {
+									SESION_VENCIDA: {
+										summary: "Pasaron 30 min desde que validó el código",
+										value: {
+											success: false,
+											error: {
+												codigo: "SESION_VENCIDA",
+												mensaje:
+													"Por seguridad tu sesión expiró. Vuelve a identificarte para continuar.",
+											},
+										},
+									},
+									REFERENCIA_INVALIDA: {
+										summary: "No existe, o su código nunca se validó",
+										value: {
+											success: false,
+											error: {
+												codigo: "REFERENCIA_INVALIDA",
+												mensaje:
+													"No encontramos tu solicitud. Comienza de nuevo.",
+											},
+										},
+									},
+									NO_AUTORIZADO: {
+										summary: "API key ausente o incorrecta",
+										value: {
+											success: false,
+											error: {
+												codigo: "NO_AUTORIZADO",
+												mensaje: "No autorizado.",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					"404": {
+						description: "El crédito no es de ese cliente.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								examples: {
+									CREDITO_NO_ENCONTRADO: {
+										summary: "No es un crédito de esta persona",
+										value: {
+											success: false,
+											error: {
+												codigo: "CREDITO_NO_ENCONTRADO",
+												mensaje: "No encontramos ese crédito.",
+											},
+										},
+									},
+									CREDITO_SIN_DATOS: {
+										summary: "El crédito está en el CRM pero no en cartera",
+										value: {
+											success: false,
+											error: {
+												codigo: "CREDITO_SIN_DATOS",
+												mensaje:
+													"No pudimos consultar la información de ese crédito. Por favor contacta a soporte.",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					"409": {
+						description:
+							"El crédito existe y es del cliente, pero **hoy no se le puede cobrar por link**. Ruteá por `codigo`.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								examples: {
+									MORA_POR_CONFIRMAR: {
+										summary:
+											"La mora registrada no cuadra con las cuotas atrasadas: sin cifra confiable no se genera link",
+										value: {
+											success: false,
+											error: {
+												codigo: "MORA_POR_CONFIRMAR",
+												mensaje:
+													"Estamos confirmando el monto de tu mora. Tu asesor te va a indicar cuánto pagar.",
+											},
+										},
+									},
+									CREDITO_NO_PAGABLE_POR_LINK: {
+										summary:
+											"Estado del crédito fuera del flujo (convenio, incobrable, cancelado, pendiente de cancelación, caído)",
+										value: {
+											success: false,
+											error: {
+												codigo: "CREDITO_NO_PAGABLE_POR_LINK",
+												mensaje:
+													"Este crédito no puede pagarse con link. Tu asesor te va a ayudar.",
+											},
+										},
+									},
+									SIN_CUOTAS_QUE_PAGAR: {
+										summary: "Nada vencido ni por vencer que ofrecer",
+										value: {
+											success: false,
+											error: {
+												codigo: "SIN_CUOTAS_QUE_PAGAR",
+												mensaje:
+													"No tenés cuotas pendientes de pago por ahora.",
+											},
+										},
+									},
+									PAGO_EN_PROCESO: {
+										summary:
+											"Ya hay un pago por link aplicándose (o uno en curso con su asesor): no se ofrecen opciones sobre una deuda que está por cambiar",
+										value: {
+											success: false,
+											error: {
+												codigo: "PAGO_EN_PROCESO",
+												mensaje:
+													"Ya tenés un pago en proceso. En cuanto se confirme te mandamos tu recibo.",
+											},
+										},
+									},
+									PAGO_PARCIAL_EN_CURSO: {
+										summary:
+											"El cliente pagó UNO de los dos links: no hay opciones nuevas — `data` trae el link pendiente y el mensaje para reenviarlo",
+										value: {
+											success: false,
+											error: {
+												codigo: "PAGO_PARCIAL_EN_CURSO",
+												mensaje:
+													"Ya recibimos el Pago 1 de 2. Te falta el Pago 2 de 2 por Q3,079.26.",
+											},
+											data: {
+												codigo: "PAGO_PARCIAL_EN_CURSO",
+												mensaje:
+													"Ya recibimos el Pago 1 de 2. Te falta el Pago 2 de 2 por Q3,079.26.",
+												pago: {
+													referenciaPago:
+														"9f21c4d0-7b1e-4c1a-9a6d-2f0c3e5b8d41",
+													montoTotal: "6179.26",
+												},
+												linkPendiente: {
+													tipo: "MORA_INTERES",
+													titulo: "Pago 2 de 2",
+													monto: "3079.26",
+													url: "https://checkout.pagalo.co/…",
+												},
+												mensajes: {
+													titulo: "💳 Te falta un pago",
+													completo:
+														"💳 *Te falta un pago*\n\nYa recibimos tu *Pago 1 de 2*. Para completar tu cuota pagá el *Pago 2 de 2* por Q3,079.26:\n\nhttps://checkout.pagalo.co/…\n\nTe avisamos en cuanto se confirme.",
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					"500": {
+						description: "Error nuestro.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								example: {
+									success: false,
+									error: {
+										codigo: "ERROR_INTERNO",
+										mensaje:
+											"Ocurrió un error. Intenta de nuevo en unos minutos.",
+									},
+								},
+							},
+						},
+					},
+					"501": {
+						description:
+							"**Estado actual de la instancia de dev:** el servicio está documentado pero su lógica todavía no está desplegada. Desaparece de acá cuando se implemente.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								example: {
+									success: false,
+									error: {
+										codigo: "NO_IMPLEMENTADO",
+										mensaje:
+											"El pago con link todavía no está disponible. Puedes subir tu boleta o hablar con tu asesor.",
+									},
+								},
+							},
+						},
+					},
+					"503": {
+						description: "El servidor no tiene configurada la API key.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								example: {
+									success: false,
+									error: {
+										codigo: "SERVICIO_NO_DISPONIBLE",
+										mensaje: "El servicio no está disponible en este momento.",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		"/api/bot/cobros/pago-link/crear": {
+			post: {
+				tags: ["Pago con link"],
+				summary: "Servicio 8 · Crear los links de pago",
+				description: [
+					"El cliente ya eligió cuántas cuotas: se arma el pago y se devuelven **los links de Págalo**. El bot los entrega y **ahí termina la conversación** — el cliente no confirma nada; nosotros detectamos el pago y le avisamos por WhatsApp.",
+					"",
+					"**Son uno o dos links**, y el cliente tiene que pagar **todos**, en cualquier orden. Hay dos porque el capital y el resto de la cuota se cobran por separado; para el cliente son simplemente *Pago 1 de 2* y *Pago 2 de 2*. Cuando la selección no lleva capital (solo mora) o es solo capital, viene **un solo link**. Usá `mensajes.completo`, que ya lo explica.",
+					"",
+					"`montoEsperado` es el `montoTotal` de la opción que el cliente vio. Se recalcula al momento y, si ya no coincide (entró un pago, cambió la mora), responde `409 MONTO_DESACTUALIZADO`: volvé a `/pago-link/opciones` y mostrale las opciones nuevas.",
+					"",
+					"Si el cliente vuelve a pedir lo mismo con un pago ya en curso, se le responden **los mismos links** (o el que le falta pagar), nunca unos nuevos encima.",
+					"",
+					"**Los links no expiran por ahora** (`expira: null`).",
+				].join("\n"),
+				operationId: "crearPagoLink",
+				requestBody: {
+					required: true,
+					content: {
+						"application/json": {
+							schema: {
+								type: "object",
+								required: [
+									"referencia",
+									"numeroSifco",
+									"cuotas",
+									"montoEsperado",
+								],
+								properties: {
+									referencia: {
+										type: "string",
+										format: "uuid",
+										description: "La que devolvió el servicio 1.",
+									},
+									numeroSifco: {
+										type: "string",
+										description: "El crédito que eligió el cliente.",
+									},
+									cuotas: {
+										type: "integer",
+										minimum: 1,
+										description:
+											"El campo `cuotas` de la opción que eligió el cliente.",
+									},
+									montoEsperado: {
+										type: "string",
+										description:
+											"El `montoTotal` de esa opción, tal cual lo devolvió `/opciones` (string con dos decimales).",
+									},
+								},
+							},
+							example: {
+								referencia: "3b530493-eff1-492d-8394-26adf5b5e211",
+								numeroSifco: "01010214124000",
+								cuotas: 2,
+								montoEsperado: "6179.26",
+							},
+						},
+					},
+				},
+				responses: {
+					"200": {
+						description:
+							"Los links listos para mandar. **Un `200` también cubre el reintento**: si ya había un pago en curso con la misma selección se devuelven los mismos links, y si el cliente ya pagó uno de los dos viene solo el pendiente.",
+						content: {
+							"application/json": {
+								examples: {
+									dos_links: {
+										summary: "Selección con capital y rubros: dos links",
+										value: {
+											success: true,
+											data: {
+												pago: {
+													referenciaPago:
+														"9f21c4d0-7b1e-4c1a-9a6d-2f0c3e5b8d41",
+													montoTotal: "6179.26",
+													expira: null,
+												},
+												links: [
+													{
+														tipo: "CAPITAL",
+														titulo: "Pago 1 de 2",
+														monto: "3100.00",
+														url: "https://checkout.pagalo.co/…",
+													},
+													{
+														tipo: "MORA_INTERES",
+														titulo: "Pago 2 de 2",
+														monto: "3079.26",
+														url: "https://checkout.pagalo.co/…",
+													},
+												],
+												mensajes: {
+													titulo: "💳 Tus links de pago",
+													completo:
+														"💳 *Tus links de pago*\n\nTu pago de Q6,179.26 se divide en dos partes. Pagá *ambas*, en el orden que querás:\n\n*Pago 1 de 2* — Q3,100.00\nhttps://checkout.pagalo.co/…\n\n*Pago 2 de 2* — Q3,079.26\nhttps://checkout.pagalo.co/…\n\nEn cuanto se confirmen te mandamos tu recibo por acá. No necesitás avisarnos.",
+												},
+											},
+										},
+									},
+									un_link: {
+										summary: "Selección de solo mora (o solo capital): un link",
+										value: {
+											success: true,
+											data: {
+												pago: {
+													referenciaPago:
+														"c2a7e9b4-51d3-4f0e-8b2a-6d9f1c3e7a50",
+													montoTotal: "1250.00",
+													expira: null,
+												},
+												links: [
+													{
+														tipo: "MORA_INTERES",
+														titulo: "Pago",
+														monto: "1250.00",
+														url: "https://checkout.pagalo.co/…",
+													},
+												],
+												mensajes: {
+													titulo: "💳 Tu link de pago",
+													completo:
+														"💳 *Tu link de pago*\n\nPagá Q1,250.00 acá:\nhttps://checkout.pagalo.co/…\n\nEn cuanto se confirme te mandamos tu recibo por acá. No necesitás avisarnos.",
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					"400": {
+						description:
+							"Faltan datos, o `cuotas`/`montoEsperado` no tienen el formato esperado.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								example: {
+									success: false,
+									error: {
+										codigo: "PARAMETROS_INVALIDOS",
+										mensaje: "Faltan datos para armar tu pago.",
+									},
+								},
+							},
+						},
+					},
+					"401": {
+						description: "La referencia no sirve, o pasaron los 30 minutos.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								examples: {
+									SESION_VENCIDA: {
+										summary: "Pasaron 30 min desde que validó el código",
+										value: {
+											success: false,
+											error: {
+												codigo: "SESION_VENCIDA",
+												mensaje:
+													"Por seguridad tu sesión expiró. Vuelve a identificarte para continuar.",
+											},
+										},
+									},
+									REFERENCIA_INVALIDA: {
+										summary: "No existe, o su código nunca se validó",
+										value: {
+											success: false,
+											error: {
+												codigo: "REFERENCIA_INVALIDA",
+												mensaje:
+													"No encontramos tu solicitud. Comienza de nuevo.",
+											},
+										},
+									},
+									NO_AUTORIZADO: {
+										summary: "API key ausente o incorrecta",
+										value: {
+											success: false,
+											error: {
+												codigo: "NO_AUTORIZADO",
+												mensaje: "No autorizado.",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					"404": {
+						description: "El crédito no es de ese cliente.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								examples: {
+									CREDITO_NO_ENCONTRADO: {
+										summary: "No es un crédito de esta persona",
+										value: {
+											success: false,
+											error: {
+												codigo: "CREDITO_NO_ENCONTRADO",
+												mensaje: "No encontramos ese crédito.",
+											},
+										},
+									},
+									CREDITO_SIN_DATOS: {
+										summary: "El crédito está en el CRM pero no en cartera",
+										value: {
+											success: false,
+											error: {
+												codigo: "CREDITO_SIN_DATOS",
+												mensaje:
+													"No pudimos consultar la información de ese crédito. Por favor contacta a soporte.",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					"409": {
+						description:
+							"No se pueden generar links en este momento. Ruteá por `codigo`.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								examples: {
+									MONTO_DESACTUALIZADO: {
+										summary:
+											"El monto cambió desde que se mostraron las opciones: volvé a `/opciones`",
+										value: {
+											success: false,
+											error: {
+												codigo: "MONTO_DESACTUALIZADO",
+												mensaje:
+													"El monto de tu pago cambió. Te muestro las opciones actualizadas.",
+											},
+										},
+									},
+									PAGO_EN_PROCESO: {
+										summary:
+											"Un pago por link ya está aplicándose, quedó en revisión, o hay uno en curso con su asesor: jamás links nuevos en esa ventana",
+										value: {
+											success: false,
+											error: {
+												codigo: "PAGO_EN_PROCESO",
+												mensaje:
+													"Tu pago se está aplicando. En cuanto se confirme te mandamos tu recibo.",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					"500": {
+						description: "Error nuestro.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								example: {
+									success: false,
+									error: {
+										codigo: "ERROR_INTERNO",
+										mensaje:
+											"Ocurrió un error. Intenta de nuevo en unos minutos.",
+									},
+								},
+							},
+						},
+					},
+					"502": {
+						description:
+							"Págalo no respondió. **No queda nada a medias**: el cliente puede reintentar más tarde o subir su boleta.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								example: {
+									success: false,
+									error: {
+										codigo: "PAGALO_NO_DISPONIBLE",
+										mensaje:
+											"No pudimos generar tu link de pago en este momento. Intenta más tarde o sube tu boleta.",
+									},
+								},
+							},
+						},
+					},
+					"501": {
+						description:
+							"**Estado actual de la instancia de dev:** el servicio está documentado pero su lógica todavía no está desplegada. Desaparece de acá cuando se implemente.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								example: {
+									success: false,
+									error: {
+										codigo: "NO_IMPLEMENTADO",
+										mensaje:
+											"El pago con link todavía no está disponible. Puedes subir tu boleta o hablar con tu asesor.",
+									},
+								},
+							},
+						},
+					},
+					"503": {
+						description: "El servidor no tiene configurada la API key.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								example: {
+									success: false,
+									error: {
+										codigo: "SERVICIO_NO_DISPONIBLE",
+										mensaje: "El servicio no está disponible en este momento.",
 									},
 								},
 							},

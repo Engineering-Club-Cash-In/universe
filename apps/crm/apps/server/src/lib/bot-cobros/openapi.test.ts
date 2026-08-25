@@ -19,7 +19,11 @@ import { join } from "node:path";
 import { codigosDocumentados, especificacionBotCobros } from "./openapi";
 
 /** Los archivos que le responden al bot. Si aparece otro, va en esta lista. */
-const FUENTES = ["../../controllers/bot-cobros.ts", "./auth.ts"];
+const FUENTES = [
+	"../../controllers/bot-cobros.ts",
+	"../../controllers/bot-cobros-pago-link.ts",
+	"./auth.ts",
+];
 
 /**
  * Endpoints montados bajo `/api/bot/cobros/` que NO consume SimpleTech.

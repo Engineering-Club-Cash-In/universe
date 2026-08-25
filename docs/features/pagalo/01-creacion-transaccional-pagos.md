@@ -37,6 +37,8 @@ export async function procesarRegistroPago(
 
 `ejecutarRegistroPago` contiene lógica existente de `insertPayment`, cambiando
 acceso global `db` por executor recibido. No altera orden, fórmulas ni reglas.
+Para Págalo recibe además presupuestos inmutables por lado; no puede tratar dos
+transacciones como una bolsa única de dinero.
 
 `insertPayment` queda como adaptador Elysia:
 
@@ -66,6 +68,9 @@ return withPaymentLock(command.creditoId, () =>
       mapearPagaloARegistro(command, imported.id),
       tx,
     );
+    for (const paymentId of result.payment_ids) {
+      await validarPagoRegistrado(paymentId, tx);
+    }
     await marcarPagosCreados(imported.id, tx);
     return result;
   }),
@@ -86,6 +91,7 @@ processConvenioPayment(input, executor);
 insertarPago(input, executor);
 insertarBoletas(input, executor);
 getPagosDelMesActual(creditoId, executor);
+validarPagoRegistrado(pagoId, executor);
 ```
 
 Si helper ya abre transacción, adopta mismo patrón: usa transacción recibida o
@@ -94,6 +100,13 @@ escribirse con mismo executor, no después de commit separado.
 
 Retornos HTTP dejan de vivir dentro del motor. Errores de dominio tipados
 provocan rollback y adaptador conserva códigos/mensajes actuales de `/newPayment`.
+
+`validarPagoRegistrado` se extrae del cuerpo interno de `revalidatePayment`:
+actualiza capital/restantes, marca cuota cuando corresponde y distribuye
+inversionistas. Págalo primero registra filas como `pending` dentro de la
+transacción privada y después invoca este helper para cada fila, antes de
+commit. Así ninguna fila Págalo pending queda visible y al commit todas salen
+`validated`, sin saltar efectos existentes de revalidación.
 
 ## 4. Contrato CRM → Cartera
 
@@ -183,16 +196,17 @@ Retry exacto responde `200` con mismos ids e `idempotent_replay=true`.
 const registro: RegistroPagoInput = {
   credito_id: command.credito_id,
   usuario_id: credito.usuario_id, // siempre resuelto en Cartera
+  // Total solo para auditoría/cabecera; no autoriza mezclar presupuestos.
   monto_boleta: decimal(command.total_amount),
   fecha_pago: hoyGuatemala(),
   fecha_boleta: fechaMayorRequerida(
     command.capital?.paid_at,
-    command.facturable.paid_at,
+    command.facturable?.paid_at,
   ),
   cuotaApagar: command.cuota_inicial,
   url_boletas: compactar([
     command.capital?.voucher_storage_key,
-    command.facturable.voucher_storage_key,
+    command.facturable?.voucher_storage_key,
   ]),
   banco_id: undefined,
   numeroAutorizacion: undefined,
@@ -202,13 +216,35 @@ const registro: RegistroPagoInput = {
   abono_directo_capital: 0,
   registerBy: "pagalo@clubcashin.com",
   pagalo_import_id: imported.id,
+  pagalo_componentes: {
+    capital: command.capital
+      ? {
+          disponible: decimal(command.capital_total),
+          allocations: allocationsDe(command, "CAPITAL"),
+          voucher_storage_key: command.capital.voucher_storage_key,
+        }
+      : undefined,
+    facturable: command.facturable
+      ? {
+          disponible: decimal(command.facturable_total),
+          allocations: allocationsDe(command, "MORA_INTERES"),
+          voucher_storage_key: command.facturable.voucher_storage_key,
+        }
+      : undefined,
+  },
 };
 ```
 
 `usuario_id` del request no se confía ni se necesita; Cartera lo deriva desde
 crédito. URLs externas tampoco se aceptan: solo keys esperadas de almacenamiento
-propio. `registerPayment` agrega base pública e inserta ambas en `boletas` para
-cada pago resultante, igual que hoy hace con comprobantes múltiples.
+propio. `pagalo_componentes` es contrato interno; no se agrega al schema público
+de `/newPayment`.
+
+Motor consume `facturable.disponible` primero para mora viva y luego solo para
+rubros facturables de sus allocations. Motor consume `capital.disponible` solo
+para CAPITAL. Jamás cruza presupuesto, voucher, transacción o rubro entre lados.
+Mora mayor al snapshot deja faltante; no toma dinero CAPITAL. Si un componente
+queda sobrado porque deuda bajó, se aborta y grupo pasa `REVIEW_REQUIRED`.
 
 ## 6. Invariantes dentro del lock
 
@@ -228,8 +264,10 @@ Antes de primera escritura financiera:
    link sobrado por deuda achicada sí requiere revisión.
 9. Voucher keys requeridas son no vacías, distintas cuando hay dos y pertenecen
    al prefijo del grupo.
+10. Suma consumida por lado nunca excede presupuesto Págalo; mora usa solo
+    presupuesto `MORA_INTERES`.
 
-Fallo de 1–9 crea o actualiza importación como `REVIEW_REQUIRED` sin pagos. No
+Fallo de 1–10 crea o actualiza importación como `REVIEW_REQUIRED` sin pagos. No
 se llama motor con datos ambiguos.
 
 ## 7. Idempotencia y fallos
@@ -292,7 +330,8 @@ Inyectar error después de cada familia de escritura y comprobar cero cambios:
 
 ### Págalo
 
-- ACCEPT requeridos crean importación y N pagos `validated`.
+- ACCEPT requeridos crean importación y N pagos `validated`; helper extraído de
+  revalidación corre dentro de misma transacción antes de commit.
 - Todos pagos tienen mismo `pagalo_import_id`, origen `pagalo` y banco nulo.
 - Cada pago expone uno o dos vouchers requeridos mediante `boletas`.
 - Retry exacto no crea filas adicionales.
@@ -301,6 +340,7 @@ Inyectar error después de cada familia de escritura y comprobar cero cambios:
 - Operación de dos lados no puede importarse con una sola transacción ACCEPT.
 - Link sobrado por deuda achicada termina `REVIEW_REQUIRED`; mora crecida se
   consume primero desde MORA_INTERES e informa faltante.
+- Presupuesto CAPITAL nunca cubre mora aunque componente facturable se agote.
 
 ## 10. Criterio de cierre
 

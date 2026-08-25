@@ -109,7 +109,7 @@ export const especificacionBotCobros = {
 			description: [
 				"Paso 3 del bot: el cliente elige cuántas cuotas paga y recibe **uno o dos links de pago** (Págalo). Ahí termina la conversación: del pago nos enteramos nosotros y le avisamos por WhatsApp.",
 				"",
-				"⏳ **Contrato publicado por adelantado.** Los dos servicios ya están montados para que el árbol del bot se pueda armar contra este documento, pero **todavía responden `501 NO_IMPLEMENTADO`**. Cuando la lógica esté lista, las respuestas serán exactamente las documentadas acá. Contrato completo: `docs/features/bot-whatsapp-cobros/07-pago-con-link.md`.",
+				"Contrato completo: `docs/features/bot-whatsapp-cobros/07-pago-con-link.md`. Los links se emiten en el **sandbox** de Págalo mientras dure la integración.",
 			].join("\n"),
 		},
 	],
@@ -2154,33 +2154,34 @@ export const especificacionBotCobros = {
 							},
 						},
 					},
-					"501": {
-						description:
-							"**Estado actual de la instancia de dev:** el servicio está documentado pero su lógica todavía no está desplegada. Desaparece de acá cuando se implemente.",
-						content: {
-							"application/json": {
-								schema: { $ref: "#/components/schemas/RespuestaError" },
-								example: {
-									success: false,
-									error: {
-										codigo: "NO_IMPLEMENTADO",
-										mensaje:
-											"El pago con link todavía no está disponible. Puedes subir tu boleta o hablar con tu asesor.",
-									},
-								},
-							},
-						},
-					},
 					"503": {
-						description: "El servidor no tiene configurada la API key.",
+						description:
+							"Falta configuración del servidor, o cartera no respondió.",
 						content: {
 							"application/json": {
 								schema: { $ref: "#/components/schemas/RespuestaError" },
-								example: {
-									success: false,
-									error: {
-										codigo: "SERVICIO_NO_DISPONIBLE",
-										mensaje: "El servicio no está disponible en este momento.",
+								examples: {
+									SERVICIO_NO_DISPONIBLE: {
+										summary: "El servidor no tiene configurada la API key",
+										value: {
+											success: false,
+											error: {
+												codigo: "SERVICIO_NO_DISPONIBLE",
+												mensaje:
+													"El servicio no está disponible en este momento.",
+											},
+										},
+									},
+									CARTERA_NO_DISPONIBLE: {
+										summary: "Cartera no contestó: reintentar en un rato",
+										value: {
+											success: false,
+											error: {
+												codigo: "CARTERA_NO_DISPONIBLE",
+												mensaje:
+													"No pudimos consultar tu crédito en este momento. Intenta de nuevo en unos minutos.",
+											},
+										},
 									},
 								},
 							},
@@ -2465,33 +2466,34 @@ export const especificacionBotCobros = {
 							},
 						},
 					},
-					"501": {
-						description:
-							"**Estado actual de la instancia de dev:** el servicio está documentado pero su lógica todavía no está desplegada. Desaparece de acá cuando se implemente.",
-						content: {
-							"application/json": {
-								schema: { $ref: "#/components/schemas/RespuestaError" },
-								example: {
-									success: false,
-									error: {
-										codigo: "NO_IMPLEMENTADO",
-										mensaje:
-											"El pago con link todavía no está disponible. Puedes subir tu boleta o hablar con tu asesor.",
-									},
-								},
-							},
-						},
-					},
 					"503": {
-						description: "El servidor no tiene configurada la API key.",
+						description:
+							"Falta configuración del servidor, o cartera no respondió.",
 						content: {
 							"application/json": {
 								schema: { $ref: "#/components/schemas/RespuestaError" },
-								example: {
-									success: false,
-									error: {
-										codigo: "SERVICIO_NO_DISPONIBLE",
-										mensaje: "El servicio no está disponible en este momento.",
+								examples: {
+									SERVICIO_NO_DISPONIBLE: {
+										summary: "El servidor no tiene configurada la API key",
+										value: {
+											success: false,
+											error: {
+												codigo: "SERVICIO_NO_DISPONIBLE",
+												mensaje:
+													"El servicio no está disponible en este momento.",
+											},
+										},
+									},
+									CARTERA_NO_DISPONIBLE: {
+										summary: "Cartera no contestó: reintentar en un rato",
+										value: {
+											success: false,
+											error: {
+												codigo: "CARTERA_NO_DISPONIBLE",
+												mensaje:
+													"No pudimos consultar tu crédito en este momento. Intenta de nuevo en unos minutos.",
+											},
+										},
 									},
 								},
 							},

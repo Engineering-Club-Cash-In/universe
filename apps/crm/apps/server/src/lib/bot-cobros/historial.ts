@@ -192,6 +192,28 @@ const CURADORES: Record<
 			monto: exito ? texto(data.monto) : null,
 			banco: exito ? texto(data.banco) : null,
 		}),
+
+	// Pago con link (CB-105, §4.4 del contrato): cuántas opciones se ofrecieron
+	// y con qué atraso. Nada de URLs de pago.
+	pago_link_opciones: (_cuerpo, data, exito) => {
+		const resumen = (data.resumen ?? {}) as Json;
+		return conValor({
+			opciones: exito ? numero(data.cantidadOpciones) : null,
+			cuotasAtrasadas: exito ? numero(resumen.cuotasAtrasadas) : null,
+			mora: exito ? texto(resumen.mora) : null,
+		});
+	},
+
+	// El monto elegido, cuántos links salieron y el id del grupo (para soporte).
+	// La URL de Págalo JAMÁS: es un link cobrable.
+	pago_link_crear: (cuerpo, data, exito) => {
+		const pago = (data.pago ?? {}) as Json;
+		return conValor({
+			monto: texto(String(cuerpo.monto ?? "")),
+			links: exito && Array.isArray(data.links) ? data.links.length : null,
+			referenciaPago: exito ? texto(pago.referenciaPago) : null,
+		});
+	},
 };
 
 /**

@@ -353,13 +353,13 @@ Un `GET /pago-link/estado` para responder con el estado real (pagó uno, falta e
   cuotas elegidas, montos y tipo de link — **jamás** URLs de pago ni datos de tarjeta.
 - Son endpoints de SimpleTech → **Swagger obligatorio en el mismo commit**
   ([D-23](./DECISIONES.md#d-23--la-documentación-de-la-api-es-swagger-y-es-obligatoria)).
-- **Swagger publicado por adelantado (2026-08-25):** los dos servicios ya están montados y
-  documentados en `/api/bot/cobros/docs` (tag *Pago con link*) para que SimpleTech arme el
-  árbol sin esperar la lógica. Mientras tanto responden `501 NO_IMPLEMENTADO` — nunca un
-  `200` inventado. El catálogo de errores vive en
-  `controllers/bot-cobros-pago-link.ts` (`CODIGOS_PAGO_LINK`) y el candado de
-  `openapi.test.ts` lo compara contra la spec; al implementar, cada código sale de un
-  `error(...)` real y el 501 desaparece del documento.
+- **Implementación (2026-08-25):** lógica en `lib/bot-cobros/pago-link.ts` (opciones,
+  candados de grupo, creación del grupo `origen=BOT` y emisión de links con el cliente
+  Págalo de CB-028), handlers en `controllers/bot-cobros-pago-link.ts`, curadores
+  `pago_link_opciones`/`pago_link_crear` en `historial.ts`. **Alcance de este slice: hasta
+  entregar los links.** La detección del pago (poller CB-028), la aplicación en cartera y
+  la notificación (§5) se integran aparte — primero como pago sin validar, luego validado
+  + facturación (decisión de Daniel 2026-08-25).
 
 ---
 

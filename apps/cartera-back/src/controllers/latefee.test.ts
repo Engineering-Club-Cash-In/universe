@@ -67,10 +67,16 @@ function crearMutadores() {
   };
 }
 
+let transactionCalls = 0;
+let transactionExecutorOverride: any = null;
+
 const fakeDb: any = {
   select: () => crearBuilderSelect(),
   ...crearMutadores(),
-  transaction: async (cb: any) => cb(crearMutadores()),
+  transaction: async (cb: any) => {
+    transactionCalls++;
+    return cb(transactionExecutorOverride ?? crearMutadores());
+  },
 };
 
 const fakeClient: any = {
@@ -87,7 +93,13 @@ const fakeClient: any = {
 
 mock.module("../database", () => ({ db: fakeDb, client: fakeClient }));
 
-const { procesarMoras, isOverdueInstallmentForMora, elegirAsesorParaBucket } = await import("./latefee");
+const {
+  procesarMoras,
+  isOverdueInstallmentForMora,
+  elegirAsesorParaBucket,
+  updateMora,
+  updateMoraEnTx,
+} = await import("./latefee");
 // CB-030 — misma función que usa el freeze real (latefee la importa de acá,
 // no la reimplementa): si divergen, estos tests lo detectan.
 const { hoyGtISO } = await import("../lib/buckets-classification");
@@ -100,6 +112,8 @@ const {
   buckets_historial,
   credito_asesor_historial,
   pagos_credito,
+  moras_historial,
+  platform_users,
 } = await import("../database/db/schema");
 
 // ── Helpers de escenario ────────────────────────────────────────────────────
@@ -174,7 +188,236 @@ const insertsEn = (tabla: any) =>
 const updatesEn = (tabla: any) =>
   estado.updates.filter((u) => u.tabla === tabla).map((u) => u.set);
 
-beforeEach(() => prepararEscenario({ cuotas: [] }));
+beforeEach(() => {
+  prepararEscenario({ cuotas: [] });
+  transactionCalls = 0;
+  transactionExecutorOverride = null;
+});
+
+function crearTxUpdateMora() {
+  const inserts: { tabla: any; filas: Fila[] }[] = [];
+  const updates: { tabla: any; set: Fila }[] = [];
+  const savepoints = { calls: 0 };
+  const selects = new Map<any, Fila[][]>([
+    [creditos, [
+      [{ credito_id: 8818 }],
+      [{ statusCredit: "ACTIVO" }],
+    ]],
+    [platform_users, [[{ id: 44 }]]],
+    [moras_credito, [[{
+      id: 93892,
+      monto: "100.00",
+      activa: true,
+      porcentaje_mora: "1.12",
+      cuotas_atrasadas: 2,
+    }]]],
+  ]);
+
+  const tx: any = {
+    transaction(callback: (savepoint: any) => Promise<unknown>) {
+      savepoints.calls++;
+      return callback(tx);
+    },
+    select() {
+      let tabla: any;
+      const builder: any = {
+        from(value: any) { tabla = value; return builder; },
+        where() { return builder; },
+        orderBy() { return builder; },
+        limit() { return builder; },
+        for() { return builder; },
+        then(resolve: any, reject: any) {
+          const queue = selects.get(tabla) ?? [];
+          return Promise.resolve(queue.shift() ?? []).then(resolve, reject);
+        },
+      };
+      return builder;
+    },
+    update(tabla: any) {
+      return {
+        set(value: Fila) {
+          updates.push({ tabla, set: value });
+          const rows = tabla === moras_credito
+            ? [{ mora_id: 93892, porcentaje_mora: "1.12", ...value }]
+            : [];
+          const result: any = {
+            where() {
+              const promise: any = Promise.resolve(rows);
+              promise.returning = () => Promise.resolve(rows);
+              return promise;
+            },
+          };
+          return result;
+        },
+      };
+    },
+    insert(tabla: any) {
+      return {
+        values(value: Fila | Fila[]) {
+          inserts.push({ tabla, filas: Array.isArray(value) ? value : [value] });
+          return Promise.resolve([]);
+        },
+      };
+    },
+  };
+
+  return { tx, inserts, updates, savepoints };
+}
+
+describe("updateMoraEnTx", () => {
+  it("usa solo el executor inyectado e inserta el historial en la misma transacción", async () => {
+    const fake = crearTxUpdateMora();
+
+    const result = await updateMoraEnTx({
+      numero_credito_sifco: "01010214103710",
+      monto_cambio: 25,
+      tipo: "INCREMENTO",
+      cuotas_atrasadas: 3,
+      usuario_email: "pagalo@clubcashin.com",
+    }, fake.tx);
+
+    expect(result).toMatchObject({
+      success: true,
+      newStatus: "MOROSO",
+      mora: { mora_id: 93892, monto_mora: "125" },
+    });
+    expect(transactionCalls).toBe(0);
+    expect(fake.inserts.filter((entry) => entry.tabla === moras_historial)).toHaveLength(1);
+    expect(fake.updates.map((entry) => entry.tabla)).toEqual([moras_credito, creditos]);
+  });
+
+  it("propaga errores inesperados para que la transacción exterior haga rollback", async () => {
+    const expected = new Error("db unavailable");
+    const tx: any = {
+      select: () => ({
+        from: () => ({
+          where: () => Promise.reject(expected),
+        }),
+      }),
+    };
+
+    expect(updateMoraEnTx({
+      numero_credito_sifco: "01010214103710",
+      monto_cambio: 25,
+      tipo: "INCREMENTO",
+    }, tx)).rejects.toBe(expected);
+  });
+
+  it("por defecto propaga un fallo de historial para abortar la transacción exterior", async () => {
+    const expected = new Error("history insert failed");
+    const fake = crearTxUpdateMora();
+    fake.tx.insert = () => ({
+      values: () => Promise.reject(expected),
+    });
+
+    expect(updateMoraEnTx({
+      credito_id: 8818,
+      monto_cambio: 25,
+      tipo: "INCREMENTO",
+    }, fake.tx)).rejects.toBe(expected);
+  });
+});
+
+describe("updateMora", () => {
+  it("abre exactamente una transacción y delega la operación completa", async () => {
+    const fake = crearTxUpdateMora();
+    transactionExecutorOverride = fake.tx;
+
+    const result = await updateMora({
+      credito_id: 8818,
+      monto_cambio: 25,
+      tipo: "INCREMENTO",
+    });
+
+    expect(result.success).toBe(true);
+    expect(transactionCalls).toBe(1);
+    expect(fake.inserts.filter((entry) => entry.tabla === moras_historial)).toHaveLength(1);
+  });
+
+  it("conserva historial best-effort para callers legados", async () => {
+    const fake = crearTxUpdateMora();
+    let outerTransactionAborted = false;
+    fake.tx.insert = () => ({
+      values: () => {
+        outerTransactionAborted = true;
+        return Promise.reject(new Error("same-level history insert failed"));
+      },
+    });
+    fake.tx.transaction = async (callback: (savepoint: any) => Promise<unknown>) => {
+      fake.savepoints.calls++;
+      const savepoint = Object.create(fake.tx);
+      savepoint.insert = () => ({
+        values: () => Promise.reject(new Error("savepoint history insert failed")),
+      });
+      return callback(savepoint);
+    };
+    transactionExecutorOverride = fake.tx;
+
+    const result = await updateMora({
+      credito_id: 8818,
+      monto_cambio: 25,
+      tipo: "INCREMENTO",
+    });
+
+    expect(result.success).toBe(true);
+    expect(transactionCalls).toBe(1);
+    expect(fake.savepoints.calls).toBe(1);
+    expect(outerTransactionAborted).toBe(false);
+    expect(fake.updates.map((entry) => entry.tabla)).toEqual([moras_credito, creditos]);
+  });
+
+  it("con SIFCO conserva el mismo requestId entre inicio y error", async () => {
+    const expected = new Error("mora select failed");
+    transactionExecutorOverride = {
+      select() {
+        let tabla: any;
+        const builder: any = {
+          from(value: any) { tabla = value; return builder; },
+          where() { return builder; },
+          orderBy() { return builder; },
+          limit() { return builder; },
+          for() { return builder; },
+          then(resolve: any, reject: any) {
+            const result = tabla === creditos
+              ? Promise.resolve([{ credito_id: 8818 }])
+              : Promise.reject(expected);
+            return result.then(resolve, reject);
+          },
+        };
+        return builder;
+      },
+    };
+
+    const originalNow = Date.now;
+    const originalLog = console.log;
+    const originalError = console.error;
+    let instant = 1_000;
+    const output: string[] = [];
+    Date.now = () => instant++;
+    console.log = (...args: unknown[]) => output.push(args.map(String).join(" "));
+    console.error = (...args: unknown[]) => output.push(args.map(String).join(" "));
+
+    try {
+      const result = await updateMora({
+        numero_credito_sifco: "01010214103710",
+        monto_cambio: 25,
+        tipo: "INCREMENTO",
+      });
+
+      expect(result).toMatchObject({ success: false, error: String(expected) });
+    } finally {
+      Date.now = originalNow;
+      console.log = originalLog;
+      console.error = originalError;
+    }
+
+    const requestIds = output.flatMap((line) =>
+      [...line.matchAll(/Request ID: ([^\n]+)/g)].map((match) => match[1]),
+    );
+    expect(requestIds).toHaveLength(2);
+    expect(new Set(requestIds).size).toBe(1);
+  });
+});
 
 // ── El ciclo probado a mano en el sandbox, ahora como especificación ───────
 

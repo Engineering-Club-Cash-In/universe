@@ -719,10 +719,12 @@ interface ProcessConvenioPaymentResult {
   monto_restante: string; 
 }
 
-export async function processConvenioPayment(
-  params: ProcessConvenioPaymentParams
+type ProcessConvenioPaymentTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+export async function processConvenioPaymentEnTx(
+  params: ProcessConvenioPaymentParams,
+  tx: ProcessConvenioPaymentTransaction,
 ): Promise<ProcessConvenioPaymentResult> {
-  try {
     const { credito_id, numero_credito_sifco, monto_pago, creditoInfo, pagoMetadata } = params;
 
     // 1. Validar que se haya proporcionado credito_id o numero_credito_sifco
@@ -731,7 +733,7 @@ export async function processConvenioPayment(
     }
 
     // 2. Buscar el convenio activo del crédito
-    const [convenio] = await db
+    const [convenio] = await tx
       .select()
       .from(convenios_pago)
       .where(
@@ -801,7 +803,7 @@ export async function processConvenioPayment(
     const convenioCompletado = nuevoMontoPendienteBig.lte(0) || nuevosPagosPendientes <= 0;
 
     // 9. Actualizar el convenio
-    const [convenioActualizado] = await db
+    const [convenioActualizado] = await tx
       .update(convenios_pago)
       .set({
         monto_pagado: nuevoMontoPagadoBig.toFixed(2),
@@ -827,12 +829,12 @@ export async function processConvenioPayment(
     if (convenioCompletado) {
       const cuotasReestructuradas = convenio.cuotas_convenio ?? [];
       if (cuotasReestructuradas.length > 0) {
-        await db
+        await tx
           .update(cuotas_credito)
           .set({ pagado: true })
           .where(inArray(cuotas_credito.cuota_id, cuotasReestructuradas));
       }
-      await db
+      await tx
         .update(creditos)
         .set({ statusCredit: "ACTIVO" })
         .where(
@@ -853,7 +855,7 @@ export async function processConvenioPayment(
       );
 
       // Las N cuotas pendientes más viejas del convenio (fecha_pago = NULL)
-      const cuotasPendientesConvenio = await db
+      const cuotasPendientesConvenio = await tx
         .select()
         .from(convenio_cuotas)
         .where(
@@ -882,7 +884,7 @@ export async function processConvenioPayment(
         const [month, day, year] = datePart.split("/");
         const fechaGuatemala = new Date(`${year}-${month}-${day}T${timePart}`);
 
-        await db
+        await tx
           .update(convenio_cuotas)
           .set({
             fecha_pago: fechaGuatemala, // 👈 Fecha y hora de Guatemala
@@ -931,6 +933,13 @@ export async function processConvenioPayment(
       monto_aplicado: montoAplicarBig.toFixed(2),
       monto_restante: nuevoMontoPendienteBig.toFixed(2),
     };
+}
+
+export async function processConvenioPayment(
+  params: ProcessConvenioPaymentParams
+): Promise<ProcessConvenioPaymentResult> {
+  try {
+    return await db.transaction((tx) => processConvenioPaymentEnTx(params, tx));
   } catch (error) {
     console.error("Error procesando pago de convenio:", error);
     throw new Error(

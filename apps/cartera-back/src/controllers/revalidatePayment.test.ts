@@ -30,12 +30,13 @@ const tx = {
 
 const lockQuery = mock(() => Promise.resolve());
 const lockRelease = mock(() => {});
+const dbTransaction = mock(
+  (callback: (transaction: typeof tx) => Promise<unknown>) => callback(tx),
+);
 
 mock.module("../database", () => ({
   db: {
-    transaction: mock(
-      (callback: (transaction: typeof tx) => Promise<unknown>) => callback(tx),
-    ),
+    transaction: dbTransaction,
   },
   // Pool de advisory locks: el wrapper withPaymentAdvisoryLock pide una
   // conexión, lockea/deslockea y la libera.
@@ -54,7 +55,7 @@ mock.module("./payments", () => ({
   insertPagosCreditoInversionistasV2: insertInvestors,
 }));
 
-const { revalidatePayment } = await import("./revalidatePayment");
+const { revalidatePayment, validarPagoRegistrado } = await import("./revalidatePayment");
 
 const pagoCompletoPendiente = {
   pago_id: 30,
@@ -116,6 +117,22 @@ describe("revalidatePayment", () => {
       [8765, 10],
     );
     expect(lockRelease).toHaveBeenCalledTimes(1);
+  });
+
+  it("aplica la misma lógica mediante el tx inyectado sin lock ni transacción anidada", async () => {
+    dbTransaction.mockClear();
+    lockQuery.mockClear();
+    lockRelease.mockClear();
+    const result = await validarPagoRegistrado({
+      credito_id: 10,
+      pago_id: 30,
+      tx: tx as never,
+    });
+
+    expect(result).toMatchObject({ pago_id: 30, credito_id: 10 });
+    expect(lockQuery).not.toHaveBeenCalled();
+    expect(lockRelease).not.toHaveBeenCalled();
+    expect(dbTransaction).not.toHaveBeenCalled();
   });
 
   it("valida un pago parcial sin cerrar la cuota", async () => {

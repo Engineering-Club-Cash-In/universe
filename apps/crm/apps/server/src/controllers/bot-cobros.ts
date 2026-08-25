@@ -447,12 +447,20 @@ export async function leerBoletaBotCobros(c: Context) {
 							"Ya intentamos leer tu boleta varias veces. Tu asesor te va a ayudar a registrarla.",
 						estado: 429,
 					});
-				case "URL_NO_PERMITIDA":
+				case "URL_NO_PERMITIDA": {
+					// Diagnóstico temporal (integración WittyBots): qué host manda
+					// el bot, para agregarlo a BOT_COBROS_DOMINIOS_IMAGEN.
+					let host = "(url inválida)";
+					try {
+						host = `${new URL(imagenUrl).protocol}//${new URL(imagenUrl).hostname}`;
+					} catch {}
+					console.warn("[BotCobros] leer-boleta URL_NO_PERMITIDA host:", host);
 					return error(c, {
 						codigo: "URL_NO_PERMITIDA",
 						mensaje: "No pudimos abrir esa imagen.",
 						estado: 400,
 					});
+				}
 				// El CDN de SimpleTech falló: la sesión del cliente sigue siendo
 				// válida, así que NO se le puede decir que empiece de nuevo. Sin
 				// este caso caía en el `default` y salía un 401.

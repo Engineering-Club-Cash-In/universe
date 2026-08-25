@@ -16,10 +16,10 @@ import {
 } from "../database/db";
 import { eq, and, lt, lte, asc, desc, sql, gt, or, ne, inArray } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import { updateMora } from "./latefee";
+import { updateMoraEnTx } from "./latefee";
 import { insertPagosCreditoInversionistas, insertPagosCreditoInversionistasV2 } from "./payments";
 import { processAndReplaceCreditInvestors } from "./investor"; 
-import { processConvenioPayment } from "./paymentAgreement";
+import { processConvenioPaymentEnTx } from "./paymentAgreement";
 import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
 import { recalcularPagosCredito } from "./updateCredit";
 import {
@@ -87,6 +87,15 @@ interface SetContext {
   status: number;
 }
 
+type RegisterPaymentTransaction = Parameters<
+  Parameters<typeof db.transaction>[0]
+>[0];
+
+type RegisterPaymentExecutor = Pick<
+  typeof db,
+  "select" | "insert" | "update"
+>;
+
 // ========================================
 // 1. PREPARACIÓN DE DATOS
 // ========================================
@@ -146,12 +155,14 @@ const procesarPagoMora = async ({
   mora,
   stats,
   disponible,
+  tx,
 }: {
   credito_id: number;
   numero_credito_sifco: string;
   mora: MoraInfo | null;
   stats: StatsInfo;
   disponible: Big;
+  tx: RegisterPaymentTransaction;
 }): Promise<ResultadoMora> => {
   // 🔍 Verificar si NO hay mora activa
   console.log("\n🔍 Verificando mora activa...");
@@ -200,12 +211,12 @@ const procesarPagoMora = async ({
     );
 
     // Actualizar mora a 0 (se desactiva automáticamente)
-    const resultadoMora = await updateMora({
+    const resultadoMora = await updateMoraEnTx({
       credito_id,
       numero_credito_sifco,
       tipo: "DECREMENTO",
       monto_cambio: montoMora.toNumber(),
-    });
+    }, tx);
 
     if (!resultadoMora.success) {
       throw new Error("Error al actualizar mora: " + resultadoMora.message);
@@ -235,12 +246,12 @@ const procesarPagoMora = async ({
   );
 
   // Aplicar todo lo disponible a la mora
-  const resultadoMora = await updateMora({
+  const resultadoMora = await updateMoraEnTx({
     credito_id,
     numero_credito_sifco,
     tipo: "DECREMENTO",
     monto_cambio: disponible.toNumber(),
-  });
+  }, tx);
 
   if (!resultadoMora.success) {
     throw new Error("Error al actualizar mora: " + resultadoMora.message);
@@ -283,11 +294,12 @@ const obtenerInfoCompletaCredito = async (
   set: SetContext,
   cuotaApagar: number,
   esSoloCapital = false,
-  pagoSoloOtros = false
+  pagoSoloOtros = false,
+  tx: RegisterPaymentExecutor = db
 ) => {
   try {
     // 📋 Query 1: Crédito + Usuario + Mora (1 fila)
-    const [info] = await db
+    const [info] = await tx
       .select({
         credito: creditos,
         saldo_a_favor: usuarios.saldo_a_favor,
@@ -340,13 +352,13 @@ const obtenerInfoCompletaCredito = async (
     // 🔥 Query 2: Inversionistas + Cuotas pendientes (en paralelo)
     const [inversionistas, cuotasPendientes] = await Promise.all([
       // 👥 Todos los inversionistas del crédito
-      db
+      tx
         .select()
         .from(creditos_inversionistas)
         .where(eq(creditos_inversionistas.credito_id, credito_id)),
 
       // 📊 Cuotas pendientes (sin filtro de cuota específica, traemos TODAS las pendientes)
-      db
+      tx
         .select()
         .from(cuotas_credito)
         .innerJoin(
@@ -641,22 +653,16 @@ const insertarBoletas = async (pago_id: number, urlCompletas: string[]) => {
 // FUNCIÓN PRINCIPAL
 // ========================================
 
-export const insertPayment = async ({ body, set }: any) => {
-  // 🔒 Conexión dedicada para el advisory lock (se libera en finally).
-  let lockConn: PaymentAdvisoryLockConnection | undefined;
-  let lockedCreditoId: number | undefined;
-  try {
-    // 1. Validar schema
-    const parseResult = pagoSchema.safeParse(body);
-    if (!parseResult.success) {
-      set.status = 400;
-      return {
-        success: false,
-        message: "Validation failed",
-        errors: parseResult.error.flatten().fieldErrors,
-      };
-    }
+type ProcesarRegistroPagoInput = {
+  data: PagoData;
+  set: SetContext;
+};
 
+export async function procesarRegistroPago(
+  input: ProcesarRegistroPagoInput,
+  tx: RegisterPaymentTransaction
+) {
+    const { data, set } = input;
     const {
       credito_id,
       monto_boleta,
@@ -673,29 +679,12 @@ export const insertPayment = async ({ body, set }: any) => {
       registerBy,
       fecha_boleta,
       origen_pago,
-    } = parseResult.data;
-
-    // 🔒 LOCK PESIMISTA POR CRÉDITO
-    // Serializa los pagos concurrentes del MISMO crédito. Sin esto, dos pagos
-    // a la misma cuota que entran casi al mismo tiempo (doble clic, reintento,
-    // dos cajeros) leen el mismo saldo vigente ANTES de que el otro escriba
-    // (TOCTOU) y ambos re-aplican interés/IVA/etc → interés duplicado. La
-    // validación anti-sobreaplicación no los detiene porque ambos leen el
-    // estado previo. El lock obliga a que el segundo espere a que el primero
-    // termine y vea el saldo ya actualizado.
-    // Conexión del pool DEDICADO de locks: los waiters de pg_advisory_lock no
-    // deben consumir conexiones del pool de trabajo (deadlock de pool).
-    lockConn = await lockPool.connect();
-    lockedCreditoId = credito_id;
-    await lockConn.query("SELECT pg_advisory_lock($1, $2)", [
-      PAYMENT_ADVISORY_LOCK_NAMESPACE,
-      credito_id,
-    ]);
+    } = data;
 
     // 2. Preparar datos
     const urlCompletas = prepararURLsBoletas(url_boletas);
     const boletasExistentes = numeroAutorizacion && banco_id 
-      ? await db
+      ? await tx
         .select({
           numeroAutorizacion: pagos_credito.numeroAutorizacion,
         })
@@ -750,7 +739,8 @@ export const insertPayment = async ({ body, set }: any) => {
       set,
       cuotaApagar,
       esSoloCapital,
-      pagoSoloOtros
+      pagoSoloOtros,
+      tx
     );
 
     const {
@@ -808,7 +798,7 @@ export const insertPayment = async ({ body, set }: any) => {
         registerBy: registerBy ?? "",
         fecha_boleta,
         monto_aplicado: pagoEspecialCuota.montoAplicado,
-      });
+      }, tx);
     }
 
     const montoEfectivo = calcularMontoEfectivo(
@@ -831,6 +821,7 @@ export const insertPayment = async ({ body, set }: any) => {
       mora: mora,
       stats,
       disponible,
+      tx,
     });
     // Actualizar disponible
     disponible = new Big(resultadoMora.disponibleRestante);
@@ -859,7 +850,7 @@ export const insertPayment = async ({ body, set }: any) => {
             registerBy: registerBy ?? "",
             fecha_boleta,
             monto_aplicado: pagoEspecialCuota.montoAplicado,
-          });
+          }, tx);
         }
         console.log(
           "Mora pagada completamente, se procede a registrar el pago normal."
@@ -881,7 +872,7 @@ export const insertPayment = async ({ body, set }: any) => {
             registerBy: registerBy ?? "",
             fecha_boleta,
             monto_aplicado: pagoEspecialCuota.montoAplicado,
-          });
+          }, tx);
         }
         // success:true explícito — este return es un 200 real (el pago SÍ se
         // insertó arriba), solo informa que quedó parcial y no cerró cuota.
@@ -912,7 +903,7 @@ export const insertPayment = async ({ body, set }: any) => {
           registerBy: registerBy ?? "",
           fecha_boleta,
           monto_aplicado: pagoEspecialCuota.montoAplicado,
-        });
+        }, tx);
       }
       // Mismo motivo que el return de arriba: 200 real, pago insertado,
       // success:true explícito para no leerse como rechazo.
@@ -938,21 +929,28 @@ export const insertPayment = async ({ body, set }: any) => {
         disponible: disponible_restante,
       })
     ) {
-      pagoConvenio = await processConvenioPayment({
-        credito_id: credito_id,
-        monto_pago: disponible_restante.toNumber(),
-        creditoInfo: creditoInfo,
-        pagoMetadata: {
-          montoBoleta: montoBoleta.toString(),
-          llamada: llamada,
-          renuevo_o_nuevo: "Convenio",
-          observaciones: observaciones,
-          numeroAutorizacion: numeroAutorizacion,
-          banco_id: banco_id,
-          registerBy: usuario_id,
-          urlCompletas: urlCompletas,
-        },
-      });
+      try {
+        pagoConvenio = await processConvenioPaymentEnTx({
+          credito_id: credito_id,
+          monto_pago: disponible_restante.toNumber(),
+          creditoInfo: creditoInfo,
+          pagoMetadata: {
+            montoBoleta: montoBoleta.toString(),
+            llamada: llamada,
+            renuevo_o_nuevo: "Convenio",
+            observaciones: observaciones,
+            numeroAutorizacion: numeroAutorizacion,
+            banco_id: banco_id,
+            registerBy: usuario_id,
+            urlCompletas: urlCompletas,
+          },
+        }, tx);
+      } catch (error) {
+        console.error("Error procesando pago de convenio:", error);
+        throw new Error(
+          `Error al procesar pago de convenio: ${error instanceof Error ? error.message : "Error desconocido"}`
+        );
+      }
       montoConvenio = new Big(pagoConvenio.monto_aplicado);
       console.log(`Convenio: registrado $${montoConvenio.toString()}`);
     }
@@ -983,7 +981,7 @@ export const insertPayment = async ({ body, set }: any) => {
       );
       if (disponible_restante.gt(0)) {
         // Verificar si existe pago previo - priorizar el original (no_required)
-        const allExistingPagos = await db
+        const allExistingPagos = await tx
           .select({ pago: pagos_credito })
           .from(pagos_credito)
           .innerJoin(
@@ -1015,7 +1013,7 @@ export const insertPayment = async ({ body, set }: any) => {
         // cuota antes de validar el primero, el segundo debe partir del saldo
         // que dejó el primero y NO re-aplicar los mismos rubros
         // (interés/IVA/seguro/membresías). Ref: crédito 197, cuota 6.
-        const [ultimoParcialPendiente] = await db
+        const [ultimoParcialPendiente] = await tx
           .select({ pago: pagos_credito })
           .from(pagos_credito)
           .where(
@@ -1113,7 +1111,7 @@ export const insertPayment = async ({ body, set }: any) => {
         const pagoIdEnVuelo = destinoSobrescribible
           ? existingPago!.pago.pago_id
           : -1;
-        const pagosHermanos = await db
+        const pagosHermanos = await tx
           .select({
             pago_id: pagos_credito.pago_id,
             monto_aplicado: pagos_credito.monto_aplicado,
@@ -1378,7 +1376,7 @@ export const insertPayment = async ({ body, set }: any) => {
 
         // Obtener pago del mes
         console.log("\n🔍 ========== CALCULANDO PAGO DEL MES ==========");
-        const pago_del_mes = await getPagosDelMesActual(credito.credito_id);
+        const pago_del_mes = await getPagosDelMesActual(credito.credito_id, tx);
         console.log("💰 Pago del mes actual (DB):", pago_del_mes);
         console.log("💵 Monto boleta actual:", montoBoleta);
 
@@ -1582,7 +1580,7 @@ export const insertPayment = async ({ body, set }: any) => {
               console.log(
                 `✅ Cuota ${cuota.cuotas_credito.numero_cuota} PAGADA COMPLETAMENTE`
               );
-              [pagoInsertado] = await db
+              [pagoInsertado] = await tx
                 .update(pagos_credito)
                 // Esta fila ES la boleta (pisa el placeholder): sin estampar
                 // acá, el estampado seguía pendiente tras el loop y la fila
@@ -1602,7 +1600,7 @@ export const insertPayment = async ({ body, set }: any) => {
                   )
                 )
                 .returning();
-              await db
+              await tx
                 .update(pagos_credito)
                 .set({ pagado: true })
                 .where(
@@ -1614,7 +1612,7 @@ export const insertPayment = async ({ body, set }: any) => {
                 urlCompletas &&
                 urlCompletas.length > 0
               ) {
-                await db.insert(boletas).values(
+                await tx.insert(boletas).values(
                   urlCompletas.map((url) => ({
                     pago_id: pagoInsertado!.pago_id,
                     url_boleta: url,
@@ -1653,7 +1651,7 @@ export const insertPayment = async ({ body, set }: any) => {
                 `${year}-${month}-${day}T${timePart}`
               );
 
-              [pagoInsertado] = await db
+              [pagoInsertado] = await tx
                 .insert(pagos_credito)
                 .values({
                   // Campos requeridos del input
@@ -1730,7 +1728,7 @@ export const insertPayment = async ({ body, set }: any) => {
                 .returning();
 
               // Marcar TODA la cuota como pagada (igual que la rama UPDATE).
-              await db
+              await tx
                 .update(pagos_credito)
                 .set({ pagado: true })
                 .where(
@@ -1742,7 +1740,7 @@ export const insertPayment = async ({ body, set }: any) => {
                 urlCompletas &&
                 urlCompletas.length > 0
               ) {
-                await db.insert(boletas).values(
+                await tx.insert(boletas).values(
                   urlCompletas.map((url) => ({
                     pago_id: pagoInsertado!.pago_id,
                     url_boleta: url,
@@ -1800,7 +1798,7 @@ export const insertPayment = async ({ body, set }: any) => {
                 `⚠️ Cuota ${cuota.cuotas_credito.numero_cuota} con PAGO PARCIAL`
               );
 
-              [pagoInsertado] = await db
+              [pagoInsertado] = await tx
                 .insert(pagos_credito)
                 .values({
                   // Campos requeridos del input
@@ -1878,7 +1876,7 @@ export const insertPayment = async ({ body, set }: any) => {
                 urlCompletas &&
                 urlCompletas.length > 0
               ) {
-                await db.insert(boletas).values(
+                await tx.insert(boletas).values(
                   urlCompletas.map((url) => ({
                     pago_id: pagoInsertado!.pago_id,
                     url_boleta: url,
@@ -1906,7 +1904,7 @@ export const insertPayment = async ({ body, set }: any) => {
           // Se omite si la cuota no absorbió nada: un pago que no tocó la
           // cuota tampoco debe reescribirle los saldos de sus filas.
           if (!filaParcialOmitida) {
-            await db
+            await tx
               .update(pagos_credito)
               .set({
                 capital_restante: nuevo_capital_restante.toString(),
@@ -1931,7 +1929,7 @@ export const insertPayment = async ({ body, set }: any) => {
           // Si el sobrante es <= Q25, agregarlo como "otros" al pago actual y no continuar
           if (disponible_restante.lte(25) && pagoInsertado?.pago_id) {
             const otrosActual = new Big(pagoInsertado.otros ?? "0");
-            await db
+            await tx
               .update(pagos_credito)
               .set({
                 otros: otrosActual.plus(disponible_restante).toString(),
@@ -1948,7 +1946,7 @@ export const insertPayment = async ({ body, set }: any) => {
     }
     // Jalar la última cuota pagada
     const hoy = new Date().toISOString().slice(0, 10);
-    const [ultimaCuotaPagada] = await db
+    const [ultimaCuotaPagada] = await tx
       .select({
         cuota_id: cuotas_credito.cuota_id,
         numero_cuota: cuotas_credito.numero_cuota,
@@ -2007,7 +2005,7 @@ export const insertPayment = async ({ body, set }: any) => {
       );
 
       const monthPaymentsBig = new Big(
-        (await getPagosDelMesActual(credito_id)) ?? 0
+        (await getPagosDelMesActual(credito_id, tx)) ?? 0
       ).plus(abonoCapital);
       // En un INCOBRABLE con todas las cuotas abiertas ya cubiertas la lista
       // filtrada viene vacía y no hay cuota pagada con numero_cuota > 0: el
@@ -2104,7 +2102,7 @@ export const insertPayment = async ({ body, set }: any) => {
       console.log("\n📝 ========== REGISTRANDO PAGO ==========");
 
       // 2️⃣ Registrar el pago
-      const [pagoInsertado] = await db
+      const [pagoInsertado] = await tx
         .insert(pagos_credito)
         .values(pagoData)
         .returning();
@@ -2115,7 +2113,7 @@ export const insertPayment = async ({ body, set }: any) => {
       if (urlCompletas && urlCompletas.length > 0) {
         console.log(`\n📄 Insertando ${urlCompletas.length} boletas...`);
 
-        await db.insert(boletas).values(
+        await tx.insert(boletas).values(
           urlCompletas.map((url) => ({
             pago_id: pagoInsertado.pago_id,
             url_boleta: url,
@@ -2138,7 +2136,7 @@ export const insertPayment = async ({ body, set }: any) => {
       // hay capitalDevuelto).
       if (disponible_restante.gt(0)) {
         const saldoConSobrante = saldoAFavor.plus(disponible_restante);
-        await db
+        await tx
           .update(usuarios)
           .set({ saldo_a_favor: saldoConSobrante.toString() })
           .where(eq(usuarios.usuario_id, credito.usuario_id));
@@ -2186,7 +2184,7 @@ export const insertPayment = async ({ body, set }: any) => {
         // capital colado, y acá lo que importa es qué se escribió.
         otrosEspecialAplicado: montoBoleta.eq(otrosBig),
         // Si el convenio ya se registró, `convenios_pago` YA está escrito
-        // (processConvenioPayment corre antes del loop): un 409 aquí invitaría
+        // (processConvenioPaymentEnTx corre antes del loop): un 409 aquí invitaría
         // a reintentar la boleta y acreditaría el convenio dos veces.
         convenioAplicado: montoConvenio,
       };
@@ -2262,13 +2260,13 @@ export const insertPayment = async ({ body, set }: any) => {
           fecha_boleta,
           monto_aplicado: pagoEspecialCuota.montoAplicado,
           pagoConvenio: Number(estamparPagoConvenio()),
-        });
+        }, tx);
       }
 
       const newSaldoAFavor = saldoAFavor
         .plus(disponible_restante)
         .plus(capitalDevuelto);
-      await db
+      await tx
         .update(usuarios)
         .set({ saldo_a_favor: newSaldoAFavor.toString() })
         .where(eq(usuarios.usuario_id, credito.usuario_id));
@@ -2293,6 +2291,25 @@ export const insertPayment = async ({ body, set }: any) => {
         resumen: `Se procesaron   cuota(s): ${cuotas_completas} pagada(s) completamente y ${cuotas_parciales} con pago parcial. Monto total aplicado: Q${montoTotal}. ${capitalDevuelto.gt(0) ? `El abono a capital de Q${capitalDevuelto.toString()} no se aplicó (el crédito no lo permite) y quedó en saldo a favor. ` : ""}Ya no queda saldo disponible.`,
       };
     }
+}
+
+export const insertPayment = async ({ body, set }: any) => {
+  const parseResult = pagoSchema.safeParse(body);
+  if (!parseResult.success) {
+    set.status = 400;
+    return {
+      success: false,
+      message: "Validation failed",
+      errors: parseResult.error.flatten().fieldErrors,
+    };
+  }
+
+  try {
+    return await withPaymentAdvisoryLock(parseResult.data.credito_id, () =>
+      db.transaction(async (tx) =>
+        procesarRegistroPago({ data: parseResult.data, set }, tx)
+      )
+    );
   } catch (error) {
     console.error("[insertPayment] Error:", error);
     if ((error as { code?: string }).code === CREDIT_PENDING_CANCELLATION_ERROR.code) {
@@ -2316,31 +2333,18 @@ export const insertPayment = async ({ body, set }: any) => {
       message: "Internal server error",
       error: error instanceof Error ? error.message : String(error),
     };
-  } finally {
-    // 🔓 Liberar el advisory lock y devolver la conexión al pool, pase lo que pase.
-    if (lockConn) {
-      try {
-        if (lockedCreditoId !== undefined) {
-          await lockConn.query("SELECT pg_advisory_unlock($1, $2)", [
-            PAYMENT_ADVISORY_LOCK_NAMESPACE,
-            lockedCreditoId,
-          ]);
-        }
-      } catch (unlockError) {
-        console.error("[insertPayment] Error liberando lock:", unlockError);
-      } finally {
-        lockConn.release();
-      }
-    }
   }
 };
-export async function getPagosDelMesActual(credito_id: number) {
+export async function getPagosDelMesActual(
+  credito_id: number,
+  executor: RegisterPaymentExecutor = db
+) {
   const hoy = new Date();
   const mes = hoy.getMonth() + 1; // getMonth() es 0-based
   const anio = hoy.getFullYear();
 
   // Trae todos los pagos válidos de este mes y año
-  const pagos = await db
+  const pagos = await executor
     .select({ monto_boleta: pagos_credito.monto_boleta })
     .from(pagos_credito)
     .where(
@@ -2395,13 +2399,13 @@ export async function insertarPago({
   fecha_boleta,
   monto_aplicado,
   pagoConvenio = 0
-}: InsertarPagoParams) {
+}: InsertarPagoParams, executor: RegisterPaymentExecutor = db) {
   console.log(
     `Insertando pago para crédito SIFCO: ${numero_credito_sifco}, cuota: ${numero_cuota}, mora: ${mora}, otros: ${otros}`
   );
 
   // 🔥 Query único optimizado: Crédito + Pagos + Usuario en 1 hit
-  const [creditData] = await db
+  const [creditData] = await executor
     .select({
       // 📋 Datos del crédito
       credito_id: creditos.credito_id,
@@ -2483,11 +2487,14 @@ export async function insertarPago({
   }
 
   // 💰 Calcular pagos del mes actual
-  const monthPayments = await getPagosDelMesActual(creditData.credito_id);
+  const monthPayments = await getPagosDelMesActual(
+    creditData.credito_id,
+    executor
+  );
   const monthPaymentsBig = new Big(monthPayments ?? 0).add(boleta ?? 0);
 
   // 💾 Insertar nuevo pago
-  const [nuevoPago] = await db
+  const [nuevoPago] = await executor
     .insert(pagos_credito)
     .values({
       credito_id: creditData.credito_id,
@@ -2542,7 +2549,7 @@ export async function insertarPago({
 
   // 📎 Insertar boletas si existen
   if (urlBoletas && urlBoletas.length > 0) {
-    await db.insert(boletas).values(
+    await executor.insert(boletas).values(
       urlBoletas.map((url) => ({
         pago_id: nuevoPago?.pago_id,
         url_boleta: url,

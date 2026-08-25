@@ -23,6 +23,39 @@ import {
 } from "./registerPaymentPolicy";
 
 describe("register payment", () => {
+  it("ejecuta todo el registro bajo un lock y una sola transacción", async () => {
+    const source = await Bun.file(
+      new URL("./registerPayment.ts", import.meta.url)
+    ).text();
+    const engineStart = source.indexOf(
+      "export async function procesarRegistroPago("
+    );
+    const wrapperStart = source.indexOf("export const insertPayment =");
+
+    expect(engineStart).toBeGreaterThan(-1);
+    expect(wrapperStart).toBeGreaterThan(engineStart);
+
+    const engine = source.slice(engineStart, wrapperStart);
+    const wrapper = source.slice(
+      wrapperStart,
+      source.indexOf("export async function getPagosDelMesActual")
+    );
+    const moraHelper = source.slice(
+      source.indexOf("const procesarPagoMora ="),
+      source.indexOf("const obtenerInfoCompletaCredito =")
+    );
+
+    expect(engine).not.toContain("await db.");
+    expect(engine).toContain("procesarPagoMora({");
+    expect(moraHelper).toContain("await updateMoraEnTx(");
+    expect(moraHelper).not.toContain("historyRequired: false");
+    expect(engine).toContain("processConvenioPaymentEnTx(");
+    expect(engine).not.toContain("processConvenioPayment({");
+    expect(wrapper).toContain("withPaymentAdvisoryLock(");
+    expect(wrapper).toContain("db.transaction(async (tx)");
+    expect(wrapper.match(/db\.transaction/g) ?? []).toHaveLength(1);
+  });
+
   it("clasifica un crédito pendiente de cancelación con un mensaje descriptivo", () => {
     expect(getCreditPaymentBlock("PENDIENTE_CANCELACION")).toEqual({
       code: "CREDIT_PENDING_CANCELLATION",

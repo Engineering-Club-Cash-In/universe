@@ -90,7 +90,7 @@ jobs:
 
       - name: Redeploy en Coolify
         run: |
-          curl --fail-with-body --request GET \
+          curl --fail-with-body --request POST \
             "${{ secrets.COOLIFY_WEBHOOK_BACK_DEV }}" \
             --header "Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}"
 
@@ -129,6 +129,6 @@ jobs:
 
       - name: Redeploy en Coolify
         run: |
-          curl --fail-with-body --request GET \
+          curl --fail-with-body --request POST \
             "${{ secrets.COOLIFY_WEBHOOK_FRONT_DEV }}" \
             --header "Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}"

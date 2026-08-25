@@ -67,6 +67,11 @@ export const partnerAuth = betterAuth({
 	emailAndPassword: {
 		enabled: true,
 		requireEmailVerification: false,
+		// Los socios se dan de alta solo desde el panel de admin. Sin esto,
+		// cualquiera podría registrarse en /sign-up/email y, como esta instancia
+		// no lleva el plugin admin que asigna rol, quedaría con el default de la
+		// columna (sales) y con acceso al CRM.
+		disableSignUp: true,
 	},
 	secret: process.env.BETTER_AUTH_SECRET,
 	baseURL: process.env.BETTER_AUTH_URL,

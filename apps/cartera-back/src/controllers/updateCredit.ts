@@ -2499,6 +2499,19 @@ export const recalcularPagosCredito = async ({
     // Cuota 0 (desembolso) no se recalcula
     if (numCuota === 0) continue;
 
+    // Parciales VALIDADOS vivos de esta cuota (ver pre-paso más abajo). Si ya
+    // abonaron capital, ese capital YA se descontó de creditos.capital al
+    // validarse: la cuota se proyecta desde el principal PRE-parcial (si no,
+    // el capital validado se restaría dos veces: en el arranque y en el neteo
+    // de rem.capital). Como el rem se netea con sus abonos, la cadena de
+    // capitalEnMemoria hacia las cuotas siguientes queda igual que la sembrada.
+    const validadosVivos = pagos.filter(
+      (p) => p.validationStatus === "validated" && !p.paymentFalse,
+    );
+    for (const v of validadosVivos) {
+      capitalEnMemoria = capitalEnMemoria.plus(v.abono_capital ?? 0);
+    }
+
     // Amortización de esta cuota
     const interesMes = capitalEnMemoria.times(porcentajeInteres).round(2);
     const ivaMes = interesMes.times(0.12).round(2);
@@ -2570,9 +2583,9 @@ export const recalcularPagosCredito = async ({
     // (fecha_pago null) se ordenan primero y su snapshot debe salir ya neto
     // — el mismo neteo que hace registerPayment al recibir el siguiente pago.
     const esValidadoVivo = (p: (typeof pagos)[number]) =>
-      p.validationStatus === "validated" && !p.paymentFalse;
+      validadosVivos.includes(p);
     const noNeg = (b: Big) => (b.lt(0) ? new Big(0) : b);
-    for (const v of pagosOrdenados.filter(esValidadoVivo)) {
+    for (const v of validadosVivos) {
       rem.interes = noNeg(rem.interes.minus(v.abono_interes ?? 0));
       rem.iva = noNeg(rem.iva.minus(v.abono_iva_12 ?? 0));
       rem.seguro = noNeg(rem.seguro.minus(v.abono_seguro ?? 0));

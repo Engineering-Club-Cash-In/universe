@@ -188,14 +188,16 @@ describe("recalcularPagosCredito — pagos validados no se reescriben", () => {
     validationStatus: "validated",
     pagado: false,
     paymentFalse: false,
-    monto_aplicado: "112",
+    monto_aplicado: "162",
     fecha_pago: "2026-08-21",
     abono_interes: "100",
     abono_iva_12: "12",
     abono_seguro: "0",
     abono_gps: "0",
     membresias_pago: "0",
-    abono_capital: "0",
+    // Ya descontado de creditos.capital al validarse (fixture: 18493.39 es
+    // el capital POST-parcial).
+    abono_capital: "50",
   };
 
   it("usa el parcial validado solo como contexto y siembra al hermano sobre el neto", async () => {
@@ -212,13 +214,20 @@ describe("recalcularPagosCredito — pagos validados no se reescriben", () => {
     expect(idsEscritos).toContain(74540);
     expect(idsEscritos).not.toContain(156048);
 
-    // Fixture: capital 18493.39 × 1.5% = 277.40 de interés, IVA 33.29.
-    // El sembrado queda neto de lo que el validado ya abonó (100 y 12).
+    // La cuota se proyecta desde el principal PRE-parcial: 18493.39 + 50 =
+    // 18543.39 × 1.5% = 278.15 de interés, IVA 33.38; capital de la cuota =
+    // 2021.83 − 278.15 − 33.38 − 260.93 − 399.73 = 1049.64. El sembrado queda
+    // neto de lo que el validado ya abonó (100 / 12 / 50), sin restar el
+    // capital validado dos veces.
     const vals = capturedUpdates[0].vals;
-    expect(vals.interes_restante).toBe("177.4");
-    expect(vals.iva_12_restante).toBe("21.29");
+    expect(vals.interes_restante).toBe("178.15");
+    expect(vals.iva_12_restante).toBe("21.38");
     expect(vals.seguro_restante).toBe("260.93");
     expect(vals.membresias).toBe("399.73");
+    expect(vals.capital_restante).toBe("999.64");
+    // Capital proyectado hacia la siguiente cuota = pre-parcial − capital de
+    // la cuota completa (no vuelve a restar los 50 ya validados).
+    expect(vals.total_restante).toBe("17493.75");
     expect(vals.abono_interes).toBe("0");
     expect(vals.pagado).toBe(false);
   });

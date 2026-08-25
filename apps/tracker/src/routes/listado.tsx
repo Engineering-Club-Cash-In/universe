@@ -8,7 +8,7 @@ import {
 	Search,
 	X,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { BarraPasos } from "@/components/barra-pasos";
 import { authClient } from "@/lib/auth-client";
 import {
@@ -73,6 +73,18 @@ export function ListadoPage() {
 	const anioVigente = aniosDisponibles.includes(anio)
 		? anio
 		: (aniosDisponibles[0] ?? anio);
+
+	// El refresco puede retirar un año de la lista si su último caso cruza la
+	// ventana de retención. anioVigente evita filtrar por un año inexistente en
+	// ese render, y este efecto alinea el estado para que el filtro de avance
+	// exacto no quede aplicado en silencio sobre un año que ya no es el elegido.
+	useEffect(() => {
+		if (!aniosDisponibles.includes(anio)) {
+			setAnio(anioVigente);
+			setPctFiltro(null);
+			setPagina(1);
+		}
+	}, [aniosDisponibles, anio, anioVigente]);
 
 	const hayPeriodo = periodo !== TODO_EL_TIEMPO;
 	const ventana = hayPeriodo ? ventanaDelMes(anioVigente, Number(periodo)) : null;
@@ -228,7 +240,7 @@ export function ListadoPage() {
 								Mostrando lo que{" "}
 								<span className="font-medium text-slate-700">
 									llegó a cada etapa en {MESES[Number(periodo) - 1].toLowerCase()}{" "}
-									{anio}
+									{anioVigente}
 								</span>
 								. Un caso puede aparecer en varias etapas si avanzó más de una
 								vez ese mes.

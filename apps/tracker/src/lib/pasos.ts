@@ -2,6 +2,7 @@ import type { CasoTracker } from "../../../crm/apps/server/src/routers/tracker";
 
 export type Caso = CasoTracker;
 export type EstadoCaso = CasoTracker["estado"];
+export type Ventana = { inicio: number; fin: number };
 
 export const PASOS = [
 	{ etiqueta: "Solicitud recibida", desde: 0, hasta: 20 },
@@ -17,17 +18,64 @@ export function rangoDePaso(paso: number): string {
 	return p.desde === p.hasta ? `${p.hasta}%` : `${p.desde}–${p.hasta}%`;
 }
 
-/** Fecha en que el caso llegó a una etapa, o null si nunca la alcanzó. */
-export function llegadaAPaso(caso: Caso, paso: number): string | null {
-	return caso.historial.find((h) => h.paso === paso)?.fecha ?? null;
-}
-
 /** Ventana del mes en hora de Guatemala (UTC-6), igual que el servidor. */
-export function ventanaDelMes(anio: number, mes: number) {
+export function ventanaDelMes(anio: number, mes: number): Ventana {
 	return {
 		inicio: Date.UTC(anio, mes - 1, 1, 6),
 		fin: Date.UTC(anio, mes, 1, 6),
 	};
+}
+
+function dentroDeVentana(fecha: string, ventana: Ventana) {
+	const t = new Date(fecha).getTime();
+	return t >= ventana.inicio && t < ventana.fin;
+}
+
+/**
+ * Entradas del historial de una etapa, de la más antigua a la más reciente.
+ *
+ * El servidor las ordena por porcentaje, no por fecha, así que un caso que
+ * retrocedió dentro de la etapa trae primero la entrada más nueva. Reordenar
+ * por fecha es lo que hace que "primera llegada" signifique eso de verdad.
+ */
+function entradasDePaso(caso: Caso, paso: number) {
+	return caso.historial
+		.filter((h) => h.paso === paso)
+		.sort((a, b) => a.fecha.localeCompare(b.fecha));
+}
+
+/**
+ * Cómo cuenta un caso en una etapa, o null si no cuenta.
+ *
+ * Sin período: cuenta solo en la etapa donde está hoy, con su avance actual.
+ * Con período: cuenta si llegó a esa etapa dentro del mes, y devuelve el
+ * porcentaje y la fecha de *esa llegada* — no los actuales, que pueden
+ * corresponder a una etapa posterior.
+ */
+export function coincidenciaEnPaso(
+	caso: Caso,
+	paso: number,
+	ventana: Ventana | null,
+): { porcentaje: number; fecha: string } | null {
+	if (!ventana) {
+		if (caso.pasoActual !== paso) return null;
+		return {
+			porcentaje: caso.porcentaje,
+			fecha: entradasDePaso(caso, paso)[0]?.fecha ?? caso.actualizadoAt,
+		};
+	}
+
+	const entrada = entradasDePaso(caso, paso).find((h) =>
+		dentroDeVentana(h.fecha, ventana),
+	);
+	return entrada
+		? { porcentaje: entrada.porcentaje, fecha: entrada.fecha }
+		: null;
+}
+
+/** ¿El caso registró algún avance dentro del período? */
+export function tuvoAvanceEn(caso: Caso, ventana: Ventana): boolean {
+	return caso.historial.some((h) => dentroDeVentana(h.fecha, ventana));
 }
 
 export const ESTADOS: Record<

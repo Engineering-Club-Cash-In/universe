@@ -8,7 +8,8 @@
 		"build": "vite build",
 		"serve": "vite preview",
 		"check-types": "tsc --noEmit",
-		"push": "bash ./deploy.sh"
+		"push": "bash ./deploy.sh",
+		"test": "bun test"
 	},
 	"dependencies": {
 		"@orpc/client": "^1.5.0",

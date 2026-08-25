@@ -15,6 +15,7 @@ on:
       - "apps/carteraFront/**"
       - "apps/crm/**"
       - "apps/portal-web/**"
+      - "apps/tracker/**"
       - "apps/auth-google/**"
       - "apps/backend-2/**"
       - "apps/legal-documents/**"

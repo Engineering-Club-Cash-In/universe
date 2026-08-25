@@ -13,12 +13,13 @@ import { BarraPasos } from "@/components/barra-pasos";
 import { authClient } from "@/lib/auth-client";
 import {
 	type Caso,
+	coincidenciaEnPaso,
 	ESTADOS,
 	PASOS,
 	formatearFecha,
 	formatearMonto,
-	llegadaAPaso,
 	rangoDePaso,
+	tuvoAvanceEn,
 	ventanaDelMes,
 } from "@/lib/pasos";
 import { cn } from "@/lib/utils";
@@ -58,52 +59,30 @@ export function ListadoPage() {
 	const hayPeriodo = periodo !== TODO_EL_TIEMPO;
 	const ventana = hayPeriodo ? ventanaDelMes(anio, Number(periodo)) : null;
 
-	/**
-	 * Sin período: el caso cuenta en la etapa donde está hoy.
-	 * Con período: cuenta si llegó a la etapa dentro de ese mes.
-	 */
-	const estaEnPaso = useMemo(() => {
-		return (caso: Caso, paso: number) => {
-			if (!ventana) return caso.pasoActual === paso;
-			const llegada = llegadaAPaso(caso, paso);
-			if (!llegada) return false;
-			const t = new Date(llegada).getTime();
-			return t >= ventana.inicio && t < ventana.fin;
-		};
-	}, [ventana]);
-
-	const enElPeriodo = useMemo(() => {
-		return (caso: Caso) => {
-			if (!ventana) return true;
-			if (pasoFiltro !== null) return estaEnPaso(caso, pasoFiltro);
-			return caso.historial.some((h) => {
-				const t = new Date(h.fecha).getTime();
-				return t >= ventana.inicio && t < ventana.fin;
-			});
-		};
-	}, [ventana, pasoFiltro, estaEnPaso]);
+	// Sin período cuenta la etapa actual; con período, la llegada dentro del mes.
+	const coincidencia = useMemo(
+		() => (caso: Caso, paso: number) => coincidenciaEnPaso(caso, paso, ventana),
+		[ventana],
+	);
 
 	const filtrados = useMemo(() => {
 		const todos: Caso[] = casosQuery.data ?? [];
 		const termino = busqueda.trim().toLowerCase();
 		return todos.filter((caso) => {
-			if (pasoFiltro !== null && !estaEnPaso(caso, pasoFiltro)) return false;
-			if (pasoFiltro === null && !enElPeriodo(caso)) return false;
-			if (pctFiltro !== null && caso.porcentaje !== pctFiltro) return false;
+			if (pasoFiltro === null) {
+				if (ventana && !tuvoAvanceEn(caso, ventana)) return false;
+			} else {
+				const marca = coincidencia(caso, pasoFiltro);
+				if (!marca) return false;
+				if (pctFiltro !== null && marca.porcentaje !== pctFiltro) return false;
+			}
 			if (!termino) return true;
 			return [caso.referencia, caso.cliente, caso.vehiculo ?? ""]
 				.join(" ")
 				.toLowerCase()
 				.includes(termino);
 		});
-	}, [
-		casosQuery.data,
-		busqueda,
-		pasoFiltro,
-		pctFiltro,
-		estaEnPaso,
-		enElPeriodo,
-	]);
+	}, [casosQuery.data, busqueda, pasoFiltro, pctFiltro, ventana, coincidencia]);
 
 	const totalPaginas = Math.max(1, Math.ceil(filtrados.length / porPagina));
 	const visibles = filtrados.slice(
@@ -115,29 +94,31 @@ export function ListadoPage() {
 		const conteo = new Map<number, number>();
 		for (const caso of casosQuery.data ?? []) {
 			for (let paso = 1; paso <= PASOS.length; paso++) {
-				if (estaEnPaso(caso, paso)) {
+				if (coincidencia(caso, paso)) {
 					conteo.set(paso, (conteo.get(paso) ?? 0) + 1);
 				}
 			}
 		}
 		return conteo;
-	}, [casosQuery.data, estaEnPaso]);
+	}, [casosQuery.data, coincidencia]);
 
 	const totalVisible = useMemo(() => {
 		const todos: Caso[] = casosQuery.data ?? [];
-		return todos.filter((caso) => enElPeriodo(caso)).length;
-	}, [casosQuery.data, enElPeriodo]);
+		if (!ventana) return todos.length;
+		return todos.filter((caso) => tuvoAvanceEn(caso, ventana)).length;
+	}, [casosQuery.data, ventana]);
 
 	// Porcentajes exactos presentes dentro de la etapa seleccionada.
 	const porcentajesDelPaso = useMemo(() => {
 		if (pasoFiltro === null) return [];
 		const conteo = new Map<number, number>();
 		for (const caso of casosQuery.data ?? []) {
-			if (!estaEnPaso(caso, pasoFiltro)) continue;
-			conteo.set(caso.porcentaje, (conteo.get(caso.porcentaje) ?? 0) + 1);
+			const marca = coincidencia(caso, pasoFiltro);
+			if (!marca) continue;
+			conteo.set(marca.porcentaje, (conteo.get(marca.porcentaje) ?? 0) + 1);
 		}
 		return [...conteo.entries()].sort(([a], [b]) => a - b);
-	}, [casosQuery.data, pasoFiltro, estaEnPaso]);
+	}, [casosQuery.data, pasoFiltro, coincidencia]);
 
 	const cambiarFiltro = (accion: () => void) => {
 		accion();
@@ -330,10 +311,8 @@ export function ListadoPage() {
 					<>
 						<ul className="space-y-2.5">
 							{visibles.map((caso) => {
-								const pasoMostrado = pasoFiltro ?? caso.pasoActual;
-								const llegada = hayPeriodo
-									? llegadaAPaso(caso, pasoMostrado)
-									: null;
+								const marca = coincidencia(caso, pasoFiltro ?? caso.pasoActual);
+								const llegada = hayPeriodo ? (marca?.fecha ?? null) : null;
 								return (
 									<li key={caso.id}>
 										<Link

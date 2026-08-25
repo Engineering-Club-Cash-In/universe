@@ -2774,6 +2774,20 @@ function RouteComponent() {
 																: "Pendiente";
 														const tieneMora = Number(cuota.montoMora) > 0;
 														const pagoConMora = esPagada && tieneMora; // Pagado pero con mora
+														// Cuota abierta con abonos parciales: lo que interesa es
+														// cuánto lleva y cuánto le falta — el "estado actual" que
+														// cartera sí muestra y acá faltaba.
+														const abonado = esPagada
+															? 0
+															: (cuota.pagos ?? []).reduce(
+																	(suma: number, pago: any) =>
+																		suma + Number(pago.montoAplicado ?? 0),
+																	0,
+																);
+														const saldoCuota = Math.max(
+															Number(cuota.montoCuota) - abonado,
+															0,
+														);
 
 														return (
 															<div
@@ -2880,6 +2894,20 @@ function RouteComponent() {
 																					? "Pago recibido, en validación"
 																					: "Pendiente de pago"}
 																			</span>
+																			{!enValidacion && abonado > 0 && (
+																				<span className="block text-amber-700 text-xs dark:text-amber-400">
+																					Abonado Q
+																					{abonado.toLocaleString("es-GT", {
+																						minimumFractionDigits: 2,
+																						maximumFractionDigits: 2,
+																					})}{" "}
+																					· Falta Q
+																					{saldoCuota.toLocaleString("es-GT", {
+																						minimumFractionDigits: 2,
+																						maximumFractionDigits: 2,
+																					})}
+																				</span>
+																			)}
 																			{tieneMora && (
 																				<span className="block font-medium text-red-600 text-xs">
 																					Total: Q

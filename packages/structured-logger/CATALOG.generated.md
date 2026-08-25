@@ -51,6 +51,7 @@ Schema version: **1**
 | `lock_state` | enum: not_attempted, acquired, failed |
 | `manual_action_required` | boolean |
 | `method` | enum: POST |
+| `migration_operation` | enum: adjust_schedule, import_payments |
 | `mime_family` | enum: image, pdf, other |
 | `notification_attempted` | boolean |
 | `operation` | enum: certify_document, lookup_internal_document, get_document, void_document, verify_document, lookup_taxpayer, list_clients, list_client_loans, get_loan_detail, list_installments, get_surcharges, get_statement, get_loan_info, bulk_sync, put_upload, put_invoice_pdf, create_signed_url, delete_object, fetch_invoice_logo, send_failed_invoice_report, write |
@@ -283,6 +284,13 @@ Schema version: **1**
 | `local_state_inconsistent` | `error` | `reversal_path`, `processed_count`, `succeeded_count`, `failed_count`, `duration_ms`, `error_code` | — | `error_code=persistence_failed` |
 | `partially_completed` | `warn` | `reversal_path`, `processed_count`, `succeeded_count`, `failed_count`, `duration_ms` | — | — |
 | `rejected` | `warn` | `duration_ms`, `reason_code` | — | — |
+
+### `payment.sifco_migration`
+
+| Outcome | Level | Required | Optional | Constants |
+|---|---|---|---|---|
+| `completed` | `info` | `migration_operation`, `processed_count`, `succeeded_count`, `failed_count`, `skipped_count`, `duration_ms` | — | — |
+| `partially_completed` | `warn` | `migration_operation`, `processed_count`, `succeeded_count`, `failed_count`, `skipped_count`, `duration_ms`, `reason_code` | — | — |
 
 ### `payment.upload`
 

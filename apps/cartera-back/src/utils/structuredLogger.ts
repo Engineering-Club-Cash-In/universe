@@ -230,6 +230,25 @@ export type CreditScheduleRecalculationResult = Readonly<{
   errorCode: "persistence_failed" | "unknown";
 }>;
 
+export type SifcoPaymentMigrationResult = Readonly<{
+  outcome: "completed";
+  operation: "adjust_schedule" | "import_payments";
+  processedCount: number;
+  succeededCount: number;
+  failedCount: number;
+  skippedCount: number;
+  durationMs: number;
+}> | Readonly<{
+  outcome: "partially_completed";
+  operation: "import_payments";
+  processedCount: number;
+  succeededCount: number;
+  failedCount: number;
+  skippedCount: number;
+  durationMs: number;
+  reasonCode: "item_failures";
+}>;
+
 export type PaymentReversalResult =
   | Readonly<{
       outcome: "completed";
@@ -643,6 +662,30 @@ export function emitCreditScheduleRecalculation(
         error_code: result.errorCode,
       });
     }
+  });
+}
+
+export function emitSifcoPaymentMigration(
+  result: SifcoPaymentMigrationResult,
+  logger: CarteraStructuredLogger = carteraStructuredLogger,
+): void {
+  emitAuditWithoutAffectingControlFlow(() => {
+    const common = {
+      migration_operation: result.operation,
+      processed_count: result.processedCount,
+      succeeded_count: result.succeededCount,
+      failed_count: result.failedCount,
+      skipped_count: result.skippedCount,
+      duration_ms: result.durationMs,
+    };
+    if (result.outcome === "completed") {
+      logger.emit("payment.sifco_migration", "completed", common);
+      return;
+    }
+    logger.emit("payment.sifco_migration", "partially_completed", {
+      ...common,
+      reason_code: result.reasonCode,
+    });
   });
 }
 

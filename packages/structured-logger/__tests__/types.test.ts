@@ -152,7 +152,48 @@ const widenedTupleCountLogger = createStructuredLogger(widenedTupleCountCatalog,
   sink: () => undefined,
 });
 
+const widenedReasonConstants: Readonly<Record<'reason_code', string>> = {
+  reason_code: 'missing_payment_reference',
+};
+const widenedConstantsCatalog = {
+  schemaVersion: carteraCatalog.schemaVersion,
+  commonFields: carteraCatalog.commonFields,
+  fields: {
+    reason_code: {
+      type: 'enum',
+      values: ['missing_payment_reference', 'invalid_payment_state'],
+    },
+  },
+  events: {
+    'custom.widened_constants': {
+      outcomes: {
+        rejected: {
+          level: 'warn',
+          required: ['reason_code'],
+          optional: [],
+          constants: widenedReasonConstants,
+        },
+      },
+    },
+  },
+  providerOperations: {},
+  countInvariants: [],
+} as const;
+const widenedConstantsLogger = createStructuredLogger(widenedConstantsCatalog, {
+  service: 'widened-constants',
+  environment: 'staging',
+  sink: () => undefined,
+});
+
 if (false) {
+  widenedConstantsLogger.emit('custom.widened_constants', 'rejected', {
+    reason_code: 'missing_payment_reference',
+  });
+  widenedConstantsLogger.emit('custom.widened_constants', 'rejected', {
+    // @ts-expect-error widened constants must retain the enum field constraint
+    reason_code: 'not_in_the_enum',
+  });
+
   logger.emit('payment.upload', 'stored', validExactKeyUnion);
   // @ts-expect-error every union member must reject runtime extra fields
   logger.emit('payment.upload', 'stored', invalidExactKeyUnion);

@@ -48,6 +48,8 @@ import { ejecutarAgendaCobrosDiariaConReintentos } from "./jobs/agenda-cobros-sn
 import { purgarBoletasSinConfirmar } from "./jobs/bot-cobros-purga";
 import { reconciliarBoletasColgadas } from "./jobs/bot-cobros-reconciliacion";
 import { reintentarAvisosDeRechazo } from "./jobs/bot-cobros-respaldo";
+import { correrPollPagalo } from "./jobs/pagalo-poll";
+import { isPagaloPollEnabled } from "./lib/pagalo-poll-config";
 import { generarCierreDiario } from "./jobs/cierre-diario-asesores";
 import {
 	checkSeguimientosVencidos,
@@ -1669,6 +1671,24 @@ async function correrRespaldoDeRechazos(): Promise<void> {
 }
 
 setInterval(correrRespaldoDeRechazos, 60 * 60 * 1000);
+
+// El poller de links Págalo (CB-028) también va fuera de la bandera: es
+// integridad financiera, no notificación al cliente — es la única fuente de
+// verdad de si un link se pagó (D-49, docs/features/pagalo/DECISIONES.md).
+// Dejarlo atado a TAREAS_PROGRAMADAS_ACTIVAS significaría que en esta rama
+// ningún grupo Págalo avanza nunca de PENDING_PAYMENT.
+async function correrPollDePagalo(): Promise<void> {
+	try {
+		await correrPollPagalo();
+	} catch (error) {
+		console.error("Error en el poller de links Págalo:", error);
+	}
+}
+
+if (isPagaloPollEnabled()) {
+	void correrPollDePagalo();
+	setInterval(correrPollDePagalo, 5 * 60 * 1000);
+}
 
 if (TAREAS_PROGRAMADAS_ACTIVAS) {
 	// checkPromesasPago traga sus propios errores de persistencia por SIFCO

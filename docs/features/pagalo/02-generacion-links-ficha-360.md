@@ -34,8 +34,8 @@ Al abrir:
 4. selección siempre forma prefijo consecutivo desde cuota más antigua;
 5. seleccionar cuota posterior selecciona anteriores;
 6. desmarcar cuota elimina esa cuota y posteriores;
-7. si existe mora mayor que Q0.00, fila Mora inicia marcada y no permite monto
-   parcial;
+7. si existe mora mayor que Q0.00, fila Mora inicia marcada, queda bloqueada y
+   no permite monto parcial;
 8. asesor puede quitar todas las cuotas y conservar solo Mora;
 9. si no existe mora, debe quedar al menos una cuota seleccionada.
 10. próxima cuota por vencer puede agregarse al final del rango consecutivo.
@@ -128,13 +128,15 @@ Al confirmar:
 5. cuando todos existen, envía un solo mensaje con uno o dos links etiquetados;
 6. registra eventos de creador, parámetros, generación y envío.
 
-Modal bloquea doble submit. Reintento usa idempotencia del grupo; nunca crea
-segundo grupo por timeout ambiguo sin consultar primero operación previa.
+Modal bloquea doble submit. Índice único evita dos grupos activos para mismo
+crédito. Recuperación visible de timeout ambiguo sigue pendiente: asesor debe
+consultar grupo existente antes de reintentar.
 
 ## 6. Mora cambiante
 
-Link usa monto fijo. Worker consulta primero estado Págalo y después compara
-mora viva con snapshot mientras link siga pendiente.
+Link usa monto fijo. Worker confirma estado remoto, monto y moneda antes de
+guardar voucher. Comparación de mora viva contra snapshot ocurre en Cartera al
+importar; CRM no aplica dinero ni recalcula saldo financiero.
 
 Págalo documenta consulta y estados de link, pero no documenta endpoint para
 cancelar request pendiente. Hasta obtener contrato oficial:
@@ -196,13 +198,14 @@ Prueba de caracterización vigente:
 
 ```text
 bun test src/controllers/registerPayment.test.ts
-54 pass
+57 pass
 0 fail
 ```
 
-Esto prueba semántica interna existente; todavía faltan integración HTTP,
-transacción total, origen `pagalo`, importación y rollback antes de declarar
-flujo Págalo listo end-to-end.
+Esto prueba semántica interna y metadatos Págalo. Hay pruebas unitarias de
+mapping/idempotencia, pero todavía faltan integración HTTP, rollback total y
+validación de snapshot/rubros vivos antes de declarar flujo Págalo listo
+end-to-end.
 
 ## 9. Casos de aceptación
 
@@ -220,6 +223,8 @@ flujo Págalo listo end-to-end.
 10. Mora crecida se aplica primero desde MORA_INTERES e informa faltante; solo
    deuda achicada con link sobrado deja `REVIEW_REQUIRED`.
 11. Doble submit/retry no crea grupos o links duplicados.
+12. Mora aparece como fila propia, queda marcada y no puede desmarcarse cuando
+    tiene saldo positivo.
 
 ## 10. Fuera de alcance
 

@@ -18,6 +18,22 @@ async function asignarAgencias(userId: string, companyIds: string[]) {
 	// justo después de validarla— el socio se quedaría sin ninguna membresía y
 	// sin poder entrar, en vez de conservar la asignación que ya tenía.
 	await db.transaction(async (tx) => {
+		const [objetivo] = await tx
+			.select({ role: user.role })
+			.from(user)
+			.where(eq(user.id, userId))
+			.for("update")
+			.limit(1);
+
+		if (!objetivo) {
+			throw new ORPCError("NOT_FOUND", { message: "Usuario no encontrado" });
+		}
+		if (objetivo.role !== ROLES.PARTNER) {
+			throw new ORPCError("BAD_REQUEST", {
+				message: "Solo los usuarios de predio/agencia llevan agencias",
+			});
+		}
+
 		const existentes = await tx
 			.select({ id: companies.id })
 			.from(companies)
@@ -288,21 +304,8 @@ export const adminRouter = {
 			}),
 		)
 		.handler(async ({ input }) => {
-			const [objetivo] = await db
-				.select({ id: user.id, role: user.role })
-				.from(user)
-				.where(eq(user.id, input.userId))
-				.limit(1);
-
-			if (!objetivo) {
-				throw new ORPCError("NOT_FOUND", { message: "Usuario no encontrado" });
-			}
-			if (objetivo.role !== ROLES.PARTNER) {
-				throw new ORPCError("BAD_REQUEST", {
-					message: "Solo los usuarios de predio/agencia llevan agencias",
-				});
-			}
-
+			// La verificación de rol vive dentro de asignarAgencias, junto al
+			// bloqueo de la fila, para que no se pueda colar un cambio de rol.
 			await asignarAgencias(input.userId, input.companyIds);
 			return { success: true };
 		}),

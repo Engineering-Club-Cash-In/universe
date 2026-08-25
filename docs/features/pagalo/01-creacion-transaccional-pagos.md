@@ -11,11 +11,12 @@ montos correctos y vouchers propios, una llamada idempotente a Cartera crea:
 - una fila `pagalo_payment_imports`;
 - una o varias filas `pagos_credito`, según distribución normal del motor;
 - `pagalo_import_id` en todas las filas creadas o reutilizadas por operación;
-- `origen_pago='pagalo'`, `banco_id=NULL` y estado `pending`;
+- `origen_pago='pagalo'`, `banco_id=NULL` y estado `validated`;
 - filas `boletas` con uno o dos vouchers requeridos;
 - estado final `PAYMENTS_CREATED` en importación.
 
-No se valida pago, no se factura y no se marca importación `APPLIED`.
+Pago nace validado porque `ACCEPT` y voucher ya fueron verificados. No pasa por
+bandeja humana ni se marca importación `APPLIED` hasta terminar flujo posterior.
 
 ## 2. Regla de reutilización
 
@@ -154,9 +155,9 @@ Request normalizado:
 }
 ```
 
-Para mora sola, `capital_total` es `"0.00"`, allocations no contiene CAPITAL y
-`capital` es `null`. `facturable` conserva transacción y único voucher real. No
-se fabrica evidencia CAPITAL vacía.
+Para grupo de un link, lado Q0.00 no tiene allocation, fuente ni voucher. Puede
+ser mora-only (`capital_total="0.00"`, `capital=null`) o solo-capital
+(`facturable_total="0.00"`, `facturable=null`). Nunca se fabrica evidencia Q0.
 
 `payload_hash` se calcula en CRM sobre JSON canónico con orden fijo de campos y
 allocations. Cartera reconstruye hash antes de aceptar. Headers, tokens y datos
@@ -215,15 +216,16 @@ Antes de primera escritura financiera:
 
 1. Crédito existe y `(credito_id, numero_credito_sifco)` coincide.
 2. Moneda es `GTQ`.
-3. Capital es no negativo, facturable/total son positivos y
+3. Capital y facturable son no negativos, total es positivo y
    `capital + facturable = total` en centavos.
-4. Allocations suman encabezados; CAPITAL existe si y solo si capital es mayor
-   que cero.
+4. Allocations y fuente existen si y solo si su lado es mayor que cero.
 5. CAPITAL solo contiene rubros no facturables; MORA_INTERES, facturables.
 6. UUIDs e identificadores requeridos son distintos y no aparecen en ningún rol
    de importaciones previas.
 7. `payload_hash` coincide con comando canónico.
-8. Cuota inicial y allocations todavía son compatibles con deuda viva.
+8. Cuota inicial y allocations todavía son compatibles con deuda viva. Mora que
+   creció no invalida pago: se consume primero únicamente desde MORA_INTERES;
+   link sobrado por deuda achicada sí requiere revisión.
 9. Voucher keys requeridas son no vacías, distintas cuando hay dos y pertenecen
    al prefijo del grupo.
 
@@ -290,14 +292,15 @@ Inyectar error después de cada familia de escritura y comprobar cero cambios:
 
 ### Págalo
 
-- ACCEPT requeridos crean importación y N pagos `pending`.
+- ACCEPT requeridos crean importación y N pagos `validated`.
 - Todos pagos tienen mismo `pagalo_import_id`, origen `pagalo` y banco nulo.
 - Cada pago expone uno o dos vouchers requeridos mediante `boletas`.
 - Retry exacto no crea filas adicionales.
 - Hash distinto y transacción reutilizada no crean pagos.
-- Mora sola con un ACCEPT crea fila especial sin marcar cuota pagada.
-- Operación con capital no puede importarse con una sola transacción ACCEPT.
-- Drift de crédito/cuotas termina `REVIEW_REQUIRED`.
+- Mora-only o solo-capital con un ACCEPT crea flujo de un link.
+- Operación de dos lados no puede importarse con una sola transacción ACCEPT.
+- Link sobrado por deuda achicada termina `REVIEW_REQUIRED`; mora crecida se
+  consume primero desde MORA_INTERES e informa faltante.
 
 ## 10. Criterio de cierre
 

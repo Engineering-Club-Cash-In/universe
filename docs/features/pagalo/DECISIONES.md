@@ -3,6 +3,23 @@
 Este archivo registra decisiones vigentes. Cambiar una exige actualizar
 contrato, pruebas y plan afectados.
 
+## Precedencia del circuito compartido
+
+Las decisiones D-45…D-52 de
+[`bot-whatsapp-cobros/DECISIONES.md`](../bot-whatsapp-cobros/DECISIONES.md)
+mandan para reglas compartidas por bot y asesor. D-01…D-18 explican cómo
+Ficha 360 consume ese circuito y no pueden contradecirlo.
+
+| Decisión asesor | Fuente compartida |
+| --- | --- |
+| D-01, D-02, D-08, D-13, D-15 | D-45 |
+| D-03, D-04, D-05, D-11 | D-48 |
+| D-06 | D-51 |
+| D-07 | D-49 |
+| D-09, D-10, D-12 | D-50 |
+| D-14, D-17 | D-52 |
+| D-16, D-18 | D-46 |
+
 ## D-01 · Solo desarrollo
 
 Implementación y pruebas usan sandbox. Integración queda detrás de feature flag
@@ -16,23 +33,26 @@ reales. Credenciales Págalo nunca llegan a Cartera.
 
 ## D-03 · Un grupo contiene uno o dos componentes reales
 
-Una selección con cuotas genera `CAPITAL` no facturable y `MORA_INTERES`
-facturable. Una selección de solo mora genera únicamente `MORA_INTERES`.
-Nunca se crea fila ni link CAPITAL por Q0.00. Cada link usa monto fijo. Cuando
-hay dos, pagar solo uno deja grupo parcial y no crea pagos.
+Regla compartida: [D-48](../bot-whatsapp-cobros/DECISIONES.md#d-48--capital-en-un-link-todo-lo-demás-en-el-otro).
+`CAPITAL` contiene capital no facturable; `MORA_INTERES` contiene todo rubro
+facturable. Cualquiera de ambos subtotales puede ser Q0.00 —mora-only o
+solo-capital, por ejemplo cuando pago parcial ya cubrió interés y rubros— y ese
+link no se crea. Nunca hay fila ni link ficticio de Q0.00. Cuando hay dos,
+pagar solo uno deja grupo parcial y no crea pagos.
 
 ## D-04 · Envío conjunto
 
 Cliente recibe un solo mensaje con todos los links requeridos etiquetados. CRM
-no envía nada hasta crear correctamente el único link de mora o los dos links
-de una selección con cuotas.
+no envía nada hasta crear grupo completo: uno o dos links según D-48. Texto
+visible siempre neutro: `Crédito {sifco} · Pago`, o `Pago 1 de 2` / `Pago 2 de
+2`; nunca nombra mora o intereses.
 
 ## D-05 · Todos los ACCEPT requeridos antes de registrar
 
 Cartera recibe importación únicamente cuando CRM eligió una transacción
 `ACCEPT` por cada tipo requerido, validó moneda/montos y tiene sus vouchers.
-Mora sola requiere un `ACCEPT`; cuotas requieren dos. Diferencia o ambigüedad
-lleva grupo a `REVIEW_REQUIRED`; nunca se crea pago especulativo.
+Grupo de un link requiere un `ACCEPT`; uno de dos requiere ambos. Diferencia o
+ambigüedad lleva grupo a `REVIEW_REQUIRED`; nunca se crea pago especulativo.
 
 ## D-06 · Sin expiración en MVP
 
@@ -58,11 +78,13 @@ transacción. Front y bot usan transacción interna; importación Págalo abre u
 transacción que incluye cabecera, pagos, boletas y estado final, y se la pasa al
 motor. Todos los helpers de persistencia usan el executor recibido.
 
-## D-10 · Primer slice solo registra pagos pendientes
+## D-10 · Pago Págalo nace validado
 
-Resultado esperado es `pagos_credito.validation_status='pending'`. No se llama
-validación contable, aplicación de inversionistas ni facturación. Se conserva,
-sin ampliar, comportamiento vigente que `/newPayment` ejecuta durante registro.
+Regla compartida: [D-50](../bot-whatsapp-cobros/DECISIONES.md#d-50--el-pago-por-link-nace-validado).
+Después de verificar `ACCEPT` con Págalo y voucher propio, resultado esperado
+es `pagos_credito.validation_status='validated'`. No pasa por bandeja de
+conta. Importación reutiliza flujo existente de pago validado; este slice no
+agrega una factura ni proceso de inversionistas alterno.
 
 ## D-11 · Págalo no inventa banco ni autorización única
 
@@ -90,9 +112,10 @@ transacciones no pueden reutilizarse.
 
 CRM envía selección congelada y totales. Bajo lock del crédito, Cartera valida
 identidad crédito/SIFCO, cuota inicial, moneda, sumas y compatibilidad con deuda
-vigente. Si cambió de forma que impide aplicar comando original, persiste
-`REVIEW_REQUIRED` sin crear pagos. No redistribuye silenciosamente una
-operación Págalo contra una intención diferente.
+vigente. Si deuda se achicó y deja link sobrado, persiste `REVIEW_REQUIRED` sin
+crear pagos. Si mora creció, dinero emitido se aplica: mora vigente se consume
+primero solo desde `MORA_INTERES` y recibo informa faltante. No redistribuye
+silenciosamente dinero entre lados. Ver D-52.
 
 ## D-15 · Endpoint Págalo separado; servicio compartido
 
@@ -104,30 +127,32 @@ que clientes normales puedan inyectar `pagalo_import_id` o fingir evidencia.
 ## D-16 · Selector cobra unidades completas
 
 Botón `Generar links de pago` vive junto a `Registrar Contacto` en Ficha 360.
-Modal reutiliza patrón visual de Promesa de Pago. Primera versión muestra cuotas
-atrasadas; inicia con todas seleccionadas y permite quitar únicamente desde la
-última hacia la primera, conservando un rango consecutivo desde la más antigua.
-Cada cuota se cobra completa y monto no es editable.
+Modal reutiliza patrón visual de Promesa de Pago. Muestra cuotas atrasadas en
+rango consecutivo desde la más antigua y permite agregar próxima cuota por
+vencer, como bot (D-46). Cada cuota se cobra completa y monto no es editable.
 
 Si mora vigente es mayor que cero, aparece seleccionada y bloqueada mientras
 haya cuotas elegidas. Asesor también puede desmarcar todas las cuotas y dejar
 solo mora completa. No existen pagos parciales de cuota ni mora desde este flujo.
 
-## D-17 · Link de mora viejo no se cancela solo localmente
+## D-17 · Link viejo: mora primero; revisión solo por sobrante
 
 Monto de mora queda congelado al generar link. Worker compara snapshot contra
 mora viva. Documentación Págalo muestra estado cancelado, pero no publica un
 endpoint para cancelar un link pendiente; por tanto CRM no puede declarar
 cancelación remota sin confirmación del proveedor.
 
-Mientras no exista contrato oficial de cancelación, un link pagado cuyo monto ya
-no coincide pasa `REVIEW_REQUIRED` y no se distribuye automáticamente. Si Págalo
-confirma endpoint, worker podrá cancelar remoto, verificar estado cancelado y
-recién entonces generar reemplazo. Reversa de transacción pagada no se usa como
+Regla compartida: [D-51](../bot-whatsapp-cobros/DECISIONES.md#d-51--los-links-no-expiran-por-ahora)
+y [D-52](../bot-whatsapp-cobros/DECISIONES.md#d-52--si-la-mora-cambió-cuando-el-link-se-paga-mora-primero-y-se-avisa-el-faltante).
+Si mora creció, pago se aplica igual: `MORA_INTERES` consume primero mora viva,
+`CAPITAL` conserva destino y recibo informa faltante. Solo deuda achicada que
+deja link sobrado pasa `REVIEW_REQUIRED`. Si Págalo confirma cancelación remota,
+worker podrá cancelar antes de reemplazar; reversa pagada no sirve como
 cancelación de link.
 
-## D-18 · Cuotas futuras quedan diferidas
+## D-18 · Próxima cuota por vencer permitida
 
-Diseño futuro permitirá, cuando crédito esté al día, seleccionar una o varias
-cuotas futuras consecutivas desde la próxima pendiente. No forma parte de
-primera versión del modal ni del primer plan de implementación.
+Regla compartida: [D-46](../bot-whatsapp-cobros/DECISIONES.md#d-46--el-cliente-elige-cuántas-cuotas-el-crm-arma-el-monto).
+Selector del asesor permite agregar próxima cuota por vencer al rango de
+atrasadas; cuando está al día permite cuota actual/próxima pendiente. No permite
+cuotas futuras arbitrarias ni pagos parciales.

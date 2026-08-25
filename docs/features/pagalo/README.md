@@ -10,9 +10,11 @@ los links Págalo requeridos y, cuando Págalo confirme todas las transacciones
 esperadas, registre los pagos correspondientes en Cartera usando la misma lógica
 financiera que hoy usan Ficha 360 y bot de WhatsApp.
 
-Una selección con cuotas genera `CAPITAL` y `MORA_INTERES`. Una selección de
-solo mora genera únicamente `MORA_INTERES`; nunca se crea un link CAPITAL de
-Q0.00.
+Un grupo tiene uno o dos links reales. `CAPITAL` contiene solo capital; el
+otro lado contiene todos los rubros facturables, incluida mora. Si cualquiera
+de los subtotales es Q0.00, ese link no se crea: existen tanto mora-only como
+solo-capital. Nunca se crea un link ficticio por Q0.00. Ver D-48 del contrato
+compartido del bot.
 
 ## Documentos
 
@@ -54,7 +56,7 @@ cartera-back POST /pagalo/payment-imports
   ▼
 procesarRegistroPago() ── mismo motor de Ficha 360 y bot
   │
-  ├─ N pagos_credito (pending, origen pagalo, pagalo_import_id)
+  ├─ N pagos_credito (validated, origen pagalo, pagalo_import_id)
   └─ boletas (uno o dos vouchers por cada pago creado)
 ```
 
@@ -62,9 +64,9 @@ procesarRegistroPago() ── mismo motor de Ficha 360 y bot
 
 El primer slice empieza con un grupo CRM que ya posee todas sus transacciones
 requeridas en `ACCEPT` y vouchers almacenados, y termina con pagos de Cartera
-creados en estado pendiente. Puede recibir una fuente `MORA_INTERES` para mora
-sola o dos fuentes para cuotas. No crea links, no consulta Págalo, no envía
-WhatsApp, no valida pagos, no procesa inversionistas y no factura.
+creados ya validados. Puede recibir una fuente CAPITAL, una fuente
+MORA_INTERES o ambas, según los componentes reales. No crea links, no consulta
+Págalo, no envía WhatsApp, no procesa inversionistas y no factura.
 
 `registerPayment` conserva exactamente su semántica vigente al registrar:
 cualquier efecto que hoy forma parte de `/newPayment` —por ejemplo el manejo de

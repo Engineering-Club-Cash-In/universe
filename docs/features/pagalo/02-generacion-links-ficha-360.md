@@ -81,9 +81,18 @@ Total a pagar                             Q150.00
 Se generará 1 link de pago
 ```
 
-Bloque CAPITAL no se muestra cuando subtotal es cero. Botón final cambia texto:
+Para solo-capital, por ejemplo cuota parcialmente cubierta cuyos rubros
+facturables ya llegaron a cero:
 
-- `Generar 1 link de pago` para mora sola;
+```text
+Link de pago                             Q1,800.00
+Total a pagar                            Q1,800.00
+Se generará 1 link de pago
+```
+
+Solo se muestran bloques con subtotal positivo. Botón final cambia texto:
+
+- `Generar 1 link de pago` para mora sola o solo-capital;
 - `Generar 2 links de pago` cuando existen ambos componentes.
 
 ## 4. Cálculo y fuente de verdad
@@ -201,13 +210,16 @@ flujo Págalo listo end-to-end.
 2. Mora mayor que cero siempre forma parte de selección con cuotas.
 3. Todas las cuotas pueden quitarse y mora sola sigue siendo válida.
 4. Mora sola crea un grupo, un link, un voucher y una fuente ACCEPT.
-5. Cuotas crean un grupo y dos links; un ACCEPT deja grupo parcial.
-6. Desglose mostrado coincide en centavos con payload y snapshot guardados.
-7. Fallo creando segundo link no envía primero al cliente.
-8. Diferencia de mora antes de generar bloquea operación y refresca modal.
-9. Mora crecida se aplica primero desde MORA_INTERES e informa faltante; solo
+5. Cuotas crean uno o dos links según subtotales positivos; dos links requieren
+   dos ACCEPT y un solo link queda listo con su único ACCEPT.
+6. Cuota parcialmente pagada con saldo solo CAPITAL crea un link CAPITAL, un
+   voucher y una fuente ACCEPT; no muestra bloque facturable.
+7. Desglose mostrado coincide en centavos con payload y snapshot guardados.
+8. Fallo creando segundo link no envía primero al cliente.
+9. Diferencia de mora antes de generar bloquea operación y refresca modal.
+10. Mora crecida se aplica primero desde MORA_INTERES e informa faltante; solo
    deuda achicada con link sobrado deja `REVIEW_REQUIRED`.
-10. Doble submit/retry no crea grupos o links duplicados.
+11. Doble submit/retry no crea grupos o links duplicados.
 
 ## 10. Fuera de alcance
 
@@ -217,4 +229,4 @@ flujo Págalo listo end-to-end.
 - expiración automática;
 - cancelación remota hasta contrato oficial;
 - producción;
-- validación contable, facturación y aplicación a inversionistas.
+- validación manual, facturación nueva o aplicación a inversionistas alternativa.

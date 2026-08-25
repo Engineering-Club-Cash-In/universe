@@ -66,7 +66,9 @@ El primer slice empieza con un grupo CRM que ya posee todas sus transacciones
 requeridas en `ACCEPT` y vouchers almacenados, y termina con pagos de Cartera
 creados ya validados. Puede recibir una fuente CAPITAL, una fuente
 MORA_INTERES o ambas, según los componentes reales. No crea links, no consulta
-Págalo, no envía WhatsApp, no procesa inversionistas y no factura.
+Págalo, no envía WhatsApp ni factura. Sí extrae y reutiliza validación y
+distribución a inversionistas ya existentes, dentro de misma transacción, para
+que pago Págalo salga `validated` sin crear un flujo financiero paralelo.
 
 `registerPayment` conserva exactamente su semántica vigente al registrar:
 cualquier efecto que hoy forma parte de `/newPayment` —por ejemplo el manejo de

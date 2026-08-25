@@ -350,5 +350,6 @@ Slice termina cuando:
 2. pruebas de rollback cubren familias de efectos;
 3. endpoint Págalo crea pagos multicuota e idempotentes en sandbox;
 4. Ficha 360 y bot siguen registrando pagos mediante mismo endpoint;
-5. ningún código de creación de links, polling, WhatsApp, validación o factura se
-   incluye en este slice.
+5. validación y distribución existentes se ejecutan por helpers extraídos dentro
+   de transacción; ningún código de creación de links, polling, WhatsApp ni
+   facturación nueva se incluye en este slice.

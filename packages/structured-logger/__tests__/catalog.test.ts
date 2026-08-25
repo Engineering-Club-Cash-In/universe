@@ -10,7 +10,11 @@ describe('carteraCatalog', () => {
     expect(Object.keys(carteraCatalog.events).sort()).toEqual([
       'audit.persistence',
       'auth.jwt_validation',
+      'credit.capital_contribution',
+      'credit.capital_payment_audit',
       'credit.creation',
+      'credit.due_date',
+      'credit.late_fee',
       'credit.liquidation',
       'credit.schedule_recalculation',
       'credit.update',
@@ -26,7 +30,9 @@ describe('carteraCatalog', () => {
       'payment.integrity_anomaly',
       'payment.investor_distribution',
       'payment.registration',
+      'payment.revalidation',
       'payment.reversal',
+      'payment.reversal_to_pending',
       'payment.upload',
       'service.lifecycle',
     ]);
@@ -97,5 +103,158 @@ describe('carteraCatalog', () => {
   test('requires manual action for local invoice state inconsistencies', () => {
     expect(carteraCatalog.events['invoice.voiding'].outcomes.local_state_inconsistent.constants)
       .toEqual({ manual_action_required: true });
+  });
+
+  test('defines a finite safe contract for the capital-payment audit slice', () => {
+    expect(carteraCatalog.fields.audit_operation).toEqual({
+      type: 'enum',
+      values: ['query', 'diagnostic'],
+    });
+    expect(carteraCatalog.events['credit.capital_payment_audit']).toEqual({
+      outcomes: {
+        completed: {
+          level: 'info',
+          required: [
+            'audit_operation',
+            'processed_count',
+            'succeeded_count',
+            'failed_count',
+            'duration_ms',
+          ],
+          optional: [],
+        },
+        diagnostic_completed: {
+          level: 'info',
+          required: ['audit_operation', 'duration_ms'],
+          optional: [],
+          constants: { audit_operation: 'diagnostic' },
+        },
+        partially_completed: {
+          level: 'warn',
+          required: [
+            'audit_operation',
+            'processed_count',
+            'succeeded_count',
+            'failed_count',
+            'duration_ms',
+          ],
+          optional: [],
+        },
+        rejected: {
+          level: 'warn',
+          required: ['audit_operation', 'duration_ms', 'reason_code'],
+          optional: [],
+        },
+        failed: {
+          level: 'error',
+          required: ['audit_operation', 'duration_ms', 'error_code'],
+          optional: [],
+        },
+      },
+    });
+  });
+
+  test('defines a finite safe contract for capital-contribution persistence failures', () => {
+    expect(carteraCatalog.fields.contribution_operation).toEqual({
+      type: 'enum',
+      values: ['create', 'update'],
+    });
+    expect(carteraCatalog.events['credit.capital_contribution']).toEqual({
+      outcomes: {
+        completed: {
+          level: 'info',
+          required: ['contribution_operation', 'duration_ms'],
+          optional: [],
+        },
+        rejected: {
+          level: 'warn',
+          required: ['contribution_operation', 'duration_ms', 'reason_code'],
+          optional: [],
+        },
+        failed: {
+          level: 'error',
+          required: ['contribution_operation', 'duration_ms', 'error_code'],
+          optional: [],
+          constants: { error_code: 'persistence_failed' },
+        },
+      },
+    });
+  });
+
+  test('defines a finite safe contract for late-fee operations', () => {
+    expect(carteraCatalog.fields.late_fee_operation).toEqual({
+      type: 'enum',
+      values: ['history', 'deactivate', 'create', 'update', 'process', 'condone', 'list', 'bulk_condone'],
+    });
+    expect(carteraCatalog.events['credit.late_fee']).toEqual({
+      outcomes: {
+        completed: {
+          level: 'info',
+          required: ['late_fee_operation', 'duration_ms'],
+          optional: ['processed_count', 'succeeded_count', 'failed_count', 'skipped_count'],
+        },
+        skipped: {
+          level: 'info',
+          required: ['late_fee_operation', 'duration_ms', 'reason_code'],
+          optional: [],
+        },
+        rejected: {
+          level: 'warn',
+          required: ['late_fee_operation', 'duration_ms', 'reason_code'],
+          optional: [],
+        },
+        degraded: {
+          level: 'warn',
+          required: ['late_fee_operation', 'duration_ms', 'error_code'],
+          optional: [],
+        },
+        failed: {
+          level: 'error',
+          required: ['late_fee_operation', 'duration_ms', 'error_code'],
+          optional: [],
+        },
+      },
+    });
+  });
+
+  test('defines a finite safe contract for due-date maintenance', () => {
+    expect(carteraCatalog.fields.due_date_operation).toEqual({
+      type: 'enum',
+      values: ['batch_update', 'repair_missing_february', 'change_start_date', 'list_change_history', 'single_update', 'json_bulk_update'],
+    });
+    expect(carteraCatalog.events['credit.due_date']).toEqual({
+      outcomes: {
+        completed: {
+          level: 'info',
+          required: ['due_date_operation', 'duration_ms'],
+          optional: ['processed_count', 'succeeded_count', 'failed_count', 'skipped_count'],
+        },
+        skipped: {
+          level: 'info',
+          required: ['due_date_operation', 'processed_count', 'succeeded_count', 'failed_count', 'skipped_count', 'duration_ms', 'reason_code'],
+          optional: [],
+        },
+        partially_completed: {
+          level: 'warn',
+          required: ['due_date_operation', 'processed_count', 'succeeded_count', 'failed_count', 'skipped_count', 'duration_ms', 'reason_code'],
+          optional: [],
+        },
+        rejected: {
+          level: 'warn',
+          required: ['due_date_operation', 'duration_ms', 'reason_code'],
+          optional: [],
+        },
+        partially_persisted: {
+          level: 'error',
+          required: ['due_date_operation', 'duration_ms', 'error_code'],
+          optional: [],
+        },
+        failed: {
+          level: 'error',
+          required: ['due_date_operation', 'duration_ms', 'error_code'],
+          optional: [],
+        },
+      },
+    });
   });
 });

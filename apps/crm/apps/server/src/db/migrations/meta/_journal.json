@@ -124,8 +124,15 @@
 		{
 			"idx": 17,
 			"version": "7",
-			"when": 1787450062674,
-			"tag": "0030_add_partner_tracker",
+			"when": 1787097600000,
+			"tag": "0030_create_opportunity_validations",
+			"breakpoints": true
+		},
+		{
+			"idx": 18,
+			"version": "7",
+			"when": 1787679602360,
+			"tag": "0031_add_partner_tracker",
 			"breakpoints": true
 		}
 	]

@@ -25,14 +25,17 @@ Schema version: **1**
 | `anomaly_code` | enum: duplicate_pending_installment |
 | `assignment_mode` | enum: add, replace, process |
 | `attempt` | integer 1..10 |
+| `audit_operation` | enum: query, diagnostic |
 | `auth_reason` | enum: missing, invalid, expired |
 | `change_set` | enum: terms, schedule, investors, status, mixed |
 | `commit_ref` | string max=40 pattern=^[0-9a-f]{7,40}$ |
+| `contribution_operation` | enum: create, update |
 | `credit_closed` | boolean |
 | `credit_state_transition` | enum: to_active, to_agreement, to_delinquent, unchanged |
 | `credit_type` | enum: new, renewal |
 | `credit_updated` | boolean |
 | `distribution_mode` | enum: standard, frozen_split, proportional_fallback, clamped |
+| `due_date_operation` | enum: batch_update, repair_missing_february, change_start_date, list_change_history, single_update, json_bulk_update |
 | `duration_ms` | integer 0..86400000 |
 | `error_code` | enum: not_configured, invalid_input, timeout, connection_refused, http_4xx, http_5xx, invalid_payload, parse_failed, not_found, provider_rejected, access_denied, rate_limited, provider_unavailable, database_unavailable, conflict, integrity_violation, persistence_failed, unknown |
 | `failed_count` | integer 0..1000000000 |
@@ -42,6 +45,7 @@ Schema version: **1**
 | `investments_reversed` | boolean |
 | `investor_count` | integer 0..1000000000 |
 | `job_name` | enum: process_late_fees, upsert_advisor_effectiveness, expire_portfolio_purchases, generate_monthly_close, verify_sat_invoices, report_failed_sat_invoices, generate_daily_invoice_snapshot |
+| `late_fee_operation` | enum: history, deactivate, create, update, process, condone, list, bulk_condone |
 | `late_fee_recreation` | enum: not_required, completed, failed |
 | `liquidation_mode` | enum: single, batch, credit |
 | `lock_state` | enum: not_attempted, acquired, failed |
@@ -51,14 +55,15 @@ Schema version: **1**
 | `notification_attempted` | boolean |
 | `operation` | enum: certify_document, lookup_internal_document, get_document, void_document, verify_document, lookup_taxpayer, list_clients, list_client_loans, get_loan_detail, list_installments, get_surcharges, get_statement, get_loan_info, bulk_sync, put_upload, put_invoice_pdf, create_signed_url, delete_object, fetch_invoice_logo, send_failed_invoice_report, write |
 | `payment_kind` | enum: normal, other_only, capital_only, agreement |
-| `previous_payment_state` | enum: applied, pending |
+| `previous_payment_state` | enum: applied, pending, unknown |
 | `processed_count` | integer 0..1000000000 |
 | `provider` | enum: cofidi_sat, cofidi_nit, sifco, cloudflare_r2, remote_asset, email_provider |
-| `reason_code` | enum: schema_invalid, duplicate_receipt, payment_not_found, credit_not_found, agreement_already_active, payment_already_applied, no_investors, purchase_exceeds_mirror, missing_participation_date, state_conflict, provider_rejected, local_state_inconsistent, manual_reconciliation_required |
+| `reason_code` | enum: schema_invalid, duplicate_receipt, payment_not_found, credit_not_found, agreement_already_active, payment_already_applied, no_investors, purchase_exceeds_mirror, missing_participation_date, state_conflict, provider_rejected, local_state_inconsistent, manual_reconciliation_required, invalid_late_fee_amount, invalid_installment_count, overdue_count_mismatch, excluded_credit_state, amount_out_of_range, override_reason_missing, user_not_found, active_late_fee_not_found, concurrent_run, installments_not_found, paid_installment_conflict, item_failures, missing_payment_reference, overdue_installments_remain, capital_contribution_not_found |
 | `recalculation_strategy` | enum: single, bulk, from_json, migration |
 | `recovery_applied` | boolean |
 | `requested_state` | enum: active, inactive |
 | `retryable` | boolean |
+| `reversal_path` | enum: already_pending, validated_payment |
 | `route_template` | enum: /upload, /newPayment |
 | `rubric_count` | integer 0..1000000000 |
 | `skipped_count` | integer 0..1000000000 |
@@ -82,6 +87,24 @@ Schema version: **1**
 |---|---|---|---|---|
 | `rejected` | `warn` | `auth_reason` | — | — |
 
+### `credit.capital_contribution`
+
+| Outcome | Level | Required | Optional | Constants |
+|---|---|---|---|---|
+| `completed` | `info` | `contribution_operation`, `duration_ms` | — | — |
+| `failed` | `error` | `contribution_operation`, `duration_ms`, `error_code` | — | `error_code=persistence_failed` |
+| `rejected` | `warn` | `contribution_operation`, `duration_ms`, `reason_code` | — | — |
+
+### `credit.capital_payment_audit`
+
+| Outcome | Level | Required | Optional | Constants |
+|---|---|---|---|---|
+| `completed` | `info` | `audit_operation`, `processed_count`, `succeeded_count`, `failed_count`, `duration_ms` | — | — |
+| `diagnostic_completed` | `info` | `audit_operation`, `duration_ms` | — | `audit_operation=diagnostic` |
+| `failed` | `error` | `audit_operation`, `duration_ms`, `error_code` | — | — |
+| `partially_completed` | `warn` | `audit_operation`, `processed_count`, `succeeded_count`, `failed_count`, `duration_ms` | — | — |
+| `rejected` | `warn` | `audit_operation`, `duration_ms`, `reason_code` | — | — |
+
 ### `credit.creation`
 
 | Outcome | Level | Required | Optional | Constants |
@@ -89,6 +112,27 @@ Schema version: **1**
 | `created` | `info` | `credit_type`, `investor_count`, `rubric_count`, `advisor_assignment_source`, `notification_attempted`, `duration_ms` | — | — |
 | `failed` | `error` | `credit_type`, `investor_count`, `rubric_count`, `advisor_assignment_source`, `notification_attempted`, `duration_ms`, `error_code` | — | — |
 | `rejected` | `warn` | `credit_type`, `investor_count`, `rubric_count`, `advisor_assignment_source`, `notification_attempted`, `duration_ms`, `reason_code` | — | — |
+
+### `credit.due_date`
+
+| Outcome | Level | Required | Optional | Constants |
+|---|---|---|---|---|
+| `completed` | `info` | `due_date_operation`, `duration_ms` | `processed_count`, `succeeded_count`, `failed_count`, `skipped_count` | — |
+| `failed` | `error` | `due_date_operation`, `duration_ms`, `error_code` | — | — |
+| `partially_completed` | `warn` | `due_date_operation`, `processed_count`, `succeeded_count`, `failed_count`, `skipped_count`, `duration_ms`, `reason_code` | — | — |
+| `partially_persisted` | `error` | `due_date_operation`, `duration_ms`, `error_code` | — | — |
+| `rejected` | `warn` | `due_date_operation`, `duration_ms`, `reason_code` | — | — |
+| `skipped` | `info` | `due_date_operation`, `processed_count`, `succeeded_count`, `failed_count`, `skipped_count`, `duration_ms`, `reason_code` | — | — |
+
+### `credit.late_fee`
+
+| Outcome | Level | Required | Optional | Constants |
+|---|---|---|---|---|
+| `completed` | `info` | `late_fee_operation`, `duration_ms` | `processed_count`, `succeeded_count`, `failed_count`, `skipped_count` | — |
+| `degraded` | `warn` | `late_fee_operation`, `duration_ms`, `error_code` | — | — |
+| `failed` | `error` | `late_fee_operation`, `duration_ms`, `error_code` | — | — |
+| `rejected` | `warn` | `late_fee_operation`, `duration_ms`, `reason_code` | — | — |
+| `skipped` | `info` | `late_fee_operation`, `duration_ms`, `reason_code` | — | — |
 
 ### `credit.liquidation`
 
@@ -209,6 +253,14 @@ Schema version: **1**
 | `failed` | `error` | `payment_kind`, `duration_ms`, `lock_state`, `error_code` | — | — |
 | `rejected` | `warn` | `payment_kind`, `duration_ms`, `lock_state`, `reason_code` | — | — |
 
+### `payment.revalidation`
+
+| Outcome | Level | Required | Optional | Constants |
+|---|---|---|---|---|
+| `completed` | `info` | `credit_updated`, `installment_closed`, `duration_ms` | — | — |
+| `failed` | `error` | `credit_updated`, `installment_closed`, `duration_ms`, `error_code` | — | — |
+| `rejected` | `warn` | `credit_updated`, `installment_closed`, `duration_ms`, `reason_code` | — | — |
+
 ### `payment.reversal`
 
 | Outcome | Level | Required | Optional | Constants |
@@ -217,6 +269,16 @@ Schema version: **1**
 | `failed` | `error` | `previous_payment_state`, `credit_updated`, `investments_reversed`, `manual_action_required`, `duration_ms`, `error_code` | — | — |
 | `partially_completed` | `warn` | `previous_payment_state`, `credit_updated`, `investments_reversed`, `manual_action_required`, `duration_ms`, `reason_code` | — | — |
 | `rejected` | `warn` | `previous_payment_state`, `credit_updated`, `investments_reversed`, `manual_action_required`, `duration_ms`, `reason_code` | — | — |
+
+### `payment.reversal_to_pending`
+
+| Outcome | Level | Required | Optional | Constants |
+|---|---|---|---|---|
+| `completed` | `info` | `reversal_path`, `processed_count`, `succeeded_count`, `failed_count`, `duration_ms` | — | — |
+| `failed` | `error` | `duration_ms`, `error_code` | — | — |
+| `local_state_inconsistent` | `error` | `reversal_path`, `processed_count`, `succeeded_count`, `failed_count`, `duration_ms`, `error_code` | — | `error_code=persistence_failed` |
+| `partially_completed` | `warn` | `reversal_path`, `processed_count`, `succeeded_count`, `failed_count`, `duration_ms` | — | — |
+| `rejected` | `warn` | `duration_ms`, `reason_code` | — | — |
 
 ### `payment.upload`
 

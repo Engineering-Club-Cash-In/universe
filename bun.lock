@@ -76,6 +76,7 @@
         "@grotto/logysia": "^0.1.1",
         "@headlessui/react": "^2.2.7",
         "@libsql/client": "0.14.0",
+        "@repo/structured-logger": "workspace:*",
         "@sinclair/typebox": "^0.34.41",
         "@tanstack/react-query": "^5.81.2",
         "@tanstack/react-query-devtools": "^5.81.2",

@@ -34,6 +34,44 @@ import {
   recomputeCreditAfterCapital,
   shouldIncobrableInstallmentBePaid,
 } from "./registerPaymentPolicy";
+import {
+  emitInvoiceVoiding,
+  emitPaymentReversal,
+} from "../utils/structuredLogger";
+import {
+  classifyInvoiceVoidingBatch,
+  classifyPaymentReversalCompletion,
+  classifyPaymentReversalFailure,
+} from "./reversePaymentTelemetry";
+
+const MAX_TELEMETRY_DURATION_MS = 86_400_000;
+
+function safeNow(): number {
+  try {
+    const value = Date.now();
+    return Number.isFinite(value) ? value : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function elapsedMilliseconds(startedAt: number): number {
+  try {
+    const value = safeNow() - startedAt;
+    return Math.min(MAX_TELEMETRY_DURATION_MS, Math.max(0, Number.isFinite(value) ? value : 0));
+  } catch {
+    return 0;
+  }
+}
+
+function caughtErrorMessage(error: unknown): string | undefined {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "object" && error !== null && "message" in error) {
+    const value = Reflect.get(error, "message");
+    return typeof value === "string" ? value : undefined;
+  }
+  return undefined;
+}
 // ============================================================================
 // SCHEMA DE VALIDACIÓN
 // ============================================================================
@@ -59,9 +97,28 @@ export const reversePaymentSchema = z.object({
  * @param set - Handler de respuesta HTTP
  * @returns Objeto con el resultado de la operación
  */
-export const reversePayment = async ({ body, set }: any) => {
+export interface ReversePaymentDependencies {
+  readonly runTransaction: typeof db.transaction;
+  readonly reverseInvestors: typeof processAndReplaceCreditInvestorsReverse;
+  readonly reverseCapitalPayment: typeof revertirAbonoCapitalEspejo;
+}
+
+const defaultDependencies: ReversePaymentDependencies = {
+  runTransaction: db.transaction.bind(db),
+  reverseInvestors: processAndReplaceCreditInvestorsReverse,
+  reverseCapitalPayment: revertirAbonoCapitalEspejo,
+};
+
+export function createReversePayment(
+  dependencies: ReversePaymentDependencies = defaultDependencies,
+) {
+  return async ({ body, set, telemetryLogger }: any) => {
+  const startedAt = safeNow();
+  let previousPaymentState: "applied" | "pending" | "unknown" = "unknown";
+  let mayHaveGlobalPersistence = false;
+  let investmentsReversed = false;
+  let transactionCommitted = false;
   try {
-    console.log("\n🔄 ========== INICIO REVERSIÓN DE PAGO ==========");
 
     // ========================================================================
     // 1️⃣ VALIDAR ENTRADA
@@ -69,19 +126,26 @@ export const reversePayment = async ({ body, set }: any) => {
     const parseResult = reversePaymentSchema.safeParse(body);
     if (!parseResult.success) {
       set.status = 400;
+      emitPaymentReversal({
+        outcome: "rejected",
+        previousPaymentState: "unknown",
+        creditUpdated: false,
+        investmentsReversed: false,
+        manualActionRequired: false,
+        durationMs: elapsedMilliseconds(startedAt),
+        reasonCode: "schema_invalid",
+      }, telemetryLogger);
       return {
         message: "Validation failed",
         errors: parseResult.error.flatten().fieldErrors,
       };
     }
     const { credito_id, pago_id } = parseResult.data;
-    console.log(`📋 Crédito ID: ${credito_id}`);
-    console.log(`🧾 Pago ID: ${pago_id}`);
 
     // ========================================================================
     // 🔥 INICIAR TRANSACCIÓN ATÓMICA
     // ========================================================================
-    const result = await db.transaction(async (tx) => {
+    const result = await dependencies.runTransaction(async (tx) => {
       // ======================================================================
       // 2️⃣ OBTENER DATOS DEL PAGO A REVERSAR
       // ======================================================================
@@ -101,8 +165,8 @@ export const reversePayment = async ({ body, set }: any) => {
       }
 
       const pagoValidado = esPagoAplicado(pago.validationStatus);
+      previousPaymentState = pagoValidado ? "applied" : "pending";
 
-      console.log(`✅ Pago encontrado | Validado: ${pagoValidado}`);
 
       // ======================================================================
       // 3️⃣ OBTENER DATOS DEL CRÉDITO
@@ -123,7 +187,6 @@ export const reversePayment = async ({ body, set }: any) => {
         throw new Error("Credit not found or not active");
       }
 
-      console.log("✅ Crédito encontrado y activo");
 
       // En un INCOBRABLE solo se permite reversar pagos de recuperación reales.
       // Reversar una fila estructural del castigo (system_reset / SISTEMA-INCOBRABLE
@@ -152,7 +215,6 @@ export const reversePayment = async ({ body, set }: any) => {
         throw new Error("User not found");
       }
 
-      console.log("✅ Usuario encontrado");
 
       // ======================================================================
       // 4️⃣.5️⃣ REVERSAR EL ABONO A CAPITAL DEL ESPEJO (abonos_capital)
@@ -170,7 +232,7 @@ export const reversePayment = async ({ body, set }: any) => {
       // después de ellas, el rollback NO las desharía: el pago quedaría sin
       // revertir pero la mora, el convenio y el saldo del inversionista ya
       // habrían cambiado. Se aborta antes de tocar nada.
-      const reversionEspejo = await revertirAbonoCapitalEspejo(pago_id, tx);
+      const reversionEspejo = await dependencies.reverseCapitalPayment(pago_id, tx);
 
       // ======================================================================
       // 4️⃣.6️⃣ LEER LAS FACTURAS ACTIVAS DEL PAGO (ANTES DE TOCARLO)
@@ -207,9 +269,6 @@ export const reversePayment = async ({ body, set }: any) => {
           ),
         );
 
-      console.log(
-        `📊 Se encontraron ${facturasDelPago.length} factura(s) activa(s)`,
-      );
 
       // ======================================================================
       // 5️⃣ RECALCULAR VALORES DEL CRÉDITO (solo si cuota está pagada)
@@ -220,9 +279,6 @@ export const reversePayment = async ({ body, set }: any) => {
       let deudatotal = new Big(creditData.creditos.deudatotal ?? 0);
 
       if (pagoValidado) {
-        console.log(
-          "\n📊 ========== RECALCULANDO VALORES DEL CRÉDITO ==========",
-        );
 
         const capitalActual = new Big(creditData.creditos.capital ?? 0);
         const abonoCapital = new Big(pago.abono_capital ?? 0);
@@ -243,21 +299,13 @@ export const reversePayment = async ({ body, set }: any) => {
         iva_12 = recomputed.iva;
         deudatotal = recomputed.deudaTotal;
 
-        console.log(`💰 Capital actual: ${capitalActual.toString()}`);
-        console.log(`💵 Abono capital a reversar: ${abonoCapital.toString()}`);
-        console.log(`✅ Nuevo capital: ${nuevoCapital.toString()}`);
-        console.log(`🔢 Nuevo interés: ${cuota_interes.toString()}`);
-        console.log(`🔢 Nuevo IVA: ${iva_12.toString()}`);
-        console.log(`💳 Nueva deuda total: ${deudatotal.toString()}`);
-      } else {
-        console.log("⏭️ Cuota no pagada — se omite recálculo de capital/interés/IVA");
       }
 
       // ======================================================================
       // 6️⃣ REVERSAR MORA SI EXISTÍA
       // ======================================================================
       if (pago.mora && Number(pago.mora) > 0) {
-        console.log(`⚠️ Reversando mora: ${pago.mora}`);
+        mayHaveGlobalPersistence = true;
         const reverseMoraResult = await updateMora({
           credito_id,
           monto_cambio: Number(pago.mora),
@@ -274,14 +322,11 @@ export const reversePayment = async ({ body, set }: any) => {
       // 6️⃣.5️⃣ REVERSAR PAGO DE CONVENIO SI EXISTÍA
       // ======================================================================
       if (pago.pagoConvenio && Number(pago.pagoConvenio) > 0) {
-        console.log(`⚠️ Reversando pago de convenio: ${pago.pagoConvenio}`);
-        const reverseConvenioResult = await reverseConvenioPayment({
+        mayHaveGlobalPersistence = true;
+        await reverseConvenioPayment({
           credito_id,
           monto_pago: Number(pago.pagoConvenio),
         });
-        console.log(
-          `✅ Pago de convenio reversado: ${reverseConvenioResult.message}`,
-        );
       }
 
       // ======================================================================
@@ -299,25 +344,23 @@ export const reversePayment = async ({ body, set }: any) => {
           })
           .where(eq(creditos.credito_id, credito_id));
 
-        console.log("✅ Crédito actualizado con nuevos valores");
-      } else {
-        console.log(`⏭️ Crédito NO actualizado (pagoValidado=${pagoValidado})`);
       }
 
       // ======================================================================
       // 8️⃣ REVERSAR INVERSIONES ASOCIADAS AL PAGO
       // ======================================================================
-      console.log("\n💼 ========== REVERSANDO INVERSIONES ==========");
-      await processAndReplaceCreditInvestorsReverse(
+      await dependencies.reverseInvestors(
         credito_id,
         pago_id,
+        () => {
+          mayHaveGlobalPersistence = true;
+        },
       );
-      console.log("✅ Inversiones reversadas correctamente");
+      investmentsReversed = true;
 
       // ======================================================================
       // 9️⃣ DEVOLVER ABONOS A LOS "RESTANTES" DEL PAGO
       // ======================================================================
-      console.log("\n🔙 ========== DEVOLVIENDO ABONOS A RESTANTES ==========");
 
       const nuevoCapitalRestante = new Big(pago.capital_restante ?? 0).plus(
         pago.abono_capital ?? 0,
@@ -338,24 +381,6 @@ export const reversePayment = async ({ body, set }: any) => {
         pago.membresias_pago ?? 0,
       );
 
-      console.log(
-        `💵 Capital restante: ${pago.capital_restante} → ${nuevoCapitalRestante.toString()}`,
-      );
-      console.log(
-        `💵 Interés restante: ${pago.interes_restante} → ${nuevoInteresRestante.toString()}`,
-      );
-      console.log(
-        `💵 IVA restante: ${pago.iva_12_restante} → ${nuevoIvaRestante.toString()}`,
-      );
-      console.log(
-        `💵 Seguro restante: ${pago.seguro_restante} → ${nuevoSeguroRestante.toString()}`,
-      );
-      console.log(
-        `💵 GPS restante: ${pago.gps_restante} → ${nuevoGpsRestante.toString()}`,
-      );
-      console.log(
-        `💵 Membresías restante: ${pago.membresias} → ${nuevoMembresiasRestante.toString()}`,
-      );
 
       // ======================================================================
       // 🔟 ACTUALIZAR LA CUOTA ASOCIADA (marcar como NO pagada)
@@ -363,16 +388,11 @@ export const reversePayment = async ({ body, set }: any) => {
       const pagoEstabaPagado = pago.pagado === true;
       if (pagoEstabaPagado) {
         // Si el pago SÍ estaba pagado, actualizamos la cuota y reseteamos el pago
-        console.log(
-          "📝 Pago estaba PAGADO - Marcando cuota como NO pagada y reseteando pago",
-        );
 
-        console.log("✅ El estado de la cuota se recalculará con los pagos restantes");
 
         // ======================================================================
         // 1️⃣1️⃣ RESETEAR EL PAGO (devolver a estado inicial)
         // ======================================================================
-        console.log("\n🔄 ========== RESETEANDO VALORES DEL PAGO ==========");
 
         await tx
           .update(pagos_credito)
@@ -421,11 +441,7 @@ export const reversePayment = async ({ body, set }: any) => {
           })
           .where(eq(pagos_credito.pago_id, pago_id));
 
-        console.log(
-          "✅ Pago reseteado correctamente (mantiene registro histórico)",
-        );
         await tx.delete(boletas).where(eq(boletas.pago_id, pago_id));
-        console.log("✅ Boletas eliminadas");
       } else {
         // Pago parcial - verificar si es el único registro de la cuota
         const cantidadPagos = pago.cuota_id === null
@@ -436,21 +452,17 @@ export const reversePayment = async ({ body, set }: any) => {
               .where(eq(pagos_credito.cuota_id, pago.cuota_id)))[0].count;
 
         await tx.delete(boletas).where(eq(boletas.pago_id, pago_id));
-        console.log("✅ Boletas eliminadas");
         await tx
           .delete(pagos_credito_inversionistas)
           .where(eq(pagos_credito_inversionistas.pago_id, pago_id));
-        console.log("✅ Pagos inversionistas eliminados");
 
         if (Number(cantidadPagos) > 1) {
           // Hay más registros, se puede eliminar este
           await tx
             .delete(pagos_credito)
             .where(eq(pagos_credito.pago_id, pago_id));
-          console.log("✅ Pago parcial eliminado (quedan otros registros en la cuota)");
         } else {
           // Es el único registro, resetear en vez de eliminar
-          console.log("⚠️ Único registro de la cuota, reseteando en vez de eliminar");
           await tx
             .update(pagos_credito)
             .set({
@@ -488,10 +500,8 @@ export const reversePayment = async ({ body, set }: any) => {
               banco_id: null,
             })
             .where(eq(pagos_credito.pago_id, pago_id));
-          console.log("✅ Pago reseteado (registro conservado para la cuota)");
         }
       }
-      console.log("✅ Pago reseteado correctamente");
 
       // ======================================================================
       // 1️⃣2️⃣ ELIMINAR BOLETAS ASOCIADAS
@@ -526,12 +536,10 @@ export const reversePayment = async ({ body, set }: any) => {
       await tx
         .delete(pagos_credito_inversionistas)
         .where(eq(pagos_credito_inversionistas.pago_id, pago_id));
-      console.log("✅ Pagos de inversionistas eliminados");
 
       // ======================================================================
       // 1️⃣4️⃣ ACTUALIZAR SALDO A FAVOR DEL USUARIO
       // ======================================================================
-      console.log("\n💰 ========== ACTUALIZANDO SALDO A FAVOR ==========");
 
       const saldoActual = new Big(user.saldo_a_favor ?? 0);
       const montoBoleta = new Big(pago.monto_boleta ?? 0);
@@ -542,16 +550,12 @@ export const reversePayment = async ({ body, set }: any) => {
         nuevoSaldoAFavor = new Big(0);
       }
 
-      console.log(`💵 Saldo actual: ${saldoActual.toString()}`);
-      console.log(`💵 Monto boleta: ${montoBoleta.toString()}`);
-      console.log(`✅ Nuevo saldo a favor: ${nuevoSaldoAFavor.toString()}`);
 
       await tx
         .update(usuarios)
         .set({ saldo_a_favor: nuevoSaldoAFavor.toString() })
         .where(eq(usuarios.usuario_id, user.usuario_id));
 
-      console.log("✅ Saldo a favor actualizado");
 
       // ======================================================================
       // 1️⃣5️⃣ LIMPIAR SOLO PLACEHOLDERS Y RECALCULAR ESTADO DE LA CUOTA
@@ -559,7 +563,6 @@ export const reversePayment = async ({ body, set }: any) => {
       let pagosDuplicados: { pago_id: number }[] = [];
 
       if (pagoEstabaPagado) {
-        console.log("\n🧹 ========== RECALCULANDO PAGOS DE LA CUOTA ==========");
 
         const pagosMismaCuota = pago.cuota_id === null
           ? []
@@ -643,12 +646,6 @@ export const reversePayment = async ({ body, set }: any) => {
             .where(inArray(pagos_credito.pago_id, pagosPagadosRestantesIds));
         }
 
-        console.log(`🗑️ Placeholders eliminados: ${pagosDuplicados.length}`);
-        console.log(
-          `✅ Cuota recalculada como ${cuotaPermanecePagada ? "PAGADA" : "NO pagada"}`,
-        );
-      } else {
-        console.log("\n⏭️ Pago eliminado - no se limpian duplicados");
       }
 
       // ======================================================================
@@ -656,6 +653,7 @@ export const reversePayment = async ({ body, set }: any) => {
       // ======================================================================
       return {
         pago,
+        pagoValidado,
         creditData,
         user,
         nuevoCapital,
@@ -671,6 +669,7 @@ export const reversePayment = async ({ body, set }: any) => {
         reversionEspejo,
       };
     });
+    transactionCommitted = true;
 // La reversión NO recalcula ninguna otra fila del crédito. La transacción de
 // arriba ya deja todo consistente (pago reseteado, capital/deuda restaurados).
 // Aquí vivía un updateInstallments({all: true}) (agregado en 0183a387, ene-2026)
@@ -709,9 +708,12 @@ export const reversePayment = async ({ body, set }: any) => {
       error?: string;
       mensaje?: string;
     }[] = [];
+    const invoiceVoidingStartedAt = safeNow();
+    let invoiceProviderRejectedCount = 0;
+    let invoiceUnexpectedFailureCount = 0;
+    let invoiceLocalStateFailureCount = 0;
 
     if (result.facturasDelPago.length > 0) {
-      console.log("\n🧾 ========== ANULANDO FACTURAS ELECTRÓNICAS ==========");
 
       for (const factura of result.facturasDelPago) {
         // Cada factura va en su propio try: de acá en adelante la reversa YA
@@ -720,9 +722,6 @@ export const reversePayment = async ({ body, set }: any) => {
         // con el cliente creyendo lo contrario. Se reporta en
         // `facturasConError` y se sigue con la próxima.
         try {
-          console.log(
-            `\n🧾 Procesando factura ${factura.serie}-${factura.numero} (${factura.uuid})`,
-          );
 
           // 1️⃣ ANULAR EN COFIDI
           const resultadoCofidi = await anularFacturaEnCofidi({
@@ -779,9 +778,6 @@ export const reversePayment = async ({ body, set }: any) => {
                 );
               }
 
-              console.log(
-                `   ✅ Factura ${factura.serie}-${factura.numero} anulada correctamente`,
-              );
 
               facturasAnuladas.push({
                 factura_id: factura.factura_id,
@@ -791,10 +787,7 @@ export const reversePayment = async ({ body, set }: any) => {
               });
             } catch (dbError: any) {
               // 🔴 Anulada en SAT pero la BD quedó ACTIVA: va a conciliación.
-              console.error(
-                `   ⚠️ Error al actualizar BD (factura YA anulada en COFIDI):`,
-                dbError.message,
-              );
+              invoiceLocalStateFailureCount += 1;
 
               facturasConError.push({
                 factura_id: factura.factura_id,
@@ -804,10 +797,8 @@ export const reversePayment = async ({ body, set }: any) => {
               });
             }
           } else {
-            console.error(
-              `   ❌ Error al anular en COFIDI:`,
-              resultadoCofidi.mensaje,
-            );
+            if (resultadoCofidi.error === "EXCEPTION") invoiceUnexpectedFailureCount += 1;
+            else invoiceProviderRejectedCount += 1;
 
             facturasConError.push({
               factura_id: factura.factura_id,
@@ -819,10 +810,7 @@ export const reversePayment = async ({ body, set }: any) => {
         } catch (facturaError: any) {
           // Red de seguridad: la reversa ya está firme, esta factura queda para
           // conciliación manual y el resto del lote sigue procesándose.
-          console.error(
-            `   ❌ Fallo inesperado anulando ${factura.serie}-${factura.numero}:`,
-            facturaError?.message ?? facturaError,
-          );
+          invoiceUnexpectedFailureCount += 1;
 
           facturasConError.push({
             factura_id: factura.factura_id,
@@ -833,20 +821,60 @@ export const reversePayment = async ({ body, set }: any) => {
         }
       }
 
-      console.log(`\n📊 Resumen anulación facturas:`);
-      console.log(`   ✅ Anuladas: ${facturasAnuladas.length}`);
-      console.log(`   ❌ Con error: ${facturasConError.length}`);
+      const invoiceTerminal = classifyInvoiceVoidingBatch({
+        succeededCount: facturasAnuladas.length,
+        providerRejectedCount: invoiceProviderRejectedCount,
+        unexpectedFailureCount: invoiceUnexpectedFailureCount,
+        localStateFailureCount: invoiceLocalStateFailureCount,
+        durationMs: elapsedMilliseconds(invoiceVoidingStartedAt),
+      });
+      if (invoiceTerminal.outcome === "completed") {
+        emitInvoiceVoiding({
+          outcome: "completed",
+          processedCount: invoiceTerminal.processedCount,
+          succeededCount: invoiceTerminal.succeededCount,
+          failedCount: invoiceTerminal.failedCount,
+          manualActionRequired: false,
+          durationMs: invoiceTerminal.durationMs,
+        }, telemetryLogger);
+      } else if (invoiceTerminal.outcome === "provider_rejected") {
+        emitInvoiceVoiding({
+          outcome: "provider_rejected",
+          processedCount: invoiceTerminal.processedCount,
+          succeededCount: invoiceTerminal.succeededCount,
+          failedCount: invoiceTerminal.failedCount,
+          manualActionRequired: true,
+          durationMs: invoiceTerminal.durationMs,
+          reasonCode: "provider_rejected",
+        }, telemetryLogger);
+      } else if (invoiceTerminal.outcome === "local_state_inconsistent") {
+        emitInvoiceVoiding({
+          outcome: "local_state_inconsistent",
+          processedCount: invoiceTerminal.processedCount,
+          succeededCount: invoiceTerminal.succeededCount,
+          failedCount: invoiceTerminal.failedCount,
+          manualActionRequired: true,
+          durationMs: invoiceTerminal.durationMs,
+          errorCode: "persistence_failed",
+        }, telemetryLogger);
+      } else {
+        emitInvoiceVoiding({
+          outcome: "failed",
+          processedCount: invoiceTerminal.processedCount,
+          succeededCount: invoiceTerminal.succeededCount,
+          failedCount: invoiceTerminal.failedCount,
+          manualActionRequired: true,
+          durationMs: invoiceTerminal.durationMs,
+          errorCode: invoiceTerminal.errorCode,
+        }, telemetryLogger);
+      }
     }
 
     // ========================================================================
     // ✅ TRANSACCIÓN COMPLETADA - RETORNAR RESULTADO EXITOSO
     // ========================================================================
-    console.log(
-      "\n✅ ========== REVERSIÓN COMPLETADA EXITOSAMENTE ==========\n",
-    );
 
-    set.status = 200;
-    return {
+    const response = {
       message: "Payment reversed successfully",
       data: {
         reversedPaymentId: pago_id,
@@ -885,23 +913,89 @@ export const reversePayment = async ({ body, set }: any) => {
             : undefined,
       },
     };
-  } catch (error: any) {
-    console.error("\n❌ ========== ERROR EN REVERSIÓN ==========");
-    console.error("[reversePayment] Error:", error);
-    console.error("========================================\n");
+    set.status = 200;
+    const terminal = classifyPaymentReversalCompletion({
+      previousPaymentState: result.pagoValidado ? "applied" : "pending",
+      creditUpdated: result.pagoValidado,
+      investmentsReversed,
+      invoiceFailureCount: facturasConError.length,
+      durationMs: elapsedMilliseconds(startedAt),
+    });
+    if (terminal.outcome === "completed") {
+      emitPaymentReversal({
+        outcome: "completed",
+        previousPaymentState: terminal.previousPaymentState,
+        creditUpdated: terminal.creditUpdated,
+        investmentsReversed: terminal.investmentsReversed,
+        manualActionRequired: false,
+        durationMs: terminal.durationMs,
+      }, telemetryLogger);
+    } else {
+      emitPaymentReversal({
+        outcome: "partially_completed",
+        previousPaymentState: terminal.previousPaymentState,
+        creditUpdated: terminal.creditUpdated,
+        investmentsReversed: terminal.investmentsReversed,
+        manualActionRequired: true,
+        durationMs: terminal.durationMs,
+        reasonCode: terminal.reasonCode,
+      }, telemetryLogger);
+    }
+    return response;
+  } catch (error: unknown) {
+    const errorMessage = caughtErrorMessage(error);
+    const terminal = classifyPaymentReversalFailure({
+      errorMessage,
+      transactionCommitted,
+      mayHaveGlobalPersistence,
+      previousPaymentState,
+      investmentsReversed,
+      durationMs: elapsedMilliseconds(startedAt),
+    });
+    if (terminal.outcome === "partially_completed") {
+      emitPaymentReversal({
+        outcome: "partially_completed",
+        previousPaymentState: terminal.previousPaymentState,
+        creditUpdated: terminal.creditUpdated,
+        investmentsReversed: terminal.investmentsReversed,
+        manualActionRequired: true,
+        durationMs: terminal.durationMs,
+        reasonCode: terminal.reasonCode,
+      }, telemetryLogger);
+    } else if (terminal.outcome === "rejected") {
+      emitPaymentReversal({
+        outcome: "rejected",
+        previousPaymentState: terminal.previousPaymentState,
+        creditUpdated: false,
+        investmentsReversed: terminal.investmentsReversed,
+        manualActionRequired: terminal.manualActionRequired,
+        durationMs: terminal.durationMs,
+        reasonCode: terminal.reasonCode,
+      }, telemetryLogger);
+    } else {
+      emitPaymentReversal({
+        outcome: "failed",
+        previousPaymentState: terminal.previousPaymentState,
+        creditUpdated: false,
+        investmentsReversed: terminal.investmentsReversed,
+        manualActionRequired: terminal.manualActionRequired,
+        durationMs: terminal.durationMs,
+        errorCode: terminal.errorCode,
+      }, telemetryLogger);
+    }
 
     // Determinar status code según el tipo de error
-    if (error.message === "Payment not found") {
+    if (errorMessage === "Payment not found") {
       set.status = 404;
     } else if (
-      error.message === "Payment is not marked as paid" ||
-      error.message === "Credit not found or not active" ||
-      error.message === "Incobrable structural row cannot be reversed" ||
-      error.message === "User not found" ||
+      errorMessage === "Payment is not marked as paid" ||
+      errorMessage === "Credit not found or not active" ||
+      errorMessage === "Incobrable structural row cannot be reversed" ||
+      errorMessage === "User not found" ||
       // Porteros del abono a capital: no es una falla del sistema, es que este
       // pago no se puede revertir hasta resolver el abono a mano.
-      error.message?.startsWith("[ABONO_YA_LIQUIDADO]") ||
-      error.message?.startsWith("[ABONO_EN_CALCULO_PENDIENTE]")
+      errorMessage?.startsWith("[ABONO_YA_LIQUIDADO]") ||
+      errorMessage?.startsWith("[ABONO_EN_CALCULO_PENDIENTE]")
     ) {
       set.status = 400;
     } else {
@@ -913,7 +1007,10 @@ export const reversePayment = async ({ body, set }: any) => {
       error: error instanceof Error ? error.message : String(error),
     };
   }
-};
+  };
+}
+
+export const reversePayment = createReversePayment();
 
 interface ReverseConvenioPaymentParams {
   credito_id: number;
@@ -943,9 +1040,6 @@ export async function reverseConvenioPayment(
   try {
     const { credito_id, monto_pago } = params;
 
-    console.log("\n🔄 ========== REVIRTIENDO PAGO DE CONVENIO ==========");
-    console.log("🏦 Crédito ID:", credito_id);
-    console.log("💵 Monto a revertir:", monto_pago);
 
     // 1. Buscar el convenio del crédito (puede estar completado o activo)
     const [convenio] = await db
@@ -960,7 +1054,6 @@ export async function reverseConvenioPayment(
       );
     }
 
-    console.log("📋 Convenio ID encontrado:", convenio.convenio_id);
 
     // 2. Convertir valores a Big.js
     const montoPagoBig = new Big(monto_pago);
@@ -968,7 +1061,6 @@ export async function reverseConvenioPayment(
     const montoPagadoActualBig = new Big(convenio.monto_pagado);
     const montoPendienteActualBig = new Big(convenio.monto_pendiente);
 
-    console.log("💵 Monto a revertir:", montoPagoBig.toString());
 
     // 3. RESTAR del monto pagado (reversa)
     const nuevoMontoPagadoBig = montoPagadoActualBig.minus(montoPagoBig);
@@ -981,13 +1073,6 @@ export async function reverseConvenioPayment(
       throw new Error("No se puede revertir más de lo que se ha pagado");
     }
 
-    console.log("📊 Monto pagado anterior:", montoPagadoActualBig.toString());
-    console.log("📊 Monto pagado nuevo:", nuevoMontoPagadoBig.toString());
-    console.log(
-      "📊 Monto pendiente anterior:",
-      montoPendienteActualBig.toString(),
-    );
-    console.log("📊 Monto pendiente nuevo:", nuevoMontoPendienteBig.toString());
 
     // 5. Recalcular cuántas cuotas completas se han pagado — con el MISMO
     // helper de acumulado que usa processConvenioPayment al marcar, para que
@@ -1005,20 +1090,11 @@ export async function reverseConvenioPayment(
     });
     const nuevosPagosPendientes = convenio.numero_meses - nuevosPagosRealizados;
 
-    console.log(
-      "✅ Cuotas completas pagadas (después de reversa):",
-      nuevosPagosRealizados,
-    );
-    console.log(
-      "⬇️ Cuotas pendientes (después de reversa):",
-      nuevosPagosPendientes,
-    );
 
     // 6. El convenio ya NO está completado si se revirtió un pago
     const convenioCompletado = nuevoMontoPendienteBig.lte(0);
     const convenioActivo = !convenioCompletado;
 
-    console.log("🔓 Convenio reactivado:", convenioActivo);
 
     // 7. Actualizar el convenio
     const [convenioActualizado] = await db
@@ -1067,14 +1143,8 @@ export async function reverseConvenioPayment(
             aDesmarcar.map((c) => c.cuota_convenio_id)
           )
         );
-      console.log(
-        `↩️ Cuotas del convenio desmarcadas por reversa: ${aDesmarcar
-          .map((c) => `#${c.numero_cuota}`)
-          .join(", ")}`
-      );
     }
 
-    console.log("🔄 ========== FIN REVERSIÓN DE PAGO ==========\n");
 
     // 8. Retornar resultado
     return {
@@ -1094,7 +1164,6 @@ export async function reverseConvenioPayment(
       monto_revertido: montoPagoBig.toFixed(2),
     };
   } catch (error) {
-    console.error("Error revirtiendo pago de convenio:", error);
     throw new Error(
       `Error al revertir pago de convenio: ${error instanceof Error ? error.message : "Error desconocido"}`,
     );
@@ -1129,7 +1198,6 @@ export async function anularFacturaEnCofidi(
   try {
     const { uuid, motivo, factura } = params;
 
-    console.log("🚫 Anulando factura en COFIDI:", uuid);
 
     // 1️⃣ CONSTRUIR XML DE ANULACIÓN
     //
@@ -1172,12 +1240,6 @@ export async function anularFacturaEnCofidi(
   </dte:SAT>
 </dte:GTAnulacionDocumento>`;
 
-    console.log("📄 XML construido:", {
-      uuid,
-      nit_receptor: factura.receptor_nit,
-      fecha_usada: fechaEmisionDocumento,
-      motivo,
-    });
 
     // 2️⃣ CONVERTIR A BASE64
     const xmlBase64 = Buffer.from(xmlAnulacion, "utf-8").toString("base64");
@@ -1196,7 +1258,6 @@ export async function anularFacturaEnCofidi(
     const resultado = await satClient.anularDocumento(uuid, xmlBase64);
 
     if (!resultado.anulado) {
-      console.error("❌ Error en COFIDI:", resultado.descripcion);
       return {
         success: false,
         anulado: false,
@@ -1205,7 +1266,6 @@ export async function anularFacturaEnCofidi(
       };
     }
 
-    console.log("✅ Factura anulada en COFIDI");
     return {
       success: true,
       anulado: true,
@@ -1213,7 +1273,6 @@ export async function anularFacturaEnCofidi(
       processor: resultado.processor,
     };
   } catch (error: any) {
-    console.error("❌ Error al anular en COFIDI:", error);
     return {
       success: false,
       anulado: false,

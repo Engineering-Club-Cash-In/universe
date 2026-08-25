@@ -92,8 +92,12 @@ import {
 } from "../lib/vehicle-helpers";
 import { carteraBackClient } from "../services/cartera-back-client";
 import { scoreLead } from "../services/lead-scoring";
+import {
+	ejecutarValidaciones,
+	resolverExencionPorBot,
+} from "../services/opportunity-validations";
 import type { StatusCreditEnum } from "../types/cartera-back";
-import { validarDpi } from "../utils/cui-validation";
+import { normalizarDpi, validarDpi } from "../utils/cui-validation";
 import { createNotification } from "./notifications";
 
 const CLIENT_CREDIT_CARTERA_STATUSES = [
@@ -414,8 +418,7 @@ export function buildCarteraMatchedClientRows(params: {
 	const rows: MatchedClientRow[] = [];
 	const leadOpportunities = params.opportunityOwnerId
 		? params.leadOpportunities.filter(
-				(opportunity) =>
-					opportunity.assignedTo === params.opportunityOwnerId,
+				(opportunity) => opportunity.assignedTo === params.opportunityOwnerId,
 			)
 		: params.leadOpportunities;
 
@@ -432,12 +435,12 @@ export function buildCarteraMatchedClientRows(params: {
 			rowId: `${params.lead.id}-${sifco}`,
 			opportunities: leadOpportunities,
 			creditAnalysis: matchingOpportunity
-				? (params.creditAnalysisByOpportunityId.get(matchingOpportunity.id) ?? null)
+				? (params.creditAnalysisByOpportunityId.get(matchingOpportunity.id) ??
+					null)
 				: null,
 			totalClosedValue: getCarteraCreditAmount(credit),
-			closedOpportunitiesCount: leadOpportunities.filter(
-				(opp) => opp.isClosed,
-			).length,
+			closedOpportunitiesCount: leadOpportunities.filter((opp) => opp.isClosed)
+				.length,
 			crmMatchStatus: "matched",
 			carteraCredit: buildCarteraOnlyClientRow(credit).carteraCredit,
 		});
@@ -1340,9 +1343,12 @@ export const crmRouter = {
 					maxPayment: z.number().min(0).optional(),
 					maxCreditAmount: z.number().min(0).optional(),
 				})
-				.refine((data) => data.coDebtorId || (data.leadId && data.opportunityId), {
-					message: "Debe proporcionar leadId y opportunityId, o coDebtorId",
-				})
+				.refine(
+					(data) => data.coDebtorId || (data.leadId && data.opportunityId),
+					{
+						message: "Debe proporcionar leadId y opportunityId, o coDebtorId",
+					},
+				)
 				.refine((data) => !(data.leadId && data.coDebtorId), {
 					message: "No puede guardar un lead y un co-deudor a la vez",
 				}),
@@ -1503,9 +1509,12 @@ export const crmRouter = {
 					opportunityId: z.string().uuid().optional(),
 					coDebtorId: z.string().uuid().optional(),
 				})
-				.refine((data) => data.coDebtorId || (data.leadId && data.opportunityId), {
-					message: "Debe proporcionar leadId y opportunityId, o coDebtorId",
-				})
+				.refine(
+					(data) => data.coDebtorId || (data.leadId && data.opportunityId),
+					{
+						message: "Debe proporcionar leadId y opportunityId, o coDebtorId",
+					},
+				)
 				.refine((data) => !(data.leadId && data.coDebtorId), {
 					message: "No puede resetear un lead y un co-deudor a la vez",
 				}),
@@ -2937,6 +2946,9 @@ export const crmRouter = {
 					stageId: opportunities.stageId,
 					notes: opportunities.notes,
 					leadId: opportunities.leadId,
+					source: opportunities.source,
+					leadSource: leads.source,
+					leadDpi: leads.dpi,
 					clientType: leads.clientType,
 					analysisStatus: opportunities.analysisStatus,
 					analysisRejectionCount: opportunities.analysisRejectionCount,
@@ -3098,8 +3110,15 @@ export const crmRouter = {
 			}
 
 			// Validate analysisStatus is in a valid state for approval/rejection
-			const validStatusesForReview = ["pending", "resubmitted"];
-			if (!validStatusesForReview.includes(opportunity[0].analysisStatus)) {
+			const validStatusesForReview: ("pending" | "resubmitted")[] = [
+				"pending",
+				"resubmitted",
+			];
+			if (
+				!validStatusesForReview.some(
+					(estado) => estado === opportunity[0].analysisStatus,
+				)
+			) {
 				if (opportunity[0].analysisStatus === "approved") {
 					throw new ORPCError("BAD_REQUEST", {
 						message:
@@ -3115,6 +3134,81 @@ export const crmRouter = {
 				throw new ORPCError("BAD_REQUEST", {
 					message: `Estado de análisis inválido: ${opportunity[0].analysisStatus}. Solo se pueden revisar oportunidades con estado 'pending' o 'resubmitted'.`,
 				});
+			}
+
+			// Validaciones RENAP + Buró para oportunidades que NO provienen del
+			// bot de WhatsApp (el bot ya las ejecuta en su propio flujo). Va
+			// después de los chequeos de etapa y estado para no gastar llamadas
+			// a las fuentes externas en aprobaciones que igual van a fallar.
+			// El UPDATE de aprobación se condiciona a que el lead siga teniendo
+			// este DPI, tanto si se validó como si quedó exenta
+			let dpiVerificado: string | null = null;
+
+			if (input.approved && !input.bypassValidation) {
+				// La exención se resuelve en el servicio: `source` es editable por el
+				// usuario, así que además exige evidencia de que el bot validó.
+				const exencion = await resolverExencionPorBot({
+					opportunityId: input.opportunityId,
+					source: opportunity[0].source,
+					leadSource: opportunity[0].leadSource,
+					leadId: opportunity[0].leadId,
+					leadDpi: opportunity[0].leadDpi,
+				});
+
+				// Vale para los dos caminos: el validado y el exento. Una oportunidad
+				// exenta siempre tiene DPI, porque la evidencia del bot lo exige
+				if (opportunity[0].leadDpi) {
+					dpiVerificado = normalizarDpi(opportunity[0].leadDpi);
+				}
+
+				if (!exencion.exento) {
+					// El DPI como texto es obligatorio en la ficha del lead,
+					// en paralelo al documento DPI exigido arriba
+					if (!opportunity[0].leadDpi) {
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								"Para aprobar el análisis, el cliente debe tener su número de DPI capturado en la ficha del lead.",
+						});
+					}
+
+					const resultadoValidaciones = await ejecutarValidaciones({
+						opportunityId: input.opportunityId,
+						userId: context.userId,
+						reusarVigente: true,
+					});
+
+					// Un fallo técnico (API caída, timeout, sin respuesta) sí
+					// bloquea: ninguna oportunidad no-bot pasa a 40% sin
+					// validación ejecutada con veredicto
+					if (resultadoValidaciones.errorTecnico) {
+						throw new ORPCError("BAD_REQUEST", {
+							message: `No se pudo completar la validación de Buró/RENAP: ${resultadoValidaciones.mensaje ?? "error desconocido"}. Intenta nuevamente o contacta al administrador.`,
+						});
+					}
+
+					// El DPI pudo cambiar mientras corrían las validaciones: el
+					// veredicto sería de otra persona
+					const [leadActual] = await db
+						.select({ dpi: leads.dpi })
+						.from(opportunities)
+						.leftJoin(leads, eq(opportunities.leadId, leads.id))
+						.where(eq(opportunities.id, input.opportunityId))
+						.limit(1);
+
+					if (
+						normalizarDpi(leadActual?.dpi ?? "") !==
+						normalizarDpi(opportunity[0].leadDpi)
+					) {
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								"El DPI del cliente cambió mientras se ejecutaban las validaciones. Vuelve a ejecutarlas antes de aprobar.",
+						});
+					}
+
+					// Ni el rechazo del buró ni la ausencia de registro bloquean:
+					// quedan en la bitácora y visibles en la página de análisis
+					// para que el analista decida bajo su criterio
+				}
 			}
 
 			// Get the next stage (40% - Cierre de propuesta) for approval
@@ -3150,12 +3244,33 @@ export const crmRouter = {
 
 			if (input.approved || input.reason || !input.approved) {
 				// Build where clause with optional optimistic locking
-				const whereClause = input.expectedUpdatedAt
+				// Solo se actualiza si sigue pendiente: dos aprobaciones simultáneas
+				// no pueden duplicar historial de etapa ni notificaciones
+				const condicionesBase = input.expectedUpdatedAt
 					? and(
 							eq(opportunities.id, input.opportunityId),
 							eq(opportunities.updatedAt, new Date(input.expectedUpdatedAt)),
+							inArray(opportunities.analysisStatus, validStatusesForReview),
 						)
-					: eq(opportunities.id, input.opportunityId);
+					: and(
+							eq(opportunities.id, input.opportunityId),
+							inArray(opportunities.analysisStatus, validStatusesForReview),
+						);
+
+				// Cuando hubo validaciones, el chequeo de DPI queda dentro del
+				// mismo UPDATE: si el lead cambia de DPI entre la verificación y
+				// la escritura, no se afecta ninguna fila y la aprobación falla
+				// en vez de aprobar con el veredicto de otra persona
+				const whereClause = dpiVerificado
+					? and(
+							condicionesBase,
+							sql`exists (
+								select 1 from ${leads}
+								where ${leads.id} = ${opportunities.leadId}
+									and ${eqDpi(leads.dpi, dpiVerificado)}
+							)`,
+						)
+					: condicionesBase;
 
 				// Update opportunity with analysisStatus
 				const updatedRows = await db
@@ -3177,7 +3292,26 @@ export const crmRouter = {
 					.returning();
 
 				// Check for concurrent modification
-				if (updatedRows.length === 0 && input.expectedUpdatedAt) {
+				if (updatedRows.length === 0) {
+					// Con el chequeo atómico de DPI, 0 filas también significa que el
+					// DPI del lead cambió después de validar: se relee para dar el
+					// mensaje correcto en vez del de conflicto genérico
+					if (dpiVerificado) {
+						const [leadAlMomento] = await db
+							.select({ dpi: leads.dpi })
+							.from(opportunities)
+							.leftJoin(leads, eq(opportunities.leadId, leads.id))
+							.where(eq(opportunities.id, input.opportunityId))
+							.limit(1);
+
+						if (normalizarDpi(leadAlMomento?.dpi ?? "") !== dpiVerificado) {
+							throw new ORPCError("BAD_REQUEST", {
+								message:
+									"El DPI del cliente cambió mientras se aprobaba. Vuelve a ejecutar las validaciones antes de aprobar.",
+							});
+						}
+					}
+
 					throw new ORPCError("CONFLICT", {
 						message:
 							"La oportunidad fue modificada por otro usuario. Por favor recarga la página e intenta de nuevo.",
@@ -6320,7 +6454,10 @@ export const crmRouter = {
 					)
 					.map((ca) => [
 						ca.opportunityId,
-						{ leadId: ca.leadId, suggestedPaymentDays: ca.suggestedPaymentDays },
+						{
+							leadId: ca.leadId,
+							suggestedPaymentDays: ca.suggestedPaymentDays,
+						},
 					]),
 			);
 

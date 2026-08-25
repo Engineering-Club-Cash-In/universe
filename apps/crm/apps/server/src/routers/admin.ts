@@ -125,26 +125,33 @@ export const adminRouter = {
 				}
 			}
 
-			const updatedUser = await db
-				.update(user)
-				.set({
-					role: input.role,
-					updatedAt: new Date(),
-				})
-				.where(eq(user.id, input.userId))
-				.returning();
+			// El rol y la limpieza de membresías van juntos: si el borrado fallara
+			// después de cambiar el rol, al devolverle el rol de socio recuperaría
+			// agencias viejas sin que nadie las reasigne.
+			const updatedUser = await db.transaction(async (tx) => {
+				const actualizado = await tx
+					.update(user)
+					.set({
+						role: input.role,
+						updatedAt: new Date(),
+					})
+					.where(eq(user.id, input.userId))
+					.returning();
 
-			// Si deja de ser socio, sus agencias se van con el rol: si no, al
-			// devolverle el rol recuperaría accesos viejos sin que nadie lo note.
-			if (input.role !== ROLES.PARTNER) {
-				await db
-					.delete(partnerMembers)
-					.where(eq(partnerMembers.userId, input.userId));
-			}
+				if (actualizado.length === 0) {
+					throw new ORPCError("NOT_FOUND", {
+						message: "Usuario no encontrado",
+					});
+				}
 
-			if (updatedUser.length === 0) {
-				throw new ORPCError("NOT_FOUND", { message: "Usuario no encontrado" });
-			}
+				if (input.role !== ROLES.PARTNER) {
+					await tx
+						.delete(partnerMembers)
+						.where(eq(partnerMembers.userId, input.userId));
+				}
+
+				return actualizado;
+			});
 
 			return updatedUser[0];
 		}),

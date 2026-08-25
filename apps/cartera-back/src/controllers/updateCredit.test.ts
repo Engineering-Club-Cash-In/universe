@@ -233,6 +233,64 @@ describe("recalcularPagosCredito — pagos validados no se reescriben", () => {
   });
 });
 
+describe("recalcularPagosCredito — capital validado de cuotas posteriores", () => {
+  const cuota18 = { cuota_id: 74540, numero_cuota: 18, pagado: false };
+  const cuota19 = { cuota_id: 74541, numero_cuota: 19, pagado: false };
+  const sembrada = (pago_id: number, cuota_id: number) => ({
+    pago_id,
+    cuota_id,
+    validationStatus: "no_required",
+    pagado: false,
+    paymentFalse: false,
+    monto_aplicado: "0",
+    fecha_pago: null,
+  });
+  // Parcial validado en la cuota 19 (posterior) con capital ya descontado de
+  // creditos.capital; quedó pagado=true porque otro pago cerró la cuota.
+  const validadoCuota19 = {
+    pago_id: 156049,
+    cuota_id: 74541,
+    validationStatus: "validated",
+    pagado: true,
+    paymentFalse: false,
+    monto_aplicado: "162",
+    fecha_pago: "2026-08-21",
+    abono_interes: "100",
+    abono_iva_12: "12",
+    abono_seguro: "0",
+    abono_gps: "0",
+    membresias_pago: "0",
+    abono_capital: "50",
+  };
+
+  it("restaura el capital de todas las cuotas abiertas antes de proyectar la primera", async () => {
+    pagosActuales = [
+      { pagos_credito: sembrada(74540, 74540), cuotas_credito: cuota18 },
+      { pagos_credito: validadoCuota19, cuotas_credito: cuota19 },
+      { pagos_credito: sembrada(74541, 74541), cuotas_credito: cuota19 },
+    ];
+
+    await recalcularPagosCredito({ numero_credito_sifco: "01010214120190" });
+
+    // Se escriben solo las dos sembradas; el validado (aunque pagado=true) no.
+    expect(capturedUpdates.length).toBe(2);
+    const ids = capturedUpdates.map((u) => renderSql(u.cond).params).flat();
+    expect(ids).toContain(74540);
+    expect(ids).toContain(74541);
+    expect(ids).not.toContain(156049);
+
+    // La cuota 18 se proyecta desde 18493.39 + 50 (capital del parcial de la
+    // 19) = 18543.39 × 1.5% = 278.15, no desde el capital ya reducido.
+    const c18 = capturedUpdates.find((u) => renderSql(u.cond).params.includes(74540))!.vals;
+    expect(c18.interes_restante).toBe("278.15");
+    expect(c18.capital_restante).toBe("1049.64");
+    // Cuota 19: principal 18543.39 − 1049.64 = 17493.75 × 1.5% = 262.41,
+    // neto del interés que ya abonó el validado (100).
+    const c19 = capturedUpdates.find((u) => renderSql(u.cond).params.includes(74541))!.vals;
+    expect(c19.interes_restante).toBe("162.41");
+  });
+});
+
 // Body espejo del fixture: sin cambios financieros, sin inversionistas.
 const baseBody = {
   credito_id: 794,

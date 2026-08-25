@@ -2458,6 +2458,31 @@ export const recalcularPagosCredito = async ({
     return;
   }
 
+  // Contexto de solo lectura: parciales VALIDADOS vivos de las cuotas
+  // seleccionadas, aunque tengan pagado=true (cuando un pending cierra la
+  // cuota, insertPayment marca pagado=true a TODAS sus filas y el WHERE de
+  // arriba dejaría fuera al validado). Nunca se escriben (ver esValidadoVivo);
+  // solo netean el saldo de la cuota y restauran su capital.
+  const cuotaIdsSeleccionadas = [...new Set(rows.map((r) => r.cuotas_credito.cuota_id))];
+  const pagoIdsSeleccionados = new Set(rows.map((r) => r.pagos_credito.pago_id));
+  const contextoValidados = await db
+    .select()
+    .from(pagos_credito)
+    .innerJoin(cuotas_credito, eq(pagos_credito.cuota_id, cuotas_credito.cuota_id))
+    .where(
+      and(
+        eq(pagos_credito.credito_id, credito.credito_id),
+        inArray(pagos_credito.cuota_id, cuotaIdsSeleccionadas),
+        eq(pagos_credito.validationStatus, "validated"),
+        eq(pagos_credito.paymentFalse, false),
+        ne(pagos_credito.registerBy, "system_reset"),
+      ),
+    )
+    .orderBy(asc(cuotas_credito.numero_cuota), asc(pagos_credito.pago_id));
+  for (const r of contextoValidados) {
+    if (!pagoIdsSeleccionados.has(r.pagos_credito.pago_id)) rows.push(r);
+  }
+
   // 3️⃣ Agrupar pagos por cuota_id
   const pagosPorCuota = new Map<
     number,
@@ -2488,6 +2513,20 @@ export const recalcularPagosCredito = async ({
   // recibos quedarían con capital_restante/abono_capital negativos.
   if (capitalEnMemoria.lt(0)) capitalEnMemoria = new Big(0);
 
+  // Parciales VALIDADOS vivos: su capital YA se descontó de creditos.capital
+  // al validarse, en TODAS las cuotas abiertas (un parcial puede caer en una
+  // cuota posterior mientras las anteriores siguen abiertas). Se restaura
+  // completo ANTES de amortizar la primera cuota: así cada cuota se proyecta
+  // desde el mismo principal con que se sembró, el neteo de rem.capital resta
+  // el capital validado una sola vez y la cadena queda igual a la sembrada.
+  const esValidadoVivo = (p: (typeof rows)[number]["pagos_credito"]) =>
+    p.validationStatus === "validated" && !p.paymentFalse;
+  for (const r of rows) {
+    if (esValidadoVivo(r.pagos_credito)) {
+      capitalEnMemoria = capitalEnMemoria.plus(r.pagos_credito.abono_capital ?? 0);
+    }
+  }
+
   // 5️⃣ Procesar cada cuota en orden
   const actualizaciones: { pago_id: number; datos: Record<string, unknown> }[] = [];
 
@@ -2499,18 +2538,7 @@ export const recalcularPagosCredito = async ({
     // Cuota 0 (desembolso) no se recalcula
     if (numCuota === 0) continue;
 
-    // Parciales VALIDADOS vivos de esta cuota (ver pre-paso más abajo). Si ya
-    // abonaron capital, ese capital YA se descontó de creditos.capital al
-    // validarse: la cuota se proyecta desde el principal PRE-parcial (si no,
-    // el capital validado se restaría dos veces: en el arranque y en el neteo
-    // de rem.capital). Como el rem se netea con sus abonos, la cadena de
-    // capitalEnMemoria hacia las cuotas siguientes queda igual que la sembrada.
-    const validadosVivos = pagos.filter(
-      (p) => p.validationStatus === "validated" && !p.paymentFalse,
-    );
-    for (const v of validadosVivos) {
-      capitalEnMemoria = capitalEnMemoria.plus(v.abono_capital ?? 0);
-    }
+    const validadosVivos = pagos.filter(esValidadoVivo);
 
     // Amortización de esta cuota
     const interesMes = capitalEnMemoria.times(porcentajeInteres).round(2);
@@ -2582,8 +2610,6 @@ export const recalcularPagosCredito = async ({
     // tiene guardados, y lo hace ANTES del loop porque las filas sembradas
     // (fecha_pago null) se ordenan primero y su snapshot debe salir ya neto
     // — el mismo neteo que hace registerPayment al recibir el siguiente pago.
-    const esValidadoVivo = (p: (typeof pagos)[number]) =>
-      validadosVivos.includes(p);
     const noNeg = (b: Big) => (b.lt(0) ? new Big(0) : b);
     for (const v of validadosVivos) {
       rem.interes = noNeg(rem.interes.minus(v.abono_interes ?? 0));

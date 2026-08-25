@@ -120,6 +120,13 @@
 			"when": 1786735924142,
 			"tag": "0029_add_license_qr_verifications",
 			"breakpoints": true
+		},
+		{
+			"idx": 17,
+			"version": "7",
+			"when": 1787450062674,
+			"tag": "0030_add_partner_tracker",
+			"breakpoints": true
 		}
 	]
 }

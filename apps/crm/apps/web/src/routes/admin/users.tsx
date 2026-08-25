@@ -27,6 +27,7 @@ import {
 	AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -139,12 +140,16 @@ function RouteComponent() {
 		},
 	});
 
+	// Catálogo de agencias para los usuarios de predio/agencia.
+	const companiesQuery = useQuery(orpc.getCompanies.queryOptions());
+
 	const createUserMutation = useMutation({
 		mutationFn: (input: {
 			name: string;
 			email: string;
 			password: string;
 			role: UserRole;
+			companyIds?: string[];
 		}) => client.createUser(input),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["getAllUsers"] });
@@ -190,9 +195,15 @@ function RouteComponent() {
 			email: "",
 			password: "",
 			role: ROLES.SALES as UserRole,
+			companyIds: [] as string[],
 		},
 		onSubmit: async ({ value }) => {
-			createUserMutation.mutate(value);
+			// Solo los socios llevan agencias; el server rechaza lo contrario.
+			createUserMutation.mutate({
+				...value,
+				companyIds:
+					value.role === ROLES.PARTNER ? value.companyIds : undefined,
+			});
 		},
 		validators: {
 			onSubmit: z.object({
@@ -200,6 +211,11 @@ function RouteComponent() {
 				email: z.string().email("Invalid email address"),
 				password: z.string().min(8, "Password must be at least 8 characters"),
 				role: z.enum(ALL_ROLES as [UserRole, ...UserRole[]]),
+				companyIds: z.array(z.string()),
+			})
+			.refine((v) => v.role !== ROLES.PARTNER || v.companyIds.length > 0, {
+				message: "Selecciona al menos una agencia",
+				path: ["companyIds"],
 			}),
 		},
 	});
@@ -387,6 +403,58 @@ function RouteComponent() {
 											)}
 										</createUserForm.Field>
 									</div>
+
+									<createUserForm.Subscribe selector={(state) => state.values.role}>
+										{(rol) =>
+											rol === ROLES.PARTNER ? (
+												<createUserForm.Field name="companyIds">
+													{(field) => (
+														<div className="space-y-2">
+															<Label>Agencias asignadas</Label>
+															<p className="text-muted-foreground text-xs">
+																El socio solo verá los créditos de las agencias que
+																marques aquí.
+															</p>
+															<div className="max-h-48 space-y-2 overflow-y-auto rounded-md border p-3">
+																{companiesQuery.data?.length ? (
+																	companiesQuery.data.map((company) => {
+																		const marcada = field.state.value.includes(company.id);
+																		return (
+																			<label
+																				key={company.id}
+																				className="flex cursor-pointer items-center gap-2 text-sm"
+																			>
+																				<Checkbox
+																					checked={marcada}
+																					onCheckedChange={() =>
+																						field.handleChange(
+																							marcada
+																								? field.state.value.filter((id) => id !== company.id)
+																								: [...field.state.value, company.id],
+																						)
+																					}
+																				/>
+																				{company.name.trim()}
+																			</label>
+																		);
+																	})
+																) : (
+																	<p className="text-muted-foreground text-sm">
+																		No hay agencias registradas.
+																	</p>
+																)}
+															</div>
+															{field.state.meta.errors.map((error) => (
+																<p key={error?.message} className="text-red-500 text-sm">
+																	{error?.message}
+																</p>
+															))}
+														</div>
+													)}
+												</createUserForm.Field>
+											) : null
+										}
+									</createUserForm.Subscribe>
 
 									<createUserForm.Subscribe>
 										{(state) => (

@@ -1,11 +1,35 @@
 import { ORPCError } from "@orpc/server";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
+import { companies } from "../db/schema/crm";
+import { partnerMembers } from "../db/schema/partners";
 import { auth } from "../lib/auth";
 import { adminProcedure } from "../lib/orpc";
-import { USER_ROLE_VALUES } from "../lib/roles";
+import { ROLES, USER_ROLE_VALUES } from "../lib/roles";
+
+/**
+ * Deja al usuario con exactamente estas agencias. Se usa al crear un socio y al
+ * editarlo, para que asignar agencias nunca requiera SQL a mano.
+ */
+async function asignarAgencias(userId: string, companyIds: string[]) {
+	const existentes = await db
+		.select({ id: companies.id })
+		.from(companies)
+		.where(inArray(companies.id, companyIds));
+
+	if (existentes.length !== companyIds.length) {
+		throw new ORPCError("BAD_REQUEST", {
+			message: "Alguna de las agencias seleccionadas ya no existe",
+		});
+	}
+
+	await db.delete(partnerMembers).where(eq(partnerMembers.userId, userId));
+	await db
+		.insert(partnerMembers)
+		.values(companyIds.map((companyId) => ({ userId, companyId })));
+}
 
 export const adminRouter = {
 	getStats: adminProcedure.handler(async ({ context: _ }) => {
@@ -36,7 +60,25 @@ export const adminRouter = {
 			})
 			.from(user);
 
-		return users;
+		const membresias = await db
+			.select({
+				userId: partnerMembers.userId,
+				agencia: companies.name,
+			})
+			.from(partnerMembers)
+			.innerJoin(companies, eq(companies.id, partnerMembers.companyId));
+
+		const agenciasPorUsuario = new Map<string, string[]>();
+		for (const m of membresias) {
+			const lista = agenciasPorUsuario.get(m.userId) ?? [];
+			lista.push(m.agencia.trim());
+			agenciasPorUsuario.set(m.userId, lista);
+		}
+
+		return users.map((u) => ({
+			...u,
+			agencias: (agenciasPorUsuario.get(u.id) ?? []).sort(),
+		}));
 	}),
 
 	updateUserRole: adminProcedure
@@ -62,6 +104,14 @@ export const adminRouter = {
 				})
 				.where(eq(user.id, input.userId))
 				.returning();
+
+			// Si deja de ser socio, sus agencias se van con el rol: si no, al
+			// devolverle el rol recuperaría accesos viejos sin que nadie lo note.
+			if (input.role !== ROLES.PARTNER) {
+				await db
+					.delete(partnerMembers)
+					.where(eq(partnerMembers.userId, input.userId));
+			}
 
 			if (updatedUser.length === 0) {
 				throw new ORPCError("NOT_FOUND", { message: "Usuario no encontrado" });
@@ -136,13 +186,31 @@ export const adminRouter = {
 				role: z
 					.enum(USER_ROLE_VALUES)
 					.default("sales"),
+				companyIds: z.array(z.string().uuid()).optional(),
 			}),
 		)
 		.handler(async ({ input, context: _ }) => {
-			// Check if email is from clubcashin.com domain
-			if (!input.email.endsWith("@clubcashin.com")) {
+			// Los socios (predios/agencias) son externos y usan su propio correo.
+			if (
+				input.role !== ROLES.PARTNER &&
+				!input.email.endsWith("@clubcashin.com")
+			) {
 				throw new ORPCError("BAD_REQUEST", {
 					message: "Solo se permiten correos @clubcashin.com",
+				});
+			}
+
+			const esSocio = input.role === ROLES.PARTNER;
+			const agencias = input.companyIds ?? [];
+
+			if (esSocio && agencias.length === 0) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Selecciona al menos una agencia para el socio",
+				});
+			}
+			if (!esSocio && agencias.length > 0) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Solo los usuarios de predio/agencia llevan agencias",
 				});
 			}
 
@@ -162,6 +230,44 @@ export const adminRouter = {
 				});
 			}
 
+			if (esSocio) {
+				try {
+					await asignarAgencias(result.user.id, agencias);
+				} catch (error) {
+					// Un socio sin agencias no puede entrar a nada: mejor no dejarlo a medias.
+					await db.delete(user).where(eq(user.id, result.user.id));
+					throw error;
+				}
+			}
+
 			return result.user;
+		}),
+
+	// Permite corregir las agencias de un socio ya creado sin tocar la BD a mano.
+	setPartnerCompanies: adminProcedure
+		.input(
+			z.object({
+				userId: z.string(),
+				companyIds: z.array(z.string().uuid()).min(1, "Selecciona al menos una agencia"),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const [objetivo] = await db
+				.select({ id: user.id, role: user.role })
+				.from(user)
+				.where(eq(user.id, input.userId))
+				.limit(1);
+
+			if (!objetivo) {
+				throw new ORPCError("NOT_FOUND", { message: "Usuario no encontrado" });
+			}
+			if (objetivo.role !== ROLES.PARTNER) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Solo los usuarios de predio/agencia llevan agencias",
+				});
+			}
+
+			await asignarAgencias(input.userId, input.companyIds);
+			return { success: true };
 		}),
 };

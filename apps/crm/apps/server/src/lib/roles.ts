@@ -15,6 +15,7 @@ export const ROLES = {
 	INVESTMENT_MANAGER: "investment_manager",
 	SERVICE_CENTER_MANAGER: "service_center_manager",
 	VEHICLE_VERIFIER: "vehicle_verifier",
+	PARTNER: "partner",
 } as const;
 
 export const USER_ROLE_VALUES = [
@@ -31,6 +32,7 @@ export const USER_ROLE_VALUES = [
 	ROLES.INVESTMENT_MANAGER,
 	ROLES.SERVICE_CENTER_MANAGER,
 	ROLES.VEHICLE_VERIFIER,
+	ROLES.PARTNER,
 ] as const;
 
 export type UserRole = (typeof ROLES)[keyof typeof ROLES];
@@ -101,6 +103,11 @@ export const ROLE_CONFIG = {
 		label: "Verificador de Vehículo",
 		color: "bg-lime-100 text-lime-800",
 		icon: "ClipboardCheck" as const,
+	},
+	[ROLES.PARTNER]: {
+		label: "Predio / Agencia",
+		color: "bg-rose-100 text-rose-800",
+		icon: "Store" as const,
 	},
 } as const;
 

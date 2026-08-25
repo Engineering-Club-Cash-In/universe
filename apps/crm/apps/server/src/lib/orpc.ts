@@ -3,7 +3,8 @@ import { eq } from "drizzle-orm";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import type { Context } from "./context";
-import { PERMISSIONS } from "./roles";
+import { resolvePartnerScope } from "./partner-scope";
+import { PERMISSIONS, ROLES } from "./roles";
 
 export const o = os.$context<Context>();
 
@@ -667,6 +668,46 @@ const requireInvestmentManager = o.middleware(async ({ context, next }) => {
 	});
 });
 
+
+// Socios externos (predios/agencias). Exige una sesión emitida por la instancia
+// de partner-auth: una sesión del CRM nunca sirve aquí, ni al revés.
+const requirePartnerAccess = o.middleware(async ({ context, next }) => {
+	if (!context.partnerSession?.user) {
+		throw new ORPCError("UNAUTHORIZED");
+	}
+
+	const userId = context.partnerSession.user.id;
+	const userData = await db
+		.select()
+		.from(user)
+		.where(eq(user.id, userId))
+		.limit(1);
+	const userRole = userData[0]?.role;
+
+	if (userRole !== ROLES.PARTNER) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "Se requiere rol de predio/agencia",
+		});
+	}
+
+	const companyIds = await resolvePartnerScope(userId);
+	if (companyIds.length === 0) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "El usuario no tiene ninguna agencia asignada",
+		});
+	}
+
+	return next({
+		context: {
+			partnerSession: context.partnerSession,
+			user: userData[0],
+			userId,
+			userRole,
+			companyIds,
+		},
+	});
+});
+
 export const protectedProcedure = publicProcedure.use(requireAuth);
 export const adminProcedure = publicProcedure.use(requireAdmin);
 export const crmProcedure = publicProcedure.use(requireCrmAccess);
@@ -708,3 +749,4 @@ export const investmentProcedure = publicProcedure.use(requireInvestmentAccess);
 export const investmentManagerProcedure = publicProcedure.use(
 	requireInvestmentManager,
 );
+export const partnerProcedure = publicProcedure.use(requirePartnerAccess);

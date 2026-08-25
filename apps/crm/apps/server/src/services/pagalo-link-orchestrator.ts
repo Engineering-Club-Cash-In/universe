@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, notInArray } from "drizzle-orm";
 import { db } from "../db";
 import { casosCobros } from "../db/schema/cobros";
 import { leads, opportunities } from "../db/schema/crm";
@@ -127,31 +127,39 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 		location,
 	};
 
-	const grupoEnRevision = await db
+	// Cualquier grupo ACTIVO del crédito —en revisión, esperando pago, o uno
+	// que el BOT creó desde WhatsApp— se devuelve tal cual en vez de intentar
+	// otro insert: el índice único parcial (un grupo activo por crédito) lo
+	// rechazaría y salía como error interno (hallazgo de Codex, PR #1445).
+	const grupoActivo = await db
 		.select({
 			groupId: pagaloPaymentGroups.id,
+			status: pagaloPaymentGroups.status,
+			origen: pagaloPaymentGroups.origen,
 			capitalTotal: pagaloPaymentGroups.capitalTotal,
 			facturableTotal: pagaloPaymentGroups.facturableTotal,
 			totalAmount: pagaloPaymentGroups.totalAmount,
 			linkType: pagaloPaymentLinks.linkType,
+			linkStatus: pagaloPaymentLinks.status,
 			paymentUrl: pagaloPaymentLinks.paymentUrl,
 		})
 		.from(pagaloPaymentGroups)
 		.leftJoin(pagaloPaymentLinks, eq(pagaloPaymentLinks.groupId, pagaloPaymentGroups.id))
 		.where(and(
 			eq(pagaloPaymentGroups.carteraCreditoId, input.creditoId),
-			eq(pagaloPaymentGroups.status, "REVIEW_REQUIRED"),
+			notInArray(pagaloPaymentGroups.status, ["COMPLETED", "CANCELLED"]),
 		));
-	if (grupoEnRevision.length > 0) {
-		const group = grupoEnRevision[0]!;
+	if (grupoActivo.length > 0) {
+		const group = grupoActivo[0]!;
 		return {
 			groupId: group.groupId,
-			status: "REVIEW_REQUIRED" as const,
+			status: group.status,
+			origen: group.origen,
 			capitalTotal: group.capitalTotal,
 			facturableTotal: group.facturableTotal,
 			totalAmount: group.totalAmount,
-			links: grupoEnRevision.flatMap((link) =>
-				link.linkType && link.paymentUrl
+			links: grupoActivo.flatMap((link) =>
+				link.linkType && link.paymentUrl && link.linkStatus === "ACTIVE"
 					? [{ linkType: link.linkType, paymentUrl: link.paymentUrl }]
 					: [],
 			),

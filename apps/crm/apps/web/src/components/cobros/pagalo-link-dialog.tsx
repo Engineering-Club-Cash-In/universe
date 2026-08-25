@@ -59,6 +59,8 @@ export function PagaloLinkDialog({ casoCobroId, numeroSifco, creditoId }: { caso
 			(client as any).crearLinksPagalo(input),
 		onSuccess: (result: any) => {
 			if (result.status === "REVIEW_REQUIRED") toast.error("Grupo Págalo existente requiere revisión.");
+			else if (result.origen === "BOT")
+				toast.info("El cliente ya generó estos links desde WhatsApp; se muestran los mismos.");
 			else toast.success(`Links Págalo listos: ${q(result.totalAmount)}`);
 		},
 		onError: (error: Error) => toast.error(error.message || "No se pudieron crear links Págalo"),

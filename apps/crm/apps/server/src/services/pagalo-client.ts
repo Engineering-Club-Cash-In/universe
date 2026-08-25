@@ -28,19 +28,25 @@ export const pagaloCreateRequestSchema = z
 		n_quotas: z.boolean().default(false),
 		// D-51: links sin vencimiento durante MVP.
 		expiration: z.literal(false),
-		client: z
-			.object({
-				first_name: z.string().trim().min(1),
-				last_name: z.string().trim().min(1),
-				email: z.string().email().optional(),
-				phone: z.string().trim().min(1).optional(),
-				country: z.string().trim().min(1).optional(),
-				city: z.string().trim().min(1).optional(),
-				state: z.string().trim().min(1).optional(),
-				postal_code: z.string().trim().min(1).optional(),
-				location: z.string().trim().min(1).optional(),
-			})
-			.strict(),
+		// `{}` = el cliente llena sus datos en el checkout (flujo documentado
+		// de Págalo). Si se manda contacto, Págalo exige nombre, apellido,
+		// teléfono, correo y país — ver 07-pago-con-link.md §3.2.
+		client: z.union([
+			z.object({}).strict(),
+			z
+				.object({
+					first_name: z.string().trim().min(1),
+					last_name: z.string().trim().min(1),
+					email: z.string().email(),
+					phone: z.string().trim().min(1),
+					country: z.string().trim().min(1),
+					city: z.string().trim().min(1).optional(),
+					state: z.string().trim().min(1).optional(),
+					postal_code: z.string().trim().min(1).optional(),
+					location: z.string().trim().min(1).optional(),
+				})
+				.strict(),
+		]),
 		products: z
 			.array(
 				z
@@ -79,13 +85,20 @@ export function toPagaloProviderAmount(amount: string): number {
 	if (!match) throw new Error("Monto Págalo inválido.");
 	const cents = BigInt(match[1]) * 100n + BigInt(match[2]);
 	if (cents > BigInt(Number.MAX_SAFE_INTEGER)) {
-		throw new Error("Págalo no puede representar este monto sin perder centavos.");
+		throw new Error(
+			"Págalo no puede representar este monto sin perder centavos.",
+		);
 	}
 	const providerAmount = Number(cents) / 100;
 	const serialized = JSON.stringify(providerAmount);
 	const roundTrip = serialized.match(/^(\d+)(?:\.(\d{1,2}))?$/);
-	if (!roundTrip || `${roundTrip[1]}.${(roundTrip[2] ?? "").padEnd(2, "0")}` !== amount) {
-		throw new Error("Págalo no puede representar este monto sin perder centavos.");
+	if (
+		!roundTrip ||
+		`${roundTrip[1]}.${(roundTrip[2] ?? "").padEnd(2, "0")}` !== amount
+	) {
+		throw new Error(
+			"Págalo no puede representar este monto sin perder centavos.",
+		);
 	}
 	return providerAmount;
 }

@@ -943,8 +943,14 @@ export async function crearPagoLink(
 			})
 			.returning({ id: pagaloPaymentLinks.id });
 		if (!fila) {
-			await abortarGrupo(grupoId, creados, usuarioSistema, "sin_fila_de_link");
-			return { ok: false, codigo: "PAGALO_NO_DISPONIBLE" };
+			return respuestaTrasAbortar(
+				await abortarGrupo(
+					grupoId,
+					creados,
+					usuarioSistema,
+					"sin_fila_de_link",
+				),
+			);
 		}
 		try {
 			const respuesta = await cliente.createPaymentRequest(requestPayload);
@@ -1007,63 +1013,198 @@ export async function crearPagoLink(
 					updatedAt: new Date(),
 				})
 				.where(eq(pagaloPaymentLinks.id, fila.id));
-			await abortarGrupo(grupoId, creados, usuarioSistema, detalle);
-			return { ok: false, codigo: "PAGALO_NO_DISPONIBLE" };
+			return respuestaTrasAbortar(
+				await abortarGrupo(grupoId, creados, usuarioSistema, detalle),
+			);
 		}
 	}
 
-	// Condicional a LINKS_PENDING: si mientras emitíamos el poller escaló
-	// este grupo a REVIEW_REQUIRED (se pagó un link REPLACED del grupo
-	// anterior), ese estado se respeta — pisarlo dejaría ese cobro sin
-	// revisión (hallazgo de Codex).
-	await db
-		.update(pagaloPaymentGroups)
-		.set({ status: "PENDING_PAYMENT", updatedAt: new Date() })
-		.where(
-			and(
-				eq(pagaloPaymentGroups.id, grupoId),
-				eq(pagaloPaymentGroups.status, "LINKS_PENDING"),
-			),
-		);
-
-	return respuestaConLinks(grupoId, opcion.calculo.totalAmount, links);
+	// Cierre de la emisión, bajo candado y derivado de los links REALES
+	// (hallazgos de Codex): el poller pudo haber pagado un link mientras
+	// emitíamos el siguiente, o haber escalado el grupo a REVIEW_REQUIRED
+	// por un link REPLACED del grupo anterior. Nada de eso se pisa.
+	const cierre = await finalizarGrupo(grupoId);
+	switch (cierre.estado) {
+		case "PENDING_PAYMENT":
+			return respuestaConLinks(grupoId, opcion.calculo.totalAmount, links);
+		case "PARTIALLY_PAID":
+			return respuestaConLinks(
+				grupoId,
+				opcion.calculo.totalAmount,
+				links.filter((l) => cierre.pendientes.includes(l.tipo)),
+			);
+		case "READY_TO_APPLY":
+			return {
+				ok: false,
+				codigo: "PAGO_EN_PROCESO",
+				datos: { mensaje: mensajeEnProceso("post_pago") },
+			};
+		default:
+			// REVIEW_REQUIRED u otro: no se exponen links nuevos con un cobro
+			// inesperado en revisión.
+			return {
+				ok: false,
+				codigo: "PAGO_EN_PROCESO",
+				datos: { mensaje: mensajeEnProceso("revision") },
+			};
+	}
 }
 
-/** Págalo falló a medias: nada cobrable queda atado a un grupo vivo. */
+/**
+ * Cierra la emisión con el estado que dicen los links (bajo candado, mismo
+ * orden que el poller: grupo → links). Solo transiciona desde LINKS_PENDING;
+ * cualquier otro estado (p. ej. REVIEW_REQUIRED puesto por el poller) se
+ * respeta y se devuelve tal cual.
+ */
+async function finalizarGrupo(grupoId: string): Promise<{
+	estado: PagaloPaymentGroupStatus;
+	pendientes: PagaloLinkType[];
+}> {
+	return db.transaction(async (tx) => {
+		const [grupo] = await tx
+			.select({
+				status: pagaloPaymentGroups.status,
+				capitalTotal: pagaloPaymentGroups.capitalTotal,
+				facturableTotal: pagaloPaymentGroups.facturableTotal,
+			})
+			.from(pagaloPaymentGroups)
+			.where(eq(pagaloPaymentGroups.id, grupoId))
+			.for("update");
+		if (!grupo) return { estado: "CANCELLED", pendientes: [] };
+		const links = await tx
+			.select({
+				linkType: pagaloPaymentLinks.linkType,
+				status: pagaloPaymentLinks.status,
+				esFuente: pagaloPaymentLinks.isApplicationSource,
+			})
+			.from(pagaloPaymentLinks)
+			.where(eq(pagaloPaymentLinks.groupId, grupoId))
+			.for("update");
+		const requeridos: PagaloLinkType[] = [];
+		if (grupo.capitalTotal !== "0.00") requeridos.push("CAPITAL");
+		if (grupo.facturableTotal !== "0.00") requeridos.push("MORA_INTERES");
+		const pagados = new Set(
+			links.filter((l) => l.esFuente).map((l) => l.linkType),
+		);
+		const pendientes = requeridos.filter((t) => !pagados.has(t));
+		if (grupo.status !== "LINKS_PENDING") {
+			return { estado: grupo.status, pendientes };
+		}
+		const estado: PagaloPaymentGroupStatus =
+			pendientes.length === 0
+				? "READY_TO_APPLY"
+				: pagados.size > 0
+					? "PARTIALLY_PAID"
+					: "PENDING_PAYMENT";
+		await tx
+			.update(pagaloPaymentGroups)
+			.set({
+				status: estado,
+				...(estado === "READY_TO_APPLY" ? { readyToApplyAt: new Date() } : {}),
+				updatedAt: new Date(),
+			})
+			.where(
+				and(
+					eq(pagaloPaymentGroups.id, grupoId),
+					eq(pagaloPaymentGroups.status, "LINKS_PENDING"),
+				),
+			);
+		if (estado !== "PENDING_PAYMENT") {
+			await tx.insert(pagaloPaymentEvents).values({
+				groupId: grupoId,
+				eventType:
+					estado === "READY_TO_APPLY" ? "GROUP_READY" : "GROUP_PARTIALLY_PAID",
+				source: "BOT",
+				fromStatus: "LINKS_PENDING",
+				toStatus: estado,
+				payload: { enEmision: true },
+			});
+		}
+		return { estado, pendientes };
+	});
+}
+
+/**
+ * Págalo falló a medias: nada cobrable queda atado a un grupo vivo — salvo
+ * que un link ya se haya PAGADO mientras tanto (hallazgo de Codex): ese
+ * jamás se pisa; el grupo va a REVIEW_REQUIRED con el dinero adentro.
+ * Mismo orden de candados que el poller: grupo → links.
+ */
 async function abortarGrupo(
 	grupoId: string,
 	linksCreados: string[],
 	actor: string,
 	motivo: string,
-) {
-	await db.transaction(async (tx) => {
-		if (linksCreados.length > 0) {
+): Promise<"cancelado" | "con_pago"> {
+	return db.transaction(async (tx) => {
+		const [grupo] = await tx
+			.select({ status: pagaloPaymentGroups.status })
+			.from(pagaloPaymentGroups)
+			.where(eq(pagaloPaymentGroups.id, grupoId))
+			.for("update");
+		const links = await tx
+			.select({ id: pagaloPaymentLinks.id, status: pagaloPaymentLinks.status })
+			.from(pagaloPaymentLinks)
+			.where(eq(pagaloPaymentLinks.groupId, grupoId))
+			.for("update");
+		const hayPago = links.some((l) => l.status === "PAID");
+		const reemplazables = links
+			.filter((l) => l.status === "CREATING" || l.status === "ACTIVE")
+			.map((l) => l.id);
+		if (reemplazables.length > 0) {
 			await tx
 				.update(pagaloPaymentLinks)
 				.set({ status: "REPLACED", updatedAt: new Date() })
-				.where(inArray(pagaloPaymentLinks.id, linksCreados));
+				.where(inArray(pagaloPaymentLinks.id, reemplazables));
 		}
-		await tx
-			.update(pagaloPaymentGroups)
-			.set({
-				status: "CANCELLED",
-				cancelledAt: new Date(),
-				updatedAt: new Date(),
-			})
-			.where(eq(pagaloPaymentGroups.id, grupoId));
+		const destino: PagaloPaymentGroupStatus = hayPago
+			? "REVIEW_REQUIRED"
+			: "CANCELLED";
+		if (grupo?.status === "LINKS_PENDING") {
+			await tx
+				.update(pagaloPaymentGroups)
+				.set({
+					status: destino,
+					...(destino === "CANCELLED" ? { cancelledAt: new Date() } : {}),
+					updatedAt: new Date(),
+				})
+				.where(
+					and(
+						eq(pagaloPaymentGroups.id, grupoId),
+						eq(pagaloPaymentGroups.status, "LINKS_PENDING"),
+					),
+				);
+		}
 		await tx.insert(pagaloPaymentEvents).values({
 			groupId: grupoId,
-			eventType: "GROUP_ABORTED",
+			eventType: hayPago ? "GROUP_ABORTED_WITH_PAYMENT" : "GROUP_ABORTED",
 			source: "BOT",
 			actorUserId: actor,
-			fromStatus: "LINKS_PENDING",
-			toStatus: "CANCELLED",
+			fromStatus: grupo?.status ?? "LINKS_PENDING",
+			toStatus:
+				grupo?.status === "LINKS_PENDING"
+					? destino
+					: (grupo?.status ?? destino),
 			payload: {
 				motivo: motivo.slice(0, 200),
-				linksReemplazados: linksCreados.length,
+				linksReemplazados: reemplazables.length,
+				linksCreados: linksCreados.length,
 			},
 		});
+		return hayPago ? "con_pago" : "cancelado";
 	});
+}
+
+function respuestaTrasAbortar(
+	resultado: "cancelado" | "con_pago",
+): ResultadoCrear {
+	return resultado === "con_pago"
+		? {
+				ok: false,
+				codigo: "PAGO_EN_PROCESO",
+				datos: { mensaje: mensajeEnProceso("revision") },
+			}
+		: { ok: false, codigo: "PAGALO_NO_DISPONIBLE" };
 }
 
 function esViolacionDeUnicidad(error: unknown): boolean {

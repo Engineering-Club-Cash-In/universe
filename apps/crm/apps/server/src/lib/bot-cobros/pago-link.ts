@@ -1012,10 +1012,19 @@ export async function crearPagoLink(
 		}
 	}
 
+	// Condicional a LINKS_PENDING: si mientras emitíamos el poller escaló
+	// este grupo a REVIEW_REQUIRED (se pagó un link REPLACED del grupo
+	// anterior), ese estado se respeta — pisarlo dejaría ese cobro sin
+	// revisión (hallazgo de Codex).
 	await db
 		.update(pagaloPaymentGroups)
 		.set({ status: "PENDING_PAYMENT", updatedAt: new Date() })
-		.where(eq(pagaloPaymentGroups.id, grupoId));
+		.where(
+			and(
+				eq(pagaloPaymentGroups.id, grupoId),
+				eq(pagaloPaymentGroups.status, "LINKS_PENDING"),
+			),
+		);
 
 	return respuestaConLinks(grupoId, opcion.calculo.totalAmount, links);
 }

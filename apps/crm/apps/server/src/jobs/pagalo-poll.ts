@@ -438,13 +438,30 @@ async function marcarLinkPagado(
 							),
 						)
 						.limit(1)
+						// Candado sobre el objetivo: si otro /crear lo está
+						// reemplazando, el SELECT espera a que termine y re-evalúa
+						// el WHERE — un grupo que quedó CANCELLED ya no se devuelve
+						// (hallazgo de Codex). El UPDATE es además condicional.
+						.for("update")
 				: [];
 			const objetivo = activo ?? viejo;
 			if (!objetivo) return;
-			await tx
+			const [escalado] = await tx
 				.update(pagaloPaymentGroups)
 				.set({ status: "REVIEW_REQUIRED", updatedAt: new Date() })
-				.where(eq(pagaloPaymentGroups.id, objetivo.id));
+				.where(
+					and(
+						eq(pagaloPaymentGroups.id, objetivo.id),
+						objetivo === activo
+							? notInArray(pagaloPaymentGroups.status, [
+									"COMPLETED",
+									"CANCELLED",
+								])
+							: eq(pagaloPaymentGroups.status, objetivo.status),
+					),
+				)
+				.returning({ id: pagaloPaymentGroups.id });
+			if (!escalado) return;
 			await tx.insert(pagaloPaymentEvents).values({
 				groupId: objetivo.id,
 				eventType: "REPLACED_LINK_PAID",

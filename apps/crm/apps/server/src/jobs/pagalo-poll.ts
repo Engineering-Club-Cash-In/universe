@@ -342,7 +342,24 @@ async function marcarLinkPagado(
 	},
 ): Promise<void> {
 	await db.transaction(async (tx) => {
-		const esReemplazado = link.status === "REPLACED";
+		// Se serializa contra el reemplazo del grupo (/crear con otra selección,
+		// pago-link.ts): primero el candado del GRUPO, después el del link —
+		// mismo orden que el reemplazo, para no cruzarse en deadlock— y se
+		// decide con el estado FRESCO del link, no con el snapshot del reclamo.
+		// Sin esto un pago que llega en medio del reemplazo se anotaba como
+		// application_source de un grupo ya cancelado (hallazgo de Codex).
+		await tx
+			.select({ id: pagaloPaymentGroups.id })
+			.from(pagaloPaymentGroups)
+			.where(eq(pagaloPaymentGroups.id, link.groupId))
+			.for("update");
+		const [fresco] = await tx
+			.select({ status: pagaloPaymentLinks.status })
+			.from(pagaloPaymentLinks)
+			.where(eq(pagaloPaymentLinks.id, link.id))
+			.for("update");
+		if (!fresco || fresco.status === "PAID") return;
+		const esReemplazado = fresco.status === "REPLACED";
 		const [updated] = await tx
 			.update(pagaloPaymentLinks)
 			.set({
@@ -376,7 +393,7 @@ async function marcarLinkPagado(
 			linkId: link.id,
 			eventType: "LINK_PAID",
 			source: "PAGALO_POLLER",
-			fromStatus: link.status,
+			fromStatus: fresco.status,
 			toStatus: "PAID",
 			payload: {
 				transactionUuid: transaccion.uuid,
@@ -452,6 +469,20 @@ async function marcarLinkTerminal(
 	status: "CANCELLED" | "EXPIRED",
 ): Promise<void> {
 	await db.transaction(async (tx) => {
+		const [grupo] = await tx
+			.select({
+				id: pagaloPaymentGroups.id,
+				status: pagaloPaymentGroups.status,
+			})
+			.from(pagaloPaymentGroups)
+			.where(eq(pagaloPaymentGroups.id, link.groupId))
+			.for("update");
+		const [fresco] = await tx
+			.select({ status: pagaloPaymentLinks.status })
+			.from(pagaloPaymentLinks)
+			.where(eq(pagaloPaymentLinks.id, link.id))
+			.for("update");
+		if (!fresco || fresco.status === "PAID") return;
 		await tx
 			.update(pagaloPaymentLinks)
 			.set({
@@ -461,6 +492,28 @@ async function marcarLinkTerminal(
 				updatedAt: new Date(),
 			})
 			.where(eq(pagaloPaymentLinks.id, link.id));
+		await tx.insert(pagaloPaymentEvents).values({
+			groupId: link.groupId,
+			linkId: link.id,
+			eventType: "LINK_TERMINAL",
+			source: "PAGALO_POLLER",
+			fromStatus: fresco.status,
+			toStatus: status,
+			payload: {},
+		});
+		// Un link REPLACED que Págalo da por cancelado/expirado es el final
+		// ESPERADO del reemplazo: no reabre su grupo (CANCELLED) — chocaría con
+		// el índice único de un grupo activo por crédito y tumbaba la corrida
+		// entera del poller (hallazgo de Codex). Solo un link vivo que muere
+		// afuera deja su grupo en revisión.
+		if (
+			fresco.status === "REPLACED" ||
+			!grupo ||
+			grupo.status === "CANCELLED" ||
+			grupo.status === "COMPLETED"
+		) {
+			return;
+		}
 		await tx
 			.update(pagaloPaymentGroups)
 			.set({ status: "REVIEW_REQUIRED", updatedAt: new Date() })

@@ -664,6 +664,9 @@ function respuestaConLinks(
 const mismaSeleccion = (a: unknown, b: PagaloAllocation[]) =>
 	JSON.stringify(a) === JSON.stringify(b);
 
+/** El grupo que íbamos a reemplazar cambió debajo nuestro (entró un pago). */
+class ReemplazoInvalido extends Error {}
+
 export async function crearPagoLink(
 	referencia: string,
 	numeroSifco: string,
@@ -754,6 +757,31 @@ export async function crearPagoLink(
 		grupoId = await db.transaction(async (tx) => {
 			if (veredicto.tipo === "reusable") {
 				const viejo = veredicto.grupo;
+				// Serializado contra el poller (hallazgo de Codex): candado del
+				// GRUPO primero y luego de sus links —mismo orden que
+				// marcarLinkPagado— y se decide con el estado FRESCO. Si mientras
+				// el cliente elegía ya pagó uno de los links, este grupo ya no se
+				// reemplaza: tiene dinero adentro.
+				const [grupoFresco] = await tx
+					.select({ status: pagaloPaymentGroups.status })
+					.from(pagaloPaymentGroups)
+					.where(eq(pagaloPaymentGroups.id, viejo.id))
+					.for("update");
+				if (
+					!grupoFresco ||
+					(grupoFresco.status !== "PENDING_PAYMENT" &&
+						grupoFresco.status !== "LINKS_PENDING")
+				) {
+					throw new ReemplazoInvalido();
+				}
+				const linksFrescos = await tx
+					.select({ status: pagaloPaymentLinks.status })
+					.from(pagaloPaymentLinks)
+					.where(eq(pagaloPaymentLinks.groupId, viejo.id))
+					.for("update");
+				if (linksFrescos.some((l) => l.status === "PAID")) {
+					throw new ReemplazoInvalido();
+				}
 				await tx
 					.update(pagaloPaymentLinks)
 					.set({ status: "REPLACED", updatedAt: new Date() })
@@ -770,7 +798,15 @@ export async function crearPagoLink(
 						cancelledAt: new Date(),
 						updatedAt: new Date(),
 					})
-					.where(eq(pagaloPaymentGroups.id, viejo.id));
+					.where(
+						and(
+							eq(pagaloPaymentGroups.id, viejo.id),
+							inArray(pagaloPaymentGroups.status, [
+								"PENDING_PAYMENT",
+								"LINKS_PENDING",
+							]),
+						),
+					);
 				await tx.insert(pagaloPaymentEvents).values({
 					groupId: viejo.id,
 					eventType: "GROUP_REPLACED",
@@ -819,9 +855,11 @@ export async function crearPagoLink(
 			return creado.id;
 		});
 	} catch (error) {
-		// Perdimos la carrera: otro /crear ya dejó un grupo. Se relee y se
-		// responde lo del ganador (o el candado que corresponda).
-		if (esViolacionDeUnicidad(error)) {
+		// Perdimos la carrera: otro /crear ya dejó un grupo, o el poller anotó
+		// un pago en el que íbamos a reemplazar. Se relee y se responde lo que
+		// corresponda al estado real (los mismos links, el pendiente, o el
+		// candado).
+		if (error instanceof ReemplazoInvalido || esViolacionDeUnicidad(error)) {
 			const ganador = evaluarGrupo(
 				await grupoActivoDelCredito(carteraCreditoId),
 			);

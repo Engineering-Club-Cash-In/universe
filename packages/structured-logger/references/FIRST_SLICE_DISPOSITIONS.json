@@ -1885,11 +1885,11 @@
       "path": "apps/cartera-back/src/utils/functions/uploadsFiles.ts",
       "line": 50,
       "method": "console.error",
-      "classification": "remove",
-      "disposition": "remove",
-      "event": null,
-      "outcome": null,
-      "rationale": "raw_error_duplicate_signal"
+      "classification": "replace",
+      "disposition": "event",
+      "event": "payment.upload",
+      "outcome": "failed",
+      "rationale": "upload_failure_emitted_with_finite_safe_fields"
     }
   ]
 }

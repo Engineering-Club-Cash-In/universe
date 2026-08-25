@@ -11,6 +11,7 @@ import {
 import { useState } from "react";
 import { toast } from "sonner";
 import { AnalysisChecklistView } from "@/components/analysis/AnalysisChecklistView";
+import { RenapBuroValidation } from "@/components/analysis/RenapBuroValidation";
 import { DocumentValidationChecklist } from "@/components/document-validation-checklist";
 import {
 	LeadDetailModal,
@@ -218,6 +219,9 @@ function OpportunityDocumentsPage() {
 		(validation.data?.canApprove ?? false) &&
 		((checklist.data as any)?.canApprove ?? false);
 	const isValidationLoading = validation.isLoading || checklist.isLoading;
+	// Mientras la validación de Buró/RENAP corre no se puede aprobar: el gate
+	// volvería a llamar a las mismas fuentes y duplicaría consultas facturadas.
+	const [validandoBuroRenap, setValidandoBuroRenap] = useState(false);
 
 	const getDisabledReason = () => {
 		if (!validation.data || !checklist.data) return "Cargando validación...";
@@ -420,7 +424,9 @@ function OpportunityDocumentsPage() {
 										<Button
 											variant="default"
 											onClick={() => handleApprovalClick(true)}
-											disabled={!canApprove || isValidationLoading}
+											disabled={
+												!canApprove || isValidationLoading || validandoBuroRenap
+											}
 										>
 											<CheckCircle className="mr-2 h-4 w-4" />
 											Aprobar
@@ -504,6 +510,12 @@ function OpportunityDocumentsPage() {
 					validation.refetch();
 					checklist.refetch();
 				}}
+			/>
+
+			{/* Validaciones RENAP y Buró (oportunidades fuera del bot de WhatsApp) */}
+			<RenapBuroValidation
+				opportunityId={opportunityId}
+				onEjecucionChange={setValidandoBuroRenap}
 			/>
 
 			{/* Document Validation */}

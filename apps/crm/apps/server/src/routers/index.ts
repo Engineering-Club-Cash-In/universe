@@ -27,6 +27,7 @@ import * as reportsRouter from "./reports";
 import { seguimientosRouter } from "./seguimientos";
 import { trackerRouter } from "./tracker";
 import { uploadRouter } from "./upload";
+import { validationsRouter } from "./validations";
 import { vehiclesRouter } from "./vehicles";
 import { vendorsRouter } from "./vendors";
 
@@ -102,6 +103,11 @@ export const crmAppRouter = {
 	listLicenseVerifications: licenseVerificationRouter.listLicenseVerifications,
 	getLicenseVerificationById:
 		licenseVerificationRouter.getLicenseVerificationById,
+
+	// Validaciones RENAP/Buró para oportunidades fuera del bot de WhatsApp
+	ejecutarValidacionesRenapBuro:
+		validationsRouter.ejecutarValidacionesRenapBuro,
+	getValidacionesOportunidad: validationsRouter.getValidacionesOportunidad,
 };
 
 /**

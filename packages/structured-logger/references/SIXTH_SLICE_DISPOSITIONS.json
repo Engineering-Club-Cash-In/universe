@@ -1,0 +1,545 @@
+{
+  "commit": "56717ddef8f0bbd8c8633172c8ca2c85c248dfd7",
+  "entries": [
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 95,
+      "method": "console.error",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.late_fee",
+      "outcome": "degraded",
+      "rationale": "late_fee_history_persistence_degraded"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 286,
+      "method": "console.error",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.late_fee",
+      "outcome": "failed",
+      "rationale": "late_fee_deactivation_failed"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 324,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 337,
+      "method": "console.log",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.late_fee",
+      "outcome": "rejected",
+      "rationale": "invalid_late_fee_amount"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 348,
+      "method": "console.log",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.late_fee",
+      "outcome": "rejected",
+      "rationale": "invalid_installment_count"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 387,
+      "method": "console.log",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.late_fee",
+      "outcome": "rejected",
+      "rationale": "overdue_count_mismatch"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 404,
+      "method": "console.log",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.late_fee",
+      "outcome": "rejected",
+      "rationale": "excluded_credit_state"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 420,
+      "method": "console.log",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.late_fee",
+      "outcome": "rejected",
+      "rationale": "amount_out_of_range"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 444,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 467,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 483,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 486,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 501,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 506,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 511,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 528,
+      "method": "console.log",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.late_fee",
+      "outcome": "completed",
+      "rationale": "late_fee_create_completed"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 544,
+      "method": "console.error",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.late_fee",
+      "outcome": "failed",
+      "rationale": "late_fee_create_failed"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 619,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 718,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 734,
+      "method": "console.log",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.late_fee",
+      "outcome": "rejected",
+      "rationale": "active_late_fee_not_found"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 751,
+      "method": "console.log",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.late_fee",
+      "outcome": "completed",
+      "rationale": "late_fee_update_completed"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 768,
+      "method": "console.error",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.late_fee",
+      "outcome": "failed",
+      "rationale": "late_fee_update_failed"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 815,
+      "method": "console.log",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.late_fee",
+      "outcome": "skipped",
+      "rationale": "concurrent_run_skipped"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 821,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 822,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 823,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 824,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 855,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 860,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 871,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 902,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 942,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 970,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 995,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 1034,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 1078,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 1081,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 1082,
+      "method": "console.log",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.late_fee",
+      "outcome": "completed",
+      "rationale": "late_fee_process_completed"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 1083,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 1084,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 1085,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 1086,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 1087,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 1088,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 1093,
+      "method": "console.error",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 1094,
+      "method": "console.error",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.late_fee",
+      "outcome": "failed",
+      "rationale": "late_fee_process_failed"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 1095,
+      "method": "console.error",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 1096,
+      "method": "console.error",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 1097,
+      "method": "console.error",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 1161,
+      "method": "console.log",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.late_fee",
+      "outcome": "completed",
+      "rationale": "late_fee_condonation_completed"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 1162,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 1417,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 1419,
+      "method": "console.log",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.late_fee",
+      "outcome": "completed",
+      "rationale": "late_fee_condonation_list_completed"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/latefee.ts",
+      "line": 1516,
+      "method": "console.log",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.late_fee",
+      "outcome": "completed",
+      "rationale": "late_fee_bulk_condonation_completed"
+    }
+  ]
+}

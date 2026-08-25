@@ -1,0 +1,20 @@
+{
+  "commit": "56717ddef8f0bbd8c8633172c8ca2c85c248dfd7",
+  "entries": [
+    { "path": "apps/cartera-back/src/controllers/revalidatePayment.ts", "line": 29, "method": "console.log", "classification": "remove", "disposition": "remove", "event": null, "outcome": null, "rationale": "operational_banner" },
+    { "path": "apps/cartera-back/src/controllers/revalidatePayment.ts", "line": 41, "method": "console.log", "classification": "remove", "disposition": "remove", "event": null, "outcome": null, "rationale": "sensitive_business_identifier" },
+    { "path": "apps/cartera-back/src/controllers/revalidatePayment.ts", "line": 42, "method": "console.log", "classification": "remove", "disposition": "remove", "event": null, "outcome": null, "rationale": "sensitive_business_identifier" },
+    { "path": "apps/cartera-back/src/controllers/revalidatePayment.ts", "line": 90, "method": "console.log", "classification": "remove", "disposition": "remove", "event": null, "outcome": null, "rationale": "intermediate_state" },
+    { "path": "apps/cartera-back/src/controllers/revalidatePayment.ts", "line": 107, "method": "console.log", "classification": "remove", "disposition": "remove", "event": null, "outcome": null, "rationale": "intermediate_state" },
+    { "path": "apps/cartera-back/src/controllers/revalidatePayment.ts", "line": 146, "method": "console.log", "classification": "remove", "disposition": "remove", "event": null, "outcome": null, "rationale": "sensitive_financial_value" },
+    { "path": "apps/cartera-back/src/controllers/revalidatePayment.ts", "line": 147, "method": "console.log", "classification": "remove", "disposition": "remove", "event": null, "outcome": null, "rationale": "sensitive_financial_value" },
+    { "path": "apps/cartera-back/src/controllers/revalidatePayment.ts", "line": 148, "method": "console.log", "classification": "remove", "disposition": "remove", "event": null, "outcome": null, "rationale": "sensitive_financial_value" },
+    { "path": "apps/cartera-back/src/controllers/revalidatePayment.ts", "line": 167, "method": "console.log", "classification": "remove", "disposition": "remove", "event": null, "outcome": null, "rationale": "sensitive_financial_value" },
+    { "path": "apps/cartera-back/src/controllers/revalidatePayment.ts", "line": 168, "method": "console.log", "classification": "remove", "disposition": "remove", "event": null, "outcome": null, "rationale": "sensitive_financial_value" },
+    { "path": "apps/cartera-back/src/controllers/revalidatePayment.ts", "line": 169, "method": "console.log", "classification": "remove", "disposition": "remove", "event": null, "outcome": null, "rationale": "sensitive_financial_value" },
+    { "path": "apps/cartera-back/src/controllers/revalidatePayment.ts", "line": 183, "method": "console.log", "classification": "remove", "disposition": "remove", "event": null, "outcome": null, "rationale": "intermediate_state" },
+    { "path": "apps/cartera-back/src/controllers/revalidatePayment.ts", "line": 201, "method": "console.log", "classification": "replace", "disposition": "event", "event": "payment.revalidation", "outcome": "completed", "rationale": "terminal_completion_event" },
+    { "path": "apps/cartera-back/src/controllers/revalidatePayment.ts", "line": 246, "method": "console.error", "classification": "replace", "disposition": "event", "event": "payment.revalidation", "outcome": "failed", "rationale": "terminal_failure_event" },
+    { "path": "apps/cartera-back/src/controllers/revalidatePayment.ts", "line": 247, "method": "console.error", "classification": "remove", "disposition": "remove", "event": null, "outcome": null, "rationale": "arbitrary_error_payload" }
+  ]
+}

@@ -32,8 +32,18 @@
  */
 import { createHash } from "node:crypto";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
-import { and, asc, eq, inArray, isNull, lt, ne, or } from "drizzle-orm";
+import {
+	and,
+	asc,
+	eq,
+	inArray,
+	isNull,
+	lt,
+	ne,
+	notInArray,
+	or,
+} from "drizzle-orm";
+import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 import { db } from "../db";
 import {
 	pagaloPaymentEvents,
@@ -41,7 +51,10 @@ import {
 	pagaloPaymentLinks,
 } from "../db/schema/pagalo-payments";
 import { getFileUrl, R2_BUCKET_NAME, r2Client } from "../lib/storage";
-import { createPagaloClient, getPagaloSandboxConfig } from "../services/pagalo-client";
+import {
+	createPagaloClient,
+	getPagaloSandboxConfig,
+} from "../services/pagalo-client";
 
 /** Tope por corrida. Si hay más, se atienden en la siguiente. */
 const MAXIMO_POR_CORRIDA = 50;
@@ -74,14 +87,21 @@ const proximoIntento = (pollAttempts: number): Date => {
 	return new Date(Date.now() + segundos * 1000);
 };
 
-function validarTransaccionPagalo(link: LinkClaimado, transaccion: TransaccionPagalo): void {
+function validarTransaccionPagalo(
+	link: LinkClaimado,
+	transaccion: TransaccionPagalo,
+): void {
 	if (transaccion.status_transaction !== "ACCEPT") {
 		throw new Error("Transacción Págalo no está ACCEPT.");
 	}
 	const payload = link.requestPayload as { total_amount?: unknown } | null;
 	const expected = Number(payload?.total_amount);
 	const received = Number(transaccion.total);
-	if (!Number.isFinite(expected) || !Number.isFinite(received) || expected.toFixed(2) !== received.toFixed(2)) {
+	if (
+		!Number.isFinite(expected) ||
+		!Number.isFinite(received) ||
+		expected.toFixed(2) !== received.toFixed(2)
+	) {
 		throw new Error("Monto Págalo no coincide con monto congelado del link.");
 	}
 	if (transaccion.currency !== "GTQ") {
@@ -123,7 +143,11 @@ async function reclamarLinksPendientes(): Promise<LinkClaimado[]> {
 				and(
 					eq(pagaloPaymentLinks.id, candidato.id),
 					lt(pagaloPaymentLinks.nextPollAt, ahora),
-					inArray(pagaloPaymentLinks.status, ["CREATING", "ACTIVE", "REPLACED"]),
+					inArray(pagaloPaymentLinks.status, [
+						"CREATING",
+						"ACTIVE",
+						"REPLACED",
+					]),
 					or(
 						isNull(pagaloPaymentLinks.pollClaimedAt),
 						lt(pagaloPaymentLinks.pollClaimedAt, leaseVencido),
@@ -184,11 +208,11 @@ async function generarVoucherPdf(
 	centrado(businessName, 16, 40);
 	centrado("Guatemala", 11);
 	y -= 20;
+	centrado(`Guatemala, ${transaccion.date_transaction}`, 10);
 	centrado(
-		`Guatemala, ${transaccion.date_transaction}`,
+		`Ref: ${transaccion.request_id}  Aut: ${transaccion.request_auth}`,
 		10,
 	);
-	centrado(`Ref: ${transaccion.request_id}  Aut: ${transaccion.request_auth}`, 10);
 	centrado(`No.Tarjeta **** **** **** ${transaccion.value_payment}`, 10, 30);
 	centrado(
 		`Compra: ${transaccion.currency} ${Number(transaccion.total).toFixed(2)}`,
@@ -206,7 +230,11 @@ async function subirVoucher(
 	buffer: Uint8Array,
 	groupId: string,
 	link: LinkClaimado,
-): Promise<{ voucherStorageKey: string; voucherSha256: string; voucherUrl: string }> {
+): Promise<{
+	voucherStorageKey: string;
+	voucherSha256: string;
+	voucherUrl: string;
+}> {
 	const voucherSha256 = createHash("sha256")
 		.update(Buffer.from(buffer))
 		.digest("hex");
@@ -307,7 +335,11 @@ async function evaluarGrupo(
 async function marcarLinkPagado(
 	link: LinkClaimado,
 	transaccion: TransaccionPagalo,
-	voucher: { voucherStorageKey: string; voucherSha256: string; voucherUrl: string },
+	voucher: {
+		voucherStorageKey: string;
+		voucherSha256: string;
+		voucherUrl: string;
+	},
 ): Promise<void> {
 	await db.transaction(async (tx) => {
 		const esReemplazado = link.status === "REPLACED";
@@ -331,7 +363,12 @@ async function marcarLinkPagado(
 				nextPollAt: null,
 				updatedAt: new Date(),
 			})
-			.where(and(eq(pagaloPaymentLinks.id, link.id), ne(pagaloPaymentLinks.status, "PAID")))
+			.where(
+				and(
+					eq(pagaloPaymentLinks.id, link.id),
+					ne(pagaloPaymentLinks.status, "PAID"),
+				),
+			)
 			.returning({ id: pagaloPaymentLinks.id });
 		if (!updated) return;
 		await tx.insert(pagaloPaymentEvents).values({
@@ -341,26 +378,92 @@ async function marcarLinkPagado(
 			source: "PAGALO_POLLER",
 			fromStatus: link.status,
 			toStatus: "PAID",
-			payload: { transactionUuid: transaccion.uuid, amount: transaccion.total, replaced: esReemplazado },
+			payload: {
+				transactionUuid: transaccion.uuid,
+				amount: transaccion.total,
+				replaced: esReemplazado,
+			},
 		});
 		if (esReemplazado) {
-			await tx.update(pagaloPaymentGroups).set({ status: "REVIEW_REQUIRED", updatedAt: new Date() })
+			// Un link REPLACED que se paga es dinero real fuera de la intención
+			// viva. Si el crédito ya tiene OTRO grupo activo (el que reemplazó a
+			// este), es ESE el que pasa a REVIEW_REQUIRED: reabrir el grupo
+			// viejo (CANCELLED) chocaría con el índice único de un grupo activo
+			// por crédito y el poller reintentaría para siempre sin registrar
+			// el pago (hallazgo de Codex, PR #1445). Sin grupo activo, se
+			// reabre el viejo como antes.
+			const [viejo] = await tx
+				.select({
+					id: pagaloPaymentGroups.id,
+					carteraCreditoId: pagaloPaymentGroups.carteraCreditoId,
+					status: pagaloPaymentGroups.status,
+				})
+				.from(pagaloPaymentGroups)
 				.where(eq(pagaloPaymentGroups.id, link.groupId));
+			const [activo] = viejo
+				? await tx
+						.select({
+							id: pagaloPaymentGroups.id,
+							status: pagaloPaymentGroups.status,
+						})
+						.from(pagaloPaymentGroups)
+						.where(
+							and(
+								eq(
+									pagaloPaymentGroups.carteraCreditoId,
+									viejo.carteraCreditoId,
+								),
+								ne(pagaloPaymentGroups.id, viejo.id),
+								notInArray(pagaloPaymentGroups.status, [
+									"COMPLETED",
+									"CANCELLED",
+								]),
+							),
+						)
+						.limit(1)
+				: [];
+			const objetivo = activo ?? viejo;
+			if (!objetivo) return;
+			await tx
+				.update(pagaloPaymentGroups)
+				.set({ status: "REVIEW_REQUIRED", updatedAt: new Date() })
+				.where(eq(pagaloPaymentGroups.id, objetivo.id));
+			await tx.insert(pagaloPaymentEvents).values({
+				groupId: objetivo.id,
+				eventType: "REPLACED_LINK_PAID",
+				source: "PAGALO_POLLER",
+				fromStatus: objetivo.status,
+				toStatus: "REVIEW_REQUIRED",
+				payload: {
+					linkId: link.id,
+					grupoDelLink: link.groupId,
+					transactionUuid: transaccion.uuid,
+					amount: transaccion.total,
+				},
+			});
 			return;
 		}
 		await evaluarGrupo(tx, link.groupId);
 	});
 }
 
-async function marcarLinkTerminal(link: LinkClaimado, status: "CANCELLED" | "EXPIRED"): Promise<void> {
+async function marcarLinkTerminal(
+	link: LinkClaimado,
+	status: "CANCELLED" | "EXPIRED",
+): Promise<void> {
 	await db.transaction(async (tx) => {
-		await tx.update(pagaloPaymentLinks).set({
-			status,
-			nextPollAt: null,
-			lastPolledAt: new Date(),
-			updatedAt: new Date(),
-		}).where(eq(pagaloPaymentLinks.id, link.id));
-		await tx.update(pagaloPaymentGroups).set({ status: "REVIEW_REQUIRED", updatedAt: new Date() })
+		await tx
+			.update(pagaloPaymentLinks)
+			.set({
+				status,
+				nextPollAt: null,
+				lastPolledAt: new Date(),
+				updatedAt: new Date(),
+			})
+			.where(eq(pagaloPaymentLinks.id, link.id));
+		await tx
+			.update(pagaloPaymentGroups)
+			.set({ status: "REVIEW_REQUIRED", updatedAt: new Date() })
 			.where(eq(pagaloPaymentGroups.id, link.groupId));
 	});
 }

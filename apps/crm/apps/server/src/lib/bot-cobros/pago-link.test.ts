@@ -87,6 +87,25 @@ describe("cuotasPagables", () => {
 		expect(pagables.map((c) => c.numeroCuota)).toEqual([3]);
 	});
 
+	test("una cuota sin saldo no entra: dos opciones nunca comparten monto (Codex)", () => {
+		const cero = {
+			capital_restante: "0.00",
+			interes_restante: "0.00",
+			iva_12_restante: "0.00",
+			seguro_restante: "0.00",
+		};
+		const pagables = cuotasPagables({
+			cuotasAtrasadas: [fila(1, cero), fila(2), fila(3, cero)],
+			cuotasPendientes: [fila(4)],
+		});
+		expect(pagables.map((c) => c.numeroCuota)).toEqual([2, 4]);
+		const opciones = calcularOpciones(pagables, "0.00");
+		expect(opciones.map((o) => o.etiqueta)).toEqual([
+			"1 cuota — Q3,487.62",
+			"1 cuota + la próxima — Q6,975.24",
+		]);
+	});
+
 	test("la misma cuota en atrasadas y pendientes se cuenta una vez", () => {
 		const pagables = cuotasPagables({
 			cuotasAtrasadas: [fila(1)],

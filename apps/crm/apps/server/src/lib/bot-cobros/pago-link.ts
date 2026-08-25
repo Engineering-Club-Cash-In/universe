@@ -139,6 +139,10 @@ export function cuotasPagables(
 	const absorber = (filas: CarteraCuotaCredito[] | undefined) => {
 		for (const fila of filas ?? []) {
 			if (fila.numero_cuota <= 0 || fila.pagado) continue;
+			// Una cuota sin saldo no suma opción: si entrara, dos opciones
+			// tendrían el mismo monto y el monto dejaría de identificar la
+			// opción (D-47). Hallazgo de Codex.
+			if (saldoDeFila(fila) === 0n) continue;
 			if (fila.validationStatus === "pending") {
 				conPagoEnValidacion.add(fila.cuota_id);
 			}
@@ -468,7 +472,10 @@ function linksParaElBot(
  */
 type Veredicto =
 	| { tipo: "libre" }
-	| { tipo: "en_proceso"; motivo: "post_pago" | "revision" | "asesor" }
+	| {
+			tipo: "en_proceso";
+			motivo: "post_pago" | "revision" | "asesor" | "creando";
+	  }
 	| { tipo: "parcial"; grupo: GrupoActivo; pendiente: LinkParaElBot[] }
 	| { tipo: "reusable"; grupo: GrupoActivo };
 
@@ -482,15 +489,32 @@ function evaluarGrupo(grupo: GrupoActivo | null): Veredicto {
 	if (grupo.status === "PARTIALLY_PAID") {
 		return { tipo: "parcial", grupo, pendiente: linksParaElBot(grupo, true) };
 	}
+	// LINKS_PENDING = otro /crear está en medio de las llamadas a Págalo
+	// (hallazgo de Codex): reemplazarlo dejaría links cobrables colgados de un
+	// grupo cancelado. Solo se considera huérfano —y reemplazable— si lleva
+	// más de LINKS_PENDING_HUERFANO_MS sin avanzar (el proceso murió a mitad).
+	if (
+		grupo.status === "LINKS_PENDING" &&
+		Date.now() - grupo.updatedAt.getTime() < LINKS_PENDING_HUERFANO_MS
+	) {
+		return { tipo: "en_proceso", motivo: "creando" };
+	}
 	return { tipo: "reusable", grupo };
 }
 
-function mensajeEnProceso(motivo: "post_pago" | "revision" | "asesor"): string {
+/** Un /crear tarda segundos; pasado esto, un LINKS_PENDING es un proceso muerto. */
+const LINKS_PENDING_HUERFANO_MS = 5 * 60 * 1000;
+
+function mensajeEnProceso(
+	motivo: "post_pago" | "revision" | "asesor" | "creando",
+): string {
 	switch (motivo) {
 		case "revision":
 			return "Tu último pago con link quedó en revisión. Tu asesor te va a ayudar a completarlo.";
 		case "asesor":
 			return "Ya tenés un pago por link en curso con tu asesor. Pagá ese o consultale a él antes de generar otro.";
+		case "creando":
+			return "Estamos generando tus links de pago. Intentá de nuevo en un momento.";
 		default:
 			return "Tu pago se está aplicando. En cuanto se confirme te mandamos tu recibo por acá.";
 	}

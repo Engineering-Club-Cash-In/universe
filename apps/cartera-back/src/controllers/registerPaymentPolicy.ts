@@ -356,6 +356,7 @@ export const calcularCoberturaCuota = ({
 
 export type FilaCuotaVencida = PagoCoberturaCuota & {
   cuota_id: number | null;
+  numero_cuota: number | null;
 };
 
 /**
@@ -379,29 +380,33 @@ export const filtrarCuotasVencidasSinCobertura = <T extends FilaCuotaVencida>(
   rows: T[],
   montoCuota: BigInput
 ): T[] => {
-  const porCuota = new Map<number | null, T[]>();
+  // Agrupar por numero_cuota, NO por cuota_id: hay créditos con filas
+  // duplicadas de la misma cuota contractual (mismo numero_cuota, cuota_id
+  // distinto) y sus pagos quedan repartidos entre los duplicados. Mismo
+  // criterio de merge que getCoveredOpenInstallments.
+  const porNumeroCuota = new Map<number | null, T[]>();
   for (const row of rows) {
-    const grupo = porCuota.get(row.cuota_id);
+    const grupo = porNumeroCuota.get(row.numero_cuota);
     if (grupo) {
       grupo.push(row);
     } else {
-      porCuota.set(row.cuota_id, [row]);
+      porNumeroCuota.set(row.numero_cuota, [row]);
     }
   }
 
   const cubiertas = new Set<number | null>();
-  for (const [cuotaId, grupo] of porCuota) {
+  for (const [numeroCuota, grupo] of porNumeroCuota) {
     const { cuotaCompleta } = calcularCoberturaCuota({
       montoCuota,
       pagos: grupo,
       incluirPendientes: true,
     });
     if (cuotaCompleta) {
-      cubiertas.add(cuotaId);
+      cubiertas.add(numeroCuota);
     }
   }
 
-  return rows.filter((row) => !cubiertas.has(row.cuota_id));
+  return rows.filter((row) => !cubiertas.has(row.numero_cuota));
 };
 
 type CuotaAbiertaConPagos = {

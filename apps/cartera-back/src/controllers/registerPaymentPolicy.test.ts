@@ -1213,3 +1213,51 @@ describe("filtrarCuotasVencidasSinCobertura — contador de atrasadas por montos
     expect(result).toHaveLength(2);
   });
 });
+
+describe("filtrarCuotasVencidasSinCobertura — cuotas duplicadas (mismo numero_cuota, distinto cuota_id)", () => {
+  const filtrar = registerPaymentPolicy.filtrarCuotasVencidasSinCobertura;
+
+  const fila = (over: Record<string, any> = {}) => ({
+    cuota_id: 10,
+    numero_cuota: 1,
+    pago_id: 100,
+    validationStatus: "validated",
+    paymentFalse: false,
+    abono_capital: "0",
+    abono_interes: "0",
+    abono_iva_12: "0",
+    abono_seguro: "0",
+    abono_gps: "0",
+    membresias_pago: "0",
+    ...over,
+  });
+
+  it("suma los fragmentos de filas duplicadas de la misma cuota contractual antes de decidir", () => {
+    // Cuota lógica #1 partida en dos filas de cuotas_credito (dup conocido):
+    // Q60 en una y Q40 en la otra cubren la cuota de Q100 entre las dos.
+    const fragmento1 = fila({ cuota_id: 10, pago_id: 100, abono_capital: "60.00" });
+    const fragmento2 = fila({ cuota_id: 11, pago_id: 101, abono_capital: "40.00" });
+
+    expect(filtrar([fragmento1, fragmento2], "100.00")).toHaveLength(0);
+  });
+
+  it("una fila cubierta + su duplicada vacía no dejan cuota atrasada fantasma", () => {
+    const cubierta = fila({ cuota_id: 10, pago_id: 100, abono_capital: "100.00" });
+    const dupVacia = fila({
+      cuota_id: 11,
+      pago_id: null,
+      validationStatus: null,
+      paymentFalse: null,
+      abono_capital: null,
+    });
+
+    expect(filtrar([cubierta, dupVacia], "100.00")).toHaveLength(0);
+  });
+
+  it("cuotas de numero distinto NO se mezclan: cada una se evalúa sola", () => {
+    const cuota1cubierta = fila({ cuota_id: 10, numero_cuota: 1, abono_capital: "100.00" });
+    const cuota2descubierta = fila({ cuota_id: 20, numero_cuota: 2, pago_id: 200, abono_capital: "10.00" });
+
+    expect(filtrar([cuota1cubierta, cuota2descubierta], "100.00")).toEqual([cuota2descubierta]);
+  });
+});

@@ -1,6 +1,6 @@
 # CB-028 · Integración Págalo
 
-**Estado:** diseño aprobado; implementación pendiente.
+**Estado:** implementación parcial en revisión; no lista para operación E2E.
 **Ambiente permitido:** desarrollo/sandbox. Producción queda fuera de alcance.
 
 ## Objetivo
@@ -26,17 +26,23 @@ compartido del bot.
 
 ## Alcance por etapas
 
-1. **Creación transaccional de pagos:** volver transaccional el motor actual y
-   agregar importación Págalo idempotente. Es el único slice aprobado para
-   implementación inmediata.
-2. **Cliente Págalo:** crear uno o dos links con montos fijos y guardar
-   respuestas sanitizadas.
-3. **Confirmación automática:** consultar links/transacciones hasta tener todos
-   los `ACCEPT` requeridos, obtener/generar vouchers y preparar importación.
-4. **CRM y mensajería:** selector de cuotas/mora, generación desde gestión,
-   envío de links requeridos en un solo WhatsApp e historial.
-5. **Prueba E2E en sandbox:** casos completos, parciales, reintentos, fallos y
-   reconciliación. Sin despliegue productivo.
+1. **Creación transaccional de pagos:** existe endpoint idempotente, motor con
+   transacción externa y llave de servicio requerida. Faltan pruebas de
+   rollback real y de compatibilidad exacta entre snapshot congelado y rubros
+   vivos.
+2. **Cliente Págalo:** existe cliente limitado a `api.pagalodev.com`, respuesta
+   sanitizada, flag explícito para crear links y orquestación de uno o dos
+   links. Esta implementación no ha creado links.
+3. **Confirmación automática:** worker consulta estado Págalo; estado `2`
+   sólo permite consultar detalle. Exige después
+   `status_transaction='ACCEPT'`, valida monto/GTQ, guarda voucher propio
+   `pagalo/{crm_group_id}/...` y prepara grupo. Aún no llama al importador de
+   Cartera; no completa pagos end-to-end.
+4. **CRM:** botón y modal fuerzan cuotas consecutivas; mora positiva queda
+   marcada/bloqueada. Cálculo servidor usa centavos exactos. Falta prueba de UI
+   y eliminar aproximación numérica del preview visual.
+5. **Prueba E2E en sandbox:** pendiente: casos completos, parciales,
+   reintentos, fallos y reconciliación. Sin despliegue productivo.
 
 Cada etapa tendrá plan y PR separados. Ninguna etapa puede introducir un motor
 alterno de cálculo de pagos.
@@ -60,7 +66,18 @@ procesarRegistroPago() ── mismo motor de Ficha 360 y bot
   └─ boletas (uno o dos vouchers por cada pago creado)
 ```
 
-## Límites del primer slice
+## Guardas antes de habilitar sandbox
+
+No habilitar creación de links ni polling automático hasta cerrar estos puntos:
+
+- validar monto, moneda y `ACCEPT` de cada transacción contra link/snapshot;
+- enviar grupo `READY_TO_APPLY` al importador de Cartera y persistir resultado;
+- probar rollback total, replay HTTP y grupos capital-only, facturable-only y
+  ambos;
+- configurar misma llave `PAGALO_IMPORT_SERVICE_KEY` en CRM y Cartera antes de
+  habilitar dispatch.
+
+## Límites del primer slice original
 
 El primer slice empieza con un grupo CRM que ya posee todas sus transacciones
 requeridas en `ACCEPT` y vouchers almacenados, y termina con pagos de Cartera

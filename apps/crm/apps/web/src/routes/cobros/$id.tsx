@@ -36,6 +36,7 @@ import {
 import { toast } from "sonner";
 import { ActividadBot } from "@/components/cobros/actividad-bot";
 import { PromesaActivaBadge } from "@/components/cobros/promesa-activa-badge";
+import { PagaloLinkDialog } from "@/components/cobros/pagalo-link-dialog";
 import { ReferenciasView } from "@/components/cobros/ReferenciasView";
 import { SeguimientoRecurrenteModal } from "@/components/cobros/seguimiento-recurrente-modal";
 import { ContactoModal } from "@/components/contacto-modal";
@@ -118,6 +119,7 @@ function formatFechaGT(date: Date): string {
  */
 interface CasoDetalle {
 	id?: string | null;
+	carteraCreditoId?: number | null;
 	contratoId?: string | null;
 	estadoMora?: string | null;
 	montoEnMora?: string | number | null;
@@ -1273,6 +1275,14 @@ function RouteComponent() {
 											)}
 										</DropdownMenuContent>
 									</DropdownMenu>
+
+									{caso.numeroCreditoSifco && caso.carteraCreditoId && (
+										<PagaloLinkDialog
+											casoCobroId={caso.id}
+											numeroSifco={caso.numeroCreditoSifco}
+											creditoId={caso.carteraCreditoId}
+										/>
+									)}
 
 									{/* 2 · Promesa de Pago: visible porque es una gestión con
 									    peso propio (CB-020: modal reducido — solo Detalles de

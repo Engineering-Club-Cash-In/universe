@@ -22,8 +22,9 @@ Ficha 360 consume ese circuito y no pueden contradecirlo.
 
 ## D-01 · Solo desarrollo
 
-Implementación y pruebas usan sandbox. Integración queda detrás de feature flag
-desactivado por defecto. No se configuran credenciales ni URL productivas.
+Implementación y pruebas usan sandbox. Integración queda detrás de flags
+desactivados por defecto: creación de links y polling. No se configuran
+credenciales ni URL productivas. Worker exige habilitación explícita en DEV.
 
 ## D-02 · CRM orquesta; Cartera registra dinero
 
@@ -131,9 +132,9 @@ Modal reutiliza patrón visual de Promesa de Pago. Muestra cuotas atrasadas en
 rango consecutivo desde la más antigua y permite agregar próxima cuota por
 vencer, como bot (D-46). Cada cuota se cobra completa y monto no es editable.
 
-Si mora vigente es mayor que cero, aparece seleccionada y bloqueada mientras
-haya cuotas elegidas. Asesor también puede desmarcar todas las cuotas y dejar
-solo mora completa. No existen pagos parciales de cuota ni mora desde este flujo.
+Si mora vigente es mayor que cero, aparece siempre seleccionada y bloqueada.
+Asesor puede desmarcar todas las cuotas y dejar solo mora completa. No existen
+pagos parciales de cuota ni mora desde este flujo.
 
 ## D-17 · Link viejo: mora primero; revisión solo por sobrante
 

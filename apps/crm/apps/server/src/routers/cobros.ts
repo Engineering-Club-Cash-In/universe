@@ -111,6 +111,8 @@ import {
 	crmCobrosOrInvestmentsProcedure,
 	crmOrCobrosProcedure,
 } from "../lib/orpc";
+import { createPagaloClient, getPagaloSandboxConfig } from "../services/pagalo-client";
+import { createPagaloLinks } from "../services/pagalo-link-orchestrator";
 import { primerTelefono } from "../lib/phone-utils";
 import {
 	aplicarCambiosEstadoPromesa,
@@ -4537,6 +4539,7 @@ export const cobrosRouter = {
 				return {
 					// ID del caso de cobros (si existe)
 					id: casoCobro?.id || null,
+					carteraCreditoId: creditoCompleto.credito.credito_id,
 					contratoId: contratoId,
 
 					// Datos de mora / convenio
@@ -4725,6 +4728,21 @@ export const cobrosRouter = {
 			// reales al momento de cobrar, no una copia de hasta 5 min de vieja.
 			return carteraBackClient.getCredito(input.numeroSifco, false);
 		}),
+
+	// Págalo: revalida cuotas contra cartera justo antes de crear links. El
+	// cliente proveedor queda server-only y bloqueado fuera de sandbox.
+	crearLinksPagalo: cobrosProcedure
+		.input(
+			z.object({
+				casoCobroId: z.string().uuid(),
+				numeroSifco: z.string().min(1),
+				creditoId: z.number().int().positive(),
+				cuotaIds: z.array(z.number().int().positive()).max(24),
+			}),
+		)
+		.handler(async ({ input, context }) =>
+			createPagaloLinks({ ...input, requestedBy: context.user.id }),
+		),
 
 	// Catálogo de bancos para el selector del form de pago.
 	getBancosParaPago: cobrosProcedure.handler(async () => {

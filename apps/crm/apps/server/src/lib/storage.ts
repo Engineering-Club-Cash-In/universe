@@ -14,7 +14,7 @@ const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID;
 const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
 const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
 // R2 Bucket names - standardized naming convention
-const R2_BUCKET_NAME =
+export const R2_BUCKET_NAME =
 	process.env.R2_BUCKET_CRM || process.env.R2_BUCKET_NAME || "crm-documents";
 
 // Verificar que las variables de entorno estén configuradas

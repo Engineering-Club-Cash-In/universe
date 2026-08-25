@@ -39,6 +39,7 @@ import {
 } from "drizzle-orm";
 import { getPagosDelMesActual, insertPagosCreditoInversionistasV2 } from "./payments";
 import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
+import { filtrarCuotasVencidasSinCobertura } from "./registerPaymentPolicy";
 import {
   CREDIT_DETAIL_STATUSES,
   RESET_CREDIT_ERRORS,
@@ -192,8 +193,16 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       (hoy.getMonth() - fechaInicio.getMonth()) +
       1;
 
-    // 5. Consultar cuotas pendientes (no pagadas y ya deberían haberse pagado)
-    const cuotasAtrasadas = await db
+    // 5. Consultar cuotas atrasadas: vencidas, sin cerrar y NO cubiertas por
+    // montos. El criterio viejo confiaba en flags (NOT EXISTS pago pending con
+    // pagado=true) y mentía cuando los flags no cuadraban con el dinero real
+    // (ej. crédito 9266: pago validated parcial porque la mora se comió parte
+    // de la boleta). Ahora la query trae TODAS las vencidas sin cerrar con sus
+    // pagos y la cobertura se decide por montos en
+    // filtrarCuotasVencidasSinCobertura (misma semántica de rubros y
+    // tolerancia que calcularCoberturaCuota, pendientes incluidos para no
+    // contar como deuda una boleta en validación).
+    const cuotasVencidasSinCerrar = await db
       .select({
         cuota_id: cuotas_credito.cuota_id,
         credito_id: cuotas_credito.credito_id,
@@ -204,6 +213,9 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         validationStatus: pagos_credito.validationStatus,
         pago_id: pagos_credito.pago_id,
         cuota: pagos_credito.cuota,
+        // Necesarios para la cobertura por montos (el front los ignora)
+        paymentFalse: pagos_credito.paymentFalse,
+        membresias_pago: pagos_credito.membresias_pago,
 
         monto_boleta: pagos_credito.monto_boleta,
         abono_capital: pagos_credito.abono_capital,
@@ -234,17 +246,15 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         and(
           eq(cuotas_credito.credito_id, creditoId),
           eq(cuotas_credito.pagado, false),
-          lt(cuotas_credito.fecha_vencimiento, hoy.toISOString().slice(0, 10)),
-          sql`NOT EXISTS (
-            SELECT 1
-            FROM cartera.pagos_credito p_pending
-            WHERE p_pending.cuota_id = ${cuotas_credito.cuota_id}
-              AND p_pending.validation_status = 'pending'
-              AND p_pending.pagado = true
-          )`
+          lt(cuotas_credito.fecha_vencimiento, hoy.toISOString().slice(0, 10))
         )
       )
       .orderBy(asc(cuotas_credito.numero_cuota));
+
+    const cuotasAtrasadas = filtrarCuotasVencidasSinCobertura(
+      cuotasVencidasSinCerrar,
+      currentCredit.creditos.cuota ?? 0
+    );
 
     const cuotasPendientes = await db
       .select({

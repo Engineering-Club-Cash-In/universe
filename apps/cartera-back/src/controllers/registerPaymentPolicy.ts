@@ -280,7 +280,9 @@ export type RubrosCuotaRow = {
 };
 
 export type PagoCoberturaCuota = RubrosCuotaRow & {
-  pago_id?: number;
+  // number | null: las filas que vienen de un leftJoin traen null cuando la
+  // cuota no tiene pago; solo se usa en comparaciones de igualdad.
+  pago_id?: number | null;
   validationStatus?: string | null;
   paymentFalse?: boolean | null;
   mora?: BigInput | null;
@@ -350,6 +352,56 @@ export const calcularCoberturaCuota = ({
     tieneAbonoParcial:
       !cuotaCompleta && totalAplicado.gt(0) && totalAplicado.lt(monto),
   };
+};
+
+export type FilaCuotaVencida = PagoCoberturaCuota & {
+  cuota_id: number | null;
+};
+
+/**
+ * Filtro del contador de "cuotas atrasadas" del buscador de créditos
+ * (getCreditoByNumero): de las filas de cuotas vencidas sin cerrar, deja solo
+ * las de cuotas NO cubiertas por montos.
+ *
+ * Reemplaza al criterio viejo por flags (NOT EXISTS pago pending con
+ * pagado=true), que mentía en los dos sentidos: una boleta pending marcada
+ * pagado=true ocultaba la cuota sin verificar cuánto dinero traía, y una cuota
+ * ya cobrada con flags desincronizados seguía contando como atrasada. La
+ * verdad son los montos: Σ rubros de pagos vivos (validated + pending,
+ * paymentFalse=false) vs el valor contractual de la cuota, con la tolerancia
+ * de Q0.01 de calcularCoberturaCuota.
+ *
+ * Recibe las filas tal como salen del leftJoin (una por par cuota-pago) y
+ * devuelve esas mismas filas (orden y multiplicidad intactos) para las cuotas
+ * descubiertas — el shape que el front ya consume no cambia.
+ */
+export const filtrarCuotasVencidasSinCobertura = <T extends FilaCuotaVencida>(
+  rows: T[],
+  montoCuota: BigInput
+): T[] => {
+  const porCuota = new Map<number | null, T[]>();
+  for (const row of rows) {
+    const grupo = porCuota.get(row.cuota_id);
+    if (grupo) {
+      grupo.push(row);
+    } else {
+      porCuota.set(row.cuota_id, [row]);
+    }
+  }
+
+  const cubiertas = new Set<number | null>();
+  for (const [cuotaId, grupo] of porCuota) {
+    const { cuotaCompleta } = calcularCoberturaCuota({
+      montoCuota,
+      pagos: grupo,
+      incluirPendientes: true,
+    });
+    if (cuotaCompleta) {
+      cubiertas.add(cuotaId);
+    }
+  }
+
+  return rows.filter((row) => !cubiertas.has(row.cuota_id));
 };
 
 type CuotaAbiertaConPagos = {

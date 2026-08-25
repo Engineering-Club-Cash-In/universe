@@ -1076,3 +1076,140 @@ describe("debeRechazarPagoSinAplicacion", () => {
     ).toBe(false);
   });
 });
+
+describe("filtrarCuotasVencidasSinCobertura — contador de atrasadas por montos", () => {
+  const filtrar = () => {
+    const fn = Reflect.get(
+      registerPaymentPolicy,
+      "filtrarCuotasVencidasSinCobertura",
+    );
+    expect(fn).toBeFunction();
+    return fn as (
+      rows: any[],
+      montoCuota: string | number,
+    ) => any[];
+  };
+
+  // Fila como la devuelve la query de getCreditoByNumero (cuota + pago join)
+  const fila = (over: Record<string, any> = {}) => ({
+    cuota_id: 10,
+    numero_cuota: 1,
+    pago_id: 100,
+    validationStatus: "validated",
+    paymentFalse: false,
+    abono_capital: "0",
+    abono_interes: "0",
+    abono_iva_12: "0",
+    abono_seguro: "0",
+    abono_gps: "0",
+    membresias_pago: "0",
+    ...over,
+  });
+
+  it("mantiene atrasada la cuota con pago validated parcial (caso Aura: 5,079.59 de 6,394.11)", () => {
+    const rows = [
+      fila({
+        abono_capital: "902.44",
+        abono_interes: "3729.60",
+        abono_iva_12: "447.55",
+      }), // suma 5,079.59
+    ];
+    expect(filtrar()(rows, "6394.11")).toHaveLength(1);
+  });
+
+  it("excluye la cuota cuya boleta pending SÍ cubre por montos (reemplaza al viejo NOT EXISTS)", () => {
+    const rows = [
+      fila({
+        validationStatus: "pending",
+        abono_capital: "1000.00",
+        abono_interes: "4500.00",
+        abono_iva_12: "894.11",
+      }), // suma 6,394.11 exacto
+    ];
+    expect(filtrar()(rows, "6394.11")).toHaveLength(0);
+  });
+
+  it("cuenta atrasada la cuota con pending+pagado=true cuyos montos NO cubren (los flags mienten)", () => {
+    const rows = [
+      fila({
+        validationStatus: "pending",
+        pagado: true, // flag mentiroso: el viejo criterio la ocultaba
+        abono_capital: "100.00",
+      }),
+    ];
+    expect(filtrar()(rows, "6394.11")).toHaveLength(1);
+  });
+
+  it("cuenta atrasada la cuota sin ningún pago (fila con pago null del leftJoin)", () => {
+    const rows = [
+      fila({
+        pago_id: null,
+        validationStatus: null,
+        paymentFalse: null,
+        abono_capital: null,
+        abono_interes: null,
+        abono_iva_12: null,
+        abono_seguro: null,
+        abono_gps: null,
+        membresias_pago: null,
+      }),
+    ];
+    expect(filtrar()(rows, "6394.11")).toHaveLength(1);
+  });
+
+  it("ignora boletas con paymentFalse=true aunque sus montos cubran", () => {
+    const rows = [
+      fila({
+        paymentFalse: true,
+        abono_capital: "6394.11",
+      }),
+    ];
+    expect(filtrar()(rows, "6394.11")).toHaveLength(1);
+  });
+
+  it("tolera 1 centavo de redondeo (6,394.10 aplicado cubre cuota de 6,394.11)", () => {
+    const rows = [
+      fila({
+        abono_capital: "6394.10",
+      }),
+    ];
+    expect(filtrar()(rows, "6394.11")).toHaveLength(0);
+  });
+
+  it("las filas de solo-mora no cubren la cuota (los rubros van en 0)", () => {
+    // monto_aplicado legacy diría 2,420.41 (mora), pero la cuota no recibió nada
+    const rows = [fila({ pago_mora: "2420.41" })];
+    expect(filtrar()(rows, "6394.11")).toHaveLength(1);
+  });
+
+  it("filtra por cuota: devuelve solo las filas de la cuota descubierta, preservando orden y multiplicidad", () => {
+    const cubierta1 = fila({
+      cuota_id: 10,
+      numero_cuota: 1,
+      pago_id: 100,
+      abono_capital: "3000.00",
+    });
+    const cubierta2 = fila({
+      cuota_id: 10,
+      numero_cuota: 1,
+      pago_id: 101,
+      abono_capital: "3394.11",
+    }); // entre las dos suman 6,394.11
+    const descubierta = fila({
+      cuota_id: 11,
+      numero_cuota: 2,
+      pago_id: 102,
+      abono_capital: "50.00",
+    });
+
+    const result = filtrar()([cubierta1, cubierta2, descubierta], "6394.11");
+    expect(result).toEqual([descubierta]);
+  });
+
+  it("con dos filas parciales de la misma cuota descubierta, devuelve ambas filas", () => {
+    const parcial1 = fila({ pago_id: 100, abono_capital: "1000.00" });
+    const parcial2 = fila({ pago_id: 101, abono_capital: "2000.00" });
+    const result = filtrar()([parcial1, parcial2], "6394.11");
+    expect(result).toHaveLength(2);
+  });
+});

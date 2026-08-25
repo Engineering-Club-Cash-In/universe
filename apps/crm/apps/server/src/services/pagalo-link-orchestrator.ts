@@ -32,19 +32,26 @@ const pickString = (value: unknown, names: string[]): string | undefined => {
 	return undefined;
 };
 
+const deduplicarCuotas = <T extends { numero_cuota: number; pago_id?: number }>(cuotas: T[]): T[] => {
+	const porNumero = new Map<number, T>();
+	for (const cuota of cuotas) {
+		const actual = porNumero.get(cuota.numero_cuota);
+		if (!actual || (cuota.pago_id ?? 0) > (actual.pago_id ?? 0)) {
+			porNumero.set(cuota.numero_cuota, cuota);
+		}
+	}
+	return [...porNumero.values()].sort((a, b) => a.numero_cuota - b.numero_cuota);
+};
+
 /** CRM orchestration. Solo sandbox; una llamada externa por componente > Q0. */
 export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 	const credit = await carteraBackClient.getCredito(input.numeroSifco, false);
 	if (credit.credito.credito_id !== input.creditoId) {
 		throw new Error("Crédito Págalo no coincide con SIFCO.");
 	}
-	const vencidas = credit.cuotasAtrasadas
-		.filter((cuota) => cuota.numero_cuota > 0)
-		.sort((a, b) => a.numero_cuota - b.numero_cuota);
-	const proximaPendiente = [...credit.cuotasPendientes]
-		.filter((cuota) => cuota.numero_cuota > 0)
-		.sort((a, b) => a.numero_cuota - b.numero_cuota)[0];
-	const cuotasDisponibles = proximaPendiente ? [...vencidas, proximaPendiente] : vencidas;
+	const vencidas = deduplicarCuotas(credit.cuotasAtrasadas.filter((cuota) => cuota.numero_cuota > 0));
+	const proximaPendiente = deduplicarCuotas(credit.cuotasPendientes.filter((cuota) => cuota.numero_cuota > 0))[0];
+	const cuotasDisponibles = deduplicarCuotas(proximaPendiente ? [...vencidas, proximaPendiente] : vencidas);
 	const selectable = cuotasDisponibles.filter((cuota) => input.cuotaIds.includes(cuota.cuota_id));
 	if (selectable.length !== input.cuotaIds.length) {
 		throw new Error("Una cuota Págalo ya no está vencida o no pertenece al crédito.");
@@ -70,8 +77,8 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 	const installmentsForCalculation =
 		installments.length > 0
 			? installments
-			: credit.cuotasAtrasadas[0]
-				? [{ cuotaId: credit.cuotasAtrasadas[0].cuota_id, numeroCuota: credit.cuotasAtrasadas[0].numero_cuota }]
+			: vencidas[0]
+				? [{ cuotaId: vencidas[0].cuota_id, numeroCuota: vencidas[0].numero_cuota }]
 				: [];
 	const calculation = buildPagaloAllocations({ installments: installmentsForCalculation, mora: credit.moraActual });
 
@@ -120,8 +127,6 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 		location,
 	};
 
-	const config = getPagaloSandboxConfig();
-	const client = createPagaloClient(config);
 	const grupoEnRevision = await db
 		.select({
 			groupId: pagaloPaymentGroups.id,
@@ -152,6 +157,20 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 			),
 		};
 	}
+	const config = getPagaloSandboxConfig();
+	if (!config.linkCreationEnabled) {
+		throw new Error("Creación de links Págalo deshabilitada por configuración.");
+	}
+	const client = createPagaloClient(config);
+	const components = [
+		["CAPITAL", calculation.capitalTotal] as const,
+		["MORA_INTERES", calculation.facturableTotal] as const,
+	];
+	const providerAmounts = new Map(
+		components
+			.filter(([, amount]) => amount !== "0.00")
+			.map(([linkType, amount]) => [linkType, toPagaloProviderAmount(amount)]),
+	);
 
 	const group = await db.transaction(async (tx) => {
 		const [created] = await tx
@@ -186,13 +205,11 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 	});
 
 	const links = [] as Array<{ linkType: "CAPITAL" | "MORA_INTERES"; paymentUrl: string }>;
-	for (const component of [
-		["CAPITAL", calculation.capitalTotal] as const,
-		["MORA_INTERES", calculation.facturableTotal] as const,
-	]) {
+	for (const component of components) {
 		const [linkType, amount] = component;
 		if (amount === "0.00") continue;
-		const providerAmount = toPagaloProviderAmount(amount);
+		const providerAmount = providerAmounts.get(linkType);
+		if (providerAmount === undefined) throw new Error("Monto Págalo no disponible.");
 		const externalIdentifier = `pagalo-${group.id}-${linkType}-${randomUUID().slice(0, 8)}`;
 		const requestPayload = {
 			total_amount: providerAmount,

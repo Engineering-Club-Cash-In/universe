@@ -211,5 +211,5 @@ jobs:
             echo "::notice::Sin webhook configurado para ${{ matrix.app }}; imagen pusheada pero sin redeploy automático."
             exit 0
           fi
-          curl --fail-with-body --request GET "$WEBHOOK" \
+          curl --fail-with-body --request POST "$WEBHOOK" \
             --header "Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}"

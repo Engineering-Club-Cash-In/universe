@@ -13,10 +13,11 @@ montos correctos y vouchers propios, una llamada idempotente a Cartera crea:
 - `pagalo_import_id` en todas las filas creadas o reutilizadas por operación;
 - `origen_pago='pagalo'`, `banco_id=NULL` y estado `validated`;
 - filas `boletas` con uno o dos vouchers requeridos;
-- estado final `PAYMENTS_CREATED` en importación.
+- estado final `APPLIED` en importación.
 
 Pago nace validado porque `ACCEPT` y voucher ya fueron verificados. No pasa por
-bandeja humana ni se marca importación `APPLIED` hasta terminar flujo posterior.
+bandeja humana: validación y estado final `APPLIED` ocurren antes del mismo
+commit atómico de importación.
 
 ## 2. Regla de reutilización
 
@@ -68,10 +69,11 @@ return withPaymentLock(command.creditoId, () =>
       mapearPagaloARegistro(command, imported.id),
       tx,
     );
+    await marcarPagosCreados(imported.id, tx);
     for (const paymentId of result.payment_ids) {
       await validarPagoRegistrado(paymentId, tx);
     }
-    await marcarPagosCreados(imported.id, tx);
+    await marcarImportacionApplied(imported.id, tx);
     return result;
   }),
 );
@@ -107,6 +109,11 @@ inversionistas. Págalo primero registra filas como `pending` dentro de la
 transacción privada y después invoca este helper para cada fila, antes de
 commit. Así ninguna fila Págalo pending queda visible y al commit todas salen
 `validated`, sin saltar efectos existentes de revalidación.
+
+`marcarImportacionApplied` corre después de validar todas las filas y, en el
+mismo `tx`, escribe `status='APPLIED'`, `payments_created_at` si falta y
+`applied_at`. `PAYMENTS_CREATED` puede existir solo como estado transitorio no
+observable fuera de esa transacción; nunca es respuesta final de importación.
 
 ## 4. Contrato CRM → Cartera
 
@@ -181,7 +188,7 @@ Respuesta nueva:
 ```json
 {
   "success": true,
-  "status": "PAYMENTS_CREATED",
+  "status": "APPLIED",
   "import_id": 42,
   "payment_ids": [1001, 1002],
   "idempotent_replay": false
@@ -274,8 +281,8 @@ se llama motor con datos ambiguos.
 
 | Situación | Resultado |
 | --- | --- |
-| Grupo nuevo válido | Crea importación y pagos; `PAYMENTS_CREATED`. |
-| Retry mismo grupo/hash | Devuelve importación y pagos existentes. |
+| Grupo nuevo válido | Crea importación, pagos y validación; `APPLIED`. |
+| Retry mismo grupo/hash | Devuelve importación `APPLIED` y pagos existentes. |
 | Mismo grupo, hash diferente | `409 PAYLOAD_MISMATCH`; `REVIEW_REQUIRED`. |
 | UUID/identificador reutilizado | `409 TRANSACTION_ALREADY_IMPORTED`. |
 | Regla financiera rechaza antes de escribir | Rollback completo; importación queda para revisión. |
@@ -326,12 +333,12 @@ Inyectar error después de cada familia de escritura y comprobar cero cambios:
 - después de primer `pagos_credito` en operación multicuota;
 - después de insertar boletas;
 - antes de actualizar saldo a favor;
-- antes de marcar importación `PAYMENTS_CREATED`.
+- antes de marcar importación `APPLIED`.
 
 ### Págalo
 
-- ACCEPT requeridos crean importación y N pagos `validated`; helper extraído de
-  revalidación corre dentro de misma transacción antes de commit.
+- ACCEPT requeridos crean importación `APPLIED` y N pagos `validated`; helper
+  extraído de revalidación corre dentro de misma transacción antes de commit.
 - Todos pagos tienen mismo `pagalo_import_id`, origen `pagalo` y banco nulo.
 - Cada pago expone uno o dos vouchers requeridos mediante `boletas`.
 - Retry exacto no crea filas adicionales.

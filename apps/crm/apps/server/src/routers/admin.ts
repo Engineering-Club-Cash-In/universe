@@ -14,21 +14,26 @@ import { ROLES, USER_ROLE_VALUES } from "../lib/roles";
  * editarlo, para que asignar agencias nunca requiera SQL a mano.
  */
 async function asignarAgencias(userId: string, companyIds: string[]) {
-	const existentes = await db
-		.select({ id: companies.id })
-		.from(companies)
-		.where(inArray(companies.id, companyIds));
+	// En una transacción: si el insert falla —por ejemplo si borran una agencia
+	// justo después de validarla— el socio se quedaría sin ninguna membresía y
+	// sin poder entrar, en vez de conservar la asignación que ya tenía.
+	await db.transaction(async (tx) => {
+		const existentes = await tx
+			.select({ id: companies.id })
+			.from(companies)
+			.where(inArray(companies.id, companyIds));
 
-	if (existentes.length !== companyIds.length) {
-		throw new ORPCError("BAD_REQUEST", {
-			message: "Alguna de las agencias seleccionadas ya no existe",
-		});
-	}
+		if (existentes.length !== companyIds.length) {
+			throw new ORPCError("BAD_REQUEST", {
+				message: "Alguna de las agencias seleccionadas ya no existe",
+			});
+		}
 
-	await db.delete(partnerMembers).where(eq(partnerMembers.userId, userId));
-	await db
-		.insert(partnerMembers)
-		.values(companyIds.map((companyId) => ({ userId, companyId })));
+		await tx.delete(partnerMembers).where(eq(partnerMembers.userId, userId));
+		await tx
+			.insert(partnerMembers)
+			.values(companyIds.map((companyId) => ({ userId, companyId })));
+	});
 }
 
 export const adminRouter = {
@@ -63,21 +68,27 @@ export const adminRouter = {
 		const membresias = await db
 			.select({
 				userId: partnerMembers.userId,
+				companyId: partnerMembers.companyId,
 				agencia: companies.name,
 			})
 			.from(partnerMembers)
 			.innerJoin(companies, eq(companies.id, partnerMembers.companyId));
 
-		const agenciasPorUsuario = new Map<string, string[]>();
+		const agenciasPorUsuario = new Map<
+			string,
+			{ id: string; nombre: string }[]
+		>();
 		for (const m of membresias) {
 			const lista = agenciasPorUsuario.get(m.userId) ?? [];
-			lista.push(m.agencia.trim());
+			lista.push({ id: m.companyId, nombre: m.agencia.trim() });
 			agenciasPorUsuario.set(m.userId, lista);
 		}
 
 		return users.map((u) => ({
 			...u,
-			agencias: (agenciasPorUsuario.get(u.id) ?? []).sort(),
+			agencias: (agenciasPorUsuario.get(u.id) ?? []).sort((a, b) =>
+				a.nombre.localeCompare(b.nombre),
+			),
 		}));
 	}),
 

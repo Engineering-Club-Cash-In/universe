@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
 	Ban,
+	Building2,
 	Eye,
 	EyeOff,
 	FileText,
@@ -177,6 +178,34 @@ function RouteComponent() {
 			toast.error("Access denied: Admin role required");
 		}
 	}, [session, sessionError, isPending, userProfile.data, navigate]);
+
+	const [socioAEditar, setSocioAEditar] = useState<{
+		id: string;
+		name: string;
+	} | null>(null);
+	const [agenciasEditadas, setAgenciasEditadas] = useState<string[]>([]);
+
+	const setPartnerCompaniesMutation = useMutation({
+		mutationFn: (input: { userId: string; companyIds: string[] }) =>
+			client.setPartnerCompanies(input),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["getAllUsers"] });
+			toast.success("Agencias actualizadas");
+			setSocioAEditar(null);
+		},
+		onError: (error) => {
+			toast.error(error.message || "No se pudieron actualizar las agencias");
+		},
+	});
+
+	const abrirEdicionDeAgencias = (usuario: {
+		id: string;
+		name: string;
+		agencias: { id: string; nombre: string }[];
+	}) => {
+		setSocioAEditar({ id: usuario.id, name: usuario.name });
+		setAgenciasEditadas(usuario.agencias.map((a) => a.id));
+	};
 
 	const handleToggleSuspend = (
 		userId: string,
@@ -505,6 +534,13 @@ function RouteComponent() {
 											<Badge className={getRoleColor(user.role)}>
 												{getRoleLabel(user.role)}
 											</Badge>
+											{user.role === ROLES.PARTNER && (
+												<p className="mt-1 text-muted-foreground text-xs">
+													{user.agencias.length
+														? user.agencias.map((a) => a.nombre).join(", ")
+														: "Sin agencias asignadas"}
+												</p>
+											)}
 										</TableCell>
 										<TableCell>
 											{user.banned ? (
@@ -541,6 +577,14 @@ function RouteComponent() {
 													<DropdownMenuContent align="end">
 														<DropdownMenuLabel>Acciones</DropdownMenuLabel>
 														<DropdownMenuSeparator />
+														{user.role === ROLES.PARTNER && (
+															<DropdownMenuItem
+																onClick={() => abrirEdicionDeAgencias(user)}
+															>
+																<Building2 className="mr-2 h-4 w-4" />
+																Editar agencias
+															</DropdownMenuItem>
+														)}
 														<DropdownMenuItem
 															onClick={() =>
 																handleToggleSuspend(user.id, user.banned)
@@ -763,6 +807,68 @@ function RouteComponent() {
 							</div>
 						</div>
 					)}
+				</DialogContent>
+			</Dialog>
+
+			<Dialog
+				open={socioAEditar !== null}
+				onOpenChange={(abierto) => !abierto && setSocioAEditar(null)}
+			>
+				<DialogContent>
+					<DialogHeader>
+						<DialogTitle>Agencias de {socioAEditar?.name}</DialogTitle>
+					</DialogHeader>
+					<div className="space-y-3">
+						<p className="text-muted-foreground text-sm">
+							El socio solo verá los créditos de las agencias que marques aquí.
+						</p>
+						<div className="max-h-64 space-y-2 overflow-y-auto rounded-md border p-3">
+							{companiesQuery.data?.map((company) => {
+								const marcada = agenciasEditadas.includes(company.id);
+								return (
+									<label
+										key={company.id}
+										className="flex cursor-pointer items-center gap-2 text-sm"
+									>
+										<Checkbox
+											checked={marcada}
+											onCheckedChange={() =>
+												setAgenciasEditadas(
+													marcada
+														? agenciasEditadas.filter((id) => id !== company.id)
+														: [...agenciasEditadas, company.id],
+												)
+											}
+										/>
+										{company.name.trim()}
+									</label>
+								);
+							})}
+						</div>
+						<Button
+							className="w-full"
+							disabled={
+								agenciasEditadas.length === 0 ||
+								setPartnerCompaniesMutation.isPending
+							}
+							onClick={() =>
+								socioAEditar &&
+								setPartnerCompaniesMutation.mutate({
+									userId: socioAEditar.id,
+									companyIds: agenciasEditadas,
+								})
+							}
+						>
+							{setPartnerCompaniesMutation.isPending
+								? "Guardando..."
+								: "Guardar agencias"}
+						</Button>
+						{agenciasEditadas.length === 0 && (
+							<p className="text-amber-600 text-xs">
+								Un socio sin agencias no puede entrar al tracker.
+							</p>
+						)}
+					</div>
 				</DialogContent>
 			</Dialog>
 		</div>

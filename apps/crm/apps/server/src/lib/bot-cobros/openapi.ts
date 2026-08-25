@@ -1821,12 +1821,15 @@ export const especificacionBotCobros = {
 					"**Cómo se arman las opciones:**",
 					"- **Al día** → una sola opción (`cuotas: 1`, la cuota actual, sin mora). No hace falta mostrar select.",
 					"- **Con atraso** → una opción por cada acumulado desde la cuota más vieja (`1…N`), más una que agrega la **próxima cuota por vencer** (`N+1`). No se eligen cuotas sueltas.",
+					"- **Máximo 4 opciones** (`cantidadOpciones` ≤ 4). Con 4 o más cuotas atrasadas el crédito ya está en recuperación, así que se ofrecen solo los 4 primeros acumulados y no la próxima.",
 					"- **La mora nunca es opcional**: va completa en toda opción con atraso.",
 					"- **No hay pagos parciales**: cada opción paga cuotas completas. Si una cuota ya traía un pago parcial, la opción ofrece **lo que le falta**.",
 					"",
 					"`mensajes` viene armado para el chat: **no concatenes nada**. `montoTotal` y los desgloses son strings con dos decimales; `etiqueta` es el texto de cada opción del select.",
 					"",
-					"Después de que el cliente elige, llamá a `/pago-link/crear` con `cuotas` y el `montoTotal` de esa opción como `montoEsperado`.",
+					"**Las opciones vienen dos veces**, como los créditos del servicio 2: en el arreglo `opciones` y **aplanadas** en `cantidadOpciones` + `opcion1Etiqueta`/`opcion1Monto` … `opcion4Etiqueta`/`opcion4Monto` (solo existen las que hay). Usá las planas para armar el select sin recorrer arreglos.",
+					"",
+					"Después de que el cliente elige, llamá a `/pago-link/crear` con el `opcionNMonto` de esa opción como `monto`. **Solo el monto**: cada opción tiene un monto distinto, con eso sabemos cuál eligió.",
 				].join("\n"),
 				operationId: "opcionesPagoLink",
 				requestBody: {
@@ -1900,6 +1903,16 @@ export const especificacionBotCobros = {
 														desglose: { cuotas: "9858.52", mora: "1250.00" },
 													},
 												],
+												cantidadOpciones: 4,
+												opcion1Etiqueta: "1 cuota + mora — Q3,714.63",
+												opcion1Monto: "3714.63",
+												opcion2Etiqueta: "2 cuotas + mora — Q6,179.26",
+												opcion2Monto: "6179.26",
+												opcion3Etiqueta: "3 cuotas + mora — Q8,643.89",
+												opcion3Monto: "8643.89",
+												opcion4Etiqueta:
+													"3 cuotas + la próxima + mora — Q11,108.52",
+												opcion4Monto: "11108.52",
 												mensajes: {
 													titulo: "💳 Pago con link",
 													resumen:
@@ -1929,6 +1942,9 @@ export const especificacionBotCobros = {
 														desglose: { cuotas: "2464.63", mora: "0.00" },
 													},
 												],
+												cantidadOpciones: 1,
+												opcion1Etiqueta: "Cuota de septiembre — Q2,464.63",
+												opcion1Monto: "2464.63",
 												mensajes: {
 													titulo: "💳 Pago con link",
 													resumen:
@@ -2182,7 +2198,7 @@ export const especificacionBotCobros = {
 					"",
 					"**Son uno o dos links**, y el cliente tiene que pagar **todos**, en cualquier orden. Hay dos porque el capital y el resto de la cuota se cobran por separado; para el cliente son simplemente *Pago 1 de 2* y *Pago 2 de 2*. Cuando la selección no lleva capital (solo mora) o es solo capital, viene **un solo link**. Usá `mensajes.completo`, que ya lo explica.",
 					"",
-					"`montoEsperado` es el `montoTotal` de la opción que el cliente vio. Se recalcula al momento y, si ya no coincide (entró un pago, cambió la mora), responde `409 MONTO_DESACTUALIZADO`: volvé a `/pago-link/opciones` y mostrale las opciones nuevas.",
+					"**Solo se manda el `monto`** (el `opcionNMonto` de la opción que eligió el cliente): como cada opción tiene un monto distinto, con eso sabemos cuántas cuotas son. Se recalculan las opciones al momento y, si ese monto ya no está entre ellas (entró un pago, cambió la mora), responde `409 MONTO_DESACTUALIZADO`: volvé a `/pago-link/opciones` y mostrale las opciones nuevas.",
 					"",
 					"Si el cliente vuelve a pedir lo mismo con un pago ya en curso, se le responden **los mismos links** (o el que le falta pagar), nunca unos nuevos encima.",
 					"",
@@ -2195,12 +2211,7 @@ export const especificacionBotCobros = {
 						"application/json": {
 							schema: {
 								type: "object",
-								required: [
-									"referencia",
-									"numeroSifco",
-									"cuotas",
-									"montoEsperado",
-								],
+								required: ["referencia", "numeroSifco", "monto"],
 								properties: {
 									referencia: {
 										type: "string",
@@ -2211,24 +2222,17 @@ export const especificacionBotCobros = {
 										type: "string",
 										description: "El crédito que eligió el cliente.",
 									},
-									cuotas: {
-										type: "integer",
-										minimum: 1,
-										description:
-											"El campo `cuotas` de la opción que eligió el cliente.",
-									},
-									montoEsperado: {
+									monto: {
 										type: "string",
 										description:
-											"El `montoTotal` de esa opción, tal cual lo devolvió `/opciones` (string con dos decimales).",
+											"El `opcionNMonto` de la opción que eligió el cliente, tal cual lo devolvió `/opciones` (string con dos decimales). Identifica la opción: no se manda cantidad de cuotas.",
 									},
 								},
 							},
 							example: {
 								referencia: "3b530493-eff1-492d-8394-26adf5b5e211",
 								numeroSifco: "01010214124000",
-								cuotas: 2,
-								montoEsperado: "6179.26",
+								monto: "6179.26",
 							},
 						},
 					},
@@ -2306,7 +2310,7 @@ export const especificacionBotCobros = {
 					},
 					"400": {
 						description:
-							"Faltan datos, o `cuotas`/`montoEsperado` no tienen el formato esperado.",
+							"Faltan datos, o `monto` no tiene el formato esperado.",
 						content: {
 							"application/json": {
 								schema: { $ref: "#/components/schemas/RespuestaError" },
@@ -2402,7 +2406,7 @@ export const especificacionBotCobros = {
 								examples: {
 									MONTO_DESACTUALIZADO: {
 										summary:
-											"El monto cambió desde que se mostraron las opciones: volvé a `/opciones`",
+											"El `monto` ya no corresponde a ninguna opción vigente (cambió la deuda desde que se mostraron): volvé a `/opciones`",
 										value: {
 											success: false,
 											error: {

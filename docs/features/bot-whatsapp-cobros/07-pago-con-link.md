@@ -176,7 +176,7 @@ flowchart TD
     MP[Menú de pago<br/>«Pagar con link»] --> OP[POST /pago-link/opciones]
     OP --> R[Bot muestra resumen +<br/>select de cuántas cuotas]
     R --> S[Cliente elige N cuotas<br/>la mora va incluida siempre]
-    S --> CR[POST /pago-link/crear<br/>cuotas + montoEsperado]
+    S --> CR[POST /pago-link/crear<br/>solo el monto elegido]
     CR -- monto cambió --> OP
     CR -- ok --> L[Bot entrega los DOS links<br/>«pagá ambos, te avisamos al confirmarse»]
     L --> FIN[Fin de la conversación]
@@ -217,8 +217,16 @@ CREDITO_NO_ENCONTRADO` si no).
       { "cuotas": 2, "etiqueta": "2 cuotas + mora — Q6,179.26", "montoTotal": "6179.26",
         "desglose": { "cuotas": "4929.26", "mora": "1250.00" } },
       { "cuotas": 3, "etiqueta": "3 cuotas + mora — Q8,643.89", "montoTotal": "8643.89",
-        "desglose": { "cuotas": "7393.89", "mora": "1250.00" } }
+        "desglose": { "cuotas": "7393.89", "mora": "1250.00" } },
+      { "cuotas": 4, "etiqueta": "3 cuotas + la próxima + mora — Q11,108.52", "montoTotal": "11108.52",
+        "desglose": { "cuotas": "9858.52", "mora": "1250.00" } }
     ],
+    // aplanado para el bot, como los créditos del paso 1 (`cantidadCreditos` + `etiquetaN`)
+    "cantidadOpciones": 4,
+    "opcion1Etiqueta": "1 cuota + mora — Q3,714.63",  "opcion1Monto": "3714.63",
+    "opcion2Etiqueta": "2 cuotas + mora — Q6,179.26", "opcion2Monto": "6179.26",
+    "opcion3Etiqueta": "3 cuotas + mora — Q8,643.89", "opcion3Monto": "8643.89",
+    "opcion4Etiqueta": "3 cuotas + la próxima + mora — Q11,108.52", "opcion4Monto": "11108.52",
     "mensajes": { "titulo": "…", "resumen": "…", "completo": "…" }
   }
 }
@@ -230,6 +238,12 @@ CREDITO_NO_ENCONTRADO` si no).
   que agrega la próxima cuota por vencer (`N+1`): confirmado por Daniel — hoy 24 de agosto
   el cliente puede pagar también la del 30. **No se eligen cuotas sueltas**: pagar la 5
   dejando abierta la 3 no existe.
+- **Máximo 4 opciones** (acordado con SimpleTech 2026-08-25): lo normal son 2 o 3 cuotas
+  atrasadas, y con 4 el crédito ya está en recuperación del vehículo. Se ofrecen los
+  primeros acumulados hasta llenar 4 (`1…min(N,4)`) y la opción "+ próxima" solo si cabe.
+- **Las opciones vienen también aplanadas** (`cantidadOpciones`, `opcion1Etiqueta`,
+  `opcion1Monto` … hasta 4), igual que `cantidadCreditos`/`etiquetaN` del paso 1: el motor
+  de SimpleTech arma el select con variables literales, no recorriendo arreglos.
 - **No hay pagos parciales en este flujo** (a diferencia de la boleta): se pagan cuotas
   **completas**, y justo por eso el reparto por rubro de cada link es determinista — se
   sabe exactamente qué abono va a dónde.
@@ -262,19 +276,20 @@ CREDITO_NO_ENCONTRADO` si no).
 ### 4.2 Servicio 2 — `POST /api/bot/cobros/pago-link/crear`
 
 ```jsonc
-// request
+// request — SOLO el monto (acordado con SimpleTech 2026-08-25): no viaja `cuotas`
 {
   "referencia": "3b530493-…",
   "numeroSifco": "01010214124000",
-  "cuotas": 2,
-  "montoEsperado": "6179.26"   // el monto de la opción que el cliente vio
+  "monto": "6179.26"   // el opcionNMonto de la opción que el cliente eligió
 }
 ```
 
 El CRM valida identidad, **recalcula con la misma función que armó las opciones**
-([D-47](./DECISIONES.md#d-47--fuente-única-del-monto-y-montoesperado)) y compara contra
-`montoEsperado`. Si difiere (cambió la mora, entró un pago) → `409 MONTO_DESACTUALIZADO` y
-el bot vuelve a pedir opciones. Si coincide: crea el **grupo CB-028** (origen `BOT`,
+([D-47](./DECISIONES.md#d-47--fuente-única-del-monto-y-montoesperado)) y busca `monto`
+entre las opciones vigentes: como los montos son estrictamente crecientes (cada opción
+agrega una cuota), **el monto identifica la opción** y no hace falta mandar `cuotas`. Si no
+está entre ellas (cambió la mora, entró un pago) → `409 MONTO_DESACTUALIZADO` y el bot
+vuelve a pedir opciones. Si coincide: crea el **grupo CB-028** (origen `BOT`,
 asociado al asesor asignado del crédito) con su snapshot, llama a Págalo — **dos veces, o
 una sola si la selección no lleva capital o es solo capital** — y responde:
 
@@ -305,7 +320,7 @@ una sola si la selección no lleva capital o es solo capital** — y responde:
 
 | HTTP | `codigo` | Cuándo |
 | --- | --- | --- |
-| 409 | `MONTO_DESACTUALIZADO` | El recálculo no coincide con `montoEsperado`. El bot repite `/opciones` |
+| 409 | `MONTO_DESACTUALIZADO` | `monto` no corresponde a ninguna opción vigente del recálculo. El bot repite `/opciones` |
 | 200 | — (mismos links) | Grupo activo **sin pagos observados** y el recálculo da **el mismo desglose** (comparación contra el `allocations_snapshot` completo, no el total — dos deudas distintas pueden sumar lo mismo): se responden **los mismos links**. Con **desglose distinto**: se crea un **grupo NUEVO** con su propio snapshot, y el viejo se cancela con sus links `REPLACED` (siguen en el poll, [§3.5](#35-otras-notas-de-la-investigación)) — el snapshot de un grupo es **inmutable** (hallazgo de Codex): reemplazar links "adentro" del mismo grupo dejaría al `REPLACED` —aún cobrable afuera— sin la evidencia bajo la que se emitió, o a los links nuevos despachándose con un snapshot viejo |
 | 200 | — (link pendiente) | Grupo **`PARTIALLY_PAID`** (ya se observó un pago): se responde **el link pendiente de ese mismo grupo**, siempre, **ignorando la selección enviada** — un grupo con dinero adentro **jamás se regenera** (reemplazarlo crearía de nuevo el componente ya pagado y mandaría el pago real a revisión); la deriva de mora la absorbe [D-52](./DECISIONES.md#d-52--si-la-mora-cambió-cuando-el-link-se-paga-mora-primero-y-se-avisa-el-faltante) al aplicar. En el flujo normal no se llega acá: `/opciones` ya intercepta este estado con `PAGO_PARCIAL_EN_CURSO` (§4.1) — esta rama cubre la conversación que quedó abierta con la pantalla de selección vieja |
 | 409 | `PAGO_EN_PROCESO` | Un grupo Págalo del crédito — **de cualquier origen, bot o asesor** (comparten poller y ledger; hallazgo de Codex) — está **en vuelo post-pago** (`READY_TO_APPLY`, `APPLYING` o `APPLICATION_FAILED`): el dinero ya entró y cartera todavía no aplica, así que el recálculo vería la deuda **vieja** y armaría un doble cobro. Respuesta: «tu pago se está aplicando, te llega tu recibo» — **jamás** links nuevos en esa ventana. `REVIEW_REQUIRED` responde el mismo código con mensaje de hablar con su asesor. Y un grupo **del asesor** con links vivos o dinero adentro (aunque nadie haya pagado aún) también responde este código — «tenés un pago por link en curso con tu asesor» — porque el bot **no cancela ni duplica la intención de un asesor**; las reglas de reuso/reemplazo de arriba aplican solo a grupos de origen `BOT` |
@@ -372,8 +387,8 @@ y los reportes sepan de quién es cada link.
 1. **El bot no calcula nada.** Ni montos, ni mora, ni desgloses: solo muestra lo que
    `/opciones` respondió y devuelve la selección.
 2. **El monto tiene una sola fuente.** La función que arma opciones es la que arma el link;
-   `montoEsperado` es el candado. En cobros ya nos pasó tener doble fuente del monto de
-   mora — acá nace prohibido.
+   el `monto` que manda el bot (el `montoEsperado` de D-47) es el candado. En cobros ya nos
+   pasó tener doble fuente del monto de mora — acá nace prohibido.
 3. **Sin mora confiable no hay link** (`MORA_POR_CONFIRMAR` bloquea, no avisa).
 4. **Ningún pago se aplica sin `ACCEPT` verificado contra Págalo** (el status `2` del link
    no basta; los callbacks jamás escriben).

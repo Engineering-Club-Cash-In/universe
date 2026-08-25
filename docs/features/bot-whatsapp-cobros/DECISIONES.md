@@ -1755,6 +1755,12 @@ las 23:59) o entrarle un pago al crédito.
   recibe `montoEsperado` (lo que el cliente vio), recalcula y si no coincide responde
   `409 MONTO_DESACTUALIZADO`.**
 
+  *Ajuste 2026-08-25 (acordado con SimpleTech):* el campo se llama `monto` y es **lo
+  único** que viaja además de la identidad — no se manda `cuotas`. Como cada opción agrega
+  una cuota, los montos son estrictamente crecientes y el monto identifica la opción.
+  Además `/opciones` ofrece **máximo 4** y las devuelve aplanadas (`cantidadOpciones`,
+  `opcionNEtiqueta`, `opcionNMonto`), como `cantidadCreditos`/`etiquetaN` del paso 1.
+
 **Decisión: B.** Da la misma garantía —nunca se cobra un monto distinto del mostrado— sin
 inventar una tabla de ofertas efímeras ni TTLs. El costo es un round-trip extra en el caso
 raro en que el monto cambió justo en medio, y ese round-trip es además el comportamiento

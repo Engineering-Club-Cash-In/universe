@@ -118,21 +118,21 @@ export function sortEstadoCuentaPayments<T extends EstadoCuentaPagoRow>(pagos: T
 export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(pagos: T[]) {
   let capitalRestante: Big | null = null;
 
-  // Saldos "snapshot" por cuota: filas pagadas con rubros de cuota. Cuando la
-  // sync con el Excel reconstruye una cuota, escribe el MISMO total_restante
-  // (ya neto de abonos extra) en todos sus pagos; un abono a capital puro cuyo
-  // total_restante coincide con el de una hermana ya viene restado y no hay
-  // que volver a restarlo (caso 01010214106990 cuota 35: 47,874.89 mostraba
-  // 45,434.39).
-  const snapshotsPorCuota = new Map<string, Set<string>>();
+  // Σ abono_capital por cuota. Una fila de abono a capital puro "ya viene neta"
+  // (la sync con el Excel escribe en todos los pagos de la cuota el saldo neto
+  // de TODOS sus abonos) cuando su total_restante == saldo al inicio de la
+  // cuota − Σ abonos de la cuota. Un cierre de parcial normal (registerPayment)
+  // hereda el total_restante de la hermana SIN restar su propio capital, así que
+  // no cumple la igualdad y se le sigue restando. Caso 01010214106990 cuota 35:
+  // el PDF mostraba 45,434.39 en vez de 47,874.89.
+  const abonosPorCuota = new Map<string, Big>();
   for (const pago of pagos) {
-    const total = new Big(pago.total_restante || 0);
-    if (pago.pagado === true && getEstadoCuentaOtrosRubros(pago) > 0 && total.gt(0)) {
-      const key = String(pago.numero_cuota ?? "");
-      if (!snapshotsPorCuota.has(key)) snapshotsPorCuota.set(key, new Set());
-      snapshotsPorCuota.get(key)!.add(total.toFixed(2));
-    }
+    const key = String(pago.numero_cuota ?? "");
+    abonosPorCuota.set(key, (abonosPorCuota.get(key) ?? new Big(0)).plus(pago.abono_capital || 0));
   }
+
+  let cuotaActual: string | null = null;
+  let saldoInicioCuota: Big | null = null;
 
   return pagos.map((pago) => {
     const abonoCapital = new Big(pago.abono_capital || 0);
@@ -147,12 +147,17 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
         : totalRestanteFila.plus(abonoCapital);
     }
 
-    // Abono puro ya neto: su saldo es el de una hermana de la cuota o el corrido.
+    const key = String(pago.numero_cuota ?? "");
+    if (key !== cuotaActual) {
+      cuotaActual = key;
+      saldoInicioCuota = capitalRestante;
+    }
+
+    const saldoNetoCuota = saldoInicioCuota!.minus(abonosPorCuota.get(key) ?? 0);
     const abonoYaRestado =
       !snapshotConfiable &&
       totalRestanteFila.gt(0) &&
-      (totalRestanteFila.eq(capitalRestante) ||
-        (snapshotsPorCuota.get(String(pago.numero_cuota ?? ""))?.has(totalRestanteFila.toFixed(2)) ?? false));
+      totalRestanteFila.minus(saldoNetoCuota).abs().lte(0.05);
 
     capitalRestante = snapshotConfiable || abonoYaRestado
       ? totalRestanteFila

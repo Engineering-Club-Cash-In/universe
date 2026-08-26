@@ -93,6 +93,18 @@ test("scheduler preserves cron rules, timezone, order, and snapshot offsets", ()
 	);
 });
 
+test("scheduler maps resolved advisor-upsert failures to the failed terminal path", () => {
+	const source = readFileSync(scheduleFile, "utf8");
+	const callback = source.slice(
+		source.indexOf("'upsert_advisor_effectiveness'"),
+		source.indexOf("// ⏰ Expira compras"),
+	);
+	expect(callback).toContain("const result = await upsertEfectividadAsesores(dia, mes, anio)");
+	expect(callback).toContain("if (!result.ok)");
+	expect(callback).toContain('throw new Error("scheduled job reported failure")');
+	expect(callback).not.toContain("result.error");
+});
+
 test("scheduler source does not expose forbidden business or error payloads", () => {
 	const source = readFileSync(scheduleFile, "utf8");
 	for (const forbidden of [

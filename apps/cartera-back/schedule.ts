@@ -44,7 +44,10 @@ export function iniciarTareasProgramadas() {
     const { dia, mes, anio } = getFechaGuatemala();
     await runScheduledJob(
       'upsert_advisor_effectiveness',
-      () => upsertEfectividadAsesores(dia, mes, anio),
+      async () => {
+        const result = await upsertEfectividadAsesores(dia, mes, anio);
+        if (!result.ok) throw new Error("scheduled job reported failure");
+      },
     );
   });
 

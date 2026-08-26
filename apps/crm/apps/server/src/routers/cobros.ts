@@ -4804,6 +4804,7 @@ export const cobrosRouter = {
 						paymentUrl: pagaloPaymentLinks.paymentUrl,
 						voucherUrl: pagaloPaymentLinks.voucherUrl,
 						paidAt: pagaloPaymentLinks.paidAt,
+						isApplicationSource: pagaloPaymentLinks.isApplicationSource,
 					})
 					.from(pagaloPaymentLinks)
 					.where(inArray(pagaloPaymentLinks.groupId, groupIds)),

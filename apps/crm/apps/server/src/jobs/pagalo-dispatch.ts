@@ -65,6 +65,17 @@ const proximoIntento = (dispatchAttemptCount: number): Date => {
  * comentario del schema en pagalo-payments.ts ya anticipa esa mejora si
  * algún día corre más de una instancia).
  */
+/**
+ * Incluye `APPLYING`: si un proceso murió a mitad de aplicar (crash, deploy,
+ * kill -9) el grupo queda en ese estado y jamás volvería a seleccionarse sin
+ * esto (hallazgo Codex) — el lease vencido es la única señal de que el
+ * dueño anterior ya no sigue vivo. Reclamarlo de nuevo es seguro por D-13:
+ * el mismo `crm_group_id`+`payload_hash` es idempotente en cartera-back, así
+ * que reintentar el POST nunca duplica el pago aunque la corrida anterior sí
+ * haya llegado a aplicarse y solo faltara que el CRM se enterara.
+ */
+const ESTADOS_RECLAMABLES = ["READY_TO_APPLY", "APPLICATION_FAILED", "APPLYING"] as const;
+
 async function reclamarGruposListos(): Promise<GrupoClaimado[]> {
 	const ahora = new Date();
 	const leaseVencido = new Date(Date.now() - MINUTOS_LEASE * 60 * 1000);
@@ -73,7 +84,7 @@ async function reclamarGruposListos(): Promise<GrupoClaimado[]> {
 		.from(pagaloPaymentGroups)
 		.where(
 			and(
-				inArray(pagaloPaymentGroups.status, ["READY_TO_APPLY", "APPLICATION_FAILED"]),
+				inArray(pagaloPaymentGroups.status, ESTADOS_RECLAMABLES),
 				or(
 					isNull(pagaloPaymentGroups.nextDispatchAt),
 					lt(pagaloPaymentGroups.nextDispatchAt, ahora),
@@ -101,7 +112,7 @@ async function reclamarGruposListos(): Promise<GrupoClaimado[]> {
 			.where(
 				and(
 					eq(pagaloPaymentGroups.id, candidato.id),
-					inArray(pagaloPaymentGroups.status, ["READY_TO_APPLY", "APPLICATION_FAILED"]),
+					inArray(pagaloPaymentGroups.status, ESTADOS_RECLAMABLES),
 					or(
 						isNull(pagaloPaymentGroups.dispatchClaimedAt),
 						lt(pagaloPaymentGroups.dispatchClaimedAt, leaseVencido),

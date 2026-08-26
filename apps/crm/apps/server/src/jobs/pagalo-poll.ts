@@ -66,6 +66,7 @@ import {
 } from "../db/schema/pagalo-payments";
 import { carteraBackClient } from "../services/cartera-back-client";
 import { createPagaloClient, getPagaloSandboxConfig } from "../services/pagalo-client";
+import { isPagaloDispatchEnabled } from "../lib/pagalo-dispatch-config";
 import { correrDispatchPagalo, reclamarYProcesarGrupo } from "./pagalo-dispatch";
 
 /** Tope por corrida. Si hay más, se atienden en la siguiente. */
@@ -260,8 +261,9 @@ async function subirVoucher(
 	const subida = await carteraBackClient.uploadFile(archivo, nombreSugerido);
 	const voucherStorageKey = subida.filename;
 	// cartera-back arma la URL pública final (URL_PUBLIC_R2 + key) del lado
-	// suyo cuando persiste la boleta — el CRM no tiene ese dominio, así que
-	// guarda la misma key como referencia, no una URL clicable.
+	// suyo cuando persiste la boleta — el comprobante se revisa ahí, no desde
+	// el CRM (fuera de alcance por ahora, hallazgo Codex: el historial Págalo
+	// del CRM no debe pretender un link clicable sin ese dominio).
 	return { voucherStorageKey, voucherSha256, voucherUrl: voucherStorageKey };
 }
 
@@ -577,7 +579,15 @@ export type ResultadoPollPagalo = {
  * dispatcher programado por separado.
  */
 export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
-	const dispatchPrevio = await correrDispatchPagalo();
+	// PAGALO_DISPATCH_ENABLED es el kill switch de aplicar pagos reales en
+	// cartera-back — debe frenar también el dispatch que corre desde acá
+	// (reintento de pendientes y el inline de abajo), no solo el ciclo
+	// programado de pagalo-dispatch.ts (hallazgo Codex). Con el flag apagado,
+	// el poll sigue detectando/marcando pagos y voucher, solo no los envía.
+	const dispatchHabilitado = isPagaloDispatchEnabled();
+	const dispatchPrevio = dispatchHabilitado
+		? await correrDispatchPagalo()
+		: { revisados: 0, completados: 0, revisionRequerida: 0, errores: 0 };
 
 	const links = await reclamarLinksPendientes();
 	const resultado: ResultadoPollPagalo = {
@@ -647,7 +657,7 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 			// cartera-back (red) mientras una tx de DB sigue abierta. Si esto
 			// falla, el grupo queda READY_TO_APPLY/APPLICATION_FAILED y el
 			// dispatcher programado lo recoge en su propio ciclo — nunca se pierde.
-			if (listoParaAplicar) {
+			if (listoParaAplicar && dispatchHabilitado) {
 				try {
 					await reclamarYProcesarGrupo(link.groupId);
 				} catch (error) {

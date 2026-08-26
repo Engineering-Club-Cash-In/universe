@@ -134,11 +134,10 @@ function GrupoPagalo({ grupo }: { grupo: Grupo }) {
 									<ExternalLink className="h-3.5 w-3.5" />
 								</a>
 							)}
-							{link.voucherUrl && (
-								<a href={link.voucherUrl} target="_blank" rel="noreferrer" className="text-xs text-muted-foreground hover:underline">
-									comprobante
-								</a>
-							)}
+							{/* Comprobante: fuera de alcance por ahora mostrarlo acá — el CRM
+							    no tiene el dominio público del bucket de cartera-back, y
+							    voucherUrl guarda solo la key plana, no una URL. Se revisa del
+							    lado de cartera (boleta con su URL ya resuelta). */}
 						</div>
 					))}
 				</div>

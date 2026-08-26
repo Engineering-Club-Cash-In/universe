@@ -87,6 +87,16 @@ export function resolverLinksPendientes(
 	return null;
 }
 
+export function resolverLinksRecordables(
+	statusGrupo: PagaloPaymentGroupStatus,
+	links: LinkVigente[],
+): LinkVigente[] | null {
+	if (!(ESTADOS_GRUPOS_RECORDABLES as readonly PagaloPaymentGroupStatus[]).includes(statusGrupo)) {
+		return null;
+	}
+	return resolverLinksPendientes(links);
+}
+
 /**
  * Cada fuente se prueba por separado con primerTelefono() antes de encadenar
  * con ??: si telefonoPrincipal existe pero es basura ("N/A", muy corto),
@@ -241,14 +251,34 @@ async function procesarRecordatorioDeGrupo(
 	links: LinkVigente[],
 	usuarioSistema: string,
 ): Promise<ResultadoRecordatorioGrupo> {
-	const linksPendientes = resolverLinksPendientes(links);
+	const linksPendientes = resolverLinksRecordables(group.status, links);
 	if (!linksPendientes) return "SIN_LINKS_PENDIENTES";
 
 	const { telefono, clienteNombre, vehiculo } = await resolverContacto(group);
 	if (!telefono) return "SIN_TELEFONO";
 
-	// paymentUrl no-nulo garantizado por esPendiente() al construir linksPendientes.
-	const linksParaEnviar: PagaloLinkParaEnviar[] = linksPendientes.map((l) => ({
+	// Relee estado después de consultas de contacto/cartera: un asesor o bot
+	// pudo reemplazar selección mientras esas I/O corrían. Links REPLACED
+	// siguen cobrables en proveedor, así que nunca se manda URL capturada antes
+	// de confirmar que grupo y links siguen vigentes.
+	const [grupoFresco] = await db
+		.select({ status: pagaloPaymentGroups.status })
+		.from(pagaloPaymentGroups)
+		.where(eq(pagaloPaymentGroups.id, group.id))
+		.limit(1);
+	if (!grupoFresco) return "SIN_LINKS_PENDIENTES";
+	const linksFrescos = await db
+		.select()
+		.from(pagaloPaymentLinks)
+		.where(eq(pagaloPaymentLinks.groupId, group.id));
+	const linksPendientesFrescos = resolverLinksRecordables(
+		grupoFresco.status,
+		linksFrescos,
+	);
+	if (!linksPendientesFrescos) return "SIN_LINKS_PENDIENTES";
+
+	// paymentUrl no-nulo garantizado por esPendiente() al construir linksPendientesFrescos.
+	const linksParaEnviar: PagaloLinkParaEnviar[] = linksPendientesFrescos.map((l) => ({
 		linkType: l.linkType,
 		paymentUrl: l.paymentUrl as string,
 	}));

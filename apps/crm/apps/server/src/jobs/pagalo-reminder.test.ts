@@ -4,6 +4,7 @@ import {
 	ESTADOS_GRUPOS_RECORDABLES,
 	esPendiente,
 	resolverLinksPendientes,
+	resolverLinksRecordables,
 	resolverTelefono,
 	resolverVehiculo,
 } from "./pagalo-reminder";
@@ -197,6 +198,12 @@ describe("resolverLinksPendientes", () => {
 		expect(resultado).toHaveLength(1);
 		expect(resultado?.[0]?.id).toBe("new");
 	});
+});
+
+test("grupo cancelado no reenvía links activos capturados antes del reemplazo", () => {
+	const activo = link({ linkType: "CAPITAL", status: "ACTIVE" });
+
+	expect(resolverLinksRecordables("CANCELLED", [activo])).toBeNull();
 });
 
 describe("resolverTelefono", () => {

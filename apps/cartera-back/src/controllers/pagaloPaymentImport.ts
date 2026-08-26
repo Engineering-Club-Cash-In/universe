@@ -5,12 +5,11 @@ import {
   type PagaloImportCommand,
 } from "./pagaloPaymentImportPolicy";
 import Big from "big.js";
-import { and, asc, eq, inArray, lt, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, lt, or } from "drizzle-orm";
 import { db } from "../database";
 import {
   creditos,
   cuentasEmpresa,
-  facturas_electronicas,
   moras_credito,
   pagalo_payment_imports,
   pagos_credito,
@@ -494,57 +493,44 @@ async function facturarYNotificarPostCommit(
 /** Minutos tras `applied_at` a partir de los cuales un PENDIENTE se considera huérfano. */
 export const MINUTOS_FACTURA_PENDIENTE_HUERFANA = 10;
 
+export const MOTIVO_FACTURA_HUERFANA =
+  "Facturación interrumpida (cartera murió entre el commit y SAT). NO se reintenta sola: verificar en SAT/COFIDI qué DTE existen antes de facturar a mano (playbook facturas no en SAT).";
+
 /**
  * Barrido programado (schedule.ts): un import APPLIED cuya facturación quedó
  * en PENDIENTE más de N minutos es que cartera murió/redeployó entre el commit
- * y SAT. Si sus pagos NO tienen ninguna factura ACTIVA, refacturar es seguro
- * y se hace; si ya hay alguna, quedó a medias → PARCIAL para revisión manual
- * (reintentar duplicaría en SAT). El recibo por WhatsApp no se reenvía desde
- * acá: no hay forma de saber si ya salió.
+ * y SAT. Solo lo MARCA como FALLIDA para que entre al playbook; jamás vuelve a
+ * certificar: "no hay factura ACTIVA en la DB" no prueba que no exista en SAT
+ * (el proceso pudo morir entre `generarYCertificarDTE` y el insert en
+ * `facturas_electronicas`), y SAT no tiene idempotencia de nuestro lado
+ * (hallazgo Codex; la idempotencia se descartó en #1282). El UPDATE es
+ * condicional y atómico: si dos réplicas corren a la vez, solo una marca cada
+ * fila, y marcar dos veces sería inocuo de todos modos.
  */
 export async function reintentarFacturacionPagaloPendiente(
   minutos = MINUTOS_FACTURA_PENDIENTE_HUERFANA,
 ) {
   const limite = new Date(Date.now() - minutos * 60 * 1000);
-  const huerfanos: { id: number }[] = await db
-    .select({ id: pagalo_payment_imports.id })
-    .from(pagalo_payment_imports)
+  const marcados: { id: number }[] = await db
+    .update(pagalo_payment_imports)
+    .set({
+      factura_status: "FALLIDA",
+      factura_error: JSON.stringify([{ motivo: MOTIVO_FACTURA_HUERFANA }]),
+      factura_at: new Date(),
+      updated_at: new Date(),
+    })
     .where(
       and(
         eq(pagalo_payment_imports.status, "APPLIED"),
         eq(pagalo_payment_imports.factura_status, "PENDIENTE"),
         lt(pagalo_payment_imports.applied_at, limite),
       ),
-    );
-  let refacturados = 0;
-  let revisados = 0;
-  for (const { id } of huerfanos) {
-    const pagoIds = await paymentIdsForImport(db, id);
-    const [activas] = pagoIds.length
-      ? await db
-          .select({ n: sql<number>`count(*)` })
-          .from(facturas_electronicas)
-          .where(
-            and(
-              inArray(facturas_electronicas.pago_id, pagoIds),
-              eq(facturas_electronicas.status, "ACTIVA"),
-            ),
-          )
-      : [{ n: 0 }];
-    if (Number(activas?.n ?? 0) > 0) {
-      await guardarEstadoFactura(id, {
-        status: "PARCIAL",
-        error: JSON.stringify([
-          { motivo: "Facturación interrumpida con facturas ACTIVAS previas; revisar a mano antes de reintentar.", pago_ids: pagoIds },
-        ]),
-      });
-      revisados++;
-      continue;
-    }
-    await facturarImport(id, pagoIds);
-    refacturados++;
+    )
+    .returning({ id: pagalo_payment_imports.id });
+  for (const { id } of marcados) {
+    console.error(`⚠️ Págalo import ${id}: ${MOTIVO_FACTURA_HUERFANA}`);
   }
-  return { huerfanos: huerfanos.length, refacturados, revisados };
+  return { huerfanos: marcados.length, ids: marcados.map((m) => m.id) };
 }
 
 const CUOTA_INTEGRITY_ERROR_PREFIX = "Inconsistencia de integridad:";

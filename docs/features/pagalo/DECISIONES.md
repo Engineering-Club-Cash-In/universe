@@ -110,9 +110,12 @@ pre-check de facturación solo mira "¿hay alguna ACTIVA?" y duplicaría en SAT)
 
 **Huérfanos:** si cartera muere entre el commit y SAT, el import queda `APPLIED`
 + `PENDIENTE`. El barrido `reintentarFacturacionPagaloPendiente` (schedule.ts,
-cada 10 min) toma los `PENDIENTE` con más de 10 min: sin ninguna factura
-`ACTIVA` en sus pagos → refactura (seguro); con alguna → `PARCIAL` a revisión
-manual. El recibo por WhatsApp no se reenvía desde ahí.
+cada 10 min) marca como `FALLIDA` los `PENDIENTE` con más de 10 min (UPDATE
+condicional atómico, seguro con varias réplicas) para que entren al playbook.
+**Nunca re-certifica solo**: "no hay factura `ACTIVA` en la DB" no prueba que
+no exista en SAT (el proceso pudo morir entre certificar e insertar), y SAT no
+tiene idempotencia de nuestro lado (descartada en #1282) — la verificación
+contra SAT/COFIDI y el reintento son manuales.
 
 El CRM manda **una sola llamada** y no sabe de la factura: con `APPLIED` marca
 el grupo `COMPLETED`.

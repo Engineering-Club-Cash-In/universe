@@ -119,13 +119,13 @@ export function iniciarTareasProgramadas() {
   });
 
   // 💳 Págalo: imports APPLIED con factura PENDIENTE hace >10 min (cartera
-  //    murió entre el commit y SAT). Sin facturas ACTIVAS → refactura; con
-  //    alguna → PARCIAL para revisión manual. Cada 10 min.
+  //    murió entre el commit y SAT) → se marcan FALLIDA para el playbook.
+  //    Nunca re-certifica (SAT no es idempotente de nuestro lado). Cada 10 min.
   schedule.scheduleJob({ rule: '*/10 * * * *', tz: TZ_GUATEMALA }, async () => {
     try {
       const res = await reintentarFacturacionPagaloPendiente();
       if (res.huerfanos > 0) {
-        console.log(`💳 Págalo factura pendiente: huérfanos=${res.huerfanos}, refacturados=${res.refacturados}, a revisión=${res.revisados}`);
+        console.log(`💳 Págalo factura huérfana marcada FALLIDA: imports=${res.ids.join(",")}`);
       }
     } catch (error) {
       console.error('❌ Error en reintentarFacturacionPagaloPendiente:', error);

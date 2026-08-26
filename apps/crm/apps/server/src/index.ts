@@ -48,15 +48,13 @@ import { ejecutarAgendaCobrosDiariaConReintentos } from "./jobs/agenda-cobros-sn
 import { purgarBoletasSinConfirmar } from "./jobs/bot-cobros-purga";
 import { reconciliarBoletasColgadas } from "./jobs/bot-cobros-reconciliacion";
 import { reintentarAvisosDeRechazo } from "./jobs/bot-cobros-respaldo";
-import { correrDispatchPagalo } from "./jobs/pagalo-dispatch";
-import { correrPollPagalo } from "./jobs/pagalo-poll";
-import { isPagaloDispatchEnabled } from "./lib/pagalo-dispatch-config";
-import { isPagaloPollEnabled } from "./lib/pagalo-poll-config";
 import { generarCierreDiario } from "./jobs/cierre-diario-asesores";
 import {
 	checkSeguimientosVencidos,
 	procesarSeguimientosRecurrentes,
 } from "./jobs/cobros-notifications";
+import { correrDispatchPagalo } from "./jobs/pagalo-dispatch";
+import { correrPollPagalo } from "./jobs/pagalo-poll";
 import { auth } from "./lib/auth";
 import {
 	autenticarBotCobros,
@@ -1674,11 +1672,15 @@ async function correrRespaldoDeRechazos(): Promise<void> {
 
 setInterval(correrRespaldoDeRechazos, 60 * 60 * 1000);
 
-// El poller de links Págalo (CB-028) también va fuera de la bandera: es
-// integridad financiera, no notificación al cliente — es la única fuente de
-// verdad de si un link se pagó (D-49, docs/features/pagalo/DECISIONES.md).
-// Dejarlo atado a TAREAS_PROGRAMADAS_ACTIVAS significaría que en esta rama
-// ningún grupo Págalo avanza nunca de PENDING_PAYMENT.
+// El poller y el dispatcher de Págalo (CB-028) usan el mismo gate que el
+// resto de tareas programadas (`TAREAS_PROGRAMADAS_ACTIVAS`) — ya no tienen
+// flags propios (`PAGALO_POLL_ENABLED`/`PAGALO_DISPATCH_ENABLED` se
+// eliminaron: el botón manual `probarPollPagalo` y el dispatch inline
+// dentro del poll corren siempre, sin ningún gate, decisión explícita del
+// usuario). En esta rama (COBROS-02), `TAREAS_PROGRAMADAS_ACTIVAS` está
+// hardcodeada en `false` (ver FIXME arriba), así que el ciclo automático de
+// Págalo queda apagado junto con el resto de jobs hasta que se revierta ese
+// FIXME antes de mergear a develop.
 async function correrPollDePagalo(): Promise<void> {
 	try {
 		await correrPollPagalo();
@@ -1687,14 +1689,11 @@ async function correrPollDePagalo(): Promise<void> {
 	}
 }
 
-if (isPagaloPollEnabled()) {
+if (TAREAS_PROGRAMADAS_ACTIVAS) {
 	void correrPollDePagalo();
 	setInterval(correrPollDePagalo, 5 * 60 * 1000);
 }
 
-// El dispatcher Págalo (CB-028, paso 3) también va fuera de la bandera, mismo
-// motivo que el poller: sin esto, un grupo READY_TO_APPLY se queda ahí para
-// siempre y el pago confirmado nunca llega a aplicarse en cartera.
 async function correrDispatchDePagalo(): Promise<void> {
 	try {
 		await correrDispatchPagalo();
@@ -1703,7 +1702,7 @@ async function correrDispatchDePagalo(): Promise<void> {
 	}
 }
 
-if (isPagaloDispatchEnabled()) {
+if (TAREAS_PROGRAMADAS_ACTIVAS) {
 	void correrDispatchDePagalo();
 	setInterval(correrDispatchDePagalo, 5 * 60 * 1000);
 }

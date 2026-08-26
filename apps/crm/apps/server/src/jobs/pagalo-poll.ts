@@ -66,7 +66,6 @@ import {
 } from "../db/schema/pagalo-payments";
 import { carteraBackClient } from "../services/cartera-back-client";
 import { createPagaloClient, getPagaloSandboxConfig } from "../services/pagalo-client";
-import { isPagaloDispatchEnabled } from "../lib/pagalo-dispatch-config";
 import { correrDispatchPagalo, reclamarYProcesarGrupo } from "./pagalo-dispatch";
 
 /** Tope por corrida. Si hay más, se atienden en la siguiente. */
@@ -635,13 +634,6 @@ export type ResultadoPollPagalo = {
  * dispatcher programado por separado.
  */
 export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
-	// PAGALO_DISPATCH_ENABLED es el kill switch de aplicar pagos reales en
-	// cartera-back — debe frenar también el dispatch que corre desde acá
-	// (reintento de pendientes y el inline de abajo), no solo el ciclo
-	// programado de pagalo-dispatch.ts. Con el flag apagado, el poll sigue
-	// detectando/marcando pagos y voucher, solo no los envía.
-	const dispatchHabilitado = isPagaloDispatchEnabled();
-
 	const resultado: ResultadoPollPagalo = {
 		revisados: 0,
 		pagados: 0,
@@ -760,7 +752,7 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 				// cartera-back (red) mientras una tx de DB sigue abierta. Si esto
 				// falla, el grupo queda READY_TO_APPLY/APPLICATION_FAILED y el
 				// dispatcher programado lo recoge en su propio ciclo — nunca se pierde.
-				if (listoParaAplicar && dispatchHabilitado) {
+				if (listoParaAplicar) {
 					try {
 						const resultadoInline = await reclamarYProcesarGrupo(link.groupId);
 						// El resultado del retry del backlog (más abajo) también
@@ -799,12 +791,10 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 	// después de detectar pagos nuevos, para que un backlog grande con
 	// cartera-back lento no retrase la detección de un pago que el cliente
 	// ya hizo (hallazgo Codex).
-	if (dispatchHabilitado) {
-		const dispatchPrevio = await correrDispatchPagalo();
-		resultado.dispatchReintentados += dispatchPrevio.revisados;
-		resultado.dispatchCompletados += dispatchPrevio.completados;
-		resultado.dispatchErrores += dispatchPrevio.errores + dispatchPrevio.revisionRequerida;
-	}
+	const dispatchPrevio = await correrDispatchPagalo();
+	resultado.dispatchReintentados += dispatchPrevio.revisados;
+	resultado.dispatchCompletados += dispatchPrevio.completados;
+	resultado.dispatchErrores += dispatchPrevio.errores + dispatchPrevio.revisionRequerida;
 
 	return resultado;
 }

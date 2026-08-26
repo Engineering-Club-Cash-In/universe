@@ -308,6 +308,13 @@ async function marcarRevisionRequerida(
 				lastDispatchError: code,
 				dispatchClaimedAt: null,
 				updatedAt: new Date(),
+				// cartera-back crea igual un ledger REVIEW_REQUIRED para un
+				// rechazo de deuda viva/identidad de crédito y devuelve su id —
+				// antes solo quedaba en el payload del evento, y getPagaloHistorial
+				// lee la columna del grupo, no los payloads (hallazgo Codex). No
+				// implica que el pago se aplicó — solo deja el identificador para
+				// que el operador pueda inspeccionar el import rechazado.
+				...(importId !== undefined ? { carteraImportId: importId } : {}),
 			})
 			.where(filtroClaimVigente(group))
 			.returning({ id: pagaloPaymentGroups.id });

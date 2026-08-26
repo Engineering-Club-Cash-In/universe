@@ -9,6 +9,7 @@ import {
 	pagaloPaymentLinks,
 } from "../db/schema/pagalo-payments";
 import { buildPagaloAllocations, type PagaloInstallment } from "../lib/pagalo-allocations";
+import { isTestModeEnabled } from "../lib/messaging-test-mode";
 import { assertPagaloInstallmentSelection } from "../lib/pagalo-selection";
 import { primerTelefono } from "../lib/phone-utils";
 import { carteraBackClient } from "./cartera-back-client";
@@ -22,6 +23,13 @@ type CreatePagaloLinksInput = {
 	cuotaIds: number[];
 	requestedBy: string;
 };
+
+// TEST_MESSAGE=true redirige también el contacto real del cliente que se
+// manda a Págalo — mismo patrón que WhatsApp (messaging-test-mode.ts): sirve
+// para probar el checkout real en sandbox sin exponer datos de un cliente
+// real al proveedor.
+const PAGALO_TEST_EMAIL = "j.alvarez@clubcashin.com";
+const PAGALO_TEST_PHONE = "35219722";
 
 const pickString = (value: unknown, names: string[]): string | undefined => {
 	if (!value || typeof value !== "object") return undefined;
@@ -119,9 +127,16 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 	if (!telefono || !email || !location) {
 		throw new Error("Págalo requiere teléfono, correo y dirección reales del cliente.");
 	}
+	// Sustitución de test mode DESPUÉS de validar que el caso sí tiene
+	// contacto real cargado — testMode no debe ocultar un caso mal cargado.
+	// Solo phone/email se redirigen (para que cualquier correo/mensaje real
+	// que dispare Págalo llegue acá); nombre, ciudad, departamento y
+	// dirección se quedan reales por trazabilidad — decisión explícita del
+	// usuario.
+	const testMode = isTestModeEnabled();
 	const clientContact = {
-		phone: telefono,
-		email,
+		phone: testMode ? PAGALO_TEST_PHONE : telefono,
+		email: testMode ? PAGALO_TEST_EMAIL : email,
 		country: "GT" as const,
 		...(leadInfo?.municipio ? { city: leadInfo.municipio } : {}),
 		...(leadInfo?.departamento ? { state: leadInfo.departamento } : {}),

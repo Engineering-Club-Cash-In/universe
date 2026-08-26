@@ -111,10 +111,15 @@ function GrupoPagalo({ grupo }: { grupo: Grupo }) {
 				<span>Origen: {grupo.origen === "ASESOR" ? "Asesor" : "Bot WhatsApp"}</span>
 				<span>Creado por: {grupo.creadoPor ?? "—"}</span>
 			</div>
-			{grupo.carteraImportId && (
+			{grupo.carteraImportId && grupo.status === "COMPLETED" && (
 				<p className="text-sm text-green-700">
 					<CheckCircle2 className="mr-1 inline h-4 w-4" />
 					Aplicado en cartera (importación #{grupo.carteraImportId})
+				</p>
+			)}
+			{grupo.carteraImportId && grupo.status !== "COMPLETED" && (
+				<p className="text-sm text-muted-foreground">
+					Importación en cartera #{grupo.carteraImportId} (revisión, no aplicado)
 				</p>
 			)}
 			{grupo.lastDispatchError && grupo.status !== "COMPLETED" && (

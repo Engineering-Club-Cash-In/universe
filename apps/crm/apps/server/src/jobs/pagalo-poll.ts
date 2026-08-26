@@ -307,7 +307,15 @@ async function evaluarGrupo(
 	);
 
 	if (todosPagados) {
-		await tx
+		// El grupo puede estar en REVIEW_REQUIRED (p.ej. un link REPLACED
+		// pagado escaló el grupo activo, ver marcarLinkPagado) cuando llegan a
+		// pagarse todos los links requeridos — el UPDATE condicional no toca
+		// nada en ese caso, pero antes se emitía GROUP_READY y se retornaba
+		// true igual, mintiendo en el historial y disparando un dispatch
+		// inline sobre un grupo que en realidad sigue en revisión (hallazgo
+		// Codex). Solo emitir el evento/reportar listo si el UPDATE realmente
+		// afectó la fila.
+		const [actualizado] = await tx
 			.update(pagaloPaymentGroups)
 			.set({
 				status: "READY_TO_APPLY",
@@ -322,7 +330,9 @@ async function evaluarGrupo(
 						"PARTIALLY_PAID",
 					]),
 				),
-			);
+			)
+			.returning({ id: pagaloPaymentGroups.id });
+		if (!actualizado) return false;
 		await tx.insert(pagaloPaymentEvents).values({
 			groupId,
 			eventType: "GROUP_READY",
@@ -682,18 +692,30 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 				validarTransaccionPagalo(link, transaccion);
 				const pdf = await generarVoucherPdf(transaccion, "Club Cashin");
 				const subida = await subirVoucher(pdf, link.groupId, link);
-				const { listoParaAplicar, voucherConsumido } = await marcarLinkPagado(
-					link,
-					transaccion,
-					subida,
-				);
-				// Otro worker (lease vencido, poll solapado) ya ganó la carrera
-				// antes de que este llegara a actualizar el link — cada worker
-				// sube su voucher a una key R2 aleatoria distinta, y la de este
-				// nunca quedó referenciada. Se borra en vez de dejarla huérfana
-				// con datos de cliente/pago (hallazgo Codex). Best-effort: si
-				// falla, cartera-back tiene su propio job de limpieza de
-				// huérfanos y esto no debe tumbar el poll.
+				// Otro worker (lease vencido, poll solapado) puede ganar la
+				// carrera antes de que este llegue a actualizar el link — cada
+				// worker sube su voucher a una key R2 aleatoria distinta, y la
+				// de este nunca queda referenciada. Se borra en vez de dejarla
+				// huérfana con datos de cliente/pago, tanto si marcarLinkPagado
+				// resuelve voucherConsumido=false como si lanza (la tx de DB
+				// puede reventar a mitad — hallazgo Codex tras el fix anterior,
+				// que solo cubría el camino resuelto). Best-effort: un fallo al
+				// borrar no debe tumbar el poll.
+				let resultadoMarcado: ResultadoMarcarLinkPagado;
+				try {
+					resultadoMarcado = await marcarLinkPagado(link, transaccion, subida);
+				} catch (error) {
+					await carteraBackClient
+						.deleteArchivoBoletaHuerfano(subida.voucherStorageKey)
+						.catch((deleteError) =>
+							console.error(
+								`[Págalo][POLL] no se pudo borrar voucher huérfano ${subida.voucherStorageKey}:`,
+								deleteError,
+							),
+						);
+					throw error;
+				}
+				const { listoParaAplicar, voucherConsumido } = resultadoMarcado;
 				if (!voucherConsumido) {
 					await carteraBackClient
 						.deleteArchivoBoletaHuerfano(subida.voucherStorageKey)

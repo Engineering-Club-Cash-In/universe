@@ -56,10 +56,16 @@ export function ordenarAllocations(
 	});
 }
 
+// cartera-back normaliza transaction_uuid a minúsculas antes de recomputar el
+// hash (pagaloPaymentImportPolicy.ts, sourceSchema) — si Págalo alguna vez
+// devuelve mayúsculas, hashear el valor crudo acá daría un hash distinto al
+// que cartera-back verifica, y un pago legítimo caería a INVALID_COMMAND
+// (hallazgo Codex). Se normaliza acá también para que ambos lados hasheen
+// exactamente el mismo valor canónico.
 const normalizarFuente = (source: PagaloSourceForHash) =>
 	source
 		? {
-				transaction_uuid: source.transaction_uuid,
+				transaction_uuid: source.transaction_uuid.toLowerCase(),
 				external_identifier: source.external_identifier,
 				request_id: source.request_id ?? null,
 				request_auth: source.request_auth ?? null,

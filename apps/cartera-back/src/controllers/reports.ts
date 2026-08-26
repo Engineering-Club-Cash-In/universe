@@ -118,6 +118,22 @@ export function sortEstadoCuentaPayments<T extends EstadoCuentaPagoRow>(pagos: T
 export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(pagos: T[]) {
   let capitalRestante: Big | null = null;
 
+  // Saldos "snapshot" por cuota: filas pagadas con rubros de cuota. Cuando la
+  // sync con el Excel reconstruye una cuota, escribe el MISMO total_restante
+  // (ya neto de abonos extra) en todos sus pagos; un abono a capital puro cuyo
+  // total_restante coincide con el de una hermana ya viene restado y no hay
+  // que volver a restarlo (caso 01010214106990 cuota 35: 47,874.89 mostraba
+  // 45,434.39).
+  const snapshotsPorCuota = new Map<string, Set<string>>();
+  for (const pago of pagos) {
+    const total = new Big(pago.total_restante || 0);
+    if (pago.pagado === true && getEstadoCuentaOtrosRubros(pago) > 0 && total.gt(0)) {
+      const key = String(pago.numero_cuota ?? "");
+      if (!snapshotsPorCuota.has(key)) snapshotsPorCuota.set(key, new Set());
+      snapshotsPorCuota.get(key)!.add(total.toFixed(2));
+    }
+  }
+
   return pagos.map((pago) => {
     const abonoCapital = new Big(pago.abono_capital || 0);
     const totalRestanteFila = new Big(pago.total_restante || 0);
@@ -131,7 +147,14 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
         : totalRestanteFila.plus(abonoCapital);
     }
 
-    capitalRestante = snapshotConfiable
+    // Abono puro ya neto: su saldo es el de una hermana de la cuota o el corrido.
+    const abonoYaRestado =
+      !snapshotConfiable &&
+      totalRestanteFila.gt(0) &&
+      (totalRestanteFila.eq(capitalRestante) ||
+        (snapshotsPorCuota.get(String(pago.numero_cuota ?? ""))?.has(totalRestanteFila.toFixed(2)) ?? false));
+
+    capitalRestante = snapshotConfiable || abonoYaRestado
       ? totalRestanteFila
       : capitalRestante.minus(abonoCapital);
 

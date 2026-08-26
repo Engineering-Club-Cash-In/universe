@@ -206,6 +206,27 @@ describe("estado de cuenta PDF", () => {
       "40196.94",
     ]);
   });
+
+  it("no resta dos veces el abono a capital cuando la fila ya viene neta (sync Excel)", () => {
+    // Crédito 01010214106990, cuota 35: la sync escribe el mismo total_restante
+    // (ya neto del abono de Q2,440.50) en ambos pagos de la cuota.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 10748, numero_cuota: 34, pagado: true, abono_capital: "1880.27", abono_interes: "818.33", total_restante: "52234.65" },
+      { pago_id: 144022, numero_cuota: 34, pagado: true, abono_capital: "440.50", total_restante: "52234.65" },
+      { pago_id: 10749, numero_cuota: 35, pagado: true, abono_capital: "1919.26", abono_interes: "783.52", total_restante: "47874.89" },
+      { pago_id: 150049, numero_cuota: 35, pagado: true, abono_capital: "2440.50", total_restante: "47874.89" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["52234.65", "52234.65", "47874.89", "47874.89"]);
+  });
+
+  it("abono puro que llega antes que la cuota regular del mismo mes usa el saldo de la hermana", () => {
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 1, numero_cuota: 29, pagado: true, abono_capital: "3456.78", abono_interes: "900.00", total_restante: "62139.83" },
+      { pago_id: 3, numero_cuota: 30, pagado: true, abono_capital: "440.50", total_restante: "59946.48" },
+      { pago_id: 2, numero_cuota: 30, pagado: true, abono_capital: "1752.85", abono_interes: "850.00", total_restante: "59946.48" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["62139.83", "59946.48", "59946.48"]);
+  });
 });
 
 // ──────────────────────────────────────────────────────────────────────────

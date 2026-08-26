@@ -2,6 +2,7 @@ import { describe, expect, it, mock } from "bun:test";
 import { calcularPagaloPayloadHash, type PagaloImportCommand } from "./pagaloPaymentImportPolicy";
 import {
   createPagaloImportService,
+  getPagaloImportReplayHttpStatus,
   getPagaloReviewRequiredReason,
   mapPagaloImportToRegistro,
   resolvePagaloLedgerCreditIdentity,
@@ -54,6 +55,11 @@ const command = (): PagaloImportCommand => {
 };
 
 describe("pagalo payment import", () => {
+  it("returns 409 when replaying a reviewed import", () => {
+    expect(getPagaloImportReplayHttpStatus("REVIEW_REQUIRED")).toBe(409);
+    expect(getPagaloImportReplayHttpStatus("APPLIED")).toBe(200);
+  });
+
   it("maps a two-link group as a single payment with the combined total (Daniel, 2026-08-26)", () => {
     expect(mapPagaloImportToRegistro(command(), 44)).toMatchObject({
       credito_id: 123,

@@ -181,6 +181,10 @@ const DETERMINISTIC_PAYMENT_REJECT_PREFIXES = [
   "Pago rechazado:",
 ];
 
+/** Replay no aplicado nunca debe parecer entrega exitosa al dispatcher CRM. */
+export const getPagaloImportReplayHttpStatus = (status: string) =>
+  status === "APPLIED" ? 200 : 409;
+
 /** Errores de negocio recuperables: se auditan sin reintentar motor normal. */
 export function getPagaloReviewRequiredReason(error: unknown) {
   const message = error instanceof Error ? error.message :
@@ -332,6 +336,7 @@ export const importPagaloPayment = async ({ body, set }: any) => {
         };
       }
 
+      set.status = getPagaloImportReplayHttpStatus(existing.status);
       return {
         success: existing.status === "APPLIED",
         status: existing.status,

@@ -9,6 +9,7 @@ import { db } from "../database";
 import { pagalo_payment_imports, pagos_credito } from "../database/db";
 import { procesarRegistroPago } from "./registerPayment";
 import type { PagaloComponentes } from "./registerPayment";
+import { CREDIT_PENDING_CANCELLATION_ERROR } from "./registerPaymentPolicy";
 import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 
 export type PagaloImportLedger = {
@@ -173,6 +174,26 @@ export function createPagaloImportService(deps: PagaloImportServiceDependencies)
 }
 
 const REVIEW_REQUIRED_PREFIX = "PAGALO_REVIEW_REQUIRED:";
+const CUOTA_INTEGRITY_ERROR_PREFIX = "Inconsistencia de integridad:";
+
+/** Errores de negocio recuperables: se auditan sin reintentar motor normal. */
+export function getPagaloReviewRequiredReason(error: unknown) {
+  const message = error instanceof Error ? error.message :
+    typeof error === "object" && error !== null && "message" in error &&
+      typeof (error as { message?: unknown }).message === "string"
+      ? (error as { message: string }).message
+      : undefined;
+  if (message?.startsWith(REVIEW_REQUIRED_PREFIX))
+    return message.slice(REVIEW_REQUIRED_PREFIX.length).trim();
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { code?: unknown }).code === CREDIT_PENDING_CANCELLATION_ERROR.code
+  )
+    return message ?? CREDIT_PENDING_CANCELLATION_ERROR.message;
+  if (message?.startsWith(CUOTA_INTEGRITY_ERROR_PREFIX)) return message;
+  return undefined;
+}
 
 const paymentIdsForImport = async (
   executor: any,
@@ -329,8 +350,8 @@ export const importPagaloPayment = async ({ body, set }: any) => {
         };
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (!message.startsWith(REVIEW_REQUIRED_PREFIX)) throw error;
+      const message = getPagaloReviewRequiredReason(error);
+      if (message === undefined) throw error;
 
       // La tx financiera ya hizo rollback. Esta tx corta deja evidencia de la
       // revisión sin reintroducir ningún pago, mora, boleta ni saldo mutado.
@@ -340,7 +361,7 @@ export const importPagaloPayment = async ({ body, set }: any) => {
           ...importValues(command),
           status: "REVIEW_REQUIRED",
           last_error_code: "PAGALO_LIVE_DEBT_REVIEW",
-          last_error_message: message.slice(REVIEW_REQUIRED_PREFIX.length).trim(),
+          last_error_message: message,
         })
         .returning({ id: pagalo_payment_imports.id });
       set.status = 409;

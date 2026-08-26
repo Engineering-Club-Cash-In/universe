@@ -2322,6 +2322,8 @@ export async function procesarRegistroPago(
           fecha_boleta,
           monto_aplicado: pagoEspecialCuota.montoAplicado,
           pagoConvenio: Number(estamparPagoConvenio()),
+          origen_pago,
+          pagalo_import_id,
         }, tx);
       }
 

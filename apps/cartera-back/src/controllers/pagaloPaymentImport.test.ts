@@ -2,6 +2,7 @@ import { describe, expect, it, mock } from "bun:test";
 import { calcularPagaloPayloadHash, type PagaloImportCommand } from "./pagaloPaymentImportPolicy";
 import {
   createPagaloImportService,
+  getPagaloReviewRequiredReason,
   mapPagaloImportToRegistro,
 } from "./pagaloPaymentImport";
 
@@ -145,6 +146,21 @@ describe("pagalo payment import", () => {
     });
     expect(findByGroup).not.toHaveBeenCalled();
     expect(registrarPago).not.toHaveBeenCalled();
+  });
+
+  it("classifies known Cartera business rejects for Págalo manual review", () => {
+    expect(
+      getPagaloReviewRequiredReason({
+        code: "CREDIT_PENDING_CANCELLATION",
+        message: "crédito pendiente de cancelación",
+      }),
+    ).toBe("crédito pendiente de cancelación");
+    expect(
+      getPagaloReviewRequiredReason(
+        new Error("Inconsistencia de integridad: cuota inválida"),
+      ),
+    ).toBe("Inconsistencia de integridad: cuota inválida");
+    expect(getPagaloReviewRequiredReason(new Error("database offline"))).toBeUndefined();
   });
 
   it("marks same group with different hash REVIEW_REQUIRED without creating payments", async () => {

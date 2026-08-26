@@ -35,6 +35,12 @@ describe("register payment", () => {
     expect(source).toContain("origen_pago: pagoData.origen_pago");
     expect(source).toContain("pagalo_import_id: pagoData.pagalo_import_id");
     expect(source.match(/pagalo_import_id: pagoData\.pagalo_import_id/g) ?? []).toHaveLength(2);
+    const convenioFallback = source.slice(
+      source.indexOf("if (new Big(estamparPagoConvenio.pendiente()).gt(0))"),
+      source.indexOf("const newSaldoAFavor"),
+    );
+    expect(convenioFallback).toContain("origen_pago,");
+    expect(convenioFallback).toContain("pagalo_import_id,");
   });
 
   it("Págalo se registra como un solo pago con el total (Daniel, 2026-08-26): capital se paga dentro del loop normal, sin guard de sobrante", async () => {

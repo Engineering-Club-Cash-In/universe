@@ -3,8 +3,10 @@
  *
  * D-04 (docs/features/pagalo/DECISIONES.md): "Cliente recibe un solo mensaje
  * con todos los links requeridos etiquetados. CRM no envía nada hasta crear
- * grupo completo... Texto visible siempre neutro: `Crédito {sifco} · Pago`,
- * o `Pago 1 de 2` / `Pago 2 de 2`; nunca nombra mora o intereses."
+ * grupo completo... Texto visible siempre neutro: `Pago` o `Pago 1 de 2` /
+ * `Pago 2 de 2`; nunca nombra mora o intereses." El crédito se identifica
+ * como "vehículo {marca modelo año} · {placa}" cuando el contrato tiene
+ * vehículo cargado, si no cae a "crédito {sifco}" (pagalo-link-orchestrator.ts).
  *
  * Mismo patrón que send-welcome-message.ts / send-recibo-pago-whatsapp.ts:
  * texto plano vía sendWhatsappTemplate sin templateName explícito (se
@@ -12,9 +14,10 @@
  * cobros_send_logs, y nunca lanza al caller — un fallo de WhatsApp no debe
  * romper la creación de links, que ya ocurrió.
  */
+
+import { persistCobrosSendLog } from "../lib/cobros-send-log";
 import { getTestPhone, isTestModeEnabled } from "../lib/messaging-test-mode";
 import { sendWhatsappTemplate } from "../lib/simpletech";
-import { persistCobrosSendLog } from "../lib/cobros-send-log";
 
 const LOG_PREFIX = "[PagaloLinksWhatsapp]";
 const PLANTILLA_ID = "pagalo_links";
@@ -26,6 +29,8 @@ export type PagaloLinkParaEnviar = {
 
 export interface SendPagaloLinksWhatsappParams {
 	numeroSifco: string;
+	/** "vehículo {marca modelo año} · {placa}" cuando está cargado, si no "crédito {sifco}". */
+	identificadorCredito: string;
 	telefono: string;
 	clienteNombre: string;
 	links: PagaloLinkParaEnviar[];
@@ -43,7 +48,7 @@ export type SendPagaloLinksWhatsappResult =
  */
 export function construirMensajePagaloLinks(
 	clienteNombre: string,
-	numeroSifco: string,
+	identificadorCredito: string,
 	links: PagaloLinkParaEnviar[],
 ): string {
 	const ordenados = [...links].sort((a, b) =>
@@ -55,7 +60,7 @@ export function construirMensajePagaloLinks(
 		const etiqueta = dosLinks ? `Pago ${index + 1} de 2` : "Pago";
 		return `${etiqueta}: ${link.paymentUrl}`;
 	});
-	return `${saludo}, aquí tienes el enlace de pago de tu crédito ${numeroSifco}.\n\n${lineas.join("\n")}`;
+	return `${saludo}, aquí tienes el enlace de pago de tu ${identificadorCredito}.\n\n${lineas.join("\n")}`;
 }
 
 /** Deps inyectables solo para tests — en producción no se pasa nada. */
@@ -68,18 +73,31 @@ export async function sendPagaloLinksWhatsapp(
 	params: SendPagaloLinksWhatsappParams,
 	deps: SendPagaloLinksWhatsappDeps = {},
 ): Promise<SendPagaloLinksWhatsappResult> {
-	const { numeroSifco, telefono, clienteNombre, links, createdBy } = params;
+	const {
+		numeroSifco,
+		identificadorCredito,
+		telefono,
+		clienteNombre,
+		links,
+		createdBy,
+	} = params;
 	const enviar = deps.enviar ?? sendWhatsappTemplate;
 	const guardarLog = deps.guardarLog ?? persistCobrosSendLog;
 
 	if (links.length === 0) {
-		console.log(`${LOG_PREFIX} SIFCO ${numeroSifco} sin links que enviar; se omite`);
+		console.log(
+			`${LOG_PREFIX} SIFCO ${numeroSifco} sin links que enviar; se omite`,
+		);
 		return { sent: false, skipped: true, reason: "sin_links" };
 	}
 
 	const testMode = isTestModeEnabled();
 	const telefonoDestino = testMode ? getTestPhone(2) : telefono;
-	const mensaje = construirMensajePagaloLinks(clienteNombre, numeroSifco, links);
+	const mensaje = construirMensajePagaloLinks(
+		clienteNombre,
+		identificadorCredito,
+		links,
+	);
 
 	let result: Awaited<ReturnType<typeof sendWhatsappTemplate>>;
 	try {
@@ -90,7 +108,9 @@ export async function sendPagaloLinksWhatsapp(
 		});
 	} catch (error) {
 		const msg = error instanceof Error ? error.message : String(error);
-		console.error(`${LOG_PREFIX} Error no controlado enviando a ${numeroSifco}: ${msg}`);
+		console.error(
+			`${LOG_PREFIX} Error no controlado enviando a ${numeroSifco}: ${msg}`,
+		);
 		return { sent: false, error: msg };
 	}
 
@@ -122,10 +142,16 @@ export async function sendPagaloLinksWhatsapp(
 	});
 
 	if (!result.success) {
-		console.error(`${LOG_PREFIX} Falló envío para ${numeroSifco}: ${result.error}`);
+		console.error(
+			`${LOG_PREFIX} Falló envío para ${numeroSifco}: ${result.error}`,
+		);
 		return { sent: false, error: result.error };
 	}
 
 	console.log(`${LOG_PREFIX} ✓ Links Págalo enviados para ${numeroSifco}`);
-	return { sent: true, templateMessageId: result.templateMessageId, telefono: telefonoDestino };
+	return {
+		sent: true,
+		templateMessageId: result.templateMessageId,
+		telefono: telefonoDestino,
+	};
 }

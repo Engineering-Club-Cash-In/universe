@@ -99,7 +99,11 @@ hay copias del motor ni del validador.
 **Fuera de la transacción, después del commit, lo dispara cartera** (mismo
 request, fire-and-forget, patrón de `/aplicar-pago`): `facturarPagoCompleto()`
 —el cuerpo de `/api/dte/facturar-pago-completo` extraído a función— por cada
-pago, y el recibo por WhatsApp (`enviarReciboPagoWhatsappBestEffort`). SAT es
+pago, **bajo el advisory lock del crédito** (el mismo de registrar/validar; y
+`reversePayment` ahora también lo toma, para que una reversión no se cruce con
+esa certificación y deje un DTE vivo de un pago revertido), y el recibo por
+WhatsApp (`enviarRecibosPagoDeCreditoBestEffort`), **independiente** de la
+facturación: sale aunque esta falle. SAT es
 irreversible: jamás corre dentro de una tx que pueda hacer rollback. El
 resultado queda en `pagalo_payment_imports.factura_status`
 (`PENDIENTE|OK|PARCIAL|FALLIDA`) + `factura_error` (JSON por pago: `http` 400 =

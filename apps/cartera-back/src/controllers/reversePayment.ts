@@ -21,6 +21,7 @@ import { updateMora } from "./latefee";
 import { SATClientService } from "../cofidi/satClientService";
 import { CLUB_CASHIN_CONFIG, SAT_CONFIG } from "../utils/functions/const";
 import { esPagoAplicado } from "../utils/paymentStatus";
+import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import {
   getRemainingPaymentPaidStatusAfterReversal,
   isReversibleIncobrablePayment,
@@ -79,8 +80,13 @@ export const reversePayment = async ({ body, set }: any) => {
 
     // ========================================================================
     // 🔥 INICIAR TRANSACCIÓN ATÓMICA
+    //    Bajo el mismo advisory lock por crédito que registrar/validar y la
+    //    facturación post-commit de Págalo: sin él, una reversión podía
+    //    consultar las facturas ACTIVAS (para anularlas) justo antes de que
+    //    esa facturación insertara el DTE, y dejar una factura viva para un
+    //    pago revertido (hallazgo Codex).
     // ========================================================================
-    const result = await db.transaction(async (tx) => {
+    const result = await withPaymentAdvisoryLock(credito_id, () => db.transaction(async (tx) => {
       // ======================================================================
       // 2️⃣ OBTENER DATOS DEL PAGO A REVERSAR
       // ======================================================================
@@ -715,7 +721,7 @@ export const reversePayment = async ({ body, set }: any) => {
         totalFacturas: facturasDelPago.length,
         reversionEspejo,
       };
-    });
+    }));
 // La reversión NO recalcula ninguna otra fila del crédito. La transacción de
 // arriba ya deja todo consistente (pago reseteado, capital/deuda restaurados).
 // Aquí vivía un updateInstallments({all: true}) (agregado en 0183a387, ene-2026)

@@ -389,7 +389,10 @@ export function resumirFacturacion(
 ): { status: PagaloFacturaStatus; error: string | null } {
   const fallidas = resultados.filter((r) => !r.success);
   const parciales = resultados.filter((r) => r.success && r.errores.length > 0);
-  if (fallidas.length) return { status: "FALLIDA", error: JSON.stringify(fallidas) };
+  // FALLIDA manda, pero el detalle conserva TAMBIÉN los parciales: el
+  // playbook necesita saber qué pago ya tiene DTE a medias (no reintentar a
+  // ciegas) y cuál tiene cero (hallazgo Codex).
+  if (fallidas.length) return { status: "FALLIDA", error: JSON.stringify([...fallidas, ...parciales]) };
   if (parciales.length) return { status: "PARCIAL", error: JSON.stringify(parciales) };
   return { status: "OK", error: null };
 }
@@ -465,29 +468,51 @@ async function guardarEstadoFactura(
   }
 }
 
-/** Factura cada pago del import y deja el resultado en el ledger. Nunca lanza. */
-async function facturarImport(importId: number, pagoIds: number[]) {
-  const resultados: ResultadoFacturaPago[] = [];
-  for (const pagoId of pagoIds) resultados.push(await facturarPagoDeImport(pagoId));
-  const resumen = resumirFacturacion(resultados);
-  await guardarEstadoFactura(importId, resumen);
-  return resumen;
+/**
+ * Factura cada pago del import y deja el resultado en el ledger. Corre bajo
+ * el advisory lock del crédito (el mismo de registrar/validar y de
+ * `reversePayment`): así el re-chequeo "¿sigue validated?" de cada pago y la
+ * certificación no se cruzan con una reversión — o la reversión termina antes
+ * y acá no se factura, o espera y encuentra el DTE ACTIVA para anularlo
+ * (hallazgo Codex). Nunca lanza.
+ */
+async function facturarImport(importId: number, creditoId: number, pagoIds: number[]) {
+  try {
+    return await withPaymentAdvisoryLock(creditoId, async () => {
+      const resultados: ResultadoFacturaPago[] = [];
+      for (const pagoId of pagoIds) resultados.push(await facturarPagoDeImport(pagoId));
+      const resumen = resumirFacturacion(resultados);
+      await guardarEstadoFactura(importId, resumen);
+      return resumen;
+    });
+  } catch (error) {
+    // Falló antes de facturar (p. ej. la DB se cayó en el re-chequeo): que
+    // quede en el ledger y no como PENDIENTE mudo.
+    const detalle = error instanceof Error ? error.message : String(error);
+    const resumen = { status: "FALLIDA" as const, error: JSON.stringify([{ motivo: detalle }]) };
+    await guardarEstadoFactura(importId, resumen);
+    return resumen;
+  }
 }
 
 /**
  * Post-commit, fire-and-forget: SAT y WhatsApp son irreversibles, así que
  * corren solo cuando el pago ya quedó validado y confirmado. Mismo patrón que
  * `/aplicar-pago` (recibo) y "Validar y Facturar" del front (segunda
- * llamada). Nunca lanza. El recibo es el de pago (no depende de la factura):
- * se manda igual que cuando conta valida a mano, uno por pago del grupo.
+ * llamada). Nunca lanza. El recibo es el de pago, no de la factura: se manda
+ * igual que cuando conta valida a mano (uno por pago del grupo) y de forma
+ * INDEPENDIENTE de la facturación — si esta se traba o falla, el recibo sale
+ * igual (hallazgo Codex).
  */
 async function facturarYNotificarPostCommit(
   importId: number,
   creditoId: number,
   pagoIds: number[],
 ) {
-  await facturarImport(importId, pagoIds);
-  await enviarRecibosPagoDeCreditoBestEffort({ creditoId, pagoIds });
+  await Promise.allSettled([
+    facturarImport(importId, creditoId, pagoIds),
+    enviarRecibosPagoDeCreditoBestEffort({ creditoId, pagoIds }),
+  ]);
 }
 
 /** Minutos tras `applied_at` a partir de los cuales un PENDIENTE se considera huérfano. */

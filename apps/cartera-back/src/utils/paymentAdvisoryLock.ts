@@ -1,6 +1,17 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { lockPool } from "../database";
 
 export const PAYMENT_ADVISORY_LOCK_NAMESPACE = 8765;
+
+/**
+ * Créditos cuyo lock ya sostiene la cadena async actual. Hace el lock
+ * REENTRANTE por cadena: `rechazarPagoBoleta` toma el lock y adentro llama a
+ * `reversePayment`, que también lo toma — sin esto, la segunda toma usaría
+ * otra conexión del lockPool y esperaría para siempre al primero (deadlock).
+ * Otra request del mismo proceso tiene su propio contexto, así que sigue
+ * bloqueándose como debe.
+ */
+const locksDeLaCadena = new AsyncLocalStorage<ReadonlySet<number>>();
 
 export type PaymentAdvisoryLockConnection = {
   query: (text: string, values?: unknown[]) => Promise<unknown>;
@@ -19,13 +30,20 @@ export async function withPaymentAdvisoryLock<T>(
   credito_id: number,
   fn: () => Promise<T>
 ): Promise<T> {
+  const yaSostenidos = locksDeLaCadena.getStore();
+  if (yaSostenidos?.has(credito_id)) {
+    // Reentrada: esta misma cadena ya tiene el lock del crédito.
+    return fn();
+  }
   const lockConn: PaymentAdvisoryLockConnection = await lockPool.connect();
   try {
     await lockConn.query("SELECT pg_advisory_lock($1, $2)", [
       PAYMENT_ADVISORY_LOCK_NAMESPACE,
       credito_id,
     ]);
-    return await fn();
+    const sostenidos = new Set(yaSostenidos ?? []);
+    sostenidos.add(credito_id);
+    return await locksDeLaCadena.run(sostenidos, fn);
   } finally {
     try {
       await lockConn.query("SELECT pg_advisory_unlock($1, $2)", [

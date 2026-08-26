@@ -297,13 +297,13 @@ describe("facturación post-commit (D-10 v2)", () => {
     });
   });
 
-  it("FALLIDA manda sobre PARCIAL; el detalle conserva pago, http y errores de cada caído", () => {
+  it("FALLIDA manda sobre PARCIAL; el detalle conserva los caídos Y los parciales (a medias en SAT)", () => {
     const parcial = { pago_id: 1, success: true, http: 200, errores: [{ error: "x" }] };
     const sat = { pago_id: 2, success: false, http: 500, errores: [{ tipo: "MORA", error: "SAT timeout" }], detalle: "No se pudo generar ninguna factura" };
     const nit = { pago_id: 3, success: false, http: 400, errores: [], detalle: "sin NIT" };
     expect(resumirFacturacion([parcial, sat, nit])).toEqual({
       status: "FALLIDA",
-      error: JSON.stringify([sat, nit]),
+      error: JSON.stringify([sat, nit, parcial]),
     });
     // lo que lee el playbook: qué pago tiene cero facturas (reintento seguro)
     expect(JSON.parse(resumirFacturacion([sat]).error ?? "[]")[0]).toMatchObject({ pago_id: 2, http: 500 });

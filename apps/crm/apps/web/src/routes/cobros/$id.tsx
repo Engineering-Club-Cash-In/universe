@@ -36,6 +36,7 @@ import {
 import { toast } from "sonner";
 import { ActividadBot } from "@/components/cobros/actividad-bot";
 import { PromesaActivaBadge } from "@/components/cobros/promesa-activa-badge";
+import { PagaloHistorial } from "@/components/cobros/pagalo-historial";
 import { PagaloLinkDialog } from "@/components/cobros/pagalo-link-dialog";
 import { ReferenciasView } from "@/components/cobros/ReferenciasView";
 import { SeguimientoRecurrenteModal } from "@/components/cobros/seguimiento-recurrente-modal";
@@ -2444,6 +2445,13 @@ function RouteComponent() {
 							)}
 						</CardContent>
 					</Card>
+					{caso.id && (
+						<Card>
+							<CardContent className="pt-6">
+								<PagaloHistorial casoCobroId={caso.id} />
+							</CardContent>
+						</Card>
+					)}
 					{/* CB-020: Promesas de Pago — filtro sobre los mismos contactos
 					    (no query aparte para listarlas). Las promesas ya NO aparecen
 					    en el Historial de arriba (se filtran ahí, ver `contactos`).

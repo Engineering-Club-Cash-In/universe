@@ -9,6 +9,11 @@
  * D-50: cuando TODOS los links requeridos de un grupo (uno o dos, según D-48
  * — cualquier lado puede ser Q0 y no tener link) están pagados y con voucher
  * propio, el grupo pasa a READY_TO_APPLY. Ningún paso previo toca cartera.
+ * Apenas eso ocurre, este job dispara el dispatch de ESE grupo inline (ver
+ * `reclamarYProcesarGrupo` en `pagalo-dispatch.ts`) en vez de esperar el
+ * próximo ciclo programado del dispatcher — evita hasta 5 min extra de
+ * espera. El dispatcher programado sigue corriendo igual como respaldo para
+ * reintentar cualquier grupo que haya quedado `APPLICATION_FAILED`.
  *
  * D-51: los links no expiran. Un link REPLACED sigue en el barrido hasta
  * observar su destino final (pagado/cancelado/expirado) — sacarlo del poll
@@ -29,9 +34,18 @@
  * uuid` con el uuid del link no encuentra nada; `id_external` sí). Con esos
  * datos reales, el worker genera su propio comprobante en el mismo formato
  * visual del que emite Págalo (ver generarVoucherPdf) usando pdf-lib.
+ *
+ * DÓNDE SE SUBE EL VOUCHER — a cartera-back, no al bucket del CRM. El comando
+ * de importación (`pagaloPaymentImportPolicy.ts`) exige una key que
+ * cartera-back pueda resolver en SU PROPIO bucket R2 (`R2_BUCKET`, distinto
+ * del bucket del CRM) — cartera-back nunca sube ni descarga nada él mismo,
+ * solo persiste el string recibido (`insertarBoletas`/`prepararURLsBoletas`
+ * en registerPayment.ts, confirmado leyendo el código: cero I/O de storage).
+ * Por eso el worker sube el PDF reutilizando `carteraBackClient.uploadFile`
+ * — el mismo `POST /upload` que ya usan carteraFront y el bot de cobros para
+ * boletas de depósito, con el mismo Bearer JWT — en vez de un bucket propio.
  */
 import { createHash } from "node:crypto";
-import { PutObjectCommand } from "@aws-sdk/client-s3";
 import {
 	and,
 	asc,
@@ -50,11 +64,9 @@ import {
 	pagaloPaymentGroups,
 	pagaloPaymentLinks,
 } from "../db/schema/pagalo-payments";
-import { getFileUrl, R2_BUCKET_NAME, r2Client } from "../lib/storage";
-import {
-	createPagaloClient,
-	getPagaloSandboxConfig,
-} from "../services/pagalo-client";
+import { carteraBackClient } from "../services/cartera-back-client";
+import { createPagaloClient, getPagaloSandboxConfig } from "../services/pagalo-client";
+import { correrDispatchPagalo, reclamarYProcesarGrupo } from "./pagalo-dispatch";
 
 /** Tope por corrida. Si hay más, se atienden en la siguiente. */
 const MAXIMO_POR_CORRIDA = 50;
@@ -238,31 +250,32 @@ async function subirVoucher(
 	const voucherSha256 = createHash("sha256")
 		.update(Buffer.from(buffer))
 		.digest("hex");
-	const voucherStorageKey = `pagalo/${groupId}/${link.linkType}-${link.generation}.pdf`;
-	await r2Client.send(
-		new PutObjectCommand({
-			Bucket: R2_BUCKET_NAME,
-			Key: voucherStorageKey,
-			Body: Buffer.from(buffer),
-			ContentType: "application/pdf",
-		}),
-	);
-	// `voucherStorageKey` es la fuente de verdad para volver a generar una URL
-	// firmada cuando haga falta mostrarla (getFileUrl); esta URL guardada en DB
-	// expira igual que el resto de firmas del repo (SIGNED_URL_EXPIRY).
-	const voucherUrl = await getFileUrl(voucherStorageKey);
-	return { voucherStorageKey, voucherSha256, voucherUrl };
+	// Mismo proceso que carteraFront/bot de cobros: solo se manda el archivo,
+	// sin pedir una key propia — cartera-back siempre devuelve un nombre
+	// aleatorio plano (uuid.pdf). La key queda atada a este grupo por el resto
+	// del comando de importación (crm_group_id, transaction_uuid), no por su
+	// propio nombre de archivo (ver pagaloPaymentImportPolicy.ts, voucherValid).
+	const nombreSugerido = `voucher-pagalo-${groupId}-${link.linkType}.pdf`;
+	const archivo = new Blob([new Uint8Array(buffer)], { type: "application/pdf" });
+	const subida = await carteraBackClient.uploadFile(archivo, nombreSugerido);
+	const voucherStorageKey = subida.filename;
+	// cartera-back arma la URL pública final (URL_PUBLIC_R2 + key) del lado
+	// suyo cuando persiste la boleta — el CRM no tiene ese dominio, así que
+	// guarda la misma key como referencia, no una URL clicable.
+	return { voucherStorageKey, voucherSha256, voucherUrl: voucherStorageKey };
 }
 
 /**
  * Todos los `linkType` del grupo con monto > 0 (D-48: un lado puede ser Q0 y
  * no generar link) ya tienen isApplicationSource=true → READY_TO_APPLY. Si
- * falta alguno, PARTIALLY_PAID (solo si el grupo no está ya ahí).
+ * falta alguno, PARTIALLY_PAID (solo si el grupo no está ya ahí). Devuelve
+ * `true` si el grupo quedó `READY_TO_APPLY` en esta llamada — el caller usa
+ * eso para disparar el dispatch inline apenas la transacción cierre.
  */
 async function evaluarGrupo(
 	tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
 	groupId: string,
-): Promise<void> {
+): Promise<boolean> {
 	const [group] = await tx
 		.select({
 			capitalTotal: pagaloPaymentGroups.capitalTotal,
@@ -271,7 +284,7 @@ async function evaluarGrupo(
 		})
 		.from(pagaloPaymentGroups)
 		.where(eq(pagaloPaymentGroups.id, groupId));
-	if (!group) return;
+	if (!group) return false;
 
 	const linkTypesDelGrupo = new Set<"CAPITAL" | "MORA_INTERES">();
 	if (Number(group.capitalTotal) > 0) linkTypesDelGrupo.add("CAPITAL");
@@ -316,7 +329,9 @@ async function evaluarGrupo(
 			toStatus: "READY_TO_APPLY",
 			payload: {},
 		});
-	} else if (group.status === "PENDING_PAYMENT") {
+		return true;
+	}
+	if (group.status === "PENDING_PAYMENT") {
 		await tx
 			.update(pagaloPaymentGroups)
 			.set({ status: "PARTIALLY_PAID", updatedAt: new Date() })
@@ -330,8 +345,14 @@ async function evaluarGrupo(
 			payload: {},
 		});
 	}
+	return false;
 }
 
+/**
+ * Devuelve `true` cuando este link fue el que dejó al grupo `READY_TO_APPLY`
+ * — el caller usa eso para disparar el dispatch inline apenas la transacción
+ * cierre (no llamar cartera-back desde dentro de una tx de DB abierta).
+ */
 async function marcarLinkPagado(
 	link: LinkClaimado,
 	transaccion: TransaccionPagalo,
@@ -340,8 +361,8 @@ async function marcarLinkPagado(
 		voucherSha256: string;
 		voucherUrl: string;
 	},
-): Promise<void> {
-	await db.transaction(async (tx) => {
+): Promise<boolean> {
+	return db.transaction(async (tx) => {
 		// Se serializa contra el reemplazo del grupo (/crear con otra selección,
 		// pago-link.ts): primero el candado del GRUPO, después el del link —
 		// mismo orden que el reemplazo, para no cruzarse en deadlock— y se
@@ -358,7 +379,7 @@ async function marcarLinkPagado(
 			.from(pagaloPaymentLinks)
 			.where(eq(pagaloPaymentLinks.id, link.id))
 			.for("update");
-		if (!fresco || fresco.status === "PAID") return;
+		if (!fresco || fresco.status === "PAID") return false;
 		const esReemplazado = fresco.status === "REPLACED";
 		const [updated] = await tx
 			.update(pagaloPaymentLinks)
@@ -387,7 +408,7 @@ async function marcarLinkPagado(
 				),
 			)
 			.returning({ id: pagaloPaymentLinks.id });
-		if (!updated) return;
+		if (!updated) return false;
 		await tx.insert(pagaloPaymentEvents).values({
 			groupId: link.groupId,
 			linkId: link.id,
@@ -445,7 +466,7 @@ async function marcarLinkPagado(
 						.for("update")
 				: [];
 			const objetivo = activo ?? viejo;
-			if (!objetivo) return;
+			if (!objetivo) return false;
 			const [escalado] = await tx
 				.update(pagaloPaymentGroups)
 				.set({ status: "REVIEW_REQUIRED", updatedAt: new Date() })
@@ -461,7 +482,7 @@ async function marcarLinkPagado(
 					),
 				)
 				.returning({ id: pagaloPaymentGroups.id });
-			if (!escalado) return;
+			if (!escalado) return false;
 			await tx.insert(pagaloPaymentEvents).values({
 				groupId: objetivo.id,
 				eventType: "REPLACED_LINK_PAID",
@@ -475,9 +496,9 @@ async function marcarLinkPagado(
 					amount: transaccion.total,
 				},
 			});
-			return;
+			return false;
 		}
-		await evaluarGrupo(tx, link.groupId);
+		return evaluarGrupo(tx, link.groupId);
 	});
 }
 
@@ -543,15 +564,30 @@ export type ResultadoPollPagalo = {
 	pagados: number;
 	sinCambios: number;
 	errores: number;
+	dispatchReintentados: number;
+	dispatchCompletados: number;
+	dispatchErrores: number;
 };
 
+/**
+ * Antes de barrer links nuevos, reintenta grupos que quedaron
+ * READY_TO_APPLY/APPLICATION_FAILED de una corrida anterior (p.ej. si
+ * cartera-back estuvo caído). Así un solo botón/ciclo cubre tanto "detectar
+ * pago nuevo" como "reintentar aplicación pendiente" sin depender del
+ * dispatcher programado por separado.
+ */
 export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
+	const dispatchPrevio = await correrDispatchPagalo();
+
 	const links = await reclamarLinksPendientes();
 	const resultado: ResultadoPollPagalo = {
 		revisados: links.length,
 		pagados: 0,
 		sinCambios: 0,
 		errores: 0,
+		dispatchReintentados: dispatchPrevio.revisados,
+		dispatchCompletados: dispatchPrevio.completados,
+		dispatchErrores: dispatchPrevio.errores + dispatchPrevio.revisionRequerida,
 	};
 	if (links.length === 0) return resultado;
 
@@ -605,8 +641,22 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 			validarTransaccionPagalo(link, transaccion);
 			const pdf = await generarVoucherPdf(transaccion, "Club Cashin");
 			const subida = await subirVoucher(pdf, link.groupId, link);
-			await marcarLinkPagado(link, transaccion, subida);
+			const listoParaAplicar = await marcarLinkPagado(link, transaccion, subida);
 			resultado.pagados++;
+			// Fuera de la transacción de arriba a propósito: nunca llamar
+			// cartera-back (red) mientras una tx de DB sigue abierta. Si esto
+			// falla, el grupo queda READY_TO_APPLY/APPLICATION_FAILED y el
+			// dispatcher programado lo recoge en su propio ciclo — nunca se pierde.
+			if (listoParaAplicar) {
+				try {
+					await reclamarYProcesarGrupo(link.groupId);
+				} catch (error) {
+					console.error(
+						`[Págalo][POLL] grupo ${link.groupId} quedó READY_TO_APPLY pero falló el dispatch inline:`,
+						error instanceof Error ? error.message : error,
+					);
+				}
+			}
 		} catch (error) {
 			await registrarIntentoFallido(
 				link,

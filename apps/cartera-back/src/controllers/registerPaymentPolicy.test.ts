@@ -1478,3 +1478,64 @@ describe("esReciboSaldado vía filtrar — restantes parcialmente informados", (
     ).toHaveLength(1);
   });
 });
+
+describe("esReciboSaldado vía filtrar — el cierre no cubre a sus hermanos (cierre diferido)", () => {
+  const filtrarAtrasadas = registerPaymentPolicy.filtrarCuotasVencidasSinCobertura;
+  const filtrarEnValidacion = registerPaymentPolicy.filtrarCuotasEnValidacion;
+
+  const base = {
+    cuota_id: 10,
+    numero_cuota: 12,
+    paymentFalse: false,
+    abono_interes: "0",
+    abono_iva_12: "0",
+    abono_seguro: "0",
+    abono_gps: "0",
+    membresias_pago: "0",
+    capital_restante: "0",
+    interes_restante: "0",
+    iva_12_restante: "0",
+    seguro_restante: "0",
+    gps_restante: "0",
+    membresias_restante: "0",
+  };
+
+  // Fila de CIERRE validada primero: restantes 0 por diseño, rubros parciales
+  const cierreValidado = {
+    ...base,
+    pago_id: 101,
+    validationStatus: "validated",
+    abono_capital: "800.00",
+  };
+
+  it("cierre validado + hermano pending con plata → la cuota está EN VALIDACIÓN, no cubierta firme", () => {
+    const hermanoPending = {
+      ...base,
+      pago_id: 100,
+      validationStatus: "pending",
+      abono_capital: "1473.80",
+      capital_restante: "1473.80", // el parcial aún debe sus restantes
+    };
+    const rows = [hermanoPending, cierreValidado];
+    expect(filtrarAtrasadas(rows, "2273.80")).toHaveLength(0);
+    expect(filtrarEnValidacion(rows, "2273.80")).toHaveLength(2);
+  });
+
+  it("cierre validado + hermano ANULADO con plata → la cuota vuelve a ser atrasada", () => {
+    const hermanoAnulado = {
+      ...base,
+      pago_id: 100,
+      validationStatus: "pending",
+      paymentFalse: true,
+      abono_capital: "1473.80",
+    };
+    const rows = [hermanoAnulado, cierreValidado];
+    expect(filtrarAtrasadas(rows, "2273.80")).toHaveLength(2);
+  });
+
+  it("cierre validado SIN hermanos con plata (cuota recortada real) sigue cubierta firme", () => {
+    const rows = [cierreValidado];
+    expect(filtrarAtrasadas(rows, "2273.80")).toHaveLength(0);
+    expect(filtrarEnValidacion(rows, "2273.80")).toHaveLength(0);
+  });
+});

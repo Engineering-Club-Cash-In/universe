@@ -421,11 +421,32 @@ const cuotaCubiertaPorGrupo = (
   });
   if (cuotaCompleta) return true;
 
+  // El atajo del recibo saldado es consciente del GRUPO (review Codex): en una
+  // cuota partida, la fila de CIERRE queda con restantes 0 por diseño aunque
+  // sus hermanos sigan vivos (cierre diferido, registerPayment.ts). Un cierre
+  // validated no puede dar la cuota por firme mientras haya un hermano pending
+  // con plata (la cuota sigue dependiendo de él → en validación), y si un
+  // hermano con plata fue ANULADO, el atajo se descarta por completo: los
+  // restantes 0 del cierre son residuo y la deuda del hermano volvió a existir
+  // (la suma de rubros decide, y sin esa plata no cubre).
+  const hayPlataAnulada = grupo.some(
+    (row) => row.paymentFalse === true && sumarAplicadoACuota([row]).gt(0)
+  );
+  if (hayPlataAnulada) return false;
+
+  const hayPendienteConPlata = grupo.some(
+    (row) =>
+      row.paymentFalse === false &&
+      row.validationStatus === "pending" &&
+      sumarAplicadoACuota([row]).gt(0)
+  );
+
   return grupo.some(
     (row) =>
       esReciboSaldado(row) &&
-      (row.validationStatus === "validated" ||
-        (incluirPendientes && row.validationStatus === "pending"))
+      (row.validationStatus === "validated"
+        ? incluirPendientes || !hayPendienteConPlata
+        : incluirPendientes && row.validationStatus === "pending")
   );
 };
 

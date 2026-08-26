@@ -15,6 +15,7 @@ import {
 	lte,
 	max,
 	ne,
+	notInArray,
 	or,
 	sql,
 } from "drizzle-orm";
@@ -47,6 +48,11 @@ import {
 	salesStages,
 } from "../db/schema/crm";
 import { notifications } from "../db/schema/notifications";
+import {
+	pagaloPaymentEvents,
+	pagaloPaymentGroups,
+	pagaloPaymentLinks,
+} from "../db/schema/pagalo-payments";
 import { quotations } from "../db/schema/quotations";
 import { recordatoriosPremora } from "../db/schema/recordatorios-premora";
 import { vehicles } from "../db/schema/vehicles";
@@ -54,6 +60,7 @@ import {
 	PREFIJO_PREMORA_AUTO,
 	PREFIJO_WSP_MASIVO,
 } from "../jobs/cierre-diario-asesores";
+import { correrPollPagalo } from "../jobs/pagalo-poll";
 import {
 	payloadEdicionManual,
 	registrarAuditContacto,
@@ -111,14 +118,6 @@ import {
 	crmCobrosOrInvestmentsProcedure,
 	crmOrCobrosProcedure,
 } from "../lib/orpc";
-import {
-	pagaloPaymentEvents,
-	pagaloPaymentGroups,
-	pagaloPaymentLinks,
-} from "../db/schema/pagalo-payments";
-import { correrPollPagalo } from "../jobs/pagalo-poll";
-import { createPagaloClient, getPagaloSandboxConfig } from "../services/pagalo-client";
-import { createPagaloLinks } from "../services/pagalo-link-orchestrator";
 import { primerTelefono } from "../lib/phone-utils";
 import {
 	aplicarCambiosEstadoPromesa,
@@ -151,6 +150,11 @@ import {
 	isCarteraBackEnabled,
 	isCarteraBackPaymentsEnabled,
 } from "../services/cartera-back-integration";
+import {
+	createPagaloClient,
+	getPagaloSandboxConfig,
+} from "../services/pagalo-client";
+import { createPagaloLinks } from "../services/pagalo-link-orchestrator";
 import {
 	type EstadoCuentaErrorCodigo,
 	sendEstadoCuentaWhatsapp,
@@ -4754,14 +4758,85 @@ export const cobrosRouter = {
 		)
 		.handler(async ({ input, context }) => {
 			try {
-				return await createPagaloLinks({ ...input, requestedBy: context.user.id });
+				return await createPagaloLinks({
+					...input,
+					requestedBy: context.user.id,
+				});
 			} catch (error) {
 				console.error(
 					`[Págalo] Error creando links para ${input.numeroSifco}:`,
-					error instanceof Error ? error.stack ?? error.message : error,
+					error instanceof Error ? (error.stack ?? error.message) : error,
 				);
 				throw error;
 			}
+		}),
+
+	// Grupo Págalo activo (no COMPLETED/CANCELLED) del crédito, si existe —
+	// mismo filtro que createPagaloLinks usa para no duplicar (pagalo-link-
+	// orchestrator.ts). El diálogo lo consulta al abrir para mostrar los
+	// links ya pendientes en vez de reofrecer el checklist de cuotas.
+	getPagaloGrupoActivo: cobrosProcedure
+		.input(z.object({ creditoId: z.number().int().positive() }))
+		.handler(async ({ input }) => {
+			const filas = await db
+				.select({
+					groupId: pagaloPaymentGroups.id,
+					status: pagaloPaymentGroups.status,
+					origen: pagaloPaymentGroups.origen,
+					capitalTotal: pagaloPaymentGroups.capitalTotal,
+					facturableTotal: pagaloPaymentGroups.facturableTotal,
+					totalAmount: pagaloPaymentGroups.totalAmount,
+					createdAt: pagaloPaymentGroups.createdAt,
+					linkId: pagaloPaymentLinks.id,
+					linkType: pagaloPaymentLinks.linkType,
+					linkStatus: pagaloPaymentLinks.status,
+					paymentUrl: pagaloPaymentLinks.paymentUrl,
+					transactionAmount: pagaloPaymentLinks.transactionAmount,
+					paidAt: pagaloPaymentLinks.paidAt,
+				})
+				.from(pagaloPaymentGroups)
+				.leftJoin(
+					pagaloPaymentLinks,
+					eq(pagaloPaymentLinks.groupId, pagaloPaymentGroups.id),
+				)
+				.where(
+					and(
+						eq(pagaloPaymentGroups.carteraCreditoId, input.creditoId),
+						notInArray(pagaloPaymentGroups.status, ["COMPLETED", "CANCELLED"]),
+					),
+				);
+			if (filas.length === 0) return null;
+			const grupo = filas[0]!;
+			return {
+				groupId: grupo.groupId,
+				status: grupo.status,
+				origen: grupo.origen,
+				capitalTotal: grupo.capitalTotal,
+				facturableTotal: grupo.facturableTotal,
+				totalAmount: grupo.totalAmount,
+				createdAt: grupo.createdAt,
+				links: filas.flatMap((fila) =>
+					fila.linkId && fila.linkType
+						? [
+								{
+									id: fila.linkId,
+									linkType: fila.linkType,
+									status: fila.linkStatus!,
+									paymentUrl: fila.paymentUrl,
+									// El proveedor solo confirma transactionAmount al pagar; antes
+									// de eso el monto "esperado" es el total del componente en el
+									// grupo (capitalTotal/facturableTotal), ya fijado al crear.
+									amount:
+										fila.transactionAmount ??
+										(fila.linkType === "CAPITAL"
+											? grupo.capitalTotal
+											: grupo.facturableTotal),
+									paidAt: fila.paidAt,
+								},
+							]
+						: [],
+				),
+			};
 		}),
 
 	// Rastro completo de Págalo para el caso: todos los grupos que se hayan
@@ -4846,7 +4921,7 @@ export const cobrosRouter = {
 		} catch (error) {
 			console.error(
 				"[Págalo] Error corriendo el poll manual:",
-				error instanceof Error ? error.stack ?? error.message : error,
+				error instanceof Error ? (error.stack ?? error.message) : error,
 			);
 			throw error;
 		}

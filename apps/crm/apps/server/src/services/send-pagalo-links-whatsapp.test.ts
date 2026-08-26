@@ -28,11 +28,18 @@ function baseParams(
 ) {
 	return {
 		numeroSifco: SIFCO,
+		identificadorCredito: `crédito ${SIFCO}`,
 		telefono: TELEFONO,
 		clienteNombre: "Juan Pérez",
 		links: [
-			{ linkType: "CAPITAL" as const, paymentUrl: "https://s.pagalodev.com/capital" },
-			{ linkType: "MORA_INTERES" as const, paymentUrl: "https://s.pagalodev.com/mora" },
+			{
+				linkType: "CAPITAL" as const,
+				paymentUrl: "https://s.pagalodev.com/capital",
+			},
+			{
+				linkType: "MORA_INTERES" as const,
+				paymentUrl: "https://s.pagalodev.com/mora",
+			},
 		],
 		createdBy: CREATED_BY,
 		...overrides,
@@ -72,7 +79,7 @@ function buildDeps(overrides: Partial<SendPagaloLinksWhatsappDeps> = {}): {
 
 describe("construirMensajePagaloLinks", () => {
 	test("dos links: CAPITAL siempre 'Pago 1 de 2' sin importar el orden del array", () => {
-		const invertido = construirMensajePagaloLinks("Juan", SIFCO, [
+		const invertido = construirMensajePagaloLinks("Juan", `crédito ${SIFCO}`, [
 			{ linkType: "MORA_INTERES", paymentUrl: "https://s.pagalodev.com/mora" },
 			{ linkType: "CAPITAL", paymentUrl: "https://s.pagalodev.com/capital" },
 		]);
@@ -81,16 +88,19 @@ describe("construirMensajePagaloLinks", () => {
 	});
 
 	test("un solo link: etiqueta 'Pago' a secas", () => {
-		const mensaje = construirMensajePagaloLinks("Juan", SIFCO, [
+		const mensaje = construirMensajePagaloLinks("Juan", `crédito ${SIFCO}`, [
 			{ linkType: "MORA_INTERES", paymentUrl: "https://s.pagalodev.com/mora" },
 		]);
 		expect(mensaje).toContain("Pago: https://s.pagalodev.com/mora");
 	});
 
 	test("D-04: nunca nombra mora, interés ni capital en el texto visible", () => {
-		const mensaje = construirMensajePagaloLinks("Juan", SIFCO, [
+		const mensaje = construirMensajePagaloLinks("Juan", `crédito ${SIFCO}`, [
 			{ linkType: "CAPITAL", paymentUrl: "https://s.pagalodev.com/atkCzHTwT9" },
-			{ linkType: "MORA_INTERES", paymentUrl: "https://s.pagalodev.com/xk92JqLwR3" },
+			{
+				linkType: "MORA_INTERES",
+				paymentUrl: "https://s.pagalodev.com/xk92JqLwR3",
+			},
 		]);
 		expect(mensaje.toLowerCase()).not.toContain("capital");
 		expect(mensaje.toLowerCase()).not.toContain("mora");

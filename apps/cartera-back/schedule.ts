@@ -9,6 +9,7 @@ import {
   reportarFacturasFallidasSat,
 } from './src/controllers/verificarFacturasSat';
 import { generarSnapshotDiario } from './src/controllers/facturacionSnapshot';
+import { reintentarFacturacionPagaloPendiente } from './src/controllers/pagaloPaymentImport';
 
 const TZ_GUATEMALA = 'America/Guatemala';
 
@@ -114,6 +115,20 @@ export function iniciarTareasProgramadas() {
       console.log(`✅ verificarFacturasSat: revisadas=${res.revisadas}, fallidas=${res.fallidas}`);
     } catch (error) {
       console.error('❌ Error al ejecutar verificarFacturasSat:', error);
+    }
+  });
+
+  // 💳 Págalo: imports APPLIED con factura PENDIENTE hace >10 min (cartera
+  //    murió entre el commit y SAT). Sin facturas ACTIVAS → refactura; con
+  //    alguna → PARCIAL para revisión manual. Cada 10 min.
+  schedule.scheduleJob({ rule: '*/10 * * * *', tz: TZ_GUATEMALA }, async () => {
+    try {
+      const res = await reintentarFacturacionPagaloPendiente();
+      if (res.huerfanos > 0) {
+        console.log(`💳 Págalo factura pendiente: huérfanos=${res.huerfanos}, refacturados=${res.refacturados}, a revisión=${res.revisados}`);
+      }
+    } catch (error) {
+      console.error('❌ Error en reintentarFacturacionPagaloPendiente:', error);
     }
   });
 

@@ -5,17 +5,26 @@ import {
   type PagaloImportCommand,
 } from "./pagaloPaymentImportPolicy";
 import Big from "big.js";
-import { and, eq, or } from "drizzle-orm";
+import { and, asc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { db } from "../database";
 import {
   creditos,
+  cuentasEmpresa,
+  facturas_electronicas,
   moras_credito,
   pagalo_payment_imports,
   pagos_credito,
 } from "../database/db";
+import type { PagaloFacturaStatus } from "../database/db/schema";
+import { facturarPagoCompleto } from "../routers/cofidi";
+import { enviarRecibosPagoDeCreditoBestEffort } from "../services/reciboPagoWhatsapp";
 import { updateMoraEnTx } from "./latefee";
-import { procesarRegistroPago } from "./registerPayment";
-import type { PagaloComponentes } from "./registerPayment";
+import {
+  aplicarPagoNormalEnTx,
+  evaluarPagoParaAplicar,
+  procesarRegistroPago,
+} from "./registerPayment";
+import type { AplicarPagoTx, PagaloComponentes } from "./registerPayment";
 import { CREDIT_PENDING_CANCELLATION_ERROR } from "./registerPaymentPolicy";
 import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 
@@ -276,6 +285,268 @@ async function igualarMoraAlSnapshot(
 }
 
 const REVIEW_REQUIRED_PREFIX = "PAGALO_REVIEW_REQUIRED:";
+
+/**
+ * Cuenta de empresa virtual de los pagos con link (la siembra la migración
+ * 0012). Se resuelve por `numero_cuenta`, que es UNIQUE — el nombre se puede
+ * editar desde la pantalla de cuentas y no es único.
+ */
+export const PAGALO_CUENTA_EMPRESA_NUMERO = "PAGALO-LINK";
+
+/**
+ * Los pagos Págalo nacen con su cuenta de empresa puesta (lo que en el front
+ * hace "Seleccionar Cuenta de Empresa" antes de poder validar). Sin la cuenta
+ * NO es un caso de revisión: es config faltante → 500, rollback, y el CRM
+ * reintenta cuando exista.
+ */
+async function asignarCuentaPagalo(tx: any, pagoIds: number[]) {
+  const [cuenta] = await tx
+    .select({ cuentaId: cuentasEmpresa.cuentaId })
+    .from(cuentasEmpresa)
+    .where(
+      and(
+        eq(cuentasEmpresa.numeroCuenta, PAGALO_CUENTA_EMPRESA_NUMERO),
+        eq(cuentasEmpresa.activo, true),
+      ),
+    )
+    .limit(1);
+  if (!cuenta) {
+    throw new Error(
+      `Falta la cuenta de empresa ${PAGALO_CUENTA_EMPRESA_NUMERO} activa en cuentas_empresa (migración 0012).`,
+    );
+  }
+  const asignados: { pago_id: number }[] = await tx
+    .update(pagos_credito)
+    .set({ cuenta_empresa_id: cuenta.cuentaId })
+    .where(inArray(pagos_credito.pago_id, pagoIds))
+    .returning({ pago_id: pagos_credito.pago_id });
+  if (asignados.length !== pagoIds.length) {
+    throw new Error(
+      `${REVIEW_REQUIRED_PREFIX} Se esperaban ${pagoIds.length} pagos y se encontraron ${asignados.length} al asignar la cuenta.`,
+    );
+  }
+}
+
+/**
+ * Valida el pago dentro de la MISMA tx del registro con la función del botón
+ * "Validar Pago" (`aplicarPagoNormalEnTx`: cierre de cuota, capital/deuda,
+ * limpieza de restantes, inversionistas) y los MISMOS guards previos
+ * (`evaluarPagoParaAplicar`). No se usa `aplicarPagoAlCredito` porque abre su
+ * propio lock y su propia transacción. Se relee la fila justo antes: la
+ * validación de un pago anterior del mismo import pudo tocarla.
+ */
+async function validarPagoEnTx(tx: any, pagoId: number) {
+  const [pago] = await tx
+    .select()
+    .from(pagos_credito)
+    .where(eq(pagos_credito.pago_id, pagoId))
+    .limit(1);
+  if (!pago) throw new Error(`${REVIEW_REQUIRED_PREFIX} Pago ${pagoId} no encontrado tras registrarlo.`);
+
+  const evaluacion = evaluarPagoParaAplicar(pago, pagoId);
+  switch (evaluacion.accion) {
+    case "rechazar":
+      throw new Error(`${REVIEW_REQUIRED_PREFIX} ${evaluacion.resultado.message}`);
+    case "capital":
+      // Hoy el import no manda abono_directo_capital (un solo pago con el
+      // total). Si algún día lo hace, ese pago se aplica con
+      // applyCapitalPaymentAndBuildResponse, que no acepta tx: revisión
+      // explícita en vez de validar a medias.
+      throw new Error(
+        `${REVIEW_REQUIRED_PREFIX} El pago ${pagoId} nació como abono a capital (validationStatus="capital"); el import Págalo aún no lo aplica automáticamente.`,
+      );
+    case "reset":
+      throw new Error(
+        `${REVIEW_REQUIRED_PREFIX} El pago ${pagoId} nació con validationStatus="reset"; no se valida automáticamente.`,
+      );
+    case "normal":
+      break;
+  }
+  const resultado = await aplicarPagoNormalEnTx(tx as AplicarPagoTx, pago, pagoId);
+  if (!resultado.success) {
+    throw new Error(`${REVIEW_REQUIRED_PREFIX} ${resultado.message}`);
+  }
+}
+
+export type ResultadoFacturaPago = {
+  pago_id: number;
+  success: boolean;
+  /** Status HTTP que hubiera dado el endpoint: 400 = determinista (NIT, %,
+   *  ya facturado), 500 = SAT/transitorio. Sirve para decidir si reintentar. */
+  http: number;
+  /** Facturas individuales que fallaron (si la respuesta las trae). */
+  errores: Array<{ tipo?: string; error?: string }>;
+  detalle?: string;
+};
+
+/**
+ * Un estado por import a partir de lo que devolvió la facturación de cada
+ * pago. `error` es JSON con los pagos problemáticos (pago_id, http, errores),
+ * para que el playbook sepa qué pago tiene cero facturas (reintento seguro)
+ * y cuál quedó a medias (revisar antes de reintentar).
+ */
+export function resumirFacturacion(
+  resultados: ResultadoFacturaPago[],
+): { status: PagaloFacturaStatus; error: string | null } {
+  const fallidas = resultados.filter((r) => !r.success);
+  const parciales = resultados.filter((r) => r.success && r.errores.length > 0);
+  if (fallidas.length) return { status: "FALLIDA", error: JSON.stringify(fallidas) };
+  if (parciales.length) return { status: "PARCIAL", error: JSON.stringify(parciales) };
+  return { status: "OK", error: null };
+}
+
+/** Facturar un pago del import, traduciendo la respuesta HTTP-shaped a dato. */
+async function facturarPagoDeImport(pagoId: number): Promise<ResultadoFacturaPago> {
+  // El lock del crédito ya se soltó: si conta revirtió el pago en la ventana
+  // (segundos), no se certifica nada en SAT para un pago que ya no existe.
+  const [vivo] = await db
+    .select({ validationStatus: pagos_credito.validationStatus, paymentFalse: pagos_credito.paymentFalse })
+    .from(pagos_credito)
+    .where(eq(pagos_credito.pago_id, pagoId))
+    .limit(1);
+  if (!vivo || vivo.paymentFalse || vivo.validationStatus !== "validated") {
+    return {
+      pago_id: pagoId,
+      success: false,
+      http: 409,
+      errores: [],
+      detalle: `El pago ya no está validado (status=${vivo?.validationStatus ?? "inexistente"}, paymentFalse=${vivo?.paymentFalse ?? "-"}); no se factura.`,
+    };
+  }
+  try {
+    const set: { status?: number | string } = {};
+    const r = (await facturarPagoCompleto({ body: { pago_id: pagoId }, set })) as {
+      success?: boolean;
+      message?: string;
+      error?: string;
+      mensaje?: string;
+      errores?: Array<{ tipo?: string; error?: string }>;
+      data?: { errores?: Array<{ tipo?: string; error?: string }> };
+    };
+    // "No se pudo generar ninguna factura" trae `errores` arriba; el parcial
+    // los trae en `data.errores`.
+    const errores = r.errores ?? r.data?.errores ?? [];
+    return {
+      pago_id: pagoId,
+      success: r.success === true,
+      http: typeof set.status === "number" ? set.status : 200,
+      errores,
+      detalle: r.success ? (errores.length ? r.mensaje : undefined) : (r.message ?? r.error),
+    };
+  } catch (error) {
+    return {
+      pago_id: pagoId,
+      success: false,
+      http: 500,
+      errores: [],
+      detalle: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function guardarEstadoFactura(
+  importId: number,
+  resumen: { status: PagaloFacturaStatus; error: string | null },
+) {
+  try {
+    await db
+      .update(pagalo_payment_imports)
+      .set({
+        factura_status: resumen.status,
+        factura_error: resumen.error,
+        factura_at: new Date(),
+        updated_at: new Date(),
+      })
+      .where(eq(pagalo_payment_imports.id, importId));
+  } catch (error) {
+    console.error(`⚠️ Págalo import ${importId}: no se pudo guardar factura_status`, error);
+  }
+  if (resumen.status !== "OK") {
+    console.error(`⚠️ Págalo import ${importId}: facturación ${resumen.status} — ${resumen.error}`);
+  }
+}
+
+/** Factura cada pago del import y deja el resultado en el ledger. Nunca lanza. */
+async function facturarImport(importId: number, pagoIds: number[]) {
+  const resultados: ResultadoFacturaPago[] = [];
+  for (const pagoId of pagoIds) resultados.push(await facturarPagoDeImport(pagoId));
+  const resumen = resumirFacturacion(resultados);
+  await guardarEstadoFactura(importId, resumen);
+  return resumen;
+}
+
+/**
+ * Post-commit, fire-and-forget: SAT y WhatsApp son irreversibles, así que
+ * corren solo cuando el pago ya quedó validado y confirmado. Mismo patrón que
+ * `/aplicar-pago` (recibo) y "Validar y Facturar" del front (segunda
+ * llamada). Nunca lanza. El recibo es el de pago (no depende de la factura):
+ * se manda igual que cuando conta valida a mano, uno por pago del grupo.
+ */
+async function facturarYNotificarPostCommit(
+  importId: number,
+  creditoId: number,
+  pagoIds: number[],
+) {
+  await facturarImport(importId, pagoIds);
+  await enviarRecibosPagoDeCreditoBestEffort({ creditoId, pagoIds });
+}
+
+/** Minutos tras `applied_at` a partir de los cuales un PENDIENTE se considera huérfano. */
+export const MINUTOS_FACTURA_PENDIENTE_HUERFANA = 10;
+
+/**
+ * Barrido programado (schedule.ts): un import APPLIED cuya facturación quedó
+ * en PENDIENTE más de N minutos es que cartera murió/redeployó entre el commit
+ * y SAT. Si sus pagos NO tienen ninguna factura ACTIVA, refacturar es seguro
+ * y se hace; si ya hay alguna, quedó a medias → PARCIAL para revisión manual
+ * (reintentar duplicaría en SAT). El recibo por WhatsApp no se reenvía desde
+ * acá: no hay forma de saber si ya salió.
+ */
+export async function reintentarFacturacionPagaloPendiente(
+  minutos = MINUTOS_FACTURA_PENDIENTE_HUERFANA,
+) {
+  const limite = new Date(Date.now() - minutos * 60 * 1000);
+  const huerfanos: { id: number }[] = await db
+    .select({ id: pagalo_payment_imports.id })
+    .from(pagalo_payment_imports)
+    .where(
+      and(
+        eq(pagalo_payment_imports.status, "APPLIED"),
+        eq(pagalo_payment_imports.factura_status, "PENDIENTE"),
+        lt(pagalo_payment_imports.applied_at, limite),
+      ),
+    );
+  let refacturados = 0;
+  let revisados = 0;
+  for (const { id } of huerfanos) {
+    const pagoIds = await paymentIdsForImport(db, id);
+    const [activas] = pagoIds.length
+      ? await db
+          .select({ n: sql<number>`count(*)` })
+          .from(facturas_electronicas)
+          .where(
+            and(
+              inArray(facturas_electronicas.pago_id, pagoIds),
+              eq(facturas_electronicas.status, "ACTIVA"),
+            ),
+          )
+      : [{ n: 0 }];
+    if (Number(activas?.n ?? 0) > 0) {
+      await guardarEstadoFactura(id, {
+        status: "PARCIAL",
+        error: JSON.stringify([
+          { motivo: "Facturación interrumpida con facturas ACTIVAS previas; revisar a mano antes de reintentar.", pago_ids: pagoIds },
+        ]),
+      });
+      revisados++;
+      continue;
+    }
+    await facturarImport(id, pagoIds);
+    refacturados++;
+  }
+  return { huerfanos: huerfanos.length, refacturados, revisados };
+}
+
 const CUOTA_INTEGRITY_ERROR_PREFIX = "Inconsistencia de integridad:";
 const DETERMINISTIC_PAYMENT_REJECT_PREFIXES = [
   "Credit not found",
@@ -340,6 +611,7 @@ const paymentIdsForImport = async (
       .select({ pago_id: pagos_credito.pago_id })
       .from(pagos_credito)
       .where(eq(pagos_credito.pagalo_import_id, importId))
+      .orderBy(asc(pagos_credito.pago_id))
   ).map((row: { pago_id: number }) => row.pago_id);
 
 type PagaloLedgerCreditIdentity = {
@@ -514,7 +786,7 @@ export const importPagaloPayment = async ({ body, set }: any) => {
     }
 
     try {
-      return await db.transaction(async (tx) => {
+      const aplicado = await db.transaction(async (tx) => {
         const [liveCredit] = await tx
           .select({
             credito_id: creditos.credito_id,
@@ -568,23 +840,30 @@ export const importPagaloPayment = async ({ body, set }: any) => {
         if ("success" in result && result.success === false) {
           throw new Error(`${REVIEW_REQUIRED_PREFIX} ${result.message}`);
         }
-        if (reponerMora) await reponerMora();
 
         const paymentIds = await paymentIdsForImport(tx, ledger.id);
         if (paymentIds.length === 0) {
           throw new Error("PAGALO_REVIEW_REQUIRED: importación no creó pagos.");
         }
-        // Este import solo deja pago(s) y boleta(s) registrados. Validar el
-        // pago (cerrar cuota, mover capital, distribuir a inversionistas) es
-        // el flujo normal de cartera-back — el mismo que corre para
-        // cualquier otro pago pendiente, sin importar su origen. No se llama
-        // acá porque un pago de abono a capital (validationStatus="capital")
-        // sigue un camino de validación distinto al de cuotas/mora
-        // (validarPagoRegistrado solo entiende "pending"), y este import no
-        // decide cuál aplica — el flujo normal de cartera ya sabe hacerlo.
+
+        // D-10 v2 / D-50 v2: el pago Págalo NACE VALIDADO. Todo lo que es DB
+        // — cuenta de empresa, validación (cierre de cuota, capital, restantes,
+        // inversionistas) y la reposición de la mora — va en ESTA tx: si algo
+        // falla se hace rollback completo, el ledger no queda APPLIED y el
+        // CRM reintenta. La factura (SAT) y el recibo (WhatsApp) son
+        // irreversibles y corren después del commit.
+        await asignarCuentaPagalo(tx, paymentIds);
+        for (const pagoId of paymentIds) await validarPagoEnTx(tx, pagoId);
+        if (reponerMora) await reponerMora();
+
         await tx
           .update(pagalo_payment_imports)
-          .set({ status: "APPLIED", applied_at: new Date(), updated_at: new Date() })
+          .set({
+            status: "APPLIED",
+            applied_at: new Date(),
+            factura_status: "PENDIENTE",
+            updated_at: new Date(),
+          })
           .where(eq(pagalo_payment_imports.id, ledger.id));
         return {
           success: true,
@@ -594,6 +873,16 @@ export const importPagaloPayment = async ({ body, set }: any) => {
           idempotent_replay: false,
         };
       });
+      if (aplicado.success) {
+        void facturarYNotificarPostCommit(
+          aplicado.import_id,
+          command.credito_id,
+          aplicado.payment_ids,
+        ).catch((error) =>
+          console.error(`⚠️ Págalo import ${aplicado.import_id}: post-commit falló`, error),
+        );
+      }
+      return aplicado;
     } catch (error) {
       if (isPagaloSameRoleEvidenceConflict(error)) {
         set.status = 409;

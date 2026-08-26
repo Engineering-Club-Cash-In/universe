@@ -9,6 +9,7 @@ import {
   mapPagaloImportToRegistro,
   moraDelSnapshot,
   resolvePagaloLedgerCreditIdentity,
+  resumirFacturacion,
 } from "./pagaloPaymentImport";
 
 const groupId = "3b6f0ed4-c4c5-4adf-afb9-aef97da9a5e6";
@@ -269,5 +270,42 @@ describe("ajuste de mora al aplicar (D-52, 2026-08-26)", () => {
     expect(calcularAjusteMoraPagalo("300.00", "500.00")).toBeNull();
     expect(calcularAjusteMoraPagalo(null, "500.00")).toBeNull();
     expect(calcularAjusteMoraPagalo(undefined, "0.00")).toBeNull();
+  });
+});
+
+describe("facturación post-commit (D-10 v2)", () => {
+  it("OK solo si todos los pagos facturaron sin errores", () => {
+    expect(
+      resumirFacturacion([
+        { pago_id: 1, success: true, http: 200, errores: [] },
+        { pago_id: 2, success: true, http: 200, errores: [] },
+      ]),
+    ).toEqual({ status: "OK", error: null });
+  });
+
+  it("PARCIAL cuando alguna factura del pago falló pero el pago respondió success", () => {
+    const parcial = {
+      pago_id: 1,
+      success: true,
+      http: 200,
+      errores: [{ tipo: "INTERESES", error: "SAT timeout" }],
+      detalle: "1 factura(s) generada(s), 1 con errores",
+    };
+    expect(resumirFacturacion([parcial])).toEqual({
+      status: "PARCIAL",
+      error: JSON.stringify([parcial]),
+    });
+  });
+
+  it("FALLIDA manda sobre PARCIAL; el detalle conserva pago, http y errores de cada caído", () => {
+    const parcial = { pago_id: 1, success: true, http: 200, errores: [{ error: "x" }] };
+    const sat = { pago_id: 2, success: false, http: 500, errores: [{ tipo: "MORA", error: "SAT timeout" }], detalle: "No se pudo generar ninguna factura" };
+    const nit = { pago_id: 3, success: false, http: 400, errores: [], detalle: "sin NIT" };
+    expect(resumirFacturacion([parcial, sat, nit])).toEqual({
+      status: "FALLIDA",
+      error: JSON.stringify([sat, nit]),
+    });
+    // lo que lee el playbook: qué pago tiene cero facturas (reintento seguro)
+    expect(JSON.parse(resumirFacturacion([sat]).error ?? "[]")[0]).toMatchObject({ pago_id: 2, http: 500 });
   });
 });

@@ -2684,6 +2684,88 @@ export async function aplicarPagoAlCredito(pago_id: number) {
   }
 }
 
+export type EvaluacionPagoParaAplicar =
+  | { accion: "rechazar"; resultado: { success: false; applied: false; message: string } }
+  | { accion: "reset"; resultado: { success: true; applied: false; message: string } }
+  | { accion: "capital" }
+  | { accion: "normal" };
+
+/**
+ * Guards previos a aplicar un pago — los del botón "Validar Pago". Es la ÚNICA
+ * lista: la usan `aplicarPagoAlCreditoSinLock` (HTTP) y el import Págalo (que
+ * valida dentro de su propia tx), para que un guard nuevo aplique a ambos.
+ * Solo decide; no escribe nada.
+ */
+export function evaluarPagoParaAplicar(
+  pago: typeof pagos_credito.$inferSelect,
+  pago_id: number
+): EvaluacionPagoParaAplicar {
+  // Ver un status aplicado es definitivo — no se aplica dos veces.
+  if (
+    pago.validationStatus === "validated" ||
+    pago.validationStatus === "capital_validated"
+  ) {
+    return {
+      accion: "rechazar",
+      resultado: {
+        success: false,
+        applied: false,
+        message: `El pago ${pago_id} ya fue aplicado (${pago.validationStatus}); no se aplica dos veces.`,
+      },
+    };
+  }
+  if (pago.validationStatus === "capital") {
+    return { accion: "capital" };
+  }
+  if (pago.validationStatus === "reset") {
+    if (pago.credito_id === null) {
+      throw new Error("No se puede aplicar el abono: credito_id es null");
+    }
+    console.log("credito cancelado correctamente ");
+    // OJO: NO cambiar validationStatus a "validated". La facturación
+    // identifica las cancelaciones por status "reset" (cofidi.ts:
+    // esCancelacion) para repartir intereses por cuota_inversionista en
+    // vez de monto_aportado; pisar el status rompería ese cálculo. El
+    // update que vivía aquí nunca se ejecutó (le faltaba el await y las
+    // queries de drizzle son lazy), así que el comportamiento real de
+    // prod siempre fue conservar "reset" — se elimina para que el código
+    // diga lo que hace.
+    return {
+      accion: "reset",
+      resultado: {
+        success: true,
+        applied: false,
+        message: "Pago validado, crédito cancelado correctamente",
+      },
+    };
+  }
+
+  if (
+    shouldRejectZeroAppliedNormalValidation({
+      validationStatus: pago.validationStatus,
+      nextValidationStatus: "validated",
+      montoAplicado: pago.monto_aplicado,
+      mora: pago.mora,
+      otros: pago.otros,
+      pagoConvenio: pago.pagoConvenio,
+    })
+  ) {
+    return {
+      accion: "rechazar",
+      resultado: {
+        success: false,
+        applied: false,
+        message: `No se puede validar el pago ${pago_id}: monto_aplicado es 0.00`,
+      },
+    };
+  }
+
+  if (pago.credito_id === null) {
+    throw new Error("No se puede aplicar el pago: credito_id es null");
+  }
+  return { accion: "normal" };
+}
+
 async function aplicarPagoAlCreditoSinLock(pago_id: number) {
   try {
     console.log("🔄 Iniciando aplicación de pago al crédito:", pago_id);
@@ -2698,68 +2780,23 @@ async function aplicarPagoAlCreditoSinLock(pago_id: number) {
     if (!pago) {
       throw new Error(`Pago ${pago_id} no encontrado`);
     }
-    // 🔒 Re-chequeo BAJO EL LOCK: dos /aplicar-pago del mismo pago pueden
-    // pasar el pre-check del router antes de que alguno tome el lock (doble
-    // click / reintento); el segundo entra aquí cuando el primero ya aplicó.
-    // Esta lectura ocurre ya con el lock tomado, así que ver un status
-    // aplicado es definitivo — se rechaza en vez de volver a mover capital y
-    // re-distribuir a inversionistas.
-    if (
-      pago.validationStatus === "validated" ||
-      pago.validationStatus === "capital_validated"
-    ) {
-      return {
-        success: false,
-        applied: false,
-        message: `El pago ${pago_id} ya fue aplicado (${pago.validationStatus}); no se aplica dos veces.`,
-      };
-    }
-    if (pago.validationStatus === "capital") {
-      return applyCapitalPaymentAndBuildResponse(
-        pago,
-        pago_id,
-        aplicarAbonoCapitalInversionistas
-      );
-    }
-    if (pago.validationStatus === "reset") {
-      if (pago.credito_id === null) {
-        throw new Error("No se puede aplicar el abono: credito_id es null");
-      }
-      console.log("credito cancelado correctamente ");
-      // OJO: NO cambiar validationStatus a "validated". La facturación
-      // identifica las cancelaciones por status "reset" (cofidi.ts:
-      // esCancelacion) para repartir intereses por cuota_inversionista en
-      // vez de monto_aportado; pisar el status rompería ese cálculo. El
-      // update que vivía aquí nunca se ejecutó (le faltaba el await y las
-      // queries de drizzle son lazy), así que el comportamiento real de
-      // prod siempre fue conservar "reset" — se elimina para que el código
-      // diga lo que hace.
-      return {
-        success: true,
-        applied: false,
-        message: "Pago validado, crédito cancelado correctamente",
-      };
-    }
-
-    if (
-      shouldRejectZeroAppliedNormalValidation({
-        validationStatus: pago.validationStatus,
-        nextValidationStatus: "validated",
-        montoAplicado: pago.monto_aplicado,
-        mora: pago.mora,
-        otros: pago.otros,
-        pagoConvenio: pago.pagoConvenio,
-      })
-    ) {
-      return {
-        success: false,
-        applied: false,
-        message: `No se puede validar el pago ${pago_id}: monto_aplicado es 0.00`,
-      };
-    }
-
-    if (pago.credito_id === null) {
-      throw new Error("No se puede aplicar el pago: credito_id es null");
+    // 🔒 Re-chequeo BAJO EL LOCK (ver evaluarPagoParaAplicar): dos
+    // /aplicar-pago del mismo pago pueden pasar el pre-check del router antes
+    // de que alguno tome el lock; el segundo entra aquí cuando el primero ya
+    // aplicó y se rechaza en vez de volver a mover capital.
+    const evaluacion = evaluarPagoParaAplicar(pago, pago_id);
+    switch (evaluacion.accion) {
+      case "rechazar":
+      case "reset":
+        return evaluacion.resultado;
+      case "capital":
+        return applyCapitalPaymentAndBuildResponse(
+          pago,
+          pago_id,
+          aplicarAbonoCapitalInversionistas
+        );
+      case "normal":
+        break;
     }
 
     // TODAS las escrituras del flujo normal (validar el pago, capital/deuda
@@ -2779,7 +2816,7 @@ async function aplicarPagoAlCreditoSinLock(pago_id: number) {
 }
 
 // Ejecutor mínimo que cubre tanto `db` como una transacción de drizzle.
-type AplicarPagoTx = Pick<
+export type AplicarPagoTx = Pick<
   typeof db,
   "query" | "select" | "selectDistinct" | "insert" | "update" | "execute"
 >;
@@ -2790,7 +2827,7 @@ type AplicarPagoTx = Pick<
  * propia transacción) para etiquetar el trigger de historial de capital en
  * ESTA misma tx.
  */
-async function aplicarPagoNormalEnTx(
+export async function aplicarPagoNormalEnTx(
   tx: AplicarPagoTx,
   pago: typeof pagos_credito.$inferSelect,
   pago_id: number

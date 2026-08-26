@@ -729,6 +729,8 @@
   // filas iniciales de pagos_credito dentro de UNA transacción de
   // cartera, o reanudar explícitamente usando pagalo_import_id. `newPayment`
   // actual no es transaccional; reintentar a ciegas sigue prohibido.
+  export type PagaloFacturaStatus = "PENDIENTE" | "OK" | "PARCIAL" | "FALLIDA";
+
   export type PagaloPaymentImportStatus =
     | "RECEIVED"
     | "CREATING_PAYMENTS"
@@ -819,6 +821,12 @@
       retry_count: integer("retry_count").notNull().default(0),
       last_error_code: text("last_error_code"),
       last_error_message: text("last_error_message"),
+      // Facturación post-commit (D-10 v2): el pago nace validado dentro de la
+      // tx; SAT se certifica DESPUÉS del commit y su resultado queda aquí.
+      // NULL = import anterior a esta regla o que no llegó a APPLIED.
+      factura_status: text("factura_status").$type<PagaloFacturaStatus>(),
+      factura_error: text("factura_error"),
+      factura_at: timestamp("factura_at", { withTimezone: true }),
       created_at: timestamp("created_at", { withTimezone: true })
         .notNull()
         .defaultNow(),

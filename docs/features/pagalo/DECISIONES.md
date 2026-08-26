@@ -79,13 +79,45 @@ transacción. Front y bot usan transacción interna; importación Págalo abre u
 transacción que incluye cabecera, pagos, boletas y estado final, y se la pasa al
 motor. Todos los helpers de persistencia usan el executor recibido.
 
-## D-10 · Importación Págalo registra; validación sigue flujo normal
+## D-10 · Importación Págalo registra Y valida en una transacción; factura y recibo post-commit
 
-Regla compartida: [D-50](../bot-whatsapp-cobros/DECISIONES.md#d-50--el-pago-por-link-se-registra-con-evidencia-y-sigue-la-validación-normal).
-Después de verificar `ACCEPT` y voucher propio, importación crea pagos y
-boletas `pending`. No valida dentro de este endpoint: validación contable y
-aplicación final siguen camino normal de Cartera. Este slice no agrega factura
-ni proceso de inversionistas alterno.
+**v2 · 2026-08-26 — decisión de Daniel con el equipo.** Regla compartida:
+[D-50](../bot-whatsapp-cobros/DECISIONES.md#d-50--el-pago-por-link-nace-validado-en-la-misma-transacción).
+
+`POST /pagalo/payment-imports` hace, bajo el advisory lock del crédito y en
+**una sola `db.transaction`**: ledger `APPLYING` → ajuste de mora (D-52) →
+`procesarRegistroPago(data, tx)` → `cuenta_empresa_id = PAGALO` en cada pago
+creado → **validación con `aplicarPagoNormalEnTx(tx, …)`** (la misma función
+del botón "Validar Pago": cierre de cuota, capital/deuda, restantes,
+inversionistas) → reposición de la mora → ledger `APPLIED`. Si cualquier paso
+falla, rollback completo: el ledger no queda `APPLIED`, cartera responde 5xx y
+el dispatcher del CRM reintenta con su backoff (idempotente por `crm_group_id`).
+
+Las funciones existentes se reutilizan **recibiendo la tx por parámetro**; no
+hay copias del motor ni del validador.
+
+**Fuera de la transacción, después del commit, lo dispara cartera** (mismo
+request, fire-and-forget, patrón de `/aplicar-pago`): `facturarPagoCompleto()`
+—el cuerpo de `/api/dte/facturar-pago-completo` extraído a función— por cada
+pago, y el recibo por WhatsApp (`enviarReciboPagoWhatsappBestEffort`). SAT es
+irreversible: jamás corre dentro de una tx que pueda hacer rollback. El
+resultado queda en `pagalo_payment_imports.factura_status`
+(`PENDIENTE|OK|PARCIAL|FALLIDA`) + `factura_error` (JSON por pago: `http` 400 =
+determinista —NIT, %, ya facturado—, 500 = SAT/transitorio, y las facturas
+individuales que fallaron). Un `FALLIDA`/`PARCIAL` no se reintenta solo (el
+pre-check de facturación solo mira "¿hay alguna ACTIVA?" y duplicaría en SAT)
+— sigue el playbook de facturas no en SAT / "Generar Factura".
+
+**Huérfanos:** si cartera muere entre el commit y SAT, el import queda `APPLIED`
++ `PENDIENTE`. El barrido `reintentarFacturacionPagaloPendiente` (schedule.ts,
+cada 10 min) toma los `PENDIENTE` con más de 10 min: sin ninguna factura
+`ACTIVA` en sus pagos → refactura (seguro); con alguna → `PARCIAL` a revisión
+manual. El recibo por WhatsApp no se reenvía desde ahí.
+
+El CRM manda **una sola llamada** y no sabe de la factura: con `APPLIED` marca
+el grupo `COMPLETED`.
+
+Historia: v1 (2026-08-24) dejaba los pagos `pending` para la bandeja de conta.
 
 ## D-11 · Págalo no inventa banco ni autorización única
 

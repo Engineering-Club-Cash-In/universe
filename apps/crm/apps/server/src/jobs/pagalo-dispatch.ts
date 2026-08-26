@@ -76,7 +76,16 @@ const proximoIntento = (dispatchAttemptCount: number): Date => {
  */
 const ESTADOS_RECLAMABLES = ["READY_TO_APPLY", "APPLICATION_FAILED", "APPLYING"] as const;
 
-async function reclamarGruposListos(): Promise<GrupoClaimado[]> {
+/**
+ * Solo IDS candidatos — el claim real ocurre uno por uno en
+ * `reclamarYProcesarGrupo`, justo antes de procesar cada grupo. Reclamar el
+ * batch entero de una vez (como antes) estampaba el mismo lease de 2 min a
+ * los 50 grupos por adelantado; si el batch tardaba más que eso (plausible:
+ * hasta 10s por request HTTP), un segundo worker podía reclamar de nuevo los
+ * grupos todavía en cola del primero y ambos los procesaban en paralelo sin
+ * que ninguna escritura de resultado verificara el lease (hallazgo Codex).
+ */
+async function buscarCandidatosListos(): Promise<string[]> {
 	const ahora = new Date();
 	const leaseVencido = new Date(Date.now() - MINUTOS_LEASE * 60 * 1000);
 	const candidatos = await db
@@ -97,32 +106,33 @@ async function reclamarGruposListos(): Promise<GrupoClaimado[]> {
 		)
 		.orderBy(asc(pagaloPaymentGroups.readyToApplyAt))
 		.limit(MAXIMO_POR_CORRIDA);
-	if (candidatos.length === 0) return [];
+	return candidatos.map((c) => c.id);
+}
 
-	const reclamados: GrupoClaimado[] = [];
-	for (const candidato of candidatos) {
-		const [group] = await db
-			.update(pagaloPaymentGroups)
-			.set({
-				status: "APPLYING",
-				dispatchClaimedAt: ahora,
-				dispatchClaimToken: randomUUID(),
-				applicationStartedAt: ahora,
-			})
-			.where(
-				and(
-					eq(pagaloPaymentGroups.id, candidato.id),
-					inArray(pagaloPaymentGroups.status, ESTADOS_RECLAMABLES),
-					or(
-						isNull(pagaloPaymentGroups.dispatchClaimedAt),
-						lt(pagaloPaymentGroups.dispatchClaimedAt, leaseVencido),
-					),
+/** Claim atómico puntual, con lease vencido — mismo criterio en todos lados. */
+async function reclamarGrupo(groupId: string): Promise<GrupoClaimado | undefined> {
+	const ahora = new Date();
+	const leaseVencido = new Date(Date.now() - MINUTOS_LEASE * 60 * 1000);
+	const [group] = await db
+		.update(pagaloPaymentGroups)
+		.set({
+			status: "APPLYING",
+			dispatchClaimedAt: ahora,
+			dispatchClaimToken: randomUUID(),
+			applicationStartedAt: ahora,
+		})
+		.where(
+			and(
+				eq(pagaloPaymentGroups.id, groupId),
+				inArray(pagaloPaymentGroups.status, ESTADOS_RECLAMABLES),
+				or(
+					isNull(pagaloPaymentGroups.dispatchClaimedAt),
+					lt(pagaloPaymentGroups.dispatchClaimedAt, leaseVencido),
 				),
-			)
-			.returning();
-		if (group) reclamados.push(group);
-	}
-	return reclamados;
+			),
+		)
+		.returning();
+	return group;
 }
 
 async function registrarIntentoFallido(
@@ -247,6 +257,7 @@ async function marcarRevisionRequerida(
 	group: GrupoClaimado,
 	code: string,
 	importId: number | undefined,
+	detalle?: unknown,
 ): Promise<void> {
 	await db.transaction(async (tx) => {
 		await tx
@@ -264,7 +275,7 @@ async function marcarRevisionRequerida(
 			source: "PAGALO_DISPATCHER",
 			fromStatus: "APPLYING",
 			toStatus: "REVIEW_REQUIRED",
-			payload: { code, carteraImportId: importId ?? null },
+			payload: { code, carteraImportId: importId ?? null, ...(detalle ? { detalle } : {}) },
 		});
 	});
 }
@@ -313,42 +324,40 @@ export async function procesarGrupoParaAplicar(
 		return "REVIEW_REQUIRED";
 	}
 
-	// INVALID_COMMAND, NETWORK_ERROR, AUTH_ERROR, UNEXPECTED_RESPONSE — todo
-	// lo demás es reintentable con backoff, nunca REVIEW_REQUIRED (eso solo
-	// lo decide cartera-back bajo lock, D-05).
-	const mensaje =
-		"message" in respuesta
-			? respuesta.message
-			: `Respuesta inesperada de cartera-back: ${respuesta.status}`;
-	await registrarIntentoFallido(group, mensaje);
-	console.error(`[Págalo][DISPATCH] grupo ${group.id} falló: ${mensaje}`);
+	// INVALID_COMMAND es determinístico: el comando se arma desde datos
+	// inmutables del grupo (allocations_snapshot, links pagados, hash) —
+	// reintentar el mismo comando nunca cambia el resultado. Reintentarlo con
+	// backoff bloqueaba para siempre el grupo (constraint de "un grupo activo
+	// por crédito" impide crear uno de reemplazo) sin que nadie se enterara
+	// salvo mirando logs (hallazgo Codex). Va a REVIEW_REQUIRED con los
+	// errores de validación preservados, igual que cualquier otro caso que
+	// solo un humano puede resolver.
+	if (!respuesta.success && respuesta.status === "INVALID_COMMAND") {
+		await marcarRevisionRequerida(group, "PAGALO_INVALID_COMMAND", undefined, respuesta.errors);
+		console.error(
+			`[Págalo][DISPATCH] grupo ${group.id} con comando inválido, requiere revisión:`,
+			respuesta.errors,
+		);
+		return "REVIEW_REQUIRED";
+	}
+
+	// NETWORK_ERROR, AUTH_ERROR, UNEXPECTED_RESPONSE — transitorios, sí vale
+	// reintentar con backoff.
+	await registrarIntentoFallido(group, respuesta.message);
+	console.error(`[Págalo][DISPATCH] grupo ${group.id} falló: ${respuesta.message}`);
 	return "ERROR";
 }
 
 /**
- * Reclama un grupo puntual (no recorre la tabla) para el caso del poller:
- * ya sabe cuál grupo acaba de quedar READY_TO_APPLY, solo necesita el claim
- * atómico de siempre antes de llamar `procesarGrupoParaAplicar`.
+ * Reclama un grupo puntual y lo procesa — usada tanto por el poller (ya sabe
+ * cuál grupo acaba de quedar READY_TO_APPLY) como por el loop de
+ * `correrDispatchPagalo` (reclama cada candidato del batch justo antes de
+ * procesarlo, no todos de antemano).
  */
 export async function reclamarYProcesarGrupo(
 	groupId: string,
 ): Promise<ResultadoProcesarGrupo | "NO_RECLAMADO"> {
-	const ahora = new Date();
-	const [group] = await db
-		.update(pagaloPaymentGroups)
-		.set({
-			status: "APPLYING",
-			dispatchClaimedAt: ahora,
-			dispatchClaimToken: randomUUID(),
-			applicationStartedAt: ahora,
-		})
-		.where(
-			and(
-				eq(pagaloPaymentGroups.id, groupId),
-				inArray(pagaloPaymentGroups.status, ["READY_TO_APPLY", "APPLICATION_FAILED"]),
-			),
-		)
-		.returning();
+	const group = await reclamarGrupo(groupId);
 	if (!group) return "NO_RECLAMADO";
 	return procesarGrupoParaAplicar(group);
 }
@@ -361,20 +370,20 @@ export type ResultadoDispatchPagalo = {
 };
 
 export async function correrDispatchPagalo(): Promise<ResultadoDispatchPagalo> {
-	const grupos = await reclamarGruposListos();
+	const candidatoIds = await buscarCandidatosListos();
 	const resultado: ResultadoDispatchPagalo = {
-		revisados: grupos.length,
+		revisados: candidatoIds.length,
 		completados: 0,
 		revisionRequerida: 0,
 		errores: 0,
 	};
-	if (grupos.length === 0) return resultado;
+	if (candidatoIds.length === 0) return resultado;
 
-	for (const group of grupos) {
-		const resultadoGrupo = await procesarGrupoParaAplicar(group);
+	for (const groupId of candidatoIds) {
+		const resultadoGrupo = await reclamarYProcesarGrupo(groupId);
 		if (resultadoGrupo === "COMPLETADO") resultado.completados++;
 		else if (resultadoGrupo === "REVIEW_REQUIRED") resultado.revisionRequerida++;
-		else resultado.errores++;
+		else if (resultadoGrupo !== "NO_RECLAMADO") resultado.errores++;
 	}
 
 	return resultado;

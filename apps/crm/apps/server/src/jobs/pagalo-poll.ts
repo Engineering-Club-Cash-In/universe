@@ -355,6 +355,19 @@ async function evaluarGrupo(
  * — el caller usa eso para disparar el dispatch inline apenas la transacción
  * cierre (no llamar cartera-back desde dentro de una tx de DB abierta).
  */
+/**
+ * Instante real del pago según Págalo, no el momento en que el poller lo
+ * observó — si el polling corre con retraso (backoff, batch grande,
+ * medianoche guatemalteca de por medio), `paidAt` quedaría con la fecha
+ * contable equivocada aunque el proveedor sí trae el instante real
+ * (hallazgo Codex). Fallback al momento de observación si Págalo manda un
+ * formato no parseable — mejor una fecha aproximada que romper el flujo.
+ */
+function instanteTransaccion(transaccion: TransaccionPagalo): Date {
+	const instante = new Date(transaccion.date_transaction);
+	return Number.isNaN(instante.getTime()) ? new Date() : instante;
+}
+
 async function marcarLinkPagado(
 	link: LinkClaimado,
 	transaccion: TransaccionPagalo,
@@ -399,7 +412,7 @@ async function marcarLinkPagado(
 				voucherStorageKey: voucher.voucherStorageKey,
 				voucherSha256: voucher.voucherSha256,
 				voucherGeneratedAt: new Date(),
-				paidAt: new Date(),
+				paidAt: instanteTransaccion(transaccion),
 				nextPollAt: null,
 				updatedAt: new Date(),
 			})

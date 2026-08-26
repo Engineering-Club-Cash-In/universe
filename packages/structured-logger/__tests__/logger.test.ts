@@ -48,6 +48,99 @@ describe('structured logger runtime contract', () => {
     })).toThrow(StructuredLoggerValidationError);
   });
 
+  test('rejects sensitive aliases in custom catalog fields', () => {
+    const forbiddenAliases = [
+      'request_bodies', 'cookies', 'access_tokens', 'credenciales', 'api_keys',
+      'error_messages', 'signed_urls', 'customer_names', 'telefonos', 'documentos_fiscales',
+      'name', 'names', 'legal_name', 'display_name',
+      'nombres', 'nombre_cliente', 'correo', 'correos', 'domicilio', 'domicilios',
+      'credit_ids', 'sifco_codes', 'amounts', 'balances', 'porcentajes', 'free_text',
+      'address', 'addresses', 'address_customer',
+      'autorizacion', 'autorizaciones', 'autorizacion_cliente',
+      'credential', 'credentials', 'credential_api',
+      'credencial', 'credenciales', 'credencial_api',
+      'direccion', 'direcciones', 'direccion_cliente',
+      'interest', 'interests', 'interest_monthly',
+      'interes', 'intereses', 'interes_mensual',
+      'credit_id', 'credit_ids', 'credits_id', 'credits_ids',
+      'credito_id', 'credito_ids', 'creditos_id', 'creditos_ids',
+      'payment_id', 'payment_ids', 'payments_id', 'payments_ids',
+      'pago_id', 'pago_ids', 'pagos_id', 'pagos_ids',
+      'installment_id', 'installment_ids', 'installments_id', 'installments_ids',
+      'cuota_id', 'cuota_ids', 'cuotas_id', 'cuotas_ids',
+      'investor_id', 'investor_ids', 'investors_id', 'investors_ids',
+      'inversionista_id', 'inversionista_ids', 'inversionistas_id', 'inversionistas_ids',
+      'invoice_id', 'invoice_ids', 'invoices_id', 'invoices_ids',
+      'factura_id', 'factura_ids', 'facturas_id', 'facturas_ids',
+      'receipt_id', 'receipt_ids', 'receipts_id', 'receipts_ids',
+      'boleta_id', 'boleta_ids', 'boletas_id', 'boletas_ids',
+    ] as const;
+
+    for (const field of forbiddenAliases) {
+      const maliciousCatalog = structuredClone(carteraCatalog);
+      Object.assign(maliciousCatalog.fields, { [field]: { type: 'boolean' } });
+      Object.assign(maliciousCatalog.events, {
+        [`malicious.${field}`]: {
+          outcomes: { completed: { level: 'info', required: [field], optional: [] } },
+        },
+      });
+      expect(() => createStructuredLogger(maliciousCatalog, {
+        service: 'cartera-back', environment: 'staging', sink: () => undefined,
+      }), field).toThrow(StructuredLoggerValidationError);
+    }
+  });
+
+  test.each(['pdfs', 'xmls', 'soaps', 'htmls', 'dpis', 'nits'] as const)(
+    'rejects plural document-format or identifier alias %s in custom catalog fields',
+    (field) => {
+      const maliciousCatalog = structuredClone(carteraCatalog);
+      Object.assign(maliciousCatalog.fields, { [field]: { type: 'boolean' } });
+      Object.assign(maliciousCatalog.events, {
+        [`malicious.${field}`]: {
+          outcomes: { completed: { level: 'info', required: [field], optional: [] } },
+        },
+      });
+      expect(() => createStructuredLogger(maliciousCatalog, {
+        service: 'cartera-back', environment: 'staging', sink: () => undefined,
+      })).toThrow(StructuredLoggerValidationError);
+    },
+  );
+
+  test('allows approved fields that contain non-sensitive word fragments', () => {
+    const approvedFields = [
+      'auth_reason', 'credit_closed', 'credit_state_transition', 'credit_type', 'credit_updated',
+      'installment_closed', 'investor_count', 'job_name', 'payment_kind', 'previous_payment_state',
+    ] as const;
+
+    expect(() => createStructuredLogger(carteraCatalog, {
+      service: 'cartera-back', environment: 'staging', sink: () => undefined,
+    })).not.toThrow();
+    for (const field of approvedFields) expect(carteraCatalog.fields).toHaveProperty(field);
+  });
+
+  test('rejects custom string job_name definitions', () => {
+    const maliciousCatalog = structuredClone(carteraCatalog);
+    Object.assign(maliciousCatalog.fields, {
+      job_name: { type: 'string', maxLength: 1024, pattern: '^.*$' },
+    });
+    expect(() => createStructuredLogger(maliciousCatalog, {
+      service: 'cartera-back', environment: 'staging', sink: () => undefined,
+    })).toThrow(StructuredLoggerValidationError);
+  });
+
+  test('rejects altered job_name enums', () => {
+    const maliciousCatalog = structuredClone(carteraCatalog);
+    Object.assign(maliciousCatalog.fields, {
+      job_name: {
+        type: 'enum',
+        values: [...carteraCatalog.fields.job_name.values, 'user_supplied_job_name'],
+      },
+    });
+    expect(() => createStructuredLogger(maliciousCatalog, {
+      service: 'cartera-back', environment: 'staging', sink: () => undefined,
+    })).toThrow(StructuredLoggerValidationError);
+  });
+
   test('rejects accessor payloads and emits only from one Proxy snapshot', () => {
     const lines: string[] = [];
     const logger = createStructuredLogger(carteraCatalog, {

@@ -51,6 +51,7 @@ Schema version: **1**
 | `lock_state` | enum: not_attempted, acquired, failed |
 | `manual_action_required` | boolean |
 | `method` | enum: POST |
+| `migration_operation` | enum: adjust_schedule, import_payments |
 | `mime_family` | enum: image, pdf, other |
 | `notification_attempted` | boolean |
 | `operation` | enum: certify_document, lookup_internal_document, get_document, void_document, verify_document, lookup_taxpayer, list_clients, list_client_loans, get_loan_detail, list_installments, get_surcharges, get_statement, get_loan_info, bulk_sync, put_upload, put_invoice_pdf, create_signed_url, delete_object, fetch_invoice_logo, send_failed_invoice_report, write |
@@ -58,7 +59,8 @@ Schema version: **1**
 | `previous_payment_state` | enum: applied, pending, unknown |
 | `processed_count` | integer 0..1000000000 |
 | `provider` | enum: cofidi_sat, cofidi_nit, sifco, cloudflare_r2, remote_asset, email_provider |
-| `reason_code` | enum: schema_invalid, duplicate_receipt, payment_not_found, credit_not_found, agreement_already_active, payment_already_applied, no_investors, purchase_exceeds_mirror, missing_participation_date, state_conflict, provider_rejected, local_state_inconsistent, manual_reconciliation_required, invalid_late_fee_amount, invalid_installment_count, overdue_count_mismatch, excluded_credit_state, amount_out_of_range, override_reason_missing, user_not_found, active_late_fee_not_found, concurrent_run, installments_not_found, paid_installment_conflict, item_failures, missing_payment_reference, overdue_installments_remain, capital_contribution_not_found |
+| `reason_code` | enum: schema_invalid, duplicate_receipt, payment_not_found, credit_not_found, agreement_already_active, payment_already_applied, no_investors, purchase_exceeds_mirror, missing_participation_date, state_conflict, provider_rejected, local_state_inconsistent, manual_reconciliation_required, invalid_late_fee_amount, invalid_installment_count, overdue_count_mismatch, excluded_credit_state, amount_out_of_range, override_reason_missing, user_not_found, active_late_fee_not_found, concurrent_run, installments_not_found, paid_installment_conflict, item_failures, missing_payment_reference, overdue_installments_remain, capital_contribution_not_found, no_actionable_items |
+| `recalculation_operation` | enum: recalculate, process_pools, delete_credits, update_investor_installments |
 | `recalculation_strategy` | enum: single, bulk, from_json, migration |
 | `recovery_applied` | boolean |
 | `requested_state` | enum: active, inactive |
@@ -146,8 +148,11 @@ Schema version: **1**
 
 | Outcome | Level | Required | Optional | Constants |
 |---|---|---|---|---|
-| `completed` | `info` | `recalculation_strategy`, `affected_installment_count`, `duration_ms` | — | — |
-| `failed` | `error` | `recalculation_strategy`, `affected_installment_count`, `duration_ms`, `error_code` | — | — |
+| `completed` | `info` | `recalculation_strategy`, `recalculation_operation`, `processed_count`, `succeeded_count`, `failed_count`, `skipped_count`, `manual_action_required`, `duration_ms` | — | — |
+| `failed` | `error` | `recalculation_strategy`, `recalculation_operation`, `processed_count`, `succeeded_count`, `failed_count`, `skipped_count`, `manual_action_required`, `duration_ms`, `error_code` | — | — |
+| `partially_completed` | `warn` | `recalculation_strategy`, `recalculation_operation`, `processed_count`, `succeeded_count`, `failed_count`, `skipped_count`, `manual_action_required`, `duration_ms`, `reason_code` | — | — |
+| `partially_persisted` | `error` | `recalculation_strategy`, `recalculation_operation`, `processed_count`, `succeeded_count`, `failed_count`, `skipped_count`, `manual_action_required`, `duration_ms`, `error_code` | — | `manual_action_required=true` |
+| `rejected` | `warn` | `recalculation_strategy`, `recalculation_operation`, `processed_count`, `succeeded_count`, `failed_count`, `skipped_count`, `manual_action_required`, `duration_ms`, `reason_code` | — | — |
 
 ### `credit.update`
 
@@ -279,6 +284,13 @@ Schema version: **1**
 | `local_state_inconsistent` | `error` | `reversal_path`, `processed_count`, `succeeded_count`, `failed_count`, `duration_ms`, `error_code` | — | `error_code=persistence_failed` |
 | `partially_completed` | `warn` | `reversal_path`, `processed_count`, `succeeded_count`, `failed_count`, `duration_ms` | — | — |
 | `rejected` | `warn` | `duration_ms`, `reason_code` | — | — |
+
+### `payment.sifco_migration`
+
+| Outcome | Level | Required | Optional | Constants |
+|---|---|---|---|---|
+| `completed` | `info` | `migration_operation`, `processed_count`, `succeeded_count`, `failed_count`, `skipped_count`, `duration_ms` | — | — |
+| `partially_completed` | `warn` | `migration_operation`, `processed_count`, `succeeded_count`, `failed_count`, `skipped_count`, `duration_ms`, `reason_code` | — | — |
 
 ### `payment.upload`
 

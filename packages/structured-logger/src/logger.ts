@@ -1,10 +1,54 @@
 import { randomUUID } from 'node:crypto';
-import type { EventCatalogDefinition, FieldDefinition } from './catalog-types';
+import type { CountInvariantDefinition, EventCatalogDefinition, FieldDefinition } from './catalog-types';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SAFE_FIELD_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 const SAFE_EVENT_PATTERN = /^[a-z][a-z0-9_.]{0,127}$/;
-const FORBIDDEN_FIELD_PATTERN = /(^|_)(body|request|response|query|params|headers|cookie|token|authorization|password|secret|credential|api_?key|connection_?string|message|stack|cause|dpi|nit|email|phone|address|amount|monto|saldo|deuda|capital|interes|iva|credito_id|pago_id|cuota_id|inversionista_id|factura_id|boleta)($|_)/i;
+const FORBIDDEN_FIELD_TERMS = [
+  'body', 'bodies', 'request', 'requests', 'response', 'responses', 'query', 'queries',
+  'param', 'params', 'parameter', 'parameters', 'parametro', 'parametros', 'header', 'headers',
+  'cookie', 'cookies', 'token', 'tokens', 'authorization', 'authorizations',
+  'autorizacion', 'autorizaciones', 'password', 'passwords', 'contrasena', 'contrasenas',
+  'secret', 'secrets', 'credential', 'credentials', 'credencial', 'credenciales',
+  'apikey', 'apikeys', 'api_key', 'api_keys', 'connectionstring', 'connectionstrings',
+  'connection_string', 'connection_strings', 'message', 'messages', 'stack', 'stacks',
+  'cause', 'causes', 'axioserror', 'axioserrors', 'axios_error', 'axios_errors',
+  'file', 'files', 'blob', 'blobs', 'buffer', 'buffers', 'xml', 'xmls', 'soap', 'soaps',
+  'html', 'htmls', 'pdf', 'pdfs',
+  'url', 'urls', 'localpath', 'localpaths', 'local_path', 'local_paths', 'filepath',
+  'filepaths', 'file_path', 'file_paths', 'ruta_local', 'rutas_locales',
+  'customername', 'customernames', 'customer_name', 'customer_names', 'clientname',
+  'clientnames', 'client_name', 'client_names', 'username', 'usernames', 'user_name',
+  'user_names', 'fullname', 'fullnames', 'full_name', 'full_names', 'firstname',
+  'firstnames', 'first_name', 'first_names', 'lastname', 'lastnames', 'last_name',
+  'last_names', 'name', 'names', 'nombre', 'nombres', 'correo', 'correos', 'domicilio',
+  'domicilios', 'email', 'emails', 'phone', 'phones', 'telefono', 'telefonos', 'address',
+  'addresses', 'direccion', 'direcciones', 'dpi', 'dpis', 'nit', 'nits', 'document', 'documents',
+  'documento', 'documentos',
+  'credit_id', 'credit_ids', 'credits_id', 'credits_ids', 'credito_id', 'credito_ids',
+  'creditos_id', 'creditos_ids', 'payment_id', 'payment_ids', 'payments_id', 'payments_ids',
+  'pago_id', 'pago_ids', 'pagos_id', 'pagos_ids', 'installment_id', 'installment_ids',
+  'installments_id', 'installments_ids', 'cuota_id', 'cuota_ids', 'cuotas_id', 'cuotas_ids',
+  'investor_id', 'investor_ids', 'investors_id', 'investors_ids', 'inversionista_id',
+  'inversionista_ids', 'inversionistas_id', 'inversionistas_ids', 'invoice_id', 'invoice_ids',
+  'invoices_id', 'invoices_ids', 'factura_id', 'factura_ids', 'facturas_id', 'facturas_ids',
+  'receipt_id', 'receipt_ids', 'receipts_id', 'receipts_ids', 'boleta', 'boletas',
+  'boleta_id', 'boleta_ids', 'boletas_id', 'boletas_ids', 'sifco_code', 'sifco_codes',
+  'amount', 'amounts', 'monto', 'montos', 'balance', 'balances', 'saldo', 'saldos', 'mora',
+  'debt', 'debts', 'deuda', 'deudas', 'principal', 'capital', 'interest', 'interests',
+  'interes', 'intereses', 'iva', 'vat', 'cuota', 'cuotas', 'percentage', 'percentages',
+  'percent', 'percents', 'porcentaje', 'porcentajes', 'free_text', 'comment', 'comments',
+  'note', 'notes',
+] as const;
+const FORBIDDEN_FIELD_PATTERN = new RegExp(
+  `(^|_)(?:${FORBIDDEN_FIELD_TERMS.map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})($|_)`,
+  'i',
+);
+const CANONICAL_JOB_NAMES = new Set([
+  'process_late_fees', 'upsert_advisor_effectiveness', 'expire_portfolio_purchases',
+  'generate_monthly_close', 'verify_sat_invoices', 'report_failed_sat_invoices',
+  'generate_daily_invoice_snapshot',
+]);
 const CONTEXT_FIELDS = new Set(['request_id', 'operation_id', 'run_id']);
 const RESERVED_EVENT_FIELDS = new Set([
   'timestamp', 'schema_version', 'service', 'environment', 'event', 'outcome', 'level',
@@ -13,6 +57,17 @@ const RESERVED_EVENT_FIELDS = new Set([
 
 function hasOwn(record: object, field: PropertyKey): boolean {
   return Object.prototype.hasOwnProperty.call(record, field);
+}
+
+function isCanonicalJobNameDefinition(definition: FieldDefinition | undefined): boolean {
+  return definition?.type === 'enum' && definition.values.length === CANONICAL_JOB_NAMES.size &&
+    new Set(definition.values).size === CANONICAL_JOB_NAMES.size &&
+    definition.values.every((value) => CANONICAL_JOB_NAMES.has(value));
+}
+
+function isForbiddenField(field: string, definition?: FieldDefinition): boolean {
+  return FORBIDDEN_FIELD_PATTERN.test(field) &&
+    !(field === 'job_name' && isCanonicalJobNameDefinition(definition));
 }
 
 export type Environment = 'local' | 'development' | 'staging' | 'production';
@@ -38,6 +93,10 @@ type RequiredField<C extends EventCatalogDefinition, E extends EventName<C>, O e
   Extract<Outcome<C, E, O>['required'][number], keyof C['fields']>;
 type OptionalField<C extends EventCatalogDefinition, E extends EventName<C>, O extends OutcomeName<C, E>> =
   Extract<Outcome<C, E, O>['optional'][number], keyof C['fields']>;
+type OutcomeConstants<C extends EventCatalogDefinition, E extends EventName<C>, O extends OutcomeName<C, E>> =
+  Outcome<C, E, O> extends Readonly<{ constants: infer Constants }> ? Constants : Readonly<Record<never, never>>;
+type ConstantField<C extends EventCatalogDefinition, E extends EventName<C>, O extends OutcomeName<C, E>> =
+  Extract<keyof OutcomeConstants<C, E, O>, keyof C['fields']>;
 
 type FieldValue<D> =
   D extends Readonly<{ type: 'boolean' }> ? boolean :
@@ -46,15 +105,128 @@ type FieldValue<D> =
   D extends Readonly<{ type: 'string' | 'timestamp' | 'uuid' }> ? string :
   never;
 
+type InvariantMandatoryField<I extends CountInvariantDefinition> =
+  Extract<I['total'] | I['parts'][number], string>;
+type InvariantOptionalField<I extends CountInvariantDefinition> = Extract<I['optionalParts'][number], string>;
+type InvariantField<I extends CountInvariantDefinition> = InvariantMandatoryField<I> | InvariantOptionalField<I>;
+type PayloadField<C extends EventCatalogDefinition, E extends EventName<C>, O extends OutcomeName<C, E>> =
+  RequiredField<C, E, O> | OptionalField<C, E, O>;
+type CountField<C extends EventCatalogDefinition> = number extends C['countInvariants']['length']
+  ? never
+  : string extends InvariantField<C['countInvariants'][number]>
+    ? never
+    : InvariantField<C['countInvariants'][number]>;
+
+type CountInvariantPayload<
+  C extends EventCatalogDefinition,
+  E extends EventName<C>,
+  O extends OutcomeName<C, E>,
+  I extends CountInvariantDefinition,
+  Declared extends keyof C['fields'] = Extract<InvariantField<I>, PayloadField<C, E, O>>,
+> = ([InvariantMandatoryField<I>] extends [PayloadField<C, E, O>]
+  ? { readonly [K in Extract<InvariantMandatoryField<I>, keyof C['fields']>]-?: FieldValue<C['fields'][K]> } &
+    { readonly [K in Extract<InvariantOptionalField<I>, RequiredField<C, E, O>>]-?: FieldValue<C['fields'][K]> } &
+    { readonly [K in Extract<InvariantOptionalField<I>, OptionalField<C, E, O>>]?: FieldValue<C['fields'][K]> }
+  : never) |
+  ([Declared] extends [OptionalField<C, E, O>]
+    ? { readonly [K in Declared]?: never }
+    : never);
+
+type CountInvariantPayloads<
+  C extends EventCatalogDefinition,
+  E extends EventName<C>,
+  O extends OutcomeName<C, E>,
+  Invariants extends readonly CountInvariantDefinition[] = C['countInvariants'],
+> = string extends InvariantField<Invariants[number]> ? object
+  : number extends Invariants['length'] ? object
+  : Invariants extends readonly [
+    infer First extends CountInvariantDefinition,
+    ...infer Rest extends readonly CountInvariantDefinition[],
+  ]
+    ? CountInvariantPayload<C, E, O, First> & CountInvariantPayloads<C, E, O, Rest>
+    : object;
+
+type CountInvariantMemberInput<
+  C extends EventCatalogDefinition,
+  E extends EventName<C>,
+  O extends OutcomeName<C, E>,
+  I extends CountInvariantDefinition,
+  P,
+  Declared extends keyof C['fields'] = Extract<InvariantField<I>, PayloadField<C, E, O>>,
+  Present extends Declared = Extract<keyof P, Declared>,
+> = [Present] extends [never]
+  ? [Declared] extends [OptionalField<C, E, O>] ? object : never
+  : P extends { readonly [K in Present]-?: FieldValue<C['fields'][K]> }
+    ? P extends CountInvariantPayload<C, E, O, I> ? object : never
+    : never;
+
+type InvalidCountInvariantMembers<
+  C extends EventCatalogDefinition,
+  E extends EventName<C>,
+  O extends OutcomeName<C, E>,
+  I extends CountInvariantDefinition,
+  P,
+> = P extends unknown
+  ? CountInvariantMemberInput<C, E, O, I, P> extends never ? P : never
+  : never;
+
+type CountInvariantInput<
+  C extends EventCatalogDefinition,
+  E extends EventName<C>,
+  O extends OutcomeName<C, E>,
+  I extends CountInvariantDefinition,
+  P,
+> = [InvalidCountInvariantMembers<C, E, O, I, P>] extends [never] ? object : never;
+
+type CountInvariantInputs<
+  C extends EventCatalogDefinition,
+  E extends EventName<C>,
+  O extends OutcomeName<C, E>,
+  P,
+  Invariants extends readonly CountInvariantDefinition[] = C['countInvariants'],
+> = string extends InvariantField<Invariants[number]> ? object
+  : number extends Invariants['length'] ? object
+  : Invariants extends readonly [
+    infer First extends CountInvariantDefinition,
+    ...infer Rest extends readonly CountInvariantDefinition[],
+  ]
+    ? CountInvariantInput<C, E, O, First, P> & CountInvariantInputs<C, E, O, P, Rest>
+    : object;
+
+type ExactPayloadMemberInput<
+  C extends EventCatalogDefinition,
+  E extends EventName<C>,
+  O extends OutcomeName<C, E>,
+  P,
+> = Exclude<keyof P, keyof EventPayload<C, E, O>> extends never ? object : never;
+
+type InvalidExactPayloadMembers<
+  C extends EventCatalogDefinition,
+  E extends EventName<C>,
+  O extends OutcomeName<C, E>,
+  P,
+> = P extends unknown
+  ? ExactPayloadMemberInput<C, E, O, P> extends never ? P : never
+  : never;
+
+type ExactPayloadInput<
+  C extends EventCatalogDefinition,
+  E extends EventName<C>,
+  O extends OutcomeName<C, E>,
+  P,
+> = [InvalidExactPayloadMembers<C, E, O, P>] extends [never] ? object : never;
+
 export type EventPayload<
   C extends EventCatalogDefinition,
   E extends EventName<C>,
   O extends OutcomeName<C, E>,
 > = {
-  readonly [K in RequiredField<C, E, O>]: FieldValue<C['fields'][K]>;
+  readonly [K in Exclude<RequiredField<C, E, O>, ConstantField<C, E, O> | CountField<C>>]: FieldValue<C['fields'][K]>;
 } & {
-  readonly [K in OptionalField<C, E, O>]?: FieldValue<C['fields'][K]>;
-};
+  readonly [K in Exclude<OptionalField<C, E, O>, ConstantField<C, E, O> | CountField<C>>]?: FieldValue<C['fields'][K]>;
+} & {
+  readonly [K in ConstantField<C, E, O>]: OutcomeConstants<C, E, O>[K] & FieldValue<C['fields'][K]>;
+} & CountInvariantPayloads<C, E, O>;
 
 export type StructuredEvent = Readonly<Record<string, unknown>>;
 
@@ -200,7 +372,7 @@ function validateCatalog(catalog: EventCatalogDefinition): void {
     fail('invalid_catalog', 'logger_config');
   }
   for (const [field, definition] of Object.entries(catalog.fields)) {
-    if (!SAFE_FIELD_PATTERN.test(field) || FORBIDDEN_FIELD_PATTERN.test(field) || RESERVED_EVENT_FIELDS.has(field)) {
+    if (!SAFE_FIELD_PATTERN.test(field) || isForbiddenField(field, definition) || RESERVED_EVENT_FIELDS.has(field)) {
       fail('invalid_catalog', 'logger_config', field);
     }
     validateFieldDefinition(definition, field);
@@ -287,7 +459,7 @@ function validatePayload(
 
   const allowed = new Set([...outcomeDefinition.required, ...outcomeDefinition.optional]);
   for (const field of Object.keys(payload)) {
-    if (FORBIDDEN_FIELD_PATTERN.test(field)) fail('forbidden_field', event, field);
+    if (isForbiddenField(field, catalog.fields[field])) fail('forbidden_field', event, field);
     if (!allowed.has(field)) fail('extra_field', event, field);
   }
   for (const field of outcomeDefinition.required) {
@@ -343,7 +515,7 @@ function validateContext(
   const context = snapshotInputRecord(contextValue ?? {}, 'invalid_context', event);
   for (const field of Object.keys(context)) {
     if (!CONTEXT_FIELDS.has(field)) {
-      if (FORBIDDEN_FIELD_PATTERN.test(field)) fail('forbidden_field', event, field);
+      if (isForbiddenField(field)) fail('forbidden_field', event, field);
       fail('extra_context_field', event, field);
     }
     const definition = catalog.commonFields[field];
@@ -406,10 +578,11 @@ export function createStructuredLogger<const C extends EventCatalogDefinition>(
   const emit = <
     E extends EventName<C>,
     O extends OutcomeName<C, E>,
+    const P extends EventPayload<C, E, O>,
   >(
     event: E,
     outcome: O,
-    payload: EventPayload<C, E, O>,
+    payload: P & ExactPayloadInput<C, E, O, P> & CountInvariantInputs<C, E, O, P>,
     context: CorrelationContext = {},
   ): StructuredEvent => emitUnsafe(event, outcome, payload, context);
 

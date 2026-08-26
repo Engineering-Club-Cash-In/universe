@@ -1015,7 +1015,8 @@ export async function processAndReplaceCreditInvestors(
 }
 export async function processAndReplaceCreditInvestorsReverse(
   credito_id: number,
-  pago_id: number
+  pago_id: number,
+  onPersisted?: () => void,
 ) {
   // 1. Obtener crédito
   const credit = await db.query.creditos.findFirst({
@@ -1090,7 +1091,7 @@ export async function processAndReplaceCreditInvestorsReverse(
       ? montoCashIn.times(0.12).round(2)
       : new Big(0);
 
-    await db
+    const updatedInvestors = await db
       .update(creditos_inversionistas)
       .set({
         monto_aportado: montoAportado.toFixed(2),
@@ -1099,7 +1100,9 @@ export async function processAndReplaceCreditInvestorsReverse(
         iva_inversionista: ivaInversionista.toFixed(2),
         iva_cash_in: ivaCashIn.toFixed(2),
       })
-      .where(eq(creditos_inversionistas.id, inv.id));
+      .where(eq(creditos_inversionistas.id, inv.id))
+      .returning({ id: creditos_inversionistas.id });
+    if (updatedInvestors.length > 0) onPersisted?.();
   }
 }
 

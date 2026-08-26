@@ -129,6 +129,17 @@ async function reclamarGrupo(groupId: string): Promise<GrupoClaimado | undefined
 					isNull(pagaloPaymentGroups.dispatchClaimedAt),
 					lt(pagaloPaymentGroups.dispatchClaimedAt, leaseVencido),
 				),
+				// Mismo predicado que buscarCandidatosListos: si el dispatcher
+				// programado y el dispatch del poll corren solapados, uno puede
+				// fallar el grupo y fijar nextDispatchAt (backoff) DESPUÉS de que
+				// el otro ya lo tenía en su lista de candidatos — sin repetir el
+				// chequeo acá, el segundo lo reclama igual y reintenta de
+				// inmediato, saltándose el backoff recién configurado (hallazgo
+				// Codex).
+				or(
+					isNull(pagaloPaymentGroups.nextDispatchAt),
+					lt(pagaloPaymentGroups.nextDispatchAt, ahora),
+				),
 			),
 		)
 		.returning();

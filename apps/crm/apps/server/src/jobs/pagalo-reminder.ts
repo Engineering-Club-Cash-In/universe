@@ -32,7 +32,7 @@
  * ventana; aceptado porque no hay estado que coordinar (sandbox de una
  * instancia, mismo supuesto que el resto de jobs de este módulo).
  */
-import { and, desc, eq, inArray, notInArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "../db";
 import { casosCobros, contratosFinanciamiento } from "../db/schema/cobros";
 import { clients, leads, opportunities } from "../db/schema/crm";
@@ -51,12 +51,11 @@ import {
 	type VehiculoRecordatorioPagalo,
 } from "../services/send-pagalo-reminder-whatsapp";
 
-const ESTADOS_EXCLUIDOS: PagaloPaymentGroupStatus[] = [
-	"DRAFT",
-	"COMPLETED",
-	"CANCELLED",
-	"REVIEW_REQUIRED",
-];
+/** Grupo debe haber terminado de emitir TODOS sus links antes de recordar. */
+export const ESTADOS_GRUPOS_RECORDABLES = [
+	"PENDING_PAYMENT",
+	"PARTIALLY_PAID",
+] as const satisfies readonly PagaloPaymentGroupStatus[];
 
 export const ESTADOS_OPORTUNIDAD_CON_CREDITO = ["won", "migrate"] as const;
 
@@ -276,7 +275,9 @@ export async function correrRecordatorioPagalo(): Promise<ResultadoRecordatorioP
 	const grupos = await db
 		.select()
 		.from(pagaloPaymentGroups)
-		.where(notInArray(pagaloPaymentGroups.status, ESTADOS_EXCLUIDOS));
+		.where(
+			inArray(pagaloPaymentGroups.status, [...ESTADOS_GRUPOS_RECORDABLES]),
+		);
 
 	const resultado: ResultadoRecordatorioPagalo = {
 		revisados: grupos.length,

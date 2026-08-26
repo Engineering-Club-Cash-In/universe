@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
 	ESTADOS_OPORTUNIDAD_CON_CREDITO,
+	ESTADOS_GRUPOS_RECORDABLES,
 	esPendiente,
 	resolverLinksPendientes,
 	resolverTelefono,
@@ -11,6 +12,13 @@ type LinkFixture = Parameters<typeof esPendiente>[0];
 
 test("fallback de oportunidad solo permite créditos ganados o migrados", () => {
 	expect(ESTADOS_OPORTUNIDAD_CON_CREDITO).toEqual(["won", "migrate"]);
+});
+
+test("recordatorios solo consideran grupos con emisión de links terminada", () => {
+	expect(ESTADOS_GRUPOS_RECORDABLES).toEqual([
+		"PENDING_PAYMENT",
+		"PARTIALLY_PAID",
+	]);
 });
 
 function link(overrides: Partial<LinkFixture> = {}): LinkFixture {

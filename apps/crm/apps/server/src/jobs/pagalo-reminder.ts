@@ -104,7 +104,7 @@ export function resolverTelefono(
 		primerTelefono(telefonoPrincipal) ??
 		primerTelefono(telefonoAlternativo) ??
 		primerTelefono(telefonoLead)
-	)?.replace(/\D/g, "");
+	) ?? undefined;
 }
 
 export function resolverVehiculo(

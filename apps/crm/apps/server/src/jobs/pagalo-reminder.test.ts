@@ -7,6 +7,7 @@ import {
 	resolverTelefono,
 	resolverVehiculo,
 } from "./pagalo-reminder";
+import { normalizePhone } from "../lib/simpletech";
 
 type LinkFixture = Parameters<typeof esPendiente>[0];
 
@@ -231,8 +232,16 @@ describe("resolverTelefono", () => {
 		expect(resolverTelefono(undefined, undefined)).toBeUndefined();
 	});
 
-	test("normaliza separadores y no-dígitos del resultado final", () => {
-		expect(resolverTelefono("+502 3029-5849", undefined)).toBe("50230295849");
+	test("conserva formato para que normalizePhone lo normalice", () => {
+		expect(resolverTelefono("+502 3029-5849", undefined)).toBe(
+			"+502 3029-5849",
+		);
+	});
+
+	test("conserva código internacional explícito", () => {
+		const telefono = resolverTelefono("+1 305 555 0100", undefined);
+
+		expect(normalizePhone(telefono!)).toBe("+13055550100");
 	});
 });
 

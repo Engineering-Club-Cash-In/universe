@@ -109,9 +109,14 @@ const money = (minimum: "zero" | "positive") =>
       return z.NEVER;
     }
     const amount = new Big(text);
+    const normalized = amount.toFixed(2);
+    // El motor normal de pagos aún recibe `number`. Rechazamos cualquier
+    // decimal que no sobreviva esa conversión exactamente, incluso si llega
+    // como string y cabe en numeric(18,2).
+    const engineAmount = Number(normalized);
     if (
-      (typeof value === "number" &&
-        amount.times(100).gt(Number.MAX_SAFE_INTEGER)) ||
+      amount.times(100).gt(Number.MAX_SAFE_INTEGER) ||
+      !new Big(engineAmount).eq(amount) ||
       (minimum === "positive" && amount.lte(0))
     ) {
       ctx.addIssue({
@@ -120,7 +125,7 @@ const money = (minimum: "zero" | "positive") =>
       });
       return z.NEVER;
     }
-    return amount.toFixed(2);
+    return normalized;
   });
 
 const sourceSchema = z

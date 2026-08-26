@@ -190,6 +190,18 @@ describe("validatePagaloImportCommand", () => {
     }
   });
 
+  it("rejects decimal strings that lose cents when the normal payment engine converts them to Number", () => {
+    const input = command();
+    const amount = "90071992547409.91";
+    input.capital_total = amount;
+    input.facturable_total = "0.00";
+    input.total_amount = amount;
+    input.allocations = [{ ...input.allocations[0], amount }];
+    (input as unknown as { facturable: null }).facturable = null;
+
+    expectInvalid(input, PAGALO_IMPORT_ERROR_CODES.PAGALO_INVALID_COMMAND);
+  });
+
   it("rejects voucher paths with traversal, encoding escapes, or an external URL", () => {
     for (const voucher_storage_key of [
       `pagalo/${groupId}/../receipt.pdf`,

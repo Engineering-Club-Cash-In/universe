@@ -46,6 +46,21 @@ export type PagaloRegistroInput = {
   banco_id: number;
 };
 
+const fechaGuatemala = (instant: Date) => {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Guatemala",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    })
+      .formatToParts(instant)
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, part.value]),
+  );
+  return `${parts.year}-${parts.month}-${parts.day}`;
+};
+
 /**
  * Maps only audited Págalo evidence. capital y facturable siguen siendo dos
  * LINKS de cobro distintos hacia el cliente (D-48: capital no se factura, el
@@ -62,8 +77,12 @@ export function mapPagaloImportToRegistro(
   const sources = [command.capital, command.facturable].filter(
     (source): source is NonNullable<typeof source> => source !== null,
   );
-  const paidAts = sources.map((source) => source.paid_at).sort();
-  const paidAt = paidAts[paidAts.length - 1]!;
+  const paidAt = sources
+    .map((source) => new Date(source.paid_at))
+    .reduce((latest, current) =>
+      current.getTime() > latest.getTime() ? current : latest,
+    );
+  const fechaPago = fechaGuatemala(paidAt);
   const capital = command.capital
     ? ({
         disponible: command.capital_total,
@@ -84,8 +103,8 @@ export function mapPagaloImportToRegistro(
   return {
     credito_id: command.credito_id,
     monto_boleta: Number(command.total_amount),
-    fecha_pago: paidAt.slice(0, 10),
-    fecha_boleta: paidAt.slice(0, 10),
+    fecha_pago: fechaPago,
+    fecha_boleta: fechaPago,
     cuotaApagar: command.cuota_inicial,
     url_boletas: sources.map((source) => source.voucher_storage_key),
     registerBy: "pagalo@clubcashin.com",

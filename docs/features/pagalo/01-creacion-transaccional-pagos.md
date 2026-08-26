@@ -209,9 +209,12 @@ const registro: RegistroPagoInput = {
   credito_id: command.credito_id,
   usuario_id: credito.usuario_id, // siempre resuelto en Cartera
   // Total solo para auditoría/cabecera; no autoriza mezclar presupuestos.
-  monto_boleta: decimal(command.total_amount),
-  fecha_pago: hoyGuatemala(),
-  fecha_boleta: fechaMayorRequerida(
+  monto_boleta: numberExacto(command.total_amount),
+  fecha_pago: fechaGuatemalaDelInstanteMayor(
+    command.capital?.paid_at,
+    command.facturable?.paid_at,
+  ),
+  fecha_boleta: fechaGuatemalaDelInstanteMayor(
     command.capital?.paid_at,
     command.facturable?.paid_at,
   ),

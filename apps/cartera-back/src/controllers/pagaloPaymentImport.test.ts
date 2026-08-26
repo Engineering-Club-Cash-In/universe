@@ -96,6 +96,17 @@ describe("pagalo payment import", () => {
     });
   });
 
+  it("uses Guatemala calendar date from the latest paid_at instant", () => {
+    const input = command();
+    input.capital!.paid_at = "2026-08-20T18:00:00-12:00";
+    input.facturable!.paid_at = "2026-08-20T19:00:00+14:00";
+
+    expect(mapPagaloImportToRegistro(input, 47)).toMatchObject({
+      fecha_pago: "2026-08-21",
+      fecha_boleta: "2026-08-21",
+    });
+  });
+
   it("replays an APPLIED group with same hash without creating payments", async () => {
     const registrarPago = mock();
     const service = createPagaloImportService({

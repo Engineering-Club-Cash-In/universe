@@ -114,7 +114,7 @@ function GrupoPagalo({ grupo }: { grupo: Grupo }) {
 			{grupo.carteraImportId && grupo.status === "COMPLETED" && (
 				<p className="text-sm text-green-700">
 					<CheckCircle2 className="mr-1 inline h-4 w-4" />
-					Aplicado en cartera (importación #{grupo.carteraImportId})
+					Registrado en cartera, pendiente de validación (importación #{grupo.carteraImportId})
 				</p>
 			)}
 			{grupo.carteraImportId && grupo.status !== "COMPLETED" && (

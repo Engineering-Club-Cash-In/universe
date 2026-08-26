@@ -375,7 +375,16 @@ export async function procesarGrupoParaAplicar(
 		// venir sin `code` pese al tipo estricto. Fallback defensivo para
 		// nunca guardar "undefined" como motivo (hallazgo Codex).
 		const code = respuesta.code ?? "PAGALO_REVIEW_REQUIRED_UNKNOWN_REASON";
-		await marcarRevisionRequerida(group, code, respuesta.import_id);
+		// PAGALO_TRANSACTION_ALREADY_IMPORTED manda conflicting_import_id (el
+		// import PREEXISTENTE con la misma evidencia), no import_id — usar el
+		// campo correcto según el código, si no el operador pierde la
+		// referencia al import que realmente causó el conflicto (hallazgo
+		// Codex).
+		const importId =
+			code === "PAGALO_TRANSACTION_ALREADY_IMPORTED"
+				? respuesta.conflicting_import_id
+				: respuesta.import_id;
+		await marcarRevisionRequerida(group, code, importId);
 		return "REVIEW_REQUIRED";
 	}
 

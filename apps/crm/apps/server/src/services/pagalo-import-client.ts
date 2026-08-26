@@ -33,8 +33,17 @@ export type PagaloImportSuccess = {
 export type PagaloImportReviewRequired = {
 	success: false;
 	status: "REVIEW_REQUIRED";
-	code: "PAGALO_PAYLOAD_HASH_CONFLICT" | "PAGALO_LIVE_DEBT_REVIEW";
+	code:
+		| "PAGALO_PAYLOAD_HASH_CONFLICT"
+		| "PAGALO_LIVE_DEBT_REVIEW"
+		| "PAGALO_LIVE_CREDIT_IDENTITY_REVIEW"
+		| "PAGALO_TRANSACTION_ALREADY_IMPORTED";
 	import_id?: number;
+	// Solo presente en PAGALO_TRANSACTION_ALREADY_IMPORTED: el import
+	// PREEXISTENTE que ya tiene el mismo transaction_uuid/external_identifier
+	// en su rol (distinto de import_id, que sería el de ESTE intento si
+	// llegara a crearse uno).
+	conflicting_import_id?: number;
 };
 
 export type PagaloImportInvalidCommand = {

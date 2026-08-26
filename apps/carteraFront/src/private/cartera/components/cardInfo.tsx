@@ -472,7 +472,7 @@ export function MiniCardCredito({
                 {mora.toLocaleString("es-GT", { minimumFractionDigits: 2 })} sin
                 cuotas atrasadas visibles
                 {(cuotasEnValidacionInfo?.total ?? 0) > 0
-                  ? " — se generó mientras sus boletas esperan validación de contabilidad; al validarse, la mora se libera automáticamente."
+                  ? " — se generó mientras sus boletas esperan validación de contabilidad; normalmente se libera al validarlas. Si persiste, revisar con contabilidad."
                   : " — revisar con contabilidad antes de cobrarla."}
               </div>
             )}

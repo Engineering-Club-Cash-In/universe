@@ -368,6 +368,17 @@ function instanteTransaccion(transaccion: TransaccionPagalo): Date {
 	return Number.isNaN(instante.getTime()) ? new Date() : instante;
 }
 
+type ResultadoMarcarLinkPagado = {
+	listoParaAplicar: boolean;
+	// `false` cuando otro worker (lease vencido, poll solapado) ya ganó la
+	// carrera antes de que este llegara a actualizar el link: cada worker
+	// sube su propio voucher a una key R2 aleatoria distinta, y solo la del
+	// ganador queda referenciada. El caller debe borrar la key perdedora de
+	// cartera-back — nunca queda huérfana con datos de cliente/pago sin
+	// limpieza (hallazgo Codex).
+	voucherConsumido: boolean;
+};
+
 async function marcarLinkPagado(
 	link: LinkClaimado,
 	transaccion: TransaccionPagalo,
@@ -376,7 +387,7 @@ async function marcarLinkPagado(
 		voucherSha256: string;
 		voucherUrl: string;
 	},
-): Promise<boolean> {
+): Promise<ResultadoMarcarLinkPagado> {
 	return db.transaction(async (tx) => {
 		// Se serializa contra el reemplazo del grupo (/crear con otra selección,
 		// pago-link.ts): primero el candado del GRUPO, después el del link —
@@ -394,7 +405,9 @@ async function marcarLinkPagado(
 			.from(pagaloPaymentLinks)
 			.where(eq(pagaloPaymentLinks.id, link.id))
 			.for("update");
-		if (!fresco || fresco.status === "PAID") return false;
+		if (!fresco || fresco.status === "PAID") {
+			return { listoParaAplicar: false, voucherConsumido: false };
+		}
 		const esReemplazado = fresco.status === "REPLACED";
 		const [updated] = await tx
 			.update(pagaloPaymentLinks)
@@ -423,7 +436,7 @@ async function marcarLinkPagado(
 				),
 			)
 			.returning({ id: pagaloPaymentLinks.id });
-		if (!updated) return false;
+		if (!updated) return { listoParaAplicar: false, voucherConsumido: false };
 		await tx.insert(pagaloPaymentEvents).values({
 			groupId: link.groupId,
 			linkId: link.id,
@@ -481,7 +494,7 @@ async function marcarLinkPagado(
 						.for("update")
 				: [];
 			const objetivo = activo ?? viejo;
-			if (!objetivo) return false;
+			if (!objetivo) return { listoParaAplicar: false, voucherConsumido: true };
 			const [escalado] = await tx
 				.update(pagaloPaymentGroups)
 				.set({ status: "REVIEW_REQUIRED", updatedAt: new Date() })
@@ -497,7 +510,7 @@ async function marcarLinkPagado(
 					),
 				)
 				.returning({ id: pagaloPaymentGroups.id });
-			if (!escalado) return false;
+			if (!escalado) return { listoParaAplicar: false, voucherConsumido: true };
 			await tx.insert(pagaloPaymentEvents).values({
 				groupId: objetivo.id,
 				eventType: "REPLACED_LINK_PAID",
@@ -511,9 +524,10 @@ async function marcarLinkPagado(
 					amount: transaccion.total,
 				},
 			});
-			return false;
+			return { listoParaAplicar: false, voucherConsumido: true };
 		}
-		return evaluarGrupo(tx, link.groupId);
+		const listoParaAplicar = await evaluarGrupo(tx, link.groupId);
+		return { listoParaAplicar, voucherConsumido: true };
 	});
 }
 
@@ -668,7 +682,30 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 				validarTransaccionPagalo(link, transaccion);
 				const pdf = await generarVoucherPdf(transaccion, "Club Cashin");
 				const subida = await subirVoucher(pdf, link.groupId, link);
-				const listoParaAplicar = await marcarLinkPagado(link, transaccion, subida);
+				const { listoParaAplicar, voucherConsumido } = await marcarLinkPagado(
+					link,
+					transaccion,
+					subida,
+				);
+				// Otro worker (lease vencido, poll solapado) ya ganó la carrera
+				// antes de que este llegara a actualizar el link — cada worker
+				// sube su voucher a una key R2 aleatoria distinta, y la de este
+				// nunca quedó referenciada. Se borra en vez de dejarla huérfana
+				// con datos de cliente/pago (hallazgo Codex). Best-effort: si
+				// falla, cartera-back tiene su propio job de limpieza de
+				// huérfanos y esto no debe tumbar el poll.
+				if (!voucherConsumido) {
+					await carteraBackClient
+						.deleteArchivoBoletaHuerfano(subida.voucherStorageKey)
+						.catch((error) =>
+							console.error(
+								`[Págalo][POLL] no se pudo borrar voucher huérfano ${subida.voucherStorageKey}:`,
+								error,
+							),
+						);
+					resultado.sinCambios++;
+					continue;
+				}
 				resultado.pagados++;
 				// Fuera de la transacción de arriba a propósito: nunca llamar
 				// cartera-back (red) mientras una tx de DB sigue abierta. Si esto

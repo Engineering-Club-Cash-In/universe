@@ -389,6 +389,25 @@ type ResultadoMarcarLinkPagado = {
 	voucherConsumido: boolean;
 };
 
+/**
+ * Cuando `marcarLinkPagado` lanza, la promesa puede rechazar por un error de
+ * conexión aunque Postgres SÍ haya hecho commit de la transacción antes de
+ * que el ACK llegara a este proceso — el link ya referenciaría esta key
+ * (hallazgo Codex). Releer el estado real fuera de cualquier tx evita borrar
+ * evidencia que un dispatcher está a punto de usar: solo se confirma "no
+ * consumido" si el link, en la DB real, efectivamente no apunta a esta key.
+ */
+async function voucherRealmenteNoConsumido(
+	linkId: string,
+	voucherStorageKey: string,
+): Promise<boolean> {
+	const [actual] = await db
+		.select({ voucherStorageKey: pagaloPaymentLinks.voucherStorageKey })
+		.from(pagaloPaymentLinks)
+		.where(eq(pagaloPaymentLinks.id, linkId));
+	return actual?.voucherStorageKey !== voucherStorageKey;
+}
+
 async function marcarLinkPagado(
 	link: LinkClaimado,
 	transaccion: TransaccionPagalo,
@@ -705,14 +724,22 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 				try {
 					resultadoMarcado = await marcarLinkPagado(link, transaccion, subida);
 				} catch (error) {
-					await carteraBackClient
-						.deleteArchivoBoletaHuerfano(subida.voucherStorageKey)
-						.catch((deleteError) =>
-							console.error(
-								`[Págalo][POLL] no se pudo borrar voucher huérfano ${subida.voucherStorageKey}:`,
-								deleteError,
-							),
-						);
+					// La promesa puede rechazar por un error de conexión aunque
+					// Postgres SÍ haya comiteado antes de que el ACK llegara acá —
+					// el link real podría ya referenciar esta key. Borrar sin
+					// verificar arriesgaba dejar un pago READY_TO_APPLY apuntando a
+					// un archivo que ya no existe (hallazgo Codex tras el fix
+					// anterior, que asumía "lanzó = no se guardó nada").
+					if (await voucherRealmenteNoConsumido(link.id, subida.voucherStorageKey)) {
+						await carteraBackClient
+							.deleteArchivoBoletaHuerfano(subida.voucherStorageKey)
+							.catch((deleteError) =>
+								console.error(
+									`[Págalo][POLL] no se pudo borrar voucher huérfano ${subida.voucherStorageKey}:`,
+									deleteError,
+								),
+							);
+					}
 					throw error;
 				}
 				const { listoParaAplicar, voucherConsumido } = resultadoMarcado;

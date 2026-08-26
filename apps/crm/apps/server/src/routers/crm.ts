@@ -2173,8 +2173,8 @@ export const crmRouter = {
 			z.object({
 				id: z.string().uuid(),
 				title: z.string().min(1, "Title is required").optional(),
-				leadId: z.string().uuid().optional(),
-				companyId: z.string().uuid().optional(),
+				leadId: z.string().uuid().nullable().optional(),
+				companyId: z.string().uuid().nullable().optional(),
 				vehicleId: z.string().uuid().nullable().optional(),
 				creditType: z.enum(["autocompra", "sobre_vehiculo"]).optional(),
 				source: z.enum(leadSourceEnum.enumValues).optional(),
@@ -2261,7 +2261,8 @@ export const crmRouter = {
 				input.diaPagoMensual !== 15 &&
 				input.diaPagoMensual !== 30
 			) {
-				const effectiveLeadId = input.leadId ?? currentOpportunity[0].leadId;
+				const effectiveLeadId =
+					"leadId" in input ? input.leadId : currentOpportunity[0].leadId;
 				const [analysis] = effectiveLeadId
 					? await db
 							.select({

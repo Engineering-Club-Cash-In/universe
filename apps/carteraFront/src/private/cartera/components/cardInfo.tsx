@@ -125,6 +125,26 @@ export function MiniCardCredito({
     if (onCuotaSeleccionadaChange) onCuotaSeleccionadaChange(num);
   };
 
+  // Cuotas atrasadas LÓGICAS: el back preserva una fila por pago (parciales,
+  // duplicadas), así que contador, detalle y truncado deben deduplicar por
+  // numero_cuota CON LA MISMA lista — si cada uno cuenta lo suyo, la tarjeta
+  // puede decir "1" y abajo listar "#1" repetido o "...y N más" con filas
+  // fantasma (además de duplicar keys de React). Una cuota queda "pendiente
+  // de revisión" si ALGUNA de sus filas está pending.
+  const cuotasAtrasadasUnicas = [
+    ...(cuotasAtrasadasInfo?.cuotas ?? [])
+      .reduce((porNumero, c) => {
+        const previa = porNumero.get(c.numero_cuota);
+        porNumero.set(c.numero_cuota, {
+          numero_cuota: c.numero_cuota,
+          tienePending:
+            (previa?.tienePending ?? false) || c.validationStatus === "pending",
+        });
+        return porNumero;
+      }, new Map<number, { numero_cuota: number; tienePending: boolean }>())
+      .values(),
+  ].sort((a, b) => a.numero_cuota - b.numero_cuota);
+
   const cuotasFiltradas = [
     // Las atrasadas ya vienen filtradas por COBERTURA desde el back: son
     // pagables aunque su fila sea un pago validated parcial (ocultarlas por
@@ -433,15 +453,13 @@ export function MiniCardCredito({
               <span
                 className={
                   "text-2xl font-bold " +
-                  ((cuotasAtrasadasInfo?.cuotas.length ?? 0) > 0
+                  (cuotasAtrasadasUnicas.length > 0
                     ? "text-red-600"
                     : "text-gray-600")
                 }
               >
                 {/* Cuotas únicas: hay una fila por pago y los parciales inflarían el número */}
-                {new Set(
-                  (cuotasAtrasadasInfo?.cuotas ?? []).map((c) => c.numero_cuota),
-                ).size}
+                {cuotasAtrasadasUnicas.length}
               </span>
               {mora > 0 && (
                 <span className="text-xs font-semibold text-red-500">
@@ -466,7 +484,7 @@ export function MiniCardCredito({
               </div>
             )}
 
-            {mora > 0 && (cuotasAtrasadasInfo?.cuotas.length ?? 0) === 0 && (
+            {mora > 0 && cuotasAtrasadasUnicas.length === 0 && (
               <div className="mt-1 px-2 py-1 bg-red-50 border border-red-300 rounded text-[11px] font-semibold text-red-700">
                 ⚠️ Tiene mora activa de Q
                 {mora.toLocaleString("es-GT", { minimumFractionDigits: 2 })} sin
@@ -477,28 +495,28 @@ export function MiniCardCredito({
               </div>
             )}
 
-            {(cuotasAtrasadasInfo?.cuotas.length ?? 0) > 0 && (
+            {cuotasAtrasadasUnicas.length > 0 && (
               <div className="mt-2 pt-2 border-t border-gray-200">
                 <span className="font-semibold text-xs text-red-600 block mb-1">
                   Pendientes:
                 </span>
                 <div className="flex flex-col gap-0.5">
-                  {cuotasAtrasadasInfo!.cuotas.slice(0, 3).map((cuota, idx) => (
+                  {cuotasAtrasadasUnicas.slice(0, 3).map((cuota) => (
                     <span
-                      key={cuota.numero_cuota ?? idx}
+                      key={cuota.numero_cuota}
                       className="text-xs text-red-500 pl-2"
                     >
                       • Cuota #{cuota.numero_cuota}
-                      {cuota.validationStatus === "pending" && (
+                      {cuota.tienePending && (
                         <span className="ml-1 text-orange-500">
                           (Pendiente de revisión)
                         </span>
                       )}
                     </span>
                   ))}
-                  {cuotasAtrasadasInfo!.cuotas.length > 3 && (
+                  {cuotasAtrasadasUnicas.length > 3 && (
                     <span className="text-xs text-gray-500 pl-2 italic">
-                      ...y {cuotasAtrasadasInfo!.cuotas.length - 3} más
+                      ...y {cuotasAtrasadasUnicas.length - 3} más
                     </span>
                   )}
                 </div>

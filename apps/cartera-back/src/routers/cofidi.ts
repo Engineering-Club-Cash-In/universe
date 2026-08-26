@@ -29,6 +29,7 @@ import { eq, desc, and, sql, gte, lte, inArray } from "drizzle-orm";
 import ExcelJS from "exceljs";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { NITSoapClient } from "../cofidi/nitGenerator";
+import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import type { DTERequest } from "../cofidi/types";
 import {
   SAT_CONFIG,
@@ -85,29 +86,37 @@ function generarIdInternoRandom(): string {
 }
 
 
-export const dteController = new Elysia({ prefix: "/api/dte" })
-  .use(authMiddleware)
+export type FacturarPagoCompletoInput = {
+  body: { pago_id: number; created_by?: number };
+  set: { status?: number | string };
+};
 
-  // 🔥 POST - Certificar DTE
-  // ========================================================================
-  // FLUJO GENERAL DE /facturar-pago-completo
-  // ------------------------------------------------------------------------
-  //  0️⃣  PRE-VALIDACIÓN: verifica que el pago NO tenga ya facturas ACTIVAS
-  //  1️⃣  OBTENER DATOS DEL PAGO  (incluye cuotas_atrasadas para cancelaciones)
-  //  2️⃣  OBTENER INVERSIONISTAS + CALCULAR PARTICIPACIÓN POR CADA UNO
-  //        - Pago normal   → base = monto_aportado
-  //        - Pago "reset"  → base = cuota_inversionista (mayor: se le restan
-  //                          seguro+membresía+gps por cuota)
-  //  3️⃣  CONSTRUIR RECEPTOR  (NIT, consulta SAT, dirección)
-  //  4️⃣  FACTURA DE MORA                (si mora > 0)
-  //  5️⃣  FACTURA DE OTROS SERVICIOS     (seguro + gps + membresía en 1 factura)
-  //  5.5️⃣ FACTURA DE OTROS              (garantía/traspaso/extras en 1 factura)
-  //  6️⃣  FACTURAS DE INTERESES         (1 por cada inversionista no-Cube + 1 para Cube por residuo)
-  //  7️⃣  RESPUESTA FINAL
-  // ========================================================================
-.post(
-  "/facturar-pago-completo",
-  async ({ body, set }) => {
+/**
+ * Facturación completa de un pago (mora, otros servicios, otros, intereses
+ * por inversionista). Es el cuerpo de `POST /api/dte/facturar-pago-completo`
+ * extraído a función para que otros flujos de cartera (el import Págalo, que
+ * factura post-commit) lo llamen con la misma lógica y sin pasar por HTTP.
+ * No acepta `tx` a propósito: certifica contra SAT (irreversible), así que
+ * jamás debe correr dentro de una transacción que pueda hacer rollback.
+ *
+ * ========================================================================
+ * FLUJO GENERAL DE /facturar-pago-completo
+ * ------------------------------------------------------------------------
+ *  0️⃣  PRE-VALIDACIÓN: verifica que el pago NO tenga ya facturas ACTIVAS
+ *  1️⃣  OBTENER DATOS DEL PAGO  (incluye cuotas_atrasadas para cancelaciones)
+ *  2️⃣  OBTENER INVERSIONISTAS + CALCULAR PARTICIPACIÓN POR CADA UNO
+ *        - Pago normal   → base = monto_aportado
+ *        - Pago "reset"  → base = cuota_inversionista (mayor: se le restan
+ *                          seguro+membresía+gps por cuota)
+ *  3️⃣  CONSTRUIR RECEPTOR  (NIT, consulta SAT, dirección)
+ *  4️⃣  FACTURA DE MORA                (si mora > 0)
+ *  5️⃣  FACTURA DE OTROS SERVICIOS     (seguro + gps + membresía en 1 factura)
+ *  5.5️⃣ FACTURA DE OTROS              (garantía/traspaso/extras en 1 factura)
+ *  6️⃣  FACTURAS DE INTERESES         (1 por cada inversionista no-Cube + 1 para Cube por residuo)
+ *  7️⃣  RESPUESTA FINAL
+ * ========================================================================
+ */
+export async function facturarPagoCompleto({ body, set }: FacturarPagoCompletoInput) {
     try {
       const { pago_id, created_by } = body;
 
@@ -2114,14 +2123,31 @@ if (facturasExistentes.length > 0) {
         stack: (error as Error).stack,
       };
     }
-  },
-  {
-    body: t.Object({
-      pago_id: t.Number(),
-      created_by: t.Optional(t.Number()),
-    }),
-  }
-)
+}
+
+export const dteController = new Elysia({ prefix: "/api/dte" })
+  .use(authMiddleware)
+
+  // 🔥 POST - Certificar DTE (el flujo completo vive en facturarPagoCompleto)
+.post("/facturar-pago-completo", async ({ body, set }) => {
+  // Mismo advisory lock por crédito que el import Págalo usa al facturar
+  // post-commit: "Generar Factura" a mano sobre un pago Págalo recién
+  // validado podía pasar el pre-check de facturas ACTIVAS a la vez que el
+  // worker y certificar DTE duplicados en SAT (hallazgo Codex). Sin crédito
+  // (pago inexistente) se deja pasar: la función responde su 404.
+  const [pago] = await db
+    .select({ credito_id: pagos_credito.credito_id })
+    .from(pagos_credito)
+    .where(eq(pagos_credito.pago_id, body.pago_id))
+    .limit(1);
+  if (!pago?.credito_id) return facturarPagoCompleto({ body, set });
+  return withPaymentAdvisoryLock(pago.credito_id, () => facturarPagoCompleto({ body, set }));
+}, {
+  body: t.Object({
+    pago_id: t.Number(),
+    created_by: t.Optional(t.Number()),
+  }),
+})
   // 🔥 GET - Obtener por UUID
 
   // 🔥 GET - Obtener por UUID (COFIDI + BD)

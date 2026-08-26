@@ -57,7 +57,7 @@ día; si no está escrito, no está decidido.
 | [D-47](#d-47--fuente-única-del-monto-y-montoesperado) | Fuente única del monto y `montoEsperado` | 🟢 |
 | [D-48](#d-48--capital-en-un-link-todo-lo-demás-en-el-otro) | Capital en un link, todo lo demás en el otro | 🟢 |
 | [D-49](#d-49--del-pago-nos-enteramos-nosotros-no-el-cliente) | Del pago nos enteramos nosotros, no el cliente | 🟢 |
-| [D-50](#d-50--el-pago-por-link-se-registra-con-evidencia-y-sigue-la-validación-normal) | El pago por link sigue validación normal | 🟢 |
+| [D-50](#d-50--el-pago-por-link-nace-validado-en-la-misma-transacción) | El pago por link nace validado en la misma transacción | 🟢 |
 | [D-51](#d-51--los-links-no-expiran-por-ahora) | Los links no expiran (por ahora) | 🟢 |
 | [D-52](#d-52--si-deuda-cambia-págalo-se-comporta-como-boleta-manual) | Págalo usa comportamiento de boleta manual ante deuda cambiante | 🟢 |
 
@@ -1835,28 +1835,47 @@ herramienta de conciliación si algún día dudamos del poller.
 
 ---
 
-## D-50 · El pago por link se registra con evidencia y sigue validación normal
+## D-50 · El pago por link nace validado en la misma transacción
 
-**Estado:** 🟢 **Cerrada · 2026-08-24** — confirmada por Daniel
+**Estado:** 🟢 **Cerrada · v2 2026-08-26** — decisión de Daniel con el equipo
+(v1 del 2026-08-24 lo dejaba `pending` para conta).
 
 **Contexto.** La boleta entra a cartera y espera a que conta la valide
-([D-39](#d-39--el-rechazo-es-un-botón-explícito-no-se-infiere-del-reverso)). ¿El pago por
-link también?
+([D-39](#d-39--el-rechazo-es-un-botón-explícito-no-se-infiere-del-reverso)). El pago por
+link ya viene verificado contra Págalo (`ACCEPT` + voucher), así que esperar a un humano
+solo retrasa el cierre de la cuota — y deja la ventana registrar→validar en la que el
+cron de moras vuelve a cobrar lo ya pagado ([D-52](#d-52--si-deuda-cambia-págalo-se-comporta-como-boleta-manual)).
 
-**Decisión: registro primero.** Cuando grupo llega a `READY_TO_APPLY` —**todos los links requeridos
-del grupo** (dos, o uno solo cuando un lado es Q0, [D-48](#d-48--capital-en-un-link-todo-lo-demás-en-el-otro)) con transacción
-`ACCEPT` verificada contra Págalo y voucher guardado— el dispatcher lo manda a cartera y
-los `pagos_credito` y boletas se crean como registros pendientes. Importador no
-los valida ni aplica distribución final: continúan mediante flujo normal de
-Cartera, igual que boleta manual. **Cartera ni se entera** de intención de pago
-hasta ese momento: ningún estado intermedio del grupo toca Cartera.
+**Decisión.** Cuando el grupo llega a `READY_TO_APPLY` —**todos los links requeridos**
+([D-48](#d-48--capital-en-un-link-todo-lo-demás-en-el-otro)) con `ACCEPT` verificado y
+voucher guardado— el dispatcher hace **una sola llamada** a cartera, y cartera, en **una
+sola transacción** con las funciones de siempre recibiendo la `tx` por parámetro:
+
+1. iguala la mora viva al snapshot (D-52);
+2. registra el pago (`procesarRegistroPago`, `origen_pago = 'pagalo'`, voucher como boleta);
+3. le pone la cuenta de empresa **PAGALO** (lo que el front hace en "Seleccionar Cuenta");
+4. **lo valida** con `aplicarPagoNormalEnTx` — la misma función del botón "Validar Pago",
+   con los mismos guards previos (`evaluarPagoParaAplicar`);
+5. repone la diferencia de mora y marca el import `APPLIED`.
+
+Si algo falla, rollback completo y el CRM reintenta (idempotente por `crm_group_id`).
+
+**Después del commit, lo dispara cartera** (fire-and-forget, como hace `/aplicar-pago`):
+la **factura** (SAT, irreversible: nunca dentro de la tx) y el **recibo por WhatsApp**.
+El resultado de la factura queda en el ledger (`factura_status`); si falla, el pago sigue
+validado y la factura se resuelve por el playbook normal.
+
+**Notificación: la manda cartera.** El recibo de pago por WhatsApp es el mismo que recibe
+cualquier cliente al validarse su pago. El bot **no** manda un segundo recibo con saldos
+— solo el acuse al detectar cada `ACCEPT` («recibimos tu Pago 1 de 2…»). Esto reemplaza
+el "recibo en dos tiempos" de [07-pago-con-link §5](./07-pago-con-link.md#5-después-del-chat-quién-escucha-y-quién-aplica).
 
 **Lo que sí queda para humanos:** los grupos `REVIEW_REQUIRED` (montos que no cuadran,
-links duplicados pagados, hash distinto en retry) — esos no se aplican solos jamás.
+links duplicados pagados, hash distinto en retry, identidad del crédito cambiada) — esos
+no se aplican solos jamás.
 
-**Consecuencia:** `COMPLETED` confirma registro idempotente de pagos/boletas,
-no validación final. Notificaciones de validación y recibo siguen mecanismo
-normal de Cartera; dispatcher Págalo no las adelanta.
+**Consecuencia:** `COMPLETED` en el CRM = pago **validado** en cartera (cuota cerrada,
+capital movido, inversionistas distribuidos). La factura puede ir unos segundos detrás.
 
 ---
 

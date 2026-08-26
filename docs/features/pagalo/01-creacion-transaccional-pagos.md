@@ -17,7 +17,7 @@ montos correctos y vouchers propios, una llamada idempotente a Cartera crea:
 - una fila `pagalo_payment_imports`;
 - una o varias filas `pagos_credito`, según distribución normal del motor;
 - `pagalo_import_id` en todas las filas creadas o reutilizadas por operación;
-- `origen_pago='pagalo'`, banco temporal sandbox y estado `pending`;
+- `origen_pago='pagalo'`, banco PAGALO, cuenta de empresa PAGALO y estado `validated` (D-10 v2; en v1 nacían `pending`);
 - filas `boletas` con uno o dos vouchers requeridos;
 - estado final `APPLIED` en importación.
 
@@ -108,12 +108,14 @@ escribirse con mismo executor, no después de commit separado.
 Retornos HTTP dejan de vivir dentro del motor. Errores de dominio tipados
 provocan rollback y adaptador conserva códigos/mensajes actuales de `/newPayment`.
 
-`validarPagoRegistrado` se extrae del cuerpo interno de `revalidatePayment`:
-actualiza capital/restantes, marca cuota cuando corresponde y distribuye
-inversionistas. Págalo primero registra filas como `pending` dentro de la
-transacción privada y después invoca este helper para cada fila, antes de
-commit. Así ninguna fila Págalo pending queda visible y al commit todas salen
-`validated`, sin saltar efectos existentes de revalidación.
+**Implementado (D-10 v2, 2026-08-26) con otro helper del previsto:** la
+validación no sale de `revalidatePayment` sino de `aplicarPagoNormalEnTx`
+(registerPayment.ts), que es lo que corre el botón "Validar Pago" — cierre de
+cuota, capital/deuda, limpieza de restantes e inversionistas — y ya recibía la
+`tx` por parámetro; se exportó tal cual. Los guards previos del botón viven en
+`evaluarPagoParaAplicar`, compartida por ambos callers. Págalo registra las
+filas dentro de la transacción y las valida una por una, en orden de
+`pago_id`, antes de commit: ninguna fila Págalo `pending` queda visible.
 
 `marcarImportacionApplied` corre después de validar todas las filas y, en el
 mismo `tx`, escribe `status='APPLIED'`, `payments_created_at` si falta y

@@ -1,4 +1,7 @@
+import { eq } from "drizzle-orm";
 import { generateReciboPagoPDF } from "../controllers/reports";
+import { db } from "../database";
+import { creditos, usuarios } from "../database/db";
 import { notifyReciboPagoWhatsapp } from "./crm.service";
 
 export interface EnviarReciboPagoWhatsappParams {
@@ -41,5 +44,41 @@ export async function enviarReciboPagoWhatsappBestEffort(
       error?.message
     );
     return { success: false, message: error?.message ?? "Error desconocido" };
+  }
+}
+
+/**
+ * Un lookup del cliente por crédito y un recibo por cada pago. Lo comparten
+ * `/aplicar-pago` (un pago) y el import Págalo (N pagos de un mismo grupo).
+ * Nunca lanza: cualquier fallo (DB, PDF, envío) queda solo en el log.
+ */
+export async function enviarRecibosPagoDeCreditoBestEffort(params: {
+  creditoId: number;
+  pagoIds: number[];
+}): Promise<EnviarReciboPagoWhatsappResult[]> {
+  try {
+    const [cliente] = await db
+      .select({ numeroSifco: creditos.numero_credito_sifco, nombre: usuarios.nombre })
+      .from(creditos)
+      .innerJoin(usuarios, eq(usuarios.usuario_id, creditos.usuario_id))
+      .where(eq(creditos.credito_id, params.creditoId))
+      .limit(1);
+    const resultados: EnviarReciboPagoWhatsappResult[] = [];
+    for (const pagoId of params.pagoIds) {
+      resultados.push(
+        await enviarReciboPagoWhatsappBestEffort({
+          pagoId,
+          numeroSifco: cliente?.numeroSifco ?? null,
+          clienteNombre: cliente?.nombre ?? "",
+        }),
+      );
+    }
+    return resultados;
+  } catch (error) {
+    console.error(
+      `⚠️ No se pudo enviar recibo de pago por WhatsApp para pagos ${params.pagoIds.join(",")} (NO afecta la validación):`,
+      error instanceof Error ? error.message : error,
+    );
+    return [];
   }
 }

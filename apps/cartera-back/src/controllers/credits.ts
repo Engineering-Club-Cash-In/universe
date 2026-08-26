@@ -39,7 +39,10 @@ import {
 } from "drizzle-orm";
 import { getPagosDelMesActual, insertPagosCreditoInversionistasV2 } from "./payments";
 import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
-import { filtrarCuotasVencidasSinCobertura } from "./registerPaymentPolicy";
+import {
+  filtrarCuotasEnValidacion,
+  filtrarCuotasVencidasSinCobertura,
+} from "./registerPaymentPolicy";
 import {
   CREDIT_DETAIL_STATUSES,
   RESET_CREDIT_ERRORS,
@@ -256,6 +259,14 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       currentCredit.creditos.cuota ?? 0
     );
 
+    // Cuotas vencidas ya cubiertas por boletas que contabilidad aún no valida:
+    // no son deuda (no van en atrasadas), pero el asesor debe verlas — mientras
+    // no se validen, el cron de moras las sigue tratando como atraso.
+    const cuotasEnValidacion = filtrarCuotasEnValidacion(
+      cuotasVencidasSinCerrar,
+      currentCredit.creditos.cuota ?? 0
+    );
+
     const cuotasPendientes = await db
       .select({
         cuota_id: cuotas_credito.cuota_id,
@@ -384,6 +395,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         cuotaActualStatus: null,
         cuotasPendientes,
         cuotasAtrasadas,
+        cuotasEnValidacion,
         cuotasPagadas,
         moraActual: moraActual.length > 0 ? moraActual[0].monto_mora : 0,
         mora: moraActual.length > 0 ? moraActual[0] : null,
@@ -511,6 +523,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       cuotaActualStatus,
       cuotasPendientes,
       cuotasAtrasadas,
+      cuotasEnValidacion,
       cuotasPagadas,
       moraActual: moraActual.length > 0 ? moraActual[0].monto_mora : 0,
       mora: moraActual.length > 0 ? moraActual[0] : null,

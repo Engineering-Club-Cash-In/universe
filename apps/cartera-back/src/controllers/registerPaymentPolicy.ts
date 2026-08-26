@@ -376,14 +376,13 @@ export type FilaCuotaVencida = PagoCoberturaCuota & {
  * devuelve esas mismas filas (orden y multiplicidad intactos) para las cuotas
  * descubiertas — el shape que el front ya consume no cambia.
  */
-export const filtrarCuotasVencidasSinCobertura = <T extends FilaCuotaVencida>(
-  rows: T[],
-  montoCuota: BigInput
-): T[] => {
-  // Agrupar por numero_cuota, NO por cuota_id: hay créditos con filas
-  // duplicadas de la misma cuota contractual (mismo numero_cuota, cuota_id
-  // distinto) y sus pagos quedan repartidos entre los duplicados. Mismo
-  // criterio de merge que getCoveredOpenInstallments.
+// Agrupar por numero_cuota, NO por cuota_id: hay créditos con filas
+// duplicadas de la misma cuota contractual (mismo numero_cuota, cuota_id
+// distinto) y sus pagos quedan repartidos entre los duplicados. Mismo
+// criterio de merge que getCoveredOpenInstallments.
+const agruparPorNumeroCuota = <T extends FilaCuotaVencida>(
+  rows: T[]
+): Map<number | null, T[]> => {
   const porNumeroCuota = new Map<number | null, T[]>();
   for (const row of rows) {
     const grupo = porNumeroCuota.get(row.numero_cuota);
@@ -393,9 +392,15 @@ export const filtrarCuotasVencidasSinCobertura = <T extends FilaCuotaVencida>(
       porNumeroCuota.set(row.numero_cuota, [row]);
     }
   }
+  return porNumeroCuota;
+};
 
+export const filtrarCuotasVencidasSinCobertura = <T extends FilaCuotaVencida>(
+  rows: T[],
+  montoCuota: BigInput
+): T[] => {
   const cubiertas = new Set<number | null>();
-  for (const [numeroCuota, grupo] of porNumeroCuota) {
+  for (const [numeroCuota, grupo] of agruparPorNumeroCuota(rows)) {
     const { cuotaCompleta } = calcularCoberturaCuota({
       montoCuota,
       pagos: grupo,
@@ -407,6 +412,42 @@ export const filtrarCuotasVencidasSinCobertura = <T extends FilaCuotaVencida>(
   }
 
   return rows.filter((row) => !cubiertas.has(row.numero_cuota));
+};
+
+/**
+ * Cuotas vencidas cuya cobertura DEPENDE de boletas aún sin validar: cubiertas
+ * contando pendientes, pero que no se sostienen solo con lo validated.
+ *
+ * Es el complemento informativo de filtrarCuotasVencidasSinCobertura: esas
+ * cuotas NO se muestran como atrasadas (el dinero ya está registrado), pero el
+ * asesor debe saber que están esperando validación de contabilidad — mientras
+ * tanto el cron de moras (que solo cree en lo validated) puede seguir
+ * generándoles mora.
+ */
+export const filtrarCuotasEnValidacion = <T extends FilaCuotaVencida>(
+  rows: T[],
+  montoCuota: BigInput
+): T[] => {
+  const enValidacion = new Set<number | null>();
+  for (const [numeroCuota, grupo] of agruparPorNumeroCuota(rows)) {
+    const conPendientes = calcularCoberturaCuota({
+      montoCuota,
+      pagos: grupo,
+      incluirPendientes: true,
+    });
+    if (!conPendientes.cuotaCompleta) continue; // descubierta → es atrasada
+
+    const soloValidados = calcularCoberturaCuota({
+      montoCuota,
+      pagos: grupo,
+      incluirPendientes: false,
+    });
+    if (soloValidados.cuotaCompleta) continue; // se sostiene sin pendientes
+
+    enValidacion.add(numeroCuota);
+  }
+
+  return rows.filter((row) => enValidacion.has(row.numero_cuota));
 };
 
 type CuotaAbiertaConPagos = {

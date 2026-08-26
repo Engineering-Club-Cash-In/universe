@@ -19,6 +19,7 @@ export function MiniCardCredito({
   cuotaActualPagada,
   cuotaActualStatus,
   cuotasAtrasadasInfo,
+  cuotasEnValidacionInfo,
   cuotaSeleccionada,
   onCuotaSeleccionadaChange,
   cuotasPendientesInfo,
@@ -47,6 +48,12 @@ export function MiniCardCredito({
         | "capital"
         | "reset";
     }[];
+  };
+  // Cuotas vencidas ya cubiertas por boletas pendientes de validar por
+  // contabilidad: no son atraso, pero el asesor debe saberlo.
+  cuotasEnValidacionInfo?: {
+    total: number;
+    cuotas: { numero_cuota: number }[];
   };
   cuotaSeleccionada?: number;
   onCuotaSeleccionadaChange?: (cuota: number) => void;
@@ -434,6 +441,21 @@ export function MiniCardCredito({
                 </span>
               )}
             </div>
+
+            {(cuotasEnValidacionInfo?.total ?? 0) > 0 && (
+              <div className="mt-1 px-2 py-1 bg-amber-50 border border-amber-300 rounded text-[11px] font-semibold text-amber-700">
+                ⏳ {cuotasEnValidacionInfo!.total}{" "}
+                {cuotasEnValidacionInfo!.total === 1
+                  ? "cuota pagada pendiente"
+                  : "cuotas pagadas pendientes"}{" "}
+                de validación por contabilidad (
+                {[...new Set(cuotasEnValidacionInfo!.cuotas.map((c) => c.numero_cuota))]
+                  .sort((a, b) => a - b)
+                  .map((n) => `#${n}`)
+                  .join(", ")}
+                )
+              </div>
+            )}
 
             {(cuotasAtrasadasInfo?.cuotas.length ?? 0) > 0 && (
               <div className="mt-2 pt-2 border-t border-gray-200">

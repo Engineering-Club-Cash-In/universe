@@ -1261,3 +1261,92 @@ describe("filtrarCuotasVencidasSinCobertura — cuotas duplicadas (mismo numero_
     expect(filtrar([cuota1cubierta, cuota2descubierta], "100.00")).toEqual([cuota2descubierta]);
   });
 });
+
+describe("filtrarCuotasEnValidacion — cuotas cubiertas que dependen de boletas sin validar", () => {
+  const filtrar = () => {
+    const fn = Reflect.get(registerPaymentPolicy, "filtrarCuotasEnValidacion");
+    expect(fn).toBeFunction();
+    return fn as (rows: any[], montoCuota: string | number) => any[];
+  };
+
+  const fila = (over: Record<string, any> = {}) => ({
+    cuota_id: 10,
+    numero_cuota: 1,
+    pago_id: 100,
+    validationStatus: "validated",
+    paymentFalse: false,
+    abono_capital: "0",
+    abono_interes: "0",
+    abono_iva_12: "0",
+    abono_seguro: "0",
+    abono_gps: "0",
+    membresias_pago: "0",
+    ...over,
+  });
+
+  it("incluye la cuota cubierta SOLO gracias a una boleta pending (caso Carlos)", () => {
+    const rows = [
+      fila({ validationStatus: "pending", abono_capital: "2273.80" }),
+    ];
+    expect(filtrar()(rows, "2273.80")).toHaveLength(1);
+  });
+
+  it("excluye la cuota cubierta solo con pagos validated (nada que validar)", () => {
+    const rows = [fila({ abono_capital: "2273.80" })];
+    expect(filtrar()(rows, "2273.80")).toHaveLength(0);
+  });
+
+  it("excluye la cuota descubierta (esa es atrasada, no en validación)", () => {
+    const rows = [
+      fila({ validationStatus: "pending", abono_capital: "500.00" }),
+    ];
+    expect(filtrar()(rows, "2273.80")).toHaveLength(0);
+  });
+
+  it("incluye la cuota que cierra con la mezcla validated + pending", () => {
+    const rows = [
+      fila({ pago_id: 100, abono_capital: "1500.00" }),
+      fila({
+        pago_id: 101,
+        validationStatus: "pending",
+        abono_capital: "773.80",
+      }),
+    ];
+    expect(filtrar()(rows, "2273.80")).toHaveLength(2);
+  });
+
+  it("una boleta falsa pending no pone la cuota en validación", () => {
+    const rows = [
+      fila({
+        validationStatus: "pending",
+        paymentFalse: true,
+        abono_capital: "2273.80",
+      }),
+    ];
+    expect(filtrar()(rows, "2273.80")).toHaveLength(0);
+  });
+
+  it("agrupa por numero_cuota: fragmentos duplicados pending que cubren juntos cuentan", () => {
+    const rows = [
+      fila({ cuota_id: 10, validationStatus: "pending", abono_capital: "60.00" }),
+      fila({ cuota_id: 11, pago_id: 101, validationStatus: "pending", abono_capital: "40.00" }),
+    ];
+    expect(filtrar()(rows, "100.00")).toHaveLength(2);
+  });
+
+  it("no mezcla cuotas: solo devuelve las filas de la cuota en validación", () => {
+    const enValidacion = fila({
+      numero_cuota: 1,
+      validationStatus: "pending",
+      abono_capital: "100.00",
+    });
+    const atrasada = fila({
+      cuota_id: 20,
+      numero_cuota: 2,
+      pago_id: 200,
+      validationStatus: null,
+      abono_capital: "0",
+    });
+    expect(filtrar()([enValidacion, atrasada], "100.00")).toEqual([enValidacion]);
+  });
+});

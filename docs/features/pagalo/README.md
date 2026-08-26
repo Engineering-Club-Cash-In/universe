@@ -1,6 +1,7 @@
 # CB-028 · Integración Págalo
 
-**Estado:** implementación parcial en revisión; no lista para operación E2E.
+**Estado:** flujo CRM → sandbox → Cartera implementado; pendiente de pruebas E2E
+controladas y de retirar salvaguardas exclusivas de sandbox antes de producción.
 **Ambiente permitido:** desarrollo/sandbox. Producción queda fuera de alcance.
 
 ## Objetivo
@@ -26,21 +27,20 @@ compartido del bot.
 
 ## Alcance por etapas
 
-1. **Creación transaccional de pagos:** existe endpoint idempotente, motor con
-   transacción externa y llave de servicio requerida. Faltan pruebas de
-   rollback real y de compatibilidad exacta entre snapshot congelado y rubros
-   vivos.
+1. **Creación transaccional de pagos:** endpoint idempotente crea ledger,
+   pagos pendientes y boletas dentro de una transacción. Usa JWT normal de
+   Cartera, igual que rutas internas existentes; validación posterior sigue
+   flujo normal de Cartera.
 2. **Cliente Págalo:** existe cliente limitado a `api.pagalodev.com`, respuesta
    sanitizada, flag explícito para crear links y orquestación de uno o dos
-   links. Esta implementación no ha creado links.
+   links. Crear links sigue limitado a sandbox y requiere flag explícito.
 3. **Confirmación automática:** worker consulta estado Págalo; estado `2`
    sólo permite consultar detalle. Exige después
-   `status_transaction='ACCEPT'`, valida monto/GTQ, guarda voucher propio
-   `pagalo/{crm_group_id}/...` y prepara grupo. Aún no llama al importador de
-   Cartera; no completa pagos end-to-end.
-4. **CRM:** botón y modal fuerzan cuotas consecutivas; mora positiva queda
-   marcada/bloqueada. Cálculo servidor usa centavos exactos. Falta prueba de UI
-   y eliminar aproximación numérica del preview visual.
+   `status_transaction='ACCEPT'`, valida monto/GTQ, genera voucher propio,
+   lo sube mediante `/upload` de Cartera y despacha grupo a importador.
+4. **CRM:** botón, modal, historial, envío conjunto por WhatsApp, poller y
+   dispatcher existen. Modal fuerza cuotas consecutivas; mora positiva queda
+   marcada/bloqueada. Cálculo servidor usa centavos exactos.
 5. **Prueba E2E en sandbox:** pendiente: casos completos, parciales,
    reintentos, fallos y reconciliación. Sin despliegue productivo.
 
@@ -58,36 +58,37 @@ CRM server ── crea 1 o 2 links / consulta Págalo / conserva auditoría
   │ solo cuando todos los links requeridos están ACCEPT
   ▼
 cartera-back POST /pagalo/payment-imports
-  │ valida idempotencia y abre transacción
+  │ valida evidencia/idempotencia y abre transacción
   ▼
 procesarRegistroPago() ── mismo motor de Ficha 360 y bot
   │
-  ├─ N pagos_credito (validated, origen pagalo, pagalo_import_id)
+  ├─ N pagos_credito pending, origen pagalo, pagalo_import_id
   └─ boletas (uno o dos vouchers por cada pago creado)
 ```
 
-## Guardas antes de habilitar sandbox
+## Guardas antes de producción
 
-No habilitar creación de links ni polling automático hasta cerrar estos puntos:
+No habilitar producción hasta cerrar estos puntos:
 
 - validar monto, moneda y `ACCEPT` de cada transacción contra link/snapshot;
-- enviar grupo `READY_TO_APPLY` al importador de Cartera y persistir resultado;
 - probar rollback total, replay HTTP y grupos capital-only, facturable-only y
   ambos;
-- configurar misma llave `PAGALO_IMPORT_SERVICE_KEY` en CRM y Cartera antes de
-  habilitar dispatch.
+- mantener `TEST_MESSAGE=true` durante pruebas para redirigir WhatsApp a número
+  de prueba; fuera de ese modo, envío usa teléfono del cliente.
 
 ## Límites del primer slice original
 
-El primer slice empieza con un grupo CRM que ya posee todas sus transacciones
-requeridas en `ACCEPT` y vouchers almacenados, y termina con pagos de Cartera
-creados ya validados. Puede recibir una fuente CAPITAL, una fuente
-MORA_INTERES o ambas, según los componentes reales. No crea links, no consulta
-Págalo, no envía WhatsApp ni factura. Sí extrae y reutiliza validación y
-distribución a inversionistas ya existentes, dentro de misma transacción, para
-que pago Págalo salga `validated` sin crear un flujo financiero paralelo.
+Un grupo CRM posee una o dos transacciones `ACCEPT` y vouchers almacenados. Sus
+links permanecen separados por facturación, pero Cartera registra **un pago
+combinado** con total, usando mismo motor de una boleta manual. Crea pagos y
+boletas; no los valida en este endpoint ni crea flujo financiero paralelo.
 
 `registerPayment` conserva exactamente su semántica vigente al registrar:
 cualquier efecto que hoy forma parte de `/newPayment` —por ejemplo el manejo de
 mora, convenios, cuotas parciales o saldo a favor— sigue siendo parte del mismo
 registro. El proyecto no agrega efectos nuevos dentro de ese motor.
+
+Snapshot CRM es evidencia/auditoría del link emitido, no presupuesto que
+restrinja aplicación posterior. Si deuda cambia antes del pago, motor normal
+puede cascader a cuotas posteriores o saldo a favor. No crea `REVIEW_REQUIRED`
+solo porque link quede sobrado.

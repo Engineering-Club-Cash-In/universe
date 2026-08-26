@@ -2,14 +2,17 @@ import { describe, expect, it } from "bun:test";
 import type { z } from "zod";
 import {
   PAGALO_IMPORT_ERROR_CODES,
+  calcularPagaloPayloadHash,
   pagaloImportCommandSchema,
   validatePagaloImportCommand,
+  verificarPagaloPayloadHash,
   type PagaloImportErrorCode,
 } from "./pagaloPaymentImportPolicy";
 
 const groupId = "3b6f0ed4-c4c5-4adf-afb9-aef97da9a5e6";
 const capitalTransactionId = "d9d7ba9b-c558-48e9-a68f-38473f82145d";
 const facturableTransactionId = "d350f86c-c15e-4cd8-af7f-d197804c0dd0";
+const validPayloadHash = "b6a7f6e188653732c9b0d193b00b57956fdf96d33609aa4554e0889f0505803a";
 
 const source = (
   transaction_uuid: string,
@@ -87,7 +90,7 @@ const command = (): TestCommand => ({
   ],
   capital: source(capitalTransactionId, "capital-123", "capital"),
   facturable: source(facturableTransactionId, "facturable-123", "facturable"),
-  payload_hash: "a".repeat(64),
+  payload_hash: validPayloadHash,
 });
 
 const expectInvalid = (input: unknown, code: PagaloImportErrorCode) => {
@@ -106,6 +109,16 @@ describe("validatePagaloImportCommand", () => {
       expect(result.data.capital_total).toBe("100.00");
       expect(result.data.facturable_total).toBe("25.00");
     }
+  });
+
+  it("hashes validated command content canonically and detects an altered hash", () => {
+    const parsed = validatePagaloImportCommand(command());
+    expect(parsed.success).toBeTrue();
+    if (!parsed.success) return;
+
+    expect(calcularPagaloPayloadHash(parsed.data)).toBe(validPayloadHash);
+    expect(verificarPagaloPayloadHash(parsed.data)).toBeTrue();
+    expect(verificarPagaloPayloadHash({ ...parsed.data, payload_hash: "a".repeat(64) })).toBeFalse();
   });
 
   it("accepts mora-only commands and requires the top-level source shape", () => {
@@ -177,9 +190,20 @@ describe("validatePagaloImportCommand", () => {
     }
   });
 
-  it("rejects voucher paths outside the exact group prefix and encoded escapes", () => {
+  it("rejects decimal strings that lose cents when the normal payment engine converts them to Number", () => {
+    const input = command();
+    const amount = "90071992547409.91";
+    input.capital_total = amount;
+    input.facturable_total = "0.00";
+    input.total_amount = amount;
+    input.allocations = [{ ...input.allocations[0], amount }];
+    (input as unknown as { facturable: null }).facturable = null;
+
+    expectInvalid(input, PAGALO_IMPORT_ERROR_CODES.PAGALO_INVALID_COMMAND);
+  });
+
+  it("rejects voucher paths with traversal, encoding escapes, or an external URL", () => {
     for (const voucher_storage_key of [
-      `pagalo/${groupId.toUpperCase()}/receipt.pdf`,
       `pagalo/${groupId}/../receipt.pdf`,
       `pagalo/${groupId}/%2e%2e/receipt.pdf`,
       `pagalo/${groupId}/%252e%252e/receipt.pdf`,
@@ -196,6 +220,19 @@ describe("validatePagaloImportCommand", () => {
         PAGALO_IMPORT_ERROR_CODES.PAGALO_INVALID_VOUCHER_KEY,
       );
     }
+  });
+
+  // El comprobante ahora se genera en CRM y se sube reutilizando /upload de
+  // cartera-back (mismo endpoint que carteraFront y el bot de cobros usan
+  // para boletas de depósito) — ese endpoint siempre devuelve una key plana
+  // con nombre aleatorio, sin el prefijo pagalo/{group}/ que antes exigía
+  // esta validación cuando se esperaba descargar el voucher real de Págalo.
+  it("accepts a plain random key like the one /upload already returns", () => {
+    const input = command();
+    input.facturable.voucher_storage_key =
+      "3f9e9e2a-2f2f-4a7b-9a8f-1a2b3c4d5e6f.pdf";
+    const result = validatePagaloImportCommand(input);
+    expect(result.success).toBe(true);
   });
 
   it("rejects duplicate source identifiers and voucher storage keys", () => {

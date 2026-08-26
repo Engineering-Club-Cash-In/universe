@@ -1,6 +1,12 @@
 # CB-028 · Generación de links desde Ficha 360
 
-**Estado:** diseño conversacional aprobado; revisión escrita pendiente.
+> **Estado histórico parcial.** Selector, snapshot y separación de links siguen
+> vigentes. Reglas de aplicación posterior fueron reemplazadas por
+> `DECISIONES.md` D-14/D-17 y D-52 compartida: importación suma links y usa
+> motor normal de boleta manual; snapshot no genera `REVIEW_REQUIRED` por
+> deuda reducida.
+
+**Estado:** reglas de UI vigentes; reglas de aplicación posterior superadas.
 **Ambiente:** desarrollo/sandbox. Producción fuera de alcance.
 
 ## 1. Resultado visible
@@ -135,17 +141,17 @@ consultar grupo existente antes de reintentar.
 ## 6. Mora cambiante
 
 Link usa monto fijo. Worker confirma estado remoto, monto y moneda antes de
-guardar voucher. Comparación de mora viva contra snapshot ocurre en Cartera al
-importar; CRM no aplica dinero ni recalcula saldo financiero.
+guardar voucher. Snapshot queda como auditoría; Cartera aplica estado vivo con
+motor de boleta manual. CRM no aplica dinero ni recalcula saldo financiero.
 
 Págalo documenta consulta y estados de link, pero no documenta endpoint para
 cancelar request pendiente. Hasta obtener contrato oficial:
 
 - CRM no marca `CANCELLED` alegando cancelación solo local;
 - no genera reemplazo que deje URL vieja todavía cobrable;
-- mora que creció se consume primero desde dinero MORA_INTERES y recibo avisa
-  faltante de cuota;
-- solo link sobrado porque deuda se achicó pasa `REVIEW_REQUIRED`.
+- mora que creció se consume primero mediante pago combinado del motor normal;
+- deuda achicada puede dejar cascadeo a cuotas posteriores o saldo a favor;
+  no crea `REVIEW_REQUIRED` solo por link sobrado.
 
 Si proveedor confirma cancelación:
 
@@ -220,8 +226,8 @@ end-to-end.
 7. Desglose mostrado coincide en centavos con payload y snapshot guardados.
 8. Fallo creando segundo link no envía primero al cliente.
 9. Diferencia de mora antes de generar bloquea operación y refresca modal.
-10. Mora crecida se aplica primero desde MORA_INTERES e informa faltante; solo
-   deuda achicada con link sobrado deja `REVIEW_REQUIRED`.
+10. Mora crecida usa jerarquía normal del pago combinado; deuda achicada puede
+    cascader o dejar saldo a favor sin `REVIEW_REQUIRED` por sobrante.
 11. Doble submit/retry no crea grupos o links duplicados.
 12. Mora aparece como fila propia, queda marcada y no puede desmarcarse cuando
     tiene saldo positivo.

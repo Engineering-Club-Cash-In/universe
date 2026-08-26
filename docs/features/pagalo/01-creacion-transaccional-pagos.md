@@ -1,6 +1,12 @@
 # CB-028 · Creación transaccional de pagos Págalo
 
-**Estado:** diseño aprobado; plan ejecutable pendiente de revisión del equipo.
+> **Estado histórico.** Documento conserva diseño inicial de presupuestos
+> separados y pago validado. Decisiones vigentes en `DECISIONES.md` y D-48,
+> D-50, D-52 compartidas lo reemplazan: importador registra un pago combinado
+> pendiente y boletas; motor normal de Cartera valida/aplica después. Snapshot
+> audita, no limita cascadeo ni saldo a favor.
+
+**Estado:** diseño original superado; conservar solo como trazabilidad.
 **Alcance:** primer slice, solo DEV/sandbox.
 
 ## 1. Resultado observable
@@ -11,13 +17,12 @@ montos correctos y vouchers propios, una llamada idempotente a Cartera crea:
 - una fila `pagalo_payment_imports`;
 - una o varias filas `pagos_credito`, según distribución normal del motor;
 - `pagalo_import_id` en todas las filas creadas o reutilizadas por operación;
-- `origen_pago='pagalo'`, `banco_id=NULL` y estado `validated`;
+- `origen_pago='pagalo'`, banco temporal sandbox y estado `pending`;
 - filas `boletas` con uno o dos vouchers requeridos;
 - estado final `APPLIED` en importación.
 
-Pago nace validado porque `ACCEPT` y voucher ya fueron verificados. No pasa por
-bandeja humana: validación y estado final `APPLIED` ocurren antes del mismo
-commit atómico de importación.
+`ACCEPT` y voucher autorizan registro idempotente, no validación final. Pago
+sigue validación normal de Cartera después del commit atómico de importación.
 
 ## 2. Regla de reutilización
 
@@ -204,9 +209,12 @@ const registro: RegistroPagoInput = {
   credito_id: command.credito_id,
   usuario_id: credito.usuario_id, // siempre resuelto en Cartera
   // Total solo para auditoría/cabecera; no autoriza mezclar presupuestos.
-  monto_boleta: decimal(command.total_amount),
-  fecha_pago: hoyGuatemala(),
-  fecha_boleta: fechaMayorRequerida(
+  monto_boleta: numberExacto(command.total_amount),
+  fecha_pago: fechaGuatemalaDelInstanteMayor(
+    command.capital?.paid_at,
+    command.facturable?.paid_at,
+  ),
+  fecha_boleta: fechaGuatemalaDelInstanteMayor(
     command.capital?.paid_at,
     command.facturable?.paid_at,
   ),
@@ -247,11 +255,9 @@ crédito. URLs externas tampoco se aceptan: solo keys esperadas de almacenamient
 propio. `pagalo_componentes` es contrato interno; no se agrega al schema público
 de `/newPayment`.
 
-Motor consume `facturable.disponible` primero para mora viva y luego solo para
-rubros facturables de sus allocations. Motor consume `capital.disponible` solo
-para CAPITAL. Jamás cruza presupuesto, voucher, transacción o rubro entre lados.
-Mora mayor al snapshot deja faltante; no toma dinero CAPITAL. Si un componente
-queda sobrado porque deuda bajó, se aborta y grupo pasa `REVIEW_REQUIRED`.
+Diseño de presupuestos de este apartado fue reemplazado. Motor recibe total
+combinado, aplica reglas normales de boleta manual y puede cascader/saldo a
+favor. Snapshot y componentes quedan como evidencia, no como límite financiero.
 
 ## 6. Invariantes dentro del lock
 
@@ -263,15 +269,15 @@ Antes de primera escritura financiera:
    `capital + facturable = total` en centavos.
 4. Allocations y fuente existen si y solo si su lado es mayor que cero.
 5. CAPITAL solo contiene rubros no facturables; MORA_INTERES, facturables.
-6. UUIDs e identificadores requeridos son distintos y no aparecen en ningún rol
-   de importaciones previas.
+6. CRM conserva unicidad global de UUID e identificadores Págalo. Cartera aún
+   no revalida reutilización cruzada de roles entre grupos: defensa adicional
+   P2 documentada en D-13, no bloqueante para dispatcher CRM actual.
 7. `payload_hash` coincide con comando canónico.
-8. Cuota inicial y allocations todavía son compatibles con deuda viva. Mora que
-   creció no invalida pago: se consume primero únicamente desde MORA_INTERES;
-   link sobrado por deuda achicada sí requiere revisión.
-9. Voucher keys requeridas son no vacías, distintas cuando hay dos y pertenecen
-   al prefijo del grupo.
-10. Suma consumida por lado nunca excede presupuesto Págalo; mora usa solo
+8. Cuota inicial y snapshot conservan trazabilidad; aplicación posterior usa
+   estado vivo del motor normal, sin revisión por sobrante del snapshot.
+9. Voucher keys requeridas son no vacías y distintas cuando hay dos; se obtienen
+   mediante `/upload` de Cartera.
+10. Diseño histórico: suma consumida por lado nunca excede presupuesto Págalo; mora usa solo
     presupuesto `MORA_INTERES`.
 
 Fallo de 1–10 crea o actualiza importación como `REVIEW_REQUIRED` sin pagos. No

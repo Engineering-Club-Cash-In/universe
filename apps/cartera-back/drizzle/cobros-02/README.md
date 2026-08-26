@@ -23,6 +23,7 @@ para que se sepa que se aplican como bloque cuando salga esa versión.
 | `0009_pagalo_un_solo_link.sql` | CB-105: el ledger acepta grupos de **un solo link** (selección sin capital o solo capital — D-48 del bot): evidencia por lado nullable + CHECK de coherencia explícito (monto > 0 ⇒ evidencia completa; monto = 0 ⇒ lado vacío). Se aplica después de la 0008. |
 | `0009_pagalo_optional_capital.sql` | CB-028 (#1422): la versión **mora-only** del mismo ajuste, hecha en paralelo (solo capital opcional; exige `facturable_total > 0`). Compatible pero más restrictiva que la de CB-105. |
 | `0010_pagalo_solo_capital.sql` | CB-105: **estado final de las dos 0009 gemelas** (D-48, decisión de Daniel): re-afirma montos `>= 0` en ambos lados y lado facturable nullable con su CHECK de coherencia — la última palabra, corra lo que corra antes. |
+| `0011_pagalo_review_missing_credit.sql` | CB-105: permite auditar `REVIEW_REQUIRED` sin crédito vivo si SIFCO cambió o crédito fue eliminado; `APPLIED` conserva identidad crédito↔SIFCO obligatoria. |
 
 ## Asignación inicial (`asignacion/`) — carga de datos, NO schema
 

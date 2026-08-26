@@ -79,44 +79,48 @@ transacción. Front y bot usan transacción interna; importación Págalo abre u
 transacción que incluye cabecera, pagos, boletas y estado final, y se la pasa al
 motor. Todos los helpers de persistencia usan el executor recibido.
 
-## D-10 · Pago Págalo nace validado
+## D-10 · Importación Págalo registra; validación sigue flujo normal
 
-Regla compartida: [D-50](../bot-whatsapp-cobros/DECISIONES.md#d-50--el-pago-por-link-nace-validado).
-Después de verificar `ACCEPT` con Págalo y voucher propio, resultado esperado
-es `pagos_credito.validation_status='validated'`. No pasa por bandeja de
-conta. Importación reutiliza flujo existente de pago validado; este slice no
-agrega una factura ni proceso de inversionistas alterno.
+Regla compartida: [D-50](../bot-whatsapp-cobros/DECISIONES.md#d-50--el-pago-por-link-se-registra-con-evidencia-y-sigue-la-validación-normal).
+Después de verificar `ACCEPT` y voucher propio, importación crea pagos y
+boletas `pending`. No valida dentro de este endpoint: validación contable y
+aplicación final siguen camino normal de Cartera. Este slice no agrega factura
+ni proceso de inversionistas alterno.
 
 ## D-11 · Págalo no inventa banco ni autorización única
 
-`banco_id` queda `NULL`: pago con tarjeta procesado por Págalo no es depósito en
-una cuenta bancaria del catálogo. `numeroAutorizacion` de `pagos_credito` no se
-usa para compactar dos códigos diferentes. Evidencia individual vive en
-`pagalo_payment_imports` y links CRM. Origen es `pagalo` y actor del sistema es
-`pagalo@clubcashin.com`.
+Págalo no reporta banco del catálogo ni autorización única equivalente. En
+sandbox, importador usa temporalmente `banco_id=1` porque motor actual exige FK
+válida; no representa banco real de Págalo. `numeroAutorizacion` no compacta
+dos códigos diferentes. Evidencia individual vive en `pagalo_payment_imports`
+y links CRM. Origen es `pagalo` y actor del sistema es `pagalo@clubcashin.com`.
 
 ## D-12 · Vouchers usan flujo existente de boletas
 
-Antes de importar, CRM copia cada voucher Págalo a almacenamiento propio; si
-proveedor no entrega archivo, CRM genera PDF desde transacción confirmada y lo
-sube. Importación pasa una o dos keys en `url_boletas`. Motor existente crea
-filas `boletas`; no existe segundo mecanismo de adjuntos.
+CRM genera PDF propio desde transacción confirmada y lo sube mediante `/upload`
+de Cartera, mismo flujo de carteraFront. Importación pasa una o dos keys planas
+en `url_boletas`. Motor existente crea filas `boletas`; no existe segundo
+mecanismo de adjuntos.
 
 ## D-13 · Idempotencia se defiende en Cartera
 
 `crm_group_id` es llave idempotente y `payload_hash` congela contenido. Retry
 con mismo grupo/hash devuelve misma importación y mismos pagos. Mismo grupo con
-hash distinto responde conflicto y pasa a revisión. UUIDs e identificadores de
-transacciones no pueden reutilizarse.
+hash distinto responde conflicto y pasa a revisión. CRM impide reutilizar UUIDs
+e identificadores globalmente; defensa cruzada adicional dentro de Cartera queda
+como mejora P2, no bloqueante del dispatcher actual.
 
 ## D-14 · Snapshot audita; Cartera valida estado vivo
 
-CRM envía selección congelada y totales. Bajo lock del crédito, Cartera valida
-identidad crédito/SIFCO, cuota inicial, moneda, sumas y compatibilidad con deuda
-vigente. Si deuda se achicó y deja link sobrado, persiste `REVIEW_REQUIRED` sin
-crear pagos. Si mora creció, dinero emitido se aplica: mora vigente se consume
-primero solo desde `MORA_INTERES` y recibo informa faltante. No redistribuye
-silenciosamente dinero entre lados. Ver D-52.
+CRM envía selección congelada y totales como evidencia/auditoría. Cartera valida
+identidad crédito/SIFCO viva, cuota inicial, moneda y sumas; si SIFCO cambió o
+el crédito ya no existe, conserva evidencia como `REVIEW_REQUIRED` sin aplicar.
+Con identidad vigente aplica **un pago
+combinado** mediante motor normal de boleta manual. Snapshot no restringe
+rubros, cuotas ni saldo vivo: deuda reducida puede cascader a cuotas posteriores
+o saldo a favor, sin `REVIEW_REQUIRED` solo por sobrante. Si mora creció, motor
+normal consume mora viva primero; faltante queda visible en estado de Cartera,
+sin dato especial en ledger Págalo. Ver D-52.
 
 ## D-15 · Endpoint Págalo separado; servicio compartido
 
@@ -136,20 +140,21 @@ Si mora vigente es mayor que cero, aparece siempre seleccionada y bloqueada.
 Asesor puede desmarcar todas las cuotas y dejar solo mora completa. No existen
 pagos parciales de cuota ni mora desde este flujo.
 
-## D-17 · Link viejo: mora primero; revisión solo por sobrante
+## D-17 · Link viejo: aplicación normal sobre estado vivo
 
-Monto de mora queda congelado al generar link. Worker compara snapshot contra
-mora viva. Documentación Págalo muestra estado cancelado, pero no publica un
+Monto de mora queda congelado al generar link. Snapshot queda como auditoría;
+aplicación usa estado vivo del motor normal. Documentación Págalo muestra estado
+cancelado, pero no publica un
 endpoint para cancelar un link pendiente; por tanto CRM no puede declarar
 cancelación remota sin confirmación del proveedor.
 
 Regla compartida: [D-51](../bot-whatsapp-cobros/DECISIONES.md#d-51--los-links-no-expiran-por-ahora)
-y [D-52](../bot-whatsapp-cobros/DECISIONES.md#d-52--si-la-mora-cambió-cuando-el-link-se-paga-mora-primero-y-se-avisa-el-faltante).
-Si mora creció, pago se aplica igual: `MORA_INTERES` consume primero mora viva,
-`CAPITAL` conserva destino y recibo informa faltante. Solo deuda achicada que
-deja link sobrado pasa `REVIEW_REQUIRED`. Si Págalo confirma cancelación remota,
-worker podrá cancelar antes de reemplazar; reversa pagada no sirve como
-cancelación de link.
+y [D-52](../bot-whatsapp-cobros/DECISIONES.md#d-52--si-deuda-cambia-págalo-se-comporta-como-boleta-manual).
+Si mora creció, pago combinado se aplica igual y motor normal consume mora viva
+primero. Si deuda se achicó, sobrante puede cascader o ir a saldo a favor,
+igual que boleta manual. No hay `REVIEW_REQUIRED` solo por diferencia entre
+snapshot y deuda viva. Si Págalo confirma cancelación remota, worker podrá
+cancelar antes de reemplazar; reversa pagada no sirve como cancelación de link.
 
 ## D-18 · Próxima cuota por vencer permitida
 

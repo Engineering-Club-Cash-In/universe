@@ -219,7 +219,6 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         // Necesarios para la cobertura por montos (el front los ignora)
         paymentFalse: pagos_credito.paymentFalse,
         membresias_pago: pagos_credito.membresias_pago,
-        monto_aplicado: pagos_credito.monto_aplicado,
 
         monto_boleta: pagos_credito.monto_boleta,
         abono_capital: pagos_credito.abono_capital,

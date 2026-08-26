@@ -358,7 +358,6 @@ export type FilaCuotaVencida = PagoCoberturaCuota & {
   cuota_id: number | null;
   numero_cuota: number | null;
   // Para detectar recibos SALDADOS de cuotas recortadas (ver esReciboSaldado)
-  monto_aplicado?: BigInput | null;
   capital_restante?: BigInput | null;
   interes_restante?: BigInput | null;
   iva_12_restante?: BigInput | null;
@@ -378,7 +377,22 @@ export type FilaCuotaVencida = PagoCoberturaCuota & {
  */
 const esReciboSaldado = (row: FilaCuotaVencida): boolean => {
   if (row.paymentFalse !== false) return false;
-  if (!new Big(row.monto_aplicado ?? 0).gt(0)) return false;
+  // Plata aplicada A LA CUOTA (rubros), no monto_aplicado: en filas legacy de
+  // solo mora/otros el monto_aplicado trae mora+otros con todos los abono_*
+  // en 0 — esas no saldan nada.
+  if (!sumarAplicadoACuota([row]).gt(0)) return false;
+  // Sin restantes informados no se puede afirmar el saldado: un NULL no es un
+  // cero — filas legacy con restantes NULL y abonos reales quedarían mal
+  // clasificadas como cubiertas.
+  const restantesInformados = [
+    row.capital_restante,
+    row.interes_restante,
+    row.iva_12_restante,
+    row.seguro_restante,
+    row.gps_restante,
+    row.membresias_restante,
+  ].some((v) => v !== null && v !== undefined);
+  if (!restantesInformados) return false;
   const restantes = new Big(row.capital_restante ?? 0)
     .plus(new Big(row.interes_restante ?? 0))
     .plus(new Big(row.iva_12_restante ?? 0))

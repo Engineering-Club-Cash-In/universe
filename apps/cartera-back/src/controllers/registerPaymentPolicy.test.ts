@@ -1416,3 +1416,33 @@ describe("filtrarCuotas* — cuotas recortadas (recibo saldado con restantes en 
     expect(filtrarAtrasadas(rows, "2273.80")).toHaveLength(1);
   });
 });
+
+describe("esReciboSaldado vía filtrar — pagos legacy solo-mora no saldan cuota", () => {
+  const filtrarAtrasadas = registerPaymentPolicy.filtrarCuotasVencidasSinCobertura;
+
+  it("un pago legacy de solo mora (monto_aplicado>0 pero rubros en 0) NO cubre la cuota", () => {
+    // Legacy: monto_aplicado incluía mora+otros; la cuota no recibió nada.
+    const filaLegacySoloMora = {
+      cuota_id: 10,
+      numero_cuota: 5,
+      pago_id: 100,
+      validationStatus: "validated",
+      paymentFalse: false,
+      abono_capital: "0",
+      abono_interes: "0",
+      abono_iva_12: "0",
+      abono_seguro: "0",
+      abono_gps: "0",
+      membresias_pago: "0",
+      monto_aplicado: "2420.41", // mora legacy, no plata de cuota
+      pago_mora: "2420.41",
+      capital_restante: "0",
+      interes_restante: "0",
+      iva_12_restante: "0",
+      seguro_restante: "0",
+      gps_restante: "0",
+      membresias_restante: "0",
+    };
+    expect(filtrarAtrasadas([filaLegacySoloMora], "2273.80")).toHaveLength(1);
+  });
+});

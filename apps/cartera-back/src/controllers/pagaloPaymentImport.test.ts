@@ -2,13 +2,16 @@ import { describe, expect, it, mock } from "bun:test";
 import { calcularPagaloPayloadHash, type PagaloImportCommand } from "./pagaloPaymentImportPolicy";
 import {
   calcularAjusteMoraPagalo,
+  clasificarRespuestaFacturacion,
   createPagaloImportService,
   getPagaloImportReplayHttpStatus,
   getPagaloReviewRequiredReason,
   isPagaloSameRoleEvidenceConflict,
   mapPagaloImportToRegistro,
   moraDelSnapshot,
+  pagosSinRecibo,
   resolvePagaloLedgerCreditIdentity,
+  resumirFacturacion,
 } from "./pagaloPaymentImport";
 
 const groupId = "3b6f0ed4-c4c5-4adf-afb9-aef97da9a5e6";
@@ -269,5 +272,82 @@ describe("ajuste de mora al aplicar (D-52, 2026-08-26)", () => {
     expect(calcularAjusteMoraPagalo("300.00", "500.00")).toBeNull();
     expect(calcularAjusteMoraPagalo(null, "500.00")).toBeNull();
     expect(calcularAjusteMoraPagalo(undefined, "0.00")).toBeNull();
+  });
+});
+
+describe("facturación post-commit (D-10 v2)", () => {
+  it("OK solo si todos los pagos facturaron sin errores", () => {
+    expect(
+      resumirFacturacion([
+        { pago_id: 1, success: true, http: 200, errores: [] },
+        { pago_id: 2, success: true, http: 200, errores: [] },
+      ]),
+    ).toEqual({ status: "OK", error: null });
+  });
+
+  it("PARCIAL cuando alguna factura del pago falló pero el pago respondió success", () => {
+    const parcial = {
+      pago_id: 1,
+      success: true,
+      http: 200,
+      errores: [{ tipo: "INTERESES", error: "SAT timeout" }],
+      detalle: "1 factura(s) generada(s), 1 con errores",
+    };
+    expect(resumirFacturacion([parcial])).toEqual({
+      status: "PARCIAL",
+      error: JSON.stringify([parcial]),
+    });
+  });
+
+  it("FALLIDA manda sobre PARCIAL; el detalle conserva los caídos Y los parciales (a medias en SAT)", () => {
+    const parcial = { pago_id: 1, success: true, http: 200, errores: [{ error: "x" }] };
+    const sat = { pago_id: 2, success: false, http: 500, errores: [{ tipo: "MORA", error: "SAT timeout" }], detalle: "No se pudo generar ninguna factura" };
+    const nit = { pago_id: 3, success: false, http: 400, errores: [], detalle: "sin NIT" };
+    expect(resumirFacturacion([parcial, sat, nit])).toEqual({
+      status: "FALLIDA",
+      error: JSON.stringify([sat, nit, parcial]),
+    });
+    // lo que lee el playbook: qué pago tiene cero facturas (reintento seguro)
+    expect(JSON.parse(resumirFacturacion([sat]).error ?? "[]")[0]).toMatchObject({ pago_id: 2, http: 500 });
+  });
+});
+
+describe("outbox del recibo por pago", () => {
+  it("un reintento manda solo a los pagos que aún no recibieron su recibo", () => {
+    expect(pagosSinRecibo([10, 11, 12], JSON.stringify([10, 12]))).toEqual([11]);
+    expect(pagosSinRecibo([10, 11], null)).toEqual([10, 11]);
+    expect(pagosSinRecibo([10, 11], "basura")).toEqual([10, 11]);
+    expect(pagosSinRecibo([10], JSON.stringify([10]))).toEqual([]);
+  });
+});
+
+describe("clasificarRespuestaFacturacion", () => {
+  it("'ya tiene facturas activas' (otro flujo ganó el lock) cuenta como facturado, no como FALLIDA", () => {
+    const r = clasificarRespuestaFacturacion(
+      7,
+      { success: false, message: "Este pago ya tiene facturas electrónicas activas.", facturasExistentes: [{}, {}] },
+      400,
+    );
+    expect(r).toMatchObject({ pago_id: 7, success: true, http: 200, yaFacturado: 2, errores: [] });
+    expect(resumirFacturacion([r])).toEqual({ status: "OK", error: null });
+  });
+
+  it("'no se pudo generar ninguna factura' conserva los errores de nivel superior", () => {
+    const r = clasificarRespuestaFacturacion(
+      8,
+      { success: false, error: "No se pudo generar ninguna factura", errores: [{ tipo: "MORA", error: "SAT timeout" }] },
+      500,
+    );
+    expect(r).toMatchObject({ success: false, http: 500, errores: [{ tipo: "MORA", error: "SAT timeout" }], detalle: "No se pudo generar ninguna factura" });
+  });
+
+  it("parcial: success con data.errores", () => {
+    const r = clasificarRespuestaFacturacion(
+      9,
+      { success: true, mensaje: "2 generadas, 1 con errores", data: { errores: [{ tipo: "INTERESES", error: "x" }] } },
+      200,
+    );
+    expect(r).toMatchObject({ success: true, errores: [{ tipo: "INTERESES", error: "x" }], detalle: "2 generadas, 1 con errores" });
+    expect(resumirFacturacion([r]).status).toBe("PARCIAL");
   });
 });

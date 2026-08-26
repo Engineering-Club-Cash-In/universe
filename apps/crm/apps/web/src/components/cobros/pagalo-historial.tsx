@@ -165,8 +165,8 @@ function GrupoPagalo({ grupo }: { grupo: Grupo }) {
 			{grupo.carteraImportId && grupo.status === "COMPLETED" && (
 				<p className="text-green-700 text-sm">
 					<CheckCircle2 className="mr-1 inline h-4 w-4" />
-					Registrado en cartera, pendiente de validación (importación #
-					{grupo.carteraImportId})
+					Pago validado y aplicado en cartera (importación #
+					{grupo.carteraImportId}); la factura sale después
 				</p>
 			)}
 			{grupo.carteraImportId && grupo.status !== "COMPLETED" && (

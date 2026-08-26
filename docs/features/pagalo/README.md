@@ -28,9 +28,10 @@ compartido del bot.
 ## Alcance por etapas
 
 1. **Creación transaccional de pagos:** endpoint idempotente crea ledger,
-   pagos pendientes y boletas dentro de una transacción. Usa JWT normal de
-   Cartera, igual que rutas internas existentes; validación posterior sigue
-   flujo normal de Cartera.
+   pagos y boletas, les pone la cuenta de empresa PAGALO y **los valida**
+   dentro de una sola transacción (D-10 v2, 2026-08-26). Usa JWT normal de
+   Cartera, igual que rutas internas existentes. Factura (SAT) y recibo por
+   WhatsApp corren después del commit, disparados por cartera.
 2. **Cliente Págalo:** existe cliente limitado a `api.pagalodev.com`, respuesta
    sanitizada, flag explícito para crear links y orquestación de uno o dos
    links. Crear links sigue limitado a sandbox y requiere flag explícito.
@@ -58,12 +59,20 @@ CRM server ── crea 1 o 2 links / consulta Págalo / conserva auditoría
   │ solo cuando todos los links requeridos están ACCEPT
   ▼
 cartera-back POST /pagalo/payment-imports
-  │ valida evidencia/idempotencia y abre transacción
+  │ valida evidencia/idempotencia y abre UNA transacción (D-10 v2)
   ▼
-procesarRegistroPago() ── mismo motor de Ficha 360 y bot
+  ├─ ajuste de mora al snapshot (D-52)
+  ├─ procesarRegistroPago(data, tx) ── mismo motor de Ficha 360 y bot
+  │    ├─ N pagos_credito, origen pagalo, pagalo_import_id
+  │    └─ boletas (uno o dos vouchers por cada pago creado)
+  ├─ cuenta_empresa_id = PAGALO
+  ├─ aplicarPagoNormalEnTx(tx, …) por pago ── mismo validador del botón "Validar Pago"
+  └─ commit → APPLIED (falla = rollback + reintento del CRM)
   │
-  ├─ N pagos_credito pending, origen pagalo, pagalo_import_id
-  └─ boletas (uno o dos vouchers por cada pago creado)
+  │ post-commit, fire-and-forget (SAT/WhatsApp son irreversibles)
+  ▼
+facturarPagoCompleto() por pago → factura_status en el ledger
+enviarReciboPagoWhatsappBestEffort() ── el recibo normal de cartera
 ```
 
 ## Guardas antes de producción
@@ -81,7 +90,9 @@ No habilitar producción hasta cerrar estos puntos:
 Un grupo CRM posee una o dos transacciones `ACCEPT` y vouchers almacenados. Sus
 links permanecen separados por facturación, pero Cartera registra **un pago
 combinado** con total, usando mismo motor de una boleta manual. Crea pagos y
-boletas; no los valida en este endpoint ni crea flujo financiero paralelo.
+boletas y los valida con el mismo validador del botón "Validar Pago"
+(`aplicarPagoNormalEnTx`), en la misma transacción; no crea flujo financiero
+paralelo (D-10 v2).
 
 `registerPayment` conserva exactamente su semántica vigente al registrar:
 cualquier efecto que hoy forma parte de `/newPayment` —por ejemplo el manejo de

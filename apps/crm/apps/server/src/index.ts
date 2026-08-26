@@ -55,6 +55,7 @@ import {
 } from "./jobs/cobros-notifications";
 import { correrDispatchPagalo } from "./jobs/pagalo-dispatch";
 import { correrPollPagalo } from "./jobs/pagalo-poll";
+import { correrRecordatorioPagalo } from "./jobs/pagalo-reminder";
 import { auth } from "./lib/auth";
 import {
 	autenticarBotCobros,
@@ -1705,6 +1706,21 @@ async function correrDispatchDePagalo(): Promise<void> {
 if (TAREAS_PROGRAMADAS_ACTIVAS) {
 	void correrDispatchDePagalo();
 	setInterval(correrDispatchDePagalo, 5 * 60 * 1000);
+}
+
+// Recordatorio Págalo (CB-028): mismo gate que poll/dispatch, sin flag propio
+// — es notificación al cliente, no integridad financiera, pero corre bajo la
+// misma bandera general de tareas programadas. Cada 3h.
+async function correrRecordatorioDePagalo(): Promise<void> {
+	try {
+		await correrRecordatorioPagalo();
+	} catch (error) {
+		console.error("Error en el recordatorio de pagos Págalo:", error);
+	}
+}
+
+if (TAREAS_PROGRAMADAS_ACTIVAS) {
+	setInterval(correrRecordatorioDePagalo, 3 * 60 * 60 * 1000);
 }
 
 if (TAREAS_PROGRAMADAS_ACTIVAS) {

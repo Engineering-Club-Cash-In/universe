@@ -491,12 +491,28 @@ export const importPagaloPayment = async ({ body, set }: any) => {
       const message = getPagaloReviewRequiredReason(error);
       if (message === undefined) throw error;
 
-      // La tx financiera ya hizo rollback. Esta tx corta deja evidencia de la
-      // revisión sin reintroducir ningún pago, mora, boleta ni saldo mutado.
+      // La tx financiera ya hizo rollback y liberó el lock `FOR UPDATE` del
+      // crédito, así que el crédito pudo desaparecer o cambiar de SIFCO en
+      // esa ventana. Re-resolver la identidad acá evita que el FK compuesto
+      // de `pagalo_payment_imports` rechace este insert y se pierda la
+      // evidencia de que Págalo aceptó el pago (hallazgo Codex).
+      const [liveCreditAfterRollback] = await db
+        .select({
+          credito_id: creditos.credito_id,
+          numero_credito_sifco: creditos.numero_credito_sifco,
+        })
+        .from(creditos)
+        .where(eq(creditos.credito_id, command.credito_id))
+        .limit(1);
+      const { identity } = resolvePagaloLedgerCreditIdentity(
+        command,
+        liveCreditAfterRollback,
+      );
+
       const [review] = await db
         .insert(pagalo_payment_imports)
         .values({
-          ...importValues(command),
+          ...importValues(command, identity),
           status: "REVIEW_REQUIRED",
           last_error_code: "PAGALO_LIVE_DEBT_REVIEW",
           last_error_message: message,

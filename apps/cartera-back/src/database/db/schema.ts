@@ -758,10 +758,12 @@
       id: serial("id").primaryKey(),
       // UUID opaco de pagalo_payment_groups en CRM; no hay FK entre bases.
       crm_group_id: varchar("crm_group_id", { length: 36 }).notNull(),
-      credito_id: integer("credito_id").notNull(),
+      // Solo REVIEW_REQUIRED sin crédito vivo usa NULL. APPLIED conserva el
+      // par obligatorio mediante pagalo_payment_imports_live_credit_chk.
+      credito_id: integer("credito_id"),
       numero_credito_sifco: varchar("numero_credito_sifco", {
         length: 40,
-      }).notNull(),
+      }),
       currency: varchar("currency", { length: 3 }).notNull().default("GTQ"),
       capital_total: numeric("capital_total", {
         precision: 18,
@@ -844,7 +846,7 @@
         name: "pagalo_payment_imports_credit_sifco_fk",
         columns: [t.credito_id, t.numero_credito_sifco],
         foreignColumns: [creditos.credito_id, creditos.numero_credito_sifco],
-      }).onDelete("restrict"),
+      }).onDelete("set null"),
       index("pagalo_payment_imports_status_idx").on(t.status, t.updated_at),
       index("pagalo_payment_imports_credit_idx").on(t.credito_id, t.created_at),
       check(
@@ -853,6 +855,12 @@
           'RECEIVED', 'CREATING_PAYMENTS', 'PAYMENTS_CREATED', 'APPLYING',
           'APPLIED', 'RETRYABLE_ERROR', 'REVIEW_REQUIRED'
         )`
+      ),
+      check(
+        "pagalo_payment_imports_live_credit_chk",
+        sql`${t.status} = 'REVIEW_REQUIRED' OR (
+          ${t.credito_id} IS NOT NULL AND ${t.numero_credito_sifco} IS NOT NULL
+        )`,
       ),
       // Un lado puede ser 0 (grupo de un solo link, D-48); total > 0 junto con
       // total_matches garantiza que al menos un lado existe.

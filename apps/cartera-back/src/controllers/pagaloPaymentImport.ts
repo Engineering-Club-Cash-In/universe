@@ -6,7 +6,7 @@ import {
 } from "./pagaloPaymentImportPolicy";
 import { and, eq } from "drizzle-orm";
 import { db } from "../database";
-import { pagalo_payment_imports, pagos_credito } from "../database/db";
+import { creditos, pagalo_payment_imports, pagos_credito } from "../database/db";
 import { procesarRegistroPago } from "./registerPayment";
 import type { PagaloComponentes } from "./registerPayment";
 import { CREDIT_PENDING_CANCELLATION_ERROR } from "./registerPaymentPolicy";
@@ -216,10 +216,39 @@ const paymentIdsForImport = async (
       .where(eq(pagos_credito.pagalo_import_id, importId))
   ).map((row: { pago_id: number }) => row.pago_id);
 
-const importValues = (command: PagaloImportCommand) => ({
+type PagaloLedgerCreditIdentity = {
+  credito_id: number | null;
+  numero_credito_sifco: string | null;
+};
+
+export function resolvePagaloLedgerCreditIdentity(
+  command: PagaloImportCommand,
+  liveCredit: PagaloLedgerCreditIdentity | undefined,
+) {
+  if (!liveCredit) {
+    return {
+      identity: { credito_id: null, numero_credito_sifco: null },
+      reviewReason: `El crédito ${command.credito_id} ya no existe; SIFCO recibido: ${command.numero_credito_sifco}.`,
+    };
+  }
+  if (liveCredit.numero_credito_sifco !== command.numero_credito_sifco) {
+    return {
+      identity: liveCredit,
+      reviewReason:
+        `SIFCO recibido (${command.numero_credito_sifco}) no coincide con ` +
+        `crédito ${command.credito_id} vivo (${liveCredit.numero_credito_sifco}).`,
+    };
+  }
+  return { identity: liveCredit, reviewReason: undefined };
+}
+
+const importValues = (
+  command: PagaloImportCommand,
+  creditIdentity: PagaloLedgerCreditIdentity = command,
+) => ({
   crm_group_id: command.crm_group_id,
-  credito_id: command.credito_id,
-  numero_credito_sifco: command.numero_credito_sifco,
+  credito_id: creditIdentity.credito_id,
+  numero_credito_sifco: creditIdentity.numero_credito_sifco,
   currency: command.currency,
   capital_total: command.capital_total,
   facturable_total: command.facturable_total,
@@ -314,9 +343,38 @@ export const importPagaloPayment = async ({ body, set }: any) => {
 
     try {
       return await db.transaction(async (tx) => {
+        const [liveCredit] = await tx
+          .select({
+            credito_id: creditos.credito_id,
+            numero_credito_sifco: creditos.numero_credito_sifco,
+          })
+          .from(creditos)
+          .where(eq(creditos.credito_id, command.credito_id))
+          .limit(1)
+          .for("update");
+        const creditResolution = resolvePagaloLedgerCreditIdentity(command, liveCredit);
+        if (creditResolution.reviewReason) {
+          const [review] = await tx
+            .insert(pagalo_payment_imports)
+            .values({
+              ...importValues(command, creditResolution.identity),
+              status: "REVIEW_REQUIRED",
+              last_error_code: "PAGALO_LIVE_CREDIT_IDENTITY_REVIEW",
+              last_error_message: creditResolution.reviewReason,
+            })
+            .returning({ id: pagalo_payment_imports.id });
+          set.status = 409;
+          return {
+            success: false,
+            status: "REVIEW_REQUIRED",
+            code: "PAGALO_LIVE_CREDIT_IDENTITY_REVIEW",
+            import_id: review?.id,
+          };
+        }
+
         const [ledger] = await tx
           .insert(pagalo_payment_imports)
-          .values({ ...importValues(command), status: "APPLYING" })
+          .values({ ...importValues(command, creditResolution.identity), status: "APPLYING" })
           .returning({ id: pagalo_payment_imports.id });
         if (!ledger) throw new Error("No se pudo crear importación Págalo.");
 

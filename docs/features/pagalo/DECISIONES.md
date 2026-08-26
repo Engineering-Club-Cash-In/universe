@@ -113,7 +113,9 @@ como mejora P2, no bloqueante del dispatcher actual.
 ## D-14 · Snapshot audita; Cartera valida estado vivo
 
 CRM envía selección congelada y totales como evidencia/auditoría. Cartera valida
-identidad crédito/SIFCO, cuota inicial, moneda y sumas, luego aplica **un pago
+identidad crédito/SIFCO viva, cuota inicial, moneda y sumas; si SIFCO cambió o
+el crédito ya no existe, conserva evidencia como `REVIEW_REQUIRED` sin aplicar.
+Con identidad vigente aplica **un pago
 combinado** mediante motor normal de boleta manual. Snapshot no restringe
 rubros, cuotas ni saldo vivo: deuda reducida puede cascader a cuotas posteriores
 o saldo a favor, sin `REVIEW_REQUIRED` solo por sobrante. Si mora creció, motor

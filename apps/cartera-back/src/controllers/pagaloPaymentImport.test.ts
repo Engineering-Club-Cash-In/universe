@@ -4,6 +4,7 @@ import {
   createPagaloImportService,
   getPagaloReviewRequiredReason,
   mapPagaloImportToRegistro,
+  resolvePagaloLedgerCreditIdentity,
 } from "./pagaloPaymentImport";
 
 const groupId = "3b6f0ed4-c4c5-4adf-afb9-aef97da9a5e6";
@@ -167,6 +168,32 @@ describe("pagalo payment import", () => {
     expect(
       getPagaloReviewRequiredReason(new Error("Pago rechazado: cuota sobre-aplicada")),
     ).toBe("Pago rechazado: cuota sobre-aplicada");
+  });
+
+  it("keeps accepted evidence in review when live credit identity changed or vanished", () => {
+    expect(resolvePagaloLedgerCreditIdentity(command(), undefined)).toEqual({
+      identity: { credito_id: null, numero_credito_sifco: null },
+      reviewReason: "El crédito 123 ya no existe; SIFCO recibido: SIFCO-123.",
+    });
+    expect(
+      resolvePagaloLedgerCreditIdentity(command(), {
+        credito_id: 123,
+        numero_credito_sifco: "SIFCO-actual",
+      }),
+    ).toEqual({
+      identity: { credito_id: 123, numero_credito_sifco: "SIFCO-actual" },
+      reviewReason:
+        "SIFCO recibido (SIFCO-123) no coincide con crédito 123 vivo (SIFCO-actual).",
+    });
+    expect(
+      resolvePagaloLedgerCreditIdentity(command(), {
+        credito_id: 123,
+        numero_credito_sifco: "SIFCO-123",
+      }),
+    ).toEqual({
+      identity: { credito_id: 123, numero_credito_sifco: "SIFCO-123" },
+      reviewReason: undefined,
+    });
   });
 
   it("marks same group with different hash REVIEW_REQUIRED without creating payments", async () => {

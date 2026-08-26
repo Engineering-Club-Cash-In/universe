@@ -492,32 +492,36 @@ export const importPagaloPayment = async ({ body, set }: any) => {
       if (message === undefined) throw error;
 
       // La tx financiera ya hizo rollback y liberó el lock `FOR UPDATE` del
-      // crédito, así que el crédito pudo desaparecer o cambiar de SIFCO en
-      // esa ventana. Re-resolver la identidad acá evita que el FK compuesto
-      // de `pagalo_payment_imports` rechace este insert y se pierda la
-      // evidencia de que Págalo aceptó el pago (hallazgo Codex).
-      const [liveCreditAfterRollback] = await db
-        .select({
-          credito_id: creditos.credito_id,
-          numero_credito_sifco: creditos.numero_credito_sifco,
-        })
-        .from(creditos)
-        .where(eq(creditos.credito_id, command.credito_id))
-        .limit(1);
-      const { identity } = resolvePagaloLedgerCreditIdentity(
-        command,
-        liveCreditAfterRollback,
-      );
+      // crédito, así que pudo desaparecer o cambiar de SIFCO en esa ventana.
+      // Re-resolver la identidad bajo un lock propio (no un select+insert
+      // sueltos: el crédito podría volver a cambiar entre ambos) evita que
+      // el FK compuesto de `pagalo_payment_imports` rechace este insert y se
+      // pierda la evidencia de que Págalo aceptó el pago (hallazgo Codex).
+      const [review] = await db.transaction(async (auditTx) => {
+        const [liveCreditAfterRollback] = await auditTx
+          .select({
+            credito_id: creditos.credito_id,
+            numero_credito_sifco: creditos.numero_credito_sifco,
+          })
+          .from(creditos)
+          .where(eq(creditos.credito_id, command.credito_id))
+          .limit(1)
+          .for("update");
+        const { identity } = resolvePagaloLedgerCreditIdentity(
+          command,
+          liveCreditAfterRollback,
+        );
 
-      const [review] = await db
-        .insert(pagalo_payment_imports)
-        .values({
-          ...importValues(command, identity),
-          status: "REVIEW_REQUIRED",
-          last_error_code: "PAGALO_LIVE_DEBT_REVIEW",
-          last_error_message: message,
-        })
-        .returning({ id: pagalo_payment_imports.id });
+        return auditTx
+          .insert(pagalo_payment_imports)
+          .values({
+            ...importValues(command, identity),
+            status: "REVIEW_REQUIRED",
+            last_error_code: "PAGALO_LIVE_DEBT_REVIEW",
+            last_error_message: message,
+          })
+          .returning({ id: pagalo_payment_imports.id });
+      });
       set.status = 409;
       return {
         success: false,

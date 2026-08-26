@@ -14,7 +14,9 @@ import { authClient, cerrarSesion } from "@/lib/auth-client";
 import {
 	type Caso,
 	anioEnGuatemala,
-	coincidenciaEnPaso,
+	coincidenciaPrincipal,
+	llegadaEnVentana,
+	coincidenciasEnPaso,
 	ESTADOS,
 	etiquetaDeEtapa,
 	PASOS,
@@ -92,8 +94,8 @@ export function ListadoPage() {
 	const ventana = hayPeriodo ? ventanaDelMes(anioVigente, Number(periodo)) : null;
 
 	// Sin período cuenta la etapa actual; con período, la llegada dentro del mes.
-	const coincidencia = useMemo(
-		() => (caso: Caso, paso: number) => coincidenciaEnPaso(caso, paso, ventana),
+	const coincidencias = useMemo(
+		() => (caso: Caso, paso: number) => coincidenciasEnPaso(caso, paso, ventana),
 		[ventana],
 	);
 
@@ -104,9 +106,14 @@ export function ListadoPage() {
 			if (pasoFiltro === null) {
 				if (ventana && !tuvoAvanceEn(caso, ventana)) return false;
 			} else {
-				const marca = coincidencia(caso, pasoFiltro);
-				if (!marca) return false;
-				if (pctFiltro !== null && marca.porcentaje !== pctFiltro) return false;
+				const marcas = coincidencias(caso, pasoFiltro);
+				if (marcas.length === 0) return false;
+				if (
+					pctFiltro !== null &&
+					!marcas.some((m) => m.porcentaje === pctFiltro)
+				) {
+					return false;
+				}
 			}
 			if (!termino) return true;
 			return [caso.referencia, caso.cliente, caso.vehiculo ?? ""]
@@ -114,7 +121,7 @@ export function ListadoPage() {
 				.toLowerCase()
 				.includes(termino);
 		});
-	}, [casosQuery.data, busqueda, pasoFiltro, pctFiltro, ventana, coincidencia]);
+	}, [casosQuery.data, busqueda, pasoFiltro, pctFiltro, ventana, coincidencias]);
 
 	const totalPaginas = Math.max(1, Math.ceil(filtrados.length / porPagina));
 
@@ -130,13 +137,13 @@ export function ListadoPage() {
 		const conteo = new Map<number, number>();
 		for (const caso of casosQuery.data ?? []) {
 			for (let paso = 1; paso <= PASOS.length; paso++) {
-				if (coincidencia(caso, paso)) {
+				if (coincidencias(caso, paso).length > 0) {
 					conteo.set(paso, (conteo.get(paso) ?? 0) + 1);
 				}
 			}
 		}
 		return conteo;
-	}, [casosQuery.data, coincidencia]);
+	}, [casosQuery.data, coincidencias]);
 
 	const totalVisible = useMemo(() => {
 		const todos: Caso[] = casosQuery.data ?? [];
@@ -149,12 +156,12 @@ export function ListadoPage() {
 		if (pasoFiltro === null) return [];
 		const conteo = new Map<number, number>();
 		for (const caso of casosQuery.data ?? []) {
-			const marca = coincidencia(caso, pasoFiltro);
-			if (!marca) continue;
-			conteo.set(marca.porcentaje, (conteo.get(marca.porcentaje) ?? 0) + 1);
+			for (const marca of coincidencias(caso, pasoFiltro)) {
+				conteo.set(marca.porcentaje, (conteo.get(marca.porcentaje) ?? 0) + 1);
+			}
 		}
 		return [...conteo.entries()].sort(([a], [b]) => a - b);
-	}, [casosQuery.data, pasoFiltro, coincidencia]);
+	}, [casosQuery.data, pasoFiltro, coincidencias]);
 
 	useEffect(() => {
 		if (pasoFiltro === null || pctFiltro === null) return;
@@ -252,8 +259,9 @@ export function ListadoPage() {
 									llegó a cada etapa en {MESES[Number(periodo) - 1].toLowerCase()}{" "}
 									{anioVigente}
 								</span>
-								. Un caso puede aparecer en varias etapas si avanzó más de una
-								vez ese mes.
+								. Un caso puede aparecer en varias etapas, y en varios
+								porcentajes de una misma etapa, si avanzó más de una vez ese
+								mes.
 							</>
 						) : (
 							<>
@@ -378,8 +386,17 @@ export function ListadoPage() {
 					<>
 						<ul className="space-y-2.5">
 							{visibles.map((caso) => {
-								const marca = coincidencia(caso, pasoFiltro ?? caso.pasoActual);
-								const llegada = hayPeriodo ? (marca?.fecha ?? null) : null;
+								// Con etapa filtrada manda la llegada de esa etapa; sin
+								// ella, la del mes, que es lo que hizo entrar al caso.
+								const marca = !ventana
+									? null
+									: pasoFiltro !== null
+										? coincidenciaPrincipal(
+												coincidencias(caso, pasoFiltro),
+												pctFiltro,
+											)
+										: llegadaEnVentana(caso, ventana);
+								const llegada = marca?.fecha ?? null;
 								return (
 									<li key={caso.id}>
 										<Link
@@ -405,7 +422,7 @@ export function ListadoPage() {
 												</div>
 												<div className="flex shrink-0 items-center gap-2">
 													<span className="font-semibold text-slate-900 text-sm tabular-nums">
-														{hayPeriodo ? (marca?.porcentaje ?? caso.porcentaje) : caso.porcentaje}%
+														{marca?.porcentaje ?? caso.porcentaje}%
 													</span>
 													<ChevronRight className="h-5 w-5 text-slate-400" />
 												</div>
@@ -433,7 +450,7 @@ export function ListadoPage() {
 															ESTADOS[caso.estado].punto,
 														)}
 													/>
-													{etiquetaDeEtapa(caso)}
+													{etiquetaDeEtapa(caso.pasoActual, caso.estado)}
 												</span>
 												<span className="shrink-0 text-slate-400 text-xs">
 													{llegada

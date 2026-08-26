@@ -1,5 +1,11 @@
 import { Check, X } from "lucide-react";
-import { type Caso, PASOS, formatearFecha, rangoDePaso } from "@/lib/pasos";
+import {
+	type Caso,
+	etiquetaDeEtapa,
+	formatearFecha,
+	PASOS,
+	rangoDePaso,
+} from "@/lib/pasos";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -30,7 +36,7 @@ export function BarraPasos({
 		return (
 			<div
 				className="flex gap-1"
-				aria-label={`Paso ${pasoActual} de 5, ${porcentaje}% de avance`}
+				aria-label={`Paso ${pasoActual} de 5`}
 			>
 				{PASOS.map((p, i) => (
 					<span
@@ -96,7 +102,11 @@ export function BarraPasos({
 										alcanzado ? "text-slate-900" : "text-slate-400",
 									)}
 								>
-									{p.etiqueta}
+									{/* En los pasos que no son el vigente la etiqueta es solo el
+									    nombre de la etapa en el catálogo. En el vigente se lee
+									    como una afirmación sobre el caso, así que ahí no puede
+									    decir "Desembolsado" mientras el pago no se ejecuta. */}
+									{esActual ? etiquetaDeEtapa(paso, estado) : p.etiqueta}
 								</p>
 								<span
 									className={cn(
@@ -154,7 +164,9 @@ export function BarraPasos({
 										? "El crédito no fue aprobado"
 										: enPausa
 											? "El proceso está en pausa"
-											: "En curso"}
+											: estado === "desembolsado"
+												? "Crédito desembolsado"
+												: "En curso"}
 								</p>
 							)}
 						</div>

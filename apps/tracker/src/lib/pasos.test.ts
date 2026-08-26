@@ -2,8 +2,10 @@ import { describe, expect, test } from "bun:test";
 import {
 	type Caso,
 	anioEnGuatemala,
-	coincidenciaEnPaso,
+	coincidenciaPrincipal,
+	coincidenciasEnPaso,
 	etiquetaDeEtapa,
+	llegadaEnVentana,
 	tuvoAvanceEn,
 	ventanaDelMes,
 } from "./pasos";
@@ -27,7 +29,7 @@ const caso = (parcial: Partial<Caso>): Caso => ({
 const ABRIL = ventanaDelMes(2026, 4);
 const JULIO = ventanaDelMes(2026, 7);
 
-describe("coincidenciaEnPaso sin período", () => {
+describe("coincidenciasEnPaso sin período", () => {
 	test("solo cuenta en la etapa donde está hoy, con su avance actual", () => {
 		const c = caso({
 			pasoActual: 2,
@@ -38,12 +40,12 @@ describe("coincidenciaEnPaso sin período", () => {
 			],
 		});
 
-		expect(coincidenciaEnPaso(c, 1, null)).toBeNull();
-		expect(coincidenciaEnPaso(c, 2, null)?.porcentaje).toBe(40);
+		expect(coincidenciasEnPaso(c, 1, null)).toEqual([]);
+		expect(coincidenciasEnPaso(c, 2, null)[0].porcentaje).toBe(40);
 	});
 });
 
-describe("coincidenciaEnPaso con período", () => {
+describe("coincidenciasEnPaso con período", () => {
 	test("usa el porcentaje de la llegada, no el avance actual", () => {
 		// Llegó al paso 1 en abril con 20% y hoy va en 80%: el filtro de abril
 		// para el paso 1 tiene que ofrecer 20%, no 80%.
@@ -56,9 +58,9 @@ describe("coincidenciaEnPaso con período", () => {
 			],
 		});
 
-		expect(coincidenciaEnPaso(c, 1, ABRIL)?.porcentaje).toBe(20);
-		expect(coincidenciaEnPaso(c, 3, ABRIL)).toBeNull();
-		expect(coincidenciaEnPaso(c, 3, JULIO)?.porcentaje).toBe(80);
+		expect(coincidenciasEnPaso(c, 1, ABRIL)[0].porcentaje).toBe(20);
+		expect(coincidenciasEnPaso(c, 3, ABRIL)).toEqual([]);
+		expect(coincidenciasEnPaso(c, 3, JULIO)[0].porcentaje).toBe(80);
 	});
 
 	test("toma la llegada más antigua aunque el historial venga desordenado", () => {
@@ -73,7 +75,7 @@ describe("coincidenciaEnPaso con período", () => {
 			],
 		});
 
-		const enAbril = coincidenciaEnPaso(c, 2, ABRIL);
+		const enAbril = coincidenciasEnPaso(c, 2, ABRIL)[0];
 		expect(enAbril?.fecha).toBe("2026-04-05T12:00:00.000Z");
 		expect(enAbril?.porcentaje).toBe(40);
 	});
@@ -88,8 +90,25 @@ describe("coincidenciaEnPaso con período", () => {
 			],
 		});
 
-		expect(coincidenciaEnPaso(c, 2, ABRIL)?.porcentaje).toBe(30);
-		expect(coincidenciaEnPaso(c, 2, JULIO)?.porcentaje).toBe(40);
+		expect(coincidenciasEnPaso(c, 2, ABRIL)[0].porcentaje).toBe(30);
+		expect(coincidenciasEnPaso(c, 2, JULIO)[0].porcentaje).toBe(40);
+	});
+
+	test("conserva las dos llegadas cuando ocurren en el mismo mes", () => {
+		// 30% y luego 40% en julio: ambos son avances reales y el filtro por
+		// porcentaje exacto tiene que poder encontrar cualquiera de los dos.
+		const c = caso({
+			pasoActual: 2,
+			porcentaje: 40,
+			historial: [
+				{ paso: 2, porcentaje: 30, fecha: "2026-07-05T12:00:00.000Z" },
+				{ paso: 2, porcentaje: 40, fecha: "2026-07-20T12:00:00.000Z" },
+			],
+		});
+
+		expect(coincidenciasEnPaso(c, 2, JULIO).map((m) => m.porcentaje)).toEqual([
+			30, 40,
+		]);
 	});
 
 	test("respeta el huso de Guatemala en los bordes del mes", () => {
@@ -100,8 +119,8 @@ describe("coincidenciaEnPaso con período", () => {
 			],
 		});
 
-		expect(coincidenciaEnPaso(c, 1, ABRIL)).not.toBeNull();
-		expect(coincidenciaEnPaso(c, 1, ventanaDelMes(2026, 5))).toBeNull();
+		expect(coincidenciasEnPaso(c, 1, ABRIL)).toHaveLength(1);
+		expect(coincidenciasEnPaso(c, 1, ventanaDelMes(2026, 5))).toEqual([]);
 	});
 });
 
@@ -142,20 +161,56 @@ describe("etiquetaDeEtapa", () => {
 	test("no anuncia el desembolso mientras la oportunidad sigue abierta", () => {
 		// Se llega al paso 5 al aprobar el checklist, pero contabilidad ejecuta el
 		// pago después: ahí el caso todavía está en proceso.
-		const enTramite = caso({ pasoActual: 5, porcentaje: 100, estado: "en_proceso" });
-		expect(etiquetaDeEtapa(enTramite)).toBe("En trámite de desembolso");
+		expect(etiquetaDeEtapa(5, "en_proceso")).toBe("En trámite de desembolso");
 
-		const pagado = caso({ pasoActual: 5, porcentaje: 100, estado: "desembolsado" });
-		expect(etiquetaDeEtapa(pagado)).toBe("Desembolsado");
+		expect(etiquetaDeEtapa(5, "desembolsado")).toBe("Desembolsado");
 	});
 
 	test("en el paso 5 un caso cerrado o pausado usa la etiqueta de su estado", () => {
-		expect(etiquetaDeEtapa(caso({ pasoActual: 5, estado: "rechazado" }))).toBe("No aprobado");
-		expect(etiquetaDeEtapa(caso({ pasoActual: 5, estado: "en_pausa" }))).toBe("En pausa");
+		expect(etiquetaDeEtapa(5, "rechazado")).toBe("No aprobado");
+		expect(etiquetaDeEtapa(5, "en_pausa")).toBe("En pausa");
 	});
 
 	test("en los demás pasos usa el nombre de la etapa", () => {
-		expect(etiquetaDeEtapa(caso({ pasoActual: 2, estado: "en_proceso" }))).toBe("Documentos y análisis");
-		expect(etiquetaDeEtapa(caso({ pasoActual: 2, estado: "rechazado" }))).toBe("Documentos y análisis");
+		expect(etiquetaDeEtapa(2, "en_proceso")).toBe("Documentos y análisis");
+		expect(etiquetaDeEtapa(2, "rechazado")).toBe("Documentos y análisis");
+	});
+});
+
+describe("coincidenciaPrincipal", () => {
+	const marcas = [
+		{ porcentaje: 30, fecha: "2026-07-05T12:00:00.000Z" },
+		{ porcentaje: 40, fecha: "2026-07-20T12:00:00.000Z" },
+	];
+
+	test("sin porcentaje filtrado usa la primera llegada", () => {
+		expect(coincidenciaPrincipal(marcas, null)?.porcentaje).toBe(30);
+	});
+
+	test("con porcentaje filtrado usa esa llegada", () => {
+		expect(coincidenciaPrincipal(marcas, 40)?.fecha).toBe(
+			"2026-07-20T12:00:00.000Z",
+		);
+	});
+
+	test("sin llegadas devuelve null", () => {
+		expect(coincidenciaPrincipal([], 30)).toBeNull();
+	});
+});
+
+describe("llegadaEnVentana", () => {
+	test("devuelve la llegada del mes aunque sea de otra etapa", () => {
+		// Entró al listado por su avance de julio en el paso 2, pero hoy va en 4.
+		const c = caso({
+			pasoActual: 4,
+			porcentaje: 85,
+			historial: [
+				{ paso: 2, porcentaje: 30, fecha: "2026-07-10T12:00:00.000Z" },
+				{ paso: 4, porcentaje: 85, fecha: "2026-08-02T12:00:00.000Z" },
+			],
+		});
+
+		expect(llegadaEnVentana(c, JULIO)?.porcentaje).toBe(30);
+		expect(llegadaEnVentana(c, ABRIL)).toBeNull();
 	});
 });

@@ -146,6 +146,34 @@ async function reclamarGrupo(groupId: string): Promise<GrupoClaimado | undefined
 	return group;
 }
 
+/**
+ * Todo update de resultado exige `status='APPLYING'` + el mismo
+ * `dispatchClaimToken` con el que se reclamó — no solo el id. Un solo
+ * `getCarteraAccessToken()` (verify/login sin timeout, cartera-auth.service.ts)
+ * puede tardar más que el lease de 2 min por sí solo, así que un worker
+ * reemplazante puede reclamar y hasta completar el grupo antes de que el
+ * worker viejo (que sigue esperando su fetch colgado) escriba su resultado.
+ * Sin este guard, ese resultado atrasado podía pisar un COMPLETED con
+ * APPLICATION_FAILED o duplicar el evento (hallazgo Codex).
+ */
+const filtroClaimVigente = (group: GrupoClaimado) => {
+	// El token siempre se setea junto con status='APPLYING' en el mismo
+	// UPDATE que reclama (reclamarGrupo/reclamarYProcesarGrupo) — si llega
+	// null acá, algo llamó a este código con un `group` que nunca pasó por
+	// un claim real, y comparar contra NULL en SQL fallaría siempre en
+	// falso de forma silenciosa. Mejor un error explícito.
+	if (!group.dispatchClaimToken) {
+		throw new Error(
+			`Grupo ${group.id} sin dispatchClaimToken — no fue reclamado correctamente.`,
+		);
+	}
+	return and(
+		eq(pagaloPaymentGroups.id, group.id),
+		eq(pagaloPaymentGroups.status, "APPLYING"),
+		eq(pagaloPaymentGroups.dispatchClaimToken, group.dispatchClaimToken),
+	);
+};
+
 async function registrarIntentoFallido(
 	group: GrupoClaimado,
 	errorMessage: string,
@@ -161,7 +189,7 @@ async function registrarIntentoFallido(
 			lastDispatchError: errorMessage,
 			updatedAt: new Date(),
 		})
-		.where(eq(pagaloPaymentGroups.id, group.id));
+		.where(filtroClaimVigente(group));
 }
 
 type FuenteLink = { linkType: "CAPITAL" | "MORA_INTERES" } & Pick<
@@ -240,7 +268,7 @@ async function marcarCompletado(
 	importId: number,
 ): Promise<void> {
 	await db.transaction(async (tx) => {
-		await tx
+		const [actualizado] = await tx
 			.update(pagaloPaymentGroups)
 			.set({
 				status: "COMPLETED",
@@ -252,7 +280,9 @@ async function marcarCompletado(
 				nextDispatchAt: null,
 				updatedAt: new Date(),
 			})
-			.where(eq(pagaloPaymentGroups.id, group.id));
+			.where(filtroClaimVigente(group))
+			.returning({ id: pagaloPaymentGroups.id });
+		if (!actualizado) return;
 		await tx.insert(pagaloPaymentEvents).values({
 			groupId: group.id,
 			eventType: "GROUP_COMPLETED",
@@ -271,7 +301,7 @@ async function marcarRevisionRequerida(
 	detalle?: unknown,
 ): Promise<void> {
 	await db.transaction(async (tx) => {
-		await tx
+		const [actualizado] = await tx
 			.update(pagaloPaymentGroups)
 			.set({
 				status: "REVIEW_REQUIRED",
@@ -279,7 +309,9 @@ async function marcarRevisionRequerida(
 				dispatchClaimedAt: null,
 				updatedAt: new Date(),
 			})
-			.where(eq(pagaloPaymentGroups.id, group.id));
+			.where(filtroClaimVigente(group))
+			.returning({ id: pagaloPaymentGroups.id });
+		if (!actualizado) return;
 		await tx.insert(pagaloPaymentEvents).values({
 			groupId: group.id,
 			eventType: "GROUP_REVIEW_REQUIRED",

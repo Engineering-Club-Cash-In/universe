@@ -381,9 +381,10 @@ const esReciboSaldado = (row: FilaCuotaVencida): boolean => {
   // solo mora/otros el monto_aplicado trae mora+otros con todos los abono_*
   // en 0 — esas no saldan nada.
   if (!sumarAplicadoACuota([row]).gt(0)) return false;
-  // Sin restantes informados no se puede afirmar el saldado: un NULL no es un
-  // cero — filas legacy con restantes NULL y abonos reales quedarían mal
-  // clasificadas como cubiertas.
+  // TODOS los restantes deben venir informados para afirmar el saldado: un
+  // NULL no es un cero. Con .some, una fila legacy con interes_restante=0
+  // pero capital_restante NULL pasaría y el ?? 0 escondería deuda viva
+  // (review Codex). Sin el atajo, la cuota se decide por la suma de rubros.
   const restantesInformados = [
     row.capital_restante,
     row.interes_restante,
@@ -391,7 +392,7 @@ const esReciboSaldado = (row: FilaCuotaVencida): boolean => {
     row.seguro_restante,
     row.gps_restante,
     row.membresias_restante,
-  ].some((v) => v !== null && v !== undefined);
+  ].every((v) => v !== null && v !== undefined);
   if (!restantesInformados) return false;
   const restantes = new Big(row.capital_restante ?? 0)
     .plus(new Big(row.interes_restante ?? 0))

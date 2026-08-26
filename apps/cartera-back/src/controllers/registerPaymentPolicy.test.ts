@@ -1446,3 +1446,35 @@ describe("esReciboSaldado vía filtrar — pagos legacy solo-mora no saldan cuot
     expect(filtrarAtrasadas([filaLegacySoloMora], "2273.80")).toHaveLength(1);
   });
 });
+
+describe("esReciboSaldado vía filtrar — restantes parcialmente informados", () => {
+  it("un restante NULL con otros en 0 NO permite afirmar el saldado (todos deben venir)", () => {
+    // Legacy: interes_restante=0 informado pero capital_restante NULL.
+    // El ?? 0 trataría el NULL como pagado y escondería una cuota viva.
+    const filaParcialmenteInformada = {
+      cuota_id: 10,
+      numero_cuota: 5,
+      pago_id: 100,
+      validationStatus: "validated",
+      paymentFalse: false,
+      abono_capital: "500.00",
+      abono_interes: "0",
+      abono_iva_12: "0",
+      abono_seguro: "0",
+      abono_gps: "0",
+      membresias_pago: "0",
+      capital_restante: null,
+      interes_restante: "0",
+      iva_12_restante: "0",
+      seguro_restante: "0",
+      gps_restante: "0",
+      membresias_restante: "0",
+    };
+    expect(
+      registerPaymentPolicy.filtrarCuotasVencidasSinCobertura(
+        [filaParcialmenteInformada],
+        "2273.80",
+      ),
+    ).toHaveLength(1);
+  });
+});

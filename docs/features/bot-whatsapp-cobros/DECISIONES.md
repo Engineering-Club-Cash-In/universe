@@ -1943,3 +1943,10 @@ desactiva; si la cuota que venció después de generar el link sigue abierta, la
 mora amanece con el monto justo por esa cuota. La reposición del punto 2 solo
 evita que el crédito figure `ACTIVO` las horas entre el pago y el cron.
 
+**Requisito:** el pago Págalo debe quedar **validado en la misma transacción**
+(siguiente slice). El cron solo cuenta la cuota como cubierta con pago
+`validated`/`no_required`; un pago `pending` que cruce las 23:59 hace que
+reponga la mora completa y cobre de nuevo la parte ya pagada — la misma ventana
+registrar→validar que hoy tiene cualquier boleta manual con mora. No se
+parcha `procesarMoras` por esto: se cierra validando de una vez.
+

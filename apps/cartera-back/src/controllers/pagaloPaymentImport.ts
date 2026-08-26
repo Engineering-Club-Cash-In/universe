@@ -220,6 +220,14 @@ export function calcularAjusteMoraPagalo(
  * no amanezca ACTIVO unas horas: `procesarMoras` (23:59) recalcula la mora
  * desde cero (capital × 1.12% × cuotas vencidas), así que a la noche queda
  * la mora justa según las cuotas que sigan abiertas tras este pago.
+ *
+ * DEPENDE de que el pago quede VALIDADO en esta misma transacción: el cron
+ * solo cuenta una cuota como cubierta con pago `validated`/`no_required`, así
+ * que un pago `pending` que cruce las 23:59 hace que reponga la mora completa
+ * (la misma ventana que hoy tiene cualquier boleta manual con mora entre
+ * registrar y validar). Hasta que el import valide de una vez (siguiente
+ * slice, decisión de Daniel), el ajuste solo es exacto si conta valida antes
+ * del cron.
  */
 async function igualarMoraAlSnapshot(
   tx: any,

@@ -220,13 +220,25 @@ describe("estado de cuenta PDF", () => {
     expect(rows.map((p) => p.total_restante)).toEqual(["54555.42", "52234.65", "52234.65", "47874.89", "47874.89"]);
   });
 
-  it("abono puro que llega antes que la cuota regular del mismo mes usa el saldo de la hermana", () => {
+  it("abono puro que llega antes que la cuota regular del mismo mes: saldo corrido real, luego la hermana lo cierra", () => {
     const rows = applyEstadoCuentaRunningCapital([
       { pago_id: 1, numero_cuota: 29, pagado: true, abono_capital: "3456.78", abono_interes: "900.00", total_restante: "62139.83" },
       { pago_id: 3, numero_cuota: 30, pagado: true, abono_capital: "440.50", total_restante: "59946.48" },
       { pago_id: 2, numero_cuota: 30, pagado: true, abono_capital: "1752.85", abono_interes: "850.00", total_restante: "59946.48" },
     ]);
-    expect(rows.map((p) => p.total_restante)).toEqual(["62139.83", "59946.48", "59946.48"]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["62139.83", "61699.33", "59946.48"]);
+  });
+
+  it("abono agregado DESPUÉS de la sync no desarma a las filas ya netas de la cuota", () => {
+    // Saldo Q100; sync escribió Q85 (neto de 10+5) en ambas filas; luego entra
+    // un abono de Q2 que hereda el snapshot Q85. Esperado: 85, 85, 83 (no 78).
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 1, numero_cuota: 4, pagado: true, abono_capital: "0.00", abono_interes: "1.00", total_restante: "100.00" },
+      { pago_id: 2, numero_cuota: 5, pagado: true, abono_capital: "10.00", abono_interes: "1.00", total_restante: "85.00" },
+      { pago_id: 3, numero_cuota: 5, pagado: true, abono_capital: "5.00", total_restante: "85.00" },
+      { pago_id: 4, numero_cuota: 5, pagado: true, abono_capital: "2.00", total_restante: "85.00" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["100.00", "85.00", "85.00", "83.00"]);
   });
 
   it("parcial normal (registerPayment): el cierre solo-capital hereda el saldo de la hermana y SÍ se resta", () => {

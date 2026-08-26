@@ -70,14 +70,14 @@ export function construirMensajeRecordatorioPagalo(
 			? `tu vehículo, placas ${vehiculo.placa}`
 			: `tu crédito ${numeroSifco}`;
 	const explicacion = dosLinks
-		? "Los siguientes pagos, en conjunto, corresponden al total de tu saldo pendiente:"
-		: "Este pago corresponde al total de tu saldo pendiente:";
+		? "Para completar este pago, realiza ambos enlaces de pago:"
+		: "Puedes realizar este pago aquí:";
 	const lineas = links.map((link, index) => {
 		const etiqueta = dosLinks ? `Pago ${index + 1} de 2` : "Pago";
 		return `${etiqueta}: ${link.paymentUrl}`;
 	});
 	return (
-		`${saludo}, tienes un saldo pendiente de ${identificador}.\n\n` +
+		`${saludo}, tienes un pago pendiente de ${identificador}.\n\n` +
 		`${explicacion}\n\n${lineas.join("\n")}\n\n` +
 		"Si ya realizaste el pago, puedes ignorar este mensaje."
 	);

@@ -77,7 +77,7 @@ function buildDeps(overrides: Partial<SendPagaloReminderWhatsappDeps> = {}): {
 }
 
 describe("construirMensajeRecordatorioPagalo", () => {
-	test("dos links: explica que juntos forman saldo pendiente e identifica vehículo y placa", () => {
+	test("dos links: explica que ambos completan un pago pendiente e identifica vehículo y placa", () => {
 		const mensaje = construirMensajeRecordatorioPagalo(
 			"Juan",
 			SIFCO,
@@ -88,14 +88,15 @@ describe("construirMensajeRecordatorioPagalo", () => {
 			{ marca: "TOYOTA", modelo: "RAV4", year: 2017, placa: "P-507GFV" },
 		);
 
-		expect(mensaje).toContain("saldo pendiente de tu TOYOTA RAV4 2017, placas P-507GFV");
+		expect(mensaje).toContain("pago pendiente de tu TOYOTA RAV4 2017, placas P-507GFV");
 		expect(mensaje).toContain(
-			"Los siguientes pagos, en conjunto, corresponden al total de tu saldo pendiente:",
+			"Para completar este pago, realiza ambos enlaces de pago:",
 		);
 		expect(mensaje).not.toContain(SIFCO);
+		expect(mensaje).not.toContain("total de tu saldo pendiente");
 	});
 
-	test("un link: explica que corresponde al total del saldo pendiente", () => {
+	test("un link: invita a realizar pago pendiente", () => {
 		const mensaje = construirMensajeRecordatorioPagalo(
 			"Juan",
 			SIFCO,
@@ -103,9 +104,7 @@ describe("construirMensajeRecordatorioPagalo", () => {
 			{ marca: "TOYOTA", modelo: "RAV4", year: 2017, placa: "P-507GFV" },
 		);
 
-		expect(mensaje).toContain(
-			"Este pago corresponde al total de tu saldo pendiente:",
-		);
+		expect(mensaje).toContain("Puedes realizar este pago aquí:");
 	});
 
 	test("sin vehículo: usa SIFCO como fallback", () => {
@@ -113,7 +112,7 @@ describe("construirMensajeRecordatorioPagalo", () => {
 			{ linkType: "CAPITAL", paymentUrl: "https://s.pagalodev.com/capital" },
 		]);
 
-		expect(mensaje).toContain(`saldo pendiente de tu crédito ${SIFCO}`);
+		expect(mensaje).toContain(`pago pendiente de tu crédito ${SIFCO}`);
 	});
 
 	test("dos links: respeta el orden de entrada (mora primero), no reordena a capital-primero", () => {

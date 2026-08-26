@@ -320,7 +320,12 @@ export async function procesarGrupoParaAplicar(
 	}
 
 	if (!respuesta.success && respuesta.status === "REVIEW_REQUIRED") {
-		await marcarRevisionRequerida(group, respuesta.code, respuesta.import_id);
+		// `postPagaloPaymentImport` castea el JSON de cartera-back sin
+		// validación runtime — un replay de un import ya REVIEW_REQUIRED podía
+		// venir sin `code` pese al tipo estricto. Fallback defensivo para
+		// nunca guardar "undefined" como motivo (hallazgo Codex).
+		const code = respuesta.code ?? "PAGALO_REVIEW_REQUIRED_UNKNOWN_REASON";
+		await marcarRevisionRequerida(group, code, respuesta.import_id);
 		return "REVIEW_REQUIRED";
 	}
 

@@ -336,7 +336,11 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
       });
 
       setCuotasAtrasadasInfo({
-        total: result.cuotasAtrasadas.length,
+        // Únicas por numero_cuota: el endpoint devuelve una fila por pago y
+        // una cuota con varios abonos parciales inflaría el contador.
+        total: new Set(
+          result.cuotasAtrasadas.map((c: any) => c.numero_cuota),
+        ).size,
         cuotas: result.cuotasAtrasadas,
         cuotaMasAntigua:
           result.cuotasAtrasadas.length > 0

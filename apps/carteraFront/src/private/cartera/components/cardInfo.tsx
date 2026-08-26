@@ -432,7 +432,10 @@ export function MiniCardCredito({
                     : "text-gray-600")
                 }
               >
-                {cuotasAtrasadasInfo?.cuotas.length ?? 0}
+                {/* Cuotas únicas: hay una fila por pago y los parciales inflarían el número */}
+                {new Set(
+                  (cuotasAtrasadasInfo?.cuotas ?? []).map((c) => c.numero_cuota),
+                ).size}
               </span>
               {mora > 0 && (
                 <span className="text-xs font-semibold text-red-500">
@@ -454,6 +457,17 @@ export function MiniCardCredito({
                   .map((n) => `#${n}`)
                   .join(", ")}
                 )
+              </div>
+            )}
+
+            {mora > 0 && (cuotasAtrasadasInfo?.cuotas.length ?? 0) === 0 && (
+              <div className="mt-1 px-2 py-1 bg-red-50 border border-red-300 rounded text-[11px] font-semibold text-red-700">
+                ⚠️ Tiene mora activa de Q
+                {mora.toLocaleString("es-GT", { minimumFractionDigits: 2 })} sin
+                cuotas atrasadas visibles
+                {(cuotasEnValidacionInfo?.total ?? 0) > 0
+                  ? " — se generó mientras sus boletas esperan validación de contabilidad; al validarse, la mora se libera automáticamente."
+                  : " — revisar con contabilidad antes de cobrarla."}
               </div>
             )}
 

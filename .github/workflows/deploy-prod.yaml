@@ -46,6 +46,8 @@ on:
 env:
   AWS_REGION: us-east-1
   ECR_REGISTRY: public.ecr.aws/a6w8m2u2
+  COOLIFY_API_BASE: https://coolify.devteamatcci.site/api/v1
+  COOLIFY_APP_UUID_CARTERA_BACK_PROD: qk4sw4kc4c088c8csos400wc
 
 permissions:
   contents: read
@@ -143,6 +145,22 @@ jobs:
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
+
+      - name: Validar variables de Cartera en Coolify
+        if: matrix.app == 'cartera-back'
+        env:
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+        run: |
+          if [ -z "$COOLIFY_TOKEN" ]; then
+            echo "::error::Falta el secret COOLIFY_TOKEN"
+            exit 1
+          fi
+
+          curl --silent --show-error --fail \
+            "$COOLIFY_API_BASE/applications/$COOLIFY_APP_UUID_CARTERA_BACK_PROD/envs" \
+            --header "Authorization: Bearer $COOLIFY_TOKEN" \
+            | node apps/cartera-back/scripts/validate-coolify-envs.mjs \
+                --manifest apps/cartera-back/required-env.production.json
 
       - name: Configure AWS credentials
         # legal-docs-blueprints no pushea imagen: Coolify buildea del repo

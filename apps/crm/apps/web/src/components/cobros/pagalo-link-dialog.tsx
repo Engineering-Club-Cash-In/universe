@@ -108,7 +108,24 @@ export function PagaloLinkDialog({ casoCobroId, numeroSifco, creditoId }: { caso
 			</div> : <div className="min-h-0 space-y-3">
 					<div className="flex items-center justify-between"><p className="text-sm font-medium">Cuotas seleccionables</p><div className="flex items-center gap-2"><span className="text-muted-foreground text-xs">{selected.length + (tieneMora ? 1 : 0)} seleccionada(s)</span>{cuotas.length > 0 && <Button type="button" variant="link" className="h-auto p-0 text-xs" onClick={toggleTodas}>{todasSeleccionadas ? "Desmarcar todas" : "Marcar todas"}</Button>}</div></div>
 				{tieneMora && <div className="flex items-center justify-between rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-900"><span className="flex items-center gap-3"><Checkbox checked disabled />Mora actual</span><span className="text-sm">{q(data.moraActual)}</span></div>}
-				{cuotas.length === 0 ? <p className="text-muted-foreground text-sm">No hay cuotas vencidas disponibles.</p> : <div className="max-h-[48vh] space-y-2 overflow-y-auto pr-2">{cuotas.map((cuota: any) => <Label key={cuota.cuota_id} className="flex cursor-pointer items-center justify-between rounded-md border p-3"><span className="flex items-center gap-3"><Checkbox checked={selected.includes(cuota.cuota_id)} onCheckedChange={() => toggle(cuota.cuota_id)} />Cuota {cuota.numero_cuota}</span><span className="text-muted-foreground text-sm">Capital {q(cuota.capital_restante)} · Interés {q(cuota.interes_restante)}</span></Label>)}</div>}
+				{cuotas.length === 0 ? <p className="text-muted-foreground text-sm">No hay cuotas vencidas disponibles.</p> : <div className="max-h-[48vh] space-y-2 overflow-y-auto pr-2">{cuotas.map((cuota: any) => {
+						const facturableCuota =
+							Number(cuota.interes_restante ?? 0) +
+							Number(cuota.iva_12_restante ?? 0) +
+							Number(cuota.seguro_restante ?? 0) +
+							Number(cuota.gps_restante ?? 0) +
+							Number(cuota.membresias_restante ?? 0);
+						const saldoCuota = Number(cuota.capital_restante ?? 0) + facturableCuota;
+						const nominalCuota = Number(cuota.cuota ?? 0);
+						// Cuota nominal vs saldo real: si hubo un abono parcial previo a
+						// esta misma cuota, el link solo cubre lo que falta (saldoCuota),
+						// no el monto nominal completo — mostrar ambos evita que parezca
+						// que el link está incompleto (caso crédito 752, cuota 28: abono
+						// previo de Q78.24 a interés dejó nominal Q1695.91 vs saldo real
+						// Q1617.67).
+						const yaAbonado = nominalCuota - saldoCuota;
+						return <Label key={cuota.cuota_id} className="flex cursor-pointer items-center justify-between rounded-md border p-3"><span className="flex items-center gap-3"><Checkbox checked={selected.includes(cuota.cuota_id)} onCheckedChange={() => toggle(cuota.cuota_id)} />Cuota {cuota.numero_cuota}</span><span className="text-right text-muted-foreground text-sm"><span className="block">Capital {q(cuota.capital_restante)} · Mora e intereses {q(facturableCuota)}</span>{yaAbonado > 0.01 && <span className="block text-xs">Cuota nominal {q(nominalCuota)} − ya abonado {q(yaAbonado)} = saldo {q(saldoCuota)}</span>}</span></Label>;
+					})}</div>}
 				{(selected.length > 0 || tieneMora) && <div className="space-y-1 rounded-md border bg-muted/40 p-3 text-sm">
 					<p className="font-medium">Links que se van a crear</p>
 					{preview.capital > 0 && <div className="flex items-center justify-between"><span>Link Capital</span><span>{q(preview.capital)}</span></div>}

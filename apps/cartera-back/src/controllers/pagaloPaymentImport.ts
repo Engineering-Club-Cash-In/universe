@@ -39,13 +39,13 @@ export type PagaloRegistroInput = {
   origen_pago: "pagalo";
   pagalo_import_id: number;
   pagalo_componentes: PagaloComponentes;
-  // TEMPORAL (solo pruebas sandbox): procesarRegistroPago usa `banco_id ?? 0`
-  // como default cuando no viene, y banco_id=0 no existe en `bancos` (FK
-  // pagos_credito_banco_id_fkey). Págalo no tiene banco real que reportar;
-  // se fija un banco_id válido cualquiera hasta decidir el manejo definitivo
-  // (columna nullable de verdad, o un banco "PAGALO" dedicado).
   banco_id: number;
 };
+
+// Banco dedicado para pagos Págalo (bancos.banco_id = 28, nombre "PAGALO") —
+// evita el default banco_id=0 que procesarRegistroPago usaría si no viniera
+// (no existe en `bancos`, violaría pagos_credito_banco_id_fkey).
+const PAGALO_BANCO_ID = 28;
 
 const fechaGuatemala = (instant: Date) => {
   const parts = Object.fromEntries(
@@ -115,7 +115,7 @@ export function mapPagaloImportToRegistro(
       ...(capital ? { capital } : {}),
       ...(facturable ? { facturable } : {}),
     },
-    banco_id: 1,
+    banco_id: PAGALO_BANCO_ID,
   };
 }
 

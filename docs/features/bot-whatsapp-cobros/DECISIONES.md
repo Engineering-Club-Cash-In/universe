@@ -1920,3 +1920,26 @@ boleta manual.
 
 Esta decisión reemplaza diseño anterior de dos presupuestos de aplicación y de
 revisión automática por sobrante.
+
+**Ajuste 2026-08-26 (Daniel) — la mora que creció no se cobra de este pago.**
+El punto 1 dejaba al cliente con la cuota abierta aunque pagó exactamente lo que
+le dijimos. Ahora, al aplicar (`pagaloPaymentImport.ts`, dentro de la misma
+transacción y con el crédito bajo lock):
+
+1. Se compara la mora viva (`moras_credito.activa`) con la mora del snapshot
+   (suma del rubro `MORA`; Q0 si el grupo se armó al día).
+2. Si la viva es **mayor**, se baja a la del snapshot (`DECREMENTO`), se aplica
+   el pago (la mora del link y las cuotas cierran) y se repone la diferencia
+   (`INCREMENTO`, reactivando la fila). El crédito sigue `MOROSO` por esa
+   diferencia y queda en `moras_historial` con motivo `Ajuste Págalo grupo …`.
+3. Si la viva es **igual o menor** (condonación o pago por otro canal entre
+   medio) no se sube: sería cobrar mora que ya no debe. Aplica el punto 2 tal
+   cual (sobrante cascadea).
+
+Qué monto queda debiendo a la larga NO lo decide este ajuste sino
+`procesarMoras` (23:59), que recalcula desde cero `capital × 1.12% × cuotas
+vencidas`: si tras el pago ya no hay cuota vencida, esa noche la mora se
+desactiva; si la cuota que venció después de generar el link sigue abierta, la
+mora amanece con el monto justo por esa cuota. La reposición del punto 2 solo
+evita que el crédito figure `ACTIVO` las horas entre el pago y el cron.
+

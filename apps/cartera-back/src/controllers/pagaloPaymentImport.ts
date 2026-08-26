@@ -4,9 +4,16 @@ import {
   verificarPagaloPayloadHash,
   type PagaloImportCommand,
 } from "./pagaloPaymentImportPolicy";
+import Big from "big.js";
 import { and, eq, or } from "drizzle-orm";
 import { db } from "../database";
-import { creditos, pagalo_payment_imports, pagos_credito } from "../database/db";
+import {
+  creditos,
+  moras_credito,
+  pagalo_payment_imports,
+  pagos_credito,
+} from "../database/db";
+import { updateMoraEnTx } from "./latefee";
 import { procesarRegistroPago } from "./registerPayment";
 import type { PagaloComponentes } from "./registerPayment";
 import { CREDIT_PENDING_CANCELLATION_ERROR } from "./registerPaymentPolicy";
@@ -170,6 +177,93 @@ export function createPagaloImportService(deps: PagaloImportServiceDependencies)
 
       return deps.registrarPago(validated.data);
     },
+  };
+}
+
+/**
+ * Mora que el cliente VIO al generar los links: la suma del rubro MORA del
+ * snapshot (Q0 si el grupo se armó al día y no lleva ese rubro).
+ */
+export const moraDelSnapshot = (command: PagaloImportCommand): string =>
+  command.allocations
+    .filter((a) => a.rubro === "MORA")
+    .reduce((n, a) => n.plus(a.amount), new Big(0))
+    .toFixed(2);
+
+/**
+ * Ajuste de mora al aplicar un pago Págalo (D-52, ajuste 2026-08-26, Daniel).
+ *
+ * El motor de `procesarRegistroPago` consume PRIMERO la mora viva de
+ * `moras_credito`. Si esa mora creció (o nació) después de generar los links
+ * — corrió el job de las 23:59 — se tragaría parte del dinero de la cuota y
+ * el cliente, que pagó exactamente lo que le dijimos, quedaría con la cuota
+ * abierta. Lo justo: el pago cubre la mora que el cliente vio; la diferencia
+ * sigue debiéndose como mora.
+ *
+ * Devuelve la diferencia (viva − snapshot) solo cuando la mora viva es MAYOR.
+ * Si la mora viva es menor (condonación o pago por otro canal entre medio)
+ * no se sube: sería cobrar mora que ya no debe; el sobrante cascadea como
+ * boleta manual (D-52.2).
+ */
+export function calcularAjusteMoraPagalo(
+  moraViva: string | number | null | undefined,
+  moraSnapshot: string,
+): string | null {
+  const viva = new Big(moraViva ?? 0);
+  const snapshot = new Big(moraSnapshot);
+  return viva.gt(snapshot) ? viva.minus(snapshot).toFixed(2) : null;
+}
+
+/**
+ * Deja la mora viva igual al snapshot ANTES de registrar el pago, y devuelve
+ * el callback que la repone DESPUÉS. La reposición existe para que el crédito
+ * no amanezca ACTIVO unas horas: `procesarMoras` (23:59) recalcula la mora
+ * desde cero (capital × 1.12% × cuotas vencidas), así que a la noche queda
+ * la mora justa según las cuotas que sigan abiertas tras este pago.
+ */
+async function igualarMoraAlSnapshot(
+  tx: any,
+  command: PagaloImportCommand,
+): Promise<null | (() => Promise<void>)> {
+  const snapshot = moraDelSnapshot(command);
+  const [moraViva] = await tx
+    .select({ monto_mora: moras_credito.monto_mora })
+    .from(moras_credito)
+    .where(
+      and(
+        eq(moras_credito.credito_id, command.credito_id),
+        eq(moras_credito.activa, true),
+      ),
+    )
+    .limit(1)
+    .for("update");
+  const diferencia = calcularAjusteMoraPagalo(moraViva?.monto_mora, snapshot);
+  if (diferencia === null) return null;
+
+  const motivo = `Ajuste Págalo grupo ${command.crm_group_id}: mora viva Q${new Big(moraViva?.monto_mora ?? 0).toFixed(2)} vs mora del link Q${snapshot}; diferencia Q${diferencia} sigue pendiente`;
+  const bajar = await updateMoraEnTx(
+    { credito_id: command.credito_id, tipo: "DECREMENTO", monto_cambio: Number(diferencia) },
+    tx,
+    { motivo },
+  );
+  if (!bajar.success) {
+    throw new Error(`${REVIEW_REQUIRED_PREFIX} No se pudo igualar la mora al snapshot Págalo: ${bajar.message}`);
+  }
+  return async () => {
+    // `activa: true` reactiva la fila aunque el pago la haya dejado en Q0.
+    const subir = await updateMoraEnTx(
+      {
+        credito_id: command.credito_id,
+        tipo: "INCREMENTO",
+        monto_cambio: Number(diferencia),
+        activa: true,
+      },
+      tx,
+      { motivo },
+    );
+    if (!subir.success) {
+      throw new Error(`${REVIEW_REQUIRED_PREFIX} No se pudo reponer la diferencia de mora Págalo: ${subir.message}`);
+    }
   };
 }
 
@@ -448,6 +542,10 @@ export const importPagaloPayment = async ({ body, set }: any) => {
           .returning({ id: pagalo_payment_imports.id });
         if (!ledger) throw new Error("No se pudo crear importación Págalo.");
 
+        // D-52 (ajuste): el pago cubre la mora que el cliente vio en el link;
+        // si la mora creció desde entonces, la diferencia se repone después.
+        const reponerMora = await igualarMoraAlSnapshot(tx, command);
+
         const result = await procesarRegistroPago(
           {
             data: {
@@ -462,6 +560,7 @@ export const importPagaloPayment = async ({ body, set }: any) => {
         if ("success" in result && result.success === false) {
           throw new Error(`${REVIEW_REQUIRED_PREFIX} ${result.message}`);
         }
+        if (reponerMora) await reponerMora();
 
         const paymentIds = await paymentIdsForImport(tx, ledger.id);
         if (paymentIds.length === 0) {

@@ -1,11 +1,13 @@
 import { describe, expect, it, mock } from "bun:test";
 import { calcularPagaloPayloadHash, type PagaloImportCommand } from "./pagaloPaymentImportPolicy";
 import {
+  calcularAjusteMoraPagalo,
   createPagaloImportService,
   getPagaloImportReplayHttpStatus,
   getPagaloReviewRequiredReason,
   isPagaloSameRoleEvidenceConflict,
   mapPagaloImportToRegistro,
+  moraDelSnapshot,
   resolvePagaloLedgerCreditIdentity,
 } from "./pagaloPaymentImport";
 
@@ -245,5 +247,27 @@ describe("pagalo payment import", () => {
     });
     expect(markReviewRequired).toHaveBeenCalledWith(44, "PAGALO_PAYLOAD_HASH_CONFLICT");
     expect(registrarPago).not.toHaveBeenCalled();
+  });
+});
+
+describe("ajuste de mora al aplicar (D-52, 2026-08-26)", () => {
+  it("la mora del snapshot es la suma del rubro MORA (Q0 si no viene)", () => {
+    expect(moraDelSnapshot(command())).toBe("25.00");
+    const alDia = command();
+    alDia.allocations = alDia.allocations.filter((a) => a.rubro !== "MORA");
+    expect(moraDelSnapshot(alDia)).toBe("0.00");
+  });
+
+  it("si la mora viva creció, la diferencia es lo que sigue pendiente", () => {
+    expect(calcularAjusteMoraPagalo("700.00", "500.00")).toBe("200.00");
+    // nació una mora que no existía al generar el link (cliente al día)
+    expect(calcularAjusteMoraPagalo("312.48", "0.00")).toBe("312.48");
+  });
+
+  it("si la mora viva es igual o menor (condonada / pagada por otro canal) no se toca", () => {
+    expect(calcularAjusteMoraPagalo("500.00", "500.00")).toBeNull();
+    expect(calcularAjusteMoraPagalo("300.00", "500.00")).toBeNull();
+    expect(calcularAjusteMoraPagalo(null, "500.00")).toBeNull();
+    expect(calcularAjusteMoraPagalo(undefined, "0.00")).toBeNull();
   });
 });

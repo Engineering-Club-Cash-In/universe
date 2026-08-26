@@ -21,7 +21,11 @@ describe("Págalo link display", () => {
 		});
 		expect(
 			getPagaloGroupSummary([
-				{ linkType: "CAPITAL", status: "PAID" },
+				{
+					linkType: "CAPITAL",
+					status: "PAID",
+					isApplicationSource: true,
+				},
 				{ linkType: "MORA_INTERES", status: "ACTIVE" },
 			]),
 		).toBe("1 de 2 pagados");
@@ -33,9 +37,30 @@ describe("Págalo link display", () => {
 			getPagaloGroupSummary([
 				{ linkType: "CAPITAL", status: "REPLACED" },
 				{ linkType: "CAPITAL", status: "ACTIVE" },
-				{ linkType: "MORA_INTERES", status: "PAID" },
+				{
+					linkType: "MORA_INTERES",
+					status: "PAID",
+					isApplicationSource: true,
+				},
 			]),
 		).toBe("1 de 2 pagados");
+	});
+
+	test("does not treat a late payment on replaced link as obligation paid", () => {
+		expect(
+			getPagaloGroupSummary([
+				{
+					linkType: "CAPITAL",
+					status: "PAID",
+					isApplicationSource: false,
+				},
+				{
+					linkType: "CAPITAL",
+					status: "ACTIVE",
+					isApplicationSource: false,
+				},
+			]),
+		).toBe("0 de 1 pagados");
 	});
 
 	test("copies exact URL and returns clipboard failures", async () => {

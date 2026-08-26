@@ -68,14 +68,19 @@ export function getPagaloLinkStatusInfo(status: string): StatusInfo {
 }
 
 export function getPagaloGroupSummary(
-	links: Array<{ linkType: string; status: string }>,
+	links: Array<{
+		linkType: string;
+		status: string;
+		isApplicationSource?: boolean;
+	}>,
 ) {
 	if (links.length === 0) return null;
 	const estadoPorTipo = new Map<string, boolean>();
 	for (const link of links) {
 		estadoPorTipo.set(
 			link.linkType,
-			estadoPorTipo.get(link.linkType) === true || link.status === "PAID",
+			estadoPorTipo.get(link.linkType) === true ||
+				(link.status === "PAID" && link.isApplicationSource === true),
 		);
 	}
 	const pagados = [...estadoPorTipo.values()].filter(Boolean).length;

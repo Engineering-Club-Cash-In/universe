@@ -69,6 +69,7 @@ type Link = {
 	paymentUrl: string | null;
 	voucherUrl: string | null;
 	paidAt: string | null;
+	isApplicationSource: boolean;
 };
 
 type Grupo = {

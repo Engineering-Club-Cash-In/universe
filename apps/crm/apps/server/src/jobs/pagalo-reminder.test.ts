@@ -12,6 +12,17 @@ import { normalizePhone } from "../lib/simpletech";
 
 type LinkFixture = Parameters<typeof esPendiente>[0];
 
+test("fallback de vehículo usa vehículo de oportunidad, no contrato arbitrario del cliente", async () => {
+	const source = await Bun.file(new URL("./pagalo-reminder.ts", import.meta.url)).text();
+
+	expect(source).toContain(
+		".leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))",
+	);
+	expect(source).not.toContain(
+		"eq(contratosFinanciamiento.clientId, clients.id)",
+	);
+});
+
 test("fallback de oportunidad solo permite créditos ganados o migrados", () => {
 	expect(ESTADOS_OPORTUNIDAD_CON_CREDITO).toEqual(["won", "migrate"]);
 });

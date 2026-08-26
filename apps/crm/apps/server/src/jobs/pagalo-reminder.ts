@@ -35,7 +35,7 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "../db";
 import { casosCobros, contratosFinanciamiento } from "../db/schema/cobros";
-import { clients, leads, opportunities } from "../db/schema/crm";
+import { leads, opportunities } from "../db/schema/crm";
 import {
 	type PagaloPaymentGroupStatus,
 	pagaloPaymentGroups,
@@ -187,12 +187,7 @@ async function resolverContacto(
 		})
 		.from(opportunities)
 		.leftJoin(leads, eq(opportunities.leadId, leads.id))
-		.leftJoin(clients, eq(clients.opportunityId, opportunities.id))
-		.leftJoin(
-			contratosFinanciamiento,
-			eq(contratosFinanciamiento.clientId, clients.id),
-		)
-		.leftJoin(vehicles, eq(vehicles.id, contratosFinanciamiento.vehicleId))
+		.leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
 		.where(
 			and(
 				eq(opportunities.numeroSifco, group.numeroCreditoSifco),

@@ -74,6 +74,12 @@ const [resetBuscador, setResetBuscador] = useState(false);
     cuotas: any[];
     cuotaMasAntigua?: number;
   } | null>(null);
+  // Cuotas vencidas ya cubiertas por boletas pendientes de validar por
+  // contabilidad: no son atraso, pero el asesor debe saber que existen.
+  const [cuotasEnValidacionInfo, setCuotasEnValidacionInfo] = useState<{
+    total: number;
+    cuotas: any[];
+  } | null>(null);
   const [permiteAbonoCapital, setPermiteAbonoCapital] = useState<boolean>(false);
 const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
   convenio_id: number;
@@ -193,6 +199,7 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
         setDataCredito(null); // Limpiar datos del crédito
         setCuotaActualInfo(null);
         setCuotasAtrasadasInfo(null);
+        setCuotasEnValidacionInfo(null);
         setPermiteAbonoCapital(false);
         setCuotasPendientesInfo(null);
         setModalExcesoOpen(false); // Cerrar modal de exceso
@@ -233,6 +240,7 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
         setCreditoCanceladoInfo(null);
         setCuotaActualInfo(null);
         setCuotasAtrasadasInfo(null);
+        setCuotasEnValidacionInfo(null);
         setCuotasPendientesInfo(null);
         setConvenioActivoInfo(null);
         setPermiteAbonoCapital(false);
@@ -259,6 +267,7 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
         setDataCredito(result);
         setCuotaActualInfo(null);
         setCuotasAtrasadasInfo(null);
+        setCuotasEnValidacionInfo(null);
         setPermiteAbonoCapital(false);
         setCuotasPendientesInfo(null);
         setCuotaSeleccionada(0);
@@ -291,13 +300,19 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
         : cuotaActualObj;
 
       const siguienteCuotaPagable = [
+        // Las atrasadas ya vienen filtradas por COBERTURA desde el back: si
+        // están aquí, la cuota sigue debiendo y es pagable aunque su fila sea
+        // un pago validated parcial (filtrarla por status la escondía y el
+        // selector saltaba a la cuota siguiente sin cobrar el faltante).
         ...(result.cuotasAtrasadas ?? []),
-        ...(result.cuotasPendientes ?? []),
-      ]
-        // Los pagos `pending` también son seleccionables para poder reportar
-        // abonos complementarios antes de que contabilidad valide el anterior.
-        .filter((c: any) => c.validationStatus !== "validated" && c.validationStatus !== "capital_validated")
-        .sort((a: any, b: any) => a.numero_cuota - b.numero_cuota)[0];
+        // En pendientes sí se ocultan las validadas/cerradas; los `pending`
+        // siguen seleccionables para reportar abonos complementarios.
+        ...(result.cuotasPendientes ?? []).filter(
+          (c: any) =>
+            c.validationStatus !== "validated" &&
+            c.validationStatus !== "capital_validated",
+        ),
+      ].sort((a: any, b: any) => a.numero_cuota - b.numero_cuota)[0];
 
       setCuotaSeleccionada(siguienteCuotaPagable?.numero_cuota ?? cuotaActualNumero ?? 0);
       setMora(result.moraActual || 0);
@@ -327,12 +342,23 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
       });
 
       setCuotasAtrasadasInfo({
-        total: result.cuotasAtrasadas.length,
+        // Únicas por numero_cuota: el endpoint devuelve una fila por pago y
+        // una cuota con varios abonos parciales inflaría el contador.
+        total: new Set(
+          result.cuotasAtrasadas.map((c: any) => c.numero_cuota),
+        ).size,
         cuotas: result.cuotasAtrasadas,
         cuotaMasAntigua:
           result.cuotasAtrasadas.length > 0
             ? result.cuotasAtrasadas[0].numero_cuota
             : undefined,
+      });
+
+      const filasEnValidacion = result.cuotasEnValidacion ?? [];
+      setCuotasEnValidacionInfo({
+        // Únicas por numero_cuota: el endpoint devuelve una fila por pago
+        total: new Set(filasEnValidacion.map((c: any) => c.numero_cuota)).size,
+        cuotas: filasEnValidacion,
       });
 
       setPermiteAbonoCapital(!!result.credito?.permite_abono_capital);
@@ -367,6 +393,7 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
       setDataCredito(null);
       setCuotaActualInfo(null);
       setCuotasAtrasadasInfo(null);
+        setCuotasEnValidacionInfo(null);
       setCuotasPendientesInfo(null);
       setCuotaSeleccionada(0);
       setSaldoAFavorUser(0);
@@ -786,6 +813,7 @@ async function handleResetCredito(montoIncobrable = 0) {
         setDataCredito(null);
         setCuotaActualInfo(null);
         setCuotasAtrasadasInfo(null);
+        setCuotasEnValidacionInfo(null);
         setPermiteAbonoCapital(false);
         setCuotasPendientesInfo(null);
         setModalExcesoOpen(false);
@@ -813,6 +841,7 @@ async function handleResetCredito(montoIncobrable = 0) {
     errorCredito,
     cuotaActualInfo,
     cuotasAtrasadasInfo,
+    cuotasEnValidacionInfo,
     permiteAbonoCapital,
     cuotasPendientesInfo,
     useReversePagosInversionistas,

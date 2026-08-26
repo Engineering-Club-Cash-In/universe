@@ -35,6 +35,7 @@ export function PagoForm() {
     errorCredito,
     cuotaActualInfo,
     cuotasAtrasadasInfo,
+    cuotasEnValidacionInfo,
     handleFormSubmit,
     modalExcesoOpen,
     setModalExcesoOpen,
@@ -530,6 +531,7 @@ export function PagoForm() {
                 cuotaActualPagada={cuotaActualInfo?.pagada}
                 cuotaActualStatus={cuotaActualInfo?.validationStatus}
                 cuotasAtrasadasInfo={cuotasAtrasadasInfo ?? { cuotas: [] }}
+                cuotasEnValidacionInfo={cuotasEnValidacionInfo ?? undefined}
                 onCuotaSeleccionadaChange={setCuotaSeleccionada}
                 cuotasPendientesInfo={cuotasPendientesInfo ?? { cuotas: [] }}
                 mora={mora || 0}

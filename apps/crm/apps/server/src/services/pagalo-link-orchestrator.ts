@@ -129,6 +129,10 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 	}
 	// Sustitución de test mode DESPUÉS de validar que el caso sí tiene
 	// contacto real cargado — testMode no debe ocultar un caso mal cargado.
+	// Solo phone/email se redirigen (para que cualquier correo/mensaje real
+	// que dispare Págalo llegue acá); nombre, ciudad, departamento y
+	// dirección se quedan reales por trazabilidad — decisión explícita del
+	// usuario.
 	const testMode = isTestModeEnabled();
 	const clientContact = {
 		phone: testMode ? PAGALO_TEST_PHONE : telefono,

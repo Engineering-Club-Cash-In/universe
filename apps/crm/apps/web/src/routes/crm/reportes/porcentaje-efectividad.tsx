@@ -365,8 +365,8 @@ export function PorcentajeEfectividadContent() {
 				<CardHeader>
 					<CardTitle>Colocación por predio / agencia</CardTitle>
 					<CardDescription>
-						Monto colocado y cantidad de créditos cuyo primer cierre ocurrió en
-						el período
+						Monto colocado y cantidad de créditos por la empresa asociada a la
+						oportunidad cuyo primer cierre ocurrió en el período
 					</CardDescription>
 				</CardHeader>
 				<CardContent>

@@ -869,8 +869,8 @@ export const getReportePorcentajeEfectividad =
 						opportunities,
 						eq(firstClosedStageDates.opportunityId, opportunities.id),
 					)
-					.leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
-					.leftJoin(companies, eq(vehicles.companyId, companies.id))
+					// El predio/agencia pertenece directamente a la oportunidad.
+					.leftJoin(companies, eq(opportunities.companyId, companies.id))
 					.where(
 						and(
 							gte(firstClosedStageDates.firstClosedStageAt, start),

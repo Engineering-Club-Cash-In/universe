@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CreditCard, ExternalLink, Loader2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -54,10 +54,12 @@ export function PagaloLinkDialog({ casoCobroId, numeroSifco, creditoId }: { caso
 		const facturable = facturableCuotas + mora;
 		return { capital, facturable, total: capital + facturable };
 	}, [cuotas, selected, tieneMora, data]);
+	const queryClient = useQueryClient();
 	const mutation = useMutation({
 		mutationFn: (input: { casoCobroId: string; numeroSifco: string; creditoId: number; cuotaIds: number[] }) =>
 			(client as any).crearLinksPagalo(input),
 		onSuccess: (result: any) => {
+			queryClient.invalidateQueries(orpc.getPagaloHistorial.queryOptions({ input: { casoCobroId } }));
 			if (result.status === "REVIEW_REQUIRED") toast.error("Grupo Págalo existente requiere revisión.");
 			else if (result.origen === "BOT")
 				toast.info("El cliente ya generó estos links desde WhatsApp; se muestran los mismos.");
@@ -83,6 +85,7 @@ export function PagaloLinkDialog({ casoCobroId, numeroSifco, creditoId }: { caso
 	const pollMutation = useMutation({
 		mutationFn: () => (client as any).probarPollPagalo(),
 		onSuccess: (result: any) => {
+			queryClient.invalidateQueries(orpc.getPagaloHistorial.queryOptions({ input: { casoCobroId } }));
 			console.log("[Págalo] resultado del poll:", result);
 			toast.success(
 				`Poll: ${result.pagados} pagado(s), ${result.errores} error(es). Dispatch: ${result.dispatchCompletados} completado(s), ${result.dispatchErrores} error(es). Revisa la consola.`,

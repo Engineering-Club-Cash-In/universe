@@ -59,11 +59,20 @@ function getCarteraBackUrl(): string {
 	return process.env.CARTERA_BACK_URL || "http://localhost:7000";
 }
 
-async function enviar(command: PagaloImportCommand, token: string): Promise<Response> {
+type RespuestaLeida = { status: number; raw: string };
+
+/**
+ * Lee headers Y body bajo la misma ventana de abort. `fetch` resuelve en
+ * cuanto llegan los headers — si el `text()` corriera fuera de este scope
+ * (como antes), un cartera-back que manda headers y se cuelga/desconecta a
+ * mitad del body colgaría la lectura indefinidamente, sin ningún límite,
+ * dejando el grupo en APPLYING hasta recovery de lease (hallazgo Codex).
+ */
+async function enviar(command: PagaloImportCommand, token: string): Promise<RespuestaLeida> {
 	const controller = new AbortController();
 	const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
 	try {
-		return await fetch(`${getCarteraBackUrl()}/pagalo/payment-imports`, {
+		const response = await fetch(`${getCarteraBackUrl()}/pagalo/payment-imports`, {
 			method: "POST",
 			headers: {
 				"content-type": "application/json",
@@ -72,6 +81,8 @@ async function enviar(command: PagaloImportCommand, token: string): Promise<Resp
 			body: JSON.stringify(command),
 			signal: controller.signal,
 		});
+		const raw = await response.text();
+		return { status: response.status, raw };
 	} finally {
 		clearTimeout(timeout);
 	}
@@ -81,7 +92,7 @@ async function enviar(command: PagaloImportCommand, token: string): Promise<Resp
 export async function postPagaloPaymentImport(
 	command: PagaloImportCommand,
 ): Promise<PagaloImportResult> {
-	let response: Response;
+	let response: RespuestaLeida;
 	try {
 		const token = await getCarteraAccessToken();
 		response = await enviar(command, token);
@@ -97,7 +108,7 @@ export async function postPagaloPaymentImport(
 		return { success: false, status: "NETWORK_ERROR", message };
 	}
 
-	const raw = await response.text();
+	const raw = response.raw;
 	let body: unknown;
 	try {
 		body = raw ? JSON.parse(raw) : null;

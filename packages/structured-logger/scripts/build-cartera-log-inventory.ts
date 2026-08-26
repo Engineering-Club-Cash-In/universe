@@ -67,6 +67,10 @@ const sliceManifests = [
     file: 'TENTH_SLICE_DISPOSITIONS.json',
     paths: new Set(['apps/cartera-back/src/controllers/migratePayments.ts']),
   },
+  {
+    file: 'ELEVENTH_SLICE_DISPOSITIONS.json',
+    paths: new Set(['apps/cartera-back/schedule.ts']),
+  },
 ] as const;
 const reviewedPaths = new Set(sliceManifests.flatMap(({ paths }) => [...paths]));
 

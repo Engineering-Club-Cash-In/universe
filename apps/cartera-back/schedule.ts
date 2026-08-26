@@ -8,6 +8,7 @@ import {
   reportarFacturasFallidasSat,
 } from './src/controllers/verificarFacturasSat';
 import { generarSnapshotDiario } from './src/controllers/facturacionSnapshot';
+import { runScheduledJob, runScheduledJobAttempts } from './scheduledJobRunner';
 
 const TZ_GUATEMALA = 'America/Guatemala';
 
@@ -35,25 +36,16 @@ function getFechaGuatemalaISO(offsetDays = 0) {
 export function iniciarTareasProgramadas() {
   // 🌙 procesarMoras - 11:59 PM hora Guatemala (sin importar dónde esté el server)
   schedule.scheduleJob({ rule: '59 23 * * *', tz: TZ_GUATEMALA }, async () => {
-    console.log('🕐 Ejecutando procesarMoras a las 11:59 PM Guatemala...');
-    try {
-      await procesarMoras();
-      console.log('✅ procesarMoras ejecutado correctamente');
-    } catch (error) {
-      console.error('❌ Error al ejecutar procesarMoras:', error);
-    }
+    await runScheduledJob('process_late_fees', () => procesarMoras());
   });
 
   // 📊 Efectividad asesores - 11:00 PM hora Guatemala
   schedule.scheduleJob({ rule: '0 23 * * *', tz: TZ_GUATEMALA }, async () => {
     const { dia, mes, anio } = getFechaGuatemala();
-    console.log(`📊 Ejecutando upsertEfectividadAsesores para ${dia}/${mes}/${anio}...`);
-    try {
-      const result = await upsertEfectividadAsesores(dia, mes, anio);
-      console.log('✅ upsertEfectividadAsesores:', result.ok ? 'OK' : result.error);
-    } catch (error) {
-      console.error('❌ Error al ejecutar upsertEfectividadAsesores:', error);
-    }
+    await runScheduledJob(
+      'upsert_advisor_effectiveness',
+      () => upsertEfectividadAsesores(dia, mes, anio),
+    );
   });
 
   // ⏰ Expira compras de cartera aceptadas vencidas - 00:00 hora Guatemala.
@@ -61,15 +53,10 @@ export function iniciarTareasProgramadas() {
   //    con status="pendiente_revision" cuya fecha de baja (expira + 1 hábil)
   //    sea <= hoy en GT se devuelve a CUBE.
   schedule.scheduleJob({ rule: '0 0 * * *', tz: TZ_GUATEMALA }, async () => {
-    console.log('🕛 Ejecutando expirarCompraCarteraVencidas a las 00:00 Guatemala...');
-    try {
-      const res = await expirarCompraCarteraVencidas();
-      console.log(
-        `✅ expirarCompraCartera: escaneados=${res.escaneados}, vencidos=${res.vencidos}, creditosProcesados=${res.creditosProcesados}`,
-      );
-    } catch (error) {
-      console.error('❌ Error al ejecutar expirarCompraCarteraVencidas:', error);
-    }
+    await runScheduledJob(
+      'expire_portfolio_purchases',
+      () => expirarCompraCarteraVencidas(),
+    );
   });
 
   // 📊 Cierre mensual de cartera - DIARIO a las 02:00 hora Guatemala (después de procesarMoras).
@@ -77,38 +64,26 @@ export function iniciarTareasProgramadas() {
   //    (gracia para que asiente la data), del 6 en adelante refresca el mes actual.
   //    Genera conteo/capital por estado + el aging de mora (buckets por cuotas atrasadas).
   schedule.scheduleJob({ rule: '0 2 * * *', tz: TZ_GUATEMALA }, async () => {
-    console.log('🗓️ Ejecutando generarCierreMensual (diario, 02:00 Guatemala)...');
-    try {
-      const res = await generarCierreMensual(periodoObjetivo(new Date()));
-      console.log(`✅ cierreMensual: periodo=${res.periodo}, filas=${res.filas}`);
-    } catch (error) {
-      console.error('❌ Error al ejecutar generarCierreMensual:', error);
-    }
+    await runScheduledJob(
+      'generate_monthly_close',
+      () => generarCierreMensual(periodoObjetivo(new Date())),
+    );
   });
 
   // 🧾 Verificación de facturas en SAT - cada 15 min, 8:00–19:00 hora Guatemala.
   //    Revisa las facturas ACTIVA nuevas (desde el último cursor) y registra en
   //    cartera.facturas_fallidas_sat las que NO se encuentran en SAT.
   schedule.scheduleJob({ rule: '*/15 8-19 * * *', tz: TZ_GUATEMALA }, async () => {
-    console.log('🧾 Ejecutando verificarFacturasSat...');
-    try {
-      const res = await verificarFacturasSat();
-      console.log(`✅ verificarFacturasSat: revisadas=${res.revisadas}, fallidas=${res.fallidas}`);
-    } catch (error) {
-      console.error('❌ Error al ejecutar verificarFacturasSat:', error);
-    }
+    await runScheduledJob('verify_sat_invoices', () => verificarFacturasSat());
   });
 
   // 📧 Reporte por correo de facturas fallidas - cada hora, 8:00–19:00 hora Guatemala.
   //    Envía todas las fallidas PENDIENTE; si no hay, no envía correo.
   schedule.scheduleJob({ rule: '0 8-19 * * *', tz: TZ_GUATEMALA }, async () => {
-    console.log('📧 Ejecutando reportarFacturasFallidasSat...');
-    try {
-      const res = await reportarFacturasFallidasSat();
-      console.log(`✅ reportarFacturasFallidasSat: enviadas=${res.enviadas}`);
-    } catch (error) {
-      console.error('❌ Error al ejecutar reportarFacturasFallidasSat:', error);
-    }
+    await runScheduledJob(
+      'report_failed_sat_invoices',
+      () => reportarFacturasFallidasSat(),
+    );
   });
 
   // 📸 Snapshot diario de facturación - 01:00 hora Guatemala.
@@ -117,17 +92,12 @@ export function iniciarTareasProgramadas() {
   //    (p. ej. del import del Excel hasta 2026-12-31) que de otro modo
   //    quedarían congeladas en su valor viejo/0.
   schedule.scheduleJob({ rule: '0 1 * * *', tz: TZ_GUATEMALA }, async () => {
-    for (const off of [-1, -2, -3]) {
-      const fecha = getFechaGuatemalaISO(off); // ayer, antier, trasantier (GT)
-      console.log(`📸 Regenerando snapshot diario ${fecha} (01:00 Guatemala)...`);
-      try {
-        await generarSnapshotDiario(fecha);
-        console.log(`✅ snapshotDiario ${fecha}: regenerado`);
-      } catch (error) {
-        console.error(`❌ Error regenerando snapshot ${fecha}:`, error);
+    function* snapshotAttempts() {
+      for (const offset of [-1, -2, -3]) {
+        const fecha = getFechaGuatemalaISO(offset); // ayer, antier, trasantier (GT)
+        yield async () => generarSnapshotDiario(fecha);
       }
     }
+    await runScheduledJobAttempts('generate_daily_invoice_snapshot', snapshotAttempts());
   });
-
-  console.log('✅ Tareas programadas iniciadas (horario Guatemala)');
 }

@@ -300,13 +300,19 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
         : cuotaActualObj;
 
       const siguienteCuotaPagable = [
+        // Las atrasadas ya vienen filtradas por COBERTURA desde el back: si
+        // están aquí, la cuota sigue debiendo y es pagable aunque su fila sea
+        // un pago validated parcial (filtrarla por status la escondía y el
+        // selector saltaba a la cuota siguiente sin cobrar el faltante).
         ...(result.cuotasAtrasadas ?? []),
-        ...(result.cuotasPendientes ?? []),
-      ]
-        // Los pagos `pending` también son seleccionables para poder reportar
-        // abonos complementarios antes de que contabilidad valide el anterior.
-        .filter((c: any) => c.validationStatus !== "validated" && c.validationStatus !== "capital_validated")
-        .sort((a: any, b: any) => a.numero_cuota - b.numero_cuota)[0];
+        // En pendientes sí se ocultan las validadas/cerradas; los `pending`
+        // siguen seleccionables para reportar abonos complementarios.
+        ...(result.cuotasPendientes ?? []).filter(
+          (c: any) =>
+            c.validationStatus !== "validated" &&
+            c.validationStatus !== "capital_validated",
+        ),
+      ].sort((a: any, b: any) => a.numero_cuota - b.numero_cuota)[0];
 
       setCuotaSeleccionada(siguienteCuotaPagable?.numero_cuota ?? cuotaActualNumero ?? 0);
       setMora(result.moraActual || 0);

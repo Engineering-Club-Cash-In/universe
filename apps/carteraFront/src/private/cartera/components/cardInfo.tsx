@@ -126,13 +126,19 @@ export function MiniCardCredito({
   };
 
   const cuotasFiltradas = [
+    // Las atrasadas ya vienen filtradas por COBERTURA desde el back: son
+    // pagables aunque su fila sea un pago validated parcial (ocultarlas por
+    // status hacía imposible cobrar el faltante de la cuota).
     ...(cuotasAtrasadasInfo?.cuotas ?? []),
-    ...(cuotasPendientesInfo?.cuotas ?? []),
+    // En pendientes sí se ocultan las validadas/cerradas; los `pending`
+    // siguen seleccionables para abonos complementarios.
+    ...(cuotasPendientesInfo?.cuotas ?? []).filter(
+      (c) =>
+        c.validationStatus !== "validated" &&
+        c.validationStatus !== "capital_validated",
+    ),
   ]
-    // Permitir seleccionar cuotas con pagos pendientes; solo se ocultan las
-    // cuotas ya validadas/cerradas. Se mantiene limitado a la cuota pagable
-    // más antigua para no saltar deuda anterior.
-    .filter((c) => c.validationStatus !== "validated" && c.validationStatus !== "capital_validated")
+    // Limitado a la cuota pagable más antigua para no saltar deuda anterior.
     .sort((a, b) => a.numero_cuota - b.numero_cuota)
     .slice(0, 1);
 

@@ -357,6 +357,61 @@ export const calcularCoberturaCuota = ({
 export type FilaCuotaVencida = PagoCoberturaCuota & {
   cuota_id: number | null;
   numero_cuota: number | null;
+  // Para detectar recibos SALDADOS de cuotas recortadas (ver esReciboSaldado)
+  monto_aplicado?: BigInput | null;
+  capital_restante?: BigInput | null;
+  interes_restante?: BigInput | null;
+  iva_12_restante?: BigInput | null;
+  seguro_restante?: BigInput | null;
+  gps_restante?: BigInput | null;
+  membresias_restante?: BigInput | null;
+};
+
+/**
+ * ¿Este recibo quedó SALDADO? — plata aplicada y todos los restantes en ≤0.01.
+ *
+ * Cubre las cuotas RECORTADAS: tras un abono grande el recálculo topa el
+ * capital del último recibo (y los de cola quedan solo con seguro/GPS), así
+ * que su total real es MENOR a `credito.cuota` y la suma de rubros nunca las
+ * daría por cubiertas. Mismo criterio con el que aplicarPagoNormalEnTx cierra
+ * esas cuotas (registerPayment.ts, "Recibos MENORES a la cuota mensual").
+ */
+const esReciboSaldado = (row: FilaCuotaVencida): boolean => {
+  if (row.paymentFalse !== false) return false;
+  if (!new Big(row.monto_aplicado ?? 0).gt(0)) return false;
+  const restantes = new Big(row.capital_restante ?? 0)
+    .plus(new Big(row.interes_restante ?? 0))
+    .plus(new Big(row.iva_12_restante ?? 0))
+    .plus(new Big(row.seguro_restante ?? 0))
+    .plus(new Big(row.gps_restante ?? 0))
+    .plus(new Big(row.membresias_restante ?? 0));
+  return restantes.lte(0.01);
+};
+
+/**
+ * Cobertura de una cuota (grupo de filas de la misma numero_cuota): por suma
+ * de rubros contra el valor contractual, O por un recibo saldado (cuota
+ * recortada). `incluirPendientes` controla si los pagos pending cuentan en
+ * ambas vías.
+ */
+const cuotaCubiertaPorGrupo = (
+  grupo: FilaCuotaVencida[],
+  montoCuota: BigInput,
+  incluirPendientes: boolean
+): boolean => {
+  const { cuotaCompleta } = calcularCoberturaCuota({
+    montoCuota,
+    pagos: grupo,
+    incluirPendientes,
+  });
+  if (cuotaCompleta) return true;
+
+  return grupo.some(
+    (row) =>
+      esReciboSaldado(row) &&
+      (row.validationStatus === "validated" ||
+        (incluirPendientes && row.validationStatus === "pending"))
+  );
 };
 
 /**
@@ -401,12 +456,7 @@ export const filtrarCuotasVencidasSinCobertura = <T extends FilaCuotaVencida>(
 ): T[] => {
   const cubiertas = new Set<number | null>();
   for (const [numeroCuota, grupo] of agruparPorNumeroCuota(rows)) {
-    const { cuotaCompleta } = calcularCoberturaCuota({
-      montoCuota,
-      pagos: grupo,
-      incluirPendientes: true,
-    });
-    if (cuotaCompleta) {
+    if (cuotaCubiertaPorGrupo(grupo, montoCuota, true)) {
       cubiertas.add(numeroCuota);
     }
   }
@@ -430,19 +480,8 @@ export const filtrarCuotasEnValidacion = <T extends FilaCuotaVencida>(
 ): T[] => {
   const enValidacion = new Set<number | null>();
   for (const [numeroCuota, grupo] of agruparPorNumeroCuota(rows)) {
-    const conPendientes = calcularCoberturaCuota({
-      montoCuota,
-      pagos: grupo,
-      incluirPendientes: true,
-    });
-    if (!conPendientes.cuotaCompleta) continue; // descubierta → es atrasada
-
-    const soloValidados = calcularCoberturaCuota({
-      montoCuota,
-      pagos: grupo,
-      incluirPendientes: false,
-    });
-    if (soloValidados.cuotaCompleta) continue; // se sostiene sin pendientes
+    if (!cuotaCubiertaPorGrupo(grupo, montoCuota, true)) continue; // atrasada
+    if (cuotaCubiertaPorGrupo(grupo, montoCuota, false)) continue; // firme sin pendientes
 
     enValidacion.add(numeroCuota);
   }

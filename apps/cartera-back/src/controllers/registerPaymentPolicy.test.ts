@@ -1350,3 +1350,69 @@ describe("filtrarCuotasEnValidacion — cuotas cubiertas que dependen de boletas
     expect(filtrar()([enValidacion, atrasada], "100.00")).toEqual([enValidacion]);
   });
 });
+
+describe("filtrarCuotas* — cuotas recortadas (recibo saldado con restantes en 0)", () => {
+  const filtrarAtrasadas = registerPaymentPolicy.filtrarCuotasVencidasSinCobertura;
+  const filtrarEnValidacion = registerPaymentPolicy.filtrarCuotasEnValidacion;
+
+  // Última cuota tras abono grande: el recibo real vale menos que credito.cuota
+  const reciboRecortado = (over: Record<string, any> = {}) => ({
+    cuota_id: 10,
+    numero_cuota: 84,
+    pago_id: 100,
+    validationStatus: "validated",
+    paymentFalse: false,
+    // Rubros: solo Q500 de capital topado + seguro (mucho menos que la cuota mensual)
+    abono_capital: "500.00",
+    abono_interes: "0",
+    abono_iva_12: "0",
+    abono_seguro: "150.00",
+    abono_gps: "0",
+    membresias_pago: "0",
+    monto_aplicado: "650.00",
+    // El recibo quedó SALDADO: todos los restantes en 0
+    capital_restante: "0",
+    interes_restante: "0",
+    iva_12_restante: "0",
+    seguro_restante: "0",
+    gps_restante: "0",
+    membresias_restante: "0",
+    ...over,
+  });
+
+  it("no marca atrasada la cuota recortada saldada por un pago validated", () => {
+    expect(filtrarAtrasadas([reciboRecortado()], "2273.80")).toHaveLength(0);
+  });
+
+  it("la cuota recortada saldada por un pago pending no es atrasada, es en-validación", () => {
+    const rows = [reciboRecortado({ validationStatus: "pending" })];
+    expect(filtrarAtrasadas(rows, "2273.80")).toHaveLength(0);
+    expect(filtrarEnValidacion(rows, "2273.80")).toHaveLength(1);
+  });
+
+  it("un placeholder con restantes en 0 pero sin plata aplicada NO salda la cuota", () => {
+    const rows = [
+      reciboRecortado({
+        abono_capital: "0",
+        abono_seguro: "0",
+        monto_aplicado: "0",
+      }),
+    ];
+    expect(filtrarAtrasadas(rows, "2273.80")).toHaveLength(1);
+  });
+
+  it("un parcial normal (restantes > 0) sigue contando como atrasada", () => {
+    const rows = [
+      reciboRecortado({
+        capital_restante: "800.00",
+        interes_restante: "473.80",
+      }),
+    ];
+    expect(filtrarAtrasadas(rows, "2273.80")).toHaveLength(1);
+  });
+
+  it("una boleta falsa saldada no cubre la cuota", () => {
+    const rows = [reciboRecortado({ paymentFalse: true })];
+    expect(filtrarAtrasadas(rows, "2273.80")).toHaveLength(1);
+  });
+});

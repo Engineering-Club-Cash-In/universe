@@ -4,6 +4,7 @@ import {
   createPagaloImportService,
   getPagaloImportReplayHttpStatus,
   getPagaloReviewRequiredReason,
+  isPagaloSameRoleEvidenceConflict,
   mapPagaloImportToRegistro,
   resolvePagaloLedgerCreditIdentity,
 } from "./pagaloPaymentImport";
@@ -58,6 +59,24 @@ describe("pagalo payment import", () => {
   it("returns 409 when replaying a reviewed import", () => {
     expect(getPagaloImportReplayHttpStatus("REVIEW_REQUIRED")).toBe(409);
     expect(getPagaloImportReplayHttpStatus("APPLIED")).toBe(200);
+  });
+
+  it("recognizes unique conflicts for Págalo evidence in the same role", () => {
+    expect(
+      isPagaloSameRoleEvidenceConflict({
+        code: "23505",
+        constraint: "pagalo_payment_imports_capital_tx_uq",
+      }),
+    ).toBe(true);
+    expect(
+      isPagaloSameRoleEvidenceConflict({
+        code: "23505",
+        constraint: "pagalo_payment_imports_facturable_external_uq",
+      }),
+    ).toBe(true);
+    expect(
+      isPagaloSameRoleEvidenceConflict({ code: "23505", constraint: "other_uq" }),
+    ).toBe(false);
   });
 
   it("maps a two-link group as a single payment with the combined total (Daniel, 2026-08-26)", () => {

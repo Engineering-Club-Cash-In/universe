@@ -4,7 +4,7 @@ import {
   verificarPagaloPayloadHash,
   type PagaloImportCommand,
 } from "./pagaloPaymentImportPolicy";
-import { and, eq } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
 import { db } from "../database";
 import { creditos, pagalo_payment_imports, pagos_credito } from "../database/db";
 import { procesarRegistroPago } from "./registerPayment";
@@ -185,6 +185,26 @@ const DETERMINISTIC_PAYMENT_REJECT_PREFIXES = [
 export const getPagaloImportReplayHttpStatus = (status: string) =>
   status === "APPLIED" ? 200 : 409;
 
+const PAGALO_SAME_ROLE_EVIDENCE_CONSTRAINTS = new Set([
+  "pagalo_payment_imports_capital_tx_uq",
+  "pagalo_payment_imports_facturable_tx_uq",
+  "pagalo_payment_imports_capital_external_uq",
+  "pagalo_payment_imports_facturable_external_uq",
+]);
+
+/** Solo mismas columnas/rol; cruce CAPITAL↔MORA_INTERES sigue hardening D-13. */
+export function isPagaloSameRoleEvidenceConflict(error: unknown): boolean {
+  const dbError = error as { code?: unknown; constraint?: unknown; cause?: unknown } | null;
+  if (!dbError || typeof dbError !== "object") return false;
+  if (
+    dbError.code === "23505" &&
+    typeof dbError.constraint === "string" &&
+    PAGALO_SAME_ROLE_EVIDENCE_CONSTRAINTS.has(dbError.constraint)
+  )
+    return true;
+  return isPagaloSameRoleEvidenceConflict(dbError.cause);
+}
+
 /** Errores de negocio recuperables: se auditan sin reintentar motor normal. */
 export function getPagaloReviewRequiredReason(error: unknown) {
   const message = error instanceof Error ? error.message :
@@ -272,6 +292,32 @@ const importValues = (
   payload_hash: command.payload_hash,
 });
 
+const findSameRoleEvidenceImport = async (
+  executor: any,
+  command: PagaloImportCommand,
+) => {
+  const conditions: any[] = [];
+  if (command.capital) {
+    conditions.push(
+      eq(pagalo_payment_imports.capital_transaction_uuid, command.capital.transaction_uuid),
+      eq(pagalo_payment_imports.capital_external_identifier, command.capital.external_identifier),
+    );
+  }
+  if (command.facturable) {
+    conditions.push(
+      eq(pagalo_payment_imports.facturable_transaction_uuid, command.facturable.transaction_uuid),
+      eq(pagalo_payment_imports.facturable_external_identifier, command.facturable.external_identifier),
+    );
+  }
+  if (conditions.length === 0) return undefined;
+  const [existing] = await executor
+    .select({ id: pagalo_payment_imports.id })
+    .from(pagalo_payment_imports)
+    .where(or(...conditions))
+    .limit(1);
+  return existing;
+};
+
 /**
  * Endpoint interno CRM → Cartera. No recibe credenciales Págalo: solo evidencia
  * ACCEPT ya validada por CRM. Advisory lock y transacción dejan importación,
@@ -343,6 +389,17 @@ export const importPagaloPayment = async ({ body, set }: any) => {
         import_id: existing.id,
         payment_ids: await paymentIdsForImport(db, existing.id),
         idempotent_replay: true,
+      };
+    }
+
+    const evidenceConflict = await findSameRoleEvidenceImport(db, command);
+    if (evidenceConflict) {
+      set.status = 409;
+      return {
+        success: false,
+        status: "REVIEW_REQUIRED",
+        code: "PAGALO_TRANSACTION_ALREADY_IMPORTED",
+        conflicting_import_id: evidenceConflict.id,
       };
     }
 
@@ -423,6 +480,14 @@ export const importPagaloPayment = async ({ body, set }: any) => {
         };
       });
     } catch (error) {
+      if (isPagaloSameRoleEvidenceConflict(error)) {
+        set.status = 409;
+        return {
+          success: false,
+          status: "REVIEW_REQUIRED",
+          code: "PAGALO_TRANSACTION_ALREADY_IMPORTED",
+        };
+      }
       const message = getPagaloReviewRequiredReason(error);
       if (message === undefined) throw error;
 

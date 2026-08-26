@@ -39,6 +39,18 @@ export function createCarteraStructuredLogger(options: CarteraStructuredLoggerOp
 }
 
 export type CarteraStructuredLogger = ReturnType<typeof createCarteraStructuredLogger>;
+export type ScheduledJobName = typeof carteraCatalog.fields.job_name.values[number];
+
+export type JobExecutionResult = Readonly<{
+  outcome: "completed";
+  jobName: ScheduledJobName;
+  durationMs: number;
+}> | Readonly<{
+  outcome: "failed";
+  jobName: ScheduledJobName;
+  durationMs: number;
+  errorCode: "unknown";
+}>;
 
 interface CreditCapitalPaymentAuditCompleted {
   readonly processedCount: number;
@@ -228,6 +240,25 @@ export type CreditScheduleRecalculationResult = Readonly<{
   manualActionRequired: boolean;
   durationMs: number;
   errorCode: "persistence_failed" | "unknown";
+}>;
+
+export type SifcoPaymentMigrationResult = Readonly<{
+  outcome: "completed";
+  operation: "adjust_schedule" | "import_payments";
+  processedCount: number;
+  succeededCount: number;
+  failedCount: number;
+  skippedCount: number;
+  durationMs: number;
+}> | Readonly<{
+  outcome: "partially_completed";
+  operation: "import_payments";
+  processedCount: number;
+  succeededCount: number;
+  failedCount: number;
+  skippedCount: number;
+  durationMs: number;
+  reasonCode: "item_failures";
 }>;
 
 export type PaymentReversalResult =
@@ -643,6 +674,50 @@ export function emitCreditScheduleRecalculation(
         error_code: result.errorCode,
       });
     }
+  });
+}
+
+export function emitSifcoPaymentMigration(
+  result: SifcoPaymentMigrationResult,
+  logger: CarteraStructuredLogger = carteraStructuredLogger,
+): void {
+  emitAuditWithoutAffectingControlFlow(() => {
+    const common = {
+      migration_operation: result.operation,
+      processed_count: result.processedCount,
+      succeeded_count: result.succeededCount,
+      failed_count: result.failedCount,
+      skipped_count: result.skippedCount,
+      duration_ms: result.durationMs,
+    };
+    if (result.outcome === "completed") {
+      logger.emit("payment.sifco_migration", "completed", common);
+      return;
+    }
+    logger.emit("payment.sifco_migration", "partially_completed", {
+      ...common,
+      reason_code: result.reasonCode,
+    });
+  });
+}
+
+export function emitJobExecution(
+  result: JobExecutionResult,
+  logger: CarteraStructuredLogger = carteraStructuredLogger,
+): void {
+  emitAuditWithoutAffectingControlFlow(() => {
+    if (result.outcome === "completed") {
+      logger.emit("job.execution", "completed", {
+        job_name: result.jobName,
+        duration_ms: result.durationMs,
+      });
+      return;
+    }
+    logger.emit("job.execution", "failed", {
+      job_name: result.jobName,
+      duration_ms: result.durationMs,
+      error_code: result.errorCode,
+    });
   });
 }
 

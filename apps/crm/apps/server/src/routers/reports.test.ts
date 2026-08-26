@@ -3,6 +3,7 @@ import { getLeadSourceChannelType } from "../lib/lead-sources";
 import {
 	aggregateEfectividadPorTipoCanal,
 	aggregateTiempoCierrePorTipoCanal,
+	buildColocacionPorEmpresaRows,
 	buildPorcentajeEfectividadFuenteRows,
 	CLOSED_CREDIT_REPORT_CARTERA_STATUS_CHUNK_SIZE,
 	enforceClosedCreditReportLimit,
@@ -73,6 +74,22 @@ describe("isPorcentajeEfectividadPeriodCloseIncluded", () => {
 				end,
 			),
 		).toBe(false);
+	});
+});
+
+describe("buildColocacionPorEmpresaRows", () => {
+	test("normalizes missing companies and sorts placements by amount", () => {
+		expect(
+			buildColocacionPorEmpresaRows([
+				{ companyName: "Predio Norte", monto: "125000.50", cantidad: 2 },
+				{ companyName: "  ", monto: "75000", cantidad: 1 },
+				{ companyName: "Agencia Centro", monto: "200000", cantidad: 3 },
+			]),
+		).toEqual([
+			{ name: "Agencia Centro", monto: 200000, cantidad: 3 },
+			{ name: "Predio Norte", monto: 125000.5, cantidad: 2 },
+			{ name: "Sin predio/agencia", monto: 75000, cantidad: 1 },
+		]);
 	});
 });
 

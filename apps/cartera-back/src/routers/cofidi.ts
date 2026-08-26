@@ -29,6 +29,7 @@ import { eq, desc, and, sql, gte, lte, inArray } from "drizzle-orm";
 import ExcelJS from "exceljs";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { NITSoapClient } from "../cofidi/nitGenerator";
+import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import type { DTERequest } from "../cofidi/types";
 import {
   SAT_CONFIG,
@@ -2128,7 +2129,20 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
   .use(authMiddleware)
 
   // 🔥 POST - Certificar DTE (el flujo completo vive en facturarPagoCompleto)
-.post("/facturar-pago-completo", ({ body, set }) => facturarPagoCompleto({ body, set }), {
+.post("/facturar-pago-completo", async ({ body, set }) => {
+  // Mismo advisory lock por crédito que el import Págalo usa al facturar
+  // post-commit: "Generar Factura" a mano sobre un pago Págalo recién
+  // validado podía pasar el pre-check de facturas ACTIVAS a la vez que el
+  // worker y certificar DTE duplicados en SAT (hallazgo Codex). Sin crédito
+  // (pago inexistente) se deja pasar: la función responde su 404.
+  const [pago] = await db
+    .select({ credito_id: pagos_credito.credito_id })
+    .from(pagos_credito)
+    .where(eq(pagos_credito.pago_id, body.pago_id))
+    .limit(1);
+  if (!pago?.credito_id) return facturarPagoCompleto({ body, set });
+  return withPaymentAdvisoryLock(pago.credito_id, () => facturarPagoCompleto({ body, set }));
+}, {
   body: t.Object({
     pago_id: t.Number(),
     created_by: t.Optional(t.Number()),

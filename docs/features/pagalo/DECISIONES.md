@@ -125,9 +125,16 @@ El post-commit se lanza **fuera del lock del import** y con el contexto de
 locks limpio (`fueraDeLocksHeredados`): `facturarImport` toma el suyo.
 
 **Recibo = outbox mínimo** (`recibo_status`: `PENDIENTE` en la tx → claim
-`ENVIANDO` → `OK|FALLIDA`). Si cartera muere entre el commit y el envío, lo
-reanudan un replay `APPLIED` del dispatcher o el barrido de 10 min; el claim
-atómico evita duplicarlo. La factura, en cambio, **nunca** se reanuda sola.
+`ENVIANDO` → `OK|FALLIDA`, `recibo_intentos`, `recibo_pagos_ok`). Si cartera
+muere entre el commit y el envío, o el envío falla por una caída transitoria
+(PDF/CRM), lo reanudan un replay `APPLIED` del dispatcher o el barrido de 10
+min: hasta 5 intentos, cada 30 min, y **solo a los pagos que aún no recibieron
+el suyo**; el claim atómico evita duplicarlo. La factura, en cambio, **nunca**
+se reanuda sola.
+
+**"Generar Factura" manual** (`POST /api/dte/facturar-pago-completo`) toma el
+mismo advisory lock del crédito, para no cruzarse con la facturación
+post-commit de un pago Págalo y certificar DTE duplicados.
 
 El CRM manda **una sola llamada** y no sabe de la factura: con `APPLIED` marca
 el grupo `COMPLETED`.

@@ -833,6 +833,10 @@
       // el barrido lo reanudan si el proceso murió antes de mandarlo.
       recibo_status: text("recibo_status").$type<PagaloReciboStatus>(),
       recibo_at: timestamp("recibo_at", { withTimezone: true }),
+      recibo_intentos: integer("recibo_intentos").notNull().default(0),
+      // JSON array de pago_id cuyo recibo YA salió: un reintento solo manda
+      // los que faltan (no se duplica al cliente lo que ya recibió).
+      recibo_pagos_ok: text("recibo_pagos_ok"),
       created_at: timestamp("created_at", { withTimezone: true })
         .notNull()
         .defaultNow(),

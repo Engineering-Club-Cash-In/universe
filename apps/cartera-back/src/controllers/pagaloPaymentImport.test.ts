@@ -8,6 +8,7 @@ import {
   isPagaloSameRoleEvidenceConflict,
   mapPagaloImportToRegistro,
   moraDelSnapshot,
+  pagosSinRecibo,
   resolvePagaloLedgerCreditIdentity,
   resumirFacturacion,
 } from "./pagaloPaymentImport";
@@ -307,5 +308,14 @@ describe("facturación post-commit (D-10 v2)", () => {
     });
     // lo que lee el playbook: qué pago tiene cero facturas (reintento seguro)
     expect(JSON.parse(resumirFacturacion([sat]).error ?? "[]")[0]).toMatchObject({ pago_id: 2, http: 500 });
+  });
+});
+
+describe("outbox del recibo por pago", () => {
+  it("un reintento manda solo a los pagos que aún no recibieron su recibo", () => {
+    expect(pagosSinRecibo([10, 11, 12], JSON.stringify([10, 12]))).toEqual([11]);
+    expect(pagosSinRecibo([10, 11], null)).toEqual([10, 11]);
+    expect(pagosSinRecibo([10, 11], "basura")).toEqual([10, 11]);
+    expect(pagosSinRecibo([10], JSON.stringify([10]))).toEqual([]);
   });
 });

@@ -5,7 +5,7 @@ import {
   type PagaloImportCommand,
 } from "./pagaloPaymentImportPolicy";
 import Big from "big.js";
-import { and, asc, eq, inArray, lt, or } from "drizzle-orm";
+import { and, asc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { db } from "../database";
 import {
   creditos,
@@ -497,22 +497,44 @@ async function facturarImport(importId: number, creditoId: number, pagoIds: numb
 
 /** Un claim ENVIANDO más viejo que esto es de un proceso que murió: se puede retomar. */
 export const MINUTOS_RECIBO_ENVIANDO_HUERFANO = 30;
+/** Un FALLIDA se reintenta pasado este tiempo, hasta MAXIMO_INTENTOS_RECIBO. */
+export const MINUTOS_RECIBO_FALLIDA_REINTENTO = 30;
+export const MAXIMO_INTENTOS_RECIBO = 5;
+
+/** Pagos del import a los que todavía no les salió el recibo. */
+export function pagosSinRecibo(pagoIds: number[], reciboPagosOk: string | null): number[] {
+  let ok: number[] = [];
+  try {
+    const parsed = reciboPagosOk ? JSON.parse(reciboPagosOk) : [];
+    if (Array.isArray(parsed)) ok = parsed.filter((n): n is number => typeof n === "number");
+  } catch {}
+  return pagoIds.filter((id) => !ok.includes(id));
+}
 
 /**
- * Outbox mínimo del recibo por WhatsApp. Claim atómico (PENDIENTE → ENVIANDO,
- * o ENVIANDO viejo de un proceso muerto), envío, y OK/FALLIDA. Quien no gana
- * el claim no manda nada, así que lo pueden llamar a la vez el post-commit,
- * un replay del dispatcher y el barrido sin duplicar el mensaje (hallazgo
- * Codex: si cartera moría entre el commit y el envío, el cliente se quedaba
- * sin recibo para siempre). Un recibo duplicado por una carrera extrema es
- * inocuo; uno que nunca sale, no. Nunca lanza.
+ * Outbox mínimo del recibo por WhatsApp. Claim atómico (PENDIENTE → ENVIANDO;
+ * ENVIANDO viejo de un proceso muerto; o FALLIDA con reintentos disponibles),
+ * envío SOLO a los pagos que aún no tienen recibo, y OK/FALLIDA. Quien no
+ * gana el claim no manda nada, así que lo pueden llamar a la vez el
+ * post-commit, un replay del dispatcher y el barrido sin duplicar el mensaje
+ * (hallazgos Codex: si cartera moría entre el commit y el envío el cliente se
+ * quedaba sin recibo; y una caída transitoria de PDF/CRM no puede dejarlo
+ * varado). Un recibo duplicado por una carrera extrema es inocuo; uno que
+ * nunca sale, no. Nunca lanza.
  */
 export async function intentarEnviarRecibosDeImport(importId: number): Promise<PagaloReciboStatus | "SIN_CLAIM"> {
-  const limiteEnviando = new Date(Date.now() - MINUTOS_RECIBO_ENVIANDO_HUERFANO * 60 * 1000);
+  const ahora = Date.now();
+  const limiteEnviando = new Date(ahora - MINUTOS_RECIBO_ENVIANDO_HUERFANO * 60 * 1000);
+  const limiteFallida = new Date(ahora - MINUTOS_RECIBO_FALLIDA_REINTENTO * 60 * 1000);
   try {
     const [claim] = await db
       .update(pagalo_payment_imports)
-      .set({ recibo_status: "ENVIANDO", recibo_at: new Date(), updated_at: new Date() })
+      .set({
+        recibo_status: "ENVIANDO",
+        recibo_at: new Date(),
+        recibo_intentos: sql`${pagalo_payment_imports.recibo_intentos} + 1`,
+        updated_at: new Date(),
+      })
       .where(
         and(
           eq(pagalo_payment_imports.id, importId),
@@ -523,25 +545,46 @@ export async function intentarEnviarRecibosDeImport(importId: number): Promise<P
               eq(pagalo_payment_imports.recibo_status, "ENVIANDO"),
               lt(pagalo_payment_imports.recibo_at, limiteEnviando),
             ),
+            and(
+              eq(pagalo_payment_imports.recibo_status, "FALLIDA"),
+              lt(pagalo_payment_imports.recibo_at, limiteFallida),
+              lt(pagalo_payment_imports.recibo_intentos, MAXIMO_INTENTOS_RECIBO),
+            ),
           ),
         ),
       )
-      .returning({ credito_id: pagalo_payment_imports.credito_id });
+      .returning({
+        credito_id: pagalo_payment_imports.credito_id,
+        recibo_pagos_ok: pagalo_payment_imports.recibo_pagos_ok,
+        intentos: pagalo_payment_imports.recibo_intentos,
+      });
     if (!claim) return "SIN_CLAIM";
     if (claim.credito_id === null) throw new Error("import sin crédito vivo");
 
-    const pagoIds = await paymentIdsForImport(db, importId);
+    const pagoIds: number[] = await paymentIdsForImport(db, importId);
+    const pendientes = pagosSinRecibo(pagoIds, claim.recibo_pagos_ok);
+    const yaOk = pagoIds.filter((id) => !pendientes.includes(id));
     const resultados = await enviarRecibosPagoDeCreditoBestEffort({
       creditoId: claim.credito_id,
-      pagoIds,
+      pagoIds: pendientes,
     });
-    const status: PagaloReciboStatus =
-      resultados.length === pagoIds.length && resultados.every((r) => r.success) ? "OK" : "FALLIDA";
+    const nuevosOk = pendientes.filter((_, i) => resultados[i]?.success === true);
+    const todosOk = [...yaOk, ...nuevosOk];
+    const status: PagaloReciboStatus = todosOk.length === pagoIds.length ? "OK" : "FALLIDA";
     await db
       .update(pagalo_payment_imports)
-      .set({ recibo_status: status, recibo_at: new Date(), updated_at: new Date() })
+      .set({
+        recibo_status: status,
+        recibo_at: new Date(),
+        recibo_pagos_ok: JSON.stringify(todosOk),
+        updated_at: new Date(),
+      })
       .where(eq(pagalo_payment_imports.id, importId));
-    if (status !== "OK") console.error(`⚠️ Págalo import ${importId}: recibo por WhatsApp FALLIDA`);
+    if (status !== "OK") {
+      console.error(
+        `⚠️ Págalo import ${importId}: recibo por WhatsApp FALLIDA (intento ${claim.intentos}/${MAXIMO_INTENTOS_RECIBO}, faltan pagos ${pendientes.filter((id) => !nuevosOk.includes(id)).join(",")})`,
+      );
+    }
     return status;
   } catch (error) {
     console.error(`⚠️ Págalo import ${importId}: no se pudo enviar/registrar el recibo`, error);
@@ -617,9 +660,11 @@ export async function reintentarFacturacionPagaloPendiente(
     console.error(`⚠️ Págalo import ${id}: ${MOTIVO_FACTURA_HUERFANA}`);
   }
 
-  // Recibos que nunca salieron (PENDIENTE viejo o ENVIANDO de un proceso
-  // muerto): a diferencia de SAT, reintentar un WhatsApp sí es seguro.
+  // Recibos que no salieron (PENDIENTE viejo, ENVIANDO de un proceso muerto,
+  // o FALLIDA con reintentos): a diferencia de SAT, reintentar un WhatsApp
+  // sí es seguro, y solo va a los pagos que aún no lo recibieron.
   const limiteEnviando = new Date(Date.now() - MINUTOS_RECIBO_ENVIANDO_HUERFANO * 60 * 1000);
+  const limiteFallida = new Date(Date.now() - MINUTOS_RECIBO_FALLIDA_REINTENTO * 60 * 1000);
   const recibosHuerfanos: { id: number }[] = await db
     .select({ id: pagalo_payment_imports.id })
     .from(pagalo_payment_imports)
@@ -629,6 +674,11 @@ export async function reintentarFacturacionPagaloPendiente(
         or(
           and(eq(pagalo_payment_imports.recibo_status, "PENDIENTE"), lt(pagalo_payment_imports.applied_at, limite)),
           and(eq(pagalo_payment_imports.recibo_status, "ENVIANDO"), lt(pagalo_payment_imports.recibo_at, limiteEnviando)),
+          and(
+            eq(pagalo_payment_imports.recibo_status, "FALLIDA"),
+            lt(pagalo_payment_imports.recibo_at, limiteFallida),
+            lt(pagalo_payment_imports.recibo_intentos, MAXIMO_INTENTOS_RECIBO),
+          ),
         ),
       ),
     );

@@ -672,8 +672,18 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 			// dispatcher programado lo recoge en su propio ciclo — nunca se pierde.
 			if (listoParaAplicar && dispatchHabilitado) {
 				try {
-					await reclamarYProcesarGrupo(link.groupId);
+					const resultadoInline = await reclamarYProcesarGrupo(link.groupId);
+					// El resultado del retry preliminar (dispatchPrevio) ya está
+					// contado arriba — esto suma lo que pasa con el dispatch
+					// inline, que antes se descartaba y dejaba el reporte del
+					// botón manual mintiendo "0 completados" aunque sí aplicara
+					// el pago (hallazgo Codex).
+					if (resultadoInline === "COMPLETADO") resultado.dispatchCompletados++;
+					else if (resultadoInline === "ERROR" || resultadoInline === "REVIEW_REQUIRED") {
+						resultado.dispatchErrores++;
+					}
 				} catch (error) {
+					resultado.dispatchErrores++;
 					console.error(
 						`[Págalo][POLL] grupo ${link.groupId} quedó READY_TO_APPLY pero falló el dispatch inline:`,
 						error instanceof Error ? error.message : error,

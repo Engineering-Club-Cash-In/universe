@@ -117,6 +117,7 @@ import {
 	pagaloPaymentLinks,
 } from "../db/schema/pagalo-payments";
 import { correrPollPagalo } from "../jobs/pagalo-poll";
+import { isPagaloPollEnabled } from "../lib/pagalo-poll-config";
 import { createPagaloClient, getPagaloSandboxConfig } from "../services/pagalo-client";
 import { createPagaloLinks } from "../services/pagalo-link-orchestrator";
 import { primerTelefono } from "../lib/phone-utils";
@@ -4840,6 +4841,14 @@ export const cobrosRouter = {
 	// solo botón cubre todo el ciclo. Borrar cuando el ciclo automático esté
 	// confirmado en sandbox.
 	probarPollPagalo: cobrosProcedure.handler(async () => {
+		// PAGALO_POLL_ENABLED antes solo gateaba el setInterval de index.ts —
+		// este endpoint manual quedaba expuesto sin importar el flag, así que
+		// no servía como el kill switch anunciado (hallazgo Codex). Ahora
+		// respeta el mismo flag: apagado, ni el interval ni el botón tocan
+		// Págalo/cartera-back.
+		if (!isPagaloPollEnabled()) {
+			throw new Error("PAGALO_POLL_ENABLED está apagado — el poll manual no puede correr.");
+		}
 		try {
 			return await correrPollPagalo();
 		} catch (error) {

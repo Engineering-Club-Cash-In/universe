@@ -121,6 +121,14 @@ no exista en SAT (el proceso pudo morir entre certificar e insertar), y SAT no
 tiene idempotencia de nuestro lado (descartada en #1282) — la verificación
 contra SAT/COFIDI y el reintento son manuales.
 
+El post-commit se lanza **fuera del lock del import** y con el contexto de
+locks limpio (`fueraDeLocksHeredados`): `facturarImport` toma el suyo.
+
+**Recibo = outbox mínimo** (`recibo_status`: `PENDIENTE` en la tx → claim
+`ENVIANDO` → `OK|FALLIDA`). Si cartera muere entre el commit y el envío, lo
+reanudan un replay `APPLIED` del dispatcher o el barrido de 10 min; el claim
+atómico evita duplicarlo. La factura, en cambio, **nunca** se reanuda sola.
+
 El CRM manda **una sola llamada** y no sabe de la factura: con `APPLIED` marca
 el grupo `COMPLETED`.
 

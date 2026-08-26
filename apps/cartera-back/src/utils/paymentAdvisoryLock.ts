@@ -106,3 +106,14 @@ export async function tryWithPaymentAdvisoryLock<T>(
     lockConn.release();
   }
 }
+
+/**
+ * Corre `fn` con el contexto de locks LIMPIO. Para trabajo fire-and-forget
+ * lanzado desde adentro de un lock (p. ej. la facturación post-commit de
+ * Págalo): si heredara `locksDeLaCadena`, `withPaymentAdvisoryLock` creería
+ * que ya tiene el lock, no lo tomaría, y seguiría corriendo después de que el
+ * dueño original lo soltó (hallazgo Codex). Así siempre adquiere el suyo.
+ */
+export function fueraDeLocksHeredados<T>(fn: () => Promise<T>): Promise<T> {
+  return locksDeLaCadena.exit(fn);
+}

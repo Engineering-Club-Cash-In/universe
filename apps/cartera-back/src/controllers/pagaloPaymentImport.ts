@@ -14,7 +14,7 @@ import {
   pagalo_payment_imports,
   pagos_credito,
 } from "../database/db";
-import type { PagaloFacturaStatus } from "../database/db/schema";
+import type { PagaloFacturaStatus, PagaloReciboStatus } from "../database/db/schema";
 import { facturarPagoCompleto } from "../routers/cofidi";
 import { enviarRecibosPagoDeCreditoBestEffort } from "../services/reciboPagoWhatsapp";
 import { updateMoraEnTx } from "./latefee";
@@ -25,7 +25,7 @@ import {
 } from "./registerPayment";
 import type { AplicarPagoTx, PagaloComponentes } from "./registerPayment";
 import { CREDIT_PENDING_CANCELLATION_ERROR } from "./registerPaymentPolicy";
-import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
+import { fueraDeLocksHeredados, withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 
 export type PagaloImportLedger = {
   id: number;
@@ -495,6 +495,66 @@ async function facturarImport(importId: number, creditoId: number, pagoIds: numb
   }
 }
 
+/** Un claim ENVIANDO más viejo que esto es de un proceso que murió: se puede retomar. */
+export const MINUTOS_RECIBO_ENVIANDO_HUERFANO = 30;
+
+/**
+ * Outbox mínimo del recibo por WhatsApp. Claim atómico (PENDIENTE → ENVIANDO,
+ * o ENVIANDO viejo de un proceso muerto), envío, y OK/FALLIDA. Quien no gana
+ * el claim no manda nada, así que lo pueden llamar a la vez el post-commit,
+ * un replay del dispatcher y el barrido sin duplicar el mensaje (hallazgo
+ * Codex: si cartera moría entre el commit y el envío, el cliente se quedaba
+ * sin recibo para siempre). Un recibo duplicado por una carrera extrema es
+ * inocuo; uno que nunca sale, no. Nunca lanza.
+ */
+export async function intentarEnviarRecibosDeImport(importId: number): Promise<PagaloReciboStatus | "SIN_CLAIM"> {
+  const limiteEnviando = new Date(Date.now() - MINUTOS_RECIBO_ENVIANDO_HUERFANO * 60 * 1000);
+  try {
+    const [claim] = await db
+      .update(pagalo_payment_imports)
+      .set({ recibo_status: "ENVIANDO", recibo_at: new Date(), updated_at: new Date() })
+      .where(
+        and(
+          eq(pagalo_payment_imports.id, importId),
+          eq(pagalo_payment_imports.status, "APPLIED"),
+          or(
+            eq(pagalo_payment_imports.recibo_status, "PENDIENTE"),
+            and(
+              eq(pagalo_payment_imports.recibo_status, "ENVIANDO"),
+              lt(pagalo_payment_imports.recibo_at, limiteEnviando),
+            ),
+          ),
+        ),
+      )
+      .returning({ credito_id: pagalo_payment_imports.credito_id });
+    if (!claim) return "SIN_CLAIM";
+    if (claim.credito_id === null) throw new Error("import sin crédito vivo");
+
+    const pagoIds = await paymentIdsForImport(db, importId);
+    const resultados = await enviarRecibosPagoDeCreditoBestEffort({
+      creditoId: claim.credito_id,
+      pagoIds,
+    });
+    const status: PagaloReciboStatus =
+      resultados.length === pagoIds.length && resultados.every((r) => r.success) ? "OK" : "FALLIDA";
+    await db
+      .update(pagalo_payment_imports)
+      .set({ recibo_status: status, recibo_at: new Date(), updated_at: new Date() })
+      .where(eq(pagalo_payment_imports.id, importId));
+    if (status !== "OK") console.error(`⚠️ Págalo import ${importId}: recibo por WhatsApp FALLIDA`);
+    return status;
+  } catch (error) {
+    console.error(`⚠️ Págalo import ${importId}: no se pudo enviar/registrar el recibo`, error);
+    try {
+      await db
+        .update(pagalo_payment_imports)
+        .set({ recibo_status: "FALLIDA", recibo_at: new Date(), updated_at: new Date() })
+        .where(and(eq(pagalo_payment_imports.id, importId), eq(pagalo_payment_imports.recibo_status, "ENVIANDO")));
+    } catch {}
+    return "FALLIDA";
+  }
+}
+
 /**
  * Post-commit, fire-and-forget: SAT y WhatsApp son irreversibles, así que
  * corren solo cuando el pago ya quedó validado y confirmado. Mismo patrón que
@@ -502,7 +562,8 @@ async function facturarImport(importId: number, creditoId: number, pagoIds: numb
  * llamada). Nunca lanza. El recibo es el de pago, no de la factura: se manda
  * igual que cuando conta valida a mano (uno por pago del grupo) y de forma
  * INDEPENDIENTE de la facturación — si esta se traba o falla, el recibo sale
- * igual (hallazgo Codex).
+ * igual (hallazgo Codex). Se lanza FUERA del lock del import (ver
+ * `fueraDeLocksHeredados`): `facturarImport` toma el suyo.
  */
 async function facturarYNotificarPostCommit(
   importId: number,
@@ -511,7 +572,7 @@ async function facturarYNotificarPostCommit(
 ) {
   await Promise.allSettled([
     facturarImport(importId, creditoId, pagoIds),
-    enviarRecibosPagoDeCreditoBestEffort({ creditoId, pagoIds }),
+    intentarEnviarRecibosDeImport(importId),
   ]);
 }
 
@@ -555,7 +616,27 @@ export async function reintentarFacturacionPagaloPendiente(
   for (const { id } of marcados) {
     console.error(`⚠️ Págalo import ${id}: ${MOTIVO_FACTURA_HUERFANA}`);
   }
-  return { huerfanos: marcados.length, ids: marcados.map((m) => m.id) };
+
+  // Recibos que nunca salieron (PENDIENTE viejo o ENVIANDO de un proceso
+  // muerto): a diferencia de SAT, reintentar un WhatsApp sí es seguro.
+  const limiteEnviando = new Date(Date.now() - MINUTOS_RECIBO_ENVIANDO_HUERFANO * 60 * 1000);
+  const recibosHuerfanos: { id: number }[] = await db
+    .select({ id: pagalo_payment_imports.id })
+    .from(pagalo_payment_imports)
+    .where(
+      and(
+        eq(pagalo_payment_imports.status, "APPLIED"),
+        or(
+          and(eq(pagalo_payment_imports.recibo_status, "PENDIENTE"), lt(pagalo_payment_imports.applied_at, limite)),
+          and(eq(pagalo_payment_imports.recibo_status, "ENVIANDO"), lt(pagalo_payment_imports.recibo_at, limiteEnviando)),
+        ),
+      ),
+    );
+  let recibosReenviados = 0;
+  for (const { id } of recibosHuerfanos) {
+    if ((await intentarEnviarRecibosDeImport(id)) !== "SIN_CLAIM") recibosReenviados++;
+  }
+  return { huerfanos: marcados.length, ids: marcados.map((m) => m.id), recibosReenviados };
 }
 
 const CUOTA_INTEGRITY_ERROR_PREFIX = "Inconsistencia de integridad:";
@@ -736,7 +817,7 @@ export const importPagaloPayment = async ({ body, set }: any) => {
   }
 	const command = parsed.data;
 
-  return withPaymentAdvisoryLock(command.credito_id, async () => {
+  const respuesta = await withPaymentAdvisoryLock(command.credito_id, async () => {
     const [existing] = await db
       .select({
         id: pagalo_payment_imports.id,
@@ -873,6 +954,7 @@ export const importPagaloPayment = async ({ body, set }: any) => {
             status: "APPLIED",
             applied_at: new Date(),
             factura_status: "PENDIENTE",
+            recibo_status: "PENDIENTE",
             updated_at: new Date(),
           })
           .where(eq(pagalo_payment_imports.id, ledger.id));
@@ -884,15 +966,6 @@ export const importPagaloPayment = async ({ body, set }: any) => {
           idempotent_replay: false,
         };
       });
-      if (aplicado.success) {
-        void facturarYNotificarPostCommit(
-          aplicado.import_id,
-          command.credito_id,
-          aplicado.payment_ids,
-        ).catch((error) =>
-          console.error(`⚠️ Págalo import ${aplicado.import_id}: post-commit falló`, error),
-        );
-      }
       return aplicado;
     } catch (error) {
       if (isPagaloSameRoleEvidenceConflict(error)) {
@@ -946,4 +1019,26 @@ export const importPagaloPayment = async ({ body, set }: any) => {
       };
     }
   });
+
+  // Post-commit FUERA del lock del import y con el contexto de locks limpio:
+  // si se lanzara adentro, heredaría el lock por AsyncLocalStorage, no
+  // tomaría el suyo y seguiría certificando después de que este callback lo
+  // soltó (hallazgo Codex). Un replay APPLIED solo reanuda el recibo (el
+  // claim evita duplicarlo); la factura nunca se reanuda sola (SAT no es
+  // idempotente).
+  if (
+    respuesta.success === true &&
+    respuesta.status === "APPLIED" &&
+    "import_id" in respuesta &&
+    typeof respuesta.import_id === "number"
+  ) {
+    const importId = respuesta.import_id;
+    const esReplay = "idempotent_replay" in respuesta && respuesta.idempotent_replay === true;
+    const pagoIds = "payment_ids" in respuesta && Array.isArray(respuesta.payment_ids) ? respuesta.payment_ids : [];
+    void fueraDeLocksHeredados(async () => {
+      if (esReplay) await intentarEnviarRecibosDeImport(importId);
+      else await facturarYNotificarPostCommit(importId, command.credito_id, pagoIds);
+    }).catch((error) => console.error(`⚠️ Págalo import ${importId}: post-commit falló`, error));
+  }
+  return respuesta;
 };

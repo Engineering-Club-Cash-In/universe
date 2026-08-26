@@ -25,6 +25,7 @@ para que se sepa que se aplican como bloque cuando salga esa versión.
 | `0010_pagalo_solo_capital.sql` | CB-105: **estado final de las dos 0009 gemelas** (D-48, decisión de Daniel): re-afirma montos `>= 0` en ambos lados y lado facturable nullable con su CHECK de coherencia — la última palabra, corra lo que corra antes. |
 | `0011_pagalo_review_missing_credit.sql` | CB-105: permite auditar `REVIEW_REQUIRED` sin crédito vivo si SIFCO cambió o crédito fue eliminado; `APPLIED` conserva identidad crédito↔SIFCO obligatoria. |
 | `0012_pagalo_validado_cuenta_factura.sql` | D-10 v2 / D-50 v2: siembra la cuenta de empresa virtual **PAGALO** (`numero_cuenta = PAGALO-LINK`, la exige `asignarCuentaPagalo`) y agrega `factura_status/factura_error/factura_at` al ledger para el resultado de la facturación post-commit. |
+| `0013_pagalo_recibo_status.sql` | D-10 v2: `recibo_status/recibo_at` en el ledger — outbox mínimo del recibo por WhatsApp post-commit (claim `ENVIANDO`; lo reanudan el replay del CRM y el barrido). |
 
 ## Asignación inicial (`asignacion/`) — carga de datos, NO schema
 

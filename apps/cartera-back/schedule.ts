@@ -124,8 +124,8 @@ export function iniciarTareasProgramadas() {
   schedule.scheduleJob({ rule: '*/10 * * * *', tz: TZ_GUATEMALA }, async () => {
     try {
       const res = await reintentarFacturacionPagaloPendiente();
-      if (res.huerfanos > 0) {
-        console.log(`💳 Págalo factura huérfana marcada FALLIDA: imports=${res.ids.join(",")}`);
+      if (res.huerfanos > 0 || res.recibosReenviados > 0) {
+        console.log(`💳 Págalo factura huérfana marcada FALLIDA: imports=${res.ids.join(",")}; recibos reenviados=${res.recibosReenviados}`);
       }
     } catch (error) {
       console.error('❌ Error en reintentarFacturacionPagaloPendiente:', error);

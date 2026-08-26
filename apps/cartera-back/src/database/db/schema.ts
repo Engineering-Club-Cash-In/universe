@@ -730,6 +730,7 @@
   // cartera, o reanudar explícitamente usando pagalo_import_id. `newPayment`
   // actual no es transaccional; reintentar a ciegas sigue prohibido.
   export type PagaloFacturaStatus = "PENDIENTE" | "OK" | "PARCIAL" | "FALLIDA";
+  export type PagaloReciboStatus = "PENDIENTE" | "ENVIANDO" | "OK" | "FALLIDA";
 
   export type PagaloPaymentImportStatus =
     | "RECEIVED"
@@ -827,6 +828,11 @@
       factura_status: text("factura_status").$type<PagaloFacturaStatus>(),
       factura_error: text("factura_error"),
       factura_at: timestamp("factura_at", { withTimezone: true }),
+      // Recibo por WhatsApp post-commit (outbox mínimo): PENDIENTE se escribe
+      // en la tx; ENVIANDO es el claim de quien lo manda; un replay del CRM o
+      // el barrido lo reanudan si el proceso murió antes de mandarlo.
+      recibo_status: text("recibo_status").$type<PagaloReciboStatus>(),
+      recibo_at: timestamp("recibo_at", { withTimezone: true }),
       created_at: timestamp("created_at", { withTimezone: true })
         .notNull()
         .defaultNow(),

@@ -357,7 +357,12 @@ export const calcularCoberturaCuota = ({
 export type FilaCuotaVencida = PagoCoberturaCuota & {
   cuota_id: number | null;
   numero_cuota: number | null;
-  // Para detectar recibos SALDADOS de cuotas recortadas (ver esReciboSaldado)
+  // Para detectar recibos SALDADOS de cuotas recortadas (ver esReciboSaldado).
+  // pago_mora/pago_otros son los alias con que la query del buscador devuelve
+  // mora e importes "otros"; monto_aplicado respalda la vía stale-zero.
+  monto_aplicado?: BigInput | null;
+  pago_mora?: BigInput | null;
+  pago_otros?: string | number | null;
   capital_restante?: BigInput | null;
   interes_restante?: BigInput | null;
   iva_12_restante?: BigInput | null;
@@ -377,10 +382,23 @@ export type FilaCuotaVencida = PagoCoberturaCuota & {
  */
 const esReciboSaldado = (row: FilaCuotaVencida): boolean => {
   if (row.paymentFalse !== false) return false;
-  // Plata aplicada A LA CUOTA (rubros), no monto_aplicado: en filas legacy de
-  // solo mora/otros el monto_aplicado trae mora+otros con todos los abono_*
-  // en 0 — esas no saldan nada.
-  if (!sumarAplicadoACuota([row]).gt(0)) return false;
+  // Plata aplicada A LA CUOTA: primero los rubros (abono_*). En filas legacy
+  // de solo mora/otros el monto_aplicado trae mora+otros con los abono_* en
+  // 0 — esas no saldan nada. PERO la vía stale-zero (registerPayment,
+  // shouldApplyStaleZeroRestanteAdjustment) consume el monto exacto subiendo
+  // monto_aplicado SIN repartir rubros (los restantes origen ya estaban en
+  // 0): ahí la evidencia de plata de cuota es monto_aplicado − mora − otros.
+  if (!sumarAplicadoACuota([row]).gt(0)) {
+    const numericText = (v: string | number | null | undefined) => {
+      if (v == null) return "0";
+      const s = String(v).trim();
+      return /^-?\d+(\.\d+)?$/.test(s) ? s : "0";
+    };
+    const plataSinMoraOtros = new Big(row.monto_aplicado ?? 0)
+      .minus(new Big(row.pago_mora ?? 0))
+      .minus(new Big(numericText(row.pago_otros)));
+    if (!plataSinMoraOtros.gt(0)) return false;
+  }
   // TODOS los restantes deben venir informados para afirmar el saldado: un
   // NULL no es un cero. Con .some, una fila legacy con interes_restante=0
   // pero capital_restante NULL pasaría y el ?? 0 escondería deuda viva

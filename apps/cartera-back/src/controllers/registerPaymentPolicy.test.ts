@@ -1539,3 +1539,65 @@ describe("esReciboSaldado vía filtrar — el cierre no cubre a sus hermanos (ci
     expect(filtrarEnValidacion(rows, "2273.80")).toHaveLength(0);
   });
 });
+
+describe("esReciboSaldado vía filtrar — pagos exactos por la vía stale-zero", () => {
+  const filtrarAtrasadas = registerPaymentPolicy.filtrarCuotasVencidasSinCobertura;
+  const filtrarEnValidacion = registerPaymentPolicy.filtrarCuotasEnValidacion;
+
+  // Vía stale-zero (shouldApplyStaleZeroRestanteAdjustment): el pago exacto
+  // consume la cuota subiendo monto_aplicado, pero los abono_* quedan en 0
+  // porque los restantes de la fila origen ya estaban (mal) en 0.
+  const staleZeroExacto = (over: Record<string, any> = {}) => ({
+    cuota_id: 10,
+    numero_cuota: 8,
+    pago_id: 100,
+    validationStatus: "pending",
+    paymentFalse: false,
+    abono_capital: "0",
+    abono_interes: "0",
+    abono_iva_12: "0",
+    abono_seguro: "0",
+    abono_gps: "0",
+    membresias_pago: "0",
+    monto_aplicado: "2273.80", // la cuota exacta
+    pago_mora: "0",
+    pago_otros: "0",
+    capital_restante: "0",
+    interes_restante: "0",
+    iva_12_restante: "0",
+    seguro_restante: "0",
+    gps_restante: "0",
+    membresias_restante: "0",
+    ...over,
+  });
+
+  it("el pago exacto stale-zero pending NO es atrasada: es cuota en validación", () => {
+    const rows = [staleZeroExacto()];
+    expect(filtrarAtrasadas(rows, "2273.80")).toHaveLength(0);
+    expect(filtrarEnValidacion(rows, "2273.80")).toHaveLength(1);
+  });
+
+  it("el pago exacto stale-zero validated cubre firme", () => {
+    const rows = [staleZeroExacto({ validationStatus: "validated" })];
+    expect(filtrarAtrasadas(rows, "2273.80")).toHaveLength(0);
+    expect(filtrarEnValidacion(rows, "2273.80")).toHaveLength(0);
+  });
+
+  it("regresión: el legacy solo-mora (monto_aplicado = mora) sigue atrasado", () => {
+    const rows = [
+      staleZeroExacto({ monto_aplicado: "2420.41", pago_mora: "2420.41" }),
+    ];
+    expect(filtrarAtrasadas(rows, "2273.80")).toHaveLength(1);
+  });
+
+  it("regresión: mora+otros exactos tampoco saldan (plata de cuota = 0)", () => {
+    const rows = [
+      staleZeroExacto({
+        monto_aplicado: "500.00",
+        pago_mora: "300.00",
+        pago_otros: "200.00",
+      }),
+    ];
+    expect(filtrarAtrasadas(rows, "2273.80")).toHaveLength(1);
+  });
+});

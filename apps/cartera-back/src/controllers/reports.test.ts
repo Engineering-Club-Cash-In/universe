@@ -241,6 +241,14 @@ describe("estado de cuenta PDF", () => {
     expect(rows.map((p) => p.total_restante)).toEqual(["100.00", "85.00", "85.00", "83.00"]);
   });
 
+  it("primera cuota visible sin saldo previo: siembra la apertura y respeta la fila neta", () => {
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 10749, numero_cuota: 35, pagado: true, abono_capital: "1919.26", abono_interes: "783.52", total_restante: "47874.89" },
+      { pago_id: 150049, numero_cuota: 35, pagado: true, abono_capital: "2440.50", total_restante: "47874.89" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["47874.89", "47874.89"]);
+  });
+
   it("parcial normal (registerPayment): el cierre solo-capital hereda el saldo de la hermana y SÍ se resta", () => {
     // La 1a parte cubre interés/servicios + parte del capital; el cierre trae solo
     // capital y total_restante = el de la hermana (sin restar su propio capital).

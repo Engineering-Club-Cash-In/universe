@@ -138,14 +138,24 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
     const snapshotConfiable =
       pago.pagado === true && tieneRubrosDeCuota && totalRestanteFila.gt(0);
 
+    const key = String(pago.numero_cuota ?? "");
+
     if (capitalRestante === null) {
       capitalRestante = snapshotConfiable
         ? totalRestanteFila
         : totalRestanteFila.plus(abonoCapital);
-    }
-
-    const key = String(pago.numero_cuota ?? "");
-    if (key !== cuotaActual) {
+      // Primera cuota visible sin saldo previo: su apertura se reconstruye como
+      // snapshot + Σ abonos de la cuota (el snapshot ya es post-pago).
+      cuotaActual = key;
+      saldoInicioCuota = snapshotConfiable
+        ? totalRestanteFila.plus(
+            pagos
+              .filter((p) => String(p.numero_cuota ?? "") === key)
+              .reduce((acc, p) => acc.plus(p.abono_capital || 0), new Big(0)),
+          )
+        : capitalRestante;
+      abonosAcumCuota = new Big(0);
+    } else if (key !== cuotaActual) {
       cuotaActual = key;
       saldoInicioCuota = capitalRestante;
       abonosAcumCuota = new Big(0);

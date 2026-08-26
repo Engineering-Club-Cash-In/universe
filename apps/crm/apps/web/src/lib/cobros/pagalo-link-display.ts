@@ -67,10 +67,19 @@ export function getPagaloLinkStatusInfo(status: string): StatusInfo {
 	);
 }
 
-export function getPagaloGroupSummary(links: Array<{ status: string }>) {
+export function getPagaloGroupSummary(
+	links: Array<{ linkType: string; status: string }>,
+) {
 	if (links.length === 0) return null;
-	const pagados = links.filter((link) => link.status === "PAID").length;
-	return `${pagados} de ${links.length} pagados`;
+	const estadoPorTipo = new Map<string, boolean>();
+	for (const link of links) {
+		estadoPorTipo.set(
+			link.linkType,
+			estadoPorTipo.get(link.linkType) === true || link.status === "PAID",
+		);
+	}
+	const pagados = [...estadoPorTipo.values()].filter(Boolean).length;
+	return `${pagados} de ${estadoPorTipo.size} pagados`;
 }
 
 export async function copyPagaloLink(

@@ -638,6 +638,8 @@ type UpdateMoraTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0]
 type UpdateMoraEnTxOptions = {
   requestId?: string;
   historyRequired?: boolean;
+  /** Justificación que queda en moras_historial.motivo (ej. ajuste Págalo). */
+  motivo?: string;
 };
 
 export async function updateMoraEnTx({
@@ -784,6 +786,7 @@ export async function updateMoraEnTx({
     cuotas_atrasadas_nuevas: cuotas_atrasadas,
     porcentaje_mora: updated.porcentaje_mora,
     usuario_id: usuarioId,
+    motivo: options.motivo ?? null,
   } as const;
 
   if (options.historyRequired !== false) {

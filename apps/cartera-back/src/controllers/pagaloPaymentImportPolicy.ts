@@ -1,4 +1,5 @@
 import Big from "big.js";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 
 // FASE 1 — Códigos estables que el endpoint podrá devolver al CRM sin exponer
@@ -28,6 +29,7 @@ export const PAGALO_IMPORT_ERROR_CODES = {
   PAGALO_DUPLICATE_VOUCHER_KEY: "PAGALO_DUPLICATE_VOUCHER_KEY",
   PAGALO_INVALID_CAPITAL_RUBRO: "PAGALO_INVALID_CAPITAL_RUBRO",
   PAGALO_INVALID_FACTURABLE_RUBRO: "PAGALO_INVALID_FACTURABLE_RUBRO",
+  PAGALO_PAYLOAD_HASH_MISMATCH: "PAGALO_PAYLOAD_HASH_MISMATCH",
 } as const;
 
 export type PagaloImportErrorCode =
@@ -76,6 +78,8 @@ export const PAGALO_IMPORT_ERROR_MESSAGES: Record<
     "Las asignaciones CAPITAL deben usar rubro CAPITAL.",
   PAGALO_INVALID_FACTURABLE_RUBRO:
     "Las asignaciones MORA_INTERES no pueden usar rubro CAPITAL.",
+  PAGALO_PAYLOAD_HASH_MISMATCH:
+    "El payload_hash no corresponde al contenido del comando Págalo.",
 };
 
 const moneyText = /^\d+(?:\.\d{1,2})?$/;
@@ -194,6 +198,62 @@ const err = (code: PagaloImportErrorCode) => ({
   code,
   message: PAGALO_IMPORT_ERROR_MESSAGES[code],
 });
+
+/** Contrato CB-028 compartido con CRM. El hash recibido no es fuente de verdad. */
+export function canonicalizarPagaloPayload(
+  command: Omit<PagaloImportCommand, "payload_hash">,
+): string {
+  const allocations = [...command.allocations]
+    .sort((a, b) => {
+      if (a.link_type !== b.link_type) return a.link_type < b.link_type ? -1 : 1;
+      if (a.numero_cuota !== b.numero_cuota) return a.numero_cuota - b.numero_cuota;
+      return a.rubro < b.rubro ? -1 : a.rubro > b.rubro ? 1 : 0;
+    })
+    .map((a) => ({
+      link_type: a.link_type,
+      cartera_cuota_id: a.cartera_cuota_id,
+      numero_cuota: a.numero_cuota,
+      rubro: a.rubro,
+      amount: a.amount,
+      facturable: a.facturable,
+    }));
+  const source = (value: PagaloImportCommand["capital"]) =>
+    value
+      ? {
+          transaction_uuid: value.transaction_uuid,
+          external_identifier: value.external_identifier,
+          request_id: value.request_id ?? null,
+          request_auth: value.request_auth ?? null,
+          paid_at: value.paid_at,
+          voucher_storage_key: value.voucher_storage_key,
+        }
+      : null;
+
+  return JSON.stringify({
+    crm_group_id: command.crm_group_id,
+    credito_id: command.credito_id,
+    numero_credito_sifco: command.numero_credito_sifco,
+    currency: command.currency,
+    capital_total: command.capital_total,
+    facturable_total: command.facturable_total,
+    total_amount: command.total_amount,
+    cuota_inicial: command.cuota_inicial,
+    allocations,
+    capital: source(command.capital),
+    facturable: source(command.facturable),
+  });
+}
+
+export function calcularPagaloPayloadHash(
+  command: Omit<PagaloImportCommand, "payload_hash">,
+): string {
+  return createHash("sha256").update(canonicalizarPagaloPayload(command)).digest("hex");
+}
+
+export function verificarPagaloPayloadHash(command: PagaloImportCommand) {
+  const { payload_hash, ...content } = command;
+  return calcularPagaloPayloadHash(content) === payload_hash;
+}
 
 // FASE 4 — Seguridad del voucher. Solo se acepta una key propia de R2;
 // nunca una URL externa, traversal, encoding ambiguo o query.

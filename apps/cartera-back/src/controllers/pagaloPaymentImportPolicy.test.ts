@@ -2,14 +2,17 @@ import { describe, expect, it } from "bun:test";
 import type { z } from "zod";
 import {
   PAGALO_IMPORT_ERROR_CODES,
+  calcularPagaloPayloadHash,
   pagaloImportCommandSchema,
   validatePagaloImportCommand,
+  verificarPagaloPayloadHash,
   type PagaloImportErrorCode,
 } from "./pagaloPaymentImportPolicy";
 
 const groupId = "3b6f0ed4-c4c5-4adf-afb9-aef97da9a5e6";
 const capitalTransactionId = "d9d7ba9b-c558-48e9-a68f-38473f82145d";
 const facturableTransactionId = "d350f86c-c15e-4cd8-af7f-d197804c0dd0";
+const validPayloadHash = "b6a7f6e188653732c9b0d193b00b57956fdf96d33609aa4554e0889f0505803a";
 
 const source = (
   transaction_uuid: string,
@@ -87,7 +90,7 @@ const command = (): TestCommand => ({
   ],
   capital: source(capitalTransactionId, "capital-123", "capital"),
   facturable: source(facturableTransactionId, "facturable-123", "facturable"),
-  payload_hash: "a".repeat(64),
+  payload_hash: validPayloadHash,
 });
 
 const expectInvalid = (input: unknown, code: PagaloImportErrorCode) => {
@@ -106,6 +109,16 @@ describe("validatePagaloImportCommand", () => {
       expect(result.data.capital_total).toBe("100.00");
       expect(result.data.facturable_total).toBe("25.00");
     }
+  });
+
+  it("hashes validated command content canonically and detects an altered hash", () => {
+    const parsed = validatePagaloImportCommand(command());
+    expect(parsed.success).toBeTrue();
+    if (!parsed.success) return;
+
+    expect(calcularPagaloPayloadHash(parsed.data)).toBe(validPayloadHash);
+    expect(verificarPagaloPayloadHash(parsed.data)).toBeTrue();
+    expect(verificarPagaloPayloadHash({ ...parsed.data, payload_hash: "a".repeat(64) })).toBeFalse();
   });
 
   it("accepts mora-only commands and requires the top-level source shape", () => {

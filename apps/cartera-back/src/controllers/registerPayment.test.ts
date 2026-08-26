@@ -32,6 +32,9 @@ describe("register payment", () => {
     expect(source).toContain('origen_pago: "pagalo";');
     expect(source).toContain("pagalo_import_id: number;");
     expect(source).toContain("pagalo_import_id: pagalo_import_id");
+    expect(source).toContain("origen_pago: pagoData.origen_pago");
+    expect(source).toContain("pagalo_import_id: pagoData.pagalo_import_id");
+    expect(source.match(/pagalo_import_id: pagoData\.pagalo_import_id/g) ?? []).toHaveLength(2);
   });
 
   it("Págalo se registra como un solo pago con el total (Daniel, 2026-08-26): capital se paga dentro del loop normal, sin guard de sobrante", async () => {

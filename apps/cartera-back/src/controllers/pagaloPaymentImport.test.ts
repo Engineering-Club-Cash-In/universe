@@ -1,5 +1,5 @@
 import { describe, expect, it, mock } from "bun:test";
-import type { PagaloImportCommand } from "./pagaloPaymentImportPolicy";
+import { calcularPagaloPayloadHash, type PagaloImportCommand } from "./pagaloPaymentImportPolicy";
 import {
   createPagaloImportService,
   mapPagaloImportToRegistro,
@@ -7,7 +7,8 @@ import {
 
 const groupId = "3b6f0ed4-c4c5-4adf-afb9-aef97da9a5e6";
 
-const command = (): PagaloImportCommand => ({
+const command = (): PagaloImportCommand => {
+  const input: Omit<PagaloImportCommand, "payload_hash"> = {
   crm_group_id: groupId,
   credito_id: 123,
   numero_credito_sifco: "SIFCO-123",
@@ -46,8 +47,9 @@ const command = (): PagaloImportCommand => ({
     paid_at: "2026-08-24T12:00:00.000Z",
     voucher_storage_key: `pagalo/${groupId}/facturable.pdf`,
   },
-  payload_hash: "a".repeat(64),
-});
+  };
+  return { ...input, payload_hash: calcularPagaloPayloadHash(input) };
+};
 
 describe("pagalo payment import", () => {
   it("maps a two-link group as a single payment with the combined total (Daniel, 2026-08-26)", () => {
@@ -101,7 +103,7 @@ describe("pagalo payment import", () => {
         Promise.resolve({
           id: 44,
           status: "APPLIED",
-          payload_hash: "a".repeat(64),
+          payload_hash: command().payload_hash,
           payment_ids: [801, 802],
         }),
       ),
@@ -116,6 +118,21 @@ describe("pagalo payment import", () => {
       payment_ids: [801, 802],
       idempotent_replay: true,
     });
+    expect(registrarPago).not.toHaveBeenCalled();
+  });
+
+  it("rejects a stale payload hash before checking idempotency or creating a payment", async () => {
+    const findByGroup = mock();
+    const registrarPago = mock();
+    const service = createPagaloImportService({ findByGroup, markReviewRequired: mock(), registrarPago });
+    const stale = { ...command(), payload_hash: "a".repeat(64) };
+
+    await expect(service.import(stale)).resolves.toMatchObject({
+      success: false,
+      status: "INVALID_COMMAND",
+      code: "PAGALO_PAYLOAD_HASH_MISMATCH",
+    });
+    expect(findByGroup).not.toHaveBeenCalled();
     expect(registrarPago).not.toHaveBeenCalled();
   });
 

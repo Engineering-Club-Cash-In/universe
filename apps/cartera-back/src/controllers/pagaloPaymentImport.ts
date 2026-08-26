@@ -1,5 +1,7 @@
 import {
+  PAGALO_IMPORT_ERROR_CODES,
   validatePagaloImportCommand,
+  verificarPagaloPayloadHash,
   type PagaloImportCommand,
 } from "./pagaloPaymentImportPolicy";
 import { and, eq } from "drizzle-orm";
@@ -110,6 +112,18 @@ export function createPagaloImportService(deps: PagaloImportServiceDependencies)
         };
       }
 
+      if (!verificarPagaloPayloadHash(validated.data)) {
+        return {
+          success: false as const,
+          status: "INVALID_COMMAND" as const,
+          code: PAGALO_IMPORT_ERROR_CODES.PAGALO_PAYLOAD_HASH_MISMATCH,
+          errors: [{
+            code: PAGALO_IMPORT_ERROR_CODES.PAGALO_PAYLOAD_HASH_MISMATCH,
+            message: "El payload_hash no corresponde al contenido del comando Págalo.",
+          }],
+        };
+      }
+
       const existing = await deps.findByGroup(validated.data.crm_group_id);
       if (existing) {
         if (existing.payload_hash === validated.data.payload_hash) {
@@ -187,15 +201,26 @@ const importValues = (command: PagaloImportCommand) => ({
  */
 export const importPagaloPayment = async ({ body, set }: any) => {
 	const parsed = validatePagaloImportCommand(body);
-  if (!parsed.success) {
+	if (!parsed.success) {
     set.status = 400;
     return {
       success: false,
       status: "INVALID_COMMAND",
       errors: parsed.errors,
     };
+	}
+  if (!verificarPagaloPayloadHash(parsed.data)) {
+    set.status = 400;
+    return {
+      success: false,
+      status: "INVALID_COMMAND",
+      errors: [{
+        code: PAGALO_IMPORT_ERROR_CODES.PAGALO_PAYLOAD_HASH_MISMATCH,
+        message: "El payload_hash no corresponde al contenido del comando Págalo.",
+      }],
+    };
   }
-  const command = parsed.data;
+	const command = parsed.data;
 
   return withPaymentAdvisoryLock(command.credito_id, async () => {
     const [existing] = await db

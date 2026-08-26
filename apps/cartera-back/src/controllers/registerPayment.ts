@@ -1773,6 +1773,7 @@ export async function procesarRegistroPago(
                   // Paridad con la rama UPDATE de cierre (que persiste pagoData
                   // completo): conservar el origen del pago en la fila de cierre.
                   origen_pago: pagoData.origen_pago,
+                  pagalo_import_id: pagoData.pagalo_import_id,
                 })
                 .returning();
 
@@ -1917,6 +1918,8 @@ export async function procesarRegistroPago(
                   pagoConvenio: estamparPagoConvenio(),
                   fecha_boleta:pagoData.fecha_boleta,
                   monto_aplicado: pagoData.monto_aplicado,
+                  origen_pago: pagoData.origen_pago,
+                  pagalo_import_id: pagoData.pagalo_import_id,
                 })
                 .returning();
               console.log("pagoInsertado cuota parcial:", pagoInsertado);

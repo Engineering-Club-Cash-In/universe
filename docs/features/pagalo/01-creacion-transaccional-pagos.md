@@ -266,8 +266,9 @@ Antes de primera escritura financiera:
    `capital + facturable = total` en centavos.
 4. Allocations y fuente existen si y solo si su lado es mayor que cero.
 5. CAPITAL solo contiene rubros no facturables; MORA_INTERES, facturables.
-6. UUIDs e identificadores requeridos son distintos y no aparecen en ningún rol
-   de importaciones previas.
+6. CRM conserva unicidad global de UUID e identificadores Págalo. Cartera aún
+   no revalida reutilización cruzada de roles entre grupos: defensa adicional
+   P2 documentada en D-13, no bloqueante para dispatcher CRM actual.
 7. `payload_hash` coincide con comando canónico.
 8. Cuota inicial y snapshot conservan trazabilidad; aplicación posterior usa
    estado vivo del motor normal, sin revisión por sobrante del snapshot.

@@ -595,112 +595,129 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 	// PAGALO_DISPATCH_ENABLED es el kill switch de aplicar pagos reales en
 	// cartera-back — debe frenar también el dispatch que corre desde acá
 	// (reintento de pendientes y el inline de abajo), no solo el ciclo
-	// programado de pagalo-dispatch.ts (hallazgo Codex). Con el flag apagado,
-	// el poll sigue detectando/marcando pagos y voucher, solo no los envía.
+	// programado de pagalo-dispatch.ts. Con el flag apagado, el poll sigue
+	// detectando/marcando pagos y voucher, solo no los envía.
 	const dispatchHabilitado = isPagaloDispatchEnabled();
-	const dispatchPrevio = dispatchHabilitado
-		? await correrDispatchPagalo()
-		: { revisados: 0, completados: 0, revisionRequerida: 0, errores: 0 };
 
-	const links = await reclamarLinksPendientes();
 	const resultado: ResultadoPollPagalo = {
-		revisados: links.length,
+		revisados: 0,
 		pagados: 0,
 		sinCambios: 0,
 		errores: 0,
-		dispatchReintentados: dispatchPrevio.revisados,
-		dispatchCompletados: dispatchPrevio.completados,
-		dispatchErrores: dispatchPrevio.errores + dispatchPrevio.revisionRequerida,
+		dispatchReintentados: 0,
+		dispatchCompletados: 0,
+		dispatchErrores: 0,
 	};
-	if (links.length === 0) return resultado;
 
-	const config = getPagaloSandboxConfig();
-	const client = createPagaloClient(config);
+	// Detectar pagos nuevos va PRIMERO: correrDispatchPagalo puede recorrer
+	// hasta 50 grupos, cada uno con hasta 10s de timeout HTTP (más el tiempo
+	// sin límite de getCarteraAccessToken) — si eso corriera antes, un
+	// backlog de dispatch con cartera-back lenta/caída podía retrasar
+	// minutos la detección de un pago que el cliente ya hizo (hallazgo
+	// Codex). El reintento del backlog corre al final, sin bloquear esto.
+	const links = await reclamarLinksPendientes();
+	resultado.revisados = links.length;
+	if (links.length > 0) {
+		const config = getPagaloSandboxConfig();
+		const client = createPagaloClient(config);
 
-	for (const link of links) {
-		if (!link.pagaloRequestUuid) {
-			await registrarIntentoFallido(link, "Link sin pagaloRequestUuid.");
-			resultado.errores++;
-			continue;
-		}
-		let estado: any;
-		try {
-			estado = await client.getRequestByUuid(link.pagaloRequestUuid);
-		} catch (error) {
-			await registrarIntentoFallido(
-				link,
-				error instanceof Error ? error.message : String(error),
-			);
-			resultado.errores++;
-			continue;
-		}
-		const status = estado?.message?.status ?? estado?.data?.status;
-		if (status === "3" || status === "4") {
-			await marcarLinkTerminal(link, status === "3" ? "CANCELLED" : "EXPIRED");
-			resultado.sinCambios++;
-			continue;
-		}
-		if (status !== "2") {
-			await registrarIntentoFallido(link);
-			resultado.sinCambios++;
-			continue;
-		}
-
-		// Pagado. Traer el detalle real de la transacción (no. de transacción,
-		// tarjeta, fecha) por id_external — mismo authorization fijo, sin login.
-		try {
-			const detalle: any = await client.getTransactionByIdExternalRaw(
-				link.externalIdentifier,
-			);
-			const transaccion: TransaccionPagalo | undefined = detalle?.transaction;
-			if (!transaccion) {
+		for (const link of links) {
+			if (!link.pagaloRequestUuid) {
+				await registrarIntentoFallido(link, "Link sin pagaloRequestUuid.");
+				resultado.errores++;
+				continue;
+			}
+			let estado: any;
+			try {
+				estado = await client.getRequestByUuid(link.pagaloRequestUuid);
+			} catch (error) {
 				await registrarIntentoFallido(
 					link,
-					"Págalo confirma link pagado pero no encontró la transacción por id_external.",
+					error instanceof Error ? error.message : String(error),
 				);
 				resultado.errores++;
 				continue;
 			}
-			validarTransaccionPagalo(link, transaccion);
-			const pdf = await generarVoucherPdf(transaccion, "Club Cashin");
-			const subida = await subirVoucher(pdf, link.groupId, link);
-			const listoParaAplicar = await marcarLinkPagado(link, transaccion, subida);
-			resultado.pagados++;
-			// Fuera de la transacción de arriba a propósito: nunca llamar
-			// cartera-back (red) mientras una tx de DB sigue abierta. Si esto
-			// falla, el grupo queda READY_TO_APPLY/APPLICATION_FAILED y el
-			// dispatcher programado lo recoge en su propio ciclo — nunca se pierde.
-			if (listoParaAplicar && dispatchHabilitado) {
-				try {
-					const resultadoInline = await reclamarYProcesarGrupo(link.groupId);
-					// El resultado del retry preliminar (dispatchPrevio) ya está
-					// contado arriba — esto suma lo que pasa con el dispatch
-					// inline, que antes se descartaba y dejaba el reporte del
-					// botón manual mintiendo "0 completados" aunque sí aplicara
-					// el pago (hallazgo Codex).
-					if (resultadoInline === "COMPLETADO") resultado.dispatchCompletados++;
-					else if (resultadoInline === "ERROR" || resultadoInline === "REVIEW_REQUIRED") {
-						resultado.dispatchErrores++;
-					}
-				} catch (error) {
-					resultado.dispatchErrores++;
-					console.error(
-						`[Págalo][POLL] grupo ${link.groupId} quedó READY_TO_APPLY pero falló el dispatch inline:`,
-						error instanceof Error ? error.message : error,
-					);
-				}
+			const status = estado?.message?.status ?? estado?.data?.status;
+			if (status === "3" || status === "4") {
+				await marcarLinkTerminal(link, status === "3" ? "CANCELLED" : "EXPIRED");
+				resultado.sinCambios++;
+				continue;
 			}
-		} catch (error) {
-			await registrarIntentoFallido(
-				link,
-				error instanceof Error ? error.message : String(error),
-			);
-			resultado.errores++;
-			console.error(
-				`[Págalo][POLL] link ${link.id} pagado pero falló generar/subir voucher:`,
-				error instanceof Error ? error.message : error,
-			);
+			if (status !== "2") {
+				await registrarIntentoFallido(link);
+				resultado.sinCambios++;
+				continue;
+			}
+
+			// Pagado. Traer el detalle real de la transacción (no. de transacción,
+			// tarjeta, fecha) por id_external — mismo authorization fijo, sin login.
+			try {
+				const detalle: any = await client.getTransactionByIdExternalRaw(
+					link.externalIdentifier,
+				);
+				const transaccion: TransaccionPagalo | undefined = detalle?.transaction;
+				if (!transaccion) {
+					await registrarIntentoFallido(
+						link,
+						"Págalo confirma link pagado pero no encontró la transacción por id_external.",
+					);
+					resultado.errores++;
+					continue;
+				}
+				validarTransaccionPagalo(link, transaccion);
+				const pdf = await generarVoucherPdf(transaccion, "Club Cashin");
+				const subida = await subirVoucher(pdf, link.groupId, link);
+				const listoParaAplicar = await marcarLinkPagado(link, transaccion, subida);
+				resultado.pagados++;
+				// Fuera de la transacción de arriba a propósito: nunca llamar
+				// cartera-back (red) mientras una tx de DB sigue abierta. Si esto
+				// falla, el grupo queda READY_TO_APPLY/APPLICATION_FAILED y el
+				// dispatcher programado lo recoge en su propio ciclo — nunca se pierde.
+				if (listoParaAplicar && dispatchHabilitado) {
+					try {
+						const resultadoInline = await reclamarYProcesarGrupo(link.groupId);
+						// El resultado del retry del backlog (más abajo) también
+						// suma acá — esto solo cubre lo que antes se descartaba
+						// del dispatch inline, que dejaba el reporte del botón
+						// manual mintiendo "0 completados" aunque sí aplicara el
+						// pago (hallazgo Codex).
+						if (resultadoInline === "COMPLETADO") resultado.dispatchCompletados++;
+						else if (resultadoInline === "ERROR" || resultadoInline === "REVIEW_REQUIRED") {
+							resultado.dispatchErrores++;
+						}
+					} catch (error) {
+						resultado.dispatchErrores++;
+						console.error(
+							`[Págalo][POLL] grupo ${link.groupId} quedó READY_TO_APPLY pero falló el dispatch inline:`,
+							error instanceof Error ? error.message : error,
+						);
+					}
+				}
+			} catch (error) {
+				await registrarIntentoFallido(
+					link,
+					error instanceof Error ? error.message : String(error),
+				);
+				resultado.errores++;
+				console.error(
+					`[Págalo][POLL] link ${link.id} pagado pero falló generar/subir voucher:`,
+					error instanceof Error ? error.message : error,
+				);
+			}
 		}
+	}
+
+	// Backlog de grupos READY_TO_APPLY/APPLICATION_FAILED/APPLYING de una
+	// corrida anterior (p.ej. si cartera-back estuvo caído). Va AL FINAL,
+	// después de detectar pagos nuevos, para que un backlog grande con
+	// cartera-back lento no retrase la detección de un pago que el cliente
+	// ya hizo (hallazgo Codex).
+	if (dispatchHabilitado) {
+		const dispatchPrevio = await correrDispatchPagalo();
+		resultado.dispatchReintentados += dispatchPrevio.revisados;
+		resultado.dispatchCompletados += dispatchPrevio.completados;
+		resultado.dispatchErrores += dispatchPrevio.errores + dispatchPrevio.revisionRequerida;
 	}
 
 	return resultado;

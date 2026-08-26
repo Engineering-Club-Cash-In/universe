@@ -1720,7 +1720,6 @@ async function correrRecordatorioDePagalo(): Promise<void> {
 }
 
 if (TAREAS_PROGRAMADAS_ACTIVAS) {
-	void correrRecordatorioDePagalo();
 	setInterval(correrRecordatorioDePagalo, 3 * 60 * 60 * 1000);
 }
 

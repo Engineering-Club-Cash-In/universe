@@ -199,6 +199,12 @@ describe("resolverTelefono", () => {
 		expect(resolverTelefono(undefined, "50967386")).toBe("50967386");
 	});
 
+	test("telefonoPrincipal inválido: usa teléfono alternativo antes que lead", () => {
+		expect(resolverTelefono("N/A", "50967386", "57099747")).toBe(
+			"57099747",
+		);
+	});
+
 	test("telefonoPrincipal inválido/basura NO bloquea el fallback válido de leads (bug corregido)", () => {
 		// Antes: primerTelefono(a ?? b) evaluaba "N/A" como truthy y nunca
 		// probaba leads.phone. Ahora cada fuente se prueba por separado.

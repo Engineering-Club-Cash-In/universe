@@ -99,9 +99,12 @@ export function resolverLinksPendientes(
 export function resolverTelefono(
 	telefonoPrincipal: string | null | undefined,
 	telefonoLead: string | null | undefined,
+	telefonoAlternativo?: string | null,
 ): string | undefined {
 	return (
-		primerTelefono(telefonoPrincipal) ?? primerTelefono(telefonoLead)
+		primerTelefono(telefonoPrincipal) ??
+		primerTelefono(telefonoAlternativo) ??
+		primerTelefono(telefonoLead)
 	)?.replace(/\D/g, "");
 }
 
@@ -150,6 +153,7 @@ async function resolverContacto(
 		? await db
 				.select({
 					telefonoPrincipal: casosCobros.telefonoPrincipal,
+					telefonoAlternativo: casosCobros.telefonoAlternativo,
 					vehiculoMarca: vehicles.make,
 					vehiculoModelo: vehicles.model,
 					vehiculoYear: vehicles.year,
@@ -189,7 +193,11 @@ async function resolverContacto(
 		.orderBy(desc(opportunities.updatedAt))
 		.limit(1);
 
-	const telefono = resolverTelefono(caso?.telefonoPrincipal, leadInfo?.phone);
+	const telefono = resolverTelefono(
+		caso?.telefonoPrincipal,
+		leadInfo?.phone,
+		caso?.telefonoAlternativo,
+	);
 	const vehiculo = resolverVehiculo(
 		caso
 			? {

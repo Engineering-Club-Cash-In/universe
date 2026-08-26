@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CreditCard, ExternalLink, Loader2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -54,10 +54,12 @@ export function PagaloLinkDialog({ casoCobroId, numeroSifco, creditoId }: { caso
 		const facturable = facturableCuotas + mora;
 		return { capital, facturable, total: capital + facturable };
 	}, [cuotas, selected, tieneMora, data]);
+	const queryClient = useQueryClient();
 	const mutation = useMutation({
 		mutationFn: (input: { casoCobroId: string; numeroSifco: string; creditoId: number; cuotaIds: number[] }) =>
 			(client as any).crearLinksPagalo(input),
 		onSuccess: (result: any) => {
+			queryClient.invalidateQueries(orpc.getPagaloHistorial.queryOptions({ input: { casoCobroId } }));
 			if (result.status === "REVIEW_REQUIRED") toast.error("Grupo Págalo existente requiere revisión.");
 			else if (result.origen === "BOT")
 				toast.info("El cliente ya generó estos links desde WhatsApp; se muestran los mismos.");
@@ -76,11 +78,30 @@ export function PagaloLinkDialog({ casoCobroId, numeroSifco, creditoId }: { caso
 	});
 	const todasSeleccionadas = cuotas.length > 0 && selected.length === cuotas.length;
 	const toggleTodas = () => setSelected(todasSeleccionadas ? [] : cuotas.map((cuota: any) => cuota.cuota_id));
+	// PRUEBA: dispara un ciclo del poller Págalo a demanda, sin esperar el
+	// setInterval de 5 min. Con poller+dispatch unificados, un solo click
+	// alcanza para llevar un link pagado hasta COMPLETED. Borrar junto con
+	// el procedure probarPollPagalo cuando el ciclo automático esté probado.
+	const pollMutation = useMutation({
+		mutationFn: () => (client as any).probarPollPagalo(),
+		onSuccess: (result: any) => {
+			queryClient.invalidateQueries(orpc.getPagaloHistorial.queryOptions({ input: { casoCobroId } }));
+			console.log("[Págalo] resultado del poll:", result);
+			toast.success(
+				`Poll: ${result.pagados} pagado(s), ${result.errores} error(es). Dispatch: ${result.dispatchCompletados} completado(s), ${result.dispatchErrores} error(es). Revisa la consola.`,
+			);
+		},
+		onError: (error: Error) => toast.error(error.message || "Falló correr el poll de Págalo"),
+	});
 
 	return <Dialog open={open} onOpenChange={(next) => { setOpen(next); if (!next) { setSelected([]); mutation.reset(); } }}>
 		<DialogTrigger asChild><Button variant="outline" className="gap-2"><CreditCard className="h-4 w-4 text-violet-600" />Generar links Págalo</Button></DialogTrigger>
 		<DialogContent className="flex max-h-[90vh] max-w-lg flex-col overflow-hidden">
 			<DialogHeader><DialogTitle>Links de pago Págalo</DialogTitle><DialogDescription>Sandbox. Capital y mora/intereses salen en links separados. Links no expiran.</DialogDescription></DialogHeader>
+			<Button type="button" variant="secondary" size="sm" className="w-fit" disabled={pollMutation.isPending} onClick={() => pollMutation.mutate()}>
+				{pollMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+				Correr poll Págalo ahora (temporal)
+			</Button>
 			{credit.isLoading ? <div className="flex justify-center py-8"><Loader2 className="animate-spin" /></div> : links.length > 0 ? <div className="space-y-3">
 					<p className="text-sm">{reviewRequired ? "Grupo existente en revisión. No se creó un link adicional:" : "Grupo creado. Comparte solo links necesarios:"}</p>
 				{links.map((link: any) => <a key={link.linkType} href={link.paymentUrl} target="_blank" rel="noreferrer" className="flex items-center justify-between rounded-md border p-3 text-sm hover:bg-muted"><span>{link.linkType === "CAPITAL" ? "Capital" : "Mora e intereses"}</span><ExternalLink className="h-4 w-4" /></a>)}

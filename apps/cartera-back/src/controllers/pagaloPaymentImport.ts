@@ -357,6 +357,7 @@ export const importPagaloPayment = async ({ body, set }: any) => {
         id: pagalo_payment_imports.id,
         payload_hash: pagalo_payment_imports.payload_hash,
         status: pagalo_payment_imports.status,
+        last_error_code: pagalo_payment_imports.last_error_code,
       })
       .from(pagalo_payment_imports)
       .where(eq(pagalo_payment_imports.crm_group_id, command.crm_group_id))
@@ -389,6 +390,13 @@ export const importPagaloPayment = async ({ body, set }: any) => {
         import_id: existing.id,
         payment_ids: await paymentIdsForImport(db, existing.id),
         idempotent_replay: true,
+        // Un replay de un import que quedó REVIEW_REQUIRED (deuda viva,
+        // comando inválido, etc.) debe llevar el motivo original; sin esto
+        // el CRM guardaba `code: undefined` y el operador no sabía por qué
+        // revisar el grupo (hallazgo Codex).
+        ...(existing.status === "REVIEW_REQUIRED" && existing.last_error_code
+          ? { code: existing.last_error_code }
+          : {}),
       };
     }
 

@@ -9,6 +9,11 @@
  * D-50: cuando TODOS los links requeridos de un grupo (uno o dos, según D-48
  * — cualquier lado puede ser Q0 y no tener link) están pagados y con voucher
  * propio, el grupo pasa a READY_TO_APPLY. Ningún paso previo toca cartera.
+ * Apenas eso ocurre, este job dispara el dispatch de ESE grupo inline (ver
+ * `reclamarYProcesarGrupo` en `pagalo-dispatch.ts`) en vez de esperar el
+ * próximo ciclo programado del dispatcher — evita hasta 5 min extra de
+ * espera. El dispatcher programado sigue corriendo igual como respaldo para
+ * reintentar cualquier grupo que haya quedado `APPLICATION_FAILED`.
  *
  * D-51: los links no expiran. Un link REPLACED sigue en el barrido hasta
  * observar su destino final (pagado/cancelado/expirado) — sacarlo del poll
@@ -29,9 +34,18 @@
  * uuid` con el uuid del link no encuentra nada; `id_external` sí). Con esos
  * datos reales, el worker genera su propio comprobante en el mismo formato
  * visual del que emite Págalo (ver generarVoucherPdf) usando pdf-lib.
+ *
+ * DÓNDE SE SUBE EL VOUCHER — a cartera-back, no al bucket del CRM. El comando
+ * de importación (`pagaloPaymentImportPolicy.ts`) exige una key que
+ * cartera-back pueda resolver en SU PROPIO bucket R2 (`R2_BUCKET`, distinto
+ * del bucket del CRM) — cartera-back nunca sube ni descarga nada él mismo,
+ * solo persiste el string recibido (`insertarBoletas`/`prepararURLsBoletas`
+ * en registerPayment.ts, confirmado leyendo el código: cero I/O de storage).
+ * Por eso el worker sube el PDF reutilizando `carteraBackClient.uploadFile`
+ * — el mismo `POST /upload` que ya usan carteraFront y el bot de cobros para
+ * boletas de depósito, con el mismo Bearer JWT — en vez de un bucket propio.
  */
 import { createHash } from "node:crypto";
-import { PutObjectCommand } from "@aws-sdk/client-s3";
 import {
 	and,
 	asc,
@@ -50,11 +64,10 @@ import {
 	pagaloPaymentGroups,
 	pagaloPaymentLinks,
 } from "../db/schema/pagalo-payments";
-import { getFileUrl, R2_BUCKET_NAME, r2Client } from "../lib/storage";
-import {
-	createPagaloClient,
-	getPagaloSandboxConfig,
-} from "../services/pagalo-client";
+import { carteraBackClient } from "../services/cartera-back-client";
+import { createPagaloClient, getPagaloSandboxConfig } from "../services/pagalo-client";
+import { isPagaloDispatchEnabled } from "../lib/pagalo-dispatch-config";
+import { correrDispatchPagalo, reclamarYProcesarGrupo } from "./pagalo-dispatch";
 
 /** Tope por corrida. Si hay más, se atienden en la siguiente. */
 const MAXIMO_POR_CORRIDA = 50;
@@ -238,31 +251,33 @@ async function subirVoucher(
 	const voucherSha256 = createHash("sha256")
 		.update(Buffer.from(buffer))
 		.digest("hex");
-	const voucherStorageKey = `pagalo/${groupId}/${link.linkType}-${link.generation}.pdf`;
-	await r2Client.send(
-		new PutObjectCommand({
-			Bucket: R2_BUCKET_NAME,
-			Key: voucherStorageKey,
-			Body: Buffer.from(buffer),
-			ContentType: "application/pdf",
-		}),
-	);
-	// `voucherStorageKey` es la fuente de verdad para volver a generar una URL
-	// firmada cuando haga falta mostrarla (getFileUrl); esta URL guardada en DB
-	// expira igual que el resto de firmas del repo (SIGNED_URL_EXPIRY).
-	const voucherUrl = await getFileUrl(voucherStorageKey);
-	return { voucherStorageKey, voucherSha256, voucherUrl };
+	// Mismo proceso que carteraFront/bot de cobros: solo se manda el archivo,
+	// sin pedir una key propia — cartera-back siempre devuelve un nombre
+	// aleatorio plano (uuid.pdf). La key queda atada a este grupo por el resto
+	// del comando de importación (crm_group_id, transaction_uuid), no por su
+	// propio nombre de archivo (ver pagaloPaymentImportPolicy.ts, voucherValid).
+	const nombreSugerido = `voucher-pagalo-${groupId}-${link.linkType}.pdf`;
+	const archivo = new Blob([new Uint8Array(buffer)], { type: "application/pdf" });
+	const subida = await carteraBackClient.uploadFile(archivo, nombreSugerido);
+	const voucherStorageKey = subida.filename;
+	// cartera-back arma la URL pública final (URL_PUBLIC_R2 + key) del lado
+	// suyo cuando persiste la boleta — el comprobante se revisa ahí, no desde
+	// el CRM (fuera de alcance por ahora, hallazgo Codex: el historial Págalo
+	// del CRM no debe pretender un link clicable sin ese dominio).
+	return { voucherStorageKey, voucherSha256, voucherUrl: voucherStorageKey };
 }
 
 /**
  * Todos los `linkType` del grupo con monto > 0 (D-48: un lado puede ser Q0 y
  * no generar link) ya tienen isApplicationSource=true → READY_TO_APPLY. Si
- * falta alguno, PARTIALLY_PAID (solo si el grupo no está ya ahí).
+ * falta alguno, PARTIALLY_PAID (solo si el grupo no está ya ahí). Devuelve
+ * `true` si el grupo quedó `READY_TO_APPLY` en esta llamada — el caller usa
+ * eso para disparar el dispatch inline apenas la transacción cierre.
  */
 async function evaluarGrupo(
 	tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
 	groupId: string,
-): Promise<void> {
+): Promise<boolean> {
 	const [group] = await tx
 		.select({
 			capitalTotal: pagaloPaymentGroups.capitalTotal,
@@ -271,7 +286,7 @@ async function evaluarGrupo(
 		})
 		.from(pagaloPaymentGroups)
 		.where(eq(pagaloPaymentGroups.id, groupId));
-	if (!group) return;
+	if (!group) return false;
 
 	const linkTypesDelGrupo = new Set<"CAPITAL" | "MORA_INTERES">();
 	if (Number(group.capitalTotal) > 0) linkTypesDelGrupo.add("CAPITAL");
@@ -292,7 +307,15 @@ async function evaluarGrupo(
 	);
 
 	if (todosPagados) {
-		await tx
+		// El grupo puede estar en REVIEW_REQUIRED (p.ej. un link REPLACED
+		// pagado escaló el grupo activo, ver marcarLinkPagado) cuando llegan a
+		// pagarse todos los links requeridos — el UPDATE condicional no toca
+		// nada en ese caso, pero antes se emitía GROUP_READY y se retornaba
+		// true igual, mintiendo en el historial y disparando un dispatch
+		// inline sobre un grupo que en realidad sigue en revisión (hallazgo
+		// Codex). Solo emitir el evento/reportar listo si el UPDATE realmente
+		// afectó la fila.
+		const [actualizado] = await tx
 			.update(pagaloPaymentGroups)
 			.set({
 				status: "READY_TO_APPLY",
@@ -307,7 +330,9 @@ async function evaluarGrupo(
 						"PARTIALLY_PAID",
 					]),
 				),
-			);
+			)
+			.returning({ id: pagaloPaymentGroups.id });
+		if (!actualizado) return false;
 		await tx.insert(pagaloPaymentEvents).values({
 			groupId,
 			eventType: "GROUP_READY",
@@ -316,7 +341,9 @@ async function evaluarGrupo(
 			toStatus: "READY_TO_APPLY",
 			payload: {},
 		});
-	} else if (group.status === "PENDING_PAYMENT") {
+		return true;
+	}
+	if (group.status === "PENDING_PAYMENT") {
 		await tx
 			.update(pagaloPaymentGroups)
 			.set({ status: "PARTIALLY_PAID", updatedAt: new Date() })
@@ -330,6 +357,55 @@ async function evaluarGrupo(
 			payload: {},
 		});
 	}
+	return false;
+}
+
+/**
+ * Devuelve `true` cuando este link fue el que dejó al grupo `READY_TO_APPLY`
+ * — el caller usa eso para disparar el dispatch inline apenas la transacción
+ * cierre (no llamar cartera-back desde dentro de una tx de DB abierta).
+ */
+/**
+ * Instante real del pago según Págalo, no el momento en que el poller lo
+ * observó — si el polling corre con retraso (backoff, batch grande,
+ * medianoche guatemalteca de por medio), `paidAt` quedaría con la fecha
+ * contable equivocada aunque el proveedor sí trae el instante real
+ * (hallazgo Codex). Fallback al momento de observación si Págalo manda un
+ * formato no parseable — mejor una fecha aproximada que romper el flujo.
+ */
+function instanteTransaccion(transaccion: TransaccionPagalo): Date {
+	const instante = new Date(transaccion.date_transaction);
+	return Number.isNaN(instante.getTime()) ? new Date() : instante;
+}
+
+type ResultadoMarcarLinkPagado = {
+	listoParaAplicar: boolean;
+	// `false` cuando otro worker (lease vencido, poll solapado) ya ganó la
+	// carrera antes de que este llegara a actualizar el link: cada worker
+	// sube su propio voucher a una key R2 aleatoria distinta, y solo la del
+	// ganador queda referenciada. El caller debe borrar la key perdedora de
+	// cartera-back — nunca queda huérfana con datos de cliente/pago sin
+	// limpieza (hallazgo Codex).
+	voucherConsumido: boolean;
+};
+
+/**
+ * Cuando `marcarLinkPagado` lanza, la promesa puede rechazar por un error de
+ * conexión aunque Postgres SÍ haya hecho commit de la transacción antes de
+ * que el ACK llegara a este proceso — el link ya referenciaría esta key
+ * (hallazgo Codex). Releer el estado real fuera de cualquier tx evita borrar
+ * evidencia que un dispatcher está a punto de usar: solo se confirma "no
+ * consumido" si el link, en la DB real, efectivamente no apunta a esta key.
+ */
+async function voucherRealmenteNoConsumido(
+	linkId: string,
+	voucherStorageKey: string,
+): Promise<boolean> {
+	const [actual] = await db
+		.select({ voucherStorageKey: pagaloPaymentLinks.voucherStorageKey })
+		.from(pagaloPaymentLinks)
+		.where(eq(pagaloPaymentLinks.id, linkId));
+	return actual?.voucherStorageKey !== voucherStorageKey;
 }
 
 async function marcarLinkPagado(
@@ -340,8 +416,8 @@ async function marcarLinkPagado(
 		voucherSha256: string;
 		voucherUrl: string;
 	},
-): Promise<void> {
-	await db.transaction(async (tx) => {
+): Promise<ResultadoMarcarLinkPagado> {
+	return db.transaction(async (tx) => {
 		// Se serializa contra el reemplazo del grupo (/crear con otra selección,
 		// pago-link.ts): primero el candado del GRUPO, después el del link —
 		// mismo orden que el reemplazo, para no cruzarse en deadlock— y se
@@ -358,7 +434,9 @@ async function marcarLinkPagado(
 			.from(pagaloPaymentLinks)
 			.where(eq(pagaloPaymentLinks.id, link.id))
 			.for("update");
-		if (!fresco || fresco.status === "PAID") return;
+		if (!fresco || fresco.status === "PAID") {
+			return { listoParaAplicar: false, voucherConsumido: false };
+		}
 		const esReemplazado = fresco.status === "REPLACED";
 		const [updated] = await tx
 			.update(pagaloPaymentLinks)
@@ -376,7 +454,7 @@ async function marcarLinkPagado(
 				voucherStorageKey: voucher.voucherStorageKey,
 				voucherSha256: voucher.voucherSha256,
 				voucherGeneratedAt: new Date(),
-				paidAt: new Date(),
+				paidAt: instanteTransaccion(transaccion),
 				nextPollAt: null,
 				updatedAt: new Date(),
 			})
@@ -387,7 +465,7 @@ async function marcarLinkPagado(
 				),
 			)
 			.returning({ id: pagaloPaymentLinks.id });
-		if (!updated) return;
+		if (!updated) return { listoParaAplicar: false, voucherConsumido: false };
 		await tx.insert(pagaloPaymentEvents).values({
 			groupId: link.groupId,
 			linkId: link.id,
@@ -445,7 +523,7 @@ async function marcarLinkPagado(
 						.for("update")
 				: [];
 			const objetivo = activo ?? viejo;
-			if (!objetivo) return;
+			if (!objetivo) return { listoParaAplicar: false, voucherConsumido: true };
 			const [escalado] = await tx
 				.update(pagaloPaymentGroups)
 				.set({ status: "REVIEW_REQUIRED", updatedAt: new Date() })
@@ -461,7 +539,7 @@ async function marcarLinkPagado(
 					),
 				)
 				.returning({ id: pagaloPaymentGroups.id });
-			if (!escalado) return;
+			if (!escalado) return { listoParaAplicar: false, voucherConsumido: true };
 			await tx.insert(pagaloPaymentEvents).values({
 				groupId: objetivo.id,
 				eventType: "REPLACED_LINK_PAID",
@@ -475,9 +553,10 @@ async function marcarLinkPagado(
 					amount: transaccion.total,
 				},
 			});
-			return;
+			return { listoParaAplicar: false, voucherConsumido: true };
 		}
-		await evaluarGrupo(tx, link.groupId);
+		const listoParaAplicar = await evaluarGrupo(tx, link.groupId);
+		return { listoParaAplicar, voucherConsumido: true };
 	});
 }
 
@@ -543,81 +622,188 @@ export type ResultadoPollPagalo = {
 	pagados: number;
 	sinCambios: number;
 	errores: number;
+	dispatchReintentados: number;
+	dispatchCompletados: number;
+	dispatchErrores: number;
 };
 
+/**
+ * Antes de barrer links nuevos, reintenta grupos que quedaron
+ * READY_TO_APPLY/APPLICATION_FAILED de una corrida anterior (p.ej. si
+ * cartera-back estuvo caído). Así un solo botón/ciclo cubre tanto "detectar
+ * pago nuevo" como "reintentar aplicación pendiente" sin depender del
+ * dispatcher programado por separado.
+ */
 export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
-	const links = await reclamarLinksPendientes();
+	// PAGALO_DISPATCH_ENABLED es el kill switch de aplicar pagos reales en
+	// cartera-back — debe frenar también el dispatch que corre desde acá
+	// (reintento de pendientes y el inline de abajo), no solo el ciclo
+	// programado de pagalo-dispatch.ts. Con el flag apagado, el poll sigue
+	// detectando/marcando pagos y voucher, solo no los envía.
+	const dispatchHabilitado = isPagaloDispatchEnabled();
+
 	const resultado: ResultadoPollPagalo = {
-		revisados: links.length,
+		revisados: 0,
 		pagados: 0,
 		sinCambios: 0,
 		errores: 0,
+		dispatchReintentados: 0,
+		dispatchCompletados: 0,
+		dispatchErrores: 0,
 	};
-	if (links.length === 0) return resultado;
 
-	const config = getPagaloSandboxConfig();
-	const client = createPagaloClient(config);
+	// Detectar pagos nuevos va PRIMERO: correrDispatchPagalo puede recorrer
+	// hasta 50 grupos, cada uno con hasta 10s de timeout HTTP (más el tiempo
+	// sin límite de getCarteraAccessToken) — si eso corriera antes, un
+	// backlog de dispatch con cartera-back lenta/caída podía retrasar
+	// minutos la detección de un pago que el cliente ya hizo (hallazgo
+	// Codex). El reintento del backlog corre al final, sin bloquear esto.
+	const links = await reclamarLinksPendientes();
+	resultado.revisados = links.length;
+	if (links.length > 0) {
+		const config = getPagaloSandboxConfig();
+		const client = createPagaloClient(config);
 
-	for (const link of links) {
-		if (!link.pagaloRequestUuid) {
-			await registrarIntentoFallido(link, "Link sin pagaloRequestUuid.");
-			resultado.errores++;
-			continue;
-		}
-		let estado: any;
-		try {
-			estado = await client.getRequestByUuid(link.pagaloRequestUuid);
-		} catch (error) {
-			await registrarIntentoFallido(
-				link,
-				error instanceof Error ? error.message : String(error),
-			);
-			resultado.errores++;
-			continue;
-		}
-		const status = estado?.message?.status ?? estado?.data?.status;
-		if (status === "3" || status === "4") {
-			await marcarLinkTerminal(link, status === "3" ? "CANCELLED" : "EXPIRED");
-			resultado.sinCambios++;
-			continue;
-		}
-		if (status !== "2") {
-			await registrarIntentoFallido(link);
-			resultado.sinCambios++;
-			continue;
-		}
-
-		// Pagado. Traer el detalle real de la transacción (no. de transacción,
-		// tarjeta, fecha) por id_external — mismo authorization fijo, sin login.
-		try {
-			const detalle: any = await client.getTransactionByIdExternalRaw(
-				link.externalIdentifier,
-			);
-			const transaccion: TransaccionPagalo | undefined = detalle?.transaction;
-			if (!transaccion) {
+		for (const link of links) {
+			if (!link.pagaloRequestUuid) {
+				await registrarIntentoFallido(link, "Link sin pagaloRequestUuid.");
+				resultado.errores++;
+				continue;
+			}
+			let estado: any;
+			try {
+				estado = await client.getRequestByUuid(link.pagaloRequestUuid);
+			} catch (error) {
 				await registrarIntentoFallido(
 					link,
-					"Págalo confirma link pagado pero no encontró la transacción por id_external.",
+					error instanceof Error ? error.message : String(error),
 				);
 				resultado.errores++;
 				continue;
 			}
-			validarTransaccionPagalo(link, transaccion);
-			const pdf = await generarVoucherPdf(transaccion, "Club Cashin");
-			const subida = await subirVoucher(pdf, link.groupId, link);
-			await marcarLinkPagado(link, transaccion, subida);
-			resultado.pagados++;
-		} catch (error) {
-			await registrarIntentoFallido(
-				link,
-				error instanceof Error ? error.message : String(error),
-			);
-			resultado.errores++;
-			console.error(
-				`[Págalo][POLL] link ${link.id} pagado pero falló generar/subir voucher:`,
-				error instanceof Error ? error.message : error,
-			);
+			const status = estado?.message?.status ?? estado?.data?.status;
+			if (status === "3" || status === "4") {
+				await marcarLinkTerminal(link, status === "3" ? "CANCELLED" : "EXPIRED");
+				resultado.sinCambios++;
+				continue;
+			}
+			if (status !== "2") {
+				await registrarIntentoFallido(link);
+				resultado.sinCambios++;
+				continue;
+			}
+
+			// Pagado. Traer el detalle real de la transacción (no. de transacción,
+			// tarjeta, fecha) por id_external — mismo authorization fijo, sin login.
+			try {
+				const detalle: any = await client.getTransactionByIdExternalRaw(
+					link.externalIdentifier,
+				);
+				const transaccion: TransaccionPagalo | undefined = detalle?.transaction;
+				if (!transaccion) {
+					await registrarIntentoFallido(
+						link,
+						"Págalo confirma link pagado pero no encontró la transacción por id_external.",
+					);
+					resultado.errores++;
+					continue;
+				}
+				validarTransaccionPagalo(link, transaccion);
+				const pdf = await generarVoucherPdf(transaccion, "Club Cashin");
+				const subida = await subirVoucher(pdf, link.groupId, link);
+				// Otro worker (lease vencido, poll solapado) puede ganar la
+				// carrera antes de que este llegue a actualizar el link — cada
+				// worker sube su voucher a una key R2 aleatoria distinta, y la
+				// de este nunca queda referenciada. Se borra en vez de dejarla
+				// huérfana con datos de cliente/pago, tanto si marcarLinkPagado
+				// resuelve voucherConsumido=false como si lanza (la tx de DB
+				// puede reventar a mitad — hallazgo Codex tras el fix anterior,
+				// que solo cubría el camino resuelto). Best-effort: un fallo al
+				// borrar no debe tumbar el poll.
+				let resultadoMarcado: ResultadoMarcarLinkPagado;
+				try {
+					resultadoMarcado = await marcarLinkPagado(link, transaccion, subida);
+				} catch (error) {
+					// La promesa puede rechazar por un error de conexión aunque
+					// Postgres SÍ haya comiteado antes de que el ACK llegara acá —
+					// el link real podría ya referenciar esta key. Borrar sin
+					// verificar arriesgaba dejar un pago READY_TO_APPLY apuntando a
+					// un archivo que ya no existe (hallazgo Codex tras el fix
+					// anterior, que asumía "lanzó = no se guardó nada").
+					if (await voucherRealmenteNoConsumido(link.id, subida.voucherStorageKey)) {
+						await carteraBackClient
+							.deleteArchivoBoletaHuerfano(subida.voucherStorageKey)
+							.catch((deleteError) =>
+								console.error(
+									`[Págalo][POLL] no se pudo borrar voucher huérfano ${subida.voucherStorageKey}:`,
+									deleteError,
+								),
+							);
+					}
+					throw error;
+				}
+				const { listoParaAplicar, voucherConsumido } = resultadoMarcado;
+				if (!voucherConsumido) {
+					await carteraBackClient
+						.deleteArchivoBoletaHuerfano(subida.voucherStorageKey)
+						.catch((error) =>
+							console.error(
+								`[Págalo][POLL] no se pudo borrar voucher huérfano ${subida.voucherStorageKey}:`,
+								error,
+							),
+						);
+					resultado.sinCambios++;
+					continue;
+				}
+				resultado.pagados++;
+				// Fuera de la transacción de arriba a propósito: nunca llamar
+				// cartera-back (red) mientras una tx de DB sigue abierta. Si esto
+				// falla, el grupo queda READY_TO_APPLY/APPLICATION_FAILED y el
+				// dispatcher programado lo recoge en su propio ciclo — nunca se pierde.
+				if (listoParaAplicar && dispatchHabilitado) {
+					try {
+						const resultadoInline = await reclamarYProcesarGrupo(link.groupId);
+						// El resultado del retry del backlog (más abajo) también
+						// suma acá — esto solo cubre lo que antes se descartaba
+						// del dispatch inline, que dejaba el reporte del botón
+						// manual mintiendo "0 completados" aunque sí aplicara el
+						// pago (hallazgo Codex).
+						if (resultadoInline === "COMPLETADO") resultado.dispatchCompletados++;
+						else if (resultadoInline === "ERROR" || resultadoInline === "REVIEW_REQUIRED") {
+							resultado.dispatchErrores++;
+						}
+					} catch (error) {
+						resultado.dispatchErrores++;
+						console.error(
+							`[Págalo][POLL] grupo ${link.groupId} quedó READY_TO_APPLY pero falló el dispatch inline:`,
+							error instanceof Error ? error.message : error,
+						);
+					}
+				}
+			} catch (error) {
+				await registrarIntentoFallido(
+					link,
+					error instanceof Error ? error.message : String(error),
+				);
+				resultado.errores++;
+				console.error(
+					`[Págalo][POLL] link ${link.id} pagado pero falló generar/subir voucher:`,
+					error instanceof Error ? error.message : error,
+				);
+			}
 		}
+	}
+
+	// Backlog de grupos READY_TO_APPLY/APPLICATION_FAILED/APPLYING de una
+	// corrida anterior (p.ej. si cartera-back estuvo caído). Va AL FINAL,
+	// después de detectar pagos nuevos, para que un backlog grande con
+	// cartera-back lento no retrase la detección de un pago que el cliente
+	// ya hizo (hallazgo Codex).
+	if (dispatchHabilitado) {
+		const dispatchPrevio = await correrDispatchPagalo();
+		resultado.dispatchReintentados += dispatchPrevio.revisados;
+		resultado.dispatchCompletados += dispatchPrevio.completados;
+		resultado.dispatchErrores += dispatchPrevio.errores + dispatchPrevio.revisionRequerida;
 	}
 
 	return resultado;

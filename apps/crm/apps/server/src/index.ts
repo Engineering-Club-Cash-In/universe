@@ -48,7 +48,9 @@ import { ejecutarAgendaCobrosDiariaConReintentos } from "./jobs/agenda-cobros-sn
 import { purgarBoletasSinConfirmar } from "./jobs/bot-cobros-purga";
 import { reconciliarBoletasColgadas } from "./jobs/bot-cobros-reconciliacion";
 import { reintentarAvisosDeRechazo } from "./jobs/bot-cobros-respaldo";
+import { correrDispatchPagalo } from "./jobs/pagalo-dispatch";
 import { correrPollPagalo } from "./jobs/pagalo-poll";
+import { isPagaloDispatchEnabled } from "./lib/pagalo-dispatch-config";
 import { isPagaloPollEnabled } from "./lib/pagalo-poll-config";
 import { generarCierreDiario } from "./jobs/cierre-diario-asesores";
 import {
@@ -1688,6 +1690,22 @@ async function correrPollDePagalo(): Promise<void> {
 if (isPagaloPollEnabled()) {
 	void correrPollDePagalo();
 	setInterval(correrPollDePagalo, 5 * 60 * 1000);
+}
+
+// El dispatcher Págalo (CB-028, paso 3) también va fuera de la bandera, mismo
+// motivo que el poller: sin esto, un grupo READY_TO_APPLY se queda ahí para
+// siempre y el pago confirmado nunca llega a aplicarse en cartera.
+async function correrDispatchDePagalo(): Promise<void> {
+	try {
+		await correrDispatchPagalo();
+	} catch (error) {
+		console.error("Error en el dispatcher de pagos Págalo:", error);
+	}
+}
+
+if (isPagaloDispatchEnabled()) {
+	void correrDispatchDePagalo();
+	setInterval(correrDispatchDePagalo, 5 * 60 * 1000);
 }
 
 if (TAREAS_PROGRAMADAS_ACTIVAS) {

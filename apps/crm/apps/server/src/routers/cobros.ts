@@ -111,6 +111,13 @@ import {
 	crmCobrosOrInvestmentsProcedure,
 	crmOrCobrosProcedure,
 } from "../lib/orpc";
+import {
+	pagaloPaymentEvents,
+	pagaloPaymentGroups,
+	pagaloPaymentLinks,
+} from "../db/schema/pagalo-payments";
+import { correrPollPagalo } from "../jobs/pagalo-poll";
+import { isPagaloPollEnabled } from "../lib/pagalo-poll-config";
 import { createPagaloClient, getPagaloSandboxConfig } from "../services/pagalo-client";
 import { createPagaloLinks } from "../services/pagalo-link-orchestrator";
 import { primerTelefono } from "../lib/phone-utils";
@@ -4746,9 +4753,112 @@ export const cobrosRouter = {
 				cuotaIds: z.array(z.number().int().positive()).max(24),
 			}),
 		)
-		.handler(async ({ input, context }) =>
-			createPagaloLinks({ ...input, requestedBy: context.user.id }),
-		),
+		.handler(async ({ input, context }) => {
+			try {
+				return await createPagaloLinks({ ...input, requestedBy: context.user.id });
+			} catch (error) {
+				console.error(
+					`[Págalo] Error creando links para ${input.numeroSifco}:`,
+					error instanceof Error ? error.stack ?? error.message : error,
+				);
+				throw error;
+			}
+		}),
+
+	// Rastro completo de Págalo para el caso: todos los grupos que se hayan
+	// creado a lo largo del tiempo (puede haber más de uno — un grupo
+	// completado o cancelado libera el slot y permite crear otro nuevo para
+	// el mismo crédito), más reciente primero, cada uno con su timeline de
+	// eventos append-only (pagaloPaymentEvents).
+	getPagaloHistorial: cobrosProcedure
+		.input(z.object({ casoCobroId: z.string().uuid() }))
+		.handler(async ({ input }) => {
+			const grupos = await db
+				.select({
+					id: pagaloPaymentGroups.id,
+					status: pagaloPaymentGroups.status,
+					origen: pagaloPaymentGroups.origen,
+					capitalTotal: pagaloPaymentGroups.capitalTotal,
+					facturableTotal: pagaloPaymentGroups.facturableTotal,
+					totalAmount: pagaloPaymentGroups.totalAmount,
+					carteraImportId: pagaloPaymentGroups.carteraImportId,
+					lastDispatchError: pagaloPaymentGroups.lastDispatchError,
+					createdAt: pagaloPaymentGroups.createdAt,
+					readyToApplyAt: pagaloPaymentGroups.readyToApplyAt,
+					completedAt: pagaloPaymentGroups.completedAt,
+					creadoPor: user.name,
+				})
+				.from(pagaloPaymentGroups)
+				.leftJoin(user, eq(user.id, pagaloPaymentGroups.createdBy))
+				.where(eq(pagaloPaymentGroups.casoCobroId, input.casoCobroId))
+				.orderBy(desc(pagaloPaymentGroups.createdAt));
+			if (grupos.length === 0) return [];
+
+			const groupIds = grupos.map((g) => g.id);
+			const [links, eventos] = await Promise.all([
+				db
+					.select({
+						id: pagaloPaymentLinks.id,
+						groupId: pagaloPaymentLinks.groupId,
+						linkType: pagaloPaymentLinks.linkType,
+						status: pagaloPaymentLinks.status,
+						paymentUrl: pagaloPaymentLinks.paymentUrl,
+						voucherUrl: pagaloPaymentLinks.voucherUrl,
+						paidAt: pagaloPaymentLinks.paidAt,
+					})
+					.from(pagaloPaymentLinks)
+					.where(inArray(pagaloPaymentLinks.groupId, groupIds)),
+				db
+					.select({
+						id: pagaloPaymentEvents.id,
+						groupId: pagaloPaymentEvents.groupId,
+						eventType: pagaloPaymentEvents.eventType,
+						source: pagaloPaymentEvents.source,
+						fromStatus: pagaloPaymentEvents.fromStatus,
+						toStatus: pagaloPaymentEvents.toStatus,
+						payload: pagaloPaymentEvents.payload,
+						occurredAt: pagaloPaymentEvents.occurredAt,
+					})
+					.from(pagaloPaymentEvents)
+					.where(inArray(pagaloPaymentEvents.groupId, groupIds))
+					.orderBy(asc(pagaloPaymentEvents.occurredAt)),
+			]);
+
+			return grupos.map((grupo) => ({
+				...grupo,
+				links: links.filter((l) => l.groupId === grupo.id),
+				eventos: eventos.filter((e) => e.groupId === grupo.id),
+			}));
+		}),
+
+	// PRUEBA: dispara un ciclo del poller Págalo a demanda, sin esperar el
+	// setInterval de 5 min. Con la unificación poller+dispatch inline, esto
+	// alcanza para llevar un link pagado hasta COMPLETED de una sola llamada.
+	// Borrar cuando el ciclo automático esté confirmado en sandbox.
+	// PRUEBA: dispara un ciclo del poller Págalo a demanda. Ahora también
+	// reintenta primero cualquier grupo READY_TO_APPLY/APPLICATION_FAILED
+	// pendiente (ver correrPollPagalo) antes de barrer links nuevos, así un
+	// solo botón cubre todo el ciclo. Borrar cuando el ciclo automático esté
+	// confirmado en sandbox.
+	probarPollPagalo: cobrosProcedure.handler(async () => {
+		// PAGALO_POLL_ENABLED antes solo gateaba el setInterval de index.ts —
+		// este endpoint manual quedaba expuesto sin importar el flag, así que
+		// no servía como el kill switch anunciado (hallazgo Codex). Ahora
+		// respeta el mismo flag: apagado, ni el interval ni el botón tocan
+		// Págalo/cartera-back.
+		if (!isPagaloPollEnabled()) {
+			throw new Error("PAGALO_POLL_ENABLED está apagado — el poll manual no puede correr.");
+		}
+		try {
+			return await correrPollPagalo();
+		} catch (error) {
+			console.error(
+				"[Págalo] Error corriendo el poll manual:",
+				error instanceof Error ? error.stack ?? error.message : error,
+			);
+			throw error;
+		}
+	}),
 
 	// Catálogo de bancos para el selector del form de pago.
 	getBancosParaPago: cobrosProcedure.handler(async () => {

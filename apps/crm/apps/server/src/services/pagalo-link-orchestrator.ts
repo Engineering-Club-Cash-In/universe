@@ -13,6 +13,7 @@ import { assertPagaloInstallmentSelection } from "../lib/pagalo-selection";
 import { primerTelefono } from "../lib/phone-utils";
 import { carteraBackClient } from "./cartera-back-client";
 import { createPagaloClient, getPagaloSandboxConfig, toPagaloProviderAmount } from "./pagalo-client";
+import { sendPagaloLinksWhatsapp } from "./send-pagalo-links-whatsapp";
 
 type CreatePagaloLinksInput = {
 	casoCobroId: string;
@@ -212,6 +213,14 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 		return created;
 	});
 
+	// D-04 (docs/features/pagalo/DECISIONES.md): texto visible al cliente
+	// siempre neutro — nunca "CAPITAL" ni "MORA_INTERES". Con dos links reales,
+	// se numeran en orden fijo (CAPITAL siempre 1 de 2) sin importar cuál se
+	// crea primero; con uno solo, "Pago" a secas.
+	const dosLinks = providerAmounts.size === 2;
+	const etiquetaPago = (linkType: "CAPITAL" | "MORA_INTERES") =>
+		dosLinks ? (linkType === "CAPITAL" ? "Pago 1 de 2" : "Pago 2 de 2") : "Pago";
+
 	const links = [] as Array<{ linkType: "CAPITAL" | "MORA_INTERES"; paymentUrl: string }>;
 	for (const component of components) {
 		const [linkType, amount] = component;
@@ -219,10 +228,11 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 		const providerAmount = providerAmounts.get(linkType);
 		if (providerAmount === undefined) throw new Error("Monto Págalo no disponible.");
 		const externalIdentifier = `pagalo-${group.id}-${linkType}-${randomUUID().slice(0, 8)}`;
+		const etiqueta = etiquetaPago(linkType);
 		const requestPayload = {
 			total_amount: providerAmount,
 			currency: "GTQ" as const,
-			description: `Pago Club Cashin ${input.numeroSifco}`,
+			description: `Crédito ${input.numeroSifco} · ${etiqueta}`,
 			external_identifier: externalIdentifier,
 			type_request: "SP" as const,
 			n_quotas: false,
@@ -232,7 +242,7 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 				last_name: credit.usuario.nombre?.split(" ").slice(1).join(" ") || "Cashin",
 				...clientContact,
 			},
-			products: [{ product_uuid: 0, name: linkType, product_name: linkType, amount: providerAmount, quantity: 1, subtotal: providerAmount }],
+			products: [{ product_uuid: 0, name: etiqueta, product_name: etiqueta, amount: providerAmount, quantity: 1, subtotal: providerAmount }],
 		};
 		const [stored] = await db
 			.insert(pagaloPaymentLinks)
@@ -267,5 +277,25 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 		}
 	}
 	await db.update(pagaloPaymentGroups).set({ status: "PENDING_PAYMENT", updatedAt: new Date() }).where(eq(pagaloPaymentGroups.id, group.id));
+
+	// D-04: un solo mensaje, con TODOS los links requeridos, solo cuando el
+	// grupo ya está completo (arriba de esta línea). Fallo de WhatsApp nunca
+	// revierte la creación de links, que ya ocurrió y es válida sin importar
+	// si el mensaje llega — el asesor igual ve las URLs en el modal.
+	try {
+		await sendPagaloLinksWhatsapp({
+			numeroSifco: input.numeroSifco,
+			telefono,
+			clienteNombre: credit.usuario.nombre ?? "",
+			links,
+			createdBy: input.requestedBy,
+		});
+	} catch (error) {
+		console.error(
+			`[Págalo] Error enviando links por WhatsApp para ${input.numeroSifco}:`,
+			error instanceof Error ? error.message : error,
+		);
+	}
+
 	return { groupId: group.id, capitalTotal: calculation.capitalTotal, facturableTotal: calculation.facturableTotal, totalAmount: calculation.totalAmount, links };
 }

@@ -42,9 +42,37 @@ let tokenCache: TokenCache = {
 };
 
 const TOKEN_EXPIRY_MS = 12 * 60 * 60 * 1000;
+// Ninguno de los 3 fetches de este archivo tenía límite — si cartera-back
+// acepta la conexión pero nunca responde, getCarteraAccessToken() (llamado
+// antes de enviar()) cuelga indefinidamente, sin que el timeout de 10s del
+// import client lo cubra: nunca se llega a ese fetch (hallazgo Codex). Mismo
+// valor que ya usa pagalo-import-client.ts, por consistencia.
+const AUTH_TIMEOUT_MS = 10_000;
 
 function getBaseUrl(): string {
 	return process.env.CARTERA_BACK_URL || "http://localhost:7000";
+}
+
+type RespuestaAuthLeida = { status: number; ok: boolean; raw: string };
+
+/**
+ * Lee headers Y body dentro de la misma ventana de abort. `fetch()` resuelve
+ * en cuanto llegan los headers — si el caller leyera el body después (como
+ * antes), cartera-back mandando headers y colgándose a mitad del body dejaba
+ * el timeout sin efecto real: getCarteraAccessToken() y cada dispatcher de
+ * pago que depende de él podían colgarse indefinidamente igual (hallazgo
+ * Codex, tras el fix anterior que solo cubría el fetch en sí).
+ */
+async function fetchConTimeout(url: string, init: RequestInit): Promise<RespuestaAuthLeida> {
+	const controller = new AbortController();
+	const timeout = setTimeout(() => controller.abort(), AUTH_TIMEOUT_MS);
+	try {
+		const response = await fetch(url, { ...init, signal: controller.signal });
+		const raw = await response.text();
+		return { status: response.status, ok: response.ok, raw };
+	} finally {
+		clearTimeout(timeout);
+	}
 }
 
 function getCredentials(): { email: string; password: string } {
@@ -60,18 +88,17 @@ function getCredentials(): { email: string; password: string } {
 
 export async function loginCartera(): Promise<string> {
 	const { email, password } = getCredentials();
-	const response = await fetch(`${getBaseUrl()}/auth/login`, {
+	const response = await fetchConTimeout(`${getBaseUrl()}/auth/login`, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({ email, password }),
 	});
 
 	if (!response.ok) {
-		const text = await response.text();
-		throw new Error(`Cartera login falló (${response.status}): ${text}`);
+		throw new Error(`Cartera login falló (${response.status}): ${response.raw}`);
 	}
 
-	const data = (await response.json()) as CarteraLoginResponse;
+	const data = JSON.parse(response.raw) as CarteraLoginResponse;
 	tokenCache = {
 		accessToken: data.data.accessToken,
 		refreshToken: data.data.refreshToken,
@@ -82,12 +109,12 @@ export async function loginCartera(): Promise<string> {
 
 async function verifyCarteraToken(token: string): Promise<string | null> {
 	try {
-		const response = await fetch(
+		const response = await fetchConTimeout(
 			`${getBaseUrl()}/auth/verify?token=${encodeURIComponent(token)}`,
 			{ method: "GET", headers: { "Content-Type": "application/json" } },
 		);
 		if (!response.ok) return null;
-		const data = (await response.json()) as CarteraVerifyResponse;
+		const data = JSON.parse(response.raw) as CarteraVerifyResponse;
 		if (data.success && data.accessToken) {
 			tokenCache.accessToken = data.accessToken;
 			tokenCache.expiresAt = Date.now() + TOKEN_EXPIRY_MS;
@@ -103,13 +130,13 @@ async function verifyCarteraToken(token: string): Promise<string | null> {
 async function refreshCarteraToken(): Promise<string | null> {
 	if (!tokenCache.refreshToken) return null;
 	try {
-		const response = await fetch(`${getBaseUrl()}/auth/refresh`, {
+		const response = await fetchConTimeout(`${getBaseUrl()}/auth/refresh`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ refreshToken: tokenCache.refreshToken }),
 		});
 		if (!response.ok) return null;
-		const data = (await response.json()) as CarteraRefreshResponse;
+		const data = JSON.parse(response.raw) as CarteraRefreshResponse;
 		if (data.success && data.accessToken) {
 			tokenCache.accessToken = data.accessToken;
 			if (data.refreshToken) tokenCache.refreshToken = data.refreshToken;

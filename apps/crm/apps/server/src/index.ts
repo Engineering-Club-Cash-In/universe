@@ -1673,13 +1673,14 @@ async function correrRespaldoDeRechazos(): Promise<void> {
 setInterval(correrRespaldoDeRechazos, 60 * 60 * 1000);
 
 // El poller y el dispatcher de Págalo (CB-028) usan el mismo gate que el
-// resto de tareas programadas (`TAREAS_PROGRAMADAS_ACTIVAS`), no su propio
-// flag `PAGALO_POLL_ENABLED`/`PAGALO_DISPATCH_ENABLED` — esos siguen
-// gateando el botón manual (`probarPollPagalo`) y el dispatch inline dentro
-// del poll. Decisión explícita del usuario: en esta rama (COBROS-02),
-// `TAREAS_PROGRAMADAS_ACTIVAS` está hardcodeada en `false` (ver FIXME
-// arriba), así que el ciclo automático de Págalo queda apagado junto con el
-// resto de jobs hasta que se revierta ese FIXME antes de mergear a develop.
+// resto de tareas programadas (`TAREAS_PROGRAMADAS_ACTIVAS`) — ya no tienen
+// flags propios (`PAGALO_POLL_ENABLED`/`PAGALO_DISPATCH_ENABLED` se
+// eliminaron: el botón manual `probarPollPagalo` y el dispatch inline
+// dentro del poll corren siempre, sin ningún gate, decisión explícita del
+// usuario). En esta rama (COBROS-02), `TAREAS_PROGRAMADAS_ACTIVAS` está
+// hardcodeada en `false` (ver FIXME arriba), así que el ciclo automático de
+// Págalo queda apagado junto con el resto de jobs hasta que se revierta ese
+// FIXME antes de mergear a develop.
 async function correrPollDePagalo(): Promise<void> {
 	try {
 		await correrPollPagalo();

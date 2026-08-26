@@ -23,6 +23,31 @@ import {
 } from "./registerPaymentPolicy";
 
 describe("register payment", () => {
+  it("conserva metadatos Págalo al insertar pagos sin exponerlos en /newPayment", async () => {
+    const source = await Bun.file(
+      new URL("./registerPayment.ts", import.meta.url)
+    ).text();
+
+    expect(source).toContain("type PagaloRegistroMetadata = {");
+    expect(source).toContain('origen_pago: "pagalo";');
+    expect(source).toContain("pagalo_import_id: number;");
+    expect(source).toContain("pagalo_import_id: pagalo_import_id");
+  });
+
+  it("Págalo se registra como un solo pago con el total (Daniel, 2026-08-26): capital se paga dentro del loop normal, sin guard de sobrante", async () => {
+    const source = await Bun.file(
+      new URL("./registerPayment.ts", import.meta.url),
+    ).text();
+    const capitalStep = source.indexOf("// 3.6 Pagar capital");
+
+    expect(source.slice(capitalStep, capitalStep + 700)).not.toContain(
+      "!esImportacionPagalo",
+    );
+    expect(source).not.toContain(
+      "PAGALO_REVIEW_REQUIRED: presupuesto MORA_INTERES",
+    );
+  });
+
   it("ejecuta todo el registro bajo un lock y una sola transacción", async () => {
     const source = await Bun.file(
       new URL("./registerPayment.ts", import.meta.url)

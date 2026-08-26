@@ -83,6 +83,42 @@ const pagoSchema = z.object({
 
 type PagoData = z.infer<typeof pagoSchema>;
 
+// Solo importador interno crea este metadato. `pagoSchema` público de
+// /newPayment no lo admite para que clientes normales no puedan fingir Págalo.
+export type PagaloRegistroMetadata = {
+  origen_pago: "pagalo";
+  pagalo_import_id: number;
+};
+export type PagaloComponentes = Partial<{
+  capital: {
+    disponible: string;
+    allocations: Array<{
+      cartera_cuota_id: number;
+      numero_cuota: number;
+      rubro: "CAPITAL";
+      amount: string;
+      facturable: false;
+    }>;
+    voucher_storage_key: string;
+  };
+  facturable: {
+    disponible: string;
+    allocations: Array<{
+      cartera_cuota_id: number;
+      numero_cuota: number;
+      rubro: "INTERES" | "IVA" | "INTERES_CI" | "IVA_CI" | "SEGURO" | "GPS" | "MEMBRESIAS" | "MORA";
+      amount: string;
+      facturable: true;
+    }>;
+    voucher_storage_key: string;
+  };
+}>;
+type RegistroPagoData = Omit<PagoData, "origen_pago" | "usuario_id"> & {
+  origen_pago: PagoData["origen_pago"] | "pagalo";
+  pagalo_import_id?: number;
+  pagalo_componentes?: PagaloComponentes;
+};
+
 interface SetContext {
   status: number;
 }
@@ -654,7 +690,7 @@ const insertarBoletas = async (pago_id: number, urlCompletas: string[]) => {
 // ========================================
 
 type ProcesarRegistroPagoInput = {
-  data: PagoData;
+  data: RegistroPagoData;
   set: SetContext;
 };
 
@@ -679,6 +715,7 @@ export async function procesarRegistroPago(
       registerBy,
       fecha_boleta,
       origen_pago,
+      pagalo_import_id,
     } = data;
 
     // 2. Preparar datos
@@ -798,6 +835,8 @@ export async function procesarRegistroPago(
         registerBy: registerBy ?? "",
         fecha_boleta,
         monto_aplicado: pagoEspecialCuota.montoAplicado,
+        origen_pago,
+        pagalo_import_id,
       }, tx);
     }
 
@@ -850,6 +889,8 @@ export async function procesarRegistroPago(
             registerBy: registerBy ?? "",
             fecha_boleta,
             monto_aplicado: pagoEspecialCuota.montoAplicado,
+            origen_pago,
+            pagalo_import_id,
           }, tx);
         }
         console.log(
@@ -872,6 +913,8 @@ export async function procesarRegistroPago(
             registerBy: registerBy ?? "",
             fecha_boleta,
             monto_aplicado: pagoEspecialCuota.montoAplicado,
+            origen_pago,
+            pagalo_import_id,
           }, tx);
         }
         // success:true explícito — este return es un 200 real (el pago SÍ se
@@ -902,7 +945,9 @@ export async function procesarRegistroPago(
           numeroAutorizacion: numeroAutorizacion ?? "",
           registerBy: registerBy ?? "",
           fecha_boleta,
-          monto_aplicado: pagoEspecialCuota.montoAplicado,
+            monto_aplicado: pagoEspecialCuota.montoAplicado,
+            origen_pago,
+            pagalo_import_id,
         }, tx);
       }
       // Mismo motivo que el return de arriba: 200 real, pago insertado,
@@ -1320,7 +1365,10 @@ export async function procesarRegistroPago(
         // 3.6 Pagar capital
         console.log("\n📌 PASO 6: Pagar Capital");
         console.log("   Capital restante:", capital_restante_pago.toString());
-        if (disponible_restante.gt(0) && capital_restante_pago.gt(0)) {
+        if (
+          disponible_restante.gt(0) &&
+          capital_restante_pago.gt(0)
+        ) {
           const pago = disponible_restante.lt(capital_restante_pago)
             ? disponible_restante
             : capital_restante_pago;
@@ -1552,6 +1600,7 @@ export async function procesarRegistroPago(
           fecha_boleta: fecha_boleta,
           monto_aplicado: totalPagado.toString(),
           origen_pago: origen_pago,
+          pagalo_import_id: pagalo_import_id,
         };
 
         // Insertar o actualizar pago
@@ -1927,7 +1976,10 @@ export async function procesarRegistroPago(
             break;
           }
           // Si el sobrante es <= Q25, agregarlo como "otros" al pago actual y no continuar
-          if (disponible_restante.lte(25) && pagoInsertado?.pago_id) {
+          if (
+            disponible_restante.lte(25) &&
+            pagoInsertado?.pago_id
+          ) {
             const otrosActual = new Big(pagoInsertado.otros ?? "0");
             await tx
               .update(pagos_credito)
@@ -1941,6 +1993,12 @@ export async function procesarRegistroPago(
           }
         }
       }
+
+      // Págalo ya no separa
+      // "presupuesto facturable" de capital dentro de cartera-back — es un
+      // solo pago con el total, y cualquier sobrante ya se resolvió arriba
+      // (capital habilitado en el loop igual que un pago normal). Ya no hay
+      // "presupuesto que sobra" que rechazar acá.
 
       // 7. Procesar abono directo a capital (si aplica)
     }
@@ -2097,6 +2155,7 @@ export async function procesarRegistroPago(
         fecha_boleta: fecha_boleta,
         monto_aplicado: abonoCapital.toString(),
         origen_pago: origen_pago,
+        pagalo_import_id: pagalo_import_id,
       };
 
       console.log("\n📝 ========== REGISTRANDO PAGO ==========");
@@ -2383,6 +2442,8 @@ interface InsertarPagoParams {
   fecha_boleta?: string;
   monto_aplicado: number;
   pagoConvenio?: number;
+  origen_pago?: "transferencia" | "cheque" | "boleta" | "pagalo";
+  pagalo_import_id?: number;
 }
 export async function insertarPago({
   numero_credito_sifco,
@@ -2398,7 +2459,9 @@ export async function insertarPago({
   registerBy,
   fecha_boleta,
   monto_aplicado,
-  pagoConvenio = 0
+  pagoConvenio = 0,
+  origen_pago,
+  pagalo_import_id,
 }: InsertarPagoParams, executor: RegisterPaymentExecutor = db) {
   console.log(
     `Insertando pago para crédito SIFCO: ${numero_credito_sifco}, cuota: ${numero_cuota}, mora: ${mora}, otros: ${otros}`
@@ -2544,6 +2607,8 @@ export async function insertarPago({
       registerBy: registerBy,
       pagoConvenio: pagoConvenio.toString(),
       monto_aplicado: monto_aplicado.toString(),
+      origen_pago,
+      pagalo_import_id,
     })
     .returning();
 

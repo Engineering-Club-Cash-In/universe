@@ -28,6 +28,7 @@ import { ajustarCuotasConSIFCO, marcarCuotasPagadasHastaNumero, procesarPagosSIF
 import { updateInstallments, updateAllInstallments } from "../controllers/updateCredit";
 import { esPagoAplicado } from "../utils/paymentStatus";
 import { getApplyPaymentHttpStatus } from "../controllers/registerPaymentPolicy";
+import { importPagaloPayment } from "../controllers/pagaloPaymentImport";
 
 export const liquidatePaymentsSchema = z.object({
   pago_id: z.number().int().positive(),
@@ -46,6 +47,9 @@ export const paymentRouter = new Elysia()
   .use(authMiddleware)
   // Endpoint para registrar pago (ya lo tienes)
   .post("/newPayment", insertPayment)
+  // CRM server autenticado. Contrato aislado: clientes de /newPayment no pueden
+  // fingir importación, vouchers ni presupuestos Págalo.
+  .post("/pagalo/payment-imports", importPagaloPayment)
   .post("/reversePayment", reversePayment)
   // El botón "Pago no válido" de conta (D-39): reversa con el handler de
   // arriba —sin tocarlo— y notifica al cliente vía CRM. Solo pagos del bot.

@@ -57,9 +57,9 @@ día; si no está escrito, no está decidido.
 | [D-47](#d-47--fuente-única-del-monto-y-montoesperado) | Fuente única del monto y `montoEsperado` | 🟢 |
 | [D-48](#d-48--capital-en-un-link-todo-lo-demás-en-el-otro) | Capital en un link, todo lo demás en el otro | 🟢 |
 | [D-49](#d-49--del-pago-nos-enteramos-nosotros-no-el-cliente) | Del pago nos enteramos nosotros, no el cliente | 🟢 |
-| [D-50](#d-50--el-pago-por-link-nace-validado) | El pago por link nace validado | 🟢 |
+| [D-50](#d-50--el-pago-por-link-se-registra-con-evidencia-y-sigue-la-validación-normal) | El pago por link sigue validación normal | 🟢 |
 | [D-51](#d-51--los-links-no-expiran-por-ahora) | Los links no expiran (por ahora) | 🟢 |
-| [D-52](#d-52--si-la-mora-cambió-cuando-el-link-se-paga-mora-primero-y-se-avisa-el-faltante) | Si la mora cambió cuando el link se paga: mora primero y se avisa el faltante | 🟢 |
+| [D-52](#d-52--si-deuda-cambia-págalo-se-comporta-como-boleta-manual) | Págalo usa comportamiento de boleta manual ante deuda cambiante | 🟢 |
 
 ---
 
@@ -1534,7 +1534,7 @@ ni siquiera se ejercita.
 
 ## D-41 · El registro es un middleware, y jamás rompe la respuesta
 
-**Estado:** 🟢 **Cerrada · 2026-08-24** — confirmada por Daniel
+**Estado:** 🟢 **Cerrada · actualizada 2026-08-25** — decisión de Daniel
 
 **Contexto.** Decidido dónde se guarda (D-40), falta quién escribe la fila.
 
@@ -1741,7 +1741,7 @@ de Daniel del contrato
 bot tiene ventana de 30 minutos ([D-24](#d-24--el-menú-hereda-la-identidad-del-paso-1)),
 así que la conversación no puede quedarse colgada días — el candado cubre el borde fino
 (el job de moras de las 23:59 cayendo en medio), no conversaciones eternas. Para el monto
-que cambia DESPUÉS de generar el link, ver [D-52](#d-52--si-la-mora-cambió-cuando-el-link-se-paga-mora-primero-y-se-avisa-el-faltante).
+que cambia DESPUÉS de generar el link, ver [D-52](#d-52--si-deuda-cambia-págalo-se-comporta-como-boleta-manual).
 
 **Contexto.** El monto que el cliente vio en las opciones y el monto del link **tienen**
 que ser el mismo número. En el módulo de cobros ya existe el bug de la doble fuente del
@@ -1799,6 +1799,9 @@ rubros facturables y no facturables en un mismo cobro de tarjeta.
    de dos, pagar solo uno lo deja `PARTIALLY_PAID` y nada se aplica en cartera hasta
    completarse; en un grupo de un solo link, ese único `ACCEPT` ya lo deja
    `READY_TO_APPLY`.
+5. **Al importar, links se combinan:** separación existe en checkout y evidencia
+   fiscal. Cartera registra un único pago con suma de links y deja reparto al
+   mismo motor de boleta manual; no conserva dos presupuestos internos.
 
 **Consecuencia UX asumida:** el cliente pasa (hasta) dos veces por el checkout de Págalo.
 Es el precio de no generar factura sobre capital; lo amortigua el mensaje armado que
@@ -1808,7 +1811,7 @@ numera los links y su monto.
 
 ## D-49 · Del pago nos enteramos nosotros, no el cliente
 
-**Estado:** 🟢 **Cerrada · 2026-08-24** — confirmada por Daniel
+**Estado:** 🟢 **Cerrada · actualizada 2026-08-25** — decisión de Daniel
 
 **Contexto.** ¿Cómo sabemos que un link fue pagado? La colección de Págalo **no documenta
 webhooks firmados**: los `callback_accept/reject` del create son redirects del navegador
@@ -1832,7 +1835,7 @@ herramienta de conciliación si algún día dudamos del poller.
 
 ---
 
-## D-50 · El pago por link nace validado
+## D-50 · El pago por link se registra con evidencia y sigue validación normal
 
 **Estado:** 🟢 **Cerrada · 2026-08-24** — confirmada por Daniel
 
@@ -1840,30 +1843,26 @@ herramienta de conciliación si algún día dudamos del poller.
 ([D-39](#d-39--el-rechazo-es-un-botón-explícito-no-se-infiere-del-reverso)). ¿El pago por
 link también?
 
-**Decisión: no.** Cuando el grupo llega a `READY_TO_APPLY` —**todos los links requeridos
+**Decisión: registro primero.** Cuando grupo llega a `READY_TO_APPLY` —**todos los links requeridos
 del grupo** (dos, o uno solo cuando un lado es Q0, [D-48](#d-48--capital-en-un-link-todo-lo-demás-en-el-otro)) con transacción
 `ACCEPT` verificada contra Págalo y voucher guardado— el dispatcher lo manda a cartera y
-los `pagos_credito` se crean **ya validados**. No hay nada que un humano pueda revisar
-mejor que la evidencia del procesador: el monto es exacto (lo armamos nosotros), la
-transacción está aceptada y el comprobante existe. **Cartera ni se entera** de que hubo
-intención de pago hasta ese momento: ningún estado intermedio del grupo toca cartera.
+los `pagos_credito` y boletas se crean como registros pendientes. Importador no
+los valida ni aplica distribución final: continúan mediante flujo normal de
+Cartera, igual que boleta manual. **Cartera ni se entera** de intención de pago
+hasta ese momento: ningún estado intermedio del grupo toca Cartera.
 
 **Lo que sí queda para humanos:** los grupos `REVIEW_REQUIRED` (montos que no cuadran,
 links duplicados pagados, hash distinto en retry) — esos no se aplican solos jamás.
 
-**Consecuencia (precisada por Daniel, afinada por Codex):** la notificación la mandamos
-**nosotros**, sin esperar a nadie, **en dos tiempos**: al validar cada `ACCEPT`, un
-**acuse de recibo que no afirma aplicación** («recibimos tu Pago 1 de 2, te falta el 2»),
-y el **recibo con saldos** solo cuando cartera confirma el grupo `COMPLETED` — antes de
-eso los saldos no han cambiado, y un `ACCEPT` puede terminar en fallo del dispatcher: un
-recibo adelantado le describiría al cliente una aplicación que no ocurrió. Sigue en pie
-verificar los recibos que cartera ya manda hoy para no duplicar el aviso.
+**Consecuencia:** `COMPLETED` confirma registro idempotente de pagos/boletas,
+no validación final. Notificaciones de validación y recibo siguen mecanismo
+normal de Cartera; dispatcher Págalo no las adelanta.
 
 ---
 
 ## D-51 · Los links no expiran (por ahora)
 
-**Estado:** 🟢 **Cerrada · 2026-08-24** — decisión de Daniel
+**Estado:** 🟢 **Cerrada · actualizada 2026-08-25** — decisión de Daniel
 
 **Contexto.** La propuesta original era expirar los links el mismo día (la mora se
 recalcula a las 23:59 GT y un link viejo queda corto). Pero un grupo son dos links: ¿qué
@@ -1877,9 +1876,9 @@ unos días".
 **Consecuencias asumidas:**
 
 1. **El monto queda congelado al generar**: si el cliente paga días después y la mora
-   creció (o nació una que no existía), el pago entra igual — **la mora se consume
-   primero y al cliente se le avisa el faltante**, ver
-   [D-52](#d-52--si-la-mora-cambió-cuando-el-link-se-paga-mora-primero-y-se-avisa-el-faltante).
+   creció (o nació una que no existía), pago combinado entra igual y motor normal
+   consume mora viva primero, ver
+   [D-52](#d-52--si-deuda-cambia-págalo-se-comporta-como-boleta-manual).
 2. **Regenerar no mata al viejo por API**: la colección de Págalo no documenta cómo
    cancelar un link (el estado 3 = cancelado existe, seguramente desde su panel — hay que
    preguntarles). Al generar links nuevos, los viejos se marcan `REPLACED` en nuestro
@@ -1894,9 +1893,9 @@ unos días".
 
 ---
 
-## D-52 · Si la mora cambió cuando el link se paga: mora primero y se avisa el faltante
+## D-52 · Si deuda cambia, Págalo se comporta como boleta manual
 
-**Estado:** 🟢 **Cerrada · 2026-08-24** — decisión de Daniel
+**Estado:** 🟢 **Cerrada · actualizada 2026-08-25** — decisión de Daniel
 
 **Contexto.** Los links no expiran ([D-51](#d-51--los-links-no-expiran-por-ahora)) y el
 monto queda congelado al generarlos. Dos escenarios donde la realidad se movió antes de
@@ -1906,39 +1905,18 @@ que el cliente pagara:
 - Nació una mora **que no existía**: el cliente al día generó hoy el link de su cuota del
   30, y pagó después del 30 — esa mora nueva no se puede simplemente quitar.
 
-**Opciones.**
-- A) Congelar también la mora: guardar su monto al generar el link y, antes de aplicar el
-  pago, **alinear** la mora del crédito a ese valor (condonar la diferencia — al final la
-  mora se llega a condonar seguido).
-- **B) El pago entra tal cual, y la jerarquía de aplicación consume PRIMERO la mora
-  vigente; lo que falte queda en la cuota, y la notificación se lo aclara al cliente.**
+**Decisión.** Grupo conserva separación CAPITAL/MORA_INTERES únicamente para
+checkout, facturación y evidencia. Cuando todos links requeridos tienen
+`ACCEPT`, dispatcher suma montos y Cartera crea un solo pago mediante motor de
+boleta manual.
 
-**Decisión: B.** La mora nueva no se regala en silencio ni se toca el crédito antes de
-aplicar; el dinero del cliente entra completo y la cuota queda con su faltante exacto. La
-**notificación del recibo** ([D-50](#d-50--el-pago-por-link-nace-validado)) hace el
-trabajo de transparencia: en el mismo mensaje se le explica que su mora ya no era la de
-antes (y por qué) y se le dice **cuánto le falta para completar la cuota**, para que pueda
-generar otro link o pagar por otro medio.
+1. Si mora creció o nació, motor consume mora vigente primero. Si dinero no
+   alcanza, pago queda aplicado parcialmente según reglas normales; Págalo no
+   guarda faltante especial ni manda aviso especial.
+2. Si deuda se achicó, sobrante sigue cascadeo normal a cuotas posteriores o
+   saldo a favor. No pasa a `REVIEW_REQUIRED` solo por link sobrado.
+3. Snapshot queda inmutable como auditoría de monto emitido; no es presupuesto
+   que limite distribución posterior dentro de Cartera.
 
-**Límite fiscal del "mora primero" (hallazgo de Codex).** Cada link paga **solo sus
-rubros**: la regla de consumir primero la mora aplica **dentro del dinero del link
-`MORA_INTERES`**, jamás cruzando lados. Si la mora nueva excede lo que ese link trae, el
-dinero del link `CAPITAL` **no** la cubre — se aplica íntegro a capital, como fue emitido,
-y el faltante queda en los rubros facturables. Cruzar lados haría que una transacción
-creada deliberadamente como no facturable pague un rubro facturable, deshaciendo la razón
-misma de los dos links ([D-48](#d-48--capital-en-un-link-todo-lo-demás-en-el-otro)) y
-descuadrando vouchers y facturación contra los montos de cada transacción.
-
-**Consecuencia asumida:** este es el **único** "pago parcial" que puede existir en el
-flujo del link (la regla de [D-46](#d-46--el-cliente-elige-cuántas-cuotas-el-crm-arma-el-monto)
-sigue: el cliente jamás elige montos) — y nunca pasa en silencio: siempre viene con la
-aclaración y el faltante en el WhatsApp del cliente.
-
-**El espejo: la deuda se achicó (hallazgo de Codex).** Sin expiración también pasa lo
-contrario: otro pago entra, o se condona mora, y el link viejo queda **grande** — su monto
-congelado excede lo que sus rubros pueden absorber. La aplicación **revalida contra los
-saldos vigentes al observar el pago**, y un link sobrado manda el grupo a
-**`REVIEW_REQUIRED`**: el sobrante **jamás se acomoda solo** — ni con la regla de Q25 de
-excedentes — porque a diferencia del faltante (que solo deja la cuota abierta), colocar
-plata de más exige decidir entre adelantar cuota, devolver u otros ingresos, y eso lo
-decide un humano con el cliente avisado.
+Esta decisión reemplaza diseño anterior de dos presupuestos de aplicación y de
+revisión automática por sobrante.

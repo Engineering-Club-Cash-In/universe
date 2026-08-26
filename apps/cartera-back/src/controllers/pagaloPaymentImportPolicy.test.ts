@@ -177,9 +177,8 @@ describe("validatePagaloImportCommand", () => {
     }
   });
 
-  it("rejects voucher paths outside the exact group prefix and encoded escapes", () => {
+  it("rejects voucher paths with traversal, encoding escapes, or an external URL", () => {
     for (const voucher_storage_key of [
-      `pagalo/${groupId.toUpperCase()}/receipt.pdf`,
       `pagalo/${groupId}/../receipt.pdf`,
       `pagalo/${groupId}/%2e%2e/receipt.pdf`,
       `pagalo/${groupId}/%252e%252e/receipt.pdf`,
@@ -196,6 +195,19 @@ describe("validatePagaloImportCommand", () => {
         PAGALO_IMPORT_ERROR_CODES.PAGALO_INVALID_VOUCHER_KEY,
       );
     }
+  });
+
+  // El comprobante ahora se genera en CRM y se sube reutilizando /upload de
+  // cartera-back (mismo endpoint que carteraFront y el bot de cobros usan
+  // para boletas de depósito) — ese endpoint siempre devuelve una key plana
+  // con nombre aleatorio, sin el prefijo pagalo/{group}/ que antes exigía
+  // esta validación cuando se esperaba descargar el voucher real de Págalo.
+  it("accepts a plain random key like the one /upload already returns", () => {
+    const input = command();
+    input.facturable.voucher_storage_key =
+      "3f9e9e2a-2f2f-4a7b-9a8f-1a2b3c4d5e6f.pdf";
+    const result = validatePagaloImportCommand(input);
+    expect(result.success).toBe(true);
   });
 
   it("rejects duplicate source identifiers and voucher storage keys", () => {

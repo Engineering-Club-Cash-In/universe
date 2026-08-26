@@ -195,23 +195,29 @@ const err = (code: PagaloImportErrorCode) => ({
   message: PAGALO_IMPORT_ERROR_MESSAGES[code],
 });
 
-// FASE 4 — Seguridad del voucher. Solo se acepta una key propia de R2 para
-// este grupo CRM; nunca una URL externa, traversal, encoding ambiguo o query.
-const voucherValid = (key: unknown, group: string) => {
-  if (typeof key !== "string") return false;
-  const prefix = `pagalo/${group}/`;
+// FASE 4 — Seguridad del voucher. Solo se acepta una key propia de R2;
+// nunca una URL externa, traversal, encoding ambiguo o query.
+//
+// Antes exigía el prefijo `pagalo/{group}/` porque se esperaba descargar el
+// voucher real de Págalo y subirlo nosotros mismos con esa key controlada.
+// Cambio de diseño: el voucher ahora se genera en CRM (comprobante propio,
+// no el de Págalo) y se sube reutilizando el mismo endpoint `/upload` que ya
+// usan carteraFront y el bot de cobros para boletas de depósito — ese
+// endpoint siempre devuelve una key plana con nombre aleatorio (`uuid.ext`),
+// sin carpetas, así que ya no puede pertenecer a un prefijo por grupo. La
+// key sigue atada a SU grupo por el resto del comando (crm_group_id,
+// transaction_uuid, external_identifier), no por su propio nombre de archivo.
+const voucherValid = (key: unknown, _group: string) => {
+  if (typeof key !== "string" || key.length === 0) return false;
   if (
-    !key.startsWith(prefix) ||
     key.includes("%") ||
+    key.startsWith("/") ||
     /[\u0000-\u001F\u007F?#\\]/.test(key)
   )
     return false;
-  const suffix = key.slice(prefix.length);
   return (
-    suffix.length > 0 &&
-    !suffix.split("/").some((segment) => segment === "." || segment === "..") &&
-    !suffix.startsWith("/") &&
-    !/^[a-z][a-z0-9+.-]*:/i.test(suffix)
+    !key.split("/").some((segment) => segment === "." || segment === "..") &&
+    !/^[a-z][a-z0-9+.-]*:/i.test(key)
   );
 };
 

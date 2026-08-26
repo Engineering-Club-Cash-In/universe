@@ -161,6 +161,12 @@ describe("pagalo payment import", () => {
       ),
     ).toBe("Inconsistencia de integridad: cuota inválida");
     expect(getPagaloReviewRequiredReason(new Error("database offline"))).toBeUndefined();
+    expect(getPagaloReviewRequiredReason(new Error("Credit not found"))).toBe(
+      "Credit not found",
+    );
+    expect(
+      getPagaloReviewRequiredReason(new Error("Pago rechazado: cuota sobre-aplicada")),
+    ).toBe("Pago rechazado: cuota sobre-aplicada");
   });
 
   it("marks same group with different hash REVIEW_REQUIRED without creating payments", async () => {

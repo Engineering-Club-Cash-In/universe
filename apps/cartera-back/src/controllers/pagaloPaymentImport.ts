@@ -175,6 +175,11 @@ export function createPagaloImportService(deps: PagaloImportServiceDependencies)
 
 const REVIEW_REQUIRED_PREFIX = "PAGALO_REVIEW_REQUIRED:";
 const CUOTA_INTEGRITY_ERROR_PREFIX = "Inconsistencia de integridad:";
+const DETERMINISTIC_PAYMENT_REJECT_PREFIXES = [
+  "Credit not found",
+  "User not found",
+  "Pago rechazado:",
+];
 
 /** Errores de negocio recuperables: se auditan sin reintentar motor normal. */
 export function getPagaloReviewRequiredReason(error: unknown) {
@@ -192,6 +197,11 @@ export function getPagaloReviewRequiredReason(error: unknown) {
   )
     return message ?? CREDIT_PENDING_CANCELLATION_ERROR.message;
   if (message?.startsWith(CUOTA_INTEGRITY_ERROR_PREFIX)) return message;
+  if (
+    message &&
+    DETERMINISTIC_PAYMENT_REJECT_PREFIXES.some((prefix) => message.startsWith(prefix))
+  )
+    return message;
   return undefined;
 }
 

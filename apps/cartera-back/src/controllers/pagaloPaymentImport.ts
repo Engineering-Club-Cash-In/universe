@@ -370,13 +370,60 @@ async function validarPagoEnTx(tx: any, pagoId: number) {
 export type ResultadoFacturaPago = {
   pago_id: number;
   success: boolean;
-  /** Status HTTP que hubiera dado el endpoint: 400 = determinista (NIT, %,
-   *  ya facturado), 500 = SAT/transitorio. Sirve para decidir si reintentar. */
+  /** Status HTTP que hubiera dado el endpoint: 400 = determinista (NIT, %),
+   *  500 = SAT/transitorio. Sirve para decidir si reintentar. */
   http: number;
   /** Facturas individuales que fallaron (si la respuesta las trae). */
   errores: Array<{ tipo?: string; error?: string }>;
+  /** Cuántas facturas ACTIVAS ya tenía el pago (lo facturó otro flujo antes). */
+  yaFacturado?: number;
   detalle?: string;
 };
+
+export type RespuestaFacturarPagoCompleto = {
+  success?: boolean;
+  message?: string;
+  error?: string;
+  mensaje?: string;
+  errores?: Array<{ tipo?: string; error?: string }>;
+  facturasExistentes?: unknown[];
+  data?: { errores?: Array<{ tipo?: string; error?: string }> };
+};
+
+/**
+ * Traduce la respuesta HTTP-shaped de `facturarPagoCompleto` a dato.
+ * - "Ya tiene facturas activas" NO es un fallo: otro flujo (p. ej. "Generar
+ *   Factura" a mano, que ganó el lock antes) ya certificó este pago; se cuenta
+ *   como facturado y se anota cuántas había (hallazgo Codex). El pre-check es
+ *   por pago, así que si el manual quedó parcial lo muestra su propia
+ *   respuesta al humano, no este ledger.
+ * - "No se pudo generar ninguna factura" trae `errores` arriba; el parcial los
+ *   trae en `data.errores`.
+ */
+export function clasificarRespuestaFacturacion(
+  pagoId: number,
+  r: RespuestaFacturarPagoCompleto,
+  http: number,
+): ResultadoFacturaPago {
+  if (r.success !== true && Array.isArray(r.facturasExistentes) && r.facturasExistentes.length > 0) {
+    return {
+      pago_id: pagoId,
+      success: true,
+      http: 200,
+      errores: [],
+      yaFacturado: r.facturasExistentes.length,
+      detalle: `Ya facturado por otro flujo (${r.facturasExistentes.length} factura(s) ACTIVA(s))`,
+    };
+  }
+  const errores = r.errores ?? r.data?.errores ?? [];
+  return {
+    pago_id: pagoId,
+    success: r.success === true,
+    http,
+    errores,
+    detalle: r.success ? (errores.length ? r.mensaje : undefined) : (r.message ?? r.error),
+  };
+}
 
 /**
  * Un estado por import a partir de lo que devolvió la facturación de cada
@@ -417,24 +464,12 @@ async function facturarPagoDeImport(pagoId: number): Promise<ResultadoFacturaPag
   }
   try {
     const set: { status?: number | string } = {};
-    const r = (await facturarPagoCompleto({ body: { pago_id: pagoId }, set })) as {
-      success?: boolean;
-      message?: string;
-      error?: string;
-      mensaje?: string;
-      errores?: Array<{ tipo?: string; error?: string }>;
-      data?: { errores?: Array<{ tipo?: string; error?: string }> };
-    };
-    // "No se pudo generar ninguna factura" trae `errores` arriba; el parcial
-    // los trae en `data.errores`.
-    const errores = r.errores ?? r.data?.errores ?? [];
-    return {
-      pago_id: pagoId,
-      success: r.success === true,
-      http: typeof set.status === "number" ? set.status : 200,
-      errores,
-      detalle: r.success ? (errores.length ? r.mensaje : undefined) : (r.message ?? r.error),
-    };
+    const r = (await facturarPagoCompleto({ body: { pago_id: pagoId }, set })) as RespuestaFacturarPagoCompleto;
+    const resultado = clasificarRespuestaFacturacion(pagoId, r, typeof set.status === "number" ? set.status : 200);
+    if (resultado.yaFacturado) {
+      console.log(`ℹ️ Págalo pago ${pagoId}: ${resultado.detalle}; no se certifica de nuevo.`);
+    }
+    return resultado;
   } catch (error) {
     return {
       pago_id: pagoId,
@@ -526,6 +561,8 @@ export async function intentarEnviarRecibosDeImport(importId: number): Promise<P
   const ahora = Date.now();
   const limiteEnviando = new Date(ahora - MINUTOS_RECIBO_ENVIANDO_HUERFANO * 60 * 1000);
   const limiteFallida = new Date(ahora - MINUTOS_RECIBO_FALLIDA_REINTENTO * 60 * 1000);
+  /** Generación de ESTE intento (recibo_intentos tras el claim); undefined = no llegó a reclamar. */
+  let generacion: number | undefined;
   try {
     const [claim] = await db
       .update(pagalo_payment_imports)
@@ -559,6 +596,7 @@ export async function intentarEnviarRecibosDeImport(importId: number): Promise<P
         intentos: pagalo_payment_imports.recibo_intentos,
       });
     if (!claim) return "SIN_CLAIM";
+    generacion = claim.intentos;
     if (claim.credito_id === null) throw new Error("import sin crédito vivo");
 
     const pagoIds: number[] = await paymentIdsForImport(db, importId);
@@ -571,7 +609,12 @@ export async function intentarEnviarRecibosDeImport(importId: number): Promise<P
     const nuevosOk = pendientes.filter((_, i) => resultados[i]?.success === true);
     const todosOk = [...yaOk, ...nuevosOk];
     const status: PagaloReciboStatus = todosOk.length === pagoIds.length ? "OK" : "FALLIDA";
-    await db
+    // Guardado por GENERACIÓN: `recibo_intentos` del claim identifica este
+    // intento. Si el barrido ya reclamó el import (ENVIANDO > 30 min) y otro
+    // intento lo cerró, este worker viejo no debe pisar su OK ni su
+    // `recibo_pagos_ok` (hallazgo Codex): la actualización no matchea y se
+    // ignora.
+    const [cerrado] = await db
       .update(pagalo_payment_imports)
       .set({
         recibo_status: status,
@@ -579,7 +622,18 @@ export async function intentarEnviarRecibosDeImport(importId: number): Promise<P
         recibo_pagos_ok: JSON.stringify(todosOk),
         updated_at: new Date(),
       })
-      .where(eq(pagalo_payment_imports.id, importId));
+      .where(
+        and(
+          eq(pagalo_payment_imports.id, importId),
+          eq(pagalo_payment_imports.recibo_status, "ENVIANDO"),
+          eq(pagalo_payment_imports.recibo_intentos, claim.intentos),
+        ),
+      )
+      .returning({ id: pagalo_payment_imports.id });
+    if (!cerrado) {
+      console.warn(`⚠️ Págalo import ${importId}: el intento ${claim.intentos} del recibo fue reclamado por otro; se ignora su resultado.`);
+      return "SIN_CLAIM";
+    }
     if (status !== "OK") {
       console.error(
         `⚠️ Págalo import ${importId}: recibo por WhatsApp FALLIDA (intento ${claim.intentos}/${MAXIMO_INTENTOS_RECIBO}, faltan pagos ${pendientes.filter((id) => !nuevosOk.includes(id)).join(",")})`,
@@ -588,11 +642,19 @@ export async function intentarEnviarRecibosDeImport(importId: number): Promise<P
     return status;
   } catch (error) {
     console.error(`⚠️ Págalo import ${importId}: no se pudo enviar/registrar el recibo`, error);
+    if (generacion === undefined) return "FALLIDA"; // falló antes de reclamar: no hay claim que cerrar
     try {
+      // Solo si este intento sigue siendo el dueño del claim (misma generación).
       await db
         .update(pagalo_payment_imports)
         .set({ recibo_status: "FALLIDA", recibo_at: new Date(), updated_at: new Date() })
-        .where(and(eq(pagalo_payment_imports.id, importId), eq(pagalo_payment_imports.recibo_status, "ENVIANDO")));
+        .where(
+          and(
+            eq(pagalo_payment_imports.id, importId),
+            eq(pagalo_payment_imports.recibo_status, "ENVIANDO"),
+            eq(pagalo_payment_imports.recibo_intentos, generacion),
+          ),
+        );
     } catch {}
     return "FALLIDA";
   }

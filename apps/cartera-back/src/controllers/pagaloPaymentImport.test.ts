@@ -2,6 +2,7 @@ import { describe, expect, it, mock } from "bun:test";
 import { calcularPagaloPayloadHash, type PagaloImportCommand } from "./pagaloPaymentImportPolicy";
 import {
   calcularAjusteMoraPagalo,
+  clasificarRespuestaFacturacion,
   createPagaloImportService,
   getPagaloImportReplayHttpStatus,
   getPagaloReviewRequiredReason,
@@ -317,5 +318,36 @@ describe("outbox del recibo por pago", () => {
     expect(pagosSinRecibo([10, 11], null)).toEqual([10, 11]);
     expect(pagosSinRecibo([10, 11], "basura")).toEqual([10, 11]);
     expect(pagosSinRecibo([10], JSON.stringify([10]))).toEqual([]);
+  });
+});
+
+describe("clasificarRespuestaFacturacion", () => {
+  it("'ya tiene facturas activas' (otro flujo ganó el lock) cuenta como facturado, no como FALLIDA", () => {
+    const r = clasificarRespuestaFacturacion(
+      7,
+      { success: false, message: "Este pago ya tiene facturas electrónicas activas.", facturasExistentes: [{}, {}] },
+      400,
+    );
+    expect(r).toMatchObject({ pago_id: 7, success: true, http: 200, yaFacturado: 2, errores: [] });
+    expect(resumirFacturacion([r])).toEqual({ status: "OK", error: null });
+  });
+
+  it("'no se pudo generar ninguna factura' conserva los errores de nivel superior", () => {
+    const r = clasificarRespuestaFacturacion(
+      8,
+      { success: false, error: "No se pudo generar ninguna factura", errores: [{ tipo: "MORA", error: "SAT timeout" }] },
+      500,
+    );
+    expect(r).toMatchObject({ success: false, http: 500, errores: [{ tipo: "MORA", error: "SAT timeout" }], detalle: "No se pudo generar ninguna factura" });
+  });
+
+  it("parcial: success con data.errores", () => {
+    const r = clasificarRespuestaFacturacion(
+      9,
+      { success: true, mensaje: "2 generadas, 1 con errores", data: { errores: [{ tipo: "INTERESES", error: "x" }] } },
+      200,
+    );
+    expect(r).toMatchObject({ success: true, errores: [{ tipo: "INTERESES", error: "x" }], detalle: "2 generadas, 1 con errores" });
+    expect(resumirFacturacion([r]).status).toBe("PARCIAL");
   });
 });

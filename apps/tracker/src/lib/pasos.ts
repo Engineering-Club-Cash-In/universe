@@ -12,6 +12,7 @@ export const PASOS = [
 	{ etiqueta: "Desembolsado", desde: 100, hasta: 100 },
 ] as const;
 
+
 export function rangoDePaso(paso: number): string {
 	const p = PASOS[paso - 1];
 	if (!p) return "";
@@ -109,6 +110,16 @@ export const ESTADOS: Record<
 		punto: "bg-emerald-500",
 	},
 };
+
+export function etiquetaDeEtapa(caso: Caso): string {
+	if (caso.pasoActual === 5 && caso.estado !== "desembolsado") {
+		
+		return caso.estado === "en_proceso"
+			? "En trámite de desembolso"
+			: ESTADOS[caso.estado].etiqueta;
+	}
+	return PASOS[caso.pasoActual - 1].etiqueta;
+}
 
 export function formatearMonto(monto: number | null): string {
 	if (monto === null) return "Sin monto";

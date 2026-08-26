@@ -16,6 +16,7 @@ import {
 	anioEnGuatemala,
 	coincidenciaEnPaso,
 	ESTADOS,
+	etiquetaDeEtapa,
 	PASOS,
 	formatearFecha,
 	formatearMonto,
@@ -404,7 +405,7 @@ export function ListadoPage() {
 												</div>
 												<div className="flex shrink-0 items-center gap-2">
 													<span className="font-semibold text-slate-900 text-sm tabular-nums">
-														{caso.porcentaje}%
+														{hayPeriodo ? (marca?.porcentaje ?? caso.porcentaje) : caso.porcentaje}%
 													</span>
 													<ChevronRight className="h-5 w-5 text-slate-400" />
 												</div>
@@ -432,7 +433,7 @@ export function ListadoPage() {
 															ESTADOS[caso.estado].punto,
 														)}
 													/>
-													{PASOS[caso.pasoActual - 1].etiqueta}
+													{etiquetaDeEtapa(caso)}
 												</span>
 												<span className="shrink-0 text-slate-400 text-xs">
 													{llegada

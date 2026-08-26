@@ -3,6 +3,7 @@ import {
 	type Caso,
 	anioEnGuatemala,
 	coincidenciaEnPaso,
+	etiquetaDeEtapa,
 	tuvoAvanceEn,
 	ventanaDelMes,
 } from "./pasos";
@@ -134,5 +135,27 @@ describe("anioEnGuatemala", () => {
 	test("una marca de fin de año se atribuye al año que corresponde en Guatemala", () => {
 		// 31 de diciembre 20:00 GT, aunque en UTC ya sea 1 de enero.
 		expect(anioEnGuatemala("2027-01-01T02:00:00.000Z")).toBe(2026);
+	});
+});
+
+describe("etiquetaDeEtapa", () => {
+	test("no anuncia el desembolso mientras la oportunidad sigue abierta", () => {
+		// Se llega al paso 5 al aprobar el checklist, pero contabilidad ejecuta el
+		// pago después: ahí el caso todavía está en proceso.
+		const enTramite = caso({ pasoActual: 5, porcentaje: 100, estado: "en_proceso" });
+		expect(etiquetaDeEtapa(enTramite)).toBe("En trámite de desembolso");
+
+		const pagado = caso({ pasoActual: 5, porcentaje: 100, estado: "desembolsado" });
+		expect(etiquetaDeEtapa(pagado)).toBe("Desembolsado");
+	});
+
+	test("en el paso 5 un caso cerrado o pausado usa la etiqueta de su estado", () => {
+		expect(etiquetaDeEtapa(caso({ pasoActual: 5, estado: "rechazado" }))).toBe("No aprobado");
+		expect(etiquetaDeEtapa(caso({ pasoActual: 5, estado: "en_pausa" }))).toBe("En pausa");
+	});
+
+	test("en los demás pasos usa el nombre de la etapa", () => {
+		expect(etiquetaDeEtapa(caso({ pasoActual: 2, estado: "en_proceso" }))).toBe("Documentos y análisis");
+		expect(etiquetaDeEtapa(caso({ pasoActual: 2, estado: "rechazado" }))).toBe("Documentos y análisis");
 	});
 });

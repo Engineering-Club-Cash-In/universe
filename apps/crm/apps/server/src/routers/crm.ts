@@ -76,7 +76,11 @@ import {
 } from "../lib/lead-helpers";
 import { canSyncNitToOpportunity } from "../lib/lead-nit-sync";
 import { getLeadSourceLabel } from "../lib/lead-sources";
-import { getStageVehicleRequirementError } from "../lib/opportunity-stage-guard";
+import {
+	getStageLeadRequirementError,
+	getStageVehicleRequirementError,
+	resolveOpportunityUpdateVersion,
+} from "../lib/opportunity-stage-guard";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import {
@@ -2253,6 +2257,24 @@ export const crmRouter = {
 				});
 			}
 
+			if (input.leadId === null) {
+				const [currentStageForLead] = await db
+					.select({ closurePercentage: salesStages.closurePercentage })
+					.from(salesStages)
+					.where(eq(salesStages.id, currentOpportunity[0].stageId))
+					.limit(1);
+				const leadRequirementError = getStageLeadRequirementError(
+					currentStageForLead?.closurePercentage ?? 0,
+					input.leadId,
+				);
+
+				if (leadRequirementError) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: leadRequirementError,
+					});
+				}
+			}
+
 			// diaPagoMensual solo puede ser 15, 30, o uno de los días recomendados
 			// por el análisis de esta oportunidad Y del lead que quedará asignado
 			// (si leadId también cambia, el análisis del lead anterior ya no aplica).
@@ -2306,6 +2328,8 @@ export const crmRouter = {
 
 				const fromPercentage = currentStage[0]?.closurePercentage ?? 0;
 				const toPercentage = targetStage[0]?.closurePercentage ?? 0;
+				const effectiveLeadId =
+					"leadId" in input ? input.leadId : currentOpportunity[0].leadId;
 				const effectiveVehicleId =
 					input.vehicleId !== undefined
 						? input.vehicleId
@@ -2322,6 +2346,16 @@ export const crmRouter = {
 				if (vehicleRequirementError) {
 					throw new ORPCError("BAD_REQUEST", {
 						message: vehicleRequirementError,
+					});
+				}
+
+				const leadRequirementError = getStageLeadRequirementError(
+					toPercentage,
+					effectiveLeadId,
+				);
+				if (leadRequirementError) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: leadRequirementError,
 					});
 				}
 
@@ -2398,7 +2432,7 @@ export const crmRouter = {
 					}
 
 					// Validar datos del lead para contratos
-					if (currentOpportunity[0].leadId) {
+					if (effectiveLeadId) {
 						const leadForValidation = await db
 							.select({
 								dpi: leads.dpi,
@@ -2409,7 +2443,7 @@ export const crmRouter = {
 								nationality: leads.nationality,
 							})
 							.from(leads)
-							.where(eq(leads.id, currentOpportunity[0].leadId))
+							.where(eq(leads.id, effectiveLeadId))
 							.limit(1);
 
 						if (leadForValidation[0]) {
@@ -2483,9 +2517,12 @@ export const crmRouter = {
 				}
 			}
 
-			// Sales users can only update opportunities assigned to them
-			// Admin and sales_supervisor can update any opportunity
-			// Include optimistic locking check if expectedUpdatedAt is provided
+			// Sales users can only update opportunities assigned to them.
+			// Admin and sales_supervisor can update any opportunity.
+			const canUpdateOpportunity =
+				context.userRole === "admin" ||
+				context.userRole === "sales_supervisor" ||
+				currentOpportunity[0].assignedTo === context.userId;
 			const baseWhereClause =
 				context.userRole === "admin" || context.userRole === "sales_supervisor"
 					? eq(opportunities.id, id)
@@ -2494,13 +2531,16 @@ export const crmRouter = {
 							eq(opportunities.assignedTo, context.userId),
 						);
 
-			// Add optimistic locking condition if expectedUpdatedAt is provided
-			const whereClause = expectedUpdatedAt
-				? and(
-						baseWhereClause,
-						eq(opportunities.updatedAt, new Date(expectedUpdatedAt)),
-					)
-				: baseWhereClause;
+			// Always compare-and-swap against the version validated above so
+			// concurrent lead/stage edits cannot violate contractual invariants.
+			const updateVersion = resolveOpportunityUpdateVersion(
+				currentOpportunity[0].updatedAt,
+				expectedUpdatedAt,
+			);
+			const whereClause = and(
+				baseWhereClause,
+				eq(opportunities.updatedAt, updateVersion),
+			);
 
 			// Sales users cannot reassign opportunities
 			if (
@@ -2612,8 +2652,7 @@ export const crmRouter = {
 				.returning();
 
 			if (updatedOpportunity.length === 0) {
-				// If expectedUpdatedAt was provided and no rows updated, it's likely a concurrent modification
-				if (expectedUpdatedAt) {
+				if (canUpdateOpportunity) {
 					throw new ORPCError("CONFLICT", {
 						message:
 							"La oportunidad fue modificada por otro usuario. Por favor recarga la página e intenta de nuevo.",

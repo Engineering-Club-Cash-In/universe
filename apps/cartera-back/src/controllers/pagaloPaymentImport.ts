@@ -155,6 +155,16 @@ export function esCuotaInicialPagaloVigente(
 	return otros?.cartera_cuota_id === cuotaInicialVivaId;
 }
 
+/** Misma regla de duplicados que CRM: la fila con mayor pago_id prevalece. */
+export function resolverCuotaInicialPagaloVigente(
+	cuotas: { cuotaId: number; pagoId: number }[],
+): number | undefined {
+	return cuotas.reduce<{ cuotaId: number; pagoId: number } | undefined>(
+		(actual, cuota) => (!actual || cuota.pagoId > actual.pagoId ? cuota : actual),
+		undefined,
+	)?.cuotaId;
+}
+
 export function createPagaloImportService(deps: PagaloImportServiceDependencies) {
   return {
     async import(input: unknown) {
@@ -311,8 +321,11 @@ async function asegurarCuotaInicialPagaloVigente(
 	command: PagaloImportCommand,
 ): Promise<void> {
 	if (new Big(command.otros_total).eq(0)) return;
-	const [cuotaInicialViva] = await tx
-		.select({ cuotaId: cuotas_credito.cuota_id })
+	const cuotasInicialesVivas = await tx
+		.select({
+			cuotaId: cuotas_credito.cuota_id,
+			pagoId: pagos_credito.pago_id,
+		})
 		.from(cuotas_credito)
 		.innerJoin(
 			pagos_credito,
@@ -325,10 +338,14 @@ async function asegurarCuotaInicialPagaloVigente(
 				eq(cuotas_credito.pagado, false),
 			),
 		)
-		.orderBy(desc(cuotas_credito.cuota_id))
-		.limit(1)
+		.orderBy(desc(pagos_credito.pago_id))
 		.for("update");
-	if (!esCuotaInicialPagaloVigente(command, cuotaInicialViva?.cuotaId)) {
+	if (
+		!esCuotaInicialPagaloVigente(
+			command,
+			resolverCuotaInicialPagaloVigente(cuotasInicialesVivas),
+		)
+	) {
 		throw new Error(
 			`${REVIEW_REQUIRED_PREFIX} La cuota inicial auditada de Otros ya no es la cuota pagable actual.`,
 		);

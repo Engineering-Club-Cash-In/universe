@@ -6,6 +6,7 @@ import {
   createPagaloImportService,
   facturacionPagaloActiva,
 	esCuotaInicialPagaloVigente,
+	resolverCuotaInicialPagaloVigente,
   getPagaloImportReplayHttpStatus,
   getPagaloReviewRequiredReason,
   isPagaloSameRoleEvidenceConflict,
@@ -147,6 +148,15 @@ describe("pagalo payment import", () => {
 		expect(esCuotaInicialPagaloVigente(input, 20)).toBeTrue();
 		expect(esCuotaInicialPagaloVigente(input, 21)).toBeFalse();
 		expect(esCuotaInicialPagaloVigente(input, undefined)).toBeFalse();
+	});
+
+	it("elige cuota inicial viva por pago_id, igual que CRM", () => {
+		expect(
+			resolverCuotaInicialPagaloVigente([
+				{ cuotaId: 21, pagoId: 10 },
+				{ cuotaId: 20, pagoId: 11 },
+			]),
+		).toBe(20);
 	});
 
   it("does not invent a Q0 source when mapping capital-only or facturable-only groups", () => {

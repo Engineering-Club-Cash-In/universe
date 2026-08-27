@@ -25,7 +25,11 @@ import {
   procesarRegistroPago,
 } from "./registerPayment";
 import type { AplicarPagoTx, PagaloComponentes } from "./registerPayment";
-import { CREDIT_PENDING_CANCELLATION_ERROR } from "./registerPaymentPolicy";
+import {
+  CREDIT_PENDING_CANCELLATION_ERROR,
+  getCoveredInstallmentNumbers,
+  type PagoCoberturaCuota,
+} from "./registerPaymentPolicy";
 import { fueraDeLocksHeredados, withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 
 export type PagaloImportLedger = {
@@ -163,6 +167,34 @@ export function resolverCuotaInicialPagaloVigente(
 		(actual, cuota) => (!actual || cuota.cuotaId > actual.cuotaId ? cuota : actual),
 		undefined,
 	)?.cuotaId;
+}
+
+/**
+ * INCOBRABLE conserva abiertas cuotas cubiertas hasta cancelar capital. El
+ * motor las omite; Págalo debe mandar Otros a revisión antes de que caiga en
+ * otra cuota.
+ */
+export function esCuotaInicialPagaloCubiertaEnIncobrable({
+	statusCredit,
+	montoCuota,
+	cuotaInicial,
+	cuotas,
+}: {
+	statusCredit: string | null | undefined;
+	montoCuota: string | number | null | undefined;
+	cuotaInicial: number;
+	cuotas: {
+		cuotaId: number;
+		numeroCuota: number;
+		pagos: PagoCoberturaCuota[];
+	}[];
+}): boolean {
+	return (
+		statusCredit === "INCOBRABLE" &&
+		getCoveredInstallmentNumbers({ montoCuota: montoCuota ?? 0, cuotas }).has(
+			cuotaInicial,
+		)
+	);
 }
 
 export function createPagaloImportService(deps: PagaloImportServiceDependencies) {
@@ -322,8 +354,23 @@ async function asegurarCuotaInicialPagaloVigente(
 ): Promise<void> {
 	if (new Big(command.otros_total).eq(0)) return;
 	const cuotasInicialesVivas = await tx
-		.select({ cuotaId: cuotas_credito.cuota_id })
+		.select({
+			cuotaId: cuotas_credito.cuota_id,
+			numeroCuota: cuotas_credito.numero_cuota,
+			statusCredit: creditos.statusCredit,
+			montoCuota: creditos.cuota,
+			pagoId: pagos_credito.pago_id,
+			validationStatus: pagos_credito.validationStatus,
+			paymentFalse: pagos_credito.paymentFalse,
+			abono_capital: pagos_credito.abono_capital,
+			abono_interes: pagos_credito.abono_interes,
+			abono_iva_12: pagos_credito.abono_iva_12,
+			abono_seguro: pagos_credito.abono_seguro,
+			abono_gps: pagos_credito.abono_gps,
+			membresias_pago: pagos_credito.membresias_pago,
+		})
 		.from(cuotas_credito)
+		.innerJoin(creditos, eq(creditos.credito_id, cuotas_credito.credito_id))
 		.innerJoin(
 			pagos_credito,
 			eq(pagos_credito.cuota_id, cuotas_credito.cuota_id),
@@ -337,11 +384,45 @@ async function asegurarCuotaInicialPagaloVigente(
 		)
 		.orderBy(desc(cuotas_credito.cuota_id))
 		.for("update");
+	type CuotaParaCobertura = {
+		cuotaId: number;
+		numeroCuota: number;
+		pagos: PagoCoberturaCuota[];
+	};
+	const cuotasPorId = new Map<number, CuotaParaCobertura>();
+	for (const cuota of cuotasInicialesVivas) {
+		let actual = cuotasPorId.get(cuota.cuotaId);
+		if (!actual) {
+			actual = {
+				cuotaId: cuota.cuotaId,
+				numeroCuota: cuota.numeroCuota,
+				pagos: [],
+			};
+		}
+		actual.pagos.push({
+			pago_id: cuota.pagoId,
+			validationStatus: cuota.validationStatus,
+			paymentFalse: cuota.paymentFalse,
+			abono_capital: cuota.abono_capital,
+			abono_interes: cuota.abono_interes,
+			abono_iva_12: cuota.abono_iva_12,
+			abono_seguro: cuota.abono_seguro,
+			abono_gps: cuota.abono_gps,
+			membresias_pago: cuota.membresias_pago,
+		});
+		cuotasPorId.set(cuota.cuotaId, actual);
+	}
 	if (
 		!esCuotaInicialPagaloVigente(
 			command,
 			resolverCuotaInicialPagaloVigente(cuotasInicialesVivas),
-		)
+		) ||
+		esCuotaInicialPagaloCubiertaEnIncobrable({
+			statusCredit: cuotasInicialesVivas[0]?.statusCredit,
+			montoCuota: cuotasInicialesVivas[0]?.montoCuota,
+			cuotaInicial: command.cuota_inicial,
+			cuotas: [...cuotasPorId.values()],
+		})
 	) {
 		throw new Error(
 			`${REVIEW_REQUIRED_PREFIX} La cuota inicial auditada de Otros ya no es la cuota pagable actual.`,

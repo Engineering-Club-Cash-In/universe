@@ -6,6 +6,7 @@ import {
   createPagaloImportService,
   facturacionPagaloActiva,
 	esCuotaInicialPagaloVigente,
+	esCuotaInicialPagaloCubiertaEnIncobrable,
 	resolverCuotaInicialPagaloVigente,
   getPagaloImportReplayHttpStatus,
   getPagaloReviewRequiredReason,
@@ -153,10 +154,34 @@ describe("pagalo payment import", () => {
 	it("elige cuota inicial viva por cuota_id, igual que motor de pagos", () => {
 		expect(
 			resolverCuotaInicialPagaloVigente([
-				{ cuotaId: 21, pagoId: 10 },
-				{ cuotaId: 20, pagoId: 11 },
+				{ cuotaId: 21 },
+				{ cuotaId: 20 },
 			]),
 		).toBe(21);
+	});
+
+	it("rechaza Otros cuando cuota inicial INCOBRABLE ya está cubierta", () => {
+		expect(
+			esCuotaInicialPagaloCubiertaEnIncobrable({
+				statusCredit: "INCOBRABLE",
+				montoCuota: "100.00",
+				cuotaInicial: 2,
+				cuotas: [
+					{
+						cuotaId: 20,
+						numeroCuota: 2,
+						pagos: [
+							{
+								pago_id: 50,
+								validationStatus: "validated",
+								paymentFalse: false,
+								abono_capital: "100.00",
+							},
+						],
+					},
+				],
+			}),
+		).toBeTrue();
 	});
 
   it("does not invent a Q0 source when mapping capital-only or facturable-only groups", () => {

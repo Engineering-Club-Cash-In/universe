@@ -651,11 +651,27 @@ export function createReversePayment(
           pagoEraElQueCobroElAjuste: ajusteEraDeEstePago,
         });
 
+        if (pago.cuota_id === null && ajusteEraDeEstePago) {
+          throw new Error("Adjustment payment has no installment");
+        }
+
         if (pago.cuota_id !== null) {
-          await tx
+          const cuotaActualizada = await tx
             .update(cuotas_credito)
             .set({ pagado: cuotaPermanecePagada })
-            .where(eq(cuotas_credito.cuota_id, pago.cuota_id));
+            .where(
+              ajusteEraDeEstePago
+                ? and(
+                    eq(cuotas_credito.cuota_id, pago.cuota_id),
+                    eq(cuotas_credito.numero_cuota, 1),
+                  )
+                : eq(cuotas_credito.cuota_id, pago.cuota_id),
+            )
+            .returning({ cuota_id: cuotas_credito.cuota_id });
+
+          if (ajusteEraDeEstePago && cuotaActualizada.length === 0) {
+            throw new Error("Adjustment payment is not linked to installment 1");
+          }
         }
 
         const pagosPagadosRestantesIds = pagosRestantesCuota
@@ -674,6 +690,7 @@ export function createReversePayment(
         }
 
       }
+
 
       // ======================================================================
       // ✅ RETORNAR DATOS DE LA TRANSACCIÓN

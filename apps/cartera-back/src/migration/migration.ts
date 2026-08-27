@@ -34,7 +34,10 @@ import {
   pagos_credito_inversionistas,
 } from "../database/db";
 import { findOrCreateInvestor } from "../controllers/investor";
-import { resetAjusteFechaIdealPorCredito } from "../controllers/ajusteFechaIdealPago";
+import {
+  prepararAjusteFechaIdealParaReconstruccion,
+  reattachAjusteFechaIdealReconstruido,
+} from "../controllers/ajusteFechaIdealPago";
 import { map } from "zod";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { toBigExcel } from "../utils/functions/generalFunctions";
@@ -538,7 +541,11 @@ export async function mapEstadoCuentaToPagosBig(
   console.log("│ 4️⃣ LIMPIANDO DATOS PREVIOS");
   console.log("└─────────────────────────────────────────────────────────────");
 
-  await db.transaction(async (tx) => {
+  const { pagosDB, cuotasInsertadas } = await db.transaction(async (tx) => {
+    const ajusteCobrado = await prepararAjusteFechaIdealParaReconstruccion(
+      creditoId,
+      tx,
+    );
     // Eliminar hijos primero (FK constraints)
     const pagosDelCredito = await tx
       .select({ pago_id: pagos_credito.pago_id })
@@ -558,18 +565,11 @@ export async function mapEstadoCuentaToPagosBig(
       .delete(pagos_credito)
       .where(eq(pagos_credito.credito_id, creditoId));
     console.log("  ✅ Pagos eliminados");
-    // El crédito sigue vivo (se remapea, no se borra): si tenía un ajuste por
-    // fecha ideal de pago ya cobrado, el pago que lo cobró se acaba de
-    // eliminar arriba — resetearlo para que no quede "cobrado" sin ningún
-    // pago real detrás.
-    await resetAjusteFechaIdealPorCredito(creditoId, tx);
-
     console.log("  🗑️  Eliminando cuotas previas...");
     await tx
       .delete(cuotas_credito)
       .where(eq(cuotas_credito.credito_id, creditoId));
     console.log("  ✅ Cuotas eliminadas");
-  });
 
   console.log(`✅ Limpieza completada para crédito_id=${creditoId}`);
 
@@ -613,7 +613,7 @@ export async function mapEstadoCuentaToPagosBig(
     };
     console.log("  • Datos cuota 0:", cuota0Data);
 
-    const cuota0 = await db
+    const cuota0 = await tx
       .insert(cuotas_credito)
       .values(cuota0Data)
       .returning();
@@ -717,13 +717,13 @@ export async function mapEstadoCuentaToPagosBig(
       total_restante: pago0.total_restante,
     });
 
-    await db.insert(pagos_credito).values(pago0).onConflictDoNothing();
+    await tx.insert(pagos_credito).values(pago0).onConflictDoNothing();
     console.log("✅ Pago 0 insertado exitosamente");
 
     // Actualizar royalty si existe
     if (royaltiValor.gt(0)) {
       console.log("\n💎 Actualizando royalty en crédito...");
-      await db
+      await tx
         .update(creditos)
         .set({ royalti: royaltiValor.toString() })
         .where(eq(creditos.credito_id, creditoId));
@@ -792,7 +792,7 @@ export async function mapEstadoCuentaToPagosBig(
   console.log("│ 7️⃣ INSERTANDO CUOTAS EN BATCH");
   console.log("└─────────────────────────────────────────────────────────────");
 
-  const cuotasInsertadas = await db
+  const cuotasInsertadas = await tx
     .insert(cuotas_credito)
     .values(cuotasParaInsertar)
     .returning();
@@ -1003,10 +1003,20 @@ export async function mapEstadoCuentaToPagosBig(
   console.log("│ 9️⃣ INSERTANDO PAGOS EN BATCH");
   console.log("└─────────────────────────────────────────────────────────────");
 
-  const pagosDB = await db
+  const pagosReconstruidos = await tx
     .insert(pagos_credito)
     .values(pagosParaInsertar)
     .returning();
+
+  await reattachAjusteFechaIdealReconstruido(
+    ajusteCobrado,
+    cuotasInsertadas,
+    pagosReconstruidos,
+    tx,
+  );
+
+  return { pagosDB: pagosReconstruidos, cuotasInsertadas };
+  });
 
   console.log(`✅ ${pagosDB.length} pagos insertados exitosamente`);
   console.log("  • Primer pago:", {
@@ -1127,7 +1137,11 @@ export async function mapPagosDesdeJson(
   // ═══════════════════════════════════════════════════════════════
   // 3️⃣ LIMPIEZA DE DATOS PREVIOS
   // ═══════════════════════════════════════════════════════════════
-  await db.transaction(async (tx) => {
+  const { pagosInsertados, cuotasInsertadas } = await db.transaction(async (tx) => {
+    const ajusteCobrado = await prepararAjusteFechaIdealParaReconstruccion(
+      creditoId,
+      tx,
+    );
     const pagosDelCredito = await tx
       .select({ pago_id: pagos_credito.pago_id })
       .from(pagos_credito)
@@ -1145,22 +1159,16 @@ export async function mapPagosDesdeJson(
     await tx
       .delete(pagos_credito)
       .where(eq(pagos_credito.credito_id, creditoId));
-    // El crédito sigue vivo (se remapea, no se borra): si tenía un ajuste por
-    // fecha ideal de pago ya cobrado, el pago que lo cobró se acaba de
-    // eliminar arriba — resetearlo para que no quede "cobrado" sin ningún
-    // pago real detrás.
-    await resetAjusteFechaIdealPorCredito(creditoId, tx);
     console.log("  🗑️  Eliminando cuotas previas...");
     await tx
       .delete(cuotas_credito)
       .where(eq(cuotas_credito.credito_id, creditoId));
-  });
   console.log(`  ✅ Limpieza completada para crédito_id=${creditoId}`);
 
   // ═══════════════════════════════════════════════════════════════
   // 4️⃣ CREAR CUOTA 0 (DESEMBOLSO)
   // ═══════════════════════════════════════════════════════════════
-  const cuota0 = await db
+  const cuota0 = await tx
     .insert(cuotas_credito)
     .values({
       credito_id: creditoId,
@@ -1184,7 +1192,7 @@ export async function mapPagosDesdeJson(
     .plus(membresiaDb)
     .round(2);
 
-  await db.insert(pagos_credito).values({
+  await tx.insert(pagos_credito).values({
     credito_id: creditoId,
     cuota: cuotaAmount.toString(),
     cuota_interes: cuotaInteres0.toString(),
@@ -1255,7 +1263,7 @@ export async function mapPagosDesdeJson(
     });
   }
 
-  const cuotasInsertadas = await db
+  const cuotasInsertadas = await tx
     .insert(cuotas_credito)
     .values(cuotasData)
     .returning();
@@ -1355,10 +1363,20 @@ export async function mapPagosDesdeJson(
   // ═══════════════════════════════════════════════════════════════
   // 7️⃣ INSERCIÓN BATCH DE PAGOS
   // ═══════════════════════════════════════════════════════════════
-  const pagosInsertados = await db
+  const pagosInsertados = await tx
     .insert(pagos_credito)
     .values(pagosData)
     .returning();
+
+  await reattachAjusteFechaIdealReconstruido(
+    ajusteCobrado,
+    cuotasInsertadas,
+    pagosInsertados,
+    tx,
+  );
+
+  return { pagosInsertados, cuotasInsertadas };
+  });
 
   const pagados = pagosInsertados.filter((p) => p.pagado).length;
   const pendientes = pagosInsertados.filter((p) => !p.pagado).length;

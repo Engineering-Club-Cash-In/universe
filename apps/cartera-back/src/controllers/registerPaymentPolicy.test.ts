@@ -1,5 +1,7 @@
 import { describe, expect, it } from "bun:test";
+import * as registerPaymentPolicy from "./registerPaymentPolicy";
 import {
+  aplicarAjusteFechaIdealAPago,
   getAjusteFechaIdealADeducir,
   recomputeCreditAfterCapital,
   shouldBlockCuota1ClosingForPendingAjuste,
@@ -8,7 +10,6 @@ import {
   shouldIncobrableInstallmentBePaid,
   shouldProcessCuota1DespiteZeroDisponible,
 } from "./registerPaymentPolicy";
-import * as registerPaymentPolicy from "./registerPaymentPolicy";
 
 describe("registerPaymentPolicy - integridad de cuotas abiertas", () => {
   it("detecta una cuota abierta que ya está cubierta por pagos validados vivos", () => {
@@ -836,6 +837,58 @@ describe("getAjusteFechaIdealADeducir", () => {
       disponible: "30.97",
     });
     expect(resultado?.monto.toString()).toBe("30.96");
+  });
+});
+
+describe("aplicarAjusteFechaIdealAPago", () => {
+  it("suma el ajuste completo solo a otros y conserva todos los demás rubros", () => {
+    const pago = {
+      otros: "10.00",
+      abono_interes: "100.00",
+      abono_iva_12: "12.00",
+      membresias_pago: "90.00",
+      abono_seguro: "45.00",
+      abono_gps: "15.00",
+      abono_capital: "500.00",
+    };
+
+    expect(aplicarAjusteFechaIdealAPago(pago, "32.40")).toEqual({
+      ...pago,
+      otros: "42.4",
+    });
+    expect(pago).toEqual({
+      otros: "10.00",
+      abono_interes: "100.00",
+      abono_iva_12: "12.00",
+      membresias_pago: "90.00",
+      abono_seguro: "45.00",
+      abono_gps: "15.00",
+      abono_capital: "500.00",
+    });
+  });
+
+  it("el pago exacto del ajuste conserva una fila parcial por su otros final", () => {
+    const pago = aplicarAjusteFechaIdealAPago(
+      {
+        otros: "0",
+        abono_interes: "0",
+        abono_iva_12: "0",
+        membresias_pago: "0",
+        abono_seguro: "0",
+        abono_gps: "0",
+      },
+      "50",
+    );
+
+    expect(pago.otros).toBe("50");
+    expect(
+      registerPaymentPolicy.debeInsertarFilaParcialCuota({
+        totalPagado: "0",
+        mora: "0",
+        otros: pago.otros,
+        pagoConvenio: "0",
+      }),
+    ).toBe(true);
   });
 });
 

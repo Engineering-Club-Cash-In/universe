@@ -1033,6 +1033,24 @@ export const getAjusteFechaIdealADeducir = ({
   return { id: ajustePendiente.id, monto };
 };
 
+type PagoConRubrosDeAjuste = {
+  otros: BigInput;
+  abono_interes: BigInput;
+  abono_iva_12: BigInput;
+  membresias_pago: BigInput;
+  abono_seguro: BigInput;
+  abono_gps: BigInput;
+};
+
+/** Cobra el ajuste bruto en `otros` sin redistribuirlo entre rubros de cuota. */
+export const aplicarAjusteFechaIdealAPago = <T extends PagoConRubrosDeAjuste>(
+  pago: T,
+  montoAjuste: BigInput,
+): Omit<T, "otros"> & { otros: string } => ({
+  ...pago,
+  otros: new Big(pago.otros).plus(montoAjuste).toString(),
+});
+
 /**
  * La cuota 1 no puede cerrar (pagado=true) mientras exista un ajuste por
  * fecha ideal de pago pendiente que ESTE pago no cobró: si cerrara, deja de

@@ -13,7 +13,10 @@ import {
 import { findOrCreateAdvisorByName } from "./advisor";
 import { findOrCreateUserByName } from "./users";
 import { marcarCuotasPagadasHastaNumero } from "./migratePayments";
-import { resetAjusteFechaIdealPorCredito } from "./ajusteFechaIdealPago";
+import {
+  prepararAjusteFechaIdealParaReconstruccion,
+  reattachAjusteFechaIdealReconstruido,
+} from "./ajusteFechaIdealPago";
 import { updateAllInstallments } from "./updateCredit";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -299,57 +302,48 @@ export async function procesarCreditoDesdeExcelFull(
     mora: "0",
   };
 
+  const reconstruccion = await db.transaction(async (tx) => {
   // Limpiar datos previos si el crédito ya existe
-  const [existing] = await db
+  const [existing] = await tx
     .select({ credito_id: creditos.credito_id })
     .from(creditos)
     .where(eq(creditos.numero_credito_sifco, creditoBase))
     .limit(1);
 
+  let ajusteCobrado: Awaited<
+    ReturnType<typeof prepararAjusteFechaIdealParaReconstruccion>
+  > = null;
   if (existing) {
     console.log(`🔄 Crédito existente (ID ${existing.credito_id}) — limpiando...`);
-    const pagosExistentes = await db
+    ajusteCobrado = await prepararAjusteFechaIdealParaReconstruccion(
+      existing.credito_id,
+      tx,
+    );
+    const pagosExistentes = await tx
       .select({ pago_id: pagos_credito.pago_id })
       .from(pagos_credito)
       .where(eq(pagos_credito.credito_id, existing.credito_id));
 
     const pagoIds = pagosExistentes.map((p) => p.pago_id);
     if (pagoIds.length > 0) {
-      await db.delete(boletas).where(inArray(boletas.pago_id, pagoIds));
-      await db
+      await tx.delete(boletas).where(inArray(boletas.pago_id, pagoIds));
+      await tx
         .delete(pagos_credito_inversionistas)
         .where(inArray(pagos_credito_inversionistas.pago_id, pagoIds));
     }
-    await db
+    await tx
       .delete(pagos_credito)
       .where(eq(pagos_credito.credito_id, existing.credito_id));
-    // El crédito sigue vivo (se reimporta, no se borra) — si tenía un ajuste
-    // por fecha ideal de pago ya cobrado, el pago que lo cobró se acaba de
-    // eliminar arriba.
-    //
-    // Si esta reimportación SÍ va a reconstruir la cuota 1 como pagada más
-    // abajo (hasta_cuota >= 1), NO se resetea acá: marcarCuotasPagadasHastaNumero
-    // necesita leer fecha_cobro tal cual estaba (el ON DELETE SET NULL del FK
-    // ya limpió pago_id solo) para decidir si reenganchar el ajuste a la fila
-    // reconstruida o reabrir la cuota — resetear acá borraría esa evidencia
-    // antes de que la pueda leer (ver decidirAjusteAlReconstruirCuota1).
-    //
-    // Si NO va a reconstruir nada (hasta_cuota 0/undefined), nadie más va a
-    // resolver el ajuste después: se resetea acá para no dejarlo "cobrado"
-    // apuntando a un pago que ya no existe.
-    if (hasta_cuota === undefined || hasta_cuota <= 0) {
-      await resetAjusteFechaIdealPorCredito(existing.credito_id);
-    }
-    await db
+    await tx
       .delete(cuotas_credito)
       .where(eq(cuotas_credito.credito_id, existing.credito_id));
-    await db
+    await tx
       .delete(creditos_inversionistas)
       .where(eq(creditos_inversionistas.credito_id, existing.credito_id));
     console.log(`✅ Limpieza completada`);
   }
 
-  const [newCredit] = await db
+  const [newCredit] = await tx
     .insert(creditos)
     .values(creditData)
     .onConflictDoUpdate({ target: creditos.numero_credito_sifco, set: creditData })
@@ -421,7 +415,7 @@ export async function procesarCreditoDesdeExcelFull(
   }
 
   if (inversionistasData.length > 0) {
-    await db.insert(creditos_inversionistas).values(inversionistasData);
+    await tx.insert(creditos_inversionistas).values(inversionistasData);
     // ⚡ NO se inserta en creditos_inversionistas_espejo (intencional)
     console.log(`✅ ${inversionistasData.length} inversionistas insertados (sin espejo)`);
   }
@@ -457,7 +451,7 @@ export async function procesarCreditoDesdeExcelFull(
   // 6. Insertar cuotas (0 + 1..plazo)
   // ───────────────────────────────────────────────────────
 
-  const [cuota0Row] = await db
+  const [cuota0Row] = await tx
     .insert(cuotas_credito)
     .values({ credito_id: creditoId, numero_cuota: 0, fecha_vencimiento: fechas[0], pagado: true })
     .returning();
@@ -469,7 +463,7 @@ export async function procesarCreditoDesdeExcelFull(
     pagado: false,
   }));
 
-  const cuotasInsertadas = await db
+  const cuotasInsertadas = await tx
     .insert(cuotas_credito)
     .values(cuotasRegulares)
     .returning({
@@ -600,8 +594,40 @@ export async function procesarCreditoDesdeExcelFull(
     });
   }
 
-  await db.insert(pagos_credito).values(pagos);
+  const pagosInsertados = await tx
+    .insert(pagos_credito)
+    .values(pagos)
+    .returning({
+      pago_id: pagos_credito.pago_id,
+      cuota_id: pagos_credito.cuota_id,
+      otros: pagos_credito.otros,
+    });
+  await reattachAjusteFechaIdealReconstruido(
+    ajusteCobrado,
+    cuotasInsertadas,
+    pagosInsertados,
+    tx,
+  );
   console.log(`✅ ${pagos.length} pagos insertados`);
+
+  return {
+    creditoId,
+    cuotasInsertadas,
+    inversionistasData,
+    inversionistasNoEncontrados,
+    pagos,
+    startDate,
+  };
+  });
+
+  const {
+    creditoId,
+    cuotasInsertadas,
+    inversionistasData,
+    inversionistasNoEncontrados,
+    pagos,
+    startDate,
+  } = reconstruccion;
 
   // ───────────────────────────────────────────────────────
   // 8. Marcar cuotas pagadas + recalcular

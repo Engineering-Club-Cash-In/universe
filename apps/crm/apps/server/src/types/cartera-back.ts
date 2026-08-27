@@ -103,6 +103,7 @@ export interface AjusteFechaIdealPayload {
 	dia_pago_mensual_elegido: number;
 	dias_diferencia: number;
 	dias_del_mes: number;
+	/** Interés proporcional incluyendo el IVA del 12% del interés mensual. */
 	monto_interes: number;
 	monto_membresia: number;
 	monto_servicios: number;
@@ -134,6 +135,7 @@ export interface CreateCreditoInput {
 	aseguradora?: string;
 	como_se_entero?: string;
 	dia_pago_mensual?: number;
+	dia_pago_original_sistema?: number;
 	// Ingreso adicional por elegir un día IA que cae después del día que el
 	// sistema hubiera asignado por default (solo presente cuando aplica el
 	// ajuste, ver apps/crm/apps/server/src/lib/fecha-ideal-pago-ajuste.ts).

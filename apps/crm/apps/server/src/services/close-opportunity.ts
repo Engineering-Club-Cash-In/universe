@@ -1082,6 +1082,8 @@ async function createCredit(
 				? Number(params.cuotaMensual)
 				: Number.parseFloat(opportunity.cuotaMensual as string),
 			dia_pago_mensual: diaPagoMensual,
+			dia_pago_original_sistema:
+				opportunity.diaPagoOriginalSistema ?? undefined,
 			ajuste_fecha_ideal: ajusteFechaIdeal,
 			tipoCredito: opportunity.creditType || "autocompra",
 			observaciones: `Crédito generado desde CRM - Oportunidad: ${opportunity.title}`,

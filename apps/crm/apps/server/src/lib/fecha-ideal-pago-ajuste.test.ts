@@ -31,7 +31,7 @@ describe("getDiaPagoOriginalSistema", () => {
 });
 
 describe("calcularAjusteFechaIdeal", () => {
-	test("día IA después del original: prorratea interés, membresía y servicios", () => {
+	test("prorratea el interés bruto con IVA, membresía y servicios por componente", () => {
 		// fechaReferencia en marzo (hora Guatemala) → primera cuota cae en abril (30 días)
 		const fechaReferencia = new Date("2026-03-10T18:00:00Z");
 
@@ -39,7 +39,7 @@ describe("calcularAjusteFechaIdeal", () => {
 			diaPagoOriginalSistema: 15,
 			diaPagoMensualElegido: 17,
 			capital: 10000,
-			porcentajeInteres: 3, // interés mensual = 300
+			porcentajeInteres: 3, // interés base Q300 + IVA Q36 = Q336
 			membresiaMensual: 90,
 			seguroMensual: 45,
 			gpsMensual: 15, // servicios = 60
@@ -49,10 +49,10 @@ describe("calcularAjusteFechaIdeal", () => {
 		expect(resultado).not.toBeNull();
 		expect(resultado?.diasDiferencia).toBe(2);
 		expect(resultado?.diasDelMes).toBe(30);
-		expect(resultado?.montoInteres).toBe(20); // (300/30)*2
+		expect(resultado?.montoInteres).toBe(22.4); // (336/30)*2
 		expect(resultado?.montoMembresia).toBe(6); // (90/30)*2
 		expect(resultado?.montoServicios).toBe(4); // (60/30)*2
-		expect(resultado?.montoTotal).toBe(30);
+		expect(resultado?.montoTotal).toBe(32.4);
 	});
 
 	test("redondea a 2 decimales cuando la división no es exacta", () => {
@@ -63,7 +63,7 @@ describe("calcularAjusteFechaIdeal", () => {
 			diaPagoOriginalSistema: 15,
 			diaPagoMensualElegido: 17,
 			capital: 10000,
-			porcentajeInteres: 1, // interés mensual = 100
+			porcentajeInteres: 1, // interés base Q100 + IVA Q12 = Q112
 			membresiaMensual: 50,
 			seguroMensual: 20,
 			gpsMensual: 10, // servicios = 30
@@ -71,10 +71,44 @@ describe("calcularAjusteFechaIdeal", () => {
 		});
 
 		expect(resultado?.diasDelMes).toBe(31);
-		expect(resultado?.montoInteres).toBe(6.45); // (100/31)*2 = 6.4516...
+		expect(resultado?.montoInteres).toBe(7.23); // (112/31)*2 = 7.2258...
 		expect(resultado?.montoMembresia).toBe(3.23); // (50/31)*2 = 3.2258...
 		expect(resultado?.montoServicios).toBe(1.94); // (30/31)*2 = 1.9354...
-		expect(resultado?.montoTotal).toBe(11.62);
+		expect(resultado?.montoTotal).toBe(12.4);
+	});
+
+	test("prorratea Q1,000 de interés mensual ya con IVA a Q366.67 por 11/30 días", () => {
+		const resultado = calcularAjusteFechaIdeal({
+			diaPagoOriginalSistema: 15,
+			diaPagoMensualElegido: 26,
+			capital: 89286,
+			porcentajeInteres: 1, // base Q892.86 + IVA Q107.14 = Q1,000
+			membresiaMensual: 0,
+			seguroMensual: 0,
+			gpsMensual: 0,
+			fechaReferencia: new Date("2026-03-10T18:00:00Z"),
+		});
+
+		expect(resultado?.diasDiferencia).toBe(11);
+		expect(resultado?.diasDelMes).toBe(30);
+		expect(resultado?.montoInteres).toBe(366.67);
+		expect(resultado?.montoTotal).toBe(366.67);
+	});
+
+	test("redondea primero el interés base y luego su IVA antes de prorratear", () => {
+		const resultado = calcularAjusteFechaIdeal({
+			diaPagoOriginalSistema: 14,
+			diaPagoMensualElegido: 28,
+			capital: 0.5,
+			porcentajeInteres: 1, // Q0.005 -> base Q0.01; IVA Q0.00
+			membresiaMensual: 0,
+			seguroMensual: 0,
+			gpsMensual: 0,
+			fechaReferencia: new Date("2026-01-10T18:00:00Z"),
+		});
+
+		// Q0.01 * 14/28 = Q0.005 -> Q0.01. Multiplicar 0.005 por 1.12 daría Q0.00.
+		expect(resultado?.montoInteres).toBe(0.01);
 	});
 
 	test("día IA igual al original: no hay ajuste (null)", () => {
@@ -160,5 +194,26 @@ describe("calcularAjusteFechaIdeal", () => {
 		expect(resultado?.diasDelMes).toBe(28);
 		// 28 - 15 = 13, NO 31 - 15 = 16
 		expect(resultado?.diasDiferencia).toBe(13);
+	});
+
+	test.each([
+		["2026-01-10T18:00:00Z", 15, 31, 28, 13],
+		["2028-01-10T18:00:00Z", 15, 31, 29, 14],
+		["2026-03-10T18:00:00Z", 15, 31, 30, 15],
+		["2026-02-10T18:00:00Z", 30, 31, 31, 1],
+	])("usa meses de 28/29/30/31 días y clampa el elegido (%s)", (fecha, original, elegido, diasDelMes, diasDiferencia) => {
+		const resultado = calcularAjusteFechaIdeal({
+			diaPagoOriginalSistema: original,
+			diaPagoMensualElegido: elegido,
+			capital: 10000,
+			porcentajeInteres: 3,
+			membresiaMensual: 0,
+			seguroMensual: 0,
+			gpsMensual: 0,
+			fechaReferencia: new Date(fecha),
+		});
+
+		expect(resultado?.diasDelMes).toBe(diasDelMes);
+		expect(resultado?.diasDiferencia).toBe(diasDiferencia);
 	});
 });

@@ -119,9 +119,86 @@ function createTransactionTx() {
         where: takeRows,
       }),
     })),
-    update: mock(() => ({ set: () => ({ where: () => Promise.resolve() }) })),
+    update: mock(() => ({
+      set: () => ({
+        where: () => Object.assign(Promise.resolve([]), {
+          returning: () => Promise.resolve([]),
+        }),
+      }),
+    })),
     delete: mock(() => ({ where: () => Promise.resolve() })),
   };
+}
+
+function createAdjustmentReversalHarness(ajusteEnlazado: boolean) {
+  const payment = {
+    ...pendingPayment,
+    cuota_id: 40,
+    validationStatus: "validated",
+    pagado: true,
+    monto_aplicado: "30",
+  };
+  const selectResults: unknown[][] = [
+    [payment],
+    [activeCredit],
+    [user],
+    [],
+    [
+      {
+        pago_id: 31,
+        monto_aplicado: "300",
+        monto_boleta: "300",
+        validationStatus: "validated",
+        paymentFalse: false,
+        pagado: false,
+      },
+    ],
+  ];
+  const updateSets: Array<Record<string, unknown>> = [];
+  let updateCall = 0;
+  const tx = {
+    select: mock(() => ({
+      from: () => ({
+        innerJoin: () => ({
+          where: () => ({ limit: () => Promise.resolve(selectResults.shift() ?? []) }),
+        }),
+        where: () => {
+          const rows = selectResults.shift() ?? [];
+          return Object.assign(Promise.resolve(rows), {
+            limit: () => Promise.resolve(rows),
+          });
+        },
+      }),
+    })),
+    update: mock(() => {
+      updateCall += 1;
+      const currentCall = updateCall;
+      return {
+        set: (values: Record<string, unknown>) => {
+          updateSets.push(values);
+          return {
+            where: () => Object.assign(Promise.resolve([]), {
+              returning: () => {
+                if (currentCall === 1) {
+                  return Promise.resolve(ajusteEnlazado ? [{ id: 7 }] : []);
+                }
+                return Promise.resolve([{ cuota_id: 40 }]);
+              },
+            }),
+          };
+        },
+      };
+    }),
+    delete: mock(() => ({ where: () => Promise.resolve([]) })),
+    execute: mock(() => Promise.resolve()),
+  };
+  const dependencies = {
+    runTransaction: async (callback: (value: typeof tx) => Promise<unknown>) => callback(tx),
+    reverseInvestors: mock(() => Promise.resolve([])),
+    reverseCapitalPayment: mock(() => Promise.resolve(undefined)),
+  } as unknown as ReversePaymentDependencies;
+
+  return { handler: createReversePayment(dependencies), updateSets };
 }
 
 function createPersistenceHarness(
@@ -218,5 +295,39 @@ describe("reversePayment global-persistence evidence", () => {
       manual_action_required: true,
       reason_code: "local_state_inconsistent",
     });
+  });
+});
+
+describe("reversePayment ajuste por fecha ideal", () => {
+  test("reabre cuota 1 si revierte el pago solo-ajuste aunque la base siga cubierta", async () => {
+    const { handler, updateSets } = createAdjustmentReversalHarness(true);
+    const set = { status: 0 };
+
+    await handler({
+      body: { credito_id: 10, pago_id: 30 },
+      set,
+      telemetryLogger: createCarteraStructuredLogger({ sink: () => undefined }),
+    });
+
+    expect(set.status).toBe(200);
+    expect(updateSets.filter((values) => "pagado" in values && Object.keys(values).length === 1)).toEqual([
+      { pagado: false },
+    ]);
+  });
+
+  test("conserva cerrada la cuota cubierta al revertir un pago distinto", async () => {
+    const { handler, updateSets } = createAdjustmentReversalHarness(false);
+    const set = { status: 0 };
+
+    await handler({
+      body: { credito_id: 10, pago_id: 30 },
+      set,
+      telemetryLogger: createCarteraStructuredLogger({ sink: () => undefined }),
+    });
+
+    expect(set.status).toBe(200);
+    expect(updateSets.filter((values) => "pagado" in values && Object.keys(values).length === 1)).toEqual([
+      { pagado: true },
+    ]);
   });
 });

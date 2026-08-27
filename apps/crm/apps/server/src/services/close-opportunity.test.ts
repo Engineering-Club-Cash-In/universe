@@ -34,9 +34,18 @@ const newerInternalDraft = {
 
 const dialect = new PgDialect();
 let orderBy: SQL[] = [];
+const createCredito = mock(async (input: Record<string, unknown>) => ({
+	credito_id: 123,
+	numero_credito_sifco: input.numero_credito_sifco,
+}));
+
+mock.module("./cartera-back-client", () => ({
+	carteraBackClient: { createCredito },
+}));
 
 mock.module("../db", () => ({
 	db: {
+		insert: () => ({ values: () => Promise.resolve() }),
 		select: () => ({
 			from: () => ({
 				where: () => ({
@@ -58,6 +67,43 @@ mock.module("../db", () => ({
 		}),
 	},
 }));
+
+describe("createCreditoInCarteraBack", () => {
+	test("envía siempre el día original para que cartera use la cuota 1 efectiva", async () => {
+		const previous = process.env.ENABLE_CARTERA_BACK_INTEGRATION;
+		process.env.ENABLE_CARTERA_BACK_INTEGRATION = "true";
+		try {
+			const { createCreditoInCarteraBack } = await import(
+				"./cartera-back-integration"
+			);
+			await createCreditoInCarteraBack({
+				opportunityId: "opportunity-1",
+				userId: "user-1",
+				usuario_id: "Cliente prueba",
+				numero_credito_sifco: "TEST-ROLLOVER",
+				capital: 1000,
+				porcentaje_interes: 10,
+				plazo: 1,
+				cuota: 1120,
+				dia_pago_mensual: 31,
+				dia_pago_original_sistema: 30,
+			});
+
+			expect(createCredito).toHaveBeenCalledWith(
+				expect.objectContaining({
+					dia_pago_mensual: 31,
+					dia_pago_original_sistema: 30,
+				}),
+			);
+		} finally {
+			if (previous === undefined) {
+				delete process.env.ENABLE_CARTERA_BACK_INTEGRATION;
+			} else {
+				process.env.ENABLE_CARTERA_BACK_INTEGRATION = previous;
+			}
+		}
+	});
+});
 
 describe("getLatestApprovedQuotation", () => {
 	test("prefers an older accepted quotation over a newer internal draft", async () => {

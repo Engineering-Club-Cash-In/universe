@@ -1,8 +1,82 @@
-import { eq } from "drizzle-orm";
+import Big from "big.js";
+import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { db } from "../database";
-import { ajuste_fecha_ideal_pago } from "../database/db";
+import { ajuste_fecha_ideal_pago, pagos_credito } from "../database/db";
 
-type Executor = Pick<typeof db, "update">;
+type Executor = Pick<typeof db, "select" | "update">;
+type AjusteCobrado = { id: number; monto_total: string };
+
+export async function prepararAjusteFechaIdealParaReconstruccion(
+  credito_id: number,
+  executor: Executor = db,
+): Promise<AjusteCobrado | null> {
+  const [ajusteCobrado] = await executor
+    .select({
+      id: ajuste_fecha_ideal_pago.id,
+      monto_total: ajuste_fecha_ideal_pago.monto_total,
+    })
+    .from(ajuste_fecha_ideal_pago)
+    .where(
+      and(
+        eq(ajuste_fecha_ideal_pago.credito_id, credito_id),
+        isNotNull(ajuste_fecha_ideal_pago.fecha_cobro),
+        isNotNull(ajuste_fecha_ideal_pago.pago_id),
+      ),
+    )
+    .limit(1);
+
+  if (ajusteCobrado) return ajusteCobrado;
+
+  await resetAjusteFechaIdealPorCredito(credito_id, executor);
+  return null;
+}
+
+export async function reattachAjusteFechaIdealReconstruido(
+  ajuste: AjusteCobrado | null,
+  cuotas: readonly { cuota_id: number; numero_cuota: number }[],
+  pagos: readonly {
+    pago_id: number;
+    cuota_id: number | null;
+    otros: string | null;
+  }[],
+  executor: Executor = db,
+): Promise<void> {
+  if (ajuste === null) return;
+
+  const cuota1Id = cuotas.find((cuota) => cuota.numero_cuota === 1)?.cuota_id;
+  const pagoCuota1 = pagos.find((pago) => pago.cuota_id === cuota1Id);
+  if (!pagoCuota1) {
+    throw new Error("No se pudo reconstruir el pago de la cuota 1");
+  }
+
+  const [ajusteActualizado] = await executor
+    .update(ajuste_fecha_ideal_pago)
+    .set({ pago_id: pagoCuota1.pago_id })
+    .where(
+      and(
+        eq(ajuste_fecha_ideal_pago.id, ajuste.id),
+        isNotNull(ajuste_fecha_ideal_pago.fecha_cobro),
+        isNull(ajuste_fecha_ideal_pago.pago_id),
+      ),
+    )
+    .returning({ id: ajuste_fecha_ideal_pago.id });
+
+  if (!ajusteActualizado) {
+    throw new Error(`No se pudo reenlazar el ajuste ${ajuste.id}`);
+  }
+
+  const [pagoActualizado] = await executor
+    .update(pagos_credito)
+    .set({
+      otros: new Big(pagoCuota1.otros || 0).plus(ajuste.monto_total).toString(),
+    })
+    .where(eq(pagos_credito.pago_id, pagoCuota1.pago_id))
+    .returning({ pago_id: pagos_credito.pago_id });
+
+  if (!pagoActualizado) {
+    throw new Error(`No se pudo aplicar el ajuste ${ajuste.id} al pago`);
+  }
+}
 
 /**
  * Si pago_id es el que cobró un ajuste por fecha ideal de pago (ver

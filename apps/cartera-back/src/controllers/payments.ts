@@ -1983,10 +1983,22 @@ export async function falsePayment(pago_id: number, credito_id: number) {
         pagoEraElQueCobroElAjuste: ajusteEraDeEstePago,
       });
 
-      await tx
+      const cuotaActualizada = await tx
         .update(cuotas_credito)
         .set({ pagado: cuotaPermanecePagada })
-        .where(eq(cuotas_credito.cuota_id, updated.cuota_id));
+        .where(
+          ajusteEraDeEstePago
+            ? and(
+                eq(cuotas_credito.cuota_id, updated.cuota_id),
+                eq(cuotas_credito.numero_cuota, 1),
+              )
+            : eq(cuotas_credito.cuota_id, updated.cuota_id),
+        )
+        .returning({ cuota_id: cuotas_credito.cuota_id });
+
+      if (ajusteEraDeEstePago && cuotaActualizada.length === 0) {
+        throw new Error("Adjustment payment is not linked to installment 1");
+      }
 
       // Mismo paso que ya hace reversePayment.ts y que a falsePayment le
       // faltaba desde antes de este feature: las demás filas de la cuota
@@ -2005,6 +2017,8 @@ export async function falsePayment(pago_id: number, credito_id: number) {
           .set({ pagado: cuotaPermanecePagada })
           .where(inArray(pagos_credito.pago_id, pagosPagadosRestantesIds));
       }
+    } else if (ajusteEraDeEstePago) {
+      throw new Error("Adjustment payment has no installment");
     }
 
     return updated;

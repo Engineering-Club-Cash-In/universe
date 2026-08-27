@@ -26,6 +26,7 @@ import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
 import { recalcularPagosCredito } from "./updateCredit";
 import {
   applyCapitalPaymentAndBuildResponse,
+  aplicarAjusteFechaIdealAPago,
   calcularSaldoNetoCuota,
   crearEstampadorPagoConvenio,
   esDestinoSobrescribible,
@@ -1525,65 +1526,65 @@ export const insertPayment = async ({ body, set }: any) => {
         // Mora y otros solo van en la primera cuota (si ya hubo completas antes, no se repiten)
         const esPrimeraCuota = cuotas_completas === 0 && cuotas_parciales === 0;
         const moraParaPago = esPrimeraCuota ? moraBig : new Big(0);
-        // El ajuste solo se suma en la cuota 1 (no en "la primera que se
-        // procese en este pago"). Comparte el campo "otros" con lo que el
-        // operador tipeó a mano; para aislar el ajuste, ver
-        // ajuste_fecha_ideal_pago.fecha_cobro.
+        // La base de "otros" manual solo va en la primera cuota procesada.
+        // aplicarAjusteFechaIdealAPago agrega después el ajuste bruto sin tocar
+        // interés, IVA, membresía, seguro ni GPS.
         const otrosParaPago = esPrimeraCuota
-          ? otrosBig.plus(
-              cuota.cuotas_credito.numero_cuota === 1
-                ? ajusteFechaIdealMonto
-                : 0
-            )
+          ? otrosBig
           : new Big(0);
 
-        const pagoData = {
-          credito_id: credito.credito_id,
-          cuota: credito.cuota,
-          cuota_interes: credito.cuota_interes,
-          abono_capital: abono_capital.toString(),
-          abono_interes: abono_interes.toString(),
-          abono_iva_12: abono_iva_12.toString(),
-          abono_interes_ci: abono_interes_ci.toString(),
-          abono_iva_ci: abono_iva_ci.toString(),
-          abono_seguro: abono_seguro.toString(),
-          abono_gps: abono_gps.toString(),
-          pago_del_mes: pago_del_mesBig.toString(),
-          monto_boleta: montoBoleta.toString(),
-          capital_restante: nuevo_capital_restante.toString(),
-          interes_restante: nuevo_interes_restante.toString(),
-          iva_12_restante: nuevo_iva_restante.toString(),
-          seguro_restante: nuevo_seguro_restante.toString(),
-          gps_restante: nuevo_gps_restante.toString(),
-          numero_cuota: cuota.cuotas_credito.numero_cuota,
-          llamada: llamada,
-          fecha_pago: fechaGuatemala,
-          renuevo_o_nuevo: renuevo_o_nuevo,
-          tipoCredito: "Renuevo",
-          membresias: nuevo_membresias_restante.toString(),
-          membresias_pago: abono_membresias.toString(),
-          membresias_mes: abono_membresias.toString(),
-          otros: otrosParaPago.toString(),
-          mora: moraParaPago.toString(),
-          monto_boleta_cuota: montoBoleta.toString(),
-          seguro_total: credito.seguro_10_cuotas?.toString() ?? "0",
-          pagado: cuota_pagada,
-          facturacion: "si",
-          mes_pagado,
-          seguro_facturado: abono_seguro.toString() ?? "0",
-          gps_facturado: abono_gps.toString() ?? "0",
-          reserva: "0",
-          observaciones: observaciones,
-          validate: false,
-          validationStatus: "pending" as const,
-          paymentFalse: paymentFalse,
-          numeroAutorizacion: numeroAutorizacion,
-          banco_id: banco_id,
-          registerBy: registerBy,
-          fecha_boleta: fecha_boleta,
-          monto_aplicado: totalPagado.toString(),
-          origen_pago: origen_pago,
-        };
+        const pagoData = aplicarAjusteFechaIdealAPago(
+          {
+            credito_id: credito.credito_id,
+            cuota: credito.cuota,
+            cuota_interes: credito.cuota_interes,
+            abono_capital: abono_capital.toString(),
+            abono_interes: abono_interes.toString(),
+            abono_iva_12: abono_iva_12.toString(),
+            abono_interes_ci: abono_interes_ci.toString(),
+            abono_iva_ci: abono_iva_ci.toString(),
+            abono_seguro: abono_seguro.toString(),
+            abono_gps: abono_gps.toString(),
+            pago_del_mes: pago_del_mesBig.toString(),
+            monto_boleta: montoBoleta.toString(),
+            capital_restante: nuevo_capital_restante.toString(),
+            interes_restante: nuevo_interes_restante.toString(),
+            iva_12_restante: nuevo_iva_restante.toString(),
+            seguro_restante: nuevo_seguro_restante.toString(),
+            gps_restante: nuevo_gps_restante.toString(),
+            numero_cuota: cuota.cuotas_credito.numero_cuota,
+            llamada: llamada,
+            fecha_pago: fechaGuatemala,
+            renuevo_o_nuevo: renuevo_o_nuevo,
+            tipoCredito: "Renuevo",
+            membresias: nuevo_membresias_restante.toString(),
+            membresias_pago: abono_membresias.toString(),
+            membresias_mes: abono_membresias.toString(),
+            otros: otrosParaPago.toString(),
+            mora: moraParaPago.toString(),
+            monto_boleta_cuota: montoBoleta.toString(),
+            seguro_total: credito.seguro_10_cuotas?.toString() ?? "0",
+            pagado: cuota_pagada,
+            facturacion: "si",
+            mes_pagado,
+            seguro_facturado: abono_seguro.toString() ?? "0",
+            gps_facturado: abono_gps.toString() ?? "0",
+            reserva: "0",
+            observaciones: observaciones,
+            validate: false,
+            validationStatus: "pending" as const,
+            paymentFalse: paymentFalse,
+            numeroAutorizacion: numeroAutorizacion,
+            banco_id: banco_id,
+            registerBy: registerBy,
+            fecha_boleta: fecha_boleta,
+            monto_aplicado: totalPagado.toString(),
+            origen_pago: origen_pago,
+          },
+          esPrimeraCuota && cuota.cuotas_credito.numero_cuota === 1
+            ? ajusteFechaIdealMonto
+            : 0,
+        );
 
         // Insertar o actualizar pago
         type PagoCredito = typeof pagos_credito.$inferSelect;
@@ -1836,7 +1837,11 @@ export const insertPayment = async ({ body, set }: any) => {
               !debeInsertarFilaParcialCuota({
                 totalPagado,
                 mora: moraParaPago,
-                otros: otrosParaPago,
+                // Evaluar el payload final: ahí ya está incluido el ajuste por
+                // fecha ideal. En un pago exacto del ajuste, los rubros
+                // estructurales quedan en cero pero la fila debe persistirse
+                // para cobrar `otros` y enlazar el pago.
+                otros: pagoData.otros,
                 // Peek NO consumidor: si el convenio sigue sin estampar, esta
                 // cuota debe insertar fila para cargarlo. Una vez estampado
                 // devuelve "0" y las siguientes cuotas sí pueden saltarse.

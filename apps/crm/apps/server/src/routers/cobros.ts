@@ -4804,6 +4804,7 @@ export const cobrosRouter = {
 					paymentUrl: pagaloPaymentLinks.paymentUrl,
 					transactionAmount: pagaloPaymentLinks.transactionAmount,
 					paidAt: pagaloPaymentLinks.paidAt,
+					isApplicationSource: pagaloPaymentLinks.isApplicationSource,
 				})
 				.from(pagaloPaymentGroups)
 				.leftJoin(
@@ -4843,6 +4844,7 @@ export const cobrosRouter = {
 											? grupo.capitalTotal
 											: grupo.facturableTotal),
 									paidAt: fila.paidAt,
+									isApplicationSource: fila.isApplicationSource ?? false,
 								},
 							]
 						: [],

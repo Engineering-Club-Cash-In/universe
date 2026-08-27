@@ -29,6 +29,7 @@ export async function resolverVehiculoCasoPagalo(
 	const [fila] = await db
 		.select({
 			numeroCreditoSifco: casosCobros.numeroCreditoSifco,
+			contratoVehicleId: contratosFinanciamiento.vehicleId,
 			vehiculoMarca: vehicles.make,
 			vehiculoModelo: vehicles.model,
 			vehiculoYear: vehicles.year,
@@ -43,8 +44,20 @@ export async function resolverVehiculoCasoPagalo(
 		.where(eq(casosCobros.id, casoCobroId))
 		.limit(1);
 	if (!fila) return null;
-	if (fila.vehiculoMarca && fila.vehiculoPlaca) return fila;
-	if (!fila.numeroCreditoSifco) return fila;
+	const delContrato: VehiculoCredito = {
+		vehiculoMarca: fila.vehiculoMarca,
+		vehiculoModelo: fila.vehiculoModelo,
+		vehiculoYear: fila.vehiculoYear,
+		vehiculoPlaca: fila.vehiculoPlaca,
+	};
+	if (delContrato.vehiculoMarca && delContrato.vehiculoPlaca)
+		return delContrato;
+	// Contrato SÍ existe y tiene vehículo vinculado, pero le falta marca o
+	// placa: es la fuente autoritativa con datos incompletos, no un caso sin
+	// contrato — cae a SIFCO en vez de mostrar un vehículo distinto (posible
+	// dato viejo/stale) desde la oportunidad (hallazgo de Codex, PR #1470).
+	if (fila.contratoVehicleId) return delContrato;
+	if (!fila.numeroCreditoSifco) return delContrato;
 
 	const [porOportunidad] = await db
 		.select({
@@ -57,7 +70,7 @@ export async function resolverVehiculoCasoPagalo(
 		.leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
 		.where(eq(opportunities.numeroSifco, fila.numeroCreditoSifco))
 		.limit(1);
-	return porOportunidad?.vehiculoMarca ? porOportunidad : fila;
+	return porOportunidad?.vehiculoMarca ? porOportunidad : delContrato;
 }
 
 /** "vehículo {marca modelo año} · {placa}" si está cargado, si no "crédito {sifco}". */

@@ -23,6 +23,7 @@ import {
 import { Label } from "@/components/ui/label";
 import {
 	copyPagaloLink,
+	getPagaloGroupSummary,
 	getPagaloLinkStatusInfo,
 	previewMensajePagaloLinks,
 } from "@/lib/cobros/pagalo-link-display";
@@ -298,10 +299,11 @@ export function PagaloLinkDialog({
 									</div>
 									<div className="text-right">
 										<p className="font-medium text-sm">{q(totalPendiente)}</p>
-										<p className="text-muted-foreground text-xs">
-											{links.filter((l: any) => l.status === "PAID").length} de{" "}
-											{links.length} pagados
-										</p>
+										{getPagaloGroupSummary(links) && (
+											<p className="text-muted-foreground text-xs">
+												{getPagaloGroupSummary(links)}
+											</p>
+										)}
 									</div>
 								</div>
 							)}

@@ -4787,8 +4787,37 @@ export const cobrosRouter = {
 	// orchestrator.ts). El diálogo lo consulta al abrir para mostrar los
 	// links ya pendientes en vez de reofrecer el checklist de cuotas.
 	getPagaloGrupoActivo: cobrosProcedure
-		.input(z.object({ creditoId: z.number().int().positive() }))
-		.handler(async ({ input }) => {
+		.input(
+			z.object({
+				casoCobroId: z.string().uuid(),
+				creditoId: z.number().int().positive(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			// Mismo control de acceso que getCasoCobroById: un asesor regular solo
+			// puede consultar links de pago de sus propios casos asignados
+			// (hallazgo de Codex, PR #1477 — el procedure anterior aceptaba
+			// creditoId enumerable sin verificar dueño del caso). carteraCreditoId
+			// no es columna local (se resuelve vía cartera-back) así que no se
+			// cruza-valida acá; alcanza con confirmar acceso al caso.
+			const whereClauseCaso = PERMISSIONS.canViewAllCasosCobros(
+				context.userRole,
+			)
+				? eq(casosCobros.id, input.casoCobroId)
+				: and(
+						eq(casosCobros.id, input.casoCobroId),
+						eq(casosCobros.responsableCobros, context.userId),
+					);
+			const [caso] = await db
+				.select({ id: casosCobros.id })
+				.from(casosCobros)
+				.where(whereClauseCaso)
+				.limit(1);
+			if (!caso) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Caso de cobro no encontrado o sin acceso.",
+				});
+			}
 			const filas = await db
 				.select({
 					groupId: pagaloPaymentGroups.id,

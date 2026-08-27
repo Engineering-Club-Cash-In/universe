@@ -28,8 +28,8 @@ export async function resolverVehiculoCasoPagalo(
 ): Promise<VehiculoCredito | null> {
 	const [fila] = await db
 		.select({
+			contratoId: casosCobros.contratoId,
 			numeroCreditoSifco: casosCobros.numeroCreditoSifco,
-			contratoVehicleId: contratosFinanciamiento.vehicleId,
 			vehiculoMarca: vehicles.make,
 			vehiculoModelo: vehicles.model,
 			vehiculoYear: vehicles.year,
@@ -52,11 +52,13 @@ export async function resolverVehiculoCasoPagalo(
 	};
 	if (delContrato.vehiculoMarca && delContrato.vehiculoPlaca)
 		return delContrato;
-	// Contrato SÍ existe y tiene vehículo vinculado, pero le falta marca o
-	// placa: es la fuente autoritativa con datos incompletos, no un caso sin
-	// contrato — cae a SIFCO en vez de mostrar un vehículo distinto (posible
-	// dato viejo/stale) desde la oportunidad (hallazgo de Codex, PR #1470).
-	if (fila.contratoVehicleId) return delContrato;
+	// Contrato SÍ está vinculado (casosCobros.contratoId no es null): es la
+	// fuente autoritativa aunque le falte marca o placa — cae a SIFCO en vez
+	// de mostrar un vehículo distinto (posible dato viejo/stale) desde la
+	// oportunidad. Se chequea contratoId directo, no un campo derivado del
+	// join a vehicles, que puede quedar null por otras razones incluso con
+	// contrato vinculado (hallazgo de Codex, PR #1477).
+	if (fila.contratoId) return delContrato;
 	if (!fila.numeroCreditoSifco) return delContrato;
 
 	const [porOportunidad] = await db

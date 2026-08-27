@@ -46,7 +46,9 @@ export function PagaloLinkDialog({
 	const [open, setOpen] = useState(false);
 	const [selected, setSelected] = useState<number[]>([]);
 	const grupoActivo = useQuery({
-		...orpc.getPagaloGrupoActivo.queryOptions({ input: { creditoId } }),
+		...orpc.getPagaloGrupoActivo.queryOptions({
+			input: { casoCobroId, creditoId },
+		}),
 		enabled: open,
 	});
 	// Misma fuente que usa createPagaloLinks para el identificador del mensaje
@@ -141,7 +143,9 @@ export function PagaloLinkDialog({
 				orpc.getPagaloHistorial.queryOptions({ input: { casoCobroId } }),
 			);
 			queryClient.invalidateQueries(
-				orpc.getPagaloGrupoActivo.queryOptions({ input: { creditoId } }),
+				orpc.getPagaloGrupoActivo.queryOptions({
+					input: { casoCobroId, creditoId },
+				}),
 			);
 			if (result.status === "REVIEW_REQUIRED")
 				toast.error("Grupo Págalo existente requiere revisión.");
@@ -203,8 +207,15 @@ export function PagaloLinkDialog({
 				orpc.getPagaloHistorial.queryOptions({ input: { casoCobroId } }),
 			);
 			queryClient.invalidateQueries(
-				orpc.getPagaloGrupoActivo.queryOptions({ input: { creditoId } }),
+				orpc.getPagaloGrupoActivo.queryOptions({
+					input: { casoCobroId, creditoId },
+				}),
 			);
+			// linksRecienCreados (snapshot de mutation.data) tiene prioridad sobre
+			// el estado fresco de grupoActivo mientras el modal siga abierto —
+			// sin este reset, un link marcado pagado por el poll seguiría
+			// mostrándose ACTIVE/copiable acá (hallazgo de Codex, PR #1477).
+			mutation.reset();
 			console.log("[Págalo] resultado del poll:", result);
 			toast.success(
 				`Poll: ${result.pagados} pagado(s), ${result.errores} error(es). Dispatch: ${result.dispatchCompletados} completado(s), ${result.dispatchErrores} error(es). Revisa la consola.`,

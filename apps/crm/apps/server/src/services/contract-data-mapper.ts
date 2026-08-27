@@ -3,9 +3,17 @@
  */
 import { eq } from "drizzle-orm";
 import { db } from "../db";
-import { leads, opportunities } from "../db/schema/crm";
-import { vehicles } from "../db/schema/vehicles";
+import { creditChecks } from "../db/schema/checks";
+import { companies, leads, opportunities } from "../db/schema/crm";
+import { investors } from "../db/schema/investments";
+import { vehicles, vehicleVendors } from "../db/schema/vehicles";
 import { getRenapData } from "../functions/getRenapInfo";
+import { mapChecksToDisbursementRows } from "../lib/contract-disbursement";
+import {
+	parseOpportunityInvestors,
+	resolveEntityType,
+	selectPrimaryInvestor,
+} from "../lib/contract-entity";
 import {
 	calculateAge,
 	calculateAgeInWords,
@@ -198,6 +206,36 @@ export interface ContractData {
 		fecha: ContractDateComponents;
 		fechaInicio?: ContractDateComponents;
 		lugarFirma: string;
+	};
+	// Vendedor del vehículo (para la Declaración de Vendedor).
+	// Opcional: hoy asignarlo en la oportunidad no es obligatorio.
+	vendedor?: {
+		nombre: string;
+		nombreMayusculas: string;
+		dpi: string;
+		dpiFormateado: string;
+		dpiLetras: string;
+		tipo: string;
+		empresaNombre?: string;
+		telefono?: string;
+		email?: string;
+		direccion?: string;
+	};
+	// Filas de la Carta de Emisión de Cheques ({cuenta}/{valor}, {cuenta2}/{valor2})
+	desembolso?: {
+		filas: Array<{ cuenta: string; valor: string }>;
+		sobrantes: number;
+		omitidosPorMoneda: number;
+	};
+	// {empresa} no se mapea: la API ya lo llena con su propio default
+	// {agencia}: la empresa que vende el carro nuevo. Solo aplica a nuevos:
+	// un usado lo vende un particular, no una agencia.
+	agencia?: string;
+	// {entidad} y {tipoEntidad}: el acreedor del crédito, o sea el
+	// inversionista asignado en el análisis del 50%
+	entidad?: {
+		nombre: string;
+		tipo: string;
 	};
 	// Beneficiarios (para desembolso)
 	beneficiarios?: Beneficiario[];
@@ -479,6 +517,87 @@ export async function mapOpportunityToContractData(
 		? getDateComponents(opportunity.fechaInicio)
 		: undefined;
 
+	// Vendedor del vehículo. Se prioriza el de la oportunidad porque es la
+	// única columna que hoy se escribe (desde el combobox al crear/editar) y
+	// porque el vendedor es un hecho de esta venta: un mismo vehículo puede
+	// recomprarse y cambiar de dueño. Se conserva el fallback al vehículo para
+	// no perder el dato si alguien lo llena por ese lado.
+	const vendorId = opportunity.vendorId || vehicle?.vendorId || null;
+	const [vendor] = vendorId
+		? await db
+				.select()
+				.from(vehicleVendors)
+				.where(eq(vehicleVendors.id, vendorId))
+				.limit(1)
+		: [];
+
+	const vendedor = vendor
+		? {
+				nombre: capitalizeWords(vendor.name),
+				nombreMayusculas: toUpperCase(vendor.name),
+				dpi: vendor.dpi || "",
+				dpiFormateado: formatDpi(vendor.dpi || ""),
+				dpiLetras: dpiToWordsUppercase(vendor.dpi || ""),
+				tipo: vendor.vendorType,
+				empresaNombre: vendor.companyName || undefined,
+				// {agencia} NO sale de aquí: en los contratos históricos es la
+				// distribuidora de autos nuevos (JAC, AUTOMAQ), que no está en
+				// vehicle_vendors. Pendiente definir su origen.
+				telefono: vendor.phone || undefined,
+				email: vendor.email || undefined,
+				direccion: vendor.address || undefined,
+			}
+		: undefined;
+
+	// Cheques ya registrados en el detalle de crédito: alimentan la Carta de
+	// Emisión de Cheques. Solo se leen, el flujo de cheques no se toca.
+	const checks = await db
+		.select()
+		.from(creditChecks)
+		.where(eq(creditChecks.opportunityId, opportunityId));
+
+	const desembolso = mapChecksToDisbursementRows(checks);
+
+	// Entidad acreedora: el inversionista asignado en el análisis del 50%.
+	const inversionistaPrincipal = selectPrimaryInvestor(
+		parseOpportunityInvestors(opportunity.inversionistas),
+	);
+
+	// El JSON solo guarda id y nombre; el tipo de entidad vive en el catálogo
+	// local de inversionistas, enlazado por el id de cartera-back.
+	const [investorProfile] = inversionistaPrincipal
+		? await db
+				.select({ clientType: investors.clientType })
+				.from(investors)
+				.where(
+					eq(
+						investors.carteraBackInvestorId,
+						inversionistaPrincipal.inversionista_id,
+					),
+				)
+				.limit(1)
+		: [];
+
+	// {agencia}: la empresa asignada a la oportunidad, que en carro nuevo es
+	// la distribuidora. Se hereda del lead al crear la oportunidad.
+	const [empresaAgencia] = opportunity.companyId
+		? await db
+				.select({ name: companies.name })
+				.from(companies)
+				.where(eq(companies.id, opportunity.companyId))
+				.limit(1)
+		: [];
+
+	const entidad = inversionistaPrincipal
+		? {
+				nombre: inversionistaPrincipal.nombre,
+				tipo: resolveEntityType(
+					investorProfile?.clientType,
+					inversionistaPrincipal.nombre,
+				),
+			}
+		: undefined;
+
 	return {
 		cliente: {
 			nombreCompleto: capitalizeWords(nombreCompleto),
@@ -532,6 +651,11 @@ export async function mapOpportunityToContractData(
 			fechaInicio,
 			lugarFirma: "Guatemala",
 		},
+		vendedor,
+		desembolso,
+		entidad,
+		// trim: varios nombres en `companies` traen espacios sobrantes
+		agencia: empresaAgencia?.name?.trim() || undefined,
 		oportunidad: {
 			id: opportunity.id,
 			titulo: opportunity.title,

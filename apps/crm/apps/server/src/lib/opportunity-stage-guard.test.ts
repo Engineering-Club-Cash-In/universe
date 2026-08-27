@@ -6,8 +6,8 @@ import {
 	buildOpportunityRelationshipInvariantCondition,
 	getStageLeadRequirementError,
 	getStageVehicleRequirementError,
+	getWonOpportunityFrozenFieldChanges,
 	getWonOpportunityLockError,
-	WON_OPPORTUNITY_LOCKED_ERROR,
 } from "./opportunity-stage-guard";
 
 describe("opportunity stage vehicle guard", () => {
@@ -72,26 +72,80 @@ describe("opportunity update concurrency guard", () => {
 	});
 });
 
-describe("won opportunity lock", () => {
-	test("blocks edits on won opportunities for non-admin roles", () => {
-		expect(getWonOpportunityLockError("won", "sales")).toBe(
-			WON_OPPORTUNITY_LOCKED_ERROR,
+describe("won opportunity frozen fields", () => {
+	const wonOpportunity = {
+		leadId: "lead-1",
+		companyId: null,
+		vehicleId: "vehicle-1",
+		creditType: "autocompra",
+	};
+
+	test("detects a vehicle swap on a won opportunity", () => {
+		const changes = getWonOpportunityFrozenFieldChanges(
+			{ vehicleId: "vehicle-2" },
+			wonOpportunity,
 		);
-		expect(getWonOpportunityLockError("won", "sales_supervisor")).toBe(
-			WON_OPPORTUNITY_LOCKED_ERROR,
+		expect(changes).toEqual(["vehicleId"]);
+		expect(getWonOpportunityLockError("won", "sales", changes)).toContain(
+			"el vehículo",
 		);
-		expect(getWonOpportunityLockError("won", null)).toBe(
-			WON_OPPORTUNITY_LOCKED_ERROR,
-		);
+	});
+
+	test("lets a won opportunity keep advancing to 100%", () => {
+		// El drag del kanban manda solo { id, stageId }: no toca campos congelados.
+		const changes = getWonOpportunityFrozenFieldChanges({}, wonOpportunity);
+		expect(changes).toEqual([]);
+		expect(getWonOpportunityLockError("won", "sales", changes)).toBeNull();
+	});
+
+	test("ignores a form that resends the same relationships", () => {
+		expect(
+			getWonOpportunityFrozenFieldChanges(
+				{
+					leadId: "lead-1",
+					companyId: null,
+					vehicleId: "vehicle-1",
+					creditType: "autocompra",
+				},
+				wonOpportunity,
+			),
+		).toEqual([]);
+	});
+
+	test("catches clearing a relationship and filling an empty one", () => {
+		expect(
+			getWonOpportunityFrozenFieldChanges(
+				{ vehicleId: null, companyId: "company-1" },
+				wonOpportunity,
+			),
+		).toEqual(["vehicleId", "companyId"]);
+	});
+
+	test("ignores undefined values", () => {
+		expect(
+			getWonOpportunityFrozenFieldChanges(
+				{ vehicleId: undefined },
+				wonOpportunity,
+			),
+		).toEqual([]);
 	});
 
 	test("lets admins correct a won opportunity", () => {
-		expect(getWonOpportunityLockError("won", "admin")).toBeNull();
+		expect(getWonOpportunityLockError("won", "admin", ["vehicleId"])).toBeNull();
 	});
 
 	test("does not touch open, lost or on-hold opportunities", () => {
-		expect(getWonOpportunityLockError("open", "sales")).toBeNull();
-		expect(getWonOpportunityLockError("lost", "sales")).toBeNull();
-		expect(getWonOpportunityLockError("on_hold", "sales")).toBeNull();
+		for (const status of ["open", "lost", "on_hold"]) {
+			expect(getWonOpportunityLockError(status, "sales", ["vehicleId"])).toBeNull();
+		}
+	});
+
+	test("names every frozen field it blocks", () => {
+		const message = getWonOpportunityLockError("won", "sales", [
+			"leadId",
+			"vehicleId",
+		]);
+		expect(message).toContain("el cliente");
+		expect(message).toContain("el vehículo");
 	});
 });

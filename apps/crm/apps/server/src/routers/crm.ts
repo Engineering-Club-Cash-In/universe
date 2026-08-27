@@ -19,6 +19,7 @@ import {
 } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
+import { logEntityAudit } from "../lib/audit";
 import {
 	vehicleDocumentRequirements,
 	vehicleDocuments,
@@ -79,8 +80,10 @@ import { canSyncNitToOpportunity } from "../lib/lead-nit-sync";
 import { getLeadSourceLabel } from "../lib/lead-sources";
 import {
 	buildOpportunityRelationshipInvariantCondition,
+	buildWonOpportunityFrozenFieldError,
 	getStageLeadRequirementError,
 	getStageVehicleRequirementError,
+	getWonOpportunityFrozenFieldChanges,
 	getWonOpportunityLockError,
 } from "../lib/opportunity-stage-guard";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
@@ -1061,16 +1064,30 @@ export const crmRouter = {
 							});
 						}
 
-						await tx.insert(opportunities).values({
-							title: `${input.firstName} ${input.lastName}`,
-							leadId: existingLead.id,
-							creditType: "autocompra",
-							stageId: firstStage.id,
-							probability: 1,
-							assignedTo,
-							createdBy: context.userId,
-							source: input.source,
-							campaign: input.campaign,
+						const [nuevaOportunidad] = await tx
+							.insert(opportunities)
+							.values({
+								title: `${input.firstName} ${input.lastName}`,
+								leadId: existingLead.id,
+								creditType: "autocompra",
+								stageId: firstStage.id,
+								probability: 1,
+								assignedTo,
+								createdBy: context.userId,
+								source: input.source,
+								campaign: input.campaign,
+							})
+							.returning({ id: opportunities.id });
+						// El meta.audit de createLead solo cubre el lead; esta rama además
+						// abre una oportunidad, y esa creación también tiene que quedar.
+						await logEntityAudit(tx, {
+							entityType: "opportunity",
+							entityId: nuevaOportunidad.id,
+							action: "create",
+							procedure: "crm.createLead",
+							performedBy: context.userId,
+							performedByRole: context.userRole,
+							input: { leadId: existingLead.id, assignedTo },
 						});
 
 						return lead;
@@ -2320,15 +2337,28 @@ export const crmRouter = {
 				});
 			}
 
-			// Ganada = congelada: ya hay crédito y contratos en cartera con estos
-			// datos. Solo admin puede corregirla (queda en crm_entity_audit).
+			// Una oportunidad pasa a "won" en el 90% y de ahí todavía avanza al 100%
+			// con ajustes operativos, así que no se congela el update completo: solo
+			// los datos con los que se firmaron los contratos y viajaron a cartera.
+			const frozenFieldChanges = getWonOpportunityFrozenFieldChanges(
+				input,
+				currentOpportunity[0],
+			);
 			const wonLockError = getWonOpportunityLockError(
 				currentOpportunity[0].status,
 				context.userRole,
+				frozenFieldChanges,
 			);
 			if (wonLockError) {
 				throw new ORPCError("FORBIDDEN", { message: wonLockError });
 			}
+			// Lo de arriba leyó la fila antes del UPDATE: si closeOpportunity la marca
+			// ganada en el medio, el cambio entraría igual. Cuando se tocan campos
+			// congelados el predicado lo vuelve a exigir en la misma sentencia
+			// (Postgres lo re-evalúa tras esperar a la escritura rival).
+			const enforceNotWonInPredicate =
+				frozenFieldChanges.length > 0 &&
+				!PERMISSIONS.canAccessAdmin(context.userRole ?? "");
 
 			if (input.leadId === null) {
 				const [currentStageForLead] = await db
@@ -2615,12 +2645,15 @@ export const crmRouter = {
 				baseWhereClause,
 				relationshipInvariantCondition,
 			);
+			const wonLockWhereClause = enforceNotWonInPredicate
+				? and(invariantWhereClause, not(eq(opportunities.status, "won")))
+				: invariantWhereClause;
 			const whereClause = expectedUpdatedAt
 				? and(
-						invariantWhereClause,
+						wonLockWhereClause,
 						eq(opportunities.updatedAt, new Date(expectedUpdatedAt)),
 					)
-				: invariantWhereClause;
+				: wonLockWhereClause;
 
 			// Sales users cannot reassign opportunities
 			if (
@@ -2732,6 +2765,20 @@ export const crmRouter = {
 				.returning();
 
 			if (updatedOpportunity.length === 0) {
+				if (enforceNotWonInPredicate) {
+					// Puede haber sido la carrera con closeOpportunity: distinguirlo del
+					// conflicto de concurrencia para no mandar a "recargá e intentá".
+					const [latest] = await db
+						.select({ status: opportunities.status })
+						.from(opportunities)
+						.where(eq(opportunities.id, id))
+						.limit(1);
+					if (latest?.status === "won") {
+						throw new ORPCError("FORBIDDEN", {
+							message: buildWonOpportunityFrozenFieldError(frozenFieldChanges),
+						});
+					}
+				}
 				if (canUpdateOpportunity) {
 					throw new ORPCError("CONFLICT", {
 						message:
@@ -2753,6 +2800,15 @@ export const crmRouter = {
 						updatedAt: new Date(),
 					})
 					.where(eq(leads.id, currentOpportunity[0].leadId));
+				await logEntityAudit(db, {
+					entityType: "lead",
+					entityId: currentOpportunity[0].leadId,
+					action: "update_direccion",
+					procedure: "crm.updateOpportunity",
+					performedBy: context.userId,
+					performedByRole: context.userRole,
+					input: { opportunityId: id, direccion },
+				});
 			}
 
 			if (vehicleChanged) {
@@ -2908,6 +2964,20 @@ export const crmRouter = {
 						.update(leads)
 						.set({ assignedTo: input.assignedTo, updatedAt: new Date() })
 						.where(eq(leads.id, current.leadId));
+					// La reasignación arrastra al lead: sin esta fila su historial no
+					// muestra el cambio de dueño (el meta.audit solo cubre la opp).
+					await logEntityAudit(tx, {
+						entityType: "lead",
+						entityId: current.leadId,
+						action: "reassign",
+						procedure: "crm.reassignOpportunityAndLead",
+						performedBy: context.userId,
+						performedByRole: context.userRole,
+						input: {
+							opportunityId: input.opportunityId,
+							assignedTo: input.assignedTo,
+						},
+					});
 				}
 			});
 		}),

@@ -851,8 +851,10 @@ function RouteComponent() {
 	};
 
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
-	// Ganada = congelada (misma regla que el backend en updateOpportunity):
-	// el crédito y los contratos ya se generaron con estos datos.
+	// Campos congelados de una oportunidad ganada (misma regla que el backend en
+	// updateOpportunity): lo que viajó a los contratos y a cartera. La etapa y el
+	// resto siguen editables porque la opp es "won" desde el 90% y todavía va al
+	// 100%.
 	const isWonLocked =
 		selectedOpportunity?.status === "won" &&
 		userProfile.data?.role !== ROLES.ADMIN;
@@ -2969,9 +2971,10 @@ function RouteComponent() {
 						<DialogTitle>Editar Oportunidad</DialogTitle>
 						{isWonLocked && (
 							<p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-amber-700 text-sm dark:text-amber-300">
-								Esta oportunidad ya está ganada: sus datos quedaron fijados al
-								generar el crédito y los contratos. Solo un administrador puede
-								corregirla.
+								Esta oportunidad ya está ganada: el cliente, la empresa, el
+								vehículo y el tipo de crédito quedaron fijados al generar los
+								contratos y solo un administrador puede corregirlos. El resto de
+								los campos sigue editable.
 							</p>
 						)}
 					</DialogHeader>
@@ -3061,6 +3064,7 @@ function RouteComponent() {
 													isLoading={leadsQuery.isFetching}
 													placeholder="Buscar lead..."
 													width="full"
+													disabled={isWonLocked}
 												/>
 											</div>
 										);
@@ -3086,6 +3090,7 @@ function RouteComponent() {
 												}
 												placeholder="Seleccionar empresa"
 												width="full"
+												disabled={isWonLocked}
 											/>
 										</div>
 									)}
@@ -3122,6 +3127,7 @@ function RouteComponent() {
 											<Label htmlFor={field.name}>Tipo de Crédito</Label>
 											<Select
 												value={field.state.value}
+												disabled={isWonLocked}
 												onValueChange={(value) =>
 													field.handleChange(
 														value as "autocompra" | "sobre_vehiculo",
@@ -3197,6 +3203,7 @@ function RouteComponent() {
 												isLoading={vehiclesQuery.isFetching}
 												placeholder="Buscar vehículo..."
 												width="full"
+												disabled={isWonLocked}
 											/>
 										</div>
 									)}
@@ -3310,7 +3317,6 @@ function RouteComponent() {
 										type="submit"
 										className="flex-1"
 										disabled={
-											isWonLocked ||
 											!state.canSubmit ||
 											state.isSubmitting ||
 											updateOpportunityMutation.isPending

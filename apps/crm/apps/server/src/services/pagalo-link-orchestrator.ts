@@ -8,12 +8,23 @@ import {
 	pagaloPaymentGroups,
 	pagaloPaymentLinks,
 } from "../db/schema/pagalo-payments";
-import { buildPagaloAllocations, type PagaloInstallment } from "../lib/pagalo-allocations";
 import { isTestModeEnabled } from "../lib/messaging-test-mode";
+import {
+	buildPagaloAllocations,
+	type PagaloInstallment,
+} from "../lib/pagalo-allocations";
 import { assertPagaloInstallmentSelection } from "../lib/pagalo-selection";
 import { primerTelefono } from "../lib/phone-utils";
 import { carteraBackClient } from "./cartera-back-client";
-import { createPagaloClient, getPagaloSandboxConfig, toPagaloProviderAmount } from "./pagalo-client";
+import {
+	createPagaloClient,
+	getPagaloSandboxConfig,
+	toPagaloProviderAmount,
+} from "./pagalo-client";
+import {
+	construirIdentificadorCredito,
+	resolverVehiculoCasoPagalo,
+} from "./pagalo-vehiculo";
 import { sendPagaloLinksWhatsapp } from "./send-pagalo-links-whatsapp";
 
 type CreatePagaloLinksInput = {
@@ -34,14 +45,17 @@ const PAGALO_TEST_PHONE = "35219722";
 const pickString = (value: unknown, names: string[]): string | undefined => {
 	if (!value || typeof value !== "object") return undefined;
 	for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-		if (names.includes(key.toLowerCase()) && typeof child === "string" && child) return child;
+		if (names.includes(key.toLowerCase()) && typeof child === "string" && child)
+			return child;
 		const nested = pickString(child, names);
 		if (nested) return nested;
 	}
 	return undefined;
 };
 
-const deduplicarCuotas = <T extends { numero_cuota: number; pago_id?: number }>(cuotas: T[]): T[] => {
+const deduplicarCuotas = <T extends { numero_cuota: number; pago_id?: number }>(
+	cuotas: T[],
+): T[] => {
 	const porNumero = new Map<number, T>();
 	for (const cuota of cuotas) {
 		const actual = porNumero.get(cuota.numero_cuota);
@@ -49,7 +63,9 @@ const deduplicarCuotas = <T extends { numero_cuota: number; pago_id?: number }>(
 			porNumero.set(cuota.numero_cuota, cuota);
 		}
 	}
-	return [...porNumero.values()].sort((a, b) => a.numero_cuota - b.numero_cuota);
+	return [...porNumero.values()].sort(
+		(a, b) => a.numero_cuota - b.numero_cuota,
+	);
 };
 
 /** CRM orchestration. Solo sandbox; una llamada externa por componente > Q0. */
@@ -58,12 +74,30 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 	if (credit.credito.credito_id !== input.creditoId) {
 		throw new Error("Crédito Págalo no coincide con SIFCO.");
 	}
-	const vencidas = deduplicarCuotas(credit.cuotasAtrasadas.filter((cuota) => cuota.numero_cuota > 0));
-	const proximaPendiente = deduplicarCuotas(credit.cuotasPendientes.filter((cuota) => cuota.numero_cuota > 0))[0];
-	const cuotasDisponibles = deduplicarCuotas(proximaPendiente ? [...vencidas, proximaPendiente] : vencidas);
-	const selectable = cuotasDisponibles.filter((cuota) => input.cuotaIds.includes(cuota.cuota_id));
+	const vencidas = deduplicarCuotas(
+		credit.cuotasAtrasadas.filter((cuota) => cuota.numero_cuota > 0),
+	);
+	// cuotasPendientes es "todas las no pagadas" (sin filtro de fecha), no
+	// "solo próximas" — ya incluye las vencidas. Sin excluirlas acá, [0] cae
+	// siempre en la misma cuota que ya está en `vencidas` y la cuota vigente
+	// real nunca se ofrece (hallazgo del usuario, crédito 9216).
+	const proximaPendiente = deduplicarCuotas(
+		credit.cuotasPendientes.filter(
+			(cuota) =>
+				cuota.numero_cuota > 0 &&
+				!vencidas.some((v) => v.numero_cuota === cuota.numero_cuota),
+		),
+	)[0];
+	const cuotasDisponibles = deduplicarCuotas(
+		proximaPendiente ? [...vencidas, proximaPendiente] : vencidas,
+	);
+	const selectable = cuotasDisponibles.filter((cuota) =>
+		input.cuotaIds.includes(cuota.cuota_id),
+	);
 	if (selectable.length !== input.cuotaIds.length) {
-		throw new Error("Una cuota Págalo ya no está vencida o no pertenece al crédito.");
+		throw new Error(
+			"Una cuota Págalo ya no está vencida o no pertenece al crédito.",
+		);
 	}
 	assertPagaloInstallmentSelection(
 		selectable.map((cuota) => cuota.numero_cuota),
@@ -87,9 +121,17 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 		installments.length > 0
 			? installments
 			: vencidas[0]
-				? [{ cuotaId: vencidas[0].cuota_id, numeroCuota: vencidas[0].numero_cuota }]
+				? [
+						{
+							cuotaId: vencidas[0].cuota_id,
+							numeroCuota: vencidas[0].numero_cuota,
+						},
+					]
 				: [];
-	const calculation = buildPagaloAllocations({ installments: installmentsForCalculation, mora: credit.moraActual });
+	const calculation = buildPagaloAllocations({
+		installments: installmentsForCalculation,
+		mora: credit.moraActual,
+	});
 
 	// Datos de contacto: casos_cobros es la fuente principal; leads (vía
 	// opportunities.numeroSifco) rellena lo que falte. cartera-back no expone
@@ -107,6 +149,15 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 	if (!caso || caso.numeroCreditoSifco !== input.numeroSifco) {
 		throw new Error("Caso de cobro no corresponde al crédito Págalo.");
 	}
+	// D-04 pedía siempre "crédito {sifco}" en el mensaje; ahora el pedido es
+	// identificar el vehículo cuando esté cargado — mismo helper que usa el
+	// preview del modal (getVehiculoCasoPagalo, cobros.ts) para que ambos
+	// textos coincidan siempre (hallazgo de Codex, PR #1470).
+	const vehiculoCaso = await resolverVehiculoCasoPagalo(input.casoCobroId);
+	const identificadorCredito = construirIdentificadorCredito(
+		vehiculoCaso,
+		input.numeroSifco,
+	);
 	const [leadInfo] = await db
 		.select({
 			email: leads.email,
@@ -121,11 +172,15 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 		.where(eq(opportunities.numeroSifco, input.numeroSifco))
 		.limit(1);
 
-	const telefono = primerTelefono(caso?.telefonoPrincipal ?? leadInfo?.phone)?.replace(/\D/g, "");
+	const telefono = primerTelefono(
+		caso?.telefonoPrincipal ?? leadInfo?.phone,
+	)?.replace(/\D/g, "");
 	const email = caso?.emailContacto || leadInfo?.email;
 	const location = caso?.direccionContacto || leadInfo?.direccion;
 	if (!telefono || !email || !location) {
-		throw new Error("Págalo requiere teléfono, correo y dirección reales del cliente.");
+		throw new Error(
+			"Págalo requiere teléfono, correo y dirección reales del cliente.",
+		);
 	}
 	// Sustitución de test mode DESPUÉS de validar que el caso sí tiene
 	// contacto real cargado — testMode no debe ocultar un caso mal cargado.
@@ -160,11 +215,16 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 			paymentUrl: pagaloPaymentLinks.paymentUrl,
 		})
 		.from(pagaloPaymentGroups)
-		.leftJoin(pagaloPaymentLinks, eq(pagaloPaymentLinks.groupId, pagaloPaymentGroups.id))
-		.where(and(
-			eq(pagaloPaymentGroups.carteraCreditoId, input.creditoId),
-			notInArray(pagaloPaymentGroups.status, ["COMPLETED", "CANCELLED"]),
-		));
+		.leftJoin(
+			pagaloPaymentLinks,
+			eq(pagaloPaymentLinks.groupId, pagaloPaymentGroups.id),
+		)
+		.where(
+			and(
+				eq(pagaloPaymentGroups.carteraCreditoId, input.creditoId),
+				notInArray(pagaloPaymentGroups.status, ["COMPLETED", "CANCELLED"]),
+			),
+		);
 	if (grupoActivo.length > 0) {
 		const group = grupoActivo[0]!;
 		return {
@@ -176,14 +236,32 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 			totalAmount: group.totalAmount,
 			links: grupoActivo.flatMap((link) =>
 				link.linkType && link.paymentUrl && link.linkStatus === "ACTIVE"
-					? [{ linkType: link.linkType, paymentUrl: link.paymentUrl }]
+					? [
+							{
+								linkType: link.linkType,
+								paymentUrl: link.paymentUrl,
+								status: link.linkStatus as "ACTIVE",
+								amount:
+									link.linkType === "CAPITAL"
+										? group.capitalTotal
+										: group.facturableTotal,
+							},
+						]
 					: [],
 			),
+			// Grupo ya existía (reintento o creado por otro asesor/el BOT) — este
+			// llamado no intentó enviar WhatsApp, `null` distingue "no aplica" de
+			// "se intentó y falló" (whatsappEnviado: false), para no instruir al
+			// asesor a reenviar manualmente un mensaje que sí pudo haber llegado
+			// en la creación original (hallazgo de Codex, PR #1470).
+			whatsappEnviado: null as boolean | null,
 		};
 	}
 	const config = getPagaloSandboxConfig();
 	if (!config.linkCreationEnabled) {
-		throw new Error("Creación de links Págalo deshabilitada por configuración.");
+		throw new Error(
+			"Creación de links Págalo deshabilitada por configuración.",
+		);
 	}
 	const client = createPagaloClient(config);
 	const components = [
@@ -223,7 +301,10 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 			source: "ASESOR",
 			actorUserId: input.requestedBy,
 			toStatus: "LINKS_PENDING",
-			payload: { capitalTotal: calculation.capitalTotal, facturableTotal: calculation.facturableTotal },
+			payload: {
+				capitalTotal: calculation.capitalTotal,
+				facturableTotal: calculation.facturableTotal,
+			},
 		});
 		return created;
 	});
@@ -234,14 +315,24 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 	// crea primero; con uno solo, "Pago" a secas.
 	const dosLinks = providerAmounts.size === 2;
 	const etiquetaPago = (linkType: "CAPITAL" | "MORA_INTERES") =>
-		dosLinks ? (linkType === "CAPITAL" ? "Pago 1 de 2" : "Pago 2 de 2") : "Pago";
+		dosLinks
+			? linkType === "CAPITAL"
+				? "Pago 1 de 2"
+				: "Pago 2 de 2"
+			: "Pago";
 
-	const links = [] as Array<{ linkType: "CAPITAL" | "MORA_INTERES"; paymentUrl: string }>;
+	const links = [] as Array<{
+		linkType: "CAPITAL" | "MORA_INTERES";
+		paymentUrl: string;
+		status: "ACTIVE";
+		amount: string;
+	}>;
 	for (const component of components) {
 		const [linkType, amount] = component;
 		if (amount === "0.00") continue;
 		const providerAmount = providerAmounts.get(linkType);
-		if (providerAmount === undefined) throw new Error("Monto Págalo no disponible.");
+		if (providerAmount === undefined)
+			throw new Error("Monto Págalo no disponible.");
 		const externalIdentifier = `pagalo-${group.id}-${linkType}-${randomUUID().slice(0, 8)}`;
 		const etiqueta = etiquetaPago(linkType);
 		const requestPayload = {
@@ -254,10 +345,20 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 			expiration: false as const,
 			client: {
 				first_name: credit.usuario.nombre?.split(" ")[0] || "Cliente",
-				last_name: credit.usuario.nombre?.split(" ").slice(1).join(" ") || "Cashin",
+				last_name:
+					credit.usuario.nombre?.split(" ").slice(1).join(" ") || "Cashin",
 				...clientContact,
 			},
-			products: [{ product_uuid: 0, name: etiqueta, product_name: etiqueta, amount: providerAmount, quantity: 1, subtotal: providerAmount }],
+			products: [
+				{
+					product_uuid: 0,
+					name: etiqueta,
+					product_name: etiqueta,
+					amount: providerAmount,
+					quantity: 1,
+					subtotal: providerAmount,
+				},
+			],
 		};
 		const [stored] = await db
 			.insert(pagaloPaymentLinks)
@@ -274,37 +375,77 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 		if (!stored) throw new Error("No se pudo persistir link Págalo.");
 		try {
 			const response = await client.createPaymentRequest(requestPayload);
-			const paymentUrl = pickString(response, ["payment_url", "paymenturl", "url", "link"]);
+			const paymentUrl = pickString(response, [
+				"payment_url",
+				"paymenturl",
+				"url",
+				"link",
+			]);
 			const requestUuid = pickString(response, ["uuid", "request_uuid"]);
-			if (!paymentUrl || !requestUuid) throw new Error("Págalo no devolvió URL y UUID de request.");
+			if (!paymentUrl || !requestUuid)
+				throw new Error("Págalo no devolvió URL y UUID de request.");
 			await db.transaction(async (tx) => {
-				await tx.update(pagaloPaymentLinks).set({
-					status: "ACTIVE", paymentUrl, pagaloRequestUuid: requestUuid,
-					responsePayload: response, activatedAt: new Date(), nextPollAt: new Date(), updatedAt: new Date(),
-				}).where(eq(pagaloPaymentLinks.id, stored.id));
-				await tx.insert(pagaloPaymentEvents).values({ groupId: group.id, linkId: stored.id, eventType: "LINK_ACTIVE", source: "PAGALO", actorUserId: input.requestedBy, fromStatus: "CREATING", toStatus: "ACTIVE", payload: { linkType } });
+				await tx
+					.update(pagaloPaymentLinks)
+					.set({
+						status: "ACTIVE",
+						paymentUrl,
+						pagaloRequestUuid: requestUuid,
+						responsePayload: response,
+						activatedAt: new Date(),
+						nextPollAt: new Date(),
+						updatedAt: new Date(),
+					})
+					.where(eq(pagaloPaymentLinks.id, stored.id));
+				await tx.insert(pagaloPaymentEvents).values({
+					groupId: group.id,
+					linkId: stored.id,
+					eventType: "LINK_ACTIVE",
+					source: "PAGALO",
+					actorUserId: input.requestedBy,
+					fromStatus: "CREATING",
+					toStatus: "ACTIVE",
+					payload: { linkType },
+				});
 			});
-			links.push({ linkType, paymentUrl });
+			links.push({ linkType, paymentUrl, status: "ACTIVE", amount });
 		} catch (error) {
-			await db.update(pagaloPaymentLinks).set({ status: "ERROR", errorCode: error instanceof Error ? error.name : "PAGALO_ERROR", errorMessage: error instanceof Error ? error.message : String(error), updatedAt: new Date() }).where(eq(pagaloPaymentLinks.id, stored.id));
-			await db.update(pagaloPaymentGroups).set({ status: "REVIEW_REQUIRED", updatedAt: new Date() }).where(eq(pagaloPaymentGroups.id, group.id));
+			await db
+				.update(pagaloPaymentLinks)
+				.set({
+					status: "ERROR",
+					errorCode: error instanceof Error ? error.name : "PAGALO_ERROR",
+					errorMessage: error instanceof Error ? error.message : String(error),
+					updatedAt: new Date(),
+				})
+				.where(eq(pagaloPaymentLinks.id, stored.id));
+			await db
+				.update(pagaloPaymentGroups)
+				.set({ status: "REVIEW_REQUIRED", updatedAt: new Date() })
+				.where(eq(pagaloPaymentGroups.id, group.id));
 			throw error;
 		}
 	}
-	await db.update(pagaloPaymentGroups).set({ status: "PENDING_PAYMENT", updatedAt: new Date() }).where(eq(pagaloPaymentGroups.id, group.id));
+	await db
+		.update(pagaloPaymentGroups)
+		.set({ status: "PENDING_PAYMENT", updatedAt: new Date() })
+		.where(eq(pagaloPaymentGroups.id, group.id));
 
 	// D-04: un solo mensaje, con TODOS los links requeridos, solo cuando el
 	// grupo ya está completo (arriba de esta línea). Fallo de WhatsApp nunca
 	// revierte la creación de links, que ya ocurrió y es válida sin importar
 	// si el mensaje llega — el asesor igual ve las URLs en el modal.
+	let whatsappEnviado = false;
 	try {
-		await sendPagaloLinksWhatsapp({
+		const resultado = await sendPagaloLinksWhatsapp({
 			numeroSifco: input.numeroSifco,
+			identificadorCredito,
 			telefono,
 			clienteNombre: credit.usuario.nombre ?? "",
 			links,
 			createdBy: input.requestedBy,
 		});
+		whatsappEnviado = resultado.sent;
 	} catch (error) {
 		console.error(
 			`[Págalo] Error enviando links por WhatsApp para ${input.numeroSifco}:`,
@@ -312,5 +453,12 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 		);
 	}
 
-	return { groupId: group.id, capitalTotal: calculation.capitalTotal, facturableTotal: calculation.facturableTotal, totalAmount: calculation.totalAmount, links };
+	return {
+		groupId: group.id,
+		capitalTotal: calculation.capitalTotal,
+		facturableTotal: calculation.facturableTotal,
+		totalAmount: calculation.totalAmount,
+		links,
+		whatsappEnviado,
+	};
 }

@@ -15,6 +15,7 @@ import {
 	lte,
 	max,
 	ne,
+	notInArray,
 	or,
 	sql,
 } from "drizzle-orm";
@@ -47,6 +48,11 @@ import {
 	salesStages,
 } from "../db/schema/crm";
 import { notifications } from "../db/schema/notifications";
+import {
+	pagaloPaymentEvents,
+	pagaloPaymentGroups,
+	pagaloPaymentLinks,
+} from "../db/schema/pagalo-payments";
 import { quotations } from "../db/schema/quotations";
 import { recordatoriosPremora } from "../db/schema/recordatorios-premora";
 import { vehicles } from "../db/schema/vehicles";
@@ -54,6 +60,7 @@ import {
 	PREFIJO_PREMORA_AUTO,
 	PREFIJO_WSP_MASIVO,
 } from "../jobs/cierre-diario-asesores";
+import { correrPollPagalo } from "../jobs/pagalo-poll";
 import {
 	payloadEdicionManual,
 	registrarAuditContacto,
@@ -111,14 +118,6 @@ import {
 	crmCobrosOrInvestmentsProcedure,
 	crmOrCobrosProcedure,
 } from "../lib/orpc";
-import {
-	pagaloPaymentEvents,
-	pagaloPaymentGroups,
-	pagaloPaymentLinks,
-} from "../db/schema/pagalo-payments";
-import { correrPollPagalo } from "../jobs/pagalo-poll";
-import { createPagaloClient, getPagaloSandboxConfig } from "../services/pagalo-client";
-import { createPagaloLinks } from "../services/pagalo-link-orchestrator";
 import { primerTelefono } from "../lib/phone-utils";
 import {
 	aplicarCambiosEstadoPromesa,
@@ -151,6 +150,12 @@ import {
 	isCarteraBackEnabled,
 	isCarteraBackPaymentsEnabled,
 } from "../services/cartera-back-integration";
+import {
+	createPagaloClient,
+	getPagaloSandboxConfig,
+} from "../services/pagalo-client";
+import { createPagaloLinks } from "../services/pagalo-link-orchestrator";
+import { resolverVehiculoCasoPagalo } from "../services/pagalo-vehiculo";
 import {
 	type EstadoCuentaErrorCodigo,
 	sendEstadoCuentaWhatsapp,
@@ -736,6 +741,36 @@ type ActividadBotSesion = {
 	codeudorNombre: string | null;
 	interacciones: ActividadBotInteraccion[];
 };
+
+/**
+ * Verifica que el usuario tenga acceso al caso de cobro (mismo patrón que
+ * getCasoCobroById): un asesor regular solo ve sus propios casos asignados
+ * (responsableCobros), salvo que su rol pueda ver todos. Lanza NOT_FOUND si
+ * no hay acceso — usarlo antes de devolver cualquier dato derivado del caso
+ * (vehículo, links de pago, etc.) en procedures nuevos.
+ */
+async function assertAccesoCasoCobro(
+	casoCobroId: string,
+	userId: string,
+	userRole: string,
+): Promise<void> {
+	const whereClause = PERMISSIONS.canViewAllCasosCobros(userRole)
+		? eq(casosCobros.id, casoCobroId)
+		: and(
+				eq(casosCobros.id, casoCobroId),
+				eq(casosCobros.responsableCobros, userId),
+			);
+	const [caso] = await db
+		.select({ id: casosCobros.id })
+		.from(casosCobros)
+		.where(whereClause)
+		.limit(1);
+	if (!caso) {
+		throw new ORPCError("NOT_FOUND", {
+			message: "Caso de cobro no encontrado o sin acceso.",
+		});
+	}
+}
 
 export const cobrosRouter = {
 	// Dashboard de cobros - Vista general del embudo
@@ -4754,14 +4789,121 @@ export const cobrosRouter = {
 		)
 		.handler(async ({ input, context }) => {
 			try {
-				return await createPagaloLinks({ ...input, requestedBy: context.user.id });
+				return await createPagaloLinks({
+					...input,
+					requestedBy: context.user.id,
+				});
 			} catch (error) {
 				console.error(
 					`[Págalo] Error creando links para ${input.numeroSifco}:`,
-					error instanceof Error ? error.stack ?? error.message : error,
+					error instanceof Error ? (error.stack ?? error.message) : error,
 				);
 				throw error;
 			}
+		}),
+
+	// Vehículo del caso para el preview del mensaje de Págalo — usa el mismo
+	// helper que createPagaloLinks (resolverVehiculoCasoPagalo) para que el
+	// preview y el mensaje real de WhatsApp identifiquen siempre el mismo
+	// vehículo (hallazgo de Codex, PR #1470).
+	getVehiculoCasoPagalo: cobrosProcedure
+		.input(z.object({ casoCobroId: z.string().uuid() }))
+		.handler(async ({ input, context }) => {
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
+			return resolverVehiculoCasoPagalo(input.casoCobroId);
+		}),
+
+	// Grupo Págalo activo (no COMPLETED/CANCELLED) del crédito, si existe —
+	// mismo filtro que createPagaloLinks usa para no duplicar (pagalo-link-
+	// orchestrator.ts). El diálogo lo consulta al abrir para mostrar los
+	// links ya pendientes en vez de reofrecer el checklist de cuotas.
+	getPagaloGrupoActivo: cobrosProcedure
+		.input(
+			z.object({
+				casoCobroId: z.string().uuid(),
+				creditoId: z.number().int().positive(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			// El creditoId es numérico y enumerable; sin verificar acceso al caso
+			// un asesor podía consultar links de pago (URLs reales) de créditos
+			// ajenos (hallazgo de Codex, PR #1477).
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
+			const filas = await db
+				.select({
+					groupId: pagaloPaymentGroups.id,
+					status: pagaloPaymentGroups.status,
+					origen: pagaloPaymentGroups.origen,
+					capitalTotal: pagaloPaymentGroups.capitalTotal,
+					facturableTotal: pagaloPaymentGroups.facturableTotal,
+					totalAmount: pagaloPaymentGroups.totalAmount,
+					createdAt: pagaloPaymentGroups.createdAt,
+					linkId: pagaloPaymentLinks.id,
+					linkType: pagaloPaymentLinks.linkType,
+					linkStatus: pagaloPaymentLinks.status,
+					paymentUrl: pagaloPaymentLinks.paymentUrl,
+					transactionAmount: pagaloPaymentLinks.transactionAmount,
+					paidAt: pagaloPaymentLinks.paidAt,
+					isApplicationSource: pagaloPaymentLinks.isApplicationSource,
+				})
+				.from(pagaloPaymentGroups)
+				.leftJoin(
+					pagaloPaymentLinks,
+					eq(pagaloPaymentLinks.groupId, pagaloPaymentGroups.id),
+				)
+				.where(
+					and(
+						// casoCobroId, no solo carteraCreditoId: el creditoId es
+						// numérico y enumerable, sin este filtro un asesor podía
+						// pasar su propio caso (pasa el check de acceso arriba) con
+						// un creditoId ajeno y ver links de otro crédito (hallazgo
+						// de Codex, PR #1477).
+						eq(pagaloPaymentGroups.casoCobroId, input.casoCobroId),
+						eq(pagaloPaymentGroups.carteraCreditoId, input.creditoId),
+						notInArray(pagaloPaymentGroups.status, ["COMPLETED", "CANCELLED"]),
+					),
+				);
+			if (filas.length === 0) return null;
+			const grupo = filas[0]!;
+			return {
+				groupId: grupo.groupId,
+				status: grupo.status,
+				origen: grupo.origen,
+				capitalTotal: grupo.capitalTotal,
+				facturableTotal: grupo.facturableTotal,
+				totalAmount: grupo.totalAmount,
+				createdAt: grupo.createdAt,
+				links: filas.flatMap((fila) =>
+					fila.linkId && fila.linkType
+						? [
+								{
+									id: fila.linkId,
+									linkType: fila.linkType,
+									status: fila.linkStatus!,
+									paymentUrl: fila.paymentUrl,
+									// El proveedor solo confirma transactionAmount al pagar; antes
+									// de eso el monto "esperado" es el total del componente en el
+									// grupo (capitalTotal/facturableTotal), ya fijado al crear.
+									amount:
+										fila.transactionAmount ??
+										(fila.linkType === "CAPITAL"
+											? grupo.capitalTotal
+											: grupo.facturableTotal),
+									paidAt: fila.paidAt,
+									isApplicationSource: fila.isApplicationSource ?? false,
+								},
+							]
+						: [],
+				),
+			};
 		}),
 
 	// Rastro completo de Págalo para el caso: todos los grupos que se hayan
@@ -4846,7 +4988,7 @@ export const cobrosRouter = {
 		} catch (error) {
 			console.error(
 				"[Págalo] Error corriendo el poll manual:",
-				error instanceof Error ? error.stack ?? error.message : error,
+				error instanceof Error ? (error.stack ?? error.message) : error,
 			);
 			throw error;
 		}

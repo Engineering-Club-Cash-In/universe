@@ -35,9 +35,9 @@ import {
 } from "server/src/lib/gestion-temprana-b1";
 import { toast } from "sonner";
 import { ActividadBot } from "@/components/cobros/actividad-bot";
-import { PromesaActivaBadge } from "@/components/cobros/promesa-activa-badge";
 import { PagaloHistorial } from "@/components/cobros/pagalo-historial";
 import { PagaloLinkDialog } from "@/components/cobros/pagalo-link-dialog";
+import { PromesaActivaBadge } from "@/components/cobros/promesa-activa-badge";
 import { ReferenciasView } from "@/components/cobros/ReferenciasView";
 import { SeguimientoRecurrenteModal } from "@/components/cobros/seguimiento-recurrente-modal";
 import { ContactoModal } from "@/components/contacto-modal";

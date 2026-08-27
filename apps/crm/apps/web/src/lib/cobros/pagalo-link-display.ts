@@ -93,3 +93,27 @@ export async function copyPagaloLink(
 ) {
 	await clipboard.writeText(paymentUrl);
 }
+
+/**
+ * Mismo formato que construirMensajePagaloLinks (server, send-pagalo-links-
+ * whatsapp.ts) — se duplica acá porque ese archivo importa libs server-only.
+ * Antes de crear los links no existe la URL real todavía (la asigna Págalo
+ * al llamarlo), así que se muestra un placeholder en su lugar; el texto de
+ * saludo/etiquetas es idéntico al que se envía de verdad.
+ */
+export function previewMensajePagaloLinks(
+	clienteNombre: string,
+	identificadorCredito: string,
+	linkTypes: Array<"CAPITAL" | "MORA_INTERES">,
+): string {
+	const ordenados = [...linkTypes].sort((a, b) =>
+		a === b ? 0 : a === "CAPITAL" ? -1 : 1,
+	);
+	const dosLinks = ordenados.length === 2;
+	const saludo = clienteNombre ? `Hola ${clienteNombre}` : "Hola";
+	const lineas = ordenados.map((_linkType, index) => {
+		const etiqueta = dosLinks ? `Pago ${index + 1} de 2` : "Pago";
+		return `${etiqueta}: [link de pago]`;
+	});
+	return `${saludo}, aquí tienes el enlace de pago de tu ${identificadorCredito}.\n\n${lineas.join("\n")}`;
+}

@@ -32,6 +32,7 @@ type CreatePagaloLinksInput = {
 	numeroSifco: string;
 	creditoId: number;
 	cuotaIds: number[];
+	otros?: string;
 	requestedBy: string;
 };
 
@@ -131,6 +132,7 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 	const calculation = buildPagaloAllocations({
 		installments: installmentsForCalculation,
 		mora: credit.moraActual,
+		otros: input.otros,
 	});
 
 	// Datos de contacto: casos_cobros es la fuente principal; leads (vía
@@ -286,6 +288,7 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 				carteraAsesorId: credit.asesor?.asesor_id ?? null,
 				capitalTotal: calculation.capitalTotal,
 				facturableTotal: calculation.facturableTotal,
+				otrosTotal: calculation.otrosTotal,
 				totalAmount: calculation.totalAmount,
 				allocationsSnapshot: calculation.allocations,
 				status: "LINKS_PENDING",
@@ -304,6 +307,7 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 			payload: {
 				capitalTotal: calculation.capitalTotal,
 				facturableTotal: calculation.facturableTotal,
+				otrosTotal: calculation.otrosTotal,
 			},
 		});
 		return created;
@@ -457,6 +461,7 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 		groupId: group.id,
 		capitalTotal: calculation.capitalTotal,
 		facturableTotal: calculation.facturableTotal,
+		otrosTotal: calculation.otrosTotal,
 		totalAmount: calculation.totalAmount,
 		links,
 		whatsappEnviado,

@@ -46,6 +46,7 @@ export type PagaloImportServiceDependencies = {
 export type PagaloRegistroInput = {
   credito_id: number;
   monto_boleta: number;
+	otros: number;
   fecha_pago: string;
   fecha_boleta: string;
   cuotaApagar: number;
@@ -119,6 +120,7 @@ export function mapPagaloImportToRegistro(
   return {
     credito_id: command.credito_id,
     monto_boleta: Number(command.total_amount),
+		otros: Number(command.otros_total),
     fecha_pago: fechaPago,
     fecha_boleta: fechaPago,
     cuotaApagar: command.cuota_inicial,
@@ -872,6 +874,7 @@ const importValues = (
   currency: command.currency,
   capital_total: command.capital_total,
   facturable_total: command.facturable_total,
+  otros_total: command.otros_total,
   total_amount: command.total_amount,
   capital_transaction_uuid: command.capital?.transaction_uuid ?? null,
   facturable_transaction_uuid: command.facturable?.transaction_uuid ?? null,
@@ -1053,7 +1056,6 @@ export const importPagaloPayment = async ({ body, set }: any) => {
             data: {
               ...mapPagaloImportToRegistro(command, ledger.id),
               observaciones: `Pago Págalo · grupo ${command.crm_group_id}`,
-              otros: 0,
             },
             set: { status: 200 },
           },

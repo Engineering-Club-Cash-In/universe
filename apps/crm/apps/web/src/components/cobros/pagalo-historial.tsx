@@ -78,6 +78,7 @@ type Grupo = {
 	origen: "ASESOR" | "BOT";
 	capitalTotal: string;
 	facturableTotal: string;
+	otrosTotal: string;
 	totalAmount: string;
 	carteraImportId: number | null;
 	lastDispatchError: string | null;
@@ -157,6 +158,7 @@ function GrupoPagalo({ grupo }: { grupo: Grupo }) {
 			<div className="grid grid-cols-2 gap-x-4 gap-y-1 text-muted-foreground text-sm sm:grid-cols-4">
 				<span>Capital: {q(grupo.capitalTotal)}</span>
 				<span>Mora e intereses: {q(grupo.facturableTotal)}</span>
+				<span>Otros: {q(grupo.otrosTotal)}</span>
 				<span>
 					Origen: {grupo.origen === "ASESOR" ? "Asesor" : "Bot WhatsApp"}
 				</span>

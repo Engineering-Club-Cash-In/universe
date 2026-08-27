@@ -74,7 +74,11 @@ const proximoIntento = (dispatchAttemptCount: number): Date => {
  * que reintentar el POST nunca duplica el pago aunque la corrida anterior sí
  * haya llegado a aplicarse y solo faltara que el CRM se enterara.
  */
-const ESTADOS_RECLAMABLES = ["READY_TO_APPLY", "APPLICATION_FAILED", "APPLYING"] as const;
+const ESTADOS_RECLAMABLES = [
+	"READY_TO_APPLY",
+	"APPLICATION_FAILED",
+	"APPLYING",
+] as const;
 
 /**
  * Solo IDS candidatos — el claim real ocurre uno por uno en
@@ -110,7 +114,9 @@ async function buscarCandidatosListos(): Promise<string[]> {
 }
 
 /** Claim atómico puntual, con lease vencido — mismo criterio en todos lados. */
-async function reclamarGrupo(groupId: string): Promise<GrupoClaimado | undefined> {
+async function reclamarGrupo(
+	groupId: string,
+): Promise<GrupoClaimado | undefined> {
 	const ahora = new Date();
 	const leaseVencido = new Date(Date.now() - MINUTOS_LEASE * 60 * 1000);
 	const [group] = await db
@@ -194,11 +200,22 @@ async function registrarIntentoFallido(
 
 type FuenteLink = { linkType: "CAPITAL" | "MORA_INTERES" } & Pick<
 	typeof pagaloPaymentLinks.$inferSelect,
-	"pagaloTransactionUuid" | "externalIdentifier" | "requestId" | "requestAuth" | "paidAt" | "voucherStorageKey"
+	| "pagaloTransactionUuid"
+	| "externalIdentifier"
+	| "requestId"
+	| "requestAuth"
+	| "paidAt"
+	| "voucherStorageKey"
 >;
 
 function fuenteDesdeLink(link: FuenteLink | undefined): PagaloSourceForHash {
-	if (!link || !link.pagaloTransactionUuid || !link.paidAt || !link.voucherStorageKey) return null;
+	if (
+		!link ||
+		!link.pagaloTransactionUuid ||
+		!link.paidAt ||
+		!link.voucherStorageKey
+	)
+		return null;
 	return {
 		transaction_uuid: link.pagaloTransactionUuid,
 		external_identifier: link.externalIdentifier,
@@ -237,7 +254,8 @@ async function armarComando(group: GrupoClaimado) {
 		return null;
 	}
 
-	const allocationsSnapshot = group.allocationsSnapshot as PagaloAllocationForHash[];
+	const allocationsSnapshot =
+		group.allocationsSnapshot as PagaloAllocationForHash[];
 	const allocations = ordenarAllocations(allocationsSnapshot);
 	const cuotaInicial = Math.min(...allocations.map((a) => a.numero_cuota));
 
@@ -248,6 +266,7 @@ async function armarComando(group: GrupoClaimado) {
 		currency: group.currency,
 		capital_total: group.capitalTotal,
 		facturable_total: group.facturableTotal,
+		otros_total: group.otrosTotal,
 		total_amount: group.totalAmount,
 		cuota_inicial: cuotaInicial,
 		allocations,
@@ -325,7 +344,11 @@ async function marcarRevisionRequerida(
 			source: "PAGALO_DISPATCHER",
 			fromStatus: "APPLYING",
 			toStatus: "REVIEW_REQUIRED",
-			payload: { code, carteraImportId: importId ?? null, ...(detalle ? { detalle } : {}) },
+			payload: {
+				code,
+				carteraImportId: importId ?? null,
+				...(detalle ? { detalle } : {}),
+			},
 		});
 	});
 }
@@ -397,7 +420,12 @@ export async function procesarGrupoParaAplicar(
 	// errores de validación preservados, igual que cualquier otro caso que
 	// solo un humano puede resolver.
 	if (!respuesta.success && respuesta.status === "INVALID_COMMAND") {
-		await marcarRevisionRequerida(group, "PAGALO_INVALID_COMMAND", undefined, respuesta.errors);
+		await marcarRevisionRequerida(
+			group,
+			"PAGALO_INVALID_COMMAND",
+			undefined,
+			respuesta.errors,
+		);
 		console.error(
 			`[Págalo][DISPATCH] grupo ${group.id} con comando inválido, requiere revisión:`,
 			respuesta.errors,
@@ -408,7 +436,9 @@ export async function procesarGrupoParaAplicar(
 	// NETWORK_ERROR, AUTH_ERROR, UNEXPECTED_RESPONSE — transitorios, sí vale
 	// reintentar con backoff.
 	await registrarIntentoFallido(group, respuesta.message);
-	console.error(`[Págalo][DISPATCH] grupo ${group.id} falló: ${respuesta.message}`);
+	console.error(
+		`[Págalo][DISPATCH] grupo ${group.id} falló: ${respuesta.message}`,
+	);
 	return "ERROR";
 }
 
@@ -446,7 +476,8 @@ export async function correrDispatchPagalo(): Promise<ResultadoDispatchPagalo> {
 	for (const groupId of candidatoIds) {
 		const resultadoGrupo = await reclamarYProcesarGrupo(groupId);
 		if (resultadoGrupo === "COMPLETADO") resultado.completados++;
-		else if (resultadoGrupo === "REVIEW_REQUIRED") resultado.revisionRequerida++;
+		else if (resultadoGrupo === "REVIEW_REQUIRED")
+			resultado.revisionRequerida++;
 		else if (resultadoGrupo !== "NO_RECLAMADO") resultado.errores++;
 	}
 

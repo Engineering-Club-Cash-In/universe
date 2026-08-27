@@ -157,6 +157,12 @@ export const pagaloPaymentGroups = pgTable(
 			precision: 18,
 			scale: 2,
 		}).notNull(),
+		otrosTotal: numeric("otros_total", {
+			precision: 18,
+			scale: 2,
+		})
+			.notNull()
+			.default("0.00"),
 		totalAmount: numeric("total_amount", {
 			precision: 18,
 			scale: 2,

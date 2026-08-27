@@ -12,7 +12,7 @@ import {
 const groupId = "3b6f0ed4-c4c5-4adf-afb9-aef97da9a5e6";
 const capitalTransactionId = "d9d7ba9b-c558-48e9-a68f-38473f82145d";
 const facturableTransactionId = "d350f86c-c15e-4cd8-af7f-d197804c0dd0";
-const validPayloadHash = "b6a7f6e188653732c9b0d193b00b57956fdf96d33609aa4554e0889f0505803a";
+const validPayloadHash = "7e6590ed71e4028ab265a08eef779a55ecf46bc1a5acfb4e66c2d2249eb19e06";
 
 const source = (
   transaction_uuid: string,
@@ -48,7 +48,8 @@ type MutableAllocation = {
     | "SEGURO"
     | "GPS"
     | "MEMBRESIAS"
-    | "MORA";
+    | "MORA"
+    | "OTROS";
   amount: string | number;
   facturable: boolean;
 };
@@ -101,7 +102,7 @@ const expectInvalid = (input: unknown, code: PagaloImportErrorCode) => {
 };
 
 describe("validatePagaloImportCommand", () => {
-  it("accepts the two-source command and normalizes valid money to cents", () => {
+	it("accepts the two-source command and normalizes valid money to cents", () => {
     const result = validatePagaloImportCommand(command());
 
     expect(result.success).toBeTrue();
@@ -109,7 +110,26 @@ describe("validatePagaloImportCommand", () => {
       expect(result.data.capital_total).toBe("100.00");
       expect(result.data.facturable_total).toBe("25.00");
     }
-  });
+	});
+
+	it("acepta Otros facturable cuando coincide con su allocation", () => {
+		const input = command();
+		input.facturable_total = "37.34";
+		input.total_amount = "137.34";
+		(input as TestCommand & { otros_total: string }).otros_total = "12.34";
+		input.allocations.push({
+			link_type: "MORA_INTERES",
+			cartera_cuota_id: 20,
+			numero_cuota: 2,
+			rubro: "OTROS",
+			amount: "12.34",
+			facturable: true,
+		});
+
+		const result = validatePagaloImportCommand(input);
+		expect(result.success).toBeTrue();
+		if (result.success) expect(result.data.otros_total).toBe("12.34");
+	});
 
   it("hashes validated command content canonically and detects an altered hash", () => {
     const parsed = validatePagaloImportCommand(command());

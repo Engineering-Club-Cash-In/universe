@@ -4785,6 +4785,10 @@ export const cobrosRouter = {
 				numeroSifco: z.string().min(1),
 				creditoId: z.number().int().positive(),
 				cuotaIds: z.array(z.number().int().positive()).max(24),
+				otros: z
+					.string()
+					.regex(/^(?:[1-9]\d*)(?:\.\d{1,2})?$|^0\.(?:0?[1-9]|[1-9]\d)$/)
+					.optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -4844,6 +4848,7 @@ export const cobrosRouter = {
 					origen: pagaloPaymentGroups.origen,
 					capitalTotal: pagaloPaymentGroups.capitalTotal,
 					facturableTotal: pagaloPaymentGroups.facturableTotal,
+					otrosTotal: pagaloPaymentGroups.otrosTotal,
 					totalAmount: pagaloPaymentGroups.totalAmount,
 					createdAt: pagaloPaymentGroups.createdAt,
 					linkId: pagaloPaymentLinks.id,
@@ -4879,6 +4884,7 @@ export const cobrosRouter = {
 				origen: grupo.origen,
 				capitalTotal: grupo.capitalTotal,
 				facturableTotal: grupo.facturableTotal,
+				otrosTotal: grupo.otrosTotal,
 				totalAmount: grupo.totalAmount,
 				createdAt: grupo.createdAt,
 				links: filas.flatMap((fila) =>
@@ -4921,6 +4927,7 @@ export const cobrosRouter = {
 					origen: pagaloPaymentGroups.origen,
 					capitalTotal: pagaloPaymentGroups.capitalTotal,
 					facturableTotal: pagaloPaymentGroups.facturableTotal,
+					otrosTotal: pagaloPaymentGroups.otrosTotal,
 					totalAmount: pagaloPaymentGroups.totalAmount,
 					carteraImportId: pagaloPaymentGroups.carteraImportId,
 					lastDispatchError: pagaloPaymentGroups.lastDispatchError,

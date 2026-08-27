@@ -14,26 +14,40 @@ export type PagaloAllocation = {
 	link_type: "CAPITAL" | "MORA_INTERES";
 	cartera_cuota_id: number;
 	numero_cuota: number;
-	rubro: "CAPITAL" | "INTERES" | "IVA" | "SEGURO" | "GPS" | "MEMBRESIAS" | "MORA";
+	rubro:
+		| "CAPITAL"
+		| "INTERES"
+		| "IVA"
+		| "SEGURO"
+		| "GPS"
+		| "MEMBRESIAS"
+		| "MORA"
+		| "OTROS";
 	amount: string;
 	facturable: boolean;
 };
 
 const cents = (value: string | null | undefined) => {
-	const match = String(value ?? "0").trim().match(/^(\d+)(?:\.(\d{1,2}))?$/);
+	const match = String(value ?? "0")
+		.trim()
+		.match(/^(\d+)(?:\.(\d{1,2}))?$/);
 	if (!match) throw new Error("Monto de cartera inválido para Págalo.");
 	return BigInt(match[1]) * 100n + BigInt((match[2] ?? "").padEnd(2, "0"));
 };
-const money = (amount: bigint) => `${amount / 100n}.${String(amount % 100n).padStart(2, "0")}`;
+const money = (amount: bigint) =>
+	`${amount / 100n}.${String(amount % 100n).padStart(2, "0")}`;
 
 export function buildPagaloAllocations({
 	installments,
 	mora,
+	otros,
 }: {
 	installments: PagaloInstallment[];
 	mora: string | null | undefined;
+	otros?: string | null;
 }) {
-	if (installments.length === 0) throw new Error("Seleccione al menos una cuota.");
+	if (installments.length === 0)
+		throw new Error("Seleccione al menos una cuota.");
 	const allocations: PagaloAllocation[] = [];
 	let capitalCents = 0n;
 	let facturableCents = 0n;
@@ -77,11 +91,26 @@ export function buildPagaloAllocations({
 		});
 		facturableCents += moraCents;
 	}
-	if (capitalCents + facturableCents === 0n) throw new Error("No hay saldo pagable para Págalo.");
+	const otrosCents = cents(otros);
+	if (otrosCents > 0n) {
+		const first = installments[0]!;
+		allocations.push({
+			link_type: "MORA_INTERES",
+			cartera_cuota_id: first.cuotaId,
+			numero_cuota: first.numeroCuota,
+			rubro: "OTROS",
+			amount: money(otrosCents),
+			facturable: true,
+		});
+		facturableCents += otrosCents;
+	}
+	if (capitalCents + facturableCents === 0n)
+		throw new Error("No hay saldo pagable para Págalo.");
 	return {
 		allocations,
 		capitalTotal: money(capitalCents),
 		facturableTotal: money(facturableCents),
 		totalAmount: money(capitalCents + facturableCents),
+		otrosTotal: money(otrosCents),
 	};
 }

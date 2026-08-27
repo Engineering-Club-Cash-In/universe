@@ -38,6 +38,7 @@ export type PagaloCommandForHash = {
 	currency: string;
 	capital_total: string;
 	facturable_total: string;
+	otros_total: string;
 	total_amount: string;
 	cuota_inicial: number;
 	allocations: PagaloAllocationForHash[];
@@ -51,7 +52,8 @@ export function ordenarAllocations(
 ): PagaloAllocationForHash[] {
 	return [...allocations].sort((a, b) => {
 		if (a.link_type !== b.link_type) return a.link_type < b.link_type ? -1 : 1;
-		if (a.numero_cuota !== b.numero_cuota) return a.numero_cuota - b.numero_cuota;
+		if (a.numero_cuota !== b.numero_cuota)
+			return a.numero_cuota - b.numero_cuota;
 		return a.rubro < b.rubro ? -1 : a.rubro > b.rubro ? 1 : 0;
 	});
 }
@@ -83,7 +85,9 @@ const normalizarAllocation = (a: PagaloAllocationForHash) => ({
 	facturable: a.facturable,
 });
 
-export function canonicalizarPagaloCommand(command: PagaloCommandForHash): string {
+export function canonicalizarPagaloCommand(
+	command: PagaloCommandForHash,
+): string {
 	const allocations = ordenarAllocations(command.allocations);
 	return JSON.stringify({
 		crm_group_id: command.crm_group_id,
@@ -92,6 +96,7 @@ export function canonicalizarPagaloCommand(command: PagaloCommandForHash): strin
 		currency: command.currency,
 		capital_total: command.capital_total,
 		facturable_total: command.facturable_total,
+		otros_total: command.otros_total,
 		total_amount: command.total_amount,
 		cuota_inicial: command.cuota_inicial,
 		allocations: allocations.map(normalizarAllocation),
@@ -101,7 +106,9 @@ export function canonicalizarPagaloCommand(command: PagaloCommandForHash): strin
 }
 
 /** SHA-256 hex minúsculas — debe pasar `^[0-9a-f]{64}$` (cartera-back lo exige). */
-export function calcularPagaloPayloadHash(command: PagaloCommandForHash): string {
+export function calcularPagaloPayloadHash(
+	command: PagaloCommandForHash,
+): string {
 	return createHash("sha256")
 		.update(canonicalizarPagaloCommand(command))
 		.digest("hex");

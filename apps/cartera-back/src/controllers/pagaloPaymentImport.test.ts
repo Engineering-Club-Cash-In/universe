@@ -25,6 +25,7 @@ const command = (): PagaloImportCommand => {
   currency: "GTQ",
   capital_total: "100.00",
   facturable_total: "25.00",
+  otros_total: "0.00",
   total_amount: "125.00",
   cuota_inicial: 2,
   allocations: [
@@ -106,6 +107,26 @@ describe("pagalo payment import", () => {
     expect(mapPagaloImportToRegistro(command(), 44)).not.toHaveProperty(
       "abono_directo_capital",
     );
+  });
+
+  it("maps Otros as an explicit normal-payment component", () => {
+    const input = command();
+    input.facturable_total = "37.34";
+    input.otros_total = "12.34";
+    input.total_amount = "137.34";
+    input.allocations.push({
+      link_type: "MORA_INTERES",
+      cartera_cuota_id: 20,
+      numero_cuota: 2,
+      rubro: "OTROS",
+      amount: "12.34",
+      facturable: true,
+    });
+
+    expect(mapPagaloImportToRegistro(input, 44)).toMatchObject({
+      monto_boleta: 137.34,
+      otros: 12.34,
+    });
   });
 
   it("does not invent a Q0 source when mapping capital-only or facturable-only groups", () => {

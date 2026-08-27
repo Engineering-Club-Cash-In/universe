@@ -106,7 +106,7 @@ export type PagaloComponentes = Partial<{
     allocations: Array<{
       cartera_cuota_id: number;
       numero_cuota: number;
-      rubro: "INTERES" | "IVA" | "INTERES_CI" | "IVA_CI" | "SEGURO" | "GPS" | "MEMBRESIAS" | "MORA";
+      rubro: "INTERES" | "IVA" | "INTERES_CI" | "IVA_CI" | "SEGURO" | "GPS" | "MEMBRESIAS" | "MORA" | "OTROS";
       amount: string;
       facturable: true;
     }>;

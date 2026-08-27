@@ -136,6 +136,10 @@ function createPersistenceHarness(
     runTransaction: runTransaction as unknown as ReversePaymentDependencies["runTransaction"],
     reverseInvestors,
     reverseCapitalPayment: mock(() => Promise.resolve(undefined)) as unknown as ReversePaymentDependencies["reverseCapitalPayment"],
+    // Lock identidad: acá no hay concurrencia que serializar y el real
+    // abriría conexión al lockPool.
+    withCreditLock: ((_creditoId: number, fn: () => Promise<unknown>) =>
+      fn()) as ReversePaymentDependencies["withCreditLock"],
   });
   return { handler, runTransaction };
 }

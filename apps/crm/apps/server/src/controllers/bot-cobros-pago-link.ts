@@ -5,6 +5,7 @@
  *
  * Servicio 7 · POST /api/bot/cobros/pago-link/opciones → cuántas cuotas puede pagar
  * Servicio 8 · POST /api/bot/cobros/pago-link/crear    → arma el grupo y devuelve los links
+ * Servicio 9 · POST /api/bot/cobros/pago-link/estado   → ¿ya pagó los links de esta conversación?
  *
  * Los handlers solo traducen el resultado de `lib/bot-cobros/pago-link.ts` al
  * formato del bot (D-22: todo lo que no termina en dato sale con estado HTTP
@@ -17,6 +18,7 @@
 
 import type { Context } from "hono";
 import {
+	consultarEstadoPagoLink,
 	crearPagoLink,
 	obtenerOpcionesPagoLink,
 } from "../lib/bot-cobros/pago-link";
@@ -239,6 +241,56 @@ export async function crearPagoLinkBotCobros(c: Context) {
 		return c.json({ success: true, data: resultado.data });
 	} catch (err) {
 		console.error("[BotCobros] pago-link/crear:", err);
+		return error(c, {
+			codigo: "ERROR_INTERNO",
+			mensaje: "Ocurrió un error. Intenta de nuevo en unos minutos.",
+			estado: 500,
+		});
+	}
+}
+
+/** Servicio 9 · ¿Ya están pagados los links que generó en esta conversación? */
+export async function estadoPagoLinkBotCobros(c: Context) {
+	try {
+		const body = await c.req.json<{
+			referencia?: unknown;
+			numeroSifco?: unknown;
+		}>();
+		const referencia = String(body.referencia ?? "").trim();
+		const numeroSifco = String(body.numeroSifco ?? "").trim();
+		if (!referencia) {
+			return error(c, {
+				codigo: "PARAMETROS_INVALIDOS",
+				mensaje: "Faltan datos para consultar tu pago.",
+				estado: 400,
+			});
+		}
+
+		const resultado = await consultarEstadoPagoLink(
+			referencia,
+			numeroSifco || undefined,
+		);
+		if (!resultado.ok) {
+			if (resultado.codigo === "SIN_LINKS") {
+				return error(c, {
+					codigo: "SIN_LINKS",
+					mensaje:
+						"No encontramos links de pago en esta conversación. Si querés pagar con link, elegí esa opción en el menú.",
+					estado: 409,
+				});
+			}
+			return (
+				errorComun(c, resultado.codigo) ??
+				error(c, {
+					codigo: "REFERENCIA_INVALIDA",
+					mensaje: "No encontramos tu solicitud. Comienza de nuevo.",
+					estado: 401,
+				})
+			);
+		}
+		return c.json({ success: true, data: resultado.data });
+	} catch (err) {
+		console.error("[BotCobros] pago-link/estado:", err);
 		return error(c, {
 			codigo: "ERROR_INTERNO",
 			mensaje: "Ocurrió un error. Intenta de nuevo en unos minutos.",

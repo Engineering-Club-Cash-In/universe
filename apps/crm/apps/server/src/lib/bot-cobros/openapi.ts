@@ -2502,6 +2502,361 @@ export const especificacionBotCobros = {
 				},
 			},
 		},
+		"/api/bot/cobros/pago-link/estado": {
+			post: {
+				tags: ["Pago con link"],
+				summary: "Servicio 9 · ¿Ya pagó los links de esta conversación?",
+				description: [
+					"Dice si los links que el bot generó **en esta conversación** ya están pagados, según **nuestra base** (nosotros verificamos cada pago contra Págalo y guardamos el comprobante). Solo hace falta la `referencia`; con `numeroSifco` se limita a ese crédito.",
+					"",
+					"`estado` viene en tres valores: **`PAGADOS`** (todos los links pagados; ya lo estamos aplicando al crédito), **`PARCIAL`** (uno pagado, el otro no: te decimos cuál falta y te devolvemos su link para que lo reenvíes) y **`SIN_PAGO`** (ninguno pagado; te devolvemos los links activos).",
+					"",
+					"Viene plano como las opciones: `totalLinks`, `linksPagados`, `linksPendientes` y `link1Titulo`/`link1Estado`/`link1Monto`/`link1Url`, `link2…`. `linkNUrl` solo trae valor si ese link sigue pendiente. `mensajes.completo` ya lo dice todo en el tono del bot.",
+					"",
+					"Un pago recién hecho puede tardar unos minutos en reflejarse (lo detectamos nosotros, D-49). Si no hay links generados en esta conversación responde `409 SIN_LINKS`.",
+				].join("\n"),
+				operationId: "estadoPagoLink",
+				requestBody: {
+					required: true,
+					content: {
+						"application/json": {
+							schema: {
+								type: "object",
+								required: ["referencia"],
+								properties: {
+									referencia: {
+										type: "string",
+										format: "uuid",
+										description: "La que devolvió el servicio 1.",
+									},
+									numeroSifco: {
+										type: "string",
+										description:
+											"Opcional: limitar la consulta a ese crédito (si el cliente tiene varios).",
+									},
+								},
+							},
+							example: {
+								referencia: "3f9c2a1e-6b7d-4c8e-9a0b-1c2d3e4f5a6b",
+							},
+						},
+					},
+				},
+				responses: {
+					"200": {
+						description: "Estado de los links de la conversación.",
+						content: {
+							"application/json": {
+								schema: {
+									type: "object",
+									properties: {
+										success: { type: "boolean", enum: [true] },
+										data: {
+											type: "object",
+											properties: {
+												estado: {
+													type: "string",
+													enum: ["PAGADOS", "PARCIAL", "SIN_PAGO"],
+												},
+												numeroSifco: { type: "string" },
+												referenciaPago: {
+													type: "string",
+													format: "uuid",
+													description:
+														"El mismo `pago.referenciaPago` que devolvió `/crear`.",
+												},
+												totalLinks: { type: "integer" },
+												linksPagados: { type: "integer" },
+												linksPendientes: { type: "integer" },
+												link1Titulo: { type: "string" },
+												link1Estado: {
+													type: "string",
+													enum: ["PAGADO", "PENDIENTE"],
+												},
+												link1Monto: { type: "string" },
+												link1Url: {
+													type: "string",
+													nullable: true,
+													description: "Solo si sigue pendiente.",
+												},
+												link2Titulo: { type: "string" },
+												link2Estado: {
+													type: "string",
+													enum: ["PAGADO", "PENDIENTE"],
+												},
+												link2Monto: { type: "string" },
+												link2Url: { type: "string", nullable: true },
+												links: {
+													type: "array",
+													description: "Lo mismo, como lista.",
+													items: {
+														type: "object",
+														properties: {
+															tipo: {
+																type: "string",
+																enum: ["CAPITAL", "MORA_INTERES"],
+															},
+															titulo: { type: "string" },
+															monto: { type: "string" },
+															estado: {
+																type: "string",
+																enum: ["PAGADO", "PENDIENTE"],
+															},
+															url: { type: "string", nullable: true },
+														},
+													},
+												},
+												mensajes: {
+													type: "object",
+													properties: { completo: { type: "string" } },
+												},
+											},
+										},
+									},
+								},
+								examples: {
+									pagados: {
+										summary: "Los dos links pagados",
+										value: {
+											success: true,
+											data: {
+												estado: "PAGADOS",
+												numeroSifco: "01010214117590",
+												referenciaPago: "9d4b2b7a-2c0a-4b1e-8a4d-5f6e7a8b9c0d",
+												totalLinks: 2,
+												linksPagados: 2,
+												linksPendientes: 0,
+												link1Titulo: "Pago 1 de 2",
+												link1Estado: "PAGADO",
+												link1Monto: "800.00",
+												link1Url: null,
+												link2Titulo: "Pago 2 de 2",
+												link2Estado: "PAGADO",
+												link2Monto: "3937.62",
+												link2Url: null,
+												links: [
+													{
+														tipo: "CAPITAL",
+														titulo: "Pago 1 de 2",
+														monto: "800.00",
+														estado: "PAGADO",
+														url: null,
+													},
+													{
+														tipo: "MORA_INTERES",
+														titulo: "Pago 2 de 2",
+														monto: "3937.62",
+														estado: "PAGADO",
+														url: null,
+													},
+												],
+												mensajes: {
+													completo:
+														"✅ Ya recibimos tus 2 pagos. Los estamos aplicando a tu crédito; en cuanto quede listo te mandamos tu recibo por WhatsApp.",
+												},
+											},
+										},
+									},
+									parcial: {
+										summary: "Solo uno pagado: se devuelve el que falta",
+										value: {
+											success: true,
+											data: {
+												estado: "PARCIAL",
+												numeroSifco: "01010214117590",
+												referenciaPago: "9d4b2b7a-2c0a-4b1e-8a4d-5f6e7a8b9c0d",
+												totalLinks: 2,
+												linksPagados: 1,
+												linksPendientes: 1,
+												link1Titulo: "Pago 1 de 2",
+												link1Estado: "PAGADO",
+												link1Monto: "800.00",
+												link1Url: null,
+												link2Titulo: "Pago 2 de 2",
+												link2Estado: "PENDIENTE",
+												link2Monto: "3937.62",
+												link2Url: "https://checkout.pagalodev.com/xyz789",
+												links: [
+													{
+														tipo: "CAPITAL",
+														titulo: "Pago 1 de 2",
+														monto: "800.00",
+														estado: "PAGADO",
+														url: null,
+													},
+													{
+														tipo: "MORA_INTERES",
+														titulo: "Pago 2 de 2",
+														monto: "3937.62",
+														estado: "PENDIENTE",
+														url: "https://checkout.pagalodev.com/xyz789",
+													},
+												],
+												mensajes: {
+													completo:
+														"Recibimos tu *Pago 1 de 2* ✅. Te falta completar:\n*Pago 2 de 2* (Q3,937.62): https://checkout.pagalodev.com/xyz789\n\nSi pagaste hace poco, puede tardar unos minutos en reflejarse.",
+												},
+											},
+										},
+									},
+									sin_pago: {
+										summary: "Ninguno pagado todavía",
+										value: {
+											success: true,
+											data: {
+												estado: "SIN_PAGO",
+												numeroSifco: "01010214117590",
+												referenciaPago: "9d4b2b7a-2c0a-4b1e-8a4d-5f6e7a8b9c0d",
+												totalLinks: 2,
+												linksPagados: 0,
+												linksPendientes: 2,
+												link1Titulo: "Pago 1 de 2",
+												link1Estado: "PENDIENTE",
+												link1Monto: "800.00",
+												link1Url: "https://checkout.pagalodev.com/abc123",
+												link2Titulo: "Pago 2 de 2",
+												link2Estado: "PENDIENTE",
+												link2Monto: "3937.62",
+												link2Url: "https://checkout.pagalodev.com/xyz789",
+												links: [
+													{
+														tipo: "CAPITAL",
+														titulo: "Pago 1 de 2",
+														monto: "800.00",
+														estado: "PENDIENTE",
+														url: "https://checkout.pagalodev.com/abc123",
+													},
+													{
+														tipo: "MORA_INTERES",
+														titulo: "Pago 2 de 2",
+														monto: "3937.62",
+														estado: "PENDIENTE",
+														url: "https://checkout.pagalodev.com/xyz789",
+													},
+												],
+												mensajes: {
+													completo:
+														"Todavía no vemos ningún pago. Tus links siguen activos:\n*Pago 1 de 2* (Q800.00): https://checkout.pagalodev.com/abc123\n*Pago 2 de 2* (Q3,937.62): https://checkout.pagalodev.com/xyz789\n\nSi pagaste hace poco, puede tardar unos minutos en reflejarse.",
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					"400": {
+						description: "Falta la `referencia`.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								example: {
+									success: false,
+									error: {
+										codigo: "PARAMETROS_INVALIDOS",
+										mensaje: "Faltan datos para consultar tu pago.",
+									},
+								},
+							},
+						},
+					},
+					"401": {
+						description:
+							"La referencia no sirve o la sesión (30 min) expiró: volver al servicio 1.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								examples: {
+									SESION_VENCIDA: {
+										value: {
+											success: false,
+											error: {
+												codigo: "SESION_VENCIDA",
+												mensaje:
+													"Por seguridad tu sesión expiró. Vuelve a identificarte para continuar.",
+											},
+										},
+									},
+									REFERENCIA_INVALIDA: {
+										value: {
+											success: false,
+											error: {
+												codigo: "REFERENCIA_INVALIDA",
+												mensaje:
+													"No encontramos tu solicitud. Comienza de nuevo.",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					"404": {
+						description: "El `numeroSifco` no es de este cliente.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								example: {
+									success: false,
+									error: {
+										codigo: "CREDITO_NO_ENCONTRADO",
+										mensaje: "No encontramos ese crédito.",
+									},
+								},
+							},
+						},
+					},
+					"409": {
+						description:
+							"En esta conversación no se generaron links de pago (o ya no queda ninguno vivo).",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								example: {
+									success: false,
+									error: {
+										codigo: "SIN_LINKS",
+										mensaje:
+											"No encontramos links de pago en esta conversación. Si querés pagar con link, elegí esa opción en el menú.",
+									},
+								},
+							},
+						},
+					},
+					"500": {
+						description: "Error inesperado.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								example: {
+									success: false,
+									error: {
+										codigo: "ERROR_INTERNO",
+										mensaje:
+											"Ocurrió un error. Intenta de nuevo en unos minutos.",
+									},
+								},
+							},
+						},
+					},
+					"503": {
+						description: "Falta configuración del servidor.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								example: {
+									success: false,
+									error: {
+										codigo: "SERVICIO_NO_DISPONIBLE",
+										mensaje: "El servicio no está disponible en este momento.",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
 	},
 } as const;
 

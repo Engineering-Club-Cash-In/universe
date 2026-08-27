@@ -365,6 +365,27 @@ Un `GET /pago-link/estado` para responder con el estado real (pagó uno, falta e
 
 ---
 
+### 4.5 Servicio 9 — `POST /api/bot/cobros/pago-link/estado` (agregado 2026-08-27)
+
+Pedido de SimpleTech: el bot quiere saber si **los links que generó en esta conversación** ya
+están pagados. Lo respondemos con **nuestra base** (el poller ya verificó cada `ACCEPT` contra
+Págalo y guardó el voucher): un link está pagado si es `PAID`/fuente de aplicación, o si el grupo
+ya está en aplicación (`READY_TO_APPLY`, `APPLYING`, `APPLICATION_FAILED`, `COMPLETED`).
+
+- **Entrada:** solo `referencia` (con `numeroSifco` opcional para limitar a un crédito). "Esta
+  conversación" = el grupo de origen `BOT`, de un crédito de esta persona, **creado después de
+  que canjeó su código** (la sesión de D-24). Sin ninguno → `409 SIN_LINKS`.
+- **Salida:** `estado` = `PAGADOS` | `PARCIAL` | `SIN_PAGO`, plano como las opciones
+  (`totalLinks`, `linksPagados`, `linksPendientes`, `link1Titulo/Estado/Monto/Url`, `link2…`;
+  la URL solo viene si ese link sigue pendiente, para que el bot lo reenvíe) y
+  `mensajes.completo` listo para mandar. Los links `REPLACED`/`CANCELLED` no cuentan.
+- **Historial:** `pago_link_estado` guarda el veredicto y el conteo, nunca URLs.
+- Implementación: `consultarEstadoPagoLink` + `resumirEstadoLinks` en `pago-link.ts`;
+  `verificarSesion` se separó de `verificarAcceso` en `menu-credito.ts` para poder validar la
+  sesión sin un crédito.
+
+---
+
 ## 5. Después del chat: quién escucha y quién aplica
 
 Todo esto es **infraestructura CB-028, compartida con el flujo del asesor** — se construye

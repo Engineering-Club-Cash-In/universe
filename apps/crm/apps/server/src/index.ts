@@ -22,6 +22,7 @@ import {
 import { eventoPagoBotCobros } from "./controllers/bot-cobros-eventos";
 import {
 	crearPagoLinkBotCobros,
+	estadoPagoLinkBotCobros,
 	opcionesPagoLinkBotCobros,
 } from "./controllers/bot-cobros-pago-link";
 import { infornetController } from "./controllers/buro";
@@ -1165,6 +1166,11 @@ app.post(
 	"/api/bot/cobros/pago-link/crear",
 	autenticarBotCobros,
 	crearPagoLinkBotCobros,
+);
+app.post(
+	"/api/bot/cobros/pago-link/estado",
+	autenticarBotCobros,
+	estadoPagoLinkBotCobros,
 );
 
 // Documentación de esos dos endpoints, para SimpleTech. Va SIN API key —no

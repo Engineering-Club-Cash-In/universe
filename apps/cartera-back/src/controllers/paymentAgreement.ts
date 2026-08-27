@@ -19,6 +19,7 @@ import {
   calcularCuotasConvenioCompletadas,
 } from "./registerPaymentPolicy";
 import { createMora } from "./latefee";
+import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import { getPagosDelMesActual } from "./payments";
 import { creditRouter } from "../routers";
 
@@ -1541,6 +1542,16 @@ export const updateConvenioStatus = async (
 
     const creditoId = convenio.credito_id;
 
+    // 🔒 Mismo advisory lock por crédito que insertPayment y reversePayment
+    // (P2 de Codex en #1482, 2ª ronda): el borrado de abajo es
+    // multi-statement (convenio_cuotas → resume → convenios_pago) y podía
+    // interlevarse con el commit diferido de un pago en vuelo — el guard
+    // optimista del commit matchea sobre el parent todavía vivo, el marcado
+    // ya no encuentra cuotas hijas y el borrado termina llevándose el
+    // convenio recién acreditado mientras el pago responde éxito.
+    // Serializada, la mutación espera a que el pago termine (o corre entera
+    // antes del prepare, y entonces el guard optimista sí la detecta).
+    return await withPaymentAdvisoryLock(creditoId, async () => {
     // 2. Si status = false, ELIMINAR el convenio y procesar mora
     if (!status) {
       console.log("🔴 Eliminando convenio y procesando mora...");
@@ -1646,6 +1657,7 @@ export const updateConvenioStatus = async (
       .where(eq(convenios_pago.convenio_id, convenio_id));
 
     return { success: true, message: "Convenio activado exitosamente" };
+    });
   } catch (error) {
     console.error("Error updating convenio status:", error);
     return { success: false, message: "Error updating convenio status", error };

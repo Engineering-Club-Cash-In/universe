@@ -351,6 +351,9 @@ export function validatePagaloImportCommand(
   const capitals = c.allocations.filter((a) => a.link_type === "CAPITAL"),
     facts = c.allocations.filter((a) => a.link_type === "MORA_INTERES");
   const otros = facts.filter((a) => a.rubro === "OTROS");
+  const allocationCuotaInicial = c.allocations.find(
+    (a) => a.numero_cuota === c.cuota_inicial,
+  );
   const sum = (items: typeof c.allocations) =>
     items.reduce((n, a) => n.plus(a.amount), new Big(0));
 
@@ -387,6 +390,11 @@ export function validatePagaloImportCommand(
     errors.push(err(PAGALO_IMPORT_ERROR_CODES.PAGALO_INVALID_FACTURABLE_RUBRO));
   if (
     otros.some((a) => a.link_type !== "MORA_INTERES" || !a.facturable) ||
+    otros.some(
+      (a) =>
+        a.numero_cuota !== c.cuota_inicial ||
+        a.cartera_cuota_id !== allocationCuotaInicial?.cartera_cuota_id,
+    ) ||
     !sum(otros).eq(new Big(c.otros_total))
   )
     errors.push(err(PAGALO_IMPORT_ERROR_CODES.PAGALO_OTROS_ALLOCATION_MISMATCH));

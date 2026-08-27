@@ -1573,14 +1573,18 @@ export const insertPayment = async ({ body, set }: any) => {
                     .update(ajuste_fecha_ideal_pago)
                     .set({ fecha_cobro: new Date(), pago_id: inserted.pago_id })
                     .where(eq(ajuste_fecha_ideal_pago.id, ajusteFechaIdealId));
-                  console.log(
-                    `🧾 Ajuste por fecha ideal de pago #${ajusteFechaIdealId} marcado como cobrado (pago_id=${inserted.pago_id}).`
-                  );
                 }
                 return rows;
               });
               if (cuota.cuotas_credito.numero_cuota === 1 && pagoInsertado) {
                 cuota1PagoId = pagoInsertado.pago_id;
+                // Se loguea tras el commit: dentro de la tx el mensaje saldría
+                // aunque el commit fallara después.
+                if (ajusteFechaIdealId !== undefined) {
+                  console.log(
+                    `🧾 Ajuste por fecha ideal de pago #${ajusteFechaIdealId} marcado como cobrado (pago_id=${pagoInsertado.pago_id}).`
+                  );
+                }
               }
               await db
                 .update(pagos_credito)
@@ -1722,14 +1726,18 @@ export const insertPayment = async ({ body, set }: any) => {
                   .update(ajuste_fecha_ideal_pago)
                   .set({ fecha_cobro: new Date(), pago_id: inserted.pago_id })
                   .where(eq(ajuste_fecha_ideal_pago.id, ajusteFechaIdealId));
-                console.log(
-                  `🧾 Ajuste por fecha ideal de pago #${ajusteFechaIdealId} marcado como cobrado (pago_id=${inserted.pago_id}).`
-                );
               }
               return rows;
               });
               if (cuota.cuotas_credito.numero_cuota === 1 && pagoInsertado) {
                 cuota1PagoId = pagoInsertado.pago_id;
+                // Se loguea tras el commit: dentro de la tx el mensaje saldría
+                // aunque el commit fallara después.
+                if (ajusteFechaIdealId !== undefined) {
+                  console.log(
+                    `🧾 Ajuste por fecha ideal de pago #${ajusteFechaIdealId} marcado como cobrado (pago_id=${pagoInsertado.pago_id}).`
+                  );
+                }
               }
 
               // Marcar TODA la cuota como pagada (igual que la rama UPDATE).
@@ -1887,14 +1895,18 @@ export const insertPayment = async ({ body, set }: any) => {
                   .update(ajuste_fecha_ideal_pago)
                   .set({ fecha_cobro: new Date(), pago_id: inserted.pago_id })
                   .where(eq(ajuste_fecha_ideal_pago.id, ajusteFechaIdealId));
-                console.log(
-                  `🧾 Ajuste por fecha ideal de pago #${ajusteFechaIdealId} marcado como cobrado (pago_id=${inserted.pago_id}).`
-                );
               }
               return rows;
               });
               if (cuota.cuotas_credito.numero_cuota === 1 && pagoInsertado) {
                 cuota1PagoId = pagoInsertado.pago_id;
+                // Se loguea tras el commit: dentro de la tx el mensaje saldría
+                // aunque el commit fallara después.
+                if (ajusteFechaIdealId !== undefined) {
+                  console.log(
+                    `🧾 Ajuste por fecha ideal de pago #${ajusteFechaIdealId} marcado como cobrado (pago_id=${pagoInsertado.pago_id}).`
+                  );
+                }
               }
               if (
                 pagoInsertado?.pago_id &&

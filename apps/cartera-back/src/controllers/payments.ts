@@ -1906,30 +1906,37 @@ export async function falsePayment(pago_id: number, credito_id: number) {
     // Falsear un pago no debe descontar el aporte del crédito/espejo.
     await insertPagosCreditoInversionistas(pago_id, credito_id, true, false, false); // excludeCube=true, cuotaPagada=false, updateCredito=false
   });
-  // Actualizar el estado del pago a falso
-  const result = await db
-    .update(pagos_credito)
-    .set({
-      pagado: false,
-      paymentFalse: true,
-    })
-    .where(
-      and(
-        eq(pagos_credito.pago_id, pago_id),
-        eq(pagos_credito.credito_id, credito_id)
-      )
-    );
+  // Actualizar el estado del pago a falso y resetear el ajuste (si este pago
+  // era el que lo cobró) en la misma transacción: si el reset fallara,
+  // el pago tampoco debe quedar marcado como falso con el ajuste todavía
+  // "cobrado" apuntando a un pago que ya no vale.
+  const result = await db.transaction(async (tx) => {
+    const updateResult = await tx
+      .update(pagos_credito)
+      .set({
+        pagado: false,
+        paymentFalse: true,
+      })
+      .where(
+        and(
+          eq(pagos_credito.pago_id, pago_id),
+          eq(pagos_credito.credito_id, credito_id)
+        )
+      );
 
-  // 🚨 Si no se actualizó ningún registro, lanza error controlado
-  if (!result.rowCount || result.rowCount === 0) {
-    throw new Error(
-      "No payment found to mark as false with the given criteria"
-    );
-  }
+    // 🚨 Si no se actualizó ningún registro, lanza error controlado
+    if (!updateResult.rowCount || updateResult.rowCount === 0) {
+      throw new Error(
+        "No payment found to mark as false with the given criteria"
+      );
+    }
 
-  // Si este pago era el que cobró un ajuste por fecha ideal de pago, resetearlo
-  // a pendiente — la boleta resultó falsa, el dinero nunca entró de verdad.
-  await resetAjusteFechaIdealSiPagoInvalidado(pago_id);
+    // Si este pago era el que cobró un ajuste por fecha ideal de pago, resetearlo
+    // a pendiente — la boleta resultó falsa, el dinero nunca entró de verdad.
+    await resetAjusteFechaIdealSiPagoInvalidado(pago_id, tx);
+
+    return updateResult;
+  });
 
   return {
     message: "Payment marked as false successfully",

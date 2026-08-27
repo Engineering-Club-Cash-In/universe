@@ -2410,8 +2410,14 @@ export const crmRouter = {
 						: elegidoDesdeRecomendacionIA &&
 							(suggestedDays?.some((d) => d.dia === input.diaPagoMensual) ??
 								false);
+				// Si ya había un valor capturado, se preserva: representa "qué día
+				// hubiera puesto el sistema al momento de la asignación original", no
+				// de hoy. Recalcularlo cada vez que se edita el día IA (p. ej. cambiar
+				// de una recomendación a otra) movería el default retroactivamente y
+				// distorsionaría calcularAjusteFechaIdeal al cierre.
 				diaPagoOriginalSistemaUpdate = esDiaIA
-					? getDiaPagoOriginalSistema()
+					? (currentOpportunity[0].diaPagoOriginalSistema ??
+						getDiaPagoOriginalSistema())
 					: null;
 			}
 
@@ -7025,8 +7031,12 @@ export const crmRouter = {
 						diaPagoMensual: input.diaPagoMensual,
 						// Se captura AHORA (momento de la asignación) porque depende de qué
 						// día es "hoy" en este instante — no se puede recalcular después.
+						// Si la oportunidad ya traía un valor (p. ej. regresó de 80%→50% y
+						// se está reasignando de nuevo), se preserva el original en vez de
+						// recapturarlo con la fecha de hoy.
 						diaPagoOriginalSistema: esDiaIA
-							? getDiaPagoOriginalSistema()
+							? (opportunity.diaPagoOriginalSistema ??
+								getDiaPagoOriginalSistema())
 							: null,
 						updatedAt: new Date(),
 					})

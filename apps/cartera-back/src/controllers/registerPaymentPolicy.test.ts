@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import {
   getAjusteFechaIdealADeducir,
   recomputeCreditAfterCapital,
+  shouldBlockCuota1ClosingForPendingAjuste,
   shouldIncobrableInstallmentBePaid,
 } from "./registerPaymentPolicy";
 import * as registerPaymentPolicy from "./registerPaymentPolicy";
@@ -822,6 +823,48 @@ describe("getAjusteFechaIdealADeducir", () => {
       disponible: "30.97",
     });
     expect(resultado?.monto.toString()).toBe("30.96");
+  });
+});
+
+describe("shouldBlockCuota1ClosingForPendingAjuste", () => {
+  it("bloquea la cuota 1 si hay ajuste pendiente y no se cobró en este pago", () => {
+    expect(
+      shouldBlockCuota1ClosingForPendingAjuste({
+        numeroCuota: 1,
+        hayAjustePendiente: true,
+        ajusteFueCobradoEsteMismoPago: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("no bloquea si el ajuste sí se cobró en este mismo pago (camino feliz: cierran juntos)", () => {
+    expect(
+      shouldBlockCuota1ClosingForPendingAjuste({
+        numeroCuota: 1,
+        hayAjustePendiente: true,
+        ajusteFueCobradoEsteMismoPago: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("no bloquea si no hay ningún ajuste pendiente para el crédito", () => {
+    expect(
+      shouldBlockCuota1ClosingForPendingAjuste({
+        numeroCuota: 1,
+        hayAjustePendiente: false,
+        ajusteFueCobradoEsteMismoPago: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("nunca bloquea cuotas distintas de la 1, aunque haya ajuste pendiente", () => {
+    expect(
+      shouldBlockCuota1ClosingForPendingAjuste({
+        numeroCuota: 2,
+        hayAjustePendiente: true,
+        ajusteFueCobradoEsteMismoPago: false,
+      }),
+    ).toBe(false);
   });
 });
 

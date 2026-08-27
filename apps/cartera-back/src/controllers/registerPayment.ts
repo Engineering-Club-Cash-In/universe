@@ -49,6 +49,7 @@ import {
   recomputeCreditAfterCapital,
   shouldApplyStaleZeroRestanteAdjustment,
   shouldRejectZeroAppliedNormalValidation,
+  shouldBlockCuota1ClosingForPendingAjuste,
   shouldIncobrableInstallmentBePaid,
   shouldMarkInstallmentPaymentPaid,
   sumarAplicadoACuota,
@@ -886,6 +887,11 @@ export const insertPayment = async ({ body, set }: any) => {
     // pago_id de la cuota 1 que efectivamente lo cobra — lo usa
     // reversePayment.ts para resetear el ajuste si se revierte ese pago.
     let cuota1PagoId: number | undefined;
+    // Existe un ajuste pendiente para este crédito, sin importar si el
+    // disponible de ESTE pago alcanza para cobrarlo — lo usa
+    // shouldBlockCuota1ClosingForPendingAjuste más abajo para no dejar
+    // cerrar la cuota 1 sin haberlo cobrado.
+    let hayAjustePendiente = false;
     const tieneCuota1Pendiente = cuotasPendientes.some(
       (c) => c.cuotas_credito.numero_cuota === 1
     );
@@ -900,6 +906,7 @@ export const insertPayment = async ({ body, set }: any) => {
           )
         )
         .limit(1);
+      hayAjustePendiente = !!ajustePendiente;
       const deduccion = getAjusteFechaIdealADeducir({
         tieneCuota1Pendiente,
         ajustePendiente: ajustePendiente
@@ -1409,11 +1416,23 @@ export const insertPayment = async ({ body, set }: any) => {
 
         // Solo marcar como pagada si los restantes están en 0 Y existía un pago previo
         // (evita marcar como pagada cuando no hay pago existente y los restantes son 0 por default)
-        const cuota_pagada = shouldMarkInstallmentPaymentPaid({
+        const cuota_pagada_calculada = shouldMarkInstallmentPaymentPaid({
           allRemainingZero: todosRestantesEnCero,
           hasExistingInstallmentPayment: !!existingPago,
           installmentAmountApplied: totalPagado.toString(),
         });
+        // La cuota 1 no cierra si queda un ajuste por fecha ideal de pago sin
+        // cobrar (ver shouldBlockCuota1ClosingForPendingAjuste): sin esto, una
+        // seguidilla de parciales que nunca individualmente alcanzan para el
+        // ajuste puede cerrar la cuota 1 sin cobrarlo — y una vez cerrada,
+        // nadie vuelve a consultarlo (Codex #1263).
+        const cuota_pagada = shouldBlockCuota1ClosingForPendingAjuste({
+          numeroCuota: cuota.cuotas_credito.numero_cuota,
+          hayAjustePendiente,
+          ajusteFueCobradoEsteMismoPago: ajusteFechaIdealId !== undefined,
+        })
+          ? false
+          : cuota_pagada_calculada;
         // Preparar datos del pago
         const currentDate = new Date();
         const months = [

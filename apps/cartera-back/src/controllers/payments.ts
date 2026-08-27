@@ -31,6 +31,7 @@ import { calcularFactoresProrrateoInteresV2 } from "../cofidi/prorrateoPciIntere
 import { calcularSplitInteresPci, type InvSplitRow } from "../cofidi/splitInteresPci";
 import { t } from "elysia";
 import { calcularResumenAbonosCuota } from "./registerPaymentPolicy";
+import { shouldInstallmentRemainPaidAfterReversal } from "./reversePaymentPolicy";
 import {
   buildPendingReturnAuthorizationWarning,
   PendingReturnAuthorizationError,
@@ -1911,7 +1912,7 @@ export async function falsePayment(pago_id: number, credito_id: number) {
   // el pago tampoco debe quedar marcado como falso con el ajuste todavía
   // "cobrado" apuntando a un pago que ya no vale.
   const result = await db.transaction(async (tx) => {
-    const updateResult = await tx
+    const [updated] = await tx
       .update(pagos_credito)
       .set({
         pagado: false,
@@ -1922,10 +1923,11 @@ export async function falsePayment(pago_id: number, credito_id: number) {
           eq(pagos_credito.pago_id, pago_id),
           eq(pagos_credito.credito_id, credito_id)
         )
-      );
+      )
+      .returning({ cuota_id: pagos_credito.cuota_id });
 
     // 🚨 Si no se actualizó ningún registro, lanza error controlado
-    if (!updateResult.rowCount || updateResult.rowCount === 0) {
+    if (!updated) {
       throw new Error(
         "No payment found to mark as false with the given criteria"
       );
@@ -1935,12 +1937,50 @@ export async function falsePayment(pago_id: number, credito_id: number) {
     // a pendiente — la boleta resultó falsa, el dinero nunca entró de verdad.
     await resetAjusteFechaIdealSiPagoInvalidado(pago_id, tx);
 
-    return updateResult;
+    // Si este pago era el que cerraba su cuota, reabrirla: sin esto
+    // cuotas_credito.pagado se queda en true y getCreditoByNumero /
+    // obtenerInfoCompletaCredito nunca vuelven a ofrecer el ajuste que se
+    // acaba de resetear arriba (exigen la cuota abierta para cobrarlo).
+    // Mismo criterio que reversePayment.ts: se recalcula si la cuota sigue
+    // cubierta con lo que queda, en vez de asumir que hay que reabrirla
+    // siempre — puede seguir pagada si había otro pago validado encima.
+    if (updated.cuota_id !== null) {
+      const [credito] = await tx
+        .select({ cuota: creditos.cuota })
+        .from(creditos)
+        .where(eq(creditos.credito_id, credito_id))
+        .limit(1);
+
+      // Se consultan TODAS las filas de la cuota (incluida esta, que ya
+      // quedó con paymentFalse=true arriba en la misma transacción): la
+      // función pura descarta paymentFalse=true al sumar, así que no hace
+      // falta excluirla a mano.
+      const pagosDeLaCuota = await tx
+        .select({
+          monto_aplicado: pagos_credito.monto_aplicado,
+          validationStatus: pagos_credito.validationStatus,
+          paymentFalse: pagos_credito.paymentFalse,
+        })
+        .from(pagos_credito)
+        .where(eq(pagos_credito.cuota_id, updated.cuota_id));
+
+      const cuotaPermanecePagada = shouldInstallmentRemainPaidAfterReversal({
+        cuota: credito?.cuota,
+        remainingPayments: pagosDeLaCuota,
+      });
+
+      await tx
+        .update(cuotas_credito)
+        .set({ pagado: cuotaPermanecePagada })
+        .where(eq(cuotas_credito.cuota_id, updated.cuota_id));
+    }
+
+    return updated;
   });
 
   return {
     message: "Payment marked as false successfully",
-    updatedCount: result.rowCount ?? 0,
+    updatedCount: result ? 1 : 0,
   };
 }
 

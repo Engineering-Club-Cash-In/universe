@@ -1028,6 +1028,29 @@ export const getAjusteFechaIdealADeducir = ({
 };
 
 /**
+ * La cuota 1 no puede cerrar (pagado=true) mientras exista un ajuste por
+ * fecha ideal de pago pendiente que ESTE pago no cobró: si cerrara, deja de
+ * aparecer en cuotasPendientes y getAjusteFechaIdealADeducir nunca vuelve a
+ * consultarse para este crédito — el ajuste queda huérfano, cobrado nunca.
+ * No bloquea si el ajuste sí se cobró en este mismo pago (ambos cierran
+ * juntos, el camino feliz de siempre), ni si no hay ningún ajuste pendiente.
+ *
+ * El dinero de un pago que esto retiene nunca se pierde: si no alcanza para
+ * nada más en el loop de cuotas, cae a saldo_a_favor del usuario al final de
+ * insertPayment, disponible para el siguiente pago.
+ */
+export const shouldBlockCuota1ClosingForPendingAjuste = ({
+  numeroCuota,
+  hayAjustePendiente,
+  ajusteFueCobradoEsteMismoPago,
+}: {
+  numeroCuota: number;
+  hayAjustePendiente: boolean;
+  ajusteFueCobradoEsteMismoPago: boolean;
+}): boolean =>
+  numeroCuota === 1 && hayAjustePendiente && !ajusteFueCobradoEsteMismoPago;
+
+/**
  * ¿El pago debe pasar por processConvenioPayment? Solo créditos EN_CONVENIO y
  * solo si después de otros/abono-capital/mora todavía queda plata (orden
  * canónico del split, espejo del desglose del front: otros → mora → convenio).

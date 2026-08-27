@@ -1119,6 +1119,7 @@ export const crmRouter = {
 		}),
 
 	updateLead: crmProcedure
+		.meta({ audit: { entity: "lead", action: "update" } })
 		.input(
 			z.object({
 				id: z.string().uuid(),
@@ -1221,6 +1222,7 @@ export const crmRouter = {
 				})
 				.where(whereClause)
 				.returning();
+			auditRecord({ entity: "lead", id: id, action: "update" });
 
 			if (updatedLead.length === 0) {
 				throw new ORPCError("NOT_FOUND", {
@@ -1252,6 +1254,15 @@ export const crmRouter = {
 								sincronizables.map((o) => o.id),
 							),
 						);
+					// El NIT que viaja a cartera es el de la oportunidad, no el del lead.
+					for (const oportunidad of sincronizables) {
+						auditRecord({
+							entity: "opportunity",
+							id: oportunidad.id,
+							action: "sync_nit",
+							data: { leadId: id, nit: updateData.nit || null },
+						});
+					}
 				}
 
 				const conservadas = leadOpportunities.length - sincronizables.length;
@@ -1291,6 +1302,16 @@ export const crmRouter = {
 							updatedAt: new Date(),
 						})
 						.where(eq(opportunities.id, activeOpportunity.id));
+					auditRecord({
+						entity: "opportunity",
+						id: activeOpportunity.id,
+						action: "sync_source_campaign",
+						data: {
+							leadId: id,
+							source: updateData.source,
+							campaign: updateData.campaign,
+						},
+					});
 				}
 			}
 
@@ -1903,6 +1924,7 @@ export const crmRouter = {
 		}),
 
 	deleteOpportunity: crmProcedure
+		.meta({ audit: { entity: "opportunity", action: "delete" } })
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
@@ -2128,12 +2150,18 @@ export const crmRouter = {
 				await tx
 					.delete(opportunities)
 					.where(eq(opportunities.id, input.opportunityId));
+				auditRecord({
+					entity: "opportunity",
+					id: input.opportunityId,
+					action: "delete",
+				});
 			});
 
 			return { message: "Oportunidad eliminada exitosamente" };
 		}),
 
 	createOpportunity: crmProcedure
+		.meta({ audit: { entity: "opportunity", action: "create" } })
 		.input(
 			z.object({
 				title: z.string().min(1, "Title is required"),
@@ -2241,10 +2269,16 @@ export const crmRouter = {
 					updatedAt: new Date(),
 				})
 				.returning();
+			auditRecord({
+				entity: "opportunity",
+				id: newOpportunity[0].id,
+				action: "create",
+			});
 			return { ...newOpportunity[0], warning: false as const };
 		}),
 
 	updateOpportunity: crmProcedure
+		.meta({ audit: { entity: "opportunity", action: "update" } })
 		.input(
 			z.object({
 				id: z.string().uuid(),
@@ -2760,6 +2794,7 @@ export const crmRouter = {
 				})
 				.where(whereClause)
 				.returning();
+			auditRecord({ entity: "opportunity", id: id, action: "update" });
 
 			if (updatedOpportunity.length === 0) {
 				if (enforceNotWonInPredicate) {
@@ -2797,6 +2832,12 @@ export const crmRouter = {
 						updatedAt: new Date(),
 					})
 					.where(eq(leads.id, currentOpportunity[0].leadId));
+				auditRecord({
+					entity: "lead",
+					id: currentOpportunity[0].leadId,
+					action: "update_direccion",
+					data: { opportunityId: id, direccion },
+				});
 			}
 
 			if (vehicleChanged) {
@@ -3100,6 +3141,7 @@ export const crmRouter = {
 		}),
 
 	approveOpportunityAnalysis: analystProcedure
+		.meta({ audit: { entity: "opportunity", action: "approve_analysis" } })
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
@@ -3467,6 +3509,12 @@ export const crmRouter = {
 					})
 					.where(whereClause)
 					.returning();
+				auditRecord({
+					entity: "opportunity",
+					id: input.opportunityId,
+					action: "approve_analysis",
+					data: { approved: input.approved, reason: input.reason },
+				});
 
 				// Check for concurrent modification
 				if (updatedRows.length === 0) {
@@ -3562,6 +3610,7 @@ export const crmRouter = {
 
 	// Approve credit detail (40% → 50% transition)
 	approveCreditDetail: crmProcedure
+		.meta({ audit: { entity: "opportunity", action: "approve_credit_detail" } })
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
@@ -3619,6 +3668,11 @@ export const crmRouter = {
 					updatedAt: new Date(),
 				})
 				.where(eq(opportunities.id, input.opportunityId));
+			auditRecord({
+				entity: "opportunity",
+				id: input.opportunityId,
+				action: "approve_credit_detail",
+			});
 
 			// Record stage history
 			await db.insert(opportunityStageHistory).values({
@@ -3647,6 +3701,7 @@ export const crmRouter = {
 
 	// Revoke credit detail approval (back to 40%)
 	revokeCreditDetailApproval: crmProcedure
+		.meta({ audit: { entity: "opportunity", action: "revoke_credit_detail" } })
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
@@ -3734,6 +3789,11 @@ export const crmRouter = {
 						updatedAt: new Date(),
 					})
 					.where(eq(opportunities.id, input.opportunityId));
+				auditRecord({
+					entity: "opportunity",
+					id: input.opportunityId,
+					action: "revoke_credit_detail",
+				});
 
 				// Record stage history
 				await tx.insert(opportunityStageHistory).values({
@@ -6157,6 +6217,7 @@ export const crmRouter = {
 
 	// Approve disbursement (90% → 100% transition)
 	approveDisbursement: analystProcedure
+		.meta({ audit: { entity: "opportunity", action: "approve_disbursement" } })
 		.input(z.object({ opportunityId: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
 			// Get checklist and verify all items are completed
@@ -6245,6 +6306,11 @@ export const crmRouter = {
 					updatedAt: new Date(),
 				})
 				.where(eq(opportunities.id, input.opportunityId));
+			auditRecord({
+				entity: "opportunity",
+				id: input.opportunityId,
+				action: "approve_disbursement",
+			});
 
 			// Mark checklist as completed
 			await db
@@ -6743,6 +6809,7 @@ export const crmRouter = {
 
 	// Assign investor and advance to 80%
 	assignInvestorAndAdvance: analystProcedure
+		.meta({ audit: { entity: "opportunity", action: "assign_investor" } })
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
@@ -6995,6 +7062,12 @@ export const crmRouter = {
 						updatedAt: new Date(),
 					})
 					.where(eq(opportunities.id, input.opportunityId));
+				auditRecord({
+					entity: "opportunity",
+					id: input.opportunityId,
+					action: "assign_investor",
+					data: { categoria: input.categoria },
+				});
 
 				// Record stage history
 				await tx.insert(opportunityStageHistory).values({
@@ -7026,6 +7099,7 @@ export const crmRouter = {
 		}),
 
 	updateOpportunityInvestors: analystProcedure
+		.meta({ audit: { entity: "opportunity", action: "update_investors" } })
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
@@ -7136,6 +7210,11 @@ export const crmRouter = {
 					updatedAt: new Date(),
 				})
 				.where(eq(opportunities.id, input.opportunityId));
+			auditRecord({
+				entity: "opportunity",
+				id: input.opportunityId,
+				action: "update_investors",
+			});
 
 			return {
 				success: true,
@@ -7145,6 +7224,7 @@ export const crmRouter = {
 
 	// ── Credit Scoring ──────────────────────────────────────────────────
 	scoreLead: crmProcedure
+		.meta({ audit: { entity: "lead", action: "score" } })
 		.input(
 			z.object({
 				leadId: z.string().uuid(),

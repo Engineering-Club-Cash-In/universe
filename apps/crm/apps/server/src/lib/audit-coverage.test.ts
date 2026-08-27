@@ -22,24 +22,23 @@ const INVENTARIO: Record<
 	string,
 	{ escrituras: number; estado: Estado; nota?: string }
 > = {
-	// --- migrados
-	"routers/crm.ts": { escrituras: 18, estado: "pendiente" },
+	// --- migrados (escrituras anotadas con auditRecord)
+	"routers/crm.ts": { escrituras: 18, estado: "listo" },
 	"controllers/public-lead.ts": { escrituras: 8, estado: "listo" },
 
-	// --- pendientes
-	"routers/vehicles.ts": { escrituras: 10, estado: "pendiente" },
-	"controllers/migrate-creditos.ts": { escrituras: 8, estado: "pendiente" },
+	"routers/vehicles.ts": { escrituras: 10, estado: "listo" },
+	"controllers/migrate-creditos.ts": { escrituras: 8, estado: "listo" },
 	"controllers/bot.ts": { escrituras: 6, estado: "listo" },
 	"controllers/portal-lead.ts": { escrituras: 3, estado: "listo" },
-	"routers/auctionVehicles.ts": { escrituras: 3, estado: "pendiente" },
-	"routers/cobros.ts": { escrituras: 3, estado: "pendiente" },
-	"services/close-opportunity.ts": { escrituras: 3, estado: "pendiente" },
-	"routers/legal-contracts.ts": { escrituras: 2, estado: "pendiente" },
+	"routers/auctionVehicles.ts": { escrituras: 3, estado: "listo" },
+	"routers/cobros.ts": { escrituras: 3, estado: "listo" },
+	"services/close-opportunity.ts": { escrituras: 3, estado: "listo" },
+	"routers/legal-contracts.ts": { escrituras: 2, estado: "listo" },
 	"controllers/liveness.ts": { escrituras: 1, estado: "listo" },
-	"controllers/load-cars.ts": { escrituras: 1, estado: "pendiente" },
+	"controllers/load-cars.ts": { escrituras: 1, estado: "listo" },
 	"routers/messaging.ts": { escrituras: 1, estado: "listo" },
-	"services/contract-data-mapper.ts": { escrituras: 1, estado: "pendiente" },
-	"services/lead-scoring.ts": { escrituras: 1, estado: "pendiente" },
+	"services/contract-data-mapper.ts": { escrituras: 1, estado: "listo" },
+	"services/lead-scoring.ts": { escrituras: 1, estado: "listo" },
 
 	// --- exentos
 	"db/seed.ts": {

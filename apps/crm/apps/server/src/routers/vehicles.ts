@@ -4,6 +4,7 @@ import { generateObject, generateText } from "ai";
 import { and, desc, eq, ilike, inArray, not, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
+import { auditRecord } from "../lib/audit";
 import {
 	casosCobros,
 	checklistItemEvidence,
@@ -459,6 +460,7 @@ export const vehiclesRouter = {
 
 	// Create new vehicle (used vehicles - all fields required)
 	create: protectedProcedure
+		.meta({ audit: { entity: "vehicle", action: "create" } })
 		.input(
 			z.object({
 				make: z.string(),
@@ -495,6 +497,11 @@ export const vehiclesRouter = {
 					.insert(vehicles)
 					.values(input as NewVehicle)
 					.returning();
+				auditRecord({
+					entity: "vehicle",
+					id: newVehicle.id,
+					action: "create",
+				});
 
 				return newVehicle;
 			} catch (error: unknown) {
@@ -514,6 +521,7 @@ export const vehiclesRouter = {
 
 	// Create new vehicle (for brand new vehicles from dealer - minimal required fields)
 	createNewVehicle: protectedProcedure
+		.meta({ audit: { entity: "vehicle", action: "create" } })
 		.input(createNewVehicleInputSchema)
 		.handler(async ({ input }) => {
 			try {
@@ -531,6 +539,11 @@ export const vehiclesRouter = {
 						kmMileage: vehicleInput.kmMileage ?? 0, // Default 0 para nuevos
 					} as NewVehicle)
 					.returning();
+				auditRecord({
+					entity: "vehicle",
+					id: newVehicle.id,
+					action: "create",
+				});
 
 				return newVehicle;
 			} catch (error: unknown) {
@@ -550,6 +563,7 @@ export const vehiclesRouter = {
 
 	// Update vehicle
 	update: vehiclesProcedure
+		.meta({ audit: { entity: "vehicle", action: "update" } })
 		.input(
 			z.object({
 				id: z.string(),
@@ -631,6 +645,12 @@ export const vehiclesRouter = {
 					})
 					.where(eq(vehicles.id, input.id))
 					.returning();
+				auditRecord({
+					entity: "vehicle",
+					id: input.id,
+					action: "update",
+					data: input.data,
+				});
 
 				return updated;
 			} catch (error: unknown) {
@@ -645,6 +665,7 @@ export const vehiclesRouter = {
 
 	// Delete vehicle
 	delete: protectedProcedure
+		.meta({ audit: { entity: "vehicle", action: "delete" } })
 		.input(z.object({ id: z.string() }))
 		.handler(async ({ input }) => {
 			// Delete related photos first
@@ -662,6 +683,11 @@ export const vehiclesRouter = {
 				.delete(vehicles)
 				.where(eq(vehicles.id, input.id))
 				.returning();
+			auditRecord({
+				entity: "vehicle",
+				id: input.id,
+				action: "delete",
+			});
 
 			return deleted;
 		}),
@@ -788,6 +814,7 @@ export const vehiclesRouter = {
 
 	// Create vehicle inspection
 	createInspection: tallerOrCrmProcedure
+		.meta({ audit: { entity: "vehicle", action: "inspection_create" } })
 		.input(
 			z.object({
 				vehicleId: z.string(),
@@ -826,6 +853,11 @@ export const vehiclesRouter = {
 						updatedAt: new Date(),
 					})
 					.where(eq(vehicles.id, input.vehicleId));
+				auditRecord({
+					entity: "vehicle",
+					id: input.vehicleId,
+					action: "inspection_approved",
+				});
 			}
 
 			return newInspection;
@@ -1184,6 +1216,7 @@ export const vehiclesRouter = {
 
 	// Create full inspection with all data (vehicle + inspection + checklist)
 	createFullInspection: tallerOrCrmProcedure
+		.meta({ audit: { entity: "vehicle", action: "full_inspection" } })
 		.input(
 			z.object({
 				// Vehicle data
@@ -1347,6 +1380,11 @@ export const vehiclesRouter = {
 							})
 							.where(eq(vehicles.id, vehicleInputId))
 							.returning();
+						auditRecord({
+							entity: "vehicle",
+							id: updated?.id ?? input.vehicle.id,
+							action: "update",
+						});
 
 						if (updated) {
 							vehicleId = updated.id;
@@ -1360,6 +1398,11 @@ export const vehiclesRouter = {
 									status: "pending",
 								} as NewVehicle)
 								.returning();
+							auditRecord({
+								entity: "vehicle",
+								id: newVehicle.id,
+								action: "create",
+							});
 							vehicleId = newVehicle.id;
 						}
 					} else {
@@ -1371,6 +1414,11 @@ export const vehiclesRouter = {
 								status: "pending",
 							} as NewVehicle)
 							.returning();
+						auditRecord({
+							entity: "vehicle",
+							id: newVehicle.id,
+							action: "create",
+						});
 						vehicleId = newVehicle.id;
 					}
 
@@ -1521,6 +1569,11 @@ export const vehiclesRouter = {
 								updatedAt: new Date(),
 							})
 							.where(eq(vehicles.id, vehicleId));
+						auditRecord({
+							entity: "vehicle",
+							id: vehicleId,
+							action: "inspection_rejected",
+						});
 
 						const alertsArray = criticalIssues.map((item) => item.item);
 
@@ -1540,6 +1593,11 @@ export const vehiclesRouter = {
 								updatedAt: new Date(),
 							})
 							.where(eq(vehicles.id, vehicleId));
+						auditRecord({
+							entity: "vehicle",
+							id: vehicleId,
+							action: "inspection_approved",
+						});
 
 						await tx
 							.update(vehicleInspections)

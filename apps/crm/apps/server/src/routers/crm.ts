@@ -2362,17 +2362,13 @@ export const crmRouter = {
 				input.leadId !== undefined &&
 				input.leadId !== currentOpportunity[0].leadId;
 			let diaPagoOriginalSistemaUpdate: number | null | undefined;
-			if (
-				input.diaPagoMensual !== undefined &&
-				(input.diaPagoMensual !== currentOpportunity[0].diaPagoMensual ||
-					cambioDeIntencion ||
-					leadIdCambio)
-			) {
+			if (input.diaPagoMensual !== undefined) {
 				const effectiveLeadId =
 					"leadId" in input ? input.leadId : currentOpportunity[0].leadId;
-				// Se consulta sin importar si el día es 15/30: esDiaIA (más abajo)
-				// necesita saber si la IA recomendó justo ese día aunque no requiera
-				// validación contra suggestedDays.
+				// Se consulta una sola vez: la usan tanto la validación de abajo
+				// (siempre que el día no sea 15/30) como esDiaIA más abajo (que la
+				// necesita aunque el día sí sea 15/30, para distinguir si ese 15/30
+				// vino de una recomendación IA o de selección manual).
 				let suggestedDays: Array<{ dia: number; porcentaje: number }> | null =
 					null;
 				if (effectiveLeadId) {
@@ -2391,6 +2387,12 @@ export const crmRouter = {
 					suggestedDays = analysis?.suggestedPaymentDays ?? null;
 				}
 
+				// Se valida SIEMPRE que el día no sea 15/30, sin importar si
+				// "cambió" contra el valor guardado: el análisis de capacidad de
+				// pago puede haberse vuelto a correr y ya no recomendar el mismo
+				// día que antes sí recomendaba — un guardado que reenvía el mismo
+				// día (formulario sin tocarlo) no debe colarse sin revalidar
+				// contra la versión vigente del análisis.
 				if (input.diaPagoMensual !== 15 && input.diaPagoMensual !== 30) {
 					const isRecommended = suggestedDays?.some(
 						(d) => d.dia === input.diaPagoMensual,
@@ -2403,22 +2405,31 @@ export const crmRouter = {
 					}
 				}
 
-				// No 15/30 ya probó su origen IA al pasar la validación de arriba.
-				const esDiaIA =
-					input.diaPagoMensual !== 15 && input.diaPagoMensual !== 30
-						? true
-						: elegidoDesdeRecomendacionIA &&
-							(suggestedDays?.some((d) => d.dia === input.diaPagoMensual) ??
-								false);
-				// Si ya había un valor capturado, se preserva: representa "qué día
-				// hubiera puesto el sistema al momento de la asignación original", no
-				// de hoy. Recalcularlo cada vez que se edita el día IA (p. ej. cambiar
-				// de una recomendación a otra) movería el default retroactivamente y
-				// distorsionaría calcularAjusteFechaIdeal al cierre.
-				diaPagoOriginalSistemaUpdate = esDiaIA
-					? (currentOpportunity[0].diaPagoOriginalSistema ??
-						getDiaPagoOriginalSistema())
-					: null;
+				// diaPagoOriginalSistema solo se recaptura si algo relevante
+				// cambió (evita recaptura accidental en guardados que reenvían el
+				// mismo día sin tocarlo — ver comentario arriba de cambioDeIntencion).
+				if (
+					input.diaPagoMensual !== currentOpportunity[0].diaPagoMensual ||
+					cambioDeIntencion ||
+					leadIdCambio
+				) {
+					// No 15/30 ya probó su origen IA al pasar la validación de arriba.
+					const esDiaIA =
+						input.diaPagoMensual !== 15 && input.diaPagoMensual !== 30
+							? true
+							: elegidoDesdeRecomendacionIA &&
+								(suggestedDays?.some((d) => d.dia === input.diaPagoMensual) ??
+									false);
+					// Si ya había un valor capturado, se preserva: representa "qué día
+					// hubiera puesto el sistema al momento de la asignación original", no
+					// de hoy. Recalcularlo cada vez que se edita el día IA (p. ej. cambiar
+					// de una recomendación a otra) movería el default retroactivamente y
+					// distorsionaría calcularAjusteFechaIdeal al cierre.
+					diaPagoOriginalSistemaUpdate = esDiaIA
+						? (currentOpportunity[0].diaPagoOriginalSistema ??
+							getDiaPagoOriginalSistema())
+						: null;
+				}
 			}
 
 			// Validate stage transitions

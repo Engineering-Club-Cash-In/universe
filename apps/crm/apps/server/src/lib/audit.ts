@@ -43,8 +43,11 @@ export type AuditEntry = {
 };
 
 export type AuditContext = {
+	/** Quién responde por la escritura. Bajo suplantación, el admin que la inició. */
 	actorId: string | null;
 	actorRole: string | null;
+	/** Usuario suplantado, cuando la sesión es una suplantación. */
+	impersonatedFor?: string | null;
 	source: AuditSource;
 	/** `crm.updateOpportunity` o `POST /api/public/lead`. */
 	operation: string;
@@ -207,13 +210,21 @@ export function buildAuditRows(
 		durationMs: outcome.durationMs,
 	};
 
+	// Bajo suplantación `performed_by` es el admin que la inició — si no, la
+	// bitácora diría que el cambio lo hizo el usuario suplantado, que es
+	// exactamente lo que no hay que perder de vista.
+	const conActor = (payload: unknown) =>
+		context.impersonatedFor
+			? { _ejecutadoComo: context.impersonatedFor, payload }
+			: payload;
+
 	if (context.entries.length > 0) {
 		return context.entries.map((entry) => ({
 			...common,
 			entityType: entry.entity,
 			entityId: entry.id ?? null,
 			action: entry.action,
-			input: prepareAuditInput(entry.data ?? context.input),
+			input: prepareAuditInput(conActor(entry.data ?? context.input)),
 			ok: entry.ok ?? outcome.ok,
 			errorCode: entry.errorCode ?? outcome.errorCode ?? null,
 		}));
@@ -229,7 +240,7 @@ export function buildAuditRows(
 			entityType: context.fallback.entity,
 			entityId: null,
 			action: context.fallback.action,
-			input: prepareAuditInput(context.input),
+			input: prepareAuditInput(conActor(context.input)),
 			ok: false,
 			errorCode: outcome.errorCode ?? null,
 		},
@@ -329,10 +340,15 @@ export const auditMiddleware = auditBase.middleware(
 	async ({ context, next, path, procedure }, input) => {
 		const audit = procedure["~orpc"].meta.audit;
 		const actor = context.session?.user;
+		// Better Auth deja al admin que inició la suplantación en la sesión, no en
+		// el usuario: sin esto, todo lo hecho suplantando se le atribuiría al
+		// suplantado (ver `impersonatedBy` en lib/auth.ts).
+		const impersonatedBy = context.session?.session?.impersonatedBy ?? null;
 		return runWithAudit(
 			{
-				actorId: actor?.id ?? null,
+				actorId: impersonatedBy ?? actor?.id ?? null,
 				actorRole: actor?.role ?? null,
+				impersonatedFor: impersonatedBy ? (actor?.id ?? null) : null,
 				source: "crm",
 				operation: path.join("."),
 				input,

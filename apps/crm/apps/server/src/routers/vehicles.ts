@@ -645,12 +645,18 @@ export const vehiclesRouter = {
 					})
 					.where(eq(vehicles.id, input.id))
 					.returning();
-				auditRecord({
-					entity: "vehicle",
-					id: input.id,
-					action: "update",
-					data: input.data,
-				});
+
+				if (updated) {
+					// Con un id inexistente el UPDATE no toca nada y el handler
+					// devuelve undefined sin fallar: anotar igual afirmaría una edición
+					// que no ocurrió.
+					auditRecord({
+						entity: "vehicle",
+						id: updated.id,
+						action: "update",
+						data: input.data,
+					});
+				}
 
 				return updated;
 			} catch (error: unknown) {
@@ -683,11 +689,10 @@ export const vehiclesRouter = {
 				.delete(vehicles)
 				.where(eq(vehicles.id, input.id))
 				.returning();
-			auditRecord({
-				entity: "vehicle",
-				id: input.id,
-				action: "delete",
-			});
+
+			if (deleted) {
+				auditRecord({ entity: "vehicle", id: deleted.id, action: "delete" });
+			}
 
 			return deleted;
 		}),

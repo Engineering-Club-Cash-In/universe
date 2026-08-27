@@ -267,3 +267,46 @@ describe("resolveOperation", () => {
 		);
 	});
 });
+
+describe("suplantación", () => {
+	test("atribuye la escritura al admin que la inició, no al suplantado", () => {
+		const [row] = buildAuditRows(
+			contextWith({
+				actorId: "admin-1",
+				actorRole: "sales",
+				impersonatedFor: "vendedor-9",
+				entries: [
+					{
+						entity: "opportunity",
+						id: "opp-1",
+						action: "update",
+						data: { x: 1 },
+					},
+				],
+			}),
+			{ ok: true, durationMs: 3 },
+		);
+		expect(row.performedBy).toBe("admin-1");
+		expect(row.input).toEqual({
+			_ejecutadoComo: "vendedor-9",
+			payload: { x: 1 },
+		});
+	});
+
+	test("sin suplantación el payload queda tal cual", () => {
+		const [row] = buildAuditRows(
+			contextWith({
+				entries: [
+					{
+						entity: "opportunity",
+						id: "opp-1",
+						action: "update",
+						data: { x: 1 },
+					},
+				],
+			}),
+			{ ok: true, durationMs: 3 },
+		);
+		expect(row.input).toEqual({ x: 1 });
+	});
+});

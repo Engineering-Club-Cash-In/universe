@@ -4,6 +4,7 @@ import {
 	auditSourceForPath,
 	buildAuditRows,
 	chunk,
+	resolveOperation,
 	prepareAuditInput,
 	redactAuditInput,
 } from "./audit";
@@ -235,5 +236,34 @@ describe("chunk", () => {
 	test("leaves a small batch in a single statement", () => {
 		expect(chunk([1, 2, 3], 500)).toEqual([[1, 2, 3]]);
 		expect(chunk([], 500)).toEqual([]);
+	});
+});
+
+describe("resolveOperation", () => {
+	test("ignores the middleware pattern and keeps the real path", () => {
+		// En un middleware montado con app.use(), routePath es el del middleware:
+		// sin esto, toda ruta de Hono quedaba registrada como "POST /*".
+		expect(resolveOperation("POST", "/api/public/lead", "/*")).toBe(
+			"POST /api/public/lead",
+		);
+		expect(resolveOperation("POST", "/info/renap", "*")).toBe(
+			"POST /info/renap",
+		);
+	});
+
+	test("prefers the matched route once Hono resolved it", () => {
+		expect(
+			resolveOperation(
+				"DELETE",
+				"/api/migrate/cleanup",
+				"/api/migrate/cleanup",
+			),
+		).toBe("DELETE /api/migrate/cleanup");
+	});
+
+	test("falls back to the request path when there is no route", () => {
+		expect(resolveOperation("POST", "/api/load-cars")).toBe(
+			"POST /api/load-cars",
+		);
 	});
 });

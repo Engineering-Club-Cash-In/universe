@@ -1,4 +1,4 @@
-import { and, asc, count, eq, or } from "drizzle-orm";
+import { and, asc, count, eq, not, or } from "drizzle-orm";
 import type { Context } from "hono";
 import { db } from "../db";
 import { auditRecord } from "../lib/audit";
@@ -247,19 +247,39 @@ export async function createPublicLead(c: Context) {
 					);
 
 					if (Object.keys(opportunityUpdates).length > 0) {
-						await db
+						// `opportunityUpdates` puede traer `creditType`, que es campo
+						// congelado. La oportunidad se eligió entre las abiertas, pero
+						// entre esa lectura y este UPDATE `closeOpportunity` puede
+						// haberla marcado ganada: el predicado lo exige en la misma
+						// sentencia, como en `updateOpportunity`.
+						const actualizadas = await db
 							.update(opportunities)
 							.set({
 								...opportunityUpdates,
 								updatedAt: new Date(),
 							})
-							.where(eq(opportunities.id, sameSourceOpportunity.id));
-						auditRecord({
-							entity: "opportunity",
-							id: sameSourceOpportunity.id,
-							action: "update",
-							data: opportunityUpdates,
-						});
+							.where(
+								and(
+									eq(opportunities.id, sameSourceOpportunity.id),
+									not(eq(opportunities.status, "won")),
+								),
+							)
+							.returning({ id: opportunities.id });
+
+						if (actualizadas.length > 0) {
+							auditRecord({
+								entity: "opportunity",
+								id: sameSourceOpportunity.id,
+								action: "update",
+								data: opportunityUpdates,
+							});
+						} else {
+							// No es un error del formulario: el proceso ya se cerró
+							// mientras tanto y sus datos quedaron fijados.
+							console.log(
+								`[PublicLead] Oportunidad ${sameSourceOpportunity.id} ya está ganada; no se actualiza`,
+							);
+						}
 					}
 
 					// La campaña sí se sincroniza cuando la re-entrada es del mismo

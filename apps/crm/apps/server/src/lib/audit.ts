@@ -100,6 +100,12 @@ export function auditRollback(marca: number): void {
 	if (context) context.entries.length = marca;
 }
 
+/** Precisa el nombre de la operación una vez que se conoce. */
+export function setAuditOperation(operation: string): void {
+	const context = storage.getStore();
+	if (context) context.operation = operation;
+}
+
 /** Cuántas escrituras lleva anotadas la request (para chequeos internos). */
 export function auditedSoFar(): number {
 	return storage.getStore()?.entries.length ?? 0;
@@ -337,6 +343,22 @@ export const auditMiddleware = auditBase.middleware(
 	},
 );
 
+/**
+ * Nombre de la operación para una request de Hono.
+ *
+ * `routePath` sirve solo si ya se resolvió la ruta concreta: en un middleware
+ * montado con `app.use()` vale el patrón del propio middleware (`/*`), y todas
+ * las rutas terminarían registradas como `POST /*`.
+ */
+export function resolveOperation(
+	method: string,
+	path: string,
+	routePath?: string,
+): string {
+	const usable = routePath && !routePath.includes("*") ? routePath : path;
+	return `${method} ${usable}`;
+}
+
 /** El `source` sale de la ruta: no hay que acordarse de declararlo. */
 export function auditSourceForPath(path: string): AuditSource {
 	if (path.startsWith("/info/")) return "bot";
@@ -361,12 +383,17 @@ export function auditRequest(): MiddlewareHandler {
 				actorId: null,
 				actorRole: null,
 				source: auditSourceForPath(path),
-				operation: `${c.req.method} ${c.req.routePath ?? path}`,
+				operation: resolveOperation(c.req.method, path),
 				input: await readRequestBody(c),
 				fallback: null,
 			},
 			async () => {
 				await next();
+				// Recién acá Hono resolvió la ruta concreta; antes de `next()` el
+				// `routePath` es el del propio middleware.
+				setAuditOperation(
+					resolveOperation(c.req.method, path, c.req.routePath),
+				);
 			},
 			// Los handlers de Hono devuelven el error en la respuesta en vez de
 			// lanzarlo, así que el estado es la única señal de que falló.

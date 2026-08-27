@@ -3723,6 +3723,7 @@ export const crmRouter = {
 					title: opportunities.title,
 					assignedTo: opportunities.assignedTo,
 					stageId: opportunities.stageId,
+					status: opportunities.status,
 					creditDetailApproved: opportunities.creditDetailApproved,
 				})
 				.from(opportunities)
@@ -3763,6 +3764,18 @@ export const crmRouter = {
 				});
 			}
 
+			// Lo de arriba mira la etapa, y una oportunidad puede estar ganada sin
+			// haber llegado al 90%: `confirmContractsSigned` crea el crédito en
+			// cartera y recién después mueve la etapa, así que si eso falla queda
+			// ganada en el 85%. Ahí cancelar la devolvería al 40% y dejaría el
+			// detalle de crédito editable con el crédito ya creado.
+			if (opportunity.status === "won") {
+				throw new ORPCError("FORBIDDEN", {
+					message:
+						"La oportunidad ya está ganada: no se puede cancelar la aprobación del detalle de crédito porque el crédito ya existe en cartera.",
+				});
+			}
+
 			// Get stage 40% by closurePercentage (more reliable than order)
 			const [previousStage] = await db
 				.select()
@@ -3779,7 +3792,7 @@ export const crmRouter = {
 			// Update opportunity and record history in a transaction for atomicity
 			await db.transaction(async (tx) => {
 				// Update opportunity - revoke approval
-				await tx
+				const revocadas = await tx
 					.update(opportunities)
 					.set({
 						stageId: previousStage.id,
@@ -3788,7 +3801,23 @@ export const crmRouter = {
 						creditDetailApprovedAt: null,
 						updatedAt: new Date(),
 					})
-					.where(eq(opportunities.id, input.opportunityId));
+					.where(
+						and(
+							eq(opportunities.id, input.opportunityId),
+							// El chequeo de arriba leyó la fila antes del UPDATE: si se
+							// gana en el medio, esta condición lo frena en la misma
+							// sentencia.
+							not(eq(opportunities.status, "won")),
+						),
+					)
+					.returning({ id: opportunities.id });
+
+				if (revocadas.length === 0) {
+					throw new ORPCError("FORBIDDEN", {
+						message:
+							"La oportunidad se marcó como ganada mientras se cancelaba la aprobación. El crédito ya existe en cartera.",
+					});
+				}
 				auditRecord({
 					entity: "opportunity",
 					id: input.opportunityId,

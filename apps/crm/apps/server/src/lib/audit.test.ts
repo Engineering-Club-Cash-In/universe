@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
 	type AuditContext,
+	auditSourceForPath,
 	buildAuditRows,
 	prepareAuditInput,
 	redactAuditInput,
@@ -180,5 +181,41 @@ describe("prepareAuditInput", () => {
 		};
 		expect(result._truncated).toBe(true);
 		expect(result.keys.length).toBe(100);
+	});
+});
+
+describe("auditSourceForPath", () => {
+	test("derives the source from the route so nobody has to declare it", () => {
+		expect(auditSourceForPath("/info/renap")).toBe("bot");
+		expect(auditSourceForPath("/api/portal/lead")).toBe("portal");
+		expect(auditSourceForPath("/api/public/lead")).toBe("public");
+		expect(auditSourceForPath("/api/migrate/creditos")).toBe("system");
+		expect(auditSourceForPath("/api/load-cars")).toBe("system");
+	});
+});
+
+describe("failed requests that do not throw", () => {
+	test("marks the recorded writes with the outcome of the request", () => {
+		// Los handlers de Hono devuelven c.json({ error }, 400) en vez de lanzar:
+		// sin mirar el estado, una escritura dentro de un rechazo quedaba como ok.
+		const [row] = buildAuditRows(
+			contextWith({
+				source: "public",
+				operation: "POST /api/public/lead",
+				entries: [{ entity: "lead", id: "lead-1", action: "create" }],
+			}),
+			{ ok: false, errorCode: "HTTP_400", durationMs: 5 },
+		);
+		expect(row).toMatchObject({ ok: false, errorCode: "HTTP_400" });
+	});
+
+	test("lets an entry keep its own outcome", () => {
+		const [row] = buildAuditRows(
+			contextWith({
+				entries: [{ entity: "lead", id: "lead-1", action: "create", ok: true }],
+			}),
+			{ ok: false, errorCode: "HTTP_500", durationMs: 5 },
+		);
+		expect(row.ok).toBe(true);
 	});
 });

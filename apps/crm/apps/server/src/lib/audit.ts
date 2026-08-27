@@ -12,9 +12,9 @@ import type { Context } from "./context";
  * request. Los handlers no conocen la tabla ni la conexión — solo anotan qué
  * entidad tocaron con `auditRecord`, que es un push en memoria.
  *
- *     ORPC:  publicProcedure.meta({ audit: { entity, action } })
- *     Hono:  app.post("/api/public/lead", auditRoute("public"), handler)
- *     Ambos: auditRecord({ entity: "lead", id, action: "create" })
+ *     Handlers: auditRecord({ entity: "lead", id, action: "create" })
+ *     ORPC:     el middleware abre el contexto para todo procedure
+ *     Hono:     app.use(auditRequest()) lo abre para todo lo demás
  *
  * De ahí salen dos garantías que la versión anterior no tenía:
  *
@@ -124,7 +124,9 @@ export function redactAuditInput(value: unknown, depth = 0): unknown {
 	}
 	if (typeof value === "object") {
 		const out: Record<string, unknown> = {};
-		for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+		for (const [key, item] of Object.entries(
+			value as Record<string, unknown>,
+		)) {
 			if (item === undefined) continue;
 			out[key] = SENSITIVE_KEY.test(key)
 				? "<omitido>"
@@ -228,10 +230,17 @@ async function flush(
 
 type RunOptions = Omit<AuditContext, "startedAt" | "entries">;
 
-/** Abre el contexto, corre la operación y persiste lo anotado. */
+/**
+ * Abre el contexto, corre la operación y persiste lo anotado.
+ *
+ * `resolveOutcome` existe porque no todo fallo se lanza: los handlers de Hono
+ * devuelven `c.json({ error }, 400)` y eso resuelve normal. Sin consultarlo, un
+ * rechazo se registraría como éxito.
+ */
 export async function runWithAudit<T>(
 	options: RunOptions,
 	run: () => Promise<T>,
+	resolveOutcome?: () => { ok: boolean; errorCode?: string | null },
 ): Promise<T> {
 	const context: AuditContext = {
 		...options,
@@ -241,7 +250,7 @@ export async function runWithAudit<T>(
 	return storage.run(context, async () => {
 		try {
 			const result = await run();
-			await flush(context, { ok: true });
+			await flush(context, resolveOutcome?.() ?? { ok: true });
 			return result;
 		} catch (error) {
 			await flush(context, { ok: false, errorCode: describeAuditError(error) });
@@ -254,21 +263,25 @@ export async function runWithAudit<T>(
 
 export type AuditMeta = {
 	/**
-	 * Declara que el procedure escribe entidades auditadas. `entity` y `action`
-	 * identifican la fila de fallo; las de éxito salen de lo que anote el
-	 * handler.
+	 * Identidad de la fila de fallo cuando el handler no llegó a anotar nada.
+	 * Es OPCIONAL: el contexto se abre igual para todos los procedures, así que
+	 * olvidarlo nunca hace que se pierda una anotación — solo que un intento
+	 * rechazado que no escribió nada no deje rastro.
 	 */
 	audit?: { entity: AuditEntityType; action: string };
 };
 
 const auditBase = os.$context<Context>().$meta<AuditMeta>({});
 
-/** Middleware de ORPC. Passthrough para los procedures sin `meta.audit`. */
+/**
+ * Middleware de ORPC. Abre el contexto para TODOS los procedures: si solo lo
+ * abriera para los que declaran `meta.audit`, un `auditRecord` en un handler
+ * sin meta se descartaría en silencio. Sin anotaciones no escribe nada, así
+ * que abrirlo de más no cuesta una fila.
+ */
 export const auditMiddleware = auditBase.middleware(
 	async ({ context, next, path, procedure }, input) => {
 		const audit = procedure["~orpc"].meta.audit;
-		if (!audit) return next();
-
 		const actor = context.session?.user;
 		return runWithAudit(
 			{
@@ -277,34 +290,50 @@ export const auditMiddleware = auditBase.middleware(
 				source: "crm",
 				operation: path.join("."),
 				input,
-				fallback: audit,
+				fallback: audit ?? null,
 			},
 			async () => next(),
 		);
 	},
 );
 
+/** El `source` sale de la ruta: no hay que acordarse de declararlo. */
+export function auditSourceForPath(path: string): AuditSource {
+	if (path.startsWith("/info/")) return "bot";
+	if (path.startsWith("/api/portal/")) return "portal";
+	if (path.startsWith("/api/public/")) return "public";
+	return "system";
+}
+
 /**
- * Middleware de Hono para lo que no pasa por ORPC (bot, portal, formulario
- * público, imports). El `source` sale de la ruta, no de quien la escribe.
+ * Middleware de Hono, montado una sola vez para toda la app. Abre el contexto
+ * de cualquier request que no pase por ORPC (que tiene el suyo) para que un
+ * `auditRecord` en un controller nunca caiga al vacío por haberse olvidado de
+ * enganchar la ruta.
  */
-export function auditRoute(
-	source: AuditSource,
-	fallback: { entity: AuditEntityType; action: string } | null = null,
-): MiddlewareHandler {
+export function auditRequest(): MiddlewareHandler {
 	return async (c: HonoContext, next) => {
+		const path = c.req.path;
+		if (path.startsWith("/rpc")) return next();
+
 		return runWithAudit(
 			{
 				actorId: null,
 				actorRole: null,
-				source,
-				operation: `${c.req.method} ${c.req.routePath ?? c.req.path}`,
+				source: auditSourceForPath(path),
+				operation: `${c.req.method} ${c.req.routePath ?? path}`,
 				input: await readRequestBody(c),
-				fallback,
+				fallback: null,
 			},
 			async () => {
 				await next();
 			},
+			// Los handlers de Hono devuelven el error en la respuesta en vez de
+			// lanzarlo, así que el estado es la única señal de que falló.
+			() =>
+				c.res.status >= 400
+					? { ok: false, errorCode: `HTTP_${c.res.status}` }
+					: { ok: true },
 		);
 	};
 }

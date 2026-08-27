@@ -363,6 +363,7 @@ export const messagingRouter = {
 	 * y guarda el resultado real (sent/failed).
 	 */
 	updateWhatsappLog: crmProcedure
+		.meta({ audit: { entity: "lead", action: "update_phone" } })
 		.input(
 			z.object({
 				recipientId: z.string().uuid(),

@@ -78,3 +78,12 @@ describe("tieneMontosFacturables", () => {
     expect(tieneMontosFacturables({ membresias_pago: "50" })).toBe(true);
   });
 });
+
+describe("IVA como monto facturable (Codex)", () => {
+  it("un pago que solo trae abono_iva_12 sí requiere factura", () => {
+    // El motor cobra interés antes que IVA: tras un parcial que cerró el
+    // interés, el siguiente pago puede traer solo IVA — y va en el DTE.
+    expect(tieneMontosFacturables({ abono_iva_12: "35.71" })).toBe(true);
+    expect(tieneMontosFacturables({ abono_iva_ci: "12.00" })).toBe(true);
+  });
+});

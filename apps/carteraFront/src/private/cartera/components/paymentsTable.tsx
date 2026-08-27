@@ -680,6 +680,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                   setSoloAplicados(undefined);
                   setInversionistaId(undefined);
                   setValidationStatusFilter("");
+                  setFacturaStatusFilter("");
                   setQueryInv("");
                   setPage(1);
                 }}
@@ -694,6 +695,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                     inversionistaId !== undefined,
                     soloAplicados !== undefined,
                     validationStatusFilter !== "",
+                    facturaStatusFilter !== "",
                     categoriaCredito !== "",
                     formatoCredito !== "",
                     modoFecha !== "simple" || (modoFecha === "simple" && (mes !== today.getMonth() + 1 || anio !== today.getFullYear() || dia !== today.getDate())),

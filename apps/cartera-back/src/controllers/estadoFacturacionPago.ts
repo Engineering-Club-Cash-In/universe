@@ -113,6 +113,8 @@ export async function registrarEstadoFacturacion(
 export type MontosFacturablesPago = {
   abono_interes?: string | number | null;
   abono_interes_ci?: string | number | null;
+  /** El motor cobra interés antes que IVA: un pago puede traer solo esto. */
+  abono_iva_12?: string | number | null;
   abono_iva_ci?: string | number | null;
   abono_seguro?: string | number | null;
   abono_gps?: string | number | null;
@@ -132,6 +134,7 @@ export function tieneMontosFacturables(pago: MontosFacturablesPago): boolean {
   return [
     pago.abono_interes,
     pago.abono_interes_ci,
+    pago.abono_iva_12,
     pago.abono_iva_ci,
     pago.abono_seguro,
     pago.abono_gps,

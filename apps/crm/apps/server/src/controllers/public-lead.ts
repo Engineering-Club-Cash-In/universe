@@ -8,12 +8,14 @@ import {
 	opportunities,
 	salesStages,
 } from "../db/schema/crm";
+import { eqDpi } from "../lib/dpi-lookup";
 import {
 	findSalesUserWithLeastAutoAssignedLeads,
 	resolveExistingLeadAssigneeFromDatabase,
 } from "../lib/lead-assignment";
 import { getPublicLeadExistingOpportunityUpdates } from "../lib/lead-helpers";
-import { getOpenOpportunityBySource } from "../lib/lead-opportunity";
+import { getActiveOpportunities } from "../lib/lead-opportunity";
+import { isOpportunityFromSource } from "../lib/lead-opportunity-source";
 import { validarDpi } from "../utils/cui-validation";
 import { getOnlyRenapInfoController } from "./bot";
 
@@ -164,14 +166,28 @@ export async function createPublicLead(c: Context) {
 
 		// Buscar lead existente: por email+DPI si hay DPI, solo por email si no
 		const whereClause = hasDpi
-			? or(eq(leads.email, body.email), eq(leads.dpi, body.dpi))
+			? or(eq(leads.email, body.email), eqDpi(leads.dpi, body.dpi))
 			: eq(leads.email, body.email);
 
-		const [existingLead] = await db
+		// Se traen TODAS las filas que empataron, no una sola: mientras queden
+		// leads duplicados sin depurar, el proceso en curso puede estar colgado de
+		// cualquiera de ellas. Se trabaja sobre el lead que sostiene ese proceso y,
+		// si no hay ninguno, sobre el más antiguo, que arrastra el historial.
+		const matchingLeads = await db
 			.select()
 			.from(leads)
 			.where(whereClause)
-			.limit(1);
+			.orderBy(asc(leads.createdAt));
+
+		const activeOpportunities = await getActiveOpportunities(
+			matchingLeads.map((lead) => lead.id),
+		);
+
+		const activeOpportunity = activeOpportunities[0];
+
+		const existingLead =
+			matchingLeads.find((lead) => lead.id === activeOpportunity?.leadId) ??
+			matchingLeads[0];
 
 		// --- Lead existente ---
 		if (existingLead) {
@@ -186,6 +202,106 @@ export async function createPublicLead(c: Context) {
 				);
 			}
 
+			// Un cliente que ya está siendo atendido no vuelve a la ruleta ni estrena
+			// oportunidad por entrar de nuevo. Antes esto solo se respetaba cuando la
+			// oportunidad abierta era del mismo canal, y por eso una re-entrada por
+			// otro canal le quitaba el lead al asesor cada vez que el dueño actual
+			// tenía `assign_leads = false`, aunque llevara días trabajando el caso.
+			if (activeOpportunity) {
+				// ¿Alguno de los procesos vivos es del canal por el que acaba de
+				// entrar? Se busca sobre todos, no solo sobre los del lead elegido:
+				// con filas duplicadas el proceso del canal entrante puede estar
+				// colgado de otra. Y cada oportunidad legacy (sin source) se clasifica
+				// con el canal de SU lead, que es el que le corresponde.
+				const leadById = new Map(
+					matchingLeads.map((lead) => [lead.id, lead] as const),
+				);
+
+				const leadOf = (opportunity: { leadId: string | null }) =>
+					(opportunity.leadId && leadById.get(opportunity.leadId)) ||
+					existingLead;
+
+				const sameSourceOpportunity = activeOpportunities.find((opportunity) =>
+					isOpportunityFromSource(
+						opportunity.source,
+						source,
+						leadOf(opportunity).source,
+					),
+				);
+
+				if (sameSourceOpportunity) {
+					const opportunityUpdates = getPublicLeadExistingOpportunityUpdates(
+						sameSourceOpportunity,
+						{
+							campaign: body.campaign,
+							creditType,
+						},
+					);
+
+					if (Object.keys(opportunityUpdates).length > 0) {
+						await db
+							.update(opportunities)
+							.set({
+								...opportunityUpdates,
+								updatedAt: new Date(),
+							})
+							.where(eq(opportunities.id, sameSourceOpportunity.id));
+					}
+
+					// La campaña sí se sincroniza cuando la re-entrada es del mismo
+					// canal: es la atribución del proceso que ya está abierto, y
+					// `createOpportunity` la copia del lead cuando se crea una
+					// oportunidad sin campaña explícita. Se escribe en el lead dueño de
+					// esa oportunidad, que con filas duplicadas no siempre es el que se
+					// eligió arriba. El `source` no se toca (ver abajo); si la re-entrada
+					// es de otro canal, la campaña tampoco, porque pertenece a un toque
+					// que no se está registrando.
+					const opportunityLead = leadOf(sameSourceOpportunity);
+
+					if (body.campaign && body.campaign !== opportunityLead.campaign) {
+						const [syncedLead] = await db
+							.update(leads)
+							.set({ campaign: body.campaign, updatedAt: new Date() })
+							.where(eq(leads.id, opportunityLead.id))
+							.returning();
+
+						if (syncedLead?.id === existingLead.id) {
+							leadData = syncedLead;
+						}
+					}
+				}
+
+				// El correo sí se sincroniza aunque la re-entrada no cree oportunidad:
+				// es dato de contacto del cliente, no atribución ni asignación, y el
+				// bloque que lo hacía más abajo ya no se alcanza desde acá.
+				if (
+					hasDpi &&
+					existingLead.dpi === body.dpi &&
+					(!existingLead.email || existingLead.email.trim() === "")
+				) {
+					[leadData] = await db
+						.update(leads)
+						.set({ email: body.email, updatedAt: new Date() })
+						.where(eq(leads.id, existingLead.id))
+						.returning();
+				}
+
+				// De `leads` no se toca nada más: `source` es lo que clasifica a las
+				// oportunidades legacy sin source, así que pisarlo con el canal de una
+				// re-entrada que se está rechazando haría que la próxima entrada por
+				// ese canal se lleve por delante el proceso de otro canal.
+				return c.json(
+					{
+						success: true,
+						data: leadData,
+						message: sameSourceOpportunity
+							? "Lead ya tiene una oportunidad abierta con el mismo source"
+							: "Lead ya tiene un proceso activo con su asesor; no se creó una oportunidad nueva",
+					},
+					200,
+				);
+			}
+
 			if (body.source || body.campaign) {
 				[leadData] = await db
 					.update(leads)
@@ -196,41 +312,6 @@ export async function createPublicLead(c: Context) {
 					})
 					.where(eq(leads.id, existingLead.id))
 					.returning();
-			}
-
-			// Verificar si ya tiene una oportunidad abierta con el mismo source
-			const existingOpportunity = await getOpenOpportunityBySource(
-				existingLead.id,
-				source,
-			);
-			if (existingOpportunity) {
-				const opportunityUpdates = getPublicLeadExistingOpportunityUpdates(
-					existingOpportunity,
-					{
-						campaign: body.campaign,
-						creditType,
-					},
-				);
-
-				if (Object.keys(opportunityUpdates).length > 0) {
-					await db
-						.update(opportunities)
-						.set({
-							...opportunityUpdates,
-							updatedAt: new Date(),
-						})
-						.where(eq(opportunities.id, existingOpportunity.id));
-				}
-
-				return c.json(
-					{
-						success: true,
-						data: leadData,
-						message:
-							"Lead ya tiene una oportunidad abierta con el mismo source",
-					},
-					200,
-				);
 			}
 
 			const assignedTo = await resolveExistingLeadAssigneeFromDatabase(

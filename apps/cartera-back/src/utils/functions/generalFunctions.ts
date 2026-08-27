@@ -6,6 +6,7 @@ import axios from "axios";
 import Big from "big.js";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { sql, type SQL } from "drizzle-orm";
+import type { FilaCompraAjuste } from "../comprasAjuste";
 // Tipos auxiliares
 
 /**
@@ -698,7 +699,7 @@ export async function buildInversionistaWorkbook(
   function toN(v: any) { return Number(v || 0); }
 
   // Carril descuenta_impuestos: solo con el flag en true; con false nada cambia.
-  // Del controlador: abono_interes llega BRUTO, abonoGeneralInteres = neto (×0.81),
+  // Del controlador: abono_interes llega BRUTO, abonoGeneralInteres = neto (×0.93, solo ISR),
   // abono_iva = 12% bruto, isr = 7% bruto; el subtotal ya viene neteado.
   const aplicaDescImp = inv.descuenta_impuestos === true;
 
@@ -802,6 +803,71 @@ export async function buildInversionistaWorkbook(
     sin_reinversion:       "El inversionista recibe capital + interés; no se reinvierte nada.",
   };
 
+  // ── Precarga en bloque para el ajuste de compras (2 consultas para TODO el reporte).
+  // Antes esto vivía dentro del loop de créditos: 2 consultas por crédito, en serie. Con la
+  // latencia real de la BD eso hacía que el Excel tardara ~2 × créditos × RTT (un inversionista
+  // de 300 créditos pasaba de los 2 minutos y el endpoint moría por timeout aunque el archivo
+  // sí se subía). Los datos son los mismos; solo cambia cuándo se traen.
+  const creditoIdsReporte = inv.creditos.map((c) => c.credito_id).filter((id): id is number => id != null);
+
+  const ultimoHistoricoPorCredito = new Map<number, { fecha: Date }>();
+  const comprasPorCredito = new Map<number, FilaCompraAjuste[]>();
+
+  if (creditoIdsReporte.length > 0) {
+    try {
+      const [{ db }, schema, { and, eq, inArray, desc }, { columnasCompraAjuste }] = await Promise.all([
+        import("../../database/index"),
+        import("../../database/db/schema"),
+        import("drizzle-orm"),
+        import("../comprasAjuste"),
+      ]);
+      const { historico_liquidaciones_espejo, compras_credito_inversionista } = schema;
+
+      const [historicos, compras] = await Promise.all([
+        db
+          .select({
+            credito_id: historico_liquidaciones_espejo.credito_id,
+            fecha: historico_liquidaciones_espejo.fecha,
+          })
+          .from(historico_liquidaciones_espejo)
+          .where(
+            and(
+              inArray(historico_liquidaciones_espejo.credito_id, creditoIdsReporte),
+              eq(historico_liquidaciones_espejo.inversionista_id, inv.inversionista_id)
+            )
+          ),
+        db
+          .select({ credito_id: compras_credito_inversionista.credito_id, ...columnasCompraAjuste })
+          .from(compras_credito_inversionista)
+          .where(
+            and(
+              inArray(compras_credito_inversionista.credito_id, creditoIdsReporte),
+              eq(compras_credito_inversionista.inversionista_id, inv.inversionista_id),
+              inArray(compras_credito_inversionista.tipo_operacion, ["compra_cartera", "reinversion"])
+            )
+          )
+          .orderBy(desc(compras_credito_inversionista.updated_at)),
+      ]);
+
+      // Equivalente al `orderBy(fecha desc).limit(1)` que se hacía por crédito.
+      for (const h of historicos) {
+        if (h.credito_id == null || h.fecha == null) continue;
+        const fecha = new Date(h.fecha as any);
+        const previo = ultimoHistoricoPorCredito.get(h.credito_id);
+        if (!previo || fecha > previo.fecha) ultimoHistoricoPorCredito.set(h.credito_id, { fecha });
+      }
+
+      for (const c of compras) {
+        if (c.credito_id == null) continue;
+        const lista = comprasPorCredito.get(c.credito_id);
+        if (lista) lista.push(c as FilaCompraAjuste);
+        else comprasPorCredito.set(c.credito_id, [c as FilaCompraAjuste]);
+      }
+    } catch (e) {
+      console.error("Error precargando el ajuste de compras para el Excel:", e);
+    }
+  }
+
   // Con descuenta_impuestos las filas 5-6 llevan el bloque "Neto de impuestos".
   let row = aplicaDescImp ? 7 : 5;
   const groupTotalRows: number[] = [];
@@ -876,35 +942,18 @@ export async function buildInversionistaWorkbook(
       const primerPago = cr.pagos?.[0];
       if (primerPago) {
         try {
-          const { db } = await import("../../database/index");
-          const { historico_liquidaciones_espejo } = await import("../../database/db/schema");
-          const { and, eq, desc } = await import("drizzle-orm");
-          const { calcularAjusteCompras } = await import("../comprasAjuste");
+          const { calcularAjusteComprasDesdeFilas } = await import("../comprasAjuste");
 
-          // Buscamos el último histórico
-          const [lastHistorico] = await db
-            .select({
-              monto_aportado: historico_liquidaciones_espejo.monto_aportado,
-              fecha: historico_liquidaciones_espejo.fecha,
-            })
-            .from(historico_liquidaciones_espejo)
-            .where(
-              and(
-                eq(historico_liquidaciones_espejo.credito_id, cr.credito_id),
-                eq(historico_liquidaciones_espejo.inversionista_id, inv.inversionista_id)
-              )
-            )
-            .orderBy(desc(historico_liquidaciones_espejo.fecha))
-            .limit(1);
+          // Último histórico y compras del crédito: ya vienen de la precarga en bloque.
+          const lastHistorico = ultimoHistoricoPorCredito.get(cr.credito_id) ?? null;
 
           const fechaParaAjuste = primerPago.fecha_pago ? new Date(primerPago.fecha_pago) : new Date();
           const periodoMes = fechaParaAjuste.getMonth();
           const periodoAnio = fechaParaAjuste.getFullYear();
           // Siempre calcular ajuste — cubre compras pendientes aunque espejo == historico
-          const { montoRestarCalculo } = await calcularAjusteCompras(
-            cr.credito_id,
-            inv.inversionista_id,
-            lastHistorico ? new Date(lastHistorico.fecha) : null,
+          const { montoRestarCalculo } = calcularAjusteComprasDesdeFilas(
+            comprasPorCredito.get(cr.credito_id) ?? [],
+            lastHistorico ? lastHistorico.fecha : null,
             periodoMes,
             periodoAnio,
           );
@@ -1136,9 +1185,9 @@ export async function buildInversionistaWorkbook(
         const isr = new Big(pago.isr || 0);
 
         // Con descuenta_impuestos `int` es el interés BRUTO (el controller lo mantiene
-        // así); el neto = bruto − IVA − ISR, usando el iva/isr que ya trae el pago.
+        // así); el neto = bruto − ISR (solo ISR; el IVA no se resta).
         const abonoGeneralInteres = aplicaDescImp
-          ? int.minus(iva).minus(isr)
+          ? int.minus(isr)
           : inv.emite_factura
           ? int.plus(iva)
           : int.minus(isr);

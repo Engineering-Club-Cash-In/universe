@@ -21,6 +21,7 @@ import { revertirAbonoCapitalEspejo } from "./abonosCapital";
 import { updateMora } from "./latefee";
 import { SATClientService } from "../cofidi/satClientService";
 import { CLUB_CASHIN_CONFIG, SAT_CONFIG } from "../utils/functions/const";
+import { ahoraEnGuatemala, formatearFechaSAT } from "../utils/functions/fechaSAT";
 import { esPagoAplicado } from "../utils/paymentStatus";
 import {
   getRemainingPaymentPaidStatusAfterReversal,
@@ -34,6 +35,44 @@ import {
   recomputeCreditAfterCapital,
   shouldIncobrableInstallmentBePaid,
 } from "./registerPaymentPolicy";
+import {
+  emitInvoiceVoiding,
+  emitPaymentReversal,
+} from "../utils/structuredLogger";
+import {
+  classifyInvoiceVoidingBatch,
+  classifyPaymentReversalCompletion,
+  classifyPaymentReversalFailure,
+} from "./reversePaymentTelemetry";
+
+const MAX_TELEMETRY_DURATION_MS = 86_400_000;
+
+function safeNow(): number {
+  try {
+    const value = Date.now();
+    return Number.isFinite(value) ? value : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function elapsedMilliseconds(startedAt: number): number {
+  try {
+    const value = safeNow() - startedAt;
+    return Math.min(MAX_TELEMETRY_DURATION_MS, Math.max(0, Number.isFinite(value) ? value : 0));
+  } catch {
+    return 0;
+  }
+}
+
+function caughtErrorMessage(error: unknown): string | undefined {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "object" && error !== null && "message" in error) {
+    const value = Reflect.get(error, "message");
+    return typeof value === "string" ? value : undefined;
+  }
+  return undefined;
+}
 // ============================================================================
 // SCHEMA DE VALIDACIÓN
 // ============================================================================
@@ -59,9 +98,28 @@ export const reversePaymentSchema = z.object({
  * @param set - Handler de respuesta HTTP
  * @returns Objeto con el resultado de la operación
  */
-export const reversePayment = async ({ body, set }: any) => {
+export interface ReversePaymentDependencies {
+  readonly runTransaction: typeof db.transaction;
+  readonly reverseInvestors: typeof processAndReplaceCreditInvestorsReverse;
+  readonly reverseCapitalPayment: typeof revertirAbonoCapitalEspejo;
+}
+
+const defaultDependencies: ReversePaymentDependencies = {
+  runTransaction: db.transaction.bind(db),
+  reverseInvestors: processAndReplaceCreditInvestorsReverse,
+  reverseCapitalPayment: revertirAbonoCapitalEspejo,
+};
+
+export function createReversePayment(
+  dependencies: ReversePaymentDependencies = defaultDependencies,
+) {
+  return async ({ body, set, telemetryLogger }: any) => {
+  const startedAt = safeNow();
+  let previousPaymentState: "applied" | "pending" | "unknown" = "unknown";
+  let mayHaveGlobalPersistence = false;
+  let investmentsReversed = false;
+  let transactionCommitted = false;
   try {
-    console.log("\n🔄 ========== INICIO REVERSIÓN DE PAGO ==========");
 
     // ========================================================================
     // 1️⃣ VALIDAR ENTRADA
@@ -69,19 +127,26 @@ export const reversePayment = async ({ body, set }: any) => {
     const parseResult = reversePaymentSchema.safeParse(body);
     if (!parseResult.success) {
       set.status = 400;
+      emitPaymentReversal({
+        outcome: "rejected",
+        previousPaymentState: "unknown",
+        creditUpdated: false,
+        investmentsReversed: false,
+        manualActionRequired: false,
+        durationMs: elapsedMilliseconds(startedAt),
+        reasonCode: "schema_invalid",
+      }, telemetryLogger);
       return {
         message: "Validation failed",
         errors: parseResult.error.flatten().fieldErrors,
       };
     }
     const { credito_id, pago_id } = parseResult.data;
-    console.log(`📋 Crédito ID: ${credito_id}`);
-    console.log(`🧾 Pago ID: ${pago_id}`);
 
     // ========================================================================
     // 🔥 INICIAR TRANSACCIÓN ATÓMICA
     // ========================================================================
-    const result = await db.transaction(async (tx) => {
+    const result = await dependencies.runTransaction(async (tx) => {
       // ======================================================================
       // 2️⃣ OBTENER DATOS DEL PAGO A REVERSAR
       // ======================================================================
@@ -101,8 +166,8 @@ export const reversePayment = async ({ body, set }: any) => {
       }
 
       const pagoValidado = esPagoAplicado(pago.validationStatus);
+      previousPaymentState = pagoValidado ? "applied" : "pending";
 
-      console.log(`✅ Pago encontrado | Validado: ${pagoValidado}`);
 
       // ======================================================================
       // 2️⃣.5️⃣ RESETEAR AJUSTE POR FECHA IDEAL DE PAGO, SI ESTE PAGO LO COBRÓ
@@ -133,7 +198,6 @@ export const reversePayment = async ({ body, set }: any) => {
         throw new Error("Credit not found or not active");
       }
 
-      console.log("✅ Crédito encontrado y activo");
 
       // En un INCOBRABLE solo se permite reversar pagos de recuperación reales.
       // Reversar una fila estructural del castigo (system_reset / SISTEMA-INCOBRABLE
@@ -162,7 +226,6 @@ export const reversePayment = async ({ body, set }: any) => {
         throw new Error("User not found");
       }
 
-      console.log("✅ Usuario encontrado");
 
       // ======================================================================
       // 4️⃣.5️⃣ REVERSAR EL ABONO A CAPITAL DEL ESPEJO (abonos_capital)
@@ -180,7 +243,43 @@ export const reversePayment = async ({ body, set }: any) => {
       // después de ellas, el rollback NO las desharía: el pago quedaría sin
       // revertir pero la mora, el convenio y el saldo del inversionista ya
       // habrían cambiado. Se aborta antes de tocar nada.
-      const reversionEspejo = await revertirAbonoCapitalEspejo(pago_id, tx);
+      const reversionEspejo = await dependencies.reverseCapitalPayment(pago_id, tx);
+
+      // ======================================================================
+      // 4️⃣.6️⃣ LEER LAS FACTURAS ACTIVAS DEL PAGO (ANTES DE TOCARLO)
+      // ======================================================================
+      // 🔴 LA LECTURA VA ACÁ, NO EN EL PASO 1️⃣2️⃣.5️⃣ DONDE SE ANULAN: más abajo la
+      // rama de pago parcial hace `DELETE FROM pagos_credito`, y el FK de
+      // `facturas_electronicas.pago_id` es `onDelete: "set null"` (schema.ts):
+      // al borrarse el pago la factura NO se borra, pero pierde el vínculo.
+      // Para cuando corría el bloque de anulación, el SELECT por `pago_id` ya
+      // devolvía 0 filas: no se llamaba a COFIDI, no fallaba nada y la reversa
+      // respondía 200 "exitosa" con la factura VIGENTE en SAT (crédito 102,
+      // pago 153742, 13-ago-2026: 3 facturas certificadas que quedaron
+      // vigentes y sin anular).
+      //
+      // Leyendo acá capturamos factura_id y uuid mientras el vínculo existe.
+      // La anulación en COFIDI sigue ocurriendo abajo, en su paso, y actualiza
+      // por `factura_id`, que sigue siendo válido aunque `pago_id` quede NULL.
+      const facturasDelPago = await tx
+        .select({
+          factura_id: facturas_electronicas.factura_id,
+          uuid: facturas_electronicas.uuid,
+          status: facturas_electronicas.status,
+          receptor_nit: facturas_electronicas.receptor_nit,
+          fecha_certificacion: facturas_electronicas.fecha_certificacion,
+          fecha_emision: facturas_electronicas.fecha_emision,
+          serie: facturas_electronicas.serie,
+          numero: facturas_electronicas.numero,
+        })
+        .from(facturas_electronicas)
+        .where(
+          and(
+            eq(facturas_electronicas.pago_id, pago_id),
+            eq(facturas_electronicas.status, "ACTIVA"), // Solo anular las activas
+          ),
+        );
+
 
       // ======================================================================
       // 5️⃣ RECALCULAR VALORES DEL CRÉDITO (solo si cuota está pagada)
@@ -191,9 +290,6 @@ export const reversePayment = async ({ body, set }: any) => {
       let deudatotal = new Big(creditData.creditos.deudatotal ?? 0);
 
       if (pagoValidado) {
-        console.log(
-          "\n📊 ========== RECALCULANDO VALORES DEL CRÉDITO ==========",
-        );
 
         const capitalActual = new Big(creditData.creditos.capital ?? 0);
         const abonoCapital = new Big(pago.abono_capital ?? 0);
@@ -214,21 +310,13 @@ export const reversePayment = async ({ body, set }: any) => {
         iva_12 = recomputed.iva;
         deudatotal = recomputed.deudaTotal;
 
-        console.log(`💰 Capital actual: ${capitalActual.toString()}`);
-        console.log(`💵 Abono capital a reversar: ${abonoCapital.toString()}`);
-        console.log(`✅ Nuevo capital: ${nuevoCapital.toString()}`);
-        console.log(`🔢 Nuevo interés: ${cuota_interes.toString()}`);
-        console.log(`🔢 Nuevo IVA: ${iva_12.toString()}`);
-        console.log(`💳 Nueva deuda total: ${deudatotal.toString()}`);
-      } else {
-        console.log("⏭️ Cuota no pagada — se omite recálculo de capital/interés/IVA");
       }
 
       // ======================================================================
       // 6️⃣ REVERSAR MORA SI EXISTÍA
       // ======================================================================
       if (pago.mora && Number(pago.mora) > 0) {
-        console.log(`⚠️ Reversando mora: ${pago.mora}`);
+        mayHaveGlobalPersistence = true;
         const reverseMoraResult = await updateMora({
           credito_id,
           monto_cambio: Number(pago.mora),
@@ -245,14 +333,11 @@ export const reversePayment = async ({ body, set }: any) => {
       // 6️⃣.5️⃣ REVERSAR PAGO DE CONVENIO SI EXISTÍA
       // ======================================================================
       if (pago.pagoConvenio && Number(pago.pagoConvenio) > 0) {
-        console.log(`⚠️ Reversando pago de convenio: ${pago.pagoConvenio}`);
-        const reverseConvenioResult = await reverseConvenioPayment({
+        mayHaveGlobalPersistence = true;
+        await reverseConvenioPayment({
           credito_id,
           monto_pago: Number(pago.pagoConvenio),
         });
-        console.log(
-          `✅ Pago de convenio reversado: ${reverseConvenioResult.message}`,
-        );
       }
 
       // ======================================================================
@@ -270,25 +355,23 @@ export const reversePayment = async ({ body, set }: any) => {
           })
           .where(eq(creditos.credito_id, credito_id));
 
-        console.log("✅ Crédito actualizado con nuevos valores");
-      } else {
-        console.log(`⏭️ Crédito NO actualizado (pagoValidado=${pagoValidado})`);
       }
 
       // ======================================================================
       // 8️⃣ REVERSAR INVERSIONES ASOCIADAS AL PAGO
       // ======================================================================
-      console.log("\n💼 ========== REVERSANDO INVERSIONES ==========");
-      await processAndReplaceCreditInvestorsReverse(
+      await dependencies.reverseInvestors(
         credito_id,
         pago_id,
+        () => {
+          mayHaveGlobalPersistence = true;
+        },
       );
-      console.log("✅ Inversiones reversadas correctamente");
+      investmentsReversed = true;
 
       // ======================================================================
       // 9️⃣ DEVOLVER ABONOS A LOS "RESTANTES" DEL PAGO
       // ======================================================================
-      console.log("\n🔙 ========== DEVOLVIENDO ABONOS A RESTANTES ==========");
 
       const nuevoCapitalRestante = new Big(pago.capital_restante ?? 0).plus(
         pago.abono_capital ?? 0,
@@ -309,24 +392,6 @@ export const reversePayment = async ({ body, set }: any) => {
         pago.membresias_pago ?? 0,
       );
 
-      console.log(
-        `💵 Capital restante: ${pago.capital_restante} → ${nuevoCapitalRestante.toString()}`,
-      );
-      console.log(
-        `💵 Interés restante: ${pago.interes_restante} → ${nuevoInteresRestante.toString()}`,
-      );
-      console.log(
-        `💵 IVA restante: ${pago.iva_12_restante} → ${nuevoIvaRestante.toString()}`,
-      );
-      console.log(
-        `💵 Seguro restante: ${pago.seguro_restante} → ${nuevoSeguroRestante.toString()}`,
-      );
-      console.log(
-        `💵 GPS restante: ${pago.gps_restante} → ${nuevoGpsRestante.toString()}`,
-      );
-      console.log(
-        `💵 Membresías restante: ${pago.membresias} → ${nuevoMembresiasRestante.toString()}`,
-      );
 
       // ======================================================================
       // 🔟 ACTUALIZAR LA CUOTA ASOCIADA (marcar como NO pagada)
@@ -334,16 +399,11 @@ export const reversePayment = async ({ body, set }: any) => {
       const pagoEstabaPagado = pago.pagado === true;
       if (pagoEstabaPagado) {
         // Si el pago SÍ estaba pagado, actualizamos la cuota y reseteamos el pago
-        console.log(
-          "📝 Pago estaba PAGADO - Marcando cuota como NO pagada y reseteando pago",
-        );
 
-        console.log("✅ El estado de la cuota se recalculará con los pagos restantes");
 
         // ======================================================================
         // 1️⃣1️⃣ RESETEAR EL PAGO (devolver a estado inicial)
         // ======================================================================
-        console.log("\n🔄 ========== RESETEANDO VALORES DEL PAGO ==========");
 
         await tx
           .update(pagos_credito)
@@ -392,11 +452,7 @@ export const reversePayment = async ({ body, set }: any) => {
           })
           .where(eq(pagos_credito.pago_id, pago_id));
 
-        console.log(
-          "✅ Pago reseteado correctamente (mantiene registro histórico)",
-        );
         await tx.delete(boletas).where(eq(boletas.pago_id, pago_id));
-        console.log("✅ Boletas eliminadas");
       } else {
         // Pago parcial - verificar si es el único registro de la cuota
         const cantidadPagos = pago.cuota_id === null
@@ -407,21 +463,17 @@ export const reversePayment = async ({ body, set }: any) => {
               .where(eq(pagos_credito.cuota_id, pago.cuota_id)))[0].count;
 
         await tx.delete(boletas).where(eq(boletas.pago_id, pago_id));
-        console.log("✅ Boletas eliminadas");
         await tx
           .delete(pagos_credito_inversionistas)
           .where(eq(pagos_credito_inversionistas.pago_id, pago_id));
-        console.log("✅ Pagos inversionistas eliminados");
 
         if (Number(cantidadPagos) > 1) {
           // Hay más registros, se puede eliminar este
           await tx
             .delete(pagos_credito)
             .where(eq(pagos_credito.pago_id, pago_id));
-          console.log("✅ Pago parcial eliminado (quedan otros registros en la cuota)");
         } else {
           // Es el único registro, resetear en vez de eliminar
-          console.log("⚠️ Único registro de la cuota, reseteando en vez de eliminar");
           await tx
             .update(pagos_credito)
             .set({
@@ -459,121 +511,35 @@ export const reversePayment = async ({ body, set }: any) => {
               banco_id: null,
             })
             .where(eq(pagos_credito.pago_id, pago_id));
-          console.log("✅ Pago reseteado (registro conservado para la cuota)");
         }
       }
-      console.log("✅ Pago reseteado correctamente");
 
       // ======================================================================
       // 1️⃣2️⃣ ELIMINAR BOLETAS ASOCIADAS
       // ======================================================================
 
       // ======================================================================
-      // 1️⃣2️⃣.5️⃣ 🆕 ANULAR FACTURAS ELECTRÓNICAS ASOCIADAS AL PAGO
+      // 1️⃣2️⃣.5️⃣ LAS FACTURAS SE ANULAN DESPUÉS DEL COMMIT, NO ACÁ
       // ======================================================================
-      console.log("\n🧾 ========== ANULANDO FACTURAS ELECTRÓNICAS ==========");
-
-      // Buscar facturas activas de este pago
-      const facturasDelPago = await tx
-        .select({
-          factura_id: facturas_electronicas.factura_id,
-          uuid: facturas_electronicas.uuid,
-          status: facturas_electronicas.status,
-          receptor_nit: facturas_electronicas.receptor_nit,
-          fecha_certificacion: facturas_electronicas.fecha_certificacion,
-          fecha_emision: facturas_electronicas.fecha_emision,
-          serie: facturas_electronicas.serie,
-          numero: facturas_electronicas.numero,
-        })
-        .from(facturas_electronicas)
-        .where(
-          and(
-            eq(facturas_electronicas.pago_id, pago_id),
-            eq(facturas_electronicas.status, "ACTIVA"), // Solo anular las activas
-          ),
-        );
-
-      console.log(
-        `📊 Se encontraron ${facturasDelPago.length} factura(s) activa(s)`,
-      );
-
-      const facturasAnuladas = [];
-      const facturasConError = [];
-
-      if (facturasDelPago.length > 0) {
-        for (const factura of facturasDelPago) {
-          console.log(
-            `\n🧾 Procesando factura ${factura.serie}-${factura.numero} (${factura.uuid})`,
-          );
-
-          // 1️⃣ ANULAR EN COFIDI
-          const resultadoCofidi = await anularFacturaEnCofidi({
-            uuid: factura.uuid,
-            motivo: `Reversión automática del pago ID: ${pago_id}`,
-            factura: {
-              receptor_nit: factura.receptor_nit,
-              fecha_certificacion: factura.fecha_certificacion,
-              fecha_emision: factura.fecha_emision,
-            },
-          });
-
-          if (resultadoCofidi.success && resultadoCofidi.anulado) {
-            // 2️⃣ ACTUALIZAR EN BD (SOLO SI SE ANULÓ EN COFIDI)
-            try {
-              await tx
-                .update(facturas_electronicas)
-                .set({
-                  status: "ANULADA",
-                  fecha_anulacion: new Date(),
-                  motivo_anulacion: `Reversión automática del pago ID: ${pago_id}`,
-                  anulada_por: creditData.creditos.usuario_id || null,
-                })
-                .where(
-                  eq(facturas_electronicas.factura_id, factura.factura_id),
-                );
-
-              console.log(
-                `   ✅ Factura ${factura.serie}-${factura.numero} anulada correctamente`,
-              );
-
-              facturasAnuladas.push({
-                factura_id: factura.factura_id,
-                uuid: factura.uuid,
-                serie: factura.serie,
-                numero: factura.numero,
-              });
-            } catch (dbError: any) {
-              console.error(
-                `   ⚠️ Error al actualizar BD (factura YA anulada en COFIDI):`,
-                dbError.message,
-              );
-
-              facturasConError.push({
-                factura_id: factura.factura_id,
-                uuid: factura.uuid,
-                error: "BD_UPDATE_ERROR",
-                mensaje: "Anulada en COFIDI pero error al actualizar BD",
-              });
-            }
-          } else {
-            console.error(
-              `   ❌ Error al anular en COFIDI:`,
-              resultadoCofidi.mensaje,
-            );
-
-            facturasConError.push({
-              factura_id: factura.factura_id,
-              uuid: factura.uuid,
-              error: resultadoCofidi.error,
-              mensaje: resultadoCofidi.mensaje,
-            });
-          }
-        }
-
-        console.log(`\n📊 Resumen anulación facturas:`);
-        console.log(`   ✅ Anuladas: ${facturasAnuladas.length}`);
-        console.log(`   ❌ Con error: ${facturasConError.length}`);
-      }
+      // Acá vivía el loop que llamaba a COFIDI (HTTP a SAT) DENTRO de esta
+      // transacción. Dos problemas:
+      //
+      //   1. Cada llamada tiene `AbortSignal.timeout(60000)` (satClientService):
+      //      con 3 facturas la transacción podía retener su conexión y sus locks
+      //      sobre pagos_credito/creditos hasta 180s. El pool de trabajo usa el
+      //      default de `pg` (10 conexiones), así que un COFIDI lento podía
+      //      agotarlo y colgar al backend entero, no solo a las reversas.
+      //
+      //   2. Peor: si COFIDI anulaba OK y la transacción abortaba después (pasos
+      //      13/14/15 o timeout), el DTE quedaba ANULADO en SAT con la BD
+      //      restaurada — pago vivo, factura ACTIVA. Y desanular no existe: es
+      //      irreversible del lado fiscal.
+      //
+      // La anulación se movió a después del commit (best-effort). Se invierte
+      // el riesgo a la variante recuperable: si falla el UPDATE post-commit, la
+      // factura queda ACTIVA en BD pero ANULADA en SAT, que la conciliación de
+      // DTEs sí puede detectar y corregir. La respuesta ya tolera parciales vía
+      // `facturasConError`.
 
       // ======================================================================
       // 1️⃣3️⃣ ELIMINAR PAGOS DE INVERSIONISTAS ASOCIADOS
@@ -581,12 +547,10 @@ export const reversePayment = async ({ body, set }: any) => {
       await tx
         .delete(pagos_credito_inversionistas)
         .where(eq(pagos_credito_inversionistas.pago_id, pago_id));
-      console.log("✅ Pagos de inversionistas eliminados");
 
       // ======================================================================
       // 1️⃣4️⃣ ACTUALIZAR SALDO A FAVOR DEL USUARIO
       // ======================================================================
-      console.log("\n💰 ========== ACTUALIZANDO SALDO A FAVOR ==========");
 
       const saldoActual = new Big(user.saldo_a_favor ?? 0);
       const montoBoleta = new Big(pago.monto_boleta ?? 0);
@@ -597,16 +561,12 @@ export const reversePayment = async ({ body, set }: any) => {
         nuevoSaldoAFavor = new Big(0);
       }
 
-      console.log(`💵 Saldo actual: ${saldoActual.toString()}`);
-      console.log(`💵 Monto boleta: ${montoBoleta.toString()}`);
-      console.log(`✅ Nuevo saldo a favor: ${nuevoSaldoAFavor.toString()}`);
 
       await tx
         .update(usuarios)
         .set({ saldo_a_favor: nuevoSaldoAFavor.toString() })
         .where(eq(usuarios.usuario_id, user.usuario_id));
 
-      console.log("✅ Saldo a favor actualizado");
 
       // ======================================================================
       // 1️⃣5️⃣ LIMPIAR SOLO PLACEHOLDERS Y RECALCULAR ESTADO DE LA CUOTA
@@ -614,7 +574,6 @@ export const reversePayment = async ({ body, set }: any) => {
       let pagosDuplicados: { pago_id: number }[] = [];
 
       if (pagoEstabaPagado) {
-        console.log("\n🧹 ========== RECALCULANDO PAGOS DE LA CUOTA ==========");
 
         const pagosMismaCuota = pago.cuota_id === null
           ? []
@@ -698,12 +657,6 @@ export const reversePayment = async ({ body, set }: any) => {
             .where(inArray(pagos_credito.pago_id, pagosPagadosRestantesIds));
         }
 
-        console.log(`🗑️ Placeholders eliminados: ${pagosDuplicados.length}`);
-        console.log(
-          `✅ Cuota recalculada como ${cuotaPermanecePagada ? "PAGADA" : "NO pagada"}`,
-        );
-      } else {
-        console.log("\n⏭️ Pago eliminado - no se limpian duplicados");
       }
 
       // ======================================================================
@@ -711,6 +664,7 @@ export const reversePayment = async ({ body, set }: any) => {
       // ======================================================================
       return {
         pago,
+        pagoValidado,
         creditData,
         user,
         nuevoCapital,
@@ -721,12 +675,12 @@ export const reversePayment = async ({ body, set }: any) => {
         nuevoInteresRestante,
         nuevoIvaRestante,
         nuevoSaldoAFavor,
-        facturasAnuladas,
-        facturasConError,
-        totalFacturas: facturasDelPago.length,
+        // Las facturas todavía NO se anularon: se hace después del commit.
+        facturasDelPago,
         reversionEspejo,
       };
     });
+    transactionCommitted = true;
 // La reversión NO recalcula ninguna otra fila del crédito. La transacción de
 // arriba ya deja todo consistente (pago reseteado, capital/deuda restaurados).
 // Aquí vivía un updateInstallments({all: true}) (agregado en 0183a387, ene-2026)
@@ -737,14 +691,201 @@ export const reversePayment = async ({ body, set }: any) => {
 // refresca por el flujo normal (siguiente pago aplicado o el botón manual
 // "Recalcular Pagos"), igual que antes de enero 2026.
     // ========================================================================
+    // 🧾 ANULAR FACTURAS ELECTRÓNICAS — DESPUÉS DEL COMMIT (best-effort)
+    // ========================================================================
+    // Va acá, FUERA de la transacción, a propósito: la anulación es HTTP a
+    // SAT/COFIDI con timeout de 60s por factura. Adentro retenía la conexión y
+    // los locks del pago/crédito hasta 60s × N facturas sobre un pool de 10, y
+    // sobre todo dejaba abierta la ventana irreversible: COFIDI anula OK →
+    // algo falla más abajo → rollback → DTE ANULADO en SAT con el pago vivo en
+    // la BD. Desanular no existe.
+    //
+    // Acá el peor caso es el recuperable: la reversa ya está firme y, si el
+    // UPDATE falla, la factura queda ACTIVA en la BD pero ANULADA en SAT, que
+    // la conciliación de DTEs detecta comparando ambos lados.
+    //
+    // Los datos vienen del SELECT del paso 4️⃣.6️⃣, tomado antes de que el DELETE
+    // del pago rompiera el vínculo por FK. Se anula por `factura_id`, que sigue
+    // siendo válido aunque `pago_id` haya quedado NULL.
+    const facturasAnuladas: {
+      factura_id: number;
+      uuid: string;
+      serie: string;
+      numero: string;
+    }[] = [];
+    const facturasConError: {
+      factura_id: number;
+      uuid: string;
+      error?: string;
+      mensaje?: string;
+    }[] = [];
+    const invoiceVoidingStartedAt = safeNow();
+    let invoiceProviderRejectedCount = 0;
+    let invoiceUnexpectedFailureCount = 0;
+    let invoiceLocalStateFailureCount = 0;
+
+    if (result.facturasDelPago.length > 0) {
+
+      for (const factura of result.facturasDelPago) {
+        // Cada factura va en su propio try: de acá en adelante la reversa YA
+        // está commiteada, así que ningún fallo de esta etapa puede escalar al
+        // catch de abajo y convertir un 200 en 500 — el pago quedaría revertido
+        // con el cliente creyendo lo contrario. Se reporta en
+        // `facturasConError` y se sigue con la próxima.
+        try {
+
+          // 1️⃣ ANULAR EN COFIDI
+          const resultadoCofidi = await anularFacturaEnCofidi({
+            uuid: factura.uuid,
+            motivo: `Reversión automática del pago ID: ${pago_id}`,
+            factura: {
+              receptor_nit: factura.receptor_nit,
+              fecha_certificacion: factura.fecha_certificacion,
+              fecha_emision: factura.fecha_emision,
+            },
+          });
+
+          if (resultadoCofidi.success && resultadoCofidi.anulado) {
+            // 2️⃣ ACTUALIZAR EN BD (SOLO SI SE ANULÓ EN COFIDI)
+            try {
+              const filasActualizadas = await db
+                .update(facturas_electronicas)
+                .set({
+                  status: "ANULADA",
+                  fecha_anulacion: new Date(),
+                  motivo_anulacion: `Reversión automática del pago ID: ${pago_id}`,
+                  // `anulada_por` tiene FK contra `platform_users.id`, NO contra
+                  // `usuarios.usuario_id`: son namespaces distintos. Acá se
+                  // escribía `creditData.creditos.usuario_id` (el id del DEUDOR),
+                  // que en producción no existe en platform_users en 1719 de
+                  // 1746 casos -> el UPDATE viola el FK, cae en el catch de
+                  // abajo y la factura queda ACTIVA en la BD aunque SAT ya la
+                  // anuló. En los 27 ids que sí colisionan es peor: pasa en
+                  // silencio y le atribuye la anulación a un usuario de
+                  // plataforma que no fue.
+                  //
+                  // El endpoint solo recibe { credito_id, pago_id }: no hay
+                  // usuario de sesión en scope. Se deja null, igual que
+                  // revertPaymentToPending. Si se quiere trazar quién reversó,
+                  // hay que plomar el userId real desde el router (como hace la
+                  // anulación manual de cofidi.ts).
+                  anulada_por: null,
+                })
+                .where(
+                  eq(facturas_electronicas.factura_id, factura.factura_id),
+                )
+                .returning({ factura_id: facturas_electronicas.factura_id });
+
+              // Un UPDATE que no matchea ninguna fila NO tira error en
+              // Postgres: sin este chequeo la factura entraba a
+              // `facturasAnuladas` y la respuesta decía "anulada
+              // correctamente" aunque en la BD no hubiera quedado registro.
+              // Pasa si el DELETE del pago disparó el CASCADE de `fk_pago` (la
+              // FK duplicada que sigue viva en la BD y no está en schema.ts) y
+              // se llevó la fila: en SAT quedó ANULADA y acá nadie se entera.
+              if (filasActualizadas.length === 0) {
+                throw new Error(
+                  `El UPDATE no afectó ninguna fila (factura_id ${factura.factura_id} ya no existe en la BD)`,
+                );
+              }
+
+
+              facturasAnuladas.push({
+                factura_id: factura.factura_id,
+                uuid: factura.uuid,
+                serie: factura.serie,
+                numero: factura.numero,
+              });
+            } catch (dbError: any) {
+              // 🔴 Anulada en SAT pero la BD quedó ACTIVA: va a conciliación.
+              invoiceLocalStateFailureCount += 1;
+
+              facturasConError.push({
+                factura_id: factura.factura_id,
+                uuid: factura.uuid,
+                error: "BD_UPDATE_ERROR",
+                mensaje: `Anulada en COFIDI pero error al actualizar BD: ${dbError.message}`,
+              });
+            }
+          } else {
+            if (resultadoCofidi.error === "EXCEPTION") invoiceUnexpectedFailureCount += 1;
+            else invoiceProviderRejectedCount += 1;
+
+            facturasConError.push({
+              factura_id: factura.factura_id,
+              uuid: factura.uuid,
+              error: resultadoCofidi.error,
+              mensaje: resultadoCofidi.mensaje,
+            });
+          }
+        } catch (facturaError: any) {
+          // Red de seguridad: la reversa ya está firme, esta factura queda para
+          // conciliación manual y el resto del lote sigue procesándose.
+          invoiceUnexpectedFailureCount += 1;
+
+          facturasConError.push({
+            factura_id: factura.factura_id,
+            uuid: factura.uuid,
+            error: "UNEXPECTED_ERROR",
+            mensaje: facturaError?.message ?? String(facturaError),
+          });
+        }
+      }
+
+      const invoiceTerminal = classifyInvoiceVoidingBatch({
+        succeededCount: facturasAnuladas.length,
+        providerRejectedCount: invoiceProviderRejectedCount,
+        unexpectedFailureCount: invoiceUnexpectedFailureCount,
+        localStateFailureCount: invoiceLocalStateFailureCount,
+        durationMs: elapsedMilliseconds(invoiceVoidingStartedAt),
+      });
+      if (invoiceTerminal.outcome === "completed") {
+        emitInvoiceVoiding({
+          outcome: "completed",
+          processedCount: invoiceTerminal.processedCount,
+          succeededCount: invoiceTerminal.succeededCount,
+          failedCount: invoiceTerminal.failedCount,
+          manualActionRequired: false,
+          durationMs: invoiceTerminal.durationMs,
+        }, telemetryLogger);
+      } else if (invoiceTerminal.outcome === "provider_rejected") {
+        emitInvoiceVoiding({
+          outcome: "provider_rejected",
+          processedCount: invoiceTerminal.processedCount,
+          succeededCount: invoiceTerminal.succeededCount,
+          failedCount: invoiceTerminal.failedCount,
+          manualActionRequired: true,
+          durationMs: invoiceTerminal.durationMs,
+          reasonCode: "provider_rejected",
+        }, telemetryLogger);
+      } else if (invoiceTerminal.outcome === "local_state_inconsistent") {
+        emitInvoiceVoiding({
+          outcome: "local_state_inconsistent",
+          processedCount: invoiceTerminal.processedCount,
+          succeededCount: invoiceTerminal.succeededCount,
+          failedCount: invoiceTerminal.failedCount,
+          manualActionRequired: true,
+          durationMs: invoiceTerminal.durationMs,
+          errorCode: "persistence_failed",
+        }, telemetryLogger);
+      } else {
+        emitInvoiceVoiding({
+          outcome: "failed",
+          processedCount: invoiceTerminal.processedCount,
+          succeededCount: invoiceTerminal.succeededCount,
+          failedCount: invoiceTerminal.failedCount,
+          manualActionRequired: true,
+          durationMs: invoiceTerminal.durationMs,
+          errorCode: invoiceTerminal.errorCode,
+        }, telemetryLogger);
+      }
+    }
+
+    // ========================================================================
     // ✅ TRANSACCIÓN COMPLETADA - RETORNAR RESULTADO EXITOSO
     // ========================================================================
-    console.log(
-      "\n✅ ========== REVERSIÓN COMPLETADA EXITOSAMENTE ==========\n",
-    );
 
-    set.status = 200;
-    return {
+    const response = {
       message: "Payment reversed successfully",
       data: {
         reversedPaymentId: pago_id,
@@ -770,36 +911,102 @@ export const reversePayment = async ({ body, set }: any) => {
         abonoCapitalEspejo: result.reversionEspejo?.data ?? undefined,
         // 🆕 Info de facturas anuladas
         facturas:
-          result.totalFacturas > 0
+          result.facturasDelPago.length > 0
             ? {
-                total: result.totalFacturas,
-                anuladas: result.facturasAnuladas.length,
-                con_error: result.facturasConError.length,
+                total: result.facturasDelPago.length,
+                anuladas: facturasAnuladas.length,
+                con_error: facturasConError.length,
                 detalles: {
-                  anuladas: result.facturasAnuladas,
-                  errores: result.facturasConError,
+                  anuladas: facturasAnuladas,
+                  errores: facturasConError,
                 },
               }
             : undefined,
       },
     };
-  } catch (error: any) {
-    console.error("\n❌ ========== ERROR EN REVERSIÓN ==========");
-    console.error("[reversePayment] Error:", error);
-    console.error("========================================\n");
+    set.status = 200;
+    const terminal = classifyPaymentReversalCompletion({
+      previousPaymentState: result.pagoValidado ? "applied" : "pending",
+      creditUpdated: result.pagoValidado,
+      investmentsReversed,
+      invoiceFailureCount: facturasConError.length,
+      durationMs: elapsedMilliseconds(startedAt),
+    });
+    if (terminal.outcome === "completed") {
+      emitPaymentReversal({
+        outcome: "completed",
+        previousPaymentState: terminal.previousPaymentState,
+        creditUpdated: terminal.creditUpdated,
+        investmentsReversed: terminal.investmentsReversed,
+        manualActionRequired: false,
+        durationMs: terminal.durationMs,
+      }, telemetryLogger);
+    } else {
+      emitPaymentReversal({
+        outcome: "partially_completed",
+        previousPaymentState: terminal.previousPaymentState,
+        creditUpdated: terminal.creditUpdated,
+        investmentsReversed: terminal.investmentsReversed,
+        manualActionRequired: true,
+        durationMs: terminal.durationMs,
+        reasonCode: terminal.reasonCode,
+      }, telemetryLogger);
+    }
+    return response;
+  } catch (error: unknown) {
+    const errorMessage = caughtErrorMessage(error);
+    const terminal = classifyPaymentReversalFailure({
+      errorMessage,
+      transactionCommitted,
+      mayHaveGlobalPersistence,
+      previousPaymentState,
+      investmentsReversed,
+      durationMs: elapsedMilliseconds(startedAt),
+    });
+    if (terminal.outcome === "partially_completed") {
+      emitPaymentReversal({
+        outcome: "partially_completed",
+        previousPaymentState: terminal.previousPaymentState,
+        creditUpdated: terminal.creditUpdated,
+        investmentsReversed: terminal.investmentsReversed,
+        manualActionRequired: true,
+        durationMs: terminal.durationMs,
+        reasonCode: terminal.reasonCode,
+      }, telemetryLogger);
+    } else if (terminal.outcome === "rejected") {
+      emitPaymentReversal({
+        outcome: "rejected",
+        previousPaymentState: terminal.previousPaymentState,
+        creditUpdated: false,
+        investmentsReversed: terminal.investmentsReversed,
+        manualActionRequired: terminal.manualActionRequired,
+        durationMs: terminal.durationMs,
+        reasonCode: terminal.reasonCode,
+      }, telemetryLogger);
+    } else {
+      emitPaymentReversal({
+        outcome: "failed",
+        previousPaymentState: terminal.previousPaymentState,
+        creditUpdated: false,
+        investmentsReversed: terminal.investmentsReversed,
+        manualActionRequired: terminal.manualActionRequired,
+        durationMs: terminal.durationMs,
+        errorCode: terminal.errorCode,
+      }, telemetryLogger);
+    }
 
     // Determinar status code según el tipo de error
-    if (error.message === "Payment not found") {
+    if (errorMessage === "Payment not found") {
       set.status = 404;
     } else if (
-      error.message === "Payment is not marked as paid" ||
-      error.message === "Credit not found or not active" ||
-      error.message === "Incobrable structural row cannot be reversed" ||
-      error.message === "User not found" ||
+      errorMessage === "Payment is not marked as paid" ||
+      errorMessage === "Credit not found or not active" ||
+      errorMessage === "Incobrable structural row cannot be reversed" ||
+      errorMessage === "User not found" ||
       // Porteros del abono a capital: no es una falla del sistema, es que este
       // pago no se puede revertir hasta resolver el abono a mano.
-      error.message?.startsWith("[ABONO_YA_LIQUIDADO]") ||
-      error.message?.startsWith("[ABONO_EN_CALCULO_PENDIENTE]")
+      errorMessage?.startsWith("[ABONO_YA_LIQUIDADO]") ||
+      errorMessage?.startsWith("[ABONO_EN_CALCULO_PENDIENTE]")
     ) {
       set.status = 400;
     } else {
@@ -811,7 +1018,10 @@ export const reversePayment = async ({ body, set }: any) => {
       error: error instanceof Error ? error.message : String(error),
     };
   }
-};
+  };
+}
+
+export const reversePayment = createReversePayment();
 
 interface ReverseConvenioPaymentParams {
   credito_id: number;
@@ -841,9 +1051,6 @@ export async function reverseConvenioPayment(
   try {
     const { credito_id, monto_pago } = params;
 
-    console.log("\n🔄 ========== REVIRTIENDO PAGO DE CONVENIO ==========");
-    console.log("🏦 Crédito ID:", credito_id);
-    console.log("💵 Monto a revertir:", monto_pago);
 
     // 1. Buscar el convenio del crédito (puede estar completado o activo)
     const [convenio] = await db
@@ -858,7 +1065,6 @@ export async function reverseConvenioPayment(
       );
     }
 
-    console.log("📋 Convenio ID encontrado:", convenio.convenio_id);
 
     // 2. Convertir valores a Big.js
     const montoPagoBig = new Big(monto_pago);
@@ -866,7 +1072,6 @@ export async function reverseConvenioPayment(
     const montoPagadoActualBig = new Big(convenio.monto_pagado);
     const montoPendienteActualBig = new Big(convenio.monto_pendiente);
 
-    console.log("💵 Monto a revertir:", montoPagoBig.toString());
 
     // 3. RESTAR del monto pagado (reversa)
     const nuevoMontoPagadoBig = montoPagadoActualBig.minus(montoPagoBig);
@@ -879,13 +1084,6 @@ export async function reverseConvenioPayment(
       throw new Error("No se puede revertir más de lo que se ha pagado");
     }
 
-    console.log("📊 Monto pagado anterior:", montoPagadoActualBig.toString());
-    console.log("📊 Monto pagado nuevo:", nuevoMontoPagadoBig.toString());
-    console.log(
-      "📊 Monto pendiente anterior:",
-      montoPendienteActualBig.toString(),
-    );
-    console.log("📊 Monto pendiente nuevo:", nuevoMontoPendienteBig.toString());
 
     // 5. Recalcular cuántas cuotas completas se han pagado — con el MISMO
     // helper de acumulado que usa processConvenioPayment al marcar, para que
@@ -903,20 +1101,11 @@ export async function reverseConvenioPayment(
     });
     const nuevosPagosPendientes = convenio.numero_meses - nuevosPagosRealizados;
 
-    console.log(
-      "✅ Cuotas completas pagadas (después de reversa):",
-      nuevosPagosRealizados,
-    );
-    console.log(
-      "⬇️ Cuotas pendientes (después de reversa):",
-      nuevosPagosPendientes,
-    );
 
     // 6. El convenio ya NO está completado si se revirtió un pago
     const convenioCompletado = nuevoMontoPendienteBig.lte(0);
     const convenioActivo = !convenioCompletado;
 
-    console.log("🔓 Convenio reactivado:", convenioActivo);
 
     // 7. Actualizar el convenio
     const [convenioActualizado] = await db
@@ -965,14 +1154,8 @@ export async function reverseConvenioPayment(
             aDesmarcar.map((c) => c.cuota_convenio_id)
           )
         );
-      console.log(
-        `↩️ Cuotas del convenio desmarcadas por reversa: ${aDesmarcar
-          .map((c) => `#${c.numero_cuota}`)
-          .join(", ")}`
-      );
     }
 
-    console.log("🔄 ========== FIN REVERSIÓN DE PAGO ==========\n");
 
     // 8. Retornar resultado
     return {
@@ -992,7 +1175,6 @@ export async function reverseConvenioPayment(
       monto_revertido: montoPagoBig.toFixed(2),
     };
   } catch (error) {
-    console.error("Error revirtiendo pago de convenio:", error);
     throw new Error(
       `Error al revertir pago de convenio: ${error instanceof Error ? error.message : "Error desconocido"}`,
     );
@@ -1027,16 +1209,31 @@ export async function anularFacturaEnCofidi(
   try {
     const { uuid, motivo, factura } = params;
 
-    console.log("🚫 Anulando factura en COFIDI:", uuid);
 
     // 1️⃣ CONSTRUIR XML DE ANULACIÓN
-    const fechaEmisionDocumento = factura.fecha_certificacion
-      ? new Date(factura.fecha_certificacion).toISOString()
-      : factura.fecha_emision
-        ? new Date(factura.fecha_emision).toISOString()
-        : new Date().toISOString();
+    //
+    // 📄 `FechaEmisionDocumentoAnular` tiene que coincidir con la
+    // `FechaHoraEmision` del DTE original — que es lo que se persiste en
+    // `fecha_emision`. Acá se venía priorizando `fecha_certificacion`: en las
+    // facturas backdateadas (emisión a fin de mes, certificación días después)
+    // eso mandaba a SAT una fecha que no es la del DTE y la anulación moría con
+    // `TrCode: [1083] La fecha de emisión del documento a anular no coincide
+    // con la registrada en la SAT`. Son 4430 de 22518 facturas con día de
+    // emisión distinto al de certificación, y de las 12 reversas que llegaron a
+    // intentar anular, las 12 fallaron. Mismo criterio que la anulación manual
+    // de `routers/cofidi.ts`.
+    const fechaBaseAnulacion = factura.fecha_emision
+      ? new Date(factura.fecha_emision)
+      : factura.fecha_certificacion
+        ? new Date(factura.fecha_certificacion)
+        : ahoraEnGuatemala();
 
-    const fechaHoraAnulacion = new Date().toISOString();
+    // ⏰ Formato SAT (sin milisegundos ni sufijo Z): `.toISOString()` produce
+    // `2026-08-13T11:13:59.000Z` y SAT rechaza el documento. Y `new Date()` a
+    // secas para la hora de anulación viaja en UTC, así que una anulación de la
+    // noche llegaría a SAT con el día siguiente.
+    const fechaEmisionDocumento = formatearFechaSAT(fechaBaseAnulacion);
+    const fechaHoraAnulacion = formatearFechaSAT(ahoraEnGuatemala());
 
     const xmlAnulacion = `<?xml version="1.0" encoding="UTF-8"?>
 <dte:GTAnulacionDocumento xmlns:dte="http://www.sat.gob.gt/dte/fel/0.1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Version="0.1" xsi:schemaLocation="http://www.sat.gob.gt/dte/fel/0.1.0 GT_AnulacionDocumento-0.1.0.xsd">
@@ -1054,12 +1251,6 @@ export async function anularFacturaEnCofidi(
   </dte:SAT>
 </dte:GTAnulacionDocumento>`;
 
-    console.log("📄 XML construido:", {
-      uuid,
-      nit_receptor: factura.receptor_nit,
-      fecha_usada: fechaEmisionDocumento,
-      motivo,
-    });
 
     // 2️⃣ CONVERTIR A BASE64
     const xmlBase64 = Buffer.from(xmlAnulacion, "utf-8").toString("base64");
@@ -1078,7 +1269,6 @@ export async function anularFacturaEnCofidi(
     const resultado = await satClient.anularDocumento(uuid, xmlBase64);
 
     if (!resultado.anulado) {
-      console.error("❌ Error en COFIDI:", resultado.descripcion);
       return {
         success: false,
         anulado: false,
@@ -1087,7 +1277,6 @@ export async function anularFacturaEnCofidi(
       };
     }
 
-    console.log("✅ Factura anulada en COFIDI");
     return {
       success: true,
       anulado: true,
@@ -1095,7 +1284,6 @@ export async function anularFacturaEnCofidi(
       processor: resultado.processor,
     };
   } catch (error: any) {
-    console.error("❌ Error al anular en COFIDI:", error);
     return {
       success: false,
       anulado: false,

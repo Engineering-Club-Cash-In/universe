@@ -2,6 +2,7 @@ import { and, count, eq, gte, lt } from "drizzle-orm";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { leads } from "../db/schema/crm";
+import { gtDateStrToDate, toDateStrGT } from "./guatemala-month-window";
 import { ROLES } from "./roles";
 
 export type LeadAssignableUser = {
@@ -10,6 +11,20 @@ export type LeadAssignableUser = {
 	assignLeads: boolean | null | undefined;
 	banned: boolean | null | undefined;
 };
+
+export type NewAutoLeadAssignment =
+	| {
+			success: true;
+			assignedTo: string;
+			createdBy: string;
+			assignmentType: "auto";
+	  }
+	| {
+			success: false;
+			message: string;
+	  };
+
+export type FindAssignableSalesUser = () => Promise<{ id: string } | null>;
 
 export function canReceiveAutoAssignedLead(
 	user: LeadAssignableUser | null | undefined,
@@ -45,6 +60,10 @@ export function getSalesUserWithLeastAutoAssignedLeads(
 	return selectedUser;
 }
 
+export function getStartOfTodayGT(now: Date): Date {
+	return gtDateStrToDate(toDateStrGT(now));
+}
+
 export function resolveExistingLeadAssignee(
 	currentOwner: LeadAssignableUser | null | undefined,
 	fallbackSalesUser: LeadAssignableUser | null,
@@ -54,6 +73,27 @@ export function resolveExistingLeadAssignee(
 	}
 
 	return fallbackSalesUser?.id ?? null;
+}
+
+export async function resolveNewAutoLeadAssignment(
+	findSalesUser: FindAssignableSalesUser = findSalesUserWithLeastAutoAssignedLeads,
+	unavailableMessage = "No sales user available to assign the lead",
+): Promise<NewAutoLeadAssignment> {
+	const salesUser = await findSalesUser();
+
+	if (!salesUser) {
+		return {
+			success: false,
+			message: unavailableMessage,
+		};
+	}
+
+	return {
+		success: true,
+		assignedTo: salesUser.id,
+		createdBy: salesUser.id,
+		assignmentType: "auto",
+	};
 }
 
 export async function findSalesUserWithLeastAutoAssignedLeads() {
@@ -72,11 +112,7 @@ export async function findSalesUserWithLeastAutoAssignedLeads() {
 				eq(user.banned, false),
 			),
 		);
-	const startOfToday = new Date(
-		new Date().toLocaleDateString("en-US", {
-			timeZone: "America/Guatemala",
-		}),
-	);
+	const startOfToday = getStartOfTodayGT(new Date());
 	const [leadCounts, reactivatedLeadCounts] = await Promise.all([
 		db
 			.select({ assignedTo: leads.assignedTo, count: count(leads.id) })

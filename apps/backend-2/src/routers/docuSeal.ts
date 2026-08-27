@@ -825,16 +825,22 @@ const docuSealRouter = new Elysia({
 .post(
   "/document-by-dpi",
   async ({ body }) => {
-    const { dpi, documentNames } = body;
+    const { dpi, documentNames, genero } = body;
 
     // 🧠 Llamamos al controller que maneja RENAP + query en DB
-    const result = await getDocumentsByDpiController(dpi, documentNames);
+    // `genero` es el fallback del CRM por si RENAP no tiene a la persona
+    const result = await getDocumentsByDpiController(
+      dpi,
+      documentNames,
+      genero
+    );
     return result;
   },
   {
     body: t.Object({
       dpi: t.String(),
       documentNames: t.Array(t.String()),
+      genero: t.Optional(t.String()),
     }),
   }
 ).post(

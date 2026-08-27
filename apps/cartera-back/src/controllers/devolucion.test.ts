@@ -49,6 +49,7 @@ function makeTx() {
 
 // Import DESPUÉS de mock.module para que use el db mockeado.
 mock.module("../database", () => ({
+  client: {},
   db: {
     select: () => ({
       from: () => ({ where: () => Promise.resolve(currentCreditRows) }),

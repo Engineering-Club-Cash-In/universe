@@ -781,7 +781,7 @@ export interface ResumenGlobalInversionista {
 	total_isr: string;
 	/** true si al inversionista se le descuentan impuestos del interés. */
 	descuenta_impuestos?: boolean;
-	/** Interés neto de impuestos (interés × 0.81). Null cuando no descuenta impuestos. */
+	/** Interés neto de impuestos (interés × 0.93, solo ISR). Null cuando no descuenta impuestos. */
 	total_neto_impuestos?: number | string | null;
 	total_cuota?: string;
 	total_a_recibir_sin_reinversion: string;
@@ -790,6 +790,7 @@ export interface ResumenGlobalInversionista {
 	boleta_pendiente: BoletaPagoInversionista | null;
 	boleta_liquidacion?: BoletaPagoInversionista | null;
 	estado_liquidacion_resumen?: "pending" | "uploaded" | "liquidated";
+	reporte_liquidacion_url?: string | null;
 }
 
 // ============================================================================

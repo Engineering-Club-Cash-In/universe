@@ -125,6 +125,20 @@ export function ModalEditCredit({
     return dateString ? new Date(dateString).toISOString().split('T')[0] : "2025-12-01";
   };
 
+  // IDs que participan HOY en el crédito (padre + espejo, al abrir el modal).
+  // Un inversionista "nuevo" no puede ser uno de estos ni aunque se borre de la
+  // lista y se vuelva a agregar en la misma edición: sería la misma
+  // participación disfrazada de compra nueva. En cambio el que ya salió del
+  // crédito sí puede volver a entrar (rotación normal de pool). El backend
+  // valida exactamente lo mismo; esto es la primera línea en UI.
+  const originalInvestorIds = useMemo(() => {
+    const ids = new Set<number>();
+    investorsInitial?.forEach((i) => ids.add(Number(i.inversionista_id)));
+    investorsMirrorInitial?.forEach((i) => ids.add(Number(i.inversionista_id)));
+    ids.delete(0);
+    return ids;
+  }, [investorsInitial, investorsMirrorInitial]);
+
   // Preparamos los valores iniciales
   const parseInvestors = (list?: InvestorItem[]) =>
     list?.map((inv) => ({
@@ -212,6 +226,50 @@ export function ModalEditCredit({
         return;
       }
 
+      // Validar inversionistas nuevos antes de armar el payload
+      const nuevos = values.investors.filter((inv: InvestorItem) => inv.es_nuevo === true);
+      for (const nuevo of nuevos) {
+        const id = Number(nuevo.inversionista_id);
+        const nombre =
+          investorsOptions.find((o) => o.inversionista_id === id)?.nombre ?? `ID ${id}`;
+        if (!(id > 0)) {
+          toast.error("Hay un inversionista nuevo sin seleccionar. Elegí uno o quitá la fila.");
+          return;
+        }
+        if (originalInvestorIds.has(id)) {
+          toast.error(
+            `${nombre} ya participa en este crédito; no puede agregarse como nuevo (aunque se haya borrado de la lista).`
+          );
+          return;
+        }
+        if (!(Number(nuevo.monto_aportado) > 0)) {
+          toast.error(`El inversionista nuevo ${nombre} debe tener un monto mayor a 0.`);
+          return;
+        }
+      }
+      // Una sola compra de cartera por edición: la facturación prorratea el
+      // interés del pago con UNA fecha de corte, así que una segunda compra
+      // pendiente se quedaría sin prorratear. Las reinversiones no facturan y
+      // pueden ir varias juntas. El backend rechaza lo mismo (y además si el
+      // crédito ya arrastra una compra pendiente de facturar).
+      const nuevasCompras = nuevos.filter(
+        (inv: InvestorItem) => inv.tipo_operacion === "compra_cartera"
+      );
+      if (nuevasCompras.length > 1) {
+        toast.error(
+          "Solo se puede agregar una compra de cartera a la vez. Agregá una, esperá a que se facture el siguiente pago y luego la otra."
+        );
+        return;
+      }
+
+      const idsInvestors = values.investors
+        .map((inv: InvestorItem) => Number(inv.inversionista_id))
+        .filter((id: number) => id > 0);
+      if (new Set(idsInvestors).size !== idsInvestors.length) {
+        toast.error("Hay inversionistas repetidos en la lista.");
+        return;
+      }
+
       // Filtrar espejo vacíos antes de enviar
       const espejoFinal = values.investorsMirror.filter(
         (inv) => Number(inv.monto_aportado) > 0 || Number(inv.inversionista_id) > 0
@@ -253,6 +311,8 @@ export function ModalEditCredit({
         permite_abono_capital: !!values.permite_abono_capital,
         // Crédito solo-interés (no amortiza capital en la cuota)
         no_amortiza_capital: !!values.no_amortiza_capital,
+        // Excluye el crédito de la asignación de capital a inversionistas
+        excluir_compras: !!values.excluir_compras,
         estado_devolucion: values.estado_devolucion,
         motivo_devolucion:
           values.estado_devolucion === "PENDIENTE_AUTORIZACION"
@@ -264,7 +324,8 @@ export function ModalEditCredit({
             ? values.motivo_ajuste_capital?.trim() || undefined
             : undefined,
 
-        // Lista Principal
+        // Lista Principal. Los nuevos viajan con es_nuevo + tipo_operacion para
+        // que el backend registre la operación en compras_credito_inversionista.
         inversionistas: values.investors.map((i: InvestorItem) => ({
           inversionista_id: Number(i.inversionista_id),
           monto_aportado: Number(i.monto_aportado),
@@ -272,6 +333,7 @@ export function ModalEditCredit({
           porcentaje_inversion: Number(i.porcentaje_inversion),
           fecha_inicio_participacion: i.fecha_inicio_participacion,
           cuota_inversionista: Number(i.cuota_inversionista || 0),
+          ...(i.es_nuevo ? { es_nuevo: true, tipo_operacion: i.tipo_operacion } : {}),
         })),
 
         // Lista Espejo
@@ -282,6 +344,7 @@ export function ModalEditCredit({
           porcentaje_inversion: Number(i.porcentaje_inversion),
           fecha_inicio_participacion: i.fecha_inicio_participacion,
           cuota_inversionista: Number(i.cuota_inversionista || 0),
+          ...(i.es_nuevo ? { es_nuevo: true, tipo_operacion: i.tipo_operacion } : {}),
         })),
       };
       updateCredit(payload, {
@@ -677,6 +740,41 @@ export function ModalEditCredit({
               </div>
 
               <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-gray-800 font-bold text-sm">
+                    Excluir de compras a inversionistas
+                  </Label>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Si está activo, este crédito no se tomará en cuenta para las compras de inversionistas.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={!!formik.values.excluir_compras}
+                  onClick={() =>
+                    formik.setFieldValue(
+                      "excluir_compras",
+                      !formik.values.excluir_compras
+                    )
+                  }
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                    formik.values.excluir_compras
+                      ? "bg-green-500"
+                      : "bg-gray-300"
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                      formik.values.excluir_compras
+                        ? "translate-x-5"
+                        : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between">
                 <div className="space-y-1">
                   <Label className="text-gray-800 font-bold text-sm">
                     Solicitar devolución de crédito
@@ -793,6 +891,7 @@ export function ModalEditCredit({
                   });
                 }
               }}
+              blockedInvestorIds={originalInvestorIds}
             />
           </form>
         </div>

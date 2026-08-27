@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import api from "@/Provider/interceptor";
+import { esDetalleTecnicoCrudo } from "@/lib/apiError";
 import type { PagoFormValues } from "../hooks/registerPayment";
 import type { ReactNode } from "react";
 import type { InstallmentContributionSummary } from "./installmentContribution";
@@ -185,6 +186,8 @@ export interface Credito {
   statusCredit: string; // ACTIVO, CANCELADO, INCOBRABLE
   permite_abono_capital?: boolean;
   no_amortiza_capital?: boolean;
+  // Excluye el crédito de la asignación de capital a inversionistas
+  excluir_compras?: boolean;
   estado_devolucion?: 'NO_APLICA' | 'PENDIENTE_AUTORIZACION' | 'VERIFICADO' | 'RECHAZADO';
 }
 
@@ -456,6 +459,8 @@ export interface Credito {
   mora: string;
   permite_abono_capital?: boolean;
   no_amortiza_capital?: boolean;
+  // Excluye el crédito de la asignación de capital a inversionistas
+  excluir_compras?: boolean;
   estado_devolucion?: 'NO_APLICA' | 'PENDIENTE_AUTORIZACION' | 'VERIFICADO' | 'RECHAZADO';
 }
 
@@ -724,6 +729,13 @@ export interface InversionistaPayload {
   porcentaje_inversion: number;
   fecha_inicio_participacion?: string;
   cuota_inversionista?: number;
+  /**
+   * Inversionista agregado desde la edición del crédito (no estaba antes).
+   * El backend exige declararlo así para registrar la operación en
+   * compras_credito_inversionista; sin ese registro la liquidación descuadra.
+   */
+  es_nuevo?: boolean;
+  tipo_operacion?: "compra_cartera" | "reinversion";
 }
 
 export interface UpdateCreditBody {
@@ -762,6 +774,8 @@ export interface UpdateCreditBody {
   // Abono capital
   permite_abono_capital?: boolean;
   no_amortiza_capital?: boolean;
+  // Excluye el crédito de la asignación de capital a inversionistas
+  excluir_compras?: boolean;
   estado_devolucion?: 'NO_APLICA' | 'PENDIENTE_AUTORIZACION' | 'VERIFICADO' | 'RECHAZADO';
   motivo_devolucion?: string;
 
@@ -931,7 +945,7 @@ export interface SubtotalInversionista {
   total_reinversion_interes: number;
   total_reinversion: number;
   total_abono_general_interes: number;
-  /** Interés neto de impuestos (interés × 0.81). Solo viene con valor cuando el inversionista tiene `descuenta_impuestos`; en caso contrario es null. */
+  /** Interés neto de impuestos (interés × 0.93, solo ISR). Solo viene con valor cuando el inversionista tiene `descuenta_impuestos`; en caso contrario es null. */
   total_neto_impuestos?: number | string | null;
 }
 
@@ -1030,6 +1044,12 @@ export async function getInvestorTotalsService(
 // ============================================================
 // calcularPagosEspejo — POST /calcularPagosEspejo
 // ============================================================
+export interface PendingReturnBlockedCredit {
+  credito_id: number;
+  numero_credito_sifco: string;
+  estado_devolucion: "PENDIENTE_AUTORIZACION";
+}
+
 export interface CalcularPagosEspejoResponse {
   success: boolean;
   message: string;
@@ -1076,7 +1096,11 @@ export function formatMensajeFallido(mensaje: string): string {
   if (match) {
     return ERROR_MESSAGES[match[1]] ?? "Error al procesar el crédito. Contacta soporte.";
   }
-  return mensaje;
+  const trimmed = mensaje.trim();
+  if (!trimmed || esDetalleTecnicoCrudo(trimmed)) {
+    return "Error al procesar el crédito. Contacta soporte.";
+  }
+  return trimmed;
 }
 
 // ============================================================
@@ -1107,7 +1131,7 @@ export interface InvestorMirrorSummaryResponse {
     total_reinversion_capital: number;
     total_reinversion_interes: number;
     total_reinversion: number;
-    /** Interés neto de impuestos (interés × 0.81). Null cuando el inversionista no descuenta impuestos. */
+    /** Interés neto de impuestos (interés × 0.93, solo ISR). Null cuando el inversionista no descuenta impuestos. */
     total_neto_impuestos?: number | string | null;
   };
 }
@@ -1234,9 +1258,18 @@ export interface LiquidateByInvestorRequest {
 export interface LiquidateByInvestorResponse {
   message: string;
   updatedCount: number;
+  success?: boolean;
+  warning?: boolean;
+  code?: string;
+  creditos_bloqueados?: PendingReturnBlockedCredit[];
   liquidaciones_creadas?: number;
   inversionistas_saltados?: number;
-  errores?: Array<{ inversionista_id: number; razon: string }>;
+  errores?: Array<{
+    inversionista_id: number;
+    razon: string;
+    code?: string;
+    creditos_bloqueados?: PendingReturnBlockedCredit[];
+  }>;
 }
 export async function liquidateByInvestorService(
   data: LiquidateByInvestorRequest
@@ -2209,7 +2242,7 @@ export interface LiquidacionResumen {
   total_isr: number;
   /** true si al inversionista se le descuentan impuestos del interés. */
   descuenta_impuestos?: boolean;
-  /** Interés neto de impuestos (interés × 0.81). Null cuando el inversionista no descuenta impuestos. */
+  /** Interés neto de impuestos (interés × 0.93, solo ISR). Null cuando el inversionista no descuenta impuestos. */
   total_neto_impuestos?: number | string | null;
   total_a_recibir_sin_reinversion: number;
   total_reinversion: number;

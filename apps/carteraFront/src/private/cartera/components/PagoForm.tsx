@@ -1,10 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { usePagoForm } from "../hooks/registerPayment";
 import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
+import { formatFieldErrors } from "@/lib/formErrors";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { DollarSign, Percent, Info, FileText, Building2, CheckCircle2, Calendar, ChevronsUpDown, Check } from "lucide-react";
+import { DollarSign, Info, FileText, Building2, CheckCircle2, ChevronsUpDown, Check } from "lucide-react";
 import { Combobox, Transition } from "@headlessui/react";
 import { Fragment, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -13,13 +15,6 @@ import { MiniCardCredito } from "./cardInfo";
 import { OpcionesExcesoModal } from "./excessModal";
 import { ModalBadDebtCredit } from "./ModalBadDebtCredit";
 import { BuscadorUsuarioSifco } from "./searchByNameSifco"; 
-import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "@/components/ui/select";
 import { useBancos } from "../hooks/bancos";
 import { useState, useCallback } from "react";
 import {
@@ -31,29 +26,6 @@ import {
 } from "@/components/ui/dialog"; 
 import {  DatePickerMUI } from "./calendar";
 import { getDisplayedPartialContribution } from "../services/installmentContribution";
-const fields = [
-  {
-    name: "monto_boleta",
-    label: "Monto Boleta",
-    type: "number",
-    icon: <DollarSign className="text-blue-500 mr-2 w-5 h-5" />,
-    required: true,
-  },
-  {
-    name: "otros",
-    label: "Otros (Opcional)",
-    type: "number",
-    icon: <Info className="text-blue-500 mr-2 w-5 h-5" />,
-    required: false,
-  },
-  {
-    name: "observaciones",
-    label: "Observaciones (Opcional)",
-    type: "text",
-    icon: <Percent className="text-blue-500 mr-2 w-5 h-5" />,
-    required: false,
-  },
-];
 
 export function PagoForm() {
   const {
@@ -63,6 +35,7 @@ export function PagoForm() {
     errorCredito,
     cuotaActualInfo,
     cuotasAtrasadasInfo,
+    cuotasEnValidacionInfo,
     handleFormSubmit,
     modalExcesoOpen,
     setModalExcesoOpen,
@@ -151,26 +124,10 @@ export function PagoForm() {
         Object.keys(errors).reduce((acc, key) => ({ ...acc, [key]: true }), {})
       );
 
-      const nombresAmigables: Record<string, string> = {
-        monto_boleta: "Monto Boleta",
-        fecha_boleta: "Fecha Boleta",
-        banco_id: "Banco",
-        numeroAutorizacion: "Número de Autorización",
-        credito_id: "Crédito",
-        usuario_id: "Usuario",
-        origen_pago: "Origen de Pago",
-      };
-
-      const errores = Object.entries(errors)
-        .map(([campo, mensaje]) => {
-          const nombreCampo = nombresAmigables[campo] || campo;
-          return `• ${nombreCampo}: ${mensaje}`;
-        })
-        .join("\n");
-
-      toast.error(`Campos con errores:\n${errores}`, {
-        duration: 5000,
-      });
+      const mensaje = formatFieldErrors(errors);
+      if (mensaje) {
+        toast.error(mensaje, { duration: 5000 });
+      }
       return;
     }
 
@@ -575,6 +532,7 @@ export function PagoForm() {
                 cuotaActualPagada={cuotaActualInfo?.pagada}
                 cuotaActualStatus={cuotaActualInfo?.validationStatus}
                 cuotasAtrasadasInfo={cuotasAtrasadasInfo ?? { cuotas: [] }}
+                cuotasEnValidacionInfo={cuotasEnValidacionInfo ?? undefined}
                 onCuotaSeleccionadaChange={setCuotaSeleccionada}
                 cuotasPendientesInfo={cuotasPendientesInfo ?? { cuotas: [] }}
                 mora={mora || 0}
@@ -626,12 +584,12 @@ export function PagoForm() {
                   <Label className="text-gray-700 font-semibold text-sm">
                     Monto Boleta <span className="text-red-500">*</span>
                   </Label>
-                  <Input
+                  <NumberInput
                     id="monto_boleta"
                     name="monto_boleta"
-                    type="number"
-                    value={formik.values.monto_boleta ?? ""}
-                    onChange={formik.handleChange}
+                    min={0}
+                    value={formik.values.monto_boleta}
+                    onValueChange={(v) => formik.setFieldValue("monto_boleta", v)}
                     onBlur={formik.handleBlur}
                     className={`border rounded-lg px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white ${
                       formik.errors.monto_boleta && formik.touched.monto_boleta
@@ -647,12 +605,12 @@ export function PagoForm() {
                   <Label className="text-gray-700 font-semibold text-sm">
                     Otros (Opcional)
                   </Label>
-                  <Input
+                  <NumberInput
                     id="otros"
                     name="otros"
-                    type="number"
-                    value={formik.values.otros ?? ""}
-                    onChange={formik.handleChange}
+                    min={0}
+                    value={formik.values.otros}
+                    onValueChange={(v) => formik.setFieldValue("otros", v)}
                     onBlur={formik.handleBlur}
                     className="border rounded-lg px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white border-gray-300"
                   />

@@ -742,6 +742,36 @@ type ActividadBotSesion = {
 	interacciones: ActividadBotInteraccion[];
 };
 
+/**
+ * Verifica que el usuario tenga acceso al caso de cobro (mismo patrón que
+ * getCasoCobroById): un asesor regular solo ve sus propios casos asignados
+ * (responsableCobros), salvo que su rol pueda ver todos. Lanza NOT_FOUND si
+ * no hay acceso — usarlo antes de devolver cualquier dato derivado del caso
+ * (vehículo, links de pago, etc.) en procedures nuevos.
+ */
+async function assertAccesoCasoCobro(
+	casoCobroId: string,
+	userId: string,
+	userRole: string,
+): Promise<void> {
+	const whereClause = PERMISSIONS.canViewAllCasosCobros(userRole)
+		? eq(casosCobros.id, casoCobroId)
+		: and(
+				eq(casosCobros.id, casoCobroId),
+				eq(casosCobros.responsableCobros, userId),
+			);
+	const [caso] = await db
+		.select({ id: casosCobros.id })
+		.from(casosCobros)
+		.where(whereClause)
+		.limit(1);
+	if (!caso) {
+		throw new ORPCError("NOT_FOUND", {
+			message: "Caso de cobro no encontrado o sin acceso.",
+		});
+	}
+}
+
 export const cobrosRouter = {
 	// Dashboard de cobros - Vista general del embudo
 	getDashboardStats: cobrosProcedure
@@ -4778,9 +4808,14 @@ export const cobrosRouter = {
 	// vehículo (hallazgo de Codex, PR #1470).
 	getVehiculoCasoPagalo: cobrosProcedure
 		.input(z.object({ casoCobroId: z.string().uuid() }))
-		.handler(async ({ input }) =>
-			resolverVehiculoCasoPagalo(input.casoCobroId),
-		),
+		.handler(async ({ input, context }) => {
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
+			return resolverVehiculoCasoPagalo(input.casoCobroId);
+		}),
 
 	// Grupo Págalo activo (no COMPLETED/CANCELLED) del crédito, si existe —
 	// mismo filtro que createPagaloLinks usa para no duplicar (pagalo-link-
@@ -4794,30 +4829,14 @@ export const cobrosRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
-			// Mismo control de acceso que getCasoCobroById: un asesor regular solo
-			// puede consultar links de pago de sus propios casos asignados
-			// (hallazgo de Codex, PR #1477 — el procedure anterior aceptaba
-			// creditoId enumerable sin verificar dueño del caso). carteraCreditoId
-			// no es columna local (se resuelve vía cartera-back) así que no se
-			// cruza-valida acá; alcanza con confirmar acceso al caso.
-			const whereClauseCaso = PERMISSIONS.canViewAllCasosCobros(
+			// El creditoId es numérico y enumerable; sin verificar acceso al caso
+			// un asesor podía consultar links de pago (URLs reales) de créditos
+			// ajenos (hallazgo de Codex, PR #1477).
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
 				context.userRole,
-			)
-				? eq(casosCobros.id, input.casoCobroId)
-				: and(
-						eq(casosCobros.id, input.casoCobroId),
-						eq(casosCobros.responsableCobros, context.userId),
-					);
-			const [caso] = await db
-				.select({ id: casosCobros.id })
-				.from(casosCobros)
-				.where(whereClauseCaso)
-				.limit(1);
-			if (!caso) {
-				throw new ORPCError("NOT_FOUND", {
-					message: "Caso de cobro no encontrado o sin acceso.",
-				});
-			}
+			);
 			const filas = await db
 				.select({
 					groupId: pagaloPaymentGroups.id,
@@ -4842,6 +4861,12 @@ export const cobrosRouter = {
 				)
 				.where(
 					and(
+						// casoCobroId, no solo carteraCreditoId: el creditoId es
+						// numérico y enumerable, sin este filtro un asesor podía
+						// pasar su propio caso (pasa el check de acceso arriba) con
+						// un creditoId ajeno y ver links de otro crédito (hallazgo
+						// de Codex, PR #1477).
+						eq(pagaloPaymentGroups.casoCobroId, input.casoCobroId),
 						eq(pagaloPaymentGroups.carteraCreditoId, input.creditoId),
 						notInArray(pagaloPaymentGroups.status, ["COMPLETED", "CANCELLED"]),
 					),

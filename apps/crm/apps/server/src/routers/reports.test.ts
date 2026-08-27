@@ -78,18 +78,34 @@ describe("isPorcentajeEfectividadPeriodCloseIncluded", () => {
 });
 
 describe("buildColocacionPorEmpresaRows", () => {
-	test("normalizes missing companies and sorts placements by amount", () => {
+	test("excludes unassigned companies and sorts placements by amount", () => {
 		expect(
 			buildColocacionPorEmpresaRows([
 				{ companyName: "Predio Norte", monto: "125000.50", cantidad: 2 },
+				{ companyName: null, monto: "90000", cantidad: 1 },
 				{ companyName: "  ", monto: "75000", cantidad: 1 },
 				{ companyName: "Agencia Centro", monto: "200000", cantidad: 3 },
 			]),
 		).toEqual([
 			{ name: "Agencia Centro", monto: 200000, cantidad: 3 },
 			{ name: "Predio Norte", monto: 125000.5, cantidad: 2 },
-			{ name: "Sin predio/agencia", monto: 75000, cantidad: 1 },
 		]);
+	});
+
+	test("sources the company from the opportunity and excludes unassigned placements", async () => {
+		const source = await Bun.file(
+			new URL("./reports.ts", import.meta.url),
+		).text();
+		const query = source.slice(
+			source.indexOf("companyName: companies.name"),
+			source.indexOf("registrosRaw.map"),
+		);
+
+		expect(query).toContain(
+			".innerJoin(companies, eq(opportunities.companyId, companies.id))",
+		);
+		expect(query).toContain("isNotNull(opportunities.companyId)");
+		expect(query).not.toContain("vehicles.companyId");
 	});
 });
 

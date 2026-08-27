@@ -62,6 +62,7 @@ import {
 	updateChecklistForClientDocument,
 	updateChecklistForVehicleDocument,
 } from "../lib/checklist";
+import { mergeCompanyRelationshipStats } from "../lib/company-relationship-stats";
 import {
 	assertOpportunityBelongsToLead,
 	canWriteOpportunityCreditAnalysis,
@@ -536,8 +537,8 @@ export const crmRouter = {
 
 	// Companies
 	getCompanies: crmProcedure.handler(async ({ context }) => {
-		// Admin can see all companies, sales can only see companies they created or are assigned to
-		if (context.userRole === "admin") {
+		// Supervisors manage the complete sales directory; sales users see their own.
+		if (PERMISSIONS.canManageAllCompanies(context.userRole)) {
 			return await db.select().from(companies).orderBy(companies.createdAt);
 		}
 		return await db
@@ -545,6 +546,50 @@ export const crmRouter = {
 			.from(companies)
 			.where(eq(companies.createdBy, context.userId))
 			.orderBy(companies.createdAt);
+	}),
+
+	getCompanyRelationshipStats: crmProcedure.handler(async ({ context }) => {
+		const leadsOwnerCondition =
+			context.userRole === "sales"
+				? eq(leads.assignedTo, context.userId)
+				: undefined;
+		const opportunitiesOwnerCondition =
+			context.userRole === "sales"
+				? eq(opportunities.assignedTo, context.userId)
+				: undefined;
+		const clientsOwnerCondition =
+			context.userRole === "sales"
+				? eq(clients.assignedTo, context.userId)
+				: undefined;
+
+		const [leadRows, opportunityRows, clientRows] = await Promise.all([
+			db
+				.select({ companyId: leads.companyId, total: count(leads.id) })
+				.from(leads)
+				.where(and(isNotNull(leads.companyId), leadsOwnerCondition))
+				.groupBy(leads.companyId),
+			db
+				.select({
+					companyId: opportunities.companyId,
+					total: count(opportunities.id),
+				})
+				.from(opportunities)
+				.where(
+					and(isNotNull(opportunities.companyId), opportunitiesOwnerCondition),
+				)
+				.groupBy(opportunities.companyId),
+			db
+				.select({ companyId: clients.companyId, total: count(clients.id) })
+				.from(clients)
+				.where(and(isNotNull(clients.companyId), clientsOwnerCondition))
+				.groupBy(clients.companyId),
+		]);
+
+		return mergeCompanyRelationshipStats({
+			leads: leadRows,
+			opportunities: opportunityRows,
+			clients: clientRows,
+		});
 	}),
 
 	createCompany: crmProcedure
@@ -589,9 +634,9 @@ export const crmRouter = {
 		.handler(async ({ input, context }) => {
 			const { id, ...updateData } = input;
 
-			// Sales users can only update companies they created
+			// Supervisors can update the complete sales directory.
 			const whereClause =
-				context.userRole === "admin"
+				PERMISSIONS.canManageAllCompanies(context.userRole)
 					? eq(companies.id, id)
 					: and(eq(companies.id, id), eq(companies.createdBy, context.userId));
 

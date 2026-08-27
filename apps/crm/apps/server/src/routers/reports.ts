@@ -1,5 +1,17 @@
 import { ORPCError } from "@orpc/server";
-import { and, count, desc, eq, gte, lt, lte, ne, sql, sum } from "drizzle-orm";
+import {
+	and,
+	count,
+	desc,
+	eq,
+	gte,
+	isNotNull,
+	lt,
+	lte,
+	ne,
+	sql,
+	sum,
+} from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { auctionVehicles } from "../db/schema/auctionVehicles";
@@ -116,8 +128,9 @@ type ColocacionPorEmpresaRow = {
 
 export function buildColocacionPorEmpresaRows(rows: ColocacionPorEmpresaRow[]) {
 	return rows
+		.filter((row) => Boolean(row.companyName?.trim()))
 		.map((row) => ({
-			name: row.companyName?.trim() || "Sin predio/agencia",
+			name: row.companyName?.trim() ?? "",
 			monto: Number.parseFloat(row.monto) || 0,
 			cantidad: row.cantidad,
 		}))
@@ -870,12 +883,13 @@ export const getReportePorcentajeEfectividad =
 						eq(firstClosedStageDates.opportunityId, opportunities.id),
 					)
 					// El predio/agencia pertenece directamente a la oportunidad.
-					.leftJoin(companies, eq(opportunities.companyId, companies.id))
+					.innerJoin(companies, eq(opportunities.companyId, companies.id))
 					.where(
 						and(
 							gte(firstClosedStageDates.firstClosedStageAt, start),
 							lte(firstClosedStageDates.firstClosedStageAt, end),
 							ne(opportunities.status, MIGRATED_OPPORTUNITY_STATUS),
+							isNotNull(opportunities.companyId),
 						),
 					)
 					.groupBy(companies.id, companies.name),

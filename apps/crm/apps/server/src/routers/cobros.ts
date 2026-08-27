@@ -4774,15 +4774,16 @@ export const cobrosRouter = {
 	// Vehículo del caso vía la MISMA fuente que usa createPagaloLinks para
 	// armar el identificador del mensaje de WhatsApp (pagalo-link-
 	// orchestrator.ts: casosCobros.contratoId -> contratosFinanciamiento.
-	// vehicleId -> vehicles). El diálogo lo usa para el preview del mensaje;
-	// otra fuente (ej. opportunities.vehicleId) puede apuntar a un vehículo
-	// distinto en créditos refinanciados u oportunidades desactualizadas
-	// (hallazgo de Codex, PR #1470).
+	// vehicleId -> vehicles). Casos migrados de cartera-back sin flujo de
+	// originación completo no tienen contratoId (hallazgo real, PR #1470:
+	// caso 01010214109410) — en ese caso cae a opportunities.vehicleId, la
+	// misma fuente que ya usa getDetallesCreditoCarteraBack para el header.
 	getVehiculoCasoPagalo: cobrosProcedure
 		.input(z.object({ casoCobroId: z.string().uuid() }))
 		.handler(async ({ input }) => {
 			const [fila] = await db
 				.select({
+					numeroCreditoSifco: casosCobros.numeroCreditoSifco,
 					vehiculoMarca: vehicles.make,
 					vehiculoModelo: vehicles.model,
 					vehiculoYear: vehicles.year,
@@ -4796,7 +4797,22 @@ export const cobrosRouter = {
 				.leftJoin(vehicles, eq(contratosFinanciamiento.vehicleId, vehicles.id))
 				.where(eq(casosCobros.id, input.casoCobroId))
 				.limit(1);
-			return fila ?? null;
+			if (!fila) return null;
+			if (fila.vehiculoMarca && fila.vehiculoPlaca) return fila;
+			if (!fila.numeroCreditoSifco) return fila;
+
+			const [porOportunidad] = await db
+				.select({
+					vehiculoMarca: vehicles.make,
+					vehiculoModelo: vehicles.model,
+					vehiculoYear: vehicles.year,
+					vehiculoPlaca: vehicles.licensePlate,
+				})
+				.from(opportunities)
+				.leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
+				.where(eq(opportunities.numeroSifco, fila.numeroCreditoSifco))
+				.limit(1);
+			return porOportunidad?.vehiculoMarca ? porOportunidad : fila;
 		}),
 
 	// Grupo Págalo activo (no COMPLETED/CANCELLED) del crédito, si existe —

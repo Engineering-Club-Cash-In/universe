@@ -9,7 +9,7 @@ import { user } from "../db/schema/auth";
 import { coDebtors, leads, opportunities, salesStages } from "../db/schema/crm";
 import { licenseQrVerifications } from "../db/schema/license-verification";
 import { vehicles } from "../db/schema/vehicles";
-import { auditRecord } from "../lib/audit";
+import { auditMark, auditRecord, auditRollback } from "../lib/audit";
 import { carteraBackClient } from "../services/cartera-back-client";
 
 // Tipo para cliente de DB que puede ser el db normal o una transacción
@@ -468,6 +468,11 @@ export async function migrarCreditos(
 		ignorados: [],
 	};
 
+	// El catch de abajo se traga el rollback y devuelve 200: sin esta marca, las
+	// anotaciones de los créditos ya procesados quedarían como altas exitosas de
+	// filas que la reversión borró.
+	const marcaAuditoria = auditMark();
+
 	try {
 		await db.transaction(async (tx) => {
 			// Procesar cada crédito dentro de la transacción
@@ -542,6 +547,7 @@ export async function migrarCreditos(
 			error instanceof Error ? error.message : "Error desconocido";
 
 		console.error(`[Migrate] ROLLBACK ejecutado: ${errorMessage}`);
+		auditRollback(marcaAuditoria);
 
 		// Retornar resultado con información del rollback
 		return {

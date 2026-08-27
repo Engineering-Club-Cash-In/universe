@@ -2755,10 +2755,14 @@ export const crmRouter = {
 				}
 			}
 
-			const safeUpdateData =
-				currentOpportunity[0].status === "won"
-					? stripUnchangedFrozenFields(updateData, currentOpportunity[0])
-					: updateData;
+			// Se saca SIEMPRE, no solo si la lectura la vio ganada: reescribir un
+			// campo congelado con el mismo valor que se acaba de leer no aporta
+			// nada, y si en el medio la oportunidad se gana y alguien lo corrige,
+			// esta sentencia le pisaría la corrección con un dato ya viejo.
+			const safeUpdateData = stripUnchangedFrozenFields(
+				updateData,
+				currentOpportunity[0],
+			);
 
 			const updatedOpportunity = await db
 				.update(opportunities)

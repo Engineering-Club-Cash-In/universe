@@ -3,6 +3,7 @@ import {
 	type AuditContext,
 	auditSourceForPath,
 	buildAuditRows,
+	chunk,
 	prepareAuditInput,
 	redactAuditInput,
 } from "./audit";
@@ -217,5 +218,22 @@ describe("failed requests that do not throw", () => {
 			{ ok: false, errorCode: "HTTP_500", durationMs: 5 },
 		);
 		expect(row.ok).toBe(true);
+	});
+});
+
+describe("chunk", () => {
+	test("splits bulk flushes so Postgres does not reject the statement", () => {
+		// 13 parámetros por fila contra un tope de 65535: una limpieza o un import
+		// masivo reventaría la sentencia entera y el catch se comería toda la
+		// bitácora de esa operación.
+		const filas = Array.from({ length: 1_250 }, (_, i) => i);
+		const lotes = chunk(filas, 500);
+		expect(lotes.map((l) => l.length)).toEqual([500, 500, 250]);
+		expect(lotes.flat()).toEqual(filas);
+	});
+
+	test("leaves a small batch in a single statement", () => {
+		expect(chunk([1, 2, 3], 500)).toEqual([[1, 2, 3]]);
+		expect(chunk([], 500)).toEqual([]);
 	});
 });

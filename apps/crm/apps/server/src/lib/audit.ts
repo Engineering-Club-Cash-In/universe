@@ -77,6 +77,29 @@ export function auditRecord(entry: AuditEntry): void {
 	context.entries.push(entry);
 }
 
+/**
+ * Marca cuántas anotaciones lleva la request, para poder descartar las que
+ * vengan después si algo se revierte. Ver `auditRollback`.
+ */
+export function auditMark(): number {
+	return storage.getStore()?.entries.length ?? 0;
+}
+
+/**
+ * Descarta las anotaciones hechas desde `marca`.
+ *
+ * Hace falta donde una transacción puede revertirse y el error se atrapa sin
+ * volver a lanzarlo: ahí la request termina bien y esas anotaciones se
+ * persistirían como escrituras exitosas de filas que el rollback borró.
+ *
+ * Cuando el error SÍ se propaga no es necesario: el flush marca todo con
+ * `ok = false`, que es una descripción honesta de lo que pasó.
+ */
+export function auditRollback(marca: number): void {
+	const context = storage.getStore();
+	if (context) context.entries.length = marca;
+}
+
 /** Cuántas escrituras lleva anotadas la request (para chequeos internos). */
 export function auditedSoFar(): number {
 	return storage.getStore()?.entries.length ?? 0;
@@ -207,6 +230,21 @@ export function buildAuditRows(
 	];
 }
 
+/**
+ * Un INSERT de varias filas manda 13 parámetros por fila y Postgres admite
+ * 65535 en total, así que un import o una limpieza masiva reventaría la
+ * sentencia entera. Se parte en lotes: si uno falla, los demás igual entran.
+ */
+export const AUDIT_CHUNK_SIZE = 500;
+
+export function chunk<T>(items: T[], size = AUDIT_CHUNK_SIZE): T[][] {
+	const out: T[][] = [];
+	for (let i = 0; i < items.length; i += size) {
+		out.push(items.slice(i, i + size));
+	}
+	return out;
+}
+
 /** Nunca lanza: la bitácora no puede tumbar la operación que registra. */
 async function flush(
 	context: AuditContext,
@@ -217,14 +255,16 @@ async function flush(
 		durationMs: Date.now() - context.startedAt,
 	});
 	if (rows.length === 0) return;
-	try {
-		await db.insert(crmEntityAudit).values(rows);
-	} catch (error) {
-		console.warn(
-			"[crm-entity-audit] no se pudo registrar",
-			{ operation: context.operation, rows: rows.length },
-			error,
-		);
+	for (const lote of chunk(rows)) {
+		try {
+			await db.insert(crmEntityAudit).values(lote);
+		} catch (error) {
+			console.warn(
+				"[crm-entity-audit] no se pudo registrar un lote",
+				{ operation: context.operation, rows: lote.length },
+				error,
+			);
+		}
 	}
 }
 

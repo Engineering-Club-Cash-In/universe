@@ -730,6 +730,13 @@ export const legalContractsRouter = {
 
 	// Aprobar oportunidad desde jurídico (mover a 90%)
 	approveOpportunityLegal: juridicoProcedure
+		.meta({
+			audit: {
+				entity: "opportunity",
+				action: "approve_legal",
+				idFrom: "input.opportunityId",
+			},
+		})
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
@@ -857,6 +864,13 @@ export const legalContractsRouter = {
 
 	// Confirmar que los contratos fueron firmados (mover de 85% a 90%)
 	confirmContractsSigned: viewOpportunityContractsProcedure
+		.meta({
+			audit: {
+				entity: "opportunity",
+				action: "confirm_contracts_signed",
+				idFrom: "input.opportunityId",
+			},
+		})
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),

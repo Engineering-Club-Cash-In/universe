@@ -81,6 +81,7 @@ import {
 	buildOpportunityRelationshipInvariantCondition,
 	getStageLeadRequirementError,
 	getStageVehicleRequirementError,
+	getWonOpportunityLockError,
 } from "../lib/opportunity-stage-guard";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
@@ -912,6 +913,7 @@ export const crmRouter = {
 	}),
 
 	createLead: crmProcedure
+		.meta({ audit: { entity: "lead", action: "create", idFrom: "output.id" } })
 		.input(
 			z.object({
 				firstName: z.string().min(1, "First name is required"),
@@ -1094,6 +1096,7 @@ export const crmRouter = {
 		}),
 
 	updateLead: crmProcedure
+		.meta({ audit: { entity: "lead", action: "update", idFrom: "input.id" } })
 		.input(
 			z.object({
 				id: z.string().uuid(),
@@ -1878,6 +1881,13 @@ export const crmRouter = {
 		}),
 
 	deleteOpportunity: crmProcedure
+		.meta({
+			audit: {
+				entity: "opportunity",
+				action: "delete",
+				idFrom: "input.opportunityId",
+			},
+		})
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
@@ -2109,6 +2119,9 @@ export const crmRouter = {
 		}),
 
 	createOpportunity: crmProcedure
+		.meta({
+			audit: { entity: "opportunity", action: "create", idFrom: "output.id" },
+		})
 		.input(
 			z.object({
 				title: z.string().min(1, "Title is required"),
@@ -2220,6 +2233,9 @@ export const crmRouter = {
 		}),
 
 	updateOpportunity: crmProcedure
+		.meta({
+			audit: { entity: "opportunity", action: "update", idFrom: "input.id" },
+		})
 		.input(
 			z.object({
 				id: z.string().uuid(),
@@ -2302,6 +2318,16 @@ export const crmRouter = {
 				throw new ORPCError("NOT_FOUND", {
 					message: "Oportunidad no encontrada",
 				});
+			}
+
+			// Ganada = congelada: ya hay crédito y contratos en cartera con estos
+			// datos. Solo admin puede corregirla (queda en crm_entity_audit).
+			const wonLockError = getWonOpportunityLockError(
+				currentOpportunity[0].status,
+				context.userRole,
+			);
+			if (wonLockError) {
+				throw new ORPCError("FORBIDDEN", { message: wonLockError });
 			}
 
 			if (input.leadId === null) {
@@ -2789,6 +2815,13 @@ export const crmRouter = {
 		}),
 
 	reassignOpportunityAndLead: crmProcedure
+		.meta({
+			audit: {
+				entity: "opportunity",
+				action: "reassign",
+				idFrom: "input.opportunityId",
+			},
+		})
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
@@ -3017,6 +3050,13 @@ export const crmRouter = {
 		}),
 
 	approveOpportunityAnalysis: analystProcedure
+		.meta({
+			audit: {
+				entity: "opportunity",
+				action: "approve_analysis",
+				idFrom: "input.opportunityId",
+			},
+		})
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
@@ -3479,6 +3519,13 @@ export const crmRouter = {
 
 	// Approve credit detail (40% → 50% transition)
 	approveCreditDetail: crmProcedure
+		.meta({
+			audit: {
+				entity: "opportunity",
+				action: "approve_credit_detail",
+				idFrom: "input.opportunityId",
+			},
+		})
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
@@ -3564,6 +3611,13 @@ export const crmRouter = {
 
 	// Revoke credit detail approval (back to 40%)
 	revokeCreditDetailApproval: crmProcedure
+		.meta({
+			audit: {
+				entity: "opportunity",
+				action: "revoke_credit_detail",
+				idFrom: "input.opportunityId",
+			},
+		})
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
@@ -6074,6 +6128,13 @@ export const crmRouter = {
 
 	// Approve disbursement (90% → 100% transition)
 	approveDisbursement: analystProcedure
+		.meta({
+			audit: {
+				entity: "opportunity",
+				action: "approve_disbursement",
+				idFrom: "input.opportunityId",
+			},
+		})
 		.input(z.object({ opportunityId: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
 			// Get checklist and verify all items are completed
@@ -6660,6 +6721,13 @@ export const crmRouter = {
 
 	// Assign investor and advance to 80%
 	assignInvestorAndAdvance: analystProcedure
+		.meta({
+			audit: {
+				entity: "opportunity",
+				action: "assign_investor",
+				idFrom: "input.opportunityId",
+			},
+		})
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
@@ -6943,6 +7011,13 @@ export const crmRouter = {
 		}),
 
 	updateOpportunityInvestors: analystProcedure
+		.meta({
+			audit: {
+				entity: "opportunity",
+				action: "update_investors",
+				idFrom: "input.opportunityId",
+			},
+		})
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
@@ -7062,6 +7137,9 @@ export const crmRouter = {
 
 	// ── Credit Scoring ──────────────────────────────────────────────────
 	scoreLead: crmProcedure
+		.meta({
+			audit: { entity: "lead", action: "score", idFrom: "input.leadId" },
+		})
 		.input(
 			z.object({
 				leadId: z.string().uuid(),

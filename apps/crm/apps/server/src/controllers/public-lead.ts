@@ -1,6 +1,7 @@
 import { and, asc, count, eq, or } from "drizzle-orm";
 import type { Context } from "hono";
 import { db } from "../db";
+import { logEntityAudit } from "../lib/audit";
 import { user } from "../db/schema/auth";
 import {
 	type leadSourceEnum,
@@ -129,6 +130,15 @@ export async function createOpportunityForLead(
 			creditType: creditType ?? "autocompra",
 		})
 		.returning();
+	await logEntityAudit(db, {
+		entityType: "opportunity",
+		entityId: newOpportunity.id,
+		action: "create",
+		procedure: "public-lead.createOpportunityForLead",
+		source: "public",
+		performedBy: null,
+		input: { leadId, source, campaign, creditType, assignedTo: systemUserId },
+	});
 
 	return newOpportunity;
 }
@@ -246,6 +256,15 @@ export async function createPublicLead(c: Context) {
 								updatedAt: new Date(),
 							})
 							.where(eq(opportunities.id, sameSourceOpportunity.id));
+						await logEntityAudit(db, {
+							entityType: "opportunity",
+							entityId: sameSourceOpportunity.id,
+							action: "update",
+							procedure: "public-lead.createPublicLead",
+							source: "public",
+							performedBy: null,
+							input: opportunityUpdates,
+						});
 					}
 
 					// La campaña sí se sincroniza cuando la re-entrada es del mismo
@@ -264,6 +283,15 @@ export async function createPublicLead(c: Context) {
 							.set({ campaign: body.campaign, updatedAt: new Date() })
 							.where(eq(leads.id, opportunityLead.id))
 							.returning();
+						await logEntityAudit(db, {
+							entityType: "lead",
+							entityId: opportunityLead.id,
+							action: "update",
+							procedure: "public-lead.createPublicLead",
+							source: "public",
+							performedBy: null,
+							input: { campaign: body.campaign },
+						});
 
 						if (syncedLead?.id === existingLead.id) {
 							leadData = syncedLead;
@@ -284,6 +312,15 @@ export async function createPublicLead(c: Context) {
 						.set({ email: body.email, updatedAt: new Date() })
 						.where(eq(leads.id, existingLead.id))
 						.returning();
+					await logEntityAudit(db, {
+						entityType: "lead",
+						entityId: existingLead.id,
+						action: "update",
+						procedure: "public-lead.createPublicLead",
+						source: "public",
+						performedBy: null,
+						input: { email: body.email },
+					});
 				}
 
 				// De `leads` no se toca nada más: `source` es lo que clasifica a las
@@ -312,6 +349,15 @@ export async function createPublicLead(c: Context) {
 					})
 					.where(eq(leads.id, existingLead.id))
 					.returning();
+				await logEntityAudit(db, {
+					entityType: "lead",
+					entityId: existingLead.id,
+					action: "update",
+					procedure: "public-lead.createPublicLead",
+					source: "public",
+					performedBy: null,
+					input: { source, campaign },
+				});
 			}
 
 			const assignedTo = await resolveExistingLeadAssigneeFromDatabase(
@@ -338,6 +384,15 @@ export async function createPublicLead(c: Context) {
 					})
 					.where(eq(leads.id, existingLead.id))
 					.returning();
+				await logEntityAudit(db, {
+					entityType: "lead",
+					entityId: existingLead.id,
+					action: "reassign",
+					procedure: "public-lead.createPublicLead",
+					source: "public",
+					performedBy: null,
+					input: { assignedTo },
+				});
 			}
 
 			const opportunity = await createOpportunityForLead(
@@ -368,6 +423,15 @@ export async function createPublicLead(c: Context) {
 					})
 					.where(eq(leads.id, existingLead.id))
 					.returning();
+				await logEntityAudit(db, {
+					entityType: "lead",
+					entityId: existingLead.id,
+					action: "update",
+					procedure: "public-lead.createPublicLead",
+					source: "public",
+					performedBy: null,
+					input: { email: body.email, source, campaign },
+				});
 
 				return c.json(
 					{
@@ -434,6 +498,15 @@ export async function createPublicLead(c: Context) {
 				updatedAt: new Date(),
 			})
 			.returning();
+		await logEntityAudit(db, {
+			entityType: "lead",
+			entityId: newLead.id,
+			action: "create",
+			procedure: "public-lead.createPublicLead",
+			source: "public",
+			performedBy: null,
+			input: body,
+		});
 
 		// RENAP solo si tiene DPI y teléfono
 		const renapInfo = hasDpi

@@ -21,6 +21,7 @@ import {
 import { getOpenOpportunityBySource } from "@/lib/lead-opportunity";
 import { generateUniqueFilename, uploadFileFromUrlToR2 } from "@/lib/storage";
 import { db } from "../db";
+import { logEntityAudit } from "../lib/audit";
 import { validarDpi } from "../utils/cui-validation";
 import { otpController } from "./otp";
 
@@ -508,6 +509,15 @@ export const getRenapInfoController = async (
 				assignmentType: "auto",
 			})
 			.returning({ id: leads.id });
+		await logEntityAudit(db, {
+			entityType: "lead",
+			entityId: newLead[0].id,
+			action: "create",
+			procedure: "bot.getRenapInfoController",
+			source: "bot",
+			performedBy: null,
+			input: { dpi, phone },
+		});
 		leadId = newLead[0].id;
 		assignedUserId = newLeadAssignment.assignedTo;
 		createdByUserId = newLeadAssignment.createdBy;
@@ -538,6 +548,15 @@ export const getRenapInfoController = async (
 					updatedAt: new Date(),
 				})
 				.where(eq(leads.id, existingLead.id));
+			await logEntityAudit(db, {
+				entityType: "lead",
+				entityId: existingLead.id,
+				action: "update",
+				procedure: "bot.getRenapInfoController",
+				source: "bot",
+				performedBy: null,
+				input: { dpi, reason: "renap_refresh" },
+			});
 		} else {
 			console.log(
 				`[DEBUG] Lead ${leadId} sin proceso activo; se reasigna por ruleta.`,
@@ -567,6 +586,15 @@ export const getRenapInfoController = async (
 					livenessValidated: false,
 				})
 				.where(eq(leads.id, existingLead.id));
+			await logEntityAudit(db, {
+				entityType: "lead",
+				entityId: existingLead.id,
+				action: "reassign",
+				procedure: "bot.getRenapInfoController",
+				source: "bot",
+				performedBy: null,
+				input: { dpi, assignedTo: reassignment.assignedTo },
+			});
 		}
 	}
 
@@ -621,6 +649,15 @@ export const getRenapInfoController = async (
 				.update(opportunities)
 				.set({ assignedTo: assignedUserId, updatedAt: new Date() })
 				.where(eq(opportunities.id, existingOpportunity.id));
+			await logEntityAudit(db, {
+				entityType: "opportunity",
+				entityId: existingOpportunity.id,
+				action: "reassign",
+				procedure: "bot.getRenapInfoController",
+				source: "bot",
+				performedBy: null,
+				input: { dpi, assignedTo: assignedUserId },
+			});
 		}
 		opportunityId = existingOpportunity.id;
 	} else {
@@ -651,6 +688,15 @@ export const getRenapInfoController = async (
 				source: "Whatsapp",
 			})
 			.returning();
+		await logEntityAudit(db, {
+			entityType: "opportunity",
+			entityId: newOpportunity.id,
+			action: "create",
+			procedure: "bot.getRenapInfoController",
+			source: "bot",
+			performedBy: null,
+			input: { dpi, leadId, assignedTo: assignedUserId },
+		});
 
 		opportunityId = newOpportunity.id;
 	}
@@ -795,6 +841,15 @@ export const updateLeadAndCreateOpportunity = async (
 			.update(leads)
 			.set(leadUpdates)
 			.where(eq(leads.id, existingLead.id));
+		await logEntityAudit(db, {
+			entityType: "lead",
+			entityId: existingLead.id,
+			action: "update",
+			procedure: "bot.updateLeadAndCreateOpportunity",
+			source: "bot",
+			performedBy: null,
+			input: { dpi, ...leadUpdates },
+		});
 	}
 
 	// 3. Agregar documentos a las oportunidades abiertas usando la función genérica

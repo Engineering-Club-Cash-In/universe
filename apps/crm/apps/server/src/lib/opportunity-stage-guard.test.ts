@@ -6,6 +6,8 @@ import {
 	buildOpportunityRelationshipInvariantCondition,
 	getStageLeadRequirementError,
 	getStageVehicleRequirementError,
+	getWonOpportunityLockError,
+	WON_OPPORTUNITY_LOCKED_ERROR,
 } from "./opportunity-stage-guard";
 
 describe("opportunity stage vehicle guard", () => {
@@ -67,5 +69,29 @@ describe("opportunity update concurrency guard", () => {
 
 		expect(query).toContain('and ( coalesce(( select "sales_stages"');
 		expect(query).toContain('or "opportunities"."lead_id" is not null ))');
+	});
+});
+
+describe("won opportunity lock", () => {
+	test("blocks edits on won opportunities for non-admin roles", () => {
+		expect(getWonOpportunityLockError("won", "sales")).toBe(
+			WON_OPPORTUNITY_LOCKED_ERROR,
+		);
+		expect(getWonOpportunityLockError("won", "sales_supervisor")).toBe(
+			WON_OPPORTUNITY_LOCKED_ERROR,
+		);
+		expect(getWonOpportunityLockError("won", null)).toBe(
+			WON_OPPORTUNITY_LOCKED_ERROR,
+		);
+	});
+
+	test("lets admins correct a won opportunity", () => {
+		expect(getWonOpportunityLockError("won", "admin")).toBeNull();
+	});
+
+	test("does not touch open, lost or on-hold opportunities", () => {
+		expect(getWonOpportunityLockError("open", "sales")).toBeNull();
+		expect(getWonOpportunityLockError("lost", "sales")).toBeNull();
+		expect(getWonOpportunityLockError("on_hold", "sales")).toBeNull();
 	});
 });

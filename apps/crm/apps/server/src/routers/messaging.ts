@@ -2,6 +2,7 @@ import { ORPCError } from "@orpc/server";
 import { and, count, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
+import { logEntityAudit } from "../lib/audit";
 import { coDebtors, leads } from "../db/schema/crm";
 import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import {
@@ -374,7 +375,7 @@ export const messagingRouter = {
 				),
 			}),
 		)
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
 			const [recipient] = await db
 				.select()
 				.from(whatsappLogRecipients)
@@ -393,6 +394,15 @@ export const messagingRouter = {
 					.update(leads)
 					.set({ phone: input.phone })
 					.where(eq(leads.id, recipient.leadId));
+				await logEntityAudit(db, {
+					entityType: "lead",
+					entityId: recipient.leadId,
+					action: "update_phone",
+					procedure: "messaging.updateWhatsappLog",
+					source: "crm",
+					performedBy: context.userId,
+					input: { recipientId: input.recipientId, phone: input.phone },
+				});
 			}
 			if (recipient.coDebtorId) {
 				await db

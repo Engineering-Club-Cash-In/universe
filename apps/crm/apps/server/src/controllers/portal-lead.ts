@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray, ne, or, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { db } from "../db";
+import { logEntityAudit } from "../lib/audit";
 import { user } from "../db/schema/auth";
 import { leads, opportunities } from "../db/schema/crm";
 import { opportunityDocuments } from "../db/schema/documents";
@@ -288,6 +289,15 @@ export async function updateLeadByEmail(c: Context) {
 				direccion: leads.direccion,
 				updatedAt: leads.updatedAt,
 			});
+		await logEntityAudit(db, {
+			entityType: "lead",
+			entityId: existingLead.id,
+			action: "update",
+			procedure: "portal-lead.updateLeadByEmail",
+			source: "portal",
+			performedBy: null,
+			input: updateData,
+		});
 
 		// If address was updated, also update the lead direccion
 		if (address !== undefined && updatedLead) {
@@ -681,6 +691,15 @@ export async function createPortalRegisterLead(c: Context) {
 					.set({ email, updatedAt: new Date() })
 					.where(eq(leads.id, existingLead.id))
 					.returning();
+				await logEntityAudit(db, {
+					entityType: "lead",
+					entityId: existingLead.id,
+					action: "update",
+					procedure: "portal-lead.createPortalRegisterLead",
+					source: "portal",
+					performedBy: null,
+					input: { email },
+				});
 
 				return c.json({
 					success: true,
@@ -730,6 +749,15 @@ export async function createPortalRegisterLead(c: Context) {
 				updatedAt: new Date(),
 			})
 			.returning();
+		await logEntityAudit(db, {
+			entityType: "lead",
+			entityId: newLead.id,
+			action: "create",
+			procedure: "portal-lead.createPortalRegisterLead",
+			source: "portal",
+			performedBy: null,
+			input: { email, phone, dpi, assignedTo: salesUserForLead.id },
+		});
 
 		let renapInfo = null;
 		if (dpi) {

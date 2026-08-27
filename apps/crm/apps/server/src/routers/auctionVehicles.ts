@@ -21,6 +21,13 @@ export const auctionRouter = {
 	 * - Updates vehicle.status to "auction"
 	 */
 	createAuction: protectedProcedure
+		.meta({
+			audit: {
+				entity: "vehicle",
+				action: "auction_create",
+				idFrom: "input.vehicleId",
+			},
+		})
 		.input(
 			z.object({
 				vehicleId: z.string().uuid(),
@@ -125,6 +132,13 @@ export const auctionRouter = {
 	 * - Updates vehicles.status = "sold"
 	 */
 	closeAuction: protectedProcedure
+		.meta({
+			audit: {
+				entity: "vehicle",
+				action: "auction_close",
+				idFrom: "input.vehicleId",
+			},
+		})
 		.input(
 			z.object({
 				vehicleId: z.string().uuid(),
@@ -447,6 +461,13 @@ export const auctionRouter = {
 	 * - Updates inspections.status = "pending"
 	 */
 	cancelAuction: protectedProcedure
+		.meta({
+			audit: {
+				entity: "vehicle",
+				action: "auction_cancel",
+				idFrom: "input.vehicleId",
+			},
+		})
 		.input(
 			z.object({
 				vehicleId: z.string().uuid(),

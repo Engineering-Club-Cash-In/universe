@@ -851,6 +851,11 @@ function RouteComponent() {
 	};
 
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
+	// Ganada = congelada (misma regla que el backend en updateOpportunity):
+	// el crédito y los contratos ya se generaron con estos datos.
+	const isWonLocked =
+		selectedOpportunity?.status === "won" &&
+		userProfile.data?.role !== ROLES.ADMIN;
 	const opportunitiesQuery = useQuery({
 		...orpc.getOpportunities.queryOptions({
 			input: {
@@ -2962,6 +2967,13 @@ function RouteComponent() {
 				<DialogContent className="scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent dark:scrollbar-thumb-gray-700 max-h-[90vh] min-w-[56rem] max-w-5xl overflow-y-auto">
 					<DialogHeader>
 						<DialogTitle>Editar Oportunidad</DialogTitle>
+						{isWonLocked && (
+							<p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-amber-700 text-sm dark:text-amber-300">
+								Esta oportunidad ya está ganada: sus datos quedaron fijados al
+								generar el crédito y los contratos. Solo un administrador puede
+								corregirla.
+							</p>
+						)}
 					</DialogHeader>
 					<form
 						onSubmit={(e) => {
@@ -3298,6 +3310,7 @@ function RouteComponent() {
 										type="submit"
 										className="flex-1"
 										disabled={
+											isWonLocked ||
 											!state.canSubmit ||
 											state.isSubmitting ||
 											updateOpportunityMutation.isPending

@@ -8,6 +8,7 @@ import crypto from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
+import { logEntityAudit } from "../lib/audit";
 import {
 	carteraBackReferences,
 	carteraBackSyncLog,
@@ -1538,6 +1539,15 @@ export async function closeOpportunity(
 						updatedAt: new Date(),
 					})
 					.where(eq(vehicles.id, opportunity.vehicleId));
+				await logEntityAudit(tx, {
+					entityType: "vehicle",
+					entityId: opportunity.vehicleId,
+					action: "mark_sold",
+					procedure: "closeOpportunity",
+					source: "system",
+					performedBy: userId,
+					input: { opportunityId },
+				});
 				console.log(
 					`[CloseOpportunity] ✓ Vehicle ${opportunity.vehicleId} marked as sold`,
 				);

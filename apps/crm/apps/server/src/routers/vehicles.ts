@@ -459,6 +459,9 @@ export const vehiclesRouter = {
 
 	// Create new vehicle (used vehicles - all fields required)
 	create: protectedProcedure
+		.meta({
+			audit: { entity: "vehicle", action: "create", idFrom: "output.id" },
+		})
 		.input(
 			z.object({
 				make: z.string(),
@@ -514,6 +517,9 @@ export const vehiclesRouter = {
 
 	// Create new vehicle (for brand new vehicles from dealer - minimal required fields)
 	createNewVehicle: protectedProcedure
+		.meta({
+			audit: { entity: "vehicle", action: "create", idFrom: "output.id" },
+		})
 		.input(createNewVehicleInputSchema)
 		.handler(async ({ input }) => {
 			try {
@@ -550,6 +556,9 @@ export const vehiclesRouter = {
 
 	// Update vehicle
 	update: vehiclesProcedure
+		.meta({
+			audit: { entity: "vehicle", action: "update", idFrom: "input.id" },
+		})
 		.input(
 			z.object({
 				id: z.string(),
@@ -645,6 +654,9 @@ export const vehiclesRouter = {
 
 	// Delete vehicle
 	delete: protectedProcedure
+		.meta({
+			audit: { entity: "vehicle", action: "delete", idFrom: "input.id" },
+		})
 		.input(z.object({ id: z.string() }))
 		.handler(async ({ input }) => {
 			// Delete related photos first
@@ -788,6 +800,13 @@ export const vehiclesRouter = {
 
 	// Create vehicle inspection
 	createInspection: tallerOrCrmProcedure
+		.meta({
+			audit: {
+				entity: "vehicle",
+				action: "inspection_create",
+				idFrom: "input.vehicleId",
+			},
+		})
 		.input(
 			z.object({
 				vehicleId: z.string(),
@@ -1184,6 +1203,13 @@ export const vehiclesRouter = {
 
 	// Create full inspection with all data (vehicle + inspection + checklist)
 	createFullInspection: tallerOrCrmProcedure
+		.meta({
+			audit: {
+				entity: "vehicle",
+				action: "full_inspection",
+				idFrom: "output.vehicleId",
+			},
+		})
 		.input(
 			z.object({
 				// Vehicle data

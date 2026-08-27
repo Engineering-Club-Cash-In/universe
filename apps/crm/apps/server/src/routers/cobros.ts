@@ -16,6 +16,7 @@ import {
 } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
+import { logEntityAudit } from "../lib/audit";
 import { user } from "../db/schema/auth";
 import { carteraBackReferences } from "../db/schema/cartera-back";
 import {
@@ -325,7 +326,14 @@ async function autoCrearDatosMigrate({
 				notes: `Creado automáticamente desde Cartera-Back. Crédito SIFCO: ${numeroSifco}`,
 			})
 			.returning({ id: leads.id });
-
+		await logEntityAudit(tx, {
+			entityType: "lead",
+			entityId: nuevoLead.id,
+			action: "create",
+			procedure: "cobros.autoCrearDatosMigrate",
+			performedBy: userId,
+			input: { numeroSifco, nombre },
+		});
 		// 2. Crear Vehículo con datos nulos, status "sold"
 		const [nuevoVehiculo] = await tx
 			.insert(vehicles)
@@ -338,22 +346,40 @@ async function autoCrearDatosMigrate({
 				status: "sold",
 			})
 			.returning({ id: vehicles.id });
-
+		await logEntityAudit(tx, {
+			entityType: "vehicle",
+			entityId: nuevoVehiculo.id,
+			action: "create",
+			procedure: "cobros.autoCrearDatosMigrate",
+			performedBy: userId,
+			input: { numeroSifco },
+		});
 		// 3. Crear Oportunidad enlazando lead y vehículo
-		await tx.insert(opportunities).values({
-			title: `Crédito ${numeroSifco}`,
-			leadId: nuevoLead.id,
-			vehicleId: nuevoVehiculo.id,
-			creditType,
-			stageId: defaultStage.id,
-			assignedTo: userId,
-			createdBy: userId,
-			status: "migrate",
-			numeroSifco,
-			diaPagoMensual: diaPagoMensual,
-			cuotaMensual: cuotaMensual,
-			value: deudaTotal,
-			notes: "Crédito migrado automáticamente desde Cartera-Back.",
+		const [nuevaOportunidad] = await tx
+			.insert(opportunities)
+			.values({
+				title: `Crédito ${numeroSifco}`,
+				leadId: nuevoLead.id,
+				vehicleId: nuevoVehiculo.id,
+				creditType,
+				stageId: defaultStage.id,
+				assignedTo: userId,
+				createdBy: userId,
+				status: "migrate",
+				numeroSifco,
+				diaPagoMensual: diaPagoMensual,
+				cuotaMensual: cuotaMensual,
+				value: deudaTotal,
+				notes: "Crédito migrado automáticamente desde Cartera-Back.",
+			})
+			.returning({ id: opportunities.id });
+		await logEntityAudit(tx, {
+			entityType: "opportunity",
+			entityId: nuevaOportunidad.id,
+			action: "create",
+			procedure: "cobros.autoCrearDatosMigrate",
+			performedBy: userId,
+			input: { numeroSifco, leadId: nuevoLead.id, vehicleId: nuevoVehiculo.id },
 		});
 
 		return { leadId: nuevoLead.id, vehiculoId: nuevoVehiculo.id };

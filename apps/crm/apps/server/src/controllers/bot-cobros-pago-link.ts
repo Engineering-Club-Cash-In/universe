@@ -258,7 +258,7 @@ export async function estadoPagoLinkBotCobros(c: Context) {
 		}>();
 		const referencia = String(body.referencia ?? "").trim();
 		const numeroSifco = String(body.numeroSifco ?? "").trim();
-		if (!referencia) {
+		if (!referencia || !numeroSifco) {
 			return error(c, {
 				codigo: "PARAMETROS_INVALIDOS",
 				mensaje: "Faltan datos para consultar tu pago.",
@@ -266,10 +266,7 @@ export async function estadoPagoLinkBotCobros(c: Context) {
 			});
 		}
 
-		const resultado = await consultarEstadoPagoLink(
-			referencia,
-			numeroSifco || undefined,
-		);
+		const resultado = await consultarEstadoPagoLink(referencia, numeroSifco);
 		if (!resultado.ok) {
 			if (resultado.codigo === "SIN_LINKS") {
 				return error(c, {

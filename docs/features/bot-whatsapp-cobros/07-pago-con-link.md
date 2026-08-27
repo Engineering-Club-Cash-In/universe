@@ -372,9 +372,9 @@ están pagados. Lo respondemos con **nuestra base** (el poller ya verificó cada
 Págalo y guardó el voucher): un link está pagado si es `PAID`/fuente de aplicación, o si el grupo
 ya está en aplicación (`READY_TO_APPLY`, `APPLYING`, `APPLICATION_FAILED`, `COMPLETED`).
 
-- **Entrada:** solo `referencia` (con `numeroSifco` opcional para limitar a un crédito). "Esta
-  conversación" = el grupo de origen `BOT`, de un crédito de esta persona, **creado después de
-  que canjeó su código** (la sesión de D-24). Sin ninguno → `409 SIN_LINKS`.
+- **Entrada:** `referencia` y `numeroSifco`, como los otros dos servicios. "Esta conversación" =
+  el grupo de origen `BOT` de ese crédito **creado después de que la persona canjeó su código**
+  (la sesión de D-24). Sin ninguno → `409 SIN_LINKS`.
 - **Salida:** `estado` = `PAGADOS` | `PARCIAL` | `SIN_PAGO`, plano como las opciones
   (`totalLinks`, `linksPagados`, `linksPendientes`, `link1Titulo/Estado/Monto/Url`, `link2…`;
   la URL solo viene si ese link sigue pendiente, para que el bot lo reenvíe) y

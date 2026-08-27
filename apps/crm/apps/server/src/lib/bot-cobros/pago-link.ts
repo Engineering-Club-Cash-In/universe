@@ -1379,14 +1379,14 @@ export type EstadoPagoLinkData = {
 } & Record<string, unknown>;
 
 /**
- * Servicio 9: los links que el bot generó EN ESTA CONVERSACIÓN (grupo de
- * origen BOT, de un crédito de esta persona, creado después de que canjeó su
- * código) y si ya están pagados según nuestra base. Con `numeroSifco` se
- * limita a ese crédito. Sin links en la conversación → `SIN_LINKS`.
+ * Servicio 9: los links que el bot generó EN ESTA CONVERSACIÓN para ese
+ * crédito (grupo de origen BOT, creado después de que la persona canjeó su
+ * código) y si ya están pagados según nuestra base. Sin links en la
+ * conversación → `SIN_LINKS`.
  */
 export async function consultarEstadoPagoLink(
 	referencia: string,
-	numeroSifco?: string,
+	numeroSifco: string,
 ): Promise<
 	| { ok: true; data: EstadoPagoLinkData }
 	| {
@@ -1401,14 +1401,9 @@ export async function consultarEstadoPagoLink(
 	const sesion = await verificarSesion(referencia);
 	if (!sesion.ok) return sesion;
 
-	let sifcos = sesion.creditos.map((c) => c.numeroSifco);
-	if (numeroSifco) {
-		if (!sifcos.includes(numeroSifco)) {
-			return { ok: false, codigo: "CREDITO_NO_ES_DEL_CLIENTE" };
-		}
-		sifcos = [numeroSifco];
+	if (!sesion.creditos.some((c) => c.numeroSifco === numeroSifco)) {
+		return { ok: false, codigo: "CREDITO_NO_ES_DEL_CLIENTE" };
 	}
-	if (sifcos.length === 0) return { ok: false, codigo: "SIN_LINKS" };
 
 	const [grupo] = await db
 		.select()
@@ -1416,7 +1411,7 @@ export async function consultarEstadoPagoLink(
 		.where(
 			and(
 				eq(pagaloPaymentGroups.origen, "BOT"),
-				inArray(pagaloPaymentGroups.numeroCreditoSifco, sifcos),
+				eq(pagaloPaymentGroups.numeroCreditoSifco, numeroSifco),
 				gte(pagaloPaymentGroups.createdAt, sesion.otp.usedAt),
 			),
 		)

@@ -2507,7 +2507,7 @@ export const especificacionBotCobros = {
 				tags: ["Pago con link"],
 				summary: "Servicio 9 · ¿Ya pagó los links de esta conversación?",
 				description: [
-					"Dice si los links que el bot generó **en esta conversación** ya están pagados, según **nuestra base** (nosotros verificamos cada pago contra Págalo y guardamos el comprobante). Solo hace falta la `referencia`; con `numeroSifco` se limita a ese crédito.",
+					"Dice si los links que el bot generó **en esta conversación** para ese crédito ya están pagados, según **nuestra base** (nosotros verificamos cada pago contra Págalo y guardamos el comprobante). Mismos parámetros que los otros dos servicios: `referencia` y `numeroSifco`.",
 					"",
 					"`estado` viene en tres valores: **`PAGADOS`** (todos los links pagados; ya lo estamos aplicando al crédito), **`PARCIAL`** (uno pagado, el otro no: te decimos cuál falta y te devolvemos su link para que lo reenvíes) y **`SIN_PAGO`** (ninguno pagado; te devolvemos los links activos).",
 					"",
@@ -2522,7 +2522,7 @@ export const especificacionBotCobros = {
 						"application/json": {
 							schema: {
 								type: "object",
-								required: ["referencia"],
+								required: ["referencia", "numeroSifco"],
 								properties: {
 									referencia: {
 										type: "string",
@@ -2531,13 +2531,13 @@ export const especificacionBotCobros = {
 									},
 									numeroSifco: {
 										type: "string",
-										description:
-											"Opcional: limitar la consulta a ese crédito (si el cliente tiene varios).",
+										description: "El crédito que eligió el cliente.",
 									},
 								},
 							},
 							example: {
 								referencia: "3f9c2a1e-6b7d-4c8e-9a0b-1c2d3e4f5a6b",
+								numeroSifco: "01010214117590",
 							},
 						},
 					},
@@ -2746,7 +2746,7 @@ export const especificacionBotCobros = {
 						},
 					},
 					"400": {
-						description: "Falta la `referencia`.",
+						description: "Faltan `referencia` o `numeroSifco`.",
 						content: {
 							"application/json": {
 								schema: { $ref: "#/components/schemas/RespuestaError" },

@@ -19,7 +19,7 @@ import {
 } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { logEntityAudit } from "../lib/audit";
+import { logEntityAudit, logEntityAuditMany } from "../lib/audit";
 import {
 	vehicleDocumentRequirements,
 	vehicleDocuments,
@@ -1276,6 +1276,20 @@ export const crmRouter = {
 								sincronizables.map((o) => o.id),
 							),
 						);
+					// El meta.audit de este procedure cubre el lead; el NIT que viaja a
+					// cartera es el de la oportunidad, así que cada una lleva su fila.
+					await logEntityAuditMany(
+						db,
+						sincronizables.map((o) => ({
+							entityType: "opportunity" as const,
+							entityId: o.id,
+							action: "sync_nit",
+							procedure: "crm.updateLead",
+							performedBy: context.userId,
+							performedByRole: context.userRole,
+							input: { leadId: id, nit: updateData.nit || null },
+						})),
+					);
 				}
 
 				const conservadas = leadOpportunities.length - sincronizables.length;
@@ -1315,6 +1329,19 @@ export const crmRouter = {
 							updatedAt: new Date(),
 						})
 						.where(eq(opportunities.id, activeOpportunity.id));
+					await logEntityAudit(db, {
+						entityType: "opportunity",
+						entityId: activeOpportunity.id,
+						action: "sync_source_campaign",
+						procedure: "crm.updateLead",
+						performedBy: context.userId,
+						performedByRole: context.userRole,
+						input: {
+							leadId: id,
+							source: updateData.source,
+							campaign: updateData.campaign,
+						},
+					});
 				}
 			}
 

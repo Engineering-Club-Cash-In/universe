@@ -3,6 +3,7 @@
  */
 import { eq } from "drizzle-orm";
 import { db } from "../db";
+import { logEntityAudit } from "../lib/audit";
 import { leads, opportunities } from "../db/schema/crm";
 import { vehicles } from "../db/schema/vehicles";
 import { getRenapData } from "../functions/getRenapInfo";
@@ -222,6 +223,9 @@ export interface RenapEnrichmentResult {
  */
 export async function enrichLeadFromRenap(
 	leadId: string,
+	// Lo dispara un usuario de jurídico desde el CRM: sin esto la fila de
+	// auditoría quedaría sin autor.
+	actor?: { userId: string | null; userRole?: string | null },
 ): Promise<RenapEnrichmentResult> {
 	const enrichedFields: string[] = [];
 	const missingFields: string[] = [];
@@ -320,6 +324,16 @@ export async function enrichLeadFromRenap(
 					updatedAt: new Date(),
 				})
 				.where(eq(leads.id, leadId));
+			await logEntityAudit(db, {
+				entityType: "lead",
+				entityId: leadId,
+				action: "enrich_renap",
+				procedure: "contract-data-mapper.enrichLeadFromRenap",
+				source: "crm",
+				performedBy: actor?.userId ?? null,
+				performedByRole: actor?.userRole ?? null,
+				input: { enrichedFields, updates },
+			});
 		}
 
 		return {

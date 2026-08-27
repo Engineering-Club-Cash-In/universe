@@ -1,5 +1,6 @@
 import type { Context } from "hono";
 import { db } from "../db";
+import { logEntityAudit } from "../lib/audit";
 import { vehicleInspections, vehicles } from "../db/schema/vehicles";
 
 interface CarData {
@@ -169,6 +170,16 @@ export async function loadCarsController(c: Context) {
 						},
 					})
 					.returning();
+
+				await logEntityAudit(db, {
+					entityType: "vehicle",
+					entityId: newVehicle.id,
+					action: "import_upsert",
+					procedure: "load-cars.loadCarsController",
+					source: "system",
+					performedBy: null,
+					input: vehicleData,
+				});
 
 				console.log("Vehículo creado con ID:", newVehicle.id);
 

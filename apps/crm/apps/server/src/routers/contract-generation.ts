@@ -189,12 +189,17 @@ export const contractGenerationRouter = {
 	 * Intenta enriquecer los datos del lead desde RENAP
 	 */
 	enrichLeadFromRenap: juridicoProcedure
+		// El éxito lo audita el helper, que es el que conoce el lead y los campos
+		// que se enriquecieron; acá solo quedan los intentos rechazados.
+		.meta({
+			audit: { entity: "lead", action: "enrich_renap", onlyOnError: true },
+		})
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
 			}),
 		)
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
 			// Obtener el leadId de la oportunidad
 			const [opportunity] = await db
 				.select({ leadId: opportunities.leadId })
@@ -208,7 +213,10 @@ export const contractGenerationRouter = {
 				});
 			}
 
-			const result = await enrichLeadFromRenap(opportunity.leadId);
+			const result = await enrichLeadFromRenap(opportunity.leadId, {
+				userId: context.userId,
+				userRole: context.userRole,
+			});
 			return result;
 		}),
 

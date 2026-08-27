@@ -9,6 +9,7 @@ import { user } from "../db/schema/auth";
 import { coDebtors, leads, opportunities, salesStages } from "../db/schema/crm";
 import { licenseQrVerifications } from "../db/schema/license-verification";
 import { vehicles } from "../db/schema/vehicles";
+import { logEntityAudit, logEntityAuditMany } from "../lib/audit";
 import { carteraBackClient } from "../services/cartera-back-client";
 
 // Tipo para cliente de DB que puede ser el db normal o una transacción
@@ -268,6 +269,15 @@ async function procesarCredito(
 				notes: `Migrado desde sistema anterior. Número de préstamo: ${credito.numero_prestamo}`,
 			})
 			.returning({ id: leads.id });
+		await logEntityAudit(dbClient, {
+			entityType: "lead",
+			entityId: nuevoLead.id,
+			action: "create",
+			procedure: "migrate-creditos.migrarCreditos",
+			source: "system",
+			performedBy: defaultUserId,
+			input: { numeroPrestamo: credito.numero_prestamo },
+		});
 
 		// 2. Crear Vehículo
 		// Parsear año de forma segura (puede venir como "2015" o como número)
@@ -329,6 +339,18 @@ async function procesarCredito(
 					})
 					.returning({ id: vehicles.id });
 				vehiculoId = nuevoVehiculo.id;
+				await logEntityAudit(dbClient, {
+					entityType: "vehicle",
+					entityId: vehiculoId,
+					action: "create",
+					procedure: "migrate-creditos.migrarCreditos",
+					source: "system",
+					performedBy: defaultUserId,
+					input: {
+						numeroPrestamo: credito.numero_prestamo,
+						placa: credito.placa,
+					},
+				});
 			}
 		} else {
 			// Sin placa, crear vehículo nuevo
@@ -355,26 +377,51 @@ async function procesarCredito(
 				})
 				.returning({ id: vehicles.id });
 			vehiculoId = nuevoVehiculo.id;
+			await logEntityAudit(dbClient, {
+				entityType: "vehicle",
+				entityId: vehiculoId,
+				action: "create",
+				procedure: "migrate-creditos.migrarCreditos",
+				source: "system",
+				performedBy: defaultUserId,
+				input: { numeroPrestamo: credito.numero_prestamo, placa: null },
+			});
 		}
 
 		// 3. Crear Oportunidad
-		await dbClient.insert(opportunities).values({
-			title: `Crédito ${credito.numero_prestamo}`,
-			leadId: nuevoLead.id,
-			vehicleId: vehiculoId,
-			creditType: convertirTipoPrestamo(credito.tipo_de_prestamo),
-			stageId: defaultStageId,
-			assignedTo: defaultUserId,
-			createdBy: defaultUserId,
-			status: "migrate",
-			numeroSifco: credito.numero_prestamo || null,
-			diaPagoMensual: credito.fecha_de_pago
-				? Math.round(credito.fecha_de_pago)
-				: null,
-			cuotaMensual: credito.cuota_mensual
-				? credito.cuota_mensual.toString()
-				: null,
-			notes: construirNotesOportunidad(credito),
+		const [nuevaOportunidad] = await dbClient
+			.insert(opportunities)
+			.values({
+				title: `Crédito ${credito.numero_prestamo}`,
+				leadId: nuevoLead.id,
+				vehicleId: vehiculoId,
+				creditType: convertirTipoPrestamo(credito.tipo_de_prestamo),
+				stageId: defaultStageId,
+				assignedTo: defaultUserId,
+				createdBy: defaultUserId,
+				status: "migrate",
+				numeroSifco: credito.numero_prestamo || null,
+				diaPagoMensual: credito.fecha_de_pago
+					? Math.round(credito.fecha_de_pago)
+					: null,
+				cuotaMensual: credito.cuota_mensual
+					? credito.cuota_mensual.toString()
+					: null,
+				notes: construirNotesOportunidad(credito),
+			})
+			.returning({ id: opportunities.id });
+		await logEntityAudit(dbClient, {
+			entityType: "opportunity",
+			entityId: nuevaOportunidad.id,
+			action: "create",
+			procedure: "migrate-creditos.migrarCreditos",
+			source: "system",
+			performedBy: defaultUserId,
+			input: {
+				numeroPrestamo: credito.numero_prestamo,
+				leadId: nuevoLead.id,
+				vehicleId: vehiculoId,
+			},
 		});
 
 		return { success: true };
@@ -598,6 +645,38 @@ export async function limpiarMigracion(): Promise<CleanupResult> {
 			.where(eq(leads.status, "migrate"))
 			.returning({ id: leads.id });
 
+		// El borrado masivo es justo lo que hay que poder reconstruir después, así
+		// que va una fila por entidad (en un solo INSERT para no alargar la tx).
+		await logEntityAuditMany(tx, [
+			...deletedOpportunities.map((row) => ({
+				entityType: "opportunity" as const,
+				entityId: row.id,
+				action: "delete",
+				procedure: "migrate-creditos.limpiarMigracion",
+				source: "system" as const,
+				performedBy: null,
+				input: { motivo: "rollback_migracion" },
+			})),
+			...deletedVehicles.map((row) => ({
+				entityType: "vehicle" as const,
+				entityId: row.id,
+				action: "delete",
+				procedure: "migrate-creditos.limpiarMigracion",
+				source: "system" as const,
+				performedBy: null,
+				input: { motivo: "rollback_migracion" },
+			})),
+			...deletedLeads.map((row) => ({
+				entityType: "lead" as const,
+				entityId: row.id,
+				action: "delete",
+				procedure: "migrate-creditos.limpiarMigracion",
+				source: "system" as const,
+				performedBy: null,
+				input: { motivo: "rollback_migracion" },
+			})),
+		]);
+
 		const result: CleanupResult = {
 			opportunitiesDeleted: deletedOpportunities.length,
 			vehiclesDeleted: deletedVehicles.length,
@@ -723,6 +802,19 @@ export async function actualizarValueOportunidades(): Promise<UpdateValueResult>
 				.update(opportunities)
 				.set({ value: deudaTotal })
 				.where(eq(opportunities.id, oportunidad.id));
+			await logEntityAudit(db, {
+				entityType: "opportunity",
+				entityId: oportunidad.id,
+				action: "update_value",
+				procedure: "migrate-creditos.actualizarValueOportunidades",
+				source: "system",
+				performedBy: null,
+				input: {
+					numeroSifco: oportunidad.numeroSifco,
+					valueAnterior: oportunidad.value,
+					valueNuevo: deudaTotal,
+				},
+			});
 
 			resultado.totalActualizadas++;
 			resultado.actualizaciones.push({

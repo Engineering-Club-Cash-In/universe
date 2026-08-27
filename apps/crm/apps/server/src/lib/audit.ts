@@ -43,7 +43,15 @@ export type AuditMeta = {
 };
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
-export type AuditExecutor = typeof db | Transaction;
+
+/**
+ * Cualquier cosa capaz de insertar: `db`, una transacción, o el `Pick<typeof
+ * db, …>` que usan los controllers de migración. Estructural a propósito, para
+ * que auditar nunca obligue a cambiarle el tipo al código que se audita.
+ */
+export type AuditExecutor =
+	| Pick<typeof db, "insert">
+	| Pick<Transaction, "insert">;
 
 export type AuditEntry = {
 	entityType: AuditEntityType;
@@ -193,6 +201,42 @@ export async function logEntityAudit(
 				action: entry.action,
 				procedure: entry.procedure ?? null,
 			},
+			error,
+		);
+	}
+}
+
+/**
+ * Igual que `logEntityAudit` pero en un solo INSERT. Para operaciones masivas
+ * (imports, limpiezas) donde una fila por entidad a razón de un round-trip
+ * cada una haría lenta la transacción que se está auditando.
+ */
+export async function logEntityAuditMany(
+	executor: AuditExecutor,
+	entries: AuditEntry[],
+): Promise<void> {
+	if (entries.length === 0) return;
+	try {
+		await executor.insert(crmEntityAudit).values(
+			entries.map((entry) => ({
+				entityType: entry.entityType,
+				entityId: entry.entityId ?? null,
+				action: entry.action,
+				procedure: entry.procedure ?? null,
+				performedBy: entry.performedBy ?? null,
+				performedByRole: entry.performedByRole ?? null,
+				source: entry.source ?? ("crm" as const),
+				input:
+					entry.input === undefined ? null : prepareAuditInput(entry.input),
+				ok: entry.ok ?? true,
+				errorCode: entry.errorCode ?? null,
+				durationMs: entry.durationMs ?? null,
+			})),
+		);
+	} catch (error) {
+		console.warn(
+			"[crm-entity-audit] no se pudo registrar el lote",
+			{ count: entries.length, action: entries[0]?.action ?? null },
 			error,
 		);
 	}

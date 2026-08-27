@@ -3,7 +3,10 @@ import {
   getAjusteFechaIdealADeducir,
   recomputeCreditAfterCapital,
   shouldBlockCuota1ClosingForPendingAjuste,
+  shouldCloseCuota1ViaAjusteSettlement,
+  shouldIgnoreCoveredOpenInstallment,
   shouldIncobrableInstallmentBePaid,
+  shouldProcessCuota1DespiteZeroDisponible,
 } from "./registerPaymentPolicy";
 import * as registerPaymentPolicy from "./registerPaymentPolicy";
 
@@ -807,11 +810,21 @@ describe("getAjusteFechaIdealADeducir", () => {
     expect(resultado?.monto.toString()).toBe("30.96");
   });
 
-  it("null si disponible == monto exacto (no deja nada para procesar la cuota, ver comentario de la función)", () => {
+  it("deduce si disponible == monto exacto (shouldBlockCuota1ClosingForPendingAjuste ya cubre que no cierre sola)", () => {
     const resultado = getAjusteFechaIdealADeducir({
       tieneCuota1Pendiente: true,
       ajustePendiente: { id: 7, monto_total: "30.96" },
       disponible: "30.96",
+    });
+    expect(resultado?.id).toBe(7);
+    expect(resultado?.monto.toString()).toBe("30.96");
+  });
+
+  it("null si disponible es apenas menor al monto", () => {
+    const resultado = getAjusteFechaIdealADeducir({
+      tieneCuota1Pendiente: true,
+      ajustePendiente: { id: 7, monto_total: "30.96" },
+      disponible: "30.95",
     });
     expect(resultado).toBeNull();
   });
@@ -863,6 +876,144 @@ describe("shouldBlockCuota1ClosingForPendingAjuste", () => {
         numeroCuota: 2,
         hayAjustePendiente: true,
         ajusteFueCobradoEsteMismoPago: false,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("shouldCloseCuota1ViaAjusteSettlement", () => {
+  it("cierra la cuota 1 si ya no le falta nada estructural y el ajuste se cobró en este pago", () => {
+    expect(
+      shouldCloseCuota1ViaAjusteSettlement({
+        numeroCuota: 1,
+        allRemainingZero: true,
+        hasExistingInstallmentPayment: true,
+        ajusteFueCobradoEsteMismoPago: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("no cierra si el ajuste no se cobró en este pago (deja que lo bloquee shouldBlockCuota1ClosingForPendingAjuste)", () => {
+    expect(
+      shouldCloseCuota1ViaAjusteSettlement({
+        numeroCuota: 1,
+        allRemainingZero: true,
+        hasExistingInstallmentPayment: true,
+        ajusteFueCobradoEsteMismoPago: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("no cierra si todavía quedan restantes estructurales, aunque el ajuste sí se cobró", () => {
+    expect(
+      shouldCloseCuota1ViaAjusteSettlement({
+        numeroCuota: 1,
+        allRemainingZero: false,
+        hasExistingInstallmentPayment: true,
+        ajusteFueCobradoEsteMismoPago: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("no cierra sin un pago previo existente", () => {
+    expect(
+      shouldCloseCuota1ViaAjusteSettlement({
+        numeroCuota: 1,
+        allRemainingZero: true,
+        hasExistingInstallmentPayment: false,
+        ajusteFueCobradoEsteMismoPago: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("nunca aplica a cuotas distintas de la 1", () => {
+    expect(
+      shouldCloseCuota1ViaAjusteSettlement({
+        numeroCuota: 2,
+        allRemainingZero: true,
+        hasExistingInstallmentPayment: true,
+        ajusteFueCobradoEsteMismoPago: true,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("shouldProcessCuota1DespiteZeroDisponible", () => {
+  it("fuerza a procesar la cuota 1 si el ajuste dejó el disponible exactamente en 0", () => {
+    expect(
+      shouldProcessCuota1DespiteZeroDisponible({
+        numeroCuota: 1,
+        disponibleRestante: "0",
+        ajusteFueCobradoEsteMismoPago: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("también aplica si el disponible quedó negativo", () => {
+    expect(
+      shouldProcessCuota1DespiteZeroDisponible({
+        numeroCuota: 1,
+        disponibleRestante: "-0.01",
+        ajusteFueCobradoEsteMismoPago: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("no aplica si el ajuste no se cobró en este pago", () => {
+    expect(
+      shouldProcessCuota1DespiteZeroDisponible({
+        numeroCuota: 1,
+        disponibleRestante: "0",
+        ajusteFueCobradoEsteMismoPago: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("no aplica si todavía queda disponible positivo (el gate normal ya lo cubre)", () => {
+    expect(
+      shouldProcessCuota1DespiteZeroDisponible({
+        numeroCuota: 1,
+        disponibleRestante: "5",
+        ajusteFueCobradoEsteMismoPago: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("nunca aplica a cuotas distintas de la 1", () => {
+    expect(
+      shouldProcessCuota1DespiteZeroDisponible({
+        numeroCuota: 2,
+        disponibleRestante: "0",
+        ajusteFueCobradoEsteMismoPago: true,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("shouldIgnoreCoveredOpenInstallment", () => {
+  it("ignora la cuota 1 cubierta-pero-abierta si hay un ajuste pendiente", () => {
+    expect(
+      shouldIgnoreCoveredOpenInstallment({
+        numeroCuota: 1,
+        hayAjustePendiente: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("no ignora la cuota 1 si no hay ningún ajuste pendiente (inconsistencia real)", () => {
+    expect(
+      shouldIgnoreCoveredOpenInstallment({
+        numeroCuota: 1,
+        hayAjustePendiente: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("nunca ignora cuotas distintas de la 1, aunque haya ajuste pendiente", () => {
+    expect(
+      shouldIgnoreCoveredOpenInstallment({
+        numeroCuota: 3,
+        hayAjustePendiente: true,
       }),
     ).toBe(false);
   });

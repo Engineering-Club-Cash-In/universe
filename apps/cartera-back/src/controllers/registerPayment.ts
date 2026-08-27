@@ -50,6 +50,9 @@ import {
   shouldApplyStaleZeroRestanteAdjustment,
   shouldRejectZeroAppliedNormalValidation,
   shouldBlockCuota1ClosingForPendingAjuste,
+  shouldCloseCuota1ViaAjusteSettlement,
+  shouldIgnoreCoveredOpenInstallment,
+  shouldProcessCuota1DespiteZeroDisponible,
   shouldIncobrableInstallmentBePaid,
   shouldMarkInstallmentPaymentPaid,
   sumarAplicadoACuota,
@@ -378,12 +381,47 @@ const obtenerInfoCompletaCredito = async (
         })
       : new Set<number>();
 
+    // Ajuste por fecha ideal de pago pendiente para este crédito (existe una
+    // fila con fecha_cobro NULL), sin importar si ESTE pago alcanza para
+    // cobrarlo — se necesita ya acá porque shouldBlockCuota1ClosingForPendingAjuste
+    // puede dejar la cuota 1 "cubierta pero abierta" A PROPÓSITO mientras el
+    // ajuste sigue pendiente, y getCoveredOpenInstallment de abajo no sabe
+    // distinguir eso de una inconsistencia real.
+    const tieneCuota1EntrePendientes = [...cuotasParaValidar.values()].some(
+      (c) => c.numeroCuota === 1
+    );
+    let ajustePendiente:
+      | { id: number; monto_total: string }
+      | null = null;
+    if (tieneCuota1EntrePendientes) {
+      const [fila] = await db
+        .select({
+          id: ajuste_fecha_ideal_pago.id,
+          monto_total: ajuste_fecha_ideal_pago.monto_total,
+        })
+        .from(ajuste_fecha_ideal_pago)
+        .where(
+          and(
+            eq(ajuste_fecha_ideal_pago.credito_id, credito_id),
+            isNull(ajuste_fecha_ideal_pago.fecha_cobro)
+          )
+        )
+        .limit(1);
+      ajustePendiente = fila ?? null;
+    }
+
     if (!esIncobrable) {
       const cuotaInconsistente = getCoveredOpenInstallment({
         montoCuota: info.credito.cuota ?? 0,
         cuotas: [...cuotasParaValidar.values()],
       });
-      if (cuotaInconsistente) {
+      if (
+        cuotaInconsistente &&
+        !shouldIgnoreCoveredOpenInstallment({
+          numeroCuota: cuotaInconsistente.numeroCuota,
+          hayAjustePendiente: !!ajustePendiente,
+        })
+      ) {
         set.status = 409;
         throw new Error(
           `${CUOTA_INTEGRITY_ERROR_PREFIX} la cuota ${cuotaInconsistente.numeroCuota} está abierta, pero sus pagos validados ya cubren el total. Revalide el pago antes de registrar uno nuevo.`
@@ -447,6 +485,11 @@ const obtenerInfoCompletaCredito = async (
 
       // 📊 Cuotas pendientes (array ordenado)
       cuotasPendientes: cuotasPendientesUnicas,
+
+      // 🧾 Ajuste por fecha ideal de pago pendiente para este crédito, si lo
+      // hay (sin importar si el disponible de este pago alcanza para
+      // cobrarlo). Ver comentario donde se calculó, arriba.
+      ajustePendiente,
 
       // 🔗 Cuota a la que se cuelga un abono directo a capital cuando no queda
       // ninguna pendiente utilizable: la primera cuota abierta ANTES de filtrar
@@ -724,6 +767,7 @@ export const insertPayment = async ({ body, set }: any) => {
       mora,
       stats,
       usuario_id,
+      ajustePendiente: ajustePendienteExistente,
     } = creditoData;
     const cuotaIdPagoEspecial = getSpecialPaymentCuotaId({
       requestedInstallment: cuotaApagar,
@@ -891,27 +935,16 @@ export const insertPayment = async ({ body, set }: any) => {
     // disponible de ESTE pago alcanza para cobrarlo — lo usa
     // shouldBlockCuota1ClosingForPendingAjuste más abajo para no dejar
     // cerrar la cuota 1 sin haberlo cobrado.
-    let hayAjustePendiente = false;
+    // Ya se consultó arriba (obtenerInfoCompletaCredito), se reusa acá para
+    // no repetir la misma query.
+    const hayAjustePendiente = !!ajustePendienteExistente;
     const tieneCuota1Pendiente = cuotasPendientes.some(
       (c) => c.cuotas_credito.numero_cuota === 1
     );
     if (tieneCuota1Pendiente) {
-      const [ajustePendiente] = await db
-        .select()
-        .from(ajuste_fecha_ideal_pago)
-        .where(
-          and(
-            eq(ajuste_fecha_ideal_pago.credito_id, credito.credito_id),
-            isNull(ajuste_fecha_ideal_pago.fecha_cobro)
-          )
-        )
-        .limit(1);
-      hayAjustePendiente = !!ajustePendiente;
       const deduccion = getAjusteFechaIdealADeducir({
         tieneCuota1Pendiente,
-        ajustePendiente: ajustePendiente
-          ? { id: ajustePendiente.id, monto_total: ajustePendiente.monto_total }
-          : null,
+        ajustePendiente: ajustePendienteExistente,
         disponible: disponible_restante,
       });
       if (deduccion) {
@@ -978,7 +1011,14 @@ export const insertPayment = async ({ body, set }: any) => {
 
 
 
-      if (disponible_restante.gt(0)) {
+      if (
+        disponible_restante.gt(0) ||
+        shouldProcessCuota1DespiteZeroDisponible({
+          numeroCuota: cuota.cuotas_credito.numero_cuota,
+          disponibleRestante: disponible_restante,
+          ajusteFueCobradoEsteMismoPago: ajusteFechaIdealId !== undefined,
+        })
+      ) {
         // Verificar si existe pago previo - priorizar el original (no_required)
         const allExistingPagos = await db
           .select({ pago: pagos_credito })
@@ -1416,11 +1456,24 @@ export const insertPayment = async ({ body, set }: any) => {
 
         // Solo marcar como pagada si los restantes están en 0 Y existía un pago previo
         // (evita marcar como pagada cuando no hay pago existente y los restantes son 0 por default)
-        const cuota_pagada_calculada = shouldMarkInstallmentPaymentPaid({
-          allRemainingZero: todosRestantesEnCero,
-          hasExistingInstallmentPayment: !!existingPago,
-          installmentAmountApplied: totalPagado.toString(),
-        });
+        // — O, para la cuota 1, si lo único que faltaba era cobrar el ajuste y
+        // este pago SÍ lo cobró (shouldCloseCuota1ViaAjusteSettlement): sin esto,
+        // installmentAmountApplied da 0 (nada de capital/interés que aplicar, ya
+        // en cero por partials previos) y la cuota nunca cierra aunque el ajuste
+        // ya se haya cobrado — quedando "cubierta pero abierta" para siempre y
+        // bloqueando TODO pago futuro vía getCoveredOpenInstallment.
+        const cuota_pagada_calculada =
+          shouldMarkInstallmentPaymentPaid({
+            allRemainingZero: todosRestantesEnCero,
+            hasExistingInstallmentPayment: !!existingPago,
+            installmentAmountApplied: totalPagado.toString(),
+          }) ||
+          shouldCloseCuota1ViaAjusteSettlement({
+            numeroCuota: cuota.cuotas_credito.numero_cuota,
+            allRemainingZero: todosRestantesEnCero,
+            hasExistingInstallmentPayment: !!existingPago,
+            ajusteFueCobradoEsteMismoPago: ajusteFechaIdealId !== undefined,
+          });
         // La cuota 1 no cierra si queda un ajuste por fecha ideal de pago sin
         // cobrar (ver shouldBlockCuota1ClosingForPendingAjuste): sin esto, una
         // seguidilla de parciales que nunca individualmente alcanzan para el

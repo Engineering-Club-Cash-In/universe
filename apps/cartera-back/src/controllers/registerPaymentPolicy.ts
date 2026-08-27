@@ -1023,7 +1023,13 @@ export const getAjusteFechaIdealADeducir = ({
   if (!tieneCuota1Pendiente || !ajustePendiente) return null;
   const monto = new Big(ajustePendiente.monto_total);
   if (monto.lte(0)) return null;
-  if (new Big(disponible).lte(monto)) return null;
+  // Antes exigía disponible ESTRICTAMENTE mayor (no gte) "para que quede algo
+  // con qué procesar la cuota 1". Con shouldBlockCuota1ClosingForPendingAjuste
+  // ya no hace falta: si el disponible alcanza justo para el ajuste y nada
+  // más, ese pago simplemente no toca capital/interés esta vez (queda una
+  // fila parcial con otros>0, o el disponible cae a saldo_a_favor si tampoco
+  // hay fila que insertar) — la cuota no cierra sola por eso.
+  if (new Big(disponible).lt(monto)) return null;
   return { id: ajustePendiente.id, monto };
 };
 
@@ -1049,6 +1055,78 @@ export const shouldBlockCuota1ClosingForPendingAjuste = ({
   ajusteFueCobradoEsteMismoPago: boolean;
 }): boolean =>
   numeroCuota === 1 && hayAjustePendiente && !ajusteFueCobradoEsteMismoPago;
+
+/**
+ * shouldMarkInstallmentPaymentPaid exige installmentAmountApplied > 0 (que
+ * este pago mueva algo de capital/interés/etc). Eso falla justo en el caso
+ * que shouldBlockCuota1ClosingForPendingAjuste crea a propósito: cuota 1 con
+ * restantes ya en 0 (por partials previos) pero pagado=false porque el
+ * ajuste seguía pendiente. Cuando ESE pago finalmente cobra el ajuste,
+ * installmentAmountApplied vuelve a ser 0 (no queda nada estructural que
+ * aplicar) y la cuota se queda abierta para siempre — y el guard de
+ * "cuota cubierta pero abierta" (getCoveredOpenInstallment) la marca como
+ * inconsistencia y rechaza TODOS los pagos futuros del crédito con un 409.
+ * Esto le da a la cuota 1 una segunda vía de cierre: si ya no le falta nada
+ * estructural Y el ajuste se cobró en este mismo pago, cierra aunque
+ * installmentAmountApplied sea 0.
+ */
+export const shouldCloseCuota1ViaAjusteSettlement = ({
+  numeroCuota,
+  allRemainingZero,
+  hasExistingInstallmentPayment,
+  ajusteFueCobradoEsteMismoPago,
+}: {
+  numeroCuota: number;
+  allRemainingZero: boolean;
+  hasExistingInstallmentPayment: boolean;
+  ajusteFueCobradoEsteMismoPago: boolean;
+}): boolean =>
+  numeroCuota === 1 &&
+  allRemainingZero &&
+  hasExistingInstallmentPayment &&
+  ajusteFueCobradoEsteMismoPago;
+
+/**
+ * El loop de cuotas solo entra a procesar una cuota si queda
+ * disponible_restante > 0 — si no hay nada que repartir, no hay nada que
+ * hacer, optimización preexistente y correcta en el caso general. Pero deja
+ * inalcanzable el caso exacto que shouldCloseCuota1ViaAjusteSettlement existe
+ * para resolver: cuando el ajuste consume TODO el disponible de este pago
+ * (lo deja en 0 exacto), no queda nada para capital/interés, pero sí hay un
+ * `otros` > 0 que registrar y una cuota que cerrar — y sin entrar al bloque,
+ * ninguna de las dos cosas ocurre (el pago "desaparece": se dedujo del
+ * disponible pero nunca se escribió ninguna fila).
+ */
+export const shouldProcessCuota1DespiteZeroDisponible = ({
+  numeroCuota,
+  disponibleRestante,
+  ajusteFueCobradoEsteMismoPago,
+}: {
+  numeroCuota: number;
+  disponibleRestante: BigInput;
+  ajusteFueCobradoEsteMismoPago: boolean;
+}): boolean =>
+  numeroCuota === 1 &&
+  new Big(disponibleRestante).lte(0) &&
+  ajusteFueCobradoEsteMismoPago;
+
+/**
+ * getCoveredOpenInstallment existe para atrapar inconsistencias reales (un
+ * bug dejó una cuota abierta aunque sus pagos validados ya la cubren — casos
+ * 9272/9340). Pero shouldBlockCuota1ClosingForPendingAjuste puede dejar la
+ * cuota 1 EXACTAMENTE en ese estado a propósito, mientras el ajuste sigue
+ * pendiente: no es un bug, es el diseño. Sin esta excepción, el propio
+ * mecanismo que protege el cobro del ajuste terminaría bloqueando con un 409
+ * cualquier pago futuro del crédito — incluido el que intenta cobrar el
+ * ajuste mismo.
+ */
+export const shouldIgnoreCoveredOpenInstallment = ({
+  numeroCuota,
+  hayAjustePendiente,
+}: {
+  numeroCuota: number;
+  hayAjustePendiente: boolean;
+}): boolean => numeroCuota === 1 && hayAjustePendiente;
 
 /**
  * ¿El pago debe pasar por processConvenioPayment? Solo créditos EN_CONVENIO y

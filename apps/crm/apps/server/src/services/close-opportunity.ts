@@ -1036,18 +1036,26 @@ async function createCredit(
 					})
 				: null;
 
-		const ajusteFechaIdeal = ajusteCalculado
-			? {
-					dia_pago_original_sistema: opportunity.diaPagoOriginalSistema as number,
-					dia_pago_mensual_elegido: diaPagoMensual,
-					dias_diferencia: ajusteCalculado.diasDiferencia,
-					dias_del_mes: ajusteCalculado.diasDelMes,
-					monto_interes: ajusteCalculado.montoInteres,
-					monto_membresia: ajusteCalculado.montoMembresia,
-					monto_servicios: ajusteCalculado.montoServicios,
-					monto_total: ajusteCalculado.montoTotal,
-				}
-			: undefined;
+		// Solo se persiste si montoTotal > 0: un crédito con diasDiferencia > 0
+		// pero interés/membresía/seguro/GPS en cero (crédito promocional sin
+		// esos rubros) redondea a montoTotal 0 — una fila así nunca se puede
+		// cobrar (getAjusteFechaIdealADeducir descarta monto <= 0) pero sigue
+		// contando como "hay ajuste pendiente" para
+		// shouldBlockCuota1ClosingForPendingAjuste, bloqueando la cuota 1 para
+		// siempre por un cobro que nunca iba a existir.
+		const ajusteFechaIdeal =
+			ajusteCalculado && ajusteCalculado.montoTotal > 0
+				? {
+						dia_pago_original_sistema: opportunity.diaPagoOriginalSistema as number,
+						dia_pago_mensual_elegido: diaPagoMensual,
+						dias_diferencia: ajusteCalculado.diasDiferencia,
+						dias_del_mes: ajusteCalculado.diasDelMes,
+						monto_interes: ajusteCalculado.montoInteres,
+						monto_membresia: ajusteCalculado.montoMembresia,
+						monto_servicios: ajusteCalculado.montoServicios,
+						monto_total: ajusteCalculado.montoTotal,
+					}
+				: undefined;
 
 		const creditoResult = await createCreditoInCarteraBack({
 			opportunityId: opportunity.id,

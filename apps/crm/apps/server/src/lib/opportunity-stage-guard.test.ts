@@ -78,6 +78,7 @@ describe("won opportunity frozen fields", () => {
 		companyId: null,
 		vehicleId: "vehicle-1",
 		creditType: "autocompra",
+		status: "won",
 	};
 
 	test("detects a vehicle swap on a won opportunity", () => {
@@ -131,13 +132,38 @@ describe("won opportunity frozen fields", () => {
 	});
 
 	test("lets admins correct a won opportunity", () => {
-		expect(getWonOpportunityLockError("won", "admin", ["vehicleId"])).toBeNull();
+		expect(
+			getWonOpportunityLockError("won", "admin", ["vehicleId"]),
+		).toBeNull();
 	});
 
 	test("does not touch open, lost or on-hold opportunities", () => {
 		for (const status of ["open", "lost", "on_hold"]) {
-			expect(getWonOpportunityLockError(status, "sales", ["vehicleId"])).toBeNull();
+			expect(
+				getWonOpportunityLockError(status, "sales", ["vehicleId"]),
+			).toBeNull();
 		}
+	});
+
+	test("blocks reopening a won opportunity", () => {
+		// Sin esto se esquiva todo: reabrir en un request y cambiar el vehículo en
+		// el siguiente, porque para entonces la fila ya no está ganada.
+		for (const status of ["open", "lost", "on_hold"]) {
+			const changes = getWonOpportunityFrozenFieldChanges(
+				{ status },
+				wonOpportunity,
+			);
+			expect(changes).toEqual(["status"]);
+			expect(getWonOpportunityLockError("won", "sales", changes)).toContain(
+				"el estado",
+			);
+		}
+	});
+
+	test("lets a won opportunity be resubmitted as won", () => {
+		expect(
+			getWonOpportunityFrozenFieldChanges({ status: "won" }, wonOpportunity),
+		).toEqual([]);
 	});
 
 	test("names every frozen field it blocks", () => {

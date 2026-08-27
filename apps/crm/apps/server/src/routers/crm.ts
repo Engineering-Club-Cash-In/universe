@@ -916,7 +916,6 @@ export const crmRouter = {
 	}),
 
 	createLead: crmProcedure
-		.meta({ audit: { entity: "lead", action: "create", idFrom: "output.id" } })
 		.input(
 			z.object({
 				firstName: z.string().min(1, "First name is required"),
@@ -1050,6 +1049,21 @@ export const crmRouter = {
 							})
 							.where(eq(leads.id, existingLead.id))
 							.returning();
+						// Este lead ya existía: lo que pasó fue una reasignación, no un
+						// alta. Auditarlo como "create" dejaría su historial mintiendo.
+						await logEntityAudit(tx, {
+							entityType: "lead",
+							entityId: existingLead.id,
+							action: "reassign",
+							procedure: "crm.createLead",
+							performedBy: context.userId,
+							performedByRole: context.userRole,
+							input: {
+								dpi: normalizedDpi,
+								assignedTo,
+								reason: "lead_existente_sin_procesos_activos",
+							},
+						});
 
 						// Crear nueva oportunidad en el primer stage
 						const [firstStage] = await tx
@@ -1109,6 +1123,15 @@ export const crmRouter = {
 					updatedAt: new Date(),
 				})
 				.returning();
+			await logEntityAudit(db, {
+				entityType: "lead",
+				entityId: newLead[0].id,
+				action: "create",
+				procedure: "crm.createLead",
+				performedBy: context.userId,
+				performedByRole: context.userRole,
+				input,
+			});
 			return newLead[0];
 		}),
 

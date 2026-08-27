@@ -52,6 +52,11 @@ export const WON_OPPORTUNITY_FROZEN_FIELD_LABELS = {
 	leadId: "el cliente",
 	companyId: "la empresa",
 	creditType: "el tipo de crédito",
+	// `status` va acá para que no se pueda despegar la oportunidad de "won":
+	// sin esto, reabrirla en un request y cambiarle el vehículo en el siguiente
+	// esquiva el congelamiento entero. La UI ya la muestra fija (badge en vez de
+	// selector), así que esto solo lo hace cumplir del lado del server.
+	status: "el estado",
 } as const;
 
 export type WonOpportunityFrozenField =
@@ -94,9 +99,9 @@ export function buildWonOpportunityFrozenFieldError(
 		.map((field) => WON_OPPORTUNITY_FROZEN_FIELD_LABELS[field])
 		.join(", ");
 	return (
-		`La oportunidad ya está ganada: no se puede cambiar ${labels} porque ` +
-		"así viajó a los contratos y a cartera. Si hay que corregirlo, debe " +
-		"hacerlo un administrador."
+		`La oportunidad ya está ganada: no se puede cambiar ${labels}; así se ` +
+		"firmaron los contratos y así viajó a cartera. Si hay que corregirlo, " +
+		"debe hacerlo un administrador."
 	);
 }
 

@@ -243,7 +243,9 @@ export function PagaloLinkDialog({
 				</Button>
 				<div className="min-h-0 flex-1 overflow-y-auto pr-1">
 					{grupoActivo.isLoading ||
-					(grupoActivo.isSuccess && !grupoActivo.data && credit.isLoading) ? (
+					(grupoActivo.isSuccess &&
+						!grupoActivo.data &&
+						(credit.isLoading || vehiculoCaso.isLoading)) ? (
 						<div className="flex justify-center py-8">
 							<Loader2 className="animate-spin" />
 						</div>
@@ -495,7 +497,9 @@ export function PagaloLinkDialog({
 					<DialogFooter>
 						<Button
 							disabled={
-								(!tieneMora && selected.length === 0) || mutation.isPending
+								(!tieneMora && selected.length === 0) ||
+								mutation.isPending ||
+								vehiculoCaso.isLoading
 							}
 							onClick={() =>
 								mutation.mutate({

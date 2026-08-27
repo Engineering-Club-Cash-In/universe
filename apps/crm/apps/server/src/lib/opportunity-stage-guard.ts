@@ -1,3 +1,6 @@
+import { sql } from "drizzle-orm";
+import { opportunities, salesStages } from "../db/schema";
+
 export const STAGE_VEHICLE_REQUIREMENT_ERROR =
 	"Para avanzar a esta etapa, la oportunidad debe tener un vehículo asignado.";
 
@@ -21,9 +24,24 @@ export function getStageLeadRequirementError(
 	return stagePercentage >= 80 && !leadId ? STAGE_LEAD_REQUIREMENT_ERROR : null;
 }
 
-export function resolveOpportunityUpdateVersion(
-	currentUpdatedAt: Date,
-	expectedUpdatedAt?: string,
-) {
-	return expectedUpdatedAt ? new Date(expectedUpdatedAt) : currentUpdatedAt;
+export function buildOpportunityRelationshipInvariantCondition(input: {
+	stageId?: string;
+	leadId?: string | null;
+}) {
+	const effectiveStageId = input.stageId
+		? sql`${input.stageId}::uuid`
+		: sql`${opportunities.stageId}`;
+	const effectiveLeadId =
+		"leadId" in input
+			? sql`${input.leadId}::uuid`
+			: sql`${opportunities.leadId}`;
+
+	return sql<boolean>`(
+		COALESCE((
+			SELECT ${salesStages.closurePercentage}
+			FROM ${salesStages}
+			WHERE ${salesStages.id} = ${effectiveStageId}
+		), 0) < 80
+		OR ${effectiveLeadId} IS NOT NULL
+	)`;
 }

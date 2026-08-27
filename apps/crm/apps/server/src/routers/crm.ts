@@ -77,9 +77,9 @@ import {
 import { canSyncNitToOpportunity } from "../lib/lead-nit-sync";
 import { getLeadSourceLabel } from "../lib/lead-sources";
 import {
+	buildOpportunityRelationshipInvariantCondition,
 	getStageLeadRequirementError,
 	getStageVehicleRequirementError,
-	resolveOpportunityUpdateVersion,
 } from "../lib/opportunity-stage-guard";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
@@ -2531,16 +2531,23 @@ export const crmRouter = {
 							eq(opportunities.assignedTo, context.userId),
 						);
 
-			// Always compare-and-swap against the version validated above so
-			// concurrent lead/stage edits cannot violate contractual invariants.
-			const updateVersion = resolveOpportunityUpdateVersion(
-				currentOpportunity[0].updatedAt,
-				expectedUpdatedAt,
-			);
-			const whereClause = and(
+			// PostgreSQL re-evaluates this predicate after waiting for a concurrent
+			// row update, so lead/stage edits cannot jointly persist an invalid state.
+			const relationshipInvariantCondition =
+				buildOpportunityRelationshipInvariantCondition({
+					...(input.stageId ? { stageId: input.stageId } : {}),
+					...("leadId" in input ? { leadId: input.leadId } : {}),
+				});
+			const invariantWhereClause = and(
 				baseWhereClause,
-				eq(opportunities.updatedAt, updateVersion),
+				relationshipInvariantCondition,
 			);
+			const whereClause = expectedUpdatedAt
+				? and(
+						invariantWhereClause,
+						eq(opportunities.updatedAt, new Date(expectedUpdatedAt)),
+					)
+				: invariantWhereClause;
 
 			// Sales users cannot reassign opportunities
 			if (

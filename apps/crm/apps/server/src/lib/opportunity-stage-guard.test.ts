@@ -1,8 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import { and, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { opportunities } from "../db/schema";
 import {
+	buildOpportunityRelationshipInvariantCondition,
 	getStageLeadRequirementError,
 	getStageVehicleRequirementError,
-	resolveOpportunityUpdateVersion,
 } from "./opportunity-stage-guard";
 
 describe("opportunity stage vehicle guard", () => {
@@ -46,17 +49,23 @@ describe("opportunity stage lead guard", () => {
 });
 
 describe("opportunity update concurrency guard", () => {
-	test("uses the server snapshot when the client omits optimistic locking", () => {
-		const snapshot = new Date("2026-08-27T08:00:00.000Z");
+	test("parenthesizes the lead-stage invariant inside authorization predicates", () => {
+		const database = drizzle.mock();
+		const query = database
+			.update(opportunities)
+			.set({ notes: "updated" })
+			.where(
+				and(
+					eq(opportunities.id, "11111111-1111-4111-8111-111111111111"),
+					eq(opportunities.assignedTo, "sales-user"),
+					buildOpportunityRelationshipInvariantCondition({}),
+				),
+			)
+			.toSQL()
+			.sql.replace(/\s+/g, " ")
+			.toLowerCase();
 
-		expect(resolveOpportunityUpdateVersion(snapshot)).toEqual(snapshot);
-	});
-
-	test("preserves an explicit client version", () => {
-		const snapshot = new Date("2026-08-27T08:00:00.000Z");
-
-		expect(
-			resolveOpportunityUpdateVersion(snapshot, "2026-08-27T07:59:00.000Z"),
-		).toEqual(new Date("2026-08-27T07:59:00.000Z"));
+		expect(query).toContain('and ( coalesce(( select "sales_stages"');
+		expect(query).toContain('or "opportunities"."lead_id" is not null ))');
 	});
 });

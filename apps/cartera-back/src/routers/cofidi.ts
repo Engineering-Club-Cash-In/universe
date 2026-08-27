@@ -1462,7 +1462,9 @@ if (facturasExistentes.length > 0) {
               console.error(`      ❌ Error: ${error.message}`);
               facturasGeneradas.push({
                 tipo: "ERROR",
+                concepto: "INTERESES",
                 inversionista: inv.nombre,
+                inversionista_id: inv.inversionista_id,
                 flujo: "NUEVO_PRORRATEADO",
                 error: error.message,
               });
@@ -1543,6 +1545,7 @@ if (facturasExistentes.length > 0) {
               console.error(`      ❌ Error factura CUBE: ${error.message}`);
               facturasGeneradas.push({
                 tipo: "ERROR",
+                concepto: "INTERESES_CUBE",
                 inversionista: "CUBE",
                 flujo: "NUEVO_PRORRATEADO",
                 error: error.message,
@@ -1821,7 +1824,9 @@ if (facturasExistentes.length > 0) {
             console.error(`      ❌ Error: ${error.message}`);
             facturasGeneradas.push({
               tipo: "ERROR",
+              concepto: "INTERESES",
               inversionista: inv.nombre,
+              inversionista_id: inv.inversionista_id,
               error: error.message,
             });
           }
@@ -1911,6 +1916,7 @@ if (facturasExistentes.length > 0) {
             console.error(`      ❌ Error factura CUBE: ${error.message}`);
             facturasGeneradas.push({
               tipo: "ERROR",
+              concepto: "INTERESES_CUBE",
               inversionista: "CUBE",
               error: error.message,
             });

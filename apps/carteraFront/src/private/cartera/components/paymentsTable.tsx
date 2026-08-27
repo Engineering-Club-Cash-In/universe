@@ -1789,6 +1789,21 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                             {statusConfig.icon}
                             {statusConfig.label}
                           </span>
+                          {(() => {
+                            // Mismo badge que en la tarjeta móvil: esta es la
+                            // vista que usa conta (migración 0014).
+                            const badge = badgeFacturacion(pago.facturaStatus);
+                            if (!badge) return null;
+                            return (
+                              <span
+                                className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full font-semibold text-sm ${badge.clase}`}
+                                title="Abrí 'Ver Facturas' para ver qué rubro falta y por qué"
+                              >
+                                <Receipt className="w-4 h-4" />
+                                {badge.label}
+                              </span>
+                            );
+                          })()}
                           {pago.banderaReinversion && (
                             <span
                               className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full font-semibold text-sm bg-red-100 text-red-700"

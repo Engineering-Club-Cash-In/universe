@@ -146,6 +146,10 @@ inversionista. Antes eso no dejaba rastro: había que abrir el modal y adivinar.
 | Filtro **Facturación** | La bandeja de conta: `Falta factura (todos)`, `Sin facturar`, `Facturado a medias`, `Falló la factura`, `Facturado`, `Sin DTE que emitir` |
 | Modal *Ver Facturas* | El **rubro** de cada factura emitida (y de qué inversionista), y un bloque **"Falta emitir N facturas"** con el motivo de cada una |
 
+Un fallo que **no** es de certificación (por ejemplo, no poder marcar
+`pendiente_facturar=false` después de emitir) no cuenta: el DTE ya existe en
+SAT y mandaría a conta a buscar una factura que sí salió. Se corrige en BD.
+
 **De dónde sale.** `pagos_credito.factura_status`
 (`NO_APLICA | PENDIENTE | OK | PARCIAL | FALLIDA`) + `factura_error` (JSON con
 rubro, inversionista y motivo). Lo escriben los tres momentos que ya existen:

@@ -35,6 +35,14 @@ export type RubroFallido = {
 };
 
 /**
+ * Fallos que NO son de certificación: el DTE sí salió, lo que falló fue una
+ * escritura nuestra (p. ej. marcar `pendiente_facturar=false`). No pueden
+ * volver el pago PARCIAL ni aparecer como "falta emitir": mandarían a conta a
+ * buscar en SAT una factura que ya existe (hallazgo Codex). Se corrigen en BD.
+ */
+const CONCEPTOS_NO_CERTIFICACION = new Set(["MARCAR_PENDIENTE_FACTURAR"]);
+
+/**
  * Deriva el estado a partir de lo emitido y lo que falló.
  * Sin nada emitido ni fallado = no había DTE que emitir (solo capital).
  */
@@ -42,7 +50,14 @@ export function derivarEstadoFacturacion(
   facturasGeneradas: FacturaGeneradaResumen[],
 ): { estado: PagoFacturaStatus; fallidos: RubroFallido[] } {
   const fallidos: RubroFallido[] = facturasGeneradas
-    .filter((f) => f.tipo === "ERROR")
+    .filter(
+      (f) =>
+        f.tipo === "ERROR" &&
+        !(
+          typeof f.concepto === "string" &&
+          CONCEPTOS_NO_CERTIFICACION.has(f.concepto)
+        ),
+    )
     .map((f) => ({
       rubro: typeof f.concepto === "string" ? f.concepto : "DESCONOCIDO",
       inversionista: typeof f.inversionista === "string" ? f.inversionista : null,

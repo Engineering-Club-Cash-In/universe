@@ -1600,9 +1600,9 @@ export const crmRouter = {
 				.select({
 					opportunityId: opportunityStageHistory.opportunityId,
 					firstClosedStageAt:
-						sql<Date>`min(${opportunityStageHistory.changedAt})`.as(
-							"first_closed_stage_at",
-						),
+						sql<Date>`min(${opportunityStageHistory.changedAt})`
+							.mapWith(opportunityStageHistory.changedAt)
+							.as("first_closed_stage_at"),
 				})
 				.from(opportunityStageHistory)
 				.innerJoin(
@@ -1617,15 +1617,17 @@ export const crmRouter = {
 				.select({
 					opportunityId: opportunityStageHistory.opportunityId,
 					latestStageChangedAt:
-						sql<Date>`max(${opportunityStageHistory.changedAt})`.as(
-							"latest_stage_changed_at",
-						),
+						sql<Date>`max(${opportunityStageHistory.changedAt})`
+							.mapWith(opportunityStageHistory.changedAt)
+							.as("latest_stage_changed_at"),
 				})
 				.from(opportunityStageHistory)
 				.groupBy(opportunityStageHistory.opportunityId)
 				.as("latest_stage_history");
 
-			const closedAtExpression = sql<Date | null>`coalesce(${firstClosedStageDates.firstClosedStageAt}, ${opportunities.actualCloseDate})`;
+			const closedAtExpression = sql<Date | null>`coalesce(${firstClosedStageDates.firstClosedStageAt}, ${opportunities.actualCloseDate})`.mapWith(
+				opportunities.actualCloseDate,
+			);
 
 			const selectFields = {
 				id: opportunities.id,
@@ -1641,9 +1643,9 @@ export const crmRouter = {
 				createdAt: opportunities.createdAt,
 				closedAt: closedAtExpression.as("closed_at"),
 				latestStageChangedAt:
-					sql<Date>`coalesce(${latestStageHistory.latestStageChangedAt}, ${opportunities.createdAt})`.as(
-						"latest_stage_changed_at",
-					),
+					sql<Date>`coalesce(${latestStageHistory.latestStageChangedAt}, ${opportunities.createdAt})`
+						.mapWith(opportunities.createdAt)
+						.as("latest_stage_changed_at"),
 				updatedAt: opportunities.updatedAt,
 				numeroSifco: opportunities.numeroSifco,
 				// Analysis status for tracking rejection/resubmission

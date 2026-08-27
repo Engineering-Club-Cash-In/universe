@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { formatGuatemalaDateTime } from "@/lib/crm-formatters";
 import { client, orpc, queryClient } from "@/utils/orpc";
 
 function WhatsAppIcon({ className }: { className?: string }) {
@@ -285,10 +286,7 @@ function RecipientCard({
 					)}
 					{recipient.sentAt && (
 						<p className="text-muted-foreground text-xs">
-							Enviado:{" "}
-							{new Date(recipient.sentAt).toLocaleString(
-								"es-GT",
-							)}
+							Enviado: {formatGuatemalaDateTime(recipient.sentAt)}
 						</p>
 					)}
 					{recipientContracts.length > 0 && (

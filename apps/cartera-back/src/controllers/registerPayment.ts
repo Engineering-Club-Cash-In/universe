@@ -1537,26 +1537,48 @@ export const insertPayment = async ({ body, set }: any) => {
               // histórico para el caso normal.
               cuotas_completas++;
 
-              [pagoInsertado] = await db
-                .update(pagos_credito)
-                // Esta fila ES la boleta (pisa el placeholder): sin estampar
-                // acá, el estampado seguía pendiente tras el loop y la fila
-                // fallback del convenio insertaba una SEGUNDA fila con el
-                // mismo monto; además el reverso no tenía pago_convenio de
-                // dónde leer en los cierres por UPDATE.
-                .set({ ...pagoData, pagoConvenio: estamparPagoConvenio() })
-                .from(cuotas_credito)
-                .where(
-                  and(
-                    eq(
-                      cuotas_credito.cuota_id,
-                      cuota.cuotas_credito.cuota_id
-                    ),
-                    eq(pagos_credito.pago_id, existingPago.pago.pago_id),
-                    eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
+              // El UPDATE de esta fila y el marcado del ajuste (si aplica a la
+              // cuota 1) van en una sola transacción: si el marcado falla, el
+              // pago tampoco queda escrito — evita que quede "cobrado" vía
+              // `otros` pero el ajuste siga pendiente y se vuelva a cobrar en
+              // el siguiente pago.
+              [pagoInsertado] = await db.transaction(async (tx) => {
+                const rows = await tx
+                  .update(pagos_credito)
+                  // Esta fila ES la boleta (pisa el placeholder): sin estampar
+                  // acá, el estampado seguía pendiente tras el loop y la fila
+                  // fallback del convenio insertaba una SEGUNDA fila con el
+                  // mismo monto; además el reverso no tenía pago_convenio de
+                  // dónde leer en los cierres por UPDATE.
+                  .set({ ...pagoData, pagoConvenio: estamparPagoConvenio() })
+                  .from(cuotas_credito)
+                  .where(
+                    and(
+                      eq(
+                        cuotas_credito.cuota_id,
+                        cuota.cuotas_credito.cuota_id
+                      ),
+                      eq(pagos_credito.pago_id, existingPago.pago.pago_id),
+                      eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
+                    )
                   )
-                )
-                .returning();
+                  .returning();
+                const [inserted] = rows;
+                if (
+                  cuota.cuotas_credito.numero_cuota === 1 &&
+                  inserted &&
+                  ajusteFechaIdealId !== undefined
+                ) {
+                  await tx
+                    .update(ajuste_fecha_ideal_pago)
+                    .set({ fecha_cobro: new Date(), pago_id: inserted.pago_id })
+                    .where(eq(ajuste_fecha_ideal_pago.id, ajusteFechaIdealId));
+                  console.log(
+                    `🧾 Ajuste por fecha ideal de pago #${ajusteFechaIdealId} marcado como cobrado (pago_id=${inserted.pago_id}).`
+                  );
+                }
+                return rows;
+              });
               if (cuota.cuotas_credito.numero_cuota === 1 && pagoInsertado) {
                 cuota1PagoId = pagoInsertado.pago_id;
               }
@@ -1609,7 +1631,13 @@ export const insertPayment = async ({ body, set }: any) => {
                 `${year}-${month}-${day}T${timePart}`
               );
 
-              [pagoInsertado] = await db
+              // El INSERT de esta fila y el marcado del ajuste (si aplica a la
+              // cuota 1) van en una sola transacción: si el marcado falla, el
+              // pago tampoco queda escrito — evita que quede "cobrado" vía
+              // `otros` pero el ajuste siga pendiente y se vuelva a cobrar en
+              // el siguiente pago.
+              [pagoInsertado] = await db.transaction(async (tx) => {
+              const rows = await tx
                 .insert(pagos_credito)
                 .values({
                   // Campos requeridos del input
@@ -1684,6 +1712,22 @@ export const insertPayment = async ({ body, set }: any) => {
                   origen_pago: pagoData.origen_pago,
                 })
                 .returning();
+              const [inserted] = rows;
+              if (
+                cuota.cuotas_credito.numero_cuota === 1 &&
+                inserted &&
+                ajusteFechaIdealId !== undefined
+              ) {
+                await tx
+                  .update(ajuste_fecha_ideal_pago)
+                  .set({ fecha_cobro: new Date(), pago_id: inserted.pago_id })
+                  .where(eq(ajuste_fecha_ideal_pago.id, ajusteFechaIdealId));
+                console.log(
+                  `🧾 Ajuste por fecha ideal de pago #${ajusteFechaIdealId} marcado como cobrado (pago_id=${inserted.pago_id}).`
+                );
+              }
+              return rows;
+              });
               if (cuota.cuotas_credito.numero_cuota === 1 && pagoInsertado) {
                 cuota1PagoId = pagoInsertado.pago_id;
               }
@@ -1755,7 +1799,13 @@ export const insertPayment = async ({ body, set }: any) => {
 
 
 
-              [pagoInsertado] = await db
+              // El INSERT de esta fila y el marcado del ajuste (si aplica a la
+              // cuota 1) van en una sola transacción: si el marcado falla, el
+              // pago tampoco queda escrito — evita que quede "cobrado" vía
+              // `otros` pero el ajuste siga pendiente y se vuelva a cobrar en
+              // el siguiente pago.
+              [pagoInsertado] = await db.transaction(async (tx) => {
+              const rows = await tx
                 .insert(pagos_credito)
                 .values({
                   // Campos requeridos del input
@@ -1827,6 +1877,22 @@ export const insertPayment = async ({ body, set }: any) => {
                   monto_aplicado: pagoData.monto_aplicado,
                 })
                 .returning();
+              const [inserted] = rows;
+              if (
+                cuota.cuotas_credito.numero_cuota === 1 &&
+                inserted &&
+                ajusteFechaIdealId !== undefined
+              ) {
+                await tx
+                  .update(ajuste_fecha_ideal_pago)
+                  .set({ fecha_cobro: new Date(), pago_id: inserted.pago_id })
+                  .where(eq(ajuste_fecha_ideal_pago.id, ajusteFechaIdealId));
+                console.log(
+                  `🧾 Ajuste por fecha ideal de pago #${ajusteFechaIdealId} marcado como cobrado (pago_id=${inserted.pago_id}).`
+                );
+              }
+              return rows;
+              });
               if (cuota.cuotas_credito.numero_cuota === 1 && pagoInsertado) {
                 cuota1PagoId = pagoInsertado.pago_id;
               }
@@ -1929,31 +1995,13 @@ export const insertPayment = async ({ body, set }: any) => {
     const fechaVenc = ultimaCuotaPagada?.fecha_vencimiento ?? null;
     const estaAlDia = ultimaCuotaPagada && fechaVenc && fechaVenc >= hoy;
 
-    // Se marca cobrado acá, antes de la bifurcación de abono a capital / saldo
-    // a favor, para que corra siempre — sin importar a dónde vaya el sobrante
-    // — y solo si quedó un pago_id que lo respalde (cuota1PagoId), evitando
-    // que el dinero quede "cobrado" sin ningún pago real detrás.
-    if (ajusteFechaIdealId !== undefined && cuota1PagoId !== undefined) {
-      // try/catch propio: un fallo acá no debe tumbar la respuesta del pago
-      // (que ya se aplicó con éxito) con un 500 que invite a reintentar y
-      // duplicar el cobro. Best-effort, reconciliable manualmente si falla.
-      try {
-        await db
-          .update(ajuste_fecha_ideal_pago)
-          .set({ fecha_cobro: new Date(), pago_id: cuota1PagoId })
-          .where(eq(ajuste_fecha_ideal_pago.id, ajusteFechaIdealId));
-        console.log(
-          `🧾 Ajuste por fecha ideal de pago #${ajusteFechaIdealId} marcado como cobrado (pago_id=${cuota1PagoId}).`
-        );
-      } catch (ajusteError) {
-        console.error(
-          `❌ No se pudo marcar como cobrado el ajuste #${ajusteFechaIdealId} ` +
-            `(pago_id=${cuota1PagoId}) — el pago SÍ se registró con éxito. ` +
-            `Requiere reconciliación manual:`,
-          ajusteError
-        );
-      }
-    } else if (ajusteFechaIdealId !== undefined) {
+    // El marcado como cobrado ya corrió de forma atómica junto con el
+    // INSERT/UPDATE de la fila de la cuota 1, dentro del loop de arriba (ver
+    // comentario en cada rama) — así un fallo del marcado también revierte el
+    // pago en vez de dejarlo "cobrado" vía `otros` con el ajuste sin marcar.
+    // Acá solo queda avisar si había un ajuste pendiente pero la cuota 1
+    // nunca se escribió en este pago (nada que marcar).
+    if (ajusteFechaIdealId !== undefined && cuota1PagoId === undefined) {
       console.warn(
         `⚠️ Ajuste por fecha ideal de pago #${ajusteFechaIdealId}: se dedujo del ` +
           `disponible pero no se escribió ningún pago de la cuota 1 en este loop. ` +

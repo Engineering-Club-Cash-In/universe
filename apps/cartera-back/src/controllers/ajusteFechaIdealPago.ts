@@ -163,16 +163,29 @@ export type AjusteReimportAction =
 export function decidirAjusteAlReconstruirCuota1({
   hastaCuota,
   ajustePrevio,
+  pagoCuota1Id,
 }: {
   hastaCuota: number;
   ajustePrevio: {
     id: number;
     montoTotal: string;
     fechaCobro: Date | string | null;
+    pagoId?: number | null;
   } | null;
+  pagoCuota1Id?: number | null;
 }): AjusteReimportAction {
   if (hastaCuota < 1 || !ajustePrevio) return { kind: "ninguna" };
   if (ajustePrevio.fechaCobro != null) {
+    // Idempotencia: processFromExcelFull puede haber reenlazado el ajuste a
+    // esta misma fila dentro de su transacción antes de llamar al marcador
+    // SIFCO. No se debe volver a sumar monto_total en `otros`.
+    if (
+      ajustePrevio.pagoId != null &&
+      pagoCuota1Id != null &&
+      ajustePrevio.pagoId === pagoCuota1Id
+    ) {
+      return { kind: "ninguna" };
+    }
     return {
       kind: "reenganchar",
       ajusteId: ajustePrevio.id,

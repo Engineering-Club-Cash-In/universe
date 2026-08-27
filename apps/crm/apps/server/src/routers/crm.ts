@@ -70,7 +70,10 @@ import {
 } from "../lib/credit-analysis-ownership";
 import { buildDeletedOpportunitySnapshot } from "../lib/deleted-opportunity-audit";
 import { eqDpi } from "../lib/dpi-lookup";
-import { getDiaPagoOriginalSistema } from "../lib/fecha-ideal-pago-ajuste";
+import {
+	esSeleccionDiaPagoValida,
+	getDiaPagoOriginalSistema,
+} from "../lib/fecha-ideal-pago-ajuste";
 import { getGuatemalaMonthWindow } from "../lib/guatemala-month-window";
 import {
 	formatMissingLeadFields,
@@ -2393,16 +2396,18 @@ export const crmRouter = {
 				// día que antes sí recomendaba — un guardado que reenvía el mismo
 				// día (formulario sin tocarlo) no debe colarse sin revalidar
 				// contra la versión vigente del análisis.
-				if (input.diaPagoMensual !== 15 && input.diaPagoMensual !== 30) {
-					const isRecommended = suggestedDays?.some(
-						(d) => d.dia === input.diaPagoMensual,
-					);
-					if (!isRecommended) {
-						throw new ORPCError("BAD_REQUEST", {
-							message:
-								"El día de pago mensual debe ser 15, 30, o uno de los días recomendados por el análisis de capacidad de pago",
-						});
-					}
+				if (
+					!esSeleccionDiaPagoValida({
+						diaPagoMensual: input.diaPagoMensual,
+						elegidoDesdeRecomendacionIA:
+							input.elegidoDesdeRecomendacionIA ?? false,
+						suggestedDays,
+					})
+				) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"El día de pago mensual debe ser 15, 30, o uno de los días recomendados por el análisis de capacidad de pago",
+					});
 				}
 
 				// diaPagoOriginalSistema solo se recaptura si algo relevante

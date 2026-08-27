@@ -1,8 +1,51 @@
 import { describe, expect, test } from "bun:test";
 import {
 	calcularAjusteFechaIdeal,
+	esSeleccionDiaPagoValida,
 	getDiaPagoOriginalSistema,
 } from "./fecha-ideal-pago-ajuste";
+
+describe("esSeleccionDiaPagoValida", () => {
+	test("acepta 15/30 manuales sin recomendación vigente", () => {
+		expect(
+			esSeleccionDiaPagoValida({
+				diaPagoMensual: 15,
+				elegidoDesdeRecomendacionIA: false,
+				suggestedDays: null,
+			}),
+		).toBe(true);
+	});
+
+	test("rechaza un 15 IA que ya no aparece en las recomendaciones", () => {
+		expect(
+			esSeleccionDiaPagoValida({
+				diaPagoMensual: 15,
+				elegidoDesdeRecomendacionIA: true,
+				suggestedDays: [{ dia: 18 }],
+			}),
+		).toBe(false);
+	});
+
+	test("acepta un 30 IA solo si continúa recomendado", () => {
+		expect(
+			esSeleccionDiaPagoValida({
+				diaPagoMensual: 30,
+				elegidoDesdeRecomendacionIA: true,
+				suggestedDays: [{ dia: 30 }],
+			}),
+		).toBe(true);
+	});
+
+	test("los demás días siempre requieren recomendación vigente", () => {
+		expect(
+			esSeleccionDiaPagoValida({
+				diaPagoMensual: 26,
+				elegidoDesdeRecomendacionIA: false,
+				suggestedDays: [{ dia: 25 }],
+			}),
+		).toBe(false);
+	});
+});
 
 describe("getDiaPagoOriginalSistema", () => {
 	test("día 15 (≤20) devuelve 15", () => {

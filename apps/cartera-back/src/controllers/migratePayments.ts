@@ -353,6 +353,7 @@ export const marcarCuotasPagadasHastaNumero = async ({
       id: ajuste_fecha_ideal_pago.id,
       montoTotal: ajuste_fecha_ideal_pago.monto_total,
       fechaCobro: ajuste_fecha_ideal_pago.fecha_cobro,
+      pagoId: ajuste_fecha_ideal_pago.pago_id,
     })
     .from(ajuste_fecha_ideal_pago)
     .where(eq(ajuste_fecha_ideal_pago.credito_id, credito.credito_id))
@@ -596,6 +597,7 @@ export const marcarCuotasPagadasHastaNumero = async ({
     const accionAjuste = decidirAjusteAlReconstruirCuota1({
       hastaCuota: hasta_cuota,
       ajustePrevio,
+      pagoCuota1Id: cuota1?.pago_id ?? null,
     });
     if (cuota1) {
       if (accionAjuste.kind === "reenganchar" && cuota1.pago_id) {

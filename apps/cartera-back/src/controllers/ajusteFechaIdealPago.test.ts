@@ -56,6 +56,21 @@ describe("decidirAjusteAlReconstruirCuota1", () => {
       }),
     ).toEqual({ kind: "reenganchar", ajusteId: 9, montoTotal: "12.34" });
   });
+
+  it("no vuelve a sumar si el ajuste ya apunta al pago reconstruido de cuota 1", () => {
+    expect(
+      decidirAjusteAlReconstruirCuota1({
+        hastaCuota: 1,
+        ajustePrevio: {
+          id: 9,
+          montoTotal: "12.34",
+          fechaCobro: new Date(),
+          pagoId: 700,
+        },
+        pagoCuota1Id: 700,
+      }),
+    ).toEqual({ kind: "ninguna" });
+  });
 });
 
 describe("ajuste por fecha ideal durante reconstruccion", () => {

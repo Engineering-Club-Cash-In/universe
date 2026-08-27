@@ -46,6 +46,29 @@ export interface AjusteFechaIdealResult {
 }
 
 /**
+ * Los días tradicionales 15/30 son válidos sin análisis solo cuando fueron
+ * elegidos manualmente. Si el formulario los marca como recomendación IA
+ * —igual que cualquier otro día— deben seguir en las recomendaciones vigentes.
+ */
+export function esSeleccionDiaPagoValida({
+	diaPagoMensual,
+	elegidoDesdeRecomendacionIA,
+	suggestedDays,
+}: {
+	diaPagoMensual: number;
+	elegidoDesdeRecomendacionIA: boolean;
+	suggestedDays: readonly { dia: number }[] | null;
+}): boolean {
+	const esTradicionalManual =
+		(diaPagoMensual === 15 || diaPagoMensual === 30) &&
+		!elegidoDesdeRecomendacionIA;
+	return (
+		esTradicionalManual ||
+		(suggestedDays?.some((dia) => dia.dia === diaPagoMensual) ?? false)
+	);
+}
+
+/**
  * Días del mes de la primera cuota, mismo cálculo que generatePaymentDates en
  * cartera-back (createCredit.ts) — a propósito hora local del server, no GT,
  * para no desincronizarse del mes que cartera-back realmente agenda.

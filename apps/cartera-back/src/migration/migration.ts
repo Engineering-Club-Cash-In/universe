@@ -34,6 +34,7 @@ import {
   pagos_credito_inversionistas,
 } from "../database/db";
 import { findOrCreateInvestor } from "../controllers/investor";
+import { resetAjusteFechaIdealPorCredito } from "../controllers/ajusteFechaIdealPago";
 import { map } from "zod";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { toBigExcel } from "../utils/functions/generalFunctions";
@@ -557,6 +558,11 @@ export async function mapEstadoCuentaToPagosBig(
       .delete(pagos_credito)
       .where(eq(pagos_credito.credito_id, creditoId));
     console.log("  ✅ Pagos eliminados");
+    // El crédito sigue vivo (se remapea, no se borra): si tenía un ajuste por
+    // fecha ideal de pago ya cobrado, el pago que lo cobró se acaba de
+    // eliminar arriba — resetearlo para que no quede "cobrado" sin ningún
+    // pago real detrás.
+    await resetAjusteFechaIdealPorCredito(creditoId, tx);
 
     console.log("  🗑️  Eliminando cuotas previas...");
     await tx
@@ -1139,6 +1145,11 @@ export async function mapPagosDesdeJson(
     await tx
       .delete(pagos_credito)
       .where(eq(pagos_credito.credito_id, creditoId));
+    // El crédito sigue vivo (se remapea, no se borra): si tenía un ajuste por
+    // fecha ideal de pago ya cobrado, el pago que lo cobró se acaba de
+    // eliminar arriba — resetearlo para que no quede "cobrado" sin ningún
+    // pago real detrás.
+    await resetAjusteFechaIdealPorCredito(creditoId, tx);
     console.log("  🗑️  Eliminando cuotas previas...");
     await tx
       .delete(cuotas_credito)

@@ -13,6 +13,7 @@ import {
 import { findOrCreateAdvisorByName } from "./advisor";
 import { findOrCreateUserByName } from "./users";
 import { marcarCuotasPagadasHastaNumero } from "./migratePayments";
+import { resetAjusteFechaIdealPorCredito } from "./ajusteFechaIdealPago";
 import { updateAllInstallments } from "./updateCredit";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -322,6 +323,11 @@ export async function procesarCreditoDesdeExcelFull(
     await db
       .delete(pagos_credito)
       .where(eq(pagos_credito.credito_id, existing.credito_id));
+    // El crédito sigue vivo (se reimporta, no se borra) — si tenía un ajuste
+    // por fecha ideal de pago ya cobrado, el pago que lo cobró se acaba de
+    // eliminar arriba: resetearlo, si no queda "cobrado" para siempre sin
+    // ningún pago real detrás.
+    await resetAjusteFechaIdealPorCredito(existing.credito_id);
     await db
       .delete(cuotas_credito)
       .where(eq(cuotas_credito.credito_id, existing.credito_id));

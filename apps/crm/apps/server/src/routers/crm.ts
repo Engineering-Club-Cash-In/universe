@@ -80,8 +80,12 @@ import { canSyncNitToOpportunity } from "../lib/lead-nit-sync";
 import { getLeadSourceLabel } from "../lib/lead-sources";
 import {
 	buildOpportunityRelationshipInvariantCondition,
+	buildWonOpportunityFrozenFieldError,
 	getStageLeadRequirementError,
 	getStageVehicleRequirementError,
+	getWonOpportunityFrozenFieldChanges,
+	getWonOpportunityLockError,
+	stripUnchangedFrozenFields,
 } from "../lib/opportunity-stage-guard";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
@@ -2325,6 +2329,29 @@ export const crmRouter = {
 				});
 			}
 
+			// Una oportunidad pasa a "won" en el 90% y de ahí todavía avanza al 100%
+			// con ajustes operativos, así que no se congela el update completo: solo
+			// los datos con los que se firmaron los contratos.
+			const frozenFieldChanges = getWonOpportunityFrozenFieldChanges(
+				input,
+				currentOpportunity[0],
+			);
+			const wonLockError = getWonOpportunityLockError(
+				currentOpportunity[0].status,
+				context.userRole,
+				frozenFieldChanges,
+			);
+			if (wonLockError) {
+				throw new ORPCError("FORBIDDEN", { message: wonLockError });
+			}
+			// El chequeo de arriba leyó la fila antes del UPDATE: si closeOpportunity
+			// la marca ganada en el medio, el cambio entraría igual. Cuando se tocan
+			// campos congelados, el predicado lo vuelve a exigir en la misma
+			// sentencia (Postgres lo re-evalúa tras esperar a la escritura rival).
+			const enforceNotWonInPredicate =
+				frozenFieldChanges.length > 0 &&
+				!PERMISSIONS.canAccessAdmin(context.userRole ?? "");
+
 			if (input.leadId === null) {
 				const [currentStageForLead] = await db
 					.select({ closurePercentage: salesStages.closurePercentage })
@@ -2610,12 +2637,15 @@ export const crmRouter = {
 				baseWhereClause,
 				relationshipInvariantCondition,
 			);
+			const wonLockWhereClause = enforceNotWonInPredicate
+				? and(invariantWhereClause, not(eq(opportunities.status, "won")))
+				: invariantWhereClause;
 			const whereClause = expectedUpdatedAt
 				? and(
-						invariantWhereClause,
+						wonLockWhereClause,
 						eq(opportunities.updatedAt, new Date(expectedUpdatedAt)),
 					)
-				: invariantWhereClause;
+				: wonLockWhereClause;
 
 			// Sales users cannot reassign opportunities
 			if (
@@ -2690,10 +2720,15 @@ export const crmRouter = {
 				}
 			}
 
+			const safeUpdateData =
+				currentOpportunity[0].status === "won"
+					? stripUnchangedFrozenFields(updateData, currentOpportunity[0])
+					: updateData;
+
 			const updatedOpportunity = await db
 				.update(opportunities)
 				.set({
-					...updateData,
+					...safeUpdateData,
 					...(assignedTo && { assignedTo }),
 					...(expectedCloseDate && {
 						expectedCloseDate: new Date(expectedCloseDate),
@@ -2727,6 +2762,20 @@ export const crmRouter = {
 				.returning();
 
 			if (updatedOpportunity.length === 0) {
+				if (enforceNotWonInPredicate) {
+					// Pudo ser la carrera con closeOpportunity: distinguirlo del
+					// conflicto de concurrencia para no mandar a "recargá e intentá".
+					const [latest] = await db
+						.select({ status: opportunities.status })
+						.from(opportunities)
+						.where(eq(opportunities.id, id))
+						.limit(1);
+					if (latest?.status === "won") {
+						throw new ORPCError("FORBIDDEN", {
+							message: buildWonOpportunityFrozenFieldError(frozenFieldChanges),
+						});
+					}
+				}
 				if (canUpdateOpportunity) {
 					throw new ORPCError("CONFLICT", {
 						message:

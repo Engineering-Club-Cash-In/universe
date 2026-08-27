@@ -37,23 +37,23 @@ export function PagaloLinkDialog({
 	casoCobroId,
 	numeroSifco,
 	creditoId,
-	vehiculoMarca,
-	vehiculoModelo,
-	vehiculoYear,
-	vehiculoPlaca,
 }: {
 	casoCobroId: string;
 	numeroSifco: string;
 	creditoId: number;
-	vehiculoMarca?: string;
-	vehiculoModelo?: string;
-	vehiculoYear?: number;
-	vehiculoPlaca?: string;
 }) {
 	const [open, setOpen] = useState(false);
 	const [selected, setSelected] = useState<number[]>([]);
 	const grupoActivo = useQuery({
 		...orpc.getPagaloGrupoActivo.queryOptions({ input: { creditoId } }),
+		enabled: open,
+	});
+	// Misma fuente que usa createPagaloLinks para el identificador del mensaje
+	// real (contratosFinanciamiento.vehicleId) — no la del header del caso
+	// (opportunities.vehicleId), que puede apuntar a otro vehículo en
+	// créditos refinanciados u oportunidades desactualizadas.
+	const vehiculoCaso = useQuery({
+		...orpc.getVehiculoCasoPagalo.queryOptions({ input: { casoCobroId } }),
 		enabled: open,
 	});
 	const credit = useQuery({
@@ -100,9 +100,10 @@ export function PagaloLinkDialog({
 	const tieneMora = Number(data?.moraActual ?? 0) > 0;
 	// Mismo criterio que identificadorCredito en pagalo-link-orchestrator.ts:
 	// vehículo (marca modelo año · placa) si está cargado, si no crédito+SIFCO.
+	const vehiculo = vehiculoCaso.data as any;
 	const identificadorCredito =
-		vehiculoMarca && vehiculoPlaca
-			? `vehículo ${[vehiculoMarca, vehiculoModelo, vehiculoYear].filter(Boolean).join(" ")} · ${vehiculoPlaca}`
+		vehiculo?.vehiculoMarca && vehiculo?.vehiculoPlaca
+			? `vehículo ${[vehiculo.vehiculoMarca, vehiculo.vehiculoModelo, vehiculo.vehiculoYear].filter(Boolean).join(" ")} · ${vehiculo.vehiculoPlaca}`
 			: `crédito ${numeroSifco}`;
 	const preview = useMemo(() => {
 		const seleccionadas = cuotas.filter((cuota: any) =>

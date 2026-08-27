@@ -6,4 +6,5 @@ import { cobrosRouter } from "./cobros";
 // con su propio tipo, sin tocar el tamaño de index.ts.
 export const pagaloGrupoActivoRouter = {
 	getPagaloGrupoActivo: cobrosRouter.getPagaloGrupoActivo,
+	getVehiculoCasoPagalo: cobrosRouter.getVehiculoCasoPagalo,
 };

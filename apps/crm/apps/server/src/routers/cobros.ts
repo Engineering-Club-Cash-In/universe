@@ -4771,6 +4771,34 @@ export const cobrosRouter = {
 			}
 		}),
 
+	// Vehículo del caso vía la MISMA fuente que usa createPagaloLinks para
+	// armar el identificador del mensaje de WhatsApp (pagalo-link-
+	// orchestrator.ts: casosCobros.contratoId -> contratosFinanciamiento.
+	// vehicleId -> vehicles). El diálogo lo usa para el preview del mensaje;
+	// otra fuente (ej. opportunities.vehicleId) puede apuntar a un vehículo
+	// distinto en créditos refinanciados u oportunidades desactualizadas
+	// (hallazgo de Codex, PR #1470).
+	getVehiculoCasoPagalo: cobrosProcedure
+		.input(z.object({ casoCobroId: z.string().uuid() }))
+		.handler(async ({ input }) => {
+			const [fila] = await db
+				.select({
+					vehiculoMarca: vehicles.make,
+					vehiculoModelo: vehicles.model,
+					vehiculoYear: vehicles.year,
+					vehiculoPlaca: vehicles.licensePlate,
+				})
+				.from(casosCobros)
+				.leftJoin(
+					contratosFinanciamiento,
+					eq(casosCobros.contratoId, contratosFinanciamiento.id),
+				)
+				.leftJoin(vehicles, eq(contratosFinanciamiento.vehicleId, vehicles.id))
+				.where(eq(casosCobros.id, input.casoCobroId))
+				.limit(1);
+			return fila ?? null;
+		}),
+
 	// Grupo Págalo activo (no COMPLETED/CANCELLED) del crédito, si existe —
 	// mismo filtro que createPagaloLinks usa para no duplicar (pagalo-link-
 	// orchestrator.ts). El diálogo lo consulta al abrir para mostrar los

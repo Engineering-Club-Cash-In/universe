@@ -1076,3 +1076,528 @@ describe("debeRechazarPagoSinAplicacion", () => {
     ).toBe(false);
   });
 });
+
+describe("filtrarCuotasVencidasSinCobertura — contador de atrasadas por montos", () => {
+  const filtrar = () => {
+    const fn = Reflect.get(
+      registerPaymentPolicy,
+      "filtrarCuotasVencidasSinCobertura",
+    );
+    expect(fn).toBeFunction();
+    return fn as (
+      rows: any[],
+      montoCuota: string | number,
+    ) => any[];
+  };
+
+  // Fila como la devuelve la query de getCreditoByNumero (cuota + pago join)
+  const fila = (over: Record<string, any> = {}) => ({
+    cuota_id: 10,
+    numero_cuota: 1,
+    pago_id: 100,
+    validationStatus: "validated",
+    paymentFalse: false,
+    abono_capital: "0",
+    abono_interes: "0",
+    abono_iva_12: "0",
+    abono_seguro: "0",
+    abono_gps: "0",
+    membresias_pago: "0",
+    ...over,
+  });
+
+  it("mantiene atrasada la cuota con pago validated parcial (caso Aura: 5,079.59 de 6,394.11)", () => {
+    const rows = [
+      fila({
+        abono_capital: "902.44",
+        abono_interes: "3729.60",
+        abono_iva_12: "447.55",
+      }), // suma 5,079.59
+    ];
+    expect(filtrar()(rows, "6394.11")).toHaveLength(1);
+  });
+
+  it("excluye la cuota cuya boleta pending SÍ cubre por montos (reemplaza al viejo NOT EXISTS)", () => {
+    const rows = [
+      fila({
+        validationStatus: "pending",
+        abono_capital: "1000.00",
+        abono_interes: "4500.00",
+        abono_iva_12: "894.11",
+      }), // suma 6,394.11 exacto
+    ];
+    expect(filtrar()(rows, "6394.11")).toHaveLength(0);
+  });
+
+  it("cuenta atrasada la cuota con pending+pagado=true cuyos montos NO cubren (los flags mienten)", () => {
+    const rows = [
+      fila({
+        validationStatus: "pending",
+        pagado: true, // flag mentiroso: el viejo criterio la ocultaba
+        abono_capital: "100.00",
+      }),
+    ];
+    expect(filtrar()(rows, "6394.11")).toHaveLength(1);
+  });
+
+  it("cuenta atrasada la cuota sin ningún pago (fila con pago null del leftJoin)", () => {
+    const rows = [
+      fila({
+        pago_id: null,
+        validationStatus: null,
+        paymentFalse: null,
+        abono_capital: null,
+        abono_interes: null,
+        abono_iva_12: null,
+        abono_seguro: null,
+        abono_gps: null,
+        membresias_pago: null,
+      }),
+    ];
+    expect(filtrar()(rows, "6394.11")).toHaveLength(1);
+  });
+
+  it("ignora boletas con paymentFalse=true aunque sus montos cubran", () => {
+    const rows = [
+      fila({
+        paymentFalse: true,
+        abono_capital: "6394.11",
+      }),
+    ];
+    expect(filtrar()(rows, "6394.11")).toHaveLength(1);
+  });
+
+  it("tolera 1 centavo de redondeo (6,394.10 aplicado cubre cuota de 6,394.11)", () => {
+    const rows = [
+      fila({
+        abono_capital: "6394.10",
+      }),
+    ];
+    expect(filtrar()(rows, "6394.11")).toHaveLength(0);
+  });
+
+  it("las filas de solo-mora no cubren la cuota (los rubros van en 0)", () => {
+    // monto_aplicado legacy diría 2,420.41 (mora), pero la cuota no recibió nada
+    const rows = [fila({ pago_mora: "2420.41" })];
+    expect(filtrar()(rows, "6394.11")).toHaveLength(1);
+  });
+
+  it("filtra por cuota: devuelve solo las filas de la cuota descubierta, preservando orden y multiplicidad", () => {
+    const cubierta1 = fila({
+      cuota_id: 10,
+      numero_cuota: 1,
+      pago_id: 100,
+      abono_capital: "3000.00",
+    });
+    const cubierta2 = fila({
+      cuota_id: 10,
+      numero_cuota: 1,
+      pago_id: 101,
+      abono_capital: "3394.11",
+    }); // entre las dos suman 6,394.11
+    const descubierta = fila({
+      cuota_id: 11,
+      numero_cuota: 2,
+      pago_id: 102,
+      abono_capital: "50.00",
+    });
+
+    const result = filtrar()([cubierta1, cubierta2, descubierta], "6394.11");
+    expect(result).toEqual([descubierta]);
+  });
+
+  it("con dos filas parciales de la misma cuota descubierta, devuelve ambas filas", () => {
+    const parcial1 = fila({ pago_id: 100, abono_capital: "1000.00" });
+    const parcial2 = fila({ pago_id: 101, abono_capital: "2000.00" });
+    const result = filtrar()([parcial1, parcial2], "6394.11");
+    expect(result).toHaveLength(2);
+  });
+});
+
+describe("filtrarCuotasVencidasSinCobertura — cuotas duplicadas (mismo numero_cuota, distinto cuota_id)", () => {
+  const filtrar = registerPaymentPolicy.filtrarCuotasVencidasSinCobertura;
+
+  const fila = (over: Record<string, any> = {}) => ({
+    cuota_id: 10,
+    numero_cuota: 1,
+    pago_id: 100,
+    validationStatus: "validated",
+    paymentFalse: false,
+    abono_capital: "0",
+    abono_interes: "0",
+    abono_iva_12: "0",
+    abono_seguro: "0",
+    abono_gps: "0",
+    membresias_pago: "0",
+    ...over,
+  });
+
+  it("suma los fragmentos de filas duplicadas de la misma cuota contractual antes de decidir", () => {
+    // Cuota lógica #1 partida en dos filas de cuotas_credito (dup conocido):
+    // Q60 en una y Q40 en la otra cubren la cuota de Q100 entre las dos.
+    const fragmento1 = fila({ cuota_id: 10, pago_id: 100, abono_capital: "60.00" });
+    const fragmento2 = fila({ cuota_id: 11, pago_id: 101, abono_capital: "40.00" });
+
+    expect(filtrar([fragmento1, fragmento2], "100.00")).toHaveLength(0);
+  });
+
+  it("una fila cubierta + su duplicada vacía no dejan cuota atrasada fantasma", () => {
+    const cubierta = fila({ cuota_id: 10, pago_id: 100, abono_capital: "100.00" });
+    const dupVacia = fila({
+      cuota_id: 11,
+      pago_id: null,
+      validationStatus: null,
+      paymentFalse: null,
+      abono_capital: null,
+    });
+
+    expect(filtrar([cubierta, dupVacia], "100.00")).toHaveLength(0);
+  });
+
+  it("cuotas de numero distinto NO se mezclan: cada una se evalúa sola", () => {
+    const cuota1cubierta = fila({ cuota_id: 10, numero_cuota: 1, abono_capital: "100.00" });
+    const cuota2descubierta = fila({ cuota_id: 20, numero_cuota: 2, pago_id: 200, abono_capital: "10.00" });
+
+    expect(filtrar([cuota1cubierta, cuota2descubierta], "100.00")).toEqual([cuota2descubierta]);
+  });
+});
+
+describe("filtrarCuotasEnValidacion — cuotas cubiertas que dependen de boletas sin validar", () => {
+  const filtrar = () => {
+    const fn = Reflect.get(registerPaymentPolicy, "filtrarCuotasEnValidacion");
+    expect(fn).toBeFunction();
+    return fn as (rows: any[], montoCuota: string | number) => any[];
+  };
+
+  const fila = (over: Record<string, any> = {}) => ({
+    cuota_id: 10,
+    numero_cuota: 1,
+    pago_id: 100,
+    validationStatus: "validated",
+    paymentFalse: false,
+    abono_capital: "0",
+    abono_interes: "0",
+    abono_iva_12: "0",
+    abono_seguro: "0",
+    abono_gps: "0",
+    membresias_pago: "0",
+    ...over,
+  });
+
+  it("incluye la cuota cubierta SOLO gracias a una boleta pending (caso Carlos)", () => {
+    const rows = [
+      fila({ validationStatus: "pending", abono_capital: "2273.80" }),
+    ];
+    expect(filtrar()(rows, "2273.80")).toHaveLength(1);
+  });
+
+  it("excluye la cuota cubierta solo con pagos validated (nada que validar)", () => {
+    const rows = [fila({ abono_capital: "2273.80" })];
+    expect(filtrar()(rows, "2273.80")).toHaveLength(0);
+  });
+
+  it("excluye la cuota descubierta (esa es atrasada, no en validación)", () => {
+    const rows = [
+      fila({ validationStatus: "pending", abono_capital: "500.00" }),
+    ];
+    expect(filtrar()(rows, "2273.80")).toHaveLength(0);
+  });
+
+  it("incluye la cuota que cierra con la mezcla validated + pending", () => {
+    const rows = [
+      fila({ pago_id: 100, abono_capital: "1500.00" }),
+      fila({
+        pago_id: 101,
+        validationStatus: "pending",
+        abono_capital: "773.80",
+      }),
+    ];
+    expect(filtrar()(rows, "2273.80")).toHaveLength(2);
+  });
+
+  it("una boleta falsa pending no pone la cuota en validación", () => {
+    const rows = [
+      fila({
+        validationStatus: "pending",
+        paymentFalse: true,
+        abono_capital: "2273.80",
+      }),
+    ];
+    expect(filtrar()(rows, "2273.80")).toHaveLength(0);
+  });
+
+  it("agrupa por numero_cuota: fragmentos duplicados pending que cubren juntos cuentan", () => {
+    const rows = [
+      fila({ cuota_id: 10, validationStatus: "pending", abono_capital: "60.00" }),
+      fila({ cuota_id: 11, pago_id: 101, validationStatus: "pending", abono_capital: "40.00" }),
+    ];
+    expect(filtrar()(rows, "100.00")).toHaveLength(2);
+  });
+
+  it("no mezcla cuotas: solo devuelve las filas de la cuota en validación", () => {
+    const enValidacion = fila({
+      numero_cuota: 1,
+      validationStatus: "pending",
+      abono_capital: "100.00",
+    });
+    const atrasada = fila({
+      cuota_id: 20,
+      numero_cuota: 2,
+      pago_id: 200,
+      validationStatus: null,
+      abono_capital: "0",
+    });
+    expect(filtrar()([enValidacion, atrasada], "100.00")).toEqual([enValidacion]);
+  });
+});
+
+describe("filtrarCuotas* — cuotas recortadas (recibo saldado con restantes en 0)", () => {
+  const filtrarAtrasadas = registerPaymentPolicy.filtrarCuotasVencidasSinCobertura;
+  const filtrarEnValidacion = registerPaymentPolicy.filtrarCuotasEnValidacion;
+
+  // Última cuota tras abono grande: el recibo real vale menos que credito.cuota
+  const reciboRecortado = (over: Record<string, any> = {}) => ({
+    cuota_id: 10,
+    numero_cuota: 84,
+    pago_id: 100,
+    validationStatus: "validated",
+    paymentFalse: false,
+    // Rubros: solo Q500 de capital topado + seguro (mucho menos que la cuota mensual)
+    abono_capital: "500.00",
+    abono_interes: "0",
+    abono_iva_12: "0",
+    abono_seguro: "150.00",
+    abono_gps: "0",
+    membresias_pago: "0",
+    monto_aplicado: "650.00",
+    // El recibo quedó SALDADO: todos los restantes en 0
+    capital_restante: "0",
+    interes_restante: "0",
+    iva_12_restante: "0",
+    seguro_restante: "0",
+    gps_restante: "0",
+    membresias_restante: "0",
+    ...over,
+  });
+
+  it("no marca atrasada la cuota recortada saldada por un pago validated", () => {
+    expect(filtrarAtrasadas([reciboRecortado()], "2273.80")).toHaveLength(0);
+  });
+
+  it("la cuota recortada saldada por un pago pending no es atrasada, es en-validación", () => {
+    const rows = [reciboRecortado({ validationStatus: "pending" })];
+    expect(filtrarAtrasadas(rows, "2273.80")).toHaveLength(0);
+    expect(filtrarEnValidacion(rows, "2273.80")).toHaveLength(1);
+  });
+
+  it("un placeholder con restantes en 0 pero sin plata aplicada NO salda la cuota", () => {
+    const rows = [
+      reciboRecortado({
+        abono_capital: "0",
+        abono_seguro: "0",
+        monto_aplicado: "0",
+      }),
+    ];
+    expect(filtrarAtrasadas(rows, "2273.80")).toHaveLength(1);
+  });
+
+  it("un parcial normal (restantes > 0) sigue contando como atrasada", () => {
+    const rows = [
+      reciboRecortado({
+        capital_restante: "800.00",
+        interes_restante: "473.80",
+      }),
+    ];
+    expect(filtrarAtrasadas(rows, "2273.80")).toHaveLength(1);
+  });
+
+  it("una boleta falsa saldada no cubre la cuota", () => {
+    const rows = [reciboRecortado({ paymentFalse: true })];
+    expect(filtrarAtrasadas(rows, "2273.80")).toHaveLength(1);
+  });
+});
+
+describe("esReciboSaldado vía filtrar — pagos legacy solo-mora no saldan cuota", () => {
+  const filtrarAtrasadas = registerPaymentPolicy.filtrarCuotasVencidasSinCobertura;
+
+  it("un pago legacy de solo mora (monto_aplicado>0 pero rubros en 0) NO cubre la cuota", () => {
+    // Legacy: monto_aplicado incluía mora+otros; la cuota no recibió nada.
+    const filaLegacySoloMora = {
+      cuota_id: 10,
+      numero_cuota: 5,
+      pago_id: 100,
+      validationStatus: "validated",
+      paymentFalse: false,
+      abono_capital: "0",
+      abono_interes: "0",
+      abono_iva_12: "0",
+      abono_seguro: "0",
+      abono_gps: "0",
+      membresias_pago: "0",
+      monto_aplicado: "2420.41", // mora legacy, no plata de cuota
+      pago_mora: "2420.41",
+      capital_restante: "0",
+      interes_restante: "0",
+      iva_12_restante: "0",
+      seguro_restante: "0",
+      gps_restante: "0",
+      membresias_restante: "0",
+    };
+    expect(filtrarAtrasadas([filaLegacySoloMora], "2273.80")).toHaveLength(1);
+  });
+});
+
+describe("esReciboSaldado vía filtrar — restantes parcialmente informados", () => {
+  it("un restante NULL con otros en 0 NO permite afirmar el saldado (todos deben venir)", () => {
+    // Legacy: interes_restante=0 informado pero capital_restante NULL.
+    // El ?? 0 trataría el NULL como pagado y escondería una cuota viva.
+    const filaParcialmenteInformada = {
+      cuota_id: 10,
+      numero_cuota: 5,
+      pago_id: 100,
+      validationStatus: "validated",
+      paymentFalse: false,
+      abono_capital: "500.00",
+      abono_interes: "0",
+      abono_iva_12: "0",
+      abono_seguro: "0",
+      abono_gps: "0",
+      membresias_pago: "0",
+      capital_restante: null,
+      interes_restante: "0",
+      iva_12_restante: "0",
+      seguro_restante: "0",
+      gps_restante: "0",
+      membresias_restante: "0",
+    };
+    expect(
+      registerPaymentPolicy.filtrarCuotasVencidasSinCobertura(
+        [filaParcialmenteInformada],
+        "2273.80",
+      ),
+    ).toHaveLength(1);
+  });
+});
+
+describe("esReciboSaldado vía filtrar — el cierre no cubre a sus hermanos (cierre diferido)", () => {
+  const filtrarAtrasadas = registerPaymentPolicy.filtrarCuotasVencidasSinCobertura;
+  const filtrarEnValidacion = registerPaymentPolicy.filtrarCuotasEnValidacion;
+
+  const base = {
+    cuota_id: 10,
+    numero_cuota: 12,
+    paymentFalse: false,
+    abono_interes: "0",
+    abono_iva_12: "0",
+    abono_seguro: "0",
+    abono_gps: "0",
+    membresias_pago: "0",
+    capital_restante: "0",
+    interes_restante: "0",
+    iva_12_restante: "0",
+    seguro_restante: "0",
+    gps_restante: "0",
+    membresias_restante: "0",
+  };
+
+  // Fila de CIERRE validada primero: restantes 0 por diseño, rubros parciales
+  const cierreValidado = {
+    ...base,
+    pago_id: 101,
+    validationStatus: "validated",
+    abono_capital: "800.00",
+  };
+
+  it("cierre validado + hermano pending con plata → la cuota está EN VALIDACIÓN, no cubierta firme", () => {
+    const hermanoPending = {
+      ...base,
+      pago_id: 100,
+      validationStatus: "pending",
+      abono_capital: "1473.80",
+      capital_restante: "1473.80", // el parcial aún debe sus restantes
+    };
+    const rows = [hermanoPending, cierreValidado];
+    expect(filtrarAtrasadas(rows, "2273.80")).toHaveLength(0);
+    expect(filtrarEnValidacion(rows, "2273.80")).toHaveLength(2);
+  });
+
+  it("cierre validado + hermano ANULADO con plata → la cuota vuelve a ser atrasada", () => {
+    const hermanoAnulado = {
+      ...base,
+      pago_id: 100,
+      validationStatus: "pending",
+      paymentFalse: true,
+      abono_capital: "1473.80",
+    };
+    const rows = [hermanoAnulado, cierreValidado];
+    expect(filtrarAtrasadas(rows, "2273.80")).toHaveLength(2);
+  });
+
+  it("cierre validado SIN hermanos con plata (cuota recortada real) sigue cubierta firme", () => {
+    const rows = [cierreValidado];
+    expect(filtrarAtrasadas(rows, "2273.80")).toHaveLength(0);
+    expect(filtrarEnValidacion(rows, "2273.80")).toHaveLength(0);
+  });
+});
+
+describe("esReciboSaldado vía filtrar — pagos exactos por la vía stale-zero", () => {
+  const filtrarAtrasadas = registerPaymentPolicy.filtrarCuotasVencidasSinCobertura;
+  const filtrarEnValidacion = registerPaymentPolicy.filtrarCuotasEnValidacion;
+
+  // Vía stale-zero (shouldApplyStaleZeroRestanteAdjustment): el pago exacto
+  // consume la cuota subiendo monto_aplicado, pero los abono_* quedan en 0
+  // porque los restantes de la fila origen ya estaban (mal) en 0.
+  const staleZeroExacto = (over: Record<string, any> = {}) => ({
+    cuota_id: 10,
+    numero_cuota: 8,
+    pago_id: 100,
+    validationStatus: "pending",
+    paymentFalse: false,
+    abono_capital: "0",
+    abono_interes: "0",
+    abono_iva_12: "0",
+    abono_seguro: "0",
+    abono_gps: "0",
+    membresias_pago: "0",
+    monto_aplicado: "2273.80", // la cuota exacta
+    pago_mora: "0",
+    pago_otros: "0",
+    capital_restante: "0",
+    interes_restante: "0",
+    iva_12_restante: "0",
+    seguro_restante: "0",
+    gps_restante: "0",
+    membresias_restante: "0",
+    ...over,
+  });
+
+  it("el pago exacto stale-zero pending NO es atrasada: es cuota en validación", () => {
+    const rows = [staleZeroExacto()];
+    expect(filtrarAtrasadas(rows, "2273.80")).toHaveLength(0);
+    expect(filtrarEnValidacion(rows, "2273.80")).toHaveLength(1);
+  });
+
+  it("el pago exacto stale-zero validated cubre firme", () => {
+    const rows = [staleZeroExacto({ validationStatus: "validated" })];
+    expect(filtrarAtrasadas(rows, "2273.80")).toHaveLength(0);
+    expect(filtrarEnValidacion(rows, "2273.80")).toHaveLength(0);
+  });
+
+  it("regresión: el legacy solo-mora (monto_aplicado = mora) sigue atrasado", () => {
+    const rows = [
+      staleZeroExacto({ monto_aplicado: "2420.41", pago_mora: "2420.41" }),
+    ];
+    expect(filtrarAtrasadas(rows, "2273.80")).toHaveLength(1);
+  });
+
+  it("regresión: mora+otros exactos tampoco saldan (plata de cuota = 0)", () => {
+    const rows = [
+      staleZeroExacto({
+        monto_aplicado: "500.00",
+        pago_mora: "300.00",
+        pago_otros: "200.00",
+      }),
+    ];
+    expect(filtrarAtrasadas(rows, "2273.80")).toHaveLength(1);
+  });
+});

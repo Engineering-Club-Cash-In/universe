@@ -104,6 +104,7 @@ import {
 	type Opportunity,
 	opportunitiesColumns,
 } from "@/lib/opportunities/columns";
+import { buildOpportunityRelationshipPatch } from "@/lib/opportunity-relationship-patch";
 import {
 	formatQuotationClientName,
 	formatVehicleWithClient,
@@ -1124,17 +1125,15 @@ function RouteComponent() {
 		},
 		onSubmit: async ({ value }) => {
 			if (selectedOpportunity) {
+				const { leadId, companyId, vehicleId, ...opportunityValues } = value;
 				updateOpportunityMutation.mutate({
 					id: selectedOpportunity.id,
-					...value,
+					...opportunityValues,
+					...buildOpportunityRelationshipPatch({
+						values: { leadId, companyId, vehicleId },
+						opportunity: selectedOpportunity,
+					}),
 					creditType: value.creditType,
-					leadId:
-						value.leadId && value.leadId !== "none" ? value.leadId : undefined,
-					companyId:
-						value.companyId && value.companyId !== "none"
-							? value.companyId
-							: undefined,
-					vehicleId: value.vehicleId || null,
 					value: value.value || undefined,
 					expectedCloseDate: value.expectedCloseDate || undefined,
 					notes: value.notes || undefined,
@@ -1209,8 +1208,8 @@ function RouteComponent() {
 		mutationFn: (input: {
 			id: string;
 			title?: string;
-			leadId?: string;
-			companyId?: string;
+			leadId?: string | null;
+			companyId?: string | null;
 			vehicleId?: string | null;
 			creditType?: "autocompra" | "sobre_vehiculo";
 			status?: "open" | "won" | "lost" | "on_hold";
@@ -2834,7 +2833,7 @@ function RouteComponent() {
 															<div className="flex items-center gap-4 text-muted-foreground text-xs">
 																<div className="flex items-center gap-1">
 																	<Clock className="h-3 w-3" />
-																	{new Date(change.changedAt).toLocaleString()}
+																	{formatGuatemalaDateTime(change.changedAt)}
 																</div>
 																<div className="flex items-center gap-1">
 																	<Users className="h-3 w-3" />
@@ -4204,9 +4203,7 @@ function DocumentsManager({
 											</p>
 											<p className="text-muted-foreground text-xs">
 												Subido el{" "}
-												{new Date(detalleDoc.uploadedAt).toLocaleString(
-													"es-GT",
-												)}{" "}
+												{formatGuatemalaDateTime(detalleDoc.uploadedAt)}{" "}
 												• {(detalleDoc.size / 1024 / 1024).toFixed(2)} MB
 											</p>
 										</div>
@@ -4486,7 +4483,7 @@ function DocumentsManager({
 													Subido por{" "}
 													{doc.uploadedBy?.name || "Usuario desconocido"}
 												</span>
-												<span>{new Date(doc.uploadedAt).toLocaleString()}</span>
+												<span>{formatGuatemalaDateTime(doc.uploadedAt)}</span>
 											</div>
 										</div>
 									</div>

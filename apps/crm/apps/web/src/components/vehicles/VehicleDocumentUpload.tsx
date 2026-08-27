@@ -20,6 +20,7 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { formatGuatemalaDate } from "@/lib/crm-formatters";
 import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
 import { client } from "@/utils/orpc";
 
@@ -251,8 +252,7 @@ export function VehicleDocumentUpload({
 										{documentTypeLabels[doc.documentType] || doc.documentType}
 									</p>
 									<p className="text-muted-foreground text-xs">
-										{doc.originalName} •{" "}
-										{new Date(doc.uploadedAt).toLocaleDateString()}
+										{doc.originalName} • {formatGuatemalaDate(doc.uploadedAt)}
 									</p>
 									{doc.description && (
 										<p className="text-muted-foreground text-xs">

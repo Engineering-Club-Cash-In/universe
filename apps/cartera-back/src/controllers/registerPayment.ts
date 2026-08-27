@@ -20,7 +20,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { desactivarMoraSiCreditoAlDia, updateMora } from "./latefee";
 import { insertPagosCreditoInversionistas, insertPagosCreditoInversionistasV2 } from "./payments";
 import { processAndReplaceCreditInvestors } from "./investor";
-import { processConvenioPayment } from "./paymentAgreement";
+import { prepararConvenioPayment } from "./paymentAgreement";
 import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
 import { recalcularPagosCredito } from "./updateCredit";
 import {
@@ -875,7 +875,7 @@ export const insertPayment = async ({ body, set }: any) => {
       };
     }
 
-    // 🔥 CONVENIO — se REGISTRA después de la mora (orden canónico otros →
+    // 🔥 CONVENIO — se CALCULA después de la mora (orden canónico otros →
     // mora → convenio), topado al menor entre la cuota mensual del convenio y
     // el pendiente real, pero NO se resta del disponible: acreditar
     // convenios_pago es el RASTRO de cuánto de esta boleta cuenta como
@@ -883,13 +883,22 @@ export const insertPayment = async ({ body, set }: any) => {
     // La boleta completa (tras otros/mora) sigue pagando cuotas corrientes —
     // regla de negocio del dueño del dominio (06-ago-2026), que revierte la
     // resta introducida en b6d79b8d.
+    //
+    // La escritura en BD (convenios_pago + convenio_cuotas) se DIFIERE a
+    // `commitConvenio`, que corre solo en los returns de éxito: cuando el
+    // convenio se acreditaba acá mismo, cualquier rechazo posterior (p. ej.
+    // el guard anti-sobreaplicación) dejaba el convenio cobrado sin fila en
+    // pagos_credito, y cada reintento sumaba una cuota fantasma (convenio 102
+    // / crédito 72, 26-ago-2026: 4 reintentos rechazados lo dejaron 5/6 con
+    // un solo pago real).
+    let commitConvenio: (() => Promise<void>) | null = null;
     if (
       debeProcesarConvenio({
         statusCredit: creditoInfo.credito.statusCredit,
         disponible: disponible_restante,
       })
     ) {
-      pagoConvenio = await processConvenioPayment({
+      const convenioPreparado = await prepararConvenioPayment({
         credito_id: credito_id,
         monto_pago: disponible_restante.toNumber(),
         creditoInfo: creditoInfo,
@@ -904,6 +913,8 @@ export const insertPayment = async ({ body, set }: any) => {
           urlCompletas: urlCompletas,
         },
       });
+      pagoConvenio = convenioPreparado.resultado;
+      commitConvenio = convenioPreparado.commit;
       montoConvenio = new Big(pagoConvenio.monto_aplicado);
 
     }
@@ -2039,6 +2050,14 @@ export const insertPayment = async ({ body, set }: any) => {
 
       }
 
+      // La boleta ya está persistida (fila de capital + boletas): recién acá
+      // se acredita el convenio. Si el commit falla, el 500 es honesto — el
+      // pago quedó escrito y la detección de boleta duplicada frena el
+      // reintento; el convenio se concilia aparte.
+      if (commitConvenio) {
+        await commitConvenio();
+      }
+
       // 4️⃣ Retornar resultado
       return {
         success: true,
@@ -2077,9 +2096,10 @@ export const insertPayment = async ({ body, set }: any) => {
         // pagoSoloOtros): esa rama inserta su fila aunque el request traiga
         // capital colado, y acá lo que importa es qué se escribió.
         otrosEspecialAplicado: montoBoleta.eq(otrosBig),
-        // Si el convenio ya se registró, `convenios_pago` YA está escrito
-        // (processConvenioPayment corre antes del loop): un 409 aquí invitaría
-        // a reintentar la boleta y acreditaría el convenio dos veces.
+        // Si hay convenio aplicado, el flujo debe seguir hasta el return de
+        // éxito para escribir la fila-rastro y ejecutar `commitConvenio` (la
+        // acreditación se difiere al éxito): un 409 acá dejaría la boleta del
+        // convenio sin registrar.
         convenioAplicado: montoConvenio,
       };
       if (debeRechazarAbonoCapitalNoAplicado(guardCapitalParams)) {
@@ -2129,13 +2149,14 @@ export const insertPayment = async ({ body, set }: any) => {
 
       }
 
-      // El convenio ya acreditó convenios_pago pero NINGUNA fila de esta
-      // boleta consumió el estampado: pasa cuando el crédito EN_CONVENIO no
-      // tiene cuotas abiertas (el guard de integridad pide cuotasPendientes
-      // > 0, así que no lo intercepta). Sin esta fila la boleta no existe en
-      // pagos_credito — invisible para la detección de duplicados y sin
-      // reversa posible del convenio. El disponible sigue yendo a saldo a
-      // favor: el registro del convenio no consume la boleta.
+      // El convenio va a acreditarse (commitConvenio corre unas líneas más
+      // abajo) pero NINGUNA fila de esta boleta consumió el estampado: pasa
+      // cuando el crédito EN_CONVENIO no tiene cuotas abiertas (el guard de
+      // integridad pide cuotasPendientes > 0, así que no lo intercepta). Sin
+      // esta fila la boleta no existe en pagos_credito — invisible para la
+      // detección de duplicados y sin reversa posible del convenio. El
+      // disponible sigue yendo a saldo a favor: el registro del convenio no
+      // consume la boleta.
       if (new Big(estamparPagoConvenio.pendiente()).gt(0)) {
         await insertarPago({
           numero_credito_sifco: credito.numero_credito_sifco,
@@ -2164,8 +2185,13 @@ export const insertPayment = async ({ body, set }: any) => {
         .set({ saldo_a_favor: newSaldoAFavor.toString() })
         .where(eq(usuarios.usuario_id, credito.usuario_id));
 
-
-
+      // Éxito: las filas de la boleta (loop de cuotas y/o la fila-rastro de
+      // arriba) ya están escritas — recién acá se acredita el convenio. Los
+      // 409 de este else salen ANTES de este punto, así que un rechazo ya no
+      // deja el convenio cobrado sin boleta.
+      if (commitConvenio) {
+        await commitConvenio();
+      }
 
       const montoTotal = montoBoleta.toString();
 

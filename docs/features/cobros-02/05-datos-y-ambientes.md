@@ -92,6 +92,11 @@ El bloque de COBROS-02 hoy:
 | `0005_asesor_bucket_margen_alerta.sql` | Margen de alerta de ocupación |
 | `0006_buckets_dias_sla.sql` | `buckets.dias_sla` (CB-020) |
 | `0007_promesas_pago_espejo.sql` | Copia local de promesas para el motor (CB-030) |
+| `0008_pagalo_payment_imports.sql` | Ledger idempotente de los pagos con link de Págalo (CB-028) |
+| `0009`–`0011` (Págalo) | Grupos de un solo link, solo capital y auditoría sin crédito vivo |
+| `0012_pagalo_validado_cuenta_factura.sql` | Cuenta de empresa **PAGALO** + estado de la factura del import (el pago con link nace validado) |
+| `0013_pagalo_recibo_status.sql` | Outbox del recibo por WhatsApp del import Págalo |
+| `0014_estado_facturacion_pago.sql` | **`pagos_credito.factura_status`** + `facturas_electronicas.rubro/inversionista_id` — ver [Facturación](./04-operacion-diaria.md#facturación-qué-quedó-sin-factura) |
 
 Y en el CRM: `0025` premora · `0027` alertas de cobros · `0030` reducción CB-010 ·
 `0031` recordatorios de convenio · `0032` alerta de promesa · `0033`-`0035` bot de cobros.

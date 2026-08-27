@@ -131,6 +131,48 @@ Pantalla: `/cobros/promesas`.
 
 ---
 
+## Facturación: qué quedó sin factura
+
+Un pago puede quedar **validado pero sin factura** (SAT caído, cliente sin NIT,
+porcentajes de inversionistas mal configurados) o **facturado a medias** —
+un pago emite varios DTE: mora, otros servicios, otros, e intereses uno por
+inversionista. Antes eso no dejaba rastro: había que abrir el modal y adivinar.
+
+**Qué se ve ahora** (migración `0014`, 2026-08-27):
+
+| Dónde | Qué muestra |
+| --- | --- |
+| Tabla de pagos | Badge **"Falta factura" / "Facturado a medias" / "Sin facturar"** junto al estado. Solo aparece cuando falta algo |
+| Filtro **Facturación** | La bandeja de conta: `Falta factura (todos)`, `Sin facturar`, `Facturado a medias`, `Falló la factura`, `Facturado`, `Sin DTE que emitir` |
+| Modal *Ver Facturas* | El **rubro** de cada factura emitida (y de qué inversionista), y un bloque **"Falta emitir N facturas"** con el motivo de cada una |
+
+**De dónde sale.** `pagos_credito.factura_status`
+(`NO_APLICA | PENDIENTE | OK | PARCIAL | FALLIDA`) + `factura_error` (JSON con
+rubro, inversionista y motivo). Lo escriben los tres momentos que ya existen:
+al **validar** (queda `PENDIENTE`, o `NO_APLICA` si el pago es solo capital —
+el capital no se factura), al **facturar** (el resultado real) y al **reversar**
+(`NO_APLICA`, sus facturas ya se anulan). Un `factura_status` en `NULL` es un
+pago anterior a la feature: no se interpreta.
+
+Está **separado a propósito de `validation_status`**: un pago validado sin
+factura sigue siendo un pago aplicado. Meterlo en el mismo campo haría que el
+cron de moras y los buckets dejaran de contar esa cuota como cubierta.
+
+> **No se refactura solo.** No hay job ni endpoint que reintente
+> (decisión de Daniel, 2026-08-27): que una factura no esté en nuestra base
+> **no prueba** que no esté en SAT — el proceso pudo morir entre certificar y
+> guardar. Reintentar a ciegas emite un DTE duplicado, que solo se arregla
+> anulando en SAT dentro de los 5 días de gracia. Por eso la información se
+> muestra y **la decisión es de conta**: verificar en SAT/COFIDI y facturar a
+> mano lo que falte.
+>
+> Trampa conocida: "Generar Factura" hoy se bloquea si el pago ya tiene
+> **alguna** factura ACTIVA, así que un pago a medias no se puede completar
+> desde la UI. Con el `rubro` ya guardado, el paso natural es que ese botón
+> salte los rubros ya emitidos; no está hecho.
+
+---
+
 ## Historial y auditoría
 
 | Pantalla | Qué muestra |

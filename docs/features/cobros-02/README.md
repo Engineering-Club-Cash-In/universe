@@ -43,6 +43,11 @@ Y aparte, con documentación propia:
   cliente. Es parte de COBROS-02: el cliente resuelve por WhatsApp lo que hoy ocupa
   llamadas del asesor, y libera al asesor para los buckets donde su tiempo rinde.
 
+- [**Págalo · pagos con link**](../pagalo/README.md) — cobrar por link (desde la Ficha 360
+  y desde el bot). El pago entra a cartera **validado en una sola transacción**, y la
+  factura y el recibo salen después del commit
+  ([D-10](../pagalo/DECISIONES.md#d-10--importación-págalo-registra-y-valida-en-una-transacción-factura-y-recibo-post-commit)).
+
 ---
 
 ## El mapa: qué vive dónde
@@ -115,6 +120,8 @@ le habla, cuándo y por dónde → CRM. El bot solo habla con el CRM
 | Alertas de cobros con propósito | ✅ Implementado |
 | Apertura / Cola del día / SLA / Agenda | ✅ Implementado |
 | Bot de WhatsApp | 🔵 Paso 1 (identificación) desplegado en dev; pasos 2-4 pendientes |
+| Pagos con link de Págalo | 🔵 Ficha 360 y bot generan links; el pago entra validado a cartera. Facturación automática **apagada** hasta poner `PAGALO_FACTURACION_ACTIVA=true` |
+| Visibilidad de la facturación | ✅ Estado por pago y rubro por factura — ver [Operación diaria](./04-operacion-diaria.md#facturación-qué-quedó-sin-factura). **No refactura solo**, por diseño |
 | Convenio y promesa **por el bot** | 🔴 Bloqueado — falta aprobación de gerencia |
 | Sandbox al día con producción | ✅ Refrescado el 2026-08-17 — ver el [runbook](./RUNBOOK-refrescar-sandbox.md) |
 | Carga inicial en producción | ⚪ Pendiente — mismo runbook, pero **sin replay**: línea base limpia |

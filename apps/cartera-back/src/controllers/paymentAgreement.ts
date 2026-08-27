@@ -702,11 +702,35 @@ interface ProcessConvenioPaymentResult {
   monto_restante: string; 
 }
 
-export async function processConvenioPayment(
+interface ConvenioPaymentPreparado {
+  /**
+   * Preview del resultado con los montos ya topados: refleja el estado en que
+   * quedará el convenio DESPUÉS de ejecutar `commit`. Nada está persistido
+   * todavía.
+   */
+  resultado: ProcessConvenioPaymentResult;
+  /**
+   * Persiste la acreditación (update de `convenios_pago` + marcado de
+   * `convenio_cuotas`). `null` cuando no hay convenio activo que acreditar.
+   * El caller decide CUÁNDO: debe llamarse solo cuando la boleta ya quedó
+   * escrita en `pagos_credito` — acreditar antes deja el convenio inflado si
+   * una validación posterior rechaza el pago (caso convenio 102 / crédito 72,
+   * 26-ago-2026: cada reintento rechazado por el guard anti-sobreaplicación
+   * sumaba una cuota fantasma).
+   */
+  commit: (() => Promise<void>) | null;
+}
+
+/**
+ * Calcula la aplicación de una boleta al convenio activo SIN escribir nada.
+ * `processConvenioPayment` es el wrapper calcular+commitear inmediato; el flujo
+ * de `insertPayment` usa esta versión para diferir el commit al éxito.
+ */
+export async function prepararConvenioPayment(
   params: ProcessConvenioPaymentParams
-): Promise<ProcessConvenioPaymentResult> {
+): Promise<ConvenioPaymentPreparado> {
   try {
-    const { credito_id, numero_credito_sifco, monto_pago, creditoInfo, pagoMetadata } = params;
+    const { credito_id, numero_credito_sifco, monto_pago } = params;
 
     // 1. Validar que se haya proporcionado credito_id o numero_credito_sifco
     if (!credito_id && !numero_credito_sifco) {
@@ -728,12 +752,15 @@ export async function processConvenioPayment(
 
     if (!convenio) {
       return {
-        success: false,
-        message: "No active payment agreement found for this credit",
-        convenio: null,
-        pago_completo: false,
-        monto_aplicado: "0",
-        monto_restante: "0",  
+        resultado: {
+          success: false,
+          message: "No active payment agreement found for this credit",
+          convenio: null,
+          pago_completo: false,
+          monto_aplicado: "0",
+          monto_restante: "0",
+        },
+        commit: null,
       };
     }
 
@@ -783,112 +810,157 @@ export async function processConvenioPayment(
     // 8. Verificar si se completó el convenio
     const convenioCompletado = nuevoMontoPendienteBig.lte(0) || nuevosPagosPendientes <= 0;
 
-    // 9. Actualizar el convenio
-    const [convenioActualizado] = await db
-      .update(convenios_pago)
-      .set({
-        monto_pagado: nuevoMontoPagadoBig.toFixed(2),
-        monto_pendiente: nuevoMontoPendienteBig.toFixed(2),
-        pagos_realizados: nuevosPagosRealizados,
-        pagos_pendientes: nuevosPagosPendientes,
-        completado: convenioCompletado,
-        activo: !convenioCompletado, // Si se completó, ya no está activo
-        updated_at: new Date(),
-      })
-      .where(eq(convenios_pago.convenio_id, convenio.convenio_id))
-      .returning();
-
-    // 10. 🔥 MARCAR LAS CUOTAS DEL CONVENIO COMPLETADAS POR ACUMULADO
-    if (nuevasCuotasCompletadas > 0) {
-      console.log(
-        `✅ Marcando ${nuevasCuotasCompletadas} cuota(s) del convenio como pagada(s) (acumulado)`
-      );
-
-      // Las N cuotas pendientes más viejas del convenio (fecha_pago = NULL)
-      const cuotasPendientesConvenio = await db
-        .select()
-        .from(convenio_cuotas)
-        .where(
-          and(
-            eq(convenio_cuotas.convenio_id, convenio.convenio_id),
-            isNull(convenio_cuotas.fecha_pago)
-          )
-        )
-        .orderBy(convenio_cuotas.numero_cuota)
-        .limit(nuevasCuotasCompletadas);
-
-      if (cuotasPendientesConvenio.length > 0) {
-        // 🔥 Obtener fecha y hora de Guatemala
-        const guatemalaTimeString = new Date().toLocaleString("en-US", {
-          timeZone: "America/Guatemala",
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-          hour12: false,
-        });
-
-        const [datePart, timePart] = guatemalaTimeString.split(", ");
-        const [month, day, year] = datePart.split("/");
-        const fechaGuatemala = new Date(`${year}-${month}-${day}T${timePart}`);
-
+    // 9-10. El commit persiste todo lo calculado arriba: update de
+    // convenios_pago + marcado de convenio_cuotas. Se entrega como closure
+    // para que el caller lo ejecute solo cuando la boleta ya quedó escrita.
+    const commit = async () => {
+      try {
         await db
-          .update(convenio_cuotas)
+          .update(convenios_pago)
           .set({
-            fecha_pago: fechaGuatemala, // 👈 Fecha y hora de Guatemala
+            monto_pagado: nuevoMontoPagadoBig.toFixed(2),
+            monto_pendiente: nuevoMontoPendienteBig.toFixed(2),
+            pagos_realizados: nuevosPagosRealizados,
+            pagos_pendientes: nuevosPagosPendientes,
+            completado: convenioCompletado,
+            activo: !convenioCompletado, // Si se completó, ya no está activo
+            updated_at: new Date(),
           })
-          .where(
-            inArray(
-              convenio_cuotas.cuota_convenio_id,
-              cuotasPendientesConvenio.map((c) => c.cuota_convenio_id)
-            )
-          );
+          .where(eq(convenios_pago.convenio_id, convenio.convenio_id));
 
-        console.log(
-          `✅ Cuotas marcadas: ${cuotasPendientesConvenio
-            .map((c) => `#${c.numero_cuota}`)
-            .join(", ")}`
+        await marcarCuotasConvenioCompletadas({
+          convenio_id: convenio.convenio_id,
+          nuevasCuotasCompletadas,
+        });
+      } catch (error) {
+        console.error("Error procesando pago de convenio:", error);
+        throw new Error(
+          `Error al procesar pago de convenio: ${error instanceof Error ? error.message : "Error desconocido"}`
         );
-      } else {
-        console.log("⚠️ No se encontraron cuotas pendientes para marcar");
       }
-    } else {
-      console.log(
-        "⚠️ Pago parcial - el acumulado aún no completa una cuota del convenio"
-      );
-    }
+    };
 
-   
-
-    // 12. Retornar resultado
+    // Preview del resultado: los mismos valores que quedarán persistidos al
+    // ejecutar `commit`.
     return {
-      success: true,
-      message: convenioCompletado
-        ? "¡Convenio completado exitosamente!"
-        : pagoCompleto
-          ? "Pago de cuota completa registrado exitosamente"
-          : "Pago parcial registrado exitosamente",
-      convenio: {
-        convenio_id: convenioActualizado.convenio_id,
-        monto_total_convenio: convenioActualizado.monto_total_convenio,
-        monto_pagado: convenioActualizado.monto_pagado,
-        monto_pendiente: convenioActualizado.monto_pendiente,
-        cuota_mensual: convenioActualizado.cuota_mensual,
-        pagos_realizados: convenioActualizado.pagos_realizados,
-        pagos_pendientes: convenioActualizado.pagos_pendientes,
-        completado: convenioActualizado.completado,
-        activo: convenioActualizado.activo,
+      resultado: {
+        success: true,
+        message: convenioCompletado
+          ? "¡Convenio completado exitosamente!"
+          : pagoCompleto
+            ? "Pago de cuota completa registrado exitosamente"
+            : "Pago parcial registrado exitosamente",
+        convenio: {
+          convenio_id: convenio.convenio_id,
+          monto_total_convenio: convenio.monto_total_convenio,
+          monto_pagado: nuevoMontoPagadoBig.toFixed(2),
+          monto_pendiente: nuevoMontoPendienteBig.toFixed(2),
+          cuota_mensual: convenio.cuota_mensual,
+          pagos_realizados: nuevosPagosRealizados,
+          pagos_pendientes: nuevosPagosPendientes,
+          completado: convenioCompletado,
+          activo: !convenioCompletado,
+        },
+        pago_completo: pagoCompleto,
+        monto_aplicado: montoAplicarBig.toFixed(2),
+        monto_restante: nuevoMontoPendienteBig.toFixed(2),
       },
-      pago_completo: pagoCompleto,
-      monto_aplicado: montoAplicarBig.toFixed(2),
-      monto_restante: nuevoMontoPendienteBig.toFixed(2),
+      commit,
     };
   } catch (error) {
-    console.error("Error procesando pago de convenio:", error);
+    console.error("Error preparando pago de convenio:", error);
     throw new Error(
       `Error al procesar pago de convenio: ${error instanceof Error ? error.message : "Error desconocido"}`
+    );
+  }
+}
+
+/**
+ * Calcular + commitear en un solo paso (comportamiento histórico). Los flujos
+ * que necesitan validar la boleta ANTES de acreditar el convenio deben usar
+ * `prepararConvenioPayment` y llamar su `commit` solo tras persistir el pago.
+ */
+export async function processConvenioPayment(
+  params: ProcessConvenioPaymentParams
+): Promise<ProcessConvenioPaymentResult> {
+  const preparado = await prepararConvenioPayment(params);
+  if (preparado.commit) {
+    await preparado.commit();
+  }
+  return preparado.resultado;
+}
+
+/**
+ * Marca como pagadas las N cuotas pendientes más viejas del convenio
+ * (fecha_pago = NULL). Extraído del cuerpo de processConvenioPayment para que
+ * el commit diferido lo reutilice sin duplicar lógica.
+ */
+async function marcarCuotasConvenioCompletadas({
+  convenio_id,
+  nuevasCuotasCompletadas,
+}: {
+  convenio_id: number;
+  nuevasCuotasCompletadas: number;
+}): Promise<void> {
+  // 🔥 MARCAR LAS CUOTAS DEL CONVENIO COMPLETADAS POR ACUMULADO
+  if (nuevasCuotasCompletadas > 0) {
+    console.log(
+      `✅ Marcando ${nuevasCuotasCompletadas} cuota(s) del convenio como pagada(s) (acumulado)`
+    );
+
+    // Las N cuotas pendientes más viejas del convenio (fecha_pago = NULL)
+    const cuotasPendientesConvenio = await db
+      .select()
+      .from(convenio_cuotas)
+      .where(
+        and(
+          eq(convenio_cuotas.convenio_id, convenio_id),
+          isNull(convenio_cuotas.fecha_pago)
+        )
+      )
+      .orderBy(convenio_cuotas.numero_cuota)
+      .limit(nuevasCuotasCompletadas);
+
+    if (cuotasPendientesConvenio.length > 0) {
+      // 🔥 Obtener fecha y hora de Guatemala
+      const guatemalaTimeString = new Date().toLocaleString("en-US", {
+        timeZone: "America/Guatemala",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      });
+
+      const [datePart, timePart] = guatemalaTimeString.split(", ");
+      const [month, day, year] = datePart.split("/");
+      const fechaGuatemala = new Date(`${year}-${month}-${day}T${timePart}`);
+
+      await db
+        .update(convenio_cuotas)
+        .set({
+          fecha_pago: fechaGuatemala, // 👈 Fecha y hora de Guatemala
+        })
+        .where(
+          inArray(
+            convenio_cuotas.cuota_convenio_id,
+            cuotasPendientesConvenio.map((c) => c.cuota_convenio_id)
+          )
+        );
+
+      console.log(
+        `✅ Cuotas marcadas: ${cuotasPendientesConvenio
+          .map((c) => `#${c.numero_cuota}`)
+          .join(", ")}`
+      );
+    } else {
+      console.log("⚠️ No se encontraron cuotas pendientes para marcar");
+    }
+  } else {
+    console.log(
+      "⚠️ Pago parcial - el acumulado aún no completa una cuota del convenio"
     );
   }
 }

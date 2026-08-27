@@ -21,6 +21,9 @@ export const PAGALO_IMPORT_ERROR_CODES = {
     "PAGALO_FACTURABLE_ALLOCATIONS_MISMATCH",
   PAGALO_FACTURABLE_ALLOCATION_NOT_FACTURABLE:
     "PAGALO_FACTURABLE_ALLOCATION_NOT_FACTURABLE",
+  PAGALO_OTROS_ALLOCATION_MISMATCH: "PAGALO_OTROS_ALLOCATION_MISMATCH",
+  PAGALO_OTROS_ALLOCATION_INVALID: "PAGALO_OTROS_ALLOCATION_INVALID",
+  PAGALO_OTROS_REQUIRES_INSTALLMENT: "PAGALO_OTROS_REQUIRES_INSTALLMENT",
   PAGALO_DUPLICATE_ALLOCATION: "PAGALO_DUPLICATE_ALLOCATION",
   PAGALO_ALLOCATION_CUOTA_CONFLICT: "PAGALO_ALLOCATION_CUOTA_CONFLICT",
   PAGALO_CUOTA_INICIAL_MISMATCH: "PAGALO_CUOTA_INICIAL_MISMATCH",
@@ -62,6 +65,12 @@ export const PAGALO_IMPORT_ERROR_MESSAGES: Record<
     "Las asignaciones MORA_INTERES no coinciden con el total facturable.",
   PAGALO_FACTURABLE_ALLOCATION_NOT_FACTURABLE:
     "Las asignaciones MORA_INTERES deben ser facturables.",
+  PAGALO_OTROS_ALLOCATION_MISMATCH:
+    "Las asignaciones OTROS no coinciden con el total de Otros.",
+  PAGALO_OTROS_ALLOCATION_INVALID:
+    "Otros debe ser facturable y pertenecer a MORA_INTERES.",
+  PAGALO_OTROS_REQUIRES_INSTALLMENT:
+    "Otros requiere evidencia de una cuota seleccionada.",
   PAGALO_DUPLICATE_ALLOCATION:
     "No se permiten asignaciones repetidas para la misma cuota, rubro y tipo.",
   PAGALO_ALLOCATION_CUOTA_CONFLICT:
@@ -83,6 +92,16 @@ export const PAGALO_IMPORT_ERROR_MESSAGES: Record<
 };
 
 const moneyText = /^\d+(?:\.\d{1,2})?$/;
+const RUBROS_DERIVADOS_DE_CUOTA = new Set([
+  "CAPITAL",
+  "INTERES",
+  "IVA",
+  "INTERES_CI",
+  "IVA_CI",
+  "SEGURO",
+  "GPS",
+  "MEMBRESIAS",
+]);
 
 // FASE 2 — Tipos de entrada estrictos. Antes de crear Big.js se descartan
 // exponentes, Infinity, montos negativos/imprecisos y valores fuera de
@@ -164,6 +183,7 @@ const allocationSchema = z
       "GPS",
       "MEMBRESIAS",
       "MORA",
+      "OTROS",
     ]),
     amount: money("positive"),
     facturable: z.boolean(),
@@ -183,6 +203,7 @@ export const pagaloImportCommandSchema = z
     currency: z.literal("GTQ"),
     capital_total: money("zero"),
     facturable_total: money("zero"),
+    otros_total: money("zero").default("0.00"),
     total_amount: money("positive"),
     cuota_inicial: z.number().int().positive().max(2147483647),
     allocations: z.array(allocationSchema).min(1),
@@ -234,6 +255,7 @@ export function canonicalizarPagaloPayload(
         }
       : null;
 
+  const incluirOtrosEnHash = !/^0(?:\.0{1,2})?$/.test(command.otros_total);
   return JSON.stringify({
     crm_group_id: command.crm_group_id,
     credito_id: command.credito_id,
@@ -241,6 +263,7 @@ export function canonicalizarPagaloPayload(
     currency: command.currency,
     capital_total: command.capital_total,
     facturable_total: command.facturable_total,
+    ...(incluirOtrosEnHash ? { otros_total: command.otros_total } : {}),
     total_amount: command.total_amount,
     cuota_inicial: command.cuota_inicial,
     allocations,
@@ -340,6 +363,15 @@ export function validatePagaloImportCommand(
     total = new Big(c.total_amount);
   const capitals = c.allocations.filter((a) => a.link_type === "CAPITAL"),
     facts = c.allocations.filter((a) => a.link_type === "MORA_INTERES");
+  const otros = facts.filter((a) => a.rubro === "OTROS");
+  const allocationCuotaInicial = c.allocations.find(
+    (a) => a.numero_cuota === c.cuota_inicial,
+  );
+  const otrosTieneCuotaSeleccionada = c.allocations.some(
+    (a) =>
+      a.numero_cuota === c.cuota_inicial &&
+      RUBROS_DERIVADOS_DE_CUOTA.has(a.rubro),
+  );
   const sum = (items: typeof c.allocations) =>
     items.reduce((n, a) => n.plus(a.amount), new Big(0));
 
@@ -374,6 +406,20 @@ export function validatePagaloImportCommand(
     errors.push(err(PAGALO_IMPORT_ERROR_CODES.PAGALO_INVALID_CAPITAL_RUBRO));
   if (facts.some((a) => a.rubro === "CAPITAL"))
     errors.push(err(PAGALO_IMPORT_ERROR_CODES.PAGALO_INVALID_FACTURABLE_RUBRO));
+  if (
+    otros.some((a) => a.link_type !== "MORA_INTERES" || !a.facturable) ||
+    otros.some(
+      (a) =>
+        a.numero_cuota !== c.cuota_inicial ||
+        a.cartera_cuota_id !== allocationCuotaInicial?.cartera_cuota_id,
+    ) ||
+    !sum(otros).eq(new Big(c.otros_total))
+  )
+    errors.push(err(PAGALO_IMPORT_ERROR_CODES.PAGALO_OTROS_ALLOCATION_MISMATCH));
+  if (new Big(c.otros_total).gt(0) && !otrosTieneCuotaSeleccionada)
+    errors.push(
+      err(PAGALO_IMPORT_ERROR_CODES.PAGALO_OTROS_REQUIRES_INSTALLMENT),
+    );
 
   // FASE 10 — Presencia y suma exacta de cada lado. Un total Q0 significa que
   // no existe fuente ni allocation de ese tipo: no se crean links ficticios.

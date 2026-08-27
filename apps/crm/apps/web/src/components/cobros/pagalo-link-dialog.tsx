@@ -20,6 +20,7 @@ import {
 	DialogTitle,
 	DialogTrigger,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
 	copyPagaloLink,
@@ -27,7 +28,9 @@ import {
 	getPagaloLinkStatusInfo,
 	previewMensajePagaloLinks,
 } from "@/lib/cobros/pagalo-link-display";
+import { parseOtrosGTQ } from "@/lib/cobros/pagalo-otros";
 import { client, orpc } from "@/utils/orpc";
+import { deduplicarCuotasPagalo } from "server/src/lib/pagalo-installments";
 
 const q = (value: unknown) =>
 	new Intl.NumberFormat("es-GT", { style: "currency", currency: "GTQ" }).format(
@@ -45,6 +48,8 @@ export function PagaloLinkDialog({
 }) {
 	const [open, setOpen] = useState(false);
 	const [selected, setSelected] = useState<number[]>([]);
+	const [otrosActivo, setOtrosActivo] = useState(false);
+	const [otrosMonto, setOtrosMonto] = useState("");
 	const grupoActivo = useQuery({
 		...orpc.getPagaloGrupoActivo.queryOptions({
 			input: { casoCobroId, creditoId },
@@ -66,33 +71,25 @@ export function PagaloLinkDialog({
 	});
 	const data = credit.data as any;
 	const cuotas = useMemo(() => {
-		const sinDuplicados = (items: any[]) => {
-			const porNumero = new Map<number, any>();
-			for (const cuota of items) {
-				const actual = porNumero.get(cuota.numero_cuota);
-				if (!actual || Number(cuota.pago_id ?? 0) > Number(actual.pago_id ?? 0))
-					porNumero.set(cuota.numero_cuota, cuota);
-			}
-			return [...porNumero.values()];
-		};
-		const vencidas = sinDuplicados(data?.cuotasAtrasadas ?? [])
+		const vencidas = deduplicarCuotasPagalo(data?.cuotasAtrasadas ?? [])
 			.filter((cuota: any) => cuota.numero_cuota > 0)
 			.sort((a: any, b: any) => a.numero_cuota - b.numero_cuota);
 		// cuotasPendientes es "todas las no pagadas" (sin filtro de fecha), no
 		// "solo próximas" — ya incluye las vencidas. Sin excluirlas acá, [0]
 		// cae siempre en la misma cuota que ya está en `vencidas` y la cuota
 		// vigente real nunca se ofrece.
-		const proxima = sinDuplicados(data?.cuotasPendientes ?? [])
+		const proxima = deduplicarCuotasPagalo(data?.cuotasPendientes ?? [])
 			.filter(
 				(cuota: any) =>
 					cuota.numero_cuota > 0 &&
 					!vencidas.some((v: any) => v.numero_cuota === cuota.numero_cuota),
 			)
 			.sort((a: any, b: any) => a.numero_cuota - b.numero_cuota)[0];
-		return sinDuplicados(proxima ? [...vencidas, proxima] : vencidas).map(
+		return deduplicarCuotasPagalo(proxima ? [...vencidas, proxima] : vencidas).map(
 			(cuota: any) => ({
 				...cuota,
 				esActual: proxima?.cuota_id === cuota.cuota_id,
+				esProxima: vencidas.length === 0 && proxima?.cuota_id === cuota.cuota_id,
 			}),
 		);
 	}, [data]);
@@ -108,6 +105,10 @@ export function PagaloLinkDialog({
 		vehiculo?.vehiculoMarca && vehiculo?.vehiculoPlaca
 			? `vehículo ${[vehiculo.vehiculoMarca, vehiculo.vehiculoModelo, vehiculo.vehiculoYear].filter(Boolean).join(" ")} · ${vehiculo.vehiculoPlaca}`
 			: `crédito ${numeroSifco}`;
+	const otrosParseado = useMemo(
+		() => (otrosActivo ? parseOtrosGTQ(otrosMonto) : null),
+		[otrosActivo, otrosMonto],
+	);
 	const preview = useMemo(() => {
 		const seleccionadas = cuotas.filter((cuota: any) =>
 			selected.includes(cuota.cuota_id),
@@ -127,9 +128,10 @@ export function PagaloLinkDialog({
 			0,
 		);
 		const mora = tieneMora ? Number(data?.moraActual ?? 0) : 0;
-		const facturable = facturableCuotas + mora;
-		return { capital, facturable, total: capital + facturable };
-	}, [cuotas, selected, tieneMora, data]);
+		const otros = otrosParseado?.valid ? Number(otrosParseado.value) : 0;
+		const facturable = facturableCuotas + mora + otros;
+		return { capital, facturable, otros, total: capital + facturable };
+	}, [cuotas, selected, tieneMora, data, otrosParseado]);
 	const queryClient = useQueryClient();
 	const mutation = useMutation({
 		mutationFn: (input: {
@@ -137,6 +139,7 @@ export function PagaloLinkDialog({
 			numeroSifco: string;
 			creditoId: number;
 			cuotaIds: number[];
+			otros?: string;
 		}) => (client as any).crearLinksPagalo(input),
 		onSuccess: (result: any) => {
 			queryClient.invalidateQueries(
@@ -232,6 +235,8 @@ export function PagaloLinkDialog({
 				setOpen(next);
 				if (!next) {
 					setSelected([]);
+					setOtrosActivo(false);
+					setOtrosMonto("");
 					mutation.reset();
 				}
 			}}
@@ -429,6 +434,40 @@ export function PagaloLinkDialog({
 									<span className="text-sm">{q(data.moraActual)}</span>
 								</div>
 							)}
+							<div className="space-y-2 rounded-md border p-3">
+								<Label className="flex cursor-pointer items-center justify-between">
+									<span className="flex items-center gap-3">
+										<Checkbox
+											checked={otrosActivo}
+											onCheckedChange={(checked) => {
+												setOtrosActivo(checked === true);
+												if (checked !== true) setOtrosMonto("");
+											}}
+										/>
+										Otros
+									</span>
+									<span className="text-muted-foreground text-xs">
+										Cargo manual
+									</span>
+								</Label>
+								{otrosActivo && (
+									<div className="space-y-1">
+										<Label htmlFor="pagalo-otros">Monto Otros (GTQ)</Label>
+										<Input
+											id="pagalo-otros"
+											inputMode="decimal"
+											placeholder="0.00"
+											value={otrosMonto}
+											onChange={(event) => setOtrosMonto(event.target.value)}
+										/>
+										{!otrosParseado?.valid && (
+											<p className="text-destructive text-xs">
+												Ingresá monto mayor que Q0.00, con máximo dos decimales.
+											</p>
+										)}
+									</div>
+								)}
+							</div>
 							{cuotas.length === 0 ? (
 								<p className="text-muted-foreground text-sm">
 									No hay cuotas vencidas disponibles.
@@ -463,7 +502,11 @@ export function PagaloLinkDialog({
 														onCheckedChange={() => toggle(cuota.cuota_id)}
 													/>
 													Cuota {cuota.numero_cuota}
-													{cuota.esActual ? (
+									{cuota.esProxima ? (
+										<Badge className="bg-blue-50 text-blue-700">
+											Próxima cuota
+										</Badge>
+									) : cuota.esActual ? (
 														<Badge className="bg-blue-50 text-blue-700">
 															Cuota actual
 														</Badge>
@@ -490,7 +533,7 @@ export function PagaloLinkDialog({
 									})}
 								</div>
 							)}
-							{(selected.length > 0 || tieneMora) && (
+							{(selected.length > 0 || tieneMora || otrosActivo) && (
 								<div className="space-y-1 rounded-md border bg-muted/40 p-3 text-sm">
 									<p className="font-medium">Links que se van a crear</p>
 									{preview.capital > 0 && (
@@ -503,6 +546,12 @@ export function PagaloLinkDialog({
 										<div className="flex items-center justify-between">
 											<span>Link Mora e intereses</span>
 											<span>{q(preview.facturable)}</span>
+										</div>
+									)}
+									{preview.otros > 0 && (
+										<div className="flex items-center justify-between text-muted-foreground">
+											<span>Incluye Otros</span>
+											<span>{q(preview.otros)}</span>
 										</div>
 									)}
 									<div className="flex items-center justify-between border-t pt-1 font-medium">
@@ -555,6 +604,8 @@ export function PagaloLinkDialog({
 						<Button
 							disabled={
 								(!tieneMora && selected.length === 0) ||
+								(otrosActivo && selected.length === 0) ||
+								(otrosActivo && !otrosParseado?.valid) ||
 								mutation.isPending ||
 								!vehiculoCaso.isSuccess
 							}
@@ -564,6 +615,9 @@ export function PagaloLinkDialog({
 									numeroSifco,
 									creditoId,
 									cuotaIds: selected,
+									...(otrosParseado?.valid
+										? { otros: otrosParseado.value }
+										: {}),
 								})
 							}
 						>

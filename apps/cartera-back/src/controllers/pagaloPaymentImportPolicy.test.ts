@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import type { z } from "zod";
 import {
   PAGALO_IMPORT_ERROR_CODES,
+	canonicalizarPagaloPayload,
   calcularPagaloPayloadHash,
   pagaloImportCommandSchema,
   validatePagaloImportCommand,
@@ -48,7 +49,8 @@ type MutableAllocation = {
     | "SEGURO"
     | "GPS"
     | "MEMBRESIAS"
-    | "MORA";
+    | "MORA"
+    | "OTROS";
   amount: string | number;
   facturable: boolean;
 };
@@ -101,7 +103,13 @@ const expectInvalid = (input: unknown, code: PagaloImportErrorCode) => {
 };
 
 describe("validatePagaloImportCommand", () => {
-  it("accepts the two-source command and normalizes valid money to cents", () => {
+	it("Otros Q0 conserva formato canónico histórico", () => {
+    const parsed = pagaloImportCommandSchema.parse(command());
+    const { payload_hash: _payloadHash, ...content } = parsed;
+    expect(canonicalizarPagaloPayload(content)).not.toContain('"otros_total"');
+  });
+
+	it("accepts the two-source command and normalizes valid money to cents", () => {
     const result = validatePagaloImportCommand(command());
 
     expect(result.success).toBeTrue();
@@ -109,7 +117,92 @@ describe("validatePagaloImportCommand", () => {
       expect(result.data.capital_total).toBe("100.00");
       expect(result.data.facturable_total).toBe("25.00");
     }
-  });
+	});
+
+	it("acepta Otros facturable cuando coincide con su allocation", () => {
+		const input = command();
+		input.facturable_total = "37.34";
+		input.total_amount = "137.34";
+		(input as TestCommand & { otros_total: string }).otros_total = "12.34";
+		input.allocations.push({
+			link_type: "MORA_INTERES",
+			cartera_cuota_id: 20,
+			numero_cuota: 2,
+			rubro: "OTROS",
+			amount: "12.34",
+			facturable: true,
+		});
+
+		const result = validatePagaloImportCommand(input);
+		expect(result.success).toBeTrue();
+		if (result.success) expect(result.data.otros_total).toBe("12.34");
+	});
+
+	it("rechaza Otros asociado a una cuota posterior", () => {
+		const input = command();
+		input.facturable_total = "37.34";
+		input.total_amount = "137.34";
+		(input as TestCommand & { otros_total: string }).otros_total = "12.34";
+		input.allocations.push({
+			link_type: "MORA_INTERES",
+			cartera_cuota_id: 21,
+			numero_cuota: 3,
+			rubro: "OTROS",
+			amount: "12.34",
+			facturable: true,
+		});
+
+		expectInvalid(input, PAGALO_IMPORT_ERROR_CODES.PAGALO_OTROS_ALLOCATION_MISMATCH);
+	});
+
+	it("rechaza Otros sin evidencia de una cuota seleccionada", () => {
+		const input = command();
+		input.capital_total = "0.00";
+		input.facturable_total = "12.34";
+		input.total_amount = "12.34";
+		(input as TestCommand & { otros_total: string }).otros_total = "12.34";
+		(input as unknown as { capital: null }).capital = null;
+		input.allocations = [
+			{
+				link_type: "MORA_INTERES",
+				cartera_cuota_id: 20,
+				numero_cuota: 2,
+				rubro: "OTROS",
+				amount: "12.34",
+				facturable: true,
+			},
+		];
+
+		expectInvalid(
+			input,
+			PAGALO_IMPORT_ERROR_CODES.PAGALO_OTROS_REQUIRES_INSTALLMENT,
+		);
+	});
+
+	it("rechaza mora como única evidencia para Otros", () => {
+		const input = command();
+		input.capital_total = "0.00";
+		input.facturable_total = "37.34";
+		input.total_amount = "37.34";
+		(input as TestCommand & { otros_total: string }).otros_total = "12.34";
+		(input as unknown as { capital: null }).capital = null;
+		input.allocations = [
+			{ ...input.allocations[1], amount: "25.00" },
+			{
+				link_type: "MORA_INTERES",
+				cartera_cuota_id: 20,
+				numero_cuota: 2,
+				rubro: "OTROS",
+				amount: "12.34",
+				facturable: true,
+			},
+		];
+
+		expectInvalid(
+			input,
+			PAGALO_IMPORT_ERROR_CODES.PAGALO_OTROS_REQUIRES_INSTALLMENT,
+		);
+	});
 
   it("hashes validated command content canonically and detects an altered hash", () => {
     const parsed = validatePagaloImportCommand(command());

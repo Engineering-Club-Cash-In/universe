@@ -10,3 +10,11 @@ export function assertPagaloInstallmentSelection(
 		throw new Error("Las cuotas Págalo deben formar un prefijo consecutivo desde la más antigua.");
 	}
 }
+
+export function assertPagaloOtrosRequiresInstallment(
+	otros: string | undefined,
+	selectedNumbers: number[],
+): void {
+	if (otros && selectedNumbers.length === 0)
+		throw new Error("Seleccione al menos una cuota para agregar Otros.");
+}

@@ -5,7 +5,7 @@ import {
   type PagaloImportCommand,
 } from "./pagaloPaymentImportPolicy";
 import Big from "big.js";
-import { and, asc, eq, inArray, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { db } from "../database";
 import {
   creditos,
@@ -13,6 +13,7 @@ import {
   moras_credito,
   pagalo_payment_imports,
   pagos_credito,
+	cuotas_credito,
 } from "../database/db";
 import type { PagaloFacturaStatus, PagaloReciboStatus } from "../database/db/schema";
 import { facturarPagoCompleto } from "../routers/cofidi";
@@ -24,7 +25,11 @@ import {
   procesarRegistroPago,
 } from "./registerPayment";
 import type { AplicarPagoTx, PagaloComponentes } from "./registerPayment";
-import { CREDIT_PENDING_CANCELLATION_ERROR } from "./registerPaymentPolicy";
+import {
+  CREDIT_PENDING_CANCELLATION_ERROR,
+  getCoveredInstallmentNumbers,
+  type PagoCoberturaCuota,
+} from "./registerPaymentPolicy";
 import { fueraDeLocksHeredados, withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 
 export type PagaloImportLedger = {
@@ -46,6 +51,7 @@ export type PagaloImportServiceDependencies = {
 export type PagaloRegistroInput = {
   credito_id: number;
   monto_boleta: number;
+	otros: number;
   fecha_pago: string;
   fecha_boleta: string;
   cuotaApagar: number;
@@ -119,6 +125,7 @@ export function mapPagaloImportToRegistro(
   return {
     credito_id: command.credito_id,
     monto_boleta: Number(command.total_amount),
+		otros: Number(command.otros_total),
     fecha_pago: fechaPago,
     fecha_boleta: fechaPago,
     cuotaApagar: command.cuota_inicial,
@@ -132,6 +139,62 @@ export function mapPagaloImportToRegistro(
     },
     banco_id: PAGALO_BANCO_ID,
   };
+}
+
+/**
+ * `Otros` es un cargo de la cuota inicial auditada, no un saldo genérico del
+ * crédito. Si esa cuota ya cambió antes de importar, no se puede mover a la
+ * siguiente sin contradecir el snapshot firmado por Págalo.
+ */
+export function esCuotaInicialPagaloVigente(
+	command: PagaloImportCommand,
+	cuotaInicialVivaId: number | undefined,
+): boolean {
+	if (new Big(command.otros_total).eq(0)) return true;
+	const otros = command.allocations.find(
+		(allocation) =>
+			allocation.numero_cuota === command.cuota_inicial &&
+			allocation.rubro === "OTROS",
+	);
+	return otros?.cartera_cuota_id === cuotaInicialVivaId;
+}
+
+/** Misma regla de duplicados que motor de pagos: mayor cuota_id prevalece. */
+export function resolverCuotaInicialPagaloVigente(
+	cuotas: { cuotaId: number }[],
+): number | undefined {
+	return cuotas.reduce<{ cuotaId: number } | undefined>(
+		(actual, cuota) => (!actual || cuota.cuotaId > actual.cuotaId ? cuota : actual),
+		undefined,
+	)?.cuotaId;
+}
+
+/**
+ * INCOBRABLE conserva abiertas cuotas cubiertas hasta cancelar capital. El
+ * motor las omite; Págalo debe mandar Otros a revisión antes de que caiga en
+ * otra cuota.
+ */
+export function esCuotaInicialPagaloCubiertaEnIncobrable({
+	statusCredit,
+	montoCuota,
+	cuotaInicial,
+	cuotas,
+}: {
+	statusCredit: string | null | undefined;
+	montoCuota: string | number | null | undefined;
+	cuotaInicial: number;
+	cuotas: {
+		cuotaId: number;
+		numeroCuota: number;
+		pagos: PagoCoberturaCuota[];
+	}[];
+}): boolean {
+	return (
+		statusCredit === "INCOBRABLE" &&
+		getCoveredInstallmentNumbers({ montoCuota: montoCuota ?? 0, cuotas }).has(
+			cuotaInicial,
+		)
+	);
 }
 
 export function createPagaloImportService(deps: PagaloImportServiceDependencies) {
@@ -284,6 +347,88 @@ async function igualarMoraAlSnapshot(
 }
 
 const REVIEW_REQUIRED_PREFIX = "PAGALO_REVIEW_REQUIRED:";
+
+async function asegurarCuotaInicialPagaloVigente(
+	tx: any,
+	command: PagaloImportCommand,
+): Promise<void> {
+	if (new Big(command.otros_total).eq(0)) return;
+	const cuotasInicialesVivas = await tx
+		.select({
+			cuotaId: cuotas_credito.cuota_id,
+			numeroCuota: cuotas_credito.numero_cuota,
+			statusCredit: creditos.statusCredit,
+			montoCuota: creditos.cuota,
+			pagoId: pagos_credito.pago_id,
+			validationStatus: pagos_credito.validationStatus,
+			paymentFalse: pagos_credito.paymentFalse,
+			abono_capital: pagos_credito.abono_capital,
+			abono_interes: pagos_credito.abono_interes,
+			abono_iva_12: pagos_credito.abono_iva_12,
+			abono_seguro: pagos_credito.abono_seguro,
+			abono_gps: pagos_credito.abono_gps,
+			membresias_pago: pagos_credito.membresias_pago,
+		})
+		.from(cuotas_credito)
+		.innerJoin(creditos, eq(creditos.credito_id, cuotas_credito.credito_id))
+		.innerJoin(
+			pagos_credito,
+			eq(pagos_credito.cuota_id, cuotas_credito.cuota_id),
+		)
+		.where(
+			and(
+				eq(cuotas_credito.credito_id, command.credito_id),
+				eq(cuotas_credito.numero_cuota, command.cuota_inicial),
+				eq(cuotas_credito.pagado, false),
+			),
+		)
+		.orderBy(desc(cuotas_credito.cuota_id))
+		.for("update");
+	type CuotaParaCobertura = {
+		cuotaId: number;
+		numeroCuota: number;
+		pagos: PagoCoberturaCuota[];
+	};
+	const cuotasPorId = new Map<number, CuotaParaCobertura>();
+	for (const cuota of cuotasInicialesVivas) {
+		let actual = cuotasPorId.get(cuota.cuotaId);
+		if (!actual) {
+			actual = {
+				cuotaId: cuota.cuotaId,
+				numeroCuota: cuota.numeroCuota,
+				pagos: [],
+			};
+		}
+		actual.pagos.push({
+			pago_id: cuota.pagoId,
+			validationStatus: cuota.validationStatus,
+			paymentFalse: cuota.paymentFalse,
+			abono_capital: cuota.abono_capital,
+			abono_interes: cuota.abono_interes,
+			abono_iva_12: cuota.abono_iva_12,
+			abono_seguro: cuota.abono_seguro,
+			abono_gps: cuota.abono_gps,
+			membresias_pago: cuota.membresias_pago,
+		});
+		cuotasPorId.set(cuota.cuotaId, actual);
+	}
+	if (
+		!esCuotaInicialPagaloVigente(
+			command,
+			resolverCuotaInicialPagaloVigente(cuotasInicialesVivas),
+		) ||
+		esCuotaInicialPagaloCubiertaEnIncobrable({
+			statusCredit: cuotasInicialesVivas[0]?.statusCredit,
+			montoCuota: cuotasInicialesVivas[0]?.montoCuota,
+			cuotaInicial: command.cuota_inicial,
+			cuotas: [...cuotasPorId.values()],
+		})
+	) {
+		throw new Error(
+			`${REVIEW_REQUIRED_PREFIX} La cuota inicial auditada de Otros ya no es la cuota pagable actual.`,
+		);
+	}
+}
 
 /**
  * Cuenta de empresa virtual de los pagos con link (la siembra la migración
@@ -872,6 +1017,7 @@ const importValues = (
   currency: command.currency,
   capital_total: command.capital_total,
   facturable_total: command.facturable_total,
+  otros_total: command.otros_total,
   total_amount: command.total_amount,
   capital_transaction_uuid: command.capital?.transaction_uuid ?? null,
   facturable_transaction_uuid: command.facturable?.transaction_uuid ?? null,
@@ -1038,6 +1184,8 @@ export const importPagaloPayment = async ({ body, set }: any) => {
           };
         }
 
+		await asegurarCuotaInicialPagaloVigente(tx, command);
+
         const [ledger] = await tx
           .insert(pagalo_payment_imports)
           .values({ ...importValues(command, creditResolution.identity), status: "APPLYING" })
@@ -1053,7 +1201,6 @@ export const importPagaloPayment = async ({ body, set }: any) => {
             data: {
               ...mapPagaloImportToRegistro(command, ledger.id),
               observaciones: `Pago Págalo · grupo ${command.crm_group_id}`,
-              otros: 0,
             },
             set: { status: 200 },
           },

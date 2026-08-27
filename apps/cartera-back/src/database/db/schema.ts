@@ -776,6 +776,10 @@
         precision: 18,
         scale: 2,
       }).notNull(),
+      otros_total: numeric("otros_total", {
+        precision: 18,
+        scale: 2,
+      }).notNull().default("0.00"),
       total_amount: numeric("total_amount", {
         precision: 18,
         scale: 2,

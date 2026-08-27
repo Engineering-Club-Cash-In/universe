@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+	canonicalizarPagaloCommand,
 	calcularPagaloPayloadHash,
 	type PagaloCommandForHash,
 } from "./pagalo-payload-hash";
@@ -11,11 +12,26 @@ const baseCommand = (): PagaloCommandForHash => ({
 	currency: "GTQ",
 	capital_total: "5000.00",
 	facturable_total: "850.00",
+	otros_total: "0.00",
 	total_amount: "5850.00",
 	cuota_inicial: 3,
 	allocations: [
-		{ link_type: "CAPITAL", cartera_cuota_id: 301, numero_cuota: 3, rubro: "CAPITAL", amount: "5000.00", facturable: false },
-		{ link_type: "MORA_INTERES", cartera_cuota_id: 301, numero_cuota: 3, rubro: "INTERES", amount: "850.00", facturable: true },
+		{
+			link_type: "CAPITAL",
+			cartera_cuota_id: 301,
+			numero_cuota: 3,
+			rubro: "CAPITAL",
+			amount: "5000.00",
+			facturable: false,
+		},
+		{
+			link_type: "MORA_INTERES",
+			cartera_cuota_id: 301,
+			numero_cuota: 3,
+			rubro: "INTERES",
+			amount: "850.00",
+			facturable: true,
+		},
 	],
 	capital: {
 		transaction_uuid: "7c9e8dc3-e8dc-4a90-8afb-0f74f7419712",
@@ -65,6 +81,19 @@ describe("calcularPagaloPayloadHash", () => {
 		);
 	});
 
+	test("otros_total forma parte del hash", () => {
+		const command = baseCommand();
+		expect(
+			calcularPagaloPayloadHash({ ...command, otros_total: "0.00" }),
+		).not.toBe(calcularPagaloPayloadHash({ ...command, otros_total: "12.34" }));
+	});
+
+	test("Otros Q0 conserva formato canónico histórico", () => {
+		expect(canonicalizarPagaloCommand(baseCommand())).not.toContain(
+			'"otros_total"',
+		);
+	});
+
 	test("capital null (Q0, D-48) se distingue de tenerlo presente", () => {
 		const conCapital = baseCommand();
 		const sinCapital: PagaloCommandForHash = { ...conCapital, capital: null };
@@ -77,7 +106,11 @@ describe("calcularPagaloPayloadHash", () => {
 		const command = baseCommand();
 		const conRequestId: PagaloCommandForHash = {
 			...command,
-			capital: { ...command.capital!, request_id: "148600", request_auth: "977076" },
+			capital: {
+				...command.capital!,
+				request_id: "148600",
+				request_auth: "977076",
+			},
 		};
 		expect(calcularPagaloPayloadHash(command)).not.toBe(
 			calcularPagaloPayloadHash(conRequestId),

@@ -816,51 +816,59 @@ export async function prepararConvenioPayment(
     // para que el caller lo ejecute solo cuando la boleta ya quedó escrita.
     const commit = async () => {
       try {
-        // Update GUARDADO contra estado stale (P2 de Codex en #1482): el
-        // convenio pudo cambiar entre prepare y commit por un escritor que no
-        // pasa por el advisory lock del pago (updateConvenioStatus, una
-        // reversa concurrente). Se exige el MISMO estado que leyó el prepare
-        // (activo, no completado y mismo acumulado); si no matchea, el update
-        // afecta 0 filas y NO se marcan cuotas — pisar con los absolutos del
-        // closure acreditaría de más o resucitaría un convenio desactivado.
-        const [convenioAcreditado] = await db
-          .update(convenios_pago)
-          .set({
-            monto_pagado: nuevoMontoPagadoBig.toFixed(2),
-            monto_pendiente: nuevoMontoPendienteBig.toFixed(2),
-            pagos_realizados: nuevosPagosRealizados,
-            pagos_pendientes: nuevosPagosPendientes,
-            completado: convenioCompletado,
-            activo: !convenioCompletado, // Si se completó, ya no está activo
-            updated_at: new Date(),
-          })
-          .where(
-            and(
-              eq(convenios_pago.convenio_id, convenio.convenio_id),
-              eq(convenios_pago.activo, true),
-              eq(convenios_pago.completado, false),
-              eq(convenios_pago.monto_pagado, convenio.monto_pagado)
+        // Transacción CHICA (P1 de Codex en #1482, 3ª ronda): acreditación y
+        // marcado de cuotas caen o persisten JUNTOS — sin esto, un fallo
+        // entre ambos statements dejaba convenios_pago acreditado con
+        // convenio_cuotas sin marcar, y un reintento prepararía una segunda
+        // acreditación sobre ese estado a medias.
+        await db.transaction(async (tx) => {
+          // Update GUARDADO contra estado stale (P2 de Codex en #1482): el
+          // convenio pudo cambiar entre prepare y commit por un escritor que
+          // no pasa por el advisory lock del pago. Se exige el MISMO estado
+          // que leyó el prepare (activo, no completado y mismo acumulado); si
+          // no matchea, el update afecta 0 filas y NO se marcan cuotas —
+          // pisar con los absolutos del closure acreditaría de más o
+          // resucitaría un convenio desactivado.
+          const [convenioAcreditado] = await tx
+            .update(convenios_pago)
+            .set({
+              monto_pagado: nuevoMontoPagadoBig.toFixed(2),
+              monto_pendiente: nuevoMontoPendienteBig.toFixed(2),
+              pagos_realizados: nuevosPagosRealizados,
+              pagos_pendientes: nuevosPagosPendientes,
+              completado: convenioCompletado,
+              activo: !convenioCompletado, // Si se completó, ya no está activo
+              updated_at: new Date(),
+            })
+            .where(
+              and(
+                eq(convenios_pago.convenio_id, convenio.convenio_id),
+                eq(convenios_pago.activo, true),
+                eq(convenios_pago.completado, false),
+                eq(convenios_pago.monto_pagado, convenio.monto_pagado)
+              )
             )
-          )
-          .returning({ convenio_id: convenios_pago.convenio_id });
+            .returning({ convenio_id: convenios_pago.convenio_id });
 
-        if (!convenioAcreditado) {
-          // El pago YA está persistido y su fila puede cargar el sello
-          // pago_convenio: se deja rastro ruidoso para conciliar a mano en
-          // vez de tirar (un throw acá respondería 500 sobre un pago que sí
-          // quedó escrito).
-          console.error(
-            `⚠️ commitConvenio: el convenio ${convenio.convenio_id} cambió o ` +
-              `se desactivó entre prepare y commit (esperaba activo, no ` +
-              `completado, monto_pagado=${convenio.monto_pagado}); no se ` +
-              `acreditó ni se marcaron cuotas — conciliar a mano.`
-          );
-          return;
-        }
+          if (!convenioAcreditado) {
+            // El pago YA está persistido y su fila puede cargar el sello
+            // pago_convenio: se deja rastro ruidoso para conciliar a mano en
+            // vez de tirar (un throw acá respondería 500 sobre un pago que sí
+            // quedó escrito).
+            console.error(
+              `⚠️ commitConvenio: el convenio ${convenio.convenio_id} cambió o ` +
+                `se desactivó entre prepare y commit (esperaba activo, no ` +
+                `completado, monto_pagado=${convenio.monto_pagado}); no se ` +
+                `acreditó ni se marcaron cuotas — conciliar a mano.`
+            );
+            return;
+          }
 
-        await marcarCuotasConvenioCompletadas({
-          convenio_id: convenio.convenio_id,
-          nuevasCuotasCompletadas,
+          await marcarCuotasConvenioCompletadas({
+            convenio_id: convenio.convenio_id,
+            nuevasCuotasCompletadas,
+            dbc: tx,
+          });
         });
       } catch (error) {
         console.error("Error procesando pago de convenio:", error);
@@ -928,9 +936,12 @@ export async function processConvenioPayment(
 async function marcarCuotasConvenioCompletadas({
   convenio_id,
   nuevasCuotasCompletadas,
+  dbc = db,
 }: {
   convenio_id: number;
   nuevasCuotasCompletadas: number;
+  /** Conexión sobre la que escribir: la tx del commit del convenio. */
+  dbc?: Pick<typeof db, "select" | "update">;
 }): Promise<void> {
   // 🔥 MARCAR LAS CUOTAS DEL CONVENIO COMPLETADAS POR ACUMULADO
   if (nuevasCuotasCompletadas > 0) {
@@ -939,7 +950,7 @@ async function marcarCuotasConvenioCompletadas({
     );
 
     // Las N cuotas pendientes más viejas del convenio (fecha_pago = NULL)
-    const cuotasPendientesConvenio = await db
+    const cuotasPendientesConvenio = await dbc
       .select()
       .from(convenio_cuotas)
       .where(
@@ -968,7 +979,7 @@ async function marcarCuotasConvenioCompletadas({
       const [month, day, year] = datePart.split("/");
       const fechaGuatemala = new Date(`${year}-${month}-${day}T${timePart}`);
 
-      await db
+      await dbc
         .update(convenio_cuotas)
         .set({
           fecha_pago: fechaGuatemala, // 👈 Fecha y hora de Guatemala

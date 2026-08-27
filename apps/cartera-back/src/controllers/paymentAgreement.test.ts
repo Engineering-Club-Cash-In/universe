@@ -20,23 +20,29 @@ const makeSelect = () => {
   return { from: () => ({ where: () => conChain }) };
 };
 
+const dbMock = {
+  select: mock(() => makeSelect()),
+  update: mock(() => ({
+    set: (values: Record<string, unknown>) => ({
+      where: () => {
+        updates.push(values);
+        return Object.assign(Promise.resolve(), {
+          returning: () =>
+            Promise.resolve(updateAffectsRows ? [values] : []),
+        });
+      },
+    }),
+  })),
+  // La tx del commit reusa el mismo mock: acá solo interesa QUÉ se escribe.
+  transaction: mock((callback: (tx: unknown) => Promise<unknown>) =>
+    callback(dbMock)
+  ),
+};
+
 mock.module("../database", () => ({
   client: {},
   lockPool: { connect: mock(() => Promise.resolve({ query: mock(), release: mock() })) },
-  db: {
-    select: mock(() => makeSelect()),
-    update: mock(() => ({
-      set: (values: Record<string, unknown>) => ({
-        where: () => {
-          updates.push(values);
-          return Object.assign(Promise.resolve(), {
-            returning: () =>
-              Promise.resolve(updateAffectsRows ? [values] : []),
-          });
-        },
-      }),
-    })),
-  },
+  db: dbMock,
 }));
 
 mock.module("./latefee", () => ({ createMora: mock(() => Promise.resolve()) }));

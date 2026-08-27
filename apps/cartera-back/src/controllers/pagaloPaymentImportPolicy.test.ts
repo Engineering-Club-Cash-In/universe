@@ -155,6 +155,30 @@ describe("validatePagaloImportCommand", () => {
 		expectInvalid(input, PAGALO_IMPORT_ERROR_CODES.PAGALO_OTROS_ALLOCATION_MISMATCH);
 	});
 
+	it("rechaza Otros sin evidencia de una cuota seleccionada", () => {
+		const input = command();
+		input.capital_total = "0.00";
+		input.facturable_total = "12.34";
+		input.total_amount = "12.34";
+		(input as TestCommand & { otros_total: string }).otros_total = "12.34";
+		(input as unknown as { capital: null }).capital = null;
+		input.allocations = [
+			{
+				link_type: "MORA_INTERES",
+				cartera_cuota_id: 20,
+				numero_cuota: 2,
+				rubro: "OTROS",
+				amount: "12.34",
+				facturable: true,
+			},
+		];
+
+		expectInvalid(
+			input,
+			PAGALO_IMPORT_ERROR_CODES.PAGALO_OTROS_REQUIRES_INSTALLMENT,
+		);
+	});
+
   it("hashes validated command content canonically and detects an altered hash", () => {
     const parsed = validatePagaloImportCommand(command());
     expect(parsed.success).toBeTrue();

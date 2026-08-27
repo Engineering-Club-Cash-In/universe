@@ -558,7 +558,7 @@ export function PagaloLinkDialog({
 									)}
 									{preview.otros > 0 && (
 										<div className="flex items-center justify-between text-muted-foreground">
-											<span>Otros</span>
+											<span>Incluye Otros</span>
 											<span>{q(preview.otros)}</span>
 										</div>
 									)}

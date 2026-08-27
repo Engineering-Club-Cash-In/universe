@@ -23,6 +23,7 @@ export const PAGALO_IMPORT_ERROR_CODES = {
     "PAGALO_FACTURABLE_ALLOCATION_NOT_FACTURABLE",
   PAGALO_OTROS_ALLOCATION_MISMATCH: "PAGALO_OTROS_ALLOCATION_MISMATCH",
   PAGALO_OTROS_ALLOCATION_INVALID: "PAGALO_OTROS_ALLOCATION_INVALID",
+  PAGALO_OTROS_REQUIRES_INSTALLMENT: "PAGALO_OTROS_REQUIRES_INSTALLMENT",
   PAGALO_DUPLICATE_ALLOCATION: "PAGALO_DUPLICATE_ALLOCATION",
   PAGALO_ALLOCATION_CUOTA_CONFLICT: "PAGALO_ALLOCATION_CUOTA_CONFLICT",
   PAGALO_CUOTA_INICIAL_MISMATCH: "PAGALO_CUOTA_INICIAL_MISMATCH",
@@ -68,6 +69,8 @@ export const PAGALO_IMPORT_ERROR_MESSAGES: Record<
     "Las asignaciones OTROS no coinciden con el total de Otros.",
   PAGALO_OTROS_ALLOCATION_INVALID:
     "Otros debe ser facturable y pertenecer a MORA_INTERES.",
+  PAGALO_OTROS_REQUIRES_INSTALLMENT:
+    "Otros requiere evidencia de una cuota seleccionada.",
   PAGALO_DUPLICATE_ALLOCATION:
     "No se permiten asignaciones repetidas para la misma cuota, rubro y tipo.",
   PAGALO_ALLOCATION_CUOTA_CONFLICT:
@@ -354,6 +357,9 @@ export function validatePagaloImportCommand(
   const allocationCuotaInicial = c.allocations.find(
     (a) => a.numero_cuota === c.cuota_inicial,
   );
+  const otrosTieneCuotaSeleccionada = c.allocations.some(
+    (a) => a.numero_cuota === c.cuota_inicial && a.rubro !== "OTROS",
+  );
   const sum = (items: typeof c.allocations) =>
     items.reduce((n, a) => n.plus(a.amount), new Big(0));
 
@@ -398,6 +404,10 @@ export function validatePagaloImportCommand(
     !sum(otros).eq(new Big(c.otros_total))
   )
     errors.push(err(PAGALO_IMPORT_ERROR_CODES.PAGALO_OTROS_ALLOCATION_MISMATCH));
+  if (new Big(c.otros_total).gt(0) && !otrosTieneCuotaSeleccionada)
+    errors.push(
+      err(PAGALO_IMPORT_ERROR_CODES.PAGALO_OTROS_REQUIRES_INSTALLMENT),
+    );
 
   // FASE 10 — Presencia y suma exacta de cada lado. Un total Q0 significa que
   // no existe fuente ni allocation de ese tipo: no se crean links ficticios.

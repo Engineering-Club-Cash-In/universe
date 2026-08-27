@@ -21,6 +21,7 @@ import {
 import { getOpenOpportunityBySource } from "@/lib/lead-opportunity";
 import { generateUniqueFilename, uploadFileFromUrlToR2 } from "@/lib/storage";
 import { db } from "../db";
+import { auditRecord } from "../lib/audit";
 import { validarDpi } from "../utils/cui-validation";
 import { otpController } from "./otp";
 
@@ -508,6 +509,12 @@ export const getRenapInfoController = async (
 				assignmentType: "auto",
 			})
 			.returning({ id: leads.id });
+		auditRecord({
+			entity: "lead",
+			id: newLead[0].id,
+			action: "create",
+			data: { dpi, phone },
+		});
 		leadId = newLead[0].id;
 		assignedUserId = newLeadAssignment.assignedTo;
 		createdByUserId = newLeadAssignment.createdBy;
@@ -538,6 +545,12 @@ export const getRenapInfoController = async (
 					updatedAt: new Date(),
 				})
 				.where(eq(leads.id, existingLead.id));
+			auditRecord({
+				entity: "lead",
+				id: existingLead.id,
+				action: "update",
+				data: { dpi, motivo: "refresco_renap" },
+			});
 		} else {
 			console.log(
 				`[DEBUG] Lead ${leadId} sin proceso activo; se reasigna por ruleta.`,
@@ -567,6 +580,13 @@ export const getRenapInfoController = async (
 					livenessValidated: false,
 				})
 				.where(eq(leads.id, existingLead.id));
+			// Reasignación por ruleta: es de lo que más se reclama.
+			auditRecord({
+				entity: "lead",
+				id: existingLead.id,
+				action: "reassign",
+				data: { dpi, assignedTo: reassignment.assignedTo },
+			});
 		}
 	}
 
@@ -621,6 +641,12 @@ export const getRenapInfoController = async (
 				.update(opportunities)
 				.set({ assignedTo: assignedUserId, updatedAt: new Date() })
 				.where(eq(opportunities.id, existingOpportunity.id));
+			auditRecord({
+				entity: "opportunity",
+				id: existingOpportunity.id,
+				action: "reassign",
+				data: { dpi, assignedTo: assignedUserId },
+			});
 		}
 		opportunityId = existingOpportunity.id;
 	} else {
@@ -651,6 +677,12 @@ export const getRenapInfoController = async (
 				source: "Whatsapp",
 			})
 			.returning();
+		auditRecord({
+			entity: "opportunity",
+			id: newOpportunity.id,
+			action: "create",
+			data: { dpi, leadId, assignedTo: assignedUserId },
+		});
 
 		opportunityId = newOpportunity.id;
 	}
@@ -795,6 +827,12 @@ export const updateLeadAndCreateOpportunity = async (
 			.update(leads)
 			.set(leadUpdates)
 			.where(eq(leads.id, existingLead.id));
+		auditRecord({
+			entity: "lead",
+			id: existingLead.id,
+			action: "update",
+			data: leadUpdates,
+		});
 	}
 
 	// 3. Agregar documentos a las oportunidades abiertas usando la función genérica

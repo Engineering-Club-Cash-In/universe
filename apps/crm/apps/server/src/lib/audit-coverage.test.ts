@@ -24,20 +24,20 @@ const INVENTARIO: Record<
 > = {
 	// --- migrados
 	"routers/crm.ts": { escrituras: 18, estado: "pendiente" },
-	"controllers/public-lead.ts": { escrituras: 8, estado: "pendiente" },
+	"controllers/public-lead.ts": { escrituras: 8, estado: "listo" },
 
 	// --- pendientes
 	"routers/vehicles.ts": { escrituras: 10, estado: "pendiente" },
 	"controllers/migrate-creditos.ts": { escrituras: 8, estado: "pendiente" },
-	"controllers/bot.ts": { escrituras: 6, estado: "pendiente" },
-	"controllers/portal-lead.ts": { escrituras: 3, estado: "pendiente" },
+	"controllers/bot.ts": { escrituras: 6, estado: "listo" },
+	"controllers/portal-lead.ts": { escrituras: 3, estado: "listo" },
 	"routers/auctionVehicles.ts": { escrituras: 3, estado: "pendiente" },
 	"routers/cobros.ts": { escrituras: 3, estado: "pendiente" },
 	"services/close-opportunity.ts": { escrituras: 3, estado: "pendiente" },
 	"routers/legal-contracts.ts": { escrituras: 2, estado: "pendiente" },
-	"controllers/liveness.ts": { escrituras: 1, estado: "pendiente" },
+	"controllers/liveness.ts": { escrituras: 1, estado: "listo" },
 	"controllers/load-cars.ts": { escrituras: 1, estado: "pendiente" },
-	"routers/messaging.ts": { escrituras: 1, estado: "pendiente" },
+	"routers/messaging.ts": { escrituras: 1, estado: "listo" },
 	"services/contract-data-mapper.ts": { escrituras: 1, estado: "pendiente" },
 	"services/lead-scoring.ts": { escrituras: 1, estado: "pendiente" },
 

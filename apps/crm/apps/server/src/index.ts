@@ -51,6 +51,46 @@ import { investmentsRouter } from "./routers/investments";
 import externalContractsRouter from "./routes/external-contracts";
 
 const app = new Hono();
+
+// Contextos de auditoría para lo que no pasa por /rpc. El `source` sale de la
+// ruta; los handlers solo anotan con `auditRecord` (ver lib/audit.ts).
+const auditPublicLead = auditRoute("public", {
+	entity: "lead",
+	action: "create",
+});
+const auditPortalLead = auditRoute("portal", {
+	entity: "lead",
+	action: "create",
+});
+const auditPortalLeadUpdate = auditRoute("portal", {
+	entity: "lead",
+	action: "update",
+});
+const auditBotLead = auditRoute("bot", { entity: "lead", action: "create" });
+const auditBotLeadUpdate = auditRoute("bot", {
+	entity: "lead",
+	action: "update",
+});
+const auditBotLiveness = auditRoute("bot", {
+	entity: "lead",
+	action: "liveness_validated",
+});
+const auditVehicleImport = auditRoute("system", {
+	entity: "vehicle",
+	action: "import_upsert",
+});
+const auditMigrateCreate = auditRoute("system", {
+	entity: "opportunity",
+	action: "create",
+});
+const auditMigrateValue = auditRoute("system", {
+	entity: "opportunity",
+	action: "update_value",
+});
+const auditMigrateCleanup = auditRoute("system", {
+	entity: "opportunity",
+	action: "delete",
+});
 const AUTH_DIAG_PREFIX = "CRM_AUTH_DIAG";
 
 function logAuthDiagnostic(reason: string, detail: Record<string, unknown>) {
@@ -481,7 +521,7 @@ app.post("/api/upload-opportunity-document", async (c) => {
 		return c.json({ error: "Error al subir el documento" }, 500);
 	}
 });
-app.post("/info/renap", async (c) => {
+app.post("/info/renap", auditBotLead, async (c) => {
 	try {
 		const body = await c.req.json<{ dpi: unknown; phone: unknown }>();
 
@@ -500,7 +540,7 @@ app.post("/info/renap", async (c) => {
 		return c.json({ error: err.message || "Internal server error" }, 500);
 	}
 });
-app.post("/info/lead-opportunity", async (c) => {
+app.post("/info/lead-opportunity", auditBotLeadUpdate, async (c) => {
 	try {
 		const body = await c.req.json<{
 			dpi: string;
@@ -734,7 +774,7 @@ app.post("/info/validate-otp", async (c) => {
 	return c.json(result, result.status);
 });
 
-app.post("/info/check-liveness", async (c) => {
+app.post("/info/check-liveness", auditBotLiveness, async (c) => {
 	const body = await c.req.json();
 	const { dpi, phoneNumber } = body as {
 		dpi?: string;
@@ -959,11 +999,7 @@ app.post("/api/notifications/pay-investors", async (c) => {
 });
 
 // REST endpoint for public lead creation (for external web forms)
-app.post(
-	"/api/public/lead",
-	auditRoute("public", { entity: "lead", action: "create" }),
-	createPublicLead,
-);
+app.post("/api/public/lead", auditPublicLead, createPublicLead);
 
 // REST endpoint for investment lead creation (for external APIs)
 app.post("/api/public/investment-lead", async (c) => {
@@ -974,13 +1010,23 @@ app.post("/api/public/investment-lead", async (c) => {
 });
 
 // Load cars endpoint (for importing vehicles from Excel/JSON)
-app.post("/api/load-cars", loadCarsController);
+app.post("/api/load-cars", auditVehicleImport, loadCarsController);
 
 // Portal endpoints (protected with BETTER_SECRET_PORTAL token)
 app.get("/api/portal/lead", validatePortalToken, getLeadByEmail);
 // REST endpoint for portal registration: finds lead by DPI or creates new one without duplicate opportunities
-app.post("/api/portal/lead", validatePortalToken, createPortalRegisterLead);
-app.post("/api/portal/lead/update", validatePortalToken, updateLeadByEmail);
+app.post(
+	"/api/portal/lead",
+	validatePortalToken,
+	auditPortalLead,
+	createPortalRegisterLead,
+);
+app.post(
+	"/api/portal/lead/update",
+	validatePortalToken,
+	auditPortalLeadUpdate,
+	updateLeadByEmail,
+);
 app.get(
 	"/api/portal/lead/documents",
 	validatePortalToken,
@@ -1040,7 +1086,7 @@ app.get("/upload-csv", async (c) => {
 // 	}
 // });
 
-app.post("/api/migrate/creditos", async (c) => {
+app.post("/api/migrate/creditos", auditMigrateCreate, async (c) => {
 	try {
 		const { migrarCreditos } = await import("./controllers/migrate-creditos");
 		const creditos = await c.req.json();
@@ -1061,7 +1107,7 @@ app.post("/api/migrate/creditos", async (c) => {
 });
 
 // Endpoint para actualizar el value de oportunidades migradas desde cartera-back
-app.post("/api/migrate/actualizar-value", async (c) => {
+app.post("/api/migrate/actualizar-value", auditMigrateValue, async (c) => {
 	try {
 		const { actualizarValueOportunidades } = await import(
 			"./controllers/migrate-creditos"
@@ -1076,7 +1122,7 @@ app.post("/api/migrate/actualizar-value", async (c) => {
 
 // Endpoint para hacer rollback/limpieza de TODOS los datos migrados
 // CUIDADO: Elimina todos los leads, vehículos y oportunidades con status='migrate'
-app.delete("/api/migrate/cleanup", async (c) => {
+app.delete("/api/migrate/cleanup", auditMigrateCleanup, async (c) => {
 	try {
 		const { limpiarMigracion } = await import("./controllers/migrate-creditos");
 		const resultado = await limpiarMigracion();

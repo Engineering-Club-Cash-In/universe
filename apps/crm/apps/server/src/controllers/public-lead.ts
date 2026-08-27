@@ -254,6 +254,12 @@ export async function createPublicLead(c: Context) {
 								updatedAt: new Date(),
 							})
 							.where(eq(opportunities.id, sameSourceOpportunity.id));
+						auditRecord({
+							entity: "opportunity",
+							id: sameSourceOpportunity.id,
+							action: "update",
+							data: opportunityUpdates,
+						});
 					}
 
 					// La campaña sí se sincroniza cuando la re-entrada es del mismo
@@ -272,6 +278,12 @@ export async function createPublicLead(c: Context) {
 							.set({ campaign: body.campaign, updatedAt: new Date() })
 							.where(eq(leads.id, opportunityLead.id))
 							.returning();
+						auditRecord({
+							entity: "lead",
+							id: opportunityLead.id,
+							action: "update",
+							data: { campaign: body.campaign },
+						});
 
 						if (syncedLead?.id === existingLead.id) {
 							leadData = syncedLead;
@@ -292,6 +304,12 @@ export async function createPublicLead(c: Context) {
 						.set({ email: body.email, updatedAt: new Date() })
 						.where(eq(leads.id, existingLead.id))
 						.returning();
+					auditRecord({
+						entity: "lead",
+						id: existingLead.id,
+						action: "update",
+						data: { email: body.email },
+					});
 				}
 
 				// De `leads` no se toca nada más: `source` es lo que clasifica a las
@@ -320,6 +338,12 @@ export async function createPublicLead(c: Context) {
 					})
 					.where(eq(leads.id, existingLead.id))
 					.returning();
+				auditRecord({
+					entity: "lead",
+					id: existingLead.id,
+					action: "update",
+					data: { source, campaign },
+				});
 			}
 
 			const assignedTo = await resolveExistingLeadAssigneeFromDatabase(
@@ -384,6 +408,12 @@ export async function createPublicLead(c: Context) {
 					})
 					.where(eq(leads.id, existingLead.id))
 					.returning();
+				auditRecord({
+					entity: "lead",
+					id: existingLead.id,
+					action: "update",
+					data: { email: body.email, source, campaign },
+				});
 
 				return c.json(
 					{
@@ -450,6 +480,12 @@ export async function createPublicLead(c: Context) {
 				updatedAt: new Date(),
 			})
 			.returning();
+		auditRecord({
+			entity: "lead",
+			id: newLead.id,
+			action: "create",
+			data: body,
+		});
 
 		// RENAP solo si tiene DPI y teléfono
 		const renapInfo = hasDpi

@@ -471,6 +471,23 @@ export function PagaloLinkDialog({
 									</div>
 								</div>
 							)}
+							{vehiculoCaso.isError && (
+								<div className="flex items-center justify-between rounded-md border border-red-300 bg-red-50 p-3 text-red-900 text-sm">
+									<span className="flex items-center gap-2">
+										<AlertTriangle className="h-4 w-4" />
+										No se pudo verificar el vehículo del caso. No se pueden
+										crear links hasta reintentar.
+									</span>
+									<Button
+										type="button"
+										size="sm"
+										variant="outline"
+										onClick={() => vehiculoCaso.refetch()}
+									>
+										Reintentar
+									</Button>
+								</div>
+							)}
 							{(preview.capital > 0 || preview.facturable > 0) && (
 								<div className="space-y-1 rounded-md border p-3 text-sm">
 									<p className="font-medium">
@@ -499,7 +516,7 @@ export function PagaloLinkDialog({
 							disabled={
 								(!tieneMora && selected.length === 0) ||
 								mutation.isPending ||
-								vehiculoCaso.isLoading
+								!vehiculoCaso.isSuccess
 							}
 							onClick={() =>
 								mutation.mutate({

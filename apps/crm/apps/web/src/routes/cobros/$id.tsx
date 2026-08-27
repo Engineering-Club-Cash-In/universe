@@ -1282,18 +1282,6 @@ function RouteComponent() {
 											casoCobroId={caso.id}
 											numeroSifco={caso.numeroCreditoSifco}
 											creditoId={caso.carteraCreditoId}
-											vehiculoMarca={
-												caso.vehiculoMarca && caso.vehiculoMarca !== "N/A"
-													? caso.vehiculoMarca
-													: undefined
-											}
-											vehiculoModelo={
-												caso.vehiculoModelo && caso.vehiculoModelo !== "N/A"
-													? caso.vehiculoModelo
-													: undefined
-											}
-											vehiculoYear={caso.vehiculoYear ?? undefined}
-											vehiculoPlaca={caso.vehiculoPlaca ?? undefined}
 										/>
 									)}
 

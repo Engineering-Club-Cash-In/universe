@@ -530,6 +530,17 @@ async function facturarImport(importId: number, creditoId: number, pagoIds: numb
   }
 }
 
+/**
+ * Gate de la facturación automática post-commit. Solo factura con
+ * `PAGALO_FACTURACION_ACTIVA=true`; ausente o cualquier otro valor → se omite
+ * (el pago igual nace validado y el recibo igual sale). Existe porque hoy no
+ * hay SAT de pruebas separado: mientras esto esté en pruebas, cualquier
+ * ambiente sin la env NO certifica nada real (decisión de Daniel 2026-08-27).
+ */
+export function facturacionPagaloActiva(env: NodeJS.ProcessEnv = process.env): boolean {
+  return (env.PAGALO_FACTURACION_ACTIVA ?? "").trim().toLowerCase() === "true";
+}
+
 /** Un claim ENVIANDO más viejo que esto es de un proceso que murió: se puede retomar. */
 export const MINUTOS_RECIBO_ENVIANDO_HUERFANO = 30;
 /** Un FALLIDA se reintenta pasado este tiempo, hasta MAXIMO_INTENTOS_RECIBO. */
@@ -675,6 +686,13 @@ async function facturarYNotificarPostCommit(
   creditoId: number,
   pagoIds: number[],
 ) {
+  if (!facturacionPagaloActiva()) {
+    console.log(
+      `ℹ️ Págalo import ${importId}: facturación OMITIDA (PAGALO_FACTURACION_ACTIVA no es "true"); solo se manda el recibo.`,
+    );
+    await intentarEnviarRecibosDeImport(importId);
+    return;
+  }
   await Promise.allSettled([
     facturarImport(importId, creditoId, pagoIds),
     intentarEnviarRecibosDeImport(importId),
@@ -1065,7 +1083,9 @@ export const importPagaloPayment = async ({ body, set }: any) => {
           .set({
             status: "APPLIED",
             applied_at: new Date(),
-            factura_status: "PENDIENTE",
+            // NULL = "no aplica" cuando la facturación automática está
+            // apagada: así el barrido no lo confunde con un PENDIENTE huérfano.
+            factura_status: facturacionPagaloActiva() ? "PENDIENTE" : null,
             recibo_status: "PENDIENTE",
             updated_at: new Date(),
           })

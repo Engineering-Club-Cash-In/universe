@@ -4,6 +4,7 @@ import {
   calcularAjusteMoraPagalo,
   clasificarRespuestaFacturacion,
   createPagaloImportService,
+  facturacionPagaloActiva,
   getPagaloImportReplayHttpStatus,
   getPagaloReviewRequiredReason,
   isPagaloSameRoleEvidenceConflict,
@@ -349,5 +350,16 @@ describe("clasificarRespuestaFacturacion", () => {
     );
     expect(r).toMatchObject({ success: true, errores: [{ tipo: "INTERESES", error: "x" }], detalle: "2 generadas, 1 con errores" });
     expect(resumirFacturacion([r]).status).toBe("PARCIAL");
+  });
+});
+
+describe("gate de facturación automática (PAGALO_FACTURACION_ACTIVA)", () => {
+  it("solo factura con la env exactamente en true; ausente o cualquier otro valor se omite", () => {
+    expect(facturacionPagaloActiva({})).toBe(false);
+    expect(facturacionPagaloActiva({ PAGALO_FACTURACION_ACTIVA: "false" })).toBe(false);
+    expect(facturacionPagaloActiva({ PAGALO_FACTURACION_ACTIVA: "1" })).toBe(false);
+    expect(facturacionPagaloActiva({ PAGALO_FACTURACION_ACTIVA: "" })).toBe(false);
+    expect(facturacionPagaloActiva({ PAGALO_FACTURACION_ACTIVA: "true" })).toBe(true);
+    expect(facturacionPagaloActiva({ PAGALO_FACTURACION_ACTIVA: " TRUE " })).toBe(true);
   });
 });

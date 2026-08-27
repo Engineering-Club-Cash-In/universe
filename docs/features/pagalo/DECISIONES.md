@@ -96,6 +96,12 @@ el dispatcher del CRM reintenta con su backoff (idempotente por `crm_group_id`).
 Las funciones existentes se reutilizan **recibiendo la tx por parámetro**; no
 hay copias del motor ni del validador.
 
+**Gate (2026-08-27, Daniel):** la facturación automática solo corre con
+`PAGALO_FACTURACION_ACTIVA=true` en cartera-back. Ausente o con otro valor se
+**omite** (el pago nace validado igual, el recibo sale igual, y el ledger deja
+`factura_status = NULL` = no aplica). Hoy no hay SAT de pruebas separado:
+mientras esto esté en pruebas, ningún ambiente sin la env certifica nada real.
+
 **Fuera de la transacción, después del commit, lo dispara cartera** (mismo
 request, fire-and-forget, patrón de `/aplicar-pago`): `facturarPagoCompleto()`
 —el cuerpo de `/api/dte/facturar-pago-completo` extraído a función— por cada

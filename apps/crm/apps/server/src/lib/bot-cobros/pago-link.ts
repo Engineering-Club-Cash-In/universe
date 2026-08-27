@@ -1296,13 +1296,28 @@ const ESTADOS_GRUPO_PAGADO: PagaloPaymentGroupStatus[] = [
  * lo que dice NUESTRA base (el poller ya verificó el ACCEPT contra Págalo y
  * guardó el voucher): link `PAID`/fuente de aplicación, o grupo ya en
  * aplicación. Puro: sin DB.
+ *
+ * Solo cuenta la **generación vigente** de cada tipo de link (la de mayor
+ * `generation`). Un link `REPLACED` que el cliente pagó después queda `PAID`
+ * pero con `isApplicationSource=false` y fuera de la aplicación (va a
+ * REVIEW_REQUIRED): no puede inflar `totalLinks` ni contar como pagado acá
+ * (hallazgo Codex).
  */
 export function resumirEstadoLinks(grupo: GrupoActivo): {
 	estado: EstadoLinksBot;
 	links: LinkEstadoBot[];
 } {
 	const orden: PagaloLinkType[] = ["CAPITAL", "MORA_INTERES"];
-	const considerados = grupo.links
+	const vigentePorTipo = new Map<
+		PagaloLinkType,
+		GrupoActivo["links"][number]
+	>();
+	for (const l of grupo.links) {
+		const actual = vigentePorTipo.get(l.linkType);
+		if (!actual || l.generation > actual.generation)
+			vigentePorTipo.set(l.linkType, l);
+	}
+	const considerados = [...vigentePorTipo.values()]
 		.filter((l) => l.status === "ACTIVE" || l.status === "PAID")
 		.sort((a, b) => orden.indexOf(a.linkType) - orden.indexOf(b.linkType));
 	const grupoPagado = ESTADOS_GRUPO_PAGADO.includes(grupo.status);

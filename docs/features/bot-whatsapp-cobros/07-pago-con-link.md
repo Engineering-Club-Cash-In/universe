@@ -378,7 +378,9 @@ ya está en aplicación (`READY_TO_APPLY`, `APPLYING`, `APPLICATION_FAILED`, `CO
 - **Salida:** `estado` = `PAGADOS` | `PARCIAL` | `SIN_PAGO`, plano como las opciones
   (`totalLinks`, `linksPagados`, `linksPendientes`, `link1Titulo/Estado/Monto/Url`, `link2…`;
   la URL solo viene si ese link sigue pendiente, para que el bot lo reenvíe) y
-  `mensajes.completo` listo para mandar. Los links `REPLACED`/`CANCELLED` no cuentan.
+  `mensajes.completo` listo para mandar. Solo cuenta la **generación vigente** de cada link:
+  un `REPLACED` que se pagó tarde (queda `PAID` sin ser fuente de aplicación) no infla el
+  conteo ni suma como pagado.
 - **Historial:** `pago_link_estado` guarda el veredicto y el conteo, nunca URLs.
 - Implementación: `consultarEstadoPagoLink` + `resumirEstadoLinks` en `pago-link.ts`;
   `verificarSesion` se separó de `verificarAcceso` en `menu-credito.ts` para poder validar la

@@ -344,6 +344,24 @@ describe("estado de los links de la conversación (servicio 9)", () => {
 		);
 	});
 
+	test("un link REPLACED que se pagó después no cuenta: solo la generación vigente (Codex)", () => {
+		const r = resumirEstadoLinks(
+			grupo("PENDING_PAYMENT", [
+				link("CAPITAL", "ACTIVE"),
+				// generación 1, reemplazada y pagada tarde: PAID pero fuera de la aplicación
+				link("MORA_INTERES", "PAID", {
+					id: "m1",
+					generation: 1,
+					isApplicationSource: false,
+				}),
+				link("MORA_INTERES", "ACTIVE", { id: "m2", generation: 2 }),
+			]),
+		);
+		expect(r.estado).toBe("SIN_PAGO");
+		expect(r.links).toHaveLength(2);
+		expect(r.links.map((l) => l.estado)).toEqual(["PENDIENTE", "PENDIENTE"]);
+	});
+
 	test("aplanado: totalLinks/linksPagados/linksPendientes + linkN*", () => {
 		const r = resumirEstadoLinks(
 			grupo("PARTIALLY_PAID", [

@@ -202,6 +202,9 @@ export function PagaloLinkDialog({
 			queryClient.invalidateQueries(
 				orpc.getPagaloHistorial.queryOptions({ input: { casoCobroId } }),
 			);
+			queryClient.invalidateQueries(
+				orpc.getPagaloGrupoActivo.queryOptions({ input: { creditoId } }),
+			);
 			console.log("[Págalo] resultado del poll:", result);
 			toast.success(
 				`Poll: ${result.pagados} pagado(s), ${result.errores} error(es). Dispatch: ${result.dispatchCompletados} completado(s), ${result.dispatchErrores} error(es). Revisa la consola.`,

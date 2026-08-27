@@ -114,32 +114,44 @@ export async function sendPagaloLinksWhatsapp(
 		return { sent: false, error: msg };
 	}
 
-	await guardarLog({
-		numeroCreditoSifco: numeroSifco,
-		plantillaId: PLANTILLA_ID,
-		telefono: telefonoDestino,
-		mensaje,
-		providerRequest: result.providerRequest ?? null,
-		createdBy,
-		result: result.success
-			? {
-					success: true,
-					providerResponse: {
-						...(result.providerResponse ?? {}),
-						templateMessageId: result.templateMessageId,
-						testMode,
-						realTarget: testMode ? telefono : undefined,
+	// El log es best-effort: si el envío ya llegó al proveedor (result.success)
+	// y el log falla (ej. DB caída momentáneamente), NO debe convertirse en un
+	// "sent: false" — el modal instruiría al asesor a reenviar manualmente y
+	// duplicaría el mensaje al cliente que ya lo recibió (hallazgo de Codex,
+	// PR #1477).
+	try {
+		await guardarLog({
+			numeroCreditoSifco: numeroSifco,
+			plantillaId: PLANTILLA_ID,
+			telefono: telefonoDestino,
+			mensaje,
+			providerRequest: result.providerRequest ?? null,
+			createdBy,
+			result: result.success
+				? {
+						success: true,
+						providerResponse: {
+							...(result.providerResponse ?? {}),
+							templateMessageId: result.templateMessageId,
+							testMode,
+							realTarget: testMode ? telefono : undefined,
+						},
+					}
+				: {
+						success: false,
+						errorMessage: result.error,
+						providerResponse: {
+							...(result.providerResponse ?? {}),
+							...(testMode ? { testMode, realTarget: telefono } : {}),
+						},
 					},
-				}
-			: {
-					success: false,
-					errorMessage: result.error,
-					providerResponse: {
-						...(result.providerResponse ?? {}),
-						...(testMode ? { testMode, realTarget: telefono } : {}),
-					},
-				},
-	});
+		});
+	} catch (error) {
+		console.error(
+			`${LOG_PREFIX} Error guardando log para ${numeroSifco} (envío ${result.success ? "exitoso" : "fallido"}, no afecta el resultado):`,
+			error instanceof Error ? error.message : error,
+		);
+	}
 
 	if (!result.success) {
 		console.error(

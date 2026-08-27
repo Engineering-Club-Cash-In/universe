@@ -19,6 +19,7 @@ import {
 } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
+import { auditRecord } from "../lib/audit";
 import {
 	vehicleDocumentRequirements,
 	vehicleDocuments,
@@ -912,6 +913,7 @@ export const crmRouter = {
 	}),
 
 	createLead: crmProcedure
+		.meta({ audit: { entity: "lead", action: "create" } })
 		.input(
 			z.object({
 				firstName: z.string().min(1, "First name is required"),
@@ -1059,16 +1061,34 @@ export const crmRouter = {
 							});
 						}
 
-						await tx.insert(opportunities).values({
-							title: `${input.firstName} ${input.lastName}`,
-							leadId: existingLead.id,
-							creditType: "autocompra",
-							stageId: firstStage.id,
-							probability: 1,
-							assignedTo,
-							createdBy: context.userId,
-							source: input.source,
-							campaign: input.campaign,
+						// Este lead ya existía: lo que pasó fue una reasignación, no
+						// un alta.
+						auditRecord({
+							entity: "lead",
+							id: existingLead.id,
+							action: "reassign",
+							data: { dpi: normalizedDpi, assignedTo },
+						});
+
+						const [nuevaOportunidad] = await tx
+							.insert(opportunities)
+							.values({
+								title: `${input.firstName} ${input.lastName}`,
+								leadId: existingLead.id,
+								creditType: "autocompra",
+								stageId: firstStage.id,
+								probability: 1,
+								assignedTo,
+								createdBy: context.userId,
+								source: input.source,
+								campaign: input.campaign,
+							})
+							.returning({ id: opportunities.id });
+						auditRecord({
+							entity: "opportunity",
+							id: nuevaOportunidad.id,
+							action: "create",
+							data: { leadId: existingLead.id, assignedTo },
 						});
 
 						return lead;
@@ -1090,6 +1110,7 @@ export const crmRouter = {
 					updatedAt: new Date(),
 				})
 				.returning();
+			auditRecord({ entity: "lead", id: newLead[0].id, action: "create" });
 			return newLead[0];
 		}),
 
@@ -2789,6 +2810,7 @@ export const crmRouter = {
 		}),
 
 	reassignOpportunityAndLead: crmProcedure
+		.meta({ audit: { entity: "opportunity", action: "reassign" } })
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
@@ -2869,12 +2891,24 @@ export const crmRouter = {
 					.update(opportunities)
 					.set({ assignedTo: input.assignedTo, updatedAt: new Date() })
 					.where(eq(opportunities.id, input.opportunityId));
+				auditRecord({
+					entity: "opportunity",
+					id: input.opportunityId,
+					action: "reassign",
+				});
 
 				if (current.leadId) {
 					await tx
 						.update(leads)
 						.set({ assignedTo: input.assignedTo, updatedAt: new Date() })
 						.where(eq(leads.id, current.leadId));
+					// La reasignación arrastra al lead: sin esto su historial no
+					// muestra el cambio de dueño.
+					auditRecord({
+						entity: "lead",
+						id: current.leadId,
+						action: "reassign",
+					});
 				}
 			});
 		}),

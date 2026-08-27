@@ -1,6 +1,7 @@
 import { and, asc, count, eq, or } from "drizzle-orm";
 import type { Context } from "hono";
 import { db } from "../db";
+import { auditRecord } from "../lib/audit";
 import { user } from "../db/schema/auth";
 import {
 	type leadSourceEnum,
@@ -129,6 +130,13 @@ export async function createOpportunityForLead(
 			creditType: creditType ?? "autocompra",
 		})
 		.returning();
+
+	auditRecord({
+		entity: "opportunity",
+		id: newOpportunity.id,
+		action: "create",
+		data: { leadId, source, campaign, creditType, assignedTo: systemUserId },
+	});
 
 	return newOpportunity;
 }
@@ -338,6 +346,14 @@ export async function createPublicLead(c: Context) {
 					})
 					.where(eq(leads.id, existingLead.id))
 					.returning();
+				// Reasignación por ruleta: es de lo que más se reclama y hasta ahora
+				// no dejaba rastro en ningún lado.
+				auditRecord({
+					entity: "lead",
+					id: existingLead.id,
+					action: "reassign",
+					data: { assignedTo, motivo: "reingreso_formulario_publico" },
+				});
 			}
 
 			const opportunity = await createOpportunityForLead(

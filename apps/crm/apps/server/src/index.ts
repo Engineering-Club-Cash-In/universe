@@ -37,6 +37,7 @@ import {
 	checkSeguimientosVencidos,
 	procesarSeguimientosRecurrentes,
 } from "./jobs/cobros-notifications";
+import { auditRoute } from "./lib/audit";
 import { auth } from "./lib/auth";
 import { createContext } from "./lib/context";
 import { PERMISSIONS } from "./lib/roles";
@@ -958,7 +959,11 @@ app.post("/api/notifications/pay-investors", async (c) => {
 });
 
 // REST endpoint for public lead creation (for external web forms)
-app.post("/api/public/lead", createPublicLead);
+app.post(
+	"/api/public/lead",
+	auditRoute("public", { entity: "lead", action: "create" }),
+	createPublicLead,
+);
 
 // REST endpoint for investment lead creation (for external APIs)
 app.post("/api/public/investment-lead", async (c) => {

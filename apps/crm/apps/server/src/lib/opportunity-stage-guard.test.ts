@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { getStageVehicleRequirementError } from "./opportunity-stage-guard";
+import { and, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { opportunities } from "../db/schema";
+import {
+	buildOpportunityRelationshipInvariantCondition,
+	getStageLeadRequirementError,
+	getStageVehicleRequirementError,
+} from "./opportunity-stage-guard";
 
 describe("opportunity stage vehicle guard", () => {
 	test("requires a vehicle when moving from 30% to a later stage", () => {
@@ -16,5 +23,49 @@ describe("opportunity stage vehicle guard", () => {
 
 	test("allows stage changes when a vehicle is assigned", () => {
 		expect(getStageVehicleRequirementError(30, 40, "vehicle-id")).toBeNull();
+	});
+});
+
+describe("opportunity stage lead guard", () => {
+	test("rejects clearing the lead from an opportunity already in contractual workflow", () => {
+		expect(getStageLeadRequirementError(85, null)).toBe(
+			"La oportunidad debe conservar un cliente asignado desde la etapa jurídica (80%).",
+		);
+	});
+
+	test("requires an effective lead when entering contractual workflow", () => {
+		expect(getStageLeadRequirementError(80, null)).toBe(
+			"La oportunidad debe conservar un cliente asignado desde la etapa jurídica (80%).",
+		);
+	});
+
+	test("allows clearing the lead before contractual workflow", () => {
+		expect(getStageLeadRequirementError(79, null)).toBeNull();
+	});
+
+	test("allows advanced-stage edits when a lead remains assigned", () => {
+		expect(getStageLeadRequirementError(90, "lead-id")).toBeNull();
+	});
+});
+
+describe("opportunity update concurrency guard", () => {
+	test("parenthesizes the lead-stage invariant inside authorization predicates", () => {
+		const database = drizzle.mock();
+		const query = database
+			.update(opportunities)
+			.set({ notes: "updated" })
+			.where(
+				and(
+					eq(opportunities.id, "11111111-1111-4111-8111-111111111111"),
+					eq(opportunities.assignedTo, "sales-user"),
+					buildOpportunityRelationshipInvariantCondition({}),
+				),
+			)
+			.toSQL()
+			.sql.replace(/\s+/g, " ")
+			.toLowerCase();
+
+		expect(query).toContain('and ( coalesce(( select "sales_stages"');
+		expect(query).toContain('or "opportunities"."lead_id" is not null ))');
 	});
 });

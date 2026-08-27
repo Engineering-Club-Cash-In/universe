@@ -104,6 +104,7 @@ import {
 	type Opportunity,
 	opportunitiesColumns,
 } from "@/lib/opportunities/columns";
+import { buildOpportunityRelationshipPatch } from "@/lib/opportunity-relationship-patch";
 import {
 	formatQuotationClientName,
 	formatVehicleWithClient,
@@ -1124,17 +1125,15 @@ function RouteComponent() {
 		},
 		onSubmit: async ({ value }) => {
 			if (selectedOpportunity) {
+				const { leadId, companyId, vehicleId, ...opportunityValues } = value;
 				updateOpportunityMutation.mutate({
 					id: selectedOpportunity.id,
-					...value,
+					...opportunityValues,
+					...buildOpportunityRelationshipPatch({
+						values: { leadId, companyId, vehicleId },
+						opportunity: selectedOpportunity,
+					}),
 					creditType: value.creditType,
-					leadId:
-						value.leadId && value.leadId !== "none" ? value.leadId : undefined,
-					companyId:
-						value.companyId && value.companyId !== "none"
-							? value.companyId
-							: undefined,
-					vehicleId: value.vehicleId || null,
 					value: value.value || undefined,
 					expectedCloseDate: value.expectedCloseDate || undefined,
 					notes: value.notes || undefined,
@@ -1209,8 +1208,8 @@ function RouteComponent() {
 		mutationFn: (input: {
 			id: string;
 			title?: string;
-			leadId?: string;
-			companyId?: string;
+			leadId?: string | null;
+			companyId?: string | null;
 			vehicleId?: string | null;
 			creditType?: "autocompra" | "sobre_vehiculo";
 			status?: "open" | "won" | "lost" | "on_hold";

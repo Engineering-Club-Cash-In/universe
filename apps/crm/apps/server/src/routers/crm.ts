@@ -77,7 +77,11 @@ import {
 } from "../lib/lead-helpers";
 import { canSyncNitToOpportunity } from "../lib/lead-nit-sync";
 import { getLeadSourceLabel } from "../lib/lead-sources";
-import { getStageVehicleRequirementError } from "../lib/opportunity-stage-guard";
+import {
+	buildOpportunityRelationshipInvariantCondition,
+	getStageLeadRequirementError,
+	getStageVehicleRequirementError,
+} from "../lib/opportunity-stage-guard";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import {
@@ -2220,8 +2224,8 @@ export const crmRouter = {
 			z.object({
 				id: z.string().uuid(),
 				title: z.string().min(1, "Title is required").optional(),
-				leadId: z.string().uuid().optional(),
-				companyId: z.string().uuid().optional(),
+				leadId: z.string().uuid().nullable().optional(),
+				companyId: z.string().uuid().nullable().optional(),
 				vehicleId: z.string().uuid().nullable().optional(),
 				creditType: z.enum(["autocompra", "sobre_vehiculo"]).optional(),
 				source: z.enum(leadSourceEnum.enumValues).optional(),
@@ -2300,6 +2304,24 @@ export const crmRouter = {
 				});
 			}
 
+			if (input.leadId === null) {
+				const [currentStageForLead] = await db
+					.select({ closurePercentage: salesStages.closurePercentage })
+					.from(salesStages)
+					.where(eq(salesStages.id, currentOpportunity[0].stageId))
+					.limit(1);
+				const leadRequirementError = getStageLeadRequirementError(
+					currentStageForLead?.closurePercentage ?? 0,
+					input.leadId,
+				);
+
+				if (leadRequirementError) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: leadRequirementError,
+					});
+				}
+			}
+
 			// diaPagoMensual solo puede ser 15, 30, o uno de los días recomendados
 			// por el análisis de esta oportunidad Y del lead que quedará asignado
 			// (si leadId también cambia, el análisis del lead anterior ya no aplica).
@@ -2308,7 +2330,8 @@ export const crmRouter = {
 				input.diaPagoMensual !== 15 &&
 				input.diaPagoMensual !== 30
 			) {
-				const effectiveLeadId = input.leadId ?? currentOpportunity[0].leadId;
+				const effectiveLeadId =
+					"leadId" in input ? input.leadId : currentOpportunity[0].leadId;
 				const [analysis] = effectiveLeadId
 					? await db
 							.select({
@@ -2352,6 +2375,8 @@ export const crmRouter = {
 
 				const fromPercentage = currentStage[0]?.closurePercentage ?? 0;
 				const toPercentage = targetStage[0]?.closurePercentage ?? 0;
+				const effectiveLeadId =
+					"leadId" in input ? input.leadId : currentOpportunity[0].leadId;
 				const effectiveVehicleId =
 					input.vehicleId !== undefined
 						? input.vehicleId
@@ -2368,6 +2393,16 @@ export const crmRouter = {
 				if (vehicleRequirementError) {
 					throw new ORPCError("BAD_REQUEST", {
 						message: vehicleRequirementError,
+					});
+				}
+
+				const leadRequirementError = getStageLeadRequirementError(
+					toPercentage,
+					effectiveLeadId,
+				);
+				if (leadRequirementError) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: leadRequirementError,
 					});
 				}
 
@@ -2444,7 +2479,7 @@ export const crmRouter = {
 					}
 
 					// Validar datos del lead para contratos
-					if (currentOpportunity[0].leadId) {
+					if (effectiveLeadId) {
 						const leadForValidation = await db
 							.select({
 								dpi: leads.dpi,
@@ -2455,7 +2490,7 @@ export const crmRouter = {
 								nationality: leads.nationality,
 							})
 							.from(leads)
-							.where(eq(leads.id, currentOpportunity[0].leadId))
+							.where(eq(leads.id, effectiveLeadId))
 							.limit(1);
 
 						if (leadForValidation[0]) {
@@ -2529,9 +2564,12 @@ export const crmRouter = {
 				}
 			}
 
-			// Sales users can only update opportunities assigned to them
-			// Admin and sales_supervisor can update any opportunity
-			// Include optimistic locking check if expectedUpdatedAt is provided
+			// Sales users can only update opportunities assigned to them.
+			// Admin and sales_supervisor can update any opportunity.
+			const canUpdateOpportunity =
+				context.userRole === "admin" ||
+				context.userRole === "sales_supervisor" ||
+				currentOpportunity[0].assignedTo === context.userId;
 			const baseWhereClause =
 				context.userRole === "admin" || context.userRole === "sales_supervisor"
 					? eq(opportunities.id, id)
@@ -2540,13 +2578,23 @@ export const crmRouter = {
 							eq(opportunities.assignedTo, context.userId),
 						);
 
-			// Add optimistic locking condition if expectedUpdatedAt is provided
+			// PostgreSQL re-evaluates this predicate after waiting for a concurrent
+			// row update, so lead/stage edits cannot jointly persist an invalid state.
+			const relationshipInvariantCondition =
+				buildOpportunityRelationshipInvariantCondition({
+					...(input.stageId ? { stageId: input.stageId } : {}),
+					...("leadId" in input ? { leadId: input.leadId } : {}),
+				});
+			const invariantWhereClause = and(
+				baseWhereClause,
+				relationshipInvariantCondition,
+			);
 			const whereClause = expectedUpdatedAt
 				? and(
-						baseWhereClause,
+						invariantWhereClause,
 						eq(opportunities.updatedAt, new Date(expectedUpdatedAt)),
 					)
-				: baseWhereClause;
+				: invariantWhereClause;
 
 			// Sales users cannot reassign opportunities
 			if (
@@ -2658,8 +2706,7 @@ export const crmRouter = {
 				.returning();
 
 			if (updatedOpportunity.length === 0) {
-				// If expectedUpdatedAt was provided and no rows updated, it's likely a concurrent modification
-				if (expectedUpdatedAt) {
+				if (canUpdateOpportunity) {
 					throw new ORPCError("CONFLICT", {
 						message:
 							"La oportunidad fue modificada por otro usuario. Por favor recarga la página e intenta de nuevo.",

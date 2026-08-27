@@ -249,9 +249,12 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 						]
 					: [],
 			),
-			// Grupo ya existía (reintento o creado por el BOT) — este llamado no
-			// disparó un envío de WhatsApp nuevo.
-			whatsappEnviado: false,
+			// Grupo ya existía (reintento o creado por otro asesor/el BOT) — este
+			// llamado no intentó enviar WhatsApp, `null` distingue "no aplica" de
+			// "se intentó y falló" (whatsappEnviado: false), para no instruir al
+			// asesor a reenviar manualmente un mensaje que sí pudo haber llegado
+			// en la creación original (hallazgo de Codex, PR #1470).
+			whatsappEnviado: null as boolean | null,
 		};
 	}
 	const config = getPagaloSandboxConfig();

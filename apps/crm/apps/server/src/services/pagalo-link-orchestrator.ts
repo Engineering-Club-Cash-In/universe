@@ -1,14 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray, notInArray } from "drizzle-orm";
 import { db } from "../db";
-import { casosCobros, contratosFinanciamiento } from "../db/schema/cobros";
+import { casosCobros } from "../db/schema/cobros";
 import { leads, opportunities } from "../db/schema/crm";
 import {
 	pagaloPaymentEvents,
 	pagaloPaymentGroups,
 	pagaloPaymentLinks,
 } from "../db/schema/pagalo-payments";
-import { vehicles } from "../db/schema/vehicles";
 import { isTestModeEnabled } from "../lib/messaging-test-mode";
 import {
 	buildPagaloAllocations,
@@ -22,6 +21,10 @@ import {
 	getPagaloSandboxConfig,
 	toPagaloProviderAmount,
 } from "./pagalo-client";
+import {
+	construirIdentificadorCredito,
+	resolverVehiculoCasoPagalo,
+} from "./pagalo-vehiculo";
 import { sendPagaloLinksWhatsapp } from "./send-pagalo-links-whatsapp";
 
 type CreatePagaloLinksInput = {
@@ -139,31 +142,22 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 			telefonoPrincipal: casosCobros.telefonoPrincipal,
 			emailContacto: casosCobros.emailContacto,
 			direccionContacto: casosCobros.direccionContacto,
-			vehiculoMarca: vehicles.make,
-			vehiculoModelo: vehicles.model,
-			vehiculoYear: vehicles.year,
-			vehiculoPlaca: vehicles.licensePlate,
 		})
 		.from(casosCobros)
-		.leftJoin(
-			contratosFinanciamiento,
-			eq(casosCobros.contratoId, contratosFinanciamiento.id),
-		)
-		.leftJoin(vehicles, eq(contratosFinanciamiento.vehicleId, vehicles.id))
 		.where(eq(casosCobros.id, input.casoCobroId))
 		.limit(1);
 	if (!caso || caso.numeroCreditoSifco !== input.numeroSifco) {
 		throw new Error("Caso de cobro no corresponde al crédito Págalo.");
 	}
 	// D-04 pedía siempre "crédito {sifco}" en el mensaje; ahora el pedido es
-	// identificar el vehículo (marca modelo año · placa) cuando esté cargado,
-	// cayendo a SIFCO si el contrato o la placa no están disponibles.
-	const identificadorCredito =
-		caso.vehiculoMarca && caso.vehiculoPlaca
-			? `vehículo ${`${caso.vehiculoMarca} ${caso.vehiculoModelo ?? ""} ${caso.vehiculoYear ?? ""}`
-					.replace(/\s+/g, " ")
-					.trim()} · ${caso.vehiculoPlaca}`
-			: `crédito ${input.numeroSifco}`;
+	// identificar el vehículo cuando esté cargado — mismo helper que usa el
+	// preview del modal (getVehiculoCasoPagalo, cobros.ts) para que ambos
+	// textos coincidan siempre (hallazgo de Codex, PR #1470).
+	const vehiculoCaso = await resolverVehiculoCasoPagalo(input.casoCobroId);
+	const identificadorCredito = construirIdentificadorCredito(
+		vehiculoCaso,
+		input.numeroSifco,
+	);
 	const [leadInfo] = await db
 		.select({
 			email: leads.email,

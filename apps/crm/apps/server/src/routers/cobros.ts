@@ -155,6 +155,7 @@ import {
 	getPagaloSandboxConfig,
 } from "../services/pagalo-client";
 import { createPagaloLinks } from "../services/pagalo-link-orchestrator";
+import { resolverVehiculoCasoPagalo } from "../services/pagalo-vehiculo";
 import {
 	type EstadoCuentaErrorCodigo,
 	sendEstadoCuentaWhatsapp,
@@ -4771,49 +4772,15 @@ export const cobrosRouter = {
 			}
 		}),
 
-	// Vehículo del caso vía la MISMA fuente que usa createPagaloLinks para
-	// armar el identificador del mensaje de WhatsApp (pagalo-link-
-	// orchestrator.ts: casosCobros.contratoId -> contratosFinanciamiento.
-	// vehicleId -> vehicles). Casos migrados de cartera-back sin flujo de
-	// originación completo no tienen contratoId (hallazgo real, PR #1470:
-	// caso 01010214109410) — en ese caso cae a opportunities.vehicleId, la
-	// misma fuente que ya usa getDetallesCreditoCarteraBack para el header.
+	// Vehículo del caso para el preview del mensaje de Págalo — usa el mismo
+	// helper que createPagaloLinks (resolverVehiculoCasoPagalo) para que el
+	// preview y el mensaje real de WhatsApp identifiquen siempre el mismo
+	// vehículo (hallazgo de Codex, PR #1470).
 	getVehiculoCasoPagalo: cobrosProcedure
 		.input(z.object({ casoCobroId: z.string().uuid() }))
-		.handler(async ({ input }) => {
-			const [fila] = await db
-				.select({
-					numeroCreditoSifco: casosCobros.numeroCreditoSifco,
-					vehiculoMarca: vehicles.make,
-					vehiculoModelo: vehicles.model,
-					vehiculoYear: vehicles.year,
-					vehiculoPlaca: vehicles.licensePlate,
-				})
-				.from(casosCobros)
-				.leftJoin(
-					contratosFinanciamiento,
-					eq(casosCobros.contratoId, contratosFinanciamiento.id),
-				)
-				.leftJoin(vehicles, eq(contratosFinanciamiento.vehicleId, vehicles.id))
-				.where(eq(casosCobros.id, input.casoCobroId))
-				.limit(1);
-			if (!fila) return null;
-			if (fila.vehiculoMarca && fila.vehiculoPlaca) return fila;
-			if (!fila.numeroCreditoSifco) return fila;
-
-			const [porOportunidad] = await db
-				.select({
-					vehiculoMarca: vehicles.make,
-					vehiculoModelo: vehicles.model,
-					vehiculoYear: vehicles.year,
-					vehiculoPlaca: vehicles.licensePlate,
-				})
-				.from(opportunities)
-				.leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
-				.where(eq(opportunities.numeroSifco, fila.numeroCreditoSifco))
-				.limit(1);
-			return porOportunidad?.vehiculoMarca ? porOportunidad : fila;
-		}),
+		.handler(async ({ input }) =>
+			resolverVehiculoCasoPagalo(input.casoCobroId),
+		),
 
 	// Grupo Págalo activo (no COMPLETED/CANCELLED) del crédito, si existe —
 	// mismo filtro que createPagaloLinks usa para no duplicar (pagalo-link-

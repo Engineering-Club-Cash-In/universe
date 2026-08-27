@@ -28,6 +28,7 @@ import {
   isReversibleIncobrablePayment,
   REVERSIBLE_CREDIT_STATUSES,
   shouldInstallmentRemainPaidAfterReversal,
+  shouldRemainPaidAfterInvalidatingPayment,
   shouldRemoveSameInstallmentPaymentOnReverse,
 } from "./reversePaymentPolicy";
 import {
@@ -177,7 +178,13 @@ export function createReversePayment(
       // el dinero vuelve — el ajuste debe volver a quedar pendiente para poder
       // reintentarlo en un pago futuro. Mismo helper que usan falsePayment y
       // la anulación por incobrable (ver ajusteFechaIdealPago.ts).
-      await resetAjusteFechaIdealSiPagoInvalidado(pago_id, tx);
+      // El resultado se reusa más abajo: si este pago era el que lo cobraba,
+      // hay que forzar la reapertura de la cuota 1 (ver
+      // shouldRemainPaidAfterInvalidatingPayment).
+      const ajusteEraDeEstePago = await resetAjusteFechaIdealSiPagoInvalidado(
+        pago_id,
+        tx,
+      );
 
       // ======================================================================
       // 3️⃣ OBTENER DATOS DEL CRÉDITO
@@ -634,6 +641,15 @@ export function createReversePayment(
         if (incobrableCuotaPagada !== null) {
           cuotaPermanecePagada = incobrableCuotaPagada;
         }
+
+        // Última palabra: si el pago que se está revirtiendo era el que
+        // cobraba el ajuste, la cuota 1 se reabre sin importar lo que diga
+        // el contractual (o INCOBRABLE) por su cuenta — ver
+        // shouldRemainPaidAfterInvalidatingPayment.
+        cuotaPermanecePagada = shouldRemainPaidAfterInvalidatingPayment({
+          cuotaPermanecePagadaCalculado: cuotaPermanecePagada,
+          pagoEraElQueCobroElAjuste: ajusteEraDeEstePago,
+        });
 
         if (pago.cuota_id !== null) {
           await tx

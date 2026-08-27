@@ -4,6 +4,7 @@ import {
   isCreditStatusReversible,
   isReversibleIncobrablePayment,
   shouldInstallmentRemainPaidAfterReversal,
+  shouldRemainPaidAfterInvalidatingPayment,
   shouldRemoveSameInstallmentPaymentOnReverse,
 } from "./reversePaymentPolicy";
 
@@ -87,6 +88,41 @@ describe("reverse payment policy", () => {
     expect(isCreditStatusReversible("CAIDO")).toBeFalse();
     expect(isCreditStatusReversible(null)).toBeFalse();
     expect(isCreditStatusReversible(undefined)).toBeFalse();
+  });
+});
+
+describe("shouldRemainPaidAfterInvalidatingPayment", () => {
+  it("fuerza a reabrir la cuota si el pago invalidado era el que cobraba el ajuste, aunque el contractual siga cubierto", () => {
+    expect(
+      shouldRemainPaidAfterInvalidatingPayment({
+        cuotaPermanecePagadaCalculado: true,
+        pagoEraElQueCobroElAjuste: true,
+      }),
+    ).toBeFalse();
+  });
+
+  it("respeta el cálculo normal si el pago invalidado no era el del ajuste", () => {
+    expect(
+      shouldRemainPaidAfterInvalidatingPayment({
+        cuotaPermanecePagadaCalculado: true,
+        pagoEraElQueCobroElAjuste: false,
+      }),
+    ).toBeTrue();
+    expect(
+      shouldRemainPaidAfterInvalidatingPayment({
+        cuotaPermanecePagadaCalculado: false,
+        pagoEraElQueCobroElAjuste: false,
+      }),
+    ).toBeFalse();
+  });
+
+  it("sigue reabriendo aunque el cálculo previo ya diera false (idempotente)", () => {
+    expect(
+      shouldRemainPaidAfterInvalidatingPayment({
+        cuotaPermanecePagadaCalculado: false,
+        pagoEraElQueCobroElAjuste: true,
+      }),
+    ).toBeFalse();
   });
 });
 

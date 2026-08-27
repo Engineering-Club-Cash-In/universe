@@ -107,6 +107,11 @@ export interface AjusteFechaIdealPayload {
 	monto_membresia: number;
 	monto_servicios: number;
 	monto_total: number;
+	// Momento (ISO) que CRM usó como "hoy" para calcular dias_del_mes.
+	// cartera-back debe usar EXACTAMENTE este mismo valor al generar el
+	// calendario real (generatePaymentDates), no su propio new Date(), para
+	// que ambos lados nunca puedan discrepar sobre en qué mes cae la cuota 1.
+	fecha_referencia: string;
 }
 
 export interface CreateCreditoInput {

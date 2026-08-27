@@ -12,12 +12,19 @@ type Executor = Pick<typeof db, "update">;
  * Sin esto el dinero queda "cobrado" para siempre apuntando a un pago que en
  * realidad nunca entró, y nadie lo vuelve a cobrar.
  *
- * No-op silencioso si pago_id no es el que cobró ningún ajuste (caso normal).
+ * Devuelve true si pago_id SÍ era el que cobraba un ajuste (se reseteó). El
+ * caller lo necesita: si el pago que se invalida era justo ese, la cuota 1
+ * puede quedar "cerrada" igual porque el monto contractual por su cuenta
+ * sigue cubierto (shouldInstallmentRemainPaidAfterReversal no sabe nada del
+ * ajuste) — hay que forzar la reapertura aparte, ver reversePayment.ts y
+ * payments.ts (falsePayment).
+ *
+ * No-op silencioso (retorna false) si pago_id no cobró ningún ajuste (caso normal).
  */
 export async function resetAjusteFechaIdealSiPagoInvalidado(
   pago_id: number,
   executor: Executor = db
-): Promise<void> {
+): Promise<boolean> {
   const reseteado = await executor
     .update(ajuste_fecha_ideal_pago)
     .set({ fecha_cobro: null, pago_id: null })
@@ -29,6 +36,8 @@ export async function resetAjusteFechaIdealSiPagoInvalidado(
       `🧾 Ajuste por fecha ideal de pago #${reseteado[0].id} reseteado a pendiente (pago_id=${pago_id} invalidado).`
     );
   }
+
+  return reseteado.length > 0;
 }
 
 /**
@@ -56,4 +65,45 @@ export async function resetAjusteFechaIdealPorCredito(
       `🧾 Ajuste por fecha ideal de pago #${reseteado[0].id} reseteado a pendiente (crédito ${credito_id}: se borraron sus pagos).`
     );
   }
+}
+
+export type AjusteReimportAction =
+  | { kind: "ninguna" }
+  | { kind: "reenganchar"; ajusteId: number; montoTotal: string }
+  | { kind: "reabrir" };
+
+/**
+ * Qué hacer con el ajuste cuando una reconstrucción de historial (Excel/SIFCO
+ * — marcarCuotasPagadasHastaNumero y sus 5 llamadores) marca la cuota 1 como
+ * pagada. Esos flujos no pasan por insertPayment, así que no tienen ninguna
+ * noción del ajuste por su cuenta.
+ *
+ * Se decide con el ÚNICO dato real que tenemos — el estado del ajuste ANTES
+ * de que la reconstrucción lo toque — en vez de asumir que sí o que no se
+ * cobró:
+ * - Si ya tenía fecha_cobro (un pago real, por insertPayment, lo había
+ *   cobrado antes) → es un hecho: se reengancha a la fila reconstruida.
+ * - Si nunca se cobró → también es un hecho: no hay evidencia de que haya
+ *   entrado, así que la cuota 1 se reabre en vez de darla por buena.
+ */
+export function decidirAjusteAlReconstruirCuota1({
+  hastaCuota,
+  ajustePrevio,
+}: {
+  hastaCuota: number;
+  ajustePrevio: {
+    id: number;
+    montoTotal: string;
+    fechaCobro: Date | string | null;
+  } | null;
+}): AjusteReimportAction {
+  if (hastaCuota < 1 || !ajustePrevio) return { kind: "ninguna" };
+  if (ajustePrevio.fechaCobro != null) {
+    return {
+      kind: "reenganchar",
+      ajusteId: ajustePrevio.id,
+      montoTotal: ajustePrevio.montoTotal,
+    };
+  }
+  return { kind: "reabrir" };
 }

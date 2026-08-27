@@ -253,6 +253,13 @@ const creditSchema = z.object({
       monto_membresia: z.number().min(0),
       monto_servicios: z.number().min(0),
       monto_total: z.number().min(0),
+      // Momento (ISO) que el CRM usó como "hoy" para calcular dias_del_mes.
+      // generatePaymentDates lo usa tal cual en vez de leer su propio
+      // new Date(), para que el calendario real y el ajuste ya calculado
+      // nunca puedan discrepar sobre en qué mes cae la cuota 1. Opcional
+      // por compatibilidad con payloads viejos -- sin él, cae al new Date()
+      // de siempre (mismo comportamiento que antes de este campo).
+      fecha_referencia: z.string().datetime().optional(),
     })
     .optional(),
 });
@@ -716,11 +723,23 @@ if (creditosInversionistasData.length > 0) {
 // 3. GENERACIÓN DE FECHAS
 // ========================================
 
-const generatePaymentDates = (plazo: number, diaPagoMensual: number): string[] => {
+// fechaReferencia: opcional. Cuando el crédito trae un ajuste por fecha ideal
+// de pago (ver ajuste_fecha_ideal.fecha_referencia más arriba), es el mismo
+// "hoy" que el CRM ya usó para calcular ese ajuste -- generar el calendario
+// con esa misma fecha, en vez de leer un new Date() propio unos segundos
+// después por la llamada HTTP, es lo que evita que ambos lados discrepen
+// sobre en qué mes cae la cuota 1 (P2 de revisión, PR #1263). Sin ella
+// (cualquier otro flujo de creación de crédito, insolutos incluidos), cae al
+// new Date() de siempre -- comportamiento sin cambios.
+export const generatePaymentDates = (
+  plazo: number,
+  diaPagoMensual: number,
+  fechaReferencia?: Date
+): string[] => {
   const fechas: string[] = [];
-  const startDate = new Date();
+  const startDate = fechaReferencia ?? new Date();
 
-  const fechaHoy = new Date();
+  const fechaHoy = fechaReferencia ?? new Date();
   const fechaHoyGuate = fechaHoy.toLocaleDateString("sv-SE", {
     timeZone: "America/Guatemala",
   });
@@ -985,7 +1004,14 @@ export const createCreditCore = async (
   // El día de pago ya viene validado (1-31) desde el CRM: 15, 30, o un día
   // recomendado por el análisis de capacidad de pago. generatePaymentDates
   // hace el clamp de fin de mes internamente, así que se usa tal cual.
-  const fechas = generatePaymentDates(creditData.plazo, creditData.dia_pago_mensual);
+  const fechaReferenciaAjuste = creditData.ajuste_fecha_ideal?.fecha_referencia
+    ? new Date(creditData.ajuste_fecha_ideal.fecha_referencia)
+    : undefined;
+  const fechas = generatePaymentDates(
+    creditData.plazo,
+    creditData.dia_pago_mensual,
+    fechaReferenciaAjuste
+  );
 
   const { cuotaInicial, cuotasInsertadas } = await insertInstallments(
     newCredit.credito_id,

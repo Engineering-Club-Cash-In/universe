@@ -1,11 +1,12 @@
 import Big from "big.js";
-import { eq, and, gt, asc, inArray, lte } from "drizzle-orm";
+import { eq, and, gt, asc, inArray, lte, sql } from "drizzle-orm";
 import { db } from "../database";
-import { creditos, cuotas_credito, pagos_credito } from "../database/db";
+import { creditos, cuotas_credito, pagos_credito, ajuste_fecha_ideal_pago } from "../database/db";
 import { consultarEstadoCuentaPrestamo } from "../services/sifcoIntegrations";
 import { updateInstallments } from "./updateCredit";
 import { countPersistedRows } from "./persistenceEvidence";
 import { emitSifcoPaymentMigration } from "../utils/structuredLogger";
+import { decidirAjusteAlReconstruirCuota1 } from "./ajusteFechaIdealPago";
 
 interface AjustarCuotasConSIFCOParams {
   numero_credito_sifco: string;
@@ -343,6 +344,21 @@ export const marcarCuotasPagadasHastaNumero = async ({
   const credito = creditoResult[0];
   if (!credito) throw new Error("Crédito no encontrado");
 
+  // Estado del ajuste por fecha ideal de pago ANTES de que esta reconstrucción
+  // toque nada — es el único dato real que tenemos sobre si alguna vez se
+  // cobró de verdad (por un pago real, vía insertPayment). Se decide con eso
+  // más abajo (decidirAjusteAlReconstruirCuota1), no adivinando.
+  const [ajustePrevioRow] = await db
+    .select({
+      id: ajuste_fecha_ideal_pago.id,
+      montoTotal: ajuste_fecha_ideal_pago.monto_total,
+      fechaCobro: ajuste_fecha_ideal_pago.fecha_cobro,
+    })
+    .from(ajuste_fecha_ideal_pago)
+    .where(eq(ajuste_fecha_ideal_pago.credito_id, credito.credito_id))
+    .limit(1);
+  const ajustePrevio = ajustePrevioRow ?? null;
+
   /* =====================================================
      2️⃣ CAPITAL INICIAL REAL (SIFCO)
      ===================================================== */
@@ -570,6 +586,45 @@ export const marcarCuotasPagadasHastaNumero = async ({
           .returning({ pago_id: pagos_credito.pago_id })
       ),
     ]);
+
+    // Esta reconstrucción no pasa por insertPayment, así que no tiene ninguna
+    // noción propia del ajuste por fecha ideal de pago — sin esto, marcar la
+    // cuota 1 como pagada la deja "cerrada" mientras el ajuste queda
+    // huérfano (cobrado antes y ahora sin pago que lo respalde, o nunca
+    // cobrado y ahora sin ninguna cuota abierta que lo vuelva a ofrecer).
+    const cuota1 = cuotasConPagos.find((c) => c.numero_cuota === 1);
+    const accionAjuste = decidirAjusteAlReconstruirCuota1({
+      hastaCuota: hasta_cuota,
+      ajustePrevio,
+    });
+    if (cuota1) {
+      if (accionAjuste.kind === "reenganchar" && cuota1.pago_id) {
+        await tx
+          .update(pagos_credito)
+          .set({
+            // otros es `text` en la DB, no numeric -- hay que castear ambos
+            // lados para sumar, y castear el resultado de vuelta a texto.
+            otros: sql`(COALESCE(${pagos_credito.otros}, '0')::numeric + ${accionAjuste.montoTotal}::numeric)::text`,
+          })
+          .where(eq(pagos_credito.pago_id, cuota1.pago_id));
+        await tx
+          .update(ajuste_fecha_ideal_pago)
+          .set({ fecha_cobro: new Date(), pago_id: cuota1.pago_id })
+          .where(eq(ajuste_fecha_ideal_pago.id, accionAjuste.ajusteId));
+        console.log(
+          `🧾 Ajuste #${accionAjuste.ajusteId} reenganchado a la cuota 1 reconstruida (pago_id=${cuota1.pago_id}) — ya se había cobrado antes de reimportar.`
+        );
+      } else if (accionAjuste.kind === "reabrir") {
+        await tx
+          .update(cuotas_credito)
+          .set({ pagado: false })
+          .where(eq(cuotas_credito.cuota_id, cuota1.cuota_id));
+        console.log(
+          `🧾 Cuota 1 del crédito ${credito.credito_id} se deja abierta: tiene un ajuste por fecha ideal de pago pendiente que nunca se cobró.`
+        );
+      }
+    }
+
     return countPersistedRows(updatedRows);
   });
 

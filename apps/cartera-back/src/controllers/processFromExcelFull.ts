@@ -325,9 +325,21 @@ export async function procesarCreditoDesdeExcelFull(
       .where(eq(pagos_credito.credito_id, existing.credito_id));
     // El crédito sigue vivo (se reimporta, no se borra) — si tenía un ajuste
     // por fecha ideal de pago ya cobrado, el pago que lo cobró se acaba de
-    // eliminar arriba: resetearlo, si no queda "cobrado" para siempre sin
-    // ningún pago real detrás.
-    await resetAjusteFechaIdealPorCredito(existing.credito_id);
+    // eliminar arriba.
+    //
+    // Si esta reimportación SÍ va a reconstruir la cuota 1 como pagada más
+    // abajo (hasta_cuota >= 1), NO se resetea acá: marcarCuotasPagadasHastaNumero
+    // necesita leer fecha_cobro tal cual estaba (el ON DELETE SET NULL del FK
+    // ya limpió pago_id solo) para decidir si reenganchar el ajuste a la fila
+    // reconstruida o reabrir la cuota — resetear acá borraría esa evidencia
+    // antes de que la pueda leer (ver decidirAjusteAlReconstruirCuota1).
+    //
+    // Si NO va a reconstruir nada (hasta_cuota 0/undefined), nadie más va a
+    // resolver el ajuste después: se resetea acá para no dejarlo "cobrado"
+    // apuntando a un pago que ya no existe.
+    if (hasta_cuota === undefined || hasta_cuota <= 0) {
+      await resetAjusteFechaIdealPorCredito(existing.credito_id);
+    }
     await db
       .delete(cuotas_credito)
       .where(eq(cuotas_credito.credito_id, existing.credito_id));

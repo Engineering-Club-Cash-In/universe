@@ -1021,6 +1021,15 @@ async function createCredit(
 		// sistema hubiera asignado por default. Solo aplica cuando diaPagoOriginalSistema
 		// quedó capturado en el 50% (assignInvestorAndAdvance) — es decir, solo cuando
 		// se eligió un día IA, nunca cuando se eligió 15/30 manualmente.
+		//
+		// fechaReferenciaAjuste se captura UNA vez y viaja con el payload para que
+		// cartera-back arme el calendario real (generatePaymentDates) con la MISMA
+		// fecha, no con su propio new Date() unos milisegundos/segundos después por
+		// la llamada HTTP. Sin esto, si la llamada cruza la medianoche del último
+		// día del mes, cada lado calcula "días del mes" contra un mes distinto —
+		// el ajuste quedaría calculado con un denominador que no corresponde al
+		// mes real de la cuota 1.
+		const fechaReferenciaAjuste = new Date();
 		const ajusteCalculado =
 			opportunity.diaPagoOriginalSistema != null
 				? calcularAjusteFechaIdeal({
@@ -1033,6 +1042,7 @@ async function createCredit(
 						membresiaMensual: membresiaPago ?? 0,
 						seguroMensual: seguro ?? 0,
 						gpsMensual: gps ?? 0,
+						fechaReferencia: fechaReferenciaAjuste,
 					})
 				: null;
 
@@ -1054,6 +1064,7 @@ async function createCredit(
 						monto_membresia: ajusteCalculado.montoMembresia,
 						monto_servicios: ajusteCalculado.montoServicios,
 						monto_total: ajusteCalculado.montoTotal,
+						fecha_referencia: fechaReferenciaAjuste.toISOString(),
 					}
 				: undefined;
 

@@ -71,7 +71,7 @@ mock.module("@cci/email", () => ({
   sendNewCreditNotification: mock(() => Promise.resolve()),
 }));
 
-const { insertCredit, findOrCreateAseguradora } = await import("./createCredit");
+const { insertCredit, findOrCreateAseguradora, generatePaymentDates } = await import("./createCredit");
 
 type Executor = Parameters<typeof findOrCreateAseguradora>[1];
 
@@ -186,5 +186,36 @@ describe("findOrCreateAseguradora", () => {
 
     const id = await findOrCreateAseguradora("Universales", executor);
     expect(id).toBe(99);
+  });
+});
+
+describe("generatePaymentDates", () => {
+  // Regresión del P2 de revisión (rollover de fin de mes, PR #1263): CRM
+  // calcula el ajuste con su propio "hoy" y cartera-back generaba el
+  // calendario con OTRO "hoy" propio, minutos/segundos después por la
+  // llamada HTTP. Si esa llamada cruza la medianoche del último día del
+  // mes, cada lado usaba un mes distinto para el prorrateo. Pasar
+  // fechaReferencia hace que cartera-back use EXACTAMENTE el mismo "hoy"
+  // que ya usó el CRM para calcular el ajuste.
+  it("con fechaReferencia a las 23:59:59 del último día del mes, agenda la cuota 1 en el mes siguiente correcto (no en el que caería si leyera su propio reloj después de medianoche)", () => {
+    // 31-ene-2026 23:59:59 — el ejemplo exacto de la revisión.
+    const fechaReferencia = new Date(2026, 0, 31, 23, 59, 59);
+    const fechas = generatePaymentDates(1, 15, fechaReferencia);
+
+    // fechas[0] es "hoy"; fechas[1] es la cuota 1.
+    expect(fechas[1]).toBe("2026-02-15");
+  });
+
+  it("respeta el clamp de fin de mes usando el mes de fechaReferencia, no el que tocaría cruzando a marzo", () => {
+    // Elegido 31, pero febrero 2026 (no bisiesto) solo tiene 28 días.
+    const fechaReferencia = new Date(2026, 0, 31, 23, 59, 59);
+    const fechas = generatePaymentDates(1, 31, fechaReferencia);
+
+    expect(fechas[1]).toBe("2026-02-28");
+  });
+
+  it("sin fechaReferencia, sigue funcionando como antes (no revienta ni la exige)", () => {
+    const fechas = generatePaymentDates(2, 15);
+    expect(fechas.length).toBe(3); // "hoy" + 2 cuotas
   });
 });

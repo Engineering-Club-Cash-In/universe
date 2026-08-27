@@ -39,6 +39,9 @@ declara `.meta({ audit: { …, onlyOnError: true } })`: audita su éxito a mano 
 cada rama y deja que el middleware registre solo los intentos rechazados, para
 que no sea el único procedure sin filas `ok = false`.
 
+Para operaciones masivas (imports, limpiezas) está `logEntityAuditMany`, que
+mete todas las filas en un solo INSERT en vez de un round-trip por entidad.
+
 Un helper compartido por varios flujos (como `createOpportunityForLead`, que
 usan el formulario público y el portal) recibe el `source` por parámetro en vez
 de fijarlo, si no la procedencia se pierde.
@@ -75,6 +78,12 @@ JOIN opportunities o ON o.id::text = a.entity_id
 WHERE a.entity_type = 'opportunity' AND a.action = 'update'
   AND o.status = 'won' AND a.input ? 'vehicleId';
 ```
+
+## Qué queda fuera
+
+`db/seed.ts` y `db/clear.ts` (scripts de desarrollo, no endpoints) y
+`controllers/reprocess-opportunities.ts`, cuya ruta está comentada en
+`index.ts`. Si esa se reactiva, hay que auditarla.
 
 ## Retención
 

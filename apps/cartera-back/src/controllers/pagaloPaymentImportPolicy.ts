@@ -92,6 +92,16 @@ export const PAGALO_IMPORT_ERROR_MESSAGES: Record<
 };
 
 const moneyText = /^\d+(?:\.\d{1,2})?$/;
+const RUBROS_DERIVADOS_DE_CUOTA = new Set([
+  "CAPITAL",
+  "INTERES",
+  "IVA",
+  "INTERES_CI",
+  "IVA_CI",
+  "SEGURO",
+  "GPS",
+  "MEMBRESIAS",
+]);
 
 // FASE 2 — Tipos de entrada estrictos. Antes de crear Big.js se descartan
 // exponentes, Infinity, montos negativos/imprecisos y valores fuera de
@@ -358,7 +368,9 @@ export function validatePagaloImportCommand(
     (a) => a.numero_cuota === c.cuota_inicial,
   );
   const otrosTieneCuotaSeleccionada = c.allocations.some(
-    (a) => a.numero_cuota === c.cuota_inicial && a.rubro !== "OTROS",
+    (a) =>
+      a.numero_cuota === c.cuota_inicial &&
+      RUBROS_DERIVADOS_DE_CUOTA.has(a.rubro),
   );
   const sum = (items: typeof c.allocations) =>
     items.reduce((n, a) => n.plus(a.amount), new Big(0));

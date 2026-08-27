@@ -5,6 +5,7 @@ import {
   clasificarRespuestaFacturacion,
   createPagaloImportService,
   facturacionPagaloActiva,
+	esCuotaInicialPagaloVigente,
   getPagaloImportReplayHttpStatus,
   getPagaloReviewRequiredReason,
   isPagaloSameRoleEvidenceConflict,
@@ -128,6 +129,25 @@ describe("pagalo payment import", () => {
       otros: 12.34,
     });
   });
+
+	it("requiere que Otros conserve su cuota inicial auditada", () => {
+		const input = command();
+		input.facturable_total = "37.34";
+		input.otros_total = "12.34";
+		input.total_amount = "137.34";
+		input.allocations.push({
+			link_type: "MORA_INTERES",
+			cartera_cuota_id: 20,
+			numero_cuota: 2,
+			rubro: "OTROS",
+			amount: "12.34",
+			facturable: true,
+		});
+
+		expect(esCuotaInicialPagaloVigente(input, 20)).toBeTrue();
+		expect(esCuotaInicialPagaloVigente(input, 21)).toBeFalse();
+		expect(esCuotaInicialPagaloVigente(input, undefined)).toBeFalse();
+	});
 
   it("does not invent a Q0 source when mapping capital-only or facturable-only groups", () => {
     const capitalOnly = command();

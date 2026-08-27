@@ -5,7 +5,7 @@ import {
   type PagaloImportCommand,
 } from "./pagaloPaymentImportPolicy";
 import Big from "big.js";
-import { and, asc, eq, inArray, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { db } from "../database";
 import {
   creditos,
@@ -13,6 +13,7 @@ import {
   moras_credito,
   pagalo_payment_imports,
   pagos_credito,
+	cuotas_credito,
 } from "../database/db";
 import type { PagaloFacturaStatus, PagaloReciboStatus } from "../database/db/schema";
 import { facturarPagoCompleto } from "../routers/cofidi";
@@ -134,6 +135,24 @@ export function mapPagaloImportToRegistro(
     },
     banco_id: PAGALO_BANCO_ID,
   };
+}
+
+/**
+ * `Otros` es un cargo de la cuota inicial auditada, no un saldo genérico del
+ * crédito. Si esa cuota ya cambió antes de importar, no se puede mover a la
+ * siguiente sin contradecir el snapshot firmado por Págalo.
+ */
+export function esCuotaInicialPagaloVigente(
+	command: PagaloImportCommand,
+	cuotaInicialVivaId: number | undefined,
+): boolean {
+	if (new Big(command.otros_total).eq(0)) return true;
+	const otros = command.allocations.find(
+		(allocation) =>
+			allocation.numero_cuota === command.cuota_inicial &&
+			allocation.rubro === "OTROS",
+	);
+	return otros?.cartera_cuota_id === cuotaInicialVivaId;
 }
 
 export function createPagaloImportService(deps: PagaloImportServiceDependencies) {
@@ -286,6 +305,35 @@ async function igualarMoraAlSnapshot(
 }
 
 const REVIEW_REQUIRED_PREFIX = "PAGALO_REVIEW_REQUIRED:";
+
+async function asegurarCuotaInicialPagaloVigente(
+	tx: any,
+	command: PagaloImportCommand,
+): Promise<void> {
+	if (new Big(command.otros_total).eq(0)) return;
+	const [cuotaInicialViva] = await tx
+		.select({ cuotaId: cuotas_credito.cuota_id })
+		.from(cuotas_credito)
+		.innerJoin(
+			pagos_credito,
+			eq(pagos_credito.cuota_id, cuotas_credito.cuota_id),
+		)
+		.where(
+			and(
+				eq(cuotas_credito.credito_id, command.credito_id),
+				eq(cuotas_credito.numero_cuota, command.cuota_inicial),
+				eq(cuotas_credito.pagado, false),
+			),
+		)
+		.orderBy(desc(cuotas_credito.cuota_id))
+		.limit(1)
+		.for("update");
+	if (!esCuotaInicialPagaloVigente(command, cuotaInicialViva?.cuotaId)) {
+		throw new Error(
+			`${REVIEW_REQUIRED_PREFIX} La cuota inicial auditada de Otros ya no es la cuota pagable actual.`,
+		);
+	}
+}
 
 /**
  * Cuenta de empresa virtual de los pagos con link (la siembra la migración
@@ -1040,6 +1088,8 @@ export const importPagaloPayment = async ({ body, set }: any) => {
             import_id: review?.id,
           };
         }
+
+		await asegurarCuotaInicialPagaloVigente(tx, command);
 
         const [ledger] = await tx
           .insert(pagalo_payment_imports)

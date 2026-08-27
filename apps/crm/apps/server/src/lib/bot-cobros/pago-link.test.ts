@@ -8,12 +8,15 @@
 import { describe, expect, test } from "bun:test";
 import type { CarteraCuotaCredito } from "../../types/cartera-back";
 import {
+	aplanarLinksEstado,
 	aplanarOpciones,
 	buscarOpcionPorMonto,
 	calcularOpciones,
 	cuotasPagables,
 	MAXIMO_OPCIONES,
+	mensajeEstadoLinks,
 	normalizarMonto,
+	resumirEstadoLinks,
 } from "./pago-link";
 
 function fila(
@@ -244,6 +247,140 @@ describe("aplanarOpciones", () => {
 			opcion1Monto: "3487.62",
 			opcion2Etiqueta: "1 cuota + la próxima — Q6,975.24",
 			opcion2Monto: "6975.24",
+		});
+	});
+});
+
+describe("estado de los links de la conversación (servicio 9)", () => {
+	const link = (
+		linkType: "CAPITAL" | "MORA_INTERES",
+		status: string,
+		extra: Record<string, unknown> = {},
+	) =>
+		({
+			id: `${linkType}-1`,
+			linkType,
+			status,
+			paymentUrl: `https://pagalo/${linkType}`,
+			isApplicationSource: false,
+			generation: 1,
+			...extra,
+		}) as never;
+	const grupo = (status: string, links: unknown[]) =>
+		({
+			id: "g1",
+			status,
+			capitalTotal: "800.00",
+			facturableTotal: "3937.62",
+			links,
+		}) as never;
+
+	test("ninguno pagado: SIN_PAGO con las dos URLs", () => {
+		const r = resumirEstadoLinks(
+			grupo("PENDING_PAYMENT", [
+				link("MORA_INTERES", "ACTIVE"),
+				link("CAPITAL", "ACTIVE"),
+			]),
+		);
+		expect(r.estado).toBe("SIN_PAGO");
+		expect(r.links.map((l) => [l.titulo, l.estado, l.url])).toEqual([
+			["Pago 1 de 2", "PENDIENTE", "https://pagalo/CAPITAL"],
+			["Pago 2 de 2", "PENDIENTE", "https://pagalo/MORA_INTERES"],
+		]);
+		expect(mensajeEstadoLinks(r.estado, r.links)).toContain(
+			"Todavía no vemos ningún pago",
+		);
+	});
+
+	test("uno pagado: PARCIAL, dice cuál falta y solo esa URL", () => {
+		const r = resumirEstadoLinks(
+			grupo("PARTIALLY_PAID", [
+				link("CAPITAL", "PAID", { isApplicationSource: true }),
+				link("MORA_INTERES", "ACTIVE"),
+			]),
+		);
+		expect(r.estado).toBe("PARCIAL");
+		expect(r.links[0]).toMatchObject({
+			titulo: "Pago 1 de 2",
+			estado: "PAGADO",
+			url: null,
+		});
+		expect(r.links[1]).toMatchObject({
+			titulo: "Pago 2 de 2",
+			estado: "PENDIENTE",
+			url: "https://pagalo/MORA_INTERES",
+		});
+		const m = mensajeEstadoLinks(r.estado, r.links);
+		expect(m).toContain("Recibimos tu *Pago 1 de 2* ✅");
+		expect(m).toContain(
+			"*Pago 2 de 2* (Q3,937.62): https://pagalo/MORA_INTERES",
+		);
+	});
+
+	test("grupo ya en aplicación cuenta como PAGADOS aunque un link diga ACTIVE", () => {
+		const r = resumirEstadoLinks(
+			grupo("READY_TO_APPLY", [
+				link("CAPITAL", "PAID"),
+				link("MORA_INTERES", "ACTIVE"),
+			]),
+		);
+		expect(r.estado).toBe("PAGADOS");
+		expect(r.links.every((l) => l.url === null)).toBe(true);
+		expect(mensajeEstadoLinks(r.estado, r.links)).toContain("tus 2 pagos");
+	});
+
+	test("un solo link pagado: PAGADOS con mensaje en singular; los REPLACED no cuentan", () => {
+		const r = resumirEstadoLinks(
+			grupo("COMPLETED", [
+				link("MORA_INTERES", "REPLACED"),
+				link("MORA_INTERES", "PAID", { id: "m2", generation: 2 }),
+			]),
+		);
+		expect(r.estado).toBe("PAGADOS");
+		expect(r.links).toHaveLength(1);
+		expect(r.links[0]?.titulo).toBe("Pago");
+		expect(mensajeEstadoLinks(r.estado, r.links)).toContain(
+			"Ya recibimos tu pago",
+		);
+	});
+
+	test("un link REPLACED que se pagó después no cuenta: solo la generación vigente (Codex)", () => {
+		const r = resumirEstadoLinks(
+			grupo("PENDING_PAYMENT", [
+				link("CAPITAL", "ACTIVE"),
+				// generación 1, reemplazada y pagada tarde: PAID pero fuera de la aplicación
+				link("MORA_INTERES", "PAID", {
+					id: "m1",
+					generation: 1,
+					isApplicationSource: false,
+				}),
+				link("MORA_INTERES", "ACTIVE", { id: "m2", generation: 2 }),
+			]),
+		);
+		expect(r.estado).toBe("SIN_PAGO");
+		expect(r.links).toHaveLength(2);
+		expect(r.links.map((l) => l.estado)).toEqual(["PENDIENTE", "PENDIENTE"]);
+	});
+
+	test("aplanado: totalLinks/linksPagados/linksPendientes + linkN*", () => {
+		const r = resumirEstadoLinks(
+			grupo("PARTIALLY_PAID", [
+				link("CAPITAL", "PAID"),
+				link("MORA_INTERES", "ACTIVE"),
+			]),
+		);
+		expect(aplanarLinksEstado(r.links)).toEqual({
+			totalLinks: 2,
+			linksPagados: 1,
+			linksPendientes: 1,
+			link1Titulo: "Pago 1 de 2",
+			link1Estado: "PAGADO",
+			link1Monto: "800.00",
+			link1Url: null,
+			link2Titulo: "Pago 2 de 2",
+			link2Estado: "PENDIENTE",
+			link2Monto: "3937.62",
+			link2Url: "https://pagalo/MORA_INTERES",
 		});
 	});
 });

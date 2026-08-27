@@ -54,6 +54,7 @@ const ACCIONES: Record<string, string> = {
 	"/api/bot/cobros/boleta/confirmar": "boleta_confirmar",
 	"/api/bot/cobros/pago-link/opciones": "pago_link_opciones",
 	"/api/bot/cobros/pago-link/crear": "pago_link_crear",
+	"/api/bot/cobros/pago-link/estado": "pago_link_estado",
 };
 
 /**
@@ -214,6 +215,15 @@ const CURADORES: Record<
 			referenciaPago: exito ? texto(pago.referenciaPago) : null,
 		});
 	},
+
+	// Consultó si ya pagó: el veredicto y cuántos links iban pagados. Sin URLs.
+	pago_link_estado: (_cuerpo, data, exito) =>
+		conValor({
+			estado: exito ? texto(data.estado) : null,
+			linksPagados: exito ? numero(data.linksPagados) : null,
+			totalLinks: exito ? numero(data.totalLinks) : null,
+			referenciaPago: exito ? texto(data.referenciaPago) : null,
+		}),
 };
 
 /**

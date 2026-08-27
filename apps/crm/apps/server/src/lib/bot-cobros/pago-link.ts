@@ -33,7 +33,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, notInArray } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, notInArray } from "drizzle-orm";
 import { db } from "../../db";
 import { casosCobros } from "../../db/schema/cobros";
 import {
@@ -61,7 +61,7 @@ import {
 	type PagaloInstallment,
 } from "../pagalo-allocations";
 import { fechaLegible, quetzales } from "./mensajes-credito";
-import { verificarAcceso } from "./menu-credito";
+import { verificarAcceso, verificarSesion } from "./menu-credito";
 
 /** Acordado con SimpleTech 2026-08-25: con 4 atrasadas ya se recoge el carro. */
 export const MAXIMO_OPCIONES = 4;
@@ -1262,4 +1262,195 @@ function extraerTexto(valor: unknown, nombres: string[]): string | undefined {
 		if (anidado) return anidado;
 	}
 	return undefined;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Servicio 9 · ¿Ya pagó los links de esta conversación? (pedido de SimpleTech)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type EstadoLinksBot = "PAGADOS" | "PARCIAL" | "SIN_PAGO";
+
+export type LinkEstadoBot = {
+	tipo: PagaloLinkType;
+	titulo: string;
+	monto: string;
+	estado: "PAGADO" | "PENDIENTE";
+	/** Solo si sigue pendiente: para que el bot lo vuelva a mandar. */
+	url: string | null;
+};
+
+/**
+ * Un grupo con dinero ya entrando a cartera cuenta como pagado completo,
+ * sin importar cómo quedaron marcados sus links. `REVIEW_REQUIRED` no: ahí
+ * puede haber un link viejo pagado y el vivo no, así que se mira link a link.
+ */
+const ESTADOS_GRUPO_PAGADO: PagaloPaymentGroupStatus[] = [
+	"READY_TO_APPLY",
+	"APPLYING",
+	"APPLICATION_FAILED",
+	"COMPLETED",
+];
+
+/**
+ * Estado de cada link vivo del grupo y el veredicto del conjunto. "Pagado" es
+ * lo que dice NUESTRA base (el poller ya verificó el ACCEPT contra Págalo y
+ * guardó el voucher): link `PAID`/fuente de aplicación, o grupo ya en
+ * aplicación. Puro: sin DB.
+ *
+ * Solo cuenta la **generación vigente** de cada tipo de link (la de mayor
+ * `generation`). Un link `REPLACED` que el cliente pagó después queda `PAID`
+ * pero con `isApplicationSource=false` y fuera de la aplicación (va a
+ * REVIEW_REQUIRED): no puede inflar `totalLinks` ni contar como pagado acá
+ * (hallazgo Codex).
+ */
+export function resumirEstadoLinks(grupo: GrupoActivo): {
+	estado: EstadoLinksBot;
+	links: LinkEstadoBot[];
+} {
+	const orden: PagaloLinkType[] = ["CAPITAL", "MORA_INTERES"];
+	const vigentePorTipo = new Map<
+		PagaloLinkType,
+		GrupoActivo["links"][number]
+	>();
+	for (const l of grupo.links) {
+		const actual = vigentePorTipo.get(l.linkType);
+		if (!actual || l.generation > actual.generation)
+			vigentePorTipo.set(l.linkType, l);
+	}
+	const considerados = [...vigentePorTipo.values()]
+		.filter((l) => l.status === "ACTIVE" || l.status === "PAID")
+		.sort((a, b) => orden.indexOf(a.linkType) - orden.indexOf(b.linkType));
+	const grupoPagado = ESTADOS_GRUPO_PAGADO.includes(grupo.status);
+	const titulo = titulosDe(considerados.length);
+	const links: LinkEstadoBot[] = considerados.map((l, i) => {
+		const pagado = grupoPagado || l.status === "PAID" || l.isApplicationSource;
+		return {
+			tipo: l.linkType,
+			titulo: titulo(i),
+			monto:
+				l.linkType === "CAPITAL" ? grupo.capitalTotal : grupo.facturableTotal,
+			estado: pagado ? "PAGADO" : "PENDIENTE",
+			url: pagado ? null : (l.paymentUrl ?? null),
+		};
+	});
+	const pagados = links.filter((l) => l.estado === "PAGADO").length;
+	const estado: EstadoLinksBot =
+		links.length > 0 && pagados === links.length
+			? "PAGADOS"
+			: pagados > 0
+				? "PARCIAL"
+				: "SIN_PAGO";
+	return { estado, links };
+}
+
+/** `link1Titulo`, `link1Estado`, `link1Monto`, `link1Url`, … (mismo estilo que las opciones). */
+export function aplanarLinksEstado(
+	links: LinkEstadoBot[],
+): Record<string, string | number | null> {
+	const plano: Record<string, string | number | null> = {
+		totalLinks: links.length,
+		linksPagados: links.filter((l) => l.estado === "PAGADO").length,
+		linksPendientes: links.filter((l) => l.estado === "PENDIENTE").length,
+	};
+	links.forEach((l, i) => {
+		plano[`link${i + 1}Titulo`] = l.titulo;
+		plano[`link${i + 1}Estado`] = l.estado;
+		plano[`link${i + 1}Monto`] = l.monto;
+		plano[`link${i + 1}Url`] = l.url;
+	});
+	return plano;
+}
+
+const NOTA_DEMORA =
+	"Si pagaste hace poco, puede tardar unos minutos en reflejarse.";
+
+export function mensajeEstadoLinks(
+	estado: EstadoLinksBot,
+	links: LinkEstadoBot[],
+): string {
+	const pendientes = links.filter((l) => l.estado === "PENDIENTE");
+	const pagados = links.filter((l) => l.estado === "PAGADO");
+	if (estado === "PAGADOS") {
+		return links.length === 1
+			? "✅ Ya recibimos tu pago. Lo estamos aplicando a tu crédito; en cuanto quede listo te mandamos tu recibo por WhatsApp."
+			: `✅ Ya recibimos tus ${links.length} pagos. Los estamos aplicando a tu crédito; en cuanto quede listo te mandamos tu recibo por WhatsApp.`;
+	}
+	const listaPendientes = pendientes
+		.map((l) => `*${l.titulo}* (${quetzales(l.monto)}): ${l.url ?? ""}`.trim())
+		.join("\n");
+	if (estado === "PARCIAL") {
+		return `Recibimos tu *${pagados.map((l) => l.titulo).join("* y *")}* ✅. Te falta completar:\n${listaPendientes}\n\n${NOTA_DEMORA}`;
+	}
+	return `Todavía no vemos ningún pago. ${links.length === 1 ? "Tu link sigue activo" : "Tus links siguen activos"}:\n${listaPendientes}\n\n${NOTA_DEMORA}`;
+}
+
+export type EstadoPagoLinkData = {
+	estado: EstadoLinksBot;
+	numeroSifco: string;
+	/** Id del grupo, el mismo `pago.referenciaPago` que devolvió `/crear`. */
+	referenciaPago: string;
+	links: LinkEstadoBot[];
+	mensajes: { completo: string };
+} & Record<string, unknown>;
+
+/**
+ * Servicio 9: los links que el bot generó EN ESTA CONVERSACIÓN para ese
+ * crédito (grupo de origen BOT, creado después de que la persona canjeó su
+ * código) y si ya están pagados según nuestra base. Sin links en la
+ * conversación → `SIN_LINKS`.
+ */
+export async function consultarEstadoPagoLink(
+	referencia: string,
+	numeroSifco: string,
+): Promise<
+	| { ok: true; data: EstadoPagoLinkData }
+	| {
+			ok: false;
+			codigo:
+				| "REFERENCIA_INVALIDA"
+				| "SESION_VENCIDA"
+				| "CREDITO_NO_ES_DEL_CLIENTE"
+				| "SIN_LINKS";
+	  }
+> {
+	const sesion = await verificarSesion(referencia);
+	if (!sesion.ok) return sesion;
+
+	if (!sesion.creditos.some((c) => c.numeroSifco === numeroSifco)) {
+		return { ok: false, codigo: "CREDITO_NO_ES_DEL_CLIENTE" };
+	}
+
+	const [grupo] = await db
+		.select()
+		.from(pagaloPaymentGroups)
+		.where(
+			and(
+				eq(pagaloPaymentGroups.origen, "BOT"),
+				eq(pagaloPaymentGroups.numeroCreditoSifco, numeroSifco),
+				gte(pagaloPaymentGroups.createdAt, sesion.otp.usedAt),
+			),
+		)
+		.orderBy(desc(pagaloPaymentGroups.createdAt))
+		.limit(1);
+	if (!grupo) return { ok: false, codigo: "SIN_LINKS" };
+
+	const links = await db
+		.select()
+		.from(pagaloPaymentLinks)
+		.where(eq(pagaloPaymentLinks.groupId, grupo.id))
+		.orderBy(pagaloPaymentLinks.generation, pagaloPaymentLinks.linkType);
+	const resumen = resumirEstadoLinks({ ...grupo, links });
+	if (resumen.links.length === 0) return { ok: false, codigo: "SIN_LINKS" };
+
+	return {
+		ok: true,
+		data: {
+			estado: resumen.estado,
+			numeroSifco: grupo.numeroCreditoSifco,
+			referenciaPago: grupo.id,
+			...aplanarLinksEstado(resumen.links),
+			links: resumen.links,
+			mensajes: { completo: mensajeEstadoLinks(resumen.estado, resumen.links) },
+		},
+	};
 }

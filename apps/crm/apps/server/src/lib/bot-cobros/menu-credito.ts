@@ -207,10 +207,23 @@ type ResultadoAcceso =
  * las que vengan). Si alguna se salta esto, la API key sola alcanzaría para
  * pedir datos de cualquier crédito.
  */
-export async function verificarAcceso(
+export type ResultadoSesion =
+	| {
+			ok: true;
+			otp: typeof otps.$inferSelect & { usedAt: Date };
+			creditos: CreditoBot[];
+	  }
+	| { ok: false; codigo: "REFERENCIA_INVALIDA" | "SESION_VENCIDA" };
+
+/**
+ * Las comprobaciones de identidad de D-24 que NO dependen de un crédito:
+ * referencia válida, OTP canjeado y sesión vigente; devuelve la persona y sus
+ * créditos. La usan `verificarAcceso` (con crédito) y las gestiones que
+ * hablan de la conversación entera (estado de los links de pago).
+ */
+export async function verificarSesion(
 	referencia: string,
-	numeroSifco: string,
-): Promise<ResultadoAcceso> {
+): Promise<ResultadoSesion> {
 	// La referencia es el uuid de la fila; con otra cosa la consulta explota.
 	if (
 		!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
@@ -243,6 +256,17 @@ export async function verificarAcceso(
 		leadId: otp.leadId,
 		dpi: otp.dpi,
 	});
+
+	return { ok: true, otp: { ...otp, usedAt: otp.usedAt }, creditos };
+}
+
+export async function verificarAcceso(
+	referencia: string,
+	numeroSifco: string,
+): Promise<ResultadoAcceso> {
+	const sesion = await verificarSesion(referencia);
+	if (!sesion.ok) return sesion;
+	const { otp, creditos } = sesion;
 
 	const credito = creditos.find((c) => c.numeroSifco === numeroSifco);
 

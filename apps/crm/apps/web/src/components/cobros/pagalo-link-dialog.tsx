@@ -148,6 +148,13 @@ export function PagaloLinkDialog({
 				toast.info(
 					"El cliente ya generó estos links desde WhatsApp; se muestran los mismos.",
 				);
+			else if (result.whatsappEnviado === null)
+				// Grupo ya existía (reintento u otro asesor) — no se intentó un
+				// envío nuevo, pero pudo haberse enviado en la creación original.
+				// No instruir a reenviar manualmente para no duplicar el mensaje.
+				toast.info(
+					`Ya existían links Págalo para este crédito: ${q(result.totalAmount)}.`,
+				);
 			else if (result.whatsappEnviado)
 				toast.success(
 					`Links Págalo listos: ${q(result.totalAmount)}. Se envió el mensaje por WhatsApp al cliente.`,
@@ -242,10 +249,24 @@ export function PagaloLinkDialog({
 					Correr poll Págalo ahora (temporal)
 				</Button>
 				<div className="min-h-0 flex-1 overflow-y-auto pr-1">
-					{grupoActivo.isLoading ||
-					(grupoActivo.isSuccess &&
-						!grupoActivo.data &&
-						(credit.isLoading || vehiculoCaso.isLoading)) ? (
+					{grupoActivo.isError ? (
+						<div className="flex flex-col items-center gap-3 py-8 text-center">
+							<p className="text-muted-foreground text-sm">
+								No se pudo verificar si este crédito ya tiene links de pago.
+							</p>
+							<Button
+								type="button"
+								size="sm"
+								variant="outline"
+								onClick={() => grupoActivo.refetch()}
+							>
+								Reintentar
+							</Button>
+						</div>
+					) : grupoActivo.isLoading ||
+						(grupoActivo.isSuccess &&
+							!grupoActivo.data &&
+							(credit.isLoading || vehiculoCaso.isLoading)) ? (
 						<div className="flex justify-center py-8">
 							<Loader2 className="animate-spin" />
 						</div>
@@ -289,9 +310,12 @@ export function PagaloLinkDialog({
 									<p className="text-sm">
 										{mutation.data?.origen === "BOT"
 											? "El cliente ya generó estos links desde WhatsApp; se muestran los mismos:"
-											: "Grupo creado. Comparte solo links necesarios:"}
+											: mutation.data?.whatsappEnviado === null
+												? "Ya existían links de pago para este crédito:"
+												: "Grupo creado. Comparte solo links necesarios:"}
 									</p>
 									{mutation.data?.origen !== "BOT" &&
+										mutation.data?.whatsappEnviado !== null &&
 										(mutation.data?.whatsappEnviado ? (
 											<p className="flex items-center gap-1.5 text-green-700 text-xs">
 												<CheckCircle2 className="h-3.5 w-3.5" />

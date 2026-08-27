@@ -1861,6 +1861,8 @@ export interface PagoDataInvestor {
   fechaBoleta: string | null;
   numeroautorizacion: string | null;
   validationStatus: string;
+  /** Estado de la facturación del pago (cartera, migración 0014). NULL en los viejos. */
+  facturaStatus: EstadoFacturacionPago | null;
 
   // 💰 Abonos asociados directamente al pago
   abono_interes: number;
@@ -1953,6 +1955,8 @@ export interface GetPagosParams {
   excel?: boolean;
   usuarioNombre?: string;
   validationStatus?: string;
+  /** NO_APLICA|PENDIENTE|OK|PARCIAL|FALLIDA|SIN_FACTURAR (los tres que faltan). */
+  facturaStatus?: string;
   reportAdvisor?: boolean;
   fechaBoleta?: string;
   fechaBoletaInicio?: string;
@@ -3094,12 +3098,43 @@ interface Cliente {
 
 
 
+export type RubroFactura =
+  | "MORA"
+  | "OTROS_SERVICIOS"
+  | "OTROS"
+  | "INTERESES"
+  | "INTERESES_CUBE";
+
+/** Estado de la facturación de un pago (cartera, migración 0014). */
+export type EstadoFacturacionPago =
+  | "NO_APLICA"
+  | "PENDIENTE"
+  | "OK"
+  | "PARCIAL"
+  | "FALLIDA";
+
+export interface RubroFacturaFaltante {
+  rubro: string;
+  inversionista?: string | null;
+  inversionista_id?: number | null;
+  error: string;
+}
+
+export interface EstadoFacturacion {
+  status: EstadoFacturacionPago | null;
+  fecha: string | null;
+  faltantes: RubroFacturaFaltante[];
+}
+
 interface Factura {
   factura_id: number;
   serie: string;
   numero: string;
   uuid: string;
   tipo_documento: string;
+  /** Qué cubre esta factura. NULL en las emitidas antes de la migración 0014. */
+  rubro: RubroFactura | null;
+  inversionista_id: number | null;
   monto_total: string;
   monto_iva: string;
   pdf_url: string;
@@ -3132,6 +3167,7 @@ interface PagoCompletoResponse {
     pago: Pago;
     cliente: Cliente;
     credito: Credito;
+    facturacion?: EstadoFacturacion;
     facturas: Facturas;
   };
   mensaje: string;

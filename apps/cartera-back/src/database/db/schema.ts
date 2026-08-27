@@ -964,6 +964,22 @@
     'pagalo',
   ]);
 
+  /** Estado de facturación de un pago (columna `factura_status`, migración 0014). */
+  export type PagoFacturaStatus =
+    | "NO_APLICA"
+    | "PENDIENTE"
+    | "OK"
+    | "PARCIAL"
+    | "FALLIDA";
+
+  /** Qué cubre cada DTE (columna `facturas_electronicas.rubro`, migración 0014). */
+  export type FacturaRubro =
+    | "MORA"
+    | "OTROS_SERVICIOS"
+    | "OTROS"
+    | "INTERESES"
+    | "INTERESES_CUBE";
+
   export const paymentValidationStatus = pgEnum('payment_validation_status', [
     'no_required',    // No necesita validación (pagos normales/automáticos)
     'pending',        // Pendiente de validación
@@ -1028,6 +1044,13 @@
     observaciones: text("observaciones"), //input
 
     paymentFalse: boolean("paymentFalse").notNull().default(false), // indica si el pago es falso
+    // Estado de la facturación de ESTE pago (migración 0014). Separado a
+    // propósito de validationStatus: un pago validado sin factura sigue
+    // siendo un pago aplicado. NULL = anterior a la feature.
+    factura_status: text("factura_status").$type<PagoFacturaStatus>(),
+    /** JSON con los rubros que fallaron y por qué (para el modal de facturas). */
+    factura_error: text("factura_error"),
+    factura_at: timestamp("factura_at", { withTimezone: true }),
     validationStatus: paymentValidationStatus("validation_status")
     .notNull()
     .default('no_required'),
@@ -1748,6 +1771,11 @@
 
     // STATUS Y ANULACIÓN
     status: statusFacturaEnum("status").notNull().default("ACTIVA"),
+    // Qué cubre esta factura (migración 0014): sin esto no se puede saber qué
+    // rubro quedó sin emitir cuando un pago se factura a medias.
+    rubro: text("rubro").$type<FacturaRubro>(),
+    /** Solo en facturas de intereses: de quién es la participación facturada. */
+    inversionista_id: integer("inversionista_id"),
     fecha_anulacion: timestamp("fecha_anulacion"),
     motivo_anulacion: text("motivo_anulacion"),
     anulada_por: integer("anulada_por").references(() => platform_users.id),

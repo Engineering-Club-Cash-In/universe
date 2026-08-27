@@ -12,6 +12,8 @@ import {
   decidirRubroInteresInversionistas,
 } from "../cofidi/rubroInteresInversionistas";
 import { db } from "../database";
+import type { FacturaRubro } from "../database/db/schema";
+import { registrarEstadoFacturacion } from "../controllers/estadoFacturacionPago";
 import {
   compras_credito_inversionista,
   credit_cancelations,
@@ -384,6 +386,10 @@ if (facturasExistentes.length > 0) {
           diferencia_vs_100: suma.minus(100).toString(),
         }));
         console.error(`❌ Inversionistas con porcentajes que no suman 100%:`, detalle);
+        await registrarEstadoFacturacion(pago_id, {
+          estado: "FALLIDA",
+          motivo: "Configuración inválida: los porcentajes de los inversionistas no suman 100%.",
+        });
         return {
           success: false,
           error: "Configuración inválida: porcentaje_participacion + porcentaje_cash_in debe sumar 100% por inversionista",
@@ -506,6 +512,10 @@ if (facturasExistentes.length > 0) {
       if (nitsDisponibles.length === 0) {
         set.status = 400;
         console.error(`❌ Cliente sin NIT registrado - Pago ID: ${pago_id}`);
+        await registrarEstadoFacturacion(pago_id, {
+          estado: "FALLIDA",
+          motivo: `El cliente "${pagoData.nombre}" no tiene NIT registrado.`,
+        });
         return {
           success: false,
           error: `El cliente "${pagoData.nombre}" no tiene NIT registrado. No se puede facturar sin un NIT válido.`,
@@ -673,6 +683,7 @@ if (facturasExistentes.length > 0) {
             items: itemsMora,
             complementos: complementosMora,
             created_by,
+            rubro: "MORA",
             nitsFallback: nitsDisponibles.slice(1),
           });
 
@@ -835,6 +846,7 @@ if (facturasExistentes.length > 0) {
             items: itemsOtrosServicios,
             complementos: complementosOtrosServicios,
             created_by,
+            rubro: "OTROS_SERVICIOS",
             nitsFallback: nitsDisponibles.slice(1),
           });
 
@@ -922,6 +934,7 @@ if (facturasExistentes.length > 0) {
             items: itemsOtros,
             complementos: complementosOtros,
             created_by,
+            rubro: "OTROS",
             nitsFallback: nitsDisponibles.slice(1),
           });
 
@@ -1413,6 +1426,8 @@ if (facturasExistentes.length > 0) {
                 items: itemsInv,
                 complementos: complementosInv,
                 created_by,
+                rubro: "INTERESES",
+                inversionista_id: inv.inversionista_id,
                 customConfig: inversionistaConfig?.config,
                 customSatConfig: inversionistaConfig?.satConfig,
                 nitsFallback: nitsDisponibles.slice(1),
@@ -1510,6 +1525,7 @@ if (facturasExistentes.length > 0) {
                 items: itemsCube,
                 complementos: complementosCube,
                 created_by,
+                rubro: "INTERESES_CUBE",
                 nitsFallback: nitsDisponibles.slice(1),
               });
 
@@ -1768,6 +1784,8 @@ if (facturasExistentes.length > 0) {
               items: itemsIntereses,
               complementos: complementosInteres,
               created_by,
+              rubro: "INTERESES",
+              inversionista_id: inv.inversionista_id,
               customConfig: inversionistaConfig?.config,
               customSatConfig: inversionistaConfig?.satConfig,
               nitsFallback: nitsDisponibles.slice(1),
@@ -1876,6 +1894,7 @@ if (facturasExistentes.length > 0) {
               items: itemsCube,
               complementos: complementosCube,
               created_by,
+              rubro: "INTERESES_CUBE",
               nitsFallback: nitsDisponibles.slice(1),
             });
 
@@ -1921,6 +1940,8 @@ if (facturasExistentes.length > 0) {
       // ⛔ Si NO se generó ninguna factura y hubo errores de certificación, es un
       //    fallo real: NO escribimos el desglose (no se facturó nada de verdad).
       if (facturasExitosas.length === 0 && facturasConError.length > 0) {
+        // Queda visible en el pago: "Falta factura" con el motivo por rubro.
+        await registrarEstadoFacturacion(pago_id, { facturasGeneradas });
         set.status = 500;
         return {
           success: false,
@@ -2082,6 +2103,7 @@ if (facturasExistentes.length > 0) {
       // Pago solo-capital (sin DTE que emitir y sin errores): no es fallo.
       // El desglose ya quedó guardado arriba (capital de CUBE).
       if (facturasExitosas.length === 0) {
+        await registrarEstadoFacturacion(pago_id, { facturasGeneradas });
         return {
           success: true,
           data: {
@@ -2096,6 +2118,8 @@ if (facturasExistentes.length > 0) {
               : "Sin DTE que emitir y sin montos para el registro diario.",
         };
       }
+
+      await registrarEstadoFacturacion(pago_id, { facturasGeneradas });
 
       return {
         success: true,
@@ -2116,6 +2140,10 @@ if (facturasExistentes.length > 0) {
       };
     } catch (error) {
       console.error("❌ Error facturando pago completo:", error);
+      await registrarEstadoFacturacion(body.pago_id, {
+        estado: "FALLIDA",
+        motivo: (error as Error).message,
+      });
       set.status = 500;
       return {
         success: false,
@@ -3127,6 +3155,9 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
             membresias_pago: pagos_credito.membresias_pago,
             mora: pagos_credito.mora,
             abono_interes: pagos_credito.abono_interes,
+            factura_status: pagos_credito.factura_status,
+            factura_error: pagos_credito.factura_error,
+            factura_at: pagos_credito.factura_at,
             abono_iva_12: pagos_credito.abono_iva_12,
 
             // Datos del cliente
@@ -3165,6 +3196,8 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
             numero: facturas_electronicas.numero,
             uuid: facturas_electronicas.uuid,
             tipo_documento: facturas_electronicas.tipo_documento,
+            rubro: facturas_electronicas.rubro,
+            inversionista_id: facturas_electronicas.inversionista_id,
             monto_total: facturas_electronicas.monto_total,
             monto_iva: facturas_electronicas.monto_iva,
             pdf_url: facturas_electronicas.pdf_url,
@@ -3243,6 +3276,24 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
               credito_id: pagoData.credito_id,
             },
 
+            // 🧾 ESTADO DE LA FACTURACIÓN DE ESTE PAGO (migración 0014)
+            //    `faltantes` sale de lo que guardó la última facturación: qué
+            //    rubro (y de qué inversionista) no se pudo emitir y por qué.
+            //    NO se refactura solo: es información para que conta decida.
+            facturacion: {
+              status: pagoData.factura_status ?? null,
+              fecha: pagoData.factura_at ?? null,
+              faltantes: (() => {
+                if (!pagoData.factura_error) return [];
+                try {
+                  const parsed = JSON.parse(pagoData.factura_error);
+                  return Array.isArray(parsed) ? parsed : [];
+                } catch {
+                  return [{ rubro: "DESCONOCIDO", error: pagoData.factura_error }];
+                }
+              })(),
+            },
+
             // 📄 FACTURAS (LO IMPORTANTE 🔥)
             facturas: {
               total: facturas.length,
@@ -3260,6 +3311,9 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
                 numero: f.numero,
                 uuid: f.uuid,
                 tipo_documento: f.tipo_documento,
+                // Qué cubre esta factura (migración 0014). NULL en las viejas.
+                rubro: f.rubro,
+                inversionista_id: f.inversionista_id,
                 monto_total: f.monto_total,
                 monto_iva: f.monto_iva,
                 pdf_url: f.pdf_url,
@@ -3941,12 +3995,18 @@ async function certificarFacturaHelper({
   customSatConfig,
   usarFechaActual = false,
   nitsFallback = [],
+  rubro,
+  inversionista_id,
 }: {
   pago_id?: number | null;
   receptor: any;
   items: any[];
   complementos: any[];
   created_by?: number;
+  /** Qué cubre este DTE (migración 0014): sin esto no se sabe qué rubro quedó sin emitir. */
+  rubro?: FacturaRubro;
+  /** Solo en facturas de intereses: de quién es la participación facturada. */
+  inversionista_id?: number | null;
   customConfig?: FacturadorConfig;
   customSatConfig?: {
     requestor: string;
@@ -4291,6 +4351,8 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
 
         status: "ACTIVA",
         created_by: created_by || null,
+        rubro: rubro ?? null,
+        inversionista_id: inversionista_id ?? null,
       })
       .returning();
 

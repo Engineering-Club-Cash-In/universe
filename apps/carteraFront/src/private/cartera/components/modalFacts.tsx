@@ -12,6 +12,45 @@ import {
   fechaPeriodoFactura,
 } from "@/lib/anulacionPeriodo";
 
+
+/** Nombre legible de lo que cubre cada factura (columna `rubro`, migración 0014). */
+const ETIQUETA_RUBRO: Record<string, string> = {
+  MORA: "Mora",
+  OTROS_SERVICIOS: "Seguro / GPS / Membresía",
+  OTROS: "Otros (garantía, traspaso)",
+  INTERESES: "Intereses",
+  INTERESES_CUBE: "Intereses (Cube)",
+  FACTURACION: "Facturación",
+  DESCONOCIDO: "Rubro no identificado",
+};
+
+const etiquetaRubro = (rubro?: string | null) =>
+  rubro ? (ETIQUETA_RUBRO[rubro] ?? rubro) : "Sin clasificar";
+
+/** Cómo se ve el estado de facturación del pago en el encabezado del modal. */
+const ESTADO_FACTURACION: Record<
+  string,
+  { texto: string; clase: string }
+> = {
+  OK: { texto: "Facturado", clase: "bg-green-100 text-green-800 border-green-300" },
+  PARCIAL: {
+    texto: "Facturado a medias",
+    clase: "bg-amber-100 text-amber-800 border-amber-300",
+  },
+  FALLIDA: {
+    texto: "Falta factura",
+    clase: "bg-red-100 text-red-800 border-red-300",
+  },
+  PENDIENTE: {
+    texto: "Sin facturar",
+    clase: "bg-amber-100 text-amber-800 border-amber-300",
+  },
+  NO_APLICA: {
+    texto: "Sin DTE que emitir",
+    clase: "bg-gray-100 text-gray-700 border-gray-300",
+  },
+};
+
 interface ModalFacturasPagoProps {
   open: boolean;
   onClose: () => void;
@@ -243,11 +282,66 @@ export function ModalFacturasPago({
   };
 
   const facturas = pagoCompleto?.data?.facturas?.listado || [];
+  const facturacion = pagoCompleto?.data?.facturacion;
+  const faltantes = facturacion?.faltantes ?? [];
   const facturasActivas = facturas.filter((f) => f.status === "ACTIVA");
 
   // ⏳ Si la factura es del período anterior y estamos dentro de los días de gracia,
   // el modal avisa que el resultado hay que verificarlo en SAT.
   const facturaSeleccionada = facturas.find((f) => f.uuid === facturaParaAnular);
+
+  /* 🧾 Estado de la facturación del pago y qué rubro quedó sin emitir
+     (migración 0014). Es SOLO informativo: cartera no refactura sola —
+     ausencia en la BD no prueba ausencia en SAT. */
+  const bloqueFacturacion = (() => {
+    const estado = facturacion?.status
+      ? ESTADO_FACTURACION[facturacion.status]
+      : undefined;
+    if (!estado && faltantes.length === 0) return null;
+    return (
+      <div className="mb-6">
+        {estado && (
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-gray-700 text-sm font-semibold">
+              Estado de facturación:
+            </span>
+            <span
+              className={`px-3 py-1 rounded-full border text-sm font-semibold ${estado.clase}`}
+            >
+              {estado.texto}
+            </span>
+          </div>
+        )}
+        {faltantes.length > 0 && (
+          <div className="bg-red-50 border-2 border-red-300 rounded-xl p-4">
+            <p className="text-red-800 font-semibold mb-2">
+              Falta emitir {faltantes.length === 1 ? "1 factura" : `${faltantes.length} facturas`}:
+            </p>
+            <ul className="space-y-2">
+              {faltantes.map((f, i) => (
+                <li
+                  key={`${f.rubro}-${f.inversionista_id ?? "s"}-${i}`}
+                  className="text-sm text-gray-800"
+                >
+                  <span className="font-semibold">{etiquetaRubro(f.rubro)}</span>
+                  {f.inversionista ? (
+                    <span className="text-gray-600"> · {f.inversionista}</span>
+                  ) : null}
+                  <span className="block text-gray-600 break-words">{f.error}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="text-xs text-gray-600 mt-3">
+              Verificá en SAT antes de volver a facturar: puede haber quedado
+              certificada allá aunque no aparezca acá.
+            </p>
+          </div>
+        )}
+      </div>
+    );
+  })();
+
+
   const anulacionConDiasDeGracia = esAnulacionEnDiasDeGracia(
     fechaPeriodoFactura(facturaSeleccionada)
   );
@@ -300,9 +394,12 @@ export function ModalFacturasPago({
               <p className="text-gray-600">
                 Este pago aún no ha sido facturado
               </p>
+              <div className="w-full max-w-2xl mt-6">{bloqueFacturacion}</div>
             </div>
           ) : (
             <>
+              {bloqueFacturacion}
+
               {/* 📊 RESUMEN */}
               {pagoCompleto?.data && (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
@@ -392,6 +489,9 @@ export function ModalFacturasPago({
                         </p>
                         <p className="text-gray-900 text-sm font-bold">
                           {factura.tipo_documento}
+                          <span className="ml-2 font-normal text-gray-600">
+                            · {etiquetaRubro(factura.rubro)}
+                          </span>
                         </p>
                       </div>
                       <div className="bg-gray-50 rounded-lg p-3 border border-gray-300">

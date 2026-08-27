@@ -1772,6 +1772,8 @@ interface GetPagosOptions {
   inversionistaId?: number;
   usuarioNombre?: string;
   validationStatus?: string;
+  /** Filtro de la bandeja de facturación: NO_APLICA|PENDIENTE|OK|PARCIAL|FALLIDA|SIN_FACTURAR. */
+  facturaStatus?: string;
   categoriaCredito?: string;
   tipoCredito?: string;
   formatoCredito?: string;
@@ -1991,6 +1993,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     inversionistaId,
     usuarioNombre,
     validationStatus,
+    facturaStatus,
     categoriaCredito,
     tipoCredito,
     formatoCredito,
@@ -2029,6 +2032,19 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     if (anio && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(YEAR FROM p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala') = ${anio}`);
     if (mes && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(MONTH FROM p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala') = ${mes}`);
     if (dia && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(DAY FROM p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala') = ${dia}`);
+
+    if (facturaStatus) {
+      // Bandeja de conta: "pagos con factura pendiente". Lista blanca — el
+      // valor entra directo al SQL como el resto de este builder.
+      const permitidos = ["PENDIENTE", "PARCIAL", "FALLIDA", "OK", "NO_APLICA"];
+      if (permitidos.includes(facturaStatus)) {
+        whereClauses.push(`p.factura_status = '${facturaStatus}'`);
+      } else if (facturaStatus === "SIN_FACTURAR") {
+        whereClauses.push(
+          `p.factura_status IN ('PENDIENTE', 'PARCIAL', 'FALLIDA')`,
+        );
+      }
+    }
 
     if (validationStatus) {
       whereClauses.push(`p.validation_status = '${validationStatus}'`);
@@ -2208,6 +2224,9 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         p.abono_seguro AS "abono_seguro",
         p.abono_gps AS "abono_gps",
         p.validation_status AS "validation_status",
+        -- Estado de la facturación del pago (migración 0014): la tabla lo
+        -- muestra como badge "Falta factura" y se puede filtrar por él.
+        p.factura_status AS "factura_status",
         p.monto_aplicado AS "monto_aplicado",
         p.origen_pago AS "origenPago",
 
@@ -2507,6 +2526,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       abono_iva_12: r.abono_iva_12,
       abono_seguro: r.abono_seguro,
       validationStatus: r.validation_status,
+      facturaStatus: r.factura_status ?? null,
       abono_gps: r.abono_gps,
       monto_aplicado: r.monto_aplicado,
       origenPago: r.origenPago,

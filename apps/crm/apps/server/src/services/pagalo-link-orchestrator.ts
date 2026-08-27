@@ -13,7 +13,10 @@ import {
 	buildPagaloAllocations,
 	type PagaloInstallment,
 } from "../lib/pagalo-allocations";
-import { assertPagaloInstallmentSelection } from "../lib/pagalo-selection";
+import {
+	assertPagaloInstallmentSelection,
+	assertPagaloOtrosRequiresInstallment,
+} from "../lib/pagalo-selection";
 import { primerTelefono } from "../lib/phone-utils";
 import { carteraBackClient } from "./cartera-back-client";
 import {
@@ -104,6 +107,7 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 		selectable.map((cuota) => cuota.numero_cuota),
 		cuotasDisponibles.map((cuota) => cuota.numero_cuota),
 	);
+	assertPagaloOtrosRequiresInstallment(input.otros, selectable.map((cuota) => cuota.numero_cuota));
 	const installments: PagaloInstallment[] = selectable
 		.sort((a, b) => a.numero_cuota - b.numero_cuota)
 		.map((cuota) => ({

@@ -612,6 +612,7 @@ export function PagaloLinkDialog({
 						<Button
 							disabled={
 								(!tieneMora && selected.length === 0) ||
+								(otrosActivo && selected.length === 0) ||
 								(otrosActivo && !otrosParseado?.valid) ||
 								mutation.isPending ||
 								!vehiculoCaso.isSuccess

@@ -155,12 +155,12 @@ export function esCuotaInicialPagaloVigente(
 	return otros?.cartera_cuota_id === cuotaInicialVivaId;
 }
 
-/** Misma regla de duplicados que CRM: la fila con mayor pago_id prevalece. */
+/** Misma regla de duplicados que motor de pagos: mayor cuota_id prevalece. */
 export function resolverCuotaInicialPagaloVigente(
-	cuotas: { cuotaId: number; pagoId: number }[],
+	cuotas: { cuotaId: number }[],
 ): number | undefined {
-	return cuotas.reduce<{ cuotaId: number; pagoId: number } | undefined>(
-		(actual, cuota) => (!actual || cuota.pagoId > actual.pagoId ? cuota : actual),
+	return cuotas.reduce<{ cuotaId: number } | undefined>(
+		(actual, cuota) => (!actual || cuota.cuotaId > actual.cuotaId ? cuota : actual),
 		undefined,
 	)?.cuotaId;
 }
@@ -322,10 +322,7 @@ async function asegurarCuotaInicialPagaloVigente(
 ): Promise<void> {
 	if (new Big(command.otros_total).eq(0)) return;
 	const cuotasInicialesVivas = await tx
-		.select({
-			cuotaId: cuotas_credito.cuota_id,
-			pagoId: pagos_credito.pago_id,
-		})
+		.select({ cuotaId: cuotas_credito.cuota_id })
 		.from(cuotas_credito)
 		.innerJoin(
 			pagos_credito,
@@ -338,7 +335,7 @@ async function asegurarCuotaInicialPagaloVigente(
 				eq(cuotas_credito.pagado, false),
 			),
 		)
-		.orderBy(desc(pagos_credito.pago_id))
+		.orderBy(desc(cuotas_credito.cuota_id))
 		.for("update");
 	if (
 		!esCuotaInicialPagaloVigente(

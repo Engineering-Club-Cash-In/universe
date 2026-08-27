@@ -150,13 +150,13 @@ describe("pagalo payment import", () => {
 		expect(esCuotaInicialPagaloVigente(input, undefined)).toBeFalse();
 	});
 
-	it("elige cuota inicial viva por pago_id, igual que CRM", () => {
+	it("elige cuota inicial viva por cuota_id, igual que motor de pagos", () => {
 		expect(
 			resolverCuotaInicialPagaloVigente([
 				{ cuotaId: 21, pagoId: 10 },
 				{ cuotaId: 20, pagoId: 11 },
 			]),
-		).toBe(20);
+		).toBe(21);
 	});
 
   it("does not invent a Q0 source when mapping capital-only or facturable-only groups", () => {

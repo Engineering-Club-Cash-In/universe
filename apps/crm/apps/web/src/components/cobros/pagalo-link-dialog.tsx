@@ -30,6 +30,7 @@ import {
 } from "@/lib/cobros/pagalo-link-display";
 import { parseOtrosGTQ } from "@/lib/cobros/pagalo-otros";
 import { client, orpc } from "@/utils/orpc";
+import { deduplicarCuotasPagalo } from "server/src/lib/pagalo-installments";
 
 const q = (value: unknown) =>
 	new Intl.NumberFormat("es-GT", { style: "currency", currency: "GTQ" }).format(
@@ -70,30 +71,21 @@ export function PagaloLinkDialog({
 	});
 	const data = credit.data as any;
 	const cuotas = useMemo(() => {
-		const sinDuplicados = (items: any[]) => {
-			const porNumero = new Map<number, any>();
-			for (const cuota of items) {
-				const actual = porNumero.get(cuota.numero_cuota);
-				if (!actual || Number(cuota.pago_id ?? 0) > Number(actual.pago_id ?? 0))
-					porNumero.set(cuota.numero_cuota, cuota);
-			}
-			return [...porNumero.values()];
-		};
-		const vencidas = sinDuplicados(data?.cuotasAtrasadas ?? [])
+		const vencidas = deduplicarCuotasPagalo(data?.cuotasAtrasadas ?? [])
 			.filter((cuota: any) => cuota.numero_cuota > 0)
 			.sort((a: any, b: any) => a.numero_cuota - b.numero_cuota);
 		// cuotasPendientes es "todas las no pagadas" (sin filtro de fecha), no
 		// "solo próximas" — ya incluye las vencidas. Sin excluirlas acá, [0]
 		// cae siempre en la misma cuota que ya está en `vencidas` y la cuota
 		// vigente real nunca se ofrece.
-		const proxima = sinDuplicados(data?.cuotasPendientes ?? [])
+		const proxima = deduplicarCuotasPagalo(data?.cuotasPendientes ?? [])
 			.filter(
 				(cuota: any) =>
 					cuota.numero_cuota > 0 &&
 					!vencidas.some((v: any) => v.numero_cuota === cuota.numero_cuota),
 			)
 			.sort((a: any, b: any) => a.numero_cuota - b.numero_cuota)[0];
-		return sinDuplicados(proxima ? [...vencidas, proxima] : vencidas).map(
+		return deduplicarCuotasPagalo(proxima ? [...vencidas, proxima] : vencidas).map(
 			(cuota: any) => ({
 				...cuota,
 				esActual: proxima?.cuota_id === cuota.cuota_id,

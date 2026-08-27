@@ -13,6 +13,7 @@ import {
 	buildPagaloAllocations,
 	type PagaloInstallment,
 } from "../lib/pagalo-allocations";
+import { deduplicarCuotasPagalo } from "../lib/pagalo-installments";
 import {
 	assertPagaloInstallmentSelection,
 	assertPagaloOtrosRequiresInstallment,
@@ -57,42 +58,27 @@ const pickString = (value: unknown, names: string[]): string | undefined => {
 	return undefined;
 };
 
-const deduplicarCuotas = <T extends { numero_cuota: number; pago_id?: number }>(
-	cuotas: T[],
-): T[] => {
-	const porNumero = new Map<number, T>();
-	for (const cuota of cuotas) {
-		const actual = porNumero.get(cuota.numero_cuota);
-		if (!actual || (cuota.pago_id ?? 0) > (actual.pago_id ?? 0)) {
-			porNumero.set(cuota.numero_cuota, cuota);
-		}
-	}
-	return [...porNumero.values()].sort(
-		(a, b) => a.numero_cuota - b.numero_cuota,
-	);
-};
-
 /** CRM orchestration. Solo sandbox; una llamada externa por componente > Q0. */
 export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 	const credit = await carteraBackClient.getCredito(input.numeroSifco, false);
 	if (credit.credito.credito_id !== input.creditoId) {
 		throw new Error("Crédito Págalo no coincide con SIFCO.");
 	}
-	const vencidas = deduplicarCuotas(
+	const vencidas = deduplicarCuotasPagalo(
 		credit.cuotasAtrasadas.filter((cuota) => cuota.numero_cuota > 0),
 	);
 	// cuotasPendientes es "todas las no pagadas" (sin filtro de fecha), no
 	// "solo próximas" — ya incluye las vencidas. Sin excluirlas acá, [0] cae
 	// siempre en la misma cuota que ya está en `vencidas` y la cuota vigente
 	// real nunca se ofrece (hallazgo del usuario, crédito 9216).
-	const proximaPendiente = deduplicarCuotas(
+	const proximaPendiente = deduplicarCuotasPagalo(
 		credit.cuotasPendientes.filter(
 			(cuota) =>
 				cuota.numero_cuota > 0 &&
 				!vencidas.some((v) => v.numero_cuota === cuota.numero_cuota),
 		),
 	)[0];
-	const cuotasDisponibles = deduplicarCuotas(
+	const cuotasDisponibles = deduplicarCuotasPagalo(
 		proximaPendiente ? [...vencidas, proximaPendiente] : vencidas,
 	);
 	const selectable = cuotasDisponibles.filter((cuota) =>

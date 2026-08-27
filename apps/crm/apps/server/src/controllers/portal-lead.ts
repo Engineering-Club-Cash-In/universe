@@ -771,6 +771,10 @@ export async function createPortalRegisterLead(c: Context) {
 			salesUserForLead.id,
 			notes ?? "",
 			"website",
+			undefined,
+			undefined,
+			undefined,
+			"portal",
 		);
 
 		return c.json({

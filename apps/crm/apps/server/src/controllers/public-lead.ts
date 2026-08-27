@@ -1,7 +1,7 @@
 import { and, asc, count, eq, or } from "drizzle-orm";
 import type { Context } from "hono";
 import { db } from "../db";
-import { logEntityAudit } from "../lib/audit";
+import { type AuditSource, logEntityAudit } from "../lib/audit";
 import { user } from "../db/schema/auth";
 import {
 	type leadSourceEnum,
@@ -99,6 +99,9 @@ export async function createOpportunityForLead(
 	campaign?: string,
 	loanPurpose?: "personal" | "business",
 	creditType?: "autocompra" | "sobre_vehiculo",
+	// El portal reusa este helper: sin esto sus oportunidades quedarían
+	// registradas como si vinieran del formulario público.
+	auditSource: AuditSource = "public",
 ) {
 	const [firstStage] = await db
 		.select()
@@ -135,7 +138,7 @@ export async function createOpportunityForLead(
 		entityId: newOpportunity.id,
 		action: "create",
 		procedure: "public-lead.createOpportunityForLead",
-		source: "public",
+		source: auditSource,
 		performedBy: null,
 		input: { leadId, source, campaign, creditType, assignedTo: systemUserId },
 	});

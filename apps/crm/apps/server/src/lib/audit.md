@@ -33,6 +33,16 @@ puede ser la causa de que falle la operación que registra.
    `logEntityAudit(db | tx, {...})` explícitamente. Si se pasa la transacción,
    la fila se commitea con el cambio.
 
+Un procedure con ramas que terminan en acciones distintas (por ejemplo
+`crm.createLead`, que puede dar de alta un lead o reasignar uno que ya existía)
+declara `.meta({ audit: { …, onlyOnError: true } })`: audita su éxito a mano en
+cada rama y deja que el middleware registre solo los intentos rechazados, para
+que no sea el único procedure sin filas `ok = false`.
+
+Un helper compartido por varios flujos (como `createOpportunityForLead`, que
+usan el formulario público y el portal) recibe el `source` por parámetro en vez
+de fijarlo, si no la procedencia se pierde.
+
 Para auditar un procedure nuevo basta con agregarle el `.meta({ audit })`.
 
 ## Redacción del body

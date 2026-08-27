@@ -916,6 +916,12 @@ export const crmRouter = {
 	}),
 
 	createLead: crmProcedure
+		// El éxito se audita dentro del handler, que según la rama termina en un
+		// alta o en la reasignación de un lead que ya existía; acá solo quedan los
+		// intentos rechazados (DPI con proceso activo, permisos, errores de DB).
+		.meta({
+			audit: { entity: "lead", action: "create", onlyOnError: true },
+		})
 		.input(
 			z.object({
 				firstName: z.string().min(1, "First name is required"),

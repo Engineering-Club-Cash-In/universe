@@ -32,6 +32,13 @@ export type AuditMeta = {
 		entity: AuditEntityType;
 		action: string;
 		idFrom?: AuditIdFrom;
+		/**
+		 * El handler audita su propio éxito (porque tiene ramas que terminan en
+		 * acciones distintas), pero los intentos fallidos los sigue registrando el
+		 * middleware: si no, esos procedures serían los únicos sin filas
+		 * `ok = false`, que es justo lo que sirve para diagnosticar.
+		 */
+		onlyOnError?: boolean;
 	};
 };
 
@@ -225,6 +232,7 @@ export const auditMiddleware = auditBase.middleware(
 
 		try {
 			const result = await next();
+			if (audit.onlyOnError) return result;
 			await logEntityAudit(db, {
 				...base,
 				entityId: resolveAuditEntityId(audit.idFrom, input, result.output),

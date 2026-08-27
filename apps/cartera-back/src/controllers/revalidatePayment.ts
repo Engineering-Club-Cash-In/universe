@@ -6,6 +6,7 @@ import { setCapitalSource } from "../utils/withAuditContext";
 import { pagos_credito, creditos, cuotas_credito } from "../database/db";
 import { insertPagosCreditoInversionistasV2 } from "./payments";
 import { esPagoAplicado } from "../utils/paymentStatus";
+import { marcarFacturacionPendiente } from "./estadoFacturacionPago";
 import {
   calcularCoberturaCuota,
   shouldRejectZeroAppliedNormalValidation,
@@ -182,6 +183,9 @@ export async function validarPagoRegistrado({
     throw new Error(`Payment ${pago_id} changed during revalidation`);
   }
   console.log("✅ Pago marcado como validado con fecha de aplicación");
+
+  // Mismo criterio que aplicarPagoNormalEnTx: queda a la espera de su factura.
+  await marcarFacturacionPendiente(tx, pago_id, pago);
 
   if (pago.cuota_id !== null && coberturaCuota.cuotaCompleta) {
     await tx

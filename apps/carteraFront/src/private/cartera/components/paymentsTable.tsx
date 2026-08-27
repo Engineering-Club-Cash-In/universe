@@ -286,6 +286,7 @@ export function PaymentsTable() {
   const [inversionistaId, setInversionistaId] = usePersistedState<number | undefined>("cartera/pagos/inversionistaId", undefined);
   const [soloAplicados, setSoloAplicados] = usePersistedState<boolean | undefined>("cartera/pagos/soloAplicados", undefined);
   const [validationStatusFilter, setValidationStatusFilter] = usePersistedState<string>("cartera/pagos/validationStatusFilter", "");
+  const [facturaStatusFilter, setFacturaStatusFilter] = usePersistedState<string>("cartera/pagos/facturaStatusFilter", "");
   const [queryInv, setQueryInv] = usePersistedState<string>("cartera/pagos/queryInv", "");
   const filteredInvestors = queryInv === ""
     ? investors
@@ -301,6 +302,7 @@ export function PaymentsTable() {
     inversionistaId !== undefined ||
     soloAplicados !== undefined ||
     validationStatusFilter !== "" ||
+    facturaStatusFilter !== "" ||
     categoriaCredito !== "" ||
     formatoCredito !== "" ||
     modoFecha !== "simple" ||
@@ -479,6 +481,21 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
   };
 
   // Función para verificar si tiene cuenta asignada
+  /**
+   * Badge de facturación (migración 0014). Solo se muestra cuando falta algo:
+   * un pago facturado o sin DTE que emitir no necesita ruido en la tabla.
+   * Es informativo — cartera no refactura sola (ver modal de facturas).
+   */
+  const badgeFacturacion = (facturaStatus: string | null | undefined) => {
+    if (facturaStatus === "PENDIENTE")
+      return { label: "Sin facturar", clase: "bg-amber-100 text-amber-800" };
+    if (facturaStatus === "PARCIAL")
+      return { label: "Facturado a medias", clase: "bg-amber-100 text-amber-800" };
+    if (facturaStatus === "FALLIDA")
+      return { label: "Falta factura", clase: "bg-red-100 text-red-800" };
+    return null;
+  };
+
   const tieneCuentaAsignada = (pago: PagoDataInvestor) => {
     return (
       pago.cuentaEmpresaNombre !== null ||
@@ -508,6 +525,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
     inversionistaId,
     usuarioNombre: usuarioNombre || undefined,
     validationStatus: validationStatusFilter || undefined,
+    facturaStatus: facturaStatusFilter || undefined,
   });
 
   const pagos: PagoDataInvestor[] = data?.data || [];
@@ -662,6 +680,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                   setSoloAplicados(undefined);
                   setInversionistaId(undefined);
                   setValidationStatusFilter("");
+                  setFacturaStatusFilter("");
                   setQueryInv("");
                   setPage(1);
                 }}
@@ -676,6 +695,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                     inversionistaId !== undefined,
                     soloAplicados !== undefined,
                     validationStatusFilter !== "",
+                    facturaStatusFilter !== "",
                     categoriaCredito !== "",
                     formatoCredito !== "",
                     modoFecha !== "simple" || (modoFecha === "simple" && (mes !== today.getMonth() + 1 || anio !== today.getFullYear() || dia !== today.getDate())),
@@ -1028,6 +1048,30 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                 </select>
               </div>
               <div>
+                {/* Bandeja de conta: qué pago quedó sin factura o a medias
+                    (migración 0014). No refactura nada: solo lo hace visible. */}
+                <label className="text-[10px] text-gray-500 font-medium mb-0.5 block">Facturación</label>
+                <select
+                  value={facturaStatusFilter}
+                  onChange={(e) => { setFacturaStatusFilter(e.target.value); setPage(1); }}
+                  className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs font-medium bg-gray-50/50 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all"
+                  style={{
+                    color: facturaStatusFilter === "OK" ? "#15803d"
+                      : facturaStatusFilter === "FALLIDA" ? "#b91c1c"
+                      : facturaStatusFilter === "PARCIAL" || facturaStatusFilter === "PENDIENTE" || facturaStatusFilter === "SIN_FACTURAR" ? "#a16207"
+                      : "#1f2937"
+                  }}
+                >
+                  <option value="" style={{ color: "#1f2937" }}>Todos</option>
+                  <option value="SIN_FACTURAR" style={{ color: "#a16207" }}>Falta factura (todos)</option>
+                  <option value="PENDIENTE" style={{ color: "#a16207" }}>Sin facturar</option>
+                  <option value="PARCIAL" style={{ color: "#a16207" }}>Facturado a medias</option>
+                  <option value="FALLIDA" style={{ color: "#b91c1c" }}>Falló la factura</option>
+                  <option value="OK" style={{ color: "#15803d" }}>Facturado</option>
+                  <option value="NO_APLICA" style={{ color: "#374151" }}>Sin DTE que emitir</option>
+                </select>
+              </div>
+              <div>
                 <label className="text-[10px] text-gray-500 font-medium mb-0.5 block">Formato</label>
                 <select
                   value={formatoCredito}
@@ -1268,6 +1312,20 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                         {statusConfig.icon}
                         {statusConfig.label}
                       </span>
+                      {(() => {
+                        // Solo aparece cuando falta factura (migración 0014).
+                        const badge = badgeFacturacion(pago.facturaStatus);
+                        if (!badge) return null;
+                        return (
+                          <span
+                            className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-full font-semibold text-xs ${badge.clase}`}
+                            title="Abrí 'Ver Facturas' para ver qué rubro falta y por qué"
+                          >
+                            <Receipt className="w-3.5 h-3.5" />
+                            {badge.label}
+                          </span>
+                        );
+                      })()}
                       {pago.banderaReinversion && (
                         <span
                           className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full font-semibold text-sm bg-red-100 text-red-700"
@@ -1733,6 +1791,21 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                             {statusConfig.icon}
                             {statusConfig.label}
                           </span>
+                          {(() => {
+                            // Mismo badge que en la tarjeta móvil: esta es la
+                            // vista que usa conta (migración 0014).
+                            const badge = badgeFacturacion(pago.facturaStatus);
+                            if (!badge) return null;
+                            return (
+                              <span
+                                className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full font-semibold text-sm ${badge.clase}`}
+                                title="Abrí 'Ver Facturas' para ver qué rubro falta y por qué"
+                              >
+                                <Receipt className="w-4 h-4" />
+                                {badge.label}
+                              </span>
+                            );
+                          })()}
                           {pago.banderaReinversion && (
                             <span
                               className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full font-semibold text-sm bg-red-100 text-red-700"

@@ -793,6 +793,7 @@ export async function exportPagosConInversionistasExcel(
     inversionistaId?: number;
     usuarioNombre?: string;
     validationStatus?: string;
+    facturaStatus?: string;
     categoriaCredito?: string;
     tipoCredito?: string;
     formatoCredito?: string;
@@ -1115,6 +1116,7 @@ export async function exportPagosAdvisorExcel(
     inversionistaId?: number;
     usuarioNombre?: string;
     validationStatus?: string;
+    facturaStatus?: string;
     categoriaCredito?: string;
     tipoCredito?: string;
     formatoCredito?: string;

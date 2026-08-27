@@ -384,6 +384,12 @@ export const reversePayment = async ({ body, set }: any) => {
             validationStatus: "no_required" as const,
             numeroAutorizacion: "",
             banco_id: null,
+            // El pago se reversó (sus facturas ACTIVAS ya se anularon arriba):
+            // su estado de facturación deja de aplicar y no debe seguir
+            // apareciendo como "falta factura".
+            factura_status: "NO_APLICA" as const,
+            factura_error: null,
+            factura_at: null,
           })
           .where(eq(pagos_credito.pago_id, pago_id));
 
@@ -452,6 +458,9 @@ export const reversePayment = async ({ body, set }: any) => {
               validationStatus: "no_required" as const,
               numeroAutorizacion: "",
               banco_id: null,
+              factura_status: "NO_APLICA" as const,
+              factura_error: null,
+              factura_at: null,
             })
             .where(eq(pagos_credito.pago_id, pago_id));
           console.log("✅ Pago reseteado (registro conservado para la cuota)");

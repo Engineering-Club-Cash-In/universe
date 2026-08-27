@@ -815,7 +815,14 @@ export async function prepararConvenioPayment(
     // para que el caller lo ejecute solo cuando la boleta ya quedó escrita.
     const commit = async () => {
       try {
-        await db
+        // Update GUARDADO contra estado stale (P2 de Codex en #1482): el
+        // convenio pudo cambiar entre prepare y commit por un escritor que no
+        // pasa por el advisory lock del pago (updateConvenioStatus, una
+        // reversa concurrente). Se exige el MISMO estado que leyó el prepare
+        // (activo, no completado y mismo acumulado); si no matchea, el update
+        // afecta 0 filas y NO se marcan cuotas — pisar con los absolutos del
+        // closure acreditaría de más o resucitaría un convenio desactivado.
+        const [convenioAcreditado] = await db
           .update(convenios_pago)
           .set({
             monto_pagado: nuevoMontoPagadoBig.toFixed(2),
@@ -826,7 +833,29 @@ export async function prepararConvenioPayment(
             activo: !convenioCompletado, // Si se completó, ya no está activo
             updated_at: new Date(),
           })
-          .where(eq(convenios_pago.convenio_id, convenio.convenio_id));
+          .where(
+            and(
+              eq(convenios_pago.convenio_id, convenio.convenio_id),
+              eq(convenios_pago.activo, true),
+              eq(convenios_pago.completado, false),
+              eq(convenios_pago.monto_pagado, convenio.monto_pagado)
+            )
+          )
+          .returning({ convenio_id: convenios_pago.convenio_id });
+
+        if (!convenioAcreditado) {
+          // El pago YA está persistido y su fila puede cargar el sello
+          // pago_convenio: se deja rastro ruidoso para conciliar a mano en
+          // vez de tirar (un throw acá respondería 500 sobre un pago que sí
+          // quedó escrito).
+          console.error(
+            `⚠️ commitConvenio: el convenio ${convenio.convenio_id} cambió o ` +
+              `se desactivó entre prepare y commit (esperaba activo, no ` +
+              `completado, monto_pagado=${convenio.monto_pagado}); no se ` +
+              `acreditó ni se marcaron cuotas — conciliar a mano.`
+          );
+          return;
+        }
 
         await marcarCuotasConvenioCompletadas({
           convenio_id: convenio.convenio_id,

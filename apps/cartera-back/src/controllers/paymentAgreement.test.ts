@@ -8,6 +8,8 @@ import { beforeEach, describe, expect, it, mock } from "bun:test";
 const updates: Array<Record<string, unknown>> = [];
 /** Cola de resultados para cada db.select() en orden de ejecución. */
 let selectQueue: unknown[][] = [];
+/** Simula el update guardado del commit: false = 0 filas afectadas. */
+let updateAffectsRows = true;
 
 const makeSelect = () => {
   const rows = selectQueue.shift() ?? [];
@@ -28,7 +30,8 @@ mock.module("../database", () => ({
         where: () => {
           updates.push(values);
           return Object.assign(Promise.resolve(), {
-            returning: () => Promise.resolve([values]),
+            returning: () =>
+              Promise.resolve(updateAffectsRows ? [values] : []),
           });
         },
       }),
@@ -73,6 +76,7 @@ const paramsBase = {
 beforeEach(() => {
   updates.length = 0;
   selectQueue = [];
+  updateAffectsRows = true;
 });
 
 describe("prepararConvenioPayment: calcular sin escribir", () => {
@@ -159,6 +163,19 @@ describe("commit: persiste exactamente lo previsualizado", () => {
     expect(updates).toHaveLength(1);
     expect(updates[0].monto_pagado).toBe("753.07");
     expect(updates[0].pagos_realizados).toBe(1);
+  });
+
+  it("convenio cambiado entre prepare y commit (P2 Codex #1482): el update guardado no matchea y NO se marcan cuotas", async () => {
+    selectQueue = [[{ ...convenioBase }]];
+
+    const { commit } = await prepararConvenioPayment(paramsBase);
+    // Otro escritor (updateConvenioStatus, reversa) tocó el convenio: el
+    // update condicionado afecta 0 filas.
+    updateAffectsRows = false;
+    await commit!();
+
+    // Solo el intento de acreditación; nada de convenio_cuotas.
+    expect(updates).toHaveLength(1);
   });
 
   it("última cuota: el commit cierra el convenio (completado=true, activo=false)", async () => {

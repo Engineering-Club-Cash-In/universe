@@ -16,6 +16,7 @@ import {
 	getPagaloGroupSummary,
 	getPagaloLinkStatusInfo,
 } from "@/lib/cobros/pagalo-link-display";
+import { facturableSinOtrosGTQ } from "@/lib/cobros/pagalo-otros";
 import { orpc } from "@/utils/orpc";
 
 const q = (value: unknown) =>
@@ -141,6 +142,10 @@ function GrupoPagalo({ grupo }: { grupo: Grupo }) {
 		color: "bg-muted",
 	};
 	const resumenLinks = getPagaloGroupSummary(grupo.links);
+	const moraEIntereses = facturableSinOtrosGTQ(
+		grupo.facturableTotal,
+		grupo.otrosTotal,
+	);
 	return (
 		<div className="space-y-3 rounded-lg border p-4">
 			<div className="flex items-center justify-between">
@@ -157,7 +162,7 @@ function GrupoPagalo({ grupo }: { grupo: Grupo }) {
 			</div>
 			<div className="grid grid-cols-2 gap-x-4 gap-y-1 text-muted-foreground text-sm sm:grid-cols-4">
 				<span>Capital: {q(grupo.capitalTotal)}</span>
-				<span>Mora e intereses: {q(grupo.facturableTotal)}</span>
+				<span>Mora e intereses: {q(moraEIntereses)}</span>
 				<span>Otros: {q(grupo.otrosTotal)}</span>
 				<span>
 					Origen: {grupo.origen === "ASESOR" ? "Asesor" : "Bot WhatsApp"}

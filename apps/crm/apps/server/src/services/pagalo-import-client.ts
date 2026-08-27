@@ -15,12 +15,21 @@
  * de red vive en el dispatcher (`jobs/pagalo-dispatch.ts`) vía
  * `nextDispatchAt` con backoff, no acá.
  */
-import { getCarteraAccessToken, invalidateAndReauth } from "./cartera-auth.service";
+
 import type { PagaloCommandForHash } from "../lib/pagalo-payload-hash";
+import {
+	getCarteraAccessToken,
+	invalidateAndReauth,
+} from "./cartera-auth.service";
 
 const TIMEOUT_MS = 10_000;
 
-export type PagaloImportCommand = PagaloCommandForHash & { payload_hash: string };
+export type PagaloImportCommand = PagaloCommandForHash & {
+	payload_hash: string;
+};
+type PagaloImportCommandWire = Omit<PagaloImportCommand, "otros_total"> & {
+	otros_total?: string;
+};
 
 export type PagaloImportSuccess = {
 	success: true;
@@ -70,6 +79,21 @@ function getCarteraBackUrl(): string {
 
 type RespuestaLeida = { status: number; raw: string };
 
+const esOtrosCero = (otrosTotal: string) => /^0(?:\.0{1,2})?$/.test(otrosTotal);
+
+/**
+ * Mientras CRM y cartera-back se despliegan por separado, un cartera-back
+ * anterior no conoce `otros_total`. Omitir el cero conserva compatibilidad;
+ * con un monto positivo se envía el campo para que el back nuevo lo aplique.
+ */
+export function prepararPagaloImportParaEnvio(
+	command: PagaloImportCommand,
+): PagaloImportCommandWire {
+	if (!esOtrosCero(command.otros_total)) return command;
+	const { otros_total: _otrosTotal, ...commandLegacyCompatible } = command;
+	return commandLegacyCompatible;
+}
+
 /**
  * Lee headers Y body bajo la misma ventana de abort. `fetch` resuelve en
  * cuanto llegan los headers — si el `text()` corriera fuera de este scope
@@ -77,19 +101,25 @@ type RespuestaLeida = { status: number; raw: string };
  * mitad del body colgaría la lectura indefinidamente, sin ningún límite,
  * dejando el grupo en APPLYING hasta recovery de lease (hallazgo Codex).
  */
-async function enviar(command: PagaloImportCommand, token: string): Promise<RespuestaLeida> {
+async function enviar(
+	command: PagaloImportCommand,
+	token: string,
+): Promise<RespuestaLeida> {
 	const controller = new AbortController();
 	const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
 	try {
-		const response = await fetch(`${getCarteraBackUrl()}/pagalo/payment-imports`, {
-			method: "POST",
-			headers: {
-				"content-type": "application/json",
-				Authorization: `Bearer ${token}`,
+		const response = await fetch(
+			`${getCarteraBackUrl()}/pagalo/payment-imports`,
+			{
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					Authorization: `Bearer ${token}`,
+				},
+				body: JSON.stringify(prepararPagaloImportParaEnvio(command)),
+				signal: controller.signal,
 			},
-			body: JSON.stringify(command),
-			signal: controller.signal,
-		});
+		);
 		const raw = await response.text();
 		return { status: response.status, raw };
 	} finally {

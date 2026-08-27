@@ -145,3 +145,23 @@ export function stripUnchangedFrozenFields<T extends FrozenValues>(
 	}
 	return out;
 }
+
+export const WON_OPPORTUNITY_REVOKE_ERROR =
+	"La oportunidad ya está ganada: no se puede cancelar la aprobación del " +
+	"detalle de crédito porque el crédito ya existe en cartera.";
+
+/**
+ * Cancelar la aprobación del detalle devuelve la oportunidad al 40% y deja el
+ * detalle editable otra vez. Sobre una oportunidad ganada eso es una puerta
+ * trasera al congelamiento: cancelar, editar, volver a aprobar.
+ *
+ * Ya existe un guard por etapa (>= 90% no se puede cancelar), pero mira la
+ * etapa y no el estado: `confirmContractsSigned` crea el crédito en cartera y
+ * recién después mueve la etapa, así que si eso falla la oportunidad queda
+ * ganada en el 85% y el guard por etapa la deja pasar.
+ */
+export function getWonOpportunityRevokeError(
+	status: string | null | undefined,
+) {
+	return status === "won" ? WON_OPPORTUNITY_REVOKE_ERROR : null;
+}

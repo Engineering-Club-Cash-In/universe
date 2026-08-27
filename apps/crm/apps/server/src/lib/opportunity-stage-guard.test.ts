@@ -8,6 +8,7 @@ import {
 	getStageVehicleRequirementError,
 	getWonOpportunityFrozenFieldChanges,
 	getWonOpportunityLockError,
+	getWonOpportunityRevokeError,
 	stripUnchangedFrozenFields,
 } from "./opportunity-stage-guard";
 
@@ -179,5 +180,26 @@ describe("stripUnchangedFrozenFields", () => {
 		expect(
 			stripUnchangedFrozenFields({ vehicleId: undefined, title: "x" }, won),
 		).toEqual({ vehicleId: undefined, title: "x" });
+	});
+});
+
+describe("revocar la aprobación del detalle de crédito", () => {
+	test("no se puede cancelar sobre una oportunidad ganada", () => {
+		expect(getWonOpportunityRevokeError("won")).toContain(
+			"el crédito ya existe en cartera",
+		);
+	});
+
+	test("cubre el caso que el guard por etapa deja pasar", () => {
+		// Una opp puede quedar ganada en el 85% si falla el paso a 90%, y ahí el
+		// guard de closurePercentage >= 90 no la frena.
+		expect(getWonOpportunityRevokeError("won")).not.toBeNull();
+	});
+
+	test("no estorba a las que siguen en proceso", () => {
+		for (const status of ["open", "on_hold", "lost"]) {
+			expect(getWonOpportunityRevokeError(status)).toBeNull();
+		}
+		expect(getWonOpportunityRevokeError(null)).toBeNull();
 	});
 });

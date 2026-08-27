@@ -1380,13 +1380,16 @@ export const vehiclesRouter = {
 							})
 							.where(eq(vehicles.id, vehicleInputId))
 							.returning();
-						auditRecord({
-							entity: "vehicle",
-							id: updated?.id ?? input.vehicle.id,
-							action: "update",
-						});
 
 						if (updated) {
+							// Solo si el UPDATE encontró la fila: si no, abajo se crea el
+							// vehículo con ese id y anotar aquí inventaría la edición de
+							// algo que no existía.
+							auditRecord({
+								entity: "vehicle",
+								id: updated.id,
+								action: "update",
+							});
 							vehicleId = updated.id;
 						} else {
 							// Fallback: If ID not found, create new vehicle with that ID

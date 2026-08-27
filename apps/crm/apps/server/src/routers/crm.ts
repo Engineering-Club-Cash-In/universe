@@ -85,6 +85,7 @@ import {
 	getStageVehicleRequirementError,
 	getWonOpportunityFrozenFieldChanges,
 	getWonOpportunityLockError,
+	getWonOpportunityRevokeError,
 	stripUnchangedFrozenFields,
 } from "../lib/opportunity-stage-guard";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
@@ -3769,11 +3770,9 @@ export const crmRouter = {
 			// cartera y recién después mueve la etapa, así que si eso falla queda
 			// ganada en el 85%. Ahí cancelar la devolvería al 40% y dejaría el
 			// detalle de crédito editable con el crédito ya creado.
-			if (opportunity.status === "won") {
-				throw new ORPCError("FORBIDDEN", {
-					message:
-						"La oportunidad ya está ganada: no se puede cancelar la aprobación del detalle de crédito porque el crédito ya existe en cartera.",
-				});
+			const revokeError = getWonOpportunityRevokeError(opportunity.status);
+			if (revokeError) {
+				throw new ORPCError("FORBIDDEN", { message: revokeError });
 			}
 
 			// Get stage 40% by closurePercentage (more reliable than order)

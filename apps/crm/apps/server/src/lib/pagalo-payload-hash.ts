@@ -85,6 +85,9 @@ const normalizarAllocation = (a: PagaloAllocationForHash) => ({
 	facturable: a.facturable,
 });
 
+const incluirOtrosEnHash = (otrosTotal: string) =>
+	!/^0(?:\.0{1,2})?$/.test(otrosTotal);
+
 export function canonicalizarPagaloCommand(
 	command: PagaloCommandForHash,
 ): string {
@@ -96,7 +99,9 @@ export function canonicalizarPagaloCommand(
 		currency: command.currency,
 		capital_total: command.capital_total,
 		facturable_total: command.facturable_total,
-		otros_total: command.otros_total,
+		...(incluirOtrosEnHash(command.otros_total)
+			? { otros_total: command.otros_total }
+			: {}),
 		total_amount: command.total_amount,
 		cuota_inicial: command.cuota_inicial,
 		allocations: allocations.map(normalizarAllocation),

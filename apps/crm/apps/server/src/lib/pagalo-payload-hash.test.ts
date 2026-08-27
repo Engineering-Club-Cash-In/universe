@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+	canonicalizarPagaloCommand,
 	calcularPagaloPayloadHash,
 	type PagaloCommandForHash,
 } from "./pagalo-payload-hash";
@@ -85,6 +86,12 @@ describe("calcularPagaloPayloadHash", () => {
 		expect(
 			calcularPagaloPayloadHash({ ...command, otros_total: "0.00" }),
 		).not.toBe(calcularPagaloPayloadHash({ ...command, otros_total: "12.34" }));
+	});
+
+	test("Otros Q0 conserva formato canónico histórico", () => {
+		expect(canonicalizarPagaloCommand(baseCommand())).not.toContain(
+			'"otros_total"',
+		);
 	});
 
 	test("capital null (Q0, D-48) se distingue de tenerlo presente", () => {

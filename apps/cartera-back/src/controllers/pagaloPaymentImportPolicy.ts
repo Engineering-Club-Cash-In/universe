@@ -242,6 +242,7 @@ export function canonicalizarPagaloPayload(
         }
       : null;
 
+  const incluirOtrosEnHash = !/^0(?:\.0{1,2})?$/.test(command.otros_total);
   return JSON.stringify({
     crm_group_id: command.crm_group_id,
     credito_id: command.credito_id,
@@ -249,7 +250,7 @@ export function canonicalizarPagaloPayload(
     currency: command.currency,
     capital_total: command.capital_total,
     facturable_total: command.facturable_total,
-    otros_total: command.otros_total,
+    ...(incluirOtrosEnHash ? { otros_total: command.otros_total } : {}),
     total_amount: command.total_amount,
     cuota_inicial: command.cuota_inicial,
     allocations,

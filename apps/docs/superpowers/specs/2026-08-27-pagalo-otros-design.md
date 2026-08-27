@@ -11,18 +11,18 @@ queda pagado.
 
 - Solo origen `ASESOR` (modal CRM). Flujo bot no cambia.
 - Moneda única GTQ.
-- `Otros` no altera capital ni selección/consecutividad de cuotas.
-- No se crea link de Q0.00. Grupo solo-Otros crea solo `MORA_INTERES`.
+- `Otros` no altera capital ni selección/consecutividad de cuotas; siempre se
+  selecciona al menos una cuota.
+- No se crea link de Q0.00.
 
 ## Datos y reglas
 
 CRM añade `otros_total NUMERIC(18,2) NOT NULL DEFAULT 0` a
 `pagalo_payment_groups`.
 
-`allocations_snapshot` admite rubro `OTROS`, facturable, sin cuota
-(`cartera_cuota_id` y `numero_cuota` nulos). Su monto coincide exactamente con
-`otros_total` cuando este es positivo; no existe allocation OTROS cuando es
-cero.
+`allocations_snapshot` admite rubro `OTROS`, facturable, asociado a primera
+cuota seleccionada. Su monto coincide exactamente con `otros_total` cuando
+este es positivo; no existe allocation OTROS cuando es cero.
 
 Los totales quedan:
 
@@ -75,8 +75,8 @@ Links existentes quedan compatibles: `otros_total = 0`, sin allocation OTROS.
 
 1. UI: activar/desactivar, formato y validaciones de Otros.
 2. API CRM: rechaza cero, negativo, tres decimales; acepta `12.34`.
-3. Orquestador: Mora/Interés suma Otros; Capital no cambia; solo-Otros emite un
-   link MORA_INTERES.
+3. Orquestador: Mora/Interés suma Otros; Capital no cambia; requiere cuota
+   seleccionada y conserva selección consecutiva.
 4. Persistencia/historial: grupo, snapshot, endpoint y columna muestran monto.
 5. Dispatcher/hash: payload incluye `otros_total` y allocation OTROS.
 6. cartera-back: valida contrato, persiste, reintento idempotente, mapea

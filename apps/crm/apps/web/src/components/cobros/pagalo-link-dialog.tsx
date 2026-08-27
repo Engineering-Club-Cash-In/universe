@@ -97,6 +97,7 @@ export function PagaloLinkDialog({
 			(cuota: any) => ({
 				...cuota,
 				esActual: proxima?.cuota_id === cuota.cuota_id,
+				esProxima: vencidas.length === 0 && proxima?.cuota_id === cuota.cuota_id,
 			}),
 		);
 	}, [data]);
@@ -509,7 +510,11 @@ export function PagaloLinkDialog({
 														onCheckedChange={() => toggle(cuota.cuota_id)}
 													/>
 													Cuota {cuota.numero_cuota}
-													{cuota.esActual ? (
+									{cuota.esProxima ? (
+										<Badge className="bg-blue-50 text-blue-700">
+											Próxima cuota
+										</Badge>
+									) : cuota.esActual ? (
 														<Badge className="bg-blue-50 text-blue-700">
 															Cuota actual
 														</Badge>

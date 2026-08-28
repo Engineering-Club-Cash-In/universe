@@ -819,15 +819,23 @@ export async function emitirLinksDeGrupo(params: {
 			amount,
 		});
 	}
+	// Grupo de dos componentes: si uno se invalida concurrentemente mientras
+	// el otro ya salió bien (activo=true), `links` queda con solo el
+	// componente sobreviviente — la invalidación ya escaló el grupo a
+	// REVIEW_REQUIRED (invalidarLinkEnTx), así que este grupo quedó
+	// intencionalmente incompleto. Avanzar a PENDING_PAYMENT y mandar por
+	// WhatsApp ese link parcial dejaba pagable solo una parte de un grupo
+	// que no puede completarse tal como está — dinero que no fluye por el
+	// camino normal de aplicación (hallazgo de code review). Solo se
+	// considera "completo" cuando TODOS los tipos requeridos llegaron
+	// activos, no cuando `links` simplemente no está vacío.
+	const completo = links.length === providerAmounts.size;
+
 	// Solo avanza el grupo si seguía en la fase de emisión inicial — un
 	// regenerarLinkIndividual sobre un grupo ya PARTIALLY_PAID/READY_TO_APPLY
 	// no debe retrocederlo a PENDING_PAYMENT (perdería el otro link ya pagado
-	// del radar del dispatcher). Y solo si `links` no quedó vacío: si el
-	// único componente resultó `activo=false` (invalidado durante la
-	// emisión), avanzar a PENDING_PAYMENT dejaría el grupo pareciendo
-	// "esperando pago" sin ningún link real esperando nada — ni el poller ni
-	// el dispatcher notarían que falta un link entero.
-	if (links.length > 0) {
+	// del radar del dispatcher).
+	if (completo) {
 		await db
 			.update(pagaloPaymentGroups)
 			.set({ status: "PENDING_PAYMENT", updatedAt: new Date() })
@@ -843,25 +851,27 @@ export async function emitirLinksDeGrupo(params: {
 	}
 
 	// D-04: un solo mensaje, con TODOS los links requeridos, solo cuando el
-	// grupo ya está completo (arriba de esta línea). Fallo de WhatsApp nunca
-	// revierte la creación de links, que ya ocurrió y es válida sin importar
-	// si el mensaje llega — el asesor igual ve las URLs en el modal.
+	// grupo ya está completo. Fallo de WhatsApp nunca revierte la creación
+	// de links, que ya ocurrió y es válida sin importar si el mensaje
+	// llega — el asesor igual ve las URLs en el modal.
 	let whatsappEnviado = false;
-	try {
-		const resultado = await sendPagaloLinksWhatsapp({
-			numeroSifco: params.numeroSifco,
-			identificadorCredito: params.identificadorCredito,
-			telefono: params.telefono,
-			clienteNombre: params.clienteNombre,
-			links,
-			createdBy: params.requestedBy,
-		});
-		whatsappEnviado = resultado.sent;
-	} catch (error) {
-		console.error(
-			`[Págalo] Error enviando links por WhatsApp para ${params.numeroSifco}:`,
-			error instanceof Error ? error.message : error,
-		);
+	if (completo) {
+		try {
+			const resultado = await sendPagaloLinksWhatsapp({
+				numeroSifco: params.numeroSifco,
+				identificadorCredito: params.identificadorCredito,
+				telefono: params.telefono,
+				clienteNombre: params.clienteNombre,
+				links,
+				createdBy: params.requestedBy,
+			});
+			whatsappEnviado = resultado.sent;
+		} catch (error) {
+			console.error(
+				`[Págalo] Error enviando links por WhatsApp para ${params.numeroSifco}:`,
+				error instanceof Error ? error.message : error,
+			);
+		}
 	}
 
 	return { links, whatsappEnviado };

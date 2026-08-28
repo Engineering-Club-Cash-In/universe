@@ -189,7 +189,18 @@ async function registrarIntentoFallido(
 ): Promise<void> {
 	const pollAttempts = link.pollAttempts + 1;
 	await db.transaction(async (tx) => {
-		await tx
+		// Condicionado al pollClaimedAt que ESTA corrida puso al reclamar el
+		// link (reclamarLinksPendientes) — sin esto, dos corridas reclamando
+		// el mismo link casi a la vez (dos requests concurrentes al botón
+		// manual probarPollPagalo, o dos réplicas del cron si algún día corre
+		// en más de una instancia) calculaban pollAttempts en memoria a
+		// partir del mismo snapshot y ambas insertaban POLL_RETRY_EXHAUSTED
+		// al cruzar el umbral — evento duplicado en la bitácora sin que el
+		// umbral realmente se cruzara dos veces (hallazgo de code review).
+		// Solo la corrida que sigue siendo dueña del lease escribe; la otra
+		// pierde la carrera en silencio (su próximo poll ya verá el estado
+		// fresco).
+		const [actualizado] = await tx
 			.update(pagaloPaymentLinks)
 			.set({
 				pollAttempts,
@@ -198,7 +209,16 @@ async function registrarIntentoFallido(
 				nextPollAt: proximoIntento(pollAttempts),
 				updatedAt: new Date(),
 			})
-			.where(eq(pagaloPaymentLinks.id, link.id));
+			.where(
+				and(
+					eq(pagaloPaymentLinks.id, link.id),
+					link.pollClaimedAt
+						? eq(pagaloPaymentLinks.pollClaimedAt, link.pollClaimedAt)
+						: isNull(pagaloPaymentLinks.pollClaimedAt),
+				),
+			)
+			.returning({ id: pagaloPaymentLinks.id });
+		if (!actualizado) return;
 		if (pollAttempts === UMBRAL_POLL_RETRY_EXHAUSTED) {
 			await tx.insert(pagaloPaymentEvents).values({
 				groupId: link.groupId,

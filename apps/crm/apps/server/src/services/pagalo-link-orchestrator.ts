@@ -683,6 +683,95 @@ async function emitirUnLink(params: {
 	for (let intento = 1; intento <= REINTENTOS_PERSISTENCIA; intento++) {
 		try {
 			const activo = await db.transaction(async (tx) => {
+				// La transacción de candados de más arriba (línea 622) ya
+				// comiteó y soltó sus locks ANTES de esta llamada HTTP — no se
+				// puede tener una transacción DB abierta durante latencia de
+				// red externa. Un pago sobre un link predecesor puede llegar
+				// justo en esa ventana (poller escala el grupo a
+				// REVIEW_REQUIRED) mientras Págalo procesa este request; sin
+				// volver a mirarlo acá, el UPDATE de abajo activaba el link
+				// nuevo igual, dejándolo cobrable mientras el grupo ya estaba
+				// en revisión por el pago viejo (hallazgo de code review). Se
+				// bloquean de nuevo el grupo activo y sus predecesores (mismo
+				// orden que marcarLinkPagado) y se revisa el pago antes de
+				// activar. El link YA es real en Págalo pase lo que pase (D-51)
+				// — lo único controlable acá es no dejarlo ACTIVE/cobrable en
+				// NUESTRA DB: se preserva CREATING con el UUID guardado (para
+				// que el poller lo siga) y errorCode ambiguo, igual que el caso
+				// de invalidación explícita de más abajo.
+				const [grupoParaChequeo] = await tx
+					.select({ carteraCreditoId: pagaloPaymentGroups.carteraCreditoId })
+					.from(pagaloPaymentGroups)
+					.where(eq(pagaloPaymentGroups.id, params.groupId))
+					.for("update");
+				if (grupoParaChequeo) {
+					await tx
+						.select({ id: pagaloPaymentGroups.id })
+						.from(pagaloPaymentGroups)
+						.where(
+							and(
+								eq(
+									pagaloPaymentGroups.carteraCreditoId,
+									grupoParaChequeo.carteraCreditoId,
+								),
+								ne(pagaloPaymentGroups.id, params.groupId),
+							),
+						)
+						.orderBy(pagaloPaymentGroups.id)
+						.for("update");
+					const [pagoPredecesorSinReconciliar] = await tx
+						.select({ linkId: pagaloPaymentLinks.id })
+						.from(pagaloPaymentLinks)
+						.innerJoin(
+							pagaloPaymentGroups,
+							eq(pagaloPaymentGroups.id, pagaloPaymentLinks.groupId),
+						)
+						.where(
+							and(
+								eq(
+									pagaloPaymentGroups.carteraCreditoId,
+									grupoParaChequeo.carteraCreditoId,
+								),
+								eq(pagaloPaymentLinks.status, "PAID"),
+								eq(pagaloPaymentLinks.isApplicationSource, false),
+							),
+						)
+						.limit(1);
+					if (pagoPredecesorSinReconciliar) {
+						const [preservado] = await tx
+							.update(pagaloPaymentLinks)
+							.set({
+								paymentUrl,
+								pagaloRequestUuid: requestUuid,
+								responsePayload: response,
+								errorCode: "PagaloRespuestaAmbigua",
+								errorMessage:
+									"Un pago de un link predecesor llegó mientras Págalo confirmaba este link — requiere reconciliación manual antes de invalidar o regenerar.",
+								nextPollAt: new Date(),
+								updatedAt: new Date(),
+							})
+							.where(
+								and(
+									eq(pagaloPaymentLinks.id, stored.id),
+									eq(pagaloPaymentLinks.status, "CREATING"),
+								),
+							)
+							.returning({ status: pagaloPaymentLinks.status });
+						await tx.insert(pagaloPaymentEvents).values({
+							groupId: params.groupId,
+							linkId: stored.id,
+							eventType: "LINK_ACTIVE",
+							source: "PAGALO",
+							actorUserId: params.requestedBy,
+							payload: {
+								linkType: params.linkType,
+								statusPreservado: preservado?.status ?? null,
+								nota: "Respuesta de Págalo llegó después de que un pago-predecesor sin reconciliar apareció en el mismo crédito; status preservado, no activado.",
+							},
+						});
+						return false;
+					}
+				}
 				// La respuesta HTTP de Págalo puede llegar DESPUÉS de que un
 				// supervisor invalide este mismo link (CREATING es un estado
 				// "vivo", invalidable) — sin este WHERE, este UPDATE reactivaba
@@ -1245,6 +1334,8 @@ export async function regenerarGrupo(params: {
 				status: pagaloPaymentLinks.status,
 				generation: pagaloPaymentLinks.generation,
 				errorCode: pagaloPaymentLinks.errorCode,
+				activatedAt: pagaloPaymentLinks.activatedAt,
+				pagaloRequestUuid: pagaloPaymentLinks.pagaloRequestUuid,
 			})
 			.from(pagaloPaymentLinks)
 			.where(eq(pagaloPaymentLinks.groupId, params.groupId))
@@ -1260,6 +1351,31 @@ export async function regenerarGrupo(params: {
 		// acá, antes de tocar nada.
 		if (linksViejos.some((l) => l.errorCode === "PagaloRespuestaAmbigua")) {
 			throw new PagaloReemplazoInvalido();
+		}
+		// Mismo problema con un CREATING común (sin errorCode, request HTTP a
+		// Págalo todavía en vuelo, ni éxito ni fallo confirmado): el chequeo
+		// compartido de emitirUnLink (activatedAt/pagaloRequestUuid) SÍ lo
+		// rechaza cuando se llega a emitir el link nuevo — pero eso corre
+		// DESPUÉS de que esta transacción ya invalidó el grupo viejo y creó
+		// el nuevo. El error se lanza tarde: viejo ya CANCELLED, nuevo ya
+		// LINKS_PENDING sin ese link (hallazgo de code review). Se valida
+		// acá, antes de invalidar nada — solo para la generación MÁS ALTA de
+		// cada tipo (una generación anterior superada, ya REPLACED, es
+		// normal y no bloquea).
+		for (const linkType of ["CAPITAL", "MORA_INTERES"] as const) {
+			const masReciente = linksViejos
+				.filter((l) => l.linkType === linkType)
+				.reduce<(typeof linksViejos)[number] | undefined>(
+					(max, l) => (!max || l.generation > max.generation ? l : max),
+					undefined,
+				);
+			if (
+				masReciente?.status === "CREATING" &&
+				!masReciente.activatedAt &&
+				!masReciente.pagaloRequestUuid
+			) {
+				throw new PagaloReemplazoInvalido();
+			}
 		}
 
 		// invalidarGrupoEnTx solo mira links PAID del grupo que se está

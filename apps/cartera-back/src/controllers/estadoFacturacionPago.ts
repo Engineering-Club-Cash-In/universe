@@ -146,8 +146,15 @@ export type MontosFacturablesPago = {
   otros?: string | number | null;
 };
 
-const positivo = (valor: string | number | null | undefined) =>
-  Number(valor ?? 0) > 0;
+// Semántica parseFloat, la MISMA de los bloques de emisión y del diff: un
+// `otros = "12abc"` legado vale Q12 al emitir (parseFloat), pero Number() lo
+// haría NaN y este clasificador diría NO_APLICA mientras la emisión SÍ factura
+// — estado y realidad divergirían. (Codex P2 del PR)
+const positivo = (valor: string | number | null | undefined) => {
+  if (valor === null || valor === undefined) return false;
+  const n = typeof valor === "number" ? valor : parseFloat(String(valor));
+  return Number.isFinite(n) && n > 0;
+};
 
 /**
  * ¿Este pago genera DTE? Capital no se factura (D-48): un pago que solo abona

@@ -4,6 +4,7 @@ import Big from "big.js";
 import { db } from "../database";
 import { setCapitalSource } from "../utils/withAuditContext";
 import type { PagoFacturaStatus } from "../database/db/schema";
+import { adquirirPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import {
   pagos_credito,
   creditos,
@@ -70,6 +71,8 @@ export interface RevertPaymentToPendingDependencies {
   readonly voidInvoice: typeof anularFacturaEnCofidi;
   readonly setCapitalSource: typeof setCapitalSource;
   readonly emitTerminal: typeof emitPaymentReversalToPending;
+  /** Advisory lock por crédito (inyectable en tests: el real toca el lockPool). */
+  readonly acquireLock?: typeof adquirirPaymentAdvisoryLock;
 }
 
 const defaultDependencies: RevertPaymentToPendingDependencies = {
@@ -78,6 +81,7 @@ const defaultDependencies: RevertPaymentToPendingDependencies = {
   voidInvoice: anularFacturaEnCofidi,
   setCapitalSource,
   emitTerminal: emitPaymentReversalToPending,
+  acquireLock: adquirirPaymentAdvisoryLock,
 };
 
 async function reverseAndCleanInvestors(
@@ -107,6 +111,7 @@ export function createRevertPaymentToPending(
   let investorPersistence: {
     readonly reversalPath: "already_pending" | "validated_payment";
   } | undefined;
+  let soltarLockRevert: (() => Promise<void>) | null = null;
   try {
     // 1️⃣ VALIDAR ENTRADA
     const parseResult = revertPaymentToPendingSchema.safeParse(body);
@@ -123,6 +128,10 @@ export function createRevertPaymentToPending(
       };
     }
     const { credito_id, pago_id } = parseResult.data;
+    // 🔒 Mismo advisory lock por crédito que la facturación y la reversa: este
+    // flujo también anula DTEs y no debe cruzarse con una facturación en curso
+    // del mismo crédito. (Codex P1 del PR)
+    soltarLockRevert = await (dependencies.acquireLock ?? adquirirPaymentAdvisoryLock)(credito_id);
 
     // 🔥 INICIAR TRANSACCIÓN ATÓMICA
     const result = await dependencies.runTransaction(async (tx) => {
@@ -423,6 +432,8 @@ export function createRevertPaymentToPending(
       message: "Internal server error",
       error: error instanceof Error ? error.message : String(error),
     };
+  } finally {
+    if (soltarLockRevert) await soltarLockRevert();
   }
   };
 }

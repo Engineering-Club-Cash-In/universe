@@ -38,6 +38,7 @@ import {
   emitInvoiceVoiding,
   emitPaymentReversal,
 } from "../utils/structuredLogger";
+import { adquirirPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import {
   classifyInvoiceVoidingBatch,
   classifyPaymentReversalCompletion,
@@ -101,12 +102,15 @@ export interface ReversePaymentDependencies {
   readonly runTransaction: typeof db.transaction;
   readonly reverseInvestors: typeof processAndReplaceCreditInvestorsReverse;
   readonly reverseCapitalPayment: typeof revertirAbonoCapitalEspejo;
+  /** Advisory lock por crédito (inyectable en tests: el real toca el lockPool). */
+  readonly acquireLock?: typeof adquirirPaymentAdvisoryLock;
 }
 
 const defaultDependencies: ReversePaymentDependencies = {
   runTransaction: db.transaction.bind(db),
   reverseInvestors: processAndReplaceCreditInvestorsReverse,
   reverseCapitalPayment: revertirAbonoCapitalEspejo,
+  acquireLock: adquirirPaymentAdvisoryLock,
 };
 
 export function createReversePayment(
@@ -118,6 +122,11 @@ export function createReversePayment(
   let mayHaveGlobalPersistence = false;
   let investmentsReversed = false;
   let transactionCommitted = false;
+  // 🔒 Mismo advisory lock por crédito que registerPayment/revalidate y ahora
+  // /facturar-pago-completo: la reversa ANULA facturas — correr en paralelo con
+  // una facturación del mismo crédito dejaría al diff decidir sobre un snapshot
+  // que esta reversa está desarmando. (Codex P1 del PR)
+  let soltarLockReversa: (() => Promise<void>) | null = null;
   try {
 
     // ========================================================================
@@ -141,6 +150,7 @@ export function createReversePayment(
       };
     }
     const { credito_id, pago_id } = parseResult.data;
+    soltarLockReversa = await (dependencies.acquireLock ?? adquirirPaymentAdvisoryLock)(credito_id);
 
     // ========================================================================
     // 🔥 INICIAR TRANSACCIÓN ATÓMICA
@@ -1052,6 +1062,8 @@ export function createReversePayment(
       message: "Internal server error",
       error: error instanceof Error ? error.message : String(error),
     };
+  } finally {
+    if (soltarLockReversa) await soltarLockReversa();
   }
   };
 }

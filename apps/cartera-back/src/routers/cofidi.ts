@@ -2618,6 +2618,10 @@ if (facturasExistentes.length > 0) {
     }
   )
 .post('/anular', async ({ body, set }) => {
+  // 🔒 Lock por crédito cuando la factura pertenece a un pago (ver comentario
+  // del lock en /facturar-pago-completo): anular un DTE a media facturación
+  // del mismo crédito desarmaría el snapshot sobre el que el diff decidió.
+  let soltarLockAnulacion: (() => Promise<void>) | null = null;
   try {
     const { uuid, motivo, userId } = body;
 
@@ -2709,6 +2713,18 @@ if (facturasExistentes.length > 0) {
         },
         sugerencia: 'No es posible anular una factura que ya está anulada'
       };
+    }
+
+    // 🔒 Adquirir el lock ANTES de tocar SAT (solo facturas ligadas a un pago;
+    // las genéricas no compiten con la facturación de ningún crédito). (Codex P1)
+    if (facturaCompleta.pago_id != null) {
+      const [refCredito] = await db
+        .select({ credito_id: pagos_credito.credito_id })
+        .from(pagos_credito)
+        .where(eq(pagos_credito.pago_id, facturaCompleta.pago_id));
+      soltarLockAnulacion = await adquirirPaymentAdvisoryLock(
+        refCredito?.credito_id ?? 0
+      );
     }
 
     // 🔥 VALIDACIÓN: Verificar período válido para anular
@@ -3207,6 +3223,8 @@ if (facturasExistentes.length > 0) {
       },
       sugerencia: 'Contacte al administrador del sistema con los detalles del error'
     };
+  } finally {
+    if (soltarLockAnulacion) await soltarLockAnulacion();
   }
 }, {
   body: t.Object({

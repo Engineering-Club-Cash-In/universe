@@ -48,6 +48,8 @@ const revertPaymentToPending = createRevertPaymentToPending({
   voidInvoice: voidInvoice as unknown as Dependencies["voidInvoice"],
   setCapitalSource: mock(() => Promise.resolve()) as unknown as Dependencies["setCapitalSource"],
   emitTerminal: (event) => emitted.push(event),
+  // Stub del advisory lock: el real conecta al lockPool (no hay BD en tests).
+  acquireLock: async () => async () => {},
 });
 
 const credit = {

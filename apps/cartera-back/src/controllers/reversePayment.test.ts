@@ -136,6 +136,8 @@ function createPersistenceHarness(
     runTransaction: runTransaction as unknown as ReversePaymentDependencies["runTransaction"],
     reverseInvestors,
     reverseCapitalPayment: mock(() => Promise.resolve(undefined)) as unknown as ReversePaymentDependencies["reverseCapitalPayment"],
+    // Stub del advisory lock: el real conecta al lockPool (no hay BD en tests).
+    acquireLock: async () => async () => {},
   });
   return { handler, runTransaction };
 }

@@ -282,7 +282,15 @@ function GrupoPagalo({
 				<span>
 					Origen: {grupo.origen === "ASESOR" ? "Asesor" : "Bot WhatsApp"}
 				</span>
-				<span>Creado por: {grupo.creadoPor ?? "—"}</span>
+				{/* Los grupos del bot no tienen persona detrás: el servidor manda
+				    `creadoPor` en null y acá se nombra al bot, en vez de atribuirle
+				    los links a un asesor que nunca los generó. */}
+				<span>
+					Creado por:{" "}
+					{grupo.origen === "BOT"
+						? "Bot de WhatsApp"
+						: (grupo.creadoPor ?? "—")}
+				</span>
 				{grupo.dispatchAttemptCount > 0 && (
 					<span>
 						Intentos de aplicación: {grupo.dispatchAttemptCount}

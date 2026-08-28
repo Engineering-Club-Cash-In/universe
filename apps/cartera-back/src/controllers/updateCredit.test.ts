@@ -30,6 +30,7 @@ let creditoActual: any = fakeCredito;
 // Filas que devuelve el select de pagos (vacío = early return del recálculo).
 let pagosActuales: any[] = [];
 const capturedUpdates: { vals: any; cond: any }[] = [];
+const capturedInserts: any[] = [];
 const dbMock = {
   select: () => ({
     from: () => ({
@@ -47,28 +48,34 @@ const dbMock = {
       }),
     }),
   }),
-  // recalcularPagosCredito escribe dentro de db.transaction(tx => tx.update…)
-  transaction: async (fn: any) =>
-    fn({
-      update: () => ({
-        set: (vals: any) => ({
-          where: (cond: any) => {
-            capturedUpdates.push({ vals, cond });
-            return Promise.resolve();
-          },
-        }),
-      }),
-    }),
+  transaction: async (fn: any) => fn(dbMock),
   // update del crédito: .set(vals).where().returning()
   update: () => ({
     set: (vals: any) => ({
-      where: () => ({
-        returning: () => Promise.resolve([{ ...creditoActual, ...vals }]),
-      }),
+      where: (cond: any) => {
+        capturedUpdates.push({ vals, cond });
+        return {
+          returning: () => Promise.resolve([{ ...creditoActual, ...vals }]),
+        };
+      },
     }),
   }),
+  insert: () => ({
+    values: (vals: any) => {
+      capturedInserts.push(vals);
+      return Promise.resolve();
+    },
+  }),
 };
-mock.module("../database", () => ({ db: dbMock, client: {}, lockPool: {} }));
+const lockConnection = {
+  query: async () => ({ rows: [{ ok: true }] }),
+  release: () => undefined,
+};
+mock.module("../database", () => ({
+  db: dbMock,
+  client: {},
+  lockPool: { connect: async () => lockConnection },
+}));
 mock.module("../services/sifcoIntegrations", () => ({
   consultarEstadoCuentaPrestamo: () => Promise.resolve(null),
 }));
@@ -81,6 +88,7 @@ beforeEach(() => {
   capturedWheres.length = 0;
   capturedCreditWheres.length = 0;
   capturedUpdates.length = 0;
+  capturedInserts.length = 0;
   pagosActuales = [];
   creditoActual = fakeCredito;
 });
@@ -329,6 +337,22 @@ describe("updateCredit — editar sin importar el status", () => {
 
     expect(set.status).toBe(200);
     expect(result.credito_id).toBe(794);
+  });
+});
+
+describe("updateCredit — validaciones antes de escribir", () => {
+  it("no actualiza usuario ni inserta historial ante transición de devolución inválida", async () => {
+    const { set, request } = makeCtx();
+    const result: any = await updateCredit({
+      body: { ...baseBody, nombre: "No debe guardarse", estado_devolucion: "COMPLETADO" },
+      set,
+      request,
+    });
+
+    expect(set.status).toBe(400);
+    expect(result.message).toContain("Transición de estado de devolución no permitida");
+    expect(capturedUpdates).toHaveLength(0);
+    expect(capturedInserts).toHaveLength(0);
   });
 });
 

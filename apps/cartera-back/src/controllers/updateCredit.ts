@@ -19,8 +19,8 @@ import {
   creditos_inversionistas,
   creditos_inversionistas_espejo,
   compras_credito_inversionista,
+  inversionistas as inversionistasTabla,
   cuotas_credito,
-  inversionistas as inversionistasTable,
   pagos_credito,
   usuarios,
   historial_devolucion_credito,
@@ -28,7 +28,13 @@ import {
 import z from "zod";
 import type { WSCrEstadoCuentaResponse } from "../services/sifco.interface";
 import { consultarEstadoCuentaPrestamo } from "../services/sifcoIntegrations";
-import { withAuditContext, withCapitalContext } from "../utils/withAuditContext";
+import { withAuditContext, setCapitalSource } from "../utils/withAuditContext";
+import { clasificarCompraCreditoInversionista, tieneConflictoExcedenteVariable } from "./purchaseClassification";
+import { withCreditoEspejoLocks } from "../utils/creditoEspejoLock";
+import {
+  getModalidadFacturacionSpreadById,
+  resolveModalidadFacturacionSpread,
+} from "./modalidadFacturacion";
 
 interface UpdateInstallmentsParams {
   numero_credito_sifco: string;
@@ -41,10 +47,10 @@ const updateInstallments = async ({
   nueva_cuota,
 
   all = false,
-}: UpdateInstallmentsParams): Promise<void> => {
+}: UpdateInstallmentsParams, dbInstance: typeof db = db): Promise<void> => {
   // 1️⃣ Obtener crédito y pagos en paralelo (en lugar de secuencial)
   const [creditoResult, todosPagos] = await Promise.all([
-    db
+    dbInstance
       .select({
         credito_id: creditos.credito_id,
         capital: creditos.capital,
@@ -61,7 +67,7 @@ const updateInstallments = async ({
       .limit(1),
 
     // Solo traer cuotas NO pagadas, ordenadas por numero_cuota (no por cuota_id)
-    db
+    dbInstance
       .select()
       .from(pagos_credito)
       .innerJoin(
@@ -72,7 +78,7 @@ const updateInstallments = async ({
         and(
           eq(
             pagos_credito.credito_id,
-            db
+            dbInstance
               .select({ id: creditos.credito_id })
               .from(creditos)
               .where(eq(creditos.numero_credito_sifco, numero_credito_sifco))
@@ -153,13 +159,13 @@ const updateInstallments = async ({
   await Promise.all([
     // Actualizar todos los pagos pendientes
     ...actualizaciones.map(({ pago_id, datos }) =>
-      db
+      dbInstance
         .update(pagos_credito)
         .set(datos)
         .where(eq(pagos_credito.pago_id, pago_id)),
     ),
     // Actualizar el crédito
-    db
+      dbInstance
       .update(creditos)
       .set({ cuota: cuotaMensual.toString() })
       .where(eq(creditos.credito_id, credito.credito_id)),
@@ -445,6 +451,16 @@ const creditUpdateSchema = z.object({
         // descuadra (calcular pagos espejo data las compras por ahí).
         es_nuevo: z.boolean().optional(),
         tipo_operacion: z.enum(["compra_cartera", "reinversion"]).optional(),
+        tipo_reinversion: z.enum([
+          "sin_reinversion",
+          "reinversion_capital",
+          "reinversion_interes",
+          "reinversion_total",
+          "reinversion_excedente",
+          "reinversion_variable",
+        ]).optional(),
+        modalidad_facturacion: z.enum(["p2p_directa", "factura_cube", "factura_cube_pequeno"]).optional(),
+        modalidad_facturacion_spread_id: z.number().int().positive().optional(),
       }),
     )
     .min(0)
@@ -462,6 +478,16 @@ const creditUpdateSchema = z.object({
         // campos viajan también aquí pero la lógica solo lee los del padre.
         es_nuevo: z.boolean().optional(),
         tipo_operacion: z.enum(["compra_cartera", "reinversion"]).optional(),
+        tipo_reinversion: z.enum([
+          "sin_reinversion",
+          "reinversion_capital",
+          "reinversion_interes",
+          "reinversion_total",
+          "reinversion_excedente",
+          "reinversion_variable",
+        ]).optional(),
+        modalidad_facturacion: z.enum(["p2p_directa", "factura_cube", "factura_cube_pequeno"]).optional(),
+        modalidad_facturacion_spread_id: z.number().int().positive().optional(),
       }),
     )
     .min(0)
@@ -564,7 +590,13 @@ export type InversionistaNuevoValidado = {
   inversionista_id: number;
   monto_aportado: number;
   tipo_operacion: "compra_cartera" | "reinversion";
+  tipo_reinversion: "sin_reinversion" | "reinversion_capital" | "reinversion_interes" | "reinversion_total" | "reinversion_excedente" | "reinversion_variable";
   fecha_inicio_participacion?: string;
+  porcentaje_cash_in?: number;
+  porcentaje_inversion?: number;
+  modalidad_facturacion?: "p2p_directa" | "factura_cube" | "factura_cube_pequeno";
+  modalidad_facturacion_spread_id?: number;
+  tipo_compra: "nueva_posicion" | "ampliacion_posicion" | "sin_clasificar";
 };
 
 export const validarInversionistasNuevos = async (
@@ -576,6 +608,7 @@ export const validarInversionistasNuevos = async (
   // edición se puede prender el flag y agregar una compra, así que no alcanza
   // con mirar el estado actual del crédito.
   excluirComprasEfectivo: boolean = false,
+  dbInstance: typeof db = db,
 ): Promise<
   | { success: true; nuevos: InversionistaNuevoValidado[] }
   | { success: false; error: { message: string; [key: string]: unknown } }
@@ -596,11 +629,11 @@ export const validarInversionistasNuevos = async (
   }
 
   const [padreActual, espejoActual] = await Promise.all([
-    db
+    dbInstance
       .select({ inversionista_id: creditos_inversionistas.inversionista_id })
       .from(creditos_inversionistas)
       .where(eq(creditos_inversionistas.credito_id, credito_id)),
-    db
+    dbInstance
       .select({ inversionista_id: creditos_inversionistas_espejo.inversionista_id })
       .from(creditos_inversionistas_espejo)
       .where(eq(creditos_inversionistas_espejo.credito_id, credito_id)),
@@ -609,6 +642,10 @@ export const validarInversionistasNuevos = async (
   const idsEspejoActual = new Set(espejoActual.map((r) => r.inversionista_id));
 
   const declaradosNuevos = inversionistas.filter((i) => i.es_nuevo === true);
+  const porcentajesPorNuevo = new Map<
+    number,
+    { porcentaje_cash_in: number; porcentaje_inversion: number }
+  >();
 
   // Regla 1: nadie entra al crédito sin declararse nuevo. Aplica al padre y al
   // espejo (el espejo nuevo viene sincronizado desde el padre por el front).
@@ -651,11 +688,70 @@ export const validarInversionistasNuevos = async (
         { inversionista_id: inv.inversionista_id },
       );
     }
+    if (!inv.tipo_reinversion) {
+      return fail("tipo_reinversion es requerido para todo inversionista nuevo", {
+        inversionista_id: inv.inversionista_id,
+      });
+    }
+    const traeModalidad = inv.modalidad_facturacion !== undefined;
+    const traeSpread = inv.modalidad_facturacion_spread_id !== undefined;
+    if (inv.tipo_operacion === "compra_cartera" && (!traeModalidad || !traeSpread)) {
+      return fail("modalidad_facturacion y modalidad_facturacion_spread_id son requeridos para compra_cartera", {
+        inversionista_id: inv.inversionista_id,
+      });
+    }
+    if (inv.tipo_operacion === "reinversion" && (traeModalidad || traeSpread)) {
+      return fail("modalidad_facturacion solo aplica a compra_cartera", {
+        inversionista_id: inv.inversionista_id,
+      });
+    }
     if (!(Number(inv.monto_aportado) > 0)) {
       return fail(
         `El inversionista nuevo con ID ${inv.inversionista_id} debe tener un monto aportado mayor a 0.`,
         { inversionista_id: inv.inversionista_id },
       );
+    }
+    if (inv.tipo_operacion === "compra_cartera") {
+      const modalidad = inv.modalidad_facturacion;
+      const modalidadFacturacionSpreadId = inv.modalidad_facturacion_spread_id;
+      if (!modalidad || !modalidadFacturacionSpreadId) {
+        return fail("modalidad_facturacion y modalidad_facturacion_spread_id son requeridos para compra_cartera", {
+          inversionista_id: inv.inversionista_id,
+        });
+      }
+      const spread = await getModalidadFacturacionSpreadById(
+        modalidadFacturacionSpreadId,
+      );
+      if (!spread) {
+        return fail(
+          `No existe un bracket de modalidad de facturación con id ${inv.modalidad_facturacion_spread_id}`,
+          {
+            inversionista_id: inv.inversionista_id,
+          },
+        );
+      }
+      if (spread.modalidad !== modalidad) {
+        return fail(
+          `El bracket ${inv.modalidad_facturacion_spread_id} pertenece a la modalidad '${spread.modalidad}', no a '${modalidad}'`,
+          {
+          inversionista_id: inv.inversionista_id,
+          },
+        );
+      }
+      const bracketDelMonto = await resolveModalidadFacturacionSpread(
+        Number(inv.monto_aportado),
+        modalidad,
+      );
+      if (!bracketDelMonto) {
+        return fail(
+          `No existe un bracket de modalidad de facturación para el monto Q${inv.monto_aportado}`,
+          { inversionista_id: inv.inversionista_id },
+        );
+      }
+      porcentajesPorNuevo.set(inv.inversionista_id, {
+        porcentaje_cash_in: new Big(100).minus(spread.spread).toNumber(),
+        porcentaje_inversion: new Big(spread.spread).toNumber(),
+      });
     }
   }
 
@@ -711,7 +807,7 @@ export const validarInversionistasNuevos = async (
     );
   }
   if (nuevasCompras.length === 1) {
-    const [pendiente] = await db
+    const [pendiente] = await dbInstance
       .select({ inversionista_id: compras_credito_inversionista.inversionista_id })
       .from(compras_credito_inversionista)
       .where(
@@ -734,14 +830,46 @@ export const validarInversionistasNuevos = async (
     }
   }
 
+  // Un nuevo se materializa en padre, espejo y compras dentro del mismo
+  // rebuild. No aceptar un padre nuevo sin su fila espejo evita insertar una
+  // compra/snapshot que no tiene la posición pendiente correspondiente.
+  const idsEspejoPayload = new Set(
+    (inversionistas_espejo ?? []).map((inv) => inv.inversionista_id),
+  );
+  const faltanEnEspejo = declaradosNuevos
+    .map((inv) => inv.inversionista_id)
+    .filter((id) => !idsEspejoPayload.has(id));
+  if (faltanEnEspejo.length > 0) {
+    return fail(
+      `Todo inversionista nuevo debe venir también en inversionistas_espejo antes de persistir la compra o reinversión. Faltan: ${faltanEnEspejo.join(", ")}.`,
+      { inversionistas_ids: faltanEnEspejo },
+    );
+  }
+
   return {
     success: true,
-    nuevos: declaradosNuevos.map((inv) => ({
-      inversionista_id: inv.inversionista_id,
-      monto_aportado: Number(inv.monto_aportado),
-      tipo_operacion: inv.tipo_operacion!,
-      fecha_inicio_participacion: inv.fecha_inicio_participacion,
-    })),
+    nuevos: declaradosNuevos.map((inv) => {
+      if (!inv.tipo_operacion || !inv.tipo_reinversion) {
+        throw new Error(`Inversionista nuevo ${inv.inversionista_id} sin tipo de operación o reinversión`);
+      }
+      return {
+        inversionista_id: inv.inversionista_id,
+        monto_aportado: Number(inv.monto_aportado),
+        tipo_operacion: inv.tipo_operacion,
+        tipo_reinversion: inv.tipo_reinversion,
+        fecha_inicio_participacion: inv.fecha_inicio_participacion,
+        porcentaje_cash_in:
+          porcentajesPorNuevo.get(inv.inversionista_id)?.porcentaje_cash_in,
+        porcentaje_inversion:
+          porcentajesPorNuevo.get(inv.inversionista_id)?.porcentaje_inversion,
+        modalidad_facturacion: inv.modalidad_facturacion,
+        modalidad_facturacion_spread_id: inv.modalidad_facturacion_spread_id,
+        tipo_compra: clasificarCompraCreditoInversionista(
+          [...idsPadreActual, ...idsEspejoActual],
+          inv.inversionista_id,
+        ),
+      };
+    }),
   };
 };
 
@@ -771,22 +899,6 @@ export const registrarComprasInversionistasNuevos = async (
 ) => {
   if (nuevos.length === 0) return;
 
-  // tipo_reinversion informativo del registro: la modalidad global del
-  // inversionista (mismo fallback que usa addInvestorToCredit cuando no viene).
-  const filasInv = await dbInstance
-    .select({
-      inversionista_id: inversionistasTable.inversionista_id,
-      tipo_reinversion: inversionistasTable.tipo_reinversion,
-    })
-    .from(inversionistasTable)
-    .where(
-      inArray(
-        inversionistasTable.inversionista_id,
-        nuevos.map((n) => n.inversionista_id),
-      ),
-    );
-  const tipoReinvPorId = new Map(filasInv.map((r) => [r.inversionista_id, r.tipo_reinversion]));
-
   const ahora = new Date();
   await dbInstance.insert(compras_credito_inversionista).values(
     nuevos.map((n) => {
@@ -802,7 +914,10 @@ export const registrarComprasInversionistasNuevos = async (
         inversionista_id: n.inversionista_id,
         monto_aportado: n.monto_aportado.toString(),
         tipo_operacion: n.tipo_operacion,
-        tipo_reinversion: tipoReinvPorId.get(n.inversionista_id) ?? null,
+        tipo_reinversion: n.tipo_reinversion,
+        modalidad_facturacion: n.modalidad_facturacion ?? null,
+        modalidad_facturacion_spread_id: n.modalidad_facturacion_spread_id ?? null,
+        tipo_compra: n.tipo_compra,
         status: "completado" as const,
         fecha_completada: fechaCompletada,
         pendiente_facturar: esCompra,
@@ -952,8 +1067,9 @@ const detectDebtAffectingChanges = (
 const updateInitialQuotaOtros = async (
   credito_id: number,
   otros: number,
+  dbInstance: typeof db = db,
 ): Promise<void> => {
-  const cuotaInicial = await db
+  const cuotaInicial = await dbInstance
     .select({ id: cuotas_credito.cuota_id })
     .from(cuotas_credito)
     .where(
@@ -964,7 +1080,7 @@ const updateInitialQuotaOtros = async (
     );
 
   if (cuotaInicial.length) {
-    await db
+    await dbInstance
       .update(pagos_credito)
       .set({ otros: otros.toString() })
       .where(eq(pagos_credito.cuota_id, cuotaInicial[0].id));
@@ -978,7 +1094,7 @@ const updateInitialQuotaOtros = async (
 /**
  * Actualiza los inversionistas del crédito
  */
-const updateInvestors = async (
+export const updateInvestors = async (
   credito_id: number,
   inversionistas:
     | CreditUpdateData["inversionistas"]
@@ -1027,6 +1143,26 @@ const updateInvestors = async (
   );
   const cuotaTotal = new Big(updateFields.cuota ?? current?.cuota);
 
+  const porcentajesPorSpread = new Map<
+    number,
+    { porcentaje_cash_in: Big; porcentaje_inversion: Big }
+  >();
+  for (const inv of inversionistas) {
+    if (!inv.es_nuevo || !inv.modalidad_facturacion_spread_id) continue;
+    const spread = await getModalidadFacturacionSpreadById(
+      inv.modalidad_facturacion_spread_id,
+    );
+    if (!spread || spread.modalidad !== inv.modalidad_facturacion) {
+      throw new Error(
+        `Bracket de modalidad de facturación inválido para el inversionista ${inv.inversionista_id}`,
+      );
+    }
+    porcentajesPorSpread.set(inv.inversionista_id, {
+      porcentaje_cash_in: new Big(100).minus(spread.spread),
+      porcentaje_inversion: new Big(spread.spread),
+    });
+  }
+
   console.log(`💰 Capital Total: Q${capitalTotal.toFixed(2)}`);
   console.log(`📊 Cuota Total: Q${cuotaTotal.toFixed(2)}`);
 
@@ -1037,8 +1173,11 @@ const updateInvestors = async (
     console.log(`${"=".repeat(60)}`);
 
     const montoAportado = new Big(inv.monto_aportado);
-    const porcentajeCashIn = new Big(inv.porcentaje_cash_in);
-    const porcentajeInversion = new Big(inv.porcentaje_inversion);
+    const porcentajeDelSpread = porcentajesPorSpread.get(inv.inversionista_id);
+    const porcentajeCashIn =
+      porcentajeDelSpread?.porcentaje_cash_in ?? new Big(inv.porcentaje_cash_in);
+    const porcentajeInversion =
+      porcentajeDelSpread?.porcentaje_inversion ?? new Big(inv.porcentaje_inversion);
 
     console.log(`🆔 ID Inversionista: ${inv.inversionista_id}`);
     console.log(`💰 Monto Aportado: Q${montoAportado.toFixed(2)}`);
@@ -1239,6 +1378,11 @@ const updateInvestors = async (
     if (prevData?.tipo_reinversion !== undefined) baseReturn.tipo_reinversion = prevData.tipo_reinversion;
     if (prevData?.modalidad_facturacion !== undefined) baseReturn.modalidad_facturacion = prevData.modalidad_facturacion;
     if (prevData?.modalidad_facturacion_spread_id !== undefined) baseReturn.modalidad_facturacion_spread_id = prevData.modalidad_facturacion_spread_id;
+    if (targetTable === creditos_inversionistas_espejo && inv.es_nuevo) {
+      baseReturn.tipo_reinversion = inv.tipo_reinversion ?? null;
+      baseReturn.modalidad_facturacion = inv.modalidad_facturacion ?? null;
+      baseReturn.modalidad_facturacion_spread_id = inv.modalidad_facturacion_spread_id ?? null;
+    }
 
     return baseReturn;
   });
@@ -1337,6 +1481,10 @@ export const updateCredit = async ({ body, set, request }: any) => {
       ...fieldsToUpdate
     } = parseResult.data;
 
+    const espejoUserId = extractUserId(request);
+    const runUpdate = async (tx: typeof db) => {
+      const db = tx;
+
     // 2. Buscar el crédito actual (editable sin importar el status)
     const [current] = await db
       .select()
@@ -1426,11 +1574,76 @@ export const updateCredit = async ({ body, set, request }: any) => {
         set,
         // El request manda si trae el flag; si no, vale el estado actual.
         excluir_compras ?? current.excluir_compras,
+        db,
       );
       if (!nuevosValidation.success) {
         return nuevosValidation.error;
       }
       inversionistasNuevos = nuevosValidation.nuevos;
+
+      // Igual que addInvestorToCredit: una compra que escala a combinada
+      // backfillea espejos NULL con el modo global previo. Nunca pueden quedar
+      // Excedente y Variable para el mismo inversionista.
+      const nuevosPorInversionista = new Map<number, string[]>();
+      for (const nuevo of inversionistasNuevos) {
+        if (!nuevo.tipo_reinversion) continue;
+        const modos = nuevosPorInversionista.get(nuevo.inversionista_id) ?? [];
+        modos.push(nuevo.tipo_reinversion);
+        nuevosPorInversionista.set(nuevo.inversionista_id, modos);
+      }
+      for (const inversionistaId of [...nuevosPorInversionista.keys()].sort((a, b) => a - b)) {
+        const modosNuevos = nuevosPorInversionista.get(inversionistaId)!;
+        const [inversionistaActual] = await db
+          .select({ tipo_reinversion: inversionistasTabla.tipo_reinversion })
+          .from(inversionistasTabla)
+          .where(eq(inversionistasTabla.inversionista_id, inversionistaId))
+          .for("update")
+          .limit(1);
+        const modoGlobal = inversionistaActual?.tipo_reinversion ?? null;
+        const espejosExistentes = await db
+          .select({ tipo_reinversion: creditos_inversionistas_espejo.tipo_reinversion })
+          .from(creditos_inversionistas_espejo)
+          .where(eq(creditos_inversionistas_espejo.inversionista_id, inversionistaId));
+        const debeEscalar = modoGlobal !== "reinversion_combinada" && modosNuevos.some((modo) => modo !== modoGlobal);
+        const modosFinales = [
+          ...espejosExistentes.map((espejo) =>
+            espejo.tipo_reinversion === null && debeEscalar ? modoGlobal : espejo.tipo_reinversion,
+          ),
+          ...modosNuevos,
+        ];
+        if (tieneConflictoExcedenteVariable(modosFinales)) {
+          set.status = 409;
+          return {
+            message: "No se puede mezclar Excedente y Variable en el mismo inversionista: el monto de reinversión es único (una modalidad recibe un monto fijo y la otra reinvierte un monto fijo).",
+          };
+        }
+      }
+    }
+
+    // Validar la transición antes de cualquier write (incluido usuario).
+    const updateFields: any = { ...fieldsToUpdate };
+    let historialDevolucion: Record<string, unknown> | undefined;
+    if (estado_devolucion !== undefined && estado_devolucion !== current.estado_devolucion) {
+      const fromState = current.estado_devolucion;
+      const esSolicitudValida = estado_devolucion === "PENDIENTE_AUTORIZACION" &&
+        (fromState === "NO_APLICA" || fromState === "RECHAZADO" || fromState === "VERIFICADO");
+      const esDesactivacionValida = estado_devolucion === "NO_APLICA" && fromState === "PENDIENTE_AUTORIZACION";
+      if (!esSolicitudValida && !esDesactivacionValida) {
+        set.status = 400;
+        return { message: `Transición de estado de devolución no permitida en este endpoint (${fromState} -> ${estado_devolucion})` };
+      }
+      if (esSolicitudValida && (!motivo_devolucion || motivo_devolucion.trim() === "")) {
+        set.status = 400;
+        return { message: "Motivo de devolución es obligatorio al solicitar devolución" };
+      }
+      historialDevolucion = {
+        credito_id,
+        usuario_id: 1,
+        estado_anterior: fromState,
+        estado_nuevo: estado_devolucion,
+        motivo: esDesactivacionValida ? null : motivo_devolucion?.trim() ?? null,
+      };
+      updateFields.estado_devolucion = estado_devolucion;
     }
 
     // 3.5 Actualizar datos del usuario si se enviaron
@@ -1447,9 +1660,6 @@ export const updateCredit = async ({ body, set, request }: any) => {
         .set(userFields)
         .where(eq(usuarios.usuario_id, current.usuario_id));
     }
-
-    // 4. Preparar campos de actualización
-    const updateFields: any = { ...fieldsToUpdate };
 
     if (formato_credito !== undefined) {
       updateFields.formato_credito = formato_credito;
@@ -1479,53 +1689,7 @@ export const updateCredit = async ({ body, set, request }: any) => {
     if (excluir_compras !== undefined) {
       updateFields.excluir_compras = excluir_compras;
     }
-    if (estado_devolucion !== undefined) {
-      if (estado_devolucion !== current.estado_devolucion) {
-        const fromState = current.estado_devolucion;
-        let motivoFinal: string | null | undefined = motivo_devolucion;
-
-        const esSolicitudValida =
-          estado_devolucion === "PENDIENTE_AUTORIZACION" &&
-          (fromState === "NO_APLICA" ||
-            fromState === "RECHAZADO" ||
-            fromState === "VERIFICADO");
-        const esDesactivacionValida =
-          estado_devolucion === "NO_APLICA" && fromState === "PENDIENTE_AUTORIZACION";
-
-        // Este endpoint (editar crédito) solo puede solicitar o desactivar solicitud.
-        if (!esSolicitudValida && !esDesactivacionValida) {
-          set.status = 400;
-          return {
-            message: `Transición de estado de devolución no permitida en este endpoint (${fromState} -> ${estado_devolucion})`,
-          };
-        }
-
-        if (esSolicitudValida) {
-          if (!motivo_devolucion || motivo_devolucion.trim() === "") {
-            set.status = 400;
-            return {
-              message:
-                "Motivo de devolución es obligatorio al solicitar devolución",
-            };
-          }
-          motivoFinal = motivo_devolucion.trim();
-        }
-
-        if (esDesactivacionValida) {
-          motivoFinal = null;
-        }
-
-        await db.insert(historial_devolucion_credito).values({
-          credito_id,
-          usuario_id: 1, // TODO integrate auth for real user_id
-          estado_anterior: fromState,
-          estado_nuevo: estado_devolucion,
-          motivo: motivoFinal ?? null,
-        });
-
-        updateFields.estado_devolucion = estado_devolucion;
-      }
-    }
+    if (historialDevolucion) await db.insert(historial_devolucion_credito).values(historialDevolucion as any);
     if (bandera_reinversion !== undefined) {
       updateFields.bandera_reinversion = bandera_reinversion;
     }
@@ -1588,7 +1752,7 @@ export const updateCredit = async ({ body, set, request }: any) => {
       // En créditos finalizados NO: la cuota 0 es historia congelada (en un
       // CAIDO es el único pago que sobrevive, ancla de repararTotalRestante).
       if (otrosModificado && !esCreditoFinalizado) {
-        await updateInitialQuotaOtros(credito_id, fieldsToUpdate.otros);
+        await updateInitialQuotaOtros(credito_id, fieldsToUpdate.otros, db);
       }
 
 
@@ -1615,13 +1779,13 @@ export const updateCredit = async ({ body, set, request }: any) => {
 
     let updatedCredit;
     if (capitalCambia) {
-      const ajusteUserId = extractUserId(request);
-      [updatedCredit] = await withCapitalContext(
-        ajusteUserId,
+      await setCapitalSource(
+        db,
         "AJUSTE_MANUAL",
+        espejoUserId,
         motivo_ajuste_capital,
-        ejecutarUpdateCredito,
       );
+      [updatedCredit] = await ejecutarUpdateCredito(db);
     } else {
       [updatedCredit] = await ejecutarUpdateCredito(db);
     }
@@ -1641,10 +1805,10 @@ export const updateCredit = async ({ body, set, request }: any) => {
       const sifco = numero_credito_sifco ?? current.numero_credito_sifco;
       const cuotaNuevaNum = Number(updateFields.cuota);
 
-      await updateInstallments({
-        numero_credito_sifco: sifco,
-        nueva_cuota: cuotaNuevaNum,
-      });
+        await updateInstallments({
+          numero_credito_sifco: sifco,
+          nueva_cuota: cuotaNuevaNum,
+        }, db);
 
       const bodyTraeInversionistas =
         (inversionistas && inversionistas.length > 0) ||
@@ -1681,6 +1845,8 @@ export const updateCredit = async ({ body, set, request }: any) => {
             Number(updateFields.membresias_pago ?? current.membresias_pago),
             Number(updateFields.gps ?? current.gps),
             creditos_inversionistas,
+            undefined,
+            db,
           );
         }
 
@@ -1701,6 +1867,7 @@ export const updateCredit = async ({ body, set, request }: any) => {
             Number(updateFields.gps ?? current.gps),
             creditos_inversionistas_espejo,
             cuotasPadreAuto,
+            db,
           );
         }
       }
@@ -1715,12 +1882,72 @@ export const updateCredit = async ({ body, set, request }: any) => {
     // como participante.
     console.log(`🪞 [ESPEJO] inversionistas_espejo recibidos: ${JSON.stringify(inversionistas_espejo?.length ?? 'undefined')}`);
     const runInvestorRebuild = async (tx: typeof db) => {
+      // La segunda lectura ocurre bajo el lock que protege su clasificación y rebuild.
+      const nuevosBajoLock = await validarInversionistasNuevos(
+        credito_id,
+        inversionistas ?? [],
+        inversionistas_espejo,
+        set,
+        excluir_compras ?? current.excluir_compras,
+        db,
+      );
+      if (!nuevosBajoLock.success) throw new Error(nuevosBajoLock.error.message);
+      inversionistasNuevos = nuevosBajoLock.nuevos;
+      // Igual que addInvestorToCredit: un modo por-crédito distinto del modo
+      // global vuelve al inversionista combinado y preserva el modo anterior
+      // en los espejos que todavía no tenían snapshot propio.
+      const nuevosPorInversionista = new Map<number, InversionistaNuevoValidado>();
+      for (const nuevo of inversionistasNuevos) {
+        if (nuevo.tipo_reinversion) {
+          nuevosPorInversionista.set(nuevo.inversionista_id, nuevo);
+        }
+      }
+      for (const nuevo of nuevosPorInversionista.values()) {
+        const [inversionistaActual] = await tx
+          .select({ tipo_reinversion: inversionistasTabla.tipo_reinversion })
+          .from(inversionistasTabla)
+          .where(eq(inversionistasTabla.inversionista_id, nuevo.inversionista_id))
+          .for("update")
+          .limit(1);
+        if (!inversionistaActual) {
+          throw new Error(`Inversionista ${nuevo.inversionista_id} no encontrado`);
+        }
+        const modoAnterior = inversionistaActual.tipo_reinversion;
+        if (modoAnterior !== "reinversion_combinada" && modoAnterior !== nuevo.tipo_reinversion) {
+          await tx
+            .update(inversionistasTabla)
+            .set({ tipo_reinversion: "reinversion_combinada" })
+            .where(eq(inversionistasTabla.inversionista_id, nuevo.inversionista_id));
+          await tx
+            .update(creditos_inversionistas_espejo)
+            .set({ tipo_reinversion: modoAnterior })
+            .where(
+              and(
+                eq(creditos_inversionistas_espejo.inversionista_id, nuevo.inversionista_id),
+                isNull(creditos_inversionistas_espejo.tipo_reinversion),
+              ),
+            );
+        }
+      }
       // 9. Actualizar inversionistas (Principal)
       let parentCuotasTx: Map<number, string> = new Map();
       if (inversionistas && inversionistas.length > 0) {
+        const nuevosPorId = new Map(
+          inversionistasNuevos.map((inv) => [inv.inversionista_id, inv]),
+        );
+        const inversionistasNormalizados = inversionistas.map((inv) => {
+          const nuevo = nuevosPorId.get(inv.inversionista_id);
+          return nuevo?.porcentaje_inversion === undefined
+            ? inv
+            : {
+                ...inv,
+                porcentaje_cash_in: nuevo.porcentaje_cash_in!,
+                porcentaje_inversion: nuevo.porcentaje_inversion,
+              };
+        });
         parentCuotasTx = await updateInvestors(
           credito_id,
-          inversionistas,
+          inversionistasNormalizados,
           updateFields,
           current,
           numero_credito_sifco ?? current.numero_credito_sifco,
@@ -1743,10 +1970,22 @@ export const updateCredit = async ({ body, set, request }: any) => {
           (inversionistas || []).map((inv) => [inv.inversionista_id, inv.cuota_inversionista ?? 0])
         );
 
-        const espejoSincronizado = inversionistas_espejo.map((inv) => ({
-          ...inv,
-          cuota_inversionista: principalCuotas.get(inv.inversionista_id) ?? inv.cuota_inversionista,
-        }));
+        const nuevoPorId = new Map(inversionistasNuevos.map((inv) => [inv.inversionista_id, inv]));
+        const espejoSincronizado = inversionistas_espejo.map((inv) => {
+          const nuevo = nuevoPorId.get(inv.inversionista_id);
+          return {
+            ...inv,
+            ...(nuevo && {
+              es_nuevo: true,
+              tipo_reinversion: nuevo.tipo_reinversion,
+              modalidad_facturacion: nuevo.modalidad_facturacion,
+              modalidad_facturacion_spread_id: nuevo.modalidad_facturacion_spread_id,
+              porcentaje_cash_in: nuevo.porcentaje_cash_in ?? inv.porcentaje_cash_in,
+              porcentaje_inversion: nuevo.porcentaje_inversion ?? inv.porcentaje_inversion,
+            }),
+            cuota_inversionista: principalCuotas.get(inv.inversionista_id) ?? inv.cuota_inversionista,
+          };
+        });
 
         console.log(`🪞 [ESPEJO] Iniciando updateInvestors para credito_id=${credito_id} con ${espejoSincronizado.length} inversionistas`);
         await updateInvestors(
@@ -1780,24 +2019,23 @@ export const updateCredit = async ({ body, set, request }: any) => {
         (inversionistas_espejo && inversionistas_espejo.length > 0) ||
         inversionistasNuevos.length > 0)
     ) {
-      try {
-        // withAuditContext ya abre su propia transacción (setea
-        // app.current_user_id para los triggers de auditoría); sin usuario, una
-        // transacción pelada.
-        const espejoUserId = extractUserId(request);
-        if (espejoUserId) {
-          await withAuditContext(espejoUserId, runInvestorRebuild);
-        } else {
-          await db.transaction(async (tx) => runInvestorRebuild(tx as unknown as typeof db));
-        }
-      } catch (investorError) {
-        console.error(`🪞 [ESPEJO] ❌ Error actualizando inversionistas:`, investorError);
-        throw investorError;
-      }
+      await runInvestorRebuild(db);
     }
 
     set.status = 200;
     return updatedCredit;
+    };
+
+    return await withCreditoEspejoLocks(async (locks) => {
+      if (!(await locks.tryLock(credito_id))) {
+        set.status = 409;
+        return { message: `Crédito ${credito_id} está siendo operado por otro proceso` };
+      }
+      if (espejoUserId) {
+        return await withAuditContext(espejoUserId, runUpdate);
+      }
+      return await db.transaction(async (tx) => runUpdate(tx as unknown as typeof db));
+    });
   } catch (error) {
     console.error("Error al actualizar el crédito:", error);
     set.status = 500;

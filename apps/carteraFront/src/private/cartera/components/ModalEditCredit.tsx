@@ -24,6 +24,10 @@ import type {
 } from "../services/services";
 import { updateSaldoReinversionService } from "../services/services";
 import { InvestorsList } from "./InvestorsList";
+import {
+  getNewInvestorMetadataError,
+  mapNewInvestorMetadata,
+} from "./newInvestorMetadata";
 
 // Tipos locales
 interface InvestorItem extends InversionistaPayload {}
@@ -246,6 +250,11 @@ export function ModalEditCredit({
           toast.error(`El inversionista nuevo ${nombre} debe tener un monto mayor a 0.`);
           return;
         }
+        const metadataError = getNewInvestorMetadataError(nuevo);
+        if (metadataError) {
+          toast.error(`${nombre}: ${metadataError}`);
+          return;
+        }
       }
       // Una sola compra de cartera por edición: la facturación prorratea el
       // interés del pago con UNA fecha de corte, así que una segunda compra
@@ -333,7 +342,7 @@ export function ModalEditCredit({
           porcentaje_inversion: Number(i.porcentaje_inversion),
           fecha_inicio_participacion: i.fecha_inicio_participacion,
           cuota_inversionista: Number(i.cuota_inversionista || 0),
-          ...(i.es_nuevo ? { es_nuevo: true, tipo_operacion: i.tipo_operacion } : {}),
+          ...(i.es_nuevo ? mapNewInvestorMetadata(i) : {}),
         })),
 
         // Lista Espejo
@@ -344,7 +353,7 @@ export function ModalEditCredit({
           porcentaje_inversion: Number(i.porcentaje_inversion),
           fecha_inicio_participacion: i.fecha_inicio_participacion,
           cuota_inversionista: Number(i.cuota_inversionista || 0),
-          ...(i.es_nuevo ? { es_nuevo: true, tipo_operacion: i.tipo_operacion } : {}),
+          ...(i.es_nuevo ? mapNewInvestorMetadata(i) : {}),
         })),
       };
       updateCredit(payload, {

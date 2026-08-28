@@ -532,6 +532,7 @@ async function emitirUnLink(params: {
 				.select({
 					status: pagaloPaymentLinks.status,
 					errorCode: pagaloPaymentLinks.errorCode,
+					activatedAt: pagaloPaymentLinks.activatedAt,
 				})
 				.from(pagaloPaymentLinks)
 				.where(eq(pagaloPaymentLinks.id, params.supersedesLinkId))
@@ -547,16 +548,31 @@ async function emitirUnLink(params: {
 					`El link que se está reemplazando cambió a ${viejo?.status ?? "eliminado"} justo antes de emitir el nuevo — no se creó ningún link.`,
 				);
 			}
-			// Mismo criterio que la validación de entrada de
-			// regenerarLinkIndividual — se revalida acá también porque este
-			// candado relee el estado FRESCO (el de arriba puede estar
-			// obsoleto si el link cambió entre esa lectura y este punto).
 			if (
 				viejo.status === "ERROR" &&
 				viejo.errorCode === "PagaloRespuestaAmbigua"
 			) {
 				throw new Error(
 					"El link que se está reemplazando quedó en un estado ambiguo con Págalo — no se puede regenerar hasta reconciliarlo a mano.",
+				);
+			}
+			// Este chequeo vivía solo en la validación de entrada de
+			// regenerarLinkIndividual, así que regenerarGrupo (que llama acá
+			// directo, sin pasar por esa validación) quedaba sin protección:
+			// invalidarGrupoEnTx acepta CREATING→REPLACED sin mirar
+			// activatedAt (correcto para el bot, que la usa igual), y sin este
+			// chequeo compartido un predecesor REPLACED/CANCELLED/EXPIRED que
+			// se cerró mientras su solicitud original todavía estaba en vuelo
+			// se aceptaba igual, disparando una segunda solicitud real antes
+			// de que la primera confirmara su destino (hallazgo de code
+			// review). Movido acá, al punto compartido bajo candado, para
+			// cubrir ambos llamadores en vez de duplicarlo.
+			if (
+				["REPLACED", "CANCELLED", "EXPIRED"].includes(viejo.status) &&
+				!viejo.activatedAt
+			) {
+				throw new Error(
+					"El link que se está reemplazando se cerró mientras Págalo todavía no confirmaba su creación — no se puede regenerar hasta saber si esa solicitud tuvo éxito o no.",
 				);
 			}
 		}

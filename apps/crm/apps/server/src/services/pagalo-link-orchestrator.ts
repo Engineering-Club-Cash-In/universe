@@ -752,7 +752,7 @@ async function emitirUnLink(params: {
 						)
 						.limit(1);
 					if (pagoPredecesorSinReconciliar) {
-						const [preservado] = await tx
+						let [preservado] = await tx
 							.update(pagaloPaymentLinks)
 							.set({
 								paymentUrl,
@@ -771,6 +771,35 @@ async function emitirUnLink(params: {
 								),
 							)
 							.returning({ status: pagaloPaymentLinks.status });
+						if (!preservado) {
+							// El WHERE status='CREATING' no matcheó porque un
+							// supervisor invalidó este mismo link (CREATING→REPLACED)
+							// en el mismo instante en que se detectó el
+							// pago-predecesor. El UPDATE de arriba no afectó
+							// ninguna fila — paymentUrl/pagaloRequestUuid NUNCA se
+							// guardaron. El link es real y cobrable en Págalo pase
+							// lo que pase; sin su UUID persistido, el poller lo
+							// salta para siempre (pagalo-poll.ts solo encola links
+							// con pagaloRequestUuid) — huérfano permanente, invisible
+							// tanto para el poller como para cualquier reconciliación
+							// manual (hallazgo de code review). UPDATE incondicional
+							// que preserva el status actual (cualquiera que sea) y
+							// persiste los identificadores igual.
+							[preservado] = await tx
+								.update(pagaloPaymentLinks)
+								.set({
+									paymentUrl,
+									pagaloRequestUuid: requestUuid,
+									responsePayload: response,
+									errorCode: "PagaloRespuestaAmbigua",
+									errorMessage:
+										"Un pago de un link predecesor llegó mientras Págalo confirmaba este link — requiere reconciliación manual antes de invalidar o regenerar.",
+									nextPollAt: new Date(),
+									updatedAt: new Date(),
+								})
+								.where(eq(pagaloPaymentLinks.id, stored.id))
+								.returning({ status: pagaloPaymentLinks.status });
+						}
 						await tx.insert(pagaloPaymentEvents).values({
 							groupId: params.groupId,
 							linkId: stored.id,

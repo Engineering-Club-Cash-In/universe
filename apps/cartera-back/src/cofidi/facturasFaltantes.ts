@@ -82,7 +82,33 @@ export type DiffFacturas =
 const esCubeInv = (nombre: string) =>
   nombre.trim().toUpperCase().includes("CUBE INVESTMENTS");
 
-const big = (v: string | number | null | undefined) => new Big(v ?? "0");
+/**
+ * Lee un monto del pago con la MISMA tolerancia que los bloques de emisión.
+ *
+ * ⚠️ No basta `new Big(v ?? "0")`. Varias columnas de `pagos_credito` son `text`
+ * (mora, otros, abono_seguro, ...) y la mayoría de las filas traen CADENA VACÍA,
+ * no NULL: en el dump de prod 108,267 de 120,764 pagos tienen `otros = ''`.
+ * `??` no sustituye `''`, así que `new Big("")` lanza "[big.js] Invalid number"
+ * y el try/catch del handler lo convertía en un HTTP 500 (pago 54778).
+ *
+ * Los bloques de emisión leen estos campos con `parseFloat(x) > 0`, que da NaN
+ * (falsy) para `''` y basura, y tolera colas no numéricas ("12abc" → 12). Acá se
+ * replica ese criterio: si el bloque no emitiría, el esperado tampoco lo pide.
+ */
+const big = (v: string | number | null | undefined): Big => {
+  if (v === null || v === undefined) return new Big(0);
+  if (typeof v === "number") return Number.isFinite(v) ? new Big(v) : new Big(0);
+
+  const s = String(v).trim();
+  if (s === "") return new Big(0);
+
+  try {
+    return new Big(s);
+  } catch {
+    const n = parseFloat(s);
+    return Number.isFinite(n) ? new Big(n) : new Big(0);
+  }
+};
 
 /**
  * Lo que ESTE pago debería tener facturado, replicando las condiciones de los

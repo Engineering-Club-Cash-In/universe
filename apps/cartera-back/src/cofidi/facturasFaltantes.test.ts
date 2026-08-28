@@ -139,6 +139,101 @@ describe("calcularEsperado", () => {
   });
 });
 
+// ⚠️ Varias columnas de pagos_credito son `text` y la mayoría de las filas traen
+//    CADENA VACÍA, no NULL (108,267 de 120,764 pagos con otros=''). Un `new Big("")`
+//    lanza y el handler lo convierte en HTTP 500.
+describe("calcularEsperado — montos sucios (columnas text de pagos_credito)", () => {
+  const pagoSucio = (over: Partial<PagoParaDiff>): PagoParaDiff => ({
+    mora: "0",
+    abono_seguro: "0",
+    abono_gps: "0",
+    membresias_pago: "0",
+    otros: "0",
+    abono_interes: "0",
+    abono_iva_12: "0",
+    ...over,
+  });
+
+  it("21. otros='' no revienta y NO pide OTROS", () => {
+    const esperado = calcularEsperado({
+      pagoData: pagoSucio({ otros: "" }),
+      inversionistas: [],
+    });
+    expect(esperado.has("OTROS")).toBe(false);
+  });
+
+  it("22. cadena vacía / whitespace / null / undefined / basura → 0 en todos los rubros", () => {
+    for (const v of ["", "   ", null, undefined, "abc", "N/A", "-"] as const) {
+      const esperado = calcularEsperado({
+        pagoData: pagoSucio({
+          mora: v,
+          otros: v,
+          abono_seguro: v,
+          abono_gps: v,
+          membresias_pago: v,
+          abono_interes: v,
+          abono_iva_12: v,
+        }),
+        inversionistas: ROSTER,
+      });
+      expect({ v, keys: [...esperado] }).toEqual({ v, keys: [] });
+    }
+  });
+
+  it("23. NaN e Infinity numéricos tampoco revientan", () => {
+    const esperado = calcularEsperado({
+      pagoData: pagoSucio({ mora: NaN, otros: Infinity }),
+      inversionistas: [],
+    });
+    expect([...esperado]).toEqual([]);
+  });
+
+  it("24. parseFloat manda: '12abc' se lee como 12 (igual que el bloque de emisión)", () => {
+    const esperado = calcularEsperado({
+      pagoData: pagoSucio({ mora: "12abc" }),
+      inversionistas: [],
+    });
+    expect([...esperado]).toEqual(["MORA"]);
+  });
+
+  it("25. interes_proporcional sucio de un inversionista no rompe el reparto", () => {
+    const esperado = calcularEsperado({
+      pagoData: pagoSucio({ abono_interes: "1000.00", abono_iva_12: "120.00" }),
+      inversionistas: [CUBE, { ...RODRIGO, interes_proporcional: "" }],
+    });
+    // Sin parte para el inversionista: todo el interés queda de residuo en CUBE.
+    expect([...esperado]).toEqual(["INTERESES_CUBE"]);
+  });
+
+  it("26. REPRO pago 54778 del dump (otros=''): antes 500, ahora FALTANTES", () => {
+    // Fila real: mora 0.00, otros '', abono_seguro 260.93, abono_gps 0.00,
+    // membresias_pago 341.66, abono_interes 588.50, abono_iva_12 70.62.
+    const pago54778: PagoParaDiff = {
+      mora: "0.00",
+      otros: "",
+      abono_seguro: "260.93",
+      abono_gps: "0.00",
+      membresias_pago: "341.66",
+      abono_interes: "588.50",
+      abono_iva_12: "70.62",
+      bandera_reinversion: false,
+    };
+
+    expect([
+      ...calcularEsperado({ pagoData: pago54778, inversionistas: ROSTER }),
+    ].sort()).toEqual(["INTERESES:2", "INTERESES_CUBE", "OTROS_SERVICIOS"]);
+
+    const diff = computarDiffFacturas({
+      pagoData: pago54778,
+      inversionistas: ROSTER,
+      activas: [activa("OTROS_SERVICIOS", null, 1), activa("INTERESES_CUBE", null, 2)],
+    });
+    expect(diff.modo).toBe("FALTANTES");
+    if (diff.modo !== "FALTANTES") throw new Error("modo inesperado");
+    expect([...diff.faltantes]).toEqual([keyIntereses(2)]);
+  });
+});
+
 describe("computarDiffFacturas", () => {
   it("8. sin facturas activas → COMPLETO (flujo de siempre, sin cambios)", () => {
     expect(

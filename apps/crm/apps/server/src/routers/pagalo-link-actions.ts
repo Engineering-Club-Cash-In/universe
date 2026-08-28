@@ -19,6 +19,7 @@ import { z } from "zod";
 import { db } from "../db";
 import { casosCobros } from "../db/schema/cobros";
 import {
+	pagaloPaymentEvents,
 	pagaloPaymentGroups,
 	pagaloPaymentLinks,
 } from "../db/schema/pagalo-payments";
@@ -136,9 +137,12 @@ export const pagaloLinkActionsRouter = {
 
 	reintentarDispatchPagalo: cobrosSupervisorProcedure
 		.input(z.object({ groupId: z.string().uuid() }))
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
 			const [grupo] = await db
-				.select({ status: pagaloPaymentGroups.status })
+				.select({
+					status: pagaloPaymentGroups.status,
+					dispatchAttemptCount: pagaloPaymentGroups.dispatchAttemptCount,
+				})
 				.from(pagaloPaymentGroups)
 				.where(eq(pagaloPaymentGroups.id, input.groupId))
 				.limit(1);
@@ -164,8 +168,25 @@ export const pagaloLinkActionsRouter = {
 			// El backoff normal (`nextDispatchAt`) sigue vigente para el ciclo
 			// automático; el supervisor lo salta a propósito, así que se limpia
 			// antes de reclamar — reclamarGrupo respeta ese campo (pagalo-dispatch.ts).
-			await db.transaction((tx) =>
-				tx
+			//
+			// El UPDATE no capturaba si afectó alguna fila — si el dispatcher
+			// programado reclamaba el grupo entre el SELECT de arriba y este
+			// UPDATE, el WHERE no matcheaba nada pero el código igual seguía y
+			// llamaba reclamarYProcesarGrupo, que devuelve "NO_RECLAMADO" como
+			// resultado NORMAL (no lanza), así que el endpoint respondía 200 OK
+			// anunciando un reintento que nunca se disparó (hallazgo de code
+			// review). Se captura con .returning() y se rechaza con CONFLICT si
+			// no afectó ninguna fila, mismo criterio que ya se usa en
+			// pagalo-supervision.ts.
+			//
+			// El evento DISPATCH_RETRY_FORCED se perdió al mover este procedure
+			// a este archivo — sin él, un reintento manual del supervisor no
+			// queda en la bitácora: no hay forma de saber después quién forzó
+			// el reintento ni cuántos intentos previos tenía (hallazgo de code
+			// review). UPDATE + evento en una sola transacción para que no
+			// quede uno sin el otro si algo falla entre medio.
+			const limpiado = await db.transaction(async (tx) => {
+				const [fila] = await tx
 					.update(pagaloPaymentGroups)
 					.set({ nextDispatchAt: null, dispatchClaimedAt: null })
 					.where(
@@ -173,8 +194,25 @@ export const pagaloLinkActionsRouter = {
 							eq(pagaloPaymentGroups.id, input.groupId),
 							eq(pagaloPaymentGroups.status, grupo.status),
 						),
-					),
-			);
+					)
+					.returning({ id: pagaloPaymentGroups.id });
+				if (!fila) return undefined;
+				await tx.insert(pagaloPaymentEvents).values({
+					groupId: input.groupId,
+					eventType: "DISPATCH_RETRY_FORCED",
+					source: "SUPERVISOR",
+					actorUserId: context.userId,
+					fromStatus: grupo.status,
+					payload: { intentosPrevios: grupo.dispatchAttemptCount },
+				});
+				return fila;
+			});
+			if (!limpiado) {
+				throw new ORPCError("CONFLICT", {
+					message:
+						"El grupo cambió justo antes del reintento — recargá el historial.",
+				});
+			}
 			const resultado = await reclamarYProcesarGrupo(input.groupId);
 			return { resultado };
 		}),
@@ -209,41 +247,45 @@ export const pagaloLinkActionsRouter = {
 				});
 			}
 
-			// Mismo alcance que getPagaloHistorial: se autoriza por un caso al
-			// que el usuario SÍ tiene acceso, y el grupo tiene que ser del MISMO
-			// crédito que ese caso. El crédito no se recibe del cliente: sale del
-			// caso, que es lo que impide pedir el grupo de un crédito ajeno.
-			let autorizado = false;
-			if (input.casoCobroId) {
-				await assertAccesoCasoCobro(
-					input.casoCobroId,
-					context.userId,
-					context.userRole,
-				);
-				const [caso] = await db
-					.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
-					.from(casosCobros)
-					.where(eq(casosCobros.id, input.casoCobroId))
-					.limit(1);
-				autorizado =
-					!!caso?.numeroCreditoSifco &&
-					caso.numeroCreditoSifco === grupo.numeroCreditoSifco;
-			}
+			// Grupo del bot (sin gestión de asesor asociada) no tiene "dueño" a
+			// quien verificarle propiedad — la única regla posible es exigir
+			// supervisor, sin importar si el input trae un casoCobroId propio
+			// que coincida por SIFCO. Este chequeo debe correr ANTES del atajo
+			// de "mismo crédito, otro caso": sin este orden, un asesor con
+			// cualquier caso accesible del mismo crédito quedaba `autorizado`
+			// por SIFCO y el gate de supervisor para grupos del bot nunca se
+			// evaluaba — cualquier asesor podía leer el desglose financiero
+			// completo de un grupo del bot igual (hallazgo de code review).
+			if (!grupo.casoCobroId) {
+				if (!PERMISSIONS.canAssignCobros(context.userRole)) {
+					throw new ORPCError("FORBIDDEN", {
+						message:
+							"Este grupo no tiene caso asociado: solo un supervisor puede verlo.",
+					});
+				}
+			} else {
+				// Mismo alcance que getPagaloHistorial: se autoriza por un caso al
+				// que el usuario SÍ tiene acceso, y el grupo tiene que ser del MISMO
+				// crédito que ese caso. El crédito no se recibe del cliente: sale del
+				// caso, que es lo que impide pedir el grupo de un crédito ajeno.
+				let autorizado = false;
+				if (input.casoCobroId) {
+					await assertAccesoCasoCobro(
+						input.casoCobroId,
+						context.userId,
+						context.userRole,
+					);
+					const [caso] = await db
+						.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
+						.from(casosCobros)
+						.where(eq(casosCobros.id, input.casoCobroId))
+						.limit(1);
+					autorizado =
+						!!caso?.numeroCreditoSifco &&
+						caso.numeroCreditoSifco === grupo.numeroCreditoSifco;
+				}
 
-			if (!autorizado) {
-				// Sin casoCobroId (grupo del bot, sin gestión de asesor asociada) no
-				// hay "dueño" a quien verificarle propiedad — la única regla posible
-				// es exigir supervisor. Antes esta rama no verificaba nada: cualquier
-				// usuario de cobros con el groupId podía leer el desglose financiero
-				// completo de un grupo del bot (hallazgo de code review).
-				if (!grupo.casoCobroId) {
-					if (!PERMISSIONS.canAssignCobros(context.userRole)) {
-						throw new ORPCError("FORBIDDEN", {
-							message:
-								"Este grupo no tiene caso asociado: solo un supervisor puede verlo.",
-						});
-					}
-				} else {
+				if (!autorizado) {
 					await assertAccesoCasoCobro(
 						grupo.casoCobroId,
 						context.userId,

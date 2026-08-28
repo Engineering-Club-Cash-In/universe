@@ -2440,10 +2440,7 @@ function RouteComponent() {
 					{caso.id && caso.carteraCreditoId && (
 						<Card>
 							<CardContent className="pt-6">
-								<PagaloHistorial
-									casoCobroId={caso.id}
-									creditoId={caso.carteraCreditoId}
-								/>
+								<PagaloHistorial casoCobroId={caso.id} />
 							</CardContent>
 						</Card>
 					)}

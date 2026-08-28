@@ -240,13 +240,28 @@ export function ChipLinkPagalo({
 	}
 
 	const puedeInvalidar = esSupervisor && ESTADOS_VIVOS.has(link.status);
-	// El server siempre rechaza regenerar un link de un grupo sin caso
-	// asociado (regenerarLinkIndividual, pagalo-link-orchestrator.ts —
-	// necesita resolver contacto del cliente vía casoCobroId). Sin este
-	// chequeo el botón se ofrecía igual para grupos del bot y fallaba
+	// El server SIEMPRE rechaza regenerar dos casos, aunque el status esté en
+	// ESTADOS_REGENERABLES (regenerarLinkIndividual, pagalo-link-orchestrator.ts):
+	// un ERROR con errorCode=PagaloRespuestaAmbigua (Págalo puede haber creado
+	// el link real igual, regenerar duplicaría un link cobrable), o un
+	// REPLACED/CANCELLED/EXPIRED sin activatedAt (se cerró mientras Págalo
+	// todavía no confirmaba la creación — mismo riesgo de duplicado). Ambos
+	// campos ya viajan en el payload de la bandeja; sin este chequeo el botón
+	// se ofrecía igual y fallaba siempre después de que el supervisor
+	// escribía el motivo (hallazgo de code review).
+	const regeneracionSiempreRechazada =
+		link.errorCode === "PagaloRespuestaAmbigua" ||
+		(["REPLACED", "CANCELLED", "EXPIRED"].includes(link.status) &&
+			!link.activatedAt);
+	// El server también rechaza regenerar un link de un grupo sin caso
+	// asociado (necesita resolver contacto del cliente vía casoCobroId). Sin
+	// este chequeo el botón se ofrecía igual para grupos del bot y fallaba
 	// siempre al confirmar (hallazgo de code review).
 	const puedeRegenerar =
-		esSupervisor && !!casoCobroId && ESTADOS_REGENERABLES.has(link.status);
+		esSupervisor &&
+		!!casoCobroId &&
+		ESTADOS_REGENERABLES.has(link.status) &&
+		!regeneracionSiempreRechazada;
 	const puedeCopiar = !!paymentUrl && ESTADOS_VIVOS.has(link.status);
 	const tieneMenu = puedeInvalidar || puedeRegenerar || puedeCopiar;
 
@@ -390,7 +405,12 @@ export function AccionesLinkPagalo({
 	casoCobroId,
 	esSupervisor,
 }: {
-	link: { id: string; status: string };
+	link: {
+		id: string;
+		status: string;
+		errorCode?: string | null;
+		activatedAt?: string | Date | null;
+	};
 	paymentUrl: string | null;
 	casoCobroId: string | null;
 	esSupervisor: boolean;
@@ -399,9 +419,17 @@ export function AccionesLinkPagalo({
 
 	const puedeInvalidar = esSupervisor && ESTADOS_VIVOS.has(link.status);
 	// Mismo chequeo que ChipLinkPagalo: el server siempre rechaza regenerar
-	// sin casoCobroId (hallazgo de code review).
+	// sin casoCobroId, o cuando el link quedó ambiguo/sin confirmar (hallazgo
+	// de code review).
+	const regeneracionSiempreRechazada =
+		link.errorCode === "PagaloRespuestaAmbigua" ||
+		(["REPLACED", "CANCELLED", "EXPIRED"].includes(link.status) &&
+			!link.activatedAt);
 	const puedeRegenerar =
-		esSupervisor && !!casoCobroId && ESTADOS_REGENERABLES.has(link.status);
+		esSupervisor &&
+		!!casoCobroId &&
+		ESTADOS_REGENERABLES.has(link.status) &&
+		!regeneracionSiempreRechazada;
 	const puedeCopiar = !!paymentUrl && ESTADOS_VIVOS.has(link.status);
 	if (!puedeInvalidar && !puedeRegenerar && !puedeCopiar) return null;
 

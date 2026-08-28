@@ -57,12 +57,28 @@ export const pagaloSupervisionRouter = {
 				antiguedadMinDias: input.antiguedadMinDias,
 			};
 			const condicionesExplicitas = condicionesFiltro(filtroInput);
-			const condicionPrincipal =
-				condicionesExplicitas.length > 0
+			const problemasLink = input.problemasLink as
+				| PagaloPaymentLinkStatus[]
+				| undefined;
+			// problemasLink (estado de link, no de grupo) NO estaba contando como
+			// filtro explícito acá — con problemasLink como único filtro activo,
+			// condicionPrincipal igual caía en condicionGrupoProblematico() (el
+			// predicado "problemático" por defecto, soloProblematicos default
+			// true), agregado como AND extra sobre el EXISTS de más abajo. Eso
+			// excluía grupos con un link problemático cuyo ESTADO DE GRUPO no
+			// caía en la lista de "problemático" (p. ej. PENDING_PAYMENT
+			// reciente con un link ERROR) — el filtro que el operador pidió
+			// explícitamente quedaba intersectado con uno que no pidió
+			// (hallazgo de code review).
+			const hayFiltrosExplicitos =
+				condicionesExplicitas.length > 0 || !!problemasLink?.length;
+			const condicionPrincipal = hayFiltrosExplicitos
+				? condicionesExplicitas.length > 0
 					? and(...condicionesExplicitas)
-					: input.soloProblematicos
-						? condicionGrupoProblematico()
-						: undefined;
+					: undefined
+				: input.soloProblematicos
+					? condicionGrupoProblematico()
+					: undefined;
 			const condiciones = condicionPrincipal ? [condicionPrincipal] : [];
 			if (input.numeroSifco) {
 				// Búsqueda parcial (contiene, no igualdad exacta): el supervisor
@@ -76,14 +92,11 @@ export const pagaloSupervisionRouter = {
 					),
 				);
 			}
-			// problemasLink (estado de link, no de grupo) se resuelve en SQL con
-			// un EXISTS correlacionado — antes se traían TODOS los grupos y TODOS
-			// sus links a memoria del server para filtrar y paginar con .slice(),
-			// costo que crecía sin límite con el historial completo (hallazgo de
-			// code review). Con esto, filtro y paginación quedan en la DB.
-			const problemasLink = input.problemasLink as
-				| PagaloPaymentLinkStatus[]
-				| undefined;
+			// problemasLink se resuelve en SQL con un EXISTS correlacionado —
+			// antes se traían TODOS los grupos y TODOS sus links a memoria del
+			// server para filtrar y paginar con .slice(), costo que crecía sin
+			// límite con el historial completo (hallazgo de code review). Con
+			// esto, filtro y paginación quedan en la DB.
 			if (problemasLink?.length) {
 				condiciones.push(
 					exists(

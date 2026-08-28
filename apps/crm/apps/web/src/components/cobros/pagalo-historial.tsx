@@ -18,12 +18,10 @@ import {
 	CheckCircle2,
 	ChevronLeft,
 	ChevronRight,
-	Copy,
 	CreditCard,
 	XCircle,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,15 +32,14 @@ import {
 import { authClient } from "@/lib/auth-client";
 import { agruparPorCuota } from "@/lib/cobros/pagalo-allocations-view";
 import {
-	copyPagaloLink,
 	getPagaloGroupSummary,
 	getPagaloLinkStatusInfo,
 } from "@/lib/cobros/pagalo-link-display";
 import { facturableSinOtrosGTQ } from "@/lib/cobros/pagalo-otros";
 import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
-import { AccionesSupervisorPagalo } from "./pagalo/acciones-supervisor-pagalo";
 import { BitacoraPagalo, type EventoPagalo } from "./pagalo/bitacora-pagalo";
+import { AccionesLinkPagalo } from "./pagalo/chip-link-pagalo";
 import {
 	antiguedadLink,
 	etiquetaMotivo,
@@ -96,9 +93,18 @@ const q = (value: unknown) =>
 		Number(value ?? 0),
 	);
 
-function LinkPagalo({ link, monto }: { link: Link; monto: string }) {
+function LinkPagalo({
+	link,
+	monto,
+	casoCobroId,
+	esSupervisor,
+}: {
+	link: Link;
+	monto: string;
+	casoCobroId: string;
+	esSupervisor: boolean;
+}) {
 	const estado = getPagaloLinkStatusInfo(link.status);
-	const puedeCopiar = estado.canCopy && Boolean(link.paymentUrl);
 	const antiguedad = antiguedadLink(link.activatedAt ?? link.createdAt);
 	const motivoFalla =
 		link.status === "ERROR"
@@ -106,16 +112,6 @@ function LinkPagalo({ link, monto }: { link: Link; monto: string }) {
 			: link.pollAttempts > 0
 				? link.lastPollError
 				: null;
-
-	const copiar = async () => {
-		if (!link.paymentUrl) return;
-		try {
-			await copyPagaloLink(link.paymentUrl);
-			toast.success("Link copiado");
-		} catch {
-			toast.error("No se pudo copiar el link. Intentá de nuevo.");
-		}
-	};
 
 	return (
 		<div className="rounded-md border p-3">
@@ -171,18 +167,12 @@ function LinkPagalo({ link, monto }: { link: Link; monto: string }) {
 							: `Antigüedad: ${antiguedad.etiqueta}`}
 					</p>
 				)}
-			{puedeCopiar && (
-				<Button
-					className="mt-3"
-					onClick={copiar}
-					size="sm"
-					type="button"
-					variant="outline"
-				>
-					<Copy className="mr-2 h-3.5 w-3.5" />
-					Copiar link de pago
-				</Button>
-			)}
+			<AccionesLinkPagalo
+				link={link}
+				paymentUrl={link.paymentUrl}
+				casoCobroId={casoCobroId}
+				esSupervisor={esSupervisor}
+			/>
 		</div>
 	);
 }
@@ -249,11 +239,9 @@ function LinksPorCuota({
 function GrupoPagalo({
 	grupo,
 	casoCobroId,
-	creditoId,
 }: {
 	grupo: Grupo;
 	casoCobroId: string;
-	creditoId: number;
 }) {
 	const estadoInfo = getEstadoGrupoInfo(grupo.status);
 	const resumenLinks = getPagaloGroupSummary(grupo.links);
@@ -328,6 +316,8 @@ function GrupoPagalo({
 									? grupo.capitalTotal
 									: grupo.facturableTotal
 							}
+							casoCobroId={casoCobroId}
+							esSupervisor={esSupervisor}
 						/>
 					))}
 				</div>
@@ -345,12 +335,6 @@ function GrupoPagalo({
 					<LinksPorCuota casoCobroId={casoCobroId} groupId={grupo.id} />
 				</CollapsibleContent>
 			</Collapsible>
-			<AccionesSupervisorPagalo
-				casoCobroId={casoCobroId}
-				creditoId={creditoId}
-				groupId={grupo.id}
-				status={grupo.status}
-			/>
 			<BitacoraPagalo
 				eventos={grupo.eventos}
 				esSupervisor={esSupervisor}
@@ -362,13 +346,7 @@ function GrupoPagalo({
 
 const POR_PAGINA = 5;
 
-export function PagaloHistorial({
-	casoCobroId,
-	creditoId,
-}: {
-	casoCobroId: string;
-	creditoId: number;
-}) {
+export function PagaloHistorial({ casoCobroId }: { casoCobroId: string }) {
 	const [expandido, setExpandido] = useState(true);
 	const [pagina, setPagina] = useState(1);
 	// El componente se reusa al navegar de un caso a otro (misma ruta): sin
@@ -443,7 +421,6 @@ export function PagaloHistorial({
 								key={grupo.id}
 								grupo={grupo}
 								casoCobroId={casoCobroId}
-								creditoId={creditoId}
 							/>
 						))}
 						{totalPaginas > 1 && (

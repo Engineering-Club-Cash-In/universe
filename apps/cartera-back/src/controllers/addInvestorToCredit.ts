@@ -31,7 +31,11 @@ import {
   resolverStatusEspejoRebuild,
   type FilaEspejoGuard,
 } from "../utils/espejoGuards";
-import { clasificarCompraCreditoInversionista, tieneConflictoExcedenteVariable } from "./purchaseClassification";
+import {
+  clasificarCompraCreditoInversionista,
+  resolverModosTrasReemplazo,
+  tieneConflictoExcedenteVariable,
+} from "./purchaseClassification";
 
 const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";
 
@@ -890,19 +894,25 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
       const debeEscalar = X !== "reinversion_combinada" && X !== Y;
 
       const espejosExistentes = await db
-        .select({ tipo_reinversion: creditos_inversionistas_espejo.tipo_reinversion })
+        .select({
+          credito_id: creditos_inversionistas_espejo.credito_id,
+          tipo_reinversion: creditos_inversionistas_espejo.tipo_reinversion,
+        })
         .from(creditos_inversionistas_espejo)
         .where(eq(creditos_inversionistas_espejo.inversionista_id, inversionista_id));
 
-      // Modalidades por-crédito resultantes: existentes (NULL→backfill si escala)
-      // + la de los créditos nuevos (Y).
-      const modalidadesFinales = new Set<string | null>();
-      for (const e of espejosExistentes) {
-        modalidadesFinales.add(e.tipo_reinversion === null && debeEscalar ? X : e.tipo_reinversion);
-      }
-      modalidadesFinales.add(Y);
+      // En manual, los créditos objetivo reemplazan su modalidad durante el
+      // rebuild; validar el estado resultante, no la fila que será eliminada.
+      const modalidadesFinales = resolverModosTrasReemplazo({
+        espejos: espejosExistentes,
+        creditoIdsObjetivo: esManual
+          ? candidatos.map((candidato) => candidato.credito_id)
+          : [],
+        modoSolicitado: Y,
+        modoParaNulos: debeEscalar ? X : null,
+      });
 
-      if (modalidadesFinales.has("reinversion_excedente") && modalidadesFinales.has("reinversion_variable")) {
+      if (tieneConflictoExcedenteVariable(modalidadesFinales)) {
         set.status = 409;
         return {
           success: false,
@@ -974,15 +984,20 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
           X !== "reinversion_combinada" && X !== Y;
 
         const espejosExistentes = await tx
-          .select({ tipo_reinversion: creditos_inversionistas_espejo.tipo_reinversion })
+          .select({
+            credito_id: creditos_inversionistas_espejo.credito_id,
+            tipo_reinversion: creditos_inversionistas_espejo.tipo_reinversion,
+          })
           .from(creditos_inversionistas_espejo)
           .where(eq(creditos_inversionistas_espejo.inversionista_id, inversionista_id));
-        const modosFinales = [
-          ...espejosExistentes.map((espejo) =>
-            espejo.tipo_reinversion === null && debeEscalar ? X : espejo.tipo_reinversion,
-          ),
-          Y,
-        ];
+        const modosFinales = resolverModosTrasReemplazo({
+          espejos: espejosExistentes,
+          creditoIdsObjetivo: esManual
+            ? candidatos.map((candidato) => candidato.credito_id)
+            : [],
+          modoSolicitado: Y,
+          modoParaNulos: debeEscalar ? X : null,
+        });
         if (tieneConflictoExcedenteVariable(modosFinales)) {
           throw new ModalidadReinversionConflictError("No se puede mezclar Excedente y Variable en el mismo inversionista");
         }
@@ -1204,9 +1219,15 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
         );
 
         if (!cubePadre) {
+          const razon = "CUBE no encontrado en el padre del crédito";
+          if (esManual) {
+            throw new CreditoNoDisponibleError(
+              `${razon} ${numero_credito_sifco}; asignación manual cancelada.`,
+            );
+          }
           errores.push({
             credito_id,
-            razon: "CUBE no encontrado en el padre del crédito",
+            razon,
           });
           continue;
         }

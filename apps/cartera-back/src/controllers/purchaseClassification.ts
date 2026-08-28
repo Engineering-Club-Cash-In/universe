@@ -30,6 +30,27 @@ export function tieneConflictoExcedenteVariable(
   return modos.includes("reinversion_excedente") && modos.includes("reinversion_variable");
 }
 
+export function resolverModosTrasReemplazo<T extends string>({
+  espejos,
+  creditoIdsObjetivo,
+  modoSolicitado,
+  modoParaNulos,
+}: {
+  espejos: readonly FilaModoEspejo<T>[];
+  creditoIdsObjetivo: readonly number[];
+  modoSolicitado: T;
+  modoParaNulos: T | null;
+}): (T | null)[] {
+  const objetivos = new Set(creditoIdsObjetivo);
+  return [
+    ...espejos.map((espejo) => {
+      if (objetivos.has(espejo.credito_id)) return modoSolicitado;
+      return espejo.tipo_reinversion ?? modoParaNulos;
+    }),
+    modoSolicitado,
+  ];
+}
+
 export function resolverModosEfectivosLiquidacion<T extends string>(
   modoGlobal: T | null | undefined,
   creditoIds: readonly number[],

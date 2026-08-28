@@ -1,7 +1,9 @@
 import { describe, expect, it } from "bun:test";
+import { readFile } from "node:fs/promises";
 import {
   clasificarCompraCreditoInversionista,
   resolverModosEfectivosLiquidacion,
+  resolverModosTrasReemplazo,
   tieneConflictoExcedenteVariable,
   snapshotModoLiquidacion,
 } from "./purchaseClassification";
@@ -72,6 +74,45 @@ describe("snapshotModoLiquidacion", () => {
   it("no inventa un modo cuando la fuente no lo conoce", () => {
     expect(snapshotModoLiquidacion(null)).toBeNull();
     expect(snapshotModoLiquidacion(undefined)).toBeNull();
+  });
+});
+
+describe("resolverModosTrasReemplazo", () => {
+  it("se usa tanto antes como después del lock transaccional", async () => {
+    const source = await readFile(
+      new URL("./addInvestorToCredit.ts", import.meta.url),
+      "utf8",
+    );
+    expect(source.match(/resolverModosTrasReemplazo\(\{/g)).toHaveLength(2);
+    expect(source).toMatch(
+      /if \(!cubePadre\) \{\s*const razon = "CUBE no encontrado en el padre del crédito";\s*if \(esManual\) \{\s*throw new CreditoNoDisponibleError/,
+    );
+  });
+
+  it("reemplaza el modo anterior del crédito objetivo antes de validar conflicto", () => {
+    expect(
+      resolverModosTrasReemplazo({
+        espejos: [
+          { credito_id: 10, tipo_reinversion: "reinversion_variable" },
+        ],
+        creditoIdsObjetivo: [10],
+        modoSolicitado: "reinversion_excedente",
+        modoParaNulos: "reinversion_variable",
+      }),
+    ).toEqual(["reinversion_excedente", "reinversion_excedente"]);
+  });
+
+  it("conserva el conflicto de un crédito no reemplazado", () => {
+    const modos = resolverModosTrasReemplazo({
+      espejos: [
+        { credito_id: 10, tipo_reinversion: "reinversion_variable" },
+        { credito_id: 11, tipo_reinversion: "reinversion_variable" },
+      ],
+      creditoIdsObjetivo: [10],
+      modoSolicitado: "reinversion_excedente",
+      modoParaNulos: "reinversion_variable",
+    });
+    expect(tieneConflictoExcedenteVariable(modos)).toBe(true);
   });
 });
 

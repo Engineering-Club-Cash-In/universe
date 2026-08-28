@@ -232,24 +232,24 @@ export function buildAuditRows(
 			? { _ejecutadoComo: context.impersonatedFor, payload }
 			: payload;
 
-	if (context.entries.length > 0) {
-		return context.entries.map((entry) => ({
-			...common,
-			entityType: entry.entity,
-			entityId: entry.id ?? null,
-			action: entry.action,
-			input: prepareAuditInput(conActor(entry.data ?? context.input)),
-			ok: entry.ok ?? outcome.ok,
-			errorCode: entry.errorCode ?? outcome.errorCode ?? null,
-		}));
-	}
+	// Una anotación describe una escritura que YA ocurrió: se anota después de
+	// que la sentencia pasó. Que la request falle más adelante no la deshace —
+	// las escrituras de una transacción revertida se descartan con
+	// `auditRollback`, que es otro mecanismo.
+	const filas = context.entries.map((entry) => ({
+		...common,
+		entityType: entry.entity,
+		entityId: entry.id ?? null,
+		action: entry.action,
+		input: prepareAuditInput(conActor(entry.data ?? context.input)),
+		ok: entry.ok ?? true,
+		errorCode: entry.errorCode ?? null,
+	}));
 
-	// Nada anotado. Si terminó bien no se escribe: no hubo escritura que
-	// registrar. Si falló queda el intento, que es lo que sirve para
-	// diagnosticar quién quiso hacer qué.
-	if (outcome.ok || !context.fallback) return [];
-	return [
-		{
+	// El fracaso de la operación es una fila aparte, no una reinterpretación de
+	// las anteriores: así conviven "el lead se creó" y "la operación falló".
+	if (!outcome.ok && context.fallback) {
+		filas.push({
 			...common,
 			entityType: context.fallback.entity,
 			entityId: null,
@@ -257,8 +257,10 @@ export function buildAuditRows(
 			input: prepareAuditInput(conActor(context.input)),
 			ok: false,
 			errorCode: outcome.errorCode ?? null,
-		},
-	];
+		});
+	}
+
+	return filas;
 }
 
 /**
@@ -429,23 +431,33 @@ const FALLBACK_POR_RUTA: Record<
 	string,
 	{ entity: AuditEntityType; action: string }
 > = {
-	"/api/public/lead": { entity: "lead", action: "create" },
-	"/api/portal/lead": { entity: "lead", action: "create" },
-	"/api/portal/lead/update": { entity: "lead", action: "update" },
-	"/info/renap": { entity: "lead", action: "create" },
-	"/info/lead-opportunity": { entity: "lead", action: "update" },
-	"/info/check-liveness": { entity: "lead", action: "liveness_validated" },
-	"/api/load-cars": { entity: "vehicle", action: "import_upsert" },
-	"/api/migrate/creditos": { entity: "opportunity", action: "create" },
-	"/api/migrate/actualizar-value": {
+	"POST /api/public/lead": { entity: "lead", action: "create" },
+	"POST /api/portal/lead": { entity: "lead", action: "create" },
+	"POST /api/portal/lead/update": { entity: "lead", action: "update" },
+	"POST /info/renap": { entity: "lead", action: "create" },
+	"POST /info/lead-opportunity": { entity: "lead", action: "update" },
+	// La escritura vive en el GET que valida; el POST /info/check-liveness solo
+	// consulta si ya se validó y manda un OTP.
+	"GET /info/validate-liveness": {
+		entity: "lead",
+		action: "liveness_validated",
+	},
+	"POST /api/load-cars": { entity: "vehicle", action: "import_upsert" },
+	"POST /api/migrate/creditos": { entity: "opportunity", action: "create" },
+	"POST /api/migrate/actualizar-value": {
 		entity: "opportunity",
 		action: "update_value",
 	},
-	"/api/migrate/cleanup": { entity: "opportunity", action: "delete" },
+	"DELETE /api/migrate/cleanup": { entity: "opportunity", action: "delete" },
 };
 
-export function auditFallbackForPath(path: string) {
-	return FALLBACK_POR_RUTA[path] ?? null;
+/**
+ * Se indexa por método Y ruta: `GET /api/portal/lead` solo lee y comparte el
+ * path con el POST que crea, así que un rechazo de lectura no debe fabricar un
+ * intento de alta.
+ */
+export function auditFallbackForPath(method: string, path: string) {
+	return FALLBACK_POR_RUTA[`${method} ${path}`] ?? null;
 }
 
 /** El `source` sale de la ruta: no hay que acordarse de declararlo. */
@@ -474,7 +486,7 @@ export function auditRequest(): MiddlewareHandler {
 				source: auditSourceForPath(path),
 				operation: resolveOperation(c.req.method, path),
 				input: await readRequestBody(c),
-				fallback: auditFallbackForPath(path),
+				fallback: auditFallbackForPath(c.req.method, path),
 			},
 			async () => {
 				await next();

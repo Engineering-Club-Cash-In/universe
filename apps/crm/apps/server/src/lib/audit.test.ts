@@ -199,28 +199,45 @@ describe("auditSourceForPath", () => {
 });
 
 describe("failed requests that do not throw", () => {
-	test("marks the recorded writes with the outcome of the request", () => {
-		// Los handlers de Hono devuelven c.json({ error }, 400) en vez de lanzar:
-		// sin mirar el estado, una escritura dentro de un rechazo quedaba como ok.
-		const [row] = buildAuditRows(
+	test("keeps a committed write as successful and adds the failed attempt", () => {
+		// El lead se creó de verdad; que un paso posterior falle no lo deshace.
+		// Marcarlo ok:false diría que no ocurrió, y perder la fila del fallo
+		// escondería que la operación no terminó: van las dos.
+		const rows = buildAuditRows(
 			contextWith({
 				source: "public",
 				operation: "POST /api/public/lead",
+				fallback: { entity: "lead", action: "create" },
 				entries: [{ entity: "lead", id: "lead-1", action: "create" }],
-			}),
-			{ ok: false, errorCode: "HTTP_400", durationMs: 5 },
-		);
-		expect(row).toMatchObject({ ok: false, errorCode: "HTTP_400" });
-	});
-
-	test("lets an entry keep its own outcome", () => {
-		const [row] = buildAuditRows(
-			contextWith({
-				entries: [{ entity: "lead", id: "lead-1", action: "create", ok: true }],
 			}),
 			{ ok: false, errorCode: "HTTP_500", durationMs: 5 },
 		);
-		expect(row.ok).toBe(true);
+		expect(rows).toHaveLength(2);
+		expect(rows[0]).toMatchObject({ entityId: "lead-1", ok: true });
+		expect(rows[1]).toMatchObject({
+			entityId: null,
+			ok: false,
+			errorCode: "HTTP_500",
+		});
+	});
+
+	test("lets an entry declare its own failure", () => {
+		const [row] = buildAuditRows(
+			contextWith({
+				fallback: null,
+				entries: [
+					{
+						entity: "lead",
+						id: "lead-1",
+						action: "enrich_renap",
+						ok: false,
+						errorCode: "SIN_DPI",
+					},
+				],
+			}),
+			{ ok: true, durationMs: 5 },
+		);
+		expect(row).toMatchObject({ ok: false, errorCode: "SIN_DPI" });
 	});
 });
 
@@ -320,19 +337,39 @@ describe("auditFallbackForPath", () => {
 	test("identifies rejected attempts on routes that write", () => {
 		// Un 400 por campos faltantes no llega a anotar nada: sin esta identidad
 		// el intento rechazado no dejaría rastro.
-		expect(auditFallbackForPath("/api/public/lead")).toEqual({
+		expect(auditFallbackForPath("POST", "/api/public/lead")).toEqual({
 			entity: "lead",
 			action: "create",
 		});
-		expect(auditFallbackForPath("/api/migrate/cleanup")).toEqual({
+		expect(auditFallbackForPath("DELETE", "/api/migrate/cleanup")).toEqual({
 			entity: "opportunity",
 			action: "delete",
 		});
 	});
 
+	test("distinguishes the reading route from the writing one", () => {
+		// GET y POST comparten path en el portal: un rechazo de lectura no debe
+		// fabricar un intento de alta.
+		expect(auditFallbackForPath("GET", "/api/portal/lead")).toBeNull();
+		expect(auditFallbackForPath("POST", "/api/portal/lead")).toEqual({
+			entity: "lead",
+			action: "create",
+		});
+	});
+
+	test("points liveness at the endpoint that actually writes", () => {
+		expect(auditFallbackForPath("GET", "/info/validate-liveness")).toEqual({
+			entity: "lead",
+			action: "liveness_validated",
+		});
+		expect(auditFallbackForPath("POST", "/info/check-liveness")).toBeNull();
+	});
+
 	test("stays quiet on routes that write nothing", () => {
-		expect(auditFallbackForPath("/info/send-otp")).toBeNull();
-		expect(auditFallbackForPath("/api/upload-vehicle-video")).toBeNull();
+		expect(auditFallbackForPath("POST", "/info/send-otp")).toBeNull();
+		expect(
+			auditFallbackForPath("POST", "/api/upload-vehicle-video"),
+		).toBeNull();
 	});
 });
 

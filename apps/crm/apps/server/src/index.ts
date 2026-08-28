@@ -541,6 +541,12 @@ app.post("/info/lead-opportunity", async (c) => {
 
 		const result = await updateLeadAndCreateOpportunity(body.dpi, body);
 
+		// Mismo caso que /info/renap: el controller reporta el rechazo en el valor
+		// y la ruta responde 200.
+		if (result && typeof result === "object" && result.success === false) {
+			markAuditFailure("LEAD_OPPORTUNITY_RECHAZADO");
+		}
+
 		return c.json(result);
 	} catch (err: any) {
 		console.error("[ERROR] /info/lead-opportunity:", err);

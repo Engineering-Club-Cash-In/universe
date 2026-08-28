@@ -2972,9 +2972,10 @@ function RouteComponent() {
 						{isWonLocked && (
 							<p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-amber-700 text-sm dark:text-amber-300">
 								Esta oportunidad ya está ganada: el cliente, la empresa, el
-								vehículo y el tipo de crédito quedaron fijados al generar los
-								contratos y solo un administrador puede corregirlos. El resto de
-								los campos sigue editable.
+								vehículo, el tipo de crédito y los términos del financiamiento
+								(monto, plazo, tasa, cuota y día de pago) quedaron fijados al
+								generar los contratos, y solo un administrador puede
+								corregirlos. La etapa, las notas y el resto siguen editables.
 							</p>
 						)}
 					</DialogHeader>
@@ -3112,6 +3113,7 @@ function RouteComponent() {
 												onBlur={field.handleBlur}
 												onChange={(e) => field.handleChange(e.target.value)}
 												placeholder="0.00"
+												disabled={isWonLocked}
 											/>
 										</div>
 									)}

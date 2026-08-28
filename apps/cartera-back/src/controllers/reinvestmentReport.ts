@@ -182,6 +182,43 @@ export function buildCubeNetInterest(value: number | string) {
   };
 }
 
+function allocateRoundedAmountsToTarget(
+  values: (number | string)[],
+  target: Big,
+) {
+  const rawCents = values.map((value) => new Big(value).times(100));
+  const allocated = rawCents.map((value) => value.round(0, Big.roundDown));
+  const remainder = target
+    .minus(allocated.reduce((total, value) => total.plus(value), new Big(0)))
+    .toNumber();
+  const direction = Math.sign(remainder);
+  const order = rawCents
+    .map((value, index) => ({
+      index,
+      remainder: value.minus(allocated[index]),
+    }))
+    .sort((a, b) => {
+      const difference = direction * b.remainder.cmp(a.remainder);
+      return difference !== 0 ? difference : a.index - b.index;
+    });
+
+  for (let index = 0; index < Math.abs(remainder); index++) {
+    const eligible =
+      direction < 0
+        ? order.filter(({ index: candidateIndex }) =>
+            allocated[candidateIndex].gt(0),
+          )
+        : order;
+    const destination = eligible[index % eligible.length];
+    if (!destination) {
+      throw new Error("No se pudo distribuir el residuo monetario sin negativos");
+    }
+    allocated[destination.index] = allocated[destination.index].plus(direction);
+  }
+
+  return allocated.map((value) => value.div(100).toFixed(2));
+}
+
 export function allocateRoundedAmounts(values: (number | string)[]) {
   const rawCents = values.map((value) => new Big(value).times(100));
   const allocated = rawCents.map((value) => value.round(0, Big.roundHalfUp));
@@ -198,10 +235,15 @@ export function allocateRoundedAmounts(values: (number | string)[]) {
       index,
       remainder: value.minus(allocated[index]),
     }))
-    .sort((a, b) => direction * b.remainder.cmp(a.remainder));
+    .sort((a, b) => {
+      const difference = direction * b.remainder.cmp(a.remainder);
+      return difference !== 0 ? difference : a.index - b.index;
+    });
 
   for (let index = 0; index < Math.abs(remainder); index++) {
-    allocated[order[index].index] = allocated[order[index].index].plus(direction);
+    const destination = order[index % order.length];
+    if (!destination) break;
+    allocated[destination.index] = allocated[destination.index].plus(direction);
   }
 
   return allocated.map((value) => value.div(100).toFixed(2));
@@ -221,18 +263,78 @@ type LiquidationModeAllocationRow = {
 export function canonicalizeLiquidationModeRows<T extends LiquidationModeAllocationRow>(rows: T[]) {
   const allocate = (field: keyof LiquidationModeAllocationRow) =>
     allocateRoundedAmounts(rows.map((row) => row[field]));
-  const reinvestedCapital = allocate("reinversion_capital");
-  const reinvestedRest = allocate("reinversion_interes");
-  const reinvestedUnclassified = allocateRoundedAmounts(rows.map((row) =>
+  const targetCents = (values: (number | string)[]) =>
+    values
+      .reduce((total, value) => total.plus(value), new Big(0))
+      .times(100)
+      .round(0, Big.roundHalfUp);
+  const clampTarget = (value: Big, lower: Big, upper: Big) =>
+    value.lt(lower) ? lower : value.gt(upper) ? upper : value;
+
+  const reinvestedCapitalRaw = rows.map((row) => row.reinversion_capital);
+  const reinvestedRestRaw = rows.map((row) => row.reinversion_interes);
+  const reinvestedUnclassifiedRaw = rows.map((row) =>
     new Big(row.reinversion_total)
       .minus(row.reinversion_capital)
       .minus(row.reinversion_interes)
-      .toString()
-  ));
-  const paid = allocateRoundedAmounts(rows.map((row) =>
-    new Big(row.total_distribuido).minus(row.reinversion_total).toString()
-  ));
-  const totalCapital = allocate("total_capital");
+      .toString(),
+  );
+  const paidCapitalRaw = rows.map((row) =>
+    new Big(row.total_capital).minus(row.reinversion_capital).toString(),
+  );
+  const paidRestRaw = rows.map((row) =>
+    new Big(row.total_distribuido)
+      .minus(row.reinversion_total)
+      .minus(new Big(row.total_capital).minus(row.reinversion_capital))
+      .toString(),
+  );
+
+  const reinvestedCapitalTarget = targetCents(reinvestedCapitalRaw);
+  const totalCapitalTarget = targetCents(rows.map((row) => row.total_capital));
+  const totalFlowTarget = targetCents(rows.map((row) => row.total_distribuido));
+  const paidCapitalTarget = totalCapitalTarget.minus(reinvestedCapitalTarget);
+  const reinvestedTotalTarget = clampTarget(
+    targetCents(rows.map((row) => row.reinversion_total)),
+    reinvestedCapitalTarget,
+    totalFlowTarget.minus(paidCapitalTarget),
+  );
+  const reinvestedNonCapitalTarget = reinvestedTotalTarget.minus(
+    reinvestedCapitalTarget,
+  );
+  const reinvestedRestTarget = clampTarget(
+    targetCents(reinvestedRestRaw),
+    new Big(0),
+    reinvestedNonCapitalTarget,
+  );
+  const reinvestedUnclassifiedTarget = reinvestedNonCapitalTarget.minus(
+    reinvestedRestTarget,
+  );
+  const paidTotalTarget = totalFlowTarget.minus(reinvestedTotalTarget);
+  const paidRestTarget = paidTotalTarget.minus(paidCapitalTarget);
+
+  const reinvestedCapital = allocateRoundedAmountsToTarget(
+    reinvestedCapitalRaw,
+    reinvestedCapitalTarget,
+  );
+  const reinvestedRest = allocateRoundedAmountsToTarget(
+    reinvestedRestRaw,
+    reinvestedRestTarget,
+  );
+  const reinvestedUnclassified = allocateRoundedAmountsToTarget(
+    reinvestedUnclassifiedRaw,
+    reinvestedUnclassifiedTarget,
+  );
+  const paidCapital = allocateRoundedAmountsToTarget(
+    paidCapitalRaw,
+    paidCapitalTarget,
+  );
+  const paidRest = allocateRoundedAmountsToTarget(paidRestRaw, paidRestTarget);
+  const paid = paidCapital.map((value, index) =>
+    new Big(value).plus(paidRest[index]).toFixed(2),
+  );
+  const totalCapital = reinvestedCapital.map((value, index) =>
+    new Big(value).plus(paidCapital[index]).toFixed(2),
+  );
   const totalInterest = allocate("total_interes");
   const totalIva = allocate("total_iva");
   const totalIsr = allocate("total_isr");

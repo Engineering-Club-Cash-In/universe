@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import Big from "big.js";
 import {
   allocateRoundedAmounts,
   allocateRoundedPurchaseAmounts,
@@ -36,7 +37,7 @@ test("asigna una sola vez el residuo de centavo entre modalidades", () => {
   const rows = canonicalizeLiquidationModeRows([
     {
       tipo: "reinversion_variable",
-      reinversion_capital: "0",
+      reinversion_capital: "0.005",
       reinversion_interes: "0",
       reinversion_total: "0.005",
       total_capital: "0.005",
@@ -47,7 +48,7 @@ test("asigna una sola vez el residuo de centavo entre modalidades", () => {
     },
     {
       tipo: "sin_reinversion",
-      reinversion_capital: "0",
+      reinversion_capital: "0.005",
       reinversion_interes: "0",
       reinversion_total: "0.005",
       total_capital: "0.005",
@@ -62,6 +63,180 @@ test("asigna una sola vez el residuo de centavo entre modalidades", () => {
   expect(rows.map((row) => row.total_distribuido).sort()).toEqual(["0.00", "0.01"]);
   expect(rows.map((row) => row.reinversion_total).sort()).toEqual(["0.00", "0.01"]);
   expect(rows.map((row) => row.total_cuota)).toEqual(["0.00", "0.00"]);
+});
+
+test("preserva reinversión de capital dentro del capital al repartir un centavo", () => {
+  const rows = canonicalizeLiquidationModeRows([
+    {
+      tipo: "reinversion_capital",
+      reinversion_capital: "0.005",
+      reinversion_interes: "0",
+      reinversion_total: "0.005",
+      total_capital: "0.005",
+      total_interes: "0",
+      total_iva: "0",
+      total_isr: "0",
+      total_distribuido: "0.005",
+    },
+    {
+      tipo: "sin_reinversion",
+      reinversion_capital: "0",
+      reinversion_interes: "0",
+      reinversion_total: "0",
+      total_capital: "0.005",
+      total_interes: "0",
+      total_iva: "0",
+      total_isr: "0",
+      total_distribuido: "0.005",
+    },
+  ]);
+
+  expect(rows[0]).toMatchObject({
+    reinversion_capital: "0.01",
+    total_capital: "0.01",
+  });
+  expect(rows[1]).toMatchObject({
+    reinversion_capital: "0.00",
+    total_capital: "0.00",
+  });
+  expect(() =>
+    rows.forEach((row) =>
+      buildLiquidationComposition({
+        totalCapital: row.total_capital,
+        paidTotal: row.total_cuota,
+        reinvestedCapital: row.reinversion_capital,
+        reinvestedRest: row.reinversion_interes,
+        reinvestedTotal: row.reinversion_total,
+      }),
+    ),
+  ).not.toThrow();
+});
+
+test("alinea el centavo de capital pagado con el flujo pagado", () => {
+  const rows = canonicalizeLiquidationModeRows([
+    {
+      tipo: "sin_reinversion_a",
+      reinversion_capital: "0",
+      reinversion_interes: "0",
+      reinversion_total: "0",
+      total_capital: "0.005",
+      total_interes: "0",
+      total_iva: "0",
+      total_isr: "0",
+      total_distribuido: "0.005",
+    },
+    {
+      tipo: "sin_reinversion_b",
+      reinversion_capital: "0",
+      reinversion_interes: "0",
+      reinversion_total: "0",
+      total_capital: "0.005",
+      total_interes: "0",
+      total_iva: "0",
+      total_isr: "0",
+      total_distribuido: "0.005",
+    },
+  ]);
+
+  expect(rows.map(({ total_capital, total_cuota }) => ({ total_capital, total_cuota }))).toEqual([
+    { total_capital: "0.01", total_cuota: "0.01" },
+    { total_capital: "0.00", total_cuota: "0.00" },
+  ]);
+  expect(() =>
+    rows.forEach((row) =>
+      buildLiquidationComposition({
+        totalCapital: row.total_capital,
+        paidTotal: row.total_cuota,
+        reinvestedCapital: row.reinversion_capital,
+        reinvestedRest: row.reinversion_interes,
+        reinvestedTotal: row.reinversion_total,
+      }),
+    ),
+  ).not.toThrow();
+});
+
+test("deriva el objetivo pagado del flujo total para no perder el centavo", () => {
+  const [row] = canonicalizeLiquidationModeRows([
+    {
+      tipo: "reinversion_capital",
+      reinversion_capital: "100.0049",
+      reinversion_interes: "0",
+      reinversion_total: "100.0049",
+      total_capital: "100.0051",
+      total_interes: "0.0047",
+      total_iva: "0",
+      total_isr: "0",
+      total_distribuido: "100.0098",
+    },
+  ]);
+
+  expect(row).toMatchObject({
+    reinversion_capital: "100.00",
+    reinversion_total: "100.00",
+    total_capital: "100.01",
+    total_cuota: "0.01",
+    total_distribuido: "100.01",
+  });
+  expect(() =>
+    buildLiquidationComposition({
+      totalCapital: row!.total_capital,
+      paidTotal: row!.total_cuota,
+      reinvestedCapital: row!.reinversion_capital,
+      reinvestedRest: row!.reinversion_interes,
+      reinvestedTotal: row!.reinversion_total,
+    }),
+  ).not.toThrow();
+});
+
+test("nunca resta centavos a una fila cero al reducir un objetivo jerárquico", () => {
+  const rows = canonicalizeLiquidationModeRows([
+    {
+      tipo: "sin_flujo",
+      reinversion_capital: "0",
+      reinversion_interes: "0",
+      reinversion_total: "0",
+      total_capital: "0",
+      total_interes: "0",
+      total_iva: "0",
+      total_isr: "0",
+      total_distribuido: "0",
+    },
+    {
+      tipo: "flujo_redondeado",
+      reinversion_capital: "0",
+      reinversion_interes: "0.005",
+      reinversion_total: "0.015",
+      total_capital: "0.005",
+      total_interes: "0.015",
+      total_iva: "0",
+      total_isr: "0",
+      total_distribuido: "0.020",
+    },
+  ]);
+
+  expect(
+    rows.every((row) =>
+      [
+        row.reinversion_capital,
+        row.reinversion_interes,
+        row.reinversion_total,
+        row.total_capital,
+        row.total_cuota,
+        row.total_distribuido,
+      ].every((value) => new Big(value).gte(0)),
+    ),
+  ).toBe(true);
+  expect(() =>
+    rows.forEach((row) =>
+      buildLiquidationComposition({
+        totalCapital: row.total_capital,
+        paidTotal: row.total_cuota,
+        reinvestedCapital: row.reinversion_capital,
+        reinvestedRest: row.reinversion_interes,
+        reinvestedTotal: row.reinversion_total,
+      }),
+    ),
+  ).not.toThrow();
 });
 
 test("distribuye el centavo residual sin cambiar el orden de los pagos", () => {

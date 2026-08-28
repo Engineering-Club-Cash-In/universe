@@ -411,14 +411,14 @@ export async function getMontoACobrarPeriodo({
     -- FULL JOIN: el resultado se arma desde la unión de buckets de ambas fuentes, para que un
     -- período con pagos a inversionistas pero SIN cuotas pendientes (posible en vista
     -- día/semana) no se pierda ni subestime la columna.
-      COALESCE(SUM(capital_inv_participacion_actual), 0) AS capital_inv_participacion_actual,
-      COALESCE(SUM(capital_cube_participacion_actual), 0) AS capital_cube_participacion_actual,
-      COALESCE(SUM(interes_iva_inv_participacion_actual), 0) AS interes_iva_inv_participacion_actual,
-      COALESCE(SUM(interes_iva_cube_participacion_actual), 0) AS interes_iva_cube_participacion_actual,
-      COALESCE(SUM(acum_capital_inv_participacion_actual), 0) AS acum_capital_inv_participacion_actual,
-      COALESCE(SUM(acum_capital_cube_participacion_actual), 0) AS acum_capital_cube_participacion_actual,
-      COALESCE(SUM(acum_interes_iva_inv_participacion_actual), 0) AS acum_interes_iva_inv_participacion_actual,
-      COALESCE(SUM(acum_interes_iva_cube_participacion_actual), 0) AS acum_interes_iva_cube_participacion_actual,
+      COALESCE(SUM(capital_inv_participacion_actual) FILTER (WHERE NOT participacion_invalida), 0) AS capital_inv_participacion_actual,
+      COALESCE(SUM(capital_cube_participacion_actual) FILTER (WHERE NOT participacion_invalida), 0) AS capital_cube_participacion_actual,
+      COALESCE(SUM(interes_iva_inv_participacion_actual) FILTER (WHERE NOT participacion_invalida), 0) AS interes_iva_inv_participacion_actual,
+      COALESCE(SUM(interes_iva_cube_participacion_actual) FILTER (WHERE NOT participacion_invalida), 0) AS interes_iva_cube_participacion_actual,
+      COALESCE(SUM(acum_capital_inv_participacion_actual) FILTER (WHERE NOT participacion_invalida), 0) AS acum_capital_inv_participacion_actual,
+      COALESCE(SUM(acum_capital_cube_participacion_actual) FILTER (WHERE NOT participacion_invalida), 0) AS acum_capital_cube_participacion_actual,
+      COALESCE(SUM(acum_interes_iva_inv_participacion_actual) FILTER (WHERE NOT participacion_invalida), 0) AS acum_interes_iva_inv_participacion_actual,
+      COALESCE(SUM(acum_interes_iva_cube_participacion_actual) FILTER (WHERE NOT participacion_invalida), 0) AS acum_interes_iva_cube_participacion_actual,
       COUNT(credito_id) FILTER (WHERE participacion_invalida)::int AS creditos_participacion_invalida,
       COALESCE(MAX(pir.creditos_participacion_invalida_rango), 0)::int AS creditos_participacion_invalida_rango,
       COALESCE(SUM(cuotas_count) FILTER (WHERE participacion_invalida), 0)::int AS cuotas_participacion_invalida,

@@ -270,7 +270,6 @@
       dia_pago_mensual_elegido: integer("dia_pago_mensual_elegido").notNull(),
       dias_diferencia: integer("dias_diferencia").notNull(),
       dias_del_mes: integer("dias_del_mes").notNull(),
-      // Interés proporcional bruto: interés base mensual + IVA del interés.
       monto_interes: numeric("monto_interes", { precision: 18, scale: 2 }).notNull(),
       monto_membresia: numeric("monto_membresia", { precision: 18, scale: 2 }).notNull(),
       monto_servicios: numeric("monto_servicios", { precision: 18, scale: 2 }).notNull(),

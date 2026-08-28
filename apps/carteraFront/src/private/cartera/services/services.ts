@@ -310,7 +310,6 @@ export interface GetCreditoByNumeroActivoResponse {
   moraActual: number;
   cuotaActualPagada: boolean;
   cuotaActualStatus: 'no_required' | 'pending' | 'validated' | 'capital' | 'reset';
-  cuotaMensualAPagar?: string;
 
   // 🔥 ARRAYS DE CUOTAS (ahora con campos de abonos)
   cuotasAtrasadas: Cuota[];

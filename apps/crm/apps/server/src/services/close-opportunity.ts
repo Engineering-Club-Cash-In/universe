@@ -18,12 +18,9 @@ import {
 	vehicles,
 } from "../db/schema";
 import { contratosFinanciamiento } from "../db/schema/cobros";
-import { clients, creditAnalysis, leads, opportunities } from "../db/schema/crm";
+import { clients, leads, opportunities } from "../db/schema/crm";
 import { eqDpi } from "../lib/dpi-lookup";
-import {
-	calcularAjusteFechaIdeal,
-	esSeleccionDiaPagoValida,
-} from "../lib/fecha-ideal-pago-ajuste";
+import { calcularAjusteFechaIdeal } from "../lib/fecha-ideal-pago-ajuste";
 import { formatMissingFields, getMissingFields } from "../lib/vehicle-helpers";
 import type { FacturaItem } from "../types/cartera-back";
 import { carteraBackClient } from "./cartera-back-client";
@@ -47,24 +44,9 @@ export const DEFAULT_CODIGO_POSTAL = "01001";
 /** Credit number prefix for CRM-generated credits */
 export const CREDIT_NUMBER_PREFIX = "CRM";
 
-export const esDiaPagoValidoAlCerrar = ({
-	diaPagoMensual,
-	diaPagoOriginalSistema,
-	suggestedDays,
-}: {
-	diaPagoMensual: number;
-	diaPagoOriginalSistema: number | null;
-	suggestedDays: readonly { dia: number }[] | null;
-}): boolean =>
-	diaPagoOriginalSistema == null ||
-	esSeleccionDiaPagoValida({
-		diaPagoMensual,
-		elegidoDesdeRecomendacionIA: true,
-		suggestedDays,
-	});
-
-// El día se valida al guardarlo y vuelve a validarse contra el análisis vigente
-// justo antes del cierre. Aquí primero se confirma que sea un día de mes válido.
+// El día de pago ya se validó al guardarlo en la oportunidad (assignInvestorAndAdvance):
+// siempre es 15, 30, o un día recomendado por el análisis de capacidad de pago del lead.
+// Aquí solo se confirma que sea un día de mes válido antes de mandarlo a cartera-back.
 function normalizePaymentDay(day: number | null | undefined): number | null {
 	if (day == null) return null;
 	if (!Number.isInteger(day) || day < 1 || day > 31) return null;
@@ -1035,48 +1017,10 @@ async function createCredit(
 			};
 		}
 
-		let suggestedDaysAlCerrar: Array<{ dia: number; porcentaje: number }> | null =
-			null;
-		if (opportunity.diaPagoOriginalSistema != null && opportunity.leadId) {
-			const [analysis] = await db
-				.select({ suggestedPaymentDays: creditAnalysis.suggestedPaymentDays })
-				.from(creditAnalysis)
-				.where(
-					and(
-						eq(creditAnalysis.opportunityId, opportunity.id),
-						eq(creditAnalysis.leadId, opportunity.leadId),
-					),
-				)
-				.limit(1);
-			suggestedDaysAlCerrar = analysis?.suggestedPaymentDays ?? null;
-		}
-		if (
-			!esDiaPagoValidoAlCerrar({
-				diaPagoMensual,
-				diaPagoOriginalSistema: opportunity.diaPagoOriginalSistema,
-				suggestedDays: suggestedDaysAlCerrar,
-			})
-		) {
-			return {
-				success: false,
-				error:
-					"El día de pago elegido por IA ya no aparece en el análisis vigente; actualiza la oportunidad antes de cerrarla",
-			};
-		}
-
 		// Ingreso adicional por elegir un día IA que cae después del día que el
 		// sistema hubiera asignado por default. Solo aplica cuando diaPagoOriginalSistema
 		// quedó capturado en el 50% (assignInvestorAndAdvance) — es decir, solo cuando
 		// se eligió un día IA, nunca cuando se eligió 15/30 manualmente.
-		//
-		// fechaReferenciaAjuste se captura UNA vez y viaja con el payload para que
-		// cartera-back arme el calendario real (generatePaymentDates) con la MISMA
-		// fecha, no con su propio new Date() unos milisegundos/segundos después por
-		// la llamada HTTP. Sin esto, si la llamada cruza la medianoche del último
-		// día del mes, cada lado calcula "días del mes" contra un mes distinto —
-		// el ajuste quedaría calculado con un denominador que no corresponde al
-		// mes real de la cuota 1.
-		const fechaReferenciaAjuste = new Date();
 		const ajusteCalculado =
 			opportunity.diaPagoOriginalSistema != null
 				? calcularAjusteFechaIdeal({
@@ -1089,31 +1033,21 @@ async function createCredit(
 						membresiaMensual: membresiaPago ?? 0,
 						seguroMensual: seguro ?? 0,
 						gpsMensual: gps ?? 0,
-						fechaReferencia: fechaReferenciaAjuste,
 					})
 				: null;
 
-		// Solo se persiste si montoTotal > 0: un crédito con diasDiferencia > 0
-		// pero interés/membresía/seguro/GPS en cero (crédito promocional sin
-		// esos rubros) redondea a montoTotal 0 — una fila así nunca se puede
-		// cobrar (getAjusteFechaIdealADeducir descarta monto <= 0) pero sigue
-		// contando como "hay ajuste pendiente" para
-		// shouldBlockCuota1ClosingForPendingAjuste, bloqueando la cuota 1 para
-		// siempre por un cobro que nunca iba a existir.
-		const ajusteFechaIdeal =
-			ajusteCalculado && ajusteCalculado.montoTotal > 0
-				? {
-						dia_pago_original_sistema: opportunity.diaPagoOriginalSistema as number,
-						dia_pago_mensual_elegido: diaPagoMensual,
-						dias_diferencia: ajusteCalculado.diasDiferencia,
-						dias_del_mes: ajusteCalculado.diasDelMes,
-						monto_interes: ajusteCalculado.montoInteres,
-						monto_membresia: ajusteCalculado.montoMembresia,
-						monto_servicios: ajusteCalculado.montoServicios,
-						monto_total: ajusteCalculado.montoTotal,
-						fecha_referencia: fechaReferenciaAjuste.toISOString(),
-					}
-				: undefined;
+		const ajusteFechaIdeal = ajusteCalculado
+			? {
+					dia_pago_original_sistema: opportunity.diaPagoOriginalSistema as number,
+					dia_pago_mensual_elegido: diaPagoMensual,
+					dias_diferencia: ajusteCalculado.diasDiferencia,
+					dias_del_mes: ajusteCalculado.diasDelMes,
+					monto_interes: ajusteCalculado.montoInteres,
+					monto_membresia: ajusteCalculado.montoMembresia,
+					monto_servicios: ajusteCalculado.montoServicios,
+					monto_total: ajusteCalculado.montoTotal,
+				}
+			: undefined;
 
 		const creditoResult = await createCreditoInCarteraBack({
 			opportunityId: opportunity.id,
@@ -1129,10 +1063,6 @@ async function createCredit(
 				? Number(params.cuotaMensual)
 				: Number.parseFloat(opportunity.cuotaMensual as string),
 			dia_pago_mensual: diaPagoMensual,
-			dia_pago_original_sistema:
-				opportunity.diaPagoOriginalSistema ?? undefined,
-			fecha_referencia_primera_cuota:
-				fechaReferenciaAjuste.toISOString(),
 			ajuste_fecha_ideal: ajusteFechaIdeal,
 			tipoCredito: opportunity.creditType || "autocompra",
 			observaciones: `Crédito generado desde CRM - Oportunidad: ${opportunity.title}`,

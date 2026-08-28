@@ -13,7 +13,6 @@ CREATE TABLE IF NOT EXISTS cartera.ajuste_fecha_ideal_pago (
   dia_pago_mensual_elegido   integer NOT NULL,
   dias_diferencia            integer NOT NULL,
   dias_del_mes               integer NOT NULL,
-  -- Interés proporcional bruto: interés base mensual + IVA del interés.
   monto_interes              numeric(18, 2) NOT NULL,
   monto_membresia            numeric(18, 2) NOT NULL,
   monto_servicios            numeric(18, 2) NOT NULL,

@@ -28,7 +28,6 @@ import {
   isReversibleIncobrablePayment,
   REVERSIBLE_CREDIT_STATUSES,
   shouldInstallmentRemainPaidAfterReversal,
-  shouldRemainPaidAfterInvalidatingPayment,
   shouldRemoveSameInstallmentPaymentOnReverse,
 } from "./reversePaymentPolicy";
 import {
@@ -178,13 +177,7 @@ export function createReversePayment(
       // el dinero vuelve — el ajuste debe volver a quedar pendiente para poder
       // reintentarlo en un pago futuro. Mismo helper que usan falsePayment y
       // la anulación por incobrable (ver ajusteFechaIdealPago.ts).
-      // El resultado se reusa más abajo: si este pago era el que lo cobraba,
-      // hay que forzar la reapertura de la cuota 1 (ver
-      // shouldRemainPaidAfterInvalidatingPayment).
-      const ajusteEraDeEstePago = await resetAjusteFechaIdealSiPagoInvalidado(
-        pago_id,
-        tx,
-      );
+      await resetAjusteFechaIdealSiPagoInvalidado(pago_id, tx);
 
       // ======================================================================
       // 3️⃣ OBTENER DATOS DEL CRÉDITO
@@ -642,36 +635,11 @@ export function createReversePayment(
           cuotaPermanecePagada = incobrableCuotaPagada;
         }
 
-        // Última palabra: si el pago que se está revirtiendo era el que
-        // cobraba el ajuste, la cuota 1 se reabre sin importar lo que diga
-        // el contractual (o INCOBRABLE) por su cuenta — ver
-        // shouldRemainPaidAfterInvalidatingPayment.
-        cuotaPermanecePagada = shouldRemainPaidAfterInvalidatingPayment({
-          cuotaPermanecePagadaCalculado: cuotaPermanecePagada,
-          pagoEraElQueCobroElAjuste: ajusteEraDeEstePago,
-        });
-
-        if (pago.cuota_id === null && ajusteEraDeEstePago) {
-          throw new Error("Adjustment payment has no installment");
-        }
-
         if (pago.cuota_id !== null) {
-          const cuotaActualizada = await tx
+          await tx
             .update(cuotas_credito)
             .set({ pagado: cuotaPermanecePagada })
-            .where(
-              ajusteEraDeEstePago
-                ? and(
-                    eq(cuotas_credito.cuota_id, pago.cuota_id),
-                    eq(cuotas_credito.numero_cuota, 1),
-                  )
-                : eq(cuotas_credito.cuota_id, pago.cuota_id),
-            )
-            .returning({ cuota_id: cuotas_credito.cuota_id });
-
-          if (ajusteEraDeEstePago && cuotaActualizada.length === 0) {
-            throw new Error("Adjustment payment is not linked to installment 1");
-          }
+            .where(eq(cuotas_credito.cuota_id, pago.cuota_id));
         }
 
         const pagosPagadosRestantesIds = pagosRestantesCuota
@@ -690,7 +658,6 @@ export function createReversePayment(
         }
 
       }
-
 
       // ======================================================================
       // ✅ RETORNAR DATOS DE LA TRANSACCIÓN

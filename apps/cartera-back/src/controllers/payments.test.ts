@@ -14,9 +14,6 @@ let mockDbTransactionCalls = 0;
 let mockLockQueries: string[] = [];
 let mockInsertCalls = 0;
 let mockInsertError: Error | null = null;
-let mockUpdateReturningRows: unknown[][] = [];
-let mockUpdateSets: Array<Record<string, unknown>> = [];
-let mockFalsePaymentCredit: { cuota: string } | null = null;
 
 // For compras_credito_inversionista mock
 let mockComprasCreditoInversionista: any[] = [];
@@ -49,17 +46,13 @@ mock.module("../database/index", () => {
         return Promise.resolve(mockComprasCreditoInversionista);
       }
 
-       const rows = tableName.includes("creditos")
-         ? (mockLockedCreditRows ?? mockCreditosInversionistaEspejo)
-         : mockHistoricoLiquidacionesEspejo;
-       const promise = Promise.resolve(rows);
-       const forUpdate = () => Promise.resolve(rows);
-       Object.assign(promise, {
-         orderBy,
-         for: forUpdate,
-         limit: () => Promise.resolve(rows),
-       });
-       return promise;
+      const rows = tableName.includes("creditos")
+        ? (mockLockedCreditRows ?? mockCreditosInversionistaEspejo)
+        : mockHistoricoLiquidacionesEspejo;
+      const promise = Promise.resolve(rows);
+      const forUpdate = () => Promise.resolve(rows);
+      Object.assign(promise, { orderBy, for: forUpdate });
+      return promise;
     };
 
     const innerJoin = (joinTable: any, cond: any) => {
@@ -88,7 +81,6 @@ mock.module("../database/index", () => {
   const mockDbInstance: any = {
       select: mock((fields: any) => {
         const isSelectNoFields = !fields || Object.keys(fields).length === 0;
-        const selectedKeys = fields ? Object.keys(fields) : [];
         let isMainQuery = false;
         if (fields && typeof fields === "object" && "inversionistaId" in fields) {
           isMainQuery = true;
@@ -107,18 +99,6 @@ mock.module("../database/index", () => {
 
         return {
           from: (table: any) => {
-            if (mockFalsePaymentCredit && selectedKeys.length === 1 && selectedKeys[0] === "cuota") {
-              const rows = [mockFalsePaymentCredit];
-              const promise = Promise.resolve(rows);
-              return {
-                where: () => Object.assign(promise, {
-                  limit: () => Promise.resolve(rows),
-                }),
-              };
-            }
-            if (mockFalsePaymentCredit && selectedKeys.includes("monto_aplicado")) {
-              return { where: () => Promise.resolve(mockCuotasCreditoWithPagos) };
-            }
             if (isMainQuery) {
               const innerJoin = (joinTable: any, cond: any) => {
                 const innerWhere = (whereCond: any) => {
@@ -144,14 +124,9 @@ mock.module("../database/index", () => {
         };
       }),
       update: mock(() => ({
-        set: (values: Record<string, unknown>) => {
-          mockUpdateSets.push(values);
-          return {
-            where: () => Object.assign(Promise.resolve([]), {
-              returning: () => Promise.resolve(mockUpdateReturningRows.shift() ?? []),
-            }),
-          };
-        },
+        set: () => ({
+          where: () => Promise.resolve()
+        })
       })),
       // insertPagosCreditoInversionistas mete el insert del espejo y el marcado
       // de los abonos en una transacción, para que no puedan quedar sueltos.
@@ -270,7 +245,6 @@ const {
   calcularYRegistrarPagosEspejo,
   armarInversionistasPago,
   aplicarRepartoCongelado,
-  falsePayment,
   insertPagosCreditoInversionistas,
 } = await import("./payments");
 
@@ -293,9 +267,6 @@ describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
     mockLockQueries = [];
     mockInsertCalls = 0;
     mockInsertError = null;
-    mockUpdateReturningRows = [];
-    mockUpdateSets = [];
-    mockFalsePaymentCredit = null;
   });
 
   it("bloquea toda la generación si un crédito está pendiente de autorización para devolución", async () => {
@@ -808,60 +779,6 @@ describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
     const result = await calcularYRegistrarPagosEspejo(99, new Date("2026-06-10T12:00:00.000Z"));
     expect(result.success).toBeTrue();
     expect(result.totalCreditosProcesados).toBe(0);
-  });
-});
-
-describe("falsePayment ajuste por fecha ideal", () => {
-  beforeEach(() => {
-    mockCreditosInversionistaEspejo = [
-      {
-        creditoId: 10,
-        inversionistaId: 99,
-        montoAportado: "1000.00",
-        porcentajeParticipacion: "100.00",
-        fechaInicioParticipacion: "2026-01-15",
-        numeroCreditoSifco: "TEST-10",
-        estadoDevolucion: "NO_APLICA",
-        capital: "1000.00",
-        deudaTotal: "1300.00",
-        statusCredit: "ACTIVO",
-        cuota: "300.00",
-      },
-    ];
-    mockLockedCreditRows = [
-      {
-        creditoId: 10,
-        numeroCreditoSifco: "TEST-10",
-        estadoDevolucion: "NO_APLICA",
-        cuota: "300",
-      },
-    ];
-    mockCuotasCreditoWithPagos = [
-      {
-        monto_aplicado: "300",
-        validationStatus: "validated",
-        paymentFalse: false,
-      },
-    ];
-    mockUpdateReturningRows = [];
-    mockUpdateSets = [];
-    mockFalsePaymentCredit = { cuota: "300" };
-  });
-
-  it("reabre cuota 1 al falsear el pago solo-ajuste aunque la base siga cubierta", async () => {
-    mockUpdateReturningRows = [[{ cuota_id: 40 }], [{ id: 7 }], [{ cuota_id: 40 }]];
-
-    await falsePayment(30, 10);
-
-    expect(mockUpdateSets.at(-1)).toEqual({ pagado: false });
-  });
-
-  it("conserva cerrada la cuota cubierta al falsear un pago distinto", async () => {
-    mockUpdateReturningRows = [[{ cuota_id: 40 }], []];
-
-    await falsePayment(30, 10);
-
-    expect(mockUpdateSets.at(-1)).toEqual({ pagado: true });
   });
 });
 

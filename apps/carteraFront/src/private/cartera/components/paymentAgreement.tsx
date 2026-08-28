@@ -33,7 +33,6 @@ import {
   useCreditoBySifco,
 } from "../hooks/paymentagreement";
 import { BuscadorUsuarioSifco } from "./searchByNameSifco";
-import { calcularTotalConvenioCuotas } from "./paymentAgreementPolicy";
 
 export function CreatePaymentAgreementForm() {
   const [sifcoSeleccionado, setSifcoSeleccionado] = useState<string>("");
@@ -125,19 +124,10 @@ export function CreatePaymentAgreementForm() {
     if (!activoData || selectedInstallments.length === 0) return 0;
 
     const cuotaMensual = parseFloat(activoData.credito?.cuota || "0");
-    const cuota1ConAjuste = parseFloat(
-      activoData.cuotaMensualAPagar ?? activoData.credito?.cuota ?? "0",
-    );
     const mora = parseFloat(activoData.moraActual?.toString() || "0");
 
-    return calcularTotalConvenioCuotas({
-      selectedInstallmentIds: selectedInstallments,
-      installments: cuotasParaConvenio,
-      regularInstallmentAmount: cuotaMensual,
-      firstInstallmentAmount: cuota1ConAjuste,
-      lateFee: mora,
-    });
-  }, [activoData, cuotasParaConvenio, selectedInstallments]);
+    return cuotaMensual * selectedInstallments.length + mora;
+  }, [activoData, selectedInstallments]);
 
   const totalAmount = montoManual !== null ? montoManual : totalAmountCalculado;
 

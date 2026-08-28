@@ -103,16 +103,10 @@ export interface AjusteFechaIdealPayload {
 	dia_pago_mensual_elegido: number;
 	dias_diferencia: number;
 	dias_del_mes: number;
-	/** Interés proporcional incluyendo el IVA del 12% del interés mensual. */
 	monto_interes: number;
 	monto_membresia: number;
 	monto_servicios: number;
 	monto_total: number;
-	// Momento (ISO) que CRM usó como "hoy" para calcular dias_del_mes.
-	// cartera-back debe usar EXACTAMENTE este mismo valor al generar el
-	// calendario real (generatePaymentDates), no su propio new Date(), para
-	// que ambos lados nunca puedan discrepar sobre en qué mes cae la cuota 1.
-	fecha_referencia: string;
 }
 
 export interface CreateCreditoInput {
@@ -135,8 +129,6 @@ export interface CreateCreditoInput {
 	aseguradora?: string;
 	como_se_entero?: string;
 	dia_pago_mensual?: number;
-	dia_pago_original_sistema?: number;
-	fecha_referencia_primera_cuota?: string;
 	// Ingreso adicional por elegir un día IA que cae después del día que el
 	// sistema hubiera asignado por default (solo presente cuando aplica el
 	// ajuste, ver apps/crm/apps/server/src/lib/fecha-ideal-pago-ajuste.ts).

@@ -8,7 +8,6 @@ import {
   asesores,
   StatusCredit,
 } from "../database/db/schema";
-import { resetAjusteFechaIdealPorCredito } from "./ajusteFechaIdealPago";
 import { and, eq, sql, ne, desc, gte, lte } from "drizzle-orm";
 
 /**
@@ -73,11 +72,6 @@ export async function marcarCreditoComoCaido({
         .delete(pagos_credito)
         .where(eq(pagos_credito.credito_id, credito_id));
     }
-
-    // 1.1 Resetear el ajuste por fecha ideal de pago (si lo hay): el pago que
-    // lo cobró se acaba de borrar arriba, así que no puede seguir marcado
-    // como cobrado.
-    await resetAjusteFechaIdealPorCredito(credito_id, tx);
 
     // 2. Eliminar cuotas (excepto cuota 0)
     await tx

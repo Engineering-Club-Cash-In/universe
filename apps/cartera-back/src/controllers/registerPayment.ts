@@ -26,13 +26,10 @@ import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
 import { recalcularPagosCredito } from "./updateCredit";
 import {
   applyCapitalPaymentAndBuildResponse,
-  aplicarAjusteFechaIdealAPago,
   calcularSaldoNetoCuota,
   crearEstampadorPagoConvenio,
   esDestinoSobrescribible,
   getAjusteFechaIdealADeducir,
-  puedeEditarOtrosConAjuste,
-  puedeEditarMontoProtegidoConAjuste,
   getCuotaIdForPaymentInsert,
   getCoveredOpenInstallment,
   getCoveredInstallmentNumbers,
@@ -52,19 +49,11 @@ import {
   recomputeCreditAfterCapital,
   shouldApplyStaleZeroRestanteAdjustment,
   shouldRejectZeroAppliedNormalValidation,
-  shouldBlockCuota1ClosingForPendingAjuste,
-  shouldCloseCuota1ViaAjusteSettlement,
-  shouldIgnoreCoveredOpenInstallment,
-  shouldProcessCuota1DespiteZeroDisponible,
   shouldIncobrableInstallmentBePaid,
   shouldMarkInstallmentPaymentPaid,
   sumarAplicadoACuota,
   pagoSchema,
 } from "./registerPaymentPolicy";
-import {
-  claimAjusteFechaIdealPago,
-  debeMantenerCuotaAbiertaPorAjustePendiente,
-} from "./ajusteFechaIdealPago";
 import {
   PAYMENT_ADVISORY_LOCK_NAMESPACE,
   withPaymentAdvisoryLock,
@@ -388,47 +377,12 @@ const obtenerInfoCompletaCredito = async (
         })
       : new Set<number>();
 
-    // Ajuste por fecha ideal de pago pendiente para este crédito (existe una
-    // fila con fecha_cobro NULL), sin importar si ESTE pago alcanza para
-    // cobrarlo — se necesita ya acá porque shouldBlockCuota1ClosingForPendingAjuste
-    // puede dejar la cuota 1 "cubierta pero abierta" A PROPÓSITO mientras el
-    // ajuste sigue pendiente, y getCoveredOpenInstallment de abajo no sabe
-    // distinguir eso de una inconsistencia real.
-    const tieneCuota1EntrePendientes = [...cuotasParaValidar.values()].some(
-      (c) => c.numeroCuota === 1
-    );
-    let ajustePendiente:
-      | { id: number; monto_total: string }
-      | null = null;
-    if (tieneCuota1EntrePendientes) {
-      const [fila] = await db
-        .select({
-          id: ajuste_fecha_ideal_pago.id,
-          monto_total: ajuste_fecha_ideal_pago.monto_total,
-        })
-        .from(ajuste_fecha_ideal_pago)
-        .where(
-          and(
-            eq(ajuste_fecha_ideal_pago.credito_id, credito_id),
-            isNull(ajuste_fecha_ideal_pago.fecha_cobro)
-          )
-        )
-        .limit(1);
-      ajustePendiente = fila ?? null;
-    }
-
     if (!esIncobrable) {
       const cuotaInconsistente = getCoveredOpenInstallment({
         montoCuota: info.credito.cuota ?? 0,
         cuotas: [...cuotasParaValidar.values()],
       });
-      if (
-        cuotaInconsistente &&
-        !shouldIgnoreCoveredOpenInstallment({
-          numeroCuota: cuotaInconsistente.numeroCuota,
-          hayAjustePendiente: !!ajustePendiente,
-        })
-      ) {
+      if (cuotaInconsistente) {
         set.status = 409;
         throw new Error(
           `${CUOTA_INTEGRITY_ERROR_PREFIX} la cuota ${cuotaInconsistente.numeroCuota} está abierta, pero sus pagos validados ya cubren el total. Revalide el pago antes de registrar uno nuevo.`
@@ -492,11 +446,6 @@ const obtenerInfoCompletaCredito = async (
 
       // 📊 Cuotas pendientes (array ordenado)
       cuotasPendientes: cuotasPendientesUnicas,
-
-      // 🧾 Ajuste por fecha ideal de pago pendiente para este crédito, si lo
-      // hay (sin importar si el disponible de este pago alcanza para
-      // cobrarlo). Ver comentario donde se calculó, arriba.
-      ajustePendiente,
 
       // 🔗 Cuota a la que se cuelga un abono directo a capital cuando no queda
       // ninguna pendiente utilizable: la primera cuota abierta ANTES de filtrar
@@ -774,7 +723,6 @@ export const insertPayment = async ({ body, set }: any) => {
       mora,
       stats,
       usuario_id,
-      ajustePendiente: ajustePendienteExistente,
     } = creditoData;
     const cuotaIdPagoEspecial = getSpecialPaymentCuotaId({
       requestedInstallment: cuotaApagar,
@@ -938,20 +886,25 @@ export const insertPayment = async ({ body, set }: any) => {
     // pago_id de la cuota 1 que efectivamente lo cobra — lo usa
     // reversePayment.ts para resetear el ajuste si se revierte ese pago.
     let cuota1PagoId: number | undefined;
-    // Existe un ajuste pendiente para este crédito, sin importar si el
-    // disponible de ESTE pago alcanza para cobrarlo — lo usa
-    // shouldBlockCuota1ClosingForPendingAjuste más abajo para no dejar
-    // cerrar la cuota 1 sin haberlo cobrado.
-    // Ya se consultó arriba (obtenerInfoCompletaCredito), se reusa acá para
-    // no repetir la misma query.
-    const hayAjustePendiente = !!ajustePendienteExistente;
     const tieneCuota1Pendiente = cuotasPendientes.some(
       (c) => c.cuotas_credito.numero_cuota === 1
     );
     if (tieneCuota1Pendiente) {
+      const [ajustePendiente] = await db
+        .select()
+        .from(ajuste_fecha_ideal_pago)
+        .where(
+          and(
+            eq(ajuste_fecha_ideal_pago.credito_id, credito.credito_id),
+            isNull(ajuste_fecha_ideal_pago.fecha_cobro)
+          )
+        )
+        .limit(1);
       const deduccion = getAjusteFechaIdealADeducir({
         tieneCuota1Pendiente,
-        ajustePendiente: ajustePendienteExistente,
+        ajustePendiente: ajustePendiente
+          ? { id: ajustePendiente.id, monto_total: ajustePendiente.monto_total }
+          : null,
         disponible: disponible_restante,
       });
       if (deduccion) {
@@ -976,13 +929,12 @@ export const insertPayment = async ({ body, set }: any) => {
     if (
       debeProcesarConvenio({
         statusCredit: creditoInfo.credito.statusCredit,
-        disponible: disponible_restante.plus(ajusteFechaIdealMonto),
+        disponible: disponible_restante,
       })
     ) {
       pagoConvenio = await processConvenioPayment({
         credito_id: credito_id,
         monto_pago: disponible_restante.toNumber(),
-        ajuste_fecha_ideal: ajusteFechaIdealMonto.toString(),
         creditoInfo: creditoInfo,
         pagoMetadata: {
           montoBoleta: montoBoleta.toString(),
@@ -1019,14 +971,7 @@ export const insertPayment = async ({ body, set }: any) => {
 
 
 
-      if (
-        disponible_restante.gt(0) ||
-        shouldProcessCuota1DespiteZeroDisponible({
-          numeroCuota: cuota.cuotas_credito.numero_cuota,
-          disponibleRestante: disponible_restante,
-          ajusteFueCobradoEsteMismoPago: ajusteFechaIdealId !== undefined,
-        })
-      ) {
+      if (disponible_restante.gt(0)) {
         // Verificar si existe pago previo - priorizar el original (no_required)
         const allExistingPagos = await db
           .select({ pago: pagos_credito })
@@ -1464,36 +1409,11 @@ export const insertPayment = async ({ body, set }: any) => {
 
         // Solo marcar como pagada si los restantes están en 0 Y existía un pago previo
         // (evita marcar como pagada cuando no hay pago existente y los restantes son 0 por default)
-        // — O, para la cuota 1, si lo único que faltaba era cobrar el ajuste y
-        // este pago SÍ lo cobró (shouldCloseCuota1ViaAjusteSettlement): sin esto,
-        // installmentAmountApplied da 0 (nada de capital/interés que aplicar, ya
-        // en cero por partials previos) y la cuota nunca cierra aunque el ajuste
-        // ya se haya cobrado — quedando "cubierta pero abierta" para siempre y
-        // bloqueando TODO pago futuro vía getCoveredOpenInstallment.
-        const cuota_pagada_calculada =
-          shouldMarkInstallmentPaymentPaid({
-            allRemainingZero: todosRestantesEnCero,
-            hasExistingInstallmentPayment: !!existingPago,
-            installmentAmountApplied: totalPagado.toString(),
-          }) ||
-          shouldCloseCuota1ViaAjusteSettlement({
-            numeroCuota: cuota.cuotas_credito.numero_cuota,
-            allRemainingZero: todosRestantesEnCero,
-            hasExistingInstallmentPayment: !!existingPago,
-            ajusteFueCobradoEsteMismoPago: ajusteFechaIdealId !== undefined,
-          });
-        // La cuota 1 no cierra si queda un ajuste por fecha ideal de pago sin
-        // cobrar (ver shouldBlockCuota1ClosingForPendingAjuste): sin esto, una
-        // seguidilla de parciales que nunca individualmente alcanzan para el
-        // ajuste puede cerrar la cuota 1 sin cobrarlo — y una vez cerrada,
-        // nadie vuelve a consultarlo (Codex #1263).
-        const cuota_pagada = shouldBlockCuota1ClosingForPendingAjuste({
-          numeroCuota: cuota.cuotas_credito.numero_cuota,
-          hayAjustePendiente,
-          ajusteFueCobradoEsteMismoPago: ajusteFechaIdealId !== undefined,
-        })
-          ? false
-          : cuota_pagada_calculada;
+        const cuota_pagada = shouldMarkInstallmentPaymentPaid({
+          allRemainingZero: todosRestantesEnCero,
+          hasExistingInstallmentPayment: !!existingPago,
+          installmentAmountApplied: totalPagado.toString(),
+        });
         // Preparar datos del pago
         const currentDate = new Date();
         const months = [
@@ -1533,65 +1453,65 @@ export const insertPayment = async ({ body, set }: any) => {
         // Mora y otros solo van en la primera cuota (si ya hubo completas antes, no se repiten)
         const esPrimeraCuota = cuotas_completas === 0 && cuotas_parciales === 0;
         const moraParaPago = esPrimeraCuota ? moraBig : new Big(0);
-        // La base de "otros" manual solo va en la primera cuota procesada.
-        // aplicarAjusteFechaIdealAPago agrega después el ajuste bruto sin tocar
-        // interés, IVA, membresía, seguro ni GPS.
+        // El ajuste solo se suma en la cuota 1 (no en "la primera que se
+        // procese en este pago"). Comparte el campo "otros" con lo que el
+        // operador tipeó a mano; para aislar el ajuste, ver
+        // ajuste_fecha_ideal_pago.fecha_cobro.
         const otrosParaPago = esPrimeraCuota
-          ? otrosBig
+          ? otrosBig.plus(
+              cuota.cuotas_credito.numero_cuota === 1
+                ? ajusteFechaIdealMonto
+                : 0
+            )
           : new Big(0);
 
-        const pagoData = aplicarAjusteFechaIdealAPago(
-          {
-            credito_id: credito.credito_id,
-            cuota: credito.cuota,
-            cuota_interes: credito.cuota_interes,
-            abono_capital: abono_capital.toString(),
-            abono_interes: abono_interes.toString(),
-            abono_iva_12: abono_iva_12.toString(),
-            abono_interes_ci: abono_interes_ci.toString(),
-            abono_iva_ci: abono_iva_ci.toString(),
-            abono_seguro: abono_seguro.toString(),
-            abono_gps: abono_gps.toString(),
-            pago_del_mes: pago_del_mesBig.toString(),
-            monto_boleta: montoBoleta.toString(),
-            capital_restante: nuevo_capital_restante.toString(),
-            interes_restante: nuevo_interes_restante.toString(),
-            iva_12_restante: nuevo_iva_restante.toString(),
-            seguro_restante: nuevo_seguro_restante.toString(),
-            gps_restante: nuevo_gps_restante.toString(),
-            numero_cuota: cuota.cuotas_credito.numero_cuota,
-            llamada: llamada,
-            fecha_pago: fechaGuatemala,
-            renuevo_o_nuevo: renuevo_o_nuevo,
-            tipoCredito: "Renuevo",
-            membresias: nuevo_membresias_restante.toString(),
-            membresias_pago: abono_membresias.toString(),
-            membresias_mes: abono_membresias.toString(),
-            otros: otrosParaPago.toString(),
-            mora: moraParaPago.toString(),
-            monto_boleta_cuota: montoBoleta.toString(),
-            seguro_total: credito.seguro_10_cuotas?.toString() ?? "0",
-            pagado: cuota_pagada,
-            facturacion: "si",
-            mes_pagado,
-            seguro_facturado: abono_seguro.toString() ?? "0",
-            gps_facturado: abono_gps.toString() ?? "0",
-            reserva: "0",
-            observaciones: observaciones,
-            validate: false,
-            validationStatus: "pending" as const,
-            paymentFalse: paymentFalse,
-            numeroAutorizacion: numeroAutorizacion,
-            banco_id: banco_id,
-            registerBy: registerBy,
-            fecha_boleta: fecha_boleta,
-            monto_aplicado: totalPagado.toString(),
-            origen_pago: origen_pago,
-          },
-          esPrimeraCuota && cuota.cuotas_credito.numero_cuota === 1
-            ? ajusteFechaIdealMonto
-            : 0,
-        );
+        const pagoData = {
+          credito_id: credito.credito_id,
+          cuota: credito.cuota,
+          cuota_interes: credito.cuota_interes,
+          abono_capital: abono_capital.toString(),
+          abono_interes: abono_interes.toString(),
+          abono_iva_12: abono_iva_12.toString(),
+          abono_interes_ci: abono_interes_ci.toString(),
+          abono_iva_ci: abono_iva_ci.toString(),
+          abono_seguro: abono_seguro.toString(),
+          abono_gps: abono_gps.toString(),
+          pago_del_mes: pago_del_mesBig.toString(),
+          monto_boleta: montoBoleta.toString(),
+          capital_restante: nuevo_capital_restante.toString(),
+          interes_restante: nuevo_interes_restante.toString(),
+          iva_12_restante: nuevo_iva_restante.toString(),
+          seguro_restante: nuevo_seguro_restante.toString(),
+          gps_restante: nuevo_gps_restante.toString(),
+          numero_cuota: cuota.cuotas_credito.numero_cuota,
+          llamada: llamada,
+          fecha_pago: fechaGuatemala,
+          renuevo_o_nuevo: renuevo_o_nuevo,
+          tipoCredito: "Renuevo",
+          membresias: nuevo_membresias_restante.toString(),
+          membresias_pago: abono_membresias.toString(),
+          membresias_mes: abono_membresias.toString(),
+          otros: otrosParaPago.toString(),
+          mora: moraParaPago.toString(),
+          monto_boleta_cuota: montoBoleta.toString(),
+          seguro_total: credito.seguro_10_cuotas?.toString() ?? "0",
+          pagado: cuota_pagada,
+          facturacion: "si",
+          mes_pagado,
+          seguro_facturado: abono_seguro.toString() ?? "0",
+          gps_facturado: abono_gps.toString() ?? "0",
+          reserva: "0",
+          observaciones: observaciones,
+          validate: false,
+          validationStatus: "pending" as const,
+          paymentFalse: paymentFalse,
+          numeroAutorizacion: numeroAutorizacion,
+          banco_id: banco_id,
+          registerBy: registerBy,
+          fecha_boleta: fecha_boleta,
+          monto_aplicado: totalPagado.toString(),
+          origen_pago: origen_pago,
+        };
 
         // Insertar o actualizar pago
         type PagoCredito = typeof pagos_credito.$inferSelect;
@@ -1617,55 +1537,28 @@ export const insertPayment = async ({ body, set }: any) => {
               // histórico para el caso normal.
               cuotas_completas++;
 
-              // El UPDATE de esta fila y el marcado del ajuste (si aplica a la
-              // cuota 1) van en una sola transacción: si el marcado falla, el
-              // pago tampoco queda escrito — evita que quede "cobrado" vía
-              // `otros` pero el ajuste siga pendiente y se vuelva a cobrar en
-              // el siguiente pago.
-              [pagoInsertado] = await db.transaction(async (tx) => {
-                const rows = await tx
-                  .update(pagos_credito)
-                  // Esta fila ES la boleta (pisa el placeholder): sin estampar
-                  // acá, el estampado seguía pendiente tras el loop y la fila
-                  // fallback del convenio insertaba una SEGUNDA fila con el
-                  // mismo monto; además el reverso no tenía pago_convenio de
-                  // dónde leer en los cierres por UPDATE.
-                  .set({ ...pagoData, pagoConvenio: estamparPagoConvenio() })
-                  .from(cuotas_credito)
-                  .where(
-                    and(
-                      eq(
-                        cuotas_credito.cuota_id,
-                        cuota.cuotas_credito.cuota_id
-                      ),
-                      eq(pagos_credito.pago_id, existingPago.pago.pago_id),
-                      eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
-                    )
+              [pagoInsertado] = await db
+                .update(pagos_credito)
+                // Esta fila ES la boleta (pisa el placeholder): sin estampar
+                // acá, el estampado seguía pendiente tras el loop y la fila
+                // fallback del convenio insertaba una SEGUNDA fila con el
+                // mismo monto; además el reverso no tenía pago_convenio de
+                // dónde leer en los cierres por UPDATE.
+                .set({ ...pagoData, pagoConvenio: estamparPagoConvenio() })
+                .from(cuotas_credito)
+                .where(
+                  and(
+                    eq(
+                      cuotas_credito.cuota_id,
+                      cuota.cuotas_credito.cuota_id
+                    ),
+                    eq(pagos_credito.pago_id, existingPago.pago.pago_id),
+                    eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
                   )
-                  .returning();
-                const [inserted] = rows;
-                if (
-                  cuota.cuotas_credito.numero_cuota === 1 &&
-                  inserted &&
-                  ajusteFechaIdealId !== undefined
-                ) {
-                  await claimAjusteFechaIdealPago(
-                    ajusteFechaIdealId,
-                    inserted.pago_id,
-                    tx,
-                  );
-                }
-                return rows;
-              });
+                )
+                .returning();
               if (cuota.cuotas_credito.numero_cuota === 1 && pagoInsertado) {
                 cuota1PagoId = pagoInsertado.pago_id;
-                // Se loguea tras el commit: dentro de la tx el mensaje saldría
-                // aunque el commit fallara después.
-                if (ajusteFechaIdealId !== undefined) {
-                  console.log(
-                    `🧾 Ajuste por fecha ideal de pago #${ajusteFechaIdealId} marcado como cobrado (pago_id=${pagoInsertado.pago_id}).`
-                  );
-                }
               }
               await db
                 .update(pagos_credito)
@@ -1716,13 +1609,7 @@ export const insertPayment = async ({ body, set }: any) => {
                 `${year}-${month}-${day}T${timePart}`
               );
 
-              // El INSERT de esta fila y el marcado del ajuste (si aplica a la
-              // cuota 1) van en una sola transacción: si el marcado falla, el
-              // pago tampoco queda escrito — evita que quede "cobrado" vía
-              // `otros` pero el ajuste siga pendiente y se vuelva a cobrar en
-              // el siguiente pago.
-              [pagoInsertado] = await db.transaction(async (tx) => {
-              const rows = await tx
+              [pagoInsertado] = await db
                 .insert(pagos_credito)
                 .values({
                   // Campos requeridos del input
@@ -1797,29 +1684,8 @@ export const insertPayment = async ({ body, set }: any) => {
                   origen_pago: pagoData.origen_pago,
                 })
                 .returning();
-              const [inserted] = rows;
-              if (
-                cuota.cuotas_credito.numero_cuota === 1 &&
-                inserted &&
-                ajusteFechaIdealId !== undefined
-              ) {
-                await claimAjusteFechaIdealPago(
-                  ajusteFechaIdealId,
-                  inserted.pago_id,
-                  tx,
-                );
-              }
-              return rows;
-              });
               if (cuota.cuotas_credito.numero_cuota === 1 && pagoInsertado) {
                 cuota1PagoId = pagoInsertado.pago_id;
-                // Se loguea tras el commit: dentro de la tx el mensaje saldría
-                // aunque el commit fallara después.
-                if (ajusteFechaIdealId !== undefined) {
-                  console.log(
-                    `🧾 Ajuste por fecha ideal de pago #${ajusteFechaIdealId} marcado como cobrado (pago_id=${pagoInsertado.pago_id}).`
-                  );
-                }
               }
 
               // Marcar TODA la cuota como pagada (igual que la rama UPDATE).
@@ -1846,11 +1712,7 @@ export const insertPayment = async ({ body, set }: any) => {
               !debeInsertarFilaParcialCuota({
                 totalPagado,
                 mora: moraParaPago,
-                // Evaluar el payload final: ahí ya está incluido el ajuste por
-                // fecha ideal. En un pago exacto del ajuste, los rubros
-                // estructurales quedan en cero pero la fila debe persistirse
-                // para cobrar `otros` y enlazar el pago.
-                otros: pagoData.otros,
+                otros: otrosParaPago,
                 // Peek NO consumidor: si el convenio sigue sin estampar, esta
                 // cuota debe insertar fila para cargarlo. Una vez estampado
                 // devuelve "0" y las siguientes cuotas sí pueden saltarse.
@@ -1893,13 +1755,7 @@ export const insertPayment = async ({ body, set }: any) => {
 
 
 
-              // El INSERT de esta fila y el marcado del ajuste (si aplica a la
-              // cuota 1) van en una sola transacción: si el marcado falla, el
-              // pago tampoco queda escrito — evita que quede "cobrado" vía
-              // `otros` pero el ajuste siga pendiente y se vuelva a cobrar en
-              // el siguiente pago.
-              [pagoInsertado] = await db.transaction(async (tx) => {
-              const rows = await tx
+              [pagoInsertado] = await db
                 .insert(pagos_credito)
                 .values({
                   // Campos requeridos del input
@@ -1971,29 +1827,8 @@ export const insertPayment = async ({ body, set }: any) => {
                   monto_aplicado: pagoData.monto_aplicado,
                 })
                 .returning();
-              const [inserted] = rows;
-              if (
-                cuota.cuotas_credito.numero_cuota === 1 &&
-                inserted &&
-                ajusteFechaIdealId !== undefined
-              ) {
-                await claimAjusteFechaIdealPago(
-                  ajusteFechaIdealId,
-                  inserted.pago_id,
-                  tx,
-                );
-              }
-              return rows;
-              });
               if (cuota.cuotas_credito.numero_cuota === 1 && pagoInsertado) {
                 cuota1PagoId = pagoInsertado.pago_id;
-                // Se loguea tras el commit: dentro de la tx el mensaje saldría
-                // aunque el commit fallara después.
-                if (ajusteFechaIdealId !== undefined) {
-                  console.log(
-                    `🧾 Ajuste por fecha ideal de pago #${ajusteFechaIdealId} marcado como cobrado (pago_id=${pagoInsertado.pago_id}).`
-                  );
-                }
               }
               if (
                 pagoInsertado?.pago_id &&
@@ -2094,13 +1929,31 @@ export const insertPayment = async ({ body, set }: any) => {
     const fechaVenc = ultimaCuotaPagada?.fecha_vencimiento ?? null;
     const estaAlDia = ultimaCuotaPagada && fechaVenc && fechaVenc >= hoy;
 
-    // El marcado como cobrado ya corrió de forma atómica junto con el
-    // INSERT/UPDATE de la fila de la cuota 1, dentro del loop de arriba (ver
-    // comentario en cada rama) — así un fallo del marcado también revierte el
-    // pago en vez de dejarlo "cobrado" vía `otros` con el ajuste sin marcar.
-    // Acá solo queda avisar si había un ajuste pendiente pero la cuota 1
-    // nunca se escribió en este pago (nada que marcar).
-    if (ajusteFechaIdealId !== undefined && cuota1PagoId === undefined) {
+    // Se marca cobrado acá, antes de la bifurcación de abono a capital / saldo
+    // a favor, para que corra siempre — sin importar a dónde vaya el sobrante
+    // — y solo si quedó un pago_id que lo respalde (cuota1PagoId), evitando
+    // que el dinero quede "cobrado" sin ningún pago real detrás.
+    if (ajusteFechaIdealId !== undefined && cuota1PagoId !== undefined) {
+      // try/catch propio: un fallo acá no debe tumbar la respuesta del pago
+      // (que ya se aplicó con éxito) con un 500 que invite a reintentar y
+      // duplicar el cobro. Best-effort, reconciliable manualmente si falla.
+      try {
+        await db
+          .update(ajuste_fecha_ideal_pago)
+          .set({ fecha_cobro: new Date(), pago_id: cuota1PagoId })
+          .where(eq(ajuste_fecha_ideal_pago.id, ajusteFechaIdealId));
+        console.log(
+          `🧾 Ajuste por fecha ideal de pago #${ajusteFechaIdealId} marcado como cobrado (pago_id=${cuota1PagoId}).`
+        );
+      } catch (ajusteError) {
+        console.error(
+          `❌ No se pudo marcar como cobrado el ajuste #${ajusteFechaIdealId} ` +
+            `(pago_id=${cuota1PagoId}) — el pago SÍ se registró con éxito. ` +
+            `Requiere reconciliación manual:`,
+          ajusteError
+        );
+      }
+    } else if (ajusteFechaIdealId !== undefined) {
       console.warn(
         `⚠️ Ajuste por fecha ideal de pago #${ajusteFechaIdealId}: se dedujo del ` +
           `disponible pero no se escribió ningún pago de la cuota 1 en este loop. ` +
@@ -3129,24 +2982,7 @@ async function aplicarPagoNormalEnTx(
       .set({ validationStatus: "validated", fecha_aplicado: new Date() })
       .where(eq(pagos_credito.pago_id, pago_id));
 
-    const mantenerCuotaAbiertaPorAjuste =
-      pago.cuota_id !== null &&
-      (await debeMantenerCuotaAbiertaPorAjustePendiente(
-        pago.cuota_id,
-        pago.credito_id,
-        tx,
-      ));
-    if (mantenerCuotaAbiertaPorAjuste && pago.cuota_id !== null) {
-      await tx
-        .update(cuotas_credito)
-        .set({ pagado: false })
-        .where(eq(cuotas_credito.cuota_id, pago.cuota_id));
-      await tx
-        .update(pagos_credito)
-        .set({ pagado: false })
-        .where(eq(pagos_credito.pago_id, pago_id));
-    }
-    if (pago.cuota_id !== null && !mantenerCuotaAbiertaPorAjuste) {
+    if (pago.cuota_id !== null) {
       // Marcar la cuota como pagada
       await tx
         .update(cuotas_credito)
@@ -4054,22 +3890,13 @@ async function aplicarMontoAPagoSinLock(pago_id: number, monto: number, fecha_pa
     const nuevo_membresias_restante = membresias_restante.minus(abono_membresias);
     const nuevo_capital_restante = capital_restante.minus(abono_capital);
 
-    const cuota_pagada_calculada =
+    const cuota_pagada =
       nuevo_interes_restante.eq(0) &&
       nuevo_iva_restante.eq(0) &&
       nuevo_seguro_restante.eq(0) &&
       nuevo_gps_restante.eq(0) &&
       nuevo_membresias_restante.eq(0) &&
       nuevo_capital_restante.eq(0);
-    const mantenerCuotaAbiertaPorAjuste =
-      pago.cuota_id !== null &&
-      pago.credito_id !== null &&
-      (await debeMantenerCuotaAbiertaPorAjustePendiente(
-        pago.cuota_id,
-        pago.credito_id,
-      ));
-    const cuota_pagada =
-      cuota_pagada_calculada && !mantenerCuotaAbiertaPorAjuste;
 
     // Resetear abonos: solo quedan los de este monto
     const nuevo_abono_interes = abono_interes;
@@ -4237,44 +4064,6 @@ export async function editarPago(pago_id: number, campos: {
 
     if (!pago) {
       return { success: false, message: `Pago ${pago_id} no encontrado` };
-    }
-
-    let tieneAjusteVinculado = false;
-    if (campos.otros !== undefined || campos.monto_boleta !== undefined) {
-      const [ajusteVinculado] = await db
-        .select({ id: ajuste_fecha_ideal_pago.id })
-        .from(ajuste_fecha_ideal_pago)
-        .where(eq(ajuste_fecha_ideal_pago.pago_id, pago_id))
-        .limit(1);
-      tieneAjusteVinculado = ajusteVinculado !== undefined;
-    }
-    if (
-      campos.otros !== undefined &&
-      !puedeEditarOtrosConAjuste({
-        otrosActual: pago.otros ?? 0,
-        otrosSolicitado: campos.otros,
-        tieneAjusteVinculado,
-      })
-    ) {
-      return {
-        success: false,
-        message:
-          "No se puede editar Otros porque este pago respalda un ajuste por fecha ideal de pago",
-      };
-    }
-    if (
-      campos.monto_boleta !== undefined &&
-      !puedeEditarMontoProtegidoConAjuste({
-        montoActual: pago.monto_boleta ?? 0,
-        montoSolicitado: campos.monto_boleta,
-        tieneAjusteVinculado,
-      })
-    ) {
-      return {
-        success: false,
-        message:
-          "No se puede editar Monto Boleta porque este pago respalda un ajuste por fecha ideal de pago",
-      };
     }
 
     // 2. Construir objeto de update solo con los campos enviados

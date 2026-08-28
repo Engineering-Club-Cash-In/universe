@@ -32,10 +32,6 @@ import { calcularSplitInteresPci, type InvSplitRow } from "../cofidi/splitIntere
 import { t } from "elysia";
 import { calcularResumenAbonosCuota } from "./registerPaymentPolicy";
 import {
-  shouldInstallmentRemainPaidAfterReversal,
-  shouldRemainPaidAfterInvalidatingPayment,
-} from "./reversePaymentPolicy";
-import {
   buildPendingReturnAuthorizationWarning,
   PendingReturnAuthorizationError,
   PENDING_RETURN_AUTHORIZATION_CODE,
@@ -1910,123 +1906,34 @@ export async function falsePayment(pago_id: number, credito_id: number) {
     // Falsear un pago no debe descontar el aporte del crédito/espejo.
     await insertPagosCreditoInversionistas(pago_id, credito_id, true, false, false); // excludeCube=true, cuotaPagada=false, updateCredito=false
   });
-  // Actualizar el estado del pago a falso y resetear el ajuste (si este pago
-  // era el que lo cobró) en la misma transacción: si el reset fallara,
-  // el pago tampoco debe quedar marcado como falso con el ajuste todavía
-  // "cobrado" apuntando a un pago que ya no vale.
-  const result = await db.transaction(async (tx) => {
-    const [updated] = await tx
-      .update(pagos_credito)
-      .set({
-        pagado: false,
-        paymentFalse: true,
-      })
-      .where(
-        and(
-          eq(pagos_credito.pago_id, pago_id),
-          eq(pagos_credito.credito_id, credito_id)
-        )
+  // Actualizar el estado del pago a falso
+  const result = await db
+    .update(pagos_credito)
+    .set({
+      pagado: false,
+      paymentFalse: true,
+    })
+    .where(
+      and(
+        eq(pagos_credito.pago_id, pago_id),
+        eq(pagos_credito.credito_id, credito_id)
       )
-      .returning({ cuota_id: pagos_credito.cuota_id, pago_id: pagos_credito.pago_id });
-
-    // 🚨 Si no se actualizó ningún registro, lanza error controlado
-    if (!updated) {
-      throw new Error(
-        "No payment found to mark as false with the given criteria"
-      );
-    }
-
-    // Si este pago era el que cobró un ajuste por fecha ideal de pago, resetearlo
-    // a pendiente — la boleta resultó falsa, el dinero nunca entró de verdad.
-    // El resultado se reusa abajo: si este pago era el que lo cobraba, hay
-    // que forzar la reapertura de la cuota 1 (ver
-    // shouldRemainPaidAfterInvalidatingPayment).
-    const ajusteEraDeEstePago = await resetAjusteFechaIdealSiPagoInvalidado(
-      pago_id,
-      tx,
     );
 
-    // Si este pago era el que cerraba su cuota, reabrirla: sin esto
-    // cuotas_credito.pagado se queda en true y getCreditoByNumero /
-    // obtenerInfoCompletaCredito nunca vuelven a ofrecer el ajuste que se
-    // acaba de resetear arriba (exigen la cuota abierta para cobrarlo).
-    // Mismo criterio que reversePayment.ts: se recalcula si la cuota sigue
-    // cubierta con lo que queda, en vez de asumir que hay que reabrirla
-    // siempre — puede seguir pagada si había otro pago validado encima.
-    if (updated.cuota_id !== null) {
-      const [credito] = await tx
-        .select({ cuota: creditos.cuota })
-        .from(creditos)
-        .where(eq(creditos.credito_id, credito_id))
-        .limit(1);
+  // 🚨 Si no se actualizó ningún registro, lanza error controlado
+  if (!result.rowCount || result.rowCount === 0) {
+    throw new Error(
+      "No payment found to mark as false with the given criteria"
+    );
+  }
 
-      // Se consultan TODAS las filas de la cuota (incluida esta, que ya
-      // quedó con paymentFalse=true arriba en la misma transacción): la
-      // función pura descarta paymentFalse=true al sumar, así que no hace
-      // falta excluirla a mano.
-      const pagosDeLaCuota = await tx
-        .select({
-          pago_id: pagos_credito.pago_id,
-          pagado: pagos_credito.pagado,
-          monto_aplicado: pagos_credito.monto_aplicado,
-          validationStatus: pagos_credito.validationStatus,
-          paymentFalse: pagos_credito.paymentFalse,
-        })
-        .from(pagos_credito)
-        .where(eq(pagos_credito.cuota_id, updated.cuota_id));
-
-      const cuotaPermanecePagada = shouldRemainPaidAfterInvalidatingPayment({
-        cuotaPermanecePagadaCalculado: shouldInstallmentRemainPaidAfterReversal({
-          cuota: credito?.cuota,
-          remainingPayments: pagosDeLaCuota,
-        }),
-        pagoEraElQueCobroElAjuste: ajusteEraDeEstePago,
-      });
-
-      const cuotaActualizada = await tx
-        .update(cuotas_credito)
-        .set({ pagado: cuotaPermanecePagada })
-        .where(
-          ajusteEraDeEstePago
-            ? and(
-                eq(cuotas_credito.cuota_id, updated.cuota_id),
-                eq(cuotas_credito.numero_cuota, 1),
-              )
-            : eq(cuotas_credito.cuota_id, updated.cuota_id),
-        )
-        .returning({ cuota_id: cuotas_credito.cuota_id });
-
-      if (ajusteEraDeEstePago && cuotaActualizada.length === 0) {
-        throw new Error("Adjustment payment is not linked to installment 1");
-      }
-
-      // Mismo paso que ya hace reversePayment.ts y que a falsePayment le
-      // faltaba desde antes de este feature: las demás filas de la cuota
-      // que quedaron pagado=true (por el cierre masivo de cuando se cerró
-      // la cuota) no se tocan solas. Sin resincronizarlas, siguen
-      // pagado=true aunque la cuota se reabrió — y allExistingPagos (más
-      // abajo, al registrar el siguiente pago) las descarta a TODAS por
-      // pagado=true, dejando la cuota sin ninguna fila válida de dónde
-      // partir (ver Codex #1263 / revisión de rollover).
-      const pagosPagadosRestantesIds = pagosDeLaCuota
-        .filter((p) => p.pago_id !== updated.pago_id && p.pagado === true)
-        .map((p) => p.pago_id);
-      if (pagosPagadosRestantesIds.length > 0) {
-        await tx
-          .update(pagos_credito)
-          .set({ pagado: cuotaPermanecePagada })
-          .where(inArray(pagos_credito.pago_id, pagosPagadosRestantesIds));
-      }
-    } else if (ajusteEraDeEstePago) {
-      throw new Error("Adjustment payment has no installment");
-    }
-
-    return updated;
-  });
+  // Si este pago era el que cobró un ajuste por fecha ideal de pago, resetearlo
+  // a pendiente — la boleta resultó falsa, el dinero nunca entró de verdad.
+  await resetAjusteFechaIdealSiPagoInvalidado(pago_id);
 
   return {
     message: "Payment marked as false successfully",
-    updatedCount: result ? 1 : 0,
+    updatedCount: result.rowCount ?? 0,
   };
 }
 

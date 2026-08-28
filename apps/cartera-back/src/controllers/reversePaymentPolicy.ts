@@ -106,27 +106,3 @@ export function getRemainingPaymentPaidStatusAfterReversal(
 ) {
   return installmentRemainsPaid;
 }
-
-/**
- * shouldInstallmentRemainPaidAfterReversal (y la excepción de INCOBRABLE que
- * la puede pisar) solo ven el monto CONTRACTUAL de la cuota — no saben que un
- * pago "solo ajuste" (shouldCloseCuota1ViaAjusteSettlement, ver
- * registerPaymentPolicy.ts) pudo haber cerrado la cuota 1 sin aportar nada al
- * monto contractual, porque todo su dinero fue al ajuste por fecha ideal de
- * pago. Si el pago que se está invalidando (reversión o boleta falsa) era
- * justo ese, la cuota 1 tiene que reabrirse sin importar que el resto de
- * pagos siga cubriendo el contractual por su cuenta — de lo contrario el
- * ajuste vuelve a "pendiente" pero la cuota sigue "cerrada", y como nada
- * vuelve a consultar el ajuste de una cuota cerrada, queda incobrable para
- * siempre. Por eso pisa cualquier otro veredicto (incluido el de INCOBRABLE).
- */
-export function shouldRemainPaidAfterInvalidatingPayment({
-  cuotaPermanecePagadaCalculado,
-  pagoEraElQueCobroElAjuste,
-}: {
-  cuotaPermanecePagadaCalculado: boolean;
-  pagoEraElQueCobroElAjuste: boolean;
-}): boolean {
-  if (pagoEraElQueCobroElAjuste) return false;
-  return cuotaPermanecePagadaCalculado;
-}

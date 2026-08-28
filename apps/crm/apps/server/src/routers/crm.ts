@@ -70,10 +70,7 @@ import {
 } from "../lib/credit-analysis-ownership";
 import { buildDeletedOpportunitySnapshot } from "../lib/deleted-opportunity-audit";
 import { eqDpi } from "../lib/dpi-lookup";
-import {
-	esSeleccionDiaPagoValida,
-	getDiaPagoOriginalSistema,
-} from "../lib/fecha-ideal-pago-ajuste";
+import { getDiaPagoOriginalSistema } from "../lib/fecha-ideal-pago-ajuste";
 import { getGuatemalaMonthWindow } from "../lib/guatemala-month-window";
 import {
 	formatMissingLeadFields,
@@ -2365,13 +2362,17 @@ export const crmRouter = {
 				input.leadId !== undefined &&
 				input.leadId !== currentOpportunity[0].leadId;
 			let diaPagoOriginalSistemaUpdate: number | null | undefined;
-			if (input.diaPagoMensual !== undefined) {
+			if (
+				input.diaPagoMensual !== undefined &&
+				(input.diaPagoMensual !== currentOpportunity[0].diaPagoMensual ||
+					cambioDeIntencion ||
+					leadIdCambio)
+			) {
 				const effectiveLeadId =
 					"leadId" in input ? input.leadId : currentOpportunity[0].leadId;
-				// Se consulta una sola vez: la usan tanto la validación de abajo
-				// (siempre que el día no sea 15/30) como esDiaIA más abajo (que la
-				// necesita aunque el día sí sea 15/30, para distinguir si ese 15/30
-				// vino de una recomendación IA o de selección manual).
+				// Se consulta sin importar si el día es 15/30: esDiaIA (más abajo)
+				// necesita saber si la IA recomendó justo ese día aunque no requiera
+				// validación contra suggestedDays.
 				let suggestedDays: Array<{ dia: number; porcentaje: number }> | null =
 					null;
 				if (effectiveLeadId) {
@@ -2390,51 +2391,28 @@ export const crmRouter = {
 					suggestedDays = analysis?.suggestedPaymentDays ?? null;
 				}
 
-				// Se valida SIEMPRE que el día no sea 15/30, sin importar si
-				// "cambió" contra el valor guardado: el análisis de capacidad de
-				// pago puede haberse vuelto a correr y ya no recomendar el mismo
-				// día que antes sí recomendaba — un guardado que reenvía el mismo
-				// día (formulario sin tocarlo) no debe colarse sin revalidar
-				// contra la versión vigente del análisis.
-				if (
-					!esSeleccionDiaPagoValida({
-						diaPagoMensual: input.diaPagoMensual,
-						elegidoDesdeRecomendacionIA:
-							input.elegidoDesdeRecomendacionIA ?? false,
-						suggestedDays,
-					})
-				) {
-					throw new ORPCError("BAD_REQUEST", {
-						message:
-							"El día de pago mensual debe ser 15, 30, o uno de los días recomendados por el análisis de capacidad de pago",
-					});
+				if (input.diaPagoMensual !== 15 && input.diaPagoMensual !== 30) {
+					const isRecommended = suggestedDays?.some(
+						(d) => d.dia === input.diaPagoMensual,
+					);
+					if (!isRecommended) {
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								"El día de pago mensual debe ser 15, 30, o uno de los días recomendados por el análisis de capacidad de pago",
+						});
+					}
 				}
 
-				// diaPagoOriginalSistema solo se recaptura si algo relevante
-				// cambió (evita recaptura accidental en guardados que reenvían el
-				// mismo día sin tocarlo — ver comentario arriba de cambioDeIntencion).
-				if (
-					input.diaPagoMensual !== currentOpportunity[0].diaPagoMensual ||
-					cambioDeIntencion ||
-					leadIdCambio
-				) {
-					// No 15/30 ya probó su origen IA al pasar la validación de arriba.
-					const esDiaIA =
-						input.diaPagoMensual !== 15 && input.diaPagoMensual !== 30
-							? true
-							: elegidoDesdeRecomendacionIA &&
-								(suggestedDays?.some((d) => d.dia === input.diaPagoMensual) ??
-									false);
-					// Si ya había un valor capturado, se preserva: representa "qué día
-					// hubiera puesto el sistema al momento de la asignación original", no
-					// de hoy. Recalcularlo cada vez que se edita el día IA (p. ej. cambiar
-					// de una recomendación a otra) movería el default retroactivamente y
-					// distorsionaría calcularAjusteFechaIdeal al cierre.
-					diaPagoOriginalSistemaUpdate = esDiaIA
-						? (currentOpportunity[0].diaPagoOriginalSistema ??
-							getDiaPagoOriginalSistema())
-						: null;
-				}
+				// No 15/30 ya probó su origen IA al pasar la validación de arriba.
+				const esDiaIA =
+					input.diaPagoMensual !== 15 && input.diaPagoMensual !== 30
+						? true
+						: elegidoDesdeRecomendacionIA &&
+							(suggestedDays?.some((d) => d.dia === input.diaPagoMensual) ??
+								false);
+				diaPagoOriginalSistemaUpdate = esDiaIA
+					? getDiaPagoOriginalSistema()
+					: null;
 			}
 
 			// Validate stage transitions
@@ -6849,18 +6827,16 @@ export const crmRouter = {
 			// diaPagoMensual solo puede ser 15, 30, o uno de los días recomendados
 			// por el análisis de esta oportunidad Y del lead actual (si la oportunidad
 			// fue reasignada a otro lead, el análisis anterior ya no aplica).
-			if (
-				!esSeleccionDiaPagoValida({
-					diaPagoMensual: input.diaPagoMensual,
-					elegidoDesdeRecomendacionIA:
-						input.elegidoDesdeRecomendacionIA,
-					suggestedDays,
-				})
-			) {
-				throw new ORPCError("BAD_REQUEST", {
-					message:
-						"El día de pago mensual debe ser 15, 30, o uno de los días recomendados por el análisis de capacidad de pago",
-				});
+			if (input.diaPagoMensual !== 15 && input.diaPagoMensual !== 30) {
+				const isRecommended = suggestedDays?.some(
+					(d) => d.dia === input.diaPagoMensual,
+				);
+				if (!isRecommended) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"El día de pago mensual debe ser 15, 30, o uno de los días recomendados por el análisis de capacidad de pago",
+					});
+				}
 			}
 
 			// Parse existing investors from DB
@@ -7049,12 +7025,8 @@ export const crmRouter = {
 						diaPagoMensual: input.diaPagoMensual,
 						// Se captura AHORA (momento de la asignación) porque depende de qué
 						// día es "hoy" en este instante — no se puede recalcular después.
-						// Si la oportunidad ya traía un valor (p. ej. regresó de 80%→50% y
-						// se está reasignando de nuevo), se preserva el original en vez de
-						// recapturarlo con la fecha de hoy.
 						diaPagoOriginalSistema: esDiaIA
-							? (opportunity.diaPagoOriginalSistema ??
-								getDiaPagoOriginalSistema())
+							? getDiaPagoOriginalSistema()
 							: null,
 						updatedAt: new Date(),
 					})

@@ -185,7 +185,6 @@ const creditSchema = z.object({
   plazo: z.number().int().min(1).max(360),
   cuota: z.number().min(0),
   dia_pago_mensual: z.number().int().min(1).max(31),
-  dia_pago_original_sistema: z.number().int().min(1).max(31).optional(),
   membresias_pago: z.number().min(0),
   porcentaje_royalti: z.number().min(0),
   royalti: z.number().min(0),
@@ -250,24 +249,12 @@ const creditSchema = z.object({
       dia_pago_mensual_elegido: z.number().int().min(1).max(31),
       dias_diferencia: z.number().int().positive(),
       dias_del_mes: z.number().int().min(28).max(31),
-      // Interés proporcional bruto: cuota_interes mensual + su iva_12.
       monto_interes: z.number().min(0),
       monto_membresia: z.number().min(0),
       monto_servicios: z.number().min(0),
       monto_total: z.number().min(0),
-      // Momento (ISO) que el CRM usó como "hoy" para calcular dias_del_mes.
-      // generatePaymentDates lo usa tal cual en vez de leer su propio
-      // new Date(), para que el calendario real y el ajuste ya calculado
-      // nunca puedan discrepar sobre en qué mes cae la cuota 1. Opcional
-      // por compatibilidad con payloads viejos -- sin él, cae al new Date()
-      // de siempre (mismo comportamiento que antes de este campo).
-      fecha_referencia: z.string().datetime().optional(),
     })
     .optional(),
-  // La referencia viaja siempre, aun cuando el cálculo no emite ajuste. Así
-  // CRM y Cartera generan cuota 1 contra el mismo mes si la llamada cruza un
-  // cambio de mes. Opcional para clientes legacy.
-  fecha_referencia_primera_cuota: z.string().datetime().optional(),
 });
 
 // ========================================
@@ -729,51 +716,33 @@ if (creditosInversionistasData.length > 0) {
 // 3. GENERACIÓN DE FECHAS
 // ========================================
 
-// fechaReferencia: opcional. Cuando el crédito trae un ajuste por fecha ideal
-// de pago (ver ajuste_fecha_ideal.fecha_referencia más arriba), es el mismo
-// "hoy" que el CRM ya usó para calcular ese ajuste -- generar el calendario
-// con esa misma fecha, en vez de leer un new Date() propio unos segundos
-// después por la llamada HTTP, es lo que evita que ambos lados discrepen
-// sobre en qué mes cae la cuota 1 (P2 de revisión, PR #1263). Sin ella
-// (cualquier otro flujo de creación de crédito, insolutos incluidos), cae al
-// new Date() de siempre -- comportamiento sin cambios.
-export const generatePaymentDates = (
-  plazo: number,
-  diaPagoMensual: number,
-  fechaReferencia?: Date,
-): string[] => {
+const generatePaymentDates = (plazo: number, diaPagoMensual: number): string[] => {
   const fechas: string[] = [];
-  const fechaHoy = fechaReferencia ?? new Date();
+  const startDate = new Date();
+
+  const fechaHoy = new Date();
   const fechaHoyGuate = fechaHoy.toLocaleDateString("sv-SE", {
     timeZone: "America/Guatemala",
   });
-  const [anioBase, mesBase] = fechaHoyGuate.split("-").map(Number);
 
   fechas.push(fechaHoyGuate);
 
   for (let i = 0; i < plazo; i++) {
-    const mesDestino = mesBase + i;
-    const anio = anioBase + Math.floor(mesDestino / 12);
-    const mes = (mesDestino % 12) + 1;
-    const ultimoDiaMes = new Date(Date.UTC(anio, mes, 0)).getUTCDate();
+    const anioBase = startDate.getFullYear();
+    const mesBase = startDate.getMonth() + i + 1; // JS maneja overflow de meses
+
+    // Último día del mes destino (ej: Feb → 28/29)
+    const ultimoDiaMes = new Date(anioBase, mesBase + 1, 0).getDate();
     const diaPago = Math.min(diaPagoMensual, ultimoDiaMes);
-    fechas.push(
-      `${anio}-${String(mes).padStart(2, "0")}-${String(diaPago).padStart(2, "0")}`,
-    );
+
+    const fechaLocal = new Date(anioBase, mesBase, diaPago, 12, 0, 0);
+    const fechaGuateStr = fechaLocal.toLocaleDateString("sv-SE", {
+      timeZone: "America/Guatemala",
+    });
+    fechas.push(fechaGuateStr);
   }
 
   return fechas;
-};
-
-export const getFechaReferenciaPrimeraCuota = ({
-  fechaReferencia,
-  fechaReferenciaAjuste,
-}: {
-  fechaReferencia?: string;
-  fechaReferenciaAjuste?: string;
-}): Date | undefined => {
-  const iso = fechaReferencia ?? fechaReferenciaAjuste;
-  return iso ? new Date(iso) : undefined;
 };
 
 // ========================================
@@ -1016,15 +985,7 @@ export const createCreditCore = async (
   // El día de pago ya viene validado (1-31) desde el CRM: 15, 30, o un día
   // recomendado por el análisis de capacidad de pago. generatePaymentDates
   // hace el clamp de fin de mes internamente, así que se usa tal cual.
-  const fechaReferenciaAjuste = getFechaReferenciaPrimeraCuota({
-    fechaReferencia: creditData.fecha_referencia_primera_cuota,
-    fechaReferenciaAjuste: creditData.ajuste_fecha_ideal?.fecha_referencia,
-  });
-  const fechas = generatePaymentDates(
-    creditData.plazo,
-    creditData.dia_pago_mensual,
-    fechaReferenciaAjuste
-  );
+  const fechas = generatePaymentDates(creditData.plazo, creditData.dia_pago_mensual);
 
   const { cuotaInicial, cuotasInsertadas } = await insertInstallments(
     newCredit.credito_id,
@@ -1045,70 +1006,16 @@ export const createCreditCore = async (
     executor
   );
 
-  const ajusteFechaIdeal = creditData.dia_pago_original_sistema
-    ? calcularAjusteFechaIdealDesdeCuota1(creditData, cuotasInsertadas)
-    : creditData.ajuste_fecha_ideal;
-
-  // Compatibilidad: clientes antiguos siguen enviando el desglose calculado.
-  if (ajusteFechaIdeal) {
+  // Aditivo: no toca la cuota 0 recién insertada, solo la referencia por credito_id.
+  if (creditData.ajuste_fecha_ideal) {
     await insertAjusteFechaIdeal(
       newCredit.credito_id,
-      ajusteFechaIdeal,
+      creditData.ajuste_fecha_ideal,
       executor
     );
   }
 
   return { newCredit, creditDataForInsert };
-};
-
-const calcularAjusteFechaIdealDesdeCuota1 = (
-  creditData: CreditData,
-  cuotasInsertadas: CuotaInsertada[]
-): NonNullable<CreditData["ajuste_fecha_ideal"]> | undefined => {
-  const diaPagoOriginalSistema = creditData.dia_pago_original_sistema;
-  if (diaPagoOriginalSistema === undefined) return undefined;
-
-  const cuota1 = cuotasInsertadas.find((cuota) => cuota.numero_cuota === 1);
-  if (!cuota1) throw new Error("No se creó la cuota 1 para calcular el ajuste");
-
-  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(cuota1.fecha_vencimiento);
-  if (!match) throw new Error("La fecha de cuota 1 no es válida");
-
-  const [, anio, mes, dia] = match;
-  const diasDelMes = new Date(Number(anio), Number(mes), 0).getDate();
-  const diasDiferencia = Math.max(
-    0,
-    Number(dia) - diaPagoOriginalSistema
-  );
-  if (diasDiferencia === 0) return undefined;
-
-  const prorratear = (montoMensual: Big) =>
-    montoMensual.times(diasDiferencia).div(diasDelMes).round(2);
-  const interesBaseMensual = new Big(creditData.capital)
-    .times(creditData.porcentaje_interes)
-    .div(100)
-    .round(2);
-  const ivaInteresMensual = interesBaseMensual.times(0.12).round(2);
-  const montoInteres = prorratear(
-    interesBaseMensual.plus(ivaInteresMensual)
-  );
-  const montoMembresia = prorratear(new Big(creditData.membresias_pago));
-  const montoServicios = prorratear(
-    new Big(creditData.seguro_10_cuotas).plus(creditData.gps)
-  );
-  const montoTotal = montoInteres.plus(montoMembresia).plus(montoServicios);
-  if (montoTotal.eq(0)) return undefined;
-
-  return {
-    dia_pago_original_sistema: diaPagoOriginalSistema,
-    dia_pago_mensual_elegido: creditData.dia_pago_mensual,
-    dias_diferencia: diasDiferencia,
-    dias_del_mes: diasDelMes,
-    monto_interes: montoInteres.toNumber(),
-    monto_membresia: montoMembresia.toNumber(),
-    monto_servicios: montoServicios.toNumber(),
-    monto_total: montoTotal.toNumber(),
-  };
 };
 
 // ========================================

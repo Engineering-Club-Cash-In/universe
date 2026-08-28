@@ -1,4 +1,3 @@
-import Big from "big.js";
 import { toDateStrGT } from "./guatemala-month-window";
 
 /**
@@ -38,34 +37,14 @@ export interface CalcularAjusteFechaIdealParams {
 export interface AjusteFechaIdealResult {
 	diasDiferencia: number;
 	diasDelMes: number;
-	/** Interés proporcional bruto: interés base mensual más su IVA del 12%. */
 	montoInteres: number;
 	montoMembresia: number;
 	montoServicios: number;
 	montoTotal: number;
 }
 
-/**
- * Los días tradicionales 15/30 son válidos sin análisis solo cuando fueron
- * elegidos manualmente. Si el formulario los marca como recomendación IA
- * —igual que cualquier otro día— deben seguir en las recomendaciones vigentes.
- */
-export function esSeleccionDiaPagoValida({
-	diaPagoMensual,
-	elegidoDesdeRecomendacionIA,
-	suggestedDays,
-}: {
-	diaPagoMensual: number;
-	elegidoDesdeRecomendacionIA: boolean;
-	suggestedDays: readonly { dia: number }[] | null;
-}): boolean {
-	const esTradicionalManual =
-		(diaPagoMensual === 15 || diaPagoMensual === 30) &&
-		!elegidoDesdeRecomendacionIA;
-	return (
-		esTradicionalManual ||
-		(suggestedDays?.some((dia) => dia.dia === diaPagoMensual) ?? false)
-	);
+function redondearMonto(valor: number): number {
+	return Math.round((valor + Number.EPSILON) * 100) / 100;
 }
 
 /**
@@ -97,7 +76,10 @@ export function calcularAjusteFechaIdeal(
 	// Clamp de fin de mes: el pago real cae en el último día del mes si el día
 	// elegido (29/30/31) no existe ese mes — mismo criterio que
 	// generatePaymentDates en cartera-back.
-	const diaElegidoClamped = Math.min(params.diaPagoMensualElegido, diasDelMes);
+	const diaElegidoClamped = Math.min(
+		params.diaPagoMensualElegido,
+		diasDelMes,
+	);
 
 	const diasDiferencia = Math.max(
 		0,
@@ -106,20 +88,17 @@ export function calcularAjusteFechaIdeal(
 
 	if (diasDiferencia === 0) return null;
 
-	const interesBaseMensual = new Big(params.capital)
-		.times(params.porcentajeInteres)
-		.div(100)
-		.round(2);
-	const ivaInteresMensual = interesBaseMensual.times(0.12).round(2);
-	const prorratear = (montoMensual: Big): number =>
-		Number(
-			montoMensual.times(diasDiferencia).div(diasDelMes).round(2).toString(),
-		);
+	const interesMensual = (params.capital * params.porcentajeInteres) / 100;
+	const serviciosMensual = params.seguroMensual + params.gpsMensual;
 
-	const montoInteres = prorratear(interesBaseMensual.plus(ivaInteresMensual));
-	const montoMembresia = prorratear(new Big(params.membresiaMensual));
-	const montoServicios = prorratear(
-		new Big(params.seguroMensual).plus(params.gpsMensual),
+	const montoInteres = redondearMonto(
+		(interesMensual / diasDelMes) * diasDiferencia,
+	);
+	const montoMembresia = redondearMonto(
+		(params.membresiaMensual / diasDelMes) * diasDiferencia,
+	);
+	const montoServicios = redondearMonto(
+		(serviciosMensual / diasDelMes) * diasDiferencia,
 	);
 
 	return {
@@ -128,11 +107,6 @@ export function calcularAjusteFechaIdeal(
 		montoInteres,
 		montoMembresia,
 		montoServicios,
-		montoTotal: Number(
-			new Big(montoInteres)
-				.plus(montoMembresia)
-				.plus(montoServicios)
-				.toString(),
-		),
+		montoTotal: redondearMonto(montoInteres + montoMembresia + montoServicios),
 	};
 }

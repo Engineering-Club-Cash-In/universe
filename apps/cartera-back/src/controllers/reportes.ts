@@ -830,7 +830,15 @@ export async function getReinversionLiquidaciones({
         COALESCE(s.tipo, 'sin_clasificar') AS tipo,
         COALESCE(SUM(pe.abono_capital::numeric), 0) AS peso_capital,
         COALESCE(SUM(pe.abono_interes::numeric), 0) AS peso_interes,
-        COALESCE(SUM(pe.abono_capital::numeric + pe.abono_interes::numeric), 0) AS peso_flujo
+        COALESCE(SUM(
+          pe.abono_capital::numeric
+          + pe.abono_interes::numeric
+          + CASE
+              WHEN l.descuenta_impuestos = true OR l.total_isr::numeric > 0
+                THEN -(pe.abono_interes::numeric * 0.07)
+              ELSE pe.abono_iva_12::numeric
+            END
+        ), 0) AS peso_flujo
       FROM liquidaciones_mes l
       JOIN cartera.pagos_credito_inversionistas_espejo pe
         ON pe.liquidacion_id = l.liquidacion_id

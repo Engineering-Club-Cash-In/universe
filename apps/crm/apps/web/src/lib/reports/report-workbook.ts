@@ -60,14 +60,16 @@ export function buildAdminReportsWorkbook(input: {
 		if (!last) throw new Error("No fue posible totalizar Cobranza.");
 		const total = { Período: "Total" } as Record<string, string | number>;
 		for (const key of Object.keys(last).slice(1)) {
-			total[key] = input.cobranza.acumulado
-				? Number(last[key as keyof typeof last])
-				: Math.round(
+			const debeSumar =
+				!input.cobranza.acumulado || key === "Cantidad de cuotas";
+			total[key] = debeSumar
+				? Math.round(
 						cobranzaRows.reduce(
 							(sum, row) => sum + Number(row[key as keyof typeof row]),
 							0,
 						) * 100,
-					) / 100;
+					) / 100
+				: Number(last[key as keyof typeof last]);
 		}
 		cobranzaRows.push(total as (typeof cobranzaRows)[number]);
 	}

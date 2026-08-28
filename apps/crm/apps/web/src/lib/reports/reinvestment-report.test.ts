@@ -1004,7 +1004,7 @@ test("workbook comparte modelos, conserva números y contiene las siete hojas", 
 	});
 });
 
-test("workbook acumulado totaliza desde la última fila con datos aunque el rango termine vacío", () => {
+test("workbook acumulado conserva montos acumulados pero suma cuotas de todos los buckets", () => {
 	const reinvestment = response();
 	const rows = fillMissingMontoACobrarPeriods(
 		[
@@ -1046,6 +1046,11 @@ test("workbook acumulado totaliza desde la última fila con datos aunque el rang
 		"2026-07-01",
 		"2026-07-02",
 	);
+	rows[1] = {
+		...rows[0]!,
+		bucket: rows[1]!.bucket,
+		cuotas_count: 3,
+	};
 	const workbook = buildAdminReportsWorkbook({
 		cobranza: { acumulado: true, rows },
 		reinvestment,
@@ -1061,7 +1066,7 @@ test("workbook acumulado totaliza desde la última fila con datos aunque el rang
 
 	expect(total).toMatchObject({
 		Período: "Total",
-		"Cantidad de cuotas": 2,
+		"Cantidad de cuotas": 5,
 		Capital: 100,
 		Facturación: 18.72,
 	});

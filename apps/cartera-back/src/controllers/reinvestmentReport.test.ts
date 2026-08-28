@@ -407,6 +407,18 @@ test("el contrato v2 no publica monto_aportado histórico incorrecto", async () 
   expect(source).not.toContain("monto_aportado: Number");
 });
 
+test("peso de flujo mixto usa capital más interés neto con IVA o ISR", async () => {
+  const source = await Bun.file(new URL("./reportes.ts", import.meta.url)).text();
+  const query = source.slice(
+    source.indexOf("pesos_mixtos AS"),
+    source.indexOf("pesos AS"),
+  );
+
+  expect(query).toContain("pe.abono_iva_12::numeric");
+  expect(query).toContain("l.descuenta_impuestos = true OR l.total_isr::numeric > 0");
+  expect(query).toContain("-(pe.abono_interes::numeric * 0.07)");
+});
+
 test("consulta de interés no deja una coma antes de FROM", async () => {
   const source = await Bun.file(new URL("./reportes.ts", import.meta.url)).text();
   const query = source.slice(

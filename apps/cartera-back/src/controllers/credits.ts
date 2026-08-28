@@ -38,6 +38,7 @@ import {
   isNull,
 } from "drizzle-orm";
 import { getPagosDelMesActual, insertPagosCreditoInversionistasV2 } from "./payments";
+import { marcarFacturacionPendiente } from "./estadoFacturacionPago";
 import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
 import {
   filtrarCuotasEnValidacion,
@@ -2064,6 +2065,12 @@ export async function resetCredit({
           monto_aplicado: totalMontoPago.toString(),
         })
         .returning();
+
+      // El pago de cancelación nace ya aplicado ('reset') sin pasar por los
+      // hooks de validación que inicializan factura_status: sin esto quedaba
+      // NULL (reservado para pagos históricos) y la cancelación era invisible
+      // en la bandeja de facturación hasta que alguien facturara. (Codex P2)
+      await marcarFacturacionPendiente(tx, nuevoPago.pago_id, nuevoPago);
 
       // 11. Anular pagos no pagados (NO se borran: se conservan como histórico marcándolos
       //     paymentFalse=true). Además se ponen los *_restante en 0: algunas queries de

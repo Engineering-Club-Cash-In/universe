@@ -527,3 +527,31 @@ describe("fixes del code review: gates sub-centavo y prorrateado sin interés", 
     expect(diff.modo).toBe("BLOQUEADO");
   });
 });
+
+describe("regla (e): DTEs duplicados del mismo rubro (Codex P2 del PR #1493)", () => {
+  it("36. dos ACTIVAS con la misma key → BLOQUEADO (no se colapsan en 'cubierto')", () => {
+    const diff = computarDiffFacturas({
+      pagoData: PAGO,
+      inversionistas: ROSTER,
+      activas: [
+        { factura_id: 400, rubro: "MORA", inversionista_id: null, monto_total: "150.00" },
+        { factura_id: 401, rubro: "MORA", inversionista_id: null, monto_total: "150.00" },
+      ],
+    });
+    expect(diff.modo).toBe("BLOQUEADO");
+    if (diff.modo !== "BLOQUEADO") throw new Error("modo inesperado");
+    expect(diff.razon).toContain("más de una factura activa para MORA");
+  });
+
+  it("37. duplicado por inversionista también bloquea; otro inversionista no", () => {
+    const dup = computarDiffFacturas({
+      pagoData: PAGO,
+      inversionistas: ROSTER,
+      activas: [
+        { factura_id: 402, rubro: "INTERESES", inversionista_id: 2, monto_total: "392.00" },
+        { factura_id: 403, rubro: "INTERESES", inversionista_id: 2, monto_total: "392.00" },
+      ],
+    });
+    expect(dup.modo).toBe("BLOQUEADO");
+  });
+});

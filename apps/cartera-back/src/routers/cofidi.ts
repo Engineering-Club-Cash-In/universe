@@ -420,8 +420,10 @@ if (facturasExistentes.length > 0) {
           diferencia_vs_100: suma.minus(100).toString(),
         }));
         console.error(`❌ Inversionistas con porcentajes que no suman 100%:`, detalle);
+        // Este exit corre ANTES del diff (esRecorridaParcial aún no se evalúa):
+        // el piso PARCIAL se decide por las ACTIVAS ya cargadas en el paso 0.
         await registrarEstadoFacturacion(pago_id, {
-          estado: "FALLIDA",
+          estado: facturasExistentes.length > 0 ? "PARCIAL" : "FALLIDA",
           motivo: "Configuración inválida: los porcentajes de los inversionistas no suman 100%.",
         });
         return {
@@ -651,8 +653,11 @@ if (facturasExistentes.length > 0) {
       if (nitsDisponibles.length === 0) {
         set.status = 400;
         console.error(`❌ Cliente sin NIT registrado - Pago ID: ${pago_id}`);
+        // Piso PARCIAL en re-corrida: el diff ya probó que hay DTEs activos
+        // válidos de la corrida original — FALLIDA (= no se emitió nada)
+        // mandaría a conta a la remediación equivocada. (Codex P2)
         await registrarEstadoFacturacion(pago_id, {
-          estado: "FALLIDA",
+          estado: esRecorridaParcial ? "PARCIAL" : "FALLIDA",
           motivo: `El cliente "${pagoData.nombre}" no tiene NIT registrado.`,
         });
         return {

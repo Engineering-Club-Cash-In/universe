@@ -286,7 +286,22 @@ export function computarDiffFacturas(args: {
           `Anule las facturas activas y vuelva a facturar el pago completo.`,
       };
     }
-    logrado.add(keyDeActiva(f));
+    const key = keyDeActiva(f);
+    // (e) Dos ACTIVAS con la MISMA key = el cliente ya tiene DTEs duplicados de
+    //     ese rubro (doble-POST histórico, réplicas concurrentes, backfill).
+    //     Colapsarlas en el Set las haría pasar por "cubierto" y hasta
+    //     reconciliaría el pago a OK escondiendo el doble cobro → BLOQUEADO.
+    if (logrado.has(key)) {
+      return {
+        modo: "BLOQUEADO",
+        razon:
+          `Hay más de una factura activa para ${key}${
+            f.factura_id ? ` (la más reciente: factura_id ${f.factura_id})` : ""
+          }: el pago tiene DTEs duplicados de ese rubro. ` +
+          `Anule el duplicado antes de re-facturar.`,
+      };
+    }
+    logrado.add(key);
   }
 
   const esperadoDetallado = calcularEsperadoDetallado({ pagoData, inversionistas });

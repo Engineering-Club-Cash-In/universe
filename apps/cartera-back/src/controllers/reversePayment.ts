@@ -438,12 +438,12 @@ export function createReversePayment(
             validationStatus: "no_required" as const,
             numeroAutorizacion: "",
             banco_id: null,
-            // El pago se reversó (sus facturas ACTIVAS ya se anularon arriba):
-            // su estado de facturación deja de aplicar y no debe seguir
-            // apareciendo como "falta factura".
-            factura_status: "NO_APLICA" as const,
-            factura_error: null,
-            factura_at: null,
+            // ⚠️ factura_status NO se toca acá: la anulación de los DTEs es
+            // POST-commit y best-effort. Escribir NO_APLICA dentro de la tx
+            // abría una ventana (crash entre el commit y el loop de anulación)
+            // donde el pago quedaba escondido como NO_APLICA con facturas
+            // ACTIVAS vivas. El estado terminal se resuelve al final de la
+            // etapa de anulación: NO_APLICA si todo se anuló, FALLIDA si no.
           })
           .where(eq(pagos_credito.pago_id, pago_id));
 
@@ -504,9 +504,7 @@ export function createReversePayment(
               validationStatus: "no_required" as const,
               numeroAutorizacion: "",
               banco_id: null,
-              factura_status: "NO_APLICA" as const,
-              factura_error: null,
-              factura_at: null,
+              // factura_status se resuelve POST-anulación (ver rama de arriba).
             })
             .where(eq(pagos_credito.pago_id, pago_id));
         }
@@ -878,36 +876,44 @@ export function createReversePayment(
         }, telemetryLogger);
       }
 
-      // 🧾 La tx dejó factura_status='NO_APLICA' asumiendo que esta etapa
-      // anularía todos los DTEs — pero es best-effort: si alguno falló, el pago
-      // tiene facturas ACTIVAS (en BD o en SAT) y 'NO_APLICA' se lo ESCONDERÍA
-      // a conta. Se corrige a FALLIDA con el detalle para que aparezca en la
-      // bandeja y se resuelva a mano (anulación manual / conciliación).
-      // Best-effort también: si el pago se borró en la reversa total, el UPDATE
-      // no matchea filas y no pasa nada.
-      if (facturasConError.length > 0) {
-        try {
-          await db
-            .update(pagos_credito)
-            .set({
-              factura_status: "FALLIDA",
-              factura_error: JSON.stringify(
-                facturasConError.map((f) => ({
-                  rubro: "ANULACION",
-                  error: `Factura ${f.factura_id} (${f.uuid}) quedó sin anular: ${f.error ?? f.mensaje ?? "sin detalle"}`,
-                }))
-              ),
-              factura_at: new Date(),
-            })
-            .where(eq(pagos_credito.pago_id, pago_id));
-        } catch {
-          // Best-effort: la anulación fallida ya quedó reportada arriba por
-          // emitInvoiceVoiding (manualActionRequired) y en facturasConError de
-          // la respuesta; este marcador de bandeja no puede romper la reversa.
-          // (Sin console.*: el slice de reversa usa structured logging y un
-          // guard-test lo hace cumplir.)
-        }
-      }
+    }
+
+    // 🧾 ESTADO TERMINAL DE FACTURACIÓN — solo DESPUÉS de la etapa de anulación
+    // (la tx ya no lo escribe: hacerlo antes abría la ventana crash→NO_APLICA
+    // con DTEs vivos). NO_APLICA únicamente cuando ya no queda nada por anular;
+    // FALLIDA con el detalle cuando algún DTE quedó sin anular, para que el
+    // pago aparezca en la bandeja y se resuelva a mano (anulación manual /
+    // conciliación). Si un crash corta antes de llegar acá, el pago conserva su
+    // estado anterior — impreciso pero nunca ESCONDE facturas vivas.
+    // Best-effort: si la reversa borró el pago, el UPDATE no matchea filas.
+    try {
+      await db
+        .update(pagos_credito)
+        .set(
+          facturasConError.length > 0
+            ? {
+                factura_status: "FALLIDA" as const,
+                factura_error: JSON.stringify(
+                  facturasConError.map((f) => ({
+                    rubro: "ANULACION",
+                    error: `Factura ${f.factura_id} (${f.uuid}) quedó sin anular: ${f.error ?? f.mensaje ?? "sin detalle"}`,
+                  }))
+                ),
+                factura_at: new Date(),
+              }
+            : {
+                factura_status: "NO_APLICA" as const,
+                factura_error: null,
+                factura_at: null,
+              }
+        )
+        .where(eq(pagos_credito.pago_id, pago_id));
+    } catch {
+      // Best-effort: la anulación fallida ya quedó reportada arriba por
+      // emitInvoiceVoiding (manualActionRequired) y en facturasConError de la
+      // respuesta; este marcador de bandeja no puede romper la reversa.
+      // (Sin console.*: el slice de reversa usa structured logging y un
+      // guard-test lo hace cumplir.)
     }
 
     // ========================================================================

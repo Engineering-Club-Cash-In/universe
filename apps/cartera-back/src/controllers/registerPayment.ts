@@ -18,6 +18,7 @@ import {
 import { eq, and, lt, lte, asc, desc, sql, gt, or, ne, inArray } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { desactivarMoraSiCreditoAlDia, updateMora } from "./latefee";
+import { marcarFacturacionPendiente } from "./estadoFacturacionPago";
 import { insertPagosCreditoInversionistas, insertPagosCreditoInversionistasV2 } from "./payments";
 import { processAndReplaceCreditInvestors } from "./investor";
 import { processConvenioPayment } from "./paymentAgreement";
@@ -2786,6 +2787,10 @@ async function aplicarPagoNormalEnTx(
         })
         .where(eq(pagos_credito.pago_id, pago_id));
 
+      // Queda a la espera de su factura (o NO_APLICA si es solo capital):
+      // así conta ve en la tabla de pagos cuál todavía no se facturó.
+      await marcarFacturacionPendiente(tx, pago_id, pago);
+
       const abonoCapitalPago = new Big(pago.abono_capital ?? 0);
       if (abonoCapitalPago.gt(0)) {
 
@@ -2891,6 +2896,8 @@ async function aplicarPagoNormalEnTx(
       .update(pagos_credito)
       .set({ validationStatus: "validated", fecha_aplicado: new Date() })
       .where(eq(pagos_credito.pago_id, pago_id));
+
+    await marcarFacturacionPendiente(tx, pago_id, pago);
 
     if (pago.cuota_id !== null) {
       // Marcar la cuota como pagada

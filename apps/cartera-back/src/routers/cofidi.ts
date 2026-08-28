@@ -12,6 +12,7 @@ import {
 } from "../cofidi/rubroInteresInversionistas";
 import { calcularSplitInteresPci } from "../cofidi/splitInteresPci";
 import { computarDiffFacturas, keyIntereses } from "../cofidi/facturasFaltantes";
+import { registrarEstadoFacturacion } from "../controllers/estadoFacturacionPago";
 import { db } from "../database";
 import {
   audit_logs,
@@ -34,6 +35,7 @@ import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { NITSoapClient } from "../cofidi/nitGenerator";
 import { formatearFechaSAT } from "../utils/functions/fechaSAT";
 import type { DTERequest } from "../cofidi/types";
+import type { FacturaRubro } from "../database/db/schema";
 import {
   SAT_CONFIG,
   CLUB_CASHIN_CONFIG,
@@ -155,10 +157,10 @@ const facturasExistentes = await db
     serie: facturas_electronicas.serie,
     numero: facturas_electronicas.numero,
     uuid: facturas_electronicas.uuid,
-    concepto: facturas_electronicas.concepto,
+    rubro: facturas_electronicas.rubro,
     inversionista_id: facturas_electronicas.inversionista_id,
     // Para la regla (d) del diff: el DTE vivo debe cuadrar al centavo con el
-    // monto que el cálculo de HOY le asigna a su concepto.
+    // monto que el cálculo de HOY le asigna a su rubro.
     monto_total: facturas_electronicas.monto_total,
   })
   .from(facturas_electronicas)
@@ -173,7 +175,7 @@ const facturasExistentes = await db
 const facturasExistentesResumen = facturasExistentes.map((f) => ({
   id: f.factura_id,
   tipo: f.tipo_documento,
-  concepto: f.concepto,
+  rubro: f.rubro,
   inversionista_id: f.inversionista_id,
   serie: f.serie,
   numero: f.numero,
@@ -414,6 +416,10 @@ if (facturasExistentes.length > 0) {
           diferencia_vs_100: suma.minus(100).toString(),
         }));
         console.error(`❌ Inversionistas con porcentajes que no suman 100%:`, detalle);
+        await registrarEstadoFacturacion(pago_id, {
+          estado: "FALLIDA",
+          motivo: "Configuración inválida: los porcentajes de los inversionistas no suman 100%.",
+        });
         return {
           success: false,
           error: "Configuración inválida: porcentaje_participacion + porcentaje_cash_in debe sumar 100% por inversionista",
@@ -550,6 +556,10 @@ if (facturasExistentes.length > 0) {
 
       if (soloFaltantes && faltantes.size === 0) {
         console.log(`✅ Pago ${pago_id} ya está completamente facturado (nada que emitir).`);
+        // Reconciliación: el diff acaba de PROBAR que todos los rubros esperados
+        // tienen DTE activo. Si el estado quedó rancio (PARCIAL/FALLIDA de una
+        // corrida que murió a medio request), acá se corrige a OK.
+        await registrarEstadoFacturacion(pago_id, { estado: "OK" });
         set.status = 400;
         return {
           success: false,
@@ -572,7 +582,7 @@ if (facturasExistentes.length > 0) {
       //    OTROS_SERVICIOS, OTROS, INTERESES (loop, key por inversionista) e
       //    INTERESES_CUBE. Un bloque nuevo SIN el check certifica incondicional
       //    en re-corridas parciales → DTE duplicado ante SAT. Si agregas un
-      //    concepto: gatearlo acá, sumarlo a CONCEPTOS_FACTURA y al esperado de
+      //    rubro: gatearlo acá, sumarlo a RUBROS_FACTURA y al esperado de
       //    calcularEsperadoDetallado (facturasFaltantes.ts) — los tres van juntos.
       const debeEmitir = (key: string) => !soloFaltantes || faltantes.has(key);
 
@@ -609,6 +619,10 @@ if (facturasExistentes.length > 0) {
       if (nitsDisponibles.length === 0) {
         set.status = 400;
         console.error(`❌ Cliente sin NIT registrado - Pago ID: ${pago_id}`);
+        await registrarEstadoFacturacion(pago_id, {
+          estado: "FALLIDA",
+          motivo: `El cliente "${pagoData.nombre}" no tiene NIT registrado.`,
+        });
         return {
           success: false,
           error: `El cliente "${pagoData.nombre}" no tiene NIT registrado. No se puede facturar sin un NIT válido.`,
@@ -777,7 +791,7 @@ if (facturasExistentes.length > 0) {
             complementos: complementosMora,
             created_by,
             nitsFallback: nitsDisponibles.slice(1),
-            concepto: "MORA",
+                        rubro: "MORA",
           });
 
           facturasGeneradas.push({
@@ -940,7 +954,7 @@ if (facturasExistentes.length > 0) {
             complementos: complementosOtrosServicios,
             created_by,
             nitsFallback: nitsDisponibles.slice(1),
-            concepto: "OTROS_SERVICIOS",
+                        rubro: "OTROS_SERVICIOS",
           });
 
           facturasGeneradas.push({
@@ -1028,7 +1042,7 @@ if (facturasExistentes.length > 0) {
             complementos: complementosOtros,
             created_by,
             nitsFallback: nitsDisponibles.slice(1),
-            concepto: "OTROS",
+                        rubro: "OTROS",
           });
 
           facturasGeneradas.push({
@@ -1522,7 +1536,7 @@ if (facturasExistentes.length > 0) {
                 customConfig: inversionistaConfig?.config,
                 customSatConfig: inversionistaConfig?.satConfig,
                 nitsFallback: nitsDisponibles.slice(1),
-                concepto: "INTERESES",
+                                rubro: "INTERESES",
                 inversionista_id: inv.inversionista_id,
               });
 
@@ -1555,7 +1569,9 @@ if (facturasExistentes.length > 0) {
               console.error(`      ❌ Error: ${error.message}`);
               facturasGeneradas.push({
                 tipo: "ERROR",
+                concepto: "INTERESES",
                 inversionista: inv.nombre,
+                inversionista_id: inv.inversionista_id,
                 flujo: "NUEVO_PRORRATEADO",
                 error: error.message,
               });
@@ -1619,7 +1635,7 @@ if (facturasExistentes.length > 0) {
                 complementos: complementosCube,
                 created_by,
                 nitsFallback: nitsDisponibles.slice(1),
-                concepto: "INTERESES_CUBE",
+                                rubro: "INTERESES_CUBE",
               });
 
               facturasGeneradas.push({
@@ -1636,6 +1652,7 @@ if (facturasExistentes.length > 0) {
               console.error(`      ❌ Error factura CUBE: ${error.message}`);
               facturasGeneradas.push({
                 tipo: "ERROR",
+                concepto: "INTERESES_CUBE",
                 inversionista: "CUBE",
                 flujo: "NUEVO_PRORRATEADO",
                 error: error.message,
@@ -1890,7 +1907,7 @@ if (facturasExistentes.length > 0) {
               customConfig: inversionistaConfig?.config,
               customSatConfig: inversionistaConfig?.satConfig,
               nitsFallback: nitsDisponibles.slice(1),
-              concepto: "INTERESES",
+                            rubro: "INTERESES",
               inversionista_id: inv.inversionista_id,
             });
 
@@ -1924,7 +1941,9 @@ if (facturasExistentes.length > 0) {
             console.error(`      ❌ Error: ${error.message}`);
             facturasGeneradas.push({
               tipo: "ERROR",
+              concepto: "INTERESES",
               inversionista: inv.nombre,
+              inversionista_id: inv.inversionista_id,
               error: error.message,
             });
           }
@@ -1999,7 +2018,7 @@ if (facturasExistentes.length > 0) {
               complementos: complementosCube,
               created_by,
               nitsFallback: nitsDisponibles.slice(1),
-              concepto: "INTERESES_CUBE",
+                            rubro: "INTERESES_CUBE",
             });
 
             facturasGeneradas.push({
@@ -2015,6 +2034,7 @@ if (facturasExistentes.length > 0) {
             console.error(`      ❌ Error factura CUBE: ${error.message}`);
             facturasGeneradas.push({
               tipo: "ERROR",
+              concepto: "INTERESES_CUBE",
               inversionista: "CUBE",
               error: error.message,
             });
@@ -2044,6 +2064,8 @@ if (facturasExistentes.length > 0) {
       // ⛔ Si NO se generó ninguna factura y hubo errores de certificación, es un
       //    fallo real: NO escribimos el desglose (no se facturó nada de verdad).
       if (facturasExitosas.length === 0 && facturasConError.length > 0) {
+        // Queda visible en el pago: "Falta factura" con el motivo por rubro.
+        await registrarEstadoFacturacion(pago_id, { facturasGeneradas });
         set.status = 500;
         return {
           success: false,
@@ -2362,6 +2384,7 @@ if (facturasExistentes.length > 0) {
       // Pago solo-capital (sin DTE que emitir y sin errores): no es fallo.
       // El desglose ya quedó guardado arriba (capital de CUBE).
       if (facturasExitosas.length === 0) {
+        await registrarEstadoFacturacion(pago_id, { facturasGeneradas });
         return {
           success: true,
           data: {
@@ -2376,6 +2399,12 @@ if (facturasExistentes.length > 0) {
               : "Sin DTE que emitir y sin montos para el registro diario.",
         };
       }
+
+      // 🧾 Estado de facturación del pago (OK / PARCIAL según lo que salió).
+      //    En una re-corrida FALTANTES esto ve solo los DTEs de ESTA corrida,
+      //    pero es correcto igual: si completó lo que faltaba → OK; si algo
+      //    volvió a fallar → PARCIAL con esos rubros en factura_error.
+      await registrarEstadoFacturacion(pago_id, { facturasGeneradas });
 
       return {
         success: true,
@@ -2396,6 +2425,10 @@ if (facturasExistentes.length > 0) {
       };
     } catch (error) {
       console.error("❌ Error facturando pago completo:", error);
+      await registrarEstadoFacturacion(pago_id, {
+        estado: "FALLIDA",
+        motivo: (error as Error).message,
+      });
       set.status = 500;
       return {
         success: false,
@@ -3107,6 +3140,8 @@ if (facturasExistentes.length > 0) {
             numero: facturas_electronicas.numero,
             uuid: facturas_electronicas.uuid,
             tipo_documento: facturas_electronicas.tipo_documento,
+            rubro: facturas_electronicas.rubro,
+            inversionista_id: facturas_electronicas.inversionista_id,
             monto_total: facturas_electronicas.monto_total,
             monto_iva: facturas_electronicas.monto_iva,
             pdf_url: facturas_electronicas.pdf_url,
@@ -3405,6 +3440,9 @@ if (facturasExistentes.length > 0) {
             membresias_pago: pagos_credito.membresias_pago,
             mora: pagos_credito.mora,
             abono_interes: pagos_credito.abono_interes,
+            factura_status: pagos_credito.factura_status,
+            factura_error: pagos_credito.factura_error,
+            factura_at: pagos_credito.factura_at,
             abono_iva_12: pagos_credito.abono_iva_12,
 
             // Datos del cliente
@@ -3443,6 +3481,8 @@ if (facturasExistentes.length > 0) {
             numero: facturas_electronicas.numero,
             uuid: facturas_electronicas.uuid,
             tipo_documento: facturas_electronicas.tipo_documento,
+            rubro: facturas_electronicas.rubro,
+            inversionista_id: facturas_electronicas.inversionista_id,
             monto_total: facturas_electronicas.monto_total,
             monto_iva: facturas_electronicas.monto_iva,
             pdf_url: facturas_electronicas.pdf_url,
@@ -3521,6 +3561,25 @@ if (facturasExistentes.length > 0) {
               credito_id: pagoData.credito_id,
             },
 
+            // 🧾 ESTADO DE LA FACTURACIÓN DE ESTE PAGO (migración 0014/0030)
+            //    `faltantes` sale de lo que guardó la última facturación: qué
+            //    rubro (y de qué inversionista) no se pudo emitir y por qué.
+            //    Para completarlo, /facturar-pago-completo re-emite SOLO lo
+            //    faltante cuando el diff prueba que es seguro (facturasFaltantes).
+            facturacion: {
+              status: pagoData.factura_status ?? null,
+              fecha: pagoData.factura_at ?? null,
+              faltantes: (() => {
+                if (!pagoData.factura_error) return [];
+                try {
+                  const parsed = JSON.parse(pagoData.factura_error);
+                  return Array.isArray(parsed) ? parsed : [];
+                } catch {
+                  return [{ rubro: "DESCONOCIDO", error: pagoData.factura_error }];
+                }
+              })(),
+            },
+
             // 📄 FACTURAS (LO IMPORTANTE 🔥)
             facturas: {
               total: facturas.length,
@@ -3538,6 +3597,9 @@ if (facturasExistentes.length > 0) {
                 numero: f.numero,
                 uuid: f.uuid,
                 tipo_documento: f.tipo_documento,
+                // Qué cubre esta factura (migración 0014/0030). NULL en las viejas.
+                rubro: f.rubro,
+                inversionista_id: f.inversionista_id,
                 monto_total: f.monto_total,
                 monto_iva: f.monto_iva,
                 pdf_url: f.pdf_url,
@@ -4441,7 +4503,7 @@ async function certificarFacturaHelper({
   customSatConfig,
   usarFechaActual = false,
   nitsFallback = [],
-  concepto = null,
+  rubro = null,
   inversionista_id = null,
 }: {
   pago_id?: number | null;
@@ -4465,8 +4527,8 @@ async function certificarFacturaHelper({
   //    es lo que permite re-facturar únicamente lo faltante si una corrida sale
   //    a medias (src/cofidi/facturasFaltantes.ts). El resto de llamadores
   //    (p. ej. /facturar-generico) lo dejan en NULL a propósito.
-  concepto?: string | null;
-  /** Solo con concepto='INTERESES': el inversionista dueño de esa parte. */
+  rubro?: FacturaRubro | null;
+  /** Solo con rubro='INTERESES': el inversionista dueño de esa parte. */
   inversionista_id?: number | null;
 }) {
   try {
@@ -4638,7 +4700,7 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
             customSatConfig,
             usarFechaActual,
             nitsFallback: restantesFallback,
-            concepto,
+                        rubro,
             inversionista_id,
           });
         }
@@ -4874,7 +4936,7 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
         created_by: created_by || null,
 
         // 🧩 Etiqueta del rubro (NULL para genéricas / llamadores que no lo pasan).
-        concepto: concepto ?? null,
+        rubro: rubro ?? null,
         inversionista_id: inversionista_id ?? null,
       })
       .returning();

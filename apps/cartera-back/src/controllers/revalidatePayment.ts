@@ -6,6 +6,7 @@ import { setCapitalSource } from "../utils/withAuditContext";
 import { pagos_credito, creditos, cuotas_credito } from "../database/db";
 import { insertPagosCreditoInversionistasV2 } from "./payments";
 import { esPagoAplicado } from "../utils/paymentStatus";
+import { marcarFacturacionPendiente } from "./estadoFacturacionPago";
 import {
   calcularCoberturaCuota,
   shouldRejectZeroAppliedNormalValidation,
@@ -264,6 +265,9 @@ async function handleRevalidatePayment(
           "El pago cambió durante la revalidación",
         );
       }
+
+      // Mismo criterio que aplicarPagoNormalEnTx: queda a la espera de su factura.
+      await marcarFacturacionPendiente(tx, pago_id, pago);
 
       let installmentClosed = false;
       if (pago.cuota_id !== null && coberturaCuota.cuotaCompleta) {

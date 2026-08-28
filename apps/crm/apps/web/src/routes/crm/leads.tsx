@@ -397,6 +397,10 @@ function RouteComponent() {
 					errors.lastName = "El apellido es requerido";
 				}
 
+				if (!editingLead && !value.phone.trim()) {
+					errors.phone = "El teléfono es requerido";
+				}
+
 				if (
 					value.email.trim() &&
 					!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.email)
@@ -1158,15 +1162,6 @@ function RouteComponent() {
 														}
 														return undefined;
 													},
-													onBlur: ({ value }) => {
-														if (
-															value.trim() &&
-															!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
-														) {
-															return "El correo electrónico no es válido";
-														}
-														return undefined;
-													},
 												}}
 											>
 												{(field) => (
@@ -1189,11 +1184,13 @@ function RouteComponent() {
 																	: ""
 															}
 														/>
-														{field.state.meta.errors.map((error, index) => (
-															<p key={index} className="text-red-500 text-sm">
-																{String(error)}
-															</p>
-														))}
+														{getUniqueFieldErrors(field.state.meta.errors).map(
+															(error) => (
+																<p key={error} className="text-red-500 text-sm">
+																	{error}
+																</p>
+															),
+														)}
 													</div>
 												)}
 											</createLeadForm.Field>

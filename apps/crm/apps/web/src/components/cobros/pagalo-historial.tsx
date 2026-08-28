@@ -1,13 +1,17 @@
 /**
- * Rastro completo de Págalo (CB-028) del CRÉDITO: todos los grupos creados a
- * lo largo del tiempo (puede haber más de uno — un grupo completado o
- * cancelado libera el slot y permite crear otro nuevo), más reciente primero,
- * cada uno con su timeline de eventos append-only (pagaloPaymentEvents) y los
- * links generados.
+ * Rastro completo de Págalo (CB-028/CB-127) del CRÉDITO: todos los grupos
+ * creados a lo largo del tiempo (puede haber más de uno — un grupo completado
+ * o cancelado libera el slot y permite crear otro nuevo), más reciente
+ * primero, cada uno con su timeline de eventos append-only, badges de motivo
+ * de falla/reintentos/antigüedad/generación, el detalle "Links por cuota" bajo
+ * demanda, y las acciones de supervisor.
  *
  * Va por crédito y paginado, no por caso: un crédito puede acumular varios
  * casos de cobro y el asesor espera ver TODOS los links que se le generaron,
- * no solo los del caso vigente ni solo los que siguen pendientes de pago.
+ * no solo los del caso vigente ni solo los que siguen pendientes de pago. El
+ * crédito lo resuelve el servidor a partir del caso (getPagaloHistorial): un
+ * id de crédito es numérico y enumerable, mandarlo desde acá sería pedirle al
+ * cliente que elija qué links puede ver.
  */
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -23,56 +27,26 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+	Collapsible,
+	CollapsibleContent,
+	CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { agruparPorCuota } from "@/lib/cobros/pagalo-allocations-view";
+import {
 	copyPagaloLink,
 	getPagaloGroupSummary,
 	getPagaloLinkStatusInfo,
 } from "@/lib/cobros/pagalo-link-display";
 import { facturableSinOtrosGTQ } from "@/lib/cobros/pagalo-otros";
-import { orpc } from "@/utils/orpc";
-
-const q = (value: unknown) =>
-	new Intl.NumberFormat("es-GT", { style: "currency", currency: "GTQ" }).format(
-		Number(value ?? 0),
-	);
-
-const fechaHora = (fecha: string | Date | null) =>
-	fecha
-		? new Date(fecha).toLocaleString("es-GT", {
-				day: "numeric",
-				month: "short",
-				year: "numeric",
-				hour: "2-digit",
-				minute: "2-digit",
-			})
-		: "—";
-
-const ESTADO_INFO: Record<string, { label: string; color: string }> = {
-	DRAFT: { label: "Borrador", color: "bg-muted text-muted-foreground" },
-	LINKS_PENDING: { label: "Creando links", color: "bg-blue-50 text-blue-700" },
-	PENDING_PAYMENT: {
-		label: "Esperando pago",
-		color: "bg-amber-50 text-amber-700",
-	},
-	PARTIALLY_PAID: {
-		label: "Pago parcial",
-		color: "bg-amber-50 text-amber-700",
-	},
-	READY_TO_APPLY: {
-		label: "Listo para aplicar",
-		color: "bg-blue-50 text-blue-700",
-	},
-	APPLYING: { label: "Aplicando", color: "bg-blue-50 text-blue-700" },
-	COMPLETED: { label: "Completado", color: "bg-green-50 text-green-700" },
-	APPLICATION_FAILED: {
-		label: "Falló al aplicar",
-		color: "bg-red-50 text-red-700",
-	},
-	REVIEW_REQUIRED: {
-		label: "Requiere revisión",
-		color: "bg-red-50 text-red-700",
-	},
-	CANCELLED: { label: "Cancelado", color: "bg-muted text-muted-foreground" },
-};
+import { client, orpc } from "@/utils/orpc";
+import { AccionesSupervisorPagalo } from "./pagalo/acciones-supervisor-pagalo";
+import { BitacoraPagalo, type EventoPagalo } from "./pagalo/bitacora-pagalo";
+import {
+	antiguedadLink,
+	estadoGrupoInfo,
+	etiquetaMotivoRevision,
+	fechaHora,
+} from "./pagalo/formato-pagalo";
 
 type Link = {
 	id: string;
@@ -82,6 +56,15 @@ type Link = {
 	voucherUrl: string | null;
 	paidAt: string | null;
 	isApplicationSource: boolean;
+	generation: number;
+	supersedesLinkId: string | null;
+	errorCode: string | null;
+	errorMessage: string | null;
+	lastPollError: string | null;
+	pollAttempts: number;
+	activatedAt: string | null;
+	createdAt: string;
+	transactionAmount: string | null;
 };
 
 type Grupo = {
@@ -93,17 +76,34 @@ type Grupo = {
 	otrosTotal: string;
 	totalAmount: string;
 	carteraImportId: number | null;
+	carteraCreditoId: number;
 	lastDispatchError: string | null;
+	dispatchAttemptCount: number;
+	nextDispatchAt: string | null;
 	createdAt: string;
 	readyToApplyAt: string | null;
 	completedAt: string | null;
+	cancelledAt: string | null;
 	creadoPor: string | null;
 	links: Link[];
+	eventos: EventoPagalo[];
 };
+
+const q = (value: unknown) =>
+	new Intl.NumberFormat("es-GT", { style: "currency", currency: "GTQ" }).format(
+		Number(value ?? 0),
+	);
 
 function LinkPagalo({ link, monto }: { link: Link; monto: string }) {
 	const estado = getPagaloLinkStatusInfo(link.status);
 	const puedeCopiar = estado.canCopy && Boolean(link.paymentUrl);
+	const antiguedad = antiguedadLink(link.activatedAt ?? link.createdAt);
+	const motivoFalla =
+		link.status === "ERROR"
+			? (link.errorMessage ?? link.errorCode)
+			: link.pollAttempts > 0
+				? link.lastPollError
+				: null;
 
 	const copiar = async () => {
 		if (!link.paymentUrl) return;
@@ -122,15 +122,53 @@ function LinkPagalo({ link, monto }: { link: Link; monto: string }) {
 					<p className="font-medium">
 						{link.linkType === "CAPITAL" ? "Capital" : "Mora e intereses"}
 					</p>
-					<p className="text-muted-foreground text-sm">{q(monto)}</p>
+					<p className="text-muted-foreground text-sm">
+						{q(link.transactionAmount ?? monto)}
+					</p>
 				</div>
-				<Badge className={estado.className}>{estado.label}</Badge>
+				<div className="flex flex-col items-end gap-1">
+					<Badge className={estado.className}>{estado.label}</Badge>
+					{link.generation > 1 && (
+						<Badge
+							variant="outline"
+							className="text-xs"
+							title={
+								link.supersedesLinkId
+									? `Reemplaza al link ${link.supersedesLinkId}`
+									: undefined
+							}
+						>
+							Generación {link.generation}
+						</Badge>
+					)}
+				</div>
 			</div>
 			{link.status === "PAID" && (
 				<p className="mt-2 text-green-700 text-sm">
 					Pagado: {fechaHora(link.paidAt)}
 				</p>
 			)}
+			{motivoFalla && (
+				<p className="mt-2 text-red-700 text-sm">
+					<XCircle className="mr-1 inline h-3.5 w-3.5" />
+					{motivoFalla}
+				</p>
+			)}
+			{link.pollAttempts > 0 && (
+				<p className="text-muted-foreground text-xs">
+					{link.pollAttempts} intento(s) de verificación
+				</p>
+			)}
+			{antiguedad &&
+				["CREATING", "ACTIVE", "REPLACED"].includes(link.status) && (
+					<p
+						className={`text-xs ${antiguedad.alerta ? "text-amber-700" : "text-muted-foreground"}`}
+					>
+						{["EXPIRED", "CANCELLED"].includes(link.status)
+							? `Págalo lo dio por ${link.status === "EXPIRED" ? "vencido" : "cancelado"} — ${antiguedad.etiqueta}`
+							: `Antigüedad: ${antiguedad.etiqueta}`}
+					</p>
+				)}
 			{puedeCopiar && (
 				<Button
 					className="mt-3"
@@ -147,16 +185,72 @@ function LinkPagalo({ link, monto }: { link: Link; monto: string }) {
 	);
 }
 
-function GrupoPagalo({ grupo }: { grupo: Grupo }) {
-	const estadoInfo = ESTADO_INFO[grupo.status] ?? {
-		label: grupo.status,
-		color: "bg-muted",
-	};
+function LinksPorCuota({ groupId }: { groupId: string }) {
+	const allocations = useQuery({
+		queryKey: ["getPagaloAllocations", groupId],
+		queryFn: () => (client as any).getPagaloAllocations({ groupId }),
+	});
+	const data = allocations.data as
+		| {
+				allocationsSnapshot: unknown;
+				links: Array<{
+					id: string;
+					linkType: "CAPITAL" | "MORA_INTERES";
+					status: string;
+					generation: number;
+				}>;
+		  }
+		| undefined;
+	if (allocations.isLoading) {
+		return (
+			<p className="py-2 text-muted-foreground text-sm">Cargando cuotas…</p>
+		);
+	}
+	if (!data) return null;
+	const cuotas = agruparPorCuota(data.allocationsSnapshot, data.links);
+	if (cuotas.length === 0) return null;
+
+	return (
+		<div className="space-y-2">
+			{cuotas.map((cuota) => (
+				<div
+					key={cuota.numeroCuota ?? "mora"}
+					className="flex flex-wrap items-center justify-between gap-2 rounded border p-2 text-sm"
+				>
+					<span className="font-medium">
+						{cuota.numeroCuota === null ? "Mora" : `Cuota ${cuota.numeroCuota}`}
+					</span>
+					<span className="text-muted-foreground text-xs">
+						{cuota.rubros.map((r) => `${r.rubro}: ${q(r.amount)}`).join(" · ")}
+					</span>
+					<span className="text-muted-foreground text-xs">
+						{cuota.linkTypes.join(", ")}
+						{cuota.linksHistoricos.length > 0 &&
+							` (${cuota.linksHistoricos.length} link(s) previo(s))`}
+					</span>
+				</div>
+			))}
+		</div>
+	);
+}
+
+function GrupoPagalo({
+	grupo,
+	casoCobroId,
+	creditoId,
+}: {
+	grupo: Grupo;
+	casoCobroId: string;
+	creditoId: number;
+}) {
+	const estadoInfo = estadoGrupoInfo(grupo.status);
 	const resumenLinks = getPagaloGroupSummary(grupo.links);
 	const moraEIntereses = facturableSinOtrosGTQ(
 		grupo.facturableTotal,
 		grupo.otrosTotal,
 	);
+	const motivoRevision = etiquetaMotivoRevision(grupo.lastDispatchError);
+
 	return (
 		<div className="space-y-3 rounded-lg border p-4">
 			<div className="flex items-center justify-between">
@@ -165,7 +259,7 @@ function GrupoPagalo({ grupo }: { grupo: Grupo }) {
 					<span className="font-medium">
 						Crédito {grupo.createdAt ? fechaHora(grupo.createdAt) : ""}
 					</span>
-					<Badge className={estadoInfo.color}>{estadoInfo.label}</Badge>
+					<Badge className={estadoInfo.className}>{estadoInfo.label}</Badge>
 				</div>
 				<span className="text-muted-foreground text-sm">
 					{q(grupo.totalAmount)}
@@ -179,6 +273,13 @@ function GrupoPagalo({ grupo }: { grupo: Grupo }) {
 					Origen: {grupo.origen === "ASESOR" ? "Asesor" : "Bot WhatsApp"}
 				</span>
 				<span>Creado por: {grupo.creadoPor ?? "—"}</span>
+				{grupo.dispatchAttemptCount > 0 && (
+					<span>
+						Intentos de aplicación: {grupo.dispatchAttemptCount}
+						{grupo.nextDispatchAt &&
+							` (próximo: ${fechaHora(grupo.nextDispatchAt)})`}
+					</span>
+				)}
 			</div>
 			{grupo.carteraImportId && grupo.status === "COMPLETED" && (
 				<p className="text-green-700 text-sm">
@@ -193,10 +294,10 @@ function GrupoPagalo({ grupo }: { grupo: Grupo }) {
 					aplicado)
 				</p>
 			)}
-			{grupo.lastDispatchError && grupo.status !== "COMPLETED" && (
+			{motivoRevision && grupo.status !== "COMPLETED" && (
 				<p className="text-red-700 text-sm">
 					<XCircle className="mr-1 inline h-4 w-4" />
-					{grupo.lastDispatchError}
+					{motivoRevision}
 				</p>
 			)}
 			{resumenLinks && (
@@ -217,6 +318,26 @@ function GrupoPagalo({ grupo }: { grupo: Grupo }) {
 					))}
 				</div>
 			)}
+			<Collapsible>
+				<CollapsibleTrigger asChild>
+					<button
+						type="button"
+						className="text-muted-foreground text-xs hover:text-foreground"
+					>
+						Links por cuota
+					</button>
+				</CollapsibleTrigger>
+				<CollapsibleContent className="mt-2">
+					<LinksPorCuota groupId={grupo.id} />
+				</CollapsibleContent>
+			</Collapsible>
+			<AccionesSupervisorPagalo
+				casoCobroId={casoCobroId}
+				creditoId={creditoId}
+				groupId={grupo.id}
+				status={grupo.status}
+			/>
+			<BitacoraPagalo eventos={grupo.eventos} abiertoPorDefecto={false} />
 		</div>
 	);
 }
@@ -224,17 +345,19 @@ function GrupoPagalo({ grupo }: { grupo: Grupo }) {
 const POR_PAGINA = 5;
 
 export function PagaloHistorial({
-	carteraCreditoId,
+	casoCobroId,
+	creditoId,
 }: {
-	carteraCreditoId: number;
+	casoCobroId: string;
+	creditoId: number;
 }) {
 	const [expandido, setExpandido] = useState(true);
 	const [pagina, setPagina] = useState(1);
 	const historial = useQuery({
 		...orpc.getPagaloHistorial.queryOptions({
-			input: { carteraCreditoId, page: pagina, pageSize: POR_PAGINA },
+			input: { casoCobroId, page: pagina, pageSize: POR_PAGINA },
 		}),
-		enabled: !!carteraCreditoId,
+		enabled: !!casoCobroId,
 		// Sin esto la lista parpadea a vacío en cada cambio de página.
 		placeholderData: (anterior: unknown) => anterior,
 	});
@@ -278,7 +401,12 @@ export function PagaloHistorial({
 				) : (
 					<div className="space-y-3">
 						{grupos.map((grupo) => (
-							<GrupoPagalo key={grupo.id} grupo={grupo} />
+							<GrupoPagalo
+								key={grupo.id}
+								grupo={grupo}
+								casoCobroId={casoCobroId}
+								creditoId={creditoId}
+							/>
 						))}
 						{totalPaginas > 1 && (
 							<div className="flex items-center justify-between border-t pt-3">

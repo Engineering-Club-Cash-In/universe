@@ -154,6 +154,11 @@ function RegistrarPagoPage() {
 	const [errorLectura, setErrorLectura] = useState<string | null>(null);
 	const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 	const inputArchivoRef = useRef<HTMLInputElement>(null);
+	// Cada lectura lleva su número de orden. Si el asesor cambia de boleta
+	// mientras la anterior sigue en vuelo, la vieja puede responder de últimas
+	// y pisar monto/banco/fecha con los datos del comprobante que ya descartó
+	// (hallazgo de Codex, PR #1498). Las respuestas viejas se ignoran.
+	const lecturaSeq = useRef(0);
 	const [arrastrando, setArrastrando] = useState(false);
 
 	const creditoQuery = useQuery({
@@ -285,7 +290,7 @@ function RegistrarPagoPage() {
 	// y se descarta. La subida a R2 sigue pasando al registrar el pago, así una
 	// boleta que el asesor descarta no deja basura en storage.
 	const leerBoletaMutation = useMutation({
-		mutationFn: async (file: File) => {
+		mutationFn: async ({ file }: { file: File; seq: number }) => {
 			const formData = new FormData();
 			formData.append("file", file);
 			const res = await fetch(
@@ -313,7 +318,8 @@ function RegistrarPagoPage() {
 			}
 			return respuesta.data;
 		},
-		onSuccess: (datos) => {
+		onSuccess: (datos, variables) => {
+			if (variables.seq !== lecturaSeq.current) return;
 			setLectura(datos);
 			setErrorLectura(null);
 			if (!datos.esBoletaDePago) return;
@@ -330,7 +336,8 @@ function RegistrarPagoPage() {
 				setFechaBoleta(new Date(`${datos.fechaBoleta}T12:00:00`));
 			}
 		},
-		onError: (error: unknown) => {
+		onError: (error: unknown, variables) => {
+			if (variables.seq !== lecturaSeq.current) return;
 			setLectura(null);
 			setErrorLectura(
 				error instanceof Error
@@ -350,7 +357,8 @@ function RegistrarPagoPage() {
 				? URL.createObjectURL(file)
 				: null;
 		});
-		if (file) leerBoletaMutation.mutate(file);
+		const seq = ++lecturaSeq.current;
+		if (file) leerBoletaMutation.mutate({ file, seq });
 	}
 
 	// El objectURL vive fuera de React: sin esto, cada boleta que el asesor
@@ -708,9 +716,13 @@ function RegistrarPagoPage() {
 										</span>
 										<Button
 											className="shrink-0"
-											onClick={() =>
-												archivo && leerBoletaMutation.mutate(archivo)
-											}
+											onClick={() => {
+												if (!archivo) return;
+												leerBoletaMutation.mutate({
+													file: archivo,
+													seq: ++lecturaSeq.current,
+												});
+											}}
 											size="sm"
 											type="button"
 											variant="outline"

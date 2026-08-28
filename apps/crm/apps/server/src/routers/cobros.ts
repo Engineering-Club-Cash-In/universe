@@ -19,6 +19,7 @@ import {
 	or,
 	sql,
 } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
@@ -749,7 +750,7 @@ type ActividadBotSesion = {
  * no hay acceso — usarlo antes de devolver cualquier dato derivado del caso
  * (vehículo, links de pago, etc.) en procedures nuevos.
  */
-async function assertAccesoCasoCobro(
+export async function assertAccesoCasoCobro(
 	casoCobroId: string,
 	userId: string,
 	userRole: string,
@@ -4925,16 +4926,40 @@ export const cobrosRouter = {
 	getPagaloHistorial: cobrosProcedure
 		.input(
 			z.object({
-				carteraCreditoId: z.number().int().positive(),
+				casoCobroId: z.string().uuid(),
 				page: z.number().int().min(1).default(1),
 				pageSize: z.number().int().min(1).max(50).default(5),
 			}),
 		)
-		.handler(async ({ input }) => {
-			const filtroCredito = eq(
-				pagaloPaymentGroups.carteraCreditoId,
-				input.carteraCreditoId,
+		.handler(async ({ input, context }) => {
+			// Sin este chequeo, cualquier usuario de cobros con un casoCobroId
+			// ajeno veía paymentUrl de créditos de otros asesores — los
+			// procedures hermanos (getCreditoParaPago, registrarPagoCompleto)
+			// ya lo llaman, este quedó sin el gate desde que se creó.
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
 			);
+
+			// El historial es del CRÉDITO (un crédito acumula varios casos de
+			// cobro y el asesor espera ver todos sus links), pero el crédito lo
+			// resuelve el SERVIDOR desde el caso: un identificador de crédito es
+			// numérico y enumerable, así que recibirlo por input dejaría pasar
+			// el propio caso —que sí supera el gate de arriba— con un crédito
+			// ajeno y leer sus links (mismo hallazgo de Codex sobre
+			// getPagaloGrupoActivo, PR #1477).
+			const [caso] = await db
+				.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
+				.from(casosCobros)
+				.where(eq(casosCobros.id, input.casoCobroId))
+				.limit(1);
+			// Caso legacy sin SIFCO: se cae al alcance viejo (solo los grupos de
+			// ESE caso), que es lo único afirmable sin inventarle un crédito.
+			const filtroCredito = caso?.numeroCreditoSifco
+				? eq(pagaloPaymentGroups.numeroCreditoSifco, caso.numeroCreditoSifco)
+				: eq(pagaloPaymentGroups.casoCobroId, input.casoCobroId);
+
 			const [{ total }] = await db
 				.select({ total: count() })
 				.from(pagaloPaymentGroups)
@@ -4950,10 +4975,14 @@ export const cobrosRouter = {
 					otrosTotal: pagaloPaymentGroups.otrosTotal,
 					totalAmount: pagaloPaymentGroups.totalAmount,
 					carteraImportId: pagaloPaymentGroups.carteraImportId,
+					carteraCreditoId: pagaloPaymentGroups.carteraCreditoId,
 					lastDispatchError: pagaloPaymentGroups.lastDispatchError,
+					dispatchAttemptCount: pagaloPaymentGroups.dispatchAttemptCount,
+					nextDispatchAt: pagaloPaymentGroups.nextDispatchAt,
 					createdAt: pagaloPaymentGroups.createdAt,
 					readyToApplyAt: pagaloPaymentGroups.readyToApplyAt,
 					completedAt: pagaloPaymentGroups.completedAt,
+					cancelledAt: pagaloPaymentGroups.cancelledAt,
 					creadoPor: user.name,
 				})
 				.from(pagaloPaymentGroups)
@@ -4963,7 +4992,17 @@ export const cobrosRouter = {
 				.limit(input.pageSize)
 				.offset((input.page - 1) * input.pageSize);
 
+			// El payload crudo de cada evento (motivo del supervisor al
+			// invalidar/regenerar, detalle de rechazo de cartera, etc.) es
+			// sensible — BitacoraPagalo (web) gatea su visibilidad a
+			// supervisor, pero eso es solo ocultar en el cliente: el payload
+			// completo ya viajaba en esta respuesta y cualquier asesor con
+			// acceso al caso podía leerlo inspeccionando la respuesta RPC
+			// directa (hallazgo de code review). Se omite server-side para
+			// quien no sea supervisor.
+			const esSupervisor = PERMISSIONS.canAssignCobros(context.userRole);
 			const groupIds = grupos.map((g) => g.id);
+			const actor = alias(user, "pagalo_evento_actor");
 			// Sin grupos en ESTA página no hay a qué hacerle el inArray (drizzle
 			// no acepta la lista vacía) — y tampoco hay nada que colgarle.
 			const [links, eventos] = groupIds.length
@@ -4978,6 +5017,15 @@ export const cobrosRouter = {
 								voucherUrl: pagaloPaymentLinks.voucherUrl,
 								paidAt: pagaloPaymentLinks.paidAt,
 								isApplicationSource: pagaloPaymentLinks.isApplicationSource,
+								generation: pagaloPaymentLinks.generation,
+								supersedesLinkId: pagaloPaymentLinks.supersedesLinkId,
+								errorCode: pagaloPaymentLinks.errorCode,
+								errorMessage: pagaloPaymentLinks.errorMessage,
+								lastPollError: pagaloPaymentLinks.lastPollError,
+								pollAttempts: pagaloPaymentLinks.pollAttempts,
+								activatedAt: pagaloPaymentLinks.activatedAt,
+								createdAt: pagaloPaymentLinks.createdAt,
+								transactionAmount: pagaloPaymentLinks.transactionAmount,
 							})
 							.from(pagaloPaymentLinks)
 							.where(inArray(pagaloPaymentLinks.groupId, groupIds)),
@@ -4985,14 +5033,18 @@ export const cobrosRouter = {
 							.select({
 								id: pagaloPaymentEvents.id,
 								groupId: pagaloPaymentEvents.groupId,
+								linkId: pagaloPaymentEvents.linkId,
 								eventType: pagaloPaymentEvents.eventType,
 								source: pagaloPaymentEvents.source,
+								actorUserId: pagaloPaymentEvents.actorUserId,
+								actorNombre: actor.name,
 								fromStatus: pagaloPaymentEvents.fromStatus,
 								toStatus: pagaloPaymentEvents.toStatus,
 								payload: pagaloPaymentEvents.payload,
 								occurredAt: pagaloPaymentEvents.occurredAt,
 							})
 							.from(pagaloPaymentEvents)
+							.leftJoin(actor, eq(actor.id, pagaloPaymentEvents.actorUserId))
 							.where(inArray(pagaloPaymentEvents.groupId, groupIds))
 							.orderBy(asc(pagaloPaymentEvents.occurredAt)),
 					])
@@ -5002,7 +5054,12 @@ export const cobrosRouter = {
 				grupos: grupos.map((grupo) => ({
 					...grupo,
 					links: links.filter((l) => l.groupId === grupo.id),
-					eventos: eventos.filter((e) => e.groupId === grupo.id),
+					eventos: eventos
+						.filter((e) => e.groupId === grupo.id)
+						.map((e) => ({
+							...e,
+							payload: esSupervisor ? e.payload : null,
+						})),
 				})),
 				total,
 				page: input.page,
@@ -5019,7 +5076,10 @@ export const cobrosRouter = {
 	// pendiente (ver correrPollPagalo) antes de barrer links nuevos, así un
 	// solo botón cubre todo el ciclo. Borrar cuando el ciclo automático esté
 	// confirmado en sandbox.
-	probarPollPagalo: cobrosProcedure.handler(async () => {
+	// CB-127: movido a cobrosSupervisorProcedure — dispara el poller ENTERO
+	// (todos los links pendientes, no solo los de este caso), no tiene
+	// sentido que cualquier asesor pueda correrlo.
+	probarPollPagalo: cobrosSupervisorProcedure.handler(async () => {
 		try {
 			return await correrPollPagalo();
 		} catch (error) {

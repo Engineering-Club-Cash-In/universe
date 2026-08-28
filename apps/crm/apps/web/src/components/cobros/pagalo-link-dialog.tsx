@@ -8,6 +8,7 @@ import {
 	RefreshCw,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { deduplicarCuotasPagalo } from "server/src/lib/pagalo-installments";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,6 +25,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
+import { authClient } from "@/lib/auth-client";
 import {
 	copyPagaloLink,
 	getPagaloGroupSummary,
@@ -31,8 +33,8 @@ import {
 	previewMensajePagaloLinks,
 } from "@/lib/cobros/pagalo-link-display";
 import { parseOtrosGTQ } from "@/lib/cobros/pagalo-otros";
+import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
-import { deduplicarCuotasPagalo } from "server/src/lib/pagalo-installments";
 
 const q = (value: unknown) =>
 	new Intl.NumberFormat("es-GT", { style: "currency", currency: "GTQ" }).format(
@@ -104,13 +106,13 @@ export function PagaloLinkDialog({
 					!vencidas.some((v: any) => v.numero_cuota === cuota.numero_cuota),
 			)
 			.sort((a: any, b: any) => a.numero_cuota - b.numero_cuota)[0];
-		return deduplicarCuotasPagalo(proxima ? [...vencidas, proxima] : vencidas).map(
-			(cuota: any) => ({
-				...cuota,
-				esActual: proxima?.cuota_id === cuota.cuota_id,
-				esProxima: vencidas.length === 0 && proxima?.cuota_id === cuota.cuota_id,
-			}),
-		);
+		return deduplicarCuotasPagalo(
+			proxima ? [...vencidas, proxima] : vencidas,
+		).map((cuota: any) => ({
+			...cuota,
+			esActual: proxima?.cuota_id === cuota.cuota_id,
+			esProxima: vencidas.length === 0 && proxima?.cuota_id === cuota.cuota_id,
+		}));
 	}, [data]);
 	useEffect(() => {
 		if (open && credit.isSuccess)
@@ -274,6 +276,12 @@ export function PagaloLinkDialog({
 		onError: (error: Error) =>
 			toast.error(error.message || "Falló correr el poll de Págalo"),
 	});
+	// CB-127: probarPollPagalo pasó a cobrosSupervisorProcedure — el botón
+	// era visible para cualquier asesor sin gate, y disparaba el poller
+	// ENTERO (todos los links pendientes de todos los casos), no solo los
+	// de este caso puntual.
+	const { data: session } = authClient.useSession();
+	const esSupervisor = PERMISSIONS.canAssignCobros(session?.user?.role ?? "");
 
 	return (
 		<Dialog
@@ -353,22 +361,26 @@ export function PagaloLinkDialog({
 									{/* Temporal: fuerza el ciclo del poller sin esperar los 5
 									    min. Vive acá —discreto, junto al estado que refresca—
 									    en vez de encabezar el modal como si fuera la acción
-									    principal. Borrar junto con probarPollPagalo. */}
-									<Button
-										className="shrink-0"
-										disabled={pollMutation.isPending}
-										onClick={() => pollMutation.mutate()}
-										size="sm"
-										type="button"
-										variant="outline"
-									>
-										{pollMutation.isPending ? (
-											<Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-										) : (
-											<RefreshCw className="mr-2 h-3.5 w-3.5" />
-										)}
-										Actualizar estado
-									</Button>
+									    principal. Solo supervisores (CB-127): dispara el poller
+									    ENTERO, no solo los links de este caso. Borrar junto con
+									    probarPollPagalo. */}
+									{esSupervisor && (
+										<Button
+											className="shrink-0"
+											disabled={pollMutation.isPending}
+											onClick={() => pollMutation.mutate()}
+											size="sm"
+											type="button"
+											variant="outline"
+										>
+											{pollMutation.isPending ? (
+												<Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+											) : (
+												<RefreshCw className="mr-2 h-3.5 w-3.5" />
+											)}
+											Actualizar estado
+										</Button>
+									)}
 								</div>
 								<div className="mt-4 space-y-1.5">
 									<div className="flex items-center justify-between text-xs">

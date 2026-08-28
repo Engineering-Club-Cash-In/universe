@@ -906,6 +906,71 @@ export async function emitirLinksDeGrupo(params: {
 		grupoSigueVivo = !!actualizado;
 	}
 
+	// Cada emitirUnLink incluye una llamada HTTP real a Págalo — el poller
+	// puede observar y marcar PAID un link ya emitido MIENTRAS este loop
+	// sigue emitiendo el resto (creación inicial) o antes de que este
+	// UPDATE corriera. evaluarGrupo (pagalo-poll.ts) solo promueve a
+	// READY_TO_APPLY desde PENDING_PAYMENT/PARTIALLY_PAID — si el pago
+	// llegó mientras el grupo seguía en LINKS_PENDING, evaluarGrupo no hizo
+	// nada, y este UPDATE ciego a PENDING_PAYMENT lo dejaba ahí sin que
+	// nada lo reevaluara (un link PAID deja de tener nextPollAt). Mismo
+	// hueco que ya se cerró en regenerarLinkIndividual (hallazgo de code
+	// review, no se había aplicado acá). Se relee fresco y, si con eso
+	// todos los tipos requeridos ya quedan pagados, se promueve directo a
+	// READY_TO_APPLY y se dispara el dispatch.
+	if (grupoSigueVivo) {
+		const linksDelGrupo = await db
+			.select({
+				linkType: pagaloPaymentLinks.linkType,
+				isApplicationSource: pagaloPaymentLinks.isApplicationSource,
+			})
+			.from(pagaloPaymentLinks)
+			.where(eq(pagaloPaymentLinks.groupId, params.groupId));
+		const tiposPagados = new Set(
+			linksDelGrupo.filter((l) => l.isApplicationSource).map((l) => l.linkType),
+		);
+		const todosPagados = [...providerAmounts.keys()].every((t) =>
+			tiposPagados.has(t),
+		);
+		if (todosPagados) {
+			const [listo] = await db
+				.update(pagaloPaymentGroups)
+				.set({
+					status: "READY_TO_APPLY",
+					readyToApplyAt: new Date(),
+					updatedAt: new Date(),
+				})
+				.where(
+					and(
+						eq(pagaloPaymentGroups.id, params.groupId),
+						eq(pagaloPaymentGroups.status, "PENDING_PAYMENT"),
+					),
+				)
+				.returning({ id: pagaloPaymentGroups.id });
+			if (listo) {
+				await db.insert(pagaloPaymentEvents).values({
+					groupId: params.groupId,
+					eventType: "GROUP_READY",
+					source: "PAGALO",
+					fromStatus: "PENDING_PAYMENT",
+					toStatus: "READY_TO_APPLY",
+					payload: {
+						motivo:
+							"Todos los tipos requeridos ya estaban pagados al terminar de emitir los links.",
+					},
+				});
+				try {
+					await reclamarYProcesarGrupo(params.groupId);
+				} catch (error) {
+					console.error(
+						`[Págalo] Grupo ${params.groupId} quedó READY_TO_APPLY tras emitir links pero falló el dispatch inline:`,
+						error instanceof Error ? error.message : error,
+					);
+				}
+			}
+		}
+	}
+
 	// D-04: un solo mensaje, con TODOS los links requeridos, solo cuando el
 	// grupo ya está completo Y sigue siendo un grupo enviable. Fallo de
 	// WhatsApp nunca revierte la creación de links, que ya ocurrió y es

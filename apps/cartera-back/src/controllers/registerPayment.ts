@@ -4053,13 +4053,22 @@ async function aplicarMontoAPagoSinLock(pago_id: number, monto: number, fecha_pa
     const nuevo_membresias_restante = membresias_restante.minus(abono_membresias);
     const nuevo_capital_restante = capital_restante.minus(abono_capital);
 
-    const cuota_pagada =
+    const cuota_pagada_calculada =
       nuevo_interes_restante.eq(0) &&
       nuevo_iva_restante.eq(0) &&
       nuevo_seguro_restante.eq(0) &&
       nuevo_gps_restante.eq(0) &&
       nuevo_membresias_restante.eq(0) &&
       nuevo_capital_restante.eq(0);
+    const mantenerCuotaAbiertaPorAjuste =
+      pago.cuota_id !== null &&
+      pago.credito_id !== null &&
+      (await debeMantenerCuotaAbiertaPorAjustePendiente(
+        pago.cuota_id,
+        pago.credito_id,
+      ));
+    const cuota_pagada =
+      cuota_pagada_calculada && !mantenerCuotaAbiertaPorAjuste;
 
     // Resetear abonos: solo quedan los de este monto
     const nuevo_abono_interes = abono_interes;

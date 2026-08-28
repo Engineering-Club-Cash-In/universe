@@ -403,6 +403,21 @@ describe("ajuste por fecha ideal durante reconstruccion", () => {
     ).rejects.toThrow("No se pudo reconstruir el pago de la cuota 1");
   });
 
+  it("mantiene cuota 1 abierta también en aplicar-monto-pago", async () => {
+    const source = await readFile(new URL("./registerPayment.ts", import.meta.url), "utf8");
+    const endpoint = source.slice(
+      source.indexOf("async function aplicarMontoAPagoSinLock"),
+      source.indexOf("export async function editarPago"),
+    );
+
+    expect(endpoint).toContain("debeMantenerCuotaAbiertaPorAjustePendiente(");
+    expect(endpoint).toContain(
+      "cuota_pagada_calculada && !mantenerCuotaAbiertaPorAjuste",
+    );
+    expect(endpoint).toContain("pagado: cuota_pagada");
+    expect(endpoint).toContain("if (cuota_pagada && pago.cuota_id)");
+  });
+
   it("usa el helper compartido con tx en las tres reconstrucciones", async () => {
     const [excel, migration] = await Promise.all([
       readFile(new URL("./processFromExcelFull.ts", import.meta.url), "utf8"),

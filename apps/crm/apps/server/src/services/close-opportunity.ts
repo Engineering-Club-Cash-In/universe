@@ -8,6 +8,7 @@ import crypto from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
+import { buildContractFieldsUnchangedCondition } from "../lib/opportunity-stage-guard";
 import { auditRecord } from "../lib/audit";
 import {
 	carteraBackReferences,
@@ -1526,7 +1527,13 @@ export async function closeOpportunity(
 			}
 
 			// Update opportunity with numeroSifco and mark as won
-			await tx
+			// Los datos contractuales tienen que seguir siendo los que se leyeron
+			// al empezar: el crédito y los contratos en cartera se generaron con
+			// ESOS. Una edición que entre mientras tanto todavía ve la oportunidad
+			// abierta, así que el candado de `updateOpportunity` no la frena; si
+			// cambió el vehículo o el cliente, marcar "ganada" acá dejaría al CRM
+			// diciendo algo distinto de lo que se firmó.
+			const cerradas = await tx
 				.update(opportunities)
 				.set({
 					numeroSifco,
@@ -1534,7 +1541,22 @@ export async function closeOpportunity(
 					actualCloseDate: new Date(),
 					updatedAt: new Date(),
 				})
-				.where(eq(opportunities.id, opportunityId));
+				.where(
+					and(
+						eq(opportunities.id, opportunityId),
+						buildContractFieldsUnchangedCondition(opportunity),
+					),
+				)
+				.returning({ id: opportunities.id });
+
+			if (cerradas.length === 0) {
+				// Se revierte lo local y el cierre reporta el fallo, con lo cual la
+				// oportunidad se queda en 85%. El crédito en cartera ya existe: es
+				// una falla ruidosa y reparable, en vez de una divergencia silenciosa.
+				throw new Error(
+					`Los datos contractuales de la oportunidad ${opportunityId} cambiaron mientras se cerraba (crédito ${numeroSifco} ya creado en cartera). No se marcó como ganada.`,
+				);
+			}
 			auditRecord({
 				entity: "opportunity",
 				id: opportunityId,

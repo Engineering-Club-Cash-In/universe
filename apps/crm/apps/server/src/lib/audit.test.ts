@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
 	type AuditContext,
+	auditFallbackForPath,
 	auditSourceForPath,
 	buildAuditRows,
 	chunk,
@@ -311,5 +312,25 @@ describe("suplantación", () => {
 			{ ok: true, durationMs: 3 },
 		);
 		expect(row.input).toEqual({ x: 1 });
+	});
+});
+
+describe("auditFallbackForPath", () => {
+	test("identifies rejected attempts on routes that write", () => {
+		// Un 400 por campos faltantes no llega a anotar nada: sin esta identidad
+		// el intento rechazado no dejaría rastro.
+		expect(auditFallbackForPath("/api/public/lead")).toEqual({
+			entity: "lead",
+			action: "create",
+		});
+		expect(auditFallbackForPath("/api/migrate/cleanup")).toEqual({
+			entity: "opportunity",
+			action: "delete",
+		});
+	});
+
+	test("stays quiet on routes that write nothing", () => {
+		expect(auditFallbackForPath("/info/send-otp")).toBeNull();
+		expect(auditFallbackForPath("/api/upload-vehicle-video")).toBeNull();
 	});
 });

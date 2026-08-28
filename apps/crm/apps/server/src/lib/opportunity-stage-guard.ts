@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { opportunities, salesStages } from "../db/schema";
 import { PERMISSIONS } from "./roles";
 
@@ -164,4 +164,41 @@ export function getWonOpportunityRevokeError(
 	status: string | null | undefined,
 ) {
 	return status === "won" ? WON_OPPORTUNITY_REVOKE_ERROR : null;
+}
+
+/**
+ * Los campos congelados que viajan a los contratos, sin `status`: el cierre es
+ * justamente quien cambia el estado, así que compararlo no tendría sentido.
+ */
+export const WON_OPPORTUNITY_CONTRACT_FIELDS = [
+	"vehicleId",
+	"leadId",
+	"companyId",
+	"creditType",
+] as const;
+
+type ContractSnapshot = Partial<
+	Record<(typeof WON_OPPORTUNITY_CONTRACT_FIELDS)[number], string | null>
+>;
+
+/**
+ * Condición de que los datos contractuales sigan siendo los que se leyeron.
+ *
+ * El cierre lee la oportunidad, crea el crédito y los contratos en cartera con
+ * esos datos, y recién al final la marca ganada. En el medio una edición
+ * todavía la ve abierta, así que pasa el candado: sin esta comparación el
+ * cierre estamparía "ganada" sobre datos distintos de los que firmó — que es
+ * exactamente la divergencia reportada.
+ */
+export function buildContractFieldsUnchangedCondition(
+	snapshot: ContractSnapshot,
+) {
+	return and(
+		...WON_OPPORTUNITY_CONTRACT_FIELDS.map((campo) => {
+			const valor = snapshot[campo] ?? null;
+			return valor === null
+				? isNull(opportunities[campo])
+				: eq(opportunities[campo], valor);
+		}),
+	);
 }

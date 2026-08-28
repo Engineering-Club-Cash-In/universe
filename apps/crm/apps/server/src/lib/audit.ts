@@ -404,6 +404,38 @@ export function resolveOperation(
 	return `${method} ${usable}`;
 }
 
+/**
+ * Identidad de la fila de fallo para las rutas de Hono que escriben entidades
+ * auditadas. Sin esto, un rechazo temprano (por ejemplo un 400 por campos
+ * faltantes en `/api/public/lead`) no deja rastro: el handler nunca llegó a
+ * anotar nada y no hay de dónde sacar la entidad.
+ *
+ * Solo se declaran las rutas que escriben; para el resto un 4xx no tiene por
+ * qué ensuciar la bitácora.
+ */
+const FALLBACK_POR_RUTA: Record<
+	string,
+	{ entity: AuditEntityType; action: string }
+> = {
+	"/api/public/lead": { entity: "lead", action: "create" },
+	"/api/portal/lead": { entity: "lead", action: "create" },
+	"/api/portal/lead/update": { entity: "lead", action: "update" },
+	"/info/renap": { entity: "lead", action: "create" },
+	"/info/lead-opportunity": { entity: "lead", action: "update" },
+	"/info/check-liveness": { entity: "lead", action: "liveness_validated" },
+	"/api/load-cars": { entity: "vehicle", action: "import_upsert" },
+	"/api/migrate/creditos": { entity: "opportunity", action: "create" },
+	"/api/migrate/actualizar-value": {
+		entity: "opportunity",
+		action: "update_value",
+	},
+	"/api/migrate/cleanup": { entity: "opportunity", action: "delete" },
+};
+
+export function auditFallbackForPath(path: string) {
+	return FALLBACK_POR_RUTA[path] ?? null;
+}
+
 /** El `source` sale de la ruta: no hay que acordarse de declararlo. */
 export function auditSourceForPath(path: string): AuditSource {
 	if (path.startsWith("/info/")) return "bot";
@@ -430,7 +462,7 @@ export function auditRequest(): MiddlewareHandler {
 				source: auditSourceForPath(path),
 				operation: resolveOperation(c.req.method, path),
 				input: await readRequestBody(c),
-				fallback: null,
+				fallback: auditFallbackForPath(path),
 			},
 			async () => {
 				await next();

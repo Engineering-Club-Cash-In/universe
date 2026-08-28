@@ -4,6 +4,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { opportunities } from "../db/schema";
 import {
 	buildOpportunityRelationshipInvariantCondition,
+	WON_OPPORTUNITY_CONTRACT_FIELDS,
 	getStageLeadRequirementError,
 	getStageVehicleRequirementError,
 	getWonOpportunityFrozenFieldChanges,
@@ -201,5 +202,17 @@ describe("revocar la aprobación del detalle de crédito", () => {
 			expect(getWonOpportunityRevokeError(status)).toBeNull();
 		}
 		expect(getWonOpportunityRevokeError(null)).toBeNull();
+	});
+});
+
+describe("campos contractuales comparados al cerrar", () => {
+	test("no incluye el estado, que es lo que el cierre cambia", () => {
+		expect([...WON_OPPORTUNITY_CONTRACT_FIELDS]).toEqual([
+			"vehicleId",
+			"leadId",
+			"companyId",
+			"creditType",
+		]);
+		expect(WON_OPPORTUNITY_CONTRACT_FIELDS).not.toContain("status");
 	});
 });

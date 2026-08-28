@@ -200,6 +200,18 @@ async function registrarIntentoFallido(
 		// Solo la corrida que sigue siendo dueña del lease escribe; la otra
 		// pierde la carrera en silencio (su próximo poll ya verá el estado
 		// fresco).
+		//
+		// El lease por sí solo no alcanza: si ESTA corrida (dueña legítima
+		// del lease) leyó un status pendiente de Págalo, pero mientras tanto
+		// otra corrida con un lease vencido (que igual sigue procesando, el
+		// vencimiento solo permite que OTRO worker reclame, no mata al
+		// original) termina y marca el link PAID/terminal sin tocar
+		// pollClaimedAt (ni marcarLinkPagado ni marcarLinkTerminal lo
+		// limpian), este UPDATE seguía matchereando por pollClaimedAt y podía
+		// sobrescribir pollAttempts/lastPollError — o insertar
+		// POLL_RETRY_EXHAUSTED — sobre un link que ya salió del ciclo de
+		// polling (hallazgo de code review). Mismos 3 estados pollables que
+		// reclamarLinksPendientes.
 		const [actualizado] = await tx
 			.update(pagaloPaymentLinks)
 			.set({
@@ -212,6 +224,11 @@ async function registrarIntentoFallido(
 			.where(
 				and(
 					eq(pagaloPaymentLinks.id, link.id),
+					inArray(pagaloPaymentLinks.status, [
+						"CREATING",
+						"ACTIVE",
+						"REPLACED",
+					]),
 					link.pollClaimedAt
 						? eq(pagaloPaymentLinks.pollClaimedAt, link.pollClaimedAt)
 						: isNull(pagaloPaymentLinks.pollClaimedAt),

@@ -327,6 +327,7 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 		identificadorCredito,
 		telefono,
 		config,
+		enviarWhatsapp: true,
 	});
 
 	return {
@@ -598,6 +599,31 @@ async function emitirUnLink(params: {
 					)
 					.returning({ id: pagaloPaymentLinks.id });
 				if (!actualizado) {
+					// El WHERE status='CREATING' de arriba también da falso
+					// negativo cuando el status ya no es CREATING porque un
+					// INTENTO ANTERIOR de este mismo reintento ya lo puso en
+					// ACTIVE y comiteó — pero la conexión se cortó antes de que
+					// el await de ese intento devolviera el commit, así que cayó
+					// en el catch y reintentó. Sin distinguir este caso de una
+					// invalidación real, un link perfectamente activo (mismo
+					// pagaloRequestUuid que esta respuesta) se descartaba como
+					// si hubiera sido invalidado (hallazgo de code review). Se
+					// relee el status fresco: si ya es ACTIVE con el UUID de
+					// ESTA respuesta, es éxito idempotente del intento previo,
+					// no invalidación.
+					const [actual] = await tx
+						.select({
+							status: pagaloPaymentLinks.status,
+							pagaloRequestUuid: pagaloPaymentLinks.pagaloRequestUuid,
+						})
+						.from(pagaloPaymentLinks)
+						.where(eq(pagaloPaymentLinks.id, stored.id));
+					if (
+						actual?.status === "ACTIVE" &&
+						actual.pagaloRequestUuid === requestUuid
+					) {
+						return true;
+					}
 					const [preservado] = await tx
 						.update(pagaloPaymentLinks)
 						.set({
@@ -763,6 +789,11 @@ export async function emitirLinksDeGrupo(params: {
 	telefono: string;
 	config: ReturnType<typeof getPagaloSandboxConfig>;
 	generacionPorTipo?: GeneracionPorTipo;
+	// WhatsApp solo en la creación real desde el modal (createPagaloLinks).
+	// regenerarGrupo reusa esta misma función para emitir los links del
+	// grupo de reemplazo, pero una regeneración no manda mensaje — decisión
+	// de producto: el envío es únicamente al crear por primera vez.
+	enviarWhatsapp: boolean;
 }) {
 	const client = createPagaloClient(params.config);
 	const components = [
@@ -847,9 +878,18 @@ export async function emitirLinksDeGrupo(params: {
 	// Solo avanza el grupo si seguía en la fase de emisión inicial — un
 	// regenerarLinkIndividual sobre un grupo ya PARTIALLY_PAID/READY_TO_APPLY
 	// no debe retrocederlo a PENDING_PAYMENT (perdería el otro link ya pagado
-	// del radar del dispatcher).
+	// del radar del dispatcher). `completo` solo cuenta cuántos links salieron
+	// bien, no si el grupo SIGUE en un estado enviable — una invalidación
+	// concurrente (de un supervisor, o de un pago tardío de un predecesor)
+	// pudo mover el grupo a REVIEW_REQUIRED/CANCELLED después de que todos
+	// los emitirUnLink ya habían devuelto activo=true, y antes de llegar
+	// acá. Sin leer si este UPDATE realmente afectó una fila, `completo`
+	// seguía siendo true y el bloque de WhatsApp de abajo mandaba los links
+	// de todas formas, sobre un grupo que ya no podía completarse tal como
+	// está (hallazgo de code review).
+	let grupoSigueVivo = false;
 	if (completo) {
-		await db
+		const [actualizado] = await db
 			.update(pagaloPaymentGroups)
 			.set({ status: "PENDING_PAYMENT", updatedAt: new Date() })
 			.where(
@@ -860,15 +900,20 @@ export async function emitirLinksDeGrupo(params: {
 						"PENDING_PAYMENT",
 					]),
 				),
-			);
+			)
+			.returning({ id: pagaloPaymentGroups.id });
+		grupoSigueVivo = !!actualizado;
 	}
 
 	// D-04: un solo mensaje, con TODOS los links requeridos, solo cuando el
-	// grupo ya está completo. Fallo de WhatsApp nunca revierte la creación
-	// de links, que ya ocurrió y es válida sin importar si el mensaje
-	// llega — el asesor igual ve las URLs en el modal.
+	// grupo ya está completo Y sigue siendo un grupo enviable. Fallo de
+	// WhatsApp nunca revierte la creación de links, que ya ocurrió y es
+	// válida sin importar si el mensaje llega — el asesor igual ve las URLs
+	// en el modal. `enviarWhatsapp=false` en regenerarGrupo (decisión de
+	// producto): WhatsApp es solo para la creación real desde el modal, una
+	// regeneración de grupo no reenvía nada.
 	let whatsappEnviado = false;
-	if (completo) {
+	if (completo && grupoSigueVivo && params.enviarWhatsapp) {
 		try {
 			const resultado = await sendPagaloLinksWhatsapp({
 				numeroSifco: params.numeroSifco,
@@ -1079,6 +1124,10 @@ export async function regenerarGrupo(params: {
 		telefono,
 		config,
 		generacionPorTipo,
+		// WhatsApp solo en la creación real desde el modal — regenerar un
+		// grupo (aunque técnicamente cree links nuevos) no reenvía nada,
+		// decisión de producto.
+		enviarWhatsapp: false,
 	});
 
 	return {
@@ -1179,8 +1228,14 @@ export async function regenerarLinkIndividual(params: {
 			"Creación de links Págalo deshabilitada por configuración.",
 		);
 	}
-	const { identificadorCredito, telefono, clientContact } =
-		await resolverContactoPagalo(grupo.casoCobroId, grupo.numeroCreditoSifco);
+	// identificadorCredito/telefono ya no se usan acá: eran solo para el
+	// WhatsApp de la regeneración, que se quitó (decisión de producto —
+	// WhatsApp solo en la creación real desde el modal). clientContact sí
+	// sigue siendo necesario para emitirUnLink (el HTTP real a Págalo).
+	const { clientContact } = await resolverContactoPagalo(
+		grupo.casoCobroId,
+		grupo.numeroCreditoSifco,
+	);
 	const credit = await carteraBackClient.getCredito(
 		grupo.numeroCreditoSifco,
 		false,
@@ -1388,37 +1443,14 @@ export async function regenerarLinkIndividual(params: {
 		}
 	});
 
-	// activo=false: la respuesta de Págalo llegó después de que el link
-	// nuevo también fue invalidado (mismo hueco documentado arriba) — no se
-	// manda por WhatsApp ni se reporta paymentUrl al llamador, aunque el
-	// link real siga existiendo y sea cobrable en Págalo (hallazgo de code
-	// review). El supervisor ve el resultado y puede reintentar.
-	let whatsappEnviado = false;
-	if (emitido.activo) {
-		try {
-			const resultado = await sendPagaloLinksWhatsapp({
-				numeroSifco: grupo.numeroCreditoSifco,
-				identificadorCredito,
-				telefono,
-				clienteNombre: credit.usuario.nombre ?? "",
-				links: [
-					{ linkType: linkViejo.linkType, paymentUrl: emitido.paymentUrl },
-				],
-				createdBy: params.actorUserId,
-			});
-			whatsappEnviado = resultado.sent;
-		} catch (error) {
-			console.error(
-				`[Págalo] Error enviando link regenerado por WhatsApp para ${grupo.numeroCreditoSifco}:`,
-				error instanceof Error ? error.message : error,
-			);
-		}
-	}
-
+	// WhatsApp solo en la creación real desde el modal (createPagaloLinks) —
+	// regenerar un link individual no reenvía nada, decisión de producto.
+	// El supervisor ve el link nuevo (o el fallo) en la UI y decide si
+	// comunicarlo por otro medio.
 	return {
 		groupId: grupo.id,
 		linkType: linkViejo.linkType,
 		paymentUrl: emitido.activo ? emitido.paymentUrl : null,
-		whatsappEnviado,
+		whatsappEnviado: false,
 	};
 }

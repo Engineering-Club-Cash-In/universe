@@ -100,6 +100,7 @@ export async function reattachAjusteFechaIdealReconstruido(
     otros: string | null;
     monto_boleta?: string | null;
     monto_boleta_cuota?: string | null;
+    pago_del_mes?: string | null;
   }[],
   executor: Executor = db,
 ): Promise<void> {
@@ -158,6 +159,13 @@ export async function reattachAjusteFechaIdealReconstruido(
       ...(pagoCuota1.monto_boleta_cuota != null
         ? {
             monto_boleta_cuota: new Big(pagoCuota1.monto_boleta_cuota)
+              .plus(montoTotal)
+              .toString(),
+          }
+        : {}),
+      ...(pagoCuota1.pago_del_mes != null
+        ? {
+            pago_del_mes: new Big(pagoCuota1.pago_del_mes)
               .plus(montoTotal)
               .toString(),
           }

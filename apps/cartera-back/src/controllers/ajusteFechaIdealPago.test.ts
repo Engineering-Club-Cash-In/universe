@@ -223,6 +223,7 @@ describe("ajuste por fecha ideal durante reconstruccion", () => {
           otros,
           monto_boleta: "300.00",
           monto_boleta_cuota: "300.00",
+          pago_del_mes: "300.00",
         },
       ],
       executor,
@@ -235,6 +236,7 @@ describe("ajuste por fecha ideal durante reconstruccion", () => {
           otros: "50",
           monto_boleta: "350",
           monto_boleta_cuota: "350",
+          pago_del_mes: "350",
         },
       ]);
     },
@@ -263,6 +265,7 @@ describe("ajuste por fecha ideal durante reconstruccion", () => {
           otros: "20.00",
           monto_boleta: "320.00",
           monto_boleta_cuota: "320.00",
+          pago_del_mes: "320.00",
         },
       ],
       executor,
@@ -274,6 +277,7 @@ describe("ajuste por fecha ideal durante reconstruccion", () => {
         otros: "70",
         monto_boleta: "370",
         monto_boleta_cuota: "370",
+        pago_del_mes: "370",
       },
     ]);
   });
@@ -419,9 +423,10 @@ describe("ajuste por fecha ideal durante reconstruccion", () => {
   });
 
   it("usa el helper compartido con tx en las tres reconstrucciones", async () => {
-    const [excel, migration] = await Promise.all([
+    const [excel, migration, sifco] = await Promise.all([
       readFile(new URL("./processFromExcelFull.ts", import.meta.url), "utf8"),
       readFile(new URL("../migration/migration.ts", import.meta.url), "utf8"),
+      readFile(new URL("./migratePayments.ts", import.meta.url), "utf8"),
     ]);
 
     expect(
@@ -442,6 +447,8 @@ describe("ajuste por fecha ideal durante reconstruccion", () => {
         /reattachAjusteFechaIdealReconstruido\([\s\S]*?tx,\s*\)/g,
       ),
     ).toHaveLength(2);
+    expect(excel).toContain("pago_del_mes: pagos_credito.pago_del_mes");
+    expect(sifco.match(/pago_del_mes: sql`COALESCE/g)).toHaveLength(2);
   });
 
 });

@@ -603,6 +603,7 @@ export async function procesarCreditoDesdeExcelFull(
       otros: pagos_credito.otros,
       monto_boleta: pagos_credito.monto_boleta,
       monto_boleta_cuota: pagos_credito.monto_boleta_cuota,
+      pago_del_mes: pagos_credito.pago_del_mes,
     });
   await reattachAjusteFechaIdealReconstruido(
     ajusteCobrado,

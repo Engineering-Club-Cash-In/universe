@@ -612,6 +612,7 @@ export const marcarCuotasPagadasHastaNumero = async ({
             otros: sql`(COALESCE(${pagos_credito.otros}, '0')::numeric + ${accionAjuste.montoTotal}::numeric)::text`,
             monto_boleta: sql`(COALESCE(${pagos_credito.monto_boleta}, '0')::numeric + ${accionAjuste.montoTotal}::numeric)::text`,
             monto_boleta_cuota: sql`(COALESCE(${pagos_credito.monto_boleta_cuota}, '0')::numeric + ${accionAjuste.montoTotal}::numeric)::text`,
+            pago_del_mes: sql`COALESCE(${pagos_credito.pago_del_mes}, 0)::numeric + ${accionAjuste.montoTotal}::numeric`,
           })
           .where(eq(pagos_credito.pago_id, cuota1.pago_id));
         await tx
@@ -640,6 +641,7 @@ export const marcarCuotasPagadasHastaNumero = async ({
           .set({
             monto_boleta: sql`(COALESCE(${pagos_credito.monto_boleta}, '0')::numeric + ${accionAjuste.montoTotal}::numeric)::text`,
             monto_boleta_cuota: sql`(COALESCE(${pagos_credito.monto_boleta_cuota}, '0')::numeric + ${accionAjuste.montoTotal}::numeric)::text`,
+            pago_del_mes: sql`COALESCE(${pagos_credito.pago_del_mes}, 0)::numeric + ${accionAjuste.montoTotal}::numeric`,
           })
           .where(eq(pagos_credito.pago_id, cuota1.pago_id));
       } else if (accionAjuste.kind === "reabrir") {

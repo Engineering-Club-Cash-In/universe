@@ -613,8 +613,9 @@ export async function mapOpportunityToContractData(
 		: [];
 
 	// {agencia}: la empresa asignada a la oportunidad, que en carro nuevo es
-	// la distribuidora. Se hereda del lead al crear la oportunidad.
-	const [empresaAgencia] = opportunity.companyId
+	// la distribuidora. En usados no aplica; companyId puede haberse heredado
+	// del lead y no necesariamente representa una agencia del vehículo.
+	const [empresaAgencia] = vehicle?.isNew === true && opportunity.companyId
 		? await db
 				.select({ name: companies.name })
 				.from(companies)

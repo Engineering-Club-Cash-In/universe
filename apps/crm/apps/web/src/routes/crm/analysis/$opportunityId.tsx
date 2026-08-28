@@ -532,6 +532,7 @@ function OpportunityDocumentsPage() {
 					vehicleIsNew: opportunity.vehicle?.isNew,
 					companyId: opportunity.company?.id,
 					vendorId: opportunity.vendorId,
+					vehicleVendorId: opportunity.vehicle?.vendorId,
 				});
 				if (faltan.length === 0) return null;
 				return (

@@ -21,6 +21,7 @@ export interface OpportunityAssignmentInput {
 	vehicleIsNew?: boolean | null;
 	companyId?: string | null;
 	vendorId?: string | null;
+	vehicleVendorId?: string | null;
 }
 
 /**
@@ -49,7 +50,7 @@ export function getMissingOpportunityAssignments(
 	// `isNew` es nullable y el vehículo pudo borrarse: ante la duda se trata
 	// como usado, porque pedir una agencia que no existe es el error caro.
 	if (input.vehicleIsNew === true && !input.companyId) falta.push("empresa");
-	if (!input.vendorId) falta.push("vendedor");
+	if (!input.vendorId && !input.vehicleVendorId) falta.push("vendedor");
 
 	return falta;
 }

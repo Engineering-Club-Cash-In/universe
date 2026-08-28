@@ -241,6 +241,7 @@ function DraggableOpportunityCard({
 						vehicleIsNew: opportunity.vehicle?.isNew,
 						companyId: opportunity.company?.id,
 						vendorId: opportunity.vendorId,
+						vehicleVendorId: opportunity.vehicle?.vendorId,
 					});
 					const mensaje = formatMissingAssignmentsMessage(faltan);
 					if (!mensaje) return null;

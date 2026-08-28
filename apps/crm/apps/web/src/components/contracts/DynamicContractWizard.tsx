@@ -1262,7 +1262,7 @@ export function DynamicContractWizard({
 					case "agencia":
 						// La empresa asignada a la oportunidad. En un usado no aplica y
 						// se resuelve más abajo con un guion.
-						if (agencia) {
+						if (vehiculo.esNuevo === true && agencia) {
 							initialValues[field.key] = agencia.toUpperCase();
 							return;
 						}

@@ -1807,6 +1807,7 @@ export const crmRouter = {
 				},
 				vehicle: {
 					id: vehicles.id,
+					vendorId: vehicles.vendorId,
 					make: vehicles.make,
 					model: vehicles.model,
 					year: vehicles.year,

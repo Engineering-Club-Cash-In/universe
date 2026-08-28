@@ -62,6 +62,16 @@ describe("getMissingOpportunityAssignments", () => {
 		).toEqual([]);
 	});
 
+	test("un vendedor asignado al vehículo cuenta como fallback", () => {
+		expect(
+			getMissingOpportunityAssignments({
+				...base,
+				vendorId: null,
+				vehicleVendorId: "vehicle-vendor-1",
+			}),
+		).toEqual(["empresa"]);
+	});
+
 	test.each([null, undefined])(
 		"isNew %p se trata como usado, no reclama agencia",
 		(vehicleIsNew) => {

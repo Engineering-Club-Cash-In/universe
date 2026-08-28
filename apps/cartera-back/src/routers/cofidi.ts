@@ -2968,9 +2968,12 @@ if (facturasExistentes.length > 0) {
           // quedó FALLIDA por anulación incompleta debe poder CERRAR en
           // NO_APLICA al anular su último DTE — dejarlo PENDIENTE lo condenaba
           // a una bandeja de la que el endpoint lo rechaza. (Codex P2)
-          const pagoFacturable = ["validated", "reset", "capital"].includes(
-            fila.validation_status ?? ""
-          );
+          const pagoFacturable = [
+            "validated",
+            "reset",
+            "capital",
+            "capital_validated",
+          ].includes(fila.validation_status ?? "");
           const nuevoEstado = quedanActivas
             ? "PARCIAL"
             : pagoFacturable

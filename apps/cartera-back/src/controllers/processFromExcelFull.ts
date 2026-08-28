@@ -521,10 +521,13 @@ export async function procesarCreditoDesdeExcelFull(
     // Nace aplicado sin pasar por los hooks de validación que inicializan el
     // estado de facturación: sin esto quedaba NULL (sentinela de históricos) e
     // invisible en la bandeja aunque trae interés/IVA facturables. (Codex P2)
+    // Con los MISMOS valores que lleva el objeto insertado (membresias_pago va
+    // en "0" acá — `membresias` es el saldo futuro, no lo pagado — y `otros` sí
+    // se inserta con monto real).
     factura_status: (tieneMontosFacturables({
       abono_interes: cuotaInteres.toFixed(2),
       abono_iva_12: iva12.toFixed(2),
-      membresias_pago: membresias.toFixed(2),
+      otros: otros.toFixed(2),
     })
       ? "PENDIENTE"
       : "NO_APLICA") as PagoFacturaStatus,

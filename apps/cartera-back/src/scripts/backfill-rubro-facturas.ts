@@ -193,14 +193,19 @@ async function main() {
   const pagosConCubeIrreconstruible = new Set<number>();
   {
     const pagosRes = await db.execute(sql`
-      SELECT pago_id, mora, otros, abono_seguro, abono_gps, membresias_pago, abono_interes
+      SELECT pago_id, mora, otros, abono_seguro, abono_gps, membresias_pago, abono_interes, abono_iva_12
       FROM cartera.pagos_credito
       WHERE pago_id = ANY(string_to_array(${idsCsv(pagoIds)}, ',')::int[])
     `);
     const sinDesglose = new Set(pagosSinDesglose);
     for (const p of (pagosRes as any).rows as any[]) {
       const desglose = porPagoDesglose.get(p.pago_id);
-      const hayInteres = new Big(fix2(p.abono_interes)).gt(0);
+      // Interés O IVA: mismo gate que el flujo de emisión — un pago solo-IVA
+      // también emite INTERESES_CUBE, así que su DTE de CUBE es igual de
+      // irreconstruible sin la fila INTERES del desglose. (Codex P1)
+      const hayInteres = new Big(fix2(p.abono_interes))
+        .plus(fix2(p.abono_iva_12))
+        .gt(0);
       if (hayInteres && (!desglose || !desglose.has("INTERES"))) {
         pagosConCubeIrreconstruible.add(p.pago_id);
       }

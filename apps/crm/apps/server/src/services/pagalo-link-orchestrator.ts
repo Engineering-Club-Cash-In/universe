@@ -699,12 +699,21 @@ async function emitirUnLink(params: {
 				// NUESTRA DB: se preserva CREATING con el UUID guardado (para
 				// que el poller lo siga) y errorCode ambiguo, igual que el caso
 				// de invalidación explícita de más abajo.
-				const [grupoParaChequeo] = await tx
+				//
+				// Orden de candados: igual que en la transacción de más arriba
+				// y en regenerarGrupo, marcarLinkPagado bloquea primero el
+				// grupo DUEÑO del link que cobra (predecesor) y DESPUÉS el
+				// grupo activo — acá se lockeaba el activo primero (carteraCreditoId
+				// leído con FOR UPDATE) y los predecesores después, mismo
+				// deadlock invertido que ya se corrigió arriba pero se volvió a
+				// introducir en esta transacción nueva (hallazgo de code
+				// review). carteraCreditoId no cambia en un grupo existente, se
+				// puede leer sin candado para saber a qué crédito bloquear.
+				const [grupoSinCandado] = await tx
 					.select({ carteraCreditoId: pagaloPaymentGroups.carteraCreditoId })
 					.from(pagaloPaymentGroups)
-					.where(eq(pagaloPaymentGroups.id, params.groupId))
-					.for("update");
-				if (grupoParaChequeo) {
+					.where(eq(pagaloPaymentGroups.id, params.groupId));
+				if (grupoSinCandado) {
 					await tx
 						.select({ id: pagaloPaymentGroups.id })
 						.from(pagaloPaymentGroups)
@@ -712,12 +721,17 @@ async function emitirUnLink(params: {
 							and(
 								eq(
 									pagaloPaymentGroups.carteraCreditoId,
-									grupoParaChequeo.carteraCreditoId,
+									grupoSinCandado.carteraCreditoId,
 								),
 								ne(pagaloPaymentGroups.id, params.groupId),
 							),
 						)
 						.orderBy(pagaloPaymentGroups.id)
+						.for("update");
+					await tx
+						.select({ id: pagaloPaymentGroups.id })
+						.from(pagaloPaymentGroups)
+						.where(eq(pagaloPaymentGroups.id, params.groupId))
 						.for("update");
 					const [pagoPredecesorSinReconciliar] = await tx
 						.select({ linkId: pagaloPaymentLinks.id })
@@ -730,7 +744,7 @@ async function emitirUnLink(params: {
 							and(
 								eq(
 									pagaloPaymentGroups.carteraCreditoId,
-									grupoParaChequeo.carteraCreditoId,
+									grupoSinCandado.carteraCreditoId,
 								),
 								eq(pagaloPaymentLinks.status, "PAID"),
 								eq(pagaloPaymentLinks.isApplicationSource, false),

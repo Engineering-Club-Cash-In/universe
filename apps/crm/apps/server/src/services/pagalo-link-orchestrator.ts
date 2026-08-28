@@ -28,6 +28,7 @@ import {
 import {
 	ESTADOS_INVALIDABLES_SUPERVISOR,
 	invalidarGrupoEnTx,
+	PagaloReemplazoInvalido,
 	proximaGeneracion,
 } from "./pagalo-group-lifecycle";
 import {
@@ -441,12 +442,35 @@ async function emitirUnLink(params: {
 				.where(eq(pagaloPaymentLinks.id, params.supersedesLinkId));
 			grupoDelLinkViejo = viejo?.groupId ?? null;
 		}
+		// Grupo del link viejo si es OTRO grupo (regenerarGrupo): se bloquea
+		// primero, replicando el orden del poller (ver comentario arriba).
 		if (grupoDelLinkViejo && grupoDelLinkViejo !== params.groupId) {
 			await tx
 				.select({ id: pagaloPaymentGroups.id })
 				.from(pagaloPaymentGroups)
 				.where(eq(pagaloPaymentGroups.id, grupoDelLinkViejo))
 				.for("update");
+		}
+		// Grupo ACTUAL: se bloquea antes que el link viejo cuando ambos
+		// pertenecen al mismo grupo (regenerarLinkIndividual) — bloquear el
+		// link primero y el grupo después invertía el orden de
+		// marcarLinkPagado (pagalo-poll.ts), que siempre toma grupo→link. Un
+		// pago tardío concurrente sobre el mismo link (el poller con el grupo
+		// bloqueado, esperando el link) contra esta transacción (con el link
+		// bloqueado, esperando el grupo) era un deadlock clásico que podía
+		// abortar la regeneración del supervisor antes del INSERT (hallazgo
+		// de code review — el caso cross-group ya estaba resuelto, este es
+		// el caso same-group, que seguía con el orden original invertido).
+		const [grupo] = await tx
+			.select({ status: pagaloPaymentGroups.status })
+			.from(pagaloPaymentGroups)
+			.where(eq(pagaloPaymentGroups.id, params.groupId))
+			.for("update");
+		if (!grupo) throw new Error("Grupo Págalo no encontrado.");
+		if (grupo.status === "CANCELLED" || grupo.status === "COMPLETED") {
+			throw new Error(
+				`El grupo cambió a ${grupo.status} justo antes de emitir el link — no se creó ningún link nuevo.`,
+			);
 		}
 		// regenerarLinkIndividual valida el link viejo (supersedesLinkId) con
 		// un SELECT suelto bastante antes de llegar acá, tras
@@ -473,17 +497,6 @@ async function emitirUnLink(params: {
 					`El link que se está reemplazando cambió a ${viejo?.status ?? "eliminado"} justo antes de emitir el nuevo — no se creó ningún link.`,
 				);
 			}
-		}
-		const [grupo] = await tx
-			.select({ status: pagaloPaymentGroups.status })
-			.from(pagaloPaymentGroups)
-			.where(eq(pagaloPaymentGroups.id, params.groupId))
-			.for("update");
-		if (!grupo) throw new Error("Grupo Págalo no encontrado.");
-		if (grupo.status === "CANCELLED" || grupo.status === "COMPLETED") {
-			throw new Error(
-				`El grupo cambió a ${grupo.status} justo antes de emitir el link — no se creó ningún link nuevo.`,
-			);
 		}
 		const [insertado] = await tx
 			.insert(pagaloPaymentLinks)
@@ -937,6 +950,36 @@ export async function regenerarGrupo(params: {
 	);
 
 	const { groupIdNuevo } = await db.transaction(async (tx) => {
+		// invalidarGrupoEnTx solo mira links PAID del grupo que se está
+		// invalidando — pero un grupo puede llegar a REVIEW_REQUIRED porque
+		// un link REPLACED de un PREDECESOR (ya CANCELLED, mismo crédito)
+		// cobró tarde (REPLACED_LINK_PAID, pagalo-poll.ts escala el "grupo
+		// activo del crédito", no necesariamente el dueño del link pagado).
+		// Ese PAID vive en una fila del grupo viejo, invisible para el
+		// chequeo local de invalidarGrupoEnTx — sin esto, regenerarGrupo
+		// cancelaba el grupo en revisión, emitía links nuevos y se los
+		// mandaba al cliente mientras el pago anterior quedaba sin
+		// reconciliar para siempre (hallazgo de code review). Se busca en
+		// TODOS los grupos del mismo carteraCreditoId, no solo el actual.
+		const [pagoSinReconciliar] = await tx
+			.select({ linkId: pagaloPaymentLinks.id })
+			.from(pagaloPaymentLinks)
+			.innerJoin(
+				pagaloPaymentGroups,
+				eq(pagaloPaymentGroups.id, pagaloPaymentLinks.groupId),
+			)
+			.where(
+				and(
+					eq(pagaloPaymentGroups.carteraCreditoId, grupoViejo.carteraCreditoId),
+					eq(pagaloPaymentLinks.status, "PAID"),
+					eq(pagaloPaymentLinks.isApplicationSource, false),
+				),
+			)
+			.limit(1);
+		if (pagoSinReconciliar) {
+			throw new PagaloReemplazoInvalido();
+		}
+
 		await invalidarGrupoEnTx(tx, {
 			groupId: params.groupId,
 			actorUserId: params.actorUserId,
@@ -1291,21 +1334,57 @@ export async function regenerarLinkIndividual(params: {
 		const todosCubiertos = tiposRequeridos.every((t) => cubiertos.has(t));
 
 		if (todosCubiertos && !hayPagoMalAplicado) {
-			const otroTipoPagado = linksDelGrupo.some(
-				(l) => l.isApplicationSource && l.linkType !== linkViejo.linkType,
+			// El link recién emitido puede haber cobrado YA (Págalo respondió
+			// rapidísimo en sandbox, o el poller corrió entre el commit de
+			// emitirUnLink y este candado) — si con eso TODOS los tipos
+			// requeridos quedan isApplicationSource=true, restaurar solo a
+			// PENDING_PAYMENT/PARTIALLY_PAID dejaba un grupo ya totalmente
+			// pagado esperando un pago que nunca va a llegar: evaluarGrupo
+			// (pagalo-poll.ts) solo promueve a READY_TO_APPLY desde
+			// PENDING_PAYMENT/PARTIALLY_PAID, y un link PAID deja de tener
+			// nextPollAt — nada vuelve a mirar este grupo (hallazgo de code
+			// review). Se replica el mismo criterio de evaluarGrupo acá.
+			const tiposPagados = new Set(
+				linksDelGrupo
+					.filter((l) => l.isApplicationSource)
+					.map((l) => l.linkType),
 			);
+			const todosPagados = tiposRequeridos.every((t) => tiposPagados.has(t));
 			await tx
 				.update(pagaloPaymentGroups)
-				.set({
-					status: otroTipoPagado ? "PARTIALLY_PAID" : "PENDING_PAYMENT",
-					updatedAt: new Date(),
-				})
+				.set(
+					todosPagados
+						? {
+								status: "READY_TO_APPLY",
+								readyToApplyAt: new Date(),
+								updatedAt: new Date(),
+							}
+						: {
+								status:
+									tiposPagados.size > 0 ? "PARTIALLY_PAID" : "PENDING_PAYMENT",
+								updatedAt: new Date(),
+							},
+				)
 				.where(
 					and(
 						eq(pagaloPaymentGroups.id, grupo.id),
 						eq(pagaloPaymentGroups.status, "REVIEW_REQUIRED"),
 					),
 				);
+			if (todosPagados) {
+				await tx.insert(pagaloPaymentEvents).values({
+					groupId: grupo.id,
+					eventType: "GROUP_READY",
+					source: "SUPERVISOR",
+					actorUserId: params.actorUserId,
+					fromStatus: "REVIEW_REQUIRED",
+					toStatus: "READY_TO_APPLY",
+					payload: {
+						motivo:
+							"Restaurado por regeneración de link; todos los tipos requeridos ya estaban pagados.",
+					},
+				});
+			}
 		}
 	});
 

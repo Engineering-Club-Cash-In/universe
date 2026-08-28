@@ -128,12 +128,11 @@ type CreditAnalysis = Awaited<
 function validatePositiveFinancialValue(
 	value: string,
 	label: string,
-	required: boolean,
 ) {
 	const normalizedValue = value.trim();
 
 	if (!normalizedValue) {
-		return required ? `${label} es obligatorio` : undefined;
+		return undefined;
 	}
 
 	const numericValue = Number(normalizedValue);
@@ -1737,17 +1736,13 @@ function RouteComponent() {
 															validatePositiveFinancialValue(
 																value,
 																"El ingreso mensual",
-																Boolean(editingLead),
 															),
 													}}
 												>
 													{(field) => (
 														<div className="space-y-2">
 															<Label htmlFor={field.name}>
-																Ingreso Mensual{" "}
-																{editingLead && (
-																	<span className="text-red-500">*</span>
-																)}
+																Ingreso Mensual
 															</Label>
 															<Input
 																id={field.name}
@@ -1784,17 +1779,13 @@ function RouteComponent() {
 															validatePositiveFinancialValue(
 																value,
 																"El monto a financiar",
-																Boolean(editingLead),
 															),
 													}}
 												>
 													{(field) => (
 														<div className="space-y-2">
 															<Label htmlFor={field.name}>
-																Monto a Financiar{" "}
-																{editingLead && (
-																	<span className="text-red-500">*</span>
-																)}
+																Monto a Financiar
 															</Label>
 															<Input
 																id={field.name}

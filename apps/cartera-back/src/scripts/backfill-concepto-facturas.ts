@@ -2,7 +2,7 @@
 // Backfill de `facturas_electronicas.concepto` (+ inversionista_id).
 //
 // Contexto:
-//   La columna `concepto` la agregó la migración 0029 para poder re-facturar solo
+//   La columna `concepto` la agregó la migración 0030 para poder re-facturar solo
 //   los rubros que faltaron cuando una corrida de /facturar-pago-completo sale a
 //   medias (src/cofidi/facturasFaltantes.ts). Todo lo emitido ANTES de esa
 //   migración quedó en NULL, y el diff trata "concepto NULL" como BLOQUEADO:
@@ -33,17 +33,29 @@
 //   propio (SE PRESTA / AMJK / AUTOCASH / ...) es INTERESES sí o sí, y el
 //   inversionista es el que hace match con ese facturador.
 //
+//   Corolario importante: en los pagos SIN desglose y CON interés existe un DTE
+//   de CUBE cuyo monto no se puede reconstruir. Un match "único" sobre una
+//   factura emitida por CUBE en esos pagos NO es inequívoco — podría ser ese DTE
+//   de intereses. Se marcan como ambiguas (ver 2b). Esto cuesta cobertura
+//   (73% → 46% en el dump) y evita etiquetar mal ~5.5k facturas.
+//
 // USO:
 //   SUPABASE_DB_URL=postgresql://postgres:...@localhost:5433/dump20260828 \
 //     bun run src/scripts/backfill-concepto-facturas.ts            # dry-run (default)
 //   ... bun run src/scripts/backfill-concepto-facturas.ts --apply  # escribe
 //
-//   Opcional: --sample=N imprime N ejemplos de cada categoría del reporte.
+//   Opcional: --sample=N ejemplos por categoría; --csv=RUTA para el reporte de
+//   re-emisiones (default /private/tmp/backfill-concepto-reemisiones.csv).
+//
+// ⚠️ ANTES DE --apply EN PROD: revisar con conta el CSV de re-emisiones. Etiquetar
+//    habilita el modo FALTANTES, y los pagos listados ahí emitirían DTEs nuevos
+//    ante SAT si alguien los re-factura.
 // ============================================================
 import { sql } from "drizzle-orm";
 import Big from "big.js";
 import { db, client } from "../database";
 import { CLUB_CASHIN_CONFIG } from "../utils/functions/const";
+import { computarDiffFacturas } from "../cofidi/facturasFaltantes";
 
 Big.DP = 20;
 Big.RM = Big.roundHalfUp;
@@ -52,6 +64,10 @@ const APPLY = process.argv.includes("--apply");
 const SAMPLE = Number(
   process.argv.find((a) => a.startsWith("--sample="))?.split("=")[1] ?? 3
 );
+/** CSV con los pagos que quedarían re-facturables (para que conta los revise). */
+const CSV_PATH =
+  process.argv.find((a) => a.startsWith("--csv="))?.split("=")[1] ??
+  "/private/tmp/backfill-concepto-reemisiones.csv";
 
 /** NIT emisor de CUBE: cualquier otro NIT es un facturador propio de inversionista. */
 const NIT_CUBE = CLUB_CASHIN_CONFIG.emisor.nit;
@@ -152,21 +168,39 @@ async function main() {
   }
 
   // 2b. pagos_credito como fallback para los pagos SIN desglose.
+  //
+  // ⚠️ Acá NO hay candidato INTERESES_CUBE: el residuo de CUBE es
+  //    (interés+IVA) − Σ partes no-CUBE + cash_in, y esas partes salen del
+  //    `monto_aportado` del roster EN EL MOMENTO de facturar, que para un pago
+  //    viejo ya no se puede recuperar (el roster cambia con reinversiones y
+  //    compras de cartera). Reconstruirlo con el roster de HOY daría un candidato
+  //    posiblemente equivocado, y un candidato equivocado puede producir una
+  //    ETIQUETA equivocada — mucho peor que perder cobertura.
+  //
+  //    Pero omitir el candidato NO vuelve seguro el match: si el pago tiene
+  //    interés, existe un DTE de CUBE cuyo monto no conocemos, y puede empatar
+  //    con mora/otros/otros_servicios. Caso real del dump: factura 4315 (pago
+  //    116815) de Q882.00 se etiquetaba MORA cuando el totalCube del loop también
+  //    da Q882.00 → tras --apply el diff habría emitido un SEGUNDO DTE de Q882
+  //    ante SAT. Por eso `pagosConInteresSinDesglose` marca esos pagos y el
+  //    matcher trata como AMBIGUA cualquier factura emitida por CUBE en ellos.
   const pagosSinDesglose = pagoIds.filter((p) => !porPagoDesglose.has(p));
+  const pagosConInteresSinDesglose = new Set<number>();
   if (pagosSinDesglose.length > 0) {
     const pagosRes = await db.execute(sql`
-      SELECT pago_id, mora, otros, abono_seguro, abono_gps, membresias_pago
+      SELECT pago_id, mora, otros, abono_seguro, abono_gps, membresias_pago, abono_interes
       FROM cartera.pagos_credito
       WHERE pago_id = ANY(string_to_array(${idsCsv(pagosSinDesglose)}, ',')::int[])
     `);
     for (const p of (pagosRes as any).rows as any[]) {
       push(p.pago_id, { concepto: "MORA", inversionista_id: null, monto: fix2(p.mora), fuente: "pagos_credito" });
       push(p.pago_id, { concepto: "OTROS", inversionista_id: null, monto: fix2(p.otros), fuente: "pagos_credito" });
-      const otrosServicios = new Big(p.abono_seguro ?? 0)
-        .plus(p.abono_gps ?? 0)
-        .plus(p.membresias_pago ?? 0);
+      const otrosServicios = new Big(fix2(p.abono_seguro))
+        .plus(fix2(p.abono_gps))
+        .plus(fix2(p.membresias_pago));
       push(p.pago_id, { concepto: "OTROS_SERVICIOS", inversionista_id: null, monto: fix2(otrosServicios), fuente: "pagos_credito" });
-      // Sin candidato INTERESES_CUBE: el residuo de CUBE no se reconstruye desde acá.
+
+      if (new Big(fix2(p.abono_interes)).gt(0)) pagosConInteresSinDesglose.add(p.pago_id);
     }
   }
 
@@ -247,6 +281,27 @@ async function main() {
     for (const c of matches) unicos.set(`${c.concepto}:${c.inversionista_id ?? ""}`, c);
     matches = [...unicos.values()];
 
+    // 🛡️ Candidato INTERESES_CUBE DESCONOCIDO (pago sin desglose y con interés).
+    //    El DTE de CUBE sale con el NIT de CUBE, igual que MORA/OTROS/etc., así
+    //    que un match sobre una factura emitida por CUBE puede ser en realidad
+    //    ese DTE de intereses. Sin forma de distinguirlos → AMBIGUA → NULL.
+    //    Las emitidas por un facturador propio quedan a salvo: el DTE de CUBE
+    //    nunca sale con el NIT de AUTOCASH/AMJK/SE PRESTA/...
+    //    emisor_nit NULL (facturas viejas) se trata como CUBE por precaución.
+    const emisorPuedeSerCube = !f.emisor_nit || f.emisor_nit === NIT_CUBE;
+    if (
+      matches.length > 0 &&
+      emisorPuedeSerCube &&
+      pagosConInteresSinDesglose.has(f.pago_id)
+    ) {
+      ambiguas.push({ f, opciones: [...matches.map((c) => c.concepto), "INTERESES_CUBE(desconocido)"] });
+      anota(
+        "ambigua_cube_desconocido",
+        `factura ${f.factura_id} (pago ${f.pago_id}) Q${monto} → ${matches.map((c) => c.concepto).join("|")} vs el DTE de CUBE del pago, que no se puede reconstruir`
+      );
+      continue;
+    }
+
     if (matches.length === 1) {
       const c = matches[0];
       decisiones.push({
@@ -288,6 +343,40 @@ async function main() {
     }
   }
 
+  // ── 4.5 ¿Qué pagos EMITIRÍAN DTEs nuevos si alguien los re-factura? ────────
+  //
+  // Etiquetar habilita el modo FALTANTES. Un pago cuyas ACTIVAS quedan TODAS
+  // etiquetadas y al que igual le falta algún rubro pasa de "BLOQUEADO" a
+  // "re-facturable": si alguien aprieta el botón, SAT recibe DTEs nuevos.
+  //
+  // La mayoría de las veces eso es exactamente lo que se busca (la corrida
+  // original falló). Pero cuando dos rubros del pago tienen el MISMO monto, una
+  // sola factura pudo haber cubierto uno y el diff cree que falta el otro
+  // (ej. pago 114839: otros=450 y abono_interes=450, una sola factura de Q450).
+  // No es un bug del diff — es una decisión de negocio — así que se listan para
+  // que conta los revise ANTES de aplicar el backfill en prod.
+  const reemisiones = await simularReemisiones(decisiones);
+  console.log(`\n🚨 RE-EMISIONES POTENCIALES tras el backfill`);
+  console.log(`   ${reemisiones.filas.length} pago(s) quedarían re-facturables con rubros faltantes.`);
+  if (reemisiones.noSimulables > 0) {
+    console.log(`   (${reemisiones.noSimulables} pago(s) de cancelación/reset no se simulan: reparten por cuota_inversionista, no por monto_aportado)`);
+  }
+  const porMotivo = new Map<string, number>();
+  for (const r of reemisiones.filas) porMotivo.set(r.motivo, (porMotivo.get(r.motivo) ?? 0) + 1);
+  for (const m of ["montos_empatados", "posible_roster_cambiado", "rubro_no_emitido"]) {
+    const n = porMotivo.get(m) ?? 0;
+    if (n === 0) continue;
+    const icono = m === "rubro_no_emitido" ? "  " : "⚠️";
+    console.log(`   ${icono} ${String(n).padStart(4)} ${m}`);
+    for (const r of reemisiones.filas.filter((x) => x.motivo === m).slice(0, 5)) {
+      console.log(`           pago ${r.pago_id} (crédito ${r.credito_id}) faltarían [${r.faltantes}] | activas: ${r.activas}`);
+    }
+  }
+  if (reemisiones.filas.length > 0) {
+    await Bun.write(CSV_PATH, reemisiones.csv);
+    console.log(`   📄 CSV: ${CSV_PATH}`);
+  }
+
   // ── 5. Escritura ───────────────────────────────────────────────────────────
   if (!APPLY) {
     console.log(`\n📝 DRY-RUN: no se escribió nada. Reintentar con --apply para etiquetar las ${decisiones.length} facturas.`);
@@ -314,6 +403,187 @@ async function main() {
     console.log(`   💾 ${escritas}/${decisiones.length}`);
   }
   console.log(`\n✅ Backfill aplicado: ${escritas} factura(s) etiquetada(s).`);
+}
+
+/**
+ * Simula el diff de /facturar-pago-completo COMO SI el backfill ya estuviera
+ * aplicado, para saber qué pagos pasarían de "BLOQUEADO" a "re-facturable con
+ * rubros faltantes" (= DTEs nuevos ante SAT si alguien aprieta el botón).
+ *
+ * Reusa la MISMA función pura del endpoint (computarDiffFacturas), así que el
+ * reporte no puede divergir del comportamiento real.
+ */
+async function simularReemisiones(
+  decisiones: { factura_id: number; concepto: Concepto; inversionista_id: number | null }[]
+) {
+  const conceptoPorFactura = new Map(decisiones.map((d) => [d.factura_id, d]));
+  const pagosAfectados = new Set<number>();
+
+  // Los pagos que tocó el backfill son los únicos que pueden cambiar de modo.
+  const facturasDecididasRes = await db.execute(sql`
+    SELECT factura_id, pago_id
+    FROM cartera.facturas_electronicas
+    WHERE factura_id = ANY(string_to_array(${idsCsv(decisiones.map((d) => d.factura_id))}, ',')::int[])
+  `);
+  for (const r of (facturasDecididasRes as any).rows as any[]) pagosAfectados.add(r.pago_id);
+
+  const ids = [...pagosAfectados];
+  if (ids.length === 0) return { filas: [], csv: "", noSimulables: 0 };
+
+  const pagosRes = await db.execute(sql`
+    SELECT pc.pago_id, pc.credito_id, pc.validation_status,
+           pc.mora, pc.otros, pc.abono_seguro, pc.abono_gps, pc.membresias_pago,
+           pc.abono_interes, pc.abono_iva_12,
+           c.bandera_reinversion,
+           EXISTS (
+             SELECT 1 FROM cartera.compras_credito_inversionista cci
+             WHERE cci.credito_id = pc.credito_id
+               AND cci.pendiente_facturar = true
+               AND cci.tipo_operacion = 'compra_cartera'
+           ) AS prorrateo_pendiente
+    FROM cartera.pagos_credito pc
+    JOIN cartera.creditos c ON c.credito_id = pc.credito_id
+    WHERE pc.pago_id = ANY(string_to_array(${idsCsv(ids)}, ',')::int[])
+  `);
+  const pagos = (pagosRes as any).rows as any[];
+
+  // Roster vivo por crédito (el histórico no es recuperable; ver nota en 2b).
+  const creditoIds = [...new Set(pagos.map((p) => p.credito_id).filter(Boolean))];
+  const rosterRes = await db.execute(sql`
+    SELECT ci.credito_id, ci.inversionista_id, i.nombre, i.emite_factura,
+           ci.porcentaje_participacion_inversionista AS porcentaje_participacion,
+           ci.porcentaje_cash_in, ci.monto_aportado,
+           esp.status AS status_espejo
+    FROM cartera.creditos_inversionistas ci
+    JOIN cartera.inversionistas i ON i.inversionista_id = ci.inversionista_id
+    LEFT JOIN cartera.creditos_inversionistas_espejo esp
+      ON esp.credito_id = ci.credito_id AND esp.inversionista_id = ci.inversionista_id
+    WHERE ci.credito_id = ANY(string_to_array(${idsCsv(creditoIds)}, ',')::int[])
+  `);
+  const rosterPorCredito = new Map<number, any[]>();
+  for (const r of (rosterRes as any).rows as any[]) {
+    const arr = rosterPorCredito.get(r.credito_id) ?? [];
+    arr.push(r);
+    rosterPorCredito.set(r.credito_id, arr);
+  }
+
+  // TODAS las ACTIVAS del pago (no solo las que el backfill etiqueta): una que
+  // siga en NULL deja el pago BLOQUEADO, que es justo lo que hay que detectar.
+  const activasRes = await db.execute(sql`
+    SELECT factura_id, pago_id, concepto, inversionista_id, monto_total::text AS monto_total
+    FROM cartera.facturas_electronicas
+    WHERE pago_id = ANY(string_to_array(${idsCsv(ids)}, ',')::int[])
+      AND status = 'ACTIVA'
+  `);
+  const activasPorPago = new Map<number, any[]>();
+  for (const r of (activasRes as any).rows as any[]) {
+    const arr = activasPorPago.get(r.pago_id) ?? [];
+    arr.push(r);
+    activasPorPago.set(r.pago_id, arr);
+  }
+
+  const filas: {
+    pago_id: number;
+    credito_id: number;
+    motivo: string;
+    faltantes: string;
+    activas: string;
+    montos_empatados: boolean;
+  }[] = [];
+  let noSimulables = 0;
+
+  for (const p of pagos) {
+    // Cancelación: reparte por cuota_inversionista, no por monto_aportado. La
+    // simulación daría un esperado distinto al real → no se reporta, se cuenta.
+    if (p.validation_status === "reset") {
+      noSimulables++;
+      continue;
+    }
+
+    const invs = rosterPorCredito.get(p.credito_id) ?? [];
+    const totalConIva = new Big(fix2(p.abono_interes)).plus(fix2(p.abono_iva_12));
+    const totalBase = invs.reduce((s, i) => s.plus(new Big(fix2(i.monto_aportado))), new Big(0));
+    const roster = invs.map((i) => ({
+      inversionista_id: i.inversionista_id,
+      nombre: i.nombre,
+      emite_factura: i.emite_factura,
+      status_espejo: i.status_espejo,
+      porcentaje_participacion: i.porcentaje_participacion,
+      porcentaje_cash_in: i.porcentaje_cash_in,
+      interes_proporcional: totalBase.gt(0)
+        ? totalConIva.times(new Big(fix2(i.monto_aportado)).div(totalBase)).round(2).toString()
+        : "0",
+    }));
+
+    const activas = (activasPorPago.get(p.pago_id) ?? []).map((a) => {
+      const d = conceptoPorFactura.get(a.factura_id);
+      return {
+        factura_id: a.factura_id,
+        concepto: d?.concepto ?? a.concepto ?? null,
+        inversionista_id: d?.inversionista_id ?? a.inversionista_id ?? null,
+        monto_total: a.monto_total,
+      };
+    });
+
+    const diff = computarDiffFacturas({
+      pagoData: p,
+      inversionistas: roster,
+      activas,
+      tieneOperacionesPendientesFacturar: p.prorrateo_pendiente === true,
+    });
+
+    if (diff.modo !== "FALTANTES" || diff.faltantes.size === 0) continue;
+
+    // ¿Dos rubros distintos del pago con el MISMO monto? Ese es el caso peligroso:
+    // una sola factura pudo cubrir uno y el diff cree que falta el otro.
+    const montosRubro = [
+      fix2(p.mora),
+      fix2(p.otros),
+      new Big(fix2(p.abono_seguro)).plus(fix2(p.abono_gps)).plus(fix2(p.membresias_pago)).toFixed(2),
+      totalConIva.toFixed(2),
+    ].filter((m) => new Big(m).gt(0));
+    const montos_empatados = new Set(montosRubro).size !== montosRubro.length;
+
+    // Por qué revisarlo antes de habilitar la re-facturación:
+    //   • montos_empatados: dos rubros del pago valen lo mismo, una sola factura
+    //     pudo cubrir uno y el diff cree que falta el otro.
+    //   • posible_roster_cambiado: el faltante es el DTE de un inversionista. El
+    //     esperado se calcula con el roster VIVO; si ese inversionista entró
+    //     DESPUÉS de la corrida original, su parte nunca se facturó porque no le
+    //     tocaba. Re-facturar le emitiría un DTE por un pago que no era suyo.
+    //     (La dirección contraria —un DTE de alguien que ya salió— sí la corta
+    //      el diff con la regla logrado ⊄ esperado.)
+    //   • rubro_no_emitido: el caso sano — un rubro del pago sin ningún DTE.
+    const faltantesArr = [...diff.faltantes];
+    const motivo = montos_empatados
+      ? "montos_empatados"
+      : faltantesArr.some((k) => k.startsWith("INTERESES:"))
+        ? "posible_roster_cambiado"
+        : "rubro_no_emitido";
+
+    filas.push({
+      pago_id: p.pago_id,
+      credito_id: p.credito_id,
+      motivo,
+      faltantes: faltantesArr.join(" "),
+      activas: activas.map((a) => `${a.factura_id}:${a.concepto}:Q${a.monto_total}`).join(" "),
+      montos_empatados,
+    });
+  }
+
+  const ORDEN = ["montos_empatados", "posible_roster_cambiado", "rubro_no_emitido"];
+  filas.sort(
+    (a, b) => ORDEN.indexOf(a.motivo) - ORDEN.indexOf(b.motivo) || a.pago_id - b.pago_id
+  );
+
+  const csv = [
+    "pago_id,credito_id,motivo,faltantes,facturas_activas",
+    ...filas.map((r) =>
+      [r.pago_id, r.credito_id, r.motivo, `"${r.faltantes}"`, `"${r.activas}"`].join(",")
+    ),
+  ].join("\n");
+
+  return { filas, csv, noSimulables };
 }
 
 main()

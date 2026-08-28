@@ -1,8 +1,29 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "../database";
 import { ajuste_fecha_ideal_pago } from "../database/db";
 
 type Executor = Pick<typeof db, "update">;
+
+export async function claimAjusteFechaIdealPago(
+  ajusteId: number,
+  pagoId: number,
+  executor: Executor = db
+): Promise<void> {
+  const [claimed] = await executor
+    .update(ajuste_fecha_ideal_pago)
+    .set({ fecha_cobro: new Date(), pago_id: pagoId })
+    .where(
+      and(
+        eq(ajuste_fecha_ideal_pago.id, ajusteId),
+        isNull(ajuste_fecha_ideal_pago.fecha_cobro),
+        isNull(ajuste_fecha_ideal_pago.pago_id)
+      )
+    )
+    .returning({ id: ajuste_fecha_ideal_pago.id });
+  if (!claimed) {
+    throw new Error(`El ajuste ${ajusteId} ya fue cobrado por otro pago`);
+  }
+}
 
 /**
  * Si pago_id es el que cobró un ajuste por fecha ideal de pago (ver

@@ -107,6 +107,7 @@ export interface AjusteFechaIdealPayload {
 	monto_membresia: number;
 	monto_servicios: number;
 	monto_total: number;
+	fecha_referencia?: string;
 }
 
 export interface CreateCreditoInput {

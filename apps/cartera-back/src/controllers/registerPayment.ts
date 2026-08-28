@@ -60,6 +60,7 @@ import {
   type PaymentAdvisoryLockConnection,
 } from "../utils/paymentAdvisoryLock";
 import { emitRecoveredDuplicatePendingInstallment } from "../utils/structuredLogger";
+import { claimAjusteFechaIdealPago } from "./ajusteFechaIdealPago";
 
 const CUOTA_INTEGRITY_ERROR_PREFIX = "Inconsistencia de integridad:";
 
@@ -1569,10 +1570,11 @@ export const insertPayment = async ({ body, set }: any) => {
                   inserted &&
                   ajusteFechaIdealId !== undefined
                 ) {
-                  await tx
-                    .update(ajuste_fecha_ideal_pago)
-                    .set({ fecha_cobro: new Date(), pago_id: inserted.pago_id })
-                    .where(eq(ajuste_fecha_ideal_pago.id, ajusteFechaIdealId));
+                  await claimAjusteFechaIdealPago(
+                    ajusteFechaIdealId,
+                    inserted.pago_id,
+                    tx
+                  );
                   console.log(
                     `🧾 Ajuste por fecha ideal de pago #${ajusteFechaIdealId} marcado como cobrado (pago_id=${inserted.pago_id}).`
                   );
@@ -1718,10 +1720,11 @@ export const insertPayment = async ({ body, set }: any) => {
                 inserted &&
                 ajusteFechaIdealId !== undefined
               ) {
-                await tx
-                  .update(ajuste_fecha_ideal_pago)
-                  .set({ fecha_cobro: new Date(), pago_id: inserted.pago_id })
-                  .where(eq(ajuste_fecha_ideal_pago.id, ajusteFechaIdealId));
+                await claimAjusteFechaIdealPago(
+                  ajusteFechaIdealId,
+                  inserted.pago_id,
+                  tx
+                );
                 console.log(
                   `🧾 Ajuste por fecha ideal de pago #${ajusteFechaIdealId} marcado como cobrado (pago_id=${inserted.pago_id}).`
                 );
@@ -1883,10 +1886,11 @@ export const insertPayment = async ({ body, set }: any) => {
                 inserted &&
                 ajusteFechaIdealId !== undefined
               ) {
-                await tx
-                  .update(ajuste_fecha_ideal_pago)
-                  .set({ fecha_cobro: new Date(), pago_id: inserted.pago_id })
-                  .where(eq(ajuste_fecha_ideal_pago.id, ajusteFechaIdealId));
+                await claimAjusteFechaIdealPago(
+                  ajusteFechaIdealId,
+                  inserted.pago_id,
+                  tx
+                );
                 console.log(
                   `🧾 Ajuste por fecha ideal de pago #${ajusteFechaIdealId} marcado como cobrado (pago_id=${inserted.pago_id}).`
                 );

@@ -1021,6 +1021,7 @@ async function createCredit(
 		// sistema hubiera asignado por default. Solo aplica cuando diaPagoOriginalSistema
 		// quedó capturado en el 50% (assignInvestorAndAdvance) — es decir, solo cuando
 		// se eligió un día IA, nunca cuando se eligió 15/30 manualmente.
+		const fechaReferenciaPrimeraCuota = new Date();
 		const ajusteCalculado =
 			opportunity.diaPagoOriginalSistema != null
 				? calcularAjusteFechaIdeal({
@@ -1033,6 +1034,7 @@ async function createCredit(
 						membresiaMensual: membresiaPago ?? 0,
 						seguroMensual: seguro ?? 0,
 						gpsMensual: gps ?? 0,
+						fechaReferencia: fechaReferenciaPrimeraCuota,
 					})
 				: null;
 
@@ -1046,6 +1048,7 @@ async function createCredit(
 					monto_membresia: ajusteCalculado.montoMembresia,
 					monto_servicios: ajusteCalculado.montoServicios,
 					monto_total: ajusteCalculado.montoTotal,
+					fecha_referencia: fechaReferenciaPrimeraCuota.toISOString(),
 				}
 			: undefined;
 

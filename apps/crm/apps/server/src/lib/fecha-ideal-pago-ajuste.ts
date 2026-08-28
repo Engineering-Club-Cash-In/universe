@@ -1,3 +1,4 @@
+import Big from "big.js";
 import { toDateStrGT } from "./guatemala-month-window";
 
 /**
@@ -43,19 +44,14 @@ export interface AjusteFechaIdealResult {
 	montoTotal: number;
 }
 
-function redondearMonto(valor: number): number {
-	return Math.round((valor + Number.EPSILON) * 100) / 100;
-}
 
 /**
- * Días del mes de la primera cuota, mismo cálculo que generatePaymentDates en
- * cartera-back (createCredit.ts) — a propósito hora local del server, no GT,
- * para no desincronizarse del mes que cartera-back realmente agenda.
+ * Días del mes de la primera cuota usando la misma fecha calendario de
+ * Guatemala que generatePaymentDates en cartera-back.
  */
 function getDiasDelMesPrimeraCuota(fechaReferencia: Date): number {
-	const anio = fechaReferencia.getFullYear();
-	const mesBase = fechaReferencia.getMonth() + 1; // "mes siguiente", 0-based
-	return new Date(anio, mesBase + 1, 0).getDate();
+	const [anio, mes] = toDateStrGT(fechaReferencia).split("-").map(Number);
+	return new Date(Date.UTC(anio, mes + 1, 0)).getUTCDate();
 }
 
 /**
@@ -88,17 +84,20 @@ export function calcularAjusteFechaIdeal(
 
 	if (diasDiferencia === 0) return null;
 
-	const interesMensual = (params.capital * params.porcentajeInteres) / 100;
-	const serviciosMensual = params.seguroMensual + params.gpsMensual;
+	const interesBaseMensual = new Big(params.capital)
+		.times(params.porcentajeInteres)
+		.div(100)
+		.round(2);
+	const ivaInteresMensual = interesBaseMensual.times(0.12).round(2);
+	const prorratear = (montoMensual: Big): number =>
+		Number(
+			montoMensual.times(diasDiferencia).div(diasDelMes).round(2).toString(),
+		);
 
-	const montoInteres = redondearMonto(
-		(interesMensual / diasDelMes) * diasDiferencia,
-	);
-	const montoMembresia = redondearMonto(
-		(params.membresiaMensual / diasDelMes) * diasDiferencia,
-	);
-	const montoServicios = redondearMonto(
-		(serviciosMensual / diasDelMes) * diasDiferencia,
+	const montoInteres = prorratear(interesBaseMensual.plus(ivaInteresMensual));
+	const montoMembresia = prorratear(new Big(params.membresiaMensual));
+	const montoServicios = prorratear(
+		new Big(params.seguroMensual).plus(params.gpsMensual),
 	);
 
 	return {
@@ -107,6 +106,11 @@ export function calcularAjusteFechaIdeal(
 		montoInteres,
 		montoMembresia,
 		montoServicios,
-		montoTotal: redondearMonto(montoInteres + montoMembresia + montoServicios),
+		montoTotal: Number(
+			new Big(montoInteres)
+				.plus(montoMembresia)
+				.plus(montoServicios)
+				.toString(),
+		),
 	};
 }

@@ -253,6 +253,7 @@ const creditSchema = z.object({
       monto_membresia: z.number().min(0),
       monto_servicios: z.number().min(0),
       monto_total: z.number().min(0),
+      fecha_referencia: z.string().datetime().optional(),
     })
     .optional(),
 });
@@ -716,30 +717,29 @@ if (creditosInversionistasData.length > 0) {
 // 3. GENERACIÓN DE FECHAS
 // ========================================
 
-const generatePaymentDates = (plazo: number, diaPagoMensual: number): string[] => {
+export const generatePaymentDates = (
+  plazo: number,
+  diaPagoMensual: number,
+  fechaReferencia?: Date,
+): string[] => {
   const fechas: string[] = [];
-  const startDate = new Date();
-
-  const fechaHoy = new Date();
+  const fechaHoy = fechaReferencia ?? new Date();
   const fechaHoyGuate = fechaHoy.toLocaleDateString("sv-SE", {
     timeZone: "America/Guatemala",
   });
+  const [anioBase, mesBase] = fechaHoyGuate.split("-").map(Number);
 
   fechas.push(fechaHoyGuate);
 
   for (let i = 0; i < plazo; i++) {
-    const anioBase = startDate.getFullYear();
-    const mesBase = startDate.getMonth() + i + 1; // JS maneja overflow de meses
-
-    // Último día del mes destino (ej: Feb → 28/29)
-    const ultimoDiaMes = new Date(anioBase, mesBase + 1, 0).getDate();
+    const mesDestino = mesBase + i;
+    const anio = anioBase + Math.floor(mesDestino / 12);
+    const mes = (mesDestino % 12) + 1;
+    const ultimoDiaMes = new Date(Date.UTC(anio, mes, 0)).getUTCDate();
     const diaPago = Math.min(diaPagoMensual, ultimoDiaMes);
-
-    const fechaLocal = new Date(anioBase, mesBase, diaPago, 12, 0, 0);
-    const fechaGuateStr = fechaLocal.toLocaleDateString("sv-SE", {
-      timeZone: "America/Guatemala",
-    });
-    fechas.push(fechaGuateStr);
+    fechas.push(
+      `${anio}-${String(mes).padStart(2, "0")}-${String(diaPago).padStart(2, "0")}`,
+    );
   }
 
   return fechas;
@@ -985,7 +985,14 @@ export const createCreditCore = async (
   // El día de pago ya viene validado (1-31) desde el CRM: 15, 30, o un día
   // recomendado por el análisis de capacidad de pago. generatePaymentDates
   // hace el clamp de fin de mes internamente, así que se usa tal cual.
-  const fechas = generatePaymentDates(creditData.plazo, creditData.dia_pago_mensual);
+  const fechaReferenciaPrimeraCuota = creditData.ajuste_fecha_ideal?.fecha_referencia
+    ? new Date(creditData.ajuste_fecha_ideal.fecha_referencia)
+    : undefined;
+  const fechas = generatePaymentDates(
+    creditData.plazo,
+    creditData.dia_pago_mensual,
+    fechaReferenciaPrimeraCuota
+  );
 
   const { cuotaInicial, cuotasInsertadas } = await insertInstallments(
     newCredit.credito_id,

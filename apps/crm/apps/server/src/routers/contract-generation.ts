@@ -17,6 +17,10 @@ import { eqDpi } from "../lib/dpi-lookup";
 import { juridicoProcedure } from "../lib/orpc";
 import { getFileUrlWithBucketInKey } from "../lib/storage";
 import {
+	LEGACY_VENDOR_GENDER_REQUIRED_MESSAGE,
+	resolveLegacyContractGender,
+} from "../lib/contract-generation-gender";
+import {
 	enrichLeadFromRenap,
 	mapOpportunityToContractData,
 	transformToApiFormat,
@@ -226,6 +230,7 @@ export const contractGenerationRouter = {
 					month: z.string(),
 					year: z.string(),
 				}),
+				vendorGender: z.enum(["male", "female"]).optional(),
 				beneficiarios: z
 					.array(
 						z.object({
@@ -276,6 +281,15 @@ export const contractGenerationRouter = {
 				];
 				throw new ORPCError("BAD_REQUEST", {
 					message: `Faltan datos para generar contratos: ${allMissing.join(", ")}`,
+				});
+			}
+
+			if (
+				input.contractTypes.includes("declaracion_jurada") &&
+				!input.vendorGender
+			) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: LEGACY_VENDOR_GENDER_REQUIRED_MESSAGE,
 				});
 			}
 
@@ -336,7 +350,11 @@ export const contractGenerationRouter = {
 					const contractName = `Contrato ${contractType}`;
 
 					// Llamar a la API de legal-docs-blueprints
-					const apiResult = await callLegalDocsApi(contractType, contractData);
+					const apiResult = await callLegalDocsApi(
+						contractType,
+						contractData,
+						input.vendorGender,
+					);
 
 					if (apiResult.success) {
 						// Guardar el contrato en la base de datos
@@ -1167,6 +1185,7 @@ interface LegalDocsApiResult {
 async function callLegalDocsApi(
 	contractType: string,
 	data: Awaited<ReturnType<typeof mapOpportunityToContractData>>,
+	vendorGender?: "male" | "female",
 ): Promise<LegalDocsApiResult> {
 	try {
 		if (!data) {
@@ -1211,8 +1230,11 @@ async function callLegalDocsApi(
 		const emails = clientEmail ? [clientEmail] : undefined;
 
 		// Determinar género para concordancia en documentos
-		const gender =
-			data.cliente?.genero === "femenino" ? "female" : ("male" as const);
+		const gender = resolveLegacyContractGender({
+			apiContractType,
+			clientGender: data.cliente?.genero,
+			vendorGender,
+		});
 
 		// Preparar payload para el endpoint /contracts/:type
 		// El endpoint extrae emails y gender del body, el resto va a data

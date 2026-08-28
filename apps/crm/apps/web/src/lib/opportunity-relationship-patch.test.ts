@@ -118,6 +118,20 @@ describe("buildOpportunityRelationshipPatch", () => {
 		});
 	});
 
+	test("preserves company on unrelated edits to a used vehicle", () => {
+		expect(
+			buildOpportunityRelationshipPatch({
+				values: {
+					leadId: currentOpportunity.lead.id,
+					companyId: currentOpportunity.company.id,
+					vehicleId: currentOpportunity.vehicleId,
+				},
+				opportunity: currentOpportunity,
+				vehicleIsNew: false,
+			}),
+		).toEqual({});
+	});
+
 	test("keeps the selected company for a new vehicle", () => {
 		expect(
 			buildOpportunityRelationshipPatch({

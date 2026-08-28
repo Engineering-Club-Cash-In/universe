@@ -521,6 +521,24 @@ export const actualizarPagosExcelRouter = new Elysia()
             //    lo almacenado. `otros` es text sucio: se castea tolerante.
             //    (Codex P1 del #1493)
             const d = datos as Record<string, string>;
+            // Updates de solo-saldo (p. ej. la cuota 0 escribe únicamente
+            // total_restante) no traen campos facturables: sin este guard, sus
+            // undefined se bindean como NULL y el IS DISTINCT FROM de abajo
+            // daría verdadero contra cualquier valor almacenado → re-abriría
+            // pagos OK sin que nada cambiara. (Codex P2)
+            const tocaMontosFacturables = [
+              "abono_interes",
+              "abono_iva_12",
+              "abono_seguro",
+              "abono_gps",
+              "membresias_pago",
+              "mora",
+              "otros",
+            ].every((k) => k in d);
+            if (!tocaMontosFacturables) {
+              await tx.update(pagos_credito).set(datos).where(eq(pagos_credito.pago_id, pago_id));
+              continue;
+            }
             await tx.execute(sql`
               UPDATE cartera.pagos_credito SET
                 factura_status = 'PARCIAL',

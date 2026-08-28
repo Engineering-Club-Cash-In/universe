@@ -420,10 +420,13 @@ async function main() {
     // etiquetó, gana él. Los VALUES van inlined (números e identificadores de
     // nuestro propio catálogo, no input externo) para no pelear con el límite
     // de parámetros.
+    // ::int explícito: un lote donde TODOS los inversionista_id son NULL haría
+    // que Postgres resuelva esa columna del VALUES como text y el SET contra la
+    // columna integer reviente. (Codex P2)
     const values = lote
       .map(
         (d) =>
-          `(${d.factura_id}, '${d.rubro}', ${d.inversionista_id ?? "NULL"})`
+          `(${d.factura_id}, '${d.rubro}', ${d.inversionista_id ?? "NULL"}::int)`
       )
       .join(", ");
     await db.execute(sql`

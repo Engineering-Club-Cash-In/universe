@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, notInArray } from "drizzle-orm";
+import { and, eq, inArray, ne, notInArray } from "drizzle-orm";
 import { db } from "../db";
 import { casosCobros } from "../db/schema/cobros";
 import { leads, opportunities } from "../db/schema/crm";
@@ -454,33 +454,42 @@ async function emitirUnLink(params: {
 	// review). Por eso el grupo del link viejo (si es distinto al actual)
 	// se bloquea PRIMERO, replicando el orden del poller.
 	const stored = await db.transaction(async (tx) => {
-		let grupoDelLinkViejo: string | null = null;
-		if (params.supersedesLinkId) {
-			const [viejo] = await tx
-				.select({ groupId: pagaloPaymentLinks.groupId })
-				.from(pagaloPaymentLinks)
-				.where(eq(pagaloPaymentLinks.id, params.supersedesLinkId));
-			grupoDelLinkViejo = viejo?.groupId ?? null;
-		}
-		// Grupo del link viejo si es OTRO grupo (regenerarGrupo): se bloquea
-		// primero, replicando el orden del poller (ver comentario arriba).
-		if (grupoDelLinkViejo && grupoDelLinkViejo !== params.groupId) {
-			await tx
-				.select({ id: pagaloPaymentGroups.id })
-				.from(pagaloPaymentGroups)
-				.where(eq(pagaloPaymentGroups.id, grupoDelLinkViejo))
-				.for("update");
-		}
-		// Grupo ACTUAL: se bloquea antes que el link viejo cuando ambos
-		// pertenecen al mismo grupo (regenerarLinkIndividual) — bloquear el
-		// link primero y el grupo después invertía el orden de
-		// marcarLinkPagado (pagalo-poll.ts), que siempre toma grupo→link. Un
-		// pago tardío concurrente sobre el mismo link (el poller con el grupo
-		// bloqueado, esperando el link) contra esta transacción (con el link
-		// bloqueado, esperando el grupo) era un deadlock clásico que podía
-		// abortar la regeneración del supervisor antes del INSERT (hallazgo
-		// de code review — el caso cross-group ya estaba resuelto, este es
-		// el caso same-group, que seguía con el orden original invertido).
+		// carteraCreditoId no cambia en un grupo existente — se puede leer
+		// sin candado para saber a qué crédito bloquear antes de tocar nada.
+		const [grupoSinCandado] = await tx
+			.select({ carteraCreditoId: pagaloPaymentGroups.carteraCreditoId })
+			.from(pagaloPaymentGroups)
+			.where(eq(pagaloPaymentGroups.id, params.groupId));
+		if (!grupoSinCandado) throw new Error("Grupo Págalo no encontrado.");
+		// Orden de candados: marcarLinkPagado (pagalo-poll.ts) bloquea
+		// primero el grupo DUEÑO del link que cobra —que puede ser CUALQUIER
+		// predecesor de la cadena, no solo el inmediato (supersedesLinkId)—
+		// y DESPUÉS, solo si ese link es REPLACED, el grupo activo del
+		// crédito (este grupo, params.groupId). Bloquear acá el grupo activo
+		// primero y los predecesores después invierte ese orden: deadlock
+		// clásico, y si Postgres aborta al poller como víctima, su PAID
+		// nunca comitea, esta transacción ve "sin pago pendiente" y emite el
+		// link nuevo igual mientras el pago real queda sin detectar hasta el
+		// siguiente poll (hallazgo de code review — el caso de un solo
+		// predecesor inmediato ya estaba resuelto bloqueándolo antes que el
+		// activo; con más de un predecesor en la cadena, o en el caso
+		// same-group de regenerarLinkIndividual, el activo seguía
+		// bloqueándose primero). Se bloquean TODOS los demás grupos del
+		// crédito (todos los predecesores posibles) antes que el activo.
+		await tx
+			.select({ id: pagaloPaymentGroups.id })
+			.from(pagaloPaymentGroups)
+			.where(
+				and(
+					eq(
+						pagaloPaymentGroups.carteraCreditoId,
+						grupoSinCandado.carteraCreditoId,
+					),
+					ne(pagaloPaymentGroups.id, params.groupId),
+				),
+			)
+			.orderBy(pagaloPaymentGroups.id)
+			.for("update");
 		const [grupo] = await tx
 			.select({
 				status: pagaloPaymentGroups.status,
@@ -500,26 +509,9 @@ async function emitirUnLink(params: {
 		// tomara el suyo — un pago podía llegar en esa ventana sin candado
 		// entre ambas y colarse igual (hallazgo de code review). Movido acá,
 		// bajo el MISMO candado que protege el INSERT de más abajo: sin
-		// ventana entre el chequeo y la emisión.
-		//
-		// El query busca en TODO el historial del crédito (join sin filtrar
-		// groupId), pero hasta acá solo se bloqueaba el grupo actual y —si
-		// aplica— el grupo del predecesor INMEDIATO (supersedesLinkId). Con
-		// una cadena de más de un predecesor cancelado (A→B→C, emitiendo para
-		// C con supersedesLinkId apuntando a B), marcarLinkPagado bloquea
-		// primero el grupo DUEÑO del link que cobra — que puede ser A, dos
-		// niveles atrás, nunca bloqueado acá — así que un pago tardío en A
-		// corría sin cruzarse con este candado, se leía como "no hay pago
-		// pendiente" y el link nuevo se emitía igual (hallazgo de code
-		// review). Se bloquean TODOS los grupos del carteraCreditoId antes de
-		// leer los links pagados, para serializar contra cualquier grupo de
-		// la cadena, no solo el inmediato.
-		await tx
-			.select({ id: pagaloPaymentGroups.id })
-			.from(pagaloPaymentGroups)
-			.where(eq(pagaloPaymentGroups.carteraCreditoId, grupo.carteraCreditoId))
-			.orderBy(pagaloPaymentGroups.id)
-			.for("update");
+		// ventana entre el chequeo y la emisión. Busca en TODO el historial
+		// del crédito (join sin filtrar groupId) — ya bloqueado arriba,
+		// predecesores primero, activo al final.
 		const [pagoPredecesorSinReconciliar] = await tx
 			.select({ linkId: pagaloPaymentLinks.id })
 			.from(pagaloPaymentLinks)
@@ -1207,6 +1199,30 @@ export async function regenerarGrupo(params: {
 		// el lock esta transacción espera — y cuando despierta, ve TODO lo
 		// que el poller comiteó en su transacción (marcar PAID + escalar el
 		// grupo van juntos, misma tx), incluido el pago del predecesor.
+		//
+		// Orden de candados: marcarLinkPagado (pagalo-poll.ts) bloquea
+		// primero el grupo DUEÑO del link que cobra (que puede ser un
+		// predecesor) y DESPUÉS, solo si ese link es REPLACED, el grupo
+		// activo del crédito (este grupo). Bloquear acá el grupo activo
+		// PRIMERO y los predecesores DESPUÉS invertía ese orden — deadlock
+		// clásico; si Postgres aborta al poller como víctima, su PAID nunca
+		// comitea, esta transacción ve "sin pago pendiente" y regenera
+		// igual, emitiendo un link nuevo cobrable mientras el pago real
+		// queda sin detectar hasta el siguiente poll (hallazgo de code
+		// review). Se bloquean primero TODOS los demás grupos del crédito
+		// (los predecesores), y el grupo activo al final — mismo orden que
+		// el poller.
+		await tx
+			.select({ id: pagaloPaymentGroups.id })
+			.from(pagaloPaymentGroups)
+			.where(
+				and(
+					eq(pagaloPaymentGroups.carteraCreditoId, grupoViejo.carteraCreditoId),
+					ne(pagaloPaymentGroups.id, params.groupId),
+				),
+			)
+			.orderBy(pagaloPaymentGroups.id)
+			.for("update");
 		await tx
 			.select({ id: pagaloPaymentGroups.id })
 			.from(pagaloPaymentGroups)
@@ -1256,23 +1272,8 @@ export async function regenerarGrupo(params: {
 		// cancelaba el grupo en revisión, emitía links nuevos y se los
 		// mandaba al cliente mientras el pago anterior quedaba sin
 		// reconciliar para siempre (hallazgo de code review). Se busca en
-		// TODOS los grupos del mismo carteraCreditoId, no solo el actual.
-		//
-		// Mismo hueco que emitirUnLink ya tuvo (hallazgo de code review): con
-		// más de un predecesor cancelado en la cadena, marcarLinkPagado
-		// bloquea primero el grupo DUEÑO del link que cobra, que puede ser
-		// cualquiera de la cadena — no solo params.groupId. Sin bloquear
-		// también los predecesores, un pago tardío en uno de ellos corre sin
-		// cruzarse con este candado. Se bloquean TODOS los grupos del
-		// carteraCreditoId antes de leer los pagos.
-		await tx
-			.select({ id: pagaloPaymentGroups.id })
-			.from(pagaloPaymentGroups)
-			.where(
-				eq(pagaloPaymentGroups.carteraCreditoId, grupoViejo.carteraCreditoId),
-			)
-			.orderBy(pagaloPaymentGroups.id)
-			.for("update");
+		// TODOS los grupos del mismo carteraCreditoId, no solo el actual —
+		// ya bloqueados (predecesores primero, activo al final) más arriba.
 		const [pagoSinReconciliar] = await tx
 			.select({ linkId: pagaloPaymentLinks.id })
 			.from(pagaloPaymentLinks)

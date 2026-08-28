@@ -59,11 +59,14 @@ function esFilaValida(valor: unknown): valor is AllocationRow {
 		return false;
 	if (typeof fila.rubro !== "string") return false;
 	if (typeof fila.amount !== "string") return false;
-	if (
-		fila.numero_cuota !== null &&
-		fila.numero_cuota !== undefined &&
-		typeof fila.numero_cuota !== "number"
-	)
+	// AllocationRow declara numero_cuota como number | null (sin undefined) —
+	// el chequeo anterior (!== null && !== undefined && typeof !== "number")
+	// dejaba pasar undefined sin llegar al typeof, así que un snapshot
+	// histórico/malformado con el campo directamente ausente entraba como
+	// válido y agruparPorCuota usaba esa clave undefined en el Map, armando
+	// un grupo "Cuota #undefined" en vez de descartar la fila (hallazgo de
+	// code review). Solo null o number pasan ahora.
+	if (fila.numero_cuota !== null && typeof fila.numero_cuota !== "number")
 		return false;
 	return true;
 }

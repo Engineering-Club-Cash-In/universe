@@ -103,19 +103,37 @@ function FilaGrupo({
 	return (
 		<TableRow>
 			<TableCell>
-				{/* /cobros/$id acepta el SIFCO directo cuando no es UUID de caso
-				    (resolverNumeroSifco, server) — un grupo del bot sin
-				    casoCobroId (D-45 del contrato compartido) igual llega a su
-				    Ficha 360 y su bitácora, no queda huérfano en la bandeja
-				    (hallazgo de code review). */}
-				<Link
-					to="/cobros/$id"
-					params={{ id: grupo.numeroCreditoSifco }}
-					search={{ tipo: "caso" }}
-					className="font-medium text-violet-700 hover:underline"
-				>
-					{grupo.numeroCreditoSifco}
-				</Link>
+				{grupo.casoCobroId ? (
+					// /cobros/$id acepta el SIFCO directo cuando no es UUID de
+					// caso (resolverNumeroSifco, server) — un grupo con
+					// casoCobroId ya tiene un caso real detrás, así que
+					// navegar ahí es de solo lectura sobre algo que ya existe.
+					<Link
+						to="/cobros/$id"
+						params={{ id: grupo.numeroCreditoSifco }}
+						search={{ tipo: "caso" }}
+						className="font-medium text-violet-700 hover:underline"
+					>
+						{grupo.numeroCreditoSifco}
+					</Link>
+				) : (
+					// Un grupo SIN casoCobroId (típicamente del bot) no tiene
+					// caso de cobros detrás — /cobros/$id llama
+					// getDetallesCreditoCarteraBack, que si no encuentra un
+					// caso activo para el SIFCO CREA uno nuevo y lo asigna al
+					// usuario que solo quería mirar (cobros.ts, líneas ~4468-
+					// 4508). Navegar ahí desde la bandeja no era de solo
+					// lectura: el supervisor terminaba generándose trabajo
+					// operativo real con un click (hallazgo de code review).
+					// Sin link hasta que exista una vista de detalle
+					// realmente read-only para este caso.
+					<span
+						className="font-medium"
+						title="Este grupo no tiene caso de cobros asociado — abrirlo crearía uno nuevo."
+					>
+						{grupo.numeroCreditoSifco}
+					</span>
+				)}
 			</TableCell>
 			<TableCell>
 				{normalizarNombreCliente(grupo.clienteNombre) ?? "—"}

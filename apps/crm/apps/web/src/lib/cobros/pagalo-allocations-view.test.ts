@@ -98,6 +98,28 @@ describe("agruparPorCuota", () => {
 		expect(resultado[0]?.montoTotal).toBe("100.00");
 	});
 
+	test("numero_cuota ausente (undefined, no null) se descarta en vez de formar 'Cuota #undefined'", () => {
+		const snapshot = [
+			{
+				link_type: "CAPITAL",
+				rubro: "CAPITAL",
+				amount: "100.00",
+				// numero_cuota directamente ausente del objeto — distinto de
+				// pasarlo explícito como null (mora pura, sí válido).
+			},
+			{
+				link_type: "MORA_INTERES",
+				numero_cuota: null,
+				rubro: "MORA",
+				amount: "50.00",
+			},
+		];
+		const resultado = agruparPorCuota(snapshot, []);
+		expect(resultado).toHaveLength(1);
+		expect(resultado[0]?.numeroCuota).toBeNull();
+		expect(resultado[0]?.montoTotal).toBe("50.00");
+	});
+
 	test("link REPLACED + ACTIVE del mismo tipo: uno activo, uno histórico", () => {
 		const snapshot = [
 			{

@@ -65,8 +65,14 @@ import {
 	pagaloPaymentLinks,
 } from "../db/schema/pagalo-payments";
 import { carteraBackClient } from "../services/cartera-back-client";
-import { createPagaloClient, getPagaloSandboxConfig } from "../services/pagalo-client";
-import { correrDispatchPagalo, reclamarYProcesarGrupo } from "./pagalo-dispatch";
+import {
+	createPagaloClient,
+	getPagaloSandboxConfig,
+} from "../services/pagalo-client";
+import {
+	correrDispatchPagalo,
+	reclamarYProcesarGrupo,
+} from "./pagalo-dispatch";
 
 /** Tope por corrida. Si hay más, se atienden en la siguiente. */
 const MAXIMO_POR_CORRIDA = 50;
@@ -172,21 +178,74 @@ async function reclamarLinksPendientes(): Promise<LinkClaimado[]> {
 	return reclamados;
 }
 
+/** Umbral de reintentos de poll a partir del cual se registra un evento
+ * (no en cada intento: con backoff exponencial hasta 30 min, eso serían
+ * decenas de filas por link y ahogaría la bitácora — CB-127 G3). */
+const UMBRAL_POLL_RETRY_EXHAUSTED = 5;
+
 async function registrarIntentoFallido(
 	link: LinkClaimado,
 	errorMessage?: string,
 ): Promise<void> {
 	const pollAttempts = link.pollAttempts + 1;
-	await db
-		.update(pagaloPaymentLinks)
-		.set({
-			pollAttempts,
-			lastPolledAt: new Date(),
-			lastPollError: errorMessage ?? null,
-			nextPollAt: proximoIntento(pollAttempts),
-			updatedAt: new Date(),
-		})
-		.where(eq(pagaloPaymentLinks.id, link.id));
+	await db.transaction(async (tx) => {
+		// Condicionado al pollClaimedAt que ESTA corrida puso al reclamar el
+		// link (reclamarLinksPendientes) — sin esto, dos corridas reclamando
+		// el mismo link casi a la vez (dos requests concurrentes al botón
+		// manual probarPollPagalo, o dos réplicas del cron si algún día corre
+		// en más de una instancia) calculaban pollAttempts en memoria a
+		// partir del mismo snapshot y ambas insertaban POLL_RETRY_EXHAUSTED
+		// al cruzar el umbral — evento duplicado en la bitácora sin que el
+		// umbral realmente se cruzara dos veces (hallazgo de code review).
+		// Solo la corrida que sigue siendo dueña del lease escribe; la otra
+		// pierde la carrera en silencio (su próximo poll ya verá el estado
+		// fresco).
+		//
+		// El lease por sí solo no alcanza: si ESTA corrida (dueña legítima
+		// del lease) leyó un status pendiente de Págalo, pero mientras tanto
+		// otra corrida con un lease vencido (que igual sigue procesando, el
+		// vencimiento solo permite que OTRO worker reclame, no mata al
+		// original) termina y marca el link PAID/terminal sin tocar
+		// pollClaimedAt (ni marcarLinkPagado ni marcarLinkTerminal lo
+		// limpian), este UPDATE seguía matchereando por pollClaimedAt y podía
+		// sobrescribir pollAttempts/lastPollError — o insertar
+		// POLL_RETRY_EXHAUSTED — sobre un link que ya salió del ciclo de
+		// polling (hallazgo de code review). Mismos 3 estados pollables que
+		// reclamarLinksPendientes.
+		const [actualizado] = await tx
+			.update(pagaloPaymentLinks)
+			.set({
+				pollAttempts,
+				lastPolledAt: new Date(),
+				lastPollError: errorMessage ?? null,
+				nextPollAt: proximoIntento(pollAttempts),
+				updatedAt: new Date(),
+			})
+			.where(
+				and(
+					eq(pagaloPaymentLinks.id, link.id),
+					inArray(pagaloPaymentLinks.status, [
+						"CREATING",
+						"ACTIVE",
+						"REPLACED",
+					]),
+					link.pollClaimedAt
+						? eq(pagaloPaymentLinks.pollClaimedAt, link.pollClaimedAt)
+						: isNull(pagaloPaymentLinks.pollClaimedAt),
+				),
+			)
+			.returning({ id: pagaloPaymentLinks.id });
+		if (!actualizado) return;
+		if (pollAttempts === UMBRAL_POLL_RETRY_EXHAUSTED) {
+			await tx.insert(pagaloPaymentEvents).values({
+				groupId: link.groupId,
+				linkId: link.id,
+				eventType: "POLL_RETRY_EXHAUSTED",
+				source: "PAGALO_POLLER",
+				payload: { pollAttempts, lastPollError: errorMessage?.slice(0, 500) },
+			});
+		}
+	});
 }
 
 /**
@@ -256,7 +315,9 @@ async function subirVoucher(
 	// del comando de importación (crm_group_id, transaction_uuid), no por su
 	// propio nombre de archivo (ver pagaloPaymentImportPolicy.ts, voucherValid).
 	const nombreSugerido = `voucher-pagalo-${groupId}-${link.linkType}.pdf`;
-	const archivo = new Blob([new Uint8Array(buffer)], { type: "application/pdf" });
+	const archivo = new Blob([new Uint8Array(buffer)], {
+		type: "application/pdf",
+	});
 	const subida = await carteraBackClient.uploadFile(archivo, nombreSugerido);
 	const voucherStorageKey = subida.filename;
 	// cartera-back arma la URL pública final (URL_PUBLIC_R2 + key) del lado
@@ -587,6 +648,7 @@ async function marcarLinkTerminal(
 				updatedAt: new Date(),
 			})
 			.where(eq(pagaloPaymentLinks.id, link.id));
+		const desde = link.activatedAt ?? link.createdAt;
 		await tx.insert(pagaloPaymentEvents).values({
 			groupId: link.groupId,
 			linkId: link.id,
@@ -594,7 +656,15 @@ async function marcarLinkTerminal(
 			source: "PAGALO_POLLER",
 			fromStatus: fresco.status,
 			toStatus: status,
-			payload: {},
+			payload: {
+				motivo:
+					status === "EXPIRED" ? "expirado_en_pagalo" : "cancelado_en_pagalo",
+				providerStatus: status === "EXPIRED" ? "4" : "3",
+				pollAttempts: link.pollAttempts,
+				antiguedadHoras: desde
+					? Math.round((Date.now() - desde.getTime()) / 3_600_000)
+					: null,
+			},
 		});
 		// Un link REPLACED que Págalo da por cancelado/expirado es el final
 		// ESPERADO del reemplazo: no reabre su grupo (CANCELLED) — chocaría con
@@ -675,7 +745,10 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 			}
 			const status = estado?.message?.status ?? estado?.data?.status;
 			if (status === "3" || status === "4") {
-				await marcarLinkTerminal(link, status === "3" ? "CANCELLED" : "EXPIRED");
+				await marcarLinkTerminal(
+					link,
+					status === "3" ? "CANCELLED" : "EXPIRED",
+				);
 				resultado.sinCambios++;
 				continue;
 			}
@@ -722,7 +795,9 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 					// verificar arriesgaba dejar un pago READY_TO_APPLY apuntando a
 					// un archivo que ya no existe (hallazgo Codex tras el fix
 					// anterior, que asumía "lanzó = no se guardó nada").
-					if (await voucherRealmenteNoConsumido(link.id, subida.voucherStorageKey)) {
+					if (
+						await voucherRealmenteNoConsumido(link.id, subida.voucherStorageKey)
+					) {
 						await carteraBackClient
 							.deleteArchivoBoletaHuerfano(subida.voucherStorageKey)
 							.catch((deleteError) =>
@@ -760,8 +835,12 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 						// del dispatch inline, que dejaba el reporte del botón
 						// manual mintiendo "0 completados" aunque sí aplicara el
 						// pago (hallazgo Codex).
-						if (resultadoInline === "COMPLETADO") resultado.dispatchCompletados++;
-						else if (resultadoInline === "ERROR" || resultadoInline === "REVIEW_REQUIRED") {
+						if (resultadoInline === "COMPLETADO")
+							resultado.dispatchCompletados++;
+						else if (
+							resultadoInline === "ERROR" ||
+							resultadoInline === "REVIEW_REQUIRED"
+						) {
 							resultado.dispatchErrores++;
 						}
 					} catch (error) {
@@ -794,7 +873,8 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 	const dispatchPrevio = await correrDispatchPagalo();
 	resultado.dispatchReintentados += dispatchPrevio.revisados;
 	resultado.dispatchCompletados += dispatchPrevio.completados;
-	resultado.dispatchErrores += dispatchPrevio.errores + dispatchPrevio.revisionRequerida;
+	resultado.dispatchErrores +=
+		dispatchPrevio.errores + dispatchPrevio.revisionRequerida;
 
 	return resultado;
 }

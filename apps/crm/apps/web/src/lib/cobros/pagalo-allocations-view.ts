@@ -38,6 +38,18 @@ export type CuotaConLinks = {
 
 const LINK_TYPES: readonly PagaloLinkType[] = ["CAPITAL", "MORA_INTERES"];
 const ESTADOS_VIVOS = new Set(["CREATING", "ACTIVE"]);
+// linksHistoricos es específicamente para contar DUPLICADOS (generaciones
+// previas superadas) — un catch-all "todo lo que no es vivo" clasificaba
+// también PAID ahí, así que un grupo normal pagado sin ninguna regeneración
+// mostraba "(1 link(s) previo(s))" en cada cuota, insinuando un duplicado
+// que nunca existió (hallazgo de code review). PAID no cuenta para ningún
+// lado: no es un duplicado cerrado sin pago, tampoco está pendiente.
+const ESTADOS_HISTORICOS = new Set([
+	"REPLACED",
+	"EXPIRED",
+	"CANCELLED",
+	"ERROR",
+]);
 
 function esAllocationRow(row: unknown): row is AllocationRow {
 	if (!row || typeof row !== "object") return false;
@@ -130,7 +142,7 @@ export function agruparPorCuota(
 						generation: l.generation,
 					})),
 				linksHistoricos: linksDeLosTipos
-					.filter((l) => !ESTADOS_VIVOS.has(l.status))
+					.filter((l) => ESTADOS_HISTORICOS.has(l.status))
 					.map((l) => ({
 						id: l.id,
 						status: l.status,

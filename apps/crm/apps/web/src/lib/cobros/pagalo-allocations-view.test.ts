@@ -117,4 +117,27 @@ describe("agruparPorCuota", () => {
 			"link-viejo",
 		]);
 	});
+
+	test("link PAID sin ninguna regeneración no cuenta como link previo/duplicado", () => {
+		const snapshot = [
+			{
+				link_type: "CAPITAL",
+				numero_cuota: 7,
+				rubro: "CAPITAL",
+				amount: "400.00",
+			},
+		];
+		const links = [
+			{
+				id: "link-pagado",
+				linkType: "CAPITAL" as const,
+				status: "PAID",
+				generation: 1,
+			},
+		];
+		const resultado = agruparPorCuota(snapshot, links);
+		expect(resultado).toHaveLength(1);
+		expect(resultado[0].linksVivos).toEqual([]);
+		expect(resultado[0].linksHistoricos).toEqual([]);
+	});
 });

@@ -21,6 +21,18 @@ const MODES = new Set([
 	"reinversion_variable",
 	"reinversion_excedente",
 	"reinversion_combinada",
+	"sin_clasificar",
+]);
+const BILLING_MODES = new Set([
+	"p2p_directa",
+	"factura_cube",
+	"factura_cube_pequeno",
+	"sin_modalidad",
+]);
+const PURCHASE_CLASSIFICATIONS = new Set([
+	"nueva_posicion",
+	"ampliacion_posicion",
+	"sin_clasificar",
 ]);
 
 const MODE_MONEY_FIELDS = [
@@ -36,10 +48,25 @@ const MODE_MONEY_FIELDS = [
 	"total_distribuido",
 ];
 
+const isCompositionDestination = (value: unknown, unclassified = false) =>
+	hasMoneyFields(value, [
+		"capital",
+		"resto",
+		"total",
+		...(unclassified ? ["sin_clasificar"] : []),
+	]);
+
+const isLiquidationComposition = (value: unknown) =>
+	isRecord(value) &&
+	isCompositionDestination(value.pagado, true) &&
+	isCompositionDestination(value.reinvertido, true) &&
+	isCompositionDestination(value.flujo) &&
+	(value.estado === "exacto" || value.estado === "sin_clasificar");
+
 export function getCompatibleReportData(
 	input: unknown,
 ): ReinversionLiquidacionesResponse | undefined {
-	if (!isRecord(input) || input.contrato_version !== 2) return undefined;
+	if (!isRecord(input) || input.contrato_version !== 3) return undefined;
 	if (!isRecord(input.porTipo)) return undefined;
 	if (
 		!Object.keys(input.porTipo).every((key) => MODES.has(key)) ||
@@ -47,7 +74,8 @@ export function getCompatibleReportData(
 			(row) =>
 				isRecord(row) &&
 				hasMoneyFields(row, MODE_MONEY_FIELDS) &&
-				isNonnegativeInteger(row.cantidad_liquidaciones),
+				isNonnegativeInteger(row.cantidad_liquidaciones) &&
+				isLiquidationComposition(row.composicion),
 		)
 	)
 		return undefined;
@@ -67,7 +95,8 @@ export function getCompatibleReportData(
 					"reinversion",
 					"a_recibir",
 					"capital_activo",
-				]),
+				]) &&
+				isLiquidationComposition(row.composicion),
 		)
 	)
 		return undefined;
@@ -83,9 +112,37 @@ export function getCompatibleReportData(
 		!input.comprasMes.every(
 			(row) =>
 				isRecord(row) &&
-				MODES.has(String(row.tipo)) &&
+				BILLING_MODES.has(String(row.modalidad_facturacion)) &&
+				MODES.has(String(row.tipo_reinversion)) &&
+				PURCHASE_CLASSIFICATIONS.has(String(row.tipo_compra)) &&
 				isNonnegativeInteger(row.cantidad) &&
 				isMoney(row.monto),
+		)
+	)
+		return undefined;
+	if (
+		!isRecord(input.ticketInversion) ||
+		!isRecord(input.ticketInversion.actual) ||
+		!/^\d{4}-\d{2}$/.test(String(input.ticketInversion.actual.periodo)) ||
+		!isNonnegativeInteger(input.ticketInversion.actual.cantidad) ||
+		!hasMoneyFields(input.ticketInversion.actual, [
+			"monto_total",
+			"ticket_promedio",
+		]) ||
+		!(
+			input.ticketInversion.actual.variacion_porcentual === null ||
+			(typeof input.ticketInversion.actual.variacion_porcentual === "string" &&
+				/^-?\d+(?:\.\d+)?$/.test(
+					input.ticketInversion.actual.variacion_porcentual,
+				))
+		) ||
+		!Array.isArray(input.ticketInversion.historico) ||
+		!input.ticketInversion.historico.every(
+			(row) =>
+				isRecord(row) &&
+				/^\d{4}-\d{2}$/.test(String(row.periodo)) &&
+				isNonnegativeInteger(row.cantidad) &&
+				hasMoneyFields(row, ["monto_total", "ticket_promedio"]),
 		)
 	)
 		return undefined;
@@ -122,7 +179,9 @@ export function getCompatibleReportData(
 			(row) =>
 				hasStringFields(row, ["fecha", "inversionista"]) &&
 				isRecord(row) &&
-				MODES.has(String(row.modalidad)) &&
+				BILLING_MODES.has(String(row.modalidad_facturacion)) &&
+				MODES.has(String(row.tipo_reinversion)) &&
+				PURCHASE_CLASSIFICATIONS.has(String(row.tipo_compra)) &&
 				isMoney(row.monto),
 		)
 	)
@@ -151,7 +210,28 @@ const labels: Record<string, string> = {
 	reinversion_variable: "Reinversión variable",
 	reinversion_excedente: "Reinversión excedente",
 	reinversion_combinada: "Reinversión combinada",
+	sin_clasificar: "Sin clasificación histórica",
 };
+
+const billingLabels: Record<string, string> = {
+	p2p_directa: "P2P directa",
+	factura_cube: "Factura CUBE",
+	factura_cube_pequeno: "Factura CUBE pequeño contribuyente",
+	sin_modalidad: "Sin modalidad",
+};
+
+const purchaseLabels: Record<string, string> = {
+	nueva_posicion: "Nueva posición",
+	ampliacion_posicion: "Ampliación de posición",
+	sin_clasificar: "Sin clasificar",
+};
+
+export const getReinvestmentModeLabel = (value: string) =>
+	labels[value] ?? value;
+export const getBillingModeLabel = (value: string) =>
+	billingLabels[value] ?? value;
+export const getPurchaseClassificationLabel = (value: string) =>
+	purchaseLabels[value] ?? value;
 
 export type ReinvestmentModeRow = {
 	type: string;
@@ -171,10 +251,43 @@ export type ReinvestmentModeRow = {
 		capital: number;
 		interest: number;
 	};
+	destinationComposition: {
+		paid: {
+			capital: number;
+			rest: number;
+			unclassified: number;
+			total: number;
+		};
+		reinvested: {
+			capital: number;
+			rest: number;
+			unclassified: number;
+			total: number;
+		};
+		flow: { capital: number; rest: number; total: number };
+	};
 	reconciled: boolean;
 	roundingResidual: number | null;
 	compositionStatus: "exact" | "tolerance" | "failed" | "unavailable";
-	historicalModeVerified: false;
+	historicalModeVerified: boolean;
+};
+
+const emptySummary = {
+	paid: { total: 0, percentage: 0, capital: 0, rest: 0, unclassified: 0 },
+	reinvested: {
+		total: 0,
+		percentage: 0,
+		capital: 0,
+		rest: 0,
+		unclassified: 0,
+	},
+	flow: { total: 0, percentage: 0, capital: 0, rest: 0 },
+	ticket: { amount: 0, count: 0, variationPercentage: null as number | null },
+	interest: {
+		total: 0,
+		investors: { amount: 0, percentage: 0 },
+		cube: { amount: 0, percentage: 0 },
+	},
 };
 
 const incompatibleModel = {
@@ -182,6 +295,7 @@ const incompatibleModel = {
 	data: undefined,
 	rows: [] as ReinvestmentModeRow[],
 	totals: { distributed: 0, paid: 0, reinvested: 0, active: 0 },
+	summary: emptySummary,
 	reconciliations: {
 		destinations: false,
 		modes: false,
@@ -209,16 +323,40 @@ export function buildReinvestmentReportModel(input: unknown) {
 				withheldIsr: Number(value.total_isr),
 				distributed,
 			};
-			const hasAmbiguousFiscal =
-				Number(value.total_iva) !== 0 || Number(value.total_isr) !== 0;
-			const roundingResidual = Math.abs(
+			const destinationComposition = {
+				paid: {
+					capital: Number(value.composicion.pagado.capital),
+					rest: Number(value.composicion.pagado.resto),
+					unclassified: Number(value.composicion.pagado.sin_clasificar),
+					total: Number(value.composicion.pagado.total),
+				},
+				reinvested: {
+					capital: Number(value.composicion.reinvertido.capital),
+					rest: Number(value.composicion.reinvertido.resto),
+					unclassified: Number(value.composicion.reinvertido.sin_clasificar),
+					total: Number(value.composicion.reinvertido.total),
+				},
+				flow: {
+					capital: Number(value.composicion.flujo.capital),
+					rest: Number(value.composicion.flujo.resto),
+					total: Number(value.composicion.flujo.total),
+				},
+			};
+			const compositionReconciles =
 				sumCents([
-					composition.capital,
-					composition.interest,
-					composition.billedVat,
-					-composition.withheldIsr,
-				]) - cents(distributed),
-			);
+					destinationComposition.paid.capital,
+					destinationComposition.paid.rest,
+					destinationComposition.paid.unclassified,
+				]) === cents(destinationComposition.paid.total) &&
+				sumCents([
+					destinationComposition.reinvested.capital,
+					destinationComposition.reinvested.rest,
+					destinationComposition.reinvested.unclassified,
+				]) === cents(destinationComposition.reinvested.total) &&
+				sumCents([
+					destinationComposition.flow.capital,
+					destinationComposition.flow.rest,
+				]) === cents(destinationComposition.flow.total);
 			return {
 				type,
 				label: labels[type] ?? type,
@@ -233,22 +371,27 @@ export function buildReinvestmentReportModel(input: unknown) {
 					),
 				composition,
 				reinvestmentComposition: {
-					capital: Number(value.reinversion_capital),
-					interest: Number(value.reinversion_interes),
+					capital: destinationComposition.reinvested.capital,
+					interest: destinationComposition.reinvested.rest,
 				},
+				destinationComposition,
 				reconciled:
 					sumCents([paid, reinvested]) === cents(distributed) &&
-					(hasAmbiguousFiscal ||
-						roundingResidual <= value.cantidad_liquidaciones),
-				roundingResidual: hasAmbiguousFiscal ? null : roundingResidual / 100,
-				compositionStatus: hasAmbiguousFiscal
-					? "unavailable"
-					: roundingResidual === 0
-						? "exact"
-						: roundingResidual <= value.cantidad_liquidaciones
-							? "tolerance"
-							: "failed",
-				historicalModeVerified: false,
+					cents(destinationComposition.flow.capital) ===
+						cents(value.total_capital) &&
+					cents(destinationComposition.reinvested.capital) ===
+						cents(value.reinversion_capital) &&
+					cents(destinationComposition.reinvested.rest) ===
+						cents(value.reinversion_interes) &&
+					cents(destinationComposition.paid.total) === cents(paid) &&
+					cents(destinationComposition.reinvested.total) ===
+						cents(reinvested) &&
+					cents(destinationComposition.flow.total) === cents(distributed) &&
+					compositionReconciles,
+				roundingResidual: 0,
+				compositionStatus:
+					value.composicion.estado === "exacto" ? "exact" : "unavailable",
+				historicalModeVerified: type !== "sin_clasificar",
 			};
 		})
 		.filter((row) => row.distributed !== 0 || row.active !== 0);
@@ -267,6 +410,36 @@ export function buildReinvestmentReportModel(input: unknown) {
 			Math.round(value * 100) / 100,
 		]),
 	) as typeof totals;
+	const roundMoney = (value: number) => Math.round(value * 100) / 100;
+	const percentage = (value: number, total: number) =>
+		total === 0 ? 0 : Math.round((value / total) * 10_000) / 100;
+	const compositionTotals = rows.reduce(
+		(total, row) => ({
+			paidCapital: total.paidCapital + row.destinationComposition.paid.capital,
+			paidRest: total.paidRest + row.destinationComposition.paid.rest,
+			paidUnclassified:
+				total.paidUnclassified + row.destinationComposition.paid.unclassified,
+			reinvestedCapital:
+				total.reinvestedCapital + row.destinationComposition.reinvested.capital,
+			reinvestedRest:
+				total.reinvestedRest + row.destinationComposition.reinvested.rest,
+			reinvestedUnclassified:
+				total.reinvestedUnclassified +
+				row.destinationComposition.reinvested.unclassified,
+			flowCapital: total.flowCapital + row.destinationComposition.flow.capital,
+			flowRest: total.flowRest + row.destinationComposition.flow.rest,
+		}),
+		{
+			paidCapital: 0,
+			paidRest: 0,
+			paidUnclassified: 0,
+			reinvestedCapital: 0,
+			reinvestedRest: 0,
+			reinvestedUnclassified: 0,
+			flowCapital: 0,
+			flowRest: 0,
+		},
+	);
 	const cubeRows = data.detalleInteresNeto.filter(
 		(row) => row.tratamiento_fiscal === "cube",
 	);
@@ -287,13 +460,20 @@ export function buildReinvestmentReportModel(input: unknown) {
 				.filter((row) => row.tipo === "cancelacion")
 				.map((row) => row.monto),
 		) === cents(data.pagosExtras.cancelaciones);
+	const purchaseKey = (row: {
+		modalidad_facturacion: string;
+		tipo_reinversion: string;
+		tipo_compra: string;
+	}) =>
+		`${row.modalidad_facturacion}\u0000${row.tipo_reinversion}\u0000${row.tipo_compra}`;
 	const purchasesByMode = data.comprasMes.every(
 		(summary) =>
-			data.detalleComprasMes.filter((row) => row.modalidad === summary.tipo)
-				.length === summary.cantidad &&
+			data.detalleComprasMes.filter(
+				(row) => purchaseKey(row) === purchaseKey(summary),
+			).length === summary.cantidad &&
 			sumCents(
 				data.detalleComprasMes
-					.filter((row) => row.modalidad === summary.tipo)
+					.filter((row) => purchaseKey(row) === purchaseKey(summary))
 					.map((row) => row.monto),
 			) === cents(summary.monto),
 	);
@@ -327,7 +507,9 @@ export function buildReinvestmentReportModel(input: unknown) {
 				sumCents(data.comprasMes.map((row) => row.monto)) &&
 			purchasesByMode &&
 			data.detalleComprasMes.every((row) =>
-				data.comprasMes.some((summary) => summary.tipo === row.modalidad),
+				data.comprasMes.some(
+					(summary) => purchaseKey(summary) === purchaseKey(row),
+				),
 			),
 		contract: data.detalle_estado.disponible,
 		composition: rows.some((row) => row.compositionStatus === "unavailable")
@@ -338,13 +520,67 @@ export function buildReinvestmentReportModel(input: unknown) {
 					? "tolerance"
 					: "exact",
 	};
+	const interestInvestors = Number(data.interesNeto.noVerificado.interes);
+	const interestCube = Number(data.interesNeto.cube.interes);
+	const interestTotal = roundMoney(interestInvestors + interestCube);
+	const summary = {
+		paid: {
+			total: roundedTotals.paid,
+			percentage: percentage(roundedTotals.paid, roundedTotals.distributed),
+			capital: roundMoney(compositionTotals.paidCapital),
+			rest: roundMoney(compositionTotals.paidRest),
+			unclassified: roundMoney(compositionTotals.paidUnclassified),
+		},
+		reinvested: {
+			total: roundedTotals.reinvested,
+			percentage: percentage(
+				roundedTotals.reinvested,
+				roundedTotals.distributed,
+			),
+			capital: roundMoney(compositionTotals.reinvestedCapital),
+			rest: roundMoney(compositionTotals.reinvestedRest),
+			unclassified: roundMoney(compositionTotals.reinvestedUnclassified),
+		},
+		flow: {
+			total: roundedTotals.distributed,
+			percentage: roundedTotals.distributed === 0 ? 0 : 100,
+			capital: roundMoney(compositionTotals.flowCapital),
+			rest: roundMoney(compositionTotals.flowRest),
+		},
+		ticket: {
+			amount: Number(data.ticketInversion.actual.ticket_promedio),
+			count: data.ticketInversion.actual.cantidad,
+			variationPercentage:
+				data.ticketInversion.actual.variacion_porcentual === null
+					? null
+					: Number(data.ticketInversion.actual.variacion_porcentual),
+		},
+		interest: {
+			total: interestTotal,
+			investors: {
+				amount: interestInvestors,
+				percentage: percentage(interestInvestors, interestTotal),
+			},
+			cube: {
+				amount: interestCube,
+				percentage: percentage(interestCube, interestTotal),
+			},
+		},
+	};
 	return {
 		compatible: true as const,
 		data,
 		rows,
 		totals: roundedTotals,
+		summary,
 		reconciliations,
-		reconciled: Object.values(reconciliations).every(Boolean),
+		reconciled:
+			reconciliations.destinations &&
+			reconciliations.modes &&
+			reconciliations.interest &&
+			reconciliations.extras &&
+			reconciliations.purchases &&
+			reconciliations.contract,
 	};
 }
 
@@ -423,14 +659,8 @@ export function canRenderSecondaryDetails(state: ReportState) {
 
 const q = (value: number) => `Q${value.toFixed(2)}`;
 const amount = (values: (number | string)[]) => sumCents(values) / 100;
-const NO_SPLIT_TYPES = new Set([
-	"reinversion_variable",
-	"reinversion_excedente",
-	"reinversion_combinada",
-]);
-
 export type DestinationFormula = {
-	parts: { label: "Capital" | "Rendimiento fiscal neto"; value: number }[];
+	parts: { label: "Capital" | "Resto" | "Sin clasificar"; value: number }[];
 	result: number;
 	sentence: string;
 };
@@ -459,48 +689,28 @@ function destinationFormula(
 function getDestinationFormulas(row: ReinvestmentModeRow): {
 	paid: DestinationFormula;
 	reinvested: DestinationFormula;
-} | null {
-	// La modalidad procede del perfil actual, no de un snapshot histórico.
-	if (NO_SPLIT_TYPES.has(row.type) || !row.historicalModeVerified) return null;
-	const capital = {
-		label: "Capital" as const,
-		value: row.composition.capital,
-	};
-	const netYield = {
-		label: "Rendimiento fiscal neto" as const,
-		value:
-			Math.round(
-				(row.composition.interest +
-					row.composition.billedVat -
-					row.composition.withheldIsr) *
-					100,
-			) / 100,
-	};
-	const partsByType = {
-		sin_reinversion: { paid: [capital, netYield], reinvested: [] },
-		reinversion_capital: { paid: [netYield], reinvested: [capital] },
-		reinversion_interes: { paid: [capital], reinvested: [netYield] },
-		reinversion_total: { paid: [], reinvested: [capital, netYield] },
-	} satisfies Record<
-		string,
-		{
-			paid: DestinationFormula["parts"];
-			reinvested: DestinationFormula["parts"];
-		}
-	>;
-	const parts = partsByType[row.type as keyof typeof partsByType];
-	if (!parts) return null;
-	if (
-		sumCents(parts.paid.map((part) => part.value)) !== cents(row.paid) ||
-		sumCents(parts.reinvested.map((part) => part.value)) !==
-			cents(row.reinvested)
-	)
-		return null;
+} {
+	const parts = (destination: {
+		capital: number;
+		rest: number;
+		unclassified: number;
+	}): DestinationFormula["parts"] =>
+		(
+			[
+				{ label: "Capital", value: destination.capital },
+				{ label: "Resto", value: destination.rest },
+				{ label: "Sin clasificar", value: destination.unclassified },
+			] satisfies DestinationFormula["parts"]
+		).filter((part) => cents(part.value) !== 0);
 	return {
-		paid: destinationFormula("Pagado a inversionistas", parts.paid, row.paid),
+		paid: destinationFormula(
+			"Pagado a inversionistas",
+			parts(row.destinationComposition.paid),
+			row.paid,
+		),
 		reinvested: destinationFormula(
 			"Reinvertido",
-			parts.reinvested,
+			parts(row.destinationComposition.reinvested),
 			row.reinvested,
 		),
 	};
@@ -508,7 +718,9 @@ function getDestinationFormulas(row: ReinvestmentModeRow): {
 
 export function getModePresentation(row: ReinvestmentModeRow) {
 	const destinations = getDestinationFormulas(row);
-	const splitAvailable = destinations !== null;
+	const hasUnclassified =
+		cents(row.destinationComposition.paid.unclassified) !== 0 ||
+		cents(row.destinationComposition.reinvested.unclassified) !== 0;
 	return {
 		paid: row.paid,
 		reinvested: row.reinvested,
@@ -516,10 +728,10 @@ export function getModePresentation(row: ReinvestmentModeRow) {
 		equation: `${q(row.paid)} pagado + ${q(row.reinvested)} reinvertido = ${q(row.distributed)} flujo liquidado.`,
 		composition: row.composition,
 		destinations,
-		splitAvailable,
-		splitNote: splitAvailable
-			? null
-			: "El desglose de la reinversión entre capital e interés no está disponible en la fuente actual.",
+		splitAvailable: true,
+		splitNote: hasUnclassified
+			? "La fuente histórica no permite asignar todo el flujo entre capital y resto."
+			: null,
 	};
 }
 
@@ -595,9 +807,9 @@ export function buildSecondarySummaryPresentation(
 			label: "Compras del mes",
 			total: amount(data.comprasMes.map((item) => item.monto)),
 			items: data.comprasMes.map((item) => ({
-				label: labels[item.tipo] ?? item.tipo,
+				label: `${getBillingModeLabel(item.modalidad_facturacion)} · ${getPurchaseClassificationLabel(item.tipo_compra)}`,
 				value: Number(item.monto),
-				meta: `${item.cantidad} ${item.cantidad === 1 ? "compra" : "compras"}`,
+				meta: `${getReinvestmentModeLabel(item.tipo_reinversion)} · ${item.cantidad} ${item.cantidad === 1 ? "compra" : "compras"}`,
 			})),
 		},
 	];
@@ -608,9 +820,17 @@ export function buildInvestorExportRows(input: unknown) {
 	if (!data) return [];
 	return data.porInversionista.map((row) => ({
 		Inversionista: row.nombre,
-		"Modalidad actual": row.tipo_reinversion,
-		Pagado: row.a_recibir,
-		Reinvertido: row.reinversion,
-		"Capital activo actual": row.capital_activo,
+		"Modalidad histórica": getReinvestmentModeLabel(row.tipo_reinversion),
+		"Pagado capital": Number(row.composicion.pagado.capital),
+		"Pagado resto": Number(row.composicion.pagado.resto),
+		"Pagado sin clasificar": Number(row.composicion.pagado.sin_clasificar),
+		Pagado: Number(row.a_recibir),
+		"Reinvertido capital": Number(row.composicion.reinvertido.capital),
+		"Reinvertido resto": Number(row.composicion.reinvertido.resto),
+		"Reinvertido sin clasificar": Number(
+			row.composicion.reinvertido.sin_clasificar,
+		),
+		Reinvertido: Number(row.reinversion),
+		"Capital activo actual": Number(row.capital_activo),
 	}));
 }

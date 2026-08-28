@@ -2,6 +2,7 @@ import { ORPCError } from "@orpc/server";
 import { and, count, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
+import { auditRecord } from "../lib/audit";
 import { coDebtors, leads } from "../db/schema/crm";
 import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import {
@@ -362,6 +363,7 @@ export const messagingRouter = {
 	 * y guarda el resultado real (sent/failed).
 	 */
 	updateWhatsappLog: crmProcedure
+		.meta({ audit: { entity: "lead", action: "update_phone" } })
 		.input(
 			z.object({
 				recipientId: z.string().uuid(),
@@ -393,6 +395,12 @@ export const messagingRouter = {
 					.update(leads)
 					.set({ phone: input.phone })
 					.where(eq(leads.id, recipient.leadId));
+				auditRecord({
+					entity: "lead",
+					id: recipient.leadId,
+					action: "update_phone",
+					data: { recipientId: input.recipientId, phone: input.phone },
+				});
 			}
 			if (recipient.coDebtorId) {
 				await db

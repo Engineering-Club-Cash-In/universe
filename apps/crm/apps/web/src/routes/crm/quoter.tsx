@@ -60,6 +60,7 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { authClient } from "@/lib/auth-client";
+import { formatGuatemalaDate } from "@/lib/crm-formatters";
 import {
 	type AmortizationRow,
 	generateAmortizationTable,
@@ -2367,9 +2368,7 @@ function QuoterPage() {
 										{quotationsQuery.data?.map((quotation) => (
 											<TableRow key={quotation.id}>
 												<TableCell>
-													{new Date(quotation.createdAt).toLocaleDateString(
-														"es-GT",
-													)}
+													{formatGuatemalaDate(quotation.createdAt)}
 												</TableCell>
 												<TableCell>
 													{formatVehicleWithClient(

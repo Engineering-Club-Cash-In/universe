@@ -1,5 +1,17 @@
 import { ORPCError } from "@orpc/server";
-import { and, count, desc, eq, gte, lt, lte, ne, sql, sum } from "drizzle-orm";
+import {
+	and,
+	count,
+	desc,
+	eq,
+	gte,
+	isNotNull,
+	lt,
+	lte,
+	ne,
+	sql,
+	sum,
+} from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { auctionVehicles } from "../db/schema/auctionVehicles";
@@ -11,6 +23,7 @@ import {
 } from "../db/schema/cobros";
 import {
 	clients,
+	companies,
 	leads,
 	opportunities,
 	opportunityStageHistory,
@@ -105,6 +118,27 @@ export function isPorcentajeEfectividadPeriodCloseIncluded(
 		firstClosedAt >= start &&
 		firstClosedAt <= end
 	);
+}
+
+type ColocacionPorEmpresaRow = {
+	companyName: string | null;
+	monto: string;
+	cantidad: number;
+};
+
+export function buildColocacionPorEmpresaRows(rows: ColocacionPorEmpresaRow[]) {
+	return rows
+		.filter((row) => Boolean(row.companyName?.trim()))
+		.map((row) => ({
+			name: row.companyName?.trim() ?? "",
+			monto: Number.parseFloat(row.monto) || 0,
+			cantidad: row.cantidad,
+		}))
+		.sort((a, b) => {
+			if (b.monto !== a.monto) return b.monto - a.monto;
+			if (b.cantidad !== a.cantidad) return b.cantidad - a.cantidad;
+			return a.name.localeCompare(b.name);
+		});
 }
 
 type EfectividadFuenteRow = {
@@ -777,6 +811,7 @@ export const getReportePorcentajeEfectividad =
 				periodCloseRows,
 				porFuente,
 				cierresPeriodoPorFuente,
+				colocacionPorEmpresaRows,
 				registrosRaw,
 			] = await Promise.all([
 				db
@@ -838,6 +873,29 @@ export const getReportePorcentajeEfectividad =
 
 				db
 					.select({
+						companyName: companies.name,
+						monto: sql<string>`COALESCE(SUM(${opportunities.value}), 0)`,
+						cantidad: count(opportunities.id),
+					})
+					.from(firstClosedStageDates)
+					.innerJoin(
+						opportunities,
+						eq(firstClosedStageDates.opportunityId, opportunities.id),
+					)
+					// El predio/agencia pertenece directamente a la oportunidad.
+					.innerJoin(companies, eq(opportunities.companyId, companies.id))
+					.where(
+						and(
+							gte(firstClosedStageDates.firstClosedStageAt, start),
+							lte(firstClosedStageDates.firstClosedStageAt, end),
+							ne(opportunities.status, MIGRATED_OPPORTUNITY_STATUS),
+							isNotNull(opportunities.companyId),
+						),
+					)
+					.groupBy(companies.id, companies.name),
+
+				db
+					.select({
 						id: opportunities.id,
 						createdAt: opportunities.createdAt,
 						source: sql<string>`COALESCE(${opportunities.source}, 'other')`,
@@ -886,6 +944,7 @@ export const getReportePorcentajeEfectividad =
 				},
 				porFuente: porFuenteRows,
 				porTipoCanal: aggregateEfectividadPorTipoCanal(porFuenteRows),
+				porEmpresa: buildColocacionPorEmpresaRows(colocacionPorEmpresaRows),
 				registros: registrosRaw.map((row) => ({
 					id: row.id,
 					createdAt: row.createdAt,

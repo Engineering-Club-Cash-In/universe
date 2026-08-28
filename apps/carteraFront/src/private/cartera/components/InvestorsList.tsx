@@ -8,7 +8,13 @@ import { useRef, useState, useEffect, Fragment } from "react";
 import { Combobox, Transition } from "@headlessui/react";
 import { DatePickerMUI } from "./calendar";
 import { toast } from "sonner";
-import { calculateInvestorQuotasService, type InversionistaPayload } from "../services/services";
+import {
+  calculateInvestorQuotasService,
+  MODALIDAD_FACTURACION_LABELS,
+  type InversionistaPayload,
+  type ModalidadFacturacion,
+} from "../services/services";
+import { useModalidadFacturacionSpreadByModalidad } from "../hooks/useModalidadFacturacion";
 
 type TipoInversion = "compra_cartera" | "reinversion";
 
@@ -50,6 +56,101 @@ interface InvestorsListProps {
    * nueva). Los que ya salieron del crédito sí pueden volver a entrar.
    */
   blockedInvestorIds?: Set<number>;
+}
+
+function NewInvestorMetadataFields({
+  index,
+  investor,
+  onChange,
+}: {
+  index: number;
+  investor: InversionistaPayload;
+  onChange: (metadata: Partial<InversionistaPayload>) => void;
+}) {
+  const modalidad = investor.modalidad_facturacion;
+  const spreadQuery = useModalidadFacturacionSpreadByModalidad(
+    modalidad ?? "p2p_directa",
+    Boolean(modalidad),
+  );
+  const tipoReinversionField = (
+    <div className="w-56">
+      <Label htmlFor={`tipo-reinversion-${index}`} className="text-blue-900 font-semibold">
+        Tipo de reinversión
+      </Label>
+      <select
+        id={`tipo-reinversion-${index}`}
+        value={investor.tipo_reinversion ?? ""}
+        onChange={(event) => onChange({ tipo_reinversion: event.target.value as InversionistaPayload["tipo_reinversion"] })}
+        className="mt-1 h-10 w-full rounded-md border border-blue-200 bg-white px-3 text-sm"
+      >
+        <option value="">Seleccione tipo</option>
+        <option value="sin_reinversion">Tradicional</option>
+        <option value="reinversion_capital">Reinversión capital</option>
+        <option value="reinversion_interes">Reinversión interés</option>
+        <option value="reinversion_total">Interés compuesto</option>
+        <option value="reinversion_variable">Reinversión variable</option>
+        <option value="reinversion_excedente">Reinversión excedente</option>
+      </select>
+    </div>
+  );
+
+  if (investor.tipo_operacion === "reinversion") {
+    return tipoReinversionField;
+  }
+
+  return (
+    <>
+      {tipoReinversionField}
+      <div className="w-64">
+        <Label htmlFor={`modalidad-facturacion-${index}`} className="text-blue-900 font-semibold">
+          Modalidad de facturación
+        </Label>
+        <select
+          id={`modalidad-facturacion-${index}`}
+          value={modalidad ?? ""}
+          onChange={(event) =>
+            onChange({
+              modalidad_facturacion: event.target.value as ModalidadFacturacion,
+              modalidad_facturacion_spread_id: undefined,
+            })
+          }
+          className="mt-1 h-10 w-full rounded-md border border-blue-200 bg-white px-3 text-sm"
+        >
+          <option value="">Seleccione modalidad</option>
+          {Object.entries(MODALIDAD_FACTURACION_LABELS).map(([value, label]) => (
+            <option key={value} value={value}>{label}</option>
+          ))}
+        </select>
+      </div>
+      <div className="w-64">
+        <Label htmlFor={`rango-facturacion-${index}`} className="text-blue-900 font-semibold">
+          Rango de facturación
+        </Label>
+        <select
+          id={`rango-facturacion-${index}`}
+          value={investor.modalidad_facturacion_spread_id ?? ""}
+          disabled={!modalidad || spreadQuery.isLoading}
+          onChange={(event) =>
+            onChange({
+              modalidad_facturacion_spread_id: event.target.value
+                ? Number(event.target.value)
+                : undefined,
+            })
+          }
+          className="mt-1 h-10 w-full rounded-md border border-blue-200 bg-white px-3 text-sm disabled:bg-gray-100"
+        >
+          <option value="">
+            {spreadQuery.isLoading ? "Cargando rangos..." : "Seleccione rango"}
+          </option>
+          {spreadQuery.data?.map((spread) => (
+            <option key={spread.id} value={spread.id}>
+              {`Q${spread.monto_desde} - ${spread.monto_hasta ? `Q${spread.monto_hasta}` : "sin límite"} (${spread.spread}%)`}
+            </option>
+          ))}
+        </select>
+      </div>
+    </>
+  );
 }
 
 export function InvestorsList({
@@ -192,7 +293,10 @@ export function InvestorsList({
         espejo?.porcentaje_cash_in !== padre.porcentaje_cash_in ||
         espejo?.porcentaje_inversion !== padre.porcentaje_inversion ||
         espejo?.fecha_inicio_participacion !== padre.fecha_inicio_participacion ||
-        espejo?.tipo_operacion !== padre.tipo_operacion
+        espejo?.tipo_operacion !== padre.tipo_operacion ||
+        espejo?.tipo_reinversion !== padre.tipo_reinversion ||
+        espejo?.modalidad_facturacion !== padre.modalidad_facturacion ||
+        espejo?.modalidad_facturacion_spread_id !== padre.modalidad_facturacion_spread_id
       ) {
         formik.setFieldValue(`investorsMirror.${idx}`, { ...padre });
       }
@@ -202,11 +306,25 @@ export function InvestorsList({
 
   const handleTipoInversionChange = (index: number, tipo: TipoInversion) => {
     const fecha = getDefaultFechaInicio(tipo);
-    formik.setFieldValue(`${fieldName}.${index}.tipo_operacion`, tipo);
-    formik.setFieldValue(`${fieldName}.${index}.fecha_inicio_participacion`, fecha);
-    // Sync espejo
-    formik.setFieldValue(`investorsMirror.${index}.tipo_operacion`, tipo);
-    formik.setFieldValue(`investorsMirror.${index}.fecha_inicio_participacion`, fecha);
+    const updated = {
+      ...investors[index],
+      tipo_operacion: tipo,
+      fecha_inicio_participacion: fecha,
+      tipo_reinversion: undefined,
+      modalidad_facturacion: undefined,
+      modalidad_facturacion_spread_id: undefined,
+    };
+    formik.setFieldValue(`${fieldName}.${index}`, updated);
+    formik.setFieldValue(`investorsMirror.${index}`, { ...updated });
+  };
+
+  const handleNewMetadataChange = (
+    index: number,
+    metadata: Partial<InversionistaPayload>,
+  ) => {
+    const updated = { ...investors[index], ...metadata };
+    formik.setFieldValue(`${fieldName}.${index}`, updated);
+    formik.setFieldValue(`investorsMirror.${index}`, { ...updated });
   };
 
   const handleCalculateQuotas = async () => {
@@ -341,7 +459,7 @@ export function InvestorsList({
           >
             {/* Radio: Compra de Cartera / Reinversión (solo nuevos) */}
             {isNew && (
-              <div className="flex items-center gap-6 pb-2 border-b border-blue-200">
+              <div className="flex flex-wrap items-end gap-4 pb-2 border-b border-blue-200">
                 <span className="text-sm font-semibold text-blue-900">Tipo:</span>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
@@ -365,6 +483,11 @@ export function InvestorsList({
                   />
                   <span className="text-sm text-purple-800">Reinversión</span>
                 </label>
+                <NewInvestorMetadataFields
+                  index={index}
+                  investor={inv}
+                  onChange={(metadata) => handleNewMetadataChange(index, metadata)}
+                />
               </div>
             )}
 

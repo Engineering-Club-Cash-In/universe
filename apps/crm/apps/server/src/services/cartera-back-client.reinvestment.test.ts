@@ -10,7 +10,7 @@ const fetchTransport = (
 ) => Object.assign(handler, { preconnect: globalThis.fetch.preconnect });
 
 const response = (): ReinversionLiquidacionesResponse => ({
-	contrato_version: 2,
+	contrato_version: 3,
 	porTipo: {
 		reinversion_capital: {
 			reinversion_capital: "40.00",
@@ -24,6 +24,22 @@ const response = (): ReinversionLiquidacionesResponse => ({
 			iva_facturado: "0.00",
 			total_distribuido: "44.65",
 			cantidad_liquidaciones: 1,
+			composicion: {
+				pagado: {
+					capital: "0.00",
+					resto: "4.65",
+					sin_clasificar: "0.00",
+					total: "4.65",
+				},
+				reinvertido: {
+					capital: "40.00",
+					resto: "0.00",
+					sin_clasificar: "0.00",
+					total: "40.00",
+				},
+				flujo: { capital: "40.00", resto: "4.65", total: "44.65" },
+				estado: "exacto",
+			},
 		},
 	},
 	interesNeto: {
@@ -41,9 +57,50 @@ const response = (): ReinversionLiquidacionesResponse => ({
 			reinversion: "40.00",
 			a_recibir: "4.65",
 			capital_activo: "1000.00",
+			composicion: {
+				pagado: {
+					capital: "0.00",
+					resto: "4.65",
+					sin_clasificar: "0.00",
+					total: "4.65",
+				},
+				reinvertido: {
+					capital: "40.00",
+					resto: "0.00",
+					sin_clasificar: "0.00",
+					total: "40.00",
+				},
+				flujo: { capital: "40.00", resto: "4.65", total: "44.65" },
+				estado: "exacto",
+			},
 		},
 	],
-	comprasMes: [{ tipo: "reinversion_capital", cantidad: 2, monto: "80.00" }],
+	comprasMes: [
+		{
+			modalidad_facturacion: "factura_cube",
+			tipo_reinversion: "reinversion_capital",
+			tipo_compra: "nueva_posicion",
+			cantidad: 2,
+			monto: "80.00",
+		},
+	],
+	ticketInversion: {
+		actual: {
+			periodo: "2026-07",
+			cantidad: 2,
+			monto_total: "80.00",
+			ticket_promedio: "40.00",
+			variacion_porcentual: null,
+		},
+		historico: [
+			{
+				periodo: "2026-07",
+				cantidad: 2,
+				monto_total: "80.00",
+				ticket_promedio: "40.00",
+			},
+		],
+	},
 	detalleInteresNeto: [
 		{
 			inversionista_id: 7,
@@ -60,13 +117,17 @@ const response = (): ReinversionLiquidacionesResponse => ({
 		{
 			fecha: "2026-07-03",
 			inversionista: "Ana",
-			modalidad: "reinversion_capital",
+			modalidad_facturacion: "factura_cube",
+			tipo_reinversion: "reinversion_capital",
+			tipo_compra: "nueva_posicion",
 			monto: "40.00",
 		},
 		{
 			fecha: "2026-07-03",
 			inversionista: "Ana",
-			modalidad: "reinversion_capital",
+			modalidad_facturacion: "factura_cube",
+			tipo_reinversion: "reinversion_capital",
+			tipo_compra: "nueva_posicion",
 			monto: "40.00",
 		},
 	],
@@ -101,7 +162,7 @@ test("cliente HTTP propaga íntegro el contrato real de reinversión sin reconst
 	});
 
 	expect(actual).toEqual(expected);
-	expect(actual.contrato_version).toBe(2);
+	expect(actual.contrato_version).toBe(3);
 	expect(actual.porInversionista[0]?.capital_activo).toBe("1000.00");
 	expect(actual.detalle_estado).toEqual(expected.detalle_estado);
 	expect(actual.detalleInteresNeto).toEqual(expected.detalleInteresNeto);

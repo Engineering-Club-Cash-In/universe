@@ -15,6 +15,7 @@ import {
   convenio_cuotas,
   facturas_electronicas,
 } from "../database/db";
+import { resetAjusteFechaIdealSiPagoInvalidado } from "./ajusteFechaIdealPago";
 import { processAndReplaceCreditInvestorsReverse } from "./investor";
 import { revertirAbonoCapitalEspejo } from "./abonosCapital";
 import { updateMora } from "./latefee";
@@ -22,6 +23,7 @@ import { SATClientService } from "../cofidi/satClientService";
 import { CLUB_CASHIN_CONFIG, SAT_CONFIG } from "../utils/functions/const";
 import { ahoraEnGuatemala, formatearFechaSAT } from "../utils/functions/fechaSAT";
 import { esPagoAplicado } from "../utils/paymentStatus";
+import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import {
   getRemainingPaymentPaidStatusAfterReversal,
   isReversibleIncobrablePayment,
@@ -101,12 +103,15 @@ export interface ReversePaymentDependencies {
   readonly runTransaction: typeof db.transaction;
   readonly reverseInvestors: typeof processAndReplaceCreditInvestorsReverse;
   readonly reverseCapitalPayment: typeof revertirAbonoCapitalEspejo;
+  /** Serializa contra insertPayment (advisory lock por crédito). */
+  readonly withCreditLock: typeof withPaymentAdvisoryLock;
 }
 
 const defaultDependencies: ReversePaymentDependencies = {
   runTransaction: db.transaction.bind(db),
   reverseInvestors: processAndReplaceCreditInvestorsReverse,
   reverseCapitalPayment: revertirAbonoCapitalEspejo,
+  withCreditLock: withPaymentAdvisoryLock,
 };
 
 export function createReversePayment(
@@ -145,7 +150,16 @@ export function createReversePayment(
     // ========================================================================
     // 🔥 INICIAR TRANSACCIÓN ATÓMICA
     // ========================================================================
-    const result = await dependencies.runTransaction(async (tx) => {
+    // 🔒 Mismo advisory lock por crédito que insertPayment (P1 de Codex en
+    // #1482): sin él, la reversa puede colarse en la ventana entre la
+    // inserción de las filas de un pago en vuelo y su commitConvenio — vería
+    // el sello pago_convenio y restaría del convenio un monto que aún no se
+    // acreditó, y el commit posterior fallaría su guard optimista dejando el
+    // convenio sub-acreditado. Serializa solo la transacción; la anulación
+    // SAT/COFIDI post-commit queda fuera del lock igual que queda fuera de
+    // la tx (HTTP de hasta 60s por factura).
+    const result = await dependencies.withCreditLock(credito_id, () =>
+      dependencies.runTransaction(async (tx) => {
       // ======================================================================
       // 2️⃣ OBTENER DATOS DEL PAGO A REVERSAR
       // ======================================================================
@@ -167,6 +181,16 @@ export function createReversePayment(
       const pagoValidado = esPagoAplicado(pago.validationStatus);
       previousPaymentState = pagoValidado ? "applied" : "pending";
 
+
+      // ======================================================================
+      // 2️⃣.5️⃣ RESETEAR AJUSTE POR FECHA IDEAL DE PAGO, SI ESTE PAGO LO COBRÓ
+      // ======================================================================
+      // ajuste_fecha_ideal_pago.pago_id guarda qué fila de pagos_credito lo
+      // cobró (ver registerPayment.ts). Si es justo la que se está revirtiendo,
+      // el dinero vuelve — el ajuste debe volver a quedar pendiente para poder
+      // reintentarlo en un pago futuro. Mismo helper que usan falsePayment y
+      // la anulación por incobrable (ver ajusteFechaIdealPago.ts).
+      await resetAjusteFechaIdealSiPagoInvalidado(pago_id, tx);
 
       // ======================================================================
       // 3️⃣ OBTENER DATOS DEL CRÉDITO
@@ -668,7 +692,7 @@ export function createReversePayment(
         facturasDelPago,
         reversionEspejo,
       };
-    });
+    }));
     transactionCommitted = true;
 // La reversión NO recalcula ninguna otra fila del crédito. La transacción de
 // arriba ya deja todo consistente (pago reseteado, capital/deuda restaurados).

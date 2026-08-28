@@ -104,6 +104,7 @@ import {
 	type Opportunity,
 	opportunitiesColumns,
 } from "@/lib/opportunities/columns";
+import { buildOpportunityRelationshipPatch } from "@/lib/opportunity-relationship-patch";
 import {
 	formatQuotationClientName,
 	formatVehicleWithClient,
@@ -880,6 +881,13 @@ function RouteComponent() {
 	};
 
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
+	// Campos congelados de una oportunidad ganada (misma regla que el backend en
+	// updateOpportunity): lo que viajó a los contratos y a cartera. La etapa y el
+	// resto siguen editables porque la opp es "won" desde el 90% y todavía va al
+	// 100%.
+	const isWonLocked =
+		selectedOpportunity?.status === "won" &&
+		userProfile.data?.role !== ROLES.ADMIN;
 	const opportunitiesQuery = useQuery({
 		...orpc.getOpportunities.queryOptions({
 			input: {
@@ -1155,19 +1163,18 @@ function RouteComponent() {
 		},
 		onSubmit: async ({ value }) => {
 			if (selectedOpportunity) {
+				const { leadId, companyId, vehicleId, ...opportunityValues } = value;
 				updateOpportunityMutation.mutate({
 					id: selectedOpportunity.id,
-					...value,
+					...opportunityValues,
+					...buildOpportunityRelationshipPatch({
+						values: { leadId, companyId, vehicleId },
+						opportunity: selectedOpportunity,
+					}),
 					creditType: value.creditType,
-					leadId:
-						value.leadId && value.leadId !== "none" ? value.leadId : undefined,
-					companyId:
-						value.companyId && value.companyId !== "none"
-							? value.companyId
-							: undefined,
-					vehicleId: value.vehicleId || null,
 					// null y no undefined: en edición "Sin vendedor asignado" tiene
-					// que poder quitar un vendedor puesto antes.
+					// que poder quitar un vendedor puesto antes. El patch de arriba no
+					// cubre vendorId.
 					vendorId:
 						value.vendorId && value.vendorId !== "none" ? value.vendorId : null,
 					value: value.value || undefined,
@@ -1183,6 +1190,15 @@ function RouteComponent() {
 					diaPagoMensual: value.diaPagoMensual
 						? (Number.parseInt(value.diaPagoMensual, 10) as 15 | 30)
 						: undefined,
+					// Este form solo ofrece 15/30, nunca un día IA nuevo: si el día
+					// cambió acá es elección manual (false). Si se reenvía sin cambios,
+					// refleja el estado actual.
+					elegidoDesdeRecomendacionIA:
+						(value.diaPagoMensual
+							? Number.parseInt(value.diaPagoMensual, 10)
+							: undefined) === selectedOpportunity.diaPagoMensual
+							? selectedOpportunity.diaPagoOriginalSistema != null
+							: false,
 					seguro: value.seguro ? Number.parseFloat(value.seguro) : undefined,
 					gps: value.gps ? Number.parseFloat(value.gps) : undefined,
 					categoria: value.categoria || undefined,
@@ -1244,8 +1260,8 @@ function RouteComponent() {
 		mutationFn: (input: {
 			id: string;
 			title?: string;
-			leadId?: string;
-			companyId?: string;
+			leadId?: string | null;
+			companyId?: string | null;
 			vehicleId?: string | null;
 			// null desasigna al vendedor; sigue siendo opcional
 			vendorId?: string | null;
@@ -1262,6 +1278,7 @@ function RouteComponent() {
 			cuotaMensual?: string;
 			fechaInicio?: string;
 			diaPagoMensual?: 15 | 30;
+			elegidoDesdeRecomendacionIA?: boolean;
 			seguro?: number;
 			gps?: number;
 			categoria?:
@@ -2899,7 +2916,7 @@ function RouteComponent() {
 															<div className="flex items-center gap-4 text-muted-foreground text-xs">
 																<div className="flex items-center gap-1">
 																	<Clock className="h-3 w-3" />
-																	{new Date(change.changedAt).toLocaleString()}
+																	{formatGuatemalaDateTime(change.changedAt)}
 																</div>
 																<div className="flex items-center gap-1">
 																	<Users className="h-3 w-3" />
@@ -3028,6 +3045,15 @@ function RouteComponent() {
 				<DialogContent className="scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent dark:scrollbar-thumb-gray-700 max-h-[90vh] min-w-[56rem] max-w-5xl overflow-y-auto">
 					<DialogHeader>
 						<DialogTitle>Editar Oportunidad</DialogTitle>
+						{isWonLocked && (
+							<p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-amber-700 text-sm dark:text-amber-300">
+								Esta oportunidad ya está ganada: el cliente, la empresa, el
+								vehículo, el tipo de crédito y los términos del financiamiento
+								(monto, plazo, tasa, cuota y día de pago) quedaron fijados al
+								generar los contratos, y solo un administrador puede
+								corregirlos. La etapa, las notas y el resto siguen editables.
+							</p>
+						)}
 					</DialogHeader>
 					<form
 						onSubmit={(e) => {
@@ -3115,6 +3141,7 @@ function RouteComponent() {
 													isLoading={leadsQuery.isFetching}
 													placeholder="Buscar lead..."
 													width="full"
+													disabled={isWonLocked}
 												/>
 											</div>
 										);
@@ -3144,10 +3171,11 @@ function RouteComponent() {
 													}
 													placeholder="Seleccionar empresa"
 													width="full"
+													disabled={isWonLocked}
 												/>
 											</div>
-									)}
-								</editOpportunityForm.Field>
+										)}
+									</editOpportunityForm.Field>
 								</div>
 							)}
 						</div>
@@ -3166,6 +3194,7 @@ function RouteComponent() {
 												onBlur={field.handleBlur}
 												onChange={(e) => field.handleChange(e.target.value)}
 												placeholder="0.00"
+												disabled={isWonLocked}
 											/>
 										</div>
 									)}
@@ -3181,6 +3210,7 @@ function RouteComponent() {
 											<Label htmlFor={field.name}>Tipo de Crédito</Label>
 											<Select
 												value={field.state.value}
+												disabled={isWonLocked}
 												onValueChange={(value) =>
 													field.handleChange(
 														value as "autocompra" | "sobre_vehiculo",
@@ -3256,6 +3286,7 @@ function RouteComponent() {
 												isLoading={vehiclesQuery.isFetching}
 												placeholder="Buscar vehículo..."
 												width="full"
+												disabled={isWonLocked}
 											/>
 										</div>
 									)}
@@ -3281,6 +3312,7 @@ function RouteComponent() {
 												onChange={(value) => field.handleChange(value)}
 												placeholder="Seleccionar vendedor"
 												width="full"
+												disabled={isWonLocked}
 											/>
 										</div>
 									)}
@@ -4299,9 +4331,7 @@ function DocumentsManager({
 											</p>
 											<p className="text-muted-foreground text-xs">
 												Subido el{" "}
-												{new Date(detalleDoc.uploadedAt).toLocaleString(
-													"es-GT",
-												)}{" "}
+												{formatGuatemalaDateTime(detalleDoc.uploadedAt)}{" "}
 												• {(detalleDoc.size / 1024 / 1024).toFixed(2)} MB
 											</p>
 										</div>
@@ -4581,7 +4611,7 @@ function DocumentsManager({
 													Subido por{" "}
 													{doc.uploadedBy?.name || "Usuario desconocido"}
 												</span>
-												<span>{new Date(doc.uploadedAt).toLocaleString()}</span>
+												<span>{formatGuatemalaDateTime(doc.uploadedAt)}</span>
 											</div>
 										</div>
 									</div>

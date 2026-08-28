@@ -42,7 +42,7 @@ type ParticipacionTotals = {
 	cuotasInvalidas: number;
 };
 
-type MontoACobrarViewRow = {
+export type MontoACobrarViewRow = {
 	capital: number;
 	interesIva: number;
 	servicios: number;
@@ -52,6 +52,7 @@ type MontoACobrarViewRow = {
 	capitalCube: number;
 	interesIvaInv: number;
 	interesIvaCube: number;
+	facturacion: number;
 	totalMora: number;
 	total: number;
 };
@@ -130,6 +131,10 @@ export function getMontoACobrarViewRow(
 		value(row.total_seguro, row.acum_total_seguro) +
 		value(row.total_gps, row.acum_total_gps);
 	const membresias = value(row.total_membresias, row.acum_total_membresias);
+	const interesIvaCube = value(
+		row.interes_iva_cube_participacion_actual,
+		row.acum_interes_iva_cube_participacion_actual,
+	);
 
 	return {
 		capital,
@@ -152,10 +157,8 @@ export function getMontoACobrarViewRow(
 			row.interes_iva_inv_participacion_actual,
 			row.acum_interes_iva_inv_participacion_actual,
 		),
-		interesIvaCube: value(
-			row.interes_iva_cube_participacion_actual,
-			row.acum_interes_iva_cube_participacion_actual,
-		),
+		interesIvaCube,
+		facturacion: interesIvaCube + membresias + servicios,
 		totalMora: numeric(row.total_mora),
 		total: capital + interesIva + servicios + membresias,
 	};

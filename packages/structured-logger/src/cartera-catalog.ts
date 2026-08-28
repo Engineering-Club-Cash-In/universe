@@ -54,6 +54,10 @@ export const carteraCatalog = {
       type: 'enum',
       values: ['recalculate', 'process_pools', 'delete_credits', 'update_investor_installments'],
     },
+    migration_operation: {
+      type: 'enum',
+      values: ['adjust_schedule', 'import_payments'],
+    },
     error_code: {
       type: 'enum',
       values: [
@@ -175,6 +179,10 @@ export const carteraCatalog = {
       local_state_inconsistent: { level: 'error', required: ['reversal_path', 'processed_count', 'succeeded_count', 'failed_count', 'duration_ms', 'error_code'], optional: [], constants: { error_code: 'persistence_failed' } },
       rejected: { level: 'warn', required: ['duration_ms', 'reason_code'], optional: [] },
       failed: { level: 'error', required: ['duration_ms', 'error_code'], optional: [] },
+    } },
+    'payment.sifco_migration': { outcomes: {
+      completed: { level: 'info', required: ['migration_operation', 'processed_count', 'succeeded_count', 'failed_count', 'skipped_count', 'duration_ms'], optional: [] },
+      partially_completed: { level: 'warn', required: ['migration_operation', 'processed_count', 'succeeded_count', 'failed_count', 'skipped_count', 'duration_ms', 'reason_code'], optional: [] },
     } },
     'payment.investor_distribution': { outcomes: {
       completed: { level: 'info', required: ['distribution_mode', 'fallback_applied', 'duration_ms'], optional: [] },

@@ -35,6 +35,7 @@ import { Route as CobrosReportesRouteImport } from './routes/cobros/reportes'
 import { Route as CobrosReduccionRouteImport } from './routes/cobros/reduccion'
 import { Route as CobrosReasignacionesRouteImport } from './routes/cobros/reasignaciones'
 import { Route as CobrosPromesasRouteImport } from './routes/cobros/promesas'
+import { Route as CobrosPagaloRouteImport } from './routes/cobros/pagalo'
 import { Route as CobrosMiDiaRouteImport } from './routes/cobros/mi-dia'
 import { Route as CobrosMetasRouteImport } from './routes/cobros/metas'
 import { Route as CobrosHistorialAgendasRouteImport } from './routes/cobros/historial-agendas'
@@ -193,6 +194,11 @@ const CobrosReasignacionesRoute = CobrosReasignacionesRouteImport.update({
 const CobrosPromesasRoute = CobrosPromesasRouteImport.update({
   id: '/cobros/promesas',
   path: '/cobros/promesas',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CobrosPagaloRoute = CobrosPagaloRouteImport.update({
+  id: '/cobros/pagalo',
+  path: '/cobros/pagalo',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CobrosMiDiaRoute = CobrosMiDiaRouteImport.update({
@@ -363,6 +369,7 @@ export interface FileRoutesByFullPath {
   '/cobros/historial-agendas': typeof CobrosHistorialAgendasRoute
   '/cobros/metas': typeof CobrosMetasRoute
   '/cobros/mi-dia': typeof CobrosMiDiaRoute
+  '/cobros/pagalo': typeof CobrosPagaloRoute
   '/cobros/promesas': typeof CobrosPromesasRoute
   '/cobros/reasignaciones': typeof CobrosReasignacionesRoute
   '/cobros/reduccion': typeof CobrosReduccionRoute
@@ -419,6 +426,7 @@ export interface FileRoutesByTo {
   '/cobros/historial-agendas': typeof CobrosHistorialAgendasRoute
   '/cobros/metas': typeof CobrosMetasRoute
   '/cobros/mi-dia': typeof CobrosMiDiaRoute
+  '/cobros/pagalo': typeof CobrosPagaloRoute
   '/cobros/promesas': typeof CobrosPromesasRoute
   '/cobros/reasignaciones': typeof CobrosReasignacionesRoute
   '/cobros/reduccion': typeof CobrosReduccionRoute
@@ -476,6 +484,7 @@ export interface FileRoutesById {
   '/cobros/historial-agendas': typeof CobrosHistorialAgendasRoute
   '/cobros/metas': typeof CobrosMetasRoute
   '/cobros/mi-dia': typeof CobrosMiDiaRoute
+  '/cobros/pagalo': typeof CobrosPagaloRoute
   '/cobros/promesas': typeof CobrosPromesasRoute
   '/cobros/reasignaciones': typeof CobrosReasignacionesRoute
   '/cobros/reduccion': typeof CobrosReduccionRoute
@@ -534,6 +543,7 @@ export interface FileRouteTypes {
     | '/cobros/historial-agendas'
     | '/cobros/metas'
     | '/cobros/mi-dia'
+    | '/cobros/pagalo'
     | '/cobros/promesas'
     | '/cobros/reasignaciones'
     | '/cobros/reduccion'
@@ -590,6 +600,7 @@ export interface FileRouteTypes {
     | '/cobros/historial-agendas'
     | '/cobros/metas'
     | '/cobros/mi-dia'
+    | '/cobros/pagalo'
     | '/cobros/promesas'
     | '/cobros/reasignaciones'
     | '/cobros/reduccion'
@@ -646,6 +657,7 @@ export interface FileRouteTypes {
     | '/cobros/historial-agendas'
     | '/cobros/metas'
     | '/cobros/mi-dia'
+    | '/cobros/pagalo'
     | '/cobros/promesas'
     | '/cobros/reasignaciones'
     | '/cobros/reduccion'
@@ -703,6 +715,7 @@ export interface RootRouteChildren {
   CobrosHistorialAgendasRoute: typeof CobrosHistorialAgendasRoute
   CobrosMetasRoute: typeof CobrosMetasRoute
   CobrosMiDiaRoute: typeof CobrosMiDiaRoute
+  CobrosPagaloRoute: typeof CobrosPagaloRoute
   CobrosPromesasRoute: typeof CobrosPromesasRoute
   CobrosReasignacionesRoute: typeof CobrosReasignacionesRoute
   CobrosReduccionRoute: typeof CobrosReduccionRoute
@@ -924,6 +937,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CobrosPromesasRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/cobros/pagalo': {
+      id: '/cobros/pagalo'
+      path: '/cobros/pagalo'
+      fullPath: '/cobros/pagalo'
+      preLoaderRoute: typeof CobrosPagaloRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/cobros/mi-dia': {
       id: '/cobros/mi-dia'
       path: '/cobros/mi-dia'
@@ -1143,6 +1163,7 @@ const rootRouteChildren: RootRouteChildren = {
   CobrosHistorialAgendasRoute: CobrosHistorialAgendasRoute,
   CobrosMetasRoute: CobrosMetasRoute,
   CobrosMiDiaRoute: CobrosMiDiaRoute,
+  CobrosPagaloRoute: CobrosPagaloRoute,
   CobrosPromesasRoute: CobrosPromesasRoute,
   CobrosReasignacionesRoute: CobrosReasignacionesRoute,
   CobrosReduccionRoute: CobrosReduccionRoute,

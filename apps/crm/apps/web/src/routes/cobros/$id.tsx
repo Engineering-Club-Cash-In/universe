@@ -7,7 +7,6 @@ import {
 	CalendarClock,
 	Car,
 	ChevronDown,
-	ChevronLeft,
 	ChevronRight,
 	Clock,
 	CreditCard,
@@ -39,6 +38,7 @@ import { toast } from "sonner";
 import { ActividadBot } from "@/components/cobros/actividad-bot";
 import { PagaloHistorial } from "@/components/cobros/pagalo-historial";
 import { PagaloLinkDialog } from "@/components/cobros/pagalo-link-dialog";
+import { Pagination } from "@/components/cobros/pagination";
 import { PromesaActivaBadge } from "@/components/cobros/promesa-activa-badge";
 import { ReferenciasView } from "@/components/cobros/ReferenciasView";
 import { SeguimientoRecurrenteModal } from "@/components/cobros/seguimiento-recurrente-modal";
@@ -202,52 +202,6 @@ export const Route = createFileRoute("/cobros/$id")({
 });
 
 // Componente de paginación reutilizable
-function Pagination({
-	currentPage,
-	totalItems,
-	itemsPerPage,
-	onPageChange,
-}: {
-	currentPage: number;
-	totalItems: number;
-	itemsPerPage: number;
-	onPageChange: (page: number) => void;
-}) {
-	const totalPages = Math.ceil(totalItems / itemsPerPage);
-
-	if (totalPages <= 1) return null;
-
-	return (
-		<div className="flex items-center justify-between border-t pt-4">
-			<p className="text-muted-foreground text-sm">
-				Mostrando {(currentPage - 1) * itemsPerPage + 1} -{" "}
-				{Math.min(currentPage * itemsPerPage, totalItems)} de {totalItems}
-			</p>
-			<div className="flex items-center gap-2">
-				<Button
-					variant="outline"
-					size="sm"
-					onClick={() => onPageChange(currentPage - 1)}
-					disabled={currentPage === 1}
-				>
-					<ChevronLeft className="h-4 w-4" />
-				</Button>
-				<span className="text-sm">
-					Página {currentPage} de {totalPages}
-				</span>
-				<Button
-					variant="outline"
-					size="sm"
-					onClick={() => onPageChange(currentPage + 1)}
-					disabled={currentPage === totalPages}
-				>
-					<ChevronRight className="h-4 w-4" />
-				</Button>
-			</div>
-		</div>
-	);
-}
-
 const ETIQUETAS_COBROS = [
 	"juridico",
 	"convenio",
@@ -2486,10 +2440,7 @@ function RouteComponent() {
 					{caso.id && caso.carteraCreditoId && (
 						<Card>
 							<CardContent className="pt-6">
-								<PagaloHistorial
-									casoCobroId={caso.id}
-									creditoId={caso.carteraCreditoId}
-								/>
+								<PagaloHistorial casoCobroId={caso.id} />
 							</CardContent>
 						</Card>
 					)}

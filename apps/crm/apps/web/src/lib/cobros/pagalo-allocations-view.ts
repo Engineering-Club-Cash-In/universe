@@ -1,49 +1,50 @@
 /**
- * CB-127 · Agrupa el `allocationsSnapshot` (jsonb, por grupo — ver
- * buildPagaloAllocations en el server) por cuota, para la vista "Links por
- * cuota" del supervisor. `allocationsSnapshot` es por GRUPO, no por link: un
- * link CAPITAL cubre TODAS las cuotas del snapshot con ese link_type — el
- * mapeo cuota→tipo de link es N:1, nunca un link por cuota.
+ * CB-127 · Deriva "links por cuota" a partir de `allocationsSnapshot`
+ * (jsonb, formato documentado en
+ * server/src/db/schema/pagalo-payments.ts:95-108).
  *
- * Entrada `unknown` (viene de jsonb sin garantía de forma histórica —
- * grupos viejos pueden tener otras formas): se valida fila por fila,
- * descartando lo que no matchea en vez de tirar.
+ * Semántica clave: el snapshot es POR GRUPO, no por link. Un link `CAPITAL`
+ * cubre todas las cuotas del snapshot con ese `link_type` — el mapeo es
+ * cuota → tipo de link → link, N:1, nunca un link por cuota.
  */
 
 export type PagaloLinkType = "CAPITAL" | "MORA_INTERES";
 
-type AllocationRow = {
+export type AllocationRow = {
 	link_type: PagaloLinkType;
+	cartera_cuota_id: number | null;
 	numero_cuota: number | null;
 	rubro: string;
 	amount: string;
+	facturable: boolean;
 };
 
-export type LinkResumen = {
+export type LinkParaAgrupar = {
 	id: string;
+	linkType: PagaloLinkType;
 	status: string;
 	generation: number;
 };
 
+export type RubroCuota = { rubro: string; amount: string };
+
 export type CuotaConLinks = {
-	/** null representa el grupo sintético "Mora" (filas sin numero_cuota). */
 	numeroCuota: number | null;
-	rubros: Array<{ rubro: string; amount: string }>;
+	etiqueta: string;
+	montoTotal: string;
+	rubros: RubroCuota[];
 	linkTypes: PagaloLinkType[];
-	/** Links vivos (CREATING/ACTIVE) de los tipos que cubren esta cuota. */
-	linksVivos: LinkResumen[];
-	/** Links históricos (REPLACED/EXPIRED/CANCELLED/ERROR) — para el conteo de duplicados. */
-	linksHistoricos: LinkResumen[];
+	linksActivos: LinkParaAgrupar[];
+	linksHistoricos: LinkParaAgrupar[];
 };
 
-const LINK_TYPES: readonly PagaloLinkType[] = ["CAPITAL", "MORA_INTERES"];
 const ESTADOS_VIVOS = new Set(["CREATING", "ACTIVE"]);
 // linksHistoricos es específicamente para contar DUPLICADOS (generaciones
 // previas superadas) — un catch-all "todo lo que no es vivo" clasificaba
 // también PAID ahí, así que un grupo normal pagado sin ninguna regeneración
 // mostraba "(1 link(s) previo(s))" en cada cuota, insinuando un duplicado
-// que nunca existió (hallazgo de code review). PAID no cuenta para ningún
-// lado: no es un duplicado cerrado sin pago, tampoco está pendiente.
+// que nunca existió (hallazgo de code review, PR2 #1497). PAID no cuenta
+// para ningún lado: no es un duplicado cerrado sin pago, tampoco pendiente.
 const ESTADOS_HISTORICOS = new Set([
 	"REPLACED",
 	"EXPIRED",
@@ -51,103 +52,86 @@ const ESTADOS_HISTORICOS = new Set([
 	"ERROR",
 ]);
 
-function esAllocationRow(row: unknown): row is AllocationRow {
-	if (!row || typeof row !== "object") return false;
-	const r = row as Record<string, unknown>;
-	if (!LINK_TYPES.includes(r.link_type as PagaloLinkType)) return false;
-	if (typeof r.rubro !== "string") return false;
-	if (typeof r.amount !== "string") return false;
-	if (r.numero_cuota !== null && typeof r.numero_cuota !== "number")
+function esFilaValida(valor: unknown): valor is AllocationRow {
+	if (!valor || typeof valor !== "object") return false;
+	const fila = valor as Record<string, unknown>;
+	if (fila.link_type !== "CAPITAL" && fila.link_type !== "MORA_INTERES")
+		return false;
+	if (typeof fila.rubro !== "string") return false;
+	if (typeof fila.amount !== "string") return false;
+	// AllocationRow declara numero_cuota como number | null (sin undefined) —
+	// el chequeo anterior (!== null && !== undefined && typeof !== "number")
+	// dejaba pasar undefined sin llegar al typeof, así que un snapshot
+	// histórico/malformado con el campo directamente ausente entraba como
+	// válido y agruparPorCuota usaba esa clave undefined en el Map, armando
+	// un grupo "Cuota #undefined" en vez de descartar la fila (hallazgo de
+	// code review). Solo null o number pasan ahora.
+	if (fila.numero_cuota !== null && typeof fila.numero_cuota !== "number")
 		return false;
 	return true;
 }
 
-/**
- * `numero_cuota: null` de una fila real (mora pura, sin cuota asociada) cae
- * en el grupo sintético "Mora" — clave interna -1, nunca choca con un
- * numeroCuota real (siempre >= 1).
- */
-const CLAVE_MORA = -1;
+function sumarMontos(valores: string[]): string {
+	const centavos = valores.reduce((acc, v) => {
+		const n = Math.round(Number(v) * 100);
+		return acc + (Number.isFinite(n) ? n : 0);
+	}, 0);
+	return (centavos / 100).toFixed(2);
+}
 
+/**
+ * Agrupa el snapshot por `numero_cuota` (las filas sin cuota — mora pura de
+ * un grupo solo-mora — caen en un grupo sintético) y mapea cada tipo de link
+ * involucrado a los links vivos e históricos de ese tipo en el grupo.
+ */
 export function agruparPorCuota(
 	snapshot: unknown,
-	links: Array<{
-		id: string;
-		linkType: PagaloLinkType;
-		status: string;
-		generation: number;
-	}>,
+	links: LinkParaAgrupar[],
 ): CuotaConLinks[] {
-	const filas = Array.isArray(snapshot) ? snapshot.filter(esAllocationRow) : [];
+	if (!Array.isArray(snapshot)) return [];
+	const filas = snapshot.filter(esFilaValida);
+	if (filas.length === 0) return [];
 
-	const porCuota = new Map<
-		number,
-		{
-			numeroCuota: number | null;
-			rubros: Map<string, number>;
-			linkTypes: Set<PagaloLinkType>;
-		}
-	>();
-
+	const porCuota = new Map<number | null, AllocationRow[]>();
 	for (const fila of filas) {
-		const clave = fila.numero_cuota ?? CLAVE_MORA;
-		let entrada = porCuota.get(clave);
-		if (!entrada) {
-			entrada = {
-				numeroCuota: fila.numero_cuota,
-				rubros: new Map(),
-				linkTypes: new Set(),
-			};
-			porCuota.set(clave, entrada);
-		}
-		const monto = Number(fila.amount);
-		entrada.rubros.set(
-			fila.rubro,
-			(entrada.rubros.get(fila.rubro) ?? 0) +
-				(Number.isFinite(monto) ? monto : 0),
-		);
-		entrada.linkTypes.add(fila.link_type);
+		const clave = fila.numero_cuota;
+		const grupo = porCuota.get(clave) ?? [];
+		grupo.push(fila);
+		porCuota.set(clave, grupo);
 	}
 
-	const linksPorTipo = new Map<PagaloLinkType, typeof links>();
+	const linksPorTipo = new Map<PagaloLinkType, LinkParaAgrupar[]>();
 	for (const link of links) {
-		const lista = linksPorTipo.get(link.linkType) ?? [];
-		lista.push(link);
-		linksPorTipo.set(link.linkType, lista);
+		const grupo = linksPorTipo.get(link.linkType) ?? [];
+		grupo.push(link);
+		linksPorTipo.set(link.linkType, grupo);
 	}
 
-	return [...porCuota.values()]
-		.sort(
-			(a, b) =>
-				(a.numeroCuota ?? Number.POSITIVE_INFINITY) -
-				(b.numeroCuota ?? Number.POSITIVE_INFINITY),
-		)
-		.map((entrada) => {
-			const linkTypes = [...entrada.linkTypes];
-			const linksDeLosTipos = linkTypes.flatMap(
-				(tipo) => linksPorTipo.get(tipo) ?? [],
-			);
-			return {
-				numeroCuota: entrada.numeroCuota,
-				rubros: [...entrada.rubros.entries()].map(([rubro, amount]) => ({
-					rubro,
-					amount: amount.toFixed(2),
-				})),
-				linkTypes,
-				linksVivos: linksDeLosTipos
-					.filter((l) => ESTADOS_VIVOS.has(l.status))
-					.map((l) => ({
-						id: l.id,
-						status: l.status,
-						generation: l.generation,
-					})),
-				linksHistoricos: linksDeLosTipos
-					.filter((l) => ESTADOS_HISTORICOS.has(l.status))
-					.map((l) => ({
-						id: l.id,
-						status: l.status,
-						generation: l.generation,
-					})),
-			};
+	const resultado: CuotaConLinks[] = [];
+	const ordenCuotas = [...porCuota.keys()].sort((a, b) => {
+		if (a === null) return 1;
+		if (b === null) return -1;
+		return a - b;
+	});
+
+	for (const numeroCuota of ordenCuotas) {
+		const filasCuota = porCuota.get(numeroCuota) ?? [];
+		const linkTypes = [...new Set(filasCuota.map((f) => f.link_type))];
+		const linksDeLaCuota = linkTypes.flatMap(
+			(tipo) => linksPorTipo.get(tipo) ?? [],
+		);
+		resultado.push({
+			numeroCuota,
+			etiqueta: numeroCuota === null ? "Mora" : `Cuota #${numeroCuota}`,
+			montoTotal: sumarMontos(filasCuota.map((f) => f.amount)),
+			rubros: filasCuota.map((f) => ({ rubro: f.rubro, amount: f.amount })),
+			linkTypes,
+			linksActivos: linksDeLaCuota.filter((l) => ESTADOS_VIVOS.has(l.status)),
+			linksHistoricos: linksDeLaCuota.filter((l) =>
+				ESTADOS_HISTORICOS.has(l.status),
+			),
 		});
+	}
+
+	return resultado;
 }

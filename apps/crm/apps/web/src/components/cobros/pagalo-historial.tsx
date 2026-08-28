@@ -18,12 +18,10 @@ import {
 	CheckCircle2,
 	ChevronLeft,
 	ChevronRight,
-	Copy,
 	CreditCard,
 	XCircle,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,21 +29,23 @@ import {
 	CollapsibleContent,
 	CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { authClient } from "@/lib/auth-client";
 import { agruparPorCuota } from "@/lib/cobros/pagalo-allocations-view";
 import {
-	copyPagaloLink,
+	agruparLinksPorGeneracion,
 	getPagaloGroupSummary,
 	getPagaloLinkStatusInfo,
 } from "@/lib/cobros/pagalo-link-display";
 import { facturableSinOtrosGTQ } from "@/lib/cobros/pagalo-otros";
+import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
-import { AccionesSupervisorPagalo } from "./pagalo/acciones-supervisor-pagalo";
 import { BitacoraPagalo, type EventoPagalo } from "./pagalo/bitacora-pagalo";
+import { AccionesLinkPagalo } from "./pagalo/chip-link-pagalo";
 import {
 	antiguedadLink,
-	estadoGrupoInfo,
-	etiquetaMotivoRevision,
+	etiquetaMotivo,
 	fechaHora,
+	getEstadoGrupoInfo,
 } from "./pagalo/formato-pagalo";
 
 type Link = {
@@ -94,9 +94,22 @@ const q = (value: unknown) =>
 		Number(value ?? 0),
 	);
 
-function LinkPagalo({ link, monto }: { link: Link; monto: string }) {
+function LinkPagalo({
+	link,
+	monto,
+	casoCobroId,
+	esSupervisor,
+	esVigente,
+	grupoStatus,
+}: {
+	link: Link;
+	monto: string;
+	casoCobroId: string;
+	esSupervisor: boolean;
+	esVigente: boolean;
+	grupoStatus: string;
+}) {
 	const estado = getPagaloLinkStatusInfo(link.status);
-	const puedeCopiar = estado.canCopy && Boolean(link.paymentUrl);
 	const antiguedad = antiguedadLink(link.activatedAt ?? link.createdAt);
 	const motivoFalla =
 		link.status === "ERROR"
@@ -104,16 +117,6 @@ function LinkPagalo({ link, monto }: { link: Link; monto: string }) {
 			: link.pollAttempts > 0
 				? link.lastPollError
 				: null;
-
-	const copiar = async () => {
-		if (!link.paymentUrl) return;
-		try {
-			await copyPagaloLink(link.paymentUrl);
-			toast.success("Link copiado");
-		} catch {
-			toast.error("No se pudo copiar el link. Intentá de nuevo.");
-		}
-	};
 
 	return (
 		<div className="rounded-md border p-3">
@@ -169,18 +172,14 @@ function LinkPagalo({ link, monto }: { link: Link; monto: string }) {
 							: `Antigüedad: ${antiguedad.etiqueta}`}
 					</p>
 				)}
-			{puedeCopiar && (
-				<Button
-					className="mt-3"
-					onClick={copiar}
-					size="sm"
-					type="button"
-					variant="outline"
-				>
-					<Copy className="mr-2 h-3.5 w-3.5" />
-					Copiar link de pago
-				</Button>
-			)}
+			<AccionesLinkPagalo
+				link={link}
+				paymentUrl={link.paymentUrl}
+				casoCobroId={casoCobroId}
+				esSupervisor={esSupervisor}
+				esVigente={esVigente}
+				grupoStatus={grupoStatus}
+			/>
 		</div>
 	);
 }
@@ -247,19 +246,27 @@ function LinksPorCuota({
 function GrupoPagalo({
 	grupo,
 	casoCobroId,
-	creditoId,
 }: {
 	grupo: Grupo;
 	casoCobroId: string;
-	creditoId: number;
 }) {
-	const estadoInfo = estadoGrupoInfo(grupo.status);
+	const estadoInfo = getEstadoGrupoInfo(grupo.status);
 	const resumenLinks = getPagaloGroupSummary(grupo.links);
 	const moraEIntereses = facturableSinOtrosGTQ(
 		grupo.facturableTotal,
 		grupo.otrosTotal,
 	);
-	const motivoRevision = etiquetaMotivoRevision(grupo.lastDispatchError);
+	const motivoRevision = etiquetaMotivo(grupo.lastDispatchError);
+	const { data: session } = authClient.useSession();
+	const esSupervisor = PERMISSIONS.canAssignCobros(session?.user?.role ?? "");
+	// regenerarLinkIndividual (server) rechaza SIEMPRE una generación que no
+	// sea la más alta de su tipo — sin este filtro, Ficha 360 ofrecía
+	// "Regenerar" en un histórico y fallaba siempre después de que el
+	// supervisor escribía el motivo (hallazgo de code review). Mismo
+	// agrupamiento que ya usa la bandeja (agruparLinksPorGeneracion).
+	const idsVigentes = new Set(
+		agruparLinksPorGeneracion(grupo.links).map((g) => g.vigente.id),
+	);
 
 	return (
 		<div className="space-y-3 rounded-lg border p-4">
@@ -332,6 +339,10 @@ function GrupoPagalo({
 									? grupo.capitalTotal
 									: grupo.facturableTotal
 							}
+							casoCobroId={casoCobroId}
+							esSupervisor={esSupervisor}
+							esVigente={idsVigentes.has(link.id)}
+							grupoStatus={grupo.status}
 						/>
 					))}
 				</div>
@@ -349,26 +360,18 @@ function GrupoPagalo({
 					<LinksPorCuota casoCobroId={casoCobroId} groupId={grupo.id} />
 				</CollapsibleContent>
 			</Collapsible>
-			<AccionesSupervisorPagalo
-				casoCobroId={casoCobroId}
-				creditoId={creditoId}
-				groupId={grupo.id}
-				status={grupo.status}
+			<BitacoraPagalo
+				eventos={grupo.eventos}
+				esSupervisor={esSupervisor}
+				abiertoPorDefecto={false}
 			/>
-			<BitacoraPagalo eventos={grupo.eventos} abiertoPorDefecto={false} />
 		</div>
 	);
 }
 
 const POR_PAGINA = 5;
 
-export function PagaloHistorial({
-	casoCobroId,
-	creditoId,
-}: {
-	casoCobroId: string;
-	creditoId: number;
-}) {
+export function PagaloHistorial({ casoCobroId }: { casoCobroId: string }) {
 	const [expandido, setExpandido] = useState(true);
 	const [pagina, setPagina] = useState(1);
 	// El componente se reusa al navegar de un caso a otro (misma ruta): sin
@@ -391,7 +394,7 @@ export function PagaloHistorial({
 		// entre páginas del mismo caso: al cambiar de caso, seguir pintando los
 		// grupos anteriores mostraría —y dejaría copiar— links de pago del
 		// cliente que se acaba de dejar atrás.
-		placeholderData: (anterior: unknown) => (casoCambio ? undefined : anterior),
+		placeholderData: (anterior) => (casoCambio ? undefined : anterior),
 	});
 	const data = historial.data as { grupos: Grupo[]; total: number } | undefined;
 	const grupos = data?.grupos ?? [];
@@ -443,7 +446,6 @@ export function PagaloHistorial({
 								key={grupo.id}
 								grupo={grupo}
 								casoCobroId={casoCobroId}
-								creditoId={creditoId}
 							/>
 						))}
 						{totalPaginas > 1 && (

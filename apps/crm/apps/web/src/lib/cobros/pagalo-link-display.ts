@@ -67,6 +67,31 @@ export function getPagaloLinkStatusInfo(status: string): StatusInfo {
 	);
 }
 
+/**
+ * Agrupa los links de un grupo por `linkType`, separando el de generación
+ * más alta (el "vigente" — el que el supervisor debe mirar) del resto
+ * (históricos, generaciones superadas por una regeneración). Un grupo sin
+ * regeneraciones solo tiene una fila por tipo, así que `historicos` queda
+ * vacío — no hay nada raro que mostrar.
+ */
+export function agruparLinksPorGeneracion<
+	T extends { linkType: "CAPITAL" | "MORA_INTERES"; generation: number },
+>(links: T[]): Array<{ vigente: T; historicos: T[] }> {
+	const porTipo = new Map<"CAPITAL" | "MORA_INTERES", T[]>();
+	for (const link of links) {
+		const lista = porTipo.get(link.linkType) ?? [];
+		lista.push(link);
+		porTipo.set(link.linkType, lista);
+	}
+	const resultado: Array<{ vigente: T; historicos: T[] }> = [];
+	for (const lista of porTipo.values()) {
+		const ordenados = [...lista].sort((a, b) => b.generation - a.generation);
+		const [vigente, ...historicos] = ordenados;
+		if (vigente) resultado.push({ vigente, historicos });
+	}
+	return resultado;
+}
+
 export function getPagaloGroupSummary(
 	links: Array<{
 		linkType: string;

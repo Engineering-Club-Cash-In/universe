@@ -60,6 +60,7 @@ import {
   sumarAplicadoACuota,
   pagoSchema,
 } from "./registerPaymentPolicy";
+import { claimAjusteFechaIdealPago } from "./ajusteFechaIdealPago";
 import {
   PAYMENT_ADVISORY_LOCK_NAMESPACE,
   withPaymentAdvisoryLock,
@@ -1643,10 +1644,11 @@ export const insertPayment = async ({ body, set }: any) => {
                   inserted &&
                   ajusteFechaIdealId !== undefined
                 ) {
-                  await tx
-                    .update(ajuste_fecha_ideal_pago)
-                    .set({ fecha_cobro: new Date(), pago_id: inserted.pago_id })
-                    .where(eq(ajuste_fecha_ideal_pago.id, ajusteFechaIdealId));
+                  await claimAjusteFechaIdealPago(
+                    ajusteFechaIdealId,
+                    inserted.pago_id,
+                    tx,
+                  );
                 }
                 return rows;
               });
@@ -1796,10 +1798,11 @@ export const insertPayment = async ({ body, set }: any) => {
                 inserted &&
                 ajusteFechaIdealId !== undefined
               ) {
-                await tx
-                  .update(ajuste_fecha_ideal_pago)
-                  .set({ fecha_cobro: new Date(), pago_id: inserted.pago_id })
-                  .where(eq(ajuste_fecha_ideal_pago.id, ajusteFechaIdealId));
+                await claimAjusteFechaIdealPago(
+                  ajusteFechaIdealId,
+                  inserted.pago_id,
+                  tx,
+                );
               }
               return rows;
               });
@@ -1969,10 +1972,11 @@ export const insertPayment = async ({ body, set }: any) => {
                 inserted &&
                 ajusteFechaIdealId !== undefined
               ) {
-                await tx
-                  .update(ajuste_fecha_ideal_pago)
-                  .set({ fecha_cobro: new Date(), pago_id: inserted.pago_id })
-                  .where(eq(ajuste_fecha_ideal_pago.id, ajusteFechaIdealId));
+                await claimAjusteFechaIdealPago(
+                  ajusteFechaIdealId,
+                  inserted.pago_id,
+                  tx,
+                );
               }
               return rows;
               });

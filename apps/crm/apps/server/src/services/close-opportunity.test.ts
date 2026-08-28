@@ -108,6 +108,26 @@ describe("createCreditoInCarteraBack", () => {
 	});
 });
 
+describe("esDiaPagoValidoAlCerrar", () => {
+	test("rechaza recomendación IA obsoleta y conserva días manuales", async () => {
+		const { esDiaPagoValidoAlCerrar } = await import("./close-opportunity");
+		expect(
+			esDiaPagoValidoAlCerrar({
+				diaPagoMensual: 15,
+				diaPagoOriginalSistema: 30,
+				suggestedDays: [{ dia: 18 }],
+			}),
+		).toBe(false);
+		expect(
+			esDiaPagoValidoAlCerrar({
+				diaPagoMensual: 15,
+				diaPagoOriginalSistema: null,
+				suggestedDays: null,
+			}),
+		).toBe(true);
+	});
+});
+
 describe("getLatestApprovedQuotation", () => {
 	test("prefers an older accepted quotation over a newer internal draft", async () => {
 		const { getLatestApprovedQuotation } = await import("./close-opportunity");

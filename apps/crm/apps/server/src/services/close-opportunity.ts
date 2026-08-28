@@ -18,9 +18,12 @@ import {
 	vehicles,
 } from "../db/schema";
 import { contratosFinanciamiento } from "../db/schema/cobros";
-import { clients, leads, opportunities } from "../db/schema/crm";
+import { clients, creditAnalysis, leads, opportunities } from "../db/schema/crm";
 import { eqDpi } from "../lib/dpi-lookup";
-import { calcularAjusteFechaIdeal } from "../lib/fecha-ideal-pago-ajuste";
+import {
+	calcularAjusteFechaIdeal,
+	esSeleccionDiaPagoValida,
+} from "../lib/fecha-ideal-pago-ajuste";
 import { formatMissingFields, getMissingFields } from "../lib/vehicle-helpers";
 import type { FacturaItem } from "../types/cartera-back";
 import { carteraBackClient } from "./cartera-back-client";
@@ -44,9 +47,24 @@ export const DEFAULT_CODIGO_POSTAL = "01001";
 /** Credit number prefix for CRM-generated credits */
 export const CREDIT_NUMBER_PREFIX = "CRM";
 
-// El día de pago ya se validó al guardarlo en la oportunidad (assignInvestorAndAdvance):
-// siempre es 15, 30, o un día recomendado por el análisis de capacidad de pago del lead.
-// Aquí solo se confirma que sea un día de mes válido antes de mandarlo a cartera-back.
+export const esDiaPagoValidoAlCerrar = ({
+	diaPagoMensual,
+	diaPagoOriginalSistema,
+	suggestedDays,
+}: {
+	diaPagoMensual: number;
+	diaPagoOriginalSistema: number | null;
+	suggestedDays: readonly { dia: number }[] | null;
+}): boolean =>
+	diaPagoOriginalSistema == null ||
+	esSeleccionDiaPagoValida({
+		diaPagoMensual,
+		elegidoDesdeRecomendacionIA: true,
+		suggestedDays,
+	});
+
+// El día se valida al guardarlo y vuelve a validarse contra el análisis vigente
+// justo antes del cierre. Aquí primero se confirma que sea un día de mes válido.
 function normalizePaymentDay(day: number | null | undefined): number | null {
 	if (day == null) return null;
 	if (!Number.isInteger(day) || day < 1 || day > 31) return null;
@@ -1014,6 +1032,35 @@ async function createCredit(
 				success: false,
 				error:
 					"La oportunidad debe tener un día de pago válido (1-31) para crear el crédito en cartera-back",
+			};
+		}
+
+		let suggestedDaysAlCerrar: Array<{ dia: number; porcentaje: number }> | null =
+			null;
+		if (opportunity.diaPagoOriginalSistema != null && opportunity.leadId) {
+			const [analysis] = await db
+				.select({ suggestedPaymentDays: creditAnalysis.suggestedPaymentDays })
+				.from(creditAnalysis)
+				.where(
+					and(
+						eq(creditAnalysis.opportunityId, opportunity.id),
+						eq(creditAnalysis.leadId, opportunity.leadId),
+					),
+				)
+				.limit(1);
+			suggestedDaysAlCerrar = analysis?.suggestedPaymentDays ?? null;
+		}
+		if (
+			!esDiaPagoValidoAlCerrar({
+				diaPagoMensual,
+				diaPagoOriginalSistema: opportunity.diaPagoOriginalSistema,
+				suggestedDays: suggestedDaysAlCerrar,
+			})
+		) {
+			return {
+				success: false,
+				error:
+					"El día de pago elegido por IA ya no aparece en el análisis vigente; actualiza la oportunidad antes de cerrarla",
 			};
 		}
 

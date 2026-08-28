@@ -11,6 +11,27 @@ type Executor = Pick<typeof db, "select" | "update">;
 type AjusteCobrado = { id: number; monto_total: string };
 type AjusteParaReconstruccion = AjusteCobrado | { pendiente: true };
 
+export async function claimAjusteFechaIdealPago(
+  ajusteId: number,
+  pagoId: number,
+  executor: Executor = db,
+): Promise<void> {
+  const [claimed] = await executor
+    .update(ajuste_fecha_ideal_pago)
+    .set({ fecha_cobro: new Date(), pago_id: pagoId })
+    .where(
+      and(
+        eq(ajuste_fecha_ideal_pago.id, ajusteId),
+        isNull(ajuste_fecha_ideal_pago.fecha_cobro),
+        isNull(ajuste_fecha_ideal_pago.pago_id),
+      ),
+    )
+    .returning({ id: ajuste_fecha_ideal_pago.id });
+  if (!claimed) {
+    throw new Error(`El ajuste ${ajusteId} ya fue cobrado por otro pago`);
+  }
+}
+
 export async function prepararAjusteFechaIdealParaReconstruccion(
   credito_id: number,
   executor: Executor = db,

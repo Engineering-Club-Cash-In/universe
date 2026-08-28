@@ -1268,10 +1268,8 @@ export function DynamicContractWizard({
 						}
 						break;
 					case "gendervendedor":
-						// El <select> ya muestra "Masculino" por defecto; sin este valor
-						// el contador lo cuenta como campo vacío.
-						initialValues[field.key] = "male";
-						return;
+						// No se puede inferir el género del vendedor desde su registro.
+						break;
 				}
 
 				// === DESEMBOLSO: cheques ya registrados (from CRM) ===
@@ -1648,9 +1646,16 @@ export function DynamicContractWizard({
 		selectedDocuments.length === documentTypes.length;
 
 	const canProceedStep1 = selectedDocuments.length > 0;
+	const vendorDeclarationSelected = selectedDocuments.includes(
+		"declaracion_vendedor",
+	);
+	const vendorGenderSelected =
+		fieldValues.genderVendedor === "male" ||
+		fieldValues.genderVendedor === "female";
 	const canProceedStep2 =
-		fieldStats.required === 0 ||
-		fieldStats.filledRequired === fieldStats.required;
+		(fieldStats.required === 0 ||
+			fieldStats.filledRequired === fieldStats.required) &&
+		(!vendorDeclarationSelected || vendorGenderSelected);
 
 	const handleNext = async () => {
 		if (step === 1 && canProceedStep1) {
@@ -1658,6 +1663,15 @@ export function DynamicContractWizard({
 			setStep(2);
 		} else if (step === 2 && canProceedStep2) {
 			try {
+				if (vendorDeclarationSelected && !vendorGenderSelected) {
+					setFieldErrors((prev) => ({
+						...prev,
+						genderVendedor: "Selecciona el género del vendedor",
+					}));
+					toast.error("Selecciona el género del vendedor antes de generar");
+					return;
+				}
+
 				// Build contracts payload
 				const clientEmail = crmData.cliente.correo;
 				const hasCoDebtors = coDebtorFields.length > 0;
@@ -1699,8 +1713,7 @@ export function DynamicContractWizard({
 						let isPlural = false;
 
 						if (isVendorDeclaration) {
-							gender =
-								fieldValues.genderVendedor === "female" ? "female" : "male";
+							gender = fieldValues.genderVendedor as "male" | "female";
 							// Vendor declaration is always singular
 							isPlural = false;
 						} else {
@@ -2162,12 +2175,15 @@ export function DynamicContractWizard({
 															{/* Input o Select según el campo */}
 															{field.key?.toLowerCase() === "gendervendedor" ? (
 																<select
-																	value={fieldValues[field.key] || "male"}
+																	value={fieldValues[field.key] || ""}
 																	onChange={(e) =>
 																		handleFieldChange(field.key, e.target.value)
 																	}
 																	className={`flex h-9 w-full rounded-md border border-input bg-white px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${hasError ? "border-red-500" : ""}`}
 																>
+																	<option value="" disabled>
+																		Selecciona el género
+																	</option>
 																	<option value="male">Masculino</option>
 																	<option value="female">Femenino</option>
 																</select>

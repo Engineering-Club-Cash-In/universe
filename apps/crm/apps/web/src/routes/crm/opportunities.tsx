@@ -3149,10 +3149,9 @@ function RouteComponent() {
 									}}
 								</editOpportunityForm.Field>
 							</div>
-							{/* La empresa (agencia) solo aplica a vehículos nuevos, y una vez
-							    asignada no hace falta volver a pedirla. */}
-							{!selectedOpportunity?.company?.id &&
-								selectedOpportunity?.vehicle?.isNew !== false && (
+							{/* La empresa (agencia) solo aplica a vehículos nuevos y puede
+							    corregirse si quedó heredada o desactualizada. */}
+							{selectedOpportunity?.vehicle?.isNew !== false && (
 								<div>
 									<editOpportunityForm.Field name="companyId">
 										{(field) => (

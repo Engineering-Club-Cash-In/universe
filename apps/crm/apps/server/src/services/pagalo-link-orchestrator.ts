@@ -482,7 +482,10 @@ async function emitirUnLink(params: {
 		// de code review — el caso cross-group ya estaba resuelto, este es
 		// el caso same-group, que seguía con el orden original invertido).
 		const [grupo] = await tx
-			.select({ status: pagaloPaymentGroups.status })
+			.select({
+				status: pagaloPaymentGroups.status,
+				carteraCreditoId: pagaloPaymentGroups.carteraCreditoId,
+			})
 			.from(pagaloPaymentGroups)
 			.where(eq(pagaloPaymentGroups.id, params.groupId))
 			.for("update");
@@ -491,6 +494,30 @@ async function emitirUnLink(params: {
 			throw new Error(
 				`El grupo cambió a ${grupo.status} justo antes de emitir el link — no se creó ningún link nuevo.`,
 			);
+		}
+		// El chequeo de pago-predecesor corría antes en una transacción propia
+		// que terminaba (y soltaba su candado) ANTES de que esta transacción
+		// tomara el suyo — un pago podía llegar en esa ventana sin candado
+		// entre ambas y colarse igual (hallazgo de code review). Movido acá,
+		// bajo el MISMO candado que protege el INSERT de más abajo: sin
+		// ventana entre el chequeo y la emisión.
+		const [pagoPredecesorSinReconciliar] = await tx
+			.select({ linkId: pagaloPaymentLinks.id })
+			.from(pagaloPaymentLinks)
+			.innerJoin(
+				pagaloPaymentGroups,
+				eq(pagaloPaymentGroups.id, pagaloPaymentLinks.groupId),
+			)
+			.where(
+				and(
+					eq(pagaloPaymentGroups.carteraCreditoId, grupo.carteraCreditoId),
+					eq(pagaloPaymentLinks.status, "PAID"),
+					eq(pagaloPaymentLinks.isApplicationSource, false),
+				),
+			)
+			.limit(1);
+		if (pagoPredecesorSinReconciliar) {
+			throw new PagaloReemplazoInvalido();
 		}
 		// regenerarLinkIndividual valida el link viejo (supersedesLinkId) con
 		// un SELECT suelto bastante antes de llegar acá, tras
@@ -1342,6 +1369,24 @@ export async function regenerarLinkIndividual(params: {
 			"Págalo respondió sin confirmar el link — puede que ya lo haya creado del otro lado. No se puede regenerar hasta reconciliarlo a mano.",
 		);
 	}
+	// activatedAt solo se setea cuando emitirUnLink confirma ACTIVE — un
+	// link REPLACED/CANCELLED/EXPIRED sin activatedAt se cerró MIENTRAS
+	// createPaymentRequest todavía estaba en vuelo (invalidado por un
+	// supervisor, o por invalidarGrupoEnTx del bot, antes de que Págalo
+	// respondiera): no hay forma de saber si esa solicitud original va a
+	// tener éxito o no. Regenerar acá dispara una SEGUNDA solicitud real
+	// antes de que la primera confirme su destino — si ambas terminan
+	// aceptadas, dos links cobrables en Págalo que el poller no puede
+	// reconciliar entre sí (hallazgo de code review, ventana distinta al
+	// caso post-respuesta ya cerrado con PagaloRespuestaAmbigua).
+	if (
+		["REPLACED", "CANCELLED", "EXPIRED"].includes(linkViejo.status) &&
+		!linkViejo.activatedAt
+	) {
+		throw new Error(
+			"Este link se cerró mientras Págalo todavía no confirmaba su creación — no se puede regenerar hasta saber si esa solicitud tuvo éxito o no.",
+		);
+	}
 
 	// Solo la generación MÁS ALTA de ese tipo, dentro de ESTE grupo, puede
 	// regenerarse — regenerar una fila vieja (p. ej. generación 1 cuando ya
@@ -1447,38 +1492,11 @@ export async function regenerarLinkIndividual(params: {
 			: grupo.facturableTotal;
 	const providerAmount = toPagaloProviderAmount(amount);
 
-	// El chequeo de pago-predecesor vivía DESPUÉS de emitirUnLink (dentro de
-	// la transacción de restauración) — para entonces ya se había hecho el
-	// INSERT + HTTP real a Págalo + UPDATE a ACTIVE: el link nuevo ya
-	// existía y era cobrable, y la función igual devolvía su paymentUrl. El
-	// chequeo solo lograba que el grupo no saliera de REVIEW_REQUIRED, pero
-	// no evitaba crear el segundo link cobrable (hallazgo de code review).
-	// Movido acá, bajo candado del grupo, ANTES de gastar la llamada HTTP.
-	await db.transaction(async (tx) => {
-		await tx
-			.select({ id: pagaloPaymentGroups.id })
-			.from(pagaloPaymentGroups)
-			.where(eq(pagaloPaymentGroups.id, grupo.id))
-			.for("update");
-		const [pagoPredecesorSinReconciliar] = await tx
-			.select({ linkId: pagaloPaymentLinks.id })
-			.from(pagaloPaymentLinks)
-			.innerJoin(
-				pagaloPaymentGroups,
-				eq(pagaloPaymentGroups.id, pagaloPaymentLinks.groupId),
-			)
-			.where(
-				and(
-					eq(pagaloPaymentGroups.carteraCreditoId, grupo.carteraCreditoId),
-					eq(pagaloPaymentLinks.status, "PAID"),
-					eq(pagaloPaymentLinks.isApplicationSource, false),
-				),
-			)
-			.limit(1);
-		if (pagoPredecesorSinReconciliar) {
-			throw new PagaloReemplazoInvalido();
-		}
-	});
+	// El chequeo de pago-predecesor (antes en una transacción propia acá)
+	// ahora vive dentro de emitirUnLink, bajo el mismo candado que protege
+	// el INSERT — una transacción separada que termina antes de que
+	// emitirUnLink tome SU candado dejaba una ventana sin lock entre ambas
+	// donde un pago podía colarse igual (hallazgo de code review).
 
 	// Registrar el INTENTO de regeneración (actor + motivo) ANTES de llamar
 	// a Págalo — antes se registraba después de emitirUnLink, así que si

@@ -1154,6 +1154,15 @@ function RouteComponent() {
 					diaPagoMensual: value.diaPagoMensual
 						? (Number.parseInt(value.diaPagoMensual, 10) as 15 | 30)
 						: undefined,
+					// Este form solo ofrece 15/30, nunca un día IA nuevo: si el día
+					// cambió acá es elección manual (false). Si se reenvía sin cambios,
+					// refleja el estado actual.
+					elegidoDesdeRecomendacionIA:
+						(value.diaPagoMensual
+							? Number.parseInt(value.diaPagoMensual, 10)
+							: undefined) === selectedOpportunity.diaPagoMensual
+							? selectedOpportunity.diaPagoOriginalSistema != null
+							: false,
 					seguro: value.seguro ? Number.parseFloat(value.seguro) : undefined,
 					gps: value.gps ? Number.parseFloat(value.gps) : undefined,
 					categoria: value.categoria || undefined,
@@ -1231,6 +1240,7 @@ function RouteComponent() {
 			cuotaMensual?: string;
 			fechaInicio?: string;
 			diaPagoMensual?: 15 | 30;
+			elegidoDesdeRecomendacionIA?: boolean;
 			seguro?: number;
 			gps?: number;
 			categoria?:

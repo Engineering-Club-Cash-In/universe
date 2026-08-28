@@ -996,6 +996,37 @@ export const recomputeCreditAfterCapital = ({
   return { capital, cuotaInteres, iva, deudaTotal };
 };
 
+// ============================================================================
+// AJUSTE POR FECHA IDEAL DE PAGO (ver schema.ts: ajuste_fecha_ideal_pago)
+// ============================================================================
+
+/**
+ * Decide si el ajuste pendiente por fecha ideal de pago se debe deducir del
+ * disponible de este pago. Solo aplica cuando la cuota 1 está entre las
+ * pendientes del crédito (nunca en cuota 0, que el cliente no paga) y el
+ * ajuste aún no está cobrado. Best-effort: si el disponible no alcanza para
+ * cubrirlo completo, no bloquea el pago (a diferencia de mora) — queda
+ * pendiente para uno futuro.
+ *
+ * Disponible debe ser ESTRICTAMENTE mayor al monto (no gte), para que quede
+ * algo con qué procesar la cuota 1 en el loop de registerPayment.
+ */
+export const getAjusteFechaIdealADeducir = ({
+  tieneCuota1Pendiente,
+  ajustePendiente,
+  disponible,
+}: {
+  tieneCuota1Pendiente: boolean;
+  ajustePendiente: { id: number; monto_total: BigInput } | null | undefined;
+  disponible: BigInput;
+}): { id: number; monto: Big } | null => {
+  if (!tieneCuota1Pendiente || !ajustePendiente) return null;
+  const monto = new Big(ajustePendiente.monto_total);
+  if (monto.lte(0)) return null;
+  if (new Big(disponible).lte(monto)) return null;
+  return { id: ajustePendiente.id, monto };
+};
+
 /**
  * ¿El pago debe pasar por processConvenioPayment? Solo créditos EN_CONVENIO y
  * solo si después de otros/abono-capital/mora todavía queda plata (orden

@@ -21,6 +21,7 @@ import {
 import { contratosFinanciamiento } from "../db/schema/cobros";
 import { clients, leads, opportunities } from "../db/schema/crm";
 import { eqDpi } from "../lib/dpi-lookup";
+import { calcularAjusteFechaIdeal } from "../lib/fecha-ideal-pago-ajuste";
 import { formatMissingFields, getMissingFields } from "../lib/vehicle-helpers";
 import type { FacturaItem } from "../types/cartera-back";
 import { carteraBackClient } from "./cartera-back-client";
@@ -103,6 +104,7 @@ interface OpportunityData {
 	cuotaMensual: string | null;
 	fechaInicio: Date | null;
 	diaPagoMensual: number | null;
+	diaPagoOriginalSistema: number | null;
 	// Additional fields
 	seguro: string | null;
 	customerInsuranceCost?: string | null;
@@ -1016,6 +1018,41 @@ async function createCredit(
 			};
 		}
 
+		// Ingreso adicional por elegir un día IA que cae después del día que el
+		// sistema hubiera asignado por default. Solo aplica cuando diaPagoOriginalSistema
+		// quedó capturado en el 50% (assignInvestorAndAdvance) — es decir, solo cuando
+		// se eligió un día IA, nunca cuando se eligió 15/30 manualmente.
+		const fechaReferenciaPrimeraCuota = new Date();
+		const ajusteCalculado =
+			opportunity.diaPagoOriginalSistema != null
+				? calcularAjusteFechaIdeal({
+						diaPagoOriginalSistema: opportunity.diaPagoOriginalSistema,
+						diaPagoMensualElegido: diaPagoMensual,
+						capital: Number.parseFloat(opportunity.value as string),
+						porcentajeInteres: Number.parseFloat(
+							opportunity.tasaInteres as string,
+						),
+						membresiaMensual: membresiaPago ?? 0,
+						seguroMensual: seguro ?? 0,
+						gpsMensual: gps ?? 0,
+						fechaReferencia: fechaReferenciaPrimeraCuota,
+					})
+				: null;
+
+		const ajusteFechaIdeal = ajusteCalculado
+			? {
+					dia_pago_original_sistema: opportunity.diaPagoOriginalSistema as number,
+					dia_pago_mensual_elegido: diaPagoMensual,
+					dias_diferencia: ajusteCalculado.diasDiferencia,
+					dias_del_mes: ajusteCalculado.diasDelMes,
+					monto_interes: ajusteCalculado.montoInteres,
+					monto_membresia: ajusteCalculado.montoMembresia,
+					monto_servicios: ajusteCalculado.montoServicios,
+					monto_total: ajusteCalculado.montoTotal,
+					fecha_referencia: fechaReferenciaPrimeraCuota.toISOString(),
+				}
+			: undefined;
+
 		const creditoResult = await createCreditoInCarteraBack({
 			opportunityId: opportunity.id,
 			userId,
@@ -1030,6 +1067,7 @@ async function createCredit(
 				? Number(params.cuotaMensual)
 				: Number.parseFloat(opportunity.cuotaMensual as string),
 			dia_pago_mensual: diaPagoMensual,
+			ajuste_fecha_ideal: ajusteFechaIdeal,
 			tipoCredito: opportunity.creditType || "autocompra",
 			observaciones: `Crédito generado desde CRM - Oportunidad: ${opportunity.title}`,
 			seguro_10_cuotas: seguro,
@@ -1250,6 +1288,7 @@ export async function closeOpportunity(
 				cuotaMensual: opportunities.cuotaMensual,
 				fechaInicio: opportunities.fechaInicio,
 				diaPagoMensual: opportunities.diaPagoMensual,
+				diaPagoOriginalSistema: opportunities.diaPagoOriginalSistema,
 				seguro: opportunities.seguro,
 				gps: opportunities.gps,
 				insuranceProvider: opportunities.insuranceProvider,

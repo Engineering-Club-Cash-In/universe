@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
+  getAjusteFechaIdealADeducir,
   recomputeCreditAfterCapital,
   shouldIncobrableInstallmentBePaid,
 } from "./registerPaymentPolicy";
@@ -761,6 +762,66 @@ describe("recomputeCreditAfterCapital", () => {
       membresias: "10",
     });
     expect(r.deudaTotal.toString()).toBe("1060");
+  });
+});
+
+describe("getAjusteFechaIdealADeducir", () => {
+  it("null si la cuota 1 no está entre las pendientes (ya pagada o fuera de rango)", () => {
+    expect(
+      getAjusteFechaIdealADeducir({
+        tieneCuota1Pendiente: false,
+        ajustePendiente: { id: 1, monto_total: "30.96" },
+        disponible: "1000",
+      }),
+    ).toBeNull();
+  });
+
+  it("null si no hay ajuste pendiente (ya cobrado o nunca aplicó)", () => {
+    expect(
+      getAjusteFechaIdealADeducir({
+        tieneCuota1Pendiente: true,
+        ajustePendiente: null,
+        disponible: "1000",
+      }),
+    ).toBeNull();
+  });
+
+  it("null si el disponible no alcanza a cubrirlo completo (no cobra parcial)", () => {
+    expect(
+      getAjusteFechaIdealADeducir({
+        tieneCuota1Pendiente: true,
+        ajustePendiente: { id: 7, monto_total: "30.96" },
+        disponible: "20",
+      }),
+    ).toBeNull();
+  });
+
+  it("devuelve el id y el monto cuando aplica y el disponible alcanza", () => {
+    const resultado = getAjusteFechaIdealADeducir({
+      tieneCuota1Pendiente: true,
+      ajustePendiente: { id: 7, monto_total: "30.96" },
+      disponible: "880.96",
+    });
+    expect(resultado?.id).toBe(7);
+    expect(resultado?.monto.toString()).toBe("30.96");
+  });
+
+  it("null si disponible == monto exacto (no deja nada para procesar la cuota, ver comentario de la función)", () => {
+    const resultado = getAjusteFechaIdealADeducir({
+      tieneCuota1Pendiente: true,
+      ajustePendiente: { id: 7, monto_total: "30.96" },
+      disponible: "30.96",
+    });
+    expect(resultado).toBeNull();
+  });
+
+  it("deduce si disponible es apenas mayor al monto", () => {
+    const resultado = getAjusteFechaIdealADeducir({
+      tieneCuota1Pendiente: true,
+      ajustePendiente: { id: 7, monto_total: "30.96" },
+      disponible: "30.97",
+    });
+    expect(resultado?.monto.toString()).toBe("30.96");
   });
 });
 

@@ -54,8 +54,12 @@
 import { sql } from "drizzle-orm";
 import Big from "big.js";
 import { db, client } from "../database";
-import { CLUB_CASHIN_CONFIG } from "../utils/functions/const";
-import { computarDiffFacturas } from "../cofidi/facturasFaltantes";
+import {
+  CLUB_CASHIN_CONFIG,
+  INVERSIONISTAS_FACTURADORES,
+  esInversionistaCube,
+} from "../utils/functions/const";
+import { big, computarDiffFacturas } from "../cofidi/facturasFaltantes";
 
 Big.DP = 20;
 Big.RM = Big.roundHalfUp;
@@ -73,14 +77,11 @@ const CSV_PATH =
 const NIT_CUBE = CLUB_CASHIN_CONFIG.emisor.nit;
 
 /** NIT del facturador propio → palabras clave del nombre del inversionista.
- *  Espejo de INVERSIONISTAS_FACTURADORES en utils/functions/const.ts. */
-const FACTURADORES_POR_NIT: Record<string, string[]> = {
-  "52956032": ["SE PRESTA", "SE-PRESTA", "SEPRESTA"],
-  "100691455": ["AMJK"],
-  "2694247K": ["CREACION E IMAGEN", "CREACION IMAGEN", "CREACIÓN"],
-  "54603064": ["GRUPO BATRO", "BATRO"],
-  "96896035": ["AUTOCASH", "AUTO CASH", "AUTO-CASH", "AUTOCA"],
-};
+ *  DERIVADO de INVERSIONISTAS_FACTURADORES (fuente única): una copia a mano ya
+ *  había nacido desfasada (a SE PRESTA le faltaban variantes de keywords). */
+const FACTURADORES_POR_NIT: Record<string, string[]> = Object.fromEntries(
+  INVERSIONISTAS_FACTURADORES.map((f) => [String(f.config.emisor.nit), f.keywords])
+);
 
 type Concepto = "MORA" | "OTROS_SERVICIOS" | "OTROS" | "INTERESES" | "INTERESES_CUBE";
 
@@ -93,20 +94,17 @@ type Candidato = {
   fuente: string;
 };
 
-/** Normaliza a 2 decimales. Los campos de pagos_credito traen NULL y strings
- *  vacíos de la época de las migraciones desde SIFCO: ahí el rubro es 0. */
-const fix2 = (v: unknown) => {
-  try {
-    return new Big((v as any) ?? 0).round(2).toFixed(2);
-  } catch {
-    return "0.00";
-  }
-};
+/** Normaliza a 2 decimales con la MISMA tolerancia que los bloques de emisión y
+ *  el diff (helper `big` de facturasFaltantes): NULL/''/basura → 0, pero
+ *  '12abc' → 12.00 igual que el parseFloat con que se facturó. Zerear esos
+ *  valores (como hacía la versión anterior) perdía el candidato de un rubro que
+ *  SÍ se facturó, abriendo la puerta a un match coincidencial con otro rubro. */
+const fix2 = (v: unknown) => big(v as any).toFixed(2);
 
 /** `= ANY(...)` con una lista larga: drizzle inlinaría un ROW(...) y Postgres
  *  revienta pasadas 1664 entradas. Se manda como UN parámetro de texto. */
 const idsCsv = (ids: number[]) => ids.join(",");
-const esCube = (n: string) => n.trim().toUpperCase().includes("CUBE INVESTMENTS");
+const esCube = esInversionistaCube;
 
 async function main() {
   console.log(`\n🏷️  Backfill de concepto en facturas_electronicas (${APPLY ? "APPLY" : "DRY-RUN"})\n`);
@@ -182,25 +180,38 @@ async function main() {
   //    con mora/otros/otros_servicios. Caso real del dump: factura 4315 (pago
   //    116815) de Q882.00 se etiquetaba MORA cuando el totalCube del loop también
   //    da Q882.00 → tras --apply el diff habría emitido un SEGUNDO DTE de Q882
-  //    ante SAT. Por eso `pagosConInteresSinDesglose` marca esos pagos y el
+  //    ante SAT. Por eso `pagosConCubeIrreconstruible` marca esos pagos y el
   //    matcher trata como AMBIGUA cualquier factura emitida por CUBE en ellos.
+  //
+  //    ⚠️ El mismo hoyo existe con desglose PARCIAL: si el flujo de interés de la
+  //    corrida original abortó (interesFlujoOk=false), el desglose tiene filas de
+  //    MORA/OTROS/etc. pero NO la fila INTERES — y el DTE de CUBE (si alcanzó a
+  //    emitirse) es igual de irreconstruible. Una fila INTERES=0 sí es confiable
+  //    (flujo OK con residuo 0 → no hubo DTE de CUBE). Por eso la guarda mira
+  //    "falta la fila INTERES", no "falta todo el desglose".
   const pagosSinDesglose = pagoIds.filter((p) => !porPagoDesglose.has(p));
-  const pagosConInteresSinDesglose = new Set<number>();
-  if (pagosSinDesglose.length > 0) {
+  const pagosConCubeIrreconstruible = new Set<number>();
+  {
     const pagosRes = await db.execute(sql`
       SELECT pago_id, mora, otros, abono_seguro, abono_gps, membresias_pago, abono_interes
       FROM cartera.pagos_credito
-      WHERE pago_id = ANY(string_to_array(${idsCsv(pagosSinDesglose)}, ',')::int[])
+      WHERE pago_id = ANY(string_to_array(${idsCsv(pagoIds)}, ',')::int[])
     `);
+    const sinDesglose = new Set(pagosSinDesglose);
     for (const p of (pagosRes as any).rows as any[]) {
+      const desglose = porPagoDesglose.get(p.pago_id);
+      const hayInteres = new Big(fix2(p.abono_interes)).gt(0);
+      if (hayInteres && (!desglose || !desglose.has("INTERES"))) {
+        pagosConCubeIrreconstruible.add(p.pago_id);
+      }
+
+      if (!sinDesglose.has(p.pago_id)) continue; // el fallback 2b es solo sin desglose
       push(p.pago_id, { concepto: "MORA", inversionista_id: null, monto: fix2(p.mora), fuente: "pagos_credito" });
       push(p.pago_id, { concepto: "OTROS", inversionista_id: null, monto: fix2(p.otros), fuente: "pagos_credito" });
       const otrosServicios = new Big(fix2(p.abono_seguro))
         .plus(fix2(p.abono_gps))
         .plus(fix2(p.membresias_pago));
       push(p.pago_id, { concepto: "OTROS_SERVICIOS", inversionista_id: null, monto: fix2(otrosServicios), fuente: "pagos_credito" });
-
-      if (new Big(fix2(p.abono_interes)).gt(0)) pagosConInteresSinDesglose.add(p.pago_id);
     }
   }
 
@@ -224,8 +235,13 @@ async function main() {
     FROM cartera.pagos_credito_inversionistas_facturado f
     JOIN cartera.inversionistas i ON i.inversionista_id = f.inversionista_id
     WHERE f.pago_id = ANY(string_to_array(${idsCsv(pagoIds)}, ',')::int[])
+      -- Por (pago, inversionista) y NO solo por pago: una distribución pci que
+      -- quedó a medias (filas para 2 de 3 inversionistas — modo de falla real,
+      -- repair c1094) dejaría al 3º sin candidato si el NOT EXISTS fuera por pago.
       AND NOT EXISTS (
-        SELECT 1 FROM cartera.pagos_credito_inversionistas p2 WHERE p2.pago_id = f.pago_id
+        SELECT 1 FROM cartera.pagos_credito_inversionistas p2
+        WHERE p2.pago_id = f.pago_id
+          AND p2.inversionista_id = f.inversionista_id
       )
   `);
   for (const r of (invRes as any).rows as any[]) {
@@ -242,6 +258,7 @@ async function main() {
   // ── 3. Match por monto (+ desempate por emisor) ────────────────────────────
   const decisiones: {
     factura_id: number;
+    pago_id: number;
     concepto: Concepto;
     inversionista_id: number | null;
     fuente: string;
@@ -262,17 +279,21 @@ async function main() {
     const monto = fix2(f.monto_total);
     let matches = (candidatos.get(f.pago_id) ?? []).filter((c) => c.monto === monto);
 
-    // Desempate por emisor: un NIT que no es el de CUBE solo puede ser el DTE de
-    // intereses de ESE inversionista (los rubros MORA/OTROS/etc. siempre los
-    // emite CUBE). Se usa tanto para descartar rubros como para fijar el inv.
-    const keywords = f.emisor_nit && f.emisor_nit !== NIT_CUBE ? FACTURADORES_POR_NIT[f.emisor_nit] : null;
-    if (keywords && matches.length > 1) {
-      const soloEseFacturador = matches.filter(
+    // Restricción por emisor: un NIT que no es el de CUBE solo puede ser el DTE
+    // de intereses de ESE inversionista (los rubros MORA/OTROS/etc. siempre los
+    // emite CUBE). Se aplica SIEMPRE — no solo como desempate con matches>1: un
+    // match ÚNICO de MORA sobre una factura de AUTOCASH no es "inequívoco", es
+    // una coincidencia de montos con el candidato INTERESES ausente (pci/pcif
+    // incompletos). Sin esta restricción se etiquetaba ese rubro con confianza.
+    if (f.emisor_nit && f.emisor_nit !== NIT_CUBE) {
+      const keywords = FACTURADORES_POR_NIT[f.emisor_nit];
+      matches = matches.filter(
         (c) =>
           c.concepto === "INTERESES" &&
-          keywords.some((k) => (c.nombre ?? "").toUpperCase().includes(k))
+          // NIT conocido: además el candidato debe ser el inversionista de ESE
+          // facturador. NIT no-CUBE desconocido: al menos nunca MORA/OTROS/etc.
+          (!keywords || keywords.some((k) => (c.nombre ?? "").toUpperCase().includes(k)))
       );
-      if (soloEseFacturador.length > 0) matches = soloEseFacturador;
     }
 
     // Duplicados exactos del MISMO candidato (p. ej. pci y desglose coincidiendo)
@@ -292,7 +313,7 @@ async function main() {
     if (
       matches.length > 0 &&
       emisorPuedeSerCube &&
-      pagosConInteresSinDesglose.has(f.pago_id)
+      pagosConCubeIrreconstruible.has(f.pago_id)
     ) {
       ambiguas.push({ f, opciones: [...matches.map((c) => c.concepto), "INTERESES_CUBE(desconocido)"] });
       anota(
@@ -306,6 +327,7 @@ async function main() {
       const c = matches[0];
       decisiones.push({
         factura_id: f.factura_id,
+        pago_id: f.pago_id,
         concepto: c.concepto,
         inversionista_id: c.concepto === "INTERESES" ? c.inversionista_id : null,
         fuente: c.fuente,
@@ -387,18 +409,26 @@ async function main() {
   const LOTE = 500;
   for (let i = 0; i < decisiones.length; i += LOTE) {
     const lote = decisiones.slice(i, i + LOTE);
-    await db.transaction(async (tx) => {
-      for (const d of lote) {
-        // El WHERE repite concepto IS NULL: si otro proceso ya la etiquetó, gana él.
-        await tx.execute(sql`
-          UPDATE cartera.facturas_electronicas
-          SET concepto = ${d.concepto},
-              inversionista_id = ${d.inversionista_id}
-          WHERE factura_id = ${d.factura_id}
-            AND concepto IS NULL
-        `);
-      }
-    });
+    // UN solo UPDATE ... FROM (VALUES ...) por lote: contra el pooler de prod,
+    // un UPDATE por fila son miles de round-trips seriados (minutos de pura
+    // latencia). El WHERE repite concepto IS NULL: si otro proceso ya la
+    // etiquetó, gana él. Los VALUES van inlined (números e identificadores de
+    // nuestro propio catálogo, no input externo) para no pelear con el límite
+    // de parámetros.
+    const values = lote
+      .map(
+        (d) =>
+          `(${d.factura_id}, '${d.concepto}', ${d.inversionista_id ?? "NULL"})`
+      )
+      .join(", ");
+    await db.execute(sql`
+      UPDATE cartera.facturas_electronicas AS f
+      SET concepto = v.concepto,
+          inversionista_id = v.inversionista_id
+      FROM (VALUES ${sql.raw(values)}) AS v(factura_id, concepto, inversionista_id)
+      WHERE f.factura_id = v.factura_id
+        AND f.concepto IS NULL
+    `);
     escritas += lote.length;
     console.log(`   💾 ${escritas}/${decisiones.length}`);
   }
@@ -414,20 +444,18 @@ async function main() {
  * reporte no puede divergir del comportamiento real.
  */
 async function simularReemisiones(
-  decisiones: { factura_id: number; concepto: Concepto; inversionista_id: number | null }[]
+  decisiones: {
+    factura_id: number;
+    pago_id: number;
+    concepto: Concepto;
+    inversionista_id: number | null;
+  }[]
 ) {
   const conceptoPorFactura = new Map(decisiones.map((d) => [d.factura_id, d]));
-  const pagosAfectados = new Set<number>();
-
   // Los pagos que tocó el backfill son los únicos que pueden cambiar de modo.
-  const facturasDecididasRes = await db.execute(sql`
-    SELECT factura_id, pago_id
-    FROM cartera.facturas_electronicas
-    WHERE factura_id = ANY(string_to_array(${idsCsv(decisiones.map((d) => d.factura_id))}, ',')::int[])
-  `);
-  for (const r of (facturasDecididasRes as any).rows as any[]) pagosAfectados.add(r.pago_id);
-
-  const ids = [...pagosAfectados];
+  // (pago_id viaja en las decisiones: re-consultarlo era un round-trip por datos
+  // que main() ya tenía en memoria.)
+  const ids = [...new Set(decisiones.map((d) => d.pago_id))];
   if (ids.length === 0) return { filas: [], csv: "", noSimulables: 0 };
 
   const pagosRes = await db.execute(sql`

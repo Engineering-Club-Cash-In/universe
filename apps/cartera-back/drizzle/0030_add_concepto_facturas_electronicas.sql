@@ -33,13 +33,37 @@ ALTER TABLE "cartera"."facturas_electronicas"
 
 DO $$
 BEGIN
+  -- conrelid calificado: sin él, un constraint homónimo en CUALQUIER otra tabla
+  -- del cluster haría que este FK nunca se cree, en silencio.
   IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'fk_facturas_electronicas_inversionista'
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'fk_facturas_electronicas_inversionista'
+      AND conrelid = '"cartera"."facturas_electronicas"'::regclass
   ) THEN
     ALTER TABLE "cartera"."facturas_electronicas"
       ADD CONSTRAINT "fk_facturas_electronicas_inversionista"
       FOREIGN KEY ("inversionista_id")
       REFERENCES "cartera"."inversionistas"("inversionista_id");
+  END IF;
+END $$;
+
+-- CHECK en vez de enum: valida los 5 valores conocidos al ESCRIBIR (un typo en un
+-- repair manual revienta aquí con error claro, no días después como un 400
+-- "concepto desconocido" en el endpoint) y agregar un valor nuevo es un simple
+-- DROP+ADD del constraint, sin ALTER TYPE.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'chk_facturas_electronicas_concepto'
+      AND conrelid = '"cartera"."facturas_electronicas"'::regclass
+  ) THEN
+    ALTER TABLE "cartera"."facturas_electronicas"
+      ADD CONSTRAINT "chk_facturas_electronicas_concepto"
+      CHECK (
+        concepto IS NULL
+        OR concepto IN ('MORA', 'OTROS_SERVICIOS', 'OTROS', 'INTERESES', 'INTERESES_CUBE')
+      );
   END IF;
 END $$;
 

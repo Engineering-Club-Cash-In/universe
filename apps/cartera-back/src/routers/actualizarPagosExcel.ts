@@ -565,7 +565,7 @@ export const actualizarPagosExcelRouter = new Elysia()
                   OR abono_gps IS DISTINCT FROM ${d.abono_gps}::numeric
                   OR membresias_pago IS DISTINCT FROM ${d.membresias_pago}::numeric
                   OR mora IS DISTINCT FROM ${d.mora}::numeric
-                  OR COALESCE(substring(otros FROM '^-?[0-9]+\\.?[0-9]*')::numeric, 0)
+                  OR COALESCE(substring(btrim(otros) FROM '^[+-]?([0-9]+\\.?[0-9]*|\\.[0-9]+)')::numeric, 0)
                      IS DISTINCT FROM ${d.otros}::numeric
                 )
             `);

@@ -533,6 +533,7 @@ async function emitirUnLink(params: {
 					status: pagaloPaymentLinks.status,
 					errorCode: pagaloPaymentLinks.errorCode,
 					activatedAt: pagaloPaymentLinks.activatedAt,
+					pagaloRequestUuid: pagaloPaymentLinks.pagaloRequestUuid,
 				})
 				.from(pagaloPaymentLinks)
 				.where(eq(pagaloPaymentLinks.id, params.supersedesLinkId))
@@ -567,10 +568,26 @@ async function emitirUnLink(params: {
 			// de que la primera confirmara su destino (hallazgo de code
 			// review). Movido acá, al punto compartido bajo candado, para
 			// cubrir ambos llamadores en vez de duplicarlo.
-			if (
+			//
+			// CANCELLED/EXPIRED con pagaloRequestUuid es una excepción: ese
+			// UUID solo se guarda tras una respuesta HTTP real de Págalo
+			// (incluso si llegó después de una invalidación, ver el bloque de
+			// emitirUnLink más abajo que la preserva sin reactivar el link), y
+			// marcarLinkTerminal (pagalo-poll.ts) solo pone CANCELLED/EXPIRED
+			// cuando el poller consultó ESE uuid contra Págalo y el proveedor
+			// respondió terminal — o sea, Págalo ya confirmó que el link
+			// murió, aunque activatedAt nunca se haya llegado a setear
+			// (hallazgo de code review). REPLACED sin activatedAt sigue
+			// bloqueado siempre: ahí no hubo ninguna confirmación del
+			// proveedor, solo nuestra invalidación local.
+			const cerradoSinConfirmarNiUuid =
 				["REPLACED", "CANCELLED", "EXPIRED"].includes(viejo.status) &&
-				!viejo.activatedAt
-			) {
+				!viejo.activatedAt &&
+				!(
+					["CANCELLED", "EXPIRED"].includes(viejo.status) &&
+					viejo.pagaloRequestUuid
+				);
+			if (cerradoSinConfirmarNiUuid) {
 				throw new Error(
 					"El link que se está reemplazando se cerró mientras Págalo todavía no confirmaba su creación — no se puede regenerar hasta saber si esa solicitud tuvo éxito o no.",
 				);
@@ -1603,6 +1620,7 @@ export async function regenerarLinkIndividual(params: {
 				linkType: pagaloPaymentLinks.linkType,
 				status: pagaloPaymentLinks.status,
 				isApplicationSource: pagaloPaymentLinks.isApplicationSource,
+				errorCode: pagaloPaymentLinks.errorCode,
 			})
 			.from(pagaloPaymentLinks)
 			.where(eq(pagaloPaymentLinks.groupId, grupo.id))
@@ -1646,13 +1664,21 @@ export async function regenerarLinkIndividual(params: {
 				(l) => l.status === "PAID" && !l.isApplicationSource,
 			) || !!pagoPredecesorSinReconciliar;
 
+		// CREATING con errorCode=PagaloRespuestaAmbigua es un link que agotó
+		// reintentos de persistencia con éxito HTTP confirmado en Págalo (ver
+		// emitirUnLink más arriba): quedó en CREATING sin pagaloRequestUuid
+		// persistido, así que el poller nunca lo vuelve a mirar (huérfano) y
+		// requiere reconciliación manual. Contarlo como "cubierto" restauraba
+		// el grupo de REVIEW_REQUIRED a PENDING_PAYMENT como si ese tipo
+		// estuviera resuelto, escondiendo el link ambiguo (hallazgo de code
+		// review) — mismo criterio que ya aplica regenerarGrupo en su entrada.
 		const cubiertos = new Set(
 			linksDelGrupo
 				.filter(
 					(l) =>
 						l.isApplicationSource ||
-						l.status === "CREATING" ||
-						l.status === "ACTIVE",
+						((l.status === "CREATING" || l.status === "ACTIVE") &&
+							l.errorCode !== "PagaloRespuestaAmbigua"),
 				)
 				.map((l) => l.linkType),
 		);

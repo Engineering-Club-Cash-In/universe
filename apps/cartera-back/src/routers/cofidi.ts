@@ -11,6 +11,7 @@ import {
   decidirRubroInteresInversionistas,
 } from "../cofidi/rubroInteresInversionistas";
 import { calcularSplitInteresPci } from "../cofidi/splitInteresPci";
+import { computarDiffFacturas, keyIntereses } from "../cofidi/facturasFaltantes";
 import { db } from "../database";
 import {
   audit_logs,
@@ -116,7 +117,13 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
 
       // ============================================
       // 0️⃣ PRE-VALIDACIÓN: ¿ya existen facturas ACTIVAS para este pago?
-      //    - Si sí → aborta (no permitir doble facturación)
+      //    Ya NO se aborta acá. Antes era todo-o-nada (cualquier ACTIVA → 400),
+      //    lo que dejaba trabado el pago cuando una corrida salía A MEDIAS
+      //    (cada bloque tiene su try/catch: si MORA falla, INTERESES igual sale).
+      //    Ahora solo se CARGAN las activas con su etiqueta; la decisión
+      //    (COMPLETO / BLOQUEADO / FALTANTES) se toma más abajo, cuando ya están
+      //    cargados pagoData y el roster de inversionistas — que es lo que hace
+      //    falta para saber qué DTEs debería tener este pago.
       // ============================================
 const facturasExistentes = await db
   .select({
@@ -126,6 +133,8 @@ const facturasExistentes = await db
     serie: facturas_electronicas.serie,
     numero: facturas_electronicas.numero,
     uuid: facturas_electronicas.uuid,
+    concepto: facturas_electronicas.concepto,
+    inversionista_id: facturas_electronicas.inversionista_id,
   })
   .from(facturas_electronicas)
   .where(
@@ -135,21 +144,23 @@ const facturasExistentes = await db
     )
   );
 
+// Formato del listado que acompaña a los 400 de re-facturación (igual que antes).
+const facturasExistentesResumen = facturasExistentes.map((f) => ({
+  id: f.factura_id,
+  tipo: f.tipo_documento,
+  concepto: f.concepto,
+  inversionista_id: f.inversionista_id,
+  serie: f.serie,
+  numero: f.numero,
+  uuid: f.uuid,
+  status: f.status,
+}));
+
 if (facturasExistentes.length > 0) {
-  console.log("⚠️ Este pago ya tiene facturas activas:", facturasExistentes);
-  set.status = 400;
-  return {
-    success: false,
-    message: "Este pago ya tiene facturas electrónicas activas. No se puede volver a facturar.",
-    facturasExistentes: facturasExistentes.map(f => ({
-      id: f.factura_id,
-      tipo: f.tipo_documento,
-      serie: f.serie,
-      numero: f.numero,
-      uuid: f.uuid,
-      status: f.status
-    }))
-  };
+  console.log(
+    `⚠️ Este pago ya tiene ${facturasExistentes.length} factura(s) activa(s):`,
+    facturasExistentesResumen
+  );
 }
 
       console.log("🔥 ========== FACTURANDO PAGO COMPLETO ==========");
@@ -468,6 +479,71 @@ if (facturasExistentes.length > 0) {
       );
 
       // ============================================
+      // 2.5️⃣ DIFF DE FACTURACIÓN: ¿qué le falta a este pago?
+      //    Reemplaza el viejo guard todo-o-nada. Se evalúa ACÁ (y no en el paso
+      //    0️⃣) porque necesita pagoData + el roster con interes_proporcional ya
+      //    calculado para reconstruir el ESPERADO con las mismas reglas que los
+      //    bloques de emisión.
+      //
+      //    Va ANTES de construir el receptor a propósito: así un pago BLOQUEADO
+      //    no dispara la consulta de NIT a SAT.
+      //
+      //      • COMPLETO  → no hay activas: todo igual que siempre.
+      //      • BLOQUEADO → 400 (mismo comportamiento conservador de hoy).
+      //      • FALTANTES → se emiten SOLO los DTEs que faltan.
+      // ============================================
+      const diffFacturas = computarDiffFacturas({
+        pagoData: {
+          mora: pagoData.mora,
+          abono_seguro: pagoData.abono_seguro,
+          abono_gps: pagoData.abono_gps,
+          membresias_pago: pagoData.membresias_pago,
+          otros: pagoData.otros,
+          abono_interes: pagoData.abono_interes,
+          abono_iva_12: pagoData.abono_iva_12,
+          bandera_reinversion: pagoData.bandera_reinversion,
+        },
+        inversionistas: inversionistasDelPago,
+        activas: facturasExistentes,
+        tieneOperacionesPendientesFacturar,
+      });
+
+      if (diffFacturas.modo === "BLOQUEADO") {
+        console.log(`⛔ Re-facturación BLOQUEADA para pago ${pago_id}: ${diffFacturas.razon}`);
+        set.status = 400;
+        return {
+          success: false,
+          message: `Este pago ya tiene facturas electrónicas activas. ${diffFacturas.razon}`,
+          facturasExistentes: facturasExistentesResumen,
+        };
+      }
+
+      // Modo FALTANTES: re-corrida parcial. `debeEmitir(key)` decide bloque por bloque.
+      const soloFaltantes = diffFacturas.modo === "FALTANTES";
+      const faltantes = soloFaltantes ? diffFacturas.faltantes : null;
+
+      if (soloFaltantes && faltantes!.size === 0) {
+        console.log(`✅ Pago ${pago_id} ya está completamente facturado (nada que emitir).`);
+        set.status = 400;
+        return {
+          success: false,
+          message:
+            "Este pago ya tiene facturas electrónicas activas para todos sus rubros. No se puede volver a facturar.",
+          facturasExistentes: facturasExistentesResumen,
+        };
+      }
+
+      if (soloFaltantes) {
+        console.log(
+          `🩹 Re-facturación PARCIAL del pago ${pago_id}: faltan [${[...faltantes!].join(", ")}] ` +
+            `(ya emitidas ${facturasExistentes.length}). Solo se emitirá lo faltante.`
+        );
+      }
+
+      /** En modo FALTANTES solo se certifica lo que falta; en COMPLETO, todo. */
+      const debeEmitir = (key: string) => !soloFaltantes || faltantes!.has(key);
+
+      // ============================================
       // 3️⃣ CONSTRUIR RECEPTOR (cliente al que se le factura)
       //    - Normalizar país a ISO (SAT no acepta "GUATEMALA", requiere "GT")
       //    - Extraer NITs (pueden venir separados por "/")
@@ -609,7 +685,7 @@ if (facturasExistentes.length > 0) {
       //    - 1 solo ítem: "CARGO POR SERVICIOS MORATORIOS"
       //    - Si falla, no interrumpe el flujo (registra el error y sigue)
       // ============================================
-      if (pagoData.mora && parseFloat(pagoData.mora) > 0) {
+      if (pagoData.mora && parseFloat(pagoData.mora) > 0 && debeEmitir("MORA")) {
         console.log("\n⚠️ Generando factura de MORA...");
 
         const calcMora = calcularIvaExacto(parseFloat(pagoData.mora));
@@ -668,6 +744,7 @@ if (facturasExistentes.length > 0) {
             complementos: complementosMora,
             created_by,
             nitsFallback: nitsDisponibles.slice(1),
+            concepto: "MORA",
           });
 
           facturasGeneradas.push({
@@ -700,7 +777,7 @@ if (facturasExistentes.length > 0) {
         (pagoData.abono_gps && parseFloat(pagoData.abono_gps) > 0) ||
         (pagoData.membresias_pago && parseFloat(pagoData.membresias_pago) > 0);
 
-      if (tieneOtrosServicios) {
+      if (tieneOtrosServicios && debeEmitir("OTROS_SERVICIOS")) {
         console.log("\n💼 Generando factura de OTROS SERVICIOS...");
 
         const itemsOtrosServicios = [];
@@ -830,6 +907,7 @@ if (facturasExistentes.length > 0) {
             complementos: complementosOtrosServicios,
             created_by,
             nitsFallback: nitsDisponibles.slice(1),
+            concepto: "OTROS_SERVICIOS",
           });
 
           facturasGeneradas.push({
@@ -858,7 +936,7 @@ if (facturasExistentes.length > 0) {
       //      (llega ya sumado desde resetCredit → otrosCancelacion)
       //    - 1 solo ítem: "GASTOS VARIOS"
       // ============================================
-      if (pagoData.otros && parseFloat(pagoData.otros) > 0) {
+      if (pagoData.otros && parseFloat(pagoData.otros) > 0 && debeEmitir("OTROS")) {
         console.log("\n💼 Generando factura de OTROS...");
 
         const calcOtros = calcularIvaExacto(parseFloat(pagoData.otros));
@@ -917,6 +995,7 @@ if (facturasExistentes.length > 0) {
             complementos: complementosOtros,
             created_by,
             nitsFallback: nitsDisponibles.slice(1),
+            concepto: "OTROS",
           });
 
           facturasGeneradas.push({
@@ -1410,6 +1489,8 @@ if (facturasExistentes.length > 0) {
                 customConfig: inversionistaConfig?.config,
                 customSatConfig: inversionistaConfig?.satConfig,
                 nitsFallback: nitsDisponibles.slice(1),
+                concepto: "INTERESES",
+                inversionista_id: inv.inversionista_id,
               });
 
               // 🧾 Mismo acumulado que en el flujo estándar: SOLO lo ya
@@ -1505,6 +1586,7 @@ if (facturasExistentes.length > 0) {
                 complementos: complementosCube,
                 created_by,
                 nitsFallback: nitsDisponibles.slice(1),
+                concepto: "INTERESES_CUBE",
               });
 
               facturasGeneradas.push({
@@ -1711,6 +1793,16 @@ if (facturasExistentes.length > 0) {
             continue;
           }
 
+          // 🩹 Re-facturación PARCIAL: este inversionista ya tiene su DTE vivo.
+          //    El skip va ACÁ y no antes: totalInteresesNoCube y cashInAcumulado
+          //    (que alimentan el residuo de CUBE) ya se acumularon arriba y TIENEN
+          //    que acumularse para todos, salga o no su factura. Solo se salta el
+          //    paso de certificar.
+          if (!debeEmitir(keyIntereses(inv.inversionista_id))) {
+            console.log(`   ⏭️  ${inv.nombre} - ya tiene su factura de intereses activa (re-facturación parcial)`);
+            continue;
+          }
+
           const calc = calcularIvaExacto(parseFloat(parteInversionista.toFixed(2)));
           console.log(`   💼 Factura ${inv.nombre}: Q${parteInversionista.toFixed(2)} (Base: Q${calc.montoGravable}, IVA: Q${calc.montoImpuesto})`);
 
@@ -1765,6 +1857,8 @@ if (facturasExistentes.length > 0) {
               customConfig: inversionistaConfig?.config,
               customSatConfig: inversionistaConfig?.satConfig,
               nitsFallback: nitsDisponibles.slice(1),
+              concepto: "INTERESES",
+              inversionista_id: inv.inversionista_id,
             });
 
             // 🧾 Acumular lo facturado a inversionistas que NO se autofacturan:
@@ -1817,7 +1911,8 @@ if (facturasExistentes.length > 0) {
         console.log(`   💵 Total CUBE: Q${totalCube.toFixed(2)} (residuo + cash_in)`);
 
         // -------- PASO 3: Generar 1 factura para CUBE con (residuo + cash_in acumulado) --------
-        if (totalCube.gt(0)) {
+        // 🩹 En re-facturación parcial solo se emite si el DTE de CUBE es el que faltó.
+        if (totalCube.gt(0) && debeEmitir("INTERESES_CUBE")) {
           console.log(`   💼 Generando factura CUBE...`);
 
           const calcCube = calcularIvaExacto(parseFloat(totalCube.toFixed(2)));
@@ -1871,6 +1966,7 @@ if (facturasExistentes.length > 0) {
               complementos: complementosCube,
               created_by,
               nitsFallback: nitsDisponibles.slice(1),
+              concepto: "INTERESES_CUBE",
             });
 
             facturasGeneradas.push({
@@ -1932,7 +2028,19 @@ if (facturasExistentes.length > 0) {
       //    - fecha_aplicado_gt se calcula en SQL (zona America/Guatemala).
       //    Best-effort: si falla, NO rompe la facturación (solo loguea).
       // ============================================
+      // 🩹 En re-facturación PARCIAL no se toca ni facturacion_desglose ni el
+      //    congelado pagos_credito_inversionistas_facturado: la corrida ORIGINAL
+      //    ya los escribió "como si todo hubiera salido bien" (ambos se calculan
+      //    del pago y del roster, no de los DTEs que efectivamente certificaron).
+      //    Esta re-corrida solo hace realidad esa foto emitiendo lo que faltó, así
+      //    que reescribirlos con el roster de HOY solo arriesga moverlos si el
+      //    crédito cambió en el medio. Los dos bloques hacen DELETE + INSERT.
       let rubrosGuardados = 0;
+      if (soloFaltantes) {
+        console.log(
+          `🧾 Re-facturación parcial: NO se reescriben facturacion_desglose ni el reparto congelado del pago ${pago_id} (los dejó la corrida original).`
+        );
+      } else {
       try {
         const rubrosDesglose: {
           rubro: string;
@@ -2065,6 +2173,7 @@ if (facturasExistentes.length > 0) {
           desgloseError?.message
         );
       }
+      }
 
       // ============================================
       // 🔒 CONGELAR EL REPARTO DE INTERÉS POR INVERSIONISTA
@@ -2083,6 +2192,8 @@ if (facturasExistentes.length > 0) {
       //    que usan el reporte y el cierre, para que ambos lean el congelado en
       //    vez de recalcular.
       // ============================================
+      // 🩹 Ver nota de arriba: en modo FALTANTES el congelado tampoco se toca.
+      if (!soloFaltantes) {
       try {
         const interesPago = new Big(pagoData.abono_interes || "0");
         const ivaPago = new Big(pagoData.abono_iva_12 || "0");
@@ -2191,6 +2302,7 @@ if (facturasExistentes.length > 0) {
           `⚠️ No se pudo congelar el reparto de interés del pago ${pago_id} (NO afecta la facturación):`,
           congelarError?.message
         );
+      }
       }
 
       // Pago solo-capital (sin DTE que emitir y sin errores): no es fallo.
@@ -4273,6 +4385,8 @@ async function certificarFacturaHelper({
   customSatConfig,
   usarFechaActual = false,
   nitsFallback = [],
+  concepto = null,
+  inversionista_id = null,
 }: {
   pago_id?: number | null;
   receptor: any;
@@ -4290,6 +4404,14 @@ async function certificarFacturaHelper({
   };
   usarFechaActual?: boolean;
   nitsFallback?: string[];
+  // 🧩 Rubro del pago que cubre este DTE ('MORA' | 'OTROS_SERVICIOS' | 'OTROS' |
+  //    'INTERESES' | 'INTERESES_CUBE'). Solo lo pasa /facturar-pago-completo:
+  //    es lo que permite re-facturar únicamente lo faltante si una corrida sale
+  //    a medias (src/cofidi/facturasFaltantes.ts). El resto de llamadores
+  //    (p. ej. /facturar-generico) lo dejan en NULL a propósito.
+  concepto?: string | null;
+  /** Solo con concepto='INTERESES': el inversionista dueño de esa parte. */
+  inversionista_id?: number | null;
 }) {
   try {
     console.log(`\n📄 ========== CERTIFICANDO FACTURA ==========`);
@@ -4460,6 +4582,8 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
             customSatConfig,
             usarFechaActual,
             nitsFallback: restantesFallback,
+            concepto,
+            inversionista_id,
           });
         }
 
@@ -4692,6 +4816,10 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
 
         status: "ACTIVA",
         created_by: created_by || null,
+
+        // 🧩 Etiqueta del rubro (NULL para genéricas / llamadores que no lo pasan).
+        concepto: concepto ?? null,
+        inversionista_id: inversionista_id ?? null,
       })
       .returning();
 

@@ -1274,6 +1274,21 @@
     motivo_anulacion: text("motivo_anulacion"),
     anulada_por: integer("anulada_por").references(() => platform_users.id),
 
+    // 🧩 QUÉ RUBRO DEL PAGO CUBRE ESTE DTE
+    //    'MORA' | 'OTROS_SERVICIOS' | 'OTROS' | 'INTERESES' | 'INTERESES_CUBE'.
+    //    Lo llena /facturar-pago-completo; queda NULL en las genéricas
+    //    (/facturar-generico) y en todo lo emitido antes de esta columna.
+    //    Sirve para re-facturar SOLO los rubros que faltaron cuando una corrida
+    //    salió parcial (ver src/cofidi/facturasFaltantes.ts). Es varchar y no
+    //    enum de pg a propósito: agregar valores no requiere migrar un tipo.
+    concepto: varchar("concepto", { length: 30 }),
+
+    // Solo para concepto='INTERESES': a qué inversionista se le facturó su parte.
+    // NULL en el resto (incluido INTERESES_CUBE, que es el residuo de CUBE).
+    inversionista_id: integer("inversionista_id").references(
+      () => inversionistas.inversionista_id
+    ),
+
     // Metadata
     created_at: timestamp("created_at").defaultNow().notNull(),
     created_by: integer("created_by").references(() => platform_users.id),

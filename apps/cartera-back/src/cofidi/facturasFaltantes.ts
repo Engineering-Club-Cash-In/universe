@@ -1,0 +1,245 @@
+import Big from "big.js";
+import { getInversionistaFacturadorConfig } from "../utils/functions/const";
+
+Big.DP = 20;
+Big.RM = Big.roundHalfUp;
+
+// ============================================================
+// ¿Qué le falta facturar a un pago?
+//
+// Problema que resuelve:
+//   /facturar-pago-completo emite hasta 5 tipos de DTE por pago (MORA,
+//   OTROS_SERVICIOS, OTROS, INTERESES por inversionista, INTERESES_CUBE) y cada
+//   bloque tiene su propio try/catch: si uno falla, los demás siguen. Una corrida
+//   podía quedar A MEDIAS (p. ej. INTERESES certificó y MORA no) y el guard viejo
+//   —todo-o-nada: "¿hay alguna factura ACTIVA? → 400"— dejaba el pago trabado sin
+//   forma de emitir solo lo que faltó, salvo anular todo a mano.
+//
+//   Acá se calcula el DIFF entre lo ESPERADO (los DTEs que este pago debería
+//   tener, con las MISMAS condiciones que usan los bloques de emisión) y lo
+//   LOGRADO (las facturas ACTIVAS ya etiquetadas con su concepto), para poder
+//   re-correr emitiendo únicamente lo faltante.
+//
+// Por qué es una función pura y separada:
+//   El costo de equivocarse es sobre-facturar al cliente en SAT. Se testea sola.
+// ============================================================
+
+/** Conceptos que /facturar-pago-completo etiqueta en `facturas_electronicas.concepto`. */
+export const CONCEPTOS_FACTURA = [
+  "MORA",
+  "OTROS_SERVICIOS",
+  "OTROS",
+  "INTERESES",
+  "INTERESES_CUBE",
+] as const;
+
+export type ConceptoFactura = (typeof CONCEPTOS_FACTURA)[number];
+
+/**
+ * Clave de un DTE dentro de un pago.
+ *   - "MORA" | "OTROS_SERVICIOS" | "OTROS" | "INTERESES_CUBE": uno por pago.
+ *   - "INTERESES:<inversionista_id>": uno por inversionista no-CUBE facturable.
+ */
+export type KeyFactura = string;
+
+export function keyIntereses(inversionista_id: number): KeyFactura {
+  return `INTERESES:${inversionista_id}`;
+}
+
+export type PagoParaDiff = {
+  mora?: string | number | null;
+  abono_seguro?: string | number | null;
+  abono_gps?: string | number | null;
+  membresias_pago?: string | number | null;
+  otros?: string | number | null;
+  abono_interes?: string | number | null;
+  abono_iva_12?: string | number | null;
+  bandera_reinversion?: boolean | null;
+};
+
+export type InversionistaParaDiff = {
+  inversionista_id: number;
+  nombre: string;
+  emite_factura?: boolean | null;
+  status_espejo?: string | null;
+  porcentaje_participacion?: string | number | null;
+  porcentaje_cash_in?: string | number | null;
+  /** Ya calculado por el handler: (abono_interes + IVA) × participación_real. */
+  interes_proporcional?: string | number | null;
+};
+
+export type FacturaActiva = {
+  factura_id?: number;
+  concepto?: string | null;
+  inversionista_id?: number | null;
+};
+
+export type DiffFacturas =
+  | { modo: "COMPLETO" }
+  | { modo: "BLOQUEADO"; razon: string }
+  | { modo: "FALTANTES"; faltantes: Set<KeyFactura>; esperado: Set<KeyFactura> };
+
+const esCubeInv = (nombre: string) =>
+  nombre.trim().toUpperCase().includes("CUBE INVESTMENTS");
+
+const big = (v: string | number | null | undefined) => new Big(v ?? "0");
+
+/**
+ * Lo que ESTE pago debería tener facturado, replicando las condiciones de los
+ * bloques 4️⃣/5️⃣/5.5️⃣/6️⃣ de /facturar-pago-completo (flujo ESTÁNDAR de intereses).
+ *
+ * ⚠️ El orden de las acumulaciones importa y está copiado del loop real:
+ *   totalInteresesNoCube suma ANTES del check `interesProporcional <= 0`, y
+ *   cashInAcumulado suma ANTES del check de "emite su propia factura". Los dos
+ *   alimentan el residuo de CUBE, así que un inversionista que NO recibe DTE
+ *   igual mueve el monto de CUBE.
+ */
+export function calcularEsperado(args: {
+  pagoData: PagoParaDiff;
+  inversionistas: InversionistaParaDiff[];
+}): Set<KeyFactura> {
+  const { pagoData, inversionistas } = args;
+  const esperado = new Set<KeyFactura>();
+
+  if (big(pagoData.mora).gt(0)) esperado.add("MORA");
+
+  if (
+    big(pagoData.abono_seguro).gt(0) ||
+    big(pagoData.abono_gps).gt(0) ||
+    big(pagoData.membresias_pago).gt(0)
+  ) {
+    esperado.add("OTROS_SERVICIOS");
+  }
+
+  if (big(pagoData.otros).gt(0)) esperado.add("OTROS");
+
+  // 🚪 Mismo guard que el handler: sin interés no se entra a NINGÚN flujo de intereses.
+  if (!big(pagoData.abono_interes).gt(0)) return esperado;
+
+  const totalConIva = big(pagoData.abono_interes).plus(big(pagoData.abono_iva_12));
+
+  let totalInteresesNoCube = new Big(0);
+  let cashInAcumulado = new Big(0);
+
+  for (const inv of inversionistas) {
+    if (esCubeInv(inv.nombre)) continue;
+
+    const redirigirACube =
+      pagoData.bandera_reinversion === true &&
+      (inv.status_espejo === "pendiente_reinversion" ||
+        inv.status_espejo === "pendiente_compra_cartera");
+    if (redirigirACube) continue;
+
+    const interesProporcional = big(inv.interes_proporcional);
+    totalInteresesNoCube = totalInteresesNoCube.plus(interesProporcional);
+    if (interesProporcional.lte(0)) continue;
+
+    const pctInversion = big(inv.porcentaje_participacion).div(100);
+    const pctCashIn = big(inv.porcentaje_cash_in).div(100);
+    const parteInversionista = interesProporcional.times(pctInversion).round(2);
+    cashInAcumulado = cashInAcumulado.plus(interesProporcional.times(pctCashIn).round(2));
+
+    // Emite su propia factura y no tenemos config para emitírsela → no hay DTE.
+    if (inv.emite_factura && !getInversionistaFacturadorConfig(inv.nombre)) continue;
+    if (parteInversionista.lte(0)) continue;
+
+    esperado.add(keyIntereses(inv.inversionista_id));
+  }
+
+  // CUBE por RESIDUO (+ el cash_in de los demás). Solo hay DTE si es > 0.
+  const totalCube = totalConIva.minus(totalInteresesNoCube).plus(cashInAcumulado);
+  if (totalCube.gt(0)) esperado.add("INTERESES_CUBE");
+
+  return esperado;
+}
+
+/**
+ * Decide cómo re-facturar un pago que ya tiene facturas ACTIVAS.
+ *
+ *   COMPLETO  → no hay ACTIVAS: emitir todo, comportamiento idéntico al de siempre.
+ *   BLOQUEADO → no se puede decidir con seguridad qué falta: 400 (como hoy).
+ *   FALTANTES → emitir SOLO las keys de `faltantes`. Si el set queda vacío el pago
+ *               ya está completamente facturado (el handler responde 400).
+ */
+export function computarDiffFacturas(args: {
+  pagoData: PagoParaDiff;
+  inversionistas: InversionistaParaDiff[];
+  activas: FacturaActiva[];
+  /** Flujo PRORRATEADO de intereses activo (compra de cartera pendiente_facturar). */
+  tieneOperacionesPendientesFacturar?: boolean;
+}): DiffFacturas {
+  const { pagoData, inversionistas, activas, tieneOperacionesPendientesFacturar } = args;
+
+  if (activas.length === 0) return { modo: "COMPLETO" };
+
+  // (c) El flujo prorrateado reparte el interés por VENTANAS de fecha de corte; su
+  //     esperado NO se modela acá. Con facturas activas se mantiene el 400 de hoy.
+  if (tieneOperacionesPendientesFacturar) {
+    return {
+      modo: "BLOQUEADO",
+      razon:
+        "El crédito tiene una compra de cartera pendiente de facturar (interés prorrateado por fecha de corte). " +
+        "Ese reparto no se puede diferenciar factura por factura: anule las facturas activas y vuelva a facturar el pago completo.",
+    };
+  }
+
+  // (a) Facturas históricas sin etiquetar: no sabemos qué cubren → 400 conservador.
+  const sinConcepto = activas.filter((f) => !f.concepto);
+  if (sinConcepto.length > 0) {
+    return {
+      modo: "BLOQUEADO",
+      razon:
+        `${sinConcepto.length} factura(s) activa(s) de este pago no tienen concepto registrado ` +
+        `(se emitieron antes de que se etiquetaran, o vienen de /facturar-generico). ` +
+        `No se puede saber qué rubro cubren: anule las facturas activas y vuelva a facturar el pago completo.`,
+    };
+  }
+
+  const logrado = new Set<KeyFactura>();
+  for (const f of activas) {
+    const concepto = f.concepto as ConceptoFactura;
+    if (!(CONCEPTOS_FACTURA as readonly string[]).includes(concepto)) {
+      return {
+        modo: "BLOQUEADO",
+        razon: `Factura activa con concepto desconocido "${f.concepto}"${
+          f.factura_id ? ` (factura_id ${f.factura_id})` : ""
+        }. Anule las facturas activas y vuelva a facturar el pago completo.`,
+      };
+    }
+    if (concepto === "INTERESES") {
+      if (f.inversionista_id == null) {
+        return {
+          modo: "BLOQUEADO",
+          razon:
+            `Factura activa de INTERESES sin inversionista_id${
+              f.factura_id ? ` (factura_id ${f.factura_id})` : ""
+            }: no se sabe a qué inversionista corresponde. ` +
+            `Anule las facturas activas y vuelva a facturar el pago completo.`,
+        };
+      }
+      logrado.add(keyIntereses(f.inversionista_id));
+    } else {
+      logrado.add(concepto);
+    }
+  }
+
+  const esperado = calcularEsperado({ pagoData, inversionistas });
+
+  // (b) logrado ⊄ esperado: hay un DTE vivo que el cálculo de HOY ya no produce
+  //     (p. ej. cambió el roster de inversionistas desde la corrida original).
+  //     Re-facturar parcial sobre un reparto distinto sobre/sub-factura → 400.
+  const sobrantes = [...logrado].filter((k) => !esperado.has(k));
+  if (sobrantes.length > 0) {
+    return {
+      modo: "BLOQUEADO",
+      razon:
+        `Hay factura(s) activa(s) que ya no corresponden al reparto actual del pago (${sobrantes.join(", ")}). ` +
+        `El crédito cambió desde que se facturó (roster de inversionistas o montos del pago): ` +
+        `emitir solo lo faltante sobre/sub-facturaría. Anule las facturas activas y vuelva a facturar el pago completo.`,
+    };
+  }
+
+  const faltantes = new Set<KeyFactura>([...esperado].filter((k) => !logrado.has(k)));
+
+  return { modo: "FALTANTES", faltantes, esperado };
+}

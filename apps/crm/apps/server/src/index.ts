@@ -78,6 +78,7 @@ import {
 } from "./routers/index";
 import { investmentsRouter } from "./routers/investments";
 import { pagaloGrupoActivoRouter } from "./routers/pagalo-grupo-activo";
+import { pagaloSupervisionRouter } from "./routers/pagalo-supervision";
 import externalContractsRouter from "./routes/external-contracts";
 import { carteraBackClient } from "./services/cartera-back-client";
 import { checkCobrosAlertas } from "./services/check-cobros-alertas";
@@ -220,6 +221,7 @@ const handler = new RPCHandler(
 		bucketCapacidadRouter,
 		proyeccionRouter,
 		pagaloGrupoActivoRouter,
+		pagaloSupervisionRouter,
 	),
 );
 app.use("/rpc/*", async (c, next) => {

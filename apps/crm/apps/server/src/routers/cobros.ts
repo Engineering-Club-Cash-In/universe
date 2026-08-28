@@ -19,6 +19,7 @@ import {
 	or,
 	sql,
 } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
@@ -749,7 +750,7 @@ type ActividadBotSesion = {
  * no hay acceso — usarlo antes de devolver cualquier dato derivado del caso
  * (vehículo, links de pago, etc.) en procedures nuevos.
  */
-async function assertAccesoCasoCobro(
+export async function assertAccesoCasoCobro(
 	casoCobroId: string,
 	userId: string,
 	userRole: string,
@@ -4919,7 +4920,16 @@ export const cobrosRouter = {
 	// eventos append-only (pagaloPaymentEvents).
 	getPagaloHistorial: cobrosProcedure
 		.input(z.object({ casoCobroId: z.string().uuid() }))
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
+			// Sin este chequeo, cualquier usuario de cobros con un casoCobroId
+			// ajeno veía paymentUrl de créditos de otros asesores — los
+			// procedures hermanos (getCreditoParaPago, registrarPagoCompleto)
+			// ya lo llaman, este quedó sin el gate desde que se creó.
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
 			const grupos = await db
 				.select({
 					id: pagaloPaymentGroups.id,
@@ -4930,10 +4940,14 @@ export const cobrosRouter = {
 					otrosTotal: pagaloPaymentGroups.otrosTotal,
 					totalAmount: pagaloPaymentGroups.totalAmount,
 					carteraImportId: pagaloPaymentGroups.carteraImportId,
+					carteraCreditoId: pagaloPaymentGroups.carteraCreditoId,
 					lastDispatchError: pagaloPaymentGroups.lastDispatchError,
+					dispatchAttemptCount: pagaloPaymentGroups.dispatchAttemptCount,
+					nextDispatchAt: pagaloPaymentGroups.nextDispatchAt,
 					createdAt: pagaloPaymentGroups.createdAt,
 					readyToApplyAt: pagaloPaymentGroups.readyToApplyAt,
 					completedAt: pagaloPaymentGroups.completedAt,
+					cancelledAt: pagaloPaymentGroups.cancelledAt,
 					creadoPor: user.name,
 				})
 				.from(pagaloPaymentGroups)
@@ -4943,6 +4957,7 @@ export const cobrosRouter = {
 			if (grupos.length === 0) return [];
 
 			const groupIds = grupos.map((g) => g.id);
+			const actor = alias(user, "pagalo_evento_actor");
 			const [links, eventos] = await Promise.all([
 				db
 					.select({
@@ -4954,6 +4969,15 @@ export const cobrosRouter = {
 						voucherUrl: pagaloPaymentLinks.voucherUrl,
 						paidAt: pagaloPaymentLinks.paidAt,
 						isApplicationSource: pagaloPaymentLinks.isApplicationSource,
+						generation: pagaloPaymentLinks.generation,
+						supersedesLinkId: pagaloPaymentLinks.supersedesLinkId,
+						errorCode: pagaloPaymentLinks.errorCode,
+						errorMessage: pagaloPaymentLinks.errorMessage,
+						lastPollError: pagaloPaymentLinks.lastPollError,
+						pollAttempts: pagaloPaymentLinks.pollAttempts,
+						activatedAt: pagaloPaymentLinks.activatedAt,
+						createdAt: pagaloPaymentLinks.createdAt,
+						transactionAmount: pagaloPaymentLinks.transactionAmount,
 					})
 					.from(pagaloPaymentLinks)
 					.where(inArray(pagaloPaymentLinks.groupId, groupIds)),
@@ -4961,14 +4985,18 @@ export const cobrosRouter = {
 					.select({
 						id: pagaloPaymentEvents.id,
 						groupId: pagaloPaymentEvents.groupId,
+						linkId: pagaloPaymentEvents.linkId,
 						eventType: pagaloPaymentEvents.eventType,
 						source: pagaloPaymentEvents.source,
+						actorUserId: pagaloPaymentEvents.actorUserId,
+						actorNombre: actor.name,
 						fromStatus: pagaloPaymentEvents.fromStatus,
 						toStatus: pagaloPaymentEvents.toStatus,
 						payload: pagaloPaymentEvents.payload,
 						occurredAt: pagaloPaymentEvents.occurredAt,
 					})
 					.from(pagaloPaymentEvents)
+					.leftJoin(actor, eq(actor.id, pagaloPaymentEvents.actorUserId))
 					.where(inArray(pagaloPaymentEvents.groupId, groupIds))
 					.orderBy(asc(pagaloPaymentEvents.occurredAt)),
 			]);
@@ -4989,7 +5017,10 @@ export const cobrosRouter = {
 	// pendiente (ver correrPollPagalo) antes de barrer links nuevos, así un
 	// solo botón cubre todo el ciclo. Borrar cuando el ciclo automático esté
 	// confirmado en sandbox.
-	probarPollPagalo: cobrosProcedure.handler(async () => {
+	// CB-127: movido a cobrosSupervisorProcedure — dispara el poller ENTERO
+	// (todos los links pendientes, no solo los de este caso), no tiene
+	// sentido que cualquier asesor pueda correrlo.
+	probarPollPagalo: cobrosSupervisorProcedure.handler(async () => {
 		try {
 			return await correrPollPagalo();
 		} catch (error) {

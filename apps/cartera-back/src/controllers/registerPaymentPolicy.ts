@@ -185,9 +185,8 @@ export type DestinoSobrescribibleRow = {
  * El cierre de una cuota hace `UPDATE pagos_credito SET <pagoData> WHERE
  * pago_id = existingPago`. Eso es seguro SOLO si la fila destino es desechable:
  *
- *  - El placeholder `no_required` importado de SIFCO (su único propósito es
- *    portar los `*_restante`; no representa plata aplicada), o
- *  - Una fila "vacía": SIN plata en NINGÚN bucket — `monto_aplicado`, todos los
+ *  - Una fila "vacía", incluido un placeholder `no_required`: SIN plata en
+ *    NINGÚN bucket — `monto_aplicado`, todos los
  *    `abono_*`, y también `mora`, `pagoConvenio` y `otros` ≈ 0. (Un pago de solo
  *    mora/otros/convenio lleva `monto_aplicado`/`abono_*` en 0 pero plata en
  *    esos otros campos; si no se contaran, el cierre lo machacaría.)
@@ -201,8 +200,6 @@ export type DestinoSobrescribibleRow = {
 export const esDestinoSobrescribible = (
   pago: DestinoSobrescribibleRow
 ): boolean => {
-  if (pago.validationStatus === "no_required") return true;
-
   const tol = new Big(DESTINO_SOBRESCRIBIBLE_TOLERANCE);
   // Estricto (`lt`, no `lte`): un Q0.01 exacto es un pago real, no "vacío".
   const casiCero = (v: BigInput | null | undefined) =>

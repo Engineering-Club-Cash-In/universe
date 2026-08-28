@@ -410,7 +410,7 @@ describe("regresión: mora/otros no debe colapsar el saldo de la cuota", () => {
 // esa fila, BORRANDO un pago de interés validado/facturado. El fix: el cierre
 // solo puede UPDATE-ar un destino realmente desechable; si no, INSERTA fila nueva.
 describe("esDestinoSobrescribible", () => {
-  it("el placeholder no_required SIEMPRE es sobrescribible (aunque trajera saldos)", () => {
+  it("el placeholder no_required vacío es sobrescribible aunque traiga restantes", () => {
     expect(
       esDestinoSobrescribible({
         validationStatus: "no_required",
@@ -419,6 +419,18 @@ describe("esDestinoSobrescribible", () => {
         abono_interes: "0",
       })
     ).toBe(true);
+  });
+
+  it("preserva un recibo SIFCO no_required con pago contractual reconstruido", () => {
+    expect(
+      esDestinoSobrescribible({
+        validationStatus: "no_required",
+        monto_aplicado: "0",
+        abono_capital: "250.00",
+        abono_interes: "44.64",
+        abono_iva_12: "5.36",
+      }),
+    ).toBe(false);
   });
 
   it("una fila vacía (monto_aplicado≈0 y todos los abono_* ≈0) es sobrescribible", () => {

@@ -37,7 +37,7 @@ import {
 	checkSeguimientosVencidos,
 	procesarSeguimientosRecurrentes,
 } from "./jobs/cobros-notifications";
-import { auditRequest } from "./lib/audit";
+import { auditRequest, markAuditFailure } from "./lib/audit";
 import { auth } from "./lib/auth";
 import { createContext } from "./lib/context";
 import { PERMISSIONS } from "./lib/roles";
@@ -497,6 +497,12 @@ app.post("/info/renap", async (c) => {
 		}
 
 		const result = await getRenapInfoController(dpi, phone);
+
+		// El controller reporta el rechazo en el valor y responde 200: sin esto,
+		// un DPI inválido o una caída de RENAP no dejarían rastro del intento.
+		if (result && typeof result === "object" && result.success === false) {
+			markAuditFailure("RENAP_RECHAZADO");
+		}
 
 		return c.json(result);
 	} catch (err: any) {

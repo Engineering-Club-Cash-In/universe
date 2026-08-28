@@ -56,6 +56,8 @@ export type AuditContext = {
 	input: unknown;
 	/** Identidad de la fila de fallo, cuando no se llegó a anotar nada. */
 	fallback: { entity: AuditEntityType; action: string } | null;
+	/** Fallo que el handler reporta en el valor, no en el estado HTTP. */
+	fallo?: string | null;
 	startedAt: number;
 	entries: AuditEntry[];
 };
@@ -103,6 +105,16 @@ export function auditMark(): number {
 export function auditRollback(marca: number): void {
 	const context = storage.getStore();
 	if (context) context.entries.length = marca;
+}
+
+/**
+ * Marca la operación como fallida cuando el handler lo expresa en el valor y
+ * no en el estado HTTP — el caso de los controllers que devuelven
+ * `{ success: false }` con un 200 (`/info/renap`, por ejemplo).
+ */
+export function markAuditFailure(errorCode: string): void {
+	const context = storage.getStore();
+	if (context) context.fallo = errorCode;
 }
 
 /** Precisa el nombre de la operación una vez que se conoce. */
@@ -474,10 +486,13 @@ export function auditRequest(): MiddlewareHandler {
 			},
 			// Los handlers de Hono devuelven el error en la respuesta en vez de
 			// lanzarlo, así que el estado es la única señal de que falló.
-			() =>
-				c.res.status >= 400
+			() => {
+				const fallo = storage.getStore()?.fallo;
+				if (fallo) return { ok: false, errorCode: fallo };
+				return c.res.status >= 400
 					? { ok: false, errorCode: `HTTP_${c.res.status}` }
-					: { ok: true },
+					: { ok: true };
+			},
 		);
 	};
 }

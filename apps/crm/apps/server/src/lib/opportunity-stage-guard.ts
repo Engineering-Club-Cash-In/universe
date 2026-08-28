@@ -65,6 +65,14 @@ export const WON_OPPORTUNITY_FROZEN_FIELD_LABELS = {
 	companyId: "la empresa",
 	creditType: "el tipo de crédito",
 	status: "el estado",
+	// Términos financieros: `close-opportunity` los copia tal cual al crédito de
+	// cartera y al contrato de financiamiento (capital, plazo, interés, cuota),
+	// así que editarlos después deja al CRM en desacuerdo con lo firmado.
+	value: "el monto",
+	numeroCuotas: "el plazo",
+	tasaInteres: "la tasa de interés",
+	cuotaMensual: "la cuota mensual",
+	diaPagoMensual: "el día de pago",
 } as const;
 
 export type WonOpportunityFrozenField =
@@ -75,8 +83,27 @@ export const WON_OPPORTUNITY_FROZEN_FIELDS = Object.keys(
 ) as WonOpportunityFrozenField[];
 
 type FrozenValues = Partial<
-	Record<WonOpportunityFrozenField, string | null | undefined>
+	Record<WonOpportunityFrozenField, string | number | null | undefined>
 >;
+
+/**
+ * Los montos van y vienen entre `numeric` de Postgres (que llega como string) y
+ * los números del formulario, así que "143427.17" y 143427.17 son el mismo
+ * valor: compararlos como texto marcaría un cambio que no existe y bloquearía
+ * una edición legítima.
+ */
+function mismoValor(
+	a: string | number | null | undefined,
+	b: string | number | null | undefined,
+): boolean {
+	const x = a ?? null;
+	const y = b ?? null;
+	if (x === null || y === null) return x === y;
+	const nx = Number(x);
+	const ny = Number(y);
+	if (Number.isFinite(nx) && Number.isFinite(ny)) return nx === ny;
+	return String(x) === String(y);
+}
 
 /**
  * Campos congelados que el input REALMENTE cambiaría. Comparar contra el valor
@@ -91,7 +118,7 @@ export function getWonOpportunityFrozenFieldChanges(
 		if (!(field in input)) return false;
 		const next = input[field];
 		if (next === undefined) return false;
-		return (next ?? null) !== (current[field] ?? null);
+		return !mismoValor(next, current[field]);
 	});
 }
 
@@ -141,7 +168,7 @@ export function stripUnchangedFrozenFields<T extends FrozenValues>(
 		if (!(field in out)) continue;
 		const next = out[field];
 		if (next === undefined) continue;
-		if ((next ?? null) === (current[field] ?? null)) delete out[field];
+		if (mismoValor(next, current[field])) delete out[field];
 	}
 	return out;
 }
@@ -175,10 +202,18 @@ export const WON_OPPORTUNITY_CONTRACT_FIELDS = [
 	"leadId",
 	"companyId",
 	"creditType",
+	"value",
+	"numeroCuotas",
+	"tasaInteres",
+	"cuotaMensual",
+	"diaPagoMensual",
 ] as const;
 
 type ContractSnapshot = Partial<
-	Record<(typeof WON_OPPORTUNITY_CONTRACT_FIELDS)[number], string | null>
+	Record<
+		(typeof WON_OPPORTUNITY_CONTRACT_FIELDS)[number],
+		string | number | null
+	>
 >;
 
 /**

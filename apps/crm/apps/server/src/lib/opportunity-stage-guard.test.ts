@@ -4,13 +4,13 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { opportunities } from "../db/schema";
 import {
 	buildOpportunityRelationshipInvariantCondition,
-	WON_OPPORTUNITY_CONTRACT_FIELDS,
 	getStageLeadRequirementError,
 	getStageVehicleRequirementError,
 	getWonOpportunityFrozenFieldChanges,
 	getWonOpportunityLockError,
 	getWonOpportunityRevokeError,
 	stripUnchangedFrozenFields,
+	WON_OPPORTUNITY_CONTRACT_FIELDS,
 } from "./opportunity-stage-guard";
 
 describe("opportunity stage vehicle guard", () => {
@@ -207,12 +207,54 @@ describe("revocar la aprobación del detalle de crédito", () => {
 
 describe("campos contractuales comparados al cerrar", () => {
 	test("no incluye el estado, que es lo que el cierre cambia", () => {
-		expect([...WON_OPPORTUNITY_CONTRACT_FIELDS]).toEqual([
+		expect(WON_OPPORTUNITY_CONTRACT_FIELDS).not.toContain("status");
+	});
+
+	test("incluye los términos que se copian al crédito de cartera", () => {
+		// close-opportunity manda value→capital, tasaInteres→porcentaje_interes,
+		// numeroCuotas→plazo y cuotaMensual→cuota.
+		for (const campo of [
 			"vehicleId",
 			"leadId",
 			"companyId",
 			"creditType",
-		]);
-		expect(WON_OPPORTUNITY_CONTRACT_FIELDS).not.toContain("status");
+			"value",
+			"numeroCuotas",
+			"tasaInteres",
+			"cuotaMensual",
+			"diaPagoMensual",
+		] as const) {
+			expect(WON_OPPORTUNITY_CONTRACT_FIELDS).toContain(campo);
+		}
+	});
+});
+
+describe("comparación de montos", () => {
+	const wonConMontos = {
+		vehicleId: "v-1",
+		value: "143427.17",
+		numeroCuotas: 48,
+		tasaInteres: "18.00",
+		status: "won",
+	};
+
+	test("no marca cambio cuando el formulario manda el mismo monto como número", () => {
+		// El numeric de Postgres llega como string y el formulario manda número:
+		// compararlos como texto bloquearía una edición que no toca el monto.
+		expect(
+			getWonOpportunityFrozenFieldChanges(
+				{ value: 143427.17, numeroCuotas: 48, tasaInteres: "18" },
+				wonConMontos,
+			),
+		).toEqual([]);
+	});
+
+	test("sí marca el cambio real de un término financiero", () => {
+		expect(
+			getWonOpportunityFrozenFieldChanges({ value: 150000 }, wonConMontos),
+		).toEqual(["value"]);
+		expect(
+			getWonOpportunityFrozenFieldChanges({ numeroCuotas: 60 }, wonConMontos),
+		).toContain("numeroCuotas");
 	});
 });

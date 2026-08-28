@@ -501,6 +501,25 @@ async function emitirUnLink(params: {
 		// entre ambas y colarse igual (hallazgo de code review). Movido acá,
 		// bajo el MISMO candado que protege el INSERT de más abajo: sin
 		// ventana entre el chequeo y la emisión.
+		//
+		// El query busca en TODO el historial del crédito (join sin filtrar
+		// groupId), pero hasta acá solo se bloqueaba el grupo actual y —si
+		// aplica— el grupo del predecesor INMEDIATO (supersedesLinkId). Con
+		// una cadena de más de un predecesor cancelado (A→B→C, emitiendo para
+		// C con supersedesLinkId apuntando a B), marcarLinkPagado bloquea
+		// primero el grupo DUEÑO del link que cobra — que puede ser A, dos
+		// niveles atrás, nunca bloqueado acá — así que un pago tardío en A
+		// corría sin cruzarse con este candado, se leía como "no hay pago
+		// pendiente" y el link nuevo se emitía igual (hallazgo de code
+		// review). Se bloquean TODOS los grupos del carteraCreditoId antes de
+		// leer los links pagados, para serializar contra cualquier grupo de
+		// la cadena, no solo el inmediato.
+		await tx
+			.select({ id: pagaloPaymentGroups.id })
+			.from(pagaloPaymentGroups)
+			.where(eq(pagaloPaymentGroups.carteraCreditoId, grupo.carteraCreditoId))
+			.orderBy(pagaloPaymentGroups.id)
+			.for("update");
 		const [pagoPredecesorSinReconciliar] = await tx
 			.select({ linkId: pagaloPaymentLinks.id })
 			.from(pagaloPaymentLinks)
@@ -1151,28 +1170,6 @@ export async function regenerarGrupo(params: {
 		);
 	}
 
-	const linksViejos = await db
-		.select({
-			id: pagaloPaymentLinks.id,
-			linkType: pagaloPaymentLinks.linkType,
-			status: pagaloPaymentLinks.status,
-			generation: pagaloPaymentLinks.generation,
-			errorCode: pagaloPaymentLinks.errorCode,
-		})
-		.from(pagaloPaymentLinks)
-		.where(eq(pagaloPaymentLinks.groupId, params.groupId));
-	// Si algún link del grupo quedó ambiguo (errorCode=PagaloRespuestaAmbigua
-	// — reintentos de persistencia agotados con éxito HTTP confirmado, o
-	// Págalo respondió sin URL/UUID), invalidarGrupoEnTx más abajo ya lo
-	// rechaza — pero eso corre DESPUÉS de elegir viejoDelTipo por generación
-	// más alta e insertar el grupo nuevo; para cuando emitirUnLink lo
-	// detectaría (si ese fuera el elegido), la transacción destructiva ya
-	// comiteó: viejo CANCELLED, nuevo LINKS_PENDING sin ningún link
-	// (hallazgo de code review). Se valida acá, antes de tocar nada.
-	if (linksViejos.some((l) => l.errorCode === "PagaloRespuestaAmbigua")) {
-		throw new PagaloReemplazoInvalido();
-	}
-
 	// Preflight ANTES de la transacción: config, contacto y cartera-back son
 	// las tres cosas que pueden fallar entre "invalidar viejo + crear nuevo"
 	// y "emitir links" — si fallaran después del commit, el grupo nuevo
@@ -1195,7 +1192,7 @@ export async function regenerarGrupo(params: {
 		false,
 	);
 
-	const { groupIdNuevo } = await db.transaction(async (tx) => {
+	const { groupIdNuevo, linksViejos } = await db.transaction(async (tx) => {
 		// Bloquear el grupo ANTES de chequear el pago-predecesor: sin esto,
 		// si el poller (marcarLinkPagado) está a mitad de su transacción —ya
 		// tiene el candado de ESTE grupo (el "grupo activo del crédito" que
@@ -1216,6 +1213,39 @@ export async function regenerarGrupo(params: {
 			.where(eq(pagaloPaymentGroups.id, params.groupId))
 			.for("update");
 
+		// linksViejos se leía ANTES de esta transacción (sin candado): si una
+		// regeneración individual concurrente insertaba una generación nueva
+		// del mismo linkType en ese hueco —invalidarGrupoEnTx la marca
+		// REPLACED, esta transacción sigue viendo el snapshot viejo— el
+		// viejoDelTipo de más abajo elegía la generación vieja como
+		// supersedesLinkId y emitía OTRO link real mientras el de la
+		// regeneración individual podía seguir en vuelo: dos links cobrables
+		// si ambos tenían éxito (hallazgo de code review). Releído acá, bajo
+		// el candado del grupo recién tomado arriba.
+		const linksViejos = await tx
+			.select({
+				id: pagaloPaymentLinks.id,
+				linkType: pagaloPaymentLinks.linkType,
+				status: pagaloPaymentLinks.status,
+				generation: pagaloPaymentLinks.generation,
+				errorCode: pagaloPaymentLinks.errorCode,
+			})
+			.from(pagaloPaymentLinks)
+			.where(eq(pagaloPaymentLinks.groupId, params.groupId))
+			.for("update");
+		// Si algún link del grupo quedó ambiguo (errorCode=PagaloRespuestaAmbigua
+		// — reintentos de persistencia agotados con éxito HTTP confirmado, o
+		// Págalo respondió sin URL/UUID), invalidarGrupoEnTx más abajo ya lo
+		// rechaza — pero eso corre DESPUÉS de elegir viejoDelTipo por
+		// generación más alta e insertar el grupo nuevo; para cuando
+		// emitirUnLink lo detectaría (si ese fuera el elegido), la
+		// transacción destructiva ya comiteó: viejo CANCELLED, nuevo
+		// LINKS_PENDING sin ningún link (hallazgo de code review). Se valida
+		// acá, antes de tocar nada.
+		if (linksViejos.some((l) => l.errorCode === "PagaloRespuestaAmbigua")) {
+			throw new PagaloReemplazoInvalido();
+		}
+
 		// invalidarGrupoEnTx solo mira links PAID del grupo que se está
 		// invalidando — pero un grupo puede llegar a REVIEW_REQUIRED porque
 		// un link REPLACED de un PREDECESOR (ya CANCELLED, mismo crédito)
@@ -1227,6 +1257,22 @@ export async function regenerarGrupo(params: {
 		// mandaba al cliente mientras el pago anterior quedaba sin
 		// reconciliar para siempre (hallazgo de code review). Se busca en
 		// TODOS los grupos del mismo carteraCreditoId, no solo el actual.
+		//
+		// Mismo hueco que emitirUnLink ya tuvo (hallazgo de code review): con
+		// más de un predecesor cancelado en la cadena, marcarLinkPagado
+		// bloquea primero el grupo DUEÑO del link que cobra, que puede ser
+		// cualquiera de la cadena — no solo params.groupId. Sin bloquear
+		// también los predecesores, un pago tardío en uno de ellos corre sin
+		// cruzarse con este candado. Se bloquean TODOS los grupos del
+		// carteraCreditoId antes de leer los pagos.
+		await tx
+			.select({ id: pagaloPaymentGroups.id })
+			.from(pagaloPaymentGroups)
+			.where(
+				eq(pagaloPaymentGroups.carteraCreditoId, grupoViejo.carteraCreditoId),
+			)
+			.orderBy(pagaloPaymentGroups.id)
+			.for("update");
 		const [pagoSinReconciliar] = await tx
 			.select({ linkId: pagaloPaymentLinks.id })
 			.from(pagaloPaymentLinks)
@@ -1304,7 +1350,7 @@ export async function regenerarGrupo(params: {
 				grupoAnteriorId: params.groupId,
 			},
 		});
-		return { groupIdNuevo: creado.id };
+		return { groupIdNuevo: creado.id, linksViejos };
 	});
 
 	const generacionPorTipo: GeneracionPorTipo = {};

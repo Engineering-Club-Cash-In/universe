@@ -2,12 +2,15 @@ import { ORPCError, os } from "@orpc/server";
 import { eq } from "drizzle-orm";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
+import { type AuditMeta, auditMiddleware } from "./audit";
 import type { Context } from "./context";
 import { PERMISSIONS } from "./roles";
 
-export const o = os.$context<Context>();
+export const o = os.$context<Context>().$meta<AuditMeta>({});
 
-export const publicProcedure = o;
+// Todo procedure pasa por acá; el middleware solo actúa en los que declaran
+// `.meta({ audit })` (ver lib/audit.ts).
+export const publicProcedure = o.use(auditMiddleware);
 
 const requireAuth = o.middleware(async ({ context, next }) => {
 	if (!context.session?.user) {

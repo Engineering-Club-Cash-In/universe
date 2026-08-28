@@ -83,11 +83,26 @@ export async function invalidarGrupoEnTx(
 	}
 
 	const linksFrescos = await tx
-		.select({ id: pagaloPaymentLinks.id, status: pagaloPaymentLinks.status })
+		.select({
+			id: pagaloPaymentLinks.id,
+			status: pagaloPaymentLinks.status,
+			errorCode: pagaloPaymentLinks.errorCode,
+		})
 		.from(pagaloPaymentLinks)
 		.where(eq(pagaloPaymentLinks.groupId, params.groupId))
 		.for("update");
 	if (linksFrescos.some((l) => l.status === "PAID")) {
+		throw new PagaloReemplazoInvalido();
+	}
+	// Un link CREATING con errorCode=PagaloRespuestaAmbigua agotó los
+	// reintentos de persistencia con éxito HTTP confirmado en Págalo — sigue
+	// siendo técnicamente "vivo" (CREATING), así que sin este chequeo caía
+	// en `reemplazables` de abajo y quedaba REPLACED, un estado cerrado que
+	// después habilita "Regenerar" (regenerarGrupo/regenerarLinkIndividual)
+	// y crea un SEGUNDO link real mientras el primero (ya confirmado) sigue
+	// existiendo del otro lado (hallazgo de code review). Mismo criterio
+	// que un link PAID: no se invalida el grupo hasta reconciliar a mano.
+	if (linksFrescos.some((l) => l.errorCode === "PagaloRespuestaAmbigua")) {
 		throw new PagaloReemplazoInvalido();
 	}
 
@@ -223,6 +238,7 @@ export async function invalidarLinkEnTx(
 			groupId: pagaloPaymentLinks.groupId,
 			linkType: pagaloPaymentLinks.linkType,
 			status: pagaloPaymentLinks.status,
+			errorCode: pagaloPaymentLinks.errorCode,
 		})
 		.from(pagaloPaymentLinks)
 		.where(eq(pagaloPaymentLinks.id, params.linkId))
@@ -231,6 +247,16 @@ export async function invalidarLinkEnTx(
 		!linkFresco ||
 		(linkFresco.status !== "CREATING" && linkFresco.status !== "ACTIVE")
 	) {
+		throw new PagaloReemplazoInvalido();
+	}
+	// Un link CREATING puede haber agotado los reintentos de persistencia
+	// (pagalo-link-orchestrator.ts) con éxito HTTP confirmado en Págalo —
+	// queda marcado errorCode=PagaloRespuestaAmbigua sin cambiar su status
+	// (CREATING sigue siendo técnicamente "vivo"). Invalidarlo lo pasaría a
+	// REPLACED, un estado cerrado que después habilita "Regenerar" — creando
+	// un SEGUNDO link real en Págalo mientras el primero (ya confirmado)
+	// sigue existiendo del otro lado (hallazgo de code review).
+	if (linkFresco.errorCode === "PagaloRespuestaAmbigua") {
 		throw new PagaloReemplazoInvalido();
 	}
 

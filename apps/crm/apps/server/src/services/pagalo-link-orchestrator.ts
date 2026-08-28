@@ -726,9 +726,32 @@ async function emitirUnLink(params: {
 	}
 	// Se agotaron los reintentos de persistencia con el link YA CREADO en
 	// Págalo — no se marca ERROR (mentiría sobre el estado real). El link
-	// queda en CREATING con el error crudo logueado; requiere reconciliación
-	// manual o un job aparte, pero nunca ofrece "Regenerar" un link que ya
-	// existe y es cobrable del lado de Págalo.
+	// queda en CREATING (el UPDATE de arriba nunca llegó a comitear) con
+	// errorCode=PagaloRespuestaAmbigua para que quede marcado igual que el
+	// caso "200 sin URL/UUID" — CREATING sigue siendo un estado "vivo"
+	// (invalidable por invalidarLinkEnTx/invalidarGrupoEnTx), así que sin
+	// este marcador un supervisor podía invalidarlo (pasa a REPLACED) y
+	// después regenerarlo (REPLACED es un estado cerrado válido para
+	// regenerar), creando un SEGUNDO link real en Págalo sin que nada lo
+	// impidiera (hallazgo de code review). Best-effort: si este UPDATE
+	// también falla, ya no hay más que intentar acá — el error original se
+	// relanza igual.
+	try {
+		await db
+			.update(pagaloPaymentLinks)
+			.set({
+				errorCode: "PagaloRespuestaAmbigua",
+				errorMessage:
+					"Reintentos de persistencia agotados con éxito confirmado en Págalo — requiere reconciliación manual antes de invalidar o regenerar.",
+				updatedAt: new Date(),
+			})
+			.where(eq(pagaloPaymentLinks.id, stored.id));
+	} catch (marcarError) {
+		console.error(
+			`[Págalo] No se pudo marcar errorCode=PagaloRespuestaAmbigua para el link ${stored.id}:`,
+			marcarError instanceof Error ? marcarError.message : marcarError,
+		);
+	}
 	console.error(
 		`[Págalo] No se pudo persistir la respuesta de creación para el link ${stored.id} tras ${REINTENTOS_PERSISTENCIA} intentos — el link YA EXISTE en Págalo (paymentUrl: ${paymentUrl}). Requiere reconciliación manual.`,
 		ultimoError instanceof Error ? ultimoError.message : ultimoError,
@@ -1074,9 +1097,21 @@ export async function regenerarGrupo(params: {
 			linkType: pagaloPaymentLinks.linkType,
 			status: pagaloPaymentLinks.status,
 			generation: pagaloPaymentLinks.generation,
+			errorCode: pagaloPaymentLinks.errorCode,
 		})
 		.from(pagaloPaymentLinks)
 		.where(eq(pagaloPaymentLinks.groupId, params.groupId));
+	// Si algún link del grupo quedó ambiguo (errorCode=PagaloRespuestaAmbigua
+	// — reintentos de persistencia agotados con éxito HTTP confirmado, o
+	// Págalo respondió sin URL/UUID), invalidarGrupoEnTx más abajo ya lo
+	// rechaza — pero eso corre DESPUÉS de elegir viejoDelTipo por generación
+	// más alta e insertar el grupo nuevo; para cuando emitirUnLink lo
+	// detectaría (si ese fuera el elegido), la transacción destructiva ya
+	// comiteó: viejo CANCELLED, nuevo LINKS_PENDING sin ningún link
+	// (hallazgo de code review). Se valida acá, antes de tocar nada.
+	if (linksViejos.some((l) => l.errorCode === "PagaloRespuestaAmbigua")) {
+		throw new PagaloReemplazoInvalido();
+	}
 
 	// Preflight ANTES de la transacción: config, contacto y cartera-back son
 	// las tres cosas que pueden fallar entre "invalidar viejo + crear nuevo"

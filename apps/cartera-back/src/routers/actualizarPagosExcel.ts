@@ -500,12 +500,18 @@ export const actualizarPagosExcelRouter = new Elysia()
       //    curso podía certificar los montos VIEJOS mientras acá se escribían
       //    los nuevos, y su OK final pisaba el re-abierto de abajo — DTE vivo
       //    que no cuadra con un pago escondido como facturado. (Codex P1)
-      const creditosRes = await db.execute(sql`
-        SELECT DISTINCT credito_id
-        FROM cartera.pagos_credito
-        WHERE pago_id = ANY(string_to_array(${updatesGlobal.map((u) => u.pago_id).join(",")}, ',')::int[])
-          AND credito_id IS NOT NULL
-      `);
+      // Sin updates no hay nada que serializar ni escribir. (No es un bug:
+      // string_to_array('', ',') es {} en PG≥9.1 y el = ANY vacío da 0 filas —
+      // verificado en 15.18 — pero el short-circuit ahorra el roundtrip y el
+      // lock inútiles y deja el caso autoevidente.)
+      const creditosRes = updatesGlobal.length
+        ? await db.execute(sql`
+            SELECT DISTINCT credito_id
+            FROM cartera.pagos_credito
+            WHERE pago_id = ANY(string_to_array(${updatesGlobal.map((u) => u.pago_id).join(",")}, ',')::int[])
+              AND credito_id IS NOT NULL
+          `)
+        : { rows: [] };
       const soltarLocksSync = await adquirirPaymentAdvisoryLocks(
         ((creditosRes as any).rows as any[]).map((r) => Number(r.credito_id))
       );

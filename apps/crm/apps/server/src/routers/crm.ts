@@ -19,6 +19,7 @@ import {
 } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
+import { auditRecord } from "../lib/audit";
 import {
 	vehicleDocumentRequirements,
 	vehicleDocuments,
@@ -79,8 +80,13 @@ import { canSyncNitToOpportunity } from "../lib/lead-nit-sync";
 import { getLeadSourceLabel } from "../lib/lead-sources";
 import {
 	buildOpportunityRelationshipInvariantCondition,
+	buildWonOpportunityFrozenFieldError,
 	getStageLeadRequirementError,
 	getStageVehicleRequirementError,
+	getWonOpportunityFrozenFieldChanges,
+	getWonOpportunityLockError,
+	getWonOpportunityRevokeError,
+	stripUnchangedFrozenFields,
 } from "../lib/opportunity-stage-guard";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
@@ -912,6 +918,7 @@ export const crmRouter = {
 	}),
 
 	createLead: crmProcedure
+		.meta({ audit: { entity: "lead", action: "create" } })
 		.input(
 			z.object({
 				firstName: z.string().min(1, "First name is required"),
@@ -1059,16 +1066,34 @@ export const crmRouter = {
 							});
 						}
 
-						await tx.insert(opportunities).values({
-							title: `${input.firstName} ${input.lastName}`,
-							leadId: existingLead.id,
-							creditType: "autocompra",
-							stageId: firstStage.id,
-							probability: 1,
-							assignedTo,
-							createdBy: context.userId,
-							source: input.source,
-							campaign: input.campaign,
+						// Este lead ya existía: lo que pasó fue una reasignación, no
+						// un alta.
+						auditRecord({
+							entity: "lead",
+							id: existingLead.id,
+							action: "reassign",
+							data: { dpi: normalizedDpi, assignedTo },
+						});
+
+						const [nuevaOportunidad] = await tx
+							.insert(opportunities)
+							.values({
+								title: `${input.firstName} ${input.lastName}`,
+								leadId: existingLead.id,
+								creditType: "autocompra",
+								stageId: firstStage.id,
+								probability: 1,
+								assignedTo,
+								createdBy: context.userId,
+								source: input.source,
+								campaign: input.campaign,
+							})
+							.returning({ id: opportunities.id });
+						auditRecord({
+							entity: "opportunity",
+							id: nuevaOportunidad.id,
+							action: "create",
+							data: { leadId: existingLead.id, assignedTo },
 						});
 
 						return lead;
@@ -1090,10 +1115,12 @@ export const crmRouter = {
 					updatedAt: new Date(),
 				})
 				.returning();
+			auditRecord({ entity: "lead", id: newLead[0].id, action: "create" });
 			return newLead[0];
 		}),
 
 	updateLead: crmProcedure
+		.meta({ audit: { entity: "lead", action: "update" } })
 		.input(
 			z.object({
 				id: z.string().uuid(),
@@ -1196,6 +1223,7 @@ export const crmRouter = {
 				})
 				.where(whereClause)
 				.returning();
+			auditRecord({ entity: "lead", id: id, action: "update" });
 
 			if (updatedLead.length === 0) {
 				throw new ORPCError("NOT_FOUND", {
@@ -1227,6 +1255,15 @@ export const crmRouter = {
 								sincronizables.map((o) => o.id),
 							),
 						);
+					// El NIT que viaja a cartera es el de la oportunidad, no el del lead.
+					for (const oportunidad of sincronizables) {
+						auditRecord({
+							entity: "opportunity",
+							id: oportunidad.id,
+							action: "sync_nit",
+							data: { leadId: id, nit: updateData.nit || null },
+						});
+					}
 				}
 
 				const conservadas = leadOpportunities.length - sincronizables.length;
@@ -1266,6 +1303,16 @@ export const crmRouter = {
 							updatedAt: new Date(),
 						})
 						.where(eq(opportunities.id, activeOpportunity.id));
+					auditRecord({
+						entity: "opportunity",
+						id: activeOpportunity.id,
+						action: "sync_source_campaign",
+						data: {
+							leadId: id,
+							source: updateData.source,
+							campaign: updateData.campaign,
+						},
+					});
 				}
 			}
 
@@ -1878,6 +1925,7 @@ export const crmRouter = {
 		}),
 
 	deleteOpportunity: crmProcedure
+		.meta({ audit: { entity: "opportunity", action: "delete" } })
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
@@ -2103,12 +2151,18 @@ export const crmRouter = {
 				await tx
 					.delete(opportunities)
 					.where(eq(opportunities.id, input.opportunityId));
+				auditRecord({
+					entity: "opportunity",
+					id: input.opportunityId,
+					action: "delete",
+				});
 			});
 
 			return { message: "Oportunidad eliminada exitosamente" };
 		}),
 
 	createOpportunity: crmProcedure
+		.meta({ audit: { entity: "opportunity", action: "create" } })
 		.input(
 			z.object({
 				title: z.string().min(1, "Title is required"),
@@ -2216,10 +2270,16 @@ export const crmRouter = {
 					updatedAt: new Date(),
 				})
 				.returning();
+			auditRecord({
+				entity: "opportunity",
+				id: newOpportunity[0].id,
+				action: "create",
+			});
 			return { ...newOpportunity[0], warning: false as const };
 		}),
 
 	updateOpportunity: crmProcedure
+		.meta({ audit: { entity: "opportunity", action: "update" } })
 		.input(
 			z.object({
 				id: z.string().uuid(),
@@ -2303,6 +2363,29 @@ export const crmRouter = {
 					message: "Oportunidad no encontrada",
 				});
 			}
+
+			// Una oportunidad pasa a "won" en el 90% y de ahí todavía avanza al 100%
+			// con ajustes operativos, así que no se congela el update completo: solo
+			// los datos con los que se firmaron los contratos.
+			const frozenFieldChanges = getWonOpportunityFrozenFieldChanges(
+				input,
+				currentOpportunity[0],
+			);
+			const wonLockError = getWonOpportunityLockError(
+				currentOpportunity[0].status,
+				context.userRole,
+				frozenFieldChanges,
+			);
+			if (wonLockError) {
+				throw new ORPCError("FORBIDDEN", { message: wonLockError });
+			}
+			// El chequeo de arriba leyó la fila antes del UPDATE: si closeOpportunity
+			// la marca ganada en el medio, el cambio entraría igual. Cuando se tocan
+			// campos congelados, el predicado lo vuelve a exigir en la misma
+			// sentencia (Postgres lo re-evalúa tras esperar a la escritura rival).
+			const enforceNotWonInPredicate =
+				frozenFieldChanges.length > 0 &&
+				!PERMISSIONS.canAccessAdmin(context.userRole ?? "");
 
 			if (input.leadId === null) {
 				const [currentStageForLead] = await db
@@ -2589,12 +2672,15 @@ export const crmRouter = {
 				baseWhereClause,
 				relationshipInvariantCondition,
 			);
+			const wonLockWhereClause = enforceNotWonInPredicate
+				? and(invariantWhereClause, not(eq(opportunities.status, "won")))
+				: invariantWhereClause;
 			const whereClause = expectedUpdatedAt
 				? and(
-						invariantWhereClause,
+						wonLockWhereClause,
 						eq(opportunities.updatedAt, new Date(expectedUpdatedAt)),
 					)
-				: invariantWhereClause;
+				: wonLockWhereClause;
 
 			// Sales users cannot reassign opportunities
 			if (
@@ -2669,10 +2755,19 @@ export const crmRouter = {
 				}
 			}
 
+			// Se saca SIEMPRE, no solo si la lectura la vio ganada: reescribir un
+			// campo congelado con el mismo valor que se acaba de leer no aporta
+			// nada, y si en el medio la oportunidad se gana y alguien lo corrige,
+			// esta sentencia le pisaría la corrección con un dato ya viejo.
+			const safeUpdateData = stripUnchangedFrozenFields(
+				updateData,
+				currentOpportunity[0],
+			);
+
 			const updatedOpportunity = await db
 				.update(opportunities)
 				.set({
-					...updateData,
+					...safeUpdateData,
 					...(assignedTo && { assignedTo }),
 					...(expectedCloseDate && {
 						expectedCloseDate: new Date(expectedCloseDate),
@@ -2704,8 +2799,23 @@ export const crmRouter = {
 				})
 				.where(whereClause)
 				.returning();
+			auditRecord({ entity: "opportunity", id: id, action: "update" });
 
 			if (updatedOpportunity.length === 0) {
+				if (enforceNotWonInPredicate) {
+					// Pudo ser la carrera con closeOpportunity: distinguirlo del
+					// conflicto de concurrencia para no mandar a "recargá e intentá".
+					const [latest] = await db
+						.select({ status: opportunities.status })
+						.from(opportunities)
+						.where(eq(opportunities.id, id))
+						.limit(1);
+					if (latest?.status === "won") {
+						throw new ORPCError("FORBIDDEN", {
+							message: buildWonOpportunityFrozenFieldError(frozenFieldChanges),
+						});
+					}
+				}
 				if (canUpdateOpportunity) {
 					throw new ORPCError("CONFLICT", {
 						message:
@@ -2727,6 +2837,12 @@ export const crmRouter = {
 						updatedAt: new Date(),
 					})
 					.where(eq(leads.id, currentOpportunity[0].leadId));
+				auditRecord({
+					entity: "lead",
+					id: currentOpportunity[0].leadId,
+					action: "update_direccion",
+					data: { opportunityId: id, direccion },
+				});
 			}
 
 			if (vehicleChanged) {
@@ -2789,6 +2905,7 @@ export const crmRouter = {
 		}),
 
 	reassignOpportunityAndLead: crmProcedure
+		.meta({ audit: { entity: "opportunity", action: "reassign" } })
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
@@ -2869,12 +2986,24 @@ export const crmRouter = {
 					.update(opportunities)
 					.set({ assignedTo: input.assignedTo, updatedAt: new Date() })
 					.where(eq(opportunities.id, input.opportunityId));
+				auditRecord({
+					entity: "opportunity",
+					id: input.opportunityId,
+					action: "reassign",
+				});
 
 				if (current.leadId) {
 					await tx
 						.update(leads)
 						.set({ assignedTo: input.assignedTo, updatedAt: new Date() })
 						.where(eq(leads.id, current.leadId));
+					// La reasignación arrastra al lead: sin esto su historial no
+					// muestra el cambio de dueño.
+					auditRecord({
+						entity: "lead",
+						id: current.leadId,
+						action: "reassign",
+					});
 				}
 			});
 		}),
@@ -3017,6 +3146,7 @@ export const crmRouter = {
 		}),
 
 	approveOpportunityAnalysis: analystProcedure
+		.meta({ audit: { entity: "opportunity", action: "approve_analysis" } })
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
@@ -3384,6 +3514,12 @@ export const crmRouter = {
 					})
 					.where(whereClause)
 					.returning();
+				auditRecord({
+					entity: "opportunity",
+					id: input.opportunityId,
+					action: "approve_analysis",
+					data: { approved: input.approved, reason: input.reason },
+				});
 
 				// Check for concurrent modification
 				if (updatedRows.length === 0) {
@@ -3479,6 +3615,7 @@ export const crmRouter = {
 
 	// Approve credit detail (40% → 50% transition)
 	approveCreditDetail: crmProcedure
+		.meta({ audit: { entity: "opportunity", action: "approve_credit_detail" } })
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
@@ -3536,6 +3673,11 @@ export const crmRouter = {
 					updatedAt: new Date(),
 				})
 				.where(eq(opportunities.id, input.opportunityId));
+			auditRecord({
+				entity: "opportunity",
+				id: input.opportunityId,
+				action: "approve_credit_detail",
+			});
 
 			// Record stage history
 			await db.insert(opportunityStageHistory).values({
@@ -3564,6 +3706,7 @@ export const crmRouter = {
 
 	// Revoke credit detail approval (back to 40%)
 	revokeCreditDetailApproval: crmProcedure
+		.meta({ audit: { entity: "opportunity", action: "revoke_credit_detail" } })
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
@@ -3585,6 +3728,7 @@ export const crmRouter = {
 					title: opportunities.title,
 					assignedTo: opportunities.assignedTo,
 					stageId: opportunities.stageId,
+					status: opportunities.status,
 					creditDetailApproved: opportunities.creditDetailApproved,
 				})
 				.from(opportunities)
@@ -3625,6 +3769,16 @@ export const crmRouter = {
 				});
 			}
 
+			// Lo de arriba mira la etapa, y una oportunidad puede estar ganada sin
+			// haber llegado al 90%: `confirmContractsSigned` crea el crédito en
+			// cartera y recién después mueve la etapa, así que si eso falla queda
+			// ganada en el 85%. Ahí cancelar la devolvería al 40% y dejaría el
+			// detalle de crédito editable con el crédito ya creado.
+			const revokeError = getWonOpportunityRevokeError(opportunity.status);
+			if (revokeError) {
+				throw new ORPCError("FORBIDDEN", { message: revokeError });
+			}
+
 			// Get stage 40% by closurePercentage (more reliable than order)
 			const [previousStage] = await db
 				.select()
@@ -3641,7 +3795,7 @@ export const crmRouter = {
 			// Update opportunity and record history in a transaction for atomicity
 			await db.transaction(async (tx) => {
 				// Update opportunity - revoke approval
-				await tx
+				const revocadas = await tx
 					.update(opportunities)
 					.set({
 						stageId: previousStage.id,
@@ -3650,7 +3804,28 @@ export const crmRouter = {
 						creditDetailApprovedAt: null,
 						updatedAt: new Date(),
 					})
-					.where(eq(opportunities.id, input.opportunityId));
+					.where(
+						and(
+							eq(opportunities.id, input.opportunityId),
+							// El chequeo de arriba leyó la fila antes del UPDATE: si se
+							// gana en el medio, esta condición lo frena en la misma
+							// sentencia.
+							not(eq(opportunities.status, "won")),
+						),
+					)
+					.returning({ id: opportunities.id });
+
+				if (revocadas.length === 0) {
+					throw new ORPCError("FORBIDDEN", {
+						message:
+							"La oportunidad se marcó como ganada mientras se cancelaba la aprobación. El crédito ya existe en cartera.",
+					});
+				}
+				auditRecord({
+					entity: "opportunity",
+					id: input.opportunityId,
+					action: "revoke_credit_detail",
+				});
 
 				// Record stage history
 				await tx.insert(opportunityStageHistory).values({
@@ -6074,6 +6249,7 @@ export const crmRouter = {
 
 	// Approve disbursement (90% → 100% transition)
 	approveDisbursement: analystProcedure
+		.meta({ audit: { entity: "opportunity", action: "approve_disbursement" } })
 		.input(z.object({ opportunityId: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
 			// Get checklist and verify all items are completed
@@ -6162,6 +6338,11 @@ export const crmRouter = {
 					updatedAt: new Date(),
 				})
 				.where(eq(opportunities.id, input.opportunityId));
+			auditRecord({
+				entity: "opportunity",
+				id: input.opportunityId,
+				action: "approve_disbursement",
+			});
 
 			// Mark checklist as completed
 			await db
@@ -6660,6 +6841,7 @@ export const crmRouter = {
 
 	// Assign investor and advance to 80%
 	assignInvestorAndAdvance: analystProcedure
+		.meta({ audit: { entity: "opportunity", action: "assign_investor" } })
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
@@ -6912,6 +7094,12 @@ export const crmRouter = {
 						updatedAt: new Date(),
 					})
 					.where(eq(opportunities.id, input.opportunityId));
+				auditRecord({
+					entity: "opportunity",
+					id: input.opportunityId,
+					action: "assign_investor",
+					data: { categoria: input.categoria },
+				});
 
 				// Record stage history
 				await tx.insert(opportunityStageHistory).values({
@@ -6943,6 +7131,7 @@ export const crmRouter = {
 		}),
 
 	updateOpportunityInvestors: analystProcedure
+		.meta({ audit: { entity: "opportunity", action: "update_investors" } })
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
@@ -7053,6 +7242,11 @@ export const crmRouter = {
 					updatedAt: new Date(),
 				})
 				.where(eq(opportunities.id, input.opportunityId));
+			auditRecord({
+				entity: "opportunity",
+				id: input.opportunityId,
+				action: "update_investors",
+			});
 
 			return {
 				success: true,
@@ -7062,6 +7256,7 @@ export const crmRouter = {
 
 	// ── Credit Scoring ──────────────────────────────────────────────────
 	scoreLead: crmProcedure
+		.meta({ audit: { entity: "lead", action: "score" } })
 		.input(
 			z.object({
 				leadId: z.string().uuid(),

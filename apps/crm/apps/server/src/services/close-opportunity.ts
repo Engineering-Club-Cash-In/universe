@@ -8,6 +8,7 @@ import crypto from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
+import { auditRecord } from "../lib/audit";
 import {
 	carteraBackReferences,
 	carteraBackSyncLog,
@@ -1436,6 +1437,12 @@ export async function closeOpportunity(
 				.update(opportunities)
 				.set({ insuranceProvider })
 				.where(eq(opportunities.id, opportunityId));
+			auditRecord({
+				entity: "opportunity",
+				id: opportunityId,
+				action: "set_insurance_provider",
+				data: { insuranceProvider },
+			});
 			opportunity.insuranceProvider = insuranceProvider;
 		}
 
@@ -1528,6 +1535,12 @@ export async function closeOpportunity(
 					updatedAt: new Date(),
 				})
 				.where(eq(opportunities.id, opportunityId));
+			auditRecord({
+				entity: "opportunity",
+				id: opportunityId,
+				action: "mark_won",
+				data: { numeroSifco },
+			});
 
 			// Update vehicle status to 'sold'
 			if (opportunity.vehicleId) {
@@ -1538,6 +1551,12 @@ export async function closeOpportunity(
 						updatedAt: new Date(),
 					})
 					.where(eq(vehicles.id, opportunity.vehicleId));
+				auditRecord({
+					entity: "vehicle",
+					id: opportunity.vehicleId,
+					action: "mark_sold",
+					data: { opportunityId },
+				});
 				console.log(
 					`[CloseOpportunity] ✓ Vehicle ${opportunity.vehicleId} marked as sold`,
 				);

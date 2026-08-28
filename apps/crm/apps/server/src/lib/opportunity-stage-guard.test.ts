@@ -233,3 +233,44 @@ describe("comparación de montos", () => {
 		).toContain("numeroCuotas");
 	});
 });
+
+describe("comparación de fechas", () => {
+	const inicio = new Date("2026-03-15T00:00:00.000Z");
+	const won = { fechaInicio: inicio, vehicleId: "v-1", status: "won" };
+
+	test("reenviar la misma fecha no cuenta como cambio", () => {
+		// La DB devuelve Date y el formulario manda el ISO: compararlos como
+		// texto habría bloqueado toda edición de una oportunidad ganada, porque
+		// la modal reenvía el formulario entero.
+		expect(
+			getWonOpportunityFrozenFieldChanges(
+				{ fechaInicio: inicio.toISOString() },
+				won,
+			),
+		).toEqual([]);
+	});
+
+	test("sí detecta un cambio real de la fecha de inicio", () => {
+		expect(
+			getWonOpportunityFrozenFieldChanges(
+				{ fechaInicio: "2026-04-01T00:00:00.000Z" },
+				won,
+			),
+		).toEqual(["fechaInicio"]);
+		expect(
+			getWonOpportunityLockError("won", "sales", ["fechaInicio"]),
+		).toContain("la fecha de inicio");
+	});
+
+	test("distingue tener fecha de no tenerla", () => {
+		expect(
+			getWonOpportunityFrozenFieldChanges({ fechaInicio: null }, won),
+		).toEqual(["fechaInicio"]);
+		expect(
+			getWonOpportunityFrozenFieldChanges(
+				{ fechaInicio: inicio.toISOString() },
+				{ fechaInicio: null, status: "won" },
+			),
+		).toEqual(["fechaInicio"]);
+	});
+});

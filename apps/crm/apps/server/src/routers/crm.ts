@@ -2773,9 +2773,13 @@ export const crmRouter = {
 					...(expectedCloseDate && {
 						expectedCloseDate: new Date(expectedCloseDate),
 					}),
-					...(fechaInicio && {
-						fechaInicio: new Date(fechaInicio),
-					}),
+					// `fechaInicio` se destructura fuera de `updateData`, así que
+					// `stripUnchangedFrozenFields` no la ve: se omite acá cuando no
+					// cambia, para no reescribir un campo congelado con el mismo valor.
+					...(fechaInicio &&
+						frozenFieldChanges.includes("fechaInicio") && {
+							fechaInicio: new Date(fechaInicio),
+						}),
 					// Convert numeric fields to strings for decimal columns
 					...(seguro !== undefined && { seguro: String(seguro) }),
 					...insuranceFallback,

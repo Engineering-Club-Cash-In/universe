@@ -73,6 +73,9 @@ export const WON_OPPORTUNITY_FROZEN_FIELD_LABELS = {
 	tasaInteres: "la tasa de interés",
 	cuotaMensual: "la cuota mensual",
 	diaPagoMensual: "el día de pago",
+	// `contract-data-mapper` la usa para `contrato.fechaInicio`, así que cambiarla
+	// después hace que los contratos regenerados difieran de los ya firmados.
+	fechaInicio: "la fecha de inicio",
 } as const;
 
 export type WonOpportunityFrozenField =
@@ -83,7 +86,7 @@ export const WON_OPPORTUNITY_FROZEN_FIELDS = Object.keys(
 ) as WonOpportunityFrozenField[];
 
 type FrozenValues = Partial<
-	Record<WonOpportunityFrozenField, string | number | null | undefined>
+	Record<WonOpportunityFrozenField, string | number | Date | null | undefined>
 >;
 
 /**
@@ -93,12 +96,23 @@ type FrozenValues = Partial<
  * una edición legítima.
  */
 function mismoValor(
-	a: string | number | null | undefined,
-	b: string | number | null | undefined,
+	a: string | number | Date | null | undefined,
+	b: string | number | Date | null | undefined,
 ): boolean {
 	const x = a ?? null;
 	const y = b ?? null;
 	if (x === null || y === null) return x === y;
+
+	// Las fechas van y vienen entre el `timestamp` de Postgres (que llega como
+	// Date) y el string ISO del formulario: sin normalizarlas, reenviar la misma
+	// fecha parecería un cambio y bloquearía la edición entera.
+	if (x instanceof Date || y instanceof Date) {
+		const fx = new Date(x as string | number | Date).getTime();
+		const fy = new Date(y as string | number | Date).getTime();
+		if (Number.isFinite(fx) && Number.isFinite(fy)) return fx === fy;
+		return false;
+	}
+
 	const nx = Number(x);
 	const ny = Number(y);
 	if (Number.isFinite(nx) && Number.isFinite(ny)) return nx === ny;

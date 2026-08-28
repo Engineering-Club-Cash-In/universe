@@ -185,10 +185,20 @@ function LinkPagalo({ link, monto }: { link: Link; monto: string }) {
 	);
 }
 
-function LinksPorCuota({ groupId }: { groupId: string }) {
+function LinksPorCuota({
+	groupId,
+	casoCobroId,
+}: {
+	groupId: string;
+	casoCobroId: string;
+}) {
 	const allocations = useQuery({
-		queryKey: ["getPagaloAllocations", groupId],
-		queryFn: () => (client as any).getPagaloAllocations({ groupId }),
+		queryKey: ["getPagaloAllocations", groupId, casoCobroId],
+		// El caso desde el que se mira: el historial es del crédito y lista
+		// grupos de casos anteriores, que el servidor autoriza contra ESTE caso
+		// verificando que sean del mismo crédito.
+		queryFn: () =>
+			(client as any).getPagaloAllocations({ groupId, casoCobroId }),
 	});
 	const data = allocations.data as
 		| {
@@ -328,7 +338,7 @@ function GrupoPagalo({
 					</button>
 				</CollapsibleTrigger>
 				<CollapsibleContent className="mt-2">
-					<LinksPorCuota groupId={grupo.id} />
+					<LinksPorCuota casoCobroId={casoCobroId} groupId={grupo.id} />
 				</CollapsibleContent>
 			</Collapsible>
 			<AccionesSupervisorPagalo

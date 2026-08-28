@@ -9,6 +9,7 @@ import { ORPCError } from "@orpc/server";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
+import { casosCobros } from "../db/schema/cobros";
 import {
 	pagaloPaymentEvents,
 	pagaloPaymentGroups,
@@ -149,11 +150,24 @@ export const pagaloSupervisionRouter = {
 	// cuotas × 4 rubros por grupo, no tiene sentido cargarlo si el supervisor
 	// no expande el detalle "Links por cuota".
 	getPagaloAllocations: cobrosProcedure
-		.input(z.object({ groupId: z.string().uuid() }))
+		.input(
+			z.object({
+				groupId: z.string().uuid(),
+				/**
+				 * Caso DESDE EL QUE se mira. El historial de la ficha es del
+				 * crédito, así que lista grupos de casos anteriores —de otro
+				 * asesor incluso—; autorizar solo contra el caso viejo del grupo
+				 * rechazaba justo esos y el detalle quedaba mudo (Codex, #1498).
+				 * Opcional: sin él se cae al criterio de siempre.
+				 */
+				casoCobroId: z.string().uuid().optional(),
+			}),
+		)
 		.handler(async ({ input, context }) => {
 			const [grupo] = await db
 				.select({
 					casoCobroId: pagaloPaymentGroups.casoCobroId,
+					numeroCreditoSifco: pagaloPaymentGroups.numeroCreditoSifco,
 					allocationsSnapshot: pagaloPaymentGroups.allocationsSnapshot,
 				})
 				.from(pagaloPaymentGroups)
@@ -164,16 +178,40 @@ export const pagaloSupervisionRouter = {
 					message: "Grupo Págalo no encontrado.",
 				});
 			}
-			if (!grupo.casoCobroId) {
-				throw new ORPCError("NOT_FOUND", {
-					message: "Grupo Págalo sin caso de cobro asociado.",
-				});
+
+			// Mismo alcance que getPagaloHistorial: se autoriza por un caso al
+			// que el usuario SÍ tiene acceso, y el grupo tiene que ser del MISMO
+			// crédito que ese caso. El crédito no se recibe del cliente: sale del
+			// caso, que es lo que impide pedir el grupo de un crédito ajeno.
+			let autorizado = false;
+			if (input.casoCobroId) {
+				await assertAccesoCasoCobro(
+					input.casoCobroId,
+					context.userId,
+					context.userRole,
+				);
+				const [caso] = await db
+					.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
+					.from(casosCobros)
+					.where(eq(casosCobros.id, input.casoCobroId))
+					.limit(1);
+				autorizado =
+					!!caso?.numeroCreditoSifco &&
+					caso.numeroCreditoSifco === grupo.numeroCreditoSifco;
 			}
-			await assertAccesoCasoCobro(
-				grupo.casoCobroId,
-				context.userId,
-				context.userRole,
-			);
+
+			if (!autorizado) {
+				if (!grupo.casoCobroId) {
+					throw new ORPCError("NOT_FOUND", {
+						message: "Grupo Págalo sin caso de cobro asociado.",
+					});
+				}
+				await assertAccesoCasoCobro(
+					grupo.casoCobroId,
+					context.userId,
+					context.userRole,
+				);
+			}
 			const links = await db
 				.select({
 					id: pagaloPaymentLinks.id,

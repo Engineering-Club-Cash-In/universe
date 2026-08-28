@@ -159,6 +159,12 @@ function RegistrarPagoPage() {
 	// y pisar monto/banco/fecha con los datos del comprobante que ya descartó
 	// (hallazgo de Codex, PR #1498). Las respuestas viejas se ignoran.
 	const lecturaSeq = useRef(0);
+	// Qué campos llenó la lectura anterior. Cambiar de boleta tiene que
+	// LIMPIARLOS: si no, el comprobante nuevo se puede registrar con el monto,
+	// banco, autorización y fecha del que el asesor acaba de descartar
+	// (hallazgo de Codex, PR #1498). Se guardan en un ref, no en estado: no
+	// pintan nada, solo dicen qué revertir.
+	const camposDeLectura = useRef<Set<string>>(new Set());
 	const [arrastrando, setArrastrando] = useState(false);
 
 	const creditoQuery = useQuery({
@@ -204,14 +210,26 @@ function RegistrarPagoPage() {
 	// `cartera.bancos` tiene 24 filas para ~15 bancos reales (Banrural dos
 	// veces, BAM tres, y un "test" con 92 pagos encima). Elegir de la tabla
 	// cruda es elegir en cuál de las copias va a buscar conta el dinero.
-	const bancoOptions: ComboboxOption[] = useMemo(
-		() =>
-			bancosSugeridos().map((b: { id: number; nombre: string }) => ({
+	const bancoOptions: ComboboxOption[] = useMemo(() => {
+		const base: ComboboxOption[] = bancosSugeridos().map(
+			(b: { id: number; nombre: string }) => ({
 				value: String(b.id),
 				label: b.nombre,
-			})),
-		[],
-	);
+			}),
+		);
+		// `reconocerBanco` también resuelve los bancos SIN id universal
+		// (Interbanco, PAGALO), que `bancosSugeridos()` no ofrece: sin agregarlos
+		// el combo quedaba en blanco con un id oculto adentro, y el pago se
+		// registraba con un banco que el asesor nunca vio (Codex, PR #1498).
+		const leido = lectura?.bancoId;
+		if (leido != null && !base.some((o) => o.value === String(leido))) {
+			base.push({
+				value: String(leido),
+				label: lectura?.bancoNombre ?? `Banco #${leido}`,
+			});
+		}
+		return base;
+	}, [lectura]);
 
 	const mora = Number(credito?.moraActual ?? credito?.mora?.monto_mora ?? 0);
 	const cuotaBase = Number(credito?.credito.cuota ?? 0);
@@ -324,17 +342,27 @@ function RegistrarPagoPage() {
 			setErrorLectura(null);
 			if (!datos.esBoletaDePago) return;
 
-			if (datos.monto !== null) setMontoBoleta(datos.monto.toFixed(2));
-			if (datos.bancoId !== null) setBancoId(String(datos.bancoId));
+			const llenados = new Set<string>();
+			if (datos.monto !== null) {
+				setMontoBoleta(datos.monto.toFixed(2));
+				llenados.add("monto");
+			}
+			if (datos.bancoId !== null) {
+				setBancoId(String(datos.bancoId));
+				llenados.add("banco");
+			}
 			if (datos.numeroAutorizacion) {
 				setNumeroAutorizacion(datos.numeroAutorizacion.slice(0, 100));
+				llenados.add("numeroAutorizacion");
 			}
 			// `fechaCorregida` = el modelo no la leyó (o vino futura) y el servicio
 			// la acotó a hoy: eso NO es un dato de la boleta, así que se deja el
 			// default en vez de escribir una fecha que nadie leyó.
 			if (!datos.fechaCorregida) {
 				setFechaBoleta(new Date(`${datos.fechaBoleta}T12:00:00`));
+				llenados.add("fechaBoleta");
 			}
+			camposDeLectura.current = llenados;
 		},
 		onError: (error: unknown, variables) => {
 			if (variables.seq !== lecturaSeq.current) return;
@@ -351,6 +379,18 @@ function RegistrarPagoPage() {
 		setArchivo(file);
 		setLectura(null);
 		setErrorLectura(null);
+		// Lo que había llenado la boleta anterior se va con ella. Lo que el
+		// asesor escribió a mano se respeta: solo se revierte lo que puso el
+		// lector.
+		if (camposDeLectura.current.has("monto")) setMontoBoleta("");
+		if (camposDeLectura.current.has("banco")) setBancoId(null);
+		if (camposDeLectura.current.has("numeroAutorizacion")) {
+			setNumeroAutorizacion("");
+		}
+		if (camposDeLectura.current.has("fechaBoleta")) {
+			setFechaBoleta(new Date(`${aFechaISO_GT(new Date())}T12:00:00`));
+		}
+		camposDeLectura.current = new Set();
 		setPreviewUrl((anterior) => {
 			if (anterior) URL.revokeObjectURL(anterior);
 			return file && file.type.startsWith("image/")

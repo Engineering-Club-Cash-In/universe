@@ -996,6 +996,26 @@ export async function regenerarGrupo(params: {
 	);
 
 	const { groupIdNuevo } = await db.transaction(async (tx) => {
+		// Bloquear el grupo ANTES de chequear el pago-predecesor: sin esto,
+		// si el poller (marcarLinkPagado) está a mitad de su transacción —ya
+		// tiene el candado de ESTE grupo (el "grupo activo del crédito" que
+		// escala a REVIEW_REQUIRED) pero todavía no comiteó el PAID del link
+		// predecesor—, un SELECT sin candado corría en paralelo, no veía ese
+		// PAID (no comiteado aún) y dejaba pasar la regeneración; recién
+		// después invalidarGrupoEnTx esperaba el mismo candado, despertaba
+		// con el REVIEW_REQUIRED ya comiteado, y lo aceptaba como
+		// regenerable sin volver a mirar el pago (hallazgo de code review:
+		// el guard anterior corría antes de tomar este candado, snapshot
+		// obsoleto en esa ventana). Bloqueando primero, si el poller tiene
+		// el lock esta transacción espera — y cuando despierta, ve TODO lo
+		// que el poller comiteó en su transacción (marcar PAID + escalar el
+		// grupo van juntos, misma tx), incluido el pago del predecesor.
+		await tx
+			.select({ id: pagaloPaymentGroups.id })
+			.from(pagaloPaymentGroups)
+			.where(eq(pagaloPaymentGroups.id, params.groupId))
+			.for("update");
+
 		// invalidarGrupoEnTx solo mira links PAID del grupo que se está
 		// invalidando — pero un grupo puede llegar a REVIEW_REQUIRED porque
 		// un link REPLACED de un PREDECESOR (ya CANCELLED, mismo crédito)
@@ -1373,9 +1393,36 @@ export async function regenerarLinkIndividual(params: {
 		// el mismo tipo tenga además un link vivo tras la regeneración no
 		// resuelve ese pago mal aplicado — restaurar el grupo lo escondería
 		// (hallazgo de code review).
-		const hayPagoMalAplicado = linksDelGrupo.some(
-			(l) => l.status === "PAID" && !l.isApplicationSource,
-		);
+		//
+		// Este chequeo original solo miraba linksDelGrupo (el grupo ACTUAL) —
+		// pero el grupo puede estar en REVIEW_REQUIRED por un link REPLACED
+		// de un PREDECESOR (ya CANCELLED, mismo crédito) que cobró tarde. Esa
+		// fila PAID vive en el grupo viejo, invisible acá: regenerar CUALQUIER
+		// link cerrado del grupo actual restauraba el grupo escondiendo el
+		// pago del predecesor sin reconciliar (mismo hueco que ya se cerró en
+		// regenerarGrupo — hallazgo de code review, nunca se aplicó acá).
+		// Bajo el mismo candado del grupo actual (arriba), para no dejar la
+		// misma ventana de lectura-sin-bloqueo que regenerarGrupo tuvo que
+		// corregir después.
+		const [pagoPredecesorSinReconciliar] = await tx
+			.select({ linkId: pagaloPaymentLinks.id })
+			.from(pagaloPaymentLinks)
+			.innerJoin(
+				pagaloPaymentGroups,
+				eq(pagaloPaymentGroups.id, pagaloPaymentLinks.groupId),
+			)
+			.where(
+				and(
+					eq(pagaloPaymentGroups.carteraCreditoId, grupo.carteraCreditoId),
+					eq(pagaloPaymentLinks.status, "PAID"),
+					eq(pagaloPaymentLinks.isApplicationSource, false),
+				),
+			)
+			.limit(1);
+		const hayPagoMalAplicado =
+			linksDelGrupo.some(
+				(l) => l.status === "PAID" && !l.isApplicationSource,
+			) || !!pagoPredecesorSinReconciliar;
 
 		const cubiertos = new Set(
 			linksDelGrupo

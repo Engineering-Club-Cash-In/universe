@@ -2219,7 +2219,12 @@ export const insertPayment = async ({ body, set }: any) => {
             "No se puede acreditar el convenio sin una fila de pago persistida"
           );
         }
-        await commitConvenio(pagoConvenioPagoId);
+        const convenioAcreditado = await commitConvenio(pagoConvenioPagoId);
+        if (!convenioAcreditado) {
+          throw new Error(
+            "El pago se registró, pero el convenio cambió y no pudo acreditarse"
+          );
+        }
       }
 
       // 4️⃣ Retornar resultado
@@ -2363,7 +2368,12 @@ export const insertPayment = async ({ body, set }: any) => {
             "No se puede acreditar el convenio sin una fila de pago persistida"
           );
         }
-        await commitConvenio(pagoConvenioPagoId);
+        const convenioAcreditado = await commitConvenio(pagoConvenioPagoId);
+        if (!convenioAcreditado) {
+          throw new Error(
+            "El pago se registró, pero el convenio cambió y no pudo acreditarse"
+          );
+        }
       }
 
       const montoTotal = montoBoleta.toString();

@@ -16,18 +16,18 @@ describe("accionesDisponibles", () => {
 		}
 	});
 
-	test("PARTIALLY_PAID: invalidar sí, regenerar no (siempre abortaría), reintentar no", () => {
+	test("PARTIALLY_PAID: siempre tiene un link PAID adentro, ninguna acción salvo reintentar (que tampoco aplica acá)", () => {
 		expect(accionesDisponibles("PARTIALLY_PAID", true)).toEqual({
-			invalidar: true,
+			invalidar: false,
 			regenerar: false,
 			reintentar: false,
 		});
 	});
 
-	test("APPLICATION_FAILED: las tres acciones disponibles", () => {
+	test("APPLICATION_FAILED: solo reintentar (invalidar/regenerar siempre abortarían — un link ya está PAID)", () => {
 		expect(accionesDisponibles("APPLICATION_FAILED", true)).toEqual({
-			invalidar: true,
-			regenerar: true,
+			invalidar: false,
+			regenerar: false,
 			reintentar: true,
 		});
 	});

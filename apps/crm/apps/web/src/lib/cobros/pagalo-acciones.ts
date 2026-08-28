@@ -25,23 +25,27 @@ export type AccionesDisponibles = {
 	reintentar: boolean;
 };
 
+// APPLICATION_FAILED solo se alcanza vía READY_TO_APPLY, que evaluarGrupo
+// (pagalo-poll.ts) únicamente pone cuando TODOS los links requeridos ya
+// están isApplicationSource=true — o sea, un grupo APPLICATION_FAILED
+// SIEMPRE tiene al menos un link PAID adentro. Igual PARTIALLY_PAID, por
+// definición del estado. invalidarGrupoEnTx rechaza cualquier grupo con un
+// link PAID, así que Invalidar/Regenerar en esos dos estados fallaban
+// siempre con el toast de conflicto (hallazgo de code review — ya se había
+// excluido PARTIALLY_PAID de regenerar, pero no de invalidar, ni
+// APPLICATION_FAILED de ninguno de los dos). REVIEW_REQUIRED se deja: puede
+// o no tener un pago adentro (a veces es solo un fallo de validación
+// determinístico), así que ahí el server sigue siendo quien decide.
 const ESTADOS_INVALIDABLES = new Set<EstadoGrupoPagalo>([
 	"LINKS_PENDING",
 	"PENDING_PAYMENT",
-	"PARTIALLY_PAID",
 	"REVIEW_REQUIRED",
-	"APPLICATION_FAILED",
 ]);
 
-// Mismo conjunto que invalidar, MENOS PARTIALLY_PAID: regenerar con dinero
-// adentro siempre aborta en el server (invalidarGrupoEnTx rechaza cualquier
-// link PAID) — no tiene sentido ofrecer un botón que sabemos que va a fallar
-// siempre para ese estado puntual.
 const ESTADOS_REGENERABLES = new Set<EstadoGrupoPagalo>([
 	"LINKS_PENDING",
 	"PENDING_PAYMENT",
 	"REVIEW_REQUIRED",
-	"APPLICATION_FAILED",
 ]);
 
 export function accionesDisponibles(

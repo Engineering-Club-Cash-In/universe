@@ -6,7 +6,7 @@
  * TS7056 al inferir su tipo en el web.
  */
 import { ORPCError } from "@orpc/server";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import {
@@ -105,10 +105,34 @@ export const pagaloSupervisionRouter = {
 			// reintento manual del supervisor sin efecto hasta que ese backoff
 			// venciera solo. Limpiarlo acá es la forma explícita de "ahora,
 			// no cuando toque".
-			await db
+			//
+			// El UPDATE era incondicional (solo WHERE id) — si el dispatcher
+			// programado reclamaba este grupo (status→APPLYING, lease real)
+			// entre el SELECT de arriba y este UPDATE, pisaba ese lease a
+			// null. reclamarGrupo trata cualquier APPLYING con
+			// dispatchClaimedAt null como reclamable, así que un segundo
+			// worker (este mismo reclamarYProcesarGrupo de abajo, u otro)
+			// podía reclamarlo de nuevo mientras el primero seguía en vuelo
+			// — dos POSTs de importación concurrentes (hallazgo de code
+			// review). Condicionado a que siga APPLICATION_FAILED; si ya no
+			// lo está (alguien más lo reclamó o lo movió), no hay nada que
+			// reintentar acá.
+			const [limpiado] = await db
 				.update(pagaloPaymentGroups)
 				.set({ nextDispatchAt: null, dispatchClaimedAt: null })
-				.where(eq(pagaloPaymentGroups.id, input.groupId));
+				.where(
+					and(
+						eq(pagaloPaymentGroups.id, input.groupId),
+						eq(pagaloPaymentGroups.status, "APPLICATION_FAILED"),
+					),
+				)
+				.returning({ id: pagaloPaymentGroups.id });
+			if (!limpiado) {
+				throw new ORPCError("CONFLICT", {
+					message:
+						"El grupo cambió justo antes del reintento — recargá el historial.",
+				});
+			}
 			await db.insert(pagaloPaymentEvents).values({
 				groupId: input.groupId,
 				eventType: "DISPATCH_RETRY_FORCED",

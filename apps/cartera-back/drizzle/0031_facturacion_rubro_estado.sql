@@ -1,4 +1,4 @@
--- 0030 · Facturación: rubro por factura, estado por pago y re-facturación parcial
+-- 0031 · Facturación: rubro por factura, estado por pago y re-facturación parcial
 -- ============================================================================
 --
 -- UNIFICADA con `drizzle/cobros-02/0014_estado_facturacion_pago.sql` (Daniel,

@@ -13,6 +13,7 @@ import {
 import { calcularSplitInteresPci } from "../cofidi/splitInteresPci";
 import { computarDiffFacturas, keyIntereses } from "../cofidi/facturasFaltantes";
 import { registrarEstadoFacturacion } from "../controllers/estadoFacturacionPago";
+import { adquirirPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import { db } from "../database";
 import {
   audit_logs,
@@ -90,15 +91,14 @@ function generarIdInternoRandom(): string {
   return Math.floor(10000000 + Math.random() * 90000000).toString();
 }
 
-// 🔒 Pagos con una facturación EN CURSO en este proceso. El diff de re-facturación
-// (paso 2.5 de /facturar-pago-completo) lee-decide-certifica sin transacción: dos
-// requests simultáneos del mismo pago (doble click, retry del CRM tras timeout —
-// incidente real del 2026-08-07) computarían los MISMOS faltantes y certificarían
-// DTEs duplicados ante SAT. Este candado serializa por pago_id dentro del proceso.
-// ⚠️ Si cartera-back algún día corre con VARIAS réplicas, esto no alcanza: habría
-// que pasar a un advisory lock de Postgres (ojo con el transaction pooler 6543,
-// que rompe locks de sesión) o a un índice único parcial.
-const facturacionesEnCurso = new Set<number>();
+// 🔒 La facturación serializa POR CRÉDITO con el advisory lock compartido de
+// pagos (utils/paymentAdvisoryLock, pool dedicado): el diff de re-facturación
+// lee-decide-certifica sin transacción, y dos requests simultáneos del mismo
+// pago (doble click, retry del CRM tras timeout — incidente real del
+// 2026-08-07) computarían los MISMOS faltantes y certificarían DTEs duplicados
+// ante SAT. El mismo lock que ya usan registerPayment/revalidate/reverse:
+// funciona entre réplicas y el segundo request espera y luego ve las ACTIVAS
+// del primero (diff → "ya facturado"/faltantes reales).
 
 
 export const dteController = new Elysia({ prefix: "/api/dte" })
@@ -126,16 +126,21 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
   async ({ body, set }) => {
     const { pago_id, created_by } = body;
 
-    // 🔒 Un solo request facturando cada pago a la vez (ver facturacionesEnCurso).
-    if (facturacionesEnCurso.has(pago_id)) {
-      set.status = 409;
-      return {
-        success: false,
-        message:
-          "Ya hay una facturación en curso para este pago. Espere a que termine antes de reintentar.",
-      };
+    // 🔒 Lookup ligero del crédito para el advisory lock (ver comentario arriba).
+    const [refPago] = await db
+      .select({ credito_id: pagos_credito.credito_id })
+      .from(pagos_credito)
+      .where(eq(pagos_credito.pago_id, pago_id));
+    if (!refPago) {
+      set.status = 404;
+      return { success: false, error: "Pago no encontrado" };
     }
-    facturacionesEnCurso.add(pago_id);
+    // credito_id NULL (pago huérfano) → clave 0 compartida: sobre-serializa ese
+    // caso rarísimo en vez de dejarlo sin candado; más abajo el JOIN a creditos
+    // lo rechaza de todos modos.
+    const soltarLockFacturacion = await adquirirPaymentAdvisoryLock(
+      refPago.credito_id ?? 0
+    );
 
     // Visible para el catch: en re-corrida FALTANTES el pago tiene DTEs activos
     // válidos, así que un fallo NO puede degradar su estado a FALLIDA (piso PARCIAL).
@@ -1572,6 +1577,15 @@ if (facturasExistentes.length > 0) {
               },
             ];
 
+            // 🩹 Gate local del modo FALTANTES. Hoy es inalcanzable acá (la
+            // regla (c) del diff bloquea el prorrateado con facturas activas),
+            // pero ese invariante vive en OTRO archivo: este check hace al
+            // bloque seguro por sí mismo si alguien relaja la regla. (Daniel)
+            if (!debeEmitir(keyIntereses(inv.inversionista_id))) {
+              console.log(`      ⏭️  ${inv.nombre} - ya tiene su factura de intereses activa (re-facturación parcial)`);
+              continue;
+            }
+
             try {
               const facturaInv = await certificarFacturaHelper({
                 pago_id,
@@ -1673,6 +1687,11 @@ if (facturasExistentes.length > 0) {
               },
             ];
 
+            // 🩹 Mismo gate local que el DTE por inversionista de arriba. (Daniel)
+            if (!debeEmitir("INTERESES_CUBE")) {
+              console.log(`      ⏭️  CUBE - ya tiene su factura de intereses activa (re-facturación parcial)`);
+            } else {
+
             try {
               const facturaCube = await certificarFacturaHelper({
                 pago_id,
@@ -1704,6 +1723,7 @@ if (facturasExistentes.length > 0) {
                 error: error.message,
               });
             }
+            } // fin gate debeEmitir("INTERESES_CUBE")
           }
 
           // ============================================
@@ -2494,7 +2514,7 @@ if (facturasExistentes.length > 0) {
         stack: (error as Error).stack,
       };
     } finally {
-      facturacionesEnCurso.delete(pago_id);
+      await soltarLockFacturacion();
     }
   },
   {
@@ -3680,7 +3700,7 @@ if (facturasExistentes.length > 0) {
               credito_id: pagoData.credito_id,
             },
 
-            // 🧾 ESTADO DE LA FACTURACIÓN DE ESTE PAGO (migración 0014/0030)
+            // 🧾 ESTADO DE LA FACTURACIÓN DE ESTE PAGO (migración 0014/0031)
             //    `faltantes` sale de lo que guardó la última facturación: qué
             //    rubro (y de qué inversionista) no se pudo emitir y por qué.
             //    Para completarlo, /facturar-pago-completo re-emite SOLO lo
@@ -3716,7 +3736,7 @@ if (facturasExistentes.length > 0) {
                 numero: f.numero,
                 uuid: f.uuid,
                 tipo_documento: f.tipo_documento,
-                // Qué cubre esta factura (migración 0014/0030). NULL en las viejas.
+                // Qué cubre esta factura (migración 0014/0031). NULL en las viejas.
                 rubro: f.rubro,
                 inversionista_id: f.inversionista_id,
                 monto_total: f.monto_total,

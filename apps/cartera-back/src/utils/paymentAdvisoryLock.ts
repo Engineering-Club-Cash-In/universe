@@ -15,6 +15,42 @@ export type PaymentAdvisoryLockConnection = {
  * lock (deadlock de pool). Por eso NUNCA esperar este lock con conexiones de
  * `client`/`db` (p.ej. `pg_advisory_xact_lock` dentro de una transacción).
  */
+/**
+ * Variante acquire/release de `withPaymentAdvisoryLock`, para handlers que no
+ * pueden envolver su cuerpo en un callback sin re-indentar cientos de líneas
+ * (p. ej. /facturar-pago-completo). MISMO namespace y misma disciplina del
+ * lockPool dedicado. El release devuelto es idempotente y SIEMPRE debe
+ * llamarse en un finally.
+ */
+export async function adquirirPaymentAdvisoryLock(
+  credito_id: number
+): Promise<() => Promise<void>> {
+  const lockConn: PaymentAdvisoryLockConnection = await lockPool.connect();
+  try {
+    await lockConn.query("SELECT pg_advisory_lock($1, $2)", [
+      PAYMENT_ADVISORY_LOCK_NAMESPACE,
+      credito_id,
+    ]);
+  } catch (error) {
+    lockConn.release();
+    throw error;
+  }
+  let liberado = false;
+  return async () => {
+    if (liberado) return;
+    liberado = true;
+    try {
+      await lockConn.query("SELECT pg_advisory_unlock($1, $2)", [
+        PAYMENT_ADVISORY_LOCK_NAMESPACE,
+        credito_id,
+      ]);
+    } catch (unlockError) {
+      console.error("⚠️ Error liberando advisory lock:", unlockError);
+    }
+    lockConn.release();
+  };
+}
+
 export async function withPaymentAdvisoryLock<T>(
   credito_id: number,
   fn: () => Promise<T>

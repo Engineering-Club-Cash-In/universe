@@ -1,5 +1,5 @@
 /**
- * Estado de la facturación de un pago (migración 0014 en COBROS-02 / 0030 en
+ * Estado de la facturación de un pago (migración 0014 en COBROS-02 / 0031 en
  * develop — unificadas).
  *
  * Decisión de Daniel 2026-08-27: cartera NO refactura A CIEGAS lo que falta —

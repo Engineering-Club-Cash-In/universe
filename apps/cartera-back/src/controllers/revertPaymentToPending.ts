@@ -3,6 +3,7 @@ import { eq, and } from "drizzle-orm";
 import Big from "big.js";
 import { db } from "../database";
 import { setCapitalSource } from "../utils/withAuditContext";
+import type { PagoFacturaStatus } from "../database/db/schema";
 import {
   pagos_credito,
   creditos,
@@ -300,6 +301,25 @@ export function createRevertPaymentToPending(
         .set({
           validationStatus: "pending",
           fecha_aplicado: null,
+          // Estado de facturación terminal de esta reversión-a-pending: si
+          // alguna anulación falló, FALLIDA con detalle (bandeja de conta); si
+          // todo se anuló, NO_APLICA limpio — un pago pending no debe factura.
+          // Al re-validarlo, el hook de revalidación lo re-abre PENDIENTE.
+          // (Codex P2 del #1493: sin esto quedaba OK sin DTEs vivos, o una
+          // anulación fallida invisible para la remediación.)
+          factura_status: (facturasConError.length > 0
+            ? "FALLIDA"
+            : "NO_APLICA") as PagoFacturaStatus,
+          factura_error:
+            facturasConError.length > 0
+              ? JSON.stringify(
+                  facturasConError.map((f: any) => ({
+                    rubro: "ANULACION",
+                    error: `Factura ${f.factura_id} (${f.uuid}) quedó sin anular: ${f.error ?? f.mensaje ?? "sin detalle"}`,
+                  }))
+                )
+              : null,
+          factura_at: facturasConError.length > 0 ? new Date() : null,
         })
         .where(eq(pagos_credito.pago_id, pago_id));
       return {

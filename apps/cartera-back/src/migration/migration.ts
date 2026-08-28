@@ -24,6 +24,7 @@ import {
 import path from "path";
 import { findOrCreateUserByName } from "../controllers/users";
 import { findOrCreateAdvisorByName } from "../controllers/advisor";
+import { tieneMontosFacturables } from "../controllers/estadoFacturacionPago";
 import { db } from "../database";
 import {
   boletas,
@@ -964,6 +965,19 @@ export async function mapEstadoCuentaToPagosBig(
         : "0.00",
       otros: "",
       mora: moraTotal.toString(),
+      // Estado de facturación (migración 0031): un pago que nace 'validated'
+      // por sync SIFCO debe entrar a la bandeja; NULL es solo para históricos.
+      factura_status: isPagado
+        ? tieneMontosFacturables({
+            abono_interes: abonoInteres.toString(),
+            abono_iva_12: abonoIva12.toString(),
+            abono_seguro: abonoSeguro.toString(),
+            membresias_pago: credito?.membresias?.toString() ?? "0",
+            mora: moraTotal.toString(),
+          })
+          ? ("PENDIENTE" as const)
+          : ("NO_APLICA" as const)
+        : null,
       monto_boleta_cuota: isPagado ? pagoDelMes.toString() : "0.00",
       seguro_total: seguroDb.toString(),
       pagado: isPagado,
@@ -1321,6 +1335,17 @@ export async function mapPagosDesdeJson(
       membresias_mes: membresiaDb.toString(),
       otros: "",
       mora: "0.00",
+      // Estado de facturación (migración 0031): igual que en mapPagosPorCreditos.
+      factura_status: isPagado
+        ? tieneMontosFacturables({
+            abono_interes: interesMes.toString(),
+            abono_iva_12: ivaMes.toString(),
+            abono_seguro: seguroDb.toString(),
+            membresias_pago: membresiaDb.toString(),
+          })
+          ? ("PENDIENTE" as const)
+          : ("NO_APLICA" as const)
+        : null,
       monto_boleta_cuota: isPagado ? pagoDelMes.toString() : "0.00",
       seguro_total: seguroDb.toString(),
       pagado: isPagado,

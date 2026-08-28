@@ -976,12 +976,13 @@ export const insertPayment = async ({ body, set }: any) => {
     if (
       debeProcesarConvenio({
         statusCredit: creditoInfo.credito.statusCredit,
-        disponible: disponible_restante,
+        disponible: disponible_restante.plus(ajusteFechaIdealMonto),
       })
     ) {
       pagoConvenio = await processConvenioPayment({
         credito_id: credito_id,
         monto_pago: disponible_restante.toNumber(),
+        ajuste_fecha_ideal: ajusteFechaIdealMonto.toString(),
         creditoInfo: creditoInfo,
         pagoMetadata: {
           montoBoleta: montoBoleta.toString(),

@@ -17,6 +17,7 @@ import Big from "big.js";
 import {
   calcularAplicacionConvenio,
   calcularCuotasConvenioCompletadas,
+  getMontoAcreditarConvenio,
 } from "./registerPaymentPolicy";
 import { createMora } from "./latefee";
 import { getPagosDelMesActual } from "./payments";
@@ -651,6 +652,7 @@ interface ProcessConvenioPaymentParams {
   credito_id: number;
   numero_credito_sifco?: string;
   monto_pago: number;
+  ajuste_fecha_ideal?: string;
   // 🔥 Info precargada del crédito
   creditoInfo: {
     credito: typeof creditos.$inferSelect;
@@ -706,7 +708,14 @@ export async function processConvenioPayment(
   params: ProcessConvenioPaymentParams
 ): Promise<ProcessConvenioPaymentResult> {
   try {
-    const { credito_id, numero_credito_sifco, monto_pago, creditoInfo, pagoMetadata } = params;
+    const {
+      credito_id,
+      numero_credito_sifco,
+      monto_pago,
+      ajuste_fecha_ideal = "0",
+      creditoInfo,
+      pagoMetadata,
+    } = params;
 
     // 1. Validar que se haya proporcionado credito_id o numero_credito_sifco
     if (!credito_id && !numero_credito_sifco) {
@@ -738,7 +747,29 @@ export async function processConvenioPayment(
     }
 
     // 3. Convertir valores a Big.js para cálculos precisos
-    const montoPagoBig = new Big(monto_pago);
+    const [cuota1Incluida] = await db
+      .select({ id: convenios_pagos_resume.id })
+      .from(convenios_pagos_resume)
+      .innerJoin(
+        pagos_credito,
+        eq(pagos_credito.pago_id, convenios_pagos_resume.pago_id),
+      )
+      .innerJoin(
+        cuotas_credito,
+        eq(cuotas_credito.cuota_id, pagos_credito.cuota_id),
+      )
+      .where(
+        and(
+          eq(convenios_pagos_resume.convenio_id, convenio.convenio_id),
+          eq(cuotas_credito.numero_cuota, 1),
+        ),
+      )
+      .limit(1);
+    const montoPagoBig = getMontoAcreditarConvenio({
+      disponibleDespuesAjuste: monto_pago,
+      ajusteFechaIdeal: ajuste_fecha_ideal,
+      incluyeCuota1: !!cuota1Incluida,
+    });
     const cuotaMensualBig = new Big(convenio.cuota_mensual);
     const montoPagadoActualBig = new Big(convenio.monto_pagado);
     const montoPendienteActualBig = new Big(convenio.monto_pendiente);

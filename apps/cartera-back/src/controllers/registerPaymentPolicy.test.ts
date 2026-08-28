@@ -13,6 +13,44 @@ import {
   shouldProcessCuota1DespiteZeroDisponible,
 } from "./registerPaymentPolicy";
 
+describe("acreditación de convenio con ajuste de fecha ideal", () => {
+  it("acredita el monto bruto aunque el ajuste se separe como otros", () => {
+    expect(
+      registerPaymentPolicy
+        .getMontoAcreditarConvenio({
+          disponibleDespuesAjuste: "1000.00",
+          ajusteFechaIdeal: "100.00",
+          incluyeCuota1: true,
+        })
+        .toFixed(2),
+    ).toBe("1100.00");
+  });
+
+  it("sin ajuste conserva exactamente el disponible", () => {
+    expect(
+      registerPaymentPolicy
+        .getMontoAcreditarConvenio({
+          disponibleDespuesAjuste: "1000.00",
+          ajusteFechaIdeal: "0",
+          incluyeCuota1: true,
+        })
+        .toFixed(2),
+    ).toBe("1000.00");
+  });
+
+  it("no acredita el ajuste si el convenio excluye cuota 1", () => {
+    expect(
+      registerPaymentPolicy
+        .getMontoAcreditarConvenio({
+          disponibleDespuesAjuste: "1000.00",
+          ajusteFechaIdeal: "100.00",
+          incluyeCuota1: false,
+        })
+        .toFixed(2),
+    ).toBe("1000.00");
+  });
+});
+
 describe("registerPaymentPolicy - integridad de cuotas abiertas", () => {
   it("detecta una cuota abierta que ya está cubierta por pagos validados vivos", () => {
     const detectarInconsistencia = Reflect.get(

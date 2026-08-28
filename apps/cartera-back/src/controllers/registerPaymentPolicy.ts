@@ -1192,6 +1192,25 @@ export const debeProcesarConvenio = ({
 }) => statusCredit === "EN_CONVENIO" && new Big(disponible).gt(0);
 
 /**
+ * El convenio incluye el ajuste de cuota 1 en su saldo. Aunque el ajuste se
+ * separa del disponible para aplicarlo como `otros`, esa misma plata debe
+ * acreditarse al convenio para que el saldo mostrado y el ledger avancen por
+ * el mismo monto bruto.
+ */
+export const getMontoAcreditarConvenio = ({
+  disponibleDespuesAjuste,
+  ajusteFechaIdeal,
+  incluyeCuota1,
+}: {
+  disponibleDespuesAjuste: BigInput;
+  ajusteFechaIdeal: BigInput;
+  incluyeCuota1: boolean;
+}) =>
+  new Big(disponibleDespuesAjuste).plus(
+    incluyeCuota1 ? ajusteFechaIdeal : 0,
+  );
+
+/**
  * Cuánto aplicar al convenio en un pago. Topa al MENOR entre la cuota mensual
  * y el monto_pendiente real: tras un abono parcial previo el pendiente puede
  * ser menor que la cuota mensual, y sin este tope el ledger del convenio se

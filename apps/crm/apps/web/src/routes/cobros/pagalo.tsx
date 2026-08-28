@@ -145,6 +145,7 @@ function FilaGrupo({
 									paymentUrl={vigente.paymentUrl}
 									casoCobroId={grupo.casoCobroId}
 									esSupervisor={esSupervisor}
+									grupoStatus={grupo.status}
 								/>
 							);
 						},

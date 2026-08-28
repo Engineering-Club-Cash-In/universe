@@ -191,6 +191,7 @@ export function ChipLinkPagalo({
 	paymentUrl,
 	casoCobroId,
 	esSupervisor,
+	grupoStatus,
 }: {
 	link: {
 		id: string;
@@ -212,6 +213,12 @@ export function ChipLinkPagalo({
 	paymentUrl: string | null;
 	casoCobroId: string | null;
 	esSupervisor: boolean;
+	/** regenerarLinkIndividual (server) rechaza SIEMPRE si el grupo
+	 * contenedor está CANCELLED/COMPLETED — invalidar un grupo entero deja
+	 * justo ese estado con links vivos en REPLACED, así que sin este
+	 * chequeo el botón se ofrecía igual sobre un link cerrado dentro de un
+	 * grupo ya cerrado y fallaba siempre (hallazgo de code review). */
+	grupoStatus: string;
 }) {
 	const [accionAbierta, setAccionAbierta] = useState<AccionLink | null>(null);
 	// Diagnóstico por link: llegaba del server (pollAttempts, errorCode,
@@ -257,11 +264,14 @@ export function ChipLinkPagalo({
 	// asociado (necesita resolver contacto del cliente vía casoCobroId). Sin
 	// este chequeo el botón se ofrecía igual para grupos del bot y fallaba
 	// siempre al confirmar (hallazgo de code review).
+	const grupoCerrado =
+		grupoStatus === "CANCELLED" || grupoStatus === "COMPLETED";
 	const puedeRegenerar =
 		esSupervisor &&
 		!!casoCobroId &&
 		ESTADOS_REGENERABLES.has(link.status) &&
-		!regeneracionSiempreRechazada;
+		!regeneracionSiempreRechazada &&
+		!grupoCerrado;
 	// ESTADOS_VIVOS incluye CREATING, pero emitirUnLink preserva un link
 	// justo en CREATING (sin pasar a ACTIVE) cuando detecta un pago-
 	// predecesor sin reconciliar — persiste paymentUrl igual (para que el
@@ -413,6 +423,7 @@ export function AccionesLinkPagalo({
 	casoCobroId,
 	esSupervisor,
 	esVigente = true,
+	grupoStatus,
 }: {
 	link: {
 		id: string;
@@ -423,6 +434,10 @@ export function AccionesLinkPagalo({
 	paymentUrl: string | null;
 	casoCobroId: string | null;
 	esSupervisor: boolean;
+	/** Mismo chequeo que ChipLinkPagalo: regenerarLinkIndividual rechaza
+	 * SIEMPRE si el grupo contenedor está CANCELLED/COMPLETED (hallazgo de
+	 * code review). */
+	grupoStatus: string;
 	/** regenerarLinkIndividual (server) rechaza SIEMPRE una generación que
 	 * no sea la más alta de su tipo dentro del grupo — regenerar una fila
 	 * vieja cuando ya existe una más nueva dejaría el supersedesLinkId
@@ -444,12 +459,15 @@ export function AccionesLinkPagalo({
 		link.errorCode === "PagaloRespuestaAmbigua" ||
 		(["REPLACED", "CANCELLED", "EXPIRED"].includes(link.status) &&
 			!link.activatedAt);
+	const grupoCerrado =
+		grupoStatus === "CANCELLED" || grupoStatus === "COMPLETED";
 	const puedeRegenerar =
 		esSupervisor &&
 		esVigente &&
 		!!casoCobroId &&
 		ESTADOS_REGENERABLES.has(link.status) &&
-		!regeneracionSiempreRechazada;
+		!regeneracionSiempreRechazada &&
+		!grupoCerrado;
 	// Mismo chequeo que ChipLinkPagalo: solo ACTIVE es copiable con
 	// certeza — CREATING puede ser un link real preservado sin confirmar
 	// (pago-predecesor sin reconciliar, ver emitirUnLink), y ofrecerlo
@@ -567,6 +585,7 @@ export function GrupoLinksPorTipo({
 	paymentUrl,
 	casoCobroId,
 	esSupervisor,
+	grupoStatus,
 }: {
 	vigente: {
 		id: string;
@@ -587,6 +606,7 @@ export function GrupoLinksPorTipo({
 	paymentUrl: string | null;
 	casoCobroId: string | null;
 	esSupervisor: boolean;
+	grupoStatus: string;
 }) {
 	const [expandido, setExpandido] = useState(false);
 	return (
@@ -599,6 +619,7 @@ export function GrupoLinksPorTipo({
 				paymentUrl={paymentUrl}
 				casoCobroId={casoCobroId}
 				esSupervisor={esSupervisor}
+				grupoStatus={grupoStatus}
 			/>
 			{historicos.length > 0 && (
 				<>

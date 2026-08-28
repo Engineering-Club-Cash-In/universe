@@ -100,12 +100,14 @@ function LinkPagalo({
 	casoCobroId,
 	esSupervisor,
 	esVigente,
+	grupoStatus,
 }: {
 	link: Link;
 	monto: string;
 	casoCobroId: string;
 	esSupervisor: boolean;
 	esVigente: boolean;
+	grupoStatus: string;
 }) {
 	const estado = getPagaloLinkStatusInfo(link.status);
 	const antiguedad = antiguedadLink(link.activatedAt ?? link.createdAt);
@@ -176,6 +178,7 @@ function LinkPagalo({
 				casoCobroId={casoCobroId}
 				esSupervisor={esSupervisor}
 				esVigente={esVigente}
+				grupoStatus={grupoStatus}
 			/>
 		</div>
 	);
@@ -331,6 +334,7 @@ function GrupoPagalo({
 							casoCobroId={casoCobroId}
 							esSupervisor={esSupervisor}
 							esVigente={idsVigentes.has(link.id)}
+							grupoStatus={grupo.status}
 						/>
 					))}
 				</div>

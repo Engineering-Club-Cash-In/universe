@@ -383,7 +383,7 @@ async function emitirUnLink(params: {
 	generation?: number;
 	supersedesLinkId?: string;
 	grupoAReviewSiFalla: boolean;
-}): Promise<{ paymentUrl: string }> {
+}): Promise<{ paymentUrl: string; activo: boolean }> {
 	const externalIdentifier = `pagalo-${params.groupId}-${params.linkType}-${randomUUID().slice(0, 8)}`;
 	const requestPayload = {
 		total_amount: params.providerAmount,
@@ -418,17 +418,35 @@ async function emitirUnLink(params: {
 	// review). Tomar el candado acá, lo más cerca posible del INSERT y de la
 	// llamada HTTP, es lo que realmente cierra la ventana — revalidar con un
 	// SELECT sin candado más arriba en el caller no alcanza.
+	//
+	// Orden de candados cuando supersedesLinkId pertenece a OTRO grupo
+	// (regenerarGrupo: el link viejo es del grupo que se acaba de cancelar,
+	// no del grupo nuevo que se está emitiendo acá): marcarLinkPagado
+	// (pagalo-poll.ts) bloquea, en ese orden, grupo-del-link-viejo → link
+	// viejo → grupo-activo-del-crédito (que es ESTE grupo nuevo, para
+	// escalarlo a REVIEW_REQUIRED si el link viejo cobra tarde). Bloquear
+	// acá primero el grupo actual y después el link viejo invierte ese
+	// orden — dos transacciones tomando los mismos dos recursos en orden
+	// cruzado es un deadlock clásico; si Postgres aborta esta, el grupo
+	// nuevo (ya comiteado por la transacción de invalidar+crear, aparte)
+	// queda huérfano en LINKS_PENDING sin su link (hallazgo de code
+	// review). Por eso el grupo del link viejo (si es distinto al actual)
+	// se bloquea PRIMERO, replicando el orden del poller.
 	const stored = await db.transaction(async (tx) => {
-		const [grupo] = await tx
-			.select({ status: pagaloPaymentGroups.status })
-			.from(pagaloPaymentGroups)
-			.where(eq(pagaloPaymentGroups.id, params.groupId))
-			.for("update");
-		if (!grupo) throw new Error("Grupo Págalo no encontrado.");
-		if (grupo.status === "CANCELLED" || grupo.status === "COMPLETED") {
-			throw new Error(
-				`El grupo cambió a ${grupo.status} justo antes de emitir el link — no se creó ningún link nuevo.`,
-			);
+		let grupoDelLinkViejo: string | null = null;
+		if (params.supersedesLinkId) {
+			const [viejo] = await tx
+				.select({ groupId: pagaloPaymentLinks.groupId })
+				.from(pagaloPaymentLinks)
+				.where(eq(pagaloPaymentLinks.id, params.supersedesLinkId));
+			grupoDelLinkViejo = viejo?.groupId ?? null;
+		}
+		if (grupoDelLinkViejo && grupoDelLinkViejo !== params.groupId) {
+			await tx
+				.select({ id: pagaloPaymentGroups.id })
+				.from(pagaloPaymentGroups)
+				.where(eq(pagaloPaymentGroups.id, grupoDelLinkViejo))
+				.for("update");
 		}
 		// regenerarLinkIndividual valida el link viejo (supersedesLinkId) con
 		// un SELECT suelto bastante antes de llegar acá, tras
@@ -455,6 +473,17 @@ async function emitirUnLink(params: {
 					`El link que se está reemplazando cambió a ${viejo?.status ?? "eliminado"} justo antes de emitir el nuevo — no se creó ningún link.`,
 				);
 			}
+		}
+		const [grupo] = await tx
+			.select({ status: pagaloPaymentGroups.status })
+			.from(pagaloPaymentGroups)
+			.where(eq(pagaloPaymentGroups.id, params.groupId))
+			.for("update");
+		if (!grupo) throw new Error("Grupo Págalo no encontrado.");
+		if (grupo.status === "CANCELLED" || grupo.status === "COMPLETED") {
+			throw new Error(
+				`El grupo cambió a ${grupo.status} justo antes de emitir el link — no se creó ningún link nuevo.`,
+			);
 		}
 		const [insertado] = await tx
 			.insert(pagaloPaymentLinks)
@@ -527,7 +556,7 @@ async function emitirUnLink(params: {
 	let ultimoError: unknown;
 	for (let intento = 1; intento <= REINTENTOS_PERSISTENCIA; intento++) {
 		try {
-			await db.transaction(async (tx) => {
+			const activo = await db.transaction(async (tx) => {
 				// La respuesta HTTP de Págalo puede llegar DESPUÉS de que un
 				// supervisor invalide este mismo link (CREATING es un estado
 				// "vivo", invalidable) — sin este WHERE, este UPDATE reactivaba
@@ -586,7 +615,7 @@ async function emitirUnLink(params: {
 							nota: "Respuesta de Págalo llegó después de que el link fue invalidado; status preservado, no reactivado.",
 						},
 					});
-					return;
+					return false;
 				}
 				await tx.insert(pagaloPaymentEvents).values({
 					groupId: params.groupId,
@@ -598,8 +627,16 @@ async function emitirUnLink(params: {
 					toStatus: "ACTIVE",
 					payload: { linkType: params.linkType },
 				});
+				return true;
 			});
-			return { paymentUrl };
+			// El link puede haber sido invalidado por un supervisor mientras la
+			// llamada HTTP a Págalo estaba en vuelo — el bloque de arriba ya
+			// preserva el status real en la DB (no lo reactiva), pero devolver
+			// éxito acá igual dejaba que emitirLinksDeGrupo/regenerarLinkIndividual
+			// mandaran este paymentUrl al cliente por WhatsApp como si el link
+			// siguiera siendo válido: alguien podía pagar un link que el
+			// supervisor explícitamente invalidó (hallazgo de code review).
+			return { paymentUrl, activo };
 		} catch (error) {
 			ultimoError = error;
 			if (intento < REINTENTOS_PERSISTENCIA) {
@@ -769,6 +806,12 @@ export async function emitirLinksDeGrupo(params: {
 			// bien), pero NO para regenerarLinkIndividual (ver esa función).
 			grupoAReviewSiFalla: true,
 		});
+		// activo=false: la respuesta de Págalo llegó después de que el link
+		// fue invalidado — el link real existe y es cobrable en Págalo, pero
+		// no se manda por WhatsApp ni se cuenta como parte de la emisión
+		// (hallazgo de code review). Sin esto, un cliente podía recibir y
+		// pagar un link que un supervisor invalidó segundos antes.
+		if (!emitido.activo) continue;
 		links.push({
 			linkType,
 			paymentUrl: emitido.paymentUrl,
@@ -779,19 +822,25 @@ export async function emitirLinksDeGrupo(params: {
 	// Solo avanza el grupo si seguía en la fase de emisión inicial — un
 	// regenerarLinkIndividual sobre un grupo ya PARTIALLY_PAID/READY_TO_APPLY
 	// no debe retrocederlo a PENDING_PAYMENT (perdería el otro link ya pagado
-	// del radar del dispatcher).
-	await db
-		.update(pagaloPaymentGroups)
-		.set({ status: "PENDING_PAYMENT", updatedAt: new Date() })
-		.where(
-			and(
-				eq(pagaloPaymentGroups.id, params.groupId),
-				inArray(pagaloPaymentGroups.status, [
-					"LINKS_PENDING",
-					"PENDING_PAYMENT",
-				]),
-			),
-		);
+	// del radar del dispatcher). Y solo si `links` no quedó vacío: si el
+	// único componente resultó `activo=false` (invalidado durante la
+	// emisión), avanzar a PENDING_PAYMENT dejaría el grupo pareciendo
+	// "esperando pago" sin ningún link real esperando nada — ni el poller ni
+	// el dispatcher notarían que falta un link entero.
+	if (links.length > 0) {
+		await db
+			.update(pagaloPaymentGroups)
+			.set({ status: "PENDING_PAYMENT", updatedAt: new Date() })
+			.where(
+				and(
+					eq(pagaloPaymentGroups.id, params.groupId),
+					inArray(pagaloPaymentGroups.status, [
+						"LINKS_PENDING",
+						"PENDING_PAYMENT",
+					]),
+				),
+			);
+	}
 
 	// D-04: un solo mensaje, con TODOS los links requeridos, solo cuando el
 	// grupo ya está completo (arriba de esta línea). Fallo de WhatsApp nunca
@@ -886,6 +935,22 @@ export async function regenerarGrupo(params: {
 			estadosPermitidos: ESTADOS_INVALIDABLES_SUPERVISOR,
 			eventType: "GROUP_INVALIDATED_BY_SUPERVISOR",
 		});
+
+		// pagalo_payment_groups_contact_uq es INCONDICIONAL (a diferencia del
+		// índice de "grupo activo por crédito", que solo mira status NOT IN
+		// COMPLETED/CANCELLED) — invalidarGrupoEnTx cancela el grupo viejo
+		// pero no le toca contactoCobroId, así que copiarlo al grupo nuevo
+		// más abajo violaba el índice único siempre que hubiera gestión
+		// asociada: el INSERT tiraba 23505 y regenerarGrupo nunca funcionaba
+		// para esos casos (hallazgo de code review). Soltar la asociación del
+		// viejo, en la MISMA transacción, antes de insertar el nuevo con esa
+		// misma gestión.
+		if (grupoViejo.contactoCobroId) {
+			await tx
+				.update(pagaloPaymentGroups)
+				.set({ contactoCobroId: null, updatedAt: new Date() })
+				.where(eq(pagaloPaymentGroups.id, params.groupId));
+		}
 
 		const [creado] = await tx
 			.insert(pagaloPaymentGroups)
@@ -1234,28 +1299,37 @@ export async function regenerarLinkIndividual(params: {
 		}
 	});
 
+	// activo=false: la respuesta de Págalo llegó después de que el link
+	// nuevo también fue invalidado (mismo hueco documentado arriba) — no se
+	// manda por WhatsApp ni se reporta paymentUrl al llamador, aunque el
+	// link real siga existiendo y sea cobrable en Págalo (hallazgo de code
+	// review). El supervisor ve el resultado y puede reintentar.
 	let whatsappEnviado = false;
-	try {
-		const resultado = await sendPagaloLinksWhatsapp({
-			numeroSifco: grupo.numeroCreditoSifco,
-			identificadorCredito,
-			telefono,
-			clienteNombre: credit.usuario.nombre ?? "",
-			links: [{ linkType: linkViejo.linkType, paymentUrl: emitido.paymentUrl }],
-			createdBy: params.actorUserId,
-		});
-		whatsappEnviado = resultado.sent;
-	} catch (error) {
-		console.error(
-			`[Págalo] Error enviando link regenerado por WhatsApp para ${grupo.numeroCreditoSifco}:`,
-			error instanceof Error ? error.message : error,
-		);
+	if (emitido.activo) {
+		try {
+			const resultado = await sendPagaloLinksWhatsapp({
+				numeroSifco: grupo.numeroCreditoSifco,
+				identificadorCredito,
+				telefono,
+				clienteNombre: credit.usuario.nombre ?? "",
+				links: [
+					{ linkType: linkViejo.linkType, paymentUrl: emitido.paymentUrl },
+				],
+				createdBy: params.actorUserId,
+			});
+			whatsappEnviado = resultado.sent;
+		} catch (error) {
+			console.error(
+				`[Págalo] Error enviando link regenerado por WhatsApp para ${grupo.numeroCreditoSifco}:`,
+				error instanceof Error ? error.message : error,
+			);
+		}
 	}
 
 	return {
 		groupId: grupo.id,
 		linkType: linkViejo.linkType,
-		paymentUrl: emitido.paymentUrl,
+		paymentUrl: emitido.activo ? emitido.paymentUrl : null,
 		whatsappEnviado,
 	};
 }

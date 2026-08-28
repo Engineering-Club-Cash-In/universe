@@ -736,6 +736,15 @@ export interface InversionistaPayload {
    */
   es_nuevo?: boolean;
   tipo_operacion?: "compra_cartera" | "reinversion";
+  tipo_reinversion?:
+    | "sin_reinversion"
+     | "reinversion_capital"
+     | "reinversion_interes"
+     | "reinversion_total"
+     | "reinversion_variable"
+     | "reinversion_excedente";
+  modalidad_facturacion?: ModalidadFacturacion;
+  modalidad_facturacion_spread_id?: number;
 }
 
 export interface UpdateCreditBody {

@@ -1,40 +1,259 @@
+import Big from "big.js";
+
 type NetInterestInput = {
   inversionista_id: number;
   inversionista: string;
   referencia: string;
-  interes: number;
-  iva: number;
-  isr: number;
+  interes: number | string;
+  iva: number | string;
+  isr: number | string;
 };
 
-const cents = (value: number | string) => Math.round(Number(value) * 100);
+const cents = (value: number | string) =>
+  new Big(value).times(100).round(0, Big.roundHalfUp).toNumber();
 const money = (valueInCents: number) => (valueInCents / 100).toFixed(2);
 
-export function buildCubeNetInterest(value: number) {
-  const interest = cents(value);
-  const tax = cents(value * 0.12);
+type LiquidationCompositionInput = {
+  totalCapital: number | string;
+  paidTotal: number | string;
+  reinvestedCapital: number | string;
+  reinvestedRest: number | string;
+  reinvestedTotal: number | string;
+};
+
+export function buildLiquidationComposition(input: LiquidationCompositionInput) {
+  const flowCapital = cents(input.totalCapital);
+  const paidTotal = cents(input.paidTotal);
+  const reinvestedCapital = cents(input.reinvestedCapital);
+  const reinvestedRest = cents(input.reinvestedRest);
+  const reinvestedTotal = cents(input.reinvestedTotal);
+  const flowTotal = paidTotal + reinvestedTotal;
+  const flowRest = flowTotal - flowCapital;
+  const reinvestedUnclassified =
+    reinvestedTotal - reinvestedCapital - reinvestedRest;
+
+  if (
+    [flowCapital, paidTotal, reinvestedCapital, reinvestedRest, reinvestedTotal]
+      .some((value) => value < 0) ||
+    flowRest < 0 ||
+    reinvestedUnclassified < 0
+  ) {
+    throw new Error("Composición de liquidación inválida");
+  }
+
+  let paidCapital = 0;
+  let paidRest = 0;
+  let paidUnclassified = paidTotal;
+  if (reinvestedUnclassified === 0) {
+    paidCapital = flowCapital - reinvestedCapital;
+    paidRest = flowRest - reinvestedRest;
+    if (paidCapital < 0 || paidRest < 0) {
+      throw new Error("Composición de liquidación inválida");
+    }
+    paidUnclassified = 0;
+  }
+
   return {
-    interes: money(interest),
-    iva: money(tax),
-    neto: money(interest + tax),
+    pagado: {
+      capital: money(paidCapital),
+      resto: money(paidRest),
+      sin_clasificar: money(paidUnclassified),
+      total: money(paidTotal),
+    },
+    reinvertido: {
+      capital: money(reinvestedCapital),
+      resto: money(reinvestedRest),
+      sin_clasificar: money(reinvestedUnclassified),
+      total: money(reinvestedTotal),
+    },
+    flujo: {
+      capital: money(flowCapital),
+      resto: money(flowRest),
+      total: money(flowTotal),
+    },
+    estado: reinvestedUnclassified === 0 ? "exacto" : "sin_clasificar",
+  } as const;
+}
+
+type PurchaseClassification =
+  | "nueva_posicion"
+  | "ampliacion_posicion"
+  | "sin_clasificar";
+
+type PurchaseDetail = {
+  modalidad_facturacion: string;
+  tipo_reinversion: string;
+  tipo_compra: PurchaseClassification;
+  monto: number | string;
+};
+
+const purchaseKey = (row: Omit<PurchaseDetail, "monto">) =>
+  `${row.modalidad_facturacion}\u0000${row.tipo_reinversion}\u0000${row.tipo_compra}`;
+
+export function summarizePurchaseDetails(rows: PurchaseDetail[]) {
+  const summaries = new Map<
+    string,
+    Omit<PurchaseDetail, "monto"> & { cantidad: number; monto: Big }
+  >();
+  for (const row of rows) {
+    const key = purchaseKey(row);
+    const current = summaries.get(key) ?? {
+      modalidad_facturacion: row.modalidad_facturacion,
+      tipo_reinversion: row.tipo_reinversion,
+      tipo_compra: row.tipo_compra,
+      cantidad: 0,
+      monto: new Big(0),
+    };
+    current.cantidad += 1;
+    current.monto = current.monto.plus(row.monto);
+    summaries.set(key, current);
+  }
+  return [...summaries.values()].map(({ monto, ...summary }) => ({
+    ...summary,
+    monto: monto.toFixed(2),
+  }));
+}
+
+type PurchaseTicketRow = Pick<PurchaseDetail, "tipo_compra" | "monto"> & {
+  periodo: string;
+  cantidad?: number;
+};
+
+const previousPeriod = (period: string) => {
+  const [year, month] = period.split("-").map(Number);
+  return month === 1
+    ? `${year - 1}-12`
+    : `${year}-${String(month - 1).padStart(2, "0")}`;
+};
+
+export function buildPurchaseTicketHistory(
+  rows: PurchaseTicketRow[],
+  targetPeriod: string,
+) {
+  const months = new Map<string, { cantidad: number; monto: Big }>();
+  for (const row of rows) {
+    if (row.tipo_compra !== "nueva_posicion") continue;
+    const current = months.get(row.periodo) ?? {
+      cantidad: 0,
+      monto: new Big(0),
+    };
+    current.cantidad += row.cantidad ?? 1;
+    current.monto = current.monto.plus(row.monto);
+    months.set(row.periodo, current);
+  }
+  const historico = [...months.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([periodo, month]) => ({
+      periodo,
+      cantidad: month.cantidad,
+      monto_total: month.monto.toFixed(2),
+      ticket_promedio: month.monto.div(month.cantidad).toFixed(2),
+    }));
+  const current = historico.find((month) => month.periodo === targetPeriod) ?? {
+    periodo: targetPeriod,
+    cantidad: 0,
+    monto_total: "0.00",
+    ticket_promedio: "0.00",
+  };
+  const previous = historico.find(
+    (month) => month.periodo === previousPeriod(targetPeriod),
+  );
+  const variation = previous && new Big(previous.ticket_promedio).gt(0)
+    ? new Big(current.ticket_promedio)
+      .minus(previous.ticket_promedio)
+      .div(previous.ticket_promedio)
+      .times(100)
+      .toFixed(2)
+    : null;
+
+  return {
+    actual: { ...current, variacion_porcentual: variation },
+    historico,
+  };
+}
+
+export function buildCubeNetInterest(value: number | string) {
+  const interest = new Big(value).round(2, Big.roundHalfUp);
+  const tax = new Big(value).times("0.12").round(2, Big.roundHalfUp);
+  return {
+    interes: interest.toFixed(2),
+    iva: tax.toFixed(2),
+    neto: interest.plus(tax).toFixed(2),
   };
 }
 
 export function allocateRoundedAmounts(values: (number | string)[]) {
-  const rawCents = values.map((value) => Number(value) * 100);
-  const allocated = rawCents.map(Math.round);
-  const remainder = cents(values.reduce((total, value) => total + Number(value), 0)) -
-    allocated.reduce((total, value) => total + value, 0);
+  const rawCents = values.map((value) => new Big(value).times(100));
+  const allocated = rawCents.map((value) => value.round(0, Big.roundHalfUp));
+  const target = values
+    .reduce((total, value) => total.plus(value), new Big(0))
+    .times(100)
+    .round(0, Big.roundHalfUp);
+  const remainder = target
+    .minus(allocated.reduce((total, value) => total.plus(value), new Big(0)))
+    .toNumber();
   const direction = Math.sign(remainder);
   const order = rawCents
-    .map((value, index) => ({ index, remainder: value - allocated[index] }))
-    .sort((a, b) => direction * (b.remainder - a.remainder));
+    .map((value, index) => ({
+      index,
+      remainder: value.minus(allocated[index]),
+    }))
+    .sort((a, b) => direction * b.remainder.cmp(a.remainder));
 
   for (let index = 0; index < Math.abs(remainder); index++) {
-    allocated[order[index].index] += direction;
+    allocated[order[index].index] = allocated[order[index].index].plus(direction);
   }
 
-  return allocated.map(money);
+  return allocated.map((value) => value.div(100).toFixed(2));
+}
+
+type LiquidationModeAllocationRow = {
+  reinversion_capital: string;
+  reinversion_interes: string;
+  reinversion_total: string;
+  total_capital: string;
+  total_interes: string;
+  total_iva: string;
+  total_isr: string;
+  total_distribuido: string;
+};
+
+export function canonicalizeLiquidationModeRows<T extends LiquidationModeAllocationRow>(rows: T[]) {
+  const allocate = (field: keyof LiquidationModeAllocationRow) =>
+    allocateRoundedAmounts(rows.map((row) => row[field]));
+  const reinvestedCapital = allocate("reinversion_capital");
+  const reinvestedRest = allocate("reinversion_interes");
+  const reinvestedUnclassified = allocateRoundedAmounts(rows.map((row) =>
+    new Big(row.reinversion_total)
+      .minus(row.reinversion_capital)
+      .minus(row.reinversion_interes)
+      .toString()
+  ));
+  const paid = allocateRoundedAmounts(rows.map((row) =>
+    new Big(row.total_distribuido).minus(row.reinversion_total).toString()
+  ));
+  const totalCapital = allocate("total_capital");
+  const totalInterest = allocate("total_interes");
+  const totalIva = allocate("total_iva");
+  const totalIsr = allocate("total_isr");
+
+  return rows.map((row, index) => {
+    const reinvestedTotal = new Big(reinvestedCapital[index])
+      .plus(reinvestedRest[index])
+      .plus(reinvestedUnclassified[index]);
+    return {
+      ...row,
+      reinversion_capital: reinvestedCapital[index],
+      reinversion_interes: reinvestedRest[index],
+      reinversion_total: reinvestedTotal.toFixed(2),
+      total_capital: totalCapital[index],
+      total_interes: totalInterest[index],
+      total_iva: totalIva[index],
+      total_isr: totalIsr[index],
+      total_cuota: paid[index],
+      total_distribuido: reinvestedTotal.plus(paid[index]).toFixed(2),
+    };
+  });
 }
 
 export function allocateRoundedPurchaseAmounts<
@@ -54,12 +273,12 @@ export function allocateRoundedPurchaseAmounts<
 export function canonicalizePurchaseSummaries(
   rows: { tipo: string | null; cantidad: number; monto: string }[],
 ) {
-  const summaries = new Map<string, { cantidad: number; monto: number }>();
+  const summaries = new Map<string, { cantidad: number; monto: Big }>();
   for (const row of rows) {
     const tipo = row.tipo ?? "sin_reinversion";
-    const current = summaries.get(tipo) ?? { cantidad: 0, monto: 0 };
+    const current = summaries.get(tipo) ?? { cantidad: 0, monto: new Big(0) };
     current.cantidad += row.cantidad;
-    current.monto += Number(row.monto);
+    current.monto = current.monto.plus(row.monto);
     summaries.set(tipo, current);
   }
   return [...summaries.entries()].map(([tipo, summary]) => ({
@@ -84,7 +303,7 @@ export function buildNetInterestDetail(input: NetInterestInput) {
     referencia: input.referencia,
     // No existe una marca fiscal inmutable en la liquidación. ISR e IVA por sí
     // solos no prueban que se emitió factura, por lo que no se asignan fiscalmente.
-    tratamiento_fiscal: "no_verificado",
+    tratamiento_fiscal: "no_verificado" as const,
     interes: money(interest),
     iva: money(cents(input.iva)),
     isr: money(cents(input.isr)),
@@ -109,7 +328,7 @@ export function calculateActiveCapital(
   mirrorAmount: number | string,
   pendingPurchaseAmount: number | string,
 ) {
-  return Number(mirrorAmount) - Number(pendingPurchaseAmount);
+  return new Big(mirrorAmount).minus(pendingPurchaseAmount).toFixed(2);
 }
 
 type NoVerificadoInterestDetail = {
@@ -132,14 +351,31 @@ type ReconciliationResponse = {
     cube: { neto: string };
   };
   pagosExtras: { abonos_capital: string; cancelaciones: string };
-  comprasMes: { tipo: string; cantidad: number; monto: string }[];
+  comprasMes: (
+    | { tipo: string; cantidad: number; monto: string }
+    | (Omit<PurchaseDetail, "monto"> & { cantidad: number; monto: string })
+  )[];
   detalleInteresNeto: (NoVerificadoInterestDetail | CubeInterestDetail)[];
   detallePagosExtras: { tipo: string; monto: string }[];
-  detalleComprasMes: { modalidad: string; monto: string }[];
+  detalleComprasMes: (
+    | {
+      modalidad: string;
+      monto: string;
+      fecha?: string;
+      inversionista?: string;
+    }
+    | PurchaseDetail
+  )[];
 };
 
 const sumCents = (values: (number | string)[]) =>
-  values.reduce((total, value) => total + cents(value), 0);
+  values.reduce<number>((total, value) => total + cents(value), 0);
+
+const purchaseSummaryKey = (row: ReconciliationResponse["comprasMes"][number]) =>
+  "tipo" in row ? row.tipo : purchaseKey(row);
+const purchaseDetailKey = (
+  row: ReconciliationResponse["detalleComprasMes"][number],
+) => "modalidad" in row ? row.modalidad : purchaseKey(row);
 
 export function assertReportReconciliation(response: ReconciliationResponse) {
   const cubeRows = response.detalleInteresNeto.filter(
@@ -192,16 +428,18 @@ export function assertReportReconciliation(response: ReconciliationResponse) {
   const purchasesByMode = response.comprasMes.every(
     (summary) =>
       response.detalleComprasMes.filter(
-        (row) => row.modalidad === summary.tipo,
+        (row) => purchaseDetailKey(row) === purchaseSummaryKey(summary),
       ).length === summary.cantidad &&
       sumCents(
         response.detalleComprasMes
-          .filter((row) => row.modalidad === summary.tipo)
+          .filter((row) => purchaseDetailKey(row) === purchaseSummaryKey(summary))
           .map((row) => row.monto),
       ) === cents(summary.monto),
   );
   const hasUnknownPurchaseMode = response.detalleComprasMes.some(
-    (row) => !response.comprasMes.some((summary) => summary.tipo === row.modalidad),
+    (row) => !response.comprasMes.some(
+      (summary) => purchaseSummaryKey(summary) === purchaseDetailKey(row),
+    ),
   );
   if (
     sumCents(response.detalleComprasMes.map((row) => row.monto)) !==

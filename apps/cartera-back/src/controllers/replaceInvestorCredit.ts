@@ -18,6 +18,8 @@ import {
   operacionEnCursoEnEspejo,
   resolverStatusEspejoRebuild,
 } from "../utils/espejoGuards";
+import { clasificarCompraCreditoInversionista } from "./purchaseClassification";
+import { withCreditoEspejoLocks } from "../utils/creditoEspejoLock";
 
 const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";
 
@@ -223,6 +225,21 @@ export const returnPendingInvestorsToCube = async ({ body, set, request }: any) 
     const creditoIds = Array.isArray(creditosInput)
       ? creditosInput
       : [creditosInput];
+    const creditosABloquear = [...new Set(creditoIds)].sort((a, b) => a - b);
+
+    // Tomar todos los locks en orden antes de la primera lectura. Así el
+    // snapshot de pendientes y las relecturas dentro de la transacción ven un
+    // estado que ningún otro rebuild del espejo puede cambiar hasta terminar.
+    return await withCreditoEspejoLocks(async (locks) => {
+      for (const creditoId of creditosABloquear) {
+        if (!(await locks.tryLock(creditoId))) {
+          set.status = 409;
+          return {
+            success: false,
+            message: `Crédito ${creditoId} está siendo operado por otro proceso`,
+          };
+        }
+      }
 
     // ================================================================
     // PASO 2: BUSCAR INVERSIONISTAS PENDIENTES
@@ -769,6 +786,7 @@ export const returnPendingInvestorsToCube = async ({ body, set, request }: any) 
       message: `${resultados.length} crédito(s) limpiado(s)`,
       creditos_limpiados: resultados,
     };
+    });
   } catch (error) {
     console.error("[returnPendingInvestorsToCube] Error:", error);
     set.status = 500;
@@ -883,7 +901,22 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
       inversionista_salio_del_credito: boolean;
     } | null = null;
 
-    await db.transaction(async (tx) => {
+    const creditosABloquear = [
+      credito_espejo_removido_id,
+      ...reasignaciones.map(({ credito_destino_id }) => credito_destino_id),
+    ].filter((creditoId, index, ids) => ids.indexOf(creditoId) === index)
+      .sort((a, b) => a - b);
+
+    await withCreditoEspejoLocks(async (locks) => {
+      for (const creditoId of creditosABloquear) {
+        if (!(await locks.tryLock(creditoId))) {
+          throw new ReasignacionNoDisponibleError(
+            `Crédito ${creditoId} está siendo operado por otro proceso`,
+          );
+        }
+      }
+
+      await db.transaction(async (tx) => {
       // ================================================================
       // PASO 2: TRAER DATA DEL CRÉDITO ORIGEN
       // Necesitamos saber cuánto tiene el inversionista ahí para
@@ -1071,6 +1104,10 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
           })
           .from(creditos_inversionistas)
           .where(eq(creditos_inversionistas.credito_id, credito_destino_id));
+        const clasificacionPosicion = clasificarCompraCreditoInversionista(
+          invDestinoActuales.map((inv) => inv.inversionista_id),
+          inversionista_id,
+        );
 
         const invDestinoEspejoActuales = await tx
           .select({
@@ -1384,6 +1421,7 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
           tipo_reinversion: tipoReinversionOrigen,
           modalidad_facturacion: modalidadFacturacionOrigen,
           modalidad_facturacion_spread_id: modalidadFacturacionSpreadIdOrigen,
+          tipo_compra: clasificacionPosicion,
           status: statusEspejo,
         });
 
@@ -1776,6 +1814,7 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
         monto_devuelto: montoEnOrigen.toString(),
         inversionista_salio_del_credito: inversionistaRemovidoDelOrigen,
       };
+      });
     });
 
     // ================================================================

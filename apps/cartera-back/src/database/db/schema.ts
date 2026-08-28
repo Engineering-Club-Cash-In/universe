@@ -42,6 +42,12 @@
     "reinversion_combinada"
   ]);
 
+  export const tipoCompraEnum = customSchema.enum("tipo_compra", [
+    "nueva_posicion",
+    "ampliacion_posicion",
+    "sin_clasificar",
+  ]);
+
   export const statusInversionistaEnum = customSchema.enum("status_inversionista", [
     "activo",
     "inactivo",
@@ -637,6 +643,9 @@
       modalidad_facturacion: modalidadFacturacionEnum("modalidad_facturacion"),
       modalidad_facturacion_spread_id: integer("modalidad_facturacion_spread_id")
         .references(() => modalidad_facturacion_spread.id),
+      tipo_compra: tipoCompraEnum("tipo_compra")
+        .notNull()
+        .default("sin_clasificar"),
     },
     (t) => ({
       ixStatus: index("ix_compras_credito_inv_status").on(t.status),
@@ -1705,6 +1714,8 @@
       // descuenta_impuestos al liquidar, total_interes se persistió NETO (×0.93, solo ISR).
       // Las liquidaciones viejas quedan en false = fórmula bruta original.
       descuenta_impuestos: boolean("descuenta_impuestos").notNull().default(false),
+      tipo_reinversion_snapshot: tipoReinversionEnum("tipo_reinversion_snapshot"),
+      modalidad_facturacion_snapshot: modalidadFacturacionEnum("modalidad_facturacion_snapshot"),
 
       // Reinversión
       reinversion_capital: numeric("reinversion_capital", { precision: 18, scale: 2 }).notNull().default("0"),
@@ -1894,6 +1905,10 @@
         .references(() => creditos.credito_id, { onDelete: "cascade" }),
       liquidacion_id: integer("liquidacion_id")
         .references(() => liquidaciones.liquidacion_id, { onDelete: "set null" }),
+      tipo_reinversion_snapshot: tipoReinversionEnum("tipo_reinversion_snapshot"),
+      modalidad_facturacion_snapshot: modalidadFacturacionEnum("modalidad_facturacion_snapshot"),
+      capital_liquidado: numeric("capital_liquidado", { precision: 18, scale: 8 }),
+      capital_restante: numeric("capital_restante", { precision: 18, scale: 8 }),
     },
     (t) => ({
       ixInvCred: index("ix_historico_liq_inv_cred").on(t.inversionista_id, t.credito_id),

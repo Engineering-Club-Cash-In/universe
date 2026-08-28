@@ -17,6 +17,41 @@ export type InvSplitRow = {
   abono_iva_12: Big;
 };
 
+export type FactorPonderadoPorMontoInput = {
+  montoAportado: string | Big;
+  factor: Big;
+};
+
+export function calcularPropiedadesPorMonto(
+  inversionistas: Array<Pick<FactorPonderadoPorMontoInput, "montoAportado">>,
+): Big[] {
+  const totalAportado = inversionistas.reduce(
+    (total, inversionista) => total.plus(inversionista.montoAportado),
+    new Big(0),
+  );
+
+  return inversionistas.map((inversionista) =>
+    totalAportado.gt(0) ? new Big(inversionista.montoAportado).div(totalAportado) : new Big(0),
+  );
+}
+
+export function calcularFactoresPonderadosPorMonto(
+  inversionistas: FactorPonderadoPorMontoInput[],
+): Big[] {
+  return calcularPropiedadesPorMonto(inversionistas).map((ownership, index) =>
+    ownership.times(inversionistas[index]?.factor ?? new Big(0)),
+  );
+}
+
+export function calcularFactorPonderadoPorMonto(
+  inversionistas: FactorPonderadoPorMontoInput[],
+): Big {
+  return calcularFactoresPonderadosPorMonto(inversionistas).reduce(
+    (total, factor) => total.plus(factor),
+    new Big(0),
+  );
+}
+
 /**
  * Calcula la distribución del interés e IVA del pago por inversionista.
  *
@@ -38,29 +73,24 @@ export function calcularSplitInteresPci(args: {
 }): InvSplitRow[] {
   const { inversionistas, pagoAbonoInteres, pagoAbonoIva, factorInteresPorInv } = args;
 
-  // Suma de todos los monto_aportado (denominador del porcentajeGeneral)
-  const sumMontosAportados = inversionistas.reduce(
-    (acc, inv) => acc.plus(new Big(inv.monto_aportado ?? 0)),
-    new Big(0)
+  const factoresParticipacion = inversionistas.map((inv) => {
+    const isCube =
+      inv.nombre.trim().toLowerCase() === "cube investments s.a.".toLowerCase();
+    return isCube
+      ? new Big(inv.porcentaje_cash_in ?? 0).div(100)
+      : new Big(inv.porcentaje_participacion_inversionista ?? 0).div(100);
+  });
+  const ownerships = calcularPropiedadesPorMonto(
+    inversionistas.map((inv) => {
+      return {
+        montoAportado: new Big(inv.monto_aportado ?? 0),
+      };
+    }),
   );
 
   const result: InvSplitRow[] = [];
 
-  for (const inv of inversionistas) {
-    const isCube =
-      inv.nombre.trim().toLowerCase() === "cube investments s.a.".toLowerCase();
-
-    const montoBase = new Big(inv.monto_aportado ?? 0);
-
-    // Porcentaje general: base_calculo / SUM(monto_aportado)
-    const porcentajeGeneral = sumMontosAportados.gt(0)
-      ? montoBase.div(sumMontosAportados)
-      : new Big(0);
-
-    // Porcentaje de participación según tipo (dividir entre 100 porque se guarda como %)
-    const porcentajeParticipacion = isCube
-      ? new Big(inv.porcentaje_cash_in ?? 0).div(100)
-      : new Big(inv.porcentaje_participacion_inversionista ?? 0).div(100);
+  for (const [index, inv] of inversionistas.entries()) {
 
     let abonoInteresInv: Big;
     let abonoIvaInv: Big;
@@ -70,8 +100,10 @@ export function calcularSplitInteresPci(args: {
       abonoInteresInv = pagoAbonoInteres.times(f);
       abonoIvaInv = pagoAbonoIva.times(f);
     } else {
-      abonoInteresInv = pagoAbonoInteres.times(porcentajeParticipacion).times(porcentajeGeneral);
-      abonoIvaInv = pagoAbonoIva.times(porcentajeParticipacion).times(porcentajeGeneral);
+      const factor = factoresParticipacion[index] ?? new Big(0);
+      const ownership = ownerships[index] ?? new Big(0);
+      abonoInteresInv = pagoAbonoInteres.times(factor).times(ownership);
+      abonoIvaInv = pagoAbonoIva.times(factor).times(ownership);
     }
 
     result.push({
@@ -83,4 +115,3 @@ export function calcularSplitInteresPci(args: {
 
   return result;
 }
-

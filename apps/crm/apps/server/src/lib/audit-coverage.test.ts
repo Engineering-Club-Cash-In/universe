@@ -27,9 +27,11 @@ const INVENTARIO: Record<
 > = {
 	"routers/crm.ts": { escrituras: 18, anotaciones: 18, estado: "listo" },
 	"routers/vehicles.ts": { escrituras: 10, anotaciones: 10, estado: "listo" },
+	// Anota una vez más de lo que escribe: el rollback descarta las anotaciones
+	// de la transacción revertida y deja en su lugar el intento fallido.
 	"controllers/migrate-creditos.ts": {
 		escrituras: 8,
-		anotaciones: 8,
+		anotaciones: 9,
 		estado: "listo",
 	},
 	"controllers/public-lead.ts": {

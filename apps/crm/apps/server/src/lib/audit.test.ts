@@ -5,9 +5,10 @@ import {
 	auditSourceForPath,
 	buildAuditRows,
 	chunk,
-	resolveOperation,
+	decideBodyCapture,
 	prepareAuditInput,
 	redactAuditInput,
+	resolveOperation,
 } from "./audit";
 
 function contextWith(overrides: Partial<AuditContext> = {}): AuditContext {
@@ -332,5 +333,43 @@ describe("auditFallbackForPath", () => {
 	test("stays quiet on routes that write nothing", () => {
 		expect(auditFallbackForPath("/info/send-otp")).toBeNull();
 		expect(auditFallbackForPath("/api/upload-vehicle-video")).toBeNull();
+	});
+});
+
+describe("decideBodyCapture", () => {
+	test("no clona lo que no es JSON", () => {
+		// Clonar tee-ea el stream: en una subida de video la rama que nadie lee
+		// se llena en memoria mientras el handler consume el archivo.
+		expect(
+			decideBodyCapture("multipart/form-data; boundary=x", "90000000"),
+		).toEqual({ leer: false, enLugarDe: null });
+	});
+
+	test("no materializa dos copias de un import grande", () => {
+		// /api/migrate/creditos manda arrays de miles de elementos: parsear una
+		// copia antes de que el handler parsee la suya duplica el pico.
+		expect(decideBodyCapture("application/json", "5000000")).toEqual({
+			leer: false,
+			enLugarDe: { _bodyOmitido: { bytes: "5000000" } },
+		});
+	});
+
+	test("lee los cuerpos chicos, que son casi todos", () => {
+		expect(decideBodyCapture("application/json; charset=utf-8", "820")).toEqual(
+			{
+				leer: true,
+			},
+		);
+	});
+
+	test("deja constancia cuando no puede saber el tamaño", () => {
+		expect(decideBodyCapture("application/json", null)).toEqual({
+			leer: false,
+			enLugarDe: { _bodySinLongitud: true },
+		});
+		expect(decideBodyCapture("application/json", "no-es-un-numero")).toEqual({
+			leer: false,
+			enLugarDe: { _bodyOmitido: { bytes: "no-es-un-numero" } },
+		});
 	});
 });

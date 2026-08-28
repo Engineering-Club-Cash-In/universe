@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { ORPCError, os } from "@orpc/server";
-import type { Context as HonoContext, MiddlewareHandler } from "hono";
 import { eq } from "drizzle-orm";
+import type { Context as HonoContext, MiddlewareHandler } from "hono";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { crmEntityAudit } from "../db/schema/crm-entity-audit";
@@ -483,16 +483,57 @@ export function auditRequest(): MiddlewareHandler {
 }
 
 /**
+ * Tope de body que se guarda. Los imports mandan arrays de miles de elementos
+ * (`/api/migrate/creditos`, `/api/load-cars`): parsear una copia clonada antes
+ * de que el handler parsee la suya duplica el pico de memoria, y el recorte de
+ * `prepareAuditInput` recién actúa al final, cuando el daño ya está hecho.
+ */
+const MAX_BODY_BYTES = 64 * 1024;
+
+/**
  * El body ya viene consumido por el handler; leerlo acá no puede romperlo.
  *
- * Se mira el content-type ANTES de clonar: clonar tee-ea el stream, así que en
- * una subida multipart grande (`/api/upload-vehicle-video`) la rama clonada que
- * nadie lee se va llenando en memoria sin contrapresión mientras el handler
- * consume el archivo.
+ * Se decide por las cabeceras ANTES de clonar: clonar tee-ea el stream, así
+ * que la rama que nadie lee se va llenando en memoria sin contrapresión
+ * mientras el handler consume la suya. Con una subida multipart o un import
+ * grande eso es un pico de memoria evitable, y ninguno de los dos aporta nada
+ * que valga la pena guardar entero.
  */
+export type BodyCapture = { leer: true } | { leer: false; enLugarDe: unknown };
+
+/**
+ * Decide, solo con las cabeceras, si vale la pena clonar y parsear el body.
+ * Separada del middleware para poder probarla: es la parte con criterio.
+ */
+export function decideBodyCapture(
+	contentType: string | null,
+	contentLength: string | null,
+	maxBytes = MAX_BODY_BYTES,
+): BodyCapture {
+	if (!(contentType ?? "").includes("application/json")) {
+		return { leer: false, enLugarDe: null };
+	}
+	if (contentLength === null) {
+		return { leer: false, enLugarDe: { _bodySinLongitud: true } };
+	}
+	const bytes = Number(contentLength);
+	if (!Number.isFinite(bytes) || bytes > maxBytes) {
+		return {
+			leer: false,
+			enLugarDe: { _bodyOmitido: { bytes: contentLength } },
+		};
+	}
+	return { leer: true };
+}
+
 async function readRequestBody(c: HonoContext): Promise<unknown> {
-	const type = c.req.raw.headers.get("content-type") ?? "";
-	if (!type.includes("application/json")) return null;
+	const headers = c.req.raw.headers;
+	const decision = decideBodyCapture(
+		headers.get("content-type"),
+		headers.get("content-length"),
+	);
+	if (!decision.leer) return decision.enLugarDe;
+
 	try {
 		return await c.req.raw.clone().json();
 	} catch {

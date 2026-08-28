@@ -548,6 +548,22 @@ export async function migrarCreditos(
 
 		console.error(`[Migrate] ROLLBACK ejecutado: ${errorMessage}`);
 		auditRollback(marcaAuditoria);
+		// Descartar las anotaciones revertidas deja el contexto vacío, y como la
+		// ruta responde 200 el flush no escribiría nada: la migración fallida
+		// desaparecería de la bitácora. Queda el intento, que es lo que se
+		// consulta cuando alguien pregunta qué pasó con ese import.
+		auditRecord({
+			entity: "opportunity",
+			id: null,
+			action: "create",
+			ok: false,
+			errorCode: "ROLLBACK",
+			data: {
+				creditos: creditos.length,
+				procesadosAntesDelFallo: resultado.totalExitosos,
+				error: errorMessage,
+			},
+		});
 
 		// Retornar resultado con información del rollback
 		return {

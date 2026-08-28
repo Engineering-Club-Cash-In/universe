@@ -38,6 +38,8 @@ export async function reattachAjusteFechaIdealReconstruido(
     pago_id: number;
     cuota_id: number | null;
     otros: string | null;
+    monto_boleta?: string | null;
+    monto_boleta_cuota?: string | null;
   }[],
   executor: Executor = db,
 ): Promise<void> {
@@ -65,10 +67,25 @@ export async function reattachAjusteFechaIdealReconstruido(
     throw new Error(`No se pudo reenlazar el ajuste ${ajuste.id}`);
   }
 
+  const montoTotal = new Big(ajuste.monto_total);
   const [pagoActualizado] = await executor
     .update(pagos_credito)
     .set({
-      otros: new Big(pagoCuota1.otros || 0).plus(ajuste.monto_total).toString(),
+      otros: new Big(pagoCuota1.otros || 0).plus(montoTotal).toString(),
+      ...(pagoCuota1.monto_boleta != null
+        ? {
+            monto_boleta: new Big(pagoCuota1.monto_boleta)
+              .plus(montoTotal)
+              .toString(),
+          }
+        : {}),
+      ...(pagoCuota1.monto_boleta_cuota != null
+        ? {
+            monto_boleta_cuota: new Big(pagoCuota1.monto_boleta_cuota)
+              .plus(montoTotal)
+              .toString(),
+          }
+        : {}),
     })
     .where(eq(pagos_credito.pago_id, pagoCuota1.pago_id))
     .returning({ pago_id: pagos_credito.pago_id });
@@ -144,7 +161,55 @@ export async function resetAjusteFechaIdealPorCredito(
 export type AjusteReimportAction =
   | { kind: "ninguna" }
   | { kind: "reenganchar"; ajusteId: number; montoTotal: string }
+  | { kind: "ya_reenganchado"; montoTotal: string }
   | { kind: "reabrir" };
+
+export function debeRestaurarTotalesBoletaAjuste({
+  accion,
+  pagoCuota1Id,
+  pagosActualizados,
+}: {
+  accion: AjusteReimportAction;
+  pagoCuota1Id: number | null;
+  pagosActualizados: readonly number[];
+}): boolean {
+  return (
+    accion.kind === "ya_reenganchado" &&
+    pagoCuota1Id != null &&
+    pagosActualizados.includes(pagoCuota1Id)
+  );
+}
+
+/**
+ * Elige una sola fila por cuota de forma determinista. Para cuota 1 siempre
+ * conserva el pago que ya respalda el ajuste; moverlo a otra fila copiaría el
+ * monto sin retirarlo de la original. Sin vínculo, usa el pago_id más reciente.
+ */
+export function seleccionarPagosCanonicosPorCuota<
+  T extends { cuota_id: number; numero_cuota: number; pago_id: number | null },
+>(rows: readonly T[], pagoAjusteId: number | null | undefined): T[] {
+  const porCuota = new Map<number, T>();
+  for (const row of rows) {
+    const actual = porCuota.get(row.cuota_id);
+    if (!actual) {
+      porCuota.set(row.cuota_id, row);
+      continue;
+    }
+    const rowEsVinculado =
+      row.numero_cuota === 1 && row.pago_id === pagoAjusteId;
+    const actualEsVinculado =
+      actual.numero_cuota === 1 && actual.pago_id === pagoAjusteId;
+    if (
+      rowEsVinculado ||
+      (!actualEsVinculado && (row.pago_id ?? -1) > (actual.pago_id ?? -1))
+    ) {
+      porCuota.set(row.cuota_id, row);
+    }
+  }
+  return [...porCuota.values()].sort(
+    (a, b) => a.numero_cuota - b.numero_cuota,
+  );
+}
 
 /**
  * Qué hacer con el ajuste cuando una reconstrucción de historial (Excel/SIFCO
@@ -184,7 +249,7 @@ export function decidirAjusteAlReconstruirCuota1({
       pagoCuota1Id != null &&
       ajustePrevio.pagoId === pagoCuota1Id
     ) {
-      return { kind: "ninguna" };
+      return { kind: "ya_reenganchado", montoTotal: ajustePrevio.montoTotal };
     }
     return {
       kind: "reenganchar",

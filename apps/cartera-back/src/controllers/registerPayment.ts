@@ -31,6 +31,7 @@ import {
   crearEstampadorPagoConvenio,
   esDestinoSobrescribible,
   getAjusteFechaIdealADeducir,
+  puedeEditarOtrosConAjuste,
   getCuotaIdForPaymentInsert,
   getCoveredOpenInstallment,
   getCoveredInstallmentNumbers,
@@ -4201,6 +4202,27 @@ export async function editarPago(pago_id: number, campos: {
 
     if (!pago) {
       return { success: false, message: `Pago ${pago_id} no encontrado` };
+    }
+
+    if (campos.otros !== undefined) {
+      const [ajusteVinculado] = await db
+        .select({ id: ajuste_fecha_ideal_pago.id })
+        .from(ajuste_fecha_ideal_pago)
+        .where(eq(ajuste_fecha_ideal_pago.pago_id, pago_id))
+        .limit(1);
+      if (
+        !puedeEditarOtrosConAjuste({
+          otrosActual: pago.otros ?? 0,
+          otrosSolicitado: campos.otros,
+          tieneAjusteVinculado: ajusteVinculado !== undefined,
+        })
+      ) {
+        return {
+          success: false,
+          message:
+            "No se puede editar Otros porque este pago respalda un ajuste por fecha ideal de pago",
+        };
+      }
     }
 
     // 2. Construir objeto de update solo con los campos enviados

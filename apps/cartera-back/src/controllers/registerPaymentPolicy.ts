@@ -1052,6 +1052,23 @@ export const aplicarAjusteFechaIdealAPago = <T extends PagoConRubrosDeAjuste>(
 });
 
 /**
+ * `otros` es indivisible en la fila persistida. Si esa fila respalda un
+ * ajuste cobrado, editarlo rompería la evidencia financiera y el pago_id del
+ * marcador. En ese caso solo se acepta conservar exactamente el valor actual.
+ */
+export const puedeEditarOtrosConAjuste = ({
+  otrosActual,
+  otrosSolicitado,
+  tieneAjusteVinculado,
+}: {
+  otrosActual: BigInput;
+  otrosSolicitado: BigInput;
+  tieneAjusteVinculado: boolean;
+}): boolean =>
+  !tieneAjusteVinculado ||
+  new Big(otrosActual || 0).eq(new Big(otrosSolicitado || 0));
+
+/**
  * La cuota 1 no puede cerrar (pagado=true) mientras exista un ajuste por
  * fecha ideal de pago pendiente que ESTE pago no cobró: si cerrara, deja de
  * aparecer en cuotasPendientes y getAjusteFechaIdealADeducir nunca vuelve a

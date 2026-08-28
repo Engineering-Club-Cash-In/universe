@@ -6849,16 +6849,18 @@ export const crmRouter = {
 			// diaPagoMensual solo puede ser 15, 30, o uno de los días recomendados
 			// por el análisis de esta oportunidad Y del lead actual (si la oportunidad
 			// fue reasignada a otro lead, el análisis anterior ya no aplica).
-			if (input.diaPagoMensual !== 15 && input.diaPagoMensual !== 30) {
-				const isRecommended = suggestedDays?.some(
-					(d) => d.dia === input.diaPagoMensual,
-				);
-				if (!isRecommended) {
-					throw new ORPCError("BAD_REQUEST", {
-						message:
-							"El día de pago mensual debe ser 15, 30, o uno de los días recomendados por el análisis de capacidad de pago",
-					});
-				}
+			if (
+				!esSeleccionDiaPagoValida({
+					diaPagoMensual: input.diaPagoMensual,
+					elegidoDesdeRecomendacionIA:
+						input.elegidoDesdeRecomendacionIA,
+					suggestedDays,
+				})
+			) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"El día de pago mensual debe ser 15, 30, o uno de los días recomendados por el análisis de capacidad de pago",
+				});
 			}
 
 			// Parse existing investors from DB

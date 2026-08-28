@@ -3,6 +3,7 @@ import * as registerPaymentPolicy from "./registerPaymentPolicy";
 import {
   aplicarAjusteFechaIdealAPago,
   getAjusteFechaIdealADeducir,
+  puedeEditarOtrosConAjuste,
   recomputeCreditAfterCapital,
   shouldBlockCuota1ClosingForPendingAjuste,
   shouldCloseCuota1ViaAjusteSettlement,
@@ -887,6 +888,35 @@ describe("aplicarAjusteFechaIdealAPago", () => {
         mora: "0",
         otros: pago.otros,
         pagoConvenio: "0",
+      }),
+    ).toBe(true);
+  });
+});
+
+describe("puedeEditarOtrosConAjuste", () => {
+  it("bloquea cambiar otros cuando el pago respalda un ajuste cobrado", () => {
+    expect(
+      puedeEditarOtrosConAjuste({
+        otrosActual: "70.00",
+        otrosSolicitado: "20.00",
+        tieneAjusteVinculado: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("permite conservar el mismo otros o editar pagos sin ajuste", () => {
+    expect(
+      puedeEditarOtrosConAjuste({
+        otrosActual: "70.00",
+        otrosSolicitado: "70",
+        tieneAjusteVinculado: true,
+      }),
+    ).toBe(true);
+    expect(
+      puedeEditarOtrosConAjuste({
+        otrosActual: "70.00",
+        otrosSolicitado: "20.00",
+        tieneAjusteVinculado: false,
       }),
     ).toBe(true);
   });

@@ -6,7 +6,11 @@ import { consultarEstadoCuentaPrestamo } from "../services/sifcoIntegrations";
 import { updateInstallments } from "./updateCredit";
 import { countPersistedRows } from "./persistenceEvidence";
 import { emitSifcoPaymentMigration } from "../utils/structuredLogger";
-import { decidirAjusteAlReconstruirCuota1 } from "./ajusteFechaIdealPago";
+import {
+  decidirAjusteAlReconstruirCuota1,
+  debeRestaurarTotalesBoletaAjuste,
+  seleccionarPagosCanonicosPorCuota,
+} from "./ajusteFechaIdealPago";
 
 interface AjustarCuotasConSIFCOParams {
   numero_credito_sifco: string;
@@ -403,13 +407,12 @@ export const marcarCuotasPagadasHastaNumero = async ({
     )
     .orderBy(asc(cuotas_credito.numero_cuota));
 
-  // Deduplicar: si una cuota tiene varios pagos, quedarse solo con el primero
-  const cuotasVistas = new Set<number>();
-  const cuotasConPagos = cuotasConPagosRaw.filter((row) => {
-    if (cuotasVistas.has(row.cuota_id)) return false;
-    cuotasVistas.add(row.cuota_id);
-    return true;
-  });
+  // Deduplicar de forma determinista. En cuota 1 se conserva el pago que ya
+  // respalda el ajuste para no copiar su monto a otra fila y duplicarlo.
+  const cuotasConPagos = seleccionarPagosCanonicosPorCuota(
+    cuotasConPagosRaw,
+    ajustePrevio?.pagoId,
+  );
 
   /* =====================================================
      4️⃣ CONSTANTES FINANCIERAS
@@ -607,6 +610,8 @@ export const marcarCuotasPagadasHastaNumero = async ({
             // otros es `text` en la DB, no numeric -- hay que castear ambos
             // lados para sumar, y castear el resultado de vuelta a texto.
             otros: sql`(COALESCE(${pagos_credito.otros}, '0')::numeric + ${accionAjuste.montoTotal}::numeric)::text`,
+            monto_boleta: sql`(COALESCE(${pagos_credito.monto_boleta}, '0')::numeric + ${accionAjuste.montoTotal}::numeric)::text`,
+            monto_boleta_cuota: sql`(COALESCE(${pagos_credito.monto_boleta_cuota}, '0')::numeric + ${accionAjuste.montoTotal}::numeric)::text`,
           })
           .where(eq(pagos_credito.pago_id, cuota1.pago_id));
         await tx
@@ -616,6 +621,27 @@ export const marcarCuotasPagadasHastaNumero = async ({
         console.log(
           `🧾 Ajuste #${accionAjuste.ajusteId} reenganchado a la cuota 1 reconstruida (pago_id=${cuota1.pago_id}) — ya se había cobrado antes de reimportar.`
         );
+      } else if (
+        accionAjuste.kind === "ya_reenganchado" &&
+        cuota1.pago_id != null &&
+        debeRestaurarTotalesBoletaAjuste({
+          accion: accionAjuste,
+          pagoCuota1Id: cuota1.pago_id,
+          pagosActualizados: pagosParaActualizar.map(({ pago_id }) => pago_id),
+        })
+      ) {
+        // El helper transaccional ya preservó `otros`, pero la actualización
+        // SIFCO de esta misma ejecución acaba de reescribir los totales de
+        // boleta con la cuota contractual. Se repone solo el ajuste en esos
+        // totales, sin volverlo a sumar en `otros`. Si la fila ya estaba pagada
+        // y SIFCO no la tocó, esto queda en no-op para conservar idempotencia.
+        await tx
+          .update(pagos_credito)
+          .set({
+            monto_boleta: sql`(COALESCE(${pagos_credito.monto_boleta}, '0')::numeric + ${accionAjuste.montoTotal}::numeric)::text`,
+            monto_boleta_cuota: sql`(COALESCE(${pagos_credito.monto_boleta_cuota}, '0')::numeric + ${accionAjuste.montoTotal}::numeric)::text`,
+          })
+          .where(eq(pagos_credito.pago_id, cuota1.pago_id));
       } else if (accionAjuste.kind === "reabrir") {
         await tx
           .update(cuotas_credito)

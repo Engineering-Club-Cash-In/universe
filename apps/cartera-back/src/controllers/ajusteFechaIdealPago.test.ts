@@ -5,8 +5,10 @@ const previousDatabaseUrl = process.env.SUPABASE_DB_URL;
 process.env.SUPABASE_DB_URL = "postgresql://127.0.0.1:1/synthetic";
 const {
   decidirAjusteAlReconstruirCuota1,
+  debeRestaurarTotalesBoletaAjuste,
   prepararAjusteFechaIdealParaReconstruccion,
   reattachAjusteFechaIdealReconstruido,
+  seleccionarPagosCanonicosPorCuota,
 } = await import("./ajusteFechaIdealPago");
 if (previousDatabaseUrl === undefined) process.env.SUPABASE_DB_URL = undefined;
 else process.env.SUPABASE_DB_URL = previousDatabaseUrl;
@@ -69,7 +71,54 @@ describe("decidirAjusteAlReconstruirCuota1", () => {
         },
         pagoCuota1Id: 700,
       }),
-    ).toEqual({ kind: "ninguna" });
+    ).toEqual({ kind: "ya_reenganchado", montoTotal: "12.34" });
+  });
+});
+
+describe("debeRestaurarTotalesBoletaAjuste", () => {
+  const accion = { kind: "ya_reenganchado", montoTotal: "50" } as const;
+
+  it("restaura solo si SIFCO reescribió ese pago en esta ejecución", () => {
+    expect(
+      debeRestaurarTotalesBoletaAjuste({
+        accion,
+        pagoCuota1Id: 101,
+        pagosActualizados: [101],
+      }),
+    ).toBe(true);
+  });
+
+  it("no duplica totales al reejecutar sobre una fila pagada no modificada", () => {
+    expect(
+      debeRestaurarTotalesBoletaAjuste({
+        accion,
+        pagoCuota1Id: 101,
+        pagosActualizados: [],
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("seleccionarPagosCanonicosPorCuota", () => {
+  const rows = [
+    { cuota_id: 51, numero_cuota: 1, pago_id: 900 },
+    { cuota_id: 51, numero_cuota: 1, pago_id: 700 },
+    { cuota_id: 52, numero_cuota: 2, pago_id: 800 },
+    { cuota_id: 52, numero_cuota: 2, pago_id: 850 },
+  ];
+
+  it("prefiere en cuota 1 el pago vinculado aunque no sea el de mayor id", () => {
+    expect(seleccionarPagosCanonicosPorCuota(rows, 700)).toEqual([
+      rows[1],
+      rows[3],
+    ]);
+  });
+
+  it("sin vínculo disponible usa el pago más reciente por cuota", () => {
+    expect(seleccionarPagosCanonicosPorCuota(rows, null)).toEqual([
+      rows[0],
+      rows[3],
+    ]);
   });
 });
 
@@ -112,13 +161,26 @@ describe("ajuste por fecha ideal durante reconstruccion", () => {
       ],
       [
         { pago_id: 100, cuota_id: 50, otros: "0" },
-        { pago_id: 101, cuota_id: 51, otros },
+        {
+          pago_id: 101,
+          cuota_id: 51,
+          otros,
+          monto_boleta: "300.00",
+          monto_boleta_cuota: "300.00",
+        },
       ],
       executor,
     );
 
       expect(ajusteId).toEqual({ id: 7, monto_total: "50.00" });
-      expect(updates).toEqual([{ pago_id: 101 }, { otros: "50" }]);
+      expect(updates).toEqual([
+        { pago_id: 101 },
+        {
+          otros: "50",
+          monto_boleta: "350",
+          monto_boleta_cuota: "350",
+        },
+      ]);
     },
   );
 
@@ -138,11 +200,26 @@ describe("ajuste por fecha ideal durante reconstruccion", () => {
     await reattachAjusteFechaIdealReconstruido(
       { id: 7, monto_total: "50.00" },
       [{ cuota_id: 51, numero_cuota: 1 }],
-      [{ pago_id: 101, cuota_id: 51, otros: "20.00" }],
+      [
+        {
+          pago_id: 101,
+          cuota_id: 51,
+          otros: "20.00",
+          monto_boleta: "320.00",
+          monto_boleta_cuota: "320.00",
+        },
+      ],
       executor,
     );
 
-    expect(updates).toEqual([{ pago_id: 101 }, { otros: "70" }]);
+    expect(updates).toEqual([
+      { pago_id: 101 },
+      {
+        otros: "70",
+        monto_boleta: "370",
+        monto_boleta_cuota: "370",
+      },
+    ]);
   });
 
   it("no vuelve a sumar un ajuste que ya fue reenlazado", async () => {

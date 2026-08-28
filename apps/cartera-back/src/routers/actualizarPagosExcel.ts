@@ -31,12 +31,13 @@
  * está OK, se aplican todos los updates en UNA sola transacción.
  */
 import { Elysia, t } from "elysia";
-import { and, asc, eq, inArray, ne } from "drizzle-orm";
+import { and, asc, eq, ne, sql } from "drizzle-orm";
 import Big from "big.js";
 import { db } from "../database";
 import { creditos, cuotas_credito, pagos_credito } from "../database/db";
 import { authMiddleware } from "./midleware";
 import { debeProtegerCuota, pagoTieneAplicacion } from "./actualizarPagosExcelPolicy";
+import { tieneMontosFacturables } from "../controllers/estadoFacturacionPago";
 import {
   descargarCarteraDeR2,
   leerPagosCarteraPorVencimiento,
@@ -493,43 +494,58 @@ export const actualizarPagosExcelRouter = new Elysia()
       }
 
       // 7️⃣ Escribir TODO en una sola transacción (atómico).
-      const CAMPOS_FACTURABLES = [
-        "abono_interes",
-        "abono_iva_12",
-        "abono_seguro",
-        "abono_gps",
-        "membresias_pago",
-        "mora",
-        "otros",
-      ];
       try {
         await db.transaction(async (tx) => {
           for (const { pago_id, datos } of updatesGlobal) {
+            // 🧾 (a) Re-abrir SOLO si algún monto facturable realmente CAMBIA
+            //    (construirUpdatesCuota siempre manda todos los campos, así que
+            //    "viene en datos" no significa "cambió" — sin esta comparación,
+            //    cada sync degradaba a PARCIAL todos los OK aunque nada
+            //    cambiara). Va ANTES del update principal para comparar contra
+            //    lo almacenado. `otros` es text sucio: se castea tolerante.
+            //    (Codex P1 del #1493)
+            const d = datos as Record<string, string>;
+            await tx.execute(sql`
+              UPDATE cartera.pagos_credito SET
+                factura_status = 'PARCIAL',
+                factura_error = ${JSON.stringify([
+                  {
+                    rubro: "SYNC_EXCEL",
+                    error:
+                      "Montos facturables reescritos por /actualizar-pagos-excel: los DTEs emitidos pueden no cuadrar con el pago — revisar.",
+                  },
+                ])},
+                factura_at = now()
+              WHERE pago_id = ${pago_id}
+                AND factura_status IN ('OK', 'PARCIAL')
+                AND (
+                  abono_interes IS DISTINCT FROM ${d.abono_interes}::numeric
+                  OR abono_iva_12 IS DISTINCT FROM ${d.abono_iva_12}::numeric
+                  OR abono_seguro IS DISTINCT FROM ${d.abono_seguro}::numeric
+                  OR abono_gps IS DISTINCT FROM ${d.abono_gps}::numeric
+                  OR membresias_pago IS DISTINCT FROM ${d.membresias_pago}::numeric
+                  OR mora IS DISTINCT FROM ${d.mora}::numeric
+                  OR COALESCE(substring(otros FROM '^-?[0-9]+\\.?[0-9]*')::numeric, 0)
+                     IS DISTINCT FROM ${d.otros}::numeric
+                )
+            `);
+
             await tx.update(pagos_credito).set(datos).where(eq(pagos_credito.pago_id, pago_id));
 
-            // 🧾 Si el sync reescribió montos facturables de un pago que ya se
-            //    facturó (OK/PARCIAL), sus DTEs emitidos pueden ya no cuadrar
-            //    con el pago: se re-abre como PARCIAL con nota para que conta
-            //    lo redescubra por la bandeja (la regla (d) del diff bloquea el
-            //    re-facturado automático en ese estado). (Codex P2 del #1493)
-            if (CAMPOS_FACTURABLES.some((k) => k in datos)) {
+            // 🧾 (b) Un NO_APLICA que con los montos nuevos pasa a tener algo
+            //    facturable ahora DEBE su DTE: sube a PENDIENTE. (Codex P2)
+            if (tieneMontosFacturables(d)) {
               await tx
                 .update(pagos_credito)
                 .set({
-                  factura_status: "PARCIAL",
-                  factura_error: JSON.stringify([
-                    {
-                      rubro: "SYNC_EXCEL",
-                      error:
-                        "Montos facturables reescritos por /actualizar-pagos-excel: los DTEs emitidos pueden no cuadrar con el pago — revisar.",
-                    },
-                  ]),
-                  factura_at: new Date(),
+                  factura_status: "PENDIENTE",
+                  factura_error: null,
+                  factura_at: null,
                 })
                 .where(
                   and(
                     eq(pagos_credito.pago_id, pago_id),
-                    inArray(pagos_credito.factura_status, ["OK", "PARCIAL"])
+                    eq(pagos_credito.factura_status, "NO_APLICA")
                   )
                 );
             }

@@ -1,83 +1,16 @@
 /**
- * CB-127 · Catálogos y helpers de formato para la bitácora y las acciones
- * de supervisor de Págalo. `fechaHora`/`partesGT` se reexportan de
- * historial/formato.ts (fijadas a zona GT) — no se redefinen acá.
+ * CB-127 · Catálogos y helpers de formato para la bitácora y las acciones de
+ * supervisor sobre grupos Págalo. Mismo patrón que
+ * components/cobros/historial/formato.ts (de donde se reexportan
+ * fechaHora/partesGT, fijadas a la zona de Guatemala — no redefinir acá).
  */
-export {
-	fechaHora,
-	partesGT,
-	soloFecha,
-} from "@/components/cobros/historial/formato";
 
-export const EVENTO_LABEL: Record<string, string> = {
-	GROUP_CREATED: "Grupo creado",
-	LINK_ACTIVE: "Link activo",
-	LINK_PAID: "Link pagado",
-	// Págalo dio por vencido/cancelado el link del otro lado — no es una
-	// expiración por política nuestra (D-51: los links no expiran acá).
-	LINK_TERMINAL: "Link cerrado por Págalo",
-	REPLACED_LINK_PAID: "Se pagó un link reemplazado",
-	GROUP_READY: "Grupo listo para aplicar",
-	GROUP_PARTIALLY_PAID: "Grupo con pago parcial",
-	GROUP_COMPLETED: "Grupo completado",
-	GROUP_REVIEW_REQUIRED: "Grupo enviado a revisión",
-	GROUP_REPLACED: "Grupo reemplazado",
-	GROUP_ABORTED: "Grupo cancelado",
-	GROUP_ABORTED_WITH_PAYMENT: "Grupo cancelado con pago",
-	GROUP_INVALIDATED_BY_SUPERVISOR: "Invalidado por supervisor",
-	GROUP_REGENERATED: "Regenerado por supervisor",
-	DISPATCH_RETRY_FORCED: "Reintento de aplicación forzado",
-	LINK_CREATE_FAILED: "Falló la creación del link",
-	POLL_RETRY_EXHAUSTED: "Reintentos de verificación agotados",
-	DISPATCH_RETRY_EXHAUSTED: "Reintentos de aplicación agotados",
-};
+export { fechaHora, partesGT } from "@/components/cobros/historial/formato";
 
-export function etiquetaEvento(eventType: string): string {
-	return EVENTO_LABEL[eventType] ?? eventType;
-}
-
-export const FUENTE_LABEL: Record<string, string> = {
-	ASESOR: "Asesor",
-	BOT: "Bot de WhatsApp",
-	SUPERVISOR: "Supervisor",
-	PAGALO: "Págalo",
-	PAGALO_POLLER: "Sincronización",
-	PAGALO_DISPATCHER: "Aplicación en cartera",
-};
-
-export function etiquetaFuente(source: string): string {
-	return FUENTE_LABEL[source] ?? source;
-}
-
-/**
- * `lastDispatchError` guarda uno de estos códigos cuando el grupo llega a
- * REVIEW_REQUIRED vía dispatch (pagalo-import-client.ts / pagalo-dispatch.ts)
- * — o un mensaje libre en otros casos de fallo transitorio, que se muestra
- * tal cual si no matchea ningún código conocido.
- */
-export const MOTIVO_REVISION_LABEL: Record<string, string> = {
-	PAGALO_PAYLOAD_HASH_CONFLICT:
-		"El comando cambió respecto a un intento previo con el mismo pago",
-	PAGALO_LIVE_DEBT_REVIEW:
-		"La deuda viva del crédito no coincide con lo esperado",
-	PAGALO_LIVE_CREDIT_IDENTITY_REVIEW:
-		"La identidad del crédito no coincide con lo esperado",
-	PAGALO_TRANSACTION_ALREADY_IMPORTED:
-		"Esta transacción ya fue importada antes",
-	PAGALO_INVALID_COMMAND:
-		"El comando de aplicación no pasó validación (revisar con backend)",
-	PAGALO_REVIEW_REQUIRED_UNKNOWN_REASON:
-		"Cartera pidió revisión sin especificar motivo",
-};
-
-export function etiquetaMotivoRevision(codigo: string | null): string | null {
-	if (!codigo) return null;
-	return MOTIVO_REVISION_LABEL[codigo] ?? codigo;
-}
-
-export type EstadoGrupoInfo = { label: string; className: string };
-
-export const ESTADO_GRUPO_INFO: Record<string, EstadoGrupoInfo> = {
+export const ESTADO_GRUPO_INFO: Record<
+	string,
+	{ label: string; className: string }
+> = {
 	DRAFT: { label: "Borrador", className: "bg-muted text-muted-foreground" },
 	LINKS_PENDING: {
 		label: "Creando links",
@@ -114,7 +47,7 @@ export const ESTADO_GRUPO_INFO: Record<string, EstadoGrupoInfo> = {
 	},
 };
 
-export function estadoGrupoInfo(status: string): EstadoGrupoInfo {
+export function getEstadoGrupoInfo(status: string) {
 	return (
 		ESTADO_GRUPO_INFO[status] ?? {
 			label: status,
@@ -123,26 +56,77 @@ export function estadoGrupoInfo(status: string): EstadoGrupoInfo {
 	);
 }
 
-/** Umbral puramente visual (D-19) — no dispara ninguna acción automática. */
-const ANTIGUEDAD_ALERTA_DIAS = 7;
-
-export type AntiguedadLink = {
-	dias: number;
-	etiqueta: string;
-	alerta: boolean;
+export const EVENTO_LABEL: Record<string, string> = {
+	GROUP_CREATED: "Grupo creado",
+	LINK_ACTIVE: "Link activo",
+	LINK_CREATE_FAILED: "Falló creación de link",
+	LINK_PAID: "Link pagado",
+	LINK_TERMINAL: "Link cerrado por Págalo",
+	REPLACED_LINK_PAID: "Se pagó un link reemplazado",
+	GROUP_READY: "Listo para aplicar",
+	GROUP_PARTIALLY_PAID: "Pago parcial",
+	GROUP_COMPLETED: "Aplicado en cartera",
+	GROUP_REVIEW_REQUIRED: "Requiere revisión",
+	GROUP_REPLACED: "Grupo reemplazado",
+	GROUP_ABORTED: "Emisión abortada",
+	GROUP_ABORTED_WITH_PAYMENT: "Emisión abortada con pago",
+	GROUP_INVALIDATED_BY_SUPERVISOR: "Invalidado por supervisor",
+	GROUP_REGENERATED: "Regenerado por supervisor",
+	LINK_INVALIDATED_BY_SUPERVISOR: "Link invalidado por supervisor",
+	LINK_REGENERATED_BY_SUPERVISOR: "Link regenerado por supervisor",
+	DISPATCH_RETRY_FORCED: "Reintento forzado por supervisor",
+	POLL_RETRY_EXHAUSTED: "Reintentos de sincronización agotados",
+	DISPATCH_RETRY_EXHAUSTED: "Reintentos de aplicación agotados",
 };
 
-export function antiguedadLink(
-	desde: string | Date | null,
-): AntiguedadLink | null {
-	if (!desde) return null;
-	const dias = Math.floor(
-		(Date.now() - new Date(desde).getTime()) / (24 * 60 * 60 * 1000),
-	);
-	if (dias < 0) return null;
+export function etiquetaEvento(eventType: string): string {
+	return EVENTO_LABEL[eventType] ?? eventType;
+}
+
+export const FUENTE_LABEL: Record<string, string> = {
+	ASESOR: "Asesor",
+	BOT: "Bot WhatsApp",
+	PAGALO: "Págalo",
+	PAGALO_POLLER: "Sincronización",
+	PAGALO_DISPATCHER: "Aplicación en cartera",
+	SUPERVISOR: "Supervisor",
+};
+
+export function etiquetaFuente(source: string): string {
+	return FUENTE_LABEL[source] ?? source;
+}
+
+export const MOTIVO_REVISION_LABEL: Record<string, string> = {
+	PAGALO_PAYLOAD_HASH_CONFLICT:
+		"Conflicto de contenido con un reintento previo",
+	PAGALO_LIVE_DEBT_REVIEW: "La deuda viva no coincide con el snapshot",
+	PAGALO_LIVE_CREDIT_IDENTITY_REVIEW:
+		"El crédito ya no coincide (SIFCO cambió)",
+	PAGALO_TRANSACTION_ALREADY_IMPORTED: "La transacción ya fue importada",
+	PAGALO_INVALID_COMMAND: "Comando inválido para cartera",
+	PAGALO_REVIEW_REQUIRED_UNKNOWN_REASON: "Motivo de revisión no identificado",
+};
+
+export function etiquetaMotivo(codigo: string | null): string | null {
+	if (!codigo) return null;
+	return MOTIVO_REVISION_LABEL[codigo] ?? codigo;
+}
+
+/** Umbral puramente visual (sin efecto de negocio — D-19, docs/features/pagalo/DECISIONES.md). */
+const DIAS_ALERTA_ANTIGUEDAD = 7;
+
+export function antiguedadLink(desde: string | Date | null): {
+	dias: number | null;
+	etiqueta: string;
+	alerta: boolean;
+} {
+	if (!desde) return { dias: null, etiqueta: "—", alerta: false };
+	const ms = Date.now() - new Date(desde).getTime();
+	const dias = Math.floor(ms / 86_400_000);
+	if (dias <= 0) return { dias: 0, etiqueta: "hoy", alerta: false };
 	return {
 		dias,
-		etiqueta: dias === 0 ? "Hoy" : dias === 1 ? "1 día" : `${dias} días`,
-		alerta: dias >= ANTIGUEDAD_ALERTA_DIAS,
+		etiqueta: dias === 1 ? "1 día" : `${dias} días`,
+		alerta: dias >= DIAS_ALERTA_ANTIGUEDAD,
 	};
 }

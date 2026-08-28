@@ -31,6 +31,7 @@ import {
 	UserCircle,
 	UserCog,
 	Users,
+	Wallet,
 } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { logo } from "@/assets";
@@ -355,6 +356,14 @@ export default function Header() {
 											<Link to="/cobros/cierre" className="cursor-pointer">
 												<Moon className="mr-2 h-4 w-4" />
 												Cierre Diario
+											</Link>
+										</DropdownMenuItem>
+									)}
+									{PERMISSIONS.canAssignCobros(userRole) && (
+										<DropdownMenuItem asChild>
+											<Link to="/cobros/pagalo" className="cursor-pointer">
+												<Wallet className="mr-2 h-4 w-4" />
+												Supervisión Págalo
 											</Link>
 										</DropdownMenuItem>
 									)}
@@ -763,6 +772,12 @@ function MobileNav({
 											<Link to="/cobros/cierre" className={MOBILE_LINK_CLASS}>
 												<Moon />
 												Cierre Diario
+											</Link>
+										)}
+										{PERMISSIONS.canAssignCobros(userRole) && (
+											<Link to="/cobros/pagalo" className={MOBILE_LINK_CLASS}>
+												<Wallet />
+												Supervisión Págalo
 											</Link>
 										)}
 										{PERMISSIONS.canAssignCobros(userRole) && (

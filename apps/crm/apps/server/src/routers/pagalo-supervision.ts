@@ -1,229 +1,289 @@
 /**
- * CB-127 · Procedures oRPC de supervisión Págalo (invalidar/regenerar/
- * reintentar). Módulo aparte de cobros.ts (5000+ líneas) importando
- * `cobrosSupervisorProcedure` directo de `../lib/orpc` — mismo patrón que
- * `pagalo-grupo-activo.ts` para no engordar `cobrosAppRouter` y evitar
- * TS7056 al inferir su tipo en el web.
+ * CB-127 · Bandeja de supervisión Págalo (`/cobros/pagalo`): grupos en
+ * estado problemático de toda la cartera, no solo del caso actual.
+ *
+ * Módulo aparte, no en cobros.ts: mismo motivo que pagalo-grupo-activo.ts —
+ * cobrosAppRouter ya está en el límite donde TS7056 trunca el tipo inferido
+ * en el web (comentario en ese archivo). Las acciones de supervisor sobre
+ * un grupo/link individual (invalidar, regenerar, allocations) viven en
+ * pagalo-link-actions.ts — mismo motivo de PRs separados: esto es lo que
+ * consume la bandeja, aquello es lo que consume la Ficha 360.
  */
-import { ORPCError } from "@orpc/server";
-import { and, eq } from "drizzle-orm";
+
+import { and, count, desc, eq, exists, ilike, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { casosCobros } from "../db/schema/cobros";
+import { user } from "../db/schema/auth";
 import {
+	type PagaloPaymentGroupStatus,
+	type PagaloPaymentLinkStatus,
 	pagaloPaymentEvents,
 	pagaloPaymentGroups,
 	pagaloPaymentLinks,
 } from "../db/schema/pagalo-payments";
-import { reclamarYProcesarGrupo } from "../jobs/pagalo-dispatch";
-import { cobrosProcedure, cobrosSupervisorProcedure } from "../lib/orpc";
+import { cobrosSupervisorProcedure } from "../lib/orpc";
 import {
-	invalidarGrupo,
-	PagaloReemplazoInvalido,
-} from "../services/pagalo-group-lifecycle";
-import { regenerarGrupo } from "../services/pagalo-link-orchestrator";
-import { assertAccesoCasoCobro } from "./cobros";
-
-const motivoSchema = z.string().trim().min(10).max(500);
+	condicionesFiltro,
+	condicionGrupoProblematico,
+} from "../lib/pagalo-supervision-filtros";
+import { carteraBackClient } from "../services/cartera-back-client";
 
 export const pagaloSupervisionRouter = {
-	invalidarGrupoPagalo: cobrosSupervisorProcedure
-		.input(z.object({ groupId: z.string().uuid(), motivo: motivoSchema }))
-		.handler(async ({ input, context }) => {
-			try {
-				return await invalidarGrupo({
-					groupId: input.groupId,
-					actorUserId: context.userId,
-					source: "SUPERVISOR",
-					motivo: input.motivo,
-				});
-			} catch (error) {
-				if (error instanceof PagaloReemplazoInvalido) {
-					throw new ORPCError("CONFLICT", {
-						message:
-							"El grupo cambió: ya tiene un pago registrado o fue cerrado. Recargá el historial.",
-					});
-				}
-				throw error;
-			}
-		}),
-
-	regenerarGrupoPagalo: cobrosSupervisorProcedure
-		.input(z.object({ groupId: z.string().uuid(), motivo: motivoSchema }))
-		.handler(async ({ input, context }) => {
-			try {
-				return await regenerarGrupo({
-					groupId: input.groupId,
-					actorUserId: context.userId,
-					motivo: input.motivo,
-				});
-			} catch (error) {
-				if (error instanceof PagaloReemplazoInvalido) {
-					throw new ORPCError("CONFLICT", {
-						message:
-							"El grupo cambió: ya tiene un pago registrado o fue cerrado. Recargá el historial.",
-					});
-				}
-				throw error;
-			}
-		}),
-
-	// Solo APPLICATION_FAILED (y READY_TO_APPLY con nextDispatchAt vencido,
-	// que reclamarYProcesarGrupo ya reclama sin backoff porque ese predicado
-	// también matchea NULL/pasado) — REVIEW_REQUIRED no se reintenta: el
-	// dispatch es determinístico, si falló por un motivo de negocio (pago mal
-	// aplicado, crédito no encontrado) reintentarlo sin cambiar nada falla
-	// exactamente igual. Ahí el supervisor invalida o resuelve en cartera.
-	reintentarDispatchPagalo: cobrosSupervisorProcedure
-		.input(z.object({ groupId: z.string().uuid() }))
-		.handler(async ({ input, context }) => {
-			const [grupo] = await db
-				.select({
-					status: pagaloPaymentGroups.status,
-					dispatchAttemptCount: pagaloPaymentGroups.dispatchAttemptCount,
-				})
-				.from(pagaloPaymentGroups)
-				.where(eq(pagaloPaymentGroups.id, input.groupId))
-				.limit(1);
-			if (!grupo) {
-				throw new ORPCError("NOT_FOUND", {
-					message: "Grupo Págalo no encontrado.",
-				});
-			}
-			if (grupo.status === "REVIEW_REQUIRED") {
-				throw new ORPCError("BAD_REQUEST", {
-					message:
-						"Un grupo en revisión no se reintenta: el comando es determinístico. Invalidá el grupo o resolvé en cartera.",
-				});
-			}
-			if (grupo.status !== "APPLICATION_FAILED") {
-				throw new ORPCError("BAD_REQUEST", {
-					message: `El grupo está en ${grupo.status}: solo se reintenta un grupo en APPLICATION_FAILED.`,
-				});
-			}
-			// reclamarGrupo (pagalo-dispatch.ts) respeta nextDispatchAt — el
-			// backoff exponencial del intento fallido anterior podía dejar el
-			// reintento manual del supervisor sin efecto hasta que ese backoff
-			// venciera solo. Limpiarlo acá es la forma explícita de "ahora,
-			// no cuando toque".
-			//
-			// El UPDATE era incondicional (solo WHERE id) — si el dispatcher
-			// programado reclamaba este grupo (status→APPLYING, lease real)
-			// entre el SELECT de arriba y este UPDATE, pisaba ese lease a
-			// null. reclamarGrupo trata cualquier APPLYING con
-			// dispatchClaimedAt null como reclamable, así que un segundo
-			// worker (este mismo reclamarYProcesarGrupo de abajo, u otro)
-			// podía reclamarlo de nuevo mientras el primero seguía en vuelo
-			// — dos POSTs de importación concurrentes (hallazgo de code
-			// review). Condicionado a que siga APPLICATION_FAILED; si ya no
-			// lo está (alguien más lo reclamó o lo movió), no hay nada que
-			// reintentar acá.
-			const [limpiado] = await db
-				.update(pagaloPaymentGroups)
-				.set({ nextDispatchAt: null, dispatchClaimedAt: null })
-				.where(
-					and(
-						eq(pagaloPaymentGroups.id, input.groupId),
-						eq(pagaloPaymentGroups.status, "APPLICATION_FAILED"),
-					),
-				)
-				.returning({ id: pagaloPaymentGroups.id });
-			if (!limpiado) {
-				throw new ORPCError("CONFLICT", {
-					message:
-						"El grupo cambió justo antes del reintento — recargá el historial.",
-				});
-			}
-			await db.insert(pagaloPaymentEvents).values({
-				groupId: input.groupId,
-				eventType: "DISPATCH_RETRY_FORCED",
-				source: "SUPERVISOR",
-				actorUserId: context.userId,
-				fromStatus: "APPLICATION_FAILED",
-				payload: { intentosPrevios: grupo.dispatchAttemptCount },
-			});
-			const resultado = await reclamarYProcesarGrupo(input.groupId);
-			return { resultado };
-		}),
-
-	// allocationsSnapshot bajo demanda, no en getPagaloHistorial: hasta 24
-	// cuotas × 4 rubros por grupo, no tiene sentido cargarlo si el supervisor
-	// no expande el detalle "Links por cuota".
-	getPagaloAllocations: cobrosProcedure
+	// Bandeja de supervisión: grupos en estado problemático de toda la
+	// cartera, no solo del caso actual — por eso cobrosSupervisorProcedure,
+	// sin assertAccesoCasoCobro (el supervisor ve todo).
+	getPagaloSupervision: cobrosSupervisorProcedure
 		.input(
 			z.object({
-				groupId: z.string().uuid(),
-				/**
-				 * Caso DESDE EL QUE se mira. El historial de la ficha es del
-				 * crédito, así que lista grupos de casos anteriores —de otro
-				 * asesor incluso—; autorizar solo contra el caso viejo del grupo
-				 * rechazaba justo esos y el detalle quedaba mudo (Codex, #1498).
-				 * Opcional: sin él se cae al criterio de siempre.
-				 */
-				casoCobroId: z.string().uuid().optional(),
+				estados: z.array(z.string()).optional(),
+				problemasLink: z.array(z.string()).optional(),
+				soloHuerfanos: z.boolean().optional(),
+				antiguedadMinDias: z.number().int().positive().optional(),
+				numeroSifco: z.string().trim().optional(),
+				// Sin esto en `true`, la bandeja parte del predicado "problemático"
+				// (REVIEW_REQUIRED/APPLICATION_FAILED/huérfano/estancado). El
+				// checkbox "Solo problemáticos" de la UI lo controla; con chips de
+				// estado activos, el usuario ya acotó a propósito y ese acotado manda
+				// sin importar este flag.
+				soloProblematicos: z.boolean().default(true),
+				limit: z.number().int().min(1).max(200).default(50),
+				offset: z.number().int().min(0).default(0),
 			}),
 		)
-		.handler(async ({ input, context }) => {
-			const [grupo] = await db
+		.handler(async ({ input }) => {
+			const filtroInput = {
+				estados: input.estados as PagaloPaymentGroupStatus[] | undefined,
+				soloHuerfanos: input.soloHuerfanos,
+				antiguedadMinDias: input.antiguedadMinDias,
+			};
+			const condicionesExplicitas = condicionesFiltro(filtroInput);
+			const condicionPrincipal =
+				condicionesExplicitas.length > 0
+					? and(...condicionesExplicitas)
+					: input.soloProblematicos
+						? condicionGrupoProblematico()
+						: undefined;
+			const condiciones = condicionPrincipal ? [condicionPrincipal] : [];
+			if (input.numeroSifco) {
+				// Búsqueda parcial (contiene, no igualdad exacta): el supervisor
+				// escribe un fragmento del SIFCO ("3540"), no el número completo
+				// con todos los ceros a la izquierda ("01010214103540") — con eq()
+				// esa búsqueda nunca matcheaba nada (hallazgo de code review).
+				condiciones.push(
+					ilike(
+						pagaloPaymentGroups.numeroCreditoSifco,
+						`%${input.numeroSifco}%`,
+					),
+				);
+			}
+			// problemasLink (estado de link, no de grupo) se resuelve en SQL con
+			// un EXISTS correlacionado — antes se traían TODOS los grupos y TODOS
+			// sus links a memoria del server para filtrar y paginar con .slice(),
+			// costo que crecía sin límite con el historial completo (hallazgo de
+			// code review). Con esto, filtro y paginación quedan en la DB.
+			const problemasLink = input.problemasLink as
+				| PagaloPaymentLinkStatus[]
+				| undefined;
+			if (problemasLink?.length) {
+				condiciones.push(
+					exists(
+						db
+							.select({ uno: pagaloPaymentLinks.id })
+							.from(pagaloPaymentLinks)
+							.where(
+								and(
+									eq(pagaloPaymentLinks.groupId, pagaloPaymentGroups.id),
+									inArray(pagaloPaymentLinks.status, problemasLink),
+								),
+							),
+					),
+				);
+			}
+			const whereClause =
+				condiciones.length > 0 ? and(...condiciones) : undefined;
+
+			// Conteo por estado para los chips de filtro — SIEMPRE sobre el
+			// universo completo (solo con numeroSifco aplicado, si lo hay), no
+			// sobre el filtro de estados/soloProblematicos activo. Así el chip
+			// "Falló al aplicar (2)" sigue mostrando 2 aunque el supervisor tenga
+			// otro chip activo — es lo que le dice qué más hay para mirar.
+			const conteoWhere = input.numeroSifco
+				? ilike(
+						pagaloPaymentGroups.numeroCreditoSifco,
+						`%${input.numeroSifco}%`,
+					)
+				: undefined;
+			const conteoPorEstadoFilas = await db
 				.select({
-					casoCobroId: pagaloPaymentGroups.casoCobroId,
-					numeroCreditoSifco: pagaloPaymentGroups.numeroCreditoSifco,
-					allocationsSnapshot: pagaloPaymentGroups.allocationsSnapshot,
+					status: pagaloPaymentGroups.status,
+					total: count(),
 				})
 				.from(pagaloPaymentGroups)
-				.where(eq(pagaloPaymentGroups.id, input.groupId))
-				.limit(1);
-			if (!grupo) {
-				throw new ORPCError("NOT_FOUND", {
-					message: "Grupo Págalo no encontrado.",
-				});
+				.where(conteoWhere)
+				.groupBy(pagaloPaymentGroups.status);
+			const conteoPorEstado: Record<string, number> = {};
+			for (const fila of conteoPorEstadoFilas) {
+				conteoPorEstado[fila.status] = fila.total;
 			}
 
-			// Mismo alcance que getPagaloHistorial: se autoriza por un caso al
-			// que el usuario SÍ tiene acceso, y el grupo tiene que ser del MISMO
-			// crédito que ese caso. El crédito no se recibe del cliente: sale del
-			// caso, que es lo que impide pedir el grupo de un crédito ajeno.
-			let autorizado = false;
-			if (input.casoCobroId) {
-				await assertAccesoCasoCobro(
-					input.casoCobroId,
-					context.userId,
-					context.userRole,
-				);
-				const [caso] = await db
-					.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
-					.from(casosCobros)
-					.where(eq(casosCobros.id, input.casoCobroId))
-					.limit(1);
-				autorizado =
-					!!caso?.numeroCreditoSifco &&
-					caso.numeroCreditoSifco === grupo.numeroCreditoSifco;
+			const [{ total }] = await db
+				.select({ total: count() })
+				.from(pagaloPaymentGroups)
+				.where(whereClause);
+
+			if (total === 0) {
+				return { grupos: [], total: 0, conteoPorEstado };
 			}
 
-			if (!autorizado) {
-				if (!grupo.casoCobroId) {
-					throw new ORPCError("NOT_FOUND", {
-						message: "Grupo Págalo sin caso de cobro asociado.",
-					});
-				}
-				await assertAccesoCasoCobro(
-					grupo.casoCobroId,
-					context.userId,
-					context.userRole,
-				);
+			const pagina = await db
+				.select({
+					id: pagaloPaymentGroups.id,
+					status: pagaloPaymentGroups.status,
+					origen: pagaloPaymentGroups.origen,
+					casoCobroId: pagaloPaymentGroups.casoCobroId,
+					numeroCreditoSifco: pagaloPaymentGroups.numeroCreditoSifco,
+					carteraCreditoId: pagaloPaymentGroups.carteraCreditoId,
+					totalAmount: pagaloPaymentGroups.totalAmount,
+					capitalTotal: pagaloPaymentGroups.capitalTotal,
+					facturableTotal: pagaloPaymentGroups.facturableTotal,
+					dispatchAttemptCount: pagaloPaymentGroups.dispatchAttemptCount,
+					nextDispatchAt: pagaloPaymentGroups.nextDispatchAt,
+					lastDispatchError: pagaloPaymentGroups.lastDispatchError,
+					carteraImportId: pagaloPaymentGroups.carteraImportId,
+					createdAt: pagaloPaymentGroups.createdAt,
+					creadoPor: user.name,
+				})
+				.from(pagaloPaymentGroups)
+				.leftJoin(user, eq(user.id, pagaloPaymentGroups.createdBy))
+				.where(whereClause)
+				.orderBy(desc(pagaloPaymentGroups.createdAt))
+				.limit(input.limit)
+				.offset(input.offset);
+
+			if (pagina.length === 0) {
+				return { grupos: [], total, conteoPorEstado };
 			}
+
 			const links = await db
 				.select({
 					id: pagaloPaymentLinks.id,
+					groupId: pagaloPaymentLinks.groupId,
 					linkType: pagaloPaymentLinks.linkType,
 					status: pagaloPaymentLinks.status,
 					generation: pagaloPaymentLinks.generation,
+					pollAttempts: pagaloPaymentLinks.pollAttempts,
+					errorCode: pagaloPaymentLinks.errorCode,
+					errorMessage: pagaloPaymentLinks.errorMessage,
+					lastPollError: pagaloPaymentLinks.lastPollError,
+					activatedAt: pagaloPaymentLinks.activatedAt,
+					createdAt: pagaloPaymentLinks.createdAt,
+					paymentUrl: pagaloPaymentLinks.paymentUrl,
+					transactionAmount: pagaloPaymentLinks.transactionAmount,
 				})
 				.from(pagaloPaymentLinks)
-				.where(eq(pagaloPaymentLinks.groupId, input.groupId));
+				.where(
+					inArray(
+						pagaloPaymentLinks.groupId,
+						pagina.map((c) => c.id),
+					),
+				);
+			const linksPorGrupo = new Map<string, typeof links>();
+			for (const link of links) {
+				const arr = linksPorGrupo.get(link.groupId) ?? [];
+				arr.push(link);
+				linksPorGrupo.set(link.groupId, arr);
+			}
+
+			// Motivo de cierre de cada link (invalidado por supervisor, o cerrado
+			// por Págalo — expirado/cancelado desde su lado): un link REPLACED/
+			// EXPIRED/CANCELLED no lo explica solo con el status, y sin esto la
+			// bandeja mostraba el link viejo al lado del nuevo sin decir por qué.
+			// Solo para los links de ESTA página, mismo criterio de costo que el
+			// nombre del cliente más abajo.
+			//
+			// LINK_REGENERATED_BY_SUPERVISOR NO entra acá aunque también tenga
+			// motivo y linkId (el del link viejo, para que aparezca en la
+			// bandeja): describe por qué se REGENERÓ, no por qué se CERRÓ, y
+			// ocurre después del cierre — si compitiera por el mismo mapa
+			// ordenado por fecha, ganaría por ser el evento más reciente y
+			// reemplazaría el motivo real de cierre con el de regeneración
+			// (hallazgo de code review, yo mismo lo introduje al agregar el
+			// linkId a ese evento en una ronda anterior).
+			const linkIdsPagina = pagina.flatMap(
+				(g) => linksPorGrupo.get(g.id)?.map((l) => l.id) ?? [],
+			);
+			const motivoPorLink = new Map<string, string>();
+			if (linkIdsPagina.length > 0) {
+				const eventosCierre = await db
+					.select({
+						linkId: pagaloPaymentEvents.linkId,
+						payload: pagaloPaymentEvents.payload,
+						eventType: pagaloPaymentEvents.eventType,
+					})
+					.from(pagaloPaymentEvents)
+					.where(
+						and(
+							inArray(pagaloPaymentEvents.linkId, linkIdsPagina),
+							inArray(pagaloPaymentEvents.eventType, [
+								"LINK_INVALIDATED_BY_SUPERVISOR",
+								"LINK_TERMINAL",
+							]),
+						),
+					)
+					.orderBy(desc(pagaloPaymentEvents.occurredAt));
+				for (const evento of eventosCierre) {
+					if (!evento.linkId || motivoPorLink.has(evento.linkId)) continue;
+					const payload = evento.payload as { motivo?: string } | null;
+					if (payload?.motivo) motivoPorLink.set(evento.linkId, payload.motivo);
+				}
+			}
+
+			// Nombre real del cliente: vive en cartera-back, no en el join local
+			// (casosCobros.contratoId puede ser null y romper la cadena hacia
+			// `clients`). Una sola llamada bulk para los sifcos de ESTA página
+			// (ya paginada en SQL, no el universo completo) — con caché de 5 min
+			// del cliente HTTP. Si cartera-back falla, la bandeja igual se
+			// muestra sin nombres.
+			const nombrePorSifco = new Map<string, string>();
+			const sifcosPagina = [
+				...new Set(pagina.map((g) => g.numeroCreditoSifco)),
+			];
+			if (sifcosPagina.length > 0) {
+				try {
+					const listado = await carteraBackClient.getAllCreditos({
+						mes: 0,
+						anio: new Date().getFullYear(),
+						numeros_credito_sifco: sifcosPagina,
+						page: 1,
+						perPage: sifcosPagina.length,
+					});
+					for (const fila of listado.data) {
+						if (fila.creditos.numero_credito_sifco && fila.usuarios?.nombre) {
+							nombrePorSifco.set(
+								fila.creditos.numero_credito_sifco,
+								fila.usuarios.nombre,
+							);
+						}
+					}
+				} catch (error) {
+					console.error(
+						"[Págalo] No se pudo resolver nombres de cliente para la bandeja de supervisión:",
+						error instanceof Error ? error.message : error,
+					);
+				}
+			}
+
 			return {
-				allocationsSnapshot: grupo.allocationsSnapshot,
-				links,
+				grupos: pagina.map((grupo) => ({
+					...grupo,
+					clienteNombre: nombrePorSifco.get(grupo.numeroCreditoSifco) ?? null,
+					links: (linksPorGrupo.get(grupo.id) ?? []).map((link) => ({
+						...link,
+						motivoCierre: motivoPorLink.get(link.id) ?? null,
+					})),
+				})),
+				total,
+				conteoPorEstado,
 			};
 		}),
 };

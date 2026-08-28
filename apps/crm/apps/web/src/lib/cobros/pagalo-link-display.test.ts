@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+	agruparLinksPorGeneracion,
 	copyPagaloLink,
 	getPagaloGroupSummary,
 	getPagaloLinkStatusInfo,
@@ -76,5 +77,46 @@ describe("Págalo link display", () => {
 				},
 			}),
 		).rejects.toThrow("denied");
+	});
+});
+
+describe("agruparLinksPorGeneracion", () => {
+	test("un tipo sin regeneración: vigente único, sin históricos", () => {
+		const resultado = agruparLinksPorGeneracion([
+			{ linkType: "CAPITAL" as const, generation: 1, id: "a" },
+		]);
+		expect(resultado).toEqual([
+			{
+				vigente: { linkType: "CAPITAL", generation: 1, id: "a" },
+				historicos: [],
+			},
+		]);
+	});
+
+	test("elige la generación más alta como vigente, el resto como históricos", () => {
+		const resultado = agruparLinksPorGeneracion([
+			{ linkType: "CAPITAL" as const, generation: 1, id: "viejo" },
+			{ linkType: "CAPITAL" as const, generation: 3, id: "vigente" },
+			{ linkType: "CAPITAL" as const, generation: 2, id: "medio" },
+		]);
+		expect(resultado).toHaveLength(1);
+		expect(resultado[0]?.vigente.id).toBe("vigente");
+		expect(resultado[0]?.historicos.map((l) => l.id)).toEqual([
+			"medio",
+			"viejo",
+		]);
+	});
+
+	test("agrupa por tipo de forma independiente", () => {
+		const resultado = agruparLinksPorGeneracion([
+			{ linkType: "CAPITAL" as const, generation: 1, id: "cap" },
+			{ linkType: "MORA_INTERES" as const, generation: 1, id: "mora" },
+		]);
+		expect(resultado).toHaveLength(2);
+		expect(resultado.map((r) => r.vigente.id).sort()).toEqual(["cap", "mora"]);
+	});
+
+	test("lista vacía devuelve vacío", () => {
+		expect(agruparLinksPorGeneracion([])).toEqual([]);
 	});
 });

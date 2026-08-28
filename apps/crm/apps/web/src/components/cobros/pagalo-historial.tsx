@@ -31,6 +31,7 @@ import {
 	CollapsibleContent,
 	CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { authClient } from "@/lib/auth-client";
 import { agruparPorCuota } from "@/lib/cobros/pagalo-allocations-view";
 import {
 	copyPagaloLink,
@@ -38,14 +39,15 @@ import {
 	getPagaloLinkStatusInfo,
 } from "@/lib/cobros/pagalo-link-display";
 import { facturableSinOtrosGTQ } from "@/lib/cobros/pagalo-otros";
+import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
 import { AccionesSupervisorPagalo } from "./pagalo/acciones-supervisor-pagalo";
 import { BitacoraPagalo, type EventoPagalo } from "./pagalo/bitacora-pagalo";
 import {
 	antiguedadLink,
-	estadoGrupoInfo,
-	etiquetaMotivoRevision,
+	etiquetaMotivo,
 	fechaHora,
+	getEstadoGrupoInfo,
 } from "./pagalo/formato-pagalo";
 
 type Link = {
@@ -253,13 +255,15 @@ function GrupoPagalo({
 	casoCobroId: string;
 	creditoId: number;
 }) {
-	const estadoInfo = estadoGrupoInfo(grupo.status);
+	const estadoInfo = getEstadoGrupoInfo(grupo.status);
 	const resumenLinks = getPagaloGroupSummary(grupo.links);
 	const moraEIntereses = facturableSinOtrosGTQ(
 		grupo.facturableTotal,
 		grupo.otrosTotal,
 	);
-	const motivoRevision = etiquetaMotivoRevision(grupo.lastDispatchError);
+	const motivoRevision = etiquetaMotivo(grupo.lastDispatchError);
+	const { data: session } = authClient.useSession();
+	const esSupervisor = PERMISSIONS.canAssignCobros(session?.user?.role ?? "");
 
 	return (
 		<div className="space-y-3 rounded-lg border p-4">
@@ -347,7 +351,11 @@ function GrupoPagalo({
 				groupId={grupo.id}
 				status={grupo.status}
 			/>
-			<BitacoraPagalo eventos={grupo.eventos} abiertoPorDefecto={false} />
+			<BitacoraPagalo
+				eventos={grupo.eventos}
+				esSupervisor={esSupervisor}
+				abiertoPorDefecto={false}
+			/>
 		</div>
 	);
 }
@@ -383,7 +391,7 @@ export function PagaloHistorial({
 		// entre páginas del mismo caso: al cambiar de caso, seguir pintando los
 		// grupos anteriores mostraría —y dejaría copiar— links de pago del
 		// cliente que se acaba de dejar atrás.
-		placeholderData: (anterior: unknown) => (casoCambio ? undefined : anterior),
+		placeholderData: (anterior) => (casoCambio ? undefined : anterior),
 	});
 	const data = historial.data as { grupos: Grupo[]; total: number } | undefined;
 	const grupos = data?.grupos ?? [];

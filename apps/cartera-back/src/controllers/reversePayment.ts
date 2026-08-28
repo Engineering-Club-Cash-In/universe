@@ -877,6 +877,37 @@ export function createReversePayment(
           errorCode: invoiceTerminal.errorCode,
         }, telemetryLogger);
       }
+
+      // 🧾 La tx dejó factura_status='NO_APLICA' asumiendo que esta etapa
+      // anularía todos los DTEs — pero es best-effort: si alguno falló, el pago
+      // tiene facturas ACTIVAS (en BD o en SAT) y 'NO_APLICA' se lo ESCONDERÍA
+      // a conta. Se corrige a FALLIDA con el detalle para que aparezca en la
+      // bandeja y se resuelva a mano (anulación manual / conciliación).
+      // Best-effort también: si el pago se borró en la reversa total, el UPDATE
+      // no matchea filas y no pasa nada.
+      if (facturasConError.length > 0) {
+        try {
+          await db
+            .update(pagos_credito)
+            .set({
+              factura_status: "FALLIDA",
+              factura_error: JSON.stringify(
+                facturasConError.map((f) => ({
+                  rubro: "ANULACION",
+                  error: `Factura ${f.factura_id} (${f.uuid}) quedó sin anular: ${f.error ?? f.mensaje ?? "sin detalle"}`,
+                }))
+              ),
+              factura_at: new Date(),
+            })
+            .where(eq(pagos_credito.pago_id, pago_id));
+        } catch {
+          // Best-effort: la anulación fallida ya quedó reportada arriba por
+          // emitInvoiceVoiding (manualActionRequired) y en facturasConError de
+          // la respuesta; este marcador de bandeja no puede romper la reversa.
+          // (Sin console.*: el slice de reversa usa structured logging y un
+          // guard-test lo hace cumplir.)
+        }
+      }
     }
 
     // ========================================================================

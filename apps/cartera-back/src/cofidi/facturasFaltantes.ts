@@ -257,6 +257,14 @@ export function computarDiffFacturas(args: {
     };
   }
 
+  // Key canónica de una ACTIVA ya validada. ÚNICA derivación: la usan el set
+  // `logrado` y el check de montos (d) — si divergieran, uno compararía contra
+  // la entrada equivocada del esperado.
+  const keyDeActiva = (f: FacturaActiva): KeyFactura =>
+    f.rubro === "INTERESES"
+      ? keyIntereses(f.inversionista_id as number)
+      : (f.rubro as KeyFactura);
+
   const logrado = new Set<KeyFactura>();
   for (const f of activas) {
     const rubro = f.rubro as RubroFactura;
@@ -268,21 +276,17 @@ export function computarDiffFacturas(args: {
         }. Anule las facturas activas y vuelva a facturar el pago completo.`,
       };
     }
-    if (rubro === "INTERESES") {
-      if (f.inversionista_id == null) {
-        return {
-          modo: "BLOQUEADO",
-          razon:
-            `Factura activa de INTERESES sin inversionista_id${
-              f.factura_id ? ` (factura_id ${f.factura_id})` : ""
-            }: no se sabe a qué inversionista corresponde. ` +
-            `Anule las facturas activas y vuelva a facturar el pago completo.`,
-        };
-      }
-      logrado.add(keyIntereses(f.inversionista_id));
-    } else {
-      logrado.add(rubro);
+    if (rubro === "INTERESES" && f.inversionista_id == null) {
+      return {
+        modo: "BLOQUEADO",
+        razon:
+          `Factura activa de INTERESES sin inversionista_id${
+            f.factura_id ? ` (factura_id ${f.factura_id})` : ""
+          }: no se sabe a qué inversionista corresponde. ` +
+          `Anule las facturas activas y vuelva a facturar el pago completo.`,
+      };
     }
+    logrado.add(keyDeActiva(f));
   }
 
   const esperadoDetallado = calcularEsperadoDetallado({ pagoData, inversionistas });
@@ -313,8 +317,7 @@ export function computarDiffFacturas(args: {
   //     no hay re-facturación parcial segura.
   for (const f of activas) {
     if (f.monto_total == null) continue; // sin monto no hay contra qué comparar
-    const key =
-      f.rubro === "INTERESES" ? keyIntereses(f.inversionista_id!) : (f.rubro as KeyFactura);
+    const key = keyDeActiva(f); // validada arriba: INTERESES ya trae inversionista_id
     const montoEsperado = esperadoDetallado.get(key);
     if (montoEsperado && !big(f.monto_total).round(2).eq(montoEsperado)) {
       return {

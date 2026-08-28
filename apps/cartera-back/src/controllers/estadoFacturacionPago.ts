@@ -83,7 +83,17 @@ export function derivarEstadoFacturacion(
 export async function registrarEstadoFacturacion(
   pagoId: number | null | undefined,
   entrada:
-    | { facturasGeneradas: FacturaGeneradaResumen[] }
+    | {
+        facturasGeneradas: FacturaGeneradaResumen[];
+        /**
+         * Re-corrida PARCIAL (modo FALTANTES): facturasGeneradas trae SOLO lo
+         * intentado en esta corrida. Si todo eso falla, derivar daría FALLIDA
+         * — pero el pago SÍ tiene DTEs activos de la corrida original, así que
+         * el piso es PARCIAL (FALLIDA mandaría a conta a "anular todo y
+         * refacturar" facturas que siguen siendo válidas).
+         */
+        minimoParcial?: boolean;
+      }
     | { estado: PagoFacturaStatus; motivo?: string },
 ): Promise<void> {
   if (!pagoId) return;
@@ -97,6 +107,13 @@ export async function registrarEstadoFacturacion(
               ? [{ rubro: "FACTURACION", error: entrada.motivo }]
               : [],
           };
+    if (
+      "facturasGeneradas" in entrada &&
+      entrada.minimoParcial &&
+      resultado.estado === "FALLIDA"
+    ) {
+      resultado.estado = "PARCIAL";
+    }
     await db
       .update(pagos_credito)
       .set({

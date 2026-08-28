@@ -137,6 +137,10 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
     }
     facturacionesEnCurso.add(pago_id);
 
+    // Visible para el catch: en re-corrida FALTANTES el pago tiene DTEs activos
+    // válidos, así que un fallo NO puede degradar su estado a FALLIDA (piso PARCIAL).
+    let esRecorridaParcial = false;
+
     try {
 
       // ============================================
@@ -541,6 +545,33 @@ if (facturasExistentes.length > 0) {
 
       if (diffFacturas.modo === "BLOQUEADO") {
         console.log(`⛔ Re-facturación BLOQUEADA para pago ${pago_id}: ${diffFacturas.razon}`);
+        // La razón del bloqueo se persiste para la bandeja de conta (si no,
+        // solo vive en este 400): el pago sigue mostrando su status actual
+        // (PENDIENTE/PARCIAL/FALLIDA), pero factura_error explica POR QUÉ la
+        // re-facturación automática no procede y que se resuelve a mano.
+        // Solo se toca si el pago ya está en un estado de bandeja — un pago
+        // OK/NO_APLICA/NULL no debe aparecer como problema por un 400.
+        try {
+          await db
+            .update(pagos_credito)
+            .set({
+              factura_error: JSON.stringify([
+                { rubro: "REFACTURACION_BLOQUEADA", error: diffFacturas.razon },
+              ]),
+              factura_at: new Date(),
+            })
+            .where(
+              and(
+                eq(pagos_credito.pago_id, pago_id),
+                inArray(pagos_credito.factura_status, ["PENDIENTE", "PARCIAL", "FALLIDA"])
+              )
+            );
+        } catch (bloqueoError: any) {
+          console.error(
+            `⚠️ No se pudo persistir la razón del bloqueo (pago ${pago_id}):`,
+            bloqueoError?.message
+          );
+        }
         set.status = 400;
         return {
           success: false,
@@ -551,6 +582,7 @@ if (facturasExistentes.length > 0) {
 
       // Modo FALTANTES: re-corrida parcial. `debeEmitir(key)` decide bloque por bloque.
       const soloFaltantes = diffFacturas.modo === "FALTANTES";
+      esRecorridaParcial = soloFaltantes;
       const faltantes: Set<string> =
         diffFacturas.modo === "FALTANTES" ? diffFacturas.faltantes : new Set();
 
@@ -1850,6 +1882,18 @@ if (facturasExistentes.length > 0) {
           //    paso de certificar.
           if (!debeEmitir(keyIntereses(inv.inversionista_id))) {
             console.log(`   ⏭️  ${inv.nombre} - ya tiene su factura de intereses activa (re-facturación parcial)`);
+            // Su DTE EXISTE (por eso se salta) y la regla (d) del diff ya probó
+            // que su monto es exactamente esta parteInversionista. Si esta
+            // re-corrida termina escribiendo el desglose (caso: la corrida
+            // original murió antes de escribirlo), el rubro
+            // INTERES_INVERSIONISTAS debe incluir TAMBIÉN lo ya facturado — sin
+            // esto, el fallback de la corrida solo sumaría los DTEs nuevos y el
+            // desglose quedaría corto vs los DTEs vivos en SAT.
+            if (cuentaParaRubroInv(inv, redirigirACube)) {
+              const calcYaEmitida = calcularIvaExacto(parseFloat(parteInversionista.toFixed(2)));
+              invNoEmiteFacturadoConIva = invNoEmiteFacturadoConIva.plus(calcYaEmitida.total);
+              invNoEmiteIva = invNoEmiteIva.plus(calcYaEmitida.montoImpuesto);
+            }
             continue;
           }
 
@@ -2065,7 +2109,7 @@ if (facturasExistentes.length > 0) {
       //    fallo real: NO escribimos el desglose (no se facturó nada de verdad).
       if (facturasExitosas.length === 0 && facturasConError.length > 0) {
         // Queda visible en el pago: "Falta factura" con el motivo por rubro.
-        await registrarEstadoFacturacion(pago_id, { facturasGeneradas });
+        await registrarEstadoFacturacion(pago_id, { facturasGeneradas, minimoParcial: soloFaltantes });
         set.status = 500;
         return {
           success: false,
@@ -2384,7 +2428,7 @@ if (facturasExistentes.length > 0) {
       // Pago solo-capital (sin DTE que emitir y sin errores): no es fallo.
       // El desglose ya quedó guardado arriba (capital de CUBE).
       if (facturasExitosas.length === 0) {
-        await registrarEstadoFacturacion(pago_id, { facturasGeneradas });
+        await registrarEstadoFacturacion(pago_id, { facturasGeneradas, minimoParcial: soloFaltantes });
         return {
           success: true,
           data: {
@@ -2404,7 +2448,7 @@ if (facturasExistentes.length > 0) {
       //    En una re-corrida FALTANTES esto ve solo los DTEs de ESTA corrida,
       //    pero es correcto igual: si completó lo que faltaba → OK; si algo
       //    volvió a fallar → PARCIAL con esos rubros en factura_error.
-      await registrarEstadoFacturacion(pago_id, { facturasGeneradas });
+      await registrarEstadoFacturacion(pago_id, { facturasGeneradas, minimoParcial: soloFaltantes });
 
       return {
         success: true,
@@ -2426,7 +2470,7 @@ if (facturasExistentes.length > 0) {
     } catch (error) {
       console.error("❌ Error facturando pago completo:", error);
       await registrarEstadoFacturacion(pago_id, {
-        estado: "FALLIDA",
+        estado: esRecorridaParcial ? "PARCIAL" : "FALLIDA",
         motivo: (error as Error).message,
       });
       set.status = 500;

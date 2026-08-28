@@ -74,9 +74,11 @@ BEGIN
   END IF;
 END $$;
 
--- El diff de re-facturación filtra por (pago_id, status='ACTIVA') y lee rubro.
-CREATE INDEX IF NOT EXISTS idx_facturas_pago_rubro
-  ON cartera.facturas_electronicas (pago_id, rubro);
+-- El diff de re-facturación (y los GET de facturas por pago) filtran por
+-- pago_id + status: el índice sigue al PREDICADO real, no a las columnas que
+-- solo se leen en el SELECT.
+CREATE INDEX IF NOT EXISTS idx_facturas_pago_status
+  ON cartera.facturas_electronicas (pago_id, status);
 
 -- Backfill del histórico (de la 0014): facturacion_desglose ya amarra
 -- factura_id ↔ rubro para las que salieron completas (en la práctica, las

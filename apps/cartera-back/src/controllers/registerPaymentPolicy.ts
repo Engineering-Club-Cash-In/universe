@@ -712,10 +712,10 @@ export const puedeOmitirGuardTodasCubiertas = ({
  * importa qué se escribió, y la rama inserta aunque el request traiga capital
  * colado. Usar la clasificación aquí respondería 409 sobre estado ya escrito.
  *
- * `convenioAplicado`: en EN_CONVENIO el registro del convenio corre ANTES del
- * loop de cuotas, así que `processConvenioPayment` YA actualizó
- * `convenios_pago`. Responder 409 ahí mentiría sobre estado persistido y el
- * reintento de la boleta acreditaría el convenio DOS veces.
+ * `convenioAplicado`: en EN_CONVENIO la acreditación del convenio se difiere
+ * al return de éxito (`commitConvenio`), pero el flujo debe LLEGAR a ese
+ * return para escribir la fila-rastro del convenio y ejecutar el commit.
+ * Responder 409 acá dejaría la boleta del convenio sin registrar.
  */
 export const debeRechazarAbonoCapitalNoAplicado = ({
   abonoCapital,
@@ -1249,12 +1249,12 @@ export const capitalSuprimidoSinAplicar = (params: {
  * simplemente sigue a la siguiente cuota con el disponible intacto.
  *
  * `pagoConvenio` es lo que el estampador escribiría en ESTA fila (su peek
- * `pendiente()`, no una llamada consumidora). En EN_CONVENIO,
- * `processConvenioPayment` ya mutó `convenios_pago` ANTES del loop y el sello
- * vive en una sola fila de `pagos_credito`: si todas las cuotas se saltaran,
- * el convenio quedaría cobrado sin fila que lo registre y se romperían la
- * reversa y la detección de boleta duplicada (P2 de Codex en #1248). Una fila
- * con `monto_aplicado = 0` pero `pagoConvenio > 0` es legítima y validable
+ * `pendiente()`, no una llamada consumidora). En EN_CONVENIO el sello vive en
+ * una sola fila de `pagos_credito` y la acreditación (`commitConvenio`) corre
+ * en el return de éxito: si todas las cuotas se saltaran, el convenio se
+ * acreditaría sin fila que lo registre y se romperían la reversa y la
+ * detección de boleta duplicada (P2 de Codex en #1248). Una fila con
+ * `monto_aplicado = 0` pero `pagoConvenio > 0` es legítima y validable
  * (`shouldRejectZeroAppliedNormalValidation` exime pagoConvenio > 0).
  */
 export const debeInsertarFilaParcialCuota = ({

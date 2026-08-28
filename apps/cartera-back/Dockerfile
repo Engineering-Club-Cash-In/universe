@@ -6,6 +6,7 @@ FROM docker.io/oven/bun:1.3.14
 # `Trace/breakpoint trap` / Puppeteer `Failed to launch the browser process`.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
+    curl \
     fonts-liberation \
     libasound2 \
     libatk-bridge2.0-0 \

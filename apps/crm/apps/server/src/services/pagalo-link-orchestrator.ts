@@ -8,6 +8,7 @@ import {
 	pagaloPaymentGroups,
 	pagaloPaymentLinks,
 } from "../db/schema/pagalo-payments";
+import { reclamarYProcesarGrupo } from "../jobs/pagalo-dispatch";
 import { isTestModeEnabled } from "../lib/messaging-test-mode";
 import {
 	buildPagaloAllocations,
@@ -1317,7 +1318,7 @@ export async function regenerarLinkIndividual(params: {
 		grupoAReviewSiFalla: false,
 	});
 
-	await db.transaction(async (tx) => {
+	const quedoListo = await db.transaction(async (tx) => {
 		// Un link invalidado por el supervisor escala el grupo a
 		// REVIEW_REQUIRED (invalidarLinkEnTx, pagalo-group-lifecycle.ts). Sin
 		// restaurarlo, regenerar con éxito dejaba el grupo atascado ahí para
@@ -1405,7 +1406,18 @@ export async function regenerarLinkIndividual(params: {
 					.map((l) => l.linkType),
 			);
 			const todosPagados = tiposRequeridos.every((t) => tiposPagados.has(t));
-			await tx
+			// Capturar con .returning() y condicionar el evento al UPDATE real
+			// — no a la variable calculada en memoria. Dos regeneraciones
+			// concurrentes de tipos distintos, ambas pagadas, serializan en
+			// este candado: la primera pone READY_TO_APPLY; cuando la segunda
+			// llega, su WHERE status='REVIEW_REQUIRED' ya no matchea (el
+			// grupo no está en REVIEW_REQUIRED cuando esta transacción lo
+			// relee), así que el UPDATE no afecta fila — pero `todosPagados`
+			// seguía siendo true, y sin este chequeo se insertaba un segundo
+			// GROUP_READY mintiendo una transición que no ocurrió (mismo
+			// patrón que evaluarGrupo ya resuelve en pagalo-poll.ts, hallazgo
+			// de code review).
+			const [actualizado] = await tx
 				.update(pagaloPaymentGroups)
 				.set(
 					todosPagados
@@ -1425,8 +1437,9 @@ export async function regenerarLinkIndividual(params: {
 						eq(pagaloPaymentGroups.id, grupo.id),
 						eq(pagaloPaymentGroups.status, "REVIEW_REQUIRED"),
 					),
-				);
-			if (todosPagados) {
+				)
+				.returning({ id: pagaloPaymentGroups.id });
+			if (actualizado && todosPagados) {
 				await tx.insert(pagaloPaymentEvents).values({
 					groupId: grupo.id,
 					eventType: "GROUP_READY",
@@ -1439,9 +1452,30 @@ export async function regenerarLinkIndividual(params: {
 							"Restaurado por regeneración de link; todos los tipos requeridos ya estaban pagados.",
 					},
 				});
+				return true;
 			}
 		}
+		return false;
 	});
+
+	// Con el dispatcher automático apagado (TAREAS_PROGRAMADAS_ACTIVAS=false),
+	// dejar el grupo en READY_TO_APPLY sin disparar el dispatch lo dejaba
+	// esperando indefinidamente a que alguien corriera el poll manual — el
+	// poller sí dispara inline en su propio camino de éxito
+	// (reclamarYProcesarGrupo, pagalo-poll.ts), esta restauración no lo hacía
+	// (hallazgo de code review). Fuera de la transacción de arriba, mismo
+	// motivo que el poller: nunca llamar cartera-back mientras una tx de DB
+	// sigue abierta.
+	if (quedoListo) {
+		try {
+			await reclamarYProcesarGrupo(grupo.id);
+		} catch (error) {
+			console.error(
+				`[Págalo] Grupo ${grupo.id} quedó READY_TO_APPLY tras regenerar un link pero falló el dispatch inline:`,
+				error instanceof Error ? error.message : error,
+			);
+		}
+	}
 
 	// WhatsApp solo en la creación real desde el modal (createPagaloLinks) —
 	// regenerar un link individual no reenvía nada, decisión de producto.

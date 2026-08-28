@@ -74,8 +74,12 @@ mock.module("@cci/email", () => ({
   sendNewCreditNotification: mock(() => Promise.resolve()),
 }));
 
-const { insertCredit, findOrCreateAseguradora, generatePaymentDates } =
-  await import("./createCredit");
+const {
+  insertCredit,
+  findOrCreateAseguradora,
+  generatePaymentDates,
+  getFechaReferenciaPrimeraCuota,
+} = await import("./createCredit");
 
 type Executor = Parameters<typeof findOrCreateAseguradora>[1];
 
@@ -118,6 +122,14 @@ it("usa la fecha de referencia compartida durante rollover mensual", () => {
   );
 
   expect(fechas).toEqual(["2026-01-31", "2026-02-28"]);
+});
+
+it("conserva la referencia aunque no exista un ajuste positivo", () => {
+  expect(
+    getFechaReferenciaPrimeraCuota({
+      fechaReferencia: "2026-01-31T23:59:59.000Z",
+    })?.toISOString(),
+  ).toBe("2026-01-31T23:59:59.000Z");
 });
 
 describe("insertCredit", () => {

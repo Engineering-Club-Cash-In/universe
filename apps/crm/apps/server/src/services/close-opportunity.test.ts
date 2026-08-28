@@ -87,12 +87,15 @@ describe("createCreditoInCarteraBack", () => {
 				cuota: 1120,
 				dia_pago_mensual: 31,
 				dia_pago_original_sistema: 30,
+				fecha_referencia_primera_cuota: "2026-01-31T23:59:59.000Z",
 			});
 
 			expect(createCredito).toHaveBeenCalledWith(
 				expect.objectContaining({
 					dia_pago_mensual: 31,
 					dia_pago_original_sistema: 30,
+					fecha_referencia_primera_cuota:
+						"2026-01-31T23:59:59.000Z",
 				}),
 			);
 		} finally {

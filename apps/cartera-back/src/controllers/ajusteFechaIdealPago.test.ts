@@ -101,10 +101,10 @@ describe("debeRestaurarTotalesBoletaAjuste", () => {
 
 describe("seleccionarPagosCanonicosPorCuota", () => {
   const rows = [
-    { cuota_id: 51, numero_cuota: 1, pago_id: 900 },
+    { cuota_id: 61, numero_cuota: 1, pago_id: 900 },
     { cuota_id: 51, numero_cuota: 1, pago_id: 700 },
     { cuota_id: 52, numero_cuota: 2, pago_id: 800 },
-    { cuota_id: 52, numero_cuota: 2, pago_id: 850 },
+    { cuota_id: 62, numero_cuota: 2, pago_id: 850 },
   ];
 
   it("prefiere en cuota 1 el pago vinculado aunque no sea el de mayor id", () => {
@@ -118,6 +118,16 @@ describe("seleccionarPagosCanonicosPorCuota", () => {
     expect(seleccionarPagosCanonicosPorCuota(rows, null)).toEqual([
       rows[0],
       rows[3],
+    ]);
+  });
+
+  it("no confunde pago_id null con un vínculo y conserva la cuota más nueva", () => {
+    const duplicadas = [
+      { cuota_id: 40, numero_cuota: 1, pago_id: null },
+      { cuota_id: 60, numero_cuota: 1, pago_id: 900 },
+    ];
+    expect(seleccionarPagosCanonicosPorCuota(duplicadas, null)).toEqual([
+      duplicadas[1],
     ]);
   });
 });

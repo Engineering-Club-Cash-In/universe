@@ -213,25 +213,30 @@ export function debeRestaurarTotalesBoletaAjuste({
 export function seleccionarPagosCanonicosPorCuota<
   T extends { cuota_id: number; numero_cuota: number; pago_id: number | null },
 >(rows: readonly T[], pagoAjusteId: number | null | undefined): T[] {
-  const porCuota = new Map<number, T>();
+  const porNumeroCuota = new Map<number, T>();
   for (const row of rows) {
-    const actual = porCuota.get(row.cuota_id);
+    const actual = porNumeroCuota.get(row.numero_cuota);
     if (!actual) {
-      porCuota.set(row.cuota_id, row);
+      porNumeroCuota.set(row.numero_cuota, row);
       continue;
     }
     const rowEsVinculado =
-      row.numero_cuota === 1 && row.pago_id === pagoAjusteId;
+      pagoAjusteId != null &&
+      row.numero_cuota === 1 &&
+      row.pago_id === pagoAjusteId;
     const actualEsVinculado =
-      actual.numero_cuota === 1 && actual.pago_id === pagoAjusteId;
-    if (
-      rowEsVinculado ||
-      (!actualEsVinculado && (row.pago_id ?? -1) > (actual.pago_id ?? -1))
-    ) {
-      porCuota.set(row.cuota_id, row);
+      pagoAjusteId != null &&
+      actual.numero_cuota === 1 &&
+      actual.pago_id === pagoAjusteId;
+    const rowEsMasReciente =
+      row.cuota_id > actual.cuota_id ||
+      (row.cuota_id === actual.cuota_id &&
+        (row.pago_id ?? -1) > (actual.pago_id ?? -1));
+    if (rowEsVinculado || (!actualEsVinculado && rowEsMasReciente)) {
+      porNumeroCuota.set(row.numero_cuota, row);
     }
   }
-  return [...porCuota.values()].sort(
+  return [...porNumeroCuota.values()].sort(
     (a, b) => a.numero_cuota - b.numero_cuota,
   );
 }

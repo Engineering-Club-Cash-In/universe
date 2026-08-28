@@ -264,6 +264,10 @@ const creditSchema = z.object({
       fecha_referencia: z.string().datetime().optional(),
     })
     .optional(),
+  // La referencia viaja siempre, aun cuando el cálculo no emite ajuste. Así
+  // CRM y Cartera generan cuota 1 contra el mismo mes si la llamada cruza un
+  // cambio de mes. Opcional para clientes legacy.
+  fecha_referencia_primera_cuota: z.string().datetime().optional(),
 });
 
 // ========================================
@@ -761,6 +765,17 @@ export const generatePaymentDates = (
   return fechas;
 };
 
+export const getFechaReferenciaPrimeraCuota = ({
+  fechaReferencia,
+  fechaReferenciaAjuste,
+}: {
+  fechaReferencia?: string;
+  fechaReferenciaAjuste?: string;
+}): Date | undefined => {
+  const iso = fechaReferencia ?? fechaReferenciaAjuste;
+  return iso ? new Date(iso) : undefined;
+};
+
 // ========================================
 // 4. INSERCIÓN DE CUOTAS
 // ========================================
@@ -1001,9 +1016,10 @@ export const createCreditCore = async (
   // El día de pago ya viene validado (1-31) desde el CRM: 15, 30, o un día
   // recomendado por el análisis de capacidad de pago. generatePaymentDates
   // hace el clamp de fin de mes internamente, así que se usa tal cual.
-  const fechaReferenciaAjuste = creditData.ajuste_fecha_ideal?.fecha_referencia
-    ? new Date(creditData.ajuste_fecha_ideal.fecha_referencia)
-    : undefined;
+  const fechaReferenciaAjuste = getFechaReferenciaPrimeraCuota({
+    fechaReferencia: creditData.fecha_referencia_primera_cuota,
+    fechaReferenciaAjuste: creditData.ajuste_fecha_ideal?.fecha_referencia,
+  });
   const fechas = generatePaymentDates(
     creditData.plazo,
     creditData.dia_pago_mensual,

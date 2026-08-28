@@ -54,6 +54,24 @@ type CreatePagaloLinksInput = {
 const PAGALO_TEST_EMAIL = "j.alvarez@clubcashin.com";
 const PAGALO_TEST_PHONE = "35219722";
 
+/**
+ * Un link ERROR puede venir de dos caminos con riesgo muy distinto:
+ * createPaymentRequest lanzó (Págalo puede no haber visto nada, o pudo
+ * haber procesado el request y solo se perdió la respuesta — igual de
+ * ambiguo), o respondió 200 sin `payment_url`/`uuid` — este segundo caso
+ * es el más peligroso: Págalo ACEPTÓ el request (200), así que el link real
+ * probablemente existe del otro lado. Marcarlo con este nombre distingue
+ * "definitivamente ambiguo" del resto de errores ERROR, para no ofrecer
+ * "Regenerar" sobre un link que casi seguro ya es cobrable en Págalo
+ * (hallazgo de code review).
+ */
+class PagaloRespuestaAmbigua extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "PagaloRespuestaAmbigua";
+	}
+}
+
 const pickString = (value: unknown, names: string[]): string | undefined => {
 	if (!value || typeof value !== "object") return undefined;
 	for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
@@ -484,7 +502,10 @@ async function emitirUnLink(params: {
 		// "viejo" (hallazgo de code review).
 		if (params.supersedesLinkId) {
 			const [viejo] = await tx
-				.select({ status: pagaloPaymentLinks.status })
+				.select({
+					status: pagaloPaymentLinks.status,
+					errorCode: pagaloPaymentLinks.errorCode,
+				})
 				.from(pagaloPaymentLinks)
 				.where(eq(pagaloPaymentLinks.id, params.supersedesLinkId))
 				.for("update");
@@ -497,6 +518,18 @@ async function emitirUnLink(params: {
 			if (!viejo || !ESTADOS_CERRADOS_SIN_PAGO.includes(viejo.status)) {
 				throw new Error(
 					`El link que se está reemplazando cambió a ${viejo?.status ?? "eliminado"} justo antes de emitir el nuevo — no se creó ningún link.`,
+				);
+			}
+			// Mismo criterio que la validación de entrada de
+			// regenerarLinkIndividual — se revalida acá también porque este
+			// candado relee el estado FRESCO (el de arriba puede estar
+			// obsoleto si el link cambió entre esa lectura y este punto).
+			if (
+				viejo.status === "ERROR" &&
+				viejo.errorCode === "PagaloRespuestaAmbigua"
+			) {
+				throw new Error(
+					"El link que se está reemplazando quedó en un estado ambiguo con Págalo — no se puede regenerar hasta reconciliarlo a mano.",
 				);
 			}
 		}
@@ -556,15 +589,22 @@ async function emitirUnLink(params: {
 		// del otro lado; igual se registra como fallo de creación porque no
 		// hay paymentUrl que darle al cliente, pero el link real puede seguir
 		// existiendo en Págalo (mismo hueco documentado en D-51).
+		// PagaloRespuestaAmbigua (no un Error genérico): el errorCode que
+		// queda en la fila permite excluir este link puntual de
+		// "Regenerar" — Págalo aceptó el request (200), así que el link
+		// real casi seguro existe del otro lado.
+		const error = new PagaloRespuestaAmbigua(
+			"Págalo no devolvió URL y UUID de request.",
+		);
 		await marcarLinkCreacionFallida({
 			linkId: stored.id,
 			groupId: params.groupId,
 			requestedBy: params.requestedBy,
 			linkType: params.linkType,
 			grupoAReviewSiFalla: params.grupoAReviewSiFalla,
-			error: new Error("Págalo no devolvió URL y UUID de request."),
+			error,
 		});
-		throw new Error("Págalo no devolvió URL y UUID de request.");
+		throw error;
 	}
 
 	const REINTENTOS_PERSISTENCIA = 3;
@@ -1252,6 +1292,21 @@ export async function regenerarLinkIndividual(params: {
 			`El link está en ${linkViejo.status}: solo se regenera un link cerrado sin pago.`,
 		);
 	}
+	// Un ERROR con errorCode=PagaloRespuestaAmbigua significa que Págalo
+	// respondió 200 (aceptó el request) pero sin los campos esperados — el
+	// link real probablemente existe del otro lado. Regenerar acá crearía
+	// un SEGUNDO link cobrable que el poller no puede reconciliar con el
+	// primero, porque no tenemos su UUID para buscarlo (hallazgo de code
+	// review). El resto de ERROR (fallo de red antes de que Págalo
+	// respondiera) sigue siendo regenerable con seguridad.
+	if (
+		linkViejo.status === "ERROR" &&
+		linkViejo.errorCode === "PagaloRespuestaAmbigua"
+	) {
+		throw new Error(
+			"Págalo respondió sin confirmar el link — puede que ya lo haya creado del otro lado. No se puede regenerar hasta reconciliarlo a mano.",
+		);
+	}
 
 	// Solo la generación MÁS ALTA de ese tipo, dentro de ESTE grupo, puede
 	// regenerarse — regenerar una fila vieja (p. ej. generación 1 cuando ya
@@ -1356,6 +1411,39 @@ export async function regenerarLinkIndividual(params: {
 			? grupo.capitalTotal
 			: grupo.facturableTotal;
 	const providerAmount = toPagaloProviderAmount(amount);
+
+	// El chequeo de pago-predecesor vivía DESPUÉS de emitirUnLink (dentro de
+	// la transacción de restauración) — para entonces ya se había hecho el
+	// INSERT + HTTP real a Págalo + UPDATE a ACTIVE: el link nuevo ya
+	// existía y era cobrable, y la función igual devolvía su paymentUrl. El
+	// chequeo solo lograba que el grupo no saliera de REVIEW_REQUIRED, pero
+	// no evitaba crear el segundo link cobrable (hallazgo de code review).
+	// Movido acá, bajo candado del grupo, ANTES de gastar la llamada HTTP.
+	await db.transaction(async (tx) => {
+		await tx
+			.select({ id: pagaloPaymentGroups.id })
+			.from(pagaloPaymentGroups)
+			.where(eq(pagaloPaymentGroups.id, grupo.id))
+			.for("update");
+		const [pagoPredecesorSinReconciliar] = await tx
+			.select({ linkId: pagaloPaymentLinks.id })
+			.from(pagaloPaymentLinks)
+			.innerJoin(
+				pagaloPaymentGroups,
+				eq(pagaloPaymentGroups.id, pagaloPaymentLinks.groupId),
+			)
+			.where(
+				and(
+					eq(pagaloPaymentGroups.carteraCreditoId, grupo.carteraCreditoId),
+					eq(pagaloPaymentLinks.status, "PAID"),
+					eq(pagaloPaymentLinks.isApplicationSource, false),
+				),
+			)
+			.limit(1);
+		if (pagoPredecesorSinReconciliar) {
+			throw new PagaloReemplazoInvalido();
+		}
+	});
 
 	// Registrar el INTENTO de regeneración (actor + motivo) ANTES de llamar
 	// a Págalo — antes se registraba después de emitirUnLink, así que si

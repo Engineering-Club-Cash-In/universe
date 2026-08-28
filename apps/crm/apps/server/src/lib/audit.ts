@@ -1,7 +1,9 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { ORPCError, os } from "@orpc/server";
 import type { Context as HonoContext, MiddlewareHandler } from "hono";
+import { eq } from "drizzle-orm";
 import { db } from "../db";
+import { user } from "../db/schema/auth";
 import { crmEntityAudit } from "../db/schema/crm-entity-audit";
 import type { Context } from "./context";
 
@@ -46,8 +48,8 @@ export type AuditContext = {
 	/** Quién responde por la escritura. Bajo suplantación, el admin que la inició. */
 	actorId: string | null;
 	actorRole: string | null;
-	/** Usuario suplantado, cuando la sesión es una suplantación. */
-	impersonatedFor?: string | null;
+	/** Identidad suplantada, cuando la sesión es una suplantación. */
+	impersonatedFor?: { usuario: string | null; rol: string | null } | null;
 	source: AuditSource;
 	/** `crm.updateOpportunity` o `POST /api/public/lead`. */
 	operation: string;
@@ -328,6 +330,25 @@ export type AuditMeta = {
 	audit?: { entity: AuditEntityType; action: string };
 };
 
+/** Rol del usuario que inició la suplantación. `null` si no se puede resolver. */
+async function resolveUserRole(userId: string): Promise<string | null> {
+	try {
+		const [fila] = await db
+			.select({ role: user.role })
+			.from(user)
+			.where(eq(user.id, userId))
+			.limit(1);
+		return fila?.role ?? null;
+	} catch (error) {
+		console.warn(
+			"[crm-entity-audit] no se pudo resolver el rol",
+			userId,
+			error,
+		);
+		return null;
+	}
+}
+
 const auditBase = os.$context<Context>().$meta<AuditMeta>({});
 
 /**
@@ -344,11 +365,19 @@ export const auditMiddleware = auditBase.middleware(
 		// el usuario: sin esto, todo lo hecho suplantando se le atribuiría al
 		// suplantado (ver `impersonatedBy` en lib/auth.ts).
 		const impersonatedBy = context.session?.session?.impersonatedBy ?? null;
+		// El rol tiene que ser el de quien responde por el cambio: dejar el del
+		// suplantado produciría filas con un id de admin y rol "sales". La consulta
+		// solo corre en sesiones suplantadas, que son excepcionales.
+		const rolIniciador = impersonatedBy
+			? await resolveUserRole(impersonatedBy)
+			: null;
 		return runWithAudit(
 			{
 				actorId: impersonatedBy ?? actor?.id ?? null,
-				actorRole: actor?.role ?? null,
-				impersonatedFor: impersonatedBy ? (actor?.id ?? null) : null,
+				actorRole: impersonatedBy ? rolIniciador : (actor?.role ?? null),
+				impersonatedFor: impersonatedBy
+					? { usuario: actor?.id ?? null, rol: actor?.role ?? null }
+					: null,
 				source: "crm",
 				operation: path.join("."),
 				input,
@@ -421,13 +450,19 @@ export function auditRequest(): MiddlewareHandler {
 	};
 }
 
-/** El body ya viene consumido por el handler; leerlo acá no puede romperlo. */
+/**
+ * El body ya viene consumido por el handler; leerlo acá no puede romperlo.
+ *
+ * Se mira el content-type ANTES de clonar: clonar tee-ea el stream, así que en
+ * una subida multipart grande (`/api/upload-vehicle-video`) la rama clonada que
+ * nadie lee se va llenando en memoria sin contrapresión mientras el handler
+ * consume el archivo.
+ */
 async function readRequestBody(c: HonoContext): Promise<unknown> {
+	const type = c.req.raw.headers.get("content-type") ?? "";
+	if (!type.includes("application/json")) return null;
 	try {
-		const cloned = c.req.raw.clone();
-		const type = cloned.headers.get("content-type") ?? "";
-		if (!type.includes("application/json")) return null;
-		return await cloned.json();
+		return await c.req.raw.clone().json();
 	} catch {
 		return null;
 	}

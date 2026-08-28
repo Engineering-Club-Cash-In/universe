@@ -273,8 +273,8 @@ describe("suplantación", () => {
 		const [row] = buildAuditRows(
 			contextWith({
 				actorId: "admin-1",
-				actorRole: "sales",
-				impersonatedFor: "vendedor-9",
+				actorRole: "admin",
+				impersonatedFor: { usuario: "vendedor-9", rol: "sales" },
 				entries: [
 					{
 						entity: "opportunity",
@@ -287,8 +287,11 @@ describe("suplantación", () => {
 			{ ok: true, durationMs: 3 },
 		);
 		expect(row.performedBy).toBe("admin-1");
+		// El rol también tiene que ser el del admin: un id de admin con rol
+		// "sales" es una fila que se contradice a sí misma.
+		expect(row.performedByRole).toBe("admin");
 		expect(row.input).toEqual({
-			_ejecutadoComo: "vendedor-9",
+			_ejecutadoComo: { usuario: "vendedor-9", rol: "sales" },
 			payload: { x: 1 },
 		});
 	});

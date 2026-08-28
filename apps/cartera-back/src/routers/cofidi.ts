@@ -717,7 +717,9 @@ if (facturasExistentes.length > 0) {
           : undefined,
       };
 
-      const facturasGeneradas = [];
+      // any[]: los pushes son heterogéneos por rubro (unos traen inversionista,
+      // otros flujo, etc.) y la ref del catch solo lee `tipo`.
+      const facturasGeneradas: any[] = [];
       facturasGeneradasRef = facturasGeneradas;
       const Big = (await import("big.js")).default;
       Big.DP = 20;

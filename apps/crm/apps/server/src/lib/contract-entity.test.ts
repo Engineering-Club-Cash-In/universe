@@ -47,6 +47,25 @@ describe("parseOpportunityInvestors", () => {
 			{ inversionista_id: 3, nombre: "Válido" },
 		]);
 	});
+
+	test("descarta entradas con identificador o métricas inválidas", () => {
+		const raw = JSON.stringify([
+			{ inversionista_id: "1", nombre: "Id como texto" },
+			{ inversionista_id: 2.5, nombre: "Id decimal" },
+			{ inversionista_id: 3, nombre: "Porcentaje inválido", porcentaje_participacion: 101 },
+			{ inversionista_id: 4, nombre: "Monto inválido", monto_aportado: -1 },
+			{ inversionista_id: 5, nombre: "Válido", porcentaje_participacion: 50, monto_aportado: 100 },
+		]);
+
+		expect(parseOpportunityInvestors(raw)).toEqual([
+			{
+				inversionista_id: 5,
+				nombre: "Válido",
+				porcentaje_participacion: 50,
+				monto_aportado: 100,
+			},
+		]);
+	});
 });
 
 describe("selectPrimaryInvestor", () => {

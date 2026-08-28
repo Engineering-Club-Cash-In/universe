@@ -542,7 +542,9 @@ function OpportunityDocumentsPage() {
 							<p className="font-medium text-amber-800">
 								{formatMissingAssignmentsMessage(faltan)}
 							</p>
-							<p className="text-amber-700">Asígnelos antes de aprobar.</p>
+							<p className="text-amber-700">
+								Recomendado antes de generar contratos.
+							</p>
 							<div className="flex flex-wrap items-center gap-3 pt-1">
 								<Button
 									size="sm"

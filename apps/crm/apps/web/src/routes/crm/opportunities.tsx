@@ -456,7 +456,7 @@ function RouteComponent() {
 	const [stageIdFilter, setStageIdFilter] = usePersistedState<string>("crm/opportunities/stageIdFilter", "all");
 	const processedCompanyIdRef = useRef<string | null>(null);
 	const processedOpportunityIdRef = useRef<string | null>(null);
-	const processedEditRef = useRef(false);
+	const processedEditRef = useRef<string | null>(null);
 	const prevEditOpenRef = useRef(false);
 	const prevOpenRef = useRef(isCreateDialogOpen);
 	const prevDetailsOpenRef = useRef(isDetailsDialogOpen);
@@ -893,9 +893,15 @@ function RouteComponent() {
 		...orpc.getOpportunities.queryOptions({
 			input: {
 				excludeStatuses: ["migrate"],
-				createdMonth: month,
-				createdYear: year,
-				...(sourceFilter !== "all" ? { source: sourceFilter as any } : {}),
+				...(search.opportunityId
+					? { opportunityId: search.opportunityId }
+					: {
+							createdMonth: month,
+							createdYear: year,
+							...(sourceFilter !== "all"
+								? { source: sourceFilter as any }
+								: {}),
+						}),
 			},
 		}),
 		enabled:
@@ -909,6 +915,7 @@ function RouteComponent() {
 			month,
 			year,
 			sourceFilter,
+			search.opportunityId,
 		],
 	});
 	// Stats filtradas por mes (usa el backend que filtra por opportunityStageHistory.changedAt)
@@ -1171,6 +1178,7 @@ function RouteComponent() {
 					...buildOpportunityRelationshipPatch({
 						values: { leadId, companyId, vehicleId },
 						opportunity: selectedOpportunity,
+						vehicleIsNew: editedVehicleIsNew,
 					}),
 					creditType: value.creditType,
 					// null y no undefined: en edición "Sin vendedor asignado" tiene
@@ -1223,6 +1231,16 @@ function RouteComponent() {
 			}
 		},
 	});
+
+	const editedVehicleId = editOpportunityForm.state.values.vehicleId;
+	const editedVehicle = vehiclesQuery.data?.data?.find(
+		(vehicle: { id: string }) => vehicle.id === editedVehicleId,
+	);
+	const editedVehicleIsNew =
+		editedVehicle?.isNew ??
+		(editedVehicleId === selectedOpportunity?.vehicleId
+			? selectedOpportunity?.vehicle?.isNew
+			: false);
 
 	const createOpportunityMutation = useMutation({
 		mutationFn: (input: {
@@ -1497,11 +1515,16 @@ function RouteComponent() {
 	// que el efecto de arriba acaba de setear y todavía no está en el closure.
 	useEffect(() => {
 		if (search.edit !== "1") {
-			processedEditRef.current = false;
+			processedEditRef.current = null;
 			return;
 		}
-		if (!selectedOpportunity || processedEditRef.current) return;
-		processedEditRef.current = true;
+		if (
+			!selectedOpportunity ||
+			search.opportunityId !== selectedOpportunity.id ||
+			processedEditRef.current === selectedOpportunity.id
+		)
+			return;
+		processedEditRef.current = selectedOpportunity.id;
 		handleEditOpportunity(true);
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [search.edit, selectedOpportunity]);
@@ -1513,6 +1536,7 @@ function RouteComponent() {
 		prevEditOpenRef.current = isEditDialogOpen;
 
 		if (wasOpen && !isEditDialogOpen && search.edit === "1") {
+			processedOpportunityIdRef.current = null;
 			navigate({ to: "/crm/opportunities", search: {}, replace: true });
 		}
 	}, [isEditDialogOpen, navigate, search.edit]);
@@ -3151,7 +3175,7 @@ function RouteComponent() {
 							</div>
 							{/* La empresa (agencia) solo aplica a vehículos nuevos y puede
 							    corregirse si quedó heredada o desactualizada. */}
-							{selectedOpportunity?.vehicle?.isNew !== false && (
+							{editedVehicleIsNew === true && (
 								<div>
 									<editOpportunityForm.Field name="companyId">
 										{(field) => (

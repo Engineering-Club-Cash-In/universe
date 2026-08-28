@@ -1652,16 +1652,30 @@ export function DynamicContractWizard({
 	const vendorGenderSelected =
 		fieldValues.genderVendedor === "male" ||
 		fieldValues.genderVendedor === "female";
+	const unsupportedDisbursementCount = selectedDocuments.includes(
+		"carta_emision_cheques",
+	)
+		? (crmData.desembolso?.omitidosPorMoneda ?? 0)
+		: 0;
 	const canProceedStep2 =
 		(fieldStats.required === 0 ||
 			fieldStats.filledRequired === fieldStats.required) &&
-		(!vendorDeclarationSelected || vendorGenderSelected);
+		(!vendorDeclarationSelected || vendorGenderSelected) &&
+		unsupportedDisbursementCount === 0;
 
 	const handleNext = async () => {
 		if (step === 1 && canProceedStep1) {
 			await fetchDocumentsData();
 			setStep(2);
-		} else if (step === 2 && canProceedStep2) {
+		} else if (step === 2) {
+			if (unsupportedDisbursementCount > 0) {
+				toast.error(
+					`No se puede generar la carta: ${unsupportedDisbursementCount} cheque(s) no están en GTQ. Corrige la moneda en el detalle de crédito.`,
+				);
+				return;
+			}
+			if (!canProceedStep2) return;
+
 			try {
 				if (vendorDeclarationSelected && !vendorGenderSelected) {
 					setFieldErrors((prev) => ({
@@ -1946,6 +1960,28 @@ export function DynamicContractWizard({
 							</div>
 						) : (
 							<>
+								{unsupportedDisbursementCount > 0 && (
+									<Card className="border-red-300 bg-red-50/70 dark:border-red-900/60 dark:bg-red-950/30">
+										<CardHeader>
+											<CardTitle className="flex items-center gap-2 text-red-900 dark:text-red-200">
+												<TriangleAlert className="h-5 w-5 shrink-0" />
+												Moneda no soportada en desembolsos
+											</CardTitle>
+										</CardHeader>
+										<CardContent>
+											<p className="text-red-800 text-sm dark:text-red-200">
+												Se encontraron {unsupportedDisbursementCount} cheque(s) en
+												una moneda distinta de GTQ. Esos cheques no pueden
+												incluirse correctamente en la carta.
+											</p>
+											<p className="mt-2 text-red-800 text-sm dark:text-red-200">
+												Corrige la moneda en el detalle de crédito antes de
+												generar el contrato.
+											</p>
+										</CardContent>
+									</Card>
+								)}
+
 								{/* RENAP Info */}
 								{renapData && (
 									<Card>

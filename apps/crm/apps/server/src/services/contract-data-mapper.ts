@@ -890,6 +890,34 @@ export function transformToApiFormat(
 		baseFields.contract_end_year = data.contrato.fechaInicio.yearPartial;
 	}
 
+	// Campos específicos que también consume el endpoint legacy. El flujo nuevo
+	// los envía directamente desde el wizard, pero este endpoint pasa por este
+	// adaptador y no debe perder los datos calculados por el mapper.
+	if (data.vendedor) {
+		baseFields.nombreVendedor = data.vendedor.nombreMayusculas;
+		baseFields.dpiVendedor = data.vendedor.dpi;
+		baseFields.dpiTextoVendedor = data.vendedor.dpiLetras;
+	}
+
+	const primeraFilaDesembolso = data.desembolso?.filas[0];
+	const segundaFilaDesembolso = data.desembolso?.filas[1];
+	if (primeraFilaDesembolso) {
+		baseFields.cuenta = primeraFilaDesembolso.cuenta;
+		baseFields.valor = primeraFilaDesembolso.valor;
+	}
+	if (segundaFilaDesembolso) {
+		baseFields.cuenta2 = segundaFilaDesembolso.cuenta;
+		baseFields.valor2 = segundaFilaDesembolso.valor;
+	}
+
+	if (data.entidad) {
+		baseFields.entidad = data.entidad.nombre;
+		baseFields.tipoEntidad = data.entidad.tipo;
+	}
+	if (data.agencia) {
+		baseFields.agencia = data.agencia;
+	}
+
 	// Agregar beneficiarios si existen
 	if (data.beneficiarios && data.beneficiarios.length > 0) {
 		baseFields.beneficiarios = data.beneficiarios.map((b) => ({

@@ -2762,6 +2762,23 @@ export const crmRouter = {
 			const vehicleChanged =
 				input.vehicleId !== undefined &&
 				input.vehicleId !== currentOpportunity[0].vehicleId;
+
+			// La compañía representa la agencia únicamente para vehículos nuevos.
+			// Si se cambia a un usado (o se quita el vehículo), no conservar una
+			// compañía heredada o enviada por un caller de la API.
+			if (vehicleChanged) {
+				const [newVehicle] = input.vehicleId
+					? await db
+							.select({ isNew: vehicles.isNew })
+							.from(vehicles)
+							.where(eq(vehicles.id, input.vehicleId))
+							.limit(1)
+					: [];
+
+				if (newVehicle?.isNew !== true) {
+					updateData.companyId = null;
+				}
+			}
 			const currentInsuranceProvider =
 				currentOpportunity[0].insuranceProvider ?? "universales";
 			const insuranceFallback =

@@ -63,6 +63,7 @@ export const WON_OPPORTUNITY_FROZEN_FIELD_LABELS = {
 	vehicleId: "el vehículo",
 	leadId: "el cliente",
 	companyId: "la empresa",
+	vendorId: "el vendedor",
 	creditType: "el tipo de crédito",
 	status: "el estado",
 	// Términos financieros: `close-opportunity` los copia tal cual al crédito de

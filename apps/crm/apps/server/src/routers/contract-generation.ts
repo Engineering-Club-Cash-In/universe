@@ -298,6 +298,16 @@ export const contractGenerationRouter = {
 				});
 			}
 
+			if (
+				input.contractTypes.includes("autorizacion_desembolso") &&
+				(contractData.desembolso?.omitidosPorMoneda ?? 0) > 0
+			) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"No se puede generar la carta de desembolso: hay cheques en una moneda distinta de GTQ",
+				});
+			}
+
 			// 5. Agregar beneficiarios si se proporcionaron
 			if (input.beneficiarios && input.beneficiarios.length > 0) {
 				const { numberToWordsQuetzales } = await import(

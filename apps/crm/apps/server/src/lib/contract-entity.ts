@@ -35,7 +35,19 @@ export function parseOpportunityInvestors(
 
 		return parsed.filter(
 			(item): item is OpportunityInvestor =>
-				typeof item?.nombre === "string" && item.nombre.trim() !== "",
+				typeof item?.inversionista_id === "number" &&
+				Number.isInteger(item.inversionista_id) &&
+				item.inversionista_id > 0 &&
+				typeof item?.nombre === "string" &&
+				item.nombre.trim() !== "" &&
+				(item.porcentaje_participacion === undefined ||
+					(typeof item.porcentaje_participacion === "number" &&
+						Number.isFinite(item.porcentaje_participacion) &&
+						item.porcentaje_participacion >= 0 &&
+						item.porcentaje_participacion <= 100)) &&
+				(item.monto_aportado === undefined ||
+					(typeof item.monto_aportado === "number" &&
+						Number.isFinite(item.monto_aportado) && item.monto_aportado >= 0)),
 		);
 	} catch {
 		return [];

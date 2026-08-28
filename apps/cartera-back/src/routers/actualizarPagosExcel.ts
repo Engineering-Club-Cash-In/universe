@@ -38,6 +38,7 @@ import { creditos, cuotas_credito, pagos_credito } from "../database/db";
 import { authMiddleware } from "./midleware";
 import { debeProtegerCuota, pagoTieneAplicacion } from "./actualizarPagosExcelPolicy";
 import { tieneMontosFacturables } from "../controllers/estadoFacturacionPago";
+import { adquirirPaymentAdvisoryLocks } from "../utils/paymentAdvisoryLock";
 import {
   descargarCarteraDeR2,
   leerPagosCarteraPorVencimiento,
@@ -494,6 +495,21 @@ export const actualizarPagosExcelRouter = new Elysia()
       }
 
       // 7️⃣ Escribir TODO en una sola transacción (atómico).
+      // 🔒 Serializado contra /facturar-pago-completo con los MISMOS locks por
+      //    crédito (una conexión, ids ordenados): sin esto, una facturación en
+      //    curso podía certificar los montos VIEJOS mientras acá se escribían
+      //    los nuevos, y su OK final pisaba el re-abierto de abajo — DTE vivo
+      //    que no cuadra con un pago escondido como facturado. (Codex P1)
+      const creditosRes = await db.execute(sql`
+        SELECT DISTINCT credito_id
+        FROM cartera.pagos_credito
+        WHERE pago_id = ANY(string_to_array(${updatesGlobal.map((u) => u.pago_id).join(",")}, ',')::int[])
+          AND credito_id IS NOT NULL
+      `);
+      const soltarLocksSync = await adquirirPaymentAdvisoryLocks(
+        ((creditosRes as any).rows as any[]).map((r) => Number(r.credito_id))
+      );
+      try {
       try {
         await db.transaction(async (tx) => {
           for (const { pago_id, datos } of updatesGlobal) {
@@ -559,6 +575,9 @@ export const actualizarPagosExcelRouter = new Elysia()
           motivo: "Error al escribir; la transacción se revirtió por completo.",
           error: e?.message ?? String(e),
         };
+      }
+      } finally {
+        await soltarLocksSync();
       }
 
       set.status = 200;

@@ -51,6 +51,52 @@ export async function adquirirPaymentAdvisoryLock(
   };
 }
 
+/**
+ * Toma el lock de VARIOS créditos con UNA sola conexión del lockPool, en orden
+ * ascendente (dos corridas concurrentes que compartan créditos siempre los
+ * piden en el mismo orden → sin deadlock). Para flujos batch como
+ * /actualizar-pagos-excel, donde una conexión por crédito agotaría el pool.
+ * El release (idempotente, SIEMPRE en un finally) libera en orden inverso.
+ */
+export async function adquirirPaymentAdvisoryLocks(
+  creditoIds: number[]
+): Promise<() => Promise<void>> {
+  const ids = [...new Set(creditoIds)].sort((a, b) => a - b);
+  const lockConn: PaymentAdvisoryLockConnection = await lockPool.connect();
+  const tomados: number[] = [];
+  const soltarTodos = async () => {
+    for (const id of [...tomados].reverse()) {
+      try {
+        await lockConn.query("SELECT pg_advisory_unlock($1, $2)", [
+          PAYMENT_ADVISORY_LOCK_NAMESPACE,
+          id,
+        ]);
+      } catch (unlockError) {
+        console.error("⚠️ Error liberando advisory lock:", unlockError);
+      }
+    }
+    lockConn.release();
+  };
+  try {
+    for (const id of ids) {
+      await lockConn.query("SELECT pg_advisory_lock($1, $2)", [
+        PAYMENT_ADVISORY_LOCK_NAMESPACE,
+        id,
+      ]);
+      tomados.push(id);
+    }
+  } catch (error) {
+    await soltarTodos();
+    throw error;
+  }
+  let liberado = false;
+  return async () => {
+    if (liberado) return;
+    liberado = true;
+    await soltarTodos();
+  };
+}
+
 export async function withPaymentAdvisoryLock<T>(
   credito_id: number,
   fn: () => Promise<T>

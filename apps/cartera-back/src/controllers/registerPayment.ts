@@ -3424,7 +3424,11 @@ export async function aplicarAbonoCapitalInversionistas(
       // con factura_status NULL): al aplicarlos, si sigue NULL se inicializa por
       // SQL según sus montos — sin pisar un estado ya escrito (p. ej. OK si ya
       // se facturó la mora). Los nuevos ya nacen inicializados en el insert.
-      factura_status: sql`COALESCE(factura_status, CASE WHEN abono_interes > 0 OR abono_iva_12 > 0 OR abono_seguro > 0 OR abono_gps > 0 OR membresias_pago > 0 OR mora > 0 OR COALESCE(substring(otros FROM '^[0-9]+\\.?[0-9]*')::numeric, 0) > 0 THEN 'PENDIENTE' ELSE 'NO_APLICA' END)`,
+      // El regex de `otros` replica parseFloat (igual que la emisión y
+      // tieneMontosFacturables): btrim + signo opcional + '.50' con punto
+      // inicial — sin esto, un legacy ' 12abc'/'.50'/'+12' caía a NO_APLICA
+      // aunque la emisión SÍ facturaría su OTROS. (Codex P2)
+      factura_status: sql`COALESCE(factura_status, CASE WHEN abono_interes > 0 OR abono_iva_12 > 0 OR abono_seguro > 0 OR abono_gps > 0 OR membresias_pago > 0 OR mora > 0 OR COALESCE(substring(btrim(otros) FROM '^[+-]?([0-9]+\\.?[0-9]*|\\.[0-9]+)')::numeric, 0) > 0 THEN 'PENDIENTE' ELSE 'NO_APLICA' END)`,
       // Estampar la fecha de aplicación. Antes este flujo dejaba `fecha_aplicado`
       // en NULL → el abono quedaba "validado sin fecha". Se guarda en UTC con
       // `new Date()` igual que los demás writers de `fecha_aplicado` (~2149/2266

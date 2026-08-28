@@ -145,6 +145,10 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
     // Visible para el catch: en re-corrida FALTANTES el pago tiene DTEs activos
     // válidos, así que un fallo NO puede degradar su estado a FALLIDA (piso PARCIAL).
     let esRecorridaParcial = false;
+    // También visible para el catch: si la corrida INICIAL ya certificó algún
+    // DTE antes de que una excepción escapara (p. ej. MORA salió y el prorrateo
+    // tronó), el pago tiene facturas vivas → el piso también es PARCIAL.
+    let facturasGeneradasRef: Array<{ tipo: string }> = [];
 
     try {
 
@@ -714,6 +718,7 @@ if (facturasExistentes.length > 0) {
       };
 
       const facturasGeneradas = [];
+      facturasGeneradasRef = facturasGeneradas;
       const Big = (await import("big.js")).default;
       Big.DP = 20;
       Big.RM = Big.roundHalfUp;
@@ -2503,8 +2508,9 @@ if (facturasExistentes.length > 0) {
       };
     } catch (error) {
       console.error("❌ Error facturando pago completo:", error);
+      const huboDTEsEmitidos = facturasGeneradasRef.some((f) => f.tipo !== "ERROR");
       await registrarEstadoFacturacion(pago_id, {
-        estado: esRecorridaParcial ? "PARCIAL" : "FALLIDA",
+        estado: esRecorridaParcial || huboDTEsEmitidos ? "PARCIAL" : "FALLIDA",
         motivo: (error as Error).message,
       });
       set.status = 500;

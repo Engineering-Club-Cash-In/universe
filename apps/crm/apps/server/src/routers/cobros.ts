@@ -4956,6 +4956,15 @@ export const cobrosRouter = {
 				.orderBy(desc(pagaloPaymentGroups.createdAt));
 			if (grupos.length === 0) return [];
 
+			// El payload crudo de cada evento (motivo del supervisor al
+			// invalidar/regenerar, detalle de rechazo de cartera, etc.) es
+			// sensible — BitacoraPagalo (web) gatea su visibilidad a
+			// supervisor, pero eso es solo ocultar en el cliente: el payload
+			// completo ya viajaba en esta respuesta y cualquier asesor con
+			// acceso al caso podía leerlo inspeccionando la respuesta RPC
+			// directa (hallazgo de code review). Se omite server-side para
+			// quien no sea supervisor.
+			const esSupervisor = PERMISSIONS.canAssignCobros(context.userRole);
 			const groupIds = grupos.map((g) => g.id);
 			const actor = alias(user, "pagalo_evento_actor");
 			const [links, eventos] = await Promise.all([
@@ -5004,7 +5013,12 @@ export const cobrosRouter = {
 			return grupos.map((grupo) => ({
 				...grupo,
 				links: links.filter((l) => l.groupId === grupo.id),
-				eventos: eventos.filter((e) => e.groupId === grupo.id),
+				eventos: eventos
+					.filter((e) => e.groupId === grupo.id)
+					.map((e) => ({
+						...e,
+						payload: esSupervisor ? e.payload : null,
+					})),
 			}));
 		}),
 

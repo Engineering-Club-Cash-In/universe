@@ -62,8 +62,9 @@ export function calcularFactorPonderadoPorMonto(
  *       porcentajeGeneral = monto_aportado / Σmonto_aportado.
  *
  * Incluye TODOS los inversionistas (incl. self-billing / emite_factura=true).
- * NO calcula residuo — eso es Task 2.
- * Devuelve abono_interes y abono_iva_12 como Big sin redondear; el caller redondea al persistir.
+ * Los inversionistas externos se redondean a centavos y CUBE recibe el
+ * residuo exacto del pago. La tabla destino es numeric(18,2), por lo que
+ * calcular el residuo antes de persistir evita brechas por redondeo fila a fila.
  */
 export function calcularSplitInteresPci(args: {
   inversionistas: InvSplitInput[];
@@ -73,44 +74,59 @@ export function calcularSplitInteresPci(args: {
 }): InvSplitRow[] {
   const { inversionistas, pagoAbonoInteres, pagoAbonoIva, factorInteresPorInv } = args;
 
+  const cubeIndex = inversionistas.findIndex(
+    (inv) => inv.nombre.trim().toLowerCase() === "cube investments s.a.",
+  );
   const factoresParticipacion = inversionistas.map((inv) => {
     const isCube =
-      inv.nombre.trim().toLowerCase() === "cube investments s.a.".toLowerCase();
+      inv.nombre.trim().toLowerCase() === "cube investments s.a.";
     return isCube
       ? new Big(inv.porcentaje_cash_in ?? 0).div(100)
       : new Big(inv.porcentaje_participacion_inversionista ?? 0).div(100);
   });
   const ownerships = calcularPropiedadesPorMonto(
-    inversionistas.map((inv) => {
-      return {
-        montoAportado: new Big(inv.monto_aportado ?? 0),
-      };
-    }),
+    inversionistas.map((inv) => ({
+      montoAportado: new Big(inv.monto_aportado ?? 0),
+    })),
   );
 
-  const result: InvSplitRow[] = [];
-
-  for (const [index, inv] of inversionistas.entries()) {
-
-    let abonoInteresInv: Big;
-    let abonoIvaInv: Big;
-
-    if (factorInteresPorInv) {
-      const f = factorInteresPorInv.get(inv.inversionista_id) ?? new Big(0);
-      abonoInteresInv = pagoAbonoInteres.times(f);
-      abonoIvaInv = pagoAbonoIva.times(f);
-    } else {
-      const factor = factoresParticipacion[index] ?? new Big(0);
-      const ownership = ownerships[index] ?? new Big(0);
-      abonoInteresInv = pagoAbonoInteres.times(factor).times(ownership);
-      abonoIvaInv = pagoAbonoIva.times(factor).times(ownership);
+  const result: InvSplitRow[] = inversionistas.map((inv, index) => {
+    if (index === cubeIndex) {
+      return {
+        inversionista_id: inv.inversionista_id,
+        abono_interes: new Big(0),
+        abono_iva_12: new Big(0),
+      };
     }
 
-    result.push({
+    const factor = factorInteresPorInv
+      ? (factorInteresPorInv.get(inv.inversionista_id) ?? new Big(0))
+      : (factoresParticipacion[index] ?? new Big(0)).times(
+          ownerships[index] ?? new Big(0),
+        );
+    return {
       inversionista_id: inv.inversionista_id,
-      abono_interes: abonoInteresInv,
-      abono_iva_12: abonoIvaInv,
-    });
+      abono_interes: pagoAbonoInteres.times(factor).round(2),
+      abono_iva_12: pagoAbonoIva.times(factor).round(2),
+    };
+  });
+
+  if (cubeIndex >= 0) {
+    const interesExterno = result.reduce(
+      (total, row, index) =>
+        index === cubeIndex ? total : total.plus(row.abono_interes),
+      new Big(0),
+    );
+    const ivaExterno = result.reduce(
+      (total, row, index) =>
+        index === cubeIndex ? total : total.plus(row.abono_iva_12),
+      new Big(0),
+    );
+    result[cubeIndex] = {
+      inversionista_id: inversionistas[cubeIndex]!.inversionista_id,
+      abono_interes: pagoAbonoInteres.round(2).minus(interesExterno),
+      abono_iva_12: pagoAbonoIva.round(2).minus(ivaExterno),
+    };
   }
 
   return result;

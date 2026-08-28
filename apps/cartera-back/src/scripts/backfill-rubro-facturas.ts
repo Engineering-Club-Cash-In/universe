@@ -1,14 +1,14 @@
 // ============================================================
-// Backfill de `facturas_electronicas.concepto` (+ inversionista_id).
+// Backfill de `facturas_electronicas.rubro` (+ inversionista_id).
 //
 // Contexto:
-//   La columna `concepto` la agregó la migración 0030 para poder re-facturar solo
+//   La columna `rubro` la agregó la migración 0030 para poder re-facturar solo
 //   los rubros que faltaron cuando una corrida de /facturar-pago-completo sale a
 //   medias (src/cofidi/facturasFaltantes.ts). Todo lo emitido ANTES de esa
-//   migración quedó en NULL, y el diff trata "concepto NULL" como BLOQUEADO:
+//   migración quedó en NULL, y el diff trata "rubro NULL" como BLOQUEADO:
 //   esos pagos siguen necesitando anular todo a mano.
 //
-//   Este script infiere el concepto a posteriori CRUZANDO POR MONTO el
+//   Este script infiere el rubro a posteriori CRUZANDO POR MONTO el
 //   `monto_total` del DTE contra los rubros del mismo pago.
 //
 // Fuentes de candidatos (por pago):
@@ -41,11 +41,11 @@
 //
 // USO:
 //   SUPABASE_DB_URL=postgresql://postgres:...@localhost:5433/dump20260828 \
-//     bun run src/scripts/backfill-concepto-facturas.ts            # dry-run (default)
-//   ... bun run src/scripts/backfill-concepto-facturas.ts --apply  # escribe
+//     bun run src/scripts/backfill-rubro-facturas.ts            # dry-run (default)
+//   ... bun run src/scripts/backfill-rubro-facturas.ts --apply  # escribe
 //
 //   Opcional: --sample=N ejemplos por categoría; --csv=RUTA para el reporte de
-//   re-emisiones (default /private/tmp/backfill-concepto-reemisiones.csv).
+//   re-emisiones (default /private/tmp/backfill-rubro-reemisiones.csv).
 //
 // ⚠️ ANTES DE --apply EN PROD: revisar con conta el CSV de re-emisiones. Etiquetar
 //    habilita el modo FALTANTES, y los pagos listados ahí emitirían DTEs nuevos
@@ -71,7 +71,7 @@ const SAMPLE = Number(
 /** CSV con los pagos que quedarían re-facturables (para que conta los revise). */
 const CSV_PATH =
   process.argv.find((a) => a.startsWith("--csv="))?.split("=")[1] ??
-  "/private/tmp/backfill-concepto-reemisiones.csv";
+  "/private/tmp/backfill-rubro-reemisiones.csv";
 
 /** NIT emisor de CUBE: cualquier otro NIT es un facturador propio de inversionista. */
 const NIT_CUBE = CLUB_CASHIN_CONFIG.emisor.nit;
@@ -83,10 +83,10 @@ const FACTURADORES_POR_NIT: Record<string, string[]> = Object.fromEntries(
   INVERSIONISTAS_FACTURADORES.map((f) => [String(f.config.emisor.nit), f.keywords])
 );
 
-type Concepto = "MORA" | "OTROS_SERVICIOS" | "OTROS" | "INTERESES" | "INTERESES_CUBE";
+type Rubro = "MORA" | "OTROS_SERVICIOS" | "OTROS" | "INTERESES" | "INTERESES_CUBE";
 
 type Candidato = {
-  concepto: Concepto;
+  rubro: Rubro;
   inversionista_id: number | null;
   /** Nombre del inversionista (solo INTERESES), para desempatar por emisor. */
   nombre?: string;
@@ -107,13 +107,13 @@ const idsCsv = (ids: number[]) => ids.join(",");
 const esCube = esInversionistaCube;
 
 async function main() {
-  console.log(`\n🏷️  Backfill de concepto en facturas_electronicas (${APPLY ? "APPLY" : "DRY-RUN"})\n`);
+  console.log(`\n🏷️  Backfill de rubro en facturas_electronicas (${APPLY ? "APPLY" : "DRY-RUN"})\n`);
 
   // ── 1. Facturas sin etiquetar (ACTIVAS y ANULADAS, con pago) ────────────────
   const facturasRes = await db.execute(sql`
     SELECT factura_id, pago_id, monto_total::text AS monto_total, emisor_nit, status::text AS status
     FROM cartera.facturas_electronicas
-    WHERE concepto IS NULL
+    WHERE rubro IS NULL
       AND pago_id IS NOT NULL
     ORDER BY factura_id
   `);
@@ -126,12 +126,12 @@ async function main() {
   }[];
 
   if (facturas.length === 0) {
-    console.log("✅ No hay facturas sin concepto con pago asociado. Nada que hacer.");
+    console.log("✅ No hay facturas sin rubro con pago asociado. Nada que hacer.");
     return;
   }
 
   const pagoIds = [...new Set(facturas.map((f) => f.pago_id))];
-  console.log(`📄 ${facturas.length} factura(s) sin concepto sobre ${pagoIds.length} pago(s).`);
+  console.log(`📄 ${facturas.length} factura(s) sin rubro sobre ${pagoIds.length} pago(s).`);
 
   // ── 2. Candidatos por pago ─────────────────────────────────────────────────
   const candidatos = new Map<number, Candidato[]>();
@@ -155,14 +155,14 @@ async function main() {
     porPagoDesglose.set(r.pago_id, m);
   }
   for (const [pago_id, rubros] of porPagoDesglose) {
-    push(pago_id, { concepto: "MORA", inversionista_id: null, monto: fix2(rubros.get("MORA") ?? 0), fuente: "desglose" });
-    push(pago_id, { concepto: "OTROS", inversionista_id: null, monto: fix2(rubros.get("OTROS") ?? 0), fuente: "desglose" });
+    push(pago_id, { rubro: "MORA", inversionista_id: null, monto: fix2(rubros.get("MORA") ?? 0), fuente: "desglose" });
+    push(pago_id, { rubro: "OTROS", inversionista_id: null, monto: fix2(rubros.get("OTROS") ?? 0), fuente: "desglose" });
     const otrosServicios = (rubros.get("SEGURO") ?? new Big(0))
       .plus(rubros.get("GPS") ?? new Big(0))
       .plus(rubros.get("MEMBRESIA") ?? new Big(0));
-    push(pago_id, { concepto: "OTROS_SERVICIOS", inversionista_id: null, monto: fix2(otrosServicios), fuente: "desglose" });
+    push(pago_id, { rubro: "OTROS_SERVICIOS", inversionista_id: null, monto: fix2(otrosServicios), fuente: "desglose" });
     // El rubro INTERES del desglose ES el total del DTE de CUBE (residuo + cash_in).
-    push(pago_id, { concepto: "INTERESES_CUBE", inversionista_id: null, monto: fix2(rubros.get("INTERES") ?? 0), fuente: "desglose" });
+    push(pago_id, { rubro: "INTERESES_CUBE", inversionista_id: null, monto: fix2(rubros.get("INTERES") ?? 0), fuente: "desglose" });
   }
 
   // 2b. pagos_credito como fallback para los pagos SIN desglose.
@@ -206,12 +206,12 @@ async function main() {
       }
 
       if (!sinDesglose.has(p.pago_id)) continue; // el fallback 2b es solo sin desglose
-      push(p.pago_id, { concepto: "MORA", inversionista_id: null, monto: fix2(p.mora), fuente: "pagos_credito" });
-      push(p.pago_id, { concepto: "OTROS", inversionista_id: null, monto: fix2(p.otros), fuente: "pagos_credito" });
+      push(p.pago_id, { rubro: "MORA", inversionista_id: null, monto: fix2(p.mora), fuente: "pagos_credito" });
+      push(p.pago_id, { rubro: "OTROS", inversionista_id: null, monto: fix2(p.otros), fuente: "pagos_credito" });
       const otrosServicios = new Big(fix2(p.abono_seguro))
         .plus(fix2(p.abono_gps))
         .plus(fix2(p.membresias_pago));
-      push(p.pago_id, { concepto: "OTROS_SERVICIOS", inversionista_id: null, monto: fix2(otrosServicios), fuente: "pagos_credito" });
+      push(p.pago_id, { rubro: "OTROS_SERVICIOS", inversionista_id: null, monto: fix2(otrosServicios), fuente: "pagos_credito" });
     }
   }
 
@@ -247,7 +247,7 @@ async function main() {
   for (const r of (invRes as any).rows as any[]) {
     if (esCube(r.nombre)) continue; // el DTE de CUBE es el residuo, no su fila de pci
     push(r.pago_id, {
-      concepto: "INTERESES",
+      rubro: "INTERESES",
       inversionista_id: r.inversionista_id,
       nombre: r.nombre,
       monto: fix2(r.total),
@@ -259,13 +259,13 @@ async function main() {
   const decisiones: {
     factura_id: number;
     pago_id: number;
-    concepto: Concepto;
+    rubro: Rubro;
     inversionista_id: number | null;
     fuente: string;
   }[] = [];
   const sinMatch: typeof facturas = [];
   const ambiguas: { f: (typeof facturas)[number]; opciones: string[] }[] = [];
-  const porConcepto = new Map<string, number>();
+  const porRubro = new Map<string, number>();
   const porFuente = new Map<string, number>();
   const ejemplos = new Map<string, string[]>();
 
@@ -289,7 +289,7 @@ async function main() {
       const keywords = FACTURADORES_POR_NIT[f.emisor_nit];
       matches = matches.filter(
         (c) =>
-          c.concepto === "INTERESES" &&
+          c.rubro === "INTERESES" &&
           // NIT conocido: además el candidato debe ser el inversionista de ESE
           // facturador. NIT no-CUBE desconocido: al menos nunca MORA/OTROS/etc.
           (!keywords || keywords.some((k) => (c.nombre ?? "").toUpperCase().includes(k)))
@@ -299,7 +299,7 @@ async function main() {
     // Duplicados exactos del MISMO candidato (p. ej. pci y desglose coincidiendo)
     // no son ambigüedad: colapsan a una sola decisión.
     const unicos = new Map<string, Candidato>();
-    for (const c of matches) unicos.set(`${c.concepto}:${c.inversionista_id ?? ""}`, c);
+    for (const c of matches) unicos.set(`${c.rubro}:${c.inversionista_id ?? ""}`, c);
     matches = [...unicos.values()];
 
     // 🛡️ Candidato INTERESES_CUBE DESCONOCIDO (pago sin desglose y con interés).
@@ -315,10 +315,10 @@ async function main() {
       emisorPuedeSerCube &&
       pagosConCubeIrreconstruible.has(f.pago_id)
     ) {
-      ambiguas.push({ f, opciones: [...matches.map((c) => c.concepto), "INTERESES_CUBE(desconocido)"] });
+      ambiguas.push({ f, opciones: [...matches.map((c) => c.rubro), "INTERESES_CUBE(desconocido)"] });
       anota(
         "ambigua_cube_desconocido",
-        `factura ${f.factura_id} (pago ${f.pago_id}) Q${monto} → ${matches.map((c) => c.concepto).join("|")} vs el DTE de CUBE del pago, que no se puede reconstruir`
+        `factura ${f.factura_id} (pago ${f.pago_id}) Q${monto} → ${matches.map((c) => c.rubro).join("|")} vs el DTE de CUBE del pago, que no se puede reconstruir`
       );
       continue;
     }
@@ -328,19 +328,19 @@ async function main() {
       decisiones.push({
         factura_id: f.factura_id,
         pago_id: f.pago_id,
-        concepto: c.concepto,
-        inversionista_id: c.concepto === "INTERESES" ? c.inversionista_id : null,
+        rubro: c.rubro,
+        inversionista_id: c.rubro === "INTERESES" ? c.inversionista_id : null,
         fuente: c.fuente,
       });
-      const k = c.concepto;
-      porConcepto.set(k, (porConcepto.get(k) ?? 0) + 1);
+      const k = c.rubro;
+      porRubro.set(k, (porRubro.get(k) ?? 0) + 1);
       porFuente.set(c.fuente, (porFuente.get(c.fuente) ?? 0) + 1);
       anota(`ok:${k}`, `factura ${f.factura_id} (pago ${f.pago_id}) Q${monto} → ${k}${c.inversionista_id ? ` inv ${c.inversionista_id}` : ""} [${c.fuente}]`);
     } else if (matches.length === 0) {
       sinMatch.push(f);
-      anota("sin_match", `factura ${f.factura_id} (pago ${f.pago_id}) Q${monto} emisor ${f.emisor_nit ?? "?"} | candidatos: ${(candidatos.get(f.pago_id) ?? []).map((c) => `${c.concepto}=${c.monto}`).join(", ") || "ninguno"}`);
+      anota("sin_match", `factura ${f.factura_id} (pago ${f.pago_id}) Q${monto} emisor ${f.emisor_nit ?? "?"} | candidatos: ${(candidatos.get(f.pago_id) ?? []).map((c) => `${c.rubro}=${c.monto}`).join(", ") || "ninguno"}`);
     } else {
-      const opciones = matches.map((c) => `${c.concepto}${c.inversionista_id ? `:${c.inversionista_id}` : ""}`);
+      const opciones = matches.map((c) => `${c.rubro}${c.inversionista_id ? `:${c.inversionista_id}` : ""}`);
       ambiguas.push({ f, opciones });
       anota("ambigua", `factura ${f.factura_id} (pago ${f.pago_id}) Q${monto} → ${opciones.join(" | ")}`);
     }
@@ -348,9 +348,9 @@ async function main() {
 
   // ── 4. Reporte ─────────────────────────────────────────────────────────────
   const pct = (n: number) => `${((n / facturas.length) * 100).toFixed(1)}%`;
-  console.log(`\n📊 COBERTURA (${facturas.length} facturas sin concepto)`);
+  console.log(`\n📊 COBERTURA (${facturas.length} facturas sin rubro)`);
   console.log(`   ✅ etiquetables : ${decisiones.length} (${pct(decisiones.length)})`);
-  for (const [k, v] of [...porConcepto.entries()].sort((a, b) => b[1] - a[1])) {
+  for (const [k, v] of [...porRubro.entries()].sort((a, b) => b[1] - a[1])) {
     console.log(`        · ${k.padEnd(16)} ${v}`);
   }
   console.log(`   🤷 ambiguas     : ${ambiguas.length} (${pct(ambiguas.length)}) → quedan NULL`);
@@ -411,23 +411,23 @@ async function main() {
     const lote = decisiones.slice(i, i + LOTE);
     // UN solo UPDATE ... FROM (VALUES ...) por lote: contra el pooler de prod,
     // un UPDATE por fila son miles de round-trips seriados (minutos de pura
-    // latencia). El WHERE repite concepto IS NULL: si otro proceso ya la
+    // latencia). El WHERE repite rubro IS NULL: si otro proceso ya la
     // etiquetó, gana él. Los VALUES van inlined (números e identificadores de
     // nuestro propio catálogo, no input externo) para no pelear con el límite
     // de parámetros.
     const values = lote
       .map(
         (d) =>
-          `(${d.factura_id}, '${d.concepto}', ${d.inversionista_id ?? "NULL"})`
+          `(${d.factura_id}, '${d.rubro}', ${d.inversionista_id ?? "NULL"})`
       )
       .join(", ");
     await db.execute(sql`
       UPDATE cartera.facturas_electronicas AS f
-      SET concepto = v.concepto,
+      SET rubro = v.rubro,
           inversionista_id = v.inversionista_id
-      FROM (VALUES ${sql.raw(values)}) AS v(factura_id, concepto, inversionista_id)
+      FROM (VALUES ${sql.raw(values)}) AS v(factura_id, rubro, inversionista_id)
       WHERE f.factura_id = v.factura_id
-        AND f.concepto IS NULL
+        AND f.rubro IS NULL
     `);
     escritas += lote.length;
     console.log(`   💾 ${escritas}/${decisiones.length}`);
@@ -447,11 +447,11 @@ async function simularReemisiones(
   decisiones: {
     factura_id: number;
     pago_id: number;
-    concepto: Concepto;
+    rubro: Rubro;
     inversionista_id: number | null;
   }[]
 ) {
-  const conceptoPorFactura = new Map(decisiones.map((d) => [d.factura_id, d]));
+  const rubroPorFactura = new Map(decisiones.map((d) => [d.factura_id, d]));
   // Los pagos que tocó el backfill son los únicos que pueden cambiar de modo.
   // (pago_id viaja en las decisiones: re-consultarlo era un round-trip por datos
   // que main() ya tenía en memoria.)
@@ -498,7 +498,7 @@ async function simularReemisiones(
   // TODAS las ACTIVAS del pago (no solo las que el backfill etiqueta): una que
   // siga en NULL deja el pago BLOQUEADO, que es justo lo que hay que detectar.
   const activasRes = await db.execute(sql`
-    SELECT factura_id, pago_id, concepto, inversionista_id, monto_total::text AS monto_total
+    SELECT factura_id, pago_id, rubro, inversionista_id, monto_total::text AS monto_total
     FROM cartera.facturas_electronicas
     WHERE pago_id = ANY(string_to_array(${idsCsv(ids)}, ',')::int[])
       AND status = 'ACTIVA'
@@ -544,10 +544,10 @@ async function simularReemisiones(
     }));
 
     const activas = (activasPorPago.get(p.pago_id) ?? []).map((a) => {
-      const d = conceptoPorFactura.get(a.factura_id);
+      const d = rubroPorFactura.get(a.factura_id);
       return {
         factura_id: a.factura_id,
-        concepto: d?.concepto ?? a.concepto ?? null,
+        rubro: d?.rubro ?? a.rubro ?? null,
         inversionista_id: d?.inversionista_id ?? a.inversionista_id ?? null,
         monto_total: a.monto_total,
       };
@@ -598,7 +598,7 @@ async function simularReemisiones(
       credito_id: p.credito_id,
       motivo,
       faltantes: faltantesArr.join(" "),
-      activas: activas.map((a) => `${a.factura_id}:${a.concepto}:Q${a.monto_total}`).join(" "),
+      activas: activas.map((a) => `${a.factura_id}:${a.rubro}:Q${a.monto_total}`).join(" "),
       montos_empatados,
     });
   }

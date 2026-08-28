@@ -433,6 +433,22 @@
     'boleta',
   ]);
 
+  /** Estado de facturación de un pago (columna `factura_status`, migración 0014). */
+  export type PagoFacturaStatus =
+    | "NO_APLICA"
+    | "PENDIENTE"
+    | "OK"
+    | "PARCIAL"
+    | "FALLIDA";
+
+  /** Qué cubre cada DTE (columna `facturas_electronicas.rubro`, migración 0014). */
+  export type FacturaRubro =
+    | "MORA"
+    | "OTROS_SERVICIOS"
+    | "OTROS"
+    | "INTERESES"
+    | "INTERESES_CUBE";
+
   export const paymentValidationStatus = pgEnum('payment_validation_status', [
     'no_required',    // No necesita validación (pagos normales/automáticos)
     'pending',        // Pendiente de validación
@@ -497,6 +513,13 @@
     observaciones: text("observaciones"), //input
 
     paymentFalse: boolean("paymentFalse").notNull().default(false), // indica si el pago es falso
+    // Estado de la facturación de ESTE pago (migración 0014). Separado a
+    // propósito de validationStatus: un pago validado sin factura sigue
+    // siendo un pago aplicado. NULL = anterior a la feature.
+    factura_status: text("factura_status").$type<PagoFacturaStatus>(),
+    /** JSON con los rubros que fallaron y por qué (para el modal de facturas). */
+    factura_error: text("factura_error"),
+    factura_at: timestamp("factura_at", { withTimezone: true }),
     validationStatus: paymentValidationStatus("validation_status")
     .notNull()
     .default('no_required'),
@@ -1270,24 +1293,17 @@
 
     // STATUS Y ANULACIÓN
     status: statusFacturaEnum("status").notNull().default("ACTIVA"),
+    // Qué cubre esta factura (migración 0014): sin esto no se puede saber qué
+    // rubro quedó sin emitir cuando un pago se factura a medias.
+    // Lo llena /facturar-pago-completo; queda NULL en las genéricas y en lo
+    // emitido antes de la columna. También alimenta la re-facturación parcial
+    // (src/cofidi/facturasFaltantes.ts).
+    rubro: text("rubro").$type<FacturaRubro>(),
+    /** Solo en facturas de intereses: de quién es la participación facturada. */
+    inversionista_id: integer("inversionista_id"),
     fecha_anulacion: timestamp("fecha_anulacion"),
     motivo_anulacion: text("motivo_anulacion"),
     anulada_por: integer("anulada_por").references(() => platform_users.id),
-
-    // 🧩 QUÉ RUBRO DEL PAGO CUBRE ESTE DTE
-    //    'MORA' | 'OTROS_SERVICIOS' | 'OTROS' | 'INTERESES' | 'INTERESES_CUBE'.
-    //    Lo llena /facturar-pago-completo; queda NULL en las genéricas
-    //    (/facturar-generico) y en todo lo emitido antes de esta columna.
-    //    Sirve para re-facturar SOLO los rubros que faltaron cuando una corrida
-    //    salió parcial (ver src/cofidi/facturasFaltantes.ts). Es varchar y no
-    //    enum de pg a propósito: agregar valores no requiere migrar un tipo.
-    concepto: varchar("concepto", { length: 30 }),
-
-    // Solo para concepto='INTERESES': a qué inversionista se le facturó su parte.
-    // NULL en el resto (incluido INTERESES_CUBE, que es el residuo de CUBE).
-    inversionista_id: integer("inversionista_id").references(
-      () => inversionistas.inversionista_id
-    ),
 
     // Metadata
     created_at: timestamp("created_at").defaultNow().notNull(),

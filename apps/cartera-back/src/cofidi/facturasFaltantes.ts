@@ -20,15 +20,15 @@ Big.RM = Big.roundHalfUp;
 //
 //   Acá se calcula el DIFF entre lo ESPERADO (los DTEs que este pago debería
 //   tener, con las MISMAS condiciones que usan los bloques de emisión) y lo
-//   LOGRADO (las facturas ACTIVAS ya etiquetadas con su concepto), para poder
+//   LOGRADO (las facturas ACTIVAS ya etiquetadas con su rubro), para poder
 //   re-correr emitiendo únicamente lo faltante.
 //
 // Por qué es una función pura y separada:
 //   El costo de equivocarse es sobre-facturar al cliente en SAT. Se testea sola.
 // ============================================================
 
-/** Conceptos que /facturar-pago-completo etiqueta en `facturas_electronicas.concepto`. */
-export const CONCEPTOS_FACTURA = [
+/** Rubros que /facturar-pago-completo etiqueta en `facturas_electronicas.rubro`. */
+export const RUBROS_FACTURA = [
   "MORA",
   "OTROS_SERVICIOS",
   "OTROS",
@@ -36,7 +36,7 @@ export const CONCEPTOS_FACTURA = [
   "INTERESES_CUBE",
 ] as const;
 
-export type ConceptoFactura = (typeof CONCEPTOS_FACTURA)[number];
+export type RubroFactura = (typeof RUBROS_FACTURA)[number];
 
 /**
  * Clave de un DTE dentro de un pago.
@@ -73,12 +73,12 @@ export type InversionistaParaDiff = {
 
 export type FacturaActiva = {
   factura_id?: number;
-  concepto?: string | null;
+  rubro?: string | null;
   inversionista_id?: number | null;
   /**
    * GranTotal del DTE (facturas_electronicas.monto_total). Si viene, el diff
    * exige que cuadre AL CENTAVO con el monto que el cálculo de HOY le asigna a
-   * su concepto — es la defensa contra re-facturar sobre un pago que cambió.
+   * su rubro — es la defensa contra re-facturar sobre un pago que cambió.
    */
   monto_total?: string | number | null;
 };
@@ -246,12 +246,12 @@ export function computarDiffFacturas(args: {
   }
 
   // (a) Facturas históricas sin etiquetar: no sabemos qué cubren → 400 conservador.
-  const sinConcepto = activas.filter((f) => !f.concepto);
-  if (sinConcepto.length > 0) {
+  const sinRubro = activas.filter((f) => !f.rubro);
+  if (sinRubro.length > 0) {
     return {
       modo: "BLOQUEADO",
       razon:
-        `${sinConcepto.length} factura(s) activa(s) de este pago no tienen concepto registrado ` +
+        `${sinRubro.length} factura(s) activa(s) de este pago no tienen rubro registrado ` +
         `(se emitieron antes de que se etiquetaran, o vienen de /facturar-generico). ` +
         `No se puede saber qué rubro cubren: anule las facturas activas y vuelva a facturar el pago completo.`,
     };
@@ -259,16 +259,16 @@ export function computarDiffFacturas(args: {
 
   const logrado = new Set<KeyFactura>();
   for (const f of activas) {
-    const concepto = f.concepto as ConceptoFactura;
-    if (!(CONCEPTOS_FACTURA as readonly string[]).includes(concepto)) {
+    const rubro = f.rubro as RubroFactura;
+    if (!(RUBROS_FACTURA as readonly string[]).includes(rubro)) {
       return {
         modo: "BLOQUEADO",
-        razon: `Factura activa con concepto desconocido "${f.concepto}"${
+        razon: `Factura activa con rubro desconocido "${f.rubro}"${
           f.factura_id ? ` (factura_id ${f.factura_id})` : ""
         }. Anule las facturas activas y vuelva a facturar el pago completo.`,
       };
     }
-    if (concepto === "INTERESES") {
+    if (rubro === "INTERESES") {
       if (f.inversionista_id == null) {
         return {
           modo: "BLOQUEADO",
@@ -281,7 +281,7 @@ export function computarDiffFacturas(args: {
       }
       logrado.add(keyIntereses(f.inversionista_id));
     } else {
-      logrado.add(concepto);
+      logrado.add(rubro);
     }
   }
 
@@ -314,7 +314,7 @@ export function computarDiffFacturas(args: {
   for (const f of activas) {
     if (f.monto_total == null) continue; // sin monto no hay contra qué comparar
     const key =
-      f.concepto === "INTERESES" ? keyIntereses(f.inversionista_id!) : (f.concepto as KeyFactura);
+      f.rubro === "INTERESES" ? keyIntereses(f.inversionista_id!) : (f.rubro as KeyFactura);
     const montoEsperado = esperadoDetallado.get(key);
     if (montoEsperado && !big(f.monto_total).round(2).eq(montoEsperado)) {
       return {

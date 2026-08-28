@@ -43,10 +43,10 @@ const RODRIGO: InversionistaParaDiff = {
 const ROSTER = [CUBE, RODRIGO];
 
 const activa = (
-  concepto: string | null,
+  rubro: string | null,
   inversionista_id: number | null = null,
   factura_id = 1
-): FacturaActiva => ({ factura_id, concepto, inversionista_id });
+): FacturaActiva => ({ factura_id, rubro, inversionista_id });
 
 describe("calcularEsperado", () => {
   it("1. arma las keys de los 3 rubros + intereses por inversionista + CUBE", () => {
@@ -293,7 +293,7 @@ describe("computarDiffFacturas", () => {
     expect(diff.faltantes.size).toBe(0);
   });
 
-  it("12. BLOQUEADO por concepto NULL (facturas históricas sin etiquetar)", () => {
+  it("12. BLOQUEADO por rubro NULL (facturas históricas sin etiquetar)", () => {
     const diff = computarDiffFacturas({
       pagoData: PAGO,
       inversionistas: ROSTER,
@@ -301,7 +301,7 @@ describe("computarDiffFacturas", () => {
     });
     expect(diff.modo).toBe("BLOQUEADO");
     if (diff.modo !== "BLOQUEADO") throw new Error("modo inesperado");
-    expect(diff.razon).toContain("no tienen concepto registrado");
+    expect(diff.razon).toContain("no tienen rubro registrado");
   });
 
   it("13. BLOQUEADO por logrado ⊄ esperado (el roster de inversionistas cambió)", () => {
@@ -352,7 +352,7 @@ describe("computarDiffFacturas", () => {
     expect(diff.razon).toContain("sin inversionista_id");
   });
 
-  it("17. BLOQUEADO por concepto desconocido", () => {
+  it("17. BLOQUEADO por rubro desconocido", () => {
     const diff = computarDiffFacturas({
       pagoData: PAGO,
       inversionistas: ROSTER,
@@ -360,7 +360,7 @@ describe("computarDiffFacturas", () => {
     });
     expect(diff.modo).toBe("BLOQUEADO");
     if (diff.modo !== "BLOQUEADO") throw new Error("modo inesperado");
-    expect(diff.razon).toContain("concepto desconocido");
+    expect(diff.razon).toContain("rubro desconocido");
   });
 
   it("18. BLOQUEADO: hay MORA activa pero el pago ya no trae mora", () => {
@@ -406,11 +406,11 @@ describe("computarDiffFacturas", () => {
 
 describe("computarDiffFacturas — regla (d): los DTEs vivos deben cuadrar al centavo", () => {
   const conMonto = (
-    concepto: string,
+    rubro: string,
     monto_total: string,
     inversionista_id: number | null = null,
     factura_id = 1
-  ): FacturaActiva => ({ factura_id, concepto, inversionista_id, monto_total });
+  ): FacturaActiva => ({ factura_id, rubro, inversionista_id, monto_total });
 
   // Con PAGO + ROSTER: MORA=150.00, OTROS_SERVICIOS=80.00, INTERESES:2=392.00,
   // INTERESES_CUBE = 1120 − 560 + 168 = 728.00.
@@ -495,7 +495,7 @@ describe("fixes del code review: gates sub-centavo y prorrateado sin interés", 
       pagoData: { ...PAGO, mora: "0.003", abono_interes: "0", abono_iva_12: "0" },
       inversionistas: [],
       activas: [
-        { factura_id: 300, concepto: "MORA", inversionista_id: null, monto_total: "0.00" },
+        { factura_id: 300, rubro: "MORA", inversionista_id: null, monto_total: "0.00" },
       ],
     });
     expect(diff.modo).toBe("FALTANTES");
@@ -508,7 +508,7 @@ describe("fixes del code review: gates sub-centavo y prorrateado sin interés", 
       pagoData: { ...PAGO, abono_interes: "0", abono_iva_12: "0" },
       inversionistas: ROSTER,
       activas: [
-        { factura_id: 301, concepto: "MORA", inversionista_id: null, monto_total: "150.00" },
+        { factura_id: 301, rubro: "MORA", inversionista_id: null, monto_total: "150.00" },
       ],
       tieneOperacionesPendientesFacturar: true,
     });

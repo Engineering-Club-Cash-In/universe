@@ -1,15 +1,20 @@
 import Big from "big.js";
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { db } from "../database";
-import { ajuste_fecha_ideal_pago, pagos_credito } from "../database/db";
+import {
+  ajuste_fecha_ideal_pago,
+  cuotas_credito,
+  pagos_credito,
+} from "../database/db";
 
 type Executor = Pick<typeof db, "select" | "update">;
 type AjusteCobrado = { id: number; monto_total: string };
+type AjusteParaReconstruccion = AjusteCobrado | { pendiente: true };
 
 export async function prepararAjusteFechaIdealParaReconstruccion(
   credito_id: number,
   executor: Executor = db,
-): Promise<AjusteCobrado | null> {
+): Promise<AjusteParaReconstruccion | null> {
   const [ajusteCobrado] = await executor
     .select({
       id: ajuste_fecha_ideal_pago.id,
@@ -27,12 +32,15 @@ export async function prepararAjusteFechaIdealParaReconstruccion(
 
   if (ajusteCobrado) return ajusteCobrado;
 
-  await resetAjusteFechaIdealPorCredito(credito_id, executor);
-  return null;
+  const teniaAjustePendiente = await resetAjusteFechaIdealPorCredito(
+    credito_id,
+    executor,
+  );
+  return teniaAjustePendiente ? { pendiente: true } : null;
 }
 
 export async function reattachAjusteFechaIdealReconstruido(
-  ajuste: AjusteCobrado | null,
+  ajuste: AjusteParaReconstruccion | null,
   cuotas: readonly { cuota_id: number; numero_cuota: number }[],
   pagos: readonly {
     pago_id: number;
@@ -46,6 +54,22 @@ export async function reattachAjusteFechaIdealReconstruido(
   if (ajuste === null) return;
 
   const cuota1Id = cuotas.find((cuota) => cuota.numero_cuota === 1)?.cuota_id;
+  if (cuota1Id === undefined) {
+    throw new Error("No se pudo reconstruir el pago de la cuota 1");
+  }
+
+  if ("pendiente" in ajuste) {
+    const [cuotaReabierta] = await executor
+      .update(cuotas_credito)
+      .set({ pagado: false })
+      .where(eq(cuotas_credito.cuota_id, cuota1Id))
+      .returning({ cuota_id: cuotas_credito.cuota_id });
+    if (!cuotaReabierta) {
+      throw new Error("No se pudo reabrir la cuota 1 para cobrar el ajuste");
+    }
+    return;
+  }
+
   const pagoCuota1 = pagos.find((pago) => pago.cuota_id === cuota1Id);
   if (!pagoCuota1) {
     throw new Error("No se pudo reconstruir el pago de la cuota 1");
@@ -144,7 +168,7 @@ export async function resetAjusteFechaIdealSiPagoInvalidado(
 export async function resetAjusteFechaIdealPorCredito(
   credito_id: number,
   executor: Executor = db
-): Promise<void> {
+): Promise<boolean> {
   const reseteado = await executor
     .update(ajuste_fecha_ideal_pago)
     .set({ fecha_cobro: null, pago_id: null })
@@ -156,6 +180,7 @@ export async function resetAjusteFechaIdealPorCredito(
       `🧾 Ajuste por fecha ideal de pago #${reseteado[0].id} reseteado a pendiente (crédito ${credito_id}: se borraron sus pagos).`
     );
   }
+  return reseteado.length > 0;
 }
 
 export type AjusteReimportAction =

@@ -290,6 +290,46 @@ describe("ajuste por fecha ideal durante reconstruccion", () => {
     expect(updates).toEqual([{ fecha_cobro: null, pago_id: null }]);
   });
 
+  it("reabre cuota 1 si la reconstrucción encuentra un ajuste pendiente", async () => {
+    const updates: object[] = [];
+    const executor = {
+      select: () => ({
+        from: () => ({ where: () => ({ limit: async () => [] }) }),
+      }),
+      update: () => ({
+        set: (values: object) => {
+          updates.push(values);
+          return {
+            where: () => ({
+              returning: async () =>
+                "fecha_cobro" in values ? [{ id: 7 }] : [{ cuota_id: 51 }],
+            }),
+          };
+        },
+      }),
+    } as unknown as Parameters<
+      typeof prepararAjusteFechaIdealParaReconstruccion
+    >[1];
+
+    const ajuste = await prepararAjusteFechaIdealParaReconstruccion(
+      10,
+      executor,
+    );
+    expect(ajuste).toEqual({ pendiente: true });
+
+    await reattachAjusteFechaIdealReconstruido(
+      ajuste,
+      [{ cuota_id: 51, numero_cuota: 1 }],
+      [{ pago_id: 101, cuota_id: 51, otros: "0" }],
+      executor,
+    );
+
+    expect(updates).toEqual([
+      { fecha_cobro: null, pago_id: null },
+      { pagado: false },
+    ]);
+  });
+
   it("falla dentro de la reconstruccion si no existe replacement para cuota 1", async () => {
     const executor = {
       update: () => {

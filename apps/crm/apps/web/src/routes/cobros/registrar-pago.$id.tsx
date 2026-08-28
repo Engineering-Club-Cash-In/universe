@@ -14,7 +14,7 @@ import {
 	Upload,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { bancosSugeridos } from "server/src/lib/bot-cobros/bancos-boleta";
+import { bancosSeleccionables } from "server/src/lib/bot-cobros/bancos-boleta";
 import { toast } from "sonner";
 import { DistribucionPagoDetalle } from "@/components/cobros/distribucion-pago-detalle";
 import { aFechaISO, aFechaISO_GT } from "@/components/cobros/historial/formato";
@@ -210,26 +210,20 @@ function RegistrarPagoPage() {
 	// `cartera.bancos` tiene 24 filas para ~15 bancos reales (Banrural dos
 	// veces, BAM tres, y un "test" con 92 pagos encima). Elegir de la tabla
 	// cruda es elegir en cuál de las copias va a buscar conta el dinero.
-	const bancoOptions: ComboboxOption[] = useMemo(() => {
-		const base: ComboboxOption[] = bancosSugeridos().map(
-			(b: { id: number; nombre: string }) => ({
+	// MISMO catálogo que usa el lector de boletas del bot (bancos-boleta.ts):
+	// `cartera.bancos` tiene 24 filas para ~15 bancos reales (Banrural dos
+	// veces, BAM tres, y un "test" con 92 pagos encima). Elegir de la tabla
+	// cruda es elegir en cuál de las copias va a buscar conta el dinero.
+	// Incluye los bancos sin id universal (Interbanco, PAGALO): son válidos y
+	// el lector los reconoce, así que tienen que poder elegirse a mano.
+	const bancoOptions: ComboboxOption[] = useMemo(
+		() =>
+			bancosSeleccionables().map((b: { id: number; nombre: string }) => ({
 				value: String(b.id),
 				label: b.nombre,
-			}),
-		);
-		// `reconocerBanco` también resuelve los bancos SIN id universal
-		// (Interbanco, PAGALO), que `bancosSugeridos()` no ofrece: sin agregarlos
-		// el combo quedaba en blanco con un id oculto adentro, y el pago se
-		// registraba con un banco que el asesor nunca vio (Codex, PR #1498).
-		const leido = lectura?.bancoId;
-		if (leido != null && !base.some((o) => o.value === String(leido))) {
-			base.push({
-				value: String(leido),
-				label: lectura?.bancoNombre ?? `Banco #${leido}`,
-			});
-		}
-		return base;
-	}, [lectura]);
+			})),
+		[],
+	);
 
 	const mora = Number(credito?.moraActual ?? credito?.mora?.monto_mora ?? 0);
 	const cuotaBase = Number(credito?.credito.cuota ?? 0);

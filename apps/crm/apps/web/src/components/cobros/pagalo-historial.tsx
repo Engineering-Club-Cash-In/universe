@@ -22,7 +22,7 @@ import {
 	CreditCard,
 	XCircle,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -363,18 +363,38 @@ export function PagaloHistorial({
 }) {
 	const [expandido, setExpandido] = useState(true);
 	const [pagina, setPagina] = useState(1);
+	// El componente se reusa al navegar de un caso a otro (misma ruta): sin
+	// esto, la página vieja viaja al caso nuevo y, si el crédito nuevo tiene
+	// menos páginas, el servidor devuelve una página vacía con `total > 0` — se
+	// veía "Sin links" y los controles de paginación escondidos, sin forma de
+	// volver a la 1 salvo recargando (Codex, PR #1498).
+	const casoRenderizado = useRef(casoCobroId);
+	const casoCambio = casoRenderizado.current !== casoCobroId;
+	useEffect(() => {
+		casoRenderizado.current = casoCobroId;
+		setPagina(1);
+	}, [casoCobroId]);
 	const historial = useQuery({
 		...orpc.getPagaloHistorial.queryOptions({
 			input: { casoCobroId, page: pagina, pageSize: POR_PAGINA },
 		}),
 		enabled: !!casoCobroId,
-		// Sin esto la lista parpadea a vacío en cada cambio de página.
-		placeholderData: (anterior: unknown) => anterior,
+		// Sin esto la lista parpadea a vacío en cada cambio de página. Pero SOLO
+		// entre páginas del mismo caso: al cambiar de caso, seguir pintando los
+		// grupos anteriores mostraría —y dejaría copiar— links de pago del
+		// cliente que se acaba de dejar atrás.
+		placeholderData: (anterior: unknown) => (casoCambio ? undefined : anterior),
 	});
 	const data = historial.data as { grupos: Grupo[]; total: number } | undefined;
 	const grupos = data?.grupos ?? [];
 	const total = data?.total ?? 0;
 	const totalPaginas = Math.max(1, Math.ceil(total / POR_PAGINA));
+	// Red de seguridad del mismo problema: si el total encogió por cualquier
+	// otra vía (un grupo borrado, un refetch), la página fuera de rango no puede
+	// dejar la sección vacía y sin controles.
+	useEffect(() => {
+		if (!historial.isLoading && pagina > totalPaginas) setPagina(1);
+	}, [historial.isLoading, pagina, totalPaginas]);
 
 	return (
 		<div className="space-y-3">

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
   calcularEsperado,
+  calcularEsperadoDetallado,
   computarDiffFacturas,
   keyIntereses,
   type FacturaActiva,
@@ -553,5 +554,37 @@ describe("regla (e): DTEs duplicados del mismo rubro (Codex P2 del PR #1493)", (
       ],
     });
     expect(dup.modo).toBe("BLOQUEADO");
+  });
+});
+
+describe("gate interés+IVA (Codex P1 del PR #1493)", () => {
+  const PAGO_SOLO_IVA = {
+    mora: "0",
+    abono_seguro: "0",
+    abono_gps: "0",
+    membresias_pago: "0",
+    otros: "",
+    abono_interes: "0",
+    abono_iva_12: "35.71",
+    bandera_reinversion: false,
+  };
+
+  it("38. pago solo-IVA (el motor cobró el interés en un parcial previo) SÍ espera su DTE", () => {
+    // Antes del fix, el gate solo-interés lo dejaba fuera: el pago quedaba
+    // PENDIENTE eterno (47 pagos en prod, Q4.6k de IVA sin facturar).
+    const montos = calcularEsperadoDetallado({
+      pagoData: PAGO_SOLO_IVA,
+      inversionistas: [CUBE],
+    });
+    expect([...montos.keys()]).toEqual(["INTERESES_CUBE"]);
+    expect(montos.get("INTERESES_CUBE")!.toFixed(2)).toBe("35.71");
+  });
+
+  it("39. interés y IVA ambos en cero sigue sin flujo de intereses", () => {
+    const esperado = calcularEsperado({
+      pagoData: { ...PAGO_SOLO_IVA, abono_iva_12: "0", mora: "10.00" },
+      inversionistas: ROSTER,
+    });
+    expect([...esperado]).toEqual(["MORA"]);
   });
 });

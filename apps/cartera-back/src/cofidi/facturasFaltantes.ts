@@ -171,10 +171,11 @@ export function calcularEsperadoDetallado(args: {
   const otros = big(pagoData.otros);
   if (otros.gt(0)) esperado.set("OTROS", otros.round(2));
 
-  // 🚪 Mismo guard que el handler: sin interés no se entra a NINGÚN flujo de intereses.
-  if (!big(pagoData.abono_interes).gt(0)) return esperado;
-
+  // 🚪 Mismo guard que el handler: sin interés NI IVA no se entra a ningún flujo
+  //    de intereses. IVA cuenta porque el motor cobra interés antes que IVA: un
+  //    pago puede traer solo abono_iva_12 y ese IVA viaja en el DTE de intereses.
   const totalConIva = big(pagoData.abono_interes).plus(big(pagoData.abono_iva_12));
+  if (!totalConIva.gt(0)) return esperado;
 
   let totalInteresesNoCube = new Big(0);
   let cashInAcumulado = new Big(0);
@@ -236,7 +237,10 @@ export function computarDiffFacturas(args: {
   //     `if (!hayInteresEnPago)` ANTES del branch prorrateado (cofidi.ts ~1053),
   //     así que un pago solo-mora en un crédito con compra pendiente jamás toca
   //     el prorrateo y su re-facturación parcial es segura.
-  if (tieneOperacionesPendientesFacturar && big(pagoData.abono_interes).gt(0)) {
+  if (
+    tieneOperacionesPendientesFacturar &&
+    big(pagoData.abono_interes).plus(big(pagoData.abono_iva_12)).gt(0)
+  ) {
     return {
       modo: "BLOQUEADO",
       razon:

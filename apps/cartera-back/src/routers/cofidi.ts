@@ -1110,7 +1110,16 @@ if (facturasExistentes.length > 0) {
       //       • Tiene compra/reinversión pendiente_facturar=true → flujo nuevo (prorrateado)
       //       • No → flujo actual (residuo CUBE + reparto por aporte)
       // ============================================
-      const hayInteresEnPago = new Big(pagoData.abono_interes || "0").gt(0);
+      // ⚠️ Interés O IVA: el motor cobra interés antes que IVA, así que tras un
+      //    parcial que cerró el interés, el siguiente pago puede traer SOLO
+      //    abono_iva_12 — y ese IVA va en el DTE de intereses (todo el flujo de
+      //    abajo reparte totalInteresesConIva = interés + IVA, así que funciona
+      //    igual). Con el gate solo-interés, esos pagos (47 en prod, Q4.6k)
+      //    jamás emitían su DTE y quedaban PENDIENTE eternos en la bandeja.
+      //    Espejado en calcularEsperadoDetallado y la regla (c) del diff. (Codex P1)
+      const hayInteresEnPago = new Big(pagoData.abono_interes || "0")
+        .plus(new Big(pagoData.abono_iva_12 || "0"))
+        .gt(0);
 
       // 🧾 Interés que finalmente factura CUBE (residuo + cash_in), CON IVA.
       //    Se setea dentro de cada flujo (estándar/prorrateado) y se usa al
@@ -2936,6 +2945,43 @@ if (facturasExistentes.length > 0) {
         .returning();
 
       console.log('✅ Estado de factura actualizado en base de datos');
+
+      // 🧾 RE-ABRIR EL ESTADO DEL PAGO tras anular uno de sus DTEs (Codex P2):
+      //    un pago que quedó OK seguiría diciendo OK con un rubro anulado, y
+      //    conta jamás lo re-descubriría por la bandeja. PARCIAL si le quedan
+      //    ACTIVAS, PENDIENTE si se anuló todo; factura_error registra QUÉ
+      //    rubro se anuló. Best-effort: no rompe la anulación.
+      if (facturaAnulada?.pago_id) {
+        try {
+          const activasRes = await db.execute(
+            sql`SELECT count(*)::int AS n FROM cartera.facturas_electronicas
+                WHERE pago_id = ${facturaAnulada.pago_id} AND status = 'ACTIVA'`
+          );
+          const quedanActivas = Number((activasRes as any).rows?.[0]?.n ?? 0) > 0;
+          await db
+            .update(pagos_credito)
+            .set({
+              factura_status: quedanActivas ? "PARCIAL" : "PENDIENTE",
+              factura_error: JSON.stringify([
+                {
+                  rubro: facturaAnulada.rubro ?? "DESCONOCIDO",
+                  inversionista_id: facturaAnulada.inversionista_id ?? null,
+                  error: `DTE ${facturaAnulada.serie}-${facturaAnulada.numero} anulado manualmente: ${motivo}`,
+                },
+              ]),
+              factura_at: new Date(),
+            })
+            .where(eq(pagos_credito.pago_id, facturaAnulada.pago_id));
+          console.log(
+            `🧾 factura_status del pago ${facturaAnulada.pago_id} → ${quedanActivas ? "PARCIAL" : "PENDIENTE"} (DTE anulado)`
+          );
+        } catch (estadoError) {
+          console.error(
+            '⚠️ No se pudo re-abrir el estado de facturación del pago (NO afecta la anulación):',
+            (estadoError as Error).message
+          );
+        }
+      }
 
       // 🧾 Si la factura tenía desglose GENÉRICO (para el reporte diario), borrarlo
       //    para que no siga sumando en el snapshot tras la anulación. Solo toca las

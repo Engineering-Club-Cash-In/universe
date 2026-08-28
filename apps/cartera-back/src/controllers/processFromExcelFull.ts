@@ -13,6 +13,8 @@ import {
 import { findOrCreateAdvisorByName } from "./advisor";
 import { findOrCreateUserByName } from "./users";
 import { marcarCuotasPagadasHastaNumero } from "./migratePayments";
+import { tieneMontosFacturables } from "./estadoFacturacionPago";
+import type { PagoFacturaStatus } from "../database/db/schema";
 import { updateAllInstallments } from "./updateCredit";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -516,6 +518,16 @@ export async function procesarCreditoDesdeExcelFull(
     pagoConvenio: "0",
     registerBy: "EXCEL_MIGRATION",
     validationStatus: "validated" as const,
+    // Nace aplicado sin pasar por los hooks de validación que inicializan el
+    // estado de facturación: sin esto quedaba NULL (sentinela de históricos) e
+    // invisible en la bandeja aunque trae interés/IVA facturables. (Codex P2)
+    factura_status: (tieneMontosFacturables({
+      abono_interes: cuotaInteres.toFixed(2),
+      abono_iva_12: iva12.toFixed(2),
+      membresias_pago: membresias.toFixed(2),
+    })
+      ? "PENDIENTE"
+      : "NO_APLICA") as PagoFacturaStatus,
     fecha_boleta: fechas[0],
     monto_aplicado: "0",
   });

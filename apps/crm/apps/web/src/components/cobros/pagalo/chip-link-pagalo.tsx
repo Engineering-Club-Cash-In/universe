@@ -262,7 +262,15 @@ export function ChipLinkPagalo({
 		!!casoCobroId &&
 		ESTADOS_REGENERABLES.has(link.status) &&
 		!regeneracionSiempreRechazada;
-	const puedeCopiar = !!paymentUrl && ESTADOS_VIVOS.has(link.status);
+	// ESTADOS_VIVOS incluye CREATING, pero emitirUnLink preserva un link
+	// justo en CREATING (sin pasar a ACTIVE) cuando detecta un pago-
+	// predecesor sin reconciliar — persiste paymentUrl igual (para que el
+	// poller lo siga) porque el link ya es real en Págalo, pero
+	// deliberadamente NO lo confirma como seguro. Copiarlo con
+	// ESTADOS_VIVOS ofrecía ese link a cualquier asesor común, exactamente
+	// el caso que el backend decidió no confirmar (hallazgo de code
+	// review). Solo ACTIVE es copiable con certeza.
+	const puedeCopiar = !!paymentUrl && link.status === "ACTIVE";
 	const tieneMenu = puedeInvalidar || puedeRegenerar || puedeCopiar;
 
 	const copiar = async (e: Event) => {
@@ -430,7 +438,12 @@ export function AccionesLinkPagalo({
 		!!casoCobroId &&
 		ESTADOS_REGENERABLES.has(link.status) &&
 		!regeneracionSiempreRechazada;
-	const puedeCopiar = !!paymentUrl && ESTADOS_VIVOS.has(link.status);
+	// Mismo chequeo que ChipLinkPagalo: solo ACTIVE es copiable con
+	// certeza — CREATING puede ser un link real preservado sin confirmar
+	// (pago-predecesor sin reconciliar, ver emitirUnLink), y ofrecerlo
+	// igual dejaba mandar al cliente un link que el backend decidió no
+	// confirmar (hallazgo de code review).
+	const puedeCopiar = !!paymentUrl && link.status === "ACTIVE";
 	if (!puedeInvalidar && !puedeRegenerar && !puedeCopiar) return null;
 
 	const copiar = async () => {

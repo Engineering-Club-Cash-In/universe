@@ -4912,14 +4912,34 @@ export const cobrosRouter = {
 			};
 		}),
 
-	// Rastro completo de Págalo para el caso: todos los grupos que se hayan
-	// creado a lo largo del tiempo (puede haber más de uno — un grupo
-	// completado o cancelado libera el slot y permite crear otro nuevo para
-	// el mismo crédito), más reciente primero, cada uno con su timeline de
-	// eventos append-only (pagaloPaymentEvents).
+	// Rastro completo de Págalo del CRÉDITO: todos los grupos generados a lo
+	// largo del tiempo, más reciente primero, cada uno con sus links y su
+	// timeline de eventos append-only (pagaloPaymentEvents).
+	//
+	// Va por `carteraCreditoId` y NO por caso a propósito: un crédito puede
+	// acumular varios casos de cobro a lo largo del tiempo, y el asesor que
+	// abre la ficha espera ver TODOS los links que se le generaron a ese
+	// crédito — no solo los del caso vigente, ni solo los que siguen
+	// pendientes de pago. Paginado porque el historial crece sin techo: cada
+	// grupo completado o cancelado libera el slot para uno nuevo.
 	getPagaloHistorial: cobrosProcedure
-		.input(z.object({ casoCobroId: z.string().uuid() }))
+		.input(
+			z.object({
+				carteraCreditoId: z.number().int().positive(),
+				page: z.number().int().min(1).default(1),
+				pageSize: z.number().int().min(1).max(50).default(5),
+			}),
+		)
 		.handler(async ({ input }) => {
+			const filtroCredito = eq(
+				pagaloPaymentGroups.carteraCreditoId,
+				input.carteraCreditoId,
+			);
+			const [{ total }] = await db
+				.select({ total: count() })
+				.from(pagaloPaymentGroups)
+				.where(filtroCredito);
+
 			const grupos = await db
 				.select({
 					id: pagaloPaymentGroups.id,
@@ -4938,46 +4958,56 @@ export const cobrosRouter = {
 				})
 				.from(pagaloPaymentGroups)
 				.leftJoin(user, eq(user.id, pagaloPaymentGroups.createdBy))
-				.where(eq(pagaloPaymentGroups.casoCobroId, input.casoCobroId))
-				.orderBy(desc(pagaloPaymentGroups.createdAt));
-			if (grupos.length === 0) return [];
+				.where(filtroCredito)
+				.orderBy(desc(pagaloPaymentGroups.createdAt))
+				.limit(input.pageSize)
+				.offset((input.page - 1) * input.pageSize);
 
 			const groupIds = grupos.map((g) => g.id);
-			const [links, eventos] = await Promise.all([
-				db
-					.select({
-						id: pagaloPaymentLinks.id,
-						groupId: pagaloPaymentLinks.groupId,
-						linkType: pagaloPaymentLinks.linkType,
-						status: pagaloPaymentLinks.status,
-						paymentUrl: pagaloPaymentLinks.paymentUrl,
-						voucherUrl: pagaloPaymentLinks.voucherUrl,
-						paidAt: pagaloPaymentLinks.paidAt,
-						isApplicationSource: pagaloPaymentLinks.isApplicationSource,
-					})
-					.from(pagaloPaymentLinks)
-					.where(inArray(pagaloPaymentLinks.groupId, groupIds)),
-				db
-					.select({
-						id: pagaloPaymentEvents.id,
-						groupId: pagaloPaymentEvents.groupId,
-						eventType: pagaloPaymentEvents.eventType,
-						source: pagaloPaymentEvents.source,
-						fromStatus: pagaloPaymentEvents.fromStatus,
-						toStatus: pagaloPaymentEvents.toStatus,
-						payload: pagaloPaymentEvents.payload,
-						occurredAt: pagaloPaymentEvents.occurredAt,
-					})
-					.from(pagaloPaymentEvents)
-					.where(inArray(pagaloPaymentEvents.groupId, groupIds))
-					.orderBy(asc(pagaloPaymentEvents.occurredAt)),
-			]);
+			// Sin grupos en ESTA página no hay a qué hacerle el inArray (drizzle
+			// no acepta la lista vacía) — y tampoco hay nada que colgarle.
+			const [links, eventos] = groupIds.length
+				? await Promise.all([
+						db
+							.select({
+								id: pagaloPaymentLinks.id,
+								groupId: pagaloPaymentLinks.groupId,
+								linkType: pagaloPaymentLinks.linkType,
+								status: pagaloPaymentLinks.status,
+								paymentUrl: pagaloPaymentLinks.paymentUrl,
+								voucherUrl: pagaloPaymentLinks.voucherUrl,
+								paidAt: pagaloPaymentLinks.paidAt,
+								isApplicationSource: pagaloPaymentLinks.isApplicationSource,
+							})
+							.from(pagaloPaymentLinks)
+							.where(inArray(pagaloPaymentLinks.groupId, groupIds)),
+						db
+							.select({
+								id: pagaloPaymentEvents.id,
+								groupId: pagaloPaymentEvents.groupId,
+								eventType: pagaloPaymentEvents.eventType,
+								source: pagaloPaymentEvents.source,
+								fromStatus: pagaloPaymentEvents.fromStatus,
+								toStatus: pagaloPaymentEvents.toStatus,
+								payload: pagaloPaymentEvents.payload,
+								occurredAt: pagaloPaymentEvents.occurredAt,
+							})
+							.from(pagaloPaymentEvents)
+							.where(inArray(pagaloPaymentEvents.groupId, groupIds))
+							.orderBy(asc(pagaloPaymentEvents.occurredAt)),
+					])
+				: [[], []];
 
-			return grupos.map((grupo) => ({
-				...grupo,
-				links: links.filter((l) => l.groupId === grupo.id),
-				eventos: eventos.filter((e) => e.groupId === grupo.id),
-			}));
+			return {
+				grupos: grupos.map((grupo) => ({
+					...grupo,
+					links: links.filter((l) => l.groupId === grupo.id),
+					eventos: eventos.filter((e) => e.groupId === grupo.id),
+				})),
+				total,
+				page: input.page,
+				pageSize: input.pageSize,
+			};
 		}),
 
 	// PRUEBA: dispara un ciclo del poller Págalo a demanda, sin esperar el

@@ -3,13 +3,18 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import {
+	AlertTriangle,
 	ArrowLeft,
 	CalendarIcon,
 	CheckCircle2,
 	DollarSign,
+	FileText,
+	ImageIcon,
 	Loader2,
+	Upload,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { bancosSugeridos } from "server/src/lib/bot-cobros/bancos-boleta";
 import { toast } from "sonner";
 import { DistribucionPagoDetalle } from "@/components/cobros/distribucion-pago-detalle";
 import { aFechaISO, aFechaISO_GT } from "@/components/cobros/historial/formato";
@@ -71,6 +76,30 @@ interface UploadBoletaResponse {
 	error?: string;
 }
 
+/** Lo que devuelve /api/leer-boleta-pago (mismo lector que usa el bot). */
+type BoletaLeidaCRM = {
+	esBoletaDePago: boolean;
+	monto: number | null;
+	bancoId: number | null;
+	bancoNombre: string | null;
+	bancoLeido: string | null;
+	fechaBoleta: string;
+	fechaCorregida: boolean;
+	numeroAutorizacion: string | null;
+	origenPago: "transferencia" | "cheque" | "boleta" | null;
+	observaciones: string | null;
+	camposNoLeidos: string[];
+};
+
+/** Etiqueta del campo autocompletado, para el aviso de "revisá esto". */
+const ETIQUETA_CAMPO: Record<string, string> = {
+	banco: "banco",
+	monto: "monto",
+	fechaBoleta: "fecha de la boleta",
+	numeroAutorizacion: "número de autorización",
+	cuentaDestino: "cuenta destino",
+};
+
 /**
  * CB-128: réplica funcional del registro de pago de carteraFront
  * (PagoForm.tsx + registerPayment.ts) como página dedicada de la Ficha 360
@@ -103,9 +132,12 @@ function RegistrarPagoPage() {
 	const [montoBoleta, setMontoBoleta] = useState("");
 	const [otros, setOtros] = useState("");
 	const [bancoId, setBancoId] = useState<string | null>(null);
+	// Casi todos los pagos entran por transferencia: se deja puesta y el asesor
+	// la cambia si el comprobante es otra cosa. El lector NO la pisa — el tipo
+	// de operación impreso no dice cómo entró el dinero a la cuenta.
 	const [origenPago, setOrigenPago] = useState<
 		"transferencia" | "cheque" | "boleta" | ""
-	>("");
+	>("transferencia");
 	const [numeroAutorizacion, setNumeroAutorizacion] = useState("");
 	// CB-128: el default no puede ser new Date() (día calendario del
 	// navegador) — en un offset adelantado (ej. UTC+14) preseleccionaría un
@@ -118,16 +150,17 @@ function RegistrarPagoPage() {
 	const [observaciones, setObservaciones] = useState("");
 	const [archivo, setArchivo] = useState<File | null>(null);
 	const [confirmacionAbierta, setConfirmacionAbierta] = useState(false);
+	const [lectura, setLectura] = useState<BoletaLeidaCRM | null>(null);
+	const [errorLectura, setErrorLectura] = useState<string | null>(null);
+	const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+	const inputArchivoRef = useRef<HTMLInputElement>(null);
+	const [arrastrando, setArrastrando] = useState(false);
 
 	const creditoQuery = useQuery({
 		...orpc.getCreditoParaPago.queryOptions({
 			input: { numeroSifco: numeroCreditoSifco },
 		}),
 		enabled: !!numeroCreditoSifco,
-	});
-
-	const bancosQuery = useQuery({
-		...orpc.getBancosParaPago.queryOptions(),
 	});
 
 	const promesaActivaQuery = useQuery({
@@ -162,13 +195,17 @@ function RegistrarPagoPage() {
 	const statusBloqueado =
 		credito?.credito.statusCredit === "PENDIENTE_CANCELACION" ||
 		credito?.credito.statusCredit === "CANCELADO";
+	// MISMO catálogo que usa el lector de boletas del bot (bancos-boleta.ts):
+	// `cartera.bancos` tiene 24 filas para ~15 bancos reales (Banrural dos
+	// veces, BAM tres, y un "test" con 92 pagos encima). Elegir de la tabla
+	// cruda es elegir en cuál de las copias va a buscar conta el dinero.
 	const bancoOptions: ComboboxOption[] = useMemo(
 		() =>
-			(bancosQuery.data ?? []).map((b) => ({
-				value: String(b.banco_id),
+			bancosSugeridos().map((b: { id: number; nombre: string }) => ({
+				value: String(b.id),
 				label: b.nombre,
 			})),
-		[bancosQuery.data],
+		[],
 	);
 
 	const mora = Number(credito?.moraActual ?? credito?.mora?.monto_mora ?? 0);
@@ -243,6 +280,87 @@ function RegistrarPagoPage() {
 				todasLasCuotas[0]?.numero_cuota,
 		);
 	}, [cuotaPagable, cuotaActualNumero, todasLasCuotas]);
+
+	// Lectura de la boleta con IA. El archivo NO se sube acá: se manda, se lee
+	// y se descarta. La subida a R2 sigue pasando al registrar el pago, así una
+	// boleta que el asesor descarta no deja basura en storage.
+	const leerBoletaMutation = useMutation({
+		mutationFn: async (file: File) => {
+			const formData = new FormData();
+			formData.append("file", file);
+			const res = await fetch(
+				`${import.meta.env.VITE_SERVER_URL}/api/leer-boleta-pago`,
+				{ method: "POST", body: formData, credentials: "include" },
+			);
+			const texto = await res.text();
+			let json: unknown;
+			try {
+				json = JSON.parse(texto);
+			} catch {
+				throw new Error(
+					`Respuesta inesperada del servidor al leer la boleta (HTTP ${res.status})`,
+				);
+			}
+			const respuesta = json as {
+				success?: boolean;
+				data?: BoletaLeidaCRM;
+				error?: string;
+			};
+			if (!res.ok || !respuesta.success || !respuesta.data) {
+				throw new Error(
+					respuesta.error || "No se pudo leer la boleta automáticamente",
+				);
+			}
+			return respuesta.data;
+		},
+		onSuccess: (datos) => {
+			setLectura(datos);
+			setErrorLectura(null);
+			if (!datos.esBoletaDePago) return;
+
+			if (datos.monto !== null) setMontoBoleta(datos.monto.toFixed(2));
+			if (datos.bancoId !== null) setBancoId(String(datos.bancoId));
+			if (datos.numeroAutorizacion) {
+				setNumeroAutorizacion(datos.numeroAutorizacion.slice(0, 100));
+			}
+			// `fechaCorregida` = el modelo no la leyó (o vino futura) y el servicio
+			// la acotó a hoy: eso NO es un dato de la boleta, así que se deja el
+			// default en vez de escribir una fecha que nadie leyó.
+			if (!datos.fechaCorregida) {
+				setFechaBoleta(new Date(`${datos.fechaBoleta}T12:00:00`));
+			}
+		},
+		onError: (error: unknown) => {
+			setLectura(null);
+			setErrorLectura(
+				error instanceof Error
+					? error.message
+					: "No se pudo leer la boleta automáticamente",
+			);
+		},
+	});
+
+	function seleccionarArchivo(file: File | null) {
+		setArchivo(file);
+		setLectura(null);
+		setErrorLectura(null);
+		setPreviewUrl((anterior) => {
+			if (anterior) URL.revokeObjectURL(anterior);
+			return file && file.type.startsWith("image/")
+				? URL.createObjectURL(file)
+				: null;
+		});
+		if (file) leerBoletaMutation.mutate(file);
+	}
+
+	// El objectURL vive fuera de React: sin esto, cada boleta que el asesor
+	// cambia deja su blob retenido hasta que recargue la página.
+	useEffect(
+		() => () => {
+			if (previewUrl) URL.revokeObjectURL(previewUrl);
+		},
+		[previewUrl],
+	);
 
 	function volverAlCredito() {
 		navigate({ to: "/cobros/$id", params: { id }, search: { tipo } });
@@ -484,24 +602,362 @@ function RegistrarPagoPage() {
 					</CardContent>
 				</Card>
 			) : credito ? (
-				<div className="space-y-6">
-					<div
-						className={cn(
-							"grid gap-6",
-							convenioActivo ? "lg:grid-cols-2" : "lg:grid-cols-1",
-						)}
-					>
+				// Dos columnas: a la izquierda lo que el asesor HACE (subir la
+				// boleta y revisar los datos), a la derecha el crédito como
+				// contexto fijo. Antes todo iba apilado y el formulario quedaba
+				// debajo del pliegue, después de un resumen de media pantalla.
+				<div className="grid gap-6 lg:grid-cols-5 lg:items-start">
+					<div className="space-y-6 lg:col-span-3">
+						<Card>
+							<CardHeader className="space-y-1">
+								<CardTitle className="flex items-center gap-2 text-base">
+									<span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary font-semibold text-primary-foreground text-xs">
+										1
+									</span>
+									Boleta de pago
+								</CardTitle>
+								<p className="text-muted-foreground text-sm">
+									Subí el comprobante y leemos los datos automáticamente — mismo
+									lector que usa el bot de WhatsApp. Revisalos antes de
+									registrar.
+								</p>
+							</CardHeader>
+							<CardContent className="space-y-4">
+								<input
+									accept="image/*,application/pdf"
+									className="hidden"
+									onChange={(e) =>
+										seleccionarArchivo(e.target.files?.[0] ?? null)
+									}
+									ref={inputArchivoRef}
+									type="file"
+								/>
+								{archivo ? (
+									<div className="flex items-center gap-3 rounded-lg border p-3">
+										{previewUrl ? (
+											<img
+												alt="Boleta"
+												className="h-16 w-16 shrink-0 rounded-md border object-cover"
+												src={previewUrl}
+											/>
+										) : (
+											<span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-md border bg-muted/40">
+												<FileText className="h-6 w-6 text-muted-foreground" />
+											</span>
+										)}
+										<div className="min-w-0 flex-1">
+											<p className="truncate font-medium text-sm">
+												{archivo.name}
+											</p>
+											<p className="text-muted-foreground text-xs">
+												{(archivo.size / 1024).toFixed(0)} KB
+											</p>
+										</div>
+										<Button
+											onClick={() => inputArchivoRef.current?.click()}
+											size="sm"
+											type="button"
+											variant="outline"
+										>
+											Cambiar
+										</Button>
+									</div>
+								) : (
+									<button
+										className={cn(
+											"flex w-full flex-col items-center gap-2 rounded-lg border-2 border-dashed p-8 text-center transition-colors hover:border-primary/50 hover:bg-muted/30",
+											arrastrando && "border-primary bg-primary/5",
+										)}
+										onClick={() => inputArchivoRef.current?.click()}
+										onDragLeave={() => setArrastrando(false)}
+										onDragOver={(e) => {
+											e.preventDefault();
+											setArrastrando(true);
+										}}
+										onDrop={(e) => {
+											e.preventDefault();
+											setArrastrando(false);
+											seleccionarArchivo(e.dataTransfer.files?.[0] ?? null);
+										}}
+										type="button"
+									>
+										<span className="flex h-11 w-11 items-center justify-center rounded-full bg-muted">
+											<Upload className="h-5 w-5 text-muted-foreground" />
+										</span>
+										<span className="font-medium text-sm">
+											Arrastrá la boleta acá o hacé clic para elegirla
+										</span>
+										<span className="text-muted-foreground text-xs">
+											JPG, PNG o PDF · hasta 10 MB
+										</span>
+									</button>
+								)}
+
+								{leerBoletaMutation.isPending && (
+									<div className="flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50/60 p-3 text-sm dark:border-violet-900 dark:bg-violet-950/30">
+										<Loader2 className="h-4 w-4 animate-spin text-violet-600" />
+										Leyendo la boleta…
+									</div>
+								)}
+
+								{!leerBoletaMutation.isPending && errorLectura && (
+									<div className="flex items-start justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-900 text-sm dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+										<span className="flex items-start gap-2">
+											<AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+											{errorLectura}
+										</span>
+										<Button
+											className="shrink-0"
+											onClick={() =>
+												archivo && leerBoletaMutation.mutate(archivo)
+											}
+											size="sm"
+											type="button"
+											variant="outline"
+										>
+											Reintentar
+										</Button>
+									</div>
+								)}
+
+								{!leerBoletaMutation.isPending &&
+									lectura &&
+									!lectura.esBoletaDePago && (
+										<div className="flex items-start gap-2 rounded-lg border border-red-300 bg-red-50 p-3 text-red-900 text-sm dark:border-red-900 dark:bg-red-950/30 dark:text-red-100">
+											<ImageIcon className="mt-0.5 h-4 w-4 shrink-0" />
+											<span>
+												El archivo no parece un comprobante bancario. Revisá que
+												sea la boleta correcta; podés registrar el pago igual
+												llenando los datos a mano.
+											</span>
+										</div>
+									)}
+
+								{!leerBoletaMutation.isPending && lectura?.esBoletaDePago && (
+									<div className="space-y-3 rounded-lg border border-green-300 bg-green-50/60 p-3 dark:border-green-900 dark:bg-green-950/20">
+										<p className="flex items-center gap-2 font-medium text-green-800 text-sm dark:text-green-300">
+											<CheckCircle2 className="h-4 w-4" />
+											Datos leídos de la boleta
+										</p>
+										<div className="grid gap-2 sm:grid-cols-2">
+											{[
+												{
+													label: "Monto",
+													valor:
+														lectura.monto !== null
+															? `Q${lectura.monto.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+															: null,
+												},
+												{ label: "Banco", valor: lectura.bancoNombre },
+												{
+													label: "Fecha",
+													valor: lectura.fechaCorregida
+														? null
+														: lectura.fechaBoleta,
+												},
+												{
+													label: "No. autorización",
+													valor: lectura.numeroAutorizacion,
+												},
+											].map((dato) => (
+												<div
+													className="rounded-md bg-background/70 px-3 py-2"
+													key={dato.label}
+												>
+													<p className="text-muted-foreground text-xs">
+														{dato.label}
+													</p>
+													<p
+														className={cn(
+															"truncate font-medium text-sm",
+															!dato.valor && "text-muted-foreground",
+														)}
+													>
+														{dato.valor ?? "No se leyó"}
+													</p>
+												</div>
+											))}
+										</div>
+										{(lectura.bancoId === null ||
+											lectura.fechaCorregida ||
+											lectura.monto === null ||
+											lectura.camposNoLeidos.length > 0) && (
+											<ul className="space-y-1 text-amber-800 text-xs dark:text-amber-300">
+												{lectura.monto === null && (
+													<li>• No se leyó el monto: escribilo a mano.</li>
+												)}
+												{lectura.bancoId === null && (
+													<li>
+														• No reconocimos el banco
+														{lectura.bancoLeido
+															? ` ("${lectura.bancoLeido}")`
+															: ""}
+														: elegilo de la lista.
+													</li>
+												)}
+												{lectura.fechaCorregida && (
+													<li>
+														• No se leyó la fecha: quedó la de hoy, corregila si
+														la boleta es de otro día.
+													</li>
+												)}
+												{lectura.camposNoLeidos
+													.filter(
+														(campo) =>
+															campo !== "banco" &&
+															campo !== "monto" &&
+															campo !== "fechaBoleta",
+													)
+													.map((campo) => (
+														<li key={campo}>
+															• Sin {ETIQUETA_CAMPO[campo] ?? campo} en la
+															boleta.
+														</li>
+													))}
+											</ul>
+										)}
+									</div>
+								)}
+							</CardContent>
+						</Card>
+
+						<Card>
+							<CardHeader className="space-y-1">
+								<CardTitle className="flex items-center gap-2 text-base">
+									<span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary font-semibold text-primary-foreground text-xs">
+										2
+									</span>
+									Datos del pago
+								</CardTitle>
+								<p className="text-muted-foreground text-sm">
+									Se llenan con lo que leímos del comprobante. Corregí lo que
+									haga falta.
+								</p>
+							</CardHeader>
+							<CardContent className="space-y-4">
+								<div className="grid gap-4 sm:grid-cols-2">
+									<div className="space-y-1.5">
+										<Label>Monto boleta *</Label>
+										<CurrencyInput
+											onChange={setMontoBoleta}
+											value={montoBoleta}
+										/>
+									</div>
+
+									<div className="space-y-1.5">
+										<Label>Otros (opcional)</Label>
+										<CurrencyInput onChange={setOtros} value={otros} />
+									</div>
+
+									<div className="space-y-1.5">
+										<Label>Banco *</Label>
+										<Combobox
+											onChange={setBancoId}
+											options={bancoOptions}
+											placeholder="Selecciona banco"
+											popOverWidth="full"
+											value={bancoId}
+											width="full"
+										/>
+									</div>
+
+									<div className="space-y-1.5">
+										<Label>Origen de pago *</Label>
+										<Select
+											onValueChange={(v) =>
+												setOrigenPago(v as typeof origenPago)
+											}
+											value={origenPago}
+										>
+											<SelectTrigger className="w-full">
+												<SelectValue placeholder="Selecciona origen" />
+											</SelectTrigger>
+											<SelectContent>
+												<SelectItem value="transferencia">
+													Transferencia
+												</SelectItem>
+												<SelectItem value="cheque">Cheque</SelectItem>
+												<SelectItem value="boleta">Boleta</SelectItem>
+											</SelectContent>
+										</Select>
+									</div>
+
+									<div className="space-y-1.5">
+										<Label>No. Autorización (opcional)</Label>
+										<Input
+											maxLength={100}
+											onChange={(e) => setNumeroAutorizacion(e.target.value)}
+											placeholder="Ej: 123456789"
+											value={numeroAutorizacion}
+										/>
+									</div>
+
+									<div className="space-y-1.5">
+										<Label>Fecha de boleta *</Label>
+										<Popover>
+											<PopoverTrigger asChild>
+												<Button
+													className={cn(
+														"w-full justify-start text-left font-normal",
+														!fechaBoleta && "text-muted-foreground",
+													)}
+													type="button"
+													variant="outline"
+												>
+													<CalendarIcon className="mr-2 h-4 w-4" />
+													{fechaBoleta
+														? format(fechaBoleta, "dd MMM, yyyy", {
+																locale: es,
+															})
+														: "Seleccionar fecha"}
+												</Button>
+											</PopoverTrigger>
+											<PopoverContent align="start" className="w-auto p-0">
+												<Calendar
+													disabled={(dia) => aFechaISO(dia) > hoyGT}
+													mode="single"
+													onSelect={setFechaBoleta}
+													selected={fechaBoleta}
+												/>
+											</PopoverContent>
+										</Popover>
+									</div>
+								</div>
+
+								<div className="space-y-1.5">
+									<Label>Observaciones (opcional)</Label>
+									<Textarea
+										maxLength={2000}
+										onChange={(e) => setObservaciones(e.target.value)}
+										placeholder="Notas adicionales..."
+										rows={3}
+										value={observaciones}
+									/>
+								</div>
+							</CardContent>
+						</Card>
+
+						<div className="flex justify-end gap-2">
+							<Button onClick={volverAlCredito} variant="outline">
+								Cancelar
+							</Button>
+							<Button onClick={handleAbrirConfirmacion}>Registrar pago</Button>
+						</div>
+					</div>
+
+					<div className="space-y-6 lg:sticky lg:top-6 lg:col-span-2">
 						<Card>
 							<CardHeader>
 								<CardTitle className="text-base">Resumen del crédito</CardTitle>
 							</CardHeader>
 							<CardContent>
 								<ResumenCreditoPago
+									abonosTotal={abonosYaHechos}
 									credito={credito}
 									cuotaActualNumero={cuotaActualNumero}
 									cuotaActualPagada={!!credito.cuotaActualPagada}
 									cuotaActualStatus={credito.cuotaActualStatus}
-									abonosTotal={abonosYaHechos}
+									cuotaAPagar={cuotaSeleccionada}
 									promesaActiva={promesaActivaQuery.data}
 								/>
 							</CardContent>
@@ -522,140 +978,6 @@ function RegistrarPagoPage() {
 								</CardContent>
 							</Card>
 						)}
-					</div>
-
-					<Card>
-						<CardHeader>
-							<CardTitle className="text-base">Datos del pago</CardTitle>
-						</CardHeader>
-						<CardContent className="space-y-4">
-							<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-								<div className="space-y-1.5">
-									<Label>Cuota a pagar</Label>
-									<div className="flex h-9 items-center rounded-md border bg-muted/30 px-3 font-medium text-sm">
-										{cuotaSeleccionada
-											? `Cuota #${cuotaSeleccionada}`
-											: "Sin cuotas pendientes"}
-									</div>
-								</div>
-
-								<div className="space-y-1.5">
-									<Label>Monto boleta *</Label>
-									<CurrencyInput
-										value={montoBoleta}
-										onChange={setMontoBoleta}
-									/>
-								</div>
-
-								<div className="space-y-1.5">
-									<Label>Otros (opcional)</Label>
-									<CurrencyInput value={otros} onChange={setOtros} />
-								</div>
-
-								<div className="space-y-1.5">
-									<Label>Banco *</Label>
-									<Combobox
-										options={bancoOptions}
-										value={bancoId}
-										onChange={setBancoId}
-										isLoading={bancosQuery.isLoading}
-										width="full"
-										popOverWidth="full"
-										placeholder="Selecciona banco"
-									/>
-								</div>
-
-								<div className="space-y-1.5">
-									<Label>Origen de pago *</Label>
-									<Select
-										value={origenPago}
-										onValueChange={(v) => setOrigenPago(v as typeof origenPago)}
-									>
-										<SelectTrigger className="w-full">
-											<SelectValue placeholder="Selecciona origen" />
-										</SelectTrigger>
-										<SelectContent>
-											<SelectItem value="transferencia">
-												Transferencia
-											</SelectItem>
-											<SelectItem value="cheque">Cheque</SelectItem>
-											<SelectItem value="boleta">Boleta</SelectItem>
-										</SelectContent>
-									</Select>
-								</div>
-
-								<div className="space-y-1.5">
-									<Label>No. Autorización (opcional)</Label>
-									<Input
-										value={numeroAutorizacion}
-										onChange={(e) => setNumeroAutorizacion(e.target.value)}
-										placeholder="Ej: 123456789"
-										maxLength={100}
-									/>
-								</div>
-
-								<div className="space-y-1.5">
-									<Label>Fecha de boleta *</Label>
-									<Popover>
-										<PopoverTrigger asChild>
-											<Button
-												type="button"
-												variant="outline"
-												className={cn(
-													"w-full justify-start text-left font-normal",
-													!fechaBoleta && "text-muted-foreground",
-												)}
-											>
-												<CalendarIcon className="mr-2 h-4 w-4" />
-												{fechaBoleta
-													? format(fechaBoleta, "dd MMM, yyyy", { locale: es })
-													: "Seleccionar fecha"}
-											</Button>
-										</PopoverTrigger>
-										<PopoverContent className="w-auto p-0" align="start">
-											<Calendar
-												mode="single"
-												selected={fechaBoleta}
-												onSelect={setFechaBoleta}
-												disabled={(dia) => aFechaISO(dia) > hoyGT}
-											/>
-										</PopoverContent>
-									</Popover>
-								</div>
-
-								<div className="space-y-1.5">
-									<Label>Boleta / comprobante *</Label>
-									<Input
-										type="file"
-										accept="image/*,application/pdf"
-										onChange={(e) => setArchivo(e.target.files?.[0] ?? null)}
-									/>
-									{archivo && (
-										<p className="truncate text-muted-foreground text-xs">
-											{archivo.name}
-										</p>
-									)}
-								</div>
-							</div>
-
-							<div className="space-y-1.5">
-								<Label>Observaciones (opcional)</Label>
-								<Textarea
-									value={observaciones}
-									onChange={(e) => setObservaciones(e.target.value)}
-									placeholder="Notas adicionales..."
-									rows={3}
-									maxLength={2000}
-								/>
-							</div>
-						</CardContent>
-					</Card>
-
-					<div className="flex justify-end gap-2">
-						<Button variant="outline" onClick={volverAlCredito}>
-							Cancelar
-						</Button>
-						<Button onClick={handleAbrirConfirmacion}>Registrar pago</Button>
 					</div>
 				</div>
 			) : (

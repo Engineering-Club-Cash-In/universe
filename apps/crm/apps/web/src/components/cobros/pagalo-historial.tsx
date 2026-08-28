@@ -1,12 +1,23 @@
 /**
- * Rastro completo de Págalo (CB-028) para el caso: todos los grupos creados
- * a lo largo del tiempo (puede haber más de uno — un grupo completado o
- * cancelado libera el slot y permite crear otro nuevo para el mismo
- * crédito), más reciente primero, cada uno con su timeline de eventos
- * append-only (pagaloPaymentEvents) y los links generados.
+ * Rastro completo de Págalo (CB-028) del CRÉDITO: todos los grupos creados a
+ * lo largo del tiempo (puede haber más de uno — un grupo completado o
+ * cancelado libera el slot y permite crear otro nuevo), más reciente primero,
+ * cada uno con su timeline de eventos append-only (pagaloPaymentEvents) y los
+ * links generados.
+ *
+ * Va por crédito y paginado, no por caso: un crédito puede acumular varios
+ * casos de cobro y el asesor espera ver TODOS los links que se le generaron,
+ * no solo los del caso vigente ni solo los que siguen pendientes de pago.
  */
 import { useQuery } from "@tanstack/react-query";
-import { CheckCircle2, Copy, CreditCard, XCircle } from "lucide-react";
+import {
+	CheckCircle2,
+	ChevronLeft,
+	ChevronRight,
+	Copy,
+	CreditCard,
+	XCircle,
+} from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -210,15 +221,27 @@ function GrupoPagalo({ grupo }: { grupo: Grupo }) {
 	);
 }
 
-export function PagaloHistorial({ casoCobroId }: { casoCobroId: string }) {
-	const [expandido, setExpandido] = useState(true);
-	const historial = useQuery({
-		...orpc.getPagaloHistorial.queryOptions({ input: { casoCobroId } }),
-		enabled: !!casoCobroId,
-	});
-	const grupos = (historial.data as Grupo[] | undefined) ?? [];
+const POR_PAGINA = 5;
 
-	if (!historial.isLoading && grupos.length === 0) return null;
+export function PagaloHistorial({
+	carteraCreditoId,
+}: {
+	carteraCreditoId: number;
+}) {
+	const [expandido, setExpandido] = useState(true);
+	const [pagina, setPagina] = useState(1);
+	const historial = useQuery({
+		...orpc.getPagaloHistorial.queryOptions({
+			input: { carteraCreditoId, page: pagina, pageSize: POR_PAGINA },
+		}),
+		enabled: !!carteraCreditoId,
+		// Sin esto la lista parpadea a vacío en cada cambio de página.
+		placeholderData: (anterior: unknown) => anterior,
+	});
+	const data = historial.data as { grupos: Grupo[]; total: number } | undefined;
+	const grupos = data?.grupos ?? [];
+	const total = data?.total ?? 0;
+	const totalPaginas = Math.max(1, Math.ceil(total / POR_PAGINA));
 
 	return (
 		<div className="space-y-3">
@@ -227,12 +250,17 @@ export function PagaloHistorial({ casoCobroId }: { casoCobroId: string }) {
 				className="flex w-full items-center justify-between text-left"
 				onClick={() => setExpandido((v) => !v)}
 			>
-				<h3 className="flex items-center gap-2 font-medium text-sm">
-					<CreditCard className="h-4 w-4" />
-					Historial Links de Pagos
-				</h3>
+				<div>
+					<h3 className="flex items-center gap-2 font-medium text-sm">
+						<CreditCard className="h-4 w-4" />
+						Historial Links de Pagos
+					</h3>
+					<p className="text-muted-foreground text-xs">
+						Todos los links Págalo generados para este crédito
+					</p>
+				</div>
 				<span className="text-muted-foreground text-xs">
-					{grupos.length} grupo(s)
+					{historial.isLoading ? "…" : `${total} grupo(s)`}
 				</span>
 			</button>
 			{expandido &&
@@ -240,11 +268,51 @@ export function PagaloHistorial({ casoCobroId }: { casoCobroId: string }) {
 					<div className="py-4 text-center text-muted-foreground text-sm">
 						Cargando historial Págalo…
 					</div>
+				) : grupos.length === 0 ? (
+					// El asesor tiene que poder distinguir "no se generó ninguno"
+					// de "se rompió algo"; antes la sección desaparecía y quedaba
+					// una tarjeta vacía en la ficha.
+					<div className="py-6 text-center text-muted-foreground text-sm">
+						Sin links de pago generados para este crédito
+					</div>
 				) : (
 					<div className="space-y-3">
 						{grupos.map((grupo) => (
 							<GrupoPagalo key={grupo.id} grupo={grupo} />
 						))}
+						{totalPaginas > 1 && (
+							<div className="flex items-center justify-between border-t pt-3">
+								<p className="text-muted-foreground text-xs">
+									Mostrando {(pagina - 1) * POR_PAGINA + 1} -{" "}
+									{Math.min(pagina * POR_PAGINA, total)} de {total}
+								</p>
+								<div className="flex items-center gap-2">
+									<Button
+										disabled={pagina === 1}
+										onClick={() => setPagina((p) => Math.max(1, p - 1))}
+										size="sm"
+										type="button"
+										variant="outline"
+									>
+										<ChevronLeft className="h-4 w-4" />
+									</Button>
+									<span className="text-xs">
+										Página {pagina} de {totalPaginas}
+									</span>
+									<Button
+										disabled={pagina >= totalPaginas}
+										onClick={() =>
+											setPagina((p) => Math.min(totalPaginas, p + 1))
+										}
+										size="sm"
+										type="button"
+										variant="outline"
+									>
+										<ChevronRight className="h-4 w-4" />
+									</Button>
+								</div>
+							</div>
+						)}
 					</div>
 				))}
 		</div>

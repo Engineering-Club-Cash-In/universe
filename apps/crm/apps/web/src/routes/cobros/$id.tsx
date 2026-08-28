@@ -10,6 +10,7 @@ import {
 	ChevronLeft,
 	ChevronRight,
 	Clock,
+	CreditCard,
 	Eye,
 	FileText,
 	HandCoins,
@@ -23,6 +24,7 @@ import {
 	Play,
 	Shield,
 	Tag,
+	Upload,
 	User,
 	Users,
 	X,
@@ -476,6 +478,9 @@ function RouteComponent() {
 		null,
 	);
 	const [confirmarEstadoCuenta, setConfirmarEstadoCuenta] = useState(false);
+	// Generar links dejó de ser un botón suelto: ahora es una de las dos formas
+	// de registrar un pago, así que el diálogo lo abre el dropdown principal.
+	const [pagaloAbierto, setPagaloAbierto] = useState(false);
 	/**
 	 * Los canales del dropdown "Registrar Contacto". Todos abren el MISMO modal
 	 * (ContactoModal) con su `metodoInicial`; agregar un canal nuevo es una fila
@@ -1277,14 +1282,6 @@ function RouteComponent() {
 										</DropdownMenuContent>
 									</DropdownMenu>
 
-									{caso.numeroCreditoSifco && caso.carteraCreditoId && (
-										<PagaloLinkDialog
-											casoCobroId={caso.id}
-											numeroSifco={caso.numeroCreditoSifco}
-											creditoId={caso.carteraCreditoId}
-										/>
-									)}
-
 									{/* 2 · Promesa de Pago: visible porque es una gestión con
 									    peso propio (CB-020: modal reducido — solo Detalles de
 									    la Conversación + fecha prometida obligatoria). */}
@@ -1372,18 +1369,59 @@ function RouteComponent() {
 										</DropdownMenuContent>
 									</DropdownMenu>
 
-									{/* 4 · LA acción principal de la ficha. */}
-									<Button asChild className="flex items-center gap-2">
-										<Link
-											to="/cobros/registrar-pago/$id"
-											params={{ id }}
-											search={{ tipo }}
-										>
-											<Banknote className="h-4 w-4" />
-											Registrar Pago
-										</Link>
-									</Button>
+									{/* 4 · LA acción principal de la ficha. Cobrar tiene dos
+									    vías y las dos son "registrar un pago": mandarle links
+									    de Págalo al cliente, o subir la boleta de un depósito
+									    que ya hizo. Antes los links eran un botón aparte, como
+									    si fueran otra gestión. */}
+									<DropdownMenu>
+										<DropdownMenuTrigger asChild>
+											<Button className="flex items-center gap-2">
+												<Banknote className="h-4 w-4" />
+												Registrar Pago
+												<ChevronDown className="h-3.5 w-3.5 opacity-60" />
+											</Button>
+										</DropdownMenuTrigger>
+										<DropdownMenuContent align="end">
+											{/* Sin crédito de cartera no hay cuotas que cobrar por
+											    link: la opción se ve deshabilitada en vez de
+											    desaparecer, para que el asesor sepa que existe. */}
+											<DropdownMenuItem
+												className="cursor-pointer"
+												disabled={
+													!caso.numeroCreditoSifco || !caso.carteraCreditoId
+												}
+												onClick={() => setPagaloAbierto(true)}
+											>
+												<CreditCard className="mr-2 h-4 w-4 text-violet-600" />
+												Generar links de pago
+											</DropdownMenuItem>
+											<DropdownMenuItem asChild className="cursor-pointer">
+												<Link
+													to="/cobros/registrar-pago/$id"
+													params={{ id }}
+													search={{ tipo }}
+												>
+													<Upload className="mr-2 h-4 w-4 text-emerald-600" />
+													Subir boleta
+												</Link>
+											</DropdownMenuItem>
+										</DropdownMenuContent>
+									</DropdownMenu>
 								</div>
+
+								{/* El diálogo vive fuera del dropdown: dentro, el menú se
+								    cierra al elegir y se lo llevaría puesto. */}
+								{caso.numeroCreditoSifco && caso.carteraCreditoId && (
+									<PagaloLinkDialog
+										casoCobroId={caso.id}
+										numeroSifco={caso.numeroCreditoSifco}
+										creditoId={caso.carteraCreditoId}
+										open={pagaloAbierto}
+										onOpenChange={setPagaloAbierto}
+										mostrarTrigger={false}
+									/>
+								)}
 
 								{/* UN modal para todos los canales. El `key` remonta el
 								    formulario con el método recién elegido; cerrar = volver
@@ -2445,10 +2483,10 @@ function RouteComponent() {
 							)}
 						</CardContent>
 					</Card>
-					{caso.id && (
+					{caso.carteraCreditoId && (
 						<Card>
 							<CardContent className="pt-6">
-								<PagaloHistorial casoCobroId={caso.id} />
+								<PagaloHistorial carteraCreditoId={caso.carteraCreditoId} />
 							</CardContent>
 						</Card>
 					)}

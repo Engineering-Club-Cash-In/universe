@@ -378,6 +378,106 @@ app.post("/api/upload-boleta-pago", async (c) => {
 	}
 });
 
+/**
+ * Lee una boleta con IA y devuelve los campos para autocompletar el formulario
+ * de Registrar pago.
+ *
+ * Es EXACTAMENTE el mismo lector del bot de WhatsApp (`leerBoletaConIA` +
+ * `reconocerBanco` + `fechaBoletaValida`): si el bot y el asesor leyeran la
+ * misma boleta con criterios distintos, conta terminaría con dos verdades del
+ * mismo depósito.
+ *
+ * NO sube nada ni escribe en la base: es solo lectura. El archivo se sube a R2
+ * al registrar el pago (`/api/upload-boleta-pago`), como siempre — así una
+ * lectura que el asesor descarta no deja basura en storage.
+ */
+app.post("/api/leer-boleta-pago", async (c) => {
+	try {
+		const context = await createContext({ context: c });
+
+		if (!context.session?.user?.id) {
+			return c.json({ error: "No autorizado" }, 401);
+		}
+
+		const userRole = context.session.user.role;
+		if (!userRole || !PERMISSIONS.canAccessCobros(userRole)) {
+			return c.json({ error: "No tienes permiso para registrar pagos" }, 403);
+		}
+
+		const formData = await c.req.formData();
+		const file = formData.get("file") as File;
+		if (!file) {
+			return c.json({ error: "Falta el archivo de la boleta" }, 400);
+		}
+
+		const { validateFile } = await import("./lib/storage");
+		const validation = validateFile(file);
+		if (!validation.valid) {
+			return c.json({ error: validation.error }, 400);
+		}
+
+		const [
+			{ leerBoletaConIA, montoALimpio, fechaBoletaValida },
+			{ reconocerBanco },
+			{ hoyGuatemala },
+		] = await Promise.all([
+			import("./lib/bot-cobros/lectura-boleta"),
+			import("./lib/bot-cobros/bancos-boleta"),
+			import("./lib/bot-cobros/boleta"),
+		]);
+
+		const buffer = Buffer.from(await file.arrayBuffer());
+		const lectura = await leerBoletaConIA({ buffer, tipo: file.type });
+
+		if (!lectura.ok) {
+			// Timeout, cuota agotada o modelo caído. 503 y no 500: el asesor puede
+			// seguir a mano, que es justo lo que dice el mensaje.
+			return c.json(
+				{
+					error:
+						"No se pudo leer la boleta automáticamente. Completá los datos a mano.",
+				},
+				503,
+			);
+		}
+
+		const leida = lectura.lectura;
+		const banco = reconocerBanco(leida.banco);
+		const fecha = fechaBoletaValida(leida.fechaBoleta, hoyGuatemala());
+		const tipo = (leida.tipoOperacion ?? "").toLowerCase();
+
+		return c.json({
+			success: true,
+			data: {
+				esBoletaDePago: leida.esBoletaDePago,
+				monto: montoALimpio(leida.monto),
+				bancoId: banco?.id ?? null,
+				bancoNombre: banco?.nombre ?? null,
+				// Lo que el modelo leyó tal cual, para poder decir "leí X pero no lo
+				// tengo en el catálogo" en vez de un "no se reconoció" pelado.
+				bancoLeido: leida.banco ?? null,
+				fechaBoleta: fecha.fecha,
+				fechaCorregida: fecha.corregida,
+				numeroAutorizacion: leida.numeroAutorizacion ?? null,
+				// Un depósito monetario es "boleta" para cartera; lo demás se
+				// reconoce por palabra suelta y ante la duda no se elige nada.
+				origenPago: tipo.includes("transferencia")
+					? "transferencia"
+					: tipo.includes("cheque")
+						? "cheque"
+						: tipo.includes("deposito") || tipo.includes("depósito")
+							? "boleta"
+							: null,
+				observaciones: leida.observaciones ?? null,
+				camposNoLeidos: leida.camposNoLeidos ?? [],
+			},
+		});
+	} catch (error) {
+		console.error("Error leyendo boleta de pago:", error);
+		return c.json({ error: "Error al leer la boleta" }, 500);
+	}
+});
+
 // Vehicle video upload endpoint
 app.post("/api/upload-vehicle-video", async (c) => {
 	try {

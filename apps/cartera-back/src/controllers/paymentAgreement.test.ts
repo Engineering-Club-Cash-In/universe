@@ -10,6 +10,7 @@ const updates: Array<Record<string, unknown>> = [];
 let selectQueue: unknown[][] = [];
 /** Simula el update guardado del commit: false = 0 filas afectadas. */
 let updateAffectsRows = true;
+let updateResultQueue: boolean[] = [];
 
 const makeSelect = () => {
   const rows = selectQueue.shift() ?? [];
@@ -28,7 +29,9 @@ const dbMock = {
         updates.push(values);
         return Object.assign(Promise.resolve(), {
           returning: () =>
-            Promise.resolve(updateAffectsRows ? [values] : []),
+            Promise.resolve(
+              (updateResultQueue.shift() ?? updateAffectsRows) ? [values] : []
+            ),
         });
       },
     }),
@@ -83,6 +86,7 @@ beforeEach(() => {
   updates.length = 0;
   selectQueue = [];
   updateAffectsRows = true;
+  updateResultQueue = [];
 });
 
 describe("prepararConvenioPayment: calcular sin escribir", () => {
@@ -144,16 +148,17 @@ describe("commit: persiste exactamente lo previsualizado", () => {
     ];
 
     const { commit } = await prepararConvenioPayment(paramsBase);
-    await commit!();
+    expect(await commit!(401)).toBe(true);
 
-    expect(updates).toHaveLength(2);
-    const [updConvenio, updCuotas] = updates;
+    expect(updates).toHaveLength(3);
+    const [updConvenio, updPago, updCuotas] = updates;
     expect(updConvenio.monto_pagado).toBe("1106.14");
     expect(updConvenio.monto_pendiente).toBe("2212.31");
     expect(updConvenio.pagos_realizados).toBe(2);
     expect(updConvenio.pagos_pendientes).toBe(4);
     expect(updConvenio.completado).toBe(false);
     expect(updConvenio.activo).toBe(true);
+    expect(updPago.pagoConvenio).toBe("553.07");
     expect(updCuotas.fecha_pago).toBeInstanceOf(Date);
   });
 
@@ -178,10 +183,25 @@ describe("commit: persiste exactamente lo previsualizado", () => {
     // Otro escritor (updateConvenioStatus, reversa) tocó el convenio: el
     // update condicionado afecta 0 filas.
     updateAffectsRows = false;
-    await commit!();
+    expect(await commit!(401)).toBe(false);
 
-    // Solo el intento de acreditación; nada de convenio_cuotas.
+    // Solo el intento de acreditación: no estampa pagos_credito ni marca
+    // convenio_cuotas, por lo que reversePayment no podrá restar un convenio
+    // que este pago nunca acreditó.
     expect(updates).toHaveLength(1);
+    expect(updates.some((values) => "pagoConvenio" in values)).toBe(false);
+  });
+
+  it("revierte la acreditación si la fila de pago a estampar ya no existe", async () => {
+    selectQueue = [[{ ...convenioBase }]];
+    const { commit } = await prepararConvenioPayment(paramsBase);
+    updateResultQueue = [true, false];
+
+    expect(commit!(401)).rejects.toThrow(
+      "No se pudo estampar el convenio en el pago 401"
+    );
+    expect(updates).toHaveLength(2);
+    expect(updates.some((values) => "fecha_pago" in values)).toBe(false);
   });
 
   it("última cuota: el commit cierra el convenio (completado=true, activo=false)", async () => {

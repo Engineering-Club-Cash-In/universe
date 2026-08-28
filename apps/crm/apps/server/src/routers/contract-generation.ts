@@ -189,6 +189,7 @@ export const contractGenerationRouter = {
 	 * Intenta enriquecer los datos del lead desde RENAP
 	 */
 	enrichLeadFromRenap: juridicoProcedure
+		.meta({ audit: { entity: "lead", action: "enrich_renap" } })
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),

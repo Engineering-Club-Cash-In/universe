@@ -59,6 +59,7 @@ export const crmAppRouter = {
 	approveCreditDetail: crmRouter.approveCreditDetail,
 	revokeCreditDetailApproval: crmRouter.revokeCreditDetailApproval,
 	getCreditDetailApprovalStatus: crmRouter.getCreditDetailApprovalStatus,
+	getAjusteFechaIdealPago: crmRouter.getAjusteFechaIdealPago,
 	getOpportunityHistory: crmRouter.getOpportunityHistory,
 	validateOpportunityDocuments: crmRouter.validateOpportunityDocuments,
 	getOpportunityDocuments: crmRouter.getOpportunityDocuments,

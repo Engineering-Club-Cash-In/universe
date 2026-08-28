@@ -3,6 +3,7 @@
  */
 import { eq } from "drizzle-orm";
 import { db } from "../db";
+import { auditRecord } from "../lib/audit";
 import { leads, opportunities } from "../db/schema/crm";
 import { vehicles } from "../db/schema/vehicles";
 import { getRenapData } from "../functions/getRenapInfo";
@@ -262,6 +263,16 @@ export async function enrichLeadFromRenap(
 			if (needsGender) missingFields.push("Género");
 			if (needsBirthDate) missingFields.push("Fecha de Nacimiento");
 			if (needsNationality) missingFields.push("Nacionalidad");
+			// No hay escritura, pero el intento fallido es justamente lo que se
+			// consulta cuando alguien pregunta por qué no se enriqueció.
+			auditRecord({
+				entity: "lead",
+				id: leadId,
+				action: "enrich_renap",
+				ok: false,
+				errorCode: "SIN_DPI",
+			});
+
 			return {
 				success: false,
 				enrichedFields: [],
@@ -277,6 +288,16 @@ export async function enrichLeadFromRenap(
 			if (needsGender) missingFields.push("Género");
 			if (needsBirthDate) missingFields.push("Fecha de Nacimiento");
 			if (needsNationality) missingFields.push("Nacionalidad");
+			// No hay escritura, pero el intento fallido es justamente lo que se
+			// consulta cuando alguien pregunta por qué no se enriqueció.
+			auditRecord({
+				entity: "lead",
+				id: leadId,
+				action: "enrich_renap",
+				ok: false,
+				errorCode: "RENAP_SIN_DATOS",
+			});
+
 			return {
 				success: false,
 				enrichedFields: [],
@@ -320,6 +341,12 @@ export async function enrichLeadFromRenap(
 					updatedAt: new Date(),
 				})
 				.where(eq(leads.id, leadId));
+			auditRecord({
+				entity: "lead",
+				id: leadId,
+				action: "enrich_renap",
+				data: { enrichedFields, updates },
+			});
 		}
 
 		return {
@@ -329,6 +356,13 @@ export async function enrichLeadFromRenap(
 		};
 	} catch (error) {
 		console.error("Error consultando RENAP:", error);
+		auditRecord({
+			entity: "lead",
+			id: leadId,
+			action: "enrich_renap",
+			ok: false,
+			errorCode: "RENAP_ERROR",
+		});
 		return {
 			success: false,
 			enrichedFields: [],

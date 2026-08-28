@@ -448,7 +448,7 @@ const handleFormSubmit = (e: React.FormEvent) => {
 
   // ===== CRÉDITO ACTIVO =====
 const { monto_boleta, otros } = formik.values;
-const  cuota = Number(dataCredito?.credito?.cuota || 0);
+const  cuota = Number(dataCredito?.cuotaMensualAPagar ?? dataCredito?.credito?.cuota ?? 0);
 const otrosNum = Number(otros || 0);
 const saldoAFavor = Number(dataCredito?.usuario?.saldo_a_favor || 0);
 const montoBoleta = Number(monto_boleta || 0);

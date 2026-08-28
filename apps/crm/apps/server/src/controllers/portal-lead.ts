@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray, ne, or, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { db } from "../db";
+import { auditRecord } from "../lib/audit";
 import { user } from "../db/schema/auth";
 import { leads, opportunities } from "../db/schema/crm";
 import { opportunityDocuments } from "../db/schema/documents";
@@ -288,6 +289,12 @@ export async function updateLeadByEmail(c: Context) {
 				direccion: leads.direccion,
 				updatedAt: leads.updatedAt,
 			});
+		auditRecord({
+			entity: "lead",
+			id: existingLead.id,
+			action: "update",
+			data: updateData,
+		});
 
 		// If address was updated, also update the lead direccion
 		if (address !== undefined && updatedLead) {
@@ -681,6 +688,12 @@ export async function createPortalRegisterLead(c: Context) {
 					.set({ email, updatedAt: new Date() })
 					.where(eq(leads.id, existingLead.id))
 					.returning();
+				auditRecord({
+					entity: "lead",
+					id: existingLead.id,
+					action: "update",
+					data: { email },
+				});
 
 				return c.json({
 					success: true,
@@ -730,6 +743,12 @@ export async function createPortalRegisterLead(c: Context) {
 				updatedAt: new Date(),
 			})
 			.returning();
+		auditRecord({
+			entity: "lead",
+			id: newLead.id,
+			action: "create",
+			data: { email, phone, dpi, assignedTo: salesUserForLead.id },
+		});
 
 		let renapInfo = null;
 		if (dpi) {

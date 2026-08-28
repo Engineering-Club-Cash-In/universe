@@ -15,6 +15,7 @@ import {
   convenio_cuotas,
   facturas_electronicas,
 } from "../database/db";
+import { resetAjusteFechaIdealSiPagoInvalidado } from "./ajusteFechaIdealPago";
 import { processAndReplaceCreditInvestorsReverse } from "./investor";
 import { revertirAbonoCapitalEspejo } from "./abonosCapital";
 import { updateMora } from "./latefee";
@@ -180,6 +181,16 @@ export function createReversePayment(
       const pagoValidado = esPagoAplicado(pago.validationStatus);
       previousPaymentState = pagoValidado ? "applied" : "pending";
 
+
+      // ======================================================================
+      // 2️⃣.5️⃣ RESETEAR AJUSTE POR FECHA IDEAL DE PAGO, SI ESTE PAGO LO COBRÓ
+      // ======================================================================
+      // ajuste_fecha_ideal_pago.pago_id guarda qué fila de pagos_credito lo
+      // cobró (ver registerPayment.ts). Si es justo la que se está revirtiendo,
+      // el dinero vuelve — el ajuste debe volver a quedar pendiente para poder
+      // reintentarlo en un pago futuro. Mismo helper que usan falsePayment y
+      // la anulación por incobrable (ver ajusteFechaIdealPago.ts).
+      await resetAjusteFechaIdealSiPagoInvalidado(pago_id, tx);
 
       // ======================================================================
       // 3️⃣ OBTENER DATOS DEL CRÉDITO

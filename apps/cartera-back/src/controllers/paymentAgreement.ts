@@ -719,7 +719,7 @@ interface ConvenioPaymentPreparado {
    * 26-ago-2026: cada reintento rechazado por el guard anti-sobreaplicación
    * sumaba una cuota fantasma).
    */
-  commit: (() => Promise<void>) | null;
+  commit: ((pagoId?: number) => Promise<boolean>) | null;
 }
 
 /**
@@ -814,14 +814,14 @@ export async function prepararConvenioPayment(
     // 9-10. El commit persiste todo lo calculado arriba: update de
     // convenios_pago + marcado de convenio_cuotas. Se entrega como closure
     // para que el caller lo ejecute solo cuando la boleta ya quedó escrita.
-    const commit = async () => {
+    const commit = async (pagoId?: number): Promise<boolean> => {
       try {
         // Transacción CHICA (P1 de Codex en #1482, 3ª ronda): acreditación y
         // marcado de cuotas caen o persisten JUNTOS — sin esto, un fallo
         // entre ambos statements dejaba convenios_pago acreditado con
         // convenio_cuotas sin marcar, y un reintento prepararía una segunda
         // acreditación sobre ese estado a medias.
-        await db.transaction(async (tx) => {
+        const acreditado = await db.transaction(async (tx) => {
           // Update GUARDADO contra estado stale (P2 de Codex en #1482): el
           // convenio pudo cambiar entre prepare y commit por un escritor que
           // no pasa por el advisory lock del pago. Se exige el MISMO estado
@@ -851,17 +851,29 @@ export async function prepararConvenioPayment(
             .returning({ convenio_id: convenios_pago.convenio_id });
 
           if (!convenioAcreditado) {
-            // El pago YA está persistido y su fila puede cargar el sello
-            // pago_convenio: se deja rastro ruidoso para conciliar a mano en
-            // vez de tirar (un throw acá respondería 500 sobre un pago que sí
-            // quedó escrito).
             console.error(
               `⚠️ commitConvenio: el convenio ${convenio.convenio_id} cambió o ` +
                 `se desactivó entre prepare y commit (esperaba activo, no ` +
                 `completado, monto_pagado=${convenio.monto_pagado}); no se ` +
-                `acreditó ni se marcaron cuotas — conciliar a mano.`
+                `acreditó, no se marcó ninguna cuota ni se estampó el pago.`
             );
-            return;
+            return false;
+          }
+
+          // El sello que usa reversePayment se persiste en la MISMA tx que
+          // acredita el convenio. Así jamás existe una fila que parezca
+          // acreditada cuando el CAS anterior perdió contra otro escritor.
+          if (pagoId !== undefined) {
+            const [pagoEstampado] = await tx
+              .update(pagos_credito)
+              .set({ pagoConvenio: montoAplicarBig.toFixed(2) })
+              .where(eq(pagos_credito.pago_id, pagoId))
+              .returning({ pago_id: pagos_credito.pago_id });
+            if (!pagoEstampado) {
+              throw new Error(
+                `No se pudo estampar el convenio en el pago ${pagoId}`
+              );
+            }
           }
 
           await marcarCuotasConvenioCompletadas({
@@ -869,7 +881,9 @@ export async function prepararConvenioPayment(
             nuevasCuotasCompletadas,
             dbc: tx,
           });
+          return true;
         });
+        return acreditado;
       } catch (error) {
         console.error("Error procesando pago de convenio:", error);
         throw new Error(

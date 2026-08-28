@@ -13,11 +13,13 @@ import {
   abonos_capital,
   historico_liquidaciones_espejo,
   compras_credito_inversionista,
+  ajuste_fecha_ideal_pago,
 } from "../database/db/schema";
 import { desc, gte } from "drizzle-orm";
 import Big from "big.js";
 import { z } from "zod";
 import { and, eq, lt, sql, asc, lte, inArray } from "drizzle-orm";
+import { resetAjusteFechaIdealSiPagoInvalidado } from "./ajusteFechaIdealPago";
 import { removeAccents } from "../utils/functions/generalFunctions";
 import {
   processAndReplaceCreditInvestors,
@@ -266,6 +268,25 @@ export async function getAllPagosWithCreditAndInversionistas(
           })
         : [];
 
+    // 4.5 Ingreso adicional por fecha ideal de pago: a lo sumo 1 fila por
+    // crédito, y solo aparece acá si su pago_id coincide con alguno de esta
+    // lista (o sea, si este pago fue el que lo cobró).
+    const ajustesFechaIdealArr =
+      pagoIds.length > 0
+        ? await db
+            .select({
+              pago_id: ajuste_fecha_ideal_pago.pago_id,
+              monto_total: ajuste_fecha_ideal_pago.monto_total,
+            })
+            .from(ajuste_fecha_ideal_pago)
+            .where(inArray(ajuste_fecha_ideal_pago.pago_id, pagoIds))
+        : [];
+    const ajusteFechaIdealPorPagoId = Object.fromEntries(
+      ajustesFechaIdealArr
+        .filter((a): a is typeof a & { pago_id: number } => a.pago_id !== null)
+        .map((a) => [a.pago_id, a.monto_total])
+    );
+
     // 5. Mapear por cada pago
     const result = pagos.map((pago) => {
       // Todos los inversionistas del crédito (siempre array, aunque esté vacío)
@@ -289,7 +310,10 @@ export async function getAllPagosWithCreditAndInversionistas(
         }));
 
       return {
-        pago,
+        pago: {
+          ...pago,
+          ajusteFechaIdealMonto: ajusteFechaIdealPorPagoId[pago.pago_id] ?? null,
+        },
         inversionistasData, // SIEMPRE array (puede ser vacío)
         pagosInversionistas, // SIEMPRE array (puede ser vacío)
       };
@@ -1902,6 +1926,10 @@ export async function falsePayment(pago_id: number, credito_id: number) {
       "No payment found to mark as false with the given criteria"
     );
   }
+
+  // Si este pago era el que cobró un ajuste por fecha ideal de pago, resetearlo
+  // a pendiente — la boleta resultó falsa, el dinero nunca entró de verdad.
+  await resetAjusteFechaIdealSiPagoInvalidado(pago_id);
 
   return {
     message: "Payment marked as false successfully",

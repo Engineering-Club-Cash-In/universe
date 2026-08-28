@@ -112,6 +112,10 @@ function createTransactionTx() {
     const rows = selectResults.shift() ?? [];
     return Object.assign(Promise.resolve(rows), { limit: () => Promise.resolve(rows) });
   };
+  const updateWhere = () =>
+    Object.assign(Promise.resolve([]), {
+      returning: () => Promise.resolve([]),
+    });
   return {
     select: mock(() => ({
       from: () => ({
@@ -119,7 +123,7 @@ function createTransactionTx() {
         where: takeRows,
       }),
     })),
-    update: mock(() => ({ set: () => ({ where: () => Promise.resolve() }) })),
+    update: mock(() => ({ set: () => ({ where: updateWhere }) })),
     delete: mock(() => ({ where: () => Promise.resolve() })),
   };
 }

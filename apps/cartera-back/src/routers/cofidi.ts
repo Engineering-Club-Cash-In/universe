@@ -35,7 +35,7 @@ import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { NITSoapClient } from "../cofidi/nitGenerator";
 import { formatearFechaSAT } from "../utils/functions/fechaSAT";
 import type { DTERequest } from "../cofidi/types";
-import type { FacturaRubro } from "../database/db/schema";
+import type { FacturaRubro, PagoFacturaStatus } from "../database/db/schema";
 import {
   SAT_CONFIG,
   CLUB_CASHIN_CONFIG,
@@ -2953,27 +2953,48 @@ if (facturasExistentes.length > 0) {
       //    rubro se anuló. Best-effort: no rompe la anulación.
       if (facturaAnulada?.pago_id) {
         try {
-          const activasRes = await db.execute(
-            sql`SELECT count(*)::int AS n FROM cartera.facturas_electronicas
-                WHERE pago_id = ${facturaAnulada.pago_id} AND status = 'ACTIVA'`
+          const estadoRes = await db.execute(
+            sql`SELECT
+                  (SELECT count(*)::int FROM cartera.facturas_electronicas
+                   WHERE pago_id = ${facturaAnulada.pago_id} AND status = 'ACTIVA') AS activas,
+                  pc.validation_status::text AS validation_status
+                FROM cartera.pagos_credito pc
+                WHERE pc.pago_id = ${facturaAnulada.pago_id}`
           );
-          const quedanActivas = Number((activasRes as any).rows?.[0]?.n ?? 0) > 0;
+          const fila = (estadoRes as any).rows?.[0] ?? {};
+          const quedanActivas = Number(fila.activas ?? 0) > 0;
+          // ¿El pago sigue siendo facturable? Mismos estados que acepta
+          // /facturar-pago-completo. Un pago REVERSADO (no_required) que se
+          // quedó FALLIDA por anulación incompleta debe poder CERRAR en
+          // NO_APLICA al anular su último DTE — dejarlo PENDIENTE lo condenaba
+          // a una bandeja de la que el endpoint lo rechaza. (Codex P2)
+          const pagoFacturable = ["validated", "reset", "capital"].includes(
+            fila.validation_status ?? ""
+          );
+          const nuevoEstado = quedanActivas
+            ? "PARCIAL"
+            : pagoFacturable
+              ? "PENDIENTE"
+              : "NO_APLICA";
           await db
             .update(pagos_credito)
             .set({
-              factura_status: quedanActivas ? "PARCIAL" : "PENDIENTE",
-              factura_error: JSON.stringify([
-                {
-                  rubro: facturaAnulada.rubro ?? "DESCONOCIDO",
-                  inversionista_id: facturaAnulada.inversionista_id ?? null,
-                  error: `DTE ${facturaAnulada.serie}-${facturaAnulada.numero} anulado manualmente: ${motivo}`,
-                },
-              ]),
-              factura_at: new Date(),
+              factura_status: nuevoEstado as PagoFacturaStatus,
+              factura_error:
+                nuevoEstado === "NO_APLICA"
+                  ? null
+                  : JSON.stringify([
+                      {
+                        rubro: facturaAnulada.rubro ?? "DESCONOCIDO",
+                        inversionista_id: facturaAnulada.inversionista_id ?? null,
+                        error: `DTE ${facturaAnulada.serie}-${facturaAnulada.numero} anulado manualmente: ${motivo}`,
+                      },
+                    ]),
+              factura_at: nuevoEstado === "NO_APLICA" ? null : new Date(),
             })
             .where(eq(pagos_credito.pago_id, facturaAnulada.pago_id));
           console.log(
-            `🧾 factura_status del pago ${facturaAnulada.pago_id} → ${quedanActivas ? "PARCIAL" : "PENDIENTE"} (DTE anulado)`
+            `🧾 factura_status del pago ${facturaAnulada.pago_id} → ${nuevoEstado} (DTE anulado)`
           );
         } catch (estadoError) {
           console.error(

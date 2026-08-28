@@ -577,6 +577,10 @@ export function CreditDetailView({
 	// Verificar si el usuario puede aprobar
 	const canApprove = userRole === "admin" || userRole === "sales_supervisor";
 
+	// Una oportunidad ganada ya tiene el crédito creado en cartera: cancelar la
+	// aprobación la devolvería al 40% y dejaría el detalle editable otra vez.
+	const isWon = opportunity?.status === "won";
+
 	// Verificar si el usuario puede editar (ventas, análisis, admin - NO jurídico)
 	const canEdit =
 		userRole === "admin" ||
@@ -898,20 +902,25 @@ export function CreditDetailView({
 												<CheckCircle className="mr-1 h-3 w-3" />
 												Aprobado
 											</Badge>
-											{canApprove && (
-												<Button
-													size="sm"
-													variant="ghost"
-													className="text-muted-foreground hover:text-destructive"
-													onClick={() => revokeCreditDetailMutation.mutate()}
-													disabled={revokeCreditDetailMutation.isPending}
-												>
-													<X className="mr-1 h-3 w-3" />
-													{revokeCreditDetailMutation.isPending
-														? "Cancelando..."
-														: "Cancelar"}
-												</Button>
-											)}
+											{canApprove &&
+												(isWon ? (
+													<span className="text-muted-foreground text-xs">
+														El crédito ya existe en cartera
+													</span>
+												) : (
+													<Button
+														size="sm"
+														variant="ghost"
+														className="text-muted-foreground hover:text-destructive"
+														onClick={() => revokeCreditDetailMutation.mutate()}
+														disabled={revokeCreditDetailMutation.isPending}
+													>
+														<X className="mr-1 h-3 w-3" />
+														{revokeCreditDetailMutation.isPending
+															? "Cancelando..."
+															: "Cancelar"}
+													</Button>
+												))}
 										</div>
 									) : (
 										<>

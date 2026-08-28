@@ -156,9 +156,14 @@ const positivo = (valor: string | number | null | undefined) =>
 export function tieneMontosFacturables(pago: MontosFacturablesPago): boolean {
   return [
     pago.abono_interes,
-    pago.abono_interes_ci,
     pago.abono_iva_12,
-    pago.abono_iva_ci,
+    // ⚠️ Los *_ci NO cuentan (divergencia deliberada con la versión COBROS-02):
+    //    /facturar-pago-completo en develop no lee esas columnas ni las incluye
+    //    en hayInteresEnPago — clasificarlas como facturables dejaba 305 pagos
+    //    solo-CI de prod como PENDIENTE eternos que el endpoint luego pisaba a
+    //    NO_APLICA sin emitir nada. Si el negocio decide que el CI se factura,
+    //    hay que agregarlo PRIMERO a la emisión y al esperado del diff, y
+    //    recién entonces acá. (Codex P2 del PR #1493)
     pago.abono_seguro,
     pago.abono_gps,
     pago.membresias_pago,

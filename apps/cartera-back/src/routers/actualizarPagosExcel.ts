@@ -31,7 +31,7 @@
  * está OK, se aplican todos los updates en UNA sola transacción.
  */
 import { Elysia, t } from "elysia";
-import { and, asc, eq, ne } from "drizzle-orm";
+import { and, asc, eq, inArray, ne } from "drizzle-orm";
 import Big from "big.js";
 import { db } from "../database";
 import { creditos, cuotas_credito, pagos_credito } from "../database/db";
@@ -493,10 +493,46 @@ export const actualizarPagosExcelRouter = new Elysia()
       }
 
       // 7️⃣ Escribir TODO en una sola transacción (atómico).
+      const CAMPOS_FACTURABLES = [
+        "abono_interes",
+        "abono_iva_12",
+        "abono_seguro",
+        "abono_gps",
+        "membresias_pago",
+        "mora",
+        "otros",
+      ];
       try {
         await db.transaction(async (tx) => {
           for (const { pago_id, datos } of updatesGlobal) {
             await tx.update(pagos_credito).set(datos).where(eq(pagos_credito.pago_id, pago_id));
+
+            // 🧾 Si el sync reescribió montos facturables de un pago que ya se
+            //    facturó (OK/PARCIAL), sus DTEs emitidos pueden ya no cuadrar
+            //    con el pago: se re-abre como PARCIAL con nota para que conta
+            //    lo redescubra por la bandeja (la regla (d) del diff bloquea el
+            //    re-facturado automático en ese estado). (Codex P2 del #1493)
+            if (CAMPOS_FACTURABLES.some((k) => k in datos)) {
+              await tx
+                .update(pagos_credito)
+                .set({
+                  factura_status: "PARCIAL",
+                  factura_error: JSON.stringify([
+                    {
+                      rubro: "SYNC_EXCEL",
+                      error:
+                        "Montos facturables reescritos por /actualizar-pagos-excel: los DTEs emitidos pueden no cuadrar con el pago — revisar.",
+                    },
+                  ]),
+                  factura_at: new Date(),
+                })
+                .where(
+                  and(
+                    eq(pagos_credito.pago_id, pago_id),
+                    inArray(pagos_credito.factura_status, ["OK", "PARCIAL"])
+                  )
+                );
+            }
           }
         });
       } catch (e: any) {

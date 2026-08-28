@@ -2006,6 +2006,12 @@ export const insertPayment = async ({ body, set }: any) => {
         .values(pagoData)
         .returning();
 
+      // El abono directo a capital no pasa por aplicarPagoNormalEnTx (retorna
+      // antes), pero /facturar-pago-completo acepta 'capital'/'capital_validated'
+      // y este pago puede traer mora/otros facturables: sin esto quedaba en el
+      // NULL de históricos, invisible en la bandeja. (Codex P2)
+      await marcarFacturacionPendiente(db, pagoInsertado.pago_id, pagoInsertado);
+
 
 
       // 3️⃣ Insertar boletas si existen
@@ -3414,6 +3420,11 @@ export async function aplicarAbonoCapitalInversionistas(
       // lo deja distinguible: cuenta como aplicado en reportes/reversa, pero
       // queda fuera de la lógica de cuota.
       validationStatus: "capital_validated",
+      // Backstop para abonos a capital REGISTRADOS antes de esta feature (nacen
+      // con factura_status NULL): al aplicarlos, si sigue NULL se inicializa por
+      // SQL según sus montos — sin pisar un estado ya escrito (p. ej. OK si ya
+      // se facturó la mora). Los nuevos ya nacen inicializados en el insert.
+      factura_status: sql`COALESCE(factura_status, CASE WHEN abono_interes > 0 OR abono_iva_12 > 0 OR abono_seguro > 0 OR abono_gps > 0 OR membresias_pago > 0 OR mora > 0 OR COALESCE(substring(otros FROM '^[0-9]+\\.?[0-9]*')::numeric, 0) > 0 THEN 'PENDIENTE' ELSE 'NO_APLICA' END)`,
       // Estampar la fecha de aplicación. Antes este flujo dejaba `fecha_aplicado`
       // en NULL → el abono quedaba "validado sin fecha". Se guarda en UTC con
       // `new Date()` igual que los demás writers de `fecha_aplicado` (~2149/2266

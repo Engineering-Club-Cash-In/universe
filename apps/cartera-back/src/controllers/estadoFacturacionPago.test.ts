@@ -90,6 +90,9 @@ describe("IVA como monto facturable (Codex)", () => {
     // El motor cobra interés antes que IVA: tras un parcial que cerró el
     // interés, el siguiente pago puede traer solo IVA — y va en el DTE.
     expect(tieneMontosFacturables({ abono_iva_12: "35.71" })).toBe(true);
-    expect(tieneMontosFacturables({ abono_iva_ci: "12.00" })).toBe(true);
+    // *_ci NO cuenta en develop: la emisión no lee esas columnas — contarlas
+    // dejaba pagos solo-CI como PENDIENTE que nada puede resolver (ver comment
+    // en tieneMontosFacturables; divergencia deliberada vs COBROS-02).
+    expect(tieneMontosFacturables({ abono_iva_ci: "12.00" })).toBe(false);
   });
 });

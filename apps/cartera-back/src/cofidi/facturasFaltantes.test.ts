@@ -403,3 +403,76 @@ describe("computarDiffFacturas", () => {
     expect([...diff.faltantes]).toEqual(["OTROS_SERVICIOS"]);
   });
 });
+
+describe("computarDiffFacturas — regla (d): los DTEs vivos deben cuadrar al centavo", () => {
+  const conMonto = (
+    concepto: string,
+    monto_total: string,
+    inversionista_id: number | null = null,
+    factura_id = 1
+  ): FacturaActiva => ({ factura_id, concepto, inversionista_id, monto_total });
+
+  // Con PAGO + ROSTER: MORA=150.00, OTROS_SERVICIOS=80.00, INTERESES:2=392.00,
+  // INTERESES_CUBE = 1120 − 560 + 168 = 728.00.
+
+  it("27. roster que CRECIÓ: el DTE de CUBE viejo trae el reparto anterior → BLOQUEADO", () => {
+    // Corrida original con CUBE como único inversionista: su DTE salió por Q1120.
+    // Hoy Rodrigo ya está en el roster → esperado CUBE=728 + INTERESES:2=392.
+    // La regla (b) no lo ve (logrado ⊆ esperado); la (d) sí: 1120 ≠ 728.
+    const diff = computarDiffFacturas({
+      pagoData: PAGO,
+      inversionistas: ROSTER,
+      activas: [conMonto("INTERESES_CUBE", "1120.00", null, 120)],
+    });
+    expect(diff.modo).toBe("BLOQUEADO");
+    if (diff.modo !== "BLOQUEADO") throw new Error("modo inesperado");
+    expect(diff.razon).toContain("Q1120.00");
+    expect(diff.razon).toContain("Q728.00");
+  });
+
+  it("28. montos que cuadran al centavo → FALTANTES sigue funcionando", () => {
+    const diff = computarDiffFacturas({
+      pagoData: PAGO,
+      inversionistas: ROSTER,
+      activas: [
+        conMonto("MORA", "150.00", null, 121),
+        conMonto("INTERESES_CUBE", "728.00", null, 122),
+      ],
+    });
+    expect(diff.modo).toBe("FALTANTES");
+    if (diff.modo !== "FALTANTES") throw new Error("modo inesperado");
+    expect([...diff.faltantes].sort()).toEqual(["INTERESES:2", "OTROS_SERVICIOS"]);
+  });
+
+  it("29. monto del pago cambió después de facturar (sync/recálculo) → BLOQUEADO", () => {
+    // El DTE de MORA salió por Q99.00; hoy el pago dice mora=150.00.
+    const diff = computarDiffFacturas({
+      pagoData: PAGO,
+      inversionistas: ROSTER,
+      activas: [conMonto("MORA", "99.00", null, 123)],
+    });
+    expect(diff.modo).toBe("BLOQUEADO");
+    if (diff.modo !== "BLOQUEADO") throw new Error("modo inesperado");
+    expect(diff.razon).toContain("MORA");
+  });
+
+  it("30. DTE de INTERESES de un inversionista con monto desfasado → BLOQUEADO", () => {
+    const diff = computarDiffFacturas({
+      pagoData: PAGO,
+      inversionistas: ROSTER,
+      activas: [conMonto("INTERESES", "400.00", 2, 124)], // hoy le tocaría 392.00
+    });
+    expect(diff.modo).toBe("BLOQUEADO");
+    if (diff.modo !== "BLOQUEADO") throw new Error("modo inesperado");
+    expect(diff.razon).toContain("INTERESES:2");
+  });
+
+  it("31. activa sin monto_total (caller viejo/tests) no bloquea por monto", () => {
+    const diff = computarDiffFacturas({
+      pagoData: PAGO,
+      inversionistas: ROSTER,
+      activas: [activa("MORA", null, 125)],
+    });
+    expect(diff.modo).toBe("FALTANTES");
+  });
+});

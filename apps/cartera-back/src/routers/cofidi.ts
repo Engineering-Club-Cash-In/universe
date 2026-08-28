@@ -135,6 +135,9 @@ const facturasExistentes = await db
     uuid: facturas_electronicas.uuid,
     concepto: facturas_electronicas.concepto,
     inversionista_id: facturas_electronicas.inversionista_id,
+    // Para la regla (d) del diff: el DTE vivo debe cuadrar al centavo con el
+    // monto que el cálculo de HOY le asigna a su concepto.
+    monto_total: facturas_electronicas.monto_total,
   })
   .from(facturas_electronicas)
   .where(

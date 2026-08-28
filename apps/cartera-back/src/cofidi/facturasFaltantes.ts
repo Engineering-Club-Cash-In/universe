@@ -72,6 +72,12 @@ export type FacturaActiva = {
   factura_id?: number;
   concepto?: string | null;
   inversionista_id?: number | null;
+  /**
+   * GranTotal del DTE (facturas_electronicas.monto_total). Si viene, el diff
+   * exige que cuadre AL CENTAVO con el monto que el cálculo de HOY le asigna a
+   * su concepto — es la defensa contra re-facturar sobre un pago que cambió.
+   */
+  monto_total?: string | number | null;
 };
 
 export type DiffFacturas =
@@ -124,20 +130,35 @@ export function calcularEsperado(args: {
   pagoData: PagoParaDiff;
   inversionistas: InversionistaParaDiff[];
 }): Set<KeyFactura> {
+  return new Set(calcularEsperadoDetallado(args).keys());
+}
+
+/**
+ * Igual que `calcularEsperado` pero con el MONTO (GranTotal, con IVA) que
+ * llevaría cada DTE, replicando el redondeo de los bloques de emisión: cada
+ * bloque certifica `calcularIvaExacto(parseFloat(x.toFixed(2)))`, cuyo total es
+ * el propio monto a 2 decimales. Para OTROS_SERVICIOS el GranTotal es la suma
+ * de los 3 ítems redondeados por separado (seguro, gps, membresía).
+ */
+export function calcularEsperadoDetallado(args: {
+  pagoData: PagoParaDiff;
+  inversionistas: InversionistaParaDiff[];
+}): Map<KeyFactura, Big> {
   const { pagoData, inversionistas } = args;
-  const esperado = new Set<KeyFactura>();
+  const esperado = new Map<KeyFactura, Big>();
 
-  if (big(pagoData.mora).gt(0)) esperado.add("MORA");
+  const mora = big(pagoData.mora).round(2);
+  if (mora.gt(0)) esperado.set("MORA", mora);
 
-  if (
-    big(pagoData.abono_seguro).gt(0) ||
-    big(pagoData.abono_gps).gt(0) ||
-    big(pagoData.membresias_pago).gt(0)
-  ) {
-    esperado.add("OTROS_SERVICIOS");
+  const seguro = big(pagoData.abono_seguro).round(2);
+  const gps = big(pagoData.abono_gps).round(2);
+  const membresia = big(pagoData.membresias_pago).round(2);
+  if (seguro.gt(0) || gps.gt(0) || membresia.gt(0)) {
+    esperado.set("OTROS_SERVICIOS", seguro.plus(gps).plus(membresia));
   }
 
-  if (big(pagoData.otros).gt(0)) esperado.add("OTROS");
+  const otros = big(pagoData.otros).round(2);
+  if (otros.gt(0)) esperado.set("OTROS", otros);
 
   // 🚪 Mismo guard que el handler: sin interés no se entra a NINGÚN flujo de intereses.
   if (!big(pagoData.abono_interes).gt(0)) return esperado;
@@ -169,12 +190,12 @@ export function calcularEsperado(args: {
     if (inv.emite_factura && !getInversionistaFacturadorConfig(inv.nombre)) continue;
     if (parteInversionista.lte(0)) continue;
 
-    esperado.add(keyIntereses(inv.inversionista_id));
+    esperado.set(keyIntereses(inv.inversionista_id), parteInversionista);
   }
 
   // CUBE por RESIDUO (+ el cash_in de los demás). Solo hay DTE si es > 0.
   const totalCube = totalConIva.minus(totalInteresesNoCube).plus(cashInAcumulado);
-  if (totalCube.gt(0)) esperado.add("INTERESES_CUBE");
+  if (totalCube.gt(0)) esperado.set("INTERESES_CUBE", totalCube.round(2));
 
   return esperado;
 }
@@ -249,7 +270,8 @@ export function computarDiffFacturas(args: {
     }
   }
 
-  const esperado = calcularEsperado({ pagoData, inversionistas });
+  const esperadoDetallado = calcularEsperadoDetallado({ pagoData, inversionistas });
+  const esperado = new Set(esperadoDetallado.keys());
 
   // (b) logrado ⊄ esperado: hay un DTE vivo que el cálculo de HOY ya no produce
   //     (p. ej. cambió el roster de inversionistas desde la corrida original).
@@ -263,6 +285,32 @@ export function computarDiffFacturas(args: {
         `El crédito cambió desde que se facturó (roster de inversionistas o montos del pago): ` +
         `emitir solo lo faltante sobre/sub-facturaría. Anule las facturas activas y vuelva a facturar el pago completo.`,
     };
+  }
+
+  // (d) Los DTEs vivos tienen que cuadrar AL CENTAVO con el cálculo de HOY.
+  //     La regla (b) es ciega a los montos: si el roster CRECIÓ (entró un
+  //     inversionista), lo logrado sigue siendo subconjunto de lo esperado, pero
+  //     el DTE de CUBE vivo se emitió con el reparto viejo — su monto ya incluye
+  //     el interés que hoy le tocaría al inversionista nuevo. Emitirle su DTE
+  //     "faltante" cobraría ese interés DOS VECES ante SAT. Lo mismo si un monto
+  //     del pago cambió después de facturar (sync Excel, recálculos, reversas).
+  //     Un DTE cuyo monto ya no reproduce el cálculo actual = el pago cambió →
+  //     no hay re-facturación parcial segura.
+  for (const f of activas) {
+    if (f.monto_total == null) continue; // sin monto no hay contra qué comparar
+    const key =
+      f.concepto === "INTERESES" ? keyIntereses(f.inversionista_id!) : (f.concepto as KeyFactura);
+    const montoEsperado = esperadoDetallado.get(key);
+    if (montoEsperado && !big(f.monto_total).round(2).eq(montoEsperado)) {
+      return {
+        modo: "BLOQUEADO",
+        razon:
+          `La factura activa de ${key}${f.factura_id ? ` (factura_id ${f.factura_id})` : ""} ` +
+          `tiene monto Q${big(f.monto_total).toFixed(2)} pero el cálculo actual del pago le asigna ` +
+          `Q${montoEsperado.toFixed(2)}. El pago o el reparto cambió desde que se facturó: ` +
+          `emitir solo lo faltante sobre/sub-facturaría. Anule las facturas activas y vuelva a facturar el pago completo.`,
+      };
+    }
   }
 
   const faltantes = new Set<KeyFactura>([...esperado].filter((k) => !logrado.has(k)));

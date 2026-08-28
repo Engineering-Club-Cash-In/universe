@@ -547,12 +547,16 @@ async function simularReemisiones(
     // Por qué revisarlo antes de habilitar la re-facturación:
     //   • montos_empatados: dos rubros del pago valen lo mismo, una sola factura
     //     pudo cubrir uno y el diff cree que falta el otro.
-    //   • posible_roster_cambiado: el faltante es el DTE de un inversionista. El
-    //     esperado se calcula con el roster VIVO; si ese inversionista entró
-    //     DESPUÉS de la corrida original, su parte nunca se facturó porque no le
-    //     tocaba. Re-facturar le emitiría un DTE por un pago que no era suyo.
-    //     (La dirección contraria —un DTE de alguien que ya salió— sí la corta
-    //      el diff con la regla logrado ⊄ esperado.)
+    //   • posible_roster_cambiado: el faltante es el DTE de un inversionista.
+    //     Un inversionista que ENTRÓ después de la corrida original lo corta la
+    //     regla (d) del diff (el DTE de CUBE vivo ya no cuadra al centavo con el
+    //     residuo actual), y uno que SALIÓ lo corta la regla (b) (logrado ⊄
+    //     esperado). Lo que sobrevive acá es el caso indistinguible con datos de
+    //     hoy: el roster cuadra pero el DTE del inversionista no existe — o la
+    //     corrida original falló ahí (re-facturable de verdad), o el inversionista
+    //     entonces se autofacturaba / no tenía config y su flag cambió después
+    //     (re-facturar DUPLICARÍA un interés que él ya facturó por su cuenta).
+    //     Por eso se listan para revisión humana.
     //   • rubro_no_emitido: el caso sano — un rubro del pago sin ningún DTE.
     const faltantesArr = [...diff.faltantes];
     const motivo = montos_empatados

@@ -4,7 +4,7 @@ import { generateObject, generateText } from "ai";
 import { and, desc, eq, ilike, inArray, not, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { auditRecord } from "../lib/audit";
+import { auditRecord, auditedTransaction } from "../lib/audit";
 import {
 	casosCobros,
 	checklistItemEvidence,
@@ -1369,7 +1369,7 @@ export const vehiclesRouter = {
 
 			// Start a transaction
 			try {
-				return await db.transaction(async (tx) => {
+				return await auditedTransaction(async (tx) => {
 					// 1. Identify or create vehicle by ID - Sanitize blank IDs
 					let vehicleId: string;
 					const { id: rawId, ...vehicleData } = input.vehicle;

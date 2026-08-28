@@ -16,7 +16,7 @@ import {
 } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { auditRecord } from "../lib/audit";
+import { auditRecord, auditedTransaction } from "../lib/audit";
 import { user } from "../db/schema/auth";
 import { carteraBackReferences } from "../db/schema/cartera-back";
 import {
@@ -309,7 +309,7 @@ async function autoCrearDatosMigrate({
 		: ("sobre_vehiculo" as const);
 
 	// Transacción atómica: si algo falla, se revierte todo
-	const result = await db.transaction(async (tx) => {
+	const result = await auditedTransaction(async (tx) => {
 		// 1. Crear Lead con solo el nombre, status "migrate"
 		const [nuevoLead] = await tx
 			.insert(leads)

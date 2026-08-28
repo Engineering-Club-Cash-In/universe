@@ -8,7 +8,7 @@ import crypto from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { auditRecord } from "../lib/audit";
+import { auditRecord, auditedTransaction } from "../lib/audit";
 import {
 	carteraBackReferences,
 	carteraBackSyncLog,
@@ -1508,7 +1508,7 @@ export async function closeOpportunity(
 
 		// 4. Complete local operations in a transaction for atomicity
 		// This ensures that if any local operation fails, all changes are rolled back
-		const transactionResult = await db.transaction(async (tx) => {
+		const transactionResult = await auditedTransaction(async (tx) => {
 			// Complete client flow (client, contract, references)
 			const clientResult = await completeClient({
 				opportunity,

@@ -123,6 +123,29 @@ export function setAuditOperation(operation: string): void {
 	if (context) context.operation = operation;
 }
 
+/**
+ * `db.transaction` que descarta las anotaciones hechas adentro si la
+ * transacción se revierte.
+ *
+ * Una anotación afirma que la escritura ocurrió, y dentro de una transacción
+ * eso solo es cierto si commitea: si una sentencia posterior falla, la base
+ * deshace la escritura y la fila quedaría afirmando algo que no pasó.
+ *
+ * Se usa en lugar de `db.transaction` en todo handler que anote adentro; el
+ * inventario de cobertura lo verifica.
+ */
+export async function auditedTransaction<T>(
+	run: Parameters<typeof db.transaction<T>>[0],
+): Promise<T> {
+	const marca = auditMark();
+	try {
+		return await db.transaction(run);
+	} catch (error) {
+		auditRollback(marca);
+		throw error;
+	}
+}
+
 /** Cuántas escrituras lleva anotadas la request (para chequeos internos). */
 export function auditedSoFar(): number {
 	return storage.getStore()?.entries.length ?? 0;

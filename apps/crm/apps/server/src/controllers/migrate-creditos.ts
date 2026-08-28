@@ -9,7 +9,7 @@ import { user } from "../db/schema/auth";
 import { coDebtors, leads, opportunities, salesStages } from "../db/schema/crm";
 import { licenseQrVerifications } from "../db/schema/license-verification";
 import { vehicles } from "../db/schema/vehicles";
-import { auditMark, auditRecord, auditRollback } from "../lib/audit";
+import { auditRecord, auditedTransaction } from "../lib/audit";
 import { carteraBackClient } from "../services/cartera-back-client";
 
 // Tipo para cliente de DB que puede ser el db normal o una transacción
@@ -468,13 +468,8 @@ export async function migrarCreditos(
 		ignorados: [],
 	};
 
-	// El catch de abajo se traga el rollback y devuelve 200: sin esta marca, las
-	// anotaciones de los créditos ya procesados quedarían como altas exitosas de
-	// filas que la reversión borró.
-	const marcaAuditoria = auditMark();
-
 	try {
-		await db.transaction(async (tx) => {
+		await auditedTransaction(async (tx) => {
 			// Procesar cada crédito dentro de la transacción
 			for (let i = 0; i < creditos.length; i++) {
 				const credito = creditos[i];
@@ -547,11 +542,10 @@ export async function migrarCreditos(
 			error instanceof Error ? error.message : "Error desconocido";
 
 		console.error(`[Migrate] ROLLBACK ejecutado: ${errorMessage}`);
-		auditRollback(marcaAuditoria);
-		// Descartar las anotaciones revertidas deja el contexto vacío, y como la
-		// ruta responde 200 el flush no escribiría nada: la migración fallida
-		// desaparecería de la bitácora. Queda el intento, que es lo que se
-		// consulta cuando alguien pregunta qué pasó con ese import.
+		// `auditedTransaction` ya descartó las anotaciones que el rollback borró.
+		// Como la ruta responde 200, sin esta fila la migración fallida
+		// desaparecería: queda el intento, que es lo que se consulta cuando
+		// alguien pregunta qué pasó con ese import.
 		auditRecord({
 			entity: "opportunity",
 			id: null,
@@ -599,7 +593,7 @@ export async function limpiarMigracion(): Promise<CleanupResult> {
 	console.log("[Cleanup] Iniciando limpieza de datos migrados...");
 
 	// Usar transacción para asegurar que todo se elimine o nada
-	return await db.transaction(async (tx) => {
+	return await auditedTransaction(async (tx) => {
 		// 0. Verificaciones de licencia de estos leads/oportunidades (y sus
 		// co-deudores) primero — sus FK a leads/co_debtors son NO ACTION, así
 		// que si quedara alguna, el delete de abajo revienta la transacción.

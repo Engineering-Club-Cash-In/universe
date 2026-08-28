@@ -103,10 +103,11 @@ const ANOTACION = /auditRecord\(/;
 
 /**
  * Margen entre una escritura y su anotación. Hoy la distancia real máxima es
- * de 34 líneas (`crm.updateOpportunity`, que entre medio arma el `where` y
- * resuelve el conflicto de concurrencia).
+ * de 62 líneas, en `crm.updateOpportunity`: la anotación va después del
+ * chequeo de cero filas —que además relee el estado para distinguir la carrera
+ * con el cierre—, porque con cero filas no hubo escritura que anotar.
  */
-const LINEAS_DE_MARGEN = 45;
+const LINEAS_DE_MARGEN = 75;
 
 function archivosFuente(dir: string, out: string[] = []): string[] {
 	for (const entrada of readdirSync(dir)) {

@@ -19,7 +19,7 @@ import {
 } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { auditRecord } from "../lib/audit";
+import { auditRecord, auditedTransaction } from "../lib/audit";
 import {
 	vehicleDocumentRequirements,
 	vehicleDocuments,
@@ -1040,7 +1040,7 @@ export const crmRouter = {
 					const existingLead = matchingLeads[0];
 
 					// Lead existe pero sin procesos activos → reasignar al nuevo asesor
-					const reassignedLead = await db.transaction(async (tx) => {
+					const reassignedLead = await auditedTransaction(async (tx) => {
 						const [lead] = await tx
 							.update(leads)
 							.set({
@@ -1223,13 +1223,14 @@ export const crmRouter = {
 				})
 				.where(whereClause)
 				.returning();
-			auditRecord({ entity: "lead", id: id, action: "update" });
-
 			if (updatedLead.length === 0) {
 				throw new ORPCError("NOT_FOUND", {
 					message: "Lead no encontrado o no tienes permiso para actualizarlo",
 				});
 			}
+
+			// Después del chequeo: con cero filas no hubo escritura que anotar.
+			auditRecord({ entity: "lead", id: id, action: "update" });
 
 			// Sync NIT to associated opportunities.
 			// Solo a las que siguen con la copia del NIT del lead: el que viaja a
@@ -1942,7 +1943,7 @@ export const crmRouter = {
 				});
 			}
 
-			await db.transaction(async (tx) => {
+			await auditedTransaction(async (tx) => {
 				const [opportunity] = await tx
 					.select({
 						id: opportunities.id,
@@ -2799,8 +2800,6 @@ export const crmRouter = {
 				})
 				.where(whereClause)
 				.returning();
-			auditRecord({ entity: "opportunity", id: id, action: "update" });
-
 			if (updatedOpportunity.length === 0) {
 				if (enforceNotWonInPredicate) {
 					// Pudo ser la carrera con closeOpportunity: distinguirlo del
@@ -2827,6 +2826,9 @@ export const crmRouter = {
 						"Oportunidad no encontrada o no tienes permiso para actualizarla",
 				});
 			}
+
+			// Después del chequeo de conflicto: con cero filas no hubo escritura.
+			auditRecord({ entity: "opportunity", id: id, action: "update" });
 
 			// Si viene direccion, actualizar en el lead en lugar de la oportunidad
 			if (direccion !== undefined && currentOpportunity[0].leadId) {
@@ -2981,7 +2983,7 @@ export const crmRouter = {
 				}
 			}
 
-			await db.transaction(async (tx) => {
+			await auditedTransaction(async (tx) => {
 				await tx
 					.update(opportunities)
 					.set({ assignedTo: input.assignedTo, updatedAt: new Date() })
@@ -3514,13 +3516,6 @@ export const crmRouter = {
 					})
 					.where(whereClause)
 					.returning();
-				auditRecord({
-					entity: "opportunity",
-					id: input.opportunityId,
-					action: "approve_analysis",
-					data: { approved: input.approved, reason: input.reason },
-				});
-
 				// Check for concurrent modification
 				if (updatedRows.length === 0) {
 					// Con el chequeo atómico de DPI, 0 filas también significa que el
@@ -3547,6 +3542,14 @@ export const crmRouter = {
 							"La oportunidad fue modificada por otro usuario. Por favor recarga la página e intenta de nuevo.",
 					});
 				}
+
+				// Después del chequeo de conflicto: con cero filas no hubo escritura.
+				auditRecord({
+					entity: "opportunity",
+					id: input.opportunityId,
+					action: "approve_analysis",
+					data: { approved: input.approved, reason: input.reason },
+				});
 
 				// Record stage history
 				await db.insert(opportunityStageHistory).values({
@@ -3793,7 +3796,7 @@ export const crmRouter = {
 			}
 
 			// Update opportunity and record history in a transaction for atomicity
-			await db.transaction(async (tx) => {
+			await auditedTransaction(async (tx) => {
 				// Update opportunity - revoke approval
 				const revocadas = await tx
 					.update(opportunities)
@@ -7081,7 +7084,7 @@ export const crmRouter = {
 			}
 
 			// Update opportunity and record history in a transaction for atomicity
-			await db.transaction(async (tx) => {
+			await auditedTransaction(async (tx) => {
 				// Update opportunity with combined investors and move to 80%
 				await tx
 					.update(opportunities)

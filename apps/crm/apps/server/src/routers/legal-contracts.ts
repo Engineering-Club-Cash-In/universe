@@ -2,7 +2,7 @@ import { ORPCError } from "@orpc/server";
 import { and, count, eq, inArray, ne } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { auditRecord } from "../lib/audit";
+import { auditRecord, auditedTransaction } from "../lib/audit";
 import { user } from "../db/schema/auth";
 import {
 	leads,
@@ -804,7 +804,7 @@ export const legalContractsRouter = {
 			}
 
 			// Actualizar la oportunidad y registrar historial en una transacción
-			await db.transaction(async (tx) => {
+			await auditedTransaction(async (tx) => {
 				// Actualizar la oportunidad a 85%
 				await tx
 					.update(opportunities)
@@ -952,7 +952,7 @@ export const legalContractsRouter = {
 			}
 
 			// Solo si cartera-back respondió OK: marcar contratos + mover a 90%
-			await db.transaction(async (tx) => {
+			await auditedTransaction(async (tx) => {
 				// Re-verificar que la oportunidad sigue en 85% (previene race condition)
 				const [currentOpp] = await tx
 					.select({ stageId: opportunities.stageId })

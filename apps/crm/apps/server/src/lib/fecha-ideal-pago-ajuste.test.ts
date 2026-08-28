@@ -110,6 +110,23 @@ describe("calcularAjusteFechaIdeal", () => {
 		expect(resultado?.montoInteres).toBe(0.01);
 	});
 
+	test("redondea el IVA mensual antes de prorratearlo", () => {
+		const resultado = calcularAjusteFechaIdeal({
+			diaPagoOriginalSistema: 15,
+			diaPagoMensualElegido: 26,
+			capital: 3.5,
+			porcentajeInteres: 1,
+			membresiaMensual: 0,
+			seguroMensual: 0,
+			gpsMensual: 0,
+			fechaReferencia: new Date("2026-03-10T18:00:00Z"),
+		});
+
+		// Base Q0.035 → Q0.04; IVA Q0.0048 → Q0.00; Q0.04 × 11/30 → Q0.01.
+		// Sin redondear el IVA mensual, el resultado sería Q0.02.
+		expect(resultado?.montoInteres).toBe(0.01);
+	});
+
 	test("día IA igual al original: no hay ajuste (null)", () => {
 		const resultado = calcularAjusteFechaIdeal({
 			diaPagoOriginalSistema: 15,
@@ -138,7 +155,7 @@ describe("calcularAjusteFechaIdeal", () => {
 		expect(resultado).toBeNull();
 	});
 
-	test("usa la misma fecha Guatemala que generatePaymentDates en cartera-back", () => {
+	test("interpreta la frontera mensual con calendario Guatemala", () => {
 		// 2026-02-01T01:00:00Z = 31 ene 7pm GT, pero ya 1 feb en hora server (UTC).
 		const fechaReferencia = new Date("2026-02-01T01:00:00Z");
 

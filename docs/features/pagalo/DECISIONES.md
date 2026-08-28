@@ -222,3 +222,38 @@ Regla compartida: [D-46](../bot-whatsapp-cobros/DECISIONES.md#d-46--el-cliente-e
 Selector del asesor permite agregar próxima cuota por vencer al rango de
 atrasadas; cuando está al día permite cuota actual/próxima pendiente. No permite
 cuotas futuras arbitrarias ni pagos parciales.
+
+## D-19 · Generar links es una forma de registrar un pago, no otra gestión
+
+Reemplaza la ubicación fijada en [D-16](#d-16--selector-cobra-unidades-completas):
+`Generar links de pago` deja de ser botón suelto junto a `Registrar Contacto` y
+pasa a ser una de las dos opciones del botón primario `Registrar Pago`:
+
+- **Generar links de pago** → abre el modal de Págalo (mismo modal, mismas
+  reglas de selección).
+- **Subir boleta** → lleva al formulario de registro de pago de siempre.
+
+Cobrar tiene dos vías —mandarle links al cliente o cargar la boleta de un
+depósito que ya hizo— y las dos terminan en un pago. Tenerlas como botones
+paralelos hacía ver los links como una gestión aparte, del mismo peso que
+registrar un contacto.
+
+Sin crédito de cartera (`carteraCreditoId`/`numeroCreditoSifco`) la opción de
+links aparece **deshabilitada**, no oculta: el asesor tiene que saber que
+existe y que no aplica a ese caso.
+
+## D-20 · El historial de links es del crédito y va paginado
+
+El rastro de grupos Págalo de la ficha se consulta por `carteraCreditoId`, no
+por caso de cobro, y con paginación (5 grupos por página, más reciente
+primero).
+
+Un crédito acumula varios casos de cobro a lo largo del tiempo; el asesor que
+abre la ficha espera ver **todos** los links que se le generaron a ese crédito
+—pagados, vencidos, cancelados o pendientes— no solo los del caso vigente. Y el
+historial crece sin techo: cada grupo completado o cancelado libera el slot para
+uno nuevo.
+
+Cuando no hay ninguno, la sección se muestra igual con un placeholder
+("Sin links de pago generados para este crédito"). Antes se ocultaba entera y
+dejaba una tarjeta vacía en la ficha, que se lee como algo roto.

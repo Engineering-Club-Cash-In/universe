@@ -11,10 +11,25 @@
 
 ## 1. Resultado visible
 
-Ficha 360 muestra botón `Generar links de pago` inmediatamente después de
-`Registrar Contacto` y antes de `Promesa de Pago`. Botón abre modal propio; no
-reutiliza formulario de contacto porque genera intención financiera, links y
-auditoría distintas.
+Ficha 360 ofrece `Generar links de pago` como una de las dos opciones del botón
+primario `Registrar Pago` (la otra es `Subir boleta`); ver
+[D-19](DECISIONES.md#d-19--generar-links-es-una-forma-de-registrar-un-pago-no-otra-gestión).
+Abre modal propio; no reutiliza formulario de contacto porque genera intención
+financiera, links y auditoría distintas.
+
+> Ubicación anterior (botón suelto junto a `Registrar Contacto`): superada por
+> D-19.
+
+El modal tiene dos estados y se distinguen desde el encabezado:
+
+- **Sin grupo vivo** → selector de cuotas. La jerarquía es: qué se va a cobrar
+  (mora + cuotas, con el saldo real de cada una a la derecha), después el cargo
+  manual `Otros`, y al final el resumen con el total de los links a crear.
+- **Con grupo vivo** → lista de los links existentes, encabezada por el total
+  del grupo y el avance de cobro (`N de M links pagados`). El texto del modal
+  dice explícitamente que el crédito **ya tiene links generados** y que no se
+  pueden crear nuevos hasta que se paguen o se cancelen: sin eso, abrir el
+  modal y no encontrar el selector se lee como un error.
 
 Primera versión permite:
 

@@ -56,9 +56,11 @@ export function AccionesSupervisorPagalo({
 	const reintentar = (client as any).reintentarDispatchPagalo;
 
 	const invalidarQueries = () => {
-		queryClient.invalidateQueries(
-			orpc.getPagaloHistorial.queryOptions({ input: { casoCobroId } }),
-		);
+		// .key() = prefijo del path → invalida TODAS las páginas del historial,
+		// que va paginado (el input trae page/pageSize).
+		queryClient.invalidateQueries({
+			queryKey: orpc.getPagaloHistorial.key(),
+		});
 		queryClient.invalidateQueries(
 			orpc.getPagaloGrupoActivo.queryOptions({
 				input: { casoCobroId, creditoId },

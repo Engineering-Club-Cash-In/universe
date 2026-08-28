@@ -1,14 +1,28 @@
 /**
- * Rastro completo de Págalo (CB-028/CB-127) para el caso: todos los grupos
- * creados a lo largo del tiempo (puede haber más de uno — un grupo
- * completado o cancelado libera el slot y permite crear otro nuevo para el
- * mismo crédito), más reciente primero, cada uno con su timeline de eventos
- * append-only, badges de motivo de falla/reintentos/antigüedad/generación,
- * el detalle "Links por cuota" bajo demanda, y las acciones de supervisor.
+ * Rastro completo de Págalo (CB-028/CB-127) del CRÉDITO: todos los grupos
+ * creados a lo largo del tiempo (puede haber más de uno — un grupo completado
+ * o cancelado libera el slot y permite crear otro nuevo), más reciente
+ * primero, cada uno con su timeline de eventos append-only, badges de motivo
+ * de falla/reintentos/antigüedad/generación, el detalle "Links por cuota" bajo
+ * demanda, y las acciones de supervisor.
+ *
+ * Va por crédito y paginado, no por caso: un crédito puede acumular varios
+ * casos de cobro y el asesor espera ver TODOS los links que se le generaron,
+ * no solo los del caso vigente ni solo los que siguen pendientes de pago. El
+ * crédito lo resuelve el servidor a partir del caso (getPagaloHistorial): un
+ * id de crédito es numérico y enumerable, mandarlo desde acá sería pedirle al
+ * cliente que elija qué links puede ver.
  */
 import { useQuery } from "@tanstack/react-query";
-import { CheckCircle2, Copy, CreditCard, XCircle } from "lucide-react";
-import { useState } from "react";
+import {
+	CheckCircle2,
+	ChevronLeft,
+	ChevronRight,
+	Copy,
+	CreditCard,
+	XCircle,
+} from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -171,10 +185,20 @@ function LinkPagalo({ link, monto }: { link: Link; monto: string }) {
 	);
 }
 
-function LinksPorCuota({ groupId }: { groupId: string }) {
+function LinksPorCuota({
+	groupId,
+	casoCobroId,
+}: {
+	groupId: string;
+	casoCobroId: string;
+}) {
 	const allocations = useQuery({
-		queryKey: ["getPagaloAllocations", groupId],
-		queryFn: () => (client as any).getPagaloAllocations({ groupId }),
+		queryKey: ["getPagaloAllocations", groupId, casoCobroId],
+		// El caso desde el que se mira: el historial es del crédito y lista
+		// grupos de casos anteriores, que el servidor autoriza contra ESTE caso
+		// verificando que sean del mismo crédito.
+		queryFn: () =>
+			(client as any).getPagaloAllocations({ groupId, casoCobroId }),
 	});
 	const data = allocations.data as
 		| {
@@ -314,7 +338,7 @@ function GrupoPagalo({
 					</button>
 				</CollapsibleTrigger>
 				<CollapsibleContent className="mt-2">
-					<LinksPorCuota groupId={grupo.id} />
+					<LinksPorCuota casoCobroId={casoCobroId} groupId={grupo.id} />
 				</CollapsibleContent>
 			</Collapsible>
 			<AccionesSupervisorPagalo
@@ -328,6 +352,8 @@ function GrupoPagalo({
 	);
 }
 
+const POR_PAGINA = 5;
+
 export function PagaloHistorial({
 	casoCobroId,
 	creditoId,
@@ -336,11 +362,39 @@ export function PagaloHistorial({
 	creditoId: number;
 }) {
 	const [expandido, setExpandido] = useState(true);
+	const [pagina, setPagina] = useState(1);
+	// El componente se reusa al navegar de un caso a otro (misma ruta): sin
+	// esto, la página vieja viaja al caso nuevo y, si el crédito nuevo tiene
+	// menos páginas, el servidor devuelve una página vacía con `total > 0` — se
+	// veía "Sin links" y los controles de paginación escondidos, sin forma de
+	// volver a la 1 salvo recargando (Codex, PR #1498).
+	const casoRenderizado = useRef(casoCobroId);
+	const casoCambio = casoRenderizado.current !== casoCobroId;
+	useEffect(() => {
+		casoRenderizado.current = casoCobroId;
+		setPagina(1);
+	}, [casoCobroId]);
 	const historial = useQuery({
-		...orpc.getPagaloHistorial.queryOptions({ input: { casoCobroId } }),
+		...orpc.getPagaloHistorial.queryOptions({
+			input: { casoCobroId, page: pagina, pageSize: POR_PAGINA },
+		}),
 		enabled: !!casoCobroId,
+		// Sin esto la lista parpadea a vacío en cada cambio de página. Pero SOLO
+		// entre páginas del mismo caso: al cambiar de caso, seguir pintando los
+		// grupos anteriores mostraría —y dejaría copiar— links de pago del
+		// cliente que se acaba de dejar atrás.
+		placeholderData: (anterior: unknown) => (casoCambio ? undefined : anterior),
 	});
-	const grupos = (historial.data as Grupo[] | undefined) ?? [];
+	const data = historial.data as { grupos: Grupo[]; total: number } | undefined;
+	const grupos = data?.grupos ?? [];
+	const total = data?.total ?? 0;
+	const totalPaginas = Math.max(1, Math.ceil(total / POR_PAGINA));
+	// Red de seguridad del mismo problema: si el total encogió por cualquier
+	// otra vía (un grupo borrado, un refetch), la página fuera de rango no puede
+	// dejar la sección vacía y sin controles.
+	useEffect(() => {
+		if (!historial.isLoading && pagina > totalPaginas) setPagina(1);
+	}, [historial.isLoading, pagina, totalPaginas]);
 
 	return (
 		<div className="space-y-3">
@@ -349,12 +403,17 @@ export function PagaloHistorial({
 				className="flex w-full items-center justify-between text-left"
 				onClick={() => setExpandido((v) => !v)}
 			>
-				<h3 className="flex items-center gap-2 font-medium text-sm">
-					<CreditCard className="h-4 w-4" />
-					Historial Links de Pagos
-				</h3>
+				<div>
+					<h3 className="flex items-center gap-2 font-medium text-sm">
+						<CreditCard className="h-4 w-4" />
+						Historial Links de Pagos
+					</h3>
+					<p className="text-muted-foreground text-xs">
+						Todos los links Págalo generados para este crédito
+					</p>
+				</div>
 				<span className="text-muted-foreground text-xs">
-					{grupos.length} grupo(s)
+					{historial.isLoading ? "…" : `${total} grupo(s)`}
 				</span>
 			</button>
 			{expandido &&
@@ -363,9 +422,12 @@ export function PagaloHistorial({
 						Cargando historial Págalo…
 					</div>
 				) : grupos.length === 0 ? (
-					<p className="py-4 text-center text-muted-foreground text-sm">
-						Sin links Págalo generados para este caso.
-					</p>
+					// El asesor tiene que poder distinguir "no se generó ninguno"
+					// de "se rompió algo"; antes la sección desaparecía y quedaba
+					// una tarjeta vacía en la ficha.
+					<div className="py-6 text-center text-muted-foreground text-sm">
+						Sin links de pago generados para este crédito
+					</div>
 				) : (
 					<div className="space-y-3">
 						{grupos.map((grupo) => (
@@ -376,6 +438,39 @@ export function PagaloHistorial({
 								creditoId={creditoId}
 							/>
 						))}
+						{totalPaginas > 1 && (
+							<div className="flex items-center justify-between border-t pt-3">
+								<p className="text-muted-foreground text-xs">
+									Mostrando {(pagina - 1) * POR_PAGINA + 1} -{" "}
+									{Math.min(pagina * POR_PAGINA, total)} de {total}
+								</p>
+								<div className="flex items-center gap-2">
+									<Button
+										disabled={pagina === 1}
+										onClick={() => setPagina((p) => Math.max(1, p - 1))}
+										size="sm"
+										type="button"
+										variant="outline"
+									>
+										<ChevronLeft className="h-4 w-4" />
+									</Button>
+									<span className="text-xs">
+										Página {pagina} de {totalPaginas}
+									</span>
+									<Button
+										disabled={pagina >= totalPaginas}
+										onClick={() =>
+											setPagina((p) => Math.min(totalPaginas, p + 1))
+										}
+										size="sm"
+										type="button"
+										variant="outline"
+									>
+										<ChevronRight className="h-4 w-4" />
+									</Button>
+								</div>
+							</div>
+						)}
 					</div>
 				))}
 		</div>

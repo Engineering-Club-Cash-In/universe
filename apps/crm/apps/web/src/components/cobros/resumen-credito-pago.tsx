@@ -24,6 +24,7 @@ export function ResumenCreditoPago({
 	cuotaActualStatus,
 	abonosTotal,
 	promesaActiva,
+	cuotaAPagar,
 }: {
 	credito: CreditoDirectoResponse;
 	cuotaActualNumero: number | undefined;
@@ -31,6 +32,13 @@ export function ResumenCreditoPago({
 	cuotaActualStatus: string | null | undefined;
 	abonosTotal: number;
 	promesaActiva: PromesaActivaCredito | null | undefined;
+	/**
+	 * Cuota que va a recibir el pago. Vive acá y no en el formulario porque el
+	 * asesor no la elige: es siempre la más antigua pagable. Es contexto del
+	 * crédito, no un dato que se captura (a cartera igual le da lo mismo: el
+	 * motor aplica por saldo).
+	 */
+	cuotaAPagar?: number;
 }) {
 	const { credito, usuario, cuotasAtrasadas, convenioActivo, mora } = data;
 	const montoMora = Number(mora?.monto_mora ?? data.moraActual ?? 0);
@@ -129,6 +137,15 @@ export function ResumenCreditoPago({
 							</div>
 						</div>
 					</div>
+
+					{cuotaAPagar !== undefined && (
+						<div className="flex items-center justify-between gap-3 rounded-md border border-primary/30 bg-primary/5 px-3 py-2">
+							<span className="text-muted-foreground text-xs">
+								Cuota a pagar
+							</span>
+							<span className="font-semibold">#{cuotaAPagar}</span>
+						</div>
+					)}
 
 					{cuotasAtrasadas.length > 0 && (
 						<p className="text-muted-foreground text-xs">

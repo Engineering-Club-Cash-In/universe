@@ -175,6 +175,24 @@ export function bancosSugeridos() {
 	return BANCOS_BOLETA.map(({ id, nombre }) => ({ id, nombre }));
 }
 
+/**
+ * TODOS los bancos que aceptamos, para elegir a mano (formulario de Registrar
+ * pago del CRM).
+ *
+ * Es `bancosSugeridos()` + los que no tienen id universal: son bancos reales
+ * —`bancoValido` ya los acepta y `reconocerBanco` los resuelve—, así que
+ * dejarlos fuera del selector significaba que un depósito de Interbanco o
+ * PAGALO no se podía registrar con su banco si el lector no lo reconocía
+ * (hallazgo de Codex, PR #1498). Lo que sigue fuera, a propósito, son las
+ * COPIAS de `cartera.bancos` (Banrural dos veces, BAM tres) y las filas
+ * `test`/`test2`.
+ */
+export function bancosSeleccionables() {
+	return [...BANCOS_BOLETA, ...BANCOS_SIN_ID_UNIVERSAL].map(
+		({ id, nombre }) => ({ id, nombre }),
+	);
+}
+
 /** ¿Ese `bancoId` es uno que aceptamos? (para `/boleta/confirmar`). */
 export function bancoValido(id: number): boolean {
 	return [...BANCOS_BOLETA, ...BANCOS_SIN_ID_UNIVERSAL].some(

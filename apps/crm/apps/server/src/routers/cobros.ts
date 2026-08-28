@@ -5037,7 +5037,14 @@ export const cobrosRouter = {
 								eventType: pagaloPaymentEvents.eventType,
 								source: pagaloPaymentEvents.source,
 								actorUserId: pagaloPaymentEvents.actorUserId,
-								actorNombre: actor.name,
+								// Mismo criterio que `creadoPor`: solo los eventos de una
+								// persona muestran nombre. Bot, Págalo, poller y dispatcher
+								// también traen el usuario "sistema" en actorUserId, y la
+								// bitácora los etiquetaba con el nombre de un admin que nunca
+								// tocó el grupo. Sin nombre, cae al rótulo de la fuente.
+								actorNombre: sql<
+									string | null
+								>`CASE WHEN ${pagaloPaymentEvents.source} IN ('ASESOR', 'SUPERVISOR') THEN ${actor.name} ELSE NULL END`,
 								fromStatus: pagaloPaymentEvents.fromStatus,
 								toStatus: pagaloPaymentEvents.toStatus,
 								payload: pagaloPaymentEvents.payload,

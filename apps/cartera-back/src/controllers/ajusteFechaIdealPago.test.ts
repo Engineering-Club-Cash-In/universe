@@ -5,6 +5,7 @@ const previousDatabaseUrl = process.env.SUPABASE_DB_URL;
 process.env.SUPABASE_DB_URL = "postgresql://127.0.0.1:1/synthetic";
 const {
   claimAjusteFechaIdealPago,
+  esCuota1ConAjustePendiente,
   decidirAjusteAlReconstruirCuota1,
   debeRestaurarTotalesBoletaAjuste,
   prepararAjusteFechaIdealParaReconstruccion,
@@ -13,6 +14,20 @@ const {
 } = await import("./ajusteFechaIdealPago");
 if (previousDatabaseUrl === undefined) process.env.SUPABASE_DB_URL = undefined;
 else process.env.SUPABASE_DB_URL = previousDatabaseUrl;
+
+describe("esCuota1ConAjustePendiente", () => {
+  it("mantiene abierta únicamente cuota 1 cuando el ajuste sigue pendiente", () => {
+    expect(esCuota1ConAjustePendiente({ numeroCuota: 1, ajusteId: 7 })).toBe(
+      true,
+    );
+    expect(esCuota1ConAjustePendiente({ numeroCuota: 2, ajusteId: 7 })).toBe(
+      false,
+    );
+    expect(esCuota1ConAjustePendiente({ numeroCuota: 1, ajusteId: null })).toBe(
+      false,
+    );
+  });
+});
 
 describe("claimAjusteFechaIdealPago", () => {
   it("falla si otro pago ya reclamó el ajuste", async () => {

@@ -32,6 +32,7 @@ import {
   esDestinoSobrescribible,
   getAjusteFechaIdealADeducir,
   puedeEditarOtrosConAjuste,
+  puedeEditarMontoProtegidoConAjuste,
   getCuotaIdForPaymentInsert,
   getCoveredOpenInstallment,
   getCoveredInstallmentNumbers,
@@ -60,7 +61,10 @@ import {
   sumarAplicadoACuota,
   pagoSchema,
 } from "./registerPaymentPolicy";
-import { claimAjusteFechaIdealPago } from "./ajusteFechaIdealPago";
+import {
+  claimAjusteFechaIdealPago,
+  debeMantenerCuotaAbiertaPorAjustePendiente,
+} from "./ajusteFechaIdealPago";
 import {
   PAYMENT_ADVISORY_LOCK_NAMESPACE,
   withPaymentAdvisoryLock,
@@ -3124,7 +3128,24 @@ async function aplicarPagoNormalEnTx(
       .set({ validationStatus: "validated", fecha_aplicado: new Date() })
       .where(eq(pagos_credito.pago_id, pago_id));
 
-    if (pago.cuota_id !== null) {
+    const mantenerCuotaAbiertaPorAjuste =
+      pago.cuota_id !== null &&
+      (await debeMantenerCuotaAbiertaPorAjustePendiente(
+        pago.cuota_id,
+        pago.credito_id,
+        tx,
+      ));
+    if (mantenerCuotaAbiertaPorAjuste && pago.cuota_id !== null) {
+      await tx
+        .update(cuotas_credito)
+        .set({ pagado: false })
+        .where(eq(cuotas_credito.cuota_id, pago.cuota_id));
+      await tx
+        .update(pagos_credito)
+        .set({ pagado: false })
+        .where(eq(pagos_credito.pago_id, pago_id));
+    }
+    if (pago.cuota_id !== null && !mantenerCuotaAbiertaPorAjuste) {
       // Marcar la cuota como pagada
       await tx
         .update(cuotas_credito)
@@ -4208,25 +4229,42 @@ export async function editarPago(pago_id: number, campos: {
       return { success: false, message: `Pago ${pago_id} no encontrado` };
     }
 
-    if (campos.otros !== undefined) {
+    let tieneAjusteVinculado = false;
+    if (campos.otros !== undefined || campos.monto_boleta !== undefined) {
       const [ajusteVinculado] = await db
         .select({ id: ajuste_fecha_ideal_pago.id })
         .from(ajuste_fecha_ideal_pago)
         .where(eq(ajuste_fecha_ideal_pago.pago_id, pago_id))
         .limit(1);
-      if (
-        !puedeEditarOtrosConAjuste({
-          otrosActual: pago.otros ?? 0,
-          otrosSolicitado: campos.otros,
-          tieneAjusteVinculado: ajusteVinculado !== undefined,
-        })
-      ) {
-        return {
-          success: false,
-          message:
-            "No se puede editar Otros porque este pago respalda un ajuste por fecha ideal de pago",
-        };
-      }
+      tieneAjusteVinculado = ajusteVinculado !== undefined;
+    }
+    if (
+      campos.otros !== undefined &&
+      !puedeEditarOtrosConAjuste({
+        otrosActual: pago.otros ?? 0,
+        otrosSolicitado: campos.otros,
+        tieneAjusteVinculado,
+      })
+    ) {
+      return {
+        success: false,
+        message:
+          "No se puede editar Otros porque este pago respalda un ajuste por fecha ideal de pago",
+      };
+    }
+    if (
+      campos.monto_boleta !== undefined &&
+      !puedeEditarMontoProtegidoConAjuste({
+        montoActual: pago.monto_boleta ?? 0,
+        montoSolicitado: campos.monto_boleta,
+        tieneAjusteVinculado,
+      })
+    ) {
+      return {
+        success: false,
+        message:
+          "No se puede editar Monto Boleta porque este pago respalda un ajuste por fecha ideal de pago",
+      };
     }
 
     // 2. Construir objeto de update solo con los campos enviados

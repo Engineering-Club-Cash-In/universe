@@ -258,15 +258,15 @@ function EditPaymentModal({
                 value={formValues[field.key] ?? ""}
                 onChange={(e) => handleChange(field.key, e.target.value)}
                 disabled={
-                  field.key === "otros" &&
+                  (field.key === "otros" || field.key === "monto_boleta") &&
                   Number(pago.ajusteFechaIdealMonto ?? 0) > 0
                 }
                 className="h-9 text-sm border-gray-300 focus:border-blue-500"
               />
-              {field.key === "otros" &&
+              {(field.key === "otros" || field.key === "monto_boleta") &&
                 Number(pago.ajusteFechaIdealMonto ?? 0) > 0 && (
                   <p className="text-xs text-amber-700">
-                    Protegido: contiene un cobro extra por fecha ideal de pago.
+                    Protegido: respalda un cobro extra por fecha ideal de pago.
                   </p>
                 )}
             </div>

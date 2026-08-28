@@ -1056,6 +1056,18 @@ export const aplicarAjusteFechaIdealAPago = <T extends PagoConRubrosDeAjuste>(
  * ajuste cobrado, editarlo rompería la evidencia financiera y el pago_id del
  * marcador. En ese caso solo se acepta conservar exactamente el valor actual.
  */
+export const puedeEditarMontoProtegidoConAjuste = ({
+  montoActual,
+  montoSolicitado,
+  tieneAjusteVinculado,
+}: {
+  montoActual: BigInput;
+  montoSolicitado: BigInput;
+  tieneAjusteVinculado: boolean;
+}): boolean =>
+  !tieneAjusteVinculado ||
+  new Big(montoActual || 0).eq(new Big(montoSolicitado || 0));
+
 export const puedeEditarOtrosConAjuste = ({
   otrosActual,
   otrosSolicitado,
@@ -1065,8 +1077,11 @@ export const puedeEditarOtrosConAjuste = ({
   otrosSolicitado: BigInput;
   tieneAjusteVinculado: boolean;
 }): boolean =>
-  !tieneAjusteVinculado ||
-  new Big(otrosActual || 0).eq(new Big(otrosSolicitado || 0));
+  puedeEditarMontoProtegidoConAjuste({
+    montoActual: otrosActual,
+    montoSolicitado: otrosSolicitado,
+    tieneAjusteVinculado,
+  });
 
 /**
  * La cuota 1 no puede cerrar (pagado=true) mientras exista un ajuste por

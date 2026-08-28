@@ -11,6 +11,37 @@ type Executor = Pick<typeof db, "select" | "update">;
 type AjusteCobrado = { id: number; monto_total: string };
 type AjusteParaReconstruccion = AjusteCobrado | { pendiente: true };
 
+export const esCuota1ConAjustePendiente = ({
+  numeroCuota,
+  ajusteId,
+}: {
+  numeroCuota: number | null | undefined;
+  ajusteId: number | null | undefined;
+}): boolean => numeroCuota === 1 && ajusteId != null;
+
+export async function debeMantenerCuotaAbiertaPorAjustePendiente(
+  cuotaId: number,
+  creditoId: number,
+  executor: Executor = db,
+): Promise<boolean> {
+  const [row] = await executor
+    .select({
+      numeroCuota: cuotas_credito.numero_cuota,
+      ajusteId: ajuste_fecha_ideal_pago.id,
+    })
+    .from(cuotas_credito)
+    .leftJoin(
+      ajuste_fecha_ideal_pago,
+      and(
+        eq(ajuste_fecha_ideal_pago.credito_id, creditoId),
+        isNull(ajuste_fecha_ideal_pago.fecha_cobro),
+      ),
+    )
+    .where(eq(cuotas_credito.cuota_id, cuotaId))
+    .limit(1);
+  return esCuota1ConAjustePendiente(row ?? {});
+}
+
 export async function claimAjusteFechaIdealPago(
   ajusteId: number,
   pagoId: number,

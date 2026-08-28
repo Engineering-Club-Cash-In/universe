@@ -12,6 +12,7 @@ import {
 } from "./registerPaymentPolicy";
 import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import { desactivarMoraSiCreditoAlDia } from "./latefee";
+import { debeMantenerCuotaAbiertaPorAjustePendiente } from "./ajusteFechaIdealPago";
 import {
   carteraStructuredLogger,
   type CarteraStructuredLogger,
@@ -266,7 +267,28 @@ async function handleRevalidatePayment(
       }
 
       let installmentClosed = false;
-      if (pago.cuota_id !== null && coberturaCuota.cuotaCompleta) {
+      const mantenerCuotaAbiertaPorAjuste =
+        pago.cuota_id !== null &&
+        (await debeMantenerCuotaAbiertaPorAjustePendiente(
+          pago.cuota_id,
+          credito_id,
+          tx,
+        ));
+      if (mantenerCuotaAbiertaPorAjuste && pago.cuota_id !== null) {
+        await tx
+          .update(cuotas_credito)
+          .set({ pagado: false })
+          .where(eq(cuotas_credito.cuota_id, pago.cuota_id));
+        await tx
+          .update(pagos_credito)
+          .set({ pagado: false })
+          .where(eq(pagos_credito.pago_id, pago_id));
+      }
+      if (
+        pago.cuota_id !== null &&
+        coberturaCuota.cuotaCompleta &&
+        !mantenerCuotaAbiertaPorAjuste
+      ) {
         await tx
           .update(cuotas_credito)
           .set({ pagado: true })

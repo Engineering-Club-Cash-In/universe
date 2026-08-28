@@ -3,6 +3,7 @@ import * as registerPaymentPolicy from "./registerPaymentPolicy";
 import {
   aplicarAjusteFechaIdealAPago,
   getAjusteFechaIdealADeducir,
+  puedeEditarMontoProtegidoConAjuste,
   puedeEditarOtrosConAjuste,
   recomputeCreditAfterCapital,
   shouldBlockCuota1ClosingForPendingAjuste,
@@ -894,6 +895,23 @@ describe("aplicarAjusteFechaIdealAPago", () => {
 });
 
 describe("puedeEditarOtrosConAjuste", () => {
+  it("protege también el total de boleta enlazado al ajuste", () => {
+    expect(
+      puedeEditarMontoProtegidoConAjuste({
+        montoActual: "350.00",
+        montoSolicitado: "300.00",
+        tieneAjusteVinculado: true,
+      }),
+    ).toBe(false);
+    expect(
+      puedeEditarMontoProtegidoConAjuste({
+        montoActual: "350.00",
+        montoSolicitado: "350",
+        tieneAjusteVinculado: true,
+      }),
+    ).toBe(true);
+  });
+
   it("bloquea cambiar otros cuando el pago respalda un ajuste cobrado", () => {
     expect(
       puedeEditarOtrosConAjuste({

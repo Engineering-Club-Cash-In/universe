@@ -19,14 +19,18 @@ function loggingDependencies(lines: string[]) {
 const tx = {
   execute: mock(() => Promise.resolve()),
   select: mock(() => ({
-    from: () => ({
-      where: () => {
+    from: () => {
+      const where = () => {
         const rows = selectResults.shift() ?? [];
         return Object.assign(Promise.resolve(rows), {
           limit: () => Promise.resolve(rows),
         });
-      },
-    }),
+      };
+      return {
+        where,
+        leftJoin: () => ({ where }),
+      };
+    },
   })),
   update: mock(() => ({
     set: (values: Record<string, unknown>) => ({
@@ -152,6 +156,26 @@ describe("revalidatePayment", () => {
       [8765, 10],
     );
     expect(lockRelease).toHaveBeenCalledTimes(1);
+  });
+
+  it("mantiene cuota 1 abierta al revalidar el parcial final si el ajuste sigue pendiente", async () => {
+    selectResults = [
+      [{ ...pagoCompletoPendiente, pagado: true }],
+      [credito],
+      [],
+      [{ numeroCuota: 1, ajusteId: 7 }],
+    ];
+    const set = { status: 0 };
+
+    await revalidatePayment({
+      body: { credito_id: 10, pago_id: 30 },
+      set,
+    });
+
+    expect(set.status).toBe(200);
+    expect(updates.some((values) => values.validationStatus === "validated")).toBeTrue();
+    expect(updates.some((values) => values.pagado === false)).toBeTrue();
+    expect(updates.some((values) => values.pagado === true)).toBeFalse();
   });
 
   it("valida un pago parcial sin cerrar la cuota", async () => {

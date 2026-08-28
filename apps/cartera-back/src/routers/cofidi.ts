@@ -88,6 +88,16 @@ function generarIdInternoRandom(): string {
   return Math.floor(10000000 + Math.random() * 90000000).toString();
 }
 
+// 🔒 Pagos con una facturación EN CURSO en este proceso. El diff de re-facturación
+// (paso 2.5 de /facturar-pago-completo) lee-decide-certifica sin transacción: dos
+// requests simultáneos del mismo pago (doble click, retry del CRM tras timeout —
+// incidente real del 2026-08-07) computarían los MISMOS faltantes y certificarían
+// DTEs duplicados ante SAT. Este candado serializa por pago_id dentro del proceso.
+// ⚠️ Si cartera-back algún día corre con VARIAS réplicas, esto no alcanza: habría
+// que pasar a un advisory lock de Postgres (ojo con el transaction pooler 6543,
+// que rompe locks de sesión) o a un índice único parcial.
+const facturacionesEnCurso = new Set<number>();
+
 
 export const dteController = new Elysia({ prefix: "/api/dte" })
   .use(authMiddleware)
@@ -112,8 +122,20 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
 .post(
   "/facturar-pago-completo",
   async ({ body, set }) => {
+    const { pago_id, created_by } = body;
+
+    // 🔒 Un solo request facturando cada pago a la vez (ver facturacionesEnCurso).
+    if (facturacionesEnCurso.has(pago_id)) {
+      set.status = 409;
+      return {
+        success: false,
+        message:
+          "Ya hay una facturación en curso para este pago. Espere a que termine antes de reintentar.",
+      };
+    }
+    facturacionesEnCurso.add(pago_id);
+
     try {
-      const { pago_id, created_by } = body;
 
       // ============================================
       // 0️⃣ PRE-VALIDACIÓN: ¿ya existen facturas ACTIVAS para este pago?
@@ -523,9 +545,10 @@ if (facturasExistentes.length > 0) {
 
       // Modo FALTANTES: re-corrida parcial. `debeEmitir(key)` decide bloque por bloque.
       const soloFaltantes = diffFacturas.modo === "FALTANTES";
-      const faltantes = soloFaltantes ? diffFacturas.faltantes : null;
+      const faltantes: Set<string> =
+        diffFacturas.modo === "FALTANTES" ? diffFacturas.faltantes : new Set();
 
-      if (soloFaltantes && faltantes!.size === 0) {
+      if (soloFaltantes && faltantes.size === 0) {
         console.log(`✅ Pago ${pago_id} ya está completamente facturado (nada que emitir).`);
         set.status = 400;
         return {
@@ -538,13 +561,20 @@ if (facturasExistentes.length > 0) {
 
       if (soloFaltantes) {
         console.log(
-          `🩹 Re-facturación PARCIAL del pago ${pago_id}: faltan [${[...faltantes!].join(", ")}] ` +
+          `🩹 Re-facturación PARCIAL del pago ${pago_id}: faltan [${[...faltantes].join(", ")}] ` +
             `(ya emitidas ${facturasExistentes.length}). Solo se emitirá lo faltante.`
         );
       }
 
       /** En modo FALTANTES solo se certifica lo que falta; en COMPLETO, todo. */
-      const debeEmitir = (key: string) => !soloFaltantes || faltantes!.has(key);
+      // ⚠️ CENTINELA: TODO bloque que certifique un DTE de este pago DEBE andar
+      //    su condición con debeEmitir(<key>). Hoy son 5 call-sites: MORA,
+      //    OTROS_SERVICIOS, OTROS, INTERESES (loop, key por inversionista) e
+      //    INTERESES_CUBE. Un bloque nuevo SIN el check certifica incondicional
+      //    en re-corridas parciales → DTE duplicado ante SAT. Si agregas un
+      //    concepto: gatearlo acá, sumarlo a CONCEPTOS_FACTURA y al esperado de
+      //    calcularEsperadoDetallado (facturasFaltantes.ts) — los tres van juntos.
+      const debeEmitir = (key: string) => !soloFaltantes || faltantes.has(key);
 
       // ============================================
       // 3️⃣ CONSTRUIR RECEPTOR (cliente al que se le factura)
@@ -2031,19 +2061,32 @@ if (facturasExistentes.length > 0) {
       //    - fecha_aplicado_gt se calcula en SQL (zona America/Guatemala).
       //    Best-effort: si falla, NO rompe la facturación (solo loguea).
       // ============================================
-      // 🩹 En re-facturación PARCIAL no se toca ni facturacion_desglose ni el
-      //    congelado pagos_credito_inversionistas_facturado: la corrida ORIGINAL
-      //    ya los escribió "como si todo hubiera salido bien" (ambos se calculan
-      //    del pago y del roster, no de los DTEs que efectivamente certificaron).
-      //    Esta re-corrida solo hace realidad esa foto emitiendo lo que faltó, así
-      //    que reescribirlos con el roster de HOY solo arriesga moverlos si el
-      //    crédito cambió en el medio. Los dos bloques hacen DELETE + INSERT.
+      // 🩹 En re-facturación PARCIAL normalmente no se tocan ni facturacion_desglose
+      //    ni el congelado: la corrida ORIGINAL ya los escribió "como si todo
+      //    hubiera salido bien" (se calculan del pago y del roster, no de los DTEs
+      //    certificados) y reescribirlos con el roster de HOY solo arriesga
+      //    moverlos. PERO si la corrida original murió a MEDIO request (deploy/OOM
+      //    después de certificar el primer DTE, antes de llegar acá), el pago
+      //    quedó sin desglose/congelado y esta re-corrida es la única oportunidad
+      //    de escribirlos. Regla: en FALTANTES se escriben SOLO si no existen.
       let rubrosGuardados = 0;
-      if (soloFaltantes) {
+      const desgloseYaExiste = soloFaltantes
+        ? Number(
+            ((await db.execute(
+              sql`SELECT count(*)::int AS n FROM cartera.facturacion_desglose WHERE pago_id = ${pago_id}`
+            )) as any).rows?.[0]?.n ?? 0
+          ) > 0
+        : false;
+      if (soloFaltantes && desgloseYaExiste) {
         console.log(
-          `🧾 Re-facturación parcial: NO se reescriben facturacion_desglose ni el reparto congelado del pago ${pago_id} (los dejó la corrida original).`
+          `🧾 Re-facturación parcial: facturacion_desglose del pago ${pago_id} ya existe (lo dejó la corrida original), no se reescribe.`
         );
       } else {
+        if (soloFaltantes) {
+          console.log(
+            `🧾 Re-facturación parcial: el pago ${pago_id} NO tiene desglose (la corrida original murió antes de escribirlo) — se escribe ahora.`
+          );
+        }
       try {
         const rubrosDesglose: {
           rubro: string;
@@ -2195,8 +2238,16 @@ if (facturasExistentes.length > 0) {
       //    que usan el reporte y el cierre, para que ambos lean el congelado en
       //    vez de recalcular.
       // ============================================
-      // 🩹 Ver nota de arriba: en modo FALTANTES el congelado tampoco se toca.
-      if (!soloFaltantes) {
+      // 🩹 Ver nota del desglose: en FALTANTES el congelado solo se escribe si la
+      //    corrida original no llegó a dejarlo (murió a medio request).
+      const congeladoYaExiste = soloFaltantes
+        ? Number(
+            ((await db.execute(
+              sql`SELECT count(*)::int AS n FROM cartera.pagos_credito_inversionistas_facturado WHERE pago_id = ${pago_id}`
+            )) as any).rows?.[0]?.n ?? 0
+          ) > 0
+        : false;
+      if (!soloFaltantes || !congeladoYaExiste) {
       try {
         const interesPago = new Big(pagoData.abono_interes || "0");
         const ivaPago = new Big(pagoData.abono_iva_12 || "0");
@@ -2351,6 +2402,8 @@ if (facturasExistentes.length > 0) {
         error: (error as Error).message,
         stack: (error as Error).stack,
       };
+    } finally {
+      facturacionesEnCurso.delete(pago_id);
     }
   },
   {

@@ -289,6 +289,15 @@ export const INVERSIONISTAS_FACTURADORES = [
 ];
 
 /**
+ * ¿El inversionista es CUBE? Predicado canónico — el mismo criterio que usan los
+ * loops de intereses de cofidi.ts. Usar ESTE helper en código nuevo en vez de
+ * repetir el `.includes("CUBE INVESTMENTS")` (ya hay varias copias históricas).
+ */
+export function esInversionistaCube(nombre: string): boolean {
+  return nombre.trim().toUpperCase().includes("CUBE INVESTMENTS");
+}
+
+/**
  * 🔥 Busca si el nombre del inversionista hace match con alguna empresa facturadora
  * @param nombreInversionista - Nombre del inversionista a buscar
  * @returns La configuración del inversionista o null si no hay match

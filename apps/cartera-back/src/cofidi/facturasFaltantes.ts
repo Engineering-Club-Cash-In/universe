@@ -1,5 +1,8 @@
 import Big from "big.js";
-import { getInversionistaFacturadorConfig } from "../utils/functions/const";
+import {
+  esInversionistaCube,
+  getInversionistaFacturadorConfig,
+} from "../utils/functions/const";
 
 Big.DP = 20;
 Big.RM = Big.roundHalfUp;
@@ -83,10 +86,9 @@ export type FacturaActiva = {
 export type DiffFacturas =
   | { modo: "COMPLETO" }
   | { modo: "BLOQUEADO"; razon: string }
-  | { modo: "FALTANTES"; faltantes: Set<KeyFactura>; esperado: Set<KeyFactura> };
+  | { modo: "FALTANTES"; faltantes: Set<KeyFactura> };
 
-const esCubeInv = (nombre: string) =>
-  nombre.trim().toUpperCase().includes("CUBE INVESTMENTS");
+const esCubeInv = esInversionistaCube;
 
 /**
  * Lee un monto del pago con la MISMA tolerancia que los bloques de emisión.
@@ -101,7 +103,7 @@ const esCubeInv = (nombre: string) =>
  * (falsy) para `''` y basura, y tolera colas no numéricas ("12abc" → 12). Acá se
  * replica ese criterio: si el bloque no emitiría, el esperado tampoco lo pide.
  */
-const big = (v: string | number | null | undefined): Big => {
+export const big = (v: string | number | null | undefined): Big => {
   if (v === null || v === undefined) return new Big(0);
   if (typeof v === "number") return Number.isFinite(v) ? new Big(v) : new Big(0);
 
@@ -147,18 +149,27 @@ export function calcularEsperadoDetallado(args: {
   const { pagoData, inversionistas } = args;
   const esperado = new Map<KeyFactura, Big>();
 
-  const mora = big(pagoData.mora).round(2);
-  if (mora.gt(0)) esperado.set("MORA", mora);
+  // ⚠️ Los gates comparan el valor SIN redondear, igual que los `parseFloat(x) > 0`
+  //    de los bloques de emisión: un monto sub-centavo (mora="0.003") SÍ produce
+  //    un DTE real (de Q0.00), así que el esperado debe contemplarlo — si no, la
+  //    regla (b) bloquearía para siempre un pago que nada cambió, o faltantes
+  //    quedaría vacío y el rubro no se emitiría jamás. El round(2) es solo para
+  //    el MONTO esperado (el GranTotal que certifica el bloque).
+  const mora = big(pagoData.mora);
+  if (mora.gt(0)) esperado.set("MORA", mora.round(2));
 
-  const seguro = big(pagoData.abono_seguro).round(2);
-  const gps = big(pagoData.abono_gps).round(2);
-  const membresia = big(pagoData.membresias_pago).round(2);
+  const seguro = big(pagoData.abono_seguro);
+  const gps = big(pagoData.abono_gps);
+  const membresia = big(pagoData.membresias_pago);
   if (seguro.gt(0) || gps.gt(0) || membresia.gt(0)) {
-    esperado.set("OTROS_SERVICIOS", seguro.plus(gps).plus(membresia));
+    esperado.set(
+      "OTROS_SERVICIOS",
+      seguro.round(2).plus(gps.round(2)).plus(membresia.round(2))
+    );
   }
 
-  const otros = big(pagoData.otros).round(2);
-  if (otros.gt(0)) esperado.set("OTROS", otros);
+  const otros = big(pagoData.otros);
+  if (otros.gt(0)) esperado.set("OTROS", otros.round(2));
 
   // 🚪 Mismo guard que el handler: sin interés no se entra a NINGÚN flujo de intereses.
   if (!big(pagoData.abono_interes).gt(0)) return esperado;
@@ -221,7 +232,11 @@ export function computarDiffFacturas(args: {
 
   // (c) El flujo prorrateado reparte el interés por VENTANAS de fecha de corte; su
   //     esperado NO se modela acá. Con facturas activas se mantiene el 400 de hoy.
-  if (tieneOperacionesPendientesFacturar) {
+  //     PERO solo aplica si el pago TRAE interés: el handler corta con
+  //     `if (!hayInteresEnPago)` ANTES del branch prorrateado (cofidi.ts ~1053),
+  //     así que un pago solo-mora en un crédito con compra pendiente jamás toca
+  //     el prorrateo y su re-facturación parcial es segura.
+  if (tieneOperacionesPendientesFacturar && big(pagoData.abono_interes).gt(0)) {
     return {
       modo: "BLOQUEADO",
       razon:
@@ -315,5 +330,5 @@ export function computarDiffFacturas(args: {
 
   const faltantes = new Set<KeyFactura>([...esperado].filter((k) => !logrado.has(k)));
 
-  return { modo: "FALTANTES", faltantes, esperado };
+  return { modo: "FALTANTES", faltantes };
 }

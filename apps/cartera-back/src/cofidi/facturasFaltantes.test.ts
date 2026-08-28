@@ -476,3 +476,54 @@ describe("computarDiffFacturas — regla (d): los DTEs vivos deben cuadrar al ce
     expect(diff.modo).toBe("FALTANTES");
   });
 });
+
+describe("fixes del code review: gates sub-centavo y prorrateado sin interés", () => {
+  it("32. monto sub-centavo SÍ entra al esperado (el bloque real emitiría)", () => {
+    // El bloque real gatea con parseFloat(x) > 0 SIN redondear: mora="0.003"
+    // produce un DTE real (de Q0.00). Si el esperado lo omitiera, la regla (b)
+    // bloquearía para siempre (con el DTE vivo) o faltantes quedaría vacío y el
+    // rubro no se emitiría jamás (sin el DTE).
+    const esperado = calcularEsperado({
+      pagoData: { ...PAGO, mora: "0.003", abono_interes: "0", abono_iva_12: "0" },
+      inversionistas: [],
+    });
+    expect([...esperado].sort()).toEqual(["MORA", "OTROS_SERVICIOS"]);
+  });
+
+  it("33. re-run con DTE sub-centavo vivo ya no bloquea (era el bug)", () => {
+    const diff = computarDiffFacturas({
+      pagoData: { ...PAGO, mora: "0.003", abono_interes: "0", abono_iva_12: "0" },
+      inversionistas: [],
+      activas: [
+        { factura_id: 300, concepto: "MORA", inversionista_id: null, monto_total: "0.00" },
+      ],
+    });
+    expect(diff.modo).toBe("FALTANTES");
+    if (diff.modo !== "FALTANTES") throw new Error("modo inesperado");
+    expect([...diff.faltantes]).toEqual(["OTROS_SERVICIOS"]);
+  });
+
+  it("34. prorrateado pendiente SIN interés en el pago no bloquea (el handler ni entra al flujo)", () => {
+    const diff = computarDiffFacturas({
+      pagoData: { ...PAGO, abono_interes: "0", abono_iva_12: "0" },
+      inversionistas: ROSTER,
+      activas: [
+        { factura_id: 301, concepto: "MORA", inversionista_id: null, monto_total: "150.00" },
+      ],
+      tieneOperacionesPendientesFacturar: true,
+    });
+    expect(diff.modo).toBe("FALTANTES");
+    if (diff.modo !== "FALTANTES") throw new Error("modo inesperado");
+    expect([...diff.faltantes]).toEqual(["OTROS_SERVICIOS"]);
+  });
+
+  it("35. prorrateado pendiente CON interés sigue BLOQUEADO", () => {
+    const diff = computarDiffFacturas({
+      pagoData: PAGO,
+      inversionistas: ROSTER,
+      activas: [activa("MORA", null, 302)],
+      tieneOperacionesPendientesFacturar: true,
+    });
+    expect(diff.modo).toBe("BLOQUEADO");
+  });
+});

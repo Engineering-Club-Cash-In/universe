@@ -26,6 +26,11 @@ import {
 	toPagaloProviderAmount,
 } from "./pagalo-client";
 import {
+	ESTADOS_INVALIDABLES_SUPERVISOR,
+	invalidarGrupoEnTx,
+	proximaGeneracion,
+} from "./pagalo-group-lifecycle";
+import {
 	construirIdentificadorCredito,
 	resolverVehiculoCasoPagalo,
 } from "./pagalo-vehiculo";
@@ -59,6 +64,82 @@ const pickString = (value: unknown, names: string[]): string | undefined => {
 };
 
 /** CRM orchestration. Solo sandbox; una llamada externa por componente > Q0. */
+/**
+ * Datos de contacto: casos_cobros es la fuente principal; leads (vía
+ * opportunities.numeroSifco) rellena lo que falte. cartera-back no expone
+ * teléfono/email/dirección en /credito. Reutilizado por `createPagaloLinks`
+ * y por `regenerarGrupo` (CB-127): el contacto puede haber cambiado desde
+ * que se emitió el grupo original, así que regenerar lo vuelve a resolver
+ * en vez de copiar el que quedó congelado en el link viejo.
+ */
+async function resolverContactoPagalo(
+	casoCobroId: string,
+	numeroSifco: string,
+) {
+	const [caso] = await db
+		.select({
+			numeroCreditoSifco: casosCobros.numeroCreditoSifco,
+			telefonoPrincipal: casosCobros.telefonoPrincipal,
+			emailContacto: casosCobros.emailContacto,
+			direccionContacto: casosCobros.direccionContacto,
+		})
+		.from(casosCobros)
+		.where(eq(casosCobros.id, casoCobroId))
+		.limit(1);
+	if (!caso || caso.numeroCreditoSifco !== numeroSifco) {
+		throw new Error("Caso de cobro no corresponde al crédito Págalo.");
+	}
+	// D-04 pedía siempre "crédito {sifco}" en el mensaje; ahora el pedido es
+	// identificar el vehículo cuando esté cargado — mismo helper que usa el
+	// preview del modal (getVehiculoCasoPagalo, cobros.ts) para que ambos
+	// textos coincidan siempre (hallazgo de Codex, PR #1470).
+	const vehiculoCaso = await resolverVehiculoCasoPagalo(casoCobroId);
+	const identificadorCredito = construirIdentificadorCredito(
+		vehiculoCaso,
+		numeroSifco,
+	);
+	const [leadInfo] = await db
+		.select({
+			email: leads.email,
+			phone: leads.phone,
+			direccion: leads.direccion,
+			departamento: leads.departamento,
+			municipio: leads.municipio,
+			zona: leads.zona,
+		})
+		.from(opportunities)
+		.leftJoin(leads, eq(opportunities.leadId, leads.id))
+		.where(eq(opportunities.numeroSifco, numeroSifco))
+		.limit(1);
+
+	const telefono = primerTelefono(
+		caso?.telefonoPrincipal ?? leadInfo?.phone,
+	)?.replace(/\D/g, "");
+	const email = caso?.emailContacto || leadInfo?.email;
+	const location = caso?.direccionContacto || leadInfo?.direccion;
+	if (!telefono || !email || !location) {
+		throw new Error(
+			"Págalo requiere teléfono, correo y dirección reales del cliente.",
+		);
+	}
+	// Sustitución de test mode DESPUÉS de validar que el caso sí tiene
+	// contacto real cargado — testMode no debe ocultar un caso mal cargado.
+	// Solo phone/email se redirigen (para que cualquier correo/mensaje real
+	// que dispare Págalo llegue acá); nombre, ciudad, departamento y
+	// dirección se quedan reales por trazabilidad — decisión explícita del
+	// usuario.
+	const testMode = isTestModeEnabled();
+	const clientContact: ClientContact = {
+		phone: testMode ? PAGALO_TEST_PHONE : telefono,
+		email: testMode ? PAGALO_TEST_EMAIL : email,
+		country: "GT" as const,
+		...(leadInfo?.municipio ? { city: leadInfo.municipio } : {}),
+		...(leadInfo?.departamento ? { state: leadInfo.departamento } : {}),
+		location,
+	};
+	return { identificadorCredito, telefono, clientContact };
+}
+
 export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 	const credit = await carteraBackClient.getCredito(input.numeroSifco, false);
 	if (credit.credito.credito_id !== input.creditoId) {
@@ -93,7 +174,10 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 		selectable.map((cuota) => cuota.numero_cuota),
 		cuotasDisponibles.map((cuota) => cuota.numero_cuota),
 	);
-	assertPagaloOtrosRequiresInstallment(input.otros, selectable.map((cuota) => cuota.numero_cuota));
+	assertPagaloOtrosRequiresInstallment(
+		input.otros,
+		selectable.map((cuota) => cuota.numero_cuota),
+	);
 	const installments: PagaloInstallment[] = selectable
 		.sort((a, b) => a.numero_cuota - b.numero_cuota)
 		.map((cuota) => ({
@@ -125,70 +209,8 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 		otros: input.otros,
 	});
 
-	// Datos de contacto: casos_cobros es la fuente principal; leads (vía
-	// opportunities.numeroSifco) rellena lo que falte. cartera-back no expone
-	// teléfono/email/dirección en /credito.
-	const [caso] = await db
-		.select({
-			numeroCreditoSifco: casosCobros.numeroCreditoSifco,
-			telefonoPrincipal: casosCobros.telefonoPrincipal,
-			emailContacto: casosCobros.emailContacto,
-			direccionContacto: casosCobros.direccionContacto,
-		})
-		.from(casosCobros)
-		.where(eq(casosCobros.id, input.casoCobroId))
-		.limit(1);
-	if (!caso || caso.numeroCreditoSifco !== input.numeroSifco) {
-		throw new Error("Caso de cobro no corresponde al crédito Págalo.");
-	}
-	// D-04 pedía siempre "crédito {sifco}" en el mensaje; ahora el pedido es
-	// identificar el vehículo cuando esté cargado — mismo helper que usa el
-	// preview del modal (getVehiculoCasoPagalo, cobros.ts) para que ambos
-	// textos coincidan siempre (hallazgo de Codex, PR #1470).
-	const vehiculoCaso = await resolverVehiculoCasoPagalo(input.casoCobroId);
-	const identificadorCredito = construirIdentificadorCredito(
-		vehiculoCaso,
-		input.numeroSifco,
-	);
-	const [leadInfo] = await db
-		.select({
-			email: leads.email,
-			phone: leads.phone,
-			direccion: leads.direccion,
-			departamento: leads.departamento,
-			municipio: leads.municipio,
-			zona: leads.zona,
-		})
-		.from(opportunities)
-		.leftJoin(leads, eq(opportunities.leadId, leads.id))
-		.where(eq(opportunities.numeroSifco, input.numeroSifco))
-		.limit(1);
-
-	const telefono = primerTelefono(
-		caso?.telefonoPrincipal ?? leadInfo?.phone,
-	)?.replace(/\D/g, "");
-	const email = caso?.emailContacto || leadInfo?.email;
-	const location = caso?.direccionContacto || leadInfo?.direccion;
-	if (!telefono || !email || !location) {
-		throw new Error(
-			"Págalo requiere teléfono, correo y dirección reales del cliente.",
-		);
-	}
-	// Sustitución de test mode DESPUÉS de validar que el caso sí tiene
-	// contacto real cargado — testMode no debe ocultar un caso mal cargado.
-	// Solo phone/email se redirigen (para que cualquier correo/mensaje real
-	// que dispare Págalo llegue acá); nombre, ciudad, departamento y
-	// dirección se quedan reales por trazabilidad — decisión explícita del
-	// usuario.
-	const testMode = isTestModeEnabled();
-	const clientContact = {
-		phone: testMode ? PAGALO_TEST_PHONE : telefono,
-		email: testMode ? PAGALO_TEST_EMAIL : email,
-		country: "GT" as const,
-		...(leadInfo?.municipio ? { city: leadInfo.municipio } : {}),
-		...(leadInfo?.departamento ? { state: leadInfo.departamento } : {}),
-		location,
-	};
+	const { identificadorCredito, telefono, clientContact } =
+		await resolverContactoPagalo(input.casoCobroId, input.numeroSifco);
 
 	// Cualquier grupo ACTIVO del crédito —en revisión, esperando pago, o uno
 	// que el BOT creó desde WhatsApp— se devuelve tal cual en vez de intentar
@@ -255,16 +277,6 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 			"Creación de links Págalo deshabilitada por configuración.",
 		);
 	}
-	const client = createPagaloClient(config);
-	const components = [
-		["CAPITAL", calculation.capitalTotal] as const,
-		["MORA_INTERES", calculation.facturableTotal] as const,
-	];
-	const providerAmounts = new Map(
-		components
-			.filter(([, amount]) => amount !== "0.00")
-			.map(([linkType, amount]) => [linkType, toPagaloProviderAmount(amount)]),
-	);
 
 	const group = await db.transaction(async (tx) => {
 		const [created] = await tx
@@ -303,6 +315,416 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 		return created;
 	});
 
+	const emitido = await emitirLinksDeGrupo({
+		groupId: group.id,
+		numeroSifco: input.numeroSifco,
+		requestedBy: input.requestedBy,
+		capitalTotal: calculation.capitalTotal,
+		facturableTotal: calculation.facturableTotal,
+		clienteNombre: credit.usuario.nombre ?? "",
+		clientContact,
+		identificadorCredito,
+		telefono,
+		config,
+	});
+
+	return {
+		groupId: group.id,
+		capitalTotal: calculation.capitalTotal,
+		facturableTotal: calculation.facturableTotal,
+		otrosTotal: calculation.otrosTotal,
+		totalAmount: calculation.totalAmount,
+		links: emitido.links,
+		whatsappEnviado: emitido.whatsappEnviado,
+	};
+}
+
+type ClientContact = {
+	phone: string;
+	email: string;
+	country: "GT";
+	city?: string;
+	state?: string;
+	location: string;
+};
+
+type GeneracionPorTipo = Partial<
+	Record<
+		"CAPITAL" | "MORA_INTERES",
+		{ generation: number; supersedesLinkId: string }
+	>
+>;
+
+/**
+ * Emite UN link de Págalo y lo persiste. Extraído del loop de
+ * `emitirLinksDeGrupo` para poder reutilizarlo en
+ * `regenerarLinkIndividual` (CB-127) sin duplicar el manejo de éxito/error.
+ *
+ * `grupoAReviewSiFalla` distingue los dos llamadores: en la emisión inicial
+ * de un grupo (`emitirLinksDeGrupo`), un link que falla deja el grupo entero
+ * en REVIEW_REQUIRED porque el grupo depende de que TODOS los links salgan
+ * bien. Regenerar un link individual es distinto: el grupo ya estaba vivo
+ * antes (con el otro link, si existe, intacto) y debe seguir vivo aunque
+ * este intento puntual falle — el link nuevo queda ERROR, el resto del
+ * grupo no se toca.
+ */
+async function emitirUnLink(params: {
+	client: ReturnType<typeof createPagaloClient>;
+	groupId: string;
+	numeroSifco: string;
+	requestedBy: string;
+	clienteNombre: string;
+	clientContact: ClientContact;
+	config: ReturnType<typeof getPagaloSandboxConfig>;
+	linkType: "CAPITAL" | "MORA_INTERES";
+	amount: string;
+	providerAmount: number;
+	etiqueta: string;
+	generation?: number;
+	supersedesLinkId?: string;
+	grupoAReviewSiFalla: boolean;
+}): Promise<{ paymentUrl: string }> {
+	const externalIdentifier = `pagalo-${params.groupId}-${params.linkType}-${randomUUID().slice(0, 8)}`;
+	const requestPayload = {
+		total_amount: params.providerAmount,
+		currency: "GTQ" as const,
+		description: `Crédito ${params.numeroSifco} · ${params.etiqueta}`,
+		external_identifier: externalIdentifier,
+		type_request: "SP" as const,
+		n_quotas: false,
+		expiration: false as const,
+		client: {
+			first_name: params.clienteNombre.split(" ")[0] || "Cliente",
+			last_name: params.clienteNombre.split(" ").slice(1).join(" ") || "Cashin",
+			...params.clientContact,
+		},
+		products: [
+			{
+				product_uuid: 0,
+				name: params.etiqueta,
+				product_name: params.etiqueta,
+				amount: params.providerAmount,
+				quantity: 1,
+				subtotal: params.providerAmount,
+			},
+		],
+	};
+	// Bloquear el grupo antes de insertar la fila CREATING: sin esto, un
+	// invalidarGrupoPagalo concurrente (regenerarLinkIndividual valida el
+	// grupo con un SELECT suelto bastante antes de llegar acá, tras HTTP a
+	// cartera-back de por medio) podía cancelar el grupo en el hueco entre
+	// esa validación y este INSERT, dejando un link recién creado — y pronto
+	// activo en Págalo — dentro de un grupo ya CANCELLED (hallazgo de code
+	// review). Tomar el candado acá, lo más cerca posible del INSERT y de la
+	// llamada HTTP, es lo que realmente cierra la ventana — revalidar con un
+	// SELECT sin candado más arriba en el caller no alcanza.
+	const stored = await db.transaction(async (tx) => {
+		const [grupo] = await tx
+			.select({ status: pagaloPaymentGroups.status })
+			.from(pagaloPaymentGroups)
+			.where(eq(pagaloPaymentGroups.id, params.groupId))
+			.for("update");
+		if (!grupo) throw new Error("Grupo Págalo no encontrado.");
+		if (grupo.status === "CANCELLED" || grupo.status === "COMPLETED") {
+			throw new Error(
+				`El grupo cambió a ${grupo.status} justo antes de emitir el link — no se creó ningún link nuevo.`,
+			);
+		}
+		// regenerarLinkIndividual valida el link viejo (supersedesLinkId) con
+		// un SELECT suelto bastante antes de llegar acá, tras
+		// resolverContactoPagalo/getCredito (HTTP externo) de por medio. En
+		// ese hueco el link viejo puede cobrar (REPLACED_LINK_PAID, el poller
+		// SÍ transiciona REPLACED→PAID) sin que nada lo vuelva a mirar acá —
+		// sin esta revalidación bajo candado, se emitía un link nuevo
+		// cobrable para un tipo que ya tiene dinero adentro por el link
+		// "viejo" (hallazgo de code review).
+		if (params.supersedesLinkId) {
+			const [viejo] = await tx
+				.select({ status: pagaloPaymentLinks.status })
+				.from(pagaloPaymentLinks)
+				.where(eq(pagaloPaymentLinks.id, params.supersedesLinkId))
+				.for("update");
+			const ESTADOS_CERRADOS_SIN_PAGO = [
+				"REPLACED",
+				"EXPIRED",
+				"CANCELLED",
+				"ERROR",
+			];
+			if (!viejo || !ESTADOS_CERRADOS_SIN_PAGO.includes(viejo.status)) {
+				throw new Error(
+					`El link que se está reemplazando cambió a ${viejo?.status ?? "eliminado"} justo antes de emitir el nuevo — no se creó ningún link.`,
+				);
+			}
+		}
+		const [insertado] = await tx
+			.insert(pagaloPaymentLinks)
+			.values({
+				groupId: params.groupId,
+				linkType: params.linkType,
+				generation: params.generation ?? 1,
+				supersedesLinkId: params.supersedesLinkId ?? null,
+				externalIdentifier,
+				apiBaseUrl: params.config.baseUrl,
+				status: "CREATING",
+				requestPayload,
+				requestedBy: params.requestedBy,
+			})
+			.returning({ id: pagaloPaymentLinks.id });
+		return insertado;
+	});
+	if (!stored) throw new Error("No se pudo persistir link Págalo.");
+	// La llamada HTTP a Págalo y la persistencia posterior en nuestra DB
+	// estaban en el mismo try/catch: un fallo de persistencia DESPUÉS de que
+	// Págalo ya creó el link real (ej. un error transitorio de conexión a
+	// Postgres justo al guardar la respuesta) caía en el catch de "falló
+	// Págalo" y marcaba el link ERROR — con el link real ya vivo y cobrable
+	// en Págalo, sin que el poller lo vuelva a mirar, y habilitando
+	// "Regenerar" (ERROR es un estado regenerable) para crear un SEGUNDO
+	// link real duplicado (hallazgo de code review). Separados: un fallo de
+	// la llamada HTTP en sí sigue marcando ERROR (Págalo nunca creó nada);
+	// un fallo de persistencia posterior a una respuesta HTTP exitosa
+	// reintenta la persistencia sola, nunca marca ERROR.
+	let response: unknown;
+	try {
+		response = await params.client.createPaymentRequest(requestPayload);
+	} catch (error) {
+		await marcarLinkCreacionFallida({
+			linkId: stored.id,
+			groupId: params.groupId,
+			requestedBy: params.requestedBy,
+			linkType: params.linkType,
+			grupoAReviewSiFalla: params.grupoAReviewSiFalla,
+			error,
+		});
+		throw error;
+	}
+
+	const paymentUrl = pickString(response, [
+		"payment_url",
+		"paymenturl",
+		"url",
+		"link",
+	]);
+	const requestUuid = pickString(response, ["uuid", "request_uuid"]);
+	if (!paymentUrl || !requestUuid) {
+		// Págalo respondió 200 pero sin los campos esperados — no es un fallo
+		// de red, es una respuesta rara del proveedor con el link ya creado
+		// del otro lado; igual se registra como fallo de creación porque no
+		// hay paymentUrl que darle al cliente, pero el link real puede seguir
+		// existiendo en Págalo (mismo hueco documentado en D-51).
+		await marcarLinkCreacionFallida({
+			linkId: stored.id,
+			groupId: params.groupId,
+			requestedBy: params.requestedBy,
+			linkType: params.linkType,
+			grupoAReviewSiFalla: params.grupoAReviewSiFalla,
+			error: new Error("Págalo no devolvió URL y UUID de request."),
+		});
+		throw new Error("Págalo no devolvió URL y UUID de request.");
+	}
+
+	const REINTENTOS_PERSISTENCIA = 3;
+	let ultimoError: unknown;
+	for (let intento = 1; intento <= REINTENTOS_PERSISTENCIA; intento++) {
+		try {
+			await db.transaction(async (tx) => {
+				// La respuesta HTTP de Págalo puede llegar DESPUÉS de que un
+				// supervisor invalide este mismo link (CREATING es un estado
+				// "vivo", invalidable) — sin este WHERE, este UPDATE reactivaba
+				// el link a ACTIVE pisando el REPLACED recién puesto (hallazgo
+				// de code review). El link ya existe y es cobrable en Págalo
+				// pase lo que pase acá (mismo hueco que D-51/D-21), así que
+				// igual se guardan paymentUrl/pagaloRequestUuid/responsePayload
+				// aunque no gane el status — el poller los necesita para
+				// seguir viéndolo si cobra.
+				const [actualizado] = await tx
+					.update(pagaloPaymentLinks)
+					.set({
+						status: "ACTIVE",
+						paymentUrl,
+						pagaloRequestUuid: requestUuid,
+						responsePayload: response,
+						activatedAt: new Date(),
+						nextPollAt: new Date(),
+						updatedAt: new Date(),
+					})
+					.where(
+						and(
+							eq(pagaloPaymentLinks.id, stored.id),
+							eq(pagaloPaymentLinks.status, "CREATING"),
+						),
+					)
+					.returning({ id: pagaloPaymentLinks.id });
+				if (!actualizado) {
+					const [preservado] = await tx
+						.update(pagaloPaymentLinks)
+						.set({
+							paymentUrl,
+							pagaloRequestUuid: requestUuid,
+							responsePayload: response,
+							nextPollAt: new Date(),
+							updatedAt: new Date(),
+						})
+						.where(eq(pagaloPaymentLinks.id, stored.id))
+						.returning({ status: pagaloPaymentLinks.status });
+					// toStatus decía "ACTIVE" acá aunque el status real
+					// preservado fuera otro (típicamente REPLACED) — la nota en
+					// el payload lo explicaba en texto libre, pero cualquier
+					// lector que use la columna estructurada (la bitácora
+					// incluida) veía una transición que nunca pasó (hallazgo de
+					// code review). Sin transición real que declarar, toStatus
+					// queda null.
+					await tx.insert(pagaloPaymentEvents).values({
+						groupId: params.groupId,
+						linkId: stored.id,
+						eventType: "LINK_ACTIVE",
+						source: "PAGALO",
+						actorUserId: params.requestedBy,
+						payload: {
+							linkType: params.linkType,
+							statusPreservado: preservado?.status ?? null,
+							nota: "Respuesta de Págalo llegó después de que el link fue invalidado; status preservado, no reactivado.",
+						},
+					});
+					return;
+				}
+				await tx.insert(pagaloPaymentEvents).values({
+					groupId: params.groupId,
+					linkId: stored.id,
+					eventType: "LINK_ACTIVE",
+					source: "PAGALO",
+					actorUserId: params.requestedBy,
+					fromStatus: "CREATING",
+					toStatus: "ACTIVE",
+					payload: { linkType: params.linkType },
+				});
+			});
+			return { paymentUrl };
+		} catch (error) {
+			ultimoError = error;
+			if (intento < REINTENTOS_PERSISTENCIA) {
+				await new Promise((resolve) => setTimeout(resolve, 200 * intento));
+			}
+		}
+	}
+	// Se agotaron los reintentos de persistencia con el link YA CREADO en
+	// Págalo — no se marca ERROR (mentiría sobre el estado real). El link
+	// queda en CREATING con el error crudo logueado; requiere reconciliación
+	// manual o un job aparte, pero nunca ofrece "Regenerar" un link que ya
+	// existe y es cobrable del lado de Págalo.
+	console.error(
+		`[Págalo] No se pudo persistir la respuesta de creación para el link ${stored.id} tras ${REINTENTOS_PERSISTENCIA} intentos — el link YA EXISTE en Págalo (paymentUrl: ${paymentUrl}). Requiere reconciliación manual.`,
+		ultimoError instanceof Error ? ultimoError.message : ultimoError,
+	);
+	throw ultimoError instanceof Error
+		? ultimoError
+		: new Error("No se pudo persistir la creación del link Págalo.");
+}
+
+async function marcarLinkCreacionFallida(params: {
+	linkId: string;
+	groupId: string;
+	requestedBy: string;
+	linkType: "CAPITAL" | "MORA_INTERES";
+	grupoAReviewSiFalla: boolean;
+	error: unknown;
+}) {
+	await db.transaction(async (tx) => {
+		const mensaje =
+			params.error instanceof Error
+				? params.error.message
+				: String(params.error);
+		// El HTTP a Págalo puede tardar lo suficiente para que un supervisor
+		// invalide este mismo link (CREATING es invalidable) mientras está en
+		// vuelo — sin este WHERE, un fallo de red pisaba a ERROR un link que
+		// ya había sido correctamente marcado REPLACED por esa invalidación
+		// (hallazgo de code review). Si no afectó filas, no hay nada más que
+		// registrar acá: el estado ya lo decidió otra transacción.
+		const [actualizado] = await tx
+			.update(pagaloPaymentLinks)
+			.set({
+				status: "ERROR",
+				errorCode:
+					params.error instanceof Error ? params.error.name : "PAGALO_ERROR",
+				errorMessage: mensaje,
+				updatedAt: new Date(),
+			})
+			.where(
+				and(
+					eq(pagaloPaymentLinks.id, params.linkId),
+					eq(pagaloPaymentLinks.status, "CREATING"),
+				),
+			)
+			.returning({ id: pagaloPaymentLinks.id });
+		if (!actualizado) return;
+		if (params.grupoAReviewSiFalla) {
+			// Mismo razonamiento: si el grupo ya fue invalidado/completado
+			// concurrentemente, este UPDATE sin condición lo reabría a
+			// REVIEW_REQUIRED — solo tiene sentido escalar un grupo que
+			// todavía está en curso.
+			await tx
+				.update(pagaloPaymentGroups)
+				.set({ status: "REVIEW_REQUIRED", updatedAt: new Date() })
+				.where(
+					and(
+						eq(pagaloPaymentGroups.id, params.groupId),
+						inArray(pagaloPaymentGroups.status, [
+							"LINKS_PENDING",
+							"PENDING_PAYMENT",
+							"PARTIALLY_PAID",
+						]),
+					),
+				);
+		}
+		await tx.insert(pagaloPaymentEvents).values({
+			groupId: params.groupId,
+			linkId: params.linkId,
+			eventType: "LINK_CREATE_FAILED",
+			source: "PAGALO",
+			actorUserId: params.requestedBy,
+			fromStatus: "CREATING",
+			toStatus: "ERROR",
+			payload: {
+				errorCode:
+					params.error instanceof Error ? params.error.name : "PAGALO_ERROR",
+				errorMessage: mensaje.slice(0, 500),
+				linkType: params.linkType,
+			},
+		});
+	});
+}
+
+/**
+ * Fase "emitir links de un grupo ya existente" — separada de la creación del
+ * grupo para que CB-127 pueda reutilizarla en la regeneración: el grupo
+ * nuevo se inserta dentro de la misma transacción que invalida el viejo
+ * (cierra el hueco del índice único de crédito activo), pero los links
+ * necesitan HTTP a Págalo, que no puede correr dentro de esa transacción.
+ */
+export async function emitirLinksDeGrupo(params: {
+	groupId: string;
+	numeroSifco: string;
+	requestedBy: string;
+	capitalTotal: string;
+	facturableTotal: string;
+	clienteNombre: string;
+	clientContact: ClientContact;
+	identificadorCredito: string;
+	telefono: string;
+	config: ReturnType<typeof getPagaloSandboxConfig>;
+	generacionPorTipo?: GeneracionPorTipo;
+}) {
+	const client = createPagaloClient(params.config);
+	const components = [
+		["CAPITAL", params.capitalTotal] as const,
+		["MORA_INTERES", params.facturableTotal] as const,
+	];
+	const providerAmounts = new Map(
+		components
+			.filter(([, amount]) => amount !== "0.00")
+			.map(([linkType, amount]) => [linkType, toPagaloProviderAmount(amount)]),
+	);
+
 	// D-04 (docs/features/pagalo/DECISIONES.md): texto visible al cliente
 	// siempre neutro — nunca "CAPITAL" ni "MORA_INTERES". Con dos links reales,
 	// se numeran en orden fijo (CAPITAL siempre 1 de 2) sin importar cuál se
@@ -327,103 +749,49 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 		const providerAmount = providerAmounts.get(linkType);
 		if (providerAmount === undefined)
 			throw new Error("Monto Págalo no disponible.");
-		const externalIdentifier = `pagalo-${group.id}-${linkType}-${randomUUID().slice(0, 8)}`;
-		const etiqueta = etiquetaPago(linkType);
-		const requestPayload = {
-			total_amount: providerAmount,
-			currency: "GTQ" as const,
-			description: `Crédito ${input.numeroSifco} · ${etiqueta}`,
-			external_identifier: externalIdentifier,
-			type_request: "SP" as const,
-			n_quotas: false,
-			expiration: false as const,
-			client: {
-				first_name: credit.usuario.nombre?.split(" ")[0] || "Cliente",
-				last_name:
-					credit.usuario.nombre?.split(" ").slice(1).join(" ") || "Cashin",
-				...clientContact,
-			},
-			products: [
-				{
-					product_uuid: 0,
-					name: etiqueta,
-					product_name: etiqueta,
-					amount: providerAmount,
-					quantity: 1,
-					subtotal: providerAmount,
-				},
-			],
-		};
-		const [stored] = await db
-			.insert(pagaloPaymentLinks)
-			.values({
-				groupId: group.id,
-				linkType,
-				externalIdentifier,
-				apiBaseUrl: config.baseUrl,
-				status: "CREATING",
-				requestPayload,
-				requestedBy: input.requestedBy,
-			})
-			.returning({ id: pagaloPaymentLinks.id });
-		if (!stored) throw new Error("No se pudo persistir link Págalo.");
-		try {
-			const response = await client.createPaymentRequest(requestPayload);
-			const paymentUrl = pickString(response, [
-				"payment_url",
-				"paymenturl",
-				"url",
-				"link",
-			]);
-			const requestUuid = pickString(response, ["uuid", "request_uuid"]);
-			if (!paymentUrl || !requestUuid)
-				throw new Error("Págalo no devolvió URL y UUID de request.");
-			await db.transaction(async (tx) => {
-				await tx
-					.update(pagaloPaymentLinks)
-					.set({
-						status: "ACTIVE",
-						paymentUrl,
-						pagaloRequestUuid: requestUuid,
-						responsePayload: response,
-						activatedAt: new Date(),
-						nextPollAt: new Date(),
-						updatedAt: new Date(),
-					})
-					.where(eq(pagaloPaymentLinks.id, stored.id));
-				await tx.insert(pagaloPaymentEvents).values({
-					groupId: group.id,
-					linkId: stored.id,
-					eventType: "LINK_ACTIVE",
-					source: "PAGALO",
-					actorUserId: input.requestedBy,
-					fromStatus: "CREATING",
-					toStatus: "ACTIVE",
-					payload: { linkType },
-				});
-			});
-			links.push({ linkType, paymentUrl, status: "ACTIVE", amount });
-		} catch (error) {
-			await db
-				.update(pagaloPaymentLinks)
-				.set({
-					status: "ERROR",
-					errorCode: error instanceof Error ? error.name : "PAGALO_ERROR",
-					errorMessage: error instanceof Error ? error.message : String(error),
-					updatedAt: new Date(),
-				})
-				.where(eq(pagaloPaymentLinks.id, stored.id));
-			await db
-				.update(pagaloPaymentGroups)
-				.set({ status: "REVIEW_REQUIRED", updatedAt: new Date() })
-				.where(eq(pagaloPaymentGroups.id, group.id));
-			throw error;
-		}
+		const generacion = params.generacionPorTipo?.[linkType];
+		const emitido = await emitirUnLink({
+			client,
+			groupId: params.groupId,
+			numeroSifco: params.numeroSifco,
+			requestedBy: params.requestedBy,
+			clienteNombre: params.clienteNombre,
+			clientContact: params.clientContact,
+			config: params.config,
+			linkType,
+			amount,
+			providerAmount,
+			etiqueta: etiquetaPago(linkType),
+			generation: generacion?.generation,
+			supersedesLinkId: generacion?.supersedesLinkId,
+			// El catch de fallo escala el grupo a REVIEW_REQUIRED: correcto acá
+			// (creación normal, todo el grupo depende de que ambos links salgan
+			// bien), pero NO para regenerarLinkIndividual (ver esa función).
+			grupoAReviewSiFalla: true,
+		});
+		links.push({
+			linkType,
+			paymentUrl: emitido.paymentUrl,
+			status: "ACTIVE",
+			amount,
+		});
 	}
+	// Solo avanza el grupo si seguía en la fase de emisión inicial — un
+	// regenerarLinkIndividual sobre un grupo ya PARTIALLY_PAID/READY_TO_APPLY
+	// no debe retrocederlo a PENDING_PAYMENT (perdería el otro link ya pagado
+	// del radar del dispatcher).
 	await db
 		.update(pagaloPaymentGroups)
 		.set({ status: "PENDING_PAYMENT", updatedAt: new Date() })
-		.where(eq(pagaloPaymentGroups.id, group.id));
+		.where(
+			and(
+				eq(pagaloPaymentGroups.id, params.groupId),
+				inArray(pagaloPaymentGroups.status, [
+					"LINKS_PENDING",
+					"PENDING_PAYMENT",
+				]),
+			),
+		);
 
 	// D-04: un solo mensaje, con TODOS los links requeridos, solo cuando el
 	// grupo ya está completo (arriba de esta línea). Fallo de WhatsApp nunca
@@ -432,28 +800,462 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 	let whatsappEnviado = false;
 	try {
 		const resultado = await sendPagaloLinksWhatsapp({
-			numeroSifco: input.numeroSifco,
-			identificadorCredito,
-			telefono,
-			clienteNombre: credit.usuario.nombre ?? "",
+			numeroSifco: params.numeroSifco,
+			identificadorCredito: params.identificadorCredito,
+			telefono: params.telefono,
+			clienteNombre: params.clienteNombre,
 			links,
-			createdBy: input.requestedBy,
+			createdBy: params.requestedBy,
 		});
 		whatsappEnviado = resultado.sent;
 	} catch (error) {
 		console.error(
-			`[Págalo] Error enviando links por WhatsApp para ${input.numeroSifco}:`,
+			`[Págalo] Error enviando links por WhatsApp para ${params.numeroSifco}:`,
+			error instanceof Error ? error.message : error,
+		);
+	}
+
+	return { links, whatsappEnviado };
+}
+
+/**
+ * CB-127 · Regenerar = invalidar el grupo viejo + crear uno nuevo con las
+ * mismas cuotas y montos (mismo `allocationsSnapshot`), en una sola
+ * transacción DB, y emitir sus links después.
+ *
+ * Dos fases, igual que `createPagaloLinks`: la transacción solo hace DB
+ * (invalidar + insertar el grupo nuevo, así el índice único de "un grupo
+ * activo por crédito" nunca ve un hueco entre el CANCELLED y el INSERT);
+ * el HTTP a Págalo corre después, fuera de la transacción.
+ */
+export async function regenerarGrupo(params: {
+	groupId: string;
+	actorUserId: string;
+	motivo: string;
+}) {
+	const [grupoViejo] = await db
+		.select()
+		.from(pagaloPaymentGroups)
+		.where(eq(pagaloPaymentGroups.id, params.groupId))
+		.limit(1);
+	if (!grupoViejo) throw new Error("Grupo Págalo no encontrado.");
+	if (!grupoViejo.casoCobroId) {
+		throw new Error(
+			"Grupo Págalo sin caso de cobro asociado: no se puede regenerar.",
+		);
+	}
+
+	const linksViejos = await db
+		.select({
+			id: pagaloPaymentLinks.id,
+			linkType: pagaloPaymentLinks.linkType,
+			status: pagaloPaymentLinks.status,
+			generation: pagaloPaymentLinks.generation,
+		})
+		.from(pagaloPaymentLinks)
+		.where(eq(pagaloPaymentLinks.groupId, params.groupId));
+
+	// Preflight ANTES de la transacción: config, contacto y cartera-back son
+	// las tres cosas que pueden fallar entre "invalidar viejo + crear nuevo"
+	// y "emitir links" — si fallaran después del commit, el grupo nuevo
+	// quedaría huérfano en LINKS_PENDING para siempre y el viejo ya
+	// CANCELLED, sin forma de recuperarlo sin tocar la DB a mano (hallazgo de
+	// code review). Resolviéndolas antes, un fallo acá no toca la DB.
+	const config = getPagaloSandboxConfig();
+	if (!config.linkCreationEnabled) {
+		throw new Error(
+			"Creación de links Págalo deshabilitada por configuración.",
+		);
+	}
+	const { identificadorCredito, telefono, clientContact } =
+		await resolverContactoPagalo(
+			grupoViejo.casoCobroId,
+			grupoViejo.numeroCreditoSifco,
+		);
+	const credit = await carteraBackClient.getCredito(
+		grupoViejo.numeroCreditoSifco,
+		false,
+	);
+
+	const { groupIdNuevo } = await db.transaction(async (tx) => {
+		await invalidarGrupoEnTx(tx, {
+			groupId: params.groupId,
+			actorUserId: params.actorUserId,
+			source: "SUPERVISOR",
+			motivo: params.motivo,
+			estadosPermitidos: ESTADOS_INVALIDABLES_SUPERVISOR,
+			eventType: "GROUP_INVALIDATED_BY_SUPERVISOR",
+		});
+
+		const [creado] = await tx
+			.insert(pagaloPaymentGroups)
+			.values({
+				casoCobroId: grupoViejo.casoCobroId,
+				contactoCobroId: grupoViejo.contactoCobroId,
+				numeroCreditoSifco: grupoViejo.numeroCreditoSifco,
+				carteraCreditoId: grupoViejo.carteraCreditoId,
+				pagaloEnvironment: grupoViejo.pagaloEnvironment,
+				origen: grupoViejo.origen,
+				carteraAsesorId: grupoViejo.carteraAsesorId,
+				capitalTotal: grupoViejo.capitalTotal,
+				facturableTotal: grupoViejo.facturableTotal,
+				otrosTotal: grupoViejo.otrosTotal,
+				totalAmount: grupoViejo.totalAmount,
+				allocationsSnapshot: grupoViejo.allocationsSnapshot,
+				status: "LINKS_PENDING",
+				expirationEnabled: false,
+				expirationHours: null,
+				createdBy: params.actorUserId,
+			})
+			.returning({ id: pagaloPaymentGroups.id });
+		if (!creado) throw new Error("No se pudo crear el grupo regenerado.");
+		await tx.insert(pagaloPaymentEvents).values({
+			groupId: creado.id,
+			eventType: "GROUP_REGENERATED",
+			source: "SUPERVISOR",
+			actorUserId: params.actorUserId,
+			toStatus: "LINKS_PENDING",
+			payload: {
+				motivo: params.motivo.slice(0, 500),
+				grupoAnteriorId: params.groupId,
+			},
+		});
+		return { groupIdNuevo: creado.id };
+	});
+
+	const generacionPorTipo: GeneracionPorTipo = {};
+	for (const linkType of ["CAPITAL", "MORA_INTERES"] as const) {
+		// De haber más de una generación del mismo tipo en el grupo viejo
+		// (regeneraciones individuales previas a esta regeneración de grupo),
+		// supersedesLinkId debe apuntar a la MÁS RECIENTE — .find() se
+		// quedaba con la primera del array, sin ordenar por generation
+		// (hallazgo de code review).
+		const viejoDelTipo = linksViejos
+			.filter((l) => l.linkType === linkType)
+			.reduce<(typeof linksViejos)[number] | undefined>(
+				(max, l) => (!max || l.generation > max.generation ? l : max),
+				undefined,
+			);
+		if (!viejoDelTipo) continue;
+		const generation = await db.transaction((tx) =>
+			proximaGeneracion(tx, {
+				carteraCreditoId: grupoViejo.carteraCreditoId,
+				linkType,
+			}),
+		);
+		generacionPorTipo[linkType] = {
+			generation,
+			supersedesLinkId: viejoDelTipo.id,
+		};
+	}
+
+	const emitido = await emitirLinksDeGrupo({
+		groupId: groupIdNuevo,
+		numeroSifco: grupoViejo.numeroCreditoSifco,
+		requestedBy: params.actorUserId,
+		capitalTotal: grupoViejo.capitalTotal,
+		facturableTotal: grupoViejo.facturableTotal,
+		clienteNombre: credit.usuario.nombre ?? "",
+		clientContact,
+		identificadorCredito,
+		telefono,
+		config,
+		generacionPorTipo,
+	});
+
+	return {
+		groupIdNuevo,
+		links: emitido.links,
+		whatsappEnviado: emitido.whatsappEnviado,
+	};
+}
+
+/**
+ * CB-127 · Regenera UN link específico de un tipo dentro del MISMO grupo
+ * (a diferencia de `regenerarGrupo`, que cancela el grupo entero y crea uno
+ * nuevo). El link viejo debe estar cerrado sin pago (REPLACED/EXPIRED/
+ * CANCELLED/ERROR) — no tiene sentido regenerar uno vivo o pagado. El grupo
+ * debe seguir activo (no CANCELLED/COMPLETED).
+ *
+ * Monto: usa el mismo capitalTotal/facturableTotal ya congelado en el
+ * grupo, no recalcula contra deuda viva — coherente con que el otro link
+ * (si sigue vivo) ya se emitió con esos montos y ambos deben sumar al mismo
+ * total_amount registrado.
+ */
+export async function regenerarLinkIndividual(params: {
+	linkId: string;
+	actorUserId: string;
+	motivo: string;
+}) {
+	const [linkViejo] = await db
+		.select()
+		.from(pagaloPaymentLinks)
+		.where(eq(pagaloPaymentLinks.id, params.linkId))
+		.limit(1);
+	if (!linkViejo) throw new Error("Link Págalo no encontrado.");
+	const ESTADOS_CERRADOS = ["REPLACED", "EXPIRED", "CANCELLED", "ERROR"];
+	if (!ESTADOS_CERRADOS.includes(linkViejo.status)) {
+		throw new Error(
+			`El link está en ${linkViejo.status}: solo se regenera un link cerrado sin pago.`,
+		);
+	}
+
+	// Solo la generación MÁS ALTA de ese tipo, dentro de ESTE grupo, puede
+	// regenerarse — regenerar una fila vieja (p. ej. generación 1 cuando ya
+	// existe una 2) dejaría el supersedesLinkId apuntando al link
+	// equivocado. El índice único active_type_uq evita el caso catastrófico
+	// (dos links vivos del mismo tipo), pero no evita este enlazado
+	// incorrecto — se valida explícito acá (hallazgo de code review).
+	const generacionesDelTipo = await db
+		.select({ generation: pagaloPaymentLinks.generation })
+		.from(pagaloPaymentLinks)
+		.where(
+			and(
+				eq(pagaloPaymentLinks.groupId, linkViejo.groupId),
+				eq(pagaloPaymentLinks.linkType, linkViejo.linkType),
+			),
+		);
+	const generacionMaxima = generacionesDelTipo.reduce(
+		(max, f) => Math.max(max, f.generation),
+		0,
+	);
+	if (linkViejo.generation !== generacionMaxima) {
+		throw new Error(
+			`Este link es la generación ${linkViejo.generation}, pero ya existe una generación ${generacionMaxima} más reciente del mismo tipo — regenerá esa, no esta.`,
+		);
+	}
+
+	const [grupo] = await db
+		.select()
+		.from(pagaloPaymentGroups)
+		.where(eq(pagaloPaymentGroups.id, linkViejo.groupId))
+		.limit(1);
+	if (!grupo) throw new Error("Grupo Págalo no encontrado.");
+	if (grupo.status === "CANCELLED" || grupo.status === "COMPLETED") {
+		throw new Error(
+			`El grupo está en ${grupo.status}: no se puede regenerar un link ahí.`,
+		);
+	}
+	if (!grupo.casoCobroId) {
+		throw new Error(
+			"Grupo Págalo sin caso de cobro asociado: no se puede regenerar el link.",
+		);
+	}
+
+	const generation = await db.transaction((tx) =>
+		proximaGeneracion(tx, {
+			carteraCreditoId: grupo.carteraCreditoId,
+			linkType: linkViejo.linkType,
+			// Acotado al grupo actual (D-20: "generación más alta de ese tipo
+			// EN EL GRUPO") — sin esto, un crédito con grupos anteriores ya
+			// COMPLETED/CANCELLED con generaciones más altas hacía saltar el
+			// número acá también, aunque este grupo nunca tuvo esas
+			// generaciones (hallazgo de code review).
+			groupId: grupo.id,
+		}),
+	);
+
+	const config = getPagaloSandboxConfig();
+	if (!config.linkCreationEnabled) {
+		throw new Error(
+			"Creación de links Págalo deshabilitada por configuración.",
+		);
+	}
+	const { identificadorCredito, telefono, clientContact } =
+		await resolverContactoPagalo(grupo.casoCobroId, grupo.numeroCreditoSifco);
+	const credit = await carteraBackClient.getCredito(
+		grupo.numeroCreditoSifco,
+		false,
+	);
+
+	// Revalidar el grupo justo antes de emitir: entre la lectura de arriba y
+	// acá corrieron resolverContactoPagalo/getCredito (HTTP externo, sin
+	// candado posible) — en ese hueco un invalidarGrupoPagalo concurrente
+	// puede haber cancelado el grupo. Sin esto, emitirUnLink insertaba un
+	// link ACTIVE dentro de un grupo ya CANCELLED (hallazgo de code review).
+	// No cierra la ventana entera (emitirUnLink hace su propio INSERT+HTTP,
+	// no se puede envolver en esta transacción), pero angosta el hueco al
+	// tramo HTTP final, igual que el resto del feature acepta como riesgo
+	// residual documentado (D-51).
+	const [grupoFresco] = await db
+		.select({ status: pagaloPaymentGroups.status })
+		.from(pagaloPaymentGroups)
+		.where(eq(pagaloPaymentGroups.id, grupo.id))
+		.limit(1);
+	if (
+		!grupoFresco ||
+		grupoFresco.status === "CANCELLED" ||
+		grupoFresco.status === "COMPLETED"
+	) {
+		throw new Error(
+			`El grupo cambió a ${grupoFresco?.status ?? "eliminado"} mientras se preparaba la regeneración — no se emitió ningún link nuevo.`,
+		);
+	}
+
+	const amount =
+		linkViejo.linkType === "CAPITAL"
+			? grupo.capitalTotal
+			: grupo.facturableTotal;
+	const providerAmount = toPagaloProviderAmount(amount);
+
+	// Registrar el INTENTO de regeneración (actor + motivo) ANTES de llamar
+	// a Págalo — antes se registraba después de emitirUnLink, así que si
+	// Págalo fallaba (o se agotaban los reintentos de persistencia), la
+	// excepción se propagaba sin dejar rastro de quién pidió la regeneración
+	// ni por qué; lo único que quedaba era LINK_CREATE_FAILED, sin actor de
+	// supervisor ni motivo (hallazgo de code review). linkId apunta al link
+	// VIEJO (el que se está reemplazando) — motivoPorLink en
+	// getPagaloSupervision NO cruza este eventType (se sacó a propósito en
+	// una ronda anterior para no pisar el motivo real de cierre), así que
+	// este registro es puramente de bitácora/auditoría.
+	await db.insert(pagaloPaymentEvents).values({
+		groupId: grupo.id,
+		linkId: linkViejo.id,
+		eventType: "LINK_REGENERATED_BY_SUPERVISOR",
+		source: "SUPERVISOR",
+		actorUserId: params.actorUserId,
+		payload: {
+			motivo: params.motivo.slice(0, 500),
+			linkAnteriorId: linkViejo.id,
+			linkType: linkViejo.linkType,
+			generation,
+			resultado: "intentando",
+		},
+	});
+
+	// D-04: mismo texto neutro que la creación normal. "Pago" a secas porque
+	// este mensaje lleva solo el link nuevo — el otro link (si sigue vivo o
+	// ya pagado) no se reenvía, evita duplicar el mensaje original completo.
+	const client = createPagaloClient(config);
+	const emitido = await emitirUnLink({
+		client,
+		groupId: grupo.id,
+		numeroSifco: grupo.numeroCreditoSifco,
+		requestedBy: params.actorUserId,
+		clienteNombre: credit.usuario.nombre ?? "",
+		clientContact,
+		config,
+		linkType: linkViejo.linkType,
+		amount,
+		providerAmount,
+		etiqueta: "Pago",
+		generation,
+		supersedesLinkId: linkViejo.id,
+		grupoAReviewSiFalla: false,
+	});
+
+	await db.transaction(async (tx) => {
+		// Un link invalidado por el supervisor escala el grupo a
+		// REVIEW_REQUIRED (invalidarLinkEnTx, pagalo-group-lifecycle.ts). Sin
+		// restaurarlo, regenerar con éxito dejaba el grupo atascado ahí para
+		// siempre: el poller solo promueve PENDING_PAYMENT/PARTIALLY_PAID a
+		// READY_TO_APPLY (evaluarGrupo, pagalo-poll.ts) — REVIEW_REQUIRED nunca
+		// matchea ese WHERE.
+		//
+		// Pero restaurar a ciegas es igual de peligroso: si el grupo requiere
+		// AMBOS tipos (capitalTotal>0 y facturableTotal>0) y el que NO se está
+		// regenerando ahora ni está pagado ni tiene un link vivo (nunca se creó,
+		// o quedó cerrado sin regenerar), el poller jamás lo va a ver — no hay
+		// evento de pago que dispare evaluarGrupo para ese tipo. El grupo
+		// quedaría en PENDING_PAYMENT pareciendo normal, sin nadie notando que
+		// le falta un link entero (hallazgo de code review). Por eso se
+		// verifica primero que TODOS los tipos requeridos tengan cobertura
+		// (vivo o pagado) antes de salir de REVIEW_REQUIRED; si falta alguno,
+		// el grupo se queda en revisión — el supervisor debe regenerar también
+		// ese otro tipo.
+		//
+		// Candado: mismo orden grupo→links que marcarLinkPagado (pagalo-poll.ts)
+		// — si el link viejo REPLACED cobra durante la emisión HTTP de acá
+		// arriba, el poller pudo haber vuelto a poner el grupo en
+		// REVIEW_REQUIRED por REPLACED_LINK_PAID mientras esta transacción
+		// corría. Sin candado, esta transacción podía pisar ese
+		// REVIEW_REQUIRED recién puesto con PENDING_PAYMENT/PARTIALLY_PAID,
+		// ocultando el pago inesperado (hallazgo de code review). Bloquear el
+		// grupo y releer los links fresco bajo candado antes de decidir.
+		await tx
+			.select({ id: pagaloPaymentGroups.id })
+			.from(pagaloPaymentGroups)
+			.where(eq(pagaloPaymentGroups.id, grupo.id))
+			.for("update");
+
+		const tiposRequeridos: Array<"CAPITAL" | "MORA_INTERES"> = [];
+		if (Number(grupo.capitalTotal) > 0) tiposRequeridos.push("CAPITAL");
+		if (Number(grupo.facturableTotal) > 0) tiposRequeridos.push("MORA_INTERES");
+
+		const linksDelGrupo = await tx
+			.select({
+				linkType: pagaloPaymentLinks.linkType,
+				status: pagaloPaymentLinks.status,
+				isApplicationSource: pagaloPaymentLinks.isApplicationSource,
+			})
+			.from(pagaloPaymentLinks)
+			.where(eq(pagaloPaymentLinks.groupId, grupo.id))
+			.for("update");
+
+		// Un link PAID con isApplicationSource=false es un pago que llegó por
+		// el link EQUIVOCADO (REPLACED_LINK_PAID, pagalo-poll.ts): el poller ya
+		// escaló el grupo a REVIEW_REQUIRED por eso, y esa plata necesita
+		// reconciliación manual en cartera, no solo "cobertura" de tipos. Que
+		// el mismo tipo tenga además un link vivo tras la regeneración no
+		// resuelve ese pago mal aplicado — restaurar el grupo lo escondería
+		// (hallazgo de code review).
+		const hayPagoMalAplicado = linksDelGrupo.some(
+			(l) => l.status === "PAID" && !l.isApplicationSource,
+		);
+
+		const cubiertos = new Set(
+			linksDelGrupo
+				.filter(
+					(l) =>
+						l.isApplicationSource ||
+						l.status === "CREATING" ||
+						l.status === "ACTIVE",
+				)
+				.map((l) => l.linkType),
+		);
+		const todosCubiertos = tiposRequeridos.every((t) => cubiertos.has(t));
+
+		if (todosCubiertos && !hayPagoMalAplicado) {
+			const otroTipoPagado = linksDelGrupo.some(
+				(l) => l.isApplicationSource && l.linkType !== linkViejo.linkType,
+			);
+			await tx
+				.update(pagaloPaymentGroups)
+				.set({
+					status: otroTipoPagado ? "PARTIALLY_PAID" : "PENDING_PAYMENT",
+					updatedAt: new Date(),
+				})
+				.where(
+					and(
+						eq(pagaloPaymentGroups.id, grupo.id),
+						eq(pagaloPaymentGroups.status, "REVIEW_REQUIRED"),
+					),
+				);
+		}
+	});
+
+	let whatsappEnviado = false;
+	try {
+		const resultado = await sendPagaloLinksWhatsapp({
+			numeroSifco: grupo.numeroCreditoSifco,
+			identificadorCredito,
+			telefono,
+			clienteNombre: credit.usuario.nombre ?? "",
+			links: [{ linkType: linkViejo.linkType, paymentUrl: emitido.paymentUrl }],
+			createdBy: params.actorUserId,
+		});
+		whatsappEnviado = resultado.sent;
+	} catch (error) {
+		console.error(
+			`[Págalo] Error enviando link regenerado por WhatsApp para ${grupo.numeroCreditoSifco}:`,
 			error instanceof Error ? error.message : error,
 		);
 	}
 
 	return {
-		groupId: group.id,
-		capitalTotal: calculation.capitalTotal,
-		facturableTotal: calculation.facturableTotal,
-		otrosTotal: calculation.otrosTotal,
-		totalAmount: calculation.totalAmount,
-		links,
+		groupId: grupo.id,
+		linkType: linkViejo.linkType,
+		paymentUrl: emitido.paymentUrl,
 		whatsappEnviado,
 	};
 }

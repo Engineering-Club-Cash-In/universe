@@ -180,22 +180,41 @@ const filtroClaimVigente = (group: GrupoClaimado) => {
 	);
 };
 
+/** Mismo criterio que POLL_RETRY_EXHAUSTED (pagalo-poll.ts): un evento solo
+ * al cruzar el umbral, no en cada intento — CB-127 G3. */
+const UMBRAL_DISPATCH_RETRY_EXHAUSTED = 5;
+
 async function registrarIntentoFallido(
 	group: GrupoClaimado,
 	errorMessage: string,
 ): Promise<void> {
 	const dispatchAttemptCount = group.dispatchAttemptCount + 1;
-	await db
-		.update(pagaloPaymentGroups)
-		.set({
-			status: "APPLICATION_FAILED",
-			dispatchAttemptCount,
-			nextDispatchAt: proximoIntento(dispatchAttemptCount),
-			dispatchClaimedAt: null,
-			lastDispatchError: errorMessage,
-			updatedAt: new Date(),
-		})
-		.where(filtroClaimVigente(group));
+	await db.transaction(async (tx) => {
+		const [actualizado] = await tx
+			.update(pagaloPaymentGroups)
+			.set({
+				status: "APPLICATION_FAILED",
+				dispatchAttemptCount,
+				nextDispatchAt: proximoIntento(dispatchAttemptCount),
+				dispatchClaimedAt: null,
+				lastDispatchError: errorMessage,
+				updatedAt: new Date(),
+			})
+			.where(filtroClaimVigente(group))
+			.returning({ id: pagaloPaymentGroups.id });
+		if (!actualizado) return;
+		if (dispatchAttemptCount === UMBRAL_DISPATCH_RETRY_EXHAUSTED) {
+			await tx.insert(pagaloPaymentEvents).values({
+				groupId: group.id,
+				eventType: "DISPATCH_RETRY_EXHAUSTED",
+				source: "PAGALO_DISPATCHER",
+				payload: {
+					dispatchAttemptCount,
+					lastDispatchError: errorMessage.slice(0, 500),
+				},
+			});
+		}
+	});
 }
 
 type FuenteLink = { linkType: "CAPITAL" | "MORA_INTERES" } & Pick<

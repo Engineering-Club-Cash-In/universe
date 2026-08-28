@@ -51,6 +51,11 @@ import {
 	PagaloClientError,
 	toPagaloProviderAmount,
 } from "../../services/pagalo-client";
+import {
+	esViolacionDeUnicidadPagalo,
+	invalidarGrupoEnTx,
+	PagaloReemplazoInvalido,
+} from "../../services/pagalo-group-lifecycle";
 import type {
 	CarteraCuotaCredito,
 	CreditoDirectoResponse,
@@ -502,8 +507,12 @@ function evaluarGrupo(grupo: GrupoActivo | null): Veredicto {
 	return { tipo: "reusable", grupo };
 }
 
-/** Un /crear tarda segundos; pasado esto, un LINKS_PENDING es un proceso muerto. */
-const LINKS_PENDING_HUERFANO_MS = 5 * 60 * 1000;
+/**
+ * Un /crear tarda segundos; pasado esto, un LINKS_PENDING es un proceso
+ * muerto. Exportada: CB-127 la reusa para el mismo criterio "huérfano" en
+ * la bandeja de supervisión (pagalo-supervision-filtros.ts).
+ */
+export const LINKS_PENDING_HUERFANO_MS = 5 * 60 * 1000;
 
 function mensajeEnProceso(
 	motivo: "post_pago" | "revision" | "asesor" | "creando",
@@ -681,9 +690,6 @@ const canonico = (v: unknown): unknown =>
 const mismaSeleccion = (a: unknown, b: PagaloAllocation[]) =>
 	JSON.stringify(canonico(a)) === JSON.stringify(canonico(b));
 
-/** El grupo que íbamos a reemplazar cambió debajo nuestro (entró un pago). */
-class ReemplazoInvalido extends Error {}
-
 export async function crearPagoLink(
 	referencia: string,
 	numeroSifco: string,
@@ -779,62 +785,12 @@ export async function crearPagoLink(
 				// marcarLinkPagado— y se decide con el estado FRESCO. Si mientras
 				// el cliente elegía ya pagó uno de los links, este grupo ya no se
 				// reemplaza: tiene dinero adentro.
-				const [grupoFresco] = await tx
-					.select({ status: pagaloPaymentGroups.status })
-					.from(pagaloPaymentGroups)
-					.where(eq(pagaloPaymentGroups.id, viejo.id))
-					.for("update");
-				if (
-					!grupoFresco ||
-					(grupoFresco.status !== "PENDING_PAYMENT" &&
-						grupoFresco.status !== "LINKS_PENDING")
-				) {
-					throw new ReemplazoInvalido();
-				}
-				const linksFrescos = await tx
-					.select({ status: pagaloPaymentLinks.status })
-					.from(pagaloPaymentLinks)
-					.where(eq(pagaloPaymentLinks.groupId, viejo.id))
-					.for("update");
-				if (linksFrescos.some((l) => l.status === "PAID")) {
-					throw new ReemplazoInvalido();
-				}
-				await tx
-					.update(pagaloPaymentLinks)
-					.set({ status: "REPLACED", updatedAt: new Date() })
-					.where(
-						and(
-							eq(pagaloPaymentLinks.groupId, viejo.id),
-							inArray(pagaloPaymentLinks.status, ["CREATING", "ACTIVE"]),
-						),
-					);
-				await tx
-					.update(pagaloPaymentGroups)
-					.set({
-						status: "CANCELLED",
-						cancelledAt: new Date(),
-						updatedAt: new Date(),
-					})
-					.where(
-						and(
-							eq(pagaloPaymentGroups.id, viejo.id),
-							inArray(pagaloPaymentGroups.status, [
-								"PENDING_PAYMENT",
-								"LINKS_PENDING",
-							]),
-						),
-					);
-				await tx.insert(pagaloPaymentEvents).values({
+				await invalidarGrupoEnTx(tx, {
 					groupId: viejo.id,
-					eventType: "GROUP_REPLACED",
-					source: "BOT",
 					actorUserId: usuarioSistema,
-					fromStatus: viejo.status,
-					toStatus: "CANCELLED",
-					payload: {
-						motivo: "seleccion_distinta",
-						montoNuevo: opcion.montoTotal,
-					},
+					source: "BOT",
+					motivo: "seleccion_distinta",
+					payloadExtra: { montoNuevo: opcion.montoTotal },
 				});
 			}
 			const [creado] = await tx
@@ -876,7 +832,10 @@ export async function crearPagoLink(
 		// un pago en el que íbamos a reemplazar. Se relee y se responde lo que
 		// corresponda al estado real (los mismos links, el pendiente, o el
 		// candado).
-		if (error instanceof ReemplazoInvalido || esViolacionDeUnicidad(error)) {
+		if (
+			error instanceof PagaloReemplazoInvalido ||
+			esViolacionDeUnicidadPagalo(error)
+		) {
 			const ganador = evaluarGrupo(
 				await grupoActivoDelCredito(carteraCreditoId),
 			);
@@ -1235,16 +1194,6 @@ function respuestaTrasAbortar(
 				datos: { mensaje: mensajeEnProceso("revision") },
 			}
 		: { ok: false, codigo: "PAGALO_NO_DISPONIBLE" };
-}
-
-function esViolacionDeUnicidad(error: unknown): boolean {
-	const buscar = (e: unknown): boolean => {
-		if (!e || typeof e !== "object") return false;
-		const code = (e as { code?: unknown }).code;
-		if (code === "23505") return true;
-		return buscar((e as { cause?: unknown }).cause);
-	};
-	return buscar(error);
 }
 
 function extraerTexto(valor: unknown, nombres: string[]): string | undefined {

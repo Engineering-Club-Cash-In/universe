@@ -52,6 +52,72 @@ export function calcularFactorPonderadoPorMonto(
   );
 }
 
+export function distribuirConResiduoCube({
+  total,
+  factores,
+  cubeIndex,
+}: {
+  total: Big;
+  factores: Big[];
+  cubeIndex: number;
+}): Big[] {
+  const totalCentavos = total.gt(0) ? total.round(2) : new Big(0);
+  let exactos = factores.map((factor, index) =>
+    index === cubeIndex || factor.lte(0)
+      ? new Big(0)
+      : totalCentavos.times(factor),
+  );
+  const sumaExacta = exactos.reduce(
+    (suma, monto) => suma.plus(monto),
+    new Big(0),
+  );
+  if (sumaExacta.gt(totalCentavos) && sumaExacta.gt(0)) {
+    const escala = totalCentavos.div(sumaExacta);
+    exactos = exactos.map((monto) => monto.times(escala));
+  }
+
+  const sumaNormalizada = exactos.reduce(
+    (suma, monto) => suma.plus(monto),
+    new Big(0),
+  );
+  const objetivoRedondeado = sumaNormalizada.round(2);
+  const objetivoExterno = objetivoRedondeado.gt(totalCentavos)
+    ? totalCentavos
+    : objetivoRedondeado;
+  const asignaciones = exactos.map((monto) => monto.round(2, Big.roundDown));
+  const sumaBase = asignaciones.reduce(
+    (suma, monto) => suma.plus(monto),
+    new Big(0),
+  );
+  const centavosRestantes = objetivoExterno
+    .minus(sumaBase)
+    .times(100)
+    .round(0)
+    .toNumber();
+  const prioridad = exactos
+    .map((monto, index) => ({
+      index,
+      residuo: monto.minus(asignaciones[index] ?? 0),
+    }))
+    .filter(({ index }) => index !== cubeIndex)
+    .sort((a, b) => {
+      const diferencia = b.residuo.cmp(a.residuo);
+      return diferencia !== 0 ? diferencia : a.index - b.index;
+    });
+  for (let i = 0; i < centavosRestantes; i++) {
+    const destino = prioridad[i % prioridad.length];
+    if (!destino) break;
+    asignaciones[destino.index] = (asignaciones[destino.index] ?? new Big(0)).plus(
+      "0.01",
+    );
+  }
+
+  if (cubeIndex >= 0) {
+    asignaciones[cubeIndex] = totalCentavos.minus(objetivoExterno);
+  }
+  return asignaciones;
+}
+
 /**
  * Calcula la distribución del interés e IVA del pago por inversionista.
  *
@@ -90,44 +156,28 @@ export function calcularSplitInteresPci(args: {
     })),
   );
 
-  const result: InvSplitRow[] = inversionistas.map((inv, index) => {
-    if (index === cubeIndex) {
-      return {
-        inversionista_id: inv.inversionista_id,
-        abono_interes: new Big(0),
-        abono_iva_12: new Big(0),
-      };
-    }
-
-    const factor = factorInteresPorInv
+  const factores = inversionistas.map((inv, index) => {
+    if (index === cubeIndex) return new Big(0);
+    return factorInteresPorInv
       ? (factorInteresPorInv.get(inv.inversionista_id) ?? new Big(0))
       : (factoresParticipacion[index] ?? new Big(0)).times(
           ownerships[index] ?? new Big(0),
         );
-    return {
-      inversionista_id: inv.inversionista_id,
-      abono_interes: pagoAbonoInteres.times(factor).round(2),
-      abono_iva_12: pagoAbonoIva.times(factor).round(2),
-    };
+  });
+  const intereses = distribuirConResiduoCube({
+    total: pagoAbonoInteres,
+    factores,
+    cubeIndex,
+  });
+  const ivas = distribuirConResiduoCube({
+    total: pagoAbonoIva,
+    factores,
+    cubeIndex,
   });
 
-  if (cubeIndex >= 0) {
-    const interesExterno = result.reduce(
-      (total, row, index) =>
-        index === cubeIndex ? total : total.plus(row.abono_interes),
-      new Big(0),
-    );
-    const ivaExterno = result.reduce(
-      (total, row, index) =>
-        index === cubeIndex ? total : total.plus(row.abono_iva_12),
-      new Big(0),
-    );
-    result[cubeIndex] = {
-      inversionista_id: inversionistas[cubeIndex]!.inversionista_id,
-      abono_interes: pagoAbonoInteres.round(2).minus(interesExterno),
-      abono_iva_12: pagoAbonoIva.round(2).minus(ivaExterno),
-    };
-  }
-
-  return result;
+  return inversionistas.map((inv, index) => ({
+    inversionista_id: inv.inversionista_id,
+    abono_interes: intereses[index] ?? new Big(0),
+    abono_iva_12: ivas[index] ?? new Big(0),
+  }));
 }

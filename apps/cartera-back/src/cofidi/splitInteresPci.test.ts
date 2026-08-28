@@ -90,6 +90,51 @@ describe("calcularSplitInteresPci (regular)", () => {
     ).toBe("12.01");
   });
 
+  it("nunca deja CUBE negativo cuando varios externos redondean hacia arriba", () => {
+    const rows = calcularSplitInteresPci({
+      pagoAbonoInteres: new Big("100"),
+      pagoAbonoIva: new Big("12"),
+      inversionistas: [
+        { inversionista_id: 1, nombre: "Inv A", porcentaje_participacion_inversionista: 100, porcentaje_cash_in: 0, monto_aportado: "33335" },
+        { inversionista_id: 2, nombre: "Inv B", porcentaje_participacion_inversionista: 100, porcentaje_cash_in: 0, monto_aportado: "33335" },
+        { inversionista_id: 3, nombre: "Inv C", porcentaje_participacion_inversionista: 100, porcentaje_cash_in: 0, monto_aportado: "33329" },
+        { inversionista_id: 86, nombre: "Cube Investments S.A.", porcentaje_participacion_inversionista: 0, porcentaje_cash_in: 100, monto_aportado: "1" },
+      ],
+    });
+    const cube = rows.find((row) => row.inversionista_id === 86)!;
+    expect(cube.abono_interes.gte(0)).toBe(true);
+    expect(cube.abono_iva_12.gte(0)).toBe(true);
+    expect(
+      rows.reduce((total, row) => total.plus(row.abono_interes), new Big(0)).toString(),
+    ).toBe("100");
+    expect(
+      rows.reduce((total, row) => total.plus(row.abono_iva_12), new Big(0)).toString(),
+    ).toBe("12");
+  });
+
+  it("normaliza factores de compra que exceden el pago sin producir negativos", () => {
+    const rows = calcularSplitInteresPci({
+      pagoAbonoInteres: new Big("10"),
+      pagoAbonoIva: new Big("1.20"),
+      factorInteresPorInv: new Map([
+        [1, new Big("0.6")],
+        [2, new Big("0.6")],
+      ]),
+      inversionistas: [
+        { inversionista_id: 1, nombre: "Inv A", porcentaje_participacion_inversionista: 0, porcentaje_cash_in: 0, monto_aportado: "1" },
+        { inversionista_id: 2, nombre: "Inv B", porcentaje_participacion_inversionista: 0, porcentaje_cash_in: 0, monto_aportado: "1" },
+        { inversionista_id: 86, nombre: "Cube Investments S.A.", porcentaje_participacion_inversionista: 0, porcentaje_cash_in: 100, monto_aportado: "1" },
+      ],
+    });
+    expect(rows.every((row) => row.abono_interes.gte(0))).toBe(true);
+    expect(
+      rows.reduce((total, row) => total.plus(row.abono_interes), new Big(0)).toString(),
+    ).toBe("10");
+    expect(
+      rows.reduce((total, row) => total.plus(row.abono_iva_12), new Big(0)).toString(),
+    ).toBe("1.2");
+  });
+
   it("sin monto externo asigna 100% a CUBE", () => {
     const [cube] = calcularSplitInteresPci({
       pagoAbonoInteres: new Big("50.03"),

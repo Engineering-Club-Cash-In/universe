@@ -412,6 +412,7 @@ export function AccionesLinkPagalo({
 	paymentUrl,
 	casoCobroId,
 	esSupervisor,
+	esVigente = true,
 }: {
 	link: {
 		id: string;
@@ -422,6 +423,16 @@ export function AccionesLinkPagalo({
 	paymentUrl: string | null;
 	casoCobroId: string | null;
 	esSupervisor: boolean;
+	/** regenerarLinkIndividual (server) rechaza SIEMPRE una generación que
+	 * no sea la más alta de su tipo dentro del grupo — regenerar una fila
+	 * vieja cuando ya existe una más nueva dejaría el supersedesLinkId
+	 * apuntando al link equivocado. Ficha 360 renderizaba TODAS las
+	 * generaciones con el mismo menú de acciones, así que "Regenerar"
+	 * aparecía igual en un histórico y fallaba siempre después de que el
+	 * supervisor escribía el motivo (hallazgo de code review). Default
+	 * true: ChipLinkPagalo/GrupoLinksPorTipo (bandeja) ya solo le pasan el
+	 * vigente, así que ahí el default no cambia nada. */
+	esVigente?: boolean;
 }) {
 	const [accionAbierta, setAccionAbierta] = useState<AccionLink | null>(null);
 
@@ -435,6 +446,7 @@ export function AccionesLinkPagalo({
 			!link.activatedAt);
 	const puedeRegenerar =
 		esSupervisor &&
+		esVigente &&
 		!!casoCobroId &&
 		ESTADOS_REGENERABLES.has(link.status) &&
 		!regeneracionSiempreRechazada;

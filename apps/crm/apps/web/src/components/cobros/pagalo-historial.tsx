@@ -32,6 +32,7 @@ import {
 import { authClient } from "@/lib/auth-client";
 import { agruparPorCuota } from "@/lib/cobros/pagalo-allocations-view";
 import {
+	agruparLinksPorGeneracion,
 	getPagaloGroupSummary,
 	getPagaloLinkStatusInfo,
 } from "@/lib/cobros/pagalo-link-display";
@@ -98,11 +99,13 @@ function LinkPagalo({
 	monto,
 	casoCobroId,
 	esSupervisor,
+	esVigente,
 }: {
 	link: Link;
 	monto: string;
 	casoCobroId: string;
 	esSupervisor: boolean;
+	esVigente: boolean;
 }) {
 	const estado = getPagaloLinkStatusInfo(link.status);
 	const antiguedad = antiguedadLink(link.activatedAt ?? link.createdAt);
@@ -172,6 +175,7 @@ function LinkPagalo({
 				paymentUrl={link.paymentUrl}
 				casoCobroId={casoCobroId}
 				esSupervisor={esSupervisor}
+				esVigente={esVigente}
 			/>
 		</div>
 	);
@@ -252,6 +256,14 @@ function GrupoPagalo({
 	const motivoRevision = etiquetaMotivo(grupo.lastDispatchError);
 	const { data: session } = authClient.useSession();
 	const esSupervisor = PERMISSIONS.canAssignCobros(session?.user?.role ?? "");
+	// regenerarLinkIndividual (server) rechaza SIEMPRE una generación que no
+	// sea la más alta de su tipo — sin este filtro, Ficha 360 ofrecía
+	// "Regenerar" en un histórico y fallaba siempre después de que el
+	// supervisor escribía el motivo (hallazgo de code review). Mismo
+	// agrupamiento que ya usa la bandeja (agruparLinksPorGeneracion).
+	const idsVigentes = new Set(
+		agruparLinksPorGeneracion(grupo.links).map((g) => g.vigente.id),
+	);
 
 	return (
 		<div className="space-y-3 rounded-lg border p-4">
@@ -318,6 +330,7 @@ function GrupoPagalo({
 							}
 							casoCobroId={casoCobroId}
 							esSupervisor={esSupervisor}
+							esVigente={idsVigentes.has(link.id)}
 						/>
 					))}
 				</div>

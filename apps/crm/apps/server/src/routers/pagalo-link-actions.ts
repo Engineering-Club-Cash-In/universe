@@ -179,41 +179,50 @@ export const pagaloLinkActionsRouter = {
 			// no afectó ninguna fila, mismo criterio que ya se usa en
 			// pagalo-supervision.ts.
 			//
-			// El evento DISPATCH_RETRY_FORCED se perdió al mover este procedure
-			// a este archivo — sin él, un reintento manual del supervisor no
-			// queda en la bitácora: no hay forma de saber después quién forzó
-			// el reintento ni cuántos intentos previos tenía (hallazgo de code
-			// review). UPDATE + evento en una sola transacción para que no
-			// quede uno sin el otro si algo falla entre medio.
-			const limpiado = await db.transaction(async (tx) => {
-				const [fila] = await tx
-					.update(pagaloPaymentGroups)
-					.set({ nextDispatchAt: null, dispatchClaimedAt: null })
-					.where(
-						and(
-							eq(pagaloPaymentGroups.id, input.groupId),
-							eq(pagaloPaymentGroups.status, grupo.status),
-						),
-					)
-					.returning({ id: pagaloPaymentGroups.id });
-				if (!fila) return undefined;
-				await tx.insert(pagaloPaymentEvents).values({
-					groupId: input.groupId,
-					eventType: "DISPATCH_RETRY_FORCED",
-					source: "SUPERVISOR",
-					actorUserId: context.userId,
-					fromStatus: grupo.status,
-					payload: { intentosPrevios: grupo.dispatchAttemptCount },
-				});
-				return fila;
-			});
+			const [limpiado] = await db
+				.update(pagaloPaymentGroups)
+				.set({ nextDispatchAt: null, dispatchClaimedAt: null })
+				.where(
+					and(
+						eq(pagaloPaymentGroups.id, input.groupId),
+						eq(pagaloPaymentGroups.status, grupo.status),
+					),
+				)
+				.returning({ id: pagaloPaymentGroups.id });
 			if (!limpiado) {
 				throw new ORPCError("CONFLICT", {
 					message:
 						"El grupo cambió justo antes del reintento — recargá el historial.",
 				});
 			}
+			// Limpiar el lease acá (arriba) deja el grupo "libre para reclamar"
+			// para CUALQUIERA, incluido el dispatcher programado — en la
+			// ventana entre este UPDATE y la llamada de abajo, el ciclo
+			// automático podía colarse y reclamarlo primero. reclamarGrupo
+			// (dentro de reclamarYProcesarGrupo) es el UPDATE atómico que de
+			// verdad decide quién se queda con el grupo; devuelve
+			// "NO_RECLAMADO" si perdió esa carrera — insertar el evento
+			// DISPATCH_RETRY_FORCED ANTES de saber eso (como se hacía hasta
+			// la ronda anterior) dejaba una entrada de auditoría mintiendo que
+			// el supervisor disparó un reintento que en realidad procesó el
+			// ciclo automático (hallazgo de code review — la ventana movió de
+			// lugar, no se cerró). El evento se registra recién después de
+			// confirmar que este reclamo puntual ganó la carrera.
 			const resultado = await reclamarYProcesarGrupo(input.groupId);
+			if (resultado === "NO_RECLAMADO") {
+				throw new ORPCError("CONFLICT", {
+					message:
+						"El grupo ya estaba siendo procesado (por el ciclo automático u otro reintento) — recargá el historial.",
+				});
+			}
+			await db.insert(pagaloPaymentEvents).values({
+				groupId: input.groupId,
+				eventType: "DISPATCH_RETRY_FORCED",
+				source: "SUPERVISOR",
+				actorUserId: context.userId,
+				fromStatus: grupo.status,
+				payload: { intentosPrevios: grupo.dispatchAttemptCount },
+			});
 			return { resultado };
 		}),
 

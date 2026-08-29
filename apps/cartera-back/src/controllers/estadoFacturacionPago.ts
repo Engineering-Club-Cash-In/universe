@@ -226,9 +226,28 @@ export async function intentosCertificacionHuerfanos(
     SELECT intento_id, rubro, inversionista_id, id_interno, created_at
     FROM cartera.facturacion_intentos
     WHERE pago_id = ${pagoId}
+      AND resultado = 'PENDIENTE'
     ORDER BY intento_id
   `);
   return (((res as any).rows ?? []) as IntentoCertificacionHuerfano[]);
+}
+
+/**
+ * Rechazos DEFINITIVOS de COFIDI registrados en el write-ahead: evidencia
+ * durable de que una corrida INTENTÓ un rubro y el certificador lo rechazó
+ * sin emitir. Respaldan la regla (f) del diff aunque factura_error nunca se
+ * haya alcanzado a escribir (crash) o haya sido reescrito.
+ */
+export async function intentosRechazados(
+  pagoId: number,
+): Promise<Array<{ rubro: string; inversionista_id: number | null }>> {
+  const res = await db.execute(sql`
+    SELECT DISTINCT rubro, inversionista_id
+    FROM cartera.facturacion_intentos
+    WHERE pago_id = ${pagoId}
+      AND resultado = 'RECHAZADO'
+  `);
+  return (((res as any).rows ?? []) as Array<{ rubro: string; inversionista_id: number | null }>);
 }
 
 /**

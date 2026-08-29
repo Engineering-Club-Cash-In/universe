@@ -1391,6 +1391,8 @@
       rubro: text("rubro").notNull(),
       inversionista_id: integer("inversionista_id"),
       id_interno: text("id_interno").notNull(),
+      /** PENDIENTE = pudo certificar (bloquea); RECHAZADO = COFIDI rechazó sin emitir (evidencia regla f). */
+      resultado: text("resultado").notNull().default("PENDIENTE"),
       created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     },
     (table) => ({

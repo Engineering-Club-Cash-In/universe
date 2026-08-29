@@ -138,3 +138,10 @@ ALTER TABLE cartera.facturas_electronicas
   ADD COLUMN IF NOT EXISTS id_interno text;
 
 COMMIT;
+
+-- r21: los rechazos definitivos de COFIDI se MARCAN (no se borran) — dejan de
+-- bloquear (el candado solo mira PENDIENTE) pero quedan como evidencia durable
+-- de intención para la regla (f) del diff, inmune a crashes entre el rechazo y
+-- la escritura de factura_error. Se limpian cuando el rubro por fin se emite.
+ALTER TABLE cartera.facturacion_intentos
+  ADD COLUMN IF NOT EXISTS resultado text NOT NULL DEFAULT 'PENDIENTE';

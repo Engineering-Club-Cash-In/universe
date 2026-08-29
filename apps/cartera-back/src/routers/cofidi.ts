@@ -15,6 +15,7 @@ import { computarDiffFacturas, keyIntereses } from "../cofidi/facturasFaltantes"
 import {
   fusionarFacturaError,
   intentosCertificacionHuerfanos,
+  intentosRechazados,
   registrarEstadoFacturacion,
 } from "../controllers/estadoFacturacionPago";
 import { adquirirPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
@@ -559,17 +560,21 @@ if (facturasExistentes.length > 0) {
         inversionistas: inversionistasDelPago,
         activas: facturasExistentes,
         tieneOperacionesPendientesFacturar,
-        // Evidencia de intención de la corrida original (regla f): qué rubros
-        // quedaron registrados como fallidos en factura_error.
-        fallidosPrevios: (() => {
-          if (typeof pagoData.factura_error !== "string" || !pagoData.factura_error) return [];
-          try {
-            const parsed = JSON.parse(pagoData.factura_error);
-            return Array.isArray(parsed) ? parsed : [];
-          } catch {
-            return [];
-          }
-        })(),
+        // Evidencia de intención de la corrida original (regla f): fallidos de
+        // factura_error + rechazos definitivos del write-ahead (durables ante
+        // crash o reescritura de factura_error — r21).
+        fallidosPrevios: [
+          ...(() => {
+            if (typeof pagoData.factura_error !== "string" || !pagoData.factura_error) return [];
+            try {
+              const parsed = JSON.parse(pagoData.factura_error);
+              return Array.isArray(parsed) ? parsed : [];
+            } catch {
+              return [];
+            }
+          })(),
+          ...(await intentosRechazados(pago_id)),
+        ],
       });
 
       if (diffFacturas.modo === "BLOQUEADO") {
@@ -4822,26 +4827,10 @@ async function certificarFacturaHelper({
     // 1️⃣ AUTO-GENERAR CAMPOS
     // ============================================
     const idInterno = generarIdInternoRandom();
-
-    // 🧷 WRITE-AHEAD (r16): la intención de emitir queda persistida ANTES de
-    //    llamar a SAT — si el proceso muere en cualquier punto posterior (ni
-    //    catch ni marcador alcanzan a correr), el intento huérfano queda como
-    //    evidencia durable y el endpoint bloquea re-emisiones hasta
-    //    reconciliarlo (consultarPorIdInterno con este id_interno). Se borra
-    //    al persistir la fila. Solo aplica a los flujos del diff (pago+rubro).
+    // El intento write-ahead se registra en la sección 3, DESPUÉS de la
+    // validación local del DTE y JUSTO antes de tocar SAT (r21): un throw
+    // pre-red no debe dejar intentos huérfanos que bloqueen en falso.
     let intentoWriteAheadId: number | null = null;
-    if (pago_id && rubro) {
-      const [intento] = await db
-        .insert(facturacion_intentos)
-        .values({
-          pago_id,
-          rubro,
-          inversionista_id: inversionista_id ?? null,
-          id_interno: idInterno,
-        })
-        .returning({ intento_id: facturacion_intentos.intento_id });
-      intentoWriteAheadId = intento.intento_id;
-    }
 const fechaGuatemala = new Date();
 fechaGuatemala.setUTCHours(fechaGuatemala.getUTCHours() - 6);
 
@@ -4906,26 +4895,52 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
       fechaHoraEmision,
     };
 
-    // COFIDI RECHAZÓ sin emitir (validación): el intento write-ahead se
-    // descarta — no hay DTE que reconciliar y dejarlo bloquearía el re-run
-    // legítimo. Los fallos AMBIGUOS (timeout, respuesta ilegible) NO lo
-    // descartan: ahí el DTE pudo quedar certificado.
+    // COFIDI RECHAZÓ sin emitir (validación): el intento se MARCA 'RECHAZADO'
+    // en vez de borrarse (r21) — deja de bloquear (el candado solo mira
+    // PENDIENTE) pero queda como evidencia DURABLE de que esta corrida intentó
+    // el rubro: si el proceso muere antes de que factura_error se escriba, la
+    // regla (f) aún encuentra el respaldo en la tabla. Los fallos AMBIGUOS
+    // (timeout, respuesta ilegible) siguen PENDIENTE: el DTE pudo certificar.
     const descartarIntentoPorRechazo = async () => {
       if (intentoWriteAheadId == null) return;
       try {
         await db
-          .delete(facturacion_intentos)
+          .update(facturacion_intentos)
+          .set({ resultado: "RECHAZADO" })
           .where(eq(facturacion_intentos.intento_id, intentoWriteAheadId));
       } catch {
-        // best-effort: un intento de un rechazo queda reconciliable a mano
-        // (consultarPorIdInterno devolverá 'no existe').
+        // best-effort: quedaría PENDIENTE → bloqueo conservador reconciliable.
       }
     };
 
+    // Fase LOCAL primero (valida y arma el XML sin tocar la red): si esto
+    // lanza, NO se creó intento — nada que reconciliar.
+    const { xmlSinFirmar: xmlPreparado } = dteService.prepararDTE(requestCompleto);
+
+    // 🧷 WRITE-AHEAD (r16/r21): con el DTE localmente válido y JUSTO antes de
+    //    llamar a SAT, la intención queda persistida — si el proceso muere en
+    //    cualquier punto posterior (ni catch ni marcador alcanzan a correr),
+    //    el intento PENDIENTE queda como evidencia durable y los flujos que
+    //    mutan facturas bloquean hasta reconciliarlo (consultarPorIdInterno).
+    //    Se borra al persistir la fila; los rechazos definitivos lo MARCAN
+    //    RECHAZADO (evidencia para la regla f), no lo borran.
+    if (pago_id && rubro) {
+      const [intento] = await db
+        .insert(facturacion_intentos)
+        .values({
+          pago_id,
+          rubro,
+          inversionista_id: inversionista_id ?? null,
+          id_interno: idInterno,
+        })
+        .returning({ intento_id: facturacion_intentos.intento_id });
+      intentoWriteAheadId = intento.intento_id;
+    }
+
     let resultado;
     try {
-      resultado = await dteService.generarYCertificarDTE(
-        requestCompleto,
+      resultado = await dteService.certificarXMLPreparado(
+        xmlPreparado,
         idInterno
       );
       console.log(
@@ -5277,6 +5292,15 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
         await db
           .delete(facturacion_intentos)
           .where(eq(facturacion_intentos.intento_id, intentoWriteAheadId));
+        // El rubro quedó EMITIDO: los rechazos históricos del mismo
+        // (pago, rubro, inversionista) ya no son evidencia necesaria.
+        await db.execute(sql`
+          DELETE FROM cartera.facturacion_intentos
+          WHERE pago_id = ${pago_id}
+            AND rubro = ${rubro}
+            AND inversionista_id IS NOT DISTINCT FROM ${inversionista_id ?? null}
+            AND resultado = 'RECHAZADO'
+        `);
       } catch (limpiezaIntentoError: any) {
         console.error(
           `   ⚠️ No se pudo borrar el intento write-ahead ${intentoWriteAheadId} (se auto-reconciliará):`,

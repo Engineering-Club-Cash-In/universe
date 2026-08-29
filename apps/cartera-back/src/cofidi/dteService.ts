@@ -13,27 +13,28 @@ export class DTEService {
     this.satClient = satClient;
   }
 
-  async generarYCertificarDTE(data: DTERequest, idInterno?: string) {
-    // 1. Calcular totales
+  /**
+   * Fase LOCAL (sin red): calcula totales, valida y construye el XML. Separada
+   * de la certificación para que el write-ahead de intentos pueda registrarse
+   * DESPUÉS de que el documento es localmente válido y JUSTO antes de tocar
+   * SAT — un throw de validación local no debe dejar intentos huérfanos.
+   */
+  prepararDTE(data: DTERequest): { xmlSinFirmar: string } {
     const totales = this.calcularTotales(data);
-
-    // 2. Validar datos según tipo de documento
     this.validarDatos(data);
-
-    // 3. Construir XML sin firmar
     const xmlSinFirmar = this.xmlBuilder.construirXML(data, totales);
+    return { xmlSinFirmar };
+  }
 
-    // 4. Certificar con la SAT
+  /** Fase de RED: certifica un XML ya preparado y decodifica la respuesta. */
+  async certificarXMLPreparado(xmlSinFirmar: string, idInterno?: string) {
     const certificacion = await this.satClient.certificarDocumento({
       xml: xmlSinFirmar,
       idInterno
     });
-
-    // 5. Decodificar XML certificado
     const xmlCertificado = this.satClient.decodificarXMLCertificado(
       certificacion.xmlCertificado
     );
-
     return {
       xmlSinFirmar,
       xmlCertificado,
@@ -41,6 +42,11 @@ export class DTEService {
       numero: certificacion.serial,
       uuid: certificacion.documentGUID
     };
+  }
+
+  async generarYCertificarDTE(data: DTERequest, idInterno?: string) {
+    const { xmlSinFirmar } = this.prepararDTE(data);
+    return this.certificarXMLPreparado(xmlSinFirmar, idInterno);
   }
 
   private calcularTotales(data: DTERequest): DTETotales {

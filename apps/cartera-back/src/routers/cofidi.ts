@@ -151,6 +151,10 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
     // Visible para el catch: en re-corrida FALTANTES el pago tiene DTEs activos
     // válidos, así que un fallo NO puede degradar su estado a FALLIDA (piso PARCIAL).
     let esRecorridaParcial = false;
+    // 🎬 En modo demo el helper simula DTEs sin certificar ni insertar: ningún
+    // write de factura_status debe correr (derivaría OK/PARCIAL falsos sobre
+    // datos reales). (Codex P2 r23)
+    const esSimulacion = process.env.SIMULAR_FACTURAS === "true";
     // También visible para el catch: si la corrida INICIAL ya certificó algún
     // DTE antes de que una excepción escapara (p. ej. MORA salió y el prorrateo
     // tronó), el pago tiene facturas vivas → el piso también es PARCIAL.
@@ -439,7 +443,7 @@ if (facturasExistentes.length > 0) {
         console.error(`❌ Inversionistas con porcentajes que no suman 100%:`, detalle);
         // Este exit corre ANTES del diff (esRecorridaParcial aún no se evalúa):
         // el piso PARCIAL se decide por las ACTIVAS ya cargadas en el paso 0.
-        await registrarEstadoFacturacion(pago_id, {
+        if (!esSimulacion) await registrarEstadoFacturacion(pago_id, {
           estado: facturasExistentes.length > 0 ? "PARCIAL" : "FALLIDA",
           motivo: "Configuración inválida: los porcentajes de los inversionistas no suman 100%.",
         });
@@ -602,7 +606,7 @@ if (facturasExistentes.length > 0) {
         // Solo se toca si el pago ya está en un estado de bandeja — un pago
         // OK/NO_APLICA/NULL no debe aparecer como problema por un 400.
         try {
-          await db
+          if (!esSimulacion) await db
             .update(pagos_credito)
             .set({
               // Fusiona: preserva la evidencia previa (regla f) y dedupe la
@@ -681,7 +685,7 @@ if (facturasExistentes.length > 0) {
         // Reconciliación: el diff acaba de PROBAR que todos los rubros esperados
         // tienen DTE activo. Si el estado quedó rancio (PARCIAL/FALLIDA de una
         // corrida que murió a medio request), acá se corrige a OK.
-        await registrarEstadoFacturacion(pago_id, { estado: "OK" });
+        if (!esSimulacion) await registrarEstadoFacturacion(pago_id, { estado: "OK" });
         set.status = 400;
         return {
           success: false,
@@ -744,7 +748,7 @@ if (facturasExistentes.length > 0) {
         // Piso PARCIAL en re-corrida: el diff ya probó que hay DTEs activos
         // válidos de la corrida original — FALLIDA (= no se emitió nada)
         // mandaría a conta a la remediación equivocada. (Codex P2)
-        await registrarEstadoFacturacion(pago_id, {
+        if (!esSimulacion) await registrarEstadoFacturacion(pago_id, {
           estado: esRecorridaParcial ? "PARCIAL" : "FALLIDA",
           motivo: `El cliente "${pagoData.nombre}" no tiene NIT registrado.`,
         });
@@ -2229,7 +2233,7 @@ if (facturasExistentes.length > 0) {
       //    fallo real: NO escribimos el desglose (no se facturó nada de verdad).
       if (facturasExitosas.length === 0 && facturasConError.length > 0) {
         // Queda visible en el pago: "Falta factura" con el motivo por rubro.
-        await registrarEstadoFacturacion(pago_id, { facturasGeneradas, minimoParcial: soloFaltantes });
+        if (!esSimulacion) await registrarEstadoFacturacion(pago_id, { facturasGeneradas, minimoParcial: soloFaltantes });
         set.status = 500;
         return {
           success: false,
@@ -2548,7 +2552,7 @@ if (facturasExistentes.length > 0) {
       // Pago solo-capital (sin DTE que emitir y sin errores): no es fallo.
       // El desglose ya quedó guardado arriba (capital de CUBE).
       if (facturasExitosas.length === 0) {
-        await registrarEstadoFacturacion(pago_id, { facturasGeneradas, minimoParcial: soloFaltantes });
+        if (!esSimulacion) await registrarEstadoFacturacion(pago_id, { facturasGeneradas, minimoParcial: soloFaltantes });
         return {
           success: true,
           data: {
@@ -2568,7 +2572,7 @@ if (facturasExistentes.length > 0) {
       //    En una re-corrida FALTANTES esto ve solo los DTEs de ESTA corrida,
       //    pero es correcto igual: si completó lo que faltaba → OK; si algo
       //    volvió a fallar → PARCIAL con esos rubros en factura_error.
-      await registrarEstadoFacturacion(pago_id, { facturasGeneradas, minimoParcial: soloFaltantes });
+      if (!esSimulacion) await registrarEstadoFacturacion(pago_id, { facturasGeneradas, minimoParcial: soloFaltantes });
 
       return {
         success: true,
@@ -2590,7 +2594,7 @@ if (facturasExistentes.length > 0) {
     } catch (error) {
       console.error("❌ Error facturando pago completo:", error);
       const huboDTEsEmitidos = facturasGeneradasRef.some((f) => f.tipo !== "ERROR");
-      await registrarEstadoFacturacion(pago_id, {
+      if (!esSimulacion) await registrarEstadoFacturacion(pago_id, {
         estado: esRecorridaParcial || huboDTEsEmitidos ? "PARCIAL" : "FALLIDA",
         motivo: (error as Error).message,
       });

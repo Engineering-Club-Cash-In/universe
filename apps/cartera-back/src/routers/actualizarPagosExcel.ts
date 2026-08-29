@@ -595,6 +595,26 @@ export const actualizarPagosExcelRouter = new Elysia()
 
             await tx.update(pagos_credito).set(datos).where(eq(pagos_credito.pago_id, pago_id));
 
+            // 🧾 (c) El caso inverso: un PENDIENTE nunca facturado cuyos montos
+            //    nuevos quedaron TODOS en cero ya no debe DTE → NO_APLICA.
+            //    Solo desde PENDIENTE: OK/PARCIAL/FALLIDA pueden tener DTEs y
+            //    los maneja el reopen de arriba o revisión humana. (Codex r23)
+            if (!tieneMontosFacturables(d)) {
+              await tx
+                .update(pagos_credito)
+                .set({
+                  factura_status: "NO_APLICA",
+                  factura_error: null,
+                  factura_at: null,
+                })
+                .where(
+                  and(
+                    eq(pagos_credito.pago_id, pago_id),
+                    eq(pagos_credito.factura_status, "PENDIENTE")
+                  )
+                );
+            }
+
             // 🧾 (b) Un NO_APLICA que con los montos nuevos pasa a tener algo
             //    facturable ahora DEBE su DTE: sube a PENDIENTE. (Codex P2)
             if (tieneMontosFacturables(d)) {

@@ -951,10 +951,23 @@ export function createReversePayment(
     // estado anterior — impreciso pero nunca ESCONDE facturas vivas.
     // Best-effort: si la reversa borró el pago, el UPDATE no matchea filas.
     try {
+      // Estado REAL al momento del write (Codex P2 r22): un /anular manual
+      // pudo ganar después del re-check por factura — decidir por el conteo
+      // vivo de ACTIVAS, no por el array de esta corrida.
+      const activasRes = await db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(facturas_electronicas)
+        .where(
+          and(
+            eq(facturas_electronicas.pago_id, pago_id),
+            eq(facturas_electronicas.status, "ACTIVA")
+          )
+        );
+      const quedanActivasTerminal = Number(activasRes[0]?.n ?? 0) > 0;
       await db
         .update(pagos_credito)
         .set(
-          facturasConError.length > 0
+          quedanActivasTerminal && facturasConError.length > 0
             ? {
                 factura_status: "FALLIDA" as const,
                 factura_error: JSON.stringify(
@@ -966,6 +979,8 @@ export function createReversePayment(
                 factura_at: new Date(),
               }
             : {
+                // Sin ACTIVAS vivas (las anuló esta corrida o un /anular
+                // concurrente): la reversa quedó completa.
                 factura_status: "NO_APLICA" as const,
                 factura_error: null,
                 factura_at: null,

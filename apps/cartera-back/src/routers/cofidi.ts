@@ -562,8 +562,24 @@ if (facturasExistentes.length > 0) {
         tieneOperacionesPendientesFacturar,
         // Evidencia de intención de la corrida original (regla f): fallidos de
         // factura_error + rechazos definitivos del write-ahead (durables ante
-        // crash o reescritura de factura_error — r21).
+        // crash o reescritura — r21) + facturas ANULADAS del pago (r22): un DTE
+        // anulado del mismo rubro/inversionista prueba que le tocaba DTE —
+        // evidencia natural que sobrevive re-validaciones y reescrituras.
         fallidosPrevios: [
+          ...(
+            await db
+              .select({
+                rubro: facturas_electronicas.rubro,
+                inversionista_id: facturas_electronicas.inversionista_id,
+              })
+              .from(facturas_electronicas)
+              .where(
+                and(
+                  eq(facturas_electronicas.pago_id, pago_id),
+                  eq(facturas_electronicas.status, "ANULADA")
+                )
+              )
+          ).filter((f) => f.rubro != null),
           ...(() => {
             if (typeof pagoData.factura_error !== "string" || !pagoData.factura_error) return [];
             try {

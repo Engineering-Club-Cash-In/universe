@@ -340,7 +340,17 @@ export function createRevertPaymentToPending(
           // Al re-validarlo, el hook de revalidación lo re-abre PENDIENTE.
           // (Codex P2 del #1493: sin esto quedaba OK sin DTEs vivos, o una
           // anulación fallida invisible para la remediación.)
-          factura_status: (facturasConError.length > 0
+          // Derivado del estado REAL: si un /anular concurrente terminó lo que
+          // esta corrida no pudo, no hay ACTIVAS y el terminal es NO_APLICA.
+          factura_status: ((await tx
+            .select({ n: facturas_electronicas.factura_id })
+            .from(facturas_electronicas)
+            .where(
+              and(
+                eq(facturas_electronicas.pago_id, pago_id),
+                eq(facturas_electronicas.status, "ACTIVA")
+              )
+            )).length > 0 && facturasConError.length > 0
             ? "FALLIDA"
             : "NO_APLICA") as PagoFacturaStatus,
           factura_error:

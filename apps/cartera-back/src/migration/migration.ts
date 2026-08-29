@@ -701,6 +701,16 @@ export async function mapEstadoCuentaToPagosBig(
       pagoConvenio: "0",
       fecha_boleta:new Date(primeraTransaccion.CrMoFeTrx).toISOString(),
       monto_aplicado: "0.00",
+      // Estado de facturación (migración 0031): el pago 0 nace 'validated' con
+      // montos facturables — sin esto quedaba en el NULL de históricos. (r19)
+      factura_status: (tieneMontosFacturables({
+        abono_interes: cuota_interes.toString(),
+        abono_iva_12: iva_12.toString(),
+        abono_seguro: credito?.seguro_10_cuotas?.toString() ?? "0",
+        membresias_pago: credito?.membresias?.toString() ?? "0",
+      })
+        ? ("PENDIENTE" as const)
+        : ("NO_APLICA" as const)),
     };
 
     console.log("\n📝 Insertando pago 0...");
@@ -1227,6 +1237,15 @@ export async function mapPagosDesdeJson(
     observaciones: "pago inicial (desde JSON)",
     paymentFalse: false,
     validationStatus: "validated" as const,
+    // Estado de facturación (migración 0031): igual que el pago 0 del sync. (r19)
+    factura_status: (tieneMontosFacturables({
+      abono_interes: cuotaInteres0.toString(),
+      abono_iva_12: iva12_0.toString(),
+      abono_seguro: seguroDb.toString(),
+      membresias_pago: membresiaDb.toString(),
+    })
+      ? ("PENDIENTE" as const)
+      : ("NO_APLICA" as const)),
     registerBy: "JSON_SYNC",
     pagoConvenio: "0",
     fecha_boleta: fechaCreacion.toISOString(),

@@ -114,13 +114,26 @@ export async function registrarEstadoFacturacion(
     ) {
       resultado.estado = "PARCIAL";
     }
+    // La rama {estado, motivo} FUSIONA con la evidencia existente (Codex P2
+    // r19): un bloqueo transitorio (sin NIT, porcentajes) no puede destruir el
+    // INTERESES:<inv> fallido que autoriza el retry por la regla (f). La rama
+    // facturasGeneradas sigue REEMPLAZANDO a propósito: una corrida intenta
+    // TODAS las keys faltantes, así que sus fallidos son el estado completo.
+    let facturaError: string | null = resultado.fallidos.length
+      ? JSON.stringify(resultado.fallidos)
+      : null;
+    if (!("facturasGeneradas" in entrada) && entrada.motivo) {
+      const [previa] = await db
+        .select({ factura_error: pagos_credito.factura_error })
+        .from(pagos_credito)
+        .where(eq(pagos_credito.pago_id, pagoId));
+      facturaError = fusionarFacturaError(previa?.factura_error, resultado.fallidos);
+    }
     await db
       .update(pagos_credito)
       .set({
         factura_status: resultado.estado,
-        factura_error: resultado.fallidos.length
-          ? JSON.stringify(resultado.fallidos)
-          : null,
+        factura_error: facturaError,
         factura_at: new Date(),
       })
       .where(eq(pagos_credito.pago_id, pagoId));

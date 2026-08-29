@@ -5248,19 +5248,40 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
       })
       .returning();
 
+    // Un fallo de INSERT puede ser AMBIGUO: si el commit entró pero la conexión
+    // murió antes del ack, la fila EXISTE y un reintento ciego chocaría contra
+    // el unique de uuid y marcaría [DTE_CERTIFICADO_SIN_BD] en falso. Antes de
+    // reintentar o marcar, se busca la fila por uuid — si está, se usa. (r19)
+    const buscarFilaExistente = async () => {
+      const [fila] = await db
+        .select()
+        .from(facturas_electronicas)
+        .where(eq(facturas_electronicas.uuid, String(resultado.uuid)));
+      return fila ?? null;
+    };
     let facturaGuardada;
     try {
       [facturaGuardada] = await insertarFactura();
     } catch (insertError: any) {
-      console.error(`   ⚠️ INSERT de factura falló tras certificar (reintentando): ${insertError?.message}`);
-      try {
-        [facturaGuardada] = await insertarFactura();
-      } catch (reintentoError: any) {
-        throw new Error(
-          `[DTE_CERTIFICADO_SIN_BD] ${resultado.serie}-${resultado.numero} uuid=${resultado.uuid}` +
-            `${rubro ? ` rubro=${rubro}` : ""}: certificado en SAT pero el INSERT en BD falló dos veces ` +
-            `(${reintentoError?.message}). Recuperar la fila ANTES de re-facturar.`
-        );
+      console.error(`   ⚠️ INSERT de factura falló tras certificar: ${insertError?.message}`);
+      facturaGuardada = await buscarFilaExistente();
+      if (facturaGuardada) {
+        console.log(`   ♻️ La fila ya existía (INSERT ambiguo con commit exitoso): se usa tal cual.`);
+      } else {
+        console.error(`   ⚠️ Reintentando INSERT...`);
+        try {
+          [facturaGuardada] = await insertarFactura();
+        } catch (reintentoError: any) {
+          facturaGuardada = await buscarFilaExistente();
+          if (!facturaGuardada) {
+            throw new Error(
+              `[DTE_CERTIFICADO_SIN_BD] ${resultado.serie}-${resultado.numero} uuid=${resultado.uuid}` +
+                `${rubro ? ` rubro=${rubro}` : ""}: certificado en SAT pero el INSERT en BD falló dos veces ` +
+                `(${reintentoError?.message}). Recuperar la fila ANTES de re-facturar.`
+            );
+          }
+          console.log(`   ♻️ La fila apareció tras el reintento ambiguo: se usa tal cual.`);
+        }
       }
     }
 

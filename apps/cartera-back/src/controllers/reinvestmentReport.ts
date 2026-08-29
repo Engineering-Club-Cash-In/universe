@@ -64,6 +64,64 @@ export function assertLiquidationRowsReinvestmentIntegrity(
   for (const row of rows) normalizeReinvestmentComponents(row);
 }
 
+type InvestorLiquidationRow = ReinvestmentComponentsInput & {
+  inversionistaId: number;
+  nombre: string;
+  tipoReinversion: string;
+  paidTotal: number | string;
+  totalCapital: number | string;
+};
+
+export function aggregateInvestorLiquidationRows(rows: InvestorLiquidationRow[]) {
+  const totals = new Map<number, {
+    inversionista_id: number;
+    nombre: string;
+    tipo_reinversion: string;
+    reinversion_capital: Big;
+    reinversion_interes: Big;
+    reinversion: Big;
+    a_recibir: Big;
+    total_capital: Big;
+  }>();
+
+  for (const row of rows) {
+    const normalized = normalizeReinvestmentComponents(row);
+    const current = totals.get(row.inversionistaId);
+    if (!current) {
+      totals.set(row.inversionistaId, {
+        inversionista_id: row.inversionistaId,
+        nombre: row.nombre,
+        tipo_reinversion: row.tipoReinversion,
+        reinversion_capital: new Big(normalized.capital),
+        reinversion_interes: new Big(normalized.rest),
+        reinversion: new Big(normalized.total),
+        a_recibir: new Big(row.paidTotal),
+        total_capital: new Big(row.totalCapital),
+      });
+      continue;
+    }
+    if (current.tipo_reinversion !== row.tipoReinversion) {
+      current.tipo_reinversion = "sin_clasificar";
+    }
+    current.reinversion_capital = current.reinversion_capital.plus(normalized.capital);
+    current.reinversion_interes = current.reinversion_interes.plus(normalized.rest);
+    current.reinversion = current.reinversion.plus(normalized.total);
+    current.a_recibir = current.a_recibir.plus(row.paidTotal);
+    current.total_capital = current.total_capital.plus(row.totalCapital);
+  }
+
+  return [...totals.values()].map((row) => ({
+    inversionista_id: row.inversionista_id,
+    nombre: row.nombre,
+    tipo_reinversion: row.tipo_reinversion,
+    reinversion_capital: row.reinversion_capital.toFixed(2),
+    reinversion_interes: row.reinversion_interes.toFixed(2),
+    reinversion: row.reinversion.toFixed(2),
+    a_recibir: row.a_recibir.toFixed(2),
+    total_capital: row.total_capital.toFixed(2),
+  }));
+}
+
 export function buildLiquidationComposition(input: LiquidationCompositionInput) {
   const flowCapital = cents(input.totalCapital);
   const paidTotal = cents(input.paidTotal);

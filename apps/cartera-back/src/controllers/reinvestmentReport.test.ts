@@ -3,6 +3,7 @@ import Big from "big.js";
 import {
   allocateRoundedAmounts,
   allocateRoundedPurchaseAmounts,
+  aggregateInvestorLiquidationRows,
   assertModeReconciliation,
   assertReportReconciliation,
   assertLiquidationRowsReinvestmentIntegrity,
@@ -467,6 +468,40 @@ test("valida cada liquidación antes de que derivas opuestas se compensen", () =
       reinvestedTotal: "200.00",
     },
   ])).toThrow("Composición de liquidación inválida");
+});
+
+test("normaliza cada liquidación antes de sumar derivas por inversionista", () => {
+  expect(aggregateInvestorLiquidationRows([
+    {
+      inversionistaId: 7,
+      nombre: "Inversionista",
+      tipoReinversion: "reinversion_total",
+      reinvestedCapital: "100.00",
+      reinvestedRest: "100.01",
+      reinvestedTotal: "200.00",
+      paidTotal: "0.00",
+      totalCapital: "100.00",
+    },
+    {
+      inversionistaId: 7,
+      nombre: "Inversionista",
+      tipoReinversion: "reinversion_total",
+      reinvestedCapital: "50.00",
+      reinvestedRest: "50.01",
+      reinvestedTotal: "100.00",
+      paidTotal: "0.00",
+      totalCapital: "50.00",
+    },
+  ])).toEqual([{
+    inversionista_id: 7,
+    nombre: "Inversionista",
+    tipo_reinversion: "reinversion_total",
+    reinversion_capital: "150.00",
+    reinversion_interes: "150.00",
+    reinversion: "300.00",
+    a_recibir: "0.00",
+    total_capital: "150.00",
+  }]);
 });
 
 test("resume compras por modalidad de facturación, tipo de reinversión y clasificación", () => {

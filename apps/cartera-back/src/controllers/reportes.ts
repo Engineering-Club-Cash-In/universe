@@ -15,6 +15,7 @@ import {
 import {
   allocateRoundedAmounts,
   allocateRoundedPurchaseAmounts,
+	aggregateInvestorLiquidationRows,
 	assertLiquidationRowsReinvestmentIntegrity,
 	canonicalizeLiquidationModeRows,
 	buildLiquidationComposition,
@@ -1180,23 +1181,31 @@ export async function getReinversionLiquidaciones({
     SELECT
       l.inversionista_id,
       i.nombre,
-      CASE
-        WHEN COUNT(DISTINCT COALESCE(l.tipo_reinversion_snapshot::text, 'sin_clasificar')) = 1
-          THEN MIN(COALESCE(l.tipo_reinversion_snapshot::text, 'sin_clasificar'))
-        ELSE 'sin_clasificar'
-      END AS tipo_reinversion,
-      COALESCE(SUM(l.reinversion_capital::numeric), 0) AS reinversion_capital,
-      COALESCE(SUM(l.reinversion_interes::numeric), 0) AS reinversion_interes,
-      COALESCE(SUM(l.reinversion_total::numeric), 0)   AS reinversion,
-      COALESCE(SUM(l.total_cuota::numeric), 0)         AS a_recibir,
-      COALESCE(SUM(l.total_capital::numeric), 0)       AS total_capital
+      COALESCE(l.tipo_reinversion_snapshot::text, 'sin_clasificar') AS tipo_reinversion,
+      l.reinversion_capital,
+      l.reinversion_interes,
+      l.reinversion_total AS reinversion,
+      l.total_cuota AS a_recibir,
+      l.total_capital
     FROM cartera.liquidaciones l
     JOIN cartera.inversionistas i ON l.inversionista_id = i.inversionista_id
     WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
       AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
-    GROUP BY l.inversionista_id, i.nombre
-    ORDER BY i.nombre
+    ORDER BY i.nombre, l.liquidacion_id
   `);
+
+  const investorTotals = aggregateInvestorLiquidationRows(
+    (porInvRows.rows as Record<string, unknown>[]).map((row) => ({
+      inversionistaId: Number(row.inversionista_id),
+      nombre: String(row.nombre),
+      tipoReinversion: String(row.tipo_reinversion ?? "sin_clasificar"),
+      reinvestedCapital: String(row.reinversion_capital ?? 0),
+      reinvestedRest: String(row.reinversion_interes ?? 0),
+      reinvestedTotal: String(row.reinversion ?? 0),
+      paidTotal: String(row.a_recibir ?? 0),
+      totalCapital: String(row.total_capital ?? 0),
+    })),
+  );
 
   // Capital operativo actual desde el espejo canónico. La reinversión ya está
   // reflejada aquí, por lo que no se suma nuevamente desde la liquidación. Las
@@ -1241,17 +1250,12 @@ export async function getReinversionLiquidaciones({
     );
   }
 
-  const porInversionista = (porInvRows.rows as Record<string, unknown>[]).map(
+  const porInversionista = investorTotals.map(
     (r) => {
       const id = Number(r.inversionista_id);
-      const reinversionNormalizada = normalizeReinvestmentComponents({
-        reinvestedCapital: numericMoney(r.reinversion_capital),
-        reinvestedRest: numericMoney(r.reinversion_interes),
-        reinvestedTotal: numericMoney(r.reinversion),
-      });
-      const reinversionCapital = reinversionNormalizada.capital;
-      const reinversionInteres = reinversionNormalizada.rest;
-      const reinversion = reinversionNormalizada.total;
+      const reinversionCapital = r.reinversion_capital;
+      const reinversionInteres = r.reinversion_interes;
+      const reinversion = r.reinversion;
       const aRecibir = numericMoney(r.a_recibir);
       return {
         inversionista_id: id,

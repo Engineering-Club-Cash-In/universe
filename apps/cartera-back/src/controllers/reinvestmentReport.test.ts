@@ -457,6 +457,27 @@ test("normaliza numeric grandes sin perder sus centavos", () => {
     total: "900719925474001.91",
     unclassified: "0.00",
   });
+  expect(buildLiquidationComposition({
+    totalCapital: "900719925474000.91",
+    paidTotal: "0.00",
+    reinvestedCapital: "900719925474000.91",
+    reinvestedRest: "1.01",
+    reinvestedTotal: "900719925474001.91",
+  })).toEqual({
+    pagado: { capital: "0.00", resto: "0.00", sin_clasificar: "0.00", total: "0.00" },
+    reinvertido: {
+      capital: "900719925474000.91",
+      resto: "1.00",
+      sin_clasificar: "0.00",
+      total: "900719925474001.91",
+    },
+    flujo: {
+      capital: "900719925474000.91",
+      resto: "1.00",
+      total: "900719925474001.91",
+    },
+    estado: "exacto",
+  });
 });
 
 test("no oculta una inconsistencia mayor a un centavo", () => {

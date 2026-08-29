@@ -123,56 +123,59 @@ export function aggregateInvestorLiquidationRows(rows: InvestorLiquidationRow[])
 }
 
 export function buildLiquidationComposition(input: LiquidationCompositionInput) {
-  const flowCapital = cents(input.totalCapital);
-  const paidTotal = cents(input.paidTotal);
+  const toBigCents = (value: number | string) =>
+    new Big(value).times(100).round(0, Big.roundHalfUp);
+  const fromBigCents = (value: Big) => value.div(100).toFixed(2);
+  const flowCapital = toBigCents(input.totalCapital);
+  const paidTotal = toBigCents(input.paidTotal);
   const normalizedReinvestment = normalizeReinvestmentComponents(input);
-  const reinvestedCapital = cents(normalizedReinvestment.capital);
-  const reinvestedRest = cents(normalizedReinvestment.rest);
-  const reinvestedTotal = cents(normalizedReinvestment.total);
-  const flowTotal = paidTotal + reinvestedTotal;
-  const flowRest = flowTotal - flowCapital;
-  const reinvestedUnclassified = cents(normalizedReinvestment.unclassified);
+  const reinvestedCapital = toBigCents(normalizedReinvestment.capital);
+  const reinvestedRest = toBigCents(normalizedReinvestment.rest);
+  const reinvestedTotal = toBigCents(normalizedReinvestment.total);
+  const flowTotal = paidTotal.plus(reinvestedTotal);
+  const flowRest = flowTotal.minus(flowCapital);
+  const reinvestedUnclassified = toBigCents(normalizedReinvestment.unclassified);
 
   if (
     [flowCapital, paidTotal, reinvestedCapital, reinvestedRest, reinvestedTotal]
-      .some((value) => value < 0) ||
-    flowRest < 0 ||
-    reinvestedUnclassified < 0
+      .some((value) => value.lt(0)) ||
+    flowRest.lt(0) ||
+    reinvestedUnclassified.lt(0)
   ) {
     throw new Error("Composición de liquidación inválida");
   }
 
-  let paidCapital = 0;
-  let paidRest = 0;
+  let paidCapital = new Big(0);
+  let paidRest = new Big(0);
   let paidUnclassified = paidTotal;
-  if (reinvestedUnclassified === 0) {
-    paidCapital = flowCapital - reinvestedCapital;
-    paidRest = flowRest - reinvestedRest;
-    if (paidCapital < 0 || paidRest < 0) {
+  if (reinvestedUnclassified.eq(0)) {
+    paidCapital = flowCapital.minus(reinvestedCapital);
+    paidRest = flowRest.minus(reinvestedRest);
+    if (paidCapital.lt(0) || paidRest.lt(0)) {
       throw new Error("Composición de liquidación inválida");
     }
-    paidUnclassified = 0;
+    paidUnclassified = new Big(0);
   }
 
   return {
     pagado: {
-      capital: money(paidCapital),
-      resto: money(paidRest),
-      sin_clasificar: money(paidUnclassified),
-      total: money(paidTotal),
+      capital: fromBigCents(paidCapital),
+      resto: fromBigCents(paidRest),
+      sin_clasificar: fromBigCents(paidUnclassified),
+      total: fromBigCents(paidTotal),
     },
     reinvertido: {
-      capital: money(reinvestedCapital),
-      resto: money(reinvestedRest),
-      sin_clasificar: money(reinvestedUnclassified),
-      total: money(reinvestedTotal),
+      capital: fromBigCents(reinvestedCapital),
+      resto: fromBigCents(reinvestedRest),
+      sin_clasificar: fromBigCents(reinvestedUnclassified),
+      total: fromBigCents(reinvestedTotal),
     },
     flujo: {
-      capital: money(flowCapital),
-      resto: money(flowRest),
-      total: money(flowTotal),
+      capital: fromBigCents(flowCapital),
+      resto: fromBigCents(flowRest),
+      total: fromBigCents(flowTotal),
     },
-    estado: reinvestedUnclassified === 0 ? "exacto" : "sin_clasificar",
+    estado: reinvestedUnclassified.eq(0) ? "exacto" : "sin_clasificar",
   } as const;
 }
 

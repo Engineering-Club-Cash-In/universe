@@ -197,7 +197,6 @@ async function main() {
       FROM cartera.pagos_credito
       WHERE pago_id = ANY(string_to_array(${idsCsv(pagoIds)}, ',')::int[])
     `);
-    const sinDesglose = new Set(pagosSinDesglose);
     for (const p of (pagosRes as any).rows as any[]) {
       const desglose = porPagoDesglose.get(p.pago_id);
       // Interés O IVA: mismo gate que el flujo de emisión — un pago solo-IVA
@@ -210,13 +209,14 @@ async function main() {
         pagosConCubeIrreconstruible.add(p.pago_id);
       }
 
-      if (!sinDesglose.has(p.pago_id)) continue; // el fallback 2b es solo sin desglose
-      push(p.pago_id, { rubro: "MORA", inversionista_id: null, monto: fix2(p.mora), fuente: "pagos_credito" });
-      push(p.pago_id, { rubro: "OTROS", inversionista_id: null, monto: fix2(p.otros), fuente: "pagos_credito" });
-      const otrosServicios = new Big(fix2(p.abono_seguro))
-        .plus(fix2(p.abono_gps))
-        .plus(fix2(p.membresias_pago));
-      push(p.pago_id, { rubro: "OTROS_SERVICIOS", inversionista_id: null, monto: fix2(otrosServicios), fuente: "pagos_credito" });
+      // ⚠️ SIN candidatos desde pagos_credito (Codex P1 r14): estos campos son
+      //    MUTABLES post-emisión (/actualizar-pagos-excel y otros los
+      //    reescriben) — no son evidencia del momento de emisión. Un MORA viejo
+      //    de Q100 con mora reescrita a 200 y otros a 100 matchearía "único"
+      //    como OTROS → mislabel → el diff emitiría un MORA nuevo con el viejo
+      //    vivo. El desglose y pci/pcif sí son fotos de emisión; pagos_credito
+      //    queda SOLO para la guarda de interés de arriba (que protege, no
+      //    etiqueta). Cuesta ~237 etiquetas (2.5%): dirección segura.
     }
   }
 

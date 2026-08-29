@@ -833,15 +833,36 @@ export function createReversePayment(
               });
             }
           } else {
-            if (resultadoCofidi.error === "EXCEPTION") invoiceUnexpectedFailureCount += 1;
-            else invoiceProviderRejectedCount += 1;
+            // 🧾 Re-check contra la BD antes de contarlo como fallo: si un
+            // /anular manual corrió en la ventana post-commit (la reversa
+            // suelta el lock al commit) y ya la dejó ANULADA, el rechazo de
+            // COFIDI ("ya anulada") no es un fallo — el DTE quedó exactamente
+            // como esta reversa lo quería. Sin esto, el pago terminaba FALLIDA
+            // sin ningún DTE vivo. (Codex P2 r14)
+            const [filaActual] = await db
+              .select({ status: facturas_electronicas.status })
+              .from(facturas_electronicas)
+              .where(eq(facturas_electronicas.factura_id, factura.factura_id));
+            if (filaActual?.status === "ANULADA") {
+              // (Sin console.*: el slice usa structured logging con guard-test.
+              // El resultado queda visible en facturasAnuladas de la respuesta.)
+              facturasAnuladas.push({
+                factura_id: factura.factura_id,
+                uuid: factura.uuid,
+                serie: factura.serie,
+                numero: factura.numero,
+              });
+            } else {
+              if (resultadoCofidi.error === "EXCEPTION") invoiceUnexpectedFailureCount += 1;
+              else invoiceProviderRejectedCount += 1;
 
-            facturasConError.push({
-              factura_id: factura.factura_id,
-              uuid: factura.uuid,
-              error: resultadoCofidi.error,
-              mensaje: resultadoCofidi.mensaje,
-            });
+              facturasConError.push({
+                factura_id: factura.factura_id,
+                uuid: factura.uuid,
+                error: resultadoCofidi.error,
+                mensaje: resultadoCofidi.mensaje,
+              });
+            }
           }
         } catch (facturaError: any) {
           // Red de seguridad: la reversa ya está firme, esta factura queda para

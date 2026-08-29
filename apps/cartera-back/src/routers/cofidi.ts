@@ -231,6 +231,8 @@ if (facturasExistentes.length > 0) {
 
           abono_interes: pagos_credito.abono_interes,
           abono_iva_12: pagos_credito.abono_iva_12,
+          // Para el candado [DTE_CERTIFICADO_SIN_BD] (ver paso 2.6).
+          factura_error: pagos_credito.factura_error,
 
           capital_credito: creditos.capital,
           bandera_reinversion: creditos.bandera_reinversion,
@@ -594,6 +596,33 @@ if (facturasExistentes.length > 0) {
       // Modo FALTANTES: re-corrida parcial. `debeEmitir(key)` decide bloque por bloque.
       const soloFaltantes = diffFacturas.modo === "FALTANTES";
       esRecorridaParcial = soloFaltantes;
+
+      // 2.6️⃣ CANDADO [DTE_CERTIFICADO_SIN_BD]: una corrida anterior certificó
+      //    en SAT pero el INSERT falló (dos veces) — el DTE EXISTE y no tiene
+      //    fila, así que el diff lo vería como "faltante" y lo DUPLICARÍA.
+      //    Mientras el marcador siga en factura_error, no se emite nada: hay
+      //    que recuperar la fila primero (backfill-facturas-faltantes /
+      //    conciliación con el uuid del marcador). Solo se deja pasar el caso
+      //    "faltantes vacío": ahí la fila ya se recuperó y la reconciliación a
+      //    OK limpia el marcador.
+      const hayCertificadoSinBD =
+        typeof pagoData.factura_error === "string" &&
+        pagoData.factura_error.includes("[DTE_CERTIFICADO_SIN_BD]");
+      if (
+        hayCertificadoSinBD &&
+        !(diffFacturas.modo === "FALTANTES" && diffFacturas.faltantes.size === 0)
+      ) {
+        console.log(`⛔ Pago ${pago_id} con DTE certificado en SAT sin fila en BD — bloqueado hasta recuperarlo.`);
+        set.status = 409;
+        return {
+          success: false,
+          message:
+            "Una corrida anterior certificó un DTE en SAT pero no quedó guardado en la base de datos. " +
+            "NO se puede re-facturar hasta recuperar esa factura (el uuid está en el detalle del estado de facturación del pago): " +
+            "usar el script de recuperación/conciliación y volver a intentar.",
+          factura_error: pagoData.factura_error,
+        };
+      }
       const faltantes: Set<string> =
         diffFacturas.modo === "FALTANTES" ? diffFacturas.faltantes : new Set();
 
@@ -5073,7 +5102,15 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
     console.log('📅 Fecha emisión (SAT):', datosGenerales["@_FechaHoraEmision"]);
     console.log('📅 Fecha certificación (SAT):', certificacion["dte:FechaHoraCertificacion"]);
 
-    const [facturaGuardada] = await db
+    // ⚠️ El DTE YA existe en SAT. Si este INSERT falla, la fila no queda y el
+    //    diff de re-facturación vería la key como "faltante" → DUPLICADO ante
+    //    SAT en el siguiente intento. Defensa en dos capas: (1) un reintento
+    //    inmediato del INSERT; (2) si también falla, el error viaja MARCADO con
+    //    [DTE_CERTIFICADO_SIN_BD] + uuid — ese marcador queda en factura_error
+    //    del pago (vía registrarEstadoFacturacion) y /facturar-pago-completo
+    //    BLOQUEA cualquier corrida mientras siga ahí: primero se recupera la
+    //    fila (backfill-facturas-faltantes / conciliación) y luego se re-factura.
+    const insertarFactura = () => db
       .insert(facturas_electronicas)
       .values({
         pago_id: pago_id ?? null,
@@ -5105,6 +5142,22 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
         inversionista_id: inversionista_id ?? null,
       })
       .returning();
+
+    let facturaGuardada;
+    try {
+      [facturaGuardada] = await insertarFactura();
+    } catch (insertError: any) {
+      console.error(`   ⚠️ INSERT de factura falló tras certificar (reintentando): ${insertError?.message}`);
+      try {
+        [facturaGuardada] = await insertarFactura();
+      } catch (reintentoError: any) {
+        throw new Error(
+          `[DTE_CERTIFICADO_SIN_BD] ${resultado.serie}-${resultado.numero} uuid=${resultado.uuid}` +
+            `${rubro ? ` rubro=${rubro}` : ""}: certificado en SAT pero el INSERT en BD falló dos veces ` +
+            `(${reintentoError?.message}). Recuperar la fila ANTES de re-facturar.`
+        );
+      }
+    }
 
     console.log(`   ✅ Factura guardada en BD - ID: ${facturaGuardada.factura_id}`);
     console.log('📅 Fecha certificación guardada (Guatemala):', facturaGuardada.fecha_certificacion);

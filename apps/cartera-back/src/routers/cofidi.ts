@@ -616,14 +616,7 @@ if (facturasExistentes.length > 0) {
       const soloFaltantes = diffFacturas.modo === "FALTANTES";
       esRecorridaParcial = soloFaltantes;
 
-      // 2.6️⃣ CANDADO [DTE_CERTIFICADO_SIN_BD]: una corrida anterior certificó
-      //    en SAT pero el INSERT falló (dos veces) — el DTE EXISTE y no tiene
-      //    fila, así que el diff lo vería como "faltante" y lo DUPLICARÍA.
-      //    Mientras el marcador siga en factura_error, no se emite nada: hay
-      //    que recuperar la fila primero (backfill-facturas-faltantes /
-      //    conciliación con el uuid del marcador). Solo se deja pasar el caso
-      //    "faltantes vacío": ahí la fila ya se recuperó y la reconciliación a
-      //    OK limpia el marcador.
+      // 2.6️⃣ CANDADO ANTI-"CERTIFICADO SIN FILA".
       // 🧷 Intentos huérfanos (write-ahead): primero auto-reconciliar los que
       //    ya tienen fila (id_interno matchea — incluso si la fila se recuperó
       //    a mano) y bloquear si queda alguno: significa que una corrida
@@ -652,24 +645,13 @@ if (facturasExistentes.length > 0) {
         };
       }
 
-      const hayCertificadoSinBD =
-        typeof pagoData.factura_error === "string" &&
-        pagoData.factura_error.includes("[DTE_CERTIFICADO_SIN_BD]");
-      if (
-        hayCertificadoSinBD &&
-        !(diffFacturas.modo === "FALTANTES" && diffFacturas.faltantes.size === 0)
-      ) {
-        console.log(`⛔ Pago ${pago_id} con DTE certificado en SAT sin fila en BD — bloqueado hasta recuperarlo.`);
-        set.status = 409;
-        return {
-          success: false,
-          message:
-            "Una corrida anterior certificó un DTE en SAT pero no quedó guardado en la base de datos. " +
-            "NO se puede re-facturar hasta recuperar esa factura (el uuid está en el detalle del estado de facturación del pago): " +
-            "usar el script de recuperación/conciliación y volver a intentar.",
-          factura_error: pagoData.factura_error,
-        };
-      }
+      // ℹ️ El marcador [DTE_CERTIFICADO_SIN_BD] en factura_error es solo
+      //    INFORMATIVO (y sirve de respaldo a la regla f): el candado real
+      //    contra DTEs certificados sin fila es la tabla de intentos de
+      //    arriba, que cubre TODO fallo post-certificación (con o sin catch)
+      //    y se reconcilia sola al aparecer la fila. Un 409 por el marcador
+      //    residual bloqueaba el caso legítimo "fila recuperada pero falta
+      //    otro rubro". (Codex P2 r20)
       const faltantes: Set<string> =
         diffFacturas.modo === "FALTANTES" ? diffFacturas.faltantes : new Set();
 

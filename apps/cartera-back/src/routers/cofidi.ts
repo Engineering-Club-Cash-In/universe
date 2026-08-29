@@ -554,6 +554,17 @@ if (facturasExistentes.length > 0) {
         inversionistas: inversionistasDelPago,
         activas: facturasExistentes,
         tieneOperacionesPendientesFacturar,
+        // Evidencia de intención de la corrida original (regla f): qué rubros
+        // quedaron registrados como fallidos en factura_error.
+        fallidosPrevios: (() => {
+          if (typeof pagoData.factura_error !== "string" || !pagoData.factura_error) return [];
+          try {
+            const parsed = JSON.parse(pagoData.factura_error);
+            return Array.isArray(parsed) ? parsed : [];
+          } catch {
+            return [];
+          }
+        })(),
       });
 
       if (diffFacturas.modo === "BLOQUEADO") {
@@ -4725,6 +4736,9 @@ async function certificarFacturaHelper({
   /** Solo con rubro='INTERESES': el inversionista dueño de esa parte. */
   inversionista_id?: number | null;
 }) {
+  // Se llena apenas SAT certifica (aunque falte el XML): a partir de ahí,
+  // CUALQUIER throw posterior debe viajar marcado — el DTE ya existe.
+  let dteCertificado: { serie: string; numero: string; uuid: string } | null = null;
   try {
     console.log(`\n📄 ========== CERTIFICANDO FACTURA ==========`);
 
@@ -4939,6 +4953,13 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
         throw new Error(`Error en certificación SAT: ${errorMessage}`);
       }
     }
+
+    // 🧷 Desde acá el DTE EXISTE en SAT (Identifier válido, con o sin XML).
+    dteCertificado = {
+      serie: String(resultado.serie),
+      numero: String(resultado.numero),
+      uuid: String(resultado.uuid),
+    };
 
     // 🔥 COFIDI devolvió Identifier (serie/número/UUID válidos) pero sin el XML:
     // el parseo de abajo reventaría y perderíamos una factura ya emitida.
@@ -5206,6 +5227,20 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
     };
   } catch (error) {
     console.error(`❌ Error certificando factura:`, error);
+    // ⚠️ Si SAT YA certificó, el fallo (XML ausente irrecuperable, parseo,
+    //    INSERT, PDF-data, lo que sea) NO es reintentable a ciegas: se marca
+    //    con [DTE_CERTIFICADO_SIN_BD] + uuid para que el candado del endpoint
+    //    bloquee re-emisiones hasta recuperar la fila. (Codex P1 r15: el
+    //    marcado solo-en-INSERT dejaba fuera el camino Identifier-sin-XML.)
+    const mensaje = (error as Error)?.message ?? String(error);
+    if (dteCertificado && !mensaje.includes("[DTE_CERTIFICADO_SIN_BD]")) {
+      throw new Error(
+        `[DTE_CERTIFICADO_SIN_BD] ${dteCertificado.serie}-${dteCertificado.numero} ` +
+          `uuid=${dteCertificado.uuid}${rubro ? ` rubro=${rubro}` : ""}: ` +
+          `certificado en SAT pero el resto del guardado falló (${mensaje}). ` +
+          `Recuperar la fila ANTES de re-facturar.`
+      );
+    }
     throw error;
   }
 }

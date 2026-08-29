@@ -227,6 +227,8 @@ describe("calcularEsperado — montos sucios (columnas text de pagos_credito)", 
     const diff = computarDiffFacturas({
       pagoData: pago54778,
       inversionistas: ROSTER,
+      // regla (f): la corrida original registró el DTE de Rodrigo como fallido.
+      fallidosPrevios: [{ rubro: "INTERESES", inversionista_id: 2 }],
       activas: [activa("OTROS_SERVICIOS", null, 1), activa("INTERESES_CUBE", null, 2)],
     });
     expect(diff.modo).toBe("FALTANTES");
@@ -266,6 +268,7 @@ describe("computarDiffFacturas", () => {
     const diff = computarDiffFacturas({
       pagoData: PAGO,
       inversionistas: tresInv,
+      fallidosPrevios: [{ rubro: "INTERESES", inversionista_id: 3 }],
       activas: [
         activa("MORA", null, 20),
         activa("OTROS_SERVICIOS", null, 21),
@@ -435,6 +438,7 @@ describe("computarDiffFacturas — regla (d): los DTEs vivos deben cuadrar al ce
     const diff = computarDiffFacturas({
       pagoData: PAGO,
       inversionistas: ROSTER,
+      fallidosPrevios: [{ rubro: "INTERESES", inversionista_id: 2 }],
       activas: [
         conMonto("MORA", "150.00", null, 121),
         conMonto("INTERESES_CUBE", "728.00", null, 122),
@@ -472,6 +476,7 @@ describe("computarDiffFacturas — regla (d): los DTEs vivos deben cuadrar al ce
     const diff = computarDiffFacturas({
       pagoData: PAGO,
       inversionistas: ROSTER,
+      fallidosPrevios: [{ rubro: "INTERESES", inversionista_id: 2 }],
       activas: [activa("MORA", null, 125)],
     });
     expect(diff.modo).toBe("FALTANTES");
@@ -586,5 +591,54 @@ describe("gate interés+IVA (Codex P1 del PR #1493)", () => {
       inversionistas: ROSTER,
     });
     expect([...esperado]).toEqual(["MORA"]);
+  });
+});
+
+describe("regla (f): elegibilidad congelada de INTERESES por inversionista (Codex P1 r15)", () => {
+  it("40. INTERESES faltante SIN respaldo en fallidosPrevios → BLOQUEADO (posible flip de emite_factura)", () => {
+    const diff = computarDiffFacturas({
+      pagoData: PAGO,
+      inversionistas: ROSTER,
+      activas: [
+        { factura_id: 500, rubro: "MORA", inversionista_id: null, monto_total: "150.00" },
+        { factura_id: 501, rubro: "OTROS_SERVICIOS", inversionista_id: null, monto_total: "80.00" },
+        { factura_id: 502, rubro: "INTERESES_CUBE", inversionista_id: null, monto_total: "728.00" },
+      ],
+      // sin fallidosPrevios: la corrida original no registró intención sobre inv 2
+    });
+    expect(diff.modo).toBe("BLOQUEADO");
+    if (diff.modo !== "BLOQUEADO") throw new Error("modo inesperado");
+    expect(diff.razon).toContain("inversionista 2");
+  });
+
+  it("41. INTERESES faltante CON respaldo → FALTANTES (la corrida original lo intentó y falló)", () => {
+    const diff = computarDiffFacturas({
+      pagoData: PAGO,
+      inversionistas: ROSTER,
+      fallidosPrevios: [{ rubro: "INTERESES", inversionista_id: 2 }],
+      activas: [
+        { factura_id: 503, rubro: "MORA", inversionista_id: null, monto_total: "150.00" },
+        { factura_id: 504, rubro: "OTROS_SERVICIOS", inversionista_id: null, monto_total: "80.00" },
+        { factura_id: 505, rubro: "INTERESES_CUBE", inversionista_id: null, monto_total: "728.00" },
+      ],
+    });
+    expect(diff.modo).toBe("FALTANTES");
+    if (diff.modo !== "FALTANTES") throw new Error("modo inesperado");
+    expect([...diff.faltantes]).toEqual([keyIntereses(2)]);
+  });
+
+  it("42. INTERESES_CUBE faltante no requiere respaldo (CUBE no se autofactura)", () => {
+    const diff = computarDiffFacturas({
+      pagoData: PAGO,
+      inversionistas: ROSTER,
+      activas: [
+        { factura_id: 506, rubro: "MORA", inversionista_id: null, monto_total: "150.00" },
+        { factura_id: 507, rubro: "OTROS_SERVICIOS", inversionista_id: null, monto_total: "80.00" },
+        { factura_id: 508, rubro: "INTERESES", inversionista_id: 2, monto_total: "392.00" },
+      ],
+    });
+    expect(diff.modo).toBe("FALTANTES");
+    if (diff.modo !== "FALTANTES") throw new Error("modo inesperado");
+    expect([...diff.faltantes]).toEqual(["INTERESES_CUBE"]);
   });
 });

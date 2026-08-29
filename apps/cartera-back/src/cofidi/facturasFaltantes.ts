@@ -226,8 +226,23 @@ export function computarDiffFacturas(args: {
   activas: FacturaActiva[];
   /** Flujo PRORRATEADO de intereses activo (compra de cartera pendiente_facturar). */
   tieneOperacionesPendientesFacturar?: boolean;
+  /**
+   * Rubros que la corrida ORIGINAL registró como fallidos (el JSON de
+   * factura_error del pago). Es la evidencia de INTENCIÓN al momento de emitir:
+   * un `INTERESES:<inv>` solo es re-emitible si aquella corrida INTENTÓ ese DTE
+   * y falló. Sin ese respaldo no se puede distinguir "falló" de "entonces se
+   * autofacturaba y su flag emite_factura cambió después" — y en ese caso
+   * emitirle sería doble cobro (regla f).
+   */
+  fallidosPrevios?: Array<{ rubro?: string | null; inversionista_id?: number | null }>;
 }): DiffFacturas {
-  const { pagoData, inversionistas, activas, tieneOperacionesPendientesFacturar } = args;
+  const {
+    pagoData,
+    inversionistas,
+    activas,
+    tieneOperacionesPendientesFacturar,
+    fallidosPrevios,
+  } = args;
 
   if (activas.length === 0) return { modo: "COMPLETO" };
 
@@ -351,6 +366,31 @@ export function computarDiffFacturas(args: {
   }
 
   const faltantes = new Set<KeyFactura>([...esperado].filter((k) => !logrado.has(k)));
+
+  // (f) Elegibilidad CONGELADA para INTERESES por inversionista: emite_factura
+  //     es mutable (controllers/investor.ts) y el residuo de CUBE es idéntico
+  //     con o sin el DTE del inversionista (cash_in y noCube acumulan ANTES del
+  //     skip), así que ni la regla (b) ni la (d) detectan el flip. Solo se
+  //     re-emite el DTE de un inversionista si la corrida original lo INTENTÓ
+  //     (quedó como fallido en factura_error). MORA/OTROS/OTROS_SERVICIOS/
+  //     INTERESES_CUBE no aplican: no dependen de flags por inversionista.
+  for (const key of faltantes) {
+    if (!key.startsWith("INTERESES:")) continue;
+    const invId = Number(key.slice("INTERESES:".length));
+    const respaldado = (fallidosPrevios ?? []).some(
+      (f) => f.rubro === "INTERESES" && Number(f.inversionista_id) === invId
+    );
+    if (!respaldado) {
+      return {
+        modo: "BLOQUEADO",
+        razon:
+          `Falta el DTE de intereses del inversionista ${invId}, pero la corrida original no lo registró ` +
+          `como fallido: no se puede probar que le tocaba DTE entonces (p. ej. se autofacturaba y su flag ` +
+          `emite_factura cambió después) — emitirlo podría duplicar su factura. ` +
+          `Anule las facturas activas y vuelva a facturar el pago completo, o resuélvalo manualmente.`,
+      };
+    }
+  }
 
   return { modo: "FALTANTES", faltantes };
 }

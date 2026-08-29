@@ -29,32 +29,32 @@ type ReinvestmentComponentsInput = Pick<
 export function normalizeReinvestmentComponents(
   input: ReinvestmentComponentsInput,
 ) {
-  let capital = cents(input.reinvestedCapital);
-  let rest = cents(input.reinvestedRest);
-  const total = cents(input.reinvestedTotal);
-  let unclassified = total - capital - rest;
+  let capital = new Big(input.reinvestedCapital).times(100).round(0, Big.roundHalfUp);
+  let rest = new Big(input.reinvestedRest).times(100).round(0, Big.roundHalfUp);
+  const total = new Big(input.reinvestedTotal).times(100).round(0, Big.roundHalfUp);
+  let unclassified = total.minus(capital).minus(rest);
 
   // Liquidaciones históricas redondearon total y componentes por separado. La
   // deriva observada es de un centavo; el total acreditado a saldo_reinversion
   // es el techo contable y el resto (interés/IVA/ISR) absorbe ese centavo.
-  if (unclassified === -1) {
-    if (rest > 0) rest -= 1;
-    else if (capital > 0) capital -= 1;
-    unclassified = 0;
+  if (unclassified.eq(-1)) {
+    if (rest.gt(0)) rest = rest.minus(1);
+    else if (capital.gt(0)) capital = capital.minus(1);
+    unclassified = new Big(0);
   }
 
   if (
-    [capital, rest, total].some((value) => value < 0) ||
-    unclassified < 0
+    [capital, rest, total].some((value) => value.lt(0)) ||
+    unclassified.lt(0)
   ) {
     throw new Error("Composición de liquidación inválida");
   }
 
   return {
-    capital: money(capital),
-    rest: money(rest),
-    total: money(total),
-    unclassified: money(unclassified),
+    capital: capital.div(100).toFixed(2),
+    rest: rest.div(100).toFixed(2),
+    total: total.div(100).toFixed(2),
+    unclassified: unclassified.div(100).toFixed(2),
   };
 }
 

@@ -830,7 +830,26 @@ export async function getReinversionLiquidaciones({
 
   const result = await db.execute(sql`
     WITH liquidaciones_mes AS (
-      SELECT l.*
+      SELECT
+        l.*,
+        CASE
+          WHEN ROUND(l.reinversion_total::numeric, 2)
+            - ROUND(l.reinversion_capital::numeric, 2)
+            - ROUND(l.reinversion_interes::numeric, 2) = -0.01
+            AND ROUND(l.reinversion_interes::numeric, 2) > 0
+            THEN ROUND(l.reinversion_interes::numeric, 2) - 0.01
+          ELSE ROUND(l.reinversion_interes::numeric, 2)
+        END AS reinversion_interes_report,
+        CASE
+          WHEN ROUND(l.reinversion_total::numeric, 2)
+            - ROUND(l.reinversion_capital::numeric, 2)
+            - ROUND(l.reinversion_interes::numeric, 2) = -0.01
+            AND ROUND(l.reinversion_interes::numeric, 2) = 0
+            AND ROUND(l.reinversion_capital::numeric, 2) > 0
+            THEN ROUND(l.reinversion_capital::numeric, 2) - 0.01
+          ELSE ROUND(l.reinversion_capital::numeric, 2)
+        END AS reinversion_capital_report,
+        ROUND(l.reinversion_total::numeric, 2) AS reinversion_total_report
       FROM cartera.liquidaciones l
       WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
         AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
@@ -942,13 +961,13 @@ export async function getReinversionLiquidaciones({
         CASE
           WHEN d.tipo IN ('reinversion_capital', 'reinversion_total')
             AND d.peso_reinv_capital > 0
-            THEN d.reinversion_capital::numeric * d.peso_capital / d.peso_reinv_capital
+            THEN d.reinversion_capital_report * d.peso_capital / d.peso_reinv_capital
           ELSE 0
         END AS reinversion_capital_modo,
         CASE
           WHEN d.tipo IN ('reinversion_interes', 'reinversion_total')
             AND d.peso_reinv_interes > 0
-            THEN d.reinversion_interes::numeric * d.peso_interes / d.peso_reinv_interes
+            THEN d.reinversion_interes_report * d.peso_interes / d.peso_reinv_interes
           ELSE 0
         END AS reinversion_interes_modo
       FROM denominadores d
@@ -956,7 +975,7 @@ export async function getReinversionLiquidaciones({
     asignacion_residual AS (
       SELECT
         a.*,
-        a.reinversion_total::numeric - SUM(
+        a.reinversion_total_report - SUM(
           a.reinversion_capital_modo + a.reinversion_interes_modo
         ) OVER (PARTITION BY a.liquidacion_id) AS reinversion_residual,
         CASE

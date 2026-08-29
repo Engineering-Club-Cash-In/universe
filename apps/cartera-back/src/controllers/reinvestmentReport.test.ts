@@ -15,6 +15,7 @@ import {
   canonicalizePurchaseSummaries,
   buildNetInterestDetail,
   getPublicReinvestmentDetailError,
+  normalizeReinvestmentComponents,
   summarizePurchaseDetails,
   shouldIncludeInvestorPosition,
 } from "./reinvestmentReport";
@@ -445,6 +446,19 @@ test("absorbe en el resto un centavo de deriva histórica sin romper el reporte"
   });
 });
 
+test("normaliza numeric grandes sin perder sus centavos", () => {
+  expect(normalizeReinvestmentComponents({
+    reinvestedCapital: "900719925474000.91",
+    reinvestedRest: "1.01",
+    reinvestedTotal: "900719925474001.91",
+  })).toEqual({
+    capital: "900719925474000.91",
+    rest: "1.00",
+    total: "900719925474001.91",
+    unclassified: "0.00",
+  });
+});
+
 test("no oculta una inconsistencia mayor a un centavo", () => {
   expect(() => buildLiquidationComposition({
     totalCapital: "380.36",
@@ -576,6 +590,9 @@ test("reporte agrupa liquidaciones por snapshot y publica legacy como sin clasif
   expect(report).toContain("cartera.historico_liquidaciones_espejo");
   expect(report).toContain("cartera.pagos_credito_inversionistas_espejo");
   expect(report).toContain("reinversion_residual");
+  expect(report).toContain("reinversion_interes_report");
+  expect(report).toContain("d.reinversion_interes_report * d.peso_interes");
+  expect(report).toContain("a.reinversion_total_report - SUM(");
   expect(report).toContain("COUNT(DISTINCT f.liquidacion_id)");
   expect(report).toContain("'sin_clasificar'");
   expect(report).not.toContain("GROUP BY i.tipo_reinversion");

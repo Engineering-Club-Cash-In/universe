@@ -21,16 +21,59 @@ type LiquidationCompositionInput = {
   reinvestedTotal: number | string;
 };
 
+type ReinvestmentComponentsInput = Pick<
+  LiquidationCompositionInput,
+  "reinvestedCapital" | "reinvestedRest" | "reinvestedTotal"
+>;
+
+export function normalizeReinvestmentComponents(
+  input: ReinvestmentComponentsInput,
+) {
+  let capital = cents(input.reinvestedCapital);
+  let rest = cents(input.reinvestedRest);
+  const total = cents(input.reinvestedTotal);
+  let unclassified = total - capital - rest;
+
+  // Liquidaciones históricas redondearon total y componentes por separado. La
+  // deriva observada es de un centavo; el total acreditado a saldo_reinversion
+  // es el techo contable y el resto (interés/IVA/ISR) absorbe ese centavo.
+  if (unclassified === -1) {
+    if (rest > 0) rest -= 1;
+    else if (capital > 0) capital -= 1;
+    unclassified = 0;
+  }
+
+  if (
+    [capital, rest, total].some((value) => value < 0) ||
+    unclassified < 0
+  ) {
+    throw new Error("Composición de liquidación inválida");
+  }
+
+  return {
+    capital: money(capital),
+    rest: money(rest),
+    total: money(total),
+    unclassified: money(unclassified),
+  };
+}
+
+export function assertLiquidationRowsReinvestmentIntegrity(
+  rows: ReinvestmentComponentsInput[],
+) {
+  for (const row of rows) normalizeReinvestmentComponents(row);
+}
+
 export function buildLiquidationComposition(input: LiquidationCompositionInput) {
   const flowCapital = cents(input.totalCapital);
   const paidTotal = cents(input.paidTotal);
-  const reinvestedCapital = cents(input.reinvestedCapital);
-  const reinvestedRest = cents(input.reinvestedRest);
-  const reinvestedTotal = cents(input.reinvestedTotal);
+  const normalizedReinvestment = normalizeReinvestmentComponents(input);
+  const reinvestedCapital = cents(normalizedReinvestment.capital);
+  const reinvestedRest = cents(normalizedReinvestment.rest);
+  const reinvestedTotal = cents(normalizedReinvestment.total);
   const flowTotal = paidTotal + reinvestedTotal;
   const flowRest = flowTotal - flowCapital;
-  const reinvestedUnclassified =
-    reinvestedTotal - reinvestedCapital - reinvestedRest;
+  const reinvestedUnclassified = cents(normalizedReinvestment.unclassified);
 
   if (
     [flowCapital, paidTotal, reinvestedCapital, reinvestedRest, reinvestedTotal]

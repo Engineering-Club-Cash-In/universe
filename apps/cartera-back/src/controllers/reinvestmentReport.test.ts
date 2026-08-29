@@ -5,6 +5,7 @@ import {
   allocateRoundedPurchaseAmounts,
   assertModeReconciliation,
   assertReportReconciliation,
+  assertLiquidationRowsReinvestmentIntegrity,
   buildLiquidationComposition,
   buildPurchaseTicketHistory,
   calculateActiveCapital,
@@ -426,6 +427,46 @@ test("no inventa el destino capital/resto cuando falta composición de reinversi
     flujo: { capital: "80.00", resto: "20.00", total: "100.00" },
     estado: "sin_clasificar",
   });
+});
+
+test("absorbe en el resto un centavo de deriva histórica sin romper el reporte", () => {
+  expect(buildLiquidationComposition({
+    totalCapital: "380.36",
+    paidTotal: "0.00",
+    reinvestedCapital: "380.36",
+    reinvestedRest: "390.53",
+    reinvestedTotal: "770.88",
+  })).toEqual({
+    pagado: { capital: "0.00", resto: "0.00", sin_clasificar: "0.00", total: "0.00" },
+    reinvertido: { capital: "380.36", resto: "390.52", sin_clasificar: "0.00", total: "770.88" },
+    flujo: { capital: "380.36", resto: "390.52", total: "770.88" },
+    estado: "exacto",
+  });
+});
+
+test("no oculta una inconsistencia mayor a un centavo", () => {
+  expect(() => buildLiquidationComposition({
+    totalCapital: "380.36",
+    paidTotal: "0.00",
+    reinvestedCapital: "380.36",
+    reinvestedRest: "390.54",
+    reinvestedTotal: "770.88",
+  })).toThrow("Composición de liquidación inválida");
+});
+
+test("valida cada liquidación antes de que derivas opuestas se compensen", () => {
+  expect(() => assertLiquidationRowsReinvestmentIntegrity([
+    {
+      reinvestedCapital: "100.00",
+      reinvestedRest: "100.05",
+      reinvestedTotal: "200.00",
+    },
+    {
+      reinvestedCapital: "100.00",
+      reinvestedRest: "99.96",
+      reinvestedTotal: "200.00",
+    },
+  ])).toThrow("Composición de liquidación inválida");
 });
 
 test("resume compras por modalidad de facturación, tipo de reinversión y clasificación", () => {

@@ -15,6 +15,7 @@ import {
 import {
   allocateRoundedAmounts,
   allocateRoundedPurchaseAmounts,
+	assertLiquidationRowsReinvestmentIntegrity,
 	canonicalizeLiquidationModeRows,
 	buildLiquidationComposition,
 	buildPurchaseTicketHistory,
@@ -24,6 +25,7 @@ import {
   buildCubeNetInterest,
   buildNetInterestDetail,
 	getPublicReinvestmentDetailError,
+	normalizeReinvestmentComponents,
 	summarizePurchaseDetails,
 	shouldIncludeInvestorPosition,
 } from "./reinvestmentReport";
@@ -808,6 +810,23 @@ export async function getReinversionLiquidaciones({
   const nextYear = mes === 12 ? anio + 1 : anio;
   const inicioMesSiguiente = `${nextYear}-${String(nextMonth).padStart(2, "0")}-01`;
 
+  // Valida cada liquidación antes de cualquier GROUP BY o asignación residual:
+  // una sobreasignación material no puede compensarse con otra fila y parecer
+  // una deriva agregada de un centavo.
+  const integrityRows = await db.execute(sql`
+    SELECT reinversion_capital, reinversion_interes, reinversion_total
+    FROM cartera.liquidaciones
+    WHERE (fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
+      AND (fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
+  `);
+  assertLiquidationRowsReinvestmentIntegrity(
+    (integrityRows.rows as Record<string, unknown>[]).map((row) => ({
+      reinvestedCapital: String(row.reinversion_capital ?? 0),
+      reinvestedRest: String(row.reinversion_interes ?? 0),
+      reinvestedTotal: String(row.reinversion_total ?? 0),
+    })),
+  );
+
   const result = await db.execute(sql`
     WITH liquidaciones_mes AS (
       SELECT l.*
@@ -1018,9 +1037,14 @@ export async function getReinversionLiquidaciones({
   for (const r of modeRows) {
     const tipo = String(r.tipo ?? "sin_clasificar");
     const totalCapital = numericMoney(r.total_capital);
-    const reinversionCapital = numericMoney(r.reinversion_capital);
-    const reinversionInteres = numericMoney(r.reinversion_interes);
-    const reinversionTotal = numericMoney(r.reinversion_total);
+    const reinversionNormalizada = normalizeReinvestmentComponents({
+      reinvestedCapital: numericMoney(r.reinversion_capital),
+      reinvestedRest: numericMoney(r.reinversion_interes),
+      reinvestedTotal: numericMoney(r.reinversion_total),
+    });
+    const reinversionCapital = reinversionNormalizada.capital;
+    const reinversionInteres = reinversionNormalizada.rest;
+    const reinversionTotal = reinversionNormalizada.total;
     const totalCuota = numericMoney(r.total_cuota);
     porTipo[tipo] = {
       reinversion_capital: reinversionCapital,
@@ -1220,9 +1244,14 @@ export async function getReinversionLiquidaciones({
   const porInversionista = (porInvRows.rows as Record<string, unknown>[]).map(
     (r) => {
       const id = Number(r.inversionista_id);
-      const reinversionCapital = numericMoney(r.reinversion_capital);
-      const reinversionInteres = numericMoney(r.reinversion_interes);
-      const reinversion = numericMoney(r.reinversion);
+      const reinversionNormalizada = normalizeReinvestmentComponents({
+        reinvestedCapital: numericMoney(r.reinversion_capital),
+        reinvestedRest: numericMoney(r.reinversion_interes),
+        reinvestedTotal: numericMoney(r.reinversion),
+      });
+      const reinversionCapital = reinversionNormalizada.capital;
+      const reinversionInteres = reinversionNormalizada.rest;
+      const reinversion = reinversionNormalizada.total;
       const aRecibir = numericMoney(r.a_recibir);
       return {
         inversionista_id: id,

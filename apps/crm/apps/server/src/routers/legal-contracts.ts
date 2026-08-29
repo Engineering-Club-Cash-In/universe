@@ -2,6 +2,7 @@ import { ORPCError } from "@orpc/server";
 import { and, count, eq, inArray, ne } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
+import { auditRecord, auditedTransaction } from "../lib/audit";
 import { user } from "../db/schema/auth";
 import {
 	leads,
@@ -730,6 +731,7 @@ export const legalContractsRouter = {
 
 	// Aprobar oportunidad desde jurídico (mover a 90%)
 	approveOpportunityLegal: juridicoProcedure
+		.meta({ audit: { entity: "opportunity", action: "approve_legal" } })
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
@@ -802,7 +804,7 @@ export const legalContractsRouter = {
 			}
 
 			// Actualizar la oportunidad y registrar historial en una transacción
-			await db.transaction(async (tx) => {
+			await auditedTransaction(async (tx) => {
 				// Actualizar la oportunidad a 85%
 				await tx
 					.update(opportunities)
@@ -811,6 +813,11 @@ export const legalContractsRouter = {
 						updatedAt: new Date(),
 					})
 					.where(eq(opportunities.id, input.opportunityId));
+				auditRecord({
+					entity: "opportunity",
+					id: input.opportunityId,
+					action: "approve_legal",
+				});
 
 				// Registrar en el historial de etapas
 				await tx.insert(opportunityStageHistory).values({
@@ -857,6 +864,9 @@ export const legalContractsRouter = {
 
 	// Confirmar que los contratos fueron firmados (mover de 85% a 90%)
 	confirmContractsSigned: viewOpportunityContractsProcedure
+		.meta({
+			audit: { entity: "opportunity", action: "confirm_contracts_signed" },
+		})
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
@@ -942,7 +952,7 @@ export const legalContractsRouter = {
 			}
 
 			// Solo si cartera-back respondió OK: marcar contratos + mover a 90%
-			await db.transaction(async (tx) => {
+			await auditedTransaction(async (tx) => {
 				// Re-verificar que la oportunidad sigue en 85% (previene race condition)
 				const [currentOpp] = await tx
 					.select({ stageId: opportunities.stageId })
@@ -984,6 +994,11 @@ export const legalContractsRouter = {
 						updatedAt: new Date(),
 					})
 					.where(eq(opportunities.id, input.opportunityId));
+				auditRecord({
+					entity: "opportunity",
+					id: input.opportunityId,
+					action: "confirm_contracts_signed",
+				});
 
 				// Registrar en historial
 				await tx.insert(opportunityStageHistory).values({

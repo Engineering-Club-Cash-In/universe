@@ -107,6 +107,7 @@ test("consolida interés con IVA y seguro con GPS sin alterar el total", () => {
 		capitalCube: 60,
 		interesIvaInv: 4.48,
 		interesIvaCube: 6.72,
+		facturacion: 18.72,
 		totalMora: 6,
 		total: 123.2,
 	});
@@ -123,6 +124,7 @@ test("conserva la semántica acumulada en los rubros consolidados", () => {
 		capitalCube: 120,
 		interesIvaInv: 8.96,
 		interesIvaCube: 13.44,
+		facturacion: 37.44,
 		total: 246.4,
 	});
 });

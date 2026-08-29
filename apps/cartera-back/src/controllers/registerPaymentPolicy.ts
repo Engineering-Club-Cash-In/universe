@@ -712,10 +712,10 @@ export const puedeOmitirGuardTodasCubiertas = ({
  * importa qué se escribió, y la rama inserta aunque el request traiga capital
  * colado. Usar la clasificación aquí respondería 409 sobre estado ya escrito.
  *
- * `convenioAplicado`: en EN_CONVENIO el registro del convenio corre ANTES del
- * loop de cuotas, así que `processConvenioPayment` YA actualizó
- * `convenios_pago`. Responder 409 ahí mentiría sobre estado persistido y el
- * reintento de la boleta acreditaría el convenio DOS veces.
+ * `convenioAplicado`: en EN_CONVENIO la acreditación del convenio se difiere
+ * al return de éxito (`commitConvenio`), pero el flujo debe LLEGAR a ese
+ * return para escribir la fila-rastro del convenio y ejecutar el commit.
+ * Responder 409 acá dejaría la boleta del convenio sin registrar.
  */
 export const debeRechazarAbonoCapitalNoAplicado = ({
   abonoCapital,
@@ -996,6 +996,37 @@ export const recomputeCreditAfterCapital = ({
   return { capital, cuotaInteres, iva, deudaTotal };
 };
 
+// ============================================================================
+// AJUSTE POR FECHA IDEAL DE PAGO (ver schema.ts: ajuste_fecha_ideal_pago)
+// ============================================================================
+
+/**
+ * Decide si el ajuste pendiente por fecha ideal de pago se debe deducir del
+ * disponible de este pago. Solo aplica cuando la cuota 1 está entre las
+ * pendientes del crédito (nunca en cuota 0, que el cliente no paga) y el
+ * ajuste aún no está cobrado. Best-effort: si el disponible no alcanza para
+ * cubrirlo completo, no bloquea el pago (a diferencia de mora) — queda
+ * pendiente para uno futuro.
+ *
+ * Disponible debe ser ESTRICTAMENTE mayor al monto (no gte), para que quede
+ * algo con qué procesar la cuota 1 en el loop de registerPayment.
+ */
+export const getAjusteFechaIdealADeducir = ({
+  tieneCuota1Pendiente,
+  ajustePendiente,
+  disponible,
+}: {
+  tieneCuota1Pendiente: boolean;
+  ajustePendiente: { id: number; monto_total: BigInput } | null | undefined;
+  disponible: BigInput;
+}): { id: number; monto: Big } | null => {
+  if (!tieneCuota1Pendiente || !ajustePendiente) return null;
+  const monto = new Big(ajustePendiente.monto_total);
+  if (monto.lte(0)) return null;
+  if (new Big(disponible).lte(monto)) return null;
+  return { id: ajustePendiente.id, monto };
+};
+
 /**
  * ¿El pago debe pasar por processConvenioPayment? Solo créditos EN_CONVENIO y
  * solo si después de otros/abono-capital/mora todavía queda plata (orden
@@ -1218,12 +1249,12 @@ export const capitalSuprimidoSinAplicar = (params: {
  * simplemente sigue a la siguiente cuota con el disponible intacto.
  *
  * `pagoConvenio` es lo que el estampador escribiría en ESTA fila (su peek
- * `pendiente()`, no una llamada consumidora). En EN_CONVENIO,
- * `processConvenioPayment` ya mutó `convenios_pago` ANTES del loop y el sello
- * vive en una sola fila de `pagos_credito`: si todas las cuotas se saltaran,
- * el convenio quedaría cobrado sin fila que lo registre y se romperían la
- * reversa y la detección de boleta duplicada (P2 de Codex en #1248). Una fila
- * con `monto_aplicado = 0` pero `pagoConvenio > 0` es legítima y validable
+ * `pendiente()`, no una llamada consumidora). En EN_CONVENIO el sello vive en
+ * una sola fila de `pagos_credito` y la acreditación (`commitConvenio`) corre
+ * en el return de éxito: si todas las cuotas se saltaran, el convenio se
+ * acreditaría sin fila que lo registre y se romperían la reversa y la
+ * detección de boleta duplicada (P2 de Codex en #1248). Una fila con
+ * `monto_aplicado = 0` pero `pagoConvenio > 0` es legítima y validable
  * (`shouldRejectZeroAppliedNormalValidation` exime pagoConvenio > 0).
  */
 export const debeInsertarFilaParcialCuota = ({

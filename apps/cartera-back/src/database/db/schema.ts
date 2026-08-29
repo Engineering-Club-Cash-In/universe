@@ -42,6 +42,12 @@
     "reinversion_combinada"
   ]);
 
+  export const tipoCompraEnum = customSchema.enum("tipo_compra", [
+    "nueva_posicion",
+    "ampliacion_posicion",
+    "sin_clasificar",
+  ]);
+
   export const statusInversionistaEnum = customSchema.enum("status_inversionista", [
     "activo",
     "inactivo",
@@ -248,6 +254,49 @@
   }, (table) => ({
     idxCreditoCreated: index("idx_historial_credito_created").on(table.credito_id, table.created_at),
   }));
+
+  // 🧾 Ingreso adicional (sin capital) por elegir un día de pago recomendado
+  // por IA que cae después del día que el sistema hubiera asignado por
+  // default (día≤20→15, día>20→30). Se calcula una vez en el CRM al cerrar la
+  // oportunidad (ver apps/crm/apps/server/src/lib/fecha-ideal-pago-ajuste.ts).
+  // 1 fila por crédito, solo cuando el ajuste realmente aplica.
+  //
+  // Solo insertPayment (registerPayment.ts) sabe leer y marcar esta tabla —
+  // si la cuota 1 se liquida por un flujo alterno (carga masiva Excel,
+  // convenio de pago) el ajuste queda fecha_cobro=NULL sin alerta. Pendiente:
+  // reporte de "ajustes NULL con cuota 1 ya pagada" para detectarlos.
+  export const ajuste_fecha_ideal_pago = customSchema.table(
+    "ajuste_fecha_ideal_pago",
+    {
+      id: serial("id").primaryKey(),
+      credito_id: integer("credito_id")
+        .notNull()
+        .references(() => creditos.credito_id, { onDelete: "cascade" }),
+      dia_pago_original_sistema: integer("dia_pago_original_sistema").notNull(),
+      dia_pago_mensual_elegido: integer("dia_pago_mensual_elegido").notNull(),
+      dias_diferencia: integer("dias_diferencia").notNull(),
+      dias_del_mes: integer("dias_del_mes").notNull(),
+      monto_interes: numeric("monto_interes", { precision: 18, scale: 2 }).notNull(),
+      monto_membresia: numeric("monto_membresia", { precision: 18, scale: 2 }).notNull(),
+      monto_servicios: numeric("monto_servicios", { precision: 18, scale: 2 }).notNull(),
+      monto_total: numeric("monto_total", { precision: 18, scale: 2 }).notNull(),
+      // NULL = pendiente de cobrar. Se llena cuando registerPayment lo aplica
+      // de verdad como "otros" en el pago de la cuota 1 (ver insertPayment en
+      // controllers/registerPayment.ts). Evita cobrarlo dos veces.
+      fecha_cobro: timestamp("fecha_cobro", { withTimezone: true }),
+      // Qué fila de pagos_credito llevó el "otros" con el ajuste — permite que
+      // reversePayment.ts sepa con precisión si el pago que se está revirtiendo
+      // es el que lo cobró, y en ese caso resetear fecha_cobro/pago_id a NULL.
+      // Se llena junto con fecha_cobro; NULL mientras esté pendiente.
+      pago_id: integer("pago_id").references(() => pagos_credito.pago_id, {
+        onDelete: "set null",
+      }),
+      created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    },
+    (table) => ({
+      uqCredito: uniqueIndex("uq_ajuste_fecha_ideal_pago_credito").on(table.credito_id),
+    }),
+  );
 
   export const cuotas_credito = customSchema.table("cuotas_credito", {
     cuota_id: serial("cuota_id").primaryKey(),
@@ -660,6 +709,9 @@
       modalidad_facturacion: modalidadFacturacionEnum("modalidad_facturacion"),
       modalidad_facturacion_spread_id: integer("modalidad_facturacion_spread_id")
         .references(() => modalidad_facturacion_spread.id),
+      tipo_compra: tipoCompraEnum("tipo_compra")
+        .notNull()
+        .default("sin_clasificar"),
     },
     (t) => ({
       ixStatus: index("ix_compras_credito_inv_status").on(t.status),
@@ -1736,6 +1788,8 @@
       // descuenta_impuestos al liquidar, total_interes se persistió NETO (×0.93, solo ISR).
       // Las liquidaciones viejas quedan en false = fórmula bruta original.
       descuenta_impuestos: boolean("descuenta_impuestos").notNull().default(false),
+      tipo_reinversion_snapshot: tipoReinversionEnum("tipo_reinversion_snapshot"),
+      modalidad_facturacion_snapshot: modalidadFacturacionEnum("modalidad_facturacion_snapshot"),
 
       // Reinversión
       reinversion_capital: numeric("reinversion_capital", { precision: 18, scale: 2 }).notNull().default("0"),
@@ -1925,6 +1979,10 @@
         .references(() => creditos.credito_id, { onDelete: "cascade" }),
       liquidacion_id: integer("liquidacion_id")
         .references(() => liquidaciones.liquidacion_id, { onDelete: "set null" }),
+      tipo_reinversion_snapshot: tipoReinversionEnum("tipo_reinversion_snapshot"),
+      modalidad_facturacion_snapshot: modalidadFacturacionEnum("modalidad_facturacion_snapshot"),
+      capital_liquidado: numeric("capital_liquidado", { precision: 18, scale: 8 }),
+      capital_restante: numeric("capital_restante", { precision: 18, scale: 8 }),
     },
     (t) => ({
       ixInvCred: index("ix_historico_liq_inv_cred").on(t.inversionista_id, t.credito_id),

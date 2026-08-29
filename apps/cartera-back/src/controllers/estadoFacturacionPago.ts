@@ -180,6 +180,37 @@ export function tieneMontosFacturables(pago: MontosFacturablesPago): boolean {
 }
 
 /**
+ * Fusiona entradas nuevas al JSON de factura_error PRESERVANDO la evidencia
+ * previa. La regla (f) del diff exige que un INTERESES:<inv> faltante esté
+ * respaldado por su entrada de fallo original — un reopen lateral (sync de
+ * Excel, razón de bloqueo, anulación manual) que REEMPLACE el JSON la
+ * destruiría y dejaría el pago BLOQUEADO permanente (Codex P2 r17). Regla:
+ * se conservan todas las entradas previas cuya (rubro, inversionista_id) no
+ * venga en las nuevas; las nuevas se agregan al final.
+ */
+export function fusionarFacturaError(
+  existente: string | null | undefined,
+  nuevos: RubroFallido[],
+): string {
+  let previos: RubroFallido[] = [];
+  if (typeof existente === "string" && existente) {
+    try {
+      const parsed = JSON.parse(existente);
+      if (Array.isArray(parsed)) previos = parsed;
+    } catch {
+      // texto no-JSON legado: no hay evidencia estructurada que preservar
+    }
+  }
+  const clave = (f: { rubro?: string | null; inversionista_id?: number | null }) =>
+    `${f?.rubro ?? ""}:${f?.inversionista_id ?? ""}`;
+  const nuevasClaves = new Set(nuevos.map(clave));
+  return JSON.stringify([
+    ...previos.filter((f) => !nuevasClaves.has(clave(f))),
+    ...nuevos,
+  ]);
+}
+
+/**
  * Al validar: el pago queda a la espera de su factura (o `NO_APLICA` si no
  * hay nada facturable). Corre dentro de la tx de validación.
  */

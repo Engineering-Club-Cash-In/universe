@@ -12,7 +12,10 @@ import {
 } from "../cofidi/rubroInteresInversionistas";
 import { calcularSplitInteresPci } from "../cofidi/splitInteresPci";
 import { computarDiffFacturas, keyIntereses } from "../cofidi/facturasFaltantes";
-import { registrarEstadoFacturacion } from "../controllers/estadoFacturacionPago";
+import {
+  fusionarFacturaError,
+  registrarEstadoFacturacion,
+} from "../controllers/estadoFacturacionPago";
 import { adquirirPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import { db } from "../database";
 import {
@@ -580,9 +583,12 @@ if (facturasExistentes.length > 0) {
           await db
             .update(pagos_credito)
             .set({
-              factura_error: JSON.stringify([
-                { rubro: "REFACTURACION_BLOQUEADA", error: diffFacturas.razon },
-              ]),
+              // Fusiona: preserva la evidencia previa (regla f) y dedupe la
+              // entrada REFACTURACION_BLOQUEADA. (Codex P2 r17)
+              factura_error: fusionarFacturaError(
+                typeof pagoData.factura_error === "string" ? pagoData.factura_error : null,
+                [{ rubro: "REFACTURACION_BLOQUEADA", error: diffFacturas.razon }]
+              ),
               factura_at: new Date(),
             })
             .where(
@@ -623,12 +629,17 @@ if (facturasExistentes.length > 0) {
       //    anterior pudo certificar en SAT sin dejar fila NI rastro en
       //    factura_error (crash duro). Evidencia durable: ni el sync de Excel
       //    ni ninguna reescritura de factura_error la puede pisar.
+      // Match por (pago_id, id_interno): el id_interno es random de 8 dígitos
+      // SIN unicidad global — una fila de OTRO pago con el mismo número no
+      // reconcilia este intento (Codex P1 r17). Dentro del mismo pago, la fila
+      // con ese id_interno ES la del intento por construcción.
       await db.execute(sql`
         DELETE FROM cartera.facturacion_intentos fi
         WHERE fi.pago_id = ${pago_id}
           AND EXISTS (
             SELECT 1 FROM cartera.facturas_electronicas f
-            WHERE f.id_interno = fi.id_interno
+            WHERE f.pago_id = fi.pago_id
+              AND f.id_interno = fi.id_interno
           )
       `);
       const intentosRes = await db.execute(sql`
@@ -3084,7 +3095,8 @@ if (facturasExistentes.length > 0) {
             sql`SELECT
                   (SELECT count(*)::int FROM cartera.facturas_electronicas
                    WHERE pago_id = ${facturaAnulada.pago_id} AND status = 'ACTIVA') AS activas,
-                  pc.validation_status::text AS validation_status
+                  pc.validation_status::text AS validation_status,
+                  pc.factura_error
                 FROM cartera.pagos_credito pc
                 WHERE pc.pago_id = ${facturaAnulada.pago_id}`
           );
@@ -3113,13 +3125,18 @@ if (facturasExistentes.length > 0) {
               factura_error:
                 nuevoEstado === "NO_APLICA"
                   ? null
-                  : JSON.stringify([
-                      {
-                        rubro: facturaAnulada.rubro ?? "DESCONOCIDO",
-                        inversionista_id: facturaAnulada.inversionista_id ?? null,
-                        error: `DTE ${facturaAnulada.serie}-${facturaAnulada.numero} anulado manualmente: ${motivo}`,
-                      },
-                    ]),
+                  // Fusiona: la entrada del rubro anulado se agrega SIN borrar
+                  // la evidencia previa de otros rubros (regla f). (Codex r17)
+                  : fusionarFacturaError(
+                      typeof fila.factura_error === "string" ? fila.factura_error : null,
+                      [
+                        {
+                          rubro: facturaAnulada.rubro ?? "DESCONOCIDO",
+                          inversionista_id: facturaAnulada.inversionista_id ?? null,
+                          error: `DTE ${facturaAnulada.serie}-${facturaAnulada.numero} anulado manualmente: ${motivo}`,
+                        },
+                      ]
+                    ),
               factura_at: nuevoEstado === "NO_APLICA" ? null : new Date(),
             })
             .where(eq(pagos_credito.pago_id, facturaAnulada.pago_id));

@@ -548,13 +548,36 @@ export const actualizarPagosExcelRouter = new Elysia()
             await tx.execute(sql`
               UPDATE cartera.pagos_credito SET
                 factura_status = 'PARCIAL',
-                factura_error = ${JSON.stringify([
-                  {
-                    rubro: "SYNC_EXCEL",
-                    error:
-                      "Montos facturables reescritos por /actualizar-pagos-excel: los DTEs emitidos pueden no cuadrar con el pago — revisar.",
-                  },
-                ])},
+                -- FUSIONA en vez de reemplazar (Codex P2 r17): las entradas
+                -- previas (p. ej. el INTERESES:<inv> fallido que respalda la
+                -- regla (f) del diff) se PRESERVAN; solo se deduplica la nota
+                -- SYNC_EXCEL para no acumularlas en cada sync. Si el texto
+                -- legado no es un array JSON, se reemplaza (no hay evidencia
+                -- estructurada que conservar).
+                factura_error = CASE
+                  WHEN factura_error IS NULL
+                    OR btrim(factura_error) = ''
+                    OR left(btrim(factura_error), 1) <> '[' THEN ${JSON.stringify([
+                      {
+                        rubro: "SYNC_EXCEL",
+                        error:
+                          "Montos facturables reescritos por /actualizar-pagos-excel: los DTEs emitidos pueden no cuadrar con el pago — revisar.",
+                      },
+                    ])}
+                  ELSE (
+                    (
+                      SELECT COALESCE(jsonb_agg(e), '[]'::jsonb)
+                      FROM jsonb_array_elements(factura_error::jsonb) e
+                      WHERE e->>'rubro' IS DISTINCT FROM 'SYNC_EXCEL'
+                    ) || ${JSON.stringify([
+                      {
+                        rubro: "SYNC_EXCEL",
+                        error:
+                          "Montos facturables reescritos por /actualizar-pagos-excel: los DTEs emitidos pueden no cuadrar con el pago — revisar.",
+                      },
+                    ])}::jsonb
+                  )::text
+                END,
                 factura_at = now()
               WHERE pago_id = ${pago_id}
                 AND factura_status IN ('OK', 'PARCIAL')

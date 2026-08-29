@@ -24,6 +24,7 @@ import { CLUB_CASHIN_CONFIG, SAT_CONFIG } from "../utils/functions/const";
 import { ahoraEnGuatemala, formatearFechaSAT } from "../utils/functions/fechaSAT";
 import { esPagoAplicado } from "../utils/paymentStatus";
 import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
+import { intentosCertificacionHuerfanos } from "./estadoFacturacionPago";
 import {
   getRemainingPaymentPaidStatusAfterReversal,
   isReversibleIncobrablePayment,
@@ -105,6 +106,8 @@ export interface ReversePaymentDependencies {
   readonly reverseCapitalPayment: typeof revertirAbonoCapitalEspejo;
   /** Serializa contra insertPayment (advisory lock por crédito). */
   readonly withCreditLock: typeof withPaymentAdvisoryLock;
+  /** Chequeo de intentos write-ahead (inyectable en tests: el real toca la BD). */
+  readonly checkPendingIntents?: typeof intentosCertificacionHuerfanos;
 }
 
 const defaultDependencies: ReversePaymentDependencies = {
@@ -112,6 +115,7 @@ const defaultDependencies: ReversePaymentDependencies = {
   reverseInvestors: processAndReplaceCreditInvestorsReverse,
   reverseCapitalPayment: revertirAbonoCapitalEspejo,
   withCreditLock: withPaymentAdvisoryLock,
+  checkPendingIntents: intentosCertificacionHuerfanos,
 };
 
 export function createReversePayment(
@@ -163,8 +167,17 @@ export function createReversePayment(
     // convenio sub-acreditado. Serializa solo la transacción; la anulación
     // SAT/COFIDI post-commit queda fuera del lock igual que queda fuera de
     // la tx (HTTP de hasta 60s por factura).
-    const result = await dependencies.withCreditLock(credito_id, () =>
-      dependencies.runTransaction(async (tx) => {
+    const result = await dependencies.withCreditLock(credito_id, async () => {
+      // 🧷 Intentos de certificación sin resolver (write-ahead): un DTE pudo
+      // quedar certificado en SAT sin fila — esta reversa no lo vería en su
+      // lista de anulación y "reversaría" dejándolo VIVO. Chequeo BAJO el lock
+      // (Codex P1 r18). Se resuelve con consultarPorIdInterno y recuperar/
+      // borrar el intento; luego la reversa procede.
+      const intentosPendientes = await (dependencies.checkPendingIntents ?? intentosCertificacionHuerfanos)(pago_id);
+      if (intentosPendientes.length > 0) {
+        throw new Error("PENDING_CERTIFICATION_INTENTS");
+      }
+      return dependencies.runTransaction(async (tx) => {
       // ======================================================================
       // 2️⃣ OBTENER DATOS DEL PAGO A REVERSAR
       // ======================================================================
@@ -704,7 +717,8 @@ export function createReversePayment(
         facturasDelPago,
         reversionEspejo,
       };
-    }));
+    });
+    });
     transactionCommitted = true;
 // La reversión NO recalcula ninguna otra fila del crédito. La transacción de
 // arriba ya deja todo consistente (pago reseteado, capital/deuda restaurados).
@@ -1081,6 +1095,16 @@ export function createReversePayment(
     }
 
     // Determinar status code según el tipo de error
+    if (errorMessage === "PENDING_CERTIFICATION_INTENTS") {
+      set.status = 409;
+      return {
+        message:
+          "No se puede reversar: el pago tiene intento(s) de certificación sin resolver — un DTE pudo quedar " +
+          "certificado en SAT sin fila en la base. Reconcílielos primero (consultarPorIdInterno con el id_interno " +
+          "del intento) y vuelva a intentar la reversa.",
+        error: "PENDING_CERTIFICATION_INTENTS",
+      };
+    }
     if (errorMessage === "Payment not found") {
       set.status = 404;
     } else if (

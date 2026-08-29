@@ -50,6 +50,8 @@ const revertPaymentToPending = createRevertPaymentToPending({
   emitTerminal: (event) => emitted.push(event),
   // Stub del advisory lock: el real conecta al lockPool (no hay BD en tests).
   acquireLock: async () => async () => {},
+  // Stub del write-ahead: el real consulta la BD.
+  checkPendingIntents: async () => [],
 });
 
 const credit = {

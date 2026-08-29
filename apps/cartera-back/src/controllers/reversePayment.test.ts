@@ -144,6 +144,8 @@ function createPersistenceHarness(
     // abriría conexión al lockPool.
     withCreditLock: ((_creditoId: number, fn: () => Promise<unknown>) =>
       fn()) as ReversePaymentDependencies["withCreditLock"],
+    // Stub del write-ahead: el real consulta la BD.
+    checkPendingIntents: async () => [],
   });
   return { handler, runTransaction };
 }

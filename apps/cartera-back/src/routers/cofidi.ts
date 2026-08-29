@@ -14,6 +14,7 @@ import { calcularSplitInteresPci } from "../cofidi/splitInteresPci";
 import { computarDiffFacturas, keyIntereses } from "../cofidi/facturasFaltantes";
 import {
   fusionarFacturaError,
+  intentosCertificacionHuerfanos,
   registrarEstadoFacturacion,
 } from "../controllers/estadoFacturacionPago";
 import { adquirirPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
@@ -629,26 +630,7 @@ if (facturasExistentes.length > 0) {
       //    anterior pudo certificar en SAT sin dejar fila NI rastro en
       //    factura_error (crash duro). Evidencia durable: ni el sync de Excel
       //    ni ninguna reescritura de factura_error la puede pisar.
-      // Match por (pago_id, id_interno): el id_interno es random de 8 dígitos
-      // SIN unicidad global — una fila de OTRO pago con el mismo número no
-      // reconcilia este intento (Codex P1 r17). Dentro del mismo pago, la fila
-      // con ese id_interno ES la del intento por construcción.
-      await db.execute(sql`
-        DELETE FROM cartera.facturacion_intentos fi
-        WHERE fi.pago_id = ${pago_id}
-          AND EXISTS (
-            SELECT 1 FROM cartera.facturas_electronicas f
-            WHERE f.pago_id = fi.pago_id
-              AND f.id_interno = fi.id_interno
-          )
-      `);
-      const intentosRes = await db.execute(sql`
-        SELECT intento_id, rubro, inversionista_id, id_interno, created_at
-        FROM cartera.facturacion_intentos
-        WHERE pago_id = ${pago_id}
-        ORDER BY intento_id
-      `);
-      const intentosHuerfanos = ((intentosRes as any).rows ?? []) as any[];
+      const intentosHuerfanos = await intentosCertificacionHuerfanos(pago_id);
       if (intentosHuerfanos.length > 0) {
         console.log(
           `⛔ Pago ${pago_id} con ${intentosHuerfanos.length} intento(s) de certificación sin resolver — bloqueado.`

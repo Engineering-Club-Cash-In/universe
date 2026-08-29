@@ -13,6 +13,7 @@ import {
 } from "../database/db";
 import { processAndReplaceCreditInvestorsReverse } from "./investor";
 import { anularFacturaEnCofidi } from "./reversePayment";
+import { intentosCertificacionHuerfanos } from "./estadoFacturacionPago";
 import { emitPaymentReversalToPending } from "../utils/structuredLogger";
 
 function safeNow(): number {
@@ -73,6 +74,8 @@ export interface RevertPaymentToPendingDependencies {
   readonly emitTerminal: typeof emitPaymentReversalToPending;
   /** Advisory lock por crédito (inyectable en tests: el real toca el lockPool). */
   readonly acquireLock?: typeof adquirirPaymentAdvisoryLock;
+  /** Chequeo de intentos write-ahead (inyectable en tests: el real toca la BD). */
+  readonly checkPendingIntents?: typeof intentosCertificacionHuerfanos;
 }
 
 const defaultDependencies: RevertPaymentToPendingDependencies = {
@@ -82,6 +85,7 @@ const defaultDependencies: RevertPaymentToPendingDependencies = {
   setCapitalSource,
   emitTerminal: emitPaymentReversalToPending,
   acquireLock: adquirirPaymentAdvisoryLock,
+  checkPendingIntents: intentosCertificacionHuerfanos,
 };
 
 async function reverseAndCleanInvestors(
@@ -132,6 +136,26 @@ export function createRevertPaymentToPending(
     // flujo también anula DTEs y no debe cruzarse con una facturación en curso
     // del mismo crédito. (Codex P1 del PR)
     soltarLockRevert = await (dependencies.acquireLock ?? adquirirPaymentAdvisoryLock)(credito_id);
+
+    // 🧷 Igual que la reversa: con intentos de certificación sin resolver, un
+    // DTE pudo quedar certificado en SAT sin fila y este flujo lo dejaría VIVO
+    // al reversar. Chequeo bajo el lock. (Codex P1 r18)
+    const intentosPendientes = await (dependencies.checkPendingIntents ?? intentosCertificacionHuerfanos)(pago_id);
+    if (intentosPendientes.length > 0) {
+      dependencies.emitTerminal({
+        outcome: "rejected",
+        reasonCode: "state_conflict",
+        durationMs: elapsedMilliseconds(startedAt),
+      });
+      set.status = 409;
+      return {
+        message:
+          "No se puede pasar a pendiente: el pago tiene intento(s) de certificación sin resolver — un DTE pudo " +
+          "quedar certificado en SAT sin fila en la base. Reconcílielos primero (consultarPorIdInterno) y reintente.",
+        error: "PENDING_CERTIFICATION_INTENTS",
+        intentos: intentosPendientes,
+      };
+    }
 
     // 🔥 INICIAR TRANSACCIÓN ATÓMICA
     const result = await dependencies.runTransaction(async (tx) => {

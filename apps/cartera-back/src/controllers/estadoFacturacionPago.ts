@@ -16,7 +16,7 @@
  * Vive fuera de `routers/cofidi.ts` a propósito: es la única pieza que decide
  * el estado, y la usan la facturación, la validación del pago y la reversión.
  */
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "../database";
 import { pagos_credito } from "../database/db";
 import type { FacturaRubro, PagoFacturaStatus } from "../database/db/schema";
@@ -177,6 +177,45 @@ export function tieneMontosFacturables(pago: MontosFacturablesPago): boolean {
     pago.mora,
     pago.otros,
   ].some(positivo);
+}
+
+export type IntentoCertificacionHuerfano = {
+  intento_id: number;
+  rubro: string;
+  inversionista_id: number | null;
+  id_interno: string;
+  created_at: unknown;
+};
+
+/**
+ * Reconcilia y devuelve los intentos de certificación HUÉRFANOS de un pago
+ * (write-ahead `facturacion_intentos`): primero borra los que ya tienen fila
+ * en facturas_electronicas — match por (pago_id, id_interno); el id no es
+ * único global — y devuelve los restantes. Un huérfano = "SAT pudo certificar
+ * y no hay fila": la facturación, la reversa y el revert-a-pending deben
+ * NEGARSE a proceder mientras exista (bajo el lock por crédito). Se resuelven
+ * con consultarPorIdInterno (COFIDI): si el DTE existe → recuperar la fila
+ * (el intento se limpia solo al aparecer); si no existe → borrar el intento.
+ */
+export async function intentosCertificacionHuerfanos(
+  pagoId: number,
+): Promise<IntentoCertificacionHuerfano[]> {
+  await db.execute(sql`
+    DELETE FROM cartera.facturacion_intentos fi
+    WHERE fi.pago_id = ${pagoId}
+      AND EXISTS (
+        SELECT 1 FROM cartera.facturas_electronicas f
+        WHERE f.pago_id = fi.pago_id
+          AND f.id_interno = fi.id_interno
+      )
+  `);
+  const res = await db.execute(sql`
+    SELECT intento_id, rubro, inversionista_id, id_interno, created_at
+    FROM cartera.facturacion_intentos
+    WHERE pago_id = ${pagoId}
+    ORDER BY intento_id
+  `);
+  return (((res as any).rows ?? []) as IntentoCertificacionHuerfano[]);
 }
 
 /**

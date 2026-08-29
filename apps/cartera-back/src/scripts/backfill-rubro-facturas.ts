@@ -468,6 +468,7 @@ async function simularReemisiones(
 
   const pagosRes = await db.execute(sql`
     SELECT pc.pago_id, pc.credito_id, pc.validation_status,
+           pc.factura_error,
            pc.mora, pc.otros, pc.abono_seguro, pc.abono_gps, pc.membresias_pago,
            pc.abono_interes, pc.abono_iva_12,
            c.bandera_reinversion,
@@ -518,6 +519,31 @@ async function simularReemisiones(
     activasPorPago.set(r.pago_id, arr);
   }
 
+  // Evidencia para la regla (f), IGUAL que el handler real (r24): anuladas con
+  // rubro + rechazos del write-ahead + fallidos de factura_error. Sin esto el
+  // simulador sub-estima re-facturables vs lo que el endpoint permitiría.
+  const anuladasRes = await db.execute(sql`
+    SELECT pago_id, rubro, inversionista_id
+    FROM cartera.facturas_electronicas
+    WHERE pago_id = ANY(string_to_array(${idsCsv(ids)}, ',')::int[])
+      AND status = 'ANULADA' AND rubro IS NOT NULL
+  `);
+  const rechazadosRes = await db.execute(sql`
+    SELECT DISTINCT pago_id, rubro, inversionista_id
+    FROM cartera.facturacion_intentos
+    WHERE pago_id = ANY(string_to_array(${idsCsv(ids)}, ',')::int[])
+      AND resultado = 'RECHAZADO'
+  `);
+  const evidenciaPorPago = new Map<number, any[]>();
+  for (const r of [
+    ...(((anuladasRes as any).rows ?? []) as any[]),
+    ...(((rechazadosRes as any).rows ?? []) as any[]),
+  ]) {
+    const arr = evidenciaPorPago.get(r.pago_id) ?? [];
+    arr.push({ rubro: r.rubro, inversionista_id: r.inversionista_id });
+    evidenciaPorPago.set(r.pago_id, arr);
+  }
+
   const filas: {
     pago_id: number;
     credito_id: number;
@@ -561,11 +587,24 @@ async function simularReemisiones(
       };
     });
 
+    const fallidosPrevios = [
+      ...(() => {
+        if (typeof p.factura_error !== "string" || !p.factura_error) return [];
+        try {
+          const parsed = JSON.parse(p.factura_error);
+          return Array.isArray(parsed) ? parsed : [];
+        } catch {
+          return [];
+        }
+      })(),
+      ...(evidenciaPorPago.get(p.pago_id) ?? []),
+    ];
     const diff = computarDiffFacturas({
       pagoData: p,
       inversionistas: roster,
       activas,
       tieneOperacionesPendientesFacturar: p.prorrateo_pendiente === true,
+      fallidosPrevios,
     });
 
     if (diff.modo !== "FALTANTES" || diff.faltantes.size === 0) continue;

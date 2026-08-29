@@ -109,3 +109,32 @@ WHERE f.factura_id = m.factura_id
   AND m.rubro_factura IS NOT NULL;
 
 COMMIT;
+
+-- ============================================================================
+-- WRITE-AHEAD DE CERTIFICACIÓN (r16 del review): la intención de emitir se
+-- persiste ANTES de llamar a SAT y se borra al quedar la fila en
+-- facturas_electronicas. Un intento huérfano = "SAT pudo certificar y no hay
+-- fila" con evidencia DURABLE: sobrevive crash duro (OOM/deploy/kill, donde ni
+-- el catch corre) y no vive en factura_error (que otros flujos reescriben).
+-- /facturar-pago-completo responde 409 mientras el pago tenga intentos
+-- huérfanos; se reconcilian con consultarPorIdInterno (COFIDI) — por eso
+-- facturas_electronicas ahora guarda id_interno: si la fila aparece (incluso
+-- recuperada a mano), el intento se limpia solo.
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS cartera.facturacion_intentos (
+  intento_id serial PRIMARY KEY,
+  pago_id integer NOT NULL,
+  rubro text NOT NULL,
+  inversionista_id integer,
+  id_interno text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_facturacion_intentos_pago
+  ON cartera.facturacion_intentos (pago_id);
+
+ALTER TABLE cartera.facturas_electronicas
+  ADD COLUMN IF NOT EXISTS id_interno text;
+
+COMMIT;

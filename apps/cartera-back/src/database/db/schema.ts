@@ -1353,6 +1353,8 @@
     rubro: text("rubro").$type<FacturaRubro>(),
     /** Solo en facturas de intereses: de quién es la participación facturada. */
     inversionista_id: integer("inversionista_id"),
+    /** idInterno con que se certificó en COFIDI (para reconciliar intentos). */
+    id_interno: text("id_interno"),
     fecha_anulacion: timestamp("fecha_anulacion"),
     motivo_anulacion: text("motivo_anulacion"),
     anulada_por: integer("anulada_por").references(() => platform_users.id),
@@ -1373,6 +1375,29 @@
   //    - fecha_aplicado_gt = fecha_aplicado del pago en zona America/Guatemala.
   //    - La categoría NO se guarda: sale por JOIN pago→crédito→usuario.
   // ============================================
+  // ============================================
+  // 🧷 TABLA: facturacion_intentos (write-ahead de certificación)
+  //    La intención de emitir un DTE se persiste ANTES de llamar a SAT y se
+  //    borra al quedar la fila en facturas_electronicas. Un intento huérfano =
+  //    "SAT pudo certificar y no hay fila", con evidencia que sobrevive crash
+  //    duro y reescrituras de factura_error. /facturar-pago-completo responde
+  //    409 mientras existan; se reconcilian vía consultarPorIdInterno.
+  // ============================================
+  export const facturacion_intentos = customSchema.table(
+    "facturacion_intentos",
+    {
+      intento_id: serial("intento_id").primaryKey(),
+      pago_id: integer("pago_id").notNull(),
+      rubro: text("rubro").notNull(),
+      inversionista_id: integer("inversionista_id"),
+      id_interno: text("id_interno").notNull(),
+      created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    },
+    (table) => ({
+      idxPago: index("idx_facturacion_intentos_pago").on(table.pago_id),
+    })
+  );
+
   export const facturacion_desglose = customSchema.table(
     "facturacion_desglose",
     {

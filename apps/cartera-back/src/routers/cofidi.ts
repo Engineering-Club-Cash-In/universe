@@ -24,6 +24,7 @@ import {
   creditos_inversionistas_espejo,
   cuotas_credito,
   facturas_electronicas,
+  facturacion_intentos,
   inversionistas,
   pagos_credito,
   pagos_credito_inversionistas,
@@ -616,6 +617,48 @@ if (facturasExistentes.length > 0) {
       //    conciliación con el uuid del marcador). Solo se deja pasar el caso
       //    "faltantes vacío": ahí la fila ya se recuperó y la reconciliación a
       //    OK limpia el marcador.
+      // 🧷 Intentos huérfanos (write-ahead): primero auto-reconciliar los que
+      //    ya tienen fila (id_interno matchea — incluso si la fila se recuperó
+      //    a mano) y bloquear si queda alguno: significa que una corrida
+      //    anterior pudo certificar en SAT sin dejar fila NI rastro en
+      //    factura_error (crash duro). Evidencia durable: ni el sync de Excel
+      //    ni ninguna reescritura de factura_error la puede pisar.
+      await db.execute(sql`
+        DELETE FROM cartera.facturacion_intentos fi
+        WHERE fi.pago_id = ${pago_id}
+          AND EXISTS (
+            SELECT 1 FROM cartera.facturas_electronicas f
+            WHERE f.id_interno = fi.id_interno
+          )
+      `);
+      const intentosRes = await db.execute(sql`
+        SELECT intento_id, rubro, inversionista_id, id_interno, created_at
+        FROM cartera.facturacion_intentos
+        WHERE pago_id = ${pago_id}
+        ORDER BY intento_id
+      `);
+      const intentosHuerfanos = ((intentosRes as any).rows ?? []) as any[];
+      if (intentosHuerfanos.length > 0) {
+        console.log(
+          `⛔ Pago ${pago_id} con ${intentosHuerfanos.length} intento(s) de certificación sin resolver — bloqueado.`
+        );
+        set.status = 409;
+        return {
+          success: false,
+          message:
+            "Una corrida anterior dejó intento(s) de certificación sin resolver: el DTE pudo quedar " +
+            "certificado en SAT sin fila en la base. NO se puede re-facturar hasta reconciliarlos " +
+            "(consultar COFIDI por id_interno y recuperar la fila, o confirmar que no se emitió y borrar el intento).",
+          intentos: intentosHuerfanos.map((i) => ({
+            intento_id: i.intento_id,
+            rubro: i.rubro,
+            inversionista_id: i.inversionista_id,
+            id_interno: i.id_interno,
+            created_at: i.created_at,
+          })),
+        };
+      }
+
       const hayCertificadoSinBD =
         typeof pagoData.factura_error === "string" &&
         pagoData.factura_error.includes("[DTE_CERTIFICADO_SIN_BD]");
@@ -4798,6 +4841,26 @@ async function certificarFacturaHelper({
     // 1️⃣ AUTO-GENERAR CAMPOS
     // ============================================
     const idInterno = generarIdInternoRandom();
+
+    // 🧷 WRITE-AHEAD (r16): la intención de emitir queda persistida ANTES de
+    //    llamar a SAT — si el proceso muere en cualquier punto posterior (ni
+    //    catch ni marcador alcanzan a correr), el intento huérfano queda como
+    //    evidencia durable y el endpoint bloquea re-emisiones hasta
+    //    reconciliarlo (consultarPorIdInterno con este id_interno). Se borra
+    //    al persistir la fila. Solo aplica a los flujos del diff (pago+rubro).
+    let intentoWriteAheadId: number | null = null;
+    if (pago_id && rubro) {
+      const [intento] = await db
+        .insert(facturacion_intentos)
+        .values({
+          pago_id,
+          rubro,
+          inversionista_id: inversionista_id ?? null,
+          id_interno: idInterno,
+        })
+        .returning({ intento_id: facturacion_intentos.intento_id });
+      intentoWriteAheadId = intento.intento_id;
+    }
 const fechaGuatemala = new Date();
 fechaGuatemala.setUTCHours(fechaGuatemala.getUTCHours() - 6);
 
@@ -4862,6 +4925,22 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
       fechaHoraEmision,
     };
 
+    // COFIDI RECHAZÓ sin emitir (validación): el intento write-ahead se
+    // descarta — no hay DTE que reconciliar y dejarlo bloquearía el re-run
+    // legítimo. Los fallos AMBIGUOS (timeout, respuesta ilegible) NO lo
+    // descartan: ahí el DTE pudo quedar certificado.
+    const descartarIntentoPorRechazo = async () => {
+      if (intentoWriteAheadId == null) return;
+      try {
+        await db
+          .delete(facturacion_intentos)
+          .where(eq(facturacion_intentos.intento_id, intentoWriteAheadId));
+      } catch {
+        // best-effort: un intento de un rechazo queda reconciliable a mano
+        // (consultarPorIdInterno devolverá 'no existe').
+      }
+    };
+
     let resultado;
     try {
       resultado = await dteService.generarYCertificarDTE(
@@ -4879,6 +4958,7 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
         certError.message || "Error desconocido en certificación";
 
       if (errorMessage.includes("Cuenta no se encuentra activa")) {
+        await descartarIntentoPorRechazo();
         throw new Error(
           `La cuenta del emisor (NIT: ${CLUB_CASHIN_CONFIG.emisor.nit}) no está activa en COFIDI. ` +
             `Por favor contacte a COFIDI para activar la cuenta antes de generar facturas.`
@@ -4886,6 +4966,7 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
       }
 
       if (errorMessage.includes("Error encontrado en usuario")) {
+        await descartarIntentoPorRechazo();
         throw new Error(
           `Las credenciales de certificación no son válidas. ` +
             `Verifique con COFIDI que el usuario '${SAT_CONFIG.user}' tenga permisos activos.`
@@ -4895,6 +4976,7 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
       if (errorMessage.includes("NIT del Receptor es inválido") || errorMessage.includes("1014")) {
         // 🔥 Si hay NITs alternativos, intentar con el siguiente
         if (nitsFallback.length > 0) {
+          await descartarIntentoPorRechazo();
           const siguienteNit = nitsFallback[0];
           const restantesFallback = nitsFallback.slice(1);
           console.log(`   🔄 NIT "${receptor.idReceptor}" inválido, reintentando con: "${siguienteNit}"`);
@@ -4914,6 +4996,7 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
         }
 
         // 🔥 Sin más NITs alternativos → FALLAR (NO caer en "CF")
+        await descartarIntentoPorRechazo();
         throw new Error(
           `NIT del receptor inválido. NIT enviado: "${receptor.idReceptor}" para "${receptor.nombreReceptor}". ` +
             `Respuesta COFIDI: ${errorMessage}`
@@ -4921,6 +5004,7 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
       }
 
       if (errorMessage.includes("Certificación falló")) {
+        await descartarIntentoPorRechazo();
         throw new Error(
           `Error al certificar con SAT: ${errorMessage}. ` +
             `Contacte al administrador del sistema o a COFIDI para resolver este problema.`
@@ -5161,6 +5245,7 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
         // 🧩 Etiqueta del rubro (NULL para genéricas / llamadores que no lo pasan).
         rubro: rubro ?? null,
         inversionista_id: inversionista_id ?? null,
+        id_interno: idInterno,
       })
       .returning();
 
@@ -5181,6 +5266,22 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
     }
 
     console.log(`   ✅ Factura guardada en BD - ID: ${facturaGuardada.factura_id}`);
+
+    // 🧷 La fila ya existe: el write-ahead cumplió su función. Best-effort — si
+    //    este DELETE falla, la auto-reconciliación del endpoint lo limpia
+    //    (el id_interno del intento ya matchea una fila).
+    if (intentoWriteAheadId != null) {
+      try {
+        await db
+          .delete(facturacion_intentos)
+          .where(eq(facturacion_intentos.intento_id, intentoWriteAheadId));
+      } catch (limpiezaIntentoError: any) {
+        console.error(
+          `   ⚠️ No se pudo borrar el intento write-ahead ${intentoWriteAheadId} (se auto-reconciliará):`,
+          limpiezaIntentoError?.message
+        );
+      }
+    }
     console.log('📅 Fecha certificación guardada (Guatemala):', facturaGuardada.fecha_certificacion);
 
     // ============================================

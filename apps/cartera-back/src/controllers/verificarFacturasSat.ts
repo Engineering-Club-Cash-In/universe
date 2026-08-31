@@ -210,6 +210,12 @@ export async function verificarFacturasSat() {
       receptor_nombre: facturas_electronicas.receptor_nombre,
       monto_total: facturas_electronicas.monto_total,
       fecha_certificacion: facturas_electronicas.fecha_certificacion,
+      // El grace se evalúa en SQL, contra la hora de pared de Guatemala.
+      // certificarFacturaHelper persiste fecha_certificacion YA en hora GT (le
+      // resta 6h antes de guardar), así que leerla con `new Date()` en un
+      // proceso que corre en UTC la desplazaba 6 horas al pasado: toda factura
+      // se veía vieja y pasaba el grace de inmediato, sin importar su valor.
+      elegible: sql<boolean>`coalesce(${facturas_electronicas.fecha_certificacion} <= (now() AT TIME ZONE 'America/Guatemala') - make_interval(mins => ${GRACE_MINUTES}::int), false)`,
     })
     .from(facturas_electronicas)
     .where(
@@ -234,13 +240,11 @@ export async function verificarFacturasSat() {
   // esa factura: se reintentará en la próxima corrida. Así una caída de SAT no
   // hace que se salten facturas para siempre.
   let congelado = false;
-  const fechaLimite = Date.now() - GRACE_MINUTES * 60 * 1000;
 
   for (const f of candidatos) {
-    const fechaCertificacion = f.fecha_certificacion
-      ? new Date(f.fecha_certificacion).getTime()
-      : Number.NaN;
-    if (!Number.isFinite(fechaCertificacion) || fechaCertificacion > fechaLimite) {
+    // Sin fecha de certificación tampoco se concluye nada (elegible viene en
+    // false), igual que antes: se corta acá y se reintenta en la próxima corrida.
+    if (!f.elegible) {
       console.log(
         `🧾 [verificarFacturasSat] Factura ${f.serie}-${f.numero} (${f.factura_id}) aún no es elegible por grace. Cursor detenido en ${maxId}.`
       );

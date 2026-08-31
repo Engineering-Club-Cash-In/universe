@@ -750,11 +750,22 @@ async function marcarLinkTerminalEnTx(
 		.where(eq(pagaloPaymentGroups.id, link.groupId))
 		.for("update");
 	const [fresco] = await tx
-		.select({ status: pagaloPaymentLinks.status })
+		.select({ status: pagaloPaymentLinks.status, pollClaimedAt: pagaloPaymentLinks.pollClaimedAt })
 		.from(pagaloPaymentLinks)
 		.where(eq(pagaloPaymentLinks.id, link.id))
 		.for("update");
 	if (!fresco || fresco.status === "PAID") return;
+	// Gateado por el mismo pollClaimedAt del lease bajo el que se decidió
+	// finalizar: si la consulta HTTP que llevó a esta decisión tardó más que
+	// el lease y otro worker ya reclamó el link (pudo haber observado una
+	// transacción real PENDING que este worker viejo nunca vio), esta
+	// corrida no debe pisar esa observación más fresca con un CANCELLED/
+	// EXPIRED basado en datos obsoletos — perdería ese pago para siempre
+	// (hallazgo de code review).
+	const leaseVigente = link.pollClaimedAt
+		? fresco.pollClaimedAt?.getTime() === link.pollClaimedAt.getTime()
+		: fresco.pollClaimedAt === null;
+	if (!leaseVigente) return;
 	await tx
 		.update(pagaloPaymentLinks)
 		.set({

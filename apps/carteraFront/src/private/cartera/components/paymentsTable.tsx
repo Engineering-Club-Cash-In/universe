@@ -32,6 +32,7 @@ import {
   Handshake,
   CheckCircle,
   RotateCcw,
+  Link2,
 } from "lucide-react";
 import { Combobox, Transition } from "@headlessui/react";
 import {
@@ -160,7 +161,7 @@ function CancelacionRubros({
 
   const handleGuardar = () => {
     editPayment.mutate(
-      { pagoId, params: { otros: total } },
+      { pagoId, params: { otros: String(total) } },
       {
         onSuccess: () => {
           toast.success("Rubros de cancelación aplicados correctamente");
@@ -1344,6 +1345,15 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                           Pendiente de facturar
                         </span>
                       )}
+                      {pago.origenPago === "pagalo" && (
+                        <span
+                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full font-semibold text-xs bg-purple-100 text-purple-700"
+                          title="Este pago se registró desde un link de pago de Pagalo"
+                        >
+                          <Link2 className="w-3.5 h-3.5" />
+                          Pagalo
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -1822,6 +1832,15 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                             >
                               <Receipt className="w-4 h-4" />
                               Pendiente de facturar
+                            </span>
+                          )}
+                          {pago.origenPago === "pagalo" && (
+                            <span
+                              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full font-semibold text-sm bg-purple-100 text-purple-700"
+                              title="Este pago se registró desde un link de pago de Pagalo"
+                            >
+                              <Link2 className="w-4 h-4" />
+                              Pagalo
                             </span>
                           )}
                         </div>

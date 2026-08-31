@@ -1861,6 +1861,8 @@ export interface PagoDataInvestor {
   fechaBoleta: string | null;
   numeroautorizacion: string | null;
   validationStatus: string;
+  /** Origen del pago: transferencia | cheque | boleta | pagalo (viene de origen_pago en DB). */
+  origenPago: "transferencia" | "cheque" | "boleta" | "pagalo" | null;
   /** Estado de la facturación del pago (cartera, migración 0014). NULL en los viejos. */
   facturaStatus: EstadoFacturacionPago | null;
 

@@ -292,10 +292,10 @@ function allocateRoundedAmountsToTarget(
 ) {
   const rawCents = values.map((value) => new Big(value).times(100));
   const allocated = rawCents.map((value) => value.round(0, Big.roundDown));
-  const remainder = target
-    .minus(allocated.reduce((total, value) => total.plus(value), new Big(0)))
-    .toNumber();
-  const direction = Math.sign(remainder);
+  const delta = target.minus(
+    allocated.reduce((total, value) => total.plus(value), new Big(0)),
+  );
+  const direction = delta.cmp(0);
   const order = rawCents
     .map((value, index) => ({
       index,
@@ -306,18 +306,63 @@ function allocateRoundedAmountsToTarget(
       return difference !== 0 ? difference : a.index - b.index;
     });
 
-  for (let index = 0; index < Math.abs(remainder); index++) {
-    const eligible =
-      direction < 0
-        ? order.filter(({ index: candidateIndex }) =>
-            allocated[candidateIndex].gt(0),
-          )
-        : order;
-    const destination = eligible[index % eligible.length];
-    if (!destination) {
-      throw new Error("No se pudo distribuir el residuo monetario sin negativos");
+  if (direction > 0) {
+    if (order.length === 0) {
+      throw new Error("No se pudo distribuir el residuo monetario");
     }
-    allocated[destination.index] = allocated[destination.index].plus(direction);
+    const count = new Big(order.length);
+    const rounds = delta.div(count).round(0, Big.roundDown);
+    for (const destination of order) {
+      allocated[destination.index] = allocated[destination.index].plus(rounds);
+    }
+    const residual = delta.minus(rounds.times(count)).toNumber();
+    for (let index = 0; index < residual; index++) {
+      const destination = order[index];
+      if (!destination) break;
+      allocated[destination.index] = allocated[destination.index].plus(1);
+    }
+  } else if (direction < 0) {
+    let remaining = delta.abs();
+    let processed = new Big(0);
+    while (remaining.gt(0)) {
+      const eligible = order.filter(({ index }) => allocated[index].gt(0));
+      if (eligible.length === 0) {
+        throw new Error("No se pudo distribuir el residuo monetario sin negativos");
+      }
+      const count = new Big(eligible.length);
+      const requestedRounds = remaining.div(count).round(0, Big.roundDown);
+      if (requestedRounds.gt(0)) {
+        const firstEligible = eligible[0];
+        if (!firstEligible) {
+          throw new Error("No se pudo distribuir el residuo monetario sin negativos");
+        }
+        const availableRounds = eligible.reduce(
+          (minimum, { index }) =>
+            minimum.lt(allocated[index]) ? minimum : allocated[index],
+          allocated[firstEligible.index],
+        );
+        const safeAvailableRounds = availableRounds.minus(1);
+        const rounds = requestedRounds.lt(safeAvailableRounds)
+          ? requestedRounds
+          : safeAvailableRounds;
+        if (rounds.gt(0)) {
+          for (const destination of eligible) {
+            allocated[destination.index] = allocated[destination.index].minus(rounds);
+          }
+          const distributed = rounds.times(count);
+          remaining = remaining.minus(distributed);
+          processed = processed.plus(distributed);
+          continue;
+        }
+      }
+      const destination = eligible[processed.mod(count).toNumber()];
+      if (!destination) {
+        throw new Error("No se pudo distribuir el residuo monetario sin negativos");
+      }
+      allocated[destination.index] = allocated[destination.index].minus(1);
+      remaining = remaining.minus(1);
+      processed = processed.plus(1);
+    }
   }
 
   return allocated.map((value) => value.div(100).toFixed(2));

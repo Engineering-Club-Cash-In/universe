@@ -68,6 +68,82 @@ test("asigna una sola vez el residuo de centavo entre modalidades", () => {
   expect(rows.map((row) => row.total_cuota)).toEqual(["0.00", "0.00"]);
 });
 
+test("conserva el cursor histórico cuando una fila llega a cero", () => {
+  const rows = canonicalizeLiquidationModeRows([
+    {
+      reinversion_capital: "0",
+      reinversion_interes: "0.01",
+      reinversion_total: "0.01",
+      total_capital: "0",
+      total_interes: "0",
+      total_iva: "0",
+      total_isr: "0",
+      total_distribuido: "0.01",
+    },
+    {
+      reinversion_capital: "0",
+      reinversion_interes: "0.01",
+      reinversion_total: "0",
+      total_capital: "0",
+      total_interes: "0",
+      total_iva: "0",
+      total_isr: "0",
+      total_distribuido: "0",
+    },
+    {
+      reinversion_capital: "0",
+      reinversion_interes: "0.01",
+      reinversion_total: "0",
+      total_capital: "0",
+      total_interes: "0",
+      total_iva: "0",
+      total_isr: "0",
+      total_distribuido: "0",
+    },
+  ]);
+
+  expect(rows.map((row) => row.reinversion_interes)).toEqual([
+    "0.00",
+    "0.01",
+    "0.00",
+  ]);
+});
+
+test("distribuye un ajuste monetario grande en tiempo acotado", () => {
+  const rows = [
+    {
+      reinversion_capital: "473.9982",
+      reinversion_interes: "0",
+      reinversion_total: "473.9982",
+      total_capital: "473.9982",
+      total_interes: "333.4669",
+      total_iva: "40.0159",
+      total_isr: "0",
+      total_distribuido: "847.481",
+    },
+    {
+      reinversion_capital: "0",
+      reinversion_interes: "0",
+      reinversion_total: "23871.4168",
+      total_capital: "29423.6614",
+      total_interes: "9575.2555",
+      total_iva: "1150.3373",
+      total_isr: "107.6698",
+      total_distribuido: "39867.8965",
+    },
+  ];
+
+  const startedAt = performance.now();
+  const result = canonicalizeLiquidationModeRows(rows);
+  const elapsedMs = performance.now() - startedAt;
+
+  expect(result.map((row) => row.reinversion_total)).toEqual([
+    "474.00",
+    "10817.72",
+  ]);
+  expect(elapsedMs).toBeLessThan(250);
+});
+
 test("preserva reinversión de capital dentro del capital al repartir un centavo", () => {
   const rows = canonicalizeLiquidationModeRows([
     {

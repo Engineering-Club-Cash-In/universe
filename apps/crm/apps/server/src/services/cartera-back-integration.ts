@@ -13,6 +13,7 @@ import {
 	pagoReferences,
 } from "../db/schema";
 import type {
+	AjusteFechaIdealPayload,
 	CarteraCredito,
 	CarteraPagoCredito,
 	CreateCreditoInput,
@@ -153,6 +154,7 @@ export interface CreateCreditoParams {
 	codigo_postal?: string | null;
 	pais?: string | null;
 	dia_pago_mensual?: number;
+	ajuste_fecha_ideal?: AjusteFechaIdealPayload;
 	// Campos para el correo de notificación
 	vehiculo_marca?: string;
 	vehiculo_linea?: string;
@@ -202,6 +204,7 @@ export async function createCreditoInCarteraBack(
 			categoria: params.categoria,
 			nit: params.nit,
 			dia_pago_mensual: params.dia_pago_mensual,
+			ajuste_fecha_ideal: params.ajuste_fecha_ideal,
 			royalti: params.royalti ?? 0,
 			porcentaje_royalti: params.porcentaje_royalti ?? 0,
 			inversionistas: params.inversionistas,

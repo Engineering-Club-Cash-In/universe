@@ -42,6 +42,7 @@ mock.module("../database", () => {
   };
 
   return {
+    client: {},
     db: {
       transaction: async (callback: (transactionClient: typeof tx) => Promise<unknown>) => {
         transactionCalls += 1;

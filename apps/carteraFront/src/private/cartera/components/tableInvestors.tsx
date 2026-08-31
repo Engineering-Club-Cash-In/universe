@@ -1,5 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import {
+  formatearRazonLiquidacion,
+  getApiErrorMessage,
+  getBatchFailedCredits,
+  getLiquidationFailureReasons,
+  getPendingReturnWarningMessage,
+} from "@/lib/apiError";
+import { matchesSearch } from "@/lib/utils";
+import {
   Check,
   CheckCircle,
   ChevronDown,
@@ -210,7 +218,18 @@ export function TableInvestors() {
         }
       },
       onError: (error) => {
-        alert(`❌ Error al calcular pagos: ${error.message}`);
+        const warning = getPendingReturnWarningMessage(error);
+        if (warning) {
+          toast.warning("Generación bloqueada", { description: warning, duration: 12000 });
+        } else {
+          const fallidos = getBatchFailedCredits(error);
+          const description = fallidos.length > 0
+            ? fallidos
+                .map((f) => `• ${f.numeroCreditoSifco}: ${formatMensajeFallido(f.mensaje)}`)
+                .join("\n")
+            : undefined;
+          toast.error(getApiErrorMessage(error, "Error al calcular pagos"), { description, duration: 12000 });
+        }
       },
     });
   };
@@ -250,9 +269,20 @@ export function TableInvestors() {
       },
       onError: (error) => {
         console.error("❌ Error al calcular pagos:", error);
-        alert(`Error al calcular pagos: ${error.message}`);
-        setCalcularModalTarget(undefined);
-        setSelectedInversionista(null);
+        const warning = getPendingReturnWarningMessage(error);
+        if (warning) {
+          setCalcularModalTarget(undefined);
+          setSelectedInversionista(null);
+          toast.warning("Generación bloqueada", { description: warning, duration: 12000 });
+        } else {
+          const fallidos = getBatchFailedCredits(error);
+          const description = fallidos.length > 0
+            ? fallidos
+                .map((f) => `• ${f.numeroCreditoSifco}: ${formatMensajeFallido(f.mensaje)}`)
+                .join("\n")
+            : undefined;
+          toast.error(getApiErrorMessage(error, "Error al calcular pagos"), { description, duration: 12000 });
+        }
       },
     });
   };
@@ -272,7 +302,15 @@ export function TableInvestors() {
       {
         onSuccess: (data) => {
           if (data.errores && data.errores.length > 0) {
-            const lista = data.errores.map((e) => `• ${e.razon}`).join("\n");
+            const lista = data.errores.map((e) => {
+              if (e.code === "CREDIT_PENDING_RETURN_AUTHORIZATION") {
+                const sifcos = (e.creditos_bloqueados ?? [])
+                  .map((credito) => credito.numero_credito_sifco)
+                  .join(", ");
+                return `• Pendiente de autorización para devolución a CUBE${sifcos ? `: ${sifcos}` : ""}`;
+              }
+              return `• ${formatearRazonLiquidacion(e.razon)}`;
+            }).join("\n");
             if ((data.liquidaciones_creadas ?? 0) > 0) {
               toast.warning(
                 `Liquidación parcial. ${data.liquidaciones_creadas} liquidado(s). Créditos con inconsistencia:\n${lista}`,
@@ -292,12 +330,28 @@ export function TableInvestors() {
           refetchTotales();
         },
         onError: (error: any) => {
-          const detalle =
-            error?.response?.data?.error ||
-            error?.response?.data?.message ||
-            error?.message ||
-            "Error desconocido";
-          toast.error(`❌ Error al liquidar: ${detalle}`, { duration: 15000 });
+          const warning = getPendingReturnWarningMessage(error);
+          if (warning) {
+            toast.warning("Liquidación bloqueada", { description: warning, duration: 15000 });
+            return;
+          }
+          const razones = getLiquidationFailureReasons(error);
+          if (razones.length > 0) {
+            const lista = razones.map((e) => {
+              if (e.code === "CREDIT_PENDING_RETURN_AUTHORIZATION") {
+                const sifcos = (e.creditos_bloqueados ?? [])
+                  .map((credito) => credito.numero_credito_sifco)
+                  .join(", ");
+                return `• Pendiente de autorización para devolución a CUBE${sifcos ? `: ${sifcos}` : ""}`;
+              }
+              return `• ${e.razon}`;
+            }).join("\n");
+            toast.error(`No se pudo liquidar. Créditos con inconsistencia:\n${lista}`, {
+              duration: 15000,
+            });
+            return;
+          }
+          toast.error(getApiErrorMessage(error, "Error al liquidar"), { duration: 15000 });
         },
       }
     );
@@ -462,14 +516,7 @@ export function TableInvestors() {
   const filteredInvestors =
     query === ""
       ? investors
-      : investors.filter((inv) =>
-          inv.nombre.toLowerCase().includes(query.toLowerCase())
-        );
-
-  const tienePagosPendientes =
-    data?.inversionistas.some((inv) =>
-      (inv.creditos ?? []).some((cred) => (cred.pagos ?? []).length > 0)
-    ) ?? false;
+      : investors.filter((inv) => matchesSearch(inv.nombre, query));
 
   // 🆕 Efecto para activar Modo Borrador automático (Optimizado)
   // Se reducen las dependencias para evitar renders infinitos.
@@ -2683,8 +2730,8 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
           }
         }}
       >
-        <DialogContent className="!bg-white sm:max-w-xl z-[60] border border-gray-200 shadow-2xl rounded-2xl">
-          <DialogHeader>
+        <DialogContent className="!bg-white sm:max-w-xl z-[60] border border-gray-200 shadow-2xl rounded-2xl max-h-[90vh] flex flex-col overflow-hidden">
+          <DialogHeader className="shrink-0">
             <DialogTitle className="text-lg font-bold text-gray-900">
               {compraCarteraTipoOperacion === "reinversion"
                 ? "Reinversión"
@@ -2696,7 +2743,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 : "Ingresa el monto y los porcentajes"}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-2">
+          <div className="space-y-4 py-2 flex-1 overflow-y-auto min-h-0 pr-1">
             <div className="grid grid-cols-2 gap-2 p-1 bg-gray-100 rounded-xl">
               <button
                 type="button"
@@ -3019,7 +3066,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
               </div>
             )}
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0">
             <button
               type="button"
               onClick={() => {

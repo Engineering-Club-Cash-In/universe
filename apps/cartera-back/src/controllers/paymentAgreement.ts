@@ -20,7 +20,12 @@ import {
   calcularAplicacionConvenio,
   calcularCuotasConvenioCompletadas,
 } from "./registerPaymentPolicy";
+<<<<<<< ours
+import { createMora } from "./latefee";
+import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
+=======
 import { contarCuotasVencidasReales, createMora } from "./latefee";
+>>>>>>> theirs
 import { getPagosDelMesActual } from "./payments";
 import { calcularProgresoConvenio } from "./paymentAgreement-helpers";
 import { creditRouter } from "../routers";
@@ -719,6 +724,37 @@ interface ProcessConvenioPaymentResult {
   monto_restante: string; 
 }
 
+<<<<<<< ours
+interface ConvenioPaymentPreparado {
+  /**
+   * Preview del resultado con los montos ya topados: refleja el estado en que
+   * quedará el convenio DESPUÉS de ejecutar `commit`. Nada está persistido
+   * todavía.
+   */
+  resultado: ProcessConvenioPaymentResult;
+  /**
+   * Persiste la acreditación (update de `convenios_pago` + marcado de
+   * `convenio_cuotas`). `null` cuando no hay convenio activo que acreditar.
+   * El caller decide CUÁNDO: debe llamarse solo cuando la boleta ya quedó
+   * escrita en `pagos_credito` — acreditar antes deja el convenio inflado si
+   * una validación posterior rechaza el pago (caso convenio 102 / crédito 72,
+   * 26-ago-2026: cada reintento rechazado por el guard anti-sobreaplicación
+   * sumaba una cuota fantasma).
+   */
+  commit: ((pagoId?: number) => Promise<boolean>) | null;
+}
+
+/**
+ * Calcula la aplicación de una boleta al convenio activo SIN escribir nada.
+ * `processConvenioPayment` es el wrapper calcular+commitear inmediato; el flujo
+ * de `insertPayment` usa esta versión para diferir el commit al éxito.
+ */
+export async function prepararConvenioPayment(
+  params: ProcessConvenioPaymentParams
+): Promise<ConvenioPaymentPreparado> {
+  try {
+    const { credito_id, numero_credito_sifco, monto_pago } = params;
+=======
 type ProcessConvenioPaymentTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 export async function processConvenioPaymentEnTx(
@@ -726,6 +762,7 @@ export async function processConvenioPaymentEnTx(
   tx: ProcessConvenioPaymentTransaction,
 ): Promise<ProcessConvenioPaymentResult> {
     const { credito_id, numero_credito_sifco, monto_pago, creditoInfo, pagoMetadata } = params;
+>>>>>>> theirs
 
     // 1. Validar que se haya proporcionado credito_id o numero_credito_sifco
     if (!credito_id && !numero_credito_sifco) {
@@ -747,12 +784,15 @@ export async function processConvenioPaymentEnTx(
 
     if (!convenio) {
       return {
-        success: false,
-        message: "No active payment agreement found for this credit",
-        convenio: null,
-        pago_completo: false,
-        monto_aplicado: "0",
-        monto_restante: "0",  
+        resultado: {
+          success: false,
+          message: "No active payment agreement found for this credit",
+          convenio: null,
+          pago_completo: false,
+          monto_aplicado: "0",
+          monto_restante: "0",
+        },
+        commit: null,
       };
     }
 
@@ -802,6 +842,44 @@ export async function processConvenioPaymentEnTx(
     // 8. Verificar si se completó el convenio
     const convenioCompletado = nuevoMontoPendienteBig.lte(0) || nuevosPagosPendientes <= 0;
 
+<<<<<<< ours
+    // 9-10. El commit persiste todo lo calculado arriba: update de
+    // convenios_pago + marcado de convenio_cuotas. Se entrega como closure
+    // para que el caller lo ejecute solo cuando la boleta ya quedó escrita.
+    const commit = async (pagoId?: number): Promise<boolean> => {
+      try {
+        // Transacción CHICA (P1 de Codex en #1482, 3ª ronda): acreditación y
+        // marcado de cuotas caen o persisten JUNTOS — sin esto, un fallo
+        // entre ambos statements dejaba convenios_pago acreditado con
+        // convenio_cuotas sin marcar, y un reintento prepararía una segunda
+        // acreditación sobre ese estado a medias.
+        const acreditado = await db.transaction(async (tx) => {
+          // Update GUARDADO contra estado stale (P2 de Codex en #1482): el
+          // convenio pudo cambiar entre prepare y commit por un escritor que
+          // no pasa por el advisory lock del pago. Se exige el MISMO estado
+          // que leyó el prepare (activo, no completado y mismo acumulado); si
+          // no matchea, el update afecta 0 filas y NO se marcan cuotas —
+          // pisar con los absolutos del closure acreditaría de más o
+          // resucitaría un convenio desactivado.
+          const [convenioAcreditado] = await tx
+            .update(convenios_pago)
+            .set({
+              monto_pagado: nuevoMontoPagadoBig.toFixed(2),
+              monto_pendiente: nuevoMontoPendienteBig.toFixed(2),
+              pagos_realizados: nuevosPagosRealizados,
+              pagos_pendientes: nuevosPagosPendientes,
+              completado: convenioCompletado,
+              activo: !convenioCompletado, // Si se completó, ya no está activo
+              updated_at: new Date(),
+            })
+            .where(
+              and(
+                eq(convenios_pago.convenio_id, convenio.convenio_id),
+                eq(convenios_pago.activo, true),
+                eq(convenios_pago.completado, false),
+                eq(convenios_pago.monto_pagado, convenio.monto_pagado)
+              )
+=======
     // 9. Actualizar el convenio
     const [convenioActualizado] = await tx
       .update(convenios_pago)
@@ -893,17 +971,56 @@ export async function processConvenioPaymentEnTx(
             inArray(
               convenio_cuotas.cuota_convenio_id,
               cuotasPendientesConvenio.map((c) => c.cuota_convenio_id)
+>>>>>>> theirs
             )
-          );
+            .returning({ convenio_id: convenios_pago.convenio_id });
 
-        console.log(
-          `✅ Cuotas marcadas: ${cuotasPendientesConvenio
-            .map((c) => `#${c.numero_cuota}`)
-            .join(", ")}`
+          if (!convenioAcreditado) {
+            console.error(
+              `⚠️ commitConvenio: el convenio ${convenio.convenio_id} cambió o ` +
+                `se desactivó entre prepare y commit (esperaba activo, no ` +
+                `completado, monto_pagado=${convenio.monto_pagado}); no se ` +
+                `acreditó, no se marcó ninguna cuota ni se estampó el pago.`
+            );
+            return false;
+          }
+
+          // El sello que usa reversePayment se persiste en la MISMA tx que
+          // acredita el convenio. Así jamás existe una fila que parezca
+          // acreditada cuando el CAS anterior perdió contra otro escritor.
+          if (pagoId !== undefined) {
+            const [pagoEstampado] = await tx
+              .update(pagos_credito)
+              .set({ pagoConvenio: montoAplicarBig.toFixed(2) })
+              .where(eq(pagos_credito.pago_id, pagoId))
+              .returning({ pago_id: pagos_credito.pago_id });
+            if (!pagoEstampado) {
+              throw new Error(
+                `No se pudo estampar el convenio en el pago ${pagoId}`
+              );
+            }
+          }
+
+          await marcarCuotasConvenioCompletadas({
+            convenio_id: convenio.convenio_id,
+            nuevasCuotasCompletadas,
+            dbc: tx,
+          });
+          return true;
+        });
+        return acreditado;
+      } catch (error) {
+        console.error("Error procesando pago de convenio:", error);
+        throw new Error(
+          `Error al procesar pago de convenio: ${error instanceof Error ? error.message : "Error desconocido"}`
         );
-      } else {
-        console.log("⚠️ No se encontraron cuotas pendientes para marcar");
       }
+<<<<<<< ours
+    };
+
+    // Preview del resultado: los mismos valores que quedarán persistidos al
+    // ejecutar `commit`.
+=======
     } else {
       console.log(
         "⚠️ Pago parcial - el acumulado aún no completa una cuota del convenio"
@@ -911,27 +1028,31 @@ export async function processConvenioPaymentEnTx(
     }
 
     // 12. Retornar resultado
+>>>>>>> theirs
     return {
-      success: true,
-      message: convenioCompletado
-        ? "¡Convenio completado exitosamente!"
-        : pagoCompleto
-          ? "Pago de cuota completa registrado exitosamente"
-          : "Pago parcial registrado exitosamente",
-      convenio: {
-        convenio_id: convenioActualizado.convenio_id,
-        monto_total_convenio: convenioActualizado.monto_total_convenio,
-        monto_pagado: convenioActualizado.monto_pagado,
-        monto_pendiente: convenioActualizado.monto_pendiente,
-        cuota_mensual: convenioActualizado.cuota_mensual,
-        pagos_realizados: convenioActualizado.pagos_realizados,
-        pagos_pendientes: convenioActualizado.pagos_pendientes,
-        completado: convenioActualizado.completado,
-        activo: convenioActualizado.activo,
+      resultado: {
+        success: true,
+        message: convenioCompletado
+          ? "¡Convenio completado exitosamente!"
+          : pagoCompleto
+            ? "Pago de cuota completa registrado exitosamente"
+            : "Pago parcial registrado exitosamente",
+        convenio: {
+          convenio_id: convenio.convenio_id,
+          monto_total_convenio: convenio.monto_total_convenio,
+          monto_pagado: nuevoMontoPagadoBig.toFixed(2),
+          monto_pendiente: nuevoMontoPendienteBig.toFixed(2),
+          cuota_mensual: convenio.cuota_mensual,
+          pagos_realizados: nuevosPagosRealizados,
+          pagos_pendientes: nuevosPagosPendientes,
+          completado: convenioCompletado,
+          activo: !convenioCompletado,
+        },
+        pago_completo: pagoCompleto,
+        monto_aplicado: montoAplicarBig.toFixed(2),
+        monto_restante: nuevoMontoPendienteBig.toFixed(2),
       },
-      pago_completo: pagoCompleto,
-      monto_aplicado: montoAplicarBig.toFixed(2),
-      monto_restante: nuevoMontoPendienteBig.toFixed(2),
+      commit,
     };
 }
 
@@ -941,9 +1062,102 @@ export async function processConvenioPayment(
   try {
     return await db.transaction((tx) => processConvenioPaymentEnTx(params, tx));
   } catch (error) {
-    console.error("Error procesando pago de convenio:", error);
+    console.error("Error preparando pago de convenio:", error);
     throw new Error(
       `Error al procesar pago de convenio: ${error instanceof Error ? error.message : "Error desconocido"}`
+    );
+  }
+}
+
+/**
+ * Calcular + commitear en un solo paso (comportamiento histórico). Los flujos
+ * que necesitan validar la boleta ANTES de acreditar el convenio deben usar
+ * `prepararConvenioPayment` y llamar su `commit` solo tras persistir el pago.
+ */
+export async function processConvenioPayment(
+  params: ProcessConvenioPaymentParams
+): Promise<ProcessConvenioPaymentResult> {
+  const preparado = await prepararConvenioPayment(params);
+  if (preparado.commit) {
+    await preparado.commit();
+  }
+  return preparado.resultado;
+}
+
+/**
+ * Marca como pagadas las N cuotas pendientes más viejas del convenio
+ * (fecha_pago = NULL). Extraído del cuerpo de processConvenioPayment para que
+ * el commit diferido lo reutilice sin duplicar lógica.
+ */
+async function marcarCuotasConvenioCompletadas({
+  convenio_id,
+  nuevasCuotasCompletadas,
+  dbc = db,
+}: {
+  convenio_id: number;
+  nuevasCuotasCompletadas: number;
+  /** Conexión sobre la que escribir: la tx del commit del convenio. */
+  dbc?: Pick<typeof db, "select" | "update">;
+}): Promise<void> {
+  // 🔥 MARCAR LAS CUOTAS DEL CONVENIO COMPLETADAS POR ACUMULADO
+  if (nuevasCuotasCompletadas > 0) {
+    console.log(
+      `✅ Marcando ${nuevasCuotasCompletadas} cuota(s) del convenio como pagada(s) (acumulado)`
+    );
+
+    // Las N cuotas pendientes más viejas del convenio (fecha_pago = NULL)
+    const cuotasPendientesConvenio = await dbc
+      .select()
+      .from(convenio_cuotas)
+      .where(
+        and(
+          eq(convenio_cuotas.convenio_id, convenio_id),
+          isNull(convenio_cuotas.fecha_pago)
+        )
+      )
+      .orderBy(convenio_cuotas.numero_cuota)
+      .limit(nuevasCuotasCompletadas);
+
+    if (cuotasPendientesConvenio.length > 0) {
+      // 🔥 Obtener fecha y hora de Guatemala
+      const guatemalaTimeString = new Date().toLocaleString("en-US", {
+        timeZone: "America/Guatemala",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      });
+
+      const [datePart, timePart] = guatemalaTimeString.split(", ");
+      const [month, day, year] = datePart.split("/");
+      const fechaGuatemala = new Date(`${year}-${month}-${day}T${timePart}`);
+
+      await dbc
+        .update(convenio_cuotas)
+        .set({
+          fecha_pago: fechaGuatemala, // 👈 Fecha y hora de Guatemala
+        })
+        .where(
+          inArray(
+            convenio_cuotas.cuota_convenio_id,
+            cuotasPendientesConvenio.map((c) => c.cuota_convenio_id)
+          )
+        );
+
+      console.log(
+        `✅ Cuotas marcadas: ${cuotasPendientesConvenio
+          .map((c) => `#${c.numero_cuota}`)
+          .join(", ")}`
+      );
+    } else {
+      console.log("⚠️ No se encontraron cuotas pendientes para marcar");
+    }
+  } else {
+    console.log(
+      "⚠️ Pago parcial - el acumulado aún no completa una cuota del convenio"
     );
   }
 }
@@ -1495,6 +1709,16 @@ export const updateConvenioStatus = async (
 
     const creditoId = convenio.credito_id;
 
+    // 🔒 Mismo advisory lock por crédito que insertPayment y reversePayment
+    // (P2 de Codex en #1482, 2ª ronda): el borrado de abajo es
+    // multi-statement (convenio_cuotas → resume → convenios_pago) y podía
+    // interlevarse con el commit diferido de un pago en vuelo — el guard
+    // optimista del commit matchea sobre el parent todavía vivo, el marcado
+    // ya no encuentra cuotas hijas y el borrado termina llevándose el
+    // convenio recién acreditado mientras el pago responde éxito.
+    // Serializada, la mutación espera a que el pago termine (o corre entera
+    // antes del prepare, y entonces el guard optimista sí la detecta).
+    return await withPaymentAdvisoryLock(creditoId, async () => {
     // 2. Si status = false, ELIMINAR el convenio y procesar mora
     if (!status) {
       console.log("🔴 Eliminando convenio y procesando mora...");
@@ -1595,6 +1819,7 @@ export const updateConvenioStatus = async (
       .where(eq(convenios_pago.convenio_id, convenio_id));
 
     return { success: true, message: "Convenio activado exitosamente" };
+    });
   } catch (error) {
     console.error("Error updating convenio status:", error);
     return { success: false, message: "Error updating convenio status", error };

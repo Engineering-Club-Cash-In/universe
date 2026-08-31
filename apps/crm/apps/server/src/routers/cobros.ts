@@ -22,6 +22,7 @@ import {
 import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { db } from "../db";
+import { auditRecord, auditedTransaction } from "../lib/audit";
 import { user } from "../db/schema/auth";
 import { botCobrosInteracciones } from "../db/schema/bot-cobros-interacciones";
 import {
@@ -384,7 +385,7 @@ async function autoCrearDatosMigrate({
 		: ("sobre_vehiculo" as const);
 
 	// Transacción atómica: si algo falla, se revierte todo
-	const result = await db.transaction(async (tx) => {
+	const result = await auditedTransaction(async (tx) => {
 		// 1. Crear Lead con solo el nombre, status "migrate"
 		const [nuevoLead] = await tx
 			.insert(leads)
@@ -401,7 +402,12 @@ async function autoCrearDatosMigrate({
 				notes: `Creado automáticamente desde Cartera-Back. Crédito SIFCO: ${numeroSifco}`,
 			})
 			.returning({ id: leads.id });
-
+		auditRecord({
+			entity: "lead",
+			id: nuevoLead.id,
+			action: "create",
+			data: { numeroSifco },
+		});
 		// 2. Crear Vehículo con datos nulos, status "sold"
 		const [nuevoVehiculo] = await tx
 			.insert(vehicles)
@@ -414,22 +420,36 @@ async function autoCrearDatosMigrate({
 				status: "sold",
 			})
 			.returning({ id: vehicles.id });
-
+		auditRecord({
+			entity: "vehicle",
+			id: nuevoVehiculo.id,
+			action: "create",
+			data: { numeroSifco },
+		});
 		// 3. Crear Oportunidad enlazando lead y vehículo
-		await tx.insert(opportunities).values({
-			title: `Crédito ${numeroSifco}`,
-			leadId: nuevoLead.id,
-			vehicleId: nuevoVehiculo.id,
-			creditType,
-			stageId: defaultStage.id,
-			assignedTo: userId,
-			createdBy: userId,
-			status: "migrate",
-			numeroSifco,
-			diaPagoMensual: diaPagoMensual,
-			cuotaMensual: cuotaMensual,
-			value: deudaTotal,
-			notes: "Crédito migrado automáticamente desde Cartera-Back.",
+		const [nuevaOportunidad] = await tx
+			.insert(opportunities)
+			.values({
+				title: `Crédito ${numeroSifco}`,
+				leadId: nuevoLead.id,
+				vehicleId: nuevoVehiculo.id,
+				creditType,
+				stageId: defaultStage.id,
+				assignedTo: userId,
+				createdBy: userId,
+				status: "migrate",
+				numeroSifco,
+				diaPagoMensual: diaPagoMensual,
+				cuotaMensual: cuotaMensual,
+				value: deudaTotal,
+				notes: "Crédito migrado automáticamente desde Cartera-Back.",
+			})
+			.returning({ id: opportunities.id });
+		auditRecord({
+			entity: "opportunity",
+			id: nuevaOportunidad.id,
+			action: "create",
+			data: { numeroSifco, leadId: nuevoLead.id },
 		});
 
 		return { leadId: nuevoLead.id, vehiculoId: nuevoVehiculo.id };
@@ -4194,6 +4214,7 @@ export const cobrosRouter = {
 	// Obtener detalles de un crédito desde Cartera-Back
 	// Usa el endpoint directo /credito y combina con datos del CRM (vehículo, caso de cobros)
 	getDetallesCreditoCarteraBack: cobrosProcedure
+		.meta({ audit: { entity: "opportunity", action: "create" } })
 		.input(
 			z.object({
 				creditoId: z.string(), // credito_id como string numérico

@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import api from "@/Provider/interceptor";
+import { esDetalleTecnicoCrudo } from "@/lib/apiError";
 import type { PagoFormValues } from "../hooks/registerPayment";
 import type { ReactNode } from "react";
 import type { InstallmentContributionSummary } from "./installmentContribution";
@@ -185,6 +186,8 @@ export interface Credito {
   statusCredit: string; // ACTIVO, CANCELADO, INCOBRABLE
   permite_abono_capital?: boolean;
   no_amortiza_capital?: boolean;
+  // Excluye el crédito de la asignación de capital a inversionistas
+  excluir_compras?: boolean;
   estado_devolucion?: 'NO_APLICA' | 'PENDIENTE_AUTORIZACION' | 'VERIFICADO' | 'RECHAZADO';
 }
 
@@ -465,6 +468,8 @@ export interface Credito {
   mora: string;
   permite_abono_capital?: boolean;
   no_amortiza_capital?: boolean;
+  // Excluye el crédito de la asignación de capital a inversionistas
+  excluir_compras?: boolean;
   estado_devolucion?: 'NO_APLICA' | 'PENDIENTE_AUTORIZACION' | 'VERIFICADO' | 'RECHAZADO';
 }
 
@@ -740,6 +745,15 @@ export interface InversionistaPayload {
    */
   es_nuevo?: boolean;
   tipo_operacion?: "compra_cartera" | "reinversion";
+  tipo_reinversion?:
+    | "sin_reinversion"
+     | "reinversion_capital"
+     | "reinversion_interes"
+     | "reinversion_total"
+     | "reinversion_variable"
+     | "reinversion_excedente";
+  modalidad_facturacion?: ModalidadFacturacion;
+  modalidad_facturacion_spread_id?: number;
 }
 
 export interface UpdateCreditBody {
@@ -778,6 +792,8 @@ export interface UpdateCreditBody {
   // Abono capital
   permite_abono_capital?: boolean;
   no_amortiza_capital?: boolean;
+  // Excluye el crédito de la asignación de capital a inversionistas
+  excluir_compras?: boolean;
   estado_devolucion?: 'NO_APLICA' | 'PENDIENTE_AUTORIZACION' | 'VERIFICADO' | 'RECHAZADO';
   motivo_devolucion?: string;
 
@@ -1046,6 +1062,12 @@ export async function getInvestorTotalsService(
 // ============================================================
 // calcularPagosEspejo — POST /calcularPagosEspejo
 // ============================================================
+export interface PendingReturnBlockedCredit {
+  credito_id: number;
+  numero_credito_sifco: string;
+  estado_devolucion: "PENDIENTE_AUTORIZACION";
+}
+
 export interface CalcularPagosEspejoResponse {
   success: boolean;
   message: string;
@@ -1092,7 +1114,11 @@ export function formatMensajeFallido(mensaje: string): string {
   if (match) {
     return ERROR_MESSAGES[match[1]] ?? "Error al procesar el crédito. Contacta soporte.";
   }
-  return mensaje;
+  const trimmed = mensaje.trim();
+  if (!trimmed || esDetalleTecnicoCrudo(trimmed)) {
+    return "Error al procesar el crédito. Contacta soporte.";
+  }
+  return trimmed;
 }
 
 // ============================================================
@@ -1250,9 +1276,18 @@ export interface LiquidateByInvestorRequest {
 export interface LiquidateByInvestorResponse {
   message: string;
   updatedCount: number;
+  success?: boolean;
+  warning?: boolean;
+  code?: string;
+  creditos_bloqueados?: PendingReturnBlockedCredit[];
   liquidaciones_creadas?: number;
   inversionistas_saltados?: number;
-  errores?: Array<{ inversionista_id: number; razon: string }>;
+  errores?: Array<{
+    inversionista_id: number;
+    razon: string;
+    code?: string;
+    creditos_bloqueados?: PendingReturnBlockedCredit[];
+  }>;
 }
 export async function liquidateByInvestorService(
   data: LiquidateByInvestorRequest

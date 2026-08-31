@@ -1464,8 +1464,8 @@ export const creditRouter = new Elysia()
       numero_cuota: t.Optional(t.Number()),
     }),
     detail: {
-      summary: "Recalcular pagos desde una cuota",
-      description: "Recalcula abonos y restantes de los pagos. Si se pasa numero_cuota, procesa desde esa cuota (pagadas y no pagadas). Si no, solo procesa las no pagadas.",
+      summary: "Recalcular pagos de las cuotas no pagadas",
+      description: "Re-siembra abonos y restantes de las cuotas NO pagadas y de los pagos registrados pendientes de validar, amortizando desde el capital actual del crédito. numero_cuota se acepta por compatibilidad pero SE IGNORA: nunca se reescriben pagos validados/pagados (para reparar historial usar /reparar-total-restante).",
       tags: ["Créditos", "Cuotas"],
     },
   })

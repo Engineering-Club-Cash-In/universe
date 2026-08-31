@@ -1,0 +1,855 @@
+{
+  "commit": "56717ddef8f0bbd8c8633172c8ca2c85c248dfd7",
+  "entries": [
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 137,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 141,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 142,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 153,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 162,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 180,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 183,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 212,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 226,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 239,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 250,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 259,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 266,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 305,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 313,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 330,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 390,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 400,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 402,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 414,
+      "method": "console.error",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 428,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 429,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 430,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 431,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 432,
+      "method": "console.log",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.schedule_recalculation",
+      "outcome": "completed",
+      "rationale": "terminal_structured_event"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 472,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 501,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 513,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 514,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 557,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 559,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 563,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 580,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 589,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 600,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 602,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 607,
+      "method": "console.log",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.schedule_recalculation",
+      "outcome": "completed",
+      "rationale": "terminal_structured_event"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 637,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 640,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 651,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 676,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 682,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 688,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 695,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 701,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 707,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 714,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 723,
+      "method": "console.error",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 736,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 737,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 738,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 739,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 740,
+      "method": "console.log",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.schedule_recalculation",
+      "outcome": "completed",
+      "rationale": "terminal_structured_event"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 764,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 768,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 771,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 789,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 803,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 834,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 836,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 848,
+      "method": "console.error",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 860,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 861,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/recalculateFromJson.ts",
+      "line": 862,
+      "method": "console.log",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.schedule_recalculation",
+      "outcome": "completed",
+      "rationale": "terminal_structured_event"
+    },
+    {
+      "path": "apps/cartera-back/src/routers/recalculateFromJson.ts",
+      "line": 69,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/routers/recalculateFromJson.ts",
+      "line": 79,
+      "method": "console.error",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.schedule_recalculation",
+      "outcome": "failed",
+      "rationale": "terminal_structured_event"
+    },
+    {
+      "path": "apps/cartera-back/src/routers/recalculateFromJson.ts",
+      "line": 110,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/routers/recalculateFromJson.ts",
+      "line": 114,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/routers/recalculateFromJson.ts",
+      "line": 124,
+      "method": "console.error",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.schedule_recalculation",
+      "outcome": "failed",
+      "rationale": "terminal_structured_event"
+    },
+    {
+      "path": "apps/cartera-back/src/routers/recalculateFromJson.ts",
+      "line": 163,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/routers/recalculateFromJson.ts",
+      "line": 196,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/routers/recalculateFromJson.ts",
+      "line": 206,
+      "method": "console.error",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.schedule_recalculation",
+      "outcome": "failed",
+      "rationale": "terminal_structured_event"
+    },
+    {
+      "path": "apps/cartera-back/src/routers/recalculateFromJson.ts",
+      "line": 236,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/routers/recalculateFromJson.ts",
+      "line": 237,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/routers/recalculateFromJson.ts",
+      "line": 264,
+      "method": "console.error",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.schedule_recalculation",
+      "outcome": "failed",
+      "rationale": "terminal_structured_event"
+    },
+    {
+      "path": "apps/cartera-back/src/routers/recalculateFromJson.ts",
+      "line": 316,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/routers/recalculateFromJson.ts",
+      "line": 320,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/routers/recalculateFromJson.ts",
+      "line": 329,
+      "method": "console.error",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.schedule_recalculation",
+      "outcome": "failed",
+      "rationale": "terminal_structured_event"
+    },
+    {
+      "path": "apps/cartera-back/src/routers/recalculateFromJson.ts",
+      "line": 351,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/routers/recalculateFromJson.ts",
+      "line": 361,
+      "method": "console.error",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.schedule_recalculation",
+      "outcome": "failed",
+      "rationale": "terminal_structured_event"
+    },
+    {
+      "path": "apps/cartera-back/src/routers/recalculateFromJson.ts",
+      "line": 390,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/routers/recalculateFromJson.ts",
+      "line": 400,
+      "method": "console.error",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.schedule_recalculation",
+      "outcome": "failed",
+      "rationale": "terminal_structured_event"
+    },
+    {
+      "path": "apps/cartera-back/src/routers/recalculateFromJson.ts",
+      "line": 436,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/routers/recalculateFromJson.ts",
+      "line": 445,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/routers/recalculateFromJson.ts",
+      "line": 455,
+      "method": "console.error",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.schedule_recalculation",
+      "outcome": "failed",
+      "rationale": "terminal_structured_event"
+    }
+  ]
+}

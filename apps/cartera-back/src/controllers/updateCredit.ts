@@ -10,7 +10,6 @@ import {
   asc,
   gt,
   lte,
-  gte,
   sql,
 } from "drizzle-orm";
 import jwt from "jsonwebtoken";
@@ -20,8 +19,8 @@ import {
   creditos_inversionistas,
   creditos_inversionistas_espejo,
   compras_credito_inversionista,
+  inversionistas as inversionistasTabla,
   cuotas_credito,
-  inversionistas as inversionistasTable,
   pagos_credito,
   usuarios,
   historial_devolucion_credito,
@@ -29,7 +28,13 @@ import {
 import z from "zod";
 import type { WSCrEstadoCuentaResponse } from "../services/sifco.interface";
 import { consultarEstadoCuentaPrestamo } from "../services/sifcoIntegrations";
-import { withAuditContext, withCapitalContext } from "../utils/withAuditContext";
+import { withAuditContext, setCapitalSource } from "../utils/withAuditContext";
+import { clasificarCompraCreditoInversionista, tieneConflictoExcedenteVariable } from "./purchaseClassification";
+import { withCreditoEspejoLocks } from "../utils/creditoEspejoLock";
+import {
+  getModalidadFacturacionSpreadById,
+  resolveModalidadFacturacionSpread,
+} from "./modalidadFacturacion";
 
 interface UpdateInstallmentsParams {
   numero_credito_sifco: string;
@@ -42,10 +47,10 @@ const updateInstallments = async ({
   nueva_cuota,
 
   all = false,
-}: UpdateInstallmentsParams): Promise<void> => {
+}: UpdateInstallmentsParams, dbInstance: typeof db = db): Promise<void> => {
   // 1️⃣ Obtener crédito y pagos en paralelo (en lugar de secuencial)
   const [creditoResult, todosPagos] = await Promise.all([
-    db
+    dbInstance
       .select({
         credito_id: creditos.credito_id,
         capital: creditos.capital,
@@ -62,7 +67,7 @@ const updateInstallments = async ({
       .limit(1),
 
     // Solo traer cuotas NO pagadas, ordenadas por numero_cuota (no por cuota_id)
-    db
+    dbInstance
       .select()
       .from(pagos_credito)
       .innerJoin(
@@ -73,7 +78,7 @@ const updateInstallments = async ({
         and(
           eq(
             pagos_credito.credito_id,
-            db
+            dbInstance
               .select({ id: creditos.credito_id })
               .from(creditos)
               .where(eq(creditos.numero_credito_sifco, numero_credito_sifco))
@@ -154,13 +159,13 @@ const updateInstallments = async ({
   await Promise.all([
     // Actualizar todos los pagos pendientes
     ...actualizaciones.map(({ pago_id, datos }) =>
-      db
+      dbInstance
         .update(pagos_credito)
         .set(datos)
         .where(eq(pagos_credito.pago_id, pago_id)),
     ),
     // Actualizar el crédito
-    db
+      dbInstance
       .update(creditos)
       .set({ cuota: cuotaMensual.toString() })
       .where(eq(creditos.credito_id, credito.credito_id)),
@@ -446,6 +451,16 @@ const creditUpdateSchema = z.object({
         // descuadra (calcular pagos espejo data las compras por ahí).
         es_nuevo: z.boolean().optional(),
         tipo_operacion: z.enum(["compra_cartera", "reinversion"]).optional(),
+        tipo_reinversion: z.enum([
+          "sin_reinversion",
+          "reinversion_capital",
+          "reinversion_interes",
+          "reinversion_total",
+          "reinversion_excedente",
+          "reinversion_variable",
+        ]).optional(),
+        modalidad_facturacion: z.enum(["p2p_directa", "factura_cube", "factura_cube_pequeno"]).optional(),
+        modalidad_facturacion_spread_id: z.number().int().positive().optional(),
       }),
     )
     .min(0)
@@ -463,6 +478,16 @@ const creditUpdateSchema = z.object({
         // campos viajan también aquí pero la lógica solo lee los del padre.
         es_nuevo: z.boolean().optional(),
         tipo_operacion: z.enum(["compra_cartera", "reinversion"]).optional(),
+        tipo_reinversion: z.enum([
+          "sin_reinversion",
+          "reinversion_capital",
+          "reinversion_interes",
+          "reinversion_total",
+          "reinversion_excedente",
+          "reinversion_variable",
+        ]).optional(),
+        modalidad_facturacion: z.enum(["p2p_directa", "factura_cube", "factura_cube_pequeno"]).optional(),
+        modalidad_facturacion_spread_id: z.number().int().positive().optional(),
       }),
     )
     .min(0)
@@ -481,6 +506,7 @@ const creditUpdateSchema = z.object({
   formato_credito: z.string().max(50).optional(),
   permite_abono_capital: z.boolean().optional(),
   no_amortiza_capital: z.boolean().optional(),
+  excluir_compras: z.boolean().optional(),
   estado_devolucion: z.enum(['NO_APLICA', 'PENDIENTE_AUTORIZACION', 'VERIFICADO', 'RECHAZADO', 'COMPLETADO']).optional(),
   motivo_devolucion: z.string().optional(),
   bandera_reinversion: z.boolean().optional(),
@@ -553,11 +579,24 @@ const validateInvestorsPercentages = (
 //   3. Como máximo UNA compra_cartera puede quedar pendiente de facturar por
 //      crédito: cofidi prorratea el interés del pago con una sola fecha de
 //      corte (operacionesPendientesFacturar[0]) y las demás se le pierden.
+//   4. Si el crédito está excluido de compras, no entra NINGÚN inversionista
+//      nuevo desde acá — ni compra_cartera ni reinversion. Sin esta regla el
+//      modal de edición sería una puerta trasera al filtro de
+//      getCreditCandidates y al guard manual de addInvestorToCredit. Incluye
+//      las reinversiones porque un es_nuevo con tipo_operacion "reinversion"
+//      puede ser alguien que hoy NO está en el crédito (rotación de pool: salió
+//      y vuelve), o sea capital nuevo entrando igual que una compra.
 export type InversionistaNuevoValidado = {
   inversionista_id: number;
   monto_aportado: number;
   tipo_operacion: "compra_cartera" | "reinversion";
+  tipo_reinversion: "sin_reinversion" | "reinversion_capital" | "reinversion_interes" | "reinversion_total" | "reinversion_excedente" | "reinversion_variable";
   fecha_inicio_participacion?: string;
+  porcentaje_cash_in?: number;
+  porcentaje_inversion?: number;
+  modalidad_facturacion?: "p2p_directa" | "factura_cube" | "factura_cube_pequeno";
+  modalidad_facturacion_spread_id?: number;
+  tipo_compra: "nueva_posicion" | "ampliacion_posicion" | "sin_clasificar";
 };
 
 export const validarInversionistasNuevos = async (
@@ -565,6 +604,11 @@ export const validarInversionistasNuevos = async (
   inversionistas: NonNullable<CreditUpdateData["inversionistas"]>,
   inversionistas_espejo: CreditUpdateData["inversionistas_espejo"],
   set: SetContext,
+  // Valor EFECTIVO de excluir_compras tras aplicar este request: en una misma
+  // edición se puede prender el flag y agregar una compra, así que no alcanza
+  // con mirar el estado actual del crédito.
+  excluirComprasEfectivo: boolean = false,
+  dbInstance: typeof db = db,
 ): Promise<
   | { success: true; nuevos: InversionistaNuevoValidado[] }
   | { success: false; error: { message: string; [key: string]: unknown } }
@@ -585,11 +629,11 @@ export const validarInversionistasNuevos = async (
   }
 
   const [padreActual, espejoActual] = await Promise.all([
-    db
+    dbInstance
       .select({ inversionista_id: creditos_inversionistas.inversionista_id })
       .from(creditos_inversionistas)
       .where(eq(creditos_inversionistas.credito_id, credito_id)),
-    db
+    dbInstance
       .select({ inversionista_id: creditos_inversionistas_espejo.inversionista_id })
       .from(creditos_inversionistas_espejo)
       .where(eq(creditos_inversionistas_espejo.credito_id, credito_id)),
@@ -598,6 +642,10 @@ export const validarInversionistasNuevos = async (
   const idsEspejoActual = new Set(espejoActual.map((r) => r.inversionista_id));
 
   const declaradosNuevos = inversionistas.filter((i) => i.es_nuevo === true);
+  const porcentajesPorNuevo = new Map<
+    number,
+    { porcentaje_cash_in: number; porcentaje_inversion: number }
+  >();
 
   // Regla 1: nadie entra al crédito sin declararse nuevo. Aplica al padre y al
   // espejo (el espejo nuevo viene sincronizado desde el padre por el front).
@@ -640,11 +688,70 @@ export const validarInversionistasNuevos = async (
         { inversionista_id: inv.inversionista_id },
       );
     }
+    if (!inv.tipo_reinversion) {
+      return fail("tipo_reinversion es requerido para todo inversionista nuevo", {
+        inversionista_id: inv.inversionista_id,
+      });
+    }
+    const traeModalidad = inv.modalidad_facturacion !== undefined;
+    const traeSpread = inv.modalidad_facturacion_spread_id !== undefined;
+    if (inv.tipo_operacion === "compra_cartera" && (!traeModalidad || !traeSpread)) {
+      return fail("modalidad_facturacion y modalidad_facturacion_spread_id son requeridos para compra_cartera", {
+        inversionista_id: inv.inversionista_id,
+      });
+    }
+    if (inv.tipo_operacion === "reinversion" && (traeModalidad || traeSpread)) {
+      return fail("modalidad_facturacion solo aplica a compra_cartera", {
+        inversionista_id: inv.inversionista_id,
+      });
+    }
     if (!(Number(inv.monto_aportado) > 0)) {
       return fail(
         `El inversionista nuevo con ID ${inv.inversionista_id} debe tener un monto aportado mayor a 0.`,
         { inversionista_id: inv.inversionista_id },
       );
+    }
+    if (inv.tipo_operacion === "compra_cartera") {
+      const modalidad = inv.modalidad_facturacion;
+      const modalidadFacturacionSpreadId = inv.modalidad_facturacion_spread_id;
+      if (!modalidad || !modalidadFacturacionSpreadId) {
+        return fail("modalidad_facturacion y modalidad_facturacion_spread_id son requeridos para compra_cartera", {
+          inversionista_id: inv.inversionista_id,
+        });
+      }
+      const spread = await getModalidadFacturacionSpreadById(
+        modalidadFacturacionSpreadId,
+      );
+      if (!spread) {
+        return fail(
+          `No existe un bracket de modalidad de facturación con id ${inv.modalidad_facturacion_spread_id}`,
+          {
+            inversionista_id: inv.inversionista_id,
+          },
+        );
+      }
+      if (spread.modalidad !== modalidad) {
+        return fail(
+          `El bracket ${inv.modalidad_facturacion_spread_id} pertenece a la modalidad '${spread.modalidad}', no a '${modalidad}'`,
+          {
+          inversionista_id: inv.inversionista_id,
+          },
+        );
+      }
+      const bracketDelMonto = await resolveModalidadFacturacionSpread(
+        Number(inv.monto_aportado),
+        modalidad,
+      );
+      if (!bracketDelMonto) {
+        return fail(
+          `No existe un bracket de modalidad de facturación para el monto Q${inv.monto_aportado}`,
+          { inversionista_id: inv.inversionista_id },
+        );
+      }
+      porcentajesPorNuevo.set(inv.inversionista_id, {
+        porcentaje_cash_in: new Big(100).minus(spread.spread).toNumber(),
+        porcentaje_inversion: new Big(spread.spread).toNumber(),
+      });
     }
   }
 
@@ -675,6 +782,22 @@ export const validarInversionistasNuevos = async (
   const nuevasCompras = declaradosNuevos.filter(
     (inv) => inv.tipo_operacion === "compra_cartera",
   );
+
+  // Regla 4: crédito excluido de compras. Se evalúa antes que la Regla 3 porque
+  // no necesita ir a la DB. Aplica a TODO inversionista nuevo, no solo a
+  // compra_cartera: en este endpoint un es_nuevo con tipo_operacion
+  // "reinversion" puede ser alguien que no está hoy en el crédito (la Regla 2
+  // solo prohíbe a quien ya participa), o sea capital nuevo entrando. Mismo
+  // criterio que getCreditCandidates, que saca el crédito del buscador entero.
+  if (excluirComprasEfectivo && declaradosNuevos.length > 0) {
+    return fail(
+      `Este crédito está excluido de las compras a inversionistas; no se le puede ` +
+        `agregar capital de inversionistas nuevos. Desmarcá "Excluir de compras a ` +
+        `inversionistas" si querés asignarlo.`,
+      { inversionistas_ids: declaradosNuevos.map((i) => i.inversionista_id) },
+    );
+  }
+
   if (nuevasCompras.length > 1) {
     return fail(
       `Solo se puede agregar una compra de cartera a la vez en este crédito ` +
@@ -684,7 +807,7 @@ export const validarInversionistasNuevos = async (
     );
   }
   if (nuevasCompras.length === 1) {
-    const [pendiente] = await db
+    const [pendiente] = await dbInstance
       .select({ inversionista_id: compras_credito_inversionista.inversionista_id })
       .from(compras_credito_inversionista)
       .where(
@@ -707,14 +830,46 @@ export const validarInversionistasNuevos = async (
     }
   }
 
+  // Un nuevo se materializa en padre, espejo y compras dentro del mismo
+  // rebuild. No aceptar un padre nuevo sin su fila espejo evita insertar una
+  // compra/snapshot que no tiene la posición pendiente correspondiente.
+  const idsEspejoPayload = new Set(
+    (inversionistas_espejo ?? []).map((inv) => inv.inversionista_id),
+  );
+  const faltanEnEspejo = declaradosNuevos
+    .map((inv) => inv.inversionista_id)
+    .filter((id) => !idsEspejoPayload.has(id));
+  if (faltanEnEspejo.length > 0) {
+    return fail(
+      `Todo inversionista nuevo debe venir también en inversionistas_espejo antes de persistir la compra o reinversión. Faltan: ${faltanEnEspejo.join(", ")}.`,
+      { inversionistas_ids: faltanEnEspejo },
+    );
+  }
+
   return {
     success: true,
-    nuevos: declaradosNuevos.map((inv) => ({
-      inversionista_id: inv.inversionista_id,
-      monto_aportado: Number(inv.monto_aportado),
-      tipo_operacion: inv.tipo_operacion!,
-      fecha_inicio_participacion: inv.fecha_inicio_participacion,
-    })),
+    nuevos: declaradosNuevos.map((inv) => {
+      if (!inv.tipo_operacion || !inv.tipo_reinversion) {
+        throw new Error(`Inversionista nuevo ${inv.inversionista_id} sin tipo de operación o reinversión`);
+      }
+      return {
+        inversionista_id: inv.inversionista_id,
+        monto_aportado: Number(inv.monto_aportado),
+        tipo_operacion: inv.tipo_operacion,
+        tipo_reinversion: inv.tipo_reinversion,
+        fecha_inicio_participacion: inv.fecha_inicio_participacion,
+        porcentaje_cash_in:
+          porcentajesPorNuevo.get(inv.inversionista_id)?.porcentaje_cash_in,
+        porcentaje_inversion:
+          porcentajesPorNuevo.get(inv.inversionista_id)?.porcentaje_inversion,
+        modalidad_facturacion: inv.modalidad_facturacion,
+        modalidad_facturacion_spread_id: inv.modalidad_facturacion_spread_id,
+        tipo_compra: clasificarCompraCreditoInversionista(
+          [...idsPadreActual, ...idsEspejoActual],
+          inv.inversionista_id,
+        ),
+      };
+    }),
   };
 };
 
@@ -744,22 +899,6 @@ export const registrarComprasInversionistasNuevos = async (
 ) => {
   if (nuevos.length === 0) return;
 
-  // tipo_reinversion informativo del registro: la modalidad global del
-  // inversionista (mismo fallback que usa addInvestorToCredit cuando no viene).
-  const filasInv = await dbInstance
-    .select({
-      inversionista_id: inversionistasTable.inversionista_id,
-      tipo_reinversion: inversionistasTable.tipo_reinversion,
-    })
-    .from(inversionistasTable)
-    .where(
-      inArray(
-        inversionistasTable.inversionista_id,
-        nuevos.map((n) => n.inversionista_id),
-      ),
-    );
-  const tipoReinvPorId = new Map(filasInv.map((r) => [r.inversionista_id, r.tipo_reinversion]));
-
   const ahora = new Date();
   await dbInstance.insert(compras_credito_inversionista).values(
     nuevos.map((n) => {
@@ -775,7 +914,10 @@ export const registrarComprasInversionistasNuevos = async (
         inversionista_id: n.inversionista_id,
         monto_aportado: n.monto_aportado.toString(),
         tipo_operacion: n.tipo_operacion,
-        tipo_reinversion: tipoReinvPorId.get(n.inversionista_id) ?? null,
+        tipo_reinversion: n.tipo_reinversion,
+        modalidad_facturacion: n.modalidad_facturacion ?? null,
+        modalidad_facturacion_spread_id: n.modalidad_facturacion_spread_id ?? null,
+        tipo_compra: n.tipo_compra,
         status: "completado" as const,
         fecha_completada: fechaCompletada,
         pendiente_facturar: esCompra,
@@ -925,8 +1067,9 @@ const detectDebtAffectingChanges = (
 const updateInitialQuotaOtros = async (
   credito_id: number,
   otros: number,
+  dbInstance: typeof db = db,
 ): Promise<void> => {
-  const cuotaInicial = await db
+  const cuotaInicial = await dbInstance
     .select({ id: cuotas_credito.cuota_id })
     .from(cuotas_credito)
     .where(
@@ -937,7 +1080,7 @@ const updateInitialQuotaOtros = async (
     );
 
   if (cuotaInicial.length) {
-    await db
+    await dbInstance
       .update(pagos_credito)
       .set({ otros: otros.toString() })
       .where(eq(pagos_credito.cuota_id, cuotaInicial[0].id));
@@ -951,7 +1094,7 @@ const updateInitialQuotaOtros = async (
 /**
  * Actualiza los inversionistas del crédito
  */
-const updateInvestors = async (
+export const updateInvestors = async (
   credito_id: number,
   inversionistas:
     | CreditUpdateData["inversionistas"]
@@ -1000,6 +1143,26 @@ const updateInvestors = async (
   );
   const cuotaTotal = new Big(updateFields.cuota ?? current?.cuota);
 
+  const porcentajesPorSpread = new Map<
+    number,
+    { porcentaje_cash_in: Big; porcentaje_inversion: Big }
+  >();
+  for (const inv of inversionistas) {
+    if (!inv.es_nuevo || !inv.modalidad_facturacion_spread_id) continue;
+    const spread = await getModalidadFacturacionSpreadById(
+      inv.modalidad_facturacion_spread_id,
+    );
+    if (!spread || spread.modalidad !== inv.modalidad_facturacion) {
+      throw new Error(
+        `Bracket de modalidad de facturación inválido para el inversionista ${inv.inversionista_id}`,
+      );
+    }
+    porcentajesPorSpread.set(inv.inversionista_id, {
+      porcentaje_cash_in: new Big(100).minus(spread.spread),
+      porcentaje_inversion: new Big(spread.spread),
+    });
+  }
+
   console.log(`💰 Capital Total: Q${capitalTotal.toFixed(2)}`);
   console.log(`📊 Cuota Total: Q${cuotaTotal.toFixed(2)}`);
 
@@ -1010,8 +1173,11 @@ const updateInvestors = async (
     console.log(`${"=".repeat(60)}`);
 
     const montoAportado = new Big(inv.monto_aportado);
-    const porcentajeCashIn = new Big(inv.porcentaje_cash_in);
-    const porcentajeInversion = new Big(inv.porcentaje_inversion);
+    const porcentajeDelSpread = porcentajesPorSpread.get(inv.inversionista_id);
+    const porcentajeCashIn =
+      porcentajeDelSpread?.porcentaje_cash_in ?? new Big(inv.porcentaje_cash_in);
+    const porcentajeInversion =
+      porcentajeDelSpread?.porcentaje_inversion ?? new Big(inv.porcentaje_inversion);
 
     console.log(`🆔 ID Inversionista: ${inv.inversionista_id}`);
     console.log(`💰 Monto Aportado: Q${montoAportado.toFixed(2)}`);
@@ -1212,6 +1378,11 @@ const updateInvestors = async (
     if (prevData?.tipo_reinversion !== undefined) baseReturn.tipo_reinversion = prevData.tipo_reinversion;
     if (prevData?.modalidad_facturacion !== undefined) baseReturn.modalidad_facturacion = prevData.modalidad_facturacion;
     if (prevData?.modalidad_facturacion_spread_id !== undefined) baseReturn.modalidad_facturacion_spread_id = prevData.modalidad_facturacion_spread_id;
+    if (targetTable === creditos_inversionistas_espejo && inv.es_nuevo) {
+      baseReturn.tipo_reinversion = inv.tipo_reinversion ?? null;
+      baseReturn.modalidad_facturacion = inv.modalidad_facturacion ?? null;
+      baseReturn.modalidad_facturacion_spread_id = inv.modalidad_facturacion_spread_id ?? null;
+    }
 
     return baseReturn;
   });
@@ -1302,6 +1473,7 @@ export const updateCredit = async ({ body, set, request }: any) => {
       formato_credito,
       permite_abono_capital,
       no_amortiza_capital,
+      excluir_compras,
       estado_devolucion,
       motivo_devolucion,
       bandera_reinversion,
@@ -1309,22 +1481,15 @@ export const updateCredit = async ({ body, set, request }: any) => {
       ...fieldsToUpdate
     } = parseResult.data;
 
-    // 2. Buscar el crédito actual
+    const espejoUserId = extractUserId(request);
+    const runUpdate = async (tx: typeof db) => {
+      const db = tx;
+
+    // 2. Buscar el crédito actual (editable sin importar el status)
     const [current] = await db
       .select()
       .from(creditos)
-      .where(
-        and(
-          eq(creditos.credito_id, credito_id),
-          inArray(creditos.statusCredit, [
-            "ACTIVO",
-            "MOROSO",
-            "PENDIENTE_CANCELACION",
-            "EN_CONVENIO",
-            "INCOBRABLE"
-          ]),
-        ),
-      )
+      .where(eq(creditos.credito_id, credito_id))
       .limit(1);
 
     if (!current) {
@@ -1332,9 +1497,45 @@ export const updateCredit = async ({ body, set, request }: any) => {
       return { message: "Credit not found" };
     }
 
+    // Estados de cierre: el crédito se puede editar, pero su calendario de
+    // pagos es historia congelada — la cancelación deja los pagos no pagados
+    // en paymentFalse=true con restantes en 0 (credits.ts) y el caído conserva
+    // solo el desembolso de cuota 0 (fallenCredits.ts), ancla de
+    // repararTotalRestante. Re-proyectarlos resucitaría deuda fantasma.
+    const esCreditoFinalizado =
+      current.statusCredit === "CANCELADO" || current.statusCredit === "CAIDO";
+
+    // 3.0. En un crédito finalizado no entran inversionistas nuevos: la compra
+    // o reinversión crearía una participación "viva" (con su fila en
+    // compras_credito_inversionista que facturación trata como vigente) sobre
+    // una deuda que ya no existe.
+    const traeInversionistasNuevos =
+      (inversionistas ?? []).some((inv) => inv.es_nuevo) ||
+      (inversionistas_espejo ?? []).some((inv) => inv.es_nuevo);
+    if (traeInversionistasNuevos && esCreditoFinalizado) {
+      set.status = 400;
+      return {
+        message: `No se pueden registrar inversionistas nuevos en un crédito ${current.statusCredit}`,
+      };
+    }
+
+    // En créditos finalizados la participación de inversionistas es historia
+    // congelada: las listas del payload se IGNORAN (el front las manda siempre
+    // al editar) — ni se validan ni se reconstruyen. La cancelación dejó esos
+    // saldos en 0 y el rebuild (delete+insert) los reviviría con el
+    // monto_aportado del body; investor.ts los suma sin filtrar status.
+    if (
+      esCreditoFinalizado &&
+      ((inversionistas?.length ?? 0) > 0 ||
+        (inversionistas_espejo?.length ?? 0) > 0)
+    ) {
+      console.log(
+        `⚠️ Crédito ${current.statusCredit}: inversionistas del payload ignorados (participación congelada)`,
+      );
+    }
 
     // 3. Validar inversionistas
-    if (inversionistas && inversionistas.length > 0) {
+    if (!esCreditoFinalizado && inversionistas && inversionistas.length > 0) {
       const percentagesValidation = validateInvestorsPercentages(
         inversionistas as any,
         set,
@@ -1345,7 +1546,7 @@ export const updateCredit = async ({ body, set, request }: any) => {
     }
 
     // 3.1. Validar inversionistas espejo si existen
-    if (inversionistas_espejo && inversionistas_espejo.length > 0) {
+    if (!esCreditoFinalizado && inversionistas_espejo && inversionistas_espejo.length > 0) {
       const mirrorValidation = validateInvestorsPercentages(
         inversionistas_espejo as any,
         set
@@ -1362,19 +1563,87 @@ export const updateCredit = async ({ body, set, request }: any) => {
     // por esa lista.
     let inversionistasNuevos: InversionistaNuevoValidado[] = [];
     if (
-      (inversionistas && inversionistas.length > 0) ||
-      (inversionistas_espejo && inversionistas_espejo.length > 0)
+      !esCreditoFinalizado &&
+      ((inversionistas && inversionistas.length > 0) ||
+        (inversionistas_espejo && inversionistas_espejo.length > 0))
     ) {
       const nuevosValidation = await validarInversionistasNuevos(
         credito_id,
         inversionistas ?? [],
         inversionistas_espejo,
         set,
+        // El request manda si trae el flag; si no, vale el estado actual.
+        excluir_compras ?? current.excluir_compras,
+        db,
       );
       if (!nuevosValidation.success) {
         return nuevosValidation.error;
       }
       inversionistasNuevos = nuevosValidation.nuevos;
+
+      // Igual que addInvestorToCredit: una compra que escala a combinada
+      // backfillea espejos NULL con el modo global previo. Nunca pueden quedar
+      // Excedente y Variable para el mismo inversionista.
+      const nuevosPorInversionista = new Map<number, string[]>();
+      for (const nuevo of inversionistasNuevos) {
+        if (!nuevo.tipo_reinversion) continue;
+        const modos = nuevosPorInversionista.get(nuevo.inversionista_id) ?? [];
+        modos.push(nuevo.tipo_reinversion);
+        nuevosPorInversionista.set(nuevo.inversionista_id, modos);
+      }
+      for (const inversionistaId of [...nuevosPorInversionista.keys()].sort((a, b) => a - b)) {
+        const modosNuevos = nuevosPorInversionista.get(inversionistaId)!;
+        const [inversionistaActual] = await db
+          .select({ tipo_reinversion: inversionistasTabla.tipo_reinversion })
+          .from(inversionistasTabla)
+          .where(eq(inversionistasTabla.inversionista_id, inversionistaId))
+          .for("update")
+          .limit(1);
+        const modoGlobal = inversionistaActual?.tipo_reinversion ?? null;
+        const espejosExistentes = await db
+          .select({ tipo_reinversion: creditos_inversionistas_espejo.tipo_reinversion })
+          .from(creditos_inversionistas_espejo)
+          .where(eq(creditos_inversionistas_espejo.inversionista_id, inversionistaId));
+        const debeEscalar = modoGlobal !== "reinversion_combinada" && modosNuevos.some((modo) => modo !== modoGlobal);
+        const modosFinales = [
+          ...espejosExistentes.map((espejo) =>
+            espejo.tipo_reinversion === null && debeEscalar ? modoGlobal : espejo.tipo_reinversion,
+          ),
+          ...modosNuevos,
+        ];
+        if (tieneConflictoExcedenteVariable(modosFinales)) {
+          set.status = 409;
+          return {
+            message: "No se puede mezclar Excedente y Variable en el mismo inversionista: el monto de reinversión es único (una modalidad recibe un monto fijo y la otra reinvierte un monto fijo).",
+          };
+        }
+      }
+    }
+
+    // Validar la transición antes de cualquier write (incluido usuario).
+    const updateFields: any = { ...fieldsToUpdate };
+    let historialDevolucion: Record<string, unknown> | undefined;
+    if (estado_devolucion !== undefined && estado_devolucion !== current.estado_devolucion) {
+      const fromState = current.estado_devolucion;
+      const esSolicitudValida = estado_devolucion === "PENDIENTE_AUTORIZACION" &&
+        (fromState === "NO_APLICA" || fromState === "RECHAZADO" || fromState === "VERIFICADO");
+      const esDesactivacionValida = estado_devolucion === "NO_APLICA" && fromState === "PENDIENTE_AUTORIZACION";
+      if (!esSolicitudValida && !esDesactivacionValida) {
+        set.status = 400;
+        return { message: `Transición de estado de devolución no permitida en este endpoint (${fromState} -> ${estado_devolucion})` };
+      }
+      if (esSolicitudValida && (!motivo_devolucion || motivo_devolucion.trim() === "")) {
+        set.status = 400;
+        return { message: "Motivo de devolución es obligatorio al solicitar devolución" };
+      }
+      historialDevolucion = {
+        credito_id,
+        usuario_id: 1,
+        estado_anterior: fromState,
+        estado_nuevo: estado_devolucion,
+        motivo: esDesactivacionValida ? null : motivo_devolucion?.trim() ?? null,
+      };
+      updateFields.estado_devolucion = estado_devolucion;
     }
 
     // 3.5 Actualizar datos del usuario si se enviaron
@@ -1391,9 +1660,6 @@ export const updateCredit = async ({ body, set, request }: any) => {
         .set(userFields)
         .where(eq(usuarios.usuario_id, current.usuario_id));
     }
-
-    // 4. Preparar campos de actualización
-    const updateFields: any = { ...fieldsToUpdate };
 
     if (formato_credito !== undefined) {
       updateFields.formato_credito = formato_credito;
@@ -1420,53 +1686,10 @@ export const updateCredit = async ({ body, set, request }: any) => {
     if (no_amortiza_capital !== undefined) {
       updateFields.no_amortiza_capital = no_amortiza_capital;
     }
-    if (estado_devolucion !== undefined) {
-      if (estado_devolucion !== current.estado_devolucion) {
-        const fromState = current.estado_devolucion;
-        let motivoFinal: string | null | undefined = motivo_devolucion;
-
-        const esSolicitudValida =
-          estado_devolucion === "PENDIENTE_AUTORIZACION" &&
-          (fromState === "NO_APLICA" ||
-            fromState === "RECHAZADO" ||
-            fromState === "VERIFICADO");
-        const esDesactivacionValida =
-          estado_devolucion === "NO_APLICA" && fromState === "PENDIENTE_AUTORIZACION";
-
-        // Este endpoint (editar crédito) solo puede solicitar o desactivar solicitud.
-        if (!esSolicitudValida && !esDesactivacionValida) {
-          set.status = 400;
-          return {
-            message: `Transición de estado de devolución no permitida en este endpoint (${fromState} -> ${estado_devolucion})`,
-          };
-        }
-
-        if (esSolicitudValida) {
-          if (!motivo_devolucion || motivo_devolucion.trim() === "") {
-            set.status = 400;
-            return {
-              message:
-                "Motivo de devolución es obligatorio al solicitar devolución",
-            };
-          }
-          motivoFinal = motivo_devolucion.trim();
-        }
-
-        if (esDesactivacionValida) {
-          motivoFinal = null;
-        }
-
-        await db.insert(historial_devolucion_credito).values({
-          credito_id,
-          usuario_id: 1, // TODO integrate auth for real user_id
-          estado_anterior: fromState,
-          estado_nuevo: estado_devolucion,
-          motivo: motivoFinal ?? null,
-        });
-
-        updateFields.estado_devolucion = estado_devolucion;
-      }
+    if (excluir_compras !== undefined) {
+      updateFields.excluir_compras = excluir_compras;
     }
+    if (historialDevolucion) await db.insert(historial_devolucion_credito).values(historialDevolucion as any);
     if (bandera_reinversion !== undefined) {
       updateFields.bandera_reinversion = bandera_reinversion;
     }
@@ -1525,9 +1748,11 @@ export const updateCredit = async ({ body, set, request }: any) => {
 
 
 
-      // Actualizar "otros" en la cuota inicial si cambió
-      if (otrosModificado) {
-        await updateInitialQuotaOtros(credito_id, fieldsToUpdate.otros);
+      // Actualizar "otros" en la cuota inicial si cambió.
+      // En créditos finalizados NO: la cuota 0 es historia congelada (en un
+      // CAIDO es el único pago que sobrevive, ancla de repararTotalRestante).
+      if (otrosModificado && !esCreditoFinalizado) {
+        await updateInitialQuotaOtros(credito_id, fieldsToUpdate.otros, db);
       }
 
 
@@ -1554,13 +1779,13 @@ export const updateCredit = async ({ body, set, request }: any) => {
 
     let updatedCredit;
     if (capitalCambia) {
-      const ajusteUserId = extractUserId(request);
-      [updatedCredit] = await withCapitalContext(
-        ajusteUserId,
+      await setCapitalSource(
+        db,
         "AJUSTE_MANUAL",
+        espejoUserId,
         motivo_ajuste_capital,
-        ejecutarUpdateCredito,
       );
+      [updatedCredit] = await ejecutarUpdateCredito(db);
     } else {
       [updatedCredit] = await ejecutarUpdateCredito(db);
     }
@@ -1568,14 +1793,22 @@ export const updateCredit = async ({ body, set, request }: any) => {
     // 8.1 Si la cuota cambió, sincronizar cuotas pendientes y recalcular
     // cuotas de inversionistas (solo si NO vinieron en el body — si vinieron,
     // el bloque siguiente las maneja con la cuota nueva).
-    if (willChangeCuota) {
+    // En créditos finalizados NO se re-proyecta: updateInstallments selecciona
+    // pagado=false sin excluir paymentFalse=true, así que reescribiría los
+    // restantes que la cancelación dejó en 0 (o el desembolso del caído).
+    if (willChangeCuota && esCreditoFinalizado) {
+      console.log(
+        `⚠️ Crédito ${current.statusCredit}: cuota actualizada solo en el crédito, calendario congelado (no se re-proyectan pagos ni cuotas de inversionistas)`,
+      );
+    }
+    if (willChangeCuota && !esCreditoFinalizado) {
       const sifco = numero_credito_sifco ?? current.numero_credito_sifco;
       const cuotaNuevaNum = Number(updateFields.cuota);
 
-      await updateInstallments({
-        numero_credito_sifco: sifco,
-        nueva_cuota: cuotaNuevaNum,
-      });
+        await updateInstallments({
+          numero_credito_sifco: sifco,
+          nueva_cuota: cuotaNuevaNum,
+        }, db);
 
       const bodyTraeInversionistas =
         (inversionistas && inversionistas.length > 0) ||
@@ -1612,6 +1845,8 @@ export const updateCredit = async ({ body, set, request }: any) => {
             Number(updateFields.membresias_pago ?? current.membresias_pago),
             Number(updateFields.gps ?? current.gps),
             creditos_inversionistas,
+            undefined,
+            db,
           );
         }
 
@@ -1632,6 +1867,7 @@ export const updateCredit = async ({ body, set, request }: any) => {
             Number(updateFields.gps ?? current.gps),
             creditos_inversionistas_espejo,
             cuotasPadreAuto,
+            db,
           );
         }
       }
@@ -1646,12 +1882,72 @@ export const updateCredit = async ({ body, set, request }: any) => {
     // como participante.
     console.log(`🪞 [ESPEJO] inversionistas_espejo recibidos: ${JSON.stringify(inversionistas_espejo?.length ?? 'undefined')}`);
     const runInvestorRebuild = async (tx: typeof db) => {
+      // La segunda lectura ocurre bajo el lock que protege su clasificación y rebuild.
+      const nuevosBajoLock = await validarInversionistasNuevos(
+        credito_id,
+        inversionistas ?? [],
+        inversionistas_espejo,
+        set,
+        excluir_compras ?? current.excluir_compras,
+        db,
+      );
+      if (!nuevosBajoLock.success) throw new Error(nuevosBajoLock.error.message);
+      inversionistasNuevos = nuevosBajoLock.nuevos;
+      // Igual que addInvestorToCredit: un modo por-crédito distinto del modo
+      // global vuelve al inversionista combinado y preserva el modo anterior
+      // en los espejos que todavía no tenían snapshot propio.
+      const nuevosPorInversionista = new Map<number, InversionistaNuevoValidado>();
+      for (const nuevo of inversionistasNuevos) {
+        if (nuevo.tipo_reinversion) {
+          nuevosPorInversionista.set(nuevo.inversionista_id, nuevo);
+        }
+      }
+      for (const nuevo of nuevosPorInversionista.values()) {
+        const [inversionistaActual] = await tx
+          .select({ tipo_reinversion: inversionistasTabla.tipo_reinversion })
+          .from(inversionistasTabla)
+          .where(eq(inversionistasTabla.inversionista_id, nuevo.inversionista_id))
+          .for("update")
+          .limit(1);
+        if (!inversionistaActual) {
+          throw new Error(`Inversionista ${nuevo.inversionista_id} no encontrado`);
+        }
+        const modoAnterior = inversionistaActual.tipo_reinversion;
+        if (modoAnterior !== "reinversion_combinada" && modoAnterior !== nuevo.tipo_reinversion) {
+          await tx
+            .update(inversionistasTabla)
+            .set({ tipo_reinversion: "reinversion_combinada" })
+            .where(eq(inversionistasTabla.inversionista_id, nuevo.inversionista_id));
+          await tx
+            .update(creditos_inversionistas_espejo)
+            .set({ tipo_reinversion: modoAnterior })
+            .where(
+              and(
+                eq(creditos_inversionistas_espejo.inversionista_id, nuevo.inversionista_id),
+                isNull(creditos_inversionistas_espejo.tipo_reinversion),
+              ),
+            );
+        }
+      }
       // 9. Actualizar inversionistas (Principal)
       let parentCuotasTx: Map<number, string> = new Map();
       if (inversionistas && inversionistas.length > 0) {
+        const nuevosPorId = new Map(
+          inversionistasNuevos.map((inv) => [inv.inversionista_id, inv]),
+        );
+        const inversionistasNormalizados = inversionistas.map((inv) => {
+          const nuevo = nuevosPorId.get(inv.inversionista_id);
+          return nuevo?.porcentaje_inversion === undefined
+            ? inv
+            : {
+                ...inv,
+                porcentaje_cash_in: nuevo.porcentaje_cash_in!,
+                porcentaje_inversion: nuevo.porcentaje_inversion,
+              };
+        });
         parentCuotasTx = await updateInvestors(
           credito_id,
-          inversionistas,
+          inversionistasNormalizados,
           updateFields,
           current,
           numero_credito_sifco ?? current.numero_credito_sifco,
@@ -1674,10 +1970,22 @@ export const updateCredit = async ({ body, set, request }: any) => {
           (inversionistas || []).map((inv) => [inv.inversionista_id, inv.cuota_inversionista ?? 0])
         );
 
-        const espejoSincronizado = inversionistas_espejo.map((inv) => ({
-          ...inv,
-          cuota_inversionista: principalCuotas.get(inv.inversionista_id) ?? inv.cuota_inversionista,
-        }));
+        const nuevoPorId = new Map(inversionistasNuevos.map((inv) => [inv.inversionista_id, inv]));
+        const espejoSincronizado = inversionistas_espejo.map((inv) => {
+          const nuevo = nuevoPorId.get(inv.inversionista_id);
+          return {
+            ...inv,
+            ...(nuevo && {
+              es_nuevo: true,
+              tipo_reinversion: nuevo.tipo_reinversion,
+              modalidad_facturacion: nuevo.modalidad_facturacion,
+              modalidad_facturacion_spread_id: nuevo.modalidad_facturacion_spread_id,
+              porcentaje_cash_in: nuevo.porcentaje_cash_in ?? inv.porcentaje_cash_in,
+              porcentaje_inversion: nuevo.porcentaje_inversion ?? inv.porcentaje_inversion,
+            }),
+            cuota_inversionista: principalCuotas.get(inv.inversionista_id) ?? inv.cuota_inversionista,
+          };
+        });
 
         console.log(`🪞 [ESPEJO] Iniciando updateInvestors para credito_id=${credito_id} con ${espejoSincronizado.length} inversionistas`);
         await updateInvestors(
@@ -1706,28 +2014,28 @@ export const updateCredit = async ({ body, set, request }: any) => {
     };
 
     if (
-      (inversionistas && inversionistas.length > 0) ||
-      (inversionistas_espejo && inversionistas_espejo.length > 0) ||
-      inversionistasNuevos.length > 0
+      !esCreditoFinalizado &&
+      ((inversionistas && inversionistas.length > 0) ||
+        (inversionistas_espejo && inversionistas_espejo.length > 0) ||
+        inversionistasNuevos.length > 0)
     ) {
-      try {
-        // withAuditContext ya abre su propia transacción (setea
-        // app.current_user_id para los triggers de auditoría); sin usuario, una
-        // transacción pelada.
-        const espejoUserId = extractUserId(request);
-        if (espejoUserId) {
-          await withAuditContext(espejoUserId, runInvestorRebuild);
-        } else {
-          await db.transaction(async (tx) => runInvestorRebuild(tx as unknown as typeof db));
-        }
-      } catch (investorError) {
-        console.error(`🪞 [ESPEJO] ❌ Error actualizando inversionistas:`, investorError);
-        throw investorError;
-      }
+      await runInvestorRebuild(db);
     }
 
     set.status = 200;
     return updatedCredit;
+    };
+
+    return await withCreditoEspejoLocks(async (locks) => {
+      if (!(await locks.tryLock(credito_id))) {
+        set.status = 409;
+        return { message: `Crédito ${credito_id} está siendo operado por otro proceso` };
+      }
+      if (espejoUserId) {
+        return await withAuditContext(espejoUserId, runUpdate);
+      }
+      return await db.transaction(async (tx) => runUpdate(tx as unknown as typeof db));
+    });
   } catch (error) {
     console.error("Error al actualizar el crédito:", error);
     set.status = 500;
@@ -2305,10 +2613,19 @@ export const recalcularPagosCredito = async ({
   }
 
   // 2️⃣ Obtener pagos con su cuota
-  // Si numero_cuota está definido → desde esa cuota en adelante (pagadas y no pagadas)
-  // Si no → solo lo que AÚN NO SE APLICÓ al crédito: cuotas no pagadas y
-  // también pagos ya registrados como pagados pero SIN validar por conta
-  // (validationStatus='pending', vivos). Esos pagos no han movido capital ni
+  // `numero_cuota` YA NO ACOTA NADA (hotfix 2026-08-24). Antes, pasarlo
+  // recalculaba "desde esa cuota, pagadas y no pagadas": como la amortización
+  // siempre arranca del capital ACTUAL del crédito, ese modo solo era correcto
+  // cuando la cuota coincidía con la primera sin pagar (= el modo sin cuota).
+  // Con una cuota menor reescribía splits ya validados/facturados/distribuidos
+  // a inversionistas con un capital ya reducido; con una mayor se saltaba la
+  // cuota que la reversión acababa de reabrir (caso real: crédito 3, cuota 17,
+  // conta mandó 18). El front sigue enviando el número; se acepta y se ignora
+  // para no romper el contrato. Reparar historial pagado es trabajo de
+  // /reparar-total-restante.
+  // Se procesa siempre solo lo que AÚN NO SE APLICÓ al crédito: cuotas no
+  // pagadas y también pagos ya registrados como pagados pero SIN validar por
+  // conta (validationStatus='pending', vivos). Esos pagos no han movido capital ni
   // distribuido a inversionistas — su reparto guardado recién se aplica al
   // validarse, así que refrescarlo aquí es seguro y necesario: si quedaran
   // fuera, conta validaría el split viejo (interés pre-abono).
@@ -2342,31 +2659,30 @@ export const recalcularPagosCredito = async ({
     ),
   );
 
-  const whereConditions =
-    numero_cuota !== undefined
-      ? and(
-          eq(pagos_credito.credito_id, credito.credito_id),
-          gte(cuotas_credito.numero_cuota, numero_cuota),
-          filaNoEsAbonoCapitalNiCierre,
-        )
-      : and(
-          eq(pagos_credito.credito_id, credito.credito_id),
-          filaNoEsAbonoCapitalNiCierre,
-          or(
-            eq(pagos_credito.pagado, false),
-            // Pagos registrados sin validar: solo con monto_aplicado > 0.
-            // Los recibos especiales de solo mora/otros/convenio se guardan
-            // pagado=true con monto_aplicado=0 — no son pago de cuota, no
-            // tienen split que refrescar, y reescribirlos aquí los volvería
-            // recibos de cuota (incluso volteando su pagado).
-            and(
-              eq(pagos_credito.pagado, true),
-              eq(pagos_credito.validationStatus, "pending"),
-              eq(pagos_credito.paymentFalse, false),
-              gt(pagos_credito.monto_aplicado, "0"),
-            ),
-          ),
-        );
+  if (numero_cuota !== undefined) {
+    console.warn(
+      `⚠️ recalcularPagosCredito: numero_cuota=${numero_cuota} recibido para ${numero_credito_sifco} — se ignora; solo se recalculan cuotas no pagadas y pagos pendientes de validar.`,
+    );
+  }
+
+  const whereConditions = and(
+    eq(pagos_credito.credito_id, credito.credito_id),
+    filaNoEsAbonoCapitalNiCierre,
+    or(
+      eq(pagos_credito.pagado, false),
+      // Pagos registrados sin validar: solo con monto_aplicado > 0.
+      // Los recibos especiales de solo mora/otros/convenio se guardan
+      // pagado=true con monto_aplicado=0 — no son pago de cuota, no
+      // tienen split que refrescar, y reescribirlos aquí los volvería
+      // recibos de cuota (incluso volteando su pagado).
+      and(
+        eq(pagos_credito.pagado, true),
+        eq(pagos_credito.validationStatus, "pending"),
+        eq(pagos_credito.paymentFalse, false),
+        gt(pagos_credito.monto_aplicado, "0"),
+      ),
+    ),
+  );
 
   const rows = await db
     .select()
@@ -2378,6 +2694,31 @@ export const recalcularPagosCredito = async ({
   if (rows.length === 0) {
     console.log(`⚠️ No hay pagos para actualizar en crédito ${numero_credito_sifco}`);
     return;
+  }
+
+  // Contexto de solo lectura: parciales VALIDADOS vivos de las cuotas
+  // seleccionadas, aunque tengan pagado=true (cuando un pending cierra la
+  // cuota, insertPayment marca pagado=true a TODAS sus filas y el WHERE de
+  // arriba dejaría fuera al validado). Nunca se escriben (ver esValidadoVivo);
+  // solo netean el saldo de la cuota y restauran su capital.
+  const cuotaIdsSeleccionadas = [...new Set(rows.map((r) => r.cuotas_credito.cuota_id))];
+  const pagoIdsSeleccionados = new Set(rows.map((r) => r.pagos_credito.pago_id));
+  const contextoValidados = await db
+    .select()
+    .from(pagos_credito)
+    .innerJoin(cuotas_credito, eq(pagos_credito.cuota_id, cuotas_credito.cuota_id))
+    .where(
+      and(
+        eq(pagos_credito.credito_id, credito.credito_id),
+        inArray(pagos_credito.cuota_id, cuotaIdsSeleccionadas),
+        eq(pagos_credito.validationStatus, "validated"),
+        eq(pagos_credito.paymentFalse, false),
+        ne(pagos_credito.registerBy, "system_reset"),
+      ),
+    )
+    .orderBy(asc(cuotas_credito.numero_cuota), asc(pagos_credito.pago_id));
+  for (const r of contextoValidados) {
+    if (!pagoIdsSeleccionados.has(r.pagos_credito.pago_id)) rows.push(r);
   }
 
   // 3️⃣ Agrupar pagos por cuota_id
@@ -2410,6 +2751,20 @@ export const recalcularPagosCredito = async ({
   // recibos quedarían con capital_restante/abono_capital negativos.
   if (capitalEnMemoria.lt(0)) capitalEnMemoria = new Big(0);
 
+  // Parciales VALIDADOS vivos: su capital YA se descontó de creditos.capital
+  // al validarse, en TODAS las cuotas abiertas (un parcial puede caer en una
+  // cuota posterior mientras las anteriores siguen abiertas). Se restaura
+  // completo ANTES de amortizar la primera cuota: así cada cuota se proyecta
+  // desde el mismo principal con que se sembró, el neteo de rem.capital resta
+  // el capital validado una sola vez y la cadena queda igual a la sembrada.
+  const esValidadoVivo = (p: (typeof rows)[number]["pagos_credito"]) =>
+    p.validationStatus === "validated" && !p.paymentFalse;
+  for (const r of rows) {
+    if (esValidadoVivo(r.pagos_credito)) {
+      capitalEnMemoria = capitalEnMemoria.plus(r.pagos_credito.abono_capital ?? 0);
+    }
+  }
+
   // 5️⃣ Procesar cada cuota en orden
   const actualizaciones: { pago_id: number; datos: Record<string, unknown> }[] = [];
 
@@ -2420,6 +2775,8 @@ export const recalcularPagosCredito = async ({
   for (const [, { numero_cuota: numCuota, pagos }] of cuotasOrdenadas) {
     // Cuota 0 (desembolso) no se recalcula
     if (numCuota === 0) continue;
+
+    const validadosVivos = pagos.filter(esValidadoVivo);
 
     // Amortización de esta cuota
     const interesMes = capitalEnMemoria.times(porcentajeInteres).round(2);
@@ -2483,6 +2840,24 @@ export const recalcularPagosCredito = async ({
       rem.membresias.eq(0) &&
       rem.capital.eq(0);
 
+    // Pagos VALIDADOS por conta: un parcial validado de una cuota aún abierta
+    // sigue `pagado=false` hasta que la cuota cierre (ver registerPayment),
+    // así que el WHERE de arriba lo trae. Pero su capital ya se descontó del
+    // crédito, su split ya se distribuyó a inversionistas y ya se facturó:
+    // NO se reescribe. Solo consume el saldo de la cuota con los abonos que
+    // tiene guardados, y lo hace ANTES del loop porque las filas sembradas
+    // (fecha_pago null) se ordenan primero y su snapshot debe salir ya neto
+    // — el mismo neteo que hace registerPayment al recibir el siguiente pago.
+    const noNeg = (b: Big) => (b.lt(0) ? new Big(0) : b);
+    for (const v of validadosVivos) {
+      rem.interes = noNeg(rem.interes.minus(v.abono_interes ?? 0));
+      rem.iva = noNeg(rem.iva.minus(v.abono_iva_12 ?? 0));
+      rem.seguro = noNeg(rem.seguro.minus(v.abono_seguro ?? 0));
+      rem.gps = noNeg(rem.gps.minus(v.abono_gps ?? 0));
+      rem.membresias = noNeg(rem.membresias.minus(v.membresias_pago ?? 0));
+      rem.capital = noNeg(rem.capital.minus(v.abono_capital ?? 0));
+    }
+
     for (const pago of pagosOrdenados) {
       // Pagos ANULADOS (paymentFalse): conservan monto_aplicado, pero esa
       // plata ya no existe — no debe consumir el saldo de la cuota ni marcar
@@ -2491,6 +2866,16 @@ export const recalcularPagosCredito = async ({
       // saldo vigente). No se excluyen del SELECT a propósito: tras anular,
       // esta fila suele ser el destino que el próximo registro sobreescribe,
       // y así cascadea contra el saldo nuevo en vez del sembrado viejo.
+      // Pagos VALIDADOS por conta: un parcial validado de una cuota aún
+      // abierta sigue `pagado=false` hasta que la cuota cierre (ver
+      // registerPayment), así que el WHERE de arriba lo trae. Pero su capital
+      // ya se descontó del crédito, su split ya se distribuyó a inversionistas
+      // y ya se facturó: NO se reescribe. Solo consume el saldo de la cuota
+      // con los abonos que tiene guardados, para que los hermanos pendientes /
+      // sembrados se siembren sobre el neto (mismo neteo que hace
+      // registerPayment al recibir el siguiente pago de esa cuota).
+      if (esValidadoVivo(pago)) continue;
+
       const montoAplicado = pago.paymentFalse
         ? new Big(0)
         : new Big(pago.monto_aplicado ?? 0);

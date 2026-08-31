@@ -46,6 +46,7 @@ import ExcelJS from "exceljs";
 import { promises as fsp } from "node:fs";
 import path from "node:path";
 import { guardDescuentaImpuestos } from "./investorGuards";
+import { buildPendingReturnAuthorizationWarningFromErrors } from "../utils/pendingReturnGuard";
 // 🔥 IMPORTAR SERVICIO DE BOLETAS
 
 
@@ -586,6 +587,16 @@ export const inversionistasRouter = new Elysia()
           set.status = 207;
         } else {
           set.status = 200;
+        }
+
+        const pendingReturnWarning =
+          buildPendingReturnAuthorizationWarningFromErrors(result.errores);
+        if (pendingReturnWarning && !hayLiquidaciones) {
+          return {
+            ...result,
+            success: false,
+            ...pendingReturnWarning,
+          };
         }
 
         return result;
@@ -1541,6 +1552,10 @@ export const inversionistasRouter = new Elysia()
         );
 
         if (!resultado.success) {
+          if ((resultado as any).code === "CREDIT_PENDING_RETURN_AUTHORIZATION") {
+            set.status = 422;
+            return resultado;
+          }
           set.status = 500;
           return {
             success: false,
@@ -1591,6 +1606,18 @@ export const inversionistasRouter = new Elysia()
           inversionistaId: t.Number(),
           totalCreditosConPagos: t.Number(),
           pagosGenerados: t.Boolean(),
+          data: t.Array(t.Any()),
+        }),
+        422: t.Object({
+          success: t.Literal(false),
+          warning: t.Literal(true),
+          code: t.Literal("CREDIT_PENDING_RETURN_AUTHORIZATION"),
+          message: t.String(),
+          creditos_bloqueados: t.Array(t.Object({
+            credito_id: t.Number(),
+            numero_credito_sifco: t.String(),
+            estado_devolucion: t.Literal("PENDIENTE_AUTORIZACION"),
+          })),
           data: t.Array(t.Any()),
         }),
         500: t.Object({
@@ -2038,11 +2065,12 @@ export const inversionistasRouter = new Elysia()
         const resultado = await calcularYRegistrarPagosEspejo(inversionistaId, fechaCalculoDate);
 
         if (!resultado.success) {
+          if ((resultado as any).code === "CREDIT_PENDING_RETURN_AUTHORIZATION") {
+            set.status = 422;
+            return resultado;
+          }
           set.status = 500;
-          return {
-            success: false as const,
-            error: (resultado as any).error ?? "Error desconocido",
-          };
+          return resultado;
         }
 
         set.status = 200;
@@ -2095,9 +2123,31 @@ export const inversionistasRouter = new Elysia()
             mensaje: t.String(),
           })),
         }),
+        422: t.Object({
+          success: t.Literal(false),
+          warning: t.Literal(true),
+          code: t.Literal("CREDIT_PENDING_RETURN_AUTHORIZATION"),
+          message: t.String(),
+          creditos_bloqueados: t.Array(t.Object({
+            credito_id: t.Number(),
+            numero_credito_sifco: t.String(),
+            estado_devolucion: t.Literal("PENDIENTE_AUTORIZACION"),
+          })),
+          data: t.Array(t.Any()),
+        }),
         500: t.Object({
           success: t.Literal(false),
           error: t.String(),
+          inversionistaId: t.Optional(t.Number()),
+          totalCreditosProcesados: t.Optional(t.Number()),
+          totalCreditosFallidos: t.Optional(t.Number()),
+          pagosGenerados: t.Optional(t.Boolean()),
+          data: t.Optional(t.Array(t.Any())),
+          fallidos: t.Optional(t.Array(t.Object({
+            creditoId: t.Number(),
+            numeroCreditoSifco: t.String(),
+            mensaje: t.String(),
+          }))),
         }),
       },
     }

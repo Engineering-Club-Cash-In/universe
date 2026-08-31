@@ -90,6 +90,9 @@ function RouteComponent() {
 			return await client.getDocumentsByDpi({
 				dpi: dpi.replace(/\s/g, ""),
 				documentNames,
+				// Para resolver el género por el lead dueño de la oportunidad
+				// cuando RENAP no responde (hay DPI duplicados entre leads)
+				opportunityId,
 			});
 		},
 	});

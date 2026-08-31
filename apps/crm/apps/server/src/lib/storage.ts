@@ -114,6 +114,7 @@ export const UPLOAD_RESOURCE_TYPES = [
 	"legal_contract_pdf",
 	"bank_statement",
 	"investment_document",
+	"license_verification",
 ] as const;
 
 export type UploadResourceType = (typeof UPLOAD_RESOURCE_TYPES)[number];
@@ -152,6 +153,8 @@ export function buildUploadPrefix(
 			return `bank-statements/${resourceId}`;
 		case "investment_document":
 			return `investment-documents/${resourceId}`;
+		case "license_verification":
+			return `license-verifications/${resourceId}`;
 	}
 }
 

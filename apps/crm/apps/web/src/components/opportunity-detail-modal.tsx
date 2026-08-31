@@ -39,6 +39,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
 	formatGuatemalaCalendarDate,
 	formatGuatemalaDate,
+	formatGuatemalaDateTime,
 	getContractTypeLabel,
 	getDocumentTypeLabel,
 	getLoanPurposeLabel,
@@ -891,7 +892,7 @@ export function OpportunityDetailModal({
 														<div className="flex items-center gap-4 text-muted-foreground text-xs">
 															<div className="flex items-center gap-1">
 																<Clock className="h-3 w-3" />
-																{new Date(change.changedAt).toLocaleString()}
+																{formatGuatemalaDateTime(change.changedAt)}
 															</div>
 															<div className="flex items-center gap-1">
 																<Users className="h-3 w-3" />

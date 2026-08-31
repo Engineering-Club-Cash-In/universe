@@ -19,6 +19,7 @@ import {
 } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
+import { auditRecord, auditedTransaction } from "../lib/audit";
 import {
 	vehicleDocumentRequirements,
 	vehicleDocuments,
@@ -51,6 +52,7 @@ import {
 	opportunityDocuments,
 	VEHICLE_DOCUMENT_TYPES,
 } from "../db/schema/documents";
+import { licenseQrVerifications } from "../db/schema/license-verification";
 import { quotations } from "../db/schema/quotations";
 import {
 	carryForwardAnalysisChecklistVerificationState,
@@ -61,6 +63,7 @@ import {
 	updateChecklistForClientDocument,
 	updateChecklistForVehicleDocument,
 } from "../lib/checklist";
+import { mergeCompanyRelationshipStats } from "../lib/company-relationship-stats";
 import {
 	assertOpportunityBelongsToLead,
 	canWriteOpportunityCreditAnalysis,
@@ -69,13 +72,24 @@ import {
 import { buildDeletedOpportunitySnapshot } from "../lib/deleted-opportunity-audit";
 import { fetchAllPages } from "../lib/fetch-all-pages";
 import { eqDpi } from "../lib/dpi-lookup";
+import { getDiaPagoOriginalSistema } from "../lib/fecha-ideal-pago-ajuste";
 import { getGuatemalaMonthWindow } from "../lib/guatemala-month-window";
 import {
 	formatMissingLeadFields,
 	getMissingLeadFieldsForContracts,
 } from "../lib/lead-helpers";
+import { canSyncNitToOpportunity } from "../lib/lead-nit-sync";
 import { getLeadSourceLabel } from "../lib/lead-sources";
-import { getStageVehicleRequirementError } from "../lib/opportunity-stage-guard";
+import {
+	buildOpportunityRelationshipInvariantCondition,
+	buildWonOpportunityFrozenFieldError,
+	getStageLeadRequirementError,
+	getStageVehicleRequirementError,
+	getWonOpportunityFrozenFieldChanges,
+	getWonOpportunityLockError,
+	getWonOpportunityRevokeError,
+	stripUnchangedFrozenFields,
+} from "../lib/opportunity-stage-guard";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import {
@@ -91,8 +105,12 @@ import {
 } from "../lib/vehicle-helpers";
 import { carteraBackClient } from "../services/cartera-back-client";
 import { scoreLead } from "../services/lead-scoring";
+import {
+	ejecutarValidaciones,
+	resolverExencionPorBot,
+} from "../services/opportunity-validations";
 import type { StatusCreditEnum } from "../types/cartera-back";
-import { validarDpi } from "../utils/cui-validation";
+import { normalizarDpi, validarDpi } from "../utils/cui-validation";
 import { createNotification } from "./notifications";
 
 const CLIENT_CREDIT_CARTERA_STATUSES = [
@@ -418,8 +436,7 @@ export function buildCarteraMatchedClientRows(params: {
 	const rows: MatchedClientRow[] = [];
 	const leadOpportunities = params.opportunityOwnerId
 		? params.leadOpportunities.filter(
-				(opportunity) =>
-					opportunity.assignedTo === params.opportunityOwnerId,
+				(opportunity) => opportunity.assignedTo === params.opportunityOwnerId,
 			)
 		: params.leadOpportunities;
 
@@ -436,12 +453,12 @@ export function buildCarteraMatchedClientRows(params: {
 			rowId: `${params.lead.id}-${sifco}`,
 			opportunities: leadOpportunities,
 			creditAnalysis: matchingOpportunity
-				? (params.creditAnalysisByOpportunityId.get(matchingOpportunity.id) ?? null)
+				? (params.creditAnalysisByOpportunityId.get(matchingOpportunity.id) ??
+					null)
 				: null,
 			totalClosedValue: getCarteraCreditAmount(credit),
-			closedOpportunitiesCount: leadOpportunities.filter(
-				(opp) => opp.isClosed,
-			).length,
+			closedOpportunitiesCount: leadOpportunities.filter((opp) => opp.isClosed)
+				.length,
 			crmMatchStatus: "matched",
 			carteraCredit: buildCarteraOnlyClientRow(credit).carteraCredit,
 		});
@@ -537,8 +554,8 @@ export const crmRouter = {
 
 	// Companies
 	getCompanies: crmProcedure.handler(async ({ context }) => {
-		// Admin can see all companies, sales can only see companies they created or are assigned to
-		if (context.userRole === "admin") {
+		// Supervisors manage the complete sales directory; sales users see their own.
+		if (PERMISSIONS.canManageAllCompanies(context.userRole)) {
 			return await db.select().from(companies).orderBy(companies.createdAt);
 		}
 		return await db
@@ -546,6 +563,50 @@ export const crmRouter = {
 			.from(companies)
 			.where(eq(companies.createdBy, context.userId))
 			.orderBy(companies.createdAt);
+	}),
+
+	getCompanyRelationshipStats: crmProcedure.handler(async ({ context }) => {
+		const leadsOwnerCondition =
+			context.userRole === "sales"
+				? eq(leads.assignedTo, context.userId)
+				: undefined;
+		const opportunitiesOwnerCondition =
+			context.userRole === "sales"
+				? eq(opportunities.assignedTo, context.userId)
+				: undefined;
+		const clientsOwnerCondition =
+			context.userRole === "sales"
+				? eq(clients.assignedTo, context.userId)
+				: undefined;
+
+		const [leadRows, opportunityRows, clientRows] = await Promise.all([
+			db
+				.select({ companyId: leads.companyId, total: count(leads.id) })
+				.from(leads)
+				.where(and(isNotNull(leads.companyId), leadsOwnerCondition))
+				.groupBy(leads.companyId),
+			db
+				.select({
+					companyId: opportunities.companyId,
+					total: count(opportunities.id),
+				})
+				.from(opportunities)
+				.where(
+					and(isNotNull(opportunities.companyId), opportunitiesOwnerCondition),
+				)
+				.groupBy(opportunities.companyId),
+			db
+				.select({ companyId: clients.companyId, total: count(clients.id) })
+				.from(clients)
+				.where(and(isNotNull(clients.companyId), clientsOwnerCondition))
+				.groupBy(clients.companyId),
+		]);
+
+		return mergeCompanyRelationshipStats({
+			leads: leadRows,
+			opportunities: opportunityRows,
+			clients: clientRows,
+		});
 	}),
 
 	createCompany: crmProcedure
@@ -590,9 +651,9 @@ export const crmRouter = {
 		.handler(async ({ input, context }) => {
 			const { id, ...updateData } = input;
 
-			// Sales users can only update companies they created
+			// Supervisors can update the complete sales directory.
 			const whereClause =
-				context.userRole === "admin"
+				PERMISSIONS.canManageAllCompanies(context.userRole)
 					? eq(companies.id, id)
 					: and(eq(companies.id, id), eq(companies.createdBy, context.userId));
 
@@ -864,6 +925,7 @@ export const crmRouter = {
 	}),
 
 	createLead: crmProcedure
+		.meta({ audit: { entity: "lead", action: "create" } })
 		.input(
 			z.object({
 				firstName: z.string().min(1, "First name is required"),
@@ -985,7 +1047,7 @@ export const crmRouter = {
 					const existingLead = matchingLeads[0];
 
 					// Lead existe pero sin procesos activos → reasignar al nuevo asesor
-					const reassignedLead = await db.transaction(async (tx) => {
+					const reassignedLead = await auditedTransaction(async (tx) => {
 						const [lead] = await tx
 							.update(leads)
 							.set({
@@ -1011,16 +1073,34 @@ export const crmRouter = {
 							});
 						}
 
-						await tx.insert(opportunities).values({
-							title: `${input.firstName} ${input.lastName}`,
-							leadId: existingLead.id,
-							creditType: "autocompra",
-							stageId: firstStage.id,
-							probability: 1,
-							assignedTo,
-							createdBy: context.userId,
-							source: input.source,
-							campaign: input.campaign,
+						// Este lead ya existía: lo que pasó fue una reasignación, no
+						// un alta.
+						auditRecord({
+							entity: "lead",
+							id: existingLead.id,
+							action: "reassign",
+							data: { dpi: normalizedDpi, assignedTo },
+						});
+
+						const [nuevaOportunidad] = await tx
+							.insert(opportunities)
+							.values({
+								title: `${input.firstName} ${input.lastName}`,
+								leadId: existingLead.id,
+								creditType: "autocompra",
+								stageId: firstStage.id,
+								probability: 1,
+								assignedTo,
+								createdBy: context.userId,
+								source: input.source,
+								campaign: input.campaign,
+							})
+							.returning({ id: opportunities.id });
+						auditRecord({
+							entity: "opportunity",
+							id: nuevaOportunidad.id,
+							action: "create",
+							data: { leadId: existingLead.id, assignedTo },
 						});
 
 						return lead;
@@ -1042,10 +1122,12 @@ export const crmRouter = {
 					updatedAt: new Date(),
 				})
 				.returning();
+			auditRecord({ entity: "lead", id: newLead[0].id, action: "create" });
 			return newLead[0];
 		}),
 
 	updateLead: crmProcedure
+		.meta({ audit: { entity: "lead", action: "update" } })
 		.input(
 			z.object({
 				id: z.string().uuid(),
@@ -1123,6 +1205,18 @@ export const crmRouter = {
 				});
 			}
 
+			// El NIT que el lead tenía ANTES de esta edición: es la referencia para
+			// distinguir las oportunidades que siguen con la copia de las que
+			// alguien corrigió a mano. Hay que leerlo antes del UPDATE.
+			const [leadAntesDelUpdate] =
+				updateData.nit !== undefined
+					? await db
+							.select({ nit: leads.nit })
+							.from(leads)
+							.where(eq(leads.id, id))
+							.limit(1)
+					: [];
+
 			const updatedLead = await db
 				.update(leads)
 				.set({
@@ -1136,19 +1230,56 @@ export const crmRouter = {
 				})
 				.where(whereClause)
 				.returning();
-
 			if (updatedLead.length === 0) {
 				throw new ORPCError("NOT_FOUND", {
 					message: "Lead no encontrado o no tienes permiso para actualizarlo",
 				});
 			}
 
-			// Sync NIT to associated opportunities
+			// Después del chequeo: con cero filas no hubo escritura que anotar.
+			auditRecord({ entity: "lead", id: id, action: "update" });
+
+			// Sync NIT to associated opportunities.
+			// Solo a las que siguen con la copia del NIT del lead: el que viaja a
+			// cartera es el de la oportunidad y se corrige por aparte en el detalle
+			// de crédito (40%) y al asignar inversión (50%). Ver `lead-nit-sync`.
 			if (updateData.nit !== undefined) {
-				await db
-					.update(opportunities)
-					.set({ nit: updateData.nit || null, updatedAt: new Date() })
+				const leadOpportunities = await db
+					.select({ id: opportunities.id, nit: opportunities.nit })
+					.from(opportunities)
 					.where(eq(opportunities.leadId, id));
+
+				const sincronizables = leadOpportunities.filter((o) =>
+					canSyncNitToOpportunity(o.nit, leadAntesDelUpdate?.nit),
+				);
+
+				if (sincronizables.length > 0) {
+					await db
+						.update(opportunities)
+						.set({ nit: updateData.nit || null, updatedAt: new Date() })
+						.where(
+							inArray(
+								opportunities.id,
+								sincronizables.map((o) => o.id),
+							),
+						);
+					// El NIT que viaja a cartera es el de la oportunidad, no el del lead.
+					for (const oportunidad of sincronizables) {
+						auditRecord({
+							entity: "opportunity",
+							id: oportunidad.id,
+							action: "sync_nit",
+							data: { leadId: id, nit: updateData.nit || null },
+						});
+					}
+				}
+
+				const conservadas = leadOpportunities.length - sincronizables.length;
+				if (conservadas > 0) {
+					console.log(
+						`[updateLead] NIT del lead ${id} actualizado: ${sincronizables.length} oportunidad(es) sincronizada(s), ${conservadas} conservada(s) por tener el NIT corregido a mano`,
+					);
+				}
 			}
 
 			if (
@@ -1180,6 +1311,16 @@ export const crmRouter = {
 							updatedAt: new Date(),
 						})
 						.where(eq(opportunities.id, activeOpportunity.id));
+					auditRecord({
+						entity: "opportunity",
+						id: activeOpportunity.id,
+						action: "sync_source_campaign",
+						data: {
+							leadId: id,
+							source: updateData.source,
+							campaign: updateData.campaign,
+						},
+					});
 				}
 			}
 
@@ -1306,9 +1447,12 @@ export const crmRouter = {
 					maxPayment: z.number().min(0).optional(),
 					maxCreditAmount: z.number().min(0).optional(),
 				})
-				.refine((data) => data.coDebtorId || (data.leadId && data.opportunityId), {
-					message: "Debe proporcionar leadId y opportunityId, o coDebtorId",
-				})
+				.refine(
+					(data) => data.coDebtorId || (data.leadId && data.opportunityId),
+					{
+						message: "Debe proporcionar leadId y opportunityId, o coDebtorId",
+					},
+				)
 				.refine((data) => !(data.leadId && data.coDebtorId), {
 					message: "No puede guardar un lead y un co-deudor a la vez",
 				}),
@@ -1469,9 +1613,12 @@ export const crmRouter = {
 					opportunityId: z.string().uuid().optional(),
 					coDebtorId: z.string().uuid().optional(),
 				})
-				.refine((data) => data.coDebtorId || (data.leadId && data.opportunityId), {
-					message: "Debe proporcionar leadId y opportunityId, o coDebtorId",
-				})
+				.refine(
+					(data) => data.coDebtorId || (data.leadId && data.opportunityId),
+					{
+						message: "Debe proporcionar leadId y opportunityId, o coDebtorId",
+					},
+				)
 				.refine((data) => !(data.leadId && data.coDebtorId), {
 					message: "No puede resetear un lead y un co-deudor a la vez",
 				}),
@@ -1557,9 +1704,9 @@ export const crmRouter = {
 				.select({
 					opportunityId: opportunityStageHistory.opportunityId,
 					firstClosedStageAt:
-						sql<Date>`min(${opportunityStageHistory.changedAt})`.as(
-							"first_closed_stage_at",
-						),
+						sql<Date>`min(${opportunityStageHistory.changedAt})`
+							.mapWith(opportunityStageHistory.changedAt)
+							.as("first_closed_stage_at"),
 				})
 				.from(opportunityStageHistory)
 				.innerJoin(
@@ -1574,15 +1721,17 @@ export const crmRouter = {
 				.select({
 					opportunityId: opportunityStageHistory.opportunityId,
 					latestStageChangedAt:
-						sql<Date>`max(${opportunityStageHistory.changedAt})`.as(
-							"latest_stage_changed_at",
-						),
+						sql<Date>`max(${opportunityStageHistory.changedAt})`
+							.mapWith(opportunityStageHistory.changedAt)
+							.as("latest_stage_changed_at"),
 				})
 				.from(opportunityStageHistory)
 				.groupBy(opportunityStageHistory.opportunityId)
 				.as("latest_stage_history");
 
-			const closedAtExpression = sql<Date | null>`coalesce(${firstClosedStageDates.firstClosedStageAt}, ${opportunities.actualCloseDate})`;
+			const closedAtExpression = sql<Date | null>`coalesce(${firstClosedStageDates.firstClosedStageAt}, ${opportunities.actualCloseDate})`.mapWith(
+				opportunities.actualCloseDate,
+			);
 
 			const selectFields = {
 				id: opportunities.id,
@@ -1598,9 +1747,9 @@ export const crmRouter = {
 				createdAt: opportunities.createdAt,
 				closedAt: closedAtExpression.as("closed_at"),
 				latestStageChangedAt:
-					sql<Date>`coalesce(${latestStageHistory.latestStageChangedAt}, ${opportunities.createdAt})`.as(
-						"latest_stage_changed_at",
-					),
+					sql<Date>`coalesce(${latestStageHistory.latestStageChangedAt}, ${opportunities.createdAt})`
+						.mapWith(opportunities.createdAt)
+						.as("latest_stage_changed_at"),
 				updatedAt: opportunities.updatedAt,
 				numeroSifco: opportunities.numeroSifco,
 				// Analysis status for tracking rejection/resubmission
@@ -1612,6 +1761,7 @@ export const crmRouter = {
 				cuotaMensual: opportunities.cuotaMensual,
 				fechaInicio: opportunities.fechaInicio,
 				diaPagoMensual: opportunities.diaPagoMensual,
+				diaPagoOriginalSistema: opportunities.diaPagoOriginalSistema,
 				// Additional credit fields
 				seguro: opportunities.seguro,
 				gps: opportunities.gps,
@@ -1784,6 +1934,7 @@ export const crmRouter = {
 		}),
 
 	deleteOpportunity: crmProcedure
+		.meta({ audit: { entity: "opportunity", action: "delete" } })
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
@@ -1800,7 +1951,7 @@ export const crmRouter = {
 				});
 			}
 
-			await db.transaction(async (tx) => {
+			await auditedTransaction(async (tx) => {
 				const [opportunity] = await tx
 					.select({
 						id: opportunities.id,
@@ -1820,6 +1971,7 @@ export const crmRouter = {
 						cuotaMensual: opportunities.cuotaMensual,
 						fechaInicio: opportunities.fechaInicio,
 						diaPagoMensual: opportunities.diaPagoMensual,
+						diaPagoOriginalSistema: opportunities.diaPagoOriginalSistema,
 						numeroSifco: opportunities.numeroSifco,
 						nit: opportunities.nit,
 						assignedTo: opportunities.assignedTo,
@@ -1907,6 +2059,33 @@ export const crmRouter = {
 						eq(opportunityStageHistory.opportunityId, input.opportunityId),
 					);
 
+				// Se necesita antes del snapshot (para archivar las verificaciones) y
+				// antes del delete de abajo (para no reventar la FK NO ACTION) — una
+				// sola consulta para ambos usos.
+				const opportunityCoDebtors = await tx
+					.select({ id: coDebtors.id })
+					.from(coDebtors)
+					.where(eq(coDebtors.opportunityId, input.opportunityId));
+
+				const licenseVerificationCondition = or(
+					eq(licenseQrVerifications.opportunityId, input.opportunityId),
+					opportunityCoDebtors.length > 0
+						? inArray(
+								licenseQrVerifications.coDebtorId,
+								opportunityCoDebtors.map((c) => c.id),
+							)
+						: undefined,
+				);
+
+				// Se archivan las filas completas ANTES de borrarlas — si no, borrar
+				// una oportunidad temprana destruye para siempre la trazabilidad
+				// (QR, respuesta de Tránsito, motivo de fallo) que este feature
+				// existe para conservar.
+				const licenseVerificationRows = await tx
+					.select()
+					.from(licenseQrVerifications)
+					.where(licenseVerificationCondition);
+
 				const snapshot = buildDeletedOpportunitySnapshot({
 					opportunity,
 					stage: opportunity.stage,
@@ -1925,6 +2104,25 @@ export const crmRouter = {
 							(financialStatementsCount?.count ?? 0),
 						stageHistory: stageHistoryCount?.count ?? 0,
 					},
+					licenseVerifications: licenseVerificationRows.map((row) => ({
+						id: row.id,
+						subjectType: row.leadId ? ("lead" as const) : ("coDebtor" as const),
+						subjectId: (row.leadId ?? row.coDebtorId)!,
+						result: row.result,
+						qrRawUrl: row.qrRawUrl,
+						qrDomainValid: row.qrDomainValid,
+						cardCode: row.cardCode,
+						apiResponseCode: row.apiResponseCode,
+						licenseHolderName: row.licenseHolderName,
+						licenseNumber: row.licenseNumber,
+						licenseExpiresAt: row.licenseExpiresAt,
+						identityMatchScore: row.identityMatchScore,
+						failureReason: row.failureReason,
+						documentKey: row.documentKey,
+						rawResponse: row.rawResponse,
+						createdAt: row.createdAt,
+						createdBy: row.createdBy,
+					})),
 				});
 
 				const leadName = snapshot.lead?.fullName ?? null;
@@ -1953,15 +2151,28 @@ export const crmRouter = {
 					.set({ opportunityId: null })
 					.where(eq(clients.opportunityId, input.opportunityId));
 
+				// FK NO ACTION: sin este delete, el de abajo revienta si hay
+				// verificaciones asociadas. Ya se archivaron arriba (licenseVerificationRows)
+				// antes de llegar acá.
+				await tx
+					.delete(licenseQrVerifications)
+					.where(licenseVerificationCondition);
+
 				await tx
 					.delete(opportunities)
 					.where(eq(opportunities.id, input.opportunityId));
+				auditRecord({
+					entity: "opportunity",
+					id: input.opportunityId,
+					action: "delete",
+				});
 			});
 
 			return { message: "Oportunidad eliminada exitosamente" };
 		}),
 
 	createOpportunity: crmProcedure
+		.meta({ audit: { entity: "opportunity", action: "create" } })
 		.input(
 			z.object({
 				title: z.string().min(1, "Title is required"),
@@ -2069,16 +2280,22 @@ export const crmRouter = {
 					updatedAt: new Date(),
 				})
 				.returning();
+			auditRecord({
+				entity: "opportunity",
+				id: newOpportunity[0].id,
+				action: "create",
+			});
 			return { ...newOpportunity[0], warning: false as const };
 		}),
 
 	updateOpportunity: crmProcedure
+		.meta({ audit: { entity: "opportunity", action: "update" } })
 		.input(
 			z.object({
 				id: z.string().uuid(),
 				title: z.string().min(1, "Title is required").optional(),
-				leadId: z.string().uuid().optional(),
-				companyId: z.string().uuid().optional(),
+				leadId: z.string().uuid().nullable().optional(),
+				companyId: z.string().uuid().nullable().optional(),
 				vehicleId: z.string().uuid().nullable().optional(),
 				creditType: z.enum(["autocompra", "sobre_vehiculo"]).optional(),
 				source: z.enum(leadSourceEnum.enumValues).optional(),
@@ -2097,6 +2314,12 @@ export const crmRouter = {
 				cuotaMensual: z.string().optional(),
 				fechaInicio: z.string().optional(),
 				diaPagoMensual: z.number().int().min(1).max(31).optional(),
+				// Marca si el día viene de la opción "recomendado por IA" del select,
+				// aunque coincida numéricamente con 15/30. Se revalida server-side
+				// contra suggestedPaymentDays. Requerido cuando se envía diaPagoMensual
+				// (ver .refine() abajo). No es columna de opportunities — se destructura
+				// fuera de updateData más abajo.
+				elegidoDesdeRecomendacionIA: z.boolean().optional(),
 				// Additional fields
 				seguro: z.number().optional(),
 				gps: z.number().optional(),
@@ -2123,7 +2346,16 @@ export const crmRouter = {
 				loanPurpose: z.enum(["personal", "business"]).optional(),
 				// Optimistic locking - prevents race conditions on concurrent updates
 				expectedUpdatedAt: z.string().datetime().optional(),
-			}),
+			}).refine(
+				(data) =>
+					data.diaPagoMensual === undefined ||
+					data.elegidoDesdeRecomendacionIA !== undefined,
+				{
+					message:
+						"elegidoDesdeRecomendacionIA es requerido cuando se envía diaPagoMensual",
+					path: ["elegidoDesdeRecomendacionIA"],
+				},
+			),
 		)
 		.handler(async ({ input, context }) => {
 			const {
@@ -2141,6 +2373,7 @@ export const crmRouter = {
 				expectedCloseDate,
 				fechaInicio,
 				expectedUpdatedAt,
+				elegidoDesdeRecomendacionIA,
 				...updateData
 			} = input;
 
@@ -2157,39 +2390,119 @@ export const crmRouter = {
 				});
 			}
 
+			// Una oportunidad pasa a "won" en el 90% y de ahí todavía avanza al 100%
+			// con ajustes operativos, así que no se congela el update completo: solo
+			// los datos con los que se firmaron los contratos.
+			const frozenFieldChanges = getWonOpportunityFrozenFieldChanges(
+				input,
+				currentOpportunity[0],
+			);
+			const wonLockError = getWonOpportunityLockError(
+				currentOpportunity[0].status,
+				context.userRole,
+				frozenFieldChanges,
+			);
+			if (wonLockError) {
+				throw new ORPCError("FORBIDDEN", { message: wonLockError });
+			}
+			// El chequeo de arriba leyó la fila antes del UPDATE: si closeOpportunity
+			// la marca ganada en el medio, el cambio entraría igual. Cuando se tocan
+			// campos congelados, el predicado lo vuelve a exigir en la misma
+			// sentencia (Postgres lo re-evalúa tras esperar a la escritura rival).
+			const enforceNotWonInPredicate =
+				frozenFieldChanges.length > 0 &&
+				!PERMISSIONS.canAccessAdmin(context.userRole ?? "");
+
+			if (input.leadId === null) {
+				const [currentStageForLead] = await db
+					.select({ closurePercentage: salesStages.closurePercentage })
+					.from(salesStages)
+					.where(eq(salesStages.id, currentOpportunity[0].stageId))
+					.limit(1);
+				const leadRequirementError = getStageLeadRequirementError(
+					currentStageForLead?.closurePercentage ?? 0,
+					input.leadId,
+				);
+
+				if (leadRequirementError) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: leadRequirementError,
+					});
+				}
+			}
+
 			// diaPagoMensual solo puede ser 15, 30, o uno de los días recomendados
 			// por el análisis de esta oportunidad Y del lead que quedará asignado
 			// (si leadId también cambia, el análisis del lead anterior ya no aplica).
+			//
+			// diaPagoOriginalSistema (día que el sistema hubiera asignado por
+			// default) se recalcula cuando diaPagoMensual cambia por esta vía, o
+			// cuando cambia la intención con el mismo día (el flag entrante difiere
+			// de si el estado actual ya implica IA). Se compara contra el valor y el
+			// flag ACTUALES en DB, no solo contra "input presente": los forms
+			// (opportunities.tsx, CreditDetailView) reenvían diaPagoMensual en cada
+			// guardado reflejando el estado vigente, así que un guardado que no
+			// tocó este campo nunca dispara una recaptura accidental.
+			const cambioDeIntencion =
+				input.diaPagoMensual !== undefined &&
+				input.elegidoDesdeRecomendacionIA !==
+					(currentOpportunity[0].diaPagoOriginalSistema != null);
+			// Si leadId cambia, revalidar aunque día/flag no cambien (analisis del lead anterior ya no aplica).
+			const leadIdCambio =
+				input.leadId !== undefined &&
+				input.leadId !== currentOpportunity[0].leadId;
+			let diaPagoOriginalSistemaUpdate: number | null | undefined;
 			if (
 				input.diaPagoMensual !== undefined &&
-				input.diaPagoMensual !== 15 &&
-				input.diaPagoMensual !== 30
+				(input.diaPagoMensual !== currentOpportunity[0].diaPagoMensual ||
+					cambioDeIntencion ||
+					leadIdCambio)
 			) {
-				const effectiveLeadId = input.leadId ?? currentOpportunity[0].leadId;
-				const [analysis] = effectiveLeadId
-					? await db
-							.select({
-								suggestedPaymentDays: creditAnalysis.suggestedPaymentDays,
-							})
-							.from(creditAnalysis)
-							.where(
-								and(
-									eq(creditAnalysis.opportunityId, id),
-									eq(creditAnalysis.leadId, effectiveLeadId),
-								),
-							)
-							.limit(1)
-					: [];
-				const suggestedDays = analysis?.suggestedPaymentDays ?? null;
-				const isRecommended = suggestedDays?.some(
-					(d) => d.dia === input.diaPagoMensual,
-				);
-				if (!isRecommended) {
-					throw new ORPCError("BAD_REQUEST", {
-						message:
-							"El día de pago mensual debe ser 15, 30, o uno de los días recomendados por el análisis de capacidad de pago",
-					});
+				const effectiveLeadId =
+					"leadId" in input ? input.leadId : currentOpportunity[0].leadId;
+				// Se consulta sin importar si el día es 15/30: esDiaIA (más abajo)
+				// necesita saber si la IA recomendó justo ese día aunque no requiera
+				// validación contra suggestedDays.
+				let suggestedDays: Array<{ dia: number; porcentaje: number }> | null =
+					null;
+				if (effectiveLeadId) {
+					const [analysis] = await db
+						.select({
+							suggestedPaymentDays: creditAnalysis.suggestedPaymentDays,
+						})
+						.from(creditAnalysis)
+						.where(
+							and(
+								eq(creditAnalysis.opportunityId, id),
+								eq(creditAnalysis.leadId, effectiveLeadId),
+							),
+						)
+						.limit(1);
+					suggestedDays = analysis?.suggestedPaymentDays ?? null;
 				}
+
+				if (input.diaPagoMensual !== 15 && input.diaPagoMensual !== 30) {
+					const isRecommended = suggestedDays?.some(
+						(d) => d.dia === input.diaPagoMensual,
+					);
+					if (!isRecommended) {
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								"El día de pago mensual debe ser 15, 30, o uno de los días recomendados por el análisis de capacidad de pago",
+						});
+					}
+				}
+
+				// No 15/30 ya probó su origen IA al pasar la validación de arriba.
+				const esDiaIA =
+					input.diaPagoMensual !== 15 && input.diaPagoMensual !== 30
+						? true
+						: elegidoDesdeRecomendacionIA &&
+							(suggestedDays?.some((d) => d.dia === input.diaPagoMensual) ??
+								false);
+				diaPagoOriginalSistemaUpdate = esDiaIA
+					? getDiaPagoOriginalSistema()
+					: null;
 			}
 
 			// Validate stage transitions
@@ -2209,6 +2522,8 @@ export const crmRouter = {
 
 				const fromPercentage = currentStage[0]?.closurePercentage ?? 0;
 				const toPercentage = targetStage[0]?.closurePercentage ?? 0;
+				const effectiveLeadId =
+					"leadId" in input ? input.leadId : currentOpportunity[0].leadId;
 				const effectiveVehicleId =
 					input.vehicleId !== undefined
 						? input.vehicleId
@@ -2225,6 +2540,16 @@ export const crmRouter = {
 				if (vehicleRequirementError) {
 					throw new ORPCError("BAD_REQUEST", {
 						message: vehicleRequirementError,
+					});
+				}
+
+				const leadRequirementError = getStageLeadRequirementError(
+					toPercentage,
+					effectiveLeadId,
+				);
+				if (leadRequirementError) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: leadRequirementError,
 					});
 				}
 
@@ -2301,7 +2626,7 @@ export const crmRouter = {
 					}
 
 					// Validar datos del lead para contratos
-					if (currentOpportunity[0].leadId) {
+					if (effectiveLeadId) {
 						const leadForValidation = await db
 							.select({
 								dpi: leads.dpi,
@@ -2312,7 +2637,7 @@ export const crmRouter = {
 								nationality: leads.nationality,
 							})
 							.from(leads)
-							.where(eq(leads.id, currentOpportunity[0].leadId))
+							.where(eq(leads.id, effectiveLeadId))
 							.limit(1);
 
 						if (leadForValidation[0]) {
@@ -2386,9 +2711,12 @@ export const crmRouter = {
 				}
 			}
 
-			// Sales users can only update opportunities assigned to them
-			// Admin and sales_supervisor can update any opportunity
-			// Include optimistic locking check if expectedUpdatedAt is provided
+			// Sales users can only update opportunities assigned to them.
+			// Admin and sales_supervisor can update any opportunity.
+			const canUpdateOpportunity =
+				context.userRole === "admin" ||
+				context.userRole === "sales_supervisor" ||
+				currentOpportunity[0].assignedTo === context.userId;
 			const baseWhereClause =
 				context.userRole === "admin" || context.userRole === "sales_supervisor"
 					? eq(opportunities.id, id)
@@ -2397,13 +2725,26 @@ export const crmRouter = {
 							eq(opportunities.assignedTo, context.userId),
 						);
 
-			// Add optimistic locking condition if expectedUpdatedAt is provided
+			// PostgreSQL re-evaluates this predicate after waiting for a concurrent
+			// row update, so lead/stage edits cannot jointly persist an invalid state.
+			const relationshipInvariantCondition =
+				buildOpportunityRelationshipInvariantCondition({
+					...(input.stageId ? { stageId: input.stageId } : {}),
+					...("leadId" in input ? { leadId: input.leadId } : {}),
+				});
+			const invariantWhereClause = and(
+				baseWhereClause,
+				relationshipInvariantCondition,
+			);
+			const wonLockWhereClause = enforceNotWonInPredicate
+				? and(invariantWhereClause, not(eq(opportunities.status, "won")))
+				: invariantWhereClause;
 			const whereClause = expectedUpdatedAt
 				? and(
-						baseWhereClause,
+						wonLockWhereClause,
 						eq(opportunities.updatedAt, new Date(expectedUpdatedAt)),
 					)
-				: baseWhereClause;
+				: wonLockWhereClause;
 
 			// Sales users cannot reassign opportunities
 			if (
@@ -2478,17 +2819,30 @@ export const crmRouter = {
 				}
 			}
 
+			// Se saca SIEMPRE, no solo si la lectura la vio ganada: reescribir un
+			// campo congelado con el mismo valor que se acaba de leer no aporta
+			// nada, y si en el medio la oportunidad se gana y alguien lo corrige,
+			// esta sentencia le pisaría la corrección con un dato ya viejo.
+			const safeUpdateData = stripUnchangedFrozenFields(
+				updateData,
+				currentOpportunity[0],
+			);
+
 			const updatedOpportunity = await db
 				.update(opportunities)
 				.set({
-					...updateData,
+					...safeUpdateData,
 					...(assignedTo && { assignedTo }),
 					...(expectedCloseDate && {
 						expectedCloseDate: new Date(expectedCloseDate),
 					}),
-					...(fechaInicio && {
-						fechaInicio: new Date(fechaInicio),
-					}),
+					// `fechaInicio` se destructura fuera de `updateData`, así que
+					// `stripUnchangedFrozenFields` no la ve: se omite acá cuando no
+					// cambia, para no reescribir un campo congelado con el mismo valor.
+					...(fechaInicio &&
+						frozenFieldChanges.includes("fechaInicio") && {
+							fechaInicio: new Date(fechaInicio),
+						}),
 					// Convert numeric fields to strings for decimal columns
 					...(seguro !== undefined && { seguro: String(seguro) }),
 					...insuranceFallback,
@@ -2504,6 +2858,9 @@ export const crmRouter = {
 					...(gastosAdministrativos !== undefined && {
 						gastosAdministrativos: String(gastosAdministrativos),
 					}),
+					...(diaPagoOriginalSistemaUpdate !== undefined && {
+						diaPagoOriginalSistema: diaPagoOriginalSistemaUpdate,
+					}),
 					// Update analysisStatus if it changed during stage transition
 					...(newAnalysisStatus !== currentOpportunity[0].analysisStatus && {
 						analysisStatus: newAnalysisStatus,
@@ -2513,10 +2870,22 @@ export const crmRouter = {
 				})
 				.where(whereClause)
 				.returning();
-
 			if (updatedOpportunity.length === 0) {
-				// If expectedUpdatedAt was provided and no rows updated, it's likely a concurrent modification
-				if (expectedUpdatedAt) {
+				if (enforceNotWonInPredicate) {
+					// Pudo ser la carrera con closeOpportunity: distinguirlo del
+					// conflicto de concurrencia para no mandar a "recargá e intentá".
+					const [latest] = await db
+						.select({ status: opportunities.status })
+						.from(opportunities)
+						.where(eq(opportunities.id, id))
+						.limit(1);
+					if (latest?.status === "won") {
+						throw new ORPCError("FORBIDDEN", {
+							message: buildWonOpportunityFrozenFieldError(frozenFieldChanges),
+						});
+					}
+				}
+				if (canUpdateOpportunity) {
 					throw new ORPCError("CONFLICT", {
 						message:
 							"La oportunidad fue modificada por otro usuario. Por favor recarga la página e intenta de nuevo.",
@@ -2528,6 +2897,9 @@ export const crmRouter = {
 				});
 			}
 
+			// Después del chequeo de conflicto: con cero filas no hubo escritura.
+			auditRecord({ entity: "opportunity", id: id, action: "update" });
+
 			// Si viene direccion, actualizar en el lead en lugar de la oportunidad
 			if (direccion !== undefined && currentOpportunity[0].leadId) {
 				await db
@@ -2537,6 +2909,12 @@ export const crmRouter = {
 						updatedAt: new Date(),
 					})
 					.where(eq(leads.id, currentOpportunity[0].leadId));
+				auditRecord({
+					entity: "lead",
+					id: currentOpportunity[0].leadId,
+					action: "update_direccion",
+					data: { opportunityId: id, direccion },
+				});
 			}
 
 			if (vehicleChanged) {
@@ -2599,6 +2977,7 @@ export const crmRouter = {
 		}),
 
 	reassignOpportunityAndLead: crmProcedure
+		.meta({ audit: { entity: "opportunity", action: "reassign" } })
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
@@ -2638,17 +3017,65 @@ export const crmRouter = {
 				});
 			}
 
-			await db.transaction(async (tx) => {
+			// La reasignación arrastra al lead, así que si el lead sostiene procesos
+			// vivos de OTRO asesor el cambio se los movería por debajo: sus
+			// oportunidades quedarían colgando de un lead ajeno y la siguiente
+			// entrada del cliente seguiría al nuevo dueño del lead. Las que ya son
+			// del asesor destino no estorban — ahí la reasignación justamente alinea
+			// al cliente en vez de partirlo, que es como se reparan estos casos.
+			if (current.leadId) {
+				const oportunidadesDeOtroAsesor = await db
+					.select({
+						title: opportunities.title,
+						asesor: user.name,
+					})
+					.from(opportunities)
+					.leftJoin(user, eq(opportunities.assignedTo, user.id))
+					.where(
+						and(
+							eq(opportunities.leadId, current.leadId),
+							not(eq(opportunities.id, input.opportunityId)),
+							not(eq(opportunities.assignedTo, input.assignedTo)),
+							inArray(opportunities.status, ["open", "on_hold"]),
+						),
+					);
+
+				if (oportunidadesDeOtroAsesor.length > 0) {
+					const detalle = oportunidadesDeOtroAsesor
+						.map((o) => `"${o.title}" (${o.asesor ?? "sin asesor"})`)
+						.join(", ");
+
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							`No se puede reasignar: el lead tiene ${oportunidadesDeOtroAsesor.length} oportunidad(es) activa(s) de otro asesor — ${detalle}. ` +
+							"Reasignar esta movería el lead y dejaría esas oportunidades con otro dueño. Depurá primero las que no correspondan.",
+					});
+				}
+			}
+
+			await auditedTransaction(async (tx) => {
 				await tx
 					.update(opportunities)
 					.set({ assignedTo: input.assignedTo, updatedAt: new Date() })
 					.where(eq(opportunities.id, input.opportunityId));
+				auditRecord({
+					entity: "opportunity",
+					id: input.opportunityId,
+					action: "reassign",
+				});
 
 				if (current.leadId) {
 					await tx
 						.update(leads)
 						.set({ assignedTo: input.assignedTo, updatedAt: new Date() })
 						.where(eq(leads.id, current.leadId));
+					// La reasignación arrastra al lead: sin esto su historial no
+					// muestra el cambio de dueño.
+					auditRecord({
+						entity: "lead",
+						id: current.leadId,
+						action: "reassign",
+					});
 				}
 			});
 		}),
@@ -2791,6 +3218,7 @@ export const crmRouter = {
 		}),
 
 	approveOpportunityAnalysis: analystProcedure
+		.meta({ audit: { entity: "opportunity", action: "approve_analysis" } })
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
@@ -2814,6 +3242,9 @@ export const crmRouter = {
 					stageId: opportunities.stageId,
 					notes: opportunities.notes,
 					leadId: opportunities.leadId,
+					source: opportunities.source,
+					leadSource: leads.source,
+					leadDpi: leads.dpi,
 					clientType: leads.clientType,
 					analysisStatus: opportunities.analysisStatus,
 					analysisRejectionCount: opportunities.analysisRejectionCount,
@@ -2975,8 +3406,15 @@ export const crmRouter = {
 			}
 
 			// Validate analysisStatus is in a valid state for approval/rejection
-			const validStatusesForReview = ["pending", "resubmitted"];
-			if (!validStatusesForReview.includes(opportunity[0].analysisStatus)) {
+			const validStatusesForReview: ("pending" | "resubmitted")[] = [
+				"pending",
+				"resubmitted",
+			];
+			if (
+				!validStatusesForReview.some(
+					(estado) => estado === opportunity[0].analysisStatus,
+				)
+			) {
 				if (opportunity[0].analysisStatus === "approved") {
 					throw new ORPCError("BAD_REQUEST", {
 						message:
@@ -2992,6 +3430,81 @@ export const crmRouter = {
 				throw new ORPCError("BAD_REQUEST", {
 					message: `Estado de análisis inválido: ${opportunity[0].analysisStatus}. Solo se pueden revisar oportunidades con estado 'pending' o 'resubmitted'.`,
 				});
+			}
+
+			// Validaciones RENAP + Buró para oportunidades que NO provienen del
+			// bot de WhatsApp (el bot ya las ejecuta en su propio flujo). Va
+			// después de los chequeos de etapa y estado para no gastar llamadas
+			// a las fuentes externas en aprobaciones que igual van a fallar.
+			// El UPDATE de aprobación se condiciona a que el lead siga teniendo
+			// este DPI, tanto si se validó como si quedó exenta
+			let dpiVerificado: string | null = null;
+
+			if (input.approved && !input.bypassValidation) {
+				// La exención se resuelve en el servicio: `source` es editable por el
+				// usuario, así que además exige evidencia de que el bot validó.
+				const exencion = await resolverExencionPorBot({
+					opportunityId: input.opportunityId,
+					source: opportunity[0].source,
+					leadSource: opportunity[0].leadSource,
+					leadId: opportunity[0].leadId,
+					leadDpi: opportunity[0].leadDpi,
+				});
+
+				// Vale para los dos caminos: el validado y el exento. Una oportunidad
+				// exenta siempre tiene DPI, porque la evidencia del bot lo exige
+				if (opportunity[0].leadDpi) {
+					dpiVerificado = normalizarDpi(opportunity[0].leadDpi);
+				}
+
+				if (!exencion.exento) {
+					// El DPI como texto es obligatorio en la ficha del lead,
+					// en paralelo al documento DPI exigido arriba
+					if (!opportunity[0].leadDpi) {
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								"Para aprobar el análisis, el cliente debe tener su número de DPI capturado en la ficha del lead.",
+						});
+					}
+
+					const resultadoValidaciones = await ejecutarValidaciones({
+						opportunityId: input.opportunityId,
+						userId: context.userId,
+						reusarVigente: true,
+					});
+
+					// Un fallo técnico (API caída, timeout, sin respuesta) sí
+					// bloquea: ninguna oportunidad no-bot pasa a 40% sin
+					// validación ejecutada con veredicto
+					if (resultadoValidaciones.errorTecnico) {
+						throw new ORPCError("BAD_REQUEST", {
+							message: `No se pudo completar la validación de Buró/RENAP: ${resultadoValidaciones.mensaje ?? "error desconocido"}. Intenta nuevamente o contacta al administrador.`,
+						});
+					}
+
+					// El DPI pudo cambiar mientras corrían las validaciones: el
+					// veredicto sería de otra persona
+					const [leadActual] = await db
+						.select({ dpi: leads.dpi })
+						.from(opportunities)
+						.leftJoin(leads, eq(opportunities.leadId, leads.id))
+						.where(eq(opportunities.id, input.opportunityId))
+						.limit(1);
+
+					if (
+						normalizarDpi(leadActual?.dpi ?? "") !==
+						normalizarDpi(opportunity[0].leadDpi)
+					) {
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								"El DPI del cliente cambió mientras se ejecutaban las validaciones. Vuelve a ejecutarlas antes de aprobar.",
+						});
+					}
+
+					// Ni el rechazo del buró ni la ausencia de registro bloquean:
+					// quedan en la bitácora y visibles en la página de análisis
+					// para que el analista decida bajo su criterio
+				}
 			}
 
 			// Get the next stage (40% - Cierre de propuesta) for approval
@@ -3027,12 +3540,33 @@ export const crmRouter = {
 
 			if (input.approved || input.reason || !input.approved) {
 				// Build where clause with optional optimistic locking
-				const whereClause = input.expectedUpdatedAt
+				// Solo se actualiza si sigue pendiente: dos aprobaciones simultáneas
+				// no pueden duplicar historial de etapa ni notificaciones
+				const condicionesBase = input.expectedUpdatedAt
 					? and(
 							eq(opportunities.id, input.opportunityId),
 							eq(opportunities.updatedAt, new Date(input.expectedUpdatedAt)),
+							inArray(opportunities.analysisStatus, validStatusesForReview),
 						)
-					: eq(opportunities.id, input.opportunityId);
+					: and(
+							eq(opportunities.id, input.opportunityId),
+							inArray(opportunities.analysisStatus, validStatusesForReview),
+						);
+
+				// Cuando hubo validaciones, el chequeo de DPI queda dentro del
+				// mismo UPDATE: si el lead cambia de DPI entre la verificación y
+				// la escritura, no se afecta ninguna fila y la aprobación falla
+				// en vez de aprobar con el veredicto de otra persona
+				const whereClause = dpiVerificado
+					? and(
+							condicionesBase,
+							sql`exists (
+								select 1 from ${leads}
+								where ${leads.id} = ${opportunities.leadId}
+									and ${eqDpi(leads.dpi, dpiVerificado)}
+							)`,
+						)
+					: condicionesBase;
 
 				// Update opportunity with analysisStatus
 				const updatedRows = await db
@@ -3052,14 +3586,40 @@ export const crmRouter = {
 					})
 					.where(whereClause)
 					.returning();
-
 				// Check for concurrent modification
-				if (updatedRows.length === 0 && input.expectedUpdatedAt) {
+				if (updatedRows.length === 0) {
+					// Con el chequeo atómico de DPI, 0 filas también significa que el
+					// DPI del lead cambió después de validar: se relee para dar el
+					// mensaje correcto en vez del de conflicto genérico
+					if (dpiVerificado) {
+						const [leadAlMomento] = await db
+							.select({ dpi: leads.dpi })
+							.from(opportunities)
+							.leftJoin(leads, eq(opportunities.leadId, leads.id))
+							.where(eq(opportunities.id, input.opportunityId))
+							.limit(1);
+
+						if (normalizarDpi(leadAlMomento?.dpi ?? "") !== dpiVerificado) {
+							throw new ORPCError("BAD_REQUEST", {
+								message:
+									"El DPI del cliente cambió mientras se aprobaba. Vuelve a ejecutar las validaciones antes de aprobar.",
+							});
+						}
+					}
+
 					throw new ORPCError("CONFLICT", {
 						message:
 							"La oportunidad fue modificada por otro usuario. Por favor recarga la página e intenta de nuevo.",
 					});
 				}
+
+				// Después del chequeo de conflicto: con cero filas no hubo escritura.
+				auditRecord({
+					entity: "opportunity",
+					id: input.opportunityId,
+					action: "approve_analysis",
+					data: { approved: input.approved, reason: input.reason },
+				});
 
 				// Record stage history
 				await db.insert(opportunityStageHistory).values({
@@ -3128,6 +3688,7 @@ export const crmRouter = {
 
 	// Approve credit detail (40% → 50% transition)
 	approveCreditDetail: crmProcedure
+		.meta({ audit: { entity: "opportunity", action: "approve_credit_detail" } })
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
@@ -3185,6 +3746,11 @@ export const crmRouter = {
 					updatedAt: new Date(),
 				})
 				.where(eq(opportunities.id, input.opportunityId));
+			auditRecord({
+				entity: "opportunity",
+				id: input.opportunityId,
+				action: "approve_credit_detail",
+			});
 
 			// Record stage history
 			await db.insert(opportunityStageHistory).values({
@@ -3213,6 +3779,7 @@ export const crmRouter = {
 
 	// Revoke credit detail approval (back to 40%)
 	revokeCreditDetailApproval: crmProcedure
+		.meta({ audit: { entity: "opportunity", action: "revoke_credit_detail" } })
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
@@ -3234,6 +3801,7 @@ export const crmRouter = {
 					title: opportunities.title,
 					assignedTo: opportunities.assignedTo,
 					stageId: opportunities.stageId,
+					status: opportunities.status,
 					creditDetailApproved: opportunities.creditDetailApproved,
 				})
 				.from(opportunities)
@@ -3274,6 +3842,16 @@ export const crmRouter = {
 				});
 			}
 
+			// Lo de arriba mira la etapa, y una oportunidad puede estar ganada sin
+			// haber llegado al 90%: `confirmContractsSigned` crea el crédito en
+			// cartera y recién después mueve la etapa, así que si eso falla queda
+			// ganada en el 85%. Ahí cancelar la devolvería al 40% y dejaría el
+			// detalle de crédito editable con el crédito ya creado.
+			const revokeError = getWonOpportunityRevokeError(opportunity.status);
+			if (revokeError) {
+				throw new ORPCError("FORBIDDEN", { message: revokeError });
+			}
+
 			// Get stage 40% by closurePercentage (more reliable than order)
 			const [previousStage] = await db
 				.select()
@@ -3288,9 +3866,9 @@ export const crmRouter = {
 			}
 
 			// Update opportunity and record history in a transaction for atomicity
-			await db.transaction(async (tx) => {
+			await auditedTransaction(async (tx) => {
 				// Update opportunity - revoke approval
-				await tx
+				const revocadas = await tx
 					.update(opportunities)
 					.set({
 						stageId: previousStage.id,
@@ -3299,7 +3877,28 @@ export const crmRouter = {
 						creditDetailApprovedAt: null,
 						updatedAt: new Date(),
 					})
-					.where(eq(opportunities.id, input.opportunityId));
+					.where(
+						and(
+							eq(opportunities.id, input.opportunityId),
+							// El chequeo de arriba leyó la fila antes del UPDATE: si se
+							// gana en el medio, esta condición lo frena en la misma
+							// sentencia.
+							not(eq(opportunities.status, "won")),
+						),
+					)
+					.returning({ id: opportunities.id });
+
+				if (revocadas.length === 0) {
+					throw new ORPCError("FORBIDDEN", {
+						message:
+							"La oportunidad se marcó como ganada mientras se cancelaba la aprobación. El crédito ya existe en cartera.",
+					});
+				}
+				auditRecord({
+					entity: "opportunity",
+					id: input.opportunityId,
+					action: "revoke_credit_detail",
+				});
 
 				// Record stage history
 				await tx.insert(opportunityStageHistory).values({
@@ -3361,6 +3960,41 @@ export const crmRouter = {
 				approvedBy: opportunity.creditDetailApprovedBy || null,
 				approvedAt: opportunity.creditDetailApprovedAt || null,
 			};
+		}),
+
+	// Desglose del ingreso adicional por fecha ideal de pago. null si el
+	// crédito aún no existe en cartera-back o no tuvo ajuste.
+	getAjusteFechaIdealPago: crmProcedure
+		.input(z.object({ opportunityId: z.string().uuid() }))
+		.handler(async ({ input }) => {
+			const [opportunity] = await db
+				.select({ numeroSifco: opportunities.numeroSifco })
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!opportunity) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Oportunidad no encontrada",
+				});
+			}
+
+			if (!opportunity.numeroSifco) {
+				return { ajuste: null };
+			}
+
+			try {
+				const credito = await carteraBackClient.getCredito(
+					opportunity.numeroSifco,
+				);
+				return { ajuste: credito.ajusteFechaIdeal ?? null };
+			} catch (error) {
+				console.error(
+					`[getAjusteFechaIdealPago] No se pudo consultar cartera-back para ${opportunity.numeroSifco}:`,
+					error,
+				);
+				return { ajuste: null };
+			}
 		}),
 
 	getOpportunityHistory: crmProcedure
@@ -5723,6 +6357,7 @@ export const crmRouter = {
 
 	// Approve disbursement (90% → 100% transition)
 	approveDisbursement: analystProcedure
+		.meta({ audit: { entity: "opportunity", action: "approve_disbursement" } })
 		.input(z.object({ opportunityId: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
 			// Get checklist and verify all items are completed
@@ -5811,6 +6446,11 @@ export const crmRouter = {
 					updatedAt: new Date(),
 				})
 				.where(eq(opportunities.id, input.opportunityId));
+			auditRecord({
+				entity: "opportunity",
+				id: input.opportunityId,
+				action: "approve_disbursement",
+			});
 
 			// Mark checklist as completed
 			await db
@@ -6103,6 +6743,7 @@ export const crmRouter = {
 					categoria: opportunities.categoria,
 					nit: opportunities.nit,
 					diaPagoMensual: opportunities.diaPagoMensual,
+					diaPagoOriginalSistema: opportunities.diaPagoOriginalSistema,
 					creditType: opportunities.creditType,
 					createdAt: opportunities.createdAt,
 					updatedAt: opportunities.updatedAt,
@@ -6197,7 +6838,10 @@ export const crmRouter = {
 					)
 					.map((ca) => [
 						ca.opportunityId,
-						{ leadId: ca.leadId, suggestedPaymentDays: ca.suggestedPaymentDays },
+						{
+							leadId: ca.leadId,
+							suggestedPaymentDays: ca.suggestedPaymentDays,
+						},
 					]),
 			);
 
@@ -6242,6 +6886,7 @@ export const crmRouter = {
 					categoria: opp.categoria,
 					nit: opp.nit,
 					diaPagoMensual: opp.diaPagoMensual,
+					diaPagoOriginalSistema: opp.diaPagoOriginalSistema,
 					suggestedPaymentDays:
 						creditAnalysisMap.get(opp.id)?.leadId === opp.leadId
 							? (creditAnalysisMap.get(opp.id)?.suggestedPaymentDays ?? null)
@@ -6306,6 +6951,7 @@ export const crmRouter = {
 
 	// Assign investor and advance to 80%
 	assignInvestorAndAdvance: analystProcedure
+		.meta({ audit: { entity: "opportunity", action: "assign_investor" } })
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
@@ -6320,6 +6966,10 @@ export const crmRouter = {
 				]),
 				nit: z.string(),
 				diaPagoMensual: z.number().int().min(1).max(31),
+				// Marca si el día viene de la opción "recomendado por IA" del select,
+				// aunque coincida numéricamente con 15/30 (ver esDiaIA). Se revalida
+				// server-side contra suggestedPaymentDays. Requerido, sin default.
+				elegidoDesdeRecomendacionIA: z.boolean(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -6349,25 +6999,30 @@ export const crmRouter = {
 				});
 			}
 
+			// Se consulta siempre (no solo si el día no es 15/30): también decide
+			// esDiaIA más abajo.
+			let suggestedDays: Array<{ dia: number; porcentaje: number }> | null =
+				null;
+			if (opportunity.leadId) {
+				const [analysis] = await db
+					.select({
+						suggestedPaymentDays: creditAnalysis.suggestedPaymentDays,
+					})
+					.from(creditAnalysis)
+					.where(
+						and(
+							eq(creditAnalysis.opportunityId, input.opportunityId),
+							eq(creditAnalysis.leadId, opportunity.leadId),
+						),
+					)
+					.limit(1);
+				suggestedDays = analysis?.suggestedPaymentDays ?? null;
+			}
+
 			// diaPagoMensual solo puede ser 15, 30, o uno de los días recomendados
 			// por el análisis de esta oportunidad Y del lead actual (si la oportunidad
 			// fue reasignada a otro lead, el análisis anterior ya no aplica).
 			if (input.diaPagoMensual !== 15 && input.diaPagoMensual !== 30) {
-				const [analysis] = opportunity.leadId
-					? await db
-							.select({
-								suggestedPaymentDays: creditAnalysis.suggestedPaymentDays,
-							})
-							.from(creditAnalysis)
-							.where(
-								and(
-									eq(creditAnalysis.opportunityId, input.opportunityId),
-									eq(creditAnalysis.leadId, opportunity.leadId),
-								),
-							)
-							.limit(1)
-					: [];
-				const suggestedDays = analysis?.suggestedPaymentDays ?? null;
 				const isRecommended = suggestedDays?.some(
 					(d) => d.dia === input.diaPagoMensual,
 				);
@@ -6544,8 +7199,16 @@ export const crmRouter = {
 				});
 			}
 
+			// No 15/30 ya probó su origen IA al pasar la validación de arriba.
+			const esDiaIA =
+				input.diaPagoMensual !== 15 && input.diaPagoMensual !== 30
+					? true
+					: input.elegidoDesdeRecomendacionIA &&
+						(suggestedDays?.some((d) => d.dia === input.diaPagoMensual) ??
+							false);
+
 			// Update opportunity and record history in a transaction for atomicity
-			await db.transaction(async (tx) => {
+			await auditedTransaction(async (tx) => {
 				// Update opportunity with combined investors and move to 80%
 				await tx
 					.update(opportunities)
@@ -6555,9 +7218,20 @@ export const crmRouter = {
 						categoria: input.categoria,
 						nit: input.nit,
 						diaPagoMensual: input.diaPagoMensual,
+						// Se captura AHORA (momento de la asignación) porque depende de qué
+						// día es "hoy" en este instante — no se puede recalcular después.
+						diaPagoOriginalSistema: esDiaIA
+							? getDiaPagoOriginalSistema()
+							: null,
 						updatedAt: new Date(),
 					})
 					.where(eq(opportunities.id, input.opportunityId));
+				auditRecord({
+					entity: "opportunity",
+					id: input.opportunityId,
+					action: "assign_investor",
+					data: { categoria: input.categoria },
+				});
 
 				// Record stage history
 				await tx.insert(opportunityStageHistory).values({
@@ -6589,6 +7263,7 @@ export const crmRouter = {
 		}),
 
 	updateOpportunityInvestors: analystProcedure
+		.meta({ audit: { entity: "opportunity", action: "update_investors" } })
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
@@ -6699,6 +7374,11 @@ export const crmRouter = {
 					updatedAt: new Date(),
 				})
 				.where(eq(opportunities.id, input.opportunityId));
+			auditRecord({
+				entity: "opportunity",
+				id: input.opportunityId,
+				action: "update_investors",
+			});
 
 			return {
 				success: true,
@@ -6708,6 +7388,7 @@ export const crmRouter = {
 
 	// ── Credit Scoring ──────────────────────────────────────────────────
 	scoreLead: crmProcedure
+		.meta({ audit: { entity: "lead", action: "score" } })
 		.input(
 			z.object({
 				leadId: z.string().uuid(),
@@ -6866,6 +7547,11 @@ export const crmRouter = {
 			await db
 				.delete(creditAnalysis)
 				.where(eq(creditAnalysis.coDebtorId, input.id));
+
+			// Mismo motivo: FK NO ACTION, sin esto el borrado de abajo revienta.
+			await db
+				.delete(licenseQrVerifications)
+				.where(eq(licenseQrVerifications.coDebtorId, input.id));
 
 			const [deletedCoDebtor] = await db
 				.delete(coDebtors)

@@ -66,8 +66,9 @@ export async function calcularAjusteCompras(
   lastHistoricoFecha: Date | null,
   periodoMes?: number,
   periodoAnio?: number,
+  database: typeof db = db,
 ): Promise<AjusteCompras> {
-  const compras = await db
+  const compras = await database
     .select(columnasCompraAjuste)
     .from(compras_credito_inversionista)
     .where(

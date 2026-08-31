@@ -1,8 +1,10 @@
 import Big from "big.js";
+import { validationFailed } from "../constants/errorCodes";
 import z from "zod";
 import { db, lockPool } from "../database";
 import { withCapitalContext, setCapitalSource } from "../utils/withAuditContext";
 import {
+  ajuste_fecha_ideal_pago,
   creditos,
   usuarios,
   cuotas_credito,
@@ -14,13 +16,20 @@ import {
   pagos_credito_inversionistas,
   cuentasEmpresa,
 } from "../database/db";
-import { eq, and, lt, lte, asc, desc, sql, gt, or, ne, inArray } from "drizzle-orm";
+import { eq, and, lt, lte, asc, desc, sql, gt, or, ne, inArray, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
+<<<<<<< ours
+import { desactivarMoraSiCreditoAlDia, updateMora } from "./latefee";
+import { insertPagosCreditoInversionistas, insertPagosCreditoInversionistasV2 } from "./payments";
+import { processAndReplaceCreditInvestors } from "./investor";
+import { prepararConvenioPayment } from "./paymentAgreement";
+=======
 import { updateMoraEnTx } from "./latefee";
 import { marcarFacturacionPendiente } from "./estadoFacturacionPago";
 import { insertPagosCreditoInversionistas, insertPagosCreditoInversionistasV2 } from "./payments";
 import { processAndReplaceCreditInvestors } from "./investor"; 
 import { processConvenioPaymentEnTx } from "./paymentAgreement";
+>>>>>>> theirs
 import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
 import { recalcularPagosCredito } from "./updateCredit";
 import {
@@ -28,6 +37,7 @@ import {
   calcularSaldoNetoCuota,
   crearEstampadorPagoConvenio,
   esDestinoSobrescribible,
+  getAjusteFechaIdealADeducir,
   getCuotaIdForPaymentInsert,
   getCoveredOpenInstallment,
   getCoveredInstallmentNumbers,
@@ -50,37 +60,21 @@ import {
   shouldIncobrableInstallmentBePaid,
   shouldMarkInstallmentPaymentPaid,
   sumarAplicadoACuota,
+  pagoSchema,
 } from "./registerPaymentPolicy";
 import {
   PAYMENT_ADVISORY_LOCK_NAMESPACE,
   withPaymentAdvisoryLock,
   type PaymentAdvisoryLockConnection,
 } from "../utils/paymentAdvisoryLock";
+import { emitRecoveredDuplicatePendingInstallment } from "../utils/structuredLogger";
+import { claimAjusteFechaIdealPago } from "./ajusteFechaIdealPago";
 
 const CUOTA_INTEGRITY_ERROR_PREFIX = "Inconsistencia de integridad:";
 
 // ========================================
 // TIPOS E INTERFACES
 // ========================================
-
-const pagoSchema = z.object({
-  credito_id: z.number().int().positive(),
-  usuario_id: z.number().int().positive(),
-  monto_boleta: z.number().min(0),
-  fecha_pago: z.string(),
-  llamada: z.string().optional(),
-  renuevo_o_nuevo: z.string().optional(),
-  otros: z.number().min(0).optional(),
-  observaciones: z.string().optional(),
-  abono_directo_capital: z.number().min(0).optional(),
-  cuotaApagar: z.number().int(),
-  url_boletas: z.array(z.string()),
-  banco_id: z.number().int().positive().optional(),
-  numeroAutorizacion: z.string().optional(),
-  registerBy: z.string().min(1),
-  fecha_boleta: z.string(),
-  origen_pago: z.enum(["transferencia", "cheque", "boleta"]).optional().default("transferencia"),
-});
 
 type PagoData = z.infer<typeof pagoSchema>;
 
@@ -202,13 +196,13 @@ const procesarPagoMora = async ({
   tx: RegisterPaymentTransaction;
 }): Promise<ResultadoMora> => {
   // 🔍 Verificar si NO hay mora activa
-  console.log("\n🔍 Verificando mora activa...");
-  console.log("stats:", stats);
-  console.log("mora:", mora);
-  console.log("disponible:", disponible.toString());
-  console.log(`  Tiene mora activa: ${stats.tieneMora}`);
+
+
+
+
+
   if (!stats.tieneMora || !mora || !mora.activa) {
-    console.log("✅ Crédito al día (sin mora activa)");
+
     return {
       teniaMora: false,
       moraPagada: false,
@@ -220,17 +214,17 @@ const procesarPagoMora = async ({
   }
 
   // ⚠️ Hay mora activa
-  console.log("\n⚠️ CRÉDITO CON MORA ACTIVA");
-  console.log(`  Cuotas atrasadas: ${mora.cuotas_atrasadas}`);
-  console.log(`  Monto mora: $${mora.monto_mora.toString()}`);
-  console.log(`  Porcentaje: ${mora.porcentaje_mora}%`);
-  console.log(`  Disponible para pagar: $${disponible.toString()}`);
+
+
+
+
+
 
   const montoMora = new Big(mora.monto_mora);
 
   // ❌ Caso 1: No hay dinero disponible
   if (disponible.lte(0)) {
-    console.log("❌ No hay dinero disponible para pagar mora");
+
     return {
       teniaMora: true,
       moraPagada: false,
@@ -243,9 +237,7 @@ const procesarPagoMora = async ({
 
   // ✅ Caso 2: Alcanza para pagar TODA la mora
   if (disponible.gte(montoMora)) {
-    console.log(
-      `✅ Alcanza para pagar toda la mora ($${montoMora.toString()})`
-    );
+
 
     // Actualizar mora a 0 (se desactiva automáticamente)
     const resultadoMora = await updateMoraEnTx({
@@ -262,9 +254,7 @@ const procesarPagoMora = async ({
     // Descontar de disponible
     const nuevoDisponible = disponible.minus(montoMora);
 
-    console.log(
-      `💚 Mora pagada completamente. Restante: $${nuevoDisponible.toString()}`
-    );
+
 
     return {
       teniaMora: true,
@@ -278,9 +268,7 @@ const procesarPagoMora = async ({
   }
 
   // ⚠️ Caso 3: NO alcanza para toda la mora (pago parcial)
-  console.log(
-    `⚠️ Solo alcanza para pago parcial de mora: $${disponible.toString()}`
-  );
+
 
   // Aplicar todo lo disponible a la mora
   const resultadoMora = await updateMoraEnTx({
@@ -296,9 +284,7 @@ const procesarPagoMora = async ({
 
   const saldoMoraRestante = montoMora.minus(disponible);
 
-  console.log(
-    `💛 Mora reducida. Saldo pendiente: $${saldoMoraRestante.toString()}`
-  );
+
 
   return {
     teniaMora: true,
@@ -485,7 +471,7 @@ const obtenerInfoCompletaCredito = async (
       );
     }
 
-    console.log(cuotaApagar,"cuota a pagar");
+
     // Dedupe por NUMERO_CUOTA, no por cuota_id: hay créditos con cuotas_credito
     // duplicadas (mismo numero_cuota, cuota_id distinto — artefacto del flujo
     // viejo de abonos). Si sobreviven ambas copias, la cascada cobra la misma
@@ -508,21 +494,8 @@ const obtenerInfoCompletaCredito = async (
       cuotasPagables.map((item) => item.cuotas_credito.cuota_id)
     );
     if (cuotaIdsPendientes.size > cuotasPendientesUnicas.length) {
-      console.warn(
-        `⚠️ Crédito ${credito_id}: cuotas_credito DUPLICADAS detectadas en pendientes ` +
-          `(${cuotaIdsPendientes.size} cuota_id para ${cuotasPendientesUnicas.length} números de cuota). ` +
-          `Se usa solo la copia más reciente de cada numero_cuota.`
-      );
+      emitRecoveredDuplicatePendingInstallment();
     }
-    const numerosCuotas = cuotasPendientesUnicas.map((item) => item.cuotas_credito.numero_cuota);
-    console.log("Números de cuotas pendientes:", numerosCuotas);
-
-    // 🎯 O si quieres más info:
-    console.log("Cuotas pendientes:", cuotasPendientesUnicas.map(item => ({
-      numero_cuota: item.cuotas_credito.numero_cuota,
-      fecha_vencimiento: item.cuotas_credito.fecha_vencimiento,
-      cuota_id: item.cuotas_credito.cuota_id
-    })));
     // ✅ Retornar todo estructurado
     return {
       // 📋 Crédito completo
@@ -592,7 +565,7 @@ const obtenerInfoCompletaCredito = async (
     }
 
     // 🐛 Otros errores
-    console.error("❌ Error en obtenerInfoCompletaCredito:", error);
+
     set.status = 500;
     throw new Error("Error al obtener información del crédito");
   }
@@ -690,10 +663,24 @@ const insertarBoletas = async (pago_id: number, urlCompletas: string[]) => {
 // FUNCIÓN PRINCIPAL
 // ========================================
 
+<<<<<<< ours
+export const insertPayment = async ({ body, set }: any) => {
+  // 🔒 Conexión dedicada para el advisory lock (se libera en finally).
+  let lockConn: PaymentAdvisoryLockConnection | undefined;
+  let lockedCreditoId: number | undefined;
+  try {
+    // 1. Validar schema
+    const parseResult = pagoSchema.safeParse(body);
+    if (!parseResult.success) {
+      set.status = 400;
+      return validationFailed(parseResult.error.flatten().fieldErrors);
+    }
+=======
 type ProcesarRegistroPagoInput = {
   data: RegistroPagoData;
   set: SetContext;
 };
+>>>>>>> theirs
 
 export async function procesarRegistroPago(
   input: ProcesarRegistroPagoInput,
@@ -721,28 +708,33 @@ export async function procesarRegistroPago(
 
     // 2. Preparar datos
     const urlCompletas = prepararURLsBoletas(url_boletas);
+<<<<<<< ours
+    const boletasExistentes = numeroAutorizacion && banco_id
+      ? await db
+=======
     const boletasExistentes = numeroAutorizacion && banco_id 
       ? await tx
+>>>>>>> theirs
         .select({
           numeroAutorizacion: pagos_credito.numeroAutorizacion,
         })
         .from(pagos_credito)
         .where(and(eq(pagos_credito.numeroAutorizacion, numeroAutorizacion), eq(pagos_credito.banco_id, banco_id)))
       : [];
-      
+
       if (boletasExistentes.length > 0) {
-        console.log(`❌ Se encontraron ${boletasExistentes.length} boletas duplicadas:`);
+
         boletasExistentes.forEach(b => {
-          console.log(`   - ${b.numeroAutorizacion} `);
+
         });
-        
+
         set.status = 409; // Conflict
         return {
           success: false,
           message: "Una o más boletas ya fueron registradas previamente",
           boletas_duplicadas: boletasExistentes.map(b => ({
             numeroAutorizacion: b.numeroAutorizacion,
- 
+
           })),
         };
       }
@@ -836,9 +828,14 @@ export async function procesarRegistroPago(
         registerBy: registerBy ?? "",
         fecha_boleta,
         monto_aplicado: pagoEspecialCuota.montoAplicado,
+<<<<<<< ours
+        observaciones,
+      });
+=======
         origen_pago,
         pagalo_import_id,
       }, tx);
+>>>>>>> theirs
     }
 
     const montoEfectivo = calcularMontoEfectivo(
@@ -866,13 +863,11 @@ export async function procesarRegistroPago(
     // Actualizar disponible
     disponible = new Big(resultadoMora.disponibleRestante);
     const montoCuota = new Big(credito.cuota);
-    let disponible_restante = disponible 
+    let disponible_restante = disponible
     if (!resultadoMora.teniaMora) {
-      console.log(
-        "No tenía mora activa, se procede a registrar el pago normal."
-      );
+
     } else {
-      console.log("Resultado del pago de mora:", resultadoMora);
+
       if (resultadoMora.pagoCompleto && resultadoMora.moraPagada) {
         moraBig = new Big(resultadoMora.montoAplicadoMora);
         if (disponible_restante.lte(0)) {
@@ -890,13 +885,16 @@ export async function procesarRegistroPago(
             registerBy: registerBy ?? "",
             fecha_boleta,
             monto_aplicado: pagoEspecialCuota.montoAplicado,
+<<<<<<< ours
+            observaciones,
+          });
+=======
             origen_pago,
             pagalo_import_id,
           }, tx);
+>>>>>>> theirs
         }
-        console.log(
-          "Mora pagada completamente, se procede a registrar el pago normal."
-        );
+
       }
       if (!resultadoMora.moraPagada && resultadoMora.pagoParcial) {
         if (disponible_restante.lte(0)) {
@@ -914,9 +912,14 @@ export async function procesarRegistroPago(
             registerBy: registerBy ?? "",
             fecha_boleta,
             monto_aplicado: pagoEspecialCuota.montoAplicado,
+<<<<<<< ours
+            observaciones,
+          });
+=======
             origen_pago,
             pagalo_import_id,
           }, tx);
+>>>>>>> theirs
         }
         // success:true explícito — este return es un 200 real (el pago SÍ se
         // insertó arriba), solo informa que quedó parcial y no cerró cuota.
@@ -946,10 +949,16 @@ export async function procesarRegistroPago(
           numeroAutorizacion: numeroAutorizacion ?? "",
           registerBy: registerBy ?? "",
           fecha_boleta,
+<<<<<<< ours
+          monto_aplicado: pagoEspecialCuota.montoAplicado,
+          observaciones,
+        });
+=======
             monto_aplicado: pagoEspecialCuota.montoAplicado,
             origen_pago,
             pagalo_import_id,
         }, tx);
+>>>>>>> theirs
       }
       // Mismo motivo que el return de arriba: 200 real, pago insertado,
       // success:true explícito para no leerse como rechazo.
@@ -961,7 +970,48 @@ export async function procesarRegistroPago(
       };
     }
 
-    // 🔥 CONVENIO — se REGISTRA después de la mora (orden canónico otros →
+    // Ajuste por fecha ideal de pago (ver ajuste_fecha_ideal_pago en schema.ts).
+    // Se procesa después de mora: si mora corta el flujo con un return arriba,
+    // no debe tocarse. Se resta de disponible_restante, nunca de abonoCapital
+    // — no amortiza el préstamo, igual que "otros".
+    let ajusteFechaIdealMonto = new Big(0);
+    let ajusteFechaIdealId: number | undefined;
+    // pago_id de la cuota 1 que efectivamente lo cobra — lo usa
+    // reversePayment.ts para resetear el ajuste si se revierte ese pago.
+    let cuota1PagoId: number | undefined;
+    const tieneCuota1Pendiente = cuotasPendientes.some(
+      (c) => c.cuotas_credito.numero_cuota === 1
+    );
+    if (tieneCuota1Pendiente) {
+      const [ajustePendiente] = await db
+        .select()
+        .from(ajuste_fecha_ideal_pago)
+        .where(
+          and(
+            eq(ajuste_fecha_ideal_pago.credito_id, credito.credito_id),
+            isNull(ajuste_fecha_ideal_pago.fecha_cobro)
+          )
+        )
+        .limit(1);
+      const deduccion = getAjusteFechaIdealADeducir({
+        tieneCuota1Pendiente,
+        ajustePendiente: ajustePendiente
+          ? { id: ajustePendiente.id, monto_total: ajustePendiente.monto_total }
+          : null,
+        disponible: disponible_restante,
+      });
+      if (deduccion) {
+        disponible_restante = disponible_restante.minus(deduccion.monto);
+        ajusteFechaIdealMonto = deduccion.monto;
+        ajusteFechaIdealId = deduccion.id;
+        console.log(
+          `🧾 Ajuste por fecha ideal de pago: se deduce Q${ajusteFechaIdealMonto.toString()} ` +
+            `del disponible (id=${ajusteFechaIdealId}), se aplicará como "otros" en la cuota 1.`
+        );
+      }
+    }
+
+    // 🔥 CONVENIO — se CALCULA después de la mora (orden canónico otros →
     // mora → convenio), topado al menor entre la cuota mensual del convenio y
     // el pendiente real, pero NO se resta del disponible: acreditar
     // convenios_pago es el RASTRO de cuánto de esta boleta cuenta como
@@ -969,12 +1019,41 @@ export async function procesarRegistroPago(
     // La boleta completa (tras otros/mora) sigue pagando cuotas corrientes —
     // regla de negocio del dueño del dominio (06-ago-2026), que revierte la
     // resta introducida en b6d79b8d.
+    //
+    // La escritura en BD (convenios_pago + convenio_cuotas) se DIFIERE a
+    // `commitConvenio`, que corre solo en los returns de éxito: cuando el
+    // convenio se acreditaba acá mismo, cualquier rechazo posterior (p. ej.
+    // el guard anti-sobreaplicación) dejaba el convenio cobrado sin fila en
+    // pagos_credito, y cada reintento sumaba una cuota fantasma (convenio 102
+    // / crédito 72, 26-ago-2026: 4 reintentos rechazados lo dejaron 5/6 con
+    // un solo pago real).
+    let commitConvenio: ((pagoId?: number) => Promise<boolean>) | null = null;
+    let pagoConvenioPagoId: number | undefined;
     if (
       debeProcesarConvenio({
         statusCredit: creditoInfo.credito.statusCredit,
         disponible: disponible_restante,
       })
     ) {
+<<<<<<< ours
+      const convenioPreparado = await prepararConvenioPayment({
+        credito_id: credito_id,
+        monto_pago: disponible_restante.toNumber(),
+        creditoInfo: creditoInfo,
+        pagoMetadata: {
+          montoBoleta: montoBoleta.toString(),
+          llamada: llamada,
+          renuevo_o_nuevo: "Convenio",
+          observaciones: observaciones,
+          numeroAutorizacion: numeroAutorizacion,
+          banco_id: banco_id,
+          registerBy: usuario_id,
+          urlCompletas: urlCompletas,
+        },
+      });
+      pagoConvenio = convenioPreparado.resultado;
+      commitConvenio = convenioPreparado.commit;
+=======
       try {
         pagoConvenio = await processConvenioPaymentEnTx({
           credito_id: credito_id,
@@ -997,8 +1076,9 @@ export async function procesarRegistroPago(
           `Error al procesar pago de convenio: ${error instanceof Error ? error.message : "Error desconocido"}`
         );
       }
+>>>>>>> theirs
       montoConvenio = new Big(pagoConvenio.monto_aplicado);
-      console.log(`Convenio: registrado $${montoConvenio.toString()}`);
+
     }
 
     // Solo UNA fila de esta boleta puede cargar el pago_convenio (ver doc del
@@ -1018,13 +1098,9 @@ export async function procesarRegistroPago(
     let cuotas_saltadas = 0;
     let disponible_para_cuotasPosteriores = new Big(0);
     for (const cuota of cuotasPendientes) {
-      console.log("\n===============================");
-      console.log(
-        `🚀 Procesando cuota #${cuota.cuotas_credito.numero_cuota} (Monto: $${montoCuota.toString()})`
-      );
-      console.log(
-        `💰 Disponible antes de cuota: $${disponible_restante.toString()}`
-      );
+
+
+
       if (disponible_restante.gt(0)) {
         // Verificar si existe pago previo - priorizar el original (no_required)
         const allExistingPagos = await tx
@@ -1251,10 +1327,7 @@ export async function procesarRegistroPago(
         let total_monto_cash_in = new Big(0);
         let total_iva_cash_in = new Big(0);
 
-        console.log(
-          "🚀 Procesando pago para la cuota:",
-          cuota.cuotas_credito.numero_cuota
-        );
+
 
         // Sumar totales de inversionistas
         inversionistas.forEach(({ monto_cash_in, iva_cash_in }) => {
@@ -1267,134 +1340,119 @@ export async function procesarRegistroPago(
 
         // Calcular abonos
 
-        console.log("🔍 ========== INICIO DISTRIBUCIÓN DE PAGO ==========");
-        console.log(
-          "💰 Monto disponible inicial:",
-          disponible_restante.toString()
-        );
+
+
 
         // 3.1 Pagar interés
-        console.log("\n📌 PASO 1: Pagar Interés");
-        console.log("   Interés restante:", interes_restante.toString());
+
+
         if (disponible_restante.gt(0) && interes_restante.gt(0)) {
           const pago = disponible_restante.lt(interes_restante)
             ? disponible_restante
             : interes_restante;
-          console.log("   ✅ Pago a aplicar:", pago.toString());
+
           abono_interes = pago;
           disponible_restante = disponible_restante.minus(pago);
-          console.log(
-            "   💵 Disponible restante:",
-            disponible_restante.toString()
-          );
+
         } else {
-          console.log("   ⏭️  Saltado (sin saldo o sin deuda)");
+
         }
 
         // 3.2 Pagar IVA
-        console.log("\n📌 PASO 2: Pagar IVA");
-        console.log("   IVA restante:", iva_restante.toString());
+
+
         if (disponible_restante.gt(0) && iva_restante.gt(0)) {
           const pago = disponible_restante.lt(iva_restante)
             ? disponible_restante
             : iva_restante;
-          console.log("   ✅ Pago a aplicar:", pago.toString());
+
           abono_iva_12 = pago;
           disponible_restante = disponible_restante.minus(pago);
-          console.log(
-            "   💵 Disponible restante:",
-            disponible_restante.toString()
-          );
+
         } else {
-          console.log("   ⏭️  Saltado (sin saldo o sin deuda)");
+
         }
 
         // 3.3 Pagar seguro
-        console.log("\n📌 PASO 3: Pagar Seguro");
-        console.log("   Seguro restante:", seguro_restante.toString());
+
+
         if (disponible_restante.gt(0) && seguro_restante.gt(0)) {
           const pago = disponible_restante.lt(seguro_restante)
             ? disponible_restante
             : seguro_restante;
-          console.log("   ✅ Pago a aplicar:", pago.toString());
+
           abono_seguro = pago;
           disponible_restante = disponible_restante.minus(pago);
-          console.log(
-            "   💵 Disponible restante:",
-            disponible_restante.toString()
-          );
+
         } else {
-          console.log("   ⏭️  Saltado (sin saldo o sin deuda)");
+
         }
 
         // 3.4 Pagar GPS
-        console.log("\n📌 PASO 4: Pagar GPS");
-        console.log("   GPS restante:", gps_restante.toString());
+
+
         if (disponible_restante.gt(0) && gps_restante.gt(0)) {
           const pago = disponible_restante.lt(gps_restante)
             ? disponible_restante
             : gps_restante;
-          console.log("   ✅ Pago a aplicar:", pago.toString());
+
           abono_gps = pago;
           disponible_restante = disponible_restante.minus(pago);
-          console.log(
-            "   💵 Disponible restante:",
-            disponible_restante.toString()
-          );
+
         } else {
-          console.log("   ⏭️  Saltado (sin saldo o sin deuda)");
+
         }
 
         // 3.5 Pagar membresías
-        console.log("\n📌 PASO 5: Pagar Membresías");
-        console.log("   Membresías restante:", membresias_restante.toString());
+
+
         if (disponible_restante.gt(0) && membresias_restante.gt(0)) {
           const pago = disponible_restante.lt(membresias_restante)
             ? disponible_restante
             : membresias_restante;
-          console.log("   ✅ Pago a aplicar:", pago.toString());
+
           abono_membresias = pago;
           disponible_restante = disponible_restante.minus(pago);
-          console.log(
-            "   💵 Disponible restante:",
-            disponible_restante.toString()
-          );
+
         } else {
-          console.log("   ⏭️  Saltado (sin saldo o sin deuda)");
+
         }
 
         // 3.6 Pagar capital
+<<<<<<< ours
+
+
+        if (disponible_restante.gt(0) && capital_restante_pago.gt(0)) {
+=======
         console.log("\n📌 PASO 6: Pagar Capital");
         console.log("   Capital restante:", capital_restante_pago.toString());
         if (
           disponible_restante.gt(0) &&
           capital_restante_pago.gt(0)
         ) {
+>>>>>>> theirs
           const pago = disponible_restante.lt(capital_restante_pago)
             ? disponible_restante
             : capital_restante_pago;
-          console.log("   ✅ Pago a aplicar:", pago.toString());
+
           abono_capital = pago;
           disponible_restante = disponible_restante.minus(pago);
-          console.log(
-            "   💵 Disponible restante:",
-            disponible_restante.toString()
-          );
+
         } else {
-          console.log("   ⏭️  Saltado (sin saldo o sin deuda)");
+
         }
 
-        console.log("\n🔍 ========== RESUMEN DE ABONOS ==========");
-        console.log("💵 Abono Interés:", abono_interes.toString());
-        console.log("💵 Abono IVA 12%:", abono_iva_12.toString());
-        console.log("💵 Abono Seguro:", abono_seguro.toString());
-        console.log("💵 Abono GPS:", abono_gps.toString());
-        console.log("💵 Abono Membresías:", abono_membresias.toString());
-        console.log("💵 Abono Capital:", abono_capital.toString());
-        console.log("💰 Sobrante sin aplicar:", disponible_restante.toString());
+
+
+
+
+
+
+
+
 
         // 4. CALCULAR NUEVOS RESTANTES
-        console.log("\n🔍 ========== CALCULANDO NUEVOS RESTANTES ==========");
+
         const nuevo_interes_restante = interes_restante.minus(abono_interes);
         const nuevo_iva_restante = iva_restante.minus(abono_iva_12);
         const nuevo_seguro_restante = seguro_restante.minus(abono_seguro);
@@ -1404,36 +1462,31 @@ export async function procesarRegistroPago(
         const nuevo_capital_restante =
           capital_restante_pago.minus(abono_capital);
 
-        console.log(
-          "📊 Nuevo Interés Restante:",
-          nuevo_interes_restante.toString()
-        );
-        console.log("📊 Nuevo IVA Restante:", nuevo_iva_restante.toString());
-        console.log(
-          "📊 Nuevo Seguro Restante:",
-          nuevo_seguro_restante.toString()
-        );
-        console.log("📊 Nuevo GPS Restante:", nuevo_gps_restante.toString());
-        console.log(
-          "📊 Nuevo Membresías Restante:",
-          nuevo_membresias_restante.toString()
-        );
-        console.log(
-          "📊 Nuevo Capital Restante:",
-          nuevo_capital_restante.toString()
-        );
+
+
+
+
+
+
 
         // Obtener pago del mes
+<<<<<<< ours
+
+        const pago_del_mes = await getPagosDelMesActual(credito.credito_id);
+
+
+=======
         console.log("\n🔍 ========== CALCULANDO PAGO DEL MES ==========");
         const pago_del_mes = await getPagosDelMesActual(credito.credito_id, tx);
         console.log("💰 Pago del mes actual (DB):", pago_del_mes);
         console.log("💵 Monto boleta actual:", montoBoleta);
+>>>>>>> theirs
 
         const pago_del_mesBig = new Big(pago_del_mes ?? 0).add(
           montoBoleta ?? 0
         );
-        console.log("💵 Pago del mes TOTAL:", pago_del_mesBig.toString());
-        console.log("🔍 ========== FIN ==========\n");
+
+
         const todosRestantesEnCero =
           nuevo_interes_restante.eq(0) &&
           nuevo_iva_restante.eq(0) &&
@@ -1471,14 +1524,7 @@ export async function procesarRegistroPago(
             availableRemaining: disponible_restante,
           })
         ) {
-          console.log(
-            "⚠️ Restantes de cuota subestimados; reteniendo ajuste neutro en la cuota seleccionada:",
-            {
-              cuota: cuota.cuotas_credito.numero_cuota,
-              faltanteContraCuota: faltanteContraCuota.toString(),
-              disponibleRestante: disponible_restante.toString(),
-            }
-          );
+
           totalPagado = totalPagado.plus(faltanteContraCuota);
           disponible_restante = disponible_restante.minus(faltanteContraCuota);
         }
@@ -1553,7 +1599,17 @@ export async function procesarRegistroPago(
         // Mora y otros solo van en la primera cuota (si ya hubo completas antes, no se repiten)
         const esPrimeraCuota = cuotas_completas === 0 && cuotas_parciales === 0;
         const moraParaPago = esPrimeraCuota ? moraBig : new Big(0);
-        const otrosParaPago = esPrimeraCuota ? otrosBig : new Big(0);
+        // El ajuste solo se suma en la cuota 1 (no en "la primera que se
+        // procese en este pago"). Comparte el campo "otros" con lo que el
+        // operador tipeó a mano; para aislar el ajuste, ver
+        // ajuste_fecha_ideal_pago.fecha_cobro.
+        const otrosParaPago = esPrimeraCuota
+          ? otrosBig.plus(
+              cuota.cuotas_credito.numero_cuota === 1
+                ? ajusteFechaIdealMonto
+                : 0
+            )
+          : new Big(0);
 
         const pagoData = {
           credito_id: credito.credito_id,
@@ -1618,8 +1674,8 @@ export async function procesarRegistroPago(
             pagoInsertado?.pago_id
           ) {
           }
-          console.log("cuota_id:", cuota);
-          console.log("pagoInsertado:", pagoData);
+
+
           if (pagoData) {
             if (pagoData.pagado && destinoSobrescribible) {
               // ── CIERRE sobre fila DESECHABLE (UPDATE) ──────────────────────
@@ -1627,6 +1683,57 @@ export async function procesarRegistroPago(
               // pisarla con el pago de cierre no destruye plata. Comportamiento
               // histórico para el caso normal.
               cuotas_completas++;
+<<<<<<< ours
+
+              // El UPDATE de esta fila y el marcado del ajuste (si aplica a la
+              // cuota 1) van en una sola transacción: si el marcado falla, el
+              // pago tampoco queda escrito — evita que quede "cobrado" vía
+              // `otros` pero el ajuste siga pendiente y se vuelva a cobrar en
+              // el siguiente pago.
+              const pagoConvenioParaFila = estamparPagoConvenio();
+              [pagoInsertado] = await db.transaction(async (tx) => {
+                const rows = await tx
+                  .update(pagos_credito)
+                  // El sello del convenio se escribe después, dentro de la
+                  // misma tx que acredita convenios_pago.
+                  .set({ ...pagoData, pagoConvenio: "0" })
+                  .from(cuotas_credito)
+                  .where(
+                    and(
+                      eq(
+                        cuotas_credito.cuota_id,
+                        cuota.cuotas_credito.cuota_id
+                      ),
+                      eq(pagos_credito.pago_id, existingPago.pago.pago_id),
+                      eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
+                    )
+                  )
+                  .returning();
+                const [inserted] = rows;
+                if (
+                  cuota.cuotas_credito.numero_cuota === 1 &&
+                  inserted &&
+                  ajusteFechaIdealId !== undefined
+                ) {
+                  await claimAjusteFechaIdealPago(
+                    ajusteFechaIdealId,
+                    inserted.pago_id,
+                    tx
+                  );
+                  console.log(
+                    `🧾 Ajuste por fecha ideal de pago #${ajusteFechaIdealId} marcado como cobrado (pago_id=${inserted.pago_id}).`
+                  );
+                }
+                return rows;
+              });
+              if (cuota.cuotas_credito.numero_cuota === 1 && pagoInsertado) {
+                cuota1PagoId = pagoInsertado.pago_id;
+              }
+              if (new Big(pagoConvenioParaFila).gt(0) && pagoInsertado) {
+                pagoConvenioPagoId = pagoInsertado.pago_id;
+              }
+              await db
+=======
               console.log(
                 `✅ Cuota ${cuota.cuotas_credito.numero_cuota} PAGADA COMPLETAMENTE`
               );
@@ -1651,6 +1758,7 @@ export async function procesarRegistroPago(
                 )
                 .returning();
               await tx
+>>>>>>> theirs
                 .update(pagos_credito)
                 .set({ pagado: true })
                 .where(
@@ -1681,9 +1789,7 @@ export async function procesarRegistroPago(
               // parcial pero `pagado: true` y restantes en 0). El UPDATE masivo
               // de abajo marca toda la cuota como pagada.
               cuotas_completas++;
-              console.log(
-                `✅ Cuota ${cuota.cuotas_credito.numero_cuota} PAGADA COMPLETAMENTE (fila de cierre NUEVA: el destino existente es un pago real y no se sobrescribe)`
-              );
+
 
               const guatemalaTimeString = new Date().toLocaleString("en-US", {
                 timeZone: "America/Guatemala",
@@ -1701,7 +1807,18 @@ export async function procesarRegistroPago(
                 `${year}-${month}-${day}T${timePart}`
               );
 
+<<<<<<< ours
+              // El INSERT de esta fila y el marcado del ajuste (si aplica a la
+              // cuota 1) van en una sola transacción: si el marcado falla, el
+              // pago tampoco queda escrito — evita que quede "cobrado" vía
+              // `otros` pero el ajuste siga pendiente y se vuelva a cobrar en
+              // el siguiente pago.
+              const pagoConvenioParaFila = estamparPagoConvenio();
+              [pagoInsertado] = await db.transaction(async (tx) => {
+              const rows = await tx
+=======
               [pagoInsertado] = await tx
+>>>>>>> theirs
                 .insert(pagos_credito)
                 .values({
                   // Campos requeridos del input
@@ -1768,7 +1885,7 @@ export async function procesarRegistroPago(
                   banco_id: pagoData.banco_id || null,
                   numeroAutorizacion: pagoData.numeroAutorizacion || null,
                   registerBy: pagoData.registerBy,
-                  pagoConvenio: estamparPagoConvenio(),
+                  pagoConvenio: "0",
                   fecha_boleta: pagoData.fecha_boleta,
                   monto_aplicado: pagoData.monto_aplicado,
                   // Paridad con la rama UPDATE de cierre (que persiste pagoData
@@ -1777,6 +1894,29 @@ export async function procesarRegistroPago(
                   pagalo_import_id: pagoData.pagalo_import_id,
                 })
                 .returning();
+              const [inserted] = rows;
+              if (
+                cuota.cuotas_credito.numero_cuota === 1 &&
+                inserted &&
+                ajusteFechaIdealId !== undefined
+              ) {
+                await claimAjusteFechaIdealPago(
+                  ajusteFechaIdealId,
+                  inserted.pago_id,
+                  tx
+                );
+                console.log(
+                  `🧾 Ajuste por fecha ideal de pago #${ajusteFechaIdealId} marcado como cobrado (pago_id=${inserted.pago_id}).`
+                );
+              }
+              return rows;
+              });
+              if (cuota.cuotas_credito.numero_cuota === 1 && pagoInsertado) {
+                cuota1PagoId = pagoInsertado.pago_id;
+              }
+              if (new Big(pagoConvenioParaFila).gt(0) && pagoInsertado) {
+                pagoConvenioPagoId = pagoInsertado.pago_id;
+              }
 
               // Marcar TODA la cuota como pagada (igual que la rama UPDATE).
               await tx
@@ -1819,9 +1959,7 @@ export async function procesarRegistroPago(
               // cuota del cascadeo.
               filaParcialOmitida = true;
               cuotas_saltadas++;
-              console.log(
-                `⏭️ Cuota ${cuota.cuotas_credito.numero_cuota} sin nada que cobrar (aplicado 0, sin mora ni otros): no se inserta fila`
-              );
+
             } else {
               disponible_para_cuotasPosteriores =
                 disponible_para_cuotasPosteriores.plus(disponible);
@@ -1845,15 +1983,24 @@ export async function procesarRegistroPago(
                 `${year}-${month}-${day}T${timePart}`
               );
 
-              console.log(
-                `⚠️ Cuota ${cuota.cuotas_credito.numero_cuota} con PAGO PARCIAL`
-              );
 
+<<<<<<< ours
+
+              // El INSERT de esta fila y el marcado del ajuste (si aplica a la
+              // cuota 1) van en una sola transacción: si el marcado falla, el
+              // pago tampoco queda escrito — evita que quede "cobrado" vía
+              // `otros` pero el ajuste siga pendiente y se vuelva a cobrar en
+              // el siguiente pago.
+              const pagoConvenioParaFila = estamparPagoConvenio();
+              [pagoInsertado] = await db.transaction(async (tx) => {
+              const rows = await tx
+=======
               [pagoInsertado] = await tx
+>>>>>>> theirs
                 .insert(pagos_credito)
                 .values({
                   // Campos requeridos del input
-                  cuota_id: cuota.cuotas_credito.cuota_id, 
+                  cuota_id: cuota.cuotas_credito.cuota_id,
                   renuevo_o_nuevo: pagoData.renuevo_o_nuevo,
                   credito_id: pagoData.credito_id,
                   // Campos que vienen del crédito/cuota
@@ -1861,7 +2008,7 @@ export async function procesarRegistroPago(
                   cuota_interes: credito.cuota_interes,
                   fecha_pago: fechaGuatemala,
                   fecha_vencimiento: cuota.cuotas_credito.fecha_vencimiento ? new Date(cuota.cuotas_credito.fecha_vencimiento).toISOString() : undefined,
-                  
+
 
                   // Abonos (calculados según lógica de si monto_boleta == cuota)
                   abono_capital: pagoData.abono_capital,
@@ -1916,14 +2063,36 @@ export async function procesarRegistroPago(
                   banco_id: pagoData.banco_id || null,
                   numeroAutorizacion: pagoData.numeroAutorizacion || null,
                   registerBy: pagoData.registerBy,
-                  pagoConvenio: estamparPagoConvenio(),
+                  pagoConvenio: "0",
                   fecha_boleta:pagoData.fecha_boleta,
                   monto_aplicado: pagoData.monto_aplicado,
                   origen_pago: pagoData.origen_pago,
                   pagalo_import_id: pagoData.pagalo_import_id,
                 })
                 .returning();
-              console.log("pagoInsertado cuota parcial:", pagoInsertado);
+              const [inserted] = rows;
+              if (
+                cuota.cuotas_credito.numero_cuota === 1 &&
+                inserted &&
+                ajusteFechaIdealId !== undefined
+              ) {
+                await claimAjusteFechaIdealPago(
+                  ajusteFechaIdealId,
+                  inserted.pago_id,
+                  tx
+                );
+                console.log(
+                  `🧾 Ajuste por fecha ideal de pago #${ajusteFechaIdealId} marcado como cobrado (pago_id=${inserted.pago_id}).`
+                );
+              }
+              return rows;
+              });
+              if (cuota.cuotas_credito.numero_cuota === 1 && pagoInsertado) {
+                cuota1PagoId = pagoInsertado.pago_id;
+              }
+              if (new Big(pagoConvenioParaFila).gt(0) && pagoInsertado) {
+                pagoConvenioPagoId = pagoInsertado.pago_id;
+              }
               if (
                 pagoInsertado?.pago_id &&
                 urlCompletas &&
@@ -1937,7 +2106,7 @@ export async function procesarRegistroPago(
                 );
               }
 
-              
+
             }
           }
 
@@ -2019,7 +2188,7 @@ export async function procesarRegistroPago(
       .where(
         and(
           eq(cuotas_credito.credito_id, credito_id),
-          gt(cuotas_credito.numero_cuota, 0), 
+          gt(cuotas_credito.numero_cuota, 0),
           eq(pagos_credito.pagado, true)
         )
       )
@@ -2032,9 +2201,23 @@ export async function procesarRegistroPago(
     const fechaVenc = ultimaCuotaPagada?.fecha_vencimiento ?? null;
     const estaAlDia = ultimaCuotaPagada && fechaVenc && fechaVenc >= hoy;
 
+    // El marcado como cobrado ya corrió de forma atómica junto con el
+    // INSERT/UPDATE de la fila de la cuota 1, dentro del loop de arriba (ver
+    // comentario en cada rama) — así un fallo del marcado también revierte el
+    // pago en vez de dejarlo "cobrado" vía `otros` con el ajuste sin marcar.
+    // Acá solo queda avisar si había un ajuste pendiente pero la cuota 1
+    // nunca se escribió en este pago (nada que marcar).
+    if (ajusteFechaIdealId !== undefined && cuota1PagoId === undefined) {
+      console.warn(
+        `⚠️ Ajuste por fecha ideal de pago #${ajusteFechaIdealId}: se dedujo del ` +
+          `disponible pero no se escribió ningún pago de la cuota 1 en este loop. ` +
+          `NO se marca como cobrado — revisar manualmente.`
+      );
+    }
+
     if ((estaAlDia || permiteAbonoCapital) && abonoCapital.gt(0)) {
-      console.log("\n💰 ========== ABONO DIRECTO A CAPITAL ==========");
-      console.log(`💵 Monto: Q${abonoCapital.toString()}`);
+
+
 
       // 1️⃣ Preparar datos del pago
       const currentDate = new Date();
@@ -2099,6 +2282,7 @@ export async function procesarRegistroPago(
       const [datePart, timePart] = guatemalaTimeString.split(", ");
       const [month, day, year] = datePart.split("/");
       const fechaGuatemala = new Date(`${year}-${month}-${day}T${timePart}`);
+      const pagoConvenioParaFila = estamparPagoConvenio();
       const pagoData = {
         credito_id,
         cuota: credito.cuota,
@@ -2155,26 +2339,29 @@ export async function procesarRegistroPago(
         validationStatus: "capital" as const,
         paymentFalse: false,
         registerBy: registerBy,
-        pagoConvenio: estamparPagoConvenio(),
+        pagoConvenio: "0",
         fecha_boleta: fecha_boleta,
         monto_aplicado: abonoCapital.toString(),
         origen_pago: origen_pago,
         pagalo_import_id: pagalo_import_id,
       };
 
-      console.log("\n📝 ========== REGISTRANDO PAGO ==========");
+
 
       // 2️⃣ Registrar el pago
       const [pagoInsertado] = await tx
         .insert(pagos_credito)
         .values(pagoData)
         .returning();
+      if (new Big(pagoConvenioParaFila).gt(0)) {
+        pagoConvenioPagoId = pagoInsertado.pago_id;
+      }
 
-      console.log(`✅ Pago registrado: ID ${pagoInsertado.pago_id}`);
+
 
       // 3️⃣ Insertar boletas si existen
       if (urlCompletas && urlCompletas.length > 0) {
-        console.log(`\n📄 Insertando ${urlCompletas.length} boletas...`);
+
 
         await tx.insert(boletas).values(
           urlCompletas.map((url) => ({
@@ -2183,13 +2370,11 @@ export async function procesarRegistroPago(
           }))
         );
 
-        console.log(`✅ Boletas insertadas`);
+
       }
 
-      console.log("\n✅ ========== ABONO A CAPITAL REGISTRADO ==========");
-      console.log(
-        "⏳ Pendiente de validación para distribuir entre inversionistas\n"
-      );
+
+
 
       // Sobrante no-capital de la boleta (p. ej. EN_CONVENIO sin cuotas
       // abiertas que consuman el disponible): esta rama retorna sin pasar por
@@ -2203,9 +2388,25 @@ export async function procesarRegistroPago(
           .update(usuarios)
           .set({ saldo_a_favor: saldoConSobrante.toString() })
           .where(eq(usuarios.usuario_id, credito.usuario_id));
-        console.log(
-          `↩️ Sobrante no aplicado a cuotas acreditado a saldo a favor: Q${disponible_restante.toString()} (saldo: Q${saldoConSobrante.toString()})`
-        );
+
+      }
+
+      // La boleta ya está persistida (fila de capital + boletas): recién acá
+      // se acredita el convenio y se estampa esta fila, juntos en la misma
+      // transacción chica. Si falla el commit, ninguno de esos dos efectos
+      // persiste y la reversa no puede descontar un convenio no acreditado.
+      if (commitConvenio) {
+        if (pagoConvenioPagoId === undefined) {
+          throw new Error(
+            "No se puede acreditar el convenio sin una fila de pago persistida"
+          );
+        }
+        const convenioAcreditado = await commitConvenio(pagoConvenioPagoId);
+        if (!convenioAcreditado) {
+          throw new Error(
+            "El pago se registró, pero el convenio cambió y no pudo acreditarse"
+          );
+        }
       }
 
       // 4️⃣ Retornar resultado
@@ -2246,9 +2447,16 @@ export async function procesarRegistroPago(
         // pagoSoloOtros): esa rama inserta su fila aunque el request traiga
         // capital colado, y acá lo que importa es qué se escribió.
         otrosEspecialAplicado: montoBoleta.eq(otrosBig),
+<<<<<<< ours
+        // Si hay convenio aplicado, el flujo debe seguir hasta el return de
+        // éxito para escribir la fila-rastro y ejecutar `commitConvenio` (la
+        // acreditación se difiere al éxito): un 409 acá dejaría la boleta del
+        // convenio sin registrar.
+=======
         // Si el convenio ya se registró, `convenios_pago` YA está escrito
         // (processConvenioPaymentEnTx corre antes del loop): un 409 aquí invitaría
         // a reintentar la boleta y acreditaría el convenio dos veces.
+>>>>>>> theirs
         convenioAplicado: montoConvenio,
       };
       if (debeRechazarAbonoCapitalNoAplicado(guardCapitalParams)) {
@@ -2295,20 +2503,20 @@ export async function procesarRegistroPago(
       // apliquen una o ambas supresiones.
       const capitalDevuelto = capitalSuprimidoSinAplicar(guardCapitalParams);
       if (capitalDevuelto.gt(0)) {
-        console.log(
-          `↩️ Abono a capital no aplicable (sin permiso) devuelto a saldo a favor: Q${capitalDevuelto.toString()}`
-        );
+
       }
 
-      // El convenio ya acreditó convenios_pago pero NINGUNA fila de esta
-      // boleta consumió el estampado: pasa cuando el crédito EN_CONVENIO no
-      // tiene cuotas abiertas (el guard de integridad pide cuotasPendientes
-      // > 0, así que no lo intercepta). Sin esta fila la boleta no existe en
-      // pagos_credito — invisible para la detección de duplicados y sin
-      // reversa posible del convenio. El disponible sigue yendo a saldo a
-      // favor: el registro del convenio no consume la boleta.
+      // El convenio va a acreditarse (commitConvenio corre unas líneas más
+      // abajo) pero NINGUNA fila de esta boleta consumió el estampado: pasa
+      // cuando el crédito EN_CONVENIO no tiene cuotas abiertas (el guard de
+      // integridad pide cuotasPendientes > 0, así que no lo intercepta). Sin
+      // esta fila la boleta no existe en pagos_credito — invisible para la
+      // detección de duplicados y sin reversa posible del convenio. El
+      // disponible sigue yendo a saldo a favor: el registro del convenio no
+      // consume la boleta.
       if (new Big(estamparPagoConvenio.pendiente()).gt(0)) {
-        await insertarPago({
+        const pagoConvenioParaFila = estamparPagoConvenio();
+        const pagoEspecialInsertado = await insertarPago({
           numero_credito_sifco: credito.numero_credito_sifco,
           numero_cuota: cuotaApagar,
           cuotaId: cuotaIdPagoEspecial,
@@ -2322,10 +2530,19 @@ export async function procesarRegistroPago(
           registerBy: registerBy ?? "",
           fecha_boleta,
           monto_aplicado: pagoEspecialCuota.montoAplicado,
+<<<<<<< ours
+          pagoConvenio: 0,
+          observaciones,
+        });
+        if (new Big(pagoConvenioParaFila).gt(0)) {
+          pagoConvenioPagoId = pagoEspecialInsertado.pago_id;
+        }
+=======
           pagoConvenio: Number(estamparPagoConvenio()),
           origen_pago,
           pagalo_import_id,
         }, tx);
+>>>>>>> theirs
       }
 
       const newSaldoAFavor = saldoAFavor
@@ -2336,10 +2553,23 @@ export async function procesarRegistroPago(
         .set({ saldo_a_favor: newSaldoAFavor.toString() })
         .where(eq(usuarios.usuario_id, credito.usuario_id));
 
-      console.log(
-        `✅ Saldo a favor del usuario quedó en $${newSaldoAFavor.toString()}`
-      );
-      console.log("✅ Pago realizado con éxito");
+      // Éxito: las filas de la boleta (loop de cuotas y/o la fila-rastro de
+      // arriba) ya están escritas — recién acá se acredita el convenio. Los
+      // 409 de este else salen ANTES de este punto, así que un rechazo ya no
+      // deja el convenio cobrado sin boleta.
+      if (commitConvenio) {
+        if (pagoConvenioPagoId === undefined) {
+          throw new Error(
+            "No se puede acreditar el convenio sin una fila de pago persistida"
+          );
+        }
+        const convenioAcreditado = await commitConvenio(pagoConvenioPagoId);
+        if (!convenioAcreditado) {
+          throw new Error(
+            "El pago se registró, pero el convenio cambió y no pudo acreditarse"
+          );
+        }
+      }
 
       const montoTotal = montoBoleta.toString();
 
@@ -2376,7 +2606,7 @@ export const insertPayment = async ({ body, set }: any) => {
       )
     );
   } catch (error) {
-    console.error("[insertPayment] Error:", error);
+
     if ((error as { code?: string }).code === CREDIT_PENDING_CANCELLATION_ERROR.code) {
       set.status = 409;
       return {
@@ -2398,6 +2628,25 @@ export const insertPayment = async ({ body, set }: any) => {
       message: "Internal server error",
       error: error instanceof Error ? error.message : String(error),
     };
+<<<<<<< ours
+  } finally {
+    // 🔓 Liberar el advisory lock y devolver la conexión al pool, pase lo que pase.
+    if (lockConn) {
+      try {
+        if (lockedCreditoId !== undefined) {
+          await lockConn.query("SELECT pg_advisory_unlock($1, $2)", [
+            PAYMENT_ADVISORY_LOCK_NAMESPACE,
+            lockedCreditoId,
+          ]);
+        }
+      } catch (unlockError) {
+
+      } finally {
+        lockConn.release();
+      }
+    }
+=======
+>>>>>>> theirs
   }
 };
 export async function getPagosDelMesActual(
@@ -2448,8 +2697,12 @@ interface InsertarPagoParams {
   fecha_boleta?: string;
   monto_aplicado: number;
   pagoConvenio?: number;
+<<<<<<< ours
+  observaciones?: string;
+=======
   origen_pago?: "transferencia" | "cheque" | "boleta" | "pagalo";
   pagalo_import_id?: number;
+>>>>>>> theirs
 }
 export async function insertarPago({
   numero_credito_sifco,
@@ -2466,12 +2719,18 @@ export async function insertarPago({
   fecha_boleta,
   monto_aplicado,
   pagoConvenio = 0,
+<<<<<<< ours
+  observaciones = ""
+}: InsertarPagoParams) {
+
+=======
   origen_pago,
   pagalo_import_id,
 }: InsertarPagoParams, executor: RegisterPaymentExecutor = db) {
   console.log(
     `Insertando pago para crédito SIFCO: ${numero_credito_sifco}, cuota: ${numero_cuota}, mora: ${mora}, otros: ${otros}`
   );
+>>>>>>> theirs
 
   // 🔥 Query único optimizado: Crédito + Pagos + Usuario en 1 hit
   const [creditData] = await executor
@@ -2605,7 +2864,7 @@ export async function insertarPago({
       seguro_facturado: creditData.seguro_10_cuotas?.toString() ?? "0",
       gps_facturado: creditData.gps?.toString() ?? "0",
       reserva: "0",
-      observaciones: "",
+      observaciones: observaciones,
       validationStatus: "pending",
       fecha_boleta: fecha_boleta,
       banco_id: banco_id ?? undefined,
@@ -2676,10 +2935,7 @@ export async function aplicarPagoAlCredito(pago_id: number) {
         creditoIdLock,
       ]);
     } catch (unlockError) {
-      console.error(
-        "⚠️ Error liberando advisory lock de aplicar-pago:",
-        unlockError
-      );
+
     }
     lockConn.release();
   }
@@ -2769,7 +3025,7 @@ export function evaluarPagoParaAplicar(
 
 async function aplicarPagoAlCreditoSinLock(pago_id: number) {
   try {
-    console.log("🔄 Iniciando aplicación de pago al crédito:", pago_id);
+
 
     // 1. OBTENER EL PAGO CON TODOS SUS ABONOS
     const [pago] = await db
@@ -2781,6 +3037,77 @@ async function aplicarPagoAlCreditoSinLock(pago_id: number) {
     if (!pago) {
       throw new Error(`Pago ${pago_id} no encontrado`);
     }
+<<<<<<< ours
+    // 🔒 Re-chequeo BAJO EL LOCK: dos /aplicar-pago del mismo pago pueden
+    // pasar el pre-check del router antes de que alguno tome el lock (doble
+    // click / reintento); el segundo entra aquí cuando el primero ya aplicó.
+    // Esta lectura ocurre ya con el lock tomado, así que ver un status
+    // aplicado es definitivo — se rechaza en vez de volver a mover capital y
+    // re-distribuir a inversionistas.
+    if (
+      pago.validationStatus === "validated" ||
+      pago.validationStatus === "capital_validated"
+    ) {
+      return {
+        success: false,
+        applied: false,
+        message: `El pago ${pago_id} ya fue aplicado (${pago.validationStatus}); no se aplica dos veces.`,
+      };
+    }
+    if (pago.validationStatus === "capital") {
+      const resultadoCapital = await applyCapitalPaymentAndBuildResponse(
+        pago,
+        pago_id,
+        aplicarAbonoCapitalInversionistas
+      );
+      // Un abono directo a capital puede dejar el crédito sin capital: la
+      // regla sinCapital debe apagar la mora aquí mismo (igual que haría el
+      // cron esa noche). Post-commit del abono; barato si no hay mora activa.
+      if (resultadoCapital?.success && pago.credito_id !== null) {
+        await desactivarMoraSiCreditoAlDia(pago.credito_id);
+      }
+      return resultadoCapital;
+    }
+    if (pago.validationStatus === "reset") {
+      if (pago.credito_id === null) {
+        throw new Error("No se puede aplicar el abono: credito_id es null");
+      }
+
+      // OJO: NO cambiar validationStatus a "validated". La facturación
+      // identifica las cancelaciones por status "reset" (cofidi.ts:
+      // esCancelacion) para repartir intereses por cuota_inversionista en
+      // vez de monto_aportado; pisar el status rompería ese cálculo. El
+      // update que vivía aquí nunca se ejecutó (le faltaba el await y las
+      // queries de drizzle son lazy), así que el comportamiento real de
+      // prod siempre fue conservar "reset" — se elimina para que el código
+      // diga lo que hace.
+      return {
+        success: true,
+        applied: false,
+        message: "Pago validado, crédito cancelado correctamente",
+      };
+    }
+
+    if (
+      shouldRejectZeroAppliedNormalValidation({
+        validationStatus: pago.validationStatus,
+        nextValidationStatus: "validated",
+        montoAplicado: pago.monto_aplicado,
+        mora: pago.mora,
+        otros: pago.otros,
+        pagoConvenio: pago.pagoConvenio,
+      })
+    ) {
+      return {
+        success: false,
+        applied: false,
+        message: `No se puede validar el pago ${pago_id}: monto_aplicado es 0.00`,
+      };
+    }
+
+    if (pago.credito_id === null) {
+      throw new Error("No se puede aplicar el pago: credito_id es null");
+=======
     // 🔒 Re-chequeo BAJO EL LOCK (ver evaluarPagoParaAplicar): dos
     // /aplicar-pago del mismo pago pueden pasar el pre-check del router antes
     // de que alguno tome el lock; el segundo entra aquí cuando el primero ya
@@ -2798,6 +3125,7 @@ async function aplicarPagoAlCreditoSinLock(pago_id: number) {
         );
       case "normal":
         break;
+>>>>>>> theirs
     }
 
     // TODAS las escrituras del flujo normal (validar el pago, capital/deuda
@@ -2807,11 +3135,24 @@ async function aplicarPagoAlCreditoSinLock(pago_id: number) {
     // completo y el reintento parte de cero — sin capital doble-descontado ni
     // distribuciones a medias. Aquí adentro NO hay llamadas externas (la
     // facturación con SAT vive en otro endpoint), así que la tx es corta.
-    return await db.transaction(async (tx) =>
+    const resultado = await db.transaction(async (tx) =>
       aplicarPagoNormalEnTx(tx as unknown as AplicarPagoTx, pago, pago_id)
     );
+
+    // POST-COMMIT: si el pago dejó el crédito al día, apagar la mora que el
+    // cron pudo crear mientras la boleta esperaba validación (si no, queda
+    // activa y el crédito MOROSO hasta la corrida nocturna). Va FUERA de la
+    // transacción a propósito: el helper lee/escribe por el pool global (otra
+    // conexión), así que dentro de la tx leería el snapshot viejo (no-op) y
+    // su UPDATE a creditos chocaría con el row lock de la tx (bloqueo mutuo).
+    // Nunca lanza, así que no puede tirar una aplicación ya commiteada.
+    if (resultado?.success) {
+      await desactivarMoraSiCreditoAlDia(pago.credito_id);
+    }
+
+    return resultado;
   } catch (error) {
-    console.error("❌ Error al aplicar pago al crédito:", error);
+
     throw error;
   }
 }
@@ -2894,9 +3235,7 @@ export async function aplicarPagoNormalEnTx(
       // Tolerancia de 1 centavo por redondeos
       cuotaCompleta = totalAplicadoEnCuota.gte(cuotaAmount.minus(0.01));
 
-      console.log(
-        `📊 Cuota ${pago.cuota_id}: aplicado ${totalAplicadoEnCuota.toFixed(2)} / esperado ${cuotaAmount.toFixed(2)} (otros validated: ${otrosPagosValidados.length}) → ${cuotaCompleta ? "COMPLETA" : "incompleta"}`
-      );
+
 
       // Recibos MENORES a la cuota mensual: tras un abono grande, el recálculo
       // topa el capital del último recibo (y los de cola quedan solo con
@@ -2949,14 +3288,10 @@ export async function aplicarPagoNormalEnTx(
             // cierre esté diferido, la fila viaja como parcial (pagado=false);
             // cuotas_credito.pagado lo pone el hermano que cierra en RAMA B.
             cierreDiferido = pago.pagado === true;
-            console.log(
-              `📊 Cuota ${pago.cuota_id}: recibo en 0 pero hay otro pago pendiente sin validar (${hermanoPendiente.pago_id}) → NO se cierra con este pago${cierreDiferido ? " (se difiere también su pagado=true)" : ""}`
-            );
+
           } else {
             cuotaCompleta = true;
-            console.log(
-              `📊 Cuota ${pago.cuota_id}: recibo menor a la cuota mensual cubierto por completo (restantes en 0) → COMPLETA`
-            );
+
           }
         }
       }
@@ -2979,9 +3314,7 @@ export async function aplicarPagoNormalEnTx(
         const capitalPostPago = new Big(credito.capital ?? 0).minus(
           new Big(pago.abono_capital ?? 0)
         );
-        console.log(
-          `🔴 INCOBRABLE crédito ${credito.credito_id}: capital ${new Big(credito.capital ?? 0).toFixed(2)} − abono ${new Big(pago.abono_capital ?? 0).toFixed(2)} = ${capitalPostPago.toFixed(2)} → cuota ${cuotaCompleta ? "PAGADA (capital=0)" : "sigue pendiente"}`
-        );
+
       }
     }
 
@@ -2991,7 +3324,7 @@ export async function aplicarPagoNormalEnTx(
     //     pero NO marca la cuota como pagada NI distribuye a inversionistas.
     // ─────────────────────────────────────────────────────────────────
     if (!cuotaCompleta) {
-      console.log("⚠️ La cuota aún no se cierra con este pago");
+
 
       // Validar el pago. Si es un cierre diferido, suelta también su
       // pagado=true de registro (ver comentario en el guard de arriba).
@@ -3010,10 +3343,7 @@ export async function aplicarPagoNormalEnTx(
 
       const abonoCapitalPago = new Big(pago.abono_capital ?? 0);
       if (abonoCapitalPago.gt(0)) {
-        console.log(
-          "💰 Aplicando abono a capital aunque la cuota no cierre:",
-          abonoCapitalPago.toString()
-        );
+
 
         const capitalAct = new Big(credito.capital ?? 0);
         // Invariantes: INCOBRABLE sin interés/IVA, capital no-negativo.
@@ -3038,8 +3368,8 @@ export async function aplicarPagoNormalEnTx(
           })
           .where(eq(creditos.credito_id, pago.credito_id!));
 
-        console.log("💰 Nuevo capital:", nuevoCapitalParc.toString());
-        console.log("✅ Capital aplicado al crédito (cuota aún abierta)");
+
+
       }
 
       return {
@@ -3070,7 +3400,7 @@ export async function aplicarPagoNormalEnTx(
     //   → recalcula crédito, valida el pago, marca la cuota como pagada,
     //     limpia restantes huérfanos y distribuye a inversionistas.
     // ─────────────────────────────────────────────────────────────────
-    console.log("✅ Este pago cierra la cuota, aplicando al crédito");
+
 
     // 4. CALCULAR NUEVO CAPITAL (restar SOLO el abono_capital de este pago)
     // El capital del crédito ya viene descontado por cada pago previo validated
@@ -3094,10 +3424,10 @@ export async function aplicarPagoNormalEnTx(
     const iva_12 = recomputedCierre.iva;
     const nueva_deuda_total = recomputedCierre.deudaTotal;
 
-    console.log("💰 Capital actual:", capital_actual.toString());
-    console.log("💰 Abono capital:", abono_capital_pago.toString());
-    console.log("💰 Nuevo capital:", nuevo_capital.toString());
-    console.log("📊 Nueva deuda total:", nueva_deuda_total.toString());
+
+
+
+
 
     // 6. ACTUALIZAR EL CRÉDITO
     await setCapitalSource(tx, "PAGO");
@@ -3166,7 +3496,7 @@ export async function aplicarPagoNormalEnTx(
         );
     }
 
-    console.log("✅ Crédito actualizado, pago validado y cuota cerrada");
+
 
     // 8. Distribuir entre inversionistas — TODOS los pagos validated de la cuota
     //    que aún no tengan filas en pagos_credito_inversionistas.
@@ -3213,9 +3543,7 @@ export async function aplicarPagoNormalEnTx(
       .map((p) => p.pago_id)
       .filter((id) => !yaDistribuidosSet.has(id));
 
-    console.log(
-      `💼 Distribución a inversionistas: ${pagosADistribuir.length} pago(s) de la cuota pendiente(s) [${pagosADistribuir.join(", ") || "ninguno"}]`
-    );
+
 
     for (const distPagoId of pagosADistribuir) {
       await insertPagosCreditoInversionistasV2(
@@ -3245,8 +3573,8 @@ export async function aplicarPagoNormalEnTx(
  * basado en montos aportados y porcentajes de Cash In
  */
 export async function calcularDistribucionCredito(credito_id: number) {
-  console.log("\n💰 ========== DISTRIBUCIÓN DEL CRÉDITO ==========");
-  console.log(`📋 Crédito ID: ${credito_id}`);
+
+
 
   // 1️⃣ Obtener inversionistas
   const creditoInversionistas = await db
@@ -3275,8 +3603,8 @@ export async function calcularDistribucionCredito(credito_id: number) {
     (acc, { ci }) => acc.plus(ci.monto_aportado ?? 0),
     new Big(0)
   );
-  console.log(`💰 Capital Total (suma monto_aportado): ${capitalTotal.toString()}`);
-  console.log(`👥 Total inversionistas: ${creditoInversionistas.length}\n`);
+
+
 
   // 3️⃣ Calcular distribución por inversionista
   let totalCashInPorcentaje = new Big(0);
@@ -3320,22 +3648,16 @@ export async function calcularDistribucionCredito(credito_id: number) {
       porcentajeInversionistaDelCredito
     );
 
-    console.log(`👤 ${inv.nombre}`);
-    console.log(`   💰 Monto Aportado: Q${montoAportado.toFixed(2)}`);
-    console.log(
-      `   📊 Porcentaje del Crédito: ${porcentajeDelCredito.toFixed(2)}%`
-    );
-    console.log(`   🎯 Config Cash In: ${porcentajeCashIn.toFixed(2)}%`);
-    console.log(
-      `   ├─ 💸 Cash In: Q${montoCashIn.toFixed(2)} (${porcentajeCashInDelCredito.toFixed(2)}% del crédito)`
-    );
-    console.log(
-      `   └─ 👤 Inversionista: Q${montoInversionista.toFixed(2)} (${porcentajeInversionistaDelCredito.toFixed(2)}% del crédito)`
-    );
+
+
+
+
+
+
     if (esCubeInvestments) {
-      console.log(`   🔥 CUBE INVESTMENTS → 100% Cash In`);
+
     }
-    console.log();
+
 
     return {
       id: ci.id,
@@ -3359,16 +3681,12 @@ export async function calcularDistribucionCredito(credito_id: number) {
     };
   });
 
-  console.log(`🔍 ========== RESUMEN DEL CRÉDITO ==========`);
-  console.log(`💰 Capital Total: Q${capitalTotal.toString()}`);
-  console.log(`💸 Total Cash In: ${totalCashInPorcentaje.toFixed(2)}%`);
-  console.log(
-    `👥 Total Inversionistas: ${totalInversionistaPorcentaje.toFixed(2)}%`
-  );
-  console.log(
-    `✅ Suma: ${totalCashInPorcentaje.plus(totalInversionistaPorcentaje).toFixed(2)}%`
-  );
-  console.log(`✅ ========== FIN ==========\n`);
+
+
+
+
+
+
 
   return {
     capital_total: capitalTotal.toString(),
@@ -3396,9 +3714,9 @@ export async function calcularDistribucionAbonoCapital(
   credito_id: number,
   abono_capital: number | string
 ) {
-  console.log("\n💵 ========== DISTRIBUCIÓN DE ABONO A CAPITAL ==========");
-  console.log(`📋 Crédito ID: ${credito_id}`);
-  console.log(`💵 Abono: ${abono_capital}`);
+
+
+
 
   const abonoCapitalBig = new Big(abono_capital);
 
@@ -3407,7 +3725,7 @@ export async function calcularDistribucionAbonoCapital(
     await calcularDistribucionCredito(credito_id);
   const capitalTotalBig = new Big(capital_total);
 
-  console.log(`\n💰 Distribuyendo abono de Q${abonoCapitalBig.toString()}:\n`);
+
 
   let totalCashInAbono = new Big(0);
   let totalInversionistaAbono = new Big(0);
@@ -3432,13 +3750,11 @@ export async function calcularDistribucionAbonoCapital(
     const nuevoMontoCashIn = new Big(inv.monto_cash_in).minus(abonoCashIn);
     const nuevoMontoAportado = nuevoMontoInversionista.plus(nuevoMontoCashIn);
 
-    console.log(`👤 ${inv.nombre}`);
-    console.log(`   💵 Abono Inversionista: Q${abonoInversionista.toFixed(2)}`);
-    console.log(`   💸 Abono Cash In: Q${abonoCashIn.toFixed(2)}`);
-    console.log(
-      `   ✅ Nuevo Monto Aportado: Q${nuevoMontoAportado.toFixed(2)}`
-    );
-    console.log();
+
+
+
+
+
 
     return {
       ...inv,
@@ -3451,16 +3767,12 @@ export async function calcularDistribucionAbonoCapital(
     };
   });
 
-  console.log(`🔍 ========== VERIFICACIÓN ==========`);
-  console.log(`💵 Abono Total: Q${abonoCapitalBig.toString()}`);
-  console.log(
-    `👥 Total Inversionistas: Q${totalInversionistaAbono.toFixed(2)}`
-  );
-  console.log(`💸 Total Cash In: Q${totalCashInAbono.toFixed(2)}`);
-  console.log(
-    `✅ Suma: Q${totalInversionistaAbono.plus(totalCashInAbono).toFixed(2)}`
-  );
-  console.log(`✅ ========== FIN ==========\n`);
+
+
+
+
+
+
 
   return {
     abono_total: abonoCapitalBig.toString(),
@@ -3483,7 +3795,7 @@ export async function aplicarAbonoCapitalInversionistas(
   // 🔒 NO toma el lock aquí: su único caller es aplicarPagoAlCredito, que ya
   // serializa TODO /aplicar-pago (normal, reset y capital) con el advisory
   // lock por crédito. Tomarlo de nuevo en otra conexión sería deadlock.
-  console.log("\n💵 ========== APLICANDO ABONO A CAPITAL ==========");
+
 
   // Distribuir abono a capital en tabla espejo. El pago_id deja cada fila
   // amarrada a este pago, para poder revertirla si el pago se reversa.
@@ -3494,11 +3806,11 @@ export async function aplicarAbonoCapitalInversionistas(
   // plata, sin que nadie se enterara salvo por un console.error.
   // Es el mismo bug que teníamos del lado del reverso.
   await distribuirAbonoCapitalEspejo(credito_id, abono_capital, "CAPITAL", pago_id);
-  console.log("✅ Abono distribuido en tabla abonos_capital (espejo)");
+
 
   const abonoCapitalBig = new Big(abono_capital);
-  console.log(`💵 Abono Total: ${abonoCapitalBig.toString()}`);
-  console.log(`🧾 Pago ID: ${pago_id}`);
+
+
 
   // 1️⃣ Obtener el crédito
   const [credito] = await db
@@ -3528,11 +3840,11 @@ export async function aplicarAbonoCapitalInversionistas(
     .plus(credito.gps ?? 0)
     .plus(credito.membresias_pago ?? 0);
 
-  console.log(`💰 Capital Actual: Q${capitalActual.toString()}`);
-  console.log(`💰 Nuevo Capital: Q${nuevoCapital.toString()}`);
-  console.log(`📊 Nuevo Interés: Q${cuota_interes.toString()}`);
-  console.log(`📊 Nuevo IVA: Q${iva_12.toString()}`);
-  console.log(`📊 Nueva Deuda Total: Q${deudatotal.toString()}`);
+
+
+
+
+
 
   // 1️⃣.2 Actualizar el crédito
   await withCapitalContext(null, "PAGO", null, (tx) =>
@@ -3547,9 +3859,9 @@ export async function aplicarAbonoCapitalInversionistas(
       .where(eq(creditos.credito_id, credito_id))
   );
 
-  console.log(`✅ Crédito actualizado`);
 
-  console.log(`✅ Saldo a favor limpiado`);
+
+
 
   // 2️⃣ Calcular la distribución (ya sabes cuánto le toca a cada quien)
   const { distribucion } = await calcularDistribucionAbonoCapital(
@@ -3557,7 +3869,7 @@ export async function aplicarAbonoCapitalInversionistas(
     abono_capital
   );
 
-  console.log(`\n🔄 Procesando ${distribucion.length} inversionistas...\n`);
+
 
   const pagosRegistrados = [];
 
@@ -3566,9 +3878,9 @@ export async function aplicarAbonoCapitalInversionistas(
     const abonoInversionista = new Big(dist.abono_total);
     const porcentajeParticipacion = new Big(dist.porcentaje_total_credito);
 
-    console.log(`👤 Procesando: ${dist.nombre}`);
-    console.log(`   💵 Abono a Capital: Q${abonoInversionista.toString()}`);
-    console.log(`   📊 Participación: ${porcentajeParticipacion.toString()}%`);
+
+
+
 
     // 4️⃣ Llamar a tu método para actualizar el inversionista
     await processAndReplaceCreditInvestors(
@@ -3598,7 +3910,7 @@ export async function aplicarAbonoCapitalInversionistas(
       inversionistaActualizado.cuota_inversionista ?? 0
     );
 
-    console.log(`   💵 Cuota Actualizada: Q${cuotaInversionista.toString()}`);
+
     const guatemalaTime = new Date(
       new Date().toLocaleString("en-US", {
         timeZone: "America/Guatemala",
@@ -3629,8 +3941,8 @@ export async function aplicarAbonoCapitalInversionistas(
       })
       .returning();
 
-    console.log(`   ✅ Pago registrado: ID ${pagoRegistrado.id}`);
-    console.log(`   ✅ Actualizado: ${dist.nombre}\n`);
+
+
 
     pagosRegistrados.push({
       pago_inversionista_id: pagoRegistrado.id,
@@ -3684,9 +3996,7 @@ export async function aplicarAbonoCapitalInversionistas(
     // nuevo, contra el contrato. Se mantiene el comportamiento actual (sin
     // re-siembra automática) hasta definir la re-siembra para este formato.
     recalculo_pendientes = "omitido_solo_interes";
-    console.log(
-      "⚠️ Crédito solo-interés (no_amortiza_capital): recálculo automático omitido"
-    );
+
   } else {
     try {
       // Cuotas abiertas con pagos PARCIALES ya aplicados (monto_aplicado>0,
@@ -3750,9 +4060,7 @@ export async function aplicarAbonoCapitalInversionistas(
         // OJO: aquí NO se recomienda el botón "Recalcular Pagos": su modo con
         // numero_cuota también redistribuye el parcial aplicado (reescribiría
         // el reparto validado). Este caso requiere revisión manual del reparto.
-        console.log(
-          "⚠️ Cuota con pago parcial aplicado: recálculo automático omitido — revisar el reparto manualmente (el botón también redistribuiría el parcial)"
-        );
+
       } else {
         // Cuotas VENCIDAS sin aplicar (no pagadas, o registradas sin validar):
         // su interés corresponde a meses en los que el capital viejo todavía
@@ -3801,9 +4109,7 @@ export async function aplicarAbonoCapitalInversionistas(
           .limit(1);
         if (cuotaVencida) {
           recalculo_pendientes = "revisar_vencidas";
-          console.log(
-            "⚠️ Crédito con cuotas vencidas sin aplicar: recálculo automático omitido — revisar con el equipo cómo tratar el interés de las vencidas antes de recalcular"
-          );
+
         } else {
           await recalcularPagosCredito({
             numero_credito_sifco: credito.numero_credito_sifco,
@@ -3844,13 +4150,9 @@ export async function aplicarAbonoCapitalInversionistas(
           );
           if (haySobrante) {
             recalculo_pendientes = "revisar_sobrante";
-            console.log(
-              "⚠️ Pago registrado sin validar con monto mayor al recibo recalculado: revisar sobrante (saldo a favor/devolución) antes de validarlo"
-            );
+
           } else {
-            console.log(
-              `✅ Recibos pendientes recalculados con el capital nuevo`
-            );
+
           }
         }
       }
@@ -3859,14 +4161,11 @@ export async function aplicarAbonoCapitalInversionistas(
       // NO puede pasar silencioso: los recibos quedarían con interés viejo, así
       // que se reporta en la respuesta para correr Recalcular Pagos a mano.
       recalculo_pendientes = "error";
-      console.error(
-        "❌ Error recalculando recibos post-abono (correr Recalcular Pagos manual):",
-        error
-      );
+
     }
   }
 
-  console.log(`✅ ========== ABONO APLICADO EXITOSAMENTE ==========\n`);
+
 
   return {
     message: "Abono a capital aplicado exitosamente",
@@ -3945,7 +4244,7 @@ export async function actualizarCuentaPago(
       data: pagoActualizado,
     };
   } catch (error: any) {
-    console.error("❌ Error al actualizar cuenta de empresa en pago:", error);
+
     return {
       success: false,
       message: "❌ Error al actualizar la cuenta del pago",
@@ -4187,7 +4486,7 @@ async function aplicarMontoAPagoSinLock(pago_id: number, monto: number, fecha_pa
       },
     };
   } catch (error: any) {
-    console.error("❌ Error en aplicarMontoAPago:", error);
+
     return {
       success: false,
       message: "Error al aplicar monto al pago",
@@ -4325,7 +4624,7 @@ export async function editarPago(pago_id: number, campos: {
       .where(eq(pagos_credito.pago_id, pago_id))
       .returning();
 
-    console.log(`✅ Pago ${pago_id} editado. Campos: ${Object.keys(updateData).join(", ")}`);
+
 
     return {
       success: true,
@@ -4333,7 +4632,7 @@ export async function editarPago(pago_id: number, campos: {
       data: pagoActualizado,
     };
   } catch (error: any) {
-    console.error("❌ Error en editarPago:", error);
+
     return {
       success: false,
       message: "Error al editar el pago",

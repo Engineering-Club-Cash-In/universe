@@ -12,8 +12,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-    networks:
-      - legal-docs-network
 
   app:
     build: .
@@ -32,13 +30,7 @@ services:
     depends_on:
       gotenberg:
         condition: service_healthy
-    networks:
-      - legal-docs-network
     volumes:
       - ./output:/app/output
     extra_hosts:
       - "host.docker.internal:host-gateway"
-
-networks:
-  legal-docs-network:
-    driver: bridge

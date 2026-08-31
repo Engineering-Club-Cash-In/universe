@@ -68,6 +68,7 @@ import { carteraBackClient } from "../services/cartera-back-client";
 import {
 	createPagaloClient,
 	getPagaloSandboxConfig,
+	PagaloClientError,
 } from "../services/pagalo-client";
 import {
 	correrDispatchPagalo,
@@ -760,11 +761,46 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 			// asignados) mientras su `status` de request se queda en "1"
 			// (creado) sin transicionar nunca a "2" (pagado) — depender solo del
 			// status del link dejaba el pago invisible para siempre.
+			let detalle: any;
 			try {
-				const detalle: any = await client.getTransactionByIdExternalRaw(
+				detalle = await client.getTransactionByIdExternalRaw(
 					link.externalIdentifier,
 				);
-				const transaccion: TransaccionPagalo | undefined = detalle?.transaction;
+			} catch (error) {
+				// Un link que nadie pagó todavía es el caso común de cada ciclo:
+				// Págalo puede devolver 400 (no encontró transacción para ese
+				// id_external) en vez de 200 con `transaction: null` — confirmado
+				// que ambas formas ocurren en sandbox según el link. No es un
+				// error real salvo que el `status` del propio link ya diga "2"
+				// (Págalo afirma pagado y aun así no aparece la transacción —
+				// ahí sí hay una anomalía que merece quedar visible en
+				// lastPollError, hallazgo de code review).
+				if (
+					error instanceof PagaloClientError &&
+					error.status === 400 &&
+					status !== "2"
+				) {
+					await registrarIntentoFallido(link);
+					resultado.sinCambios++;
+					continue;
+				}
+				await registrarIntentoFallido(
+					link,
+					error instanceof Error ? error.message : String(error),
+				);
+				resultado.errores++;
+				continue;
+			}
+			try {
+				// Doc publicada de Págalo (`POST /v1/payment/transaction/uuid`)
+				// documenta el detalle bajo `data`; sandbox responde con
+				// `transaction` para esta misma consulta por `id_external`. Se
+				// leen ambas formas — si el proveedor cambia de nombre, la
+				// transacción real no debe volverse invisible para siempre
+				// (mismo bug que este PR arregla, espejado, hallazgo de code
+				// review).
+				const transaccion: TransaccionPagalo | undefined =
+					detalle?.transaction ?? detalle?.data;
 				if (!transaccion) {
 					if (status !== "2") {
 						await registrarIntentoFallido(link);

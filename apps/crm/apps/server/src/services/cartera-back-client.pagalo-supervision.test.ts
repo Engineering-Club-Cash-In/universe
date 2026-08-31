@@ -1,6 +1,34 @@
 import { expect, test } from "bun:test";
 import { CarteraBackClient } from "./cartera-back-client";
 
+test("getAllCreditos cachea lecturas GET repetidas", async () => {
+	let llamadas = 0;
+	const fetchDePrueba = (async () => {
+		llamadas += 1;
+		return new Response(
+			JSON.stringify({
+				data: [],
+				page: 1,
+				perPage: 1,
+				total: 0,
+				totalPages: 1,
+			}),
+		);
+	}) as unknown as typeof fetch;
+	const cliente = new CarteraBackClient({
+		baseUrl: "http://cartera-back.test",
+		enableCache: true,
+		accessTokenProvider: async () => "token-de-prueba",
+		fetchTransport: fetchDePrueba,
+	});
+	const params = { mes: 0, anio: 0, page: 1, perPage: 1 };
+
+	await cliente.getAllCreditos(params);
+	await cliente.getAllCreditos(params);
+
+	expect(llamadas).toBe(1);
+});
+
 test("getPoolPorAsesor permite desactivar caché para validar acceso Págalo", async () => {
 	let llamadas = 0;
 	const fetchDePrueba = (async () => {

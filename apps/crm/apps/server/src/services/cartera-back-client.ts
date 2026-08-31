@@ -1548,6 +1548,7 @@ export class CarteraBackClient {
 			response = await this.request<PaginatedResponse<CreditoDetailResponse>>(
 				`/getAllCredits?${queryParams}`,
 				{ method: "GET" },
+				true,
 			);
 		}
 

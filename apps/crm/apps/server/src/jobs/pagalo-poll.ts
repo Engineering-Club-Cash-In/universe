@@ -994,20 +994,30 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 						resultado.sinCambios++;
 						continue;
 					}
+					// status "2": Págalo afirma que el link está pagado, pero
+					// acá no hay transacción ACCEPT que lo respalde — anomalía
+					// real (no un simple "aún no pagado"), se cuenta como
+					// error para que el toast del botón manual y cualquier
+					// alerta del supervisor la reflejen (antes de este fix
+					// quedaba contada como sinCambios, ocultando la anomalía —
+					// hallazgo de code review).
+					if (status === "2") {
+						await registrarIntentoFallido(
+							link,
+							transaccion
+								? `Transacción Págalo en estado ${transaccion.status_transaction}, no ACCEPT.`
+								: "Págalo confirma link pagado pero no encontró la transacción por id_external.",
+						);
+						resultado.errores++;
+						continue;
+					}
 					if (!transaccion) {
-						if (status !== "2") {
-							await registrarIntentoFallido(link);
-						} else {
-							await registrarIntentoFallido(
-								link,
-								"Págalo confirma link pagado pero no encontró la transacción por id_external.",
-							);
-						}
+						await registrarIntentoFallido(link);
 					} else {
 						// Transacción existe pero no cerró ACCEPT (p.ej.
-						// todavía procesándose) y el link no está 3/4 — no es un
-						// error del job, es el estado normal de "aún no
-						// pagado".
+						// todavía procesándose) y el link no está 3/4 ni "2" —
+						// no es un error del job, es el estado normal de "aún
+						// no pagado".
 						await registrarIntentoFallido(
 							link,
 							`Transacción Págalo en estado ${transaccion.status_transaction}, no ACCEPT.`,

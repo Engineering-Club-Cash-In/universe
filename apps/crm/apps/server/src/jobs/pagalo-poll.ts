@@ -56,6 +56,7 @@ import {
 	ne,
 	notInArray,
 	or,
+	sql,
 } from "drizzle-orm";
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 import { db } from "../db";
@@ -68,6 +69,7 @@ import { carteraBackClient } from "../services/cartera-back-client";
 import {
 	createPagaloClient,
 	getPagaloSandboxConfig,
+	PagaloClientError,
 } from "../services/pagalo-client";
 import {
 	correrDispatchPagalo,
@@ -246,6 +248,113 @@ async function registrarIntentoFallido(
 			});
 		}
 	});
+}
+
+/**
+ * Avanza `terminalNotFoundAttempts` — contador aparte de `pollAttempts` (que
+ * mezcla cualquier causa de fallo). Solo se llama cuando Págalo reporta el
+ * link cancelado/expirado (status "3"/"4") Y la consulta de transacción
+ * devuelve 400 (no encontrada) — el único caso donde ese conteo consecutivo
+ * importa para decidir si ya es seguro finalizar. Usar `link.pollAttempts`
+ * (genérico) para ese umbral finalizaba un link en el primer 400 con status
+ * 3/4 si venía arrastrando fallos previos no relacionados (p.ej. varios
+ * ciclos con status "1" sin pagar) — el bug que este contador dedicado
+ * corrige (hallazgo de code review).
+ *
+ * El cruce de umbral se decide y se aplica DENTRO de esta misma transacción,
+ * con el valor recién escrito bajo el lease actual — no con el snapshot
+ * `link` en memoria capturado al reclamar. Si la consulta HTTP de transacción
+ * tardó más que el lease y otro worker ya reclamó el link (reseteando el
+ * contador porque para ese worker el patrón se rompió), este UPDATE
+ * simplemente no matchea nada y la corrida vieja no hace nada más — nunca
+ * finaliza con un conteo obsoleto que otra corrida ya invalidó (hallazgo de
+ * code review).
+ */
+async function registrarIntentoNoEncontradoTerminal(
+	link: LinkClaimado,
+	statusTerminal: "CANCELLED" | "EXPIRED",
+): Promise<void> {
+	const pollAttempts = link.pollAttempts + 1;
+	await db.transaction(async (tx) => {
+		// Candado del GRUPO primero, del LINK después — mismo orden que
+		// marcarLinkPagado y el reemplazo de grupo (pago-link.ts). Esta tx
+		// puede terminar llamando a marcarLinkTerminalEnTx, que toma el
+		// candado del grupo; si el UPDATE del link (que toma su candado
+		// implícito) corriera primero, un pago real llegando en paralelo por
+		// marcarLinkPagado (grupo→link) cruzaría los candados en orden
+		// inverso — deadlock, y si Postgres elige la transacción de PAGO
+		// como víctima, ese pago real queda sin observar (hallazgo de code
+		// review).
+		await tx
+			.select({ id: pagaloPaymentGroups.id })
+			.from(pagaloPaymentGroups)
+			.where(eq(pagaloPaymentGroups.id, link.groupId))
+			.for("update");
+		const [actualizado] = await tx
+			.update(pagaloPaymentLinks)
+			.set({
+				pollAttempts,
+				terminalNotFoundAttempts: sql`${pagaloPaymentLinks.terminalNotFoundAttempts} + 1`,
+				lastPolledAt: new Date(),
+				lastPollError: null,
+				nextPollAt: proximoIntento(pollAttempts),
+				updatedAt: new Date(),
+			})
+			.where(
+				and(
+					eq(pagaloPaymentLinks.id, link.id),
+					inArray(pagaloPaymentLinks.status, [
+						"CREATING",
+						"ACTIVE",
+						"REPLACED",
+					]),
+					link.pollClaimedAt
+						? eq(pagaloPaymentLinks.pollClaimedAt, link.pollClaimedAt)
+						: isNull(pagaloPaymentLinks.pollClaimedAt),
+				),
+			)
+			.returning({ terminalNotFoundAttempts: pagaloPaymentLinks.terminalNotFoundAttempts });
+		if (!actualizado) return;
+		if (actualizado.terminalNotFoundAttempts >= UMBRAL_POLL_RETRY_EXHAUSTED) {
+			await marcarLinkTerminalEnTx(tx, link, statusTerminal);
+		}
+	});
+}
+
+/**
+ * Resetea `terminalNotFoundAttempts` a 0 — se llama en cualquier ciclo donde
+ * el link NO cae en el patrón "status 3/4 + transacción no encontrada", para
+ * que un conteo viejo no se sume a confirmaciones futuras no consecutivas.
+ *
+ * Gateado por los mismos status pollables y el mismo `pollClaimedAt` que
+ * `registrarIntentoNoEncontradoTerminal`: sin esto, un worker con el lease ya
+ * vencido (consulta HTTP que tardó más de MINUTOS_LEASE) podía llegar tarde y
+ * resetear con su observación vieja un contador que un worker MÁS NUEVO ya
+ * incrementó — borrando confirmaciones válidas y manteniendo indefinidamente
+ * activo un link genuinamente cancelado/expirado (hallazgo de code review).
+ * Best-effort: si no matchea nada (lease perdido, o el link ya salió del
+ * ciclo de polling) no pasa nada.
+ */
+async function resetearContadorTerminalNoEncontrado(
+	link: LinkClaimado,
+): Promise<void> {
+	await db
+		.update(pagaloPaymentLinks)
+		.set({ terminalNotFoundAttempts: 0 })
+		.where(
+			and(
+				eq(pagaloPaymentLinks.id, link.id),
+				ne(pagaloPaymentLinks.terminalNotFoundAttempts, 0),
+				inArray(pagaloPaymentLinks.status, [
+					"CREATING",
+					"ACTIVE",
+					"REPLACED",
+				]),
+				link.pollClaimedAt
+					? eq(pagaloPaymentLinks.pollClaimedAt, link.pollClaimedAt)
+					: isNull(pagaloPaymentLinks.pollClaimedAt),
+			),
+		);
 }
 
 /**
@@ -620,70 +729,94 @@ async function marcarLinkPagado(
 	});
 }
 
+/**
+ * Cuerpo transaccional de "finalizar link terminal", extraído para poder
+ * correr DENTRO de una transacción ya abierta por el caller (ver
+ * `registrarIntentoNoEncontradoTerminal`, que decide el cruce de umbral y
+ * finaliza en la misma tx que incrementa el contador, atómico bajo el mismo
+ * lease — hallazgo de code review).
+ */
+async function marcarLinkTerminalEnTx(
+	tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+	link: LinkClaimado,
+	status: "CANCELLED" | "EXPIRED",
+): Promise<void> {
+	const [grupo] = await tx
+		.select({
+			id: pagaloPaymentGroups.id,
+			status: pagaloPaymentGroups.status,
+		})
+		.from(pagaloPaymentGroups)
+		.where(eq(pagaloPaymentGroups.id, link.groupId))
+		.for("update");
+	const [fresco] = await tx
+		.select({ status: pagaloPaymentLinks.status, pollClaimedAt: pagaloPaymentLinks.pollClaimedAt })
+		.from(pagaloPaymentLinks)
+		.where(eq(pagaloPaymentLinks.id, link.id))
+		.for("update");
+	if (!fresco || fresco.status === "PAID") return;
+	// Gateado por el mismo pollClaimedAt del lease bajo el que se decidió
+	// finalizar: si la consulta HTTP que llevó a esta decisión tardó más que
+	// el lease y otro worker ya reclamó el link (pudo haber observado una
+	// transacción real PENDING que este worker viejo nunca vio), esta
+	// corrida no debe pisar esa observación más fresca con un CANCELLED/
+	// EXPIRED basado en datos obsoletos — perdería ese pago para siempre
+	// (hallazgo de code review).
+	const leaseVigente = link.pollClaimedAt
+		? fresco.pollClaimedAt?.getTime() === link.pollClaimedAt.getTime()
+		: fresco.pollClaimedAt === null;
+	if (!leaseVigente) return;
+	await tx
+		.update(pagaloPaymentLinks)
+		.set({
+			status,
+			nextPollAt: null,
+			lastPolledAt: new Date(),
+			updatedAt: new Date(),
+		})
+		.where(eq(pagaloPaymentLinks.id, link.id));
+	const desde = link.activatedAt ?? link.createdAt;
+	await tx.insert(pagaloPaymentEvents).values({
+		groupId: link.groupId,
+		linkId: link.id,
+		eventType: "LINK_TERMINAL",
+		source: "PAGALO_POLLER",
+		fromStatus: fresco.status,
+		toStatus: status,
+		payload: {
+			motivo:
+				status === "EXPIRED" ? "expirado_en_pagalo" : "cancelado_en_pagalo",
+			providerStatus: status === "EXPIRED" ? "4" : "3",
+			pollAttempts: link.pollAttempts,
+			antiguedadHoras: desde
+				? Math.round((Date.now() - desde.getTime()) / 3_600_000)
+				: null,
+		},
+	});
+	// Un link REPLACED que Págalo da por cancelado/expirado es el final
+	// ESPERADO del reemplazo: no reabre su grupo (CANCELLED) — chocaría con
+	// el índice único de un grupo activo por crédito y tumbaba la corrida
+	// entera del poller (hallazgo de Codex). Solo un link vivo que muere
+	// afuera deja su grupo en revisión.
+	if (
+		fresco.status === "REPLACED" ||
+		!grupo ||
+		grupo.status === "CANCELLED" ||
+		grupo.status === "COMPLETED"
+	) {
+		return;
+	}
+	await tx
+		.update(pagaloPaymentGroups)
+		.set({ status: "REVIEW_REQUIRED", updatedAt: new Date() })
+		.where(eq(pagaloPaymentGroups.id, link.groupId));
+}
+
 async function marcarLinkTerminal(
 	link: LinkClaimado,
 	status: "CANCELLED" | "EXPIRED",
 ): Promise<void> {
-	await db.transaction(async (tx) => {
-		const [grupo] = await tx
-			.select({
-				id: pagaloPaymentGroups.id,
-				status: pagaloPaymentGroups.status,
-			})
-			.from(pagaloPaymentGroups)
-			.where(eq(pagaloPaymentGroups.id, link.groupId))
-			.for("update");
-		const [fresco] = await tx
-			.select({ status: pagaloPaymentLinks.status })
-			.from(pagaloPaymentLinks)
-			.where(eq(pagaloPaymentLinks.id, link.id))
-			.for("update");
-		if (!fresco || fresco.status === "PAID") return;
-		await tx
-			.update(pagaloPaymentLinks)
-			.set({
-				status,
-				nextPollAt: null,
-				lastPolledAt: new Date(),
-				updatedAt: new Date(),
-			})
-			.where(eq(pagaloPaymentLinks.id, link.id));
-		const desde = link.activatedAt ?? link.createdAt;
-		await tx.insert(pagaloPaymentEvents).values({
-			groupId: link.groupId,
-			linkId: link.id,
-			eventType: "LINK_TERMINAL",
-			source: "PAGALO_POLLER",
-			fromStatus: fresco.status,
-			toStatus: status,
-			payload: {
-				motivo:
-					status === "EXPIRED" ? "expirado_en_pagalo" : "cancelado_en_pagalo",
-				providerStatus: status === "EXPIRED" ? "4" : "3",
-				pollAttempts: link.pollAttempts,
-				antiguedadHoras: desde
-					? Math.round((Date.now() - desde.getTime()) / 3_600_000)
-					: null,
-			},
-		});
-		// Un link REPLACED que Págalo da por cancelado/expirado es el final
-		// ESPERADO del reemplazo: no reabre su grupo (CANCELLED) — chocaría con
-		// el índice único de un grupo activo por crédito y tumbaba la corrida
-		// entera del poller (hallazgo de Codex). Solo un link vivo que muere
-		// afuera deja su grupo en revisión.
-		if (
-			fresco.status === "REPLACED" ||
-			!grupo ||
-			grupo.status === "CANCELLED" ||
-			grupo.status === "COMPLETED"
-		) {
-			return;
-		}
-		await tx
-			.update(pagaloPaymentGroups)
-			.set({ status: "REVIEW_REQUIRED", updatedAt: new Date() })
-			.where(eq(pagaloPaymentGroups.id, link.groupId));
-	});
+	await db.transaction((tx) => marcarLinkTerminalEnTx(tx, link, status));
 }
 
 export type ResultadoPollPagalo = {
@@ -744,33 +877,153 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 				continue;
 			}
 			const status = estado?.message?.status ?? estado?.data?.status;
-			if (status === "3" || status === "4") {
-				await marcarLinkTerminal(
-					link,
-					status === "3" ? "CANCELLED" : "EXPIRED",
-				);
-				resultado.sinCambios++;
-				continue;
-			}
-			if (status !== "2") {
-				await registrarIntentoFallido(link);
-				resultado.sinCambios++;
-				continue;
-			}
 
-			// Pagado. Traer el detalle real de la transacción (no. de transacción,
-			// tarjeta, fecha) por id_external — mismo authorization fijo, sin login.
+			// La fuente de verdad de "pagado" es la transacción
+			// (status_transaction === "ACCEPT" via validarTransaccionPagalo), no
+			// el status del request/link. Confirmado en sandbox: un link puede
+			// tener una transacción ACCEPT real (no. de transacción y auth
+			// asignados) mientras su `status` de request se queda en "1"
+			// (creado) sin transicionar nunca a "2" (pagado) — depender solo del
+			// status del link dejaba el pago invisible para siempre. La misma
+			// inconsistencia aplica a "3"/"4" (cancelado/expirado): se consulta
+			// la transacción ANTES de finalizar el link como terminal — si
+			// Págalo reporta cancelado/expirado pero la transacción ya cerró
+			// ACCEPT, marcarLinkTerminal limpiaría nextPollAt y ese pago real
+			// quedaría perdido para siempre sin reintento (hallazgo de code
+			// review).
+			let detalle: any;
 			try {
-				const detalle: any = await client.getTransactionByIdExternalRaw(
+				detalle = await client.getTransactionByIdExternalRaw(
 					link.externalIdentifier,
 				);
-				const transaccion: TransaccionPagalo | undefined = detalle?.transaction;
-				if (!transaccion) {
-					await registrarIntentoFallido(
-						link,
-						"Págalo confirma link pagado pero no encontró la transacción por id_external.",
-					);
-					resultado.errores++;
+			} catch (error) {
+				// Un link que nadie pagó todavía es el caso común de cada ciclo:
+				// Págalo puede devolver 400 (no encontró transacción para ese
+				// id_external) en vez de 200 con `transaction: null` — confirmado
+				// que ambas formas ocurren en sandbox según el link. No es un
+				// error real salvo que el `status` del propio link ya diga "2"
+				// (Págalo afirma pagado y aun así no aparece la transacción —
+				// ahí sí hay una anomalía que merece quedar visible en
+				// lastPollError, hallazgo de code review).
+				//
+				// Un 400 aislado NO marca terminal (status 3/4) directamente:
+				// solo confirma "no encontré transacción en este intento", no
+				// "no existe ninguna ACCEPT" — misma ambigüedad documentada
+				// arriba para el caso "2". Marcar terminal en el primer 400
+				// reintroduce el mismo bug que este PR arregla, por el camino
+				// del error (hallazgo de code review). Pero tampoco reintentar
+				// para siempre: si Págalo confirma "no encontrado" de forma
+				// consistente durante UMBRAL_POLL_RETRY_EXHAUSTED intentos, ya
+				// no es una inconsistencia pasajera — un link genuinamente
+				// cancelado/expirado sin transacción real quedaría ACTIVE para
+				// siempre, su grupo nunca escala a REVIEW_REQUIRED, y el poll
+				// lo sigue consultando cada 30 min sin fin (hallazgo de code
+				// review).
+				//
+				// El conteo usa `terminalNotFoundAttempts`, NO `pollAttempts`:
+				// este último se incrementa por cualquier causa de fallo
+				// (incluidos ciclos previos con status "1" sin pagar) — un link
+				// que arrastraba 5 fallos no relacionados y recién ahora pasa a
+				// status 3/4 se finalizaba en el primer 400 de ese nuevo
+				// estado, mismo bug que esto arregla (hallazgo de code
+				// review). El contador dedicado solo avanza cuando este patrón
+				// exacto se repite consecutivamente.
+				if (
+					error instanceof PagaloClientError &&
+					error.status === 400 &&
+					status !== "2"
+				) {
+					if (status === "3" || status === "4") {
+						// Decide y aplica el cruce de umbral atómicamente,
+						// dentro de la misma transacción y bajo el mismo lease
+						// — nunca con un conteo obsoleto capturado en memoria
+						// (hallazgo de code review).
+						await registrarIntentoNoEncontradoTerminal(
+							link,
+							status === "3" ? "CANCELLED" : "EXPIRED",
+						);
+					} else {
+						await registrarIntentoFallido(link);
+						await resetearContadorTerminalNoEncontrado(link);
+					}
+					resultado.sinCambios++;
+					continue;
+				}
+				await registrarIntentoFallido(
+					link,
+					error instanceof Error ? error.message : String(error),
+				);
+				await resetearContadorTerminalNoEncontrado(link);
+				resultado.errores++;
+				continue;
+			}
+			// La consulta de transacción respondió 200 (con o sin transacción):
+			// el patrón "3/4 + 400" se rompió este ciclo, se resetea el
+			// contador dedicado para no arrastrar confirmaciones no
+			// consecutivas a la próxima vez que sí ocurra un 400.
+			await resetearContadorTerminalNoEncontrado(link);
+			try {
+				// Doc publicada de Págalo (`POST /v1/payment/transaction/uuid`)
+				// documenta el detalle bajo `data`; sandbox responde con
+				// `transaction` para esta misma consulta por `id_external`. Se
+				// leen ambas formas — si el proveedor cambia de nombre, la
+				// transacción real no debe volverse invisible para siempre
+				// (mismo bug que este PR arregla, espejado, hallazgo de code
+				// review).
+				const transaccion: TransaccionPagalo | undefined =
+					detalle?.transaction ?? detalle?.data;
+				if (!transaccion || transaccion.status_transaction !== "ACCEPT") {
+					// Doc de Págalo (status_transaction): solo dos valores
+					// existen, "ACCEPT" o "REJECT" — no hay un tercer estado
+					// "en proceso"/"pendiente" documentado para este campo. Con
+					// el link ya en "3"/"4" (cancelado/expirado) Y una
+					// transacción REJECT observada, ambas señales confirman
+					// terminal — no hay pago que esperar, y reintentar para
+					// siempre dejaba el grupo sin escalar a REVIEW_REQUIRED
+					// (hallazgo de code review). Sin transacción en absoluto
+					// (400/`null`) igual se finaliza si el link ya es 3/4: no
+					// hay pago real que proteger.
+					if (
+						(status === "3" || status === "4") &&
+						(!transaccion || transaccion.status_transaction === "REJECT")
+					) {
+						await marcarLinkTerminal(
+							link,
+							status === "3" ? "CANCELLED" : "EXPIRED",
+						);
+						resultado.sinCambios++;
+						continue;
+					}
+					// status "2": Págalo afirma que el link está pagado, pero
+					// acá no hay transacción ACCEPT que lo respalde — anomalía
+					// real (no un simple "aún no pagado"), se cuenta como
+					// error para que el toast del botón manual y cualquier
+					// alerta del supervisor la reflejen (antes de este fix
+					// quedaba contada como sinCambios, ocultando la anomalía —
+					// hallazgo de code review).
+					if (status === "2") {
+						await registrarIntentoFallido(
+							link,
+							transaccion
+								? `Transacción Págalo en estado ${transaccion.status_transaction}, no ACCEPT.`
+								: "Págalo confirma link pagado pero no encontró la transacción por id_external.",
+						);
+						resultado.errores++;
+						continue;
+					}
+					if (!transaccion) {
+						await registrarIntentoFallido(link);
+					} else {
+						// Transacción existe pero no cerró ACCEPT (p.ej.
+						// todavía procesándose) y el link no está 3/4 ni "2" —
+						// no es un error del job, es el estado normal de "aún
+						// no pagado".
+						await registrarIntentoFallido(
+							link,
+							`Transacción Págalo en estado ${transaccion.status_transaction}, no ACCEPT.`,
+						);
+					}
+					resultado.sinCambios++;
 					continue;
 				}
 				validarTransaccionPagalo(link, transaccion);

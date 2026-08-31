@@ -4,11 +4,19 @@ const estado = {
 	conteo: "0",
 	filas: [] as Array<{ numero_credito_sifco: string }>,
 	llamadas: 0,
+	consultas: [] as string[],
 };
 
 const fakeDb = {
-	execute: async () => {
+	execute: async (query: any) => {
 		estado.llamadas += 1;
+		estado.consultas.push(
+			(query?.queryChunks ?? [])
+				.map((chunk: unknown) =>
+					typeof chunk === "string" ? chunk : JSON.stringify(chunk),
+				)
+				.join(" "),
+		);
 		return estado.llamadas % 2 === 1
 			? { rows: [{ total: estado.conteo }] }
 			: { rows: estado.filas };
@@ -24,6 +32,7 @@ describe("getSifcosPoolAutoritativos", () => {
 		estado.conteo = "0";
 		estado.filas = [];
 		estado.llamadas = 0;
+		estado.consultas = [];
 	});
 
 	test("devuelve solo SIFCOs del pool autoritativo y conserva la paginación", async () => {
@@ -43,5 +52,11 @@ describe("getSifcosPoolAutoritativos", () => {
 		expect(resultado.page).toBe(2);
 		expect(resultado.perPage).toBe(500);
 		expect(resultado.totalPages).toBe(2);
+	});
+
+	test("exige asesor activo aunque conserve filas activas en asesor_bucket", async () => {
+		await getSifcosPoolAutoritativos({ asesor_id: 7 });
+
+		expect(estado.consultas.join("\n")).toContain("a.activo = true");
 	});
 });

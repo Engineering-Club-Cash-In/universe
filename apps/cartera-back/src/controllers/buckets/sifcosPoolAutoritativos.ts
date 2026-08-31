@@ -55,6 +55,9 @@ export async function getSifcosPoolAutoritativos(
 			ON ab.bucket = ue.bucket_nuevo
 			AND ab.asesor_id = ${params.asesor_id}
 			AND ab.activo = true
+		INNER JOIN ${SQL_CARTERA_SCHEMA}.asesores a
+			ON a.asesor_id = ab.asesor_id
+			AND a.activo = true
 		WHERE c."statusCredit" NOT IN (${estadosFuera})
 	`;
 

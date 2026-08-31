@@ -745,14 +745,6 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 				continue;
 			}
 			const status = estado?.message?.status ?? estado?.data?.status;
-			if (status === "3" || status === "4") {
-				await marcarLinkTerminal(
-					link,
-					status === "3" ? "CANCELLED" : "EXPIRED",
-				);
-				resultado.sinCambios++;
-				continue;
-			}
 
 			// La fuente de verdad de "pagado" es la transacción
 			// (status_transaction === "ACCEPT" via validarTransaccionPagalo), no
@@ -760,7 +752,13 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 			// tener una transacción ACCEPT real (no. de transacción y auth
 			// asignados) mientras su `status` de request se queda en "1"
 			// (creado) sin transicionar nunca a "2" (pagado) — depender solo del
-			// status del link dejaba el pago invisible para siempre.
+			// status del link dejaba el pago invisible para siempre. La misma
+			// inconsistencia aplica a "3"/"4" (cancelado/expirado): se consulta
+			// la transacción ANTES de finalizar el link como terminal — si
+			// Págalo reporta cancelado/expirado pero la transacción ya cerró
+			// ACCEPT, marcarLinkTerminal limpiaría nextPollAt y ese pago real
+			// quedaría perdido para siempre sin reintento (hallazgo de code
+			// review).
 			let detalle: any;
 			try {
 				detalle = await client.getTransactionByIdExternalRaw(
@@ -775,6 +773,15 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 				// (Págalo afirma pagado y aun así no aparece la transacción —
 				// ahí sí hay una anomalía que merece quedar visible en
 				// lastPollError, hallazgo de code review).
+				//
+				// Un 400 NUNCA marca terminal (status 3/4) directamente: solo
+				// confirma "no encontré transacción en este intento", no "no
+				// existe ninguna ACCEPT" — misma ambigüedad documentada arriba
+				// para el caso "2". Marcar terminal acá sin haber visto una
+				// respuesta 200 real (con o sin transacción) reintroduce el
+				// mismo bug que este PR arregla, por el camino del error
+				// (hallazgo de code review). El link sigue en backoff hasta que
+				// una consulta exitosa confirme la ausencia de ACCEPT.
 				if (
 					error instanceof PagaloClientError &&
 					error.status === 400 &&
@@ -801,27 +808,36 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 				// review).
 				const transaccion: TransaccionPagalo | undefined =
 					detalle?.transaction ?? detalle?.data;
-				if (!transaccion) {
-					if (status !== "2") {
-						await registrarIntentoFallido(link);
+				if (!transaccion || transaccion.status_transaction !== "ACCEPT") {
+					// Sin transacción ACCEPT: si Págalo ya dio el link por
+					// cancelado/expirado, ahí sí se finaliza — no hay pago real
+					// que proteger. Si no, sigue pendiente como antes.
+					if (status === "3" || status === "4") {
+						await marcarLinkTerminal(
+							link,
+							status === "3" ? "CANCELLED" : "EXPIRED",
+						);
+						resultado.sinCambios++;
+						continue;
+					}
+					if (!transaccion) {
+						if (status !== "2") {
+							await registrarIntentoFallido(link);
+						} else {
+							await registrarIntentoFallido(
+								link,
+								"Págalo confirma link pagado pero no encontró la transacción por id_external.",
+							);
+						}
 					} else {
+						// Transacción existe pero no cerró ACCEPT (p.ej.
+						// rechazada, o todavía procesándose) — no es un error
+						// del job, es el estado normal de "aún no pagado".
 						await registrarIntentoFallido(
 							link,
-							"Págalo confirma link pagado pero no encontró la transacción por id_external.",
+							`Transacción Págalo en estado ${transaccion.status_transaction}, no ACCEPT.`,
 						);
 					}
-					resultado.sinCambios++;
-					continue;
-				}
-				// Transacción existe pero no cerró ACCEPT (p.ej. rechazada, o
-				// todavía procesándose) — no es un error del job, es el estado
-				// normal de "aún no pagado". Sigue en backoff como cualquier
-				// otro link sin cambios.
-				if (transaccion.status_transaction !== "ACCEPT") {
-					await registrarIntentoFallido(
-						link,
-						`Transacción Págalo en estado ${transaccion.status_transaction}, no ACCEPT.`,
-					);
 					resultado.sinCambios++;
 					continue;
 				}

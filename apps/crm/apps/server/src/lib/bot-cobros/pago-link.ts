@@ -1224,9 +1224,32 @@ export type LinkEstadoBot = {
 	titulo: string;
 	monto: string;
 	estado: "PAGADO" | "PENDIENTE";
+	/** Lo mismo que `estado`, en booleano (D-54). */
+	pagado: boolean;
 	/** Solo si sigue pendiente: para que el bot lo vuelva a mandar. */
 	url: string | null;
 };
+
+/**
+ * Las tres banderas del veredicto, en booleano. El motor de reglas del bot
+ * compara mal los strings (`estado === "PAGADOS"` le queda incómodo), así que
+ * el mismo dato viaja también así (D-54). `estado` NO se toca: es aditivo.
+ */
+export type BanderasEstadoLinks = {
+	pagado: boolean;
+	pagoParcial: boolean;
+	sinPago: boolean;
+};
+
+export function banderasEstadoLinks(
+	estado: EstadoLinksBot,
+): BanderasEstadoLinks {
+	return {
+		pagado: estado === "PAGADOS",
+		pagoParcial: estado === "PARCIAL",
+		sinPago: estado === "SIN_PAGO",
+	};
+}
 
 /**
  * Un grupo con dinero ya entrando a cartera cuenta como pagado completo,
@@ -1279,6 +1302,7 @@ export function resumirEstadoLinks(grupo: GrupoActivo): {
 			monto:
 				l.linkType === "CAPITAL" ? grupo.capitalTotal : grupo.facturableTotal,
 			estado: pagado ? "PAGADO" : "PENDIENTE",
+			pagado,
 			url: pagado ? null : (l.paymentUrl ?? null),
 		};
 	});
@@ -1292,11 +1316,15 @@ export function resumirEstadoLinks(grupo: GrupoActivo): {
 	return { estado, links };
 }
 
-/** `link1Titulo`, `link1Estado`, `link1Monto`, `link1Url`, … (mismo estilo que las opciones). */
+/**
+ * `link1Titulo`, `link1Estado`, `link1Pagado`, `link1Monto`, `link1Url`, …
+ * (mismo estilo que las opciones). `linkNPagado` es el booleano de
+ * `linkNEstado`, para no comparar strings del lado del bot (D-54).
+ */
 export function aplanarLinksEstado(
 	links: LinkEstadoBot[],
-): Record<string, string | number | null> {
-	const plano: Record<string, string | number | null> = {
+): Record<string, string | number | boolean | null> {
+	const plano: Record<string, string | number | boolean | null> = {
 		totalLinks: links.length,
 		linksPagados: links.filter((l) => l.estado === "PAGADO").length,
 		linksPendientes: links.filter((l) => l.estado === "PENDIENTE").length,
@@ -1304,6 +1332,7 @@ export function aplanarLinksEstado(
 	links.forEach((l, i) => {
 		plano[`link${i + 1}Titulo`] = l.titulo;
 		plano[`link${i + 1}Estado`] = l.estado;
+		plano[`link${i + 1}Pagado`] = l.pagado;
 		plano[`link${i + 1}Monto`] = l.monto;
 		plano[`link${i + 1}Url`] = l.url;
 	});
@@ -1335,6 +1364,10 @@ export function mensajeEstadoLinks(
 
 export type EstadoPagoLinkData = {
 	estado: EstadoLinksBot;
+	/** `estado` en booleanos, para el motor de reglas del bot (D-54). */
+	pagado: boolean;
+	pagoParcial: boolean;
+	sinPago: boolean;
 	numeroSifco: string;
 	/** Id del grupo, el mismo `pago.referenciaPago` que devolvió `/crear`. */
 	referenciaPago: string;
@@ -1395,6 +1428,7 @@ export async function consultarEstadoPagoLink(
 		ok: true,
 		data: {
 			estado: resumen.estado,
+			...banderasEstadoLinks(resumen.estado),
 			numeroSifco: grupo.numeroCreditoSifco,
 			referenciaPago: grupo.id,
 			...aplanarLinksEstado(resumen.links),

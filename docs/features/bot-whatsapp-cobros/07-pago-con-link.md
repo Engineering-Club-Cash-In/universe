@@ -381,6 +381,10 @@ ya está en aplicación (`READY_TO_APPLY`, `APPLYING`, `APPLICATION_FAILED`, `CO
   `mensajes.completo` listo para mandar. Solo cuenta la **generación vigente** de cada link:
   un `REPLACED` que se pagó tarde (queda `PAID` sin ser fuente de aplicación) no infla el
   conteo ni suma como pagado.
+- **Booleanos (D-54, 2026-08-31):** el mismo veredicto viaja sin strings — `pagado`,
+  `pagoParcial` y `sinPago` (exactamente uno en `true`), al lado de `success` **y** dentro de
+  `data`; cada link trae su `linkNPagado` y su `pagado` dentro de `links[]`. `estado` se queda
+  como está: esto es aditivo.
 - **Historial:** `pago_link_estado` guarda el veredicto y el conteo, nunca URLs.
 - Implementación: `consultarEstadoPagoLink` + `resumirEstadoLinks` en `pago-link.ts`;
   `verificarSesion` se separó de `verificarAcceso` en `menu-credito.ts` para poder validar la

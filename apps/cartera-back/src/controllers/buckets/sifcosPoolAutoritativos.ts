@@ -5,17 +5,11 @@ import { STATUS_READER_FUERA } from "../../lib/buckets-classification";
 
 export type GetSifcosPoolAutoritativosParams = {
 	asesor_id: number;
-	page?: number;
-	perPage?: number;
 };
 
 export type SifcosPoolAutoritativosResultado = {
 	success: true;
 	data: string[];
-	page: number;
-	perPage: number;
-	total: number;
-	totalPages: number;
 };
 
 /**
@@ -25,14 +19,6 @@ export type SifcosPoolAutoritativosResultado = {
 export async function getSifcosPoolAutoritativos(
 	params: GetSifcosPoolAutoritativosParams,
 ): Promise<SifcosPoolAutoritativosResultado> {
-	const pageFloor = Math.floor(Number(params.page ?? 1));
-	const page = Number.isFinite(pageFloor) && pageFloor > 0 ? pageFloor : 1;
-	const perPageFloor = Math.floor(Number(params.perPage ?? 500));
-	const perPage =
-		Number.isFinite(perPageFloor) && perPageFloor > 0
-			? Math.min(perPageFloor, 500)
-			: 500;
-	const offset = (page - 1) * perPage;
 	const estadosFuera = sql.join(
 		STATUS_READER_FUERA.map((estado) => sql`${estado}`),
 		sql`, `,
@@ -61,28 +47,14 @@ export async function getSifcosPoolAutoritativos(
 		WHERE c."statusCredit" NOT IN (${estadosFuera})
 	`;
 
-	const [conteo, filas] = await Promise.all([
-		db.execute<{ total: string }>(sql`
-			${cte}
-			SELECT COUNT(DISTINCT ue.credito_id)::int AS total
-			${desdePool}
-		`),
-		db.execute<{ numero_credito_sifco: string }>(sql`
-			${cte}
-			SELECT DISTINCT c.numero_credito_sifco
-			${desdePool}
-			ORDER BY c.numero_credito_sifco ASC
-			LIMIT ${perPage} OFFSET ${offset}
-		`),
-	]);
-
-	const total = Number(conteo.rows[0]?.total ?? 0);
+	const filas = await db.execute<{ numero_credito_sifco: string }>(sql`
+		${cte}
+		SELECT DISTINCT c.numero_credito_sifco
+		${desdePool}
+		ORDER BY c.numero_credito_sifco ASC
+	`);
 	return {
 		success: true,
 		data: filas.rows.map((fila) => fila.numero_credito_sifco),
-		page,
-		perPage,
-		total,
-		totalPages: Math.ceil(total / perPage),
 	};
 }

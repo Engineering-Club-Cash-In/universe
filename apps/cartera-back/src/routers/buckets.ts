@@ -230,8 +230,6 @@ export const bucketsRouter = new Elysia()
       try {
         return await getSifcosPoolAutoritativos({
           asesor_id: asesorId,
-          page: query.page !== undefined ? Number(query.page) : undefined,
-          perPage: query.perPage !== undefined ? Number(query.perPage) : undefined,
         });
       } catch (err) {
         set.status = 500;
@@ -245,8 +243,6 @@ export const bucketsRouter = new Elysia()
     {
       query: t.Object({
         asesor_id: t.String(),
-        page: t.Optional(t.String()),
-        perPage: t.Optional(t.String()),
       }),
     },
   )

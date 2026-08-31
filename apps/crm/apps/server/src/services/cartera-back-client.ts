@@ -2014,8 +2014,6 @@ export class CarteraBackClient {
 	): Promise<CarteraSifcosPoolAutoritativosResponse> {
 		const queryParams = new URLSearchParams({
 			asesor_id: String(params.asesorId),
-			...(params.page !== undefined && { page: String(params.page) }),
-			...(params.perPage !== undefined && { perPage: String(params.perPage) }),
 		});
 		const response = await this.request<CarteraSifcosPoolAutoritativosResponse>(
 			`/buckets/pool-sifcos?${queryParams}`,

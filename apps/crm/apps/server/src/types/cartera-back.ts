@@ -201,16 +201,10 @@ export interface CreditoDetailResponse {
 /** Créditos actuales de los buckets activos de un asesor, solo desde historial del motor. */
 export interface GetSifcosPoolAutoritativosParams {
 	asesorId: number;
-	page?: number;
-	perPage?: number;
 }
 
 export interface CarteraSifcosPoolAutoritativosResponse {
 	data: string[];
-	page: number;
-	perPage: number;
-	total: number;
-	totalPages: number;
 }
 
 /** Fila del listado /buckets/creditos: CreditoDetailResponse + el bucket derivado. */

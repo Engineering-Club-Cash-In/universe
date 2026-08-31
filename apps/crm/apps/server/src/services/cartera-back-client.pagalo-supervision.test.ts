@@ -48,7 +48,7 @@ test("getPoolPorAsesor permite desactivar caché para validar acceso Págalo", a
 	expect(llamadas).toBe(2);
 });
 
-test("getSifcosPoolAutoritativos consulta solo créditos vigentes del pool", async () => {
+test("getSifcosPoolAutoritativos obtiene scope completo en una petición", async () => {
 	let urlSolicitada = "";
 	const fetchDePrueba = (async (input: RequestInfo | URL) => {
 		urlSolicitada = String(input);
@@ -56,10 +56,6 @@ test("getSifcosPoolAutoritativos consulta solo créditos vigentes del pool", asy
 			JSON.stringify({
 				success: true,
 				data: ["01010214103540"],
-				page: 2,
-				perPage: 500,
-				total: 501,
-				totalPages: 2,
 			}),
 		);
 	}) as unknown as typeof fetch;
@@ -70,13 +66,8 @@ test("getSifcosPoolAutoritativos consulta solo créditos vigentes del pool", asy
 		fetchTransport: fetchDePrueba,
 	});
 
-	const respuesta = await cliente.getSifcosPoolAutoritativos({
-		asesorId: 7,
-		page: 2,
-		perPage: 500,
-	});
+	const respuesta = await cliente.getSifcosPoolAutoritativos({ asesorId: 7 });
 
-	expect(urlSolicitada).toContain("/buckets/pool-sifcos?asesor_id=7&page=2&perPage=500");
+	expect(urlSolicitada).toContain("/buckets/pool-sifcos?asesor_id=7");
 	expect(respuesta.data).toEqual(["01010214103540"]);
-	expect(respuesta.totalPages).toBe(2);
 });

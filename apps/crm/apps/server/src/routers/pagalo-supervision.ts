@@ -21,11 +21,11 @@ import {
 	pagaloPaymentGroups,
 	pagaloPaymentLinks,
 } from "../db/schema/pagalo-payments";
-import { fetchAllPages } from "../lib/fetch-all-pages";
 import { cobrosProcedure } from "../lib/orpc";
 import { buscarAsesorPorEmail } from "../lib/pagalo-supervision-acceso";
 import {
 	condicionesFiltro,
+	condicionSifcosPermitidos,
 	condicionGrupoProblematico,
 } from "../lib/pagalo-supervision-filtros";
 import { PERMISSIONS } from "../lib/roles";
@@ -44,15 +44,9 @@ async function resolverScopeAsesorPagalo(email: string | null | undefined) {
 	return {
 		bucketsAsignados,
 		sifcosPermitidos: new Set(
-			await fetchAllPages(
-				(page) =>
-					carteraBackClient.getSifcosPoolAutoritativos({
-						asesorId: asesor.asesor_id,
-						page,
-						perPage: 500,
-					}),
-				{ maxPages: 200, concurrency: 4 },
-			),
+			(await carteraBackClient.getSifcosPoolAutoritativos({
+				asesorId: asesor.asesor_id,
+			})).data,
 		),
 	};
 }
@@ -119,11 +113,7 @@ export const pagaloSupervisionRouter = {
 					: undefined;
 			const condiciones = condicionPrincipal ? [condicionPrincipal] : [];
 			if (sifcosPermitidos) {
-				condiciones.push(
-					inArray(pagaloPaymentGroups.numeroCreditoSifco, [
-						...sifcosPermitidos,
-					]),
-				);
+				condiciones.push(condicionSifcosPermitidos([...sifcosPermitidos]));
 			}
 			if (input.numeroSifco) {
 				// Búsqueda parcial (contiene, no igualdad exacta): el supervisor
@@ -166,11 +156,7 @@ export const pagaloSupervisionRouter = {
 			// "Falló al aplicar (2)" sigue mostrando 2 aunque el supervisor tenga
 			// otro chip activo — es lo que le dice qué más hay para mirar.
 			const condicionesConteo = sifcosPermitidos
-				? [
-						inArray(pagaloPaymentGroups.numeroCreditoSifco, [
-							...sifcosPermitidos,
-						]),
-					]
+				? [condicionSifcosPermitidos([...sifcosPermitidos])]
 				: [];
 			if (input.numeroSifco) {
 				condicionesConteo.push(

@@ -276,6 +276,20 @@ async function registrarIntentoNoEncontradoTerminal(
 ): Promise<void> {
 	const pollAttempts = link.pollAttempts + 1;
 	await db.transaction(async (tx) => {
+		// Candado del GRUPO primero, del LINK después — mismo orden que
+		// marcarLinkPagado y el reemplazo de grupo (pago-link.ts). Esta tx
+		// puede terminar llamando a marcarLinkTerminalEnTx, que toma el
+		// candado del grupo; si el UPDATE del link (que toma su candado
+		// implícito) corriera primero, un pago real llegando en paralelo por
+		// marcarLinkPagado (grupo→link) cruzaría los candados en orden
+		// inverso — deadlock, y si Postgres elige la transacción de PAGO
+		// como víctima, ese pago real queda sin observar (hallazgo de code
+		// review).
+		await tx
+			.select({ id: pagaloPaymentGroups.id })
+			.from(pagaloPaymentGroups)
+			.where(eq(pagaloPaymentGroups.id, link.groupId))
+			.for("update");
 		const [actualizado] = await tx
 			.update(pagaloPaymentLinks)
 			.set({
@@ -311,19 +325,34 @@ async function registrarIntentoNoEncontradoTerminal(
  * Resetea `terminalNotFoundAttempts` a 0 — se llama en cualquier ciclo donde
  * el link NO cae en el patrón "status 3/4 + transacción no encontrada", para
  * que un conteo viejo no se sume a confirmaciones futuras no consecutivas.
- * Best-effort: si el link ya salió del ciclo de polling (marcado PAID/
- * terminal por otra corrida) el UPDATE simplemente no matchea nada.
+ *
+ * Gateado por los mismos status pollables y el mismo `pollClaimedAt` que
+ * `registrarIntentoNoEncontradoTerminal`: sin esto, un worker con el lease ya
+ * vencido (consulta HTTP que tardó más de MINUTOS_LEASE) podía llegar tarde y
+ * resetear con su observación vieja un contador que un worker MÁS NUEVO ya
+ * incrementó — borrando confirmaciones válidas y manteniendo indefinidamente
+ * activo un link genuinamente cancelado/expirado (hallazgo de code review).
+ * Best-effort: si no matchea nada (lease perdido, o el link ya salió del
+ * ciclo de polling) no pasa nada.
  */
 async function resetearContadorTerminalNoEncontrado(
-	linkId: string,
+	link: LinkClaimado,
 ): Promise<void> {
 	await db
 		.update(pagaloPaymentLinks)
 		.set({ terminalNotFoundAttempts: 0 })
 		.where(
 			and(
-				eq(pagaloPaymentLinks.id, linkId),
+				eq(pagaloPaymentLinks.id, link.id),
 				ne(pagaloPaymentLinks.terminalNotFoundAttempts, 0),
+				inArray(pagaloPaymentLinks.status, [
+					"CREATING",
+					"ACTIVE",
+					"REPLACED",
+				]),
+				link.pollClaimedAt
+					? eq(pagaloPaymentLinks.pollClaimedAt, link.pollClaimedAt)
+					: isNull(pagaloPaymentLinks.pollClaimedAt),
 			),
 		);
 }
@@ -904,7 +933,7 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 						);
 					} else {
 						await registrarIntentoFallido(link);
-						await resetearContadorTerminalNoEncontrado(link.id);
+						await resetearContadorTerminalNoEncontrado(link);
 					}
 					resultado.sinCambios++;
 					continue;
@@ -913,7 +942,7 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 					link,
 					error instanceof Error ? error.message : String(error),
 				);
-				await resetearContadorTerminalNoEncontrado(link.id);
+				await resetearContadorTerminalNoEncontrado(link);
 				resultado.errores++;
 				continue;
 			}
@@ -921,7 +950,7 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 			// el patrón "3/4 + 400" se rompió este ciclo, se resetea el
 			// contador dedicado para no arrastrar confirmaciones no
 			// consecutivas a la próxima vez que sí ocurra un 400.
-			await resetearContadorTerminalNoEncontrado(link.id);
+			await resetearContadorTerminalNoEncontrado(link);
 			try {
 				// Doc publicada de Págalo (`POST /v1/payment/transaction/uuid`)
 				// documenta el detalle bajo `data`; sandbox responde con

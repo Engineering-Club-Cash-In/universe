@@ -198,6 +198,15 @@ export interface CreditoDetailResponse {
 	} | null;
 }
 
+/** Créditos actuales de los buckets activos de un asesor, solo desde historial del motor. */
+export interface GetSifcosPoolAutoritativosParams {
+	asesorId: number;
+}
+
+export interface CarteraSifcosPoolAutoritativosResponse {
+	data: string[];
+}
+
 /** Fila del listado /buckets/creditos: CreditoDetailResponse + el bucket derivado. */
 export interface CreditoBucketResponse extends CreditoDetailResponse {
 	bucket?: {

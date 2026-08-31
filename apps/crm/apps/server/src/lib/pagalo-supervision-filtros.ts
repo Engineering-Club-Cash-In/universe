@@ -4,7 +4,7 @@
  * testearlo sin DB.
  */
 
-import { and, inArray, lt, or, type SQL } from "drizzle-orm";
+import { and, inArray, lt, or, sql, type SQL } from "drizzle-orm";
 import {
 	type PagaloPaymentGroupStatus,
 	type PagaloPaymentLinkStatus,
@@ -83,4 +83,17 @@ export function condicionesFiltro(input: SupervisionFiltrosInput): SQL[] {
 		);
 	}
 	return condiciones;
+}
+
+/** Scope de SIFCOs como un arreglo PostgreSQL: un solo bind, no uno por crédito. */
+export function condicionSifcosPermitidos(sifcos: string[]): SQL {
+	return sql`${pagaloPaymentGroups.numeroCreditoSifco} = ANY(${sql.param(sifcos, {
+		mapToDriverValue: (valores) =>
+			`{${valores
+				.map(
+					(valor) =>
+						`"${valor.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`,
+				)
+				.join(",")}}`,
+	})}::text[])`;
 }

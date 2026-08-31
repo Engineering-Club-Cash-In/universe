@@ -27,6 +27,7 @@ import type {
 	CarteraConvenioProximosResponse,
 	CarteraCredito,
 	CarteraCuotasProximasResponse,
+	CarteraSifcosPoolAutoritativosResponse,
 	CarteraInversionista,
 	CarteraPagoCredito,
 	CarteraPagoCreditoInversionista,
@@ -54,6 +55,7 @@ import type {
 	GetInvestorReportParams,
 	GetInvestorsParams,
 	GetPaymentsParams,
+	GetSifcosPoolAutoritativosParams,
 	InversionistaReporte,
 	LiquidatePagosInversionistasInput,
 	PaginatedResponse,
@@ -1546,7 +1548,7 @@ export class CarteraBackClient {
 			response = await this.request<PaginatedResponse<CreditoDetailResponse>>(
 				`/getAllCredits?${queryParams}`,
 				{ method: "GET" },
-				true, // use cache (solo GET)
+				true,
 			);
 		}
 
@@ -2003,6 +2005,24 @@ export class CarteraBackClient {
 		};
 	}
 
+	/**
+	 * SIFCOs activos en buckets del pool actual del asesor. Cartera Back resuelve
+	 * el último registro de `buckets_historial`: no hay fallback derivado.
+	 */
+	async getSifcosPoolAutoritativos(
+		params: GetSifcosPoolAutoritativosParams,
+	): Promise<CarteraSifcosPoolAutoritativosResponse> {
+		const queryParams = new URLSearchParams({
+			asesor_id: String(params.asesorId),
+		});
+		const response = await this.request<CarteraSifcosPoolAutoritativosResponse>(
+			`/buckets/pool-sifcos?${queryParams}`,
+			{ method: "GET" },
+			false,
+		);
+		return response;
+	}
+
 	// CB-027: listado paginado de convenios de pago (con cliente/SIFCO/asesor
 	// vía joins en cartera-back). Fuente de la tabla de la página
 	// /cobros/convenios del CRM. Sin cache: el progreso cambia con cada pago.
@@ -2236,11 +2256,17 @@ export class CarteraBackClient {
 	// mismo). Trae `email_cash_in` para cruzar contra `user.email` del CRM sin
 	// depender del `email` de getAdvisors (desactualizado para varios
 	// asesores).
-	async getPoolPorAsesor(): Promise<PoolPorAsesorRow[]> {
+	async getPoolPorAsesor(options?: {
+		useCache?: boolean;
+	}): Promise<PoolPorAsesorRow[]> {
 		const response = await this.request<{
 			success: boolean;
 			data: PoolPorAsesorRow[];
-		}>("/buckets/pool-por-asesor", { method: "GET" }, true);
+		}>(
+			"/buckets/pool-por-asesor",
+			{ method: "GET" },
+			options?.useCache ?? true,
+		);
 		return response.data ?? [];
 	}
 

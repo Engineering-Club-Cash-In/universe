@@ -21,18 +21,40 @@ import {
 	pagaloPaymentGroups,
 	pagaloPaymentLinks,
 } from "../db/schema/pagalo-payments";
-import { cobrosSupervisorProcedure } from "../lib/orpc";
+import { cobrosProcedure } from "../lib/orpc";
+import { buscarAsesorPorEmail } from "../lib/pagalo-supervision-acceso";
 import {
 	condicionesFiltro,
+	condicionSifcosPermitidos,
 	condicionGrupoProblematico,
 } from "../lib/pagalo-supervision-filtros";
+import { PERMISSIONS } from "../lib/roles";
 import { carteraBackClient } from "../services/cartera-back-client";
 
+async function resolverScopeAsesorPagalo(email: string | null | undefined) {
+	const asesores = await carteraBackClient.getPoolPorAsesor({
+		useCache: false,
+	});
+	const asesor = buscarAsesorPorEmail(asesores, email);
+	const bucketsAsignados = asesor?.buckets ?? [];
+	if (!asesor || bucketsAsignados.length === 0) {
+		return { bucketsAsignados, sifcosPermitidos: new Set<string>() };
+	}
+
+	return {
+		bucketsAsignados,
+		sifcosPermitidos: new Set(
+			(await carteraBackClient.getSifcosPoolAutoritativos({
+				asesorId: asesor.asesor_id,
+			})).data,
+		),
+	};
+}
+
 export const pagaloSupervisionRouter = {
-	// Bandeja de supervisión: grupos en estado problemático de toda la
-	// cartera, no solo del caso actual — por eso cobrosSupervisorProcedure,
-	// sin assertAccesoCasoCobro (el supervisor ve todo).
-	getPagaloSupervision: cobrosSupervisorProcedure
+	// Supervisor/admin ve toda la cartera. Rol cobros recibe solo créditos en
+	// buckets de su pool actual, resuelto server-side antes de cualquier conteo.
+	getPagaloSupervision: cobrosProcedure
 		.input(
 			z.object({
 				estados: z.array(z.string()).optional(),
@@ -50,7 +72,17 @@ export const pagaloSupervisionRouter = {
 				offset: z.number().int().min(0).default(0),
 			}),
 		)
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
+			const puedeVerTodo = PERMISSIONS.canAssignCobros(context.userRole ?? "");
+			const scopeAsesor = puedeVerTodo
+				? null
+				: await resolverScopeAsesorPagalo(context.session?.user?.email);
+			const bucketsAsignados = scopeAsesor?.bucketsAsignados ?? null;
+			const sifcosPermitidos = scopeAsesor?.sifcosPermitidos ?? null;
+			if (sifcosPermitidos?.size === 0) {
+				return { grupos: [], total: 0, conteoPorEstado: {}, bucketsAsignados };
+			}
+
 			const filtroInput = {
 				estados: input.estados as PagaloPaymentGroupStatus[] | undefined,
 				soloHuerfanos: input.soloHuerfanos,
@@ -80,6 +112,9 @@ export const pagaloSupervisionRouter = {
 					? condicionGrupoProblematico()
 					: undefined;
 			const condiciones = condicionPrincipal ? [condicionPrincipal] : [];
+			if (sifcosPermitidos) {
+				condiciones.push(condicionSifcosPermitidos([...sifcosPermitidos]));
+			}
 			if (input.numeroSifco) {
 				// Búsqueda parcial (contiene, no igualdad exacta): el supervisor
 				// escribe un fragmento del SIFCO ("3540"), no el número completo
@@ -120,12 +155,19 @@ export const pagaloSupervisionRouter = {
 			// sobre el filtro de estados/soloProblematicos activo. Así el chip
 			// "Falló al aplicar (2)" sigue mostrando 2 aunque el supervisor tenga
 			// otro chip activo — es lo que le dice qué más hay para mirar.
-			const conteoWhere = input.numeroSifco
-				? ilike(
+			const condicionesConteo = sifcosPermitidos
+				? [condicionSifcosPermitidos([...sifcosPermitidos])]
+				: [];
+			if (input.numeroSifco) {
+				condicionesConteo.push(
+					ilike(
 						pagaloPaymentGroups.numeroCreditoSifco,
 						`%${input.numeroSifco}%`,
-					)
-				: undefined;
+					),
+				);
+			}
+			const conteoWhere =
+				condicionesConteo.length > 0 ? and(...condicionesConteo) : undefined;
 			const conteoPorEstadoFilas = await db
 				.select({
 					status: pagaloPaymentGroups.status,
@@ -145,7 +187,7 @@ export const pagaloSupervisionRouter = {
 				.where(whereClause);
 
 			if (total === 0) {
-				return { grupos: [], total: 0, conteoPorEstado };
+				return { grupos: [], total: 0, conteoPorEstado, bucketsAsignados };
 			}
 
 			const pagina = await db
@@ -174,7 +216,7 @@ export const pagaloSupervisionRouter = {
 				.offset(input.offset);
 
 			if (pagina.length === 0) {
-				return { grupos: [], total, conteoPorEstado };
+				return { grupos: [], total, conteoPorEstado, bucketsAsignados };
 			}
 
 			const links = await db
@@ -297,6 +339,7 @@ export const pagaloSupervisionRouter = {
 				})),
 				total,
 				conteoPorEstado,
+				bucketsAsignados,
 			};
 		}),
 };

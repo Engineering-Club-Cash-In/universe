@@ -144,6 +144,11 @@ function createPersistenceHarness(
     // abriría conexión al lockPool.
     withCreditLock: ((_creditoId: number, fn: () => Promise<unknown>) =>
       fn()) as ReversePaymentDependencies["withCreditLock"],
+    // El refresco de proyección corre DESPUÉS del commit; en este harness la
+    // transacción revienta antes, así que nunca debería llamarse.
+    refrescarProyeccion: mock(() =>
+      Promise.resolve({ corrio: true as const }),
+    ) as unknown as ReversePaymentDependencies["refrescarProyeccion"],
   });
   return { handler, runTransaction };
 }

@@ -250,6 +250,70 @@ async function registrarIntentoFallido(
 }
 
 /**
+ * Registra un fallo Y avanza `terminalNotFoundAttempts` — contador aparte de
+ * `pollAttempts` (que mezcla cualquier causa de fallo). Solo se llama cuando
+ * Págalo reporta el link cancelado/expirado (status "3"/"4") Y la consulta de
+ * transacción devuelve 400 (no encontrada) — el único caso donde ese conteo
+ * consecutivo importa para decidir si ya es seguro finalizar. Usar
+ * `link.pollAttempts` (genérico) para ese umbral finalizaba un link en el
+ * primer 400 con status 3/4 si venía arrastrando fallos previos no
+ * relacionados (p.ej. varios ciclos con status "1" sin pagar) — el bug que
+ * este contador dedicado corrige (hallazgo de code review).
+ */
+async function registrarIntentoNoEncontradoTerminal(
+	link: LinkClaimado,
+): Promise<void> {
+	const pollAttempts = link.pollAttempts + 1;
+	const terminalNotFoundAttempts = link.terminalNotFoundAttempts + 1;
+	await db.transaction(async (tx) => {
+		await tx
+			.update(pagaloPaymentLinks)
+			.set({
+				pollAttempts,
+				terminalNotFoundAttempts,
+				lastPolledAt: new Date(),
+				lastPollError: null,
+				nextPollAt: proximoIntento(pollAttempts),
+				updatedAt: new Date(),
+			})
+			.where(
+				and(
+					eq(pagaloPaymentLinks.id, link.id),
+					inArray(pagaloPaymentLinks.status, [
+						"CREATING",
+						"ACTIVE",
+						"REPLACED",
+					]),
+					link.pollClaimedAt
+						? eq(pagaloPaymentLinks.pollClaimedAt, link.pollClaimedAt)
+						: isNull(pagaloPaymentLinks.pollClaimedAt),
+				),
+			);
+	});
+}
+
+/**
+ * Resetea `terminalNotFoundAttempts` a 0 — se llama en cualquier ciclo donde
+ * el link NO cae en el patrón "status 3/4 + transacción no encontrada", para
+ * que un conteo viejo no se sume a confirmaciones futuras no consecutivas.
+ * Best-effort: si el link ya salió del ciclo de polling (marcado PAID/
+ * terminal por otra corrida) el UPDATE simplemente no matchea nada.
+ */
+async function resetearContadorTerminalNoEncontrado(
+	linkId: string,
+): Promise<void> {
+	await db
+		.update(pagaloPaymentLinks)
+		.set({ terminalNotFoundAttempts: 0 })
+		.where(
+			and(
+				eq(pagaloPaymentLinks.id, linkId),
+				ne(pagaloPaymentLinks.terminalNotFoundAttempts, 0),
+			),
+		);
+}
+
+/**
  * Comprobante propio, mismo formato visual del voucher que emite Págalo
  * (comercio, ubicación, fecha, Ref/no. de transacción, tarjeta enmascarada,
  * monto, cliente, estado). Campo AUDIT del voucher real de Págalo se omite
@@ -787,6 +851,15 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 				// siempre, su grupo nunca escala a REVIEW_REQUIRED, y el poll
 				// lo sigue consultando cada 30 min sin fin (hallazgo de code
 				// review).
+				//
+				// El conteo usa `terminalNotFoundAttempts`, NO `pollAttempts`:
+				// este último se incrementa por cualquier causa de fallo
+				// (incluidos ciclos previos con status "1" sin pagar) — un link
+				// que arrastraba 5 fallos no relacionados y recién ahora pasa a
+				// status 3/4 se finalizaba en el primer 400 de ese nuevo
+				// estado, mismo bug que esto arregla (hallazgo de code
+				// review). El contador dedicado solo avanza cuando este patrón
+				// exacto se repite consecutivamente.
 				if (
 					error instanceof PagaloClientError &&
 					error.status === 400 &&
@@ -794,14 +867,17 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 				) {
 					if (
 						(status === "3" || status === "4") &&
-						link.pollAttempts >= UMBRAL_POLL_RETRY_EXHAUSTED
+						link.terminalNotFoundAttempts + 1 >= UMBRAL_POLL_RETRY_EXHAUSTED
 					) {
 						await marcarLinkTerminal(
 							link,
 							status === "3" ? "CANCELLED" : "EXPIRED",
 						);
+					} else if (status === "3" || status === "4") {
+						await registrarIntentoNoEncontradoTerminal(link);
 					} else {
 						await registrarIntentoFallido(link);
+						await resetearContadorTerminalNoEncontrado(link.id);
 					}
 					resultado.sinCambios++;
 					continue;
@@ -810,9 +886,15 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 					link,
 					error instanceof Error ? error.message : String(error),
 				);
+				await resetearContadorTerminalNoEncontrado(link.id);
 				resultado.errores++;
 				continue;
 			}
+			// La consulta de transacción respondió 200 (con o sin transacción):
+			// el patrón "3/4 + 400" se rompió este ciclo, se resetea el
+			// contador dedicado para no arrastrar confirmaciones no
+			// consecutivas a la próxima vez que sí ocurra un 400.
+			await resetearContadorTerminalNoEncontrado(link.id);
 			try {
 				// Doc publicada de Págalo (`POST /v1/payment/transaction/uuid`)
 				// documenta el detalle bajo `data`; sandbox responde con

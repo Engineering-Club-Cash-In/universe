@@ -179,6 +179,53 @@ export function cuotasPagables(
 	return proxima ? [...vencidas, aCuotaPagable(proxima, false)] : vencidas;
 }
 
+/**
+ * Cuotas VENCIDAS que están impagas pero sin nada que cobrar.
+ *
+ * Es un estado imposible: si la cuota no está pagada, algo debe. Pasa cuando
+ * los `*_restante` de todas sus filas quedaron en cero sin que la cuota se
+ * cerrara — p. ej. tras una reversa (la validación pone en cero las filas de la
+ * cuota al cerrarla y la reversa solo devuelve lo que abonó el pago reversado;
+ * ver cartera-back/reversePaymentRecalculo.ts) o por una carga de datos.
+ *
+ * Para el cálculo de opciones esa cuota es invisible: no suma monto y, peor,
+ * el crédito se ve "al día" con una cuota vencida encima. Cobrar sobre ese
+ * estado es cobrar un monto que no podemos justificar — y además el pago
+ * tampoco se aplicaría a esa cuota, porque cartera distribuye con
+ * `min(saldo de la fila, …)` y la fila está en cero.
+ *
+ * Una cuota con un pago ESPERANDO VALIDACIÓN no cuenta: sus restantes están en
+ * cero legítimamente hasta que conta valide (55 de 62 casos revisados en prod
+ * eran esto). Mismo criterio que `cuotasPagables`.
+ */
+export function cuotasVencidasSinSaldo(
+	credito: Pick<CreditoDirectoResponse, "cuotasAtrasadas" | "cuotasPendientes">,
+): number[] {
+	const conSaldo = new Set<number>();
+	const enValidacion = new Set<number>();
+	const vencidasImpagas = new Map<number, number>();
+
+	for (const fila of credito.cuotasAtrasadas ?? []) {
+		if (fila.numero_cuota <= 0 || fila.pagado) continue;
+		vencidasImpagas.set(fila.cuota_id, fila.numero_cuota);
+	}
+	// El saldo se busca en AMBAS listas: cartera puede devolver la misma cuota
+	// en las dos, y basta con que UNA fila tenga saldo para que no sea un hueco.
+	for (const fila of [
+		...(credito.cuotasAtrasadas ?? []),
+		...(credito.cuotasPendientes ?? []),
+	]) {
+		if (fila.numero_cuota <= 0 || fila.pagado) continue;
+		if (saldoDeFila(fila) > 0n) conSaldo.add(fila.cuota_id);
+		if (fila.validationStatus === "pending") enValidacion.add(fila.cuota_id);
+	}
+
+	return [...vencidasImpagas.entries()]
+		.filter(([cuotaId]) => !conSaldo.has(cuotaId) && !enValidacion.has(cuotaId))
+		.map(([, numeroCuota]) => numeroCuota)
+		.sort((a, b) => a - b);
+}
+
 function aCuotaPagable(
 	fila: CarteraCuotaCredito,
 	vencida: boolean,
@@ -328,6 +375,7 @@ type CodigoAcceso =
 
 type CodigoBloqueo =
 	| "MORA_POR_CONFIRMAR"
+	| "CREDITO_REQUIERE_REVISION"
 	| "CREDITO_NO_PAGABLE_POR_LINK"
 	| "SIN_CUOTAS_QUE_PAGAR"
 	| "PAGO_EN_PROCESO"
@@ -377,6 +425,17 @@ async function armarContexto(
 
 	if (!ESTADOS_PAGABLES.has(resumen.status_credito)) {
 		return { ok: false, codigo: "CREDITO_NO_PAGABLE_POR_LINK" };
+	}
+
+	// Antes que nada: si hay una cuota vencida sin saldo, el crédito no está en
+	// un estado del que se pueda deducir cuánto cobrar. No se ofrece link — se
+	// manda con el asesor, mismo criterio que `MORA_POR_CONFIRMAR`.
+	const sinSaldo = cuotasVencidasSinSaldo(credito);
+	if (sinSaldo.length > 0) {
+		console.error(
+			`[BotCobros] pago-link: crédito ${numeroSifco} con cuota(s) vencida(s) sin saldo: ${sinSaldo.join(", ")}. No se ofrece link.`,
+		);
+		return { ok: false, codigo: "CREDITO_REQUIERE_REVISION" };
 	}
 
 	const pagables = cuotasPagables(credito);

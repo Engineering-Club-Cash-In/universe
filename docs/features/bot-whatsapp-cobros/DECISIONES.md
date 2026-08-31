@@ -60,6 +60,7 @@ día; si no está escrito, no está decidido.
 | [D-50](#d-50--el-pago-por-link-nace-validado-en-la-misma-transacción) | El pago por link nace validado en la misma transacción | 🟢 |
 | [D-51](#d-51--los-links-no-expiran-por-ahora) | Los links no expiran (por ahora) | 🟢 |
 | [D-52](#d-52--si-deuda-cambia-págalo-se-comporta-como-boleta-manual) | Págalo usa comportamiento de boleta manual ante deuda cambiante | 🟢 |
+| [D-53](#d-53--una-cuota-vencida-sin-saldo-bloquea-el-link) | Una cuota vencida sin saldo bloquea el link | 🟢 |
 
 ---
 
@@ -1969,3 +1970,40 @@ reponga la mora completa y cobre de nuevo la parte ya pagada — la misma ventan
 registrar→validar que hoy tiene cualquier boleta manual con mora. No se
 parcha `procesarMoras` por esto: se cierra validando de una vez.
 
+
+## D-53 · Una cuota vencida sin saldo bloquea el link
+
+Si el crédito tiene una cuota **vencida, impaga y sin nada que cobrar** —todos
+sus `*_restante` en cero— no se ofrecen opciones ni se genera link:
+`CREDITO_REQUIERE_REVISION` (409) y el cliente va con su asesor. Mismo criterio
+que la guarda de mora del punto 5 de
+[D-46](#d-46--el-cliente-elige-cuántas-cuotas-el-crm-arma-el-monto): antes de
+cobrar un monto que no podemos justificar, se lo pasamos a un humano.
+
+**Por qué existe ese estado.** Cuando un pago cierra una cuota, cartera pone en
+cero los `*_restante` de todas sus filas. Al reversar, la cuota vuelve a estar
+impaga pero solo se le devuelve a la fila del pago reversado lo que ese pago
+abonó: la fila sembrada se queda vacía. La cuota termina sin pagar y sin deber
+nada. Caso real (crédito 9266, dev): tras un ciclo de pagos y reversas, el bot
+le respondió **"estás al día 🎉"** a un cliente con una cuota vencida hacía 16
+días y le ofreció pagar la de tres meses después.
+
+**Por qué el guard vive acá y no solo en cartera.** La reversa ya recalcula la
+proyección al terminar (`reversePaymentRecalculo.ts`), pero esa es *una* de las
+puertas: al revisar producción aparecieron dos créditos en ese estado **sin
+ninguna reversa registrada**, o sea que hay al menos otro camino sin
+identificar. El guard protege por el lado del que cobra, venga de donde venga.
+
+**Qué NO cuenta como hueco**, para no bloquear créditos sanos:
+
+- Una cuota con saldo en **cualquiera** de sus filas: un pago parcial deja la
+  fila sembrada en cero y el saldo real en la del pago (crédito 624, cuota 20).
+- Una cuota con **pago esperando validación**: sus restantes están en cero
+  legítimamente hasta que conta valide — eran 55 de los 62 casos que a primera
+  vista parecían huecos en producción.
+- Una cuota **futura** en cero: las colas de calendario en cero no impiden
+  cobrar lo que sí está vencido.
+
+Cobrar sobre un hueco no era solo mostrar mal el monto: cartera distribuye con
+`min(saldo de la fila, …)`, así que el pago **tampoco se habría aplicado a esa
+cuota** — el cliente pagaba y seguía debiendo.

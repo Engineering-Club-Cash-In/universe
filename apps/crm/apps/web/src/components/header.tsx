@@ -359,7 +359,7 @@ export default function Header() {
 											</Link>
 										</DropdownMenuItem>
 									)}
-									{PERMISSIONS.canAssignCobros(userRole) && (
+									{PERMISSIONS.canAccessCobros(userRole) && (
 										<DropdownMenuItem asChild>
 											<Link to="/cobros/pagalo" className="cursor-pointer">
 												<Wallet className="mr-2 h-4 w-4" />
@@ -774,7 +774,7 @@ function MobileNav({
 												Cierre Diario
 											</Link>
 										)}
-										{PERMISSIONS.canAssignCobros(userRole) && (
+										{PERMISSIONS.canAccessCobros(userRole) && (
 											<Link to="/cobros/pagalo" className={MOBILE_LINK_CLASS}>
 												<Wallet />
 												Supervisión Págalo

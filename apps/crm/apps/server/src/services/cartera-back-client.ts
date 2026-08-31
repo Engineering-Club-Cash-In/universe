@@ -1425,7 +1425,9 @@ export class CarteraBackClient {
 
 	async getAllCreditos(
 		params: GetAllCreditsParams,
+		options?: { useCache?: boolean },
 	): Promise<PaginatedResponse<CreditoDetailResponse>> {
+		const useCache = options?.useCache ?? true;
 		// Si la lista de SIFCOs es grande, usar POST para evitar URL too long
 		// (414). Threshold conservador: ~50 SIFCOs * 15 chars ≈ 750 bytes, muy
 		// por debajo de cualquier límite. Por arriba de eso, body en POST.
@@ -1546,7 +1548,7 @@ export class CarteraBackClient {
 			response = await this.request<PaginatedResponse<CreditoDetailResponse>>(
 				`/getAllCredits?${queryParams}`,
 				{ method: "GET" },
-				true, // use cache (solo GET)
+				useCache,
 			);
 		}
 
@@ -2236,11 +2238,17 @@ export class CarteraBackClient {
 	// mismo). Trae `email_cash_in` para cruzar contra `user.email` del CRM sin
 	// depender del `email` de getAdvisors (desactualizado para varios
 	// asesores).
-	async getPoolPorAsesor(): Promise<PoolPorAsesorRow[]> {
+	async getPoolPorAsesor(options?: {
+		useCache?: boolean;
+	}): Promise<PoolPorAsesorRow[]> {
 		const response = await this.request<{
 			success: boolean;
 			data: PoolPorAsesorRow[];
-		}>("/buckets/pool-por-asesor", { method: "GET" }, true);
+		}>(
+			"/buckets/pool-por-asesor",
+			{ method: "GET" },
+			options?.useCache ?? true,
+		);
 		return response.data ?? [];
 	}
 

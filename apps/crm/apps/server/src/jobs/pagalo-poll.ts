@@ -56,6 +56,7 @@ import {
 	ne,
 	notInArray,
 	or,
+	sql,
 } from "drizzle-orm";
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 import { db } from "../db";
@@ -250,27 +251,36 @@ async function registrarIntentoFallido(
 }
 
 /**
- * Registra un fallo Y avanza `terminalNotFoundAttempts` — contador aparte de
- * `pollAttempts` (que mezcla cualquier causa de fallo). Solo se llama cuando
- * Págalo reporta el link cancelado/expirado (status "3"/"4") Y la consulta de
- * transacción devuelve 400 (no encontrada) — el único caso donde ese conteo
- * consecutivo importa para decidir si ya es seguro finalizar. Usar
- * `link.pollAttempts` (genérico) para ese umbral finalizaba un link en el
- * primer 400 con status 3/4 si venía arrastrando fallos previos no
- * relacionados (p.ej. varios ciclos con status "1" sin pagar) — el bug que
- * este contador dedicado corrige (hallazgo de code review).
+ * Avanza `terminalNotFoundAttempts` — contador aparte de `pollAttempts` (que
+ * mezcla cualquier causa de fallo). Solo se llama cuando Págalo reporta el
+ * link cancelado/expirado (status "3"/"4") Y la consulta de transacción
+ * devuelve 400 (no encontrada) — el único caso donde ese conteo consecutivo
+ * importa para decidir si ya es seguro finalizar. Usar `link.pollAttempts`
+ * (genérico) para ese umbral finalizaba un link en el primer 400 con status
+ * 3/4 si venía arrastrando fallos previos no relacionados (p.ej. varios
+ * ciclos con status "1" sin pagar) — el bug que este contador dedicado
+ * corrige (hallazgo de code review).
+ *
+ * El cruce de umbral se decide y se aplica DENTRO de esta misma transacción,
+ * con el valor recién escrito bajo el lease actual — no con el snapshot
+ * `link` en memoria capturado al reclamar. Si la consulta HTTP de transacción
+ * tardó más que el lease y otro worker ya reclamó el link (reseteando el
+ * contador porque para ese worker el patrón se rompió), este UPDATE
+ * simplemente no matchea nada y la corrida vieja no hace nada más — nunca
+ * finaliza con un conteo obsoleto que otra corrida ya invalidó (hallazgo de
+ * code review).
  */
 async function registrarIntentoNoEncontradoTerminal(
 	link: LinkClaimado,
+	statusTerminal: "CANCELLED" | "EXPIRED",
 ): Promise<void> {
 	const pollAttempts = link.pollAttempts + 1;
-	const terminalNotFoundAttempts = link.terminalNotFoundAttempts + 1;
 	await db.transaction(async (tx) => {
-		await tx
+		const [actualizado] = await tx
 			.update(pagaloPaymentLinks)
 			.set({
 				pollAttempts,
-				terminalNotFoundAttempts,
+				terminalNotFoundAttempts: sql`${pagaloPaymentLinks.terminalNotFoundAttempts} + 1`,
 				lastPolledAt: new Date(),
 				lastPollError: null,
 				nextPollAt: proximoIntento(pollAttempts),
@@ -288,7 +298,12 @@ async function registrarIntentoNoEncontradoTerminal(
 						? eq(pagaloPaymentLinks.pollClaimedAt, link.pollClaimedAt)
 						: isNull(pagaloPaymentLinks.pollClaimedAt),
 				),
-			);
+			)
+			.returning({ terminalNotFoundAttempts: pagaloPaymentLinks.terminalNotFoundAttempts });
+		if (!actualizado) return;
+		if (actualizado.terminalNotFoundAttempts >= UMBRAL_POLL_RETRY_EXHAUSTED) {
+			await marcarLinkTerminalEnTx(tx, link, statusTerminal);
+		}
 	});
 }
 
@@ -685,70 +700,83 @@ async function marcarLinkPagado(
 	});
 }
 
+/**
+ * Cuerpo transaccional de "finalizar link terminal", extraído para poder
+ * correr DENTRO de una transacción ya abierta por el caller (ver
+ * `registrarIntentoNoEncontradoTerminal`, que decide el cruce de umbral y
+ * finaliza en la misma tx que incrementa el contador, atómico bajo el mismo
+ * lease — hallazgo de code review).
+ */
+async function marcarLinkTerminalEnTx(
+	tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+	link: LinkClaimado,
+	status: "CANCELLED" | "EXPIRED",
+): Promise<void> {
+	const [grupo] = await tx
+		.select({
+			id: pagaloPaymentGroups.id,
+			status: pagaloPaymentGroups.status,
+		})
+		.from(pagaloPaymentGroups)
+		.where(eq(pagaloPaymentGroups.id, link.groupId))
+		.for("update");
+	const [fresco] = await tx
+		.select({ status: pagaloPaymentLinks.status })
+		.from(pagaloPaymentLinks)
+		.where(eq(pagaloPaymentLinks.id, link.id))
+		.for("update");
+	if (!fresco || fresco.status === "PAID") return;
+	await tx
+		.update(pagaloPaymentLinks)
+		.set({
+			status,
+			nextPollAt: null,
+			lastPolledAt: new Date(),
+			updatedAt: new Date(),
+		})
+		.where(eq(pagaloPaymentLinks.id, link.id));
+	const desde = link.activatedAt ?? link.createdAt;
+	await tx.insert(pagaloPaymentEvents).values({
+		groupId: link.groupId,
+		linkId: link.id,
+		eventType: "LINK_TERMINAL",
+		source: "PAGALO_POLLER",
+		fromStatus: fresco.status,
+		toStatus: status,
+		payload: {
+			motivo:
+				status === "EXPIRED" ? "expirado_en_pagalo" : "cancelado_en_pagalo",
+			providerStatus: status === "EXPIRED" ? "4" : "3",
+			pollAttempts: link.pollAttempts,
+			antiguedadHoras: desde
+				? Math.round((Date.now() - desde.getTime()) / 3_600_000)
+				: null,
+		},
+	});
+	// Un link REPLACED que Págalo da por cancelado/expirado es el final
+	// ESPERADO del reemplazo: no reabre su grupo (CANCELLED) — chocaría con
+	// el índice único de un grupo activo por crédito y tumbaba la corrida
+	// entera del poller (hallazgo de Codex). Solo un link vivo que muere
+	// afuera deja su grupo en revisión.
+	if (
+		fresco.status === "REPLACED" ||
+		!grupo ||
+		grupo.status === "CANCELLED" ||
+		grupo.status === "COMPLETED"
+	) {
+		return;
+	}
+	await tx
+		.update(pagaloPaymentGroups)
+		.set({ status: "REVIEW_REQUIRED", updatedAt: new Date() })
+		.where(eq(pagaloPaymentGroups.id, link.groupId));
+}
+
 async function marcarLinkTerminal(
 	link: LinkClaimado,
 	status: "CANCELLED" | "EXPIRED",
 ): Promise<void> {
-	await db.transaction(async (tx) => {
-		const [grupo] = await tx
-			.select({
-				id: pagaloPaymentGroups.id,
-				status: pagaloPaymentGroups.status,
-			})
-			.from(pagaloPaymentGroups)
-			.where(eq(pagaloPaymentGroups.id, link.groupId))
-			.for("update");
-		const [fresco] = await tx
-			.select({ status: pagaloPaymentLinks.status })
-			.from(pagaloPaymentLinks)
-			.where(eq(pagaloPaymentLinks.id, link.id))
-			.for("update");
-		if (!fresco || fresco.status === "PAID") return;
-		await tx
-			.update(pagaloPaymentLinks)
-			.set({
-				status,
-				nextPollAt: null,
-				lastPolledAt: new Date(),
-				updatedAt: new Date(),
-			})
-			.where(eq(pagaloPaymentLinks.id, link.id));
-		const desde = link.activatedAt ?? link.createdAt;
-		await tx.insert(pagaloPaymentEvents).values({
-			groupId: link.groupId,
-			linkId: link.id,
-			eventType: "LINK_TERMINAL",
-			source: "PAGALO_POLLER",
-			fromStatus: fresco.status,
-			toStatus: status,
-			payload: {
-				motivo:
-					status === "EXPIRED" ? "expirado_en_pagalo" : "cancelado_en_pagalo",
-				providerStatus: status === "EXPIRED" ? "4" : "3",
-				pollAttempts: link.pollAttempts,
-				antiguedadHoras: desde
-					? Math.round((Date.now() - desde.getTime()) / 3_600_000)
-					: null,
-			},
-		});
-		// Un link REPLACED que Págalo da por cancelado/expirado es el final
-		// ESPERADO del reemplazo: no reabre su grupo (CANCELLED) — chocaría con
-		// el índice único de un grupo activo por crédito y tumbaba la corrida
-		// entera del poller (hallazgo de Codex). Solo un link vivo que muere
-		// afuera deja su grupo en revisión.
-		if (
-			fresco.status === "REPLACED" ||
-			!grupo ||
-			grupo.status === "CANCELLED" ||
-			grupo.status === "COMPLETED"
-		) {
-			return;
-		}
-		await tx
-			.update(pagaloPaymentGroups)
-			.set({ status: "REVIEW_REQUIRED", updatedAt: new Date() })
-			.where(eq(pagaloPaymentGroups.id, link.groupId));
-	});
+	await db.transaction((tx) => marcarLinkTerminalEnTx(tx, link, status));
 }
 
 export type ResultadoPollPagalo = {
@@ -865,16 +893,15 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 					error.status === 400 &&
 					status !== "2"
 				) {
-					if (
-						(status === "3" || status === "4") &&
-						link.terminalNotFoundAttempts + 1 >= UMBRAL_POLL_RETRY_EXHAUSTED
-					) {
-						await marcarLinkTerminal(
+					if (status === "3" || status === "4") {
+						// Decide y aplica el cruce de umbral atómicamente,
+						// dentro de la misma transacción y bajo el mismo lease
+						// — nunca con un conteo obsoleto capturado en memoria
+						// (hallazgo de code review).
+						await registrarIntentoNoEncontradoTerminal(
 							link,
 							status === "3" ? "CANCELLED" : "EXPIRED",
 						);
-					} else if (status === "3" || status === "4") {
-						await registrarIntentoNoEncontradoTerminal(link);
 					} else {
 						await registrarIntentoFallido(link);
 						await resetearContadorTerminalNoEncontrado(link.id);
@@ -907,9 +934,15 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 					detalle?.transaction ?? detalle?.data;
 				if (!transaccion || transaccion.status_transaction !== "ACCEPT") {
 					// Sin transacción ACCEPT: si Págalo ya dio el link por
-					// cancelado/expirado, ahí sí se finaliza — no hay pago real
-					// que proteger. Si no, sigue pendiente como antes.
-					if (status === "3" || status === "4") {
+					// cancelado/expirado Y no hay NINGUNA transacción real
+					// detrás, ahí sí se finaliza — no hay pago que proteger.
+					// Pero si sí existe una transacción (aunque no sea ACCEPT
+					// todavía, p.ej. PENDING/en proceso), NO se finaliza: podría
+					// cerrar ACCEPT en el próximo ciclo, y marcarLinkTerminal
+					// limpiaría nextPollAt dejando ese pago sin observar jamás
+					// (hallazgo de code review) — sigue pendiente como
+					// cualquier link sin cambios.
+					if (!transaccion && (status === "3" || status === "4")) {
 						await marcarLinkTerminal(
 							link,
 							status === "3" ? "CANCELLED" : "EXPIRED",

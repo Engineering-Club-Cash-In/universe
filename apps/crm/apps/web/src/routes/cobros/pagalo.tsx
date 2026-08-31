@@ -103,7 +103,7 @@ function FilaGrupo({
 	return (
 		<TableRow>
 			<TableCell>
-				{grupo.casoCobroId ? (
+				{grupo.casoCobroId && esSupervisor ? (
 					// /cobros/$id acepta el SIFCO directo cuando no es UUID de
 					// caso (resolverNumeroSifco, server) — un grupo con
 					// casoCobroId ya tiene un caso real detrás, así que
@@ -117,7 +117,10 @@ function FilaGrupo({
 						{grupo.numeroCreditoSifco}
 					</Link>
 				) : (
-					// Un grupo SIN casoCobroId (típicamente del bot) no tiene
+					// Un asesor ve grupos de sus buckets, pero el detalle de caso
+					// sigue protegido por responsableCobros. No exponer un enlace que
+					// terminaría en acceso denegado para créditos cubiertos por pool.
+					// Un grupo SIN casoCobroId (típicamente del bot) tampoco tiene
 					// caso de cobros detrás — /cobros/$id llama
 					// getDetallesCreditoCarteraBack, que si no encuentra un
 					// caso activo para el SIFCO CREA uno nuevo y lo asigna al
@@ -129,7 +132,11 @@ function FilaGrupo({
 					// realmente read-only para este caso.
 					<span
 						className="font-medium"
-						title="Este grupo no tiene caso de cobros asociado — abrirlo crearía uno nuevo."
+						title={
+							grupo.casoCobroId
+								? "Este crédito se muestra por bucket; abrir el caso exige asignación directa."
+								: "Este grupo no tiene caso de cobros asociado — abrirlo crearía uno nuevo."
+						}
 					>
 						{grupo.numeroCreditoSifco}
 					</span>
@@ -187,8 +194,8 @@ function PagaloSupervisionPage() {
 	const [pagina, setPagina] = useState(1);
 	const queryClient = useQueryClient();
 
-	const puedeConsultar = !!userRole && PERMISSIONS.canAssignCobros(userRole);
-	const esSupervisor = puedeConsultar;
+	const puedeConsultar = !!userRole && PERMISSIONS.canAccessCobros(userRole);
+	const esSupervisor = !!userRole && PERMISSIONS.canAssignCobros(userRole);
 
 	// Sin chips de estado activos: mostrar TODO, no solo lo problemático — el
 	// filtro "problemático" por defecto queda reservado para cuando el
@@ -265,6 +272,11 @@ function PagaloSupervisionPage() {
 						seleccionados se muestran todos los grupos; al elegir uno o más,
 						solo esos.
 					</p>
+					{!esSupervisor && (
+						<p className="mt-1 text-muted-foreground text-sm">
+							Mostrando créditos de tus buckets asignados.
+						</p>
+					)}
 				</div>
 				<Button
 					variant="outline"

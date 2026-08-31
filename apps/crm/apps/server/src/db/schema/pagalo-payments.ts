@@ -355,6 +355,19 @@ export const pagaloPaymentLinks = pgTable(
 		pollAttempts: integer("poll_attempts").notNull().default(0),
 		lastPolledAt: timestamp("last_polled_at", { withTimezone: true }),
 		lastPollError: text("last_poll_error"),
+		/**
+		 * Contador aparte de `pollAttempts` (que mezcla cualquier causa de
+		 * fallo, incluidos ciclos previos con status "1"/pendiente). Solo
+		 * cuenta confirmaciones CONSECUTIVAS de "Págalo reporta el link
+		 * cancelado/expirado Y la consulta de transacción devuelve 400 (no
+		 * encontrada)" — se resetea a 0 apenas ese patrón exacto deja de
+		 * repetirse. Evita finalizar un link como terminal en el primer 400
+		 * solo porque venía arrastrando fallos no relacionados de antes
+		 * (hallazgo de code review).
+		 */
+		terminalNotFoundAttempts: integer("terminal_not_found_attempts")
+			.notNull()
+			.default(0),
 
 		requestedBy: text("requested_by")
 			.notNull()
@@ -412,6 +425,10 @@ export const pagaloPaymentLinks = pgTable(
 		check(
 			"pagalo_payment_links_poll_attempts_chk",
 			sql`${t.pollAttempts} >= 0`,
+		),
+		check(
+			"pagalo_payment_links_terminal_not_found_attempts_chk",
+			sql`${t.terminalNotFoundAttempts} >= 0`,
 		),
 		check(
 			"pagalo_payment_links_transaction_amount_chk",

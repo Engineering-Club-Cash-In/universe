@@ -61,6 +61,7 @@ día; si no está escrito, no está decidido.
 | [D-51](#d-51--los-links-no-expiran-por-ahora) | Los links no expiran (por ahora) | 🟢 |
 | [D-52](#d-52--si-deuda-cambia-págalo-se-comporta-como-boleta-manual) | Págalo usa comportamiento de boleta manual ante deuda cambiante | 🟢 |
 | [D-53](#d-53--una-cuota-vencida-sin-saldo-bloquea-el-link) | Una cuota vencida sin saldo bloquea el link | 🟢 |
+| [D-54](#d-54--el-estado-de-los-links-viaja-también-en-booleanos) | El estado de los links viaja también en booleanos | 🟢 |
 
 ---
 
@@ -2007,3 +2008,31 @@ identificar. El guard protege por el lado del que cobra, venga de donde venga.
 Cobrar sobre un hueco no era solo mostrar mal el monto: cartera distribuye con
 `min(saldo de la fila, …)`, así que el pago **tampoco se habría aplicado a esa
 cuota** — el cliente pagaba y seguía debiendo.
+---
+
+## D-54 · El estado de los links viaja también en booleanos
+
+**Fecha:** 2026-08-31 · **Estado:** 🟢 vigente · **Pedido por:** Juan Diego (SimpleTech)
+
+**Contexto.** El servicio 9 (`/pago-link/estado`) responde el veredicto como texto:
+`estado` = `PAGADOS` | `PARCIAL` | `SIN_PAGO`, y cada link como `PAGADO` | `PENDIENTE`.
+El motor de reglas del bot compara strings a mano (`$data.estado` = `PAGADOS` escrito
+en la regla), y ahí cualquier detalle —un espacio, una mayúscula, un renombre nuestro—
+rompe la rama sin avisar. Los booleanos los evalúa nativo.
+
+**Decisión.** El mismo veredicto se devuelve además en booleanos, **sin tocar nada de lo
+que ya existe** (es aditivo: `estado` y `linkNEstado` siguen igual, para no romper a nadie
+que ya integró):
+
+- `pagado`, `pagoParcial`, `sinPago` — exactamente uno en `true`.
+- Van **dos veces**: al lado de `success` y dentro de `data`. El motor de reglas lee de
+  distintos niveles según el paso del flujo, y duplicar tres booleanos no cuesta nada.
+- Por link: `link1Pagado`/`link2Pagado` en el aplanado y `pagado` dentro de `links[]`.
+
+Se derivan del mismo `estado`/`estado` de cada link en un solo lugar
+(`banderasEstadoLinks` y `resumirEstadoLinks`, en `pago-link.ts`), así que no pueden
+contradecirlo: no hay dos cálculos que puedan separarse con el tiempo.
+
+**Alcance.** Solo el servicio 9. Si aparece la misma molestia en otro servicio del bot se
+resuelve igual (booleano derivado del texto, aditivo, un solo cálculo), pero no se anticipa
+en los que nadie pidió.

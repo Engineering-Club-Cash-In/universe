@@ -296,7 +296,17 @@ export async function estadoPagoLinkBotCobros(c: Context) {
 				})
 			);
 		}
-		return c.json({ success: true, data: resultado.data });
+		// Las banderas van también al lado de `success` porque el motor de
+		// reglas del bot lee ahí sin bajar a `data` (D-54). Es el mismo dato
+		// que `data.estado`, duplicado a propósito.
+		const { pagado, pagoParcial, sinPago } = resultado.data;
+		return c.json({
+			success: true,
+			pagado,
+			pagoParcial,
+			sinPago,
+			data: resultado.data,
+		});
 	} catch (err) {
 		console.error("[BotCobros] pago-link/estado:", err);
 		return error(c, {

@@ -8,7 +8,9 @@
 
 import { describe, expect, test } from "bun:test";
 import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import {
+	condicionSifcosPermitidos,
 	condicionesFiltro,
 	condicionGrupoProblematico,
 	PENDING_PAYMENT_ESTANCADO_DIAS,
@@ -103,4 +105,13 @@ describe("condicionesFiltro", () => {
 
 test("el umbral de PENDING_PAYMENT estancado es 7 días", () => {
 	expect(PENDING_PAYMENT_ESTANCADO_DIAS).toBe(7);
+});
+
+test("scope de SIFCOs usa un solo parámetro PostgreSQL", () => {
+	const sifcos = Array.from({ length: 65_536 }, (_, i) => `SIFCO-${i}`);
+	const consulta = new PgDialect().sqlToQuery(condicionSifcosPermitidos(sifcos));
+
+	expect(consulta.sql).toContain("= ANY($1::text[])");
+	expect(consulta.params).toHaveLength(1);
+	expect(String(consulta.params[0])).toStartWith('{"SIFCO-0"');
 });

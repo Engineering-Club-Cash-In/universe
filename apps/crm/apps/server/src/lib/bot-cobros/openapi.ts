@@ -2523,6 +2523,8 @@ export const especificacionBotCobros = {
 					"",
 					"`estado` viene en tres valores: **`PAGADOS`** (todos los links pagados; ya lo estamos aplicando al crédito), **`PARCIAL`** (uno pagado, el otro no: te decimos cuál falta y te devolvemos su link para que lo reenvíes) y **`SIN_PAGO`** (ninguno pagado; te devolvemos los links activos).",
 					"",
+					"El mismo veredicto viene en **booleanos** para que no haya que comparar textos: `pagado`, `pagoParcial` y `sinPago`, y van dos veces — al lado de `success` y dentro de `data` — para leerlos desde donde le quede mejor al flujo. Solo uno de los tres es `true`. Cada link trae además su propio `pagado` (`link1Pagado`, `link2Pagado`, y `pagado` dentro de `links[]`).",
+					"",
 					"Viene plano como las opciones: `totalLinks`, `linksPagados`, `linksPendientes` y `link1Titulo`/`link1Estado`/`link1Monto`/`link1Url`, `link2…`. `linkNUrl` solo trae valor si ese link sigue pendiente. `mensajes.completo` ya lo dice todo en el tono del bot.",
 					"",
 					"Un pago recién hecho puede tardar unos minutos en reflejarse (lo detectamos nosotros, D-49). Si no hay links generados en esta conversación responde `409 SIN_LINKS`.",
@@ -2563,6 +2565,19 @@ export const especificacionBotCobros = {
 									type: "object",
 									properties: {
 										success: { type: "boolean", enum: [true] },
+										pagado: {
+											type: "boolean",
+											description:
+												'`estado === "PAGADOS"`. Mismo valor que `data.pagado`.',
+										},
+										pagoParcial: {
+											type: "boolean",
+											description: '`estado === "PARCIAL"`.',
+										},
+										sinPago: {
+											type: "boolean",
+											description: '`estado === "SIN_PAGO"`.',
+										},
 										data: {
 											type: "object",
 											properties: {
@@ -2570,6 +2585,9 @@ export const especificacionBotCobros = {
 													type: "string",
 													enum: ["PAGADOS", "PARCIAL", "SIN_PAGO"],
 												},
+												pagado: { type: "boolean" },
+												pagoParcial: { type: "boolean" },
+												sinPago: { type: "boolean" },
 												numeroSifco: { type: "string" },
 												referenciaPago: {
 													type: "string",
@@ -2585,6 +2603,10 @@ export const especificacionBotCobros = {
 													type: "string",
 													enum: ["PAGADO", "PENDIENTE"],
 												},
+												link1Pagado: {
+													type: "boolean",
+													description: '`link1Estado === "PAGADO"`.',
+												},
 												link1Monto: { type: "string" },
 												link1Url: {
 													type: "string",
@@ -2596,6 +2618,7 @@ export const especificacionBotCobros = {
 													type: "string",
 													enum: ["PAGADO", "PENDIENTE"],
 												},
+												link2Pagado: { type: "boolean" },
 												link2Monto: { type: "string" },
 												link2Url: { type: "string", nullable: true },
 												links: {
@@ -2614,6 +2637,7 @@ export const especificacionBotCobros = {
 																type: "string",
 																enum: ["PAGADO", "PENDIENTE"],
 															},
+															pagado: { type: "boolean" },
 															url: { type: "string", nullable: true },
 														},
 													},
@@ -2631,8 +2655,14 @@ export const especificacionBotCobros = {
 										summary: "Los dos links pagados",
 										value: {
 											success: true,
+											pagado: true,
+											pagoParcial: false,
+											sinPago: false,
 											data: {
 												estado: "PAGADOS",
+												pagado: true,
+												pagoParcial: false,
+												sinPago: false,
 												numeroSifco: "01010214117590",
 												referenciaPago: "9d4b2b7a-2c0a-4b1e-8a4d-5f6e7a8b9c0d",
 												totalLinks: 2,
@@ -2640,10 +2670,12 @@ export const especificacionBotCobros = {
 												linksPendientes: 0,
 												link1Titulo: "Pago 1 de 2",
 												link1Estado: "PAGADO",
+												link1Pagado: true,
 												link1Monto: "800.00",
 												link1Url: null,
 												link2Titulo: "Pago 2 de 2",
 												link2Estado: "PAGADO",
+												link2Pagado: true,
 												link2Monto: "3937.62",
 												link2Url: null,
 												links: [
@@ -2652,6 +2684,7 @@ export const especificacionBotCobros = {
 														titulo: "Pago 1 de 2",
 														monto: "800.00",
 														estado: "PAGADO",
+														pagado: true,
 														url: null,
 													},
 													{
@@ -2659,6 +2692,7 @@ export const especificacionBotCobros = {
 														titulo: "Pago 2 de 2",
 														monto: "3937.62",
 														estado: "PAGADO",
+														pagado: true,
 														url: null,
 													},
 												],
@@ -2673,8 +2707,14 @@ export const especificacionBotCobros = {
 										summary: "Solo uno pagado: se devuelve el que falta",
 										value: {
 											success: true,
+											pagado: false,
+											pagoParcial: true,
+											sinPago: false,
 											data: {
 												estado: "PARCIAL",
+												pagado: false,
+												pagoParcial: true,
+												sinPago: false,
 												numeroSifco: "01010214117590",
 												referenciaPago: "9d4b2b7a-2c0a-4b1e-8a4d-5f6e7a8b9c0d",
 												totalLinks: 2,
@@ -2682,10 +2722,12 @@ export const especificacionBotCobros = {
 												linksPendientes: 1,
 												link1Titulo: "Pago 1 de 2",
 												link1Estado: "PAGADO",
+												link1Pagado: true,
 												link1Monto: "800.00",
 												link1Url: null,
 												link2Titulo: "Pago 2 de 2",
 												link2Estado: "PENDIENTE",
+												link2Pagado: false,
 												link2Monto: "3937.62",
 												link2Url: "https://checkout.pagalodev.com/xyz789",
 												links: [
@@ -2694,6 +2736,7 @@ export const especificacionBotCobros = {
 														titulo: "Pago 1 de 2",
 														monto: "800.00",
 														estado: "PAGADO",
+														pagado: true,
 														url: null,
 													},
 													{
@@ -2701,6 +2744,7 @@ export const especificacionBotCobros = {
 														titulo: "Pago 2 de 2",
 														monto: "3937.62",
 														estado: "PENDIENTE",
+														pagado: false,
 														url: "https://checkout.pagalodev.com/xyz789",
 													},
 												],
@@ -2715,8 +2759,14 @@ export const especificacionBotCobros = {
 										summary: "Ninguno pagado todavía",
 										value: {
 											success: true,
+											pagado: false,
+											pagoParcial: false,
+											sinPago: true,
 											data: {
 												estado: "SIN_PAGO",
+												pagado: false,
+												pagoParcial: false,
+												sinPago: true,
 												numeroSifco: "01010214117590",
 												referenciaPago: "9d4b2b7a-2c0a-4b1e-8a4d-5f6e7a8b9c0d",
 												totalLinks: 2,
@@ -2724,10 +2774,12 @@ export const especificacionBotCobros = {
 												linksPendientes: 2,
 												link1Titulo: "Pago 1 de 2",
 												link1Estado: "PENDIENTE",
+												link1Pagado: false,
 												link1Monto: "800.00",
 												link1Url: "https://checkout.pagalodev.com/abc123",
 												link2Titulo: "Pago 2 de 2",
 												link2Estado: "PENDIENTE",
+												link2Pagado: false,
 												link2Monto: "3937.62",
 												link2Url: "https://checkout.pagalodev.com/xyz789",
 												links: [
@@ -2736,6 +2788,7 @@ export const especificacionBotCobros = {
 														titulo: "Pago 1 de 2",
 														monto: "800.00",
 														estado: "PENDIENTE",
+														pagado: false,
 														url: "https://checkout.pagalodev.com/abc123",
 													},
 													{
@@ -2743,6 +2796,7 @@ export const especificacionBotCobros = {
 														titulo: "Pago 2 de 2",
 														monto: "3937.62",
 														estado: "PENDIENTE",
+														pagado: false,
 														url: "https://checkout.pagalodev.com/xyz789",
 													},
 												],

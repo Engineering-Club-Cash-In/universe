@@ -10,6 +10,7 @@ import type { CarteraCuotaCredito } from "../../types/cartera-back";
 import {
 	aplanarLinksEstado,
 	aplanarOpciones,
+	banderasEstadoLinks,
 	buscarOpcionPorMonto,
 	calcularOpciones,
 	cuotasPagables,
@@ -446,12 +447,46 @@ describe("estado de los links de la conversación (servicio 9)", () => {
 			linksPendientes: 1,
 			link1Titulo: "Pago 1 de 2",
 			link1Estado: "PAGADO",
+			link1Pagado: true,
 			link1Monto: "800.00",
 			link1Url: null,
 			link2Titulo: "Pago 2 de 2",
 			link2Estado: "PENDIENTE",
+			link2Pagado: false,
 			link2Monto: "3937.62",
 			link2Url: "https://pagalo/MORA_INTERES",
+		});
+	});
+
+	test("cada link trae su estado también en booleano (D-54)", () => {
+		const r = resumirEstadoLinks(
+			grupo("PARTIALLY_PAID", [
+				link("CAPITAL", "PAID"),
+				link("MORA_INTERES", "ACTIVE"),
+			]),
+		);
+		expect(r.links.map((l) => l.pagado)).toEqual([true, false]);
+		// el booleano nunca contradice al texto
+		expect(r.links.every((l) => l.pagado === (l.estado === "PAGADO"))).toBe(
+			true,
+		);
+	});
+
+	test("las banderas del veredicto: exactamente una en true (D-54)", () => {
+		expect(banderasEstadoLinks("PAGADOS")).toEqual({
+			pagado: true,
+			pagoParcial: false,
+			sinPago: false,
+		});
+		expect(banderasEstadoLinks("PARCIAL")).toEqual({
+			pagado: false,
+			pagoParcial: true,
+			sinPago: false,
+		});
+		expect(banderasEstadoLinks("SIN_PAGO")).toEqual({
+			pagado: false,
+			pagoParcial: false,
+			sinPago: true,
 		});
 	});
 });

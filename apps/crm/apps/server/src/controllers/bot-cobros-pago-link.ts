@@ -104,6 +104,17 @@ function errorComun(
 					"Estamos confirmando el monto de tu mora. Tu asesor te va a indicar cuánto pagar.",
 				estado: 409,
 			});
+		case "CREDITO_REQUIERE_REVISION":
+			// Hay una cuota vencida sin saldo: el crédito no está en un estado del
+			// que se pueda deducir cuánto cobrar. Antes que mandarle un monto que
+			// no podemos justificar —o decirle "estás al día" con una cuota
+			// vencida encima— se lo pasamos al asesor.
+			return error(c, {
+				codigo: "CREDITO_REQUIERE_REVISION",
+				mensaje:
+					"Tenemos que revisar el estado de tu crédito antes de darte un link. Tu asesor te va a indicar cuánto pagar.",
+				estado: 409,
+			});
 		case "CREDITO_NO_PAGABLE_POR_LINK":
 			return error(c, {
 				codigo: "CREDITO_NO_PAGABLE_POR_LINK",

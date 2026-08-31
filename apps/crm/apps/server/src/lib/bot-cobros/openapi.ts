@@ -2066,6 +2066,18 @@ export const especificacionBotCobros = {
 											},
 										},
 									},
+									CREDITO_REQUIERE_REVISION: {
+										summary:
+											"Hay una cuota vencida sin saldo que cobrar: el crédito quedó en un estado del que no se puede deducir el monto",
+										value: {
+											success: false,
+											error: {
+												codigo: "CREDITO_REQUIERE_REVISION",
+												mensaje:
+													"Tenemos que revisar el estado de tu crédito antes de darte un link. Tu asesor te va a indicar cuánto pagar.",
+											},
+										},
+									},
 									CREDITO_NO_PAGABLE_POR_LINK: {
 										summary:
 											"Estado del crédito fuera del flujo (convenio, incobrable, cancelado, pendiente de cancelación, caído)",

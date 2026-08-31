@@ -14,6 +14,7 @@ import {
 	buscarOpcionPorMonto,
 	calcularOpciones,
 	cuotasPagables,
+	cuotasVencidasSinSaldo,
 	MAXIMO_OPCIONES,
 	mensajeEstadoLinks,
 	normalizarMonto,
@@ -40,6 +41,76 @@ function fila(
 		...extra,
 	};
 }
+
+const EN_CERO = {
+	capital_restante: "0.00",
+	interes_restante: "0.00",
+	iva_12_restante: "0.00",
+	seguro_restante: "0.00",
+	gps_restante: "0.00",
+	membresias_restante: "0.00",
+};
+
+describe("cuotasVencidasSinSaldo", () => {
+	test("detecta la cuota vencida impaga que quedó sin nada que cobrar", () => {
+		// El estado que dejó la reversa en el crédito 9266: cuota 1 vencida, sin
+		// pagar y con todos los restantes en cero → el crédito se veía "al día".
+		expect(
+			cuotasVencidasSinSaldo({
+				cuotasAtrasadas: [fila(1, EN_CERO)],
+				cuotasPendientes: [fila(2)],
+			}),
+		).toEqual([1]);
+	});
+
+	test("una cuota con saldo en CUALQUIER fila no es un hueco", () => {
+		// Pago parcial: la fila sembrada quedó en cero pero la del pago conserva
+		// el saldo real (caso Oscar, crédito 624 · cuota 20).
+		expect(
+			cuotasVencidasSinSaldo({
+				cuotasAtrasadas: [
+					fila(1, EN_CERO),
+					fila(1, { pago_id: 7, capital_restante: "557.12" }),
+				],
+				cuotasPendientes: [],
+			}),
+		).toEqual([]);
+	});
+
+	test("un pago esperando validación NO es un hueco", () => {
+		// Sus restantes están en cero legítimamente hasta que conta valide: era
+		// el 90% de los casos al revisar prod.
+		expect(
+			cuotasVencidasSinSaldo({
+				cuotasAtrasadas: [fila(1, { ...EN_CERO, validationStatus: "pending" })],
+				cuotasPendientes: [],
+			}),
+		).toEqual([]);
+	});
+
+	test("las cuotas pagadas y la cuota 0 no cuentan", () => {
+		expect(
+			cuotasVencidasSinSaldo({
+				cuotasAtrasadas: [
+					fila(0, EN_CERO),
+					fila(1, { ...EN_CERO, pagado: true }),
+				],
+				cuotasPendientes: [],
+			}),
+		).toEqual([]);
+	});
+
+	test("una cuota FUTURA en cero no bloquea (no se está cobrando)", () => {
+		// Las colas de calendario en cero (créditos 803, 54 en prod) no impiden
+		// cobrar lo vencido.
+		expect(
+			cuotasVencidasSinSaldo({
+				cuotasAtrasadas: [fila(1)],
+				cuotasPendientes: [fila(9, EN_CERO)],
+			}),
+		).toEqual([]);
+	});
+});
 
 describe("cuotasPagables", () => {
 	test("acumula las vencidas y agrega la próxima por vencer", () => {

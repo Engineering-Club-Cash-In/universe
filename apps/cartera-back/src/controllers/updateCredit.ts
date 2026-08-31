@@ -2280,6 +2280,28 @@ interface RecalcularPagosParams {
   numero_cuota?: number; // Opcional: si se pasa, procesa desde esa cuota (pagadas y no pagadas). Si no, solo no pagadas.
 }
 
+/**
+ * Una sola cuota lógica por `numero_cuota`, quedándose con la copia más
+ * reciente (mayor `cuota_id`). Mismo criterio que registerPayment usa para las
+ * cuotas pendientes: hay créditos con `cuotas_credito` duplicadas (mismo
+ * número, cuota_id distinto) y la copia vigente —la que trae el recibo
+ * re-sembrado— es siempre la última.
+ *
+ * Existe aparte y exportada para poder probarla sin montar todo el recálculo.
+ */
+export function deduplicarCuotasPorNumero<T extends { numero_cuota: number }>(
+  porCuotaId: Map<number, T>,
+): Map<number, T> {
+  const vigentePorNumero = new Map<number, [cuotaId: number, valor: T]>();
+  for (const [cuotaId, valor] of porCuotaId) {
+    const previo = vigentePorNumero.get(valor.numero_cuota);
+    if (!previo || cuotaId > previo[0]) {
+      vigentePorNumero.set(valor.numero_cuota, [cuotaId, valor]);
+    }
+  }
+  return new Map([...vigentePorNumero.values()].map(([id, v]) => [id, v]));
+}
+
 export const recalcularPagosCredito = async ({
   numero_credito_sifco,
   numero_cuota,
@@ -2352,6 +2374,19 @@ export const recalcularPagosCredito = async ({
       : and(
           eq(pagos_credito.credito_id, credito.credito_id),
           filaNoEsAbonoCapitalNiCierre,
+          // La CUOTA tiene que seguir abierta, no basta con que la fila de
+          // pago esté en pagado=false. Al reversar un pago de una cuota que
+          // otros pagos vivos siguen cubriendo, la cuota queda pagada=true y
+          // la fila reversada en pagado=false: sin este filtro esa fila
+          // entraba al recorrido, se comía un tramo de amortización de una
+          // cuota YA cobrada y corría una casilla todos los restantes de las
+          // cuotas siguientes (hallazgo Codex). `pagado` es nullable: NULL
+          // es cuota abierta (default false), y dejarla fuera con un
+          // `eq(..., false)` a secas congelaría su proyección.
+          or(
+            isNull(cuotas_credito.pagado),
+            eq(cuotas_credito.pagado, false),
+          ),
           or(
             eq(pagos_credito.pagado, false),
             // Pagos registrados sin validar: solo con monto_aplicado > 0.
@@ -2397,6 +2432,22 @@ export const recalcularPagosCredito = async ({
     pagosPorCuota.get(cuotaId)!.pagos.push(row.pagos_credito);
   }
 
+  // 3.b Cuotas duplicadas: mismo numero_cuota con cuota_id distinto (artefacto
+  // del flujo viejo de abonos; caso real crédito 793, ya deduplicado igual en
+  // registerPayment). Agrupadas por cuota_id salen como DOS cuotas lógicas y el
+  // recorrido amortiza el mismo mes dos veces, corriendo todos los tramos de
+  // ahí en adelante (hallazgo Codex). Se conserva la copia más reciente —mayor
+  // cuota_id, la del recibo re-sembrado vigente—; las filas de la copia vieja
+  // se quedan como están en vez de reescribirse con un tramo que no les toca.
+  const cuotasUnicas = deduplicarCuotasPorNumero(pagosPorCuota);
+  if (cuotasUnicas.size < pagosPorCuota.size) {
+    console.warn(
+      `⚠️ Crédito ${numero_credito_sifco}: cuotas_credito DUPLICADAS ` +
+        `(${pagosPorCuota.size} cuota_id para ${cuotasUnicas.size} números de cuota). ` +
+        `Se recalcula solo la copia más reciente de cada numero_cuota.`,
+    );
+  }
+
   // 4️⃣ Constantes de amortización
   const seguroFijo = new Big(credito.seguro_10_cuotas ?? 0);
   const gpsFijo = new Big(credito.gps ?? 0);
@@ -2413,7 +2464,7 @@ export const recalcularPagosCredito = async ({
   // 5️⃣ Procesar cada cuota en orden
   const actualizaciones: { pago_id: number; datos: Record<string, unknown> }[] = [];
 
-  const cuotasOrdenadas = [...pagosPorCuota.entries()].sort(
+  const cuotasOrdenadas = [...cuotasUnicas.entries()].sort(
     (a, b) => a[1].numero_cuota - b[1].numero_cuota,
   );
 

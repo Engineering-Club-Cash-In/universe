@@ -973,16 +973,20 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 				const transaccion: TransaccionPagalo | undefined =
 					detalle?.transaction ?? detalle?.data;
 				if (!transaccion || transaccion.status_transaction !== "ACCEPT") {
-					// Sin transacción ACCEPT: si Págalo ya dio el link por
-					// cancelado/expirado Y no hay NINGUNA transacción real
-					// detrás, ahí sí se finaliza — no hay pago que proteger.
-					// Pero si sí existe una transacción (aunque no sea ACCEPT
-					// todavía, p.ej. PENDING/en proceso), NO se finaliza: podría
-					// cerrar ACCEPT en el próximo ciclo, y marcarLinkTerminal
-					// limpiaría nextPollAt dejando ese pago sin observar jamás
-					// (hallazgo de code review) — sigue pendiente como
-					// cualquier link sin cambios.
-					if (!transaccion && (status === "3" || status === "4")) {
+					// Doc de Págalo (status_transaction): solo dos valores
+					// existen, "ACCEPT" o "REJECT" — no hay un tercer estado
+					// "en proceso"/"pendiente" documentado para este campo. Con
+					// el link ya en "3"/"4" (cancelado/expirado) Y una
+					// transacción REJECT observada, ambas señales confirman
+					// terminal — no hay pago que esperar, y reintentar para
+					// siempre dejaba el grupo sin escalar a REVIEW_REQUIRED
+					// (hallazgo de code review). Sin transacción en absoluto
+					// (400/`null`) igual se finaliza si el link ya es 3/4: no
+					// hay pago real que proteger.
+					if (
+						(status === "3" || status === "4") &&
+						(!transaccion || transaccion.status_transaction === "REJECT")
+					) {
 						await marcarLinkTerminal(
 							link,
 							status === "3" ? "CANCELLED" : "EXPIRED",
@@ -1001,8 +1005,9 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 						}
 					} else {
 						// Transacción existe pero no cerró ACCEPT (p.ej.
-						// rechazada, o todavía procesándose) — no es un error
-						// del job, es el estado normal de "aún no pagado".
+						// todavía procesándose) y el link no está 3/4 — no es un
+						// error del job, es el estado normal de "aún no
+						// pagado".
 						await registrarIntentoFallido(
 							link,
 							`Transacción Págalo en estado ${transaccion.status_transaction}, no ACCEPT.`,

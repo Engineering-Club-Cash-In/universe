@@ -15,6 +15,8 @@ import {
 import {
   allocateRoundedAmounts,
   allocateRoundedPurchaseAmounts,
+	aggregateInvestorLiquidationRows,
+	assertLiquidationRowsReinvestmentIntegrity,
 	canonicalizeLiquidationModeRows,
 	buildLiquidationComposition,
 	buildPurchaseTicketHistory,
@@ -24,6 +26,7 @@ import {
   buildCubeNetInterest,
   buildNetInterestDetail,
 	getPublicReinvestmentDetailError,
+	normalizeReinvestmentComponents,
 	summarizePurchaseDetails,
 	shouldIncludeInvestorPosition,
 } from "./reinvestmentReport";
@@ -808,9 +811,45 @@ export async function getReinversionLiquidaciones({
   const nextYear = mes === 12 ? anio + 1 : anio;
   const inicioMesSiguiente = `${nextYear}-${String(nextMonth).padStart(2, "0")}-01`;
 
+  // Valida cada liquidación antes de cualquier GROUP BY o asignación residual:
+  // una sobreasignación material no puede compensarse con otra fila y parecer
+  // una deriva agregada de un centavo.
+  const integrityRows = await db.execute(sql`
+    SELECT reinversion_capital, reinversion_interes, reinversion_total
+    FROM cartera.liquidaciones
+    WHERE (fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
+      AND (fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
+  `);
+  assertLiquidationRowsReinvestmentIntegrity(
+    (integrityRows.rows as Record<string, unknown>[]).map((row) => ({
+      reinvestedCapital: String(row.reinversion_capital ?? 0),
+      reinvestedRest: String(row.reinversion_interes ?? 0),
+      reinvestedTotal: String(row.reinversion_total ?? 0),
+    })),
+  );
+
   const result = await db.execute(sql`
     WITH liquidaciones_mes AS (
-      SELECT l.*
+      SELECT
+        l.*,
+        CASE
+          WHEN ROUND(l.reinversion_total::numeric, 2)
+            - ROUND(l.reinversion_capital::numeric, 2)
+            - ROUND(l.reinversion_interes::numeric, 2) = -0.01
+            AND ROUND(l.reinversion_interes::numeric, 2) > 0
+            THEN ROUND(l.reinversion_interes::numeric, 2) - 0.01
+          ELSE ROUND(l.reinversion_interes::numeric, 2)
+        END AS reinversion_interes_report,
+        CASE
+          WHEN ROUND(l.reinversion_total::numeric, 2)
+            - ROUND(l.reinversion_capital::numeric, 2)
+            - ROUND(l.reinversion_interes::numeric, 2) = -0.01
+            AND ROUND(l.reinversion_interes::numeric, 2) = 0
+            AND ROUND(l.reinversion_capital::numeric, 2) > 0
+            THEN ROUND(l.reinversion_capital::numeric, 2) - 0.01
+          ELSE ROUND(l.reinversion_capital::numeric, 2)
+        END AS reinversion_capital_report,
+        ROUND(l.reinversion_total::numeric, 2) AS reinversion_total_report
       FROM cartera.liquidaciones l
       WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
         AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
@@ -922,13 +961,13 @@ export async function getReinversionLiquidaciones({
         CASE
           WHEN d.tipo IN ('reinversion_capital', 'reinversion_total')
             AND d.peso_reinv_capital > 0
-            THEN d.reinversion_capital::numeric * d.peso_capital / d.peso_reinv_capital
+            THEN d.reinversion_capital_report * d.peso_capital / d.peso_reinv_capital
           ELSE 0
         END AS reinversion_capital_modo,
         CASE
           WHEN d.tipo IN ('reinversion_interes', 'reinversion_total')
             AND d.peso_reinv_interes > 0
-            THEN d.reinversion_interes::numeric * d.peso_interes / d.peso_reinv_interes
+            THEN d.reinversion_interes_report * d.peso_interes / d.peso_reinv_interes
           ELSE 0
         END AS reinversion_interes_modo
       FROM denominadores d
@@ -936,7 +975,7 @@ export async function getReinversionLiquidaciones({
     asignacion_residual AS (
       SELECT
         a.*,
-        a.reinversion_total::numeric - SUM(
+        a.reinversion_total_report - SUM(
           a.reinversion_capital_modo + a.reinversion_interes_modo
         ) OVER (PARTITION BY a.liquidacion_id) AS reinversion_residual,
         CASE
@@ -1018,9 +1057,14 @@ export async function getReinversionLiquidaciones({
   for (const r of modeRows) {
     const tipo = String(r.tipo ?? "sin_clasificar");
     const totalCapital = numericMoney(r.total_capital);
-    const reinversionCapital = numericMoney(r.reinversion_capital);
-    const reinversionInteres = numericMoney(r.reinversion_interes);
-    const reinversionTotal = numericMoney(r.reinversion_total);
+    const reinversionNormalizada = normalizeReinvestmentComponents({
+      reinvestedCapital: numericMoney(r.reinversion_capital),
+      reinvestedRest: numericMoney(r.reinversion_interes),
+      reinvestedTotal: numericMoney(r.reinversion_total),
+    });
+    const reinversionCapital = reinversionNormalizada.capital;
+    const reinversionInteres = reinversionNormalizada.rest;
+    const reinversionTotal = reinversionNormalizada.total;
     const totalCuota = numericMoney(r.total_cuota);
     porTipo[tipo] = {
       reinversion_capital: reinversionCapital,
@@ -1156,23 +1200,31 @@ export async function getReinversionLiquidaciones({
     SELECT
       l.inversionista_id,
       i.nombre,
-      CASE
-        WHEN COUNT(DISTINCT COALESCE(l.tipo_reinversion_snapshot::text, 'sin_clasificar')) = 1
-          THEN MIN(COALESCE(l.tipo_reinversion_snapshot::text, 'sin_clasificar'))
-        ELSE 'sin_clasificar'
-      END AS tipo_reinversion,
-      COALESCE(SUM(l.reinversion_capital::numeric), 0) AS reinversion_capital,
-      COALESCE(SUM(l.reinversion_interes::numeric), 0) AS reinversion_interes,
-      COALESCE(SUM(l.reinversion_total::numeric), 0)   AS reinversion,
-      COALESCE(SUM(l.total_cuota::numeric), 0)         AS a_recibir,
-      COALESCE(SUM(l.total_capital::numeric), 0)       AS total_capital
+      COALESCE(l.tipo_reinversion_snapshot::text, 'sin_clasificar') AS tipo_reinversion,
+      l.reinversion_capital,
+      l.reinversion_interes,
+      l.reinversion_total AS reinversion,
+      l.total_cuota AS a_recibir,
+      l.total_capital
     FROM cartera.liquidaciones l
     JOIN cartera.inversionistas i ON l.inversionista_id = i.inversionista_id
     WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
       AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
-    GROUP BY l.inversionista_id, i.nombre
-    ORDER BY i.nombre
+    ORDER BY i.nombre, l.liquidacion_id
   `);
+
+  const investorTotals = aggregateInvestorLiquidationRows(
+    (porInvRows.rows as Record<string, unknown>[]).map((row) => ({
+      inversionistaId: Number(row.inversionista_id),
+      nombre: String(row.nombre),
+      tipoReinversion: String(row.tipo_reinversion ?? "sin_clasificar"),
+      reinvestedCapital: String(row.reinversion_capital ?? 0),
+      reinvestedRest: String(row.reinversion_interes ?? 0),
+      reinvestedTotal: String(row.reinversion ?? 0),
+      paidTotal: String(row.a_recibir ?? 0),
+      totalCapital: String(row.total_capital ?? 0),
+    })),
+  );
 
   // Capital operativo actual desde el espejo canónico. La reinversión ya está
   // reflejada aquí, por lo que no se suma nuevamente desde la liquidación. Las
@@ -1217,12 +1269,12 @@ export async function getReinversionLiquidaciones({
     );
   }
 
-  const porInversionista = (porInvRows.rows as Record<string, unknown>[]).map(
+  const porInversionista = investorTotals.map(
     (r) => {
       const id = Number(r.inversionista_id);
-      const reinversionCapital = numericMoney(r.reinversion_capital);
-      const reinversionInteres = numericMoney(r.reinversion_interes);
-      const reinversion = numericMoney(r.reinversion);
+      const reinversionCapital = r.reinversion_capital;
+      const reinversionInteres = r.reinversion_interes;
+      const reinversion = r.reinversion;
       const aRecibir = numericMoney(r.a_recibir);
       return {
         inversionista_id: id,

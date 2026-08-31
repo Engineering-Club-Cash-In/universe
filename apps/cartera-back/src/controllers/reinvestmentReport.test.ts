@@ -3,8 +3,10 @@ import Big from "big.js";
 import {
   allocateRoundedAmounts,
   allocateRoundedPurchaseAmounts,
+  aggregateInvestorLiquidationRows,
   assertModeReconciliation,
   assertReportReconciliation,
+  assertLiquidationRowsReinvestmentIntegrity,
   buildLiquidationComposition,
   buildPurchaseTicketHistory,
   calculateActiveCapital,
@@ -13,6 +15,7 @@ import {
   canonicalizePurchaseSummaries,
   buildNetInterestDetail,
   getPublicReinvestmentDetailError,
+  normalizeReinvestmentComponents,
   summarizePurchaseDetails,
   shouldIncludeInvestorPosition,
 } from "./reinvestmentReport";
@@ -428,6 +431,114 @@ test("no inventa el destino capital/resto cuando falta composición de reinversi
   });
 });
 
+test("absorbe en el resto un centavo de deriva histórica sin romper el reporte", () => {
+  expect(buildLiquidationComposition({
+    totalCapital: "380.36",
+    paidTotal: "0.00",
+    reinvestedCapital: "380.36",
+    reinvestedRest: "390.53",
+    reinvestedTotal: "770.88",
+  })).toEqual({
+    pagado: { capital: "0.00", resto: "0.00", sin_clasificar: "0.00", total: "0.00" },
+    reinvertido: { capital: "380.36", resto: "390.52", sin_clasificar: "0.00", total: "770.88" },
+    flujo: { capital: "380.36", resto: "390.52", total: "770.88" },
+    estado: "exacto",
+  });
+});
+
+test("normaliza numeric grandes sin perder sus centavos", () => {
+  expect(normalizeReinvestmentComponents({
+    reinvestedCapital: "900719925474000.91",
+    reinvestedRest: "1.01",
+    reinvestedTotal: "900719925474001.91",
+  })).toEqual({
+    capital: "900719925474000.91",
+    rest: "1.00",
+    total: "900719925474001.91",
+    unclassified: "0.00",
+  });
+  expect(buildLiquidationComposition({
+    totalCapital: "900719925474000.91",
+    paidTotal: "0.00",
+    reinvestedCapital: "900719925474000.91",
+    reinvestedRest: "1.01",
+    reinvestedTotal: "900719925474001.91",
+  })).toEqual({
+    pagado: { capital: "0.00", resto: "0.00", sin_clasificar: "0.00", total: "0.00" },
+    reinvertido: {
+      capital: "900719925474000.91",
+      resto: "1.00",
+      sin_clasificar: "0.00",
+      total: "900719925474001.91",
+    },
+    flujo: {
+      capital: "900719925474000.91",
+      resto: "1.00",
+      total: "900719925474001.91",
+    },
+    estado: "exacto",
+  });
+});
+
+test("no oculta una inconsistencia mayor a un centavo", () => {
+  expect(() => buildLiquidationComposition({
+    totalCapital: "380.36",
+    paidTotal: "0.00",
+    reinvestedCapital: "380.36",
+    reinvestedRest: "390.54",
+    reinvestedTotal: "770.88",
+  })).toThrow("Composición de liquidación inválida");
+});
+
+test("valida cada liquidación antes de que derivas opuestas se compensen", () => {
+  expect(() => assertLiquidationRowsReinvestmentIntegrity([
+    {
+      reinvestedCapital: "100.00",
+      reinvestedRest: "100.05",
+      reinvestedTotal: "200.00",
+    },
+    {
+      reinvestedCapital: "100.00",
+      reinvestedRest: "99.96",
+      reinvestedTotal: "200.00",
+    },
+  ])).toThrow("Composición de liquidación inválida");
+});
+
+test("normaliza cada liquidación antes de sumar derivas por inversionista", () => {
+  expect(aggregateInvestorLiquidationRows([
+    {
+      inversionistaId: 7,
+      nombre: "Inversionista",
+      tipoReinversion: "reinversion_total",
+      reinvestedCapital: "100.00",
+      reinvestedRest: "100.01",
+      reinvestedTotal: "200.00",
+      paidTotal: "0.00",
+      totalCapital: "100.00",
+    },
+    {
+      inversionistaId: 7,
+      nombre: "Inversionista",
+      tipoReinversion: "reinversion_total",
+      reinvestedCapital: "50.00",
+      reinvestedRest: "50.01",
+      reinvestedTotal: "100.00",
+      paidTotal: "0.00",
+      totalCapital: "50.00",
+    },
+  ])).toEqual([{
+    inversionista_id: 7,
+    nombre: "Inversionista",
+    tipo_reinversion: "reinversion_total",
+    reinversion_capital: "150.00",
+    reinversion_interes: "150.00",
+    reinversion: "300.00",
+    a_recibir: "0.00",
+    total_capital: "150.00",
+  }]);
+});
+
 test("resume compras por modalidad de facturación, tipo de reinversión y clasificación", () => {
   expect(summarizePurchaseDetails([
     {
@@ -500,6 +611,9 @@ test("reporte agrupa liquidaciones por snapshot y publica legacy como sin clasif
   expect(report).toContain("cartera.historico_liquidaciones_espejo");
   expect(report).toContain("cartera.pagos_credito_inversionistas_espejo");
   expect(report).toContain("reinversion_residual");
+  expect(report).toContain("reinversion_interes_report");
+  expect(report).toContain("d.reinversion_interes_report * d.peso_interes");
+  expect(report).toContain("a.reinversion_total_report - SUM(");
   expect(report).toContain("COUNT(DISTINCT f.liquidacion_id)");
   expect(report).toContain("'sin_clasificar'");
   expect(report).not.toContain("GROUP BY i.tipo_reinversion");

@@ -381,6 +381,13 @@ ya está en aplicación (`READY_TO_APPLY`, `APPLYING`, `APPLICATION_FAILED`, `CO
   `mensajes.completo` listo para mandar. Solo cuenta la **generación vigente** de cada link:
   un `REPLACED` que se pagó tarde (queda `PAID` sin ser fuente de aplicación) no infla el
   conteo ni suma como pagado.
+- **Orden de los links (2026-08-31):** primero `MORA_INTERES`, después `CAPITAL`, en los tres
+  mensajes del bot (links nuevos, "te falta un pago" y estado). Es el orden en que cartera
+  aplica el dinero —la mora vigente se consume primero y solo con el dinero del link
+  `MORA_INTERES`, nunca con el de `CAPITAL`, [D-52](./DECISIONES.md#d-52--si-deuda-cambia-págalo-se-comporta-como-boleta-manual)—
+  así que *Pago 1 de 2* es siempre el de interés y mora. Vive en una sola constante
+  (`ORDEN_LINKS` en `pago-link.ts`): si se separa, el mismo link cambia de número según qué
+  mensaje lo mande.
 - **Booleanos (D-54, 2026-08-31):** el mismo veredicto viaja sin strings — `pagado`,
   `pagoParcial` y `sinPago` (exactamente uno en `true`), al lado de `success` **y** dentro de
   `data`; cada link trae su `linkNPagado` y su `pagado` dentro de `links[]`. `estado` se queda

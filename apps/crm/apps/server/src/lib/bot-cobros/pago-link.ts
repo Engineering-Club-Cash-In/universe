@@ -498,6 +498,24 @@ function titulosDe(cantidad: number): (indice: number) => string {
 	return (i) => (cantidad === 1 ? "Pago" : `Pago ${i + 1} de ${cantidad}`);
 }
 
+/**
+ * El orden en que el bot enumera los links: **primero MORA_INTERES, después
+ * CAPITAL**. No es cosmético: es el mismo orden en que cartera aplica el
+ * dinero —la mora vigente se consume primero y solo con el dinero del link
+ * MORA_INTERES, jamás con el de CAPITAL (D-52)—, así que "Pago 1 de 2" tiene
+ * que ser el de interés y mora.
+ *
+ * Vive en un solo lugar porque los tres mensajes del bot (los links nuevos,
+ * el "te falta uno" y el estado del servicio 9) numeran con `titulosDe`: si
+ * se separan, el mismo link cambia de número según qué mensaje lo mande.
+ */
+const ORDEN_LINKS: PagaloLinkType[] = ["MORA_INTERES", "CAPITAL"];
+
+const porOrdenDeLink = (
+	a: { linkType: PagaloLinkType },
+	b: { linkType: PagaloLinkType },
+) => ORDEN_LINKS.indexOf(a.linkType) - ORDEN_LINKS.indexOf(b.linkType);
+
 function linksParaElBot(
 	grupo: GrupoActivo,
 	soloPendientes = false,
@@ -507,11 +525,10 @@ function linksParaElBot(
 		(l) => l.status === "ACTIVE" || l.status === "PAID",
 	).length;
 	const titulo = titulosDe(total);
-	const orden: PagaloLinkType[] = ["CAPITAL", "MORA_INTERES"];
-	return orden.flatMap((tipo) => {
+	return ORDEN_LINKS.flatMap((tipo) => {
 		const posicion = grupo.links
 			.filter((l) => l.status === "ACTIVE" || l.status === "PAID")
-			.sort((a, b) => orden.indexOf(a.linkType) - orden.indexOf(b.linkType))
+			.sort(porOrdenDeLink)
 			.findIndex((l) => l.linkType === tipo);
 		const link = vivos.find((l) => l.linkType === tipo);
 		if (!link || posicion < 0) return [];
@@ -596,11 +613,7 @@ function mensajeParcial(grupo: GrupoActivo, pendiente: LinkParaElBot[]) {
 	const titulo = titulosDe(total);
 	const ordenados = grupo.links
 		.filter((l) => l.status === "ACTIVE" || l.status === "PAID")
-		.sort(
-			(a, b) =>
-				(a.linkType === "CAPITAL" ? -1 : 1) -
-				(b.linkType === "CAPITAL" ? -1 : 1),
-		);
+		.sort(porOrdenDeLink);
 	const tituloPagado = pagado
 		? titulo(ordenados.findIndex((l) => l.id === pagado.id))
 		: "un pago";
@@ -1338,7 +1351,6 @@ export function resumirEstadoLinks(grupo: GrupoActivo): {
 	estado: EstadoLinksBot;
 	links: LinkEstadoBot[];
 } {
-	const orden: PagaloLinkType[] = ["CAPITAL", "MORA_INTERES"];
 	const vigentePorTipo = new Map<
 		PagaloLinkType,
 		GrupoActivo["links"][number]
@@ -1350,7 +1362,7 @@ export function resumirEstadoLinks(grupo: GrupoActivo): {
 	}
 	const considerados = [...vigentePorTipo.values()]
 		.filter((l) => l.status === "ACTIVE" || l.status === "PAID")
-		.sort((a, b) => orden.indexOf(a.linkType) - orden.indexOf(b.linkType));
+		.sort(porOrdenDeLink);
 	const grupoPagado = ESTADOS_GRUPO_PAGADO.includes(grupo.status);
 	const titulo = titulosDe(considerados.length);
 	const links: LinkEstadoBot[] = considerados.map((l, i) => {

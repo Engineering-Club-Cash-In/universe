@@ -355,9 +355,10 @@ describe("estado de los links de la conversación (servicio 9)", () => {
 			]),
 		);
 		expect(r.estado).toBe("SIN_PAGO");
+		// Primero el de mora/interés: es el que cartera consume primero (D-52).
 		expect(r.links.map((l) => [l.titulo, l.estado, l.url])).toEqual([
-			["Pago 1 de 2", "PENDIENTE", "https://pagalo/CAPITAL"],
-			["Pago 2 de 2", "PENDIENTE", "https://pagalo/MORA_INTERES"],
+			["Pago 1 de 2", "PENDIENTE", "https://pagalo/MORA_INTERES"],
+			["Pago 2 de 2", "PENDIENTE", "https://pagalo/CAPITAL"],
 		]);
 		expect(mensajeEstadoLinks(r.estado, r.links)).toContain(
 			"Todavía no vemos ningún pago",
@@ -373,19 +374,21 @@ describe("estado de los links de la conversación (servicio 9)", () => {
 		);
 		expect(r.estado).toBe("PARCIAL");
 		expect(r.links[0]).toMatchObject({
+			tipo: "MORA_INTERES",
 			titulo: "Pago 1 de 2",
-			estado: "PAGADO",
-			url: null,
-		});
-		expect(r.links[1]).toMatchObject({
-			titulo: "Pago 2 de 2",
 			estado: "PENDIENTE",
 			url: "https://pagalo/MORA_INTERES",
 		});
+		expect(r.links[1]).toMatchObject({
+			tipo: "CAPITAL",
+			titulo: "Pago 2 de 2",
+			estado: "PAGADO",
+			url: null,
+		});
 		const m = mensajeEstadoLinks(r.estado, r.links);
-		expect(m).toContain("Recibimos tu *Pago 1 de 2* ✅");
+		expect(m).toContain("Recibimos tu *Pago 2 de 2* ✅");
 		expect(m).toContain(
-			"*Pago 2 de 2* (Q3,937.62): https://pagalo/MORA_INTERES",
+			"*Pago 1 de 2* (Q3,937.62): https://pagalo/MORA_INTERES",
 		);
 	});
 
@@ -446,16 +449,31 @@ describe("estado de los links de la conversación (servicio 9)", () => {
 			linksPagados: 1,
 			linksPendientes: 1,
 			link1Titulo: "Pago 1 de 2",
-			link1Estado: "PAGADO",
-			link1Pagado: true,
-			link1Monto: "800.00",
-			link1Url: null,
+			link1Estado: "PENDIENTE",
+			link1Pagado: false,
+			link1Monto: "3937.62",
+			link1Url: "https://pagalo/MORA_INTERES",
 			link2Titulo: "Pago 2 de 2",
-			link2Estado: "PENDIENTE",
-			link2Pagado: false,
-			link2Monto: "3937.62",
-			link2Url: "https://pagalo/MORA_INTERES",
+			link2Estado: "PAGADO",
+			link2Pagado: true,
+			link2Monto: "800.00",
+			link2Url: null,
 		});
+	});
+
+	test("el link de mora/interés va primero, sin importar cómo lleguen", () => {
+		// Es el orden en que cartera aplica el dinero: la mora vigente se
+		// consume primero y solo con el dinero del link MORA_INTERES (D-52).
+		// Si esto se voltea, "Pago 1 de 2" pasa a significar otro link y los
+		// mensajes del bot dejan de coincidir entre servicios.
+		const r = resumirEstadoLinks(
+			grupo("PENDING_PAYMENT", [
+				link("CAPITAL", "ACTIVE"),
+				link("MORA_INTERES", "ACTIVE"),
+			]),
+		);
+		expect(r.links.map((l) => l.tipo)).toEqual(["MORA_INTERES", "CAPITAL"]);
+		expect(r.links[0]?.titulo).toBe("Pago 1 de 2");
 	});
 
 	test("cada link trae su estado también en booleano (D-54)", () => {
@@ -465,7 +483,7 @@ describe("estado de los links de la conversación (servicio 9)", () => {
 				link("MORA_INTERES", "ACTIVE"),
 			]),
 		);
-		expect(r.links.map((l) => l.pagado)).toEqual([true, false]);
+		expect(r.links.map((l) => l.pagado)).toEqual([false, true]);
 		// el booleano nunca contradice al texto
 		expect(r.links.every((l) => l.pagado === (l.estado === "PAGADO"))).toBe(
 			true,

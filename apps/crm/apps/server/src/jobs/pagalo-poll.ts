@@ -752,25 +752,41 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 				resultado.sinCambios++;
 				continue;
 			}
-			if (status !== "2") {
-				await registrarIntentoFallido(link);
-				resultado.sinCambios++;
-				continue;
-			}
 
-			// Pagado. Traer el detalle real de la transacción (no. de transacción,
-			// tarjeta, fecha) por id_external — mismo authorization fijo, sin login.
+			// La fuente de verdad de "pagado" es la transacción
+			// (status_transaction === "ACCEPT" via validarTransaccionPagalo), no
+			// el status del request/link. Confirmado en sandbox: un link puede
+			// tener una transacción ACCEPT real (no. de transacción y auth
+			// asignados) mientras su `status` de request se queda en "1"
+			// (creado) sin transicionar nunca a "2" (pagado) — depender solo del
+			// status del link dejaba el pago invisible para siempre.
 			try {
 				const detalle: any = await client.getTransactionByIdExternalRaw(
 					link.externalIdentifier,
 				);
 				const transaccion: TransaccionPagalo | undefined = detalle?.transaction;
 				if (!transaccion) {
+					if (status !== "2") {
+						await registrarIntentoFallido(link);
+					} else {
+						await registrarIntentoFallido(
+							link,
+							"Págalo confirma link pagado pero no encontró la transacción por id_external.",
+						);
+					}
+					resultado.sinCambios++;
+					continue;
+				}
+				// Transacción existe pero no cerró ACCEPT (p.ej. rechazada, o
+				// todavía procesándose) — no es un error del job, es el estado
+				// normal de "aún no pagado". Sigue en backoff como cualquier
+				// otro link sin cambios.
+				if (transaccion.status_transaction !== "ACCEPT") {
 					await registrarIntentoFallido(
 						link,
-						"Págalo confirma link pagado pero no encontró la transacción por id_external.",
+						`Transacción Págalo en estado ${transaccion.status_transaction}, no ACCEPT.`,
 					);
-					resultado.errores++;
+					resultado.sinCambios++;
 					continue;
 				}
 				validarTransaccionPagalo(link, transaccion);

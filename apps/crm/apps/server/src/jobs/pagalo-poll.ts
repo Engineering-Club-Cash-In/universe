@@ -774,20 +774,35 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 				// ahí sí hay una anomalía que merece quedar visible en
 				// lastPollError, hallazgo de code review).
 				//
-				// Un 400 NUNCA marca terminal (status 3/4) directamente: solo
-				// confirma "no encontré transacción en este intento", no "no
-				// existe ninguna ACCEPT" — misma ambigüedad documentada arriba
-				// para el caso "2". Marcar terminal acá sin haber visto una
-				// respuesta 200 real (con o sin transacción) reintroduce el
-				// mismo bug que este PR arregla, por el camino del error
-				// (hallazgo de code review). El link sigue en backoff hasta que
-				// una consulta exitosa confirme la ausencia de ACCEPT.
+				// Un 400 aislado NO marca terminal (status 3/4) directamente:
+				// solo confirma "no encontré transacción en este intento", no
+				// "no existe ninguna ACCEPT" — misma ambigüedad documentada
+				// arriba para el caso "2". Marcar terminal en el primer 400
+				// reintroduce el mismo bug que este PR arregla, por el camino
+				// del error (hallazgo de code review). Pero tampoco reintentar
+				// para siempre: si Págalo confirma "no encontrado" de forma
+				// consistente durante UMBRAL_POLL_RETRY_EXHAUSTED intentos, ya
+				// no es una inconsistencia pasajera — un link genuinamente
+				// cancelado/expirado sin transacción real quedaría ACTIVE para
+				// siempre, su grupo nunca escala a REVIEW_REQUIRED, y el poll
+				// lo sigue consultando cada 30 min sin fin (hallazgo de code
+				// review).
 				if (
 					error instanceof PagaloClientError &&
 					error.status === 400 &&
 					status !== "2"
 				) {
-					await registrarIntentoFallido(link);
+					if (
+						(status === "3" || status === "4") &&
+						link.pollAttempts >= UMBRAL_POLL_RETRY_EXHAUSTED
+					) {
+						await marcarLinkTerminal(
+							link,
+							status === "3" ? "CANCELLED" : "EXPIRED",
+						);
+					} else {
+						await registrarIntentoFallido(link);
+					}
 					resultado.sinCambios++;
 					continue;
 				}

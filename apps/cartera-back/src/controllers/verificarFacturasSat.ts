@@ -35,11 +35,12 @@ const GRACE_MINUTES = 10;
 const REINTENTO_MS = 2000;
 // Cuarentena del correo: una fallida recién detectada NO se reporta todavía.
 // Tiene que seguir sin aparecer en SAT después de varias corridas del job y
-// llevar un rato detectada. Una factura fantasma real se reporta igual (a lo
-// sumo una hora más tarde); un falso positivo por lentitud de COFIDI lo resuelve
-// revalidarPendientes() antes de que llegue a alarmar a nadie.
-const MIN_INTENTOS_PARA_REPORTAR = 2;
-const MIN_MINUTOS_PARA_REPORTAR = 30;
+// llevar horas detectada. El 31/08 se midió el peor caso: SAT tardó más de una
+// hora en procesar un lote de 73 facturas y las fue soltando de a poco, así que
+// media hora de espera no alcanza. Tres horas sí, y una factura fantasma real
+// sigue siendo fantasma a las tres horas: se reporta igual, solo más tarde.
+const MIN_INTENTOS_PARA_REPORTAR = 4;
+const MIN_MINUTOS_PARA_REPORTAR = 180;
 // Los dos jobs (el de 15 min y el del correo) revalidan. Sin esta guarda, una
 // misma ventana mala de COFIDI contaría como dos intentos independientes.
 const MIN_MINUTOS_ENTRE_INTENTOS = 5;

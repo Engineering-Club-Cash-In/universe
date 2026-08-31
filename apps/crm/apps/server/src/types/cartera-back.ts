@@ -196,11 +196,21 @@ export interface CreditoDetailResponse {
 		nombre: string;
 		color: string | null;
 	} | null;
-	/**
-	 * `true` solo si `bucket` salió de última fila de `buckets_historial`.
-	 * Ausente/false indica fallback derivado: nunca usar para autorización.
-	 */
-	bucket_es_autoritativo?: boolean;
+}
+
+/** Créditos actuales de los buckets activos de un asesor, solo desde historial del motor. */
+export interface GetSifcosPoolAutoritativosParams {
+	asesorId: number;
+	page?: number;
+	perPage?: number;
+}
+
+export interface CarteraSifcosPoolAutoritativosResponse {
+	data: string[];
+	page: number;
+	perPage: number;
+	total: number;
+	totalPages: number;
 }
 
 /** Fila del listado /buckets/creditos: CreditoDetailResponse + el bucket derivado. */

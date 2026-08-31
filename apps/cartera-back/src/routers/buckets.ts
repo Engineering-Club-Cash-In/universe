@@ -13,6 +13,7 @@ import {
   reasignarAsesorManual,
 } from "../controllers/buckets/reasignarAsesor";
 import { getPoolPorAsesor } from "../controllers/buckets/poolPorAsesor";
+import { getSifcosPoolAutoritativos } from "../controllers/buckets/sifcosPoolAutoritativos";
 import { getCargaPorAsesorBucket } from "../controllers/buckets/cargaAsesorBucket";
 import { actualizarCapacidadAsesorBucket } from "../controllers/buckets/actualizarAsesorBucket";
 import { getColaDiaSLA } from "../controllers/buckets/colaDia";
@@ -211,6 +212,41 @@ export const bucketsRouter = new Elysia()
         pago_id: t.Optional(t.String()),
         page: t.Optional(t.String()),
         pageSize: t.Optional(t.String()),
+      }),
+    },
+  )
+
+  // Universo actual y autoritativo de un pool: CRM lo cruza contra sus grupos
+  // Págalo sin escanear su historial completo en Cartera Back.
+  .get(
+    "/buckets/pool-sifcos",
+    async ({ query, set, user }: any) => {
+      if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+      const asesorId = Number(query.asesor_id);
+      if (!Number.isInteger(asesorId) || asesorId <= 0) {
+        set.status = 400;
+        return { success: false, message: "[ERROR] asesor_id inválido" };
+      }
+      try {
+        return await getSifcosPoolAutoritativos({
+          asesor_id: asesorId,
+          page: query.page !== undefined ? Number(query.page) : undefined,
+          perPage: query.perPage !== undefined ? Number(query.perPage) : undefined,
+        });
+      } catch (err) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "[ERROR] No se pudo obtener el pool de créditos",
+          error: String(err),
+        };
+      }
+    },
+    {
+      query: t.Object({
+        asesor_id: t.String(),
+        page: t.Optional(t.String()),
+        perPage: t.Optional(t.String()),
       }),
     },
   )

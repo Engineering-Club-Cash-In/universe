@@ -21,21 +21,15 @@ import {
 	pagaloPaymentGroups,
 	pagaloPaymentLinks,
 } from "../db/schema/pagalo-payments";
-import { mapWithConcurrency } from "../lib/fetch-all-pages";
+import { fetchAllPages } from "../lib/fetch-all-pages";
 import { cobrosProcedure } from "../lib/orpc";
-import {
-	buscarAsesorPorEmail,
-	dividirEnLotes,
-	sifcosEnBucketsPermitidos,
-} from "../lib/pagalo-supervision-acceso";
+import { buscarAsesorPorEmail } from "../lib/pagalo-supervision-acceso";
 import {
 	condicionesFiltro,
 	condicionGrupoProblematico,
 } from "../lib/pagalo-supervision-filtros";
 import { PERMISSIONS } from "../lib/roles";
 import { carteraBackClient } from "../services/cartera-back-client";
-
-const SIFCOS_POR_LOTE = 50;
 
 async function resolverScopeAsesorPagalo(email: string | null | undefined) {
 	const asesores = await carteraBackClient.getPoolPorAsesor({
@@ -47,45 +41,18 @@ async function resolverScopeAsesorPagalo(email: string | null | undefined) {
 		return { bucketsAsignados, sifcosPermitidos: new Set<string>() };
 	}
 
-	const sifcosPagalo = await db
-		.selectDistinct({
-			numeroCreditoSifco: pagaloPaymentGroups.numeroCreditoSifco,
-		})
-		.from(pagaloPaymentGroups);
-	if (sifcosPagalo.length === 0) {
-		return { bucketsAsignados, sifcosPermitidos: new Set<string>() };
-	}
-
-	const respuestas = await mapWithConcurrency(
-		dividirEnLotes(
-			sifcosPagalo.map((grupo) => grupo.numeroCreditoSifco),
-			SIFCOS_POR_LOTE,
-		),
-		4,
-		async (sifcos) =>
-			await carteraBackClient.getAllCreditos(
-				{
-					mes: 0,
-					anio: new Date().getFullYear(),
-					page: 1,
-					perPage: sifcos.length,
-					numeros_credito_sifco: sifcos,
-				},
-				{ useCache: false },
-			),
-	);
-
 	return {
 		bucketsAsignados,
-		sifcosPermitidos: sifcosEnBucketsPermitidos(
-			respuestas.flatMap((respuesta) =>
-				respuesta.data.map((credito) => ({
-					numeroCreditoSifco: credito.creditos.numero_credito_sifco,
-					bucketNumero: credito.bucket?.numero ?? null,
-					bucketEsAutoritativo: credito.bucket_es_autoritativo === true,
-				})),
+		sifcosPermitidos: new Set(
+			await fetchAllPages(
+				(page) =>
+					carteraBackClient.getSifcosPoolAutoritativos({
+						asesorId: asesor.asesor_id,
+						page,
+						perPage: 500,
+					}),
+				{ maxPages: 200, concurrency: 4 },
 			),
-			bucketsAsignados,
 		),
 	};
 }

@@ -27,6 +27,7 @@ import type {
 	CarteraConvenioProximosResponse,
 	CarteraCredito,
 	CarteraCuotasProximasResponse,
+	CarteraSifcosPoolAutoritativosResponse,
 	CarteraInversionista,
 	CarteraPagoCredito,
 	CarteraPagoCreditoInversionista,
@@ -54,6 +55,7 @@ import type {
 	GetInvestorReportParams,
 	GetInvestorsParams,
 	GetPaymentsParams,
+	GetSifcosPoolAutoritativosParams,
 	InversionistaReporte,
 	LiquidatePagosInversionistasInput,
 	PaginatedResponse,
@@ -1425,9 +1427,7 @@ export class CarteraBackClient {
 
 	async getAllCreditos(
 		params: GetAllCreditsParams,
-		options?: { useCache?: boolean },
 	): Promise<PaginatedResponse<CreditoDetailResponse>> {
-		const useCache = options?.useCache ?? true;
 		// Si la lista de SIFCOs es grande, usar POST para evitar URL too long
 		// (414). Threshold conservador: ~50 SIFCOs * 15 chars ≈ 750 bytes, muy
 		// por debajo de cualquier límite. Por arriba de eso, body en POST.
@@ -1548,7 +1548,6 @@ export class CarteraBackClient {
 			response = await this.request<PaginatedResponse<CreditoDetailResponse>>(
 				`/getAllCredits?${queryParams}`,
 				{ method: "GET" },
-				useCache,
 			);
 		}
 
@@ -2003,6 +2002,26 @@ export class CarteraBackClient {
 			total: response.totalCount,
 			totalPages: response.totalPages,
 		};
+	}
+
+	/**
+	 * SIFCOs activos en buckets del pool actual del asesor. Cartera Back resuelve
+	 * el último registro de `buckets_historial`: no hay fallback derivado.
+	 */
+	async getSifcosPoolAutoritativos(
+		params: GetSifcosPoolAutoritativosParams,
+	): Promise<CarteraSifcosPoolAutoritativosResponse> {
+		const queryParams = new URLSearchParams({
+			asesor_id: String(params.asesorId),
+			...(params.page !== undefined && { page: String(params.page) }),
+			...(params.perPage !== undefined && { perPage: String(params.perPage) }),
+		});
+		const response = await this.request<CarteraSifcosPoolAutoritativosResponse>(
+			`/buckets/pool-sifcos?${queryParams}`,
+			{ method: "GET" },
+			false,
+		);
+		return response;
 	}
 
 	// CB-027: listado paginado de convenios de pago (con cliente/SIFCO/asesor

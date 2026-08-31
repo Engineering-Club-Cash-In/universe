@@ -322,6 +322,8 @@ function VehiclesDashboard() {
 		vehicleUse: "",
 		series: "",
 		iscvCode: "",
+		cylinders: "",
+		engineCC: "",
 	});
 
 	// Evidence modal state
@@ -370,6 +372,8 @@ function VehiclesDashboard() {
 				vehicleUse: data.vehicleUse || undefined,
 				series: data.series || undefined,
 				iscvCode: data.iscvCode || undefined,
+				cylinders: data.cylinders || undefined,
+				engineCC: data.engineCC || undefined,
 			}),
 		onSuccess: () => {
 			toast.success("Vehículo creado exitosamente");
@@ -397,6 +401,8 @@ function VehiclesDashboard() {
 				vehicleUse: "",
 				series: "",
 				iscvCode: "",
+				cylinders: "",
+				engineCC: "",
 			});
 		},
 		onError: (err: any) => {
@@ -442,6 +448,8 @@ function VehiclesDashboard() {
 		vehicleUse: "",
 		series: "",
 		iscvCode: "",
+		cylinders: "",
+		engineCC: "",
 	});
 
 	// Un vehículo vendido no se puede editar: primero hay que pasarlo a
@@ -479,6 +487,8 @@ function VehiclesDashboard() {
 					vehicleUse: data.vehicleUse || null,
 					series: data.series || null,
 					iscvCode: data.iscvCode || null,
+					cylinders: data.cylinders || null,
+					engineCC: data.engineCC || null,
 				},
 			}),
 		onSuccess: () => {
@@ -860,6 +870,8 @@ function VehiclesDashboard() {
 																				vehicleUse: vehicle.vehicleUse || "",
 																				series: vehicle.series || "",
 																				iscvCode: vehicle.iscvCode || "",
+																				cylinders: vehicle.cylinders || "",
+																				engineCC: vehicle.engineCC || "",
 																			});
 																			setIsEditVehicleOpen(true);
 																		}}
@@ -1150,6 +1162,8 @@ function VehiclesDashboard() {
 											vehicleUse: selectedVehicle.vehicleUse || "",
 											series: selectedVehicle.series || "",
 											iscvCode: selectedVehicle.iscvCode || "",
+											cylinders: selectedVehicle.cylinders || "",
+											engineCC: selectedVehicle.engineCC || "",
 										});
 										isTransitioningToEditRef.current = true;
 										setIsDetailsOpen(false);
@@ -2409,6 +2423,34 @@ function VehiclesDashboard() {
 										placeholder="ISCV"
 									/>
 								</div>
+								<div className="space-y-2">
+									<Label htmlFor="cylinders">Cilindros</Label>
+									<Input
+										id="cylinders"
+										value={newVehicleForm.cylinders}
+										onChange={(e) =>
+											setNewVehicleForm({
+												...newVehicleForm,
+												cylinders: e.target.value,
+											})
+										}
+										placeholder="Ej. 4"
+									/>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="engineCC">Motor (CC)</Label>
+									<Input
+										id="engineCC"
+										value={newVehicleForm.engineCC}
+										onChange={(e) =>
+											setNewVehicleForm({
+												...newVehicleForm,
+												engineCC: e.target.value,
+											})
+										}
+										placeholder="Ej. 2000"
+									/>
+								</div>
 							</div>
 						</div>
 
@@ -2978,6 +3020,36 @@ function VehiclesDashboard() {
 											})
 										}
 										placeholder="Código ISCV"
+									/>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="edit-cylinders">Cilindros</Label>
+									<Input
+										id="edit-cylinders"
+										disabled={isVehicleSoldLocked}
+										value={editVehicleForm.cylinders}
+										onChange={(e) =>
+											setEditVehicleForm({
+												...editVehicleForm,
+												cylinders: e.target.value,
+											})
+										}
+										placeholder="Ej. 4"
+									/>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="edit-engineCC">Motor (CC)</Label>
+									<Input
+										id="edit-engineCC"
+										disabled={isVehicleSoldLocked}
+										value={editVehicleForm.engineCC}
+										onChange={(e) =>
+											setEditVehicleForm({
+												...editVehicleForm,
+												engineCC: e.target.value,
+											})
+										}
+										placeholder="Ej. 2000"
 									/>
 								</div>
 							</div>

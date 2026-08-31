@@ -1731,6 +1731,7 @@ export const crmRouter = {
 				id: opportunities.id,
 				title: opportunities.title,
 				vehicleId: opportunities.vehicleId,
+				vendorId: opportunities.vendorId,
 				creditType: opportunities.creditType,
 				value: opportunities.value,
 				probability: opportunities.probability,
@@ -1806,6 +1807,7 @@ export const crmRouter = {
 				},
 				vehicle: {
 					id: vehicles.id,
+					vendorId: vehicles.vendorId,
 					make: vehicles.make,
 					model: vehicles.model,
 					year: vehicles.year,
@@ -2302,6 +2304,9 @@ export const crmRouter = {
 				assignedTo: z.string().optional(), // Better Auth user ID (text, not UUID)
 				notes: z.string().optional(),
 				stageChangeReason: z.string().optional(),
+				// Vehicle vendor. Sigue siendo opcional: null lo desasigna, y
+				// permite corregirlo cuando no se eligió al crear la oportunidad.
+				vendorId: z.string().uuid().nullable().optional(),
 				// Credit terms
 				numeroCuotas: z.number().int().positive().optional(),
 				tasaInteres: z.string().optional(),
@@ -2757,6 +2762,23 @@ export const crmRouter = {
 			const vehicleChanged =
 				input.vehicleId !== undefined &&
 				input.vehicleId !== currentOpportunity[0].vehicleId;
+
+			// La compañía representa la agencia únicamente para vehículos nuevos.
+			// Si se cambia a un usado (o se quita el vehículo), no conservar una
+			// compañía heredada o enviada por un caller de la API.
+			if (vehicleChanged) {
+				const [newVehicle] = input.vehicleId
+					? await db
+							.select({ isNew: vehicles.isNew })
+							.from(vehicles)
+							.where(eq(vehicles.id, input.vehicleId))
+							.limit(1)
+					: [];
+
+				if (newVehicle?.isNew !== true) {
+					updateData.companyId = null;
+				}
+			}
 			const currentInsuranceProvider =
 				currentOpportunity[0].insuranceProvider ?? "universales";
 			const insuranceFallback =

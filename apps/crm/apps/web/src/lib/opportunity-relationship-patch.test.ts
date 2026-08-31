@@ -100,6 +100,51 @@ describe("buildOpportunityRelationshipPatch", () => {
 			}),
 		).toEqual({ vehicleId: "66666666-6666-4666-8666-666666666666" });
 	});
+
+	test("clears company when the selected vehicle is used", () => {
+		expect(
+			buildOpportunityRelationshipPatch({
+				values: {
+					leadId: currentOpportunity.lead.id,
+					companyId: currentOpportunity.company.id,
+					vehicleId: "66666666-6666-4666-8666-666666666666",
+				},
+				opportunity: currentOpportunity,
+				vehicleIsNew: false,
+			}),
+		).toEqual({
+			companyId: null,
+			vehicleId: "66666666-6666-4666-8666-666666666666",
+		});
+	});
+
+	test("preserves company on unrelated edits to a used vehicle", () => {
+		expect(
+			buildOpportunityRelationshipPatch({
+				values: {
+					leadId: currentOpportunity.lead.id,
+					companyId: currentOpportunity.company.id,
+					vehicleId: currentOpportunity.vehicleId,
+				},
+				opportunity: currentOpportunity,
+				vehicleIsNew: false,
+			}),
+		).toEqual({});
+	});
+
+	test("keeps the selected company for a new vehicle", () => {
+		expect(
+			buildOpportunityRelationshipPatch({
+				values: {
+					leadId: currentOpportunity.lead.id,
+					companyId: currentOpportunity.company.id,
+					vehicleId: "66666666-6666-4666-8666-666666666666",
+				},
+				opportunity: currentOpportunity,
+				vehicleIsNew: true,
+			}),
+		).toEqual({ vehicleId: "66666666-6666-4666-8666-666666666666" });
+	});
 });
 
 describe("opportunity edit submit relationship patch", () => {

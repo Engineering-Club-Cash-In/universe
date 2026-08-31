@@ -82,6 +82,7 @@ async function resolverScopeAsesorPagalo(email: string | null | undefined) {
 				respuesta.data.map((credito) => ({
 					numeroCreditoSifco: credito.creditos.numero_credito_sifco,
 					bucketNumero: credito.bucket?.numero ?? null,
+					bucketEsAutoritativo: credito.bucket_es_autoritativo === true,
 				})),
 			),
 			bucketsAsignados,

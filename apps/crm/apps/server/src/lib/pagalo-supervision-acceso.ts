@@ -8,6 +8,7 @@ export type AsesorPoolPagalo = {
 export type CreditoBucketPagalo = {
 	numeroCreditoSifco: string;
 	bucketNumero: number | null;
+	bucketEsAutoritativo: boolean;
 };
 
 const normalizarEmail = (email: string | null | undefined) =>
@@ -46,7 +47,9 @@ export function sifcosEnBucketsPermitidos(
 		creditos
 			.filter(
 				(credito) =>
-					credito.bucketNumero !== null && buckets.has(credito.bucketNumero),
+					credito.bucketEsAutoritativo &&
+					credito.bucketNumero !== null &&
+					buckets.has(credito.bucketNumero),
 			)
 			.map((credito) => credito.numeroCreditoSifco),
 	);

@@ -196,6 +196,11 @@ export interface CreditoDetailResponse {
 		nombre: string;
 		color: string | null;
 	} | null;
+	/**
+	 * `true` solo si `bucket` salió de última fila de `buckets_historial`.
+	 * Ausente/false indica fallback derivado: nunca usar para autorización.
+	 */
+	bucket_es_autoritativo?: boolean;
 }
 
 /** Fila del listado /buckets/creditos: CreditoDetailResponse + el bucket derivado. */

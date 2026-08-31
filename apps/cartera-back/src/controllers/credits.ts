@@ -718,6 +718,8 @@ export interface CreditoConInfo {
     nombre: string;
     color: string | null;
   } | null;
+  /** `true` solo cuando `bucket` viene de `buckets_historial`, no de fallback vivo. */
+  bucket_es_autoritativo: boolean;
 }
 
 // 🔥 Función auxiliar para calcular proximidad (con zona horaria de Guatemala)
@@ -1567,6 +1569,8 @@ export async function getCreditosWithUserByMesAnio(
             );
         const bucket =
           numeroBucket == null ? null : bucketDisplayMap.get(numeroBucket) ?? null;
+        const bucket_es_autoritativo =
+          numeroBucket !== null && ultimoBucketMap.has(creditoId);
 
         creditosUnicos.set(creditoId, {
           creditos: row.creditos,
@@ -1584,6 +1588,7 @@ export async function getCreditosWithUserByMesAnio(
           fecha_inicio,
           aseguradora: row.aseguradora_nombre ?? null,
           bucket,
+          bucket_es_autoritativo,
         });
       }
     });

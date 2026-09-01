@@ -101,7 +101,7 @@ describe("buildOpportunityRelationshipPatch", () => {
 		).toEqual({ vehicleId: "66666666-6666-4666-8666-666666666666" });
 	});
 
-	test("clears company when the selected vehicle is used", () => {
+	test("preserves the selected predio when the vehicle changes to used", () => {
 		expect(
 			buildOpportunityRelationshipPatch({
 				values: {
@@ -110,10 +110,24 @@ describe("buildOpportunityRelationshipPatch", () => {
 					vehicleId: "66666666-6666-4666-8666-666666666666",
 				},
 				opportunity: currentOpportunity,
-				vehicleIsNew: false,
 			}),
 		).toEqual({
-			companyId: null,
+			vehicleId: "66666666-6666-4666-8666-666666666666",
+		});
+	});
+
+	test("allows changing predio together with a used vehicle", () => {
+		expect(
+			buildOpportunityRelationshipPatch({
+				values: {
+					leadId: currentOpportunity.lead.id,
+					companyId: "44444444-4444-4444-8444-444444444444",
+					vehicleId: "66666666-6666-4666-8666-666666666666",
+				},
+				opportunity: currentOpportunity,
+			}),
+		).toEqual({
+			companyId: "44444444-4444-4444-8444-444444444444",
 			vehicleId: "66666666-6666-4666-8666-666666666666",
 		});
 	});
@@ -127,7 +141,6 @@ describe("buildOpportunityRelationshipPatch", () => {
 					vehicleId: currentOpportunity.vehicleId,
 				},
 				opportunity: currentOpportunity,
-				vehicleIsNew: false,
 			}),
 		).toEqual({});
 	});
@@ -141,7 +154,6 @@ describe("buildOpportunityRelationshipPatch", () => {
 					vehicleId: "66666666-6666-4666-8666-666666666666",
 				},
 				opportunity: currentOpportunity,
-				vehicleIsNew: true,
 			}),
 		).toEqual({ vehicleId: "66666666-6666-4666-8666-666666666666" });
 	});
@@ -193,5 +205,20 @@ describe("opportunity edit submit relationship patch", () => {
 		expect(inputContract).toContain(
 			"companyId: z.string().uuid().nullable().optional()",
 		);
+	});
+
+	test("edit exposes company for agencia and predio", () => {
+		const webSource = readFileSync(
+			join(import.meta.dir, "../routes/crm/opportunities.tsx"),
+			"utf8",
+		);
+		const companyFieldMarker = '<editOpportunityForm.Field name="companyId">';
+		const companyFieldIndex = webSource.indexOf(companyFieldMarker);
+		expect(companyFieldIndex).toBeGreaterThanOrEqual(0);
+		const companyField = webSource.slice(
+			companyFieldIndex - 300,
+			companyFieldIndex + 300,
+		);
+		expect(companyField).not.toContain("editedVehicleIsNew === true");
 	});
 });

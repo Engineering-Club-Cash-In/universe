@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { creditosVigentesSql } from "./moraCapitalCartera";
+import { creditosElegiblesMoraSql } from "./moraCapitalCartera";
 import { snapCte } from "./moraSnapshotSql";
 
 export type MoraRecoverySourceRow = {
@@ -116,7 +116,7 @@ export function buildMoraRecoveryQuery({
       SELECT c.credito_id, c.asesor_id, a.nombre
       FROM cartera.creditos c
       LEFT JOIN cartera.asesores a ON a.asesor_id = c.asesor_id
-      WHERE c."statusCredit" IN (${creditosVigentesSql})
+      WHERE c."statusCredit" IN (${creditosElegiblesMoraSql})
         ${emailFilter}
         ${asesoresFilter}
     ),

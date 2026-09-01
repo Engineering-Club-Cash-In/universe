@@ -9,7 +9,7 @@ import {
 } from "./moraRecuperacion";
 import {
   buildCapitalCarteraQuery,
-  creditosVigentesSql,
+  creditosElegiblesMoraSql,
 } from "./moraCapitalCartera";
 import { snapCte } from "./moraSnapshotSql";
 import {
@@ -1806,7 +1806,7 @@ export async function getMoraByEtapaYAsesor({
       FROM mora_activa m
       INNER JOIN cartera.creditos c ON c.credito_id = m.credito_id
       INNER JOIN cartera.asesores a ON a.asesor_id  = c.asesor_id
-      WHERE c."statusCredit" IN (${creditosVigentesSql})
+      WHERE c."statusCredit" IN (${creditosElegiblesMoraSql})
         ${emailFilter}
         ${asesoresFilter}
       GROUP BY a.asesor_id, a.nombre, a.email_cash_in, bucket
@@ -1838,7 +1838,7 @@ export async function getMoraByEtapaYAsesor({
     INNER JOIN cartera.creditos c ON c.credito_id = s.credito_id
     INNER JOIN cartera.asesores a ON a.asesor_id  = c.asesor_id
     WHERE s.tipo_evento <> 'DESACTIVACION' AND s.monto > 0 AND s.cuotas > 0
-      AND c."statusCredit" IN (${creditosVigentesSql})
+      AND c."statusCredit" IN (${creditosElegiblesMoraSql})
       ${emailFilter}
       ${asesoresFilter}
     GROUP BY a.asesor_id, a.nombre, a.email_cash_in, bucket

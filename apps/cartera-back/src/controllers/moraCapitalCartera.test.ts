@@ -10,11 +10,12 @@ describe("capital de cartera para aging", () => {
 
     expect(query.sql).toContain("SELECT DISTINCT c.credito_id");
     expect(query.sql).toContain("SUM(capital)");
-    expect(query.sql).toContain(
-      "'ACTIVO', 'MOROSO', 'EN_CONVENIO'",
-    );
+    expect(query.sql).toContain("IN ('ACTIVO', 'MOROSO')");
     expect(query.sql).not.toContain("PENDIENTE_CANCELACION");
     expect(query.sql).not.toContain("INCOBRABLE");
+    expect(query.sql).not.toContain("EN_CONVENIO");
+    expect(query.sql).not.toContain("CANCELADO");
+    expect(query.sql).not.toContain("CAIDO");
     expect(query.sql).toContain("LOWER(a.email_cash_in) = LOWER(TRIM($1))");
     expect(query.params).toEqual(["ana@example.com", 7, 9]);
   });
@@ -27,7 +28,7 @@ describe("capital de cartera para aging", () => {
     );
 
     expect(
-      getMoraSource.match(/c\."statusCredit" IN \(\$\{creditosVigentesSql\}\)/g),
+      getMoraSource.match(/c\."statusCredit" IN \(\$\{creditosElegiblesMoraSql\}\)/g),
     ).toHaveLength(2);
   });
 

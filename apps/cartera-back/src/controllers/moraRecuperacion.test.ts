@@ -54,11 +54,12 @@ describe("buildMoraRecoveryReport", () => {
 		});
 		expect(query.sql).toContain("FULL JOIN pagos_por_credito");
 		expect(query.sql).toContain("moras_historial");
-		expect(query.sql).toContain(
-			"'ACTIVO', 'MOROSO', 'EN_CONVENIO'",
-		);
+		expect(query.sql).toContain("IN ('ACTIVO', 'MOROSO')");
 		expect(query.sql).not.toContain("PENDIENTE_CANCELACION");
 		expect(query.sql).not.toContain("INCOBRABLE");
+		expect(query.sql).not.toContain("EN_CONVENIO");
+		expect(query.sql).not.toContain("CANCELADO");
+		expect(query.sql).not.toContain("CAIDO");
 		expect(query.sql).toContain("LOWER(a.email_cash_in) = LOWER(TRIM($2))");
 		expect(query.sql).toContain("a.asesor_id IN ($3, $4)");
 		expect(query.sql).toContain("COALESCE(ca.nombre, 'Sin asignar')");
@@ -73,7 +74,7 @@ describe("buildMoraRecoveryReport", () => {
 	});
 
 	it("usa la misma población vigente para recuperación live e histórica", () => {
-		const statusPopulation = "'ACTIVO', 'MOROSO', 'EN_CONVENIO'";
+		const statusPopulation = "'ACTIVO', 'MOROSO'";
 		for (const alcance of ["live", "historico"] as const) {
 			const query = new PgDialect().sqlToQuery(
 				buildMoraRecoveryQuery({

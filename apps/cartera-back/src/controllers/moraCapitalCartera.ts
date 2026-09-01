@@ -1,8 +1,6 @@
 import { sql } from "drizzle-orm";
 
-export const creditosVigentesSql = sql.raw(
-  "'ACTIVO', 'MOROSO', 'EN_CONVENIO'",
-);
+export const creditosElegiblesMoraSql = sql.raw("'ACTIVO', 'MOROSO'");
 
 export function buildCapitalCarteraQuery(
   emailCobrador?: string,
@@ -21,7 +19,7 @@ export function buildCapitalCarteraQuery(
         a.asesor_id, a.nombre, a.email_cash_in AS email_asesor
       FROM cartera.creditos c
       INNER JOIN cartera.asesores a ON a.asesor_id = c.asesor_id
-      WHERE c."statusCredit" IN (${creditosVigentesSql})
+      WHERE c."statusCredit" IN (${creditosElegiblesMoraSql})
         ${emailFilter}
         ${asesoresFilter}
     )

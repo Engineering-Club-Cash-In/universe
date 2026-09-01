@@ -319,19 +319,31 @@ async function armarComando(group: GrupoClaimado) {
  */
 let mapaAsesoresCache: {
 	promesa: Promise<Map<number, string>>;
-	expira: number;
+	expira: number | null;
 } | null = null;
 const MAPA_ASESORES_TTL_MS = 10_000;
 
 function obtenerMapaAsesoresCompartido(): Promise<Map<number, string>> {
 	const ahora = Date.now();
-	if (!mapaAsesoresCache || mapaAsesoresCache.expira < ahora) {
-		mapaAsesoresCache = {
-			promesa: construirMapaAsesorUsuario({ useCircuitBreaker: false }).catch(
-				() => new Map<number, string>(),
-			),
-			expira: ahora + MAPA_ASESORES_TTL_MS,
-		};
+	// `expira: null` = todavía en vuelo — se retiene SIN importar cuánto lleve
+	// (el GET puede tardar hasta ~90s con reintentos); el TTL solo arranca a
+	// contar una vez que la promesa resuelve, si no una llamada lenta caduca
+	// el caché a mitad de camino y el siguiente grupo dispara otra llamada en
+	// paralelo — justo el escenario degradado que esto debía evitar
+	// (hallazgo Codex).
+	if (
+		!mapaAsesoresCache ||
+		(mapaAsesoresCache.expira ?? Number.POSITIVE_INFINITY) < ahora
+	) {
+		const promesa = construirMapaAsesorUsuario({
+			useCircuitBreaker: false,
+		}).catch(() => new Map<number, string>());
+		mapaAsesoresCache = { promesa, expira: null };
+		promesa.finally(() => {
+			if (mapaAsesoresCache?.promesa === promesa) {
+				mapaAsesoresCache.expira = Date.now() + MAPA_ASESORES_TTL_MS;
+			}
+		});
 	}
 	return mapaAsesoresCache.promesa;
 }
@@ -368,6 +380,13 @@ async function resolverAsesorVigente(
  * en APPLYING reintentando para siempre el mismo import (hallazgo Codex).
  * Best-effort real: se resuelve DESPUÉS de que el grupo ya quedó COMPLETED,
  * y cualquier fallo solo se loguea.
+ *
+ * `resolverAsesorVigente` hace una llamada a `/credito` POR GRUPO (una por
+ * crédito, no compartible como el catálogo de arriba) — un backlog muy
+ * grande completándose junto podría lanzar varias en paralelo. Riesgo
+ * aceptado: degradación de carga bajo un escenario raro, no pérdida de
+ * datos ni bloqueo del flujo de pagos (mismo criterio que la ventana de
+ * pérdida de notificación ya aceptada más abajo).
  */
 async function notificarAsesorPagoAplicado(
 	group: GrupoClaimado,

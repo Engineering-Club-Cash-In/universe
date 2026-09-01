@@ -49,8 +49,7 @@ import { ejecutarAgendaCobrosDiariaConReintentos } from "./jobs/agenda-cobros-sn
 import { purgarBoletasSinConfirmar } from "./jobs/bot-cobros-purga";
 import { reconciliarBoletasColgadas } from "./jobs/bot-cobros-reconciliacion";
 import {
-	HORAS_GT_RESPALDO,
-	horaGuatemala,
+	enVentanaDeRespaldo,
 	msHastaProximoRespaldo,
 	reintentarAvisosDeRechazo,
 } from "./jobs/bot-cobros-respaldo";
@@ -1858,12 +1857,17 @@ programarRespaldoDeRechazos();
 // rechazo cuyo aviso falló justo antes del deploy espera hasta la próxima hora
 // de la lista. Barrer de más es inofensivo (solo toca lo que sigue debiendo su
 // mensaje); no barrer a tiempo deja al cliente creyendo que su pago va bien.
-setTimeout(() => {
-	const hora = horaGuatemala();
-	if (hora >= HORAS_GT_RESPALDO[0] && hora <= HORAS_GT_RESPALDO.at(-1)!) {
+//
+// La ventana se evalúa ACÁ, con la hora del arranque, y no adentro del
+// setTimeout: un deploy a las 17:59:40 está dentro de la ventana, pero 35 s
+// después ya son las 18:00 y la corrida se saltaría — dejando esos avisos
+// para las 08:00 del día siguiente (hallazgo Codex).
+const ARRANQUE_EN_VENTANA_DE_RESPALDO = enVentanaDeRespaldo();
+if (ARRANQUE_EN_VENTANA_DE_RESPALDO) {
+	setTimeout(() => {
 		void correrRespaldoDeRechazos();
-	}
-}, 35_000);
+	}, 35_000);
+}
 
 // El poller de Págalo (CB-028) corre SIEMPRE, sin depender de
 // `TAREAS_PROGRAMADAS_ACTIVAS` — decisión explícita del usuario. El poll en

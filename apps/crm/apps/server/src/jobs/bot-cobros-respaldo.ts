@@ -43,6 +43,21 @@ export function horaGuatemala(fecha = new Date()): number {
 	return (fecha.getUTCHours() + 18) % 24;
 }
 
+/**
+ * ¿Este instante cae dentro de la ventana laboral del barrido (08:00–17:59 GT)?
+ *
+ * Se pregunta por un instante EXPLÍCITO y no por "ahora" a propósito: quien
+ * decide la corrida de arranque tiene que evaluar la hora del ARRANQUE, no la
+ * de unos segundos después. Un deploy a las 17:59:40 está dentro de la ventana,
+ * pero si la pregunta se hace 35 s más tarde ya son las 18:00 y el barrido se
+ * salta — y los avisos que fallaron esperarían hasta las 08:00 del día
+ * siguiente (hallazgo Codex).
+ */
+export function enVentanaDeRespaldo(fecha = new Date()): boolean {
+	const hora = horaGuatemala(fecha);
+	return hora >= HORAS_GT_RESPALDO[0] && hora <= HORAS_GT_RESPALDO.at(-1)!;
+}
+
 /** Milisegundos hasta la próxima hora de la lista (mañana si ya pasaron todas). */
 export function msHastaProximoRespaldo(ahora = new Date()): number {
 	const proxima = new Date(ahora);

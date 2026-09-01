@@ -5,7 +5,10 @@
  * dentro de la ventana hasta las 09:01 del día siguiente (hallazgo Codex).
  */
 import { describe, expect, test } from "bun:test";
-import { msHastaProximoRespaldo } from "./bot-cobros-respaldo";
+import {
+	enVentanaDeRespaldo,
+	msHastaProximoRespaldo,
+} from "./bot-cobros-respaldo";
 
 /** Construye un instante a partir de una hora de Guatemala (UTC-6, sin DST). */
 const enGT = (hora: number, minuto = 0) =>
@@ -53,5 +56,51 @@ describe("cadencia del respaldo de rechazos", () => {
 			hora: 14,
 			minuto: 0,
 		});
+	});
+});
+
+/**
+ * La corrida de arranque decide con la hora del ARRANQUE, no con la de 35 s
+ * después: si no, un deploy a las 17:59:40 —dentro de la ventana— evaluaría
+ * las 18:00:15 y se saltaría el barrido, dejando los avisos fallidos para las
+ * 08:00 del día siguiente (hallazgo Codex).
+ */
+describe("ventana de la corrida de arranque", () => {
+	const RETRASO_MS = 35_000;
+
+	test("el borde que rompía: arranque 17:59:40 está dentro, aunque el callback caiga en las 18:00", () => {
+		const arranque = new Date(enGT(17, 59).getTime() + 40_000);
+		expect(enVentanaDeRespaldo(arranque)).toBe(true);
+		// Y la prueba de que el retraso es lo que importaba: preguntando tarde
+		// daba lo contrario.
+		expect(enVentanaDeRespaldo(new Date(arranque.getTime() + RETRASO_MS))).toBe(
+			false,
+		);
+	});
+
+	test("17:59 sigue siendo la ventana: la última hora de la lista cuenta entera", () => {
+		expect(enVentanaDeRespaldo(enGT(17, 59))).toBe(true);
+	});
+
+	test("las horas laborales están dentro", () => {
+		for (const hora of [8, 11, 14, 17]) {
+			expect(enVentanaDeRespaldo(enGT(hora))).toBe(true);
+		}
+	});
+
+	test("fuera de horario no barre al arrancar", () => {
+		for (const hora of [0, 3, 7, 18, 21, 23]) {
+			expect(enVentanaDeRespaldo(enGT(hora))).toBe(false);
+		}
+	});
+
+	test("07:59:40 no entra, aunque 35 s después ya sean las 08:00", () => {
+		// El espejo del caso de arriba: acá evaluar tarde habría barrido de más.
+		// Es inofensivo, pero la regla es la misma — manda la hora del arranque.
+		const arranque = new Date(enGT(7, 59).getTime() + 40_000);
+		expect(enVentanaDeRespaldo(arranque)).toBe(false);
+		expect(enVentanaDeRespaldo(new Date(arranque.getTime() + RETRASO_MS))).toBe(
+			true,
+		);
 	});
 });

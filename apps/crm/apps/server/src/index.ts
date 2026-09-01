@@ -1714,13 +1714,47 @@ app.post("/api/premora/elegibilidad/run", async (c) => {
 //   solo en la instancia del bot.
 //
 // ═══════════════════════════════════════════════════════════════════════════
-const TAREAS_PROGRAMADAS_ACTIVAS = false;
+//   Fase de pruebas de COBROS-02: en vez de una sola bandera apagada, se
+//   prende job por job. Lo que le ESCRIBE AL CLIENTE sigue en `false`.
+const JOBS_PROGRAMADOS = {
+	/** Reclama grupos Págalo listos y los manda a cartera. Hoy la aplicación
+	 *  solo ocurre inline desde el poller: si ese despacho falla, sin este job
+	 *  nadie lo reintenta y hay que apretar "Verificar ahora" a mano. */
+	dispatcherPagalo: true,
+	/** ⚠️ Le escribe al CLIENTE por WhatsApp cada 3 h (link sin pagar).
+	 *  Respeta TEST_MESSAGE: con `TEST_MESSAGE=true` todo envío se redirige a
+	 *  la lista de contactos de prueba. Antes de prenderlo en un ambiente
+	 *  nuevo, verificar esa env. */
+	recordatorioPagalo: true,
+	/** Interno: promesas incumplidas + cierre de snapshots de la agenda. */
+	promesasYSnapshots: true,
+	/** Interno: foto de "paga bien" + auto-revoke de la reducción (CB-010). */
+	elegibilidadPremora: true,
+	/** Interno: cliente_subido, sin_contacto_3d y seguimiento vencido.
+	 *  Lee las subidas de bucket de anoche, así que sin `moras` corriendo en
+	 *  cartera no tiene nada que reportar. */
+	alertasCobros: true,
+	/** Interno: espejo de promesas hacia cartera (CB-030, 23:30 GT). Va con
+	 *  promesasYSnapshots — es la misma cadena. */
+	syncPromesasCartera: true,
+	/** Interno: cierre diario de asesores (00:15 GT). Congela el histórico del
+	 *  día anterior; no hace falta para lo que se está probando. */
+	cierreDiarioAsesores: false,
+	/** ⚠️ Le escribe al CLIENTE. Apagados a propósito en pruebas. */
+	recordatoriosPremora: false,
+	recordatoriosConvenio: false,
+} as const;
 
-if (!TAREAS_PROGRAMADAS_ACTIVAS) {
-	console.warn(
-		"[Jobs] ⚠️  Tareas programadas DESACTIVADAS en el código (rama COBROS-02): esta instancia levanta solo la API. Si ves esto en el CRM principal, el FIXME de index.ts llegó a producción.",
-	);
-}
+const HAY_JOBS_ACTIVOS = Object.values(JOBS_PROGRAMADOS).some(Boolean);
+
+console.warn(
+	`[Jobs] ⚠️  Tareas programadas PARCIALES en el código (rama COBROS-02): ${
+		Object.entries(JOBS_PROGRAMADOS)
+			.filter(([, activo]) => activo)
+			.map(([nombre]) => nombre)
+			.join(", ") || "ninguna"
+	}. Si ves esto en el CRM principal, el FIXME de index.ts llegó a producción y el resto de jobs NO está corriendo.`,
+);
 
 // ═══════════════════════════════════════════════════════════════════════════
 // La purga de boletas del bot va FUERA del bloque de arriba, a propósito.
@@ -1841,7 +1875,7 @@ async function correrDispatchDePagalo(): Promise<void> {
 	}
 }
 
-if (TAREAS_PROGRAMADAS_ACTIVAS) {
+if (JOBS_PROGRAMADOS.dispatcherPagalo) {
 	void correrDispatchDePagalo();
 	setInterval(correrDispatchDePagalo, 5 * 60 * 1000);
 }
@@ -1857,11 +1891,11 @@ async function correrRecordatorioDePagalo(): Promise<void> {
 	}
 }
 
-if (TAREAS_PROGRAMADAS_ACTIVAS) {
+if (JOBS_PROGRAMADOS.recordatorioPagalo) {
 	setInterval(correrRecordatorioDePagalo, 3 * 60 * 60 * 1000);
 }
 
-if (TAREAS_PROGRAMADAS_ACTIVAS) {
+if (HAY_JOBS_ACTIVOS) {
 	// checkPromesasPago traga sus propios errores de persistencia por SIFCO
 	// (todo-o-nada por lote, ver check-promesas-pago.ts) y siempre resuelve
 	// normalmente — nunca rechaza, así que un simple .catch() no detecta que
@@ -1895,6 +1929,10 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 	const checkPromesasPagoBoot: Promise<CheckPromesasResumen | void> =
 		new Promise((resolve) => {
 			setTimeout(() => {
+				if (!JOBS_PROGRAMADOS.promesasYSnapshots) {
+					resolve(undefined);
+					return;
+				}
 				// checkSeguimientosVencidos ya NO va acá: se corre con las
 				// alertas de las 08:00 GT, que tienen su propia recuperación de
 				// boot condicionada a la hora. Dejarlo también en este arranque
@@ -1919,7 +1957,7 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 			scheduleAtPremoraGT();
 		}, next.getTime() - now.getTime());
 	}
-	scheduleAtPremoraGT();
+	if (JOBS_PROGRAMADOS.recordatoriosPremora) scheduleAtPremoraGT();
 
 	// COBROS-02: recordatorios de CONVENIO, diario a las 8:05 GT (= 14:05 UTC), 5
 	// min DESPUÉS del funnel premora — así corren después de la subida de bucket de
@@ -1935,12 +1973,13 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 			scheduleAtConvenioGT();
 		}, next.getTime() - now.getTime());
 	}
-	scheduleAtConvenioGT();
-
-	// Recuperación al boot (deploy tardío): idempotente por los claims.
-	setTimeout(() => {
-		sendConvenioReminders().catch(console.error);
-	}, 20_000);
+	if (JOBS_PROGRAMADOS.recordatoriosConvenio) {
+		scheduleAtConvenioGT();
+		// Recuperación al boot (deploy tardío): idempotente por los claims.
+		setTimeout(() => {
+			sendConvenioReminders().catch(console.error);
+		}, 20_000);
+	}
 
 	// CB-010: elegibilidad de la reducción de recordatorios, diario a las 7:00 GT
 	// (= 13:00 UTC) — UNA HORA ANTES del funnel premora, para que la foto de "paga
@@ -1957,7 +1996,7 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 			scheduleAtElegibilidadGT();
 		}, next.getTime() - now.getTime());
 	}
-	scheduleAtElegibilidadGT();
+	if (JOBS_PROGRAMADOS.elegibilidadPremora) scheduleAtElegibilidadGT();
 
 	// Recuperación al boot (deploy tardío): la elegibilidad se refresca ANTES del
 	// envío premora y este ESPERA a que termine (review Codex P2). En el path
@@ -1966,10 +2005,21 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 	// D-5/D-3/D-1 de un crédito que ya debía auto-revocarse (el WhatsApp perdido no
 	// se recupera después). Premora es idempotente (claims), así que re-correr al
 	// boot no duplica mensajes.
-	setTimeout(async () => {
-		await refreshPremoraElegibilidad().catch(console.error);
-		await sendPremoraReminders().catch(console.error);
-	}, 15_000);
+	// El orden importa solo cuando los DOS están prendidos; con premora apagado
+	// esto queda como el simple catch-up de la elegibilidad.
+	if (
+		JOBS_PROGRAMADOS.elegibilidadPremora ||
+		JOBS_PROGRAMADOS.recordatoriosPremora
+	) {
+		setTimeout(async () => {
+			if (JOBS_PROGRAMADOS.elegibilidadPremora) {
+				await refreshPremoraElegibilidad().catch(console.error);
+			}
+			if (JOBS_PROGRAMADOS.recordatoriosPremora) {
+				await sendPremoraReminders().catch(console.error);
+			}
+		}, 15_000);
+	}
 
 	// COBROS-02: alertas de cobros con propósito (cliente_subido + sin_contacto_3d)
 	// MÁS el aviso de seguimiento vencido, diario a las 8:00 GT — DESPUÉS de que la
@@ -1998,12 +2048,13 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 			scheduleAtCobrosAlertasGT();
 		}, next.getTime() - now.getTime());
 	}
-	scheduleAtCobrosAlertasGT();
+	if (JOBS_PROGRAMADOS.alertasCobros) scheduleAtCobrosAlertasGT();
 	// Recuperación al boot SOLO si ya pasaron las 08:00 GT (un deploy tardío recupera
 	// el batch del día; el dedup evita duplicar). Antes de las 08:00 GT NO se corre:
 	// dispararía las alertas "de las 8am" en medianoche — se deja que el timeout
 	// programado las lance a la hora (Codex P2).
 	setTimeout(() => {
+		if (!JOBS_PROGRAMADOS.alertasCobros) return;
 		const horaGT = (new Date().getUTCHours() + 18) % 24; // GT = UTC-6, sin DST
 		if (horaGT >= 8) {
 			void correrAlertasDeCobros();
@@ -2062,7 +2113,7 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 			scheduleAtMidnightGT();
 		}, next.getTime() - now.getTime());
 	}
-	scheduleAtMidnightGT();
+	if (JOBS_PROGRAMADOS.promesasYSnapshots) scheduleAtMidnightGT();
 
 	// CB-030: reconciliación diaria de promesas de pago hacia cartera-back
 	// (promesas_pago_espejo), a las 23:30 GT — 29 minutos ANTES de que
@@ -2082,7 +2133,7 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 			scheduleAtSyncPromesasGT();
 		}, next.getTime() - now.getTime());
 	}
-	scheduleAtSyncPromesasGT();
+	if (JOBS_PROGRAMADOS.syncPromesasCartera) scheduleAtSyncPromesasGT();
 
 	// Catch-up de arranque: si el proceso bootea DENTRO de la ventana 23:30–23:59
 	// GT (deploy nocturno, reinicio, crash-loop), el schedule de arriba ya empujó
@@ -2132,11 +2183,12 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 			scheduleAtCierreDiarioGT();
 		}, next.getTime() - now.getTime());
 	}
-	scheduleAtCierreDiarioGT();
+	if (JOBS_PROGRAMADOS.cierreDiarioAsesores) scheduleAtCierreDiarioGT();
 	// Recuperación al boot SOLO si ya pasaron las 00:15 GT (deploy tardío recupera
 	// el snapshot de ayer; re-correr no duplica, ver arriba). Antes de las 00:15
 	// GT NO se corre: se deja que el timeout programado lo lance a la hora.
 	setTimeout(() => {
+		if (!JOBS_PROGRAMADOS.cierreDiarioAsesores) return;
 		const bootNow = new Date();
 		const horaGT = (bootNow.getUTCHours() + 18) % 24; // GT = UTC-6, sin DST
 		const minutoGT = bootNow.getUTCMinutes();
@@ -2195,6 +2247,7 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 		return proximaMedianocheGT > ahora;
 	})();
 	setTimeout(async () => {
+		if (!JOBS_PROGRAMADOS.promesasYSnapshots) return;
 		await checkPromesasPagoBoot;
 		await esperarHasta0005GT();
 		const resumenPromesas = bootAntesDeMedianocheGT

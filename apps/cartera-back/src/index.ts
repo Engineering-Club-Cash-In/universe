@@ -2,7 +2,7 @@ import { Elysia } from "elysia";
 import config from "./config";
 import * as routers from "./routers";
 import { cors } from "@elysiajs/cors";
-import { iniciarTareasProgramadas } from "../schedule";
+import { iniciarTareasProgramadas, type TareaProgramada } from "../schedule";
 import { auditLogMiddleware } from "./middleware/auditLog";
 import { validationErrorMiddleware } from "./middleware/validationError";
 
@@ -76,11 +76,28 @@ const app = new Elysia()
 //   Para revertir: poner esta constante en `true` (o quitar la condición y
 //   volver a llamar `iniciarTareasProgramadas()` directamente).
 // ═══════════════════════════════════════════════════════════════════════════
-const TAREAS_PROGRAMADAS_ACTIVAS = false;
+// Fase de pruebas de COBROS-02: se prende el SUBCONJUNTO que alimenta el
+// módulo de cobros y nada más.
+//
+//   moras            → sin esto no hay subidas de bucket, y las alertas de
+//                      cobros del CRM (cliente_subido / sin_contacto_3d) leen
+//                      justo esas subidas: apagado, salen vacías siempre.
+//   buckets_convenio → corre después de moras y es el dueño de las
+//                      transiciones de los créditos EN_CONVENIO, que el motor
+//                      de mora excluye a propósito.
+//
+// Quedan fuera a propósito: efectividad de asesores, expiración de compras,
+// cierre mensual y snapshot de facturación (escriben histórico que no se está
+// probando), y sobre todo verificación de facturas en SAT y su reporte por
+// correo, que le pegan a SAT de verdad y mandan correos reales.
+const TAREAS_PROGRAMADAS: TareaProgramada[] = ['moras', 'buckets_convenio'];
 
 // 🚀 Iniciar tareas programadas ANTES de levantar el servidor
-if (TAREAS_PROGRAMADAS_ACTIVAS) {
-  iniciarTareasProgramadas();
+if (TAREAS_PROGRAMADAS.length > 0) {
+  iniciarTareasProgramadas(TAREAS_PROGRAMADAS);
+  console.warn(
+    `[Jobs] ⚠️  Tareas programadas PARCIALES (rama COBROS-02): solo ${TAREAS_PROGRAMADAS.join(', ')}. Si ves esto en cartera de producción, el FIXME de index.ts llegó a producción y el resto de tareas NO está corriendo.`,
+  );
 } else {
   console.warn(
     "[Jobs] ⚠️  Tareas programadas DESACTIVADAS en el código (rama COBROS-02): esta instancia levanta solo la API contra cartera_cobros2. Si ves esto en cartera de producción, el FIXME de index.ts llegó a producción.",
@@ -93,6 +110,6 @@ app.listen(config.port);
 console.log(
   `🦊 Elysia Server is running at ${app.server?.hostname}:${app.server?.port}`
 );
-if (TAREAS_PROGRAMADAS_ACTIVAS) {
-  console.log('⏰ Tareas programadas activas');
+if (TAREAS_PROGRAMADAS.length > 0) {
+  console.log(`⏰ Tareas programadas activas: ${TAREAS_PROGRAMADAS.join(', ')}`);
 }

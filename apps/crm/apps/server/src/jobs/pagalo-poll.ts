@@ -861,7 +861,11 @@ export async function correrPollPagalo(
 		const client = createPagaloClient(config);
 		// Construido una sola vez por corrida — reusado por cada dispatch inline
 		// del loop, en vez de reconstruirlo (llama a cartera-back) por grupo.
-		const asesorMap = await construirMapaAsesorUsuario();
+		// Best-effort: un fallo acá (cartera-back caído) no puede bloquear la
+		// detección de pagos, que ya viene después con los links reclamados.
+		const asesorMap = await construirMapaAsesorUsuario().catch(
+			() => new Map<number, string>(),
+		);
 
 		for (const link of links) {
 			if (!link.pagaloRequestUuid) {

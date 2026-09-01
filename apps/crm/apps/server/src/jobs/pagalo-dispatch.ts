@@ -334,8 +334,12 @@ async function marcarCompletado(
 ): Promise<void> {
 	// Resuelto ANTES de la tx (llama a cartera-back) — nunca red mientras una
 	// tx de DB sigue abierta, mismo criterio que el resto del job (ver
-	// comentario en pagalo-poll.ts sobre el dispatch inline).
-	const mapa = asesorMap ?? (await construirMapaAsesorUsuario());
+	// comentario en pagalo-poll.ts sobre el dispatch inline). Best-effort: el
+	// pago YA se aplicó en cartera-back en este punto — un fallo acá no puede
+	// impedir que el grupo se marque COMPLETED en el CRM.
+	const mapa =
+		asesorMap ??
+		(await construirMapaAsesorUsuario().catch(() => new Map<number, string>()));
 	const asesorUserId = await resolverAsesorVigente(
 		group.numeroCreditoSifco,
 		mapa,
@@ -556,7 +560,12 @@ export async function correrDispatchPagalo(): Promise<ResultadoDispatchPagalo> {
 	};
 	if (candidatoIds.length === 0) return resultado;
 
-	const asesorMap = await construirMapaAsesorUsuario();
+	// Best-effort: un fallo acá (cartera-back caído) no puede bloquear la
+	// aplicación de pagos, que es lo crítico de este job — sin destinatario
+	// resuelto, marcarCompletado simplemente omite la notificación.
+	const asesorMap = await construirMapaAsesorUsuario().catch(
+		() => new Map<number, string>(),
+	);
 	for (const groupId of candidatoIds) {
 		const resultadoGrupo = await reclamarYProcesarGrupo(groupId, asesorMap);
 		if (resultadoGrupo === "COMPLETADO") resultado.completados++;

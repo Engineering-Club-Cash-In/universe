@@ -319,8 +319,11 @@ async function resolverAsesorVigente(
 	numeroCreditoSifco: string,
 	asesorMap: Map<number, string>,
 ): Promise<string | null> {
+	// useCache=false (dato fresco) y useCircuitBreaker=false (best-effort, no
+	// debe sumar al breaker compartido — mismo criterio que
+	// construirMapaAsesorUsuario, hallazgo Codex).
 	const credito = await carteraBackClient
-		.getCredito(numeroCreditoSifco, false)
+		.getCredito(numeroCreditoSifco, false, false)
 		.catch(() => null);
 	const asesorId = credito?.credito.asesor_id;
 	return asesorId ? (asesorMap.get(asesorId) ?? null) : null;
@@ -409,7 +412,12 @@ async function marcarCompletado(
 		});
 		return true;
 	});
-	if (completado) await notificarAsesorPagoAplicado(group);
+	// Fire-and-forget a propósito: correrDispatchPagalo y el dispatch inline
+	// del poller procesan grupos en serie — esperar esta notificación acá
+	// retrasaría la detección/aplicación de TODOS los pagos siguientes de la
+	// misma corrida si cartera-back está lento (hallazgo Codex). Su propio
+	// try/catch interno ya se encarga de loguear cualquier fallo.
+	if (completado) void notificarAsesorPagoAplicado(group);
 }
 
 async function marcarRevisionRequerida(

@@ -1404,6 +1404,12 @@ export class CarteraBackClient {
 	async getCredito(
 		numeroSifco: string,
 		useCache = true,
+		/**
+		 * `false` para llamadas best-effort cuyo fallo ya se traga el caller —
+		 * no debe compartir contador de fallos con las operaciones que sí
+		 * importan (ver comentario de `usarCircuitBreaker` en `request`).
+		 */
+		useCircuitBreaker = true,
 	): Promise<CreditoDirectoResponse> {
 		// El endpoint /credito NO usa el wrapper CarteraBackApiResponse
 		// Retorna los datos directamente
@@ -1418,6 +1424,9 @@ export class CarteraBackClient {
 			`/credito?numero_credito_sifco=${encodeURIComponent(numeroSifco)}`,
 			{ method: "GET" },
 			useCache,
+			undefined,
+			undefined,
+			useCircuitBreaker,
 		);
 		// Antes acá se hacía JSON.stringify(response, null, 2) del response
 		// COMPLETO: ~120 KB indentados escritos al log en cada llamada no

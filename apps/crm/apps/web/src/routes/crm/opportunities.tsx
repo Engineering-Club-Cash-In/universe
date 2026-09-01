@@ -1178,7 +1178,6 @@ function RouteComponent() {
 					...buildOpportunityRelationshipPatch({
 						values: { leadId, companyId, vehicleId },
 						opportunity: selectedOpportunity,
-						vehicleIsNew: editedVehicleIsNew,
 					}),
 					creditType: value.creditType,
 					// null y no undefined: en edición "Sin vendedor asignado" tiene
@@ -1231,16 +1230,6 @@ function RouteComponent() {
 			}
 		},
 	});
-
-	const editedVehicleId = editOpportunityForm.state.values.vehicleId;
-	const editedVehicle = vehiclesQuery.data?.data?.find(
-		(vehicle: { id: string }) => vehicle.id === editedVehicleId,
-	);
-	const editedVehicleIsNew =
-		editedVehicle?.isNew ??
-		(editedVehicleId === selectedOpportunity?.vehicleId
-			? selectedOpportunity?.vehicle?.isNew
-			: false);
 
 	const createOpportunityMutation = useMutation({
 		mutationFn: (input: {
@@ -3173,10 +3162,8 @@ function RouteComponent() {
 									}}
 								</editOpportunityForm.Field>
 							</div>
-							{/* La empresa (agencia) solo aplica a vehículos nuevos y puede
-							    corregirse si quedó heredada o desactualizada. */}
-							{editedVehicleIsNew === true && (
-								<div>
+							{/* La empresa representa la agencia para nuevos o el predio para usados. */}
+							<div>
 									<editOpportunityForm.Field name="companyId">
 										{(field) => (
 											<div className="space-y-2">
@@ -3199,9 +3186,8 @@ function RouteComponent() {
 												/>
 											</div>
 										)}
-									</editOpportunityForm.Field>
-								</div>
-							)}
+								</editOpportunityForm.Field>
+							</div>
 						</div>
 
 						<div className="grid grid-cols-2 gap-4">

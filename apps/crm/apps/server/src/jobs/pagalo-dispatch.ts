@@ -307,6 +307,36 @@ async function armarComando(group: GrupoClaimado) {
 }
 
 /**
+ * Cachea la promesa del catálogo de asesores por unos segundos para que un
+ * backlog completando N grupos casi al mismo tiempo comparta UNA sola
+ * resolución en vuelo en vez de disparar N llamadas concurrentes e
+ * independientes a `/buckets/pool-por-asesor` (hasta 3 reintentos cada una,
+ * sin circuit breaker) — un backlog de 50 grupos podía machacar un
+ * cartera-back ya degradado con hasta ~150 requests simultáneos (hallazgo
+ * Codex). No usa `construirMapaAsesorUsuario` como caché persistente: solo
+ * comparte llamadas que caen dentro de la misma ventana breve, luego expira
+ * para no servir datos viejos indefinidamente.
+ */
+let mapaAsesoresCache: {
+	promesa: Promise<Map<number, string>>;
+	expira: number;
+} | null = null;
+const MAPA_ASESORES_TTL_MS = 10_000;
+
+function obtenerMapaAsesoresCompartido(): Promise<Map<number, string>> {
+	const ahora = Date.now();
+	if (!mapaAsesoresCache || mapaAsesoresCache.expira < ahora) {
+		mapaAsesoresCache = {
+			promesa: construirMapaAsesorUsuario({ useCircuitBreaker: false }).catch(
+				() => new Map<number, string>(),
+			),
+			expira: ahora + MAPA_ASESORES_TTL_MS,
+		};
+	}
+	return mapaAsesoresCache.promesa;
+}
+
+/**
  * EL asesor único que tiene asignado el crédito HOY — no el snapshot fijo
  * de `group.carteraAsesorId` (tomado al crear el link, puede quedar
  * desactualizado si el crédito se reasignó después), y no el pool de
@@ -343,13 +373,9 @@ async function notificarAsesorPagoAplicado(
 	group: GrupoClaimado,
 ): Promise<void> {
 	try {
-		// Sin circuit breaker: un catálogo de asesores fallando repetido no
-		// puede sumar al contador de fallos compartido y abrir el breaker
-		// global de cartera-back para las llamadas que sí importan (aplicar
-		// pagos, consultar créditos) — hallazgo Codex.
-		const mapa = await construirMapaAsesorUsuario({
-			useCircuitBreaker: false,
-		});
+		// Compartido entre notificaciones concurrentes de la misma corrida —
+		// ver obtenerMapaAsesoresCompartido (hallazgo Codex sobre fan-out).
+		const mapa = await obtenerMapaAsesoresCompartido();
 		const asesorUserId = await resolverAsesorVigente(
 			group.numeroCreditoSifco,
 			mapa,

@@ -517,19 +517,19 @@ function TabMora({
 									</CardHeader>
 									<CardContent className="flex flex-col gap-2">
 										<div className="font-bold text-2xl tabular-nums">
-											{item.porcentaje.toFixed(1)}%
+											{item.porcentaje === null
+												? "N/D"
+												: `${item.porcentaje.toFixed(1)}%`}
 										</div>
 										<div
 											className="h-1.5 overflow-hidden rounded-full bg-muted"
-											role="progressbar"
-											aria-label={`Exposición de capital mayor o igual a ${item.umbral} días`}
-											aria-valuenow={Math.min(item.porcentaje, 100)}
-											aria-valuemin={0}
-											aria-valuemax={100}
+											aria-hidden="true"
 										>
 											<div
 												className="h-full rounded-full bg-primary"
-												style={{ width: `${Math.min(item.porcentaje, 100)}%` }}
+												style={{
+													width: `${Math.min(item.porcentaje ?? 0, 100)}%`,
+												}}
 											/>
 										</div>
 										<p className="font-medium text-sm tabular-nums">
@@ -583,7 +583,9 @@ function TabMora({
 															<div className="relative overflow-hidden rounded-md border px-2 py-1.5">
 																<span className="sr-only">
 																	{asesor.nombre}, banda {banda.label}:{" "}
-																	{metric.porcentaje.toFixed(1)}%,{" "}
+																	{metric.porcentaje === null
+																		? "porcentaje no disponible"
+																		: `${metric.porcentaje.toFixed(1)}%`},{" "}
 																	{fmtQ(metric.capital)}, {metric.cantidad}{" "}
 																	créditos
 																</span>
@@ -591,11 +593,13 @@ function TabMora({
 																	aria-hidden="true"
 																	className="absolute inset-y-0 left-0 bg-primary/10"
 																	style={{
-																		width: `${Math.min(metric.porcentaje, 100)}%`,
+																		width: `${Math.min(metric.porcentaje ?? 0, 100)}%`,
 																	}}
 																/>
 																<div className="relative font-semibold tabular-nums">
-																	{metric.porcentaje.toFixed(1)}%
+																	{metric.porcentaje === null
+																		? "N/D"
+																		: `${metric.porcentaje.toFixed(1)}%`}
 																</div>
 																<div className="relative text-muted-foreground text-xs tabular-nums">
 																	{fmtQ(metric.capital)} · {metric.cantidad}{" "}

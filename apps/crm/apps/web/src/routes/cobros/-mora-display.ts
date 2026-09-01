@@ -15,7 +15,7 @@ type MoraBucketKey = (typeof MORA_BUCKET_KEYS)[number];
 type CapitalAgingMetric = {
 	cantidad: number;
 	capital: number;
-	porcentaje: number;
+	porcentaje: number | null;
 };
 
 type CapitalAgingInput = {
@@ -38,7 +38,8 @@ const capitalMetric = (
 	return {
 		cantidad: bucket?.cantidad ?? 0,
 		capital,
-		porcentaje: denominador > 0 ? (capital / denominador) * 100 : 0,
+		porcentaje:
+			denominador > 0 ? (capital / denominador) * 100 : capital > 0 ? null : 0,
 	};
 };
 
@@ -63,7 +64,8 @@ export function buildCapitalAging(data: CapitalAgingInput) {
 				(sum, bucket) => sum + (bucket?.cantidad ?? 0),
 				0,
 			),
-			porcentaje: capitalTotal > 0 ? (capital / capitalTotal) * 100 : 0,
+			porcentaje:
+				capitalTotal > 0 ? (capital / capitalTotal) * 100 : capital > 0 ? null : 0,
 		};
 	});
 

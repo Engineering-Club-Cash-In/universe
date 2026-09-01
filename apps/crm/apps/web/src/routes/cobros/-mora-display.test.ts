@@ -103,6 +103,40 @@ describe("buildCapitalAging", () => {
 		expect(aging.porAsesor[0]?.mora_30.porcentaje).toBe(0);
 	});
 
+	test("marca como indefinido un numerador positivo sin denominador actual", () => {
+		const aging = moraDisplay.buildCapitalAging({
+			totales: {
+				mora_30: { cantidad: 1, sumaCapital: "100", sumaMora: "10" },
+			},
+			porAsesor: [
+				{
+					asesorId: 7,
+					nombre: "Ana",
+					mora_30: { cantidad: 1, sumaCapital: "100", sumaMora: "10" },
+				},
+			],
+			capitalCartera: {
+				total: "0",
+				porAsesor: [{ asesorId: 7, nombre: "Ana", capital: "0" }],
+			},
+		});
+
+		expect(aging.acumulados[0]?.porcentaje).toBeNull();
+		expect(aging.porAsesor[0]?.mora_30.porcentaje).toBeNull();
+	});
+
+	test("conserva ratios superiores a cien sin truncarlos", () => {
+		const aging = moraDisplay.buildCapitalAging({
+			totales: {
+				mora_30: { cantidad: 1, sumaCapital: "120", sumaMora: "10" },
+			},
+			porAsesor: [],
+			capitalCartera: { total: "100", porAsesor: [] },
+		});
+
+		expect(aging.acumulados[0]?.porcentaje).toBe(120);
+	});
+
 	test("marca como no disponible una respuesta del backend anterior", () => {
 		const aging = moraDisplay.buildCapitalAging({
 			totales: {},
@@ -133,6 +167,8 @@ describe("panel de aging de capital", () => {
 		expect(source).toContain("Aging de capital");
 		expect(source).toContain("buildCapitalAging");
 		expect(source).toMatch(/capital y asesor\s+según asignación\s+actual/);
+		expect(source).toContain('? "N/D"');
+		expect(source).not.toContain('role="progressbar"');
 	});
 });
 

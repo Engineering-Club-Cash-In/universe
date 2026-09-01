@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 
 export const creditosVigentesSql = sql.raw(
-  "'ACTIVO', 'MOROSO', 'PENDIENTE_CANCELACION', 'EN_CONVENIO', 'INCOBRABLE'",
+  "'ACTIVO', 'MOROSO', 'EN_CONVENIO'",
 );
 
 export function buildCapitalCarteraQuery(

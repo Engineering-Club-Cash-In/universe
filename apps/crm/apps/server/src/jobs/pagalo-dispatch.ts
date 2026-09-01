@@ -326,29 +326,58 @@ async function resolverAsesorVigente(
 	return asesorId ? (asesorMap.get(asesorId) ?? null) : null;
 }
 
+/**
+ * Notifica al asesor que el pago quedó aplicado — SIEMPRE fuera de la tx que
+ * marca el grupo COMPLETED: el pago ya se aplicó en cartera-back en este
+ * punto, así que nada de esto (catálogo de asesores caído, un
+ * PREMORA_SYSTEM_USER_ID obsoleto que viola el FK created_by, cualquier otro
+ * error) puede revertir esa transición de estado ni dejar el grupo trabado
+ * en APPLYING reintentando para siempre el mismo import (hallazgo Codex).
+ * Best-effort real: se resuelve DESPUÉS de que el grupo ya quedó COMPLETED,
+ * y cualquier fallo solo se loguea.
+ */
+async function notificarAsesorPagoAplicado(
+	group: GrupoClaimado,
+): Promise<void> {
+	try {
+		const mapa = await construirMapaAsesorUsuario();
+		const asesorUserId = await resolverAsesorVigente(
+			group.numeroCreditoSifco,
+			mapa,
+		);
+		if (!asesorUserId) return;
+		const usuarioSistema = await resolverUsuarioSistemaCobros();
+		if (!usuarioSistema) return;
+		await db.insert(notifications).values({
+			titulo: `Pago aplicado - Crédito ${group.numeroCreditoSifco}`,
+			descripcion: `Se aplicó el pago de Q${group.totalAmount} sobre el crédito ${group.numeroCreditoSifco}.`,
+			type: "aviso",
+			createdBy: usuarioSistema,
+			createdByRole: "cobros_supervisor",
+			assignedToRole: "cobros",
+			assignedTo: asesorUserId,
+			...(group.casoCobroId
+				? {
+						relatedEntityType: "collection_case" as const,
+						relatedEntityId: group.casoCobroId,
+					}
+				: {}),
+			redirectPage: "cobros_detail",
+		});
+	} catch (error) {
+		console.error(
+			`[Págalo][DISPATCH] no se pudo notificar al asesor del grupo ${group.id}:`,
+			error instanceof Error ? error.message : error,
+		);
+	}
+}
+
 async function marcarCompletado(
 	group: GrupoClaimado,
 	payloadHash: string,
 	importId: number,
-	asesorMap?: Map<number, string>,
 ): Promise<void> {
-	// Resuelto ANTES de la tx (llama a cartera-back) — nunca red mientras una
-	// tx de DB sigue abierta, mismo criterio que el resto del job (ver
-	// comentario en pagalo-poll.ts sobre el dispatch inline). Best-effort: el
-	// pago YA se aplicó en cartera-back en este punto — un fallo acá no puede
-	// impedir que el grupo se marque COMPLETED en el CRM.
-	const mapa =
-		asesorMap ??
-		(await construirMapaAsesorUsuario().catch(() => new Map<number, string>()));
-	const asesorUserId = await resolverAsesorVigente(
-		group.numeroCreditoSifco,
-		mapa,
-	);
-	const usuarioSistema = asesorUserId
-		? await resolverUsuarioSistemaCobros()
-		: null;
-
-	await db.transaction(async (tx) => {
+	const completado = await db.transaction(async (tx) => {
 		const [actualizado] = await tx
 			.update(pagaloPaymentGroups)
 			.set({
@@ -363,7 +392,7 @@ async function marcarCompletado(
 			})
 			.where(filtroClaimVigente(group))
 			.returning({ id: pagaloPaymentGroups.id });
-		if (!actualizado) return;
+		if (!actualizado) return false;
 		await tx.insert(pagaloPaymentEvents).values({
 			groupId: group.id,
 			eventType: "GROUP_COMPLETED",
@@ -372,25 +401,9 @@ async function marcarCompletado(
 			toStatus: "COMPLETED",
 			payload: { carteraImportId: importId },
 		});
-		if (usuarioSistema && asesorUserId) {
-			await tx.insert(notifications).values({
-				titulo: `Pago aplicado - Crédito ${group.numeroCreditoSifco}`,
-				descripcion: `Se aplicó el pago de Q${group.totalAmount} sobre el crédito ${group.numeroCreditoSifco}.`,
-				type: "aviso",
-				createdBy: usuarioSistema,
-				createdByRole: "cobros_supervisor",
-				assignedToRole: "cobros",
-				assignedTo: asesorUserId,
-				...(group.casoCobroId
-					? {
-							relatedEntityType: "collection_case" as const,
-							relatedEntityId: group.casoCobroId,
-						}
-					: {}),
-				redirectPage: "cobros_detail",
-			});
-		}
+		return true;
 	});
+	if (completado) await notificarAsesorPagoAplicado(group);
 }
 
 async function marcarRevisionRequerida(
@@ -446,7 +459,6 @@ export type ResultadoProcesarGrupo = "COMPLETADO" | "REVIEW_REQUIRED" | "ERROR";
  */
 export async function procesarGrupoParaAplicar(
 	group: GrupoClaimado,
-	asesorMap?: Map<number, string>,
 ): Promise<ResultadoProcesarGrupo> {
 	let command: Awaited<ReturnType<typeof armarComando>>;
 	try {
@@ -469,12 +481,7 @@ export async function procesarGrupoParaAplicar(
 	const respuesta = await postPagaloPaymentImport(command);
 
 	if (respuesta.success && respuesta.status === "APPLIED") {
-		await marcarCompletado(
-			group,
-			command.payload_hash,
-			respuesta.import_id,
-			asesorMap,
-		);
+		await marcarCompletado(group, command.payload_hash, respuesta.import_id);
 		return "COMPLETADO";
 	}
 
@@ -536,11 +543,10 @@ export async function procesarGrupoParaAplicar(
  */
 export async function reclamarYProcesarGrupo(
 	groupId: string,
-	asesorMap?: Map<number, string>,
 ): Promise<ResultadoProcesarGrupo | "NO_RECLAMADO"> {
 	const group = await reclamarGrupo(groupId);
 	if (!group) return "NO_RECLAMADO";
-	return procesarGrupoParaAplicar(group, asesorMap);
+	return procesarGrupoParaAplicar(group);
 }
 
 export type ResultadoDispatchPagalo = {
@@ -560,14 +566,8 @@ export async function correrDispatchPagalo(): Promise<ResultadoDispatchPagalo> {
 	};
 	if (candidatoIds.length === 0) return resultado;
 
-	// Best-effort: un fallo acá (cartera-back caído) no puede bloquear la
-	// aplicación de pagos, que es lo crítico de este job — sin destinatario
-	// resuelto, marcarCompletado simplemente omite la notificación.
-	const asesorMap = await construirMapaAsesorUsuario().catch(
-		() => new Map<number, string>(),
-	);
 	for (const groupId of candidatoIds) {
-		const resultadoGrupo = await reclamarYProcesarGrupo(groupId, asesorMap);
+		const resultadoGrupo = await reclamarYProcesarGrupo(groupId);
 		if (resultadoGrupo === "COMPLETADO") resultado.completados++;
 		else if (resultadoGrupo === "REVIEW_REQUIRED")
 			resultado.revisionRequerida++;

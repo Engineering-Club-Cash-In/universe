@@ -67,7 +67,6 @@ import {
 } from "../db/schema/pagalo-payments";
 import { proximoIntentoPoll } from "../lib/pagalo-poll-cadencia";
 import { carteraBackClient } from "../services/cartera-back-client";
-import { construirMapaAsesorUsuario } from "../services/cobros-notif-helpers";
 import {
 	createPagaloClient,
 	getPagaloSandboxConfig,
@@ -859,13 +858,6 @@ export async function correrPollPagalo(
 	if (links.length > 0) {
 		const config = getPagaloSandboxConfig();
 		const client = createPagaloClient(config);
-		// Construido una sola vez por corrida — reusado por cada dispatch inline
-		// del loop, en vez de reconstruirlo (llama a cartera-back) por grupo.
-		// Best-effort: un fallo acá (cartera-back caído) no puede bloquear la
-		// detección de pagos, que ya viene después con los links reclamados.
-		const asesorMap = await construirMapaAsesorUsuario().catch(
-			() => new Map<number, string>(),
-		);
 
 		for (const link of links) {
 			if (!link.pagaloRequestUuid) {
@@ -1090,10 +1082,7 @@ export async function correrPollPagalo(
 				// dispatcher programado lo recoge en su propio ciclo — nunca se pierde.
 				if (listoParaAplicar) {
 					try {
-						const resultadoInline = await reclamarYProcesarGrupo(
-							link.groupId,
-							asesorMap,
-						);
+						const resultadoInline = await reclamarYProcesarGrupo(link.groupId);
 						// El resultado del retry del backlog (más abajo) también
 						// suma acá — esto solo cubre lo que antes se descartaba
 						// del dispatch inline, que dejaba el reporte del botón

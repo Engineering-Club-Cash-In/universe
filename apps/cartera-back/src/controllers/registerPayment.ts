@@ -1129,6 +1129,10 @@ export const insertPayment = async ({ body, set }: any) => {
             abono_seguro: pagos_credito.abono_seguro,
             abono_gps: pagos_credito.abono_gps,
             membresias_pago: pagos_credito.membresias_pago,
+            // Procedencia: distingue la semilla de SIFCO (sin fecha) de una
+            // fila `no_required` que sí recibió plata. Ver
+            // `esPlaceholderSifcoVirgen`.
+            fecha_pago: pagos_credito.fecha_pago,
             // Sólo para poder evaluar `cuentaComoHermanoVivo` sobre las filas
             // `no_required`; no se suman como rubros de cuota.
             abono_interes_ci: pagos_credito.abono_interes_ci,

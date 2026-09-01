@@ -176,7 +176,34 @@ export type DestinoSobrescribibleRow = {
   mora?: BigInput | null;
   pagoConvenio?: BigInput | null;
   otros?: string | number | null;
+  /** Procedencia: la semilla de SIFCO nace SIN fecha de pago. */
+  fecha_pago?: Date | string | null;
 };
+
+/**
+ * ¿Es el placeholder VIRGEN que sembró el importador, o una fila `no_required`
+ * que ya recibió plata de verdad?
+ *
+ * El status no alcanza para distinguirlos —de eso trata todo este archivo— así
+ * que se mira la PROCEDENCIA: la semilla nace con `fecha_pago = null`
+ * (`migratePayments.ts`, `registerBy = 'SIFCO_IMPORT'`) y ninguna vía de
+ * aplicación la deja sin fecha: `aplicarMontoAPago` escribe `fecha_pago` en el
+ * mismo UPDATE en que reparte el dinero, y conserva `no_required` cuando no le
+ * pasan `validationStatus`. Medido en prod el 01-sep-2026: las 181 semillas con
+ * `membresias_pago` en cuotas abiertas tienen las DOS marcas (`fecha_pago` nulo
+ * y `registerBy = 'SIFCO_IMPORT'`), y no existe ninguna fila `no_required` con
+ * plata real que venga sin fecha.
+ *
+ * Importa para los dos lados: sin esto, un pago REAL de solo membresías hecho
+ * por `/aplicar-monto-pago` (que deja `monto_aplicado === membresias_pago` y el
+ * status intacto) se leería como semilla y el siguiente cierre lo borraría.
+ * Codex P1, 3.ª ronda del PR #1519.
+ */
+export const esPlaceholderSifcoVirgen = (pago: {
+  validationStatus?: string | null;
+  fecha_pago?: Date | string | null;
+}): boolean =>
+  pago.validationStatus === "no_required" && pago.fecha_pago == null;
 
 /**
  * ¿La fila de pago elegida como `existingPago` se puede SOBRESCRIBIR (UPDATE) al
@@ -209,7 +236,7 @@ export type DestinoSobrescribibleRow = {
 export const esDestinoSobrescribible = (
   pago: DestinoSobrescribibleRow
 ): boolean => {
-  const esPlaceholderSifco = pago.validationStatus === "no_required";
+  const esPlaceholderSifco = esPlaceholderSifcoVirgen(pago);
   const tol = new Big(DESTINO_SOBRESCRIBIBLE_TOLERANCE);
   // Estricto (`lt`, no `lte`): un Q0.01 exacto es un pago real, no "vacío".
   const casiCero = (v: BigInput | null | undefined) =>
@@ -316,11 +343,12 @@ export const normalizarHermanoParaNeteo = <
   T extends {
     validationStatus?: string | null;
     membresias_pago?: BigInput | null;
+    fecha_pago?: Date | string | null;
   }
 >(
   pago: T
 ): T =>
-  pago.validationStatus === "no_required"
+  esPlaceholderSifcoVirgen(pago)
     ? ({ ...pago, membresias_pago: "0" } as T)
     : pago;
 

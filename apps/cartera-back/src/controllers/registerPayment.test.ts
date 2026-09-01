@@ -11,6 +11,7 @@ import {
   debeProcesarConvenio,
   debeRechazarAbonoCapitalNoAplicado,
   esDestinoSobrescribible,
+  esPlaceholderSifcoVirgen,
   getApplyPaymentHttpStatus,
   getCuotaIdForPaymentInsert,
   getRequestedInstallmentFloor,
@@ -467,6 +468,33 @@ describe("cuentaComoHermanoVivo", () => {
 // Codex P1 (PR #1519): la fila MIXTA — semilla de SIFCO que después absorbió
 // plata real — entraba al neteo arrastrando su `membresias_pago` sembrado, y
 // `sumarAplicadoACuota`/`membresiasPrevioCuota` lo contaban como cobrado.
+// Codex P1 (3.ª ronda): `/aplicar-monto-pago` reparte plata a `membresias_pago`
+// y conserva `no_required` cuando no le pasan `validationStatus`, dejando
+// `monto_aplicado === membresias_pago`. Sin mirar procedencia, ese pago REAL de
+// solo membresías se leía como semilla y el siguiente cierre lo borraba.
+describe("esPlaceholderSifcoVirgen", () => {
+  it("la semilla de SIFCO no trae fecha_pago", () => {
+    expect(
+      esPlaceholderSifcoVirgen({ validationStatus: "no_required", fecha_pago: null })
+    ).toBe(true);
+  });
+
+  it("una fila no_required CON fecha_pago ya recibió plata: no es semilla", () => {
+    expect(
+      esPlaceholderSifcoVirgen({
+        validationStatus: "no_required",
+        fecha_pago: "2026-06-09 17:03:09",
+      })
+    ).toBe(false);
+  });
+
+  it("ningún otro status es semilla", () => {
+    expect(
+      esPlaceholderSifcoVirgen({ validationStatus: "validated", fecha_pago: null })
+    ).toBe(false);
+  });
+});
+
 describe("normalizarHermanoParaNeteo", () => {
   it("cero la membresía sembrada de una fila no_required MIXTA", () => {
     const fila = {
@@ -552,6 +580,7 @@ describe("esDestinoSobrescribible", () => {
     expect(
       esDestinoSobrescribible({
         validationStatus: "no_required",
+        fecha_pago: null,
         monto_aplicado: "0",
         abono_capital: "0",
         abono_interes: "0",
@@ -571,6 +600,7 @@ describe("esDestinoSobrescribible", () => {
     expect(
       esDestinoSobrescribible({
         validationStatus: "no_required",
+        fecha_pago: null,
         monto_aplicado: "461.63",
         abono_capital: "0",
         abono_interes: "0",
@@ -593,6 +623,32 @@ describe("esDestinoSobrescribible", () => {
         membresias_pago: "461.63",
       })
     ).toBe(false);
+  });
+
+  it("un pago REAL de solo membresías vía /aplicar-monto-pago NO es sobrescribible", () => {
+    // Codex P1 (3.ª ronda): esa vía deja `monto_aplicado === membresias_pago` y
+    // el status en `no_required`, pero SÍ estampa `fecha_pago`. Sin la
+    // procedencia se leía como semilla y el cierre siguiente lo borraba.
+    expect(
+      esDestinoSobrescribible({
+        validationStatus: "no_required",
+        fecha_pago: "2026-08-15 10:00:00",
+        monto_aplicado: "506.41",
+        abono_capital: "0",
+        abono_interes: "0",
+        membresias_pago: "506.41",
+      })
+    ).toBe(false);
+  });
+
+  it("y ese pago real de membresías SÍ aporta al neteo de la cuota", () => {
+    const fila = {
+      validationStatus: "no_required",
+      fecha_pago: "2026-08-15 10:00:00",
+      membresias_pago: "506.41",
+    };
+    expect(normalizarHermanoParaNeteo(fila).membresias_pago).toBe("506.41");
+    expect(cuentaComoHermanoVivo({ ...fila, monto_aplicado: "506.41" })).toBe(true);
   });
 
   it("el neto de la membresía NO se descuenta fuera de no_required", () => {

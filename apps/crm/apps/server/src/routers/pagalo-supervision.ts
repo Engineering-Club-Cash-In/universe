@@ -10,6 +10,7 @@
  * consume la bandeja, aquello es lo que consume la Ficha 360.
  */
 
+import { ORPCError } from "@orpc/server";
 import { and, count, desc, eq, exists, ilike, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
@@ -21,21 +22,25 @@ import {
 	pagaloPaymentGroups,
 	pagaloPaymentLinks,
 } from "../db/schema/pagalo-payments";
-import { cobrosProcedure } from "../lib/orpc";
-import { buscarAsesorPorEmail } from "../lib/pagalo-supervision-acceso";
+import { cobrosProcedure, cobrosSupervisorProcedure } from "../lib/orpc";
+import {
+	type AsesorPoolPagalo,
+	asesoresActivosConBuckets,
+	buscarAsesorPorEmail,
+	buscarAsesorPorId,
+	nombresAsesoresPorSifco,
+} from "../lib/pagalo-supervision-acceso";
 import {
 	condicionesFiltro,
-	condicionSifcosPermitidos,
 	condicionGrupoProblematico,
+	condicionSifcosPermitidos,
 } from "../lib/pagalo-supervision-filtros";
 import { PERMISSIONS } from "../lib/roles";
 import { carteraBackClient } from "../services/cartera-back-client";
 
-async function resolverScopeAsesorPagalo(email: string | null | undefined) {
-	const asesores = await carteraBackClient.getPoolPorAsesor({
-		useCache: false,
-	});
-	const asesor = buscarAsesorPorEmail(asesores, email);
+const MAX_GRUPOS_POR_PAGINA = 25;
+
+async function resolverScopeAsesorPagalo(asesor: AsesorPoolPagalo | null) {
 	const bucketsAsignados = asesor?.buckets ?? [];
 	if (!asesor || bucketsAsignados.length === 0) {
 		return { bucketsAsignados, sifcosPermitidos: new Set<string>() };
@@ -44,14 +49,33 @@ async function resolverScopeAsesorPagalo(email: string | null | undefined) {
 	return {
 		bucketsAsignados,
 		sifcosPermitidos: new Set(
-			(await carteraBackClient.getSifcosPoolAutoritativos({
-				asesorId: asesor.asesor_id,
-			})).data,
+			(
+				await carteraBackClient.getSifcosPoolAutoritativos({
+					asesorId: asesor.asesor_id,
+				})
+			).data,
 		),
 	};
 }
 
 export const pagaloSupervisionRouter = {
+	// Catálogo para selector Págalo: solo asesores con por lo menos un bucket
+	// activo. El selector no usa getAsesores porque su email/activo no expresa
+	// pertenencia al pool que define alcance de esta bandeja.
+	getPagaloAsesores: cobrosSupervisorProcedure
+		.input(z.object({}))
+		.handler(async () => {
+			const asesores = await carteraBackClient.getPoolPorAsesor({
+				useCache: false,
+			});
+			return asesoresActivosConBuckets(asesores)
+				.map(({ asesor_id, nombre, buckets }) => ({
+					asesorId: asesor_id,
+					nombre,
+					buckets,
+				}));
+		}),
+
 	// Supervisor/admin ve toda la cartera. Rol cobros recibe solo créditos en
 	// buckets de su pool actual, resuelto server-side antes de cualquier conteo.
 	getPagaloSupervision: cobrosProcedure
@@ -62,25 +86,72 @@ export const pagaloSupervisionRouter = {
 				soloHuerfanos: z.boolean().optional(),
 				antiguedadMinDias: z.number().int().positive().optional(),
 				numeroSifco: z.string().trim().optional(),
+				asesorId: z.number().int().positive().optional(),
 				// Sin esto en `true`, la bandeja parte del predicado "problemático"
 				// (REVIEW_REQUIRED/APPLICATION_FAILED/huérfano/estancado). El
 				// checkbox "Solo problemáticos" de la UI lo controla; con chips de
 				// estado activos, el usuario ya acotó a propósito y ese acotado manda
 				// sin importar este flag.
 				soloProblematicos: z.boolean().default(true),
-				limit: z.number().int().min(1).max(200).default(50),
+				limit: z
+					.number()
+					.int()
+					.min(1)
+					.max(MAX_GRUPOS_POR_PAGINA)
+					.default(MAX_GRUPOS_POR_PAGINA),
 				offset: z.number().int().min(0).default(0),
 			}),
 		)
 		.handler(async ({ input, context }) => {
 			const puedeVerTodo = PERMISSIONS.canAssignCobros(context.userRole ?? "");
-			const scopeAsesor = puedeVerTodo
+			if (input.asesorId && !puedeVerTodo) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tenés permiso para filtrar por otro asesor.",
+				});
+			}
+
+			const necesitaScope = !puedeVerTodo || input.asesorId !== undefined;
+			let asesores: AsesorPoolPagalo[] = [];
+			try {
+				asesores = await carteraBackClient.getPoolPorAsesor({
+					useCache: false,
+				});
+			} catch (error) {
+				// Para admin/supervisor sin filtro, el pool solo alimenta columna
+				// Asesor: Págalo sigue usable si cartera-back está degradado. Para
+				// scope propio o filtro elegido, fallar cerrado conserva autorización.
+				if (necesitaScope) throw error;
+				console.error(
+					"[Págalo] No se pudo resolver catálogo de pools:",
+					error instanceof Error ? error.message : error,
+				);
+			}
+			const asesorSeleccionado = input.asesorId
+				? buscarAsesorPorId(asesores, input.asesorId)
+				: null;
+			const asesorPropio = puedeVerTodo
 				? null
-				: await resolverScopeAsesorPagalo(context.session?.user?.email);
+				: buscarAsesorPorEmail(asesores, context.session?.user?.email);
+			const scopeAsesor = input.asesorId
+				? await resolverScopeAsesorPagalo(asesorSeleccionado)
+				: puedeVerTodo
+					? null
+					: await resolverScopeAsesorPagalo(asesorPropio);
 			const bucketsAsignados = scopeAsesor?.bucketsAsignados ?? null;
 			const sifcosPermitidos = scopeAsesor?.sifcosPermitidos ?? null;
 			if (sifcosPermitidos?.size === 0) {
-				return { grupos: [], total: 0, conteoPorEstado: {}, bucketsAsignados };
+				return {
+					grupos: [],
+					total: 0,
+					conteoPorEstado: {},
+					bucketsAsignados,
+					asesorSeleccionado: asesorSeleccionado
+						? {
+								asesorId: asesorSeleccionado.asesor_id,
+								nombre: asesorSeleccionado.nombre,
+							}
+						: null,
+				};
 			}
 
 			const filtroInput = {
@@ -187,7 +258,18 @@ export const pagaloSupervisionRouter = {
 				.where(whereClause);
 
 			if (total === 0) {
-				return { grupos: [], total: 0, conteoPorEstado, bucketsAsignados };
+				return {
+					grupos: [],
+					total: 0,
+					conteoPorEstado,
+					bucketsAsignados,
+					asesorSeleccionado: asesorSeleccionado
+						? {
+								asesorId: asesorSeleccionado.asesor_id,
+								nombre: asesorSeleccionado.nombre,
+							}
+						: null,
+				};
 			}
 
 			const pagina = await db
@@ -216,7 +298,18 @@ export const pagaloSupervisionRouter = {
 				.offset(input.offset);
 
 			if (pagina.length === 0) {
-				return { grupos: [], total, conteoPorEstado, bucketsAsignados };
+				return {
+					grupos: [],
+					total,
+					conteoPorEstado,
+					bucketsAsignados,
+					asesorSeleccionado: asesorSeleccionado
+						? {
+								asesorId: asesorSeleccionado.asesor_id,
+								nombre: asesorSeleccionado.nombre,
+							}
+						: null,
+				};
 			}
 
 			const links = await db
@@ -328,10 +421,40 @@ export const pagaloSupervisionRouter = {
 				}
 			}
 
+			// Misma fuente autoritativa del filtro, pero restringida a SIFCOs de
+			// esta página. Evita resolver pools completos por cada asesor.
+			const sifcosPorAsesor = new Map<number, string[]>();
+			if (sifcosPagina.length > 0) {
+				try {
+					for (const asignacion of (
+						await carteraBackClient.getAsignacionesPoolPorSifco({
+							sifcos: sifcosPagina,
+						})
+					).data) {
+						const sifcos = sifcosPorAsesor.get(asignacion.asesor_id) ?? [];
+						sifcos.push(asignacion.numero_credito_sifco);
+						sifcosPorAsesor.set(asignacion.asesor_id, sifcos);
+					}
+				} catch (error) {
+					console.error(
+						"[Págalo] No se pudo resolver asesores de la página:",
+						error instanceof Error ? error.message : error,
+					);
+				}
+			}
+			const asesoresPorSifco = nombresAsesoresPorSifco(
+				asesoresActivosConBuckets(asesores).map((asesor) => ({
+					...asesor,
+					sifcos: sifcosPorAsesor.get(asesor.asesor_id) ?? [],
+				})),
+				sifcosPagina,
+			);
+
 			return {
 				grupos: pagina.map((grupo) => ({
 					...grupo,
 					clienteNombre: nombrePorSifco.get(grupo.numeroCreditoSifco) ?? null,
+					asesoresNombres: asesoresPorSifco.get(grupo.numeroCreditoSifco) ?? [],
 					links: (linksPorGrupo.get(grupo.id) ?? []).map((link) => ({
 						...link,
 						motivoCierre: motivoPorLink.get(link.id) ?? null,
@@ -340,6 +463,12 @@ export const pagaloSupervisionRouter = {
 				total,
 				conteoPorEstado,
 				bucketsAsignados,
+				asesorSeleccionado: asesorSeleccionado
+					? {
+							asesorId: asesorSeleccionado.asesor_id,
+							nombre: asesorSeleccionado.nombre,
+						}
+					: null,
 			};
 		}),
 };

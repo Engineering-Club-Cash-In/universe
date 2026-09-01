@@ -23,7 +23,6 @@ import {
   updateSaldoReinversion,
   updateLiquidacionReporteUrl,
   updateLiquidacionTotales,
-  getLiquidacionesPorFecha,
   revertirLiquidacion,
   revertirComprasUltimaLiquidacion,
   ejecutarReinversionAutomatica,
@@ -32,7 +31,6 @@ import {
   reconcileMirrorPercentages,
   auditMirrorPercentages,
   getCreditosEspejoPendientes,
-  detectPagosHuerfanos,
   simularInversionista,
 } from "../controllers/investor";
 import { ajustarPagosLiquidacion } from "../controllers/ajustarPagosLiquidacion";
@@ -827,113 +825,6 @@ export const inversionistasRouter = new Elysia()
       },
     }
   )
-  .post("/investor/reporte-liquidados-masivo", async ({ body, set }) => {
-    const { fecha_liquidacion } = body as { fecha_liquidacion?: string };
-
-    const fecha = fecha_liquidacion || new Date().toISOString().slice(0, 10);
-
-    try {
-      const liquidacionesDelDia = await getLiquidacionesPorFecha(fecha);
-
-      if (!liquidacionesDelDia.length) {
-        set.status = 404;
-        return { message: `No se encontraron liquidaciones para la fecha ${fecha}.` };
-      }
-
-      const resultados: any[] = [];
-      const errores: any[] = [];
-
-      for (const liq of liquidacionesDelDia) {
-        const { inversionista_id: id, liquidacion_id: liqId } = liq;
-        if (id === 38 || id === 84) continue;
-        try {
-          const huerfanos = await detectPagosHuerfanos(id, liqId);
-          if (huerfanos.length) {
-            errores.push({
-              id,
-              liquidacion_id: liqId,
-              error: `Se encontraron ${huerfanos.length} pago(s) huérfano(s) (sin crédito espejo asociado). No se generó el reporte.`,
-              pagos_huerfanos: huerfanos,
-            });
-            continue;
-          }
-
-          const result = await resumeInvestor(
-            id,
-            1,
-            999999,
-            undefined,
-            undefined,
-            undefined,
-            false,
-            undefined,
-            "espejos",
-            true,
-            liqId
-          );
-
-          if (!result.inversionistas.length) {
-            errores.push({ id, liquidacion_id: liqId, error: "Sin pagos liquidados" });
-            continue;
-          }
-
-          const inversionista = result.inversionistas[0];
-
-          const totales = await getInvestorTotalsGlobales(
-            id,
-            undefined,
-            "espejos",
-            false,
-            undefined,
-            true,
-            liqId
-          );
-          inversionista.subtotal = totales.totales as any;
-
-          const logoUrl = import.meta.env.LOGO_URL || "";
-          const filename = `reporte_liquidados_${id}_${Date.now()}.xlsx`;
-          const { url } = await generarYSubirExcelInversionista(
-            inversionista as any,
-            filename,
-            logoUrl
-          );
-
-          const liquidacionActualizada = await updateLiquidacionReporteUrl(liqId, url);
-
-          resultados.push({
-            inversionista_id: id,
-            liquidacion_id: liqId,
-            nombre: inversionista.nombre_inversionista,
-            url,
-            filename,
-            liquidacion: liquidacionActualizada || null,
-          });
-        } catch (err) {
-          errores.push({
-            id,
-            liquidacion_id: liqId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
-
-      return {
-        success: true,
-        fecha,
-        total_procesados: resultados.length,
-        total_errores: errores.length,
-        resultados,
-        errores,
-      };
-    } catch (error) {
-      console.error("[investor/reporte-liquidados-masivo] Error:", error);
-      set.status = 500;
-      return {
-        message: "Error al generar reportes masivos",
-        error: error instanceof Error ? error.message : String(error),
-      };
-    }
-  })
   .post("/investor/reporte-liquidados", async ({ body, set }) => {
     const { investor_id, liquidacion_id, reinvertir, solo_reporte, sustituir_totales } = body as {
       investor_id?: number;

@@ -497,8 +497,8 @@ test("reporte agrupa liquidaciones por snapshot y publica legacy como sin clasif
   );
 
   expect(report).toContain("l.tipo_reinversion_snapshot");
-  expect(report).toContain("cartera.historico_liquidaciones_espejo");
-  expect(report).toContain("cartera.pagos_credito_inversionistas_espejo");
+  expect(report).toContain("${SQL_CARTERA_SCHEMA}.historico_liquidaciones_espejo");
+  expect(report).toContain("${SQL_CARTERA_SCHEMA}.pagos_credito_inversionistas_espejo");
   expect(report).toContain("reinversion_residual");
   expect(report).toContain("COUNT(DISTINCT f.liquidacion_id)");
   expect(report).toContain("'sin_clasificar'");
@@ -528,7 +528,7 @@ test("capital activo agrega compras pendientes por posición antes de restarlas"
     "SUM(ppd.monto_pendiente), 0) AS monto_compra_pendiente",
   );
   expect(activeCapitalQuery).toContain(
-    "FROM cartera.creditos_inversionistas_espejo ce",
+    "FROM ${SQL_CARTERA_SCHEMA}.creditos_inversionistas_espejo ce",
   );
   expect(activeCapitalQuery).toContain(
     "cr.\"statusCredit\" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')",

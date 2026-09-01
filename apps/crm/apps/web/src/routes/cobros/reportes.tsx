@@ -14,6 +14,7 @@ import {
 import { useMemo, useState } from "react";
 import { AsesorMultiSelect } from "@/components/cobros/asesor-multi-select";
 import { DataTable } from "@/components/data-table";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -31,12 +32,21 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import {
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
+} from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import { authClient } from "@/lib/auth-client";
 import { PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
 import {
+	buildCapitalAging,
 	buildMoraDisplayRows,
 	getMoraSnapshotDate,
 	type MoraBucket,
@@ -85,6 +95,13 @@ const ETAPAS = [
 		label: "Mora 120+",
 		color: "bg-red-300 text-red-950",
 	},
+];
+
+const AGING_BANDAS = [
+	{ key: "mora_30" as const, label: "30" },
+	{ key: "mora_60" as const, label: "60" },
+	{ key: "mora_90" as const, label: "90" },
+	{ key: "mora_120_plus" as const, label: "120+" },
 ];
 
 type MoraSnapshotAsesor = {
@@ -162,8 +179,7 @@ function TabMora({
 	});
 
 	// Totales con / sin Gerencia (cliente, sobre porAsesor).
-	const porAsesor = ((data as { porAsesor?: MoraSnapshotAsesor[] } | undefined)
-		?.porAsesor ?? []) as MoraSnapshotAsesor[];
+	const porAsesor: MoraSnapshotAsesor[] = data?.porAsesor ?? [];
 	const totalConGerencia = porAsesor.reduce(
 		(s, a) => s + Number(a.totalEnMora?.sumaMora ?? 0),
 		0,
@@ -179,12 +195,14 @@ function TabMora({
 		.filter((a) => a.nombre !== "Gerencia")
 		.reduce((s, a) => s + Number(a.totalEnMora?.cantidad ?? 0), 0);
 
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const dataDisponibleDesde = (data as any)?.dataDisponibleDesde as
-		| string
-		| undefined;
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const alcance = (data as any)?.alcance as "live" | "historico" | undefined;
+	const dataDisponibleDesde = data?.dataDisponibleDesde;
+	const alcance = data?.alcance;
+	const capitalAging = buildCapitalAging({
+		totales: data?.totales ?? {},
+		porAsesor,
+		capitalCartera: data?.capitalCartera,
+		dataDisponibleDesde,
+	});
 
 	// Recuperación de mora para el mismo ciclo [día 6, día 6 siguiente).
 	const anioNum = Number(mesAnio.slice(0, 4));
@@ -433,6 +451,169 @@ function TabMora({
 					)}
 				</div>
 			)}
+
+			<section
+				aria-labelledby="aging-capital-title"
+				className="flex flex-col gap-4"
+			>
+				<div>
+					<h3 id="aging-capital-title" className="font-semibold text-lg">
+						Aging de capital
+					</h3>
+					<p className="text-muted-foreground text-sm">
+						Exposición acumulada y bandas exclusivas sobre el capital de
+						cartera.
+					</p>
+				</div>
+
+				{alcance === "historico" && (
+					<Alert>
+						<AlertDescription>
+							Para este corte histórico, capital y asesor según asignación
+							actual.
+						</AlertDescription>
+					</Alert>
+				)}
+
+				{isLoading ? (
+					<output
+						className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4"
+						aria-busy="true"
+						aria-label="Cargando aging de capital"
+					>
+						{AGING_BANDAS.map((banda) => (
+							<Card key={banda.key}>
+								<CardContent className="pt-6">
+									<div className="h-20 animate-pulse rounded bg-muted" />
+								</CardContent>
+							</Card>
+						))}
+					</output>
+				) : !capitalAging.disponible ? (
+					<Card>
+						<CardContent className="py-8 text-center text-muted-foreground text-sm">
+							{capitalAging.sinCoberturaHistorica
+								? `No hay datos de aging antes del ${dataDisponibleDesde}.`
+								: "La base de capital no está disponible para este corte."}
+						</CardContent>
+					</Card>
+				) : capitalAging.capitalTotal === 0 &&
+					capitalAging.porAsesor.length === 0 ? (
+					<Card>
+						<CardContent className="py-8 text-center text-muted-foreground text-sm">
+							No hay capital de cartera disponible para los filtros
+							seleccionados.
+						</CardContent>
+					</Card>
+				) : (
+					<>
+						<div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+							{capitalAging.acumulados.map((item) => (
+								<Card key={item.umbral}>
+									<CardHeader className="pb-2">
+										<CardTitle className="font-medium text-sm">
+											Exposición ≥{item.umbral}
+										</CardTitle>
+									</CardHeader>
+									<CardContent className="flex flex-col gap-2">
+										<div className="font-bold text-2xl tabular-nums">
+											{item.porcentaje.toFixed(1)}%
+										</div>
+										<div
+											className="h-1.5 overflow-hidden rounded-full bg-muted"
+											role="progressbar"
+											aria-label={`Exposición de capital mayor o igual a ${item.umbral} días`}
+											aria-valuenow={Math.min(item.porcentaje, 100)}
+											aria-valuemin={0}
+											aria-valuemax={100}
+										>
+											<div
+												className="h-full rounded-full bg-primary"
+												style={{ width: `${Math.min(item.porcentaje, 100)}%` }}
+											/>
+										</div>
+										<p className="font-medium text-sm tabular-nums">
+											{fmtQ(item.capital)}
+										</p>
+										<p className="text-muted-foreground text-xs">
+											{item.cantidad} créditos
+										</p>
+									</CardContent>
+								</Card>
+							))}
+						</div>
+
+						<Card>
+							<CardHeader>
+								<CardTitle className="text-base">
+									Bandas exclusivas por asesor
+								</CardTitle>
+							</CardHeader>
+							<CardContent>
+								<Table>
+									<TableHeader>
+										<TableRow>
+											<TableHead>Asesor</TableHead>
+											<TableHead className="text-right">
+												Capital asignado
+											</TableHead>
+											{AGING_BANDAS.map((banda) => (
+												<TableHead key={banda.key} className="text-right">
+													{banda.label}
+												</TableHead>
+											))}
+										</TableRow>
+									</TableHeader>
+									<TableBody>
+										{capitalAging.porAsesor.map((asesor) => (
+											<TableRow key={asesor.asesorId}>
+												<TableCell className="sticky left-0 z-10 bg-card font-medium">
+													{asesor.nombre}
+												</TableCell>
+												<TableCell className="text-right font-medium tabular-nums">
+													{fmtQ(asesor.capitalCartera)}
+												</TableCell>
+												{AGING_BANDAS.map((banda) => {
+													const metric = asesor[banda.key];
+													return (
+														<TableCell
+															key={banda.key}
+															className="min-w-36 text-right"
+														>
+															<div className="relative overflow-hidden rounded-md border px-2 py-1.5">
+																<span className="sr-only">
+																	{asesor.nombre}, banda {banda.label}:{" "}
+																	{metric.porcentaje.toFixed(1)}%,{" "}
+																	{fmtQ(metric.capital)}, {metric.cantidad}{" "}
+																	créditos
+																</span>
+																<div
+																	aria-hidden="true"
+																	className="absolute inset-y-0 left-0 bg-primary/10"
+																	style={{
+																		width: `${Math.min(metric.porcentaje, 100)}%`,
+																	}}
+																/>
+																<div className="relative font-semibold tabular-nums">
+																	{metric.porcentaje.toFixed(1)}%
+																</div>
+																<div className="relative text-muted-foreground text-xs tabular-nums">
+																	{fmtQ(metric.capital)} · {metric.cantidad}{" "}
+																	créd.
+																</div>
+															</div>
+														</TableCell>
+													);
+												})}
+											</TableRow>
+										))}
+									</TableBody>
+								</Table>
+							</CardContent>
+						</Card>
+					</>
+				)}
+			</section>
 
 			<div>
 				<h3 className="mb-3 font-semibold text-base">Desglose por Asesor</h3>

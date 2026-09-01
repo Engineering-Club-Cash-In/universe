@@ -1785,15 +1785,16 @@ async function correrRespaldoDeRechazos(): Promise<void> {
 
 setInterval(correrRespaldoDeRechazos, 60 * 60 * 1000);
 
-// El poller y el dispatcher de Págalo (CB-028) usan el mismo gate que el
-// resto de tareas programadas (`TAREAS_PROGRAMADAS_ACTIVAS`) — ya no tienen
-// flags propios (`PAGALO_POLL_ENABLED`/`PAGALO_DISPATCH_ENABLED` se
-// eliminaron: el botón manual `probarPollPagalo` y el dispatch inline
-// dentro del poll corren siempre, sin ningún gate, decisión explícita del
-// usuario). En esta rama (COBROS-02), `TAREAS_PROGRAMADAS_ACTIVAS` está
-// hardcodeada en `false` (ver FIXME arriba), así que el ciclo automático de
-// Págalo queda apagado junto con el resto de jobs hasta que se revierta ese
-// FIXME antes de mergear a develop.
+// El poller de Págalo (CB-028) corre SIEMPRE, sin depender de
+// `TAREAS_PROGRAMADAS_ACTIVAS` — decisión explícita del usuario. A
+// diferencia del resto de tareas de este bloque (recordatorios, alertas,
+// cierre diario), este job nunca le escribe nada a un cliente: solo lee el
+// estado de links en Págalo y actualiza estado interno (marcar pagado/
+// cancelado/expirado, disparar el dispatch inline hacia cartera-back). El
+// riesgo que motiva el FIXME de arriba (una segunda instancia mandando
+// mensajes reales) no aplica acá — dejarlo apagado junto con el resto solo
+// significaba que un pago real quedaba invisible hasta correr el botón
+// manual `probarPollPagalo`.
 async function correrPollDePagalo(): Promise<void> {
 	try {
 		await correrPollPagalo();
@@ -1802,10 +1803,8 @@ async function correrPollDePagalo(): Promise<void> {
 	}
 }
 
-if (TAREAS_PROGRAMADAS_ACTIVAS) {
-	void correrPollDePagalo();
-	setInterval(correrPollDePagalo, 5 * 60 * 1000);
-}
+void correrPollDePagalo();
+setInterval(correrPollDePagalo, 5 * 60 * 1000);
 
 async function correrDispatchDePagalo(): Promise<void> {
 	try {

@@ -48,7 +48,11 @@ import type { db } from "./db";
 import { ejecutarAgendaCobrosDiariaConReintentos } from "./jobs/agenda-cobros-snapshots";
 import { purgarBoletasSinConfirmar } from "./jobs/bot-cobros-purga";
 import { reconciliarBoletasColgadas } from "./jobs/bot-cobros-reconciliacion";
-import { reintentarAvisosDeRechazo } from "./jobs/bot-cobros-respaldo";
+import {
+	enVentanaDeRespaldo,
+	msHastaProximoRespaldo,
+	reintentarAvisosDeRechazo,
+} from "./jobs/bot-cobros-respaldo";
 import { generarCierreDiario } from "./jobs/cierre-diario-asesores";
 import {
 	checkSeguimientosVencidos,
@@ -1714,13 +1718,61 @@ app.post("/api/premora/elegibilidad/run", async (c) => {
 //   solo en la instancia del bot.
 //
 // ═══════════════════════════════════════════════════════════════════════════
-const TAREAS_PROGRAMADAS_ACTIVAS = false;
+//   Fase de pruebas de COBROS-02: en vez de una sola bandera apagada, se
+//   prende job por job. Lo que le ESCRIBE AL CLIENTE sigue en `false`.
+const JOBS_PROGRAMADOS = {
+	/** Reclama grupos Págalo listos y los manda a cartera. Hoy la aplicación
+	 *  solo ocurre inline desde el poller: si ese despacho falla, sin este job
+	 *  nadie lo reintenta y hay que apretar "Verificar ahora" a mano. */
+	dispatcherPagalo: true,
+	/** ⚠️ Le escribe al CLIENTE por WhatsApp cada 3 h (link sin pagar).
+	 *
+	 *  Va atado a `TEST_MESSAGE`, no a un `true` fijo, y FALLA CERRADO: si el
+	 *  modo prueba no está activo, este job NO corre.
+	 *
+	 *  El despliegue documentado de esta rama (despliegue-dev.md) configura
+	 *  `TEST_MESSAGE=false` contra una COPIA DE PRODUCCIÓN, y ahí el emisor
+	 *  manda al teléfono real del cliente. Un `true` fijo acá le mandaría
+	 *  links de pago a clientes reales cada 3 horas (hallazgo Codex). Ese
+	 *  mismo documento dice por qué la protección no puede depender de que
+	 *  alguien revise la env: "depender de que la env quedara bien puesta en
+	 *  el ambiente era demasiado frágil para lo que está en juego". */
+	recordatorioPagalo: isTestModeEnabled(),
+	/** Interno: promesas incumplidas + cierre de snapshots de la agenda. */
+	promesasYSnapshots: true,
+	/** Interno: foto de "paga bien" + auto-revoke de la reducción (CB-010). */
+	elegibilidadPremora: true,
+	/** Interno: cliente_subido, sin_contacto_3d y seguimiento vencido.
+	 *  Lee las subidas de bucket de anoche, así que sin `moras` corriendo en
+	 *  cartera no tiene nada que reportar. */
+	alertasCobros: true,
+	/** Interno: espejo de promesas hacia cartera (CB-030, 23:30 GT). Va con
+	 *  promesasYSnapshots — es la misma cadena. */
+	syncPromesasCartera: true,
+	/** Interno: cierre diario de asesores (00:15 GT). Congela el histórico del
+	 *  día anterior; no hace falta para lo que se está probando. */
+	cierreDiarioAsesores: false,
+	/** ⚠️ Le escribe al CLIENTE. Apagados a propósito en pruebas. */
+	recordatoriosPremora: false,
+	recordatoriosConvenio: false,
+} as const;
 
-if (!TAREAS_PROGRAMADAS_ACTIVAS) {
+const HAY_JOBS_ACTIVOS = Object.values(JOBS_PROGRAMADOS).some(Boolean);
+
+if (!JOBS_PROGRAMADOS.recordatorioPagalo) {
 	console.warn(
-		"[Jobs] ⚠️  Tareas programadas DESACTIVADAS en el código (rama COBROS-02): esta instancia levanta solo la API. Si ves esto en el CRM principal, el FIXME de index.ts llegó a producción.",
+		"[Jobs] ⚠️  Recordatorio de Págalo APAGADO: TEST_MESSAGE no está en 'true' y ese job le escribe al cliente. Es a propósito — se prende solo con el modo prueba activo.",
 	);
 }
+
+console.warn(
+	`[Jobs] ⚠️  Tareas programadas PARCIALES en el código (rama COBROS-02): ${
+		Object.entries(JOBS_PROGRAMADOS)
+			.filter(([, activo]) => activo)
+			.map(([nombre]) => nombre)
+			.join(", ") || "ninguna"
+	}. Si ves esto en el CRM principal, el FIXME de index.ts llegó a producción y el resto de jobs NO está corriendo.`,
+);
 
 // ═══════════════════════════════════════════════════════════════════════════
 // La purga de boletas del bot va FUERA del bloque de arriba, a propósito.
@@ -1773,8 +1825,18 @@ async function correrReconciliacionDeBoletas(): Promise<void> {
 setInterval(correrReconciliacionDeBoletas, 5 * 60 * 1000);
 
 // El respaldo del rechazo (D-39), también fuera de la bandera: si el WhatsApp
-// del rechazo falló, el cliente sigue creyendo que su pago va bien. Cada hora
-// se barren las boletas rechazadas a las que se les debe el mensaje.
+// del rechazo falló, el cliente sigue creyendo que su pago va bien — y, peor,
+// la alerta al asesor se manda UNA sola vez al rechazar, así que si ese envío
+// falla este barrido es lo único que hace que alguien se entere.
+//
+// Cada 3 horas, solo de 08:00 a 17:00 GT (2026-09-01, Daniel): no tiene
+// sentido barrer de madrugada. Un rechazo ocurre cuando conta está
+// trabajando, y tanto el mensaje al cliente como la alerta al asesor son para
+// horario laboral; correrlo a las 3 a.m. no adelanta nada que alguien vaya a
+// atender.
+// La cadencia (horas fijas 08/11/14/17 GT y el cálculo del próximo disparo)
+// vive en el módulo del job, junto a lo que agenda — y así se puede probar sin
+// levantar el servidor entero.
 async function correrRespaldoDeRechazos(): Promise<void> {
 	try {
 		await reintentarAvisosDeRechazo();
@@ -1783,7 +1845,29 @@ async function correrRespaldoDeRechazos(): Promise<void> {
 	}
 }
 
-setInterval(correrRespaldoDeRechazos, 60 * 60 * 1000);
+function programarRespaldoDeRechazos(): void {
+	setTimeout(async () => {
+		await correrRespaldoDeRechazos();
+		programarRespaldoDeRechazos();
+	}, msHastaProximoRespaldo());
+}
+programarRespaldoDeRechazos();
+
+// Y una corrida al arrancar si el deploy cae dentro de la ventana: si no, un
+// rechazo cuyo aviso falló justo antes del deploy espera hasta la próxima hora
+// de la lista. Barrer de más es inofensivo (solo toca lo que sigue debiendo su
+// mensaje); no barrer a tiempo deja al cliente creyendo que su pago va bien.
+//
+// La ventana se evalúa ACÁ, con la hora del arranque, y no adentro del
+// setTimeout: un deploy a las 17:59:40 está dentro de la ventana, pero 35 s
+// después ya son las 18:00 y la corrida se saltaría — dejando esos avisos
+// para las 08:00 del día siguiente (hallazgo Codex).
+const ARRANQUE_EN_VENTANA_DE_RESPALDO = enVentanaDeRespaldo();
+if (ARRANQUE_EN_VENTANA_DE_RESPALDO) {
+	setTimeout(() => {
+		void correrRespaldoDeRechazos();
+	}, 35_000);
+}
 
 // El poller de Págalo (CB-028) corre SIEMPRE, sin depender de
 // `TAREAS_PROGRAMADAS_ACTIVAS` — decisión explícita del usuario. El poll en
@@ -1820,7 +1904,7 @@ async function correrDispatchDePagalo(): Promise<void> {
 	}
 }
 
-if (TAREAS_PROGRAMADAS_ACTIVAS) {
+if (JOBS_PROGRAMADOS.dispatcherPagalo) {
 	void correrDispatchDePagalo();
 	setInterval(correrDispatchDePagalo, 5 * 60 * 1000);
 }
@@ -1836,11 +1920,11 @@ async function correrRecordatorioDePagalo(): Promise<void> {
 	}
 }
 
-if (TAREAS_PROGRAMADAS_ACTIVAS) {
+if (JOBS_PROGRAMADOS.recordatorioPagalo) {
 	setInterval(correrRecordatorioDePagalo, 3 * 60 * 60 * 1000);
 }
 
-if (TAREAS_PROGRAMADAS_ACTIVAS) {
+if (HAY_JOBS_ACTIVOS) {
 	// checkPromesasPago traga sus propios errores de persistencia por SIFCO
 	// (todo-o-nada por lote, ver check-promesas-pago.ts) y siempre resuelve
 	// normalmente — nunca rechaza, así que un simple .catch() no detecta que
@@ -1861,17 +1945,11 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 		}
 	}
 
-	// Job periódico de notificaciones de cobros (cada hora)
-	setInterval(
-		async () => {
-			try {
-				await checkSeguimientosVencidos();
-			} catch (error) {
-				console.error("Error en job de notificaciones cobros:", error);
-			}
-		},
-		60 * 60 * 1000,
-	);
+	// El aviso de "seguimiento vencido" ya NO corre cada hora (2026-09-01,
+	// Daniel): pasó al job de alertas de cobros de las 08:00 GT, junto con
+	// cliente_subido y sin_contacto_3d. Es una señal diaria —el seguimiento
+	// venció ayer, no hace una hora— y tenerla en su propio timer horario solo
+	// repartía las notificaciones de cobros en dos lugares distintos.
 
 	// Ejecutar una vez al iniciar (con delay de 10s para que la DB esté lista).
 	// checkPromesasPago se guarda en una promesa module-level: el catch-up de
@@ -1880,7 +1958,15 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 	const checkPromesasPagoBoot: Promise<CheckPromesasResumen | void> =
 		new Promise((resolve) => {
 			setTimeout(() => {
-				checkSeguimientosVencidos().catch(console.error);
+				if (!JOBS_PROGRAMADOS.promesasYSnapshots) {
+					resolve(undefined);
+					return;
+				}
+				// checkSeguimientosVencidos ya NO va acá: se corre con las
+				// alertas de las 08:00 GT, que tienen su propia recuperación de
+				// boot condicionada a la hora. Dejarlo también en este arranque
+				// lo dispararía dos veces por deploy (el dedup de 24 h lo hace
+				// inofensivo, pero es trabajo repetido y ruido en los logs).
 				procesarSeguimientosRecurrentes().catch(console.error);
 				resolve(checkPromesasPago().catch(console.error));
 			}, 10_000);
@@ -1900,7 +1986,7 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 			scheduleAtPremoraGT();
 		}, next.getTime() - now.getTime());
 	}
-	scheduleAtPremoraGT();
+	if (JOBS_PROGRAMADOS.recordatoriosPremora) scheduleAtPremoraGT();
 
 	// COBROS-02: recordatorios de CONVENIO, diario a las 8:05 GT (= 14:05 UTC), 5
 	// min DESPUÉS del funnel premora — así corren después de la subida de bucket de
@@ -1916,12 +2002,13 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 			scheduleAtConvenioGT();
 		}, next.getTime() - now.getTime());
 	}
-	scheduleAtConvenioGT();
-
-	// Recuperación al boot (deploy tardío): idempotente por los claims.
-	setTimeout(() => {
-		sendConvenioReminders().catch(console.error);
-	}, 20_000);
+	if (JOBS_PROGRAMADOS.recordatoriosConvenio) {
+		scheduleAtConvenioGT();
+		// Recuperación al boot (deploy tardío): idempotente por los claims.
+		setTimeout(() => {
+			sendConvenioReminders().catch(console.error);
+		}, 20_000);
+	}
 
 	// CB-010: elegibilidad de la reducción de recordatorios, diario a las 7:00 GT
 	// (= 13:00 UTC) — UNA HORA ANTES del funnel premora, para que la foto de "paga
@@ -1938,7 +2025,7 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 			scheduleAtElegibilidadGT();
 		}, next.getTime() - now.getTime());
 	}
-	scheduleAtElegibilidadGT();
+	if (JOBS_PROGRAMADOS.elegibilidadPremora) scheduleAtElegibilidadGT();
 
 	// Recuperación al boot (deploy tardío): la elegibilidad se refresca ANTES del
 	// envío premora y este ESPERA a que termine (review Codex P2). En el path
@@ -1947,35 +2034,59 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 	// D-5/D-3/D-1 de un crédito que ya debía auto-revocarse (el WhatsApp perdido no
 	// se recupera después). Premora es idempotente (claims), así que re-correr al
 	// boot no duplica mensajes.
-	setTimeout(async () => {
-		await refreshPremoraElegibilidad().catch(console.error);
-		await sendPremoraReminders().catch(console.error);
-	}, 15_000);
+	// El orden importa solo cuando los DOS están prendidos; con premora apagado
+	// esto queda como el simple catch-up de la elegibilidad.
+	if (
+		JOBS_PROGRAMADOS.elegibilidadPremora ||
+		JOBS_PROGRAMADOS.recordatoriosPremora
+	) {
+		setTimeout(async () => {
+			if (JOBS_PROGRAMADOS.elegibilidadPremora) {
+				await refreshPremoraElegibilidad().catch(console.error);
+			}
+			if (JOBS_PROGRAMADOS.recordatoriosPremora) {
+				await sendPremoraReminders().catch(console.error);
+			}
+		}, 15_000);
+	}
 
-	// COBROS-02: alertas de cobros con propósito (cliente_subido + sin_contacto_3d),
-	// diario a las 8:00 GT — DESPUÉS de que la subida de bucket de medianoche ya
-	// corrió en cartera, para leer las subidas de anoche. Reemplaza las viejas
-	// notificaciones masivas de "sin contacto". Idempotente por su propio dedup, así
-	// que el run de boot (abajo) recupera sin duplicar.
+	// COBROS-02: alertas de cobros con propósito (cliente_subido + sin_contacto_3d)
+	// MÁS el aviso de seguimiento vencido, diario a las 8:00 GT — DESPUÉS de que la
+	// subida de bucket de medianoche ya corrió en cartera, para leer las subidas de
+	// anoche. Reemplaza las viejas notificaciones masivas de "sin contacto".
+	// Idempotente por su propio dedup, así que el run de boot (abajo) recupera sin
+	// duplicar (checkSeguimientosVencidos deduplica por caso en ventana de 24 h).
+	//
+	// Los dos van juntos y en este orden a propósito: son la misma bandeja del
+	// asesor, y así abre el día con todo lo suyo de una vez en vez de irle
+	// goteando avisos a lo largo de la jornada.
+	async function correrAlertasDeCobros() {
+		await checkCobrosAlertas().catch(console.error);
+		await checkSeguimientosVencidos().catch((error) =>
+			console.error("Error en el aviso de seguimientos vencidos:", error),
+		);
+	}
+
 	function scheduleAtCobrosAlertasGT() {
 		const now = new Date();
 		const next = new Date();
 		next.setUTCHours(14, 0, 0, 0); // 08:00 GT
 		if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
 		setTimeout(async () => {
-			await checkCobrosAlertas().catch(console.error);
+			await correrAlertasDeCobros();
 			scheduleAtCobrosAlertasGT();
 		}, next.getTime() - now.getTime());
 	}
-	scheduleAtCobrosAlertasGT();
+	if (JOBS_PROGRAMADOS.alertasCobros) scheduleAtCobrosAlertasGT();
 	// Recuperación al boot SOLO si ya pasaron las 08:00 GT (un deploy tardío recupera
 	// el batch del día; el dedup evita duplicar). Antes de las 08:00 GT NO se corre:
 	// dispararía las alertas "de las 8am" en medianoche — se deja que el timeout
 	// programado las lance a la hora (Codex P2).
 	setTimeout(() => {
+		if (!JOBS_PROGRAMADOS.alertasCobros) return;
 		const horaGT = (new Date().getUTCHours() + 18) % 24; // GT = UTC-6, sin DST
 		if (horaGT >= 8) {
-			checkCobrosAlertas().catch(console.error);
+			void correrAlertasDeCobros();
 		} else {
 			console.log(
 				"[CobrosAlertas] Boot antes de las 08:00 GT; se omite la recuperación (el timeout programado la lanzará a la hora)",
@@ -2031,7 +2142,7 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 			scheduleAtMidnightGT();
 		}, next.getTime() - now.getTime());
 	}
-	scheduleAtMidnightGT();
+	if (JOBS_PROGRAMADOS.promesasYSnapshots) scheduleAtMidnightGT();
 
 	// CB-030: reconciliación diaria de promesas de pago hacia cartera-back
 	// (promesas_pago_espejo), a las 23:30 GT — 29 minutos ANTES de que
@@ -2051,7 +2162,7 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 			scheduleAtSyncPromesasGT();
 		}, next.getTime() - now.getTime());
 	}
-	scheduleAtSyncPromesasGT();
+	if (JOBS_PROGRAMADOS.syncPromesasCartera) scheduleAtSyncPromesasGT();
 
 	// Catch-up de arranque: si el proceso bootea DENTRO de la ventana 23:30–23:59
 	// GT (deploy nocturno, reinicio, crash-loop), el schedule de arriba ya empujó
@@ -2067,7 +2178,14 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 		const minutosUtc = ahora.getUTCHours() * 60 + ahora.getUTCMinutes();
 		const INICIO_VENTANA = 5 * 60 + 30; // 23:30 GT
 		const FIN_VENTANA = 5 * 60 + 59; // 23:59 GT (cuando arranca procesarMoras)
-		if (minutosUtc >= INICIO_VENTANA && minutosUtc < FIN_VENTANA) {
+		// El flag va TAMBIÉN acá: sin esto, apagar syncPromesasCartera solo
+		// apagaba el timer y este catch-up seguía escribiendo el espejo en
+		// cualquier arranque entre 23:30 y 23:59 (hallazgo Codex).
+		if (
+			JOBS_PROGRAMADOS.syncPromesasCartera &&
+			minutosUtc >= INICIO_VENTANA &&
+			minutosUtc < FIN_VENTANA
+		) {
 			console.log(
 				"[SyncPromesasCarteraBack] Arranque dentro de la ventana 23:30–23:59 GT: ejecutando reconciliación de catch-up antes de procesarMoras.",
 			);
@@ -2101,11 +2219,12 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 			scheduleAtCierreDiarioGT();
 		}, next.getTime() - now.getTime());
 	}
-	scheduleAtCierreDiarioGT();
+	if (JOBS_PROGRAMADOS.cierreDiarioAsesores) scheduleAtCierreDiarioGT();
 	// Recuperación al boot SOLO si ya pasaron las 00:15 GT (deploy tardío recupera
 	// el snapshot de ayer; re-correr no duplica, ver arriba). Antes de las 00:15
 	// GT NO se corre: se deja que el timeout programado lo lance a la hora.
 	setTimeout(() => {
+		if (!JOBS_PROGRAMADOS.cierreDiarioAsesores) return;
 		const bootNow = new Date();
 		const horaGT = (bootNow.getUTCHours() + 18) % 24; // GT = UTC-6, sin DST
 		const minutoGT = bootNow.getUTCMinutes();
@@ -2164,6 +2283,7 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 		return proximaMedianocheGT > ahora;
 	})();
 	setTimeout(async () => {
+		if (!JOBS_PROGRAMADOS.promesasYSnapshots) return;
 		await checkPromesasPagoBoot;
 		await esperarHasta0005GT();
 		const resumenPromesas = bootAntesDeMedianocheGT

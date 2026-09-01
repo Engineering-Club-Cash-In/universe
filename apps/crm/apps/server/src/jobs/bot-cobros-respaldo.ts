@@ -27,6 +27,50 @@ import {
 	avisarRechazoAlCliente,
 } from "../lib/bot-cobros/eventos-pago";
 
+/**
+ * Horas GT en las que barre. Son fijas, NO un `setInterval` cada 3 h: un
+ * intervalo queda con la fase del arranque, y con una ventana de 10 h eso
+ * alcanza para saltársela entera. Un proceso que bootea 15:01 dispararía a las
+ * 18:01 (fuera de ventana), y de ahí 21:01, 00:01, 03:01, 06:01… hasta las
+ * 09:01 del día siguiente: 18 horas sin barrer, justo el escenario que este
+ * job existe para cubrir (hallazgo Codex). Con horas fijas la cadencia no
+ * depende de cuándo se desplegó.
+ */
+export const HORAS_GT_RESPALDO = [8, 11, 14, 17] as const;
+
+/** Hora de Guatemala (UTC-6, sin horario de verano). */
+export function horaGuatemala(fecha = new Date()): number {
+	return (fecha.getUTCHours() + 18) % 24;
+}
+
+/**
+ * ¿Este instante cae dentro de la ventana laboral del barrido (08:00–17:59 GT)?
+ *
+ * Se pregunta por un instante EXPLÍCITO y no por "ahora" a propósito: quien
+ * decide la corrida de arranque tiene que evaluar la hora del ARRANQUE, no la
+ * de unos segundos después. Un deploy a las 17:59:40 está dentro de la ventana,
+ * pero si la pregunta se hace 35 s más tarde ya son las 18:00 y el barrido se
+ * salta — y los avisos que fallaron esperarían hasta las 08:00 del día
+ * siguiente (hallazgo Codex).
+ */
+export function enVentanaDeRespaldo(fecha = new Date()): boolean {
+	const hora = horaGuatemala(fecha);
+	return hora >= HORAS_GT_RESPALDO[0] && hora <= HORAS_GT_RESPALDO.at(-1)!;
+}
+
+/** Milisegundos hasta la próxima hora de la lista (mañana si ya pasaron todas). */
+export function msHastaProximoRespaldo(ahora = new Date()): number {
+	const proxima = new Date(ahora);
+	for (const horaGT of HORAS_GT_RESPALDO) {
+		// GT = UTC-6: la hora GT h es la h+6 UTC del mismo día UTC.
+		proxima.setUTCHours(horaGT + 6, 0, 0, 0);
+		if (proxima > ahora) return proxima.getTime() - ahora.getTime();
+	}
+	proxima.setUTCHours(HORAS_GT_RESPALDO[0] + 6, 0, 0, 0);
+	proxima.setUTCDate(proxima.getUTCDate() + 1);
+	return proxima.getTime() - ahora.getTime();
+}
+
 /** Tope por corrida: lo que no entre en esta, entra en la siguiente. */
 const MAXIMO_POR_CORRIDA = 200;
 

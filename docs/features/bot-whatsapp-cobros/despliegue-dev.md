@@ -123,9 +123,16 @@ los **20 segundos**, además de los recordatorios diarios.
 Como esta instancia apunta a una **copia de producción** y va con `TEST_MESSAGE=false`, sin
 protección **le mandaría recordatorios de pago reales a clientes reales en cada despliegue**.
 
-En esta rama la protección **no depende de una variable de entorno**: en `index.ts` hay un
-`const TAREAS_PROGRAMADAS_ACTIVAS = false` fijo. Depender de que la env quedara bien puesta
-en el ambiente era demasiado frágil para lo que está en juego. Al arrancar lo avisa:
+En esta rama la protección **no depende de una variable de entorno**: en `index.ts` los jobs
+se prenden uno por uno en `JOBS_PROGRAMADOS`, y los que le escriben al cliente
+(`recordatoriosPremora`, `recordatoriosConvenio`) están en `false` fijo. Depender de que la
+env quedara bien puesta en el ambiente era demasiado frágil para lo que está en juego.
+
+**Excepción con candado propio:** `recordatorioPagalo` (links de pago sin pagar, cada 3 h) sí
+está prendido para la fase de pruebas, pero **atado a `isTestModeEnabled()` y fallando
+cerrado**: con `TEST_MESSAGE` en cualquier cosa que no sea `true`/`1` el job no se registra.
+Con la configuración documentada acá (`TEST_MESSAGE=false`) queda apagado solo, y lo avisa al
+arrancar. Al arrancar lo avisa:
 
 ```
 [Jobs] ⚠️  Tareas programadas DESACTIVADAS en el código (rama COBROS-02): esta instancia

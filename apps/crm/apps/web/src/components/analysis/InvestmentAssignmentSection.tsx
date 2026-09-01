@@ -114,6 +114,10 @@ export function InvestmentAssignmentSection({
 	};
 	const [editDiaPagoMensual, setEditDiaPagoMensual] =
 		useState<PaymentDay>(getDefaultDiaPago);
+	// true solo si se eligió la opción "recomendado por IA" del select, aunque
+	// el día coincida con 15/30 — el server la revalida contra el análisis.
+	const [elegidoDesdeRecomendacionIA, setElegidoDesdeRecomendacionIA] =
+		useState(false);
 
 	// Función para calcular la categoría automáticamente basándose en creditType y vehicle.isNew
 	const getAutomaticCategoria = (
@@ -204,6 +208,12 @@ export function InvestmentAssignmentSection({
 				(selectedOpportunity.diaPagoMensual as PaymentDay) ||
 					getDefaultDiaPago(),
 			);
+			// Se inicializa según lo ya guardado en la oportunidad: si tiene
+			// diaPagoOriginalSistema, el diaPagoMensual precargado vino de una
+			// elección IA (mismo criterio que CreditDetailView.tsx).
+			setElegidoDesdeRecomendacionIA(
+				selectedOpportunity.diaPagoOriginalSistema != null,
+			);
 			// Limpiar inversionistas seleccionados
 			setSelectedInversionistas([]);
 			setIsEditingExisting(false);
@@ -219,12 +229,14 @@ export function InvestmentAssignmentSection({
 			categoria,
 			nit,
 			diaPagoMensual,
+			elegidoDesdeRecomendacionIA,
 		}: {
 			opportunityId: string;
 			inversionistas?: string;
 			categoria: CreditCategory;
 			nit: string;
 			diaPagoMensual: PaymentDay;
+			elegidoDesdeRecomendacionIA: boolean;
 		}) => {
 			return client.assignInvestorAndAdvance({
 				opportunityId,
@@ -233,6 +245,7 @@ export function InvestmentAssignmentSection({
 				categoria: categoria,
 				nit: nit,
 				diaPagoMensual: diaPagoMensual,
+				elegidoDesdeRecomendacionIA,
 			});
 		},
 		onSuccess: () => {
@@ -462,6 +475,7 @@ export function InvestmentAssignmentSection({
 			categoria: categoriaAutomatica,
 			nit: editNit,
 			diaPagoMensual: editDiaPagoMensual,
+			elegidoDesdeRecomendacionIA,
 		});
 	};
 
@@ -948,10 +962,20 @@ export function InvestmentAssignmentSection({
 									<div>
 										<Label className="text-xs">Día de Pago Mensual</Label>
 										<Select
-											value={editDiaPagoMensual.toString()}
-											onValueChange={(value) =>
-												setEditDiaPagoMensual(Number(value))
+											value={
+												elegidoDesdeRecomendacionIA
+													? `ia-${editDiaPagoMensual}`
+													: editDiaPagoMensual.toString()
 											}
+											onValueChange={(value) => {
+												if (value.startsWith("ia-")) {
+													setEditDiaPagoMensual(Number(value.slice(3)));
+													setElegidoDesdeRecomendacionIA(true);
+												} else {
+													setEditDiaPagoMensual(Number(value));
+													setElegidoDesdeRecomendacionIA(false);
+												}
+											}}
 										>
 											<SelectTrigger>
 												<SelectValue placeholder="Seleccionar día" />
@@ -959,17 +983,16 @@ export function InvestmentAssignmentSection({
 											<SelectContent>
 												<SelectItem value="15">15</SelectItem>
 												<SelectItem value="30">Fin de mes</SelectItem>
+												{/* No se excluyen 15/30: si la IA los recomienda, deben
+												verse como opción aparte para que el analista sepa que
+												la IA los sugirió — aunque el número se repita. */}
 												{selectedOpportunity.suggestedPaymentDays
 													?.filter(
-														(d: { dia: number; porcentaje: number }) =>
-															d.dia !== 15 && d.dia !== 30,
-													)
-													.filter(
 														(d, i, arr) =>
 															arr.findIndex((x) => x.dia === d.dia) === i,
 													)
 													.map((d: { dia: number; porcentaje: number }) => (
-														<SelectItem key={d.dia} value={d.dia.toString()}>
+														<SelectItem key={`ia-${d.dia}`} value={`ia-${d.dia}`}>
 															Día {d.dia} ({d.porcentaje}% recomendado en Análisis)
 														</SelectItem>
 													))}

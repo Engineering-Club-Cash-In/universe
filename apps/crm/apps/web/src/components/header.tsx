@@ -13,6 +13,7 @@ import {
 	ChevronDown,
 	Database,
 	FileText,
+	Files,
 	Gauge,
 	Gavel,
 	Handshake,
@@ -150,6 +151,12 @@ export default function Header() {
 										<Link to="/crm/vendors" className="cursor-pointer">
 											<UserCircle className="mr-2 h-4 w-4" />
 											Vendedores
+										</Link>
+									</DropdownMenuItem>
+									<DropdownMenuItem asChild>
+										<Link to="/crm/documentacion" className="cursor-pointer">
+											<Files className="mr-2 h-4 w-4" />
+											Documentación
 										</Link>
 									</DropdownMenuItem>
 									<DropdownMenuSeparator />
@@ -650,6 +657,10 @@ function MobileNav({
 										<Link to="/crm/vendors" className={MOBILE_LINK_CLASS}>
 											<UserCircle />
 											Vendedores
+										</Link>
+										<Link to="/crm/documentacion" className={MOBILE_LINK_CLASS}>
+											<Files />
+											Documentación
 										</Link>
 										<Link to="/crm/quoter" className={MOBILE_LINK_CLASS}>
 											<Calculator />

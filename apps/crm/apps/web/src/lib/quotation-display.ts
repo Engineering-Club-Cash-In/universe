@@ -1,5 +1,11 @@
 export const DISBURSEMENT_SALE_LABEL = "Desembolso por venta";
 
+export function formatInsuranceProviderLabel(
+	provider: "universales" | "gyt",
+): string | null {
+	return provider === "universales" ? "Seguro: Universales" : null;
+}
+
 export function formatQuotationClientName(input: object & {
 	leadFirstName?: string | null;
 	leadLastName?: string | null;

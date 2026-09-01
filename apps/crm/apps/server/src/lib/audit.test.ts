@@ -1,0 +1,412 @@
+import { describe, expect, test } from "bun:test";
+import {
+	type AuditContext,
+	auditFallbackForPath,
+	auditSourceForPath,
+	buildAuditRows,
+	chunk,
+	decideBodyCapture,
+	prepareAuditInput,
+	redactAuditInput,
+	resolveOperation,
+} from "./audit";
+
+function contextWith(overrides: Partial<AuditContext> = {}): AuditContext {
+	return {
+		actorId: "user-1",
+		actorRole: "sales",
+		source: "crm",
+		operation: "crm.updateOpportunity",
+		input: { id: "opp-1", title: "Crédito" },
+		fallback: { entity: "opportunity", action: "update" },
+		startedAt: 0,
+		entries: [],
+		...overrides,
+	};
+}
+
+const OK = { ok: true, durationMs: 12 };
+const FAILED = { ok: false, errorCode: "CONFLICT", durationMs: 12 };
+
+describe("buildAuditRows", () => {
+	test("writes nothing when a successful handler touched no entity", () => {
+		// El caso del aviso por duplicado: devuelve una advertencia sin insertar.
+		// Antes esto dejaba una creación que nunca ocurrió.
+		expect(buildAuditRows(contextWith(), OK)).toEqual([]);
+	});
+
+	test("keeps the rejected attempt when nothing was written", () => {
+		const rows = buildAuditRows(contextWith(), FAILED);
+		expect(rows).toHaveLength(1);
+		expect(rows[0]).toMatchObject({
+			entityType: "opportunity",
+			entityId: null,
+			action: "update",
+			ok: false,
+			errorCode: "CONFLICT",
+			performedBy: "user-1",
+			procedure: "crm.updateOpportunity",
+		});
+	});
+
+	test("skips the attempt row when the operation declares no fallback", () => {
+		expect(buildAuditRows(contextWith({ fallback: null }), FAILED)).toEqual([]);
+	});
+
+	test("writes one row per recorded entity, sharing who and where", () => {
+		const rows = buildAuditRows(
+			contextWith({
+				operation: "crm.reassignOpportunityAndLead",
+				entries: [
+					{ entity: "opportunity", id: "opp-1", action: "reassign" },
+					{ entity: "lead", id: "lead-1", action: "reassign" },
+				],
+			}),
+			OK,
+		);
+		expect(rows.map((r) => [r.entityType, r.entityId, r.action])).toEqual([
+			["opportunity", "opp-1", "reassign"],
+			["lead", "lead-1", "reassign"],
+		]);
+		expect(rows.every((r) => r.performedBy === "user-1")).toBe(true);
+		expect(rows.every((r) => r.durationMs === 12)).toBe(true);
+	});
+
+	test("lets each entry carry its own detail instead of the request body", () => {
+		const [row] = buildAuditRows(
+			contextWith({
+				entries: [
+					{
+						entity: "opportunity",
+						id: "opp-9",
+						action: "sync_nit",
+						data: { leadId: "lead-1", nit: "123" },
+					},
+				],
+			}),
+			OK,
+		);
+		expect(row.input).toEqual({ leadId: "lead-1", nit: "123" });
+	});
+
+	test("records a failure the handler returned instead of threw", () => {
+		// enrichLeadFromRenap devuelve { success: false } en vez de lanzar: la
+		// operación termina bien pero el intento tiene que quedar como fallido.
+		const [row] = buildAuditRows(
+			contextWith({
+				entries: [
+					{
+						entity: "lead",
+						id: "lead-1",
+						action: "enrich_renap",
+						ok: false,
+						errorCode: "SIN_DPI",
+					},
+				],
+			}),
+			OK,
+		);
+		expect(row).toMatchObject({ ok: false, errorCode: "SIN_DPI" });
+	});
+
+	test("redacts the payload it stores", () => {
+		const [row] = buildAuditRows(
+			contextWith({
+				input: { imageBase64: "AAAA", title: "Crédito" },
+				entries: [{ entity: "vehicle", id: "v-1", action: "update" }],
+			}),
+			OK,
+		);
+		expect(row.input).toEqual({ imageBase64: "<omitido>", title: "Crédito" });
+	});
+});
+
+describe("redactAuditInput", () => {
+	test("keeps small form-like inputs intact", () => {
+		const input = {
+			id: "opp-1",
+			title: "Crédito",
+			probability: 25,
+			active: true,
+			tags: ["a", "b"],
+			nested: { leadId: "lead-1", note: null },
+		};
+		expect(redactAuditInput(input)).toEqual(input);
+	});
+
+	test("hides base64 payloads and secrets by key name", () => {
+		expect(
+			redactAuditInput({
+				vehicleId: "v-1",
+				imageBase64: "AAAA",
+				password: "x",
+				otpCode: "123456",
+			}),
+		).toEqual({
+			vehicleId: "v-1",
+			imageBase64: "<omitido>",
+			password: "<omitido>",
+			otpCode: "<omitido>",
+		});
+	});
+
+	test("truncates long strings even when the key looks harmless", () => {
+		expect(redactAuditInput({ notes: "x".repeat(5_000) })).toEqual({
+			notes: "<omitido: 5000 chars>",
+		});
+	});
+
+	test("serializes dates, drops undefined and caps arrays", () => {
+		const result = redactAuditInput({
+			when: new Date("2026-08-27T12:00:00.000Z"),
+			missing: undefined,
+			items: Array.from({ length: 150 }, (_, i) => i),
+		}) as Record<string, unknown>;
+		expect(result.when).toBe("2026-08-27T12:00:00.000Z");
+		expect("missing" in result).toBe(false);
+		expect((result.items as unknown[]).length).toBe(101);
+		expect((result.items as unknown[])[100]).toBe("<omitidos: 50 items>");
+	});
+
+	test("replaces binary payloads", () => {
+		expect(redactAuditInput({ file: new Uint8Array([1, 2, 3]) })).toEqual({
+			file: "<omitido: binario 3 bytes>",
+		});
+	});
+});
+
+describe("prepareAuditInput", () => {
+	test("collapses to the key list when the redacted body is still too big", () => {
+		const input: Record<string, string> = {};
+		for (let i = 0; i < 100; i++) input[`field${i}`] = "y".repeat(1_500);
+		const result = prepareAuditInput(input) as {
+			_truncated: boolean;
+			keys: string[];
+		};
+		expect(result._truncated).toBe(true);
+		expect(result.keys.length).toBe(100);
+	});
+});
+
+describe("auditSourceForPath", () => {
+	test("derives the source from the route so nobody has to declare it", () => {
+		expect(auditSourceForPath("/info/renap")).toBe("bot");
+		expect(auditSourceForPath("/api/portal/lead")).toBe("portal");
+		expect(auditSourceForPath("/api/public/lead")).toBe("public");
+		expect(auditSourceForPath("/api/migrate/creditos")).toBe("system");
+		expect(auditSourceForPath("/api/load-cars")).toBe("system");
+	});
+});
+
+describe("failed requests that do not throw", () => {
+	test("keeps a committed write as successful and adds the failed attempt", () => {
+		// El lead se creó de verdad; que un paso posterior falle no lo deshace.
+		// Marcarlo ok:false diría que no ocurrió, y perder la fila del fallo
+		// escondería que la operación no terminó: van las dos.
+		const rows = buildAuditRows(
+			contextWith({
+				source: "public",
+				operation: "POST /api/public/lead",
+				fallback: { entity: "lead", action: "create" },
+				entries: [{ entity: "lead", id: "lead-1", action: "create" }],
+			}),
+			{ ok: false, errorCode: "HTTP_500", durationMs: 5 },
+		);
+		expect(rows).toHaveLength(2);
+		expect(rows[0]).toMatchObject({ entityId: "lead-1", ok: true });
+		expect(rows[1]).toMatchObject({
+			entityId: null,
+			ok: false,
+			errorCode: "HTTP_500",
+		});
+	});
+
+	test("lets an entry declare its own failure", () => {
+		const [row] = buildAuditRows(
+			contextWith({
+				fallback: null,
+				entries: [
+					{
+						entity: "lead",
+						id: "lead-1",
+						action: "enrich_renap",
+						ok: false,
+						errorCode: "SIN_DPI",
+					},
+				],
+			}),
+			{ ok: true, durationMs: 5 },
+		);
+		expect(row).toMatchObject({ ok: false, errorCode: "SIN_DPI" });
+	});
+});
+
+describe("chunk", () => {
+	test("splits bulk flushes so Postgres does not reject the statement", () => {
+		// 13 parámetros por fila contra un tope de 65535: una limpieza o un import
+		// masivo reventaría la sentencia entera y el catch se comería toda la
+		// bitácora de esa operación.
+		const filas = Array.from({ length: 1_250 }, (_, i) => i);
+		const lotes = chunk(filas, 500);
+		expect(lotes.map((l) => l.length)).toEqual([500, 500, 250]);
+		expect(lotes.flat()).toEqual(filas);
+	});
+
+	test("leaves a small batch in a single statement", () => {
+		expect(chunk([1, 2, 3], 500)).toEqual([[1, 2, 3]]);
+		expect(chunk([], 500)).toEqual([]);
+	});
+});
+
+describe("resolveOperation", () => {
+	test("ignores the middleware pattern and keeps the real path", () => {
+		// En un middleware montado con app.use(), routePath es el del middleware:
+		// sin esto, toda ruta de Hono quedaba registrada como "POST /*".
+		expect(resolveOperation("POST", "/api/public/lead", "/*")).toBe(
+			"POST /api/public/lead",
+		);
+		expect(resolveOperation("POST", "/info/renap", "*")).toBe(
+			"POST /info/renap",
+		);
+	});
+
+	test("prefers the matched route once Hono resolved it", () => {
+		expect(
+			resolveOperation(
+				"DELETE",
+				"/api/migrate/cleanup",
+				"/api/migrate/cleanup",
+			),
+		).toBe("DELETE /api/migrate/cleanup");
+	});
+
+	test("falls back to the request path when there is no route", () => {
+		expect(resolveOperation("POST", "/api/load-cars")).toBe(
+			"POST /api/load-cars",
+		);
+	});
+});
+
+describe("suplantación", () => {
+	test("atribuye la escritura al admin que la inició, no al suplantado", () => {
+		const [row] = buildAuditRows(
+			contextWith({
+				actorId: "admin-1",
+				actorRole: "admin",
+				impersonatedFor: { usuario: "vendedor-9", rol: "sales" },
+				entries: [
+					{
+						entity: "opportunity",
+						id: "opp-1",
+						action: "update",
+						data: { x: 1 },
+					},
+				],
+			}),
+			{ ok: true, durationMs: 3 },
+		);
+		expect(row.performedBy).toBe("admin-1");
+		// El rol también tiene que ser el del admin: un id de admin con rol
+		// "sales" es una fila que se contradice a sí misma.
+		expect(row.performedByRole).toBe("admin");
+		expect(row.input).toEqual({
+			_ejecutadoComo: { usuario: "vendedor-9", rol: "sales" },
+			payload: { x: 1 },
+		});
+	});
+
+	test("sin suplantación el payload queda tal cual", () => {
+		const [row] = buildAuditRows(
+			contextWith({
+				entries: [
+					{
+						entity: "opportunity",
+						id: "opp-1",
+						action: "update",
+						data: { x: 1 },
+					},
+				],
+			}),
+			{ ok: true, durationMs: 3 },
+		);
+		expect(row.input).toEqual({ x: 1 });
+	});
+});
+
+describe("auditFallbackForPath", () => {
+	test("identifies rejected attempts on routes that write", () => {
+		// Un 400 por campos faltantes no llega a anotar nada: sin esta identidad
+		// el intento rechazado no dejaría rastro.
+		expect(auditFallbackForPath("POST", "/api/public/lead")).toEqual({
+			entity: "lead",
+			action: "create",
+		});
+		expect(auditFallbackForPath("DELETE", "/api/migrate/cleanup")).toEqual({
+			entity: "opportunity",
+			action: "delete",
+		});
+	});
+
+	test("distinguishes the reading route from the writing one", () => {
+		// GET y POST comparten path en el portal: un rechazo de lectura no debe
+		// fabricar un intento de alta.
+		expect(auditFallbackForPath("GET", "/api/portal/lead")).toBeNull();
+		expect(auditFallbackForPath("POST", "/api/portal/lead")).toEqual({
+			entity: "lead",
+			action: "create",
+		});
+	});
+
+	test("points liveness at the endpoint that actually writes", () => {
+		expect(auditFallbackForPath("GET", "/info/validate-liveness")).toEqual({
+			entity: "lead",
+			action: "liveness_validated",
+		});
+		expect(auditFallbackForPath("POST", "/info/check-liveness")).toBeNull();
+	});
+
+	test("stays quiet on routes that write nothing", () => {
+		expect(auditFallbackForPath("POST", "/info/send-otp")).toBeNull();
+		expect(
+			auditFallbackForPath("POST", "/api/upload-vehicle-video"),
+		).toBeNull();
+	});
+});
+
+describe("decideBodyCapture", () => {
+	test("no clona lo que no es JSON", () => {
+		// Clonar tee-ea el stream: en una subida de video la rama que nadie lee
+		// se llena en memoria mientras el handler consume el archivo.
+		expect(
+			decideBodyCapture("multipart/form-data; boundary=x", "90000000"),
+		).toEqual({ leer: false, enLugarDe: null });
+	});
+
+	test("no materializa dos copias de un import grande", () => {
+		// /api/migrate/creditos manda arrays de miles de elementos: parsear una
+		// copia antes de que el handler parsee la suya duplica el pico.
+		expect(decideBodyCapture("application/json", "5000000")).toEqual({
+			leer: false,
+			enLugarDe: { _bodyOmitido: { bytes: "5000000" } },
+		});
+	});
+
+	test("lee los cuerpos chicos, que son casi todos", () => {
+		expect(decideBodyCapture("application/json; charset=utf-8", "820")).toEqual(
+			{
+				leer: true,
+			},
+		);
+	});
+
+	test("deja constancia cuando no puede saber el tamaño", () => {
+		expect(decideBodyCapture("application/json", null)).toEqual({
+			leer: false,
+			enLugarDe: { _bodySinLongitud: true },
+		});
+		expect(decideBodyCapture("application/json", "no-es-un-numero")).toEqual({
+			leer: false,
+			enLugarDe: { _bodyOmitido: { bytes: "no-es-un-numero" } },
+		});
+	});
+});

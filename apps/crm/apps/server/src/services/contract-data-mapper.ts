@@ -3,9 +3,18 @@
  */
 import { eq } from "drizzle-orm";
 import { db } from "../db";
-import { leads, opportunities } from "../db/schema/crm";
-import { vehicles } from "../db/schema/vehicles";
+import { creditChecks } from "../db/schema/checks";
+import { companies, leads, opportunities } from "../db/schema/crm";
+import { investors } from "../db/schema/investments";
+import { vehicles, vehicleVendors } from "../db/schema/vehicles";
 import { getRenapData } from "../functions/getRenapInfo";
+import { auditRecord } from "../lib/audit";
+import { mapChecksToDisbursementRows } from "../lib/contract-disbursement";
+import {
+	parseOpportunityInvestors,
+	resolveEntityType,
+	selectPrimaryInvestor,
+} from "../lib/contract-entity";
 import {
 	calculateAge,
 	calculateAgeInWords,
@@ -199,6 +208,36 @@ export interface ContractData {
 		fechaInicio?: ContractDateComponents;
 		lugarFirma: string;
 	};
+	// Vendedor del vehículo (para la Declaración de Vendedor).
+	// Opcional: hoy asignarlo en la oportunidad no es obligatorio.
+	vendedor?: {
+		nombre: string;
+		nombreMayusculas: string;
+		dpi: string;
+		dpiFormateado: string;
+		dpiLetras: string;
+		tipo: string;
+		empresaNombre?: string;
+		telefono?: string;
+		email?: string;
+		direccion?: string;
+	};
+	// Filas de la Carta de Emisión de Cheques ({cuenta}/{valor}, {cuenta2}/{valor2})
+	desembolso?: {
+		filas: Array<{ cuenta: string; valor: string }>;
+		sobrantes: number;
+		omitidosPorMoneda: number;
+	};
+	// {empresa} no se mapea: la API ya lo llena con su propio default
+	// {agencia}: la empresa que vende el carro nuevo. Solo aplica a nuevos:
+	// un usado lo vende un particular, no una agencia.
+	agencia?: string;
+	// {entidad} y {tipoEntidad}: el acreedor del crédito, o sea el
+	// inversionista asignado en el análisis del 50%
+	entidad?: {
+		nombre: string;
+		tipo: string;
+	};
 	// Beneficiarios (para desembolso)
 	beneficiarios?: Beneficiario[];
 	// Datos adicionales de la oportunidad
@@ -262,6 +301,16 @@ export async function enrichLeadFromRenap(
 			if (needsGender) missingFields.push("Género");
 			if (needsBirthDate) missingFields.push("Fecha de Nacimiento");
 			if (needsNationality) missingFields.push("Nacionalidad");
+			// No hay escritura, pero el intento fallido es justamente lo que se
+			// consulta cuando alguien pregunta por qué no se enriqueció.
+			auditRecord({
+				entity: "lead",
+				id: leadId,
+				action: "enrich_renap",
+				ok: false,
+				errorCode: "SIN_DPI",
+			});
+
 			return {
 				success: false,
 				enrichedFields: [],
@@ -277,6 +326,16 @@ export async function enrichLeadFromRenap(
 			if (needsGender) missingFields.push("Género");
 			if (needsBirthDate) missingFields.push("Fecha de Nacimiento");
 			if (needsNationality) missingFields.push("Nacionalidad");
+			// No hay escritura, pero el intento fallido es justamente lo que se
+			// consulta cuando alguien pregunta por qué no se enriqueció.
+			auditRecord({
+				entity: "lead",
+				id: leadId,
+				action: "enrich_renap",
+				ok: false,
+				errorCode: "RENAP_SIN_DATOS",
+			});
+
 			return {
 				success: false,
 				enrichedFields: [],
@@ -320,6 +379,12 @@ export async function enrichLeadFromRenap(
 					updatedAt: new Date(),
 				})
 				.where(eq(leads.id, leadId));
+			auditRecord({
+				entity: "lead",
+				id: leadId,
+				action: "enrich_renap",
+				data: { enrichedFields, updates },
+			});
 		}
 
 		return {
@@ -329,6 +394,13 @@ export async function enrichLeadFromRenap(
 		};
 	} catch (error) {
 		console.error("Error consultando RENAP:", error);
+		auditRecord({
+			entity: "lead",
+			id: leadId,
+			action: "enrich_renap",
+			ok: false,
+			errorCode: "RENAP_ERROR",
+		});
 		return {
 			success: false,
 			enrichedFields: [],
@@ -479,6 +551,88 @@ export async function mapOpportunityToContractData(
 		? getDateComponents(opportunity.fechaInicio)
 		: undefined;
 
+	// Vendedor del vehículo. Se prioriza el de la oportunidad porque es la
+	// única columna que hoy se escribe (desde el combobox al crear/editar) y
+	// porque el vendedor es un hecho de esta venta: un mismo vehículo puede
+	// recomprarse y cambiar de dueño. Se conserva el fallback al vehículo para
+	// no perder el dato si alguien lo llena por ese lado.
+	const vendorId = opportunity.vendorId || vehicle?.vendorId || null;
+	const [vendor] = vendorId
+		? await db
+				.select()
+				.from(vehicleVendors)
+				.where(eq(vehicleVendors.id, vendorId))
+				.limit(1)
+		: [];
+
+	const vendedor = vendor
+		? {
+				nombre: capitalizeWords(vendor.name),
+				nombreMayusculas: toUpperCase(vendor.name),
+				dpi: vendor.dpi || "",
+				dpiFormateado: formatDpi(vendor.dpi || ""),
+				dpiLetras: dpiToWordsUppercase(vendor.dpi || ""),
+				tipo: vendor.vendorType,
+				empresaNombre: vendor.companyName || undefined,
+				// {agencia} NO sale de aquí: en los contratos históricos es la
+				// distribuidora de autos nuevos (JAC, AUTOMAQ), que no está en
+				// vehicle_vendors. Pendiente definir su origen.
+				telefono: vendor.phone || undefined,
+				email: vendor.email || undefined,
+				direccion: vendor.address || undefined,
+			}
+		: undefined;
+
+	// Cheques ya registrados en el detalle de crédito: alimentan la Carta de
+	// Emisión de Cheques. Solo se leen, el flujo de cheques no se toca.
+	const checks = await db
+		.select()
+		.from(creditChecks)
+		.where(eq(creditChecks.opportunityId, opportunityId));
+
+	const desembolso = mapChecksToDisbursementRows(checks);
+
+	// Entidad acreedora: el inversionista asignado en el análisis del 50%.
+	const inversionistaPrincipal = selectPrimaryInvestor(
+		parseOpportunityInvestors(opportunity.inversionistas),
+	);
+
+	// El JSON solo guarda id y nombre; el tipo de entidad vive en el catálogo
+	// local de inversionistas, enlazado por el id de cartera-back.
+	const [investorProfile] = inversionistaPrincipal
+		? await db
+				.select({ clientType: investors.clientType })
+				.from(investors)
+				.where(
+					eq(
+						investors.carteraBackInvestorId,
+						inversionistaPrincipal.inversionista_id,
+					),
+				)
+				.limit(1)
+		: [];
+
+	// {agencia}: la empresa asignada a la oportunidad, que en carro nuevo es
+	// la distribuidora. En usados no aplica; companyId puede haberse heredado
+	// del lead y no necesariamente representa una agencia del vehículo.
+	const [empresaAgencia] = vehicle?.isNew === true && opportunity.companyId
+		? await db
+				.select({ name: companies.name })
+				.from(companies)
+				.where(eq(companies.id, opportunity.companyId))
+				.limit(1)
+		: [];
+
+	const entidad = inversionistaPrincipal
+		? {
+				nombre: inversionistaPrincipal.nombre,
+				tipo: resolveEntityType(
+					investorProfile?.clientType,
+					inversionistaPrincipal.nombre,
+				),
+			}
+		: undefined;
+
 	return {
 		cliente: {
 			nombreCompleto: capitalizeWords(nombreCompleto),
@@ -532,6 +686,11 @@ export async function mapOpportunityToContractData(
 			fechaInicio,
 			lugarFirma: "Guatemala",
 		},
+		vendedor,
+		desembolso,
+		entidad,
+		// trim: varios nombres en `companies` traen espacios sobrantes
+		agencia: empresaAgencia?.name?.trim() || undefined,
 		oportunidad: {
 			id: opportunity.id,
 			titulo: opportunity.title,
@@ -729,6 +888,34 @@ export function transformToApiFormat(
 		baseFields.contract_end_day = data.contrato.fechaInicio.dayPadded;
 		baseFields.contract_end_month = data.contrato.fechaInicio.month;
 		baseFields.contract_end_year = data.contrato.fechaInicio.yearPartial;
+	}
+
+	// Campos específicos que también consume el endpoint legacy. El flujo nuevo
+	// los envía directamente desde el wizard, pero este endpoint pasa por este
+	// adaptador y no debe perder los datos calculados por el mapper.
+	if (data.vendedor) {
+		baseFields.nombreVendedor = data.vendedor.nombreMayusculas;
+		baseFields.dpiVendedor = data.vendedor.dpi;
+		baseFields.dpiTextoVendedor = data.vendedor.dpiLetras;
+	}
+
+	const primeraFilaDesembolso = data.desembolso?.filas[0];
+	const segundaFilaDesembolso = data.desembolso?.filas[1];
+	if (primeraFilaDesembolso) {
+		baseFields.cuenta = primeraFilaDesembolso.cuenta;
+		baseFields.valor = primeraFilaDesembolso.valor;
+	}
+	if (segundaFilaDesembolso) {
+		baseFields.cuenta2 = segundaFilaDesembolso.cuenta;
+		baseFields.valor2 = segundaFilaDesembolso.valor;
+	}
+
+	if (data.entidad) {
+		baseFields.entidad = data.entidad.nombre;
+		baseFields.tipoEntidad = data.entidad.tipo;
+	}
+	if (data.agencia) {
+		baseFields.agencia = data.agencia;
 	}
 
 	// Agregar beneficiarios si existen

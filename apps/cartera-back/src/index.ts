@@ -14,6 +14,7 @@ const app = new Elysia()
     allowedHeaders: ["Content-Type", "Authorization"],
   }))
   .use(auditLogMiddleware)
+  .use(routers.healthRouter)
   .use(routers.defaultRouter)
   .use(routers.inversionistasRouter)
   .use(routers.advisorRouter)

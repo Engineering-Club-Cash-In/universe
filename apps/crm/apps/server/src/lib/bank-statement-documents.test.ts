@@ -1,6 +1,6 @@
+import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, test } from "bun:test";
 import {
 	canAutoAttachBankStatementDocuments,
 	getBankStatementOpportunityDocumentType,
@@ -112,7 +112,7 @@ describe("bank statement opportunity documents", () => {
 			"const creditCapacity = calculateCreditCapacity",
 		);
 		const persistedAnalysisIndex = source.indexOf(
-			"fullAnalysis: JSON.stringify(analysis)",
+			"fullAnalysis: JSON.stringify(",
 		);
 		const attachmentWriteIndex = source.indexOf(
 			"const { key } = await uploadFileToR2(",
@@ -123,6 +123,52 @@ describe("bank statement opportunity documents", () => {
 		expect(attachmentWriteIndex).toBeGreaterThan(persistedAnalysisIndex);
 	});
 
+	test("attaches the statements that do not fit the checklist instead of dropping them", () => {
+		const source = readFileSync(
+			join(import.meta.dir, "../routers/bank-analysis.ts"),
+			"utf8",
+		);
+
+		// El análisis acepta hasta 9 archivos y la IA los usa todos, así que los
+		// que no caben en las 3 casillas se adjuntan igual, fuera del checklist.
+		expect(source).toContain("const extraFiles = downloadedFiles.slice(");
+		expect(source).toContain("savedExtraDocumentIds.push(newDocument.id)");
+	});
+
+	test("does not roll back the checklist documents when an extra file fails", () => {
+		const source = readFileSync(
+			join(import.meta.dir, "../routers/bank-analysis.ts"),
+			"utf8",
+		);
+
+		// Los sobrantes van después del catch del checklist y con su propia
+		// limpieza: si falla el cuarto archivo, los tres ya guardados se quedan.
+		const checklistCleanupIndex = source.indexOf(
+			"...savedDocuments.map(({ id }) =>",
+		);
+		const extraFilesIndex = source.indexOf(
+			"const extraFiles = downloadedFiles.slice(",
+		);
+		const extraCleanupIndex = source.indexOf(
+			"...savedExtraDocumentIds.map((id) =>",
+		);
+
+		expect(checklistCleanupIndex).toBeGreaterThan(-1);
+		expect(extraFilesIndex).toBeGreaterThan(checklistCleanupIndex);
+		expect(extraCleanupIndex).toBeGreaterThan(extraFilesIndex);
+		expect(source).toContain("checklistDocumentsSaved && extraFiles.length > 0");
+	});
+
+	test("records which files the analysis actually read", () => {
+		const source = readFileSync(
+			join(import.meta.dir, "../routers/bank-analysis.ts"),
+			"utf8",
+		);
+
+		expect(source).toContain("const analyzedFiles = downloadedFiles.map(");
+		expect(source).toContain("archivos_analizados: analyzedFiles");
+	});
+
 	test("keeps non-upload roles analyzing while skipping auto-attachments", () => {
 		const source = readFileSync(
 			join(import.meta.dir, "../routers/bank-analysis.ts"),
@@ -131,10 +177,14 @@ describe("bank statement opportunity documents", () => {
 		const permissionCheckIndex = source.indexOf(
 			"canAutoAttachBankStatementDocuments({",
 		);
-		const enableAttachmentsIndex = source.indexOf("opportunityForDocuments = {");
+		const enableAttachmentsIndex = source.indexOf(
+			"opportunityForDocuments = {",
+		);
 
 		expect(permissionCheckIndex).toBeGreaterThan(-1);
 		expect(enableAttachmentsIndex).toBeGreaterThan(permissionCheckIndex);
-		expect(source).not.toContain('message: "No tienes permiso para subir documentos"');
+		expect(source).not.toContain(
+			'message: "No tienes permiso para subir documentos"',
+		);
 	});
 });

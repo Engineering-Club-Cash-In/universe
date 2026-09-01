@@ -23,7 +23,6 @@ import {
   updateSaldoReinversion,
   updateLiquidacionReporteUrl,
   updateLiquidacionTotales,
-  getLiquidacionesPorFecha,
   revertirLiquidacion,
   revertirComprasUltimaLiquidacion,
   ejecutarReinversionAutomatica,
@@ -32,12 +31,13 @@ import {
   reconcileMirrorPercentages,
   auditMirrorPercentages,
   getCreditosEspejoPendientes,
-  detectPagosHuerfanos,
   simularInversionista,
 } from "../controllers/investor";
 import { ajustarPagosLiquidacion } from "../controllers/ajustarPagosLiquidacion";
 import { InversionistaReporte, RespuestaReporte } from "../utils/interface";
 import { generarYSubirPDFInversionista, generarYSubirExcelInversionista } from "../utils/functions/generalFunctions";
+import { convertirReporteAUSD } from "../utils/functions/reporteMoneda";
+import { getTipoCambioUSD } from "../utils/functions/currencyConverter";
 import { authMiddleware } from "./midleware";
 import { obtenerCreditosConPagosPendientes, calcularYRegistrarPagosEspejo } from "../controllers/payments";
 import { createBoleta, getBoletaById, getAllBoletas, getBoletasPendientes, updateBoleta, marcarBoletaComoProcesada, marcarBoletaComoPendiente, deleteBoleta, getBoletasStats } from "../controllers/liquidateInvestor";
@@ -46,6 +46,7 @@ import ExcelJS from "exceljs";
 import { promises as fsp } from "node:fs";
 import path from "node:path";
 import { guardDescuentaImpuestos } from "./investorGuards";
+import { buildPendingReturnAuthorizationWarningFromErrors } from "../utils/pendingReturnGuard";
 // 🔥 IMPORTAR SERVICIO DE BOLETAS
 
 
@@ -588,6 +589,16 @@ export const inversionistasRouter = new Elysia()
           set.status = 200;
         }
 
+        const pendingReturnWarning =
+          buildPendingReturnAuthorizationWarningFromErrors(result.errores);
+        if (pendingReturnWarning && !hayLiquidaciones) {
+          return {
+            ...result,
+            success: false,
+            ...pendingReturnWarning,
+          };
+        }
+
         return result;
       } catch (error) {
         console.error("[liquidate-inversionista-pagos] Error:", error);
@@ -814,113 +825,6 @@ export const inversionistasRouter = new Elysia()
       },
     }
   )
-  .post("/investor/reporte-liquidados-masivo", async ({ body, set }) => {
-    const { fecha_liquidacion } = body as { fecha_liquidacion?: string };
-
-    const fecha = fecha_liquidacion || new Date().toISOString().slice(0, 10);
-
-    try {
-      const liquidacionesDelDia = await getLiquidacionesPorFecha(fecha);
-
-      if (!liquidacionesDelDia.length) {
-        set.status = 404;
-        return { message: `No se encontraron liquidaciones para la fecha ${fecha}.` };
-      }
-
-      const resultados: any[] = [];
-      const errores: any[] = [];
-
-      for (const liq of liquidacionesDelDia) {
-        const { inversionista_id: id, liquidacion_id: liqId } = liq;
-        if (id === 38 || id === 84) continue;
-        try {
-          const huerfanos = await detectPagosHuerfanos(id, liqId);
-          if (huerfanos.length) {
-            errores.push({
-              id,
-              liquidacion_id: liqId,
-              error: `Se encontraron ${huerfanos.length} pago(s) huérfano(s) (sin crédito espejo asociado). No se generó el reporte.`,
-              pagos_huerfanos: huerfanos,
-            });
-            continue;
-          }
-
-          const result = await resumeInvestor(
-            id,
-            1,
-            999999,
-            undefined,
-            undefined,
-            undefined,
-            false,
-            undefined,
-            "espejos",
-            true,
-            liqId
-          );
-
-          if (!result.inversionistas.length) {
-            errores.push({ id, liquidacion_id: liqId, error: "Sin pagos liquidados" });
-            continue;
-          }
-
-          const inversionista = result.inversionistas[0];
-
-          const totales = await getInvestorTotalsGlobales(
-            id,
-            undefined,
-            "espejos",
-            false,
-            undefined,
-            true,
-            liqId
-          );
-          inversionista.subtotal = totales.totales as any;
-
-          const logoUrl = import.meta.env.LOGO_URL || "";
-          const filename = `reporte_liquidados_${id}_${Date.now()}.xlsx`;
-          const { url } = await generarYSubirExcelInversionista(
-            inversionista as any,
-            filename,
-            logoUrl
-          );
-
-          const liquidacionActualizada = await updateLiquidacionReporteUrl(liqId, url);
-
-          resultados.push({
-            inversionista_id: id,
-            liquidacion_id: liqId,
-            nombre: inversionista.nombre_inversionista,
-            url,
-            filename,
-            liquidacion: liquidacionActualizada || null,
-          });
-        } catch (err) {
-          errores.push({
-            id,
-            liquidacion_id: liqId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
-
-      return {
-        success: true,
-        fecha,
-        total_procesados: resultados.length,
-        total_errores: errores.length,
-        resultados,
-        errores,
-      };
-    } catch (error) {
-      console.error("[investor/reporte-liquidados-masivo] Error:", error);
-      set.status = 500;
-      return {
-        message: "Error al generar reportes masivos",
-        error: error instanceof Error ? error.message : String(error),
-      };
-    }
-  })
   .post("/investor/reporte-liquidados", async ({ body, set }) => {
     const { investor_id, liquidacion_id, reinvertir, solo_reporte, sustituir_totales } = body as {
       investor_id?: number;
@@ -938,6 +842,9 @@ export const inversionistasRouter = new Elysia()
     try {
       const liquidacionId = liquidacion_id
 
+      // El resumen se pide UNA sola vez y en quetzales; la versión en la moneda
+      // del inversionista se deriva en memoria. Mismo camino que la liquidación:
+      // la conversión va siempre Q → USD, que es la única exacta.
       const result = await resumeInvestor(
         Number(investor_id),
         1,
@@ -950,7 +857,8 @@ export const inversionistasRouter = new Elysia()
         "espejos",
         true, // soloLiquidados
         liquidacionId,
-        undefined
+        undefined,
+        true // rawValues: montos en quetzales
       );
 
       if (!result.inversionistas.length) {
@@ -958,22 +866,10 @@ export const inversionistasRouter = new Elysia()
         return { message: "Inversionista no encontrado o sin pagos liquidados." };
       }
 
-      const inversionista = result.inversionistas[0];
-
-      // Totales formateados (USD para inv en dolares) — los que se ven en el Excel.
-      const totales = await getInvestorTotalsGlobales(
-        Number(investor_id),
-        undefined,
-        "espejos",
-        false,
-        undefined,
-        true, // soloLiquidados
-        liquidacionId,
-        undefined
-      );
-      inversionista.subtotal = totales.totales as any;
+      const inversionistaQ = result.inversionistas[0];
 
       // Totales en bruto (siempre en Quetzales). Se usan para:
+      //   • el reporte en quetzales
       //   • `sustituir_totales` → la tabla `liquidaciones` guarda en Q
       //   • la compra (`ejecutarReinversionAutomatica`) → addInvestorToCredit espera Q
       // Esto evita que para inversionistas en dólares (ej. Flujocapital 84)
@@ -989,10 +885,35 @@ export const inversionistasRouter = new Elysia()
         undefined,
         true, // rawValues
       );
+      inversionistaQ.subtotal = totalesRaw.totales as any;
+
+      // El reporte principal siempre va en la moneda del inversionista.
+      const esDolares =
+        (inversionistaQ as any).moneda_inversionista === "dolares";
+      const inversionista: any = esDolares
+        ? convertirReporteAUSD(inversionistaQ as any)
+        : inversionistaQ;
 
       const logoUrl = import.meta.env.LOGO_URL || "";
-      const filename = `reporte_liquidados_${liquidacionId}_${Date.now()}.xlsx`;
-      const { url } = await generarYSubirExcelInversionista(inversionista as any, filename, logoUrl);
+      const stamp = Date.now();
+      const filename = `reporte_liquidados_${liquidacionId}_${stamp}.xlsx`;
+
+      // Para inversionistas en dólares se regenera también la copia en quetzales,
+      // de modo que el par nunca queda descuadrado: antes esta ruta borraba la
+      // copia en Q y dejaba a la liquidación sin ella hasta la próxima corrida.
+      const filenameGtq = esDolares
+        ? `reporte_liquidados_${liquidacionId}_${stamp}_GTQ.xlsx`
+        : null;
+
+      const [excelResult, excelResultGtq] = await Promise.all([
+        generarYSubirExcelInversionista(inversionista, filename, logoUrl),
+        filenameGtq
+          ? generarYSubirExcelInversionista(inversionistaQ as any, filenameGtq, logoUrl)
+          : Promise.resolve(null),
+      ]);
+
+      const url = excelResult.url;
+      const urlGtq = excelResultGtq?.url ?? null;
 
       // Si `solo_reporte=true`, devolvemos solo el Excel: no se actualiza la
       // `reporte_liquidacion_url` en la liquidación ni se ejecuta la
@@ -1001,14 +922,21 @@ export const inversionistasRouter = new Elysia()
         return {
           success: true,
           url,
+          url_gtq: urlGtq,
           filename,
+          filename_gtq: filenameGtq,
           liquidacion: null,
           reinversion: null,
           solo_reporte: true,
         };
       }
 
-      const liquidacionActualizada = await updateLiquidacionReporteUrl(Number(liquidacionId), url);
+      const liquidacionActualizada = await updateLiquidacionReporteUrl(
+        Number(liquidacionId),
+        url,
+        urlGtq,
+        esDolares ? getTipoCambioUSD(Number(investor_id)) : null,
+      );
 
       // Si `sustituir_totales=true`, actualiza los totales monetarios de la
       // liquidación con los recalculados en vivo (en Q, igual que el INSERT
@@ -1039,8 +967,8 @@ export const inversionistasRouter = new Elysia()
       // Si `reinvertir=true`, ejecuta la reinversión automática usando el
       // total recalculado en Quetzales (`totalesRaw`), NO el `reinversion_total`
       // guardado en la liquidación — así la compra siempre refleja el estado
-      // actual de los pagos/abonos. Importante: usamos `totalesRaw` (Q) y no
-      // `totales` (que para inv en dólares ya viene convertido a USD).
+      // actual de los pagos/abonos. Importante: el monto va en Q, que es lo que
+      // espera addInvestorToCredit, no en la moneda del reporte.
       let reinversion: unknown = null;
       if (reinvertir) {
         const monto = Number((totalesRaw.totales as any).total_reinversion ?? 0);
@@ -1071,7 +999,9 @@ export const inversionistasRouter = new Elysia()
       return {
         success: true,
         url,
+        url_gtq: urlGtq,
         filename,
+        filename_gtq: filenameGtq,
         liquidacion: liquidacionActualizada || null,
         totales_actualizados: totalesActualizados,
         reinversion,
@@ -1541,6 +1471,10 @@ export const inversionistasRouter = new Elysia()
         );
 
         if (!resultado.success) {
+          if ((resultado as any).code === "CREDIT_PENDING_RETURN_AUTHORIZATION") {
+            set.status = 422;
+            return resultado;
+          }
           set.status = 500;
           return {
             success: false,
@@ -1591,6 +1525,18 @@ export const inversionistasRouter = new Elysia()
           inversionistaId: t.Number(),
           totalCreditosConPagos: t.Number(),
           pagosGenerados: t.Boolean(),
+          data: t.Array(t.Any()),
+        }),
+        422: t.Object({
+          success: t.Literal(false),
+          warning: t.Literal(true),
+          code: t.Literal("CREDIT_PENDING_RETURN_AUTHORIZATION"),
+          message: t.String(),
+          creditos_bloqueados: t.Array(t.Object({
+            credito_id: t.Number(),
+            numero_credito_sifco: t.String(),
+            estado_devolucion: t.Literal("PENDIENTE_AUTORIZACION"),
+          })),
           data: t.Array(t.Any()),
         }),
         500: t.Object({
@@ -2038,11 +1984,12 @@ export const inversionistasRouter = new Elysia()
         const resultado = await calcularYRegistrarPagosEspejo(inversionistaId, fechaCalculoDate);
 
         if (!resultado.success) {
+          if ((resultado as any).code === "CREDIT_PENDING_RETURN_AUTHORIZATION") {
+            set.status = 422;
+            return resultado;
+          }
           set.status = 500;
-          return {
-            success: false as const,
-            error: (resultado as any).error ?? "Error desconocido",
-          };
+          return resultado;
         }
 
         set.status = 200;
@@ -2095,9 +2042,31 @@ export const inversionistasRouter = new Elysia()
             mensaje: t.String(),
           })),
         }),
+        422: t.Object({
+          success: t.Literal(false),
+          warning: t.Literal(true),
+          code: t.Literal("CREDIT_PENDING_RETURN_AUTHORIZATION"),
+          message: t.String(),
+          creditos_bloqueados: t.Array(t.Object({
+            credito_id: t.Number(),
+            numero_credito_sifco: t.String(),
+            estado_devolucion: t.Literal("PENDIENTE_AUTORIZACION"),
+          })),
+          data: t.Array(t.Any()),
+        }),
         500: t.Object({
           success: t.Literal(false),
           error: t.String(),
+          inversionistaId: t.Optional(t.Number()),
+          totalCreditosProcesados: t.Optional(t.Number()),
+          totalCreditosFallidos: t.Optional(t.Number()),
+          pagosGenerados: t.Optional(t.Boolean()),
+          data: t.Optional(t.Array(t.Any())),
+          fallidos: t.Optional(t.Array(t.Object({
+            creditoId: t.Number(),
+            numeroCreditoSifco: t.String(),
+            mensaje: t.String(),
+          }))),
         }),
       },
     }

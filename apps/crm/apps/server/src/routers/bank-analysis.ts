@@ -13,6 +13,7 @@ import {
 } from "../db/schema/crm";
 import {
 	BANK_ANALYSIS_PROMPT,
+	type BankStatementAnalysis,
 	bankStatementAnalysisSchema,
 } from "../lib/bank-analysis-schema";
 import {
@@ -42,6 +43,62 @@ import {
 const MAX_AI_ATTEMPTS = 2;
 const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024; // 15MB por archivo
 const AI_TIMEOUT_MS = 120_000; // 2 minutos timeout para la IA
+
+// Mismo nombre de variable que usa cartera-back para no tener dos tasas distintas.
+const RAW_USD_EXCHANGE_RATE = Number(process.env.USD_EXCHANGE_RATE);
+const USD_EXCHANGE_RATE =
+	Number.isFinite(RAW_USD_EXCHANGE_RATE) && RAW_USD_EXCHANGE_RATE > 0
+		? RAW_USD_EXCHANGE_RATE
+		: 7.78;
+
+const toQuetzales = (amount: number) =>
+	Math.round(amount * USD_EXCHANGE_RATE * 100) / 100;
+
+/**
+ * La IA reporta los montos en la moneda original del estado de cuenta (no convierte,
+ * porque no conoce el tipo de cambio). Todo lo que sigue en el sistema asume quetzales,
+ * así que los análisis en dólares se convierten aquí antes de calcular capacidad y persistir.
+ */
+function convertAnalysisToQuetzales(
+	analysis: BankStatementAnalysis,
+): BankStatementAnalysis {
+	const { promedio_mensual } = analysis;
+
+	return {
+		...analysis,
+		resumen_mensual: analysis.resumen_mensual.map((mes) => ({
+			...mes,
+			saldo_inicial: toQuetzales(mes.saldo_inicial),
+			total_debitos: toQuetzales(mes.total_debitos),
+			total_creditos: toQuetzales(mes.total_creditos),
+			saldo_final: toQuetzales(mes.saldo_final),
+			ingresos: {
+				fijos: toQuetzales(mes.ingresos.fijos),
+				variables: toQuetzales(mes.ingresos.variables),
+			},
+			gastos: {
+				fijos: toQuetzales(mes.gastos.fijos),
+				variables: toQuetzales(mes.gastos.variables),
+			},
+		})),
+		promedio_mensual: {
+			promedio_ingresos_fijos: toQuetzales(
+				promedio_mensual.promedio_ingresos_fijos,
+			),
+			promedio_ingresos_variables: toQuetzales(
+				promedio_mensual.promedio_ingresos_variables,
+			),
+			promedio_gastos_fijos: toQuetzales(promedio_mensual.promedio_gastos_fijos),
+			promedio_gastos_variables: toQuetzales(
+				promedio_mensual.promedio_gastos_variables,
+			),
+			disponibilidad_economica: toQuetzales(
+				promedio_mensual.disponibilidad_economica,
+			),
+		},
+		moneda: "GTQ",
+	};
+}
 
 export const bankAnalysisRouter = {
 	analyzeBankStatements: crmProcedure
@@ -359,7 +416,31 @@ export const bankAnalysisRouter = {
 					});
 				}
 
-				// 5.5. ordenar por porcentaje descendente antes de persistir, ya que la UI
+				// 5.5. Normalizar a quetzales: los montos vienen en la moneda original del
+				// estado de cuenta y todo lo que sigue (capacidad, columnas, UI) asume Q.
+				if (analysis.moneda === "MIXTA") {
+					// El intento se contó antes de llamar a la IA, pero esto no es un análisis
+					// fallido sino documentos mal armados: se devuelve para no dejar al usuario
+					// bloqueado esperando un reset de admin por algo que puede corregir solo.
+					await db
+						.update(creditAnalysis)
+						.set({
+							attemptCount: sql`GREATEST(${creditAnalysis.attemptCount} - 1, 0)`,
+							updatedAt: new Date(),
+						})
+						.where(whereCondition);
+
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"Los estados de cuenta subidos están en monedas distintas (quetzales y dólares). Analice por separado los de cada moneda. Este intento no se descontó.",
+					});
+				}
+
+				if (analysis.moneda === "USD") {
+					analysis = convertAnalysisToQuetzales(analysis);
+				}
+
+				// 5.6. ordenar por porcentaje descendente antes de persistir, ya que la UI
 				// asume que el índice 0 es siempre la mejor recomendación.
 				if (analysis.analisis_fecha_pago) {
 					analysis.analisis_fecha_pago.dias_pago_sugeridos = [
@@ -375,11 +456,23 @@ export const bankAnalysisRouter = {
 					maxVariableDebtRatio: input.maxVariableDebtRatio,
 				});
 
-				// 7. Actualizar con los resultados del análisis exitoso
+				// 7. Actualizar con los resultados del análisis exitoso.
+				// Se deja constancia de con qué archivos se hizo: el checklist solo
+				// tiene tres casillas, así que la lista de la ficha no alcanza para
+				// reconstruir qué leyó la IA cuando se suben más estados de cuenta.
+				const analyzedFiles = downloadedFiles.map((file) => ({
+					nombre: file.name,
+					tamano: file.size,
+					tipo: file.mimeType,
+				}));
+
 				await db
 					.update(creditAnalysis)
 					.set({
-						fullAnalysis: JSON.stringify(analysis),
+						fullAnalysis: JSON.stringify({
+							...analysis,
+							archivos_analizados: analyzedFiles,
+						}),
 						monthlyFixedIncome:
 							analysis.promedio_mensual.promedio_ingresos_fijos.toString(),
 						monthlyVariableIncome:
@@ -402,6 +495,7 @@ export const bankAnalysisRouter = {
 				if (opportunityForDocuments) {
 					const savedDocuments: { id: string; documentType: string }[] = [];
 					const savedKeys: string[] = [];
+					let checklistDocumentsSaved = false;
 
 					try {
 						// Máximo un archivo por slot del checklist (3).
@@ -458,6 +552,8 @@ export const bankAnalysisRouter = {
 								);
 							}
 						}
+
+						checklistDocumentsSaved = true;
 					} catch (error) {
 						const cleanupResults = await Promise.allSettled([
 							...savedDocuments.map(({ id }) =>
@@ -489,6 +585,84 @@ export const bankAnalysisRouter = {
 							failedCleanups: failedCleanups.length,
 							error: error instanceof Error ? error.message : String(error),
 						});
+					}
+
+					// El checklist solo tiene tres casillas, pero el análisis acepta hasta
+					// nueve archivos y la IA los usa todos para el resultado. Los que
+					// sobran se adjuntan igual —fuera del checklist— para que la ficha
+					// muestre exactamente con qué se hizo el análisis; antes se
+					// descartaban en silencio y el original se borraba de R2.
+					//
+					// Va en su propio try con su propia limpieza: si falla adjuntando el
+					// cuarto archivo, los tres del checklist ya guardados se quedan donde
+					// están. Arrastrarlos al rollback dejaría el análisis sin ningún
+					// respaldo, que es peor que perder los sobrantes.
+					const extraFiles = downloadedFiles.slice(
+						BANK_STATEMENT_OPPORTUNITY_DOCUMENT_TYPES.length,
+					);
+
+					if (checklistDocumentsSaved && extraFiles.length > 0) {
+						const savedExtraDocumentIds: string[] = [];
+						const savedExtraKeys: string[] = [];
+
+						try {
+							for (const [index, file] of extraFiles.entries()) {
+								const position =
+									BANK_STATEMENT_OPPORTUNITY_DOCUMENT_TYPES.length + index + 1;
+
+								const uniqueFilename = generateUniqueFilename(file.name);
+								const { key } = await uploadFileToR2(
+									new Blob([new Uint8Array(file.buffer)], {
+										type: file.mimeType,
+									}),
+									uniqueFilename,
+									opportunityForDocuments.id,
+								);
+								savedExtraKeys.push(key);
+
+								const [newDocument] = await db
+									.insert(opportunityDocuments)
+									.values({
+										opportunityId: opportunityForDocuments.id,
+										filename: uniqueFilename,
+										originalName: file.name,
+										mimeType: file.mimeType,
+										size: file.size,
+										documentType: "other",
+										description: `Estado de cuenta ${position} de ${downloadedFiles.length}, guardado automáticamente desde análisis de capacidad de pago`,
+										uploadedBy: context.userId,
+										filePath: key,
+									})
+									.returning({ id: opportunityDocuments.id });
+
+								if (newDocument) {
+									savedExtraDocumentIds.push(newDocument.id);
+								}
+							}
+						} catch (error) {
+							const cleanupResults = await Promise.allSettled([
+								...savedExtraDocumentIds.map((id) =>
+									db
+										.delete(opportunityDocuments)
+										.where(eq(opportunityDocuments.id, id)),
+								),
+								...savedExtraKeys.map((key) => deleteFileFromR2(key)),
+							]);
+							const failedCleanups = cleanupResults.filter(
+								(result) => result.status === "rejected",
+							);
+
+							console.error(
+								"Failed to save extra bank statement opportunity documents",
+								{
+									opportunityId: opportunityForDocuments.id,
+									extraFiles: extraFiles.length,
+									savedExtraDocuments: savedExtraDocumentIds.length,
+									failedCleanups: failedCleanups.length,
+									error: error instanceof Error ? error.message : String(error),
+								},
+							);
+						}
 					}
 				}
 

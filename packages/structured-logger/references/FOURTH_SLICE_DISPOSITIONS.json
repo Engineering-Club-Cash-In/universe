@@ -1,0 +1,7 @@
+{
+  "commit": "56717ddef8f0bbd8c8633172c8ca2c85c248dfd7",
+  "entries": [
+    { "path": "apps/cartera-back/src/controllers/abonosCapital.ts", "line": 34, "method": "console.error", "classification": "replace", "disposition": "event", "event": "credit.capital_contribution", "outcome": "failed", "rationale": "safe_create_persistence_failure" },
+    { "path": "apps/cartera-back/src/controllers/abonosCapital.ts", "line": 355, "method": "console.error", "classification": "replace", "disposition": "event", "event": "credit.capital_contribution", "outcome": "failed", "rationale": "safe_update_persistence_failure" }
+  ]
+}

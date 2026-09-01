@@ -6,6 +6,11 @@ import {
   usuarios,
 } from "../database/db/schema";
 import { and, eq, sql } from "drizzle-orm";
+import { emitCreditCapitalPaymentAuditCompleted } from "../utils/structuredLogger";
+
+function elapsedMilliseconds(startedAt: number): number {
+  return Math.max(0, Math.min(86_400_000, Math.round(Date.now() - startedAt)));
+}
 
 export interface CreditoNuevoConAbono {
   credito_id: number;
@@ -185,16 +190,14 @@ export async function getCreditosNuevosConAbonos(
   creditos: CreditoNuevoConAbono[];
   generado_en: string;
 }> {
+  const startedAt = Date.now();
+  let failedCreditQueries = 0;
   const now = new Date();
   const defaultFechaDesde = `${now.getFullYear()}-03-01`;
   const defaultFechaHasta = now.toISOString().split("T")[0];
 
   const fechaDesde = fecha_desde ?? defaultFechaDesde;
   const fechaHasta = fecha_hasta ?? defaultFechaHasta;
-
-  console.log(
-    `[getCreditosNuevosConAbonos] Buscando créditos creados desde ${fechaDesde} hasta ${fechaHasta}`
-  );
 
   // 1. Obtener créditos nuevos en el rango de fechas usando AT TIME ZONE
   //    para evitar problemas con timestamps timezone-aware
@@ -216,10 +219,6 @@ export async function getCreditosNuevosConAbonos(
       )
     )
     .orderBy(creditos.fecha_creacion);
-
-  console.log(
-    `[getCreditosNuevosConAbonos] Créditos encontrados en rango: ${creditosNuevos.length}`
-  );
 
   // 2. Para cada crédito, traer sus pagos con abono de capital
   const resultados: CreditoNuevoConAbono[] = await Promise.all(
@@ -274,11 +273,8 @@ export async function getCreditosNuevosConAbonos(
             abono_iva_12: p.abono_iva_12,
           })),
         };
-      } catch (err) {
-        console.error(
-          `[getCreditosNuevosConAbonos] Error consultando pagos de crédito ${c.credito_id}:`,
-          err
-        );
+      } catch {
+        failedCreditQueries += 1;
         return {
           credito_id: c.credito_id,
           numero_credito_sifco: c.numero_credito_sifco,
@@ -311,9 +307,12 @@ export async function getCreditosNuevosConAbonos(
       .toFixed(2),
   };
 
-  console.log(
-    `[getCreditosNuevosConAbonos] Resumen: ${resumen.creditos_con_abonos} con abonos de ${resumen.total_creditos_nuevos} créditos nuevos`
-  );
+  emitCreditCapitalPaymentAuditCompleted({
+    processedCount: resultados.length,
+    succeededCount: resultados.length - failedCreditQueries,
+    failedCount: failedCreditQueries,
+    durationMs: elapsedMilliseconds(startedAt),
+  });
 
   return {
     filtros: {

@@ -17,6 +17,7 @@ import { insuranceRouter } from "./insurance";
 import { investorDocumentsRouter } from "./investor-documents";
 import { juridicoDashboardRouter } from "./juridico-dashboard";
 import { legalContractsRouter } from "./legal-contracts";
+import { licenseVerificationRouter } from "./license-verification";
 import { locationsRouter } from "./locations";
 import { messagingRouter } from "./messaging";
 import { miniagentRouter } from "./miniagent";
@@ -28,6 +29,7 @@ import { reportesCarteraRouter } from "./reportes-cartera";
 import * as reportsRouter from "./reports";
 import { seguimientosRouter } from "./seguimientos";
 import { uploadRouter } from "./upload";
+import { validationsRouter } from "./validations";
 import { vehiclesRouter } from "./vehicles";
 import { vendorsRouter } from "./vendors";
 
@@ -39,6 +41,7 @@ export const crmAppRouter = {
 	getSalesStages: crmRouter.getSalesStages,
 	getCrmUsers: crmRouter.getCrmUsers,
 	getCompanies: crmRouter.getCompanies,
+	getCompanyRelationshipStats: crmRouter.getCompanyRelationshipStats,
 	createCompany: crmRouter.createCompany,
 	updateCompany: crmRouter.updateCompany,
 	getLeads: crmRouter.getLeads,
@@ -59,6 +62,7 @@ export const crmAppRouter = {
 	approveCreditDetail: crmRouter.approveCreditDetail,
 	revokeCreditDetailApproval: crmRouter.revokeCreditDetailApproval,
 	getCreditDetailApprovalStatus: crmRouter.getCreditDetailApprovalStatus,
+	getAjusteFechaIdealPago: crmRouter.getAjusteFechaIdealPago,
 	getOpportunityHistory: crmRouter.getOpportunityHistory,
 	validateOpportunityDocuments: crmRouter.validateOpportunityDocuments,
 	getOpportunityDocuments: crmRouter.getOpportunityDocuments,
@@ -98,6 +102,16 @@ export const crmAppRouter = {
 	updateCoDebtor: crmRouter.updateCoDebtor,
 	deleteCoDebtor: crmRouter.deleteCoDebtor,
 	getConsolidatedCreditAnalysis: crmRouter.getConsolidatedCreditAnalysis,
+	// Verificación de QR del reverso de licencia contra Tránsito (Maicon)
+	verifyLicenseQr: licenseVerificationRouter.verifyLicenseQr,
+	listLicenseVerifications: licenseVerificationRouter.listLicenseVerifications,
+	getLicenseVerificationById:
+		licenseVerificationRouter.getLicenseVerificationById,
+
+	// Validaciones RENAP/Buró para oportunidades fuera del bot de WhatsApp
+	ejecutarValidacionesRenapBuro:
+		validationsRouter.ejecutarValidacionesRenapBuro,
+	getValidacionesOportunidad: validationsRouter.getValidacionesOportunidad,
 };
 
 /**

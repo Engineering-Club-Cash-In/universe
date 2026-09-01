@@ -14,6 +14,7 @@ import {
   getRequestedInstallmentFloor,
   getSpecialPaymentCuotaId,
   getSpecialPaymentInstallmentFields,
+  pagoSchema,
   shouldApplyStaleZeroRestanteAdjustment,
   shouldRejectZeroAppliedNormalValidation,
   shouldMarkInstallmentPaymentPaid,
@@ -1134,5 +1135,42 @@ describe("capitalSuprimidoPorConvenio (devolución a saldo a favor)", () => {
         convenioAplicado: 230,
       }).toString()
     ).toBe("0");
+  });
+});
+
+describe("pagoSchema — observaciones", () => {
+  const base = {
+    credito_id: 1,
+    usuario_id: 1,
+    monto_boleta: 100,
+    fecha_pago: "2026-08-14",
+    cuotaApagar: 1,
+    url_boletas: ["boleta1.jpg"],
+    registerBy: "test@clubcashin.com",
+    fecha_boleta: "2026-08-14",
+  };
+
+  it("conserva las observaciones del pago tras el parse", () => {
+    const parsed = pagoSchema.parse({
+      ...base,
+      observaciones: "pago solo de mora, cliente avisado en llamada",
+    });
+    expect(parsed.observaciones).toBe(
+      "pago solo de mora, cliente avisado en llamada"
+    );
+  });
+
+  it("permite omitir observaciones (campo opcional)", () => {
+    const parsed = pagoSchema.parse(base);
+    expect(parsed.observaciones).toBeUndefined();
+  });
+
+  it("rechaza observaciones de más de 500 caracteres (mismo tope que el front)", () => {
+    expect(
+      pagoSchema.safeParse({ ...base, observaciones: "x".repeat(501) }).success
+    ).toBe(false);
+    expect(
+      pagoSchema.safeParse({ ...base, observaciones: "x".repeat(500) }).success
+    ).toBe(true);
   });
 });

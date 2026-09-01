@@ -266,6 +266,16 @@ export const paymentRouter = new Elysia()
 
       return result;
     } catch (error: any) {
+      if (error?.code === "CREDIT_PENDING_RETURN_AUTHORIZATION") {
+        set.status = 422;
+        return {
+          success: false,
+          warning: true,
+          code: error.code,
+          message: error.message,
+          creditos_bloqueados: error.creditos_bloqueados,
+        };
+      }
       set.status = 400;
       return {
         message: "Failed to mark payment as false",

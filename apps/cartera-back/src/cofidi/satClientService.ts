@@ -203,7 +203,11 @@ export class SATClientService {
   }
 
   // 🔥 LOOKUP_ISSUED_INTERNAL_ID - Consultar por ID interno
-  async consultarPorIdInterno(idInterno: string): Promise<LookupInternalIdResponse> {
+  // Ojo: NO devuelve el DTE, devuelve un índice <DocsFoundBy> con metadatos
+  // (uuid, taxId, batch, serial, total). Para el XML hay que llamar obtenerPorUUID.
+  // timeoutMs se puede acortar cuando esto corre dentro de un request HTTP que
+  // ya gastó su presupuesto de tiempo en un intento de certificación fallido.
+  async consultarPorIdInterno(idInterno: string, timeoutMs = 60000): Promise<LookupInternalIdResponse> {
     try {
       console.log('🔍 Consultando DTE con ID interno:', idInterno);
 
@@ -225,7 +229,7 @@ export class SATClientService {
           'Content-Type': 'text/xml;charset=UTF-8'
         },
         body: soapRequest,
-        signal: AbortSignal.timeout(60000)
+        signal: AbortSignal.timeout(timeoutMs)
       });
 
       const responseText = await response.text();
@@ -303,7 +307,7 @@ export class SATClientService {
   }
 
   // 🔥 GET_DOCUMENT - Obtener por UUID
-  async obtenerPorUUID(uuid: string): Promise<GetDocumentResponse> {
+  async obtenerPorUUID(uuid: string, timeoutMs = 60000): Promise<GetDocumentResponse> {
     try {
       console.log('📥 Obteniendo DTE con UUID:', uuid);
 
@@ -325,7 +329,7 @@ export class SATClientService {
           'Content-Type': 'text/xml;charset=UTF-8'
         },
         body: soapRequest,
-        signal: AbortSignal.timeout(60000)
+        signal: AbortSignal.timeout(timeoutMs)
       });
 
       const responseText = await response.text();

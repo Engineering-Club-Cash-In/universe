@@ -13,6 +13,7 @@ let insertWasCalled = false;
 let lastUpdateData: Record<string, unknown> | undefined;
 
 mock.module("../database/index", () => ({
+  client: {},
   db: {
     select: () => ({
       from: () => ({
@@ -60,7 +61,11 @@ mock.module("./addInvestorToCredit", () => ({
   addInvestorToCredit: mock(() => Promise.resolve()),
 }));
 
-const { insertInvestor } = await import("./investor");
+const {
+  insertInvestor,
+  lockPendingReturnCreditsForLiquidation,
+  orderUniqueCreditIds,
+} = await import("./investor");
 
 describe("insertInvestor", () => {
   beforeEach(() => {
@@ -184,5 +189,25 @@ describe("insertInvestor", () => {
     expect(updateWasCalled).toBeTrue();
     expect(lastUpdateData).toBeDefined();
     expect("descuenta_impuestos" in lastUpdateData!).toBeFalse();
+  });
+});
+
+describe("lockPendingReturnCreditsForLiquidation", () => {
+  it("ordena IDs y usa NO KEY UPDATE después de ORDER BY", async () => {
+    const forLock = mock(() => Promise.resolve([]));
+    const orderBy = mock(() => ({ for: forLock }));
+    const tx = {
+      select: () => ({
+        from: () => ({
+          where: () => ({ orderBy }),
+        }),
+      }),
+    } as any;
+
+    expect(orderUniqueCreditIds([9, 3, 9, 5])).toEqual([3, 5, 9]);
+    await lockPendingReturnCreditsForLiquidation(tx, [9, 3, 9, 5]);
+
+    expect(orderBy).toHaveBeenCalledTimes(1);
+    expect(forLock).toHaveBeenCalledWith("no key update");
   });
 });

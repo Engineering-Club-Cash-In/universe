@@ -1,0 +1,265 @@
+{
+  "commit": "56717ddef8f0bbd8c8633172c8ca2c85c248dfd7",
+  "entries": [
+    {
+      "path": "apps/cartera-back/src/controllers/revertPaymentToPending.ts",
+      "line": 27,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/revertPaymentToPending.ts",
+      "line": 33,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/revertPaymentToPending.ts",
+      "line": 41,
+      "method": "console.log",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "payment.reversal_to_pending",
+      "outcome": "rejected",
+      "rationale": "terminal_schema_rejection"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/revertPaymentToPending.ts",
+      "line": 53,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/revertPaymentToPending.ts",
+      "line": 54,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/revertPaymentToPending.ts",
+      "line": 75,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/revertPaymentToPending.ts",
+      "line": 97,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/revertPaymentToPending.ts",
+      "line": 109,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/revertPaymentToPending.ts",
+      "line": 129,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/revertPaymentToPending.ts",
+      "line": 135,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/revertPaymentToPending.ts",
+      "line": 136,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/revertPaymentToPending.ts",
+      "line": 137,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/revertPaymentToPending.ts",
+      "line": 143,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/revertPaymentToPending.ts",
+      "line": 144,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/revertPaymentToPending.ts",
+      "line": 153,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/revertPaymentToPending.ts",
+      "line": 166,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/revertPaymentToPending.ts",
+      "line": 173,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/revertPaymentToPending.ts",
+      "line": 189,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/revertPaymentToPending.ts",
+      "line": 213,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/revertPaymentToPending.ts",
+      "line": 222,
+      "method": "console.error",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/revertPaymentToPending.ts",
+      "line": 231,
+      "method": "console.error",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/revertPaymentToPending.ts",
+      "line": 240,
+      "method": "console.log",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "payment.reversal_to_pending",
+      "outcome": "partially_completed",
+      "rationale": "aggregated_invoice_partial_completion"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/revertPaymentToPending.ts",
+      "line": 244,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/revertPaymentToPending.ts",
+      "line": 252,
+      "method": "console.log",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "payment.reversal_to_pending",
+      "outcome": "completed",
+      "rationale": "terminal_payment_reversal_completion"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/revertPaymentToPending.ts",
+      "line": 271,
+      "method": "console.error",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "payment.reversal_to_pending",
+      "outcome": "failed",
+      "rationale": "terminal_reversal_failure"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/revertPaymentToPending.ts",
+      "line": 272,
+      "method": "console.error",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    }
+  ]
+}

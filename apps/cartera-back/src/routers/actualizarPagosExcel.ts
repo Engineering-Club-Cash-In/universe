@@ -13,7 +13,8 @@
  *  - Campos que se escriben por pago:
  *      abono_capital/interes/iva_12/interes_ci/iva_ci/seguro/gps, membresias(_pago),
  *      pago_del_mes, mora, otros.
- *      capital_restante = total_restante = "Total restante" del Excel.
+ *      total_restante = "Total restante" del Excel; capital_restante = 0 (cuota
+ *      pagada: el saldo del crédito vive solo en total_restante).
  *      interes_restante = iva_12_restante = seguro_restante = gps_restante = 0.
  *      pagado = true.
  *  - Caso normal (1 pago/cuota): se escriben los totales del Excel directo.
@@ -62,7 +63,7 @@ function construirUpdatesCuota(
     iva_12_restante: "0",
     seguro_restante: "0",
     gps_restante: "0",
-    capital_restante: totalRestante,
+    capital_restante: "0",
     total_restante: totalRestante,
   };
 
@@ -180,8 +181,9 @@ function construirUpdatesCuota(
         iva_12_restante: Q(rem.iva),
         seguro_restante: Q(rem.seguro),
         gps_restante: Q(rem.gps),
-        // capital/total restante = saldo del crédito (igual en toda la cuota).
-        capital_restante: totalRestante,
+        // total_restante = saldo del crédito (igual en toda la cuota); capital_restante
+        // en 0 porque la cuota queda pagada (no hay capital pendiente de ella).
+        capital_restante: "0",
         total_restante: totalRestante,
         // Todos los pagos de la cuota quedan pagados (no solo el último): la
         // cuota se reconstruye completa desde el Excel. Ver commit 0dc646a6.

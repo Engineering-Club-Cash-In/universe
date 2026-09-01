@@ -2381,12 +2381,33 @@ export async function getInvestorTotalsGlobales(
   };
 }
 
-export async function updateLiquidacionReporteUrl(liquidacion_id: number, url: string) {
+/**
+ * Repunta el reporte de una liquidación ya hecha.
+ *
+ * `urlGtq` acompaña a `url`: quien regenera el reporte principal de un
+ * inversionista en dólares regenera también su copia en quetzales y pasa las
+ * dos, de modo que el par siempre queda coherente.
+ *
+ *   - `urlGtq` string  → se guarda (junto con el tipo de cambio usado).
+ *   - `urlGtq` null    → se limpia. Para inversionistas en quetzales, que no
+ *                        tienen copia, y para un reporte que se regeneró sin
+ *                        poder rehacerla.
+ *   - `urlGtq` omitido → la columna NO se toca y conserva lo que tenía. Es lo
+ *                        que necesita un backfill hecho a mano: repuntar el
+ *                        original sin perder la copia en Q cargada aparte.
+ */
+export async function updateLiquidacionReporteUrl(
+  liquidacion_id: number,
+  url: string,
+  urlGtq?: string | null,
+  tipoCambio?: number | null,
+) {
   const [liquidacion] = await db
     .select({
       liquidacion_id: liquidaciones.liquidacion_id,
       fecha_liquidacion: liquidaciones.fecha_liquidacion,
       reporte_liquidacion_url: liquidaciones.reporte_liquidacion_url,
+      reporte_liquidacion_url_gtq: liquidaciones.reporte_liquidacion_url_gtq,
     })
     .from(liquidaciones)
     .where(eq(liquidaciones.liquidacion_id, liquidacion_id))
@@ -2394,15 +2415,18 @@ export async function updateLiquidacionReporteUrl(liquidacion_id: number, url: s
     .limit(1);
 
   if (liquidacion) {
+    const cambios: Record<string, unknown> = { reporte_liquidacion_url: url };
+
+    // `undefined` = no se tocan las columnas de la copia en quetzales.
+    if (urlGtq !== undefined) {
+      cambios.reporte_liquidacion_url_gtq = urlGtq;
+      cambios.tipo_cambio_reporte =
+        urlGtq && tipoCambio ? String(tipoCambio) : null;
+    }
+
     await db
       .update(liquidaciones)
-      .set({
-        reporte_liquidacion_url: url,
-        // El reporte principal se regeneró por fuera de la liquidación, así que
-        // la copia en quetzales ya no le corresponde. Se limpia para no dejar
-        // dos reportes que no cuadran entre sí.
-        reporte_liquidacion_url_gtq: null,
-      })
+      .set(cambios)
       .where(eq(liquidaciones.liquidacion_id, liquidacion.liquidacion_id));
 
     return {
@@ -2410,6 +2434,9 @@ export async function updateLiquidacionReporteUrl(liquidacion_id: number, url: s
       fecha_liquidacion: liquidacion.fecha_liquidacion,
       url_anterior: liquidacion.reporte_liquidacion_url,
       url_nueva: url,
+      url_gtq_anterior: liquidacion.reporte_liquidacion_url_gtq,
+      url_gtq_nueva:
+        urlGtq === undefined ? liquidacion.reporte_liquidacion_url_gtq : urlGtq,
     };
   }
 

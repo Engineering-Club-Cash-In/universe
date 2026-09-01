@@ -1,4 +1,5 @@
 -- Reporte de liquidación en las dos monedas.
+-- (renumerada de 0027 a 0031: develop ya tenía un 0027_add_excluir_compras_creditos)
 --
 -- Los inversionistas en dólares reciben su reporte en USD, pero esta tabla
 -- guarda todos sus totales en quetzales. `reporte_liquidacion_url_gtq` es la

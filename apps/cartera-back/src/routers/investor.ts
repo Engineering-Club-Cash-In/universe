@@ -38,6 +38,8 @@ import {
 import { ajustarPagosLiquidacion } from "../controllers/ajustarPagosLiquidacion";
 import { InversionistaReporte, RespuestaReporte } from "../utils/interface";
 import { generarYSubirPDFInversionista, generarYSubirExcelInversionista } from "../utils/functions/generalFunctions";
+import { convertirReporteAUSD } from "../utils/functions/reporteMoneda";
+import { getTipoCambioUSD } from "../utils/functions/currencyConverter";
 import { authMiddleware } from "./midleware";
 import { obtenerCreditosConPagosPendientes, calcularYRegistrarPagosEspejo } from "../controllers/payments";
 import { createBoleta, getBoletaById, getAllBoletas, getBoletasPendientes, updateBoleta, marcarBoletaComoProcesada, marcarBoletaComoPendiente, deleteBoleta, getBoletasStats } from "../controllers/liquidateInvestor";
@@ -949,6 +951,9 @@ export const inversionistasRouter = new Elysia()
     try {
       const liquidacionId = liquidacion_id
 
+      // El resumen se pide UNA sola vez y en quetzales; la versión en la moneda
+      // del inversionista se deriva en memoria. Mismo camino que la liquidación:
+      // la conversión va siempre Q → USD, que es la única exacta.
       const result = await resumeInvestor(
         Number(investor_id),
         1,
@@ -961,7 +966,8 @@ export const inversionistasRouter = new Elysia()
         "espejos",
         true, // soloLiquidados
         liquidacionId,
-        undefined
+        undefined,
+        true // rawValues: montos en quetzales
       );
 
       if (!result.inversionistas.length) {
@@ -969,22 +975,10 @@ export const inversionistasRouter = new Elysia()
         return { message: "Inversionista no encontrado o sin pagos liquidados." };
       }
 
-      const inversionista = result.inversionistas[0];
-
-      // Totales formateados (USD para inv en dolares) — los que se ven en el Excel.
-      const totales = await getInvestorTotalsGlobales(
-        Number(investor_id),
-        undefined,
-        "espejos",
-        false,
-        undefined,
-        true, // soloLiquidados
-        liquidacionId,
-        undefined
-      );
-      inversionista.subtotal = totales.totales as any;
+      const inversionistaQ = result.inversionistas[0];
 
       // Totales en bruto (siempre en Quetzales). Se usan para:
+      //   • el reporte en quetzales
       //   • `sustituir_totales` → la tabla `liquidaciones` guarda en Q
       //   • la compra (`ejecutarReinversionAutomatica`) → addInvestorToCredit espera Q
       // Esto evita que para inversionistas en dólares (ej. Flujocapital 84)
@@ -1000,10 +994,35 @@ export const inversionistasRouter = new Elysia()
         undefined,
         true, // rawValues
       );
+      inversionistaQ.subtotal = totalesRaw.totales as any;
+
+      // El reporte principal siempre va en la moneda del inversionista.
+      const esDolares =
+        (inversionistaQ as any).moneda_inversionista === "dolares";
+      const inversionista: any = esDolares
+        ? convertirReporteAUSD(inversionistaQ as any)
+        : inversionistaQ;
 
       const logoUrl = import.meta.env.LOGO_URL || "";
-      const filename = `reporte_liquidados_${liquidacionId}_${Date.now()}.xlsx`;
-      const { url } = await generarYSubirExcelInversionista(inversionista as any, filename, logoUrl);
+      const stamp = Date.now();
+      const filename = `reporte_liquidados_${liquidacionId}_${stamp}.xlsx`;
+
+      // Para inversionistas en dólares se regenera también la copia en quetzales,
+      // de modo que el par nunca queda descuadrado: antes esta ruta borraba la
+      // copia en Q y dejaba a la liquidación sin ella hasta la próxima corrida.
+      const filenameGtq = esDolares
+        ? `reporte_liquidados_${liquidacionId}_${stamp}_GTQ.xlsx`
+        : null;
+
+      const [excelResult, excelResultGtq] = await Promise.all([
+        generarYSubirExcelInversionista(inversionista, filename, logoUrl),
+        filenameGtq
+          ? generarYSubirExcelInversionista(inversionistaQ as any, filenameGtq, logoUrl)
+          : Promise.resolve(null),
+      ]);
+
+      const url = excelResult.url;
+      const urlGtq = excelResultGtq?.url ?? null;
 
       // Si `solo_reporte=true`, devolvemos solo el Excel: no se actualiza la
       // `reporte_liquidacion_url` en la liquidación ni se ejecuta la
@@ -1012,14 +1031,21 @@ export const inversionistasRouter = new Elysia()
         return {
           success: true,
           url,
+          url_gtq: urlGtq,
           filename,
+          filename_gtq: filenameGtq,
           liquidacion: null,
           reinversion: null,
           solo_reporte: true,
         };
       }
 
-      const liquidacionActualizada = await updateLiquidacionReporteUrl(Number(liquidacionId), url);
+      const liquidacionActualizada = await updateLiquidacionReporteUrl(
+        Number(liquidacionId),
+        url,
+        urlGtq,
+        esDolares ? getTipoCambioUSD(Number(investor_id)) : null,
+      );
 
       // Si `sustituir_totales=true`, actualiza los totales monetarios de la
       // liquidación con los recalculados en vivo (en Q, igual que el INSERT
@@ -1050,8 +1076,8 @@ export const inversionistasRouter = new Elysia()
       // Si `reinvertir=true`, ejecuta la reinversión automática usando el
       // total recalculado en Quetzales (`totalesRaw`), NO el `reinversion_total`
       // guardado en la liquidación — así la compra siempre refleja el estado
-      // actual de los pagos/abonos. Importante: usamos `totalesRaw` (Q) y no
-      // `totales` (que para inv en dólares ya viene convertido a USD).
+      // actual de los pagos/abonos. Importante: el monto va en Q, que es lo que
+      // espera addInvestorToCredit, no en la moneda del reporte.
       let reinversion: unknown = null;
       if (reinvertir) {
         const monto = Number((totalesRaw.totales as any).total_reinversion ?? 0);
@@ -1082,7 +1108,9 @@ export const inversionistasRouter = new Elysia()
       return {
         success: true,
         url,
+        url_gtq: urlGtq,
         filename,
+        filename_gtq: filenameGtq,
         liquidacion: liquidacionActualizada || null,
         totales_actualizados: totalesActualizados,
         reinversion,

@@ -2531,7 +2531,9 @@ export const especificacionBotCobros = {
 					"",
 					"Mismo orden que el servicio 8 —primero `MORA_INTERES`, después `CAPITAL`—, así *Pago 1 de 2* es siempre el mismo link en los dos servicios.",
 					"",
-					"Un pago recién hecho puede tardar unos minutos en reflejarse (lo detectamos nosotros, D-49). Si no hay links generados en esta conversación responde `409 SIN_LINKS`.",
+					"Un pago recién hecho puede tardar unos minutos en reflejarse (lo detectamos nosotros, D-49). Si el crédito no tiene ningún pago con link abierto responde `409 SIN_LINKS`.",
+					"",
+					"**Alcance:** el pago con link vigente de ese crédito, aunque se haya generado en una conversación anterior — es el mismo que te devuelve `/crear` cuando ya hay uno en curso. Antes miraba solo los de la conversación actual y por eso podía responder `SIN_LINKS` justo después de que `/crear` te acababa de dar los links.",
 				].join("\n"),
 				operationId: "estadoPagoLink",
 				requestBody: {

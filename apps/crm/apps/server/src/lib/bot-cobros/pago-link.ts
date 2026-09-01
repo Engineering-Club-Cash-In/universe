@@ -33,7 +33,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, gte, inArray, notInArray } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, notInArray } from "drizzle-orm";
 import { db } from "../../db";
 import { casosCobros } from "../../db/schema/cobros";
 import {
@@ -1473,6 +1473,24 @@ export async function consultarEstadoPagoLink(
 		return { ok: false, codigo: "CREDITO_NO_ES_DEL_CLIENTE" };
 	}
 
+	// Antes esto exigía además `createdAt >= sesion.otp.usedAt` ("los links de
+	// ESTA conversación"), y eso rompía el circuito: `/crear` NO crea un grupo
+	// nuevo si el crédito ya tiene uno en curso, le devuelve los MISMOS links
+	// (§4, reintento) — así que un cliente que vuelve al día siguiente recibía
+	// sus links por `/crear` y acto seguido `/estado` le respondía 409
+	// SIN_LINKS, porque el grupo era de la conversación de ayer. Caso real:
+	// grupo del 31/08 21:56 UTC consultado el 01/09 (409 en los logs de dev).
+	//
+	// El alcance sigue siendo el mismo que ve `/opciones` y `/crear`: el único
+	// grupo del crédito que no está cerrado (índice único 0047, igual que
+	// `grupoActivoDelCredito`). Se acepta también COMPLETED —ordenando por
+	// fecha, solo gana si no hay uno vivo— para que quien pregunta justo
+	// después de que se aplicó su pago siga leyendo "ya lo recibimos" en vez
+	// de "no tenés links". CANCELLED sí queda fuera: no hay nada que cobrar.
+	//
+	// No abre nada: la identidad ya la probó la sesión (D-24) y el crédito se
+	// verificó como suyo arriba; la ventana era una decisión de producto, no
+	// un candado.
 	const [grupo] = await db
 		.select()
 		.from(pagaloPaymentGroups)
@@ -1480,7 +1498,7 @@ export async function consultarEstadoPagoLink(
 			and(
 				eq(pagaloPaymentGroups.origen, "BOT"),
 				eq(pagaloPaymentGroups.numeroCreditoSifco, numeroSifco),
-				gte(pagaloPaymentGroups.createdAt, sesion.otp.usedAt),
+				ne(pagaloPaymentGroups.status, "CANCELLED"),
 			),
 		)
 		.orderBy(desc(pagaloPaymentGroups.createdAt))

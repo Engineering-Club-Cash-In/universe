@@ -372,9 +372,17 @@ están pagados. Lo respondemos con **nuestra base** (el poller ya verificó cada
 Págalo y guardó el voucher): un link está pagado si es `PAID`/fuente de aplicación, o si el grupo
 ya está en aplicación (`READY_TO_APPLY`, `APPLYING`, `APPLICATION_FAILED`, `COMPLETED`).
 
-- **Entrada:** `referencia` y `numeroSifco`, como los otros dos servicios. "Esta conversación" =
-  el grupo de origen `BOT` de ese crédito **creado después de que la persona canjeó su código**
-  (la sesión de D-24). Sin ninguno → `409 SIN_LINKS`.
+- **Entrada:** `referencia` y `numeroSifco`, como los otros dos servicios. El alcance es el
+  **pago con link vigente de ese crédito** (grupo de origen `BOT` que no esté `CANCELLED`, el
+  más reciente): exactamente el mismo que `/opciones` y `/crear` miran. Sin ninguno →
+  `409 SIN_LINKS`.
+  - **Corregido el 2026-09-01:** antes exigía además que el grupo fuera **de la conversación
+    actual** (`createdAt >= otp.usedAt`). Eso contradecía a `/crear`, que ante un pago ya en
+    curso devuelve los MISMOS links sin importar de cuándo sean: el cliente que volvía al día
+    siguiente recibía sus links por `/crear` y en el mismo paso `/estado` le respondía
+    `409 SIN_LINKS`. Caso real en dev: grupo del 31/08 21:56 UTC consultado el 01/09.
+    No abre nada — la identidad la prueba la sesión (D-24) y el crédito se verifica como suyo;
+    la ventana era una decisión de producto, no un candado.
 - **Salida:** `estado` = `PAGADOS` | `PARCIAL` | `SIN_PAGO`, plano como las opciones
   (`totalLinks`, `linksPagados`, `linksPendientes`, `link1Titulo/Estado/Monto/Url`, `link2…`;
   la URL solo viene si ese link sigue pendiente, para que el bot lo reenvíe) y

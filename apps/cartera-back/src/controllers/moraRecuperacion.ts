@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import { creditosVigentesSql } from "./moraCapitalCartera";
 import { snapCte } from "./moraSnapshotSql";
 
 export type MoraRecoverySourceRow = {
@@ -107,8 +108,6 @@ export function buildMoraRecoveryQuery({
     ), snapshot_por_credito AS (
       SELECT m.credito_id, m.esperado
       FROM mora_activa m
-      JOIN cartera.creditos c ON c.credito_id = m.credito_id
-      WHERE c."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
     )`;
 
 	return sql`
@@ -117,7 +116,9 @@ export function buildMoraRecoveryQuery({
       SELECT c.credito_id, c.asesor_id, a.nombre
       FROM cartera.creditos c
       LEFT JOIN cartera.asesores a ON a.asesor_id = c.asesor_id
-      WHERE true ${emailFilter} ${asesoresFilter}
+      WHERE c."statusCredit" IN (${creditosVigentesSql})
+        ${emailFilter}
+        ${asesoresFilter}
     ),
     pagos_por_credito AS (
       SELECT pc.credito_id, COALESCE(SUM(pc.mora::numeric), 0) AS cobrado

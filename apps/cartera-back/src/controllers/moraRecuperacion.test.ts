@@ -54,7 +54,9 @@ describe("buildMoraRecoveryReport", () => {
 		});
 		expect(query.sql).toContain("FULL JOIN pagos_por_credito");
 		expect(query.sql).toContain("moras_historial");
-		expect(query.sql).not.toContain('"statusCredit"');
+		expect(query.sql).toContain(
+			"'ACTIVO', 'MOROSO', 'PENDIENTE_CANCELACION', 'EN_CONVENIO', 'INCOBRABLE'",
+		);
 		expect(query.sql).toContain("LOWER(a.email_cash_in) = LOWER(TRIM($2))");
 		expect(query.sql).toContain("a.asesor_id IN ($3, $4)");
 		expect(query.sql).toContain("COALESCE(ca.nombre, 'Sin asignar')");
@@ -66,6 +68,23 @@ describe("buildMoraRecoveryReport", () => {
 			"2026-06-06",
 			"2026-07-06",
 		]);
+	});
+
+	it("usa la misma población vigente para recuperación live e histórica", () => {
+		const statusPopulation =
+			"'ACTIVO', 'MOROSO', 'PENDIENTE_CANCELACION', 'EN_CONVENIO', 'INCOBRABLE'";
+		for (const alcance of ["live", "historico"] as const) {
+			const query = new PgDialect().sqlToQuery(
+				buildMoraRecoveryQuery({
+					inicio: "2026-06-06",
+					fin: "2026-07-06",
+					fechaSnapshot: "2026-06-06",
+					alcance,
+				}),
+			);
+
+			expect(query.sql).toContain(statusPopulation);
+		}
 	});
 
 	it("usa un snapshot estrictamente anterior al inicio y cuenta el pago del día 6", () => {

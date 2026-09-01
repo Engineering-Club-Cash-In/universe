@@ -27,6 +27,25 @@ export type PagaloLinkParaEnviar = {
 	paymentUrl: string;
 };
 
+/**
+ * El orden en que el cliente ve los links: **primero MORA_INTERES, después
+ * CAPITAL** — mismo criterio que el bot (bot-cobros/pago-link.ts, D-52):
+ * cartera aplica el dinero contra la mora vigente solo con el link
+ * MORA_INTERES, jamás con el de CAPITAL, así que "Pago 1 de 2" tiene que
+ * ser el de interés y mora.
+ */
+export const ORDEN_LINKS_PAGALO: Array<"CAPITAL" | "MORA_INTERES"> = [
+	"MORA_INTERES",
+	"CAPITAL",
+];
+
+export const porOrdenDeLinkPagalo = (
+	a: { linkType: "CAPITAL" | "MORA_INTERES" },
+	b: { linkType: "CAPITAL" | "MORA_INTERES" },
+) =>
+	ORDEN_LINKS_PAGALO.indexOf(a.linkType) -
+	ORDEN_LINKS_PAGALO.indexOf(b.linkType);
+
 export interface SendPagaloLinksWhatsappParams {
 	numeroSifco: string;
 	/** "vehículo {marca modelo año} · {placa}" cuando está cargado, si no "crédito {sifco}". */
@@ -43,17 +62,15 @@ export type SendPagaloLinksWhatsappResult =
 
 /**
  * Etiqueta neutra igual a la que ya lleva el link (pagalo-link-orchestrator.ts):
- * "Pago" si es uno solo, "Pago 1 de 2"/"Pago 2 de 2" si son dos, CAPITAL
- * siempre primero sin importar el orden en que llegue el array.
+ * "Pago" si es uno solo, "Pago 1 de 2"/"Pago 2 de 2" si son dos, en el orden
+ * fijo de ORDEN_LINKS_PAGALO sin importar el orden en que llegue el array.
  */
 export function construirMensajePagaloLinks(
 	clienteNombre: string,
 	identificadorCredito: string,
 	links: PagaloLinkParaEnviar[],
 ): string {
-	const ordenados = [...links].sort((a, b) =>
-		a.linkType === b.linkType ? 0 : a.linkType === "CAPITAL" ? -1 : 1,
-	);
+	const ordenados = [...links].sort(porOrdenDeLinkPagalo);
 	const dosLinks = ordenados.length === 2;
 	const saludo = clienteNombre ? `Hola ${clienteNombre}` : "Hola";
 	const lineas = ordenados.map((link, index) => {

@@ -78,13 +78,13 @@ function buildDeps(overrides: Partial<SendPagaloLinksWhatsappDeps> = {}): {
 }
 
 describe("construirMensajePagaloLinks", () => {
-	test("dos links: CAPITAL siempre 'Pago 1 de 2' sin importar el orden del array", () => {
+	test("dos links: MORA_INTERES siempre 'Pago 1 de 2' sin importar el orden del array", () => {
 		const invertido = construirMensajePagaloLinks("Juan", `crédito ${SIFCO}`, [
-			{ linkType: "MORA_INTERES", paymentUrl: "https://s.pagalodev.com/mora" },
 			{ linkType: "CAPITAL", paymentUrl: "https://s.pagalodev.com/capital" },
+			{ linkType: "MORA_INTERES", paymentUrl: "https://s.pagalodev.com/mora" },
 		]);
-		expect(invertido).toContain("Pago 1 de 2: https://s.pagalodev.com/capital");
-		expect(invertido).toContain("Pago 2 de 2: https://s.pagalodev.com/mora");
+		expect(invertido).toContain("Pago 1 de 2: https://s.pagalodev.com/mora");
+		expect(invertido).toContain("Pago 2 de 2: https://s.pagalodev.com/capital");
 	});
 
 	test("un solo link: etiqueta 'Pago' a secas", () => {

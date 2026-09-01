@@ -14,6 +14,7 @@ import {
 } from "../controllers/buckets/reasignarAsesor";
 import { getPoolPorAsesor } from "../controllers/buckets/poolPorAsesor";
 import { getSifcosPoolAutoritativos } from "../controllers/buckets/sifcosPoolAutoritativos";
+import { getAsignacionesPoolPorSifco } from "../controllers/buckets/asignacionesPoolPorSifco";
 import { getCargaPorAsesorBucket } from "../controllers/buckets/cargaAsesorBucket";
 import { actualizarCapacidadAsesorBucket } from "../controllers/buckets/actualizarAsesorBucket";
 import { getColaDiaSLA } from "../controllers/buckets/colaDia";
@@ -244,6 +245,40 @@ export const bucketsRouter = new Elysia()
       query: t.Object({
         asesor_id: t.String(),
       }),
+    },
+  )
+
+  // Atribución visual paginada: una sola consulta para los SIFCOs presentes
+  // en la página, en vez de resolver el pool completo de cada asesor.
+  .get(
+    "/buckets/pool-asignaciones",
+    async ({ query, set, user }: any) => {
+      if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+      const sifcos = [
+        ...new Set<string>(
+          String(query.sifcos)
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean),
+        ),
+      ];
+      if (sifcos.length === 0 || sifcos.length > 25) {
+        set.status = 400;
+        return { success: false, message: "[ERROR] sifcos debe contener entre 1 y 25 valores" };
+      }
+      try {
+        return await getAsignacionesPoolPorSifco({ sifcos });
+      } catch (err) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "[ERROR] No se pudo obtener las asignaciones del pool",
+          error: String(err),
+        };
+      }
+    },
+    {
+      query: t.Object({ sifcos: t.String() }),
     },
   )
 

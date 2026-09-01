@@ -1,9 +1,33 @@
 import { describe, expect, test } from "bun:test";
 import {
+	asesoresActivosConBuckets,
 	buscarAsesorPorEmail,
 	buscarAsesorPorId,
 	nombresAsesoresPorSifco,
 } from "./pagalo-supervision-acceso";
+
+describe("asesoresActivosConBuckets", () => {
+	test("excluye asesores inactivos aunque conserven buckets activos", () => {
+		const asesores = asesoresActivosConBuckets([
+			{
+				asesor_id: 7,
+				nombre: "Activa",
+				email_cash_in: null,
+				buckets: [1],
+				activo: true,
+			},
+			{
+				asesor_id: 8,
+				nombre: "Inactiva",
+				email_cash_in: null,
+				buckets: [1],
+				activo: false,
+			},
+		]);
+
+		expect(asesores.map((asesor) => asesor.asesor_id)).toEqual([7]);
+	});
+});
 
 describe("buscarAsesorPorEmail", () => {
 	test("normaliza correo para resolver el pool del asesor", () => {

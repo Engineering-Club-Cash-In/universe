@@ -25,6 +25,7 @@ import {
 import { cobrosProcedure, cobrosSupervisorProcedure } from "../lib/orpc";
 import {
 	type AsesorPoolPagalo,
+	asesoresActivosConBuckets,
 	buscarAsesorPorEmail,
 	buscarAsesorPorId,
 	nombresAsesoresPorSifco,
@@ -38,11 +39,6 @@ import { PERMISSIONS } from "../lib/roles";
 import { carteraBackClient } from "../services/cartera-back-client";
 
 const MAX_GRUPOS_POR_PAGINA = 25;
-const CACHE_SCOPE_VISUAL_MS = 60_000;
-const scopeVisualPorAsesor = new Map<
-	number,
-	{ venceEn: number; sifcos: string[] }
->();
 
 async function resolverScopeAsesorPagalo(asesor: AsesorPoolPagalo | null) {
 	const bucketsAsignados = asesor?.buckets ?? [];
@@ -62,20 +58,6 @@ async function resolverScopeAsesorPagalo(asesor: AsesorPoolPagalo | null) {
 	};
 }
 
-async function getSifcosPoolParaColumna(asesorId: number): Promise<string[]> {
-	const cacheado = scopeVisualPorAsesor.get(asesorId);
-	if (cacheado && cacheado.venceEn > Date.now()) return cacheado.sifcos;
-
-	const sifcos = (
-		await carteraBackClient.getSifcosPoolAutoritativos({ asesorId })
-	).data;
-	scopeVisualPorAsesor.set(asesorId, {
-		venceEn: Date.now() + CACHE_SCOPE_VISUAL_MS,
-		sifcos,
-	});
-	return sifcos;
-}
-
 export const pagaloSupervisionRouter = {
 	// Catálogo para selector Págalo: solo asesores con por lo menos un bucket
 	// activo. El selector no usa getAsesores porque su email/activo no expresa
@@ -86,8 +68,7 @@ export const pagaloSupervisionRouter = {
 			const asesores = await carteraBackClient.getPoolPorAsesor({
 				useCache: false,
 			});
-			return asesores
-				.filter((asesor) => asesor.buckets.length > 0)
+			return asesoresActivosConBuckets(asesores)
 				.map(({ asesor_id, nombre, buckets }) => ({
 					asesorId: asesor_id,
 					nombre,
@@ -440,28 +421,32 @@ export const pagaloSupervisionRouter = {
 				}
 			}
 
-			// Misma fuente autoritativa del filtro: última fila de buckets_historial.
-			// Cache corto solo evita repetir CTE global por cada búsqueda/página;
-			// autorización y filtro continúan consultándolo en vivo.
+			// Misma fuente autoritativa del filtro, pero restringida a SIFCOs de
+			// esta página. Evita resolver pools completos por cada asesor.
+			const sifcosPorAsesor = new Map<number, string[]>();
+			if (sifcosPagina.length > 0) {
+				try {
+					for (const asignacion of (
+						await carteraBackClient.getAsignacionesPoolPorSifco({
+							sifcos: sifcosPagina,
+						})
+					).data) {
+						const sifcos = sifcosPorAsesor.get(asignacion.asesor_id) ?? [];
+						sifcos.push(asignacion.numero_credito_sifco);
+						sifcosPorAsesor.set(asignacion.asesor_id, sifcos);
+					}
+				} catch (error) {
+					console.error(
+						"[Págalo] No se pudo resolver asesores de la página:",
+						error instanceof Error ? error.message : error,
+					);
+				}
+			}
 			const asesoresPorSifco = nombresAsesoresPorSifco(
-				await Promise.all(
-					asesores
-						.filter((asesor) => asesor.buckets.length > 0)
-						.map(async (asesor) => {
-							try {
-								return {
-									...asesor,
-									sifcos: await getSifcosPoolParaColumna(asesor.asesor_id),
-								};
-							} catch (error) {
-								console.error(
-									`[Págalo] No se pudo resolver pool visual de ${asesor.nombre}:`,
-									error instanceof Error ? error.message : error,
-								);
-								return { ...asesor, sifcos: [] };
-							}
-						}),
-				),
+				asesoresActivosConBuckets(asesores).map((asesor) => ({
+					...asesor,
+					sifcos: sifcosPorAsesor.get(asesor.asesor_id) ?? [],
+				})),
 				sifcosPagina,
 			);
 

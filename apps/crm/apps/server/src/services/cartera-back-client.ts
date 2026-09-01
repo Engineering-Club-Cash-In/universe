@@ -16,6 +16,7 @@ import type {
 	CarteraBackConnectionError,
 	CarteraBackError,
 	CarteraBackValidationError,
+	CarteraAsignacionesPoolPorSifcoResponse,
 	CarteraBucketActualCredito,
 	CarteraBucketCatalogo,
 	CarteraBucketHistorialEvento,
@@ -46,6 +47,7 @@ import type {
 	FacturarGenericoResponse,
 	GetAdvisorsParams,
 	GetAllCreditsParams,
+	GetAsignacionesPoolPorSifcoParams,
 	GetAsesorHistorialParams,
 	GetBucketsHistorialParams,
 	GetCargaPorAsesorBucketParams,
@@ -2021,6 +2023,23 @@ export class CarteraBackClient {
 			false,
 		);
 		return response;
+	}
+
+	/** Asignación pool→asesor limitada a los SIFCOs de una página del CRM. */
+	async getAsignacionesPoolPorSifco(
+		params: GetAsignacionesPoolPorSifcoParams,
+	): Promise<CarteraAsignacionesPoolPorSifcoResponse> {
+		const sifcos = [...new Set(params.sifcos)];
+		if (sifcos.length > 25) {
+			throw new Error("getAsignacionesPoolPorSifco admite máximo 25 SIFCOs");
+		}
+		if (sifcos.length === 0) return { data: [] };
+		const queryParams = new URLSearchParams({ sifcos: sifcos.join(",") });
+		return this.request<CarteraAsignacionesPoolPorSifcoResponse>(
+			`/buckets/pool-asignaciones?${queryParams}`,
+			{ method: "GET" },
+			false,
+		);
 	}
 
 	// CB-027: listado paginado de convenios de pago (con cliente/SIFCO/asesor

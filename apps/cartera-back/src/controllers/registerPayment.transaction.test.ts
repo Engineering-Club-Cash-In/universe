@@ -167,7 +167,11 @@ mock.module("../utils/withAuditContext", () => ({
   withCapitalContext: mock(),
   setCapitalSource: mock(),
 }));
-mock.module("./latefee", () => ({ updateMoraEnTx }));
+mock.module("./latefee", () => ({
+  updateMoraEnTx,
+  updateMora: mock(),
+  desactivarMoraSiCreditoAlDia: mock(() => Promise.resolve()),
+}));
 mock.module("./payments", () => ({
   insertPagosCreditoInversionistas: mock(),
   insertPagosCreditoInversionistasV2: mock(),

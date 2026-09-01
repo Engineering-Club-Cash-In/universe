@@ -32,8 +32,18 @@ function addChangedRelationship(
 export function buildOpportunityRelationshipPatch(params: {
 	values: ModalRelationshipValues;
 	opportunity: CurrentOpportunityRelationships;
+	/** La empresa solo representa agencia cuando el vehículo es nuevo. */
+	vehicleIsNew?: boolean | null;
 }): OpportunityRelationshipPatch {
 	const patch: OpportunityRelationshipPatch = {};
+	const nextVehicleId = normalizeRelationshipValue(params.values.vehicleId);
+	const vehicleChanged =
+		nextVehicleId !== (params.opportunity.vehicleId ?? null);
+	const nextCompanyId =
+		vehicleChanged && params.vehicleIsNew === false
+			? null
+			: normalizeRelationshipValue(params.values.companyId);
+
 	addChangedRelationship(
 		patch,
 		"leadId",
@@ -43,13 +53,13 @@ export function buildOpportunityRelationshipPatch(params: {
 	addChangedRelationship(
 		patch,
 		"companyId",
-		normalizeRelationshipValue(params.values.companyId),
+		nextCompanyId,
 		params.opportunity.company?.id ?? null,
 	);
 	addChangedRelationship(
 		patch,
 		"vehicleId",
-		normalizeRelationshipValue(params.values.vehicleId),
+		nextVehicleId,
 		params.opportunity.vehicleId ?? null,
 	);
 	return patch;

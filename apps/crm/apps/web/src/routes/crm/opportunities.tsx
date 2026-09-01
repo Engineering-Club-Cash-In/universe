@@ -117,6 +117,10 @@ import {
 } from "@/lib/vehicle-utils";
 import { isVehicleAvailable } from "@/utils/constants";
 import { usePersistedState } from "@/hooks/usePersistedState";
+import {
+	formatMissingAssignmentsMessage,
+	getMissingOpportunityAssignments,
+} from "server/src/lib/opportunity-assignment-notice";
 import { client, orpc } from "@/utils/orpc";
 
 function formatLeadFullName(lead: {
@@ -227,6 +231,25 @@ function DraggableOpportunityCard({
 						);
 					}
 					return null;
+				})()}
+				{(() => {
+					// Aviso informativo del 30%: nunca bloquea, solo marca la tarjeta.
+					const faltan = getMissingOpportunityAssignments({
+						closurePercentage: opportunity.stage?.closurePercentage,
+						status: opportunity.status,
+						vehicleId: opportunity.vehicleId,
+						vehicleIsNew: opportunity.vehicle?.isNew,
+						companyId: opportunity.company?.id,
+						vendorId: opportunity.vendorId,
+						vehicleVendorId: opportunity.vehicle?.vendorId,
+					});
+					const mensaje = formatMissingAssignmentsMessage(faltan);
+					if (!mensaje) return null;
+					return (
+						<Badge variant="secondary" className="text-xs">
+							⚠️ {mensaje}
+						</Badge>
+					);
 				})()}
 				{opportunity.analysisStatus === "rejected" && (
 					<Badge variant="destructive" className="text-xs">
@@ -382,6 +405,8 @@ export const Route = createFileRoute("/crm/opportunities")({
 	validateSearch: z.object({
 		companyId: z.string().optional(),
 		opportunityId: z.string().optional(),
+		// "1" abre directo la edición, no solo el detalle
+		edit: z.string().optional(),
 	}).parse,
 });
 
@@ -431,6 +456,8 @@ function RouteComponent() {
 	const [stageIdFilter, setStageIdFilter] = usePersistedState<string>("crm/opportunities/stageIdFilter", "all");
 	const processedCompanyIdRef = useRef<string | null>(null);
 	const processedOpportunityIdRef = useRef<string | null>(null);
+	const processedEditRef = useRef<string | null>(null);
+	const prevEditOpenRef = useRef(false);
 	const prevOpenRef = useRef(isCreateDialogOpen);
 	const prevDetailsOpenRef = useRef(isDetailsDialogOpen);
 
@@ -753,6 +780,10 @@ function RouteComponent() {
 					: "",
 			);
 			editOpportunityForm.setFieldValue(
+				"vendorId",
+				selectedOpportunity.vendorId || "none",
+			);
+			editOpportunityForm.setFieldValue(
 				"notes",
 				selectedOpportunity.notes || "",
 			);
@@ -862,9 +893,15 @@ function RouteComponent() {
 		...orpc.getOpportunities.queryOptions({
 			input: {
 				excludeStatuses: ["migrate"],
-				createdMonth: month,
-				createdYear: year,
-				...(sourceFilter !== "all" ? { source: sourceFilter as any } : {}),
+				...(search.opportunityId
+					? { opportunityId: search.opportunityId }
+					: {
+							createdMonth: month,
+							createdYear: year,
+							...(sourceFilter !== "all"
+								? { source: sourceFilter as any }
+								: {}),
+						}),
 			},
 		}),
 		enabled:
@@ -878,6 +915,7 @@ function RouteComponent() {
 			month,
 			year,
 			sourceFilter,
+			search.opportunityId,
 		],
 	});
 	// Stats filtradas por mes (usa el backend que filtra por opportunityStageHistory.changedAt)
@@ -1071,6 +1109,7 @@ function RouteComponent() {
 			stageId: "",
 			probability: undefined as number | undefined,
 			expectedCloseDate: "",
+			vendorId: "none",
 			notes: "",
 			numeroCuotas: "",
 			tasaInteres: "",
@@ -1139,8 +1178,14 @@ function RouteComponent() {
 					...buildOpportunityRelationshipPatch({
 						values: { leadId, companyId, vehicleId },
 						opportunity: selectedOpportunity,
+						vehicleIsNew: editedVehicleIsNew,
 					}),
 					creditType: value.creditType,
+					// null y no undefined: en edición "Sin vendedor asignado" tiene
+					// que poder quitar un vendedor puesto antes. El patch de arriba no
+					// cubre vendorId.
+					vendorId:
+						value.vendorId && value.vendorId !== "none" ? value.vendorId : null,
 					value: value.value || undefined,
 					expectedCloseDate: value.expectedCloseDate || undefined,
 					notes: value.notes || undefined,
@@ -1187,6 +1232,16 @@ function RouteComponent() {
 		},
 	});
 
+	const editedVehicleId = editOpportunityForm.state.values.vehicleId;
+	const editedVehicle = vehiclesQuery.data?.data?.find(
+		(vehicle: { id: string }) => vehicle.id === editedVehicleId,
+	);
+	const editedVehicleIsNew =
+		editedVehicle?.isNew ??
+		(editedVehicleId === selectedOpportunity?.vehicleId
+			? selectedOpportunity?.vehicle?.isNew
+			: false);
+
 	const createOpportunityMutation = useMutation({
 		mutationFn: (input: {
 			title: string;
@@ -1227,6 +1282,8 @@ function RouteComponent() {
 			leadId?: string | null;
 			companyId?: string | null;
 			vehicleId?: string | null;
+			// null desasigna al vendedor; sigue siendo opcional
+			vendorId?: string | null;
 			creditType?: "autocompra" | "sobre_vehiculo";
 			status?: "open" | "won" | "lost" | "on_hold";
 			value?: string;
@@ -1444,11 +1501,45 @@ function RouteComponent() {
 			);
 			if (opportunity) {
 				setSelectedOpportunity(opportunity);
-				setIsDetailsDialogOpen(true);
+				// Con ?edit=1 se salta el detalle: abrirlo aquí lo cerraría enseguida,
+				// y el efecto que limpia el search param al cerrarlo dispara un
+				// navigate que descarta el estado y te deja fuera del editor.
+				if (search.edit !== "1") setIsDetailsDialogOpen(true);
 				processedOpportunityIdRef.current = search.opportunityId;
 			}
 		}
 	}, [search.opportunityId, opportunitiesQuery.data]);
+
+	// Al llegar con ?edit=1 se salta el detalle y se abre la edición. Va en su
+	// propio efecto porque handleEditOpportunity lee `selectedOpportunity`,
+	// que el efecto de arriba acaba de setear y todavía no está en el closure.
+	useEffect(() => {
+		if (search.edit !== "1") {
+			processedEditRef.current = null;
+			return;
+		}
+		if (
+			!selectedOpportunity ||
+			search.opportunityId !== selectedOpportunity.id ||
+			processedEditRef.current === selectedOpportunity.id
+		)
+			return;
+		processedEditRef.current = selectedOpportunity.id;
+		handleEditOpportunity(true);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [search.edit, selectedOpportunity]);
+
+	// La edición abierta por ?edit=1 limpia la URL al cerrarse, igual que hace
+	// el detalle aquí abajo, para no dejar el parámetro pegado.
+	useEffect(() => {
+		const wasOpen = prevEditOpenRef.current;
+		prevEditOpenRef.current = isEditDialogOpen;
+
+		if (wasOpen && !isEditDialogOpen && search.edit === "1") {
+			processedOpportunityIdRef.current = null;
+			navigate({ to: "/crm/opportunities", search: {}, replace: true });
+		}
+	}, [isEditDialogOpen, navigate, search.edit]);
 
 	// Clear search param when details modal closes
 	useEffect(() => {
@@ -3082,31 +3173,35 @@ function RouteComponent() {
 									}}
 								</editOpportunityForm.Field>
 							</div>
-							<div>
-								<editOpportunityForm.Field name="companyId">
-									{(field) => (
-										<div className="space-y-2">
-											<Label htmlFor={field.name}>Empresa</Label>
-											<Combobox
-												options={[
-													{ value: "none", label: "Sin empresa" },
-													...(companiesQuery.data?.map((company) => ({
-														value: company.id,
-														label: company.name,
-													})) || []),
-												]}
-												value={field.state.value ?? "none"}
-												onChange={(value) =>
-													field.handleChange(value || "none")
-												}
-												placeholder="Seleccionar empresa"
-												width="full"
-												disabled={isWonLocked}
-											/>
-										</div>
-									)}
-								</editOpportunityForm.Field>
-							</div>
+							{/* La empresa (agencia) solo aplica a vehículos nuevos y puede
+							    corregirse si quedó heredada o desactualizada. */}
+							{editedVehicleIsNew === true && (
+								<div>
+									<editOpportunityForm.Field name="companyId">
+										{(field) => (
+											<div className="space-y-2">
+												<Label htmlFor={field.name}>Empresa</Label>
+												<Combobox
+													options={[
+														{ value: "none", label: "Sin empresa" },
+														...(companiesQuery.data?.map((company) => ({
+															value: company.id,
+															label: company.name,
+														})) || []),
+													]}
+													value={field.state.value ?? "none"}
+													onChange={(value) =>
+														field.handleChange(value || "none")
+													}
+													placeholder="Seleccionar empresa"
+													width="full"
+													disabled={isWonLocked}
+												/>
+											</div>
+										)}
+									</editOpportunityForm.Field>
+								</div>
+							)}
 						</div>
 
 						<div className="grid grid-cols-2 gap-4">
@@ -3214,6 +3309,32 @@ function RouteComponent() {
 												onSearchChange={setVehiclesSearch}
 												isLoading={vehiclesQuery.isFetching}
 												placeholder="Buscar vehículo..."
+												width="full"
+												disabled={isWonLocked}
+											/>
+										</div>
+									)}
+								</editOpportunityForm.Field>
+							</div>
+
+							<div>
+								<editOpportunityForm.Field name="vendorId">
+									{(field) => (
+										<div className="space-y-2">
+											<Label htmlFor={field.name}>
+												Vendedor del Vehículo (opcional)
+											</Label>
+											<Combobox
+												options={[
+													{ value: "none", label: "Sin vendedor asignado" },
+													...(vendorsQuery.data?.map((vendor: any) => ({
+														value: vendor.id,
+														label: `${vendor.name}${vendor.vendorType === "empresa" ? ` (${vendor.companyName})` : ""} - ${vendor.dpi}`,
+													})) || []),
+												]}
+												value={field.state.value ?? "none"}
+												onChange={(value) => field.handleChange(value)}
+												placeholder="Seleccionar vendedor"
 												width="full"
 												disabled={isWonLocked}
 											/>

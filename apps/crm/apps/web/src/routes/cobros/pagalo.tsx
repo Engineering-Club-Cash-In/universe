@@ -5,7 +5,7 @@
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Loader2, RotateCcw } from "lucide-react";
+import { Loader2, RotateCcw, UserRound } from "lucide-react";
 import { useEffect, useState } from "react";
 import { GrupoLinksPorTipo } from "@/components/cobros/pagalo/chip-link-pagalo";
 import {
@@ -17,6 +17,13 @@ import { Pagination } from "@/components/cobros/pagination";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
 import {
 	Table,
 	TableBody,
@@ -89,7 +96,14 @@ type GrupoSupervision = {
 	createdAt: string | Date;
 	creadoPor: string | null;
 	clienteNombre: string | null;
+	asesoresNombres: string[];
 	links: LinkResumen[];
+};
+
+type AsesorPool = {
+	asesorId: number;
+	nombre: string;
+	buckets: number[];
 };
 
 function FilaGrupo({
@@ -103,47 +117,54 @@ function FilaGrupo({
 	return (
 		<TableRow>
 			<TableCell>
-				{grupo.casoCobroId && esSupervisor ? (
-					// /cobros/$id acepta el SIFCO directo cuando no es UUID de
-					// caso (resolverNumeroSifco, server) — un grupo con
-					// casoCobroId ya tiene un caso real detrás, así que
-					// navegar ahí es de solo lectura sobre algo que ya existe.
-					<Link
-						to="/cobros/$id"
-						params={{ id: grupo.numeroCreditoSifco }}
-						search={{ tipo: "caso" }}
-						className="font-medium text-violet-700 hover:underline"
-					>
-						{grupo.numeroCreditoSifco}
-					</Link>
-				) : (
-					// Un asesor ve grupos de sus buckets, pero el detalle de caso
-					// sigue protegido por responsableCobros. No exponer un enlace que
-					// terminaría en acceso denegado para créditos cubiertos por pool.
-					// Un grupo SIN casoCobroId (típicamente del bot) tampoco tiene
-					// caso de cobros detrás — /cobros/$id llama
-					// getDetallesCreditoCarteraBack, que si no encuentra un
-					// caso activo para el SIFCO CREA uno nuevo y lo asigna al
-					// usuario que solo quería mirar (cobros.ts, líneas ~4468-
-					// 4508). Navegar ahí desde la bandeja no era de solo
-					// lectura: el supervisor terminaba generándose trabajo
-					// operativo real con un click (hallazgo de code review).
-					// Sin link hasta que exista una vista de detalle
-					// realmente read-only para este caso.
-					<span
-						className="font-medium"
-						title={
-							grupo.casoCobroId
-								? "Este crédito se muestra por bucket; abrir el caso exige asignación directa."
-								: "Este grupo no tiene caso de cobros asociado — abrirlo crearía uno nuevo."
-						}
-					>
-						{grupo.numeroCreditoSifco}
-					</span>
-				)}
+				<div>
+					{grupo.casoCobroId && esSupervisor ? (
+						// /cobros/$id acepta el SIFCO directo cuando no es UUID de
+						// caso (resolverNumeroSifco, server) — un grupo con
+						// casoCobroId ya tiene un caso real detrás, así que
+						// navegar ahí es de solo lectura sobre algo que ya existe.
+						<Link
+							to="/cobros/$id"
+							params={{ id: grupo.numeroCreditoSifco }}
+							search={{ tipo: "caso" }}
+							className="font-medium text-violet-700 hover:underline"
+						>
+							{grupo.numeroCreditoSifco}
+						</Link>
+					) : (
+						// Un asesor ve grupos de sus buckets, pero el detalle de caso
+						// sigue protegido por responsableCobros. No exponer un enlace que
+						// terminaría en acceso denegado para créditos cubiertos por pool.
+						// Un grupo SIN casoCobroId (típicamente del bot) tampoco tiene
+						// caso de cobros detrás — /cobros/$id llama
+						// getDetallesCreditoCarteraBack, que si no encuentra un
+						// caso activo para el SIFCO CREA uno nuevo y lo asigna al
+						// usuario que solo quería mirar (cobros.ts, líneas ~4468-
+						// 4508). Navegar ahí desde la bandeja no era de solo
+						// lectura: el supervisor terminaba generándose trabajo
+						// operativo real con un click (hallazgo de code review).
+						// Sin link hasta que exista una vista de detalle
+						// realmente read-only para este caso.
+						<span
+							className="font-medium"
+							title={
+								grupo.casoCobroId
+									? "Este crédito se muestra por bucket; abrir el caso exige asignación directa."
+									: "Este grupo no tiene caso de cobros asociado — abrirlo crearía uno nuevo."
+							}
+						>
+							{grupo.numeroCreditoSifco}
+						</span>
+					)}
+				</div>
+				<div className="mt-1 text-muted-foreground text-xs">
+					{normalizarNombreCliente(grupo.clienteNombre) ?? "—"}
+				</div>
 			</TableCell>
 			<TableCell>
-				{normalizarNombreCliente(grupo.clienteNombre) ?? "—"}
+				{grupo.asesoresNombres.length > 0
+					? grupo.asesoresNombres.join(", ")
+					: "—"}
 			</TableCell>
 			<TableCell>
 				<Badge className={estadoInfo.className}>{estadoInfo.label}</Badge>
@@ -191,11 +212,14 @@ function PagaloSupervisionPage() {
 		[],
 	);
 	const [numeroSifco, setNumeroSifco] = useState("");
+	const [asesorSel, setAsesorSel] = useState("todos");
 	const [pagina, setPagina] = useState(1);
 	const queryClient = useQueryClient();
 
 	const puedeConsultar = !!userRole && PERMISSIONS.canAccessCobros(userRole);
 	const esSupervisor = !!userRole && PERMISSIONS.canAssignCobros(userRole);
+	const asesorId =
+		esSupervisor && asesorSel !== "todos" ? Number(asesorSel) : undefined;
 
 	// Sin chips de estado activos: mostrar TODO, no solo lo problemático — el
 	// filtro "problemático" por defecto queda reservado para cuando el
@@ -204,6 +228,7 @@ function PagaloSupervisionPage() {
 		estados: estados.length > 0 ? estados : undefined,
 		soloProblematicos: estados.length > 0,
 		numeroSifco: numeroSifco.trim() || undefined,
+		asesorId,
 		limit: POR_PAGINA,
 		offset,
 	});
@@ -213,6 +238,10 @@ function PagaloSupervisionPage() {
 			input: inputConsulta((pagina - 1) * POR_PAGINA),
 		}),
 		enabled: puedeConsultar,
+	});
+	const asesoresQuery = useQuery({
+		...orpc.getPagaloAsesores.queryOptions({ input: {} }),
+		enabled: esSupervisor,
 	});
 
 	// Una mutación (invalidar/regenerar) puede reducir `total` de forma que
@@ -256,6 +285,7 @@ function PagaloSupervisionPage() {
 		(supervisionQuery.data?.conteoPorEstado as
 			| Record<string, number>
 			| undefined) ?? {};
+	const asesores = (asesoresQuery.data as AsesorPool[] | undefined) ?? [];
 
 	const toggleEstado = (estado: string) => {
 		setPagina(1);
@@ -309,15 +339,47 @@ function PagaloSupervisionPage() {
 						</button>
 					);
 				})}
-				<Input
-					placeholder="Buscar por SIFCO…"
-					value={numeroSifco}
-					onChange={(e) => {
-						setNumeroSifco(e.target.value);
-						setPagina(1);
-					}}
-					className="ml-auto w-56"
-				/>
+				<div className="ml-auto flex flex-wrap items-center gap-2">
+					{esSupervisor && (
+						<Select
+							value={asesorSel}
+							onValueChange={(valor) => {
+								setAsesorSel(valor);
+								setPagina(1);
+							}}
+						>
+							<SelectTrigger className="w-56">
+								<UserRound className="mr-1 h-3.5 w-3.5 text-muted-foreground" />
+								<SelectValue placeholder="Asesor" />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="todos">Todos los asesores</SelectItem>
+								{asesoresQuery.isError && (
+									<div className="px-2 py-1.5 text-destructive text-xs">
+										No se pudo cargar asesores
+									</div>
+								)}
+								{asesores.map((asesor) => (
+									<SelectItem
+										key={asesor.asesorId}
+										value={String(asesor.asesorId)}
+									>
+										{asesor.nombre}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+					)}
+					<Input
+						placeholder="Buscar por SIFCO…"
+						value={numeroSifco}
+						onChange={(e) => {
+							setNumeroSifco(e.target.value);
+							setPagina(1);
+						}}
+						className="w-56"
+					/>
+				</div>
 			</div>
 
 			{supervisionQuery.isLoading ? (
@@ -346,8 +408,8 @@ function PagaloSupervisionPage() {
 					<Table>
 						<TableHeader>
 							<TableRow>
-								<TableHead>Crédito</TableHead>
-								<TableHead>Cliente</TableHead>
+								<TableHead>Crédito / Cliente</TableHead>
+								<TableHead>Asesor</TableHead>
 								<TableHead>Estado</TableHead>
 								<TableHead className="text-right">Total</TableHead>
 								<TableHead>Origen</TableHead>

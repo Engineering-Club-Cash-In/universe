@@ -20,3 +20,27 @@ export function buscarAsesorPorEmail<T extends AsesorPoolPagalo>(
 		) ?? null
 	);
 }
+
+export function buscarAsesorPorId<T extends AsesorPoolPagalo>(
+	asesores: readonly T[],
+	asesorId: number,
+): T | null {
+	return asesores.find((asesor) => asesor.asesor_id === asesorId) ?? null;
+}
+
+export function nombresAsesoresPorSifco(
+	asesores: readonly (AsesorPoolPagalo & { sifcos: readonly string[] })[],
+	sifcosPagina: readonly string[],
+): Map<string, string[]> {
+	const sifcosBuscados = new Set(sifcosPagina);
+	const nombres = new Map<string, string[]>();
+	for (const asesor of asesores) {
+		for (const sifco of asesor.sifcos) {
+			if (!sifcosBuscados.has(sifco)) continue;
+			const asignados = nombres.get(sifco) ?? [];
+			if (!asignados.includes(asesor.nombre)) asignados.push(asesor.nombre);
+			nombres.set(sifco, asignados);
+		}
+	}
+	return nombres;
+}

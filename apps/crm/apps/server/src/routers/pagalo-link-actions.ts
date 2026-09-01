@@ -39,6 +39,33 @@ import { assertAccesoCasoCobro } from "./cobros";
 
 const motivoSchema = z.string().trim().min(10).max(500);
 
+/**
+ * Estados desde los que un reintento de aplicación tiene sentido.
+ *
+ * El supervisor solo alcanza los dos donde ya hay evidencia completa y el
+ * comando es exactamente el mismo que el ciclo automático mandaría: reintentar
+ * ahí es el retry idempotente de D-13, sin decisión de por medio.
+ *
+ * El admin además puede forzar los dos que el ciclo automático nunca vuelve a
+ * tocar solo, porque justamente esperan que un humano decida:
+ *
+ * - `REVIEW_REQUIRED`: cartera ya evaluó el comando bajo lock y lo mandó a
+ *   revisión. Reintentar NO se salta esa evaluación —cartera la repite igual y
+ *   vuelve a rechazar si el motivo sigue vivo—, así que forzarlo solo sirve
+ *   para volver a preguntar después de haber arreglado la causa. Sigue vedado
+ *   al supervisor: la decisión de reintentar un caso ambiguo es de admin.
+ * - `APPLYING`: un proceso murió a mitad (deploy, crash) y el grupo quedó
+ *   colgado. Solo se permite con el lease ya vencido — mientras el dueño
+ *   anterior pueda seguir vivo, el que manda es su lease.
+ */
+const ESTADOS_REINTENTABLES_SUPERVISOR = new Set([
+	"APPLICATION_FAILED",
+	"READY_TO_APPLY",
+]);
+const ESTADOS_SOLO_ADMIN = new Set(["REVIEW_REQUIRED", "APPLYING"]);
+/** Mismo lease que usa el dispatcher (MINUTOS_LEASE en pagalo-dispatch.ts). */
+const MINUTOS_LEASE = 2;
+
 function traducirReemplazoInvalido(error: unknown): never {
 	if (error instanceof PagaloReemplazoInvalido) {
 		throw new ORPCError("CONFLICT", {
@@ -142,6 +169,7 @@ export const pagaloLinkActionsRouter = {
 				.select({
 					status: pagaloPaymentGroups.status,
 					dispatchAttemptCount: pagaloPaymentGroups.dispatchAttemptCount,
+					dispatchClaimedAt: pagaloPaymentGroups.dispatchClaimedAt,
 				})
 				.from(pagaloPaymentGroups)
 				.where(eq(pagaloPaymentGroups.id, input.groupId))
@@ -151,19 +179,38 @@ export const pagaloLinkActionsRouter = {
 					message: "Grupo Págalo no encontrado.",
 				});
 			}
-			if (grupo.status === "REVIEW_REQUIRED") {
-				throw new ORPCError("BAD_REQUEST", {
-					message:
-						"Un grupo en revisión no se reintenta: el comando es determinístico. Invalidá el grupo o resolvé en cartera.",
-				});
-			}
+			const esAdmin = PERMISSIONS.canAccessAdmin(context.userRole);
+			const forzadoPorAdmin = esAdmin && ESTADOS_SOLO_ADMIN.has(grupo.status);
 			if (
-				grupo.status !== "APPLICATION_FAILED" &&
-				grupo.status !== "READY_TO_APPLY"
+				!ESTADOS_REINTENTABLES_SUPERVISOR.has(grupo.status) &&
+				!forzadoPorAdmin
 			) {
+				if (grupo.status === "REVIEW_REQUIRED") {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"Un grupo en revisión no se reintenta: el comando es determinístico. Invalidá el grupo o resolvé en cartera.",
+					});
+				}
 				throw new ORPCError("BAD_REQUEST", {
 					message: `El grupo está en ${grupo.status}: no hay aplicación pendiente que reintentar.`,
 				});
+			}
+			// El lease manda mientras pueda haber un worker vivo del otro lado:
+			// limpiarlo antes de tiempo deja que dos procesos armen y manden el
+			// mismo comando a la vez. Es idempotente en cartera (D-13), pero el
+			// que pierde la carrera escribe su resultado tarde y confunde la
+			// bitácora, así que acá se espera el vencimiento igual que el
+			// dispatcher.
+			if (grupo.status === "APPLYING") {
+				const leaseVence = grupo.dispatchClaimedAt
+					? grupo.dispatchClaimedAt.getTime() + MINUTOS_LEASE * 60 * 1000
+					: 0;
+				if (leaseVence > Date.now()) {
+					throw new ORPCError("CONFLICT", {
+						message:
+							"El grupo se está aplicando en este momento. Esperá un par de minutos y recargá el historial.",
+					});
+				}
 			}
 			// El backoff normal (`nextDispatchAt`) sigue vigente para el ciclo
 			// automático; el supervisor lo salta a propósito, así que se limpia
@@ -218,10 +265,16 @@ export const pagaloLinkActionsRouter = {
 			await db.insert(pagaloPaymentEvents).values({
 				groupId: input.groupId,
 				eventType: "DISPATCH_RETRY_FORCED",
-				source: "SUPERVISOR",
+				// El reintento desde un estado que el ciclo automático no toca
+				// es una decisión de una persona con rol de admin: queda
+				// distinguido en la bitácora, no mezclado con el retry normal.
+				source: forzadoPorAdmin ? "ADMIN" : "SUPERVISOR",
 				actorUserId: context.userId,
 				fromStatus: grupo.status,
-				payload: { intentosPrevios: grupo.dispatchAttemptCount },
+				payload: {
+					intentosPrevios: grupo.dispatchAttemptCount,
+					...(forzadoPorAdmin ? { forzadoDesde: grupo.status } : {}),
+				},
 			});
 			return { resultado };
 		}),

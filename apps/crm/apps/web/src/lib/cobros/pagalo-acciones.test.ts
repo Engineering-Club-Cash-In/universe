@@ -40,20 +40,22 @@ describe("accionesDisponibles", () => {
 		});
 	});
 
-	test("COMPLETED/CANCELLED/DRAFT/READY_TO_APPLY/APPLYING: ninguna acción", () => {
-		for (const status of [
-			"COMPLETED",
-			"CANCELLED",
-			"DRAFT",
-			"READY_TO_APPLY",
-			"APPLYING",
-		]) {
+	test("COMPLETED/CANCELLED/DRAFT/APPLYING: ninguna acción para el supervisor", () => {
+		for (const status of ["COMPLETED", "CANCELLED", "DRAFT", "APPLYING"]) {
 			expect(accionesDisponibles(status, true)).toEqual({
 				invalidar: false,
 				regenerar: false,
 				reintentar: false,
 			});
 		}
+	});
+
+	test("READY_TO_APPLY: reintentar sí — el server siempre lo aceptó", () => {
+		// Un grupo con los dos links pagados esperando al dispatcher no tenía
+		// botón para empujarlo, aunque reintentarDispatchPagalo lo permite.
+		expect(accionesDisponibles("READY_TO_APPLY", true)).toMatchObject({
+			reintentar: true,
+		});
 	});
 
 	test("LINKS_PENDING/PENDING_PAYMENT: invalidar y regenerar sí, reintentar no", () => {
@@ -64,5 +66,49 @@ describe("accionesDisponibles", () => {
 				reintentar: false,
 			});
 		}
+	});
+
+	describe("forzar la aplicación (solo admin)", () => {
+		test("REVIEW_REQUIRED y APPLYING: el admin sí puede reintentar", () => {
+			for (const status of ["REVIEW_REQUIRED", "APPLYING"]) {
+				expect(accionesDisponibles(status, true, true)).toMatchObject({
+					reintentar: true,
+				});
+			}
+		});
+
+		test("un supervisor sin admin no los ve", () => {
+			for (const status of ["REVIEW_REQUIRED", "APPLYING"]) {
+				expect(accionesDisponibles(status, true, false)).toMatchObject({
+					reintentar: false,
+				});
+			}
+		});
+
+		test("ni siquiera el admin lo ve en un grupo cerrado o sin pago", () => {
+			// COMPLETED/CANCELLED no se tocan, y los estados sin evidencia
+			// completa harían fallar el armado del comando y mandarían un grupo
+			// sano a APPLICATION_FAILED.
+			for (const status of [
+				"COMPLETED",
+				"CANCELLED",
+				"DRAFT",
+				"LINKS_PENDING",
+				"PENDING_PAYMENT",
+				"PARTIALLY_PAID",
+			]) {
+				expect(accionesDisponibles(status, true, true)).toMatchObject({
+					reintentar: false,
+				});
+			}
+		});
+
+		test("el asesor no gana nada aunque le pasen esAdmin", () => {
+			expect(accionesDisponibles("REVIEW_REQUIRED", false, true)).toEqual({
+				invalidar: false,
+				regenerar: false,
+				reintentar: false,
+			});
+		});
 	});
 });

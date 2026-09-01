@@ -48,9 +48,38 @@ const ESTADOS_REGENERABLES = new Set<EstadoGrupoPagalo>([
 	"REVIEW_REQUIRED",
 ]);
 
+/**
+ * Estados donde reintentar la aplicación es el retry idempotente de siempre
+ * (D-13): hay evidencia completa y el comando es el mismo que mandaría el
+ * ciclo automático. `READY_TO_APPLY` estaba fuera de esta lista aunque el
+ * server siempre lo aceptó, así que un grupo que quedaba esperando el
+ * dispatcher no tenía botón para empujarlo.
+ */
+const ESTADOS_REINTENTABLES = new Set<EstadoGrupoPagalo>([
+	"APPLICATION_FAILED",
+	"READY_TO_APPLY",
+]);
+
+/**
+ * Los dos que el ciclo automático NO vuelve a tocar solo porque esperan a una
+ * persona: revisión de cartera, y un grupo colgado en APPLYING por un proceso
+ * que murió. Forzarlos es decisión de admin (el server exige lo mismo, y en
+ * APPLYING además que el lease esté vencido).
+ */
+const ESTADOS_FORZABLES_ADMIN = new Set<EstadoGrupoPagalo>([
+	"REVIEW_REQUIRED",
+	"APPLYING",
+]);
+
+/**
+ * `esAdmin` no se pregunta aparte de `esSupervisor` por jerarquía: el admin ya
+ * pasa `canAssignCobros`, así que siempre llega acá como supervisor también.
+ * Sirve solo para abrir los dos estados forzables.
+ */
 export function accionesDisponibles(
 	status: string,
 	esSupervisor: boolean,
+	esAdmin = false,
 ): AccionesDisponibles {
 	if (!esSupervisor)
 		return { invalidar: false, regenerar: false, reintentar: false };
@@ -58,6 +87,13 @@ export function accionesDisponibles(
 	return {
 		invalidar: ESTADOS_INVALIDABLES.has(estado),
 		regenerar: ESTADOS_REGENERABLES.has(estado),
-		reintentar: estado === "APPLICATION_FAILED",
+		reintentar:
+			ESTADOS_REINTENTABLES.has(estado) ||
+			(esAdmin && ESTADOS_FORZABLES_ADMIN.has(estado)),
 	};
+}
+
+/** ¿Este reintento es de los que solo un admin puede disparar? */
+export function esReintentoForzado(status: string, esAdmin: boolean): boolean {
+	return esAdmin && ESTADOS_FORZABLES_ADMIN.has(status as EstadoGrupoPagalo);
 }

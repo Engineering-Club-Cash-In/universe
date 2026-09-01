@@ -39,6 +39,7 @@ import {
 import { facturableSinOtrosGTQ } from "@/lib/cobros/pagalo-otros";
 import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
+import { AccionesSupervisorPagalo } from "./pagalo/acciones-supervisor-pagalo";
 import { BitacoraPagalo, type EventoPagalo } from "./pagalo/bitacora-pagalo";
 import { AccionesLinkPagalo } from "./pagalo/chip-link-pagalo";
 import {
@@ -360,6 +361,19 @@ function GrupoPagalo({
 					<LinksPorCuota casoCobroId={casoCobroId} groupId={grupo.id} />
 				</CollapsibleContent>
 			</Collapsible>
+			{/* Las acciones de grupo se escribieron para vivir acá (CB-127) pero
+			    nunca se montaron: un grupo con los links pagados esperando al
+			    dispatcher no tenía desde dónde empujarse. El propio componente
+			    decide qué mostrar según el estado y el rol, y devuelve null si
+			    no hay nada que ofrecer. `carteraCreditoId` puede venir null en
+			    grupos viejos: solo se usa para invalidar la query del grupo
+			    activo, así que se cae a 0 en vez de esconder las acciones. */}
+			<AccionesSupervisorPagalo
+				casoCobroId={casoCobroId}
+				creditoId={grupo.carteraCreditoId ?? 0}
+				groupId={grupo.id}
+				status={grupo.status}
+			/>
 			<BitacoraPagalo
 				eventos={grupo.eventos}
 				esSupervisor={esSupervisor}

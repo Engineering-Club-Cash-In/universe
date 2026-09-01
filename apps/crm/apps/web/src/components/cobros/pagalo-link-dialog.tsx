@@ -603,8 +603,9 @@ export function PagaloLinkDialog({
 															)}
 														</span>
 														<span className="mt-1 block text-muted-foreground text-xs">
-															Capital {q(cuota.capital_restante)} · Mora e
-															intereses {q(facturableCuota)}
+															Capital {q(cuota.capital_restante)} ·{" "}
+															{tieneMora ? "Mora e intereses" : "Intereses"}{" "}
+															{q(facturableCuota)}
 														</span>
 														{yaAbonado > 0.01 && (
 															<span className="mt-0.5 block text-muted-foreground text-xs">
@@ -687,7 +688,11 @@ export function PagaloLinkDialog({
 										)}
 										{preview.facturable > 0 && (
 											<div className="flex items-center justify-between">
-												<span>Link Mora e intereses</span>
+												<span>
+													{tieneMora
+														? "Link Mora e intereses"
+														: "Link Intereses"}
+												</span>
 												<span className="tabular-nums">
 													{q(preview.facturable)}
 												</span>

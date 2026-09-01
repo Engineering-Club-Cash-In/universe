@@ -6,6 +6,7 @@ import {
   calcularCuotasConvenioCompletadas,
   capitalSuprimidoPorConvenio,
   calcularSaldoNetoCuota,
+  cuentaComoHermanoVivo,
   debeProcesarConvenio,
   debeRechazarAbonoCapitalNoAplicado,
   esDestinoSobrescribible,
@@ -409,8 +410,63 @@ describe("regresión: mora/otros no debe colapsar el saldo de la cuota", () => {
 // `allExistingPagos[0]` = la fila REAL más vieja. El cierre hacía UPDATE sobre
 // esa fila, BORRANDO un pago de interés validado/facturado. El fix: el cierre
 // solo puede UPDATE-ar un destino realmente desechable; si no, INSERTA fila nueva.
+// Contraparte del guard: si el cierre se niega a pisar una fila porque lleva
+// plata, esa plata TIENE que entrar al neteo de la cuota. La query de hermanos
+// solo miraba validated/pending, así que una `no_required` protegida quedaba
+// invisible y el pago nuevo re-aplicaba la cuota completa encima (sobre-cobro).
+describe("cuentaComoHermanoVivo", () => {
+  it("cuenta un pago validated", () => {
+    expect(
+      cuentaComoHermanoVivo({ validationStatus: "validated", monto_aplicado: "1000" })
+    ).toBe(true);
+  });
+
+  it("cuenta un pago pending", () => {
+    expect(
+      cuentaComoHermanoVivo({ validationStatus: "pending", monto_aplicado: "500" })
+    ).toBe(true);
+  });
+
+  it("cuenta un no_required CON plata (crédito 890 / cuota 12)", () => {
+    expect(
+      cuentaComoHermanoVivo({
+        validationStatus: "no_required",
+        monto_aplicado: "705.88",
+        abono_interes: "705.88",
+      })
+    ).toBe(true);
+  });
+
+  it("NO cuenta la semilla virgen de SIFCO, ni con membresias_pago sembrado", () => {
+    // Contarla inflaría `membresiasPrevioCuota` y el motor daría por cobradas
+    // unas membresías que nadie pagó.
+    expect(
+      cuentaComoHermanoVivo({
+        validationStatus: "no_required",
+        monto_aplicado: "0",
+        abono_capital: "0",
+        abono_interes: "0",
+        membresias_pago: "461.63",
+      })
+    ).toBe(false);
+  });
+
+  it("es el reverso exacto de esDestinoSobrescribible en las filas no_required", () => {
+    const filas = [
+      { validationStatus: "no_required", monto_aplicado: "0", membresias_pago: "461.63" },
+      { validationStatus: "no_required", monto_aplicado: "705.88", abono_interes: "705.88" },
+      { validationStatus: "no_required", monto_aplicado: "0", mora: "150.00" },
+    ];
+    for (const fila of filas) {
+      expect(cuentaComoHermanoVivo(fila)).toBe(!esDestinoSobrescribible(fila));
+    }
+  });
+});
+
 describe("esDestinoSobrescribible", () => {
-  it("el placeholder no_required SIEMPRE es sobrescribible (aunque trajera saldos)", () => {
+  it("el placeholder no_required VACÍO sigue siendo sobrescribible", () => {
+    // Es el caso normal: la fila sembrada desde SIFCO solo porta los
+    // `*_restante` (que esta función ni mira) y no tiene plata en ningún bucket.
     expect(
       esDestinoSobrescribible({
         validationStatus: "no_required",
@@ -419,6 +475,72 @@ describe("esDestinoSobrescribible", () => {
         abono_interes: "0",
       })
     ).toBe(true);
+  });
+
+  it("un no_required CON plata aplicada NO es sobrescribible (crédito 890 / cuota 12)", () => {
+    // 01-sep-2026: la fila 136221 seguía en `no_required` porque nadie vuelve a
+    // tocar ese status, pero Caja la había llenado con /editPayment y aplicado:
+    // Q705.88 de interés, ya facturados en 2 DTEs. El atajo por status la daba
+    // por desechable, así que el registro de otra boleta contra la cuota 12 la
+    // sobrescribió — se perdió el pago y las facturas quedaron sin respaldo.
+    expect(
+      esDestinoSobrescribible({
+        validationStatus: "no_required",
+        monto_aplicado: "705.88",
+        abono_capital: "0",
+        abono_interes: "705.88",
+        abono_iva_12: "0",
+        abono_seguro: "0",
+        abono_gps: "0",
+        membresias_pago: "0",
+      })
+    ).toBe(false);
+  });
+
+  it("un no_required VIRGEN de SIFCO (con membresias_pago sembrado) SIGUE siendo sobrescribible", () => {
+    // migratePayments.ts:568 siembra el placeholder con
+    // `membresias_pago = membresias` aunque nadie haya pagado nada. Medido en
+    // prod: 181 filas / 4 créditos en cuotas abiertas (crédito 899, cuotas
+    // 17-24, Q461.63). Si contáramos ese bucket, el cierre dejaría de pisarlas
+    // e insertaría una fila extra por cuota → membresías duplicadas en los
+    // reportes.
+    expect(
+      esDestinoSobrescribible({
+        validationStatus: "no_required",
+        monto_aplicado: "0",
+        abono_capital: "0",
+        abono_interes: "0",
+        abono_iva_12: "0",
+        abono_seguro: "0",
+        abono_gps: "0",
+        membresias_pago: "461.63",
+      })
+    ).toBe(true);
+  });
+
+  it("la excepción de membresias_pago es SOLO para no_required", () => {
+    // En cualquier otro status ese bucket solo lo escribe un pago real.
+    expect(
+      esDestinoSobrescribible({
+        validationStatus: "validated",
+        monto_aplicado: "0",
+        abono_capital: "0",
+        abono_interes: "0",
+        membresias_pago: "461.63",
+      })
+    ).toBe(false);
+  });
+
+  it("un no_required con plata SOLO en mora tampoco es sobrescribible", () => {
+    expect(
+      esDestinoSobrescribible({
+        validationStatus: "no_required",
+        monto_aplicado: "0",
+        abono_capital: "0",
+        abono_interes: "0",
+        mora: "795.48",
+      })
+    ).toBe(false);
   });
 
   it("una fila vacía (monto_aplicado≈0 y todos los abono_* ≈0) es sobrescribible", () => {

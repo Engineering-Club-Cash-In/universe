@@ -436,7 +436,7 @@ export async function desactivarMoraSiCreditoAlDia(
         statusCredit: creditos.statusCredit,
         hasPaidPayment: sql<boolean>`EXISTS (
           SELECT 1
-          FROM cartera.pagos_credito pc
+          FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pc
           WHERE pc.cuota_id = ${cuotas_credito.cuota_id}
             AND pc."paymentFalse" = false
             AND pc.pagado = true

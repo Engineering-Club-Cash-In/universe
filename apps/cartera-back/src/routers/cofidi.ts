@@ -2143,7 +2143,7 @@ if (facturasExistentes.length > 0) {
           // Si ya existe el reparto real (cuota completa), ESE manda: no se congela.
           const pciRes = await db.execute(sql`
             SELECT COUNT(*)::int AS n
-            FROM cartera.pagos_credito_inversionistas
+            FROM ${SQL_CARTERA_SCHEMA}.pagos_credito_inversionistas
             WHERE pago_id = ${pago_id}
           `);
           const hayPci = Number((pciRes as any).rows?.[0]?.n ?? 0) > 0;
@@ -2152,7 +2152,7 @@ if (facturasExistentes.length > 0) {
           // (calcularFactoresProrrateoInteresV2), no por monto_aportado.
           const compraRes = await db.execute(sql`
             SELECT COUNT(*)::int AS n
-            FROM cartera.compras_credito_inversionista
+            FROM ${SQL_CARTERA_SCHEMA}.compras_credito_inversionista
             WHERE credito_id = ${creditoIdPago}
               AND pendiente_facturar = true
               AND tipo_operacion = 'compra_cartera'
@@ -2211,7 +2211,7 @@ if (facturasExistentes.length > 0) {
               // que ya no participan. Mismo patrón que facturacion_desglose.
               await db.transaction(async (tx) => {
                 await tx.execute(
-                  sql`DELETE FROM cartera.pagos_credito_inversionistas_facturado WHERE pago_id = ${pago_id}`
+                  sql`DELETE FROM ${SQL_CARTERA_SCHEMA}.pagos_credito_inversionistas_facturado WHERE pago_id = ${pago_id}`
                 );
                 await tx
                   .insert(pagos_credito_inversionistas_facturado)
@@ -2778,10 +2778,10 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
       try {
         if (facturaAnulada.pago_id != null) {
           await db.execute(sql`
-            DELETE FROM cartera.pagos_credito_inversionistas_facturado
+            DELETE FROM ${SQL_CARTERA_SCHEMA}.pagos_credito_inversionistas_facturado
             WHERE pago_id = ${facturaAnulada.pago_id}
               AND NOT EXISTS (
-                SELECT 1 FROM cartera.facturas_electronicas fe
+                SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.facturas_electronicas fe
                 WHERE fe.pago_id = ${facturaAnulada.pago_id}
                   AND fe.status = 'ACTIVA'
               )

@@ -1,3 +1,5 @@
+import { CARTERA_SCHEMA } from "../database/db/schema";
+
 export const participacionExternaActualCteSql = `
     participacion_externa_actual_base AS (
       SELECT
@@ -17,12 +19,12 @@ export const participacionExternaActualCteSql = `
           ) FILTER (WHERE i.permite_distribucion = false), 0)
             / SUM(ci.monto_aportado::numeric)
           ELSE 0 END AS factor_interes_iva_inversionista
-      FROM cartera.creditos_inversionistas ci
-      INNER JOIN cartera.inversionistas i ON i.inversionista_id = ci.inversionista_id
-      LEFT JOIN cartera.creditos_inversionistas_espejo ces
+      FROM ${CARTERA_SCHEMA}.creditos_inversionistas ci
+      INNER JOIN ${CARTERA_SCHEMA}.inversionistas i ON i.inversionista_id = ci.inversionista_id
+      LEFT JOIN ${CARTERA_SCHEMA}.creditos_inversionistas_espejo ces
         ON ces.credito_id = ci.credito_id
         AND ces.inversionista_id = ci.inversionista_id
-      LEFT JOIN cartera.modalidad_facturacion_spread mfs
+      LEFT JOIN ${CARTERA_SCHEMA}.modalidad_facturacion_spread mfs
         ON mfs.id = ces.modalidad_facturacion_spread_id
       GROUP BY ci.credito_id
     ),
@@ -38,13 +40,13 @@ export const participacionExternaActualCteSql = `
             )
           ELSE 0 END AS interes_factor_numerador,
         base.total_aportado
-      FROM cartera.creditos_inversionistas ci
-      INNER JOIN cartera.inversionistas i ON i.inversionista_id = ci.inversionista_id
+      FROM ${CARTERA_SCHEMA}.creditos_inversionistas ci
+      INNER JOIN ${CARTERA_SCHEMA}.inversionistas i ON i.inversionista_id = ci.inversionista_id
       INNER JOIN participacion_externa_actual_base base ON base.credito_id = ci.credito_id
-      LEFT JOIN cartera.creditos_inversionistas_espejo ces
+      LEFT JOIN ${CARTERA_SCHEMA}.creditos_inversionistas_espejo ces
         ON ces.credito_id = ci.credito_id
         AND ces.inversionista_id = ci.inversionista_id
-      LEFT JOIN cartera.modalidad_facturacion_spread mfs
+      LEFT JOIN ${CARTERA_SCHEMA}.modalidad_facturacion_spread mfs
         ON mfs.id = ces.modalidad_facturacion_spread_id
       WHERE i.permite_distribucion = false
     ),

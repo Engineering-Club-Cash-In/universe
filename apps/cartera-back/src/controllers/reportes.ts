@@ -1,9 +1,6 @@
 import { sql } from "drizzle-orm";
-<<<<<<< HEAD
 import { SQL_CARTERA_SCHEMA } from "../database/db/schema";
-=======
 import Big from "big.js";
->>>>>>> origin/develop
 import { db } from "../database";
 import {
 	type MoraRecoverySourceRow,
@@ -162,18 +159,7 @@ export async function getMontoACobrarPeriodo({
         AND pc.fecha_vencimiento::date >= ${fechaInicio}::date
         AND pc.fecha_vencimiento::date <= ${fechaFin}::date
     ),
-<<<<<<< HEAD
-    participacion_externa_actual AS (
-      SELECT
-        ci.credito_id,
-        COALESCE(SUM(ci.porcentaje_participacion_inversionista::numeric / 100) FILTER (WHERE i.permite_distribucion = false), 0) AS participacion_externa_actual
-      FROM ${SQL_CARTERA_SCHEMA}.creditos_inversionistas ci
-      INNER JOIN ${SQL_CARTERA_SCHEMA}.inversionistas i ON i.inversionista_id = ci.inversionista_id
-      GROUP BY ci.credito_id
-    ),
-=======
     ${sql.raw(participacionExternaActualCteSql)},
->>>>>>> origin/develop
     per_credito AS (
       SELECT
         p.fecha_venc::date                                             AS bucket,
@@ -830,7 +816,7 @@ export async function getReinversionLiquidaciones({
   const result = await db.execute(sql`
     WITH liquidaciones_mes AS (
       SELECT l.*
-      FROM cartera.liquidaciones l
+      FROM ${SQL_CARTERA_SCHEMA}.liquidaciones l
       WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
         AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
     ),
@@ -839,7 +825,7 @@ export async function getReinversionLiquidaciones({
         h.liquidacion_id,
         h.credito_id,
         MIN(h.tipo_reinversion_snapshot::text) AS tipo
-      FROM cartera.historico_liquidaciones_espejo h
+      FROM ${SQL_CARTERA_SCHEMA}.historico_liquidaciones_espejo h
       JOIN liquidaciones_mes l ON l.liquidacion_id = h.liquidacion_id
       GROUP BY h.liquidacion_id, h.credito_id
     ),
@@ -859,7 +845,7 @@ export async function getReinversionLiquidaciones({
             END
         ), 0) AS peso_flujo
       FROM liquidaciones_mes l
-      JOIN cartera.pagos_credito_inversionistas_espejo pe
+      JOIN ${SQL_CARTERA_SCHEMA}.pagos_credito_inversionistas_espejo pe
         ON pe.liquidacion_id = l.liquidacion_id
       LEFT JOIN snapshots s
         ON s.liquidacion_id = pe.liquidacion_id
@@ -980,27 +966,6 @@ export async function getReinversionLiquidaciones({
       FROM asignacion_residual r
     )
     SELECT
-<<<<<<< HEAD
-      COALESCE(i.tipo_reinversion::text, 'sin_reinversion') AS tipo,
-      COALESCE(SUM(l.reinversion_capital::numeric), 0)      AS reinversion_capital,
-      COALESCE(SUM(l.reinversion_interes::numeric), 0)      AS reinversion_interes,
-      COALESCE(SUM(l.reinversion_total::numeric), 0)        AS reinversion_total,
-      COALESCE(SUM(l.total_capital::numeric), 0)            AS total_capital,
-      COALESCE(SUM(l.total_interes::numeric), 0)            AS total_interes,
-      COALESCE(SUM(l.total_iva::numeric), 0)                AS total_iva,
-      0                                                     AS iva_facturado,
-      COALESCE(SUM(l.total_isr::numeric), 0)                AS total_isr,
-      COALESCE(SUM(l.total_cuota::numeric), 0)              AS total_cuota,
-      COALESCE(SUM(
-        l.total_cuota::numeric + l.reinversion_total::numeric
-      ), 0)                                                 AS total_distribuido,
-      COUNT(*)::int                                          AS cantidad
-    FROM ${SQL_CARTERA_SCHEMA}.liquidaciones l
-    JOIN ${SQL_CARTERA_SCHEMA}.inversionistas i ON l.inversionista_id = i.inversionista_id
-    WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
-      AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
-    GROUP BY i.tipo_reinversion
-=======
       f.tipo,
       COALESCE(SUM(f.reinversion_capital_modo), 0) AS reinversion_capital,
       COALESCE(SUM(f.reinversion_interes_modo), 0) AS reinversion_interes,
@@ -1016,7 +981,6 @@ export async function getReinversionLiquidaciones({
       (SELECT COUNT(*)::int FROM liquidaciones_mes) AS cantidad_total
     FROM asignacion_final f
     GROUP BY f.tipo
->>>>>>> origin/develop
   `);
 
   const porTipo: Record<
@@ -1205,16 +1169,10 @@ export async function getReinversionLiquidaciones({
       COALESCE(SUM(l.reinversion_capital::numeric), 0) AS reinversion_capital,
       COALESCE(SUM(l.reinversion_interes::numeric), 0) AS reinversion_interes,
       COALESCE(SUM(l.reinversion_total::numeric), 0)   AS reinversion,
-<<<<<<< HEAD
-      COALESCE(SUM(l.total_cuota::numeric), 0)         AS a_recibir
-    FROM ${SQL_CARTERA_SCHEMA}.liquidaciones l
-    JOIN ${SQL_CARTERA_SCHEMA}.inversionistas i ON l.inversionista_id = i.inversionista_id
-=======
       COALESCE(SUM(l.total_cuota::numeric), 0)         AS a_recibir,
       COALESCE(SUM(l.total_capital::numeric), 0)       AS total_capital
-    FROM cartera.liquidaciones l
-    JOIN cartera.inversionistas i ON l.inversionista_id = i.inversionista_id
->>>>>>> origin/develop
+    FROM ${SQL_CARTERA_SCHEMA}.liquidaciones l
+    JOIN ${SQL_CARTERA_SCHEMA}.inversionistas i ON l.inversionista_id = i.inversionista_id
     WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
       AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
     GROUP BY l.inversionista_id, i.nombre
@@ -1308,7 +1266,7 @@ export async function getReinversionLiquidaciones({
       COALESCE(c.tipo_reinversion::text, 'sin_reinversion') AS tipo_reinversion,
       c.tipo_compra::text AS tipo_compra,
       c.monto_aportado AS monto
-    FROM cartera.compras_credito_inversionista c
+    FROM ${SQL_CARTERA_SCHEMA}.compras_credito_inversionista c
     WHERE ${comprasMesPredicate}
     ORDER BY ${fechaCompra}, c.id
   `);
@@ -1332,18 +1290,11 @@ export async function getReinversionLiquidaciones({
       c.tipo_compra::text AS tipo_compra,
       COUNT(*)::int AS cantidad,
       COALESCE(SUM(c.monto_aportado::numeric), 0) AS monto
-<<<<<<< HEAD
     FROM ${SQL_CARTERA_SCHEMA}.compras_credito_inversionista c
-    WHERE ${comprasMesPredicate}
-    GROUP BY COALESCE(c.tipo_reinversion::text, 'sin_reinversion')
-    ORDER BY monto DESC
-=======
-    FROM cartera.compras_credito_inversionista c
     WHERE c.tipo_operacion = 'compra_cartera'
       AND c.status = 'completado'
     GROUP BY periodo, c.tipo_compra
     ORDER BY periodo
->>>>>>> origin/develop
   `);
   const ticketInversion = buildPurchaseTicketHistory(
     (ticketRows.rows as Record<string, unknown>[]).map((r) => ({
@@ -1358,15 +1309,6 @@ export async function getReinversionLiquidaciones({
     `${anio}-${String(mes).padStart(2, "0")}`,
   );
 
-<<<<<<< HEAD
-  let detalleInteresNeto: (
-    | ReturnType<typeof buildNetInterestDetail>
-    | (Omit<ReturnType<typeof buildNetInterestDetail>, "tratamiento_fiscal"> & {
-        tratamiento_fiscal: "cube";
-        neto: string;
-      })
-  )[] = [];
-=======
   let detalleInteresNeto: Array<
     | ReturnType<typeof buildNetInterestDetail>
     | {
@@ -1380,7 +1322,6 @@ export async function getReinversionLiquidaciones({
         neto: string;
       }
   > = [];
->>>>>>> origin/develop
   let detallePagosExtras: {
     fecha: string;
     credito: string;
@@ -1409,8 +1350,8 @@ export async function getReinversionLiquidaciones({
       l.total_interes AS interes,
       l.total_iva AS iva,
       l.total_isr AS isr
-    FROM cartera.liquidaciones l
-    JOIN cartera.inversionistas i ON i.inversionista_id = l.inversionista_id
+    FROM ${SQL_CARTERA_SCHEMA}.liquidaciones l
+    JOIN ${SQL_CARTERA_SCHEMA}.inversionistas i ON i.inversionista_id = l.inversionista_id
     WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
       AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
     ORDER BY i.nombre, l.liquidacion_id
@@ -1446,9 +1387,9 @@ export async function getReinversionLiquidaciones({
       cr.numero_credito_sifco AS credito,
       CASE WHEN a.tipo = 'CAPITAL' THEN 'abono_capital' ELSE 'cancelacion' END AS tipo,
       a.monto
-    FROM cartera.abonos_capital a
-    JOIN cartera.liquidaciones l ON l.liquidacion_id = a.liquidacion_id
-    JOIN cartera.creditos cr ON cr.credito_id = a.credito_id
+    FROM ${SQL_CARTERA_SCHEMA}.abonos_capital a
+    JOIN ${SQL_CARTERA_SCHEMA}.liquidaciones l ON l.liquidacion_id = a.liquidacion_id
+    JOIN ${SQL_CARTERA_SCHEMA}.creditos cr ON cr.credito_id = a.credito_id
     WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
       AND (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
     ORDER BY l.fecha_liquidacion, cr.numero_credito_sifco
@@ -1468,10 +1409,10 @@ export async function getReinversionLiquidaciones({
       SUM(pe.abono_capital::numeric) AS monto,
       COALESCE(MAX(ce.monto_aportado::numeric), 0) AS monto_aportado,
       bool_and(ce.id IS NULL) AS sin_fila
-    FROM cartera.pagos_credito_inversionistas_espejo pe
-    JOIN cartera.liquidaciones l ON l.liquidacion_id = pe.liquidacion_id
-    JOIN cartera.creditos cr ON cr.credito_id = pe.credito_id
-    LEFT JOIN cartera.creditos_inversionistas_espejo ce
+    FROM ${SQL_CARTERA_SCHEMA}.pagos_credito_inversionistas_espejo pe
+    JOIN ${SQL_CARTERA_SCHEMA}.liquidaciones l ON l.liquidacion_id = pe.liquidacion_id
+    JOIN ${SQL_CARTERA_SCHEMA}.creditos cr ON cr.credito_id = pe.credito_id
+    LEFT JOIN ${SQL_CARTERA_SCHEMA}.creditos_inversionistas_espejo ce
       ON ce.credito_id = pe.credito_id
      AND ce.inversionista_id = pe.inversionista_id
     WHERE (l.fecha_liquidacion AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
@@ -1507,8 +1448,8 @@ export async function getReinversionLiquidaciones({
       COALESCE(c.tipo_reinversion::text, 'sin_reinversion') AS tipo_reinversion,
       c.tipo_compra::text AS tipo_compra,
       c.monto_aportado AS monto
-    FROM cartera.compras_credito_inversionista c
-    JOIN cartera.inversionistas i ON i.inversionista_id = c.inversionista_id
+    FROM ${SQL_CARTERA_SCHEMA}.compras_credito_inversionista c
+    JOIN ${SQL_CARTERA_SCHEMA}.inversionistas i ON i.inversionista_id = c.inversionista_id
     WHERE ${comprasMesPredicate}
     ORDER BY ${fechaCompra}, i.nombre
   `);
@@ -1867,15 +1808,9 @@ export async function getMoraByEtapaYAsesor({
         COALESCE(SUM(c.capital::numeric), 0) AS suma_capital,
         COALESCE(SUM(m.monto_mora::numeric), 0) AS suma_mora
       FROM mora_activa m
-<<<<<<< HEAD
       INNER JOIN ${SQL_CARTERA_SCHEMA}.creditos c ON c.credito_id = m.credito_id
       INNER JOIN ${SQL_CARTERA_SCHEMA}.asesores a ON a.asesor_id  = c.asesor_id
-      WHERE c."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
-=======
-      INNER JOIN cartera.creditos c ON c.credito_id = m.credito_id
-      INNER JOIN cartera.asesores a ON a.asesor_id  = c.asesor_id
       WHERE c."statusCredit" IN (${creditosElegiblesMoraSql})
->>>>>>> origin/develop
         ${emailFilter}
         ${asesoresFilter}
       GROUP BY a.asesor_id, a.nombre, a.email_cash_in, bucket

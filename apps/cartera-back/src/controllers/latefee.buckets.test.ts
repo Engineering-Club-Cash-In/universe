@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
+import { lockPoolMock } from "../utils/testMocks";
 
 /**
  * Archivo separado de `latefee.test.ts` a propósito: aquel prueba el cálculo de
@@ -96,7 +97,7 @@ const fakeClient: any = {
   }),
 };
 
-mock.module("../database", () => ({ db: fakeDb, client: fakeClient }));
+mock.module("../database", () => ({ db: fakeDb, client: fakeClient, lockPool: lockPoolMock }));
 
 const {
   procesarMoras,

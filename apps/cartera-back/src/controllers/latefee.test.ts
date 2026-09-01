@@ -1,8 +1,10 @@
 import { describe, expect, it, mock } from "bun:test";
+import { lockPoolMock } from "../utils/testMocks";
 
 mock.module("../database", () => ({
   db: {},
   client: {},
+  lockPool: lockPoolMock,
 }));
 
 const { isOverdueInstallmentForMora, decidirLimpiezaMoraTrasAplicar } =

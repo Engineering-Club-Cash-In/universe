@@ -1,4 +1,5 @@
 import { describe, expect, it, mock, beforeEach } from "bun:test";
+import { lockPoolMock } from "../utils/testMocks";
 
 // ============================================================================
 // Fake db para desactivarMoraSiCreditoAlDia
@@ -84,7 +85,7 @@ const fakeDb = {
   }),
 };
 
-mock.module("../database", () => ({ db: {}, client: {} }));
+mock.module("../database", () => ({ db: {}, client: {}, lockPool: lockPoolMock }));
 
 const { desactivarMoraSiCreditoAlDia } = await import("./latefee");
 const { moras_credito, creditos, moras_historial } = await import(

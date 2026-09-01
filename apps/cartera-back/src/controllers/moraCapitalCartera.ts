@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import { SQL_CARTERA_SCHEMA } from "../database/db/schema";
 
 export const creditosElegiblesMoraSql = sql.raw("'ACTIVO', 'MOROSO'");
 
@@ -17,8 +18,8 @@ export function buildCapitalCarteraQuery(
     WITH cartera_filtrada AS (
       SELECT DISTINCT c.credito_id, c.capital::numeric AS capital,
         a.asesor_id, a.nombre, a.email_cash_in AS email_asesor
-      FROM cartera.creditos c
-      INNER JOIN cartera.asesores a ON a.asesor_id = c.asesor_id
+      FROM ${SQL_CARTERA_SCHEMA}.creditos c
+      INNER JOIN ${SQL_CARTERA_SCHEMA}.asesores a ON a.asesor_id = c.asesor_id
       WHERE c."statusCredit" IN (${creditosElegiblesMoraSql})
         ${emailFilter}
         ${asesoresFilter}

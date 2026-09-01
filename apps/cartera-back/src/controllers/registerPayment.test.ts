@@ -7,6 +7,7 @@ import {
   capitalSuprimidoPorConvenio,
   calcularSaldoNetoCuota,
   cuentaComoHermanoVivo,
+  normalizarHermanoParaNeteo,
   debeProcesarConvenio,
   debeRechazarAbonoCapitalNoAplicado,
   esDestinoSobrescribible,
@@ -460,6 +461,50 @@ describe("cuentaComoHermanoVivo", () => {
     for (const fila of filas) {
       expect(cuentaComoHermanoVivo(fila)).toBe(!esDestinoSobrescribible(fila));
     }
+  });
+});
+
+// Codex P1 (PR #1519): la fila MIXTA — semilla de SIFCO que después absorbió
+// plata real — entraba al neteo arrastrando su `membresias_pago` sembrado, y
+// `sumarAplicadoACuota`/`membresiasPrevioCuota` lo contaban como cobrado.
+describe("normalizarHermanoParaNeteo", () => {
+  it("cero la membresía sembrada de una fila no_required MIXTA", () => {
+    const fila = {
+      validationStatus: "no_required",
+      monto_aplicado: "100.00",
+      abono_interes: "100.00",
+      membresias_pago: "461.63",
+    };
+    expect(normalizarHermanoParaNeteo(fila).membresias_pago).toBe("0");
+    // los rubros reales se conservan intactos
+    expect(normalizarHermanoParaNeteo(fila).abono_interes).toBe("100.00");
+  });
+
+  it("no toca la membresía de un pago validated (ahí sí es real)", () => {
+    const fila = {
+      validationStatus: "validated",
+      monto_aplicado: "506.41",
+      membresias_pago: "506.41",
+    };
+    expect(normalizarHermanoParaNeteo(fila).membresias_pago).toBe("506.41");
+  });
+
+  it("no muta la fila original", () => {
+    const fila = {
+      validationStatus: "no_required",
+      membresias_pago: "461.63",
+    };
+    normalizarHermanoParaNeteo(fila);
+    expect(fila.membresias_pago).toBe("461.63");
+  });
+
+  it("una fila no_required neteada no aporta membresías a la cuota", () => {
+    // El efecto que importa: sumarAplicadoACuota ya no ve el monto fantasma.
+    const hermanos = [
+      { validationStatus: "no_required", abono_interes: "100.00", membresias_pago: "461.63" },
+      { validationStatus: "validated", abono_interes: "0", membresias_pago: "506.41" },
+    ].map(normalizarHermanoParaNeteo);
+    expect(sumarAplicadoACuota(hermanos).toString()).toBe("606.41");
   });
 });
 

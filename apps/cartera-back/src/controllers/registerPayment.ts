@@ -54,6 +54,7 @@ import {
   sumarAplicadoACuota,
   pagoSchema,
   cuentaComoHermanoVivo,
+  normalizarHermanoParaNeteo,
 } from "./registerPaymentPolicy";
 import {
   PAYMENT_ADVISORY_LOCK_NAMESPACE,
@@ -1166,9 +1167,9 @@ export const insertPayment = async ({ body, set }: any) => {
         // que contarse como hermana viva; si no, `aplicadoPrevioCuota` la
         // ignora y el pago nuevo re-aplica la cuota completa encima. Antes el
         // hueco era invisible porque el atajo por status permitía pisarla.
-        const pagosHermanos = pagosHermanosCandidatos.filter(
-          cuentaComoHermanoVivo
-        );
+        const pagosHermanos = pagosHermanosCandidatos
+          .filter(cuentaComoHermanoVivo)
+          .map(normalizarHermanoParaNeteo);
         const sumaHermanos = (sel: (p: any) => any) =>
           pagosHermanos.reduce(
             (acc, p) => acc.plus(new Big(sel(p) ?? 0)),

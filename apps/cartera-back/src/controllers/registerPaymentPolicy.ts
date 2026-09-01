@@ -273,6 +273,37 @@ export const cuentaComoHermanoVivo = (
 ): boolean =>
   pago.validationStatus !== "no_required" || !esDestinoSobrescribible(pago);
 
+/**
+ * Deja una fila hermana lista para NETEAR la cuota.
+ *
+ * `membresias_pago` en una fila `no_required` no es plata cobrada: el
+ * importador de SIFCO la siembra (ver `esDestinoSobrescribible`). Ese criterio
+ * tiene que valer también al netear, no solo al decidir si la fila se puede
+ * pisar — si no, el mismo campo diría dos cosas distintas según quién lo mire.
+ *
+ * El caso que lo destapa es la fila MIXTA: una semilla que después absorbió
+ * plata real (p.ej. un `abono_interes` puesto con /editPayment, como la 136221
+ * del crédito 890). Entra al neteo por sus rubros REALES —eso es justo lo que
+ * `cuentaComoHermanoVivo` busca— pero arrastraba consigo la membresía sembrada.
+ * `sumarAplicadoACuota` y `membresiasPrevioCuota` la sumaban como cobrada, así
+ * que el motor encogía el saldo de la cuota por un monto fantasma y rebalsaba
+ * parte del pago nuevo a la cuota siguiente antes de tiempo. Codex P1 en el PR
+ * #1519.
+ *
+ * Se cero el bucket en una COPIA: la fila de la base no se toca.
+ */
+export const normalizarHermanoParaNeteo = <
+  T extends {
+    validationStatus?: string | null;
+    membresias_pago?: BigInput | null;
+  }
+>(
+  pago: T
+): T =>
+  pago.validationStatus === "no_required"
+    ? ({ ...pago, membresias_pago: "0" } as T)
+    : pago;
+
 export type SaldoCuotaInput = {
   /** Monto total de la cuota (credito.cuota). */
   montoCuota: BigInput;

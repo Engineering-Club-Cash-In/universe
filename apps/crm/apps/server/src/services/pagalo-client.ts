@@ -6,6 +6,27 @@ import { z } from "zod";
 
 const SANDBOX_ORIGIN = "https://api.pagalodev.com";
 
+/**
+ * Tope de espera de las CONSULTAS a Págalo.
+ *
+ * Sin esto, un `fetch` que no responde cuelga para siempre al que lo llama, y
+ * en el poller eso es invisible y permanente: la corrida reclama sus links
+ * (les estampa `pollClaimedAt`), se queda esperando y nunca escribe nada —
+ * ni `pollAttempts`, ni `lastPollError`, ni `nextPollAt`. A los 5 minutos
+ * entra la corrida siguiente, vuelve a reclamar los mismos links porque el
+ * lease ya venció, y se cuelga igual. Desde afuera se ve un poller "corriendo"
+ * que nunca detecta un pago y no deja ni un rastro de error. Caso real en dev
+ * el 2026-09-01: dos links pagados de verdad en Págalo, `poll_attempts = 0`
+ * tras varias corridas y `poll_claimed_at` avanzando cada 5 minutos.
+ *
+ * Con el tope, ese mismo caso falla, queda en `lastPollError` y entra al
+ * backoff normal — o sea, se reintenta y se ve.
+ */
+function timeoutConsultaMs(): number {
+	const crudo = Number.parseInt(process.env.PAGALO_TIMEOUT_MS ?? "", 10);
+	return Number.isFinite(crudo) && crudo > 0 ? crudo : 20_000;
+}
+
 export type PagaloClientConfig = {
 	baseUrl: string;
 	authorization: string;
@@ -72,7 +93,8 @@ export class PagaloClientError extends Error {
 			| "PAGALO_SANDBOX_REQUIRED"
 			| "PAGALO_MISSING_AUTHORIZATION"
 			| "PAGALO_LINK_CREATION_DISABLED"
-			| "PAGALO_HTTP_ERROR",
+			| "PAGALO_HTTP_ERROR"
+			| "PAGALO_TIMEOUT",
 		readonly status?: number,
 	) {
 		super(message);
@@ -144,15 +166,44 @@ export function createPagaloClient(
 	config: PagaloClientConfig,
 	fetchImpl: PagaloFetch = fetch,
 ) {
-	const request = async (path: string, init: RequestInit = {}) => {
-		const response = await fetchImpl(`${config.baseUrl}${path}`, {
-			...init,
-			headers: {
-				authorization: config.authorization,
-				...(init.body ? { "content-type": "application/json" } : {}),
-				...init.headers,
-			},
-		});
+	const request = async (
+		path: string,
+		init: RequestInit = {},
+		// El único mutador (createPaymentRequest) NO lleva tope a propósito:
+		// abortar un POST que crea el link no dice si Págalo alcanzó a
+		// crearlo, y ese link quedaría cobrable sin que nosotros lo sepamos.
+		// La ambigüedad ahí se maneja aparte (PagaloRespuestaAmbigua).
+		{ conTimeout = true }: { conTimeout?: boolean } = {},
+	) => {
+		const timeoutMs = timeoutConsultaMs();
+		let response: Response;
+		try {
+			response = await fetchImpl(`${config.baseUrl}${path}`, {
+				...init,
+				...(conTimeout && !init.signal
+					? { signal: AbortSignal.timeout(timeoutMs) }
+					: {}),
+				headers: {
+					authorization: config.authorization,
+					...(init.body ? { "content-type": "application/json" } : {}),
+					...init.headers,
+				},
+			});
+		} catch (error) {
+			// Un abort por tiempo llega como TimeoutError/AbortError: se traduce
+			// para que quien lo reciba (el poller) lo guarde como un motivo
+			// legible en vez de un "The operation was aborted" pelado.
+			if (
+				error instanceof Error &&
+				(error.name === "TimeoutError" || error.name === "AbortError")
+			) {
+				throw new PagaloClientError(
+					`Págalo no respondió en ${timeoutMs} ms (${path}).`,
+					"PAGALO_TIMEOUT",
+				);
+			}
+			throw error;
+		}
 		const raw = await response.text();
 		let body: unknown = raw;
 		try {
@@ -210,10 +261,13 @@ export function createPagaloClient(
 				);
 			}
 			const payload = pagaloCreateRequestSchema.parse(input);
-			return request("/v1/payment/request", {
-				method: "POST",
-				body: JSON.stringify(payload),
-			});
+			return request(
+				"/v1/payment/request",
+				{ method: "POST", body: JSON.stringify(payload) },
+				// Sin tope: ver el comentario de `request`. Abortar acá no
+				// diría si el link se creó o no.
+				{ conTimeout: false },
+			);
 		},
 	};
 }

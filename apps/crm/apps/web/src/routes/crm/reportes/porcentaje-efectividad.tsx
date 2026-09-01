@@ -14,6 +14,9 @@ import {
 	BarChart,
 	CartesianGrid,
 	Cell,
+	Legend,
+	Line,
+	LineChart,
 	ResponsiveContainer,
 	Tooltip,
 	XAxis,
@@ -254,6 +257,7 @@ export function PorcentajeEfectividadContent() {
 
 	const chartHeight = Math.max(280, chartData.length * BAR_HEIGHT_PX);
 	const channelTypeData = data?.porTipoCanal ?? [];
+	const companyData = data?.porEmpresa ?? [];
 
 	return (
 		<div className="space-y-6">
@@ -352,6 +356,88 @@ export function PorcentajeEfectividadContent() {
 									))}
 								</Bar>
 							</BarChart>
+						</ResponsiveContainer>
+					)}
+				</CardContent>
+			</Card>
+
+			<Card>
+				<CardHeader>
+					<CardTitle>Colocación por predio / agencia</CardTitle>
+					<CardDescription>
+						Monto colocado y cantidad de créditos por la empresa asociada a la
+						oportunidad cuyo primer cierre ocurrió en el período
+					</CardDescription>
+				</CardHeader>
+				<CardContent>
+					{isLoading ? (
+						<div className="flex h-[400px] items-center justify-center text-muted-foreground">
+							Cargando...
+						</div>
+					) : companyData.length === 0 ? (
+						<div className="flex h-[400px] items-center justify-center text-muted-foreground">
+							No hay colocaciones para el período seleccionado
+						</div>
+					) : (
+						<ResponsiveContainer width="100%" height={400}>
+							<LineChart data={companyData}>
+								<CartesianGrid strokeDasharray="3 3" />
+								<XAxis
+									dataKey="name"
+									interval={0}
+									height={120}
+									tick={({ x, y, payload }) => (
+										<g transform={`translate(${x},${y})`}>
+											<text
+												x={0}
+												y={0}
+												dy={16}
+												textAnchor="end"
+												fill="#666"
+												fontSize={11}
+												transform="rotate(-45)"
+											>
+												{payload.value}
+											</text>
+										</g>
+									)}
+								/>
+								<YAxis
+									yAxisId="left"
+									tickFormatter={(value: number) =>
+										`Q${(value / 1000).toFixed(0)}k`
+									}
+								/>
+								<YAxis
+									yAxisId="right"
+									orientation="right"
+									allowDecimals={false}
+								/>
+								<Tooltip
+									formatter={(value, name) =>
+										name === "Monto"
+											? `Q${Number(value).toLocaleString("es-GT")}`
+											: value
+									}
+								/>
+								<Legend />
+								<Line
+									yAxisId="left"
+									type="monotone"
+									dataKey="monto"
+									stroke="#10b981"
+									name="Monto"
+									strokeWidth={2}
+								/>
+								<Line
+									yAxisId="right"
+									type="monotone"
+									dataKey="cantidad"
+									stroke="#3b82f6"
+									name="Cantidad"
+									strokeWidth={2}
+								/>
+							</LineChart>
 						</ResponsiveContainer>
 					)}
 				</CardContent>

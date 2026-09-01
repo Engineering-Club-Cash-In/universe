@@ -1,0 +1,225 @@
+{
+  "commit": "56717ddef8f0bbd8c8633172c8ca2c85c248dfd7",
+  "entries": [
+    {
+      "path": "apps/cartera-back/schedule.ts",
+      "line": 38,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "non_terminal_job_start_trace"
+    },
+    {
+      "path": "apps/cartera-back/schedule.ts",
+      "line": 41,
+      "method": "console.log",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "job.execution",
+      "outcome": "completed",
+      "rationale": "terminal_structured_event"
+    },
+    {
+      "path": "apps/cartera-back/schedule.ts",
+      "line": 43,
+      "method": "console.error",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "job.execution",
+      "outcome": "failed",
+      "rationale": "terminal_structured_event"
+    },
+    {
+      "path": "apps/cartera-back/schedule.ts",
+      "line": 50,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "non_terminal_job_start_trace"
+    },
+    {
+      "path": "apps/cartera-back/schedule.ts",
+      "line": 53,
+      "method": "console.log",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "job.execution",
+      "outcome": "completed",
+      "rationale": "terminal_structured_event"
+    },
+    {
+      "path": "apps/cartera-back/schedule.ts",
+      "line": 55,
+      "method": "console.error",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "job.execution",
+      "outcome": "failed",
+      "rationale": "terminal_structured_event"
+    },
+    {
+      "path": "apps/cartera-back/schedule.ts",
+      "line": 64,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "non_terminal_job_start_trace"
+    },
+    {
+      "path": "apps/cartera-back/schedule.ts",
+      "line": 67,
+      "method": "console.log",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "job.execution",
+      "outcome": "completed",
+      "rationale": "terminal_structured_event"
+    },
+    {
+      "path": "apps/cartera-back/schedule.ts",
+      "line": 71,
+      "method": "console.error",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "job.execution",
+      "outcome": "failed",
+      "rationale": "terminal_structured_event"
+    },
+    {
+      "path": "apps/cartera-back/schedule.ts",
+      "line": 80,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "non_terminal_job_start_trace"
+    },
+    {
+      "path": "apps/cartera-back/schedule.ts",
+      "line": 83,
+      "method": "console.log",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "job.execution",
+      "outcome": "completed",
+      "rationale": "terminal_structured_event"
+    },
+    {
+      "path": "apps/cartera-back/schedule.ts",
+      "line": 85,
+      "method": "console.error",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "job.execution",
+      "outcome": "failed",
+      "rationale": "terminal_structured_event"
+    },
+    {
+      "path": "apps/cartera-back/schedule.ts",
+      "line": 93,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "non_terminal_job_start_trace"
+    },
+    {
+      "path": "apps/cartera-back/schedule.ts",
+      "line": 96,
+      "method": "console.log",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "job.execution",
+      "outcome": "completed",
+      "rationale": "terminal_structured_event"
+    },
+    {
+      "path": "apps/cartera-back/schedule.ts",
+      "line": 98,
+      "method": "console.error",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "job.execution",
+      "outcome": "failed",
+      "rationale": "terminal_structured_event"
+    },
+    {
+      "path": "apps/cartera-back/schedule.ts",
+      "line": 105,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "non_terminal_job_start_trace"
+    },
+    {
+      "path": "apps/cartera-back/schedule.ts",
+      "line": 108,
+      "method": "console.log",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "job.execution",
+      "outcome": "completed",
+      "rationale": "terminal_structured_event"
+    },
+    {
+      "path": "apps/cartera-back/schedule.ts",
+      "line": 110,
+      "method": "console.error",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "job.execution",
+      "outcome": "failed",
+      "rationale": "terminal_structured_event"
+    },
+    {
+      "path": "apps/cartera-back/schedule.ts",
+      "line": 122,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "non_terminal_job_start_trace"
+    },
+    {
+      "path": "apps/cartera-back/schedule.ts",
+      "line": 125,
+      "method": "console.log",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "job.execution",
+      "outcome": "completed",
+      "rationale": "terminal_structured_event"
+    },
+    {
+      "path": "apps/cartera-back/schedule.ts",
+      "line": 127,
+      "method": "console.error",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "job.execution",
+      "outcome": "failed",
+      "rationale": "terminal_structured_event"
+    },
+    {
+      "path": "apps/cartera-back/schedule.ts",
+      "line": 132,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "non_terminal_scheduler_start_trace"
+    }
+  ]
+}

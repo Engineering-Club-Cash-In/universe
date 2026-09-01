@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
 	AlertCircle,
+	AlertTriangle,
 	ArrowLeft,
 	CheckCircle,
 	FileText,
@@ -9,8 +10,13 @@ import {
 	XCircle,
 } from "lucide-react";
 import { useState } from "react";
+import {
+	formatMissingAssignmentsMessage,
+	getMissingOpportunityAssignments,
+} from "server/src/lib/opportunity-assignment-notice";
 import { toast } from "sonner";
 import { AnalysisChecklistView } from "@/components/analysis/AnalysisChecklistView";
+import { RenapBuroValidation } from "@/components/analysis/RenapBuroValidation";
 import { DocumentValidationChecklist } from "@/components/document-validation-checklist";
 import {
 	LeadDetailModal,
@@ -218,6 +224,9 @@ function OpportunityDocumentsPage() {
 		(validation.data?.canApprove ?? false) &&
 		((checklist.data as any)?.canApprove ?? false);
 	const isValidationLoading = validation.isLoading || checklist.isLoading;
+	// Mientras la validación de Buró/RENAP corre no se puede aprobar: el gate
+	// volvería a llamar a las mismas fuentes y duplicaría consultas facturadas.
+	const [validandoBuroRenap, setValidandoBuroRenap] = useState(false);
 
 	const getDisabledReason = () => {
 		if (!validation.data || !checklist.data) return "Cargando validación...";
@@ -420,7 +429,9 @@ function OpportunityDocumentsPage() {
 										<Button
 											variant="default"
 											onClick={() => handleApprovalClick(true)}
-											disabled={!canApprove || isValidationLoading}
+											disabled={
+												!canApprove || isValidationLoading || validandoBuroRenap
+											}
 										>
 											<CheckCircle className="mr-2 h-4 w-4" />
 											Aprobar
@@ -505,6 +516,71 @@ function OpportunityDocumentsPage() {
 					checklist.refetch();
 				}}
 			/>
+
+			{/* Validaciones RENAP y Buró (oportunidades fuera del bot de WhatsApp) */}
+			<RenapBuroValidation
+				opportunityId={opportunityId}
+				onEjecucionChange={setValidandoBuroRenap}
+			/>
+
+			{/* Asignaciones pendientes: informativo, no bloquea la aprobación */}
+			{(() => {
+				const faltan = getMissingOpportunityAssignments({
+					closurePercentage: opportunity.stage?.closurePercentage,
+					status: opportunity.status,
+					vehicleId: opportunity.vehicleId,
+					vehicleIsNew: opportunity.vehicle?.isNew,
+					companyId: opportunity.company?.id,
+					vendorId: opportunity.vendorId,
+					vehicleVendorId: opportunity.vehicle?.vendorId,
+				});
+				if (faltan.length === 0) return null;
+				return (
+					<div className="flex gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
+						<AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
+						<div className="space-y-2 text-sm">
+							<p className="font-medium text-amber-800">
+								{formatMissingAssignmentsMessage(faltan)}
+							</p>
+							<p className="text-amber-700">
+								Recomendado antes de generar contratos.
+							</p>
+							<div className="flex flex-wrap items-center gap-3 pt-1">
+								<Button
+									size="sm"
+									variant="outline"
+									onClick={() =>
+										navigate({
+											to: "/crm/opportunities",
+											search: { opportunityId, edit: "1" },
+										})
+									}
+								>
+									Asignar en la oportunidad
+								</Button>
+								{faltan.includes("empresa") && (
+									<button
+										type="button"
+										className="text-amber-800 text-xs underline underline-offset-2"
+										onClick={() => navigate({ to: "/crm/companies" })}
+									>
+										¿No existe la empresa? Crearla
+									</button>
+								)}
+								{faltan.includes("vendedor") && (
+									<button
+										type="button"
+										className="text-amber-800 text-xs underline underline-offset-2"
+										onClick={() => navigate({ to: "/crm/vendors" })}
+									>
+										¿No existe el vendedor? Crearlo
+									</button>
+								)}
+							</div>
+						</div>
+					</div>
+				);
+			})()}
 
 			{/* Document Validation */}
 			<DocumentValidationChecklist opportunityId={opportunityId} />

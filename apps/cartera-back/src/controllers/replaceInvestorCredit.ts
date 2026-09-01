@@ -13,8 +13,25 @@ import z from "zod";
 import jwt from "jsonwebtoken";
 import { sendSessionCancelledNotification } from "@cci/email";
 import { COMPRA_CARTERA_RECIPIENTS } from "../utils/functions/compraCarteraRecipients";
+import {
+  construirStatusActualPorInv,
+  operacionEnCursoEnEspejo,
+  resolverStatusEspejoRebuild,
+} from "../utils/espejoGuards";
+import { clasificarCompraCreditoInversionista } from "./purchaseClassification";
+import { withCreditoEspejoLocks } from "../utils/creditoEspejoLock";
 
 const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";
+
+// Conflicto de negocio (créditos rechazados por guards), no un error
+// interno: se responde 409, no 500, para que el operador vea un mensaje
+// accionable en vez de "error inesperado del servidor".
+class ReasignacionNoDisponibleError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ReasignacionNoDisponibleError";
+  }
+}
 
 // ========================================
 // ID fijo de CUBE INVESTMENTS S.A.
@@ -208,6 +225,21 @@ export const returnPendingInvestorsToCube = async ({ body, set, request }: any) 
     const creditoIds = Array.isArray(creditosInput)
       ? creditosInput
       : [creditosInput];
+    const creditosABloquear = [...new Set(creditoIds)].sort((a, b) => a - b);
+
+    // Tomar todos los locks en orden antes de la primera lectura. Así el
+    // snapshot de pendientes y las relecturas dentro de la transacción ven un
+    // estado que ningún otro rebuild del espejo puede cambiar hasta terminar.
+    return await withCreditoEspejoLocks(async (locks) => {
+      for (const creditoId of creditosABloquear) {
+        if (!(await locks.tryLock(creditoId))) {
+          set.status = 409;
+          return {
+            success: false,
+            message: `Crédito ${creditoId} está siendo operado por otro proceso`,
+          };
+        }
+      }
 
     // ================================================================
     // PASO 2: BUSCAR INVERSIONISTAS PENDIENTES
@@ -427,12 +459,25 @@ export const returnPendingInvestorsToCube = async ({ body, set, request }: any) 
               creditos_inversionistas_espejo.porcentaje_participacion_inversionista,
             fecha_inicio_participacion:
               creditos_inversionistas_espejo.fecha_inicio_participacion,
-            // Se lee para preservar la modalidad en el nuke & rebuild de abajo
-            // (si no, se borraría a null para los inversionistas que quedan).
+            // Se leen para preservar modalidad, status, tipo_reinversion y
+            // metadata de aceptación en el nuke & rebuild de abajo. Si no: la
+            // modalidad se borraría a null, el status caería a "completado"
+            // y aceptada_at/aceptada_por/compra_cartera_extendida_at se
+            // perderían — matando la sesión pendiente de cualquier OTRO
+            // inversionista del mismo crédito que no es parte de esta
+            // limpieza, y con aceptada_at en null expirarCompraCartera.ts ya
+            // no lo encuentra (filtra por isNotNull(aceptada_at)), así que
+            // una compra pendiente_revision quedaría colgada para siempre.
             modalidad_facturacion:
               creditos_inversionistas_espejo.modalidad_facturacion,
             modalidad_facturacion_spread_id:
               creditos_inversionistas_espejo.modalidad_facturacion_spread_id,
+            status: creditos_inversionistas_espejo.status,
+            tipo_reinversion: creditos_inversionistas_espejo.tipo_reinversion,
+            aceptada_at: creditos_inversionistas_espejo.aceptada_at,
+            aceptada_por: creditos_inversionistas_espejo.aceptada_por,
+            compra_cartera_extendida_at:
+              creditos_inversionistas_espejo.compra_cartera_extendida_at,
           })
           .from(creditos_inversionistas_espejo)
           .where(eq(creditos_inversionistas_espejo.credito_id, creditoId));
@@ -601,20 +646,46 @@ export const returnPendingInvestorsToCube = async ({ body, set, request }: any) 
           await tx.insert(creditos_inversionistas).values(dataPadre);
         }
 
-        // ── Espejo: agregar status="completado" + updated_at ──
-        // Se preserva la modalidad de cada inversionista (si no, se borraría a
-        // null en este nuke & rebuild).
-        const dataEspejo = dataEspejoBase.map((inv) => ({
-          ...inv,
-          status: "completado" as const,
-          modalidad_facturacion:
-            espejoPorInv.get(inv.inversionista_id)?.modalidad_facturacion ??
-            null,
-          modalidad_facturacion_spread_id:
-            espejoPorInv.get(inv.inversionista_id)
-              ?.modalidad_facturacion_spread_id ?? null,
-          updated_at: new Date(),
-        }));
+        // ── Espejo: status + updated_at ──
+        // Solo los inversionistas cuya operación se está cancelando
+        // (`inversionistas_con_pendiente`) pasan a "completado". Los demás
+        // preservan su status previo vía `statusActualPorInv`: pueden tener
+        // su PROPIA sesión pendiente en este mismo crédito y esta limpieza
+        // no es suya. No se usa `resolverStatusEspejoRebuild` directo porque
+        // ese helper asume un solo inversionista target; acá puede ser un
+        // Set de varios. También se preservan modalidad y tipo_reinversion
+        // (si no, se borrarían a null en este nuke & rebuild).
+        const statusActualPorInv = construirStatusActualPorInv(
+          invActualesEspejo,
+        );
+        const dataEspejo = dataEspejoBase.map((inv) => {
+          const previo = espejoPorInv.get(inv.inversionista_id);
+          const fueCancelado = inversionistas_con_pendiente.has(
+            inv.inversionista_id,
+          );
+          return {
+            ...inv,
+            status: fueCancelado
+              ? ("completado" as const)
+              : statusActualPorInv.get(inv.inversionista_id) ?? ("completado" as const),
+            tipo_reinversion: fueCancelado
+              ? null
+              : previo?.tipo_reinversion ?? null,
+            modalidad_facturacion: previo?.modalidad_facturacion ?? null,
+            modalidad_facturacion_spread_id:
+              previo?.modalidad_facturacion_spread_id ?? null,
+            // El cancelado no tiene nada que expirar; los demás preservan su
+            // metadata de aceptación (si no, expirarCompraCartera.ts deja de
+            // encontrarlos con aceptada_at en null y su pendiente_revision
+            // queda colgada para siempre).
+            aceptada_at: fueCancelado ? null : previo?.aceptada_at ?? null,
+            aceptada_por: fueCancelado ? null : previo?.aceptada_por ?? null,
+            compra_cartera_extendida_at: fueCancelado
+              ? null
+              : previo?.compra_cartera_extendida_at ?? null,
+            updated_at: new Date(),
+          };
+        });
 
         await tx
           .delete(creditos_inversionistas_espejo)
@@ -649,10 +720,18 @@ export const returnPendingInvestorsToCube = async ({ body, set, request }: any) 
         }
 
         // ── Apagar bandera_reinversion del crédito ──
-        await tx
-          .update(creditos)
-          .set({ bandera_reinversion: false })
-          .where(eq(creditos.credito_id, creditoId));
+        // Solo si ya no queda NINGUNA sesión pendiente en el espejo: si otro
+        // inversionista sigue pendiente, la bandera debe seguir redirigiendo
+        // sus intereses a CUBE (cofidi evalúa bandera + status_espejo).
+        const quedanPendientes = dataEspejo.some(
+          (r) => r.status !== "completado",
+        );
+        if (!quedanPendientes) {
+          await tx
+            .update(creditos)
+            .set({ bandera_reinversion: false })
+            .where(eq(creditos.credito_id, creditoId));
+        }
 
         resultados.push({
           credito_id: creditoId,
@@ -707,6 +786,7 @@ export const returnPendingInvestorsToCube = async ({ body, set, request }: any) 
       message: `${resultados.length} crédito(s) limpiado(s)`,
       creditos_limpiados: resultados,
     };
+    });
   } catch (error) {
     console.error("[returnPendingInvestorsToCube] Error:", error);
     set.status = 500;
@@ -821,7 +901,22 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
       inversionista_salio_del_credito: boolean;
     } | null = null;
 
-    await db.transaction(async (tx) => {
+    const creditosABloquear = [
+      credito_espejo_removido_id,
+      ...reasignaciones.map(({ credito_destino_id }) => credito_destino_id),
+    ].filter((creditoId, index, ids) => ids.indexOf(creditoId) === index)
+      .sort((a, b) => a - b);
+
+    await withCreditoEspejoLocks(async (locks) => {
+      for (const creditoId of creditosABloquear) {
+        if (!(await locks.tryLock(creditoId))) {
+          throw new ReasignacionNoDisponibleError(
+            `Crédito ${creditoId} está siendo operado por otro proceso`,
+          );
+        }
+      }
+
+      await db.transaction(async (tx) => {
       // ================================================================
       // PASO 2: TRAER DATA DEL CRÉDITO ORIGEN
       // Necesitamos saber cuánto tiene el inversionista ahí para
@@ -1009,6 +1104,10 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
           })
           .from(creditos_inversionistas)
           .where(eq(creditos_inversionistas.credito_id, credito_destino_id));
+        const clasificacionPosicion = clasificarCompraCreditoInversionista(
+          invDestinoActuales.map((inv) => inv.inversionista_id),
+          inversionista_id,
+        );
 
         const invDestinoEspejoActuales = await tx
           .select({
@@ -1019,12 +1118,24 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
               creditos_inversionistas_espejo.porcentaje_participacion_inversionista,
             fecha_inicio_participacion:
               creditos_inversionistas_espejo.fecha_inicio_participacion,
-            // Se lee para preservar la modalidad de los OTROS inversionistas en
-            // el nuke & rebuild del espejo (si no, se borraría a null).
+            // Se leen para preservar modalidad, status, tipo_reinversion y
+            // metadata de aceptación de los OTROS inversionistas en el nuke
+            // & rebuild del espejo. Si no: la modalidad se borraría a null,
+            // el status caería a "completado" y aceptada_at/aceptada_por/
+            // compra_cartera_extendida_at se perderían — matando sesiones
+            // pendientes ajenas a esta reasignación, y dejando cualquier
+            // pendiente_revision fuera del alcance de expirarCompraCartera.ts
+            // (filtra por isNotNull(aceptada_at)), colgada para siempre.
             modalidad_facturacion:
               creditos_inversionistas_espejo.modalidad_facturacion,
             modalidad_facturacion_spread_id:
               creditos_inversionistas_espejo.modalidad_facturacion_spread_id,
+            status: creditos_inversionistas_espejo.status,
+            tipo_reinversion: creditos_inversionistas_espejo.tipo_reinversion,
+            aceptada_at: creditos_inversionistas_espejo.aceptada_at,
+            aceptada_por: creditos_inversionistas_espejo.aceptada_por,
+            compra_cartera_extendida_at:
+              creditos_inversionistas_espejo.compra_cartera_extendida_at,
           })
           .from(creditos_inversionistas_espejo)
           .where(
@@ -1034,6 +1145,37 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
         const espejoPorInvDestino = new Map(
           invDestinoEspejoActuales.map((i) => [i.inversionista_id, i]),
         );
+
+        // ── Rechazar destino con otra sesión pendiente AJENA ──
+        // compraCarteraAceptada.ts acepta TODAS las filas
+        // "pendiente_compra_cartera" de un crédito de un solo golpe (filtra
+        // por credito_id, no por inversionista_id — el endpoint no recibe
+        // inversionista_id). Si dejamos que este reasignado entre en
+        // pendiente junto a otro inversionista que YA tenía su propia sesión
+        // pendiente en este destino, aceptar la compra del reasignado
+        // aceptaría de paso la del otro, sin que nadie la haya confirmado.
+        // Más simple y seguro rechazar acá que intentar que el rebuild lo
+        // resuelva: el operador reintenta después de que se resuelva el
+        // pendiente existente.
+        //
+        // Se excluye la fila del PROPIO inversionista_id: si este destino es
+        // también el crédito origen (reasignación dentro del mismo crédito,
+        // ver PASO 5 más abajo — "pueden haber cambiado si el origen también
+        // era un destino"), acá todavía está su fila vieja sin limpiar. Esa
+        // fila es suya, no de un tercero — no es el conflicto que este guard
+        // busca prevenir.
+        const pendienteExistente = operacionEnCursoEnEspejo(
+          invDestinoEspejoActuales.filter(
+            (i) => i.inversionista_id !== inversionista_id,
+          ),
+        );
+        if (pendienteExistente) {
+          errores.push({
+            credito_destino_id,
+            razon: `El crédito destino ya tiene una sesión pendiente (inversionista ${pendienteExistente.inversionista_id}, status ${pendienteExistente.status}); no se puede reasignar hasta que se acepte o cancele esa operación`,
+          });
+          continue;
+        }
 
         // ── Buscar CUBE en el destino (padre) ──
         const cubeDestino = invDestinoActuales.find(
@@ -1209,35 +1351,51 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
           creditoDestino.numero_credito_sifco,
         );
 
-        const dataEspejoDestinoFinal = dataEspejoDestino.map((inv) => ({
-          ...inv,
-          status: (inv.inversionista_id === inversionista_id
-            ? statusEspejo
-            : "completado") as
-            | "pendiente_reinversion"
-            | "pendiente_compra_cartera"
-            | "completado",
-          // Estampar la modalidad en la fila del inversionista reasignado:
-          // sesiones pendientes y la aceptación de compra leen tipo_reinversion
-          // DEL ESPEJO, no de compras_credito_inversionista.
-          tipo_reinversion:
-            inv.inversionista_id === inversionista_id
+        const statusActualPorInvDestino = construirStatusActualPorInv(
+          invDestinoEspejoActuales,
+        );
+        const dataEspejoDestinoFinal = dataEspejoDestino.map((inv) => {
+          const esReasignado = inv.inversionista_id === inversionista_id;
+          const previo = espejoPorInvDestino.get(inv.inversionista_id);
+          return {
+            ...inv,
+            // El reasignado queda con el status pendiente de esta
+            // operación. Los demás preservan su status previo: pueden tener
+            // su PROPIA sesión pendiente en este destino y esta reasignación
+            // no es suya.
+            status: resolverStatusEspejoRebuild(
+              inv.inversionista_id,
+              inversionista_id,
+              statusEspejo,
+              statusActualPorInvDestino,
+            ),
+            // Estampar la modalidad en la fila del inversionista reasignado:
+            // sesiones pendientes y la aceptación de compra leen tipo_reinversion
+            // DEL ESPEJO, no de compras_credito_inversionista.
+            tipo_reinversion: esReasignado
               ? tipoReinversionOrigen
-              : null,
-          // El reasignado hereda la modalidad (etiqueta + FK) del origen; los
-          // demás preservan la suya del espejo del destino.
-          modalidad_facturacion:
-            inv.inversionista_id === inversionista_id
+              : previo?.tipo_reinversion ?? null,
+            // El reasignado hereda la modalidad (etiqueta + FK) del origen; los
+            // demás preservan la suya del espejo del destino.
+            modalidad_facturacion: esReasignado
               ? modalidadFacturacionOrigen
-              : espejoPorInvDestino.get(inv.inversionista_id)
-                  ?.modalidad_facturacion ?? null,
-          modalidad_facturacion_spread_id:
-            inv.inversionista_id === inversionista_id
+              : previo?.modalidad_facturacion ?? null,
+            modalidad_facturacion_spread_id: esReasignado
               ? modalidadFacturacionSpreadIdOrigen
-              : espejoPorInvDestino.get(inv.inversionista_id)
-                  ?.modalidad_facturacion_spread_id ?? null,
-          updated_at: new Date(),
-        }));
+              : previo?.modalidad_facturacion_spread_id ?? null,
+            // El reasignado arranca un ciclo nuevo en este destino (todavía
+            // no aceptado): sin metadata de aceptación. Los demás preservan
+            // la suya (si no, expirarCompraCartera.ts deja de encontrarlos
+            // con aceptada_at en null y su pendiente_revision queda colgada
+            // para siempre).
+            aceptada_at: esReasignado ? null : previo?.aceptada_at ?? null,
+            aceptada_por: esReasignado ? null : previo?.aceptada_por ?? null,
+            compra_cartera_extendida_at: esReasignado
+              ? null
+              : previo?.compra_cartera_extendida_at ?? null,
+            updated_at: new Date(),
+          };
+        });
 
         await tx
           .delete(creditos_inversionistas_espejo)
@@ -1263,6 +1421,7 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
           tipo_reinversion: tipoReinversionOrigen,
           modalidad_facturacion: modalidadFacturacionOrigen,
           modalidad_facturacion_spread_id: modalidadFacturacionSpreadIdOrigen,
+          tipo_compra: clasificacionPosicion,
           status: statusEspejo,
         });
 
@@ -1290,6 +1449,27 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
 
         console.log(
           `   ✅ Crédito ${creditoDestino.numero_credito_sifco} - Q${montoAsignar} asignado`,
+        );
+      }
+
+      // ── Todo-o-nada: si CUALQUIER destino fue rechazado, no limpiar el
+      //    origen ──
+      // Sin este corte, el PASO 5 de abajo resta SIEMPRE `montoEnOrigen`
+      // completo (calculado ANTES del loop, sobre el total de reasignaciones
+      // pedidas) sin importar cuántos destinos realmente se asignaron. Con
+      // 0 de N destinos exitosos, eso deja al inversionista fuera de TODO
+      // crédito con respuesta 200 — el caso extremo. Pero con solo 1 destino
+      // rechazado de varios (crédito no encontrado, CUBE insuficiente,
+      // sesión pendiente ajena, etc.) el bug es el mismo, más difícil de
+      // notar: el PASO 5 resta igual el monto completo, incluida la porción
+      // del destino que falló, y esa porción se pierde hacia CUBE en
+      // silencio con respuesta 200 y "N-1 destinos, 1 error". Por eso el
+      // corte es sobre `errores.length`, no sobre si hubo al menos un
+      // éxito — un solo rechazo ya vuelve inconsistente el monto que el
+      // PASO 5 asume que salió completo del origen.
+      if (errores.length > 0) {
+        throw new ReasignacionNoDisponibleError(
+          `${errores.length} de ${reasignaciones.length} crédito(s) destino fueron rechazados; no se movió al inversionista del crédito origen para no perder la porción del destino rechazado.`,
         );
       }
 
@@ -1337,12 +1517,25 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
             creditos_inversionistas_espejo.porcentaje_participacion_inversionista,
           fecha_inicio_participacion:
             creditos_inversionistas_espejo.fecha_inicio_participacion,
-          // Se lee para preservar la modalidad en el nuke & rebuild del origen
-          // (si no, se borraría a null).
+          // Se leen para preservar modalidad, status, tipo_reinversion y
+          // metadata de aceptación en el nuke & rebuild del origen. Si no: la
+          // modalidad se borraría a null, el status caería a "completado" y
+          // aceptada_at/aceptada_por/compra_cartera_extendida_at se
+          // perderían — matando la sesión pendiente de cualquier OTRO
+          // inversionista del origen ajeno a esta reasignación, y dejando
+          // cualquier pendiente_revision fuera del alcance de
+          // expirarCompraCartera.ts (filtra por isNotNull(aceptada_at)),
+          // colgada para siempre.
           modalidad_facturacion:
             creditos_inversionistas_espejo.modalidad_facturacion,
           modalidad_facturacion_spread_id:
             creditos_inversionistas_espejo.modalidad_facturacion_spread_id,
+          status: creditos_inversionistas_espejo.status,
+          tipo_reinversion: creditos_inversionistas_espejo.tipo_reinversion,
+          aceptada_at: creditos_inversionistas_espejo.aceptada_at,
+          aceptada_por: creditos_inversionistas_espejo.aceptada_por,
+          compra_cartera_extendida_at:
+            creditos_inversionistas_espejo.compra_cartera_extendida_at,
         })
         .from(creditos_inversionistas_espejo)
         .where(
@@ -1509,19 +1702,51 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
         creditoOrigen.numero_credito_sifco,
       );
 
-      const dataEspejoOrigenConStatus = dataEspejoOrigenFinal.map((inv) => ({
-        ...inv,
-        status: "completado" as const,
-        // El inversionista reasignado ya salió del origen; los que quedan
-        // preservan su modalidad (si no, se borraría a null).
-        modalidad_facturacion:
-          espejoPorInvOrigen.get(inv.inversionista_id)?.modalidad_facturacion ??
-          null,
-        modalidad_facturacion_spread_id:
-          espejoPorInvOrigen.get(inv.inversionista_id)
-            ?.modalidad_facturacion_spread_id ?? null,
-        updated_at: new Date(),
-      }));
+      const statusActualPorInvOrigen = construirStatusActualPorInv(
+        invOrigenEspejoFresh,
+      );
+      const dataEspejoOrigenConStatus = dataEspejoOrigenFinal.map((inv) => {
+        const previo = espejoPorInvOrigen.get(inv.inversionista_id);
+        return {
+          ...inv,
+          // El reasignado queda "completado" en el origen (su operación
+          // pendiente se movió a los destinos). Los demás preservan su
+          // status previo: pueden tener su PROPIA sesión pendiente en este
+          // crédito y esta reasignación no es suya. También se preservan
+          // modalidad y tipo_reinversion (si no, se borrarían a null).
+          status: resolverStatusEspejoRebuild(
+            inv.inversionista_id,
+            inversionista_id,
+            "completado",
+            statusActualPorInvOrigen,
+          ),
+          tipo_reinversion:
+            inv.inversionista_id === inversionista_id
+              ? null
+              : previo?.tipo_reinversion ?? null,
+          modalidad_facturacion: previo?.modalidad_facturacion ?? null,
+          modalidad_facturacion_spread_id:
+            previo?.modalidad_facturacion_spread_id ?? null,
+          // El removido ya no tiene nada pendiente en el origen (su ciclo
+          // se movió al destino): sin metadata de aceptación. Los demás
+          // preservan la suya (si no, expirarCompraCartera.ts deja de
+          // encontrarlos con aceptada_at en null y su pendiente_revision
+          // queda colgada para siempre).
+          aceptada_at:
+            inv.inversionista_id === inversionista_id
+              ? null
+              : previo?.aceptada_at ?? null,
+          aceptada_por:
+            inv.inversionista_id === inversionista_id
+              ? null
+              : previo?.aceptada_por ?? null,
+          compra_cartera_extendida_at:
+            inv.inversionista_id === inversionista_id
+              ? null
+              : previo?.compra_cartera_extendida_at ?? null,
+          updated_at: new Date(),
+        };
+      });
 
       await tx
         .delete(creditos_inversionistas_espejo)
@@ -1561,12 +1786,18 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
         );
 
       // ── Apagar bandera_reinversion del crédito origen ──
-      // El espejo del origen quedó todo en "completado": ya no hay
-      // inversionistas pendientes a quienes redirigir intereses.
-      await tx
-        .update(creditos)
-        .set({ bandera_reinversion: false })
-        .where(eq(creditos.credito_id, credito_espejo_removido_id));
+      // Solo si el espejo del origen ya no tiene NINGUNA sesión pendiente:
+      // otro inversionista puede seguir pendiente en este crédito y su
+      // redirección de intereses a CUBE depende de la bandera.
+      const quedanPendientesOrigen = dataEspejoOrigenConStatus.some(
+        (r) => r.status !== "completado",
+      );
+      if (!quedanPendientesOrigen) {
+        await tx
+          .update(creditos)
+          .set({ bandera_reinversion: false })
+          .where(eq(creditos.credito_id, credito_espejo_removido_id));
+      }
 
       console.log(
         `   🧹 Crédito origen ${creditoOrigen.numero_credito_sifco} limpio - ${dataPadreOrigenFinal.length} inversionistas restantes${
@@ -1583,6 +1814,7 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
         monto_devuelto: montoEnOrigen.toString(),
         inversionista_salio_del_credito: inversionistaRemovidoDelOrigen,
       };
+      });
     });
 
     // ================================================================
@@ -1608,6 +1840,13 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
       errores,
     };
   } catch (error) {
+    if (error instanceof ReasignacionNoDisponibleError) {
+      set.status = 409;
+      return {
+        success: false,
+        message: error.message,
+      };
+    }
     console.error("[manualReassignInvestor] Error:", error);
     set.status = 500;
     return {

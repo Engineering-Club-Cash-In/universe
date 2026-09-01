@@ -2,12 +2,15 @@ import { ORPCError, os } from "@orpc/server";
 import { eq } from "drizzle-orm";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
+import { type AuditMeta, auditMiddleware } from "./audit";
 import type { Context } from "./context";
 import { PERMISSIONS } from "./roles";
 
-export const o = os.$context<Context>();
+export const o = os.$context<Context>().$meta<AuditMeta>({});
 
-export const publicProcedure = o;
+// Todo procedure pasa por acá; el middleware solo actúa en los que declaran
+// `.meta({ audit })` (ver lib/audit.ts).
+export const publicProcedure = o.use(auditMiddleware);
 
 const requireAuth = o.middleware(async ({ context, next }) => {
 	if (!context.session?.user) {
@@ -60,6 +63,34 @@ const requireCrmAccess = o.middleware(async ({ context, next }) => {
 
 	if (!PERMISSIONS.canAccessClients(userRole)) {
 		throw new ORPCError("FORBIDDEN", { message: "CRM access role required" });
+	}
+
+	return next({
+		context: {
+			session: context.session,
+			user: userData[0],
+			userId,
+			userRole,
+		},
+	});
+});
+
+// control de acceso — el backend tiene que exigir lo mismo que la UI.
+const requireCrmOnlyAccess = o.middleware(async ({ context, next }) => {
+	if (!context.session?.user) {
+		throw new ORPCError("UNAUTHORIZED");
+	}
+
+	const userId = context.session.user.id;
+	const userData = await db
+		.select()
+		.from(user)
+		.where(eq(user.id, userId))
+		.limit(1);
+	const userRole = userData[0]?.role;
+
+	if (!PERMISSIONS.canAccessCRM(userRole)) {
+		throw new ORPCError("FORBIDDEN", { message: "CRM role required" });
 	}
 
 	return next({
@@ -191,6 +222,33 @@ const requireCobros = o.middleware(async ({ context, next }) => {
 
 	if (!PERMISSIONS.canAccessCobros(userRole)) {
 		throw new ORPCError("FORBIDDEN", { message: "Cobros role required" });
+	}
+
+	return next({
+		context: {
+			session: context.session,
+			user: userData[0],
+			userId,
+			userRole,
+		},
+	});
+});
+
+const requireAccounting = o.middleware(async ({ context, next }) => {
+	if (!context.session?.user) {
+		throw new ORPCError("UNAUTHORIZED");
+	}
+
+	const userId = context.session.user.id;
+	const userData = await db
+		.select()
+		.from(user)
+		.where(eq(user.id, userId))
+		.limit(1);
+	const userRole = userData[0]?.role;
+
+	if (!PERMISSIONS.canAccessAccounting(userRole)) {
+		throw new ORPCError("FORBIDDEN", { message: "Accounting role required" });
 	}
 
 	return next({
@@ -615,11 +673,13 @@ const requireInvestmentManager = o.middleware(async ({ context, next }) => {
 export const protectedProcedure = publicProcedure.use(requireAuth);
 export const adminProcedure = publicProcedure.use(requireAdmin);
 export const crmProcedure = publicProcedure.use(requireCrmAccess);
+export const crmOnlyProcedure = publicProcedure.use(requireCrmOnlyAccess);
 export const analystProcedure = publicProcedure.use(requireAnalyst);
 export const crmOrCobrosProcedure = publicProcedure.use(requireCrmOrCobros);
 export const crmCobrosOrInvestmentsProcedure = publicProcedure.use(
 	requireCrmCobrosOrInvestments,
 );
+export const accountingProcedure = publicProcedure.use(requireAccounting);
 export const cobrosProcedure = publicProcedure.use(requireCobros);
 export const cobrosSupervisorProcedure = publicProcedure.use(
 	requireCobrosSupervisor,

@@ -6,9 +6,9 @@ import {
 } from "./insurance-selection";
 
 describe("selectInsuranceProvider", () => {
-	test("keeps Universales for eligible vehicle at Q257,000 or below", () => {
+	test("keeps Universales for eligible vehicle below Q257,000", () => {
 		const result = selectInsuranceProvider({
-			insuredAmount: 257000,
+			insuredAmount: 256999.99,
 			vehicleType: "particular",
 			universalesCost: 582.76,
 			gytCost: 500,
@@ -20,10 +20,13 @@ describe("selectInsuranceProvider", () => {
 		expect(result.insuranceSavingsToMembership).toBe(0);
 	});
 
-	test("uses GyT for particular over Q257,000 when cheaper", () => {
+	test.each([
+		"particular",
+		"nuevo",
+	])("uses GyT for eligible type %s at Q257,000 when cheaper", (vehicleType) => {
 		const result = selectInsuranceProvider({
-			insuredAmount: 257000.01,
-			vehicleType: "particular",
+			insuredAmount: 257000,
+			vehicleType,
 			universalesCost: 585.86,
 			gytCost: 584.96,
 			membershipCost: 100,
@@ -36,24 +39,33 @@ describe("selectInsuranceProvider", () => {
 		expect(result.effectiveMembershipCost).toBeCloseTo(100.9, 2);
 	});
 
-	test.each(["particular", "nuevo"])(
-		"uses GyT for %s over Q257,000 when cheaper",
-		(vehicleType) => {
-			const result = selectInsuranceProvider({
-				insuredAmount: 257000.01,
-				vehicleType,
-				universalesCost: 585.86,
-				gytCost: 584.96,
-				membershipCost: 100,
-			});
+	test("calculates the Q257,000 used/agencia seam values when GyT is cheaper", () => {
+		const result = selectInsuranceProvider({
+			insuredAmount: 257000,
+			vehicleType: "particular",
+			universalesCost: 715.28,
+			gytCost: 714.37,
+			membershipCost: 1036.19,
+		});
 
-			expect(result.provider).toBe("gyt");
-		},
-	);
+		expect(result.provider).toBe("gyt");
+		expect(result.customerInsuranceCost).toBe(715.28);
+		expect(result.internalInsuranceCost).toBe(714.37);
+		expect(result.insuranceSavingsToMembership).toBe(0.91);
+		expect(result.effectiveMembershipCost).toBe(1037.1);
+		expect(
+			result.customerInsuranceCost + result.effectiveMembershipCost,
+		).toBeCloseTo(1752.38, 2);
+	});
 
-	test.each(["uber", "pickup", "microbus", "microbus_20", "microbus_35", "microbus_36plus"])(
-		"keeps Universales for excluded type %s even when over threshold and cheaper",
-		(vehicleType) => {
+	test.each([
+		"uber",
+		"pickup",
+		"microbus",
+		"microbus_20",
+		"microbus_35",
+		"microbus_36plus",
+	])("keeps Universales for excluded type %s even when over threshold and cheaper", (vehicleType) => {
 		const result = selectInsuranceProvider({
 			insuredAmount: 300000,
 			vehicleType,
@@ -63,8 +75,7 @@ describe("selectInsuranceProvider", () => {
 		});
 
 		expect(result.provider).toBe("universales");
-		},
-	);
+	});
 
 	test("never uses GyT for pickup", () => {
 		const result = selectInsuranceProvider({
@@ -81,6 +92,8 @@ describe("selectInsuranceProvider", () => {
 	test.each([
 		"panel",
 		"camion",
+		"bus",
+		"buses",
 		"otro",
 	])("keeps Universales for non-approved type %s", (vehicleType) => {
 		const result = selectInsuranceProvider({
@@ -111,7 +124,7 @@ describe("selectInsuranceProvider", () => {
 });
 
 describe("normalizeInsuranceBreakdown", () => {
-		test("returns DB-safe values for GyT selection", () => {
+	test("returns DB-safe values for GyT selection", () => {
 		const result = normalizeInsuranceBreakdown({
 			selection: selectInsuranceProvider({
 				insuredAmount: 300000,
@@ -145,13 +158,31 @@ describe("normalizeInsuranceBreakdown", () => {
 });
 
 describe("buildServerInsurancePersistence", () => {
-	test("ignores manipulated client breakdown and persists server-calculated values", () => {
+	test("preserves the web quoter's adjusted membership without adding GyT savings again", () => {
+		const result = buildServerInsurancePersistence({
+			insuredAmount: 300000,
+			vehicleType: "particular",
+			universalesCost: 600,
+			gytCost: 580,
+			// The web quoter already adjusted the base + GyT saving for the
+			// condition/origin/credit type, then subtracted GPS for the net
+			// membership that is shown and saved.
+			membershipCost: 691.8,
+			customerInsuranceCost: 1291.8,
+		});
+
+		expect(result.insuranceProvider).toBe("gyt");
+		expect(result.insuranceSavingsToMembership).toBe("20.00");
+		expect(result.membresiaPago).toBe("691.80");
+	});
+
+	test("ignores manipulated client breakdown while preserving submitted effective membership", () => {
 		const result = buildServerInsurancePersistence({
 			insuredAmount: 300000,
 			vehicleType: "particular",
 			universalesCost: 585.86,
 			gytCost: 584.96,
-			membershipCost: 100,
+			membershipCost: 100.9,
 			clientBreakdown: {
 				insuranceProvider: "universales",
 				customerInsuranceCost: 1,
@@ -165,8 +196,7 @@ describe("buildServerInsurancePersistence", () => {
 		expect(result.customerInsuranceCost).toBe("585.86");
 		expect(result.internalInsuranceCost).toBe("584.96");
 		expect(result.insuranceSavingsToMembership).toBe("0.90");
-		// El server ya no re-suma el ahorro a la membresía (lo hace el front una vez).
-		expect(result.membresiaPago).toBe("100.00");
+		expect(result.membresiaPago).toBe("100.90");
 	});
 
 	test("uses visible quoter insurance as customer amount when provided", () => {
@@ -185,14 +215,15 @@ describe("buildServerInsurancePersistence", () => {
 		expect(result.internalInsuranceCost).toBe("540.00");
 		// ahorro limpio = universales - gyt = 550.10 - 540 = 10.10 (no del bundle)
 		expect(result.insuranceSavingsToMembership).toBe("10.10");
-		// membresía = la que mandó el front, sin re-sumar el ahorro
+		// membresía efectiva = la membresía visible/ajustada recibida, sin sumar
+		// nuevamente el ahorro GyT.
 		expect(result.membresiaPago).toBe("403.32");
 	});
 
-	test("computes savings from insurance prices and does not re-add them to membership", () => {
-		// El front ya metió el ahorro GyT en membershipCost (162) y armó el bundle
-		// base + membresía en customerInsuranceCost (762). El server NO debe calcular
-		// el ahorro del bundle (762-580) ni volver a sumarlo a la membresía.
+	test("does not derive membership from the customer insurance bundle", () => {
+		// customerInsuranceCost puede traer el bundle visible, pero el ahorro sale
+		// únicamente de Universales - GyT y la membresía se conserva desde el campo
+		// explícito del cotizador.
 		const result = buildServerInsurancePersistence({
 			insuredAmount: 300000,
 			vehicleType: "particular",
@@ -203,9 +234,8 @@ describe("buildServerInsurancePersistence", () => {
 		});
 
 		expect(result.insuranceProvider).toBe("gyt");
-		// ahorro = universales - gyt = 20  (NO 762 - 580 = 182)
+		// ahorro = universales - gyt = 20 (NO 762 - 580 = 182)
 		expect(result.insuranceSavingsToMembership).toBe("20.00");
-		// membresía persistida = la que mandó el front, sin re-sumar el ahorro
 		expect(result.membresiaPago).toBe("162.00");
 	});
 });

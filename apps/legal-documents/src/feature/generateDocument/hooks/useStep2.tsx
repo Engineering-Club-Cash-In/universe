@@ -60,9 +60,30 @@ export interface Field {
 interface DocumentByDpiResponse {
   success: boolean;
   message: string;
-  renapData: RenapData;
+  /** null cuando RENAP no tiene a la persona y el genero se eligio a mano */
+  renapData: RenapData | null;
   documents: Document[];
   campos: Field[];
+  renapUnavailable?: boolean;
+  renapError?: string | null;
+}
+
+/** Genero que se manda cuando RENAP no devuelve a la persona */
+export type GeneroManual = "hombre" | "mujer";
+
+/**
+ * Error de la consulta de DPI. `renapUnavailable` marca el caso en que RENAP
+ * no encontro a la persona, que es el unico donde tiene sentido ofrecer
+ * continuar eligiendo el genero a mano.
+ */
+export class DpiLookupError extends Error {
+  readonly renapUnavailable: boolean;
+
+  constructor(message: string, renapUnavailable: boolean) {
+    super(message);
+    this.name = "DpiLookupError";
+    this.renapUnavailable = renapUnavailable;
+  }
 }
 
 interface Step2Props {
@@ -72,10 +93,11 @@ interface Step2Props {
     renapData?: RenapData;
     documents?: Document[];
     fields?: Field[];
+    manualGender?: "M" | "F";
   };
   readonly onChange: (
     field: string,
-    value: string | RenapData | Document[] | Field[]
+    value: string | RenapData | Document[] | Field[] | null
   ) => void;
 }
 
@@ -84,37 +106,55 @@ const API_URL = import.meta.env.VITE_API_URL;
 
 const getDocumentByDpi = async (
   dpi: string,
-  documentNames: string[]
+  documentNames: string[],
+  genero?: GeneroManual
 ): Promise<DocumentByDpiResponse> => {
   const response = await fetch(`${API_URL}/docuSeal/document-by-dpi`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ dpi, documentNames }),
+    body: JSON.stringify({ dpi, documentNames, ...(genero ? { genero } : {}) }),
   });
 
   if (!response.ok) {
     throw new Error(`Error: ${response.status} ${response.statusText}`);
   }
 
-  const data = await response.json();
+  const data = (await response.json()) as DocumentByDpiResponse;
+
+  // La API responde 200 aunque falle (success:false). Sin esto el wizard se
+  // quedaba mudo: no avanzaba y tampoco mostraba el motivo.
+  if (!data.success) {
+    throw new DpiLookupError(
+      data.message || "No se pudieron obtener los documentos para ese DPI",
+      Boolean(data.renapError)
+    );
+  }
+
   return data;
 };
 
 export const useStep2 = ({ data, onChange }: Step2Props) => {
   const [dpiInput, setDpiInput] = useState(data.dpi || "");
+  // Genero elegido a mano cuando RENAP no tiene el DPI
+  const [generoManual, setGeneroManual] = useState<GeneroManual | "">("");
 
   // Mutation para consultar el DPI
   const dpiMutation = useMutation({
-    mutationFn: (dpi: string) =>
-      getDocumentByDpi(dpi, data.documentTypes || []),
-    onSuccess: (response) => {
-      if (response.success) {
-        onChange("dpi", dpiInput);
-        onChange("renapData", response.renapData);
-        onChange("documents", response.documents);
-        onChange("fields", response.campos);
+    mutationFn: ({ dpi, genero }: { dpi: string; genero?: GeneroManual }) =>
+      getDocumentByDpi(dpi, data.documentTypes || [], genero),
+    onSuccess: (response, variables) => {
+      onChange("dpi", variables.dpi);
+      onChange("renapData", response.renapData ?? null);
+      onChange("documents", response.documents);
+      onChange("fields", response.campos);
+      // Sin RENAP, el genero elegido a mano es lo unico que define la
+      // plantilla y el trato en los documentos: hay que conservarlo.
+      if (response.renapData) {
+        onChange("manualGender", null);
+      } else {
+        onChange("manualGender", variables.genero === "mujer" ? "F" : "M");
       }
     },
   });
@@ -122,8 +162,18 @@ export const useStep2 = ({ data, onChange }: Step2Props) => {
   const handleSubmitDpi = (e: React.FormEvent) => {
     e.preventDefault();
     if (dpiInput.trim()) {
-      dpiMutation.mutate(dpiInput.trim());
+      dpiMutation.mutate({ dpi: dpiInput.trim() });
     }
+  };
+
+  // RENAP no encontro a la persona: se puede seguir eligiendo el genero
+  const renapUnavailable =
+    dpiMutation.error instanceof DpiLookupError &&
+    dpiMutation.error.renapUnavailable;
+
+  const handleContinueWithoutRenap = () => {
+    if (!generoManual || !dpiInput.trim()) return;
+    dpiMutation.mutate({ dpi: dpiInput.trim(), genero: generoManual });
   };
 
   const formatDpi = (value: string) => {
@@ -166,5 +216,9 @@ export const useStep2 = ({ data, onChange }: Step2Props) => {
     renapData: data.renapData,
     documents: data.documents,
     fields: data.fields,
+    generoManual,
+    setGeneroManual,
+    renapUnavailable,
+    handleContinueWithoutRenap,
   };
 };

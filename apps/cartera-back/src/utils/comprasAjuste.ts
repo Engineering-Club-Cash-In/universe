@@ -15,6 +15,26 @@ import Big from "big.js";
  */
 const fechaEfectivaCompra = sql`COALESCE(${compras_credito_inversionista.fecha_completada}, ${compras_credito_inversionista.updated_at})`;
 
+/** Fila de compra que necesita el cálculo del ajuste (subconjunto de la tabla). */
+export interface FilaCompraAjuste {
+  monto_aportado: string;
+  status: string | null;
+  tipo_operacion: string | null;
+  fecha_completada: Date | string | null;
+  updated_at: Date | string | null;
+  created_at: Date | string | null;
+}
+
+/** Columnas que consume `calcularAjusteComprasDesdeFilas`; reutilizable para precargar en bloque. */
+export const columnasCompraAjuste = {
+  monto_aportado: compras_credito_inversionista.monto_aportado,
+  status: compras_credito_inversionista.status,
+  tipo_operacion: compras_credito_inversionista.tipo_operacion,
+  fecha_completada: compras_credito_inversionista.fecha_completada,
+  updated_at: compras_credito_inversionista.updated_at,
+  created_at: compras_credito_inversionista.created_at,
+};
+
 export interface AjusteCompras {
   /** Restar del espejo antes de comparar con histórico (compras post-historico). */
   montoRestarValidacion: Big;
@@ -46,16 +66,10 @@ export async function calcularAjusteCompras(
   lastHistoricoFecha: Date | null,
   periodoMes?: number,
   periodoAnio?: number,
+  database: typeof db = db,
 ): Promise<AjusteCompras> {
-  const compras = await db
-    .select({
-      monto_aportado: compras_credito_inversionista.monto_aportado,
-      status: compras_credito_inversionista.status,
-      tipo_operacion: compras_credito_inversionista.tipo_operacion,
-      fecha_completada: compras_credito_inversionista.fecha_completada,
-      updated_at: compras_credito_inversionista.updated_at,
-      created_at: compras_credito_inversionista.created_at,
-    })
+  const compras = await database
+    .select(columnasCompraAjuste)
     .from(compras_credito_inversionista)
     .where(
       and(
@@ -66,6 +80,27 @@ export async function calcularAjusteCompras(
     )
     .orderBy(desc(compras_credito_inversionista.updated_at));
 
+  return calcularAjusteComprasDesdeFilas(
+    compras as FilaCompraAjuste[],
+    lastHistoricoFecha,
+    periodoMes,
+    periodoAnio,
+  );
+}
+
+/**
+ * Misma lógica que `calcularAjusteCompras` pero sobre filas YA cargadas, sin tocar la BD.
+ *
+ * Existe para que quien procesa muchos créditos (p. ej. el Excel del inversionista) precargue
+ * las compras de todos ellos en UNA consulta y luego calcule en memoria, en vez de disparar
+ * una consulta por crédito. El resultado es idéntico: `calcularAjusteCompras` delega aquí.
+ */
+export function calcularAjusteComprasDesdeFilas(
+  compras: FilaCompraAjuste[],
+  lastHistoricoFecha: Date | null,
+  periodoMes?: number,
+  periodoAnio?: number,
+): AjusteCompras {
   let montoRestarValidacion = new Big(0);
   let montoRestarCalculo = new Big(0);
 

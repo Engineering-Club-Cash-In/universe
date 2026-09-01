@@ -8,6 +8,7 @@ import { isNotNull } from "drizzle-orm";
 import { db } from "../db";
 import {
 	generatedLegalContracts,
+	licenseQrVerifications,
 	notificationDocuments,
 	opportunityDocuments,
 	vehicleDocuments,
@@ -110,20 +111,29 @@ async function deleteObject(key: string): Promise<void> {
 }
 
 async function loadReferencedKeys(): Promise<Set<string>> {
-	const [opportunityRows, vehicleRows, notificationRows, legalContractRows] =
-		await Promise.all([
-			db
-				.select({ key: opportunityDocuments.filePath })
-				.from(opportunityDocuments),
-			db.select({ key: vehicleDocuments.filePath }).from(vehicleDocuments),
-			db
-				.select({ key: notificationDocuments.filePath })
-				.from(notificationDocuments),
-			db
-				.select({ key: generatedLegalContracts.pdfLink })
-				.from(generatedLegalContracts)
-				.where(isNotNull(generatedLegalContracts.pdfLink)),
-		]);
+	const [
+		opportunityRows,
+		vehicleRows,
+		notificationRows,
+		legalContractRows,
+		licenseVerificationRows,
+	] = await Promise.all([
+		db
+			.select({ key: opportunityDocuments.filePath })
+			.from(opportunityDocuments),
+		db.select({ key: vehicleDocuments.filePath }).from(vehicleDocuments),
+		db
+			.select({ key: notificationDocuments.filePath })
+			.from(notificationDocuments),
+		db
+			.select({ key: generatedLegalContracts.pdfLink })
+			.from(generatedLegalContracts)
+			.where(isNotNull(generatedLegalContracts.pdfLink)),
+		db
+			.select({ key: licenseQrVerifications.documentKey })
+			.from(licenseQrVerifications)
+			.where(isNotNull(licenseQrVerifications.documentKey)),
+	]);
 
 	const referencedKeys = new Set<string>();
 	for (const row of [
@@ -131,6 +141,7 @@ async function loadReferencedKeys(): Promise<Set<string>> {
 		...vehicleRows,
 		...notificationRows,
 		...legalContractRows,
+		...licenseVerificationRows,
 	]) {
 		const normalized = normalizeStoredKey(row.key);
 		if (normalized) {
@@ -149,6 +160,7 @@ async function main() {
 		"vehicles/",
 		"notifications/",
 		"legal-contracts/",
+		"license-verifications/",
 	];
 
 	if (includeBankStatements) {

@@ -37,6 +37,7 @@ import {
 	checkSeguimientosVencidos,
 	procesarSeguimientosRecurrentes,
 } from "./jobs/cobros-notifications";
+import { auditRequest, markAuditFailure } from "./lib/audit";
 import { auth } from "./lib/auth";
 import { createContext } from "./lib/context";
 import { PERMISSIONS } from "./lib/roles";
@@ -44,11 +45,13 @@ import {
 	appRouter,
 	disbursementRouter,
 	manualVehicleRouter,
+	proyeccionRouter,
 } from "./routers/index";
 import { investmentsRouter } from "./routers/investments";
 import externalContractsRouter from "./routes/external-contracts";
 
 const app = new Hono();
+
 const AUTH_DIAG_PREFIX = "CRM_AUTH_DIAG";
 
 function logAuthDiagnostic(reason: string, detail: Record<string, unknown>) {
@@ -75,6 +78,9 @@ function getRequestDiagnostic(c: HonoContext) {
 }
 
 app.use(logger());
+// Contexto de auditoría para todo lo que no pasa por ORPC (bot, portal,
+// formulario público, imports). Ver lib/audit.ts.
+app.use(auditRequest());
 app.use(
 	"/*",
 	cors({
@@ -175,6 +181,7 @@ const handler = new RPCHandler(
 		manualVehicleRouter,
 		investmentsRouter,
 		disbursementRouter,
+		proyeccionRouter,
 	),
 );
 app.use("/rpc/*", async (c, next) => {
@@ -491,6 +498,12 @@ app.post("/info/renap", async (c) => {
 
 		const result = await getRenapInfoController(dpi, phone);
 
+		// El controller reporta el rechazo en el valor y responde 200: sin esto,
+		// un DPI inválido o una caída de RENAP no dejarían rastro del intento.
+		if (result && typeof result === "object" && result.success === false) {
+			markAuditFailure("RENAP_RECHAZADO");
+		}
+
 		return c.json(result);
 	} catch (err: any) {
 		console.error("[ERROR] /info/renap:", err);
@@ -527,6 +540,12 @@ app.post("/info/lead-opportunity", async (c) => {
 		}
 
 		const result = await updateLeadAndCreateOpportunity(body.dpi, body);
+
+		// Mismo caso que /info/renap: el controller reporta el rechazo en el valor
+		// y la ruta responde 200.
+		if (result && typeof result === "object" && result.success === false) {
+			markAuditFailure("LEAD_OPPORTUNITY_RECHAZADO");
+		}
 
 		return c.json(result);
 	} catch (err: any) {
@@ -833,6 +852,9 @@ app.get("/api/accounting/resumen-global-excel", async (c) => {
 			mes: mes ? Number(mes) : undefined,
 			anio: anio ? Number(anio) : undefined,
 			inversionistaId: inversionistaId || undefined,
+			// Mismo criterio que la tabla de Pagar Inversionistas: el Excel debe
+			// traer también a los internos/propios (Cube, Autocash, …).
+			incluirInternos: true,
 		});
 		return c.json(result);
 	} catch (err: any) {

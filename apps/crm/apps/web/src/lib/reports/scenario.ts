@@ -158,7 +158,7 @@ export type FlujoCuotasInversionesResponse = {
 };
 
 export type ReinversionLiquidacionesResponse = {
-	contrato_version: 2;
+	contrato_version: 3;
 	/**
 	 * Distribución mensual por modalidad. `total_cuota` es el pago neto y
 	 * `reinversion_total` el flujo que permanece colocado; juntos forman el
@@ -178,6 +178,7 @@ export type ReinversionLiquidacionesResponse = {
 			iva_facturado: string;
 			total_distribuido: string;
 			cantidad_liquidaciones: number;
+			composicion: LiquidationComposition;
 		}
 	>;
 	interesNeto: {
@@ -196,9 +197,19 @@ export type ReinversionLiquidacionesResponse = {
 		reinversion: string;
 		a_recibir: string;
 		capital_activo: string;
+		composicion: LiquidationComposition;
 	}[];
-	/** Compras del mes (operación de compra) agrupadas por modalidad de reinversión. */
-	comprasMes: { tipo: string; cantidad: number; monto: string }[];
+	comprasMes: {
+		modalidad_facturacion: string;
+		tipo_reinversion: string;
+		tipo_compra: PurchaseClassification;
+		cantidad: number;
+		monto: string;
+	}[];
+	ticketInversion: {
+		actual: PurchaseTicketMonth & { variacion_porcentual: string | null };
+		historico: PurchaseTicketMonth[];
+	};
 	detalleInteresNeto: (
 		| {
 				inversionista_id: number;
@@ -229,7 +240,9 @@ export type ReinversionLiquidacionesResponse = {
 	detalleComprasMes: {
 		fecha: string;
 		inversionista: string;
-		modalidad: string;
+		modalidad_facturacion: string;
+		tipo_reinversion: string;
+		tipo_compra: PurchaseClassification;
 		monto: string;
 	}[];
 	detalle_estado: {
@@ -237,6 +250,31 @@ export type ReinversionLiquidacionesResponse = {
 		error: string | null;
 	};
 	cantidad_liquidaciones: number;
+};
+
+export type PurchaseClassification =
+	| "nueva_posicion"
+	| "ampliacion_posicion"
+	| "sin_clasificar";
+
+export type PurchaseTicketMonth = {
+	periodo: string;
+	cantidad: number;
+	monto_total: string;
+	ticket_promedio: string;
+};
+
+export type CompositionDestination = {
+	capital: string;
+	resto: string;
+	total: string;
+};
+
+export type LiquidationComposition = {
+	pagado: CompositionDestination & { sin_clasificar: string };
+	reinvertido: CompositionDestination & { sin_clasificar: string };
+	flujo: CompositionDestination;
+	estado: "exacto" | "sin_clasificar";
 };
 
 export type PuntoEquilibrioRow = {

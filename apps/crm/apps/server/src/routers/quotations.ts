@@ -261,6 +261,9 @@ export const quotationsRouter = {
 					serverInsurance.provider === "gyt"
 						? serverInsurance.internalInsuranceCost
 						: null,
+				// La membresía del cotizador ya viene ajustada por condición/origen/tipo
+				// de crédito y neta de GPS; el servidor recalcula seguro/proveedor, pero
+				// no debe reemplazarla con la base sin ajustar de la tabla.
 				membershipCost: input.membershipCost,
 				customerInsuranceCost: input.insuranceCost,
 			});
@@ -324,7 +327,9 @@ export const quotationsRouter = {
 					gpsCost: input.gpsCost.toString(),
 					transferCost: input.transferCost.toString(),
 					adminCost: input.adminCost.toString(),
-					membershipCost: insurancePersistence.membresiaPago,
+					membershipCost: input.isInterno
+						? "0.00"
+						: insurancePersistence.membresiaPago,
 					insuranceProvider: insurancePersistence.insuranceProvider,
 					customerInsuranceCost: insurancePersistence.customerInsuranceCost,
 					internalInsuranceCost: insurancePersistence.internalInsuranceCost,

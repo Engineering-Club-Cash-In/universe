@@ -3,7 +3,7 @@
  * Integra con legal-docs-blueprints API y API de documentos legales
  */
 import { ORPCError } from "@orpc/server";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNotNull } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { leads, opportunities, salesStages } from "../db/schema/crm";
@@ -13,8 +13,13 @@ import {
 } from "../db/schema/legal-contracts";
 import { quotations } from "../db/schema/quotations";
 import { vehicles } from "../db/schema/vehicles";
+import { eqDpi } from "../lib/dpi-lookup";
 import { juridicoProcedure } from "../lib/orpc";
 import { getFileUrlWithBucketInKey } from "../lib/storage";
+import {
+	LEGACY_VENDOR_GENDER_REQUIRED_MESSAGE,
+	resolveLegacyContractGender,
+} from "../lib/contract-generation-gender";
 import {
 	enrichLeadFromRenap,
 	mapOpportunityToContractData,
@@ -67,27 +72,73 @@ export const contractGenerationRouter = {
 			z.object({
 				dpi: z.string().length(13),
 				documentNames: z.array(z.string()).min(1),
+				opportunityId: z.string().uuid().optional(),
 			}),
 		)
 		.handler(async ({ input }) => {
 			try {
+				// Género del CRM como fallback: RENAP a veces no tiene al cliente
+				// aunque el DPI sea correcto, y sin género no se puede elegir plantilla.
+				// Se resuelve por la oportunidad y no por el DPI porque hay DPI
+				// duplicados entre leads (154 grupos según la migración 0028) y un
+				// lead viejo puede traer el género vacío o distinto al del dueño de
+				// esta oportunidad, que es el que firma.
+				const [leadDeLaOportunidad] = input.opportunityId
+					? await db
+							.select({ gender: leads.gender })
+							.from(opportunities)
+							.innerJoin(leads, eq(opportunities.leadId, leads.id))
+							.where(eq(opportunities.id, input.opportunityId))
+							.limit(1)
+					: [];
+
+				// Solo si ese lead no tiene género se busca por DPI: los duplicados
+				// son la misma persona, así que sirve cualquiera que sí lo tenga.
+				// eqDpi y no eq porque los DPI viejos quedaron guardados con
+				// espacios ("1648 57656 0101") y el front manda el DPI normalizado.
+				const [leadPorDpi] = leadDeLaOportunidad?.gender
+					? []
+					: await db
+							.select({ gender: leads.gender })
+							.from(leads)
+							.where(
+								and(eqDpi(leads.dpi, input.dpi), isNotNull(leads.gender)),
+							)
+							.limit(1);
+
+				const gender = leadDeLaOportunidad?.gender ?? leadPorDpi?.gender;
+				const generoFallback =
+					gender === "female"
+						? ("mujer" as const)
+						: gender === "male"
+							? ("hombre" as const)
+							: undefined;
+
 				const response = await getDocumentsByDpi(
 					input.dpi,
 					input.documentNames,
+					generoFallback,
 				);
 				if (!response.success) {
 					throw new ORPCError("BAD_REQUEST", {
 						message: response.message || "Error al obtener documentos",
 					});
 				}
+				if (response.renapUnavailable) {
+					console.warn(
+						`[getDocumentsByDpi] RENAP sin datos para ${input.dpi} (${response.renapError}); se usan los datos del CRM`,
+					);
+				}
 				return {
 					success: true,
 					renapData: response.renapData,
 					documents: response.documents,
 					fields: response.campos,
+					renapUnavailable: response.renapUnavailable ?? false,
 				};
 			} catch (error) {
 				console.error("[getDocumentsByDpi] Error:", error);
+				if (error instanceof ORPCError) throw error;
 				throw new ORPCError("INTERNAL_SERVER_ERROR", {
 					message:
 						error instanceof Error
@@ -142,6 +193,7 @@ export const contractGenerationRouter = {
 	 * Intenta enriquecer los datos del lead desde RENAP
 	 */
 	enrichLeadFromRenap: juridicoProcedure
+		.meta({ audit: { entity: "lead", action: "enrich_renap" } })
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
@@ -178,6 +230,7 @@ export const contractGenerationRouter = {
 					month: z.string(),
 					year: z.string(),
 				}),
+				vendorGender: z.enum(["male", "female"]).optional(),
 				beneficiarios: z
 					.array(
 						z.object({
@@ -231,6 +284,15 @@ export const contractGenerationRouter = {
 				});
 			}
 
+			if (
+				input.contractTypes.includes("declaracion_jurada") &&
+				!input.vendorGender
+			) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: LEGACY_VENDOR_GENDER_REQUIRED_MESSAGE,
+				});
+			}
+
 			// 3. Construir fecha del contrato
 			const contractDate = new Date(
 				Number.parseInt(input.contractDate.year),
@@ -247,6 +309,16 @@ export const contractGenerationRouter = {
 			if (!contractData) {
 				throw new ORPCError("INTERNAL_SERVER_ERROR", {
 					message: "Error al mapear datos de la oportunidad",
+				});
+			}
+
+			if (
+				input.contractTypes.includes("autorizacion_desembolso") &&
+				(contractData.desembolso?.omitidosPorMoneda ?? 0) > 0
+			) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"No se puede generar la carta de desembolso: hay cheques en una moneda distinta de GTQ",
 				});
 			}
 
@@ -278,7 +350,11 @@ export const contractGenerationRouter = {
 					const contractName = `Contrato ${contractType}`;
 
 					// Llamar a la API de legal-docs-blueprints
-					const apiResult = await callLegalDocsApi(contractType, contractData);
+					const apiResult = await callLegalDocsApi(
+						contractType,
+						contractData,
+						input.vendorGender,
+					);
 
 					if (apiResult.success) {
 						// Guardar el contrato en la base de datos
@@ -623,7 +699,7 @@ export const contractGenerationRouter = {
 				.where(
 					eq(contractGenerationSnapshots.opportunityId, input.opportunityId),
 				)
-				.orderBy(contractGenerationSnapshots.createdAt)
+				.orderBy(desc(contractGenerationSnapshots.createdAt))
 				.limit(1);
 
 			return snapshot || null;
@@ -726,6 +802,87 @@ export const contractGenerationRouter = {
 					];
 					const monthText = monthNames[monthIndex];
 
+					// === LEER LA FECHA ORIGINAL ANTES DE PISAR NADA ===
+					// Obligatorio hacerlo aquí: más abajo se sobreescriben mesTexto/ano
+					// con la fecha nueva, y compararlos después siempre daba "no cambió".
+					const mesContratoOriginal = monthNames.findIndex(
+						(m) => m === (newData.mesTexto as string | undefined)?.toLowerCase(),
+					);
+					const anioContratoOriginal = normalizarAnio(newData.ano);
+
+					const diaVencOriginal = newData.diaVencimiento
+						? Number.parseInt(String(newData.diaVencimiento), 10)
+						: null;
+					const mesVencOriginal = newData.mesVencimiento
+						? Number.parseInt(String(newData.mesVencimiento), 10) - 1
+						: null;
+					const anioVencOriginal = normalizarAnio(newData.anoVencimiento);
+
+					// === CALCULAR FECHA DE VENCIMIENTO ===
+					// Regla de negocio: el día de pago es el pactado con el cliente y NO
+					// cambia al regenerar. Lo único que se corre es el mes/año de
+					// vencimiento, la misma cantidad de meses que se movió la fecha del
+					// contrato, para que el plazo del crédito se respete.
+					// Ej: contrato 29/jul con vencimiento 15/ago -> se regenera al 03/ago
+					// (corrió 1 mes) -> el vencimiento pasa a 15/sep.
+					let mesVenc: number;
+					let anioVenc: number;
+					let diaVenc: number;
+
+					const puedeCorrerVencimiento =
+						mesContratoOriginal !== -1 &&
+						anioContratoOriginal !== null &&
+						diaVencOriginal !== null &&
+						mesVencOriginal !== null &&
+						anioVencOriginal !== null;
+
+					if (puedeCorrerVencimiento) {
+						const mesesCorridos =
+							year * 12 +
+							monthIndex -
+							(anioContratoOriginal * 12 + mesContratoOriginal);
+
+						const fechaVenc = new Date(
+							anioVencOriginal,
+							mesVencOriginal + mesesCorridos,
+							1,
+						);
+						mesVenc = fechaVenc.getMonth();
+						anioVenc = fechaVenc.getFullYear();
+
+						const diasEnMesVencOriginal = new Date(
+							anioVencOriginal,
+							mesVencOriginal + 1,
+							0,
+						).getDate();
+						const diasEnMesVenc = new Date(anioVenc, mesVenc + 1, 0).getDate();
+
+						// "último día" es una regla, no un número: se recalcula sobre el
+						// mes destino (31 de agosto -> 30 de septiembre).
+						const pagoUltimoDia =
+							newData.diaPago === "último día" ||
+							diaVencOriginal === diasEnMesVencOriginal;
+
+						diaVenc = pagoUltimoDia
+							? diasEnMesVenc
+							: Math.min(diaVencOriginal, diasEnMesVenc);
+					} else {
+						// Sin fecha original utilizable en el snapshot: recalcular desde
+						// cero con el plazo, igual que la generación original.
+						const fechaVenc = new Date(year, monthIndex + termMonths + 1, 1);
+						mesVenc = fechaVenc.getMonth();
+						anioVenc = fechaVenc.getFullYear();
+
+						const diasEnMesVenc = new Date(anioVenc, mesVenc + 1, 0).getDate();
+						if (day <= 20) {
+							diaVenc = 15;
+							if ("diaPago" in newData) newData.diaPago = "día quince";
+						} else {
+							diaVenc = diasEnMesVenc;
+							if ("diaPago" in newData) newData.diaPago = "último día";
+						}
+					}
+
 					// Convertir día a texto
 					const dayText = numberToSpanishText(day);
 					// Convertir año corto a texto (ej: 26 -> "veintiséis")
@@ -744,60 +901,6 @@ export const contractGenerationRouter = {
 					if ("anoTexto" in newData) newData.anoTexto = yearText;
 					if ("fechaInicioContrato" in newData)
 						newData.fechaInicioContrato = fullDateText;
-
-					// === CALCULAR DÍA DE PAGO Y FECHA DE VENCIMIENTO ===
-					// Regla: Del 1 al 20 -> día 15, Del 21 al 31 -> último día del mes
-					let diaPago: string;
-					let diaVenc: number;
-
-					// Obtener mes original del contrato para detectar si cambió
-					const mesContratoOriginalIndex = monthNames.findIndex(
-						(m) => m === newData.mesTexto?.toLowerCase(),
-					);
-					const mesContratoCambio =
-						mesContratoOriginalIndex !== -1 &&
-						mesContratoOriginalIndex !== monthIndex;
-
-					// Obtener mes y año de vencimiento original de los datos del contrato
-					const mesVencOriginal = newData.mesVencimiento
-						? Number.parseInt(newData.mesVencimiento) - 1
-						: null;
-					const anioVencOriginal = newData.anoVencimiento
-						? 2000 + Number.parseInt(newData.anoVencimiento)
-						: null;
-
-					let mesVenc: number;
-					let anioVenc: number;
-
-					// Si el mes del contrato cambió, recalcular la fecha de vencimiento con termMonths
-					// Si no cambió, mantener el mes/año original y solo ajustar el día
-					if (
-						mesContratoCambio ||
-						mesVencOriginal === null ||
-						anioVencOriginal === null
-					) {
-						// Recalcular fecha de vencimiento basándose en termMonths
-						const fechaVenc = new Date(year, monthIndex + termMonths, 1);
-						mesVenc = fechaVenc.getMonth();
-						anioVenc = fechaVenc.getFullYear();
-					} else {
-						// Mantener mes/año original
-						mesVenc = mesVencOriginal;
-						anioVenc = anioVencOriginal;
-					}
-
-					if (day <= 20) {
-						// Del 1 al 20: día de pago es "día quince"
-						diaPago = "día quince";
-						diaVenc = 15;
-					} else {
-						// Del 21 al 31: día de pago es "último día"
-						diaPago = "último día";
-						diaVenc = new Date(anioVenc, mesVenc + 1, 0).getDate();
-					}
-
-					// Actualizar campos de día de pago
-					if ("diaPago" in newData) newData.diaPago = diaPago;
 
 					// Actualizar campos de fecha de vencimiento
 					const mesVencText = monthNames[mesVenc];
@@ -926,6 +1029,23 @@ export const contractGenerationRouter = {
 			}
 		}),
 };
+
+/**
+ * Normaliza un año que puede venir con 2 o 4 dígitos ("26" | "2026").
+ * Los snapshots viejos guardaron el año del contrato como 19xx porque
+ * `new Date(26, ...)` mapea los años 0-99 a 1900+, por eso se corrige el siglo.
+ */
+function normalizarAnio(valor: unknown): number | null {
+	if (valor === null || valor === undefined || valor === "") return null;
+	const anio =
+		typeof valor === "number"
+			? valor
+			: Number.parseInt(String(valor).trim(), 10);
+	if (!Number.isFinite(anio)) return null;
+	if (anio < 100) return 2000 + anio;
+	if (anio < 2000) return anio + 100; // 1926 -> 2026
+	return anio;
+}
 
 /**
  * Convierte nombre del mes en español a número
@@ -1065,6 +1185,7 @@ interface LegalDocsApiResult {
 async function callLegalDocsApi(
 	contractType: string,
 	data: Awaited<ReturnType<typeof mapOpportunityToContractData>>,
+	vendorGender?: "male" | "female",
 ): Promise<LegalDocsApiResult> {
 	try {
 		if (!data) {
@@ -1109,8 +1230,11 @@ async function callLegalDocsApi(
 		const emails = clientEmail ? [clientEmail] : undefined;
 
 		// Determinar género para concordancia en documentos
-		const gender =
-			data.cliente?.genero === "femenino" ? "female" : ("male" as const);
+		const gender = resolveLegacyContractGender({
+			apiContractType,
+			clientGender: data.cliente?.genero,
+			vendorGender,
+		});
 
 		// Preparar payload para el endpoint /contracts/:type
 		// El endpoint extrae emails y gender del body, el resto va a data

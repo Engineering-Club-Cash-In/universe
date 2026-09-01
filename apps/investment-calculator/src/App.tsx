@@ -527,8 +527,9 @@ export default function InvestmentCalculator() {
     summary.appendChild(
       createSummaryRow(
         "Tasa de Interés Mensual:",
-        // Tasa real del crédito (no multiplicada por el % del inversionista).
-        `${parseFloat(interestRate.toFixed(4))}%`
+        // En el PDF va la tasa efectiva del inversionista (tasa × % de
+        // participación), pedido de inversiones; en pantalla queda la real.
+        `${parseFloat((interestRate * (investorPercentage / 100)).toFixed(4))}%`
       )
     );
 

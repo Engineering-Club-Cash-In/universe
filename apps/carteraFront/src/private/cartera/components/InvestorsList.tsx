@@ -2,12 +2,19 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { matchesSearch } from "@/lib/utils";
 import { Plus, Trash2, BookCopy, Wallet, ChevronsUpDown, Check, Calculator, Loader2 } from "lucide-react";
 import { useRef, useState, useEffect, Fragment } from "react";
 import { Combobox, Transition } from "@headlessui/react";
 import { DatePickerMUI } from "./calendar";
 import { toast } from "sonner";
-import { calculateInvestorQuotasService, type InversionistaPayload } from "../services/services";
+import {
+  calculateInvestorQuotasService,
+  MODALIDAD_FACTURACION_LABELS,
+  type InversionistaPayload,
+  type ModalidadFacturacion,
+} from "../services/services";
+import { useModalidadFacturacionSpreadByModalidad } from "../hooks/useModalidadFacturacion";
 
 type TipoInversion = "compra_cartera" | "reinversion";
 
@@ -42,6 +49,108 @@ interface InvestorsListProps {
   recalculatedQuotas?: Record<number, number>;
   recalculatedQuotasMirror?: Record<number, number>;
   onClearRecalculatedQuota?: (inversionistaId: number, isMirror: boolean) => void;
+  /**
+   * IDs que NO pueden elegirse al agregar un inversionista nuevo: los que
+   * participan HOY en el crédito (incluye los borrados en esta misma edición,
+   * porque re-agregarlos sería la misma participación disfrazada de compra
+   * nueva). Los que ya salieron del crédito sí pueden volver a entrar.
+   */
+  blockedInvestorIds?: Set<number>;
+}
+
+function NewInvestorMetadataFields({
+  index,
+  investor,
+  onChange,
+}: {
+  index: number;
+  investor: InversionistaPayload;
+  onChange: (metadata: Partial<InversionistaPayload>) => void;
+}) {
+  const modalidad = investor.modalidad_facturacion;
+  const spreadQuery = useModalidadFacturacionSpreadByModalidad(
+    modalidad ?? "p2p_directa",
+    Boolean(modalidad),
+  );
+  const tipoReinversionField = (
+    <div className="w-56">
+      <Label htmlFor={`tipo-reinversion-${index}`} className="text-blue-900 font-semibold">
+        Tipo de reinversión
+      </Label>
+      <select
+        id={`tipo-reinversion-${index}`}
+        value={investor.tipo_reinversion ?? ""}
+        onChange={(event) => onChange({ tipo_reinversion: event.target.value as InversionistaPayload["tipo_reinversion"] })}
+        className="mt-1 h-10 w-full rounded-md border border-blue-200 bg-white px-3 text-sm"
+      >
+        <option value="">Seleccione tipo</option>
+        <option value="sin_reinversion">Tradicional</option>
+        <option value="reinversion_capital">Reinversión capital</option>
+        <option value="reinversion_interes">Reinversión interés</option>
+        <option value="reinversion_total">Interés compuesto</option>
+        <option value="reinversion_variable">Reinversión variable</option>
+        <option value="reinversion_excedente">Reinversión excedente</option>
+      </select>
+    </div>
+  );
+
+  if (investor.tipo_operacion === "reinversion") {
+    return tipoReinversionField;
+  }
+
+  return (
+    <>
+      {tipoReinversionField}
+      <div className="w-64">
+        <Label htmlFor={`modalidad-facturacion-${index}`} className="text-blue-900 font-semibold">
+          Modalidad de facturación
+        </Label>
+        <select
+          id={`modalidad-facturacion-${index}`}
+          value={modalidad ?? ""}
+          onChange={(event) =>
+            onChange({
+              modalidad_facturacion: event.target.value as ModalidadFacturacion,
+              modalidad_facturacion_spread_id: undefined,
+            })
+          }
+          className="mt-1 h-10 w-full rounded-md border border-blue-200 bg-white px-3 text-sm"
+        >
+          <option value="">Seleccione modalidad</option>
+          {Object.entries(MODALIDAD_FACTURACION_LABELS).map(([value, label]) => (
+            <option key={value} value={value}>{label}</option>
+          ))}
+        </select>
+      </div>
+      <div className="w-64">
+        <Label htmlFor={`rango-facturacion-${index}`} className="text-blue-900 font-semibold">
+          Rango de facturación
+        </Label>
+        <select
+          id={`rango-facturacion-${index}`}
+          value={investor.modalidad_facturacion_spread_id ?? ""}
+          disabled={!modalidad || spreadQuery.isLoading}
+          onChange={(event) =>
+            onChange({
+              modalidad_facturacion_spread_id: event.target.value
+                ? Number(event.target.value)
+                : undefined,
+            })
+          }
+          className="mt-1 h-10 w-full rounded-md border border-blue-200 bg-white px-3 text-sm disabled:bg-gray-100"
+        >
+          <option value="">
+            {spreadQuery.isLoading ? "Cargando rangos..." : "Seleccione rango"}
+          </option>
+          {spreadQuery.data?.map((spread) => (
+            <option key={spread.id} value={spread.id}>
+              {`Q${spread.monto_desde} - ${spread.monto_hasta ? `Q${spread.monto_hasta}` : "sin límite"} (${spread.spread}%)`}
+            </option>
+          ))}
+        </select>
+      </div>
+    </>
+  );
 }
 
 export function InvestorsList({
@@ -57,15 +166,17 @@ export function InvestorsList({
   recalculatedQuotas,
   recalculatedQuotasMirror,
   onClearRecalculatedQuota,
+  blockedInvestorIds,
 }: InvestorsListProps) {
   // Estado local para saber qué items tienen el espejo expandido
   const [expandedMirrors, setExpandedMirrors] = useState<Set<number>>(new Set());
   const [investorQueries, setInvestorQueries] = useState<Record<number, string>>({});
   const [mirrorQueries, setMirrorQueries] = useState<Record<number, string>>({});
 
-  // Track nuevos inversionistas y su tipo de inversión
-  const [newInvestorIndices, setNewInvestorIndices] = useState<Set<number>>(new Set());
-  const [tipoInversionMap, setTipoInversionMap] = useState<Record<number, TipoInversion>>({});
+  // Los "nuevos" viven en los valores del formulario (inv.es_nuevo /
+  // inv.tipo_operacion), no en estado local por índice: así sobreviven a
+  // borrados intermedios sin corrimientos y viajan tal cual en el payload
+  // para que el backend registre la operación en compras_credito_inversionista.
 
   // Track saldo_reinversion overrides por inversionista_id (para mostrar el saldo actualizado en UI)
   const [saldoOverrides, setSaldoOverrides] = useState<Record<number, number>>({});
@@ -127,6 +238,10 @@ export function InvestorsList({
       porcentaje_inversion: 0,
       fecha_inicio_participacion: fecha,
       cuota_inversionista: 0,
+      // Marca de nuevo + tipo: viajan en el payload para que el backend
+      // registre la operación en compras_credito_inversionista.
+      es_nuevo: true,
+      tipo_operacion: tipoDefault,
     };
 
     const newIndex = investors.length;
@@ -136,37 +251,21 @@ export function InvestorsList({
       { ...newInvestor },
     ]);
 
-    // Marcar como nuevo y asignar tipo por defecto
-    setNewInvestorIndices((prev) => new Set(prev).add(newIndex));
-    setTipoInversionMap((prev) => ({ ...prev, [newIndex]: tipoDefault }));
     // Auto-expandir espejo para que vea que se mete en ambas
     setExpandedMirrors((prev) => new Set(prev).add(newIndex));
     setShowRecalculated(false);
   };
 
   const removeInvestor = (indexToRemove: number) => {
-    // 1. Actualizar estado de expansión y tracking de nuevos (Shift Logic)
+    // 1. Actualizar estado de expansión (Shift Logic)
     const newExpandedSet = new Set<number>();
-    const newNewIndices = new Set<number>();
-    const newTipoMap: Record<number, TipoInversion> = {};
 
     expandedMirrors.forEach((i) => {
       if (i < indexToRemove) newExpandedSet.add(i);
       else if (i > indexToRemove) newExpandedSet.add(i - 1);
     });
-    newInvestorIndices.forEach((i) => {
-      if (i < indexToRemove) newNewIndices.add(i);
-      else if (i > indexToRemove) newNewIndices.add(i - 1);
-    });
-    Object.entries(tipoInversionMap).forEach(([key, val]) => {
-      const k = Number(key);
-      if (k < indexToRemove) newTipoMap[k] = val;
-      else if (k > indexToRemove) newTipoMap[k - 1] = val;
-    });
 
     setExpandedMirrors(newExpandedSet);
-    setNewInvestorIndices(newNewIndices);
-    setTipoInversionMap(newTipoMap);
     setShowRecalculated(false);
 
     // 2. Borrar del array principal
@@ -184,9 +283,8 @@ export function InvestorsList({
 
   // Sincronizar espejo con padre para inversionistas nuevos
   useEffect(() => {
-    newInvestorIndices.forEach((idx) => {
-      const padre = investors[idx];
-      if (!padre) return;
+    investors.forEach((padre, idx) => {
+      if (!padre?.es_nuevo) return;
       const espejo = investorsMirror[idx];
       // Solo sincronizar si hay diferencia
       if (
@@ -194,7 +292,11 @@ export function InvestorsList({
         espejo?.monto_aportado !== padre.monto_aportado ||
         espejo?.porcentaje_cash_in !== padre.porcentaje_cash_in ||
         espejo?.porcentaje_inversion !== padre.porcentaje_inversion ||
-        espejo?.fecha_inicio_participacion !== padre.fecha_inicio_participacion
+        espejo?.fecha_inicio_participacion !== padre.fecha_inicio_participacion ||
+        espejo?.tipo_operacion !== padre.tipo_operacion ||
+        espejo?.tipo_reinversion !== padre.tipo_reinversion ||
+        espejo?.modalidad_facturacion !== padre.modalidad_facturacion ||
+        espejo?.modalidad_facturacion_spread_id !== padre.modalidad_facturacion_spread_id
       ) {
         formik.setFieldValue(`investorsMirror.${idx}`, { ...padre });
       }
@@ -203,11 +305,26 @@ export function InvestorsList({
   }, [investors]);
 
   const handleTipoInversionChange = (index: number, tipo: TipoInversion) => {
-    setTipoInversionMap((prev) => ({ ...prev, [index]: tipo }));
     const fecha = getDefaultFechaInicio(tipo);
-    formik.setFieldValue(`${fieldName}.${index}.fecha_inicio_participacion`, fecha);
-    // Sync espejo
-    formik.setFieldValue(`investorsMirror.${index}.fecha_inicio_participacion`, fecha);
+    const updated = {
+      ...investors[index],
+      tipo_operacion: tipo,
+      fecha_inicio_participacion: fecha,
+      tipo_reinversion: undefined,
+      modalidad_facturacion: undefined,
+      modalidad_facturacion_spread_id: undefined,
+    };
+    formik.setFieldValue(`${fieldName}.${index}`, updated);
+    formik.setFieldValue(`investorsMirror.${index}`, { ...updated });
+  };
+
+  const handleNewMetadataChange = (
+    index: number,
+    metadata: Partial<InversionistaPayload>,
+  ) => {
+    const updated = { ...investors[index], ...metadata };
+    formik.setFieldValue(`${fieldName}.${index}`, updated);
+    formik.setFieldValue(`investorsMirror.${index}`, { ...updated });
   };
 
   const handleCalculateQuotas = async () => {
@@ -315,8 +432,25 @@ export function InvestorsList({
       {listToRender.map((inv, index) => {
         const isMirrorExpanded = expandedMirrors.has(index);
         const invMirror = listMirror[index] || {}; // Fallback safe
-        const isNew = newInvestorIndices.has(index);
-        const tipoInversion = tipoInversionMap[index];
+        const isNew = inv.es_nuevo === true;
+        const tipoInversion = inv.tipo_operacion;
+
+        // Para filas nuevas: no ofrecer a quienes participan HOY en el crédito
+        // (blockedInvestorIds) ni a los ya elegidos en otra fila del
+        // formulario. Los que salieron del crédito sí aparecen: pueden volver.
+        const idsEnOtrasFilas = new Set(
+          listToRender
+            .filter((_, i) => i !== index)
+            .map((o) => Number(o.inversionista_id))
+            .filter((id) => id > 0)
+        );
+        const opcionesFila = isNew
+          ? investorsOptions.filter(
+              (o) =>
+                !blockedInvestorIds?.has(o.inversionista_id) &&
+                !idsEnOtrasFilas.has(o.inversionista_id)
+            )
+          : investorsOptions;
 
         return (
           <div
@@ -325,7 +459,7 @@ export function InvestorsList({
           >
             {/* Radio: Compra de Cartera / Reinversión (solo nuevos) */}
             {isNew && (
-              <div className="flex items-center gap-6 pb-2 border-b border-blue-200">
+              <div className="flex flex-wrap items-end gap-4 pb-2 border-b border-blue-200">
                 <span className="text-sm font-semibold text-blue-900">Tipo:</span>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
@@ -349,6 +483,11 @@ export function InvestorsList({
                   />
                   <span className="text-sm text-purple-800">Reinversión</span>
                 </label>
+                <NewInvestorMetadataFields
+                  index={index}
+                  investor={inv}
+                  onChange={(metadata) => handleNewMetadataChange(index, metadata)}
+                />
               </div>
             )}
 
@@ -389,10 +528,10 @@ export function InvestorsList({
                     >
                       <Combobox.Options className="absolute z-50 mt-2 w-full max-h-60 overflow-auto rounded-xl bg-white py-2 shadow-2xl border-2 border-blue-200 focus:outline-none">
                         {(() => {
-                          const q = (investorQueries[index] || "").toLowerCase();
+                          const q = investorQueries[index] || "";
                           const filtered = q === ""
-                            ? investorsOptions
-                            : investorsOptions.filter((o) => o.nombre.toLowerCase().includes(q));
+                            ? opcionesFila
+                            : opcionesFila.filter((o) => matchesSearch(o.nombre, q));
                           if (filtered.length === 0) {
                             return (
                               <div className="relative cursor-default select-none py-4 px-4 text-center text-gray-500 text-sm">
@@ -663,10 +802,10 @@ export function InvestorsList({
                             >
                               <Combobox.Options className="absolute z-50 mt-2 w-full max-h-60 overflow-auto rounded-xl bg-white py-2 shadow-2xl border-2 border-purple-200 focus:outline-none">
                                 {(() => {
-                                  const q = (mirrorQueries[index] || "").toLowerCase();
+                                  const q = mirrorQueries[index] || "";
                                   const filtered = q === ""
                                     ? investorsOptions
-                                    : investorsOptions.filter((o) => o.nombre.toLowerCase().includes(q));
+                                    : investorsOptions.filter((o) => matchesSearch(o.nombre, q));
                                   if (filtered.length === 0) {
                                     return (
                                       <div className="relative cursor-default select-none py-4 px-4 text-center text-gray-500 text-sm">
@@ -831,7 +970,6 @@ export function InvestorsList({
           type="button"
           onClick={addInvestor}
           variant="outline"
-          disabled
           className="w-full border-blue-500 text-blue-700 hover:bg-blue-50 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Plus className="w-4 h-4" />

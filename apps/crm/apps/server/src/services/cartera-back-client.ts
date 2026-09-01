@@ -114,6 +114,12 @@ export interface ResumenGlobalInversionistasFilters {
 	estado?: "pending" | "uploaded" | "liquidated" | "all";
 	mes?: number;
 	anio?: number;
+	/**
+	 * Incluye a los inversionistas internos/propios (permite_distribucion = true:
+	 * Cube, Autocash, Blokfund, …). En cartera-back el flag es opt-in y por defecto
+	 * el endpoint solo devuelve externos.
+	 */
+	incluirInternos?: boolean;
 }
 
 const DEFAULT_CONFIG: CarteraBackClientConfig = {
@@ -130,6 +136,15 @@ const DEFAULT_CONFIG: CarteraBackClientConfig = {
 	accessTokenProvider: getCarteraAccessToken,
 	fetchTransport: globalThis.fetch,
 };
+
+/**
+ * Generar el reporte de pagos no liquidados recorre todos los créditos del
+ * inversionista, arma el Excel y lo sube a R2. Con inversionistas grandes eso
+ * supera los 30s del timeout por defecto.
+ */
+const REPORTE_NO_LIQUIDADOS_TIMEOUT_MS = Number.parseInt(
+	process.env.CARTERA_BACK_REPORTE_TIMEOUT || "300000",
+);
 
 // ============================================================================
 // ERROR TIPADO CON STATUS HTTP
@@ -389,7 +404,7 @@ export type FlujoCuotasInversionesResponse = {
 
 export type ReinversionLiquidacionesResponse = {
 	/** Versión runtime del contrato de conciliación por modalidad. */
-	contrato_version: 2;
+	contrato_version: 3;
 	/**
 	 * Distribución mensual por modalidad. `total_cuota` es el pago neto y
 	 * `reinversion_total` el capital que permanece colocado.
@@ -409,6 +424,7 @@ export type ReinversionLiquidacionesResponse = {
 			iva_facturado: string;
 			total_distribuido: string;
 			cantidad_liquidaciones: number;
+			composicion: LiquidationComposition;
 		}
 	>;
 	interesNeto: {
@@ -427,9 +443,20 @@ export type ReinversionLiquidacionesResponse = {
 		reinversion: string;
 		a_recibir: string;
 		capital_activo: string;
+		composicion: LiquidationComposition;
 	}[];
-	/** Compras del mes (operación de compra) agrupadas por modalidad de reinversión. */
-	comprasMes: { tipo: string; cantidad: number; monto: string }[];
+	/** Compras completadas del mes agrupadas por sus snapshots de operación. */
+	comprasMes: {
+		modalidad_facturacion: string;
+		tipo_reinversion: string;
+		tipo_compra: PurchaseClassification;
+		cantidad: number;
+		monto: string;
+	}[];
+	ticketInversion: {
+		actual: PurchaseTicketMonth & { variacion_porcentual: string | null };
+		historico: PurchaseTicketMonth[];
+	};
 	detalleInteresNeto: (
 		| {
 				inversionista_id: number;
@@ -460,7 +487,9 @@ export type ReinversionLiquidacionesResponse = {
 	detalleComprasMes: {
 		fecha: string;
 		inversionista: string;
-		modalidad: string;
+		modalidad_facturacion: string;
+		tipo_reinversion: string;
+		tipo_compra: PurchaseClassification;
 		monto: string;
 	}[];
 	detalle_estado: {
@@ -468,6 +497,31 @@ export type ReinversionLiquidacionesResponse = {
 		error: string | null;
 	};
 	cantidad_liquidaciones: number;
+};
+
+type PurchaseClassification =
+	| "nueva_posicion"
+	| "ampliacion_posicion"
+	| "sin_clasificar";
+
+type PurchaseTicketMonth = {
+	periodo: string;
+	cantidad: number;
+	monto_total: string;
+	ticket_promedio: string;
+};
+
+type CompositionDestination = {
+	capital: string;
+	resto: string;
+	total: string;
+};
+
+type LiquidationComposition = {
+	pagado: CompositionDestination & { sin_clasificar: string };
+	reinvertido: CompositionDestination & { sin_clasificar: string };
+	flujo: CompositionDestination;
+	estado: "exacto" | "sin_clasificar";
 };
 
 const reinversionModes = [
@@ -478,10 +532,36 @@ const reinversionModes = [
 	"reinversion_variable",
 	"reinversion_excedente",
 	"reinversion_combinada",
+	"sin_clasificar",
+] as const;
+const billingModes = [
+	"p2p_directa",
+	"factura_cube",
+	"factura_cube_pequeno",
+	"sin_modalidad",
+] as const;
+const purchaseClassifications = [
+	"nueva_posicion",
+	"ampliacion_posicion",
+	"sin_clasificar",
 ] as const;
 const moneySchema = z.string().regex(/^\d+(?:\.\d+)?$/);
+const signedDecimalSchema = z.string().regex(/^-?\d+(?:\.\d+)?$/);
 const countSchema = z.number().int().nonnegative();
 const idSchema = z.number().int().nonnegative();
+const compositionDestinationSchema = z.object({
+	capital: moneySchema,
+	resto: moneySchema,
+	total: moneySchema,
+});
+const liquidationCompositionSchema = z.object({
+	pagado: compositionDestinationSchema.extend({ sin_clasificar: moneySchema }),
+	reinvertido: compositionDestinationSchema.extend({
+		sin_clasificar: moneySchema,
+	}),
+	flujo: compositionDestinationSchema,
+	estado: z.enum(["exacto", "sin_clasificar"]),
+});
 const modeSummarySchema = z.object({
 	reinversion_capital: moneySchema,
 	reinversion_interes: moneySchema,
@@ -494,9 +574,10 @@ const modeSummarySchema = z.object({
 	iva_facturado: moneySchema,
 	total_distribuido: moneySchema,
 	cantidad_liquidaciones: countSchema,
+	composicion: liquidationCompositionSchema,
 });
 const reinversionLiquidacionesSchema = z.object({
-	contrato_version: z.literal(2),
+	contrato_version: z.literal(3),
 	porTipo: z.record(z.enum(reinversionModes), modeSummarySchema),
 	interesNeto: z.object({
 		noVerificado: z.object({ interes: moneySchema }),
@@ -520,15 +601,35 @@ const reinversionLiquidacionesSchema = z.object({
 			reinversion: moneySchema,
 			a_recibir: moneySchema,
 			capital_activo: moneySchema,
+			composicion: liquidationCompositionSchema,
 		}),
 	),
 	comprasMes: z.array(
 		z.object({
-			tipo: z.enum(reinversionModes),
+			modalidad_facturacion: z.enum(billingModes),
+			tipo_reinversion: z.enum(reinversionModes),
+			tipo_compra: z.enum(purchaseClassifications),
 			cantidad: countSchema,
 			monto: moneySchema,
 		}),
 	),
+	ticketInversion: z.object({
+		actual: z.object({
+			periodo: z.string().regex(/^\d{4}-\d{2}$/),
+			cantidad: countSchema,
+			monto_total: moneySchema,
+			ticket_promedio: moneySchema,
+			variacion_porcentual: signedDecimalSchema.nullable(),
+		}),
+		historico: z.array(
+			z.object({
+				periodo: z.string().regex(/^\d{4}-\d{2}$/),
+				cantidad: countSchema,
+				monto_total: moneySchema,
+				ticket_promedio: moneySchema,
+			}),
+		),
+	}),
 	detalleInteresNeto: z.array(
 		z.discriminatedUnion("tratamiento_fiscal", [
 			z.object({
@@ -564,7 +665,9 @@ const reinversionLiquidacionesSchema = z.object({
 		z.object({
 			fecha: z.string().trim().min(1),
 			inversionista: z.string().trim().min(1),
-			modalidad: z.enum(reinversionModes),
+			modalidad_facturacion: z.enum(billingModes),
+			tipo_reinversion: z.enum(reinversionModes),
+			tipo_compra: z.enum(purchaseClassifications),
 			monto: moneySchema,
 		}),
 	),
@@ -690,10 +793,18 @@ export class CarteraBackClient {
 	// PRIVATE METHODS
 	// ========================================================================
 
+	/**
+	 * @param retryOnFailure fuerza la política de reintentos de esta llamada.
+	 *   Por defecto SOLO se reintentan GET/HEAD: reintentar un POST que ya se
+	 *   ejecutó del otro lado duplica el efecto (ver el bloque de reintentos
+	 *   más abajo). Pasar `true` únicamente en POST de solo lectura.
+	 */
 	private async request<T>(
 		endpoint: string,
 		options: RequestInit = {},
 		useCache = false,
+		timeoutMs?: number,
+		retryOnFailure?: boolean,
 	): Promise<T> {
 		const url = `${this.config.baseUrl}${endpoint}`;
 		const cacheKey = `${options.method || "GET"}:${url}:${JSON.stringify(options.body || {})}`;
@@ -720,9 +831,16 @@ export class CarteraBackClient {
 					Authorization: `Bearer ${token}`,
 					...options.headers,
 				},
-				signal: AbortSignal.timeout(this.config.timeout),
+				signal: AbortSignal.timeout(timeoutMs ?? this.config.timeout),
 			};
 		};
+
+		// Solo son seguras de reintentar las llamadas sin efecto de lado. Un
+		// método mutante puede haberse ejecutado igual aunque el cliente no vea
+		// la respuesta (timeout, corte de red), así que el reintento duplica.
+		const metodo = (options.method || "GET").toUpperCase();
+		const esLectura = metodo === "GET" || metodo === "HEAD";
+		const permiteReintento = retryOnFailure ?? esLectura;
 
 		let lastError: Error | null = null;
 		let didReauth = false;
@@ -813,6 +931,21 @@ export class CarteraBackClient {
 						lastError.status >= 400 &&
 						lastError.status < 500)
 				) {
+					break;
+				}
+
+				// 🚫 Nada de reintentar operaciones que MUTAN (POST/PUT/PATCH/DELETE).
+				// El 2026-08-07 este bucle reintentó un POST a /facturar-generico que
+				// había abortado por timeout a los 30s: cartera ya había certificado
+				// la factura en SAT y el reintento certificó una segunda idéntica
+				// (Q150 al NIT 43254667). El timeout del cliente NO cancela lo que el
+				// servidor ya está ejecutando; lo mismo aplicaría a /newPayment,
+				// /newCredit, /boletas, etc. Ante un fallo transitorio preferimos que
+				// el error suba y se decida arriba antes que duplicar plata o facturas.
+				if (!permiteReintento) {
+					console.warn(
+						`[CarteraBack] ${metodo} ${endpoint} falló y NO se reintenta (operación no idempotente): ${lastError.message}`,
+					);
 					break;
 				}
 
@@ -1014,6 +1147,11 @@ export class CarteraBackClient {
 						excel: false,
 					}),
 				},
+				false,
+				undefined,
+				// POST solo por el tamaño del body (>50 SIFCOs): es una consulta,
+				// no muta nada → se puede reintentar.
+				true,
 			);
 		} else {
 			const queryParams = new URLSearchParams({
@@ -1178,10 +1316,14 @@ export class CarteraBackClient {
 		data?: { nit: string; nombre: string | null };
 		mensaje: string;
 	}> {
-		return this.request("/api/dte/consultarNit", {
-			method: "POST",
-			body: JSON.stringify({ nit }),
-		});
+		// POST de solo consulta (pega a SAT y no crea nada): se puede reintentar.
+		return this.request(
+			"/api/dte/consultarNit",
+			{ method: "POST", body: JSON.stringify({ nit }) },
+			false,
+			undefined,
+			true,
+		);
 	}
 
 	// ========================================================================
@@ -1415,10 +1557,15 @@ export class CarteraBackClient {
 	 * @param fecha - "YYYY-MM-DD" (hora Guatemala)
 	 */
 	async aplicarManualesDia(fecha: string): Promise<unknown> {
-		return this.request("/api/facturacion-snapshot/aplicar-manuales-dia", {
-			method: "POST",
-			body: JSON.stringify({ fecha }),
-		});
+		// Regenera el snapshot del día completo (no suma): correrlo dos veces
+		// deja el mismo resultado → es idempotente y se puede reintentar.
+		return this.request(
+			"/api/facturacion-snapshot/aplicar-manuales-dia",
+			{ method: "POST", body: JSON.stringify({ fecha }) },
+			false,
+			undefined,
+			true,
+		);
 	}
 
 	// ========================================================================
@@ -1439,6 +1586,9 @@ export class CarteraBackClient {
 		}
 		if (filters.anio !== undefined) {
 			queryParams.set("anio", String(filters.anio));
+		}
+		if (filters.incluirInternos) {
+			queryParams.set("incluirInternos", "true");
 		}
 
 		// Sin cache: el estado de liquidación debe verse fresco siempre. Con cache
@@ -1466,6 +1616,9 @@ export class CarteraBackClient {
 		}
 		if (filters.anio !== undefined) {
 			queryParams.set("anio", String(filters.anio));
+		}
+		if (filters.incluirInternos) {
+			queryParams.set("incluirInternos", "true");
 		}
 		queryParams.set("excel", "true");
 
@@ -1499,6 +1652,29 @@ export class CarteraBackClient {
 			`/resumen-transferencias?${queryParams.toString()}`,
 			{ method: "GET" },
 			false,
+		);
+		return response;
+	}
+
+	async getReporteNoLiquidados(
+		inversionistaId: number,
+	): Promise<{ success: boolean; url: string; filename: string }> {
+		const queryParams = new URLSearchParams();
+		queryParams.set("id", String(inversionistaId));
+
+		// Sin cache: el reporte debe reflejar el estado actual de los pagos.
+		// Timeout propio de 5 min: armar el Excel recorre todos los créditos y
+		// pagos del inversionista y lo sube a R2, así que los 30s por defecto se
+		// quedan cortos con inversionistas grandes.
+		const response = await this.request<{
+			success: boolean;
+			url: string;
+			filename: string;
+		}>(
+			`/investor/reporte-no-liquidados?${queryParams.toString()}`,
+			{ method: "GET" },
+			false,
+			REPORTE_NO_LIQUIDADOS_TIMEOUT_MS,
 		);
 		return response;
 	}

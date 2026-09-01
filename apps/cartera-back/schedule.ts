@@ -9,7 +9,6 @@ import {
   reportarFacturasFallidasSat,
 } from './src/controllers/verificarFacturasSat';
 import { generarSnapshotDiario } from './src/controllers/facturacionSnapshot';
-import { reintentarFacturacionPagaloPendiente } from './src/controllers/pagaloPaymentImport';
 
 const TZ_GUATEMALA = 'America/Guatemala';
 
@@ -118,19 +117,18 @@ export function iniciarTareasProgramadas() {
     }
   });
 
-  // 💳 Págalo: imports APPLIED con factura PENDIENTE hace >10 min (cartera
-  //    murió entre el commit y SAT) → se marcan FALLIDA para el playbook.
-  //    Nunca re-certifica (SAT no es idempotente de nuestro lado). Cada 10 min.
-  schedule.scheduleJob({ rule: '*/10 * * * *', tz: TZ_GUATEMALA }, async () => {
-    try {
-      const res = await reintentarFacturacionPagaloPendiente();
-      if (res.huerfanos > 0 || res.recibosReenviados > 0) {
-        console.log(`💳 Págalo factura huérfana marcada FALLIDA: imports=${res.ids.join(",")}; recibos reenviados=${res.recibosReenviados}`);
-      }
-    } catch (error) {
-      console.error('❌ Error en reintentarFacturacionPagaloPendiente:', error);
-    }
-  });
+  // 💳 El barrido de facturas Págalo huérfanas se quitó (2026-09-01, Daniel):
+  //    un pago aplicado ya queda con `pagos_credito.factura_status = 'PENDIENTE'`
+  //    (marcarFacturacionPendiente, en aplicarPagoAlCredito), que es justo lo que
+  //    lista la bandeja de conta — la falta de factura YA se ve sin barrer nada.
+  //    Y el cliente no depende de eso: se le notifica al validar el pago, no al
+  //    facturar. Facturar o no es problema nuestro, no suyo.
+  //
+  //    `reintentarFacturacionPagaloPendiente` sigue existiendo y se puede llamar
+  //    a mano si algún día hace falta; lo que se quitó es que corra cada 10 min.
+  //    Con eso también se dejó de reintentar solo el recibo de WhatsApp del pago:
+  //    hoy sale best-effort al aplicar (enviarRecibosPagoDeCreditoBestEffort) y,
+  //    si ese envío falla, nadie lo reintenta.
 
   // 📧 Reporte por correo de facturas fallidas - cada hora, 8:00–19:00 hora Guatemala.
   //    Envía todas las fallidas PENDIENTE; si no hay, no envía correo.

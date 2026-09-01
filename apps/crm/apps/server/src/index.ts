@@ -1773,9 +1773,26 @@ async function correrReconciliacionDeBoletas(): Promise<void> {
 setInterval(correrReconciliacionDeBoletas, 5 * 60 * 1000);
 
 // El respaldo del rechazo (D-39), también fuera de la bandera: si el WhatsApp
-// del rechazo falló, el cliente sigue creyendo que su pago va bien. Cada hora
-// se barren las boletas rechazadas a las que se les debe el mensaje.
+// del rechazo falló, el cliente sigue creyendo que su pago va bien — y, peor,
+// la alerta al asesor se manda UNA sola vez al rechazar, así que si ese envío
+// falla este barrido es lo único que hace que alguien se entere.
+//
+// Cada 3 horas, solo de 08:00 a 17:00 GT (2026-09-01, Daniel): no tiene
+// sentido barrer de madrugada. Un rechazo ocurre cuando conta está
+// trabajando, y tanto el mensaje al cliente como la alerta al asesor son para
+// horario laboral; correrlo a las 3 a.m. no adelanta nada que alguien vaya a
+// atender.
+const HORA_GT_INICIO_RESPALDO = 8;
+const HORA_GT_FIN_RESPALDO = 17;
+
+/** Hora de Guatemala (UTC-6, sin horario de verano). */
+function horaGuatemala(): number {
+	return (new Date().getUTCHours() + 18) % 24;
+}
+
 async function correrRespaldoDeRechazos(): Promise<void> {
+	const hora = horaGuatemala();
+	if (hora < HORA_GT_INICIO_RESPALDO || hora > HORA_GT_FIN_RESPALDO) return;
 	try {
 		await reintentarAvisosDeRechazo();
 	} catch (error) {
@@ -1783,7 +1800,11 @@ async function correrRespaldoDeRechazos(): Promise<void> {
 	}
 }
 
-setInterval(correrRespaldoDeRechazos, 60 * 60 * 1000);
+// El timer late cada 3 h siempre; la ventana la decide la función. Alinear el
+// timer a horas exactas exigiría reprogramarlo en cada disparo y no compra
+// nada: el barrido es idempotente y una corrida fuera de ventana solo
+// devuelve sin hacer nada.
+setInterval(correrRespaldoDeRechazos, 3 * 60 * 60 * 1000);
 
 // El poller de Págalo (CB-028) corre SIEMPRE, sin depender de
 // `TAREAS_PROGRAMADAS_ACTIVAS` — decisión explícita del usuario. El poll en
@@ -1861,17 +1882,11 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 		}
 	}
 
-	// Job periódico de notificaciones de cobros (cada hora)
-	setInterval(
-		async () => {
-			try {
-				await checkSeguimientosVencidos();
-			} catch (error) {
-				console.error("Error en job de notificaciones cobros:", error);
-			}
-		},
-		60 * 60 * 1000,
-	);
+	// El aviso de "seguimiento vencido" ya NO corre cada hora (2026-09-01,
+	// Daniel): pasó al job de alertas de cobros de las 08:00 GT, junto con
+	// cliente_subido y sin_contacto_3d. Es una señal diaria —el seguimiento
+	// venció ayer, no hace una hora— y tenerla en su propio timer horario solo
+	// repartía las notificaciones de cobros en dos lugares distintos.
 
 	// Ejecutar una vez al iniciar (con delay de 10s para que la DB esté lista).
 	// checkPromesasPago se guarda en una promesa module-level: el catch-up de
@@ -1880,7 +1895,11 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 	const checkPromesasPagoBoot: Promise<CheckPromesasResumen | void> =
 		new Promise((resolve) => {
 			setTimeout(() => {
-				checkSeguimientosVencidos().catch(console.error);
+				// checkSeguimientosVencidos ya NO va acá: se corre con las
+				// alertas de las 08:00 GT, que tienen su propia recuperación de
+				// boot condicionada a la hora. Dejarlo también en este arranque
+				// lo dispararía dos veces por deploy (el dedup de 24 h lo hace
+				// inofensivo, pero es trabajo repetido y ruido en los logs).
 				procesarSeguimientosRecurrentes().catch(console.error);
 				resolve(checkPromesasPago().catch(console.error));
 			}, 10_000);
@@ -1952,18 +1971,30 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 		await sendPremoraReminders().catch(console.error);
 	}, 15_000);
 
-	// COBROS-02: alertas de cobros con propósito (cliente_subido + sin_contacto_3d),
-	// diario a las 8:00 GT — DESPUÉS de que la subida de bucket de medianoche ya
-	// corrió en cartera, para leer las subidas de anoche. Reemplaza las viejas
-	// notificaciones masivas de "sin contacto". Idempotente por su propio dedup, así
-	// que el run de boot (abajo) recupera sin duplicar.
+	// COBROS-02: alertas de cobros con propósito (cliente_subido + sin_contacto_3d)
+	// MÁS el aviso de seguimiento vencido, diario a las 8:00 GT — DESPUÉS de que la
+	// subida de bucket de medianoche ya corrió en cartera, para leer las subidas de
+	// anoche. Reemplaza las viejas notificaciones masivas de "sin contacto".
+	// Idempotente por su propio dedup, así que el run de boot (abajo) recupera sin
+	// duplicar (checkSeguimientosVencidos deduplica por caso en ventana de 24 h).
+	//
+	// Los dos van juntos y en este orden a propósito: son la misma bandeja del
+	// asesor, y así abre el día con todo lo suyo de una vez en vez de irle
+	// goteando avisos a lo largo de la jornada.
+	async function correrAlertasDeCobros() {
+		await checkCobrosAlertas().catch(console.error);
+		await checkSeguimientosVencidos().catch((error) =>
+			console.error("Error en el aviso de seguimientos vencidos:", error),
+		);
+	}
+
 	function scheduleAtCobrosAlertasGT() {
 		const now = new Date();
 		const next = new Date();
 		next.setUTCHours(14, 0, 0, 0); // 08:00 GT
 		if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
 		setTimeout(async () => {
-			await checkCobrosAlertas().catch(console.error);
+			await correrAlertasDeCobros();
 			scheduleAtCobrosAlertasGT();
 		}, next.getTime() - now.getTime());
 	}
@@ -1975,7 +2006,7 @@ if (TAREAS_PROGRAMADAS_ACTIVAS) {
 	setTimeout(() => {
 		const horaGT = (new Date().getUTCHours() + 18) % 24; // GT = UTC-6, sin DST
 		if (horaGT >= 8) {
-			checkCobrosAlertas().catch(console.error);
+			void correrAlertasDeCobros();
 		} else {
 			console.log(
 				"[CobrosAlertas] Boot antes de las 08:00 GT; se omite la recuperación (el timeout programado la lanzará a la hora)",

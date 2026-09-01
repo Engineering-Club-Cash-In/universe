@@ -120,6 +120,18 @@ export async function copyPagaloLink(
 }
 
 /**
+ * Mismo orden que el bot (bot-cobros/pago-link.ts, D-52): primero
+ * MORA_INTERES, después CAPITAL — cartera aplica la mora vigente solo
+ * contra el link MORA_INTERES, jamás contra CAPITAL. Se duplica acá (en vez
+ * de importar ORDEN_LINKS_PAGALO de send-pagalo-links-whatsapp.ts, server)
+ * porque ese archivo importa libs server-only.
+ */
+const ORDEN_LINKS_PAGALO: Array<"CAPITAL" | "MORA_INTERES"> = [
+	"MORA_INTERES",
+	"CAPITAL",
+];
+
+/**
  * Mismo formato que construirMensajePagaloLinks (server, send-pagalo-links-
  * whatsapp.ts) — se duplica acá porque ese archivo importa libs server-only.
  * Antes de crear los links no existe la URL real todavía (la asigna Págalo
@@ -131,8 +143,8 @@ export function previewMensajePagaloLinks(
 	identificadorCredito: string,
 	linkTypes: Array<"CAPITAL" | "MORA_INTERES">,
 ): string {
-	const ordenados = [...linkTypes].sort((a, b) =>
-		a === b ? 0 : a === "CAPITAL" ? -1 : 1,
+	const ordenados = [...linkTypes].sort(
+		(a, b) => ORDEN_LINKS_PAGALO.indexOf(a) - ORDEN_LINKS_PAGALO.indexOf(b),
 	);
 	const dosLinks = ordenados.length === 2;
 	const saludo = clienteNombre ? `Hola ${clienteNombre}` : "Hola";

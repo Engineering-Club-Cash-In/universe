@@ -36,7 +36,10 @@ import {
 	construirIdentificadorCredito,
 	resolverVehiculoCasoPagalo,
 } from "./pagalo-vehiculo";
-import { sendPagaloLinksWhatsapp } from "./send-pagalo-links-whatsapp";
+import {
+	ORDEN_LINKS_PAGALO,
+	sendPagaloLinksWhatsapp,
+} from "./send-pagalo-links-whatsapp";
 
 type CreatePagaloLinksInput = {
 	casoCobroId: string;
@@ -1075,15 +1078,11 @@ export async function emitirLinksDeGrupo(params: {
 
 	// D-04 (docs/features/pagalo/DECISIONES.md): texto visible al cliente
 	// siempre neutro — nunca "CAPITAL" ni "MORA_INTERES". Con dos links reales,
-	// se numeran en orden fijo (CAPITAL siempre 1 de 2) sin importar cuál se
-	// crea primero; con uno solo, "Pago" a secas.
+	// se numeran en el orden fijo de ORDEN_LINKS_PAGALO (MORA_INTERES = 1 de 2)
+	// sin importar cuál se crea primero; con uno solo, "Pago" a secas.
 	const dosLinks = providerAmounts.size === 2;
 	const etiquetaPago = (linkType: "CAPITAL" | "MORA_INTERES") =>
-		dosLinks
-			? linkType === "CAPITAL"
-				? "Pago 1 de 2"
-				: "Pago 2 de 2"
-			: "Pago";
+		dosLinks ? `Pago ${ORDEN_LINKS_PAGALO.indexOf(linkType) + 1} de 2` : "Pago";
 
 	const links = [] as Array<{
 		linkType: "CAPITAL" | "MORA_INTERES";

@@ -8,9 +8,9 @@
  * - Copy de "recordatorio", no "aquí está tu link" — mismo texto neutro de
  *   D-04 (nunca "mora" ni "interés" en texto visible), pero tono distinto.
  * - Orden MORA_INTERES primero si sigue pendiente, CAPITAL solo si mora ya
- *   se pagó o el grupo nunca tuvo lado facturable — inverso al orden fijo
- *   CAPITAL-primero de `construirMensajePagaloLinks`. El caller (el job) ya
- *   entrega `links` en el orden correcto; esta función NO reordena.
+ *   se pagó o el grupo nunca tuvo lado facturable — mismo orden fijo
+ *   MORA_INTERES-primero de `construirMensajePagaloLinks`. El caller (el job)
+ *   ya entrega `links` en el orden correcto; esta función NO reordena.
  *
  * Misma infra de envío que el original: `sendWhatsappTemplate` sin
  * templateName explícito, log en `cobros_send_logs`, nunca lanza al caller.
@@ -50,8 +50,9 @@ export type SendPagaloReminderWhatsappResult =
 
 /**
  * `links` debe llegar ya en el orden correcto (MORA_INTERES primero si
- * pendiente, CAPITAL solo si es lo único que falta) — a diferencia de
- * `construirMensajePagaloLinks`, esta función no reordena.
+ * pendiente, CAPITAL solo si es lo único que falta) — igual que
+ * `construirMensajePagaloLinks`, pero esta función no reordena, confía en
+ * el orden que entrega el caller (el job).
  */
 export function construirMensajeRecordatorioPagalo(
 	clienteNombre: string,
@@ -61,7 +62,11 @@ export function construirMensajeRecordatorioPagalo(
 ): string {
 	const dosLinks = links.length === 2;
 	const saludo = clienteNombre ? `Hola ${clienteNombre}` : "Hola";
-	const descripcionVehiculo = [vehiculo?.marca, vehiculo?.modelo, vehiculo?.year]
+	const descripcionVehiculo = [
+		vehiculo?.marca,
+		vehiculo?.modelo,
+		vehiculo?.year,
+	]
 		.filter((valor): valor is string | number => valor != null && valor !== "")
 		.join(" ");
 	const identificador = descripcionVehiculo
@@ -93,7 +98,8 @@ export async function sendPagaloReminderWhatsapp(
 	params: SendPagaloReminderWhatsappParams,
 	deps: SendPagaloReminderWhatsappDeps = {},
 ): Promise<SendPagaloReminderWhatsappResult> {
-	const { numeroSifco, telefono, clienteNombre, links, vehiculo, createdBy } = params;
+	const { numeroSifco, telefono, clienteNombre, links, vehiculo, createdBy } =
+		params;
 	const enviar = deps.enviar ?? sendWhatsappTemplate;
 	const guardarLog = deps.guardarLog ?? persistCobrosSendLog;
 

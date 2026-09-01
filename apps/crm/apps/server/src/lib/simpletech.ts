@@ -1,5 +1,6 @@
 import type { TemplateHeader, TemplateMessage } from "@repo/simpletech";
 import { SimpleTechClient } from "@repo/simpletech";
+import { enmascarar, redirigirSiEsPrueba } from "./messaging-test-mode";
 
 export const SIMPLETECH_BOT_NUMBER = process.env.CCI_BOT_NUMBER!;
 export const SIMPLETECH_TEMPLATE_NAME =
@@ -65,10 +66,7 @@ function normalizeParamsForTemplate(
 		];
 	}
 
-	return [
-		...params,
-		...new Array(templateParamCount - params.length).fill(""),
-	];
+	return [...params, ...new Array(templateParamCount - params.length).fill("")];
 }
 
 export function getSimpletechClient(): SimpleTechClient | null {
@@ -200,7 +198,19 @@ export async function sendWhatsappTemplate(params: {
 		return { success: false, error: "Servicio de mensajería no configurado" };
 	}
 
-	const phoneNormalized = normalizePhone(params.phone);
+	// Red de seguridad del modo prueba: se aplica ACÁ, en la puerta de salida,
+	// y no en cada emisor. Con `TEST_MESSAGE=true` ningún WhatsApp llega a un
+	// cliente real, aunque quien llame no se haya acordado de redirigir.
+	const {
+		destino: phoneNormalized,
+		realTarget,
+		redirigido,
+	} = redirigirSiEsPrueba(normalizePhone(params.phone));
+	if (redirigido) {
+		console.warn(
+			`${prefix} TEST_MESSAGE activo: redirigido a ${enmascarar(phoneNormalized)} (real: ${enmascarar(realTarget)})`,
+		);
+	}
 	const bodyParams = params.bodyParams ?? splitTemplateParams(params.message);
 	const templateName =
 		params.templateName ??
@@ -294,10 +304,21 @@ export async function sendWhatsappTemplateBatch(params: {
 	const prefix = params.logPrefix ?? "[SimpleTech][batch]";
 	const client = getSimpletechClient();
 
-	const normalized = params.recipients.map((r) => ({
-		...r,
-		phoneNormalized: normalizePhone(r.phone),
-	}));
+	// Misma red que en el envío individual. El índice rota por la lista de
+	// teléfonos de prueba: sin eso, un masivo de 200 destinatarios se colapsa
+	// en un solo número y el dedup de abajo lo trataría como un duplicado.
+	const normalized = params.recipients.map((r, i) => {
+		const { destino, realTarget, redirigido } = redirigirSiEsPrueba(
+			normalizePhone(r.phone),
+			i,
+		);
+		if (redirigido) {
+			console.warn(
+				`${prefix} TEST_MESSAGE activo: redirigido a ${enmascarar(destino)} (real: ${enmascarar(realTarget)})`,
+			);
+		}
+		return { ...r, phoneNormalized: destino };
+	});
 
 	if (!client) {
 		const msg = "Servicio de mensajería no configurado";
@@ -368,10 +389,7 @@ export async function sendWhatsappTemplateBatch(params: {
 		for (const r of result.results ?? []) {
 			const rDigits = toDigits(String(r.number));
 			for (let i = 0; i < normalized.length; i++) {
-				if (
-					!used[i] &&
-					toDigits(normalized[i].phoneNormalized) === rDigits
-				) {
+				if (!used[i] && toDigits(normalized[i].phoneNormalized) === rDigits) {
 					matchByIdx[i] = {
 						templateMessageId: r.templateMessageId ?? "",
 						error: r.error ?? "",

@@ -215,7 +215,15 @@ export async function alertarAsesorDelRechazo(
 	}
 }
 
-/** Manda el WhatsApp y devuelve si salió. Nunca tira. */
+/**
+ * Manda el WhatsApp y devuelve si salió. Nunca tira.
+ *
+ * No hace nada con `TEST_MESSAGE` a propósito: la redirección del modo prueba
+ * vive dentro de `sendWhatsappTemplate` (D-55). Este archivo fue justamente el
+ * que se escapó de la convención vieja —el aviso de rechazo salía al cliente
+ * real aunque el modo prueba estuviera activo—, y por eso la protección se
+ * movió a la puerta de salida.
+ */
 async function escribirleAlCliente(
 	telefono: string,
 	mensaje: string,

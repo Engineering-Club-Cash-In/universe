@@ -2036,3 +2036,43 @@ contradecirlo: no hay dos cálculos que puedan separarse con el tiempo.
 **Alcance.** Solo el servicio 9. Si aparece la misma molestia en otro servicio del bot se
 resuelve igual (booleano derivado del texto, aditivo, un solo cálculo), pero no se anticipa
 en los que nadie pidió.
+
+---
+
+## D-55 · El modo prueba se aplica en la salida, no en cada emisor
+
+**Fecha:** 2026-09-01 · **Decidió:** Daniel
+
+`TEST_MESSAGE=true` redirige todo envío a los teléfonos de prueba. Hasta hoy eso
+era una **convención por emisor**: cada servicio se acordaba de llamar a
+`getTestPhone()` antes de mandar. Con doce emisores, la convención se rompió.
+
+`lib/bot-cobros/eventos-pago.ts` —el **aviso de rechazo al cliente** y la alerta
+al asesor— no la respetaba. No era un envío marginal: lo dispara el job de
+respaldo de rechazos, que corre **cada 3 horas, solo, fuera de las banderas de
+`JOBS_PROGRAMADOS`**, contra una base que es una copia de producción con
+teléfonos reales. Con el modo prueba activo y todo, ese WhatsApp salía al
+cliente.
+
+**La protección ya no depende de que alguien se acuerde.** Vive en
+`lib/simpletech.ts`, dentro de `sendWhatsappTemplate` y
+`sendWhatsappTemplateBatch` — la única puerta del server por la que sale un
+WhatsApp (nadie más instancia `SimpleTechClient`). Un emisor nuevo **nace
+protegido sin escribir una línea**.
+
+Dos detalles que la hacen segura de adoptar:
+
+- **Es idempotente.** Los once emisores que ya redirigían llegan con un número
+  de prueba puesto a mano; `esTelefonoDePrueba()` lo detecta y no lo vuelve a
+  tocar. Sin eso, un masivo que rota con `getTestPhone(i)` para no golpear
+  siempre el mismo teléfono se colapsaría en `TEST_PHONES[0]` — y el dedup del
+  batch los trataría como un duplicado.
+- **El destinatario real se conserva** (`realTarget`) y queda en el log
+  enmascarado, así que la trazabilidad de a quién se le hubiera escrito no se
+  pierde.
+
+**Alcance:** solo WhatsApp. SMS (OTP) y email siguen redirigiendo desde el
+emisor; el OTP ya lo hacía correctamente.
+
+**Lo que NO cambia:** con `TEST_MESSAGE=false` todo sale igual que siempre. La
+red no apaga envíos, los redirige.

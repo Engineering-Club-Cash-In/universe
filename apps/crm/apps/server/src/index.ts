@@ -48,7 +48,12 @@ import type { db } from "./db";
 import { ejecutarAgendaCobrosDiariaConReintentos } from "./jobs/agenda-cobros-snapshots";
 import { purgarBoletasSinConfirmar } from "./jobs/bot-cobros-purga";
 import { reconciliarBoletasColgadas } from "./jobs/bot-cobros-reconciliacion";
-import { reintentarAvisosDeRechazo } from "./jobs/bot-cobros-respaldo";
+import {
+	HORAS_GT_RESPALDO,
+	horaGuatemala,
+	msHastaProximoRespaldo,
+	reintentarAvisosDeRechazo,
+} from "./jobs/bot-cobros-respaldo";
 import { generarCierreDiario } from "./jobs/cierre-diario-asesores";
 import {
 	checkSeguimientosVencidos,
@@ -1816,17 +1821,10 @@ setInterval(correrReconciliacionDeBoletas, 5 * 60 * 1000);
 // trabajando, y tanto el mensaje al cliente como la alerta al asesor son para
 // horario laboral; correrlo a las 3 a.m. no adelanta nada que alguien vaya a
 // atender.
-const HORA_GT_INICIO_RESPALDO = 8;
-const HORA_GT_FIN_RESPALDO = 17;
-
-/** Hora de Guatemala (UTC-6, sin horario de verano). */
-function horaGuatemala(): number {
-	return (new Date().getUTCHours() + 18) % 24;
-}
-
+// La cadencia (horas fijas 08/11/14/17 GT y el cálculo del próximo disparo)
+// vive en el módulo del job, junto a lo que agenda — y así se puede probar sin
+// levantar el servidor entero.
 async function correrRespaldoDeRechazos(): Promise<void> {
-	const hora = horaGuatemala();
-	if (hora < HORA_GT_INICIO_RESPALDO || hora > HORA_GT_FIN_RESPALDO) return;
 	try {
 		await reintentarAvisosDeRechazo();
 	} catch (error) {
@@ -1834,11 +1832,24 @@ async function correrRespaldoDeRechazos(): Promise<void> {
 	}
 }
 
-// El timer late cada 3 h siempre; la ventana la decide la función. Alinear el
-// timer a horas exactas exigiría reprogramarlo en cada disparo y no compra
-// nada: el barrido es idempotente y una corrida fuera de ventana solo
-// devuelve sin hacer nada.
-setInterval(correrRespaldoDeRechazos, 3 * 60 * 60 * 1000);
+function programarRespaldoDeRechazos(): void {
+	setTimeout(async () => {
+		await correrRespaldoDeRechazos();
+		programarRespaldoDeRechazos();
+	}, msHastaProximoRespaldo());
+}
+programarRespaldoDeRechazos();
+
+// Y una corrida al arrancar si el deploy cae dentro de la ventana: si no, un
+// rechazo cuyo aviso falló justo antes del deploy espera hasta la próxima hora
+// de la lista. Barrer de más es inofensivo (solo toca lo que sigue debiendo su
+// mensaje); no barrer a tiempo deja al cliente creyendo que su pago va bien.
+setTimeout(() => {
+	const hora = horaGuatemala();
+	if (hora >= HORAS_GT_RESPALDO[0] && hora <= HORAS_GT_RESPALDO.at(-1)!) {
+		void correrRespaldoDeRechazos();
+	}
+}, 35_000);
 
 // El poller de Págalo (CB-028) corre SIEMPRE, sin depender de
 // `TAREAS_PROGRAMADAS_ACTIVAS` — decisión explícita del usuario. El poll en
@@ -2149,7 +2160,14 @@ if (HAY_JOBS_ACTIVOS) {
 		const minutosUtc = ahora.getUTCHours() * 60 + ahora.getUTCMinutes();
 		const INICIO_VENTANA = 5 * 60 + 30; // 23:30 GT
 		const FIN_VENTANA = 5 * 60 + 59; // 23:59 GT (cuando arranca procesarMoras)
-		if (minutosUtc >= INICIO_VENTANA && minutosUtc < FIN_VENTANA) {
+		// El flag va TAMBIÉN acá: sin esto, apagar syncPromesasCartera solo
+		// apagaba el timer y este catch-up seguía escribiendo el espejo en
+		// cualquier arranque entre 23:30 y 23:59 (hallazgo Codex).
+		if (
+			JOBS_PROGRAMADOS.syncPromesasCartera &&
+			minutosUtc >= INICIO_VENTANA &&
+			minutosUtc < FIN_VENTANA
+		) {
 			console.log(
 				"[SyncPromesasCarteraBack] Arranque dentro de la ventana 23:30–23:59 GT: ejecutando reconciliación de catch-up antes de procesarMoras.",
 			);

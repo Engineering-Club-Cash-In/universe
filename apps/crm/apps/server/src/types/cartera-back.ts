@@ -792,6 +792,8 @@ export interface ResumenGlobalInversionista {
 	boleta_liquidacion?: BoletaPagoInversionista | null;
 	estado_liquidacion_resumen?: "pending" | "uploaded" | "liquidated";
 	reporte_liquidacion_url?: string | null;
+	/** Mismo reporte en quetzales. Solo los inversionistas en dólares lo tienen. */
+	reporte_liquidacion_url_gtq?: string | null;
 }
 
 // ============================================================================

@@ -1,4 +1,11 @@
-import { AlertCircle, CheckCircle2, ChevronDown, Download } from "lucide-react";
+import {
+	AlertCircle,
+	CheckCircle2,
+	ChevronDown,
+	ChevronsLeft,
+	ChevronsRight,
+	Download,
+} from "lucide-react";
 import { Fragment, type ReactNode, useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -29,6 +36,10 @@ import {
 	REGISTERED_ZERO_ACTIVITY_COPY,
 } from "@/lib/reports/reinvestment-report";
 import type { ReinversionLiquidacionesResponse } from "@/lib/reports/scenario";
+import {
+	getTablePage,
+	INVESTMENT_REPORT_PAGE_SIZE,
+} from "@/lib/reports/table-pagination";
 
 type DetailKey = "interest" | "extras" | "purchases";
 
@@ -334,76 +345,92 @@ export function ReinvestmentReport({
 				</TableOverflow>
 				{showInvestors ? (
 					<div className="mt-4">
-						<TableOverflow label="Detalle por inversionista">
-							<Table className="min-w-[1500px] tabular-nums">
-								<TableHeader>
-									<TableRow>
-										<TableHead>Inversionista</TableHead>
-										<TableHead>Modalidad histórica</TableHead>
-										<TableHead className="text-right">Pagado capital</TableHead>
-										<TableHead className="text-right">Pagado resto</TableHead>
-										<TableHead className="text-right">
-											Pagado sin clasificar
-										</TableHead>
-										<TableHead className="text-right">Pagado total</TableHead>
-										<TableHead className="text-right">
-											Reinvertido capital
-										</TableHead>
-										<TableHead className="text-right">
-											Reinvertido resto
-										</TableHead>
-										<TableHead className="text-right">
-											Reinvertido sin clasificar
-										</TableHead>
-										<TableHead className="text-right">
-											Reinvertido total
-										</TableHead>
-										<TableHead className="text-right">
-											Capital activo actual
-										</TableHead>
-									</TableRow>
-								</TableHeader>
-								<TableBody>
-									{safeData.porInversionista.map((item) => (
-										<TableRow key={item.inversionista_id}>
-											<TableCell className="font-medium">
-												{item.nombre}
-											</TableCell>
-											<TableCell>
-												{getReinvestmentModeLabel(item.tipo_reinversion)}
-											</TableCell>
-											<TableCell className="text-right">
-												{currency(item.composicion.pagado.capital)}
-											</TableCell>
-											<TableCell className="text-right">
-												{currency(item.composicion.pagado.resto)}
-											</TableCell>
-											<TableCell className="text-right">
-												{currency(item.composicion.pagado.sin_clasificar)}
-											</TableCell>
-											<TableCell className="text-right">
-												{currency(item.a_recibir)}
-											</TableCell>
-											<TableCell className="text-right">
-												{currency(item.composicion.reinvertido.capital)}
-											</TableCell>
-											<TableCell className="text-right">
-												{currency(item.composicion.reinvertido.resto)}
-											</TableCell>
-											<TableCell className="text-right">
-												{currency(item.composicion.reinvertido.sin_clasificar)}
-											</TableCell>
-											<TableCell className="text-right">
-												{currency(item.reinversion)}
-											</TableCell>
-											<TableCell className="text-right">
-												{currency(item.capital_activo)}
-											</TableCell>
-										</TableRow>
-									))}
-								</TableBody>
-							</Table>
-						</TableOverflow>
+						<PaginatedRows
+							label="Detalle por inversionista"
+							rows={safeData.porInversionista}
+							key={`investors-${periodLabel}`}
+						>
+							{(investorRows) => (
+								<TableOverflow label="Detalle por inversionista">
+									<Table className="min-w-[1500px] tabular-nums">
+										<TableHeader>
+											<TableRow>
+												<TableHead>Inversionista</TableHead>
+												<TableHead>Modalidad histórica</TableHead>
+												<TableHead className="text-right">
+													Pagado capital
+												</TableHead>
+												<TableHead className="text-right">
+													Pagado resto
+												</TableHead>
+												<TableHead className="text-right">
+													Pagado sin clasificar
+												</TableHead>
+												<TableHead className="text-right">
+													Pagado total
+												</TableHead>
+												<TableHead className="text-right">
+													Reinvertido capital
+												</TableHead>
+												<TableHead className="text-right">
+													Reinvertido resto
+												</TableHead>
+												<TableHead className="text-right">
+													Reinvertido sin clasificar
+												</TableHead>
+												<TableHead className="text-right">
+													Reinvertido total
+												</TableHead>
+												<TableHead className="text-right">
+													Capital activo actual
+												</TableHead>
+											</TableRow>
+										</TableHeader>
+										<TableBody>
+											{investorRows.map((item) => (
+												<TableRow key={item.inversionista_id}>
+													<TableCell className="font-medium">
+														{item.nombre}
+													</TableCell>
+													<TableCell>
+														{getReinvestmentModeLabel(item.tipo_reinversion)}
+													</TableCell>
+													<TableCell className="text-right">
+														{currency(item.composicion.pagado.capital)}
+													</TableCell>
+													<TableCell className="text-right">
+														{currency(item.composicion.pagado.resto)}
+													</TableCell>
+													<TableCell className="text-right">
+														{currency(item.composicion.pagado.sin_clasificar)}
+													</TableCell>
+													<TableCell className="text-right">
+														{currency(item.a_recibir)}
+													</TableCell>
+													<TableCell className="text-right">
+														{currency(item.composicion.reinvertido.capital)}
+													</TableCell>
+													<TableCell className="text-right">
+														{currency(item.composicion.reinvertido.resto)}
+													</TableCell>
+													<TableCell className="text-right">
+														{currency(
+															item.composicion.reinvertido.sin_clasificar,
+														)}
+													</TableCell>
+													<TableCell className="text-right">
+														{currency(item.reinversion)}
+													</TableCell>
+													<TableCell className="text-right">
+														{currency(item.capital_activo)}
+													</TableCell>
+												</TableRow>
+											))}
+										</TableBody>
+									</Table>
+								</TableOverflow>
+							)}
+						</PaginatedRows>
 					</div>
 				) : null}
 			</section>
@@ -488,6 +515,7 @@ export function ReinvestmentReport({
 											aria-live="polite"
 										>
 											<DetailTable
+												key={`${periodLabel}-${item.key}`}
 												detail={item.key}
 												data={safeData}
 												currency={currency}
@@ -508,32 +536,46 @@ export function ReinvestmentReport({
 				>
 					Histórico del ticket de nuevas posiciones
 				</h3>
-				<TableOverflow label="Histórico del ticket de nuevas posiciones">
-					<Table className="min-w-[620px] tabular-nums">
-						<TableHeader>
-							<TableRow>
-								<TableHead>Período</TableHead>
-								<TableHead className="text-right">Nuevas posiciones</TableHead>
-								<TableHead className="text-right">Monto total</TableHead>
-								<TableHead className="text-right">Ticket promedio</TableHead>
-							</TableRow>
-						</TableHeader>
-						<TableBody>
-							{safeData.ticketInversion.historico.map((row) => (
-								<TableRow key={row.periodo}>
-									<TableCell>{row.periodo}</TableCell>
-									<TableCell className="text-right">{row.cantidad}</TableCell>
-									<TableCell className="text-right">
-										{currency(row.monto_total)}
-									</TableCell>
-									<TableCell className="text-right font-medium">
-										{currency(row.ticket_promedio)}
-									</TableCell>
-								</TableRow>
-							))}
-						</TableBody>
-					</Table>
-				</TableOverflow>
+				<PaginatedRows
+					label="Histórico del ticket"
+					rows={safeData.ticketInversion.historico}
+					key={`ticket-${periodLabel}`}
+				>
+					{(ticketRows) => (
+						<TableOverflow label="Histórico del ticket de nuevas posiciones">
+							<Table className="min-w-[620px] tabular-nums">
+								<TableHeader>
+									<TableRow>
+										<TableHead>Período</TableHead>
+										<TableHead className="text-right">
+											Nuevas posiciones
+										</TableHead>
+										<TableHead className="text-right">Monto total</TableHead>
+										<TableHead className="text-right">
+											Ticket promedio
+										</TableHead>
+									</TableRow>
+								</TableHeader>
+								<TableBody>
+									{ticketRows.map((row) => (
+										<TableRow key={row.periodo}>
+											<TableCell>{row.periodo}</TableCell>
+											<TableCell className="text-right">
+												{row.cantidad}
+											</TableCell>
+											<TableCell className="text-right">
+												{currency(row.monto_total)}
+											</TableCell>
+											<TableCell className="text-right font-medium">
+												{currency(row.ticket_promedio)}
+											</TableCell>
+										</TableRow>
+									))}
+								</TableBody>
+							</Table>
+						</TableOverflow>
+					)}
+				</PaginatedRows>
 			</section>
 		</div>
 	);
@@ -829,114 +871,203 @@ function DetailTable({
 	if (detail === "interest") {
 		if (data.detalleInteresNeto.length === 0) return <NoDetail />;
 		return (
-			<TableOverflow label="Detalle de interés registrado">
-				<Table className="min-w-[760px]">
-					<TableHeader>
-						<TableRow>
-							<TableHead>Inversionista / referencia</TableHead>
-							<TableHead>Tratamiento fiscal</TableHead>
-							<TableHead className="text-right">Interés</TableHead>
-							<TableHead className="text-right">IVA</TableHead>
-							<TableHead className="text-right">ISR</TableHead>
-							<TableHead className="text-right">Neto derivado</TableHead>
-						</TableRow>
-					</TableHeader>
-					<TableBody>
-						{data.detalleInteresNeto.map((row) => (
-							<TableRow key={`${row.inversionista_id}-${row.referencia}`}>
-								<TableCell>
-									<strong>{row.inversionista}</strong>
-									<span className="block text-muted-foreground text-xs">
-										{row.referencia}
-									</span>
-								</TableCell>
-								<TableCell>
-									{row.tratamiento_fiscal.replaceAll("_", " ")}
-								</TableCell>
-								<TableCell className="text-right">
-									{currency(row.interes)}
-								</TableCell>
-								<TableCell className="text-right">
-									{currency(row.iva)}
-								</TableCell>
-								<TableCell className="text-right">
-									{currency(row.isr)}
-								</TableCell>
-								<TableCell className="text-right font-medium">
-									{row.tratamiento_fiscal === "cube" ? currency(row.neto) : "—"}
-								</TableCell>
-							</TableRow>
-						))}
-					</TableBody>
-				</Table>
-			</TableOverflow>
+			<PaginatedRows label="Detalle de interés" rows={data.detalleInteresNeto}>
+				{(interestRows) => (
+					<TableOverflow label="Detalle de interés registrado">
+						<Table className="min-w-[760px]">
+							<TableHeader>
+								<TableRow>
+									<TableHead>Inversionista / referencia</TableHead>
+									<TableHead>Tratamiento fiscal</TableHead>
+									<TableHead className="text-right">Interés</TableHead>
+									<TableHead className="text-right">IVA</TableHead>
+									<TableHead className="text-right">ISR</TableHead>
+									<TableHead className="text-right">Neto derivado</TableHead>
+								</TableRow>
+							</TableHeader>
+							<TableBody>
+								{interestRows.map((row) => (
+									<TableRow key={`${row.inversionista_id}-${row.referencia}`}>
+										<TableCell>
+											<strong>{row.inversionista}</strong>
+											<span className="block text-muted-foreground text-xs">
+												{row.referencia}
+											</span>
+										</TableCell>
+										<TableCell>
+											{row.tratamiento_fiscal.replaceAll("_", " ")}
+										</TableCell>
+										<TableCell className="text-right">
+											{currency(row.interes)}
+										</TableCell>
+										<TableCell className="text-right">
+											{currency(row.iva)}
+										</TableCell>
+										<TableCell className="text-right">
+											{currency(row.isr)}
+										</TableCell>
+										<TableCell className="text-right font-medium">
+											{row.tratamiento_fiscal === "cube"
+												? currency(row.neto)
+												: "—"}
+										</TableCell>
+									</TableRow>
+								))}
+							</TableBody>
+						</Table>
+					</TableOverflow>
+				)}
+			</PaginatedRows>
 		);
 	}
 	if (detail === "extras") {
 		if (data.detallePagosExtras.length === 0) return <NoDetail />;
 		return (
-			<TableOverflow label="Detalle de pagos extras">
-				<Table className="min-w-[620px]">
-					<TableHeader>
-						<TableRow>
-							<TableHead>Fecha</TableHead>
-							<TableHead>Crédito</TableHead>
-							<TableHead>Tipo</TableHead>
-							<TableHead className="text-right">Monto</TableHead>
-						</TableRow>
-					</TableHeader>
-					<TableBody>
-						{data.detallePagosExtras.map((row, index) => (
-							<TableRow key={`${row.credito}-${row.fecha}-${index}`}>
-								<TableCell>{row.fecha}</TableCell>
-								<TableCell>{row.credito}</TableCell>
-								<TableCell>{row.tipo.replaceAll("_", " ")}</TableCell>
-								<TableCell className="text-right">
-									{currency(row.monto)}
-								</TableCell>
-							</TableRow>
-						))}
-					</TableBody>
-				</Table>
-			</TableOverflow>
+			<PaginatedRows
+				label="Detalle de pagos extras"
+				rows={data.detallePagosExtras}
+			>
+				{(extraRows) => (
+					<TableOverflow label="Detalle de pagos extras">
+						<Table className="min-w-[620px]">
+							<TableHeader>
+								<TableRow>
+									<TableHead>Fecha</TableHead>
+									<TableHead>Crédito</TableHead>
+									<TableHead>Tipo</TableHead>
+									<TableHead className="text-right">Monto</TableHead>
+								</TableRow>
+							</TableHeader>
+							<TableBody>
+								{extraRows.map((row, index) => (
+									<TableRow key={`${row.credito}-${row.fecha}-${index}`}>
+										<TableCell>{row.fecha}</TableCell>
+										<TableCell>{row.credito}</TableCell>
+										<TableCell>{row.tipo.replaceAll("_", " ")}</TableCell>
+										<TableCell className="text-right">
+											{currency(row.monto)}
+										</TableCell>
+									</TableRow>
+								))}
+							</TableBody>
+						</Table>
+					</TableOverflow>
+				)}
+			</PaginatedRows>
 		);
 	}
 	if (data.detalleComprasMes.length === 0) return <NoDetail />;
 	return (
-		<TableOverflow label="Detalle de compras del mes">
-			<Table className="min-w-[900px]">
-				<TableHeader>
-					<TableRow>
-						<TableHead>Fecha</TableHead>
-						<TableHead>Inversionista</TableHead>
-						<TableHead>Modalidad de facturación</TableHead>
-						<TableHead>Tipo de reinversión</TableHead>
-						<TableHead>Tipo de compra</TableHead>
-						<TableHead className="text-right">Monto</TableHead>
-					</TableRow>
-				</TableHeader>
-				<TableBody>
-					{data.detalleComprasMes.map((row, index) => (
-						<TableRow key={`${row.inversionista}-${row.fecha}-${index}`}>
-							<TableCell>{row.fecha}</TableCell>
-							<TableCell>{row.inversionista}</TableCell>
-							<TableCell>
-								{getBillingModeLabel(row.modalidad_facturacion)}
-							</TableCell>
-							<TableCell>
-								{getReinvestmentModeLabel(row.tipo_reinversion)}
-							</TableCell>
-							<TableCell>
-								{getPurchaseClassificationLabel(row.tipo_compra)}
-							</TableCell>
-							<TableCell className="text-right">
-								{currency(row.monto)}
-							</TableCell>
-						</TableRow>
-					))}
-				</TableBody>
-			</Table>
-		</TableOverflow>
+		<PaginatedRows label="Detalle de compras" rows={data.detalleComprasMes}>
+			{(purchaseRows) => (
+				<TableOverflow label="Detalle de compras del mes">
+					<Table className="min-w-[900px]">
+						<TableHeader>
+							<TableRow>
+								<TableHead>Fecha</TableHead>
+								<TableHead>Inversionista</TableHead>
+								<TableHead>Modalidad de facturación</TableHead>
+								<TableHead>Tipo de reinversión</TableHead>
+								<TableHead>Tipo de compra</TableHead>
+								<TableHead className="text-right">Monto</TableHead>
+							</TableRow>
+						</TableHeader>
+						<TableBody>
+							{purchaseRows.map((row, index) => (
+								<TableRow key={`${row.inversionista}-${row.fecha}-${index}`}>
+									<TableCell>{row.fecha}</TableCell>
+									<TableCell>{row.inversionista}</TableCell>
+									<TableCell>
+										{getBillingModeLabel(row.modalidad_facturacion)}
+									</TableCell>
+									<TableCell>
+										{getReinvestmentModeLabel(row.tipo_reinversion)}
+									</TableCell>
+									<TableCell>
+										{getPurchaseClassificationLabel(row.tipo_compra)}
+									</TableCell>
+									<TableCell className="text-right">
+										{currency(row.monto)}
+									</TableCell>
+								</TableRow>
+							))}
+						</TableBody>
+					</Table>
+				</TableOverflow>
+			)}
+		</PaginatedRows>
+	);
+}
+
+export function PaginatedRows<Row>({
+	label,
+	rows,
+	children,
+}: {
+	label: string;
+	rows: readonly Row[];
+	children: (rows: Row[]) => ReactNode;
+}) {
+	const [requestedPage, setRequestedPage] = useState(1);
+	const page = getTablePage(rows, requestedPage, INVESTMENT_REPORT_PAGE_SIZE);
+
+	return (
+		<div className="space-y-3">
+			{children(page.rows)}
+			{page.totalPages > 1 ? (
+				<nav
+					aria-label={`Paginación de ${label}`}
+					className="flex flex-col gap-3 rounded-md border bg-muted/20 px-3 py-3 sm:flex-row sm:items-center sm:justify-between"
+				>
+					<p className="text-muted-foreground text-sm" aria-live="polite">
+						Mostrando {page.from}–{page.to} de {page.total}
+					</p>
+					<div className="flex flex-wrap items-center gap-2">
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							onClick={() => setRequestedPage(1)}
+							disabled={page.page === 1}
+						>
+							<ChevronsLeft className="h-4 w-4" />
+							Primera
+						</Button>
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							onClick={() => setRequestedPage(page.page - 1)}
+							disabled={page.page === 1}
+						>
+							Anterior
+						</Button>
+						<span className="px-1 text-sm tabular-nums">
+							Página {page.page} de {page.totalPages}
+						</span>
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							onClick={() => setRequestedPage(page.page + 1)}
+							disabled={page.page === page.totalPages}
+						>
+							Siguiente
+						</Button>
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							onClick={() => setRequestedPage(page.totalPages)}
+							disabled={page.page === page.totalPages}
+						>
+							Última
+							<ChevronsRight className="h-4 w-4" />
+						</Button>
+					</div>
+				</nav>
+			) : null}
+		</div>
 	);
 }
 

@@ -9103,6 +9103,10 @@ export async function getLiquidaciones({
           reinversion_total: formatValue(liq.reinversion_total),
         },
         reporte_liquidacion: liq.reporte_liquidacion,
+        // Mismo reporte en quetzales. Solo viene lleno para inversionistas en
+        // dólares; en los de quetzales es null porque el principal ya está en Q.
+        reporte_liquidacion_gtq: liq.reporte_liquidacion_gtq,
+        tipo_cambio_reporte: liq.tipo_cambio_reporte,
         fecha_liquidacion: liq.fecha_liquidacion,
         pagos: pagosConISR,
       };

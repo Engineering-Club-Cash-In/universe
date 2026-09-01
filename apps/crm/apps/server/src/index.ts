@@ -1785,15 +1785,22 @@ async function correrRespaldoDeRechazos(): Promise<void> {
 
 setInterval(correrRespaldoDeRechazos, 60 * 60 * 1000);
 
-// El poller y el dispatcher de Págalo (CB-028) usan el mismo gate que el
-// resto de tareas programadas (`TAREAS_PROGRAMADAS_ACTIVAS`) — ya no tienen
-// flags propios (`PAGALO_POLL_ENABLED`/`PAGALO_DISPATCH_ENABLED` se
-// eliminaron: el botón manual `probarPollPagalo` y el dispatch inline
-// dentro del poll corren siempre, sin ningún gate, decisión explícita del
-// usuario). En esta rama (COBROS-02), `TAREAS_PROGRAMADAS_ACTIVAS` está
-// hardcodeada en `false` (ver FIXME arriba), así que el ciclo automático de
-// Págalo queda apagado junto con el resto de jobs hasta que se revierta ese
-// FIXME antes de mergear a develop.
+// El poller de Págalo (CB-028) corre SIEMPRE, sin depender de
+// `TAREAS_PROGRAMADAS_ACTIVAS` — decisión explícita del usuario. El poll en
+// sí solo lee estado de Págalo y actualiza estado interno, pero el efecto de
+// cadena completo (al detectar un pago dispara el dispatch inline hacia
+// cartera-back — `reclamarYProcesarGrupo`/`correrDispatchPagalo` — que
+// factura el pago allá, y cartera-back al facturar llama de vuelta a
+// `POST /api/notifications/recibo-pago-whatsapp` en ESTE server) SÍ podría
+// llegar a un cliente real (hallazgo de code review, PR #1512) — de no ser
+// porque ese endpoint respeta `TEST_MESSAGE` (`lib/messaging-test-mode.ts`):
+// con `TEST_MESSAGE=true` (como está configurado en esta instancia) todo
+// envío redirige a la lista de contactos de prueba, nunca al destinatario
+// real. El riesgo que sí motiva el FIXME de arriba (`TAREAS_PROGRAMADAS_
+// ACTIVAS = false`) es para el resto de jobs de este bloque, pensado para
+// una instancia con `TEST_MESSAGE=false` apuntando a una copia de
+// producción (docs/features/bot-whatsapp-cobros/despliegue-dev.md) — no es
+// el caso de esta instancia.
 async function correrPollDePagalo(): Promise<void> {
 	try {
 		await correrPollPagalo();
@@ -1802,10 +1809,8 @@ async function correrPollDePagalo(): Promise<void> {
 	}
 }
 
-if (TAREAS_PROGRAMADAS_ACTIVAS) {
-	void correrPollDePagalo();
-	setInterval(correrPollDePagalo, 5 * 60 * 1000);
-}
+void correrPollDePagalo();
+setInterval(correrPollDePagalo, 5 * 60 * 1000);
 
 async function correrDispatchDePagalo(): Promise<void> {
 	try {

@@ -24,6 +24,7 @@ import {
 	pagaloPaymentLinks,
 } from "../db/schema/pagalo-payments";
 import { reclamarYProcesarGrupo } from "../jobs/pagalo-dispatch";
+import { verificarGrupoPagalo } from "../jobs/pagalo-poll";
 import { cobrosProcedure, cobrosSupervisorProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import {
@@ -74,6 +75,62 @@ function traducirReemplazoInvalido(error: unknown): never {
 		});
 	}
 	throw error;
+}
+
+/**
+ * Quién puede tocar un grupo Págalo desde la Ficha 360. Extraído porque lo
+ * comparten la lectura del desglose y la verificación a demanda: si las reglas
+ * se separan, una de las dos termina siendo la puerta floja.
+ *
+ * Grupo del bot (sin gestión de asesor asociada) no tiene "dueño" a quien
+ * verificarle propiedad — la única regla posible es exigir supervisor, sin
+ * importar si el input trae un casoCobroId propio que coincida por SIFCO. Este
+ * chequeo corre ANTES del atajo de "mismo crédito, otro caso": sin ese orden,
+ * un asesor con cualquier caso accesible del mismo crédito quedaba autorizado
+ * por SIFCO y el gate de supervisor para grupos del bot nunca se evaluaba
+ * (hallazgo de code review).
+ */
+async function autorizarAccesoAGrupo(
+	grupo: { casoCobroId: string | null; numeroCreditoSifco: string | null },
+	casoCobroIdDesdeDondeSeMira: string | undefined,
+	context: { userId: string; userRole: string },
+): Promise<void> {
+	if (!grupo.casoCobroId) {
+		if (!PERMISSIONS.canAssignCobros(context.userRole)) {
+			throw new ORPCError("FORBIDDEN", {
+				message:
+					"Este grupo no tiene caso asociado: solo un supervisor puede verlo.",
+			});
+		}
+		return;
+	}
+	// Mismo alcance que getPagaloHistorial: se autoriza por un caso al que el
+	// usuario SÍ tiene acceso, y el grupo tiene que ser del MISMO crédito que
+	// ese caso. El crédito no se recibe del cliente: sale del caso, que es lo
+	// que impide pedir el grupo de un crédito ajeno.
+	let autorizado = false;
+	if (casoCobroIdDesdeDondeSeMira) {
+		await assertAccesoCasoCobro(
+			casoCobroIdDesdeDondeSeMira,
+			context.userId,
+			context.userRole,
+		);
+		const [caso] = await db
+			.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
+			.from(casosCobros)
+			.where(eq(casosCobros.id, casoCobroIdDesdeDondeSeMira))
+			.limit(1);
+		autorizado =
+			!!caso?.numeroCreditoSifco &&
+			caso.numeroCreditoSifco === grupo.numeroCreditoSifco;
+	}
+	if (!autorizado) {
+		await assertAccesoCasoCobro(
+			grupo.casoCobroId,
+			context.userId,
+			context.userRole,
+		);
+	}
 }
 
 export const pagaloLinkActionsRouter = {
@@ -279,6 +336,53 @@ export const pagaloLinkActionsRouter = {
 			return { resultado };
 		}),
 
+	/**
+	 * "Verificar ahora": le pregunta a Págalo por los links de ESTE grupo sin
+	 * esperar la cadencia del poller y, si con eso ya hay evidencia completa,
+	 * aplica el pago en cartera de una vez.
+	 *
+	 * Va en `cobrosProcedure` —cualquiera con acceso a la Ficha 360— y no en
+	 * supervisor: es una CONSULTA a Págalo sobre un grupo que la persona ya
+	 * puede ver, y la aplicación que dispara es la misma que el ciclo
+	 * automático haría solo unos minutos después. Distinto de
+	 * `probarPollPagalo`, que corre el poller ENTERO (todos los links de
+	 * todos los créditos) y por eso sigue siendo de supervisor.
+	 */
+	verificarPagoLinksGrupo: cobrosProcedure
+		.input(
+			z.object({
+				groupId: z.string().uuid(),
+				/** Caso desde el que se mira; mismo criterio que getPagaloAllocations. */
+				casoCobroId: z.string().uuid().optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const [grupo] = await db
+				.select({
+					casoCobroId: pagaloPaymentGroups.casoCobroId,
+					numeroCreditoSifco: pagaloPaymentGroups.numeroCreditoSifco,
+					status: pagaloPaymentGroups.status,
+				})
+				.from(pagaloPaymentGroups)
+				.where(eq(pagaloPaymentGroups.id, input.groupId))
+				.limit(1);
+			if (!grupo) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Grupo Págalo no encontrado.",
+				});
+			}
+			await autorizarAccesoAGrupo(grupo, input.casoCobroId, context);
+			if (grupo.status === "COMPLETED" || grupo.status === "CANCELLED") {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						grupo.status === "COMPLETED"
+							? "Este pago ya está aplicado."
+							: "Este grupo está cancelado.",
+				});
+			}
+			return await verificarGrupoPagalo(input.groupId);
+		}),
+
 	getPagaloAllocations: cobrosProcedure
 		.input(
 			z.object({
@@ -309,52 +413,7 @@ export const pagaloLinkActionsRouter = {
 				});
 			}
 
-			// Grupo del bot (sin gestión de asesor asociada) no tiene "dueño" a
-			// quien verificarle propiedad — la única regla posible es exigir
-			// supervisor, sin importar si el input trae un casoCobroId propio
-			// que coincida por SIFCO. Este chequeo debe correr ANTES del atajo
-			// de "mismo crédito, otro caso": sin este orden, un asesor con
-			// cualquier caso accesible del mismo crédito quedaba `autorizado`
-			// por SIFCO y el gate de supervisor para grupos del bot nunca se
-			// evaluaba — cualquier asesor podía leer el desglose financiero
-			// completo de un grupo del bot igual (hallazgo de code review).
-			if (!grupo.casoCobroId) {
-				if (!PERMISSIONS.canAssignCobros(context.userRole)) {
-					throw new ORPCError("FORBIDDEN", {
-						message:
-							"Este grupo no tiene caso asociado: solo un supervisor puede verlo.",
-					});
-				}
-			} else {
-				// Mismo alcance que getPagaloHistorial: se autoriza por un caso al
-				// que el usuario SÍ tiene acceso, y el grupo tiene que ser del MISMO
-				// crédito que ese caso. El crédito no se recibe del cliente: sale del
-				// caso, que es lo que impide pedir el grupo de un crédito ajeno.
-				let autorizado = false;
-				if (input.casoCobroId) {
-					await assertAccesoCasoCobro(
-						input.casoCobroId,
-						context.userId,
-						context.userRole,
-					);
-					const [caso] = await db
-						.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
-						.from(casosCobros)
-						.where(eq(casosCobros.id, input.casoCobroId))
-						.limit(1);
-					autorizado =
-						!!caso?.numeroCreditoSifco &&
-						caso.numeroCreditoSifco === grupo.numeroCreditoSifco;
-				}
-
-				if (!autorizado) {
-					await assertAccesoCasoCobro(
-						grupo.casoCobroId,
-						context.userId,
-						context.userRole,
-					);
-				}
-			}
+			await autorizarAccesoAGrupo(grupo, input.casoCobroId, context);
 			const links = await db
 				.select({
 					id: pagaloPaymentLinks.id,

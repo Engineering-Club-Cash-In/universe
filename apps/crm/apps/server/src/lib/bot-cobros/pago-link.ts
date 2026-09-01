@@ -43,6 +43,7 @@ import {
 	pagaloPaymentGroups,
 	pagaloPaymentLinks,
 } from "../../db/schema/pagalo-payments";
+import { primeraRevisionPoll } from "../../lib/pagalo-poll-cadencia";
 import { carteraBackClient } from "../../services/cartera-back-client";
 import { resolverUsuarioSistemaCobros } from "../../services/cobros-notif-helpers";
 import {
@@ -1035,7 +1036,7 @@ export async function crearPagoLink(
 						pagaloShortUuid: uuidCorto ?? null,
 						responsePayload: respuesta as object,
 						activatedAt: new Date(),
-						nextPollAt: new Date(),
+						nextPollAt: primeraRevisionPoll(),
 						updatedAt: new Date(),
 					})
 					.where(eq(pagaloPaymentLinks.id, fila.id));

@@ -23,6 +23,8 @@ export type AccionesDisponibles = {
 	invalidar: boolean;
 	regenerar: boolean;
 	reintentar: boolean;
+	/** "Verificar ahora": consultar Págalo y, si ya está pagado, aplicar. */
+	verificar: boolean;
 };
 
 // APPLICATION_FAILED solo se alcanza vía READY_TO_APPLY, que evaluarGrupo
@@ -76,20 +78,38 @@ const ESTADOS_FORZABLES_ADMIN = new Set<EstadoGrupoPagalo>([
  * pasa `canAssignCobros`, así que siempre llega acá como supervisor también.
  * Sirve solo para abrir los dos estados forzables.
  */
+/**
+ * Un grupo cerrado no se toca; en cualquier otro estado preguntarle a Págalo
+ * es seguro (es una consulta) y es lo que destraba la espera de la cadencia.
+ */
+const ESTADOS_CERRADOS = new Set<EstadoGrupoPagalo>(["COMPLETED", "CANCELLED"]);
+
 export function accionesDisponibles(
 	status: string,
 	esSupervisor: boolean,
 	esAdmin = false,
 ): AccionesDisponibles {
-	if (!esSupervisor)
-		return { invalidar: false, regenerar: false, reintentar: false };
 	const estado = status as EstadoGrupoPagalo;
+	// "Verificar ahora" NO es de supervisor: es una consulta a Págalo sobre un
+	// grupo que la persona ya está viendo, y la aplicación que puede disparar
+	// es la misma que el ciclo automático haría minutos después por su cuenta.
+	const verificar = !ESTADOS_CERRADOS.has(estado);
+	if (!esSupervisor)
+		return {
+			invalidar: false,
+			regenerar: false,
+			reintentar: false,
+			verificar,
+		};
 	return {
 		invalidar: ESTADOS_INVALIDABLES.has(estado),
 		regenerar: ESTADOS_REGENERABLES.has(estado),
+		// El reintento a secas queda para lo que "Verificar ahora" no cubre:
+		// los dos estados que esperan una decisión de admin.
 		reintentar:
 			ESTADOS_REINTENTABLES.has(estado) ||
 			(esAdmin && ESTADOS_FORZABLES_ADMIN.has(estado)),
+		verificar,
 	};
 }
 

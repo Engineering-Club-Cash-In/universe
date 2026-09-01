@@ -65,6 +65,7 @@ import {
 	pagaloPaymentGroups,
 	pagaloPaymentLinks,
 } from "../db/schema/pagalo-payments";
+import { proximoIntentoPoll } from "../lib/pagalo-poll-cadencia";
 import { carteraBackClient } from "../services/cartera-back-client";
 import {
 	createPagaloClient,
@@ -81,8 +82,6 @@ const MAXIMO_POR_CORRIDA = 50;
 /** Lease: si un proceso murió a mitad de un batch, otro puede reclamarlo. */
 const MINUTOS_LEASE = 2;
 /** Backoff exponencial con techo. */
-const BACKOFF_BASE_SEGUNDOS = 30;
-const BACKOFF_TOPE_SEGUNDOS = 30 * 60;
 
 type LinkClaimado = typeof pagaloPaymentLinks.$inferSelect;
 
@@ -99,13 +98,10 @@ type TransaccionPagalo = {
 	client_name?: string;
 };
 
-const proximoIntento = (pollAttempts: number): Date => {
-	const segundos = Math.min(
-		BACKOFF_BASE_SEGUNDOS * 2 ** pollAttempts,
-		BACKOFF_TOPE_SEGUNDOS,
-	);
-	return new Date(Date.now() + segundos * 1000);
-};
+// La cadencia (primera revisión y backoff) vive en lib/pagalo-poll-cadencia.ts
+// porque también la necesita quien CREA el link, para sembrar next_poll_at.
+const proximoIntento = (pollAttempts: number): Date =>
+	proximoIntentoPoll(pollAttempts);
 
 function validarTransaccionPagalo(
 	link: LinkClaimado,
@@ -134,22 +130,31 @@ function validarTransaccionPagalo(
  * Si algún día corre más de una instancia de este job, hace falta ese patrón
  * (igual que el outbox de dispatch en pagaloPaymentGroups.dispatchClaimedAt).
  */
-async function reclamarLinksPendientes(): Promise<LinkClaimado[]> {
+async function reclamarLinksPendientes(
+	// Verificación puntual de un grupo (botón "Verificar ahora" de la Ficha
+	// 360): se salta `nextPollAt` a propósito — la persona está preguntando
+	// AHORA y esperar el backoff es justo lo que quiere evitar. El lease sí
+	// se respeta: si el ciclo automático ya tiene el link agarrado, esta
+	// corrida no se lo pelea.
+	groupId?: string,
+): Promise<LinkClaimado[]> {
 	const ahora = new Date();
 	const leaseVencido = new Date(Date.now() - MINUTOS_LEASE * 60 * 1000);
+	const leTocaYa = groupId
+		? eq(pagaloPaymentLinks.groupId, groupId)
+		: lt(pagaloPaymentLinks.nextPollAt, ahora);
+	const pollable = and(
+		leTocaYa,
+		inArray(pagaloPaymentLinks.status, ["CREATING", "ACTIVE", "REPLACED"]),
+		or(
+			isNull(pagaloPaymentLinks.pollClaimedAt),
+			lt(pagaloPaymentLinks.pollClaimedAt, leaseVencido),
+		),
+	);
 	const candidatos = await db
 		.select({ id: pagaloPaymentLinks.id })
 		.from(pagaloPaymentLinks)
-		.where(
-			and(
-				lt(pagaloPaymentLinks.nextPollAt, ahora),
-				inArray(pagaloPaymentLinks.status, ["CREATING", "ACTIVE", "REPLACED"]),
-				or(
-					isNull(pagaloPaymentLinks.pollClaimedAt),
-					lt(pagaloPaymentLinks.pollClaimedAt, leaseVencido),
-				),
-			),
-		)
+		.where(pollable)
 		.orderBy(asc(pagaloPaymentLinks.nextPollAt))
 		.limit(MAXIMO_POR_CORRIDA);
 	if (candidatos.length === 0) return [];
@@ -159,21 +164,7 @@ async function reclamarLinksPendientes(): Promise<LinkClaimado[]> {
 		const [link] = await db
 			.update(pagaloPaymentLinks)
 			.set({ pollClaimedAt: ahora })
-			.where(
-				and(
-					eq(pagaloPaymentLinks.id, candidato.id),
-					lt(pagaloPaymentLinks.nextPollAt, ahora),
-					inArray(pagaloPaymentLinks.status, [
-						"CREATING",
-						"ACTIVE",
-						"REPLACED",
-					]),
-					or(
-						isNull(pagaloPaymentLinks.pollClaimedAt),
-						lt(pagaloPaymentLinks.pollClaimedAt, leaseVencido),
-					),
-				),
-			)
+			.where(and(eq(pagaloPaymentLinks.id, candidato.id), pollable))
 			.returning();
 		if (link) reclamados.push(link);
 	}
@@ -313,7 +304,9 @@ async function registrarIntentoNoEncontradoTerminal(
 						: isNull(pagaloPaymentLinks.pollClaimedAt),
 				),
 			)
-			.returning({ terminalNotFoundAttempts: pagaloPaymentLinks.terminalNotFoundAttempts });
+			.returning({
+				terminalNotFoundAttempts: pagaloPaymentLinks.terminalNotFoundAttempts,
+			});
 		if (!actualizado) return;
 		if (actualizado.terminalNotFoundAttempts >= UMBRAL_POLL_RETRY_EXHAUSTED) {
 			await marcarLinkTerminalEnTx(tx, link, statusTerminal);
@@ -345,11 +338,7 @@ async function resetearContadorTerminalNoEncontrado(
 			and(
 				eq(pagaloPaymentLinks.id, link.id),
 				ne(pagaloPaymentLinks.terminalNotFoundAttempts, 0),
-				inArray(pagaloPaymentLinks.status, [
-					"CREATING",
-					"ACTIVE",
-					"REPLACED",
-				]),
+				inArray(pagaloPaymentLinks.status, ["CREATING", "ACTIVE", "REPLACED"]),
 				link.pollClaimedAt
 					? eq(pagaloPaymentLinks.pollClaimedAt, link.pollClaimedAt)
 					: isNull(pagaloPaymentLinks.pollClaimedAt),
@@ -750,7 +739,10 @@ async function marcarLinkTerminalEnTx(
 		.where(eq(pagaloPaymentGroups.id, link.groupId))
 		.for("update");
 	const [fresco] = await tx
-		.select({ status: pagaloPaymentLinks.status, pollClaimedAt: pagaloPaymentLinks.pollClaimedAt })
+		.select({
+			status: pagaloPaymentLinks.status,
+			pollClaimedAt: pagaloPaymentLinks.pollClaimedAt,
+		})
 		.from(pagaloPaymentLinks)
 		.where(eq(pagaloPaymentLinks.id, link.id))
 		.for("update");
@@ -836,7 +828,15 @@ export type ResultadoPollPagalo = {
  * pago nuevo" como "reintentar aplicación pendiente" sin depender del
  * dispatcher programado por separado.
  */
-export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
+export async function correrPollPagalo(
+	/**
+	 * Sin alcance = el ciclo automático de siempre (todos los links a los que
+	 * ya les toca + el backlog de dispatch). Con `groupId` = la verificación a
+	 * demanda de UN grupo: solo sus links, sin esperar la cadencia, y sin
+	 * tocar el backlog de otros grupos.
+	 */
+	alcance: { groupId?: string } = {},
+): Promise<ResultadoPollPagalo> {
 	const resultado: ResultadoPollPagalo = {
 		revisados: 0,
 		pagados: 0,
@@ -853,7 +853,7 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 	// backlog de dispatch con cartera-back lenta/caída podía retrasar
 	// minutos la detección de un pago que el cliente ya hizo (hallazgo
 	// Codex). El reintento del backlog corre al final, sin bloquear esto.
-	const links = await reclamarLinksPendientes();
+	const links = await reclamarLinksPendientes(alcance.groupId);
 	resultado.revisados = links.length;
 	if (links.length > 0) {
 		const config = getPagaloSandboxConfig();
@@ -1118,6 +1118,12 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 		}
 	}
 
+	// Verificación puntual: no se le arrastra a la persona el backlog de
+	// otros grupos (puede tardar minutos con cartera-back lento). El grupo
+	// propio ya se aplicó inline arriba si quedó listo; si venía de antes
+	// esperando aplicación, lo empuja `verificarGrupoPagalo`.
+	if (alcance.groupId) return resultado;
+
 	// Backlog de grupos READY_TO_APPLY/APPLICATION_FAILED/APPLYING de una
 	// corrida anterior (p.ej. si cartera-back estuvo caído). Va AL FINAL,
 	// después de detectar pagos nuevos, para que un backlog grande con
@@ -1130,4 +1136,71 @@ export async function correrPollPagalo(): Promise<ResultadoPollPagalo> {
 		dispatchPrevio.errores + dispatchPrevio.revisionRequerida;
 
 	return resultado;
+}
+
+export type ResultadoVerificacionGrupo = ResultadoPollPagalo & {
+	/** Estado del grupo DESPUÉS de verificar y, si correspondía, aplicar. */
+	statusFinal: string;
+	/** `true` si en esta corrida se aplicó el pago en cartera. */
+	aplicado: boolean;
+};
+
+/**
+ * "Verificar ahora" de la Ficha 360: le pregunta a Págalo por los links de UN
+ * grupo sin esperar la cadencia y, si con eso queda listo, lo aplica.
+ *
+ * Verificar y aplicar son un solo botón a propósito: aplicar exige tener la
+ * evidencia verificada (D-05), así que ofrecerlos por separado obligaba a
+ * apretar dos veces sabiendo de antemano el orden. Si los links ya estaban
+ * pagados y el grupo venía esperando aplicación de antes, no hay nada que
+ * verificar y se va derecho al despacho.
+ *
+ * No fuerza estados que necesitan una persona: desde REVIEW_REQUIRED (cartera
+ * ya lo evaluó y lo mandó a revisión) verifica pero no aplica — eso sigue
+ * siendo la acción de admin.
+ */
+export async function verificarGrupoPagalo(
+	groupId: string,
+): Promise<ResultadoVerificacionGrupo> {
+	const resultado = await correrPollPagalo({ groupId });
+
+	const [grupo] = await db
+		.select({ status: pagaloPaymentGroups.status })
+		.from(pagaloPaymentGroups)
+		.where(eq(pagaloPaymentGroups.id, groupId))
+		.limit(1);
+	let statusFinal = grupo?.status ?? "DESCONOCIDO";
+	let aplicado = statusFinal === "COMPLETED";
+
+	// Quedó con la evidencia completa pero sin aplicar: o el despacho inline
+	// falló, o venía esperando de una corrida anterior con su backoff todavía
+	// corriendo. Se limpia ese backoff porque acá lo pidió una persona.
+	if (
+		statusFinal === "READY_TO_APPLY" ||
+		statusFinal === "APPLICATION_FAILED"
+	) {
+		await db
+			.update(pagaloPaymentGroups)
+			.set({ nextDispatchAt: null, dispatchClaimedAt: null })
+			.where(
+				and(
+					eq(pagaloPaymentGroups.id, groupId),
+					eq(pagaloPaymentGroups.status, statusFinal),
+				),
+			);
+		const despacho = await reclamarYProcesarGrupo(groupId);
+		resultado.dispatchReintentados++;
+		if (despacho === "COMPLETADO") resultado.dispatchCompletados++;
+		else if (despacho !== "NO_RECLAMADO") resultado.dispatchErrores++;
+
+		const [fresco] = await db
+			.select({ status: pagaloPaymentGroups.status })
+			.from(pagaloPaymentGroups)
+			.where(eq(pagaloPaymentGroups.id, groupId))
+			.limit(1);
+		statusFinal = fresco?.status ?? statusFinal;
+		aplicado = statusFinal === "COMPLETED";
+	}
+
+	return { ...resultado, statusFinal, aplicado };
 }

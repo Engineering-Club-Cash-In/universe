@@ -15,6 +15,7 @@ import {
 	type PagaloInstallment,
 } from "../lib/pagalo-allocations";
 import { deduplicarCuotasPagalo } from "../lib/pagalo-installments";
+import { primeraRevisionPoll } from "../lib/pagalo-poll-cadencia";
 import {
 	assertPagaloInstallmentSelection,
 	assertPagaloOtrosRequiresInstallment,
@@ -764,7 +765,7 @@ async function emitirUnLink(params: {
 								errorCode: "PagaloRespuestaAmbigua",
 								errorMessage:
 									"Un pago de un link predecesor llegó mientras Págalo confirmaba este link — requiere reconciliación manual antes de invalidar o regenerar.",
-								nextPollAt: new Date(),
+								nextPollAt: primeraRevisionPoll(),
 								updatedAt: new Date(),
 							})
 							.where(
@@ -797,7 +798,7 @@ async function emitirUnLink(params: {
 									errorCode: "PagaloRespuestaAmbigua",
 									errorMessage:
 										"Un pago de un link predecesor llegó mientras Págalo confirmaba este link — requiere reconciliación manual antes de invalidar o regenerar.",
-									nextPollAt: new Date(),
+									nextPollAt: primeraRevisionPoll(),
 									updatedAt: new Date(),
 								})
 								.where(eq(pagaloPaymentLinks.id, stored.id))
@@ -835,7 +836,7 @@ async function emitirUnLink(params: {
 						pagaloRequestUuid: requestUuid,
 						responsePayload: response,
 						activatedAt: new Date(),
-						nextPollAt: new Date(),
+						nextPollAt: primeraRevisionPoll(),
 						updatedAt: new Date(),
 					})
 					.where(
@@ -877,7 +878,7 @@ async function emitirUnLink(params: {
 							paymentUrl,
 							pagaloRequestUuid: requestUuid,
 							responsePayload: response,
-							nextPollAt: new Date(),
+							nextPollAt: primeraRevisionPoll(),
 							updatedAt: new Date(),
 						})
 						.where(eq(pagaloPaymentLinks.id, stored.id))

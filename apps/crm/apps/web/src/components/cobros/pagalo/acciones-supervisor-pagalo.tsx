@@ -54,6 +54,7 @@ export function AccionesSupervisorPagalo({
 	const [motivo, setMotivo] = useState("");
 	const queryClient = useQueryClient();
 
+	const verificar = (client as any).verificarPagoLinksGrupo;
 	const invalidar = (client as any).invalidarGrupoPagalo;
 	const regenerar = (client as any).regenerarGrupoPagalo;
 	const reintentar = (client as any).reintentarDispatchPagalo;
@@ -117,6 +118,34 @@ export function AccionesSupervisorPagalo({
 		onError: (error: Error) => toast.error(error.message),
 	});
 
+	const mutationVerificar = useMutation({
+		mutationFn: () => verificar({ groupId, casoCobroId }),
+		onSuccess: (r: {
+			aplicado?: boolean;
+			pagados?: number;
+			statusFinal?: string;
+		}) => {
+			// Se dice lo que PASÓ, no "listo": el caso más común es que el
+			// cliente todavía no pagó, y un toast de éxito ahí hace creer que
+			// el pago entró.
+			if (r?.aplicado) toast.success("Pago verificado y aplicado en cartera.");
+			else if (r?.pagados)
+				toast.success(
+					`${r.pagados} link(s) confirmados. Falta el resto para aplicar.`,
+				);
+			else if (r?.statusFinal === "REVIEW_REQUIRED")
+				toast.warning(
+					"El grupo está en revisión — mirá el motivo en la bitácora.",
+				);
+			else
+				toast.info(
+					"Págalo todavía no reporta el pago. Probá de nuevo en un rato.",
+				);
+			invalidarQueries();
+		},
+		onError: (error: Error) => toast.error(error.message),
+	});
+
 	const cerrar = () => {
 		setAccionAbierta(null);
 		setMotivo("");
@@ -135,17 +164,38 @@ export function AccionesSupervisorPagalo({
 	// Reintentar desde REVIEW_REQUIRED/APPLYING es una decisión, no el retry de
 	// siempre: pide confirmación y se llama por su nombre.
 	const forzado = esReintentoForzado(status, esAdmin);
-	if (!acciones.invalidar && !acciones.regenerar && !acciones.reintentar) {
+	if (
+		!acciones.invalidar &&
+		!acciones.regenerar &&
+		!acciones.reintentar &&
+		!acciones.verificar
+	) {
 		return null;
 	}
 
 	const pendiente =
 		mutationInvalidar.isPending ||
 		mutationRegenerar.isPending ||
-		mutationReintentar.isPending;
+		mutationReintentar.isPending ||
+		mutationVerificar.isPending;
 
 	return (
 		<div className="flex flex-wrap items-center gap-2">
+			{acciones.verificar && (
+				<Button
+					type="button"
+					size="sm"
+					variant="outline"
+					disabled={pendiente}
+					onClick={() => mutationVerificar.mutate()}
+					title="Le pregunta a Págalo por estos links sin esperar el ciclo automático y, si ya están pagados, aplica el pago."
+				>
+					{mutationVerificar.isPending && (
+						<Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+					)}
+					Verificar ahora
+				</Button>
+			)}
 			{acciones.invalidar && (
 				<Button
 					type="button"
@@ -181,7 +231,7 @@ export function AccionesSupervisorPagalo({
 					{mutationReintentar.isPending && (
 						<Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
 					)}
-					{forzado ? "Forzar aplicación" : "Aplicar ahora"}
+					{forzado ? "Forzar aplicación" : "Reintentar aplicación"}
 				</Button>
 			)}
 			<Tooltip>

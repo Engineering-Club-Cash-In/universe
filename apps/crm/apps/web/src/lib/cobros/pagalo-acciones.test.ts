@@ -2,13 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { accionesDisponibles } from "./pagalo-acciones";
 
 describe("accionesDisponibles", () => {
-	test("asesor (no supervisor) nunca ve ninguna acción, sin importar el estado", () => {
+	test("asesor (no supervisor) no ve ninguna acción de supervisor", () => {
 		for (const status of [
 			"LINKS_PENDING",
 			"REVIEW_REQUIRED",
 			"APPLICATION_FAILED",
 		]) {
-			expect(accionesDisponibles(status, false)).toEqual({
+			expect(accionesDisponibles(status, false)).toMatchObject({
 				invalidar: false,
 				regenerar: false,
 				reintentar: false,
@@ -16,8 +16,28 @@ describe("accionesDisponibles", () => {
 		}
 	});
 
+	test("pero SÍ puede verificar: es una consulta sobre un grupo que ya ve", () => {
+		for (const status of [
+			"LINKS_PENDING",
+			"PENDING_PAYMENT",
+			"PARTIALLY_PAID",
+			"REVIEW_REQUIRED",
+			"READY_TO_APPLY",
+			"APPLICATION_FAILED",
+			"APPLYING",
+		]) {
+			expect(accionesDisponibles(status, false).verificar).toBe(true);
+		}
+	});
+
+	test("un grupo cerrado no se verifica: no hay nada que consultar", () => {
+		for (const status of ["COMPLETED", "CANCELLED"]) {
+			expect(accionesDisponibles(status, true, true).verificar).toBe(false);
+		}
+	});
+
 	test("PARTIALLY_PAID: siempre tiene un link PAID adentro, ninguna acción salvo reintentar (que tampoco aplica acá)", () => {
-		expect(accionesDisponibles("PARTIALLY_PAID", true)).toEqual({
+		expect(accionesDisponibles("PARTIALLY_PAID", true)).toMatchObject({
 			invalidar: false,
 			regenerar: false,
 			reintentar: false,
@@ -25,7 +45,7 @@ describe("accionesDisponibles", () => {
 	});
 
 	test("APPLICATION_FAILED: solo reintentar (invalidar/regenerar siempre abortarían — un link ya está PAID)", () => {
-		expect(accionesDisponibles("APPLICATION_FAILED", true)).toEqual({
+		expect(accionesDisponibles("APPLICATION_FAILED", true)).toMatchObject({
 			invalidar: false,
 			regenerar: false,
 			reintentar: true,
@@ -33,7 +53,7 @@ describe("accionesDisponibles", () => {
 	});
 
 	test("REVIEW_REQUIRED: invalidar y regenerar sí, reintentar no (comando determinístico)", () => {
-		expect(accionesDisponibles("REVIEW_REQUIRED", true)).toEqual({
+		expect(accionesDisponibles("REVIEW_REQUIRED", true)).toMatchObject({
 			invalidar: true,
 			regenerar: true,
 			reintentar: false,
@@ -42,7 +62,7 @@ describe("accionesDisponibles", () => {
 
 	test("COMPLETED/CANCELLED/DRAFT/APPLYING: ninguna acción para el supervisor", () => {
 		for (const status of ["COMPLETED", "CANCELLED", "DRAFT", "APPLYING"]) {
-			expect(accionesDisponibles(status, true)).toEqual({
+			expect(accionesDisponibles(status, true)).toMatchObject({
 				invalidar: false,
 				regenerar: false,
 				reintentar: false,
@@ -60,7 +80,7 @@ describe("accionesDisponibles", () => {
 
 	test("LINKS_PENDING/PENDING_PAYMENT: invalidar y regenerar sí, reintentar no", () => {
 		for (const status of ["LINKS_PENDING", "PENDING_PAYMENT"]) {
-			expect(accionesDisponibles(status, true)).toEqual({
+			expect(accionesDisponibles(status, true)).toMatchObject({
 				invalidar: true,
 				regenerar: true,
 				reintentar: false,
@@ -104,11 +124,13 @@ describe("accionesDisponibles", () => {
 		});
 
 		test("el asesor no gana nada aunque le pasen esAdmin", () => {
-			expect(accionesDisponibles("REVIEW_REQUIRED", false, true)).toEqual({
-				invalidar: false,
-				regenerar: false,
-				reintentar: false,
-			});
+			expect(accionesDisponibles("REVIEW_REQUIRED", false, true)).toMatchObject(
+				{
+					invalidar: false,
+					regenerar: false,
+					reintentar: false,
+				},
+			);
 		});
 	});
 });

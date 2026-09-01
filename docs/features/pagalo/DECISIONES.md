@@ -257,3 +257,41 @@ uno nuevo.
 Cuando no hay ninguno, la sección se muestra igual con un placeholder
 ("Sin links de pago generados para este crédito"). Antes se ocultaba entera y
 dejaba una tarjeta vacía en la ficha, que se lee como algo roto.
+
+## D-21 · La cadencia del poll y el botón "Verificar ahora"
+
+**Fecha:** 2026-09-01 · **Pedido por:** Daniel
+
+Cada cuánto le preguntamos a Págalo si un link ya se pagó
+(`lib/pagalo-poll-cadencia.ts`):
+
+- **La primera revisión no es inmediata: espera 5 minutos.** Nadie paga un link
+  en los primeros segundos, así que preguntar de una gasta una llamada
+  garantizada a fallar y, peor, arranca el backoff antes de tiempo.
+- De ahí duplica hasta un **tope de 15 minutos** (5 → 10 → 15 → 15 …). Antes el
+  tope eran 30 y en un link recién pagado se sentía como que el sistema no se
+  enteraba.
+
+El job sigue corriendo cada 5 minutos, así que la cadencia real es la mayor de
+las dos: nunca antes de lo que diga `next_poll_at`, nunca más seguido que el
+ciclo.
+
+**"Verificar ahora" (Ficha 360)** es la salida para no esperar nada: consulta a
+Págalo los links de ESE grupo salteándose `next_poll_at` y, si con eso queda
+evidencia completa, aplica el pago en cartera en la misma acción.
+
+- **Verificar y aplicar son un solo botón** a propósito. Aplicar exige la
+  evidencia verificada (D-05), así que ofrecerlos separados obligaba a apretar
+  dos veces sabiendo de antemano el orden.
+- Lo puede usar **cualquiera con acceso a la Ficha 360**, no solo un
+  supervisor: es una consulta sobre un grupo que la persona ya está viendo, y
+  la aplicación que dispara es la misma que el ciclo automático haría solo unos
+  minutos después. Distinto de `probarPollPagalo`, que corre el poller ENTERO
+  (todos los links de todos los créditos) y sigue siendo de supervisor.
+- Respeta el lease: si el ciclo automático ya tiene el link agarrado, no se lo
+  pelea.
+- **No fuerza lo que necesita una persona.** Desde `REVIEW_REQUIRED` verifica
+  pero no aplica: eso sigue siendo "Forzar aplicación", de admin.
+- No arrastra el backlog de dispatch de otros grupos, que puede tardar minutos
+  con cartera-back lento.
+

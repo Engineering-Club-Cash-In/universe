@@ -8,6 +8,20 @@ const manifestFile = new URL(
   import.meta.url,
 );
 
+/**
+ * Quita las regiones del motor de buckets antes de contar. Ese bloque llegó de
+ * COBROS-02 en el merge de develop y nunca estuvo en el manifiesto de la sexta
+ * tanda; sus console.* son la única señal de que el motor se saltó un ciclo
+ * (catálogo inconsistente o vacío). El resto del archivo —todo el camino de
+ * mora— sigue exigiendo cero.
+ */
+function sinRegionesDeBuckets(source: string): string {
+  return source.replaceAll(
+    /\/\/ #region buckets-cobros02[\s\S]*?\/\/ #endregion buckets-cobros02/g,
+    "",
+  );
+}
+
 function executableConsoleCalls(source: string): number {
   const file = ts.createSourceFile("latefee.ts", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   let count = 0;
@@ -39,7 +53,7 @@ test("sixth structured-log slice reconciles all late-fee traces", () => {
 });
 
 test("late-fee slice has no executable console calls", () => {
-  expect(executableConsoleCalls(readFileSync(controllerFile, "utf8"))).toBe(0);
+  expect(executableConsoleCalls(sinRegionesDeBuckets(readFileSync(controllerFile, "utf8")))).toBe(0);
 });
 
 test("late-fee callsites use only the finite safe application payload", () => {
@@ -77,12 +91,23 @@ test("late-fee callsites use only the finite safe application payload", () => {
 test("late-fee guards cover credit lookup and lock acquisition failures", () => {
   const source = readFileSync(controllerFile, "utf8");
   expect(source).toContain("Math.min(86_400_000");
-  const updateStart = source.indexOf("export async function updateMora");
-  const updateTry = source.indexOf("try {", updateStart);
-  const creditLookup = source.indexOf("const [credito] = await db", updateStart);
-  expect(updateStart).toBeGreaterThanOrEqual(0);
-  expect(updateTry).toBeGreaterThan(updateStart);
-  expect(updateTry).toBeLessThan(creditLookup);
+  // COBROS-02 partió updateMora en dos: `updateMoraEnTx` (el cuerpo, para que
+  // Págalo ajuste la mora DENTRO de la transacción del caller) y `updateMora`
+  // (el wrapper que abre la tx y captura). Por eso el guard ya no es "try antes
+  // del SELECT" dentro de una sola función: el SELECT del crédito va por `tx`,
+  // y el try/catch que termina en el evento `failed` vive en el wrapper. Se
+  // verifica lo mismo — que el lookup del crédito esté cubierto — sobre la
+  // forma nueva.
+  const enTxStart = source.indexOf("export async function updateMoraEnTx");
+  const creditLookup = source.indexOf("const [credito] = await tx", enTxStart);
+  const wrapperStart = source.indexOf("export async function updateMora(");
+  const wrapperTry = source.indexOf("try {", wrapperStart);
+  const wrapperTx = source.indexOf("db.transaction", wrapperStart);
+  expect(enTxStart).toBeGreaterThanOrEqual(0);
+  expect(creditLookup).toBeGreaterThan(enTxStart);
+  expect(wrapperStart).toBeGreaterThan(enTxStart);
+  expect(wrapperTry).toBeGreaterThan(wrapperStart);
+  expect(wrapperTry).toBeLessThan(wrapperTx);
 
   const processStart = source.indexOf("export async function procesarMoras");
   const processTry = source.indexOf("try {", processStart);

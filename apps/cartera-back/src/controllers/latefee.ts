@@ -5,7 +5,6 @@ import Big from "big.js";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import ExcelJS from "exceljs";
 import { stat } from "fs";
-<<<<<<< HEAD
 import { validarCatalogoBuckets } from "../lib/buckets-validation";
 // CB-030 — `hoyGtISO` se IMPORTA (no se recalcula acá) para que el freeze real
 // y la lectura de carteraFront usen literalmente la misma función, no dos
@@ -13,7 +12,6 @@ import { validarCatalogoBuckets } from "../lib/buckets-validation";
 // El resto del re-export de buckets-classification está más abajo, junto al
 // comentario que explica por qué esos tipos viven en otro archivo.
 import { hoyGtISO } from "../lib/buckets-classification";
-=======
 import { emitCreditLateFee } from "../utils/structuredLogger";
 import type { PoolClient } from "pg";
 
@@ -32,7 +30,6 @@ function elapsedMilliseconds(startedAt: number): number {
     return 0;
   }
 }
->>>>>>> origin/develop
 
 type MoraEventoTipo =
   | "CREACION"
@@ -192,6 +189,14 @@ export type CatalogoBucketsResultado = {
  * los consumidores de solo-lectura/presentación (credits.ts, router) usan
  * getBucketsCatalogo() y aceptan degradar en silencio, como antes.
  */
+// #region buckets-cobros02 — motor de buckets (COBROS-02)
+// Bloque traído de COBROS-02, ajeno a la migración de structured logging de
+// develop (su manifiesto de 54 entradas no lo incluye: no existía). Conserva
+// sus console.* a propósito: son la ÚNICA señal de que el motor se saltó un
+// ciclo por catálogo inconsistente o vacío, y ese silencio es justo lo que el
+// bloque existe para evitar. La compuerta de "cero console" de
+// latefeeStructuredLogging.test.ts excluye esta región y sigue estricta en
+// todo el camino de mora.
 export async function getBucketsCatalogoConEstado(): Promise<CatalogoBucketsResultado> {
   try {
     const rows = await db
@@ -229,6 +234,7 @@ export async function getBucketsCatalogoConEstado(): Promise<CatalogoBucketsResu
 }
 
 /** Catálogo dinámico de buckets (activos, ordenados) — fuente única para cartera-back y CRM. */
+// #endregion buckets-cobros02
 export async function getBucketsCatalogo(): Promise<BucketCatalogoCompleto[]> {
   const { catalogo } = await getBucketsCatalogoConEstado();
   return catalogo;
@@ -280,12 +286,7 @@ async function registrarHistorialMora(params: {
   porcentaje_mora?: string | number | null;
   usuario_id?: number | null;
   motivo?: string | null;
-<<<<<<< HEAD
-}, executor: MoraHistoryExecutor = db, options: { required?: boolean } = {}) {
-  try {
-    await executor.insert(moras_historial).values({
-=======
-  dbClient?: typeof db;
+  dbClient?: MoraHistoryExecutor;
   // Dentro de una transacción el swallow es mentiroso: un insert fallido deja
   // la tx abortada y el COMMIT se vuelve rollback silencioso, pero el caller
   // seguiría creyendo que sus writes persistieron. Con esto el error se
@@ -295,7 +296,6 @@ async function registrarHistorialMora(params: {
   const startedAt = safeNow();
   try {
     await (params.dbClient ?? db).insert(moras_historial).values({
->>>>>>> origin/develop
       credito_id: params.credito_id,
       mora_id: params.mora_id,
       tipo_evento: params.tipo_evento,
@@ -316,21 +316,30 @@ async function registrarHistorialMora(params: {
       motivo: params.motivo ?? null,
     });
   } catch (err) {
-<<<<<<< HEAD
-    console.error("[HISTORIAL] ⚠️  No se pudo registrar evento de mora:", err);
-    if (options.required) throw err;
-=======
     emitCreditLateFee({ outcome: "degraded", operation: "history", durationMs: elapsedMilliseconds(startedAt), errorCode: "persistence_failed" });
     if (params.propagarError) throw err;
->>>>>>> origin/develop
   }
 }
 
-/** Medianoche de hoy en hora Guatemala — el "hoy" canónico del módulo de mora. */
+/**
+ * El "hoy" canónico del módulo de mora: el INSTANTE real, sin normalizar.
+ *
+ * Devolvía `toZonedTime(...).setHours(0,0,0,0)`, y eso corre el día uno para
+ * atrás cuando la TZ del host no es la de Guatemala —o sea, en el contenedor,
+ * que va en UTC—: `setHours` opera en la zona del proceso y el día calendario
+ * se deriva después en zona GT, así que las 20:00 GT del día N terminaban
+ * leyéndose como el día N-1 (Codex review PR #1235; comprobado con TZ=UTC y
+ * TZ=Europe/Madrid, y solo con TZ=America/Guatemala coincidía).
+ *
+ * No es cosmético: quien consume esto es `isOverdueInstallmentForMora`, que
+ * decide qué cuotas están vencidas — y de ahí salen tanto la mora como las
+ * transiciones del motor de buckets. El día calendario GT lo deriva esa
+ * función con `hoyGtISO` (Intl), que es la ÚNICA que debe hacer esa
+ * conversión. `procesarMoras` ya trabajaba así en COBROS-02; esto alinea el
+ * camino de `desactivarMoraSiCreditoAlDia` con el mismo criterio.
+ */
 function hoyGuatemala(): Date {
-  const hoy = toZonedTime(new Date(), "America/Guatemala");
-  hoy.setHours(0, 0, 0, 0);
-  return hoy;
+  return new Date();
 }
 
 /**
@@ -851,7 +860,6 @@ export type UpdateMoraParams = {
   cuotas_atrasadas?: number;
   activa?: boolean;
   usuario_email?: string;
-<<<<<<< HEAD
 };
 
 type UpdateMoraTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -872,14 +880,9 @@ export async function updateMoraEnTx({
   activa,
   usuario_email,
 }: UpdateMoraParams, tx: UpdateMoraTransaction, options: UpdateMoraEnTxOptions = {}) {
-  if (monto_cambio < 0) {
-=======
-}) {
   const startedAt = safeNow();
-  try {
-    if (monto_cambio < 0) {
+  if (monto_cambio < 0) {
     emitCreditLateFee({ outcome: "rejected", operation: "update", durationMs: elapsedMilliseconds(startedAt), reasonCode: "invalid_late_fee_amount" });
->>>>>>> origin/develop
     return { success: false, message: "[ERROR] monto_cambio debe ser >= 0 (usa el campo 'tipo' para indicar dirección)" };
   }
 
@@ -904,7 +907,6 @@ export async function updateMoraEnTx({
   const requestId = options.requestId ?? `${targetCreditoId}-${Date.now()}`;
 
 
-<<<<<<< HEAD
   // Resolver usuario que ejecuta la acción (si vino email)
   let usuarioId: number | undefined;
   if (usuario_email) {
@@ -913,22 +915,8 @@ export async function updateMoraEnTx({
       .from(platform_users)
       .where(eq(platform_users.email, usuario_email));
     if (!user) {
+      emitCreditLateFee({ outcome: "rejected", operation: "update", durationMs: elapsedMilliseconds(startedAt), reasonCode: "user_not_found" });
       return { success: false, message: "[ERROR] Usuario no encontrado" };
-=======
-
-    // Resolver usuario que ejecuta la acción (si vino email)
-    let usuarioId: number | undefined;
-    if (usuario_email) {
-      const [user] = await db
-        .select({ id: platform_users.id })
-        .from(platform_users)
-        .where(eq(platform_users.email, usuario_email));
-      if (!user) {
-        emitCreditLateFee({ outcome: "rejected", operation: "update", durationMs: elapsedMilliseconds(startedAt), reasonCode: "user_not_found" });
-        return { success: false, message: "[ERROR] Usuario no encontrado" };
-      }
-      usuarioId = user.id;
->>>>>>> origin/develop
     }
     usuarioId = user.id;
   }
@@ -956,7 +944,7 @@ export async function updateMoraEnTx({
     .for("update");
 
   if (!moraActual) {
-    console.log(`[${requestId}] ❌ No se encontró mora activa para este crédito`);
+    emitCreditLateFee({ outcome: "rejected", operation: "update", durationMs: elapsedMilliseconds(startedAt), reasonCode: "active_late_fee_not_found" });
     return { success: false, message: "[ERROR] Mora activa no encontrada para este crédito" };
   }
 
@@ -1001,27 +989,12 @@ export async function updateMoraEnTx({
     creditoActual?.statusCredit ?? "",
   );
 
-<<<<<<< HEAD
   if (!estadoProtegido) {
     await tx
       .update(creditos)
       .set({ statusCredit: newStatus })
       .where(eq(creditos.credito_id, targetCreditoId));
-  } else {
-    console.log(
-      `[${requestId}] ⏭️ Status '${creditoActual?.statusCredit}' protegido (STATUS_EXCLUIDOS_MORA): no se cambia a ${newStatus}`,
-    );
   }
-=======
-      if (!estadoProtegido) {
-        await tx
-          .update(creditos)
-          .set({ statusCredit: newStatus })
-          .where(eq(creditos.credito_id, targetCreditoId));
-      } else {
-
-      }
->>>>>>> origin/develop
 
   const historialParams = {
     credito_id: targetCreditoId,
@@ -1037,51 +1010,21 @@ export async function updateMoraEnTx({
     motivo: options.motivo ?? null,
   } as const;
 
-<<<<<<< HEAD
   if (options.historyRequired !== false) {
-    await registrarHistorialMora(historialParams, tx, { required: true });
+    await registrarHistorialMora({ ...historialParams, dbClient: tx, propagarError: true });
   } else {
     try {
       await tx.transaction(async (savepoint) => {
-        await registrarHistorialMora(historialParams, savepoint, { required: true });
+        await registrarHistorialMora({ ...historialParams, dbClient: savepoint, propagarError: true });
       });
     } catch {
-      // registrarHistorialMora ya dejó el error en log. El savepoint evita que
-      // PostgreSQL marque abortada la transacción exterior del caller legado.
-=======
-    if (result.kind === "not_found") {
-      emitCreditLateFee({ outcome: "rejected", operation: "update", durationMs: elapsedMilliseconds(startedAt), reasonCode: "active_late_fee_not_found" });
-      return { success: false, message: "[ERROR] Mora activa no encontrada para este crédito" };
->>>>>>> origin/develop
+      // registrarHistorialMora ya dejó el evento degradado. El savepoint evita
+      // que PostgreSQL marque abortada la transacción exterior del caller
+      // legado.
     }
   }
 
-<<<<<<< HEAD
-  console.log(`
-╔════════════════════════════════════════════════════════════
-║ [UPDATE MORA SUCCESS] Request ID: ${requestId}
-║ Mora ID: ${updated.mora_id}
-║ Nuevo Monto: ${newMonto.toString()}
-║ Status Crédito: ${newStatus}
-║ Timestamp: ${new Date().toISOString()}
-╚════════════════════════════════════════════════════════════
-  `);
-=======
-    await registrarHistorialMora({
-      credito_id: targetCreditoId,
-      mora_id: result.updated.mora_id,
-      tipo_evento: tipo,
-      origen: "API_MANUAL",
-      monto_anterior: result.montoAnterior,
-      monto_nuevo: result.montoNuevo,
-      cuotas_atrasadas_anterior: result.cuotasAnteriores,
-      cuotas_atrasadas_nuevas: cuotas_atrasadas,
-      porcentaje_mora: result.updated.porcentaje_mora,
-      usuario_id: usuarioId,
-    });
-
-    emitCreditLateFee({ outcome: "completed", operation: "update", durationMs: elapsedMilliseconds(startedAt) });
->>>>>>> origin/develop
+  emitCreditLateFee({ outcome: "completed", operation: "update", durationMs: elapsedMilliseconds(startedAt) });
 
   return {
     success: true,
@@ -1091,6 +1034,10 @@ export async function updateMoraEnTx({
 }
 
 export async function updateMora(params: UpdateMoraParams) {
+  // El wrapper mide su propio tramo: `updateMoraEnTx` tiene el suyo para los
+  // rechazos, pero el evento `failed` se emite ACÁ (es este try/catch el que
+  // ve reventar la transacción) y necesita su propio inicio.
+  const startedAt = safeNow();
   const requestId = `${params.credito_id ?? params.numero_credito_sifco ?? "unknown"}-${Date.now()}`;
 
   try {
@@ -1099,19 +1046,7 @@ export async function updateMora(params: UpdateMoraParams) {
       historyRequired: false,
     }));
   } catch (error) {
-<<<<<<< HEAD
-    console.error(`
-╔════════════════════════════════════════════════════════════
-║ [UPDATE MORA ERROR] Request ID: ${requestId}
-║ Crédito ID: ${params.credito_id}
-║ Error: ${String(error)}
-║ Timestamp: ${new Date().toISOString()}
-╚════════════════════════════════════════════════════════════
-    `);
-    
-=======
     emitCreditLateFee({ outcome: "failed", operation: "update", durationMs: elapsedMilliseconds(startedAt), errorCode: "unknown" });
->>>>>>> origin/develop
     return {
       success: false,
       message: "[ERROR] Could not update mora",
@@ -1139,10 +1074,7 @@ export async function updateMora(params: UpdateMoraParams) {
 const PROCESAR_MORAS_LOCK_KEY = 728193;
 
 export async function procesarMoras() {
-<<<<<<< HEAD
-=======
   const startedAt = safeNow();
->>>>>>> origin/develop
   // 🔒 Lock entre instancias: con varias réplicas del back, todas agendan el cron
   // (23:59 GT) y corrían EN PARALELO leyendo el mismo estado viejo → duplicaban
   // eventos en moras_historial y, peor, filas activa=true en moras_credito.
@@ -1159,7 +1091,6 @@ export async function procesarMoras() {
       return { skipped: true, creadas: 0, recalculadas: 0, sinCambios: 0, desactivadas: 0, sinCapital: 0 };
     }
 
-<<<<<<< HEAD
     // Instante real; el día calendario GT lo deriva isOverdueInstallmentForMora
     // con hoyGtISO (Intl). Antes se pre-normalizaba con
     // toZonedTime(...).setHours(0,0,0,0), que mezcla zona del proceso (setHours)
@@ -1167,18 +1098,6 @@ export async function procesarMoras() {
     // para atrás (Codex review PR #1235).
     const hoy = new Date();
 
-    console.log("[INFO] Current Guatemala date:", hoyGtISO(hoy));
-    console.log("\n╔════════════════════════════════════════════════════════════");
-    console.log("║ [JOB] 🚀 INICIANDO PROCESO DE MORAS (UPSERT)");
-    console.log("╚════════════════════════════════════════════════════════════\n");
-=======
-    const hoy = hoyGuatemala();
-
-
-
-
-
->>>>>>> origin/develop
 
     // CB-030 — promesas de pago vigentes (espejo local, ver schema.ts), Map
     // por credito_id para el freeze por cuota en isOverdueInstallmentForMora.
@@ -1200,10 +1119,19 @@ export async function procesarMoras() {
           .from(promesas_pago_espejo)
           .where(eq(promesas_pago_espejo.activa, true));
       } catch (err: any) {
+// #region buckets-cobros02 — motor de buckets (COBROS-02)
+// Bloque traído de COBROS-02, ajeno a la migración de structured logging de
+// develop (su manifiesto de 54 entradas no lo incluye: no existía). Conserva
+// sus console.* a propósito: son la ÚNICA señal de que el motor se saltó un
+// ciclo por catálogo inconsistente o vacío, y ese silencio es justo lo que el
+// bloque existe para evitar. La compuerta de "cero console" de
+// latefeeStructuredLogging.test.ts excluye esta región y sigue estricta en
+// todo el camino de mora.
         if (err?.code === "42P01") {
           console.log("[MORA] ⏭️  promesas_pago_espejo aún no existe (migración pendiente) — sin freeze este ciclo.");
           return [];
         }
+// #endregion buckets-cobros02
         throw err;
       }
     })();
@@ -1483,7 +1411,14 @@ export async function procesarMoras() {
 
     }
 
-<<<<<<< HEAD
+// #region buckets-cobros02 — motor de buckets (COBROS-02)
+// Bloque traído de COBROS-02, ajeno a la migración de structured logging de
+// develop (su manifiesto de 54 entradas no lo incluye: no existía). Conserva
+// sus console.* a propósito: son la ÚNICA señal de que el motor se saltó un
+// ciclo por catálogo inconsistente o vacío, y ese silencio es justo lo que el
+// bloque existe para evitar. La compuerta de "cero console" de
+// latefeeStructuredLogging.test.ts excluye esta región y sigue estricta en
+// todo el camino de mora.
     // ============================================================
     // 🪣 MOTOR DE BUCKETS (COBROS-02) — registrar transiciones de bucket
     // ============================================================
@@ -1736,25 +1671,7 @@ export async function procesarMoras() {
         bucketErr,
       );
     }
-
-    console.log("\n╔════════════════════════════════════════════════════════════");
-    console.log(`║ [JOB] ✅ FINISHED MORA PROCESSING`);
-    console.log(`║   Creadas: ${creadas}`);
-    console.log(`║   Recalculadas: ${recalculadas}`);
-    console.log(`║   Sin cambios: ${sinCambios}`);
-    console.log(`║   Desactivadas: ${desactivadas}`);
-    console.log(`║   Sin capital (omitidas): ${sinCapital}`);
-    console.log("╚════════════════════════════════════════════════════════════\n");
-
-    return { creadas, recalculadas, sinCambios, desactivadas, sinCapital, buckets: bucketsResumen };
-=======
-
-
-
-
-
-
-
+// #endregion buckets-cobros02
 
 
     const succeededCount = creadas + recalculadas + sinCambios + desactivadas;
@@ -1768,8 +1685,7 @@ export async function procesarMoras() {
       failedCount: 0,
       skippedCount,
     });
-    return { creadas, recalculadas, sinCambios, desactivadas, sinCapital };
->>>>>>> origin/develop
+    return { creadas, recalculadas, sinCambios, desactivadas, sinCapital, buckets: bucketsResumen };
 
   } catch (error: any) {
     emitCreditLateFee({ outcome: "failed", operation: "process", durationMs: elapsedMilliseconds(startedAt), errorCode: "unknown" });

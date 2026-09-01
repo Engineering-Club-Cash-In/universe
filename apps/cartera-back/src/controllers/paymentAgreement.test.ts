@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
+import { lockPoolMock } from "../utils/testMocks";
 
 type Row = Record<string, any>;
 
@@ -6,6 +7,12 @@ const state = {
   selects: new Map<any, Row[]>(),
   reads: [] as any[],
   updates: [] as Array<{ table: any; values: Row }>,
+  /**
+   * `false` simula que el UPDATE guardado de `convenios_pago` no matcheó
+   * ninguna fila: alguien cambió el convenio entre la lectura y la
+   * acreditación. Postgres no tira error ante eso — devuelve 0 filas.
+   */
+  updateMatches: true,
 };
 
 function createTransaction() {
@@ -37,7 +44,7 @@ function createTransaction() {
           return {
             where() {
               const selected = state.selects.get(table) ?? [];
-              const rows = table === convenios_pago
+              const rows = table === convenios_pago && state.updateMatches
                 ? selected.map((row) => ({ ...row, ...values }))
                 : [];
               const query: any = Promise.resolve(rows);
@@ -61,7 +68,7 @@ const fakeDb = {
   },
 };
 
-mock.module("../database", () => ({ db: fakeDb }));
+mock.module("../database", () => ({ db: fakeDb, client: {}, lockPool: lockPoolMock }));
 mock.module("./latefee", () => ({
   contarCuotasVencidasReales: mock(() => Promise.resolve(0)),
   createMora: mock(() => Promise.resolve({ success: true })),
@@ -122,6 +129,7 @@ describe("processConvenioPaymentEnTx", () => {
     state.selects.clear();
     state.reads.length = 0;
     state.updates.length = 0;
+    state.updateMatches = true;
     transactionCalls = 0;
     transactionExecutor = createTransaction();
   });
@@ -183,6 +191,32 @@ describe("processConvenioPaymentEnTx", () => {
     });
     expect(transactionCalls).toBe(0);
   });
+
+  // Guard traído de develop (P2 de Codex en #1482). El advisory lock del pago
+  // serializa los otros pagos del mismo crédito, pero no a un escritor que
+  // toque el convenio por fuera; si el convenio cambió entre la lectura y la
+  // acreditación, el UPDATE no matchea y hay que abortar — todo lo que sigue
+  // (salida por completado, marcado de cuotas) se calculó sobre el estado
+  // viejo.
+  it("si el convenio cambió entre la lectura y la acreditación, no escribe nada más", async () => {
+    state.selects.set(convenios_pago, [activeAgreement]);
+    state.selects.set(convenio_cuotas, [
+      { cuota_convenio_id: 901, convenio_id: 77, numero_cuota: 2 },
+    ]);
+    state.updateMatches = false;
+
+    const result = await processConvenioPaymentEnTx(params, transactionExecutor as never);
+
+    expect(result).toMatchObject({
+      success: false,
+      convenio: null,
+      pago_completo: false,
+      monto_aplicado: "0",
+    });
+    // Se intentó el update guardado y nada más: ni cuotas_credito, ni
+    // creditos (la salida de EN_CONVENIO), ni convenio_cuotas.
+    expect(state.updates.map(({ table }) => table)).toEqual([convenios_pago]);
+  });
 });
 
 describe("processConvenioPayment", () => {
@@ -190,6 +224,7 @@ describe("processConvenioPayment", () => {
     state.selects.clear();
     state.reads.length = 0;
     state.updates.length = 0;
+    state.updateMatches = true;
     transactionCalls = 0;
     transactionExecutor = createTransaction();
   });

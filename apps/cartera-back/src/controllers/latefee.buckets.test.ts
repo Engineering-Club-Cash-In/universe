@@ -371,7 +371,14 @@ describe("updateMora", () => {
     expect(fake.updates.map((entry) => entry.tabla)).toEqual([moras_credito, creditos]);
   });
 
-  it("con SIFCO conserva el mismo requestId entre inicio y error", async () => {
+  // Antes esta prueba verificaba que el mismo `requestId` saliera en el log de
+  // inicio y en el de error. develop reemplazó esos banners por
+  // emitCreditLateFee, cuyo payload no lleva request id, así que esa
+  // correlación ya no es observable — y `requestId` quedó sin lector (ya venía
+  // así en develop, no lo introdujo el merge). Se conserva la mitad que sí es
+  // comportamiento: que el fallo dentro de la transacción salga como un
+  // resultado de error y no como una excepción.
+  it("con SIFCO, un fallo dentro de la transacción vuelve como resultado de error", async () => {
     const expected = new Error("mora select failed");
     transactionExecutorOverride = {
       select() {
@@ -393,34 +400,13 @@ describe("updateMora", () => {
       },
     };
 
-    const originalNow = Date.now;
-    const originalLog = console.log;
-    const originalError = console.error;
-    let instant = 1_000;
-    const output: string[] = [];
-    Date.now = () => instant++;
-    console.log = (...args: unknown[]) => output.push(args.map(String).join(" "));
-    console.error = (...args: unknown[]) => output.push(args.map(String).join(" "));
+    const result = await updateMora({
+      numero_credito_sifco: "01010214103710",
+      monto_cambio: 25,
+      tipo: "INCREMENTO",
+    });
 
-    try {
-      const result = await updateMora({
-        numero_credito_sifco: "01010214103710",
-        monto_cambio: 25,
-        tipo: "INCREMENTO",
-      });
-
-      expect(result).toMatchObject({ success: false, error: String(expected) });
-    } finally {
-      Date.now = originalNow;
-      console.log = originalLog;
-      console.error = originalError;
-    }
-
-    const requestIds = output.flatMap((line) =>
-      [...line.matchAll(/Request ID: ([^\n]+)/g)].map((match) => match[1]),
-    );
-    expect(requestIds).toHaveLength(2);
-    expect(new Set(requestIds).size).toBe(1);
+    expect(result).toMatchObject({ success: false, error: String(expected) });
   });
 });
 

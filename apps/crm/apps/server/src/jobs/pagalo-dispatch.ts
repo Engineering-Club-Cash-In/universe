@@ -340,7 +340,13 @@ async function notificarAsesorPagoAplicado(
 	group: GrupoClaimado,
 ): Promise<void> {
 	try {
-		const mapa = await construirMapaAsesorUsuario();
+		// Sin circuit breaker: un catálogo de asesores fallando repetido no
+		// puede sumar al contador de fallos compartido y abrir el breaker
+		// global de cartera-back para las llamadas que sí importan (aplicar
+		// pagos, consultar créditos) — hallazgo Codex.
+		const mapa = await construirMapaAsesorUsuario({
+			useCircuitBreaker: false,
+		});
 		const asesorUserId = await resolverAsesorVigente(
 			group.numeroCreditoSifco,
 			mapa,

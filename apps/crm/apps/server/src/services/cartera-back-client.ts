@@ -2277,6 +2277,13 @@ export class CarteraBackClient {
 	// asesores).
 	async getPoolPorAsesor(options?: {
 		useCache?: boolean;
+		/**
+		 * `false` para llamadas best-effort (p.ej. resolver a quién notificar)
+		 * cuyo fallo ya se traga el caller — no debe compartir contador de
+		 * fallos con las operaciones que sí importan (ver comentario de
+		 * `usarCircuitBreaker` en `request`).
+		 */
+		useCircuitBreaker?: boolean;
 	}): Promise<PoolPorAsesorRow[]> {
 		const response = await this.request<{
 			success: boolean;
@@ -2285,6 +2292,9 @@ export class CarteraBackClient {
 			"/buckets/pool-por-asesor",
 			{ method: "GET" },
 			options?.useCache ?? true,
+			undefined,
+			undefined,
+			options?.useCircuitBreaker ?? true,
 		);
 		return response.data ?? [];
 	}

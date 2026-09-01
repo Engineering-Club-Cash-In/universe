@@ -29,17 +29,26 @@ export type CobrosNotifTipo =
  * asesor contra el correo de login del usuario del CRM. Asesores sin usuario
  * vinculado por correo simplemente no entran al mapa (su notificación se omite).
  */
-export async function construirMapaAsesorUsuario(): Promise<
-	Map<number, string>
-> {
+export async function construirMapaAsesorUsuario(options?: {
+	/**
+	 * `false` para callers best-effort cuyo fallo ya se traga el caller (p.ej.
+	 * resolver a quién notificar DESPUÉS de que un pago ya se aplicó) — no debe
+	 * compartir contador de fallos con las operaciones de cartera-back que sí
+	 * importan. Los jobs de alertas de cobros (que sí necesitan que esto sea
+	 * confiable) mantienen el breaker normal por default.
+	 */
+	useCircuitBreaker?: boolean;
+}): Promise<Map<number, string>> {
 	// getPoolPorAsesor (email_cash_in), NO getAdvisors(): /advisor expone
 	// `platform_users.email` vía LEFT JOIN, que está desactualizado o no matchea
 	// para varios asesores (Diego Gomez, Samuel Gamboa, Caren Rivera) — con esa
 	// fuente sus notificaciones de cobros nunca se creaban. email_cash_in sí es
 	// el correo que coincide con el login del CRM.
-	const asesores = (await carteraBackClient.getPoolPorAsesor()).filter((a) =>
-		Boolean(a.email_cash_in),
-	);
+	const asesores = (
+		await carteraBackClient.getPoolPorAsesor({
+			useCircuitBreaker: options?.useCircuitBreaker,
+		})
+	).filter((a) => Boolean(a.email_cash_in));
 	if (asesores.length === 0) return new Map();
 
 	// La tabla `user` es de staff (decenas): traerla entera y matchear en JS

@@ -1,10 +1,64 @@
 import { describe, expect, test } from "bun:test";
 import {
 	asesoresActivosConBuckets,
+	asesoresConBucketsCompatibles,
 	buscarAsesorPorEmail,
 	buscarAsesorPorId,
+	debeUsarFallbackAtribucion,
 	nombresAsesoresPorSifco,
 } from "./pagalo-supervision-acceso";
+
+describe("asesoresConBucketsCompatibles", () => {
+	test("acepta respuesta legacy sin activo y excluye inactivos explícitos", () => {
+		const asesores = asesoresConBucketsCompatibles([
+			{
+				asesor_id: 7,
+				nombre: "Legacy",
+				email_cash_in: null,
+				buckets: [1],
+			},
+			{
+				asesor_id: 8,
+				nombre: "Inactiva",
+				email_cash_in: null,
+				activo: false,
+				buckets: [1],
+			},
+			{
+				asesor_id: 9,
+				nombre: "Sin estado",
+				email_cash_in: null,
+				activo: null,
+				buckets: [1],
+			},
+		]);
+
+		expect(asesores.map((asesor) => asesor.asesor_id)).toEqual([7]);
+	});
+});
+
+describe("debeUsarFallbackAtribucion", () => {
+	test("activa compatibilidad si bulk no atribuye una página con asesores activos", () => {
+		const asesores = [
+			{
+				asesor_id: 7,
+				nombre: "Activa",
+				email_cash_in: null,
+				activo: true,
+				buckets: [1],
+			},
+		];
+
+		expect(debeUsarFallbackAtribucion(asesores, ["SIFCO-1"], [])).toBe(
+			true,
+		);
+		expect(
+			debeUsarFallbackAtribucion(asesores, ["SIFCO-1"], [
+				{ asesor_id: 7, numero_credito_sifco: "SIFCO-1" },
+			]),
+		).toBe(false);
+	});
+});
 
 describe("asesoresActivosConBuckets", () => {
 	test("excluye asesores inactivos aunque conserven buckets activos", () => {

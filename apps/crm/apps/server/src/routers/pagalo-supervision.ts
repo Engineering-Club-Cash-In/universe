@@ -26,6 +26,7 @@ import { cobrosProcedure, cobrosSupervisorProcedure } from "../lib/orpc";
 import {
 	type AsesorPoolPagalo,
 	asesoresActivosConBuckets,
+	asesoresConBucketsCompatibles,
 	buscarAsesorPorEmail,
 	buscarAsesorPorId,
 	debeUsarFallbackAtribucion,
@@ -90,7 +91,7 @@ export const pagaloSupervisionRouter = {
 			const asesores = await carteraBackClient.getPoolPorAsesor({
 				useCache: false,
 			});
-			return asesoresActivosConBuckets(asesores)
+			return asesoresConBucketsCompatibles(asesores)
 				.map(({ asesor_id, nombre, buckets }) => ({
 					asesorId: asesor_id,
 					nombre,
@@ -447,6 +448,7 @@ export const pagaloSupervisionRouter = {
 			// esta página. Evita resolver pools completos por cada asesor.
 			const sifcosPorAsesor = new Map<number, string[]>();
 			const asesoresVisibles = asesoresActivosConBuckets(asesores);
+			const asesoresCompatibles = asesoresConBucketsCompatibles(asesores);
 			let usarFallback = false;
 			if (sifcosPagina.length > 0) {
 				try {
@@ -480,7 +482,7 @@ export const pagaloSupervisionRouter = {
 			}
 			if (usarFallback) {
 				const scopesFallback = await Promise.all(
-					asesoresVisibles.map(async (asesor) => {
+					asesoresCompatibles.map(async (asesor) => {
 						try {
 							return {
 								asesorId: asesor.asesor_id,
@@ -502,7 +504,7 @@ export const pagaloSupervisionRouter = {
 				}
 			}
 			const asesoresPorSifco = nombresAsesoresPorSifco(
-				asesoresVisibles.map((asesor) => ({
+				(usarFallback ? asesoresCompatibles : asesoresVisibles).map((asesor) => ({
 					...asesor,
 					sifcos: sifcosPorAsesor.get(asesor.asesor_id) ?? [],
 				})),

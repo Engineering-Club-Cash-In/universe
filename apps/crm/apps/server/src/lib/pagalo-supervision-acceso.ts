@@ -17,6 +17,20 @@ export function asesoresActivosConBuckets<T extends AsesorPoolPagalo>(
 	);
 }
 
+/**
+ * Compatibilidad mientras CRM y Cartera Back se despliegan en momentos
+ * distintos: backend previo omitía `activo`; false/null siguen excluidos.
+ */
+export function asesoresConBucketsCompatibles<T extends AsesorPoolPagalo>(
+	asesores: readonly T[],
+): T[] {
+	return asesores.filter(
+		(asesor) =>
+			asesor.buckets.length > 0 &&
+			(asesor.activo === true || asesor.activo === undefined),
+	);
+}
+
 export function debeUsarFallbackAtribucion(
 	asesores: readonly AsesorPoolPagalo[],
 	sifcosPagina: readonly string[],

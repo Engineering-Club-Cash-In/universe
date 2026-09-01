@@ -28,6 +28,7 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, inArray, isNull, lt, or } from "drizzle-orm";
 import { db } from "../db";
+import { notifications } from "../db/schema/notifications";
 import {
 	pagaloPaymentEvents,
 	pagaloPaymentGroups,
@@ -39,6 +40,11 @@ import {
 	type PagaloAllocationForHash,
 	type PagaloSourceForHash,
 } from "../lib/pagalo-payload-hash";
+import { carteraBackClient } from "../services/cartera-back-client";
+import {
+	construirMapaAsesorUsuario,
+	resolverUsuarioSistemaCobros,
+} from "../services/cobros-notif-helpers";
 import { postPagaloPaymentImport } from "../services/pagalo-import-client";
 
 /** Tope por corrida. Si hay más, se atienden en la siguiente. */
@@ -300,12 +306,132 @@ async function armarComando(group: GrupoClaimado) {
 	return { ...command, payload_hash };
 }
 
+/**
+ * Cachea la promesa del catálogo de asesores por unos segundos para que un
+ * backlog completando N grupos casi al mismo tiempo comparta UNA sola
+ * resolución en vuelo en vez de disparar N llamadas concurrentes e
+ * independientes a `/buckets/pool-por-asesor` (hasta 3 reintentos cada una,
+ * sin circuit breaker) — un backlog de 50 grupos podía machacar un
+ * cartera-back ya degradado con hasta ~150 requests simultáneos (hallazgo
+ * Codex). No usa `construirMapaAsesorUsuario` como caché persistente: solo
+ * comparte llamadas que caen dentro de la misma ventana breve, luego expira
+ * para no servir datos viejos indefinidamente.
+ */
+let mapaAsesoresCache: {
+	promesa: Promise<Map<number, string>>;
+	expira: number | null;
+} | null = null;
+const MAPA_ASESORES_TTL_MS = 10_000;
+
+function obtenerMapaAsesoresCompartido(): Promise<Map<number, string>> {
+	const ahora = Date.now();
+	// `expira: null` = todavía en vuelo — se retiene SIN importar cuánto lleve
+	// (el GET puede tardar hasta ~90s con reintentos); el TTL solo arranca a
+	// contar una vez que la promesa resuelve, si no una llamada lenta caduca
+	// el caché a mitad de camino y el siguiente grupo dispara otra llamada en
+	// paralelo — justo el escenario degradado que esto debía evitar
+	// (hallazgo Codex).
+	if (
+		!mapaAsesoresCache ||
+		(mapaAsesoresCache.expira ?? Number.POSITIVE_INFINITY) < ahora
+	) {
+		const promesa = construirMapaAsesorUsuario({
+			useCircuitBreaker: false,
+		}).catch(() => new Map<number, string>());
+		mapaAsesoresCache = { promesa, expira: null };
+		promesa.finally(() => {
+			if (mapaAsesoresCache?.promesa === promesa) {
+				mapaAsesoresCache.expira = Date.now() + MAPA_ASESORES_TTL_MS;
+			}
+		});
+	}
+	return mapaAsesoresCache.promesa;
+}
+
+/**
+ * EL asesor único que tiene asignado el crédito HOY — no el snapshot fijo
+ * de `group.carteraAsesorId` (tomado al crear el link, puede quedar
+ * desactualizado si el crédito se reasignó después), y no el pool de
+ * buckets (`getAsignacionesPoolPorSifco`), que puede devolver varios
+ * asesores solapados y no sirve para "un solo destinatario". Misma fuente
+ * (`getCredito` → `credito.asesor_id`) que usa `pago-link.ts` al crear el
+ * link originalmente.
+ */
+async function resolverAsesorVigente(
+	numeroCreditoSifco: string,
+	asesorMap: Map<number, string>,
+): Promise<string | null> {
+	// useCache=false (dato fresco) y useCircuitBreaker=false (best-effort, no
+	// debe sumar al breaker compartido — mismo criterio que
+	// construirMapaAsesorUsuario, hallazgo Codex).
+	const credito = await carteraBackClient
+		.getCredito(numeroCreditoSifco, false, false)
+		.catch(() => null);
+	const asesorId = credito?.credito.asesor_id;
+	return asesorId ? (asesorMap.get(asesorId) ?? null) : null;
+}
+
+/**
+ * Notifica al asesor que el pago quedó aplicado — SIEMPRE fuera de la tx que
+ * marca el grupo COMPLETED: el pago ya se aplicó en cartera-back en este
+ * punto, así que nada de esto (catálogo de asesores caído, un
+ * PREMORA_SYSTEM_USER_ID obsoleto que viola el FK created_by, cualquier otro
+ * error) puede revertir esa transición de estado ni dejar el grupo trabado
+ * en APPLYING reintentando para siempre el mismo import (hallazgo Codex).
+ * Best-effort real: se resuelve DESPUÉS de que el grupo ya quedó COMPLETED,
+ * y cualquier fallo solo se loguea.
+ *
+ * `resolverAsesorVigente` hace una llamada a `/credito` POR GRUPO (una por
+ * crédito, no compartible como el catálogo de arriba) — un backlog muy
+ * grande completándose junto podría lanzar varias en paralelo. Riesgo
+ * aceptado: degradación de carga bajo un escenario raro, no pérdida de
+ * datos ni bloqueo del flujo de pagos (mismo criterio que la ventana de
+ * pérdida de notificación ya aceptada más abajo).
+ */
+async function notificarAsesorPagoAplicado(
+	group: GrupoClaimado,
+): Promise<void> {
+	try {
+		// Compartido entre notificaciones concurrentes de la misma corrida —
+		// ver obtenerMapaAsesoresCompartido (hallazgo Codex sobre fan-out).
+		const mapa = await obtenerMapaAsesoresCompartido();
+		const asesorUserId = await resolverAsesorVigente(
+			group.numeroCreditoSifco,
+			mapa,
+		);
+		if (!asesorUserId) return;
+		const usuarioSistema = await resolverUsuarioSistemaCobros();
+		if (!usuarioSistema) return;
+		await db.insert(notifications).values({
+			titulo: `Pago aplicado - Crédito ${group.numeroCreditoSifco}`,
+			descripcion: `Se aplicó el pago de Q${group.totalAmount} sobre el crédito ${group.numeroCreditoSifco}.`,
+			type: "aviso",
+			createdBy: usuarioSistema,
+			createdByRole: "cobros_supervisor",
+			assignedToRole: "cobros",
+			assignedTo: asesorUserId,
+			...(group.casoCobroId
+				? {
+						relatedEntityType: "collection_case" as const,
+						relatedEntityId: group.casoCobroId,
+					}
+				: {}),
+			redirectPage: "cobros_detail",
+		});
+	} catch (error) {
+		console.error(
+			`[Págalo][DISPATCH] no se pudo notificar al asesor del grupo ${group.id}:`,
+			error instanceof Error ? error.message : error,
+		);
+	}
+}
+
 async function marcarCompletado(
 	group: GrupoClaimado,
 	payloadHash: string,
 	importId: number,
 ): Promise<void> {
-	await db.transaction(async (tx) => {
+	const completado = await db.transaction(async (tx) => {
 		const [actualizado] = await tx
 			.update(pagaloPaymentGroups)
 			.set({
@@ -320,7 +446,7 @@ async function marcarCompletado(
 			})
 			.where(filtroClaimVigente(group))
 			.returning({ id: pagaloPaymentGroups.id });
-		if (!actualizado) return;
+		if (!actualizado) return false;
 		await tx.insert(pagaloPaymentEvents).values({
 			groupId: group.id,
 			eventType: "GROUP_COMPLETED",
@@ -329,7 +455,14 @@ async function marcarCompletado(
 			toStatus: "COMPLETED",
 			payload: { carteraImportId: importId },
 		});
+		return true;
 	});
+	// Fire-and-forget a propósito: correrDispatchPagalo y el dispatch inline
+	// del poller procesan grupos en serie — esperar esta notificación acá
+	// retrasaría la detección/aplicación de TODOS los pagos siguientes de la
+	// misma corrida si cartera-back está lento (hallazgo Codex). Su propio
+	// try/catch interno ya se encarga de loguear cualquier fallo.
+	if (completado) void notificarAsesorPagoAplicado(group);
 }
 
 async function marcarRevisionRequerida(

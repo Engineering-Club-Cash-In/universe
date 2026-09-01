@@ -43,7 +43,6 @@ import {
 import { getPagosDelMesActual, insertPagosCreditoInversionistasV2 } from "./payments";
 import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
 import {
-  filtrarCuotasEnValidacion,
   filtrarCuotasVencidasSinCobertura,
 } from "./registerPaymentPolicy";
 import {
@@ -267,7 +266,6 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         // Necesarios para la cobertura por montos (el front los ignora)
         paymentFalse: pagos_credito.paymentFalse,
         membresias_pago: pagos_credito.membresias_pago,
-        monto_aplicado: pagos_credito.monto_aplicado,
 
         monto_boleta: pagos_credito.monto_boleta,
         abono_capital: pagos_credito.abono_capital,
@@ -311,14 +309,6 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       .orderBy(asc(cuotas_credito.numero_cuota));
 
     const cuotasAtrasadas = filtrarCuotasVencidasSinCobertura(
-      cuotasVencidasSinCerrar,
-      currentCredit.creditos.cuota ?? 0
-    );
-
-    // Cuotas vencidas ya cubiertas por boletas que contabilidad aún no valida:
-    // no son deuda (no van en atrasadas), pero el asesor debe verlas — mientras
-    // no se validen, el cron de moras las sigue tratando como atraso.
-    const cuotasEnValidacion = filtrarCuotasEnValidacion(
       cuotasVencidasSinCerrar,
       currentCredit.creditos.cuota ?? 0
     );

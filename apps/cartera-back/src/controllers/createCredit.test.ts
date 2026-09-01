@@ -55,7 +55,6 @@ mock.module("../database", () => {
         }),
       }),
     },
-    client: {},
   };
 });
 

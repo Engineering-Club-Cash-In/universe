@@ -1727,10 +1727,18 @@ const JOBS_PROGRAMADOS = {
 	 *  nadie lo reintenta y hay que apretar "Verificar ahora" a mano. */
 	dispatcherPagalo: true,
 	/** ⚠️ Le escribe al CLIENTE por WhatsApp cada 3 h (link sin pagar).
-	 *  Respeta TEST_MESSAGE: con `TEST_MESSAGE=true` todo envío se redirige a
-	 *  la lista de contactos de prueba. Antes de prenderlo en un ambiente
-	 *  nuevo, verificar esa env. */
-	recordatorioPagalo: true,
+	 *
+	 *  Va atado a `TEST_MESSAGE`, no a un `true` fijo, y FALLA CERRADO: si el
+	 *  modo prueba no está activo, este job NO corre.
+	 *
+	 *  El despliegue documentado de esta rama (despliegue-dev.md) configura
+	 *  `TEST_MESSAGE=false` contra una COPIA DE PRODUCCIÓN, y ahí el emisor
+	 *  manda al teléfono real del cliente. Un `true` fijo acá le mandaría
+	 *  links de pago a clientes reales cada 3 horas (hallazgo Codex). Ese
+	 *  mismo documento dice por qué la protección no puede depender de que
+	 *  alguien revise la env: "depender de que la env quedara bien puesta en
+	 *  el ambiente era demasiado frágil para lo que está en juego". */
+	recordatorioPagalo: isTestModeEnabled(),
 	/** Interno: promesas incumplidas + cierre de snapshots de la agenda. */
 	promesasYSnapshots: true,
 	/** Interno: foto de "paga bien" + auto-revoke de la reducción (CB-010). */
@@ -1751,6 +1759,12 @@ const JOBS_PROGRAMADOS = {
 } as const;
 
 const HAY_JOBS_ACTIVOS = Object.values(JOBS_PROGRAMADOS).some(Boolean);
+
+if (!JOBS_PROGRAMADOS.recordatorioPagalo) {
+	console.warn(
+		"[Jobs] ⚠️  Recordatorio de Págalo APAGADO: TEST_MESSAGE no está en 'true' y ese job le escribe al cliente. Es a propósito — se prende solo con el modo prueba activo.",
+	);
+}
 
 console.warn(
 	`[Jobs] ⚠️  Tareas programadas PARCIALES en el código (rama COBROS-02): ${

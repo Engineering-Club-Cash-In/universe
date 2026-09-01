@@ -1,4 +1,4 @@
-name: Deploy COBROS-02 (CRM API + cartera-back)
+name: Deploy COBROS-02 (CRM API + cartera-back + CRM web)
 
 # Construye y empuja las imágenes de la rama COBROS-02 al ECR público y dispara
 # el redeploy en Coolify. Dos apps, cada una con su instancia aparte, separadas
@@ -6,6 +6,9 @@ name: Deploy COBROS-02 (CRM API + cartera-back)
 #   - CRM API: la que consume el bot de WhatsApp de SimpleTech.
 #   - cartera-back: sirve contra el schema sandbox `cartera_cobros2` (el
 #     rediseño de buckets/asesores de COBROS-02), no contra `cartera`.
+#   - CRM web: el front de la rama, apuntando a la API de arriba. Ojo: sus
+#     URLs (VITE_*) se hornean en el bundle al CONSTRUIR, no son variables de
+#     runtime — por eso viajan como --build-arg y no como env de Coolify.
 #
 # Cada app se construye SOLO si su código cambió: el job `cambios` mira qué
 # tocó el push y los demás se saltan solos. Antes se reconstruían las dos
@@ -27,6 +30,9 @@ on:
       - "packages/infornet/**"
       - "packages/email/**"
       - "apps/cartera-back/**"
+      - "apps/crm/apps/web/**"
+      - "apps/crm/Dockerfile"
+      - "apps/crm/nginx.conf"
       - "package.json"
       - "bun.lock"
       - ".github/workflows/deploy-crm-api-cobros.yaml"
@@ -47,6 +53,7 @@ jobs:
     outputs:
       crm: ${{ steps.filtro.outputs.crm }}
       cartera: ${{ steps.filtro.outputs.cartera }}
+      web: ${{ steps.filtro.outputs.web }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -71,6 +78,19 @@ jobs:
               - 'packages/email/**'
               - 'package.json'
               - 'bun.lock'
+              - '.github/workflows/deploy-crm-api-cobros.yaml'
+            web:
+              - 'apps/crm/apps/web/**'
+              - 'apps/crm/Dockerfile'
+              - 'apps/crm/nginx.conf'
+              - 'apps/crm/package.json'
+              - 'apps/crm/bun.lock'
+              # El front importa tipos y esquemas del server por alias de vite
+              # (server -> ../server): un cambio de routers o de schema cambia
+              # el bundle aunque no se toque nada bajo apps/web.
+              - 'apps/crm/apps/server/src/lib/**'
+              - 'apps/crm/apps/server/src/db/schema/**'
+              - 'apps/crm/apps/server/src/routers/**'
               - '.github/workflows/deploy-crm-api-cobros.yaml'
 
   # ─── CRM API ────────────────────────────────────────────────────────────
@@ -201,8 +221,96 @@ jobs:
             "${{ secrets.COOLIFY_WEBHOOK_CARTERA_API_COBROS }}" \
             --header "Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}"
 
+  # ─── CRM web (front) ────────────────────────────────────────────────────
+  # NO se corre `tsc --noEmit` como barrera: el front arrastra ~1,059 errores
+  # de tipos preexistentes (medidos el 2026-09-01 en COBROS-02), así que ese
+  # gate bloquearía todos los despliegues desde el primer día. `vite build`
+  # tampoco typechequea — falla por imports o sintaxis, no por tipos— y esa es
+  # hoy la única barrera real, igual que en el despliegue principal
+  # (deploy-prod.yaml tampoco verifica crm-web).
+  #
+  # Lo que sí se corre es la suite del front, que es rápida y sí pasa: cubre
+  # las reglas de cobros/Págalo, que es lo que se está tocando en esta rama.
+  verificar-web:
+    name: CRM web · Pruebas
+    needs: cambios
+    if: needs.cambios.outputs.web == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # Igual que el Dockerfile: las deps se instalan en apps/crm (workspace),
+      # y el front resuelve `server -> ../server` por alias de vite.
+      - name: Instalar dependencias
+        working-directory: apps/crm
+        run: bun install --frozen-lockfile
+
+      - name: Pruebas del front
+        working-directory: apps/crm/apps/web
+        run: bun test src/lib/
+
+  # Imagen → cci/crm-web-cobros:latest
+  desplegar-web:
+    name: CRM web · Construir y desplegar
+    needs: [cambios, verificar-web]
+    if: needs.cambios.outputs.web == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-cobros02-web
+      cancel-in-progress: true
+    env:
+      IMAGEN: cci/crm-web-cobros
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar credenciales de AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login a ECR Public (podman)
+        run: |
+          aws ecr-public get-login-password --region $AWS_REGION \
+            | podman login --username AWS --password-stdin public.ecr.aws
+
+      # Las dos URLs se hornean en el bundle: si no se pasan, la imagen queda
+      # apuntando al CRM principal (los defaults del Dockerfile) y este front
+      # le pegaría a la API equivocada. Por eso el paso falla temprano y con
+      # nombre si falta la variable, en vez de publicar algo mal construido.
+      - name: Construir y empujar
+        env:
+          VITE_SERVER_URL: ${{ vars.COBROS02_VITE_SERVER_URL }}
+          VITE_FRONTEND_URL: ${{ vars.COBROS02_VITE_FRONTEND_URL }}
+        run: |
+          for v in VITE_SERVER_URL VITE_FRONTEND_URL; do
+            if [ -z "${!v}" ]; then
+              echo "::error::Falta la variable COBROS02_$v en el repo (Settings → Secrets and variables → Actions → Variables)."
+              exit 1
+            fi
+          done
+          echo "API:   $VITE_SERVER_URL"
+          echo "Front: $VITE_FRONTEND_URL"
+          podman build -f apps/crm/Dockerfile . \
+            --build-arg VITE_SERVER_URL="$VITE_SERVER_URL" \
+            --build-arg VITE_FRONTEND_URL="$VITE_FRONTEND_URL" \
+            -t $ECR_REGISTRY/$IMAGEN:latest \
+            -t $ECR_REGISTRY/$IMAGEN:${{ github.sha }}
+          podman push $ECR_REGISTRY/$IMAGEN:latest
+          podman push $ECR_REGISTRY/$IMAGEN:${{ github.sha }}
+
+      - name: Redeploy en Coolify
+        run: |
+          curl --fail-with-body --request POST \
+            "${{ secrets.COOLIFY_WEBHOOK_CRM_WEB_COBROS }}" \
+            --header "Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}"
+
 # Nota sobre concurrencia: acá va por job (agrupada por app: cobros02-crm /
-# cobros02-cartera), a diferencia de la versión anterior de este archivo que
+# cobros02-cartera / cobros02-web), a diferencia de la versión anterior de este archivo que
 # la tenía a nivel de workflow cuando solo existía el CRM API. Con dos apps
 # independientes, un grupo global haría que un push que solo toca cartera
 # cancele un deploy del CRM API en curso (y viceversa). El patrón por-app es

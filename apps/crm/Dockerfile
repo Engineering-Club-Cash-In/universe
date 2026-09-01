@@ -14,8 +14,14 @@ COPY packages/email ./packages/email
 WORKDIR /app/apps/crm
 RUN bun install --frozen-lockfile
 
-ENV VITE_SERVER_URL=https://crmapi.s3.devteamatcci.site
-ENV VITE_FRONTEND_URL=https://crm.s3.devteamatcci.site
+# Vite hornea estas URLs DENTRO del bundle al construir: no son variables de
+# runtime y no se pueden cambiar después desde Coolify. Por eso van como ARG —
+# el default es el despliegue principal (s3), y COBROS-02 pasa las suyas con
+# --build-arg desde su workflow para apuntar a su propia API.
+ARG VITE_SERVER_URL=https://crmapi.s3.devteamatcci.site
+ARG VITE_FRONTEND_URL=https://crm.s3.devteamatcci.site
+ENV VITE_SERVER_URL=$VITE_SERVER_URL
+ENV VITE_FRONTEND_URL=$VITE_FRONTEND_URL
 
 # Copy server files needed by web (vite alias: server -> ../server)
 COPY apps/crm/apps/server/tsconfig.json ./apps/server/

@@ -1786,15 +1786,21 @@ async function correrRespaldoDeRechazos(): Promise<void> {
 setInterval(correrRespaldoDeRechazos, 60 * 60 * 1000);
 
 // El poller de Págalo (CB-028) corre SIEMPRE, sin depender de
-// `TAREAS_PROGRAMADAS_ACTIVAS` — decisión explícita del usuario. A
-// diferencia del resto de tareas de este bloque (recordatorios, alertas,
-// cierre diario), este job nunca le escribe nada a un cliente: solo lee el
-// estado de links en Págalo y actualiza estado interno (marcar pagado/
-// cancelado/expirado, disparar el dispatch inline hacia cartera-back). El
-// riesgo que motiva el FIXME de arriba (una segunda instancia mandando
-// mensajes reales) no aplica acá — dejarlo apagado junto con el resto solo
-// significaba que un pago real quedaba invisible hasta correr el botón
-// manual `probarPollPagalo`.
+// `TAREAS_PROGRAMADAS_ACTIVAS` — decisión explícita del usuario. El poll en
+// sí solo lee estado de Págalo y actualiza estado interno, pero el efecto de
+// cadena completo (al detectar un pago dispara el dispatch inline hacia
+// cartera-back — `reclamarYProcesarGrupo`/`correrDispatchPagalo` — que
+// factura el pago allá, y cartera-back al facturar llama de vuelta a
+// `POST /api/notifications/recibo-pago-whatsapp` en ESTE server) SÍ podría
+// llegar a un cliente real (hallazgo de code review, PR #1512) — de no ser
+// porque ese endpoint respeta `TEST_MESSAGE` (`lib/messaging-test-mode.ts`):
+// con `TEST_MESSAGE=true` (como está configurado en esta instancia) todo
+// envío redirige a la lista de contactos de prueba, nunca al destinatario
+// real. El riesgo que sí motiva el FIXME de arriba (`TAREAS_PROGRAMADAS_
+// ACTIVAS = false`) es para el resto de jobs de este bloque, pensado para
+// una instancia con `TEST_MESSAGE=false` apuntando a una copia de
+// producción (docs/features/bot-whatsapp-cobros/despliegue-dev.md) — no es
+// el caso de esta instancia.
 async function correrPollDePagalo(): Promise<void> {
 	try {
 		await correrPollPagalo();

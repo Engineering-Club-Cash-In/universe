@@ -16,6 +16,7 @@ export type AsesorConBuckets = {
   asesor_id: number;
   nombre: string;
   email_cash_in: string | null;
+  activo: boolean | null;
   buckets: number[];
 };
 
@@ -36,6 +37,7 @@ export async function getPoolPorAsesor(): Promise<AsesorConBuckets[]> {
       asesor_id: asesores.asesor_id,
       nombre: asesores.nombre,
       email_cash_in: asesores.emailCashIn,
+      activo: asesores.activo,
       bucket: asesor_bucket.bucket,
     })
     .from(asesores)
@@ -52,6 +54,7 @@ export async function getPoolPorAsesor(): Promise<AsesorConBuckets[]> {
         asesor_id: r.asesor_id,
         nombre: r.nombre,
         email_cash_in: r.email_cash_in,
+        activo: r.activo,
         buckets: [],
       });
     }

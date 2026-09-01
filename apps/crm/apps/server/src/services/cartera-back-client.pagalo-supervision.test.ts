@@ -71,3 +71,31 @@ test("getSifcosPoolAutoritativos obtiene scope completo en una petición", async
 	expect(urlSolicitada).toContain("/buckets/pool-sifcos?asesor_id=7");
 	expect(respuesta.data).toEqual(["01010214103540"]);
 });
+
+test("getAsignacionesPoolPorSifco envía una sola consulta bulk acotada a página", async () => {
+	let urlSolicitada = "";
+	const fetchDePrueba = (async (input: RequestInfo | URL) => {
+		urlSolicitada = String(input);
+		return new Response(
+			JSON.stringify({
+				success: true,
+				data: [{ numero_credito_sifco: "SIFCO-1", asesor_id: 7 }],
+			}),
+		);
+	}) as unknown as typeof fetch;
+	const cliente = new CarteraBackClient({
+		baseUrl: "http://cartera-back.test",
+		enableCache: true,
+		accessTokenProvider: async () => "token-de-prueba",
+		fetchTransport: fetchDePrueba,
+	});
+
+	const respuesta = await cliente.getAsignacionesPoolPorSifco({
+		sifcos: ["SIFCO-1", "SIFCO-2"],
+	});
+
+	expect(urlSolicitada).toContain("/buckets/pool-asignaciones?sifcos=SIFCO-1%2CSIFCO-2");
+	expect(respuesta.data).toEqual([
+		{ numero_credito_sifco: "SIFCO-1", asesor_id: 7 },
+	]);
+});

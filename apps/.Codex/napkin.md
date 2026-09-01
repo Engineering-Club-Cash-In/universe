@@ -19,7 +19,9 @@
    Do instead: Págalo usa `/buckets/pool-sifcos`, que exige `asesores.activo` + `asesor_bucket.activo` y última fila de `buckets_historial`; sin historial, acceso denegado.
 3. **[2026-08-31] Scope Págalo puede superar límite de binds de PostgreSQL.**
    Do instead: `/buckets/pool-sifcos` devuelve scope completo en una consulta; CRM filtra con `ANY($1::text[])`, usando un parámetro de arreglo.
-4. **[2026-08-26] Págalo reminder test mode targets `TEST_PHONES[0]`.**
+4. **[2026-09-01] Filtro Págalo por asesor significa pool de buckets, no dueño del crédito.**
+   Do instead: resolver SIFCOs con `/buckets/pool-sifcos?asesor_id=…`; no filtrar por `creditos.asesor_id`.
+5. **[2026-08-26] Págalo reminder test mode targets `TEST_PHONES[0]`.**
    Do instead: keep `TEST_MESSAGE=true` for manual reminder runs; verify phone position 0 before sending.
 
 ## User Directives

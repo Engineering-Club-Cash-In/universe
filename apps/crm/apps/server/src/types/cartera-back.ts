@@ -227,6 +227,14 @@ export interface CarteraSifcosPoolAutoritativosResponse {
 	data: string[];
 }
 
+export interface GetAsignacionesPoolPorSifcoParams {
+	sifcos: string[];
+}
+
+export interface CarteraAsignacionesPoolPorSifcoResponse {
+	data: Array<{ numero_credito_sifco: string; asesor_id: number }>;
+}
+
 /** Fila del listado /buckets/creditos: CreditoDetailResponse + el bucket derivado. */
 export interface CreditoBucketResponse extends CreditoDetailResponse {
 	bucket?: {
@@ -325,6 +333,7 @@ export interface PoolPorAsesorRow {
 	asesor_id: number;
 	nombre: string;
 	email_cash_in: string | null;
+	activo: boolean | null;
 	buckets: number[];
 }
 

@@ -222,8 +222,28 @@ export const esDestinoSobrescribible = (
     return new Big(s).abs().lt(tol);
   };
 
+  // En una fila `no_required` el `monto_aplicado` puede venir DERIVADO de la
+  // membresía sembrada: `editarPago` lo recalcula como la suma de todos los
+  // abonos —membresías incluidas— en cuanto el editor de pagos guarda la fila,
+  // y el front manda todos los campos poblados. O sea que un placeholder
+  // virgen que alguien abrió y guardó sin tocar nada sale con
+  // `monto_aplicado = membresias_pago`. Medir el bruto lo daría por "con
+  // plata" y volveríamos justo a la fila duplicada que la excepción de abajo
+  // existe para evitar. Se mide el NETO de la membresía, con piso en cero (el
+  // placeholder virgen trae el bucket sembrado y `monto_aplicado` en 0, así
+  // que el neto da negativo y sin el piso lo leeríamos como plata).
+  // Una fila realmente mixta conserva su remanente y sigue protegida.
+  // Codex P1, 2.ª ronda del PR #1519.
+  const montoAplicadoBruto = new Big(pago.monto_aplicado ?? 0);
+  const montoAplicadoNeto = esPlaceholderSifco
+    ? (() => {
+        const neto = montoAplicadoBruto.minus(new Big(pago.membresias_pago ?? 0));
+        return neto.lt(0) ? new Big(0) : neto;
+      })()
+    : montoAplicadoBruto;
+
   return (
-    casiCero(pago.monto_aplicado) &&
+    casiCero(montoAplicadoNeto) &&
     casiCero(pago.abono_capital) &&
     casiCero(pago.abono_interes) &&
     casiCero(pago.abono_iva_12) &&

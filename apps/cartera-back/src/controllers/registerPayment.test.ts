@@ -563,6 +563,50 @@ describe("esDestinoSobrescribible", () => {
     ).toBe(true);
   });
 
+  it("un placeholder virgen GUARDADO desde el editor sigue siendo sobrescribible", () => {
+    // Codex P1 (2.ª ronda): el front manda todos los campos poblados y
+    // `editarPago` recalcula `monto_aplicado` sumando los abonos, membresías
+    // incluidas. Un placeholder que alguien abrió y guardó sin tocar nada sale
+    // con `monto_aplicado = membresias_pago`, derivado puro de la semilla.
+    expect(
+      esDestinoSobrescribible({
+        validationStatus: "no_required",
+        monto_aplicado: "461.63",
+        abono_capital: "0",
+        abono_interes: "0",
+        abono_iva_12: "0",
+        abono_seguro: "0",
+        abono_gps: "0",
+        membresias_pago: "461.63",
+      })
+    ).toBe(true);
+  });
+
+  it("pero si además del monto derivado hay un remanente real, NO es sobrescribible", () => {
+    // monto_aplicado 561.63 = 461.63 sembrados + 100 de interés real.
+    expect(
+      esDestinoSobrescribible({
+        validationStatus: "no_required",
+        monto_aplicado: "561.63",
+        abono_capital: "0",
+        abono_interes: "100.00",
+        membresias_pago: "461.63",
+      })
+    ).toBe(false);
+  });
+
+  it("el neto de la membresía NO se descuenta fuera de no_required", () => {
+    expect(
+      esDestinoSobrescribible({
+        validationStatus: "validated",
+        monto_aplicado: "461.63",
+        abono_capital: "0",
+        abono_interes: "0",
+        membresias_pago: "461.63",
+      })
+    ).toBe(false);
+  });
+
   it("la excepción de membresias_pago es SOLO para no_required", () => {
     // En cualquier otro status ese bucket solo lo escribe un pago real.
     expect(

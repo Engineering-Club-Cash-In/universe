@@ -3,8 +3,32 @@ import {
 	asesoresActivosConBuckets,
 	buscarAsesorPorEmail,
 	buscarAsesorPorId,
+	debeUsarFallbackAtribucion,
 	nombresAsesoresPorSifco,
 } from "./pagalo-supervision-acceso";
+
+describe("debeUsarFallbackAtribucion", () => {
+	test("activa compatibilidad si bulk no atribuye una página con asesores activos", () => {
+		const asesores = [
+			{
+				asesor_id: 7,
+				nombre: "Activa",
+				email_cash_in: null,
+				activo: true,
+				buckets: [1],
+			},
+		];
+
+		expect(debeUsarFallbackAtribucion(asesores, ["SIFCO-1"], [])).toBe(
+			true,
+		);
+		expect(
+			debeUsarFallbackAtribucion(asesores, ["SIFCO-1"], [
+				{ asesor_id: 7, numero_credito_sifco: "SIFCO-1" },
+			]),
+		).toBe(false);
+	});
+});
 
 describe("asesoresActivosConBuckets", () => {
 	test("excluye asesores inactivos aunque conserven buckets activos", () => {

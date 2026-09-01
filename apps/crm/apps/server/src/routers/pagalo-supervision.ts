@@ -28,6 +28,7 @@ import {
 	asesoresActivosConBuckets,
 	buscarAsesorPorEmail,
 	buscarAsesorPorId,
+	debeUsarFallbackAtribucion,
 	nombresAsesoresPorSifco,
 } from "../lib/pagalo-supervision-acceso";
 import {
@@ -39,6 +40,11 @@ import { PERMISSIONS } from "../lib/roles";
 import { carteraBackClient } from "../services/cartera-back-client";
 
 const MAX_GRUPOS_POR_PAGINA = 25;
+const CACHE_SCOPE_FALLBACK_MS = 60_000;
+const scopeFallbackPorAsesor = new Map<
+	number,
+	{ venceEn: number; sifcos: string[] }
+>();
 
 async function resolverScopeAsesorPagalo(asesor: AsesorPoolPagalo | null) {
 	const bucketsAsignados = asesor?.buckets ?? [];
@@ -56,6 +62,22 @@ async function resolverScopeAsesorPagalo(asesor: AsesorPoolPagalo | null) {
 			).data,
 		),
 	};
+}
+
+async function getSifcosPoolFallbackParaColumna(
+	asesorId: number,
+): Promise<string[]> {
+	const cacheado = scopeFallbackPorAsesor.get(asesorId);
+	if (cacheado && cacheado.venceEn > Date.now()) return cacheado.sifcos;
+
+	const sifcos = (
+		await carteraBackClient.getSifcosPoolAutoritativos({ asesorId })
+	).data;
+	scopeFallbackPorAsesor.set(asesorId, {
+		venceEn: Date.now() + CACHE_SCOPE_FALLBACK_MS,
+		sifcos,
+	});
+	return sifcos;
 }
 
 export const pagaloSupervisionRouter = {
@@ -424,26 +446,63 @@ export const pagaloSupervisionRouter = {
 			// Misma fuente autoritativa del filtro, pero restringida a SIFCOs de
 			// esta página. Evita resolver pools completos por cada asesor.
 			const sifcosPorAsesor = new Map<number, string[]>();
+			const asesoresVisibles = asesoresActivosConBuckets(asesores);
+			let usarFallback = false;
 			if (sifcosPagina.length > 0) {
 				try {
-					for (const asignacion of (
+					const asignaciones = (
 						await carteraBackClient.getAsignacionesPoolPorSifco({
 							sifcos: sifcosPagina,
 						})
-					).data) {
+					).data;
+					for (const asignacion of asignaciones) {
 						const sifcos = sifcosPorAsesor.get(asignacion.asesor_id) ?? [];
 						sifcos.push(asignacion.numero_credito_sifco);
 						sifcosPorAsesor.set(asignacion.asesor_id, sifcos);
 					}
+					usarFallback = debeUsarFallbackAtribucion(
+						asesoresVisibles,
+						sifcosPagina,
+						asignaciones,
+					);
+					if (usarFallback) {
+						console.warn(
+							"[Págalo] Atribución bulk vacía; usando compatibilidad pool-sifcos.",
+						);
+					}
 				} catch (error) {
+					usarFallback = true;
 					console.error(
 						"[Págalo] No se pudo resolver asesores de la página:",
 						error instanceof Error ? error.message : error,
 					);
 				}
 			}
+			if (usarFallback) {
+				const scopesFallback = await Promise.all(
+					asesoresVisibles.map(async (asesor) => {
+						try {
+							return {
+								asesorId: asesor.asesor_id,
+								sifcos: await getSifcosPoolFallbackParaColumna(
+									asesor.asesor_id,
+								),
+							};
+						} catch (error) {
+							console.error(
+								`[Págalo] No se pudo resolver compatibilidad de ${asesor.nombre}:`,
+								error instanceof Error ? error.message : error,
+							);
+							return { asesorId: asesor.asesor_id, sifcos: [] };
+						}
+					}),
+				);
+				for (const scope of scopesFallback) {
+					sifcosPorAsesor.set(scope.asesorId, scope.sifcos);
+				}
+			}
 			const asesoresPorSifco = nombresAsesoresPorSifco(
-				asesoresActivosConBuckets(asesores).map((asesor) => ({
+				asesoresVisibles.map((asesor) => ({
 					...asesor,
 					sifcos: sifcosPorAsesor.get(asesor.asesor_id) ?? [],
 				})),

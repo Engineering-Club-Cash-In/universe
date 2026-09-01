@@ -17,6 +17,18 @@ export function asesoresActivosConBuckets<T extends AsesorPoolPagalo>(
 	);
 }
 
+export function debeUsarFallbackAtribucion(
+	asesores: readonly AsesorPoolPagalo[],
+	sifcosPagina: readonly string[],
+	asignaciones: readonly { asesor_id: number; numero_credito_sifco: string }[],
+): boolean {
+	return (
+		sifcosPagina.length > 0 &&
+		asesoresActivosConBuckets(asesores).length > 0 &&
+		asignaciones.length === 0
+	);
+}
+
 export function buscarAsesorPorEmail<T extends AsesorPoolPagalo>(
 	asesores: readonly T[],
 	email: string | null | undefined,

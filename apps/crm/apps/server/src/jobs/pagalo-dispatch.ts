@@ -28,6 +28,7 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, inArray, isNull, lt, or } from "drizzle-orm";
 import { db } from "../db";
+import { notifications } from "../db/schema/notifications";
 import {
 	pagaloPaymentEvents,
 	pagaloPaymentGroups,
@@ -39,6 +40,11 @@ import {
 	type PagaloAllocationForHash,
 	type PagaloSourceForHash,
 } from "../lib/pagalo-payload-hash";
+import { carteraBackClient } from "../services/cartera-back-client";
+import {
+	construirMapaAsesorUsuario,
+	resolverUsuarioSistemaCobros,
+} from "../services/cobros-notif-helpers";
 import { postPagaloPaymentImport } from "../services/pagalo-import-client";
 
 /** Tope por corrida. Si hay más, se atienden en la siguiente. */
@@ -300,11 +306,44 @@ async function armarComando(group: GrupoClaimado) {
 	return { ...command, payload_hash };
 }
 
+/**
+ * EL asesor único que tiene asignado el crédito HOY — no el snapshot fijo
+ * de `group.carteraAsesorId` (tomado al crear el link, puede quedar
+ * desactualizado si el crédito se reasignó después), y no el pool de
+ * buckets (`getAsignacionesPoolPorSifco`), que puede devolver varios
+ * asesores solapados y no sirve para "un solo destinatario". Misma fuente
+ * (`getCredito` → `credito.asesor_id`) que usa `pago-link.ts` al crear el
+ * link originalmente.
+ */
+async function resolverAsesorVigente(
+	numeroCreditoSifco: string,
+	asesorMap: Map<number, string>,
+): Promise<string | null> {
+	const credito = await carteraBackClient
+		.getCredito(numeroCreditoSifco, false)
+		.catch(() => null);
+	const asesorId = credito?.credito.asesor_id;
+	return asesorId ? (asesorMap.get(asesorId) ?? null) : null;
+}
+
 async function marcarCompletado(
 	group: GrupoClaimado,
 	payloadHash: string,
 	importId: number,
+	asesorMap?: Map<number, string>,
 ): Promise<void> {
+	// Resuelto ANTES de la tx (llama a cartera-back) — nunca red mientras una
+	// tx de DB sigue abierta, mismo criterio que el resto del job (ver
+	// comentario en pagalo-poll.ts sobre el dispatch inline).
+	const mapa = asesorMap ?? (await construirMapaAsesorUsuario());
+	const asesorUserId = await resolverAsesorVigente(
+		group.numeroCreditoSifco,
+		mapa,
+	);
+	const usuarioSistema = asesorUserId
+		? await resolverUsuarioSistemaCobros()
+		: null;
+
 	await db.transaction(async (tx) => {
 		const [actualizado] = await tx
 			.update(pagaloPaymentGroups)
@@ -329,6 +368,24 @@ async function marcarCompletado(
 			toStatus: "COMPLETED",
 			payload: { carteraImportId: importId },
 		});
+		if (usuarioSistema && asesorUserId) {
+			await tx.insert(notifications).values({
+				titulo: `Pago aplicado - Crédito ${group.numeroCreditoSifco}`,
+				descripcion: `Se aplicó el pago de Q${group.totalAmount} sobre el crédito ${group.numeroCreditoSifco}.`,
+				type: "aviso",
+				createdBy: usuarioSistema,
+				createdByRole: "cobros_supervisor",
+				assignedToRole: "cobros",
+				assignedTo: asesorUserId,
+				...(group.casoCobroId
+					? {
+							relatedEntityType: "collection_case" as const,
+							relatedEntityId: group.casoCobroId,
+						}
+					: {}),
+				redirectPage: "cobros_detail",
+			});
+		}
 	});
 }
 
@@ -385,6 +442,7 @@ export type ResultadoProcesarGrupo = "COMPLETADO" | "REVIEW_REQUIRED" | "ERROR";
  */
 export async function procesarGrupoParaAplicar(
 	group: GrupoClaimado,
+	asesorMap?: Map<number, string>,
 ): Promise<ResultadoProcesarGrupo> {
 	let command: Awaited<ReturnType<typeof armarComando>>;
 	try {
@@ -407,7 +465,12 @@ export async function procesarGrupoParaAplicar(
 	const respuesta = await postPagaloPaymentImport(command);
 
 	if (respuesta.success && respuesta.status === "APPLIED") {
-		await marcarCompletado(group, command.payload_hash, respuesta.import_id);
+		await marcarCompletado(
+			group,
+			command.payload_hash,
+			respuesta.import_id,
+			asesorMap,
+		);
 		return "COMPLETADO";
 	}
 
@@ -469,10 +532,11 @@ export async function procesarGrupoParaAplicar(
  */
 export async function reclamarYProcesarGrupo(
 	groupId: string,
+	asesorMap?: Map<number, string>,
 ): Promise<ResultadoProcesarGrupo | "NO_RECLAMADO"> {
 	const group = await reclamarGrupo(groupId);
 	if (!group) return "NO_RECLAMADO";
-	return procesarGrupoParaAplicar(group);
+	return procesarGrupoParaAplicar(group, asesorMap);
 }
 
 export type ResultadoDispatchPagalo = {
@@ -492,8 +556,9 @@ export async function correrDispatchPagalo(): Promise<ResultadoDispatchPagalo> {
 	};
 	if (candidatoIds.length === 0) return resultado;
 
+	const asesorMap = await construirMapaAsesorUsuario();
 	for (const groupId of candidatoIds) {
-		const resultadoGrupo = await reclamarYProcesarGrupo(groupId);
+		const resultadoGrupo = await reclamarYProcesarGrupo(groupId, asesorMap);
 		if (resultadoGrupo === "COMPLETADO") resultado.completados++;
 		else if (resultadoGrupo === "REVIEW_REQUIRED")
 			resultado.revisionRequerida++;

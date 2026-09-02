@@ -124,8 +124,12 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
                partition by l.inversionista_id order by l.fecha_liquidacion desc
              ) as anterior
       from cartera.liquidaciones l
-      where l.fecha_liquidacion >= ${inicio}::date
-        and l.fecha_liquidacion <  (${inicio}::date + interval '1 month')
+      -- El período se clasifica en hora Guatemala, igual que periodoActualGuatemala.
+      -- Comparando el timestamptz crudo con la sesión en UTC, una liquidación del
+      -- 31 a las 20:00 GT caería en el mes siguiente y nunca se verificaría.
+      where (l.fecha_liquidacion at time zone 'America/Guatemala')::date >= ${inicio}::date
+        and (l.fecha_liquidacion at time zone 'America/Guatemala')::date
+            < (${inicio}::date + interval '1 month')
     ),
     liq as (
       -- La ecuación se evalúa contra la ÚLTIMA liquidación del mes: el espejo
@@ -208,15 +212,39 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
       group by 1, 2
     ),
     espejo_credito as (
+      -- Para un crédito que liquidó, entra su saldo completo: es lo que el
+      -- histórico retrató y con eso se compara.
+      --
+      -- Para un crédito que NO liquidó y solo está acá porque recibió la
+      -- reinversión, entra únicamente lo reinvertido. La reinversión puede
+      -- aterrizar sobre una posición que ya existía, y sumar su saldo entero
+      -- contra un lado derecho que solo trae reinversion_total inventaría un
+      -- descuadre del tamaño de la posición previa: Q1,000 preexistentes que
+      -- reciben Q100 no son Q1,000 que faltan.
       select cr.liquidacion_id, cr.inversionista_id, cr.credito_id,
-             coalesce(esp.monto_aportado, 0) + coalesce(pc.monto, 0) as monto
+             case
+               when hl.credito_id is not null
+                 then coalesce(esp.monto_aportado, 0) + coalesce(pc.monto, 0)
+               else least(
+                 coalesce(esp.monto_aportado, 0) + coalesce(pc.monto, 0),
+                 coalesce(rpc.monto, 0)
+               )
+             end as monto
       from creditos_rel cr
+      left join cartera.historico_liquidaciones_espejo hl
+        on  hl.liquidacion_id   = cr.liquidacion_id
+        and hl.credito_id       = cr.credito_id
+        and hl.inversionista_id = cr.inversionista_id
       left join cartera.creditos_inversionistas_espejo esp
         on  esp.credito_id       = cr.credito_id
         and esp.inversionista_id = cr.inversionista_id
       left join pendiente_por_credito pc
         on  pc.credito_id       = cr.credito_id
         and pc.inversionista_id = cr.inversionista_id
+      left join reinversion_por_credito rpc
+        on  rpc.liquidacion_id   = cr.liquidacion_id
+        and rpc.credito_id       = cr.credito_id
+        and rpc.inversionista_id = cr.inversionista_id
     ),
     espejo as (
       select liquidacion_id, sum(monto) as espejo, count(*)::int as creditos
@@ -317,8 +345,13 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
 }
 
 /**
- * Liquidaciones NO finales del mes (un inversionista liquidado dos veces) cuya
- * reinversión nunca llegó a colocarse.
+ * Liquidaciones NO finales del mes (un inversionista liquidado dos veces) con
+ * reinversión, junto con cuánto de ella llegó a colocarse.
+ *
+ * Devuelve también las que ya cuadran: si una quedó registrada como fallida y
+ * su reinversión se colocó antes de la corrida siguiente, hay que poder cerrar
+ * esa fila. Filtrando acá quedaría para siempre en cuadra = false con un
+ * descuadre y una fecha de verificación viejos.
  *
  * La ecuación principal solo puede evaluarse contra la última liquidación del
  * mes: el espejo vivo ya refleja todo lo posterior. Para las anteriores el
@@ -346,8 +379,12 @@ export async function leerReinversionesAnterioresSinColocar(periodo: string) {
                partition by l.inversionista_id order by l.fecha_liquidacion
              ) as previa
       from cartera.liquidaciones l
-      where l.fecha_liquidacion >= ${inicio}::date
-        and l.fecha_liquidacion <  (${inicio}::date + interval '1 month')
+      -- El período se clasifica en hora Guatemala, igual que periodoActualGuatemala.
+      -- Comparando el timestamptz crudo con la sesión en UTC, una liquidación del
+      -- 31 a las 20:00 GT caería en el mes siguiente y nunca se verificaría.
+      where (l.fecha_liquidacion at time zone 'America/Guatemala')::date >= ${inicio}::date
+        and (l.fecha_liquidacion at time zone 'America/Guatemala')::date
+            < (${inicio}::date + interval '1 month')
     )
     select t.liquidacion_id, t.inversionista_id, i.nombre,
            t.fecha_liquidacion, t.reinversion_total::text as reinversion_total,
@@ -366,21 +403,6 @@ export async function leerReinversionesAnterioresSinColocar(periodo: string) {
     join cartera.inversionistas i on i.inversionista_id = t.inversionista_id
     where t.orden > 1
       and t.reinversion_total > 0
-      -- Se compara el MONTO colocado contra el prometido, no la mera existencia
-      -- de una compra: addInvestorToCredit puede colocar de forma parcial y
-      -- devolver monto_sin_asignar > 0, así que una compra de Q100 no prueba
-      -- que se colocaran los Q1,000 de la liquidación.
-      and t.reinversion_total - coalesce((
-        select sum(c.monto_aportado)
-        from cartera.compras_credito_inversionista c
-        where c.inversionista_id = t.inversionista_id
-          and c.tipo_operacion = 'reinversion'
-          and c.fecha >= greatest(
-                t.fecha_liquidacion - interval '1 day',
-                coalesce(t.previa, t.fecha_liquidacion - interval '1 day')
-              )
-          and (t.siguiente is null or c.fecha < t.siguiente)
-      ), 0) > 1
     order by t.inversionista_id
   `);
 
@@ -490,6 +512,11 @@ export async function verificarCuadreLiquidaciones(periodo = periodoActualGuatem
     const prometida = new Big(ant.reinversion_total || 0);
     const colocada = new Big(ant.reinversion_colocada || 0);
     const faltante = prometida.minus(colocada);
+    // Se compara el MONTO colocado contra el prometido, no la mera existencia de
+    // una compra: addInvestorToCredit puede colocar de forma parcial y devolver
+    // monto_sin_asignar > 0, así que Q100 colocados no prueban que se colocaran
+    // los Q1,000 de la liquidación.
+    const cuadraAnt = faltante.abs().lte(TOLERANCIA);
     const guardadaAnt = await db.execute(sql`
       insert into cartera.verificacion_liquidacion (
         liquidacion_id, inversionista_id, periodo,
@@ -498,7 +525,7 @@ export async function verificarCuadreLiquidaciones(periodo = periodoActualGuatem
       ) values (
         ${ant.liquidacion_id}, ${ant.inversionista_id}, ${periodo},
         '0', '0', ${prometida.toFixed(2)}, ${colocada.toFixed(8)},
-        ${faltante.times(-1).toFixed(8)}, false,
+        ${faltante.times(-1).toFixed(8)}, ${cuadraAnt},
         ${JSON.stringify({
           motivo: "liquidacion_anterior_del_mes_con_reinversion_sin_colocar",
           reinversion_prometida: prometida.toFixed(2),
@@ -509,7 +536,7 @@ export async function verificarCuadreLiquidaciones(periodo = periodoActualGuatem
       )
       on conflict (liquidacion_id) do update set
         descuadre     = excluded.descuadre,
-        cuadra        = false,
+        cuadra        = excluded.cuadra,
         detalle       = excluded.detalle,
         intentos      = cartera.verificacion_liquidacion.intentos + 1,
         verificado_at = now()
@@ -518,6 +545,11 @@ export async function verificarCuadreLiquidaciones(periodo = periodoActualGuatem
     const filaAnt = (guardadaAnt as unknown as {
       rows: { intentos: number; ya_notificada: boolean }[];
     }).rows?.[0];
+
+    if (cuadraAnt) {
+      cuadran++;
+      continue;
+    }
 
     descuadran++;
     if (filaAnt?.ya_notificada) {

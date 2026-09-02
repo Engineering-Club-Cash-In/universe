@@ -115,7 +115,14 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
       select l.liquidacion_id, l.inversionista_id, l.fecha_liquidacion, l.reinversion_total,
              row_number() over (
                partition by l.inversionista_id order by l.fecha_liquidacion desc
-             ) as orden
+             ) as orden,
+             -- Liquidación cronológicamente anterior del mismo inversionista.
+             -- Acota por abajo la ventana en que se le atribuye una reinversión:
+             -- con liquidaciones en días consecutivos, el margen de un día haría
+             -- que la reinversión de la primera contara también para la segunda.
+             lead(l.fecha_liquidacion) over (
+               partition by l.inversionista_id order by l.fecha_liquidacion desc
+             ) as anterior
       from cartera.liquidaciones l
       where l.fecha_liquidacion >= ${inicio}::date
         and l.fecha_liquidacion <  (${inicio}::date + interval '1 month')
@@ -131,7 +138,11 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
       -- reinversión llegó a colocarse. Sin eso, una reinversión perdida en la
       -- primera liquidación se volvería invisible, porque el histórico de la
       -- segunda arranca del espejo ya deficiente y cuadra solo.
-      select liquidacion_id, inversionista_id, fecha_liquidacion, reinversion_total
+      select liquidacion_id, inversionista_id, fecha_liquidacion, reinversion_total,
+             greatest(
+               fecha_liquidacion - interval '1 day',
+               coalesce(anterior, fecha_liquidacion - interval '1 day')
+             ) as desde_reinversion
       from todas where orden = 1
     ),
     pendientes as (
@@ -167,7 +178,21 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
       join cartera.compras_credito_inversionista c
         on c.inversionista_id = p.inversionista_id
       where c.tipo_operacion = 'reinversion'
-        and c.fecha >= p.fecha_liquidacion - interval '1 day'
+        and c.fecha >= p.desde_reinversion
+    ),
+    reinversion_por_credito as (
+      -- Cuánto de la reinversión aterrizó en cada crédito. addInvestorToCredit
+      -- puede elegir una posición existente con porcentaje compatible, así que
+      -- el crecimiento del espejo en un crédito que ya liquidó puede venir de la
+      -- reinversión y no de una compra. Sin descontarlo, ese crecimiento se le
+      -- atribuye a la compra del mes y se resta de más.
+      select c.inversionista_id, c.credito_id, p.liquidacion_id,
+             sum(c.monto_aportado) as monto
+      from cartera.compras_credito_inversionista c
+      join pendientes p on p.inversionista_id = c.inversionista_id
+      where c.tipo_operacion = 'reinversion'
+        and c.fecha >= p.desde_reinversion
+      group by 1, 2, 3
     ),
     pendiente_por_credito as (
       -- Capital de pagos registrados después de la liquidación:
@@ -243,7 +268,10 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
       select cc.inversionista_id,
              sum(least(
                cc.monto_compras,
-               greatest(0, ec.monto - coalesce(hl.monto_aportado, 0))
+               greatest(
+                 0,
+                 ec.monto - coalesce(hl.monto_aportado, 0) - coalesce(rpc.monto, 0)
+               )
              )) as monto,
              jsonb_agg(cc.detalle) as detalle
       from compras_por_credito cc
@@ -255,6 +283,10 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
         on  hl.liquidacion_id   = cc.liquidacion_id
         and hl.credito_id       = cc.credito_id
         and hl.inversionista_id = cc.inversionista_id
+      left join reinversion_por_credito rpc
+        on  rpc.liquidacion_id   = cc.liquidacion_id
+        and rpc.credito_id       = cc.credito_id
+        and rpc.inversionista_id = cc.inversionista_id
       group by 1
     )
     select
@@ -306,7 +338,13 @@ export async function leerReinversionesAnterioresSinColocar(periodo: string) {
              ) as orden,
              lead(l.fecha_liquidacion) over (
                partition by l.inversionista_id order by l.fecha_liquidacion
-             ) as siguiente
+             ) as siguiente,
+             -- Cota inferior: la liquidación previa. Con liquidaciones en días
+             -- consecutivos, el margen de un día haría que la reinversión de la
+             -- anterior contara como si fuera de esta.
+             lag(l.fecha_liquidacion) over (
+               partition by l.inversionista_id order by l.fecha_liquidacion
+             ) as previa
       from cartera.liquidaciones l
       where l.fecha_liquidacion >= ${inicio}::date
         and l.fecha_liquidacion <  (${inicio}::date + interval '1 month')
@@ -318,7 +356,10 @@ export async function leerReinversionesAnterioresSinColocar(periodo: string) {
              from cartera.compras_credito_inversionista c
              where c.inversionista_id = t.inversionista_id
                and c.tipo_operacion = 'reinversion'
-               and c.fecha >= t.fecha_liquidacion - interval '1 day'
+               and c.fecha >= greatest(
+                     t.fecha_liquidacion - interval '1 day',
+                     coalesce(t.previa, t.fecha_liquidacion - interval '1 day')
+                   )
                and (t.siguiente is null or c.fecha < t.siguiente)
            ), 0)::text as reinversion_colocada
     from todas t
@@ -334,7 +375,10 @@ export async function leerReinversionesAnterioresSinColocar(periodo: string) {
         from cartera.compras_credito_inversionista c
         where c.inversionista_id = t.inversionista_id
           and c.tipo_operacion = 'reinversion'
-          and c.fecha >= t.fecha_liquidacion - interval '1 day'
+          and c.fecha >= greatest(
+                t.fecha_liquidacion - interval '1 day',
+                coalesce(t.previa, t.fecha_liquidacion - interval '1 day')
+              )
           and (t.siguiente is null or c.fecha < t.siguiente)
       ), 0) > 1
     order by t.inversionista_id

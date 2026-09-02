@@ -303,7 +303,7 @@ export const trackerRouter = {
 				body: {
 					currentPassword: input.currentPassword,
 					newPassword: input.newPassword,
-					revokeOtherSessions: false,
+					revokeOtherSessions: true,
 				},
 			});
 

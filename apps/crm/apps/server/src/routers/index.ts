@@ -460,6 +460,9 @@ export const disbursementRouter = {
 export const partnerTrackerRouter = {
 	getCasos: trackerRouter.getCasos,
 	getCasoById: trackerRouter.getCasoById,
+	getPartnerAgencies: trackerRouter.getPartnerAgencies,
+	getPartnerPasswordStatus: trackerRouter.getPartnerPasswordStatus,
+	changePartnerPassword: trackerRouter.changePartnerPassword,
 };
 
 export const manualVehicleRouter = {

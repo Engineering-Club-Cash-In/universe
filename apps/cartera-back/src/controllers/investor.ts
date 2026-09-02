@@ -3309,6 +3309,7 @@ export async function revertirComprasUltimaLiquidacion(
 export async function ejecutarReinversionAutomatica(
   inv_id: number,
   montoReinvertido: number,
+  liquidacion_id?: number,
 ) {
   if (!Number.isFinite(montoReinvertido) || montoReinvertido <= 0) {
     return { skipped: true, reason: "Monto a reinvertir = 0" };
@@ -3360,6 +3361,7 @@ export async function ejecutarReinversionAutomatica(
       porcentaje_inversion: modaInversion,
       porcentaje_cash_in: modaCashIn,
       tipo_operacion: "reinversion",
+      ...(liquidacion_id ? { liquidacion_id } : {}),
     },
     set: { status: 200 },
   })) as any;
@@ -3424,7 +3426,7 @@ export async function reinvertirDesdeLiquidacionId(liquidacion_id: number) {
     };
   }
 
-  const r = await ejecutarReinversionAutomatica(liq.inversionista_id, monto);
+  const r = await ejecutarReinversionAutomatica(liq.inversionista_id, monto, liq.liquidacion_id);
   return {
     liquidacion_id,
     inversionista_id: liq.inversionista_id,
@@ -4742,6 +4744,10 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
                   porcentaje_inversion: modaInversion,
                   porcentaje_cash_in: modaCashIn,
                   tipo_operacion: "reinversion",
+                  // Sella la compra con la liquidación que la produjo. Sin esto
+                  // no hay forma de distinguirla de una reubicación manual, que
+                  // también se guarda como "reinversion".
+                  liquidacion_id: liquidacion.liquidacion_id,
                   ...(r.tipo_reinversion ? { tipo_reinversion: r.tipo_reinversion } : {}),
                 },
                 set: { status: 200 },

@@ -143,10 +143,13 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
       -- primera liquidación se volvería invisible, porque el histórico de la
       -- segunda arranca del espejo ya deficiente y cuadra solo.
       select liquidacion_id, inversionista_id, fecha_liquidacion, reinversion_total,
-             greatest(
-               fecha_liquidacion - interval '1 day',
-               coalesce(anterior, fecha_liquidacion - interval '1 day')
-             ) as desde_reinversion
+             -- Ventana (desde, hasta] para las filas sin procedencia. El corte
+             -- es la liquidación previa misma, no un margen fijo: con dos
+             -- liquidaciones en días seguidos, un margen hacia atrás haría que
+             -- la reinversión de la primera cayera también en la ventana de la
+             -- segunda y se contara dos veces.
+             coalesce(anterior, fecha_liquidacion - interval '1 day') as desde_reinversion,
+             null::timestamptz as hasta_reinversion
       from todas where orden = 1
     ),
     pendientes as (
@@ -182,7 +185,19 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
       join cartera.compras_credito_inversionista c
         on c.inversionista_id = p.inversionista_id
       where c.tipo_operacion = 'reinversion'
-        and c.fecha >= p.desde_reinversion
+        and (
+          -- Filas nuevas: procedencia exacta.
+          c.liquidacion_id = p.liquidacion_id
+          -- Filas anteriores a la columna de procedencia: ventana acotada por
+          -- ambos lados. El límite inferior es la liquidación previa (excluida)
+          -- y el superior la siguiente, así dos liquidaciones en días seguidos
+          -- no se disputan la misma reinversión.
+          or (
+            c.liquidacion_id is null
+            and c.fecha >  p.desde_reinversion
+            and (p.hasta_reinversion is null or c.fecha <= p.hasta_reinversion)
+          )
+        )
     ),
     reinversion_por_credito as (
       -- Cuánto de la reinversión aterrizó en cada crédito. addInvestorToCredit
@@ -195,7 +210,14 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
       from cartera.compras_credito_inversionista c
       join pendientes p on p.inversionista_id = c.inversionista_id
       where c.tipo_operacion = 'reinversion'
-        and c.fecha >= p.desde_reinversion
+        and (
+          c.liquidacion_id = p.liquidacion_id
+          or (
+            c.liquidacion_id is null
+            and c.fecha >  p.desde_reinversion
+            and (p.hasta_reinversion is null or c.fecha <= p.hasta_reinversion)
+          )
+        )
       group by 1, 2, 3
     ),
     pendiente_por_credito as (
@@ -287,6 +309,16 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
       -- nuke&rebuild reinserta el roster completo y el trigger anota cada
       -- reinserción con monto_anterior NULL, así que cualquier rebaraje se
       -- vería como un aumento.
+      --
+      -- LÍMITE CONOCIDO: sobre un mismo crédito, después de la liquidación,
+      -- una compra y una reinversión de montos parecidos se tapan entre sí. Si
+      -- entran Q100 de reinversión y Q100 de compra y luego se pierden los Q100
+      -- reinvertidos, el saldo vivo queda igual que si se hubiera perdido la
+      -- compra, y la ecuación cuadra. Con saldos agregados los dos escenarios
+      -- son indistinguibles; separarlos exige rastrear la procedencia de cada
+      -- movimiento del espejo, no solo su neto. El caso pide coincidencia de
+      -- crédito, momento y monto, así que se acepta a cambio de no complicar
+      -- el chequeo.
       --
       -- Las compras sobre créditos fuera de creditos_rel no entran: su capital
       -- tampoco está del lado del espejo, así que no hay nada que corregir.
@@ -393,11 +425,14 @@ export async function leerReinversionesAnterioresSinColocar(periodo: string) {
              from cartera.compras_credito_inversionista c
              where c.inversionista_id = t.inversionista_id
                and c.tipo_operacion = 'reinversion'
-               and c.fecha >= greatest(
-                     t.fecha_liquidacion - interval '1 day',
-                     coalesce(t.previa, t.fecha_liquidacion - interval '1 day')
-                   )
-               and (t.siguiente is null or c.fecha < t.siguiente)
+               and (
+                 c.liquidacion_id = t.liquidacion_id
+                 or (
+                   c.liquidacion_id is null
+                   and c.fecha > coalesce(t.previa, t.fecha_liquidacion - interval '1 day')
+                   and (t.siguiente is null or c.fecha <= t.siguiente)
+                 )
+               )
            ), 0)::text as reinversion_colocada
     from todas t
     join cartera.inversionistas i on i.inversionista_id = t.inversionista_id

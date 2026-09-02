@@ -49,3 +49,23 @@ CREATE INDEX IF NOT EXISTS "idx_verif_liquidacion_periodo"
 
 CREATE INDEX IF NOT EXISTS "idx_verif_liquidacion_inv"
   ON "cartera"."verificacion_liquidacion" ("inversionista_id");
+
+-- Procedencia de la reinversión automática: sella la fila de compra con la
+-- liquidación que la produjo. Sin esto no hay forma de distinguirla de una
+-- reubicación manual (manualReassignInvestor también escribe "reinversion") ni
+-- de atribuirla a una liquidación concreta cuando hay dos en días seguidos.
+ALTER TABLE "cartera"."compras_credito_inversionista"
+  ADD COLUMN IF NOT EXISTS "liquidacion_id" integer;
+
+DO $$ BEGIN
+  ALTER TABLE "cartera"."compras_credito_inversionista"
+    ADD CONSTRAINT "compras_credito_inversionista_liquidacion_id_fkey"
+    FOREIGN KEY ("liquidacion_id")
+    REFERENCES "cartera"."liquidaciones"("liquidacion_id")
+    ON DELETE SET NULL;
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+CREATE INDEX IF NOT EXISTS "idx_compras_credito_inv_liquidacion"
+  ON "cartera"."compras_credito_inversionista" ("liquidacion_id");

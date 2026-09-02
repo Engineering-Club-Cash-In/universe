@@ -687,6 +687,15 @@
       modalidad_facturacion: modalidadFacturacionEnum("modalidad_facturacion"),
       modalidad_facturacion_spread_id: integer("modalidad_facturacion_spread_id")
         .references(() => modalidad_facturacion_spread.id),
+      // Liquidación que originó esta fila, cuando la creó la reinversión
+      // automática del paso 6. Es la única señal de procedencia: por tipo_operacion
+      // no se distingue una reinversión automática de una reubicación manual
+      // (manualReassignInvestor usa "reinversion" por defecto), y por fecha
+      // tampoco, porque las reubicaciones ocurren al día siguiente del corte.
+      liquidacion_id: integer("liquidacion_id").references(
+        () => liquidaciones.liquidacion_id,
+        { onDelete: "set null" },
+      ),
       tipo_compra: tipoCompraEnum("tipo_compra")
         .notNull()
         .default("sin_clasificar"),

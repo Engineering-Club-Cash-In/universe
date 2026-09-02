@@ -820,12 +820,6 @@
         .default("NO_LIQUIDADO"),
       cuota: numeric("cuota", { precision: 18, scale: 2 }).notNull(),
 
-      // 🆕 ENLACE A LIQUIDACIÓN
-      // Marca de intento revertido. revertirComprasUltimaLiquidacion deja la
-      // fila como "completado" para que no figure pendiente, así que sin esto
-      // un intento revertido y su reemplazo se suman los dos y una reinversión
-      // de Q100 bien colocada se lee como Q200.
-      revertida_at: timestamp("revertida_at", { withTimezone: true }),
       liquidacion_id: integer("liquidacion_id").references(
         () => liquidaciones.liquidacion_id,
         { onDelete: "set null" } // Si se borra la liquidación, el campo queda en null
@@ -975,12 +969,6 @@
         { onDelete: "set null" }
       ),
 
-      // 🆕 ENLACE A LIQUIDACIÓN
-      // Marca de intento revertido. revertirComprasUltimaLiquidacion deja la
-      // fila como "completado" para que no figure pendiente, así que sin esto
-      // un intento revertido y su reemplazo se suman los dos y una reinversión
-      // de Q100 bien colocada se lee como Q200.
-      revertida_at: timestamp("revertida_at", { withTimezone: true }),
       liquidacion_id: integer("liquidacion_id").references(
         () => liquidaciones.liquidacion_id,
         { onDelete: "set null" } // Si se borra la liquidación, el campo queda en null

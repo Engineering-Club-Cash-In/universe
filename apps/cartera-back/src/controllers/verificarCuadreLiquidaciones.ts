@@ -111,7 +111,21 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
   const inicio = `${periodo}-01`;
 
   const resultado = await db.execute(sql`
-    with todas as (
+    with inicio_procedencia as (
+      -- Desde cuándo existe el sello de procedencia. Antes de esa marca no hay
+      -- forma de distinguir la reinversión automática de una reubicación
+      -- manual, así que ahí se usa la ventana temporal; después, una fila de
+      -- reinversión sin liquidacion_id es por definición manual
+      -- (replaceInvestorCredit sigue escribiendo tipo_operacion = 'reinversion'
+      -- sin sello) y no debe contarse como colocación automática.
+      --
+      -- Se deriva del dato en vez de fijar una fecha: apenas la primera
+      -- liquidación sella una fila, el fallback deja de aplicar hacia adelante.
+      select min(created_at) as desde
+      from cartera.compras_credito_inversionista
+      where liquidacion_id is not null
+    ),
+    todas as (
       select l.liquidacion_id, l.inversionista_id, l.fecha_liquidacion, l.reinversion_total,
              row_number() over (
                partition by l.inversionista_id order by l.fecha_liquidacion desc
@@ -196,6 +210,9 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
           -- no se disputan la misma reinversión.
           or (
             c.liquidacion_id is null
+            and c.created_at < coalesce(
+              (select desde from inicio_procedencia), 'infinity'::timestamptz
+            )
             and c.fecha >  p.desde_reinversion
             and (p.hasta_reinversion is null or c.fecha <= p.hasta_reinversion)
           )
@@ -217,6 +234,9 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
           c.liquidacion_id = p.liquidacion_id
           or (
             c.liquidacion_id is null
+            and c.created_at < coalesce(
+              (select desde from inicio_procedencia), 'infinity'::timestamptz
+            )
             and c.fecha >  p.desde_reinversion
             and (p.hasta_reinversion is null or c.fecha <= p.hasta_reinversion)
           )
@@ -399,7 +419,21 @@ export async function leerReinversionesAnterioresSinColocar(periodo: string) {
   const inicio = `${periodo}-01`;
 
   const resultado = await db.execute(sql`
-    with todas as (
+    with inicio_procedencia as (
+      -- Desde cuándo existe el sello de procedencia. Antes de esa marca no hay
+      -- forma de distinguir la reinversión automática de una reubicación
+      -- manual, así que ahí se usa la ventana temporal; después, una fila de
+      -- reinversión sin liquidacion_id es por definición manual
+      -- (replaceInvestorCredit sigue escribiendo tipo_operacion = 'reinversion'
+      -- sin sello) y no debe contarse como colocación automática.
+      --
+      -- Se deriva del dato en vez de fijar una fecha: apenas la primera
+      -- liquidación sella una fila, el fallback deja de aplicar hacia adelante.
+      select min(created_at) as desde
+      from cartera.compras_credito_inversionista
+      where liquidacion_id is not null
+    ),
+    todas as (
       select l.liquidacion_id, l.inversionista_id, l.fecha_liquidacion, l.reinversion_total,
              row_number() over (
                partition by l.inversionista_id order by l.fecha_liquidacion desc
@@ -433,6 +467,9 @@ export async function leerReinversionesAnterioresSinColocar(periodo: string) {
                  c.liquidacion_id = t.liquidacion_id
                  or (
                    c.liquidacion_id is null
+                   and c.created_at < coalesce(
+                     (select desde from inicio_procedencia), 'infinity'::timestamptz
+                   )
                    and c.fecha > coalesce(t.previa, t.fecha_liquidacion - interval '1 day')
                    and (t.siguiente is null or c.fecha <= t.siguiente)
                  )
@@ -574,11 +611,18 @@ export async function verificarCuadreLiquidaciones(periodo = periodoActualGuatem
         })}::jsonb
       )
       on conflict (liquidacion_id) do update set
-        descuadre     = excluded.descuadre,
-        cuadra        = excluded.cuadra,
-        detalle       = excluded.detalle,
-        intentos      = cartera.verificacion_liquidacion.intentos + 1,
-        verificado_at = now()
+        -- Todos los operandos, no solo el descuadre: si el reintento recalcula
+        -- con Q75 colocados sobre una fila guardada con Q50, dejar el número
+        -- viejo en su columna deja la verificación contradiciéndose a sí misma.
+        espejo                = excluded.espejo,
+        historico             = excluded.historico,
+        reinversion_total     = excluded.reinversion_total,
+        compras_no_absorbidas = excluded.compras_no_absorbidas,
+        descuadre             = excluded.descuadre,
+        cuadra                = excluded.cuadra,
+        detalle               = excluded.detalle,
+        intentos              = cartera.verificacion_liquidacion.intentos + 1,
+        verificado_at         = now()
       returning intentos, (notificado_at is not null) as ya_notificada
     `);
     const filaAnt = (guardadaAnt as unknown as {

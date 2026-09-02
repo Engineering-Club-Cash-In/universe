@@ -65,6 +65,20 @@ export const COBROS_NO_REPLY_WARNING =
 	"⚠️ Este número es únicamente para el envío de notificaciones automáticas. Por favor, no respondas a este número.";
 export const COBROS_MOTIVO_SIN_TELEFONO_ASESOR = "sin teléfono de asesor";
 
+/**
+ * Una plantilla que usa {expectativaMora} no se puede enviar si el server no
+ * pudo calcularla (crédito sin capital válido: insolutos y similares no
+ * generan mora) — el mensaje saldría roto ("recargo por mora de Q.").
+ */
+export function plantillaRequiereExpectativaMora(
+	plantilla: PlantillaMensaje,
+): boolean {
+	return (
+		plantilla.cuerpo.includes("{expectativaMora}") ||
+		(plantilla.cuerpoWhastapp?.includes("{expectativaMora}") ?? false)
+	);
+}
+
 export function prepararTelefonoAsesorParaEnvio(
 	cuerpo: string,
 	telefono: string | null | undefined,
@@ -209,7 +223,7 @@ export const PLANTILLAS_MENSAJES: PlantillaMensaje[] = [
 ¡Bienvenido(a) a CashIn! Nos alegra acompañarte en el financiamiento de tu vehículo.
 
 📅 Información de tu cuota
-Fecha de 1er pago: {fechaPago}
+Día de pago mensual: {fechaPago}
 Monto de cuota: Q{cuotaMensual}
 
 💳 Cuentas para realizar tus pagos
@@ -233,7 +247,7 @@ CashIn`,
 ¡Bienvenido(a) a CashIn! Nos alegra acompañarte en el financiamiento de tu vehículo.
 
 📅 Información de tu cuota
-Fecha de 1er pago: {fechaPago}
+Día de pago mensual: {fechaPago}
 Monto de cuota: Q{cuotaMensual}
 
 💳 Cuentas para realizar tus pagos

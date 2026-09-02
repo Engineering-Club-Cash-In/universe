@@ -12,6 +12,7 @@ import {
 	mensajePlantillaEditable,
 	mensajeSmsEditable,
 	PLANTILLAS_MENSAJES,
+	plantillaRequiereExpectativaMora,
 	prepararTelefonoAsesorParaEnvio,
 } from "./plantillas-mensajes";
 
@@ -308,5 +309,16 @@ describe("plantillas web de cobros", () => {
 		expect(
 			fechaLimiteImpuestoCirculacion(new Date("2027-03-15T12:00:00Z")),
 		).toBe("31/07/2027");
+	});
+
+	test("identifica las plantillas que requieren expectativa de mora", () => {
+		const porId = (id: string) =>
+			PLANTILLAS_MENSAJES.find((plantilla) => plantilla.id === id);
+
+		// Solo el recordatorio del día de pago usa {expectativaMora}; el modal
+		// bloquea su envío cuando el server no pudo calcularla (sin capital).
+		expect(plantillaRequiereExpectativaMora(porId("al_dia")!)).toBe(true);
+		expect(plantillaRequiereExpectativaMora(porId("bienvenida")!)).toBe(false);
+		expect(plantillaRequiereExpectativaMora(porId("mora_30")!)).toBe(false);
 	});
 });

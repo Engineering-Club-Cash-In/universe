@@ -53,6 +53,7 @@ import {
 	calcularExpectativaMora,
 	interpolar as interpolarPlantilla,
 	PLANTILLAS_MENSAJES,
+	prepararExpectativaMoraParaEnvio,
 	prepararTelefonoAsesorParaEnvio,
 } from "../lib/cobros-plantillas";
 import { filterCobrosSearchResults } from "../lib/cobros-search";
@@ -3670,6 +3671,23 @@ export const cobrosRouter = {
 					continue;
 				}
 
+				// Si el cuerpo usa {expectativaMora} y el crédito no tiene capital
+				// válido (insolutos y similares no generan mora), se descarta en vez
+				// de enviar "recargo por mora de Q." roto.
+				const expectativaMora = prepararExpectativaMoraParaEnvio(
+					cuerpoBase,
+					credito.creditos.capital,
+				);
+
+				if (!expectativaMora.enviar) {
+					descartados.push({
+						numeroSifco: sifco,
+						clienteNombre,
+						motivo: expectativaMora.motivo,
+					});
+					continue;
+				}
+
 				// Día de pago: tomar el día del mes de la fecha de vencimiento de la
 				// próxima cuota que devuelve cartera (`proxima_cuota`). Es el mismo
 				// criterio que usa el detalle individual de este router, y la única
@@ -3698,7 +3716,7 @@ export const cobrosRouter = {
 					cuotasAtraso: credito.mora?.cuotas_atrasadas ?? 0,
 					telefonoAsesor: telefonoAsesor.telefonoAsesor,
 					nombreAsesor: asesor.nombre ?? "",
-					expectativaMora: calcularExpectativaMora(credito.creditos.capital),
+					expectativaMora: expectativaMora.expectativaMora,
 				});
 
 				candidatos.push({

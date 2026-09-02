@@ -57,6 +57,7 @@ import {
 	mensajePlantillaEditable,
 	mensajeSmsEditable,
 	PLANTILLAS_MENSAJES,
+	plantillaRequiereExpectativaMora,
 	prepararTelefonoAsesorParaEnvio,
 	sugerirPlantilla,
 	type VariablesPlantilla,
@@ -343,6 +344,23 @@ export function ContactoModal({
 		if (accionUsaCuerpoNoReply(metodo) && !telefonoAsesorNoReply.enviar) {
 			toast.error(
 				"No se puede enviar esta plantilla no-reply porque el asesor no tiene teléfono registrado",
+			);
+			return;
+		}
+		// La plantilla del día de pago usa {expectativaMora}; si el server no
+		// pudo calcularla (crédito sin capital válido, p. ej. insolutos que no
+		// generan mora), se bloquea el envío para no mandar "recargo de Q." roto.
+		const plantillaActual = PLANTILLAS_MENSAJES.find(
+			(p) => p.id === plantillaId,
+		);
+		if (
+			accionUsaCuerpoNoReply(metodo) &&
+			plantillaActual &&
+			plantillaRequiereExpectativaMora(plantillaActual) &&
+			!expectativaMora.trim()
+		) {
+			toast.error(
+				"No se puede enviar esta plantilla: el crédito no tiene capital para calcular la mora",
 			);
 			return;
 		}

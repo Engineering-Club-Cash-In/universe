@@ -99,6 +99,29 @@ export interface PlantillaMensaje {
 export const COBROS_NO_REPLY_WARNING =
 	"⚠️ Este número es únicamente para el envío de notificaciones automáticas. Por favor, no respondas a este número.";
 export const COBROS_MOTIVO_SIN_TELEFONO_ASESOR = "sin teléfono de asesor";
+export const COBROS_MOTIVO_SIN_EXPECTATIVA_MORA =
+	"sin capital para calcular la mora";
+
+/**
+ * Un cuerpo que usa {expectativaMora} no se puede enviar si el crédito no
+ * tiene capital válido: sin capital el job de cartera no genera mora (p. ej.
+ * insolutos) y el mensaje saldría roto ("recargo por mora de Q."). Mismo
+ * patrón de gate que prepararTelefonoAsesorParaEnvio.
+ */
+export function prepararExpectativaMoraParaEnvio(
+	cuerpo: string,
+	capital: string | number | null | undefined,
+):
+	| { enviar: true; expectativaMora: string }
+	| { enviar: false; motivo: string } {
+	const expectativaMora = calcularExpectativaMora(capital);
+
+	if (cuerpo.includes("{expectativaMora}") && !expectativaMora) {
+		return { enviar: false, motivo: COBROS_MOTIVO_SIN_EXPECTATIVA_MORA };
+	}
+
+	return { enviar: true, expectativaMora };
+}
 
 export function prepararTelefonoAsesorParaEnvio(
 	cuerpo: string,
@@ -168,7 +191,7 @@ export const PLANTILLAS_MENSAJES: PlantillaMensaje[] = [
 ¡Bienvenido(a) a CashIn! Nos alegra acompañarte en el financiamiento de tu vehículo.
 
 📅 Información de tu cuota
-Fecha de 1er pago: {fechaPago}
+Día de pago mensual: {fechaPago}
 Monto de cuota: Q{cuotaMensual}
 
 💳 Cuentas para realizar tus pagos

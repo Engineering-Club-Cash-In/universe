@@ -1,12 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import {
 	anioImpuestoCirculacion,
+	COBROS_MOTIVO_SIN_EXPECTATIVA_MORA,
 	COBROS_MOTIVO_SIN_TELEFONO_ASESOR,
 	COBROS_NO_REPLY_WARNING,
 	calcularExpectativaMora,
 	fechaLimiteImpuestoCirculacion,
 	interpolar,
 	PLANTILLAS_MENSAJES,
+	prepararExpectativaMoraParaEnvio,
 	prepararTelefonoAsesorParaEnvio,
 } from "./cobros-plantillas";
 
@@ -262,5 +264,34 @@ CashIn`);
 		});
 
 		expect(mensaje).toContain("un recargo por mora de Q504.00.");
+	});
+
+	test("descarta el envío que usa expectativa de mora cuando el capital no la genera", () => {
+		const alDia = PLANTILLAS_MENSAJES.find(
+			(plantilla) => plantilla.id === "al_dia",
+		);
+
+		// Sin capital válido no hay mora que anunciar → no se envía.
+		for (const capital of [null, undefined, "0.00", "no-numerico"]) {
+			expect(
+				prepararExpectativaMoraParaEnvio(alDia?.cuerpo ?? "", capital),
+			).toEqual({
+				enviar: false,
+				motivo: COBROS_MOTIVO_SIN_EXPECTATIVA_MORA,
+			});
+		}
+
+		// Con capital sí, y entrega el monto ya calculado.
+		expect(
+			prepararExpectativaMoraParaEnvio(alDia?.cuerpo ?? "", "45000.00"),
+		).toEqual({ enviar: true, expectativaMora: "504.00" });
+
+		// Una plantilla que no usa la variable se envía aunque no haya capital.
+		const mora30 = PLANTILLAS_MENSAJES.find(
+			(plantilla) => plantilla.id === "mora_30",
+		);
+		expect(
+			prepararExpectativaMoraParaEnvio(mora30?.cuerpo ?? "", null),
+		).toEqual({ enviar: true, expectativaMora: "" });
 	});
 });

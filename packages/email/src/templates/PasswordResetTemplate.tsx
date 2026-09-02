@@ -29,11 +29,18 @@ interface PasswordResetEmailProps {
 export const PasswordResetEmail = ({ resetUrl, assets }: PasswordResetEmailProps) => (
   <Html>
     <Head>
+      {/*
+        La URL apunta al archivo .woff2 directo (subset latin), no al endpoint
+        css2 de Google Fonts: <Font> declara la fuente con format('woff2'), así
+        que un stylesheet ahí no se puede decodificar y la fuente no carga.
+        Plus Jakarta Sans es variable, por lo que el mismo archivo sirve los
+        pesos 400/600/700 que usa la plantilla.
+      */}
       <Font
         fontFamily="Plus Jakarta Sans"
         fallbackFontFamily="Arial"
         webFont={{
-          url: 'https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700&display=swap',
+          url: 'https://fonts.gstatic.com/s/plusjakartasans/v12/LDIoaomQNQcsA88c7O9yZ4KMCoOg4Ko20yw.woff2',
           format: 'woff2',
         }}
         fontWeight={400}
@@ -134,7 +141,7 @@ const container = {
   backgroundColor: '#f4f4f4',
   borderRadius: '0',
   overflow: 'hidden' as const,
-  width: '600px',
+  width: '100%',
   maxWidth: '600px',
   margin: '0 auto',
 };
@@ -274,7 +281,8 @@ const expiry = {
 };
 
 const warningRow = {
-  width: '402px',
+  width: '100%',
+  maxWidth: '402px',
   margin: '32px auto 0 auto',
 };
 
@@ -283,9 +291,10 @@ const warningIconColumn = {
   verticalAlign: 'middle' as const,
 };
 
-const warningTextColumn = {
-  width: '330px',
-};
+// Sin ancho fijo: la columna del ícono sí lo tiene (imagen de 56px), así que
+// esta absorbe el espacio restante y el bloque puede encoger en pantallas
+// angostas sin desbordar el contenido.
+const warningTextColumn = {};
 
 const warningIconImg = {
   width: '56px',

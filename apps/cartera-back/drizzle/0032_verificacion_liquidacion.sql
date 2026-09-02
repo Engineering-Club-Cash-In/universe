@@ -69,3 +69,10 @@ END $$;
 
 CREATE INDEX IF NOT EXISTS "idx_compras_credito_inv_liquidacion"
   ON "cartera"."compras_credito_inversionista" ("liquidacion_id");
+
+-- Marca de intento revertido. revertirComprasUltimaLiquidacion deja la fila en
+-- "completado" para que no figure pendiente, así que sin esta marca un intento
+-- revertido y el que lo reemplaza se suman los dos y una reinversión de Q100
+-- efectivamente colocada se leería como Q200 colocados.
+ALTER TABLE "cartera"."compras_credito_inversionista"
+  ADD COLUMN IF NOT EXISTS "revertida_at" timestamp with time zone;

@@ -185,6 +185,8 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
       join cartera.compras_credito_inversionista c
         on c.inversionista_id = p.inversionista_id
       where c.tipo_operacion = 'reinversion'
+        -- Un intento revertido devolvió su monto a CUBE: no colocó nada.
+        and c.revertida_at is null
         and (
           -- Filas nuevas: procedencia exacta.
           c.liquidacion_id = p.liquidacion_id
@@ -210,6 +212,7 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
       from cartera.compras_credito_inversionista c
       join pendientes p on p.inversionista_id = c.inversionista_id
       where c.tipo_operacion = 'reinversion'
+        and c.revertida_at is null
         and (
           c.liquidacion_id = p.liquidacion_id
           or (
@@ -425,6 +428,7 @@ export async function leerReinversionesAnterioresSinColocar(periodo: string) {
              from cartera.compras_credito_inversionista c
              where c.inversionista_id = t.inversionista_id
                and c.tipo_operacion = 'reinversion'
+               and c.revertida_at is null
                and (
                  c.liquidacion_id = t.liquidacion_id
                  or (

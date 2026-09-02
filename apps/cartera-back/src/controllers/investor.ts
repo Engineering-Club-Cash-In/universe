@@ -3187,11 +3187,16 @@ export async function revertirComprasUltimaLiquidacion(
 
       // Marcamos las compras como completado para que no aparezcan como
       // pendientes; quedan en el log para borrarlas después si se decide.
+      //
+      // `revertida_at` las deja identificables: el monto volvió a CUBE, así que
+      // esta fila ya no representa capital colocado. Sin la marca, un intento
+      // revertido y el que lo reemplaza se suman los dos y una reinversión de
+      // Q100 efectivamente colocada se contaría como Q200.
       const compraIds = compras.map((c) => c.id);
       if (compraIds.length > 0) {
         await tx
           .update(compras_credito_inversionista)
-          .set({ status: "completado", updated_at: new Date() })
+          .set({ status: "completado", revertida_at: new Date(), updated_at: new Date() })
           .where(inArray(compras_credito_inversionista.id, compraIds));
       }
 

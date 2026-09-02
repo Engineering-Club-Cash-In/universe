@@ -1,10 +1,14 @@
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import { analystProcedure } from "../lib/orpc";
+import { PERMISSIONS } from "../lib/roles";
 import {
 	ejecutarValidaciones,
 	getValidaciones,
+	marcarValidacionBuroManual,
+	marcarValidacionRenapManual,
 	OportunidadNoEncontradaError,
+	OverrideNoAplicaError,
 } from "../services/opportunity-validations";
 
 /**
@@ -33,6 +37,52 @@ export const validationsRouter = {
 			} catch (error) {
 				if (error instanceof OportunidadNoEncontradaError) {
 					throw new ORPCError("NOT_FOUND", { message: error.message });
+				}
+				throw error;
+			}
+		}),
+
+	/**
+	 * Override manual: el analista verificó a mano en el portal de la fuente
+	 * que falló (Infornet o Centinela/RENAP) que el cliente está en orden.
+	 * Solo aplica si la última validación de ese tipo está en `estado:'error'`.
+	 */
+	marcarValidacionManual: analystProcedure
+		.meta({ audit: { entity: "opportunity", action: "override_validation" } })
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+				tipo: z.enum(["buro", "renap"]),
+				motivo: z
+					.string()
+					.trim()
+					.min(10, "El motivo debe tener al menos 10 caracteres"),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			if (!PERMISSIONS.canOverrideValidacionManual(context.userRole)) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permisos para marcar una validación como manual",
+				});
+			}
+
+			try {
+				const marcar =
+					input.tipo === "buro"
+						? marcarValidacionBuroManual
+						: marcarValidacionRenapManual;
+
+				return await marcar({
+					opportunityId: input.opportunityId,
+					userId: context.userId,
+					motivo: input.motivo,
+				});
+			} catch (error) {
+				if (error instanceof OportunidadNoEncontradaError) {
+					throw new ORPCError("NOT_FOUND", { message: error.message });
+				}
+				if (error instanceof OverrideNoAplicaError) {
+					throw new ORPCError("BAD_REQUEST", { message: error.message });
 				}
 				throw error;
 			}

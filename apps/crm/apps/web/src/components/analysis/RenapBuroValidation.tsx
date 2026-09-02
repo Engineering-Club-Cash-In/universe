@@ -15,6 +15,16 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,16 +34,35 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
 import { client, orpc } from "@/utils/orpc";
 
 type EstadoValidacion = "aprobado" | "rechazado" | "error" | "sin_registro";
+type TipoValidacion = "buro" | "renap";
 
 interface RenapBuroValidationProps {
 	opportunityId: string;
 	/** Avisa a la página cuándo hay una validación en curso, para no dejar aprobar mientras tanto */
 	onEjecucionChange?: (ejecutando: boolean) => void;
+	/** Solo admin/analyst pueden marcar un override manual */
+	currentUserRole?: string | null;
 }
+
+const MOTIVO_MIN_LENGTH = 10;
+
+const NOMBRE_FUENTE: Record<TipoValidacion, string> = {
+	buro: "Infornet",
+	renap: "RENAP",
+};
 
 const alertaLabels: Record<string, string> = {
 	DELITOS_PENALES: "Antecedentes penales",
@@ -133,12 +162,24 @@ function formatearFecha(fecha: string | Date | null | undefined): string {
 export function RenapBuroValidation({
 	opportunityId,
 	onEjecucionChange,
+	currentUserRole,
 }: RenapBuroValidationProps) {
 	const [isExecuting, setIsExecuting] = useState(false);
 	const [detalleRenapAbierto, setDetalleRenapAbierto] = useState(false);
 	const [detalleBuroAbierto, setDetalleBuroAbierto] = useState(false);
 	/** Qué oportunidad se auto-ejecutó: la ruta reusa el componente al navegar */
 	const autoEjecutadaPara = useRef<string | null>(null);
+
+	// Override manual: paso 1 captura el motivo, paso 2 confirma explícitamente
+	const [overrideTipo, setOverrideTipo] = useState<TipoValidacion | null>(null);
+	const [overrideStep, setOverrideStep] = useState<
+		"motivo" | "confirmar" | null
+	>(null);
+	const [overrideMotivo, setOverrideMotivo] = useState("");
+	const [isSubmittingOverride, setIsSubmittingOverride] = useState(false);
+
+	const puedeOverridear =
+		currentUserRole === "admin" || currentUserRole === "analyst";
 
 	const validacionesQuery = useQuery({
 		...orpc.getValidacionesOportunidad.queryOptions({
@@ -174,6 +215,43 @@ export function RenapBuroValidation({
 			onEjecucionChange?.(false);
 		}
 	}, [isExecuting, opportunityId, refetch, onEjecucionChange]);
+
+	const abrirOverride = useCallback((tipo: TipoValidacion) => {
+		setOverrideTipo(tipo);
+		setOverrideStep("motivo");
+		setOverrideMotivo("");
+	}, []);
+
+	const cerrarOverride = useCallback(() => {
+		setOverrideTipo(null);
+		setOverrideStep(null);
+		setOverrideMotivo("");
+	}, []);
+
+	const handleConfirmarOverride = useCallback(async () => {
+		if (!overrideTipo) return;
+		try {
+			setIsSubmittingOverride(true);
+			await client.marcarValidacionManual({
+				opportunityId,
+				tipo: overrideTipo,
+				motivo: overrideMotivo.trim(),
+			});
+			toast.success(
+				`${NOMBRE_FUENTE[overrideTipo]} marcado como validado manualmente`,
+			);
+			cerrarOverride();
+			await refetch();
+		} catch (error: unknown) {
+			toast.error(
+				error instanceof Error
+					? error.message
+					: "No se pudo registrar el override",
+			);
+		} finally {
+			setIsSubmittingOverride(false);
+		}
+	}, [overrideTipo, overrideMotivo, opportunityId, refetch, cerrarOverride]);
 
 	// Auto-ejecuta solo si la oportunidad espera análisis, hay consentimiento y
 	// nunca se validó. Con un resultado previo decide el analista con el botón.
@@ -348,7 +426,16 @@ export function RenapBuroValidation({
 											<span className="text-muted-foreground text-xs">
 												{formatearFecha(renap.ejecutadoAt)}
 											</span>
-											<EstadoBadge estado={renap.estado} />
+											{renap.fuenteDeDatos === "manual" ? (
+												<Badge
+													variant="outline"
+													className="border-purple-300 bg-purple-100 text-purple-800 hover:bg-purple-100"
+												>
+													Validado manualmente
+												</Badge>
+											) : (
+												<EstadoBadge estado={renap.estado} />
+											)}
 											{data.detalleRenap && (
 												<BotonDetalle
 													abierto={detalleRenapAbierto}
@@ -426,7 +513,16 @@ export function RenapBuroValidation({
 											<span className="text-muted-foreground text-xs">
 												{formatearFecha(buro.ejecutadoAt)}
 											</span>
-											<EstadoBadge estado={buro.estado} />
+											{buro.fuenteDeDatos === "manual" ? (
+												<Badge
+													variant="outline"
+													className="border-purple-300 bg-purple-100 text-purple-800 hover:bg-purple-100"
+												>
+													Validado manualmente
+												</Badge>
+											) : (
+												<EstadoBadge estado={buro.estado} />
+											)}
 											{data.detalleBuro && (
 												<BotonDetalle
 													abierto={detalleBuroAbierto}
@@ -555,13 +651,43 @@ export function RenapBuroValidation({
 					</Alert>
 				)}
 
-				{buro?.estado === "sin_registro" && (
+				{buro?.estado === "sin_registro" && buro.fuenteDeDatos !== "manual" && (
 					<Alert>
 						<Info className="h-4 w-4" />
 						<AlertTitle>Sin registro en el buró de Infornet</AlertTitle>
 						<AlertDescription>
 							Esta persona no tiene historial crediticio en Infornet. No bloquea
 							la aprobación del análisis.
+						</AlertDescription>
+					</Alert>
+				)}
+
+				{buro?.fuenteDeDatos === "manual" && data.overrideBuro && (
+					<Alert className="border-purple-300 bg-purple-50 dark:bg-purple-950/30">
+						<UserCog className="h-4 w-4" />
+						<AlertTitle>Buró validado manualmente</AlertTitle>
+						<AlertDescription>
+							{data.overrideBuro.marcadoPorNombre ?? "Un analista"} verificó a
+							este cliente en Infornet
+							{data.overrideBuro.motivo
+								? `: "${data.overrideBuro.motivo}"`
+								: ""}
+							.
+						</AlertDescription>
+					</Alert>
+				)}
+
+				{renap?.fuenteDeDatos === "manual" && data.overrideRenap && (
+					<Alert className="border-purple-300 bg-purple-50 dark:bg-purple-950/30">
+						<UserCog className="h-4 w-4" />
+						<AlertTitle>RENAP validado manualmente</AlertTitle>
+						<AlertDescription>
+							{data.overrideRenap.marcadoPorNombre ?? "Un analista"} verificó a
+							este cliente en el portal de RENAP
+							{data.overrideRenap.motivo
+								? `: "${data.overrideRenap.motivo}"`
+								: ""}
+							.
 						</AlertDescription>
 					</Alert>
 				)}
@@ -577,24 +703,137 @@ export function RenapBuroValidation({
 									? ", La aprobación del análisis quedará bloqueada hasta obtener un veredicto."
 									: ", El buró sí obtuvo veredicto, la aprobación del análisis puede continuar."}
 							</span>
-							<Button
-								variant="outline"
-								size="sm"
-								className="w-fit"
-								onClick={ejecutarValidaciones}
-								disabled={isExecuting}
-							>
-								{isExecuting ? (
-									<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-								) : (
-									<RefreshCw className="mr-2 h-4 w-4" />
+							<div className="flex flex-wrap gap-2">
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={ejecutarValidaciones}
+									disabled={isExecuting}
+								>
+									{isExecuting ? (
+										<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+									) : (
+										<RefreshCw className="mr-2 h-4 w-4" />
+									)}
+									Reintentar
+								</Button>
+								{buro?.estado === "error" && puedeOverridear && (
+									<Button
+										variant="outline"
+										size="sm"
+										onClick={() => abrirOverride("buro")}
+										disabled={isExecuting}
+									>
+										<UserCog className="mr-2 h-4 w-4" />
+										Marcar Buró como validado manualmente
+									</Button>
 								)}
-								Reintentar
-							</Button>
+								{renap?.estado === "error" && puedeOverridear && (
+									<Button
+										variant="outline"
+										size="sm"
+										onClick={() => abrirOverride("renap")}
+										disabled={isExecuting}
+									>
+										<UserCog className="mr-2 h-4 w-4" />
+										Marcar RENAP como validado manualmente
+									</Button>
+								)}
+							</div>
 						</AlertDescription>
 					</Alert>
 				)}
 			</CardContent>
+
+			{/* Override manual — paso 1: motivo obligatorio */}
+			<Dialog
+				open={overrideTipo !== null && overrideStep === "motivo"}
+				onOpenChange={(open) => !open && cerrarOverride()}
+			>
+				<DialogContent className="max-w-md">
+					<DialogHeader>
+						<DialogTitle>
+							Marcar {overrideTipo ? NOMBRE_FUENTE[overrideTipo] : ""} como
+							validado manualmente
+						</DialogTitle>
+						<DialogDescription>
+							Usa esto solo cuando verificaste al cliente directamente en el
+							portal de {overrideTipo ? NOMBRE_FUENTE[overrideTipo] : ""}.
+						</DialogDescription>
+					</DialogHeader>
+					<div className="grid gap-4 py-4">
+						<div className="grid gap-2">
+							<label htmlFor="override-motivo" className="font-medium text-sm">
+								Motivo (obligatorio)
+							</label>
+							<Textarea
+								id="override-motivo"
+								value={overrideMotivo}
+								onChange={(e) => setOverrideMotivo(e.target.value)}
+								rows={4}
+								placeholder="Ej: Verificado en el portal el 02/09, sin antecedentes penales ni morosidad."
+							/>
+						</div>
+					</div>
+					<DialogFooter>
+						<Button variant="outline" onClick={cerrarOverride}>
+							Cancelar
+						</Button>
+						<Button
+							onClick={() => setOverrideStep("confirmar")}
+							disabled={overrideMotivo.trim().length < MOTIVO_MIN_LENGTH}
+						>
+							Continuar
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+
+			{/* Override manual — paso 2: confirmación explícita antes de disparar la llamada */}
+			<AlertDialog
+				open={overrideTipo !== null && overrideStep === "confirmar"}
+				onOpenChange={(open) => !open && setOverrideStep("motivo")}
+			>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle>
+							¿Confirmas la validación manual de{" "}
+							{overrideTipo ? NOMBRE_FUENTE[overrideTipo] : ""}?
+						</AlertDialogTitle>
+						<AlertDialogDescription>
+							Esto permitirá aprobar el análisis de{" "}
+							{overrideTipo ? NOMBRE_FUENTE[overrideTipo] : ""}
+							{overrideTipo === "buro"
+								? " y se marcará como validado manualmente, vigente por 30 días"
+								: ""}
+							. Quedará registrado con el siguiente motivo:
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<div className="rounded-md bg-muted p-2 text-foreground text-sm italic">
+						"{overrideMotivo}"
+					</div>
+					<AlertDialogFooter>
+						<AlertDialogCancel
+							onClick={() => setOverrideStep("motivo")}
+							disabled={isSubmittingOverride}
+						>
+							Volver
+						</AlertDialogCancel>
+						<AlertDialogAction
+							onClick={(e) => {
+								// AlertDialogAction cierra el diálogo por defecto al hacer clic;
+								// acá el cierre lo controla handleConfirmarOverride (se queda
+								// abierto si la llamada falla, para poder reintentar)
+								e.preventDefault();
+								handleConfirmarOverride();
+							}}
+							disabled={isSubmittingOverride}
+						>
+							{isSubmittingOverride ? "Guardando..." : "Sí, confirmar"}
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 		</Card>
 	);
 }

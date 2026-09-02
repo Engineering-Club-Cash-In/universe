@@ -1,8 +1,9 @@
 import { createClientFromEnv, isNotFoundError } from "@repo/infornet";
-import { and, desc, eq, gt } from "drizzle-orm";
+import { and, desc, eq, gt, sql } from "drizzle-orm";
 import { getOnlyRenapInfoController } from "../controllers/bot";
 import { infornetController } from "../controllers/buro";
 import { db } from "../db";
+import { user } from "../db/schema/auth";
 import { infornetPersonaCache } from "../db/schema/buro";
 import { leads, opportunities } from "../db/schema/crm";
 import {
@@ -11,7 +12,11 @@ import {
 } from "../db/schema/documents";
 import { otps } from "../db/schema/otp";
 import { renapInfo } from "../db/schema/renap";
-import { opportunityValidations } from "../db/schema/validations";
+import {
+	opportunityValidationOverrideLogs,
+	opportunityValidations,
+} from "../db/schema/validations";
+import { auditedTransaction, auditRecord } from "../lib/audit";
 import { evaluarBuro } from "../lib/buro-evaluation";
 import { eqDpi } from "../lib/dpi-lookup";
 import {
@@ -36,10 +41,32 @@ const VIGENCIA_SIN_REGISTRO_MS = 30 * 24 * 60 * 60 * 1000;
 /** Mensaje de Infornet que no distingue "sin registro" de un fallo real */
 const ERROR_INFORNET_AMBIGUO = "Persona no encontrada en Infornet";
 
+/**
+ * Mensaje crudo de `buro.ts` cuando Infornet no llega a consultarse porque no
+ * hay una fila local de RENAP para ese DPI (dependencia preexistente entre
+ * fuentes, ajena a este servicio — ver `controllers/buro.ts`). Es la
+ * consecuencia esperada de overridear RENAP cuando nunca sincronizó de
+ * verdad: Buró sigue sin poder consultarse y necesita su propio override,
+ * pero el mensaje original suena a un problema de RENAP, no de Buró.
+ */
+const ERROR_BURO_SIN_RENAP_LOCAL = "DPI no encontrado en RENAP";
+
+/** Vigencia de un override manual de Buró: igual al TTL normal de un veredicto real de Infornet */
+const VIGENCIA_OVERRIDE_BURO_MS = 30 * 24 * 60 * 60 * 1000;
+
 export class OportunidadNoEncontradaError extends Error {
 	constructor() {
 		super("Oportunidad no encontrada");
 		this.name = "OportunidadNoEncontradaError";
+	}
+}
+
+export class OverrideNoAplicaError extends Error {
+	constructor(tipo: "buro" | "renap") {
+		super(
+			`No hay un error de ${tipo === "buro" ? "Buró" : "RENAP"} vigente para esta oportunidad; actualiza la página.`,
+		);
+		this.name = "OverrideNoAplicaError";
 	}
 }
 
@@ -97,6 +124,13 @@ export type DetalleBuro = {
 	expiraEn: Date;
 };
 
+/** Detalle de un override manual: quién lo marcó, por qué y cuándo */
+export type OverrideInfo = {
+	motivo: string | null;
+	marcadoPorNombre: string | null;
+	marcadoAt: Date;
+};
+
 export type EstadoValidacionesOportunidad = {
 	exento: boolean;
 	faltaDpi: boolean;
@@ -117,6 +151,10 @@ export type EstadoValidacionesOportunidad = {
 	dpiValidado: string | null;
 	detalleRenap: DetalleRenap | null;
 	detalleBuro: DetalleBuro | null;
+	/** Presente solo si `buro.fuenteDeDatos === 'manual'` */
+	overrideBuro: OverrideInfo | null;
+	/** Presente solo si `renap.fuenteDeDatos === 'manual'` */
+	overrideRenap: OverrideInfo | null;
 	validaciones: ValidacionOportunidad[];
 };
 
@@ -189,6 +227,10 @@ async function sinRegistroVigentePorDpi(dpi: string): Promise<Date | null> {
 				eq(opportunityValidations.estado, "sin_registro"),
 				eq(opportunityValidations.dpi, dpi),
 				gt(opportunityValidations.expiraEn, new Date()),
+				// Un "sin registro" manual no es evidencia de que Infornet no tenga a
+				// la persona: no debe filtrarse a la clasificación automática de otra
+				// oportunidad con el mismo DPI
+				sql`${opportunityValidations.fuenteDeDatos} IS DISTINCT FROM 'manual'`,
 			),
 		)
 		.orderBy(desc(opportunityValidations.expiraEn))
@@ -409,11 +451,25 @@ function enFilaPorDpi<T>(dpi: string, ejecutar: () => Promise<T>): Promise<T> {
 	return propia;
 }
 
-/** Veredicto vigente para ese DPI, salvo que haya un intento posterior fallido: evita re-consultar al aprobar */
-async function veredictoVigente(
+type ReusoRenap = { estado: EstadoValidacion; mensaje: string | null };
+type ReusoBuro = NonNullable<ResultadoEjecucionValidaciones["buro"]>;
+
+/**
+ * Vigencia de RENAP y Buró para ese DPI, evaluada de forma **independiente**
+ * por fuente: que una esté vigente no depende de la otra ni de cuál corrió
+ * más reciente. Antes se comparaban cronológicamente (`renapEsPosterior`),
+ * lo que producía dos fallas: (a) overridear solo RENAP sin que exista fila
+ * de Buró no dejaba nada vigente porque el chequeo de vigencia estaba anclado
+ * a Buró, y (b) overridear solo Buró con timestamp nuevo hacía que un error
+ * de RENAP más viejo se descartara por "no ser posterior", aprobando sin
+ * resolver RENAP. Cada fuente ahora se lee sola: RENAP vigente = su última
+ * fila no es error (no usa `expiraEn`, igual que en el resto del sistema);
+ * Buró vigente = su última fila no es error y su `expiraEn` sigue en el futuro.
+ */
+async function cargarVigenciasPorFuente(
 	opportunityId: string,
 	dpi: string,
-): Promise<ResultadoEjecucionValidaciones | null> {
+): Promise<{ renap: ReusoRenap | null; buro: ReusoBuro | null }> {
 	const filas = await db
 		.select()
 		.from(opportunityValidations)
@@ -425,33 +481,30 @@ async function veredictoVigente(
 		)
 		.orderBy(desc(opportunityValidations.ejecutadoAt));
 
-	const ultimo = filas.find((f) => f.tipo === "buro");
 	const ultimoRenap = filas.find((f) => f.tipo === "renap");
+	const ultimoBuro = filas.find((f) => f.tipo === "buro");
 
-	// Mismo criterio que `aprobacionBloqueada`: las filas de error no llevan
-	// `expiraEn`, así que sin esto el gate aprobaría lo que la UI marca bloqueado
-	const renapEsPosterior =
-		ultimoRenap && (!ultimo || ultimoRenap.ejecutadoAt > ultimo.ejecutadoAt);
+	const renap: ReusoRenap | null =
+		ultimoRenap && ultimoRenap.estado !== "error"
+			? { estado: ultimoRenap.estado, mensaje: ultimoRenap.mensaje }
+			: null;
 
-	if (ultimo?.estado === "error") return null;
-	if (renapEsPosterior && ultimoRenap?.estado === "error") return null;
+	const buro: ReusoBuro | null =
+		ultimoBuro &&
+		ultimoBuro.estado !== "error" &&
+		ultimoBuro.expiraEn &&
+		ultimoBuro.expiraEn > new Date()
+			? {
+					estado: ultimoBuro.estado,
+					mensaje: ultimoBuro.mensaje,
+					scoreRiesgo: ultimoBuro.scoreRiesgo,
+					nivelRiesgo: ultimoBuro.nivelRiesgo,
+					alertas: ultimoBuro.alertas,
+					fuenteDeDatos: ultimoBuro.fuenteDeDatos,
+				}
+			: null;
 
-	if (!ultimo?.expiraEn || ultimo.expiraEn <= new Date()) return null;
-
-	return {
-		exento: false,
-		faltaDpi: false,
-		errorTecnico: false,
-		sinRegistroBuro: false,
-		buro: {
-			estado: ultimo.estado,
-			mensaje: ultimo.mensaje,
-			scoreRiesgo: ultimo.scoreRiesgo,
-			nivelRiesgo: ultimo.nivelRiesgo,
-			alertas: ultimo.alertas,
-			fuenteDeDatos: ultimo.fuenteDeDatos,
-		},
-	};
+	return { renap, buro };
 }
 
 const validacionesEnCurso = new Map<
@@ -483,6 +536,17 @@ function conMutexDeOportunidad(
 	return validacion;
 }
 
+/**
+ * Overrides manuales en curso, por la misma llave `opportunityId:dpi` que usa
+ * `conMutexDeOportunidad`. No es un caché para reusar resultado (cada override
+ * tiene su propio motivo y debe correr su propia lógica) — es solo una señal
+ * para que una validación real concurrente espere a que termine antes de
+ * arrancar, y viceversa. Sin esto, un reintento real podía completarse entre
+ * la lectura y el insert del override, dejando la fila manual por encima
+ * cronológicamente de un veredicto real ya resuelto.
+ */
+const overridesEnCurso = new Map<string, Promise<unknown>>();
+
 /** Valida RENAP y Buró para oportunidades no-bot y registra el resultado */
 export async function ejecutarValidaciones(parametros: {
 	opportunityId: string;
@@ -496,8 +560,21 @@ export async function ejecutarValidaciones(parametros: {
 	const claveDpi = oportunidad?.leadDpi
 		? normalizarDpi(oportunidad.leadDpi)
 		: "sin-dpi";
+	const clave = `${parametros.opportunityId}:${claveDpi}`;
 
-	return conMutexDeOportunidad(`${parametros.opportunityId}:${claveDpi}`, () =>
+	// Si hay un override manual en curso para esta misma oportunidad+DPI, se
+	// espera a que termine antes de leer/escribir el estado real. En loop: un
+	// segundo override puede encadenarse detrás del que se está esperando y
+	// reemplazar la entrada del mapa mientras se espera — un solo chequeo no
+	// lo vería, así que se re-consulta el mapa después de cada espera hasta
+	// que no quede ningún override pendiente para esta llave.
+	let overrideEnCurso = overridesEnCurso.get(clave);
+	while (overrideEnCurso) {
+		await overrideEnCurso.catch(() => undefined);
+		overrideEnCurso = overridesEnCurso.get(clave);
+	}
+
+	return conMutexDeOportunidad(clave, () =>
 		ejecutarValidacionesInterno(parametros),
 	);
 }
@@ -571,74 +648,101 @@ async function ejecutarValidacionesInterno({
 
 	const dpi = dpiValidado.dpiLimpio;
 
+	let renapVigente: ReusoRenap | null = null;
+	let buroVigente: ReusoBuro | null = null;
+
 	if (reusarVigente) {
-		const vigente = await veredictoVigente(opportunityId, dpi);
-		if (vigente) return vigente;
+		({ renap: renapVigente, buro: buroVigente } =
+			await cargarVigenciasPorFuente(opportunityId, dpi));
 	}
 
-	// 1. RENAP: sincronizar datos de identidad en renap_info
-	const renapResultado = await conReintento(
-		() =>
-			conTimeout(
-				() => getOnlyRenapInfoController(dpi),
-				TIMEOUT_RENAP_MS,
-				() => ({
-					success: false as const,
-					message: MENSAJE_TIMEOUT_RENAP,
-					error: null,
-				}),
-			),
-		// El timeout deja la petición original en vuelo: reintentar la duplicaría
-		(r) => r.success || r.message === MENSAJE_TIMEOUT_RENAP,
-	);
+	// 1. RENAP: sincronizar datos de identidad en renap_info (se salta si ya está vigente)
+	let renapResumen: ReusoRenap;
 
-	const renapResumen = renapResultado.success
-		? { estado: "aprobado" as const, mensaje: "Datos de RENAP sincronizados" }
-		: { estado: "error" as const, mensaje: renapResultado.message || null };
-
-	if (!renapResultado.success) {
-		const mensajeRenap =
-			renapResultado.message || "Error desconocido al consultar RENAP";
-
-		await registrarValidacion({
-			opportunityId,
-			dpi,
-			tipo: "renap",
-			estado: "error",
-			mensaje: mensajeRenap,
-			ejecutadoPor: userId ?? null,
-		});
-
-		// Infornet exige el DPI en renap_info: con sincronización previa se continúa
-		const [renapPrevio] = await db
-			.select({ dpi: renapInfo.dpi })
-			.from(renapInfo)
-			.where(eqDpi(renapInfo.dpi, dpi))
-			.limit(1);
-
-		if (!renapPrevio) {
-			return {
-				exento: false,
-				faltaDpi: false,
-				errorTecnico: true,
-				sinRegistroBuro: false,
-				mensaje: `RENAP: ${mensajeRenap}`,
-				renap: renapResumen,
-			};
-		}
+	if (renapVigente) {
+		renapResumen = renapVigente;
 	} else {
-		await registrarValidacion({
-			opportunityId,
-			dpi,
-			tipo: "renap",
-			estado: "aprobado",
-			mensaje: "Datos de RENAP sincronizados",
-			ejecutadoPor: userId ?? null,
-		});
+		const renapResultado = await conReintento(
+			() =>
+				conTimeout(
+					() => getOnlyRenapInfoController(dpi),
+					TIMEOUT_RENAP_MS,
+					() => ({
+						success: false as const,
+						message: MENSAJE_TIMEOUT_RENAP,
+						error: null,
+					}),
+				),
+			// El timeout deja la petición original en vuelo: reintentar la duplicaría
+			(r) => r.success || r.message === MENSAJE_TIMEOUT_RENAP,
+		);
+
+		renapResumen = renapResultado.success
+			? { estado: "aprobado" as const, mensaje: "Datos de RENAP sincronizados" }
+			: { estado: "error" as const, mensaje: renapResultado.message || null };
+
+		if (!renapResultado.success) {
+			const mensajeRenap =
+				renapResultado.message || "Error desconocido al consultar RENAP";
+
+			await registrarValidacion({
+				opportunityId,
+				dpi,
+				tipo: "renap",
+				estado: "error",
+				mensaje: mensajeRenap,
+				ejecutadoPor: userId ?? null,
+			});
+
+			// Infornet exige el DPI en renap_info: con sincronización previa se continúa
+			const [renapPrevio] = await db
+				.select({ dpi: renapInfo.dpi })
+				.from(renapInfo)
+				.where(eqDpi(renapInfo.dpi, dpi))
+				.limit(1);
+
+			if (!renapPrevio) {
+				return {
+					exento: false,
+					faltaDpi: false,
+					errorTecnico: true,
+					sinRegistroBuro: false,
+					mensaje: `RENAP: ${mensajeRenap}`,
+					renap: renapResumen,
+				};
+			}
+		} else {
+			await registrarValidacion({
+				opportunityId,
+				dpi,
+				tipo: "renap",
+				estado: "aprobado",
+				mensaje: "Datos de RENAP sincronizados",
+				ejecutadoPor: userId ?? null,
+			});
+		}
 	}
 
-	// 2. Buró: usa el caché de 30 días. El fallo se clasifica ANTES de reintentar,
-	// porque reconsultar no hace aparecer a quien Infornet no tiene
+	// Si RENAP se reintentó recién (no venía vigente) y falló, sigue siendo un
+	// fallo actual aunque `renapPrevio` haya dejado continuar hacia Buró: que
+	// Buró esté bien no resuelve a RENAP, cada fuente bloquea por su cuenta
+	const renapFalloAhora = renapResumen.estado === "error";
+
+	// 2. Buró: usa el caché de 30 días (se salta si ya está vigente, incluido un
+	// override manual). El fallo se clasifica ANTES de reintentar, porque
+	// reconsultar no hace aparecer a quien Infornet no tiene
+	if (buroVigente) {
+		return {
+			exento: false,
+			faltaDpi: false,
+			errorTecnico: renapFalloAhora,
+			sinRegistroBuro: buroVigente.estado === "sin_registro",
+			mensaje: renapFalloAhora ? `RENAP: ${renapResumen.mensaje}` : undefined,
+			renap: renapResumen,
+			buro: buroVigente,
+		};
+	}
+
 	const consultaBuro = await enFilaPorDpi(dpi, async () => {
 		let resultado = await infornetController.obtenerEstudioPorDPI(dpi);
 		let sinRegistro = false;
@@ -675,7 +779,13 @@ async function ejecutarValidacionesInterno({
 
 		const mensajeBuro = buroSinRegistro
 			? MENSAJE_SIN_REGISTRO_BURO
-			: mensajeCrudo;
+			: mensajeCrudo === ERROR_BURO_SIN_RENAP_LOCAL
+				? // Este error suele aparecer justo DESPUÉS de overridear RENAP (que
+					// no llega a sincronizar datos reales): volver a overridear RENAP
+					// no crea el renap_info que Infornet exige, así que el mensaje no
+					// debe sugerir eso — la única salida acá es overridear Buró también.
+					"La consulta automática a Infornet necesita datos de RENAP ya sincronizados para este DPI, y no existen. Mientras no existan, Buró debe validarse manualmente."
+				: mensajeCrudo;
 		const estadoBuro = buroSinRegistro ? "sin_registro" : "error";
 
 		await registrarValidacion({
@@ -694,10 +804,15 @@ async function ejecutarValidacionesInterno({
 		return {
 			exento: false,
 			faltaDpi: false,
-			// Sin registro no es fallo de la fuente: no bloquea
-			errorTecnico: !buroSinRegistro,
+			// Sin registro no es fallo de la fuente: no bloquea por su cuenta,
+			// pero un RENAP recién fallido sigue bloqueando igual
+			errorTecnico: !buroSinRegistro || renapFalloAhora,
 			sinRegistroBuro: buroSinRegistro,
-			mensaje: buroSinRegistro ? undefined : `Buró: ${mensajeBuro}`,
+			mensaje: !buroSinRegistro
+				? `Buró: ${mensajeBuro}`
+				: renapFalloAhora
+					? `RENAP: ${renapResumen.mensaje}`
+					: undefined,
 			renap: renapResumen,
 			buro: {
 				estado: estadoBuro,
@@ -784,8 +899,9 @@ async function ejecutarValidacionesInterno({
 	return {
 		exento: false,
 		faltaDpi: false,
-		errorTecnico: false,
+		errorTecnico: renapFalloAhora,
 		sinRegistroBuro: false,
+		mensaje: renapFalloAhora ? `RENAP: ${renapResumen.mensaje}` : undefined,
 		renap: renapResumen,
 		buro: {
 			estado: estadoBuro,
@@ -865,6 +981,201 @@ async function obtenerDetalleBuro(
 	};
 }
 
+export type ResultadoOverride = {
+	validacion: ValidacionOportunidad;
+	overrideId: string;
+};
+
+/**
+ * Override manual: el analista verificó a mano en el portal de la fuente que
+ * falló (Infornet o Centinela/RENAP) que el cliente está en orden. Nunca pisa
+ * la fila de error real — inserta una fila NUEVA (append-only, igual que el
+ * resto de la bitácora), que `veredictoVigente` recoge exactamente igual que
+ * cualquier otro resultado no-error, más una fila de log ligada a ella.
+ *
+ * Buró usa `estado:'sin_registro'` + `expiraEn` a 30 días (mismo TTL que un
+ * veredicto real). RENAP usa `estado:'aprobado'` + sin `expiraEn` — igual que
+ * cualquier fila real de RENAP hoy, que tampoco vence.
+ */
+async function marcarValidacionManual({
+	opportunityId,
+	tipo,
+	userId,
+	motivo,
+}: {
+	opportunityId: string;
+	tipo: "buro" | "renap";
+	userId: string;
+	motivo: string;
+}): Promise<ResultadoOverride> {
+	const oportunidad = await cargarOportunidadConLead(opportunityId);
+	if (!oportunidad) throw new OportunidadNoEncontradaError();
+	if (!oportunidad.leadDpi) throw new OverrideNoAplicaError(tipo);
+
+	// Solo para saber qué llave esperar — la crítica relee el DPI, porque
+	// puede cambiar mientras se espera abajo. Limitación aceptada: si el DPI
+	// cambia justo durante esa espera, la llave sigue anclada al DPI viejo
+	// mientras la crítica ya opera sobre el nuevo, así que una validación real
+	// que arranque para el DPI nuevo en esa ventana no esperaría a este
+	// override. El peor caso es el mismo que ya se documenta para múltiples
+	// réplicas: una fila de más en la bitácora, nunca un bypass — el gate
+	// siempre relee la fila más reciente por su cuenta.
+	const clave = `${opportunityId}:${normalizarDpi(oportunidad.leadDpi)}`;
+
+	// Encadena el propio trabajo al que esté en curso (real u otro override)
+	// SIN ningún `await` entre leer y publicar en el mapa: si se lee primero y
+	// se espera antes de escribir, dos overrides que ya estaban esperando la
+	// misma validación real despiertan juntos y ninguno ve al otro todavía
+	// registrado, así que los dos leerían la misma fila de error. Encadenando
+	// de forma síncrona (mismo patrón que `enFilaPorDpi`), el segundo SIEMPRE
+	// ve la promesa que acaba de publicar el primero.
+	const anterior =
+		overridesEnCurso.get(clave) ??
+		validacionesEnCurso.get(clave) ??
+		Promise.resolve();
+	const trabajo = anterior
+		.catch(() => undefined)
+		.then(() =>
+			marcarValidacionManualCritico({ opportunityId, tipo, userId, motivo }),
+		);
+	overridesEnCurso.set(clave, trabajo);
+
+	// `.finally()` devuelve una promesa NUEVA y distinta de `trabajo`: si no se
+	// atiende también su propio rechazo queda como una promesa no manejada
+	// aparte, aunque quien llama a `marcarValidacionManual` sí capture `trabajo`
+	trabajo
+		.finally(() => {
+			if (overridesEnCurso.get(clave) === trabajo)
+				overridesEnCurso.delete(clave);
+		})
+		.catch(() => {});
+
+	return trabajo;
+}
+
+async function marcarValidacionManualCritico({
+	opportunityId,
+	tipo,
+	userId,
+	motivo,
+}: {
+	opportunityId: string;
+	tipo: "buro" | "renap";
+	userId: string;
+	motivo: string;
+}): Promise<ResultadoOverride> {
+	// Se relee la oportunidad acá, después de haber esperado cualquier trabajo
+	// en curso: si el DPI cambió durante esa espera, el chequeo y el insert
+	// deben usar el DPI actual, no el que se leyó antes de esperar
+	const oportunidad = await cargarOportunidadConLead(opportunityId);
+	if (!oportunidad) throw new OportunidadNoEncontradaError();
+	if (!oportunidad.leadDpi) throw new OverrideNoAplicaError(tipo);
+	const dpi = normalizarDpi(oportunidad.leadDpi);
+
+	// Chequeo defensivo server-side: no confiar en que la UI solo muestre el
+	// botón cuando corresponde (otra pestaña, un reintento que sí resolvió, o
+	// el DPI del lead cambió después de que el analista abrió el diálogo)
+	const [ultima] = await db
+		.select()
+		.from(opportunityValidations)
+		.where(
+			and(
+				eq(opportunityValidations.opportunityId, opportunityId),
+				eq(opportunityValidations.tipo, tipo),
+				eq(opportunityValidations.dpi, dpi),
+			),
+		)
+		.orderBy(desc(opportunityValidations.ejecutadoAt))
+		.limit(1);
+
+	if (!ultima || ultima.estado !== "error")
+		throw new OverrideNoAplicaError(tipo);
+
+	const valoresPorTipo =
+		tipo === "buro"
+			? {
+					estado: "sin_registro" as const,
+					expiraEn: new Date(Date.now() + VIGENCIA_OVERRIDE_BURO_MS),
+				}
+			: { estado: "aprobado" as const, expiraEn: null };
+
+	return auditedTransaction(async (tx) => {
+		const [validacion] = await tx
+			.insert(opportunityValidations)
+			.values({
+				opportunityId,
+				dpi,
+				tipo,
+				mensaje: motivo,
+				fuenteDeDatos: "manual",
+				ejecutadoPor: userId,
+				...valoresPorTipo,
+			})
+			.returning();
+
+		const [override] = await tx
+			.insert(opportunityValidationOverrideLogs)
+			.values({
+				opportunityId,
+				validationId: validacion.id,
+				overriddenValidationId: ultima.id,
+				tipo,
+				reason: motivo,
+				markedBy: userId,
+			})
+			.returning();
+
+		auditRecord({
+			entity: "opportunity",
+			id: opportunityId,
+			action: `override_${tipo}_validation`,
+			data: { motivo, validationId: validacion.id, overrideId: override.id },
+		});
+
+		return { validacion, overrideId: override.id };
+	});
+}
+
+export async function marcarValidacionBuroManual(params: {
+	opportunityId: string;
+	userId: string;
+	motivo: string;
+}): Promise<ResultadoOverride> {
+	return marcarValidacionManual({ ...params, tipo: "buro" });
+}
+
+export async function marcarValidacionRenapManual(params: {
+	opportunityId: string;
+	userId: string;
+	motivo: string;
+}): Promise<ResultadoOverride> {
+	return marcarValidacionManual({ ...params, tipo: "renap" });
+}
+
+/** Detalle de un override manual, con el nombre de quien lo marcó */
+async function obtenerOverride(
+	validationId: string,
+): Promise<OverrideInfo | null> {
+	const [fila] = await db
+		.select({
+			motivo: opportunityValidationOverrideLogs.reason,
+			marcadoAt: opportunityValidationOverrideLogs.createdAt,
+			marcadoPorNombre: user.name,
+		})
+		.from(opportunityValidationOverrideLogs)
+		.leftJoin(user, eq(opportunityValidationOverrideLogs.markedBy, user.id))
+		.where(eq(opportunityValidationOverrideLogs.validationId, validationId))
+		.limit(1);
+
+	return fila
+		? {
+				motivo: fila.motivo,
+				marcadoPorNombre: fila.marcadoPorNombre,
+				marcadoAt: fila.marcadoAt,
+			}
+		: null;
+}
+
 /** Estado de las validaciones: exención, DPI y últimos resultados de la bitácora */
 export async function getValidaciones({
 	opportunityId,
@@ -898,6 +1209,8 @@ export async function getValidaciones({
 			dpiValidado: null,
 			detalleRenap: null,
 			detalleBuro: null,
+			overrideBuro: null,
+			overrideRenap: null,
 			validaciones: [],
 		};
 	}
@@ -914,12 +1227,12 @@ export async function getValidaciones({
 		? new Date(buro.expiraEn) > new Date()
 		: false;
 
-	// RENAP en error solo bloquea si abortó antes del buró
-	// Si el RENAP más reciente falló después del último buró, ese veredicto ya no representa el estado actual
-	const renapEsPosterior =
-		renap && (!buro || renap.ejecutadoAt > buro.ejecutadoAt);
+	// Cada fuente bloquea por su cuenta: que la otra esté bien no la resuelve.
+	// Antes se comparaba cronológicamente (¿cuál corrió más reciente?), lo que
+	// dejaba pasar un RENAP en error si Buró se había revalidado después —
+	// mismo criterio que ahora usa el gate en `cargarVigenciasPorFuente`
 	const aprobacionBloqueada =
-		buro?.estado === "error" || (renapEsPosterior && renap?.estado === "error");
+		buro?.estado === "error" || renap?.estado === "error";
 
 	const dpiActual = oportunidad.leadDpi
 		? normalizarDpi(oportunidad.leadDpi)
@@ -938,6 +1251,11 @@ export async function getValidaciones({
 				obtenerDetalleBuro(dpiValidado, buro?.expiraEn ?? null),
 			])
 		: [null, null];
+
+	const [overrideBuro, overrideRenap] = await Promise.all([
+		buro?.fuenteDeDatos === "manual" ? obtenerOverride(buro.id) : null,
+		renap?.fuenteDeDatos === "manual" ? obtenerOverride(renap.id) : null,
+	]);
 
 	return {
 		exento: false,
@@ -960,6 +1278,8 @@ export async function getValidaciones({
 		dpiValidado,
 		detalleRenap,
 		detalleBuro,
+		overrideBuro,
+		overrideRenap,
 		validaciones,
 	};
 }

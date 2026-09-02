@@ -86,3 +86,61 @@ export const opportunityValidations = pgTable(
 		),
 	],
 );
+
+/**
+ * Log de overrides manuales sobre `opportunity_validations`.
+ *
+ * Cuando una fuente externa (Infornet o Centinela/RENAP) está caída y el
+ * analista verifica al cliente a mano en el portal correspondiente, se
+ * inserta una fila nueva en `opportunity_validations` (nunca se pisa la fila
+ * de error real) y una fila aquí que registra quién lo marcó, con qué motivo
+ * y sobre qué fallo puntual.
+ */
+export const opportunityValidationOverrideLogs = pgTable(
+	"opportunity_validation_overrides_logs",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+
+		/** Oportunidad sobre la que se hizo el override */
+		opportunityId: uuid("opportunity_id")
+			.notNull()
+			.references(() => opportunities.id, { onDelete: "cascade" }),
+
+		/** Fila creada por el override en opportunity_validations */
+		validationId: uuid("validation_id")
+			.notNull()
+			.unique()
+			.references(() => opportunityValidations.id, { onDelete: "cascade" }),
+
+		/**
+		 * Fila con estado:'error' que el override bypassea. NOT NULL a propósito:
+		 * el código nunca inserta sin ella (marcarValidacionManual exige encontrar
+		 * un error antes de overridear) y las filas de opportunity_validations
+		 * nunca se borran, así que este invariante siempre se cumple en la práctica.
+		 */
+		overriddenValidationId: uuid("overridden_validation_id")
+			.notNull()
+			.references(() => opportunityValidations.id),
+
+		/** Tipo de validación overrideada (renap | buro); redundante con `opportunity_validations.tipo` a propósito, para poder filtrar el log sin join */
+		tipo: validationTipoEnum("tipo").notNull(),
+
+		/** Motivo capturado del analista (obligatorio hoy desde la UI/API) */
+		reason: text("reason"),
+
+		/** Usuario que marcó el override */
+		markedBy: text("marked_by")
+			.notNull()
+			.references(() => user.id),
+
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+	},
+	(table) => [
+		index("opportunity_validation_overrides_logs_opportunity_id_idx").on(
+			table.opportunityId,
+		),
+		index("opportunity_validation_overrides_logs_marked_by_idx").on(
+			table.markedBy,
+		),
+	],
+);

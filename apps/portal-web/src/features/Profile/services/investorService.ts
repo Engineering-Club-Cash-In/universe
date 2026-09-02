@@ -44,6 +44,7 @@ export interface InvestorDocument {
   created_at: string;
   created_by: string | null;
   url: string;
+  downloadUrl: string;
 }
 
 export interface Banco {

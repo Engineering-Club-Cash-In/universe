@@ -79,6 +79,7 @@ export const InvestorDocuments = () => {
         isOpen={!!selectedDocument}
         documentName={selectedDocument?.nombre || ""}
         documentUrl={selectedDocument?.url || ""}
+        downloadUrl={selectedDocument?.downloadUrl || ""}
         onClose={() => setSelectedDocument(null)}
       />
     </>

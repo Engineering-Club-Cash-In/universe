@@ -5,11 +5,14 @@ import {
 	COBROS_MOTIVO_SIN_TELEFONO_ASESOR,
 	COBROS_NO_REPLY_WARNING,
 	calcularExpectativaMora,
+	cuerpoUsaFechaLimiteImpuesto,
 	fechaLimiteImpuestoCirculacion,
+	fechaLimiteImpuestoVencida,
 	interpolar,
 	PLANTILLAS_MENSAJES,
 	prepararExpectativaMoraParaEnvio,
 	prepararTelefonoAsesorParaEnvio,
+	seguroPorAseguradora,
 } from "./cobros-plantillas";
 
 const NO_REPLY_WARNING =
@@ -102,8 +105,58 @@ describe("plantillas masivas de cobros", () => {
 		);
 
 		expect(bloques(bienvenida?.cuerpo ?? "")).toHaveLength(5);
-		expect(bienvenida?.cuerpo).toContain("Seguros Universales");
+		expect(bienvenida?.cuerpo).toContain("{aseguradora}");
+		expect(bienvenida?.cuerpo).toContain("{cabinaSeguro}");
 		expect(bienvenida?.cuerpo).toMatch(/confirmar la recepción/i);
+	});
+
+	test("el bloque del seguro de la bienvenida se resuelve por aseguradora", () => {
+		// opportunities.insurance_provider: "universales" | "gyt"; desconocidos y
+		// vacíos caen al default Universales (el default de la columna).
+		expect(seguroPorAseguradora("gyt")).toEqual({
+			aseguradora: "Seguro GYT",
+			cabinaSeguro: "1778",
+		});
+		expect(seguroPorAseguradora(" GYT ")).toEqual({
+			aseguradora: "Seguro GYT",
+			cabinaSeguro: "1778",
+		});
+		for (const valor of ["universales", null, undefined, "", "otra"]) {
+			expect(seguroPorAseguradora(valor)).toEqual({
+				aseguradora: "Seguros Universales",
+				cabinaSeguro: "2384-7400",
+			});
+		}
+
+		const bienvenida = PLANTILLAS_MENSAJES.find(
+			(plantilla) => plantilla.id === "bienvenida",
+		);
+		const base = {
+			clienteNombre: "MARIA LOPEZ",
+			fechaPago: "5",
+			cuotaMensual: "2,500.00",
+			placa: "",
+			marcaLineaModelo: "",
+			montoAdeudado: "",
+			cuotasAtraso: 0,
+			telefonoAsesor: "41286630",
+			nombreAsesor: "Carlos Pérez",
+			expectativaMora: "",
+		};
+
+		// Sin variables del seguro cae al default Universales.
+		const mensajeDefault = interpolar(bienvenida?.cuerpo ?? "", base);
+		expect(mensajeDefault).toContain("a través de Seguros Universales.");
+		expect(mensajeDefault).toContain("cabina de emergencia al 2384-7400,");
+
+		// Con la aseguradora de la opp sale la variante G&T, y sigue en 5 bloques.
+		const mensajeGyt = interpolar(bienvenida?.cuerpo ?? "", {
+			...base,
+			...seguroPorAseguradora("gyt"),
+		});
+		expect(mensajeGyt).toContain("a través de Seguro GYT.");
+		expect(mensajeGyt).toContain("cabina de emergencia al 1778,");
+		expect(bloques(mensajeGyt)).toHaveLength(5);
 	});
 
 	test("descarta plantillas no-reply sin telefono de asesor", () => {
@@ -293,5 +346,71 @@ CashIn`);
 		expect(
 			prepararExpectativaMoraParaEnvio(mora30?.cuerpo ?? "", null),
 		).toEqual({ enviar: true, expectativaMora: "" });
+	});
+
+	test("los estados que el job excluye de mora tampoco generan expectativa", () => {
+		// Misma lista que STATUS_EXCLUIDOS_MORA del job procesarMoras en
+		// cartera-back: en esos estados jamás se asigna recargo.
+		const excluidos = [
+			"EN_CONVENIO",
+			"INCOBRABLE",
+			"CANCELADO",
+			"PENDIENTE_CANCELACION",
+			"CAIDO",
+		];
+		const alDia = PLANTILLAS_MENSAJES.find(
+			(plantilla) => plantilla.id === "al_dia",
+		);
+
+		for (const status of excluidos) {
+			expect(calcularExpectativaMora("45000.00", status)).toBe("");
+			expect(
+				prepararExpectativaMoraParaEnvio(
+					alDia?.cuerpo ?? "",
+					"45000.00",
+					status,
+				),
+			).toEqual({
+				enviar: false,
+				motivo: COBROS_MOTIVO_SIN_EXPECTATIVA_MORA,
+			});
+		}
+
+		// Estados que sí generan mora siguen calculando normal.
+		for (const status of ["ACTIVO", "MOROSO", null, undefined]) {
+			expect(calcularExpectativaMora("45000.00", status)).toBe("504.00");
+		}
+	});
+
+	test("la plantilla del impuesto no se envía después de la fecha límite", () => {
+		const impuesto = PLANTILLAS_MENSAJES.find(
+			(plantilla) => plantilla.id === "impuesto_circulacion_2026",
+		);
+
+		expect(cuerpoUsaFechaLimiteImpuesto(impuesto?.cuerpo ?? "")).toBe(true);
+		expect(
+			cuerpoUsaFechaLimiteImpuesto(
+				PLANTILLAS_MENSAJES.find((p) => p.id === "al_dia")?.cuerpo ?? "",
+			),
+		).toBe(false);
+
+		// Antes del corte (mayo) y el mismo 31/07 se puede enviar; después no.
+		// 2026-07-31T18:00Z = 31/07 12:00 en GT; 2026-08-01T02:00Z aún es 31/07
+		// 20:00 en GT (UTC-6); 2026-08-01T18:00Z ya es 1 de agosto en GT.
+		expect(fechaLimiteImpuestoVencida(new Date("2026-05-15T12:00:00Z"))).toBe(
+			false,
+		);
+		expect(fechaLimiteImpuestoVencida(new Date("2026-07-31T18:00:00Z"))).toBe(
+			false,
+		);
+		expect(fechaLimiteImpuestoVencida(new Date("2026-08-01T02:00:00Z"))).toBe(
+			false,
+		);
+		expect(fechaLimiteImpuestoVencida(new Date("2026-08-01T18:00:00Z"))).toBe(
+			true,
+		);
+		expect(fechaLimiteImpuestoVencida(new Date("2026-12-01T12:00:00Z"))).toBe(
+			true,
+		);
 	});
 });

@@ -1120,6 +1120,8 @@ function RouteComponent() {
 											nombreAsesor={caso.asesor?.nombre || ""}
 											telefonoAsesor={caso.asesor?.telefono || ""}
 											expectativaMora={caso.expectativaMora || ""}
+											aseguradora={caso.aseguradora || ""}
+											cabinaSeguro={caso.cabinaSeguro || ""}
 										>
 											<Button className="flex items-center gap-2">
 												<Phone className="h-4 w-4" />
@@ -1157,6 +1159,8 @@ function RouteComponent() {
 											nombreAsesor={caso.asesor?.nombre || ""}
 											telefonoAsesor={caso.asesor?.telefono || ""}
 											expectativaMora={caso.expectativaMora || ""}
+											aseguradora={caso.aseguradora || ""}
+											cabinaSeguro={caso.cabinaSeguro || ""}
 										>
 											<Button
 												variant="outline"
@@ -1197,6 +1201,8 @@ function RouteComponent() {
 											nombreAsesor={caso.asesor?.nombre || ""}
 											telefonoAsesor={caso.asesor?.telefono || ""}
 											expectativaMora={caso.expectativaMora || ""}
+											aseguradora={caso.aseguradora || ""}
+											cabinaSeguro={caso.cabinaSeguro || ""}
 										>
 											<Button
 												variant="outline"

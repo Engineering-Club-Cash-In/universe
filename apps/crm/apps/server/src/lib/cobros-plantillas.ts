@@ -34,6 +34,25 @@ export interface VariablesPlantilla {
 	anioImpuesto?: string;
 	/** Fecha límite del impuesto (dd/mm/año). Default: 31/07 del año actual. */
 	fechaLimiteImpuesto?: string;
+	/** Nombre de la aseguradora para la bienvenida. Default: Seguros Universales. */
+	aseguradora?: string;
+	/** Cabina de emergencia de la aseguradora. Default: la de Universales. */
+	cabinaSeguro?: string;
+}
+
+/**
+ * Bloque del seguro de la bienvenida según la aseguradora de la oportunidad
+ * (`opportunities.insurance_provider`: "universales" | "gyt", ver
+ * lib/insurance-selection.ts). Default Universales: la columna nace con ese
+ * default y cualquier valor desconocido cae ahí.
+ */
+export function seguroPorAseguradora(
+	insuranceProvider: string | null | undefined,
+): { aseguradora: string; cabinaSeguro: string } {
+	if (insuranceProvider?.trim().toLowerCase() === "gyt") {
+		return { aseguradora: "Seguro GYT", cabinaSeguro: "1778" };
+	}
+	return { aseguradora: "Seguros Universales", cabinaSeguro: "2384-7400" };
 }
 
 /**
@@ -57,6 +76,32 @@ export function fechaLimiteImpuestoCirculacion(ahora = new Date()): string {
 	return `${DIA_MES_LIMITE_IMPUESTO}/${anioImpuestoCirculacion(ahora)}`;
 }
 
+/** true si hoy (en Guatemala) ya pasó la fecha límite del impuesto del año. */
+export function fechaLimiteImpuestoVencida(ahora = new Date()): boolean {
+	// "en-CA" con timeZone da YYYY-MM-DD; comparamos MM-DD contra el corte.
+	const ymd = new Intl.DateTimeFormat("en-CA", {
+		timeZone: "America/Guatemala",
+		year: "numeric",
+		month: "2-digit",
+		day: "2-digit",
+	}).format(ahora);
+	const [, mes, dia] = ymd.split("-");
+	const [diaLimite, mesLimite] = DIA_MES_LIMITE_IMPUESTO.split("/");
+	return `${mes}${dia}` > `${mesLimite}${diaLimite}`;
+}
+
+/**
+ * Un cuerpo que usa las variables del impuesto no debería enviarse después de
+ * la fecha límite del año: el mensaje pediría el comprobante "antes de la hora
+ * límite" de una fecha ya vencida. Pasado el corte, los asesores editan el
+ * mensaje (quitando estas variables) o contactan personalmente.
+ */
+export function cuerpoUsaFechaLimiteImpuesto(cuerpo: string): boolean {
+	return (
+		cuerpo.includes("{fechaLimiteImpuesto}") || cuerpo.includes("{anioImpuesto}")
+	);
+}
+
 /**
  * Porcentaje de mora por cuota vencida. MISMA fórmula que el job nocturno
  * `procesarMoras` de cartera-back (apps/cartera-back/src/controllers/latefee.ts):
@@ -65,14 +110,31 @@ export function fechaLimiteImpuestoCirculacion(ahora = new Date()): string {
 const PORCENTAJE_MORA_POR_CUOTA = "0.0112";
 
 /**
+ * Estados que el job `procesarMoras` excluye de mora (STATUS_EXCLUIDOS_MORA
+ * en apps/cartera-back/src/controllers/latefee.ts) — a un crédito en estos
+ * estados el job jamás le asigna recargo, así que tampoco hay expectativa
+ * que anunciarle al cliente.
+ */
+const STATUS_EXCLUIDOS_MORA = new Set([
+	"EN_CONVENIO",
+	"INCOBRABLE",
+	"CANCELADO",
+	"PENDIENTE_CANCELACION",
+	"CAIDO",
+]);
+
+/**
  * "Expectativa de mora" del recordatorio del día de pago: el recargo de UNA
  * cuota adicional que el job de cartera asignaría si el cliente no paga hoy
  * (mora aún no asignada). Devuelve el monto formateado es-GT ("1,382.72") o
- * "" si no hay capital (sin capital no aplica mora, igual que el job).
+ * "" si no hay capital o el estado del crédito está excluido de mora (igual
+ * que el job).
  */
 export function calcularExpectativaMora(
 	capital: string | number | null | undefined,
+	statusCredit?: string | null,
 ): string {
+	if (statusCredit && STATUS_EXCLUIDOS_MORA.has(statusCredit)) return "";
 	if (capital === null || capital === undefined || capital === "") return "";
 	let monto: Big;
 	try {
@@ -100,21 +162,23 @@ export const COBROS_NO_REPLY_WARNING =
 	"⚠️ Este número es únicamente para el envío de notificaciones automáticas. Por favor, no respondas a este número.";
 export const COBROS_MOTIVO_SIN_TELEFONO_ASESOR = "sin teléfono de asesor";
 export const COBROS_MOTIVO_SIN_EXPECTATIVA_MORA =
-	"sin capital para calcular la mora";
+	"el crédito no genera mora (estado excluido o sin capital)";
 
 /**
  * Un cuerpo que usa {expectativaMora} no se puede enviar si el crédito no
- * tiene capital válido: sin capital el job de cartera no genera mora (p. ej.
- * insolutos) y el mensaje saldría roto ("recargo por mora de Q."). Mismo
- * patrón de gate que prepararTelefonoAsesorParaEnvio.
+ * genera mora: sin capital válido (p. ej. insolutos) o en un estado que el
+ * job excluye (EN_CONVENIO, INCOBRABLE, etc.), el mensaje anunciaría un
+ * recargo que jamás se va a asignar. Mismo patrón de gate que
+ * prepararTelefonoAsesorParaEnvio.
  */
 export function prepararExpectativaMoraParaEnvio(
 	cuerpo: string,
 	capital: string | number | null | undefined,
+	statusCredit?: string | null,
 ):
 	| { enviar: true; expectativaMora: string }
 	| { enviar: false; motivo: string } {
-	const expectativaMora = calcularExpectativaMora(capital);
+	const expectativaMora = calcularExpectativaMora(capital, statusCredit);
 
 	if (cuerpo.includes("{expectativaMora}") && !expectativaMora) {
 		return { enviar: false, motivo: COBROS_MOTIVO_SIN_EXPECTATIVA_MORA };
@@ -177,6 +241,14 @@ export function interpolar(
 		.replace(
 			/{fechaLimiteImpuesto}/g,
 			v(variables.fechaLimiteImpuesto ?? fechaLimiteImpuestoCirculacion()),
+		)
+		.replace(
+			/{aseguradora}/g,
+			v(variables.aseguradora ?? seguroPorAseguradora(null).aseguradora),
+		)
+		.replace(
+			/{cabinaSeguro}/g,
+			v(variables.cabinaSeguro ?? seguroPorAseguradora(null).cabinaSeguro),
 		);
 }
 
@@ -202,8 +274,8 @@ A nombre de: CUBE INVESTMENTS, S.A.
 * GyT: 01300039945
 * Banrural: 3394002346
 
-🚗 Tu vehículo cuenta con seguro completo a través de Seguros Universales.
-En caso de accidente o cualquier inconveniente con tu vehículo, llama a la cabina de emergencia al 2384-7400, identificándote únicamente con el número de placa.
+🚗 Tu vehículo cuenta con seguro completo a través de {aseguradora}.
+En caso de accidente o cualquier inconveniente con tu vehículo, llama a la cabina de emergencia al {cabinaSeguro}, identificándote únicamente con el número de placa.
 Para seguimiento de trámites con el seguro:
 ✅ Luis Escobar: 4388-7300
 ✅ Maylin Barrios: 4770-7074

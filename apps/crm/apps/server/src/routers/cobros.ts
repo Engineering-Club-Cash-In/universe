@@ -51,10 +51,14 @@ import {
 } from "../lib/cobros-credit-detail";
 import {
 	calcularExpectativaMora,
+	cuerpoUsaFechaLimiteImpuesto,
+	fechaLimiteImpuestoCirculacion,
+	fechaLimiteImpuestoVencida,
 	interpolar as interpolarPlantilla,
 	PLANTILLAS_MENSAJES,
 	prepararExpectativaMoraParaEnvio,
 	prepararTelefonoAsesorParaEnvio,
+	seguroPorAseguradora,
 } from "../lib/cobros-plantillas";
 import { filterCobrosSearchResults } from "../lib/cobros-search";
 import { toDateStrGT } from "../lib/guatemala-month-window";
@@ -2052,6 +2056,7 @@ export const cobrosRouter = {
 						oportunidadCuotaMensual: opportunities.cuotaMensual,
 						oportunidadDiaPago: opportunities.diaPagoMensual,
 						oportunidadCreditType: opportunities.creditType,
+						oportunidadInsuranceProvider: opportunities.insuranceProvider,
 						// Datos del vehículo
 						vehiculoMarca: vehicles.make,
 						vehiculoModelo: vehicles.model,
@@ -2088,10 +2093,12 @@ export const cobrosRouter = {
 				} | null = null;
 
 				let vehicleId: string | null = null;
+				let insuranceProvider: string | null = null;
 
 				if (oportunidadResult.length > 0) {
 					const opp = oportunidadResult[0];
 					vehicleId = opp.vehicleId;
+					insuranceProvider = opp.oportunidadInsuranceProvider;
 					vehiculo = {
 						make: opp.vehiculoMarca,
 						model: opp.vehiculoModelo,
@@ -2288,10 +2295,15 @@ export const cobrosRouter = {
 					montoEnMora: montoEnMora.toFixed(2),
 					// Recargo de UNA cuota vencida más (capital × 1.12%, misma fórmula
 					// que procesarMoras en cartera-back) para el {expectativaMora} de
-					// las plantillas de mensaje.
+					// las plantillas. Vacío si el estado está excluido de mora
+					// (EN_CONVENIO, INCOBRABLE, etc.) o no hay capital, igual que el job.
 					expectativaMora: calcularExpectativaMora(
 						creditoCompleto.credito.capital,
+						creditoCompleto.credito.statusCredit,
 					),
+					// Bloque del seguro de la bienvenida según la aseguradora de la
+					// oportunidad (Universales o G&T).
+					...seguroPorAseguradora(insuranceProvider),
 					diasMoraMaximo: diasMora,
 					cuotasVencidas: cuotasAtrasadas,
 					cuotaConvenio: tieneConvenioActivo
@@ -3307,6 +3319,23 @@ export const cobrosRouter = {
 				});
 			}
 
+			const cuerpoBase = input.cuerpoEditado?.trim()
+				? input.cuerpoEditado
+				: plantilla.cuerpo;
+
+			// La plantilla del impuesto no se envía después del 31/07: pediría el
+			// comprobante antes de una fecha ya vencida. Pasado el corte los
+			// asesores editan el mensaje (sin las variables del impuesto) o
+			// contactan personalmente.
+			if (
+				cuerpoUsaFechaLimiteImpuesto(cuerpoBase) &&
+				fechaLimiteImpuestoVencida()
+			) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `La fecha límite del impuesto de circulación (${fechaLimiteImpuestoCirculacion()}) ya venció; edite el mensaje o contacte a los clientes directamente.`,
+				});
+			}
+
 			// Scope server-side: solo supervisores/admins pueden ver toda la
 			// cartera; el resto queda restringido a sus propios créditos.
 			const emailCobrador = PERMISSIONS.canAssignCobros(context.userRole)
@@ -3534,6 +3563,7 @@ export const cobrosRouter = {
 				marca: string | null;
 				modelo: string | null;
 				year: number | null;
+				insuranceProvider: string | null;
 			};
 			const locales = new Map<string, LocalInfo>();
 			const casoIdPorSifco = new Map<string, string>();
@@ -3547,6 +3577,7 @@ export const cobrosRouter = {
 						marca: vehicles.make,
 						modelo: vehicles.model,
 						year: vehicles.year,
+						insuranceProvider: opportunities.insuranceProvider,
 					})
 					.from(opportunities)
 					.leftJoin(leads, eq(opportunities.leadId, leads.id))
@@ -3561,6 +3592,7 @@ export const cobrosRouter = {
 						marca: row.marca,
 						modelo: row.modelo,
 						year: row.year,
+						insuranceProvider: row.insuranceProvider,
 					});
 				}
 
@@ -3585,6 +3617,7 @@ export const cobrosRouter = {
 						marca: prev?.marca ?? null,
 						modelo: prev?.modelo ?? null,
 						year: prev?.year ?? null,
+						insuranceProvider: prev?.insuranceProvider ?? null,
 					});
 					casoIdPorSifco.set(row.numeroSifco, row.id);
 				}
@@ -3654,9 +3687,6 @@ export const cobrosRouter = {
 				const montoMora = Number(credito.mora?.monto_mora ?? 0);
 				const totalACobrar = montoMora > 0 ? montoMora + Number(cuota) : 0;
 
-				const cuerpoBase = input.cuerpoEditado?.trim()
-					? input.cuerpoEditado
-					: plantilla.cuerpo;
 				const telefonoAsesor = prepararTelefonoAsesorParaEnvio(
 					cuerpoBase,
 					asesor.telefono,
@@ -3671,12 +3701,14 @@ export const cobrosRouter = {
 					continue;
 				}
 
-				// Si el cuerpo usa {expectativaMora} y el crédito no tiene capital
-				// válido (insolutos y similares no generan mora), se descarta en vez
-				// de enviar "recargo por mora de Q." roto.
+				// Si el cuerpo usa {expectativaMora} y el crédito no genera mora
+				// (sin capital válido, o en estado que el job excluye: EN_CONVENIO,
+				// INCOBRABLE, etc.), se descarta en vez de anunciar un recargo que
+				// jamás se va a asignar.
 				const expectativaMora = prepararExpectativaMoraParaEnvio(
 					cuerpoBase,
 					credito.creditos.capital,
+					credito.creditos.statusCredit,
 				);
 
 				if (!expectativaMora.enviar) {
@@ -3717,6 +3749,9 @@ export const cobrosRouter = {
 					telefonoAsesor: telefonoAsesor.telefonoAsesor,
 					nombreAsesor: asesor.nombre ?? "",
 					expectativaMora: expectativaMora.expectativaMora,
+					// Bloque del seguro de la bienvenida según la aseguradora de la
+					// oportunidad de cada crédito (Universales o G&T).
+					...seguroPorAseguradora(info?.insuranceProvider),
 				});
 
 				candidatos.push({

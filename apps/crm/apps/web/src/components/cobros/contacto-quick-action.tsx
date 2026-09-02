@@ -135,6 +135,8 @@ export function ContactoQuickAction({
 				nombreAsesor={d.asesor?.nombre || ""}
 				telefonoAsesor={d.asesor?.telefono || ""}
 				expectativaMora={d.expectativaMora || ""}
+				aseguradora={d.aseguradora || ""}
+				cabinaSeguro={d.cabinaSeguro || ""}
 			/>
 		</span>
 	);

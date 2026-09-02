@@ -38,6 +38,8 @@ const VARIABLES_DISPONIBLES = [
 	"expectativaMora",
 	"anioImpuesto",
 	"fechaLimiteImpuesto",
+	"aseguradora",
+	"cabinaSeguro",
 ] as const;
 
 interface DescartadoItem {
@@ -277,10 +279,21 @@ export function MassWhatsappModal({
 									<p className="text-muted-foreground text-xs">
 										Separá con <strong>una línea en blanco</strong> para crear
 										un nuevo párrafo (= un parámetro del template). Mínimo 1,
-										máximo 4. Las variables entre <code>{"{llaves}"}</code> se
+										máximo 5. Las variables entre <code>{"{llaves}"}</code> se
 										reemplazan por los datos reales de cada crédito; si una
 										variable no existe o queda mal escrita, se manda literal.
 									</p>
+									{(cuerpoEditado.includes("{aseguradora}") ||
+										cuerpoEditado.includes("{cabinaSeguro}")) && (
+										<p className="rounded-md border border-primary/30 bg-primary/5 p-2 text-muted-foreground text-xs">
+											🛈 El bloque del seguro se ajusta solo:{" "}
+											<code>{"{aseguradora}"}</code> y{" "}
+											<code>{"{cabinaSeguro}"}</code> se reemplazan según la
+											aseguradora registrada en la oportunidad de cada crédito
+											(Seguros Universales, cabina 2384-7400, o Seguro GYT,
+											cabina 1778).
+										</p>
+									)}
 									<div className="flex flex-wrap gap-1">
 										{VARIABLES_DISPONIBLES.map((v) => (
 											<button

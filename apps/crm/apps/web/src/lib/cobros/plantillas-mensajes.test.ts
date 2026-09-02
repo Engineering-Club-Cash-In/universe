@@ -7,12 +7,14 @@ import {
 	crearUrlWhatsappManual,
 	cuerpoParaValidarNoReply,
 	fechaLimiteImpuestoCirculacion,
+	fechaLimiteImpuestoVencida,
 	interpolar,
 	mensajeEmailEditable,
 	mensajePlantillaEditable,
 	mensajeSmsEditable,
 	PLANTILLAS_MENSAJES,
 	plantillaRequiereExpectativaMora,
+	plantillaUsaFechaLimiteImpuesto,
 	prepararTelefonoAsesorParaEnvio,
 } from "./plantillas-mensajes";
 
@@ -126,7 +128,8 @@ describe("plantillas web de cobros", () => {
 		expect(
 			bloques(cuerpoWhatsappDe(bienvenida ?? { cuerpo: "" })),
 		).toHaveLength(5);
-		expect(bienvenida?.cuerpoWhastapp).toContain("Seguros Universales");
+		expect(bienvenida?.cuerpoWhastapp).toContain("{aseguradora}");
+		expect(bienvenida?.cuerpoWhastapp).toContain("{cabinaSeguro}");
 		expect(bienvenida?.cuerpoWhastapp).toMatch(/confirmar la recepción/i);
 	});
 
@@ -320,5 +323,59 @@ describe("plantillas web de cobros", () => {
 		expect(plantillaRequiereExpectativaMora(porId("al_dia")!)).toBe(true);
 		expect(plantillaRequiereExpectativaMora(porId("bienvenida")!)).toBe(false);
 		expect(plantillaRequiereExpectativaMora(porId("mora_30")!)).toBe(false);
+	});
+
+	test("identifica la plantilla del impuesto y su fecha límite vencida", () => {
+		const porId = (id: string) =>
+			PLANTILLAS_MENSAJES.find((plantilla) => plantilla.id === id);
+
+		expect(
+			plantillaUsaFechaLimiteImpuesto(porId("impuesto_circulacion_2026")!),
+		).toBe(true);
+		expect(plantillaUsaFechaLimiteImpuesto(porId("bienvenida")!)).toBe(false);
+		expect(plantillaUsaFechaLimiteImpuesto(porId("al_dia")!)).toBe(false);
+
+		// El mismo 31/07 en GT todavía se envía; del 1 de agosto en adelante no.
+		expect(fechaLimiteImpuestoVencida(new Date("2026-05-15T12:00:00Z"))).toBe(
+			false,
+		);
+		expect(fechaLimiteImpuestoVencida(new Date("2026-08-01T02:00:00Z"))).toBe(
+			false,
+		);
+		expect(fechaLimiteImpuestoVencida(new Date("2026-08-01T18:00:00Z"))).toBe(
+			true,
+		);
+	});
+
+	test("el bloque del seguro de la bienvenida se interpola por aseguradora", () => {
+		const bienvenida = PLANTILLAS_MENSAJES.find(
+			(plantilla) => plantilla.id === "bienvenida",
+		);
+		const base = {
+			clienteNombre: "MARIA LOPEZ",
+			fechaPago: "5",
+			cuotaMensual: "2,500.00",
+			placa: "",
+			marcaLineaModelo: "",
+			montoAdeudado: "",
+			cuotasAtraso: 0,
+			telefonoAsesor: "41286630",
+			nombreAsesor: "Carlos Pérez",
+			expectativaMora: "",
+		};
+
+		// Sin datos del server cae al default Universales.
+		const mensajeDefault = interpolar(bienvenida?.cuerpoWhastapp ?? "", base);
+		expect(mensajeDefault).toContain("a través de Seguros Universales.");
+		expect(mensajeDefault).toContain("cabina de emergencia al 2384-7400,");
+
+		// Con los datos que manda getDetallesCreditoCarteraBack sale G&T.
+		const mensajeGyt = interpolar(bienvenida?.cuerpoWhastapp ?? "", {
+			...base,
+			aseguradora: "Seguro GYT",
+			cabinaSeguro: "1778",
+		});
+		expect(mensajeGyt).toContain("a través de Seguro GYT.");
+		expect(mensajeGyt).toContain("cabina de emergencia al 1778,");
 	});
 });

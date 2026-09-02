@@ -29,7 +29,19 @@ export interface VariablesPlantilla {
 	anioImpuesto?: string;
 	/** Fecha límite del impuesto (dd/mm/año). Default: 31/07 del año actual. */
 	fechaLimiteImpuesto?: string;
+	/**
+	 * Aseguradora y cabina de emergencia para el bloque del seguro de la
+	 * bienvenida. Vienen del server (getDetallesCreditoCarteraBack) según
+	 * `opportunities.insurance_provider`; default = Seguros Universales.
+	 */
+	aseguradora?: string;
+	cabinaSeguro?: string;
 }
+
+const SEGURO_DEFAULT = {
+	aseguradora: "Seguros Universales",
+	cabinaSeguro: "2384-7400",
+};
 
 /**
  * Fecha límite del impuesto de circulación (SAT): 31 de julio, 5:00 p.m., de
@@ -50,6 +62,20 @@ export function anioImpuestoCirculacion(ahora = new Date()): string {
 
 export function fechaLimiteImpuestoCirculacion(ahora = new Date()): string {
 	return `${DIA_MES_LIMITE_IMPUESTO}/${anioImpuestoCirculacion(ahora)}`;
+}
+
+/** true si hoy (en Guatemala) ya pasó la fecha límite del impuesto del año. */
+export function fechaLimiteImpuestoVencida(ahora = new Date()): boolean {
+	// "en-CA" con timeZone da YYYY-MM-DD; comparamos MM-DD contra el corte.
+	const ymd = new Intl.DateTimeFormat("en-CA", {
+		timeZone: "America/Guatemala",
+		year: "numeric",
+		month: "2-digit",
+		day: "2-digit",
+	}).format(ahora);
+	const [, mes, dia] = ymd.split("-");
+	const [diaLimite, mesLimite] = DIA_MES_LIMITE_IMPUESTO.split("/");
+	return `${mes}${dia}` > `${mesLimite}${diaLimite}`;
 }
 
 export interface PlantillaMensaje {
@@ -77,6 +103,21 @@ export function plantillaRequiereExpectativaMora(
 		plantilla.cuerpo.includes("{expectativaMora}") ||
 		(plantilla.cuerpoWhastapp?.includes("{expectativaMora}") ?? false)
 	);
+}
+
+/**
+ * Una plantilla que usa las variables del impuesto no debería enviarse después
+ * de la fecha límite del año: pediría el comprobante "antes de la hora límite"
+ * de una fecha ya vencida. Pasado el corte, los asesores contactan
+ * personalmente.
+ */
+export function plantillaUsaFechaLimiteImpuesto(
+	plantilla: PlantillaMensaje,
+): boolean {
+	const usa = (cuerpo: string) =>
+		cuerpo.includes("{fechaLimiteImpuesto}") ||
+		cuerpo.includes("{anioImpuesto}");
+	return usa(plantilla.cuerpo) || usa(plantilla.cuerpoWhastapp ?? "");
 }
 
 export function prepararTelefonoAsesorParaEnvio(
@@ -205,6 +246,17 @@ export function interpolar(
 			v(variables.anioImpuesto ?? anioImpuestoCirculacion(), "año impuesto"),
 		)
 		.replace(
+			/{aseguradora}/g,
+			v(variables.aseguradora ?? SEGURO_DEFAULT.aseguradora, "aseguradora"),
+		)
+		.replace(
+			/{cabinaSeguro}/g,
+			v(
+				variables.cabinaSeguro ?? SEGURO_DEFAULT.cabinaSeguro,
+				"cabina del seguro",
+			),
+		)
+		.replace(
 			/{fechaLimiteImpuesto}/g,
 			v(
 				variables.fechaLimiteImpuesto ?? fechaLimiteImpuestoCirculacion(),
@@ -234,8 +286,8 @@ A nombre de: CUBE INVESTMENTS, S.A.
 * GyT: 01300039945
 * Banrural: 3394002346
 
-🚗 Tu vehículo cuenta con seguro completo a través de Seguros Universales.
-En caso de accidente o cualquier inconveniente con tu vehículo, llama a la cabina de emergencia al 2384-7400, identificándote únicamente con el número de placa.
+🚗 Tu vehículo cuenta con seguro completo a través de {aseguradora}.
+En caso de accidente o cualquier inconveniente con tu vehículo, llama a la cabina de emergencia al {cabinaSeguro}, identificándote únicamente con el número de placa.
 Para seguimiento de trámites con el seguro:
 ✅ Luis Escobar: 4388-7300
 ✅ Maylin Barrios: 4770-7074
@@ -258,8 +310,8 @@ A nombre de: CUBE INVESTMENTS, S.A.
 * GyT: 01300039945
 * Banrural: 3394002346
 
-🚗 Tu vehículo cuenta con seguro completo a través de Seguros Universales.
-En caso de accidente o cualquier inconveniente con tu vehículo, llama a la cabina de emergencia al 2384-7400, identificándote únicamente con el número de placa.
+🚗 Tu vehículo cuenta con seguro completo a través de {aseguradora}.
+En caso de accidente o cualquier inconveniente con tu vehículo, llama a la cabina de emergencia al {cabinaSeguro}, identificándote únicamente con el número de placa.
 Para seguimiento de trámites con el seguro:
 ✅ Luis Escobar: 4388-7300
 ✅ Maylin Barrios: 4770-7074

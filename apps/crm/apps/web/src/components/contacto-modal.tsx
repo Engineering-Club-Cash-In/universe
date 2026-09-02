@@ -56,8 +56,10 @@ import {
 	mensajeEmailEditable,
 	mensajePlantillaEditable,
 	mensajeSmsEditable,
+	fechaLimiteImpuestoVencida,
 	PLANTILLAS_MENSAJES,
 	plantillaRequiereExpectativaMora,
+	plantillaUsaFechaLimiteImpuesto,
 	prepararTelefonoAsesorParaEnvio,
 	sugerirPlantilla,
 	type VariablesPlantilla,
@@ -88,6 +90,8 @@ interface ContactoModalProps {
 	nombreAsesor?: string;
 	telefonoAsesor?: string;
 	expectativaMora?: string;
+	aseguradora?: string;
+	cabinaSeguro?: string;
 }
 
 export function ContactoModal({
@@ -111,6 +115,8 @@ export function ContactoModal({
 	nombreAsesor = "",
 	telefonoAsesor = "",
 	expectativaMora = "",
+	aseguradora = "",
+	cabinaSeguro = "",
 }: ContactoModalProps) {
 	const queryClient = useQueryClient();
 
@@ -155,6 +161,10 @@ export function ContactoModal({
 			telefonoAsesor: telefonoAsesorLimpio,
 			nombreAsesor,
 			expectativaMora,
+			// Vacíos caen al default de interpolar (Seguros Universales); con
+			// datos, el modal muestra de una vez la variante correcta (p. ej. G&T).
+			aseguradora: aseguradora || undefined,
+			cabinaSeguro: cabinaSeguro || undefined,
 		}),
 		[
 			clienteNombre,
@@ -167,6 +177,8 @@ export function ContactoModal({
 			telefonoAsesorLimpio,
 			nombreAsesor,
 			expectativaMora,
+			aseguradora,
+			cabinaSeguro,
 		],
 	);
 
@@ -360,7 +372,21 @@ export function ContactoModal({
 			!expectativaMora.trim()
 		) {
 			toast.error(
-				"No se puede enviar esta plantilla: el crédito no tiene capital para calcular la mora",
+				"No se puede enviar esta plantilla: el crédito no genera mora (estado excluido o sin capital)",
+			);
+			return;
+		}
+		// La plantilla del impuesto no se envía después del 31/07: pediría el
+		// comprobante antes de una fecha ya vencida. Pasado el corte se contacta
+		// personalmente.
+		if (
+			accionUsaCuerpoNoReply(metodo) &&
+			plantillaActual &&
+			plantillaUsaFechaLimiteImpuesto(plantillaActual) &&
+			fechaLimiteImpuestoVencida()
+		) {
+			toast.error(
+				"La fecha límite del impuesto de circulación ya venció; contactá al cliente directamente",
 			);
 			return;
 		}

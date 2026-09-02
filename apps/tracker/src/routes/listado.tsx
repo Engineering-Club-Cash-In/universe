@@ -59,6 +59,9 @@ export function ListadoPage() {
 
 	const { data: session } = authClient.useSession();
 	const casosQuery = useQuery(orpc.getCasos.queryOptions({ input: {} }));
+	const agenciasQuery = useQuery(
+		orpc.getPartnerAgencies.queryOptions({ input: {} }),
+	);
 
 	// El servidor acota los cerrados a una ventana de retención. Ofrecer años
 	// anteriores solo devuelve listados vacíos sin explicación, así que el
@@ -179,13 +182,24 @@ export function ListadoPage() {
 	return (
 		<div className="min-h-screen bg-slate-50">
 			<header className="sticky top-0 z-10 border-slate-200 border-b bg-white">
-				<div className="mx-auto flex max-w-3xl items-center justify-between gap-3 px-4 py-4">
-					<div className="min-w-0">
+				<div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-4">
+					<div className="min-w-0 flex-1">
 						<h1 className="truncate font-bold text-lg text-slate-900">
 							Seguimiento de Créditos
 						</h1>
 						<p className="truncate text-slate-500 text-xs">
 							{session?.user.email}
+						</p>
+					</div>
+					<div className="min-w-0 flex-1 text-center">
+						<p className="text-slate-400 text-[10px] uppercase tracking-wide">
+							Agencia/predio
+						</p>
+						<p className="truncate font-medium text-slate-700 text-xs">
+							{agenciasQuery.isPending
+								? "Cargando..."
+								: agenciasQuery.data?.map((agencia) => agencia.name).join(", ") ||
+									"Sin agencia asignada"}
 						</p>
 					</div>
 					<button
@@ -297,8 +311,8 @@ export function ListadoPage() {
 									setPctFiltro(null);
 								})
 							}
-							titulo={p.etiqueta}
-							detalle={`${rangoDePaso(i + 1)} · ${conteoPorPaso.get(i + 1) ?? 0}`}
+							titulo={rangoDePaso(i + 1)}
+							detalle={`${conteoPorPaso.get(i + 1) ?? 0} casos`}
 						/>
 					))}
 				</div>
@@ -409,13 +423,17 @@ export function ListadoPage() {
 													<p className="truncate font-semibold text-slate-900">
 														{caso.vehiculo ?? caso.cliente}
 													</p>
-													<p className="truncate text-slate-500 text-sm">
-														{caso.vehiculo
-															? caso.cliente
-															: "Vehículo por definir"}
-														{" · "}
-														{formatearMonto(caso.monto)}
-													</p>
+									<p className="truncate text-slate-500 text-sm">
+										{caso.vehiculo
+											? caso.cliente
+											: "Vehículo por definir"}
+										{caso.valorVehiculo !== null && (
+											<>
+												{" · "}
+												{formatearMonto(caso.valorVehiculo)}
+											</>
+										)}
+									</p>
 													<p className="mt-1 truncate text-slate-400 text-xs">
 														{caso.agencia}
 													</p>

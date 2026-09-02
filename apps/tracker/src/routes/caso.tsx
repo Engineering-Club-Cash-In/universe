@@ -75,19 +75,21 @@ export function CasoPage() {
 								</span>
 							</div>
 
-							<dl className="mt-4 grid grid-cols-3 gap-4 border-slate-100 border-t pt-4">
+							<dl className="mt-4 grid grid-cols-2 gap-4 border-slate-100 border-t pt-4 sm:grid-cols-3">
 								<div>
 									<dt className="text-slate-500 text-xs">Avance</dt>
 									<dd className="mt-0.5 font-semibold text-slate-900 tabular-nums">
 										{casoQuery.data.porcentaje}%
 									</dd>
 								</div>
-								<div>
-									<dt className="text-slate-500 text-xs">Monto solicitado</dt>
-									<dd className="mt-0.5 font-semibold text-slate-900">
-										{formatearMonto(casoQuery.data.monto)}
-									</dd>
-								</div>
+								{casoQuery.data.valorVehiculo !== null && (
+									<div>
+										<dt className="text-slate-500 text-xs">Valor del vehículo</dt>
+										<dd className="mt-0.5 font-semibold text-slate-900">
+											{formatearMonto(casoQuery.data.valorVehiculo)}
+										</dd>
+									</div>
+								)}
 								<div>
 									<dt className="text-slate-500 text-xs">Actualizado</dt>
 									<dd className="mt-0.5 font-semibold text-slate-900">

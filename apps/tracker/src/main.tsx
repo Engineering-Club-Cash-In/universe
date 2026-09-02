@@ -11,6 +11,7 @@ import ReactDOM from "react-dom/client";
 import { Toaster } from "sonner";
 import { RequireAuth } from "@/components/auth/require-auth";
 import { CasoPage } from "@/routes/caso";
+import { CambiarContrasenaPage } from "@/routes/cambiar-contrasena";
 import { ListadoPage } from "@/routes/listado";
 import { LoginPage } from "@/routes/login";
 import { queryClient } from "@/utils/orpc";
@@ -51,7 +52,18 @@ const casoRoute = createRoute({
 	),
 });
 
-const routeTree = rootRoute.addChildren([loginRoute, listadoRoute, casoRoute]);
+const cambiarContrasenaRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: "/cambiar-contrasena",
+	component: CambiarContrasenaPage,
+});
+
+const routeTree = rootRoute.addChildren([
+	loginRoute,
+	listadoRoute,
+	casoRoute,
+	cambiarContrasenaRoute,
+]);
 
 const router = createRouter({
 	routeTree,

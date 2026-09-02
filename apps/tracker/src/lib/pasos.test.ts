@@ -16,7 +16,7 @@ const caso = (parcial: Partial<Caso>): Caso => ({
 	cliente: "Juan P.",
 	agencia: "JAC GUATEMALA",
 	vehiculo: null,
-	monto: 100000,
+	valorVehiculo: 100000,
 	pasoActual: 1,
 	porcentaje: 20,
 	estado: "en_proceso",
@@ -161,19 +161,19 @@ describe("etiquetaDeEtapa", () => {
 	test("no anuncia el desembolso mientras la oportunidad sigue abierta", () => {
 		// Se llega al paso 5 al aprobar el checklist, pero contabilidad ejecuta el
 		// pago después: ahí el caso todavía está en proceso.
-		expect(etiquetaDeEtapa(5, "en_proceso")).toBe("En trámite de desembolso");
+		expect(etiquetaDeEtapa(5, "en_proceso")).toBe("100%");
 
-		expect(etiquetaDeEtapa(5, "desembolsado")).toBe("Desembolsado");
+		expect(etiquetaDeEtapa(5, "desembolsado")).toBe("Finalizada");
 	});
 
-	test("en el paso 5 un caso cerrado o pausado usa la etiqueta de su estado", () => {
-		expect(etiquetaDeEtapa(5, "rechazado")).toBe("No aprobado");
-		expect(etiquetaDeEtapa(5, "en_pausa")).toBe("En pausa");
+	test("en el paso 5 los casos no finalizados muestran solo el porcentaje", () => {
+		expect(etiquetaDeEtapa(5, "rechazado")).toBe("100%");
+		expect(etiquetaDeEtapa(5, "en_pausa")).toBe("100%");
 	});
 
-	test("en los demás pasos usa el nombre de la etapa", () => {
-		expect(etiquetaDeEtapa(2, "en_proceso")).toBe("Documentos y análisis");
-		expect(etiquetaDeEtapa(2, "rechazado")).toBe("Documentos y análisis");
+	test("en los demás pasos muestra el rango de avance", () => {
+		expect(etiquetaDeEtapa(2, "en_proceso")).toBe("30–40%");
+		expect(etiquetaDeEtapa(2, "rechazado")).toBe("30–40%");
 	});
 });
 

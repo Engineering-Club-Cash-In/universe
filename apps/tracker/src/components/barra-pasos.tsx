@@ -102,10 +102,7 @@ export function BarraPasos({
 										alcanzado ? "text-slate-900" : "text-slate-400",
 									)}
 								>
-									{/* En los pasos que no son el vigente la etiqueta es solo el
-									    nombre de la etapa en el catálogo. En el vigente se lee
-									    como una afirmación sobre el caso, así que ahí no puede
-									    decir "Desembolsado" mientras el pago no se ejecuta. */}
+									{/* El tracker muestra únicamente los rangos de avance. */}
 									{esActual ? etiquetaDeEtapa(paso, estado) : p.etiqueta}
 								</p>
 								<span
@@ -165,7 +162,7 @@ export function BarraPasos({
 										: enPausa
 											? "El proceso está en pausa"
 											: estado === "desembolsado"
-												? "Crédito desembolsado"
+												? "Crédito finalizado"
 												: "En curso"}
 								</p>
 							)}

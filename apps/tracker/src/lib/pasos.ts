@@ -5,11 +5,11 @@ export type EstadoCaso = CasoTracker["estado"];
 export type Ventana = { inicio: number; fin: number };
 
 export const PASOS = [
-	{ etiqueta: "Solicitud recibida", desde: 0, hasta: 20 },
-	{ etiqueta: "Documentos y análisis", desde: 30, hasta: 40 },
-	{ etiqueta: "Aprobado", desde: 50, hasta: 80 },
-	{ etiqueta: "Firma de contratos", desde: 85, hasta: 90 },
-	{ etiqueta: "Desembolsado", desde: 100, hasta: 100 },
+	{ etiqueta: "0–20%", desde: 0, hasta: 20 },
+	{ etiqueta: "30–40%", desde: 30, hasta: 40 },
+	{ etiqueta: "50–80%", desde: 50, hasta: 80 },
+	{ etiqueta: "85–90%", desde: 85, hasta: 90 },
+	{ etiqueta: "100%", desde: 100, hasta: 100 },
 ] as const;
 
 
@@ -136,20 +136,15 @@ export const ESTADOS: Record<
 		punto: "bg-rose-500",
 	},
 	desembolsado: {
-		etiqueta: "Desembolsado",
+		etiqueta: "Finalizada",
 		clase: "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
 		punto: "bg-emerald-500",
 	},
 };
 
 export function etiquetaDeEtapa(paso: number, estado: EstadoCaso): string {
-	if (paso === 5 && estado !== "desembolsado") {
-		
-		return estado === "en_proceso"
-			? "En trámite de desembolso"
-			: ESTADOS[estado].etiqueta;
-	}
-	return PASOS[paso - 1].etiqueta;
+	if (paso === 5 && estado === "desembolsado") return "Finalizada";
+	return rangoDePaso(paso);
 }
 
 export function formatearMonto(monto: number | null): string {

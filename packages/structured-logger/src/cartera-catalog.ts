@@ -50,6 +50,14 @@ export const carteraCatalog = {
       type: 'enum',
       values: ['batch_update', 'repair_missing_february', 'change_start_date', 'list_change_history', 'single_update', 'json_bulk_update'],
     },
+    recalculation_operation: {
+      type: 'enum',
+      values: ['recalculate', 'process_pools', 'delete_credits', 'update_investor_installments'],
+    },
+    migration_operation: {
+      type: 'enum',
+      values: ['adjust_schedule', 'import_payments'],
+    },
     error_code: {
       type: 'enum',
       values: [
@@ -72,7 +80,7 @@ export const carteraCatalog = {
         'user_not_found', 'active_late_fee_not_found', 'concurrent_run',
         'installments_not_found', 'paid_installment_conflict', 'item_failures',
         'missing_payment_reference', 'overdue_installments_remain',
-        'capital_contribution_not_found',
+        'capital_contribution_not_found', 'no_actionable_items',
       ],
     },
     auth_reason: { type: 'enum', values: ['missing', 'invalid', 'expired'] },
@@ -172,6 +180,10 @@ export const carteraCatalog = {
       rejected: { level: 'warn', required: ['duration_ms', 'reason_code'], optional: [] },
       failed: { level: 'error', required: ['duration_ms', 'error_code'], optional: [] },
     } },
+    'payment.sifco_migration': { outcomes: {
+      completed: { level: 'info', required: ['migration_operation', 'processed_count', 'succeeded_count', 'failed_count', 'skipped_count', 'duration_ms'], optional: [] },
+      partially_completed: { level: 'warn', required: ['migration_operation', 'processed_count', 'succeeded_count', 'failed_count', 'skipped_count', 'duration_ms', 'reason_code'], optional: [] },
+    } },
     'payment.investor_distribution': { outcomes: {
       completed: { level: 'info', required: ['distribution_mode', 'fallback_applied', 'duration_ms'], optional: [] },
       fallback: { level: 'warn', required: ['distribution_mode', 'fallback_applied', 'duration_ms', 'reason_code'], optional: [] },
@@ -238,8 +250,11 @@ export const carteraCatalog = {
       failed: { level: 'error', required: ['change_set', 'duration_ms', 'error_code'], optional: [] },
     } },
     'credit.schedule_recalculation': { outcomes: {
-      completed: { level: 'info', required: ['recalculation_strategy', 'affected_installment_count', 'duration_ms'], optional: [] },
-      failed: { level: 'error', required: ['recalculation_strategy', 'affected_installment_count', 'duration_ms', 'error_code'], optional: [] },
+      completed: { level: 'info', required: ['recalculation_strategy', 'recalculation_operation', 'processed_count', 'succeeded_count', 'failed_count', 'skipped_count', 'manual_action_required', 'duration_ms'], optional: [] },
+      partially_completed: { level: 'warn', required: ['recalculation_strategy', 'recalculation_operation', 'processed_count', 'succeeded_count', 'failed_count', 'skipped_count', 'manual_action_required', 'duration_ms', 'reason_code'], optional: [] },
+      rejected: { level: 'warn', required: ['recalculation_strategy', 'recalculation_operation', 'processed_count', 'succeeded_count', 'failed_count', 'skipped_count', 'manual_action_required', 'duration_ms', 'reason_code'], optional: [] },
+      partially_persisted: { level: 'error', required: ['recalculation_strategy', 'recalculation_operation', 'processed_count', 'succeeded_count', 'failed_count', 'skipped_count', 'manual_action_required', 'duration_ms', 'error_code'], optional: [], constants: { manual_action_required: true } },
+      failed: { level: 'error', required: ['recalculation_strategy', 'recalculation_operation', 'processed_count', 'succeeded_count', 'failed_count', 'skipped_count', 'manual_action_required', 'duration_ms', 'error_code'], optional: [] },
     } },
     'investor.assignment': { outcomes: {
       completed: { level: 'info', required: ['assignment_mode', 'investor_count', 'duration_ms'], optional: [] },

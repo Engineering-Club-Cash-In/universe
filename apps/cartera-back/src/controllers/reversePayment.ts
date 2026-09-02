@@ -15,6 +15,7 @@ import {
   convenio_cuotas,
   facturas_electronicas,
 } from "../database/db";
+import { resetAjusteFechaIdealSiPagoInvalidado } from "./ajusteFechaIdealPago";
 import { processAndReplaceCreditInvestorsReverse } from "./investor";
 import { revertirAbonoCapitalEspejo } from "./abonosCapital";
 import { updateMora } from "./latefee";
@@ -22,6 +23,8 @@ import { SATClientService } from "../cofidi/satClientService";
 import { CLUB_CASHIN_CONFIG, SAT_CONFIG } from "../utils/functions/const";
 import { ahoraEnGuatemala, formatearFechaSAT } from "../utils/functions/fechaSAT";
 import { esPagoAplicado } from "../utils/paymentStatus";
+import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
+import { refrescarProyeccionTrasReversa } from "./reversePaymentRecalculo";
 import {
   getRemainingPaymentPaidStatusAfterReversal,
   isReversibleIncobrablePayment,
@@ -101,12 +104,18 @@ export interface ReversePaymentDependencies {
   readonly runTransaction: typeof db.transaction;
   readonly reverseInvestors: typeof processAndReplaceCreditInvestorsReverse;
   readonly reverseCapitalPayment: typeof revertirAbonoCapitalEspejo;
+  /** Serializa contra insertPayment (advisory lock por crédito). */
+  readonly withCreditLock: typeof withPaymentAdvisoryLock;
+  /** Refresca la proyección de las cuotas pendientes tras la reversión. */
+  readonly refrescarProyeccion: typeof refrescarProyeccionTrasReversa;
 }
 
 const defaultDependencies: ReversePaymentDependencies = {
   runTransaction: db.transaction.bind(db),
   reverseInvestors: processAndReplaceCreditInvestorsReverse,
   reverseCapitalPayment: revertirAbonoCapitalEspejo,
+  withCreditLock: withPaymentAdvisoryLock,
+  refrescarProyeccion: refrescarProyeccionTrasReversa,
 };
 
 export function createReversePayment(
@@ -145,7 +154,16 @@ export function createReversePayment(
     // ========================================================================
     // 🔥 INICIAR TRANSACCIÓN ATÓMICA
     // ========================================================================
-    const result = await dependencies.runTransaction(async (tx) => {
+    // 🔒 Mismo advisory lock por crédito que insertPayment (P1 de Codex en
+    // #1482): sin él, la reversa puede colarse en la ventana entre la
+    // inserción de las filas de un pago en vuelo y su commitConvenio — vería
+    // el sello pago_convenio y restaría del convenio un monto que aún no se
+    // acreditó, y el commit posterior fallaría su guard optimista dejando el
+    // convenio sub-acreditado. Serializa solo la transacción; la anulación
+    // SAT/COFIDI post-commit queda fuera del lock igual que queda fuera de
+    // la tx (HTTP de hasta 60s por factura).
+    const result = await dependencies.withCreditLock(credito_id, async () => {
+      const datosReversa = await dependencies.runTransaction(async (tx) => {
       // ======================================================================
       // 2️⃣ OBTENER DATOS DEL PAGO A REVERSAR
       // ======================================================================
@@ -167,6 +185,16 @@ export function createReversePayment(
       const pagoValidado = esPagoAplicado(pago.validationStatus);
       previousPaymentState = pagoValidado ? "applied" : "pending";
 
+
+      // ======================================================================
+      // 2️⃣.5️⃣ RESETEAR AJUSTE POR FECHA IDEAL DE PAGO, SI ESTE PAGO LO COBRÓ
+      // ======================================================================
+      // ajuste_fecha_ideal_pago.pago_id guarda qué fila de pagos_credito lo
+      // cobró (ver registerPayment.ts). Si es justo la que se está revirtiendo,
+      // el dinero vuelve — el ajuste debe volver a quedar pendiente para poder
+      // reintentarlo en un pago futuro. Mismo helper que usan falsePayment y
+      // la anulación por incobrable (ver ajusteFechaIdealPago.ts).
+      await resetAjusteFechaIdealSiPagoInvalidado(pago_id, tx);
 
       // ======================================================================
       // 3️⃣ OBTENER DATOS DEL CRÉDITO
@@ -669,16 +697,27 @@ export function createReversePayment(
         reversionEspejo,
       };
     });
-    transactionCommitted = true;
-// La reversión NO recalcula ninguna otra fila del crédito. La transacción de
-// arriba ya deja todo consistente (pago reseteado, capital/deuda restaurados).
-// Aquí vivía un updateInstallments({all: true}) (agregado en 0183a387, ene-2026)
-// que reescribía las cuotas YA PAGADAS del crédito: restantes teóricos,
-// cuota actual y membresias_pago/membresias_mes en 0 — corrompiendo la
-// historia liquidada en cada reversión (los INCOBRABLES ya lo omitían por un
-// clavo análogo, PR #890). La proyección teórica de las cuotas pendientes se
-// refresca por el flujo normal (siguiente pago aplicado o el botón manual
-// "Recalcular Pagos"), igual que antes de enero 2026.
+      transactionCommitted = true;
+
+      // 🔄 Refrescar la proyección de las cuotas PENDIENTES, todavía DENTRO del
+      // lock del crédito: si corriera fuera, un pago concurrente podría estar
+      // distribuyendo sobre las mismas filas que el recálculo reescribe.
+      //
+      // Sigue sin volver el `updateInstallments({ all: true })` que vivía acá
+      // (0183a387, ene-2026) y que reescribía las cuotas YA PAGADAS —restantes
+      // teóricos, cuota actual y membresías en 0—, corrompiendo la historia
+      // liquidada en cada reversión. Esto llama a `recalcularPagosCredito` SIN
+      // `numero_cuota`, que por su propio WHERE toca solo lo que aún no se
+      // aplicó al crédito: cuotas no pagadas y pagos sin validar. Es lo mismo
+      // que hace el botón "Recalcular Pagos" que hasta hoy había que apretar a
+      // mano después de cada reversa — ver reversePaymentRecalculo.ts.
+      await dependencies.refrescarProyeccion({
+        numeroCreditoSifco: datosReversa.creditData.creditos.numero_credito_sifco,
+        statusCredit: datosReversa.creditData.creditos.statusCredit,
+      });
+
+      return datosReversa;
+    });
     // ========================================================================
     // 🧾 ANULAR FACTURAS ELECTRÓNICAS — DESPUÉS DEL COMMIT (best-effort)
     // ========================================================================

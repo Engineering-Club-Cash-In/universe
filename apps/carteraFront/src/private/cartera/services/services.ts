@@ -736,6 +736,15 @@ export interface InversionistaPayload {
    */
   es_nuevo?: boolean;
   tipo_operacion?: "compra_cartera" | "reinversion";
+  tipo_reinversion?:
+    | "sin_reinversion"
+     | "reinversion_capital"
+     | "reinversion_interes"
+     | "reinversion_total"
+     | "reinversion_variable"
+     | "reinversion_excedente";
+  modalidad_facturacion?: ModalidadFacturacion;
+  modalidad_facturacion_spread_id?: number;
 }
 
 export interface UpdateCreditBody {
@@ -2253,6 +2262,8 @@ export interface LiquidacionResumen {
   boleta_pendiente: string | null;
   boleta_liquidacion: BoletaLiquidacion | null;
   reporte_liquidacion_url: string | null;
+  /** Mismo reporte expresado en quetzales. Solo lo tienen los inversionistas en dólares. */
+  reporte_liquidacion_url_gtq?: string | null;
   estado_liquidacion_resumen:
     | "pending"
     | "uploaded"

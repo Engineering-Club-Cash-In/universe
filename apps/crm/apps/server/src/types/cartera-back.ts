@@ -94,6 +94,22 @@ export interface CarteraCredito {
 	no_poliza: string | null;
 }
 
+// Ingreso adicional (sin capital) por elegir un día de pago IA que cae después
+// del día que el sistema hubiera asignado por default. Ver
+// apps/crm/apps/server/src/lib/fecha-ideal-pago-ajuste.ts (fórmula) y la tabla
+// nueva en apps/cartera-back/src/database/db/schema.ts (persistencia).
+export interface AjusteFechaIdealPayload {
+	dia_pago_original_sistema: number;
+	dia_pago_mensual_elegido: number;
+	dias_diferencia: number;
+	dias_del_mes: number;
+	monto_interes: number;
+	monto_membresia: number;
+	monto_servicios: number;
+	monto_total: number;
+	fecha_referencia?: string;
+}
+
 export interface CreateCreditoInput {
 	//usuario_id?: number;
 	usuario?: string;
@@ -114,6 +130,10 @@ export interface CreateCreditoInput {
 	aseguradora?: string;
 	como_se_entero?: string;
 	dia_pago_mensual?: number;
+	// Ingreso adicional por elegir un día IA que cae después del día que el
+	// sistema hubiera asignado por default (solo presente cuando aplica el
+	// ajuste, ver apps/crm/apps/server/src/lib/fecha-ideal-pago-ajuste.ts).
+	ajuste_fecha_ideal?: AjusteFechaIdealPayload;
 	membresias_pago?: number;
 	categoria?: string;
 	nit?: string;
@@ -249,6 +269,22 @@ export interface CarteraConvenio {
 	cuotaConvenioAPagar?: string | null;
 }
 
+// Desglose del ingreso adicional por día IA, ya persistido en cartera-back
+// (tabla ajuste_fecha_ideal_pago). null cuando el crédito no tuvo ajuste.
+export interface CarteraAjusteFechaIdeal {
+	id: number;
+	credito_id: number;
+	dia_pago_original_sistema: number;
+	dia_pago_mensual_elegido: number;
+	dias_diferencia: number;
+	dias_del_mes: number;
+	monto_interes: string; // decimal viene como string
+	monto_membresia: string;
+	monto_servicios: string;
+	monto_total: string;
+	created_at: string;
+}
+
 export interface CreditoDirectoResponse {
 	credito: CarteraCredito;
 	contractSummary?: {
@@ -263,6 +299,7 @@ export interface CreditoDirectoResponse {
 	moraActual: string; // decimal viene como string
 	mora?: CarteraMoraCredito | null;
 	convenioActivo?: CarteraConvenio | null;
+	ajusteFechaIdeal?: CarteraAjusteFechaIdeal | null;
 }
 
 export interface UpdateCreditoInput {
@@ -755,6 +792,8 @@ export interface ResumenGlobalInversionista {
 	boleta_liquidacion?: BoletaPagoInversionista | null;
 	estado_liquidacion_resumen?: "pending" | "uploaded" | "liquidated";
 	reporte_liquidacion_url?: string | null;
+	/** Mismo reporte en quetzales. Solo los inversionistas en dólares lo tienen. */
+	reporte_liquidacion_url_gtq?: string | null;
 }
 
 // ============================================================================

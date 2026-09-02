@@ -27,6 +27,10 @@ const fakeCredito = {
 // Fila que devuelve el select del crédito; cada test puede reemplazarla (p. ej.
 // statusCredit CANCELADO) y beforeEach la regresa al fixture base.
 let creditoActual: any = fakeCredito;
+// Filas que devuelve el select de pagos (vacío = early return del recálculo).
+let pagosActuales: any[] = [];
+const capturedUpdates: { vals: any; cond: any }[] = [];
+const capturedInserts: any[] = [];
 const dbMock = {
   select: () => ({
     from: () => ({
@@ -39,21 +43,39 @@ const dbMock = {
       innerJoin: () => ({
         where: (cond: any) => {
           capturedWheres.push(cond);
-          return { orderBy: () => Promise.resolve([]) };
+          return { orderBy: () => Promise.resolve(pagosActuales) };
         },
       }),
     }),
   }),
+  transaction: async (fn: any) => fn(dbMock),
   // update del crédito: .set(vals).where().returning()
   update: () => ({
     set: (vals: any) => ({
-      where: () => ({
-        returning: () => Promise.resolve([{ ...creditoActual, ...vals }]),
-      }),
+      where: (cond: any) => {
+        capturedUpdates.push({ vals, cond });
+        return {
+          returning: () => Promise.resolve([{ ...creditoActual, ...vals }]),
+        };
+      },
     }),
   }),
+  insert: () => ({
+    values: (vals: any) => {
+      capturedInserts.push(vals);
+      return Promise.resolve();
+    },
+  }),
 };
-mock.module("../database", () => ({ db: dbMock, client: {}, lockPool: {} }));
+const lockConnection = {
+  query: async () => ({ rows: [{ ok: true }] }),
+  release: () => undefined,
+};
+mock.module("../database", () => ({
+  db: dbMock,
+  client: {},
+  lockPool: { connect: async () => lockConnection },
+}));
 mock.module("../services/sifcoIntegrations", () => ({
   consultarEstadoCuentaPrestamo: () => Promise.resolve(null),
 }));
@@ -65,6 +87,9 @@ const renderSql = (cond: any) => new PgDialect().sqlToQuery(cond);
 beforeEach(() => {
   capturedWheres.length = 0;
   capturedCreditWheres.length = 0;
+  capturedUpdates.length = 0;
+  capturedInserts.length = 0;
+  pagosActuales = [];
   creditoActual = fakeCredito;
 });
 
@@ -117,6 +142,163 @@ describe("recalcularPagosCredito — exclusión de pagos de reset", () => {
   });
 });
 
+describe("recalcularPagosCredito — numero_cuota se ignora", () => {
+  // La amortización siempre arranca del capital ACTUAL del crédito, así que
+  // "desde la cuota N, pagadas incluidas" reescribía splits ya validados con
+  // un capital ya reducido (o se saltaba la cuota reabierta si N era mayor).
+  // Caso real: crédito 3, cuota 17 reabierta por reversión, conta mandó 18.
+  it("genera exactamente el mismo WHERE con y sin numero_cuota", async () => {
+    await recalcularPagosCredito({
+      numero_credito_sifco: "01010214120190",
+      numero_cuota: 17,
+    });
+    await recalcularPagosCredito({ numero_credito_sifco: "01010214120190" });
+
+    expect(capturedWheres.length).toBe(2);
+    const conCuota = renderSql(capturedWheres[0]);
+    const sinCuota = renderSql(capturedWheres[1]);
+    expect(conCuota.sql).toBe(sinCuota.sql);
+    expect(conCuota.params).toEqual(sinCuota.params);
+  });
+
+  it("con numero_cuota nunca acota por cuota ni incluye pagos validados", async () => {
+    await recalcularPagosCredito({
+      numero_credito_sifco: "01010214120190",
+      numero_cuota: 1,
+    });
+
+    const q = renderSql(capturedWheres[0]);
+    // Sin el filtro `numero_cuota >= N` de antes…
+    expect(q.sql).not.toContain(">=");
+    expect(q.params).not.toContain(1);
+    // …y con el filtro de "solo lo no aplicado": pagado=false o pending vivo.
+    expect(q.params).toContain("pending");
+    expect(q.sql).toContain("pagado");
+  });
+});
+
+describe("recalcularPagosCredito — pagos validados no se reescriben", () => {
+  const cuota18 = { cuota_id: 74540, numero_cuota: 18, pagado: false };
+  const filaSembrada = {
+    pago_id: 74540,
+    cuota_id: 74540,
+    validationStatus: "no_required",
+    pagado: false,
+    paymentFalse: false,
+    monto_aplicado: "0",
+    fecha_pago: null,
+  };
+  // Parcial ya validado por conta sobre la cuota abierta: su capital ya se
+  // descontó del crédito y su split ya se distribuyó a inversionistas.
+  const parcialValidado = {
+    pago_id: 156048,
+    cuota_id: 74540,
+    validationStatus: "validated",
+    pagado: false,
+    paymentFalse: false,
+    monto_aplicado: "162",
+    fecha_pago: "2026-08-21",
+    abono_interes: "100",
+    abono_iva_12: "12",
+    abono_seguro: "0",
+    abono_gps: "0",
+    membresias_pago: "0",
+    // Ya descontado de creditos.capital al validarse (fixture: 18493.39 es
+    // el capital POST-parcial).
+    abono_capital: "50",
+  };
+
+  it("usa el parcial validado solo como contexto y siembra al hermano sobre el neto", async () => {
+    pagosActuales = [
+      { pagos_credito: parcialValidado, cuotas_credito: cuota18 },
+      { pagos_credito: filaSembrada, cuotas_credito: cuota18 },
+    ];
+
+    await recalcularPagosCredito({ numero_credito_sifco: "01010214120190" });
+
+    // Solo se escribe la fila sembrada; el validado queda intacto.
+    expect(capturedUpdates.length).toBe(1);
+    const idsEscritos = capturedUpdates.map((u) => renderSql(u.cond).params).flat();
+    expect(idsEscritos).toContain(74540);
+    expect(idsEscritos).not.toContain(156048);
+
+    // La cuota se proyecta desde el principal PRE-parcial: 18493.39 + 50 =
+    // 18543.39 × 1.5% = 278.15 de interés, IVA 33.38; capital de la cuota =
+    // 2021.83 − 278.15 − 33.38 − 260.93 − 399.73 = 1049.64. El sembrado queda
+    // neto de lo que el validado ya abonó (100 / 12 / 50), sin restar el
+    // capital validado dos veces.
+    const vals = capturedUpdates[0].vals;
+    expect(vals.interes_restante).toBe("178.15");
+    expect(vals.iva_12_restante).toBe("21.38");
+    expect(vals.seguro_restante).toBe("260.93");
+    expect(vals.membresias).toBe("399.73");
+    expect(vals.capital_restante).toBe("999.64");
+    // Capital proyectado hacia la siguiente cuota = pre-parcial − capital de
+    // la cuota completa (no vuelve a restar los 50 ya validados).
+    expect(vals.total_restante).toBe("17493.75");
+    expect(vals.abono_interes).toBe("0");
+    expect(vals.pagado).toBe(false);
+  });
+});
+
+describe("recalcularPagosCredito — capital validado de cuotas posteriores", () => {
+  const cuota18 = { cuota_id: 74540, numero_cuota: 18, pagado: false };
+  const cuota19 = { cuota_id: 74541, numero_cuota: 19, pagado: false };
+  const sembrada = (pago_id: number, cuota_id: number) => ({
+    pago_id,
+    cuota_id,
+    validationStatus: "no_required",
+    pagado: false,
+    paymentFalse: false,
+    monto_aplicado: "0",
+    fecha_pago: null,
+  });
+  // Parcial validado en la cuota 19 (posterior) con capital ya descontado de
+  // creditos.capital; quedó pagado=true porque otro pago cerró la cuota.
+  const validadoCuota19 = {
+    pago_id: 156049,
+    cuota_id: 74541,
+    validationStatus: "validated",
+    pagado: true,
+    paymentFalse: false,
+    monto_aplicado: "162",
+    fecha_pago: "2026-08-21",
+    abono_interes: "100",
+    abono_iva_12: "12",
+    abono_seguro: "0",
+    abono_gps: "0",
+    membresias_pago: "0",
+    abono_capital: "50",
+  };
+
+  it("restaura el capital de todas las cuotas abiertas antes de proyectar la primera", async () => {
+    pagosActuales = [
+      { pagos_credito: sembrada(74540, 74540), cuotas_credito: cuota18 },
+      { pagos_credito: validadoCuota19, cuotas_credito: cuota19 },
+      { pagos_credito: sembrada(74541, 74541), cuotas_credito: cuota19 },
+    ];
+
+    await recalcularPagosCredito({ numero_credito_sifco: "01010214120190" });
+
+    // Se escriben solo las dos sembradas; el validado (aunque pagado=true) no.
+    expect(capturedUpdates.length).toBe(2);
+    const ids = capturedUpdates.map((u) => renderSql(u.cond).params).flat();
+    expect(ids).toContain(74540);
+    expect(ids).toContain(74541);
+    expect(ids).not.toContain(156049);
+
+    // La cuota 18 se proyecta desde 18493.39 + 50 (capital del parcial de la
+    // 19) = 18543.39 × 1.5% = 278.15, no desde el capital ya reducido.
+    const c18 = capturedUpdates.find((u) => renderSql(u.cond).params.includes(74540))!.vals;
+    expect(c18.interes_restante).toBe("278.15");
+    expect(c18.capital_restante).toBe("1049.64");
+    // Cuota 19: principal 18543.39 − 1049.64 = 17493.75 × 1.5% = 262.41,
+    // neto del interés que ya abonó el validado (100).
+    const c19 = capturedUpdates.find((u) => renderSql(u.cond).params.includes(74541))!.vals;
+    expect(c19.interes_restante).toBe("162.41");
+  });
+});
+
 // Body espejo del fixture: sin cambios financieros, sin inversionistas.
 const baseBody = {
   credito_id: 794,
@@ -155,6 +337,22 @@ describe("updateCredit — editar sin importar el status", () => {
 
     expect(set.status).toBe(200);
     expect(result.credito_id).toBe(794);
+  });
+});
+
+describe("updateCredit — validaciones antes de escribir", () => {
+  it("no actualiza usuario ni inserta historial ante transición de devolución inválida", async () => {
+    const { set, request } = makeCtx();
+    const result: any = await updateCredit({
+      body: { ...baseBody, nombre: "No debe guardarse", estado_devolucion: "COMPLETADO" },
+      set,
+      request,
+    });
+
+    expect(set.status).toBe(400);
+    expect(result.message).toContain("Transición de estado de devolución no permitida");
+    expect(capturedUpdates).toHaveLength(0);
+    expect(capturedInserts).toHaveLength(0);
   });
 });
 

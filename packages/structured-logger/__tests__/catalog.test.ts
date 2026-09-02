@@ -33,6 +33,7 @@ describe('carteraCatalog', () => {
       'payment.revalidation',
       'payment.reversal',
       'payment.reversal_to_pending',
+      'payment.sifco_migration',
       'payment.upload',
       'service.lifecycle',
     ]);
@@ -98,6 +99,27 @@ describe('carteraCatalog', () => {
         expect(operations).toContain(operation);
       }
     }
+  });
+
+  test('defines a finite aggregate contract for SIFCO payment migration', () => {
+    expect(carteraCatalog.fields.migration_operation).toEqual({
+      type: 'enum',
+      values: ['adjust_schedule', 'import_payments'],
+    });
+    expect(carteraCatalog.events['payment.sifco_migration']).toEqual({
+      outcomes: {
+        completed: {
+          level: 'info',
+          required: ['migration_operation', 'processed_count', 'succeeded_count', 'failed_count', 'skipped_count', 'duration_ms'],
+          optional: [],
+        },
+        partially_completed: {
+          level: 'warn',
+          required: ['migration_operation', 'processed_count', 'succeeded_count', 'failed_count', 'skipped_count', 'duration_ms', 'reason_code'],
+          optional: [],
+        },
+      },
+    });
   });
 
   test('requires manual action for local invoice state inconsistencies', () => {

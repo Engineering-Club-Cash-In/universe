@@ -4,6 +4,8 @@ import { db } from "../database";
 import { creditos, cuotas_credito, pagos_credito } from "../database/db";
 import { consultarEstadoCuentaPrestamo } from "../services/sifcoIntegrations";
 import { updateInstallments } from "./updateCredit";
+import { countPersistedRows } from "./persistenceEvidence";
+import { emitSifcoPaymentMigration } from "../utils/structuredLogger";
 
 interface AjustarCuotasConSIFCOParams {
   numero_credito_sifco: string;
@@ -20,11 +22,9 @@ export const ajustarCuotasConSIFCO = async ({
   plazo_completo,
   dia_vencimiento,
 }: AjustarCuotasConSIFCOParams): Promise<void> => {
-  console.log(`\n🔧 Ajustando crédito ${numero_credito_sifco} - SOLO FECHAS Y PLAZO`);
-  console.log(`   📊 Cuota esperada: ${cuota_esperada} (fecha: ${fecha_cuota})`);
-  console.log(`   📐 Plazo completo (TU sistema): ${plazo_completo}`);
-
   if (!fecha_cuota || fecha_cuota.trim() === "") return;
+
+  const startedAt = Date.now();
 
   // 1️⃣ Obtener crédito local
   const creditoResult = await db
@@ -50,8 +50,6 @@ export const ajustarCuotasConSIFCO = async ({
   const cuota0 = todasLasCuotas.find(c => c.numero_cuota === 0);
   const cuotasExistentes = todasLasCuotas.filter(c => c.numero_cuota > 0);
 
-  console.log(`📦 Cuotas existentes en BD (sin la 0): ${cuotasExistentes.length}`);
-
   // 3️⃣ Calcular fechas basadas en la cuota esperada
   // Parseo manual de "YYYY-MM-DD" para evitar shift por timezone (America/Guatemala UTC-6)
   const [yyyy, mm, dd] = fecha_cuota.split("-").map(Number);
@@ -66,13 +64,13 @@ export const ajustarCuotasConSIFCO = async ({
     diaVencimiento = dia_vencimiento;
     const ultimoDia = new Date(fechaBase.getFullYear(), fechaBase.getMonth() + 1, 0).getDate();
     fechaBase.setDate(Math.min(diaVencimiento, ultimoDia));
-    console.log(`   📌 Día de vencimiento explícito: ${diaVencimiento}`);
+
   } else if (diaEsperado === 1) {
     // Día 1 = SIFCO manda el mes correcto, día 30 del mismo mes
     diaVencimiento = 30;
     const ultimoDia = new Date(fechaBase.getFullYear(), fechaBase.getMonth() + 1, 0).getDate();
     fechaBase.setDate(Math.min(30, ultimoDia));
-    console.log(`   ⚠️ Fecha en día 1 detectada, vencimiento día 30 mismo mes`);
+
   } else {
     diaVencimiento = diaEsperado;
     const ultimoDia = new Date(fechaBase.getFullYear(), fechaBase.getMonth() + 1, 0).getDate();
@@ -103,9 +101,6 @@ export const ajustarCuotasConSIFCO = async ({
     return fecha.toISOString().split("T")[0];
   };
 
-  console.log(`   ✅ Cuota 1 vence: ${calcularFechaVencimiento(1)}`);
-  console.log(`   ✅ Cuota ${cuota_esperada} vence: ${fechaCuotaEsperadaAjustada.toISOString().split("T")[0]}`);
-  console.log(`   ✅ Cuota 0 vence: ${fechaCuota0.toISOString().split("T")[0]}`);
 
   await db.transaction(async (tx) => {
     // 4️⃣ 🗑️ LIMPIAR CUOTAS QUE EXCEDEN EL PLAZO COMPLETO
@@ -114,10 +109,6 @@ export const ajustarCuotasConSIFCO = async ({
     );
 
     if (cuotasExcedentes.length > 0) {
-      console.log(
-        `\n🗑️ LIMPIANDO ${cuotasExcedentes.length} cuotas que exceden el plazo completo (${plazo_completo})...`
-      );
-
       const cuotaIdsExcedentes = cuotasExcedentes.map(c => c.cuota_id);
 
       await tx
@@ -128,7 +119,7 @@ export const ajustarCuotasConSIFCO = async ({
         .delete(cuotas_credito)
         .where(inArray(cuotas_credito.cuota_id, cuotaIdsExcedentes));
 
-      console.log(`   🗑️ ${cuotasExcedentes.length} cuotas eliminadas`);
+
     }
 
     const cuotasLimpias = cuotasExistentes.filter(
@@ -139,14 +130,7 @@ export const ajustarCuotasConSIFCO = async ({
     const cuotasActuales = cuotasLimpias.length;
     const cuotasNecesarias = Math.max(0, plazo_completo - cuotasActuales);
 
-    console.log(`\n📊 Validación de cuotas:`);
-    console.log(`   📦 Cuotas válidas después de limpieza: ${cuotasActuales}`);
-    console.log(`   🎯 Plazo completo: ${plazo_completo}`);
-    console.log(`   🧮 Cuotas necesarias: ${cuotasNecesarias}`);
-
     if (cuotasNecesarias > 0) {
-      console.log(`\n➕ Creando ${cuotasNecesarias} cuotas faltantes...`);
-
       const ultimoNumero = cuotasLimpias.length > 0
         ? Math.max(...cuotasLimpias.map((c) => c.numero_cuota))
         : 0;
@@ -157,7 +141,6 @@ export const ajustarCuotasConSIFCO = async ({
         const numeroCuota = ultimoNumero + i;
 
         if (numeroCuota > plazo_completo) {
-          console.warn(`   ⚠️ Saltando cuota ${numeroCuota} - excede plazo_completo`);
           break;
         }
 
@@ -193,12 +176,7 @@ export const ajustarCuotasConSIFCO = async ({
 
         await tx.insert(pagos_credito).values(nuevosPagosValues);
 
-        console.log(`   ✅ ${nuevasCuotas.length} cuotas creadas`);
-      } else {
-        console.log(`   ⚠️ No hay cuotas nuevas para crear (todas exceden plazo_completo)`);
       }
-    } else {
-      console.log(`   ✅ Ya existen todas las cuotas del plazo completo`);
     }
 
     // 🔥 ACTUALIZAR LA CUOTA 0 - SOLO fecha_vencimiento (respetar pagado)
@@ -215,7 +193,7 @@ export const ajustarCuotasConSIFCO = async ({
         .set({ fecha_vencimiento: fechaCuota0Str })
         .where(eq(pagos_credito.cuota_id, cuota0.cuota_id));
 
-      console.log(`   🔧 Cuota 0 fecha_vencimiento: ${fechaCuota0Str}`);
+
     }
 
     // 6️⃣ Recargar cuotas válidas y actualizar SOLO fecha_vencimiento
@@ -236,8 +214,6 @@ export const ajustarCuotasConSIFCO = async ({
       )
       .orderBy(asc(cuotas_credito.numero_cuota));
 
-    console.log(`\n📦 Total de cuotas válidas: ${cuotasConPagos.length}`);
-    console.log(`🔄 Actualizando fecha_vencimiento de ${cuotasConPagos.length} cuotas...`);
 
     await Promise.all(
       cuotasConPagos.map((row) => {
@@ -260,12 +236,17 @@ export const ajustarCuotasConSIFCO = async ({
       })
     );
 
-    console.log(`   ✅ ${cuotasConPagos.length} cuotas con fecha_vencimiento actualizada`);
   });
 
-  console.log(`\n🎉 AJUSTE COMPLETADO`);
-  console.log(`   📐 Plazo completo: ${plazo_completo} cuotas`);
-  console.log(`   📅 Día de vencimiento: ${diaVencimiento}`);
+  emitSifcoPaymentMigration({
+    outcome: "completed",
+    operation: "adjust_schedule",
+    processedCount: 1,
+    succeededCount: 1,
+    failedCount: 0,
+    skippedCount: 0,
+    durationMs: Math.max(0, Date.now() - startedAt),
+  });
 };
 interface CreditoPagoSIFCO {
   numeroCredito: string;
@@ -284,11 +265,11 @@ interface CreditoConPagos {
 export const procesarPagosSIFCODesdeJSON = async (
   jsonData: CreditoConPagos[]
 ): Promise<void> => {
-  console.log(`\n🎯 INICIANDO PROCESAMIENTO DE PAGOS DESDE JSON SIFCO`);
-  console.log(`📦 Total de créditos a procesar: ${jsonData.length}`);
+  const startedAt = Date.now();
 
   let procesados = 0;
   let errores = 0;
+  let omitidos = 0;
 
   for (const creditoData of jsonData) {
     const numeroCreditoPadre = creditoData.numeroCredito;
@@ -297,42 +278,47 @@ export const procesarPagosSIFCODesdeJSON = async (
     const primerPago = creditoData.creditos[0];
     
     if (!primerPago) {
-      console.warn(`⚠️ Crédito ${numeroCreditoPadre} no tiene pagos en el array`);
+      omitidos++;
       continue;
     }
 
     try {
-      console.log(`\n🔄 Procesando: ${numeroCreditoPadre}`);
-      console.log(`   📍 Marcar como PAGADAS desde cuota 1 hasta cuota #${primerPago.numeroCuota}`);
-      
       await marcarCuotasPagadasHastaNumero({
         numero_credito_sifco: numeroCreditoPadre,
         hasta_cuota: parseInt(primerPago.numeroCuota),
       });
 
       procesados++;
-      console.log(`   ✅ Cuotas marcadas como PAGADAS`);
-    } catch (error) {
+    } catch {
       errores++;
-      console.error(`   ❌ Error procesando ${numeroCreditoPadre}:`, error);
     }
   }
 
-  console.log(`\n🎉 PROCESAMIENTO COMPLETADO`);
-  console.log(`   ✅ Exitosos: ${procesados}`);
-  console.log(`   ❌ Errores: ${errores}`);
+  const common = {
+    operation: "import_payments" as const,
+    processedCount: jsonData.length,
+    succeededCount: procesados,
+    failedCount: errores,
+    skippedCount: omitidos,
+    durationMs: Math.max(0, Date.now() - startedAt),
+  };
+  emitSifcoPaymentMigration(errores > 0 || omitidos > 0
+    ? { ...common, outcome: "partially_completed", reasonCode: "item_failures" }
+    : { ...common, outcome: "completed" });
 };
 
 interface MarcarCuotasPagadasParams {
   numero_credito_sifco: string;
   hasta_cuota: number;
   fecha_primer_pago?: string; // e.g. "2026-01-30 00:00:00"
+  onPersisted?: () => void;
 }
 
 export const marcarCuotasPagadasHastaNumero = async ({
   numero_credito_sifco,
   hasta_cuota,
   fecha_primer_pago,
+  onPersisted,
 }: MarcarCuotasPagadasParams): Promise<void> => {
 
   /* =====================================================
@@ -464,7 +450,7 @@ export const marcarCuotasPagadasHastaNumero = async ({
   const cuotasParaActualizar: any[] = [];
   const pagosParaActualizar: any[] = [];
 
-  await db.transaction(async (tx) => {
+  const persistedWriteCount = await db.transaction(async (tx) => {
     for (const row of cuotasConPagos) {
       const esPagada = row.numero_cuota <= hasta_cuota;
 
@@ -561,7 +547,16 @@ export const marcarCuotasPagadasHastaNumero = async ({
             total_restante: deudaTotal.toString(),
 
             membresias: membresias.toString(),
-            membresias_pago: membresias.toString(),
+            // `membresias_pago` significa membresía COBRADA. Esta rama siembra
+            // el placeholder PENDIENTE (`pagado: false`, sin `fecha_pago`): no
+            // cobró nada, así que nace en 0. Sembrarlo con el monto contractual
+            // hacía que el guard de sobrescritura, el neteo de la cuota y los
+            // reportes leyeran como pagada una membresía que nadie pagó. El
+            // restante sigue en `membresias`, que es el campo que corresponde.
+            // (La rama de arriba, la de la cuota histórica YA pagada, sí lleva
+            // el monto: ahí la membresía se cobró de verdad.)
+            // Ver `esDestinoSobrescribible`. PR #1519.
+            membresias_pago: "0",
             membresias_mes: membresias.toString(),
 
             fecha_pago: null,
@@ -574,22 +569,31 @@ export const marcarCuotasPagadasHastaNumero = async ({
       }
     }
 
-    await Promise.all([
+    const updatedRows = await Promise.all([
       ...cuotasParaActualizar.map(({ cuota_id, data }) =>
         tx.update(cuotas_credito).set(data).where(eq(cuotas_credito.cuota_id, cuota_id))
+          .returning({ cuota_id: cuotas_credito.cuota_id })
       ),
       ...pagosParaActualizar.map(({ pago_id, data }) =>
         tx.update(pagos_credito).set(data).where(eq(pagos_credito.pago_id, pago_id))
+          .returning({ pago_id: pagos_credito.pago_id })
       ),
     ]);
+    return countPersistedRows(updatedRows);
   });
 
-  console.log(`✅ Cuotas marcadas correctamente hasta la ${hasta_cuota}`);
+  if (persistedWriteCount > 0) {
+    try {
+      onPersisted?.();
+    } catch {
+      // Persistence observers cannot alter the historical payment flow.
+    }
+  }
+
 
   // Recalcular cuotas pendientes con el capital correcto
   await updateInstallments({
     numero_credito_sifco,
     nueva_cuota: Number(credito.cuota),
   });
-  console.log(`✅ Cuotas pendientes recalculadas para ${numero_credito_sifco}`);
 };

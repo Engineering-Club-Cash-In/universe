@@ -1,6 +1,7 @@
-import { and, asc, count, eq, or } from "drizzle-orm";
+import { and, asc, count, eq, not, or } from "drizzle-orm";
 import type { Context } from "hono";
 import { db } from "../db";
+import { auditRecord } from "../lib/audit";
 import { user } from "../db/schema/auth";
 import {
 	type leadSourceEnum,
@@ -130,6 +131,13 @@ export async function createOpportunityForLead(
 		})
 		.returning();
 
+	auditRecord({
+		entity: "opportunity",
+		id: newOpportunity.id,
+		action: "create",
+		data: { leadId, source, campaign, creditType, assignedTo: systemUserId },
+	});
+
 	return newOpportunity;
 }
 
@@ -239,13 +247,39 @@ export async function createPublicLead(c: Context) {
 					);
 
 					if (Object.keys(opportunityUpdates).length > 0) {
-						await db
+						// `opportunityUpdates` puede traer `creditType`, que es campo
+						// congelado. La oportunidad se eligió entre las abiertas, pero
+						// entre esa lectura y este UPDATE `closeOpportunity` puede
+						// haberla marcado ganada: el predicado lo exige en la misma
+						// sentencia, como en `updateOpportunity`.
+						const actualizadas = await db
 							.update(opportunities)
 							.set({
 								...opportunityUpdates,
 								updatedAt: new Date(),
 							})
-							.where(eq(opportunities.id, sameSourceOpportunity.id));
+							.where(
+								and(
+									eq(opportunities.id, sameSourceOpportunity.id),
+									not(eq(opportunities.status, "won")),
+								),
+							)
+							.returning({ id: opportunities.id });
+
+						if (actualizadas.length > 0) {
+							auditRecord({
+								entity: "opportunity",
+								id: sameSourceOpportunity.id,
+								action: "update",
+								data: opportunityUpdates,
+							});
+						} else {
+							// No es un error del formulario: el proceso ya se cerró
+							// mientras tanto y sus datos quedaron fijados.
+							console.log(
+								`[PublicLead] Oportunidad ${sameSourceOpportunity.id} ya está ganada; no se actualiza`,
+							);
+						}
 					}
 
 					// La campaña sí se sincroniza cuando la re-entrada es del mismo
@@ -264,6 +298,12 @@ export async function createPublicLead(c: Context) {
 							.set({ campaign: body.campaign, updatedAt: new Date() })
 							.where(eq(leads.id, opportunityLead.id))
 							.returning();
+						auditRecord({
+							entity: "lead",
+							id: opportunityLead.id,
+							action: "update",
+							data: { campaign: body.campaign },
+						});
 
 						if (syncedLead?.id === existingLead.id) {
 							leadData = syncedLead;
@@ -284,6 +324,12 @@ export async function createPublicLead(c: Context) {
 						.set({ email: body.email, updatedAt: new Date() })
 						.where(eq(leads.id, existingLead.id))
 						.returning();
+					auditRecord({
+						entity: "lead",
+						id: existingLead.id,
+						action: "update",
+						data: { email: body.email },
+					});
 				}
 
 				// De `leads` no se toca nada más: `source` es lo que clasifica a las
@@ -312,6 +358,12 @@ export async function createPublicLead(c: Context) {
 					})
 					.where(eq(leads.id, existingLead.id))
 					.returning();
+				auditRecord({
+					entity: "lead",
+					id: existingLead.id,
+					action: "update",
+					data: { source, campaign },
+				});
 			}
 
 			const assignedTo = await resolveExistingLeadAssigneeFromDatabase(
@@ -338,6 +390,14 @@ export async function createPublicLead(c: Context) {
 					})
 					.where(eq(leads.id, existingLead.id))
 					.returning();
+				// Reasignación por ruleta: es de lo que más se reclama y hasta ahora
+				// no dejaba rastro en ningún lado.
+				auditRecord({
+					entity: "lead",
+					id: existingLead.id,
+					action: "reassign",
+					data: { assignedTo, motivo: "reingreso_formulario_publico" },
+				});
 			}
 
 			const opportunity = await createOpportunityForLead(
@@ -368,6 +428,12 @@ export async function createPublicLead(c: Context) {
 					})
 					.where(eq(leads.id, existingLead.id))
 					.returning();
+				auditRecord({
+					entity: "lead",
+					id: existingLead.id,
+					action: "update",
+					data: { email: body.email, source, campaign },
+				});
 
 				return c.json(
 					{
@@ -434,6 +500,12 @@ export async function createPublicLead(c: Context) {
 				updatedAt: new Date(),
 			})
 			.returning();
+		auditRecord({
+			entity: "lead",
+			id: newLead.id,
+			action: "create",
+			data: body,
+		});
 
 		// RENAP solo si tiene DPI y teléfono
 		const renapInfo = hasDpi

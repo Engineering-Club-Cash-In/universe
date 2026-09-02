@@ -11,17 +11,19 @@
 		"check-types": "tsc --noEmit"
 	},
 	"devDependencies": {
+		"@tanstack/react-query-devtools": "^5.80.5",
 		"@tanstack/react-router-devtools": "^1.114.27",
 		"@tanstack/router-plugin": "^1.114.27",
+		"@testing-library/react": "^16.3.3",
 		"@types/node": "^22.13.13",
 		"@types/react": "^19.0.12",
 		"@types/react-datepicker": "^7.0.0",
 		"@types/react-dom": "^19.0.4",
 		"@vitejs/plugin-react": "^4.3.4",
+		"happy-dom": "^20.12.0",
 		"postcss": "^8.5.3",
 		"tailwindcss": "^4.0.15",
-		"vite": "^6.2.2",
-		"@tanstack/react-query-devtools": "^5.80.5"
+		"vite": "^6.2.2"
 	},
 	"dependencies": {
 		"@atlaskit/pragmatic-drag-and-drop": "^1.7.4",

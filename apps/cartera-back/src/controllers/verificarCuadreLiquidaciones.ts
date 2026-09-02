@@ -111,23 +111,39 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
   const inicio = `${periodo}-01`;
 
   const resultado = await db.execute(sql`
-    with liq as (
-      -- Una liquidación por inversionista: la última del período. En condiciones
-      -- normales solo hay una; el distinct on es por si acaso.
-      select distinct on (l.inversionista_id)
-             l.liquidacion_id, l.inversionista_id, l.fecha_liquidacion, l.reinversion_total
+    with todas as (
+      select l.liquidacion_id, l.inversionista_id, l.fecha_liquidacion, l.reinversion_total,
+             row_number() over (
+               partition by l.inversionista_id order by l.fecha_liquidacion desc
+             ) as orden
       from cartera.liquidaciones l
       where l.fecha_liquidacion >= ${inicio}::date
         and l.fecha_liquidacion <  (${inicio}::date + interval '1 month')
-      order by l.inversionista_id, l.fecha_liquidacion desc
+    ),
+    liq as (
+      -- La ecuación se evalúa contra la ÚLTIMA liquidación del mes: el espejo
+      -- vivo refleja todo lo posterior, así que compararlo con el histórico de
+      -- una liquidación anterior daría un descuadre garantizado.
+      --
+      -- Las anteriores del mismo mes (raro, pero liquidateByInvestorId lo
+      -- permite cuando aparecen pagos NO_LIQUIDADO nuevos) no quedan sin
+      -- revisar: se verifican aparte, más abajo, comprobando que su
+      -- reinversión llegó a colocarse. Sin eso, una reinversión perdida en la
+      -- primera liquidación se volvería invisible, porque el histórico de la
+      -- segunda arranca del espejo ya deficiente y cuadra solo.
+      select liquidacion_id, inversionista_id, fecha_liquidacion, reinversion_total
+      from todas where orden = 1
     ),
     pendientes as (
-      -- Las que ya cuadraron no se vuelven a verificar.
-      select liq.* from liq
-      where not exists (
-        select 1 from cartera.verificacion_liquidacion v
-        where v.liquidacion_id = liq.liquidacion_id and v.cuadra = true
-      )
+      -- TODAS las liquidaciones del mes se revisan los tres días, incluidas
+      -- las que ya cuadraron. Cuadrar el 11 no es un salvoconducto: el caso
+      -- que motivó este job (Adriana Bahaia, agosto 2026) cuadraba a las 8am
+      -- del 11 y el borrado de Q95,035.51 de su espejo ocurrió a las 15:47 de
+      -- ese mismo día. Excluir lo ya cuadrado lo volvería invisible, que es
+      -- justo lo contrario de para qué existen las corridas del 12 y el 13.
+      --
+      -- Lo que evita el correo repetido es notificado_at, no este filtro.
+      select * from liq
     ),
     espejo as (
       select e.inversionista_id,
@@ -145,56 +161,45 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
       where h.liquidacion_id in (select liquidacion_id from pendientes)
       group by 1
     ),
-    entraron as (
-      -- Capital que la liquidación no absorbió: créditos que están en el espejo
-      -- pero no dejaron fila en el histórico de esa liquidación.
+    compras as (
+      -- Compras de cartera del período que la liquidación NO absorbió.
       --
-      -- Sale del espejo y NO de compras_credito_inversionista: esa fila se crea
-      -- recién cuando alguien acepta la compra, con fechas hacia atrás, así que
-      -- el capital vive en el espejo días antes de que exista su registro (caso
-      -- Glenda: capital el 7-ago, fila creada el 17-ago fechada 12-ago).
+      -- Se resta solo la compra cuyo crédito no dejó fila en el histórico de
+      -- esa liquidación: un crédito comprado a principio de mes no genera pago
+      -- espejo (calcularYRegistrarPagosEspejo lo omite por participación nueva
+      -- sin monto viejo), así que no entra a la liquidación del 10 pero sí
+      -- infla el monto_aportado. Si el crédito sí liquidó, el histórico se
+      -- escribió con la compra ya incluida y restarla sería doble conteo.
       --
-      -- Excepción: el crédito donde aterrizó la REINVERSIÓN no cuenta como
-      -- capital nuevo. Restarlo cancelaría la reinversión del lado derecho y el
-      -- guard nunca vería una reinversión perdida. Las compras de tipo
-      -- 'reinversion' sí se registran en el instante, así que sirven para
-      -- identificarlo (las de compra_cartera no).
-      select e.inversionista_id,
-             sum(e.monto_aportado) as monto,
+      -- Las de tipo 'reinversion' no entran: ya están del lado derecho, dentro
+      -- de reinversion_total.
+      --
+      -- El status no se mira: una compra pendiente de aceptar ya movió el
+      -- monto_aportado, y que la persona la acepte o la cancele después es
+      -- decisión suya, no un error del sistema.
+      select c.inversionista_id,
+             sum(c.monto_aportado) as monto,
              jsonb_agg(jsonb_build_object(
-               'credito_id', e.credito_id, 'monto', e.monto_aportado
-             ) order by e.credito_id) as detalle
-      from cartera.creditos_inversionistas_espejo e
-      join pendientes p on p.inversionista_id = e.inversionista_id
-      where not exists (
-        select 1 from cartera.historico_liquidaciones_espejo hl
-        where hl.liquidacion_id = p.liquidacion_id
-          and hl.credito_id = e.credito_id
-          and hl.inversionista_id = e.inversionista_id
-      )
-      and not exists (
-        select 1 from cartera.compras_credito_inversionista c
-        where c.credito_id = e.credito_id
-          and c.inversionista_id = e.inversionista_id
-          and c.tipo_operacion = 'reinversion'
-          and c.created_at >= p.fecha_liquidacion - interval '1 day'
-      )
-      group by 1
-    ),
-    salieron as (
-      -- Contrapartida: créditos que sí liquidaron pero que ya no están en el
-      -- espejo. Sin esto, mover capital de un crédito viejo a uno nuevo
-      -- (reubicación, que es válida y rutinaria) contaría el destino como
-      -- capital nuevo y alertaría por el monto completo. Restando lo que salió,
-      -- una reubicación neta da cero.
-      select hl.inversionista_id, sum(hl.monto_aportado) as monto
-      from cartera.historico_liquidaciones_espejo hl
-      join pendientes p on p.liquidacion_id = hl.liquidacion_id
-      where not exists (
-        select 1 from cartera.creditos_inversionistas_espejo e
-        where e.credito_id = hl.credito_id
-          and e.inversionista_id = hl.inversionista_id
-      )
+               'compra_id',  c.id,
+               'credito_id', c.credito_id,
+               'monto',      c.monto_aportado,
+               'status',     c.status,
+               'created_at', c.created_at
+             ) order by c.id) as detalle
+      from cartera.compras_credito_inversionista c
+      join pendientes p on p.inversionista_id = c.inversionista_id
+      where c.tipo_operacion = 'compra_cartera'
+        and (
+          c.created_at >= ${inicio}::date
+          or (c.fecha_completada >= ${inicio}::date
+              and c.fecha_completada < (${inicio}::date + interval '1 month'))
+        )
+        and not exists (
+          select 1 from cartera.historico_liquidaciones_espejo hl
+          where hl.liquidacion_id   = p.liquidacion_id
+            and hl.credito_id       = c.credito_id
+            and hl.inversionista_id = c.inversionista_id
+        )
       group by 1
     )
     select
@@ -205,10 +210,10 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
       coalesce(e.espejo, 0)::text            as espejo,
       coalesce(h.historico, 0)::text         as historico,
       p.reinversion_total::text              as reinversion_total,
-      (coalesce(en.monto, 0) - coalesce(sa.monto, 0))::text as compras_no_absorbidas,
+      coalesce(c.monto, 0)::text             as compras_no_absorbidas,
       coalesce(e.creditos, 0)                as creditos_espejo,
       coalesce(h.creditos, 0)                as creditos_historico,
-      coalesce(en.detalle, '[]'::jsonb)      as compras_detalle,
+      coalesce(c.detalle, '[]'::jsonb)       as compras_detalle,
       -- Ya se avisó de esta liquidación: se sigue verificando (por si cuadra y
       -- se cierra) pero no se vuelve a mandar correo.
       (v.notificado_at is not null)          as ya_notificada
@@ -216,13 +221,58 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
     join cartera.inversionistas i on i.inversionista_id = p.inversionista_id
     left join espejo  e on e.inversionista_id = p.inversionista_id
     left join hist    h on h.liquidacion_id   = p.liquidacion_id
-    left join entraron en on en.inversionista_id = p.inversionista_id
-    left join salieron sa on sa.inversionista_id = p.inversionista_id
+    left join compras c on c.inversionista_id = p.inversionista_id
     left join cartera.verificacion_liquidacion v on v.liquidacion_id = p.liquidacion_id
     order by p.inversionista_id
   `);
 
   return (resultado as unknown as { rows: FilaCuadre[] }).rows ?? [];
+}
+
+/**
+ * Liquidaciones NO finales del mes (un inversionista liquidado dos veces) cuya
+ * reinversión nunca llegó a colocarse.
+ *
+ * La ecuación principal solo puede evaluarse contra la última liquidación del
+ * mes: el espejo vivo ya refleja todo lo posterior. Para las anteriores el
+ * histórico de la siguiente arranca del espejo ya deficiente y cuadra solo, así
+ * que una reinversión perdida ahí sería invisible. Acá se comprueba lo único
+ * que sigue siendo verificable: que existiera una compra de reinversión después
+ * de esa liquidación.
+ */
+export async function leerReinversionesAnterioresSinColocar(periodo: string) {
+  const inicio = `${periodo}-01`;
+
+  const resultado = await db.execute(sql`
+    with todas as (
+      select l.liquidacion_id, l.inversionista_id, l.fecha_liquidacion, l.reinversion_total,
+             row_number() over (
+               partition by l.inversionista_id order by l.fecha_liquidacion desc
+             ) as orden,
+             lead(l.fecha_liquidacion) over (
+               partition by l.inversionista_id order by l.fecha_liquidacion
+             ) as siguiente
+      from cartera.liquidaciones l
+      where l.fecha_liquidacion >= ${inicio}::date
+        and l.fecha_liquidacion <  (${inicio}::date + interval '1 month')
+    )
+    select t.liquidacion_id, t.inversionista_id, i.nombre,
+           t.fecha_liquidacion, t.reinversion_total::text as reinversion_total
+    from todas t
+    join cartera.inversionistas i on i.inversionista_id = t.inversionista_id
+    where t.orden > 1
+      and t.reinversion_total > 0
+      and not exists (
+        select 1 from cartera.compras_credito_inversionista c
+        where c.inversionista_id = t.inversionista_id
+          and c.tipo_operacion = 'reinversion'
+          and c.fecha >= t.fecha_liquidacion - interval '1 day'
+          and (t.siguiente is null or c.fecha < t.siguiente)
+      )
+    order by t.inversionista_id
+  `);
+
+  return (resultado as unknown as { rows: any[] }).rows ?? [];
 }
 
 /**
@@ -317,6 +367,61 @@ export async function verificarCuadreLiquidaciones(periodo = periodoActualGuatem
     `📊 [verificarCuadreLiquidaciones] Verificadas ${filas.length} · cuadran ${cuadran} · ` +
     `descuadran ${descuadran} (${yaAvisadas} ya avisadas antes) · por avisar ${porAvisar.length}`
   );
+
+  // Liquidaciones anteriores del mismo mes cuya reinversión nunca se colocó.
+  // No pasan por la ecuación (el espejo vivo no sirve para compararlas), así
+  // que se guardan con el descuadre igual a la reinversión que falta.
+  const anteriores = await leerReinversionesAnterioresSinColocar(periodo);
+  for (const ant of anteriores) {
+    const faltante = new Big(ant.reinversion_total || 0);
+    const guardadaAnt = await db.execute(sql`
+      insert into cartera.verificacion_liquidacion (
+        liquidacion_id, inversionista_id, periodo,
+        espejo, historico, reinversion_total, compras_no_absorbidas,
+        descuadre, cuadra, detalle
+      ) values (
+        ${ant.liquidacion_id}, ${ant.inversionista_id}, ${periodo},
+        '0', '0', ${faltante.toFixed(2)}, '0',
+        ${faltante.times(-1).toFixed(8)}, false,
+        ${JSON.stringify({
+          motivo: "liquidacion_anterior_del_mes_sin_reinversion_colocada",
+          nota: "No se evalúa la ecuación: el espejo vivo ya refleja la liquidación posterior.",
+        })}::jsonb
+      )
+      on conflict (liquidacion_id) do update set
+        descuadre     = excluded.descuadre,
+        cuadra        = false,
+        detalle       = excluded.detalle,
+        intentos      = cartera.verificacion_liquidacion.intentos + 1,
+        verificado_at = now()
+      returning intentos, (notificado_at is not null) as ya_notificada
+    `);
+    const filaAnt = (guardadaAnt as unknown as {
+      rows: { intentos: number; ya_notificada: boolean }[];
+    }).rows?.[0];
+
+    descuadran++;
+    if (filaAnt?.ya_notificada) {
+      yaAvisadas++;
+      continue;
+    }
+    porAvisar.push({
+      liquidacion_id: ant.liquidacion_id,
+      inversionista_id: ant.inversionista_id,
+      nombre: ant.nombre,
+      fecha_liquidacion: ant.fecha_liquidacion,
+      espejo: "0",
+      historico: "0",
+      reinversion_total: faltante.toFixed(2),
+      compras_no_absorbidas: "0",
+      creditos_espejo: 0,
+      creditos_historico: 0,
+      compras_detalle: [],
+      ya_notificada: false,
+      descuadre: faltante.times(-1),
+      intentos: Number(filaAnt?.intentos ?? 1),
+    });
+  }
 
   if (porAvisar.length === 0) {
     return {

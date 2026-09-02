@@ -86,7 +86,10 @@ const ultimaCotizacion = db
 // desembolso fue completado. No usamos `status = won`, porque ese estado se
 // asigna antes, al crear el crÃ©dito en cartera-back.
 const desembolsosCompletados = db
-	.selectDistinct({ opportunityId: notifications.relatedEntityId })
+	.select({
+		opportunityId: notifications.relatedEntityId,
+		completedAt: sql<Date>`max(${notifications.createdAt})`.as("completed_at"),
+	})
 	.from(notifications)
 	.where(
 		and(
@@ -97,6 +100,7 @@ const desembolsosCompletados = db
 			like(notifications.titulo, "Desembolso completado -%"),
 		),
 	)
+	.groupBy(notifications.relatedEntityId)
 	.as("desembolsos_completados");
 
 const filaSelect = {
@@ -116,6 +120,7 @@ const filaSelect = {
 		quotationModel: ultimaCotizacion.vehicleModel,
 		vehicleValue: ultimaCotizacion.vehicleValue,
 		disbursementCompleted: sql<boolean>`(${desembolsosCompletados.opportunityId} IS NOT NULL)`,
+		disbursementCompletedAt: desembolsosCompletados.completedAt,
 };
 
 type Fila = {
@@ -135,6 +140,7 @@ type Fila = {
 	quotationModel: string | null;
 	vehicleValue: string | null;
 	disbursementCompleted: boolean;
+	disbursementCompletedAt: Date | null;
 };
 
 function nombreCliente(firstName: string | null, lastName: string | null) {
@@ -344,14 +350,13 @@ export const trackerRouter = {
 							isNull(desembolsosCompletados.opportunityId),
 						),
 						and(
-							or(
-								eq(opportunities.status, "lost"),
-								and(
-									eq(opportunities.status, "won"),
-									isNotNull(desembolsosCompletados.opportunityId),
-								),
-							),
+							eq(opportunities.status, "lost"),
 							gte(fechaCierre, desde),
+						),
+						and(
+							eq(opportunities.status, "won"),
+							isNotNull(desembolsosCompletados.opportunityId),
+							gte(desembolsosCompletados.completedAt, desde),
 						),
 					),
 				),

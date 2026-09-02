@@ -130,6 +130,7 @@ export function ReinvestmentReport({
 			currency: "GTQ",
 		}).format(Number(value));
 	const details = buildSecondarySummaryPresentation(safeData);
+	const selectedDetail = details.find((item) => item.key === detail);
 	const monthlyFooter = getMonthlyFooterPresentation(model);
 	const selectedModeRow = model.rows.find((row) => row.type === selectedMode);
 
@@ -494,8 +495,9 @@ export function ReinvestmentReport({
 										<Button
 											variant="ghost"
 											size="sm"
+											aria-label={`${detail === item.key ? "Ocultar" : "Ver"} detalle de ${item.label}`}
 											aria-expanded={detail === item.key}
-											aria-controls={`${detailId}-${item.key}`}
+											aria-controls={detail ? detailId : undefined}
 											onClick={() =>
 												setDetail((current) =>
 													current === item.key ? null : item.key,
@@ -508,23 +510,36 @@ export function ReinvestmentReport({
 											/>
 										</Button>
 									</div>
-									{detail === item.key ? (
-										<div
-											id={`${detailId}-${item.key}`}
-											className="border-t pt-3"
-											aria-live="polite"
-										>
-											<DetailTable
-												key={`${periodLabel}-${item.key}`}
-												detail={item.key}
-												data={safeData}
-												currency={currency}
-											/>
-										</div>
-									) : null}
 								</CardContent>
 							</Card>
 						))}
+						{detail && selectedDetail ? (
+							<section
+								id={detailId}
+								className="w-full rounded-lg border bg-background p-4 sm:p-5 lg:col-span-3"
+								data-layout="secondary-detail-panel"
+								aria-labelledby={`${detailId}-heading`}
+								aria-live="polite"
+							>
+								<div className="mb-4 border-b pb-3">
+									<p className="text-muted-foreground text-xs uppercase tracking-wide">
+										Detalle del período
+									</p>
+									<h4
+										id={`${detailId}-heading`}
+										className="mt-1 font-semibold text-lg"
+									>
+										{selectedDetail.label}
+									</h4>
+								</div>
+								<DetailTable
+									key={`${periodLabel}-${detail}`}
+									detail={detail}
+									data={safeData}
+									currency={currency}
+								/>
+							</section>
+						) : null}
 					</div>
 				)}
 			</section>

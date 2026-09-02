@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import { Resend } from "resend";
 import LiquidationEmail from "./templates/LiquidationTemplate";
-import PasswordResetEmail from "./templates/PasswordResetTemplate";
+import PasswordResetEmail, { type PasswordResetRole } from "./templates/PasswordResetTemplate";
 import NewCreditEmail from "./templates/NewCreditTemplate";
 import * as React from "react";
 
@@ -116,7 +116,11 @@ export const sendLiquidationEmail = async ({
   }
 };
 
-export const sendPasswordResetEmail = async (to: string, resetUrl: string) => {
+export const sendPasswordResetEmail = async (
+  to: string,
+  resetUrl: string,
+  role?: PasswordResetRole,
+) => {
   emailSchema.parse(to);
 
   const assetsBaseUrl = process.env.EMAIL_ASSETS_BASE_URL;
@@ -137,7 +141,7 @@ export const sendPasswordResetEmail = async (to: string, resetUrl: string) => {
       from: `Club Cash In <no-reply@${domain}>`,
       to: [to],
       subject: "Restablecer contraseña - CashIn",
-      react: React.createElement(PasswordResetEmail, { resetUrl, assets: emailAssets }),
+      react: React.createElement(PasswordResetEmail, { resetUrl, assets: emailAssets, role }),
     });
 
     if (error) {

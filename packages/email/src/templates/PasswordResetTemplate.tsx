@@ -1,6 +1,7 @@
 import * as React from 'react';
 import {
   Body,
+  Button,
   Column,
   Container,
   Font,
@@ -21,12 +22,20 @@ interface PasswordResetEmailAssets {
   warningIcon: string;
 }
 
+export type PasswordResetRole = 'CLIENT' | 'INVESTOR';
+
 interface PasswordResetEmailProps {
   resetUrl: string;
   assets: PasswordResetEmailAssets;
+  /**
+   * Rol de la cuenta que pidió el restablecimiento. El portal permite
+   * registrarse como CLIENT o INVESTOR, así que el saludo y el nombre del
+   * portal cambian según el caso. Sin rol se usa el texto neutral.
+   */
+  role?: PasswordResetRole;
 }
 
-export const PasswordResetEmail = ({ resetUrl, assets }: PasswordResetEmailProps) => (
+export const PasswordResetEmail = ({ resetUrl, assets, role }: PasswordResetEmailProps) => (
   <Html>
     <Head>
       {/*
@@ -59,7 +68,13 @@ export const PasswordResetEmail = ({ resetUrl, assets }: PasswordResetEmailProps
         />
 
         <Section style={content}>
-          <Text style={greeting}>Estimado inversionista,</Text>
+          <Text style={greeting}>
+            {role === 'INVESTOR'
+              ? 'Estimado inversionista,'
+              : role === 'CLIENT'
+                ? 'Estimado cliente,'
+                : 'Hola,'}
+          </Text>
 
           <Section style={shadowStep6}>
             <Section style={shadowStep5}>
@@ -69,16 +84,25 @@ export const PasswordResetEmail = ({ resetUrl, assets }: PasswordResetEmailProps
                     <Section style={shadowStep1}>
                       <Section style={card}>
                         <Text style={text}>
-                          Recibimos una solicitud para restablecer la contraseña de tu cuenta del
-                          Portal del Inversionista de CashIn.
+                          Recibimos una solicitud para restablecer la contraseña de tu cuenta{' '}
+                          {role === 'INVESTOR'
+                            ? 'del Portal del Inversionista de CashIn.'
+                            : 'de CashIn.'}
                         </Text>
 
                         <Text style={ctaLabel}>Haz click en el botón para</Text>
 
                         <Section style={buttonContainer}>
-                          <Link href={resetUrl} style={button}>
+                          {/*
+                            <Button> y no <Link>: react-email le agrega los
+                            workarounds que Outlook clásico (renderizador de
+                            Word) necesita para respetar el padding y el fondo
+                            redondeado; con un anchor simple el CTA colapsa a
+                            texto con estilos.
+                          */}
+                          <Button href={resetUrl} style={button}>
                             Restablecer Contraseña
-                          </Link>
+                          </Button>
                         </Section>
 
                         <Text style={expiry}>Por seguridad, este enlace expirará en 1 hora.</Text>

@@ -181,31 +181,6 @@ export type DestinoSobrescribibleRow = {
 };
 
 /**
- * ¿Es el placeholder VIRGEN que sembró el importador, o una fila `no_required`
- * que ya recibió plata de verdad?
- *
- * El status no alcanza para distinguirlos —de eso trata todo este archivo— así
- * que se mira la PROCEDENCIA: la semilla nace con `fecha_pago = null`
- * (`migratePayments.ts`, `registerBy = 'SIFCO_IMPORT'`) y ninguna vía de
- * aplicación la deja sin fecha: `aplicarMontoAPago` escribe `fecha_pago` en el
- * mismo UPDATE en que reparte el dinero, y conserva `no_required` cuando no le
- * pasan `validationStatus`. Medido en prod el 01-sep-2026: las 181 semillas con
- * `membresias_pago` en cuotas abiertas tienen las DOS marcas (`fecha_pago` nulo
- * y `registerBy = 'SIFCO_IMPORT'`), y no existe ninguna fila `no_required` con
- * plata real que venga sin fecha.
- *
- * Importa para los dos lados: sin esto, un pago REAL de solo membresías hecho
- * por `/aplicar-monto-pago` (que deja `monto_aplicado === membresias_pago` y el
- * status intacto) se leería como semilla y el siguiente cierre lo borraría.
- * Codex P1, 3.ª ronda del PR #1519.
- */
-export const esPlaceholderSifcoVirgen = (pago: {
-  validationStatus?: string | null;
-  fecha_pago?: Date | string | null;
-}): boolean =>
-  pago.validationStatus === "no_required" && pago.fecha_pago == null;
-
-/**
  * ¿La fila de pago elegida como `existingPago` se puede SOBRESCRIBIR (UPDATE) al
  * cerrar la cuota, sin destruir plata real?
  *
@@ -227,6 +202,18 @@ export const esPlaceholderSifcoVirgen = (pago: {
  * contra esa cuota fue elegida como destino y el UPDATE borró el pago. Por eso
  * la decisión mira la PLATA, no el status.
  *
+ * NO hay excepción para `membresias_pago`. La hubo: el importador siembra el
+ * placeholder con `membresias_pago = membresias` (un campo que significa
+ * "membresía COBRADA") aunque la cuota esté intacta, y exceptuarlo evitaba una
+ * fila duplicada en 181 placeholders / 4 créditos. Pero ese dato sembrado es
+ * indistinguible de un cobro real en cuanto alguien toca la fila: `editarPago`
+ * escribe `membresias_pago` sin estampar `fecha_pago` (el front no manda ese
+ * campo) y `/aplicar-monto-pago` reparte a ese bucket conservando el status.
+ * Ninguna marca de la fila los separa, y equivocarse hacia el lado de "es
+ * semilla" BORRA un pago real. Se arregla en la fuente: el importador ya no
+ * siembra ese campo (`migratePayments.ts`) y las 181 filas existentes se
+ * limpian aparte. Codex P1, rondas 2-4 del PR #1519.
+ *
  * Cuando el placeholder `no_required` ya fue consumido por un parcial previo,
  * `existingPago` cae al fallback `allExistingPagos[0]` = la fila REAL más vieja
  * (con `abono_interes` validado, posiblemente ya facturado). Sobrescribirla
@@ -236,7 +223,6 @@ export const esPlaceholderSifcoVirgen = (pago: {
 export const esDestinoSobrescribible = (
   pago: DestinoSobrescribibleRow
 ): boolean => {
-  const esPlaceholderSifco = esPlaceholderSifcoVirgen(pago);
   const tol = new Big(DESTINO_SOBRESCRIBIBLE_TOLERANCE);
   // Estricto (`lt`, no `lte`): un Q0.01 exacto es un pago real, no "vacío".
   const casiCero = (v: BigInput | null | undefined) =>
@@ -249,45 +235,14 @@ export const esDestinoSobrescribible = (
     return new Big(s).abs().lt(tol);
   };
 
-  // En una fila `no_required` el `monto_aplicado` puede venir DERIVADO de la
-  // membresía sembrada: `editarPago` lo recalcula como la suma de todos los
-  // abonos —membresías incluidas— en cuanto el editor de pagos guarda la fila,
-  // y el front manda todos los campos poblados. O sea que un placeholder
-  // virgen que alguien abrió y guardó sin tocar nada sale con
-  // `monto_aplicado = membresias_pago`. Medir el bruto lo daría por "con
-  // plata" y volveríamos justo a la fila duplicada que la excepción de abajo
-  // existe para evitar. Se mide el NETO de la membresía, con piso en cero (el
-  // placeholder virgen trae el bucket sembrado y `monto_aplicado` en 0, así
-  // que el neto da negativo y sin el piso lo leeríamos como plata).
-  // Una fila realmente mixta conserva su remanente y sigue protegida.
-  // Codex P1, 2.ª ronda del PR #1519.
-  const montoAplicadoBruto = new Big(pago.monto_aplicado ?? 0);
-  const montoAplicadoNeto = esPlaceholderSifco
-    ? (() => {
-        const neto = montoAplicadoBruto.minus(new Big(pago.membresias_pago ?? 0));
-        return neto.lt(0) ? new Big(0) : neto;
-      })()
-    : montoAplicadoBruto;
-
   return (
-    casiCero(montoAplicadoNeto) &&
+    casiCero(pago.monto_aplicado) &&
     casiCero(pago.abono_capital) &&
     casiCero(pago.abono_interes) &&
     casiCero(pago.abono_iva_12) &&
     casiCero(pago.abono_seguro) &&
     casiCero(pago.abono_gps) &&
-    // `membresias_pago` NO cuenta como plata en una fila `no_required`: el
-    // importador de SIFCO siembra el placeholder con
-    // `membresias_pago = membresias` (migratePayments.ts:568) aunque la cuota
-    // esté intacta. Medido en prod el 01-sep-2026 sobre las 92,046 filas
-    // `no_required` vírgenes de cuotas abiertas en créditos vivos: 181 (4
-    // créditos, p.ej. el 899 cuotas 17-24 con 461.63) traen ese bucket
-    // sembrado, y NINGUNA trae mora, convenio, otros ni los `*_ci` — por eso
-    // la excepción es de este campo y de ningún otro. Contarlo dejaría a esos
-    // placeholders fuera de la rama UPDATE y cada cuota cerrada terminaría con
-    // una fila duplicada que los reportes de membresías suman dos veces.
-    // En cualquier otro status sí cuenta: ahí solo lo escribe un pago real.
-    (esPlaceholderSifco || casiCero(pago.membresias_pago)) &&
+    casiCero(pago.membresias_pago) &&
     casiCero(pago.abono_interes_ci) &&
     casiCero(pago.abono_iva_ci) &&
     // Plata real fuera de los abono_* de cuota: mora, convenio y otros.
@@ -296,7 +251,6 @@ export const esDestinoSobrescribible = (
     otrosCasiCero(pago.otros)
   );
 };
-
 /**
  * ¿Esta fila hay que CONTARLA como hermana viva al netear la cuota?
  *
@@ -319,38 +273,6 @@ export const cuentaComoHermanoVivo = (
   pago: DestinoSobrescribibleRow
 ): boolean =>
   pago.validationStatus !== "no_required" || !esDestinoSobrescribible(pago);
-
-/**
- * Deja una fila hermana lista para NETEAR la cuota.
- *
- * `membresias_pago` en una fila `no_required` no es plata cobrada: el
- * importador de SIFCO la siembra (ver `esDestinoSobrescribible`). Ese criterio
- * tiene que valer también al netear, no solo al decidir si la fila se puede
- * pisar — si no, el mismo campo diría dos cosas distintas según quién lo mire.
- *
- * El caso que lo destapa es la fila MIXTA: una semilla que después absorbió
- * plata real (p.ej. un `abono_interes` puesto con /editPayment, como la 136221
- * del crédito 890). Entra al neteo por sus rubros REALES —eso es justo lo que
- * `cuentaComoHermanoVivo` busca— pero arrastraba consigo la membresía sembrada.
- * `sumarAplicadoACuota` y `membresiasPrevioCuota` la sumaban como cobrada, así
- * que el motor encogía el saldo de la cuota por un monto fantasma y rebalsaba
- * parte del pago nuevo a la cuota siguiente antes de tiempo. Codex P1 en el PR
- * #1519.
- *
- * Se cero el bucket en una COPIA: la fila de la base no se toca.
- */
-export const normalizarHermanoParaNeteo = <
-  T extends {
-    validationStatus?: string | null;
-    membresias_pago?: BigInput | null;
-    fecha_pago?: Date | string | null;
-  }
->(
-  pago: T
-): T =>
-  esPlaceholderSifcoVirgen(pago)
-    ? ({ ...pago, membresias_pago: "0" } as T)
-    : pago;
 
 export type SaldoCuotaInput = {
   /** Monto total de la cuota (credito.cuota). */

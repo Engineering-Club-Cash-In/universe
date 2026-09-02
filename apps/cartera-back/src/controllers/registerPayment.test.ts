@@ -7,11 +7,9 @@ import {
   capitalSuprimidoPorConvenio,
   calcularSaldoNetoCuota,
   cuentaComoHermanoVivo,
-  normalizarHermanoParaNeteo,
   debeProcesarConvenio,
   debeRechazarAbonoCapitalNoAplicado,
   esDestinoSobrescribible,
-  esPlaceholderSifcoVirgen,
   getApplyPaymentHttpStatus,
   getCuotaIdForPaymentInsert,
   getRequestedInstallmentFloor,
@@ -439,24 +437,37 @@ describe("cuentaComoHermanoVivo", () => {
     ).toBe(true);
   });
 
-  it("NO cuenta la semilla virgen de SIFCO, ni con membresias_pago sembrado", () => {
-    // Contarla inflaría `membresiasPrevioCuota` y el motor daría por cobradas
-    // unas membresías que nadie pagó.
+  it("NO cuenta la semilla VACÍA de SIFCO", () => {
+    // El placeholder solo porta los `*_restante`; contarlo no aporta nada y su
+    // única razón de existir es ser el destino del cierre.
     expect(
       cuentaComoHermanoVivo({
         validationStatus: "no_required",
         monto_aplicado: "0",
         abono_capital: "0",
         abono_interes: "0",
-        membresias_pago: "461.63",
+        membresias_pago: "0",
       })
     ).toBe(false);
+  });
+
+  it("SÍ cuenta una fila no_required con membresías: ya no se asume que sean sembradas", () => {
+    // Tras arreglar el importador, un `membresias_pago` en una fila
+    // `no_required` es un cobro real y tiene que entrar al neteo.
+    expect(
+      cuentaComoHermanoVivo({
+        validationStatus: "no_required",
+        monto_aplicado: "506.41",
+        membresias_pago: "506.41",
+      })
+    ).toBe(true);
   });
 
   it("es el reverso exacto de esDestinoSobrescribible en las filas no_required", () => {
     const filas = [
       { validationStatus: "no_required", monto_aplicado: "0", membresias_pago: "461.63" },
       { validationStatus: "no_required", monto_aplicado: "705.88", abono_interes: "705.88" },
+      { validationStatus: "no_required", monto_aplicado: "0", abono_interes: "0" },
       { validationStatus: "no_required", monto_aplicado: "0", mora: "150.00" },
     ];
     for (const fila of filas) {
@@ -468,74 +479,6 @@ describe("cuentaComoHermanoVivo", () => {
 // Codex P1 (PR #1519): la fila MIXTA — semilla de SIFCO que después absorbió
 // plata real — entraba al neteo arrastrando su `membresias_pago` sembrado, y
 // `sumarAplicadoACuota`/`membresiasPrevioCuota` lo contaban como cobrado.
-// Codex P1 (3.ª ronda): `/aplicar-monto-pago` reparte plata a `membresias_pago`
-// y conserva `no_required` cuando no le pasan `validationStatus`, dejando
-// `monto_aplicado === membresias_pago`. Sin mirar procedencia, ese pago REAL de
-// solo membresías se leía como semilla y el siguiente cierre lo borraba.
-describe("esPlaceholderSifcoVirgen", () => {
-  it("la semilla de SIFCO no trae fecha_pago", () => {
-    expect(
-      esPlaceholderSifcoVirgen({ validationStatus: "no_required", fecha_pago: null })
-    ).toBe(true);
-  });
-
-  it("una fila no_required CON fecha_pago ya recibió plata: no es semilla", () => {
-    expect(
-      esPlaceholderSifcoVirgen({
-        validationStatus: "no_required",
-        fecha_pago: "2026-06-09 17:03:09",
-      })
-    ).toBe(false);
-  });
-
-  it("ningún otro status es semilla", () => {
-    expect(
-      esPlaceholderSifcoVirgen({ validationStatus: "validated", fecha_pago: null })
-    ).toBe(false);
-  });
-});
-
-describe("normalizarHermanoParaNeteo", () => {
-  it("cero la membresía sembrada de una fila no_required MIXTA", () => {
-    const fila = {
-      validationStatus: "no_required",
-      monto_aplicado: "100.00",
-      abono_interes: "100.00",
-      membresias_pago: "461.63",
-    };
-    expect(normalizarHermanoParaNeteo(fila).membresias_pago).toBe("0");
-    // los rubros reales se conservan intactos
-    expect(normalizarHermanoParaNeteo(fila).abono_interes).toBe("100.00");
-  });
-
-  it("no toca la membresía de un pago validated (ahí sí es real)", () => {
-    const fila = {
-      validationStatus: "validated",
-      monto_aplicado: "506.41",
-      membresias_pago: "506.41",
-    };
-    expect(normalizarHermanoParaNeteo(fila).membresias_pago).toBe("506.41");
-  });
-
-  it("no muta la fila original", () => {
-    const fila = {
-      validationStatus: "no_required",
-      membresias_pago: "461.63",
-    };
-    normalizarHermanoParaNeteo(fila);
-    expect(fila.membresias_pago).toBe("461.63");
-  });
-
-  it("una fila no_required neteada no aporta membresías a la cuota", () => {
-    // El efecto que importa: sumarAplicadoACuota ya no ve el monto fantasma.
-    const hermanos = [
-      { validationStatus: "no_required", abono_interes: "100.00", membresias_pago: "461.63" },
-      { validationStatus: "validated", abono_interes: "0", membresias_pago: "506.41" },
-    ].map(normalizarHermanoParaNeteo);
-    expect(sumarAplicadoACuota(hermanos).toString()).toBe("606.41");
-  });
-});
-
 describe("esDestinoSobrescribible", () => {
   it("el placeholder no_required VACÍO sigue siendo sobrescribible", () => {
     // Es el caso normal: la fila sembrada desde SIFCO solo porta los
@@ -570,17 +513,15 @@ describe("esDestinoSobrescribible", () => {
     ).toBe(false);
   });
 
-  it("un no_required VIRGEN de SIFCO (con membresias_pago sembrado) SIGUE siendo sobrescribible", () => {
-    // migratePayments.ts:568 siembra el placeholder con
-    // `membresias_pago = membresias` aunque nadie haya pagado nada. Medido en
-    // prod: 181 filas / 4 créditos en cuotas abiertas (crédito 899, cuotas
-    // 17-24, Q461.63). Si contáramos ese bucket, el cierre dejaría de pisarlas
-    // e insertaría una fila extra por cuota → membresías duplicadas en los
-    // reportes.
+  it("una fila con membresias_pago NO es sobrescribible, ni siendo no_required", () => {
+    // Hubo una excepción para el `membresias_pago` que sembraba el importador,
+    // pero ese dato es indistinguible de un cobro real en cuanto alguien toca
+    // la fila (`editarPago` lo escribe sin estampar `fecha_pago`), y
+    // equivocarse hacia "es semilla" BORRA un pago. Se arregló en la fuente:
+    // el importador ya no siembra el campo. Codex P1, rondas 2-4 del PR #1519.
     expect(
       esDestinoSobrescribible({
         validationStatus: "no_required",
-        fecha_pago: null,
         monto_aplicado: "0",
         abono_capital: "0",
         abono_interes: "0",
@@ -589,27 +530,7 @@ describe("esDestinoSobrescribible", () => {
         abono_gps: "0",
         membresias_pago: "461.63",
       })
-    ).toBe(true);
-  });
-
-  it("un placeholder virgen GUARDADO desde el editor sigue siendo sobrescribible", () => {
-    // Codex P1 (2.ª ronda): el front manda todos los campos poblados y
-    // `editarPago` recalcula `monto_aplicado` sumando los abonos, membresías
-    // incluidas. Un placeholder que alguien abrió y guardó sin tocar nada sale
-    // con `monto_aplicado = membresias_pago`, derivado puro de la semilla.
-    expect(
-      esDestinoSobrescribible({
-        validationStatus: "no_required",
-        fecha_pago: null,
-        monto_aplicado: "461.63",
-        abono_capital: "0",
-        abono_interes: "0",
-        abono_iva_12: "0",
-        abono_seguro: "0",
-        abono_gps: "0",
-        membresias_pago: "461.63",
-      })
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("pero si además del monto derivado hay un remanente real, NO es sobrescribible", () => {
@@ -632,46 +553,10 @@ describe("esDestinoSobrescribible", () => {
     expect(
       esDestinoSobrescribible({
         validationStatus: "no_required",
-        fecha_pago: "2026-08-15 10:00:00",
         monto_aplicado: "506.41",
         abono_capital: "0",
         abono_interes: "0",
         membresias_pago: "506.41",
-      })
-    ).toBe(false);
-  });
-
-  it("y ese pago real de membresías SÍ aporta al neteo de la cuota", () => {
-    const fila = {
-      validationStatus: "no_required",
-      fecha_pago: "2026-08-15 10:00:00",
-      membresias_pago: "506.41",
-    };
-    expect(normalizarHermanoParaNeteo(fila).membresias_pago).toBe("506.41");
-    expect(cuentaComoHermanoVivo({ ...fila, monto_aplicado: "506.41" })).toBe(true);
-  });
-
-  it("el neto de la membresía NO se descuenta fuera de no_required", () => {
-    expect(
-      esDestinoSobrescribible({
-        validationStatus: "validated",
-        monto_aplicado: "461.63",
-        abono_capital: "0",
-        abono_interes: "0",
-        membresias_pago: "461.63",
-      })
-    ).toBe(false);
-  });
-
-  it("la excepción de membresias_pago es SOLO para no_required", () => {
-    // En cualquier otro status ese bucket solo lo escribe un pago real.
-    expect(
-      esDestinoSobrescribible({
-        validationStatus: "validated",
-        monto_aplicado: "0",
-        abono_capital: "0",
-        abono_interes: "0",
-        membresias_pago: "461.63",
       })
     ).toBe(false);
   });

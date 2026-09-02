@@ -496,7 +496,12 @@ export const marcarCuotasPagadasHastaNumero = async ({
             total_restante: capitalEnMemoria.toString(),
 
             membresias: membresias.toString(),
-            membresias_pago: membresias.toString(),
+            // `membresias_pago` significa membresía COBRADA: el placeholder no
+            // cobró nada, así que nace en 0. Sembrarlo con el monto contractual
+            // hacía que el guard de sobrescritura, el neteo de la cuota y los
+            // reportes leyeran como pagada una membresía que nadie pagó.
+            // Ver `esDestinoSobrescribible`. PR #1519.
+            membresias_pago: "0",
             membresias_mes: membresias.toString(),
 
             monto_boleta: cuotaMensual.toString(),

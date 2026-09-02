@@ -54,7 +54,6 @@ import {
   sumarAplicadoACuota,
   pagoSchema,
   cuentaComoHermanoVivo,
-  normalizarHermanoParaNeteo,
 } from "./registerPaymentPolicy";
 import {
   PAYMENT_ADVISORY_LOCK_NAMESPACE,
@@ -1129,10 +1128,6 @@ export const insertPayment = async ({ body, set }: any) => {
             abono_seguro: pagos_credito.abono_seguro,
             abono_gps: pagos_credito.abono_gps,
             membresias_pago: pagos_credito.membresias_pago,
-            // Procedencia: distingue la semilla de SIFCO (sin fecha) de una
-            // fila `no_required` que sí recibió plata. Ver
-            // `esPlaceholderSifcoVirgen`.
-            fecha_pago: pagos_credito.fecha_pago,
             // Sólo para poder evaluar `cuentaComoHermanoVivo` sobre las filas
             // `no_required`; no se suman como rubros de cuota.
             abono_interes_ci: pagos_credito.abono_interes_ci,
@@ -1171,9 +1166,9 @@ export const insertPayment = async ({ body, set }: any) => {
         // que contarse como hermana viva; si no, `aplicadoPrevioCuota` la
         // ignora y el pago nuevo re-aplica la cuota completa encima. Antes el
         // hueco era invisible porque el atajo por status permitía pisarla.
-        const pagosHermanos = pagosHermanosCandidatos
-          .filter(cuentaComoHermanoVivo)
-          .map(normalizarHermanoParaNeteo);
+        const pagosHermanos = pagosHermanosCandidatos.filter(
+          cuentaComoHermanoVivo
+        );
         const sumaHermanos = (sel: (p: any) => any) =>
           pagosHermanos.reduce(
             (acc, p) => acc.plus(new Big(sel(p) ?? 0)),

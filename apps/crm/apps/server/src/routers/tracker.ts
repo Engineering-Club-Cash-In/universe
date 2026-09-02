@@ -10,8 +10,11 @@ import {
 	opportunityStageHistory,
 	salesStages,
 } from "../db/schema/crm";
+import { partnerAccounts } from "../db/schema/partners";
+import { quotations } from "../db/schema/quotations";
 import { vehicles } from "../db/schema/vehicles";
-import { partnerProcedure } from "../lib/orpc";
+import { partnerIdentityProcedure, partnerProcedure } from "../lib/orpc";
+import { partnerAuth } from "../lib/partner-auth";
 import {
 	construirHistorial,
 	type EntradaHistorial,
@@ -36,7 +39,7 @@ export type CasoTracker = {
 	cliente: string;
 	agencia: string;
 	vehiculo: string | null;
-	monto: number | null;
+	valorVehiculo: number | null;
 	pasoActual: PasoTracker;
 	porcentaje: number;
 	estado: EstadoCaso;
@@ -48,9 +51,27 @@ export type CasoTracker = {
 // Fecha de cierre efectiva: los perdidos nunca traen actual_close_date.
 const fechaCierre = sql<Date>`COALESCE(${opportunities.actualCloseDate}, ${opportunities.updatedAt})`;
 
+// Una oportunidad puede tener varias cotizaciones. El tracker solo expone el
+// valor del vehículo de la última cotización actualizada, nunca el valor del
+// crédito de la oportunidad.
+const ultimaCotizacion = db
+	.selectDistinctOn([quotations.opportunityId], {
+		opportunityId: quotations.opportunityId,
+		vehicleBrand: quotations.vehicleBrand,
+		vehicleLine: quotations.vehicleLine,
+		vehicleModel: quotations.vehicleModel,
+		vehicleValue: quotations.vehicleValue,
+	})
+	.from(quotations)
+	.orderBy(
+		quotations.opportunityId,
+		desc(quotations.updatedAt),
+		desc(quotations.createdAt),
+	)
+	.as("ultima_cotizacion");
+
 const filaSelect = {
 	id: opportunities.id,
-	value: opportunities.value,
 	status: opportunities.status,
 	createdAt: opportunities.createdAt,
 	updatedAt: opportunities.updatedAt,
@@ -58,14 +79,17 @@ const filaSelect = {
 	agenciaNombre: companies.name,
 	leadFirstName: leads.firstName,
 	leadLastName: leads.lastName,
-	vehicleMake: vehicles.make,
-	vehicleModel: vehicles.model,
-	vehicleYear: vehicles.year,
+		vehicleMake: vehicles.make,
+		vehicleModel: vehicles.model,
+		vehicleYear: vehicles.year,
+		quotationBrand: ultimaCotizacion.vehicleBrand,
+		quotationLine: ultimaCotizacion.vehicleLine,
+		quotationModel: ultimaCotizacion.vehicleModel,
+		vehicleValue: ultimaCotizacion.vehicleValue,
 };
 
 type Fila = {
 	id: string;
-	value: string | null;
 	status: string;
 	createdAt: Date;
 	updatedAt: Date;
@@ -76,6 +100,10 @@ type Fila = {
 	vehicleMake: string | null;
 	vehicleModel: string | null;
 	vehicleYear: number | null;
+	quotationBrand: string | null;
+	quotationLine: string | null;
+	quotationModel: string | null;
+	vehicleValue: string | null;
 };
 
 function nombreCliente(firstName: string | null, lastName: string | null) {
@@ -87,10 +115,19 @@ function nombreCliente(firstName: string | null, lastName: string | null) {
 }
 
 function descripcionVehiculo(fila: Fila) {
-	if (!fila.vehicleMake || !fila.vehicleModel) return null;
-	return [fila.vehicleMake, fila.vehicleModel, fila.vehicleYear]
+	const vinculado = [fila.vehicleMake, fila.vehicleModel, fila.vehicleYear]
 		.filter(Boolean)
 		.join(" ");
+	if (vinculado) return vinculado;
+
+	const deCotizacion = [
+		fila.quotationBrand,
+		fila.quotationLine,
+		fila.quotationModel,
+	]
+		.filter(Boolean)
+		.join(" ");
+	return deCotizacion || null;
 }
 
 // El desembolso lo confirma el cierre de la oportunidad, no la etapa: al
@@ -161,7 +198,8 @@ function aCaso(fila: Fila, historial: EntradaHistorial[]): CasoTracker {
 		cliente: nombreCliente(fila.leadFirstName, fila.leadLastName),
 		agencia: fila.agenciaNombre.trim(),
 		vehiculo: descripcionVehiculo(fila),
-		monto: fila.value === null ? null : Number(fila.value),
+		valorVehiculo:
+			fila.vehicleValue === null ? null : Number(fila.vehicleValue),
 		pasoActual,
 		porcentaje: fila.closurePercentage,
 		estado: estadoDeCaso(fila.status),
@@ -178,9 +216,78 @@ const consultaBase = () =>
 		.innerJoin(salesStages, eq(salesStages.id, opportunities.stageId))
 		.innerJoin(companies, eq(companies.id, opportunities.companyId))
 		.leftJoin(leads, eq(leads.id, opportunities.leadId))
-		.leftJoin(vehicles, eq(vehicles.id, opportunities.vehicleId));
+		.leftJoin(vehicles, eq(vehicles.id, opportunities.vehicleId))
+		.leftJoin(
+			ultimaCotizacion,
+			eq(ultimaCotizacion.opportunityId, opportunities.id),
+		);
 
 export const trackerRouter = {
+	getPartnerAgencies: partnerIdentityProcedure.handler(async ({ context }) => {
+		return db
+			.select({ id: companies.id, name: companies.name })
+			.from(companies)
+			.where(inArray(companies.id, context.companyIds))
+			.orderBy(companies.name);
+	}),
+
+	getPartnerPasswordStatus: partnerIdentityProcedure.handler(({ context }) => ({
+		mustChangePassword: !context.partnerAccount?.passwordChangedAt,
+	})),
+
+	changePartnerPassword: partnerIdentityProcedure
+		.input(
+			z
+				.object({
+					email: z.string().email(),
+					currentPassword: z.string().min(1),
+					newPassword: z.string().min(8),
+					confirmPassword: z.string().min(8),
+				})
+				.refine((data) => data.newPassword === data.confirmPassword, {
+					message: "Las contraseñas nuevas no coinciden",
+					path: ["confirmPassword"],
+				}),
+		)
+		.handler(async ({ input, context }) => {
+			if (
+				input.email.trim().toLowerCase() !==
+				context.user.email.trim().toLowerCase()
+			) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "El correo no coincide con la sesión actual",
+				});
+			}
+
+			await partnerAuth.api.changePassword({
+				headers: context.headers,
+				body: {
+					currentPassword: input.currentPassword,
+					newPassword: input.newPassword,
+					revokeOtherSessions: false,
+				},
+			});
+
+			const ahora = new Date();
+			await db
+				.insert(partnerAccounts)
+				.values({
+					userId: context.userId,
+					passwordChangedAt: ahora,
+					createdAt: ahora,
+					updatedAt: ahora,
+				})
+				.onConflictDoUpdate({
+					target: partnerAccounts.userId,
+					set: {
+						passwordChangedAt: ahora,
+						updatedAt: ahora,
+					},
+				});
+
+			return { success: true };
+		}),
+
 	// Devuelve el universo completo del socio; el filtrado por período lo hace
 	// el front, que necesita el historial para saber cuándo llegó a cada etapa.
 	getCasos: partnerProcedure.handler(async ({ context }) => {
@@ -216,6 +323,10 @@ export const trackerRouter = {
 				.innerJoin(companies, eq(companies.id, opportunities.companyId))
 				.leftJoin(leads, eq(leads.id, opportunities.leadId))
 				.leftJoin(vehicles, eq(vehicles.id, opportunities.vehicleId))
+				.leftJoin(
+					ultimaCotizacion,
+					eq(ultimaCotizacion.opportunityId, opportunities.id),
+				)
 				.where(eq(opportunities.id, input.id))
 				.limit(1);
 

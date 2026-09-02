@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { type AuditMeta, auditMiddleware } from "./audit";
+import { partnerAccounts } from "../db/schema/partners";
 import type { Context } from "./context";
 import { resolvePartnerScope } from "./partner-scope";
 import { PERMISSIONS, ROLES } from "./roles";
@@ -674,7 +675,7 @@ const requireInvestmentManager = o.middleware(async ({ context, next }) => {
 
 // Socios externos (predios/agencias). Exige una sesión emitida por la instancia
 // de partner-auth: una sesión del CRM nunca sirve aquí, ni al revés.
-const requirePartnerAccess = o.middleware(async ({ context, next }) => {
+async function contextoDeSocio(context: Context) {
 	if (!context.partnerSession?.user) {
 		throw new ORPCError("UNAUTHORIZED");
 	}
@@ -709,15 +710,35 @@ const requirePartnerAccess = o.middleware(async ({ context, next }) => {
 		});
 	}
 
-	return next({
-		context: {
-			partnerSession: context.partnerSession,
-			user: userData[0],
-			userId,
-			userRole,
-			companyIds,
-		},
-	});
+	const [partnerAccount] = await db
+		.select({ passwordChangedAt: partnerAccounts.passwordChangedAt })
+		.from(partnerAccounts)
+		.where(eq(partnerAccounts.userId, userId))
+		.limit(1);
+
+	return {
+		partnerSession: context.partnerSession,
+		user: userData[0],
+		userId,
+		userRole,
+		companyIds,
+		partnerAccount,
+	};
+}
+
+const requirePartnerIdentity = o.middleware(async ({ context, next }) => {
+	return next({ context: await contextoDeSocio(context) });
+});
+
+const requirePartnerAccess = o.middleware(async ({ context, next }) => {
+	const partnerContext = await contextoDeSocio(context);
+	if (!partnerContext.partnerAccount?.passwordChangedAt) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "Debes cambiar tu contrasena antes de continuar",
+		});
+	}
+
+	return next({ context: partnerContext });
 });
 
 export const protectedProcedure = publicProcedure.use(requireAuth);
@@ -760,5 +781,8 @@ export const vehiclesProcedure = publicProcedure.use(requireVehicleAccess);
 export const investmentProcedure = publicProcedure.use(requireInvestmentAccess);
 export const investmentManagerProcedure = publicProcedure.use(
 	requireInvestmentManager,
+);
+export const partnerIdentityProcedure = publicProcedure.use(
+	requirePartnerIdentity,
 );
 export const partnerProcedure = publicProcedure.use(requirePartnerAccess);

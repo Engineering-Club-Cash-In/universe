@@ -112,6 +112,10 @@ function createTransactionTx() {
     const rows = selectResults.shift() ?? [];
     return Object.assign(Promise.resolve(rows), { limit: () => Promise.resolve(rows) });
   };
+  const updateWhere = () =>
+    Object.assign(Promise.resolve([]), {
+      returning: () => Promise.resolve([]),
+    });
   return {
     select: mock(() => ({
       from: () => ({
@@ -119,7 +123,7 @@ function createTransactionTx() {
         where: takeRows,
       }),
     })),
-    update: mock(() => ({ set: () => ({ where: () => Promise.resolve() }) })),
+    update: mock(() => ({ set: () => ({ where: updateWhere }) })),
     delete: mock(() => ({ where: () => Promise.resolve() })),
   };
 }
@@ -136,6 +140,15 @@ function createPersistenceHarness(
     runTransaction: runTransaction as unknown as ReversePaymentDependencies["runTransaction"],
     reverseInvestors,
     reverseCapitalPayment: mock(() => Promise.resolve(undefined)) as unknown as ReversePaymentDependencies["reverseCapitalPayment"],
+    // Lock identidad: acá no hay concurrencia que serializar y el real
+    // abriría conexión al lockPool.
+    withCreditLock: ((_creditoId: number, fn: () => Promise<unknown>) =>
+      fn()) as ReversePaymentDependencies["withCreditLock"],
+    // El refresco de proyección corre DESPUÉS del commit; en este harness la
+    // transacción revienta antes, así que nunca debería llamarse.
+    refrescarProyeccion: mock(() =>
+      Promise.resolve({ corrio: true as const }),
+    ) as unknown as ReversePaymentDependencies["refrescarProyeccion"],
   });
   return { handler, runTransaction };
 }

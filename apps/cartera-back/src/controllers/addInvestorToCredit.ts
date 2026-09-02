@@ -31,6 +31,11 @@ import {
   resolverStatusEspejoRebuild,
   type FilaEspejoGuard,
 } from "../utils/espejoGuards";
+import {
+  clasificarCompraCreditoInversionista,
+  resolverModosTrasReemplazo,
+  tieneConflictoExcedenteVariable,
+} from "./purchaseClassification";
 
 const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";
 
@@ -93,6 +98,8 @@ class ModalidadMontoInsuficienteError extends Error {
     this.name = "ModalidadMontoInsuficienteError";
   }
 }
+
+class ModalidadReinversionConflictError extends Error {}
 
 // ========================================
 // SCHEMA DE VALIDACIÓN
@@ -887,19 +894,25 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
       const debeEscalar = X !== "reinversion_combinada" && X !== Y;
 
       const espejosExistentes = await db
-        .select({ tipo_reinversion: creditos_inversionistas_espejo.tipo_reinversion })
+        .select({
+          credito_id: creditos_inversionistas_espejo.credito_id,
+          tipo_reinversion: creditos_inversionistas_espejo.tipo_reinversion,
+        })
         .from(creditos_inversionistas_espejo)
         .where(eq(creditos_inversionistas_espejo.inversionista_id, inversionista_id));
 
-      // Modalidades por-crédito resultantes: existentes (NULL→backfill si escala)
-      // + la de los créditos nuevos (Y).
-      const modalidadesFinales = new Set<string | null>();
-      for (const e of espejosExistentes) {
-        modalidadesFinales.add(e.tipo_reinversion === null && debeEscalar ? X : e.tipo_reinversion);
-      }
-      modalidadesFinales.add(Y);
+      // En manual, los créditos objetivo reemplazan su modalidad durante el
+      // rebuild; validar el estado resultante, no la fila que será eliminada.
+      const modalidadesFinales = resolverModosTrasReemplazo({
+        espejos: espejosExistentes,
+        creditoIdsObjetivo: esManual
+          ? candidatos.map((candidato) => candidato.credito_id)
+          : [],
+        modoSolicitado: Y,
+        modoParaNulos: debeEscalar ? X : null,
+      });
 
-      if (modalidadesFinales.has("reinversion_excedente") && modalidadesFinales.has("reinversion_variable")) {
+      if (tieneConflictoExcedenteVariable(modalidadesFinales)) {
         set.status = 409;
         return {
           success: false,
@@ -951,11 +964,12 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
       // En todos los casos, los c_i_e NUEVOS que se inserten en este
       // loop llevan tipo_reinversion = Y (estampado más abajo).
       // ================================================================
-      if (tipo_operacion === "compra_cartera") {
+      if (tipo_reinversion) {
         const [invRow] = await tx
           .select({ tipo_reinversion: inversionistas.tipo_reinversion })
           .from(inversionistas)
-          .where(eq(inversionistas.inversionista_id, inversionista_id));
+          .where(eq(inversionistas.inversionista_id, inversionista_id))
+          .for("update");
 
         if (!invRow) {
           throw new Error(
@@ -968,6 +982,25 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
 
         const debeEscalar =
           X !== "reinversion_combinada" && X !== Y;
+
+        const espejosExistentes = await tx
+          .select({
+            credito_id: creditos_inversionistas_espejo.credito_id,
+            tipo_reinversion: creditos_inversionistas_espejo.tipo_reinversion,
+          })
+          .from(creditos_inversionistas_espejo)
+          .where(eq(creditos_inversionistas_espejo.inversionista_id, inversionista_id));
+        const modosFinales = resolverModosTrasReemplazo({
+          espejos: espejosExistentes,
+          creditoIdsObjetivo: esManual
+            ? candidatos.map((candidato) => candidato.credito_id)
+            : [],
+          modoSolicitado: Y,
+          modoParaNulos: debeEscalar ? X : null,
+        });
+        if (tieneConflictoExcedenteVariable(modosFinales)) {
+          throw new ModalidadReinversionConflictError("No se puede mezclar Excedente y Variable en el mismo inversionista");
+        }
 
         if (debeEscalar) {
           // ── Backfill: preservar SIEMPRE la modalidad previa (X) del
@@ -1163,6 +1196,10 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
           porcentaje_participacion_inversionista: inv.porcentaje_participacion_inversionista,
           fecha_inicio_participacion: inv.fecha_inicio_participacion,
         }));
+        const clasificacionPosicion = clasificarCompraCreditoInversionista(
+          inversionistasPadre.map((inv) => inv.inversionista_id),
+          inversionista_id,
+        );
 
         const inversionistasEspejo = (espejoActual ?? []).map((inv: any) => ({
           inversionista_id: inv.inversionista_id,
@@ -1182,9 +1219,15 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
         );
 
         if (!cubePadre) {
+          const razon = "CUBE no encontrado en el padre del crédito";
+          if (esManual) {
+            throw new CreditoNoDisponibleError(
+              `${razon} ${numero_credito_sifco}; asignación manual cancelada.`,
+            );
+          }
           errores.push({
             credito_id,
-            razon: "CUBE no encontrado en el padre del crédito",
+            razon,
           });
           continue;
         }
@@ -1520,6 +1563,7 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
             null,
           modalidad_facturacion: modalidad_facturacion ?? null,
           modalidad_facturacion_spread_id: modalidadFacturacionSpreadRow?.id ?? null,
+          tipo_compra: clasificacionPosicion,
           status: statusEspejo,
         });
 
@@ -1746,6 +1790,10 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
       set.status = 409;
       return { success: false, message: error.message };
     }
+    if (error instanceof ModalidadReinversionConflictError) {
+      set.status = 409;
+      return { success: false, message: error.message };
+    }
     // Manual sobre un crédito tomado por otro proceso / con operación en curso:
     // también es de negocio (409) y la tx ya hizo rollback. `retryable` deja que
     // el front ofrezca reintentar en vez de mostrar un fallo genérico.
@@ -1769,4 +1817,3 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
     };
   }
 };
-

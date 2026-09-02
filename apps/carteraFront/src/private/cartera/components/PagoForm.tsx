@@ -35,6 +35,7 @@ export function PagoForm() {
     errorCredito,
     cuotaActualInfo,
     cuotasAtrasadasInfo,
+    cuotasEnValidacionInfo,
     handleFormSubmit,
     modalExcesoOpen,
     setModalExcesoOpen,
@@ -255,7 +256,8 @@ export function PagoForm() {
         }
 
         // 4 Cuota Normal (restando abonos ya realizados desde endpoint)
-        const cuotaBase = Number(dataCredito?.credito?.cuota) || 0;
+        const cuotaBase =
+          Number(dataCredito?.cuotaMensualAPagar ?? dataCredito?.credito?.cuota) || 0;
         const abonosYaHechos = displayedPartialContribution;
         const cuotaNormal = Math.max(0, cuotaBase - abonosYaHechos);
         if (cuotaNormal > 0 && montoRestante > 0) {
@@ -530,6 +532,7 @@ export function PagoForm() {
                 cuotaActualPagada={cuotaActualInfo?.pagada}
                 cuotaActualStatus={cuotaActualInfo?.validationStatus}
                 cuotasAtrasadasInfo={cuotasAtrasadasInfo ?? { cuotas: [] }}
+                cuotasEnValidacionInfo={cuotasEnValidacionInfo ?? undefined}
                 onCuotaSeleccionadaChange={setCuotaSeleccionada}
                 cuotasPendientesInfo={cuotasPendientesInfo ?? { cuotas: [] }}
                 mora={mora || 0}

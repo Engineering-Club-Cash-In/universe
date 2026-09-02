@@ -176,6 +176,8 @@ export type DestinoSobrescribibleRow = {
   mora?: BigInput | null;
   pagoConvenio?: BigInput | null;
   otros?: string | number | null;
+  /** Procedencia: la semilla de SIFCO nace SIN fecha de pago. */
+  fecha_pago?: Date | string | null;
 };
 
 /**
@@ -185,12 +187,32 @@ export type DestinoSobrescribibleRow = {
  * El cierre de una cuota hace `UPDATE pagos_credito SET <pagoData> WHERE
  * pago_id = existingPago`. Eso es seguro SOLO si la fila destino es desechable:
  *
- *  - El placeholder `no_required` importado de SIFCO (su único propósito es
- *    portar los `*_restante`; no representa plata aplicada), o
  *  - Una fila "vacía": SIN plata en NINGÚN bucket — `monto_aplicado`, todos los
  *    `abono_*`, y también `mora`, `pagoConvenio` y `otros` ≈ 0. (Un pago de solo
  *    mora/otros/convenio lleva `monto_aplicado`/`abono_*` en 0 pero plata en
  *    esos otros campos; si no se contaran, el cierre lo machacaría.)
+ *
+ * El placeholder `no_required` importado de SIFCO cae ahí solo: nace vacío
+ * porque su único propósito es portar los `*_restante`. Pero el STATUS por sí
+ * solo NO es permiso para pisar: `no_required` es un estado inicial que nadie
+ * vuelve a tocar, así que una fila puede acumular plata real —Caja la llena con
+ * /editPayment, la aplica y hasta la factura— sin dejar nunca ese status.
+ * Crédito 890 / cuota 12 (01-sep-2026): la fila 136221 era `no_required` con
+ * Q705.88 de interés aplicados y 2 DTEs emitidos; al registrar otra boleta
+ * contra esa cuota fue elegida como destino y el UPDATE borró el pago. Por eso
+ * la decisión mira la PLATA, no el status.
+ *
+ * NO hay excepción para `membresias_pago`. La hubo: el importador siembra el
+ * placeholder con `membresias_pago = membresias` (un campo que significa
+ * "membresía COBRADA") aunque la cuota esté intacta, y exceptuarlo evitaba una
+ * fila duplicada en 181 placeholders / 4 créditos. Pero ese dato sembrado es
+ * indistinguible de un cobro real en cuanto alguien toca la fila: `editarPago`
+ * escribe `membresias_pago` sin estampar `fecha_pago` (el front no manda ese
+ * campo) y `/aplicar-monto-pago` reparte a ese bucket conservando el status.
+ * Ninguna marca de la fila los separa, y equivocarse hacia el lado de "es
+ * semilla" BORRA un pago real. Se arregla en la fuente: el importador ya no
+ * siembra ese campo (`migratePayments.ts`) y las 181 filas existentes se
+ * limpian aparte. Codex P1, rondas 2-4 del PR #1519.
  *
  * Cuando el placeholder `no_required` ya fue consumido por un parcial previo,
  * `existingPago` cae al fallback `allExistingPagos[0]` = la fila REAL más vieja
@@ -201,8 +223,6 @@ export type DestinoSobrescribibleRow = {
 export const esDestinoSobrescribible = (
   pago: DestinoSobrescribibleRow
 ): boolean => {
-  if (pago.validationStatus === "no_required") return true;
-
   const tol = new Big(DESTINO_SOBRESCRIBIBLE_TOLERANCE);
   // Estricto (`lt`, no `lte`): un Q0.01 exacto es un pago real, no "vacío".
   const casiCero = (v: BigInput | null | undefined) =>
@@ -231,6 +251,28 @@ export const esDestinoSobrescribible = (
     otrosCasiCero(pago.otros)
   );
 };
+/**
+ * ¿Esta fila hay que CONTARLA como hermana viva al netear la cuota?
+ *
+ * Es el reverso exacto de `esDestinoSobrescribible`, y por eso vive pegada a
+ * ella: si el cierre se NIEGA a pisar una fila porque lleva plata, esa misma
+ * plata tiene que entrar en `aplicadoPrevioCuota` — si no, el pago nuevo la
+ * re-aplica encima y sobre-cobra la cuota.
+ *
+ * La query de hermanos solo miraba `validated`/`pending`, así que las filas
+ * `no_required` con plata quedaban fuera del neteo pese a que el comentario de
+ * `registerPayment.ts` prometía contarlas. Mientras el atajo por status las
+ * dejaba sobrescribir el hueco no se notaba (la fila desaparecía); al
+ * protegerlas hay que cerrarlo o cambiamos pérdida de plata por sobre-cobro.
+ *
+ * Las semillas vírgenes NO entran: su `membresias_pago` sembrado inflaría
+ * `membresiasPrevioCuota` y el motor creería cobradas unas membresías que
+ * nadie pagó.
+ */
+export const cuentaComoHermanoVivo = (
+  pago: DestinoSobrescribibleRow
+): boolean =>
+  pago.validationStatus !== "no_required" || !esDestinoSobrescribible(pago);
 
 export type SaldoCuotaInput = {
   /** Monto total de la cuota (credito.cuota). */
@@ -280,7 +322,9 @@ export type RubrosCuotaRow = {
 };
 
 export type PagoCoberturaCuota = RubrosCuotaRow & {
-  pago_id?: number;
+  // number | null: las filas que vienen de un leftJoin traen null cuando la
+  // cuota no tiene pago; solo se usa en comparaciones de igualdad.
+  pago_id?: number | null;
   validationStatus?: string | null;
   paymentFalse?: boolean | null;
   mora?: BigInput | null;
@@ -350,6 +394,195 @@ export const calcularCoberturaCuota = ({
     tieneAbonoParcial:
       !cuotaCompleta && totalAplicado.gt(0) && totalAplicado.lt(monto),
   };
+};
+
+export type FilaCuotaVencida = PagoCoberturaCuota & {
+  cuota_id: number | null;
+  numero_cuota: number | null;
+  // Para detectar recibos SALDADOS de cuotas recortadas (ver esReciboSaldado).
+  // pago_mora/pago_otros son los alias con que la query del buscador devuelve
+  // mora e importes "otros"; monto_aplicado respalda la vía stale-zero.
+  monto_aplicado?: BigInput | null;
+  pago_mora?: BigInput | null;
+  pago_otros?: string | number | null;
+  capital_restante?: BigInput | null;
+  interes_restante?: BigInput | null;
+  iva_12_restante?: BigInput | null;
+  seguro_restante?: BigInput | null;
+  gps_restante?: BigInput | null;
+  membresias_restante?: BigInput | null;
+};
+
+/**
+ * ¿Este recibo quedó SALDADO? — plata aplicada y todos los restantes en ≤0.01.
+ *
+ * Cubre las cuotas RECORTADAS: tras un abono grande el recálculo topa el
+ * capital del último recibo (y los de cola quedan solo con seguro/GPS), así
+ * que su total real es MENOR a `credito.cuota` y la suma de rubros nunca las
+ * daría por cubiertas. Mismo criterio con el que aplicarPagoNormalEnTx cierra
+ * esas cuotas (registerPayment.ts, "Recibos MENORES a la cuota mensual").
+ */
+const esReciboSaldado = (row: FilaCuotaVencida): boolean => {
+  if (row.paymentFalse !== false) return false;
+  // Plata aplicada A LA CUOTA: primero los rubros (abono_*). En filas legacy
+  // de solo mora/otros el monto_aplicado trae mora+otros con los abono_* en
+  // 0 — esas no saldan nada. PERO la vía stale-zero (registerPayment,
+  // shouldApplyStaleZeroRestanteAdjustment) consume el monto exacto subiendo
+  // monto_aplicado SIN repartir rubros (los restantes origen ya estaban en
+  // 0): ahí la evidencia de plata de cuota es monto_aplicado − mora − otros.
+  if (!sumarAplicadoACuota([row]).gt(0)) {
+    const numericText = (v: string | number | null | undefined) => {
+      if (v == null) return "0";
+      const s = String(v).trim();
+      return /^-?\d+(\.\d+)?$/.test(s) ? s : "0";
+    };
+    const plataSinMoraOtros = new Big(row.monto_aplicado ?? 0)
+      .minus(new Big(row.pago_mora ?? 0))
+      .minus(new Big(numericText(row.pago_otros)));
+    if (!plataSinMoraOtros.gt(0)) return false;
+  }
+  // TODOS los restantes deben venir informados para afirmar el saldado: un
+  // NULL no es un cero. Con .some, una fila legacy con interes_restante=0
+  // pero capital_restante NULL pasaría y el ?? 0 escondería deuda viva
+  // (review Codex). Sin el atajo, la cuota se decide por la suma de rubros.
+  const restantesInformados = [
+    row.capital_restante,
+    row.interes_restante,
+    row.iva_12_restante,
+    row.seguro_restante,
+    row.gps_restante,
+    row.membresias_restante,
+  ].every((v) => v !== null && v !== undefined);
+  if (!restantesInformados) return false;
+  const restantes = new Big(row.capital_restante ?? 0)
+    .plus(new Big(row.interes_restante ?? 0))
+    .plus(new Big(row.iva_12_restante ?? 0))
+    .plus(new Big(row.seguro_restante ?? 0))
+    .plus(new Big(row.gps_restante ?? 0))
+    .plus(new Big(row.membresias_restante ?? 0));
+  return restantes.lte(0.01);
+};
+
+/**
+ * Cobertura de una cuota (grupo de filas de la misma numero_cuota): por suma
+ * de rubros contra el valor contractual, O por un recibo saldado (cuota
+ * recortada). `incluirPendientes` controla si los pagos pending cuentan en
+ * ambas vías.
+ */
+const cuotaCubiertaPorGrupo = (
+  grupo: FilaCuotaVencida[],
+  montoCuota: BigInput,
+  incluirPendientes: boolean
+): boolean => {
+  const { cuotaCompleta } = calcularCoberturaCuota({
+    montoCuota,
+    pagos: grupo,
+    incluirPendientes,
+  });
+  if (cuotaCompleta) return true;
+
+  // El atajo del recibo saldado es consciente del GRUPO (review Codex): en una
+  // cuota partida, la fila de CIERRE queda con restantes 0 por diseño aunque
+  // sus hermanos sigan vivos (cierre diferido, registerPayment.ts). Un cierre
+  // validated no puede dar la cuota por firme mientras haya un hermano pending
+  // con plata (la cuota sigue dependiendo de él → en validación), y si un
+  // hermano con plata fue ANULADO, el atajo se descarta por completo: los
+  // restantes 0 del cierre son residuo y la deuda del hermano volvió a existir
+  // (la suma de rubros decide, y sin esa plata no cubre).
+  const hayPlataAnulada = grupo.some(
+    (row) => row.paymentFalse === true && sumarAplicadoACuota([row]).gt(0)
+  );
+  if (hayPlataAnulada) return false;
+
+  const hayPendienteConPlata = grupo.some(
+    (row) =>
+      row.paymentFalse === false &&
+      row.validationStatus === "pending" &&
+      sumarAplicadoACuota([row]).gt(0)
+  );
+
+  return grupo.some(
+    (row) =>
+      esReciboSaldado(row) &&
+      (row.validationStatus === "validated"
+        ? incluirPendientes || !hayPendienteConPlata
+        : incluirPendientes && row.validationStatus === "pending")
+  );
+};
+
+/**
+ * Filtro del contador de "cuotas atrasadas" del buscador de créditos
+ * (getCreditoByNumero): de las filas de cuotas vencidas sin cerrar, deja solo
+ * las de cuotas NO cubiertas por montos.
+ *
+ * Reemplaza al criterio viejo por flags (NOT EXISTS pago pending con
+ * pagado=true), que mentía en los dos sentidos: una boleta pending marcada
+ * pagado=true ocultaba la cuota sin verificar cuánto dinero traía, y una cuota
+ * ya cobrada con flags desincronizados seguía contando como atrasada. La
+ * verdad son los montos: Σ rubros de pagos vivos (validated + pending,
+ * paymentFalse=false) vs el valor contractual de la cuota, con la tolerancia
+ * de Q0.01 de calcularCoberturaCuota.
+ *
+ * Recibe las filas tal como salen del leftJoin (una por par cuota-pago) y
+ * devuelve esas mismas filas (orden y multiplicidad intactos) para las cuotas
+ * descubiertas — el shape que el front ya consume no cambia.
+ */
+// Agrupar por numero_cuota, NO por cuota_id: hay créditos con filas
+// duplicadas de la misma cuota contractual (mismo numero_cuota, cuota_id
+// distinto) y sus pagos quedan repartidos entre los duplicados. Mismo
+// criterio de merge que getCoveredOpenInstallments.
+const agruparPorNumeroCuota = <T extends FilaCuotaVencida>(
+  rows: T[]
+): Map<number | null, T[]> => {
+  const porNumeroCuota = new Map<number | null, T[]>();
+  for (const row of rows) {
+    const grupo = porNumeroCuota.get(row.numero_cuota);
+    if (grupo) {
+      grupo.push(row);
+    } else {
+      porNumeroCuota.set(row.numero_cuota, [row]);
+    }
+  }
+  return porNumeroCuota;
+};
+
+export const filtrarCuotasVencidasSinCobertura = <T extends FilaCuotaVencida>(
+  rows: T[],
+  montoCuota: BigInput
+): T[] => {
+  const cubiertas = new Set<number | null>();
+  for (const [numeroCuota, grupo] of agruparPorNumeroCuota(rows)) {
+    if (cuotaCubiertaPorGrupo(grupo, montoCuota, true)) {
+      cubiertas.add(numeroCuota);
+    }
+  }
+
+  return rows.filter((row) => !cubiertas.has(row.numero_cuota));
+};
+
+/**
+ * Cuotas vencidas cuya cobertura DEPENDE de boletas aún sin validar: cubiertas
+ * contando pendientes, pero que no se sostienen solo con lo validated.
+ *
+ * Es el complemento informativo de filtrarCuotasVencidasSinCobertura: esas
+ * cuotas NO se muestran como atrasadas (el dinero ya está registrado), pero el
+ * asesor debe saber que están esperando validación de contabilidad — mientras
+ * tanto el cron de moras (que solo cree en lo validated) puede seguir
+ * generándoles mora.
+ */
+export const filtrarCuotasEnValidacion = <T extends FilaCuotaVencida>(
+  rows: T[],
+  montoCuota: BigInput
+): T[] => {
+  const enValidacion = new Set<number | null>();
+  for (const [numeroCuota, grupo] of agruparPorNumeroCuota(rows)) {
+    if (!cuotaCubiertaPorGrupo(grupo, montoCuota, true)) continue; // atrasada
+    if (cuotaCubiertaPorGrupo(grupo, montoCuota, false)) continue; // firme sin pendientes
+
+    enValidacion.add(numeroCuota);
+  }
+
+  return rows.filter((row) => enValidacion.has(row.numero_cuota));
 };
 
 type CuotaAbiertaConPagos = {
@@ -521,10 +754,10 @@ export const puedeOmitirGuardTodasCubiertas = ({
  * importa qué se escribió, y la rama inserta aunque el request traiga capital
  * colado. Usar la clasificación aquí respondería 409 sobre estado ya escrito.
  *
- * `convenioAplicado`: en EN_CONVENIO el registro del convenio corre ANTES del
- * loop de cuotas, así que `processConvenioPayment` YA actualizó
- * `convenios_pago`. Responder 409 ahí mentiría sobre estado persistido y el
- * reintento de la boleta acreditaría el convenio DOS veces.
+ * `convenioAplicado`: en EN_CONVENIO la acreditación del convenio se difiere
+ * al return de éxito (`commitConvenio`), pero el flujo debe LLEGAR a ese
+ * return para escribir la fila-rastro del convenio y ejecutar el commit.
+ * Responder 409 acá dejaría la boleta del convenio sin registrar.
  */
 export const debeRechazarAbonoCapitalNoAplicado = ({
   abonoCapital,
@@ -805,6 +1038,37 @@ export const recomputeCreditAfterCapital = ({
   return { capital, cuotaInteres, iva, deudaTotal };
 };
 
+// ============================================================================
+// AJUSTE POR FECHA IDEAL DE PAGO (ver schema.ts: ajuste_fecha_ideal_pago)
+// ============================================================================
+
+/**
+ * Decide si el ajuste pendiente por fecha ideal de pago se debe deducir del
+ * disponible de este pago. Solo aplica cuando la cuota 1 está entre las
+ * pendientes del crédito (nunca en cuota 0, que el cliente no paga) y el
+ * ajuste aún no está cobrado. Best-effort: si el disponible no alcanza para
+ * cubrirlo completo, no bloquea el pago (a diferencia de mora) — queda
+ * pendiente para uno futuro.
+ *
+ * Disponible debe ser ESTRICTAMENTE mayor al monto (no gte), para que quede
+ * algo con qué procesar la cuota 1 en el loop de registerPayment.
+ */
+export const getAjusteFechaIdealADeducir = ({
+  tieneCuota1Pendiente,
+  ajustePendiente,
+  disponible,
+}: {
+  tieneCuota1Pendiente: boolean;
+  ajustePendiente: { id: number; monto_total: BigInput } | null | undefined;
+  disponible: BigInput;
+}): { id: number; monto: Big } | null => {
+  if (!tieneCuota1Pendiente || !ajustePendiente) return null;
+  const monto = new Big(ajustePendiente.monto_total);
+  if (monto.lte(0)) return null;
+  if (new Big(disponible).lte(monto)) return null;
+  return { id: ajustePendiente.id, monto };
+};
+
 /**
  * ¿El pago debe pasar por processConvenioPayment? Solo créditos EN_CONVENIO y
  * solo si después de otros/abono-capital/mora todavía queda plata (orden
@@ -1027,12 +1291,12 @@ export const capitalSuprimidoSinAplicar = (params: {
  * simplemente sigue a la siguiente cuota con el disponible intacto.
  *
  * `pagoConvenio` es lo que el estampador escribiría en ESTA fila (su peek
- * `pendiente()`, no una llamada consumidora). En EN_CONVENIO,
- * `processConvenioPayment` ya mutó `convenios_pago` ANTES del loop y el sello
- * vive en una sola fila de `pagos_credito`: si todas las cuotas se saltaran,
- * el convenio quedaría cobrado sin fila que lo registre y se romperían la
- * reversa y la detección de boleta duplicada (P2 de Codex en #1248). Una fila
- * con `monto_aplicado = 0` pero `pagoConvenio > 0` es legítima y validable
+ * `pendiente()`, no una llamada consumidora). En EN_CONVENIO el sello vive en
+ * una sola fila de `pagos_credito` y la acreditación (`commitConvenio`) corre
+ * en el return de éxito: si todas las cuotas se saltaran, el convenio se
+ * acreditaría sin fila que lo registre y se romperían la reversa y la
+ * detección de boleta duplicada (P2 de Codex en #1248). Una fila con
+ * `monto_aplicado = 0` pero `pagoConvenio > 0` es legítima y validable
  * (`shouldRejectZeroAppliedNormalValidation` exime pagoConvenio > 0).
  */
 export const debeInsertarFilaParcialCuota = ({

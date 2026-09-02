@@ -1,0 +1,37 @@
+{
+	"required": [
+		{ "key": "AMJK_PASSWORD", "runtime": true },
+		{ "key": "AMJK_REQUESTOR", "runtime": true },
+		{ "key": "AMJK_USER", "runtime": true },
+		{ "key": "BUCKET_REPORTS", "runtime": true },
+		{ "key": "BUCKET_REPORTS_URL", "runtime": true },
+
+		{ "key": "CREACION_IMAGEN_PASSWORD", "runtime": true },
+		{ "key": "CREACION_IMAGEN_REQUESTOR", "runtime": true },
+		{ "key": "CREACION_IMAGEN_USER", "runtime": true },
+
+		{ "key": "CRM_API_URL", "runtime": true },
+		{ "key": "CUBE_COFIDI_NIT_URL", "runtime": true },
+		{ "key": "CUBE_COFIDI_URL", "runtime": true },
+		{ "key": "CUBE_PASSWORD", "runtime": true },
+		{ "key": "CUBE_REQUESTOR", "runtime": true },
+		{ "key": "CUBE_USER", "runtime": true },
+		{ "key": "EMAIL_DOMAIN", "runtime": true },
+		{ "key": "JWT_REFRESH_SECRET", "runtime": true },
+		{ "key": "JWT_SECRET", "runtime": true },
+
+		{ "key": "PORT", "runtime": true },
+		{ "key": "R2_ACCESS_KEY_ID", "runtime": true },
+		{ "key": "R2_BUCKET", "runtime": true },
+		{ "key": "R2_ENDPOINT", "runtime": true },
+		{ "key": "R2_SECRET_ACCESS_KEY", "runtime": true },
+		{ "key": "RESEND_API_KEY", "runtime": true },
+		{ "key": "SE_PRESTA_PASSWORD", "runtime": true },
+		{ "key": "SE_PRESTA_REQUESTOR", "runtime": true },
+		{ "key": "SE_PRESTA_USER", "runtime": true },
+
+		{ "key": "SIFCO_DB_URL", "runtime": true },
+
+		{ "key": "SUPABASE_DB_URL", "runtime": true }
+	]
+}

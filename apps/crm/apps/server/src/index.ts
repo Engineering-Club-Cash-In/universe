@@ -37,6 +37,7 @@ import {
 	checkSeguimientosVencidos,
 	procesarSeguimientosRecurrentes,
 } from "./jobs/cobros-notifications";
+import { auditRequest, markAuditFailure } from "./lib/audit";
 import { auth } from "./lib/auth";
 import { createContext } from "./lib/context";
 import { PARTNER_AUTH_BASE_PATH, partnerAuth } from "./lib/partner-auth";
@@ -52,6 +53,7 @@ import { investmentsRouter } from "./routers/investments";
 import externalContractsRouter from "./routes/external-contracts";
 
 const app = new Hono();
+
 const AUTH_DIAG_PREFIX = "CRM_AUTH_DIAG";
 
 function logAuthDiagnostic(reason: string, detail: Record<string, unknown>) {
@@ -78,6 +80,9 @@ function getRequestDiagnostic(c: HonoContext) {
 }
 
 app.use(logger());
+// Contexto de auditoría para todo lo que no pasa por ORPC (bot, portal,
+// formulario público, imports). Ver lib/audit.ts.
+app.use(auditRequest());
 app.use(
 	"/*",
 	cors({
@@ -502,6 +507,12 @@ app.post("/info/renap", async (c) => {
 
 		const result = await getRenapInfoController(dpi, phone);
 
+		// El controller reporta el rechazo en el valor y responde 200: sin esto,
+		// un DPI inválido o una caída de RENAP no dejarían rastro del intento.
+		if (result && typeof result === "object" && result.success === false) {
+			markAuditFailure("RENAP_RECHAZADO");
+		}
+
 		return c.json(result);
 	} catch (err: any) {
 		console.error("[ERROR] /info/renap:", err);
@@ -538,6 +549,12 @@ app.post("/info/lead-opportunity", async (c) => {
 		}
 
 		const result = await updateLeadAndCreateOpportunity(body.dpi, body);
+
+		// Mismo caso que /info/renap: el controller reporta el rechazo en el valor
+		// y la ruta responde 200.
+		if (result && typeof result === "object" && result.success === false) {
+			markAuditFailure("LEAD_OPPORTUNITY_RECHAZADO");
+		}
 
 		return c.json(result);
 	} catch (err: any) {

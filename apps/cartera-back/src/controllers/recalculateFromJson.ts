@@ -15,6 +15,95 @@ import {
 import { findOrCreateInvestor } from "./investor";
 import { updateInstallments } from "./updateCredit";
 import { marcarCuotasPagadasHastaNumero } from "./migratePayments";
+import {
+  emitCreditScheduleRecalculation,
+  type CarteraStructuredLogger,
+} from "../utils/structuredLogger";
+import {
+  classifyJsonRecalculationTerminal,
+  runMirroredPersistence,
+  runPostPersistenceStep,
+} from "./recalculateFromJsonTelemetry";
+
+const MAX_TELEMETRY_DURATION_MS = 86_400_000;
+
+function safeNow(): number {
+  try {
+    const value = Date.now();
+    return Number.isFinite(value) ? value : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function elapsedMilliseconds(startedAt: number): number {
+  try {
+    return Math.min(MAX_TELEMETRY_DURATION_MS, Math.max(0, safeNow() - startedAt));
+  } catch {
+    return 0;
+  }
+}
+
+interface JsonTelemetryOptions {
+  readonly emitTerminal?: boolean;
+  readonly startedAt?: number;
+  readonly logger?: CarteraStructuredLogger;
+  readonly onScheduleFailure?: () => void;
+  readonly onPersisted?: () => void;
+}
+
+function notifyPersisted(telemetry: JsonTelemetryOptions): void {
+  try {
+    telemetry.onPersisted?.();
+  } catch {
+    // Telemetry observers cannot alter the historical persistence flow.
+  }
+}
+
+function emitJsonTerminal(
+  terminal: ReturnType<typeof classifyJsonRecalculationTerminal>,
+  startedAt: number,
+  logger: CarteraStructuredLogger | undefined,
+): void {
+  if (terminal.outcome === "completed") {
+    emitCreditScheduleRecalculation({
+      outcome: terminal.outcome,
+      operation: terminal.operation,
+      processedCount: terminal.processedCount,
+      succeededCount: terminal.succeededCount,
+      failedCount: terminal.failedCount,
+      skippedCount: terminal.skippedCount,
+      manualActionRequired: terminal.manualActionRequired,
+      durationMs: elapsedMilliseconds(startedAt),
+    }, logger);
+    return;
+  }
+  if (terminal.outcome === "partially_completed" || terminal.outcome === "rejected") {
+    emitCreditScheduleRecalculation({
+      outcome: terminal.outcome,
+      operation: terminal.operation,
+      processedCount: terminal.processedCount,
+      succeededCount: terminal.succeededCount,
+      failedCount: terminal.failedCount,
+      skippedCount: terminal.skippedCount,
+      manualActionRequired: terminal.manualActionRequired,
+      durationMs: elapsedMilliseconds(startedAt),
+      reasonCode: terminal.reasonCode,
+    }, logger);
+    return;
+  }
+  emitCreditScheduleRecalculation({
+    outcome: terminal.outcome,
+    operation: terminal.operation,
+    processedCount: terminal.processedCount,
+    succeededCount: terminal.succeededCount,
+    failedCount: terminal.failedCount,
+    skippedCount: terminal.skippedCount,
+    manualActionRequired: terminal.manualActionRequired,
+    durationMs: elapsedMilliseconds(startedAt),
+    errorCode: terminal.errorCode,
+  }, logger);
+}
 
 // ========================================
 // INTERFACES
@@ -125,7 +214,13 @@ function calcularDeudaTotal({
 // FUNCIÓN PRINCIPAL
 // ========================================
 
-export async function recalcularCreditosDesdeJson(creditosAgrupados: CreditoAgrupado[]) {
+export async function recalcularCreditosDesdeJson(
+  creditosAgrupados: CreditoAgrupado[],
+  telemetry: JsonTelemetryOptions = {},
+) {
+  const startedAt = telemetry.startedAt ?? safeNow();
+  let hasPersistedChanges = false;
+  let scheduleUpdateFailures = 0;
   const resultados: {
     numeroCredito: string;
     status: "success" | "error" | "not_found";
@@ -134,12 +229,9 @@ export async function recalcularCreditosDesdeJson(creditosAgrupados: CreditoAgru
     inversionistas?: number;
   }[] = [];
 
-  console.log(`\n🔄 ========== RECALCULANDO ${creditosAgrupados.length} CRÉDITOS ==========\n`);
 
   for (const grupo of creditosAgrupados) {
     const numeroBase = grupo.numeroCredito;
-    console.log(`\n📋 Procesando crédito: ${numeroBase}`);
-    console.log(`   Variaciones: ${grupo.creditos.length}`);
 
     try {
       // 1️⃣ Buscar el crédito en la BD
@@ -150,7 +242,6 @@ export async function recalcularCreditosDesdeJson(creditosAgrupados: CreditoAgru
         .limit(1);
 
       if (!creditoDB) {
-        console.log(`   ⚠️ Crédito no encontrado en BD`);
         resultados.push({
           numeroCredito: numeroBase,
           status: "not_found",
@@ -159,7 +250,6 @@ export async function recalcularCreditosDesdeJson(creditosAgrupados: CreditoAgru
         continue;
       }
 
-      console.log(`   ✅ Crédito encontrado (ID: ${creditoDB.credito_id})`);
 
       // 2️⃣ Sumar los capitalRestante de todos los inversionistas
       let nuevoCapital = new Big(0);
@@ -177,10 +267,8 @@ export async function recalcularCreditosDesdeJson(creditosAgrupados: CreditoAgru
           capitalRestante: capitalRestante,
         });
 
-        console.log(`   💰 ${credito.inversionista}: Q${capitalRestante.toFixed(2)}`);
       }
 
-      console.log(`   📊 Capital Total Calculado: Q${nuevoCapital.toFixed(2)}`);
 
       // 3️⃣ Obtener porcentajes existentes antes de eliminar (solo si no hay inversionistasActuales)
       const tieneInversionistasActuales = grupo.inversionistasActuales && grupo.inversionistasActuales.length > 0;
@@ -209,7 +297,8 @@ export async function recalcularCreditosDesdeJson(creditosAgrupados: CreditoAgru
       await db
         .delete(creditos_inversionistas)
         .where(eq(creditos_inversionistas.credito_id, creditoDB.credito_id));
-      console.log(`   🗑️ Inversionistas anteriores eliminados`);
+      hasPersistedChanges = true;
+      notifyPersisted(telemetry);
 
       // 4️⃣ Recalcular deuda total con el nuevo capital
       const nuevaDeuda = calcularDeudaTotal({
@@ -223,7 +312,6 @@ export async function recalcularCreditosDesdeJson(creditosAgrupados: CreditoAgru
         plazo: Number(creditoDB.plazo ?? 0),
       });
 
-      console.log(`   📈 Nueva Deuda Total: Q${nuevaDeuda.totalDeuda}`);
 
       // 5️⃣ Actualizar el crédito
       await db
@@ -236,7 +324,6 @@ export async function recalcularCreditosDesdeJson(creditosAgrupados: CreditoAgru
         })
         .where(eq(creditos.credito_id, creditoDB.credito_id));
 
-      console.log(`   ✅ Crédito actualizado`);
 
       // 6️⃣ Crear nuevos inversionistas
       const porcentajeInteres = new Big(creditoDB.porcentaje_interes ?? 0);
@@ -247,7 +334,6 @@ export async function recalcularCreditosDesdeJson(creditosAgrupados: CreditoAgru
 
       if (tieneInversionistasActuales) {
         // ✅ Usar inversionistasActuales del JSON
-        console.log(`   📋 Usando inversionistasActuales del JSON (${grupo.inversionistasActuales!.length})`);
 
         // Agrupar inversionistas duplicados (mismo nombre) sumando capital y cuota
         const inversionistasAgrupados = new Map<string, InversionistaActual>();
@@ -256,14 +342,12 @@ export async function recalcularCreditosDesdeJson(creditosAgrupados: CreditoAgru
           if (existing) {
             existing.capital = new Big(existing.capital || 0).plus(new Big(inv.capital || 0)).toString();
             existing.cuota = new Big(existing.cuota || 0).plus(new Big(inv.cuota || 0)).toString();
-            console.log(`   🔀 ${inv.inversionista} duplicado → sumando capital y cuota`);
           } else {
             inversionistasAgrupados.set(inv.inversionista, { ...inv });
           }
         }
 
         const inversionistasUnicos = Array.from(inversionistasAgrupados.values());
-        console.log(`   📊 Inversionistas únicos: ${inversionistasUnicos.length}`);
 
         // Encontrar al inversionista con mayor capital
         const inversionistaMayor = inversionistasUnicos.reduce((max, current) =>
@@ -302,7 +386,6 @@ export async function recalcularCreditosDesdeJson(creditosAgrupados: CreditoAgru
 
           if (invActual.cuota) {
             cuotaInversionista = new Big(invActual.cuota);
-            console.log(`   💵 Cuota de ${invActual.inversionista}: Q${cuotaInversionista.toFixed(2)} (del JSON)`);
           } else {
             // Fallback: calcular proporcionalmente
             const cuotaSinCargos = cuotaTotal.minus(seguro).minus(gps).minus(membresias);
@@ -310,7 +393,6 @@ export async function recalcularCreditosDesdeJson(creditosAgrupados: CreditoAgru
             if (invActual.inversionista === inversionistaMayor.inversionista) {
               cuotaInversionista = cuotaInversionista.plus(seguro).plus(gps).plus(membresias).round(6);
             }
-            console.log(`   💵 Cuota de ${invActual.inversionista}: Q${cuotaInversionista.toFixed(6)} (calculada)`);
           }
 
           await db.insert(creditos_inversionistas).values({
@@ -327,7 +409,6 @@ export async function recalcularCreditosDesdeJson(creditosAgrupados: CreditoAgru
             cuota_inversionista: cuotaInversionista.toString(),
           });
 
-          console.log(`   👤 Inversionista creado: ${investor.nombre} (Q${montoAportado.toFixed(2)}) [${porcentajeInversion}/${porcentajeCashIn}]`);
         }
       } else {
         // Flujo original: usar creditos + porcentajes de la BD
@@ -387,7 +468,6 @@ export async function recalcularCreditosDesdeJson(creditosAgrupados: CreditoAgru
             cuota_inversionista: cuotaInversionista.toString(),
           });
 
-          console.log(`   👤 Inversionista creado: ${investor.nombre} (Q${montoAportado.toFixed(2)})`);
         }
       }
 
@@ -397,9 +477,13 @@ export async function recalcularCreditosDesdeJson(creditosAgrupados: CreditoAgru
           numero_credito_sifco: numeroBase,
           nueva_cuota: Number(creditoDB.cuota),
         });
-        console.log(`   📅 Cuotas actualizadas`);
       } catch (err) {
-        console.log(`   ⚠️ No se pudieron actualizar las cuotas: ${err}`);
+        scheduleUpdateFailures++;
+        try {
+          telemetry.onScheduleFailure?.();
+        } catch {
+          // Telemetry observers cannot alter the historical recalculation flow.
+        }
       }
 
       resultados.push({
@@ -411,7 +495,6 @@ export async function recalcularCreditosDesdeJson(creditosAgrupados: CreditoAgru
       });
 
     } catch (error: any) {
-      console.error(`   ❌ Error: ${error.message}`);
       resultados.push({
         numeroCredito: numeroBase,
         status: "error",
@@ -425,11 +508,16 @@ export async function recalcularCreditosDesdeJson(creditosAgrupados: CreditoAgru
   const errores = resultados.filter(r => r.status === "error").length;
   const noEncontrados = resultados.filter(r => r.status === "not_found").length;
 
-  console.log(`\n📊 ========== RESUMEN ==========`);
-  console.log(`✅ Exitosos: ${exitosos}`);
-  console.log(`❌ Errores: ${errores}`);
-  console.log(`⚠️ No encontrados: ${noEncontrados}`);
-  console.log(`📋 Total: ${resultados.length}`);
+  if (telemetry.emitTerminal !== false) {
+    emitJsonTerminal(classifyJsonRecalculationTerminal({
+      operation: "recalculate",
+      processedCount: resultados.length,
+      succeededCount: Math.max(0, exitosos - scheduleUpdateFailures),
+      failedCount: errores + scheduleUpdateFailures,
+      skippedCount: noEncontrados,
+      hasPersistedChanges,
+    }), startedAt, telemetry.logger);
+  }
 
   return {
     success: exitosos > 0,
@@ -468,8 +556,14 @@ export function agruparCreditosPorNumeroBase(creditosJson: CreditoJson[]): Credi
 // PROCESAR POOLS RAROS
 // ========================================
 
-export async function processPoolsRaros(pools: PoolRaro[]) {
-  console.log(`\n🔄 ========== PROCESANDO ${pools.length} POOLS RAROS ==========\n`);
+export async function processPoolsRaros(
+  pools: PoolRaro[],
+  telemetry: JsonTelemetryOptions = {},
+) {
+  const startedAt = telemetry.startedAt ?? safeNow();
+  let nestedScheduleUpdateFailures = 0;
+  let hasPersistedChanges = false;
+  const recordNestedPersistence = () => { hasPersistedChanges = true; };
 
   // Separar: creditos que coinciden con el pool → recalcular
   //          creditos con numero diferente → eliminar de la BD
@@ -498,7 +592,6 @@ export async function processPoolsRaros(pools: PoolRaro[]) {
           ...credito,
           numeroCredito: numeroBasePool, // Reasignar al credito correcto
         });
-        console.log(`   🔀 ${credito.inversionista}: ${numeroBaseCredito} → ${numeroBasePool} (credito ${numeroBaseCredito} se eliminará)`);
       }
     }
 
@@ -510,60 +603,94 @@ export async function processPoolsRaros(pools: PoolRaro[]) {
     }
   }
 
-  console.log(`📋 Créditos a recalcular: ${creditosParaRecalcular.length}`);
-  console.log(`🗑️ Créditos a eliminar: ${creditosParaEliminar.length}`);
 
   // 1. Primero eliminar los creditos que no corresponden
   let resultadoEliminacion = null;
   if (creditosParaEliminar.length > 0) {
-    resultadoEliminacion = await eliminarCreditos(creditosParaEliminar);
+    resultadoEliminacion = await eliminarCreditos(creditosParaEliminar, {
+      emitTerminal: false,
+      onPersisted: recordNestedPersistence,
+    });
   }
 
   // 2. Luego recalcular los creditos correctos con todos sus inversionistas
-  const resultadoRecalculo = await recalcularCreditosDesdeJson(creditosParaRecalcular);
+  const resultadoRecalculo = await recalcularCreditosDesdeJson(
+    creditosParaRecalcular,
+    {
+      emitTerminal: false,
+      onScheduleFailure: () => { nestedScheduleUpdateFailures++; },
+      onPersisted: recordNestedPersistence,
+    },
+  );
 
   // 3. Leer resultado_ultimos_pagos.json para obtener la cuota correcta por crédito
   const rutaUltimosPagos =
     "C:\\Users\\Kelvin Palacios\\Documents\\analis de datos\\resultado_ultimos_pagos.json";
 
   let mapaUltimosPagos = new Map<string, { numeroCuota: number; fechaPago: string | null; cuota: number }>();
+  const loadUltimosPagos = () => {
+    if (fs.existsSync(rutaUltimosPagos)) {
+      const contenidoPagos = fs.readFileSync(rutaUltimosPagos, "utf-8");
+      const ultimosPagos: CreditoAgrupado[] = JSON.parse(contenidoPagos);
 
-  if (fs.existsSync(rutaUltimosPagos)) {
-    const contenidoPagos = fs.readFileSync(rutaUltimosPagos, "utf-8");
-    const ultimosPagos: CreditoAgrupado[] = JSON.parse(contenidoPagos);
+      for (const grupo of ultimosPagos) {
+        const numeroBase = grupo.numeroCredito.split("_")[0];
+        // Tomar el numeroCuota más alto y la cuota sumada de todos los créditos del grupo
+        let maxCuota = 0;
+        let fechaPago: string | null = null;
+        let cuotaTotal = 0;
 
-    for (const grupo of ultimosPagos) {
-      const numeroBase = grupo.numeroCredito.split("_")[0];
-      // Tomar el numeroCuota más alto y la cuota sumada de todos los créditos del grupo
-      let maxCuota = 0;
-      let fechaPago: string | null = null;
-      let cuotaTotal = 0;
-
-      for (const c of grupo.creditos) {
-        const nCuota = parseInt(c.numeroCuota ?? "0", 10);
-        if (nCuota > maxCuota) {
-          maxCuota = nCuota;
+        for (const c of grupo.creditos) {
+          const nCuota = parseInt(c.numeroCuota ?? "0", 10);
+          if (nCuota > maxCuota) {
+            maxCuota = nCuota;
+          }
+          if (c.pago && !fechaPago) {
+            fechaPago = c.pago;
+          }
+          cuotaTotal += Number(c.cuota ?? 0);
         }
-        if (c.pago && !fechaPago) {
-          fechaPago = c.pago;
-        }
-        cuotaTotal += Number(c.cuota ?? 0);
-      }
 
-      if (maxCuota > 0) {
-        mapaUltimosPagos.set(numeroBase, { numeroCuota: maxCuota, fechaPago, cuota: cuotaTotal });
+        if (maxCuota > 0) {
+          mapaUltimosPagos.set(numeroBase, { numeroCuota: maxCuota, fechaPago, cuota: cuotaTotal });
+        }
       }
+    } else {
     }
-    console.log(`📂 Últimos pagos cargados: ${mapaUltimosPagos.size} créditos`);
+  };
+
+  if (telemetry.emitTerminal === false) {
+    loadUltimosPagos();
   } else {
-    console.log(`⚠️ No se encontró ${rutaUltimosPagos}, se usará numeroCuota del pool`);
+    await runPostPersistenceStep(loadUltimosPagos, () => {
+      const eliminacionExitosa = resultadoEliminacion?.exitosos ?? 0;
+      const eliminacionFallida = resultadoEliminacion?.errores ?? 0;
+      const eliminacionOmitida = resultadoEliminacion?.noEncontrados ?? 0;
+      const succeededCount = Math.max(
+        0,
+        resultadoRecalculo.exitosos + eliminacionExitosa - nestedScheduleUpdateFailures,
+      );
+      const failedCount = resultadoRecalculo.errores
+        + eliminacionFallida
+        + nestedScheduleUpdateFailures
+        + 1;
+      const skippedCount = resultadoRecalculo.noEncontrados + eliminacionOmitida;
+      emitJsonTerminal(classifyJsonRecalculationTerminal({
+        operation: "process_pools",
+        processedCount: succeededCount + failedCount + skippedCount,
+        succeededCount,
+        failedCount,
+        skippedCount,
+        hasPersistedChanges,
+      }), startedAt, telemetry.logger);
+    });
   }
 
   // 4. Marcar cuotas pagadas y recalcular cuotas por crédito
-  console.log(`\n📅 ========== MARCANDO CUOTAS PAGADAS ==========\n`);
   let cuotasMarcadas = 0;
   let cuotasError = 0;
   let cuotasRecalculadas = 0;
+  let cuotasRecalculoError = 0;
 
   for (const pool of pools) {
     const numeroBasePool = pool.numeroCredito.split("_")[0];
@@ -577,16 +704,15 @@ export async function processPoolsRaros(pools: PoolRaro[]) {
     if (numeroCuota <= 0) continue;
 
     try {
-      console.log(`   ${numeroBasePool}: marcando hasta cuota ${numeroCuota} (pago: ${fechaPago})`);
       await marcarCuotasPagadasHastaNumero({
         numero_credito_sifco: numeroBasePool,
         hasta_cuota: numeroCuota,
         fecha_primer_pago: fechaPago ?? undefined,
+        onPersisted: recordNestedPersistence,
       });
       cuotasMarcadas++;
     } catch (err) {
       cuotasError++;
-      console.log(`   ⚠️ Error marcando cuotas ${numeroBasePool}: ${err}`);
     }
 
     // Recalcular cuotas del crédito con updateInstallments
@@ -597,14 +723,36 @@ export async function processPoolsRaros(pools: PoolRaro[]) {
           nueva_cuota: cuotaCredito,
         });
         cuotasRecalculadas++;
-        console.log(`   ✅ ${numeroBasePool}: cuotas recalculadas (cuota: ${cuotaCredito})`);
       } catch (err) {
-        console.log(`   ⚠️ Error recalculando cuotas ${numeroBasePool}: ${err}`);
+        cuotasRecalculoError++;
       }
     }
   }
 
-  console.log(`\n📊 Cuotas marcadas: ${cuotasMarcadas}, Recalculadas: ${cuotasRecalculadas}, Errores: ${cuotasError}`);
+
+  if (telemetry.emitTerminal !== false) {
+    const eliminacionExitosa = resultadoEliminacion?.exitosos ?? 0;
+    const eliminacionFallida = resultadoEliminacion?.errores ?? 0;
+    const eliminacionOmitida = resultadoEliminacion?.noEncontrados ?? 0;
+    const succeededCount = Math.max(
+      0,
+      resultadoRecalculo.exitosos + eliminacionExitosa - nestedScheduleUpdateFailures,
+    );
+    const failedCount = resultadoRecalculo.errores
+      + eliminacionFallida
+      + nestedScheduleUpdateFailures
+      + cuotasError
+      + cuotasRecalculoError;
+    const skippedCount = resultadoRecalculo.noEncontrados + eliminacionOmitida;
+    emitJsonTerminal(classifyJsonRecalculationTerminal({
+      operation: "process_pools",
+      processedCount: succeededCount + failedCount + skippedCount,
+      succeededCount,
+      failedCount,
+      skippedCount,
+      hasPersistedChanges,
+    }), startedAt, telemetry.logger);
+  }
 
   return {
     success: resultadoRecalculo.success || (resultadoEliminacion?.success ?? false),
@@ -618,7 +766,12 @@ export async function processPoolsRaros(pools: PoolRaro[]) {
 // ELIMINAR CRÉDITOS COMPLETOS DE LA BD
 // ========================================
 
-export async function eliminarCreditos(creditosEliminar: CreditoEliminar[]) {
+export async function eliminarCreditos(
+  creditosEliminar: CreditoEliminar[],
+  telemetry: JsonTelemetryOptions = {},
+) {
+  const startedAt = telemetry.startedAt ?? safeNow();
+  let hasPersistedChanges = false;
   // Agrupar por numero base para no eliminar el mismo credito varias veces
   const numerosUnicos = new Map<string, CreditoEliminar>();
   for (const item of creditosEliminar) {
@@ -634,10 +787,8 @@ export async function eliminarCreditos(creditosEliminar: CreditoEliminar[]) {
     message: string;
   }[] = [];
 
-  console.log(`\n🗑️ ========== ELIMINANDO ${numerosUnicos.size} CRÉDITOS COMPLETOS ==========\n`);
 
   for (const [numeroBase] of numerosUnicos) {
-    console.log(`\n📋 Eliminando crédito: ${numeroBase}`);
 
     try {
       // 1. Buscar credito
@@ -648,7 +799,6 @@ export async function eliminarCreditos(creditosEliminar: CreditoEliminar[]) {
         .limit(1);
 
       if (!creditoDB) {
-        console.log(`   ⚠️ Crédito ${numeroBase} no encontrado en BD`);
         resultados.push({
           numeroCredito: numeroBase,
           status: "not_found",
@@ -673,45 +823,42 @@ export async function eliminarCreditos(creditosEliminar: CreditoEliminar[]) {
         await db
           .delete(boletas)
           .where(inArray(boletas.pago_id, pagoIds));
-        console.log(`   🗑️ Boletas eliminadas (${pagoIds.length} pagos)`);
+        hasPersistedChanges = true;
+        notifyPersisted(telemetry);
 
         // Pagos inversionistas (referencia pago_id y credito_id sin CASCADE)
         await db
           .delete(pagos_credito_inversionistas)
           .where(eq(pagos_credito_inversionistas.credito_id, creditoId));
-        console.log(`   🗑️ Pagos inversionistas eliminados`);
 
         // Pagos credito (referencia credito_id sin CASCADE)
         await db
           .delete(pagos_credito)
           .where(eq(pagos_credito.credito_id, creditoId));
-        console.log(`   🗑️ Pagos eliminados`);
       }
 
       // Cuotas (referencia credito_id sin CASCADE)
       await db
         .delete(cuotas_credito)
         .where(eq(cuotas_credito.credito_id, creditoId));
-      console.log(`   🗑️ Cuotas eliminadas`);
+      hasPersistedChanges = true;
+      notifyPersisted(telemetry);
 
       // Inversionistas del credito (sin CASCADE)
       await db
         .delete(creditos_inversionistas)
         .where(eq(creditos_inversionistas.credito_id, creditoId));
-      console.log(`   🗑️ Inversionistas eliminados`);
 
       // Efectividad asesores (sin CASCADE)
       await db
         .delete(efectividad_asesores)
         .where(eq(efectividad_asesores.credito_id, creditoId));
-      console.log(`   🗑️ Efectividad asesores eliminada`);
 
       // 4. Eliminar el credito (CASCADE borra: moras, condonaciones, rubros, cancelaciones, bad_debts, montos_adicionales, convenios)
       // facturas_electronicas pone pago_id en NULL automaticamente (SET NULL)
       await db
         .delete(creditos)
         .where(eq(creditos.credito_id, creditoId));
-      console.log(`   ✅ Crédito ${numeroBase} eliminado completamente`);
 
       resultados.push({
         numeroCredito: numeroBase,
@@ -720,7 +867,6 @@ export async function eliminarCreditos(creditosEliminar: CreditoEliminar[]) {
       });
 
     } catch (error: any) {
-      console.error(`   ❌ Error: ${error.message}`);
       resultados.push({
         numeroCredito: numeroBase,
         status: "error",
@@ -733,11 +879,16 @@ export async function eliminarCreditos(creditosEliminar: CreditoEliminar[]) {
   const errores = resultados.filter(r => r.status === "error").length;
   const noEncontrados = resultados.filter(r => r.status === "not_found").length;
 
-  console.log(`\n📊 ========== RESUMEN ELIMINACION ==========`);
-  console.log(`✅ Exitosos: ${exitosos}`);
-  console.log(`❌ Errores: ${errores}`);
-  console.log(`⚠️ No encontrados: ${noEncontrados}`);
-  console.log(`📋 Total: ${resultados.length}`);
+  if (telemetry.emitTerminal !== false) {
+    emitJsonTerminal(classifyJsonRecalculationTerminal({
+      operation: "delete_credits",
+      processedCount: resultados.length,
+      succeededCount: exitosos,
+      failedCount: errores,
+      skippedCount: noEncontrados,
+      hasPersistedChanges,
+    }), startedAt, telemetry.logger);
+  }
 
   return {
     success: exitosos > 0,
@@ -753,7 +904,12 @@ export async function eliminarCreditos(creditosEliminar: CreditoEliminar[]) {
 // ACTUALIZAR SOLO CUOTAS DE INVERSIONISTAS
 // ========================================
 
-export async function actualizarCuotasInversionistas(creditosAgrupados: CreditoAgrupado[]) {
+export async function actualizarCuotasInversionistas(
+  creditosAgrupados: CreditoAgrupado[],
+  telemetry: JsonTelemetryOptions = {},
+) {
+  const startedAt = telemetry.startedAt ?? safeNow();
+  let hasPersistedChanges = false;
   const resultados: {
     numeroCredito: string;
     status: "success" | "error" | "not_found" | "sin_cuotas";
@@ -761,14 +917,11 @@ export async function actualizarCuotasInversionistas(creditosAgrupados: CreditoA
     inversionistasActualizados?: number;
   }[] = [];
 
-  console.log(`\n🔄 ========== ACTUALIZANDO CUOTAS DE ${creditosAgrupados.length} CRÉDITOS ==========\n`);
 
   for (const grupo of creditosAgrupados) {
     const numeroBase = grupo.numeroCredito;
-    console.log(`\n📋 Procesando crédito: ${numeroBase}`);
 
     if (!grupo.inversionistasActuales || grupo.inversionistasActuales.length === 0) {
-      console.log(`   ⚠️ No tiene inversionistasActuales con cuotas`);
       resultados.push({
         numeroCredito: numeroBase,
         status: "sin_cuotas",
@@ -786,7 +939,6 @@ export async function actualizarCuotasInversionistas(creditosAgrupados: CreditoA
         .limit(1);
 
       if (!creditoDB) {
-        console.log(`   ⚠️ Crédito no encontrado en BD`);
         resultados.push({
           numeroCredito: numeroBase,
           status: "not_found",
@@ -800,40 +952,46 @@ export async function actualizarCuotasInversionistas(creditosAgrupados: CreditoA
 
       for (const invActual of grupo.inversionistasActuales) {
         if (!invActual.cuota) {
-          console.log(`   ⏭️ ${invActual.inversionista}: sin cuota, saltando`);
           continue;
         }
 
         const investor = await findOrCreateInvestor(invActual.inversionista, false);
 
         // Actualizar tabla principal
-        const [updated] = await db
-          .update(creditos_inversionistas)
-          .set({ cuota_inversionista: invActual.cuota })
-          .where(
-            and(
-              eq(creditos_inversionistas.credito_id, creditoDB.credito_id),
-              eq(creditos_inversionistas.inversionista_id, investor.inversionista_id)
-            )
-          )
-          .returning({ id: creditos_inversionistas.id });
-
-        // Actualizar espejo
-        await db
-          .update(creditos_inversionistas_espejo)
-          .set({ cuota_inversionista: invActual.cuota, updated_at: new Date() })
-          .where(
-            and(
-              eq(creditos_inversionistas_espejo.credito_id, creditoDB.credito_id),
-              eq(creditos_inversionistas_espejo.inversionista_id, investor.inversionista_id)
-            )
-          );
+        const updated = await runMirroredPersistence(
+          async () => {
+            const [primaryUpdate] = await db
+              .update(creditos_inversionistas)
+              .set({ cuota_inversionista: invActual.cuota })
+              .where(
+                and(
+                  eq(creditos_inversionistas.credito_id, creditoDB.credito_id),
+                  eq(creditos_inversionistas.inversionista_id, investor.inversionista_id)
+                )
+              )
+              .returning({ id: creditos_inversionistas.id });
+            return primaryUpdate;
+          },
+          async () => {
+            await db
+              .update(creditos_inversionistas_espejo)
+              .set({ cuota_inversionista: invActual.cuota, updated_at: new Date() })
+              .where(
+                and(
+                  eq(creditos_inversionistas_espejo.credito_id, creditoDB.credito_id),
+                  eq(creditos_inversionistas_espejo.inversionista_id, investor.inversionista_id)
+                )
+              );
+          },
+          () => {
+            hasPersistedChanges = true;
+            notifyPersisted(telemetry);
+          },
+        );
 
         if (updated) {
           actualizados++;
-          console.log(`   ✅ ${invActual.inversionista}: cuota → Q${invActual.cuota} (padre + espejo)`);
         } else {
-          console.log(`   ⚠️ ${invActual.inversionista}: no encontrado en el crédito`);
         }
       }
 
@@ -845,7 +1003,6 @@ export async function actualizarCuotasInversionistas(creditosAgrupados: CreditoA
       });
 
     } catch (error: any) {
-      console.error(`   ❌ Error: ${error.message}`);
       resultados.push({
         numeroCredito: numeroBase,
         status: "error",
@@ -856,10 +1013,20 @@ export async function actualizarCuotasInversionistas(creditosAgrupados: CreditoA
 
   const exitosos = resultados.filter(r => r.status === "success").length;
   const errores = resultados.filter(r => r.status === "error").length;
+  const omitidos = resultados.filter(
+    r => r.status === "not_found" || r.status === "sin_cuotas",
+  ).length;
 
-  console.log(`\n📊 ========== RESUMEN CUOTAS ==========`);
-  console.log(`✅ Exitosos: ${exitosos}`);
-  console.log(`❌ Errores: ${errores}`);
+  if (telemetry.emitTerminal !== false) {
+    emitJsonTerminal(classifyJsonRecalculationTerminal({
+      operation: "update_investor_installments",
+      processedCount: resultados.length,
+      succeededCount: exitosos,
+      failedCount: errores,
+      skippedCount: omitidos,
+      hasPersistedChanges,
+    }), startedAt, telemetry.logger);
+  }
 
   return {
     success: exitosos > 0,

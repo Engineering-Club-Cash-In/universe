@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import { db } from "../db";
+import { auditRecord } from "../lib/audit";
 import { leads, opportunities } from "../db/schema/crm";
 
 // ── Interfaces ──────────────────────────────────────────────────────────
@@ -254,6 +255,12 @@ export async function scoreLead(leadId: string, opportunityId?: string) {
 				updatedAt: scoredAt,
 			})
 			.where(eq(leads.id, leadId));
+		auditRecord({
+			entity: "lead",
+			id: leadId,
+			action: "score",
+			data: { score: result.probability, fit: result.fit },
+		});
 
 		console.log("[scoreLead] Success!");
 		return {

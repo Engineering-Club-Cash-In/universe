@@ -1,6 +1,7 @@
 // app.ts (o donde declares tus rutas Elysia)
 import { z } from "zod";
-import { formatToUSD } from "../utils/functions/currencyConverter";
+import { formatToUSD, getTipoCambioUSD } from "../utils/functions/currencyConverter";
+import { convertirReporteAUSD } from "../utils/functions/reporteMoneda";
 import { USD_EXCHANGE_RATE } from "../utils/functions/const";
 import { descuentoImpuestos } from "../utils/functions/taxes";
 import {
@@ -52,7 +53,10 @@ import {
   type EstadoLiquidacionResumenFilter,
 } from "../utils/investorLiquidationSummary";
 import { addInvestorToCredit } from "./addInvestorToCredit";
+import { resolverModosEfectivosLiquidacion } from "./purchaseClassification";
+import type { ModalidadFacturacion } from "./modalidadFacturacion";
 import { calcularExpiracionCompraCartera, startOfDayGT } from "../utils/functions/businessDays";
+import { withCreditoEspejoLocks } from "../utils/creditoEspejoLock";
 import {
   buildPendingReturnAuthorizationWarning,
   PendingReturnAuthorizationError,
@@ -86,6 +90,8 @@ interface TablaConfig {
   origen: OrigenDatos;
 }
 
+type InvestorDatabase = typeof db;
+
 // Función helper para obtener configuración de tablas
 function getTablaConfig(tipo: OrigenDatos): TablaConfig {
   if (tipo === "espejo") {
@@ -109,12 +115,13 @@ function getTablaConfig(tipo: OrigenDatos): TablaConfig {
 // Función genérica para consultar créditos de inversionista
 async function consultarCreditosInversionista(
   inversionistaIds: number[],
-  config: TablaConfig
+  config: TablaConfig,
+  database: InvestorDatabase = db,
 ) {
   // 🔥 Type assertion segura: sabemos que ambas tablas tienen la misma estructura
   const tabla = config.creditosInversionistas as typeof creditos_inversionistas;
 
-  return await db
+  return await database
     .select({
       credito_id: tabla.credito_id,
       inversionista_id: tabla.inversionista_id,
@@ -219,13 +226,16 @@ async function consultarPagosInversionista(
 }
 
 // Función para combinar resultados de ambas fuentes (originales + espejos)
-async function consultarCreditosAmbos(inversionistaIds: number[]) {
+async function consultarCreditosAmbos(
+  inversionistaIds: number[],
+  database: InvestorDatabase = db,
+) {
   const configOriginal = getTablaConfig("original");
   const configEspejo = getTablaConfig("espejo");
 
   const [creditosOriginales, creditosEspejos] = await Promise.all([
-    consultarCreditosInversionista(inversionistaIds, configOriginal),
-    consultarCreditosInversionista(inversionistaIds, configEspejo),
+    consultarCreditosInversionista(inversionistaIds, configOriginal, database),
+    consultarCreditosInversionista(inversionistaIds, configEspejo, database),
   ]);
 
   return [...creditosOriginales, ...creditosEspejos];
@@ -261,7 +271,9 @@ async function consultarPagosBulk(
   config: TablaConfig,
   soloLiquidados = false,
   liquidacionId?: number,
-  fechaLiquidacion?: string
+  fechaLiquidacion?: string,
+  limitarPagosIds?: readonly number[],
+  database: InvestorDatabase = db,
 ) {
   const tabla = config.pagosCreditoInversionistas as typeof pagos_credito_inversionistas;
 
@@ -292,7 +304,11 @@ async function consultarPagosBulk(
     pagosConditions.push(eq(cuotas_credito.numero_cuota, numeroCuota));
   }
 
-  return await db
+  if (limitarPagosIds) {
+    pagosConditions.push(inArray(tabla.id, [...limitarPagosIds]));
+  }
+
+  return await database
     .select({
       credito_id: tabla.credito_id,
       abono_capital: tabla.abono_capital,
@@ -316,11 +332,13 @@ async function consultarPagosBulkAmbos(
   numeroCuota: number | undefined,
   soloLiquidados = false,
   liquidacionId?: number,
-  fechaLiquidacion?: string
+  fechaLiquidacion?: string,
+  limitarPagosIds?: readonly number[],
+  database: InvestorDatabase = db,
 ) {
   const [pagosOriginales, pagosEspejos] = await Promise.all([
-    consultarPagosBulk(inversionistaId, creditosIds, incluirLiquidados, numeroCuota, getTablaConfig("original"), soloLiquidados, liquidacionId, fechaLiquidacion),
-    consultarPagosBulk(inversionistaId, creditosIds, incluirLiquidados, numeroCuota, getTablaConfig("espejo"), soloLiquidados, liquidacionId, fechaLiquidacion),
+    consultarPagosBulk(inversionistaId, creditosIds, incluirLiquidados, numeroCuota, getTablaConfig("original"), soloLiquidados, liquidacionId, fechaLiquidacion, limitarPagosIds, database),
+    consultarPagosBulk(inversionistaId, creditosIds, incluirLiquidados, numeroCuota, getTablaConfig("espejo"), soloLiquidados, liquidacionId, fechaLiquidacion, limitarPagosIds, database),
   ]);
   return [...pagosOriginales, ...pagosEspejos];
 }
@@ -1249,7 +1267,8 @@ export async function resumeInvestor(
   tipo: TipoConsulta = "originales",
   soloLiquidados = false,
   liquidacionId?: number,
-  fechaLiquidacion?: string
+  fechaLiquidacion?: string,
+  rawValues = false
 ) {
   console.log(
     "resumeInvestor for",
@@ -1429,8 +1448,14 @@ export async function resumeInvestor(
         total_cuota_variable_combinada: new Big(0),
       };
 
+      // `rawValues` devuelve los montos tal como están en la base (quetzales),
+      // sin convertir a la moneda del inversionista. Lo usa la liquidación para
+      // pedir el reporte UNA sola vez y derivar la versión en dólares en memoria
+      // (ver convertirReporteAUSD), en lugar de repetir toda la consulta.
       const formatValue = (val: string | number | null | undefined) =>
-        inv.moneda === "dolares" ? formatToUSD(val, inv.inversionista_id) : Number(val || 0);
+        !rawValues && inv.moneda === "dolares"
+          ? formatToUSD(val, inv.inversionista_id)
+          : Number(val || 0);
 
       // Procesar créditos del inversionista
       const creditosData = await Promise.all(
@@ -1828,9 +1853,14 @@ export async function resumeInvestor(
         saldo_reinversion: inv.saldo_reinversion,
         tieneBoletaPendiente: inv.tiene_boleta_pendiente,
         dpi: inv.dpi,
-        moneda: inv.moneda,
+        // Con `rawValues` los montos quedaron en quetzales, así que la moneda
+        // declarada tiene que acompañarlos: si no, el Excel rotularía con "$"
+        // cifras que están en Q. La moneda real del inversionista viaja aparte
+        // en `moneda_inversionista`.
+        moneda: rawValues ? "quetzales" : inv.moneda,
+        moneda_inversionista: inv.moneda,
         email: inv.email,
-        currencySymbol: inv.moneda === "dolares" ? "$" : "Q.",
+        currencySymbol: !rawValues && inv.moneda === "dolares" ? "$" : "Q.",
         creditos: creditosData,
         subtotal: {
           total_abono_capital: formatValue(subtotal.total_abono_capital.toString()),
@@ -1893,7 +1923,10 @@ export async function getInvestorTotalsGlobales(
   soloLiquidados = false,
   liquidacionId?: number,
   fechaLiquidacion?: string,
-  rawValues = false
+  rawValues = false,
+  limitarCreditosIds?: readonly number[],
+  limitarPagosIds?: readonly number[],
+  database: InvestorDatabase = db,
 ) {
   console.log(
     "getInvestorTotalsGlobales for",
@@ -1919,7 +1952,7 @@ export async function getInvestorTotalsGlobales(
     throw new Error("Debe proporcionar al menos 'id' o 'dpi'");
   }
 
-  const listaInversionistas = await db
+  const listaInversionistas = await database
     .select({
       inversionista_id: inversionistas.inversionista_id,
       inversionista: inversionistas.nombre,
@@ -1945,7 +1978,7 @@ export async function getInvestorTotalsGlobales(
   // inversionista activó descuenta_impuestos después. Sin liquidacionId (totales
   // vivos / pre-liquidación) se conserva el flag actual.
   if (liquidacionId != null) {
-    const [liqSnap] = await db
+    const [liqSnap] = await database
       .select({ descuenta_impuestos: liquidaciones.descuenta_impuestos })
       .from(liquidaciones)
       .where(eq(liquidaciones.liquidacion_id, liquidacionId))
@@ -1961,13 +1994,18 @@ export async function getInvestorTotalsGlobales(
   let creditosParticipa;
 
   if (tipo === "ambas") {
-    creditosParticipa = await consultarCreditosAmbos(inversionistaIds);
+    creditosParticipa = await consultarCreditosAmbos(inversionistaIds, database);
   } else {
     const config = getTablaConfig(tipo === "espejos" ? "espejo" : "original");
-    creditosParticipa = await consultarCreditosInversionista(inversionistaIds, config);
+    creditosParticipa = await consultarCreditosInversionista(inversionistaIds, config, database);
   }
 
   let creditosIds = creditosParticipa.map((c) => c.credito_id);
+  if (limitarCreditosIds) {
+    const creditosPermitidos = new Set(limitarCreditosIds);
+    creditosParticipa = creditosParticipa.filter((credito) => creditosPermitidos.has(credito.credito_id));
+    creditosIds = creditosIds.filter((creditoId) => limitarCreditosIds.includes(creditoId));
+  }
 
   const formatValue = (val: string | number) =>
     rawValues ? Number(val) : (inv.moneda === "dolares" ? formatToUSD(val, inv.inversionista_id) : Number(val));
@@ -1996,7 +2034,7 @@ export async function getInvestorTotalsGlobales(
   // 3. Info de créditos con filtros (igual que resumeInvestor)
   let conditions = [inArray(creditos.credito_id, creditosIds)];
 
-  const creditosInfo = await db
+  const creditosInfo = await database
     .select({
       credito_id: creditos.credito_id,
       capital: creditos.capital,
@@ -2044,7 +2082,9 @@ export async function getInvestorTotalsGlobales(
       numeroCuota,
       soloLiquidados,
       liquidacionId,
-      fechaLiquidacion
+      fechaLiquidacion,
+      limitarPagosIds,
+      database,
     );
   } else {
     const config = getTablaConfig(tipo === "espejos" ? "espejo" : "original");
@@ -2056,7 +2096,9 @@ export async function getInvestorTotalsGlobales(
       config,
       soloLiquidados,
       liquidacionId,
-      fechaLiquidacion
+      fechaLiquidacion,
+      limitarPagosIds,
+      database,
     );
   }
 
@@ -2270,12 +2312,12 @@ export async function getInvestorTotalsGlobales(
   }
 
   // 7. Upsert en reinversiones
-  const existeReinversion = await db.query.reinversiones.findFirst({
+  const existeReinversion = await database.query.reinversiones.findFirst({
     where: (r, { eq }) => eq(r.inversionista_id, inv.inversionista_id),
   });
 
   if (existeReinversion) {
-    await db.update(reinversiones)
+    await database.update(reinversiones)
       .set({
         monto_capital: subtotal.total_reinversion_capital.toFixed(2),
         monto_interes: subtotal.total_reinversion_interes.toFixed(2),
@@ -2284,7 +2326,7 @@ export async function getInvestorTotalsGlobales(
       })
       .where(eq(reinversiones.inversionista_id, inv.inversionista_id));
   } else {
-    await db.insert(reinversiones).values({
+    await database.insert(reinversiones).values({
       inversionista_id: inv.inversionista_id,
       monto_capital: subtotal.total_reinversion_capital.toFixed(2),
       monto_interes: subtotal.total_reinversion_interes.toFixed(2),
@@ -2339,12 +2381,33 @@ export async function getInvestorTotalsGlobales(
   };
 }
 
-export async function updateLiquidacionReporteUrl(liquidacion_id: number, url: string) {
+/**
+ * Repunta el reporte de una liquidación ya hecha.
+ *
+ * `urlGtq` acompaña a `url`: quien regenera el reporte principal de un
+ * inversionista en dólares regenera también su copia en quetzales y pasa las
+ * dos, de modo que el par siempre queda coherente.
+ *
+ *   - `urlGtq` string  → se guarda (junto con el tipo de cambio usado).
+ *   - `urlGtq` null    → se limpia. Para inversionistas en quetzales, que no
+ *                        tienen copia, y para un reporte que se regeneró sin
+ *                        poder rehacerla.
+ *   - `urlGtq` omitido → la columna NO se toca y conserva lo que tenía. Es lo
+ *                        que necesita un backfill hecho a mano: repuntar el
+ *                        original sin perder la copia en Q cargada aparte.
+ */
+export async function updateLiquidacionReporteUrl(
+  liquidacion_id: number,
+  url: string,
+  urlGtq?: string | null,
+  tipoCambio?: number | null,
+) {
   const [liquidacion] = await db
     .select({
       liquidacion_id: liquidaciones.liquidacion_id,
       fecha_liquidacion: liquidaciones.fecha_liquidacion,
       reporte_liquidacion_url: liquidaciones.reporte_liquidacion_url,
+      reporte_liquidacion_url_gtq: liquidaciones.reporte_liquidacion_url_gtq,
     })
     .from(liquidaciones)
     .where(eq(liquidaciones.liquidacion_id, liquidacion_id))
@@ -2352,9 +2415,18 @@ export async function updateLiquidacionReporteUrl(liquidacion_id: number, url: s
     .limit(1);
 
   if (liquidacion) {
+    const cambios: Record<string, unknown> = { reporte_liquidacion_url: url };
+
+    // `undefined` = no se tocan las columnas de la copia en quetzales.
+    if (urlGtq !== undefined) {
+      cambios.reporte_liquidacion_url_gtq = urlGtq;
+      cambios.tipo_cambio_reporte =
+        urlGtq && tipoCambio ? String(tipoCambio) : null;
+    }
+
     await db
       .update(liquidaciones)
-      .set({ reporte_liquidacion_url: url })
+      .set(cambios)
       .where(eq(liquidaciones.liquidacion_id, liquidacion.liquidacion_id));
 
     return {
@@ -2362,6 +2434,9 @@ export async function updateLiquidacionReporteUrl(liquidacion_id: number, url: s
       fecha_liquidacion: liquidacion.fecha_liquidacion,
       url_anterior: liquidacion.reporte_liquidacion_url,
       url_nueva: url,
+      url_gtq_anterior: liquidacion.reporte_liquidacion_url_gtq,
+      url_gtq_nueva:
+        urlGtq === undefined ? liquidacion.reporte_liquidacion_url_gtq : urlGtq,
     };
   }
 
@@ -4065,34 +4140,96 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
         continue;
       }
 
-      // Totales pre-liquidación (espejos, no liquidados)
-      // rawValues=true para que los totales vengan siempre en Q (sin convertir a USD)
-      const totalesResult = await getInvestorTotalsGlobales(inv_id, undefined, "espejos", false, undefined, false, undefined, undefined, true);
-      const totales = totalesResult.totales;
-      const cantidadPagos = pagosNoLiquidados.length;
-
-      console.log(`  📊 Total pagos a liquidar: ${cantidadPagos}`);
-
-      const reinvCapital = totales.total_reinversion_capital ?? 0;
-      const reinvInteres = totales.total_reinversion_interes ?? 0;
-      const reinvTotal = totales.total_reinversion ?? 0;
-
       // Paso 4: Se abre una transacción de base de datos. Todo lo que ocurra aquí
       // es atómico: si algo falla en el medio, se revierten todos los cambios y
       // el estado queda exactamente como estaba antes de empezar.
-      const { liquidacion, updateResult, debeReinvertir, montoReinvertido } = await db.transaction(async (tx) => {
+      const resultadoLiquidacion = await withCreditoEspejoLocks(async (locks) =>
+        db.transaction(async (tx) => {
+        const creditoIdsPagos = pagosNoLiquidados.map((pago) => pago.credito_id);
+        const creditosDistintos = [...new Set(creditoIdsPagos)].sort((a, b) => a - b);
+        for (const creditoId of creditosDistintos) {
+          if (!(await locks.tryLock(creditoId))) {
+            throw new Error(`Crédito ${creditoId} está siendo operado por otro proceso`);
+          }
+        }
+        // El preflight solo descubre los locks. La liquidación consume esta foto
+        // fresca, tomada con todos los locks adquiridos, para no doble-reducir.
+        const pagosNoLiquidadosBajoLock = await tx
+          .select({
+            id: pagos_credito_inversionistas_espejo.id,
+            pago_id: pagos_credito_inversionistas_espejo.pago_id,
+            credito_id: pagos_credito_inversionistas_espejo.credito_id,
+            abono_capital: pagos_credito_inversionistas_espejo.abono_capital,
+            abono_capital_id: pagos_credito_inversionistas_espejo.abono_capital_id,
+            numero_credito_sifco: creditos.numero_credito_sifco,
+            estado_devolucion: creditos.estado_devolucion,
+          })
+          .from(pagos_credito_inversionistas_espejo)
+          .innerJoin(creditos, eq(pagos_credito_inversionistas_espejo.credito_id, creditos.credito_id))
+          .where(and(
+            eq(pagos_credito_inversionistas_espejo.inversionista_id, inv_id),
+            eq(pagos_credito_inversionistas_espejo.estado_liquidacion, "NO_LIQUIDADO"),
+            inArray(pagos_credito_inversionistas_espejo.credito_id, creditosDistintos),
+          ));
+        if (pagosNoLiquidadosBajoLock.length === 0) return { skip: true as const };
+        const cantidadPagos = pagosNoLiquidadosBajoLock.length;
+        const creditoIdsPagosBajoLock = pagosNoLiquidadosBajoLock.map((pago) => pago.credito_id);
+        const creditosDistintosBajoLock = [...new Set(creditoIdsPagosBajoLock)];
+        const pagosIds = pagosNoLiquidadosBajoLock.map((pago) => pago.id);
+        const [inversionistaBloqueado] = await tx
+          .select({ tipo_reinversion: inversionistas.tipo_reinversion })
+          .from(inversionistas)
+          .where(eq(inversionistas.inversionista_id, inv_id))
+          .for("update");
+        const totalesResult = await getInvestorTotalsGlobales(
+          inv_id, undefined, "espejos", false, undefined, false, undefined, undefined, true,
+          creditosDistintosBajoLock, pagosIds, tx as unknown as typeof db,
+        );
+        const totales = totalesResult.totales;
+        const reinvCapital = totales.total_reinversion_capital ?? 0;
+        const reinvInteres = totales.total_reinversion_interes ?? 0;
+        const reinvTotal = totales.total_reinversion ?? 0;
+        console.log(`  📊 Total pagos a liquidar: ${cantidadPagos}`);
         // Revalida bajo lock dentro de misma transacción que liquida. Esto evita
         // cambio a PENDIENTE_AUTORIZACION después del pre-chequeo.
-        const creditoIdsPagos = pagosNoLiquidados.map((pago) => pago.credito_id);
         const creditosBloqueados = await lockPendingReturnCreditsForLiquidation(
           tx,
-          creditoIdsPagos,
+          creditoIdsPagosBajoLock,
         );
 
         const warningActualizado = buildPendingReturnAuthorizationWarning(creditosBloqueados);
         if (warningActualizado) {
           throw new PendingReturnAuthorizationError(warningActualizado);
         }
+
+        // Foto tomada antes de reducir posiciones. Solo el modo común y conocido
+        // representa honestamente una liquidación multi-crédito.
+        const modosPorCredito = await tx
+          .select({
+            credito_id: creditos_inversionistas_espejo.credito_id,
+            tipo_reinversion: creditos_inversionistas_espejo.tipo_reinversion,
+            modalidad_facturacion: creditos_inversionistas_espejo.modalidad_facturacion,
+          })
+          .from(creditos_inversionistas_espejo)
+          .where(
+            and(
+              eq(creditos_inversionistas_espejo.inversionista_id, inv_id),
+              inArray(creditos_inversionistas_espejo.credito_id, creditosDistintosBajoLock),
+            ),
+          );
+        const modosEfectivos = resolverModosEfectivosLiquidacion(
+          inversionistaBloqueado?.tipo_reinversion,
+            creditosDistintosBajoLock,
+          modosPorCredito,
+        );
+        const modalidadesEfectivas = resolverModosEfectivosLiquidacion<ModalidadFacturacion>(
+          undefined,
+          creditosDistintosBajoLock,
+          modosPorCredito.map((modo) => ({
+            credito_id: modo.credito_id,
+            tipo_reinversion: modo.modalidad_facturacion,
+          })),
+        );
 
 
         // Paso 4a: Se crea el registro formal de liquidación con los totales calculados
@@ -4111,6 +4248,8 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
             // Snapshot: si total_interes viene neteado, la liquidación se marca
             // para que los reportes no la recalculen con el flag futuro.
             descuenta_impuestos: totales.total_neto_impuestos != null,
+            tipo_reinversion_snapshot: modosEfectivos.agregado,
+            modalidad_facturacion_snapshot: modalidadesEfectivas.agregado,
             reinversion_capital: reinvCapital.toString(),
             reinversion_interes: reinvInteres.toString(),
             reinversion_total: reinvTotal.toString(),
@@ -4155,15 +4294,13 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
         // el capital abonado del monto que el inversionista tiene en ese crédito,
         // y se guarda una foto del nuevo balance como punto de referencia para la
         // próxima liquidación.
-        const creditosConPagos = new Map<number, typeof pagosNoLiquidados>();
-        for (const pago of pagosNoLiquidados) {
+        const creditosConPagos = new Map<number, typeof pagosNoLiquidadosBajoLock>();
+        for (const pago of pagosNoLiquidadosBajoLock) {
           if (!creditosConPagos.has(pago.credito_id)) {
             creditosConPagos.set(pago.credito_id, []);
           }
           creditosConPagos.get(pago.credito_id)!.push(pago);
         }
-
-        const pagosIds = pagosNoLiquidados.map((p) => p.id);
 
         for (const [creditoId, pagosCred] of creditosConPagos) {
           const sumaCapitalBig = pagosCred.reduce(
@@ -4174,7 +4311,11 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
 
           // Snapshot monto_aportado BEFORE reduction
           const [espejoRow] = await tx
-            .select({ monto_aportado: creditos_inversionistas_espejo.monto_aportado })
+            .select({
+              monto_aportado: creditos_inversionistas_espejo.monto_aportado,
+              tipo_reinversion: creditos_inversionistas_espejo.tipo_reinversion,
+              modalidad_facturacion: creditos_inversionistas_espejo.modalidad_facturacion,
+            })
             .from(creditos_inversionistas_espejo)
             .where(
               and(
@@ -4221,6 +4362,9 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
               creditoId,
               inv_id,
               new Date(lastHistorico.fecha),
+              undefined,
+              undefined,
+              tx as unknown as typeof db,
             );
             const montoAjustado = new Big(currentMonto).minus(montoRestarValidacion);
             if (!montoAjustado.eq(new Big(lastHistorico.monto_aportado))) {
@@ -4261,6 +4405,12 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
               credito_id: creditoId,
               liquidacion_id: liquidacion.liquidacion_id,
               fecha: fechaLiquidacion ?? new Date(),
+              tipo_reinversion_snapshot: modosEfectivos.porCredito.get(creditoId) ?? null,
+              modalidad_facturacion_snapshot: modalidadesEfectivas.porCredito.get(creditoId) ?? null,
+              capital_liquidado: sumaCapitalBig.toFixed(8),
+              capital_restante: ["reinversion_variable", "reinversion_excedente"].includes(
+                modosEfectivos.porCredito.get(creditoId) ?? "",
+              ) ? null : montoPostReduccion,
             });
         }
 
@@ -4317,7 +4467,7 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
         // Marcar cuotas como liquidado_inversionistas
         const allPagoIds = [
           ...new Set(
-            pagosNoLiquidados
+            pagosNoLiquidadosBajoLock
               .map((p) => p.pago_id)
               .filter((id): id is number => id !== null)
           ),
@@ -4350,14 +4500,42 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
           }
         }
 
-        return { liquidacion, updateResult, debeReinvertir, montoReinvertido };
-      });
+        return {
+          liquidacion,
+          updateResult,
+          debeReinvertir,
+          montoReinvertido,
+          reinversion: totalesResult.reinversion,
+          totales,
+          creditoIdsConPagos: creditoIdsPagosBajoLock,
+        };
+      }),
+      );
+      if (resultadoLiquidacion.skip) {
+        console.log(`  ⚠️ Inversionista ${inv_id} sin pagos para liquidar bajo lock`);
+        errores.push({ inversionista_id: inv_id, razon: "Sin pagos para liquidar" });
+        inversionistasSaltados++;
+        continue;
+      }
+      const {
+        liquidacion,
+        updateResult,
+        debeReinvertir,
+        montoReinvertido,
+        reinversion,
+        totales,
+        creditoIdsConPagos: creditoIdsLiquidados,
+      } = resultadoLiquidacion;
 
       // Paso 5: Con la liquidación ya guardada, se genera el reporte Excel con el
       // detalle de lo liquidado y se envía por correo al inversionista. Si este
       // paso falla (por ejemplo, error de correo), no afecta los datos financieros
       // ya guardados — la liquidación sigue siendo válida.
       try {
+        // Se pide el resumen en quetzales (`rawValues`), tal como está en la base.
+        // Para un inversionista en dólares la versión en USD se deriva de este
+        // mismo objeto en memoria (convertirReporteAUSD), sin repetir la consulta:
+        // la liquidación no hace ni un query más que antes.
         const resumen = await resumeInvestor(
           inv_id,
           1,
@@ -4369,13 +4547,16 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
           undefined,
           "espejos",
           true,
-          liquidacion.liquidacion_id
+          liquidacion.liquidacion_id,
+          undefined,
+          true // rawValues: montos en quetzales
         );
 
-        const inversionista = resumen.inversionistas?.[0];
+        const inversionistaQ = resumen.inversionistas?.[0];
 
-        if (inversionista) {
-          // Recalcular totales específicamente para esta liquidación (ya persistida)
+        if (inversionistaQ) {
+          // Recalcular totales específicamente para esta liquidación (ya persistida).
+          // También en crudo, para que el subtotal quede en la misma moneda que el resto.
           const postTotales = await getInvestorTotalsGlobales(
             inv_id,
             undefined,
@@ -4383,27 +4564,53 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
             false,
             undefined,
             true, // soloLiquidados
-            liquidacion.liquidacion_id
+            liquidacion.liquidacion_id,
+            undefined,
+            true // rawValues: montos en quetzales
           );
-          inversionista.subtotal = postTotales.totales as any;
+          inversionistaQ.subtotal = postTotales.totales as any;
 
-          console.log(`  📄 Generando Excel...`);
+          // El reporte principal (el que se guarda como `reporte_liquidacion_url`
+          // y viaja por correo) siempre va en la moneda del inversionista.
+          const esDolares = (inversionistaQ as any).moneda_inversionista === "dolares";
+          const inversionista: any = esDolares
+            ? convertirReporteAUSD(inversionistaQ as any)
+            : inversionistaQ;
+
+          console.log(`  📄 Generando Excel${esDolares ? " (USD + GTQ)" : ""}...`);
           const logoUrl = process.env.LOGO_URL || "";
-          const filename = `liquidacion_${liquidacion.liquidacion_id}_${Date.now()}.xlsx`;
-          const excelResult = await generarYSubirExcelInversionista(
-            inversionista as any,
-            filename,
-            logoUrl
-          );
+          const stamp = Date.now();
+          const filename = `liquidacion_${liquidacion.liquidacion_id}_${stamp}.xlsx`;
+
+          // Para inversionistas en dólares se emite además el mismo reporte en
+          // quetzales, que es la moneda en la que esta tabla guarda sus totales.
+          // Los dos Excel se arman y suben en paralelo.
+          const filenameGtq = esDolares
+            ? `liquidacion_${liquidacion.liquidacion_id}_${stamp}_GTQ.xlsx`
+            : null;
+
+          const [excelResult, excelResultGtq] = await Promise.all([
+            generarYSubirExcelInversionista(inversionista, filename, logoUrl),
+            filenameGtq
+              ? generarYSubirExcelInversionista(inversionistaQ as any, filenameGtq, logoUrl)
+              : Promise.resolve(null),
+          ]);
+
           const url = excelResult.url;
+          const urlGtq = excelResultGtq?.url ?? null;
           const excelBuffer = Buffer.from(excelResult.excelBuffer);
 
           console.log(`  ✅ Excel generado: ${filename}`);
+          if (urlGtq) console.log(`  ✅ Excel en quetzales generado: ${filenameGtq}`);
 
-          // Actualizar liquidación con URL del reporte
+          // Actualizar liquidación con URL(s) del reporte
           await db
             .update(liquidaciones)
-            .set({ reporte_liquidacion_url: url })
+            .set({
+              reporte_liquidacion_url: url,
+              reporte_liquidacion_url_gtq: urlGtq,
+              tipo_cambio_reporte: esDolares ? String(getTipoCambioUSD(inv_id)) : null,
+            })
             .where(eq(liquidaciones.liquidacion_id, liquidacion.liquidacion_id));
 
           // Enviar correo (best-effort)
@@ -4511,7 +4718,7 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
               | "reinversion_variable";
             const llamadasReinversion: { monto: number; tipo_reinversion?: Modalidad; etiqueta: string }[] = [];
 
-            if (totalesResult.reinversion === "reinversion_combinada") {
+            if (reinversion === "reinversion_combinada") {
               const montoCapital = Number(totales.total_reinv_tipo_capital ?? 0);
               const montoInteres = Number(totales.total_reinv_tipo_interes ?? 0);
               const montoTotal = Number(totales.total_reinv_tipo_total ?? 0);
@@ -4574,7 +4781,7 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
         // ========================================
         try {
           const creditoIdsConPagos = [
-            ...new Set(pagosNoLiquidados.map((p) => p.credito_id)),
+            ...new Set(creditoIdsLiquidados),
           ];
 
           if (creditoIdsConPagos.length > 0) {
@@ -6884,6 +7091,8 @@ interface InversionistaResumen {
   boleta_pendiente: BoletaPendiente | null;
   boleta_liquidacion: BoletaPendiente | null;
   reporte_liquidacion_url: string | null;
+  /** Mismo reporte en quetzales. Solo los inversionistas en dólares lo tienen. */
+  reporte_liquidacion_url_gtq: string | null;
   mes_liquidacion?: number | null;
   anio_liquidacion?: number | null;
 }
@@ -6925,6 +7134,7 @@ interface InversionistaResumenRow {
   total_a_recibir_con_reinversion: number;
   total_cuota: number;
   reporte_liquidacion_url?: string | null;
+  reporte_liquidacion_url_gtq?: string | null;
   mes_liquidacion?: number | null;
   anio_liquidacion?: number | null;
   boleta_id?: number | null;
@@ -7528,6 +7738,8 @@ async function consultarResumenGlobalDesdeLiquidaciones(
     total_a_recibir_con_reinversion: sql<number>`COALESCE(SUM(${liquidaciones.total_cuota}), 0)`,
     total_a_recibir_sin_reinversion: sql<number>`COALESCE(SUM(${liquidaciones.total_cuota}), 0) + COALESCE(SUM(${liquidaciones.reinversion_total}), 0)`,
     reporte_liquidacion_url: sql<string | null>`MAX(${liquidaciones.reporte_liquidacion_url})`,
+    // Mismo reporte en quetzales (solo inversionistas en dólares lo tienen).
+    reporte_liquidacion_url_gtq: sql<string | null>`MAX(${liquidaciones.reporte_liquidacion_url_gtq})`,
     boleta_id: liquidaciones.boleta_id,
   };
 
@@ -7645,6 +7857,7 @@ function mapResumenRow(
     boleta_pendiente,
     boleta_liquidacion,
     reporte_liquidacion_url: inv.reporte_liquidacion_url ?? null,
+    reporte_liquidacion_url_gtq: inv.reporte_liquidacion_url_gtq ?? null,
     ...(inv.mes_liquidacion != null ? { mes_liquidacion: inv.mes_liquidacion } : {}),
     ...(inv.anio_liquidacion != null ? { anio_liquidacion: inv.anio_liquidacion } : {}),
   };
@@ -8226,6 +8439,7 @@ export async function resumenGlobalLiquidaciones(
         total_a_recibir_con_reinversion: 0,
         total_cuota: 0,
         reporte_liquidacion_url: null,
+        reporte_liquidacion_url_gtq: null,
       };
 
       result.push({
@@ -8702,6 +8916,10 @@ export async function getLiquidaciones({
       reinversion_interes: liquidaciones.reinversion_interes,
       reinversion_total: liquidaciones.reinversion_total,
       reporte_liquidacion: liquidaciones.reporte_liquidacion_url,
+      // Mismo reporte en quetzales. Solo viene lleno para inversionistas en
+      // dólares; en los de quetzales es null porque el principal ya está en Q.
+      reporte_liquidacion_gtq: liquidaciones.reporte_liquidacion_url_gtq,
+      tipo_cambio_reporte: liquidaciones.tipo_cambio_reporte,
       fecha_liquidacion: liquidaciones.fecha_liquidacion,
       // Datos del inversionista
       nombre_inversionista: inversionistas.nombre,
@@ -8885,6 +9103,10 @@ export async function getLiquidaciones({
           reinversion_total: formatValue(liq.reinversion_total),
         },
         reporte_liquidacion: liq.reporte_liquidacion,
+        // Mismo reporte en quetzales. Solo viene lleno para inversionistas en
+        // dólares; en los de quetzales es null porque el principal ya está en Q.
+        reporte_liquidacion_gtq: liq.reporte_liquidacion_gtq,
+        tipo_cambio_reporte: liq.tipo_cambio_reporte,
         fecha_liquidacion: liq.fecha_liquidacion,
         pagos: pagosConISR,
       };

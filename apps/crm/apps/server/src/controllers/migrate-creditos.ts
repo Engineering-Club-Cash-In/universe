@@ -9,6 +9,7 @@ import { user } from "../db/schema/auth";
 import { coDebtors, leads, opportunities, salesStages } from "../db/schema/crm";
 import { licenseQrVerifications } from "../db/schema/license-verification";
 import { vehicles } from "../db/schema/vehicles";
+import { auditRecord, auditedTransaction } from "../lib/audit";
 import { carteraBackClient } from "../services/cartera-back-client";
 
 // Tipo para cliente de DB que puede ser el db normal o una transacción
@@ -268,6 +269,12 @@ async function procesarCredito(
 				notes: `Migrado desde sistema anterior. Número de préstamo: ${credito.numero_prestamo}`,
 			})
 			.returning({ id: leads.id });
+		auditRecord({
+			entity: "lead",
+			id: nuevoLead.id,
+			action: "create",
+			data: { numeroPrestamo: credito.numero_prestamo },
+		});
 
 		// 2. Crear Vehículo
 		// Parsear año de forma segura (puede venir como "2015" o como número)
@@ -329,6 +336,15 @@ async function procesarCredito(
 					})
 					.returning({ id: vehicles.id });
 				vehiculoId = nuevoVehiculo.id;
+				auditRecord({
+					entity: "vehicle",
+					id: vehiculoId,
+					action: "create",
+					data: {
+						numeroPrestamo: credito.numero_prestamo,
+						placa: credito.placa,
+					},
+				});
 			}
 		} else {
 			// Sin placa, crear vehículo nuevo
@@ -355,26 +371,45 @@ async function procesarCredito(
 				})
 				.returning({ id: vehicles.id });
 			vehiculoId = nuevoVehiculo.id;
+			auditRecord({
+				entity: "vehicle",
+				id: vehiculoId,
+				action: "create",
+				data: { numeroPrestamo: credito.numero_prestamo, placa: null },
+			});
 		}
 
 		// 3. Crear Oportunidad
-		await dbClient.insert(opportunities).values({
-			title: `Crédito ${credito.numero_prestamo}`,
-			leadId: nuevoLead.id,
-			vehicleId: vehiculoId,
-			creditType: convertirTipoPrestamo(credito.tipo_de_prestamo),
-			stageId: defaultStageId,
-			assignedTo: defaultUserId,
-			createdBy: defaultUserId,
-			status: "migrate",
-			numeroSifco: credito.numero_prestamo || null,
-			diaPagoMensual: credito.fecha_de_pago
-				? Math.round(credito.fecha_de_pago)
-				: null,
-			cuotaMensual: credito.cuota_mensual
-				? credito.cuota_mensual.toString()
-				: null,
-			notes: construirNotesOportunidad(credito),
+		const [nuevaOportunidad] = await dbClient
+			.insert(opportunities)
+			.values({
+				title: `Crédito ${credito.numero_prestamo}`,
+				leadId: nuevoLead.id,
+				vehicleId: vehiculoId,
+				creditType: convertirTipoPrestamo(credito.tipo_de_prestamo),
+				stageId: defaultStageId,
+				assignedTo: defaultUserId,
+				createdBy: defaultUserId,
+				status: "migrate",
+				numeroSifco: credito.numero_prestamo || null,
+				diaPagoMensual: credito.fecha_de_pago
+					? Math.round(credito.fecha_de_pago)
+					: null,
+				cuotaMensual: credito.cuota_mensual
+					? credito.cuota_mensual.toString()
+					: null,
+				notes: construirNotesOportunidad(credito),
+			})
+			.returning({ id: opportunities.id });
+		auditRecord({
+			entity: "opportunity",
+			id: nuevaOportunidad.id,
+			action: "create",
+			data: {
+				numeroPrestamo: credito.numero_prestamo,
+				leadId: nuevoLead.id,
+				vehicleId: vehiculoId,
+			},
 		});
 
 		return { success: true };
@@ -434,7 +469,7 @@ export async function migrarCreditos(
 	};
 
 	try {
-		await db.transaction(async (tx) => {
+		await auditedTransaction(async (tx) => {
 			// Procesar cada crédito dentro de la transacción
 			for (let i = 0; i < creditos.length; i++) {
 				const credito = creditos[i];
@@ -507,6 +542,22 @@ export async function migrarCreditos(
 			error instanceof Error ? error.message : "Error desconocido";
 
 		console.error(`[Migrate] ROLLBACK ejecutado: ${errorMessage}`);
+		// `auditedTransaction` ya descartó las anotaciones que el rollback borró.
+		// Como la ruta responde 200, sin esta fila la migración fallida
+		// desaparecería: queda el intento, que es lo que se consulta cuando
+		// alguien pregunta qué pasó con ese import.
+		auditRecord({
+			entity: "opportunity",
+			id: null,
+			action: "create",
+			ok: false,
+			errorCode: "ROLLBACK",
+			data: {
+				creditos: creditos.length,
+				procesadosAntesDelFallo: resultado.totalExitosos,
+				error: errorMessage,
+			},
+		});
 
 		// Retornar resultado con información del rollback
 		return {
@@ -542,7 +593,7 @@ export async function limpiarMigracion(): Promise<CleanupResult> {
 	console.log("[Cleanup] Iniciando limpieza de datos migrados...");
 
 	// Usar transacción para asegurar que todo se elimine o nada
-	return await db.transaction(async (tx) => {
+	return await auditedTransaction(async (tx) => {
 		// 0. Verificaciones de licencia de estos leads/oportunidades (y sus
 		// co-deudores) primero — sus FK a leads/co_debtors son NO ACTION, así
 		// que si quedara alguna, el delete de abajo revienta la transacción.
@@ -597,6 +648,17 @@ export async function limpiarMigracion(): Promise<CleanupResult> {
 			.delete(leads)
 			.where(eq(leads.status, "migrate"))
 			.returning({ id: leads.id });
+
+		// El borrado masivo es justo lo que hay que poder reconstruir después.
+		for (const fila of deletedOpportunities) {
+			auditRecord({ entity: "opportunity", id: fila.id, action: "delete" });
+		}
+		for (const fila of deletedVehicles) {
+			auditRecord({ entity: "vehicle", id: fila.id, action: "delete" });
+		}
+		for (const fila of deletedLeads) {
+			auditRecord({ entity: "lead", id: fila.id, action: "delete" });
+		}
 
 		const result: CleanupResult = {
 			opportunitiesDeleted: deletedOpportunities.length,
@@ -723,6 +785,16 @@ export async function actualizarValueOportunidades(): Promise<UpdateValueResult>
 				.update(opportunities)
 				.set({ value: deudaTotal })
 				.where(eq(opportunities.id, oportunidad.id));
+			auditRecord({
+				entity: "opportunity",
+				id: oportunidad.id,
+				action: "update_value",
+				data: {
+					numeroSifco: oportunidad.numeroSifco,
+					valueAnterior: oportunidad.value,
+					valueNuevo: deudaTotal,
+				},
+			});
 
 			resultado.totalActualizadas++;
 			resultado.actualizaciones.push({

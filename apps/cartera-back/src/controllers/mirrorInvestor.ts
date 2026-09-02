@@ -693,6 +693,12 @@ export const asignarReinversionEspejo = async ({ body, set }: any) => {
     let desaparecidos: number[] = [];
 
     await db.transaction(async (tx) => {
+      const [inversionista] = await tx
+        .select({ inversionista_id: inversionistas.inversionista_id })
+        .from(inversionistas)
+        .where(eq(inversionistas.inversionista_id, inversionista_id))
+        .for("update");
+      if (!inversionista) throw new Error(`Inversionista ${inversionista_id} no encontrado`);
       // 1) Obtener todos los IDs de créditos espejo actuales para este inversionista
       const actuales = await tx
         .select({ id: creditos_inversionistas_espejo.id })

@@ -134,6 +134,13 @@
 			"when": 1787679602360,
 			"tag": "0031_add_partner_tracker",
 			"breakpoints": true
+		},
+		{
+			"idx": 19,
+			"version": "7",
+			"when": 1787788800000,
+			"tag": "0031_create_crm_entity_audit",
+			"breakpoints": true
 		}
 	]
 }

@@ -47,9 +47,16 @@ export class ContractGeneratorService {
   private pdfConversionQueue: Array<() => void> = [];
   private activePdfConversions = 0;
   private readonly maxConcurrentPdfConversions = 3; // Máximo 3 conversiones simultáneas
+  // Timeouts duros. Bajo Bun, el `timeout` de axios NO corta una respuesta que llegó a medias
+  // (headers recibidos, cuerpo que nunca termina): la promesa quedaba viva y el slot tomado para siempre.
+  // Con 3 slots tomados, toda conversión posterior esperaba en la cola sin log ni error.
+  private readonly pdfTimeoutMs: number;
+  private readonly pdfQueueTimeoutMs: number;
 
   constructor(options: ContractGeneratorOptions = {}) {
     this.gotenbergUrl = options.gotenbergUrl || 'http://localhost:3000';
+    this.pdfTimeoutMs = options.pdfTimeoutMs ?? 60000;
+    this.pdfQueueTimeoutMs = options.pdfQueueTimeoutMs ?? 90000;
     this.templatesDir = options.templatesDir || path.join(process.cwd(), 'templates');
     this.outputDir = options.outputDir || path.join(process.cwd(), 'output');
     this.templateRegistry = new Map();
@@ -989,13 +996,36 @@ export class ContractGeneratorService {
       return;
     }
 
-    // Esperar a que se libere un slot
-    return new Promise<void>((resolve) => {
-      this.pdfConversionQueue.push(() => {
+    console.warn(`⏳ Cola de PDF llena (${this.activePdfConversions} activas, ${this.pdfConversionQueue.length} en espera). Esperando slot...`);
+
+    // Esperar a que se libere un slot, con tope: si nunca se libera, fallar en vez de colgar la request
+    return new Promise<void>((resolve, reject) => {
+      const waiter = () => {
+        clearTimeout(timer);
         this.activePdfConversions++;
         resolve();
-      });
+      };
+      const timer = setTimeout(() => {
+        const idx = this.pdfConversionQueue.indexOf(waiter);
+        if (idx !== -1) this.pdfConversionQueue.splice(idx, 1);
+        reject(new Error(
+          `Timeout esperando slot de conversión PDF (${this.pdfQueueTimeoutMs} ms). ` +
+          `Conversiones activas: ${this.activePdfConversions}, en cola: ${this.pdfConversionQueue.length}.`
+        ));
+      }, this.pdfQueueTimeoutMs);
+      this.pdfConversionQueue.push(waiter);
     });
+  }
+
+  /**
+   * Estado de la cola de conversión PDF (para /health y /metrics)
+   */
+  public getPdfQueueStats(): { active: number; queued: number; max: number } {
+    return {
+      active: this.activePdfConversions,
+      queued: this.pdfConversionQueue.length,
+      max: this.maxConcurrentPdfConversions
+    };
   }
 
   /**
@@ -1031,7 +1061,9 @@ export class ContractGeneratorService {
           // Límites razonables para evitar memory leaks
           maxBodyLength: 50 * 1024 * 1024, // 50MB máximo
           maxContentLength: 50 * 1024 * 1024, // 50MB máximo
-          timeout: 60000 // 60 segundos timeout (LibreOffice puede ser lento)
+          timeout: this.pdfTimeoutMs, // Cubre la espera de headers (LibreOffice puede ser lento)
+          // Cubre TODO el request, incluido un cuerpo que se queda a medias: `timeout` no lo corta en Bun
+          signal: AbortSignal.timeout(this.pdfTimeoutMs)
         }
       );
 
@@ -1043,6 +1075,9 @@ export class ContractGeneratorService {
       }
       if (error.code === 'ETIMEDOUT' || error.code === 'ECONNABORTED') {
         throw new Error('Timeout al conectar con Gotenberg. El servicio puede estar sobrecargado.');
+      }
+      if (error.code === 'ERR_CANCELED' || error.name === 'CanceledError' || error.name === 'TimeoutError') {
+        throw new Error(`Timeout de ${this.pdfTimeoutMs} ms convirtiendo a PDF: Gotenberg dejó la respuesta a medias.`);
       }
       if (error.response?.status === 503) {
         throw new Error('Gotenberg está sobrecargado (503). Intente nuevamente en unos segundos.');

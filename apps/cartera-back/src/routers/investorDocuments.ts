@@ -5,6 +5,7 @@ import { documentos_inversionista, inversionistas } from "../database/db";
 import {
   uploadDocumentoInversionista,
   getSignedDocumentUrl,
+  resolveDocumentMimeType,
   deleteDocumentoFromR2,
 } from "../utils/functions/uploadsFiles";
 import { authMiddleware } from "./midleware";
@@ -140,11 +141,18 @@ export const investorDocumentsRouter = new Elysia()
             )
           );
 
+        // url: previsualizar (inline). downloadUrl: descargar (attachment).
+        // Un solo HEAD por documento (resolveDocumentMimeType), reutilizado
+        // para firmar las dos URLs en vez de repetirlo.
         const documentosConUrl = await Promise.all(
-          documentos.map(async (doc) => ({
-            ...doc,
-            url: await getSignedDocumentUrl(doc.key),
-          }))
+          documentos.map(async (doc) => {
+            const mimeType = await resolveDocumentMimeType(doc.key);
+            return {
+              ...doc,
+              url: await getSignedDocumentUrl(doc.key, { disposition: "inline", filename: doc.nombre, mimeType }),
+              downloadUrl: await getSignedDocumentUrl(doc.key, { disposition: "attachment", filename: doc.nombre, mimeType }),
+            };
+          })
         );
 
         return { success: true, data: documentosConUrl };

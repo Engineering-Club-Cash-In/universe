@@ -119,12 +119,25 @@ export const sendLiquidationEmail = async ({
 export const sendPasswordResetEmail = async (to: string, resetUrl: string) => {
   emailSchema.parse(to);
 
+  const assetsBaseUrl = process.env.EMAIL_ASSETS_BASE_URL;
+  if (!assetsBaseUrl) {
+    throw new Error(
+      "❌ [Email Package] EMAIL_ASSETS_BASE_URL is missing. Please add it to your environment variables."
+    );
+  }
+
+  const emailAssets = {
+    headerBanner: `${assetsBaseUrl}/header-mail-V2.png`,
+    footerBanner: `${assetsBaseUrl}/footer-mail.png`,
+    warningIcon: `${assetsBaseUrl}/warning-mail-gradient-v2.png`,
+  };
+
   try {
     const { data, error } = await resend.emails.send({
       from: `Club Cash In <no-reply@${domain}>`,
       to: [to],
       subject: "Restablecer contraseña - CashIn",
-      react: React.createElement(PasswordResetEmail, { resetUrl }),
+      react: React.createElement(PasswordResetEmail, { resetUrl, assets: emailAssets }),
     });
 
     if (error) {

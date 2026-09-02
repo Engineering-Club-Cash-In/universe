@@ -53,6 +53,7 @@ import {
   shouldMarkInstallmentPaymentPaid,
   sumarAplicadoACuota,
   pagoSchema,
+  cuentaComoHermanoVivo,
 } from "./registerPaymentPolicy";
 import {
   PAYMENT_ADVISORY_LOCK_NAMESPACE,
@@ -1116,9 +1117,10 @@ export const insertPayment = async ({ body, set }: any) => {
         const pagoIdEnVuelo = destinoSobrescribible
           ? existingPago!.pago.pago_id
           : -1;
-        const pagosHermanos = await db
+        const pagosHermanosCandidatos = await db
           .select({
             pago_id: pagos_credito.pago_id,
+            validationStatus: pagos_credito.validationStatus,
             monto_aplicado: pagos_credito.monto_aplicado,
             abono_capital: pagos_credito.abono_capital,
             abono_interes: pagos_credito.abono_interes,
@@ -1126,6 +1128,13 @@ export const insertPayment = async ({ body, set }: any) => {
             abono_seguro: pagos_credito.abono_seguro,
             abono_gps: pagos_credito.abono_gps,
             membresias_pago: pagos_credito.membresias_pago,
+            // Sólo para poder evaluar `cuentaComoHermanoVivo` sobre las filas
+            // `no_required`; no se suman como rubros de cuota.
+            abono_interes_ci: pagos_credito.abono_interes_ci,
+            abono_iva_ci: pagos_credito.abono_iva_ci,
+            mora: pagos_credito.mora,
+            pagoConvenio: pagos_credito.pagoConvenio,
+            otros: pagos_credito.otros,
           })
           .from(pagos_credito)
           .where(
@@ -1138,12 +1147,28 @@ export const insertPayment = async ({ body, set }: any) => {
               // Un pago que cierra la cuota se guarda como pending+pagado=true
               // hasta que contabilidad lo valida; debe contarse igual para no
               // re-aplicar sus rubros.
+              //
+              // `no_required` entra al SELECT pero NO todas pasan: el filtro
+              // fino es `cuentaComoHermanoVivo` (abajo), que deja fuera las
+              // semillas vírgenes de SIFCO. Traerlas acá y descartarlas en JS
+              // —en vez de replicar el test de "¿tiene plata?" en SQL— es lo
+              // que garantiza que el criterio del neteo sea LITERALMENTE el
+              // mismo objeto que decide si la fila es sobrescribible.
               or(
                 eq(pagos_credito.validationStatus, "validated"),
-                eq(pagos_credito.validationStatus, "pending")
+                eq(pagos_credito.validationStatus, "pending"),
+                eq(pagos_credito.validationStatus, "no_required")
               )
             )
           );
+        // Una fila `no_required` que el cierre se NIEGA a pisar por llevar
+        // plata (crédito 890 / cuota 12: Q705.88 aplicados y facturados) tiene
+        // que contarse como hermana viva; si no, `aplicadoPrevioCuota` la
+        // ignora y el pago nuevo re-aplica la cuota completa encima. Antes el
+        // hueco era invisible porque el atajo por status permitía pisarla.
+        const pagosHermanos = pagosHermanosCandidatos.filter(
+          cuentaComoHermanoVivo
+        );
         const sumaHermanos = (sel: (p: any) => any) =>
           pagosHermanos.reduce(
             (acc, p) => acc.plus(new Big(sel(p) ?? 0)),

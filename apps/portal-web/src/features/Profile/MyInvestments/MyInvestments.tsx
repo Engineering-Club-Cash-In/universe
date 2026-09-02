@@ -422,7 +422,22 @@ export const MyInvestments = () => {
                             rel="noopener noreferrer"
                             className="text-primary hover:text-primary/80 transition-[color] text-sm font-medium inline-flex items-center gap-1 focus-visible:ring-2 focus-visible:ring-primary rounded-lg px-2 py-1 -mx-2"
                           >
-                            Ver reporte de liquidación
+                            {/* Solo se rotula la moneda cuando hay dos reportes que distinguir. */}
+                            {liquidacion.reporte_liquidacion_gtq
+                              ? "Ver reporte de liquidación ($)"
+                              : "Ver reporte de liquidación"}
+                            <span aria-hidden="true">&rarr;</span>
+                          </a>
+                        )}
+
+                        {liquidacion.reporte_liquidacion_gtq && (
+                          <a
+                            href={liquidacion.reporte_liquidacion_gtq}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-primary hover:text-primary/80 transition-[color] text-sm font-medium inline-flex items-center gap-1 focus-visible:ring-2 focus-visible:ring-primary rounded-lg px-2 py-1 -mx-2"
+                          >
+                            Ver reporte de liquidación (Q)
                             <span aria-hidden="true">&rarr;</span>
                           </a>
                         )}

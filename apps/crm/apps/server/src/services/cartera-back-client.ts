@@ -739,6 +739,19 @@ export type MoraByEtapaYAsesorResponse = {
 		nombre: string;
 		email: string;
 	} & MoraTotales)[];
+	capitalCartera: {
+		total: string;
+		porAsesor: {
+			asesorId: number;
+			nombre: string;
+			email: string;
+			capital: string;
+		}[];
+	};
+	metadata: {
+		capitalCartera: "actual";
+		atribucionAsesor: "actual";
+	};
 	fecha?: string;
 	alcance?: "live" | "historico";
 	dataDisponibleDesde?: string;

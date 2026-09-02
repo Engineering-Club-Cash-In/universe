@@ -49,7 +49,13 @@ export const auth = betterAuth({
       const resetUrl = `${env.FRONTEND_URL}/reset-password?token=${token}`;
       console.log("📧 Final reset URL:", resetUrl);
       
-      await sendPasswordResetEmail(user.email, resetUrl);
+      // El portal permite registrarse como CLIENT o INVESTOR, así que el
+      // correo adapta su saludo al rol de la cuenta.
+      const role = (user as { role?: string }).role;
+      const normalizedRole =
+        role === "INVESTOR" || role === "CLIENT" ? role : undefined;
+
+      await sendPasswordResetEmail(user.email, resetUrl, normalizedRole);
     },
   },
   user: {

@@ -14,40 +14,71 @@ import {
 } from "./plantillas-mensajes";
 
 const NO_REPLY_WARNING =
-	"*NO RESPONDER EN ESTE CHAT, CONTESTAR AL NUMERO DE SU ASESOR DE COBROS*";
-const CONFIRMATION_REQUEST_REGEX =
-	/confirme la recepción|confirmar recepción|confirme recepcion/i;
+	"⚠️ Este número es únicamente para el envío de notificaciones automáticas. Por favor, no respondas a este número.";
+
+// La bienvenida es la única plantilla sin aviso no-reply: pide confirmar la
+// recepción del mensaje (diseño "Mensajes Cobros 2026").
+const IDS_SIN_AVISO = new Set(["bienvenida"]);
+
+const MAX_PARAMS_SIMPLETECH = 5;
+
+function bloques(cuerpo: string): string[] {
+	return cuerpo
+		.split(/\n\s*\n/g)
+		.map((paragraph) => paragraph.trim())
+		.filter(Boolean);
+}
+
+function cuerpoWhatsappDe(plantilla: {
+	cuerpo: string;
+	cuerpoWhastapp?: string;
+}): string {
+	return plantilla.cuerpoWhastapp ?? plantilla.cuerpo;
+}
 
 describe("plantillas web de cobros", () => {
-	test("incluyen el aviso de no responder en el cuerpo de WhatsApp", () => {
+	test("incluyen el aviso de no responder en el cuerpo de WhatsApp (salvo bienvenida)", () => {
 		for (const plantilla of PLANTILLAS_MENSAJES) {
-			const cuerpoWhatsapp = plantilla.cuerpoWhastapp ?? plantilla.cuerpo;
-			const matches = cuerpoWhatsapp.matchAll(
-				/NO RESPONDER EN ESTE CHAT, CONTESTAR AL NUMERO DE SU ASESOR DE COBROS/g,
+			const cuerpoWhatsapp = cuerpoWhatsappDe(plantilla);
+			const matches = Array.from(
+				cuerpoWhatsapp.matchAll(
+					/Este número es únicamente para el envío de notificaciones automáticas/g,
+				),
 			);
 
-			expect(Array.from(matches).length, plantilla.id).toBe(1);
-			expect(cuerpoWhatsapp, plantilla.id).toContain(NO_REPLY_WARNING);
+			if (IDS_SIN_AVISO.has(plantilla.id)) {
+				expect(matches.length, plantilla.id).toBe(0);
+			} else {
+				expect(matches.length, plantilla.id).toBe(1);
+				expect(cuerpoWhatsapp, plantilla.id).toContain(NO_REPLY_WARNING);
+			}
 		}
 	});
 
-	test("colocan el aviso antes de la firma cuando existe", () => {
+	test("cierran con el aviso no-reply y la firma CashIn en el último bloque", () => {
 		for (const plantilla of PLANTILLAS_MENSAJES) {
-			const cuerpoWhatsapp = plantilla.cuerpoWhastapp ?? plantilla.cuerpo;
-			const warningIndex = cuerpoWhatsapp.indexOf(NO_REPLY_WARNING);
-			const signatureIndex = cuerpoWhatsapp.indexOf("Atentamente");
+			if (IDS_SIN_AVISO.has(plantilla.id)) continue;
+			// aviso_juridico no entró al rediseño 2026: cierra con los números de
+			// contacto jurídico, el aviso va en el bloque anterior.
+			if (plantilla.id === "aviso_juridico") continue;
 
-			if (signatureIndex !== -1) {
-				expect(warningIndex, plantilla.id).toBeLessThan(signatureIndex);
-			}
+			const ultimoBloque = bloques(cuerpoWhatsappDe(plantilla)).at(-1) ?? "";
+			expect(ultimoBloque, plantilla.id).toContain(NO_REPLY_WARNING);
+			expect(ultimoBloque.endsWith("CashIn"), plantilla.id).toBe(true);
+		}
+	});
+
+	test("el cuerpo de email no lleva el aviso no-reply de WhatsApp", () => {
+		for (const plantilla of PLANTILLAS_MENSAJES) {
+			expect(plantilla.cuerpo, plantilla.id).not.toContain(NO_REPLY_WARNING);
 		}
 	});
 
 	test("no indican responder por este chat cuando tienen aviso de no responder", () => {
 		for (const plantilla of PLANTILLAS_MENSAJES) {
-			const cuerpoWhatsapp = plantilla.cuerpoWhastapp ?? plantilla.cuerpo;
+			if (IDS_SIN_AVISO.has(plantilla.id)) continue;
 
-			expect(cuerpoWhatsapp, plantilla.id).not.toMatch(
+			expect(cuerpoWhatsappDe(plantilla), plantilla.id).not.toMatch(
 				/por este medio|por este chat|comunicarse por este medio/i,
 			);
 		}
@@ -55,28 +86,60 @@ describe("plantillas web de cobros", () => {
 
 	test("no piden confirmar recepcion cuando tienen aviso de no responder", () => {
 		for (const plantilla of PLANTILLAS_MENSAJES) {
-			const cuerpoWhatsapp = plantilla.cuerpoWhastapp ?? plantilla.cuerpo;
+			const cuerpoWhatsapp = cuerpoWhatsappDe(plantilla);
 
 			if (cuerpoWhatsapp.includes(NO_REPLY_WARNING)) {
 				expect(cuerpoWhatsapp, plantilla.id).not.toMatch(
-					CONFIRMATION_REQUEST_REGEX,
+					/confirme la recepción|confirmar recepción|confirme recepcion|confirmar la recepción/i,
 				);
 			}
 		}
 	});
 
-	test("dirigen comprobantes y dudas al telefono del asesor", () => {
+	test("las plantillas con aviso dirigen al telefono del asesor", () => {
+		for (const plantilla of PLANTILLAS_MENSAJES) {
+			if (IDS_SIN_AVISO.has(plantilla.id)) continue;
+
+			expect(cuerpoWhatsappDe(plantilla), plantilla.id).toContain(
+				"{telefonoAsesor}",
+			);
+		}
+	});
+
+	test("ninguna plantilla de WhatsApp excede los parámetros de SimpleTech", () => {
+		for (const plantilla of PLANTILLAS_MENSAJES) {
+			expect(
+				bloques(cuerpoWhatsappDe(plantilla)).length,
+				plantilla.id,
+			).toBeLessThanOrEqual(MAX_PARAMS_SIMPLETECH);
+		}
+	});
+
+	test("la bienvenida usa los 5 bloques del template mensaje5parametro", () => {
 		const bienvenida = PLANTILLAS_MENSAJES.find(
 			(plantilla) => plantilla.id === "bienvenida",
 		);
-		const preMora = PLANTILLAS_MENSAJES.find(
-			(plantilla) => plantilla.id === "pre_mora",
+
+		expect(
+			bloques(cuerpoWhatsappDe(bienvenida ?? { cuerpo: "" })),
+		).toHaveLength(5);
+		expect(bienvenida?.cuerpoWhastapp).toContain("Seguros Universales");
+		expect(bienvenida?.cuerpoWhastapp).toMatch(/confirmar la recepción/i);
+	});
+
+	test("el recordatorio del día de pago usa la expectativa de mora del server", () => {
+		const alDia = PLANTILLAS_MENSAJES.find(
+			(plantilla) => plantilla.id === "al_dia",
 		);
 
-		expect(bienvenida?.cuerpoWhastapp).toMatch(
-			/boleta o comprobante de pago[^.]*{telefonoAsesor}/i,
+		// El monto lo calcula el server (capital × 1.12%, misma fórmula que
+		// procesarMoras en cartera-back) y llega por getDetallesCreditoCarteraBack.
+		expect(alDia?.cuerpoWhastapp).toContain(
+			"se agregará un recargo por mora de Q{expectativaMora}.",
 		);
-		expect(preMora?.cuerpoWhastapp).toMatch(/duda[^.]*{telefonoAsesor}/i);
+		expect(alDia?.cuerpo).toContain(
+			"se agregará un recargo por mora de Q{expectativaMora}.",
+		);
 	});
 
 	test("crea links manuales de WhatsApp con el cuerpo de WhatsApp", () => {
@@ -156,8 +219,10 @@ describe("plantillas web de cobros", () => {
 	});
 
 	test("descarta plantillas no-reply sin telefono de asesor", () => {
-		const cuerpoWhatsapp =
-			PLANTILLAS_MENSAJES[0].cuerpoWhastapp ?? PLANTILLAS_MENSAJES[0].cuerpo;
+		const conAviso = PLANTILLAS_MENSAJES.find(
+			(plantilla) => !IDS_SIN_AVISO.has(plantilla.id),
+		);
+		const cuerpoWhatsapp = cuerpoWhatsappDe(conAviso ?? { cuerpo: "" });
 
 		for (const telefono of [null, undefined, "", "   "]) {
 			expect(prepararTelefonoAsesorParaEnvio(cuerpoWhatsapp, telefono)).toEqual(
@@ -169,12 +234,29 @@ describe("plantillas web de cobros", () => {
 		}
 	});
 
-	test("recorta el telefono del asesor antes de interpolar", () => {
-		const cuerpoWhatsapp =
-			PLANTILLAS_MENSAJES[0].cuerpoWhastapp ?? PLANTILLAS_MENSAJES[0].cuerpo;
+	test("la bienvenida (sin aviso) se envía aunque el asesor no tenga telefono", () => {
+		const bienvenida = PLANTILLAS_MENSAJES.find(
+			(plantilla) => plantilla.id === "bienvenida",
+		);
 
 		expect(
-			prepararTelefonoAsesorParaEnvio(cuerpoWhatsapp, " 41286630 "),
+			prepararTelefonoAsesorParaEnvio(
+				cuerpoWhatsappDe(bienvenida ?? { cuerpo: "" }),
+				null,
+			),
+		).toEqual({ enviar: true, telefonoAsesor: "" });
+	});
+
+	test("recorta el telefono del asesor antes de interpolar", () => {
+		const conAviso = PLANTILLAS_MENSAJES.find(
+			(plantilla) => !IDS_SIN_AVISO.has(plantilla.id),
+		);
+
+		expect(
+			prepararTelefonoAsesorParaEnvio(
+				cuerpoWhatsappDe(conAviso ?? { cuerpo: "" }),
+				" 41286630 ",
+			),
 		).toEqual({
 			enviar: true,
 			telefonoAsesor: "41286630",
@@ -185,7 +267,7 @@ describe("plantillas web de cobros", () => {
 		const plantilla = PLANTILLAS_MENSAJES.find(
 			(plantilla) => plantilla.id === "impuesto_circulacion_2026",
 		);
-		const cuerpoWhatsapp = plantilla?.cuerpoWhastapp ?? plantilla?.cuerpo ?? "";
+		const cuerpoWhatsapp = cuerpoWhatsappDe(plantilla ?? { cuerpo: "" });
 		const mensaje = interpolar(cuerpoWhatsapp, {
 			clienteNombre: "MARIA LOPEZ",
 			fechaPago: "",
@@ -196,12 +278,13 @@ describe("plantillas web de cobros", () => {
 			cuotasAtraso: 0,
 			telefonoAsesor: "41286630",
 			nombreAsesor: "Carlos Pérez",
+			expectativaMora: "",
 		});
 
 		expect(plantilla?.nombre).toBe("Impuesto de circulación 2026");
-		expect(mensaje).toContain("Estimado(a) Maria Lopez");
-		expect(mensaje).toContain("Atentamente,\nCarlos Pérez\nTel: 41286630");
-		expect(mensaje.match(/NO RESPONDER EN ESTE CHAT/g)?.length).toBe(1);
+		expect(mensaje).toContain("Impuesto de Circulación 2026");
+		expect(mensaje).toContain("Carlos Pérez - Asesor de Cobros\n41286630");
+		expect(mensaje.match(/notificaciones automáticas/g)?.length).toBe(1);
 		expect(cuerpoWhatsapp).toContain(COBROS_NO_REPLY_WARNING);
 	});
 });

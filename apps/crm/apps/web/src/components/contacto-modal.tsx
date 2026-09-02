@@ -86,6 +86,7 @@ interface ContactoModalProps {
 	fechaInicio?: string | null;
 	nombreAsesor?: string;
 	telefonoAsesor?: string;
+	expectativaMora?: string;
 }
 
 export function ContactoModal({
@@ -108,6 +109,7 @@ export function ContactoModal({
 	fechaInicio,
 	nombreAsesor = "",
 	telefonoAsesor = "",
+	expectativaMora = "",
 }: ContactoModalProps) {
 	const queryClient = useQueryClient();
 
@@ -151,6 +153,7 @@ export function ContactoModal({
 			cuotasAtraso,
 			telefonoAsesor: telefonoAsesorLimpio,
 			nombreAsesor,
+			expectativaMora,
 		}),
 		[
 			clienteNombre,
@@ -162,6 +165,7 @@ export function ContactoModal({
 			cuotasAtraso,
 			telefonoAsesorLimpio,
 			nombreAsesor,
+			expectativaMora,
 		],
 	);
 

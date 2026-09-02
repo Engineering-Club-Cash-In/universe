@@ -19,6 +19,12 @@ export interface VariablesPlantilla {
 	cuotasAtraso: number;
 	telefonoAsesor: string;
 	nombreAsesor: string;
+	/**
+	 * Recargo de UNA cuota vencida más (capital × 1.12%), misma fórmula que el
+	 * job `procesarMoras` de cartera-back. Viene ya formateado del server
+	 * (getDetallesCreditoCarteraBack).
+	 */
+	expectativaMora: string;
 }
 
 export interface PlantillaMensaje {
@@ -31,7 +37,7 @@ export interface PlantillaMensaje {
 }
 
 export const COBROS_NO_REPLY_WARNING =
-	"*NO RESPONDER EN ESTE CHAT, CONTESTAR AL NUMERO DE SU ASESOR DE COBROS*";
+	"⚠️ Este número es únicamente para el envío de notificaciones automáticas. Por favor, no respondas a este número.";
 export const COBROS_MOTIVO_SIN_TELEFONO_ASESOR = "sin teléfono de asesor";
 
 export function prepararTelefonoAsesorParaEnvio(
@@ -150,7 +156,11 @@ export function interpolar(
 			/{telefonoAsesor}/g,
 			v(variables.telefonoAsesor, "teléfono asesor"),
 		)
-		.replace(/{nombreAsesor}/g, v(variables.nombreAsesor, "nombre asesor"));
+		.replace(/{nombreAsesor}/g, v(variables.nombreAsesor, "nombre asesor"))
+		.replace(
+			/{expectativaMora}/g,
+			v(variables.expectativaMora, "expectativa de mora"),
+		);
 }
 
 export const PLANTILLAS_MENSAJES: PlantillaMensaje[] = [
@@ -159,141 +169,191 @@ export const PLANTILLAS_MENSAJES: PlantillaMensaje[] = [
 		nombre: "Bienvenida",
 		etapa: "al_dia",
 		asunto: "Bienvenido/a a su plan de financiamiento",
-		cuerpo: `Hola {clienteNombre},
+		cuerpo: `Hola {clienteNombre} 👋
+¡Bienvenido(a) a CashIn! Nos alegra acompañarte en el financiamiento de tu vehículo.
 
-Le saludamos cordialmente de Clubcashin.com para recordarle sobre el pago de su crédito, el cual debe realizarse el {fechaPago}. Sus cuotas son por un monto de Q{cuotaMensual}.
+📅 Información de tu cuota
+Fecha de 1er pago: {fechaPago}
+Monto de cuota: Q{cuotaMensual}
 
-A continuación, le compartimos los números de cuenta para realizar su depósito o transferencia:
+💳 Cuentas para realizar tus pagos
+Tipo: Monetaria
+A nombre de: CUBE INVESTMENTS, S.A.
+* BI: 5520029876
+* BAM: 3020123033
+* GyT: 01300039945
+* Banrural: 3394002346
 
-- CUBE INVESTMENTS, S.A. (monetaria) No. 5520029876 - BANCO INDUSTRIAL (BI)
-- CUBE INVESTMENTS, S.A. (monetaria) No. 3020123033 - BANCO AGROMERCANTIL (BAM)
-- CUBE INVESTMENTS, S.A. (monetaria) No. 01300039945 - BANCO GyT CONTINENTAL
-- CUBE INVESTMENTS, S.A. (monetaria) No. 3394002346 - BANRURAL
+🚗 Tu vehículo cuenta con seguro completo a través de Seguros Universales.
+En caso de accidente o cualquier inconveniente con tu vehículo, llama a la cabina de emergencia al 2384-7400, identificándote únicamente con el número de placa.
+Para seguimiento de trámites con el seguro:
+✅ Luis Escobar: 4388-7300
+✅ Maylin Barrios: 4770-7074
 
-Por favor, envíe su boleta o comprobante de pago por este medio para aplicarlo a su cuenta.
+Si tienes alguna consulta, con gusto estamos para apoyarte. Agradeceremos confirmar la recepción de este mensaje.
+{nombreAsesor} - Asesor de Cobros
+CashIn`,
+		cuerpoWhastapp: `Hola {clienteNombre} 👋
+¡Bienvenido(a) a CashIn! Nos alegra acompañarte en el financiamiento de tu vehículo.
 
-Si tiene alguna duda o consulta, estamos a su disposición.
+📅 Información de tu cuota
+Fecha de 1er pago: {fechaPago}
+Monto de cuota: Q{cuotaMensual}
 
-Agradecemos confirme la recepción de este mensaje.
+💳 Cuentas para realizar tus pagos
+Tipo: Monetaria
+A nombre de: CUBE INVESTMENTS, S.A.
+* BI: 5520029876
+* BAM: 3020123033
+* GyT: 01300039945
+* Banrural: 3394002346
 
-Atentamente, 
-{nombreAsesor} 
-Tel: {telefonoAsesor}.`,
-		cuerpoWhastapp: `Hola {clienteNombre}, Le saludamos cordialmente de Clubcashin.com para recordarle sobre el pago de su crédito, el cual debe realizarse el {fechaPago}. Sus cuotas son por un monto de Q{cuotaMensual}.
+🚗 Tu vehículo cuenta con seguro completo a través de Seguros Universales.
+En caso de accidente o cualquier inconveniente con tu vehículo, llama a la cabina de emergencia al 2384-7400, identificándote únicamente con el número de placa.
+Para seguimiento de trámites con el seguro:
+✅ Luis Escobar: 4388-7300
+✅ Maylin Barrios: 4770-7074
 
-A continuación, le compartimos los números de cuenta para realizar su depósito o transferencia: - CUBE INVESTMENTS, S.A. (monetaria) No. 5520029876 BANCO INDUSTRIAL (BI) / CUBE INVESTMENTS, S.A. (monetaria) No. 3020123033 BANCO AGROMERCANTIL (BAM) / CUBE INVESTMENTS, S.A. (monetaria) No. 01300039945 BANCO GyT CONTINENTAL / CUBE INVESTMENTS, S.A. (monetaria) No. 3394002346 BANRURAL
-
-Por favor, envíe su boleta o comprobante de pago al {telefonoAsesor} para aplicarlo a su cuenta. Si tiene alguna duda o consulta, estamos a su disposición.
-
-${COBROS_NO_REPLY_WARNING}
-
-Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
+Si tienes alguna consulta, con gusto estamos para apoyarte. Agradeceremos confirmar la recepción de este mensaje.
+{nombreAsesor} - Asesor de Cobros
+CashIn`,
 	},
 	{
 		id: "al_dia",
-		nombre: "Recordatorio de pago",
+		nombre: "Recordatorio el día de pago",
 		etapa: "al_dia",
 		asunto: "Recordatorio de pago - Vehículo {placa}",
-		cuerpo: `Estimado(a) {clienteNombre}, buen día, cordialmente le saludamos de Clubcashin para recordarle sobre el pago de su crédito el día de hoy, quedamos a la espera de su comprobante de pago.
+		cuerpo: `Hola {clienteNombre} 👋
+Te recordamos que hoy es la fecha de pago de tu cuota, por un monto de Q{cuotaMensual}. Agradeceremos realizar tu pago y compartir tu comprobante para aplicarlo a tu cuenta.
 
-Atentamente, 
-{nombreAsesor} 
-Tel: {telefonoAsesor}.`,
-		cuerpoWhastapp: `Estimado(a) {clienteNombre}, buen día, cordialmente le saludamos de Clubcashin para recordarle sobre el pago de su crédito el día de hoy, quedamos a la espera de su comprobante de pago.
+🛑 Si no realizas tu pago hoy, se agregará un recargo por mora de Q{expectativaMora}.
 
+📞 Si necesitas apoyo, comunícate con tu asesor:
+{nombreAsesor} - Asesor de Cobros
+{telefonoAsesor}
+
+🚗 Si ya realizó su pago, agradecemos hacer caso omiso a este recordatorio.
+CashIn`,
+		cuerpoWhastapp: `Hola {clienteNombre} 👋
+Te recordamos que hoy es la fecha de pago de tu cuota, por un monto de Q{cuotaMensual}. Agradeceremos realizar tu pago y compartir tu comprobante para aplicarlo a tu cuenta.
+
+🛑 Si no realizas tu pago hoy, se agregará un recargo por mora de Q{expectativaMora}.
+
+📞 Si necesitas apoyo, comunícate con tu asesor:
+{nombreAsesor} - Asesor de Cobros
+{telefonoAsesor}
+
+🚗 Si ya realizó su pago, agradecemos hacer caso omiso a este recordatorio.
 ${COBROS_NO_REPLY_WARNING}
-
-Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
+CashIn`,
 	},
 	{
 		id: "impuesto_circulacion_2026",
 		nombre: "Impuesto de circulación 2026",
 		etapa: "al_dia",
 		asunto: "Recordatorio de pago - Impuesto de circulación 2026",
-		cuerpo: `Estimado(a) {clienteNombre}, buen día, cordialmente le saludamos de Clubcashin para recordarle sobre el pago del impuesto de circulación del año 2026.
+		cuerpo: `Hola 👋
+Te recordamos realizar el pago de tu Impuesto de Circulación 2026.
+⏰ Fecha límite: 31/07/2026 a las 5:00 p.m.
 
-Envíanos tu comprobante a tiempo para que podamos procesar y enviarte tus distintivos sin contratiempos.
+🛑 En caso de no realizar el pago, CashIn lo realizará y te cobrará las multas y gastos administrativos adicionales.
 
-¡No lo dejes para última hora!
+✅ Al realizar el pago, comparte el comprobante con tu asesor antes de la hora límite:
+{nombreAsesor} - Asesor de Cobros
+{telefonoAsesor}
+
+CashIn`,
+		cuerpoWhastapp: `Hola 👋
+Te recordamos realizar el pago de tu Impuesto de Circulación 2026.
+⏰ Fecha límite: 31/07/2026 a las 5:00 p.m.
+
+🛑 En caso de no realizar el pago, CashIn lo realizará y te cobrará las multas y gastos administrativos adicionales.
+
+✅ Al realizar el pago, comparte el comprobante con tu asesor antes de la hora límite:
+{nombreAsesor} - Asesor de Cobros
+{telefonoAsesor}
 
 ${COBROS_NO_REPLY_WARNING}
-
-Atentamente,
-{nombreAsesor}
-Tel: {telefonoAsesor}`,
-		cuerpoWhastapp: `Estimado(a) {clienteNombre}, buen día, cordialmente le saludamos de Clubcashin para recordarle sobre el pago del impuesto de circulación del año 2026.
-
-Envíanos tu comprobante a tiempo para que podamos procesar y enviarte tus distintivos sin contratiempos.
-
-¡No lo dejes para última hora!
-
-${COBROS_NO_REPLY_WARNING}
-
-Atentamente,
-{nombreAsesor}
-Tel: {telefonoAsesor}`,
+CashIn`,
 	},
 	{
 		id: "pre_mora",
-		nombre: "Aviso de atraso",
+		nombre: "Recordatorio 5 días antes",
 		etapa: "pre_mora",
-		asunto: "Aviso de atraso en pago - Vehículo {placa}",
-		cuerpo: `Hola {clienteNombre}, le saludamos de Clubcashin recordándole que su cuota esta próxima a vencer. Su día de pago es el {fechaPago}. Ponemos a su disposición nuestros medios de pago en Banco Industrial, BANRURAL, Banco Agromercantil (BAM) y GyT.
+		asunto: "Recordatorio de pago próximo - Vehículo {placa}",
+		cuerpo: `Hola {clienteNombre} 👋
+Te saludamos de CashIn para recordarte que tu próxima cuota tiene fecha de pago el {fechaPago}.
 
-Si tiene alguna duda por favor comunicarse por este medio.
+📞 Para consultas o apoyo con tu cuenta, comunícate directamente con tu asesor de cobros:
+{nombreAsesor} - Asesor de Cobros
+{telefonoAsesor}
 
-SI YA REALIZO SU PAGO POR FAVOR HACER CASO OMISO A ESTE MENSAJE.
+🚗 Si ya realizó su pago, agradecemos hacer caso omiso a este recordatorio.
+CashIn`,
+		cuerpoWhastapp: `Hola {clienteNombre} 👋
+Te saludamos de CashIn para recordarte que tu próxima cuota tiene fecha de pago el {fechaPago}.
 
-Atentamente, 
-{nombreAsesor} 
-Tel: {telefonoAsesor}.`,
-		cuerpoWhastapp: `Hola {clienteNombre}, le saludamos de Clubcashin recordándole que su cuota esta próxima a vencer. Su día de pago es el {fechaPago}. Ponemos a su disposición nuestros medios de pago en Banco Industrial, BANRURAL, Banco Agromercantil (BAM) y GyT.
+📞 Para consultas o apoyo con tu cuenta, comunícate directamente con tu asesor de cobros:
+{nombreAsesor} - Asesor de Cobros
+{telefonoAsesor}
 
-Si tiene alguna duda, por favor comuníquese al {telefonoAsesor}.
-
-SI YA REALIZO SU PAGO POR FAVOR HACER CASO OMISO A ESTE MENSAJE.
-
+🚗 Si ya realizó su pago, agradecemos hacer caso omiso a este recordatorio.
 ${COBROS_NO_REPLY_WARNING}
-
-Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
+CashIn`,
 	},
 	{
 		id: "mora_30",
-		nombre: "Mora 30 días",
+		nombre: "Notificación 1 cuota atrasada",
 		etapa: "mora_30",
 		asunto: "URGENTE: Mora de 30 días - Vehículo {placa}",
-		cuerpo: `Estimado(a) {clienteNombre}, buen día, el motivo de la notificación es porque tenemos 1 cuota en atraso, se solicita que su pago sea lo antes posible para poder solventar su situación, quedaremos a la espera de su boleta el día {fechaPago}.
+		cuerpo: `Hola {clienteNombre} 👋
+Tienes 1 cuota con atraso por un monto de Q{montoAdeudado}.
 
-Atentamente, 
-{nombreAsesor} 
-Tel: {telefonoAsesor}.`,
-		cuerpoWhastapp: `Estimado(a) {clienteNombre}, buen día, el motivo de la notificación es porque tenemos 1 cuota en atraso, se solicita que su pago sea lo antes posible para poder solventar su situación, quedaremos a la espera de su boleta el día {fechaPago}.
+Es importante que realices tu pago lo antes posible para evitar mayores recargos en tu cuenta.
+
+📲 Al realizar el pago, comparte el comprobante con tu asesor:
+{nombreAsesor} - Asesor de Cobros
+{telefonoAsesor}
+
+CashIn`,
+		cuerpoWhastapp: `Hola {clienteNombre} 👋
+Tienes 1 cuota con atraso por un monto de Q{montoAdeudado}.
+
+Es importante que realices tu pago lo antes posible para evitar mayores recargos en tu cuenta.
+
+📲 Al realizar el pago, comparte el comprobante con tu asesor:
+{nombreAsesor} - Asesor de Cobros
+{telefonoAsesor}
 
 ${COBROS_NO_REPLY_WARNING}
-
-Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
+CashIn`,
 	},
 	{
 		id: "mora_60",
-		nombre: "Mora 60 días",
+		nombre: "Notificación 2-3 cuotas atrasadas",
 		etapa: "mora_60",
 		asunto: "AVISO IMPORTANTE: Mora de 60 días - Vehículo {placa}",
-		cuerpo: `Estimado/a {clienteNombre},
+		cuerpo: `Hola {clienteNombre},
+Te informamos que actualmente tienes {cuotasAtraso} cuotas en atraso, por un monto total de Q{montoAdeudado}.
 
-Buen día. El motivo de la notificación es porque tenemos {cuotasAtraso} cuota(s) en atraso. Se solicita que su pago sea lo antes posible para poder solventar su situación. Quedaremos a la espera de su boleta el día {fechaPago}.
+⚠️ En caso de no recibir el pago, CashIn podrá aplicar las medidas de recuperación contempladas en tu contrato y la ejecución de garantía.
 
-Si no recibimos el pago dentro del plazo establecido, nos veremos obligados a tomar medidas adicionales para recuperar la deuda, incluida la posible ejecución del vehículo y el apagado de la unidad en movimiento o estacionado.
+✅ Al realizar el pago, comparte el comprobante con tu asesor:
+{nombreAsesor} - Asesor de Cobros
+{telefonoAsesor}
 
-Atentamente,
-{nombreAsesor}
-Tel: {telefonoAsesor}`,
-		cuerpoWhastapp: `Estimado/a {clienteNombre}, Buen día. El motivo de la notificación es porque tenemos {cuotasAtraso} cuota(s) en atraso. Se solicita que su pago sea lo antes posible para poder solventar su situación. Quedaremos a la espera de su boleta el día {fechaPago}.
+CashIn`,
+		cuerpoWhastapp: `Hola {clienteNombre},
+Te informamos que actualmente tienes {cuotasAtraso} cuotas en atraso, por un monto total de Q{montoAdeudado}.
 
-Si no recibimos el pago dentro del plazo establecido, nos veremos obligados a tomar medidas adicionales para recuperar la deuda, incluida la posible ejecución del vehículo y el apagado de la unidad en movimiento o estacionado.
+⚠️ En caso de no recibir el pago, CashIn podrá aplicar las medidas de recuperación contempladas en tu contrato y la ejecución de garantía.
+
+✅ Al realizar el pago, comparte el comprobante con tu asesor:
+{nombreAsesor} - Asesor de Cobros
+{telefonoAsesor}
 
 ${COBROS_NO_REPLY_WARNING}
-
-Atentamente, {nombreAsesor} Tel: {telefonoAsesor}`,
+CashIn`,
 	},
 	{
 		id: "aviso_juridico",

@@ -2,8 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Loader2, Phone } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
 import { ContactoModal } from "@/components/contacto-modal";
+import { Button } from "@/components/ui/button";
 import { orpc } from "@/utils/orpc";
 
 interface ContactoQuickActionProps {
@@ -134,6 +134,7 @@ export function ContactoQuickAction({
 				fechaInicio={d.fechaInicio || null}
 				nombreAsesor={d.asesor?.nombre || ""}
 				telefonoAsesor={d.asesor?.telefono || ""}
+				expectativaMora={d.expectativaMora || ""}
 			/>
 		</span>
 	);

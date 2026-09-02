@@ -14,25 +14,25 @@ function splitTemplateParams(message: string): string[] {
 		return [message.trim()];
 	}
 
-	if (parts.length <= 4) {
+	if (parts.length <= 5) {
 		return parts;
 	}
 
-	// SimpleTech solo soporta hasta 4 parámetros por template.
-	// Concatenamos cualquier exceso en el 4to parámetro para no perder texto.
-	return [...parts.slice(0, 3), parts.slice(3).join("\n\n")];
+	// SimpleTech solo soporta hasta 5 parámetros por template.
+	// Concatenamos cualquier exceso en el 5to parámetro para no perder texto.
+	return [...parts.slice(0, 4), parts.slice(4).join("\n\n")];
 }
 
 /**
  * Resuelve el nombre del template según la cantidad de parámetros.
  *
  * Las plantillas aprobadas siguen la convención `mensaje{N}parametro`
- * (`mensaje1parametro`, `mensaje2parametro`, …, `mensaje4parametro`).
+ * (`mensaje1parametro`, `mensaje2parametro`, …, `mensaje5parametro`).
  *
  * Esta función toma el primer dígito del nombre base
  * (`SIMPLETECH_TEMPLATE_NAME`) y lo REEMPLAZA por `paramCount`. SimpleTech
- * solo soporta hasta 4 parámetros, así que `splitTemplateParams` ya colapsa
- * a 4 cualquier mensaje con más; aquí también clampeamos por seguridad.
+ * solo soporta hasta 5 parámetros, así que `splitTemplateParams` ya colapsa
+ * a 5 cualquier mensaje con más; aquí también clampeamos por seguridad.
  */
 function resolveTemplateNameByParamCount(
 	baseTemplateName: string,
@@ -41,7 +41,7 @@ function resolveTemplateNameByParamCount(
 	const match = /\d+/.exec(baseTemplateName);
 	if (!match) return baseTemplateName;
 
-	const target = Math.min(4, Math.max(1, paramCount));
+	const target = Math.min(5, Math.max(1, paramCount));
 	return baseTemplateName.replace(match[0], String(target));
 }
 
@@ -64,10 +64,7 @@ function normalizeParamsForTemplate(
 		];
 	}
 
-	return [
-		...params,
-		...new Array(templateParamCount - params.length).fill(""),
-	];
+	return [...params, ...new Array(templateParamCount - params.length).fill("")];
 }
 
 export function getSimpletechClient(): SimpleTechClient | null {
@@ -349,10 +346,7 @@ export async function sendWhatsappTemplateBatch(params: {
 		for (const r of result.results ?? []) {
 			const rDigits = toDigits(String(r.number));
 			for (let i = 0; i < normalized.length; i++) {
-				if (
-					!used[i] &&
-					toDigits(normalized[i].phoneNormalized) === rDigits
-				) {
+				if (!used[i] && toDigits(normalized[i].phoneNormalized) === rDigits) {
 					matchByIdx[i] = {
 						templateMessageId: r.templateMessageId ?? "",
 						error: r.error ?? "",

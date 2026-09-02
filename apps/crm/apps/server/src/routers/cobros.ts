@@ -16,7 +16,6 @@ import {
 } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { auditRecord, auditedTransaction } from "../lib/audit";
 import { user } from "../db/schema/auth";
 import { carteraBackReferences } from "../db/schema/cartera-back";
 import {
@@ -41,6 +40,7 @@ import {
 } from "../db/schema/crm";
 import { quotations } from "../db/schema/quotations";
 import { vehicles } from "../db/schema/vehicles";
+import { auditedTransaction, auditRecord } from "../lib/audit";
 import { recalculateCobrosCapitalPercentages } from "../lib/cobros-capital-percentages";
 import {
 	countRemainingInstallments,
@@ -50,8 +50,9 @@ import {
 	resolveOperationalInstallment,
 } from "../lib/cobros-credit-detail";
 import {
-	PLANTILLAS_MENSAJES,
+	calcularExpectativaMora,
 	interpolar as interpolarPlantilla,
+	PLANTILLAS_MENSAJES,
 	prepararTelefonoAsesorParaEnvio,
 } from "../lib/cobros-plantillas";
 import { filterCobrosSearchResults } from "../lib/cobros-search";
@@ -2266,7 +2267,9 @@ export const cobrosRouter = {
 				const contractSummary = resolveCreditContractSummary(
 					statusCredit,
 					creditoCompleto.cuotasPagadas,
-					creditoCompleto.credito.capital ?? creditoCompleto.credito.deudatotal ?? "0.00",
+					creditoCompleto.credito.capital ??
+						creditoCompleto.credito.deudatotal ??
+						"0.00",
 					resolveHistoricalInstallment(
 						creditoCompleto.credito.cuota,
 						oportunidadData?.cuotaMensual,
@@ -2282,6 +2285,12 @@ export const cobrosRouter = {
 					// Datos de mora / convenio
 					estadoMora,
 					montoEnMora: montoEnMora.toFixed(2),
+					// Recargo de UNA cuota vencida más (capital × 1.12%, misma fórmula
+					// que procesarMoras en cartera-back) para el {expectativaMora} de
+					// las plantillas de mensaje.
+					expectativaMora: calcularExpectativaMora(
+						creditoCompleto.credito.capital,
+					),
 					diasMoraMaximo: diasMora,
 					cuotasVencidas: cuotasAtrasadas,
 					cuotaConvenio: tieneConvenioActivo
@@ -3689,6 +3698,7 @@ export const cobrosRouter = {
 					cuotasAtraso: credito.mora?.cuotas_atrasadas ?? 0,
 					telefonoAsesor: telefonoAsesor.telefonoAsesor,
 					nombreAsesor: asesor.nombre ?? "",
+					expectativaMora: calcularExpectativaMora(credito.creditos.capital),
 				});
 
 				candidatos.push({
@@ -3696,7 +3706,7 @@ export const cobrosRouter = {
 					telefono: testMode ? getTestPhone(candidatos.length) : telefono,
 					telefonoReal: telefono,
 					mensaje,
-					casoCobroId: sifco ? casoIdPorSifco.get(sifco) ?? null : null,
+					casoCobroId: sifco ? (casoIdPorSifco.get(sifco) ?? null) : null,
 					clienteNombre,
 				});
 			}

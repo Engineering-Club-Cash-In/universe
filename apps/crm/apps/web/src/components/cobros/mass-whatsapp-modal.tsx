@@ -35,6 +35,7 @@ const VARIABLES_DISPONIBLES = [
 	"cuotasAtraso",
 	"telefonoAsesor",
 	"nombreAsesor",
+	"expectativaMora",
 ] as const;
 
 interface DescartadoItem {

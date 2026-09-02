@@ -17,6 +17,8 @@
  * `plantillas_mensaje` en la BD (ver RFC en el archivo del front).
  */
 
+import Big from "big.js";
+
 export interface VariablesPlantilla {
 	clienteNombre: string;
 	fechaPago: string;
@@ -27,6 +29,38 @@ export interface VariablesPlantilla {
 	cuotasAtraso: number;
 	telefonoAsesor: string;
 	nombreAsesor: string;
+	expectativaMora: string;
+}
+
+/**
+ * Porcentaje de mora por cuota vencida. MISMA fórmula que el job nocturno
+ * `procesarMoras` de cartera-back (apps/cartera-back/src/controllers/latefee.ts):
+ * mora = capital × 1.12% × cuotas vencidas.
+ */
+const PORCENTAJE_MORA_POR_CUOTA = "0.0112";
+
+/**
+ * "Expectativa de mora" del recordatorio del día de pago: el recargo de UNA
+ * cuota adicional que el job de cartera asignaría si el cliente no paga hoy
+ * (mora aún no asignada). Devuelve el monto formateado es-GT ("1,382.72") o
+ * "" si no hay capital (sin capital no aplica mora, igual que el job).
+ */
+export function calcularExpectativaMora(
+	capital: string | number | null | undefined,
+): string {
+	if (capital === null || capital === undefined || capital === "") return "";
+	let monto: Big;
+	try {
+		monto = new Big(capital).times(PORCENTAJE_MORA_POR_CUOTA);
+	} catch {
+		return "";
+	}
+	if (monto.lte(0)) return "";
+	// Redondeo half-up a 2 decimales, idéntico al toFixed(2) de Big en el job.
+	return Number(monto.toFixed(2)).toLocaleString("es-GT", {
+		minimumFractionDigits: 2,
+		maximumFractionDigits: 2,
+	});
 }
 
 export interface PlantillaMensaje {
@@ -38,7 +72,7 @@ export interface PlantillaMensaje {
 }
 
 export const COBROS_NO_REPLY_WARNING =
-	"*NO RESPONDER EN ESTE CHAT, CONTESTAR AL NUMERO DE SU ASESOR DE COBROS*";
+	"⚠️ Este número es únicamente para el envío de notificaciones automáticas. Por favor, no respondas a este número.";
 export const COBROS_MOTIVO_SIN_TELEFONO_ASESOR = "sin teléfono de asesor";
 
 export function prepararTelefonoAsesorParaEnvio(
@@ -86,7 +120,8 @@ export function interpolar(
 		.replace(/{montoAdeudado}/g, v(variables.montoAdeudado))
 		.replace(/{cuotasAtraso}/g, v(variables.cuotasAtraso))
 		.replace(/{telefonoAsesor}/g, v(variables.telefonoAsesor))
-		.replace(/{nombreAsesor}/g, v(variables.nombreAsesor));
+		.replace(/{nombreAsesor}/g, v(variables.nombreAsesor))
+		.replace(/{expectativaMora}/g, v(variables.expectativaMora));
 }
 
 export const PLANTILLAS_MENSAJES: PlantillaMensaje[] = [
@@ -95,95 +130,129 @@ export const PLANTILLAS_MENSAJES: PlantillaMensaje[] = [
 		nombre: "Bienvenida",
 		etapa: "al_dia",
 		asunto: "Bienvenido/a a su plan de financiamiento",
-		// 5 bloques; SimpleTech colapsa a template `mensaje4parametros`.
-		cuerpo: `Hola {clienteNombre}, Le saludamos cordialmente de Clubcashin.com para recordarle sobre el pago de su crédito, el cual debe realizarse el {fechaPago}. Sus cuotas son por un monto de Q{cuotaMensual}.
+		// 5 bloques → template `mensaje5parametro`.
+		cuerpo: `Hola {clienteNombre} 👋
+¡Bienvenido(a) a CashIn! Nos alegra acompañarte en el financiamiento de tu vehículo.
 
-A continuación, le compartimos los números de cuenta para realizar su depósito o transferencia: - CUBE INVESTMENTS, S.A. (monetaria) No. 5520029876 BANCO INDUSTRIAL (BI) / CUBE INVESTMENTS, S.A. (monetaria) No. 3020123033 BANCO AGROMERCANTIL (BAM) / CUBE INVESTMENTS, S.A. (monetaria) No. 01300039945 BANCO GyT CONTINENTAL / CUBE INVESTMENTS, S.A. (monetaria) No. 3394002346 BANRURAL
+📅 Información de tu cuota
+Fecha de 1er pago: {fechaPago}
+Monto de cuota: Q{cuotaMensual}
 
-Por favor, envíe su boleta o comprobante de pago al {telefonoAsesor} para aplicarlo a su cuenta. Si tiene alguna duda o consulta, estamos a su disposición.
+💳 Cuentas para realizar tus pagos
+Tipo: Monetaria
+A nombre de: CUBE INVESTMENTS, S.A.
+* BI: 5520029876
+* BAM: 3020123033
+* GyT: 01300039945
+* Banrural: 3394002346
 
-${COBROS_NO_REPLY_WARNING}
+🚗 Tu vehículo cuenta con seguro completo a través de Seguros Universales.
+En caso de accidente o cualquier inconveniente con tu vehículo, llama a la cabina de emergencia al 2384-7400, identificándote únicamente con el número de placa.
+Para seguimiento de trámites con el seguro:
+✅ Luis Escobar: 4388-7300
+✅ Maylin Barrios: 4770-7074
 
-Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
+Si tienes alguna consulta, con gusto estamos para apoyarte. Agradeceremos confirmar la recepción de este mensaje.
+{nombreAsesor} - Asesor de Cobros
+CashIn`,
 	},
 	{
 		id: "al_dia",
-		nombre: "Recordatorio de pago",
+		nombre: "Recordatorio el día de pago",
 		etapa: "al_dia",
 		asunto: "Recordatorio de pago - Vehículo {placa}",
-		// 3 bloques → template `mensaje3parametros`.
-		cuerpo: `Estimado(a) {clienteNombre}, buen día, cordialmente le saludamos de Clubcashin para recordarle sobre el pago de su crédito el día de hoy, quedamos a la espera de su comprobante de pago.
+		// 4 bloques → template `mensaje4parametro`.
+		cuerpo: `Hola {clienteNombre} 👋
+Te recordamos que hoy es la fecha de pago de tu cuota, por un monto de Q{cuotaMensual}. Agradeceremos realizar tu pago y compartir tu comprobante para aplicarlo a tu cuenta.
 
+🛑 Si no realizas tu pago hoy, se agregará un recargo por mora de Q{expectativaMora}.
+
+📞 Si necesitas apoyo, comunícate con tu asesor:
+{nombreAsesor} - Asesor de Cobros
+{telefonoAsesor}
+
+🚗 Si ya realizó su pago, agradecemos hacer caso omiso a este recordatorio.
 ${COBROS_NO_REPLY_WARNING}
-
-Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
+CashIn`,
 	},
 	{
 		id: "impuesto_circulacion_2026",
 		nombre: "Impuesto de circulación 2026",
 		etapa: "al_dia",
 		asunto: "Recordatorio de pago - Impuesto de circulación 2026",
-		// 5 bloques; SimpleTech colapsa los dos últimos en `mensaje4parametro`.
-		cuerpo: `Estimado(a) {clienteNombre}, buen día, cordialmente le saludamos de Clubcashin para recordarle sobre el pago del impuesto de circulación del año 2026.
+		// 4 bloques → template `mensaje4parametro`.
+		cuerpo: `Hola 👋
+Te recordamos realizar el pago de tu Impuesto de Circulación 2026.
+⏰ Fecha límite: 31/07/2026 a las 5:00 p.m.
 
-Envíanos tu comprobante a tiempo para que podamos procesar y enviarte tus distintivos sin contratiempos.
+🛑 En caso de no realizar el pago, CashIn lo realizará y te cobrará las multas y gastos administrativos adicionales.
 
-¡No lo dejes para última hora!
+✅ Al realizar el pago, comparte el comprobante con tu asesor antes de la hora límite:
+{nombreAsesor} - Asesor de Cobros
+{telefonoAsesor}
 
 ${COBROS_NO_REPLY_WARNING}
-
-Atentamente,
-{nombreAsesor}
-Tel: {telefonoAsesor}`,
+CashIn`,
 	},
 	{
 		id: "pre_mora",
-		nombre: "Aviso de atraso",
+		nombre: "Recordatorio 5 días antes",
 		etapa: "pre_mora",
-		asunto: "Aviso de atraso en pago - Vehículo {placa}",
-		// 5 bloques; SimpleTech colapsa a template `mensaje4parametros`.
-		cuerpo: `Hola {clienteNombre}, le saludamos de Clubcashin recordándole que su cuota esta próxima a vencer. Su día de pago es el {fechaPago}. Ponemos a su disposición nuestros medios de pago en Banco Industrial, BANRURAL, Banco Agromercantil (BAM) y GyT.
+		asunto: "Recordatorio de pago próximo - Vehículo {placa}",
+		// 3 bloques → template `mensaje3parametro`.
+		cuerpo: `Hola {clienteNombre} 👋
+Te saludamos de CashIn para recordarte que tu próxima cuota tiene fecha de pago el {fechaPago}.
 
-Si tiene alguna duda, por favor comuníquese al {telefonoAsesor}.
+📞 Para consultas o apoyo con tu cuenta, comunícate directamente con tu asesor de cobros:
+{nombreAsesor} - Asesor de Cobros
+{telefonoAsesor}
 
-SI YA REALIZO SU PAGO POR FAVOR HACER CASO OMISO A ESTE MENSAJE.
-
+🚗 Si ya realizó su pago, agradecemos hacer caso omiso a este recordatorio.
 ${COBROS_NO_REPLY_WARNING}
-
-Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
+CashIn`,
 	},
 	{
 		id: "mora_30",
-		nombre: "Mora 30 días",
+		nombre: "Notificación 1 cuota atrasada",
 		etapa: "mora_30",
 		asunto: "URGENTE: Mora de 30 días - Vehículo {placa}",
-		// 3 bloques → template `mensaje3parametros`.
-		cuerpo: `Estimado(a) {clienteNombre}, buen día, el motivo de la notificación es porque tenemos 1 cuota en atraso, se solicita que su pago sea lo antes posible para poder solventar su situación, quedaremos a la espera de su boleta el día {fechaPago}.
+		// 4 bloques → template `mensaje4parametro`.
+		cuerpo: `Hola {clienteNombre} 👋
+Tienes 1 cuota con atraso por un monto de Q{montoAdeudado}.
+
+Es importante que realices tu pago lo antes posible para evitar mayores recargos en tu cuenta.
+
+📲 Al realizar el pago, comparte el comprobante con tu asesor:
+{nombreAsesor} - Asesor de Cobros
+{telefonoAsesor}
 
 ${COBROS_NO_REPLY_WARNING}
-
-Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
+CashIn`,
 	},
 	{
 		id: "mora_60",
-		nombre: "Mora 60 días",
+		nombre: "Notificación 2-3 cuotas atrasadas",
 		etapa: "mora_60",
 		asunto: "AVISO IMPORTANTE: Mora de 60 días - Vehículo {placa}",
-		// 4 bloques → template `mensaje4parametros`.
-		cuerpo: `Estimado/a {clienteNombre}, Buen día. El motivo de la notificación es porque tenemos {cuotasAtraso} cuota(s) en atraso. Se solicita que su pago sea lo antes posible para poder solventar su situación. Quedaremos a la espera de su boleta el día {fechaPago}.
+		// 4 bloques → template `mensaje4parametro`.
+		cuerpo: `Hola {clienteNombre},
+Te informamos que actualmente tienes {cuotasAtraso} cuotas en atraso, por un monto total de Q{montoAdeudado}.
 
-Si no recibimos el pago dentro del plazo establecido, nos veremos obligados a tomar medidas adicionales para recuperar la deuda, incluida la posible ejecución del vehículo y el apagado de la unidad en movimiento o estacionado.
+⚠️ En caso de no recibir el pago, CashIn podrá aplicar las medidas de recuperación contempladas en tu contrato y la ejecución de garantía.
+
+✅ Al realizar el pago, comparte el comprobante con tu asesor:
+{nombreAsesor} - Asesor de Cobros
+{telefonoAsesor}
 
 ${COBROS_NO_REPLY_WARNING}
-
-Atentamente, {nombreAsesor} Tel: {telefonoAsesor}`,
+CashIn`,
 	},
 	{
 		id: "aviso_juridico",
 		nombre: "Aviso jurídico",
 		etapa: "mora_90",
 		asunto: "ÚLTIMO AVISO: Proceso jurídico - Vehículo {placa}",
-		// 4 bloques → template `mensaje4parametros`.
+		// 4 bloques → template `mensaje4parametro`.
 		cuerpo: `Señor(a) {clienteNombre}, le informamos que su obligación adquirida por medio de la plataforma de inversión CLUB CASH IN por la compra del vehículo ({placa}) {marcaLineaModelo}, se encuentra con {cuotasAtraso} cuota(s) de atraso, por un monto de {montoAdeudado} incluyendo moras.
 
 Por lo que le solicitamos ponerse en contacto con nosotros para entregar la unidad en un plazo no mayor de 24 horas para solventar su situación. De no obtener respuesta en el plazo establecido, procederemos a presentar DEMANDA en su contra por denuncia de robo.

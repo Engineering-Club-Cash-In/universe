@@ -25,6 +25,31 @@ export interface VariablesPlantilla {
 	 * (getDetallesCreditoCarteraBack).
 	 */
 	expectativaMora: string;
+	/** Año del impuesto de circulación. Default: año actual en Guatemala. */
+	anioImpuesto?: string;
+	/** Fecha límite del impuesto (dd/mm/año). Default: 31/07 del año actual. */
+	fechaLimiteImpuesto?: string;
+}
+
+/**
+ * Fecha límite del impuesto de circulación (SAT): 31 de julio, 5:00 p.m., de
+ * CADA año. El año se calcula al momento de interpolar para que la plantilla
+ * no quede vencida de un año al otro; si SAT moviera el día/mes, se ajusta
+ * esta constante. Después de la fecha límite los asesores editan el mensaje o
+ * contactan personalmente.
+ */
+const DIA_MES_LIMITE_IMPUESTO = "31/07";
+
+export function anioImpuestoCirculacion(ahora = new Date()): string {
+	// Año calendario en Guatemala (evita el desfase de UTC en el cambio de año).
+	return new Intl.DateTimeFormat("es-GT", {
+		timeZone: "America/Guatemala",
+		year: "numeric",
+	}).format(ahora);
+}
+
+export function fechaLimiteImpuestoCirculacion(ahora = new Date()): string {
+	return `${DIA_MES_LIMITE_IMPUESTO}/${anioImpuestoCirculacion(ahora)}`;
 }
 
 export interface PlantillaMensaje {
@@ -160,6 +185,17 @@ export function interpolar(
 		.replace(
 			/{expectativaMora}/g,
 			v(variables.expectativaMora, "expectativa de mora"),
+		)
+		.replace(
+			/{anioImpuesto}/g,
+			v(variables.anioImpuesto ?? anioImpuestoCirculacion(), "año impuesto"),
+		)
+		.replace(
+			/{fechaLimiteImpuesto}/g,
+			v(
+				variables.fechaLimiteImpuesto ?? fechaLimiteImpuestoCirculacion(),
+				"fecha límite impuesto",
+			),
 		);
 }
 
@@ -249,12 +285,12 @@ CashIn`,
 	},
 	{
 		id: "impuesto_circulacion_2026",
-		nombre: "Impuesto de circulación 2026",
+		nombre: "Impuesto de circulación",
 		etapa: "al_dia",
-		asunto: "Recordatorio de pago - Impuesto de circulación 2026",
+		asunto: "Recordatorio de pago - Impuesto de circulación {anioImpuesto}",
 		cuerpo: `Hola 👋
-Te recordamos realizar el pago de tu Impuesto de Circulación 2026.
-⏰ Fecha límite: 31/07/2026 a las 5:00 p.m.
+Te recordamos realizar el pago de tu Impuesto de Circulación {anioImpuesto}.
+⏰ Fecha límite: {fechaLimiteImpuesto} a las 5:00 p.m.
 
 🛑 En caso de no realizar el pago, CashIn lo realizará y te cobrará las multas y gastos administrativos adicionales.
 
@@ -264,8 +300,8 @@ Te recordamos realizar el pago de tu Impuesto de Circulación 2026.
 
 CashIn`,
 		cuerpoWhastapp: `Hola 👋
-Te recordamos realizar el pago de tu Impuesto de Circulación 2026.
-⏰ Fecha límite: 31/07/2026 a las 5:00 p.m.
+Te recordamos realizar el pago de tu Impuesto de Circulación {anioImpuesto}.
+⏰ Fecha límite: {fechaLimiteImpuesto} a las 5:00 p.m.
 
 🛑 En caso de no realizar el pago, CashIn lo realizará y te cobrará las multas y gastos administrativos adicionales.
 

@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
+	anioImpuestoCirculacion,
 	COBROS_MOTIVO_SIN_TELEFONO_ASESOR,
 	COBROS_NO_REPLY_WARNING,
 	calcularExpectativaMora,
+	fechaLimiteImpuestoCirculacion,
 	interpolar,
 	PLANTILLAS_MENSAJES,
 	prepararTelefonoAsesorParaEnvio,
@@ -140,15 +142,15 @@ describe("plantillas masivas de cobros", () => {
 		});
 	});
 
-	test("define el recordatorio de impuesto de circulación 2026", () => {
+	test("define el recordatorio de impuesto de circulación", () => {
 		const plantilla = PLANTILLAS_MENSAJES.find(
 			(plantilla) => plantilla.id === "impuesto_circulacion_2026",
 		);
 
-		expect(plantilla?.nombre).toBe("Impuesto de circulación 2026");
+		expect(plantilla?.nombre).toBe("Impuesto de circulación");
 		expect(plantilla?.cuerpo).toBe(`Hola 👋
-Te recordamos realizar el pago de tu Impuesto de Circulación 2026.
-⏰ Fecha límite: 31/07/2026 a las 5:00 p.m.
+Te recordamos realizar el pago de tu Impuesto de Circulación {anioImpuesto}.
+⏰ Fecha límite: {fechaLimiteImpuesto} a las 5:00 p.m.
 
 🛑 En caso de no realizar el pago, CashIn lo realizará y te cobrará las multas y gastos administrativos adicionales.
 
@@ -159,6 +161,47 @@ Te recordamos realizar el pago de tu Impuesto de Circulación 2026.
 ${COBROS_NO_REPLY_WARNING}
 CashIn`);
 		expect(bloques(plantilla?.cuerpo ?? "")).toHaveLength(4);
+	});
+
+	test("calcula la fecha límite del impuesto con el año actual de Guatemala", () => {
+		// El año sale de la fecha en zona America/Guatemala (UTC-6): el 1 de
+		// enero a las 02:00 UTC todavía es 31 de diciembre del año anterior en GT.
+		expect(anioImpuestoCirculacion(new Date("2027-03-15T12:00:00Z"))).toBe(
+			"2027",
+		);
+		expect(anioImpuestoCirculacion(new Date("2027-01-01T02:00:00Z"))).toBe(
+			"2026",
+		);
+		expect(
+			fechaLimiteImpuestoCirculacion(new Date("2027-03-15T12:00:00Z")),
+		).toBe("31/07/2027");
+	});
+
+	test("interpola el impuesto con el año vigente sin fecha vencida hardcodeada", () => {
+		const plantilla = PLANTILLAS_MENSAJES.find(
+			(plantilla) => plantilla.id === "impuesto_circulacion_2026",
+		);
+		const mensaje = interpolar(plantilla?.cuerpo ?? "", {
+			clienteNombre: "",
+			fechaPago: "",
+			cuotaMensual: "",
+			placa: "",
+			marcaLineaModelo: "",
+			montoAdeudado: "",
+			cuotasAtraso: 0,
+			telefonoAsesor: "41286630",
+			nombreAsesor: "Carlos Pérez",
+			expectativaMora: "",
+		});
+
+		expect(mensaje).toContain(
+			`Impuesto de Circulación ${anioImpuestoCirculacion()}.`,
+		);
+		expect(mensaje).toContain(
+			`⏰ Fecha límite: ${fechaLimiteImpuestoCirculacion()} a las 5:00 p.m.`,
+		);
+		expect(mensaje).not.toContain("{anioImpuesto}");
+		expect(mensaje).not.toContain("{fechaLimiteImpuesto}");
 	});
 
 	test("interpola las plantillas con los datos del cliente y asesor", () => {

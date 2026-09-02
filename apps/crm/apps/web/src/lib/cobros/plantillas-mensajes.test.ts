@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
 	accionUsaCuerpoNoReply,
+	anioImpuestoCirculacion,
 	COBROS_MOTIVO_SIN_TELEFONO_ASESOR,
 	COBROS_NO_REPLY_WARNING,
 	crearUrlWhatsappManual,
 	cuerpoParaValidarNoReply,
+	fechaLimiteImpuestoCirculacion,
 	interpolar,
 	mensajeEmailEditable,
 	mensajePlantillaEditable,
@@ -263,7 +265,7 @@ describe("plantillas web de cobros", () => {
 		});
 	});
 
-	test("muestra el recordatorio de impuesto de circulación 2026 con sus variables", () => {
+	test("muestra el recordatorio de impuesto de circulación con sus variables", () => {
 		const plantilla = PLANTILLAS_MENSAJES.find(
 			(plantilla) => plantilla.id === "impuesto_circulacion_2026",
 		);
@@ -281,10 +283,30 @@ describe("plantillas web de cobros", () => {
 			expectativaMora: "",
 		});
 
-		expect(plantilla?.nombre).toBe("Impuesto de circulación 2026");
-		expect(mensaje).toContain("Impuesto de Circulación 2026");
+		expect(plantilla?.nombre).toBe("Impuesto de circulación");
+		// El año y la fecha límite se calculan al interpolar (año vigente en
+		// Guatemala) para que la plantilla no quede vencida de un año al otro.
+		expect(mensaje).toContain(
+			`Impuesto de Circulación ${anioImpuestoCirculacion()}.`,
+		);
+		expect(mensaje).toContain(
+			`⏰ Fecha límite: ${fechaLimiteImpuestoCirculacion()} a las 5:00 p.m.`,
+		);
 		expect(mensaje).toContain("Carlos Pérez - Asesor de Cobros\n41286630");
 		expect(mensaje.match(/notificaciones automáticas/g)?.length).toBe(1);
 		expect(cuerpoWhatsapp).toContain(COBROS_NO_REPLY_WARNING);
+	});
+
+	test("calcula la fecha límite del impuesto con el año actual de Guatemala", () => {
+		expect(anioImpuestoCirculacion(new Date("2027-03-15T12:00:00Z"))).toBe(
+			"2027",
+		);
+		// 1 de enero 02:00 UTC = 31 de diciembre del año anterior en GT (UTC-6).
+		expect(anioImpuestoCirculacion(new Date("2027-01-01T02:00:00Z"))).toBe(
+			"2026",
+		);
+		expect(
+			fechaLimiteImpuestoCirculacion(new Date("2027-03-15T12:00:00Z")),
+		).toBe("31/07/2027");
 	});
 });

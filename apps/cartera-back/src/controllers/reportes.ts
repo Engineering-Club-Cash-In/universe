@@ -7,6 +7,10 @@ import {
 	buildMoraRecoveryReport,
 	getMoraRecoveryPeriod,
 } from "./moraRecuperacion";
+import {
+  buildCapitalCarteraQuery,
+  creditosElegiblesMoraSql,
+} from "./moraCapitalCartera";
 import { snapCte } from "./moraSnapshotSql";
 import {
   buildInteresIvaInversionistaSql,
@@ -1691,6 +1695,13 @@ type MoraRow = {
   suma_mora: string;
 };
 
+type CapitalCarteraRow = {
+  asesor_id: number;
+  nombre: string;
+  email_asesor: string | null;
+  capital: string;
+};
+
 function acumularBuckets(rows: MoraRow[]) {
   const totalAcc = emptyBuckets();
   const asesorMap = new Map<number, { asesorId: number; nombre: string; email: string; acc: BucketsAcc }>();
@@ -1736,11 +1747,36 @@ export const bucketCaseSql = (col: ReturnType<typeof sql>) => sql`CASE
   ELSE                  'mora_30'
 END`;
 
+function serializeCapitalCartera(rows: CapitalCarteraRow[]) {
+  const porAsesor = rows.map((row) => ({
+    asesorId: row.asesor_id,
+    nombre: row.nombre,
+    email: row.email_asesor ?? "",
+    capital: Number(row.capital).toFixed(2),
+  }));
+  const total = porAsesor.reduce(
+    (sum, asesor) => sum + Number(asesor.capital),
+    0,
+  );
+  return { total: total.toFixed(2), porAsesor };
+}
+
+type MoraByEtapaYAsesorResult = ReturnType<typeof acumularBuckets> & {
+  capitalCartera: ReturnType<typeof serializeCapitalCartera>;
+  metadata: {
+    capitalCartera: "actual";
+    atribucionAsesor: "actual";
+  };
+  fecha: string;
+  alcance: "live" | "historico";
+  dataDisponibleDesde?: string;
+};
+
 export async function getMoraByEtapaYAsesor({
   emailCobrador,
   fecha,
   asesores,
-}: { emailCobrador?: string; fecha?: string; asesores?: number[] } = {}) {
+}: { emailCobrador?: string; fecha?: string; asesores?: number[] } = {}): Promise<MoraByEtapaYAsesorResult> {
   const hoy = hoyGTStr();
   const usarHistorico = !!fecha && fecha < hoy;
 
@@ -1750,9 +1786,10 @@ export async function getMoraByEtapaYAsesor({
   const asesoresFilter = asesores && asesores.length
     ? sql`AND a.asesor_id IN (${sql.join(asesores.map((id) => sql`${id}`), sql`, `)})`
     : sql``;
-
-  if (!usarHistorico) {
-    const rows = await db.execute<MoraRow>(sql`
+  return db.transaction(
+    async (tx) => {
+      if (!usarHistorico) {
+        const rows = await tx.execute<MoraRow>(sql`
       WITH mora_activa AS (
         SELECT DISTINCT ON (credito_id)
           credito_id, cuotas_atrasadas, monto_mora
@@ -1769,15 +1806,27 @@ export async function getMoraByEtapaYAsesor({
       FROM mora_activa m
       INNER JOIN cartera.creditos c ON c.credito_id = m.credito_id
       INNER JOIN cartera.asesores a ON a.asesor_id  = c.asesor_id
-      WHERE c."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
+      WHERE c."statusCredit" IN (${creditosElegiblesMoraSql})
         ${emailFilter}
         ${asesoresFilter}
       GROUP BY a.asesor_id, a.nombre, a.email_cash_in, bucket
     `);
-    return { ...acumularBuckets(rows.rows), fecha: hoy, alcance: "live" as const };
-  }
+        const capitalRows = await tx.execute<CapitalCarteraRow>(
+          buildCapitalCarteraQuery(emailCobrador, asesores),
+        );
+        return {
+          ...acumularBuckets(rows.rows),
+          capitalCartera: serializeCapitalCartera(capitalRows.rows),
+          metadata: {
+            capitalCartera: "actual" as const,
+            atribucionAsesor: "actual" as const,
+          },
+          fecha: hoy,
+          alcance: "live" as const,
+        };
+      }
 
-  const rows = await db.execute<MoraRow>(sql`
+      const rows = await tx.execute<MoraRow>(sql`
     WITH ${snapCte(fecha!)}
     SELECT
       a.asesor_id, a.nombre, a.email_cash_in AS email_asesor,
@@ -1789,23 +1838,50 @@ export async function getMoraByEtapaYAsesor({
     INNER JOIN cartera.creditos c ON c.credito_id = s.credito_id
     INNER JOIN cartera.asesores a ON a.asesor_id  = c.asesor_id
     WHERE s.tipo_evento <> 'DESACTIVACION' AND s.monto > 0 AND s.cuotas > 0
+      AND c."statusCredit" IN (${creditosElegiblesMoraSql})
       ${emailFilter}
       ${asesoresFilter}
     GROUP BY a.asesor_id, a.nombre, a.email_cash_in, bucket
   `);
-
-  const result = acumularBuckets(rows.rows);
-  if (!result.porAsesor.length) {
-    const minRes = await db.execute<{ min_fecha: string | null }>(sql`
+      const capitalRows = await tx.execute<CapitalCarteraRow>(
+        buildCapitalCarteraQuery(emailCobrador, asesores),
+      );
+      const result = acumularBuckets(rows.rows);
+      const capitalCartera = serializeCapitalCartera(capitalRows.rows);
+      const metadata = {
+        capitalCartera: "actual" as const,
+        atribucionAsesor: "actual" as const,
+      };
+      if (!result.porAsesor.length) {
+        const minRes = await tx.execute<{ min_fecha: string | null }>(sql`
       SELECT MIN((fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date)::text AS min_fecha
       FROM cartera.moras_historial
     `);
-    const minFecha = minRes.rows[0]?.min_fecha ?? null;
-    if (minFecha && fecha! < minFecha) {
-      return { ...result, fecha, alcance: "historico" as const, dataDisponibleDesde: minFecha };
-    }
-  }
-  return { ...result, fecha, alcance: "historico" as const };
+        const minFecha = minRes.rows[0]?.min_fecha ?? null;
+        if (minFecha && fecha! < minFecha) {
+          return {
+            ...result,
+            capitalCartera,
+            metadata,
+            fecha,
+            alcance: "historico" as const,
+            dataDisponibleDesde: minFecha,
+          };
+        }
+      }
+      return {
+        ...result,
+        capitalCartera,
+        metadata,
+        fecha,
+        alcance: "historico" as const,
+      };
+    },
+    {
+      isolationLevel: "repeatable read",
+      accessMode: "read only",
+    },
+  );
 }
 
 // Mora COBRADA por asesor en el período de cierre de un mes.

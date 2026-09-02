@@ -65,6 +65,9 @@ export interface Liquidacion {
   totales: LiquidacionTotales;
   reinversion: LiquidacionReinversion | null;
   reporte_liquidacion: string;
+  /** Mismo reporte en quetzales. Solo los inversionistas en dólares lo tienen. */
+  reporte_liquidacion_gtq: string | null;
+  tipo_cambio_reporte: string | null;
   fecha_liquidacion: string;
   pagos: LiquidacionPago[];
 }

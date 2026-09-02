@@ -94,6 +94,17 @@ describe("won opportunity frozen fields", () => {
 		);
 	});
 
+	test("blocks changing the vendor of a won opportunity", () => {
+		const changes = getWonOpportunityFrozenFieldChanges(
+			{ vendorId: "vendor-2" },
+			{ ...won, vendorId: "vendor-1" },
+		);
+		expect(changes).toEqual(["vendorId"]);
+		expect(getWonOpportunityLockError("won", "sales", changes)).toContain(
+			"el vendedor",
+		);
+	});
+
 	test("lets a won opportunity keep advancing to 100%", () => {
 		// La opp es "won" desde el 90%: el drag del kanban manda solo stageId.
 		const changes = getWonOpportunityFrozenFieldChanges({}, won);

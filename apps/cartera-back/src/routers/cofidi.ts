@@ -3815,7 +3815,7 @@ if (facturasExistentes.length > 0) {
               credito_id: pagoData.credito_id,
             },
 
-            // 🧾 ESTADO DE LA FACTURACIÓN DE ESTE PAGO (migración 0014/0031)
+            // 🧾 ESTADO DE LA FACTURACIÓN DE ESTE PAGO (migración 0014/0032)
             //    `faltantes` sale de lo que guardó la última facturación: qué
             //    rubro (y de qué inversionista) no se pudo emitir y por qué.
             //    Para completarlo, /facturar-pago-completo re-emite SOLO lo
@@ -3851,7 +3851,7 @@ if (facturasExistentes.length > 0) {
                 numero: f.numero,
                 uuid: f.uuid,
                 tipo_documento: f.tipo_documento,
-                // Qué cubre esta factura (migración 0014/0031). NULL en las viejas.
+                // Qué cubre esta factura (migración 0014/0032). NULL en las viejas.
                 rubro: f.rubro,
                 inversionista_id: f.inversionista_id,
                 monto_total: f.monto_total,

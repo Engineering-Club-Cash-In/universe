@@ -25,6 +25,7 @@ import { ahoraEnGuatemala, formatearFechaSAT } from "../utils/functions/fechaSAT
 import { esPagoAplicado } from "../utils/paymentStatus";
 import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import { intentosCertificacionHuerfanos } from "./estadoFacturacionPago";
+import { refrescarProyeccionTrasReversa } from "./reversePaymentRecalculo";
 import {
   getRemainingPaymentPaidStatusAfterReversal,
   isReversibleIncobrablePayment,
@@ -108,6 +109,8 @@ export interface ReversePaymentDependencies {
   readonly withCreditLock: typeof withPaymentAdvisoryLock;
   /** Chequeo de intentos write-ahead (inyectable en tests: el real toca la BD). */
   readonly checkPendingIntents?: typeof intentosCertificacionHuerfanos;
+  /** Refresca la proyección de las cuotas pendientes tras la reversión. */
+  readonly refrescarProyeccion: typeof refrescarProyeccionTrasReversa;
 }
 
 const defaultDependencies: ReversePaymentDependencies = {
@@ -116,6 +119,7 @@ const defaultDependencies: ReversePaymentDependencies = {
   reverseCapitalPayment: revertirAbonoCapitalEspejo,
   withCreditLock: withPaymentAdvisoryLock,
   checkPendingIntents: intentosCertificacionHuerfanos,
+  refrescarProyeccion: refrescarProyeccionTrasReversa,
 };
 
 export function createReversePayment(
@@ -177,7 +181,7 @@ export function createReversePayment(
       if (intentosPendientes.length > 0) {
         throw new Error("PENDING_CERTIFICATION_INTENTS");
       }
-      return dependencies.runTransaction(async (tx) => {
+      const datosReversa = await dependencies.runTransaction(async (tx) => {
       // ======================================================================
       // 2️⃣ OBTENER DATOS DEL PAGO A REVERSAR
       // ======================================================================
@@ -718,17 +722,27 @@ export function createReversePayment(
         reversionEspejo,
       };
     });
+      transactionCommitted = true;
+
+      // 🔄 Refrescar la proyección de las cuotas PENDIENTES, todavía DENTRO del
+      // lock del crédito: si corriera fuera, un pago concurrente podría estar
+      // distribuyendo sobre las mismas filas que el recálculo reescribe.
+      //
+      // Sigue sin volver el `updateInstallments({ all: true })` que vivía acá
+      // (0183a387, ene-2026) y que reescribía las cuotas YA PAGADAS —restantes
+      // teóricos, cuota actual y membresías en 0—, corrompiendo la historia
+      // liquidada en cada reversión. Esto llama a `recalcularPagosCredito` SIN
+      // `numero_cuota`, que por su propio WHERE toca solo lo que aún no se
+      // aplicó al crédito: cuotas no pagadas y pagos sin validar. Es lo mismo
+      // que hace el botón "Recalcular Pagos" que hasta hoy había que apretar a
+      // mano después de cada reversa — ver reversePaymentRecalculo.ts.
+      await dependencies.refrescarProyeccion({
+        numeroCreditoSifco: datosReversa.creditData.creditos.numero_credito_sifco,
+        statusCredit: datosReversa.creditData.creditos.statusCredit,
+      });
+
+      return datosReversa;
     });
-    transactionCommitted = true;
-// La reversión NO recalcula ninguna otra fila del crédito. La transacción de
-// arriba ya deja todo consistente (pago reseteado, capital/deuda restaurados).
-// Aquí vivía un updateInstallments({all: true}) (agregado en 0183a387, ene-2026)
-// que reescribía las cuotas YA PAGADAS del crédito: restantes teóricos,
-// cuota actual y membresias_pago/membresias_mes en 0 — corrompiendo la
-// historia liquidada en cada reversión (los INCOBRABLES ya lo omitían por un
-// clavo análogo, PR #890). La proyección teórica de las cuotas pendientes se
-// refresca por el flujo normal (siguiente pago aplicado o el botón manual
-// "Recalcular Pagos"), igual que antes de enero 2026.
     // ========================================================================
     // 🧾 ANULAR FACTURAS ELECTRÓNICAS — DESPUÉS DEL COMMIT (best-effort)
     // ========================================================================

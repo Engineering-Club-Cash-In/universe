@@ -176,6 +176,8 @@ export type DestinoSobrescribibleRow = {
   mora?: BigInput | null;
   pagoConvenio?: BigInput | null;
   otros?: string | number | null;
+  /** Procedencia: la semilla de SIFCO nace SIN fecha de pago. */
+  fecha_pago?: Date | string | null;
 };
 
 /**
@@ -185,12 +187,32 @@ export type DestinoSobrescribibleRow = {
  * El cierre de una cuota hace `UPDATE pagos_credito SET <pagoData> WHERE
  * pago_id = existingPago`. Eso es seguro SOLO si la fila destino es desechable:
  *
- *  - El placeholder `no_required` importado de SIFCO (su único propósito es
- *    portar los `*_restante`; no representa plata aplicada), o
  *  - Una fila "vacía": SIN plata en NINGÚN bucket — `monto_aplicado`, todos los
  *    `abono_*`, y también `mora`, `pagoConvenio` y `otros` ≈ 0. (Un pago de solo
  *    mora/otros/convenio lleva `monto_aplicado`/`abono_*` en 0 pero plata en
  *    esos otros campos; si no se contaran, el cierre lo machacaría.)
+ *
+ * El placeholder `no_required` importado de SIFCO cae ahí solo: nace vacío
+ * porque su único propósito es portar los `*_restante`. Pero el STATUS por sí
+ * solo NO es permiso para pisar: `no_required` es un estado inicial que nadie
+ * vuelve a tocar, así que una fila puede acumular plata real —Caja la llena con
+ * /editPayment, la aplica y hasta la factura— sin dejar nunca ese status.
+ * Crédito 890 / cuota 12 (01-sep-2026): la fila 136221 era `no_required` con
+ * Q705.88 de interés aplicados y 2 DTEs emitidos; al registrar otra boleta
+ * contra esa cuota fue elegida como destino y el UPDATE borró el pago. Por eso
+ * la decisión mira la PLATA, no el status.
+ *
+ * NO hay excepción para `membresias_pago`. La hubo: el importador siembra el
+ * placeholder con `membresias_pago = membresias` (un campo que significa
+ * "membresía COBRADA") aunque la cuota esté intacta, y exceptuarlo evitaba una
+ * fila duplicada en 181 placeholders / 4 créditos. Pero ese dato sembrado es
+ * indistinguible de un cobro real en cuanto alguien toca la fila: `editarPago`
+ * escribe `membresias_pago` sin estampar `fecha_pago` (el front no manda ese
+ * campo) y `/aplicar-monto-pago` reparte a ese bucket conservando el status.
+ * Ninguna marca de la fila los separa, y equivocarse hacia el lado de "es
+ * semilla" BORRA un pago real. Se arregla en la fuente: el importador ya no
+ * siembra ese campo (`migratePayments.ts`) y las 181 filas existentes se
+ * limpian aparte. Codex P1, rondas 2-4 del PR #1519.
  *
  * Cuando el placeholder `no_required` ya fue consumido por un parcial previo,
  * `existingPago` cae al fallback `allExistingPagos[0]` = la fila REAL más vieja
@@ -201,8 +223,6 @@ export type DestinoSobrescribibleRow = {
 export const esDestinoSobrescribible = (
   pago: DestinoSobrescribibleRow
 ): boolean => {
-  if (pago.validationStatus === "no_required") return true;
-
   const tol = new Big(DESTINO_SOBRESCRIBIBLE_TOLERANCE);
   // Estricto (`lt`, no `lte`): un Q0.01 exacto es un pago real, no "vacío".
   const casiCero = (v: BigInput | null | undefined) =>
@@ -231,6 +251,28 @@ export const esDestinoSobrescribible = (
     otrosCasiCero(pago.otros)
   );
 };
+/**
+ * ¿Esta fila hay que CONTARLA como hermana viva al netear la cuota?
+ *
+ * Es el reverso exacto de `esDestinoSobrescribible`, y por eso vive pegada a
+ * ella: si el cierre se NIEGA a pisar una fila porque lleva plata, esa misma
+ * plata tiene que entrar en `aplicadoPrevioCuota` — si no, el pago nuevo la
+ * re-aplica encima y sobre-cobra la cuota.
+ *
+ * La query de hermanos solo miraba `validated`/`pending`, así que las filas
+ * `no_required` con plata quedaban fuera del neteo pese a que el comentario de
+ * `registerPayment.ts` prometía contarlas. Mientras el atajo por status las
+ * dejaba sobrescribir el hueco no se notaba (la fila desaparecía); al
+ * protegerlas hay que cerrarlo o cambiamos pérdida de plata por sobre-cobro.
+ *
+ * Las semillas vírgenes NO entran: su `membresias_pago` sembrado inflaría
+ * `membresiasPrevioCuota` y el motor creería cobradas unas membresías que
+ * nadie pagó.
+ */
+export const cuentaComoHermanoVivo = (
+  pago: DestinoSobrescribibleRow
+): boolean =>
+  pago.validationStatus !== "no_required" || !esDestinoSobrescribible(pago);
 
 export type SaldoCuotaInput = {
   /** Monto total de la cuota (credito.cuota). */

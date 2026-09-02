@@ -701,7 +701,7 @@ export async function mapEstadoCuentaToPagosBig(
       pagoConvenio: "0",
       fecha_boleta:new Date(primeraTransaccion.CrMoFeTrx).toISOString(),
       monto_aplicado: "0.00",
-      // Estado de facturación (migración 0031): el pago 0 nace 'validated' con
+      // Estado de facturación (migración 0032): el pago 0 nace 'validated' con
       // montos facturables — sin esto quedaba en el NULL de históricos. (r19)
       factura_status: (tieneMontosFacturables({
         abono_interes: cuota_interes.toString(),
@@ -975,7 +975,7 @@ export async function mapEstadoCuentaToPagosBig(
         : "0.00",
       otros: "",
       mora: moraTotal.toString(),
-      // Estado de facturación (migración 0031): un pago que nace 'validated'
+      // Estado de facturación (migración 0032): un pago que nace 'validated'
       // por sync SIFCO debe entrar a la bandeja; NULL es solo para históricos.
       factura_status: isPagado
         ? tieneMontosFacturables({
@@ -1237,7 +1237,7 @@ export async function mapPagosDesdeJson(
     observaciones: "pago inicial (desde JSON)",
     paymentFalse: false,
     validationStatus: "validated" as const,
-    // Estado de facturación (migración 0031): igual que el pago 0 del sync. (r19)
+    // Estado de facturación (migración 0032): igual que el pago 0 del sync. (r19)
     factura_status: (tieneMontosFacturables({
       abono_interes: cuotaInteres0.toString(),
       abono_iva_12: iva12_0.toString(),
@@ -1354,7 +1354,7 @@ export async function mapPagosDesdeJson(
       membresias_mes: membresiaDb.toString(),
       otros: "",
       mora: "0.00",
-      // Estado de facturación (migración 0031): igual que en mapPagosPorCreditos.
+      // Estado de facturación (migración 0032): igual que en mapPagosPorCreditos.
       factura_status: isPagado
         ? tieneMontosFacturables({
             abono_interes: interesMes.toString(),

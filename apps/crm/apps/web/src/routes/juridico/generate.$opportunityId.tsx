@@ -196,6 +196,16 @@ function RouteComponent() {
 					edad: previewQuery.data.cliente?.edad,
 					genero: previewQuery.data.cliente?.genero === "femenino" ? "F" : "M",
 				},
+				vendedor: previewQuery.data.vendedor
+					? {
+							nombreMayusculas: previewQuery.data.vendedor.nombreMayusculas,
+							dpi: previewQuery.data.vendedor.dpi,
+							dpiLetras: previewQuery.data.vendedor.dpiLetras,
+						}
+					: undefined,
+				agencia: previewQuery.data.agencia,
+				desembolso: previewQuery.data.desembolso,
+				entidad: previewQuery.data.entidad,
 				vehiculo: {
 					tipo: previewQuery.data.vehiculo?.tipoVehiculo,
 					marca: previewQuery.data.vehiculo?.marca,
@@ -213,6 +223,7 @@ function RouteComponent() {
 						: undefined,
 					cilindros: previewQuery.data.vehiculo?.cilindros,
 					iscv: previewQuery.data.vehiculo?.codigoIscv,
+					esNuevo: previewQuery.data.vehiculo?.esNuevo,
 				},
 				credito: {
 					capitalAdeudado: previewQuery.data.credito?.montoTotal,

@@ -663,7 +663,19 @@ function LiquidacionCard({ item }: { item: any }) {
 						className="inline-flex items-center gap-1.5 rounded-lg border bg-background px-3.5 py-2 font-semibold text-foreground text-xs shadow-sm transition-colors hover:bg-muted"
 					>
 						<FileText className="h-3.5 w-3.5" />
-						Reporte
+						{/* Solo se rotula la moneda cuando hay dos reportes que distinguir. */}
+						{item.reporte_liquidacion_url_gtq ? "Reporte $" : "Reporte"}
+					</a>
+				)}
+				{item.reporte_liquidacion_url_gtq && (
+					<a
+						href={item.reporte_liquidacion_url_gtq}
+						target="_blank"
+						rel="noopener noreferrer"
+						className="inline-flex items-center gap-1.5 rounded-lg border bg-background px-3.5 py-2 font-semibold text-foreground text-xs shadow-sm transition-colors hover:bg-muted"
+					>
+						<FileText className="h-3.5 w-3.5" />
+						Reporte Q
 					</a>
 				)}
 				{!boleta?.boleta_url && !item.reporte_liquidacion_url && (

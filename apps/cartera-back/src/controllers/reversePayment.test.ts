@@ -146,6 +146,11 @@ function createPersistenceHarness(
       fn()) as ReversePaymentDependencies["withCreditLock"],
     // Stub del write-ahead: el real consulta la BD.
     checkPendingIntents: async () => [],
+    // El refresco de proyección corre DESPUÉS del commit; en este harness la
+    // transacción revienta antes, así que nunca debería llamarse.
+    refrescarProyeccion: mock(() =>
+      Promise.resolve({ corrio: true as const }),
+    ) as unknown as ReversePaymentDependencies["refrescarProyeccion"],
   });
   return { handler, runTransaction };
 }

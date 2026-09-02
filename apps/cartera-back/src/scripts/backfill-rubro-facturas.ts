@@ -2,7 +2,7 @@
 // Backfill de `facturas_electronicas.rubro` (+ inversionista_id).
 //
 // Contexto:
-//   La columna `rubro` la agregó la migración 0031 para poder re-facturar solo
+//   La columna `rubro` la agregó la migración 0032 para poder re-facturar solo
 //   los rubros que faltaron cuando una corrida de /facturar-pago-completo sale a
 //   medias (src/cofidi/facturasFaltantes.ts). Todo lo emitido ANTES de esa
 //   migración quedó en NULL, y el diff trata "rubro NULL" como BLOQUEADO:

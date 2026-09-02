@@ -1823,8 +1823,18 @@
       reinversion_interes: numeric("reinversion_interes", { precision: 18, scale: 2 }).notNull().default("0"),
       reinversion_total: numeric("reinversion_total", { precision: 18, scale: 2 }).notNull().default("0"),
 
-      // Reporte de liquidación (Excel/PDF)
+      // Reporte de liquidación (Excel/PDF) en la moneda del inversionista
       reporte_liquidacion_url: text("reporte_liquidacion_url"),
+
+      // Mismo reporte expresado en quetzales. Solo se llena para inversionistas
+      // en dólares: es la copia que contabilidad usa para cuadrar contra la DB
+      // (que guarda todos los totales de esta tabla en Q). Los inversionistas en
+      // quetzales lo dejan nulo — su reporte principal ya está en Q.
+      reporte_liquidacion_url_gtq: text("reporte_liquidacion_url_gtq"),
+
+      // Tipo de cambio con el que se generó el reporte en dólares. Se guarda
+      // para que el reporte siga siendo reproducible cuando la tasa cambie.
+      tipo_cambio_reporte: numeric("tipo_cambio_reporte", { precision: 10, scale: 4 }),
 
       // Fecha
       fecha_liquidacion: timestamp("fecha_liquidacion", { withTimezone: true })

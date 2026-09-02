@@ -60,7 +60,10 @@ import {
 } from "./jobs/cobros-notifications";
 import { correrDispatchPagalo } from "./jobs/pagalo-dispatch";
 import { correrPollPagalo } from "./jobs/pagalo-poll";
-import { correrRecordatorioPagalo } from "./jobs/pagalo-reminder";
+import {
+	correrRecordatorioPagalo,
+	msHastaProximoRecordatorio,
+} from "./jobs/pagalo-reminder";
 import { auth } from "./lib/auth";
 import {
 	autenticarBotCobros,
@@ -1920,8 +1923,20 @@ async function correrRecordatorioDePagalo(): Promise<void> {
 	}
 }
 
+// Horas fijas 09/12/15/18 GT, no un intervalo de 3 h: el intervalo quedaba con
+// la fase del arranque y seguía disparando toda la noche (caso real 2026-09-02:
+// recordatorios a las 00:00 y 02:40). Un recordatorio de pago es para cuando el
+// cliente puede pagar. La cadencia vive en el módulo del job, junto a lo que
+// agenda, para poder probarla sin levantar el servidor.
+function programarRecordatorioDePagalo(): void {
+	setTimeout(async () => {
+		await correrRecordatorioDePagalo();
+		programarRecordatorioDePagalo();
+	}, msHastaProximoRecordatorio());
+}
+
 if (JOBS_PROGRAMADOS.recordatorioPagalo) {
-	setInterval(correrRecordatorioDePagalo, 3 * 60 * 60 * 1000);
+	programarRecordatorioDePagalo();
 }
 
 if (HAY_JOBS_ACTIVOS) {

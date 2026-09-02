@@ -354,3 +354,34 @@ export async function correrRecordatorioPagalo(): Promise<ResultadoRecordatorioP
 
 	return resultado;
 }
+
+/**
+ * Horas GT en las que se recuerda. Son fijas, NO un `setInterval` cada 3 h.
+ *
+ * El job corría con `setInterval(..., 3h)` sin ninguna ventana: quedaba con la
+ * fase del arranque y seguía disparando toda la noche. Caso real del
+ * 2026-09-02: recordatorios a las 00:00 y a las 02:40. Un recordatorio de pago
+ * es para horario en que alguien pueda pagar; de madrugada solo molesta.
+ *
+ * Mismo patrón que el respaldo de rechazos (`bot-cobros-respaldo.ts`): con
+ * horas fijas la cadencia deja de depender de cuándo se desplegó.
+ */
+export const HORAS_GT_RECORDATORIO = [9, 12, 15, 18] as const;
+
+/** Hora de Guatemala (UTC-6, sin horario de verano). */
+export function horaGuatemala(fecha = new Date()): number {
+	return (fecha.getUTCHours() + 18) % 24;
+}
+
+/** Milisegundos hasta la próxima hora de la lista (mañana si ya pasaron todas). */
+export function msHastaProximoRecordatorio(ahora = new Date()): number {
+	const proxima = new Date(ahora);
+	for (const horaGT of HORAS_GT_RECORDATORIO) {
+		// GT = UTC-6: la hora GT h es la h+6 UTC del mismo día UTC.
+		proxima.setUTCHours(horaGT + 6, 0, 0, 0);
+		if (proxima > ahora) return proxima.getTime() - ahora.getTime();
+	}
+	proxima.setUTCHours(HORAS_GT_RECORDATORIO[0] + 6, 0, 0, 0);
+	proxima.setUTCDate(proxima.getUTCDate() + 1);
+	return proxima.getTime() - ahora.getTime();
+}

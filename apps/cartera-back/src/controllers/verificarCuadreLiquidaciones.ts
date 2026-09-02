@@ -194,11 +194,26 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
           or (c.fecha_completada >= ${inicio}::date
               and c.fecha_completada < (${inicio}::date + interval '1 month'))
         )
-        and not exists (
-          select 1 from cartera.historico_liquidaciones_espejo hl
-          where hl.liquidacion_id   = p.liquidacion_id
-            and hl.credito_id       = c.credito_id
-            and hl.inversionista_id = c.inversionista_id
+        and (
+          -- (a) el crédito no entró a la liquidación: nada suyo está en el histórico
+          not exists (
+            select 1 from cartera.historico_liquidaciones_espejo hl
+            where hl.liquidacion_id   = p.liquidacion_id
+              and hl.credito_id       = c.credito_id
+              and hl.inversionista_id = c.inversionista_id
+          )
+          -- (b) o el crédito sí liquidó, pero la compra agrandó la posición
+          --     DESPUÉS de que se escribiera el histórico. No basta con que la
+          --     compra sea posterior: hay filas de compra cuyo capital nunca
+          --     llegó a entrar al espejo. Se exige el movimiento real, que sí
+          --     queda registrado por trigger con su fecha.
+          or exists (
+            select 1 from cartera.historico_monto_aportado_espejo hm
+            where hm.credito_id       = c.credito_id
+              and hm.inversionista_id = c.inversionista_id
+              and hm.fecha > p.fecha_liquidacion
+              and coalesce(hm.monto_nuevo, 0) > coalesce(hm.monto_anterior, 0)
+          )
         )
       group by 1
     )
@@ -257,18 +272,31 @@ export async function leerReinversionesAnterioresSinColocar(periodo: string) {
         and l.fecha_liquidacion <  (${inicio}::date + interval '1 month')
     )
     select t.liquidacion_id, t.inversionista_id, i.nombre,
-           t.fecha_liquidacion, t.reinversion_total::text as reinversion_total
+           t.fecha_liquidacion, t.reinversion_total::text as reinversion_total,
+           coalesce((
+             select sum(c.monto_aportado)
+             from cartera.compras_credito_inversionista c
+             where c.inversionista_id = t.inversionista_id
+               and c.tipo_operacion = 'reinversion'
+               and c.fecha >= t.fecha_liquidacion - interval '1 day'
+               and (t.siguiente is null or c.fecha < t.siguiente)
+           ), 0)::text as reinversion_colocada
     from todas t
     join cartera.inversionistas i on i.inversionista_id = t.inversionista_id
     where t.orden > 1
       and t.reinversion_total > 0
-      and not exists (
-        select 1 from cartera.compras_credito_inversionista c
+      -- Se compara el MONTO colocado contra el prometido, no la mera existencia
+      -- de una compra: addInvestorToCredit puede colocar de forma parcial y
+      -- devolver monto_sin_asignar > 0, así que una compra de Q100 no prueba
+      -- que se colocaran los Q1,000 de la liquidación.
+      and t.reinversion_total - coalesce((
+        select sum(c.monto_aportado)
+        from cartera.compras_credito_inversionista c
         where c.inversionista_id = t.inversionista_id
           and c.tipo_operacion = 'reinversion'
           and c.fecha >= t.fecha_liquidacion - interval '1 day'
           and (t.siguiente is null or c.fecha < t.siguiente)
-      )
+      ), 0) > 1
     order by t.inversionista_id
   `);
 
@@ -373,7 +401,11 @@ export async function verificarCuadreLiquidaciones(periodo = periodoActualGuatem
   // que se guardan con el descuadre igual a la reinversión que falta.
   const anteriores = await leerReinversionesAnterioresSinColocar(periodo);
   for (const ant of anteriores) {
-    const faltante = new Big(ant.reinversion_total || 0);
+    // Faltante real: lo prometido menos lo que sí llegó a colocarse. Una
+    // colocación parcial deja un remanente que también hay que avisar.
+    const prometida = new Big(ant.reinversion_total || 0);
+    const colocada = new Big(ant.reinversion_colocada || 0);
+    const faltante = prometida.minus(colocada);
     const guardadaAnt = await db.execute(sql`
       insert into cartera.verificacion_liquidacion (
         liquidacion_id, inversionista_id, periodo,
@@ -381,10 +413,13 @@ export async function verificarCuadreLiquidaciones(periodo = periodoActualGuatem
         descuadre, cuadra, detalle
       ) values (
         ${ant.liquidacion_id}, ${ant.inversionista_id}, ${periodo},
-        '0', '0', ${faltante.toFixed(2)}, '0',
+        '0', '0', ${prometida.toFixed(2)}, ${colocada.toFixed(8)},
         ${faltante.times(-1).toFixed(8)}, false,
         ${JSON.stringify({
-          motivo: "liquidacion_anterior_del_mes_sin_reinversion_colocada",
+          motivo: "liquidacion_anterior_del_mes_con_reinversion_sin_colocar",
+          reinversion_prometida: prometida.toFixed(2),
+          reinversion_colocada: colocada.toFixed(8),
+          faltante: faltante.toFixed(8),
           nota: "No se evalúa la ecuación: el espejo vivo ya refleja la liquidación posterior.",
         })}::jsonb
       )
@@ -412,8 +447,8 @@ export async function verificarCuadreLiquidaciones(periodo = periodoActualGuatem
       fecha_liquidacion: ant.fecha_liquidacion,
       espejo: "0",
       historico: "0",
-      reinversion_total: faltante.toFixed(2),
-      compras_no_absorbidas: "0",
+      reinversion_total: prometida.toFixed(2),
+      compras_no_absorbidas: colocada.toFixed(8),
       creditos_espejo: 0,
       creditos_historico: 0,
       compras_detalle: [],

@@ -547,7 +547,16 @@ export const marcarCuotasPagadasHastaNumero = async ({
             total_restante: deudaTotal.toString(),
 
             membresias: membresias.toString(),
-            membresias_pago: membresias.toString(),
+            // `membresias_pago` significa membresía COBRADA. Esta rama siembra
+            // el placeholder PENDIENTE (`pagado: false`, sin `fecha_pago`): no
+            // cobró nada, así que nace en 0. Sembrarlo con el monto contractual
+            // hacía que el guard de sobrescritura, el neteo de la cuota y los
+            // reportes leyeran como pagada una membresía que nadie pagó. El
+            // restante sigue en `membresias`, que es el campo que corresponde.
+            // (La rama de arriba, la de la cuota histórica YA pagada, sí lleva
+            // el monto: ahí la membresía se cobró de verdad.)
+            // Ver `esDestinoSobrescribible`. PR #1519.
+            membresias_pago: "0",
             membresias_mes: membresias.toString(),
 
             fecha_pago: null,

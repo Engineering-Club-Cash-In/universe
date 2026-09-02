@@ -88,13 +88,13 @@ const ultimaCotizacion = db
 const desembolsosCompletados = db
 	.select({
 		opportunityId: notifications.relatedEntityId,
-		completedAt: sql<Date>`max(${notifications.createdAt})`.as("completed_at"),
+		completedAt: sql<Date>`min(${notifications.createdAt})`.as("completed_at"),
 	})
 	.from(notifications)
 	.where(
 		and(
 			eq(notifications.type, "aviso"),
-			eq(notifications.createdByRole, "accounting"),
+			inArray(notifications.createdByRole, ["accounting", "admin"]),
 			eq(notifications.assignedToRole, "sales"),
 			eq(notifications.relatedEntityType, "opportunity_client"),
 			like(notifications.titulo, "Desembolso completado -%"),

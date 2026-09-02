@@ -161,24 +161,12 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
       where h.liquidacion_id in (select liquidacion_id from pendientes)
       group by 1
     ),
-    compras as (
-      -- Compras de cartera del período que la liquidación NO absorbió.
-      --
-      -- Se resta solo la compra cuyo crédito no dejó fila en el histórico de
-      -- esa liquidación: un crédito comprado a principio de mes no genera pago
-      -- espejo (calcularYRegistrarPagosEspejo lo omite por participación nueva
-      -- sin monto viejo), así que no entra a la liquidación del 10 pero sí
-      -- infla el monto_aportado. Si el crédito sí liquidó, el histórico se
-      -- escribió con la compra ya incluida y restarla sería doble conteo.
-      --
-      -- Las de tipo 'reinversion' no entran: ya están del lado derecho, dentro
-      -- de reinversion_total.
-      --
-      -- El status no se mira: una compra pendiente de aceptar ya movió el
-      -- monto_aportado, y que la persona la acepte o la cancele después es
-      -- decisión suya, no un error del sistema.
+    compras_por_credito as (
+      -- Compras de cartera del período, agrupadas por crédito.
       select c.inversionista_id,
-             sum(c.monto_aportado) as monto,
+             c.credito_id,
+             p.liquidacion_id,
+             sum(c.monto_aportado) as monto_compras,
              jsonb_agg(jsonb_build_object(
                'compra_id',  c.id,
                'credito_id', c.credito_id,
@@ -194,27 +182,68 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
           or (c.fecha_completada >= ${inicio}::date
               and c.fecha_completada < (${inicio}::date + interval '1 month'))
         )
-        and (
-          -- (a) el crédito no entró a la liquidación: nada suyo está en el histórico
-          not exists (
-            select 1 from cartera.historico_liquidaciones_espejo hl
-            where hl.liquidacion_id   = p.liquidacion_id
-              and hl.credito_id       = c.credito_id
-              and hl.inversionista_id = c.inversionista_id
-          )
-          -- (b) o el crédito sí liquidó, pero la compra agrandó la posición
-          --     DESPUÉS de que se escribiera el histórico. No basta con que la
-          --     compra sea posterior: hay filas de compra cuyo capital nunca
-          --     llegó a entrar al espejo. Se exige el movimiento real, que sí
-          --     queda registrado por trigger con su fecha.
-          or exists (
-            select 1 from cartera.historico_monto_aportado_espejo hm
-            where hm.credito_id       = c.credito_id
-              and hm.inversionista_id = c.inversionista_id
-              and hm.fecha > p.fecha_liquidacion
-              and coalesce(hm.monto_nuevo, 0) > coalesce(hm.monto_anterior, 0)
-          )
-        )
+      group by 1, 2, 3
+    ),
+    compras as (
+      -- Cuánto de esas compras NO absorbió la liquidación.
+      --
+      -- La compra es lo que mete la plata al espejo, así que el monto sale de
+      -- compras_credito_inversionista. Lo que decide cuánto se resta es el
+      -- histórico:
+      --
+      --   • El crédito no dejó fila en el histórico de esa liquidación → la
+      --     compra entera. Típico: crédito comprado a principio de mes, que no
+      --     genera pago espejo (calcularYRegistrarPagosEspejo lo omite por
+      --     participación nueva sin monto viejo) y por eso no entra a la
+      --     liquidación del 10, pero sí infla el monto_aportado.
+      --
+      --   • El crédito sí liquidó → solo la parte que el histórico no alcanzó a
+      --     incluir, es decir lo que el espejo tiene HOY por encima de esa foto,
+      --     y nunca más que la compra misma. Si la compra es anterior a la
+      --     liquidación, el histórico ya la absorbió y esto da cero.
+      --
+      -- Se correlaciona por MONTO y no por "hubo algún movimiento después": el
+      -- nuke&rebuild del espejo (addInvestorToCredit, replaceInvestorCredit)
+      -- borra y reinserta el roster completo, y el trigger registra cada
+      -- reinserción con monto_anterior NULL y monto_nuevo positivo. Un rebuild
+      -- que no cambió nada se vería como un aumento y restaría la compra dos
+      -- veces.
+      --
+      -- El status de la compra no se mira: una compra pendiente ya movió el
+      -- monto_aportado, y que la acepten o la cancelen después es decisión
+      -- suya, no un error del sistema.
+      select cc.inversionista_id,
+             sum(
+               case
+                 when hl.monto_aportado is null then cc.monto_compras
+                 else least(
+                   cc.monto_compras,
+                   greatest(0, coalesce(esp.monto_aportado, 0) - hl.monto_aportado)
+                 )
+               end
+             ) as monto,
+             jsonb_agg(cc.detalle) as detalle
+      from compras_por_credito cc
+      left join cartera.historico_liquidaciones_espejo hl
+        on  hl.liquidacion_id   = cc.liquidacion_id
+        and hl.credito_id       = cc.credito_id
+        and hl.inversionista_id = cc.inversionista_id
+      left join cartera.creditos_inversionistas_espejo esp
+        on  esp.credito_id       = cc.credito_id
+        and esp.inversionista_id = cc.inversionista_id
+      group by 1
+    ),
+    capital_pendiente as (
+      -- Pagos con capital registrados después de la última liquidación del mes.
+      -- insertPagosCreditoInversionistas ya redujo monto_aportado en el espejo
+      -- (processAndReplaceCreditInvestors) pero el pago espejo sigue
+      -- NO_LIQUIDADO esperando la liquidación siguiente. Sin sumarlo de vuelta,
+      -- todo pago legítimo posterior al corte se reportaría como plata que
+      -- falta.
+      select pe.inversionista_id, sum(pe.abono_capital) as monto
+      from cartera.pagos_credito_inversionistas_espejo pe
+      join pendientes p on p.inversionista_id = pe.inversionista_id
+      where pe.estado_liquidacion = 'NO_LIQUIDADO'
       group by 1
     )
     select
@@ -222,7 +251,7 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
       p.inversionista_id,
       i.nombre,
       p.fecha_liquidacion,
-      coalesce(e.espejo, 0)::text            as espejo,
+      (coalesce(e.espejo, 0) + coalesce(cp.monto, 0))::text as espejo,
       coalesce(h.historico, 0)::text         as historico,
       p.reinversion_total::text              as reinversion_total,
       coalesce(c.monto, 0)::text             as compras_no_absorbidas,
@@ -237,6 +266,7 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
     left join espejo  e on e.inversionista_id = p.inversionista_id
     left join hist    h on h.liquidacion_id   = p.liquidacion_id
     left join compras c on c.inversionista_id = p.inversionista_id
+    left join capital_pendiente cp on cp.inversionista_id = p.inversionista_id
     left join cartera.verificacion_liquidacion v on v.liquidacion_id = p.liquidacion_id
     order by p.inversionista_id
   `);

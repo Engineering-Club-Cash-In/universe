@@ -151,10 +151,16 @@ const EXTENSIONS_BY_MIME: Record<string, string[]> = {
   "application/json": ["json"],
 };
 
+
+const MIME_BY_EXTENSION: Record<string, string> = Object.fromEntries(
+  Object.entries(EXTENSIONS_BY_MIME).flatMap(([mime, exts]) => exts.map((ext) => [ext, mime]))
+);
+
 /**
  * Lee el Content-Type real ya guardado en el objeto de R2 (HeadObject) —
- * nunca el nombre editable del documento. Sin tipo específico guardado
- * (subidas viejas en "octet-stream") o si falla el HEAD, asume PDF.
+ * nunca el nombre editable del documento. Si no hay un tipo específico
+ * guardado (subidas viejas en "octet-stream") o falla el HEAD, intenta la
+ * extensión del key en R2; solo si tampoco eso da nada, asume PDF.
  */
 export async function resolveDocumentMimeType(key: string): Promise<string> {
   try {
@@ -163,9 +169,12 @@ export async function resolveDocumentMimeType(key: string): Promise<string> {
       return head.ContentType;
     }
   } catch {
-    // seguimos con el default de PDF
+    // seguimos intentando por la extensión del key
   }
-  return "application/pdf";
+
+  const lastDotIndex = key.lastIndexOf(".");
+  const keyExtension = lastDotIndex > 0 ? key.slice(lastDotIndex + 1).toLowerCase() : "";
+  return MIME_BY_EXTENSION[keyExtension] ?? "application/pdf";
 }
 
 /**

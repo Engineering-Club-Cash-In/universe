@@ -70,6 +70,15 @@ export class OverrideNoAplicaError extends Error {
 	}
 }
 
+export class OverrideDpiInvalidoError extends Error {
+	constructor() {
+		super(
+			"El DPI del lead tiene un formato inválido — corregilo en la ficha del lead. Un override no lo resuelve: la aprobación va a seguir bloqueada por el mismo motivo.",
+		);
+		this.name = "OverrideDpiInvalidoError";
+	}
+}
+
 export type EstadoValidacion =
 	| "aprobado"
 	| "rechazado"
@@ -1070,6 +1079,18 @@ async function marcarValidacionManualCritico({
 	const oportunidad = await cargarOportunidadConLead(opportunityId);
 	if (!oportunidad) throw new OportunidadNoEncontradaError();
 	if (!oportunidad.leadDpi) throw new OverrideNoAplicaError(tipo);
+
+	// Un DPI con formato inválido (no 13 dígitos, o dígito verificador que no
+	// da) es un dato mal capturado en la ficha del lead, no un fallo de la
+	// fuente externa. `validarDpi` corre siempre, antes que cualquier reuso o
+	// override, así que overridear este error nunca destraba nada: el
+	// próximo intento de aprobar vuelve a fallar por el mismo motivo, y la
+	// bitácora queda con un "validado manualmente" que en realidad no
+	// resolvió nada. Se corrige el DPI en la ficha del lead, no acá.
+	if (tipo === "renap" && !validarDpi(oportunidad.leadDpi).valid) {
+		throw new OverrideDpiInvalidoError();
+	}
+
 	const dpi = normalizarDpi(oportunidad.leadDpi);
 
 	// Chequeo defensivo server-side: no confiar en que la UI solo muestre el

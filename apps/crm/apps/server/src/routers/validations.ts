@@ -8,6 +8,7 @@ import {
 	marcarValidacionBuroManual,
 	marcarValidacionRenapManual,
 	OportunidadNoEncontradaError,
+	OverrideDpiInvalidoError,
 	OverrideNoAplicaError,
 } from "../services/opportunity-validations";
 
@@ -82,6 +83,9 @@ export const validationsRouter = {
 					throw new ORPCError("NOT_FOUND", { message: error.message });
 				}
 				if (error instanceof OverrideNoAplicaError) {
+					throw new ORPCError("BAD_REQUEST", { message: error.message });
+				}
+				if (error instanceof OverrideDpiInvalidoError) {
 					throw new ORPCError("BAD_REQUEST", { message: error.message });
 				}
 				throw error;

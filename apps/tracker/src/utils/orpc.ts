@@ -1,4 +1,4 @@
-import { createORPCClient } from "@orpc/client";
+import { createORPCClient, ORPCError } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import type { RouterClient } from "@orpc/server";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
@@ -7,6 +7,8 @@ import { toast } from "sonner";
 import type { partnerTrackerRouter } from "../../../crm/apps/server/src/routers/index";
 
 const esErrorDeSesion = (error: Error): boolean => {
+	if (error instanceof ORPCError) return error.status === 401;
+
 	const mensaje = `${error.message ?? ""} ${String(error)}`.toLowerCase();
 	return (
 		mensaje.includes("unauthorized") ||
@@ -14,6 +16,9 @@ const esErrorDeSesion = (error: Error): boolean => {
 		mensaje.includes("401")
 	);
 };
+
+export const esErrorDeAcceso = (error: Error): boolean =>
+	error instanceof ORPCError && (error.status === 401 || error.status === 403);
 
 export const queryClient = new QueryClient({
 	queryCache: new QueryCache({

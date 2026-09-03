@@ -4,7 +4,7 @@ import { ArrowLeft, Car, Loader2 } from "lucide-react";
 import { BarraPasos } from "@/components/barra-pasos";
 import { ESTADOS, formatearFecha, formatearMonto } from "@/lib/pasos";
 import { cn } from "@/lib/utils";
-import { orpc } from "@/utils/orpc";
+import { esErrorDeAcceso, orpc } from "@/utils/orpc";
 
 export function CasoPage() {
 	const { id } = useParams({ from: "/caso/$id" });
@@ -30,7 +30,8 @@ export function CasoPage() {
 						<Loader2 className="mr-2 h-5 w-5 animate-spin" />
 						Cargando caso...
 					</div>
-				) : casoQuery.isError ? (
+				) : casoQuery.isError &&
+					(!casoQuery.data || esErrorDeAcceso(casoQuery.error)) ? (
 					<div className="rounded-xl border border-slate-200 bg-white py-16 text-center">
 						<p className="font-medium text-slate-900">
 							No se pudo cargar este caso

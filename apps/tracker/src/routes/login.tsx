@@ -3,6 +3,7 @@ import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { authClient } from "@/lib/auth-client";
+import { rutaDeRetorno } from "@/lib/rutas";
 
 export function LoginPage() {
 	const navigate = useNavigate();
@@ -14,26 +15,31 @@ export function LoginPage() {
 	const [cargando, setCargando] = useState(false);
 
 	useEffect(() => {
-		if (session) navigate({ to: search.redirect || "/" });
+		if (session) navigate({ to: rutaDeRetorno(search.redirect) });
 	}, [session, navigate, search.redirect]);
 
 	const enviar = async (evento: FormEvent) => {
 		evento.preventDefault();
 		setCargando(true);
-		const { error } = await authClient.signIn.email({
-			email,
-			password,
-			rememberMe: true,
-		});
+		try {
+			const { error } = await authClient.signIn.email({
+				email,
+				password,
+				rememberMe: true,
+			});
 
-		if (error) {
+			if (error) {
+				throw new Error(error.message || "No se pudo iniciar sesión");
+			}
+
+			navigate({ to: rutaDeRetorno(search.redirect) });
+		} catch (error) {
+			toast.error(
+				error instanceof Error ? error.message : "No se pudo iniciar sesión",
+			);
+		} finally {
 			setCargando(false);
-			toast.error(error.message || "No se pudo iniciar sesión");
-			return;
 		}
-
-		setCargando(false);
-		navigate({ to: search.redirect || "/" });
 	};
 
 	return (

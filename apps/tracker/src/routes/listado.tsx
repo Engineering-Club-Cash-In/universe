@@ -27,7 +27,7 @@ import {
 	ventanaDelMes,
 } from "@/lib/pasos";
 import { cn } from "@/lib/utils";
-import { orpc } from "@/utils/orpc";
+import { esErrorDeAcceso, orpc } from "@/utils/orpc";
 
 const MESES = [
 	"Enero",
@@ -365,7 +365,8 @@ export function ListadoPage() {
 						<Loader2 className="mr-2 h-5 w-5 animate-spin" />
 						Cargando casos...
 					</div>
-				) : casosQuery.isError ? (
+				) : casosQuery.isError &&
+					(!casosQuery.data || esErrorDeAcceso(casosQuery.error)) ? (
 					<div className="rounded-xl border border-slate-200 bg-white py-16 text-center">
 						<p className="font-medium text-slate-900">
 							No se pudieron cargar tus casos

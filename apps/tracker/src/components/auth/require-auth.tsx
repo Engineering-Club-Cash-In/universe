@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { authClient } from "@/lib/auth-client";
-import { orpc } from "@/utils/orpc";
+import { esErrorDeAcceso, orpc } from "@/utils/orpc";
 
 export function RequireAuth({ children }: { children: ReactNode }) {
 	const { data: session, isPending } = authClient.useSession();
@@ -35,7 +35,10 @@ export function RequireAuth({ children }: { children: ReactNode }) {
 		);
 	}
 
-	if (passwordStatusQuery.isError) {
+	if (
+		passwordStatusQuery.isError &&
+		(!passwordStatusQuery.data || esErrorDeAcceso(passwordStatusQuery.error))
+	) {
 		return (
 			<div className="flex min-h-screen items-center justify-center px-4 text-center text-slate-600">
 				No se pudo verificar el estado de tu contraseña. Intenta nuevamente.

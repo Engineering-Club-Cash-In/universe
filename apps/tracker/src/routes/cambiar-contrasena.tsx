@@ -3,6 +3,7 @@ import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { authClient } from "@/lib/auth-client";
+import { rutaDeRetorno } from "@/lib/rutas";
 import { client } from "@/utils/orpc";
 
 type CampoPasswordProps = {
@@ -96,7 +97,7 @@ export function CambiarContrasenaPage() {
 				confirmPassword,
 			});
 			toast.success("Contraseña actualizada correctamente");
-			window.location.href = search.redirect || "/";
+			window.location.href = rutaDeRetorno(search.redirect);
 		} catch (error) {
 			toast.error(error instanceof Error ? error.message : "No se pudo cambiar la contraseña");
 			setCargando(false);

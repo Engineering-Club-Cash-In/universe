@@ -10,7 +10,12 @@ import { eq } from "drizzle-orm";
 import { auth } from "../lib/auth";
 import { requireServiceSecret } from "../lib/serviceAuth";
 import { isPortalUserType, normalizeDpi } from "../lib/portalIdentity";
-import { applyRegistrationOutcome } from "../services/portalIdentity.service";
+import {
+  applyRegistrationOutcome,
+  assertDpiAvailable,
+  DpiAlreadyTakenError,
+  DpiFormatError,
+} from "../services/portalIdentity.service";
 import { env } from "../config/env";
 import { db } from "../db/connection";
 import { users } from "../db/schema";
@@ -148,6 +153,19 @@ unifiedRoutes.post("/register-external-auth", requireAuth, async (c) => {
       });
     }
 
+    // El DPI se reserva ANTES de cualquier efecto externo.
+    //
+    // El orden importa: la cuenta de Better Auth ya existe cuando se llega
+    // aquí, y `applyRegistrationOutcome` (que es donde vivía la única
+    // comprobación de DPI duplicado) corre DESPUÉS del alta en CRM/cartera. Con
+    // ese orden, un DPI ya tomado dejaba el correo ocupado por una cuenta sin
+    // identidad y, encima, un registro externo ya creado.
+    //
+    // Esto no reabre el oráculo de DPIs que se eliminó: la comprobación vive
+    // dentro de la operación autenticada, contra el usuario de la sesión, y no
+    // como una ruta que cualquiera pueda consultar.
+    await assertDpiAvailable(user.id, dpi);
+
     // El correo sale SIEMPRE de la sesión: es la identidad de la cuenta sobre
     // la que se van a escribir rol y DPI, así que no puede venir del body.
     const payload: RegisterExternalUserPayload = {
@@ -174,6 +192,17 @@ unifiedRoutes.post("/register-external-auth", requireAuth, async (c) => {
   } catch (error) {
     if (error instanceof HTTPException) {
       throw error;
+    }
+
+    // El conflicto de DPI se contesta con un código que el formulario pueda
+    // distinguir de un fallo cualquiera: es lo único que el titular puede
+    // corregir por su cuenta.
+    if (error instanceof DpiAlreadyTakenError) {
+      return c.json({ message: error.message, error: "dpi_ya_registrado" }, 409);
+    }
+
+    if (error instanceof DpiFormatError) {
+      return c.json({ message: error.message, error: "dpi_invalido" }, 400);
     }
 
     throw new HTTPException(500, {

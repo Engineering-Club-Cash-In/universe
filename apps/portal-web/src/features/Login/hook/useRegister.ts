@@ -1,10 +1,11 @@
 import { useFormik } from "formik";
 import * as Yup from "yup";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { RegisterCredentials } from "@/lib/auth";
 import { authClient } from "@/lib/auth";
 import { useNavigate } from "@tanstack/react-router";
 import { registerExternalUserAuth } from "@/features/Profile/services/unifiedService";
+import { conflictoDeRegistro } from "@/features/Profile/services/registroExterno.errors";
 
 // Esquema de validación con Yup
 const validationSchema = Yup.object({
@@ -40,6 +41,9 @@ export const useRegister = () => {
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
+  // La cuenta de Better Auth ya se creó en un envío anterior de este mismo
+  // formulario.
+  const cuentaCreada = useRef(false);
   const navigate = useNavigate();
 
   // Formik
@@ -55,34 +59,61 @@ export const useRegister = () => {
       userType: "CLIENT" as "CLIENT" | "INVESTOR",
     },
     validationSchema,
-    onSubmit: async (values) => {
+    onSubmit: async (values, helpers) => {
       try {
         setIsLoading(true);
-        // El rol y el DPI ya no viajan en el alta: el servidor los escribe
-        // después, al validar el registro (registerExternalUserAuth).
-        const response = await authClient.signUp.email({
-          email: values.email,
-          password: values.password,
-          name: values.fullName,
-          callbackURL: `${import.meta.env.VITE_FRONTEND_URL}/profile`,
-        });
 
-        // Si el registro fue exitoso, registrar en CRM o Cartera según tipo.
-        // La variante autenticada usa la sesión recién creada y es la que deja
-        // el rol y el DPI en la cuenta.
-        if (response?.data?.user?.id) {
-          try {
-            await registerExternalUserAuth({
-              userType: values.userType,
-              fullName: values.fullName,
-              email: values.email,
-              dpi: values.dpi,
-              phone: values.phone,
-            });
-          } catch (error) {
-            console.error("Error al registrar usuario adicional:", error);
-            // No detener el flujo si falla, el usuario ya fue registrado en better-auth
+        // La cuenta de Better Auth solo se crea una vez. Si el registro externo
+        // falló por algo corregible (un DPI ya tomado), el segundo envío tiene
+        // que reintentar SOLO esa parte: repetir el alta fallaría con "el
+        // correo ya existe" y el usuario quedaría atrapado en el formulario.
+        if (!cuentaCreada.current) {
+          // El rol y el DPI ya no viajan en el alta: el servidor los escribe
+          // después, al validar el registro (registerExternalUserAuth).
+          const response = await authClient.signUp.email({
+            email: values.email,
+            password: values.password,
+            name: values.fullName,
+            callbackURL: `${import.meta.env.VITE_FRONTEND_URL}/profile`,
+          });
+
+          if (!response?.data?.user?.id) {
+            return;
           }
+
+          cuentaCreada.current = true;
+        }
+
+        // Registrar en CRM o Cartera según tipo. La variante autenticada usa la
+        // sesión recién creada y es la que deja el rol y el DPI en la cuenta.
+        try {
+          await registerExternalUserAuth({
+            userType: values.userType,
+            fullName: values.fullName,
+            email: values.email,
+            dpi: values.dpi,
+            phone: values.phone,
+          });
+        } catch (error) {
+          console.error("Error al registrar usuario adicional:", error);
+
+          // Un conflicto de DPI no se traga: el servidor lo detecta antes de
+          // crear nada en CRM/cartera, así que el usuario puede corregirlo y
+          // reintentar. Mandarlo al perfil como si nada le dejaba el correo
+          // ocupado por una cuenta sin identidad y sin ninguna señal de qué
+          // pasó.
+          const conflicto = conflictoDeRegistro(error);
+
+          if (conflicto) {
+            helpers.setFieldTouched(conflicto.campo, true, false);
+            helpers.setFieldError(conflicto.campo, conflicto.mensaje);
+            // El DPI se pide en el primer paso del formulario.
+            setCurrentStep(1);
+            return;
+          }
+
+          // Cualquier otro fallo no detiene el flujo: la cuenta ya existe y el
+          // registro externo se puede completar desde el perfil.
         }
 
         // enviar al profile

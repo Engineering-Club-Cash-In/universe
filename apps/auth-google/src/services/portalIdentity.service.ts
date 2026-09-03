@@ -31,9 +31,18 @@ export class DpiAlreadyTakenError extends Error {
 }
 
 /**
- * Fija el DPI de la cuenta indicada. `userId` debe venir de la sesión.
+ * Comprueba que el DPI esté libre para la cuenta indicada y devuelve su forma
+ * normalizada. Lanza `DpiFormatError` o `DpiAlreadyTakenError`.
+ *
+ * Existe como paso independiente para poder detectar el conflicto ANTES de los
+ * efectos externos del registro (CRM/cartera). No es un endpoint: se llama
+ * siempre dentro de un flujo con sesión y contra el `userId` de esa sesión, así
+ * que no reintroduce el oráculo público de DPIs que se eliminó.
  */
-export async function setUserDpi(userId: string, dpi: string): Promise<string> {
+export async function assertDpiAvailable(
+  userId: string,
+  dpi: string,
+): Promise<string> {
   const normalized = normalizeDpi(dpi);
 
   if (!normalized) {
@@ -50,6 +59,15 @@ export async function setUserDpi(userId: string, dpi: string): Promise<string> {
   if (taken) {
     throw new DpiAlreadyTakenError();
   }
+
+  return normalized;
+}
+
+/**
+ * Fija el DPI de la cuenta indicada. `userId` debe venir de la sesión.
+ */
+export async function setUserDpi(userId: string, dpi: string): Promise<string> {
+  const normalized = await assertDpiAvailable(userId, dpi);
 
   await db
     .update(users)

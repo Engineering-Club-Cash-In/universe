@@ -93,8 +93,8 @@ describe("POST /register-external-auth", () => {
 
   it("normaliza el DPI con separadores antes de tocar el sistema externo", async () => {
     sessionActual = sesionDeAna;
-    // 1) la cuenta de la sesión, 2) DPI libre (dentro de setUserDpi)
-    filasSelect = [[cuentaDeAna], []];
+    // 1) DPI libre, 2) la cuenta de la sesión, 3) DPI libre (dentro de setUserDpi)
+    filasSelect = [[], [cuentaDeAna], []];
 
     const res = await postJson("/register-external-auth", {
       userType: "INVESTOR",
@@ -122,6 +122,28 @@ describe("POST /register-external-auth", () => {
 
     expect(res.status).toBe(400);
     expect(payloadExterno).toBeNull();
+  });
+
+  it("con el DPI tomado por otra cuenta responde 409 y no crea nada afuera", async () => {
+    sessionActual = sesionDeAna;
+    // El DPI ya pertenece a otra cuenta de Better Auth.
+    filasSelect = [[{ id: "otro-usuario" }]];
+
+    const res = await postJson("/register-external-auth", {
+      userType: "INVESTOR",
+      fullName: "Ana Pérez",
+      dpi: "1234567890123",
+    });
+
+    // El conflicto tiene que salir ANTES del efecto externo: si cartera ya creó
+    // al inversionista, el usuario se queda con el correo ocupado por una
+    // cuenta sin identidad y una fila huérfana en cartera.
+    expect(payloadExterno).toBeNull();
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      error: "dpi_ya_registrado",
+    });
+    expect(escrituras).toHaveLength(0);
   });
 
   it("rechaza sin sesión", async () => {

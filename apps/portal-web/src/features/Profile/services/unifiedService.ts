@@ -4,6 +4,7 @@
  */
 
 import apiAuth from "@/lib/api/apiAuth";
+import { registroExternoErrorDesde } from "./registroExterno.errors";
 
 export type UserType = "CLIENT" | "INVESTOR";
 
@@ -56,8 +57,9 @@ export const registerExternalUserAuth = async (
     );
     return response.data;
   } catch (error: any) {
-    const message = error.response?.data?.message || "Error al registrar usuario externo";
     console.error("Error al registrar usuario externo:", error);
-    throw new Error(message);
+    // Se conserva el status/código: el formulario necesita distinguir el DPI
+    // ya tomado (corregible por el titular) de un fallo cualquiera.
+    throw registroExternoErrorDesde(error);
   }
 };

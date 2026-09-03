@@ -36,6 +36,12 @@ export interface VariablesPlantilla {
 	 */
 	aseguradora?: string;
 	cabinaSeguro?: string;
+	/**
+	 * Total para ponerse al día con TODAS las cuotas vencidas (cuotas atrasadas
+	 * × cuota + mora), calculado en el server. Lo usa "Notificación 2-3 cuotas
+	 * atrasadas"; `montoAdeudado` sigue siendo mora + una cuota.
+	 */
+	montoTotalAtraso?: string;
 }
 
 const SEGURO_DEFAULT = {
@@ -51,6 +57,8 @@ const SEGURO_DEFAULT = {
  * contactan personalmente.
  */
 const DIA_MES_LIMITE_IMPUESTO = "31/07";
+/** Hora local (Guatemala, 0-23) del corte: las 5:00 p.m. que dice el mensaje. */
+const HORA_LIMITE_IMPUESTO = 17;
 
 export function anioImpuestoCirculacion(ahora = new Date()): string {
 	// Año calendario en Guatemala (evita el desfase de UTC en el cambio de año).
@@ -64,18 +72,26 @@ export function fechaLimiteImpuestoCirculacion(ahora = new Date()): string {
 	return `${DIA_MES_LIMITE_IMPUESTO}/${anioImpuestoCirculacion(ahora)}`;
 }
 
-/** true si hoy (en Guatemala) ya pasó la fecha límite del impuesto del año. */
+/**
+ * true si en Guatemala ya pasó la fecha límite del impuesto del año: después
+ * del 31/07, o el mismo 31/07 a partir de las 17:00 (el mensaje pide el
+ * comprobante "antes de las 5:00 p.m.", así que a esa hora ya venció).
+ */
 export function fechaLimiteImpuestoVencida(ahora = new Date()): boolean {
-	// "en-CA" con timeZone da YYYY-MM-DD; comparamos MM-DD contra el corte.
-	const ymd = new Intl.DateTimeFormat("en-CA", {
+	const partes = new Intl.DateTimeFormat("en-CA", {
 		timeZone: "America/Guatemala",
-		year: "numeric",
 		month: "2-digit",
 		day: "2-digit",
-	}).format(ahora);
-	const [, mes, dia] = ymd.split("-");
+		hour: "2-digit",
+		hourCycle: "h23",
+	}).formatToParts(ahora);
+	const parte = (tipo: string) =>
+		partes.find((p) => p.type === tipo)?.value ?? "";
+	const mmdd = `${parte("month")}${parte("day")}`;
 	const [diaLimite, mesLimite] = DIA_MES_LIMITE_IMPUESTO.split("/");
-	return `${mes}${dia}` > `${mesLimite}${diaLimite}`;
+	const limite = `${mesLimite}${diaLimite}`;
+	if (mmdd !== limite) return mmdd > limite;
+	return Number(parte("hour")) >= HORA_LIMITE_IMPUESTO;
 }
 
 export interface PlantillaMensaje {
@@ -92,32 +108,41 @@ export const COBROS_NO_REPLY_WARNING =
 export const COBROS_MOTIVO_SIN_TELEFONO_ASESOR = "sin teléfono de asesor";
 
 /**
- * Una plantilla que usa {expectativaMora} no se puede enviar si el server no
- * pudo calcularla (crédito sin capital válido: insolutos y similares no
- * generan mora) — el mensaje saldría roto ("recargo por mora de Q.").
+ * Fragmento fijo de la oración de mora del recordatorio del día de pago
+ * ("…se agregará un recargo por mora de Q{expectativaMora}."). Sirve para
+ * detectar, en el mensaje YA interpolado que el asesor editó, si la oración
+ * sigue presente: si la borró, no hay nada que bloquear.
  */
-export function plantillaRequiereExpectativaMora(
-	plantilla: PlantillaMensaje,
-): boolean {
+export const FRAGMENTO_EXPECTATIVA_MORA = "recargo por mora de Q";
+
+/**
+ * true si el mensaje que se va a mandar todavía anuncia el recargo por mora
+ * (con la variable sin interpolar o ya interpolada). Se evalúa sobre el texto
+ * real del canal, no sobre la plantilla original, para que el asesor pueda
+ * quitar la oración y enviar aunque el crédito no genere mora.
+ */
+export function mensajeAnunciaExpectativaMora(mensaje: string): boolean {
 	return (
-		plantilla.cuerpo.includes("{expectativaMora}") ||
-		(plantilla.cuerpoWhastapp?.includes("{expectativaMora}") ?? false)
+		mensaje.includes("{expectativaMora}") ||
+		mensaje.includes(FRAGMENTO_EXPECTATIVA_MORA)
 	);
 }
 
 /**
- * Una plantilla que usa las variables del impuesto no debería enviarse después
- * de la fecha límite del año: pediría el comprobante "antes de la hora límite"
- * de una fecha ya vencida. Pasado el corte, los asesores contactan
- * personalmente.
+ * true si ya pasó el corte del impuesto y el mensaje que se va a mandar
+ * todavía trae la fecha límite vencida (la variable sin interpolar o la fecha
+ * ya resuelta, p. ej. "31/07/2026"). Si el asesor la reemplazó por otra fecha
+ * o borró la línea, se puede enviar.
  */
-export function plantillaUsaFechaLimiteImpuesto(
-	plantilla: PlantillaMensaje,
+export function mensajeTieneFechaLimiteImpuestoVencida(
+	mensaje: string,
+	ahora = new Date(),
 ): boolean {
-	const usa = (cuerpo: string) =>
-		cuerpo.includes("{fechaLimiteImpuesto}") ||
-		cuerpo.includes("{anioImpuesto}");
-	return usa(plantilla.cuerpo) || usa(plantilla.cuerpoWhastapp ?? "");
+	if (!fechaLimiteImpuestoVencida(ahora)) return false;
+	return (
+		mensaje.includes("{fechaLimiteImpuesto}") ||
+		mensaje.includes(fechaLimiteImpuestoCirculacion(ahora))
+	);
 }
 
 export function prepararTelefonoAsesorParaEnvio(
@@ -262,6 +287,10 @@ export function interpolar(
 				variables.fechaLimiteImpuesto ?? fechaLimiteImpuestoCirculacion(),
 				"fecha límite impuesto",
 			),
+		)
+		.replace(
+			/{montoTotalAtraso}/g,
+			v(variables.montoTotalAtraso ?? "", "monto total en atraso"),
 		);
 }
 
@@ -436,7 +465,7 @@ Es importante que realices tu pago lo antes posible para evitar mayores recargos
 		etapa: "mora_60",
 		asunto: "AVISO IMPORTANTE: Mora de 60 días - Vehículo {placa}",
 		cuerpo: `Hola {clienteNombre},
-Te informamos que actualmente tienes {cuotasAtraso} cuotas en atraso, por un monto total de Q{montoAdeudado}.
+Te informamos que actualmente tienes {cuotasAtraso} cuotas en atraso, por un monto total de Q{montoTotalAtraso}.
 
 ⚠️ En caso de no recibir el pago, CashIn podrá aplicar las medidas de recuperación contempladas en tu contrato y la ejecución de garantía.
 
@@ -446,7 +475,7 @@ Te informamos que actualmente tienes {cuotasAtraso} cuotas en atraso, por un mon
 
 CashIn`,
 		cuerpoWhastapp: `Hola {clienteNombre},
-Te informamos que actualmente tienes *{cuotasAtraso} cuotas en atraso, por un monto total de Q{montoAdeudado}*.
+Te informamos que actualmente tienes *{cuotasAtraso} cuotas en atraso, por un monto total de Q{montoTotalAtraso}*.
 
 ⚠️ *En caso de no recibir el pago, CashIn podrá aplicar las medidas de recuperación contempladas en tu contrato y la ejecución de garantía.*
 
@@ -482,11 +511,15 @@ export function sugerirPlantilla(
 	estadoMora: string | undefined,
 	fechaInicio?: string | Date | null,
 ): string {
+	// "Notificación 2-3 cuotas atrasadas" cubre mora_60 Y mora_90 (2 y 3 cuotas
+	// según getDetallesCreditoCarteraBack). El aviso jurídico queda para 4+
+	// cuotas (mora_120) e incobrables.
 	const mapaMora: Record<string, string> = {
 		pre_mora: "pre_mora",
 		mora_30: "mora_30",
 		mora_60: "mora_60",
-		mora_90: "aviso_juridico",
+		mora_90: "mora_60",
+		mora_120: "aviso_juridico",
 		incobrable: "aviso_juridico",
 	};
 

@@ -51,6 +51,7 @@ import {
 } from "../lib/cobros-credit-detail";
 import {
 	calcularExpectativaMora,
+	calcularMontoTotalAtraso,
 	cuerpoUsaFechaLimiteImpuesto,
 	fechaLimiteImpuestoCirculacion,
 	fechaLimiteImpuestoVencida,
@@ -2301,6 +2302,14 @@ export const cobrosRouter = {
 						creditoCompleto.credito.capital,
 						creditoCompleto.credito.statusCredit,
 					),
+					// Total con TODAS las cuotas vencidas (cuotas × cuota + mora) para
+					// la notificación de 2-3 cuotas; montoEnMora + cuota sigue siendo
+					// el criterio de la pantalla para el resto.
+					montoTotalAtraso: calcularMontoTotalAtraso(
+						cuotasAtrasadas,
+						cuotaMensual,
+						montoEnMora,
+					),
 					// Bloque del seguro de la bienvenida según la aseguradora de la
 					// oportunidad (Universales o G&T).
 					...seguroPorAseguradora(insuranceProvider),
@@ -3749,6 +3758,13 @@ export const cobrosRouter = {
 					telefonoAsesor: telefonoAsesor.telefonoAsesor,
 					nombreAsesor: asesor.nombre ?? "",
 					expectativaMora: expectativaMora.expectativaMora,
+					// Total con TODAS las cuotas vencidas (cuotas × cuota + mora) para
+					// la notificación de 2-3 cuotas; montoAdeudado es mora + 1 cuota.
+					montoTotalAtraso: calcularMontoTotalAtraso(
+						credito.mora?.cuotas_atrasadas,
+						cuota,
+						montoMora,
+					),
 					// Bloque del seguro de la bienvenida según la aseguradora de la
 					// oportunidad de cada crédito (Universales o G&T).
 					...seguroPorAseguradora(info?.insuranceProvider),

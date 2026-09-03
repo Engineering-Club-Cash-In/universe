@@ -55,14 +55,13 @@ import {
 	accionUsaCuerpoNoReply,
 	crearUrlWhatsappManual,
 	cuerpoParaValidarNoReply,
-	fechaLimiteImpuestoVencida,
 	interpolar,
+	mensajeAnunciaExpectativaMora,
 	mensajeEmailEditable,
 	mensajePlantillaEditable,
 	mensajeSmsEditable,
+	mensajeTieneFechaLimiteImpuestoVencida,
 	PLANTILLAS_MENSAJES,
-	plantillaRequiereExpectativaMora,
-	plantillaUsaFechaLimiteImpuesto,
 	prepararTelefonoAsesorParaEnvio,
 	sugerirPlantilla,
 	type VariablesPlantilla,
@@ -95,6 +94,7 @@ interface ContactoModalProps {
 	expectativaMora?: string;
 	aseguradora?: string;
 	cabinaSeguro?: string;
+	montoTotalAtraso?: string;
 }
 
 export function ContactoModal({
@@ -120,6 +120,7 @@ export function ContactoModal({
 	expectativaMora = "",
 	aseguradora = "",
 	cabinaSeguro = "",
+	montoTotalAtraso = "",
 }: ContactoModalProps) {
 	const queryClient = useQueryClient();
 
@@ -171,6 +172,7 @@ export function ContactoModal({
 			// datos, el modal muestra de una vez la variante correcta (p. ej. G&T).
 			aseguradora: aseguradora || undefined,
 			cabinaSeguro: cabinaSeguro || undefined,
+			montoTotalAtraso: montoTotalAtraso || undefined,
 		}),
 		[
 			clienteNombre,
@@ -185,6 +187,7 @@ export function ContactoModal({
 			expectativaMora,
 			aseguradora,
 			cabinaSeguro,
+			montoTotalAtraso,
 		],
 	);
 
@@ -367,34 +370,32 @@ export function ContactoModal({
 			);
 			return;
 		}
-		// La plantilla del día de pago usa {expectativaMora}; si el server no
-		// pudo calcularla (crédito sin capital válido, p. ej. insolutos que no
-		// generan mora), se bloquea el envío para no mandar "recargo de Q." roto.
-		const plantillaActual = PLANTILLAS_MENSAJES.find(
-			(p) => p.id === plantillaId,
-		);
+		// Los dos guards siguientes se evalúan sobre el mensaje REAL del canal
+		// (ya interpolado y editado por el asesor), no sobre la plantilla
+		// original: si el asesor borra la oración de mora o corrige la fecha del
+		// impuesto en "Editar mensaje", el envío se habilita.
+		//
+		// Si el server no pudo calcular la expectativa (crédito sin capital o en
+		// estado excluido de mora) y la oración sigue en el texto, saldría
+		// "recargo por mora de Q." roto.
 		if (
 			accionUsaCuerpoNoReply(metodo) &&
-			plantillaActual &&
-			plantillaRequiereExpectativaMora(plantillaActual) &&
+			mensajeAnunciaExpectativaMora(cuerpoNoReply) &&
 			!expectativaMora.trim()
 		) {
 			toast.error(
-				"No se puede enviar esta plantilla: el crédito no genera mora (estado excluido o sin capital)",
+				'El crédito no genera mora (estado excluido o sin capital). Borrá la oración del recargo en "Editar mensaje" o elegí otra plantilla.',
 			);
 			return;
 		}
-		// La plantilla del impuesto no se envía después del 31/07: pediría el
-		// comprobante antes de una fecha ya vencida. Pasado el corte se contacta
-		// personalmente.
+		// Pasado el 31/07, el mensaje no puede seguir pidiendo el comprobante
+		// "antes de la hora límite" de una fecha vencida.
 		if (
 			accionUsaCuerpoNoReply(metodo) &&
-			plantillaActual &&
-			plantillaUsaFechaLimiteImpuesto(plantillaActual) &&
-			fechaLimiteImpuestoVencida()
+			mensajeTieneFechaLimiteImpuestoVencida(cuerpoNoReply)
 		) {
 			toast.error(
-				"La fecha límite del impuesto de circulación ya venció; contactá al cliente directamente",
+				'La fecha límite del impuesto de circulación ya venció. Cambiá la fecha en "Editar mensaje" o contactá al cliente directamente.',
 			);
 			return;
 		}

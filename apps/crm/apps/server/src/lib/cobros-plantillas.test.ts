@@ -5,6 +5,7 @@ import {
 	COBROS_MOTIVO_SIN_TELEFONO_ASESOR,
 	COBROS_NO_REPLY_WARNING,
 	calcularExpectativaMora,
+	calcularMontoTotalAtraso,
 	cuerpoUsaFechaLimiteImpuesto,
 	fechaLimiteImpuestoCirculacion,
 	fechaLimiteImpuestoVencida,
@@ -394,17 +395,24 @@ Te recordamos realizar el pago de tu *Impuesto de Circulación {anioImpuesto}*.
 			),
 		).toBe(false);
 
-		// Antes del corte (mayo) y el mismo 31/07 se puede enviar; después no.
-		// 2026-07-31T18:00Z = 31/07 12:00 en GT; 2026-08-01T02:00Z aún es 31/07
-		// 20:00 en GT (UTC-6); 2026-08-01T18:00Z ya es 1 de agosto en GT.
+		// El corte es el 31/07 a las 17:00 de Guatemala (UTC-6), la hora que
+		// dice el mensaje. 2026-07-31T18:00Z = 12:00 GT y T22:59Z = 16:59 GT →
+		// aún se envía; T23:00Z = 17:00 GT → ya venció; 2026-08-01T02:00Z sigue
+		// siendo 31/07 (20:00 GT) pero ya pasó la hora → vencido.
 		expect(fechaLimiteImpuestoVencida(new Date("2026-05-15T12:00:00Z"))).toBe(
 			false,
 		);
 		expect(fechaLimiteImpuestoVencida(new Date("2026-07-31T18:00:00Z"))).toBe(
 			false,
 		);
-		expect(fechaLimiteImpuestoVencida(new Date("2026-08-01T02:00:00Z"))).toBe(
+		expect(fechaLimiteImpuestoVencida(new Date("2026-07-31T22:59:00Z"))).toBe(
 			false,
+		);
+		expect(fechaLimiteImpuestoVencida(new Date("2026-07-31T23:00:00Z"))).toBe(
+			true,
+		);
+		expect(fechaLimiteImpuestoVencida(new Date("2026-08-01T02:00:00Z"))).toBe(
+			true,
 		);
 		expect(fechaLimiteImpuestoVencida(new Date("2026-08-01T18:00:00Z"))).toBe(
 			true,
@@ -412,5 +420,30 @@ Te recordamos realizar el pago de tu *Impuesto de Circulación {anioImpuesto}*.
 		expect(fechaLimiteImpuestoVencida(new Date("2026-12-01T12:00:00Z"))).toBe(
 			true,
 		);
+	});
+
+	test("la notificación de 2-3 cuotas usa el total con todas las cuotas vencidas", () => {
+		// cuotas atrasadas × cuota + mora (misma regla que el total de la promesa
+		// de pago). 2 × 1000 + 100 = 2100 — no 1100 como daría mora + 1 cuota.
+		expect(calcularMontoTotalAtraso(2, "1000.00", "100.00")).toBe("2,100.00");
+		expect(calcularMontoTotalAtraso(3, 1832.69, 0)).toBe("5,498.07");
+		// Sin cuotas atrasadas (o datos inválidos) no hay total que anunciar.
+		expect(calcularMontoTotalAtraso(0, "1000.00", "100.00")).toBe("");
+		expect(calcularMontoTotalAtraso(null, "1000.00", "100.00")).toBe("");
+		expect(calcularMontoTotalAtraso(2, "no-numerico", "0")).toBe("");
+
+		const mora60 = PLANTILLAS_MENSAJES.find(
+			(plantilla) => plantilla.id === "mora_60",
+		);
+		expect(mora60?.cuerpo).toContain(
+			"por un monto total de Q{montoTotalAtraso}",
+		);
+		expect(mora60?.cuerpo).not.toContain("{montoAdeudado}");
+
+		// mora_30 ("1 cuota con atraso") sigue con montoAdeudado (mora + 1 cuota).
+		const mora30 = PLANTILLAS_MENSAJES.find(
+			(plantilla) => plantilla.id === "mora_30",
+		);
+		expect(mora30?.cuerpo).toContain("Q{montoAdeudado}");
 	});
 });

@@ -6,16 +6,18 @@ import {
 	COBROS_NO_REPLY_WARNING,
 	crearUrlWhatsappManual,
 	cuerpoParaValidarNoReply,
+	FRAGMENTO_EXPECTATIVA_MORA,
 	fechaLimiteImpuestoCirculacion,
 	fechaLimiteImpuestoVencida,
 	interpolar,
+	mensajeAnunciaExpectativaMora,
 	mensajeEmailEditable,
 	mensajePlantillaEditable,
 	mensajeSmsEditable,
+	mensajeTieneFechaLimiteImpuestoVencida,
 	PLANTILLAS_MENSAJES,
-	plantillaRequiereExpectativaMora,
-	plantillaUsaFechaLimiteImpuesto,
 	prepararTelefonoAsesorParaEnvio,
+	sugerirPlantilla,
 } from "./plantillas-mensajes";
 
 const NO_REPLY_WARNING =
@@ -314,37 +316,154 @@ describe("plantillas web de cobros", () => {
 		).toBe("31/07/2027");
 	});
 
-	test("identifica las plantillas que requieren expectativa de mora", () => {
+	test("el guard de mora evalúa el mensaje editado, no la plantilla", () => {
 		const porId = (id: string) =>
-			PLANTILLAS_MENSAJES.find((plantilla) => plantilla.id === id);
+			PLANTILLAS_MENSAJES.find((plantilla) => plantilla.id === id) ?? {
+				cuerpo: "",
+			};
+		const alDia = cuerpoWhatsappDe(porId("al_dia"));
 
-		// Solo el recordatorio del día de pago usa {expectativaMora}; el modal
-		// bloquea su envío cuando el server no pudo calcularla (sin capital).
-		expect(plantillaRequiereExpectativaMora(porId("al_dia")!)).toBe(true);
-		expect(plantillaRequiereExpectativaMora(porId("bienvenida")!)).toBe(false);
-		expect(plantillaRequiereExpectativaMora(porId("mora_30")!)).toBe(false);
+		// La plantilla contiene el fragmento fijo; si cambia el copy hay que
+		// ajustar FRAGMENTO_EXPECTATIVA_MORA para que el guard lo siga detectando.
+		expect(alDia).toContain(FRAGMENTO_EXPECTATIVA_MORA);
+		expect(mensajeAnunciaExpectativaMora(alDia)).toBe(true);
+
+		// Interpolado sin expectativa queda "recargo por mora de Q." → sigue
+		// bloqueando…
+		const interpolado = interpolar(alDia, {
+			clienteNombre: "MARIA LOPEZ",
+			fechaPago: "5",
+			cuotaMensual: "2,500.00",
+			placa: "",
+			marcaLineaModelo: "",
+			montoAdeudado: "",
+			cuotasAtraso: 0,
+			telefonoAsesor: "41286630",
+			nombreAsesor: "Carlos Pérez",
+			expectativaMora: "",
+		});
+		expect(interpolado).toContain("recargo por mora de Q.");
+		expect(mensajeAnunciaExpectativaMora(interpolado)).toBe(true);
+
+		// …pero si el asesor borra esa oración, el mensaje se puede enviar.
+		const sinOracion = interpolado
+			.split("\n")
+			.filter((linea) => !linea.includes(FRAGMENTO_EXPECTATIVA_MORA))
+			.join("\n");
+		expect(mensajeAnunciaExpectativaMora(sinOracion)).toBe(false);
+
+		// Las demás plantillas no anuncian mora.
+		expect(
+			mensajeAnunciaExpectativaMora(cuerpoWhatsappDe(porId("mora_30"))),
+		).toBe(false);
+		expect(
+			mensajeAnunciaExpectativaMora(cuerpoWhatsappDe(porId("bienvenida"))),
+		).toBe(false);
 	});
 
-	test("identifica la plantilla del impuesto y su fecha límite vencida", () => {
+	test("el guard del impuesto solo bloquea si la fecha vencida sigue en el mensaje", () => {
 		const porId = (id: string) =>
-			PLANTILLAS_MENSAJES.find((plantilla) => plantilla.id === id);
+			PLANTILLAS_MENSAJES.find((plantilla) => plantilla.id === id) ?? {
+				cuerpo: "",
+			};
+		const impuesto = cuerpoWhatsappDe(porId("impuesto_circulacion_2026"));
+		const vencido = new Date("2026-09-03T18:00:00Z"); // después del 31/07 GT
+		const vigente = new Date("2026-05-15T12:00:00Z");
 
-		expect(
-			plantillaUsaFechaLimiteImpuesto(porId("impuesto_circulacion_2026")!),
-		).toBe(true);
-		expect(plantillaUsaFechaLimiteImpuesto(porId("bienvenida")!)).toBe(false);
-		expect(plantillaUsaFechaLimiteImpuesto(porId("al_dia")!)).toBe(false);
-
-		// El mismo 31/07 en GT todavía se envía; del 1 de agosto en adelante no.
-		expect(fechaLimiteImpuestoVencida(new Date("2026-05-15T12:00:00Z"))).toBe(
+		// Con la variable sin interpolar: bloquea solo si ya venció.
+		expect(mensajeTieneFechaLimiteImpuestoVencida(impuesto, vencido)).toBe(
+			true,
+		);
+		expect(mensajeTieneFechaLimiteImpuestoVencida(impuesto, vigente)).toBe(
 			false,
 		);
-		expect(fechaLimiteImpuestoVencida(new Date("2026-08-01T02:00:00Z"))).toBe(
+
+		// Interpolado trae "31/07/2026" → bloquea; si el asesor cambia la fecha,
+		// ya no (aunque el año 2026 siga en el texto).
+		const interpolado = interpolar(impuesto, {
+			clienteNombre: "",
+			fechaPago: "",
+			cuotaMensual: "",
+			placa: "",
+			marcaLineaModelo: "",
+			montoAdeudado: "",
+			cuotasAtraso: 0,
+			telefonoAsesor: "41286630",
+			nombreAsesor: "Carlos Pérez",
+			expectativaMora: "",
+			anioImpuesto: anioImpuestoCirculacion(vencido),
+			fechaLimiteImpuesto: fechaLimiteImpuestoCirculacion(vencido),
+		});
+		expect(interpolado).toContain("31/07/2026");
+		expect(mensajeTieneFechaLimiteImpuestoVencida(interpolado, vencido)).toBe(
+			true,
+		);
+		const corregido = interpolado.replace("31/07/2026", "15/09/2026");
+		expect(corregido).toContain("Impuesto de Circulación 2026");
+		expect(mensajeTieneFechaLimiteImpuestoVencida(corregido, vencido)).toBe(
 			false,
+		);
+
+		// Las demás plantillas nunca bloquean por esto.
+		expect(
+			mensajeTieneFechaLimiteImpuestoVencida(
+				cuerpoWhatsappDe(porId("al_dia")),
+				vencido,
+			),
+		).toBe(false);
+
+		// Bordes del corte: 31/07 a las 17:00 de Guatemala (la hora del mensaje).
+		// T22:59Z = 16:59 GT aún se envía; T23:00Z = 17:00 GT ya venció.
+		expect(fechaLimiteImpuestoVencida(new Date("2026-07-31T22:59:00Z"))).toBe(
+			false,
+		);
+		expect(fechaLimiteImpuestoVencida(new Date("2026-07-31T23:00:00Z"))).toBe(
+			true,
 		);
 		expect(fechaLimiteImpuestoVencida(new Date("2026-08-01T18:00:00Z"))).toBe(
 			true,
 		);
+	});
+
+	test("la notificación de 2-3 cuotas usa el total con todas las cuotas vencidas", () => {
+		const mora60 = PLANTILLAS_MENSAJES.find(
+			(plantilla) => plantilla.id === "mora_60",
+		);
+		// El server calcula cuotas × cuota + mora y lo manda como montoTotalAtraso;
+		// montoAdeudado (mora + 1 cuota) queda para "1 cuota con atraso".
+		expect(mora60?.cuerpoWhastapp).toContain(
+			"por un monto total de Q{montoTotalAtraso}",
+		);
+		expect(mora60?.cuerpo).toContain(
+			"por un monto total de Q{montoTotalAtraso}",
+		);
+
+		const mensaje = interpolar(mora60?.cuerpoWhastapp ?? "", {
+			clienteNombre: "MARIA LOPEZ",
+			fechaPago: "5",
+			cuotaMensual: "1,000.00",
+			placa: "",
+			marcaLineaModelo: "",
+			montoAdeudado: "1,100.00",
+			cuotasAtraso: 2,
+			telefonoAsesor: "41286630",
+			nombreAsesor: "Carlos Pérez",
+			expectativaMora: "",
+			montoTotalAtraso: "2,100.00",
+		});
+		expect(mensaje).toContain(
+			"tienes *2 cuotas en atraso, por un monto total de Q2,100.00*.",
+		);
+	});
+
+	test("sugiere la notificación de 2-3 cuotas para mora_90 y el aviso jurídico para 4+", () => {
+		// getDetallesCreditoCarteraBack marca mora_90 con 3 cuotas atrasadas; el
+		// deck cubre 2-3 cuotas con la misma plantilla. El jurídico es para 4+.
+		expect(sugerirPlantilla("mora_30")).toBe("mora_30");
+		expect(sugerirPlantilla("mora_60")).toBe("mora_60");
+		expect(sugerirPlantilla("mora_90")).toBe("mora_60");
+		expect(sugerirPlantilla("mora_120")).toBe("aviso_juridico");
+		expect(sugerirPlantilla("incobrable")).toBe("aviso_juridico");
 	});
 
 	test("el bloque del seguro de la bienvenida se interpola por aseguradora", () => {

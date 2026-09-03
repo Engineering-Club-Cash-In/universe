@@ -38,6 +38,44 @@ export interface VariablesPlantilla {
 	aseguradora?: string;
 	/** Cabina de emergencia de la aseguradora. Default: la de Universales. */
 	cabinaSeguro?: string;
+	/**
+	 * Total para ponerse al día con TODAS las cuotas vencidas (cuotas atrasadas
+	 * × cuota + mora). Lo usa "Notificación 2-3 cuotas atrasadas".
+	 */
+	montoTotalAtraso?: string;
+}
+
+/**
+ * Total a pagar para ponerse al día con todas las cuotas vencidas: cuotas
+ * atrasadas × cuota + mora acumulada — la misma regla que el total de la
+ * promesa de pago en cobros. `{montoAdeudado}` sigue siendo mora + UNA cuota
+ * (criterio de la pantalla de detalle), que es lo correcto para "1 cuota con
+ * atraso" pero se queda corto cuando el mensaje habla de un "monto total" con
+ * 2-3 cuotas. Devuelve "" si no hay cuotas atrasadas o el total no es
+ * positivo.
+ */
+export function calcularMontoTotalAtraso(
+	cuotasAtraso: number | null | undefined,
+	cuota: string | number | null | undefined,
+	montoMora: string | number | null | undefined,
+): string {
+	const cuotas = Number(cuotasAtraso ?? 0);
+	const cuotaNum = Number(cuota ?? 0);
+	const mora = Number(montoMora ?? 0);
+	if (
+		!Number.isFinite(cuotas) ||
+		!Number.isFinite(cuotaNum) ||
+		!Number.isFinite(mora) ||
+		cuotas <= 0
+	) {
+		return "";
+	}
+	const total = cuotas * cuotaNum + mora;
+	if (total <= 0) return "";
+	return total.toLocaleString("es-GT", {
+		minimumFractionDigits: 2,
+		maximumFractionDigits: 2,
+	});
 }
 
 /**
@@ -63,6 +101,8 @@ export function seguroPorAseguradora(
  * contactan personalmente.
  */
 const DIA_MES_LIMITE_IMPUESTO = "31/07";
+/** Hora local (Guatemala, 0-23) del corte: las 5:00 p.m. que dice el mensaje. */
+const HORA_LIMITE_IMPUESTO = 17;
 
 export function anioImpuestoCirculacion(ahora = new Date()): string {
 	// Año calendario en Guatemala (evita el desfase de UTC en el cambio de año).
@@ -76,31 +116,37 @@ export function fechaLimiteImpuestoCirculacion(ahora = new Date()): string {
 	return `${DIA_MES_LIMITE_IMPUESTO}/${anioImpuestoCirculacion(ahora)}`;
 }
 
-/** true si hoy (en Guatemala) ya pasó la fecha límite del impuesto del año. */
+/**
+ * true si en Guatemala ya pasó la fecha límite del impuesto del año: después
+ * del 31/07, o el mismo 31/07 a partir de las 17:00 (el mensaje pide el
+ * comprobante "antes de las 5:00 p.m.", así que a esa hora ya venció).
+ */
 export function fechaLimiteImpuestoVencida(ahora = new Date()): boolean {
-	// "en-CA" con timeZone da YYYY-MM-DD; comparamos MM-DD contra el corte.
-	const ymd = new Intl.DateTimeFormat("en-CA", {
+	const partes = new Intl.DateTimeFormat("en-CA", {
 		timeZone: "America/Guatemala",
-		year: "numeric",
 		month: "2-digit",
 		day: "2-digit",
-	}).format(ahora);
-	const [, mes, dia] = ymd.split("-");
+		hour: "2-digit",
+		hourCycle: "h23",
+	}).formatToParts(ahora);
+	const parte = (tipo: string) =>
+		partes.find((p) => p.type === tipo)?.value ?? "";
+	const mmdd = `${parte("month")}${parte("day")}`;
 	const [diaLimite, mesLimite] = DIA_MES_LIMITE_IMPUESTO.split("/");
-	return `${mes}${dia}` > `${mesLimite}${diaLimite}`;
+	const limite = `${mesLimite}${diaLimite}`;
+	if (mmdd !== limite) return mmdd > limite;
+	return Number(parte("hour")) >= HORA_LIMITE_IMPUESTO;
 }
 
 /**
- * Un cuerpo que usa las variables del impuesto no debería enviarse después de
- * la fecha límite del año: el mensaje pediría el comprobante "antes de la hora
- * límite" de una fecha ya vencida. Pasado el corte, los asesores editan el
- * mensaje (quitando estas variables) o contactan personalmente.
+ * Un cuerpo que todavía trae {fechaLimiteImpuesto} no debería enviarse después
+ * de la fecha límite del año: pediría el comprobante "antes de la hora límite"
+ * de una fecha ya vencida. Pasado el corte, el asesor reemplaza la variable por
+ * la fecha nueva (o borra la línea) y el envío se habilita. El año
+ * ({anioImpuesto}) por sí solo no bloquea: mencionarlo no es lo que vence.
  */
 export function cuerpoUsaFechaLimiteImpuesto(cuerpo: string): boolean {
-	return (
-		cuerpo.includes("{fechaLimiteImpuesto}") ||
-		cuerpo.includes("{anioImpuesto}")
-	);
+	return cuerpo.includes("{fechaLimiteImpuesto}");
 }
 
 /**
@@ -250,7 +296,8 @@ export function interpolar(
 		.replace(
 			/{cabinaSeguro}/g,
 			v(variables.cabinaSeguro ?? seguroPorAseguradora(null).cabinaSeguro),
-		);
+		)
+		.replace(/{montoTotalAtraso}/g, v(variables.montoTotalAtraso ?? ""));
 }
 
 export const PLANTILLAS_MENSAJES: PlantillaMensaje[] = [
@@ -365,7 +412,7 @@ Es importante que realices tu pago lo antes posible para evitar mayores recargos
 		asunto: "AVISO IMPORTANTE: Mora de 60 días - Vehículo {placa}",
 		// 4 bloques → template `mensaje4parametro`.
 		cuerpo: `Hola {clienteNombre},
-Te informamos que actualmente tienes *{cuotasAtraso} cuotas en atraso, por un monto total de Q{montoAdeudado}*.
+Te informamos que actualmente tienes *{cuotasAtraso} cuotas en atraso, por un monto total de Q{montoTotalAtraso}*.
 
 ⚠️ *En caso de no recibir el pago, CashIn podrá aplicar las medidas de recuperación contempladas en tu contrato y la ejecución de garantía.*
 

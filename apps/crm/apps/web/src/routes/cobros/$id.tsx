@@ -1122,6 +1122,7 @@ function RouteComponent() {
 											expectativaMora={caso.expectativaMora || ""}
 											aseguradora={caso.aseguradora || ""}
 											cabinaSeguro={caso.cabinaSeguro || ""}
+											montoTotalAtraso={caso.montoTotalAtraso || ""}
 										>
 											<Button className="flex items-center gap-2">
 												<Phone className="h-4 w-4" />
@@ -1161,6 +1162,7 @@ function RouteComponent() {
 											expectativaMora={caso.expectativaMora || ""}
 											aseguradora={caso.aseguradora || ""}
 											cabinaSeguro={caso.cabinaSeguro || ""}
+											montoTotalAtraso={caso.montoTotalAtraso || ""}
 										>
 											<Button
 												variant="outline"
@@ -1203,6 +1205,7 @@ function RouteComponent() {
 											expectativaMora={caso.expectativaMora || ""}
 											aseguradora={caso.aseguradora || ""}
 											cabinaSeguro={caso.cabinaSeguro || ""}
+											montoTotalAtraso={caso.montoTotalAtraso || ""}
 										>
 											<Button
 												variant="outline"

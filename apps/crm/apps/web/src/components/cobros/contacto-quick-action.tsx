@@ -137,6 +137,7 @@ export function ContactoQuickAction({
 				expectativaMora={d.expectativaMora || ""}
 				aseguradora={d.aseguradora || ""}
 				cabinaSeguro={d.cabinaSeguro || ""}
+				montoTotalAtraso={d.montoTotalAtraso || ""}
 			/>
 		</span>
 	);

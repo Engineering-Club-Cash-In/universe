@@ -545,25 +545,28 @@ export async function ejecutarValidaciones(parametros: {
 	/** El gate reusa un veredicto vigente; el botón manual siempre re-consulta */
 	reusarVigente?: boolean;
 }): Promise<ResultadoEjecucionValidaciones> {
-	// El DPI se lee antes del mutex para que la llave lo incluya: reusar una
-	// validación en curso solo es seguro si ambas llamadas ven el mismo DPI
-	const oportunidad = await cargarOportunidadConLead(parametros.opportunityId);
-	const claveDpi = oportunidad?.leadDpi
-		? normalizarDpi(oportunidad.leadDpi)
-		: "sin-dpi";
-	const clave = `${parametros.opportunityId}:${claveDpi}`;
+	// El DPI se relee en cada vuelta: puede cambiar mientras se espera un
+	// override en curso, y la llave tiene que reflejar el DPI actual antes
+	// de entrar al mutex (mismo patrón que `marcarValidacionManual`)
+	for (;;) {
+		const oportunidad = await cargarOportunidadConLead(
+			parametros.opportunityId,
+		);
+		const claveDpi = oportunidad?.leadDpi
+			? normalizarDpi(oportunidad.leadDpi)
+			: "sin-dpi";
+		const clave = `${parametros.opportunityId}:${claveDpi}`;
 
-	// Espera cualquier override en curso antes de leer/escribir el estado
-	// real; en loop porque puede encadenarse otro mientras se espera
-	let overrideEnCurso = overridesEnCurso.get(clave);
-	while (overrideEnCurso) {
-		await overrideEnCurso.catch(() => undefined);
-		overrideEnCurso = overridesEnCurso.get(clave);
+		const overrideEnCurso = overridesEnCurso.get(clave);
+		if (overrideEnCurso) {
+			await overrideEnCurso.catch(() => undefined);
+			continue;
+		}
+
+		return conMutexDeOportunidad(clave, () =>
+			ejecutarValidacionesInterno(parametros),
+		);
 	}
-
-	return conMutexDeOportunidad(clave, () =>
-		ejecutarValidacionesInterno(parametros),
-	);
 }
 
 async function ejecutarValidacionesInterno({

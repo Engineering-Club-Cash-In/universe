@@ -370,6 +370,34 @@ export const validarDpiRepLegal = (valor: unknown): string | null => {
   return null;
 };
 
+// El DPI del representante debe corresponder a un inversionista que ya exista:
+// desde que este campo concede acceso al portal, un dedazo se lo daría a un
+// tercero. Comparación NUMÉRICA a propósito: "04036613" tiene que encontrar al
+// inversionista con dpi = 4036613 (la columna `dpi` es bigint y no puede
+// guardar el cero a la izquierda, por eso ese caso vive en dpi_rep_legal).
+// Drizzle mapea `dpi` a `number` (mode: "number"), así que arriba de
+// MAX_SAFE_INTEGER la comparación dejaría de ser exacta; `dpi_rep_legal` admite
+// hasta 20 dígitos, y fuera de ese rango no puede existir ningún inversionista.
+const DPI_MAX_COMPARABLE = BigInt(Number.MAX_SAFE_INTEGER);
+
+export const repLegalExiste = async (valor: string): Promise<boolean> => {
+  let comoNumero: bigint;
+  try {
+    comoNumero = BigInt(valor);
+  } catch {
+    return false;
+  }
+  if (comoNumero > DPI_MAX_COMPARABLE) return false;
+
+  const filas = await db
+    .select({ inversionista_id: inversionistas.inversionista_id })
+    .from(inversionistas)
+    .where(eq(inversionistas.dpi, Number(comoNumero)))
+    .limit(1);
+
+  return filas.length > 0;
+};
+
 export const insertInvestor = async ({ body, set }: any) => {
   try {
     const inversionistasToUpsert = Array.isArray(body) ? body : [body];
@@ -378,6 +406,22 @@ export const insertInvestor = async ({ body, set }: any) => {
       set.status = 400;
       return { message: "No se proporcionaron inversionistas para procesar." };
     }
+
+    // El lookup por inversionista_id se hace UNA sola vez y se reusa: la
+    // validación del representante legal necesita el valor ya guardado, y el
+    // bucle de escritura necesita la fila completa.
+    const existentesPorId = new Map<number, any>();
+    const buscarExistentePorId = async (id: number) => {
+      if (existentesPorId.has(id)) return existentesPorId.get(id);
+      const result = await db
+        .select()
+        .from(inversionistas)
+        .where(eq(inversionistas.inversionista_id, id))
+        .limit(1);
+      const fila = result[0] || null;
+      existentesPorId.set(id, fila);
+      return fila;
+    };
 
     // 🔥 Validación flexible
     const errores: string[] = [];
@@ -404,6 +448,27 @@ export const insertInvestor = async ({ body, set }: any) => {
       const errorDpiRepLegal = validarDpiRepLegal(inv.dpi_rep_legal);
       if (errorDpiRepLegal) {
         errores.push(`Inversionista #${index + 1}: ${errorDpiRepLegal}`);
+      } else {
+        // Solo se verifica contra la BD cuando el valor CAMBIA. Si no viene la
+        // llave, o viene igual al guardado, no se toca: hay filas históricas
+        // (ej. el inversionista 187, "04036613") que no cumplirían la regla y
+        // deben poder seguir editándose.
+        const nuevoRepLegal = normalizarDpiRepLegal(inv.dpi_rep_legal);
+        if (typeof inv.dpi_rep_legal !== "undefined" && nuevoRepLegal !== null) {
+          const existente = inv.inversionista_id
+            ? await buscarExistentePorId(Number(inv.inversionista_id))
+            : null;
+          const guardado = existente?.dpi_rep_legal ?? null;
+
+          if (
+            guardado !== nuevoRepLegal &&
+            !(await repLegalExiste(nuevoRepLegal))
+          ) {
+            errores.push(
+              `Inversionista #${index + 1}: el DPI de representante legal ${nuevoRepLegal} no existe como inversionista`
+            );
+          }
+        }
       }
 
       // Si viene banco_id directamente, validar que exista
@@ -489,12 +554,7 @@ export const insertInvestor = async ({ body, set }: any) => {
 
       // Buscar por inversionista_id primero (para ediciones directas)
       if (inv.inversionista_id) {
-        const result = await db
-          .select()
-          .from(inversionistas)
-          .where(eq(inversionistas.inversionista_id, Number(inv.inversionista_id)))
-          .limit(1);
-        existente = result[0] || null;
+        existente = await buscarExistentePorId(Number(inv.inversionista_id));
 
         if (!existente) {
           set.status = 404;
@@ -5704,6 +5764,31 @@ export const updateInvestor = async ({ body, set }: any) => {
       if (errorDpiRepLegal) {
         set.status = 400;
         return { message: errorDpiRepLegal };
+      }
+
+      // Igual que en insertInvestor: el representante debe existir, y solo se
+      // verifica cuando el valor CAMBIA, para no trabar la edición de las filas
+      // históricas que no cumplirían la regla.
+      const nuevoRepLegal = normalizarDpiRepLegal(inv.dpi_rep_legal);
+      if (typeof inv.dpi_rep_legal !== "undefined" && nuevoRepLegal !== null) {
+        const [existente] = await db
+          .select()
+          .from(inversionistas)
+          .where(
+            eq(inversionistas.inversionista_id, Number(inv.inversionista_id))
+          )
+          .limit(1);
+        const guardado = existente?.dpi_rep_legal ?? null;
+
+        if (
+          guardado !== nuevoRepLegal &&
+          !(await repLegalExiste(nuevoRepLegal))
+        ) {
+          set.status = 400;
+          return {
+            message: `El DPI de representante legal ${nuevoRepLegal} no existe como inversionista`,
+          };
+        }
       }
     }
 

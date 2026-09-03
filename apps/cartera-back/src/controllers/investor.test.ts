@@ -202,6 +202,8 @@ describe("insertInvestor", () => {
   });
 
   it("persiste dpi_rep_legal al crear un inversionista nuevo", async () => {
+    // La 1ª respuesta es la de la búsqueda del representante: debe existir.
+    selectResponses = [[{ inversionista_id: 1 }]];
     const set = { status: 200 };
 
     await insertInvestor({
@@ -218,6 +220,8 @@ describe("insertInvestor", () => {
   });
 
   it("conserva los ceros a la izquierda del dpi_rep_legal", async () => {
+    // El representante "04036613" existe como inversionista con dpi 4036613.
+    selectResponses = [[{ inversionista_id: 1 }]];
     const set = { status: 200 };
 
     await insertInvestor({
@@ -248,7 +252,9 @@ describe("insertInvestor", () => {
   });
 
   it("actualiza dpi_rep_legal en el upsert de un inversionista existente", async () => {
-    selectResponses = [[existingInvestor]];
+    // 1ª: el inversionista a editar (su dpi_rep_legal guardado va vacío, así que
+    // el valor cambia). 2ª: la búsqueda del representante, que sí existe.
+    selectResponses = [[existingInvestor], [{ inversionista_id: 1 }]];
     const set = { status: 200 };
 
     await insertInvestor({
@@ -300,6 +306,44 @@ describe("insertInvestor", () => {
     expect(lastUpdateData?.dpi_rep_legal).toBeNull();
   });
 
+  it("rechaza un dpi_rep_legal que no existe como inversionista", async () => {
+    // 1ª respuesta: la búsqueda de existencia del representante → vacía
+    selectResponses = [[]];
+    const set = { status: 200 };
+
+    const result = await insertInvestor({
+      body: {
+        operation: "CREATE",
+        nombre: "Empresa Nueva S.A.",
+        dpi_rep_legal: "9999999999999",
+      },
+      set,
+    });
+
+    expect(set.status).toBe(400);
+    expect(result.errores?.[0]).toContain("no existe como inversionista");
+    expect(insertWasCalled).toBeFalse();
+  });
+
+  it("no revalida dpi_rep_legal cuando el valor no cambió", async () => {
+    // Solo la respuesta del lookup del inversionista existente: si el código
+    // intentara verificar al representante, consumiría otra y fallaría.
+    selectResponses = [[{ ...existingInvestor, dpi_rep_legal: "04036613" }]];
+    const set = { status: 200 };
+
+    await insertInvestor({
+      body: {
+        inversionista_id: existingInvestor.inversionista_id,
+        nombre: "Javier Camilo Kafie Guardado",
+        dpi_rep_legal: "04036613",
+      },
+      set,
+    });
+
+    expect(set.status).toBe(201);
+    expect(updateWasCalled).toBeTrue();
+  });
+
   it("rechaza dpi_rep_legal que no sea solo dígitos", async () => {
     const set = { status: 200 };
 
@@ -345,6 +389,9 @@ describe("updateInvestor", () => {
   });
 
   it("actualiza dpi_rep_legal", async () => {
+    // 1ª: el inversionista a editar (sin dpi_rep_legal guardado, el valor
+    // cambia). 2ª: la búsqueda del representante, que sí existe.
+    selectResponses = [[existingInvestor], [{ inversionista_id: 76 }]];
     const set = { status: 200 };
 
     await updateInvestor({
@@ -372,6 +419,41 @@ describe("updateInvestor", () => {
 
     expect(updateWasCalled).toBeTrue();
     expect("dpi_rep_legal" in lastUpdateData!).toBeFalse();
+  });
+
+  it("rechaza en updateInvestor un dpi_rep_legal inexistente", async () => {
+    selectResponses = [[]];
+    const set = { status: 200 };
+
+    const result = await updateInvestor({
+      body: {
+        inversionista_id: existingInvestor.inversionista_id,
+        dpi_rep_legal: "9999999999999",
+      },
+      set,
+    });
+
+    expect(set.status).toBe(400);
+    expect(result.message).toContain("no existe como inversionista");
+    expect(updateWasCalled).toBeFalse();
+  });
+
+  it("no revalida dpi_rep_legal cuando el valor no cambió", async () => {
+    // Solo la respuesta del inversionista guardado: si el código verificara al
+    // representante consumiría otra, la vería vacía y rechazaría.
+    selectResponses = [[{ ...existingInvestor, dpi_rep_legal: "04036613" }]];
+    const set = { status: 200 };
+
+    await updateInvestor({
+      body: {
+        inversionista_id: existingInvestor.inversionista_id,
+        dpi_rep_legal: "04036613",
+      },
+      set,
+    });
+
+    expect(set.status).toBe(200);
+    expect(updateWasCalled).toBeTrue();
   });
 
   it("rechaza dpi_rep_legal inválido sin escribir nada", async () => {

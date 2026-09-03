@@ -58,7 +58,7 @@ describe("plantillas masivas de cobros", () => {
 
 			const ultimoBloque = bloques(plantilla.cuerpo).at(-1) ?? "";
 			expect(ultimoBloque, plantilla.id).toContain(NO_REPLY_WARNING);
-			expect(ultimoBloque.endsWith("CashIn"), plantilla.id).toBe(true);
+			expect(ultimoBloque.endsWith("*CashIn*"), plantilla.id).toBe(true);
 		}
 	});
 
@@ -146,16 +146,16 @@ describe("plantillas masivas de cobros", () => {
 
 		// Sin variables del seguro cae al default Universales.
 		const mensajeDefault = interpolar(bienvenida?.cuerpo ?? "", base);
-		expect(mensajeDefault).toContain("a través de Seguros Universales.");
-		expect(mensajeDefault).toContain("cabina de emergencia al 2384-7400,");
+		expect(mensajeDefault).toContain("a través de Seguros Universales.*");
+		expect(mensajeDefault).toContain("cabina de emergencia al 2384-7400*,");
 
 		// Con la aseguradora de la opp sale la variante G&T, y sigue en 5 bloques.
 		const mensajeGyt = interpolar(bienvenida?.cuerpo ?? "", {
 			...base,
 			...seguroPorAseguradora("gyt"),
 		});
-		expect(mensajeGyt).toContain("a través de Seguro GYT.");
-		expect(mensajeGyt).toContain("cabina de emergencia al 1778,");
+		expect(mensajeGyt).toContain("a través de Seguro GYT.*");
+		expect(mensajeGyt).toContain("cabina de emergencia al 1778*,");
 		expect(bloques(mensajeGyt)).toHaveLength(5);
 	});
 
@@ -204,17 +204,17 @@ describe("plantillas masivas de cobros", () => {
 
 		expect(plantilla?.nombre).toBe("Impuesto de circulación");
 		expect(plantilla?.cuerpo).toBe(`Hola 👋
-Te recordamos realizar el pago de tu Impuesto de Circulación {anioImpuesto}.
-⏰ Fecha límite: {fechaLimiteImpuesto} a las 5:00 p.m.
+Te recordamos realizar el pago de tu *Impuesto de Circulación {anioImpuesto}*.
+⏰ Fecha límite: *{fechaLimiteImpuesto} a las 5:00 p.m.*
 
-🛑 En caso de no realizar el pago, CashIn lo realizará y te cobrará las multas y gastos administrativos adicionales.
+🛑 *En caso de no realizar el pago, CashIn lo realizará y te cobrará las multas y gastos administrativos adicionales.*
 
 ✅ Al realizar el pago, comparte el comprobante con tu asesor antes de la hora límite:
-{nombreAsesor} - Asesor de Cobros
+*{nombreAsesor} - Asesor de Cobros*
 {telefonoAsesor}
 
-${COBROS_NO_REPLY_WARNING}
-CashIn`);
+*${COBROS_NO_REPLY_WARNING}*
+*CashIn*`);
 		expect(bloques(plantilla?.cuerpo ?? "")).toHaveLength(4);
 	});
 
@@ -250,10 +250,10 @@ CashIn`);
 		});
 
 		expect(mensaje).toContain(
-			`Impuesto de Circulación ${anioImpuestoCirculacion()}.`,
+			`Impuesto de Circulación ${anioImpuestoCirculacion()}*.`,
 		);
 		expect(mensaje).toContain(
-			`⏰ Fecha límite: ${fechaLimiteImpuestoCirculacion()} a las 5:00 p.m.`,
+			`⏰ Fecha límite: *${fechaLimiteImpuestoCirculacion()} a las 5:00 p.m.*`,
 		);
 		expect(mensaje).not.toContain("{anioImpuesto}");
 		expect(mensaje).not.toContain("{fechaLimiteImpuesto}");
@@ -278,7 +278,7 @@ CashIn`);
 
 		expect(mensaje).toContain("Hola Maria Lopez");
 		expect(mensaje).toContain("por un monto de Q2,528.00");
-		expect(mensaje).toContain("Carlos Pérez - Asesor de Cobros\n41286630");
+		expect(mensaje).toContain("Carlos Pérez - Asesor de Cobros*\n41286630");
 		expect(mensaje.match(/notificaciones automáticas/g)?.length).toBe(1);
 	});
 

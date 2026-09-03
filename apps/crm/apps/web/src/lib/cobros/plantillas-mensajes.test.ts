@@ -69,7 +69,7 @@ describe("plantillas web de cobros", () => {
 
 			const ultimoBloque = bloques(cuerpoWhatsappDe(plantilla)).at(-1) ?? "";
 			expect(ultimoBloque, plantilla.id).toContain(NO_REPLY_WARNING);
-			expect(ultimoBloque.endsWith("CashIn"), plantilla.id).toBe(true);
+			expect(ultimoBloque.endsWith("*CashIn*"), plantilla.id).toBe(true);
 		}
 	});
 
@@ -291,12 +291,12 @@ describe("plantillas web de cobros", () => {
 		// El año y la fecha límite se calculan al interpolar (año vigente en
 		// Guatemala) para que la plantilla no quede vencida de un año al otro.
 		expect(mensaje).toContain(
-			`Impuesto de Circulación ${anioImpuestoCirculacion()}.`,
+			`Impuesto de Circulación ${anioImpuestoCirculacion()}*.`,
 		);
 		expect(mensaje).toContain(
-			`⏰ Fecha límite: ${fechaLimiteImpuestoCirculacion()} a las 5:00 p.m.`,
+			`⏰ Fecha límite: *${fechaLimiteImpuestoCirculacion()} a las 5:00 p.m.*`,
 		);
-		expect(mensaje).toContain("Carlos Pérez - Asesor de Cobros\n41286630");
+		expect(mensaje).toContain("Carlos Pérez - Asesor de Cobros*\n41286630");
 		expect(mensaje.match(/notificaciones automáticas/g)?.length).toBe(1);
 		expect(cuerpoWhatsapp).toContain(COBROS_NO_REPLY_WARNING);
 	});
@@ -366,8 +366,8 @@ describe("plantillas web de cobros", () => {
 
 		// Sin datos del server cae al default Universales.
 		const mensajeDefault = interpolar(bienvenida?.cuerpoWhastapp ?? "", base);
-		expect(mensajeDefault).toContain("a través de Seguros Universales.");
-		expect(mensajeDefault).toContain("cabina de emergencia al 2384-7400,");
+		expect(mensajeDefault).toContain("a través de Seguros Universales.*");
+		expect(mensajeDefault).toContain("cabina de emergencia al 2384-7400*,");
 
 		// Con los datos que manda getDetallesCreditoCarteraBack sale G&T.
 		const mensajeGyt = interpolar(bienvenida?.cuerpoWhastapp ?? "", {
@@ -375,7 +375,7 @@ describe("plantillas web de cobros", () => {
 			aseguradora: "Seguro GYT",
 			cabinaSeguro: "1778",
 		});
-		expect(mensajeGyt).toContain("a través de Seguro GYT.");
-		expect(mensajeGyt).toContain("cabina de emergencia al 1778,");
+		expect(mensajeGyt).toContain("a través de Seguro GYT.*");
+		expect(mensajeGyt).toContain("cabina de emergencia al 1778*,");
 	});
 });

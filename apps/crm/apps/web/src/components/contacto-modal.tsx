@@ -5,15 +5,18 @@ import { es } from "date-fns/locale";
 import {
 	CalendarIcon,
 	ChevronDown,
+	Eye,
 	Loader2,
 	Mail,
 	MessageCircle,
 	MessageSquare,
+	Pencil,
 	Phone,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
+import { WhatsappPreview } from "@/components/cobros/whatsapp-preview";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -52,11 +55,11 @@ import {
 	accionUsaCuerpoNoReply,
 	crearUrlWhatsappManual,
 	cuerpoParaValidarNoReply,
+	fechaLimiteImpuestoVencida,
 	interpolar,
 	mensajeEmailEditable,
 	mensajePlantillaEditable,
 	mensajeSmsEditable,
-	fechaLimiteImpuestoVencida,
 	PLANTILLAS_MENSAJES,
 	plantillaRequiereExpectativaMora,
 	plantillaUsaFechaLimiteImpuesto,
@@ -146,6 +149,9 @@ export function ContactoModal({
 	const [mensajeEditado, setMensajeEditado] = useState("");
 	const [mensajeWhatsappEditado, setMensajeWhatsappEditado] = useState("");
 	const [asuntoEditado, setAsuntoEditado] = useState("");
+	// El WhatsApp arranca en vista previa (sin asteriscos a la vista);
+	// "Editar mensaje" abre el textarea.
+	const [editandoWhatsapp, setEditandoWhatsapp] = useState(false);
 
 	const telefonoAsesorLimpio = telefonoAsesor.trim();
 
@@ -186,6 +192,7 @@ export function ContactoModal({
 	useEffect(() => {
 		const sugerida = sugerirPlantilla(estadoMora, fechaInicio);
 		setPlantillaId(sugerida);
+		setEditandoWhatsapp(false);
 		const plantilla = PLANTILLAS_MENSAJES.find((p) => p.id === sugerida);
 		if (plantilla) {
 			setMensajeEditado(interpolar(plantilla.cuerpo, variables));
@@ -198,6 +205,7 @@ export function ContactoModal({
 
 	const handlePlantillaChange = (id: string) => {
 		setPlantillaId(id);
+		setEditandoWhatsapp(false);
 		const plantilla = PLANTILLAS_MENSAJES.find((p) => p.id === id);
 		if (plantilla) {
 			setMensajeEditado(interpolar(plantilla.cuerpo, variables));
@@ -607,7 +615,57 @@ export function ContactoModal({
 									</div>
 								)}
 
-								{plantillaId && (
+								{plantillaId && metodoInicial === "whatsapp" && (
+									<div className="space-y-2">
+										<div className="flex items-center justify-between gap-2">
+											<Label>Mensaje</Label>
+											<Button
+												type="button"
+												size="sm"
+												variant={editandoWhatsapp ? "outline" : "default"}
+												className="gap-1.5"
+												onClick={() => setEditandoWhatsapp((v) => !v)}
+											>
+												{editandoWhatsapp ? (
+													<>
+														<Eye className="h-3.5 w-3.5" />
+														Ver como lo verá el cliente
+													</>
+												) : (
+													<>
+														<Pencil className="h-3.5 w-3.5" />
+														Editar mensaje
+													</>
+												)}
+											</Button>
+										</div>
+										{editandoWhatsapp ? (
+											<>
+												<Textarea
+													className="min-h-[150px] text-sm"
+													value={mensajeEditable}
+													onChange={(e) =>
+														handleMensajeEditableChange(e.target.value)
+													}
+												/>
+												<p className="text-muted-foreground text-xs">
+													El texto entre asteriscos (<code>*así*</code>) sale en{" "}
+													<strong>negrita</strong> en WhatsApp; los asteriscos
+													no se ven en el mensaje final.
+												</p>
+											</>
+										) : (
+											<>
+												<WhatsappPreview mensaje={mensajeEditable} />
+												<p className="text-muted-foreground text-xs">
+													Así lo verá el cliente en WhatsApp.
+												</p>
+											</>
+										)}
+									</div>
+								)}
+
+								{plantillaId && metodoInicial !== "whatsapp" && (
 									<div className="space-y-2">
 										<Label>Mensaje (editable)</Label>
 										<Textarea

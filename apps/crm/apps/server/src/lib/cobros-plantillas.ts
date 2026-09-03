@@ -261,29 +261,29 @@ export const PLANTILLAS_MENSAJES: PlantillaMensaje[] = [
 		asunto: "Bienvenido/a a su plan de financiamiento",
 		// 5 bloques → template `mensaje5parametro`.
 		cuerpo: `Hola {clienteNombre} 👋
-¡Bienvenido(a) a CashIn! Nos alegra acompañarte en el financiamiento de tu vehículo.
+¡Bienvenido(a) a *CashIn*! Nos alegra acompañarte en el financiamiento de tu vehículo.
 
-📅 Información de tu cuota
-Día de pago mensual: {fechaPago}
-Monto de cuota: Q{cuotaMensual}
+📅 *Información de tu cuota*
+Día de pago mensual: *{fechaPago}*
+Monto de cuota: *Q{cuotaMensual}*
 
 💳 *Cuentas para realizar tus pagos*
-*Tipo: Monetaria*
-*A nombre de: CUBE INVESTMENTS, S.A.*
+Tipo: *Monetaria*
+A nombre de: *CUBE INVESTMENTS, S.A.*
 * BI: 5520029876
 * BAM: 3020123033
 * GyT: 01300039945
 * Banrural: 3394002346
 
-🚗 Tu vehículo cuenta con seguro completo a través de {aseguradora}.
-En caso de accidente o cualquier inconveniente con tu vehículo, llama a la cabina de emergencia al {cabinaSeguro}, identificándote únicamente con el número de placa.
+🚗 *Tu vehículo cuenta con seguro completo a través de {aseguradora}.*
+*En caso de accidente o cualquier inconveniente con tu vehículo, llama a la cabina de emergencia al {cabinaSeguro}*, identificándote únicamente con el número de placa.
 Para seguimiento de trámites con el seguro:
 ✅ Luis Escobar: 4388-7300
 ✅ Maylin Barrios: 4770-7074
 
 Si tienes alguna consulta, con gusto estamos para apoyarte. Agradeceremos confirmar la recepción de este mensaje.
-{nombreAsesor} - Asesor de Cobros
-CashIn`,
+*{nombreAsesor} - Asesor de Cobros*
+*CashIn*`,
 	},
 	{
 		id: "al_dia",
@@ -292,17 +292,17 @@ CashIn`,
 		asunto: "Recordatorio de pago - Vehículo {placa}",
 		// 4 bloques → template `mensaje4parametro`.
 		cuerpo: `Hola {clienteNombre} 👋
-Te recordamos que hoy es la fecha de pago de tu cuota, por un monto de Q{cuotaMensual}. Agradeceremos realizar tu pago y compartir tu comprobante para aplicarlo a tu cuenta.
+Te recordamos que *hoy es la fecha de pago de tu cuota, por un monto de Q{cuotaMensual}*. Agradeceremos realizar tu pago y compartir tu comprobante para aplicarlo a tu cuenta.
 
-🛑 Si no realizas tu pago hoy, se agregará un recargo por mora de Q{expectativaMora}.
+🛑 *Si no realizas tu pago hoy, se agregará un recargo por mora de Q{expectativaMora}.*
 
 📞 Si necesitas apoyo, comunícate con tu asesor:
-{nombreAsesor} - Asesor de Cobros
+*{nombreAsesor} - Asesor de Cobros*
 {telefonoAsesor}
 
 🚗 Si ya realizó su pago, agradecemos hacer caso omiso a este recordatorio.
-${COBROS_NO_REPLY_WARNING}
-CashIn`,
+*${COBROS_NO_REPLY_WARNING}*
+*CashIn*`,
 	},
 	{
 		id: "impuesto_circulacion_2026",
@@ -311,17 +311,17 @@ CashIn`,
 		asunto: "Recordatorio de pago - Impuesto de circulación {anioImpuesto}",
 		// 4 bloques → template `mensaje4parametro`.
 		cuerpo: `Hola 👋
-Te recordamos realizar el pago de tu Impuesto de Circulación {anioImpuesto}.
-⏰ Fecha límite: {fechaLimiteImpuesto} a las 5:00 p.m.
+Te recordamos realizar el pago de tu *Impuesto de Circulación {anioImpuesto}*.
+⏰ Fecha límite: *{fechaLimiteImpuesto} a las 5:00 p.m.*
 
-🛑 En caso de no realizar el pago, CashIn lo realizará y te cobrará las multas y gastos administrativos adicionales.
+🛑 *En caso de no realizar el pago, CashIn lo realizará y te cobrará las multas y gastos administrativos adicionales.*
 
 ✅ Al realizar el pago, comparte el comprobante con tu asesor antes de la hora límite:
-{nombreAsesor} - Asesor de Cobros
+*{nombreAsesor} - Asesor de Cobros*
 {telefonoAsesor}
 
-${COBROS_NO_REPLY_WARNING}
-CashIn`,
+*${COBROS_NO_REPLY_WARNING}*
+*CashIn*`,
 	},
 	{
 		id: "pre_mora",
@@ -330,15 +330,15 @@ CashIn`,
 		asunto: "Recordatorio de pago próximo - Vehículo {placa}",
 		// 3 bloques → template `mensaje3parametro`.
 		cuerpo: `Hola {clienteNombre} 👋
-Te saludamos de CashIn para recordarte que tu próxima cuota tiene fecha de pago el {fechaPago}.
+Te saludamos de *CashIn* para recordarte que tu próxima cuota tiene fecha de pago el *{fechaPago}*.
 
 📞 Para consultas o apoyo con tu cuenta, comunícate directamente con tu asesor de cobros:
-{nombreAsesor} - Asesor de Cobros
+*{nombreAsesor} - Asesor de Cobros*
 {telefonoAsesor}
 
 🚗 Si ya realizó su pago, agradecemos hacer caso omiso a este recordatorio.
 ${COBROS_NO_REPLY_WARNING}
-CashIn`,
+*CashIn*`,
 	},
 	{
 		id: "mora_30",
@@ -347,16 +347,16 @@ CashIn`,
 		asunto: "URGENTE: Mora de 30 días - Vehículo {placa}",
 		// 4 bloques → template `mensaje4parametro`.
 		cuerpo: `Hola {clienteNombre} 👋
-Tienes 1 cuota con atraso por un monto de Q{montoAdeudado}.
+Tienes *1 cuota con atraso por un monto de Q{montoAdeudado}*.
 
 Es importante que realices tu pago lo antes posible para evitar mayores recargos en tu cuenta.
 
 📲 Al realizar el pago, comparte el comprobante con tu asesor:
-{nombreAsesor} - Asesor de Cobros
+*{nombreAsesor} - Asesor de Cobros*
 {telefonoAsesor}
 
-${COBROS_NO_REPLY_WARNING}
-CashIn`,
+*${COBROS_NO_REPLY_WARNING}*
+*CashIn*`,
 	},
 	{
 		id: "mora_60",
@@ -365,16 +365,16 @@ CashIn`,
 		asunto: "AVISO IMPORTANTE: Mora de 60 días - Vehículo {placa}",
 		// 4 bloques → template `mensaje4parametro`.
 		cuerpo: `Hola {clienteNombre},
-Te informamos que actualmente tienes {cuotasAtraso} cuotas en atraso, por un monto total de Q{montoAdeudado}.
+Te informamos que actualmente tienes *{cuotasAtraso} cuotas en atraso, por un monto total de Q{montoAdeudado}*.
 
-⚠️ En caso de no recibir el pago, CashIn podrá aplicar las medidas de recuperación contempladas en tu contrato y la ejecución de garantía.
+⚠️ *En caso de no recibir el pago, CashIn podrá aplicar las medidas de recuperación contempladas en tu contrato y la ejecución de garantía.*
 
 ✅ Al realizar el pago, comparte el comprobante con tu asesor:
-{nombreAsesor} - Asesor de Cobros
+*{nombreAsesor} - Asesor de Cobros*
 {telefonoAsesor}
 
-${COBROS_NO_REPLY_WARNING}
-CashIn`,
+*${COBROS_NO_REPLY_WARNING}*
+*CashIn*`,
 	},
 	{
 		id: "aviso_juridico",

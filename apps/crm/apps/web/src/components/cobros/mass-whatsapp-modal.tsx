@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { MessageCircle, Send } from "lucide-react";
+import { Eye, MessageCircle, Pencil, Send } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -24,6 +24,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { PLANTILLAS_MENSAJES } from "@/lib/cobros/plantillas-mensajes";
 import { client } from "@/utils/orpc";
+import { WhatsappPreview } from "./whatsapp-preview";
 
 const VARIABLES_DISPONIBLES = [
 	"clienteNombre",
@@ -140,6 +141,13 @@ export function MassWhatsappModal({
 		DescartadoItem[] | null
 	>(null);
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
+	// El mensaje arranca en modo lectura (vista previa estilo WhatsApp) para no
+	// confundir con los asteriscos de negrita; "Editar mensaje" abre el textarea.
+	const [editando, setEditando] = useState(false);
+
+	useEffect(() => {
+		if (editando) textareaRef.current?.focus();
+	}, [editando]);
 
 	const insertarVariable = (variable: string) => {
 		const token = `{${variable}}`;
@@ -170,6 +178,7 @@ export function MassWhatsappModal({
 	// Pre-poblar el textarea con el cuerpoWhastapp (versión corta aprobada en
 	// Meta) cuando cambia la plantilla. Si no existe, caemos al cuerpo largo.
 	useEffect(() => {
+		setEditando(false);
 		if (!plantillaSeleccionada) {
 			setCuerpoEditado("");
 			return;
@@ -254,35 +263,93 @@ export function MassWhatsappModal({
 						{plantillaSeleccionada ? (
 							<>
 								<div className="space-y-2">
-									<div className="flex items-center justify-between">
+									<div className="flex items-center justify-between gap-2">
 										<Label htmlFor="cuerpo-editado">Mensaje a enviar</Label>
-										<button
-											type="button"
-											onClick={() =>
-												setCuerpoEditado(
-													plantillaSeleccionada.cuerpoWhastapp ||
-														plantillaSeleccionada.cuerpo,
-												)
-											}
-											className="text-muted-foreground text-xs underline-offset-2 hover:text-foreground hover:underline"
-										>
-											Restaurar plantilla original
-										</button>
+										<div className="flex items-center gap-3">
+											{editando && (
+												<button
+													type="button"
+													onClick={() =>
+														setCuerpoEditado(
+															plantillaSeleccionada.cuerpoWhastapp ||
+																plantillaSeleccionada.cuerpo,
+														)
+													}
+													className="text-muted-foreground text-xs underline-offset-2 hover:text-foreground hover:underline"
+												>
+													Restaurar plantilla original
+												</button>
+											)}
+											<Button
+												type="button"
+												size="sm"
+												variant={editando ? "outline" : "default"}
+												className="gap-1.5"
+												onClick={() => setEditando((v) => !v)}
+											>
+												{editando ? (
+													<>
+														<Eye className="h-3.5 w-3.5" />
+														Ver como lo verá el cliente
+													</>
+												) : (
+													<>
+														<Pencil className="h-3.5 w-3.5" />
+														Editar mensaje
+													</>
+												)}
+											</Button>
+										</div>
 									</div>
-									<Textarea
-										ref={textareaRef}
-										id="cuerpo-editado"
-										className="min-h-55 text-sm"
-										value={cuerpoEditado}
-										onChange={(e) => setCuerpoEditado(e.target.value)}
-									/>
-									<p className="text-muted-foreground text-xs">
-										Separá con <strong>una línea en blanco</strong> para crear
-										un nuevo párrafo (= un parámetro del template). Mínimo 1,
-										máximo 5. Las variables entre <code>{"{llaves}"}</code> se
-										reemplazan por los datos reales de cada crédito; si una
-										variable no existe o queda mal escrita, se manda literal.
-									</p>
+
+									{editando ? (
+										<>
+											<Textarea
+												ref={textareaRef}
+												id="cuerpo-editado"
+												className="min-h-55 text-sm"
+												value={cuerpoEditado}
+												onChange={(e) => setCuerpoEditado(e.target.value)}
+											/>
+											<p className="text-muted-foreground text-xs">
+												Separá con <strong>una línea en blanco</strong> para
+												crear un nuevo párrafo (= un parámetro del template).
+												Mínimo 1, máximo 5. Las variables entre{" "}
+												<code>{"{llaves}"}</code> se reemplazan por los datos
+												reales de cada crédito; si una variable no existe o
+												queda mal escrita, se manda literal. El texto entre
+												asteriscos (<code>*así*</code>) sale en{" "}
+												<strong>negrita</strong> en WhatsApp — los asteriscos no
+												se ven en el mensaje final.
+											</p>
+											<div className="flex flex-wrap gap-1">
+												{VARIABLES_DISPONIBLES.map((v) => (
+													<button
+														key={v}
+														type="button"
+														onClick={() => insertarVariable(v)}
+														className="cursor-pointer rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+														title={`Insertar {${v}} en la posición del cursor`}
+													>
+														{`{${v}}`}
+													</button>
+												))}
+											</div>
+										</>
+									) : (
+										<>
+											<WhatsappPreview
+												mensaje={cuerpoEditado}
+												className="min-h-55"
+											/>
+											<p className="text-muted-foreground text-xs">
+												Así lo verá el cliente en WhatsApp. Las variables entre{" "}
+												<code>{"{llaves}"}</code> se reemplazan por los datos
+												reales de cada crédito al enviar.
+											</p>
+										</>
+									)}
+
 									{(cuerpoEditado.includes("{aseguradora}") ||
 										cuerpoEditado.includes("{cabinaSeguro}")) && (
 										<p className="rounded-md border border-primary/30 bg-primary/5 p-2 text-muted-foreground text-xs">
@@ -294,19 +361,6 @@ export function MassWhatsappModal({
 											cabina 1778).
 										</p>
 									)}
-									<div className="flex flex-wrap gap-1">
-										{VARIABLES_DISPONIBLES.map((v) => (
-											<button
-												key={v}
-												type="button"
-												onClick={() => insertarVariable(v)}
-												className="cursor-pointer rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-												title={`Insertar {${v}} en la posición del cursor`}
-											>
-												{`{${v}}`}
-											</button>
-										))}
-									</div>
 								</div>
 
 								<div className="grid gap-3 md:grid-cols-2">

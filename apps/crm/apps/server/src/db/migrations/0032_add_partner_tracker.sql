@@ -25,5 +25,5 @@ CREATE TABLE IF NOT EXISTS "public"."partner_accounts" (
 );--> statement-breakpoint
 
 INSERT INTO "public"."partner_accounts" ("user_id")
-SELECT "id" FROM "public"."user" WHERE "role" = 'partner'
+SELECT "id" FROM "public"."user" WHERE "role"::text = 'partner'
 ON CONFLICT ("user_id") DO NOTHING;

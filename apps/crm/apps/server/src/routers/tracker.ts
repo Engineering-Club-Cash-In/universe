@@ -1,5 +1,16 @@
 import { ORPCError } from "@orpc/server";
-import { and, desc, eq, gte, inArray, or, sql } from "drizzle-orm";
+import {
+	and,
+	desc,
+	eq,
+	gte,
+	inArray,
+	isNotNull,
+	isNull,
+	like,
+	or,
+	sql,
+} from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { db } from "../db";
@@ -12,6 +23,7 @@ import {
 } from "../db/schema/crm";
 import { partnerAccounts } from "../db/schema/partners";
 import { quotations } from "../db/schema/quotations";
+import { notifications } from "../db/schema/notifications";
 import { vehicles } from "../db/schema/vehicles";
 import { partnerIdentityProcedure, partnerProcedure } from "../lib/orpc";
 import { partnerAuth } from "../lib/partner-auth";
@@ -70,6 +82,27 @@ const ultimaCotizacion = db
 	)
 	.as("ultima_cotizacion");
 
+// El CRM persiste esta notificaciÃ³n cuando contabilidad confirma que el
+// desembolso fue completado. No usamos `status = won`, porque ese estado se
+// asigna antes, al crear el crÃ©dito en cartera-back.
+const desembolsosCompletados = db
+	.select({
+		opportunityId: notifications.relatedEntityId,
+		completedAt: sql<Date>`min(${notifications.createdAt})`.as("completed_at"),
+	})
+	.from(notifications)
+	.where(
+		and(
+			eq(notifications.type, "aviso"),
+			inArray(notifications.createdByRole, ["accounting", "admin"]),
+			eq(notifications.assignedToRole, "sales"),
+			eq(notifications.relatedEntityType, "opportunity_client"),
+			like(notifications.titulo, "Desembolso completado -%"),
+		),
+	)
+	.groupBy(notifications.relatedEntityId)
+	.as("desembolsos_completados");
+
 const filaSelect = {
 	id: opportunities.id,
 	status: opportunities.status,
@@ -86,6 +119,8 @@ const filaSelect = {
 		quotationLine: ultimaCotizacion.vehicleLine,
 		quotationModel: ultimaCotizacion.vehicleModel,
 		vehicleValue: ultimaCotizacion.vehicleValue,
+		disbursementCompleted: sql<boolean>`(${desembolsosCompletados.opportunityId} IS NOT NULL)`,
+		disbursementCompletedAt: desembolsosCompletados.completedAt,
 };
 
 type Fila = {
@@ -104,6 +139,8 @@ type Fila = {
 	quotationLine: string | null;
 	quotationModel: string | null;
 	vehicleValue: string | null;
+	disbursementCompleted: boolean;
+	disbursementCompletedAt: Date | null;
 };
 
 function nombreCliente(firstName: string | null, lastName: string | null) {
@@ -130,14 +167,16 @@ function descripcionVehiculo(fila: Fila) {
 	return deCotizacion || null;
 }
 
-// El desembolso lo confirma el cierre de la oportunidad, no la etapa: al
-// aprobar el checklist la oportunidad pasa a 100% pero sigue `open` mientras
-// contabilidad ejecuta el pago. Anunciar "desembolsado" ahí sería mentirle al
-// socio, así que un 100% abierto se muestra como en proceso.
-function estadoDeCaso(status: string): EstadoCaso {
+// `won` se asigna cuando se crea el crédito, antes de que contabilidad ejecute
+// el pago. El tracker solo anuncia el desembolso cuando existe la notificación
+// persistida de confirmación; hasta entonces el caso sigue en proceso.
+function estadoDeCaso(
+	status: string,
+	disbursementCompleted: boolean,
+): EstadoCaso {
 	if (status === "lost") return "rechazado";
 	if (status === "on_hold") return "en_pausa";
-	if (status === "won") return "desembolsado";
+	if (status === "won" && disbursementCompleted) return "desembolsado";
 	return "en_proceso";
 }
 
@@ -202,8 +241,10 @@ function aCaso(fila: Fila, historial: EntradaHistorial[]): CasoTracker {
 			fila.vehicleValue === null ? null : Number(fila.vehicleValue),
 		pasoActual,
 		porcentaje: fila.closurePercentage,
-		estado: estadoDeCaso(fila.status),
-		cerrado: fila.status === "won" || fila.status === "lost",
+		estado: estadoDeCaso(fila.status, fila.disbursementCompleted),
+		cerrado:
+			fila.status === "lost" ||
+			(fila.status === "won" && fila.disbursementCompleted),
 		actualizadoAt: fila.updatedAt.toISOString(),
 		historial,
 	};
@@ -220,6 +261,10 @@ const consultaBase = () =>
 		.leftJoin(
 			ultimaCotizacion,
 			eq(ultimaCotizacion.opportunityId, opportunities.id),
+		)
+		.leftJoin(
+			desembolsosCompletados,
+			eq(desembolsosCompletados.opportunityId, opportunities.id),
 		);
 
 export const trackerRouter = {
@@ -264,7 +309,7 @@ export const trackerRouter = {
 				body: {
 					currentPassword: input.currentPassword,
 					newPassword: input.newPassword,
-					revokeOtherSessions: false,
+					revokeOtherSessions: true,
 				},
 			});
 
@@ -301,8 +346,17 @@ export const trackerRouter = {
 					or(
 						inArray(opportunities.status, ["open", "on_hold"]),
 						and(
-							inArray(opportunities.status, ["won", "lost"]),
+							eq(opportunities.status, "won"),
+							isNull(desembolsosCompletados.opportunityId),
+						),
+						and(
+							eq(opportunities.status, "lost"),
 							gte(fechaCierre, desde),
+						),
+						and(
+							eq(opportunities.status, "won"),
+							isNotNull(desembolsosCompletados.opportunityId),
+							gte(desembolsosCompletados.completedAt, desde),
 						),
 					),
 				),
@@ -326,6 +380,10 @@ export const trackerRouter = {
 				.leftJoin(
 					ultimaCotizacion,
 					eq(ultimaCotizacion.opportunityId, opportunities.id),
+				)
+				.leftJoin(
+					desembolsosCompletados,
+					eq(desembolsosCompletados.opportunityId, opportunities.id),
 				)
 				.where(eq(opportunities.id, input.id))
 				.limit(1);

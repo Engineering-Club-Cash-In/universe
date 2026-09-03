@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import { Resend } from "resend";
 import LiquidationEmail from "./templates/LiquidationTemplate";
-import PasswordResetEmail from "./templates/PasswordResetTemplate";
+import PasswordResetEmail, { type PasswordResetRole } from "./templates/PasswordResetTemplate";
 import NewCreditEmail from "./templates/NewCreditTemplate";
 import * as React from "react";
 
@@ -87,11 +87,24 @@ export const sendLiquidationEmail = async ({
   // Validar formato de correo antes de enviar
   emailSchema.parse(to);
 
+  const assetsBaseUrl = process.env.EMAIL_ASSETS_BASE_URL;
+  const emailAssets = assetsBaseUrl
+    ? {
+        headerBanner: `${assetsBaseUrl}/header-mail-V3.png`,
+        footerBanner: `${assetsBaseUrl}/footer-mail.png`,
+      }
+    : undefined;
+  if (!emailAssets) {
+    console.warn(
+      "[sendLiquidationEmail] EMAIL_ASSETS_BASE_URL is missing. Sending without header/footer banners."
+    );
+  }
+
   try {
     const { data, error } = await resend.emails.send({
       from: `Club Cash In <no-reply@${domain}>`,
       to: [to],
-      subject: `Liquidación Procesada - ${new Date().toLocaleString("es-GT", { month: "long", year: "numeric" })}`,
+      subject: `Liquidación Procesada - ${date}`,
       react: React.createElement(LiquidationEmail, {
         investorName,
         amount,
@@ -99,6 +112,7 @@ export const sendLiquidationEmail = async ({
         date,
         currencySymbol,
         reportUrl,
+        assets: emailAssets,
       }),
       attachments: attachment ? [attachment] : undefined,
     });
@@ -116,15 +130,32 @@ export const sendLiquidationEmail = async ({
   }
 };
 
-export const sendPasswordResetEmail = async (to: string, resetUrl: string) => {
+export const sendPasswordResetEmail = async (
+  to: string,
+  resetUrl: string,
+  role?: PasswordResetRole,
+) => {
   emailSchema.parse(to);
+
+  const assetsBaseUrl = process.env.EMAIL_ASSETS_BASE_URL;
+  if (!assetsBaseUrl) {
+    throw new Error(
+      "❌ [Email Package] EMAIL_ASSETS_BASE_URL is missing. Please add it to your environment variables."
+    );
+  }
+
+  const emailAssets = {
+    headerBanner: `${assetsBaseUrl}/header-mail-V2.png`,
+    footerBanner: `${assetsBaseUrl}/footer-mail.png`,
+    warningIcon: `${assetsBaseUrl}/warning-mail-gradient-v2.png`,
+  };
 
   try {
     const { data, error } = await resend.emails.send({
       from: `Club Cash In <no-reply@${domain}>`,
       to: [to],
       subject: "Restablecer contraseña - CashIn",
-      react: React.createElement(PasswordResetEmail, { resetUrl }),
+      react: React.createElement(PasswordResetEmail, { resetUrl, assets: emailAssets, role }),
     });
 
     if (error) {

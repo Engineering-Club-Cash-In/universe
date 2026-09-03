@@ -731,12 +731,16 @@ export const inversionistasRouter = new Elysia()
       );
       inversionista.subtotal = totales.totales as any;
 
-      const logoUrl = import.meta.env.LOGO_URL || "";
+      const assetsBaseUrl = process.env.EMAIL_ASSETS_BASE_URL || (import.meta as any).env?.EMAIL_ASSETS_BASE_URL;
+      const logoUrl = assetsBaseUrl ? `${assetsBaseUrl}/isologo-cashin.png` : (import.meta.env.LOGO_URL || "");
+      const redesUrl = assetsBaseUrl ? `${assetsBaseUrl}/redes-cashin.png` : undefined;
       const filename = `reporte_inversionista_${id}_${Date.now()}.xlsx`;
       const { url } = await generarYSubirExcelInversionista(
         inversionista as any,
         filename,
-        logoUrl
+        logoUrl,
+        false,
+        redesUrl
       );
 
       return {
@@ -791,13 +795,16 @@ export const inversionistasRouter = new Elysia()
         );
         inversionista.subtotal = totales.totales as any;
 
-        const logoUrl = import.meta.env.LOGO_URL || "";
+        const assetsBaseUrl = process.env.EMAIL_ASSETS_BASE_URL || (import.meta as any).env?.EMAIL_ASSETS_BASE_URL;
+        const logoUrl = assetsBaseUrl ? `${assetsBaseUrl}/isologo-cashin.png` : (import.meta.env.LOGO_URL || "");
+        const redesUrl = assetsBaseUrl ? `${assetsBaseUrl}/redes-cashin.png` : undefined;
         const filename = `reporte_no_liquidados_${id}_${Date.now()}.xlsx`;
         const { url } = await generarYSubirExcelInversionista(
           inversionista as any,
           filename,
           logoUrl,
-          true
+          true,
+          redesUrl
         );
 
         return {
@@ -894,7 +901,9 @@ export const inversionistasRouter = new Elysia()
         ? convertirReporteAUSD(inversionistaQ as any)
         : inversionistaQ;
 
-      const logoUrl = import.meta.env.LOGO_URL || "";
+      const assetsBaseUrl = process.env.EMAIL_ASSETS_BASE_URL || (import.meta as any).env?.EMAIL_ASSETS_BASE_URL;
+      const logoUrl = assetsBaseUrl ? `${assetsBaseUrl}/isologo-cashin.png` : (import.meta.env.LOGO_URL || "");
+      const redesUrl = assetsBaseUrl ? `${assetsBaseUrl}/redes-cashin.png` : undefined;
       const stamp = Date.now();
       const filename = `reporte_liquidados_${liquidacionId}_${stamp}.xlsx`;
 
@@ -906,9 +915,9 @@ export const inversionistasRouter = new Elysia()
         : null;
 
       const [excelResult, excelResultGtq] = await Promise.all([
-        generarYSubirExcelInversionista(inversionista, filename, logoUrl),
+        generarYSubirExcelInversionista(inversionista, filename, logoUrl, false, redesUrl),
         filenameGtq
-          ? generarYSubirExcelInversionista(inversionistaQ as any, filenameGtq, logoUrl)
+          ? generarYSubirExcelInversionista(inversionistaQ as any, filenameGtq, logoUrl, false, redesUrl)
           : Promise.resolve(null),
       ]);
 
@@ -976,7 +985,11 @@ export const inversionistasRouter = new Elysia()
           reinversion = { skipped: true, reason: "total_reinversion recalculado = 0", monto };
         } else {
           try {
-            const r = await ejecutarReinversionAutomatica(Number(investor_id), monto);
+            const r = await ejecutarReinversionAutomatica(
+              Number(investor_id),
+              monto,
+              liquidacionId ? Number(liquidacionId) : undefined,
+            );
             reinversion = {
               liquidacion_id: liquidacionId,
               inversionista_id: Number(investor_id),

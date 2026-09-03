@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useForm } from "react-hook-form";
+import { AxiosError } from "axios";
 import { useInvestor } from "../hooks/investor";
 import { useBancos } from "../hooks/bancos";
 import { useQueryClient } from "@tanstack/react-query";
@@ -25,10 +26,20 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
     initialData?.tipo_reinversion ?? "sin_reinversion"
   );
 
-  const { register, handleSubmit, reset, watch, setValue } = useForm<InvestorPayload>({
+  const {
+    register,
+    handleSubmit,
+    reset,
+    watch,
+    setValue,
+    setError,
+    clearErrors,
+    formState: { errors },
+  } = useForm<InvestorPayload>({
     defaultValues: {
       nombre: "",
       dpi: undefined,
+      dpi_rep_legal: "",
       emite_factura: false,
       descuenta_impuestos: false,
       reinversion: false,
@@ -60,6 +71,7 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
       reset({
         nombre: "",
         dpi: undefined,
+        dpi_rep_legal: "",
         emite_factura: false,
         descuenta_impuestos: false,
         reinversion: false,
@@ -76,9 +88,21 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
   }, [initialData, mode, reset]);
 
   const onSubmit = (data: InvestorPayload) => {
+    // En modo crear se manda `operation: "CREATE"` para que cartera use la
+    // creación estricta: si el nombre/DPI/correo choca con un inversionista que
+    // ya existe, responde 409 en vez de caer en el upsert legacy y convertir el
+    // alta en un UPDATE sobre esa otra fila. Sin esto, "crear" podía pisarle el
+    // `dpi_rep_legal` a otra persona —y con él su acceso al portal— mientras la
+    // UI decía "creado correctamente".
+    const repLegal = data.dpi_rep_legal?.trim() || "";
+
     // Convertir dpi y banco a número si vienen como string
     const payload = {
       ...data,
+      ...(mode === "create" ? { operation: "CREATE" as const } : {}),
+      // Llave siempre presente: vacío = borrar. Es seguro en ambos modos porque
+      // la creación estricta garantiza que el alta jamás escribe sobre otra fila.
+      dpi_rep_legal: repLegal === "" ? null : repLegal,
       dpi: data.dpi ? Number(data.dpi) : null,
       banco: data.banco ? Number(data.banco) : null,
       monto_reinversion: data.monto_reinversion ? Number(data.monto_reinversion) : 0,
@@ -86,7 +110,8 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
     };
     console.log("Submitting payload:", payload);
 
-    // 🔥 SIMPLIFICADO: Siempre usa insertInvestor (hace upsert automático)
+    // Mismo endpoint para crear y editar: en crear va con creación estricta,
+    // en editar el `inversionista_id` del payload apunta la fila a actualizar.
     insertInvestor.mutate(payload, {
       onSuccess: () => {
         toast.success(
@@ -101,10 +126,50 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
         onClose();
       },
       onError: (error: Error) => {
+        // Cuando el DPI del representante no existe como inversionista, cartera
+        // manda el código de máquina `rep_legal_inexistente`. Ese fallo es de un
+        // campo concreto, así que se muestra en el input y no en un toast suelto
+        // donde el usuario tendría que adivinar cuál dato corregir.
+        const payload =
+          error instanceof AxiosError
+            ? (error.response?.data as
+                | { error?: string; message?: string; errores?: string[] }
+                | undefined)
+            : undefined;
+        const detalle: string | undefined =
+          payload?.errores?.[0] ?? payload?.message;
+        if (payload?.error === "rep_legal_inexistente" && detalle) {
+          setError("dpi_rep_legal", { type: "server", message: detalle });
+          return;
+        }
+        // Las colisiones de la creación estricta llegan como 409 con un código
+        // de máquina. `error.message` de axios ahí es "Request failed with
+        // status code 409", inútil para el operador: se muestra el texto de
+        // cartera ("Ya existe un inversionista con ese email", etc.) marcando
+        // además el input culpable.
+        const CAMPO_POR_DUPLICADO = {
+          duplicate_dpi: "dpi",
+          duplicate_email: "email",
+          duplicate_nombre: "nombre",
+        } as const;
+        const campoDuplicado =
+          payload?.error &&
+          payload.error in CAMPO_POR_DUPLICADO
+            ? CAMPO_POR_DUPLICADO[
+                payload.error as keyof typeof CAMPO_POR_DUPLICADO
+              ]
+            : undefined;
+        if (campoDuplicado) {
+          const mensaje = detalle ?? "Ya existe un inversionista con ese dato";
+          setError(campoDuplicado, { type: "server", message: mensaje });
+          toast.error(`Error al crear el inversionista. ${mensaje}`);
+          return;
+        }
+        const motivo = detalle ?? error.message ?? "";
         toast.error(
           mode === "create"
-            ? `Error al crear el inversionista. ${error.message || ""}`
-            : `Error al actualizar el inversionista. ${error.message || ""}`
+            ? `Error al crear el inversionista. ${motivo}`
+            : `Error al actualizar el inversionista. ${motivo}`
         );
       },
     });
@@ -209,6 +274,36 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
                 className="bg-white text-blue-900 placeholder-gray-400 border border-gray-300 rounded-lg px-4 py-2 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
                 placeholder="123456789"
               />
+            </div>
+
+            {/* DPI del representante legal */}
+            <div>
+              <label className="block text-sm text-blue-800 mb-1">DPI del representante legal</label>
+              <input
+                {...register("dpi_rep_legal", {
+                  onChange: (e) => {
+                    const soloDigitos = e.target.value.replace(/\D/g, "").slice(0, 20);
+                    setValue("dpi_rep_legal", soloDigitos);
+                    // Al corregir el DPI, el rechazo del backend deja de aplicar.
+                    clearErrors("dpi_rep_legal");
+                  },
+                })}
+                type="text"
+                inputMode="numeric"
+                maxLength={20}
+                aria-invalid={!!errors.dpi_rep_legal}
+                className={`bg-white text-blue-900 placeholder-gray-400 border rounded-lg px-4 py-2 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition ${
+                  errors.dpi_rep_legal
+                    ? "border-red-400 bg-red-50"
+                    : "border-gray-300"
+                }`}
+                placeholder="DPI de quien representa a la empresa"
+              />
+              {errors.dpi_rep_legal && (
+                <p className="text-red-500 text-sm mt-1">
+                  {errors.dpi_rep_legal.message}
+                </p>
+              )}
             </div>
 
             {/* Tipo de Reinversión */}
@@ -364,6 +459,9 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
             const payload = {
               ...currentFormData,
               dpi: currentFormData.dpi ? Number(currentFormData.dpi) : null,
+              dpi_rep_legal: currentFormData.dpi_rep_legal?.trim()
+                ? currentFormData.dpi_rep_legal.trim()
+                : null,
               banco: currentFormData.banco ? Number(currentFormData.banco) : null,
               monto_reinversion: currentFormData.monto_reinversion ? Number(currentFormData.monto_reinversion) : 0,
               tipo_reinversion: "reinversion_combinada",

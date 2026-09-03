@@ -542,7 +542,16 @@ export const insertInvestor = async ({ body, set }: any) => {
 
     if (errores.length > 0) {
       set.status = 400;
-      return { message: "Errores de validación", errores };
+      // El código de máquina deja que el CRM marque el input culpable en vez de
+      // mostrar el texto suelto (ver ERRORES_POR_CAMPO en el CRM).
+      const esRepLegal = errores.some((e) =>
+        e.includes("no existe como inversionista")
+      );
+      return {
+        message: "Errores de validación",
+        errores,
+        ...(esRepLegal ? { error: "rep_legal_inexistente" } : {}),
+      };
     }
 
     const resultados: any[] = [];
@@ -5787,6 +5796,7 @@ export const updateInvestor = async ({ body, set }: any) => {
           set.status = 400;
           return {
             message: `El DPI de representante legal ${nuevoRepLegal} no existe como inversionista`,
+            error: "rep_legal_inexistente",
           };
         }
       }

@@ -322,7 +322,23 @@ describe("insertInvestor", () => {
 
     expect(set.status).toBe(400);
     expect(result.errores?.[0]).toContain("no existe como inversionista");
+    // Código de máquina: el CRM lo traduce al campo culpable para marcar el
+    // input. Sin él el error llega como texto suelto.
+    expect(result.error).toBe("rep_legal_inexistente");
     expect(insertWasCalled).toBeFalse();
+  });
+
+  it("no manda el código de representante en errores de validación ajenos", async () => {
+    const set = { status: 200 };
+
+    const result = await insertInvestor({
+      body: { operation: "CREATE", nombre: "", dpi: null },
+      set,
+    });
+
+    expect(set.status).toBe(400);
+    expect(result.errores?.[0]).toContain("debe proporcionar DPI o nombre");
+    expect(result.error).toBeUndefined();
   });
 
   it("no revalida dpi_rep_legal cuando el valor no cambió", async () => {
@@ -435,6 +451,7 @@ describe("updateInvestor", () => {
 
     expect(set.status).toBe(400);
     expect(result.message).toContain("no existe como inversionista");
+    expect(result.error).toBe("rep_legal_inexistente");
     expect(updateWasCalled).toBeFalse();
   });
 

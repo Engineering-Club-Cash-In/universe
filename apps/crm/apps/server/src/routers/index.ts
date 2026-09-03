@@ -109,6 +109,7 @@ export const crmAppRouter = {
 	ejecutarValidacionesRenapBuro:
 		validationsRouter.ejecutarValidacionesRenapBuro,
 	getValidacionesOportunidad: validationsRouter.getValidacionesOportunidad,
+	marcarValidacionManual: validationsRouter.marcarValidacionManual,
 };
 
 /**

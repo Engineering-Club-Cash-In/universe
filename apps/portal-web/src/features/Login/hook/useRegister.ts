@@ -5,7 +5,6 @@ import type { RegisterCredentials } from "@/lib/auth";
 import { authClient } from "@/lib/auth";
 import { useNavigate } from "@tanstack/react-router";
 import { registerExternalUserAuth } from "@/features/Profile/services/unifiedService";
-import { apiAuth } from "@/lib/api/apiAuth";
 
 // Esquema de validación con Yup
 const validationSchema = Yup.object({
@@ -37,19 +36,9 @@ const validationSchema = Yup.object({
     .required("Debes seleccionar qué deseas hacer"),
 });
 
-const checkDpiExists = async (dpi: string): Promise<boolean> => {
-  try {
-    const response = await apiAuth.get(`/api/profile/check-dpi/${dpi}`);
-    return response.data?.data?.exists ?? false;
-  } catch {
-    return false;
-  }
-};
-
 export const useRegister = () => {
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [isCheckingDpi, setIsCheckingDpi] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
   const navigate = useNavigate();
 
@@ -106,6 +95,10 @@ export const useRegister = () => {
     },
   });
 
+  // Solo formato. Que el DPI ya esté tomado lo decide el servidor al fijarlo
+  // sobre la cuenta (409 en POST /api/profile/me/dpi): preguntarlo antes
+  // obligaba a exponer una ruta pública que confirmaba, para cualquier DPI, si
+  // estaba registrado.
   const validateDpi = async (): Promise<boolean> => {
     formik.setFieldTouched("userType", true);
     formik.setFieldTouched("dpi", true);
@@ -118,17 +111,7 @@ export const useRegister = () => {
       return false;
     }
 
-    setIsCheckingDpi(true);
-    try {
-      const exists = await checkDpiExists(formik.values.dpi);
-      if (exists) {
-        formik.setFieldError("dpi", "Este DPI ya está registrado");
-        return false;
-      }
-      return true;
-    } finally {
-      setIsCheckingDpi(false);
-    }
+    return true;
   };
 
   const handleGoogleRegister = async () => {
@@ -173,7 +156,6 @@ export const useRegister = () => {
     handleNextStep,
     isLoading,
     isGoogleLoading,
-    isCheckingDpi,
     currentStep,
     nextStep,
     prevStep,

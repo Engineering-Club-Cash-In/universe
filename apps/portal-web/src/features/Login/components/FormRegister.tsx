@@ -12,7 +12,6 @@ export const FormRegister = () => {
     handleNextStep,
     isLoading,
     isGoogleLoading,
-    isCheckingDpi,
     currentStep,
   } = useRegister();
   const isMobile = useIsMobile();
@@ -120,9 +119,8 @@ export const FormRegister = () => {
               onClick={handleNextStep}
               size={isMobile ? "sm" : "md"}
               type="button"
-              isLoading={isCheckingDpi}
             >
-              {isCheckingDpi ? "Verificando DPI..." : "Continuar"}
+              Continuar
             </Button>
 
             <div className="flex justify-center items-center gap-1 flex-col text-sm lg:text-base">

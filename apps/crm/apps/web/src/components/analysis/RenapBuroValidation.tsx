@@ -245,7 +245,7 @@ export function RenapBuroValidation({
 				`${NOMBRE_FUENTE[overrideTipo]} marcado como validado manualmente`,
 			);
 			cerrarOverride();
-			await refetch();
+			await ejecutarValidaciones(true);
 		} catch (error: unknown) {
 			toast.error(
 				error instanceof Error
@@ -255,7 +255,13 @@ export function RenapBuroValidation({
 		} finally {
 			setIsSubmittingOverride(false);
 		}
-	}, [overrideTipo, overrideMotivo, opportunityId, refetch, cerrarOverride]);
+	}, [
+		overrideTipo,
+		overrideMotivo,
+		opportunityId,
+		ejecutarValidaciones,
+		cerrarOverride,
+	]);
 
 	// Auto-ejecuta solo si la oportunidad espera análisis, hay consentimiento y
 	// nunca se validó. Con un resultado previo decide el analista con el botón.

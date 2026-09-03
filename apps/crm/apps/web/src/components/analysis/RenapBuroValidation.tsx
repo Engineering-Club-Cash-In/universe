@@ -12,7 +12,13 @@ import {
 	UserCog,
 	XCircle,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+	useCallback,
+	useEffect,
+	useLayoutEffect,
+	useRef,
+	useState,
+} from "react";
 import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -231,6 +237,10 @@ export function RenapBuroValidation({
 		setOverrideStep(null);
 		setOverrideMotivo("");
 	}, []);
+
+	useLayoutEffect(() => {
+		cerrarOverride();
+	}, [opportunityId, cerrarOverride]);
 
 	const handleConfirmarOverride = useCallback(async () => {
 		if (!overrideTipo) return;

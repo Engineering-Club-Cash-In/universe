@@ -190,31 +190,35 @@ export function RenapBuroValidation({
 
 	const { refetch } = validacionesQuery;
 
-	const ejecutarValidaciones = useCallback(async () => {
-		if (isExecuting) return;
-		try {
-			setIsExecuting(true);
-			onEjecucionChange?.(true);
-			const resultado = await client.ejecutarValidacionesRenapBuro({
-				opportunityId,
-			});
-			if (resultado.errorTecnico) {
+	const ejecutarValidaciones = useCallback(
+		async (reusarVigente?: boolean) => {
+			if (isExecuting) return;
+			try {
+				setIsExecuting(true);
+				onEjecucionChange?.(true);
+				const resultado = await client.ejecutarValidacionesRenapBuro({
+					opportunityId,
+					reusarVigente,
+				});
+				if (resultado.errorTecnico) {
+					toast.error(
+						`No se pudo completar la validación: ${resultado.mensaje ?? "error desconocido"}`,
+					);
+				}
+				await refetch();
+			} catch (error: unknown) {
 				toast.error(
-					`No se pudo completar la validación: ${resultado.mensaje ?? "error desconocido"}`,
+					error instanceof Error
+						? error.message
+						: "Error al ejecutar las validaciones",
 				);
+			} finally {
+				setIsExecuting(false);
+				onEjecucionChange?.(false);
 			}
-			await refetch();
-		} catch (error: unknown) {
-			toast.error(
-				error instanceof Error
-					? error.message
-					: "Error al ejecutar las validaciones",
-			);
-		} finally {
-			setIsExecuting(false);
-			onEjecucionChange?.(false);
-		}
-	}, [isExecuting, opportunityId, refetch, onEjecucionChange]);
+		},
+		[isExecuting, opportunityId, refetch, onEjecucionChange],
+	);
 
 	const abrirOverride = useCallback((tipo: TipoValidacion) => {
 		setOverrideTipo(tipo);
@@ -268,7 +272,7 @@ export function RenapBuroValidation({
 			!isExecuting
 		) {
 			autoEjecutadaPara.current = opportunityId;
-			ejecutarValidaciones();
+			ejecutarValidaciones(true);
 		}
 	}, [
 		validacionesQuery.data,
@@ -347,7 +351,7 @@ export function RenapBuroValidation({
 						<Button
 							variant="outline"
 							size="sm"
-							onClick={ejecutarValidaciones}
+							onClick={() => ejecutarValidaciones()}
 							disabled={isExecuting}
 						>
 							{isExecuting ? (
@@ -721,7 +725,7 @@ export function RenapBuroValidation({
 								<Button
 									variant="outline"
 									size="sm"
-									onClick={ejecutarValidaciones}
+									onClick={() => ejecutarValidaciones()}
 									disabled={isExecuting}
 								>
 									{isExecuting ? (

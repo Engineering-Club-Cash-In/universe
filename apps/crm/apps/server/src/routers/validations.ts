@@ -22,11 +22,17 @@ import {
  */
 export const validationsRouter = {
 	ejecutarValidacionesRenapBuro: analystProcedure
-		.input(z.object({ opportunityId: z.string().uuid() }))
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+				reusarVigente: z.boolean().optional(),
+			}),
+		)
 		.handler(async ({ input, context }) => {
 			return ejecutarValidaciones({
 				opportunityId: input.opportunityId,
 				userId: context.userId,
+				reusarVigente: input.reusarVigente,
 			});
 		}),
 

@@ -117,6 +117,36 @@ export const COBROS_MOTIVO_SIN_TELEFONO_ASESOR = "sin teléfono de asesor";
 export const FRAGMENTO_EXPECTATIVA_MORA = "recargo por mora de Q";
 
 /**
+ * Fragmentos fijos de las oraciones que llevan {montoAdeudado}: una por cada
+ * plantilla de mora. Son deliberadamente específicos porque "por un monto de"
+ * a secas también aparece en el recordatorio del día de pago (con
+ * {cuotaMensual}), y bloquearlo dejaría sin enviar la plantilla más usada.
+ *  - "cuota con atraso por un monto de Q" → 1 cuota atrasada (al_dia dice
+ *    "cuota, por un monto de Q", con coma, así que no colisiona).
+ *  - "por un monto total de Q" → 2-3 cuotas atrasadas.
+ *  - "incluyendo moras" → aviso jurídico (su monto va sin "Q" delante, y esta
+ *    es la parte de la oración que sobrevive a la interpolación).
+ */
+export const FRAGMENTOS_MONTO_ADEUDADO = [
+	"cuota con atraso por un monto de Q",
+	"por un monto total de Q",
+	"incluyendo moras",
+] as const;
+
+/**
+ * true si el mensaje que se va a mandar todavía anuncia el monto adeudado (con
+ * la variable sin interpolar o ya interpolada). Se evalúa sobre el texto real
+ * del canal, no sobre la plantilla, para que el asesor pueda quitar la oración
+ * y enviar aunque el server no haya podido calcular el monto.
+ */
+export function mensajeAnunciaMontoAdeudado(mensaje: string): boolean {
+	return (
+		mensaje.includes("{montoAdeudado}") ||
+		FRAGMENTOS_MONTO_ADEUDADO.some((fragmento) => mensaje.includes(fragmento))
+	);
+}
+
+/**
  * true si el mensaje que se va a mandar todavía anuncia el recargo por mora
  * (con la variable sin interpolar o ya interpolada). Se evalúa sobre el texto
  * real del canal, no sobre la plantilla original, para que el asesor pueda

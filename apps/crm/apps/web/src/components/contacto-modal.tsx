@@ -57,6 +57,7 @@ import {
 	cuerpoParaValidarNoReply,
 	interpolar,
 	mensajeAnunciaExpectativaMora,
+	mensajeAnunciaMontoAdeudado,
 	mensajeEmailEditable,
 	mensajePlantillaEditable,
 	mensajeSmsEditable,
@@ -381,6 +382,23 @@ export function ContactoModal({
 		) {
 			toast.error(
 				'El crédito no genera mora (estado excluido o sin capital). Borrá la oración del recargo en "Editar mensaje" o elegí otra plantilla.',
+			);
+			return;
+		}
+		// El monto adeudado lo calcula el server desde el detalle de cartera y
+		// puede venir vacío: crédito sin cuotas vencidas (p. ej. al día y el
+		// asesor eligió a mano una plantilla de mora), INCOBRABLE el mismo día
+		// del castigo, o el fallback por datos corruptos de cartera, que arma el
+		// detalle desde el listado y no trae cuotas. Sin este guard el mensaje
+		// sale con el hueco: "por un monto de Q.". Mismo criterio que el masivo,
+		// que en ese caso descarta el crédito con motivo.
+		if (
+			accionUsaCuerpoNoReply(metodo) &&
+			mensajeAnunciaMontoAdeudado(cuerpoNoReply) &&
+			!montoAdeudado.trim()
+		) {
+			toast.error(
+				'No se pudo calcular el monto adeudado de este crédito. Quitá la oración del monto en "Editar mensaje" o elegí otra plantilla.',
 			);
 			return;
 		}

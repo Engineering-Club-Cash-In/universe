@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 
+import { lockPoolMock } from "../utils/testMocks";
+
 const existingInvestor = {
   inversionista_id: 10,
   nombre: "Isabella Sanchez",
@@ -14,6 +16,7 @@ let lastUpdateData: Record<string, unknown> | undefined;
 
 mock.module("../database/index", () => ({
   client: {},
+  lockPool: lockPoolMock,
   db: {
     select: () => ({
       from: () => ({
@@ -189,6 +192,105 @@ describe("insertInvestor", () => {
     expect(updateWasCalled).toBeTrue();
     expect(lastUpdateData).toBeDefined();
     expect("descuenta_impuestos" in lastUpdateData!).toBeFalse();
+  });
+
+  it("no reescribe el email cuando el upsert legacy resolvió la fila por DPI", async () => {
+    // El portal manda el DPI del representante legal junto al correo de la
+    // empresa: la fila que resuelve es la de la persona, y su correo tiene que
+    // quedar intacto.
+    selectResponses = [[existingInvestor]];
+    const set = { status: 200 };
+
+    await insertInvestor({
+      body: {
+        dpi: existingInvestor.dpi,
+        email: "cube@example.com",
+        numero_cuenta: "  9876543210  ",
+      },
+      set,
+    });
+
+    expect(updateWasCalled).toBeTrue();
+    expect(lastUpdateData).toBeDefined();
+    expect("email" in lastUpdateData!).toBeFalse();
+    expect(lastUpdateData?.numero_cuenta).toBe("9876543210");
+  });
+
+  it("no reescribe el email cuando el upsert legacy resolvió la fila por nombre", async () => {
+    // Sin DPI: primero se busca por email (sin resultados) y después por
+    // nombre. La fila encontrada por nombre conserva su correo.
+    selectResponses = [[], [existingInvestor]];
+    const set = { status: 200 };
+
+    await insertInvestor({
+      body: {
+        nombre: existingInvestor.nombre,
+        email: "otro@example.com",
+      },
+      set,
+    });
+
+    expect(updateWasCalled).toBeTrue();
+    expect(lastUpdateData).toBeDefined();
+    expect("email" in lastUpdateData!).toBeFalse();
+  });
+
+  it("sí normaliza el email cuando el upsert legacy resolvió por ese mismo email", async () => {
+    selectResponses = [[existingInvestor]];
+    const set = { status: 200 };
+
+    await insertInvestor({
+      body: {
+        nombre: "LPT Lopez Sanchez, S.A.",
+        email: "ISABELLA@example.com",
+      },
+      set,
+    });
+
+    expect(updateWasCalled).toBeTrue();
+    expect(lastUpdateData?.email).toBe("isabella@example.com");
+  });
+
+  it("sí escribe el email cuando la edición viene dirigida por inversionista_id", async () => {
+    selectResponses = [[existingInvestor]];
+    const set = { status: 200 };
+
+    await insertInvestor({
+      body: {
+        inversionista_id: existingInvestor.inversionista_id,
+        nombre: "Isabella Sanchez",
+        email: "NUEVO@example.com",
+      },
+      set,
+    });
+
+    expect(updateWasCalled).toBeTrue();
+    expect(lastUpdateData?.email).toBe("nuevo@example.com");
+  });
+
+  it("mantiene la importación masiva: por nombre completa DPI y datos bancarios", async () => {
+    // Forma del payload del script de Excel (migration/upsertInvestor.py): sin
+    // email, sin id y sin operation. Resuelve por nombre y completa el resto.
+    selectResponses = [[], [existingInvestor]];
+    const set = { status: 200 };
+
+    await insertInvestor({
+      body: {
+        nombre: existingInvestor.nombre,
+        dpi: 5555555550101,
+        emite_factura: false,
+        tipo_reinversion: "sin_reinversion",
+        tipo_cuenta: "MONETARIA",
+        numero_cuenta: "1234567890",
+      },
+      set,
+    });
+
+    expect(updateWasCalled).toBeTrue();
+    expect(lastUpdateData?.dpi).toBe(5555555550101);
+    expect(lastUpdateData?.tipo_cuenta).toBe("MONETARIA");
+    expect(lastUpdateData?.numero_cuenta).toBe("1234567890");
+    expect(lastUpdateData?.emite_factura).toBeFalse();
   });
 });
 

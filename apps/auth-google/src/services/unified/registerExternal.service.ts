@@ -60,8 +60,17 @@ export const registerExternalUser = async (
         data: result.data,
       };
     } else if (userType === "INVESTOR") {
-      // Crear inversionista en Cartera
+      // Crear inversionista en Cartera.
+      //
+      // `operation: "CREATE"` es deliberado: el DPI de este payload lo escribió
+      // quien se está registrando y nadie lo verificó. Sin el modo estricto,
+      // cartera usaría ese DPI (o el nombre) para encontrar un inversionista ya
+      // existente y le sobrescribiría los datos con los del registro. En modo
+      // estricto un DPI, correo o nombre repetido responde 409 y no se toca
+      // ninguna fila: enlazar una cuenta del portal con un inversionista que ya
+      // existe es una operación de back office, no algo que decida el registro.
       const result = await createInvestor({
+        operation: "CREATE",
         nombre: fullName,
         dpi: parseInt(dpi, 10),
         email: email,

@@ -5,10 +5,10 @@
 
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { auth } from "../lib/auth";
 import {
   // Investor
   createInvestor,
+  findInvestorByEmail,
   getInvestorProfile,
   getInvestorDocuments,
   getBancos,
@@ -16,43 +16,23 @@ import {
   getLiquidaciones,
   getInvestmentsStats,
   getAsesorById,
-  type CreateInvestorPayload,
 } from "../services/cartera";
+import {
+  PortalInvestorPayloadError,
+  buildPortalInvestorUpdate,
+} from "../lib/portalInvestorPayload";
+import { requireAuth, type AuthedVariables } from "../middleware/requireAuth";
 import { getSignedUrlFromBucket } from "../lib/storage";
 
-const carteraRoutes = new Hono();
+const carteraRoutes = new Hono<{ Variables: AuthedVariables }>();
 
 // ============================================
 // MIDDLEWARE DE AUTENTICACIÓN
 // ============================================
 
-/**
- * Middleware para verificar sesión de Better Auth
- */
-const requireAuth = async (c: any, next: () => Promise<void>) => {
-  try {
-    const session = await auth.api.getSession({
-      headers: c.req.raw.headers,
-    });
-
-    if (!session || !session.user) {
-      throw new HTTPException(401, { message: "No autorizado. Inicia sesión." });
-    }
-
-    // Agregar usuario a context para uso posterior
-    c.set("user", session.user);
-    c.set("session", session.session);
-
-    await next();
-  } catch (error) {
-    if (error instanceof HTTPException) {
-      throw error;
-    }
-    throw new HTTPException(401, { message: "Token inválido o expirado" });
-  }
-};
-
-// Aplicar middleware a todas las rutas
+// Aplicar middleware a todas las rutas. `requireAuth` deja en el contexto el
+// usuario ya validado, que es de donde salen las identidades que usan los
+// handlers.
 carteraRoutes.use("*", requireAuth);
 
 // ============================================
@@ -61,17 +41,62 @@ carteraRoutes.use("*", requireAuth);
 
 /**
  * POST /api/cartera/investor
- * Crear o actualizar un inversionista
+ * Actualiza los datos de cobro del inversionista de la cuenta autenticada.
+ *
+ * El destino NO sale de la petición. El correo de la sesión resuelve el
+ * inversionista y la escritura viaja dirigida por `inversionista_id`; del
+ * cuerpo solo se conservan los campos editables (ver
+ * `buildPortalInvestorUpdate`). Así el titular solo puede modificar su propia
+ * fila, aunque mande otro DPI u otro correo.
  */
 carteraRoutes.post("/investor", async (c) => {
-  try {
-    const body = await c.req.json<CreateInvestorPayload>();
+  const user = c.get("user");
+  // Tal cual viene de la sesión, igual que la consulta del perfil: así el
+  // inversionista que se puede editar es exactamente el que el titular ve.
+  const email = user?.email?.trim();
 
-    const result = await createInvestor(body);
+  if (!email) {
+    throw new HTTPException(401, { message: "No autorizado. Inicia sesión." });
+  }
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    throw new HTTPException(400, { message: "Cuerpo de la petición inválido" });
+  }
+
+  let investor: Awaited<ReturnType<typeof findInvestorByEmail>>;
+  try {
+    investor = await findInvestorByEmail(email);
+  } catch {
+    throw new HTTPException(500, {
+      message: "Error al obtener perfil del inversionista",
+    });
+  }
+
+  if (!investor) {
+    throw new HTTPException(404, {
+      message: "No encontramos un inversionista asociado a tu cuenta",
+    });
+  }
+
+  let payload;
+  try {
+    payload = buildPortalInvestorUpdate(investor.inversionista_id, body);
+  } catch (error) {
+    if (error instanceof PortalInvestorPayloadError) {
+      throw new HTTPException(400, { message: error.message });
+    }
+    throw error;
+  }
+
+  try {
+    const result = await createInvestor(payload);
 
     return c.json({
       success: true,
-      message: "Inversionista creado/actualizado correctamente",
+      message: "Inversionista actualizado correctamente",
       data: result,
     });
   } catch (error) {
@@ -79,7 +104,7 @@ carteraRoutes.post("/investor", async (c) => {
       throw error;
     }
     throw new HTTPException(500, {
-      message: error instanceof Error ? error.message : "Error al crear inversionista",
+      message: "Error al actualizar inversionista",
     });
   }
 });

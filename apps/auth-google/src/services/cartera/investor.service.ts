@@ -10,12 +10,23 @@ import { ensureCarteraAuth } from "./carteraAuth.service";
 // ============================================
 
 export interface CreateInvestorPayload {
+  /**
+   * Destino explícito de la escritura. Cuando viene, cartera edita esa fila y
+   * no intenta resolverla por DPI/correo/nombre.
+   */
+  inversionista_id?: number;
+  /**
+   * `"CREATE"` pone a cartera en modo estricto: si el DPI, el correo o el
+   * nombre ya existen responde 409 en vez de actualizar la fila existente.
+   */
+  operation?: "CREATE";
   nombre?: string;
-  dpi: number;
+  dpi?: number;
   email?: string;
   emite_factura?: boolean;
   tipo_reinversion?: string;
   banco?: string | null;
+  banco_id?: number;
   tipo_cuenta?: string | null;
   numero_cuenta?: string | null;
 }
@@ -92,6 +103,40 @@ export const createInvestor = async (
     console.error("Error al crear inversionista:", error);
     throw error;
   }
+};
+
+/**
+ * Busca el inversionista dueño de un correo.
+ *
+ * Es la forma en que el portal resuelve "cuál es MI inversionista": el correo
+ * sale de la sesión, que es lo único que Better Auth autentica. Devuelve
+ * `null` cuando no hay ninguno, en vez de tratarlo como error.
+ */
+export const findInvestorByEmail = async (
+  email: string,
+): Promise<InvestorProfile | null> => {
+  const token = await ensureCarteraAuth();
+
+  const url = new URL(`${env.CARTERA_API_URL}/investor`);
+  url.searchParams.set("email", email);
+
+  const response = await fetch(url.toString(), {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (response.status === 404) {
+    return null;
+  }
+
+  if (!response.ok) {
+    throw new Error("Error al obtener perfil del inversionista");
+  }
+
+  const data = (await response.json()) as InvestorProfile | null;
+
+  return data?.inversionista_id ? data : null;
 };
 
 /**

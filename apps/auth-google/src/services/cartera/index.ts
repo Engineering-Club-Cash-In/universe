@@ -19,6 +19,7 @@ export {
 // Investor
 export {
   createInvestor,
+  findInvestorByEmail,
   getInvestorProfile,
   getInvestorDocuments,
   getBancos,

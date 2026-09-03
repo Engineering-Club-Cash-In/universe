@@ -364,7 +364,6 @@ export const InfoPerson = () => {
         initialValue={getCurrentValue()}
         onClose={handleCloseModal}
         onSuccess={handleSuccess}
-        profileData={profileData}
       />
     </div>
   );

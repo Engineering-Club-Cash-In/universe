@@ -457,6 +457,12 @@ export const insertInvestor = async ({ body, set }: any) => {
     for (const inv of inversionistasToUpsert) {
       const isStrictCreate = inv.operation === "CREATE" || inv.mode === "create";
       let existente = null;
+      // Con qué criterio se resolvió la fila destino. El correo es la
+      // identidad del inversionista en el portal y el destino de sus avisos,
+      // así que solo se reescribe cuando la petición apuntó a esa fila de
+      // forma explícita (por id) o cuando fue el propio correo el que la
+      // encontró. Ver el UPDATE más abajo.
+      let resueltoPor: "id" | "dpi" | "email" | "nombre" | null = null;
 
       // Buscar por inversionista_id primero (para ediciones directas)
       if (inv.inversionista_id) {
@@ -466,6 +472,7 @@ export const insertInvestor = async ({ body, set }: any) => {
           .where(eq(inversionistas.inversionista_id, Number(inv.inversionista_id)))
           .limit(1);
         existente = result[0] || null;
+        if (existente) resueltoPor = "id";
 
         if (!existente) {
           set.status = 404;
@@ -536,6 +543,7 @@ export const insertInvestor = async ({ body, set }: any) => {
             .where(eq(inversionistas.dpi, inv.dpi))
             .limit(1);
           existente = result[0] || null;
+          if (existente) resueltoPor = "dpi";
         }
 
         if (!existente && inv.email?.trim()) {
@@ -547,6 +555,7 @@ export const insertInvestor = async ({ body, set }: any) => {
             .where(ilike(inversionistas.email, email))
             .limit(1);
           existente = result[0] || null;
+          if (existente) resueltoPor = "email";
         }
 
         if (!existente && inv.nombre?.trim()) {
@@ -557,6 +566,7 @@ export const insertInvestor = async ({ body, set }: any) => {
             .where(eq(inversionistas.nombre, inv.nombre.trim()))
             .limit(1);
           existente = result[0] || null;
+          if (existente) resueltoPor = "nombre";
         }
       }
 
@@ -565,7 +575,16 @@ export const insertInvestor = async ({ body, set }: any) => {
         const updateData: any = {};
 
         if (inv.nombre?.trim()) updateData.nombre = inv.nombre.trim();
-        if (inv.email?.trim())
+
+        // El correo solo se escribe si la fila se resolvió por id (edición
+        // dirigida) o por ese mismo correo. Cuando la fila apareció por DPI o
+        // por nombre, un correo equivocado en el payload dejaría a dos
+        // inversionistas compartiendo correo: las búsquedas por correo pasan a
+        // devolver una fila no determinista y los avisos del portal terminan
+        // en el buzón de otra persona.
+        const puedeEscribirEmail =
+          resueltoPor === "id" || resueltoPor === "email";
+        if (puedeEscribirEmail && inv.email?.trim())
           updateData.email = inv.email.trim().toLowerCase();
         if (inv.emite_factura !== undefined)
           updateData.emite_factura = inv.emite_factura;

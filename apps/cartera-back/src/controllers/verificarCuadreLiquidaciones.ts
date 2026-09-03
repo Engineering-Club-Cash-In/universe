@@ -111,32 +111,11 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
   const inicio = `${periodo}-01`;
 
   const resultado = await db.execute(sql`
-    with inicio_procedencia as (
-      -- Desde cuándo existe el sello de procedencia. Antes de esa marca no hay
-      -- forma de distinguir la reinversión automática de una reubicación
-      -- manual, así que ahí se usa la ventana temporal; después, una fila de
-      -- reinversión sin liquidacion_id es por definición manual
-      -- (replaceInvestorCredit sigue escribiendo tipo_operacion = 'reinversion'
-      -- sin sello) y no debe contarse como colocación automática.
-      --
-      -- Se deriva del dato en vez de fijar una fecha: apenas la primera
-      -- liquidación sella una fila, el fallback deja de aplicar hacia adelante.
-      select min(created_at) as desde
-      from cartera.compras_credito_inversionista
-      where liquidacion_id is not null
-    ),
-    todas as (
+    with todas as (
       select l.liquidacion_id, l.inversionista_id, l.fecha_liquidacion, l.reinversion_total,
              row_number() over (
                partition by l.inversionista_id order by l.fecha_liquidacion desc
-             ) as orden,
-             -- Liquidación cronológicamente anterior del mismo inversionista.
-             -- Acota por abajo la ventana en que se le atribuye una reinversión:
-             -- con liquidaciones en días consecutivos, el margen de un día haría
-             -- que la reinversión de la primera contara también para la segunda.
-             lead(l.fecha_liquidacion) over (
-               partition by l.inversionista_id order by l.fecha_liquidacion desc
-             ) as anterior
+             ) as orden
       from cartera.liquidaciones l
       -- El período se clasifica en hora Guatemala, igual que periodoActualGuatemala.
       -- Comparando el timestamptz crudo con la sesión en UTC, una liquidación del
@@ -152,18 +131,9 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
       --
       -- Las anteriores del mismo mes (raro, pero liquidateByInvestorId lo
       -- permite cuando aparecen pagos NO_LIQUIDADO nuevos) no quedan sin
-      -- revisar: se verifican aparte, más abajo, comprobando que su
-      -- reinversión llegó a colocarse. Sin eso, una reinversión perdida en la
-      -- primera liquidación se volvería invisible, porque el histórico de la
-      -- segunda arranca del espejo ya deficiente y cuadra solo.
-      select liquidacion_id, inversionista_id, fecha_liquidacion, reinversion_total,
-             -- Ventana (desde, hasta] para las filas sin procedencia. El corte
-             -- es la liquidación previa misma, no un margen fijo: con dos
-             -- liquidaciones en días seguidos, un margen hacia atrás haría que
-             -- la reinversión de la primera cayera también en la ventana de la
-             -- segunda y se contara dos veces.
-             coalesce(anterior, fecha_liquidacion - interval '1 day') as desde_reinversion,
-             null::timestamptz as hasta_reinversion
+      -- revisar: se verifican aparte en leerReinversionesAnterioresSinColocar,
+      -- comprobando que su reinversión llegara a colocarse.
+      select liquidacion_id, inversionista_id, fecha_liquidacion, reinversion_total
       from todas where orden = 1
     ),
     pendientes as (
@@ -185,62 +155,46 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
       -- histórico. Sumarlo del lado del espejo y no del otro inventa un
       -- descuadre por su saldo completo, con la cartera intacta.
       --
-      -- Son los créditos que liquidaron, más aquel donde aterrizó la reinversión
-      -- (que es nuevo y por eso no está en el histórico, pero sí del lado
-      -- derecho dentro de reinversion_total).
+      -- Entran dos grupos:
+      --   (a) los créditos que liquidaron: tienen foto en el histórico y se
+      --       compara su saldo completo contra ella;
+      --   (b) cualquier crédito del inversionista que el trigger del espejo vio
+      --       moverse DESPUÉS de la liquidación. Ahí caen el destino de la
+      --       reinversión, las compras del mes, los pagos posteriores y las dos
+      --       puntas de una reubicación manual. De estos no entra el saldo sino
+      --       el cambio neto desde la liquidación (ver espejo_credito).
+      --
+      -- Se usa el trigger y no compras_credito_inversionista porque
+      -- manualReassignInvestor escribe "reinversion" sin sello de procedencia
+      -- (replaceInvestorCredit.ts:1416-1425): por la tabla de compras no hay
+      -- forma de ver el crédito ORIGEN de una reubicación, y sin el origen una
+      -- transferencia que no cambia el total aparece como faltante.
       select distinct p.liquidacion_id, p.inversionista_id, hl.credito_id
       from pendientes p
       join cartera.historico_liquidaciones_espejo hl
         on hl.liquidacion_id = p.liquidacion_id
        and hl.inversionista_id = p.inversionista_id
       union
-      select distinct p.liquidacion_id, p.inversionista_id, c.credito_id
+      select distinct p.liquidacion_id, p.inversionista_id, hm.credito_id
       from pendientes p
-      join cartera.compras_credito_inversionista c
-        on c.inversionista_id = p.inversionista_id
-      where c.tipo_operacion = 'reinversion'
-        -- Un intento revertido devolvió su monto a CUBE: no colocó nada.
-        and c.revertida_at is null
-        and (
-          -- Filas nuevas: procedencia exacta.
-          c.liquidacion_id = p.liquidacion_id
-          -- Filas anteriores a la columna de procedencia: ventana acotada por
-          -- ambos lados. El límite inferior es la liquidación previa (excluida)
-          -- y el superior la siguiente, así dos liquidaciones en días seguidos
-          -- no se disputan la misma reinversión.
-          or (
-            c.liquidacion_id is null
-            and c.created_at < coalesce(
-              (select desde from inicio_procedencia), 'infinity'::timestamptz
-            )
-            and c.fecha >  p.desde_reinversion
-            and (p.hasta_reinversion is null or c.fecha <= p.hasta_reinversion)
-          )
-        )
+      join cartera.historico_monto_aportado_espejo hm
+        on hm.inversionista_id = p.inversionista_id
+       and hm.fecha > p.fecha_liquidacion
     ),
-    reinversion_por_credito as (
-      -- Cuánto de la reinversión aterrizó en cada crédito. addInvestorToCredit
-      -- puede elegir una posición existente con porcentaje compatible, así que
-      -- el crecimiento del espejo en un crédito que ya liquidó puede venir de la
-      -- reinversión y no de una compra. Sin descontarlo, ese crecimiento se le
-      -- atribuye a la compra del mes y se resta de más.
+    entradas_por_credito as (
+      -- Capital que entró a cada crédito por reinversión o reubicación desde
+      -- la liquidación (automática o manual: acá da igual, lo que importa es
+      -- que ese crecimiento NO es una compra de cartera). Sirve para que el
+      -- ajuste de compras no se apropie del crecimiento que trajo la
+      -- reinversión. Los intentos revertidos devolvieron su monto a CUBE y no
+      -- entran.
       select c.inversionista_id, c.credito_id, p.liquidacion_id,
              sum(c.monto_aportado) as monto
       from cartera.compras_credito_inversionista c
       join pendientes p on p.inversionista_id = c.inversionista_id
       where c.tipo_operacion = 'reinversion'
         and c.revertida_at is null
-        and (
-          c.liquidacion_id = p.liquidacion_id
-          or (
-            c.liquidacion_id is null
-            and c.created_at < coalesce(
-              (select desde from inicio_procedencia), 'infinity'::timestamptz
-            )
-            and c.fecha >  p.desde_reinversion
-            and (p.hasta_reinversion is null or c.fecha <= p.hasta_reinversion)
-          )
-        )
+        and c.created_at > p.fecha_liquidacion
       group by 1, 2, 3
     ),
     pendiente_por_credito as (
@@ -256,24 +210,64 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
       where pe.estado_liquidacion = 'NO_LIQUIDADO'
       group by 1, 2
     ),
-    espejo_credito as (
-      -- Para un crédito que liquidó, entra su saldo completo: es lo que el
-      -- histórico retrató y con eso se compara.
+    saldo_previo as (
+      -- Saldo que tenía cada crédito del grupo (b) justo antes de que corriera
+      -- la liquidación. Es la línea base contra la que se mide su cambio neto.
       --
-      -- Para un crédito que NO liquidó y solo está acá porque recibió la
-      -- reinversión, entra únicamente lo reinvertido. La reinversión puede
-      -- aterrizar sobre una posición que ya existía, y sumar su saldo entero
-      -- contra un lado derecho que solo trae reinversion_total inventaría un
-      -- descuadre del tamaño de la posición previa: Q1,000 preexistentes que
-      -- reciben Q100 no son Q1,000 que faltan.
+      -- Sale del trigger del espejo: el último monto_nuevo anterior a la
+      -- liquidación. Si no hay ninguno (crédito sin movimientos desde que
+      -- existe la bitácora), se toma el monto_anterior del primer movimiento
+      -- posterior, que es el saldo que ese movimiento encontró. Un DELETE deja
+      -- monto_nuevo NULL: se lee como 0, la posición no existía. Un INSERT
+      -- sin DELETE previo también es 0: la posición nació ahí.
+      --
+      -- Sin esta línea base, una posición de Q1,000 que recibe Q100 de
+      -- reinversión y después los pierde seguiría aportando Q100 (su saldo
+      -- vivo sigue siendo ≥ Q100) y el faltante quedaría tapado.
       select cr.liquidacion_id, cr.inversionista_id, cr.credito_id,
+             coalesce(
+               (
+                 select coalesce(hm.monto_nuevo, 0)
+                 from cartera.historico_monto_aportado_espejo hm
+                 where hm.credito_id       = cr.credito_id
+                   and hm.inversionista_id = cr.inversionista_id
+                   and hm.fecha < p.fecha_liquidacion
+                 order by hm.fecha desc, hm.id desc
+                 limit 1
+               ),
+               (
+                 select coalesce(hm.monto_anterior, 0)
+                 from cartera.historico_monto_aportado_espejo hm
+                 where hm.credito_id       = cr.credito_id
+                   and hm.inversionista_id = cr.inversionista_id
+                   and hm.fecha > p.fecha_liquidacion
+                 order by hm.fecha asc, hm.id asc
+                 limit 1
+               ),
+               0
+             ) as monto
+      from creditos_rel cr
+      join pendientes p on p.liquidacion_id = cr.liquidacion_id
+    ),
+    espejo_credito as (
+      -- Grupo (a), crédito que liquidó: entra su saldo completo, que es lo que
+      -- el histórico retrató y con eso se compara.
+      --
+      -- Grupo (b), crédito que no liquidó pero se movió después: entra el
+      -- CAMBIO NETO desde la liquidación (saldo vivo menos saldo previo). Así:
+      --   • el destino de la reinversión aporta exactamente lo que recibió,
+      --     y si después lo pierde aporta 0, no su saldo preexistente;
+      --   • una reubicación manual aporta +X en el destino y −X en el origen
+      --     (o el origen entra por (a) con su saldo reducido) y se cancela;
+      --   • una compra de cartera nueva aporta +compra, que el ajuste de
+      --     compras resta a continuación;
+      --   • un pago posterior baja el saldo y vuelve por pendiente_por_credito.
+      select cr.liquidacion_id, cr.inversionista_id, cr.credito_id,
+             (hl.credito_id is not null) as liquido,
              case
                when hl.credito_id is not null
                  then coalesce(esp.monto_aportado, 0) + coalesce(pc.monto, 0)
-               else least(
-                 coalesce(esp.monto_aportado, 0) + coalesce(pc.monto, 0),
-                 coalesce(rpc.monto, 0)
-               )
+               else coalesce(esp.monto_aportado, 0) + coalesce(pc.monto, 0) - sp.monto
              end as monto
       from creditos_rel cr
       left join cartera.historico_liquidaciones_espejo hl
@@ -286,10 +280,10 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
       left join pendiente_por_credito pc
         on  pc.credito_id       = cr.credito_id
         and pc.inversionista_id = cr.inversionista_id
-      left join reinversion_por_credito rpc
-        on  rpc.liquidacion_id   = cr.liquidacion_id
-        and rpc.credito_id       = cr.credito_id
-        and rpc.inversionista_id = cr.inversionista_id
+      join saldo_previo sp
+        on  sp.liquidacion_id   = cr.liquidacion_id
+        and sp.credito_id       = cr.credito_id
+        and sp.inversionista_id = cr.inversionista_id
     ),
     espejo as (
       select liquidacion_id, sum(monto) as espejo, count(*)::int as creditos
@@ -323,10 +317,15 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
         )
       group by 1, 2, 3
     ),
-    compras as (
-      -- De cada compra se resta solo lo que el espejo tiene HOY por encima de la
-      -- foto del histórico, y nunca más que la compra misma. Una compra anterior
-      -- a la liquidación ya está dentro del histórico y da cero.
+    compras_por_credito_ajustada as (
+      -- Cuánto de cada compra NO absorbió la liquidación.
+      --
+      -- La compra es lo que mete la plata al espejo, así que el monto sale de
+      -- compras_credito_inversionista. De cada compra se resta solo lo que el
+      -- crédito creció por encima de su referencia —la foto del histórico si
+      -- liquidó, o el saldo previo si no— descontando el crecimiento que trajo
+      -- la reinversión, y nunca más que la compra misma. Una compra anterior a
+      -- la liquidación ya está dentro de la foto y da cero.
       --
       -- Se correlaciona por monto y no por "hubo movimiento después": el
       -- nuke&rebuild reinserta el roster completo y el trigger anota cada
@@ -343,20 +342,19 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
       -- crédito, momento y monto, así que se acepta a cambio de no complicar
       -- el chequeo.
       --
-      -- Las compras sobre créditos fuera de creditos_rel no entran: su capital
-      -- tampoco está del lado del espejo, así que no hay nada que corregir.
-      --
-      -- El status no se mira: una compra pendiente ya movió el monto_aportado, y
-      -- que la acepten o la cancelen después es decisión suya.
-      select cc.inversionista_id,
-             sum(least(
+      -- El status de la compra no se mira: una compra pendiente ya movió el
+      -- monto_aportado, y que la acepten o la cancelen después es decisión
+      -- suya, no un error del sistema.
+      select cc.liquidacion_id, cc.inversionista_id,
+             ec.liquido,
+             least(
                cc.monto_compras,
                greatest(
                  0,
-                 ec.monto - coalesce(hl.monto_aportado, 0) - coalesce(rpc.monto, 0)
+                 ec.monto - coalesce(hl.monto_aportado, 0) - coalesce(en.monto, 0)
                )
-             )) as monto,
-             jsonb_agg(cc.detalle) as detalle
+             ) as monto,
+             cc.detalle
       from compras_por_credito cc
       join espejo_credito ec
         on  ec.liquidacion_id   = cc.liquidacion_id
@@ -366,10 +364,41 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
         on  hl.liquidacion_id   = cc.liquidacion_id
         and hl.credito_id       = cc.credito_id
         and hl.inversionista_id = cc.inversionista_id
-      left join reinversion_por_credito rpc
-        on  rpc.liquidacion_id   = cc.liquidacion_id
-        and rpc.credito_id       = cc.credito_id
-        and rpc.inversionista_id = cc.inversionista_id
+      left join entradas_por_credito en
+        on  en.liquidacion_id   = cc.liquidacion_id
+        and en.credito_id       = cc.credito_id
+        and en.inversionista_id = cc.inversionista_id
+    ),
+    crecimiento_no_liquidado as (
+      -- Cambio neto del grupo (b) completo: lo que de verdad creció, en
+      -- conjunto, la parte de la cartera que no liquidó.
+      select liquidacion_id, sum(monto) as neto
+      from espejo_credito
+      where not liquido
+      group by 1
+    ),
+    compras as (
+      -- Las compras sobre créditos que SÍ liquidaron se restan por lo que
+      -- creció cada uno frente a su foto: es crecimiento real y medible.
+      --
+      -- Las compras sobre créditos que NO liquidaron solo pueden restar hasta
+      -- el crecimiento neto del grupo completo. Una compra pendiente que
+      -- expira devuelve su monto a CUBE (−X en un crédito) y al rehacerse
+      -- vuelve a entrar (+X en otro, con una fila de compra nueva): en
+      -- conjunto no creció nada, así que no hay nada que ajustar. Restar la
+      -- compra de la recompra inventaría un faltante de X con la cartera
+      -- intacta. El tope no puede tapar una pérdida real: si el grupo creció
+      -- Q200 por una compra y una reinversión de Q100 se perdió, el tope es
+      -- Q200, se resta la compra entera y el faltante de Q100 sigue a la vista.
+      select cp.inversionista_id,
+             coalesce(sum(cp.monto) filter (where cp.liquido), 0)
+             + least(
+                 coalesce(sum(cp.monto) filter (where not cp.liquido), 0),
+                 greatest(0, coalesce(max(cnl.neto), 0))
+               ) as monto,
+             jsonb_agg(cp.detalle) as detalle
+      from compras_por_credito_ajustada cp
+      left join crecimiento_no_liquidado cnl on cnl.liquidacion_id = cp.liquidacion_id
       group by 1
     )
     select

@@ -64,6 +64,14 @@ export interface FilaCuotaAtrasada {
 	abono_seguro?: string | number | null;
 	abono_gps?: string | number | null;
 	membresias_pago?: string | number | null;
+	// Buckets que solo se usan para decidir si una fila `no_required` lleva
+	// plata real (ver filaCuentaComoViva). `pago_mora`/`pago_otros` son los
+	// alias con que la query de cuotas atrasadas devuelve `mora` y `otros`.
+	monto_aplicado?: string | number | null;
+	abono_interes_ci?: string | number | null;
+	abono_iva_ci?: string | number | null;
+	pago_mora?: string | number | null;
+	pago_otros?: string | number | null;
 	capital_restante?: string | number | null;
 	interes_restante?: string | number | null;
 	iva_12_restante?: string | number | null;
@@ -115,6 +123,47 @@ function aplicadoDeFila(fila: FilaCuotaAtrasada): Big {
 		total = total.plus(aBig(fila[rubro]) ?? 0);
 	}
 	return total;
+}
+
+/** Tolerancia con que cartera decide si una fila lleva plata real. */
+const TOLERANCIA_PLATA = "0.01";
+
+/**
+ * ¿Esta fila cuenta como pago vivo al netear la cuota? Réplica de
+ * `cuentaComoHermanoVivo` (registerPaymentPolicy.ts): además de
+ * validated/pending, una fila `no_required` cuenta cuando NO está vacía.
+ *
+ * El `no_required` es un estado inicial que nadie vuelve a tocar, así que una
+ * semilla puede acumular plata real (Caja la llena con /editPayment, la aplica
+ * y hasta la factura) sin cambiar de status — y sus `*_restante` pueden quedar
+ * viejos, así que el recibo no compensa. Sin esto, esa plata no se restaba y
+ * el mensaje cobraba de más. La decisión mira la PLATA, no el status, con los
+ * mismos buckets que `esDestinoSobrescribible`.
+ */
+function filaCuentaComoViva(fila: FilaCuotaAtrasada): boolean {
+	if (fila.paymentFalse !== false) return false;
+	if (
+		fila.validationStatus === "validated" ||
+		fila.validationStatus === "pending"
+	) {
+		return true;
+	}
+	if (fila.validationStatus !== "no_required") return false;
+
+	const tolerancia = new Big(TOLERANCIA_PLATA);
+	return [
+		fila.monto_aplicado,
+		fila.abono_capital,
+		fila.abono_interes,
+		fila.abono_iva_12,
+		fila.abono_seguro,
+		fila.abono_gps,
+		fila.membresias_pago,
+		fila.abono_interes_ci,
+		fila.abono_iva_ci,
+		fila.pago_mora,
+		fila.pago_otros,
+	].some((bucket) => (aBig(bucket)?.abs() ?? new Big(0)).gte(tolerancia));
 }
 
 /**
@@ -174,7 +223,9 @@ function saldoReciboDeFila(fila: FilaCuotaAtrasada): Big | null {
  * ese recibo activo, así que los grupos sin recibo confiable se OMITEN en vez
  * de caer al contractual (sumarían el capital completo por cada cuota
  * histórica). Mismo criterio que shouldIncobrableInstallmentBePaid en cartera:
- * "queda una sola cuota que representa el capital incobrable".
+ * "queda una sola cuota que representa el capital incobrable". Si NINGÚN grupo
+ * trae recibo activo (el del castigo vence hoy y la query pide vencidas antes
+ * de hoy) se devuelve "" en vez de un total con solo la mora.
  *
  * Devuelve "" si no hay cuotas o el total no es positivo.
  */
@@ -200,11 +251,9 @@ export function calcularMontoAdeudadoDesdeCuotas(
 			aplicado: new Big(0),
 			saldoRecibo: null,
 		};
-		const vivo =
-			fila.paymentFalse === false &&
-			(fila.validationStatus === "validated" ||
-				fila.validationStatus === "pending");
-		if (vivo) grupo.aplicado = grupo.aplicado.plus(aplicadoDeFila(fila));
+		if (filaCuentaComoViva(fila)) {
+			grupo.aplicado = grupo.aplicado.plus(aplicadoDeFila(fila));
+		}
 		const saldoRecibo = saldoReciboDeFila(fila);
 		if (
 			saldoRecibo !== null &&
@@ -216,12 +265,21 @@ export function calcularMontoAdeudadoDesdeCuotas(
 	}
 
 	let total = moraBig;
+	let aportoAlgunGrupo = false;
 	for (const { aplicado, saldoRecibo } of porCuota.values()) {
 		if (soloRecibosActivos && saldoRecibo === null) continue;
+		aportoAlgunGrupo = true;
 		let saldo = cuotaBig.minus(aplicado);
 		if (saldoRecibo !== null && saldoRecibo.lt(saldo)) saldo = saldoRecibo;
 		if (saldo.gt(0)) total = total.plus(saldo);
 	}
+	// En INCOBRABLE, ningún grupo con recibo activo = el capital castigado no
+	// entró en la cuenta: la cuota del castigo vence HOY y la query de cuotas
+	// atrasadas pide `fecha_vencimiento < hoy`, así que buena parte del día del
+	// castigo el recibo base no viene en `filas`. Devolver solo la mora diría un
+	// monto muchísimo menor al real, así que no se devuelve nada y el envío se
+	// descarta (el modal y el masivo ya tratan "" como "sin monto").
+	if (soloRecibosActivos && !aportoAlgunGrupo) return "";
 	if (total.lte(0)) return "";
 	return Number(total.toFixed(2)).toLocaleString("es-GT", {
 		minimumFractionDigits: 2,

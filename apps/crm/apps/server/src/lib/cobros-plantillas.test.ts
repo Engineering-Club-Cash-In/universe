@@ -723,6 +723,62 @@ Te recordamos realizar el pago de tu *Impuesto de Circulación {anioImpuesto}*.
 		).toBe("400.00");
 	});
 
+	test("resta la plata de una semilla no_required que Caja llenó con /editPayment", () => {
+		// El status `no_required` es inicial y nadie lo vuelve a tocar: una
+		// semilla puede acumular plata real (y quedar con los *_restante viejos).
+		// cuentaComoHermanoVivo en cartera las cuenta como hermanas vivas; acá
+		// también, o el mensaje cobraría lo ya pagado.
+		const semilla = (
+			extra: Partial<FilaCuotaAtrasada> = {},
+		): FilaCuotaAtrasada => ({
+			numero_cuota: 30,
+			paymentFalse: false,
+			validationStatus: "no_required",
+			// Restantes viejos: siguen diciendo la cuota completa.
+			capital_restante: "832.00",
+			interes_restante: "150.00",
+			iva_12_restante: "18.00",
+			seguro_restante: "0",
+			gps_restante: "0",
+			membresias_restante: "0",
+			...extra,
+		});
+
+		// Semilla virgen (sin plata): la cuota vale completa.
+		expect(calcularMontoAdeudadoDesdeCuotas([semilla()], "1000.00", "0")).toBe(
+			"1,000.00",
+		);
+
+		// Con Q705.88 de interés aplicados sin cambiar de status ni de restantes.
+		expect(
+			calcularMontoAdeudadoDesdeCuotas(
+				[semilla({ abono_interes: "705.88", monto_aplicado: "705.88" })],
+				"1000.00",
+				"0",
+			),
+		).toBe("294.12");
+
+		// La plata puede estar solo en monto_aplicado (vía stale-zero): la fila
+		// cuenta como viva, pero lo aplicado A LA CUOTA son los rubros (0 acá),
+		// así que el saldo lo sigue dando el recibo/contractual.
+		expect(
+			calcularMontoAdeudadoDesdeCuotas(
+				[semilla({ monto_aplicado: "300.00" })],
+				"1000.00",
+				"0",
+			),
+		).toBe("1,000.00");
+
+		// Una semilla anulada nunca cuenta, tenga la plata que tenga.
+		expect(
+			calcularMontoAdeudadoDesdeCuotas(
+				[semilla({ paymentFalse: true, abono_interes: "705.88" })],
+				"1000.00",
+				"0",
+			),
+		).toBe("1,000.00");
+	});
+
 	test("en INCOBRABLE solo cuenta el recibo base del castigo, no las cuotas históricas anuladas", () => {
 		// Al castigar, cartera (credits.ts, acción INCOBRABLE) deja las cuotas
 		// 5-7 sin pagar con sus recibos anulados (paymentFalse=true, restantes 0),
@@ -812,6 +868,18 @@ Te recordamos realizar el pago de tu *Impuesto de Circulación {anioImpuesto}*.
 				[anulada(5), anulada(6)],
 				"7744.11",
 				"0",
+				"INCOBRABLE",
+			),
+		).toBe("");
+
+		// El día del castigo la cuota nueva vence HOY y la query pide vencidas
+		// ANTES de hoy, así que el recibo base no viene: devolver solo la mora
+		// diría un monto muchísimo menor al real → "" y el envío se descarta.
+		expect(
+			calcularMontoAdeudadoDesdeCuotas(
+				[anulada(5), anulada(6)],
+				"7744.11",
+				"120.50",
 				"INCOBRABLE",
 			),
 		).toBe("");

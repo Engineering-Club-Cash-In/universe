@@ -346,6 +346,7 @@ export interface CarteraCuotaCredito {
 	// cada cuota vencida en el CRM.
 	paymentFalse?: boolean | null;
 	membresias_pago?: string | null; // decimal
+	monto_aplicado?: string | null; // decimal
 	monto_boleta?: string; // decimal
 	abono_capital?: string; // decimal
 	abono_interes?: string; // decimal

@@ -3668,7 +3668,14 @@ export const cobrosRouter = {
 			// detalle de cada crédito elegible y se calcula igual que el modal
 			// individual (calcularMontoAdeudadoDesdeCuotas). null = detalle no
 			// disponible.
-			const montoAdeudadoPorSifco = new Map<string, string | null>();
+			// Guarda monto y conteo de cuotas del MISMO detalle: el conteo del job
+			// (`mora.cuotas_atrasadas`) puede diferir — una cuota cubierta por una
+			// boleta aún sin validar sale de `cuotasAtrasadas` pero el job la sigue
+			// contando — y el mensaje diría "2 cuotas" con el monto de una.
+			const detallePorSifco = new Map<
+				string,
+				{ montoAdeudado: string; cuotasAtraso: number } | null
+			>();
 			if (cuerpoBase.includes("{montoAdeudado}")) {
 				const sifcosElegibles = creditosFiltrados
 					.filter(
@@ -3688,21 +3695,22 @@ export const cobrosRouter = {
 							.map(async (s) => {
 								try {
 									const detalle = await carteraBackClient.getCredito(s);
-									montoAdeudadoPorSifco.set(
-										s,
-										calcularMontoAdeudadoDesdeCuotas(
-											detalle.cuotasAtrasadas ?? [],
+									const cuotasDetalle = detalle.cuotasAtrasadas ?? [];
+									detallePorSifco.set(s, {
+										montoAdeudado: calcularMontoAdeudadoDesdeCuotas(
+											cuotasDetalle,
 											detalle.credito.cuota,
 											detalle.moraActual ?? 0,
 											detalle.credito.statusCredit,
 										),
-									);
+										cuotasAtraso: contarCuotasAtrasadasUnicas(cuotasDetalle),
+									});
 								} catch (err) {
 									console.error(
 										`[cobros-masivo] sin detalle de cartera para ${s}:`,
 										err,
 									);
-									montoAdeudadoPorSifco.set(s, null);
+									detallePorSifco.set(s, null);
 								}
 							}),
 					);
@@ -3787,9 +3795,10 @@ export const cobrosRouter = {
 				// Si el cuerpo usa {montoAdeudado}, el monto viene del detalle de
 				// cartera (ver 4.b); sin él se descarta antes que mandar "Q." o un
 				// monto inflado.
+				const detalleCartera = detallePorSifco.get(sifco ?? "");
 				const adeudado = prepararMontoAdeudadoParaEnvio(
 					cuerpoBase,
-					montoAdeudadoPorSifco.get(sifco ?? ""),
+					detalleCartera?.montoAdeudado,
 				);
 				if (!adeudado.enviar) {
 					descartados.push({
@@ -3821,7 +3830,10 @@ export const cobrosRouter = {
 					// Saldo real de las cuotas vencidas + mora (detalle de cartera, ver
 					// 4.b); "" cuando la plantilla no lo usa.
 					montoAdeudado: adeudado.montoAdeudado,
-					cuotasAtraso: credito.mora?.cuotas_atrasadas ?? 0,
+					// Del mismo detalle que el monto (ver 4.b) para que el conteo y el
+					// monto hablen de las mismas cuotas; sin detalle, el del job.
+					cuotasAtraso:
+						detalleCartera?.cuotasAtraso ?? credito.mora?.cuotas_atrasadas ?? 0,
 					telefonoAsesor: telefonoAsesor.telefonoAsesor,
 					nombreAsesor: asesor.nombre ?? "",
 					expectativaMora: expectativaMora.expectativaMora,

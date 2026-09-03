@@ -41,7 +41,6 @@ const VARIABLES_DISPONIBLES = [
 	"fechaLimiteImpuesto",
 	"aseguradora",
 	"cabinaSeguro",
-	"montoTotalAtraso",
 ] as const;
 
 interface DescartadoItem {

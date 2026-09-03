@@ -51,7 +51,7 @@ import {
 } from "../lib/cobros-credit-detail";
 import {
 	calcularExpectativaMora,
-	calcularMontoTotalAtrasoDesdeCuotas,
+	calcularMontoAdeudadoDesdeCuotas,
 	contarCuotasAtrasadasUnicas,
 	cuerpoUsaFechaLimiteImpuesto,
 	fechaLimiteImpuestoCirculacion,
@@ -59,7 +59,7 @@ import {
 	interpolar as interpolarPlantilla,
 	PLANTILLAS_MENSAJES,
 	prepararExpectativaMoraParaEnvio,
-	prepararMontoTotalAtrasoParaEnvio,
+	prepararMontoAdeudadoParaEnvio,
 	prepararTelefonoAsesorParaEnvio,
 	seguroPorAseguradora,
 } from "../lib/cobros-plantillas";
@@ -2309,11 +2309,11 @@ export const cobrosRouter = {
 						creditoCompleto.credito.capital,
 						creditoCompleto.credito.statusCredit,
 					),
-					// Total real con TODAS las cuotas vencidas para la notificación de
-					// 2-3 cuotas: por cuota única, cuota − lo ya cubierto por pagos vivos
-					// (misma regla de cobertura que cartera), + mora. montoEnMora + cuota
-					// sigue siendo el criterio de la pantalla para el resto.
-					montoTotalAtraso: calcularMontoTotalAtrasoDesdeCuotas(
+					// {montoAdeudado} de las plantillas de mora (1 cuota, 2-3 cuotas,
+					// jurídico): saldo real de cada cuota vencida — recibo menos lo ya
+					// abonado, misma regla de cobertura que cartera — + mora. "" si no
+					// hay cuotas vencidas.
+					montoAdeudado: calcularMontoAdeudadoDesdeCuotas(
 						creditoCompleto.cuotasAtrasadas ?? [],
 						cuotaMensual,
 						montoEnMora,
@@ -3657,15 +3657,17 @@ export const cobrosRouter = {
 				motivo: string;
 			}> = [];
 
-			// 4.b Total real en atraso por crédito, SOLO si la plantilla lo usa. El
-			// conteo del job (mora.cuotas_atrasadas) cuenta la cuota completa aunque
-			// tenga abonos parciales (registerPayment deja esas filas con
-			// pagado=false y el job solo excluye cuotas con un pago pagado=true),
-			// así que multiplicarlo por la cuota sobrecontaría. Se trae el detalle
-			// de cada crédito elegible y se calcula igual que el modal individual
-			// (calcularMontoTotalAtrasoDesdeCuotas). null = detalle no disponible.
-			const totalAtrasoPorSifco = new Map<string, string | null>();
-			if (cuerpoBase.includes("{montoTotalAtraso}")) {
+			// 4.b Monto adeudado real por crédito, SOLO si la plantilla lo usa
+			// ({montoAdeudado}: notificaciones de 1 y de 2-3 cuotas, aviso
+			// jurídico). Ni mora + cuota ni el conteo del job × cuota sirven: la
+			// cuota puede tener abonos parciales (registerPayment deja esas filas
+			// con pagado=false y el job solo excluye cuotas con un pago
+			// pagado=true) o ser un recibo recortado menor a la cuota. Se trae el
+			// detalle de cada crédito elegible y se calcula igual que el modal
+			// individual (calcularMontoAdeudadoDesdeCuotas). null = detalle no
+			// disponible.
+			const montoAdeudadoPorSifco = new Map<string, string | null>();
+			if (cuerpoBase.includes("{montoAdeudado}")) {
 				const sifcosElegibles = creditosFiltrados
 					.filter(
 						(c) =>
@@ -3684,9 +3686,9 @@ export const cobrosRouter = {
 							.map(async (s) => {
 								try {
 									const detalle = await carteraBackClient.getCredito(s);
-									totalAtrasoPorSifco.set(
+									montoAdeudadoPorSifco.set(
 										s,
-										calcularMontoTotalAtrasoDesdeCuotas(
+										calcularMontoAdeudadoDesdeCuotas(
 											detalle.cuotasAtrasadas ?? [],
 											detalle.credito.cuota,
 											detalle.moraActual ?? 0,
@@ -3697,7 +3699,7 @@ export const cobrosRouter = {
 										`[cobros-masivo] sin detalle de cartera para ${s}:`,
 										err,
 									);
-									totalAtrasoPorSifco.set(s, null);
+									montoAdeudadoPorSifco.set(s, null);
 								}
 							}),
 					);
@@ -3746,11 +3748,6 @@ export const cobrosRouter = {
 					.join(" ")
 					.trim();
 
-				// Total a cobrar = monto en mora + cuota mensual (mismo criterio
-				// que se muestra en la pantalla de detalle del caso).
-				const montoMora = Number(credito.mora?.monto_mora ?? 0);
-				const totalACobrar = montoMora > 0 ? montoMora + Number(cuota) : 0;
-
 				const telefonoAsesor = prepararTelefonoAsesorParaEnvio(
 					cuerpoBase,
 					asesor.telefono,
@@ -3784,18 +3781,18 @@ export const cobrosRouter = {
 					continue;
 				}
 
-				// Si el cuerpo usa {montoTotalAtraso}, el total viene del detalle de
+				// Si el cuerpo usa {montoAdeudado}, el monto viene del detalle de
 				// cartera (ver 4.b); sin él se descarta antes que mandar "Q." o un
 				// monto inflado.
-				const totalAtraso = prepararMontoTotalAtrasoParaEnvio(
+				const adeudado = prepararMontoAdeudadoParaEnvio(
 					cuerpoBase,
-					totalAtrasoPorSifco.get(sifco ?? ""),
+					montoAdeudadoPorSifco.get(sifco ?? ""),
 				);
-				if (!totalAtraso.enviar) {
+				if (!adeudado.enviar) {
 					descartados.push({
 						numeroSifco: sifco,
 						clienteNombre,
-						motivo: totalAtraso.motivo,
+						motivo: adeudado.motivo,
 					});
 					continue;
 				}
@@ -3818,21 +3815,13 @@ export const cobrosRouter = {
 					cuotaMensual: String(cuota),
 					placa: info?.placa ?? "",
 					marcaLineaModelo,
-					montoAdeudado:
-						totalACobrar > 0
-							? totalACobrar.toLocaleString("es-GT", {
-									minimumFractionDigits: 2,
-									maximumFractionDigits: 2,
-								})
-							: "",
+					// Saldo real de las cuotas vencidas + mora (detalle de cartera, ver
+					// 4.b); "" cuando la plantilla no lo usa.
+					montoAdeudado: adeudado.montoAdeudado,
 					cuotasAtraso: credito.mora?.cuotas_atrasadas ?? 0,
 					telefonoAsesor: telefonoAsesor.telefonoAsesor,
 					nombreAsesor: asesor.nombre ?? "",
 					expectativaMora: expectativaMora.expectativaMora,
-					// Total real con TODAS las cuotas vencidas (detalle de cartera, ver
-					// 4.b) para la notificación de 2-3 cuotas; montoAdeudado sigue
-					// siendo mora + 1 cuota.
-					montoTotalAtraso: totalAtraso.montoTotalAtraso,
 					// Bloque del seguro de la bienvenida según la aseguradora de la
 					// oportunidad de cada crédito (Universales o G&T).
 					...seguroPorAseguradora(info?.insuranceProvider),

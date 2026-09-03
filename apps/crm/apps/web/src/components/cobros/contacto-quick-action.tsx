@@ -101,13 +101,6 @@ export function ContactoQuickAction({
 	const d = detalles.data;
 	const marcaLineaModelo =
 		`${d.vehiculoMarca || ""} ${d.vehiculoModelo || ""} ${d.vehiculoYear || ""}`.trim();
-	const montoAdeudado = (
-		Number(d.montoEnMora || 0) + Number(d.cuotaMensual || 0)
-	).toLocaleString("es-GT", {
-		minimumFractionDigits: 2,
-		maximumFractionDigits: 2,
-	});
-
 	return (
 		// biome-ignore lint/a11y/useKeyWithClickEvents: wrapper sólo intercepta clicks dentro del portal de Radix para evitar que el row-click navegue.
 		// biome-ignore lint/a11y/noStaticElementInteractions: wrapper presentacional, sin rol interactivo propio.
@@ -128,7 +121,7 @@ export function ContactoQuickAction({
 				cuotaMensual={Number(d.cuotaMensual || 0).toLocaleString()}
 				placa={d.vehiculoPlaca || ""}
 				marcaLineaModelo={marcaLineaModelo}
-				montoAdeudado={montoAdeudado}
+				montoAdeudado={d.montoAdeudado || ""}
 				cuotasAtraso={d.cuotasVencidas ?? 0}
 				estadoMora={d.estadoMora || undefined}
 				fechaInicio={d.fechaInicio || null}
@@ -137,7 +130,6 @@ export function ContactoQuickAction({
 				expectativaMora={d.expectativaMora || ""}
 				aseguradora={d.aseguradora || ""}
 				cabinaSeguro={d.cabinaSeguro || ""}
-				montoTotalAtraso={d.montoTotalAtraso || ""}
 			/>
 		</span>
 	);

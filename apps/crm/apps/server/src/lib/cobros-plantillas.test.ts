@@ -2,19 +2,20 @@ import { describe, expect, test } from "bun:test";
 import {
 	anioImpuestoCirculacion,
 	COBROS_MOTIVO_SIN_EXPECTATIVA_MORA,
+	COBROS_MOTIVO_SIN_MONTO_ADEUDADO,
 	COBROS_MOTIVO_SIN_TELEFONO_ASESOR,
-	COBROS_MOTIVO_SIN_TOTAL_ATRASO,
 	COBROS_NO_REPLY_WARNING,
 	calcularExpectativaMora,
-	calcularMontoTotalAtrasoDesdeCuotas,
+	calcularMontoAdeudadoDesdeCuotas,
 	contarCuotasAtrasadasUnicas,
 	cuerpoUsaFechaLimiteImpuesto,
+	type FilaCuotaAtrasada,
 	fechaLimiteImpuestoCirculacion,
 	fechaLimiteImpuestoVencida,
 	interpolar,
 	PLANTILLAS_MENSAJES,
 	prepararExpectativaMoraParaEnvio,
-	prepararMontoTotalAtrasoParaEnvio,
+	prepararMontoAdeudadoParaEnvio,
 	prepararTelefonoAsesorParaEnvio,
 	seguroPorAseguradora,
 } from "./cobros-plantillas";
@@ -425,54 +426,54 @@ Te recordamos realizar el pago de tu *Impuesto de Circulación {anioImpuesto}*.
 		);
 	});
 
-	test("la notificación de 2-3 cuotas usa el total real con todas las cuotas vencidas", () => {
-		// El total sale SIEMPRE del detalle de cartera
-		// (calcularMontoTotalAtrasoDesdeCuotas), tanto en el modal como en el
-		// masivo — el conteo del job cuenta la cuota completa aunque tenga abonos
-		// parciales, así que no sirve para un "monto total".
-		const mora60 = PLANTILLAS_MENSAJES.find(
-			(plantilla) => plantilla.id === "mora_60",
+	test("las notificaciones de mora usan el monto adeudado real del detalle", () => {
+		// {montoAdeudado} sale SIEMPRE del detalle de cartera
+		// (calcularMontoAdeudadoDesdeCuotas), tanto en el modal como en el
+		// masivo: saldo real de cada cuota vencida + mora. Ni "mora + una cuota"
+		// (ignoraba parciales y recibos recortados) ni "conteo del job × cuota"
+		// (una cuota con abono parcial sigue contando completa en el job).
+		const porId = (id: string) =>
+			PLANTILLAS_MENSAJES.find((plantilla) => plantilla.id === id)?.cuerpo ??
+			"";
+		expect(porId("mora_30")).toContain(
+			"1 cuota con atraso por un monto de Q{montoAdeudado}",
 		);
-		expect(mora60?.cuerpo).toContain(
-			"por un monto total de Q{montoTotalAtraso}",
+		expect(porId("mora_60")).toContain(
+			"por un monto total de Q{montoAdeudado}",
 		);
-		expect(mora60?.cuerpo).not.toContain("{montoAdeudado}");
-
-		// mora_30 ("1 cuota con atraso") sigue con montoAdeudado (mora + 1 cuota).
-		const mora30 = PLANTILLAS_MENSAJES.find(
-			(plantilla) => plantilla.id === "mora_30",
+		expect(porId("aviso_juridico")).toContain(
+			"por un monto de {montoAdeudado} incluyendo moras",
 		);
-		expect(mora30?.cuerpo).toContain("Q{montoAdeudado}");
 	});
 
-	test("descarta el envío que usa el total en atraso cuando no se pudo calcular", () => {
-		const mora60 =
-			PLANTILLAS_MENSAJES.find((plantilla) => plantilla.id === "mora_60")
-				?.cuerpo ?? "";
-
-		// null = no se pudo traer el detalle de cartera; "" = sin cuotas atrasadas.
-		for (const total of [null, undefined, ""]) {
-			expect(prepararMontoTotalAtrasoParaEnvio(mora60, total)).toEqual({
-				enviar: false,
-				motivo: COBROS_MOTIVO_SIN_TOTAL_ATRASO,
-			});
-		}
-		expect(prepararMontoTotalAtrasoParaEnvio(mora60, "2,100.00")).toEqual({
-			enviar: true,
-			montoTotalAtraso: "2,100.00",
-		});
-
-		// Una plantilla que no usa la variable se envía aunque no haya total.
+	test("descarta el envío que usa el monto adeudado cuando no se pudo calcular", () => {
 		const mora30 =
 			PLANTILLAS_MENSAJES.find((plantilla) => plantilla.id === "mora_30")
 				?.cuerpo ?? "";
-		expect(prepararMontoTotalAtrasoParaEnvio(mora30, null)).toEqual({
+
+		// null = no se pudo traer el detalle de cartera; "" = sin cuotas atrasadas.
+		for (const monto of [null, undefined, ""]) {
+			expect(prepararMontoAdeudadoParaEnvio(mora30, monto)).toEqual({
+				enviar: false,
+				motivo: COBROS_MOTIVO_SIN_MONTO_ADEUDADO,
+			});
+		}
+		expect(prepararMontoAdeudadoParaEnvio(mora30, "1,100.00")).toEqual({
 			enviar: true,
-			montoTotalAtraso: "",
+			montoAdeudado: "1,100.00",
+		});
+
+		// Una plantilla que no usa la variable se envía aunque no haya monto.
+		const alDia =
+			PLANTILLAS_MENSAJES.find((plantilla) => plantilla.id === "al_dia")
+				?.cuerpo ?? "";
+		expect(prepararMontoAdeudadoParaEnvio(alDia, null)).toEqual({
+			enviar: true,
+			montoAdeudado: "",
 		});
 	});
 
-	test("el total del detalle resta los pagos parciales y no duplica cuotas con varias filas de pago", () => {
+	test("el monto adeudado resta los pagos parciales y no duplica cuotas con varias filas de pago", () => {
 		// Filas tal como llegan de getCredito: una por par cuota-pago (leftJoin).
 		// Cuota 5 sin pagos; cuota 6 con un abono parcial validated de Q600 y
 		// una fila pending de Q100 (los pending cuentan, como en cartera).
@@ -500,7 +501,7 @@ Te recordamos realizar el pago de tu *Impuesto de Circulación {anioImpuesto}*.
 		// 2 cuotas únicas aunque hay 3 filas.
 		expect(contarCuotasAtrasadasUnicas(filas)).toBe(2);
 		// Cuota 5: 1000 completa. Cuota 6: 1000 − (600 + 100) = 300. + mora 50.
-		expect(calcularMontoTotalAtrasoDesdeCuotas(filas, "1000.00", "50.00")).toBe(
+		expect(calcularMontoAdeudadoDesdeCuotas(filas, "1000.00", "50.00")).toBe(
 			"1,350.00",
 		);
 
@@ -526,7 +527,7 @@ Te recordamos realizar el pago de tu *Impuesto de Circulación {anioImpuesto}*.
 				abono_capital: "1000.00",
 			},
 		];
-		expect(calcularMontoTotalAtrasoDesdeCuotas(noVivos, "1000.00", "0")).toBe(
+		expect(calcularMontoAdeudadoDesdeCuotas(noVivos, "1000.00", "0")).toBe(
 			"1,000.00",
 		);
 
@@ -540,7 +541,7 @@ Te recordamos realizar el pago de tu *Impuesto de Circulación {anioImpuesto}*.
 				pago_mora: "999.00",
 			},
 		];
-		expect(calcularMontoTotalAtrasoDesdeCuotas(soloMora, "1000.00", "0")).toBe(
+		expect(calcularMontoAdeudadoDesdeCuotas(soloMora, "1000.00", "0")).toBe(
 			"1,000.00",
 		);
 
@@ -554,13 +555,171 @@ Te recordamos realizar el pago de tu *Impuesto de Circulación {anioImpuesto}*.
 			},
 			{ numero_cuota: 10, paymentFalse: null, validationStatus: null },
 		];
-		expect(calcularMontoTotalAtrasoDesdeCuotas(sobrepago, "1000.00", "0")).toBe(
+		expect(calcularMontoAdeudadoDesdeCuotas(sobrepago, "1000.00", "0")).toBe(
 			"1,000.00",
 		);
 
-		// Sin cuotas no hay total que anunciar.
-		expect(calcularMontoTotalAtrasoDesdeCuotas([], "1000.00", "50.00")).toBe(
-			"",
-		);
+		// Sin cuotas no hay monto que anunciar.
+		expect(calcularMontoAdeudadoDesdeCuotas([], "1000.00", "50.00")).toBe("");
+	});
+
+	test("el saldo de cada cuota respeta el recibo recortado en vez de inflar con la cuota contractual", () => {
+		// Tras un abono grande el recálculo topa el capital del último recibo y
+		// los de cola quedan solo con seguro/GPS: su total real es MENOR a
+		// credito.cuota. Cartera lo lee de los *_restante del recibo
+		// (esReciboSaldado / calcularSaldoNetoCuota); acá se toma el menor entre
+		// ese saldo y el contractual menos lo aplicado.
+		const recibo = (
+			numero_cuota: number,
+			restantes: Partial<
+				Pick<
+					FilaCuotaAtrasada,
+					| "capital_restante"
+					| "interes_restante"
+					| "iva_12_restante"
+					| "seguro_restante"
+					| "gps_restante"
+					| "membresias_restante"
+				>
+			>,
+			extra: Partial<FilaCuotaAtrasada> = {},
+		): FilaCuotaAtrasada => ({
+			numero_cuota,
+			paymentFalse: false,
+			validationStatus: "no_required",
+			capital_restante: "0",
+			interes_restante: "0",
+			iva_12_restante: "0",
+			seguro_restante: "0",
+			gps_restante: "0",
+			membresias_restante: "0",
+			...restantes,
+			...extra,
+		});
+
+		// Recibo recortado sin pagos: 300+150+18+20+12 = Q500 (no Q1,000), más un
+		// recibo de cola solo con seguro/GPS (Q150). + mora 25 = 675.
+		expect(
+			calcularMontoAdeudadoDesdeCuotas(
+				[
+					recibo(11, {
+						capital_restante: "300.00",
+						interes_restante: "150.00",
+						iva_12_restante: "18.00",
+						seguro_restante: "20.00",
+						gps_restante: "12.00",
+					}),
+					recibo(12, { seguro_restante: "100.00", gps_restante: "50.00" }),
+				],
+				"1000.00",
+				"25.00",
+			),
+		).toBe("675.00");
+
+		// Recortado con abono parcial en el mismo recibo (pending): quedan 300.
+		expect(
+			calcularMontoAdeudadoDesdeCuotas(
+				[
+					recibo(
+						13,
+						{ capital_restante: "200.00", interes_restante: "100.00" },
+						{ validationStatus: "pending", abono_capital: "200.00" },
+					),
+				],
+				"1000.00",
+				"0",
+			),
+		).toBe("300.00");
+
+		// Hermanos desincronizados: el recibo sembrado quedó stale (1,000) y el
+		// parcial pending trae el saldo real (400) → manda el menor.
+		expect(
+			calcularMontoAdeudadoDesdeCuotas(
+				[
+					recibo(14, {
+						capital_restante: "700.00",
+						interes_restante: "300.00",
+					}),
+					recibo(
+						14,
+						{ capital_restante: "100.00", interes_restante: "300.00" },
+						{ validationStatus: "pending", abono_capital: "600.00" },
+					),
+				],
+				"1000.00",
+				"0",
+			),
+		).toBe("400.00");
+
+		// Restantes en 0 NO se confían: fila de cierre validated (aplicó 400,
+		// restantes 0) cuyo hermano de 600 se anuló → la deuda es 1,000 − 400.
+		expect(
+			calcularMontoAdeudadoDesdeCuotas(
+				[
+					recibo(
+						15,
+						{},
+						{ validationStatus: "validated", abono_capital: "400.00" },
+					),
+					recibo(
+						15,
+						{ capital_restante: "400.00" },
+						{
+							paymentFalse: true,
+							validationStatus: "validated",
+							abono_capital: "600.00",
+						},
+					),
+				],
+				"1000.00",
+				"0",
+			),
+		).toBe("600.00");
+
+		// Un restante NULL no es un cero (fila legacy): se cae al contractual.
+		expect(
+			calcularMontoAdeudadoDesdeCuotas(
+				[recibo(16, { capital_restante: null })],
+				"1000.00",
+				"0",
+			),
+		).toBe("1,000.00");
+
+		// Filas que no son recibo ni plata viva (anulada, rechazada, abono a
+		// capital) no aportan saldo de recibo aunque traigan restantes.
+		expect(
+			calcularMontoAdeudadoDesdeCuotas(
+				[
+					recibo(17, { capital_restante: "100.00" }, { paymentFalse: true }),
+					recibo(
+						17,
+						{ capital_restante: "100.00" },
+						{ validationStatus: "rejected" },
+					),
+					recibo(
+						17,
+						{ capital_restante: "100.00" },
+						{ validationStatus: "capital" },
+					),
+				],
+				"1000.00",
+				"0",
+			),
+		).toBe("1,000.00");
+
+		// El tope contractual manda si el recibo dice más de lo que falta.
+		expect(
+			calcularMontoAdeudadoDesdeCuotas(
+				[
+					recibo(
+						18,
+						{ capital_restante: "900.00", interes_restante: "300.00" },
+						{ validationStatus: "validated", abono_capital: "600.00" },
+					),
+				],
+				"1000.00",
+				"0",
+			),
+		).toBe("400.00");
 	});
 });

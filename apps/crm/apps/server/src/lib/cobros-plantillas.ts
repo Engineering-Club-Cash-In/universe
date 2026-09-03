@@ -25,6 +25,12 @@ export interface VariablesPlantilla {
 	cuotaMensual: string;
 	placa: string;
 	marcaLineaModelo: string;
+	/**
+	 * Lo que el cliente debe HOY para ponerse al día: saldo real de cada cuota
+	 * vencida (recibo menos lo ya abonado) + mora. Lo usan "Notificación 1 cuota
+	 * atrasada", "2-3 cuotas atrasadas" y el aviso jurídico; sale de
+	 * calcularMontoAdeudadoDesdeCuotas sobre el detalle de cartera.
+	 */
 	montoAdeudado: string;
 	cuotasAtraso: number;
 	telefonoAsesor: string;
@@ -38,18 +44,15 @@ export interface VariablesPlantilla {
 	aseguradora?: string;
 	/** Cabina de emergencia de la aseguradora. Default: la de Universales. */
 	cabinaSeguro?: string;
-	/**
-	 * Total para ponerse al día con TODAS las cuotas vencidas (cuotas atrasadas
-	 * × cuota + mora). Lo usa "Notificación 2-3 cuotas atrasadas".
-	 */
-	montoTotalAtraso?: string;
 }
 
 /**
  * Fila de `cuotasAtrasadas` tal como la devuelve `getCredito` de cartera: una
  * por par cuota-pago (leftJoin), así que una misma cuota puede venir repetida
- * si tiene varias filas de pago. Los rubros son los mismos que usa cartera
- * para decidir cobertura (`sumarAplicadoACuota` en registerPaymentPolicy.ts).
+ * si tiene varias filas de pago. Los `abono_*` son los rubros con que cartera
+ * decide cobertura (`sumarAplicadoACuota` en registerPaymentPolicy.ts) y los
+ * `*_restante` son lo que el RECIBO de esa fila dice que aún falta (los seis
+ * que lee `esReciboSaldado`).
  */
 export interface FilaCuotaAtrasada {
 	numero_cuota: number | null;
@@ -61,6 +64,12 @@ export interface FilaCuotaAtrasada {
 	abono_seguro?: string | number | null;
 	abono_gps?: string | number | null;
 	membresias_pago?: string | number | null;
+	capital_restante?: string | number | null;
+	interes_restante?: string | number | null;
+	iva_12_restante?: string | number | null;
+	seguro_restante?: string | number | null;
+	gps_restante?: string | number | null;
+	membresias_restante?: string | number | null;
 }
 
 /** Cuotas atrasadas ÚNICAS (por numero_cuota) en las filas del leftJoin. */
@@ -70,64 +79,134 @@ export function contarCuotasAtrasadasUnicas(
 	return new Set(filas.map((fila) => fila.numero_cuota)).size;
 }
 
+/** Rubros de cuota que un pago vivo aplica (misma suma que sumarAplicadoACuota). */
+const RUBROS_APLICADOS = [
+	"abono_capital",
+	"abono_interes",
+	"abono_iva_12",
+	"abono_seguro",
+	"abono_gps",
+	"membresias_pago",
+] as const;
+
+/** Saldos del recibo (los seis que lee esReciboSaldado en cartera). */
+const RUBROS_RESTANTES = [
+	"capital_restante",
+	"interes_restante",
+	"iva_12_restante",
+	"seguro_restante",
+	"gps_restante",
+	"membresias_restante",
+] as const;
+
+function aBig(valor: string | number | null | undefined): Big | null {
+	if (valor === null || valor === undefined || valor === "") return null;
+	try {
+		return new Big(valor);
+	} catch {
+		return null;
+	}
+}
+
+/** Σ rubros de cuota que esta fila aplicó (null o no numérico cuenta como 0). */
+function aplicadoDeFila(fila: FilaCuotaAtrasada): Big {
+	let total = new Big(0);
+	for (const rubro of RUBROS_APLICADOS) {
+		total = total.plus(aBig(fila[rubro]) ?? 0);
+	}
+	return total;
+}
+
 /**
- * Total real para ponerse al día a partir de las filas de `cuotasAtrasadas`
- * del detalle: por cada cuota ÚNICA, saldo = cuota − lo ya cubierto por pagos
- * vivos, y al final se suma la mora. "Cubierto" replica exactamente
- * `calcularCoberturaCuota` de cartera (pagos con paymentFalse=false en
- * validated o pending; Σ abono_capital + abono_interes + abono_iva_12 +
- * abono_seguro + abono_gps + membresias_pago; nunca monto_aplicado ni
- * mora/otros), así un abono parcial de Q600 a una cuota de Q1,000 deja Q400,
- * y una cuota con dos filas de pago se cuenta una sola vez. Devuelve "" si no
- * hay cuotas o el total no es positivo.
+ * Saldo que el RECIBO de esta fila dice que aún falta (Σ `*_restante`), o
+ * null si no es confiable:
+ *  - fila anulada, o de un pago que no es el recibo de la cuota ni plata viva
+ *    (solo cuentan no_required = recibo sembrado, validated y pending);
+ *  - algún restante sin informar — un NULL no es un cero (mismo criterio que
+ *    esReciboSaldado en cartera);
+ *  - restantes en 0: dentro de una cuota que cartera sigue listando como
+ *    atrasada, una fila así es la fila de CIERRE de una cuota partida cuyo
+ *    hermano se anuló (residuo), no un recibo saldado; su deuda la da el valor
+ *    contractual menos lo aplicado.
  */
-export function calcularMontoTotalAtrasoDesdeCuotas(
+function saldoReciboDeFila(fila: FilaCuotaAtrasada): Big | null {
+	if (fila.paymentFalse !== false) return null;
+	if (
+		fila.validationStatus !== "no_required" &&
+		fila.validationStatus !== "validated" &&
+		fila.validationStatus !== "pending"
+	) {
+		return null;
+	}
+	let total = new Big(0);
+	for (const rubro of RUBROS_RESTANTES) {
+		const valor = aBig(fila[rubro]);
+		if (valor === null) return null;
+		total = total.plus(valor);
+	}
+	return total.gt(0.01) ? total : null;
+}
+
+/**
+ * Monto adeudado real ({montoAdeudado}) a partir de las filas de
+ * `cuotasAtrasadas` del detalle: por cada cuota ÚNICA, su saldo, y al final se
+ * suma la mora. El saldo de una cuota es el MENOR entre:
+ *
+ *  1. Valor contractual − lo ya cubierto por pagos vivos. "Cubierto" replica
+ *     `calcularCoberturaCuota` de cartera (pagos con paymentFalse=false en
+ *     validated o pending; Σ abono_capital + abono_interes + abono_iva_12 +
+ *     abono_seguro + abono_gps + membresias_pago; nunca monto_aplicado ni
+ *     mora/otros). Así un abono parcial de Q600 a una cuota de Q1,000 deja
+ *     Q400 y una cuota con dos filas de pago se cuenta una sola vez.
+ *  2. Lo que el recibo dice que falta (Σ `*_restante` de la fila confiable
+ *     más baja, ver saldoReciboDeFila). Cubre los recibos RECORTADOS: tras un
+ *     abono grande el recálculo topa el capital del último recibo y los de
+ *     cola quedan solo con seguro/GPS, así que su total real es menor a
+ *     `credito.cuota` (mismo criterio con que cartera los da por saldados en
+ *     esReciboSaldado y los cobra en calcularSaldoNetoCuota). Los restantes
+ *     solo bajan al aplicar pagos, por eso ante hermanos desincronizados
+ *     manda el menor, y el tope contractual evita que un recibo stale infle.
+ *
+ * Devuelve "" si no hay cuotas o el total no es positivo.
+ */
+export function calcularMontoAdeudadoDesdeCuotas(
 	filas: ReadonlyArray<FilaCuotaAtrasada>,
 	cuota: string | number | null | undefined,
 	montoMora: string | number | null | undefined,
 ): string {
 	if (filas.length === 0) return "";
-	let cuotaBig: Big;
-	let moraBig: Big;
-	try {
-		cuotaBig = new Big(cuota ?? 0);
-		moraBig = new Big(montoMora ?? 0);
-	} catch {
-		return "";
-	}
+	const cuotaBig = aBig(cuota ?? 0);
+	const moraBig = aBig(montoMora ?? 0);
+	if (!cuotaBig || !moraBig) return "";
 
-	const porCuota = new Map<number | null, Big>();
+	const porCuota = new Map<
+		number | null,
+		{ aplicado: Big; saldoRecibo: Big | null }
+	>();
 	for (const fila of filas) {
-		const acumulado = porCuota.get(fila.numero_cuota) ?? new Big(0);
+		const grupo = porCuota.get(fila.numero_cuota) ?? {
+			aplicado: new Big(0),
+			saldoRecibo: null,
+		};
 		const vivo =
 			fila.paymentFalse === false &&
 			(fila.validationStatus === "validated" ||
 				fila.validationStatus === "pending");
-		if (!vivo) {
-			porCuota.set(fila.numero_cuota, acumulado);
-			continue;
+		if (vivo) grupo.aplicado = grupo.aplicado.plus(aplicadoDeFila(fila));
+		const saldoRecibo = saldoReciboDeFila(fila);
+		if (
+			saldoRecibo !== null &&
+			(grupo.saldoRecibo === null || saldoRecibo.lt(grupo.saldoRecibo))
+		) {
+			grupo.saldoRecibo = saldoRecibo;
 		}
-		let aplicado = acumulado;
-		for (const rubro of [
-			fila.abono_capital,
-			fila.abono_interes,
-			fila.abono_iva_12,
-			fila.abono_seguro,
-			fila.abono_gps,
-			fila.membresias_pago,
-		]) {
-			try {
-				aplicado = aplicado.plus(new Big(rubro ?? 0));
-			} catch {
-				/* rubro no numérico: se ignora, igual que un 0 */
-			}
-		}
-		porCuota.set(fila.numero_cuota, aplicado);
+		porCuota.set(fila.numero_cuota, grupo);
 	}
 
 	let total = moraBig;
-	for (const aplicado of porCuota.values()) {
-		const saldo = cuotaBig.minus(aplicado);
+	for (const { aplicado, saldoRecibo } of porCuota.values()) {
+		let saldo = cuotaBig.minus(aplicado);
+		if (saldoRecibo !== null && saldoRecibo.lt(saldo)) saldo = saldoRecibo;
 		if (saldo.gt(0)) total = total.plus(saldo);
 	}
 	if (total.lte(0)) return "";
@@ -293,30 +372,28 @@ export function prepararExpectativaMoraParaEnvio(
 	return { enviar: true, expectativaMora };
 }
 
-export const COBROS_MOTIVO_SIN_TOTAL_ATRASO =
-	"no se pudo calcular el total en atraso (sin cuotas atrasadas o sin detalle de cartera)";
+export const COBROS_MOTIVO_SIN_MONTO_ADEUDADO =
+	"no se pudo calcular el monto adeudado (sin cuotas atrasadas o sin detalle de cartera)";
 
 /**
- * Un cuerpo que usa {montoTotalAtraso} no se puede enviar sin ese total: el
- * mensaje diría "por un monto total de Q." roto o, peor, un monto inventado.
- * El total sale de calcularMontoTotalAtrasoDesdeCuotas sobre el detalle del
+ * Un cuerpo que usa {montoAdeudado} no se puede enviar sin ese monto: el
+ * mensaje diría "por un monto de Q." roto o, peor, un monto inventado. El
+ * monto sale de calcularMontoAdeudadoDesdeCuotas sobre el detalle del
  * crédito; si el detalle no se pudo traer o no hay cuotas atrasadas, se
  * descarta (mismo patrón que los otros gates). `null` = no se pudo obtener el
  * detalle; "" = detalle sin cuotas atrasadas.
  */
-export function prepararMontoTotalAtrasoParaEnvio(
+export function prepararMontoAdeudadoParaEnvio(
 	cuerpo: string,
-	montoTotalAtraso: string | null | undefined,
-):
-	| { enviar: true; montoTotalAtraso: string }
-	| { enviar: false; motivo: string } {
-	if (!cuerpo.includes("{montoTotalAtraso}")) {
-		return { enviar: true, montoTotalAtraso: montoTotalAtraso ?? "" };
+	montoAdeudado: string | null | undefined,
+): { enviar: true; montoAdeudado: string } | { enviar: false; motivo: string } {
+	if (!cuerpo.includes("{montoAdeudado}")) {
+		return { enviar: true, montoAdeudado: montoAdeudado ?? "" };
 	}
-	if (!montoTotalAtraso) {
-		return { enviar: false, motivo: COBROS_MOTIVO_SIN_TOTAL_ATRASO };
+	if (!montoAdeudado) {
+		return { enviar: false, motivo: COBROS_MOTIVO_SIN_MONTO_ADEUDADO };
 	}
-	return { enviar: true, montoTotalAtraso };
+	return { enviar: true, montoAdeudado };
 }
 
 export function prepararTelefonoAsesorParaEnvio(
@@ -381,8 +458,7 @@ export function interpolar(
 		.replace(
 			/{cabinaSeguro}/g,
 			v(variables.cabinaSeguro ?? seguroPorAseguradora(null).cabinaSeguro),
-		)
-		.replace(/{montoTotalAtraso}/g, v(variables.montoTotalAtraso ?? ""));
+		);
 }
 
 export const PLANTILLAS_MENSAJES: PlantillaMensaje[] = [
@@ -497,7 +573,7 @@ Es importante que realices tu pago lo antes posible para evitar mayores recargos
 		asunto: "AVISO IMPORTANTE: Mora de 60 días - Vehículo {placa}",
 		// 4 bloques → template `mensaje4parametro`.
 		cuerpo: `Hola {clienteNombre},
-Te informamos que actualmente tienes *{cuotasAtraso} cuotas en atraso, por un monto total de Q{montoTotalAtraso}*.
+Te informamos que actualmente tienes *{cuotasAtraso} cuotas en atraso, por un monto total de Q{montoAdeudado}*.
 
 ⚠️ *En caso de no recibir el pago, CashIn podrá aplicar las medidas de recuperación contempladas en tu contrato y la ejecución de garantía.*
 

@@ -94,7 +94,6 @@ interface ContactoModalProps {
 	expectativaMora?: string;
 	aseguradora?: string;
 	cabinaSeguro?: string;
-	montoTotalAtraso?: string;
 }
 
 export function ContactoModal({
@@ -120,7 +119,6 @@ export function ContactoModal({
 	expectativaMora = "",
 	aseguradora = "",
 	cabinaSeguro = "",
-	montoTotalAtraso = "",
 }: ContactoModalProps) {
 	const queryClient = useQueryClient();
 
@@ -172,7 +170,6 @@ export function ContactoModal({
 			// datos, el modal muestra de una vez la variante correcta (p. ej. G&T).
 			aseguradora: aseguradora || undefined,
 			cabinaSeguro: cabinaSeguro || undefined,
-			montoTotalAtraso: montoTotalAtraso || undefined,
 		}),
 		[
 			clienteNombre,
@@ -187,7 +184,6 @@ export function ContactoModal({
 			expectativaMora,
 			aseguradora,
 			cabinaSeguro,
-			montoTotalAtraso,
 		],
 	);
 

@@ -15,6 +15,13 @@ export interface VariablesPlantilla {
 	cuotaMensual: string;
 	placa: string;
 	marcaLineaModelo: string;
+	/**
+	 * Lo que el cliente debe HOY para ponerse al día: saldo real de cada cuota
+	 * vencida (recibo menos lo ya abonado) + mora, calculado en el server
+	 * (getDetallesCreditoCarteraBack) con la misma regla de cobertura de
+	 * cartera. Lo usan "Notificación 1 cuota atrasada", "2-3 cuotas atrasadas"
+	 * y el aviso jurídico.
+	 */
 	montoAdeudado: string;
 	cuotasAtraso: number;
 	telefonoAsesor: string;
@@ -36,12 +43,6 @@ export interface VariablesPlantilla {
 	 */
 	aseguradora?: string;
 	cabinaSeguro?: string;
-	/**
-	 * Total para ponerse al día con TODAS las cuotas vencidas (cuotas atrasadas
-	 * × cuota + mora), calculado en el server. Lo usa "Notificación 2-3 cuotas
-	 * atrasadas"; `montoAdeudado` sigue siendo mora + una cuota.
-	 */
-	montoTotalAtraso?: string;
 }
 
 const SEGURO_DEFAULT = {
@@ -287,10 +288,6 @@ export function interpolar(
 				variables.fechaLimiteImpuesto ?? fechaLimiteImpuestoCirculacion(),
 				"fecha límite impuesto",
 			),
-		)
-		.replace(
-			/{montoTotalAtraso}/g,
-			v(variables.montoTotalAtraso ?? "", "monto total en atraso"),
 		);
 }
 
@@ -465,7 +462,7 @@ Es importante que realices tu pago lo antes posible para evitar mayores recargos
 		etapa: "mora_60",
 		asunto: "AVISO IMPORTANTE: Mora de 60 días - Vehículo {placa}",
 		cuerpo: `Hola {clienteNombre},
-Te informamos que actualmente tienes {cuotasAtraso} cuotas en atraso, por un monto total de Q{montoTotalAtraso}.
+Te informamos que actualmente tienes {cuotasAtraso} cuotas en atraso, por un monto total de Q{montoAdeudado}.
 
 ⚠️ En caso de no recibir el pago, CashIn podrá aplicar las medidas de recuperación contempladas en tu contrato y la ejecución de garantía.
 
@@ -475,7 +472,7 @@ Te informamos que actualmente tienes {cuotasAtraso} cuotas en atraso, por un mon
 
 CashIn`,
 		cuerpoWhastapp: `Hola {clienteNombre},
-Te informamos que actualmente tienes *{cuotasAtraso} cuotas en atraso, por un monto total de Q{montoTotalAtraso}*.
+Te informamos que actualmente tienes *{cuotasAtraso} cuotas en atraso, por un monto total de Q{montoAdeudado}*.
 
 ⚠️ *En caso de no recibir el pago, CashIn podrá aplicar las medidas de recuperación contempladas en tu contrato y la ejecución de garantía.*
 

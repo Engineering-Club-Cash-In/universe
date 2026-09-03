@@ -425,33 +425,47 @@ describe("plantillas web de cobros", () => {
 		);
 	});
 
-	test("la notificación de 2-3 cuotas usa el total con todas las cuotas vencidas", () => {
-		const mora60 = PLANTILLAS_MENSAJES.find(
-			(plantilla) => plantilla.id === "mora_60",
+	test("las notificaciones de mora usan el monto adeudado real del server", () => {
+		// El server calcula {montoAdeudado} desde el detalle de cartera: saldo
+		// real de cada cuota vencida (recibo menos lo abonado) + mora. La misma
+		// variable sirve para 1 cuota, 2-3 cuotas y el aviso jurídico.
+		const porId = (id: string) =>
+			PLANTILLAS_MENSAJES.find((plantilla) => plantilla.id === id);
+		const mora30 = porId("mora_30");
+		const mora60 = porId("mora_60");
+		expect(mora30?.cuerpoWhastapp).toContain(
+			"1 cuota con atraso por un monto de Q{montoAdeudado}",
 		);
-		// El server calcula cuotas × cuota + mora y lo manda como montoTotalAtraso;
-		// montoAdeudado (mora + 1 cuota) queda para "1 cuota con atraso".
 		expect(mora60?.cuerpoWhastapp).toContain(
-			"por un monto total de Q{montoTotalAtraso}",
+			"por un monto total de Q{montoAdeudado}",
 		);
-		expect(mora60?.cuerpo).toContain(
-			"por un monto total de Q{montoTotalAtraso}",
-		);
+		expect(mora60?.cuerpo).toContain("por un monto total de Q{montoAdeudado}");
 
-		const mensaje = interpolar(mora60?.cuerpoWhastapp ?? "", {
+		const base = {
 			clienteNombre: "MARIA LOPEZ",
 			fechaPago: "5",
 			cuotaMensual: "1,000.00",
 			placa: "",
 			marcaLineaModelo: "",
-			montoAdeudado: "1,100.00",
-			cuotasAtraso: 2,
 			telefonoAsesor: "41286630",
 			nombreAsesor: "Carlos Pérez",
 			expectativaMora: "",
-			montoTotalAtraso: "2,100.00",
-		});
-		expect(mensaje).toContain(
+		};
+		// 1 cuota con abono parcial de Q600 + mora Q50: debe Q450, no Q1,050.
+		expect(
+			interpolar(mora30?.cuerpoWhastapp ?? "", {
+				...base,
+				montoAdeudado: "450.00",
+				cuotasAtraso: 1,
+			}),
+		).toContain("Tienes *1 cuota con atraso por un monto de Q450.00*.");
+		expect(
+			interpolar(mora60?.cuerpoWhastapp ?? "", {
+				...base,
+				montoAdeudado: "2,100.00",
+				cuotasAtraso: 2,
+			}),
+		).toContain(
 			"tienes *2 cuotas en atraso, por un monto total de Q2,100.00*.",
 		);
 	});

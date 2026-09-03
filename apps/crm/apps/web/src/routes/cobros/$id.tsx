@@ -1107,13 +1107,7 @@ function RouteComponent() {
 											).toLocaleString()}
 											placa={caso.vehiculoPlaca || ""}
 											marcaLineaModelo={`${caso.vehiculoMarca || ""} ${caso.vehiculoModelo || ""} ${caso.vehiculoYear || ""}`.trim()}
-											montoAdeudado={(
-												Number(caso.montoEnMora || 0) +
-												Number(caso.cuotaMensual || 0)
-											).toLocaleString("es-GT", {
-												minimumFractionDigits: 2,
-												maximumFractionDigits: 2,
-											})}
+											montoAdeudado={caso.montoAdeudado || ""}
 											cuotasAtraso={caso.cuotasVencidas ?? 0}
 											estadoMora={caso.estadoMora || undefined}
 											fechaInicio={caso.fechaInicio || null}
@@ -1122,7 +1116,6 @@ function RouteComponent() {
 											expectativaMora={caso.expectativaMora || ""}
 											aseguradora={caso.aseguradora || ""}
 											cabinaSeguro={caso.cabinaSeguro || ""}
-											montoTotalAtraso={caso.montoTotalAtraso || ""}
 										>
 											<Button className="flex items-center gap-2">
 												<Phone className="h-4 w-4" />
@@ -1147,13 +1140,7 @@ function RouteComponent() {
 											).toLocaleString()}
 											placa={caso.vehiculoPlaca || ""}
 											marcaLineaModelo={`${caso.vehiculoMarca || ""} ${caso.vehiculoModelo || ""} ${caso.vehiculoYear || ""}`.trim()}
-											montoAdeudado={(
-												Number(caso.montoEnMora || 0) +
-												Number(caso.cuotaMensual || 0)
-											).toLocaleString("es-GT", {
-												minimumFractionDigits: 2,
-												maximumFractionDigits: 2,
-											})}
+											montoAdeudado={caso.montoAdeudado || ""}
 											cuotasAtraso={caso.cuotasVencidas ?? 0}
 											estadoMora={caso.estadoMora || undefined}
 											fechaInicio={caso.fechaInicio || null}
@@ -1162,7 +1149,6 @@ function RouteComponent() {
 											expectativaMora={caso.expectativaMora || ""}
 											aseguradora={caso.aseguradora || ""}
 											cabinaSeguro={caso.cabinaSeguro || ""}
-											montoTotalAtraso={caso.montoTotalAtraso || ""}
 										>
 											<Button
 												variant="outline"
@@ -1190,13 +1176,7 @@ function RouteComponent() {
 											).toLocaleString()}
 											placa={caso.vehiculoPlaca || ""}
 											marcaLineaModelo={`${caso.vehiculoMarca || ""} ${caso.vehiculoModelo || ""} ${caso.vehiculoYear || ""}`.trim()}
-											montoAdeudado={(
-												Number(caso.montoEnMora || 0) +
-												Number(caso.cuotaMensual || 0)
-											).toLocaleString("es-GT", {
-												minimumFractionDigits: 2,
-												maximumFractionDigits: 2,
-											})}
+											montoAdeudado={caso.montoAdeudado || ""}
 											cuotasAtraso={caso.cuotasVencidas ?? 0}
 											estadoMora={caso.estadoMora || undefined}
 											fechaInicio={caso.fechaInicio || null}
@@ -1205,7 +1185,6 @@ function RouteComponent() {
 											expectativaMora={caso.expectativaMora || ""}
 											aseguradora={caso.aseguradora || ""}
 											cabinaSeguro={caso.cabinaSeguro || ""}
-											montoTotalAtraso={caso.montoTotalAtraso || ""}
 										>
 											<Button
 												variant="outline"

@@ -27,28 +27,87 @@ mock.module("@cci/email", () => ({
   sendInvestorAddedToCreditsNotification: mock(() => Promise.resolve()),
 }));
 
-const { applyEstadoCuentaRunningCapital, buildEstadoCuentaTableHeader, buildPreviousCapitalBalanceLateral, capitalAtPeriodStartSql, renderEstadoCuentaPaymentRow, shouldIncludeEstadoCuentaPayment, sortEstadoCuentaPayments, esStatusExcluidoMora, esStatusSinFacturacion, escalarCapitalAlPrincipal } = await import("./reports");
+const { applyEstadoCuentaRunningCapital, buildCapitalHistoryBeforePeriodLateral, buildEstadoCuentaTableHeader, buildPreviousCapitalBalanceLateral, capitalAtPeriodStartSql, renderEstadoCuentaPaymentRow, resolveCapitalAtPeriodStart, shouldIncludeEstadoCuentaPayment, sortEstadoCuentaPayments, esStatusExcluidoMora, esStatusSinFacturacion, escalarCapitalAlPrincipal } = await import("./reports");
 
 describe("Pagos por Vencimiento: saldo anterior", () => {
-  it("acepta un cierre aplicado en cero y no revive un saldo positivo anterior", () => {
+  it("prioriza el capital auditado en cero sobre el saldo positivo legado", () => {
+    expect(
+      resolveCapitalAtPeriodStart({
+        historicalCapital: "0.00",
+        legacyCapital: "7410.25",
+        currentCapital: "-0.01",
+      }),
+    ).toBe("0.00");
+  });
+
+  it("conserva el fallback legado para créditos sin historial de capital", () => {
+    expect(
+      resolveCapitalAtPeriodStart({
+        historicalCapital: null,
+        legacyCapital: "7410.25",
+        currentCapital: "5200.00",
+      }),
+    ).toBe("7410.25");
+  });
+
+  it("no cambia saldos positivos existentes fuera del caso de liquidación", () => {
+    expect(
+      resolveCapitalAtPeriodStart({
+        historicalCapital: "5200.00",
+        legacyCapital: "7410.25",
+        currentCapital: "5200.00",
+      }),
+    ).toBe("7410.25");
+  });
+
+  it("nunca convierte un capital actual negativo en expectativa", () => {
+    expect(
+      resolveCapitalAtPeriodStart({
+        historicalCapital: null,
+        legacyCapital: null,
+        currentCapital: "-0.01",
+      }),
+    ).toBe("0.00");
+  });
+
+  it("lee el último cambio auditado anterior al período en hora de Guatemala", () => {
+    const query = new PgDialect().sqlToQuery(
+      buildCapitalHistoryBeforePeriodLateral("2026-08-01"),
+    );
+
+    expect(query.sql).toContain("cartera.historial_capital_credito");
+    expect(query.sql).toContain("capital_nuevo");
+    expect(query.sql).toContain("AT TIME ZONE 'America/Guatemala'");
+    expect(query.sql).toContain("ORDER BY h.fecha DESC, h.id DESC");
+    expect(query.sql).not.toContain("pagos_credito");
+    expect(query.params).toEqual(["2026-08-01"]);
+  });
+
+  it("mantiene el fallback legado sin ampliar filas de pago elegibles", () => {
     const query = new PgDialect().sqlToQuery(
       buildPreviousCapitalBalanceLateral("2026-08-01"),
     );
 
-    expect(query.sql).not.toContain("total_restante::numeric > 0");
-    expect(query.sql).toContain('pc_a."paymentFalse" = false');
-    expect(query.sql).toContain("pc_a.pagado = true");
-    expect(query.sql).toContain("pc_a.fecha_aplicado::date");
+    expect(query.sql).toContain("pc_a.total_restante::numeric > 0");
+    expect(query.sql).not.toContain("validation_status");
+    expect(query.sql).not.toContain("fecha_aplicado");
+    expect(query.sql).toContain("pc_a.fecha_boleta::date");
     expect(query.sql).toContain("pc_a.fecha_pago::date");
-    expect(query.params).toEqual(["2026-08-01"]);
+    expect(query.sql).toContain("'1900-01-01'::date");
+    const normalizedSql = query.sql.replace(/\s+/g, " ");
+    const baselineDateExpression =
+      "COALESCE( qcc_a.fecha_vencimiento::date, GREATEST( COALESCE( pc_a.fecha_boleta::date, pc_a.fecha_pago::date, '1900-01-01'::date ), COALESCE( pc_a.fecha_pago::date, pc_a.fecha_boleta::date, '1900-01-01'::date ) ) )";
+    expect(normalizedSql.split(baselineDateExpression)).toHaveLength(3);
   });
 
-  it("nunca convierte un saldo actual negativo en expectativa", () => {
+  it("usa el historial solo como guard de liquidación en los totales SQL", () => {
     const query = new PgDialect().sqlToQuery(capitalAtPeriodStartSql);
 
-    expect(query.sql.replace(/\s+/g, " ").trim()).toBe(
-      "GREATEST( COALESCE(cap_anterior.total_restante, c.capital::numeric), 0 )",
+    expect(query.sql).toContain(
+      "WHEN capital_historial.capital_nuevo <= 0 THEN 0",
     );
+    expect(query.sql).toContain("cap_anterior.total_restante");
+    expect(query.sql).toContain("c.capital::numeric");
   });
 });
 

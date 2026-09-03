@@ -28,44 +28,90 @@ export const esStatusExcluidoMora = (status?: string | null) =>
 export const esStatusSinFacturacion = (status?: string | null) =>
   !!status && STATUS_SIN_FACTURACION.includes(status);
 
-// Saldo al inicio del período para Pagos por Vencimiento. Debe aceptar un cierre
-// aplicado en cero; filtrar `total_restante > 0` revivía el último saldo positivo.
-// Las filas pendientes de cuotas futuras no son snapshots de saldo y se excluyen.
+// Fallback legado para créditos sin auditoría de capital. Se conserva sin cambios
+// porque pagos históricos y filas directas a capital no tienen una semántica
+// uniforme de `total_restante`.
 export const buildPreviousCapitalBalanceLateral = (fechaInicio: string) => sql`
   LEFT JOIN LATERAL (
-    SELECT GREATEST(pc_a.total_restante::numeric, 0) AS total_restante
+    SELECT pc_a.total_restante::numeric AS total_restante
     FROM cartera.pagos_credito pc_a
     LEFT JOIN cartera.cuotas_credito qcc_a ON pc_a.cuota_id = qcc_a.cuota_id
     WHERE pc_a.credito_id = c.credito_id
       AND pc_a."paymentFalse" = false
       AND pc_a.total_restante IS NOT NULL
-      AND (
-        pc_a.pagado = true
-        OR (
-          pc_a.validation_status IN ('validated', 'capital_validated')
-          AND COALESCE(pc_a.monto_aplicado::numeric, 0) > 0
-        )
-      )
+      AND pc_a.total_restante::numeric > 0
       AND COALESCE(
-        pc_a.fecha_aplicado::date,
-        pc_a.fecha_pago::date,
         qcc_a.fecha_vencimiento::date,
-        pc_a.fecha_vencimiento::date
+        GREATEST(
+          COALESCE(
+            pc_a.fecha_boleta::date,
+            pc_a.fecha_pago::date,
+            '1900-01-01'::date
+          ),
+          COALESCE(
+            pc_a.fecha_pago::date,
+            pc_a.fecha_boleta::date,
+            '1900-01-01'::date
+          )
+        )
       ) < ${fechaInicio}::date
     ORDER BY COALESCE(
-      pc_a.fecha_aplicado::date,
-      pc_a.fecha_pago::date,
       qcc_a.fecha_vencimiento::date,
-      pc_a.fecha_vencimiento::date
+      GREATEST(
+        COALESCE(
+          pc_a.fecha_boleta::date,
+          pc_a.fecha_pago::date,
+          '1900-01-01'::date
+        ),
+        COALESCE(
+          pc_a.fecha_pago::date,
+          pc_a.fecha_boleta::date,
+          '1900-01-01'::date
+        )
+      )
     ) DESC, pc_a.pago_id DESC
     LIMIT 1
   ) cap_anterior ON true
 `;
 
-export const capitalAtPeriodStartSql = sql`GREATEST(
-  COALESCE(cap_anterior.total_restante, c.capital::numeric),
-  0
-)`;
+// Fuente canónica para períodos cubiertos por el trigger de auditoría: registra
+// el capital realmente movido, no el snapshot ambiguo guardado en una fila de pago.
+export const buildCapitalHistoryBeforePeriodLateral = (fechaInicio: string) => sql`
+  LEFT JOIN LATERAL (
+    SELECT GREATEST(h.capital_nuevo::numeric, 0) AS capital_nuevo
+    FROM cartera.historial_capital_credito h
+    WHERE h.credito_id = c.credito_id
+      AND h.fecha < (${fechaInicio}::date AT TIME ZONE 'America/Guatemala')
+    ORDER BY h.fecha DESC, h.id DESC
+    LIMIT 1
+  ) capital_historial ON true
+`;
+
+export const capitalAtPeriodStartSql = sql`CASE
+  WHEN capital_historial.capital_nuevo <= 0 THEN 0
+  ELSE GREATEST(
+    COALESCE(cap_anterior.total_restante, c.capital::numeric),
+    0
+  )
+END`;
+
+export const resolveCapitalAtPeriodStart = ({
+  historicalCapital,
+  legacyCapital,
+  currentCapital,
+}: {
+  historicalCapital?: string | number | null;
+  legacyCapital?: string | number | null;
+  currentCapital?: string | number | null;
+}) => {
+  if (historicalCapital !== null && historicalCapital !== undefined) {
+    const auditedAmount = new Big(historicalCapital);
+    if (auditedAmount.lte(0)) return "0.00";
+  }
+  const candidate = legacyCapital ?? currentCapital ?? 0;
+  const amount = new Big(candidate);
+  return (amount.lt(0) ? new Big(0) : amount).toFixed(2);
+};
 
 // Escala el capital de las cuotas vencidas para que su suma no exceda el principal remanente
 // del crédito (no se puede deber más capital que el que queda). Morosos normales (suma ≤
@@ -1852,6 +1898,8 @@ export async function getPagosByVencimiento({
 
   // Fragmentos SQL reutilizables entre query paginada y query de totales
   const lateralCapAnterior = buildPreviousCapitalBalanceLateral(fechaInicio);
+  const lateralCapitalHistorial =
+    buildCapitalHistoryBeforePeriodLateral(fechaInicio);
 
   const commonFromJoins = sql`
     FROM ${pagosDeduped}
@@ -1876,6 +1924,7 @@ export async function getPagosByVencimiento({
         )
     ) mora_real ON true
     ${cubeSubquery}
+    ${lateralCapitalHistorial}
     ${lateralCapAnterior}
     WHERE ${whereClause}
   `;
@@ -1884,7 +1933,7 @@ export async function getPagosByVencimiento({
     GROUP BY
       c.credito_id, c.numero_credito_sifco, u.nombre, a.nombre, c.royalti, c."statusCredit",
       c.capital, c.porcentaje_interes, c.cuota, c.seguro_10_cuotas, c.gps, c.membresias_pago,
-      cap_anterior.total_restante, mora_real.cuotas_atrasadas
+      capital_historial.capital_nuevo, cap_anterior.total_restante, mora_real.cuotas_atrasadas
     HAVING SUM(${totalFilaSql}) <> 0
   `;
 
@@ -1901,7 +1950,9 @@ export async function getPagosByVencimiento({
       c.seguro_10_cuotas,
       c.gps,
       c.membresias_pago,
-      ${capitalAtPeriodStartSql} AS capital_mes_anterior,
+      capital_historial.capital_nuevo AS capital_historial_inicio,
+      cap_anterior.total_restante AS capital_legado_inicio,
+      c.capital::numeric AS capital_actual,
       AVG(COALESCE(cube_data.cash_in_pct, 0))::numeric AS cash_in_pct,
       MIN(q.numero_cuota) AS cuota_min,
       MAX(q.numero_cuota) AS cuota_max,
@@ -1921,7 +1972,13 @@ export async function getPagosByVencimiento({
   `;
 
   const recalcRow = (row: any) => {
-    const capitalAnterior = new Big(row.capital_mes_anterior || 0);
+    const capitalAnterior = new Big(
+      resolveCapitalAtPeriodStart({
+        historicalCapital: row.capital_historial_inicio,
+        legacyCapital: row.capital_legado_inicio,
+        currentCapital: row.capital_actual,
+      })
+    );
     const porcentajeInteres = new Big(row.porcentaje_interes || 0).div(100);
     const interesCalculado = capitalAnterior.times(porcentajeInteres).round(2);
     const ivaCalculado = interesCalculado.times(0.12).round(2);

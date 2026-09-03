@@ -403,20 +403,37 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
         )
         -- Compra que el histórico ya absorbió: no hay nada que ajustar.
         --
-        -- Se compara por id y no por fecha porque las fechas de una liquidación
-        -- pueden ser retroactivas. Una liquidación revertida y rehecha conserva
-        -- su fecha_liquidacion original mientras su foto se reescribe con los
-        -- saldos del momento real, así que por fecha una compra anterior al
-        -- rehecho parece posterior a la liquidación (caso Eduardo Díaz, agosto:
-        -- la 829 dice 10-ago pero se rehizo el 21, después de su compra de
-        -- Q999, y restarla era doble conteo). Los seriales no se reescriben:
-        -- si la fila del histórico se insertó después de la compra, la incluye.
+        -- El orden no puede salir de las fechas de la liquidación, que pueden
+        -- ser retroactivas: una revertida y rehecha conserva su
+        -- fecha_liquidacion original mientras su foto se reescribe con los
+        -- saldos del momento real (caso Eduardo Díaz, agosto: la 829 dice
+        -- 10-ago pero se rehizo el 21, después de su compra de Q999, y
+        -- restarla era doble conteo).
+        --
+        -- Tampoco puede salir de comparar hl.id con c.id: son secuencias
+        -- independientes y van muy desalineadas, así que su orden numérico no
+        -- dice nada sobre cuál fila se insertó antes.
+        --
+        -- El eje común es la bitácora del espejo, que data con el reloj del
+        -- trigger y no se reescribe. El instante real en que se tomó la foto es
+        -- el del movimiento que dejó el crédito en el monto que el histórico
+        -- guardó; una compra anterior a ese instante ya está adentro.
         and not exists (
-          select 1 from cartera.historico_liquidaciones_espejo hl
+          select 1
+          from cartera.historico_liquidaciones_espejo hl
+          left join lateral (
+            select hm.fecha
+            from cartera.historico_monto_aportado_espejo hm
+            where hm.credito_id       = hl.credito_id
+              and hm.inversionista_id = hl.inversionista_id
+              and hm.monto_nuevo      = hl.monto_aportado
+            order by hm.fecha desc, hm.id desc
+            limit 1
+          ) foto on true
           where hl.liquidacion_id   = p.liquidacion_id
             and hl.credito_id       = c.credito_id
             and hl.inversionista_id = c.inversionista_id
-            and hl.id > c.id
+            and c.created_at < coalesce(foto.fecha, hl.fecha)
         )
       group by 1, 2, 3
     ),

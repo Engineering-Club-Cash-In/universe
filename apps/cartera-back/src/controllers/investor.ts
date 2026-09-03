@@ -3292,11 +3292,16 @@ export async function revertirComprasUltimaLiquidacion(
 
       // Marcamos las compras como completado para que no aparezcan como
       // pendientes; quedan en el log para borrarlas después si se decide.
+      //
+      // `revertida_at` las deja identificables: el monto volvió a CUBE, así que
+      // esta fila ya no representa capital colocado. Sin la marca, un intento
+      // revertido y el que lo reemplaza se suman los dos y una reinversión de
+      // Q100 efectivamente colocada se contaría como Q200.
       const compraIds = compras.map((c) => c.id);
       if (compraIds.length > 0) {
         await tx
           .update(compras_credito_inversionista)
-          .set({ status: "completado", updated_at: new Date() })
+          .set({ status: "completado", revertida_at: new Date(), updated_at: new Date() })
           .where(inArray(compras_credito_inversionista.id, compraIds));
       }
 
@@ -3414,6 +3419,7 @@ export async function revertirComprasUltimaLiquidacion(
 export async function ejecutarReinversionAutomatica(
   inv_id: number,
   montoReinvertido: number,
+  liquidacion_id?: number,
 ) {
   if (!Number.isFinite(montoReinvertido) || montoReinvertido <= 0) {
     return { skipped: true, reason: "Monto a reinvertir = 0" };
@@ -3465,6 +3471,7 @@ export async function ejecutarReinversionAutomatica(
       porcentaje_inversion: modaInversion,
       porcentaje_cash_in: modaCashIn,
       tipo_operacion: "reinversion",
+      ...(liquidacion_id ? { liquidacion_id } : {}),
     },
     set: { status: 200 },
   })) as any;
@@ -3529,7 +3536,7 @@ export async function reinvertirDesdeLiquidacionId(liquidacion_id: number) {
     };
   }
 
-  const r = await ejecutarReinversionAutomatica(liq.inversionista_id, monto);
+  const r = await ejecutarReinversionAutomatica(liq.inversionista_id, monto, liq.liquidacion_id);
   return {
     liquidacion_id,
     inversionista_id: liq.inversionista_id,
@@ -4849,6 +4856,10 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
                   porcentaje_inversion: modaInversion,
                   porcentaje_cash_in: modaCashIn,
                   tipo_operacion: "reinversion",
+                  // Sella la compra con la liquidación que la produjo. Sin esto
+                  // no hay forma de distinguirla de una reubicación manual, que
+                  // también se guarda como "reinversion".
+                  liquidacion_id: liquidacion.liquidacion_id,
                   ...(r.tipo_reinversion ? { tipo_reinversion: r.tipo_reinversion } : {}),
                 },
                 set: { status: 200 },

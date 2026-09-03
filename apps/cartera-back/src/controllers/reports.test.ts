@@ -1,4 +1,5 @@
 import { describe, expect, it, mock } from "bun:test";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { lockPoolMock } from "../utils/testMocks";
 
 mock.module("../database", () => ({
@@ -26,7 +27,30 @@ mock.module("@cci/email", () => ({
   sendInvestorAddedToCreditsNotification: mock(() => Promise.resolve()),
 }));
 
-const { applyEstadoCuentaRunningCapital, buildEstadoCuentaTableHeader, renderEstadoCuentaPaymentRow, shouldIncludeEstadoCuentaPayment, sortEstadoCuentaPayments, esStatusExcluidoMora, esStatusSinFacturacion, escalarCapitalAlPrincipal } = await import("./reports");
+const { applyEstadoCuentaRunningCapital, buildEstadoCuentaTableHeader, buildPreviousCapitalBalanceLateral, capitalAtPeriodStartSql, renderEstadoCuentaPaymentRow, shouldIncludeEstadoCuentaPayment, sortEstadoCuentaPayments, esStatusExcluidoMora, esStatusSinFacturacion, escalarCapitalAlPrincipal } = await import("./reports");
+
+describe("Pagos por Vencimiento: saldo anterior", () => {
+  it("acepta un cierre aplicado en cero y no revive un saldo positivo anterior", () => {
+    const query = new PgDialect().sqlToQuery(
+      buildPreviousCapitalBalanceLateral("2026-08-01"),
+    );
+
+    expect(query.sql).not.toContain("total_restante::numeric > 0");
+    expect(query.sql).toContain('pc_a."paymentFalse" = false');
+    expect(query.sql).toContain("pc_a.pagado = true");
+    expect(query.sql).toContain("pc_a.fecha_aplicado::date");
+    expect(query.sql).toContain("pc_a.fecha_pago::date");
+    expect(query.params).toEqual(["2026-08-01"]);
+  });
+
+  it("nunca convierte un saldo actual negativo en expectativa", () => {
+    const query = new PgDialect().sqlToQuery(capitalAtPeriodStartSql);
+
+    expect(query.sql.replace(/\s+/g, " ").trim()).toBe(
+      "GREATEST( COALESCE(cap_anterior.total_restante, c.capital::numeric), 0 )",
+    );
+  });
+});
 
 describe("estado de cuenta PDF", () => {
   it("incluye la columna de fecha de aplicacion del pago", () => {

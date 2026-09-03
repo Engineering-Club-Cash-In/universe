@@ -28,6 +28,45 @@ export const esStatusExcluidoMora = (status?: string | null) =>
 export const esStatusSinFacturacion = (status?: string | null) =>
   !!status && STATUS_SIN_FACTURACION.includes(status);
 
+// Saldo al inicio del período para Pagos por Vencimiento. Debe aceptar un cierre
+// aplicado en cero; filtrar `total_restante > 0` revivía el último saldo positivo.
+// Las filas pendientes de cuotas futuras no son snapshots de saldo y se excluyen.
+export const buildPreviousCapitalBalanceLateral = (fechaInicio: string) => sql`
+  LEFT JOIN LATERAL (
+    SELECT GREATEST(pc_a.total_restante::numeric, 0) AS total_restante
+    FROM cartera.pagos_credito pc_a
+    LEFT JOIN cartera.cuotas_credito qcc_a ON pc_a.cuota_id = qcc_a.cuota_id
+    WHERE pc_a.credito_id = c.credito_id
+      AND pc_a."paymentFalse" = false
+      AND pc_a.total_restante IS NOT NULL
+      AND (
+        pc_a.pagado = true
+        OR (
+          pc_a.validation_status IN ('validated', 'capital_validated')
+          AND COALESCE(pc_a.monto_aplicado::numeric, 0) > 0
+        )
+      )
+      AND COALESCE(
+        pc_a.fecha_aplicado::date,
+        pc_a.fecha_pago::date,
+        qcc_a.fecha_vencimiento::date,
+        pc_a.fecha_vencimiento::date
+      ) < ${fechaInicio}::date
+    ORDER BY COALESCE(
+      pc_a.fecha_aplicado::date,
+      pc_a.fecha_pago::date,
+      qcc_a.fecha_vencimiento::date,
+      pc_a.fecha_vencimiento::date
+    ) DESC, pc_a.pago_id DESC
+    LIMIT 1
+  ) cap_anterior ON true
+`;
+
+export const capitalAtPeriodStartSql = sql`GREATEST(
+  COALESCE(cap_anterior.total_restante, c.capital::numeric),
+  0
+)`;
+
 // Escala el capital de las cuotas vencidas para que su suma no exceda el principal remanente
 // del crédito (no se puede deber más capital que el que queda). Morosos normales (suma ≤
 // principal) → factor 1, intactos. Recalcula total_restante = capital topado + demás rubros.
@@ -1812,30 +1851,7 @@ export async function getPagosByVencimiento({
   )`;
 
   // Fragmentos SQL reutilizables entre query paginada y query de totales
-  const lateralCapAnterior = sql`
-    LEFT JOIN LATERAL (
-      SELECT pc_a.total_restante::numeric AS total_restante
-      FROM cartera.pagos_credito pc_a
-      LEFT JOIN cartera.cuotas_credito qcc_a ON pc_a.cuota_id = qcc_a.cuota_id
-      WHERE pc_a.credito_id = c.credito_id
-        AND pc_a."paymentFalse" = false
-        AND pc_a.total_restante IS NOT NULL
-        AND pc_a.total_restante::numeric > 0
-        AND COALESCE(qcc_a.fecha_vencimiento::date,
-              GREATEST(
-                COALESCE(pc_a.fecha_boleta::date, pc_a.fecha_pago::date, '1900-01-01'::date),
-                COALESCE(pc_a.fecha_pago::date,   pc_a.fecha_boleta::date, '1900-01-01'::date)
-              )
-            ) < ${fechaInicio}::date
-      ORDER BY COALESCE(qcc_a.fecha_vencimiento::date,
-                 GREATEST(
-                   COALESCE(pc_a.fecha_boleta::date, pc_a.fecha_pago::date, '1900-01-01'::date),
-                   COALESCE(pc_a.fecha_pago::date,   pc_a.fecha_boleta::date, '1900-01-01'::date)
-                 )
-               ) DESC, pc_a.pago_id DESC
-      LIMIT 1
-    ) cap_anterior ON true
-  `;
+  const lateralCapAnterior = buildPreviousCapitalBalanceLateral(fechaInicio);
 
   const commonFromJoins = sql`
     FROM ${pagosDeduped}
@@ -1885,7 +1901,7 @@ export async function getPagosByVencimiento({
       c.seguro_10_cuotas,
       c.gps,
       c.membresias_pago,
-      COALESCE(cap_anterior.total_restante, c.capital::numeric) AS capital_mes_anterior,
+      ${capitalAtPeriodStartSql} AS capital_mes_anterior,
       AVG(COALESCE(cube_data.cash_in_pct, 0))::numeric AS cash_in_pct,
       MIN(q.numero_cuota) AS cuota_min,
       MAX(q.numero_cuota) AS cuota_max,
@@ -2225,7 +2241,7 @@ export async function getPagosByVencimiento({
         SELECT
           c.credito_id AS credito_id,
           c."statusCredit" AS status,
-          COALESCE(cap_anterior.total_restante, c.capital::numeric) AS cap_ant,
+          ${capitalAtPeriodStartSql} AS cap_ant,
           c.porcentaje_interes::numeric / 100 AS tasa,
           c.cuota::numeric AS cuota_c,
           COALESCE(c.seguro_10_cuotas::numeric, 0) AS seguro,

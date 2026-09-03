@@ -401,6 +401,23 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
           or (c.fecha_completada >= ${inicio}::date
               and c.fecha_completada < (${inicio}::date + interval '1 month'))
         )
+        -- Compra que el histórico ya absorbió: no hay nada que ajustar.
+        --
+        -- Se compara por id y no por fecha porque las fechas de una liquidación
+        -- pueden ser retroactivas. Una liquidación revertida y rehecha conserva
+        -- su fecha_liquidacion original mientras su foto se reescribe con los
+        -- saldos del momento real, así que por fecha una compra anterior al
+        -- rehecho parece posterior a la liquidación (caso Eduardo Díaz, agosto:
+        -- la 829 dice 10-ago pero se rehizo el 21, después de su compra de
+        -- Q999, y restarla era doble conteo). Los seriales no se reescriben:
+        -- si la fila del histórico se insertó después de la compra, la incluye.
+        and not exists (
+          select 1 from cartera.historico_liquidaciones_espejo hl
+          where hl.liquidacion_id   = p.liquidacion_id
+            and hl.credito_id       = c.credito_id
+            and hl.inversionista_id = c.inversionista_id
+            and hl.id > c.id
+        )
       group by 1, 2, 3
     ),
     compras_por_credito_ajustada as (

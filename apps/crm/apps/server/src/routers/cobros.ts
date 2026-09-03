@@ -52,6 +52,8 @@ import {
 import {
 	calcularExpectativaMora,
 	calcularMontoTotalAtraso,
+	calcularMontoTotalAtrasoDesdeCuotas,
+	contarCuotasAtrasadasUnicas,
 	cuerpoUsaFechaLimiteImpuesto,
 	fechaLimiteImpuestoCirculacion,
 	fechaLimiteImpuestoVencida,
@@ -2230,7 +2232,12 @@ export const cobrosRouter = {
 				);
 
 				// 6. Mapear datos correctamente
-				const cuotasAtrasadas = creditoCompleto.cuotasAtrasadas?.length || 0;
+				// `cuotasAtrasadas` viene de cartera como filas del leftJoin cuota-pago
+				// (una cuota con dos filas de pago aparece dos veces): contar por
+				// numero_cuota único, no por filas.
+				const cuotasAtrasadas = contarCuotasAtrasadasUnicas(
+					creditoCompleto.cuotasAtrasadas ?? [],
+				);
 				const cuotaMensual = Number(creditoCompleto.credito.cuota ?? 0);
 				// Calcular días de mora exactos usando la fecha de vencimiento
 				const diasMora = calcularDiasMoraExactos(
@@ -2302,11 +2309,12 @@ export const cobrosRouter = {
 						creditoCompleto.credito.capital,
 						creditoCompleto.credito.statusCredit,
 					),
-					// Total con TODAS las cuotas vencidas (cuotas × cuota + mora) para
-					// la notificación de 2-3 cuotas; montoEnMora + cuota sigue siendo
-					// el criterio de la pantalla para el resto.
-					montoTotalAtraso: calcularMontoTotalAtraso(
-						cuotasAtrasadas,
+					// Total real con TODAS las cuotas vencidas para la notificación de
+					// 2-3 cuotas: por cuota única, cuota − lo ya cubierto por pagos vivos
+					// (misma regla de cobertura que cartera), + mora. montoEnMora + cuota
+					// sigue siendo el criterio de la pantalla para el resto.
+					montoTotalAtraso: calcularMontoTotalAtrasoDesdeCuotas(
+						creditoCompleto.cuotasAtrasadas ?? [],
 						cuotaMensual,
 						montoEnMora,
 					),

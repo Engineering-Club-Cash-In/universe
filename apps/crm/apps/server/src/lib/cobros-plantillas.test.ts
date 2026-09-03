@@ -6,6 +6,8 @@ import {
 	COBROS_NO_REPLY_WARNING,
 	calcularExpectativaMora,
 	calcularMontoTotalAtraso,
+	calcularMontoTotalAtrasoDesdeCuotas,
+	contarCuotasAtrasadasUnicas,
 	cuerpoUsaFechaLimiteImpuesto,
 	fechaLimiteImpuestoCirculacion,
 	fechaLimiteImpuestoVencida,
@@ -445,5 +447,97 @@ Te recordamos realizar el pago de tu *Impuesto de Circulación {anioImpuesto}*.
 			(plantilla) => plantilla.id === "mora_30",
 		);
 		expect(mora30?.cuerpo).toContain("Q{montoAdeudado}");
+	});
+
+	test("el total del detalle resta los pagos parciales y no duplica cuotas con varias filas de pago", () => {
+		// Filas tal como llegan de getCredito: una por par cuota-pago (leftJoin).
+		// Cuota 5 sin pagos; cuota 6 con un abono parcial validated de Q600 y
+		// una fila pending de Q100 (los pending cuentan, como en cartera).
+		const filas = [
+			{ numero_cuota: 5, paymentFalse: null, validationStatus: null },
+			{
+				numero_cuota: 6,
+				paymentFalse: false,
+				validationStatus: "validated",
+				abono_capital: "400.00",
+				abono_interes: "150.00",
+				abono_iva_12: "18.00",
+				abono_seguro: "20.00",
+				abono_gps: "12.00",
+				membresias_pago: "0.00",
+			},
+			{
+				numero_cuota: 6,
+				paymentFalse: false,
+				validationStatus: "pending",
+				abono_capital: "100.00",
+			},
+		];
+
+		// 2 cuotas únicas aunque hay 3 filas.
+		expect(contarCuotasAtrasadasUnicas(filas)).toBe(2);
+		// Cuota 5: 1000 completa. Cuota 6: 1000 − (600 + 100) = 300. + mora 50.
+		expect(calcularMontoTotalAtrasoDesdeCuotas(filas, "1000.00", "50.00")).toBe(
+			"1,350.00",
+		);
+
+		// Pagos NO vivos no cubren nada: paymentFalse=true, rejected, o abonos a
+		// capital (validationStatus "capital"), igual que calcularCoberturaCuota.
+		const noVivos = [
+			{
+				numero_cuota: 7,
+				paymentFalse: true,
+				validationStatus: "validated",
+				abono_capital: "1000.00",
+			},
+			{
+				numero_cuota: 7,
+				paymentFalse: false,
+				validationStatus: "rejected",
+				abono_capital: "1000.00",
+			},
+			{
+				numero_cuota: 7,
+				paymentFalse: false,
+				validationStatus: "capital",
+				abono_capital: "1000.00",
+			},
+		];
+		expect(calcularMontoTotalAtrasoDesdeCuotas(noVivos, "1000.00", "0")).toBe(
+			"1,000.00",
+		);
+
+		// monto_aplicado / mora / otros no son rubros de la cuota: no descuentan.
+		const soloMora = [
+			{
+				numero_cuota: 8,
+				paymentFalse: false,
+				validationStatus: "validated",
+				monto_aplicado: "999.00",
+				pago_mora: "999.00",
+			},
+		];
+		expect(calcularMontoTotalAtrasoDesdeCuotas(soloMora, "1000.00", "0")).toBe(
+			"1,000.00",
+		);
+
+		// Sobrepago en una cuota no genera saldo negativo que reste a las demás.
+		const sobrepago = [
+			{
+				numero_cuota: 9,
+				paymentFalse: false,
+				validationStatus: "validated",
+				abono_capital: "1500.00",
+			},
+			{ numero_cuota: 10, paymentFalse: null, validationStatus: null },
+		];
+		expect(calcularMontoTotalAtrasoDesdeCuotas(sobrepago, "1000.00", "0")).toBe(
+			"1,000.00",
+		);
+
+		// Sin cuotas no hay total que anunciar.
+		expect(calcularMontoTotalAtrasoDesdeCuotas([], "1000.00", "50.00")).toBe(
+			"",
+		);
 	});
 });

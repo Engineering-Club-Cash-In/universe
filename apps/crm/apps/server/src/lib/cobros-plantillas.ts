@@ -46,13 +46,16 @@ export interface VariablesPlantilla {
 }
 
 /**
- * Total a pagar para ponerse al día con todas las cuotas vencidas: cuotas
- * atrasadas × cuota + mora acumulada — la misma regla que el total de la
- * promesa de pago en cobros. `{montoAdeudado}` sigue siendo mora + UNA cuota
- * (criterio de la pantalla de detalle), que es lo correcto para "1 cuota con
- * atraso" pero se queda corto cuando el mensaje habla de un "monto total" con
- * 2-3 cuotas. Devuelve "" si no hay cuotas atrasadas o el total no es
- * positivo.
+ * Total a pagar para ponerse al día con todas las cuotas vencidas cuando SOLO
+ * se tiene el conteo del job de moras (envío masivo, getAllCredits no trae las
+ * cuotas): cuotas atrasadas × cuota + mora — la misma regla que el total de la
+ * promesa de pago en cobros. Ese conteo (moras_credito.cuotas_atrasadas) es
+ * por cuota única y NO incluye las cuotas con algún pago real aplicado, así que
+ * un abono parcial nunca infla este total (lo omite, no lo sobrecuenta). Con
+ * las filas de cuotas a mano usar calcularMontoTotalAtrasoDesdeCuotas, que sí
+ * resta lo cubierto. `{montoAdeudado}` sigue siendo mora + UNA cuota (criterio
+ * de la pantalla de detalle), correcto para "1 cuota con atraso". Devuelve ""
+ * si no hay cuotas atrasadas o el total no es positivo.
  */
 export function calcularMontoTotalAtraso(
 	cuotasAtraso: number | null | undefined,
@@ -73,6 +76,98 @@ export function calcularMontoTotalAtraso(
 	const total = cuotas * cuotaNum + mora;
 	if (total <= 0) return "";
 	return total.toLocaleString("es-GT", {
+		minimumFractionDigits: 2,
+		maximumFractionDigits: 2,
+	});
+}
+
+/**
+ * Fila de `cuotasAtrasadas` tal como la devuelve `getCredito` de cartera: una
+ * por par cuota-pago (leftJoin), así que una misma cuota puede venir repetida
+ * si tiene varias filas de pago. Los rubros son los mismos que usa cartera
+ * para decidir cobertura (`sumarAplicadoACuota` en registerPaymentPolicy.ts).
+ */
+export interface FilaCuotaAtrasada {
+	numero_cuota: number | null;
+	paymentFalse?: boolean | null;
+	validationStatus?: string | null;
+	abono_capital?: string | number | null;
+	abono_interes?: string | number | null;
+	abono_iva_12?: string | number | null;
+	abono_seguro?: string | number | null;
+	abono_gps?: string | number | null;
+	membresias_pago?: string | number | null;
+}
+
+/** Cuotas atrasadas ÚNICAS (por numero_cuota) en las filas del leftJoin. */
+export function contarCuotasAtrasadasUnicas(
+	filas: ReadonlyArray<Pick<FilaCuotaAtrasada, "numero_cuota">>,
+): number {
+	return new Set(filas.map((fila) => fila.numero_cuota)).size;
+}
+
+/**
+ * Total real para ponerse al día a partir de las filas de `cuotasAtrasadas`
+ * del detalle: por cada cuota ÚNICA, saldo = cuota − lo ya cubierto por pagos
+ * vivos, y al final se suma la mora. "Cubierto" replica exactamente
+ * `calcularCoberturaCuota` de cartera (pagos con paymentFalse=false en
+ * validated o pending; Σ abono_capital + abono_interes + abono_iva_12 +
+ * abono_seguro + abono_gps + membresias_pago; nunca monto_aplicado ni
+ * mora/otros), así un abono parcial de Q600 a una cuota de Q1,000 deja Q400,
+ * y una cuota con dos filas de pago se cuenta una sola vez. Devuelve "" si no
+ * hay cuotas o el total no es positivo.
+ */
+export function calcularMontoTotalAtrasoDesdeCuotas(
+	filas: ReadonlyArray<FilaCuotaAtrasada>,
+	cuota: string | number | null | undefined,
+	montoMora: string | number | null | undefined,
+): string {
+	if (filas.length === 0) return "";
+	let cuotaBig: Big;
+	let moraBig: Big;
+	try {
+		cuotaBig = new Big(cuota ?? 0);
+		moraBig = new Big(montoMora ?? 0);
+	} catch {
+		return "";
+	}
+
+	const porCuota = new Map<number | null, Big>();
+	for (const fila of filas) {
+		const acumulado = porCuota.get(fila.numero_cuota) ?? new Big(0);
+		const vivo =
+			fila.paymentFalse === false &&
+			(fila.validationStatus === "validated" ||
+				fila.validationStatus === "pending");
+		if (!vivo) {
+			porCuota.set(fila.numero_cuota, acumulado);
+			continue;
+		}
+		let aplicado = acumulado;
+		for (const rubro of [
+			fila.abono_capital,
+			fila.abono_interes,
+			fila.abono_iva_12,
+			fila.abono_seguro,
+			fila.abono_gps,
+			fila.membresias_pago,
+		]) {
+			try {
+				aplicado = aplicado.plus(new Big(rubro ?? 0));
+			} catch {
+				/* rubro no numérico: se ignora, igual que un 0 */
+			}
+		}
+		porCuota.set(fila.numero_cuota, aplicado);
+	}
+
+	let total = moraBig;
+	for (const aplicado of porCuota.values()) {
+		const saldo = cuotaBig.minus(aplicado);
+		if (saldo.gt(0)) total = total.plus(saldo);
+	}
+	if (total.lte(0)) return "";
+	return Number(total.toFixed(2)).toLocaleString("es-GT", {
 		minimumFractionDigits: 2,
 		maximumFractionDigits: 2,
 	});

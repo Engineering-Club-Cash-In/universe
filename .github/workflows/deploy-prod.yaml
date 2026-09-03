@@ -127,8 +127,6 @@ jobs:
               - 'apps/portal-web/**'
             tracker:
               - 'apps/tracker/**'
-              - 'package.json'
-              - 'bun.lock'
             auth-google:
               - 'apps/auth-google/**'
               - 'packages/email/**'

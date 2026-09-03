@@ -1,12 +1,9 @@
 # Stage 1: instalar dependencias y construir
 FROM oven/bun:1 AS builder
-WORKDIR /app
-
-COPY package.json bun.lock ./
-COPY apps/tracker/package.json ./apps/tracker/package.json
-RUN bun install --frozen-lockfile --filter=tracker
-
 WORKDIR /app/apps/tracker
+
+COPY apps/tracker/package.json ./
+RUN bun install
 
 ENV VITE_SERVER_URL=https://crmapi.s3.devteamatcci.site
 

@@ -15,10 +15,84 @@ export interface VariablesPlantilla {
 	cuotaMensual: string;
 	placa: string;
 	marcaLineaModelo: string;
+	/**
+	 * Lo que el cliente debe HOY para ponerse al día: saldo real de cada cuota
+	 * vencida (recibo menos lo ya abonado) + mora, calculado en el server
+	 * (getDetallesCreditoCarteraBack) con la misma regla de cobertura de
+	 * cartera. Lo usan "Notificación 1 cuota atrasada", "2-3 cuotas atrasadas"
+	 * y el aviso jurídico.
+	 */
 	montoAdeudado: string;
 	cuotasAtraso: number;
 	telefonoAsesor: string;
 	nombreAsesor: string;
+	/**
+	 * Recargo de UNA cuota vencida más (capital × 1.12%), misma fórmula que el
+	 * job `procesarMoras` de cartera-back. Viene ya formateado del server
+	 * (getDetallesCreditoCarteraBack).
+	 */
+	expectativaMora: string;
+	/** Año del impuesto de circulación. Default: año actual en Guatemala. */
+	anioImpuesto?: string;
+	/** Fecha límite del impuesto (dd/mm/año). Default: 31/07 del año actual. */
+	fechaLimiteImpuesto?: string;
+	/**
+	 * Aseguradora y cabina de emergencia para el bloque del seguro de la
+	 * bienvenida. Vienen del server (getDetallesCreditoCarteraBack) según
+	 * `opportunities.insurance_provider`; default = Seguros Universales.
+	 */
+	aseguradora?: string;
+	cabinaSeguro?: string;
+}
+
+const SEGURO_DEFAULT = {
+	aseguradora: "Seguros Universales",
+	cabinaSeguro: "2384-7400",
+};
+
+/**
+ * Fecha límite del impuesto de circulación (SAT): 31 de julio, 5:00 p.m., de
+ * CADA año. El año se calcula al momento de interpolar para que la plantilla
+ * no quede vencida de un año al otro; si SAT moviera el día/mes, se ajusta
+ * esta constante. Después de la fecha límite los asesores editan el mensaje o
+ * contactan personalmente.
+ */
+const DIA_MES_LIMITE_IMPUESTO = "31/07";
+/** Hora local (Guatemala, 0-23) del corte: las 5:00 p.m. que dice el mensaje. */
+const HORA_LIMITE_IMPUESTO = 17;
+
+export function anioImpuestoCirculacion(ahora = new Date()): string {
+	// Año calendario en Guatemala (evita el desfase de UTC en el cambio de año).
+	return new Intl.DateTimeFormat("es-GT", {
+		timeZone: "America/Guatemala",
+		year: "numeric",
+	}).format(ahora);
+}
+
+export function fechaLimiteImpuestoCirculacion(ahora = new Date()): string {
+	return `${DIA_MES_LIMITE_IMPUESTO}/${anioImpuestoCirculacion(ahora)}`;
+}
+
+/**
+ * true si en Guatemala ya pasó la fecha límite del impuesto del año: después
+ * del 31/07, o el mismo 31/07 a partir de las 17:00 (el mensaje pide el
+ * comprobante "antes de las 5:00 p.m.", así que a esa hora ya venció).
+ */
+export function fechaLimiteImpuestoVencida(ahora = new Date()): boolean {
+	const partes = new Intl.DateTimeFormat("en-CA", {
+		timeZone: "America/Guatemala",
+		month: "2-digit",
+		day: "2-digit",
+		hour: "2-digit",
+		hourCycle: "h23",
+	}).formatToParts(ahora);
+	const parte = (tipo: string) =>
+		partes.find((p) => p.type === tipo)?.value ?? "";
+	const mmdd = `${parte("month")}${parte("day")}`;
+	const [diaLimite, mesLimite] = DIA_MES_LIMITE_IMPUESTO.split("/");
+	const limite = `${mesLimite}${diaLimite}`;
+	if (mmdd !== limite) return mmdd > limite;
+	return Number(parte("hour")) >= HORA_LIMITE_IMPUESTO;
 }
 
 export interface PlantillaMensaje {
@@ -31,8 +105,46 @@ export interface PlantillaMensaje {
 }
 
 export const COBROS_NO_REPLY_WARNING =
-	"*NO RESPONDER EN ESTE CHAT, CONTESTAR AL NUMERO DE SU ASESOR DE COBROS*";
+	"⚠️ Este número es únicamente para el envío de notificaciones automáticas. Por favor, no respondas a este número.";
 export const COBROS_MOTIVO_SIN_TELEFONO_ASESOR = "sin teléfono de asesor";
+
+/**
+ * Fragmento fijo de la oración de mora del recordatorio del día de pago
+ * ("…se agregará un recargo por mora de Q{expectativaMora}."). Sirve para
+ * detectar, en el mensaje YA interpolado que el asesor editó, si la oración
+ * sigue presente: si la borró, no hay nada que bloquear.
+ */
+export const FRAGMENTO_EXPECTATIVA_MORA = "recargo por mora de Q";
+
+/**
+ * true si el mensaje que se va a mandar todavía anuncia el recargo por mora
+ * (con la variable sin interpolar o ya interpolada). Se evalúa sobre el texto
+ * real del canal, no sobre la plantilla original, para que el asesor pueda
+ * quitar la oración y enviar aunque el crédito no genere mora.
+ */
+export function mensajeAnunciaExpectativaMora(mensaje: string): boolean {
+	return (
+		mensaje.includes("{expectativaMora}") ||
+		mensaje.includes(FRAGMENTO_EXPECTATIVA_MORA)
+	);
+}
+
+/**
+ * true si ya pasó el corte del impuesto y el mensaje que se va a mandar
+ * todavía trae la fecha límite vencida (la variable sin interpolar o la fecha
+ * ya resuelta, p. ej. "31/07/2026"). Si el asesor la reemplazó por otra fecha
+ * o borró la línea, se puede enviar.
+ */
+export function mensajeTieneFechaLimiteImpuestoVencida(
+	mensaje: string,
+	ahora = new Date(),
+): boolean {
+	if (!fechaLimiteImpuestoVencida(ahora)) return false;
+	return (
+		mensaje.includes("{fechaLimiteImpuesto}") ||
+		mensaje.includes(fechaLimiteImpuestoCirculacion(ahora))
+	);
+}
 
 export function prepararTelefonoAsesorParaEnvio(
 	cuerpo: string,
@@ -150,7 +262,33 @@ export function interpolar(
 			/{telefonoAsesor}/g,
 			v(variables.telefonoAsesor, "teléfono asesor"),
 		)
-		.replace(/{nombreAsesor}/g, v(variables.nombreAsesor, "nombre asesor"));
+		.replace(/{nombreAsesor}/g, v(variables.nombreAsesor, "nombre asesor"))
+		.replace(
+			/{expectativaMora}/g,
+			v(variables.expectativaMora, "expectativa de mora"),
+		)
+		.replace(
+			/{anioImpuesto}/g,
+			v(variables.anioImpuesto ?? anioImpuestoCirculacion(), "año impuesto"),
+		)
+		.replace(
+			/{aseguradora}/g,
+			v(variables.aseguradora ?? SEGURO_DEFAULT.aseguradora, "aseguradora"),
+		)
+		.replace(
+			/{cabinaSeguro}/g,
+			v(
+				variables.cabinaSeguro ?? SEGURO_DEFAULT.cabinaSeguro,
+				"cabina del seguro",
+			),
+		)
+		.replace(
+			/{fechaLimiteImpuesto}/g,
+			v(
+				variables.fechaLimiteImpuesto ?? fechaLimiteImpuestoCirculacion(),
+				"fecha límite impuesto",
+			),
+		);
 }
 
 export const PLANTILLAS_MENSAJES: PlantillaMensaje[] = [
@@ -159,141 +297,191 @@ export const PLANTILLAS_MENSAJES: PlantillaMensaje[] = [
 		nombre: "Bienvenida",
 		etapa: "al_dia",
 		asunto: "Bienvenido/a a su plan de financiamiento",
-		cuerpo: `Hola {clienteNombre},
+		cuerpo: `Hola {clienteNombre} 👋
+¡Bienvenido(a) a CashIn! Nos alegra acompañarte en el financiamiento de tu vehículo.
 
-Le saludamos cordialmente de Clubcashin.com para recordarle sobre el pago de su crédito, el cual debe realizarse el {fechaPago}. Sus cuotas son por un monto de Q{cuotaMensual}.
+📅 Información de tu cuota
+Día de pago mensual: {fechaPago}
+Monto de cuota: Q{cuotaMensual}
 
-A continuación, le compartimos los números de cuenta para realizar su depósito o transferencia:
+💳 Cuentas para realizar tus pagos
+Tipo: Monetaria
+A nombre de: CUBE INVESTMENTS, S.A.
+* BI: 5520029876
+* BAM: 3020123033
+* GyT: 01300039945
+* Banrural: 3394002346
 
-- CUBE INVESTMENTS, S.A. (monetaria) No. 5520029876 - BANCO INDUSTRIAL (BI)
-- CUBE INVESTMENTS, S.A. (monetaria) No. 3020123033 - BANCO AGROMERCANTIL (BAM)
-- CUBE INVESTMENTS, S.A. (monetaria) No. 01300039945 - BANCO GyT CONTINENTAL
-- CUBE INVESTMENTS, S.A. (monetaria) No. 3394002346 - BANRURAL
+🚗 Tu vehículo cuenta con seguro completo a través de {aseguradora}.
+En caso de accidente o cualquier inconveniente con tu vehículo, llama a la cabina de emergencia al {cabinaSeguro}, identificándote únicamente con el número de placa.
+Para seguimiento de trámites con el seguro:
+✅ Luis Escobar: 4388-7300
+✅ Maylin Barrios: 4770-7074
 
-Por favor, envíe su boleta o comprobante de pago por este medio para aplicarlo a su cuenta.
+Si tienes alguna consulta, con gusto estamos para apoyarte. Agradeceremos confirmar la recepción de este mensaje.
+{nombreAsesor} - Asesor de Cobros
+CashIn`,
+		cuerpoWhastapp: `Hola {clienteNombre} 👋
+¡Bienvenido(a) a *CashIn*! Nos alegra acompañarte en el financiamiento de tu vehículo.
 
-Si tiene alguna duda o consulta, estamos a su disposición.
+📅 *Información de tu cuota*
+Día de pago mensual: *{fechaPago}*
+Monto de cuota: *Q{cuotaMensual}*
 
-Agradecemos confirme la recepción de este mensaje.
+💳 *Cuentas para realizar tus pagos*
+Tipo: *Monetaria*
+A nombre de: *CUBE INVESTMENTS, S.A.*
+* BI: 5520029876
+* BAM: 3020123033
+* GyT: 01300039945
+* Banrural: 3394002346
 
-Atentamente, 
-{nombreAsesor} 
-Tel: {telefonoAsesor}.`,
-		cuerpoWhastapp: `Hola {clienteNombre}, Le saludamos cordialmente de Clubcashin.com para recordarle sobre el pago de su crédito, el cual debe realizarse el {fechaPago}. Sus cuotas son por un monto de Q{cuotaMensual}.
+🚗 *Tu vehículo cuenta con seguro completo a través de {aseguradora}.*
+*En caso de accidente o cualquier inconveniente con tu vehículo, llama a la cabina de emergencia al {cabinaSeguro}*, identificándote únicamente con el número de placa.
+Para seguimiento de trámites con el seguro:
+✅ Luis Escobar: 4388-7300
+✅ Maylin Barrios: 4770-7074
 
-A continuación, le compartimos los números de cuenta para realizar su depósito o transferencia: - CUBE INVESTMENTS, S.A. (monetaria) No. 5520029876 BANCO INDUSTRIAL (BI) / CUBE INVESTMENTS, S.A. (monetaria) No. 3020123033 BANCO AGROMERCANTIL (BAM) / CUBE INVESTMENTS, S.A. (monetaria) No. 01300039945 BANCO GyT CONTINENTAL / CUBE INVESTMENTS, S.A. (monetaria) No. 3394002346 BANRURAL
-
-Por favor, envíe su boleta o comprobante de pago al {telefonoAsesor} para aplicarlo a su cuenta. Si tiene alguna duda o consulta, estamos a su disposición.
-
-${COBROS_NO_REPLY_WARNING}
-
-Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
+Si tienes alguna consulta, con gusto estamos para apoyarte. Agradeceremos confirmar la recepción de este mensaje.
+*{nombreAsesor} - Asesor de Cobros*
+*CashIn*`,
 	},
 	{
 		id: "al_dia",
-		nombre: "Recordatorio de pago",
+		nombre: "Recordatorio el día de pago",
 		etapa: "al_dia",
 		asunto: "Recordatorio de pago - Vehículo {placa}",
-		cuerpo: `Estimado(a) {clienteNombre}, buen día, cordialmente le saludamos de Clubcashin para recordarle sobre el pago de su crédito el día de hoy, quedamos a la espera de su comprobante de pago.
+		cuerpo: `Hola {clienteNombre} 👋
+Te recordamos que hoy es la fecha de pago de tu cuota, por un monto de Q{cuotaMensual}. Agradeceremos realizar tu pago y compartir tu comprobante para aplicarlo a tu cuenta.
 
-Atentamente, 
-{nombreAsesor} 
-Tel: {telefonoAsesor}.`,
-		cuerpoWhastapp: `Estimado(a) {clienteNombre}, buen día, cordialmente le saludamos de Clubcashin para recordarle sobre el pago de su crédito el día de hoy, quedamos a la espera de su comprobante de pago.
+🛑 Si no realizas tu pago hoy, se agregará un recargo por mora de Q{expectativaMora}.
 
-${COBROS_NO_REPLY_WARNING}
+📞 Si necesitas apoyo, comunícate con tu asesor:
+{nombreAsesor} - Asesor de Cobros
+{telefonoAsesor}
 
-Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
+🚗 Si ya realizó su pago, agradecemos hacer caso omiso a este recordatorio.
+CashIn`,
+		cuerpoWhastapp: `Hola {clienteNombre} 👋
+Te recordamos que *hoy es la fecha de pago de tu cuota, por un monto de Q{cuotaMensual}*. Agradeceremos realizar tu pago y compartir tu comprobante para aplicarlo a tu cuenta.
+
+🛑 *Si no realizas tu pago hoy, se agregará un recargo por mora de Q{expectativaMora}.*
+
+📞 Si necesitas apoyo, comunícate con tu asesor:
+*{nombreAsesor} - Asesor de Cobros*
+{telefonoAsesor}
+
+🚗 Si ya realizó su pago, agradecemos hacer caso omiso a este recordatorio.
+*${COBROS_NO_REPLY_WARNING}*
+*CashIn*`,
 	},
 	{
 		id: "impuesto_circulacion_2026",
-		nombre: "Impuesto de circulación 2026",
+		nombre: "Impuesto de circulación",
 		etapa: "al_dia",
-		asunto: "Recordatorio de pago - Impuesto de circulación 2026",
-		cuerpo: `Estimado(a) {clienteNombre}, buen día, cordialmente le saludamos de Clubcashin para recordarle sobre el pago del impuesto de circulación del año 2026.
+		asunto: "Recordatorio de pago - Impuesto de circulación {anioImpuesto}",
+		cuerpo: `Hola 👋
+Te recordamos realizar el pago de tu Impuesto de Circulación {anioImpuesto}.
+⏰ Fecha límite: {fechaLimiteImpuesto} a las 5:00 p.m.
 
-Envíanos tu comprobante a tiempo para que podamos procesar y enviarte tus distintivos sin contratiempos.
+🛑 En caso de no realizar el pago, CashIn lo realizará y te cobrará las multas y gastos administrativos adicionales.
 
-¡No lo dejes para última hora!
+✅ Al realizar el pago, comparte el comprobante con tu asesor antes de la hora límite:
+{nombreAsesor} - Asesor de Cobros
+{telefonoAsesor}
 
-${COBROS_NO_REPLY_WARNING}
+CashIn`,
+		cuerpoWhastapp: `Hola 👋
+Te recordamos realizar el pago de tu *Impuesto de Circulación {anioImpuesto}*.
+⏰ Fecha límite: *{fechaLimiteImpuesto} a las 5:00 p.m.*
 
-Atentamente,
-{nombreAsesor}
-Tel: {telefonoAsesor}`,
-		cuerpoWhastapp: `Estimado(a) {clienteNombre}, buen día, cordialmente le saludamos de Clubcashin para recordarle sobre el pago del impuesto de circulación del año 2026.
+🛑 *En caso de no realizar el pago, CashIn lo realizará y te cobrará las multas y gastos administrativos adicionales.*
 
-Envíanos tu comprobante a tiempo para que podamos procesar y enviarte tus distintivos sin contratiempos.
+✅ Al realizar el pago, comparte el comprobante con tu asesor antes de la hora límite:
+*{nombreAsesor} - Asesor de Cobros*
+{telefonoAsesor}
 
-¡No lo dejes para última hora!
-
-${COBROS_NO_REPLY_WARNING}
-
-Atentamente,
-{nombreAsesor}
-Tel: {telefonoAsesor}`,
+*${COBROS_NO_REPLY_WARNING}*
+*CashIn*`,
 	},
 	{
 		id: "pre_mora",
-		nombre: "Aviso de atraso",
+		nombre: "Recordatorio 5 días antes",
 		etapa: "pre_mora",
-		asunto: "Aviso de atraso en pago - Vehículo {placa}",
-		cuerpo: `Hola {clienteNombre}, le saludamos de Clubcashin recordándole que su cuota esta próxima a vencer. Su día de pago es el {fechaPago}. Ponemos a su disposición nuestros medios de pago en Banco Industrial, BANRURAL, Banco Agromercantil (BAM) y GyT.
+		asunto: "Recordatorio de pago próximo - Vehículo {placa}",
+		cuerpo: `Hola {clienteNombre} 👋
+Te saludamos de CashIn para recordarte que tu próxima cuota tiene fecha de pago el {fechaPago}.
 
-Si tiene alguna duda por favor comunicarse por este medio.
+📞 Para consultas o apoyo con tu cuenta, comunícate directamente con tu asesor de cobros:
+{nombreAsesor} - Asesor de Cobros
+{telefonoAsesor}
 
-SI YA REALIZO SU PAGO POR FAVOR HACER CASO OMISO A ESTE MENSAJE.
+🚗 Si ya realizó su pago, agradecemos hacer caso omiso a este recordatorio.
+CashIn`,
+		cuerpoWhastapp: `Hola {clienteNombre} 👋
+Te saludamos de *CashIn* para recordarte que tu próxima cuota tiene fecha de pago el *{fechaPago}*.
 
-Atentamente, 
-{nombreAsesor} 
-Tel: {telefonoAsesor}.`,
-		cuerpoWhastapp: `Hola {clienteNombre}, le saludamos de Clubcashin recordándole que su cuota esta próxima a vencer. Su día de pago es el {fechaPago}. Ponemos a su disposición nuestros medios de pago en Banco Industrial, BANRURAL, Banco Agromercantil (BAM) y GyT.
+📞 Para consultas o apoyo con tu cuenta, comunícate directamente con tu asesor de cobros:
+*{nombreAsesor} - Asesor de Cobros*
+{telefonoAsesor}
 
-Si tiene alguna duda, por favor comuníquese al {telefonoAsesor}.
-
-SI YA REALIZO SU PAGO POR FAVOR HACER CASO OMISO A ESTE MENSAJE.
-
+🚗 Si ya realizó su pago, agradecemos hacer caso omiso a este recordatorio.
 ${COBROS_NO_REPLY_WARNING}
-
-Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
+*CashIn*`,
 	},
 	{
 		id: "mora_30",
-		nombre: "Mora 30 días",
+		nombre: "Notificación 1 cuota atrasada",
 		etapa: "mora_30",
 		asunto: "URGENTE: Mora de 30 días - Vehículo {placa}",
-		cuerpo: `Estimado(a) {clienteNombre}, buen día, el motivo de la notificación es porque tenemos 1 cuota en atraso, se solicita que su pago sea lo antes posible para poder solventar su situación, quedaremos a la espera de su boleta el día {fechaPago}.
+		cuerpo: `Hola {clienteNombre} 👋
+Tienes 1 cuota con atraso por un monto de Q{montoAdeudado}.
 
-Atentamente, 
-{nombreAsesor} 
-Tel: {telefonoAsesor}.`,
-		cuerpoWhastapp: `Estimado(a) {clienteNombre}, buen día, el motivo de la notificación es porque tenemos 1 cuota en atraso, se solicita que su pago sea lo antes posible para poder solventar su situación, quedaremos a la espera de su boleta el día {fechaPago}.
+Es importante que realices tu pago lo antes posible para evitar mayores recargos en tu cuenta.
 
-${COBROS_NO_REPLY_WARNING}
+📲 Al realizar el pago, comparte el comprobante con tu asesor:
+{nombreAsesor} - Asesor de Cobros
+{telefonoAsesor}
 
-Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
+CashIn`,
+		cuerpoWhastapp: `Hola {clienteNombre} 👋
+Tienes *1 cuota con atraso por un monto de Q{montoAdeudado}*.
+
+Es importante que realices tu pago lo antes posible para evitar mayores recargos en tu cuenta.
+
+📲 Al realizar el pago, comparte el comprobante con tu asesor:
+*{nombreAsesor} - Asesor de Cobros*
+{telefonoAsesor}
+
+*${COBROS_NO_REPLY_WARNING}*
+*CashIn*`,
 	},
 	{
 		id: "mora_60",
-		nombre: "Mora 60 días",
+		nombre: "Notificación 2-3 cuotas atrasadas",
 		etapa: "mora_60",
 		asunto: "AVISO IMPORTANTE: Mora de 60 días - Vehículo {placa}",
-		cuerpo: `Estimado/a {clienteNombre},
+		cuerpo: `Hola {clienteNombre},
+Te informamos que actualmente tienes {cuotasAtraso} cuotas en atraso, por un monto total de Q{montoAdeudado}.
 
-Buen día. El motivo de la notificación es porque tenemos {cuotasAtraso} cuota(s) en atraso. Se solicita que su pago sea lo antes posible para poder solventar su situación. Quedaremos a la espera de su boleta el día {fechaPago}.
+⚠️ En caso de no recibir el pago, CashIn podrá aplicar las medidas de recuperación contempladas en tu contrato y la ejecución de garantía.
 
-Si no recibimos el pago dentro del plazo establecido, nos veremos obligados a tomar medidas adicionales para recuperar la deuda, incluida la posible ejecución del vehículo y el apagado de la unidad en movimiento o estacionado.
+✅ Al realizar el pago, comparte el comprobante con tu asesor:
+{nombreAsesor} - Asesor de Cobros
+{telefonoAsesor}
 
-Atentamente,
-{nombreAsesor}
-Tel: {telefonoAsesor}`,
-		cuerpoWhastapp: `Estimado/a {clienteNombre}, Buen día. El motivo de la notificación es porque tenemos {cuotasAtraso} cuota(s) en atraso. Se solicita que su pago sea lo antes posible para poder solventar su situación. Quedaremos a la espera de su boleta el día {fechaPago}.
+CashIn`,
+		cuerpoWhastapp: `Hola {clienteNombre},
+Te informamos que actualmente tienes *{cuotasAtraso} cuotas en atraso, por un monto total de Q{montoAdeudado}*.
 
-Si no recibimos el pago dentro del plazo establecido, nos veremos obligados a tomar medidas adicionales para recuperar la deuda, incluida la posible ejecución del vehículo y el apagado de la unidad en movimiento o estacionado.
+⚠️ *En caso de no recibir el pago, CashIn podrá aplicar las medidas de recuperación contempladas en tu contrato y la ejecución de garantía.*
 
-${COBROS_NO_REPLY_WARNING}
+✅ Al realizar el pago, comparte el comprobante con tu asesor:
+*{nombreAsesor} - Asesor de Cobros*
+{telefonoAsesor}
 
-Atentamente, {nombreAsesor} Tel: {telefonoAsesor}`,
+*${COBROS_NO_REPLY_WARNING}*
+*CashIn*`,
 	},
 	{
 		id: "aviso_juridico",
@@ -320,11 +508,15 @@ export function sugerirPlantilla(
 	estadoMora: string | undefined,
 	fechaInicio?: string | Date | null,
 ): string {
+	// "Notificación 2-3 cuotas atrasadas" cubre mora_60 Y mora_90 (2 y 3 cuotas
+	// según getDetallesCreditoCarteraBack). El aviso jurídico queda para 4+
+	// cuotas (mora_120) e incobrables.
 	const mapaMora: Record<string, string> = {
 		pre_mora: "pre_mora",
 		mora_30: "mora_30",
 		mora_60: "mora_60",
-		mora_90: "aviso_juridico",
+		mora_90: "mora_60",
+		mora_120: "aviso_juridico",
 		incobrable: "aviso_juridico",
 	};
 

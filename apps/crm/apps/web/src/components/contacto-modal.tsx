@@ -5,15 +5,18 @@ import { es } from "date-fns/locale";
 import {
 	CalendarIcon,
 	ChevronDown,
+	Eye,
 	Loader2,
 	Mail,
 	MessageCircle,
 	MessageSquare,
+	Pencil,
 	Phone,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
+import { WhatsappPreview } from "@/components/cobros/whatsapp-preview";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -53,9 +56,11 @@ import {
 	crearUrlWhatsappManual,
 	cuerpoParaValidarNoReply,
 	interpolar,
+	mensajeAnunciaExpectativaMora,
 	mensajeEmailEditable,
 	mensajePlantillaEditable,
 	mensajeSmsEditable,
+	mensajeTieneFechaLimiteImpuestoVencida,
 	PLANTILLAS_MENSAJES,
 	prepararTelefonoAsesorParaEnvio,
 	sugerirPlantilla,
@@ -86,6 +91,9 @@ interface ContactoModalProps {
 	fechaInicio?: string | null;
 	nombreAsesor?: string;
 	telefonoAsesor?: string;
+	expectativaMora?: string;
+	aseguradora?: string;
+	cabinaSeguro?: string;
 }
 
 export function ContactoModal({
@@ -108,6 +116,9 @@ export function ContactoModal({
 	fechaInicio,
 	nombreAsesor = "",
 	telefonoAsesor = "",
+	expectativaMora = "",
+	aseguradora = "",
+	cabinaSeguro = "",
 }: ContactoModalProps) {
 	const queryClient = useQueryClient();
 
@@ -137,6 +148,9 @@ export function ContactoModal({
 	const [mensajeEditado, setMensajeEditado] = useState("");
 	const [mensajeWhatsappEditado, setMensajeWhatsappEditado] = useState("");
 	const [asuntoEditado, setAsuntoEditado] = useState("");
+	// El WhatsApp arranca en vista previa (sin asteriscos a la vista);
+	// "Editar mensaje" abre el textarea.
+	const [editandoWhatsapp, setEditandoWhatsapp] = useState(false);
 
 	const telefonoAsesorLimpio = telefonoAsesor.trim();
 
@@ -151,6 +165,11 @@ export function ContactoModal({
 			cuotasAtraso,
 			telefonoAsesor: telefonoAsesorLimpio,
 			nombreAsesor,
+			expectativaMora,
+			// Vacíos caen al default de interpolar (Seguros Universales); con
+			// datos, el modal muestra de una vez la variante correcta (p. ej. G&T).
+			aseguradora: aseguradora || undefined,
+			cabinaSeguro: cabinaSeguro || undefined,
 		}),
 		[
 			clienteNombre,
@@ -162,6 +181,9 @@ export function ContactoModal({
 			cuotasAtraso,
 			telefonoAsesorLimpio,
 			nombreAsesor,
+			expectativaMora,
+			aseguradora,
+			cabinaSeguro,
 		],
 	);
 
@@ -169,6 +191,7 @@ export function ContactoModal({
 	useEffect(() => {
 		const sugerida = sugerirPlantilla(estadoMora, fechaInicio);
 		setPlantillaId(sugerida);
+		setEditandoWhatsapp(false);
 		const plantilla = PLANTILLAS_MENSAJES.find((p) => p.id === sugerida);
 		if (plantilla) {
 			setMensajeEditado(interpolar(plantilla.cuerpo, variables));
@@ -181,6 +204,7 @@ export function ContactoModal({
 
 	const handlePlantillaChange = (id: string) => {
 		setPlantillaId(id);
+		setEditandoWhatsapp(false);
 		const plantilla = PLANTILLAS_MENSAJES.find((p) => p.id === id);
 		if (plantilla) {
 			setMensajeEditado(interpolar(plantilla.cuerpo, variables));
@@ -339,6 +363,35 @@ export function ContactoModal({
 		if (accionUsaCuerpoNoReply(metodo) && !telefonoAsesorNoReply.enviar) {
 			toast.error(
 				"No se puede enviar esta plantilla no-reply porque el asesor no tiene teléfono registrado",
+			);
+			return;
+		}
+		// Los dos guards siguientes se evalúan sobre el mensaje REAL del canal
+		// (ya interpolado y editado por el asesor), no sobre la plantilla
+		// original: si el asesor borra la oración de mora o corrige la fecha del
+		// impuesto en "Editar mensaje", el envío se habilita.
+		//
+		// Si el server no pudo calcular la expectativa (crédito sin capital o en
+		// estado excluido de mora) y la oración sigue en el texto, saldría
+		// "recargo por mora de Q." roto.
+		if (
+			accionUsaCuerpoNoReply(metodo) &&
+			mensajeAnunciaExpectativaMora(cuerpoNoReply) &&
+			!expectativaMora.trim()
+		) {
+			toast.error(
+				'El crédito no genera mora (estado excluido o sin capital). Borrá la oración del recargo en "Editar mensaje" o elegí otra plantilla.',
+			);
+			return;
+		}
+		// Pasado el 31/07, el mensaje no puede seguir pidiendo el comprobante
+		// "antes de la hora límite" de una fecha vencida.
+		if (
+			accionUsaCuerpoNoReply(metodo) &&
+			mensajeTieneFechaLimiteImpuestoVencida(cuerpoNoReply)
+		) {
+			toast.error(
+				'La fecha límite del impuesto de circulación ya venció. Cambiá la fecha en "Editar mensaje" o contactá al cliente directamente.',
 			);
 			return;
 		}
@@ -559,7 +612,57 @@ export function ContactoModal({
 									</div>
 								)}
 
-								{plantillaId && (
+								{plantillaId && metodoInicial === "whatsapp" && (
+									<div className="space-y-2">
+										<div className="flex items-center justify-between gap-2">
+											<Label>Mensaje</Label>
+											<Button
+												type="button"
+												size="sm"
+												variant={editandoWhatsapp ? "outline" : "default"}
+												className="gap-1.5"
+												onClick={() => setEditandoWhatsapp((v) => !v)}
+											>
+												{editandoWhatsapp ? (
+													<>
+														<Eye className="h-3.5 w-3.5" />
+														Ver como lo verá el cliente
+													</>
+												) : (
+													<>
+														<Pencil className="h-3.5 w-3.5" />
+														Editar mensaje
+													</>
+												)}
+											</Button>
+										</div>
+										{editandoWhatsapp ? (
+											<>
+												<Textarea
+													className="min-h-[150px] text-sm"
+													value={mensajeEditable}
+													onChange={(e) =>
+														handleMensajeEditableChange(e.target.value)
+													}
+												/>
+												<p className="text-muted-foreground text-xs">
+													El texto entre asteriscos (<code>*así*</code>) sale en{" "}
+													<strong>negrita</strong> en WhatsApp; los asteriscos
+													no se ven en el mensaje final.
+												</p>
+											</>
+										) : (
+											<>
+												<WhatsappPreview mensaje={mensajeEditable} />
+												<p className="text-muted-foreground text-xs">
+													Así lo verá el cliente en WhatsApp.
+												</p>
+											</>
+										)}
+									</div>
+								)}
+
+								{plantillaId && metodoInicial !== "whatsapp" && (
 									<div className="space-y-2">
 										<Label>Mensaje (editable)</Label>
 										<Textarea

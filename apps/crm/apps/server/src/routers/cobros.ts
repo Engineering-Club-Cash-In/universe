@@ -16,7 +16,6 @@ import {
 } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { auditRecord, auditedTransaction } from "../lib/audit";
 import { user } from "../db/schema/auth";
 import { carteraBackReferences } from "../db/schema/cartera-back";
 import {
@@ -41,6 +40,7 @@ import {
 } from "../db/schema/crm";
 import { quotations } from "../db/schema/quotations";
 import { vehicles } from "../db/schema/vehicles";
+import { auditedTransaction, auditRecord } from "../lib/audit";
 import { recalculateCobrosCapitalPercentages } from "../lib/cobros-capital-percentages";
 import {
 	countRemainingInstallments,
@@ -50,9 +50,18 @@ import {
 	resolveOperationalInstallment,
 } from "../lib/cobros-credit-detail";
 import {
-	PLANTILLAS_MENSAJES,
+	calcularExpectativaMora,
+	calcularMontoAdeudadoDesdeCuotas,
+	contarCuotasAtrasadasUnicas,
+	cuerpoUsaFechaLimiteImpuesto,
+	fechaLimiteImpuestoCirculacion,
+	fechaLimiteImpuestoVencida,
 	interpolar as interpolarPlantilla,
+	PLANTILLAS_MENSAJES,
+	prepararExpectativaMoraParaEnvio,
+	prepararMontoAdeudadoParaEnvio,
 	prepararTelefonoAsesorParaEnvio,
+	seguroPorAseguradora,
 } from "../lib/cobros-plantillas";
 import { filterCobrosSearchResults } from "../lib/cobros-search";
 import { toDateStrGT } from "../lib/guatemala-month-window";
@@ -2050,6 +2059,7 @@ export const cobrosRouter = {
 						oportunidadCuotaMensual: opportunities.cuotaMensual,
 						oportunidadDiaPago: opportunities.diaPagoMensual,
 						oportunidadCreditType: opportunities.creditType,
+						oportunidadInsuranceProvider: opportunities.insuranceProvider,
 						// Datos del vehículo
 						vehiculoMarca: vehicles.make,
 						vehiculoModelo: vehicles.model,
@@ -2086,10 +2096,12 @@ export const cobrosRouter = {
 				} | null = null;
 
 				let vehicleId: string | null = null;
+				let insuranceProvider: string | null = null;
 
 				if (oportunidadResult.length > 0) {
 					const opp = oportunidadResult[0];
 					vehicleId = opp.vehicleId;
+					insuranceProvider = opp.oportunidadInsuranceProvider;
 					vehiculo = {
 						make: opp.vehiculoMarca,
 						model: opp.vehiculoModelo,
@@ -2220,7 +2232,12 @@ export const cobrosRouter = {
 				);
 
 				// 6. Mapear datos correctamente
-				const cuotasAtrasadas = creditoCompleto.cuotasAtrasadas?.length || 0;
+				// `cuotasAtrasadas` viene de cartera como filas del leftJoin cuota-pago
+				// (una cuota con dos filas de pago aparece dos veces): contar por
+				// numero_cuota único, no por filas.
+				const cuotasAtrasadas = contarCuotasAtrasadasUnicas(
+					creditoCompleto.cuotasAtrasadas ?? [],
+				);
 				const cuotaMensual = Number(creditoCompleto.credito.cuota ?? 0);
 				// Calcular días de mora exactos usando la fecha de vencimiento
 				const diasMora = calcularDiasMoraExactos(
@@ -2266,7 +2283,9 @@ export const cobrosRouter = {
 				const contractSummary = resolveCreditContractSummary(
 					statusCredit,
 					creditoCompleto.cuotasPagadas,
-					creditoCompleto.credito.capital ?? creditoCompleto.credito.deudatotal ?? "0.00",
+					creditoCompleto.credito.capital ??
+						creditoCompleto.credito.deudatotal ??
+						"0.00",
 					resolveHistoricalInstallment(
 						creditoCompleto.credito.cuota,
 						oportunidadData?.cuotaMensual,
@@ -2282,6 +2301,28 @@ export const cobrosRouter = {
 					// Datos de mora / convenio
 					estadoMora,
 					montoEnMora: montoEnMora.toFixed(2),
+					// Recargo de UNA cuota vencida más (capital × 1.12%, misma fórmula
+					// que procesarMoras en cartera-back) para el {expectativaMora} de
+					// las plantillas. Vacío si el estado está excluido de mora
+					// (EN_CONVENIO, INCOBRABLE, etc.) o no hay capital, igual que el job.
+					expectativaMora: calcularExpectativaMora(
+						creditoCompleto.credito.capital,
+						creditoCompleto.credito.statusCredit,
+					),
+					// {montoAdeudado} de las plantillas de mora (1 cuota, 2-3 cuotas,
+					// jurídico): saldo real de cada cuota vencida — recibo menos lo ya
+					// abonado, misma regla de cobertura que cartera — + mora. "" si no
+					// hay cuotas vencidas. En INCOBRABLE solo cuenta el recibo base del
+					// castigo (las cuotas históricas quedan anuladas).
+					montoAdeudado: calcularMontoAdeudadoDesdeCuotas(
+						creditoCompleto.cuotasAtrasadas ?? [],
+						cuotaMensual,
+						montoEnMora,
+						statusCredit,
+					),
+					// Bloque del seguro de la bienvenida según la aseguradora de la
+					// oportunidad (Universales o G&T).
+					...seguroPorAseguradora(insuranceProvider),
 					diasMoraMaximo: diasMora,
 					cuotasVencidas: cuotasAtrasadas,
 					cuotaConvenio: tieneConvenioActivo
@@ -3297,6 +3338,23 @@ export const cobrosRouter = {
 				});
 			}
 
+			const cuerpoBase = input.cuerpoEditado?.trim()
+				? input.cuerpoEditado
+				: plantilla.cuerpo;
+
+			// La plantilla del impuesto no se envía después del 31/07: pediría el
+			// comprobante antes de una fecha ya vencida. Pasado el corte los
+			// asesores editan el mensaje (sin las variables del impuesto) o
+			// contactan personalmente.
+			if (
+				cuerpoUsaFechaLimiteImpuesto(cuerpoBase) &&
+				fechaLimiteImpuestoVencida()
+			) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `La fecha límite del impuesto de circulación (${fechaLimiteImpuestoCirculacion()}) ya venció; edite el mensaje o contacte a los clientes directamente.`,
+				});
+			}
+
 			// Scope server-side: solo supervisores/admins pueden ver toda la
 			// cartera; el resto queda restringido a sus propios créditos.
 			const emailCobrador = PERMISSIONS.canAssignCobros(context.userRole)
@@ -3524,6 +3582,7 @@ export const cobrosRouter = {
 				marca: string | null;
 				modelo: string | null;
 				year: number | null;
+				insuranceProvider: string | null;
 			};
 			const locales = new Map<string, LocalInfo>();
 			const casoIdPorSifco = new Map<string, string>();
@@ -3537,6 +3596,7 @@ export const cobrosRouter = {
 						marca: vehicles.make,
 						modelo: vehicles.model,
 						year: vehicles.year,
+						insuranceProvider: opportunities.insuranceProvider,
 					})
 					.from(opportunities)
 					.leftJoin(leads, eq(opportunities.leadId, leads.id))
@@ -3551,6 +3611,7 @@ export const cobrosRouter = {
 						marca: row.marca,
 						modelo: row.modelo,
 						year: row.year,
+						insuranceProvider: row.insuranceProvider,
 					});
 				}
 
@@ -3575,6 +3636,7 @@ export const cobrosRouter = {
 						marca: prev?.marca ?? null,
 						modelo: prev?.modelo ?? null,
 						year: prev?.year ?? null,
+						insuranceProvider: prev?.insuranceProvider ?? null,
 					});
 					casoIdPorSifco.set(row.numeroSifco, row.id);
 				}
@@ -3596,6 +3658,64 @@ export const cobrosRouter = {
 				clienteNombre: string | null;
 				motivo: string;
 			}> = [];
+
+			// 4.b Monto adeudado real por crédito, SOLO si la plantilla lo usa
+			// ({montoAdeudado}: notificaciones de 1 y de 2-3 cuotas, aviso
+			// jurídico). Ni mora + cuota ni el conteo del job × cuota sirven: la
+			// cuota puede tener abonos parciales (registerPayment deja esas filas
+			// con pagado=false y el job solo excluye cuotas con un pago
+			// pagado=true) o ser un recibo recortado menor a la cuota. Se trae el
+			// detalle de cada crédito elegible y se calcula igual que el modal
+			// individual (calcularMontoAdeudadoDesdeCuotas). null = detalle no
+			// disponible.
+			// Guarda monto y conteo de cuotas del MISMO detalle: el conteo del job
+			// (`mora.cuotas_atrasadas`) puede diferir — una cuota cubierta por una
+			// boleta aún sin validar sale de `cuotasAtrasadas` pero el job la sigue
+			// contando — y el mensaje diría "2 cuotas" con el monto de una.
+			const detallePorSifco = new Map<
+				string,
+				{ montoAdeudado: string; cuotasAtraso: number } | null
+			>();
+			if (cuerpoBase.includes("{montoAdeudado}")) {
+				const sifcosElegibles = creditosFiltrados
+					.filter(
+						(c) =>
+							c.creditos.cuota &&
+							Number(c.creditos.cuota) !== 0 &&
+							c.asesores &&
+							locales.get(c.creditos.numero_credito_sifco ?? "")?.telefono,
+					)
+					.map((c) => c.creditos.numero_credito_sifco)
+					.filter((s): s is string => !!s);
+				const CONCURRENCIA_DETALLE = 5;
+				for (let i = 0; i < sifcosElegibles.length; i += CONCURRENCIA_DETALLE) {
+					await Promise.all(
+						sifcosElegibles
+							.slice(i, i + CONCURRENCIA_DETALLE)
+							.map(async (s) => {
+								try {
+									const detalle = await carteraBackClient.getCredito(s);
+									const cuotasDetalle = detalle.cuotasAtrasadas ?? [];
+									detallePorSifco.set(s, {
+										montoAdeudado: calcularMontoAdeudadoDesdeCuotas(
+											cuotasDetalle,
+											detalle.credito.cuota,
+											detalle.moraActual ?? 0,
+											detalle.credito.statusCredit,
+										),
+										cuotasAtraso: contarCuotasAtrasadasUnicas(cuotasDetalle),
+									});
+								} catch (err) {
+									console.error(
+										`[cobros-masivo] sin detalle de cartera para ${s}:`,
+										err,
+									);
+									detallePorSifco.set(s, null);
+								}
+							}),
+					);
+				}
+			}
 
 			for (const credito of creditosFiltrados) {
 				const sifco = credito.creditos.numero_credito_sifco;
@@ -3639,14 +3759,6 @@ export const cobrosRouter = {
 					.join(" ")
 					.trim();
 
-				// Total a cobrar = monto en mora + cuota mensual (mismo criterio
-				// que se muestra en la pantalla de detalle del caso).
-				const montoMora = Number(credito.mora?.monto_mora ?? 0);
-				const totalACobrar = montoMora > 0 ? montoMora + Number(cuota) : 0;
-
-				const cuerpoBase = input.cuerpoEditado?.trim()
-					? input.cuerpoEditado
-					: plantilla.cuerpo;
 				const telefonoAsesor = prepararTelefonoAsesorParaEnvio(
 					cuerpoBase,
 					asesor.telefono,
@@ -3657,6 +3769,42 @@ export const cobrosRouter = {
 						numeroSifco: sifco,
 						clienteNombre,
 						motivo: telefonoAsesor.motivo,
+					});
+					continue;
+				}
+
+				// Si el cuerpo usa {expectativaMora} y el crédito no genera mora
+				// (sin capital válido, o en estado que el job excluye: EN_CONVENIO,
+				// INCOBRABLE, etc.), se descarta en vez de anunciar un recargo que
+				// jamás se va a asignar.
+				const expectativaMora = prepararExpectativaMoraParaEnvio(
+					cuerpoBase,
+					credito.creditos.capital,
+					credito.creditos.statusCredit,
+				);
+
+				if (!expectativaMora.enviar) {
+					descartados.push({
+						numeroSifco: sifco,
+						clienteNombre,
+						motivo: expectativaMora.motivo,
+					});
+					continue;
+				}
+
+				// Si el cuerpo usa {montoAdeudado}, el monto viene del detalle de
+				// cartera (ver 4.b); sin él se descarta antes que mandar "Q." o un
+				// monto inflado.
+				const detalleCartera = detallePorSifco.get(sifco ?? "");
+				const adeudado = prepararMontoAdeudadoParaEnvio(
+					cuerpoBase,
+					detalleCartera?.montoAdeudado,
+				);
+				if (!adeudado.enviar) {
+					descartados.push({
+						numeroSifco: sifco,
+						clienteNombre,
+						motivo: adeudado.motivo,
 					});
 					continue;
 				}
@@ -3679,16 +3827,19 @@ export const cobrosRouter = {
 					cuotaMensual: String(cuota),
 					placa: info?.placa ?? "",
 					marcaLineaModelo,
-					montoAdeudado:
-						totalACobrar > 0
-							? totalACobrar.toLocaleString("es-GT", {
-									minimumFractionDigits: 2,
-									maximumFractionDigits: 2,
-								})
-							: "",
-					cuotasAtraso: credito.mora?.cuotas_atrasadas ?? 0,
+					// Saldo real de las cuotas vencidas + mora (detalle de cartera, ver
+					// 4.b); "" cuando la plantilla no lo usa.
+					montoAdeudado: adeudado.montoAdeudado,
+					// Del mismo detalle que el monto (ver 4.b) para que el conteo y el
+					// monto hablen de las mismas cuotas; sin detalle, el del job.
+					cuotasAtraso:
+						detalleCartera?.cuotasAtraso ?? credito.mora?.cuotas_atrasadas ?? 0,
 					telefonoAsesor: telefonoAsesor.telefonoAsesor,
 					nombreAsesor: asesor.nombre ?? "",
+					expectativaMora: expectativaMora.expectativaMora,
+					// Bloque del seguro de la bienvenida según la aseguradora de la
+					// oportunidad de cada crédito (Universales o G&T).
+					...seguroPorAseguradora(info?.insuranceProvider),
 				});
 
 				candidatos.push({
@@ -3696,7 +3847,7 @@ export const cobrosRouter = {
 					telefono: testMode ? getTestPhone(candidatos.length) : telefono,
 					telefonoReal: telefono,
 					mensaje,
-					casoCobroId: sifco ? casoIdPorSifco.get(sifco) ?? null : null,
+					casoCobroId: sifco ? (casoIdPorSifco.get(sifco) ?? null) : null,
 					clienteNombre,
 				});
 			}

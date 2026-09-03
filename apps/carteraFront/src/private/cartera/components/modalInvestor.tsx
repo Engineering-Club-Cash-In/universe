@@ -88,25 +88,21 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
   }, [initialData, mode, reset]);
 
   const onSubmit = (data: InvestorPayload) => {
-    // Este modal NUNCA manda `operation: "CREATE"`, así que el alta cae en el
-    // upsert legacy de cartera: si el nombre/DPI/correo choca con alguien que ya
-    // existe, se convierte en un UPDATE. Por eso en modo crear la llave se OMITE
-    // cuando va vacía — mandar null ahí borraría el DPI del representante de la
-    // fila con la que chocó, y con él su acceso al portal. En modo editar sí se
-    // manda siempre, porque vaciar el campo tiene que poder borrarlo.
-    // `dpi_rep_legal` se saca del spread a propósito: el form siempre lo trae
-    // (como "" cuando está vacío) y dejarlo pasar reintroduciría el borrado.
-    const { dpi_rep_legal: repLegalCrudo, ...resto } = data;
-    const repLegal = repLegalCrudo?.trim() || "";
-    const dpiRepLegalPayload =
-      mode === "update" || repLegal !== ""
-        ? { dpi_rep_legal: repLegal === "" ? null : repLegal }
-        : {};
+    // En modo crear se manda `operation: "CREATE"` para que cartera use la
+    // creación estricta: si el nombre/DPI/correo choca con un inversionista que
+    // ya existe, responde 409 en vez de caer en el upsert legacy y convertir el
+    // alta en un UPDATE sobre esa otra fila. Sin esto, "crear" podía pisarle el
+    // `dpi_rep_legal` a otra persona —y con él su acceso al portal— mientras la
+    // UI decía "creado correctamente".
+    const repLegal = data.dpi_rep_legal?.trim() || "";
 
     // Convertir dpi y banco a número si vienen como string
     const payload = {
-      ...resto,
-      ...dpiRepLegalPayload,
+      ...data,
+      ...(mode === "create" ? { operation: "CREATE" as const } : {}),
+      // Llave siempre presente: vacío = borrar. Es seguro en ambos modos porque
+      // la creación estricta garantiza que el alta jamás escribe sobre otra fila.
+      dpi_rep_legal: repLegal === "" ? null : repLegal,
       dpi: data.dpi ? Number(data.dpi) : null,
       banco: data.banco ? Number(data.banco) : null,
       monto_reinversion: data.monto_reinversion ? Number(data.monto_reinversion) : 0,
@@ -114,7 +110,8 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
     };
     console.log("Submitting payload:", payload);
 
-    // 🔥 SIMPLIFICADO: Siempre usa insertInvestor (hace upsert automático)
+    // Mismo endpoint para crear y editar: en crear va con creación estricta,
+    // en editar el `inversionista_id` del payload apunta la fila a actualizar.
     insertInvestor.mutate(payload, {
       onSuccess: () => {
         toast.success(
@@ -145,10 +142,34 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
           setError("dpi_rep_legal", { type: "server", message: detalle });
           return;
         }
+        // Las colisiones de la creación estricta llegan como 409 con un código
+        // de máquina. `error.message` de axios ahí es "Request failed with
+        // status code 409", inútil para el operador: se muestra el texto de
+        // cartera ("Ya existe un inversionista con ese email", etc.) marcando
+        // además el input culpable.
+        const CAMPO_POR_DUPLICADO = {
+          duplicate_dpi: "dpi",
+          duplicate_email: "email",
+          duplicate_nombre: "nombre",
+        } as const;
+        const campoDuplicado =
+          payload?.error &&
+          payload.error in CAMPO_POR_DUPLICADO
+            ? CAMPO_POR_DUPLICADO[
+                payload.error as keyof typeof CAMPO_POR_DUPLICADO
+              ]
+            : undefined;
+        if (campoDuplicado) {
+          const mensaje = detalle ?? "Ya existe un inversionista con ese dato";
+          setError(campoDuplicado, { type: "server", message: mensaje });
+          toast.error(`Error al crear el inversionista. ${mensaje}`);
+          return;
+        }
+        const motivo = detalle ?? error.message ?? "";
         toast.error(
           mode === "create"
-            ? `Error al crear el inversionista. ${error.message || ""}`
-            : `Error al actualizar el inversionista. ${error.message || ""}`
+            ? `Error al crear el inversionista. ${motivo}`
+            : `Error al actualizar el inversionista. ${motivo}`
         );
       },
     });

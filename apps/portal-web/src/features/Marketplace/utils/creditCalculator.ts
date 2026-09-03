@@ -2,6 +2,7 @@ export interface PublicCreditInput {
   vehicleAmount: number;
   downPaymentPct: number;
   termMonths: number;
+  vehicleCondition?: "new" | "used";
 }
 
 export interface PublicCreditResult {
@@ -14,7 +15,7 @@ export interface PublicCreditResult {
 const MONTHLY_INTEREST_PCT = 1.5;
 const IVA_FACTOR = 1.12;
 
-const REFERENCE_USED_IMPORTED_PRIVATE_COSTS = {
+const REFERENCE_PUBLIC_CREDIT_COSTS = {
   monthlyInsuranceAndMembershipPct: 0.00776,
   monthlyGpsCost: 148.2,
   transferCost: 545,
@@ -24,6 +25,20 @@ const REFERENCE_USED_IMPORTED_PRIVATE_COSTS = {
   royaltyPct: 4,
   upfrontInterestPct: 1.78,
 } as const;
+
+function getUsedRodadoCostFactor(vehicleAmount: number) {
+  // Referencia pública para usados: origen rodado, con los tramos de membresía del CRM.
+  if (vehicleAmount <= 100_000) return 1.375;
+  if (vehicleAmount <= 140_000) return 1.6719;
+  return 1.7;
+}
+
+function getNewVehicleCostFactor(vehicleAmount: number) {
+  // Referencia pública para nuevos: vehículo particular, con los tramos de membresía del CRM.
+  if (vehicleAmount <= 100_000) return 1.1875;
+  if (vehicleAmount <= 140_000) return 1.3359;
+  return 1.35;
+}
 
 function calculateLevelPayment(
   principal: number,
@@ -47,15 +62,20 @@ function calculateBaseMonthlyPayment(
   return calculateLevelPayment(amountToFinance, monthlyRate, termMonths);
 }
 
-function calculateUsedImportedPrivateReferencePayment(
+function calculatePublicReferencePayment(
   vehicleAmount: number,
   downPaymentPct: number,
   termMonths: number,
+  vehicleCondition: "new" | "used",
 ) {
-  const costs = REFERENCE_USED_IMPORTED_PRIVATE_COSTS;
+  const costs = REFERENCE_PUBLIC_CREDIT_COSTS;
   const amountToFinance = vehicleAmount - (vehicleAmount * downPaymentPct) / 100;
+  const vehicleCostFactor =
+    vehicleCondition === "used"
+      ? getUsedRodadoCostFactor(vehicleAmount)
+      : getNewVehicleCostFactor(vehicleAmount);
   const monthlyInsuranceAndMembership =
-    vehicleAmount * costs.monthlyInsuranceAndMembershipPct;
+    vehicleAmount * costs.monthlyInsuranceAndMembershipPct * vehicleCostFactor;
 
   const intermediateBase =
     amountToFinance +
@@ -94,6 +114,7 @@ export function getPublicAdjustmentFactor(
   vehicleAmount: number,
   downPaymentPct: number,
   termMonths: number,
+  vehicleCondition: "new" | "used" = "used",
 ) {
   const baseMonthlyPayment = calculateBaseMonthlyPayment(
     vehicleAmount,
@@ -103,10 +124,11 @@ export function getPublicAdjustmentFactor(
 
   if (!Number.isFinite(baseMonthlyPayment) || baseMonthlyPayment <= 0) return 0;
 
-  const referenceMonthlyPayment = calculateUsedImportedPrivateReferencePayment(
+  const referenceMonthlyPayment = calculatePublicReferencePayment(
     vehicleAmount,
     downPaymentPct,
     termMonths,
+    vehicleCondition,
   );
 
   return referenceMonthlyPayment / baseMonthlyPayment - 1;
@@ -116,6 +138,7 @@ export function calculatePublicCredit({
   vehicleAmount,
   downPaymentPct,
   termMonths,
+  vehicleCondition = "used",
 }: PublicCreditInput): PublicCreditResult {
   if (vehicleAmount <= 0 || downPaymentPct < 0 || termMonths <= 0) {
     return {
@@ -135,6 +158,7 @@ export function calculatePublicCredit({
     vehicleAmount,
     downPaymentPct,
     termMonths,
+    vehicleCondition,
   );
 
   return {

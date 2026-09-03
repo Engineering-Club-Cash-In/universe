@@ -4578,7 +4578,9 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
             : inversionistaQ;
 
           console.log(`  📄 Generando Excel${esDolares ? " (USD + GTQ)" : ""}...`);
-          const logoUrl = process.env.LOGO_URL || "";
+          const assetsBaseUrl = process.env.EMAIL_ASSETS_BASE_URL || (import.meta as any).env?.EMAIL_ASSETS_BASE_URL;
+          const logoUrl = assetsBaseUrl ? `${assetsBaseUrl}/isologo-cashin.png` : (process.env.LOGO_URL || "");
+          const redesUrl = assetsBaseUrl ? `${assetsBaseUrl}/redes-cashin.png` : undefined;
           const stamp = Date.now();
           const filename = `liquidacion_${liquidacion.liquidacion_id}_${stamp}.xlsx`;
 
@@ -4590,9 +4592,9 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
             : null;
 
           const [excelResult, excelResultGtq] = await Promise.all([
-            generarYSubirExcelInversionista(inversionista, filename, logoUrl),
+            generarYSubirExcelInversionista(inversionista, filename, logoUrl, false, redesUrl),
             filenameGtq
-              ? generarYSubirExcelInversionista(inversionistaQ as any, filenameGtq, logoUrl)
+              ? generarYSubirExcelInversionista(inversionistaQ as any, filenameGtq, logoUrl, false, redesUrl)
               : Promise.resolve(null),
           ]);
 
@@ -9978,7 +9980,7 @@ export async function simularInversionista(
       // 1. Interés (FIJO sobre monto_aportado, igual que el espejo) = montoInvFijo
       // Prorrateo de primera cuota: si el inversionista entró via compra_cartera en el mes
       // actual (mes anterior al ancla), el espejo solo le paga los días restantes del mes.
-      // fraccionDespues = (diasDelMes - diaCorte) / diasDelMes
+      // fraccionDespues = max(1, diasDelMes - diaCorte) / diasDelMes
       let abono_interes = montoInvFijo;
       if (idx === 0 && ci.fecha_inicio_participacion) {
         const fechaCorte = new Date(ci.fecha_inicio_participacion + "T00:00:00Z");
@@ -9990,7 +9992,15 @@ export async function simularInversionista(
         if (mesCorte === mesActual && anioCorte === anioActual) {
           const diaCorte = fechaCorte.getUTCDate();
           const diasDelMes = new Date(Date.UTC(anioCorte, mesCorte, 0)).getUTCDate();
-          const fraccionDespues = new Big(diasDelMes - diaCorte).div(diasDelMes);
+          // 🩹 Piso de 1 día: si el corte cae el ÚLTIMO día del mes la resta da 0 y la
+          //    proyección mostraría Q0 de interés en la primera cuota, mientras el pago
+          //    real y el DTE sí pagan 1/diasDelMes (mismo piso en
+          //    cofidi/prorrateoPciInteres.ts, routers/cofidi.ts y
+          //    utils/functions/diasParticipacion.ts). Sin esto el reporte contradice al pago.
+          //    OJO: acá la fecha se parsea en UTC, por eso NO se reusa el helper de
+          //    diasParticipacion.ts (ese usa getters locales). Solo se comparte el piso.
+          const diasDespues = Math.max(1, diasDelMes - diaCorte);
+          const fraccionDespues = new Big(diasDespues).div(diasDelMes);
           abono_interes = montoInvFijo.times(fraccionDespues).round(2);
         }
       }

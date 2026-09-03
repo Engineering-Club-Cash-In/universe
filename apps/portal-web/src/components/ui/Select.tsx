@@ -1,6 +1,6 @@
 import { useIsMobile } from "@/hooks";
 import { IconArrowDown } from "../icons";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useId } from "react";
 
 interface SelectOption {
   value: string;
@@ -11,6 +11,7 @@ interface SelectProps {
   options: SelectOption[];
   value: string;
   onChange: (value: string) => void;
+  id?: string;
   placeholder?: string;
   color?: string;
   variant?: "dark" | "light" | "secondary";
@@ -21,6 +22,7 @@ export const Select = ({
   options,
   value,
   onChange,
+  id,
   placeholder = "Seleccionar...",
   color = "secondary",
   variant = "dark",
@@ -28,6 +30,9 @@ export const Select = ({
 }: SelectProps) => {
   const [isOpen, setIsOpen] = useState(false);
   const selectRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const optionRefs = useRef<Array<HTMLDivElement | null>>([]);
+  const listboxId = useId();
   const isMobile = useIsMobile();
 
   const selectedOption = options.find((option) => option.value === value);
@@ -93,13 +98,64 @@ export const Select = ({
   const handleSelect = (optionValue: string) => {
     onChange(optionValue);
     setIsOpen(false);
+    buttonRef.current?.focus();
+  };
+
+  const selectedIndex = options.findIndex((option) => option.value === value);
+
+  const openWithKeyboard = () => {
+    if (disabled || options.length === 0) return;
+    setIsOpen(true);
+    requestAnimationFrame(() => {
+      optionRefs.current[selectedIndex >= 0 ? selectedIndex : 0]?.focus();
+    });
+  };
+
+  const handleButtonKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      openWithKeyboard();
+    }
+  };
+
+  const handleOptionKeyDown = (
+    event: React.KeyboardEvent<HTMLDivElement>,
+    optionIndex: number,
+    optionValue: string,
+  ) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      handleSelect(optionValue);
+      return;
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setIsOpen(false);
+      buttonRef.current?.focus();
+      return;
+    }
+
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const offset = event.key === "ArrowDown" ? 1 : -1;
+      const nextIndex =
+        (optionIndex + offset + options.length) % options.length;
+      optionRefs.current[nextIndex]?.focus();
+    }
   };
 
   return (
     <div ref={selectRef} style={{ position: "relative", width: "100%" }}>
       <button
         type="button"
+        ref={buttonRef}
+        id={id}
         onClick={() => !disabled && setIsOpen(!isOpen)}
+        onKeyDown={handleButtonKeyDown}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        aria-controls={listboxId}
         style={{
           width: "100%",
           height: isSecondary ? "auto" : isLight ? "58px" : "50px",
@@ -142,6 +198,9 @@ export const Select = ({
 
       {isOpen && (
         <div
+          id={listboxId}
+          role="listbox"
+          aria-label={placeholder}
           style={{
             position: "absolute",
             top: "calc(100% + 4px)",
@@ -155,10 +214,19 @@ export const Select = ({
             ...dropdownStyles,
           }}
         >
-          {options.map((option) => (
+          {options.map((option, optionIndex) => (
             <div
               key={option.value}
+              ref={(element) => {
+                optionRefs.current[optionIndex] = element;
+              }}
+              role="option"
+              aria-selected={option.value === value}
+              tabIndex={0}
               onClick={() => handleSelect(option.value)}
+              onKeyDown={(event) =>
+                handleOptionKeyDown(event, optionIndex, option.value)
+              }
               style={{
                 padding: "12px 16px",
                 color: optionTextColor,

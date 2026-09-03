@@ -926,7 +926,9 @@ export async function ajustarPagosLiquidacion(input: AjustarPagosLiquidacionInpu
         ? convertirReporteAUSD(inversionistaQ)
         : inversionistaQ;
 
-      const logoUrl = (import.meta as any).env?.LOGO_URL || "";
+      const assetsBaseUrl = process.env.EMAIL_ASSETS_BASE_URL || (import.meta as any).env?.EMAIL_ASSETS_BASE_URL;
+      const logoUrl = assetsBaseUrl ? `${assetsBaseUrl}/isologo-cashin.png` : ((import.meta as any).env?.LOGO_URL || "");
+      const redesUrl = assetsBaseUrl ? `${assetsBaseUrl}/redes-cashin.png` : undefined;
       const stamp = Date.now();
       const filename = `ajuste_liquidados_${liquidacion_id}_${stamp}.xlsx`;
 
@@ -938,9 +940,9 @@ export async function ajustarPagosLiquidacion(input: AjustarPagosLiquidacionInpu
         : null;
 
       const [excelResult, excelResultGtq] = await Promise.all([
-        generarYSubirExcelInversionista(inversionista, filename, logoUrl),
+        generarYSubirExcelInversionista(inversionista, filename, logoUrl, false, redesUrl),
         filenameGtq
-          ? generarYSubirExcelInversionista(inversionistaQ, filenameGtq, logoUrl)
+          ? generarYSubirExcelInversionista(inversionistaQ, filenameGtq, logoUrl, false, redesUrl)
           : Promise.resolve(null),
       ]);
 

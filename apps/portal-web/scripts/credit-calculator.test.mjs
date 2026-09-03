@@ -36,34 +36,60 @@ function assertClose(actual, expected, tolerance, label) {
   );
 }
 
-assertClose(getPublicAdjustmentFactor(50_000, 20, 48), 0.562737, 0.000001, "factor Q50k");
-assertClose(getPublicAdjustmentFactor(100_000, 20, 48), 0.474328, 0.000001, "factor Q100k");
-assertClose(getPublicAdjustmentFactor(200_000, 20, 48), 0.430124, 0.000001, "factor Q200k");
+assertClose(getPublicAdjustmentFactor(50_000, 20, 48), 0.685776, 0.000001, "factor Q50k");
+assertClose(getPublicAdjustmentFactor(100_000, 20, 48), 0.597379, 0.000001, "factor Q100k");
+assertClose(getPublicAdjustmentFactor(200_000, 20, 48), 0.659823, 0.000001, "factor Q200k");
 
 assertClose(
   calculatePublicCredit({ vehicleAmount: 50_000, downPaymentPct: 20, termMonths: 48 }).monthlyPayment,
-  1_907.52,
+  2_057.70,
   0.01,
   "Q50k / 20% / 48 meses",
 );
 assertClose(
   calculatePublicCredit({ vehicleAmount: 100_000, downPaymentPct: 20, termMonths: 48 }).monthlyPayment,
-  3_599.21,
+  3_899.61,
   0.01,
   "Q100k / 20% / 48 meses",
 );
 assertClose(
   calculatePublicCredit({ vehicleAmount: 200_000, downPaymentPct: 20, termMonths: 48 }).monthlyPayment,
-  6_982.59,
+  8_104.10,
   0.01,
   "Q200k / 20% / 48 meses",
 );
 
 assertClose(
   calculatePublicCredit({ vehicleAmount: 150_000, downPaymentPct: 10, termMonths: 60 }).monthlyPayment,
-  5_199.94,
+  6_037.65,
   0.01,
   "Q150k / 10% / 60 meses usado rodado particular",
+);
+
+const crmReferencePayment = 2_856.16;
+const publicUsedRodadoPayment = calculatePublicCredit({
+  vehicleAmount: 80_000,
+  downPaymentPct: 20,
+  termMonths: 60,
+  vehicleCondition: "used",
+}).monthlyPayment;
+assert.ok(
+  Math.abs(publicUsedRodadoPayment - crmReferencePayment) / crmReferencePayment <= 0.05,
+  `La referencia pública usada/rodado debe quedar dentro de 5% del CRM: ${publicUsedRodadoPayment} vs ${crmReferencePayment}`,
+);
+
+const crmNewVehicleReferencePayment = 2_784.93;
+const publicNewVehiclePayment = calculatePublicCredit({
+  vehicleAmount: 80_000,
+  downPaymentPct: 20,
+  termMonths: 60,
+  vehicleCondition: "new",
+}).monthlyPayment;
+assert.ok(
+  Math.abs(publicNewVehiclePayment - crmNewVehicleReferencePayment) /
+    crmNewVehicleReferencePayment <=
+    0.05,
+  `La referencia pública nueva debe quedar dentro de 5% del CRM: ${publicNewVehiclePayment} vs ${crmNewVehicleReferencePayment}`,
 );
 
 const beforeBoundary = calculatePublicCredit({
@@ -106,7 +132,18 @@ const calculatorSource = readFileSync(
 const calculadoraRouteSource = readFileSync("src/routes/calculadora.tsx", "utf8");
 
 assert.match(calculatorSource, /standalone\?: boolean/);
-assert.match(calculatorSource, /useState<string>\("60"\)/);
+assert.match(calculatorSource, /useState<VehicleCondition>\("used"\)/);
+assert.match(calculatorSource, /useState<string>\("20"\)/);
+assert.match(calculatorSource, /\{ value: "used", label: "Usado" \}/);
+assert.match(calculatorSource, /\{ value: "new", label: "Nuevo" \}/);
+assert.match(calculatorSource, /vehicleCondition === "used"/);
+assert.match(calculatorSource, /\{ value: "60", label: "60 meses" \}/);
+assert.match(calculatorSource, /\{ value: "72", label: "72 meses" \}/);
+assert.match(calculatorSource, /\{ value: "84", label: "84 meses" \}/);
+assert.match(calculatorSource, /setTiempo\("60"\)/);
+assert.match(calculatorSource, /Define el plazo/);
+assert.match(calculatorSource, /Según condición/);
+assert.match(calculatorSource, /Condición: \$\{/);
 assert.match(calculatorSource, /standalone \? "mt-4 lg:mt-8" : "mt-12 lg:mt-64"/);
 assert.match(calculadoraRouteSource, /<CalculatorCredit standalone \/>/);
 

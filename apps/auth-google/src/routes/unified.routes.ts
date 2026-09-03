@@ -6,10 +6,12 @@
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { randomBytes } from "crypto";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { auth } from "../lib/auth";
+import { requireServiceSecret } from "../lib/serviceAuth";
+import { env } from "../config/env";
 import { db } from "../db/connection";
-import { users, accounts } from "../db/schema";
+import { users } from "../db/schema";
 import {
   registerExternalUser,
   type RegisterExternalUserPayload,
@@ -160,10 +162,27 @@ unifiedRoutes.post("/register-external-auth", requireAuth, async (c) => {
 });
 
 // ============================================
-// BULK IMPORT (público)
+// BULK IMPORT (interno: requiere secreto de servicio)
 // ============================================
 
-unifiedRoutes.post("/bulk-import-investors", async (c) => {
+/**
+ * POST /api/unified/bulk-import-investors
+ *
+ * Alta masiva de inversionistas. No pertenece a ningún usuario final, así que
+ * se protege con el secreto compartido de servicio en vez de una sesión.
+ *
+ * Reglas:
+ * - Solo crea cuentas nuevas. Un correo que ya existe se omite, nunca se toca:
+ *   reescribir la credencial de una cuenta existente sería un reseteo, no una
+ *   importación, y esta ruta no es el lugar para hacerlo.
+ * - La contraseña generada no se devuelve. La cuenta nace con una credencial
+ *   aleatoria que nadie conoce y el titular la establece por "olvidé mi
+ *   contraseña".
+ */
+unifiedRoutes.post(
+  "/bulk-import-investors",
+  requireServiceSecret(() => env.INTERNAL_API_SECRET, "POST /api/unified/bulk-import-investors"),
+  async (c) => {
   type InvestorRow = { nombre: string; dpi: string; correo: string };
 
   const body = await c.req.json<InvestorRow[]>();
@@ -179,43 +198,37 @@ unifiedRoutes.post("/bulk-import-investors", async (c) => {
 
     const email = correo.trim().toLowerCase();
     const cleanDpi = dpi?.replaceAll(" ", "") ?? dpi;
-    const password = randomBytes(8).toString("hex");
 
-    try {
-      const created = await auth.api.signUpEmail({
-        body: { name: nombre, email, password },
-      });
+    // Una cuenta que ya existe se deja intacta y se reporta como omitida.
+    const [existing] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.email, email));
 
-      await db
-        .update(users)
-        .set({ role: "INVESTOR", dpi: cleanDpi })
-        .where(eq(users.id, created.user.id));
-
-      return { correo: email, nombre, dpi: cleanDpi, password, status: "creado" };
-    } catch (signUpError) {
-      const [existing] = await db
-        .select()
-        .from(users)
-        .where(eq(users.email, email));
-
-      if (!existing) throw signUpError;
-
-      const ctx = await auth.$context;
-      const hashedPassword = await ctx.password.hash(password);
-
-      await Promise.all([
-        db
-          .update(users)
-          .set({ role: "INVESTOR", dpi: cleanDpi })
-          .where(eq(users.id, existing.id)),
-        db
-          .update(accounts)
-          .set({ password: hashedPassword })
-          .where(and(eq(accounts.userId, existing.id), eq(accounts.providerId, "credential"))),
-      ]);
-
-      return { correo: email, nombre, dpi: cleanDpi, password, status: "actualizado" };
+    if (existing) {
+      return {
+        correo: email,
+        nombre,
+        dpi: cleanDpi,
+        status: "omitido" as const,
+        motivo: "La cuenta ya existe; no se modifica desde la importación.",
+      };
     }
+
+    // Credencial aleatoria que no se comunica a nadie: el titular la define
+    // con el flujo de recuperación de contraseña.
+    const password = randomBytes(32).toString("hex");
+
+    const created = await auth.api.signUpEmail({
+      body: { name: nombre, email, password },
+    });
+
+    await db
+      .update(users)
+      .set({ role: "INVESTOR", dpi: cleanDpi })
+      .where(eq(users.id, created.user.id));
+
+    return { correo: email, nombre, dpi: cleanDpi, status: "creado" as const };
   };
 
   // Procesar en lotes de 5 para no saturar el pool de conexiones
@@ -231,11 +244,16 @@ unifiedRoutes.post("/bulk-import-investors", async (c) => {
   const results = allSettled;
 
   const success: object[] = [];
+  const omitidos: object[] = [];
   const errors: object[] = [];
 
   results.forEach((result, i) => {
     if (result.status === "fulfilled") {
-      success.push(result.value);
+      if (result.value.status === "omitido") {
+        omitidos.push(result.value);
+      } else {
+        success.push(result.value);
+      }
     } else {
       const { correo, nombre, dpi } = body[i];
       const err = result.reason;
@@ -251,8 +269,10 @@ unifiedRoutes.post("/bulk-import-investors", async (c) => {
   return c.json({
     total: body.length,
     exitosos: success.length,
+    omitidos: omitidos.length,
     fallidos: errors.length,
     success,
+    omitidosDetalle: omitidos,
     errors,
   });
 });

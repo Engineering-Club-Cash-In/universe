@@ -148,6 +148,7 @@ pnpm dev
 | GOOGLE_CLIENT_SECRET | Client Secret de Google | ✅ |
 | GOOGLE_REDIRECT_URI | URI de redirección de Google | ✅ |
 | CORS_ORIGIN | Origen permitido para CORS | ❌ (default: *) |
+| INTERNAL_API_SECRET | Secreto compartido para endpoints internos servicio-a-servicio. Se envía como `Authorization: Bearer <secreto>`. Sin él, esos endpoints rechazan todo (fail closed). | ✅ en producción |
 
 ## 📄 Licencia
 

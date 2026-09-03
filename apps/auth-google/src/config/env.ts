@@ -19,6 +19,10 @@ export interface EnvConfig {
   CARTERA_PASSWORD: string;
   // CRM API Config
   CRM_API_URL: string;
+  // Secreto compartido para endpoints internos servicio-a-servicio.
+  // Opcional al arrancar (no queremos tumbar el login si falta), pero los
+  // endpoints que lo exigen rechazan cuando viene vacío.
+  INTERNAL_API_SECRET: string;
 }
 
 function validateEnv(): EnvConfig {
@@ -70,6 +74,8 @@ function validateEnv(): EnvConfig {
     CARTERA_PASSWORD: process.env.CARTERA_PASSWORD || "",
     // CRM API
     CRM_API_URL: process.env.CRM_API_URL || "http://localhost:4000",
+    // Sin default: si no viene, los endpoints internos rechazan todo.
+    INTERNAL_API_SECRET: process.env.INTERNAL_API_SECRET || "",
   };
 }
 
@@ -86,3 +92,11 @@ console.log(`   - CORS_ORIGIN: ${env.CORS_ORIGIN}`);
 console.log(
   `   - DATABASE_URL: ${env.DATABASE_URL.substring(0, 20)}...`
 );
+
+// Aviso temprano para operaciones: sin este secreto los endpoints internos
+// quedan cerrados (fail closed) y el import masivo responde 401.
+if (!env.INTERNAL_API_SECRET) {
+  console.warn(
+    "⚠️  INTERNAL_API_SECRET no está configurado: los endpoints internos rechazarán todas las peticiones."
+  );
+}

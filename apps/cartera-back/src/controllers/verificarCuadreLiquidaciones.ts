@@ -349,6 +349,40 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
       where h.liquidacion_id in (select liquidacion_id from pendientes)
       group by 1
     ),
+    crecimiento_bruto as (
+      -- Cuánto SUBIÓ cada crédito después de la liquidación, contando solo las
+      -- transacciones que sumaron y descartando las que restaron.
+      --
+      -- El neto no sirve para atribuir una compra: si el mismo crédito recibe
+      -- una compra de Q200 y después pierde Q100, el neto es Q100 y la compra
+      -- se restaría a medias, con lo que la ecuación cuadraría escondiendo la
+      -- pérdida. Y si la compra se muda a otro crédito con
+      -- manualReassignInvestor, el neto del origen vuelve a 0 y la compra deja
+      -- de reconocerse, inventando un faltante por su monto entero (la fila del
+      -- destino nace como "reinversion", así que tampoco la recoge por ahí).
+      --
+      -- Se agrupa por txid antes de mirar el signo: el nuke&rebuild borra y
+      -- reinserta el roster, y cada reinserción aislada trae monto_anterior
+      -- NULL, que se vería como un alza por el saldo completo. Sumando la
+      -- transacción entera, un rebaraje que no cambió nada da cero.
+      select cr.liquidacion_id, cr.inversionista_id, cr.credito_id,
+             coalesce((
+               select sum(t.delta)
+               from (
+                 select hm.txid,
+                        sum(coalesce(hm.monto_nuevo, 0))
+                        - sum(coalesce(hm.monto_anterior, 0)) as delta
+                 from cartera.historico_monto_aportado_espejo hm
+                 where hm.credito_id       = cr.credito_id
+                   and hm.inversionista_id = cr.inversionista_id
+                   and hm.fecha > p.fecha_liquidacion
+                 group by hm.txid
+               ) t
+               where t.delta > 0
+             ), 0) as monto
+      from creditos_rel cr
+      join pendientes p on p.liquidacion_id = cr.liquidacion_id
+    ),
     compras_por_credito as (
       select c.inversionista_id, c.credito_id, p.liquidacion_id,
              sum(c.monto_aportado) as monto_compras,
@@ -401,10 +435,7 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
              ec.liquido,
              least(
                cc.monto_compras,
-               greatest(
-                 0,
-                 ec.monto - coalesce(hl.monto_aportado, 0) - coalesce(en.monto, 0)
-               )
+               greatest(0, coalesce(cb.monto, 0) - coalesce(en.monto, 0))
              ) as monto,
              cc.detalle
       from compras_por_credito cc
@@ -420,6 +451,10 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
         on  en.liquidacion_id   = cc.liquidacion_id
         and en.credito_id       = cc.credito_id
         and en.inversionista_id = cc.inversionista_id
+      left join crecimiento_bruto cb
+        on  cb.liquidacion_id   = cc.liquidacion_id
+        and cb.credito_id       = cc.credito_id
+        and cb.inversionista_id = cc.inversionista_id
     ),
     crecimiento_cartera as (
       -- Cuánto creció la cartera del inversionista desde la liquidación, SIN
@@ -450,12 +485,12 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
       select ec.liquidacion_id,
              sum(
                case
-                 -- Una posición que liquidó y BAJA es justamente la pérdida que
-                 -- este job busca, así que no puede entrar al techo: si entrara,
-                 -- una compra en otro crédito la compensaría y la ecuación
-                 -- cuadraría con el capital ya desaparecido. Solo suma cuando
-                 -- crece.
-                 when ec.liquido then greatest(0, ec.monto - ec.referencia)
+                 -- De un crédito que liquidó entra su crecimiento BRUTO, no el
+                 -- neto. Una posición que baja es justamente la pérdida que este
+                 -- job busca: si la baja entrara al techo, la compra que ocurrió
+                 -- en ese mismo crédito —o en otro— la compensaría y la ecuación
+                 -- cuadraría con el capital ya desaparecido.
+                 when ec.liquido then coalesce(cb.monto, 0)
                  -- En el grupo que no liquidó el signo sí cuenta: ahí viven las
                  -- dos puntas de una compra que expira y se rehace, y es lo que
                  -- hace que se cancelen.
@@ -471,6 +506,10 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
         on  en.liquidacion_id   = ec.liquidacion_id
         and en.credito_id       = ec.credito_id
         and en.inversionista_id = ec.inversionista_id
+      left join crecimiento_bruto cb
+        on  cb.liquidacion_id   = ec.liquidacion_id
+        and cb.credito_id       = ec.credito_id
+        and cb.inversionista_id = ec.inversionista_id
       group by 1
     ),
     compras as (

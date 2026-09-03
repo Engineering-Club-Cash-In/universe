@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
 	index,
 	integer,
@@ -74,8 +75,15 @@ export const opportunityValidations = pgTable(
 		/** Usuario que disparó la ejecución (null si fue el sistema) */
 		ejecutadoPor: text("ejecutado_por").references(() => user.id),
 
-		/** Fecha y hora de la ejecución */
-		ejecutadoAt: timestamp("ejecutado_at").notNull().defaultNow(),
+		/**
+		 * Fecha y hora de la ejecución. `clock_timestamp()`, no `now()`: bajo el
+		 * candado de `pg_advisory_xact_lock` el orden real de los inserts puede
+		 * no coincidir con el de inicio de cada transacción, y `now()` se congela
+		 * al inicio de la transacción en vez de reflejar cuándo corrió el insert.
+		 */
+		ejecutadoAt: timestamp("ejecutado_at")
+			.notNull()
+			.default(sql`clock_timestamp()`),
 	},
 	(table) => [
 		index("opportunity_validations_opportunity_id_idx").on(table.opportunityId),

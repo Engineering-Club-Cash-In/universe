@@ -320,11 +320,18 @@ export function RenapBuroValidation({
 	const renap = data.renap;
 	const buro = data.buro;
 	const ejecutandoPrimeraVez = isExecuting && !buro && !renap;
-	const hayError = renap?.estado === "error" || buro?.estado === "error";
+	// Un error de una fila desactualizada no cuenta: no bloquea el gate real
+	// (que filtra por DPI actual) y mostrarlo como "bloqueado" contradice el
+	// aviso de "DPI cambió"
+	const buroErrorVigente = buro?.estado === "error" && !data.buroDesactualizado;
+	const renapErrorVigente =
+		renap?.estado === "error" && !data.renapDesactualizado;
+	const hayError = buroErrorVigente || renapErrorVigente;
 	const buroConVeredicto =
 		buro?.estado === "aprobado" || buro?.estado === "rechazado";
 	const mensajeError =
-		(buro?.estado === "error" ? buro.mensaje : renap?.mensaje) ?? null;
+		(buroErrorVigente ? buro?.mensaje : renapErrorVigente ? renap?.mensaje : null) ??
+		null;
 
 	return (
 		<Card>
@@ -394,12 +401,19 @@ export function RenapBuroValidation({
 						<UserCog className="h-4 w-4" />
 						<AlertTitle>El DPI del lead cambió después de validar</AlertTitle>
 						<AlertDescription>
-							Este resultado se obtuvo con el DPI{" "}
-							<span className="font-medium">{data.dpiValidado}</span>. Y la
-							ficha del lead ahora tiene{" "}
-							<span className="font-medium">{data.dpi}</span>. Lo que se muestra
-							abajo corresponde a la persona anterior. Se recomienda re-ejecutar
-							la validación.
+							La ficha del lead ahora tiene el DPI{" "}
+							<span className="font-medium">{data.dpi ?? "(sin DPI)"}</span>,
+							distinto al usado en{" "}
+							<span className="font-medium">
+								{[
+									data.buroDesactualizado && `Buró (${buro?.dpi})`,
+									data.renapDesactualizado && `RENAP (${renap?.dpi})`,
+								]
+									.filter(Boolean)
+									.join(" y ")}
+							</span>
+							. Lo que se muestra abajo para esa fuente corresponde a la
+							persona anterior. Se recomienda re-ejecutar la validación.
 						</AlertDescription>
 					</Alert>
 				)}
@@ -461,7 +475,7 @@ export function RenapBuroValidation({
 									<FilasDetalle
 										filas={[
 											["Nombre", data.detalleRenap.nombreCompleto],
-											["DPI consultado", data.dpiValidado],
+											["DPI consultado", renap?.dpi ?? null],
 											[
 												"Fecha de nacimiento",
 												data.detalleRenap.fechaNacimiento,
@@ -543,7 +557,7 @@ export function RenapBuroValidation({
 									<FilasDetalle
 										filas={[
 											["Nombre en Infornet", data.detalleBuro.nombreCompleto],
-											["DPI consultado", data.dpiValidado],
+											["DPI consultado", buro?.dpi ?? null],
 											[
 												"Código de persona",
 												String(data.detalleBuro.codigoPersona),
@@ -717,7 +731,7 @@ export function RenapBuroValidation({
 									)}
 									Reintentar
 								</Button>
-								{buro?.estado === "error" && puedeOverridear && (
+								{buroErrorVigente && puedeOverridear && (
 									<Button
 										variant="outline"
 										size="sm"
@@ -728,7 +742,7 @@ export function RenapBuroValidation({
 										Marcar Buró como validado manualmente
 									</Button>
 								)}
-								{renap?.estado === "error" && puedeOverridear && (
+								{renapErrorVigente && puedeOverridear && (
 									<Button
 										variant="outline"
 										size="sm"
@@ -821,9 +835,7 @@ export function RenapBuroValidation({
 						</AlertDialogCancel>
 						<AlertDialogAction
 							onClick={(e) => {
-								// AlertDialogAction cierra el diálogo por defecto al hacer clic;
-								// acá el cierre lo controla handleConfirmarOverride (se queda
-								// abierto si la llamada falla, para poder reintentar)
+								// Evita que se autocierre: el cierre lo controla handleConfirmarOverride
 								e.preventDefault();
 								handleConfirmarOverride();
 							}}

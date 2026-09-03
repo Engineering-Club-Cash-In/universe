@@ -15,4 +15,5 @@ ALTER TABLE "public"."opportunity_validation_overrides_logs" ADD CONSTRAINT "opp
 ALTER TABLE "public"."opportunity_validation_overrides_logs" ADD CONSTRAINT "opportunity_validation_overrides_logs_overridden_validation_id_opportunity_validations_id_fk" FOREIGN KEY ("overridden_validation_id") REFERENCES "public"."opportunity_validations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "public"."opportunity_validation_overrides_logs" ADD CONSTRAINT "opportunity_validation_overrides_logs_marked_by_user_id_fk" FOREIGN KEY ("marked_by") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "opportunity_validation_overrides_logs_opportunity_id_idx" ON "public"."opportunity_validation_overrides_logs" USING btree ("opportunity_id");--> statement-breakpoint
-CREATE INDEX "opportunity_validation_overrides_logs_marked_by_idx" ON "public"."opportunity_validation_overrides_logs" USING btree ("marked_by");
+CREATE INDEX "opportunity_validation_overrides_logs_marked_by_idx" ON "public"."opportunity_validation_overrides_logs" USING btree ("marked_by");--> statement-breakpoint
+ALTER TABLE "public"."opportunity_validations" ALTER COLUMN "ejecutado_at" SET DEFAULT clock_timestamp();

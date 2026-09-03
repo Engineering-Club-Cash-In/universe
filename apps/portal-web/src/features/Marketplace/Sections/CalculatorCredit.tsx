@@ -71,7 +71,7 @@ export const CalculatorCredit = ({ standalone = false }: CalculatorCreditProps) 
 
   return (
     <section
-      className={`relative w-full ${topMargin} mb-16 lg:mb-30 flex px-8 lg:px-20`}
+      className={`relative w-full ${topMargin} mb-16 lg:mb-30 flex gap-12 px-8 lg:px-20`}
     >
       {/* Imagen a la izquierda */}
       <div className="relative w-[438px] shrink-0 hidden lg:block">
@@ -92,7 +92,7 @@ export const CalculatorCredit = ({ standalone = false }: CalculatorCreditProps) 
 
       {/* Container de la calculadora a la derecha */}
       <div className="flex-1 flex justify-center">
-        <div className="relative lg:max-w-3/4 w-full">
+        <div className="relative w-full lg:max-w-[960px]">
           {/* Div decorativo izquierdo */}
           <div
             className="absolute left-0 top-0 bottom-0 w-64 rounded-l-xl"
@@ -136,7 +136,7 @@ export const CalculatorCredit = ({ standalone = false }: CalculatorCreditProps) 
 
               <div className="space-y-6">
                 {/* Campos de la solicitud */}
-                <div className="grid w-full grid-cols-1 gap-6 sm:grid-cols-2">
+                <div className="grid w-full grid-cols-1 gap-6 2xl:grid-cols-2">
                   <div className="w-full">
                     <label
                       htmlFor="vehicleCondition"

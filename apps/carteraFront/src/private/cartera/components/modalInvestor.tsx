@@ -29,6 +29,7 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
     defaultValues: {
       nombre: "",
       dpi: undefined,
+      dpi_rep_legal: "",
       emite_factura: false,
       descuenta_impuestos: false,
       reinversion: false,
@@ -60,6 +61,7 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
       reset({
         nombre: "",
         dpi: undefined,
+        dpi_rep_legal: "",
         emite_factura: false,
         descuenta_impuestos: false,
         reinversion: false,
@@ -76,9 +78,25 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
   }, [initialData, mode, reset]);
 
   const onSubmit = (data: InvestorPayload) => {
+    // Este modal NUNCA manda `operation: "CREATE"`, así que el alta cae en el
+    // upsert legacy de cartera: si el nombre/DPI/correo choca con alguien que ya
+    // existe, se convierte en un UPDATE. Por eso en modo crear la llave se OMITE
+    // cuando va vacía — mandar null ahí borraría el DPI del representante de la
+    // fila con la que chocó, y con él su acceso al portal. En modo editar sí se
+    // manda siempre, porque vaciar el campo tiene que poder borrarlo.
+    // `dpi_rep_legal` se saca del spread a propósito: el form siempre lo trae
+    // (como "" cuando está vacío) y dejarlo pasar reintroduciría el borrado.
+    const { dpi_rep_legal: repLegalCrudo, ...resto } = data;
+    const repLegal = repLegalCrudo?.trim() || "";
+    const dpiRepLegalPayload =
+      mode === "update" || repLegal !== ""
+        ? { dpi_rep_legal: repLegal === "" ? null : repLegal }
+        : {};
+
     // Convertir dpi y banco a número si vienen como string
     const payload = {
-      ...data,
+      ...resto,
+      ...dpiRepLegalPayload,
       dpi: data.dpi ? Number(data.dpi) : null,
       banco: data.banco ? Number(data.banco) : null,
       monto_reinversion: data.monto_reinversion ? Number(data.monto_reinversion) : 0,
@@ -208,6 +226,24 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
                 {...register("numero_cuenta")}
                 className="bg-white text-blue-900 placeholder-gray-400 border border-gray-300 rounded-lg px-4 py-2 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
                 placeholder="123456789"
+              />
+            </div>
+
+            {/* DPI del representante legal */}
+            <div>
+              <label className="block text-sm text-blue-800 mb-1">DPI del representante legal</label>
+              <input
+                {...register("dpi_rep_legal", {
+                  onChange: (e) => {
+                    const soloDigitos = e.target.value.replace(/\D/g, "").slice(0, 20);
+                    setValue("dpi_rep_legal", soloDigitos);
+                  },
+                })}
+                type="text"
+                inputMode="numeric"
+                maxLength={20}
+                className="bg-white text-blue-900 placeholder-gray-400 border border-gray-300 rounded-lg px-4 py-2 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                placeholder="DPI de quien representa a la empresa"
               />
             </div>
 
@@ -364,6 +400,9 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
             const payload = {
               ...currentFormData,
               dpi: currentFormData.dpi ? Number(currentFormData.dpi) : null,
+              dpi_rep_legal: currentFormData.dpi_rep_legal?.trim()
+                ? currentFormData.dpi_rep_legal.trim()
+                : null,
               banco: currentFormData.banco ? Number(currentFormData.banco) : null,
               monto_reinversion: currentFormData.monto_reinversion ? Number(currentFormData.monto_reinversion) : 0,
               tipo_reinversion: "reinversion_combinada",

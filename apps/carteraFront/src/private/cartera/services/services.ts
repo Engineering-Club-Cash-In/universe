@@ -20,6 +20,7 @@ export interface InvestorPayload {
   reinversion: boolean;
   banco: number | null;
   dpi:number | null;
+  dpi_rep_legal?: string | null;
   tipo_cuenta: string | null;
   re_inversion: string | null;
   numero_cuenta: string | null;
@@ -35,6 +36,7 @@ export interface InvestorResponse {
   descuenta_impuestos: boolean;
   reinversion: boolean;
   banco: string | null;
+  dpi_rep_legal?: string | null;
   tipo_cuenta: string | null;
   numero_cuenta: string | null;
   moneda?: string;

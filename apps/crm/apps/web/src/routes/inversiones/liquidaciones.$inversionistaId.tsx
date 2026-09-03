@@ -825,6 +825,7 @@ function InvestorLiquidacionesPage() {
 	const [editBanco, setEditBanco] = useState("");
 	const [editTipoCuenta, setEditTipoCuenta] = useState("");
 	const [editNumeroCuenta, setEditNumeroCuenta] = useState("");
+	const [editDpiRepLegal, setEditDpiRepLegal] = useState("");
 	const [editMoneda, setEditMoneda] = useState("quetzales");
 	const [editEmiteFactura, setEditEmiteFactura] = useState(false);
 	const [editTipoReinversion, setEditTipoReinversion] = useState("sin_reinversion");
@@ -843,6 +844,7 @@ function InvestorLiquidacionesPage() {
 		setEditBanco(inv.banco_id ? String(inv.banco_id) : "");
 		setEditTipoCuenta(inv.tipoCuenta ?? inv.tipo_cuenta ?? "");
 		setEditNumeroCuenta(inv.numeroCuenta ?? inv.numero_cuenta ?? "");
+		setEditDpiRepLegal(inv.dpiRepLegal ?? inv.dpi_rep_legal ?? "");
 		setEditMoneda(inv.moneda ?? "quetzales");
 		setEditEmiteFactura(inv.emiteFactura ?? inv.emite_factura ?? false);
 		setEditTipoReinversion(inv.tipoReinversion ?? inv.tipo_reinversion ?? "sin_reinversion");
@@ -1510,6 +1512,22 @@ function InvestorLiquidacionesPage() {
 							/>
 						</div>
 
+						<div className="space-y-1.5">
+							<Label htmlFor="edit-dpi-rep-legal">
+								DPI del representante legal
+							</Label>
+							<Input
+								id="edit-dpi-rep-legal"
+								value={editDpiRepLegal}
+								onChange={(e) =>
+									setEditDpiRepLegal(e.target.value.replace(/\D/g, ""))
+								}
+								placeholder="DPI de quien representa a la empresa"
+								maxLength={20}
+								inputMode="numeric"
+							/>
+						</div>
+
 						<div className="grid grid-cols-2 gap-3">
 							<div className="space-y-1.5">
 								<Label htmlFor="edit-moneda">Moneda</Label>
@@ -1591,6 +1609,10 @@ function InvestorLiquidacionesPage() {
 									banco: editBanco ? Number(editBanco) : null,
 									tipoCuenta: editTipoCuenta || undefined,
 									numeroCuenta: editNumeroCuenta.trim() || undefined,
+									// Siempre el string: vaciar el campo tiene que poder BORRAR el
+									// DPI guardado, y `|| undefined` haría que el valor viejo
+									// sobreviviera sin que el operador se entere.
+									dpiRepLegal: editDpiRepLegal.trim(),
 									moneda: editMoneda as "quetzales" | "dolares",
 									emiteFactura: editEmiteFactura,
 									tipoReinversion: editTipoReinversion,

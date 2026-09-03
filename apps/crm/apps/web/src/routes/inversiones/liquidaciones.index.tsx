@@ -62,6 +62,7 @@ function LiquidacionesInversionistas() {
 	const [formBanco, setFormBanco] = useState("");
 	const [formTipoCuenta, setFormTipoCuenta] = useState("");
 	const [formNumeroCuenta, setFormNumeroCuenta] = useState("");
+	const [formDpiRepLegal, setFormDpiRepLegal] = useState("");
 	const [formMoneda, setFormMoneda] = useState("quetzales");
 	const [formEmiteFactura, setFormEmiteFactura] = useState(false);
 	const [formTipoReinversion, setFormTipoReinversion] = useState("sin_reinversion");
@@ -164,6 +165,7 @@ function LiquidacionesInversionistas() {
 		setFormBanco("");
 		setFormTipoCuenta("");
 		setFormNumeroCuenta("");
+		setFormDpiRepLegal("");
 		setFormMoneda("quetzales");
 		setFormEmiteFactura(false);
 		setFormTipoReinversion("sin_reinversion");
@@ -549,6 +551,23 @@ function LiquidacionesInversionistas() {
 							/>
 						</div>
 
+						{/* DPI del representante legal */}
+						<div className="space-y-1.5">
+							<Label htmlFor="inv-dpi-rep-legal">
+								DPI del representante legal
+							</Label>
+							<Input
+								id="inv-dpi-rep-legal"
+								value={formDpiRepLegal}
+								onChange={(e) =>
+									setFormDpiRepLegal(e.target.value.replace(/\D/g, ""))
+								}
+								placeholder="DPI de quien representa a la empresa"
+								maxLength={20}
+								inputMode="numeric"
+							/>
+						</div>
+
 						{/* Moneda + Factura */}
 						<div className="grid grid-cols-2 gap-3">
 							<div className="space-y-1.5">
@@ -763,6 +782,7 @@ function LiquidacionesInversionistas() {
 									banco: formBanco ? Number(formBanco) : null,
 									tipoCuenta: formTipoCuenta || undefined,
 									numeroCuenta: formNumeroCuenta.trim() || undefined,
+									dpiRepLegal: formDpiRepLegal.trim() || undefined,
 									moneda: formMoneda as "quetzales" | "dolares",
 									emiteFactura: formEmiteFactura,
 									tipoReinversion: formTipoReinversion,

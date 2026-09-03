@@ -1847,6 +1847,7 @@ export class CarteraBackClient {
 		tipo_reinversion?: string | null;
 		monto_reinversion?: number | null;
 		moneda?: string;
+		dpi_rep_legal?: string | null;
 	}): Promise<{
 		message: string;
 		data: { inversionista_id: number; nombre: string; [key: string]: any }[];
@@ -1871,6 +1872,13 @@ export class CarteraBackClient {
 				tipo_reinversion: input.tipo_reinversion ?? "sin_reinversion",
 				monto_reinversion: input.monto_reinversion ?? null,
 				moneda: input.moneda ?? "quetzales",
+				// A propósito NO usamos `?? null`: cartera distingue "la llave no
+				// viene" (no tocar) de "viene vacía" (borrar). Mandar null siempre
+				// borraría el DPI del representante en cada edición que no lo
+				// incluya — y con él, el acceso de esa persona al portal.
+				...(input.dpi_rep_legal !== undefined
+					? { dpi_rep_legal: input.dpi_rep_legal }
+					: {}),
 			}),
 		});
 		this.cache.invalidate("investor");

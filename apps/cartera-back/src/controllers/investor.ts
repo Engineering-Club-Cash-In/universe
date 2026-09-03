@@ -347,6 +347,29 @@ async function consultarPagosBulkAmbos(
 // FIN DE CONFIGURACIÓN ORIGINALES/ESPEJO
 // ============================================
 
+// `dpi_rep_legal` guarda el DPI de la persona que representa a un inversionista
+// jurídico (en las sociedades el `dpi` propio va vacío y este campo lleva el del
+// humano; es lo que le permite al representante entrar al portal). También se
+// usa para DPIs con cero a la izquierda, que la columna numérica `dpi` no puede
+// conservar — por eso se guarda TAL CUAL, sin normalizar ni recortar ceros.
+// No es único: un mismo representante puede figurar en varias sociedades.
+const DPI_REP_LEGAL_MAX = 20; // varchar(20) en cartera.inversionistas
+
+export const normalizarDpiRepLegal = (valor: unknown): string | null => {
+  if (valor === undefined || valor === null) return null;
+  const limpio = String(valor).trim();
+  return limpio === "" ? null : limpio;
+};
+
+export const validarDpiRepLegal = (valor: unknown): string | null => {
+  const limpio = normalizarDpiRepLegal(valor);
+  if (limpio === null) return null;
+  if (!/^\d+$/.test(limpio) || limpio.length > DPI_REP_LEGAL_MAX) {
+    return `DPI de representante legal inválido (solo dígitos, máximo ${DPI_REP_LEGAL_MAX})`;
+  }
+  return null;
+};
+
 export const insertInvestor = async ({ body, set }: any) => {
   try {
     const inversionistasToUpsert = Array.isArray(body) ? body : [body];
@@ -375,6 +398,12 @@ export const insertInvestor = async ({ body, set }: any) => {
       // 🔥 Validar email si viene
       if (inv.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(inv.email)) {
         errores.push(`Inversionista #${index + 1}: email inválido`);
+      }
+
+      // 🔥 Validar DPI del representante legal si viene
+      const errorDpiRepLegal = validarDpiRepLegal(inv.dpi_rep_legal);
+      if (errorDpiRepLegal) {
+        errores.push(`Inversionista #${index + 1}: ${errorDpiRepLegal}`);
       }
 
       // Si viene banco_id directamente, validar que exista
@@ -579,6 +608,10 @@ export const insertInvestor = async ({ body, set }: any) => {
         if (inv.numero_cuenta?.trim())
           updateData.numero_cuenta = inv.numero_cuenta.trim();
         if (inv.dpi) updateData.dpi = inv.dpi;
+        // Solo se toca si el body trae la llave: mandar "" es borrarlo a
+        // propósito, no mandarla es dejarlo como está.
+        if (typeof inv.dpi_rep_legal !== "undefined")
+          updateData.dpi_rep_legal = normalizarDpiRepLegal(inv.dpi_rep_legal);
         if (inv.moneda?.trim()) updateData.moneda = inv.moneda.trim();
         if (inv.monto_reinversion !== undefined)
           updateData.monto_reinversion = inv.monto_reinversion;
@@ -614,6 +647,7 @@ export const insertInvestor = async ({ body, set }: any) => {
           numero_cuenta: inv.numero_cuenta?.trim() || null,
           moneda: inv.moneda?.trim() || "quetzales",
           monto_reinversion: inv.monto_reinversion || null,
+          dpi_rep_legal: normalizarDpiRepLegal(inv.dpi_rep_legal),
         };
 
         const [inserted] = await db
@@ -1312,6 +1346,7 @@ export async function resumeInvestor(
       tipo_cuenta: inversionistas.tipo_cuenta,
       numero_cuenta: inversionistas.numero_cuenta,
       dpi: inversionistas.dpi,
+      dpi_rep_legal: inversionistas.dpi_rep_legal,
       moneda: inversionistas.moneda,
       email: inversionistas.email,
    tiene_boleta_pendiente: sql<boolean>`
@@ -1853,6 +1888,7 @@ export async function resumeInvestor(
         saldo_reinversion: inv.saldo_reinversion,
         tieneBoletaPendiente: inv.tiene_boleta_pendiente,
         dpi: inv.dpi,
+        dpi_rep_legal: inv.dpi_rep_legal,
         // Con `rawValues` los montos quedaron en quetzales, así que la moneda
         // declarada tiene que acompañarlos: si no, el Excel rotularía con "$"
         // cifras que están en Q. La moneda real del inversionista viaja aparte
@@ -5661,6 +5697,16 @@ export const updateInvestor = async ({ body, set }: any) => {
       };
     }
 
+    // Se valida ANTES de escribir nada: con un arreglo, un DPI de representante
+    // malo en el elemento 3 no debe dejar aplicados los dos primeros.
+    for (const inv of inversionistasToUpdate) {
+      const errorDpiRepLegal = validarDpiRepLegal(inv.dpi_rep_legal);
+      if (errorDpiRepLegal) {
+        set.status = 400;
+        return { message: errorDpiRepLegal };
+      }
+    }
+
     const updatedResults = [];
     for (const inv of inversionistasToUpdate) {
       const {
@@ -5675,6 +5721,7 @@ export const updateInvestor = async ({ body, set }: any) => {
         tipo_cuenta,
         numero_cuenta,
         dpi,
+        dpi_rep_legal,
         moneda,
       } = inv;
 
@@ -5697,6 +5744,8 @@ export const updateInvestor = async ({ body, set }: any) => {
       if (typeof numero_cuenta !== "undefined")
         updateData.numero_cuenta = numero_cuenta;
       if (typeof dpi !== "undefined") updateData.dpi = dpi;
+      if (typeof dpi_rep_legal !== "undefined")
+        updateData.dpi_rep_legal = normalizarDpiRepLegal(dpi_rep_legal);
       if (typeof moneda !== "undefined") updateData.moneda = moneda;
 
       // Si no hay nada que actualizar, saltar

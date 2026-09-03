@@ -244,6 +244,15 @@ export const investorDocumentsRouter = {
 				montoReinversion: z.number().optional(),
 				moneda: z.enum(["quetzales", "dolares"]).optional(),
 				emiteFactura: z.boolean().optional(),
+				// Solo dígitos, hasta 20 (varchar(20) en cartera). Cadena vacía = borrar.
+				// Se valida acá para dar un mensaje legible: cartera responde 400 pero
+				// `editarInversionista` no lo envuelve y oRPC lo mostraría como
+				// "Internal server error".
+				dpiRepLegal: z
+					.string()
+					.regex(/^\d*$/, "El DPI del representante legal solo admite dígitos")
+					.max(20, "El DPI del representante legal admite máximo 20 dígitos")
+					.optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -259,6 +268,9 @@ export const investorDocumentsRouter = {
 				monto_reinversion: input.montoReinversion ?? null,
 				moneda: input.moneda ?? "quetzales",
 				emite_factura: input.emiteFactura ?? false,
+				// Sin `?? null`: si la llave no viene, cartera deja el valor como
+				// está; si viene vacía, lo borra.
+				dpi_rep_legal: input.dpiRepLegal,
 			});
 
 			try {
@@ -343,6 +355,13 @@ export const investorDocumentsRouter = {
 					// modalidad), sin importar si corresponde al monto.
 					modalidadFacturacionSpreadId: z.number().int().positive().optional(),
 					fechaInicioParticipacion: z.string().optional(),
+					// Solo dígitos, hasta 20 (varchar(20) en cartera). Cadena vacía =
+					// borrar. Se valida acá para rechazarlo antes de salir a cartera.
+					dpiRepLegal: z
+						.string()
+						.regex(/^\d*$/, "El DPI del representante legal solo admite dígitos")
+						.max(20, "El DPI del representante legal admite máximo 20 dígitos")
+						.optional(),
 				})
 				.refine(
 					(data) => !data.hacerCompraCartera || !!data.modalidadFacturacion,
@@ -375,6 +394,9 @@ export const investorDocumentsRouter = {
 					monto_reinversion: input.montoReinversion ?? null,
 					moneda: input.moneda ?? "quetzales",
 					emite_factura: input.emiteFactura ?? false,
+					// Sin `?? null`: si la llave no viene, cartera deja el valor como
+					// está; si viene vacía, lo borra.
+					dpi_rep_legal: input.dpiRepLegal,
 				});
 			} catch (error) {
 				throw toCarteraOrpcError(error, "Crear inversionista");

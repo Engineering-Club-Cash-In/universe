@@ -7,6 +7,8 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import {
   // Investor
+  AmbiguousInvestorEmailError,
+  CarteraInvestorError,
   createInvestor,
   findInvestorByEmail,
   getInvestorProfile,
@@ -69,8 +71,20 @@ carteraRoutes.post("/investor", async (c) => {
   let investor: Awaited<ReturnType<typeof findInvestorByEmail>>;
   try {
     investor = await findInvestorByEmail(email);
-  } catch {
-    throw new HTTPException(500, {
+  } catch (error) {
+    // El correo lo comparten varios inversionistas: no hay forma de saber a
+    // cuál quiso escribir el titular, así que no se escribe a ninguno. Es
+    // preferible bloquear la edición hasta que se limpien los datos antes que
+    // cambiarle la cuenta bancaria a la empresa equivocada.
+    if (error instanceof AmbiguousInvestorEmailError) {
+      throw new HTTPException(409, {
+        message:
+          "Tu correo está asociado a más de un inversionista. " +
+          "Contacta a soporte para que lo corrijan antes de editar tus datos.",
+      });
+    }
+
+    throw new HTTPException(502, {
       message: "Error al obtener perfil del inversionista",
     });
   }
@@ -103,7 +117,16 @@ carteraRoutes.post("/investor", async (c) => {
     if (error instanceof HTTPException) {
       throw error;
     }
-    throw new HTTPException(500, {
+
+    // Un rechazo de cartera viaja con su motivo. La escritura ya está acotada
+    // a la fila del titular, así que el mensaje no puede hablar de terceros.
+    if (error instanceof CarteraInvestorError) {
+      const status =
+        error.status === 400 || error.status === 409 ? error.status : 502;
+      throw new HTTPException(status, { message: error.message });
+    }
+
+    throw new HTTPException(502, {
       message: "Error al actualizar inversionista",
     });
   }

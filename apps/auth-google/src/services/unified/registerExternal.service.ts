@@ -4,7 +4,10 @@
  */
 
 import { sendLead } from "../crm/profile.service";
-import { createInvestor } from "../cartera/investor.service";
+import {
+  CarteraInvestorError,
+  createInvestor,
+} from "../cartera/investor.service";
 
 // ============================================
 // TIPOS
@@ -87,6 +90,15 @@ export const registerExternalUser = async (
     }
   } catch (error) {
     console.error(`Error al registrar usuario externo (${userType}):`, error);
+
+    // El motivo exacto de cartera NO sale por aquí. Este servicio lo usa
+    // también `POST /api/unified/register-external`, que no pide sesión:
+    // devolver "ya existe un inversionista con ese DPI" convertiría el registro
+    // en un oráculo para averiguar qué DPIs están dados de alta.
+    if (error instanceof CarteraInvestorError) {
+      throw new Error("No se pudo completar el registro del inversionista");
+    }
+
     throw error;
   }
 };

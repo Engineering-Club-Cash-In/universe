@@ -68,8 +68,76 @@ export interface InvestorDocument {
 }
 
 // ============================================
+// ERRORES
+// ============================================
+
+/**
+ * Rechazo de cartera al escribir un inversionista, con el motivo que dio.
+ *
+ * Se conserva el status y el mensaje para que un rechazo legítimo (un banco
+ * inexistente, un campo mal formado) le llegue a quien lo provocó en vez de
+ * convertirse en un 500 mudo. Quien lo propague hacia un cliente NO autenticado
+ * debe generalizarlo antes: los mensajes de duplicado de cartera dicen si un
+ * DPI o un correo ya existen.
+ */
+export class CarteraInvestorError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "CarteraInvestorError";
+  }
+}
+
+/**
+ * El correo de la sesión corresponde a más de un inversionista.
+ *
+ * `inversionistas.email` no es único y la consulta que lo resuelve no tiene
+ * desempate, así que no hay forma de saber a cuál de ellos quiso escribir el
+ * titular. No se elige uno: la operación se rechaza.
+ */
+export class AmbiguousInvestorEmailError extends Error {
+  constructor(readonly coincidencias: number) {
+    super("El correo está asociado a más de un inversionista");
+    this.name = "AmbiguousInvestorEmailError";
+  }
+}
+
+// ============================================
 // FUNCIONES DE INVERSIONISTAS
 // ============================================
+
+/**
+ * Saca de la respuesta de cartera el motivo del rechazo.
+ *
+ * Cartera contesta `{ message, errores?: string[] }`. Si el cuerpo no trae nada
+ * aprovechable se cae a un mensaje genérico, y en todo caso se acota el largo:
+ * lo que salga de aquí puede terminar en la pantalla de un usuario.
+ */
+const motivoDeCartera = (cuerpo: string): string => {
+  const generico = "Cartera rechazó la operación";
+
+  try {
+    const json = JSON.parse(cuerpo) as {
+      message?: unknown;
+      errores?: unknown;
+    };
+
+    const detalle = Array.isArray(json.errores)
+      ? json.errores.filter((e) => typeof e === "string").join("; ")
+      : "";
+
+    const mensaje =
+      typeof json.message === "string" && json.message.trim()
+        ? json.message.trim()
+        : generico;
+
+    return (detalle ? `${mensaje}: ${detalle}` : mensaje).slice(0, 300);
+  } catch {
+    return generico;
+  }
+};
 
 /**
  * Crear o actualizar un inversionista
@@ -93,8 +161,9 @@ export const createInvestor = async (
     });
 
     if (!response.ok) {
-      console.error("Error response from Cartera API:", await response.text());
-      throw new Error("Error al crear el inversionista");
+      const cuerpo = await response.text();
+      console.error("Error response from Cartera API:", cuerpo);
+      throw new CarteraInvestorError(response.status, motivoDeCartera(cuerpo));
     }
 
     const data = (await response.json()) as CreateInvestorResponse;
@@ -134,9 +203,23 @@ export const findInvestorByEmail = async (
     throw new Error("Error al obtener perfil del inversionista");
   }
 
-  const data = (await response.json()) as InvestorProfile | null;
+  const data = (await response.json()) as
+    | (InvestorProfile & { coincidencias_email?: number })
+    | null;
 
-  return data?.inversionista_id ? data : null;
+  if (!data?.inversionista_id) {
+    return null;
+  }
+
+  // Cartera informa cuántos inversionistas comparten el correo. Si son varios,
+  // el que viene en `data` es el que haya salido primero del plan de ejecución,
+  // no "el del titular": mejor no poder editar que editarle la cuenta bancaria
+  // a la empresa equivocada.
+  if ((data.coincidencias_email ?? 1) > 1) {
+    throw new AmbiguousInvestorEmailError(data.coincidencias_email!);
+  }
+
+  return data;
 };
 
 /**

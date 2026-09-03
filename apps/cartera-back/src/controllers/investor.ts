@@ -362,8 +362,13 @@ export const insertInvestor = async ({ body, set }: any) => {
     for (let index = 0; index < inversionistasToUpsert.length; index++) {
       const inv = inversionistasToUpsert[index];
 
-      // 🔥 Debe venir DPI o nombre (al menos uno)
-      if (!inv.dpi && !inv.nombre?.trim()) {
+      // 🔥 Debe venir DPI o nombre (al menos uno).
+      // Salvo que venga `inversionista_id`: ese identifica la fila mejor que
+      // cualquiera de los dos, y es la forma en que el portal manda sus
+      // ediciones (solo campos de cobro, sin datos de identidad). Sin id sí
+      // hacen falta, porque son los únicos criterios con los que se puede
+      // resolver o crear la fila más abajo.
+      if (!inv.inversionista_id && !inv.dpi && !inv.nombre?.trim()) {
         errores.push(
           `Inversionista #${index + 1}: debe proporcionar DPI o nombre`
         );
@@ -733,7 +738,11 @@ export const getInvestors = async ({ query, set }: any) => {
       if (!result.length) {
         return { message: "Inversionista no encontrado con ese email" };
       }
-      const investor = result[0];
+      // El correo NO es único en la tabla: hay inversionistas distintos que lo
+      // comparten. Devolver `result[0]` es elegir uno según el plan de
+      // ejecución, así que se informa cuántos coincidieron para que quien use
+      // esto para escribir pueda negarse en vez de acertar por casualidad.
+      const investor = { ...result[0], coincidencias_email: result.length };
       if (investor.dpi_rep_legal) {
         return { ...investor, dpi: investor.dpi_rep_legal };
       }

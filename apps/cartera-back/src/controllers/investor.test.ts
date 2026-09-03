@@ -292,6 +292,42 @@ describe("insertInvestor", () => {
     expect(lastUpdateData?.numero_cuenta).toBe("1234567890");
     expect(lastUpdateData?.emite_factura).toBeFalse();
   });
+
+  it("acepta una edición dirigida por inversionista_id sin DPI ni nombre", async () => {
+    // Es la forma del payload del portal: el id ya identifica la fila, así que
+    // exigir además DPI o nombre solo servía para rechazar la petición.
+    selectResponses = [[existingInvestor]];
+    const set = { status: 200 };
+
+    const result = await insertInvestor({
+      body: {
+        inversionista_id: existingInvestor.inversionista_id,
+        numero_cuenta: "5520029868",
+      },
+      set,
+    });
+
+    expect(set.status).toBe(201);
+    expect(result.errores).toBeUndefined();
+    expect(updateWasCalled).toBeTrue();
+    expect(lastUpdateData?.numero_cuenta).toBe("5520029868");
+  });
+
+  it("sigue exigiendo DPI o nombre cuando no viene inversionista_id", async () => {
+    const set = { status: 200 };
+
+    const result = await insertInvestor({
+      body: { numero_cuenta: "5520029868" },
+      set,
+    });
+
+    expect(set.status).toBe(400);
+    expect(result.errores).toEqual([
+      "Inversionista #1: debe proporcionar DPI o nombre",
+    ]);
+    expect(updateWasCalled).toBeFalse();
+    expect(insertWasCalled).toBeFalse();
+  });
 });
 
 describe("lockPendingReturnCreditsForLiquidation", () => {

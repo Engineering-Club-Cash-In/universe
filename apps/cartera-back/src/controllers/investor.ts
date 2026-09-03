@@ -4578,7 +4578,9 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
             : inversionistaQ;
 
           console.log(`  📄 Generando Excel${esDolares ? " (USD + GTQ)" : ""}...`);
-          const logoUrl = process.env.LOGO_URL || "";
+          const assetsBaseUrl = process.env.EMAIL_ASSETS_BASE_URL || (import.meta as any).env?.EMAIL_ASSETS_BASE_URL;
+          const logoUrl = assetsBaseUrl ? `${assetsBaseUrl}/isologo-cashin.png` : (process.env.LOGO_URL || "");
+          const redesUrl = assetsBaseUrl ? `${assetsBaseUrl}/redes-cashin.png` : undefined;
           const stamp = Date.now();
           const filename = `liquidacion_${liquidacion.liquidacion_id}_${stamp}.xlsx`;
 
@@ -4590,9 +4592,9 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
             : null;
 
           const [excelResult, excelResultGtq] = await Promise.all([
-            generarYSubirExcelInversionista(inversionista, filename, logoUrl),
+            generarYSubirExcelInversionista(inversionista, filename, logoUrl, false, redesUrl),
             filenameGtq
-              ? generarYSubirExcelInversionista(inversionistaQ as any, filenameGtq, logoUrl)
+              ? generarYSubirExcelInversionista(inversionistaQ as any, filenameGtq, logoUrl, false, redesUrl)
               : Promise.resolve(null),
           ]);
 

@@ -648,14 +648,14 @@ export async function buildCancelationWorkbook(
 
 export async function buildInversionistaWorkbook(
   inv: InversionistaReporte,
-  opts?: { logoUrl?: string; showCreditId?: boolean }
+  opts?: { logoUrl?: string; redesUrl?: string; showCreditId?: boolean }
 ): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   wb.creator = "Club Cashin.com";
   wb.created = new Date();
 
   const ws = wb.addWorksheet("Reporte", {
-    properties: { defaultRowHeight: 18 },
+    properties: { defaultRowHeight: 15 },
   });
   const showId = opts?.showCreditId ?? false;
   const offset = showId ? 1 : 0;
@@ -672,23 +672,25 @@ export async function buildInversionistaWorkbook(
   }
 
   // anchos de columna (15 o 16 cols)
-  const baseWidths = [10, 22, 14, 12, 16, 20, 16, 12, 12, 14, 20, 16, 22, 10, 14];
+  const baseWidths = [13.43, 25.29, 14, 12, 19.29, 20, 16, 12, 12, 14, 20, 16, 22, 10, 14];
   if (showId) baseWidths.unshift(dynamicCodigoWidth);
 
   baseWidths.forEach((w, i) => (ws.getColumn(i + 1).width = w));
 
   const CINV = {
-    navy:  "FF0F1B4C",
-    blue:  "FF0485C2",
-    text:  "FF0F172A",
-    slate: "FF334155",
-    white: "FFFFFFFF",
-    line:  "FFE0E7EF",
-    zebra: "FFF9FBFF",
-    total: "FFF0F9FF",
-    gray:  "FF8C98B5",
+    purple:      "FF4E57EA",
+    purpleLight: "FFF0F0FF",
+    navy:        "FF0F1B4C",
+    blue:        "FF0485C2",
+    text:        "FF0F172A",
+    slate:       "FF334155",
+    white:       "FFFFFFFF",
+    line:        "FFE0E7EF",
+    zebra:       "FFF9FBFF",
+    total:       "FFF0F9FF",
+    gray:        "FF8C98B5",
     // Resalte para filas con interés "partido" (cálculo dividido por compras)
-    partido: "FFFEF3C7",
+    partido:     "FFFEF3C7",
   };
 
   const esDolares = inv.moneda === "dolares";
@@ -703,27 +705,51 @@ export async function buildInversionistaWorkbook(
   // abono_iva = 12% bruto, isr = 7% bruto; el subtotal ya viene neteado.
   const aplicaDescImp = inv.descuenta_impuestos === true;
 
-  // ── fila 1-2: logo + título
-  ws.getRow(1).height = 45;
-  ws.getRow(2).height = 35;
+  // Assets por defecto desde EMAIL_ASSETS_BASE_URL (o fallback a LOGO_URL)
+  const assetsBaseUrl = process.env.EMAIL_ASSETS_BASE_URL || (import.meta as any).env?.EMAIL_ASSETS_BASE_URL;
+  const logoUrl = opts?.logoUrl || (assetsBaseUrl ? `${assetsBaseUrl}/isologo-cashin.png` : (process.env.LOGO_URL || (import.meta as any).env?.LOGO_URL || ""));
+  const redesUrl = opts?.redesUrl || (assetsBaseUrl ? `${assetsBaseUrl}/redes-cashin.png` : undefined);
 
-  const logo = await fetchImageBase64(opts?.logoUrl);
+  // ── filas 1-2: cabecera blanca con logo, títulos y pill de redes
+  ws.getRow(1).height = 45;
+  ws.getRow(2).height = 34.5;
+  ws.getRow(3).height = 25.5;
+  ws.getRow(4).height = 22.5;
+  ws.getRow(5).height = 22.5;
+  ws.mergeCells("A1:D2");
+  ws.mergeCells(showId ? "L1:P2" : "L1:O2");
+
+  const logo = await fetchImageBase64(logoUrl);
   if (logo) {
     const imgId = wb.addImage({ base64: logo.data, extension: logo.ext });
-    ws.addImage(imgId, "A1:C2");
+    ws.addImage(imgId, {
+      tl: { nativeCol: 1, nativeColOff: 95250, nativeRow: 0, nativeRowOff: 161925 } as any,
+      ext: { width: 243, height: 66 },
+    });
   }
 
-  ws.mergeCells(1, 4 + offset, 1, 15 + offset);
-  ws.getCell(1, 4 + offset).value = "REPORTE DE INVERSIONES";
-  ws.getCell(1, 4 + offset).font = { bold: true, size: 14, color: { argb: CINV.navy } };
-  ws.getCell(1, 4 + offset).alignment = { vertical: "middle" };
+  ws.mergeCells("E1:K1");
+  const titleCell = ws.getCell("E1");
+  titleCell.value = "REPORTE DE INVERSIONES";
+  titleCell.font = { bold: true, size: 18, color: { argb: CINV.navy } };
+  titleCell.alignment = { horizontal: "center", vertical: "bottom" };
 
-  ws.mergeCells(2, 4 + offset, 2, 15 + offset);
-  ws.getCell(2, 4 + offset).value = inv.nombre_inversionista;
-  ws.getCell(2, 4 + offset).font = { bold: true, size: 12, color: { argb: CINV.blue } };
-  ws.getCell(2, 4 + offset).alignment = { vertical: "middle" };
+  ws.mergeCells("E2:K2");
+  const nameCell = ws.getCell("E2");
+  nameCell.value = inv.nombre_inversionista;
+  nameCell.font = { bold: true, size: 12, color: { argb: CINV.purple } };
+  nameCell.alignment = { horizontal: "center", vertical: "middle" };
 
-  // ── fila 3: totales resumen (4 bloques)
+  const redes = await fetchImageBase64(redesUrl);
+  if (redes) {
+    const redesImgId = wb.addImage({ base64: redes.data, extension: redes.ext });
+    ws.addImage(redesImgId, {
+      tl: { nativeCol: 12, nativeColOff: 361950, nativeRow: 0, nativeRowOff: 285750 } as any,
+      ext: { width: 281, height: 50 },
+    });
+  }
+
+  // ── filas 3-4: resumen, igual a plantilla CashIn
   const sub = inv.subtotal;
   const capitalActivo = inv.creditos.reduce((s, c) => s + toN(c.monto_aportado), 0);
   const resumen: [string, number][] = [
@@ -732,39 +758,50 @@ export async function buildInversionistaWorkbook(
     ["Interés recibido",     toN(sub.total_abono_general_interes)],
     ["Gran total a recibir", toN(sub.total_cuota_con_reinversion)],
   ];
-  const resumenCols = [1, 4 + offset, 8 + offset, 12 + offset];
+  const resumenRanges = showId
+    ? [[1, 4], [5, 8], [9, 12], [13, 16]]
+    : [[1, 3], [4, 7], [8, 11], [12, 15]];
 
   // Filas 5-6 extra "Neto de impuestos": SOLO para inversionistas con el flag.
   // Cuando aplica, las tablas de datos arrancan en la fila 7 (ver `let row`).
   if (aplicaDescImp) {
     const netoLabel = ws.getCell(5, 1);
-    netoLabel.value = "Neto de impuestos";
-    netoLabel.font = { bold: true, color: { argb: CINV.slate }, size: 9 };
-    netoLabel.alignment = { horizontal: "center" };
+    netoLabel.value = "NETO DE IMPUESTOS";
+    netoLabel.font = { bold: true, color: { argb: CINV.white }, size: 9 };
+    netoLabel.fill = { type: "pattern", pattern: "solid", fgColor: { argb: CINV.purple } };
+    netoLabel.alignment = { horizontal: "center", vertical: "middle" };
     ws.mergeCells(5, 1, 5, 3);
 
     const netoVal = ws.getCell(6, 1);
     netoVal.value = toN(sub.total_neto_impuestos);
     netoVal.numFmt = numFmt;
     netoVal.font = { bold: true, size: 12, color: { argb: CINV.navy } };
-    netoVal.alignment = { horizontal: "center" };
+    netoVal.alignment = { horizontal: "center", vertical: "middle" };
     ws.mergeCells(6, 1, 6, 3);
   }
 
   for (let i = 0; i < resumen.length; i++) {
-    const col = resumenCols[i];
-    const labelCell = ws.getCell(3, col);
-    labelCell.value = resumen[i][0];
-    labelCell.font = { bold: true, color: { argb: CINV.slate }, size: 9 };
-    labelCell.alignment = { horizontal: "center" };
-    ws.mergeCells(3, col, 3, col + 2);
+    const [colStart, colEnd] = resumenRanges[i];
 
-    const valCell = ws.getCell(4, col);
+    const labelCell = ws.getCell(3, colStart);
+    labelCell.value = resumen[i][0].toUpperCase();
+    labelCell.font = { bold: true, color: { argb: CINV.white }, size: 12 };
+    labelCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: CINV.purple } };
+    labelCell.alignment = { horizontal: "center", vertical: "middle" };
+    ws.mergeCells(3, colStart, 3, colEnd);
+
+    const valCell = ws.getCell(4, colStart);
     valCell.value = resumen[i][1];
     valCell.numFmt = numFmt;
-    valCell.font = { bold: true, size: 12, color: { argb: CINV.navy } };
-    valCell.alignment = { horizontal: "center" };
-    ws.mergeCells(4, col, 4, col + 2);
+    valCell.font = { size: 12, color: { argb: CINV.navy } };
+    valCell.alignment = { horizontal: "center", vertical: "middle" };
+    ws.mergeCells(4, colStart, 4, colEnd);
+
+    valCell.border = {
+      top: { style: "thin", color: { argb: CINV.white } },
+      left: { style: "thin", color: { argb: CINV.white } },
+      right: { style: "thin", color: { argb: CINV.white } },
+    };
   }
 
   // ── tablas de datos
@@ -888,7 +925,7 @@ export async function buildInversionistaWorkbook(
       const titleRow = ws.getRow(row);
       titleRow.getCell(2).value = labelMapR[grupo ?? ""] ?? "Sin tipo definido";
       titleRow.getCell(2).font = { bold: true, size: 11, color: { argb: CINV.white } };
-      titleRow.getCell(2).fill = { type: "pattern", pattern: "solid", fgColor: { argb: CINV.blue } };
+      titleRow.getCell(2).fill = { type: "pattern", pattern: "solid", fgColor: { argb: CINV.purple } };
 
       // Descripción de la modalidad al lado del título (con el monto en
       // excedente/variable, para saber cuánto está definido que recibe/reinvierte).
@@ -914,22 +951,29 @@ export async function buildInversionistaWorkbook(
 
     const head = ws.getRow(headRowIdx);
     head.values = [
-      ...(showId ? ["Codigo"] : []),
-      "Meses en crédito", "Nombre", "Capital",
-      "% Interés", "% Inversionista", "Tasa interés inversor",
-      "Interés Inversor", "IVA", "ISR",
-      "Abono capital", "% Inv. Interés Neto", "Capital restante",
-      "Cuota de mes", "Plazo", "NIT",
+      ...(showId ? ["CÓDIGO"] : []),
+      "MESES EN CRÉDITO", "NOMBRE", "CAPITAL",
+      "% INTERÉS", "% INVERSIONISTA", "TASA INTERÉS INVERSOR",
+      "INTERÉS INVERSOR", "IVA", "ISR",
+      "ABONO CAPITAL", "%INV. INTERÉS NETO", "CAPITAL RESTANTE",
+      "CUOTA DE MES", "PLAZO", "NIT",
     ];
 
     for (let i = 1; i <= totalCols; i++) {
       const c = head.getCell(i);
-      c.font = { bold: true, color: { argb: CINV.white } };
-      c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: esCombinada ? CINV.navy : CINV.blue } };
-      c.alignment = { horizontal: i === (13 + offset) || i === (15 + offset) ? "right" : "center", wrapText: true };
-      c.border = { bottom: { style: "thin", color: { argb: CINV.line } } };
+      c.font = { bold: true, color: { argb: CINV.text } };
+      c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF3F3F3" } };
+      c.alignment = {
+        horizontal: i === (13 + offset) || i === (15 + offset) ? "right" : "center",
+        vertical: "middle",
+        wrapText: true,
+      };
+      c.border = {
+        top: { style: "medium", color: { argb: CINV.purple } },
+        bottom: { style: "thin", color: { argb: CINV.line } },
+      };
     }
-    head.height = 28;
+    head.height = 42.75;
 
     let rowIdx = 0;
     const firstDataRow = row + 1;
@@ -1042,6 +1086,7 @@ export async function buildInversionistaWorkbook(
           }
         }
         rr.eachCell(cell => {
+          cell.alignment = { ...cell.alignment, vertical: "middle" };
           cell.border = { bottom: { style: "thin", color: { argb: CINV.line } } };
         });
       }
@@ -1097,9 +1142,9 @@ export async function buildInversionistaWorkbook(
     for (let c = 1; c <= totalCols; c++) {
       const cell = totalRow.getCell(c);
       cell.font = { bold: true, color: { argb: CINV.navy } };
-      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: CINV.total } };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF3F3F3" } };
       cell.border = {
-        top:    { style: "medium", color: { argb: CINV.blue } },
+        top:    { style: "medium", color: { argb: CINV.purple } },
         bottom: { style: "thin",   color: { argb: CINV.line } },
       };
     }
@@ -1135,10 +1180,10 @@ export async function buildInversionistaWorkbook(
     for (let c = 1; c <= totalCols; c++) {
       const cell = granTotalRow.getCell(c);
       cell.font = { bold: true, color: { argb: CINV.white } };
-      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: CINV.navy } };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: CINV.purple } };
       cell.border = {
-        top:    { style: "double", color: { argb: CINV.blue } },
-        bottom: { style: "medium", color: { argb: CINV.navy } },
+        top:    { style: "double", color: { argb: CINV.purple } },
+        bottom: { style: "medium", color: { argb: CINV.purple } },
       };
     }
   }
@@ -1247,14 +1292,15 @@ export async function buildInversionistaWorkbook(
 
   let col = 1;
   for (const [label, val] of reinv) {
-    ws.getCell(row, col).value = label;
+    ws.getCell(row, col).value = label.toUpperCase();
     ws.getCell(row, col).font = { bold: true, color: { argb: CINV.text }, size: 9 };
+    ws.getCell(row, col).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF3F3F3" } };
     ws.mergeCells(row, col, row, col + 2);
     col += 3;
 
     ws.getCell(row + 1, col - 3).value = val;
     ws.getCell(row + 1, col - 3).numFmt = numFmt;
-    ws.getCell(row + 1, col - 3).font = { bold: true, size: 11, color: { argb: CINV.blue } };
+    ws.getCell(row + 1, col - 3).font = { bold: true, size: 11, color: { argb: CINV.purple } };
     ws.mergeCells(row + 1, col - 3, row + 1, col - 1);
   }
 
@@ -1263,6 +1309,13 @@ export async function buildInversionistaWorkbook(
   ws.mergeCells(row, 1, row, totalCols);
   ws.getCell(row, 1).value = `Generado por Club Cashin.com · ${new Date().toLocaleDateString("es-GT")}`;
   ws.getCell(row, 1).font = { color: { argb: CINV.gray }, size: 9 };
+  ws.getCell(row, 1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF3F3F3" } };
+
+  ws.eachRow({ includeEmpty: true }, (reportRow) => {
+    reportRow.eachCell({ includeEmpty: true }, (cell) => {
+      cell.font = { ...cell.font, name: "Inter", size: cell.font?.size ?? 11 };
+    });
+  });
 
   ws.views = [{ state: "frozen", ySplit: firstHeaderRow }];
 
@@ -1274,9 +1327,10 @@ export async function generarYSubirExcelInversionista(
   inversionista: InversionistaReporte,
   filename: string,
   logoUrl: string = "",
-  showCreditId: boolean = false
+  showCreditId: boolean = false,
+  redesUrl?: string
 ): Promise<{ url: string; excelBuffer: Buffer }> {
-  const excelBuffer = await buildInversionistaWorkbook(inversionista, { logoUrl, showCreditId });
+  const excelBuffer = await buildInversionistaWorkbook(inversionista, { logoUrl, redesUrl, showCreditId });
 
   const s3 = new S3Client({
     endpoint: process.env.BUCKET_REPORTS_URL,

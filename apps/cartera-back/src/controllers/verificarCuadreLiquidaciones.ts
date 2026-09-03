@@ -270,6 +270,10 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
       --   • un pago posterior baja el saldo y vuelve por pendiente_por_credito.
       select cr.liquidacion_id, cr.inversionista_id, cr.credito_id,
              (hl.credito_id is not null) as liquido,
+             -- Referencia contra la que se mide el crecimiento del crédito: la
+             -- foto del histórico si liquidó, y 0 si no (ahí monto ya es el
+             -- cambio neto desde la liquidación).
+             coalesce(hl.monto_aportado, 0) as referencia,
              case
                when hl.credito_id is not null
                  then coalesce(esp.monto_aportado, 0) + coalesce(pc.monto, 0)
@@ -375,51 +379,61 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
         and en.credito_id       = cc.credito_id
         and en.inversionista_id = cc.inversionista_id
     ),
-    crecimiento_no_liquidado as (
-      -- Cambio neto del grupo (b) SIN la reinversión que sigue ahí: lo que de
-      -- verdad creció, en conjunto, la parte de la cartera que no liquidó y que
-      -- no se explica por la reinversión.
+    crecimiento_cartera as (
+      -- Cuánto creció la cartera del inversionista desde la liquidación, SIN
+      -- contar la reinversión que sigue ahí. Es el techo de lo que las compras
+      -- pueden explicar, y por lo tanto de lo que el ajuste puede restar.
+      --
+      -- Se toma la cartera COMPLETA, no solo la parte que no liquidó: una
+      -- compra pendiente puede expirar sobre un crédito sin pago (−X en ese
+      -- grupo) y rehacerse sobre uno que sí liquidó (+X en el otro). El total
+      -- no se movió, pero un tope calculado por grupo no ve las dos puntas y
+      -- deja restar la recompra.
+      --
+      -- El crecimiento se mide contra la referencia de cada crédito: la foto
+      -- del histórico si liquidó, 0 si entró por cambio neto.
       --
       -- Se descuenta la reinversión que SOBREVIVE en cada crédito —lo entrado
       -- por reinversión, topado por el crecimiento real de ese crédito— y no
       -- el total registrado. Si se descontara el total, una reinversión
       -- colocada y luego perdida (crecimiento 0, registro Q100) bajaría el
-      -- tope y taparía justo esa pérdida. Y si no se descontara nada, una
-      -- reinversión intacta de Q1,000 en otro crédito subiría el tope y
-      -- dejaría restar la recompra de una compra expirada que neteó cero.
+      -- tope y taparía justo esa pérdida.
       select ec.liquidacion_id,
-             sum(ec.monto)
-             - sum(least(coalesce(en.monto, 0), greatest(0, ec.monto))) as neto
+             sum(ec.monto - ec.referencia)
+             - sum(least(
+                 coalesce(en.monto, 0),
+                 greatest(0, ec.monto - ec.referencia)
+               )) as neto
       from espejo_credito ec
       left join entradas_por_credito en
         on  en.liquidacion_id   = ec.liquidacion_id
         and en.credito_id       = ec.credito_id
         and en.inversionista_id = ec.inversionista_id
-      where not ec.liquido
       group by 1
     ),
     compras as (
-      -- Las compras sobre créditos que SÍ liquidaron se restan por lo que
-      -- creció cada uno frente a su foto: es crecimiento real y medible.
+      -- Lo que ya se ajustó por crédito, topado además por el crecimiento de
+      -- la cartera completa.
       --
-      -- Las compras sobre créditos que NO liquidaron solo pueden restar hasta
-      -- el crecimiento neto del grupo completo. Una compra pendiente que
-      -- expira devuelve su monto a CUBE (−X en un crédito) y al rehacerse
-      -- vuelve a entrar (+X en otro, con una fila de compra nueva): en
-      -- conjunto no creció nada, así que no hay nada que ajustar. Restar la
-      -- compra de la recompra inventaría un faltante de X con la cartera
-      -- intacta. El tope no puede tapar una pérdida real: si el grupo creció
-      -- Q200 por una compra y una reinversión de Q100 se perdió, el tope es
-      -- Q200, se resta la compra entera y el faltante de Q100 sigue a la vista.
+      -- El tope global es lo que evita inventar faltantes cuando el capital
+      -- solo se movió de lugar. Una compra pendiente que expira devuelve su
+      -- monto a CUBE (−X) y al rehacerse vuelve a entrar (+X, con una fila de
+      -- compra nueva): en conjunto no creció nada, así que no hay nada que
+      -- ajustar, y da igual si las dos puntas cayeron en créditos que
+      -- liquidaron o no.
+      --
+      -- El tope no puede tapar una pérdida real: si la cartera creció Q200 por
+      -- una compra y una reinversión de Q100 se perdió, la reinversión
+      -- sobreviviente es 0, el tope es Q200, se resta la compra entera y el
+      -- faltante de Q100 sigue a la vista.
       select cp.inversionista_id,
-             coalesce(sum(cp.monto) filter (where cp.liquido), 0)
-             + least(
-                 coalesce(sum(cp.monto) filter (where not cp.liquido), 0),
-                 greatest(0, coalesce(max(cnl.neto), 0))
-               ) as monto,
+             least(
+               coalesce(sum(cp.monto), 0),
+               greatest(0, coalesce(max(cc.neto), 0))
+             ) as monto,
              jsonb_agg(cp.detalle) as detalle
       from compras_por_credito_ajustada cp
-      left join crecimiento_no_liquidado cnl on cnl.liquidacion_id = cp.liquidacion_id
+      left join crecimiento_cartera cc on cc.liquidacion_id = cp.liquidacion_id
       group by 1
     )
     select

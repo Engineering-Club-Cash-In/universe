@@ -113,8 +113,14 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
   const resultado = await db.execute(sql`
     with todas as (
       select l.liquidacion_id, l.inversionista_id, l.fecha_liquidacion, l.reinversion_total,
+             -- Desempate por id: /liquidate-inversionista-pagos acepta una
+             -- fecha_liquidacion explícita, así que dos liquidaciones del mismo
+             -- inversionista pueden llevar el mismo instante. Sin el id, cuál
+             -- queda como "última" lo decide Postgres y el espejo vivo se
+             -- compararía contra la foto equivocada.
              row_number() over (
-               partition by l.inversionista_id order by l.fecha_liquidacion desc
+               partition by l.inversionista_id
+               order by l.fecha_liquidacion desc, l.liquidacion_id desc
              ) as orden
       from cartera.liquidaciones l
       -- El período se clasifica en hora Guatemala, igual que periodoActualGuatemala.
@@ -370,11 +376,26 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
         and en.inversionista_id = cc.inversionista_id
     ),
     crecimiento_no_liquidado as (
-      -- Cambio neto del grupo (b) completo: lo que de verdad creció, en
-      -- conjunto, la parte de la cartera que no liquidó.
-      select liquidacion_id, sum(monto) as neto
-      from espejo_credito
-      where not liquido
+      -- Cambio neto del grupo (b) SIN la reinversión que sigue ahí: lo que de
+      -- verdad creció, en conjunto, la parte de la cartera que no liquidó y que
+      -- no se explica por la reinversión.
+      --
+      -- Se descuenta la reinversión que SOBREVIVE en cada crédito —lo entrado
+      -- por reinversión, topado por el crecimiento real de ese crédito— y no
+      -- el total registrado. Si se descontara el total, una reinversión
+      -- colocada y luego perdida (crecimiento 0, registro Q100) bajaría el
+      -- tope y taparía justo esa pérdida. Y si no se descontara nada, una
+      -- reinversión intacta de Q1,000 en otro crédito subiría el tope y
+      -- dejaría restar la recompra de una compra expirada que neteó cero.
+      select ec.liquidacion_id,
+             sum(ec.monto)
+             - sum(least(coalesce(en.monto, 0), greatest(0, ec.monto))) as neto
+      from espejo_credito ec
+      left join entradas_por_credito en
+        on  en.liquidacion_id   = ec.liquidacion_id
+        and en.credito_id       = ec.credito_id
+        and en.inversionista_id = ec.inversionista_id
+      where not ec.liquido
       group by 1
     ),
     compras as (
@@ -464,17 +485,22 @@ export async function leerReinversionesAnterioresSinColocar(periodo: string) {
     ),
     todas as (
       select l.liquidacion_id, l.inversionista_id, l.fecha_liquidacion, l.reinversion_total,
+             -- Mismo desempate por id que en la consulta principal: dos
+             -- liquidaciones pueden compartir fecha_liquidacion explícita.
              row_number() over (
-               partition by l.inversionista_id order by l.fecha_liquidacion desc
+               partition by l.inversionista_id
+               order by l.fecha_liquidacion desc, l.liquidacion_id desc
              ) as orden,
              lead(l.fecha_liquidacion) over (
-               partition by l.inversionista_id order by l.fecha_liquidacion
+               partition by l.inversionista_id
+               order by l.fecha_liquidacion, l.liquidacion_id
              ) as siguiente,
              -- Cota inferior: la liquidación previa. Con liquidaciones en días
              -- consecutivos, el margen de un día haría que la reinversión de la
              -- anterior contara como si fuera de esta.
              lag(l.fecha_liquidacion) over (
-               partition by l.inversionista_id order by l.fecha_liquidacion
+               partition by l.inversionista_id
+               order by l.fecha_liquidacion, l.liquidacion_id
              ) as previa
       from cartera.liquidaciones l
       -- El período se clasifica en hora Guatemala, igual que periodoActualGuatemala.

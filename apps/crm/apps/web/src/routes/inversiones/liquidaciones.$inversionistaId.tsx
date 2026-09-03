@@ -830,6 +830,22 @@ function InvestorLiquidacionesPage() {
 	const [editEmiteFactura, setEditEmiteFactura] = useState(false);
 	const [editTipoReinversion, setEditTipoReinversion] = useState("sin_reinversion");
 	const [editMontoReinversion, setEditMontoReinversion] = useState("");
+	// Campo que cartera rechazó (dpi | email | nombre duplicado, o
+	// dpi_rep_legal inexistente): lo manda el backend en err.data.campo para
+	// marcar el input exacto, igual que en el modal de crear.
+	const [campoConError, setCampoConError] = useState<{
+		campo: string;
+		mensaje: string;
+	} | null>(null);
+	const errorEn = (campo: string) => campoConError?.campo === campo;
+	// Al corregir el dato que falló, la marca deja de aplicar.
+	const limpiarError = (campo: string) => {
+		if (errorEn(campo)) setCampoConError(null);
+	};
+	const MensajeCampo = ({ campo }: { campo: string }) =>
+		errorEn(campo) ? (
+			<p className="text-destructive text-xs">{campoConError?.mensaje}</p>
+		) : null;
 
 	const bancosQuery = useQuery({
 		...orpc.getBancosCartera.queryOptions({ input: undefined as never }),
@@ -849,6 +865,7 @@ function InvestorLiquidacionesPage() {
 		setEditEmiteFactura(inv.emiteFactura ?? inv.emite_factura ?? false);
 		setEditTipoReinversion(inv.tipoReinversion ?? inv.tipo_reinversion ?? "sin_reinversion");
 		setEditMontoReinversion(inv.monto_reinversion ? String(inv.monto_reinversion) : "");
+		setCampoConError(null);
 		setEditOpen(true);
 	};
 
@@ -871,7 +888,17 @@ function InvestorLiquidacionesPage() {
 			});
 		},
 		onError: (err: any) => {
-			toast.error(err?.message ?? "Error al actualizar inversionista");
+			const texto = err?.message ?? "Error al actualizar inversionista";
+			// El id del input va en kebab-case y el campo del backend en
+			// snake_case (dpi_rep_legal → edit-dpi-rep-legal).
+			const campo: string | undefined = err?.data?.campo;
+			if (campo) {
+				setCampoConError({ campo, mensaje: texto });
+				document.getElementById(`edit-${campo.replace(/_/g, "-")}`)?.focus();
+			} else {
+				setCampoConError(null);
+			}
+			toast.error(texto);
 		},
 	});
 
@@ -1441,8 +1468,16 @@ function InvestorLiquidacionesPage() {
 							<Input
 								id="edit-nombre"
 								value={editNombre}
-								onChange={(e) => setEditNombre(e.target.value)}
+								onChange={(e) => {
+									setEditNombre(e.target.value);
+									limpiarError("nombre");
+								}}
+								aria-invalid={errorEn("nombre")}
+								className={
+									errorEn("nombre") ? "border-destructive" : undefined
+								}
 							/>
+							<MensajeCampo campo="nombre" />
 						</div>
 
 						<div className="grid grid-cols-2 gap-3">
@@ -1451,8 +1486,16 @@ function InvestorLiquidacionesPage() {
 								<Input
 									id="edit-dpi"
 									value={editDpi}
-									onChange={(e) => setEditDpi(e.target.value)}
+									onChange={(e) => {
+										setEditDpi(e.target.value);
+										limpiarError("dpi");
+									}}
+									aria-invalid={errorEn("dpi")}
+									className={
+										errorEn("dpi") ? "border-destructive" : undefined
+									}
 								/>
+								<MensajeCampo campo="dpi" />
 							</div>
 							<div className="space-y-1.5">
 								<Label htmlFor="edit-email">Email</Label>
@@ -1460,8 +1503,16 @@ function InvestorLiquidacionesPage() {
 									id="edit-email"
 									type="email"
 									value={editEmail}
-									onChange={(e) => setEditEmail(e.target.value)}
+									onChange={(e) => {
+										setEditEmail(e.target.value);
+										limpiarError("email");
+									}}
+									aria-invalid={errorEn("email")}
+									className={
+										errorEn("email") ? "border-destructive" : undefined
+									}
 								/>
+								<MensajeCampo campo="email" />
 							</div>
 						</div>
 
@@ -1519,13 +1570,19 @@ function InvestorLiquidacionesPage() {
 							<Input
 								id="edit-dpi-rep-legal"
 								value={editDpiRepLegal}
-								onChange={(e) =>
-									setEditDpiRepLegal(e.target.value.replace(/\D/g, ""))
-								}
+								onChange={(e) => {
+									setEditDpiRepLegal(e.target.value.replace(/\D/g, ""));
+									limpiarError("dpi_rep_legal");
+								}}
 								placeholder="DPI de quien representa a la empresa"
 								maxLength={20}
 								inputMode="numeric"
+								aria-invalid={errorEn("dpi_rep_legal")}
+								className={
+									errorEn("dpi_rep_legal") ? "border-destructive" : undefined
+								}
 							/>
+							<MensajeCampo campo="dpi_rep_legal" />
 						</div>
 
 						<div className="grid grid-cols-2 gap-3">

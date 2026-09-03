@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useForm } from "react-hook-form";
+import { AxiosError } from "axios";
 import { useInvestor } from "../hooks/investor";
 import { useBancos } from "../hooks/bancos";
 import { useQueryClient } from "@tanstack/react-query";
@@ -25,7 +26,16 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
     initialData?.tipo_reinversion ?? "sin_reinversion"
   );
 
-  const { register, handleSubmit, reset, watch, setValue } = useForm<InvestorPayload>({
+  const {
+    register,
+    handleSubmit,
+    reset,
+    watch,
+    setValue,
+    setError,
+    clearErrors,
+    formState: { errors },
+  } = useForm<InvestorPayload>({
     defaultValues: {
       nombre: "",
       dpi: undefined,
@@ -119,6 +129,22 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
         onClose();
       },
       onError: (error: Error) => {
+        // Cuando el DPI del representante no existe como inversionista, cartera
+        // manda el código de máquina `rep_legal_inexistente`. Ese fallo es de un
+        // campo concreto, así que se muestra en el input y no en un toast suelto
+        // donde el usuario tendría que adivinar cuál dato corregir.
+        const payload =
+          error instanceof AxiosError
+            ? (error.response?.data as
+                | { error?: string; message?: string; errores?: string[] }
+                | undefined)
+            : undefined;
+        const detalle: string | undefined =
+          payload?.errores?.[0] ?? payload?.message;
+        if (payload?.error === "rep_legal_inexistente" && detalle) {
+          setError("dpi_rep_legal", { type: "server", message: detalle });
+          return;
+        }
         toast.error(
           mode === "create"
             ? `Error al crear el inversionista. ${error.message || ""}`
@@ -237,14 +263,26 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
                   onChange: (e) => {
                     const soloDigitos = e.target.value.replace(/\D/g, "").slice(0, 20);
                     setValue("dpi_rep_legal", soloDigitos);
+                    // Al corregir el DPI, el rechazo del backend deja de aplicar.
+                    clearErrors("dpi_rep_legal");
                   },
                 })}
                 type="text"
                 inputMode="numeric"
                 maxLength={20}
-                className="bg-white text-blue-900 placeholder-gray-400 border border-gray-300 rounded-lg px-4 py-2 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                aria-invalid={!!errors.dpi_rep_legal}
+                className={`bg-white text-blue-900 placeholder-gray-400 border rounded-lg px-4 py-2 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition ${
+                  errors.dpi_rep_legal
+                    ? "border-red-400 bg-red-50"
+                    : "border-gray-300"
+                }`}
                 placeholder="DPI de quien representa a la empresa"
               />
+              {errors.dpi_rep_legal && (
+                <p className="text-red-500 text-sm mt-1">
+                  {errors.dpi_rep_legal.message}
+                </p>
+              )}
             </div>
 
             {/* Tipo de Reinversión */}

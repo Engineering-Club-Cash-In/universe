@@ -73,9 +73,17 @@ export const validationsRouter = {
 						? marcarValidacionBuroManual
 						: marcarValidacionRenapManual;
 
+				// Bajo suplantación, `context.userId` es el analista suplantado, no
+				// el admin que la inició (Better Auth deja a este último en la
+				// sesión, no en el usuario) — mismo criterio que ya usa
+				// `auditMiddleware` para no atribuirle el override a la persona
+				// equivocada en un rastro de auditoría sensible.
+				const actorId =
+					context.session?.session?.impersonatedBy ?? context.userId;
+
 				return await marcar({
 					opportunityId: input.opportunityId,
-					userId: context.userId,
+					userId: actorId,
 					motivo: input.motivo,
 				});
 			} catch (error) {

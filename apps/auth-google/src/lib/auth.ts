@@ -60,16 +60,21 @@ export const auth = betterAuth({
   },
   user: {
     additionalFields: {
+      // `input: false` en ambos: ni el rol ni el DPI se aceptan desde el
+      // cliente. El rol define privilegios, así que solo lo escribe el
+      // servidor tras validar el registro (ver POST /api/unified/
+      // register-external-auth). El DPI se fija con POST /api/profile/me/dpi,
+      // que lo aplica siempre sobre la cuenta de la sesión.
       role: {
         type: "string",
         required: false,
         defaultValue: "CLIENT",
-        input: true, // Permitir que se envíe desde el cliente
+        input: false,
       },
       dpi: {
         type: "string",
         required: false,
-        input: true, // Permitir que se envíe desde el cliente
+        input: false,
       },
     },
   },

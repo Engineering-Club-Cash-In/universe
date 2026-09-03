@@ -128,3 +128,27 @@ export const getNumbersSifco = async (
     throw customError;
   }
 };
+
+/**
+ * Fija el DPI de la cuenta autenticada.
+ *
+ * El DPI dejó de aceptarse como campo del cliente en Better Auth; el servidor
+ * lo escribe sobre la cuenta de la sesión.
+ */
+export const updateOwnDpi = async (dpi: string): Promise<string> => {
+  try {
+    const response = await apiAuth.post<{
+      success: boolean;
+      data: { dpi: string };
+    }>("/api/profile/me/dpi", { dpi });
+
+    return response.data.data.dpi;
+  } catch (error) {
+    const axiosError = error as AxiosError<{ error?: string; message?: string }>;
+    throw new Error(
+      axiosError.response?.data?.message ||
+        axiosError.response?.data?.error ||
+        "Error al actualizar el DPI"
+    );
+  }
+};

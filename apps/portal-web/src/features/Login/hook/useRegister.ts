@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { RegisterCredentials } from "@/lib/auth";
 import { authClient } from "@/lib/auth";
 import { useNavigate } from "@tanstack/react-router";
-import { registerExternalUser } from "@/features/Profile/services/unifiedService";
+import { registerExternalUserAuth } from "@/features/Profile/services/unifiedService";
 import { apiAuth } from "@/lib/api/apiAuth";
 
 // Esquema de validación con Yup
@@ -69,19 +69,21 @@ export const useRegister = () => {
     onSubmit: async (values) => {
       try {
         setIsLoading(true);
+        // El rol y el DPI ya no viajan en el alta: el servidor los escribe
+        // después, al validar el registro (registerExternalUserAuth).
         const response = await authClient.signUp.email({
           email: values.email,
           password: values.password,
           name: values.fullName,
           callbackURL: `${import.meta.env.VITE_FRONTEND_URL}/profile`,
-          dpi: values.dpi,
-          role: values.userType, // Enviar el role al backend
-        } as any);
+        });
 
-        // Si el registro fue exitoso, registrar en CRM o Cartera según tipo
+        // Si el registro fue exitoso, registrar en CRM o Cartera según tipo.
+        // La variante autenticada usa la sesión recién creada y es la que deja
+        // el rol y el DPI en la cuenta.
         if (response?.data?.user?.id) {
           try {
-            await registerExternalUser({
+            await registerExternalUserAuth({
               userType: values.userType,
               fullName: values.fullName,
               email: values.email,

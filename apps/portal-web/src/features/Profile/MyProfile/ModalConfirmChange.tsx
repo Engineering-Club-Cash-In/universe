@@ -1,10 +1,9 @@
 import { useState, useEffect } from "react";
 import { InputIcon, Button, IconAddress, IconPhone, IconUser, Select } from "@/components";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { updateLead } from "../services";
+import { updateLead, updateOwnDpi } from "../services";
 import { createInvestor, getBancos } from "../services/investorService";
 import { useAuth } from "@/lib";
-import { authClient } from "@/lib/auth";
 
 type FieldType = 'dpi' | 'phone' | 'address' | 'banco_id' | 'tipo_cuenta' | 'numero_cuenta';
 
@@ -79,9 +78,8 @@ export const ModalConfirmChange = ({
 
       const payload: UpdateLeadPayload = { email };
       if (field === 'dpi') {
-        // eslint-disable-next-line
-        // @ts-ignore
-        await authClient.updateUser({ dpi: value });
+        // El DPI de la cuenta lo escribe el servidor sobre la sesión actual.
+        await updateOwnDpi(value);
         payload.dpi = value;
       }
       if (field === 'phone') payload.phone = value;

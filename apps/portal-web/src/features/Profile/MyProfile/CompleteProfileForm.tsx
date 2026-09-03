@@ -2,8 +2,7 @@ import { useState } from "react";
 import { InputIcon, Button, IconPerson } from "@/components";
 import { useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/lib";
-import { authClient } from "@/lib/auth";
-import { registerExternalUser } from "../services";
+import { registerExternalUser, registerExternalUserAuth } from "../services";
 
 interface CompleteProfileFormProps {
   onSuccess: () => void;
@@ -28,20 +27,24 @@ export const CompleteProfileForm = ({
         throw new Error("El DPI debe tener 13 dígitos");
       }
 
-      // 1. Actualizar usuario en better-auth
-      if (!onlyApi) {
-        await authClient.updateUser({
+      // El rol y el DPI los escribe el servidor al validar el registro, no el
+      // cliente. `onlyApi` conserva su sentido: cuando es true solo se crea en
+      // CRM/Cartera, sin tocar la cuenta de Better Auth.
+      if (onlyApi) {
+        await registerExternalUser({
+          userType: userType,
+          fullName: user?.name || user?.email.split("@")[0] || "",
+          email: user?.email ?? "",
           dpi: dpi,
-          role: userType,
-        } as any);
+        });
+      } else {
+        await registerExternalUserAuth({
+          userType: userType,
+          fullName: user?.name || user?.email.split("@")[0] || "",
+          email: user?.email ?? "",
+          dpi: dpi,
+        });
       }
-
-      await registerExternalUser({
-        userType: userType,
-        fullName: user?.name || user?.email.split("@")[0] || "",
-        email: user?.email ?? "",
-        dpi: dpi,
-      });
     },
     onSuccess: () => {
       setError("");

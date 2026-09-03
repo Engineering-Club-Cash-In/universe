@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
-import { registerExternalUser } from "../services/unifiedService";
+import { registerExternalUserAuth } from "../services/unifiedService";
 import { useAuth } from "@/lib";
-import { authClient } from "@/lib/auth";
 
 interface UserData {
   id: string;
@@ -41,20 +40,16 @@ export const useProfile = () => {
         console.log(`Creando usuario tipo ${userType} desde OAuth`);
         // Mantener isLoading en true mientras se procesa y recarga
         try {
-          // Usar el servicio unificado para registrar en CRM o Cartera
-          await registerExternalUser({
+          // Servicio unificado (variante autenticada): registra en CRM o
+          // Cartera y, ya del lado del servidor, deja el DPI y el rol en la
+          // cuenta de la sesión. El cliente ya no los escribe.
+          await registerExternalUserAuth({
             userType: userType,
             fullName: user.name || user.email.split("@")[0],
             email: user.email,
             dpi: dpi,
             phone: phone,
           });
-
-          // Actualizar DPI y role en Better Auth
-          await authClient.updateUser({
-            dpi: dpi,
-            ...(userType === "INVESTOR" && { role: "INVESTOR" }),
-          } as any);
 
           console.log(`${userType} creado exitosamente`);
 

@@ -9,6 +9,8 @@ import { randomBytes } from "crypto";
 import { eq } from "drizzle-orm";
 import { auth } from "../lib/auth";
 import { requireServiceSecret } from "../lib/serviceAuth";
+import { isPortalUserType, normalizeDpi } from "../lib/portalIdentity";
+import { applyRegistrationOutcome } from "../services/portalIdentity.service";
 import { env } from "../config/env";
 import { db } from "../db/connection";
 import { users } from "../db/schema";
@@ -19,7 +21,7 @@ import {
 
 // Tipo para el contexto con variables personalizadas
 type Variables = {
-  user: { name?: string; email?: string };
+  user: { id: string; name?: string; email?: string; role?: string };
   session: any;
 };
 
@@ -119,19 +121,21 @@ unifiedRoutes.post("/register-external", async (c) => {
 unifiedRoutes.post("/register-external-auth", requireAuth, async (c) => {
   try {
     const body = await c.req.json<RegisterExternalUserPayload>();
-    const user = c.get("user") as { name?: string; email?: string } | undefined;
+    const user = c.get("user");
 
-    // Usar datos del usuario autenticado si no se proporcionan
+    // El correo sale SIEMPRE de la sesión: es la identidad de la cuenta sobre
+    // la que se van a escribir rol y DPI, así que no puede venir del body.
     const payload: RegisterExternalUserPayload = {
       userType: body.userType,
-      fullName: body.fullName || user?.name || "",
-      email: body.email || user?.email || "",
+      fullName: body.fullName || user.name || "",
+      email: user.email || "",
       dpi: body.dpi,
       phone: body.phone,
     };
 
-    // Validaciones
-    if (!payload.userType || !["CLIENT", "INVESTOR"].includes(payload.userType)) {
+    // Validaciones. `isPortalUserType` acota a los roles de autoservicio: un
+    // "ADMIN" en el body no pasa de aquí.
+    if (!isPortalUserType(payload.userType)) {
       throw new HTTPException(400, {
         message: "El campo userType es requerido y debe ser 'CLIENT' o 'INVESTOR'",
       });
@@ -141,7 +145,7 @@ unifiedRoutes.post("/register-external-auth", requireAuth, async (c) => {
       throw new HTTPException(400, { message: "El campo dpi es requerido" });
     }
 
-    if (!/^\d{13}$/.test(payload.dpi)) {
+    if (!normalizeDpi(payload.dpi)) {
       throw new HTTPException(400, {
         message: "El DPI debe tener exactamente 13 dígitos",
       });
@@ -149,12 +153,22 @@ unifiedRoutes.post("/register-external-auth", requireAuth, async (c) => {
 
     const result = await registerExternalUser(payload);
 
-    return c.json(result);
+    // El rol y el DPI se escriben aquí, en el servidor, y solo después de que
+    // el registro externo salió bien. El cliente ya no puede fijarlos.
+    // `applyRegistrationOutcome` no asigna roles fuera de los de autoservicio
+    // ni pisa un rol administrativo.
+    const identity = await applyRegistrationOutcome(
+      user.id,
+      payload.userType,
+      payload.dpi,
+    );
+
+    return c.json({ ...result, identity });
   } catch (error) {
     if (error instanceof HTTPException) {
       throw error;
     }
-    
+
     throw new HTTPException(500, {
       message: error instanceof Error ? error.message : "Error al registrar usuario externo",
     });

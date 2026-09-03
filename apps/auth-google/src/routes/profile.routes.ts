@@ -1,8 +1,62 @@
 import { Hono } from "hono";
 import { ProfileService } from "../services/profile.service";
 import { HTTPException } from "hono/http-exception";
+import { requireAuth, type AuthedVariables } from "../middleware/requireAuth";
+import {
+  DpiAlreadyTakenError,
+  DpiFormatError,
+  setUserDpi,
+} from "../services/portalIdentity.service";
 
-const profileRoutes = new Hono();
+const profileRoutes = new Hono<{ Variables: AuthedVariables }>();
+
+/**
+ * POST /api/profile/me/dpi
+ * Fija el DPI de la cuenta autenticada.
+ *
+ * El DPI dejó de aceptarse como campo de registro (`input: false`), así que
+ * esta es la ruta por la que un usuario lo establece. La cuenta afectada sale
+ * siempre de la sesión: el body solo trae el valor del DPI.
+ *
+ * Se declara antes que `/:userId/...` porque esa ruta también casaría con
+ * `/me/dpi`.
+ */
+profileRoutes.post("/me/dpi", requireAuth, async (c) => {
+  const user = c.get("user");
+
+  let body: { dpi?: unknown };
+  try {
+    body = await c.req.json();
+  } catch {
+    throw new HTTPException(400, { message: "Cuerpo de la petición inválido" });
+  }
+
+  if (typeof body.dpi !== "string") {
+    throw new HTTPException(400, {
+      message: "El campo dpi es requerido y debe ser un string",
+    });
+  }
+
+  try {
+    const dpi = await setUserDpi(user.id, body.dpi);
+
+    return c.json({
+      success: true,
+      message: "DPI actualizado correctamente",
+      data: { dpi },
+    });
+  } catch (error) {
+    if (error instanceof DpiFormatError) {
+      throw new HTTPException(400, { message: error.message });
+    }
+
+    if (error instanceof DpiAlreadyTakenError) {
+      throw new HTTPException(409, { message: error.message });
+    }
+
+    throw new HTTPException(500, { message: "Error al actualizar el DPI" });
+  }
+});
 
 /**
  * GET /api/profile/check-dpi/:dpi

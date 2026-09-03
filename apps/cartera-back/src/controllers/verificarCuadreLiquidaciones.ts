@@ -383,6 +383,30 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
       from creditos_rel cr
       join pendientes p on p.liquidacion_id = cr.liquidacion_id
     ),
+    momento_foto as (
+      -- Instante real en que la liquidación tomó su foto.
+      --
+      -- No basta con buscar un movimiento cuyo saldo coincida con el que el
+      -- histórico guardó: cualquier movimiento posterior que devuelva el
+      -- crédito a ese mismo saldo también coincide. Una compra de Q200 seguida
+      -- de un pago de capital de Q200 deja el saldo como estaba, y ese pago se
+      -- tomaría como la foto, dando la compra por absorbida.
+      --
+      -- La liquidación reduce todos sus créditos en UNA transacción, así que su
+      -- txid coincide con el histórico en varios créditos a la vez, mientras un
+      -- movimiento suelto coincide en uno. Se elige el txid con más
+      -- coincidencias, y ante empate el más temprano.
+      select distinct on (hl.liquidacion_id)
+             hl.liquidacion_id, min(hm.fecha) as fecha
+      from cartera.historico_liquidaciones_espejo hl
+      join cartera.historico_monto_aportado_espejo hm
+        on  hm.credito_id       = hl.credito_id
+        and hm.inversionista_id = hl.inversionista_id
+        and hm.monto_nuevo      = hl.monto_aportado
+      where hl.liquidacion_id in (select liquidacion_id from pendientes)
+      group by hl.liquidacion_id, hm.txid
+      order by hl.liquidacion_id, count(*) desc, min(hm.fecha) asc
+    ),
     compras_por_credito as (
       select c.inversionista_id, c.credito_id, p.liquidacion_id,
              sum(c.monto_aportado) as monto_compras,
@@ -421,19 +445,11 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
         and not exists (
           select 1
           from cartera.historico_liquidaciones_espejo hl
-          left join lateral (
-            select hm.fecha
-            from cartera.historico_monto_aportado_espejo hm
-            where hm.credito_id       = hl.credito_id
-              and hm.inversionista_id = hl.inversionista_id
-              and hm.monto_nuevo      = hl.monto_aportado
-            order by hm.fecha desc, hm.id desc
-            limit 1
-          ) foto on true
+          left join momento_foto mf on mf.liquidacion_id = hl.liquidacion_id
           where hl.liquidacion_id   = p.liquidacion_id
             and hl.credito_id       = c.credito_id
             and hl.inversionista_id = c.inversionista_id
-            and c.created_at < coalesce(foto.fecha, hl.fecha)
+            and c.created_at < coalesce(mf.fecha, hl.fecha)
         )
       group by 1, 2, 3
     ),
@@ -520,10 +536,24 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
              sum(
                case
                  -- De un crédito que liquidó entra su crecimiento BRUTO, no el
-                 -- neto. Una posición que baja es justamente la pérdida que este
-                 -- job busca: si la baja entrara al techo, la compra que ocurrió
-                 -- en ese mismo crédito —o en otro— la compensaría y la ecuación
-                 -- cuadraría con el capital ya desaparecido.
+                 -- neto. Una posición que baja es la pérdida que este job busca:
+                 -- si la baja entrara al techo, una compra en ese mismo crédito
+                 -- —o en otro— la compensaría y la ecuación cuadraría con el
+                 -- capital ya desaparecido.
+                 --
+                 -- TRADE-OFF DELIBERADO. Descontar la baja hasta el monto
+                 -- comprado en ese crédito neutralizaría el caso de una compra
+                 -- que expira desde un crédito con foto y se rehace en otro
+                 -- (ahí quedan las dos filas de compra y el techo permite restar
+                 -- el doble). Pero esa misma resta apaga la detección del caso
+                 -- que motivó el job: una compra y una pérdida en el mismo
+                 -- crédito son indistinguibles de una compra que se fue, porque
+                 -- con saldos agregados las dos dejan la misma huella.
+                 --
+                 -- Se elige no perder la detección. La expiración desde un
+                 -- crédito con foto puede producir una notificación de más, que
+                 -- es el error barato: el correo se revisa y se descarta. Dejar
+                 -- pasar capital desaparecido no se recupera.
                  when ec.liquido then coalesce(cb.monto, 0)
                  -- En el grupo que no liquidó el signo sí cuenta: ahí viven las
                  -- dos puntas de una compra que expira y se rehace, y es lo que

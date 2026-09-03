@@ -87,11 +87,24 @@ export const sendLiquidationEmail = async ({
   // Validar formato de correo antes de enviar
   emailSchema.parse(to);
 
+  const assetsBaseUrl = process.env.EMAIL_ASSETS_BASE_URL;
+  const emailAssets = assetsBaseUrl
+    ? {
+        headerBanner: `${assetsBaseUrl}/header-mail-V3.png`,
+        footerBanner: `${assetsBaseUrl}/footer-mail.png`,
+      }
+    : undefined;
+  if (!emailAssets) {
+    console.warn(
+      "[sendLiquidationEmail] EMAIL_ASSETS_BASE_URL is missing. Sending without header/footer banners."
+    );
+  }
+
   try {
     const { data, error } = await resend.emails.send({
       from: `Club Cash In <no-reply@${domain}>`,
       to: [to],
-      subject: `Liquidación Procesada - ${new Date().toLocaleString("es-GT", { month: "long", year: "numeric" })}`,
+      subject: `Liquidación Procesada - ${date}`,
       react: React.createElement(LiquidationEmail, {
         investorName,
         amount,
@@ -99,6 +112,7 @@ export const sendLiquidationEmail = async ({
         date,
         currencySymbol,
         reportUrl,
+        assets: emailAssets,
       }),
       attachments: attachment ? [attachment] : undefined,
     });

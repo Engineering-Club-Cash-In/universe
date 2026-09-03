@@ -3,8 +3,10 @@ import { eq } from "drizzle-orm";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { type AuditMeta, auditMiddleware } from "./audit";
+import { partnerAccounts } from "../db/schema/partners";
 import type { Context } from "./context";
-import { PERMISSIONS } from "./roles";
+import { resolvePartnerScope } from "./partner-scope";
+import { PERMISSIONS, ROLES } from "./roles";
 
 export const o = os.$context<Context>().$meta<AuditMeta>({});
 
@@ -670,6 +672,75 @@ const requireInvestmentManager = o.middleware(async ({ context, next }) => {
 	});
 });
 
+
+// Socios externos (predios/agencias). Exige una sesión emitida por la instancia
+// de partner-auth: una sesión del CRM nunca sirve aquí, ni al revés.
+async function contextoDeSocio(context: Context) {
+	if (!context.partnerSession?.user) {
+		throw new ORPCError("UNAUTHORIZED");
+	}
+
+	const userId = context.partnerSession.user.id;
+	const userData = await db
+		.select()
+		.from(user)
+		.where(eq(user.id, userId))
+		.limit(1);
+	const userRole = userData[0]?.role;
+
+	if (userRole !== ROLES.PARTNER) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "Se requiere rol de predio/agencia",
+		});
+	}
+
+	// Suspender a un socio no revoca sus sesiones, y esta instancia no lleva el
+	// plugin admin que lo verificaría: sin este chequeo seguiría leyendo hasta
+	// que la sesión expire.
+	if (userData[0]?.banned) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "Esta cuenta está suspendida",
+		});
+	}
+
+	const companyIds = await resolvePartnerScope(userId);
+	if (companyIds.length === 0) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "El usuario no tiene ninguna agencia asignada",
+		});
+	}
+
+	const [partnerAccount] = await db
+		.select({ passwordChangedAt: partnerAccounts.passwordChangedAt })
+		.from(partnerAccounts)
+		.where(eq(partnerAccounts.userId, userId))
+		.limit(1);
+
+	return {
+		partnerSession: context.partnerSession,
+		user: userData[0],
+		userId,
+		userRole,
+		companyIds,
+		partnerAccount,
+	};
+}
+
+const requirePartnerIdentity = o.middleware(async ({ context, next }) => {
+	return next({ context: await contextoDeSocio(context) });
+});
+
+const requirePartnerAccess = o.middleware(async ({ context, next }) => {
+	const partnerContext = await contextoDeSocio(context);
+	if (!partnerContext.partnerAccount?.passwordChangedAt) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "Debes cambiar tu contrasena antes de continuar",
+		});
+	}
+
+	return next({ context: partnerContext });
+});
+
 export const protectedProcedure = publicProcedure.use(requireAuth);
 export const adminProcedure = publicProcedure.use(requireAdmin);
 export const crmProcedure = publicProcedure.use(requireCrmAccess);
@@ -711,3 +782,7 @@ export const investmentProcedure = publicProcedure.use(requireInvestmentAccess);
 export const investmentManagerProcedure = publicProcedure.use(
 	requireInvestmentManager,
 );
+export const partnerIdentityProcedure = publicProcedure.use(
+	requirePartnerIdentity,
+);
+export const partnerProcedure = publicProcedure.use(requirePartnerAccess);

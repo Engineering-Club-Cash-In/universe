@@ -1962,7 +1962,16 @@
     {
       id: serial("id").primaryKey(),
       monto_aportado: numeric("monto_aportado", { precision: 18, scale: 8 }).notNull(),
+      // Fecha DECLARADA del período: la liquidación puede recibirla explícita y
+      // ser retroactiva, así que no dice cuándo se tomó realmente la foto.
       fecha: timestamp("fecha", { withTimezone: true }).notNull().defaultNow(),
+      // Cuándo se insertó esta fila de verdad. Lo pone el default de la base, no
+      // la aplicación, así que no se puede pasar retroactivo ni reescribir. Es
+      // el único anclaje fiable al instante en que la foto se tomó: sin él hay
+      // que inferirlo buscando movimientos del espejo cuyo saldo coincida, y esa
+      // búsqueda puede acertarle a una transacción anterior que dejó los mismos
+      // montos. NULL en las filas anteriores a la migración 0033.
+      registrado_at: timestamp("registrado_at", { withTimezone: true }).defaultNow(),
       inversionista_id: integer("inversionista_id")
         .notNull()
         .references(() => inversionistas.inversionista_id, { onDelete: "cascade" }),

@@ -386,26 +386,34 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
     momento_foto as (
       -- Instante real en que la liquidación tomó su foto.
       --
-      -- No basta con buscar un movimiento cuyo saldo coincida con el que el
-      -- histórico guardó: cualquier movimiento posterior que devuelva el
-      -- crédito a ese mismo saldo también coincide. Una compra de Q200 seguida
-      -- de un pago de capital de Q200 deja el saldo como estaba, y ese pago se
-      -- tomaría como la foto, dando la compra por absorbida.
+      -- Para las filas escritas desde la migración 0033 sale directo de
+      -- historico_liquidaciones_espejo.registrado_at, que lo pone el default de
+      -- la base: no se puede pasar retroactivo ni reescribir desde el código.
+      -- La columna fecha no sirve para esto porque guarda el período
+      -- declarado, que la liquidación acepta explícito.
       --
-      -- La liquidación reduce todos sus créditos en UNA transacción, así que su
-      -- txid coincide con el histórico en varios créditos a la vez, mientras un
-      -- movimiento suelto coincide en uno. Se elige el txid con más
-      -- coincidencias, y ante empate el más temprano.
-      select distinct on (hl.liquidacion_id)
-             hl.liquidacion_id, min(hm.fecha) as fecha
+      -- Para las filas anteriores a esa migración hay que inferirlo, y la
+      -- inferencia es imperfecta a propósito: se busca la transacción cuyos
+      -- saldos coinciden con los que la foto guardó, eligiendo la que coincide
+      -- en más créditos (la liquidación reduce todos sus créditos en una sola
+      -- transacción; un movimiento suelto coincide en uno). Puede acertarle a
+      -- una transacción anterior que dejó los mismos montos, así que solo se usa
+      -- donde no hay sello, y en última instancia se cae a fecha.
+      select hl.liquidacion_id,
+             coalesce(max(hl.registrado_at), max(inferida.fecha), max(hl.fecha)) as fecha
       from cartera.historico_liquidaciones_espejo hl
-      join cartera.historico_monto_aportado_espejo hm
-        on  hm.credito_id       = hl.credito_id
-        and hm.inversionista_id = hl.inversionista_id
-        and hm.monto_nuevo      = hl.monto_aportado
+      left join lateral (
+        select min(hm.fecha) as fecha
+        from cartera.historico_monto_aportado_espejo hm
+        where hm.credito_id       = hl.credito_id
+          and hm.inversionista_id = hl.inversionista_id
+          and hm.monto_nuevo      = hl.monto_aportado
+        group by hm.txid
+        order by count(*) desc, min(hm.fecha) asc
+        limit 1
+      ) inferida on hl.registrado_at is null
       where hl.liquidacion_id in (select liquidacion_id from pendientes)
-      group by hl.liquidacion_id, hm.txid
-      order by hl.liquidacion_id, count(*) desc, min(hm.fecha) asc
+      group by hl.liquidacion_id
     ),
     compras_por_credito as (
       select c.inversionista_id, c.credito_id, p.liquidacion_id,

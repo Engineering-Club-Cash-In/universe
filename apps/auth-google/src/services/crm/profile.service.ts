@@ -3,6 +3,7 @@
  */
 
 import { env } from "../../config/env";
+import { portalAuthHeaders } from "./portalAuth";
 
 // ============================================
 // INTERFACES
@@ -86,14 +87,13 @@ export interface SendLeadPayload {
  */
 export const getProfile = async (
   email: string,
-  dpi: string,
-  token?: string
+  dpi: string
 ): Promise<ProfileData> => {
   const response = await fetch(
     `${env.CRM_API_URL}/api/portal/lead?email=${encodeURIComponent(email)}&dpi=${encodeURIComponent(dpi)}`,
     {
       headers: {
-        ...(token && { Authorization: `Bearer ${token}` }),
+        ...portalAuthHeaders(),
       },
     }
   );
@@ -111,14 +111,13 @@ export const getProfile = async (
  * Actualizar información del lead (DPI, teléfono o dirección)
  */
 export const updateLead = async (
-  payload: UpdateLeadPayload,
-  token?: string
+  payload: UpdateLeadPayload
 ): Promise<UpdateFieldResponse> => {
   const response = await fetch(`${env.CRM_API_URL}/api/portal/lead/update`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(token && { Authorization: `Bearer ${token}` }),
+      ...portalAuthHeaders(),
     },
     body: JSON.stringify(payload),
   });
@@ -137,14 +136,13 @@ export const updateLead = async (
  */
 export const getNumbersSifco = async (
   email: string,
-  dpi: string,
-  token?: string
+  dpi: string
 ): Promise<Opportunity[]> => {
   const response = await fetch(
     `${env.CRM_API_URL}/api/portal/lead/sifco?email=${encodeURIComponent(email)}&dpi=${encodeURIComponent(dpi)}`,
     {
       headers: {
-        ...(token && { Authorization: `Bearer ${token}` }),
+        ...portalAuthHeaders(),
       },
     }
   );
@@ -162,14 +160,13 @@ export const getNumbersSifco = async (
  * Enviar/Crear un lead en el CRM
  */
 export const sendLead = async (
-  payload: SendLeadPayload,
-  token?: string
+  payload: SendLeadPayload
 ): Promise<{ success: boolean; data?: any }> => {
   const response = await fetch(`${env.CRM_API_URL}/api/portal/lead`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(token && { Authorization: `Bearer ${token}` }),
+      ...portalAuthHeaders(),
     },
     body: JSON.stringify(payload),
   });

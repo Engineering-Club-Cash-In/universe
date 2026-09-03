@@ -149,6 +149,7 @@ pnpm dev
 | GOOGLE_REDIRECT_URI | URI de redirección de Google | ✅ |
 | CORS_ORIGIN | Origen permitido para CORS | ❌ (default: *) |
 | INTERNAL_API_SECRET | Secreto compartido para endpoints internos servicio-a-servicio. Se envía como `Authorization: Bearer <secreto>`. Sin él, esos endpoints rechazan todo (fail closed). | ✅ en producción |
+| CRM_PORTAL_SECRET | Secreto compartido con el CRM para `/api/portal/*`. Debe valer **lo mismo** que `BETTER_SECRET_PORTAL_WEB` en el CRM; si no coincide, el CRM responde 401. | ✅ en producción |
 
 ## 📄 Licencia
 

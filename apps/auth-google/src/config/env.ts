@@ -19,6 +19,9 @@ export interface EnvConfig {
   CARTERA_PASSWORD: string;
   // CRM API Config
   CRM_API_URL: string;
+  // Secreto compartido con el CRM para los endpoints /api/portal/*.
+  // Debe tener el MISMO valor que BETTER_SECRET_PORTAL_WEB en el CRM.
+  CRM_PORTAL_SECRET: string;
   // Secreto compartido para endpoints internos servicio-a-servicio.
   // Opcional al arrancar (no queremos tumbar el login si falta), pero los
   // endpoints que lo exigen rechazan cuando viene vacío.
@@ -74,6 +77,8 @@ function validateEnv(): EnvConfig {
     CARTERA_PASSWORD: process.env.CARTERA_PASSWORD || "",
     // CRM API
     CRM_API_URL: process.env.CRM_API_URL || "http://localhost:4000",
+    // Sin default: si no viene, el CRM rechaza las llamadas al portal.
+    CRM_PORTAL_SECRET: process.env.CRM_PORTAL_SECRET || "",
     // Sin default: si no viene, los endpoints internos rechazan todo.
     INTERNAL_API_SECRET: process.env.INTERNAL_API_SECRET || "",
   };
@@ -98,5 +103,13 @@ console.log(
 if (!env.INTERNAL_API_SECRET) {
   console.warn(
     "⚠️  INTERNAL_API_SECRET no está configurado: los endpoints internos rechazarán todas las peticiones."
+  );
+}
+
+// Sin este secreto el CRM responde 401 a /api/portal/*, y el portal se queda
+// sin perfil, documentos, contratos ni registro de leads.
+if (!env.CRM_PORTAL_SECRET) {
+  console.warn(
+    "⚠️  CRM_PORTAL_SECRET no está configurado: el CRM rechazará las llamadas del portal."
   );
 }

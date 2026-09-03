@@ -8,6 +8,7 @@ import { opportunityDocuments } from "../db/schema/documents";
 import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import { vehiclePhotos, vehicles } from "../db/schema/vehicles";
 import { eqDpi } from "../lib/dpi-lookup";
+import { extractBearerToken, secretsMatch } from "../lib/service-token";
 import { getFileUrl, getFileUrlWithBucketInKey } from "../lib/storage";
 import { normalizarDpi, validarDpi } from "../utils/cui-validation";
 import { getOnlyRenapInfoController } from "./bot";
@@ -63,37 +64,36 @@ async function findLeadByEmailOrDpi(email?: string, dpi?: string) {
 }
 
 /**
- * Middleware to validate portal token (Better Auth session token)
+ * Middleware de los endpoints `/api/portal/*`.
+ *
+ * Estos endpoints exponen datos personales de clientes y no los llama un
+ * usuario final: los llama auth-google en nombre del portal. La autorización
+ * es el secreto compartido `BETTER_SECRET_PORTAL_WEB`, que debe traer el mismo
+ * valor en ambos servicios.
+ *
+ * La comparación es en tiempo constante y sin secreto configurado se rechaza
+ * (fail closed). Todos los rechazos responden 401 con el mismo cuerpo: la
+ * causa concreta queda en el log del servidor.
  */
 export async function validatePortalToken(
 	c: Context,
 	next: () => Promise<void>,
 ) {
 	try {
-		const authHeader = c.req.header("Authorization");
-
-		if (!authHeader || !authHeader.startsWith("Bearer ")) {
-			return c.json(
-				{
-					success: false,
-					error: "Token de autorización no proporcionado",
-				},
-				401,
-			);
-		}
-
-		const token = authHeader.replace("Bearer ", "");
 		const secret = process.env.BETTER_SECRET_PORTAL_WEB;
 
-		if (!secret) {
-			console.error("[ERROR] BETTER_SECRET_PORTAL_WEB not configured");
-			return c.json(
-				{
-					success: false,
-					error: "Configuración de autorización no disponible",
-				},
-				500,
+		if (!secret?.trim()) {
+			console.error(
+				"[ERROR] BETTER_SECRET_PORTAL_WEB no está configurado; se rechaza la petición al portal.",
 			);
+			return c.json({ success: false, error: "No autorizado" }, 401);
+		}
+
+		const token = extractBearerToken(c.req.header("Authorization"));
+
+		if (!secretsMatch(token, secret)) {
+			console.warn("[WARN] validatePortalToken: token de portal inválido.");
+			return c.json({ success: false, error: "No autorizado" }, 401);
 		}
 
 		await next();

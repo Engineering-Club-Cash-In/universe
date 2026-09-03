@@ -2312,11 +2312,13 @@ export const cobrosRouter = {
 					// {montoAdeudado} de las plantillas de mora (1 cuota, 2-3 cuotas,
 					// jurídico): saldo real de cada cuota vencida — recibo menos lo ya
 					// abonado, misma regla de cobertura que cartera — + mora. "" si no
-					// hay cuotas vencidas.
+					// hay cuotas vencidas. En INCOBRABLE solo cuenta el recibo base del
+					// castigo (las cuotas históricas quedan anuladas).
 					montoAdeudado: calcularMontoAdeudadoDesdeCuotas(
 						creditoCompleto.cuotasAtrasadas ?? [],
 						cuotaMensual,
 						montoEnMora,
+						statusCredit,
 					),
 					// Bloque del seguro de la bienvenida según la aseguradora de la
 					// oportunidad (Universales o G&T).
@@ -3692,6 +3694,7 @@ export const cobrosRouter = {
 											detalle.cuotasAtrasadas ?? [],
 											detalle.credito.cuota,
 											detalle.moraActual ?? 0,
+											detalle.credito.statusCredit,
 										),
 									);
 								} catch (err) {

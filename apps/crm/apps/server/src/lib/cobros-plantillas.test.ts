@@ -722,4 +722,109 @@ Te recordamos realizar el pago de tu *Impuesto de Circulación {anioImpuesto}*.
 			),
 		).toBe("400.00");
 	});
+
+	test("en INCOBRABLE solo cuenta el recibo base del castigo, no las cuotas históricas anuladas", () => {
+		// Al castigar, cartera (credits.ts, acción INCOBRABLE) deja las cuotas
+		// 5-7 sin pagar con sus recibos anulados (paymentFalse=true, restantes 0),
+		// pone credito.cuota = capital castigado (7,744.11) y crea la cuota 25
+		// con el recibo base SISTEMA-INCOBRABLE (no_required, capital_restante =
+		// capital). Sin la regla, cada cuota histórica caería al contractual y el
+		// jurídico diría 4 × 7,744.11.
+		const anulada = (numero_cuota: number): FilaCuotaAtrasada => ({
+			numero_cuota,
+			paymentFalse: true,
+			validationStatus: "no_required",
+			capital_restante: "0",
+			interes_restante: "0",
+			iva_12_restante: "0",
+			seguro_restante: "0",
+			gps_restante: "0",
+			membresias_restante: "0",
+		});
+		const reciboBase = (
+			capitalRestante: string,
+			extra: Partial<FilaCuotaAtrasada> = {},
+		): FilaCuotaAtrasada => ({
+			numero_cuota: 25,
+			paymentFalse: false,
+			validationStatus: "no_required",
+			capital_restante: capitalRestante,
+			interes_restante: "0",
+			iva_12_restante: "0",
+			seguro_restante: "0",
+			gps_restante: "0",
+			membresias_restante: "0",
+			...extra,
+		});
+		const filas = [anulada(5), anulada(6), anulada(7), reciboBase("7744.11")];
+
+		expect(
+			calcularMontoAdeudadoDesdeCuotas(filas, "7744.11", "0", "INCOBRABLE"),
+		).toBe("7,744.11");
+		// La mora activa que cartera reporte se sigue sumando ("incluyendo moras").
+		expect(
+			calcularMontoAdeudadoDesdeCuotas(
+				filas,
+				"7744.11",
+				"120.50",
+				"INCOBRABLE",
+			),
+		).toBe("7,864.61");
+
+		// Recuperación parcial validada sobre el recibo base: queda el restante.
+		expect(
+			calcularMontoAdeudadoDesdeCuotas(
+				[
+					anulada(5),
+					reciboBase("6744.11", {
+						validationStatus: "validated",
+						abono_capital: "1000.00",
+					}),
+				],
+				"7744.11",
+				"0",
+				"INCOBRABLE",
+			),
+		).toBe("6,744.11");
+
+		// Una cuota histórica con un parcial validado antes del castigo (plata
+		// viva, restantes 0) tampoco suma: ya no hay recibo activo ahí.
+		expect(
+			calcularMontoAdeudadoDesdeCuotas(
+				[
+					{
+						...anulada(6),
+						paymentFalse: false,
+						validationStatus: "validated",
+						abono_capital: "400.00",
+					},
+					reciboBase("7744.11"),
+				],
+				"7744.11",
+				"0",
+				"INCOBRABLE",
+			),
+		).toBe("7,744.11");
+
+		// Sin recibo base confiable no se inventa nada (el masivo descarta).
+		expect(
+			calcularMontoAdeudadoDesdeCuotas(
+				[anulada(5), anulada(6)],
+				"7744.11",
+				"0",
+				"INCOBRABLE",
+			),
+		).toBe("");
+
+		// La regla es SOLO para INCOBRABLE: en un crédito activo un grupo sin
+		// recibo confiable sigue valiendo el contractual.
+		expect(
+			calcularMontoAdeudadoDesdeCuotas(
+				[anulada(5), anulada(6)],
+				"1000.00",
+				"0",
+				"ACTIVO",
+			),
+		).toBe("2,000.00");
+	});
 });

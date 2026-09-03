@@ -167,17 +167,29 @@ function saldoReciboDeFila(fila: FilaCuotaAtrasada): Big | null {
  *     solo bajan al aplicar pagos, por eso ante hermanos desincronizados
  *     manda el menor, y el tope contractual evita que un recibo stale infle.
  *
+ * INCOBRABLE: al castigar, cartera conserva las cuotas históricas no pagadas
+ * (con sus recibos anulados y los restantes en 0), pone `credito.cuota` = TODO
+ * el capital castigado y crea UNA cuota nueva con el recibo base
+ * SISTEMA-INCOBRABLE (capital_restante = capital). Ahí la deuda vive solo en
+ * ese recibo activo, así que los grupos sin recibo confiable se OMITEN en vez
+ * de caer al contractual (sumarían el capital completo por cada cuota
+ * histórica). Mismo criterio que shouldIncobrableInstallmentBePaid en cartera:
+ * "queda una sola cuota que representa el capital incobrable".
+ *
  * Devuelve "" si no hay cuotas o el total no es positivo.
  */
 export function calcularMontoAdeudadoDesdeCuotas(
 	filas: ReadonlyArray<FilaCuotaAtrasada>,
 	cuota: string | number | null | undefined,
 	montoMora: string | number | null | undefined,
+	statusCredit?: string | null,
 ): string {
 	if (filas.length === 0) return "";
 	const cuotaBig = aBig(cuota ?? 0);
 	const moraBig = aBig(montoMora ?? 0);
 	if (!cuotaBig || !moraBig) return "";
+	// En INCOBRABLE solo cuentan los grupos con recibo confiable (ver doc).
+	const soloRecibosActivos = statusCredit === "INCOBRABLE";
 
 	const porCuota = new Map<
 		number | null,
@@ -205,6 +217,7 @@ export function calcularMontoAdeudadoDesdeCuotas(
 
 	let total = moraBig;
 	for (const { aplicado, saldoRecibo } of porCuota.values()) {
+		if (soloRecibosActivos && saldoRecibo === null) continue;
 		let saldo = cuotaBig.minus(aplicado);
 		if (saldoRecibo !== null && saldoRecibo.lt(saldo)) saldo = saldoRecibo;
 		if (saldo.gt(0)) total = total.plus(saldo);

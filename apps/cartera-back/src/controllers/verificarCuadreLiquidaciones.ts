@@ -52,6 +52,17 @@ const TZ_GUATEMALA = "America/Guatemala";
 // Un quetzal: por debajo de eso es ruido de redondeo, no un descuadre.
 const TOLERANCIA = new Big(1);
 
+// Desde cuándo se puede exigir el sello de procedencia (liquidacion_id) en las
+// compras de reinversión: la fecha en que se aplicó la migración 0032.
+//
+// El corte se deriva normalmente del propio dato —la primera fila sellada— pero
+// esa señal no aparece si la primera reinversión automática posterior a la
+// migración no encuentra candidatos: addInvestorToCredit retorna sin insertar
+// nada y no queda ninguna fila con sello. Sin un tope fijo, el fallback seguiría
+// aceptando como "heredada" cualquier reasignación manual sin sello, que es
+// justo lo que la procedencia vino a distinguir.
+const CORTE_PROCEDENCIA = "2026-09-02";
+
 // Destinatarios de la notificación.
 const EMAILS = [
   "diego.l@clubcashin.com",
@@ -115,7 +126,12 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
       -- Desde cuándo existe el sello de procedencia. Antes de esa marca no hay
       -- forma de atribuir una reinversión a su liquidación, así que ahí se cae
       -- a la fecha; después, el sello manda.
-      select min(created_at) as desde
+      -- El menor entre la primera fila sellada y la fecha de la migración: si
+      -- ninguna reinversión llegó a sellar, el corte no puede quedar abierto.
+      select least(
+        min(created_at),
+        ${CORTE_PROCEDENCIA}::timestamptz
+      ) as desde
       from cartera.compras_credito_inversionista
       where liquidacion_id is not null
     ),
@@ -221,7 +237,7 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
             -- Filas anteriores al sello: no hay procedencia, solo la fecha.
             c.liquidacion_id is null
             and c.created_at < coalesce(
-              (select desde from inicio_procedencia), 'infinity'::timestamptz
+              (select desde from inicio_procedencia), ${CORTE_PROCEDENCIA}::timestamptz
             )
             and c.created_at > p.fecha_liquidacion
           )
@@ -518,7 +534,12 @@ export async function leerReinversionesAnterioresSinColocar(periodo: string) {
       --
       -- Se deriva del dato en vez de fijar una fecha: apenas la primera
       -- liquidación sella una fila, el fallback deja de aplicar hacia adelante.
-      select min(created_at) as desde
+      -- El menor entre la primera fila sellada y la fecha de la migración: si
+      -- ninguna reinversión llegó a sellar, el corte no puede quedar abierto.
+      select least(
+        min(created_at),
+        ${CORTE_PROCEDENCIA}::timestamptz
+      ) as desde
       from cartera.compras_credito_inversionista
       where liquidacion_id is not null
     ),
@@ -534,6 +555,10 @@ export async function leerReinversionesAnterioresSinColocar(periodo: string) {
                partition by l.inversionista_id
                order by l.fecha_liquidacion, l.liquidacion_id
              ) as siguiente,
+             lead(l.liquidacion_id) over (
+               partition by l.inversionista_id
+               order by l.fecha_liquidacion, l.liquidacion_id
+             ) as siguiente_id,
              -- Cota inferior: la liquidación previa. Con liquidaciones en días
              -- consecutivos, el margen de un día haría que la reinversión de la
              -- anterior contara como si fuera de esta.
@@ -603,13 +628,41 @@ export async function leerReinversionesAnterioresSinColocar(periodo: string) {
                ) as saldo
              ) antes on true
              left join lateral (
-               select coalesce(hm.monto_nuevo, 0) as saldo
-               from cartera.historico_monto_aportado_espejo hm
-               where hm.credito_id       = c.credito_id
-                 and hm.inversionista_id = c.inversionista_id
-                 and (t.siguiente is null or hm.fecha < t.siguiente)
-               order by hm.fecha desc, hm.id desc
-               limit 1
+               -- Saldo del crédito justo ANTES de que corriera la liquidación
+               -- siguiente.
+               --
+               -- Cuando esa liquidación tocó el crédito, se toma su propia foto
+               -- y no la bitácora: el trigger data sus filas con NOW() —el
+               -- inicio de la transacción— mientras t.siguiente viene de un
+               -- new Date() de JavaScript creado después, así que las filas de
+               -- la propia liquidación caen dentro de hm.fecha < t.siguiente y
+               -- la bitácora devolvería el saldo YA reducido. Una reinversión
+               -- intacta se reportaría como perdida por el capital que esa
+               -- liquidación cobró legítimamente.
+               --
+               -- El histórico guarda el monto post-reducción junto con el
+               -- capital que se liquidó, así que la suma reconstruye el saldo
+               -- previo sin depender de relojes.
+               select coalesce(
+                 (
+                   select hl.monto_aportado + coalesce(hl.capital_liquidado, 0)
+                   from cartera.historico_liquidaciones_espejo hl
+                   where hl.liquidacion_id   = t.siguiente_id
+                     and hl.credito_id       = c.credito_id
+                     and hl.inversionista_id = c.inversionista_id
+                   limit 1
+                 ),
+                 (
+                   select coalesce(hm.monto_nuevo, 0)
+                   from cartera.historico_monto_aportado_espejo hm
+                   where hm.credito_id       = c.credito_id
+                     and hm.inversionista_id = c.inversionista_id
+                     and (t.siguiente is null or hm.fecha < t.siguiente)
+                   order by hm.fecha desc, hm.id desc
+                   limit 1
+                 ),
+                 0
+               ) as saldo
              ) hasta on true
              where c.inversionista_id = t.inversionista_id
                and c.tipo_operacion = 'reinversion'
@@ -619,7 +672,7 @@ export async function leerReinversionesAnterioresSinColocar(periodo: string) {
                  or (
                    c.liquidacion_id is null
                    and c.created_at < coalesce(
-                     (select desde from inicio_procedencia), 'infinity'::timestamptz
+                     (select desde from inicio_procedencia), ${CORTE_PROCEDENCIA}::timestamptz
                    )
                    and c.fecha > coalesce(t.previa, t.fecha_liquidacion - interval '1 day')
                    and (t.siguiente is null or c.fecha <= t.siguiente)

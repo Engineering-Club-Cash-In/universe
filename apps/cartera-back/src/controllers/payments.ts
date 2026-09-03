@@ -28,6 +28,7 @@ import {
 import { updateMora } from "./latefee";
 import { calcularAjusteCompras, obtenerSumaComprasMesAnterior, obtenerSumaComprasPendientes, obtenerSumaComprasCompletadasMesActual } from "../utils/comprasAjuste";
 import { calcularFactoresProrrateoInteresV2 } from "../cofidi/prorrateoPciInteres";
+import { calcularVentanaProporcional } from "../utils/functions/diasParticipacion";
 import { calcularSplitInteresPci, type InvSplitRow } from "../cofidi/splitInteresPci";
 import { t } from "elysia";
 import { calcularResumenAbonosCuota } from "./registerPaymentPolicy";
@@ -772,14 +773,14 @@ export async function insertPagosCreditoInversionistas(
     let ivaConCompras: Big | null = null;
 
     if (esMesAnterior) {
-      // Días totales del mes de la fecha de inicio (ej: enero = 31)
-      const diasDelMes = new Date(
-        fechaInicio!.getFullYear(),
-        fechaInicio!.getMonth() + 1,
-        0
-      ).getDate();
-      const diaInicio = fechaInicio!.getDate(); // ej: 7
-      const diasProporcionales = diasDelMes - diaInicio; // ej: 31 - 7 = 24 días restantes
+      // Días totales del mes de la fecha de inicio (ej: enero = 31) y días que le
+      // tocan al inversionista. El piso de 1 día vive en el helper (ver
+      // utils/functions/diasParticipacion.ts): si la fecha cae el ÚLTIMO día del
+      // mes, la resta daría 0 y cobraría cero interés pese a haber participado.
+      // El día 1 no pasa por acá: `esMesAnterior` lo excluye arriba y cobra mes completo.
+      const { diasDelMes, diasProporcionales } = calcularVentanaProporcional(
+        fechaInicio!
+      );
 
       // ¿El inversionista ya era partícipe y además hizo compras este mes?
       // Buscamos compras de tipo 'compra_cartera' completadas en el mes anterior.

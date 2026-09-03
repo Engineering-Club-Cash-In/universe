@@ -51,7 +51,6 @@ import {
 } from "../lib/cobros-credit-detail";
 import {
 	calcularExpectativaMora,
-	calcularMontoTotalAtraso,
 	calcularMontoTotalAtrasoDesdeCuotas,
 	contarCuotasAtrasadasUnicas,
 	cuerpoUsaFechaLimiteImpuesto,
@@ -60,6 +59,7 @@ import {
 	interpolar as interpolarPlantilla,
 	PLANTILLAS_MENSAJES,
 	prepararExpectativaMoraParaEnvio,
+	prepararMontoTotalAtrasoParaEnvio,
 	prepararTelefonoAsesorParaEnvio,
 	seguroPorAseguradora,
 } from "../lib/cobros-plantillas";
@@ -3657,6 +3657,53 @@ export const cobrosRouter = {
 				motivo: string;
 			}> = [];
 
+			// 4.b Total real en atraso por crédito, SOLO si la plantilla lo usa. El
+			// conteo del job (mora.cuotas_atrasadas) cuenta la cuota completa aunque
+			// tenga abonos parciales (registerPayment deja esas filas con
+			// pagado=false y el job solo excluye cuotas con un pago pagado=true),
+			// así que multiplicarlo por la cuota sobrecontaría. Se trae el detalle
+			// de cada crédito elegible y se calcula igual que el modal individual
+			// (calcularMontoTotalAtrasoDesdeCuotas). null = detalle no disponible.
+			const totalAtrasoPorSifco = new Map<string, string | null>();
+			if (cuerpoBase.includes("{montoTotalAtraso}")) {
+				const sifcosElegibles = creditosFiltrados
+					.filter(
+						(c) =>
+							c.creditos.cuota &&
+							Number(c.creditos.cuota) !== 0 &&
+							c.asesores &&
+							locales.get(c.creditos.numero_credito_sifco ?? "")?.telefono,
+					)
+					.map((c) => c.creditos.numero_credito_sifco)
+					.filter((s): s is string => !!s);
+				const CONCURRENCIA_DETALLE = 5;
+				for (let i = 0; i < sifcosElegibles.length; i += CONCURRENCIA_DETALLE) {
+					await Promise.all(
+						sifcosElegibles
+							.slice(i, i + CONCURRENCIA_DETALLE)
+							.map(async (s) => {
+								try {
+									const detalle = await carteraBackClient.getCredito(s);
+									totalAtrasoPorSifco.set(
+										s,
+										calcularMontoTotalAtrasoDesdeCuotas(
+											detalle.cuotasAtrasadas ?? [],
+											detalle.credito.cuota,
+											detalle.moraActual ?? 0,
+										),
+									);
+								} catch (err) {
+									console.error(
+										`[cobros-masivo] sin detalle de cartera para ${s}:`,
+										err,
+									);
+									totalAtrasoPorSifco.set(s, null);
+								}
+							}),
+					);
+				}
+			}
+
 			for (const credito of creditosFiltrados) {
 				const sifco = credito.creditos.numero_credito_sifco;
 				const cuota = credito.creditos.cuota;
@@ -3737,6 +3784,22 @@ export const cobrosRouter = {
 					continue;
 				}
 
+				// Si el cuerpo usa {montoTotalAtraso}, el total viene del detalle de
+				// cartera (ver 4.b); sin él se descarta antes que mandar "Q." o un
+				// monto inflado.
+				const totalAtraso = prepararMontoTotalAtrasoParaEnvio(
+					cuerpoBase,
+					totalAtrasoPorSifco.get(sifco ?? ""),
+				);
+				if (!totalAtraso.enviar) {
+					descartados.push({
+						numeroSifco: sifco,
+						clienteNombre,
+						motivo: totalAtraso.motivo,
+					});
+					continue;
+				}
+
 				// Día de pago: tomar el día del mes de la fecha de vencimiento de la
 				// próxima cuota que devuelve cartera (`proxima_cuota`). Es el mismo
 				// criterio que usa el detalle individual de este router, y la única
@@ -3766,13 +3829,10 @@ export const cobrosRouter = {
 					telefonoAsesor: telefonoAsesor.telefonoAsesor,
 					nombreAsesor: asesor.nombre ?? "",
 					expectativaMora: expectativaMora.expectativaMora,
-					// Total con TODAS las cuotas vencidas (cuotas × cuota + mora) para
-					// la notificación de 2-3 cuotas; montoAdeudado es mora + 1 cuota.
-					montoTotalAtraso: calcularMontoTotalAtraso(
-						credito.mora?.cuotas_atrasadas,
-						cuota,
-						montoMora,
-					),
+					// Total real con TODAS las cuotas vencidas (detalle de cartera, ver
+					// 4.b) para la notificación de 2-3 cuotas; montoAdeudado sigue
+					// siendo mora + 1 cuota.
+					montoTotalAtraso: totalAtraso.montoTotalAtraso,
 					// Bloque del seguro de la bienvenida según la aseguradora de la
 					// oportunidad de cada crédito (Universales o G&T).
 					...seguroPorAseguradora(info?.insuranceProvider),

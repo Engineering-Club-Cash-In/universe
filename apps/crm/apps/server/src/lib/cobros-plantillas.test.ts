@@ -3,9 +3,9 @@ import {
 	anioImpuestoCirculacion,
 	COBROS_MOTIVO_SIN_EXPECTATIVA_MORA,
 	COBROS_MOTIVO_SIN_TELEFONO_ASESOR,
+	COBROS_MOTIVO_SIN_TOTAL_ATRASO,
 	COBROS_NO_REPLY_WARNING,
 	calcularExpectativaMora,
-	calcularMontoTotalAtraso,
 	calcularMontoTotalAtrasoDesdeCuotas,
 	contarCuotasAtrasadasUnicas,
 	cuerpoUsaFechaLimiteImpuesto,
@@ -14,6 +14,7 @@ import {
 	interpolar,
 	PLANTILLAS_MENSAJES,
 	prepararExpectativaMoraParaEnvio,
+	prepararMontoTotalAtrasoParaEnvio,
 	prepararTelefonoAsesorParaEnvio,
 	seguroPorAseguradora,
 } from "./cobros-plantillas";
@@ -424,16 +425,11 @@ Te recordamos realizar el pago de tu *Impuesto de Circulación {anioImpuesto}*.
 		);
 	});
 
-	test("la notificación de 2-3 cuotas usa el total con todas las cuotas vencidas", () => {
-		// cuotas atrasadas × cuota + mora (misma regla que el total de la promesa
-		// de pago). 2 × 1000 + 100 = 2100 — no 1100 como daría mora + 1 cuota.
-		expect(calcularMontoTotalAtraso(2, "1000.00", "100.00")).toBe("2,100.00");
-		expect(calcularMontoTotalAtraso(3, 1832.69, 0)).toBe("5,498.07");
-		// Sin cuotas atrasadas (o datos inválidos) no hay total que anunciar.
-		expect(calcularMontoTotalAtraso(0, "1000.00", "100.00")).toBe("");
-		expect(calcularMontoTotalAtraso(null, "1000.00", "100.00")).toBe("");
-		expect(calcularMontoTotalAtraso(2, "no-numerico", "0")).toBe("");
-
+	test("la notificación de 2-3 cuotas usa el total real con todas las cuotas vencidas", () => {
+		// El total sale SIEMPRE del detalle de cartera
+		// (calcularMontoTotalAtrasoDesdeCuotas), tanto en el modal como en el
+		// masivo — el conteo del job cuenta la cuota completa aunque tenga abonos
+		// parciales, así que no sirve para un "monto total".
 		const mora60 = PLANTILLAS_MENSAJES.find(
 			(plantilla) => plantilla.id === "mora_60",
 		);
@@ -447,6 +443,33 @@ Te recordamos realizar el pago de tu *Impuesto de Circulación {anioImpuesto}*.
 			(plantilla) => plantilla.id === "mora_30",
 		);
 		expect(mora30?.cuerpo).toContain("Q{montoAdeudado}");
+	});
+
+	test("descarta el envío que usa el total en atraso cuando no se pudo calcular", () => {
+		const mora60 =
+			PLANTILLAS_MENSAJES.find((plantilla) => plantilla.id === "mora_60")
+				?.cuerpo ?? "";
+
+		// null = no se pudo traer el detalle de cartera; "" = sin cuotas atrasadas.
+		for (const total of [null, undefined, ""]) {
+			expect(prepararMontoTotalAtrasoParaEnvio(mora60, total)).toEqual({
+				enviar: false,
+				motivo: COBROS_MOTIVO_SIN_TOTAL_ATRASO,
+			});
+		}
+		expect(prepararMontoTotalAtrasoParaEnvio(mora60, "2,100.00")).toEqual({
+			enviar: true,
+			montoTotalAtraso: "2,100.00",
+		});
+
+		// Una plantilla que no usa la variable se envía aunque no haya total.
+		const mora30 =
+			PLANTILLAS_MENSAJES.find((plantilla) => plantilla.id === "mora_30")
+				?.cuerpo ?? "";
+		expect(prepararMontoTotalAtrasoParaEnvio(mora30, null)).toEqual({
+			enviar: true,
+			montoTotalAtraso: "",
+		});
 	});
 
 	test("el total del detalle resta los pagos parciales y no duplica cuotas con varias filas de pago", () => {

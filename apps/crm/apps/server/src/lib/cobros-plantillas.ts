@@ -46,42 +46,6 @@ export interface VariablesPlantilla {
 }
 
 /**
- * Total a pagar para ponerse al día con todas las cuotas vencidas cuando SOLO
- * se tiene el conteo del job de moras (envío masivo, getAllCredits no trae las
- * cuotas): cuotas atrasadas × cuota + mora — la misma regla que el total de la
- * promesa de pago en cobros. Ese conteo (moras_credito.cuotas_atrasadas) es
- * por cuota única y NO incluye las cuotas con algún pago real aplicado, así que
- * un abono parcial nunca infla este total (lo omite, no lo sobrecuenta). Con
- * las filas de cuotas a mano usar calcularMontoTotalAtrasoDesdeCuotas, que sí
- * resta lo cubierto. `{montoAdeudado}` sigue siendo mora + UNA cuota (criterio
- * de la pantalla de detalle), correcto para "1 cuota con atraso". Devuelve ""
- * si no hay cuotas atrasadas o el total no es positivo.
- */
-export function calcularMontoTotalAtraso(
-	cuotasAtraso: number | null | undefined,
-	cuota: string | number | null | undefined,
-	montoMora: string | number | null | undefined,
-): string {
-	const cuotas = Number(cuotasAtraso ?? 0);
-	const cuotaNum = Number(cuota ?? 0);
-	const mora = Number(montoMora ?? 0);
-	if (
-		!Number.isFinite(cuotas) ||
-		!Number.isFinite(cuotaNum) ||
-		!Number.isFinite(mora) ||
-		cuotas <= 0
-	) {
-		return "";
-	}
-	const total = cuotas * cuotaNum + mora;
-	if (total <= 0) return "";
-	return total.toLocaleString("es-GT", {
-		minimumFractionDigits: 2,
-		maximumFractionDigits: 2,
-	});
-}
-
-/**
  * Fila de `cuotasAtrasadas` tal como la devuelve `getCredito` de cartera: una
  * por par cuota-pago (leftJoin), así que una misma cuota puede venir repetida
  * si tiene varias filas de pago. Los rubros son los mismos que usa cartera
@@ -327,6 +291,32 @@ export function prepararExpectativaMoraParaEnvio(
 	}
 
 	return { enviar: true, expectativaMora };
+}
+
+export const COBROS_MOTIVO_SIN_TOTAL_ATRASO =
+	"no se pudo calcular el total en atraso (sin cuotas atrasadas o sin detalle de cartera)";
+
+/**
+ * Un cuerpo que usa {montoTotalAtraso} no se puede enviar sin ese total: el
+ * mensaje diría "por un monto total de Q." roto o, peor, un monto inventado.
+ * El total sale de calcularMontoTotalAtrasoDesdeCuotas sobre el detalle del
+ * crédito; si el detalle no se pudo traer o no hay cuotas atrasadas, se
+ * descarta (mismo patrón que los otros gates). `null` = no se pudo obtener el
+ * detalle; "" = detalle sin cuotas atrasadas.
+ */
+export function prepararMontoTotalAtrasoParaEnvio(
+	cuerpo: string,
+	montoTotalAtraso: string | null | undefined,
+):
+	| { enviar: true; montoTotalAtraso: string }
+	| { enviar: false; motivo: string } {
+	if (!cuerpo.includes("{montoTotalAtraso}")) {
+		return { enviar: true, montoTotalAtraso: montoTotalAtraso ?? "" };
+	}
+	if (!montoTotalAtraso) {
+		return { enviar: false, motivo: COBROS_MOTIVO_SIN_TOTAL_ATRASO };
+	}
+	return { enviar: true, montoTotalAtraso };
 }
 
 export function prepararTelefonoAsesorParaEnvio(

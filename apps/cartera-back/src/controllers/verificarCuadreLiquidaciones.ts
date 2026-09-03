@@ -568,13 +568,39 @@ export async function leerReinversionesAnterioresSinColocar(periodo: string) {
              ))
              from cartera.compras_credito_inversionista c
              left join lateral (
-               select coalesce(hm.monto_nuevo, 0) as saldo
-               from cartera.historico_monto_aportado_espejo hm
-               where hm.credito_id       = c.credito_id
-                 and hm.inversionista_id = c.inversionista_id
-                 and hm.fecha < c.fecha
-               order by hm.fecha desc, hm.id desc
-               limit 1
+               -- La referencia se ancla a la LIQUIDACIÓN, no a la fecha de la
+               -- compra: addInvestorToCredit reconstruye el espejo —y el
+               -- trigger escribe su fila— antes de insertar el registro de
+               -- compra, cuya fecha la pone la aplicación 1.5-2 s después
+               -- (medido sobre producción, sin excepción). Cortar en c.fecha
+               -- dejaba adentro el movimiento de la propia colocación, el
+               -- delta daba cero y toda reinversión intacta se reportaba como
+               -- no colocada.
+               --
+               -- Mismo patrón que saldo_previo: el último monto_nuevo anterior
+               -- a la liquidación, o el monto_anterior del primer movimiento
+               -- posterior si no hay bitácora previa.
+               select coalesce(
+                 (
+                   select coalesce(hm.monto_nuevo, 0)
+                   from cartera.historico_monto_aportado_espejo hm
+                   where hm.credito_id       = c.credito_id
+                     and hm.inversionista_id = c.inversionista_id
+                     and hm.fecha < t.fecha_liquidacion
+                   order by hm.fecha desc, hm.id desc
+                   limit 1
+                 ),
+                 (
+                   select coalesce(hm.monto_anterior, 0)
+                   from cartera.historico_monto_aportado_espejo hm
+                   where hm.credito_id       = c.credito_id
+                     and hm.inversionista_id = c.inversionista_id
+                     and hm.fecha > t.fecha_liquidacion
+                   order by hm.fecha asc, hm.id asc
+                   limit 1
+                 ),
+                 0
+               ) as saldo
              ) antes on true
              left join lateral (
                select coalesce(hm.monto_nuevo, 0) as saldo

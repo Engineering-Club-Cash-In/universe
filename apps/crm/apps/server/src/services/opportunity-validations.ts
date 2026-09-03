@@ -547,7 +547,10 @@ export async function ejecutarValidaciones(parametros: {
 }): Promise<ResultadoEjecucionValidaciones> {
 	// El DPI se relee en cada vuelta: puede cambiar mientras se espera un
 	// override en curso, y la llave tiene que reflejar el DPI actual antes
-	// de entrar al mutex (mismo patrón que `marcarValidacionManual`)
+	// de entrar al mutex (mismo patrón que `marcarValidacionManual`). Se
+	// pasa esta misma lectura a `ejecutarValidacionesInterno` en vez de que
+	// vuelva a leerla: una segunda lectura independiente podría ver un DPI
+	// distinto al que ya decidió la llave, sin que nada la re-ancle.
 	for (;;) {
 		const oportunidad = await cargarOportunidadConLead(
 			parametros.opportunityId,
@@ -564,22 +567,22 @@ export async function ejecutarValidaciones(parametros: {
 		}
 
 		return conMutexDeOportunidad(clave, () =>
-			ejecutarValidacionesInterno(parametros),
+			ejecutarValidacionesInterno({ ...parametros, oportunidad }),
 		);
 	}
 }
 
 async function ejecutarValidacionesInterno({
 	opportunityId,
+	oportunidad,
 	userId,
 	reusarVigente,
 }: {
 	opportunityId: string;
+	oportunidad: Awaited<ReturnType<typeof cargarOportunidadConLead>>;
 	userId?: string | null;
 	reusarVigente?: boolean;
 }): Promise<ResultadoEjecucionValidaciones> {
-	const oportunidad = await cargarOportunidadConLead(opportunityId);
-
 	if (!oportunidad) {
 		return {
 			exento: false,

@@ -5,6 +5,7 @@
 
 import { sendLead } from "../crm/profile.service";
 import { createInvestor } from "../cartera/investor.service";
+import { normalizeDpi } from "../../lib/portalIdentity";
 
 // ============================================
 // TIPOS
@@ -39,7 +40,18 @@ export interface RegisterExternalUserResponse {
 export const registerExternalUser = async (
   payload: RegisterExternalUserPayload
 ): Promise<RegisterExternalUserResponse> => {
-  const { userType, fullName, email, dpi, phone } = payload;
+  const { userType, fullName, email, phone } = payload;
+
+  // Último punto donde el DPI sigue siendo una cadena antes de convertirse en
+  // el entero que se guarda en cartera. Se normaliza aquí para que ningún
+  // llamador pueda colar separadores hasta el `parseInt`: "1234-56789-0123"
+  // se convertiría en 1234 y cartera quedaría con un identificador distinto
+  // al que guarda Better Auth.
+  const dpi = normalizeDpi(payload.dpi);
+
+  if (!dpi) {
+    throw new Error("El DPI debe tener exactamente 13 dígitos");
+  }
 
   try {
     if (userType === "CLIENT") {

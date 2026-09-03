@@ -123,33 +123,40 @@ unifiedRoutes.post("/register-external-auth", requireAuth, async (c) => {
     const body = await c.req.json<RegisterExternalUserPayload>();
     const user = c.get("user");
 
+    // Validaciones. `isPortalUserType` acota a los roles de autoservicio: un
+    // "ADMIN" en el body no pasa de aquí.
+    if (!isPortalUserType(body.userType)) {
+      throw new HTTPException(400, {
+        message: "El campo userType es requerido y debe ser 'CLIENT' o 'INVESTOR'",
+      });
+    }
+
+    if (!body.dpi) {
+      throw new HTTPException(400, { message: "El campo dpi es requerido" });
+    }
+
+    // El DPI se normaliza ANTES de armar el payload y viaja normalizado a
+    // todas partes. `normalizeDpi` acepta separadores ("1234-56789-0123"), así
+    // que reenviar el valor crudo dejaba los dos sistemas con identificadores
+    // distintos: cartera hace `parseInt` sobre esta cadena y habría registrado
+    // el DPI 1234 mientras Better Auth guarda los 13 dígitos completos.
+    const dpi = normalizeDpi(body.dpi);
+
+    if (!dpi) {
+      throw new HTTPException(400, {
+        message: "El DPI debe tener exactamente 13 dígitos",
+      });
+    }
+
     // El correo sale SIEMPRE de la sesión: es la identidad de la cuenta sobre
     // la que se van a escribir rol y DPI, así que no puede venir del body.
     const payload: RegisterExternalUserPayload = {
       userType: body.userType,
       fullName: body.fullName || user.name || "",
       email: user.email || "",
-      dpi: body.dpi,
+      dpi,
       phone: body.phone,
     };
-
-    // Validaciones. `isPortalUserType` acota a los roles de autoservicio: un
-    // "ADMIN" en el body no pasa de aquí.
-    if (!isPortalUserType(payload.userType)) {
-      throw new HTTPException(400, {
-        message: "El campo userType es requerido y debe ser 'CLIENT' o 'INVESTOR'",
-      });
-    }
-
-    if (!payload.dpi) {
-      throw new HTTPException(400, { message: "El campo dpi es requerido" });
-    }
-
-    if (!normalizeDpi(payload.dpi)) {
-      throw new HTTPException(400, {
-        message: "El DPI debe tener exactamente 13 dígitos",
-      });
-    }
 
     const result = await registerExternalUser(payload);
 

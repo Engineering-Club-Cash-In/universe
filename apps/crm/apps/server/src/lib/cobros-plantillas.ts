@@ -98,7 +98,8 @@ export function fechaLimiteImpuestoVencida(ahora = new Date()): boolean {
  */
 export function cuerpoUsaFechaLimiteImpuesto(cuerpo: string): boolean {
 	return (
-		cuerpo.includes("{fechaLimiteImpuesto}") || cuerpo.includes("{anioImpuesto}")
+		cuerpo.includes("{fechaLimiteImpuesto}") ||
+		cuerpo.includes("{anioImpuesto}")
 	);
 }
 
@@ -266,9 +267,9 @@ export const PLANTILLAS_MENSAJES: PlantillaMensaje[] = [
 Día de pago mensual: {fechaPago}
 Monto de cuota: Q{cuotaMensual}
 
-💳 Cuentas para realizar tus pagos
-Tipo: Monetaria
-A nombre de: CUBE INVESTMENTS, S.A.
+💳 *Cuentas para realizar tus pagos*
+*Tipo: Monetaria*
+*A nombre de: CUBE INVESTMENTS, S.A.*
 * BI: 5520029876
 * BAM: 3020123033
 * GyT: 01300039945

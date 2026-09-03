@@ -1154,6 +1154,18 @@ export async function marcarValidacionRenapManual(params: {
 	return marcarValidacionManual({ ...params, tipo: "renap" });
 }
 
+/** Última fila de ese tipo para el DPI actual; si no hay, la más reciente de cualquier DPI */
+function filaMasRecientePorDpi(
+	validaciones: ValidacionOportunidad[],
+	tipo: "renap" | "buro",
+	dpiActual: string | null,
+): ValidacionOportunidad | null {
+	const delDpiActual =
+		dpiActual &&
+		validaciones.find((v) => v.tipo === tipo && v.dpi === dpiActual);
+	return delDpiActual || validaciones.find((v) => v.tipo === tipo) || null;
+}
+
 /** Detalle de un override manual, con el nombre de quien lo marcó */
 async function obtenerOverride(
 	validationId: string,
@@ -1224,15 +1236,21 @@ export async function getValidaciones({
 		.where(eq(opportunityValidations.opportunityId, opportunityId))
 		.orderBy(desc(opportunityValidations.ejecutadoAt));
 
-	const renap = validaciones.find((v) => v.tipo === "renap") ?? null;
-	const buro = validaciones.find((v) => v.tipo === "buro") ?? null;
-	const buroVigente = buro?.expiraEn
-		? new Date(buro.expiraEn) > new Date()
-		: false;
-
 	const dpiActual = oportunidad.leadDpi
 		? normalizarDpi(oportunidad.leadDpi)
 		: null;
+
+	// Prioriza la fila del DPI actual (mismo criterio que el gate real en
+	// `cargarVigenciasPorFuente`); si no hay ninguna, cae a la más reciente
+	// de cualquier DPI, solo como contexto (el aviso de desactualizado la
+	// distingue). Sin priorizar el DPI actual, un DPI que cambió y volvió a
+	// su valor anterior podía tapar un error vigente y bloqueante del DPI
+	// actual con una fila más reciente de una identidad distinta.
+	const renap = filaMasRecientePorDpi(validaciones, "renap", dpiActual);
+	const buro = filaMasRecientePorDpi(validaciones, "buro", dpiActual);
+	const buroVigente = buro?.expiraEn
+		? new Date(buro.expiraEn) > new Date()
+		: false;
 
 	// Se calcula por fuente, no con un DPI único mezclado entre las dos: cada
 	// una puede haber quedado con un DPI distinto (ej. Buró ya overrideado,

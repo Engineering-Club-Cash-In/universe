@@ -11,6 +11,7 @@ interface SelectProps {
   options: SelectOption[];
   value: string;
   onChange: (value: string) => void;
+  id?: string;
   placeholder?: string;
   color?: string;
   variant?: "dark" | "light" | "secondary";
@@ -21,6 +22,7 @@ export const Select = ({
   options,
   value,
   onChange,
+  id,
   placeholder = "Seleccionar...",
   color = "secondary",
   variant = "dark",
@@ -148,6 +150,7 @@ export const Select = ({
       <button
         type="button"
         ref={buttonRef}
+        id={id}
         onClick={() => !disabled && setIsOpen(!isOpen)}
         onKeyDown={handleButtonKeyDown}
         aria-haspopup="listbox"

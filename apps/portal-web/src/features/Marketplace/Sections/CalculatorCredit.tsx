@@ -148,6 +148,7 @@ export const CalculatorCredit = ({ standalone = false }: CalculatorCreditProps) 
                       </span>
                     </label>
                     <Select
+                      id="vehicleCondition"
                       value={vehicleCondition}
                       onChange={(value) => {
                         const nextCondition = value as VehicleCondition;

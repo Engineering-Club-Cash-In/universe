@@ -111,7 +111,15 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
   const inicio = `${periodo}-01`;
 
   const resultado = await db.execute(sql`
-    with todas as (
+    with inicio_procedencia as (
+      -- Desde cuándo existe el sello de procedencia. Antes de esa marca no hay
+      -- forma de atribuir una reinversión a su liquidación, así que ahí se cae
+      -- a la fecha; después, el sello manda.
+      select min(created_at) as desde
+      from cartera.compras_credito_inversionista
+      where liquidacion_id is not null
+    ),
+    todas as (
       select l.liquidacion_id, l.inversionista_id, l.fecha_liquidacion, l.reinversion_total,
              -- Desempate por id: /liquidate-inversionista-pagos acepta una
              -- fecha_liquidacion explícita, así que dos liquidaciones del mismo
@@ -194,13 +202,30 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
       -- ajuste de compras no se apropie del crecimiento que trajo la
       -- reinversión. Los intentos revertidos devolvieron su monto a CUBE y no
       -- entran.
+      -- La atribución va por el SELLO, no por fecha: completeEspejo reescribe
+      -- created_at, fecha, fecha_completada y updated_at de la reinversión con
+      -- el día siguiente a la ÚLTIMA liquidación del inversionista cuando se
+      -- acepta tarde (completeEspejo.ts:309-328). Una reinversión vieja, ya
+      -- incluida en la foto del histórico, se redataría como posterior a la
+      -- liquidación y se descontaría del margen de las compras, produciendo un
+      -- sobrante falso.
       select c.inversionista_id, c.credito_id, p.liquidacion_id,
              sum(c.monto_aportado) as monto
       from cartera.compras_credito_inversionista c
       join pendientes p on p.inversionista_id = c.inversionista_id
       where c.tipo_operacion = 'reinversion'
         and c.revertida_at is null
-        and c.created_at > p.fecha_liquidacion
+        and (
+          c.liquidacion_id = p.liquidacion_id
+          or (
+            -- Filas anteriores al sello: no hay procedencia, solo la fecha.
+            c.liquidacion_id is null
+            and c.created_at < coalesce(
+              (select desde from inicio_procedencia), 'infinity'::timestamptz
+            )
+            and c.created_at > p.fecha_liquidacion
+          )
+        )
       group by 1, 2, 3
     ),
     pendiente_por_credito as (
@@ -527,8 +552,39 @@ export async function leerReinversionesAnterioresSinColocar(periodo: string) {
     select t.liquidacion_id, t.inversionista_id, i.nombre,
            t.fecha_liquidacion, t.reinversion_total::text as reinversion_total,
            coalesce((
-             select sum(c.monto_aportado)
+             -- Cuánto de la reinversión SIGUE en el espejo, no cuánto dice el
+             -- log de compras que se colocó. Una colocación que después se
+             -- borra deja su fila intacta y no revertida, y la liquidación
+             -- siguiente fotografía el saldo ya deficiente: tratar la fila como
+             -- prueba haría que los dos chequeos pasaran por alto la pérdida.
+             --
+             -- De cada colocación se cuenta lo que el crédito destino conservó
+             -- entre la colocación y la liquidación siguiente: el saldo justo
+             -- antes de esa liquidación menos el que tenía justo antes de la
+             -- colocación, topado por el monto colocado.
+             select sum(least(
+               c.monto_aportado,
+               greatest(0, coalesce(hasta.saldo, 0) - coalesce(antes.saldo, 0))
+             ))
              from cartera.compras_credito_inversionista c
+             left join lateral (
+               select coalesce(hm.monto_nuevo, 0) as saldo
+               from cartera.historico_monto_aportado_espejo hm
+               where hm.credito_id       = c.credito_id
+                 and hm.inversionista_id = c.inversionista_id
+                 and hm.fecha < c.fecha
+               order by hm.fecha desc, hm.id desc
+               limit 1
+             ) antes on true
+             left join lateral (
+               select coalesce(hm.monto_nuevo, 0) as saldo
+               from cartera.historico_monto_aportado_espejo hm
+               where hm.credito_id       = c.credito_id
+                 and hm.inversionista_id = c.inversionista_id
+                 and (t.siguiente is null or hm.fecha < t.siguiente)
+               order by hm.fecha desc, hm.id desc
+               limit 1
+             ) hasta on true
              where c.inversionista_id = t.inversionista_id
                and c.tipo_operacion = 'reinversion'
                and c.revertida_at is null

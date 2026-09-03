@@ -432,6 +432,13 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
       -- no se movió, pero un tope calculado por grupo no ve las dos puntas y
       -- deja restar la recompra.
       --
+      -- Con una asimetría: de los créditos que liquidaron solo cuenta lo que
+      -- CRECIERON. Que una posición histórica baje es la pérdida que este job
+      -- existe para encontrar, y dejarla bajar el techo permitiría que una
+      -- compra en otro crédito la compensara hasta cuadrar. Borrar Q100 de una
+      -- posición de Q1,000 y comprar Q200 en otro lado tiene que seguir
+      -- reportando los Q100 que faltan.
+      --
       -- El crecimiento se mide contra la referencia de cada crédito: la foto
       -- del histórico si liquidó, 0 si entró por cambio neto.
       --
@@ -441,7 +448,20 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
       -- colocada y luego perdida (crecimiento 0, registro Q100) bajaría el
       -- tope y taparía justo esa pérdida.
       select ec.liquidacion_id,
-             sum(ec.monto - ec.referencia)
+             sum(
+               case
+                 -- Una posición que liquidó y BAJA es justamente la pérdida que
+                 -- este job busca, así que no puede entrar al techo: si entrara,
+                 -- una compra en otro crédito la compensaría y la ecuación
+                 -- cuadraría con el capital ya desaparecido. Solo suma cuando
+                 -- crece.
+                 when ec.liquido then greatest(0, ec.monto - ec.referencia)
+                 -- En el grupo que no liquidó el signo sí cuenta: ahí viven las
+                 -- dos puntas de una compra que expira y se rehace, y es lo que
+                 -- hace que se cancelen.
+                 else ec.monto - ec.referencia
+               end
+             )
              - sum(least(
                  coalesce(en.monto, 0),
                  greatest(0, ec.monto - ec.referencia)

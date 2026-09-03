@@ -608,6 +608,7 @@ export function TableInvestors() {
       re_inversion: inv.re_inversion ?? "sin_reinversion",
       moneda: inv.moneda ?? "quetzales",
       dpi: inv.dpi ?? "",
+      dpi_rep_legal: inv.dpi_rep_legal ?? "",
       tipo_reinversion: inv.re_inversion ?? inv.tipo_reinversion ?? "sin_reinversion",
       monto_reinversion: Number(inv.monto_reinversion ?? 0),
       email: inv.email ?? "",
@@ -770,6 +771,10 @@ export function TableInvestors() {
       re_inversion: cat.tipo_reinversion,
       moneda: cat.moneda,
       dpi: cat.dpi ?? "",
+      // Sin esto, editar desde el header a un inversionista SIN créditos abre el
+      // modal con el campo vacío y al guardar BORRA el DPI del representante
+      // (llave presente + valor vacío = borrar), dejándolo fuera del portal.
+      dpi_rep_legal: cat.dpi_rep_legal ?? "",
       tipo_reinversion: cat.tipo_reinversion,
       monto_reinversion: cat.monto_reinversion ?? 0,
       email: cat.email,

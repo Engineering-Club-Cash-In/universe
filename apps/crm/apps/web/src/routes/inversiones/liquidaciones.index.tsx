@@ -62,6 +62,7 @@ function LiquidacionesInversionistas() {
 	const [formBanco, setFormBanco] = useState("");
 	const [formTipoCuenta, setFormTipoCuenta] = useState("");
 	const [formNumeroCuenta, setFormNumeroCuenta] = useState("");
+	const [formDpiRepLegal, setFormDpiRepLegal] = useState("");
 	const [formMoneda, setFormMoneda] = useState("quetzales");
 	const [formEmiteFactura, setFormEmiteFactura] = useState(false);
 	const [formTipoReinversion, setFormTipoReinversion] = useState("sin_reinversion");
@@ -71,8 +72,9 @@ function LiquidacionesInversionistas() {
 	const [formMontoCompra, setFormMontoCompra] = useState("");
 	const [formModalidadFacturacion, setFormModalidadFacturacion] =
 		useState<ModalidadFacturacion>("p2p_directa");
-	// Campo que cartera rechazó por duplicado (dpi | email | nombre): lo manda
-	// el backend en err.data.campo para marcar el input exacto.
+	// Campo que cartera rechazó (dpi | email | nombre duplicado, o
+	// dpi_rep_legal inexistente): lo manda el backend en err.data.campo para
+	// marcar el input exacto.
 	const [campoDuplicado, setCampoDuplicado] = useState<{
 		campo: string;
 		mensaje: string;
@@ -164,6 +166,7 @@ function LiquidacionesInversionistas() {
 		setFormBanco("");
 		setFormTipoCuenta("");
 		setFormNumeroCuenta("");
+		setFormDpiRepLegal("");
 		setFormMoneda("quetzales");
 		setFormEmiteFactura(false);
 		setFormTipoReinversion("sin_reinversion");
@@ -200,12 +203,14 @@ function LiquidacionesInversionistas() {
 				? "No se pudo crear el inversionista. Verifica los datos e intenta de nuevo."
 				: (mensaje as string);
 
-			// Duplicado: además del toast, marcamos el input culpable y lo
-			// enfocamos para que corrijan ahí mismo.
+			// Error atribuible a un campo: además del toast, marcamos el input
+			// culpable y lo enfocamos para que corrijan ahí mismo. El id del
+			// input va en kebab-case y el campo del backend en snake_case
+			// (dpi_rep_legal → inv-dpi-rep-legal).
 			const campo: string | undefined = err?.data?.campo;
 			if (campo) {
 				setCampoDuplicado({ campo, mensaje: texto });
-				document.getElementById(`inv-${campo}`)?.focus();
+				document.getElementById(`inv-${campo.replace(/_/g, "-")}`)?.focus();
 			} else {
 				setCampoDuplicado(null);
 			}
@@ -549,6 +554,29 @@ function LiquidacionesInversionistas() {
 							/>
 						</div>
 
+						{/* DPI del representante legal */}
+						<div className="space-y-1.5">
+							<Label htmlFor="inv-dpi-rep-legal">
+								DPI del representante legal
+							</Label>
+							<Input
+								id="inv-dpi-rep-legal"
+								value={formDpiRepLegal}
+								onChange={(e) => {
+									setFormDpiRepLegal(e.target.value.replace(/\D/g, ""));
+									limpiarDuplicado("dpi_rep_legal");
+								}}
+								placeholder="DPI de quien representa a la empresa"
+								maxLength={20}
+								inputMode="numeric"
+								aria-invalid={duplicadoEn("dpi_rep_legal")}
+								className={
+									duplicadoEn("dpi_rep_legal") ? "border-destructive" : undefined
+								}
+							/>
+							<MensajeDuplicado campo="dpi_rep_legal" />
+						</div>
+
 						{/* Moneda + Factura */}
 						<div className="grid grid-cols-2 gap-3">
 							<div className="space-y-1.5">
@@ -763,6 +791,7 @@ function LiquidacionesInversionistas() {
 									banco: formBanco ? Number(formBanco) : null,
 									tipoCuenta: formTipoCuenta || undefined,
 									numeroCuenta: formNumeroCuenta.trim() || undefined,
+									dpiRepLegal: formDpiRepLegal.trim() || undefined,
 									moneda: formMoneda as "quetzales" | "dolares",
 									emiteFactura: formEmiteFactura,
 									tipoReinversion: formTipoReinversion,

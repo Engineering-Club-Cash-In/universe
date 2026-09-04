@@ -4,6 +4,7 @@ import { db } from "../db/connection";
 import * as schema from "../db/schema";
 import { env } from "../config/env";
 import { sendPasswordResetEmail } from "../services/email.service";
+import { SESSION_COOKIE_PREFIX } from "./portalCookies";
 
 export const auth = betterAuth({
   database: drizzleAdapter(db, {
@@ -96,7 +97,9 @@ export const auth = betterAuth({
     },
   },
   advanced: {
-    cookiePrefix: "better-auth",
+    // Compartido con la defensa anti-CSRF, que necesita reconocer la cookie
+    // de sesión para saber cuándo exigir un Origin de confianza.
+    cookiePrefix: SESSION_COOKIE_PREFIX,
     crossSubDomainCookies: {
       enabled: false,
     },

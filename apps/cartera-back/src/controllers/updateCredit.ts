@@ -339,39 +339,56 @@ export const recalculateQuota = async ({ body, set }: any) => {
       fecha_inicio_participacion: inv.fecha_inicio_participacion,
     });
 
+    // updateInvestors reconstruye las filas con DELETE + INSERT, pero acá solo
+    // se recalcula la cuota: el monto no cambia. Sin el contexto de rebuild el
+    // trigger registraría cada participación como una baja y un alta de monto,
+    // sin motivo. Va todo en una transacción porque set_config(..., true) es
+    // tx-local: fuera de ella el contexto se perdería entre statements, y de
+    // paso el delete+insert deja de poder quedar a medias.
     let parentCuotas: Map<number, string> = new Map();
-    if (invsPadre.length > 0) {
-      parentCuotas = await updateInvestors(
-        credito.credito_id,
-        invsPadre.map(mapToInvestorInput) as any,
-        updateFieldsRecalc,
-        credito,
-        numero_credito_sifco,
-        Number(credito.seguro_10_cuotas ?? 0),
-        Number(credito.membresias_pago ?? 0),
-        Number(credito.gps ?? 0),
-        creditos_inversionistas,
-      );
-    }
+    if (invsPadre.length > 0 || invsEspejo.length > 0) {
+      await db.transaction(async (tx) => {
+        const txDb = tx as unknown as typeof db;
+        await setMontoAportadoAuditContext(txDb, "PADRE", undefined, []);
+        await setMontoAportadoAuditContext(txDb, "ESPEJO", undefined, []);
 
-    if (invsEspejo.length > 0) {
-      const espejoSincronizado = invsEspejo.map((inv) => ({
-        ...mapToInvestorInput(inv),
-        cuota_inversionista: parentCuotas.get(inv.inversionista_id),
-      }));
+        if (invsPadre.length > 0) {
+          parentCuotas = await updateInvestors(
+            credito.credito_id,
+            invsPadre.map(mapToInvestorInput) as any,
+            updateFieldsRecalc,
+            credito,
+            numero_credito_sifco,
+            Number(credito.seguro_10_cuotas ?? 0),
+            Number(credito.membresias_pago ?? 0),
+            Number(credito.gps ?? 0),
+            creditos_inversionistas,
+            undefined,
+            txDb,
+          );
+        }
 
-      await updateInvestors(
-        credito.credito_id,
-        espejoSincronizado as any,
-        updateFieldsRecalc,
-        credito,
-        numero_credito_sifco,
-        Number(credito.seguro_10_cuotas ?? 0),
-        Number(credito.membresias_pago ?? 0),
-        Number(credito.gps ?? 0),
-        creditos_inversionistas_espejo,
-        parentCuotas,
-      );
+        if (invsEspejo.length > 0) {
+          const espejoSincronizado = invsEspejo.map((inv) => ({
+            ...mapToInvestorInput(inv),
+            cuota_inversionista: parentCuotas.get(inv.inversionista_id),
+          }));
+
+          await updateInvestors(
+            credito.credito_id,
+            espejoSincronizado as any,
+            updateFieldsRecalc,
+            credito,
+            numero_credito_sifco,
+            Number(credito.seguro_10_cuotas ?? 0),
+            Number(credito.membresias_pago ?? 0),
+            Number(credito.gps ?? 0),
+            creditos_inversionistas_espejo,
+            parentCuotas,
+            txDb,
+          );
+        }
+      });
     }
 
     // 6. Traer los inversionistas ya recalculados para devolverlos

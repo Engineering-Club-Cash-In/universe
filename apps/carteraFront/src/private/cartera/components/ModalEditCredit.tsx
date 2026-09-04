@@ -213,12 +213,17 @@ export function ModalEditCredit({
     safeInitialValues.statusCredit === "CAIDO" ||
     safeInitialValues.statusCredit === "INCOBRABLE" ||
     Number(safeInitialValues.capital ?? 0) === 0;
-  // El campo se bloquea por estado, no por valor: un crédito vivo que quedó en
-  // 0 por importación o por un reinicio a medias debe poder corregirse acá (el
-  // backend acepta cualquier monto >= 1), en vez de terminar en un repair SQL.
+  // El campo solo se bloquea cuando ya no queda nada que ajustar: capital 0 en
+  // un crédito cerrado. Con capital positivo tiene que seguir editable aunque
+  // el crédito esté cerrado, porque el backend admite llevarlo a 0 en esos
+  // estados (marcarCreditoComoCaido y el merge dejan el capital intacto). Y un
+  // crédito vivo que quedó en 0 por importación o por un reinicio a medias se
+  // corrige acá en vez de terminar en un repair SQL.
   const capitalBloqueado =
-    safeInitialValues.statusCredit === "CANCELADO" ||
-    safeInitialValues.statusCredit === "CAIDO";
+    Number(safeInitialValues.capital ?? 0) === 0 &&
+    (safeInitialValues.statusCredit === "CANCELADO" ||
+      safeInitialValues.statusCredit === "CAIDO" ||
+      safeInitialValues.statusCredit === "INCOBRABLE");
 
   const parsedInvestors = parseInvestors(investorsInitial);
   // 🔥 Sincronización Real (Por ID de Inversionista)

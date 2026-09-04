@@ -37,6 +37,35 @@ interface InvestorOption {
   saldo_reinversion?: string | null;
 }
 
+type InvestorMonto = Pick<
+  InvestorItem,
+  "inversionista_id" | "monto_aportado"
+>;
+
+const hasMontoAportadoChanged = (
+  valores: InvestorMonto[],
+  originales: InvestorMonto[],
+): boolean => {
+  const montoOriginalPorInversionista = new Map(
+    originales.map((inversionista) => [
+      Number(inversionista.inversionista_id),
+      Number(inversionista.monto_aportado),
+    ]),
+  );
+
+  return valores.some((inversionista) => {
+    const montoOriginal = montoOriginalPorInversionista.get(
+      Number(inversionista.inversionista_id),
+    );
+    return (
+      montoOriginal !== undefined &&
+      montoOriginal !== Number(inversionista.monto_aportado)
+    );
+  }) || originales.some((inversionista) => !valores.some(
+    (valor) => Number(valor.inversionista_id) === Number(inversionista.inversionista_id),
+  ));
+};
+
 interface ModalEditCreditProps {
   open: boolean;
   onClose: () => void;
@@ -48,22 +77,35 @@ interface ModalEditCreditProps {
   advisorsOptions: { asesor_id: number; nombre: string }[];
 }
 
-const creditFields = [
-  "capital",
-  "porcentaje_interes",
-  "plazo",
-  "no_poliza",
-  "observaciones",
-  "asesor_id",
-  "cuota",
-  "numero_credito_sifco",
-  "otros",
-  "seguro_10_cuotas",
-  "membresias_pago",
-  "formato_credito",
-] as const;
+// Los campos se renderizan por grupo (creditFieldGroups), no como lista plana.
+type CreditField =
+  | "capital"
+  | "porcentaje_interes"
+  | "plazo"
+  | "no_poliza"
+  | "observaciones"
+  | "asesor_id"
+  | "cuota"
+  | "numero_credito_sifco"
+  | "otros"
+  | "seguro_10_cuotas"
+  | "membresias_pago"
+  | "formato_credito";
+const creditFieldGroups: { title: string; fields: CreditField[] }[] = [
+  {
+    title: "Condiciones del crédito",
+    fields: ["capital", "porcentaje_interes", "plazo", "cuota"],
+  },
+  {
+    title: "Contrato y referencia",
+    fields: ["no_poliza", "numero_credito_sifco", "asesor_id", "formato_credito"],
+  },
+  {
+    title: "Cargos mensuales",
+    fields: ["otros", "seguro_10_cuotas", "membresias_pago", "observaciones"],
+  },
+];
 
-type CreditField = (typeof creditFields)[number];
 const fieldLabels: Record<CreditField, string> = {
   capital: "Capital",
   porcentaje_interes: "Interés (%)",
@@ -144,7 +186,7 @@ export function ModalEditCredit({
   }, [investorsInitial, investorsMirrorInitial]);
 
   // Preparamos los valores iniciales
-  const parseInvestors = (list?: InvestorItem[]) =>
+  const parseInvestors = (list?: InvestorItem[]): InvestorItem[] =>
     list?.map((inv) => ({
       inversionista_id: Number(inv.inversionista_id),
       monto_aportado: Number(inv.monto_aportado),
@@ -155,7 +197,33 @@ export function ModalEditCredit({
     })) || [];
 
   const safeInitialValues =
-    (initialValues ?? {}) as Omit<UpdateCreditBody, "inversionistas">;
+    (initialValues ?? {}) as Omit<UpdateCreditBody, "inversionistas"> & {
+      statusCredit?: string;
+    };
+
+  // Cancelar (credits.ts) y reiniciarCredito dejan el crédito en capital 0, y
+  // este modal reenvía el capital actual en cada guardado. Forzarlo a 1
+  // reviviría el capital de un crédito cerrado o reiniciado, así que cuando ya
+  // vale 0 el campo queda de solo lectura. Poner en 0 uno que tiene capital
+  // sigue prohibido.
+  // El capital puede quedar en 0 si el crédito está en un estado de cierre o si
+  // ya vale 0. En el resto el mínimo es Q1.
+  const admiteCapitalEnCero =
+    safeInitialValues.statusCredit === "CANCELADO" ||
+    safeInitialValues.statusCredit === "CAIDO" ||
+    safeInitialValues.statusCredit === "INCOBRABLE" ||
+    Number(safeInitialValues.capital ?? 0) === 0;
+  // El campo solo se bloquea cuando ya no queda nada que ajustar: capital 0 en
+  // un crédito cerrado. Con capital positivo tiene que seguir editable aunque
+  // el crédito esté cerrado, porque el backend admite llevarlo a 0 en esos
+  // estados (marcarCreditoComoCaido y el merge dejan el capital intacto). Y un
+  // crédito vivo que quedó en 0 por importación o por un reinicio a medias se
+  // corrige acá en vez de terminar en un repair SQL.
+  const capitalBloqueado =
+    Number(safeInitialValues.capital ?? 0) === 0 &&
+    (safeInitialValues.statusCredit === "CANCELADO" ||
+      safeInitialValues.statusCredit === "CAIDO" ||
+      safeInitialValues.statusCredit === "INCOBRABLE");
 
   const parsedInvestors = parseInvestors(investorsInitial);
   // 🔥 Sincronización Real (Por ID de Inversionista)
@@ -194,6 +262,8 @@ export function ModalEditCredit({
       estado_devolucion: safeInitialValues.estado_devolucion ?? "NO_APLICA",
       motivo_devolucion: "",
       motivo_ajuste_capital: "",
+      motivo_ajuste_monto_aportado_padre: "",
+      motivo_ajuste_monto_aportado_espejo: "",
       investors: parsedInvestors,
       investorsMirror: parsedInvestorsMirror, // 🆕 Campo para espejo
     },
@@ -227,6 +297,51 @@ export function ModalEditCredit({
             toast.error(String(error));
           }
         });
+        return;
+      }
+
+      const capitalCambia =
+        Number(values.capital) !== Number(safeInitialValues.capital ?? 0);
+      // La excepción al mínimo es solo dejar en 0 lo que ya vale 0; un monto
+      // fraccionario como 0.50 es un valor nuevo y le aplica el mínimo.
+      const capitalPuedeSerCero =
+        Number(values.capital) === 0 && admiteCapitalEnCero;
+      if (!capitalPuedeSerCero && !(Number(values.capital) >= 1)) {
+        toast.error("El capital debe ser mayor o igual a 1.");
+        return;
+      }
+      if (capitalCambia && !values.motivo_ajuste_capital?.trim()) {
+        toast.error("Ingresá el motivo del ajuste de capital.");
+        return;
+      }
+
+      const montoAportadoPadreCambia = hasMontoAportadoChanged(
+        values.investors,
+        parsedInvestors,
+      );
+      const montoAportadoEspejoCambia = hasMontoAportadoChanged(
+        values.investorsMirror,
+        parsedInvestorsMirror,
+      );
+      if (
+        values.investors.some((inversionista) => Number(inversionista.monto_aportado) < 0) ||
+        values.investorsMirror.some((inversionista) => Number(inversionista.monto_aportado) < 0)
+      ) {
+        toast.error("El monto aportado no puede ser negativo.");
+        return;
+      }
+      if (
+        montoAportadoPadreCambia &&
+        !values.motivo_ajuste_monto_aportado_padre?.trim()
+      ) {
+        toast.error("Ingresá el motivo del ajuste de monto aportado del padre.");
+        return;
+      }
+      if (
+        montoAportadoEspejoCambia &&
+        !values.motivo_ajuste_monto_aportado_espejo?.trim()
+      ) {
+        toast.error("Ingresá el motivo del ajuste de monto aportado del espejo.");
         return;
       }
 
@@ -329,8 +444,16 @@ export function ModalEditCredit({
             : undefined,
         // Motivo del ajuste manual de capital: solo si el capital realmente cambió
         motivo_ajuste_capital:
-          Number(values.capital) !== Number(safeInitialValues.capital ?? 0)
+          capitalCambia
             ? values.motivo_ajuste_capital?.trim() || undefined
+            : undefined,
+        motivo_ajuste_monto_aportado_padre:
+          montoAportadoPadreCambia
+            ? values.motivo_ajuste_monto_aportado_padre?.trim() || undefined
+            : undefined,
+        motivo_ajuste_monto_aportado_espejo:
+          montoAportadoEspejoCambia
+            ? values.motivo_ajuste_monto_aportado_espejo?.trim() || undefined
             : undefined,
 
         // Lista Principal. Los nuevos viajan con es_nuevo + tipo_operacion para
@@ -389,12 +512,23 @@ export function ModalEditCredit({
     },
   });
 
+  const montoAportadoPadreCambia = hasMontoAportadoChanged(
+    formik.values.investors,
+    parsedInvestors,
+  );
+  const montoAportadoEspejoCambia = hasMontoAportadoChanged(
+    formik.values.investorsMirror,
+    parsedInvestorsMirror,
+  );
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent
         onInteractOutside={(e) => e.preventDefault()}
-        className="max-w-3xl w-full bg-white text-gray-800 shadow-2xl border border-blue-100 p-0"
+        className="bg-white text-gray-800 shadow-2xl border border-blue-100 p-0"
         style={{
+          width: "min(96vw, 80rem)",
+          maxWidth: "calc(100vw - 2rem)",
           maxHeight: "94vh",
           display: "flex",
           flexDirection: "column",
@@ -409,7 +543,7 @@ export function ModalEditCredit({
 
         {/* Scrollable content container */}
         <div
-          className="flex-1 overflow-y-auto px-6 pb-4"
+          className="flex-1 overflow-y-auto px-6 pb-6 lg:px-8"
           style={{ maxHeight: "75vh" }}
         >
           <Button
@@ -490,12 +624,23 @@ export function ModalEditCredit({
             style={{ minHeight: 0 }}
           >
             {/* Datos del crédito */}
-            <div className="space-y-4">
-              <h3 className="text-lg font-bold text-blue-800 mb-2">
-                Información del Crédito
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {creditFields.map((name) => {
+            <div className="mt-4 space-y-4">
+              <div>
+                <h3 className="text-lg font-bold text-blue-800">
+                  Información del Crédito
+                </h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  Condiciones, referencias y cargos del crédito.
+                </p>
+              </div>
+              {creditFieldGroups.map(({ title, fields }) => (
+                <section
+                  key={title}
+                  className="rounded-xl border border-blue-100 bg-blue-50/40 p-4"
+                >
+                  <h4 className="text-sm font-bold text-blue-800">{title}</h4>
+                  <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    {fields.map((name) => {
                   if (name === "asesor_id") {
                     return (
                       <div key={name} className="flex flex-col gap-1">
@@ -619,11 +764,27 @@ export function ModalEditCredit({
                         onBlur={(e) => {
                           formik.handleBlur(e);
                           if (!["observaciones", "no_poliza", "numero_credito_sifco", "formato_credito"].includes(name)) {
+                            // Campo vaciado: restaurar el valor original. Number("")
+                            // da 0 y el clamp lo dejaría en 1, marcando un cambio
+                            // de capital que nadie pidió.
+                            if (e.target.value.trim() === "") {
+                              formik.setFieldValue(
+                                name,
+                                Number(
+                                  (safeInitialValues as any)[name] ?? 0,
+                                ),
+                              );
+                              return;
+                            }
                             const val = Number(e.target.value);
-                            formik.setFieldValue(name, Number(val.toFixed(2)));
+                            const normalizedVal =
+                              name === "capital" && !admiteCapitalEnCero
+                                ? Math.max(1, val)
+                                : val;
+                            formik.setFieldValue(name, Number(normalizedVal.toFixed(2)));
                           }
                         }}
-                        className={`border-blue-200 text-gray-800 ${name === "cuota" && nuevaCuota !== null ? "bg-green-50 border-green-400 ring-2 ring-green-200" : "bg-blue-50"}`}
+                        className={`border-blue-200 text-gray-800 ${name === "capital" && capitalBloqueado ? "bg-gray-100 cursor-not-allowed" : name === "cuota" && nuevaCuota !== null ? "bg-green-50 border-green-400 ring-2 ring-green-200" : "bg-blue-50"}`}
                         min={
                           [
                             "observaciones",
@@ -632,9 +793,17 @@ export function ModalEditCredit({
                             "formato_credito",
                           ].includes(name)
                             ? undefined
-                            : 0
+                            : name === "capital" && !admiteCapitalEnCero
+                              ? 1
+                              : 0
                         }
                         step="any"
+                        readOnly={name === "capital" && capitalBloqueado}
+                        title={
+                          name === "capital" && capitalBloqueado
+                            ? "El capital de un crédito cerrado no se edita desde acá"
+                            : undefined
+                        }
                       />
                       {name === "cuota" && nuevaCuota !== null && (
                         <span className="text-xs font-semibold text-green-600 mt-1 flex items-center gap-1">
@@ -643,8 +812,10 @@ export function ModalEditCredit({
                       )}
                     </div>
                   );
-                })}
-              </div>
+                    })}
+                  </div>
+                </section>
+              ))}
 
               {/* Motivo del ajuste de capital: aparece solo cuando el capital cambió */}
               {Number(formik.values.capital ?? 0) !==
@@ -678,7 +849,9 @@ export function ModalEditCredit({
 
             {/* Opciones del crédito */}
             <div className="mt-4 p-4 rounded-xl border border-blue-100 bg-blue-50/50 space-y-4">
-              <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold text-blue-800">Opciones del crédito</h3>
+              <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+              <div className="flex items-center justify-between rounded-lg border border-blue-100 bg-white/80 px-4 py-3">
                 <div>
                   <Label className="text-gray-800 font-bold text-sm">
                     Permite Abono a Capital
@@ -713,7 +886,7 @@ export function ModalEditCredit({
                 </button>
               </div>
 
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between rounded-lg border border-blue-100 bg-white/80 px-4 py-3">
                 <div>
                   <Label className="text-gray-800 font-bold text-sm">
                     Crédito solo interés (no amortiza capital)
@@ -748,7 +921,7 @@ export function ModalEditCredit({
                 </button>
               </div>
 
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between rounded-lg border border-blue-100 bg-white/80 px-4 py-3">
                 <div>
                   <Label className="text-gray-800 font-bold text-sm">
                     Excluir de compras a inversionistas
@@ -783,7 +956,7 @@ export function ModalEditCredit({
                 </button>
               </div>
 
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between rounded-lg border border-blue-100 bg-white/80 px-4 py-3">
                 <div className="space-y-1">
                   <Label className="text-gray-800 font-bold text-sm">
                     Solicitar devolución de crédito
@@ -820,7 +993,7 @@ export function ModalEditCredit({
                 </button>
               </div>
               {formik.values.estado_devolucion === 'PENDIENTE_AUTORIZACION' && (
-                <div className="mt-2">
+                <div className="xl:col-span-2">
                   <Label className="text-gray-700 font-medium">Motivo de devolución *</Label>
                   <Input
                     type="text"
@@ -837,14 +1010,15 @@ export function ModalEditCredit({
                   )}
                 </div>
               )}
+              </div>
             </div>
 
             {/* Datos del usuario */}
-            <div className="space-y-4 mt-4">
-              <h3 className="text-lg font-bold text-blue-800 mb-2">
+            <div className="mt-4 space-y-4 rounded-xl border border-blue-100 bg-blue-50/40 p-4">
+              <h3 className="text-lg font-bold text-blue-800">
                 Datos del Usuario
               </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
                 {userFields.map((name) => (
                   <div key={name} className="flex flex-col gap-1">
                     <Label className="text-gray-700 font-medium">
@@ -873,35 +1047,76 @@ export function ModalEditCredit({
             </div>
 
             {/* 🔥 LISTA UNIFICADA DE INVERSIONISTAS (CON ESPEJO INTEGRADO) */}
-            <InvestorsList
-              investors={formik.values.investors}
-              investorsMirror={formik.values.investorsMirror} // Pasamos los espejos
-              investorsOptions={investorsOptions}
-              formik={formik}
-              fieldName="investors" // Base name, el componente manejará el espejo internamente
-              labelTitle="Inversionistas Asociados"
-              errorMessage={formik.errors.investors as string}
-              errorMessageMirror={formik.errors.investorsMirror as string}
-              onSaldoChanges={(changes) => { saldoChangesRef.current = changes; }}
-              recalculatedQuotas={nuevasCuotasInvestors}
-              recalculatedQuotasMirror={nuevasCuotasInvestorsMirror}
-              onClearRecalculatedQuota={(invId, isMirror) => {
-                if (isMirror) {
-                  setNuevasCuotasInvestorsMirror((prev) => {
-                    const next = { ...prev };
-                    delete next[invId];
-                    return next;
-                  });
-                } else {
-                  setNuevasCuotasInvestors((prev) => {
-                    const next = { ...prev };
-                    delete next[invId];
-                    return next;
-                  });
-                }
-              }}
-              blockedInvestorIds={originalInvestorIds}
-            />
+            <div className="mt-4">
+              <InvestorsList
+                investors={formik.values.investors}
+                investorsMirror={formik.values.investorsMirror} // Pasamos los espejos
+                investorsOptions={investorsOptions}
+                formik={formik}
+                fieldName="investors" // Base name, el componente manejará el espejo internamente
+                labelTitle="Inversionistas Asociados"
+                errorMessage={formik.errors.investors as string}
+                errorMessageMirror={formik.errors.investorsMirror as string}
+                onSaldoChanges={(changes) => {
+                  saldoChangesRef.current = changes;
+                }}
+                recalculatedQuotas={nuevasCuotasInvestors}
+                recalculatedQuotasMirror={nuevasCuotasInvestorsMirror}
+                onClearRecalculatedQuota={(invId, isMirror) => {
+                  if (isMirror) {
+                    setNuevasCuotasInvestorsMirror((prev) => {
+                      const next = { ...prev };
+                      delete next[invId];
+                      return next;
+                    });
+                  } else {
+                    setNuevasCuotasInvestors((prev) => {
+                      const next = { ...prev };
+                      delete next[invId];
+                      return next;
+                    });
+                  }
+                }}
+                blockedInvestorIds={originalInvestorIds}
+              />
+
+              {montoAportadoPadreCambia && (
+                <div className="mt-3 p-3 rounded-lg border border-amber-200 bg-amber-50">
+                  <Label className="text-amber-800 font-medium">
+                    Motivo del ajuste de monto aportado (padre)
+                  </Label>
+                  <Input
+                    type="text"
+                    name="motivo_ajuste_monto_aportado_padre"
+                    value={formik.values.motivo_ajuste_monto_aportado_padre || ""}
+                    onChange={formik.handleChange}
+                    onBlur={formik.handleBlur}
+                    placeholder="¿Por qué se ajusta el monto fiscal? (queda en historial)"
+                    className="mt-1 border-amber-300 bg-white"
+                  />
+                </div>
+              )}
+
+              {montoAportadoEspejoCambia && (
+                <div className="mt-3 p-3 rounded-lg border border-purple-200 bg-purple-50">
+                  <Label className="text-purple-800 font-medium">
+                    Motivo del ajuste de monto aportado (espejo)
+                  </Label>
+                  <Input
+                    type="text"
+                    name="motivo_ajuste_monto_aportado_espejo"
+                    value={
+                      formik.values.motivo_ajuste_monto_aportado_espejo || ""
+                    }
+                    onChange={formik.handleChange}
+                    onBlur={formik.handleBlur}
+                    placeholder="¿Por qué se ajusta el monto espejo? (queda en historial)"
+                    className="mt-1 border-purple-300 bg-white"
+                  />
+                </div>
+              )}
+            </div>
+
           </form>
         </div>
 

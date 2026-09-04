@@ -1,5 +1,9 @@
 import { sql } from "drizzle-orm";
 import { db } from "../database";
+import {
+  buildMontoAportadoAuditSettings,
+  type MontoAportadoAuditOrigin,
+} from "./montoAportadoAuditContext";
 
 type DbOrTx = typeof db;
 
@@ -60,5 +64,25 @@ export async function setCapitalSource(
   await tx.execute(sql`select set_config('app.capital_source', ${source}, true)`);
   if (motivo != null && motivo !== "") {
     await tx.execute(sql`select set_config('app.capital_motivo', ${motivo}, true)`);
+  }
+}
+
+/**
+ * Contexto para rebuilds de inversionistas. El trigger solo audita pares
+ * DELETE/INSERT de los IDs cuyo monto cambió; así no convierte todo rebuild
+ * técnico en un ajuste monetario.
+ */
+export async function setMontoAportadoAuditContext(
+  tx: SqlExecutor,
+  origen: MontoAportadoAuditOrigin,
+  motivo: string | undefined,
+  inversionistasConMontoCambiado: number[],
+): Promise<void> {
+  for (const setting of buildMontoAportadoAuditSettings(
+    origen,
+    motivo,
+    inversionistasConMontoCambiado,
+  )) {
+    await tx.execute(sql`select set_config(${setting.name}, ${setting.value}, true)`);
   }
 }

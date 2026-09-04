@@ -196,6 +196,8 @@ export function InvestorsList({
   };
 
   const handleMontoAportadoChange = (index: number, newValue: number) => {
+    if (!Number.isFinite(newValue) || newValue < 0) return;
+
     const invId = Number(investors[index]?.inversionista_id);
 
     // Guardar el monto original solo la primera vez que se edita
@@ -257,6 +259,10 @@ export function InvestorsList({
   };
 
   const removeInvestor = (indexToRemove: number) => {
+    // El backend rechaza una lista vacía: sacar al único inversionista se hace
+    // por el flujo de liquidación o reemplazo, no vaciando la lista acá.
+    if (investors.length <= 1) return;
+
     // 1. Actualizar estado de expansión (Shift Logic)
     const newExpandedSet = new Set<number>();
 
@@ -434,6 +440,9 @@ export function InvestorsList({
         const invMirror = listMirror[index] || {}; // Fallback safe
         const isNew = inv.es_nuevo === true;
         const tipoInversion = inv.tipo_operacion;
+        // El backend rechaza una lista vacía (400): no se puede quitar al
+        // último inversionista desde acá.
+        const esUltimoInversionista = listToRender.length <= 1;
 
         // Para filas nuevas: no ofrecer a quienes participan HOY en el crédito
         // (blockedInvestorIds) ni a los ya elegidos en otra fila del
@@ -580,11 +589,25 @@ export function InvestorsList({
                 <Input
                   className="mt-1"
                   type="number"
+                  min={0}
+                  step="0.01"
                   name={`${fieldName}.${index}.monto_aportado`}
                   value={inv.monto_aportado}
                   onFocus={(e) => e.target.select()}
-                  onChange={(e) => handleMontoAportadoChange(index, Number(e.target.value))}
+                  onChange={(e) => {
+                    // Campo vacío: no interpretarlo como 0, eso bajaría el monto
+                    // en silencio mientras el usuario está tipeando.
+                    if (e.target.value.trim() === "") return;
+                    handleMontoAportadoChange(index, Number(e.target.value));
+                  }}
                   onBlur={(e) => {
+                    if (e.target.value.trim() === "") {
+                      handleMontoAportadoChange(
+                        index,
+                        Number(inv.monto_aportado ?? 0),
+                      );
+                      return;
+                    }
                     const val = Number(e.target.value);
                     handleMontoAportadoChange(index, Number(val.toFixed(2)));
                   }}
@@ -713,8 +736,18 @@ export function InvestorsList({
                 <Button
                     type="button"
                     variant="outline"
-                    className="h-10 w-10 border-red-200 text-red-500 hover:bg-red-50 hover:text-red-700 hover:border-red-300 p-0"
+                    className={`h-10 w-10 p-0 ${
+                      esUltimoInversionista
+                        ? "border-gray-200 text-gray-300 cursor-not-allowed"
+                        : "border-red-200 text-red-500 hover:bg-red-50 hover:text-red-700 hover:border-red-300"
+                    }`}
                     onClick={() => removeInvestor(index)}
+                    disabled={esUltimoInversionista}
+                    title={
+                      esUltimoInversionista
+                        ? "Un crédito no puede quedarse sin inversionistas: usá el flujo de liquidación o reemplazo"
+                        : undefined
+                    }
                 >
                     <Trash2 className="w-4 h-4" />
                 </Button>
@@ -854,13 +887,35 @@ export function InvestorsList({
                         <Input
                         className={`mt-1 h-9 text-sm border-purple-200 ${isNew ? "bg-gray-100 cursor-not-allowed" : ""}`}
                         type="number"
+                        min={0}
+                        step="0.01"
                         name={`investorsMirror.${index}.monto_aportado`}
                         value={invMirror.monto_aportado}
                         onFocus={(e) => e.target.select()}
-                        onChange={formik.handleChange}
+                        onChange={(e) => {
+                          if (e.target.value.trim() === "") return;
+                          const value = Number(e.target.value);
+                          if (Number.isFinite(value) && value >= 0) {
+                            formik.setFieldValue(
+                              `investorsMirror.${index}.monto_aportado`,
+                              value,
+                            );
+                          }
+                        }}
                         onBlur={(e) => {
+                          // Vaciar el campo restaura el valor actual en vez de
+                          // dejarlo en 0 sin que el usuario lo note.
+                          if (e.target.value.trim() === "") {
+                            formik.setFieldValue(
+                              `investorsMirror.${index}.monto_aportado`,
+                              Number(invMirror.monto_aportado ?? 0),
+                            );
+                            return;
+                          }
                           const val = Number(e.target.value);
-                          formik.setFieldValue(`investorsMirror.${index}.monto_aportado`, Number(val.toFixed(2)));
+                          if (Number.isFinite(val) && val >= 0) {
+                            formik.setFieldValue(`investorsMirror.${index}.monto_aportado`, Number(val.toFixed(2)));
+                          }
                         }}
                         disabled={isNew}
                         />

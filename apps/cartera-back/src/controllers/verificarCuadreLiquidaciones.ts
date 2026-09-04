@@ -211,6 +211,7 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
       join cartera.historico_monto_aportado_espejo hm
         on hm.inversionista_id = p.inversionista_id
        and hm.fecha > p.fecha_liquidacion
+       and hm.origen = 'ESPEJO'
     ),
     entradas_por_credito as (
       -- Capital que entró a cada crédito por reinversión o reubicación desde
@@ -280,6 +281,7 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
                  where hm.credito_id       = cr.credito_id
                    and hm.inversionista_id = cr.inversionista_id
                    and hm.fecha < p.fecha_liquidacion
+                   and hm.origen           = 'ESPEJO'
                  order by hm.fecha desc, hm.id desc
                  limit 1
                ),
@@ -289,6 +291,7 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
                  where hm.credito_id       = cr.credito_id
                    and hm.inversionista_id = cr.inversionista_id
                    and hm.fecha > p.fecha_liquidacion
+                   and hm.origen           = 'ESPEJO'
                  order by hm.fecha asc, hm.id asc
                  limit 1
                ),
@@ -376,6 +379,7 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
                  where hm.credito_id       = cr.credito_id
                    and hm.inversionista_id = cr.inversionista_id
                    and hm.fecha > p.fecha_liquidacion
+                   and hm.origen           = 'ESPEJO'
                  group by hm.txid
                ) t
                where t.delta > 0
@@ -408,6 +412,7 @@ export async function leerCuadreLiquidaciones(periodo: string): Promise<FilaCuad
         where hm.credito_id       = hl.credito_id
           and hm.inversionista_id = hl.inversionista_id
           and hm.monto_nuevo      = hl.monto_aportado
+          and hm.origen           = 'ESPEJO'
         group by hm.txid
         order by count(*) desc, min(hm.fecha) asc
         limit 1

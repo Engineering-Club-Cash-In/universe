@@ -626,8 +626,24 @@ export const insertInvestor = async ({ body, set }: any) => {
           continue;
         }
 
+        // Marca de procedencia del registro del portal (migración 0033). Se
+        // escribe AQUÍ, en el mismo INSERT que crea la fila: una escritura
+        // posterior que se cayera a medias dejaría la fila sin dueño
+        // reconocible y devolvería el problema que la columna resuelve.
+        //
+        // Nunca se escribe en el UPDATE de más arriba, y eso es deliberado: si
+        // una edición pudiera sellar una fila existente, cualquiera capaz de
+        // editarla podría ponerla a su nombre y reclamarla después. La marca
+        // solo prueba algo mientras sea exclusiva de la creación.
+        const creadoPorUsuarioPortal =
+          typeof inv.creado_por_usuario_portal === "string" &&
+          inv.creado_por_usuario_portal.trim()
+            ? inv.creado_por_usuario_portal.trim()
+            : null;
+
         const insertData = {
           nombre,
+          creado_por_usuario_portal: creadoPorUsuarioPortal,
           dpi: inv.dpi || null,
           email: inv.email?.trim().toLowerCase() || null,
           emite_factura: inv.emite_factura ?? false,

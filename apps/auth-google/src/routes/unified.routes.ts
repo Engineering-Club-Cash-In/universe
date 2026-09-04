@@ -182,13 +182,14 @@ unifiedRoutes.post("/register-external-auth", requireAuth, async (c) => {
     };
 
     try {
-      // `reconciliarRegistroPrevio` hace reintentable este flujo: si cartera ya
-      // creó al inversionista en un intento anterior que no llegó a escribir el
-      // DPI/rol del portal, el registro reconoce esa fila —solo si es idéntica
-      // a la que él mismo habría creado— y termina la identidad en vez de
-      // quedarse en un 409 permanente. Solo aquí: la ruta pública no lo activa.
+      // `usuarioPortalId` hace reintentable este flujo: el alta sella la fila
+      // de cartera con la cuenta de la sesión, y si un intento anterior ya la
+      // creó pero no llegó a escribir el DPI/rol del portal, el reintento
+      // reconoce ESA fila por el sello —no por parecerse a lo que se pidió— y
+      // termina la identidad en vez de quedarse en un 409 permanente. Solo
+      // aquí: la ruta pública no manda id y por tanto no reconcilia nada.
       const result = await registerExternalUser(payload, {
-        reconciliarRegistroPrevio: true,
+        usuarioPortalId: user.id,
       });
 
       // El rol se escribe aquí, en el servidor, y solo después de que el

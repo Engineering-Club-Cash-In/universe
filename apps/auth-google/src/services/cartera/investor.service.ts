@@ -20,6 +20,12 @@ export interface CreateInvestorPayload {
    * nombre ya existen responde 409 en vez de actualizar la fila existente.
    */
   operation?: "CREATE";
+  /**
+   * Id de la cuenta de auth-google que da de alta la fila desde el registro
+   * del portal. Cartera solo lo escribe al CREAR (migración 0033), nunca al
+   * actualizar, así que es prueba de creación y no de mera edición.
+   */
+  creado_por_usuario_portal?: string;
   nombre?: string;
   dpi?: number;
   email?: string;
@@ -40,8 +46,16 @@ export interface CreateInvestorResponse {
 export interface InvestorProfile {
   inversionista_id: number;
   nombre: string;
+  /**
+   * OJO: en la búsqueda por correo cartera devuelve aquí `dpi_rep_legal`
+   * cuando la fila tiene representante legal, no el `dpi` de la fila (que en
+   * esas filas de sociedad es NULL). No sirve para decidir de quién es la
+   * fila; para eso está `creado_por_usuario_portal`.
+   */
   dpi: number;
   email: string;
+  /** Marca de procedencia del registro del portal. NULL en todo lo demás. */
+  creado_por_usuario_portal?: string | null;
   emite_factura: boolean;
   tipo_reinversion: string;
   banco: string | null;

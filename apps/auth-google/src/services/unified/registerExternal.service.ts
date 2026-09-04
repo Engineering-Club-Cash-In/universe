@@ -35,42 +35,41 @@ export interface RegisterExternalUserResponse {
 
 export interface RegisterExternalUserOptions {
   /**
-   * Permite terminar un registro que quedó a medias reconociendo la fila que
-   * ESTE MISMO registro creó. Solo lo activa el flujo autenticado: en el
-   * público convertiría el 409 en un oráculo de correos/DPIs.
+   * Id de la cuenta de auth-google que pide el registro. Solo lo pasa el flujo
+   * autenticado, y hace dos cosas: sella la fila nueva en cartera con esa
+   * cuenta, y habilita reconocer al reintentar la fila que ESE MISMO sello
+   * identifica como propia.
+   *
+   * Sin él no hay reconciliación, y así debe ser en el flujo público: allí
+   * convertiría el 409 en un oráculo de correos y DPIs dados de alta.
    */
-  reconciliarRegistroPrevio?: boolean;
+  usuarioPortalId?: string;
 }
 
 // ============================================
 // SERVICIO UNIFICADO
 // ============================================
 
-/** Compara nombres como los guarda cartera: recortados y sin espacios dobles. */
-const mismoNombre = (a: string, b: string): boolean =>
-  a.trim().replace(/\s+/g, " ").toUpperCase() ===
-  b.trim().replace(/\s+/g, " ").toUpperCase();
-
 /**
- * Busca la fila que dejaría este mismo registro y la devuelve solo si coincide
- * en todo lo que el registro escribe: correo, DPI y nombre.
+ * Devuelve la fila de cartera que creó ESTA MISMA cuenta del portal, o `null`.
  *
- * Es lo que devuelve la idempotencia sin abrir el vector que cerró la creación
- * estricta. El upsert anterior encontraba al inversionista por DPI o por nombre
- * y le SOBREESCRIBÍA los datos con los del registro; aquí no se escribe nada en
- * cartera: solo se acepta como propia una fila que ya es idéntica al alta que
- * se intentó, y cualquier fila preexistente ajena (otro DPI, otro nombre, otro
- * correo, o un correo compartido por varios inversionistas) se sigue
- * rechazando.
+ * La única prueba admisible es la marca de procedencia
+ * (`creado_por_usuario_portal`), que cartera escribe solo en el INSERT del
+ * alta. No se compara ningún dato de la fila.
  *
- * El correo no lo elige quien se registra: en el flujo autenticado sale de la
- * sesión, que es la misma identidad con la que el portal ya resuelve "cuál es
- * mi inversionista".
+ * Antes se comparaban correo, DPI y nombre, y esa heurística no podía
+ * funcionar: coincidir en esos tres campos prueba que una fila TIENE los
+ * valores pedidos, no que este registro la haya creado. Peor aún, el DPI que
+ * llegaba no era el de la fila: la consulta por correo de cartera devuelve
+ * `dpi: dpi_rep_legal` cuando hay representante legal, así que las filas de
+ * sociedad —`dpi` NULL, `dpi_rep_legal` puesto, imposibles de crear desde el
+ * portal— pasaban la comparación con el DPI del representante. Con el registro
+ * por correo sin verificar, bastaba con crear una cuenta con el correo del
+ * inversionista y mandar su nombre y ese DPI para quedarse con la fila.
  */
 const recuperarRegistroPropio = async (
-  fullName: string,
   email: string,
-  dpi: string,
+  usuarioPortalId: string,
 ): Promise<InvestorProfile | null> => {
   let existente: InvestorProfile | null = null;
 
@@ -85,12 +84,9 @@ const recuperarRegistroPropio = async (
     return null;
   }
 
-  const coincide =
-    Number(existente.dpi) === Number(dpi) &&
-    typeof existente.nombre === "string" &&
-    mismoNombre(existente.nombre, fullName);
-
-  return coincide ? existente : null;
+  return existente.creado_por_usuario_portal === usuarioPortalId
+    ? existente
+    : null;
 };
 
 /**
@@ -148,6 +144,13 @@ export const registerExternalUser = async (
         nombre: fullName,
         dpi: parseInt(dpi, 10),
         email: email,
+        // La marca viaja en el MISMO INSERT que crea la fila. Sellarla después
+        // sería una segunda escritura: si se cayera en medio, la fila quedaría
+        // sin dueño reconocible y el reintento volvería a chocar para siempre.
+        // En el flujo público no hay cuenta que sellar y la columna queda NULL.
+        ...(options.usuarioPortalId
+          ? { creado_por_usuario_portal: options.usuarioPortalId }
+          : {}),
       });
 
       return {
@@ -171,12 +174,15 @@ export const registerExternalUser = async (
     // Solo se recupera lo que este registro habría creado, y solo en el flujo
     // autenticado. Nada se escribe en cartera.
     if (
-      options.reconciliarRegistroPrevio &&
+      options.usuarioPortalId &&
       userType === "INVESTOR" &&
       error instanceof CarteraInvestorError &&
       error.status === 409
     ) {
-      const propio = await recuperarRegistroPropio(fullName, email, dpi);
+      const propio = await recuperarRegistroPropio(
+        email,
+        options.usuarioPortalId,
+      );
 
       if (propio) {
         return {

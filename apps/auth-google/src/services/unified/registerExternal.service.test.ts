@@ -4,6 +4,7 @@ type PayloadCartera = {
   nombre?: string;
   dpi?: number;
   email?: string;
+  creado_por_usuario_portal?: string;
 };
 
 let payloadCartera: PayloadCartera | null = null;
@@ -89,12 +90,16 @@ const registroDeAna = {
   dpi: "1234567890123",
 };
 
-/** La fila que habría creado ese mismo registro. */
+/** Id de la cuenta de Better Auth con la que Ana se registra. */
+const CUENTA_DE_ANA = "usuario-portal-de-ana";
+
+/** La fila que dejó ese mismo registro, con su marca de procedencia. */
 const filaDeAna = {
   inversionista_id: 77,
   nombre: "Ana Pérez",
   dpi: 1234567890123,
   email: "ana@example.com",
+  creado_por_usuario_portal: CUENTA_DE_ANA,
 };
 
 const conflictoDeCartera = () =>
@@ -136,7 +141,7 @@ describe("registerExternalUser", () => {
       inversionistaPorCorreo = filaDeAna;
 
       const resultado = await registerExternalUser(registroDeAna, {
-        reconciliarRegistroPrevio: true,
+        usuarioPortalId: CUENTA_DE_ANA,
       });
 
       expect(resultado.success).toBe(true);
@@ -144,22 +149,53 @@ describe("registerExternalUser", () => {
       expect(correoConsultado).toBe("ana@example.com");
     });
 
-    it("no reconoce una fila ajena que solo comparte el correo", async () => {
+    // El hallazgo que obligó a la columna de procedencia. Cartera devuelve
+    // `dpi: dpi_rep_legal` cuando la fila tiene representante legal
+    // (controllers/investor.ts, rama de búsqueda por correo), así que comparar
+    // correo + DPI + nombre daba por propia una fila de sociedad: su `dpi` es
+    // NULL y el que viaja es el del representante. Un registro del portal jamás
+    // pudo crear esas filas —hay 10 en ese estado— y aun así pasaban.
+    it("no reconoce la fila de una sociedad que devuelve el DPI del representante", async () => {
       respuestaCrear = conflictoDeCartera();
-      // Mismo correo, pero el DPI es de otra persona: no la creó este registro.
-      inversionistaPorCorreo = { ...filaDeAna, dpi: 9999999999999 };
+      inversionistaPorCorreo = {
+        inversionista_id: 86,
+        nombre: "Cube Investments",
+        // Lo que responde cartera: el DPI del representante legal, no el de la
+        // fila, que es NULL.
+        dpi: 1234567890123,
+        email: "ana@example.com",
+        creado_por_usuario_portal: null,
+      };
 
       await expect(
-        registerExternalUser(registroDeAna, { reconciliarRegistroPrevio: true }),
+        registerExternalUser(
+          { ...registroDeAna, fullName: "Cube Investments" },
+          { usuarioPortalId: CUENTA_DE_ANA },
+        ),
       ).rejects.toThrow();
     });
 
-    it("no reconoce una fila cuyo nombre no es el del registro", async () => {
+    it("no reconoce una fila sin marca de procedencia", async () => {
       respuestaCrear = conflictoDeCartera();
-      inversionistaPorCorreo = { ...filaDeAna, nombre: "Otra Persona" };
+      inversionistaPorCorreo = {
+        ...filaDeAna,
+        creado_por_usuario_portal: null,
+      };
 
       await expect(
-        registerExternalUser(registroDeAna, { reconciliarRegistroPrevio: true }),
+        registerExternalUser(registroDeAna, { usuarioPortalId: CUENTA_DE_ANA }),
+      ).rejects.toThrow();
+    });
+
+    it("no reconoce una fila marcada por otra cuenta del portal", async () => {
+      respuestaCrear = conflictoDeCartera();
+      inversionistaPorCorreo = {
+        ...filaDeAna,
+        creado_por_usuario_portal: "usuario-portal-de-otro",
+      };
+
+      await expect(
+        registerExternalUser(registroDeAna, { usuarioPortalId: CUENTA_DE_ANA }),
       ).rejects.toThrow();
     });
 
@@ -168,7 +204,7 @@ describe("registerExternalUser", () => {
       inversionistaPorCorreo = null;
 
       await expect(
-        registerExternalUser(registroDeAna, { reconciliarRegistroPrevio: true }),
+        registerExternalUser(registroDeAna, { usuarioPortalId: CUENTA_DE_ANA }),
       ).rejects.toThrow();
     });
 
@@ -177,7 +213,7 @@ describe("registerExternalUser", () => {
       inversionistaPorCorreo = new AmbiguousInvestorEmailError(3);
 
       await expect(
-        registerExternalUser(registroDeAna, { reconciliarRegistroPrevio: true }),
+        registerExternalUser(registroDeAna, { usuarioPortalId: CUENTA_DE_ANA }),
       ).rejects.toThrow();
     });
 
@@ -188,13 +224,43 @@ describe("registerExternalUser", () => {
       await expect(registerExternalUser(registroDeAna)).rejects.toThrow();
       expect(correoConsultado).toBeNull();
     });
+  });
+
+  describe("marca de procedencia", () => {
+    // En el MISMO insert: una escritura posterior que se cayera a medias
+    // devolvería el problema, porque la fila quedaría sin dueño reconocible.
+    it("el alta autenticada sella la fila con la cuenta que la pidió", async () => {
+      await registerExternalUser(registroDeAna, {
+        usuarioPortalId: CUENTA_DE_ANA,
+      });
+
+      expect(payloadCartera?.creado_por_usuario_portal).toBe(CUENTA_DE_ANA);
+    });
+
+    // carteraFront, el CRM y las importaciones dejan la columna en NULL; el
+    // registro público del portal también, porque no hay cuenta que sellar.
+    it("el alta sin sesión no sella nada", async () => {
+      await registerExternalUser(registroDeAna);
+
+      expect(payloadCartera).not.toBeNull();
+      expect(payloadCartera).not.toHaveProperty("creado_por_usuario_portal");
+    });
+
+    it("el alta de un CLIENT no manda la marca al CRM", async () => {
+      await registerExternalUser(
+        { ...registroDeAna, userType: "CLIENT" },
+        { usuarioPortalId: CUENTA_DE_ANA },
+      );
+
+      expect(payloadCrm).not.toHaveProperty("creado_por_usuario_portal");
+    });
 
     it("no reconcilia un rechazo que no es un conflicto", async () => {
       respuestaCrear = new CarteraInvestorError(400, "banco inexistente");
       inversionistaPorCorreo = filaDeAna;
 
       await expect(
-        registerExternalUser(registroDeAna, { reconciliarRegistroPrevio: true }),
+        registerExternalUser(registroDeAna, { usuarioPortalId: CUENTA_DE_ANA }),
       ).rejects.toThrow();
       expect(correoConsultado).toBeNull();
     });

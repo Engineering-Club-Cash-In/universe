@@ -1030,6 +1030,12 @@
     dpi_rep_legal: varchar("dpi_rep_legal", { length: 20 }),
     celular: varchar("celular", { length: 100 }),
     status: statusInversionistaEnum("status").notNull().default("activo"),
+    // Id de la cuenta de auth-google que creó esta fila desde el registro del
+    // portal (migración 0033). NULL en todo lo demás: carteraFront, el CRM y
+    // las importaciones no la escriben, y las filas anteriores a la columna se
+    // quedan así a propósito. Es la única prueba de que un registro del portal
+    // creó la fila, y por tanto de que puede reclamarla al reintentar.
+    creado_por_usuario_portal: text("creado_por_usuario_portal"),
   });
 
   export const cuentas_extra_inversionista = customSchema.table(

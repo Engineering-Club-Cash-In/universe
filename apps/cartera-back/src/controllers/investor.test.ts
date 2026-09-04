@@ -13,6 +13,7 @@ let selectResponses: unknown[][] = [];
 let updateWasCalled = false;
 let insertWasCalled = false;
 let lastUpdateData: Record<string, unknown> | undefined;
+let lastInsertData: Record<string, unknown> | undefined;
 
 mock.module("../database/index", () => ({
   client: {},
@@ -44,9 +45,12 @@ mock.module("../database/index", () => ({
     insert: () => {
       insertWasCalled = true;
       return {
-        values: () => ({
-          returning: () => Promise.resolve([]),
-        }),
+        values: (data: Record<string, unknown>) => {
+          lastInsertData = data;
+          return {
+            returning: () => Promise.resolve([{ ...data, inversionista_id: 99 }]),
+          };
+        },
       };
     },
   },
@@ -76,6 +80,7 @@ describe("insertInvestor", () => {
     updateWasCalled = false;
     insertWasCalled = false;
     lastUpdateData = undefined;
+    lastInsertData = undefined;
   });
 
   it("rechaza operation CREATE con email ya usado por otro inversionista", async () => {
@@ -327,6 +332,81 @@ describe("insertInvestor", () => {
     ]);
     expect(updateWasCalled).toBeFalse();
     expect(insertWasCalled).toBeFalse();
+  });
+
+  // `creado_por_usuario_portal` es la marca de procedencia del registro del
+  // portal (migración 0033). Es lo único que prueba que una fila la creó una
+  // cuenta concreta, así que solo puede escribirse al CREARLA.
+  describe("creado_por_usuario_portal", () => {
+    it("sella la fila en el mismo INSERT que la crea", async () => {
+      selectResponses = [[], [], []];
+      const set = { status: 200 };
+
+      await insertInvestor({
+        body: {
+          operation: "CREATE",
+          nombre: "Ana Pérez",
+          dpi: 1234567890123,
+          email: "ana@example.com",
+          creado_por_usuario_portal: "usuario-portal-de-ana",
+        },
+        set,
+      });
+
+      expect(insertWasCalled).toBeTrue();
+      expect(lastInsertData?.creado_por_usuario_portal).toBe(
+        "usuario-portal-de-ana",
+      );
+    });
+
+    it("deja la marca en NULL cuando el alta no viene del portal", async () => {
+      selectResponses = [[], [], []];
+      const set = { status: 200 };
+
+      await insertInvestor({
+        body: { operation: "CREATE", nombre: "Ana Pérez", dpi: 1234567890123 },
+        set,
+      });
+
+      expect(lastInsertData?.creado_por_usuario_portal).toBeNull();
+    });
+
+    // Si un UPDATE pudiera escribirla, cualquiera capaz de editar una fila
+    // podría sellarla a su nombre y reclamarla después: la marca dejaría de
+    // probar la creación.
+    it("nunca la escribe en un UPDATE, aunque venga en el cuerpo", async () => {
+      selectResponses = [[existingInvestor]];
+      const set = { status: 200 };
+
+      await insertInvestor({
+        body: {
+          inversionista_id: existingInvestor.inversionista_id,
+          numero_cuenta: "0011223344",
+          creado_por_usuario_portal: "usuario-portal-de-un-atacante",
+        },
+        set,
+      });
+
+      expect(updateWasCalled).toBeTrue();
+      expect(lastUpdateData).not.toHaveProperty("creado_por_usuario_portal");
+    });
+
+    it("descarta una marca que no es una cadena con contenido", async () => {
+      selectResponses = [[], [], []];
+      const set = { status: 200 };
+
+      await insertInvestor({
+        body: {
+          operation: "CREATE",
+          nombre: "Ana Pérez",
+          dpi: 1234567890123,
+          creado_por_usuario_portal: "   ",
+        },
+        set,
+      });
+
+      expect(lastInsertData?.creado_por_usuario_portal).toBeNull();
+    });
   });
 });
 

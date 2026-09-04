@@ -33,6 +33,11 @@ describe("buildPortalInvestorUpdate", () => {
       moneda: "dolares",
       operation: "CREATE",
       mode: "create",
+      // La marca de procedencia solo la escribe cartera al CREAR una fila y
+      // solo la manda el registro del portal. Si el titular pudiera colarla en
+      // una edición, podría sellar a su nombre la fila que edita y reclamarla
+      // como propia en un registro posterior.
+      creado_por_usuario_portal: "usuario-portal-de-un-atacante",
     });
 
     expect(payload).toEqual({ inversionista_id: 12, tipo_cuenta: "AHORRO" });

@@ -119,22 +119,36 @@ const prompt = `
   
   Analiza los siguientes estados de cuenta bancarios y responde en formato JSON. Asegúrate de que los datos cuadren correctamente:
   `;
-const assistant = await openai.beta.assistants.create({
-  model: "gpt-4o",
-  name: "Analista de capacidad de pago y evaluador de crédito",
-  description:
-    "Analiza los estados de cuenta bancarios y responde en formato JSON",
-  tools: [{ type: "file_search" }],
-  response_format: {
-    type: "json_schema",
-    json_schema: {
-      name: "credit_record",
-      strict: true,
-      schema: creditRecordSchema,
-    },
-  },
-  instructions: prompt,
-});
+// OpenAI apagó la Assistants API el 26/08/2026: estas llamadas responden 404.
+// Se crea el assistant de forma perezosa para que ese 404 no reviente el
+// arranque del proceso (antes era un top-level await y tumbaba todo el server).
+let assistantPromise: Promise<
+  Awaited<ReturnType<typeof openai.beta.assistants.create>>
+> | null = null;
+const getAssistant = () => {
+  if (!assistantPromise) {
+    assistantPromise = openai.beta.assistants.create({
+      model: "gpt-4o",
+      name: "Analista de capacidad de pago y evaluador de crédito",
+      description:
+        "Analiza los estados de cuenta bancarios y responde en formato JSON",
+      tools: [{ type: "file_search" }],
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "credit_record",
+          strict: true,
+          schema: creditRecordSchema,
+        },
+      },
+      instructions: prompt,
+    });
+    assistantPromise.catch(() => {
+      assistantPromise = null;
+    });
+  }
+  return assistantPromise;
+};
 export const queueCreditRecord = async (files: File[], leadId: number) => {
   try {
     const uploadedFiles: OpenAI.Files.FileObject[] = [];
@@ -171,7 +185,7 @@ export const queueCreditRecord = async (files: File[], leadId: number) => {
     });
 
     const run = await openai.beta.threads.runs.create(thread.id, {
-      assistant_id: assistant.id,
+      assistant_id: (await getAssistant()).id,
     });
     await createOpenaiRun({
       leadId: leadId,

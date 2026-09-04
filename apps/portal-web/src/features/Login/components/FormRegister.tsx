@@ -249,6 +249,12 @@ export const FormRegister = () => {
                 </p>
               )}
 
+              {formik.status && (
+                <div className="bg-red-500/20 border border-red-500/50 rounded-lg p-4">
+                  <p className="text-red-300 text-sm">{formik.status}</p>
+                </div>
+              )}
+
               <div className="flex flex-col gap-4 mt-4">
                 <Button
                   type="submit"

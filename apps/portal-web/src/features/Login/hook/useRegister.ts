@@ -62,6 +62,8 @@ export const useRegister = () => {
     onSubmit: async (values, helpers) => {
       try {
         setIsLoading(true);
+        // Un intento nuevo parte sin el error del anterior.
+        helpers.setStatus(undefined);
 
         // La cuenta de Better Auth solo se crea una vez. Si el registro externo
         // falló por algo corregible (un DPI ya tomado), el segundo envío tiene
@@ -112,8 +114,18 @@ export const useRegister = () => {
             return;
           }
 
-          // Cualquier otro fallo no detiene el flujo: la cuenta ya existe y el
-          // registro externo se puede completar desde el perfil.
+          // Ningún fallo se traga. Esta llamada es la ÚNICA que escribe el rol
+          // y el DPI de la cuenta, así que mandar al perfil como si nada dejaba
+          // al usuario con el rol por defecto (CLIENT) y sin DPI: quien pidió
+          // ser inversionista quedaba clasificado como cliente sin enterarse.
+          // Se queda en el formulario, con su tipo elegido intacto, y puede
+          // reintentar — el alta de Better Auth ya no se repite.
+          helpers.setStatus(
+            error instanceof Error && error.message
+              ? error.message
+              : "No pudimos completar tu registro. Intenta de nuevo.",
+          );
+          return;
         }
 
         // enviar al profile

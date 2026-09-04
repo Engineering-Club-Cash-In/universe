@@ -3,6 +3,7 @@ import { InputIcon, Button, IconPerson } from "@/components";
 import { useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/lib";
 import { registerExternalUser, registerExternalUserAuth } from "../services";
+import { rolFueEstablecido } from "../identidadDelPortal";
 
 interface CompleteProfileFormProps {
   onSuccess: () => void;
@@ -15,9 +16,15 @@ export const CompleteProfileForm = ({
 }: CompleteProfileFormProps) => {
   const { user } = useAuth();
   const [dpi, setDpi] = useState("");
-  const hasRole = user?.role === "CLIENT" || user?.role === "INVESTOR";
+  // `CLIENT` a secas NO cuenta como rol elegido: es el valor por defecto de
+  // toda cuenta nueva, así que una cuenta cuyo registro falló llegaba aquí como
+  // cliente, con el selector escondido, y se reinscribía como cliente para
+  // siempre. Ver `rolFueEstablecido`.
+  const hasRole = rolFueEstablecido(user);
   const [userType, setUserType] = useState<"CLIENT" | "INVESTOR">(
-    user?.role ?? "CLIENT",
+    hasRole && (user?.role === "CLIENT" || user?.role === "INVESTOR")
+      ? user.role
+      : "CLIENT",
   );
   const [error, setError] = useState("");
 

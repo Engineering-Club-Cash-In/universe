@@ -47,7 +47,7 @@ const FORBIDDEN_FIELD_PATTERN = new RegExp(
 const CANONICAL_JOB_NAMES = new Set([
   'process_late_fees', 'upsert_advisor_effectiveness', 'expire_portfolio_purchases',
   'generate_monthly_close', 'verify_sat_invoices', 'report_failed_sat_invoices',
-  'generate_daily_invoice_snapshot',
+  'generate_daily_invoice_snapshot', 'verify_liquidation_balance',
 ]);
 const CONTEXT_FIELDS = new Set(['request_id', 'operation_id', 'run_id']);
 const RESERVED_EVENT_FIELDS = new Set([

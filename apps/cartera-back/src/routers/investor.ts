@@ -985,7 +985,11 @@ export const inversionistasRouter = new Elysia()
           reinversion = { skipped: true, reason: "total_reinversion recalculado = 0", monto };
         } else {
           try {
-            const r = await ejecutarReinversionAutomatica(Number(investor_id), monto);
+            const r = await ejecutarReinversionAutomatica(
+              Number(investor_id),
+              monto,
+              liquidacionId ? Number(liquidacionId) : undefined,
+            );
             reinversion = {
               liquidacion_id: liquidacionId,
               inversionista_id: Number(investor_id),

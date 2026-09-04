@@ -15,6 +15,7 @@
     unique,
     bigint,
     index,
+    jsonb,
   } from "drizzle-orm/pg-core";
   import { sql } from "drizzle-orm";
   export enum CategoriaUsuario {
@@ -686,6 +687,20 @@
       modalidad_facturacion: modalidadFacturacionEnum("modalidad_facturacion"),
       modalidad_facturacion_spread_id: integer("modalidad_facturacion_spread_id")
         .references(() => modalidad_facturacion_spread.id),
+      // Liquidación que originó esta fila, cuando la creó la reinversión
+      // automática del paso 6. Es la única señal de procedencia: por tipo_operacion
+      // no se distingue una reinversión automática de una reubicación manual
+      // (manualReassignInvestor usa "reinversion" por defecto), y por fecha
+      // tampoco, porque las reubicaciones ocurren al día siguiente del corte.
+      // Marca de intento revertido. revertirComprasUltimaLiquidacion deja la
+      // fila como "completado" para que no figure pendiente, así que sin esto
+      // un intento revertido y su reemplazo se suman los dos y una reinversión
+      // de Q100 bien colocada se lee como Q200.
+      revertida_at: timestamp("revertida_at", { withTimezone: true }),
+      liquidacion_id: integer("liquidacion_id").references(
+        () => liquidaciones.liquidacion_id,
+        { onDelete: "set null" },
+      ),
       tipo_compra: tipoCompraEnum("tipo_compra")
         .notNull()
         .default("sin_clasificar"),
@@ -805,7 +820,6 @@
         .default("NO_LIQUIDADO"),
       cuota: numeric("cuota", { precision: 18, scale: 2 }).notNull(),
 
-      // 🆕 ENLACE A LIQUIDACIÓN
       liquidacion_id: integer("liquidacion_id").references(
         () => liquidaciones.liquidacion_id,
         { onDelete: "set null" } // Si se borra la liquidación, el campo queda en null
@@ -955,7 +969,6 @@
         { onDelete: "set null" }
       ),
 
-      // 🆕 ENLACE A LIQUIDACIÓN
       liquidacion_id: integer("liquidacion_id").references(
         () => liquidaciones.liquidacion_id,
         { onDelete: "set null" } // Si se borra la liquidación, el campo queda en null
@@ -1955,7 +1968,16 @@
     {
       id: serial("id").primaryKey(),
       monto_aportado: numeric("monto_aportado", { precision: 18, scale: 8 }).notNull(),
+      // Fecha DECLARADA del período: la liquidación puede recibirla explícita y
+      // ser retroactiva, así que no dice cuándo se tomó realmente la foto.
       fecha: timestamp("fecha", { withTimezone: true }).notNull().defaultNow(),
+      // Cuándo se insertó esta fila de verdad. Lo pone el default de la base, no
+      // la aplicación, así que no se puede pasar retroactivo ni reescribir. Es
+      // el único anclaje fiable al instante en que la foto se tomó: sin él hay
+      // que inferirlo buscando movimientos del espejo cuyo saldo coincida, y esa
+      // búsqueda puede acertarle a una transacción anterior que dejó los mismos
+      // montos. NULL en las filas anteriores a la migración 0033.
+      registrado_at: timestamp("registrado_at", { withTimezone: true }).defaultNow(),
       inversionista_id: integer("inversionista_id")
         .notNull()
         .references(() => inversionistas.inversionista_id, { onDelete: "cascade" }),
@@ -2059,3 +2081,64 @@
       .notNull()
       .default(sql`NOW() AT TIME ZONE 'America/Guatemala'`),
   });
+
+  // ============================================================
+  // verificacion_liquidacion
+  // ------------------------------------------------------------
+  // Snapshot del cuadre de cada liquidación del mes. El job corre el 11, 12 y
+  // 13 a las 08:00 GT y solo toma las liquidaciones que todavía no cuadran:
+  // una fila por liquidación (UNIQUE), que se reescribe en cada reintento.
+  //
+  // Ecuación verificada (montos, no créditos — mover capital entre créditos es
+  // una operación válida y no debe alertar):
+  //
+  //   espejo − compras_no_absorbidas == historico + reinversion_total
+  //
+  // `detalle` guarda cómo estaban los créditos, las compras y el histórico en
+  // el momento de la verificación, para poder reconstruir el caso después.
+  // ============================================================
+  export const verificacion_liquidacion = customSchema.table(
+    "verificacion_liquidacion",
+    {
+      id: serial("id").primaryKey(),
+
+      // Una fila por liquidación: el reintento del 12 y 13 actualiza la misma.
+      liquidacion_id: integer("liquidacion_id")
+        .notNull()
+        .unique()
+        .references(() => liquidaciones.liquidacion_id, { onDelete: "cascade" }),
+      inversionista_id: integer("inversionista_id")
+        .notNull()
+        .references(() => inversionistas.inversionista_id),
+
+      // Período liquidado, "YYYY-MM" en hora Guatemala.
+      periodo: varchar("periodo", { length: 7 }).notNull(),
+
+      // Lados de la ecuación, tal como se leyeron en la verificación.
+      espejo: numeric("espejo", { precision: 18, scale: 8 }).notNull(),
+      historico: numeric("historico", { precision: 18, scale: 8 }).notNull(),
+      reinversion_total: numeric("reinversion_total", { precision: 18, scale: 2 }).notNull(),
+      compras_no_absorbidas: numeric("compras_no_absorbidas", { precision: 18, scale: 8 })
+        .notNull()
+        .default("0"),
+      descuadre: numeric("descuadre", { precision: 18, scale: 8 }).notNull(),
+
+      cuadra: boolean("cuadra").notNull(),
+      intentos: integer("intentos").notNull().default(1),
+
+      // Foto de créditos, compras e histórico al momento de verificar.
+      detalle: jsonb("detalle"),
+
+      primera_verificacion_at: timestamp("primera_verificacion_at", { withTimezone: true })
+        .defaultNow()
+        .notNull(),
+      verificado_at: timestamp("verificado_at", { withTimezone: true })
+        .defaultNow()
+        .notNull(),
+      notificado_at: timestamp("notificado_at", { withTimezone: true }),
+    },
+    (t) => ({
+      idx_verif_periodo: index("idx_verif_liquidacion_periodo").on(t.periodo, t.cuadra),
+      idx_verif_inv: index("idx_verif_liquidacion_inv").on(t.inversionista_id),
+    })
+  );

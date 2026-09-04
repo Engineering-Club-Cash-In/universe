@@ -2707,6 +2707,7 @@ export const cobrosRouter = {
 							: (inv.banco ?? null),
 						tipoCuenta: inv.tipo_cuenta ?? null,
 						numeroCuenta: inv.numero_cuenta ?? null,
+						dpiRepLegal: inv.dpi_rep_legal ?? null,
 						moneda: inv.moneda ?? "quetzales",
 						celular: inv.celular ?? null,
 						status: inv.status ?? null,

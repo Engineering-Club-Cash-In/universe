@@ -11,6 +11,7 @@ import {
 	fechaLimiteImpuestoVencida,
 	interpolar,
 	mensajeAnunciaExpectativaMora,
+	mensajeAnunciaMontoAdeudado,
 	mensajeEmailEditable,
 	mensajePlantillaEditable,
 	mensajeSmsEditable,
@@ -359,6 +360,75 @@ describe("plantillas web de cobros", () => {
 		expect(
 			mensajeAnunciaExpectativaMora(cuerpoWhatsappDe(porId("bienvenida"))),
 		).toBe(false);
+	});
+
+	test("el guard del monto adeudado detecta las 3 plantillas de mora y NO el recordatorio del día de pago", () => {
+		const porId = (id: string) =>
+			PLANTILLAS_MENSAJES.find((plantilla) => plantilla.id === id) ?? {
+				cuerpo: "",
+			};
+		const base = {
+			clienteNombre: "MARIA LOPEZ",
+			fechaPago: "5",
+			cuotaMensual: "2,500.00",
+			placa: "P123ABC",
+			marcaLineaModelo: "Toyota Yaris 2018",
+			cuotasAtraso: 2,
+			telefonoAsesor: "41286630",
+			nombreAsesor: "Carlos Pérez",
+			expectativaMora: "1,382.72",
+		};
+
+		// Las tres plantillas que llevan {montoAdeudado} se detectan con la
+		// variable sin interpolar y también ya interpoladas (con monto y sin él).
+		for (const id of ["mora_30", "mora_60", "aviso_juridico"]) {
+			const cuerpo = cuerpoWhatsappDe(porId(id));
+			expect(mensajeAnunciaMontoAdeudado(cuerpo), id).toBe(true);
+			expect(
+				mensajeAnunciaMontoAdeudado(
+					interpolar(cuerpo, { ...base, montoAdeudado: "2,100.00" }),
+				),
+				id,
+			).toBe(true);
+			// Sin monto queda el hueco ("por un monto de Q.") → hay que bloquear.
+			expect(
+				mensajeAnunciaMontoAdeudado(
+					interpolar(cuerpo, { ...base, montoAdeudado: "" }),
+				),
+				id,
+			).toBe(true);
+		}
+
+		// CLAVE: el recordatorio del día de pago dice "por un monto de
+		// Q{cuotaMensual}", que NO es el monto adeudado. Si el guard lo detectara,
+		// bloquearía la plantilla más usada en todo crédito al día (que es
+		// justamente cuando montoAdeudado viene vacío).
+		for (const id of [
+			"al_dia",
+			"pre_mora",
+			"bienvenida",
+			"impuesto_circulacion_2026",
+		]) {
+			const cuerpo = cuerpoWhatsappDe(porId(id));
+			expect(mensajeAnunciaMontoAdeudado(cuerpo), id).toBe(false);
+			expect(
+				mensajeAnunciaMontoAdeudado(
+					interpolar(cuerpo, { ...base, montoAdeudado: "" }),
+				),
+				id,
+			).toBe(false);
+		}
+
+		// Si el asesor borra la oración del monto, el envío se habilita.
+		const mora30 = interpolar(cuerpoWhatsappDe(porId("mora_30")), {
+			...base,
+			montoAdeudado: "",
+		});
+		const sinOracion = mora30
+			.split("\n")
+			.filter((linea) => !linea.includes("por un monto de"))
+			.join("\n");
+		expect(mensajeAnunciaMontoAdeudado(sinOracion)).toBe(false);
 	});
 
 	test("el guard del impuesto solo bloquea si la fecha vencida sigue en el mensaje", () => {

@@ -14,12 +14,19 @@ export const getInvestors = async () => {
 };
 export interface InvestorPayload {
   inversionista_id?: number;
+  /**
+   * "CREATE" activa la creación estricta en cartera: una colisión de
+   * nombre/DPI/email devuelve 409 en vez de convertir el alta en un UPDATE
+   * sobre el inversionista existente (upsert legacy).
+   */
+  operation?: "CREATE";
   nombre: string;
   emite_factura: boolean;
   descuenta_impuestos: boolean;
   reinversion: boolean;
   banco: number | null;
   dpi:number | null;
+  dpi_rep_legal?: string | null;
   tipo_cuenta: string | null;
   re_inversion: string | null;
   numero_cuenta: string | null;
@@ -35,6 +42,7 @@ export interface InvestorResponse {
   descuenta_impuestos: boolean;
   reinversion: boolean;
   banco: string | null;
+  dpi_rep_legal?: string | null;
   tipo_cuenta: string | null;
   numero_cuenta: string | null;
   moneda?: string;

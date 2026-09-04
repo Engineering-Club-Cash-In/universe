@@ -8,6 +8,7 @@ import {
   reportarFacturasFallidasSat,
 } from './src/controllers/verificarFacturasSat';
 import { generarSnapshotDiario } from './src/controllers/facturacionSnapshot';
+import { verificarCuadreLiquidaciones } from './src/controllers/verificarCuadreLiquidaciones';
 import { runScheduledJob, runScheduledJobAttempts } from './scheduledJobRunner';
 
 const TZ_GUATEMALA = 'America/Guatemala';
@@ -102,5 +103,20 @@ export function iniciarTareasProgramadas() {
       }
     }
     await runScheduledJobAttempts('generate_daily_invoice_snapshot', snapshotAttempts());
+  });
+
+  // 🔍 Cuadre de las liquidaciones del mes - 11, 12 y 13 a las 08:00 hora Guatemala.
+  //    El 10 queda fuera a propósito: ese día se está liquidando y todo estaría
+  //    a medio camino. Verifica que el monto aportado del espejo, descontadas
+  //    las compras que la liquidación no absorbió, sea igual al histórico que
+  //    dejó esa liquidación más su reinversión. Solo notifica por correo; no
+  //    corrige nada. De cada liquidación se avisa UNA sola vez: el 12 y el 13
+  //    sirven para cerrar las que ya cuadraron solas y para agarrar las que
+  //    aparecieron después, no para repetir el mismo correo.
+  schedule.scheduleJob({ rule: '0 8 11-13 * *', tz: TZ_GUATEMALA }, async () => {
+    await runScheduledJob(
+      'verify_liquidation_balance',
+      () => verificarCuadreLiquidaciones(),
+    );
   });
 }

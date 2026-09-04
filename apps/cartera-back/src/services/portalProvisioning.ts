@@ -26,6 +26,8 @@ export type EstadoProvisionamientoCartera =
   | "ya_tenia"
   | "avisada"
   | "omitida"
+  /** Solo el dry-run: sería provisionada, pero no se preguntó si ya tiene cuenta. */
+  | "candidata"
   | "fallo";
 
 export interface ResultadoProvisionamientoCartera {

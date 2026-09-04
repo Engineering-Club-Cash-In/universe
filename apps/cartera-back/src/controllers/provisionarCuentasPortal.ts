@@ -78,12 +78,20 @@ export const provisionarCuentasPortal = async (
       const d = decidirProvisionamiento(fila);
       resultados.push({
         inversionistaId: fila.inversionista_id,
-        estado: d.accion === "omitir" ? "omitida" : "ya_tenia",
+        estado:
+          d.accion === "omitir" || d.accion === "notificar_representante"
+            ? "omitida"
+            : "candidata",
         usuarioEmail: null,
         resueltoPor: null,
         correo: { enviado: false, plantilla: null, redirigido: false, destinatarioReal: null },
         advertencias: [],
-        motivo: d.accion === "omitir" ? d.motivo : null,
+        motivo:
+          d.accion === "omitir"
+            ? d.motivo
+            : d.accion === "notificar_representante"
+              ? "es_empresa"
+              : null,
       });
       continue;
     }

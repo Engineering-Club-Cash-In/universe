@@ -102,6 +102,18 @@ describe("resumirProvisionamiento", () => {
     expect(res.correoDistinto).toHaveLength(1);
   });
 
+  it("en seco, las candidatas se cuentan aparte y no simulan un 'ya tenía'", () => {
+    // El dry-run no sale a la red, así que NO sabe quién ya tiene cuenta.
+    // Reportarlas como "ya_tenia" sería inventar un dato que no se midió.
+    const res = resumirProvisionamiento(
+      [r({ estado: "candidata" }), r({ inversionistaId: 2, estado: "candidata" })],
+      nombres,
+    );
+    expect(res.candidatas).toHaveLength(2);
+    expect(res.yaTenian).toBe(0);
+    expect(res.hayQueReportar).toBe(false);
+  });
+
   it("cuenta las empresas aparte: su aviso solo sale en el alta", () => {
     const res = resumirProvisionamiento([r({ estado: "omitida", motivo: "es_empresa" })], nombres);
     expect(res.empresas).toBe(1);

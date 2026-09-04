@@ -19,6 +19,8 @@ export interface ResumenProvisionamiento {
   yaTenian: number;
   empresas: number;
   creadas: EntradaResumen[];
+  /** Solo en dry-run: filas que serían provisionadas. */
+  candidatas: EntradaResumen[];
   fallos: EntradaResumen[];
   sinCorreo: EntradaResumen[];
   sinNombre: EntradaResumen[];
@@ -58,6 +60,7 @@ export const resumirProvisionamiento = (
     yaTenian: 0,
     empresas: 0,
     creadas: [],
+    candidatas: [],
     fallos: [],
     sinCorreo: [],
     sinNombre: [],
@@ -77,6 +80,10 @@ export const resumirProvisionamiento = (
       // Las que ya la tenían son el estado normal del sistema desde hace
       // tiempo; reportarlas cada día sería ruido, no trabajo pendiente.
       if (pareceSociedad(e.nombre)) resumen.dudosas.push(e);
+    } else if (r.estado === "candidata") {
+      // El dry-run no sale a la red: no sabe quién ya tiene cuenta. Contarlas
+      // como "ya tenían" sería inventar un dato que no se midió.
+      resumen.candidatas.push(e);
     } else if (r.estado === "ya_tenia" || r.estado === "avisada") {
       resumen.yaTenian += 1;
     } else if (r.estado === "fallo") {
@@ -148,6 +155,7 @@ export const construirCorreoResumen = (
     ${banner}
     <p>Revisados ${resumen.total} inversionistas: ${resumen.yaTenian} ya tenían
        acceso, ${resumen.empresas} son empresas (entran con su representante).</p>
+    ${lista("Serían provisionadas (corrida en seco)", resumen.candidatas)}
     ${lista("Cuentas creadas", resumen.creadas)}
     ${lista("No se pudo dar acceso", resumen.fallos)}
     ${lista("El correo no salió", resumen.correosNoEnviados)}

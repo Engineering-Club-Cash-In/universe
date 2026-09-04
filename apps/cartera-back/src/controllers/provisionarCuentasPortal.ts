@@ -33,11 +33,17 @@ import { sendPlainEmail } from "@cci/email";
 export interface OpcionesJob {
   /** Recorre y reporta, pero no llama a auth-google ni manda nada. */
   dryRun?: boolean;
+  /**
+   * Devuelve el resultado del proveedor, no `void`: `sendPlainEmail` NO tira
+   * cuando Resend rechaza, resuelve `{ success:false, error }`. Solo un
+   * `success === false` explícito cuenta como fallo, para que un doble de
+   * prueba que resuelva `undefined` no se lea como envío caído.
+   */
   enviarResumen?: (params: {
     to: string[];
     subject: string;
     html: string;
-  }) => Promise<unknown>;
+  }) => Promise<{ success?: boolean; error?: unknown } | void>;
 }
 
 /** Envío por defecto del resumen: el mismo canal de los avisos de inversionista. */
@@ -112,13 +118,52 @@ export const provisionarCuentasPortal = async (
 
   const resumen = resumirProvisionamiento(resultados, nombres);
 
+  // Lo irrecuperable se escribe ANTES de intentar el correo, y a propósito.
+  //
+  // Tirar más abajo solo cambia una línea de log de `completed` a `failed` con
+  // `error_code:"unknown"` (structuredLogger.ts:704-722): el CONTENIDO del
+  // resumen no queda en ningún lado. `audit_logs` tampoco lo cubre — solo
+  // registra el alta por HTTP, y este job no pasa por ninguna ruta. Con estos
+  // ids en los logs del contenedor el incidente es reconstruible; sin ellos, la
+  // única salida es cruzar `user.created_at` de auth-google contra la ventana
+  // del cron y resetear a todos en bloque.
+  if (resumen.accesosPerdidos.length || resumen.cuentasSinIdentidad.length) {
+    console.error(
+      "[provisionarCuentasPortal] IRRECUPERABLE:",
+      JSON.stringify({
+        accesosPerdidos: resumen.accesosPerdidos.map((e) => e.inversionistaId),
+        cuentasSinIdentidad: resumen.cuentasSinIdentidad.map(
+          (e) => e.inversionistaId,
+        ),
+      }),
+    );
+  }
+
   if (resumen.hayQueReportar && !opciones.dryRun && opciones.enviarResumen) {
     const { subject, html } = construirCorreoResumen(resumen);
-    await opciones.enviarResumen({
+    const envio = await opciones.enviarResumen({
       to: INVESTOR_STATUS_CHANGE_RECIPIENTS,
       subject,
       html,
     });
+
+    // `sendPlainEmail` NO tira si Resend falla: resuelve `{ success:false }`
+    // (packages/email/src/index.ts:1113). Descartarlo dejaba la corrida
+    // registrada como `completed` con el resumen perdido, y el modo de fallo
+    // correlaciona: la misma caída de Resend que tumba los correos de
+    // bienvenida tumba este aviso, o sea justo la corrida con más cuentas sin
+    // contraseña entregada es la que no reporta nada. Es el mismo patrón que
+    // ya usan verificarFacturasSat.ts:403-420 y
+    // verificarCuadreLiquidaciones.ts:824-838.
+    if (envio && envio.success === false) {
+      console.error(
+        "❌ [provisionarCuentasPortal] El resumen NO se pudo enviar:",
+        envio.error,
+      );
+      throw new Error(
+        `Falló el envío del resumen de provisionamiento: ${JSON.stringify(envio.error)}`,
+      );
+    }
   }
 
   return resumen;

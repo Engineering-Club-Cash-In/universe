@@ -6,6 +6,7 @@ import { authClient } from "@/lib/auth";
 import { useNavigate } from "@tanstack/react-router";
 import { registerExternalUserAuth } from "@/features/Profile/services/unifiedService";
 import { conflictoDeRegistro } from "@/features/Profile/services/registroExterno.errors";
+import { altaYaHecha, mensajeDeAltaFallida } from "./registroPendiente";
 
 // Esquema de validación con Yup
 const validationSchema = Yup.object({
@@ -37,12 +38,30 @@ const validationSchema = Yup.object({
     .required("Debes seleccionar qué deseas hacer"),
 });
 
+/**
+ * Correo de la sesión abierta, o `null`. Es la prueba, del lado del servidor,
+ * de que un intento anterior ya creó la cuenta de Better Auth.
+ */
+const correoDeLaSesion = async (): Promise<string | null> => {
+  try {
+    const sesion = await authClient.getSession();
+    const correo = sesion?.data?.user?.email;
+
+    return typeof correo === "string" ? correo : null;
+  } catch {
+    // Sin respuesta del servidor no se puede afirmar que la cuenta exista; se
+    // intenta el alta, que es lo que hacía antes.
+    return null;
+  }
+};
+
 export const useRegister = () => {
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
-  // La cuenta de Better Auth ya se creó en un envío anterior de este mismo
-  // formulario.
+  // Atajo para no preguntarle al servidor dos veces en el mismo ciclo. NO es
+  // la fuente de verdad: un ref se pierde al recargar, y ahí es donde el
+  // registro a medias se quedaba atrapado. Ver `altaYaHecha`.
   const cuentaCreada = useRef(false);
   const navigate = useNavigate();
 
@@ -69,7 +88,22 @@ export const useRegister = () => {
         // falló por algo corregible (un DPI ya tomado), el segundo envío tiene
         // que reintentar SOLO esa parte: repetir el alta fallaría con "el
         // correo ya existe" y el usuario quedaría atrapado en el formulario.
-        if (!cuentaCreada.current) {
+        // Si el alta ya ocurrió, se pregunta al SERVIDOR, no a la memoria del
+        // componente: tras `signUp.email` la sesión queda abierta y sobrevive a
+        // una recarga. Antes esto vivía solo en un ref, así que recargar
+        // reiniciaba el estado, el siguiente envío repetía el alta y moría con
+        // "el correo ya existe" sin decir nada.
+        const yaCreada = altaYaHecha({
+          creadaEnEsteCiclo: cuentaCreada.current,
+          // Solo se pregunta si el ref no lo sabe ya, para no gastar una
+          // llamada de más en el camino normal.
+          correoDeLaSesion: cuentaCreada.current
+            ? null
+            : await correoDeLaSesion(),
+          correoDelFormulario: values.email,
+        });
+
+        if (!yaCreada) {
           // El rol y el DPI ya no viajan en el alta: el servidor los escribe
           // después, al validar el registro (registerExternalUserAuth).
           const response = await authClient.signUp.email({
@@ -80,11 +114,17 @@ export const useRegister = () => {
           });
 
           if (!response?.data?.user?.id) {
+            // Un alta fallida ya no se traga en silencio. El caso normal aquí
+            // es el correo ocupado por un registro anterior a medias, y su
+            // salida es iniciar sesión: el formulario de completar perfil
+            // termina la identidad (y muestra el selector de tipo, porque un
+            // CLIENT sin DPI no cuenta como rol elegido).
+            helpers.setStatus(mensajeDeAltaFallida(response));
             return;
           }
-
-          cuentaCreada.current = true;
         }
+
+        cuentaCreada.current = true;
 
         // Registrar en CRM o Cartera según tipo. La variante autenticada usa la
         // sesión recién creada y es la que deja el rol y el DPI en la cuenta.

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "bun:test";
 
-import { altaYaHecha, mensajeDeAltaFallida } from "./registroPendiente";
+import { RegistroExternoError } from "../../Profile/services/registroExterno.errors";
+import {
+  altaYaHecha,
+  mensajeDeAltaFallida,
+  mensajeDeRegistroFallido,
+} from "./registroPendiente";
 
 describe("altaYaHecha", () => {
   it("reconoce el alta hecha en este mismo ciclo del formulario", () => {
@@ -95,5 +100,41 @@ describe("mensajeDeAltaFallida", () => {
     expect(mensajeDeAltaFallida({ error: {} })).toBeTruthy();
     expect(mensajeDeAltaFallida(undefined)).toBeTruthy();
     expect(mensajeDeAltaFallida(null)).toBeTruthy();
+  });
+});
+
+describe("mensajeDeRegistroFallido", () => {
+  // El camino de Google no puede marcar un campo del formulario de registro
+  // (ya navegó fuera de él), pero el motivo que muestra tiene que ser EL MISMO
+  // que ve quien se registra por correo: la asimetría entre los dos caminos es
+  // justo lo que dejaba el 409 de Google sin decirle nada a la persona.
+  it("usa el conflicto de DPI cuando el servidor lo señala", () => {
+    expect(
+      mensajeDeRegistroFallido(
+        new RegistroExternoError(
+          409,
+          "dpi_ya_registrado",
+          "El DPI ya está registrado en otra cuenta",
+        ),
+      ),
+    ).toBe("El DPI ya está registrado en otra cuenta");
+
+    expect(
+      mensajeDeRegistroFallido(
+        new RegistroExternoError(400, "dpi_invalido", "El DPI no es válido"),
+      ),
+    ).toBe("El DPI no es válido");
+  });
+
+  it("conserva el motivo de un fallo cualquiera", () => {
+    expect(mensajeDeRegistroFallido(new Error("La red falló"))).toBe(
+      "La red falló",
+    );
+  });
+
+  it("cae a un mensaje genérico cuando no hay motivo aprovechable", () => {
+    expect(mensajeDeRegistroFallido(new Error(""))).toBeTruthy();
+    expect(mensajeDeRegistroFallido(undefined)).toBeTruthy();
+    expect(mensajeDeRegistroFallido({})).toBeTruthy();
   });
 });

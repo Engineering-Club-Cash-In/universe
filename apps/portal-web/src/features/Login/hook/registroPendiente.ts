@@ -13,6 +13,8 @@
  * `signUp.email` la sesión queda abierta, y esa sesión sobrevive a la recarga.
  */
 
+import { conflictoDeRegistro } from "../../Profile/services/registroExterno.errors";
+
 const normalizarCorreo = (correo: string | null | undefined): string =>
   typeof correo === "string" ? correo.trim().toLowerCase() : "";
 
@@ -76,4 +78,33 @@ export const mensajeDeAltaFallida = (resultado: ResultadoDeAlta): string => {
   }
 
   return mensaje || MENSAJE_GENERICO;
+};
+
+const MENSAJE_REGISTRO_GENERICO =
+  "No pudimos completar tu registro. Intenta de nuevo.";
+
+/**
+ * Motivo que se le muestra a la persona cuando el registro externo
+ * (`register-external-auth`) falla.
+ *
+ * Los dos caminos de registro —correo y Google— mueren en la MISMA llamada, la
+ * única que escribe el rol y el DPI, así que tienen que decir lo mismo. Que
+ * divergieran es el bug: el camino del correo ya llevaba el 409 de DPI al
+ * campo, y el de Google lo dejaba en un `console.error` con la persona mirando
+ * un formulario mudo. El camino del correo además marca el campo `dpi` (puede,
+ * sigue en el formulario); el de Google ya navegó al perfil y solo puede
+ * mostrar el texto, pero es el mismo texto.
+ */
+export const mensajeDeRegistroFallido = (error: unknown): string => {
+  const conflicto = conflictoDeRegistro(error);
+
+  if (conflicto) {
+    return conflicto.mensaje;
+  }
+
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+
+  return MENSAJE_REGISTRO_GENERICO;
 };

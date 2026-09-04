@@ -36,3 +36,25 @@ export const rolFueEstablecido = (
   // Cualquier otro rol no es de autoservicio; se comporta como antes.
   return false;
 };
+
+/**
+ * Tipo con el que arranca el formulario de recuperación del perfil.
+ *
+ * El registro por Google lleva el tipo elegido en la URL del callback y lo
+ * pierde si el registro externo falla: la persona caía en este formulario
+ * puesta en `CLIENT`, que es el valor por defecto, no su elección. Un rol ya
+ * establecido (ver `rolFueEstablecido`) sí manda sobre lo pedido: es lo que el
+ * servidor ya escribió.
+ */
+export const tipoInicialDelFormulario = (params: {
+  tipoSolicitado?: "CLIENT" | "INVESTOR" | null;
+  user?: UsuarioDelPortal | null;
+}): "CLIENT" | "INVESTOR" => {
+  const rol = params.user?.role;
+
+  if (rolFueEstablecido(params.user) && (rol === "CLIENT" || rol === "INVESTOR")) {
+    return rol;
+  }
+
+  return params.tipoSolicitado ?? "CLIENT";
+};

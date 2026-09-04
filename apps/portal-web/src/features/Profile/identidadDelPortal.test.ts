@@ -1,6 +1,9 @@
 import { describe, expect, it } from "bun:test";
 
-import { rolFueEstablecido } from "./identidadDelPortal";
+import {
+  rolFueEstablecido,
+  tipoInicialDelFormulario,
+} from "./identidadDelPortal";
 
 describe("rolFueEstablecido", () => {
   it("no da por establecido un CLIENT sin DPI: es el rol por defecto", () => {
@@ -33,5 +36,36 @@ describe("rolFueEstablecido", () => {
 
   it("un rol ajeno al autoservicio se trata como antes", () => {
     expect(rolFueEstablecido({ role: "ADMIN" })).toBeFalse();
+  });
+});
+
+describe("tipoInicialDelFormulario", () => {
+  // El registro por Google lleva el tipo elegido en la URL del callback. Si el
+  // registro externo muere con un 409 de DPI, la persona cae en el formulario
+  // de recuperación: descartar ahí su elección la reinscribe como cliente
+  // aunque hubiera pedido invertir.
+  it("respeta el tipo pedido cuando el rol es solo el CLIENT por defecto", () => {
+    expect(
+      tipoInicialDelFormulario({
+        tipoSolicitado: "INVESTOR",
+        user: { role: "CLIENT" },
+      }),
+    ).toBe("INVESTOR");
+  });
+
+  it("un rol ya establecido manda sobre el tipo pedido", () => {
+    expect(
+      tipoInicialDelFormulario({
+        tipoSolicitado: "CLIENT",
+        user: { role: "INVESTOR" },
+      }),
+    ).toBe("INVESTOR");
+  });
+
+  it("sin tipo pedido se comporta como antes", () => {
+    expect(
+      tipoInicialDelFormulario({ tipoSolicitado: null, user: { role: "CLIENT" } }),
+    ).toBe("CLIENT");
+    expect(tipoInicialDelFormulario({ user: null })).toBe("CLIENT");
   });
 });

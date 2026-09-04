@@ -3,14 +3,27 @@ import { InputIcon, Button, IconPerson } from "@/components";
 import { useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/lib";
 import { registerExternalUserAuth } from "../services";
-import { rolFueEstablecido } from "../identidadDelPortal";
+import {
+  rolFueEstablecido,
+  tipoInicialDelFormulario,
+} from "../identidadDelPortal";
 
 interface CompleteProfileFormProps {
   onSuccess: () => void;
+  /**
+   * Tipo que la persona eligió en un registro que no llegó a terminar (el
+   * camino de Google lo lleva en la URL del callback). Sin esto el formulario
+   * arrancaba en CLIENT, que es el valor por defecto, no su elección.
+   */
+  tipoSolicitado?: "CLIENT" | "INVESTOR" | null;
+  /** Motivo por el que ese registro falló, para no llegar aquí en silencio. */
+  mensajeInicial?: string;
 }
 
 export const CompleteProfileForm = ({
   onSuccess,
+  tipoSolicitado = null,
+  mensajeInicial = "",
 }: CompleteProfileFormProps) => {
   const { user } = useAuth();
   const [dpi, setDpi] = useState("");
@@ -19,12 +32,10 @@ export const CompleteProfileForm = ({
   // cliente, con el selector escondido, y se reinscribía como cliente para
   // siempre. Ver `rolFueEstablecido`.
   const hasRole = rolFueEstablecido(user);
-  const [userType, setUserType] = useState<"CLIENT" | "INVESTOR">(
-    hasRole && (user?.role === "CLIENT" || user?.role === "INVESTOR")
-      ? user.role
-      : "CLIENT",
+  const [userType, setUserType] = useState<"CLIENT" | "INVESTOR">(() =>
+    tipoInicialDelFormulario({ tipoSolicitado, user }),
   );
-  const [error, setError] = useState("");
+  const [error, setError] = useState(mensajeInicial);
 
   const completeMutation = useMutation({
     mutationFn: async () => {

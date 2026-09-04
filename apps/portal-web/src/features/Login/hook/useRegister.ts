@@ -6,7 +6,11 @@ import { authClient } from "@/lib/auth";
 import { useNavigate } from "@tanstack/react-router";
 import { registerExternalUserAuth } from "@/features/Profile/services/unifiedService";
 import { conflictoDeRegistro } from "@/features/Profile/services/registroExterno.errors";
-import { altaYaHecha, mensajeDeAltaFallida } from "./registroPendiente";
+import {
+  altaYaHecha,
+  mensajeDeAltaFallida,
+  mensajeDeRegistroFallido,
+} from "./registroPendiente";
 
 // Esquema de validación con Yup
 const validationSchema = Yup.object({
@@ -160,11 +164,10 @@ export const useRegister = () => {
           // ser inversionista quedaba clasificado como cliente sin enterarse.
           // Se queda en el formulario, con su tipo elegido intacto, y puede
           // reintentar — el alta de Better Auth ya no se repite.
-          helpers.setStatus(
-            error instanceof Error && error.message
-              ? error.message
-              : "No pudimos completar tu registro. Intenta de nuevo.",
-          );
+          // El motivo sale del mismo sitio que el del camino de Google: los dos
+          // mueren en esta llamada y no tiene sentido que digan cosas
+          // distintas.
+          helpers.setStatus(mensajeDeRegistroFallido(error));
           return;
         }
 

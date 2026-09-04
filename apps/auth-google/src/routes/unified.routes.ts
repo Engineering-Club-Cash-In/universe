@@ -230,7 +230,30 @@ unifiedRoutes.post(
     }
 
     const email = correo.trim().toLowerCase();
-    const cleanDpi = dpi?.replaceAll(" ", "") ?? dpi;
+
+    // El DPI se valida y se normaliza ANTES de crear nada.
+    //
+    // Antes solo se le quitaban los espacios, así que una fila con el DPI vacío
+    // o mal escrito creaba igual la cuenta como INVESTOR con ese valor
+    // inservible. Y la corrección después no servía: el chequeo de correo de
+    // abajo marcaba la fila "omitido" para siempre, así que el importador ya no
+    // podía terminar a ese inversionista.
+    //
+    // `normalizeDpi` es el mismo criterio que usa el registro: acepta
+    // separadores y devuelve los 13 dígitos. Sin él, la importación guardaba en
+    // `users.dpi` una cadena distinta de la que usa el resto del sistema.
+    const cleanDpi = normalizeDpi(dpi);
+
+    if (!cleanDpi) {
+      return {
+        correo: email,
+        nombre,
+        dpi,
+        status: "omitido" as const,
+        motivo:
+          "El DPI no tiene 13 dígitos; se omite para no crear una cuenta que la importación ya no podría corregir.",
+      };
+    }
 
     // Una cuenta que ya existe se deja intacta y se reporta como omitida.
     const [existing] = await db
@@ -248,7 +271,7 @@ unifiedRoutes.post(
       };
     }
 
-    // El DPI se comprueba ANTES del alta.
+    // Que el DPI esté libre se comprueba ANTES del alta.
     //
     // `users.dpi` es único y no viaja en el alta de Better Auth, así que el
     // orden anterior (crear y después escribir el DPI) reventaba el update
@@ -256,22 +279,20 @@ unifiedRoutes.post(
     // con una contraseña aleatoria que nadie conoce. Peor todavía, el chequeo
     // de correo de arriba marcaba todo reintento como "omitido", así que el
     // importador no podía terminar nunca a ese inversionista.
-    if (cleanDpi?.trim()) {
-      const [dpiTomado] = await db
-        .select({ id: users.id })
-        .from(users)
-        .where(eq(users.dpi, cleanDpi));
+    const [dpiTomado] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.dpi, cleanDpi));
 
-      if (dpiTomado) {
-        return {
-          correo: email,
-          nombre,
-          dpi: cleanDpi,
-          status: "omitido" as const,
-          motivo:
-            "El DPI ya pertenece a otra cuenta; se omite para no crear una cuenta a medias.",
-        };
-      }
+    if (dpiTomado) {
+      return {
+        correo: email,
+        nombre,
+        dpi: cleanDpi,
+        status: "omitido" as const,
+        motivo:
+          "El DPI ya pertenece a otra cuenta; se omite para no crear una cuenta a medias.",
+      };
     }
 
     // Credencial aleatoria que no se comunica a nadie: el titular la define

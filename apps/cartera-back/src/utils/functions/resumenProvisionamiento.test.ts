@@ -105,16 +105,21 @@ describe("resumirProvisionamiento", () => {
     expect(res.correoDistinto).toHaveLength(1);
   });
 
-  it("en seco, las candidatas se cuentan aparte y no simulan un 'ya tenía'", () => {
-    // El dry-run no sale a la red, así que NO sabe quién ya tiene cuenta.
+  it("las candidatas se cuentan aparte y no simulan un 'ya tenía'", () => {
     // Reportarlas como "ya_tenia" sería inventar un dato que no se midió.
+    //
+    // Antes esta prueba también exigía `hayQueReportar === false`, porque
+    // `candidata` solo existía en el dry-run —un modo manual que ya se estaba
+    // mirando— y avisar habría sido redundante. Desde que la corrida diaria NO
+    // provisiona, una candidata es una persona sin acceso esperando a que
+    // alguien se lo abra: callarla es perderla.
     const res = resumirProvisionamiento(
       [r({ estado: "candidata" }), r({ inversionistaId: 2, estado: "candidata" })],
       nombres,
     );
     expect(res.candidatas).toHaveLength(2);
     expect(res.yaTenian).toBe(0);
-    expect(res.hayQueReportar).toBe(false);
+    expect(res.hayQueReportar).toBe(true);
   });
 
   it("cuenta las empresas aparte: su aviso solo sale en el alta", () => {
@@ -219,5 +224,38 @@ describe("construirCorreoResumen — el nombre no puede inyectar HTML", () => {
     expect(html).not.toContain("<script>");
     expect(html).toContain("&lt;script&gt;");
     expect(html).not.toContain("<b>boom</b>");
+  });
+});
+
+describe("resumirProvisionamiento: la pendiente es trabajo, no estadística", () => {
+  /**
+   * El job dejó de crear cuentas: ahora las pendientes SON el entregable. Si
+   * `candidatas` no hiciera sonar la campana, la corrida terminaría en silencio
+   * y el rescate que este módulo existe para dar —la persona a la que el alta
+   * no le pudo abrir la cuenta porque auth-google estaba caído— no llegaría
+   * nunca a manos de nadie.
+   */
+  it("una candidata dispara el resumen", () => {
+    const res = resumirProvisionamiento([r({ estado: "candidata" })], nombres);
+    expect(res.hayQueReportar).toBe(true);
+    expect(res.candidatas).toHaveLength(1);
+  });
+
+  it("marca la sociedad que está a punto de recibir cuenta PROPIA", () => {
+    // Antes solo se miraba al crear. Como ya nadie crea automáticamente, la
+    // única oportunidad de ver "esto parece una S.A. y va a recibir cuenta de
+    // persona" es aquí, ANTES del click.
+    const res = resumirProvisionamiento(
+      [r({ inversionistaId: 140, estado: "candidata" })],
+      nombres,
+    );
+    expect(res.dudosas.map((d) => d.inversionistaId)).toEqual([140]);
+  });
+
+  it("el correo nombra el acto humano que falta, no una corrida en seco", () => {
+    const res = resumirProvisionamiento([r({ estado: "candidata" })], nombres);
+    const { html } = construirCorreoResumen(res);
+    expect(html).toContain("Ana Pérez");
+    expect(html).not.toContain("corrida en seco");
   });
 });

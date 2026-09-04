@@ -71,6 +71,17 @@ unifiedRoutes.post("/register-external", async (c) => {
       });
     }
 
+    // Un alta de inversionista NO es autoservicio: escribe en
+    // `cartera.inversionistas`, y el upsert legacy puede reescribirle el correo
+    // a una fila existente resolviendo por DPI (investor.ts:672-678). Se corta
+    // aquí para dar un 403 legible en vez del 500 del servicio.
+    if (body.userType === "INVESTOR") {
+      throw new HTTPException(403, {
+        message:
+          "El alta de inversionistas la hace back office desde cartera, no el registro público",
+      });
+    }
+
     if (!body.fullName) {
       throw new HTTPException(400, { message: "El campo fullName es requerido" });
     }
@@ -132,6 +143,17 @@ unifiedRoutes.post("/register-external-auth", requireAuth, async (c) => {
     if (!payload.userType || !["CLIENT", "INVESTOR"].includes(payload.userType)) {
       throw new HTTPException(400, {
         message: "El campo userType es requerido y debe ser 'CLIENT' o 'INVESTOR'",
+      });
+    }
+
+    // Un alta de inversionista NO es autoservicio: escribe en
+    // `cartera.inversionistas`, y el upsert legacy puede reescribirle el correo
+    // a una fila existente resolviendo por DPI (investor.ts:672-678). Se corta
+    // aquí para dar un 403 legible en vez del 500 del servicio.
+    if (payload.userType === "INVESTOR") {
+      throw new HTTPException(403, {
+        message:
+          "El alta de inversionistas la hace back office desde cartera, no el registro público",
       });
     }
 

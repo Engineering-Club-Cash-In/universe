@@ -4,6 +4,7 @@ import { dependenciasReales } from "../services/provisioning/deps";
 import {
   asegurarCuentaInversionista,
   avisarEmpresaAgregada,
+  consultarCuentaInversionista,
 } from "../services/provisioning/ensureInvestorAccount";
 
 /**
@@ -63,6 +64,54 @@ internalRoutes.post("/provisioning/ensure-investor-account", async (c) => {
       inversionistaNombre: texto(body?.inversionistaNombre) || nombre,
     },
     dependenciasReales(),
+  );
+
+  return c.json(resultado);
+});
+
+/**
+ * ¿Este inversionista ya tiene cuenta del portal? SOLO LECTURA.
+ *
+ * Es la ruta por la que pasa la reconciliación diaria. Está separada de
+ * `ensure-investor-account` a propósito y no es una bandera de aquella: el job
+ * recorre la tabla ENTERA todos los días, y `cartera.inversionistas` se puede
+ * escribir desde caminos que no prueban identidad. Con una bandera, un olvido
+ * o un default mal puesto vuelve a convertir ese recorrido en un reparto
+ * automático de contraseñas; con dos rutas, el job no tiene forma de crear.
+ */
+internalRoutes.post("/provisioning/check-investor-account", async (c) => {
+  const body = await c.req.json().catch(() => null);
+
+  const email = texto(body?.email).toLowerCase();
+  const nombre = texto(body?.nombre);
+  const inversionistaId = numero(body?.inversionistaId);
+
+  if (!email || !nombre || inversionistaId === null) {
+    return c.json(
+      {
+        estado: "fallo",
+        usuarioEmail: null,
+        resueltoPor: null,
+        correo: { enviado: false, plantilla: null, redirigido: false, destinatarioReal: null },
+        advertencias: [],
+        motivo: "payload_incompleto",
+      },
+      400,
+    );
+  }
+
+  // Se le pasan SOLO las dependencias de lectura. Las de escritura ni entran.
+  const { buscarPorDpi, buscarPorEmail } = dependenciasReales();
+
+  const resultado = await consultarCuentaInversionista(
+    {
+      email,
+      nombre,
+      dpi: body?.dpi != null ? String(body.dpi) : null,
+      inversionistaId,
+      inversionistaNombre: texto(body?.inversionistaNombre) || nombre,
+    },
+    { buscarPorDpi, buscarPorEmail },
   );
 
   return c.json(resultado);

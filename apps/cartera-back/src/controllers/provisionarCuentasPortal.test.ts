@@ -27,12 +27,23 @@ mock.module("@cci/email", () => ({
 }));
 
 let resultadoDoble: any;
+const provisionarSpy = mock(async () => resultadoDoble);
+const consultarSpy = mock(async () => resultadoDoble);
 mock.module("../services/portalProvisioning", () => ({
-  provisionarInversionista: mock(async () => resultadoDoble),
+  provisionarInversionista: provisionarSpy,
+  consultarAccesoInversionista: consultarSpy,
 }));
 
 const { provisionarCuentasPortal } = await import("./provisionarCuentasPortal");
 
+/**
+ * OJO: desde que el job es de solo lectura, ÉL no puede producir este estado —
+ * `consultarAccesoInversionista` solo devuelve `candidata`, `ya_tenia`,
+ * `omitida` o `fallo`. Se sigue alimentando a propósito: estas cuatro pruebas
+ * cubren el cableado resumen→log→correo, y con este resultado siguen siendo el
+ * guard de regresión que se dispara si alguien vuelve a meter creación en la
+ * corrida diaria. Las pruebas del contrato nuevo están más abajo.
+ */
 const CREADA = {
   inversionistaId: 7,
   estado: "creada",
@@ -59,6 +70,21 @@ const preparar = (over: any = {}) => {
     },
   ];
   resultadoDoble = { ...CREADA, ...over };
+};
+
+const CANDIDATA = {
+  inversionistaId: 7,
+  estado: "candidata",
+  usuarioEmail: null,
+  resueltoPor: null,
+  correo: {
+    enviado: false,
+    plantilla: null,
+    redirigido: false,
+    destinatarioReal: null,
+  },
+  advertencias: [],
+  motivo: null,
 };
 
 describe("provisionarCuentasPortal: el resumen que no sale", () => {
@@ -121,5 +147,65 @@ describe("provisionarCuentasPortal: el resumen que no sale", () => {
     expect(orden[0]).toBe("log");
     expect(capturado.join("\n")).toContain("IRRECUPERABLE");
     expect(capturado.join("\n")).toContain("7");
+  });
+});
+
+describe("provisionarCuentasPortal: el cron NO puede crear cuentas", () => {
+  /**
+   * El agujero: el universo del job es la tabla ENTERA y no mira procedencia,
+   * así que una fila sembrada por un anónimo (POST /api/unified/register-external
+   * o POST /api/cartera/investor con una sesión auto-servida) se recogía a las
+   * 07:00 y salía de ahí una cuenta INVESTOR con la contraseña al correo del
+   * atacante. Y en la variante peor —DPI de un inversionista REAL sin cuenta—
+   * el upsert legacy le reescribe el correo a la fila de la víctima
+   * (investor.ts:678) y el cron le crea LA CUENTA DE LA VÍCTIMA al buzón del
+   * atacante.
+   *
+   * Ninguna marca en la FILA cierra esa segunda variante: la fila es legítima.
+   * Lo único que la cierra es que el cron deje de crear.
+   */
+  it("con la fila que siembra un anónimo, clasifica pero NUNCA provisiona", async () => {
+    filas = [
+      {
+        inversionista_id: 7,
+        nombre: "VICTIMA S.A.",
+        email: "atacante@evil.com",
+        dpi: 1234567890101,
+        dpi_rep_legal: null,
+      },
+    ];
+    resultadoDoble = { ...CANDIDATA };
+    provisionarSpy.mockClear();
+    consultarSpy.mockClear();
+
+    const resumen = await provisionarCuentasPortal({
+      enviarResumen: async () => ({ success: true }),
+    });
+
+    expect(provisionarSpy).toHaveBeenCalledTimes(0);
+    expect(consultarSpy).toHaveBeenCalledTimes(1);
+    expect(resumen.creadas.length).toBe(0);
+    expect(resumen.candidatas.map((c) => c.inversionistaId)).toEqual([7]);
+  });
+
+  it("una pendiente SÍ hace sonar la campana: sin eso el rescate no existe", async () => {
+    // Detectar sin avisar es no detectar. El job dejó de crear, así que la
+    // única forma de que alguien se entere del pendiente es este correo.
+    filas = [
+      {
+        inversionista_id: 7,
+        nombre: "Ana Pérez",
+        email: "ana@example.com",
+        dpi: 1234567890101,
+        dpi_rep_legal: null,
+      },
+    ];
+    resultadoDoble = { ...CANDIDATA };
+    const enviarResumen = mock(async () => ({ success: true }));
+
+    const resumen = await provisionarCuentasPortal({ enviarResumen });
+
+    expect(resumen.hayQueReportar).toBe(true);
+    expect(enviarResumen).toHaveBeenCalledTimes(1);
   });
 });

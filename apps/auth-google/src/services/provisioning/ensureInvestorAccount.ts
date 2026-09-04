@@ -69,6 +69,16 @@ export interface DependenciasProvisionamiento {
   }) => Promise<ResultadoEnvio>;
 }
 
+/**
+ * Solo las dependencias de LECTURA. El tipo es el guard: con esto en la firma,
+ * quien lo reciba no tiene con qué crear un usuario, promover un rol ni mandar
+ * un correo, aunque alguien lo intente más adelante.
+ */
+export type DependenciasConsulta = Pick<
+  DependenciasProvisionamiento,
+  "buscarPorDpi" | "buscarPorEmail"
+>;
+
 export interface EntradaCuenta {
   email: string;
   dpi: string | null;
@@ -89,6 +99,8 @@ export type EstadoProvisionamiento =
   | "creada"
   | "ya_tenia"
   | "avisada"
+  /** Solo la consulta: DEBERÍA tener cuenta y no la tiene. No se creó nada. */
+  | "candidata"
   | "fallo";
 
 export interface ResultadoProvisionamiento {
@@ -119,7 +131,7 @@ export interface ResultadoProvisionamiento {
 const resolverUsuario = async (
   dpi: string | null,
   email: string,
-  deps: DependenciasProvisionamiento,
+  deps: DependenciasConsulta,
 ): Promise<{ usuario: UsuarioPortal; resueltoPor: "dpi" | "email" } | null> => {
   const dpiBusqueda = normalizarDpiPortal(dpi);
   if (dpiBusqueda) {
@@ -318,14 +330,20 @@ export const asegurarCuentaInversionista = async (
   };
 };
 
-const reconocerExistente = async (
+/**
+ * Las dos advertencias de IDENTIDAD de una cuenta que ya existe.
+ *
+ * Vive aparte porque la consulta (solo lectura) y el provisionamiento (que
+ * además promueve el rol) tienen que reportar exactamente lo mismo: si
+ * divergieran, el resumen diario diría una cosa y el alta otra sobre la misma
+ * persona.
+ */
+const anotarIdentidad = (
   encontrado: { usuario: UsuarioPortal; resueltoPor: "dpi" | "email" },
   emailDeCartera: string,
   dpiDeCartera: string | null,
   advertencias: string[],
-  modo: ModoEnvio,
-  deps: DependenciasProvisionamiento,
-): Promise<ResultadoProvisionamiento> => {
+): void => {
   const { usuario, resueltoPor } = encontrado;
 
   if (usuario.email.toLowerCase() !== emailDeCartera) {
@@ -358,6 +376,19 @@ const reconocerExistente = async (
   ) {
     advertencias.push("cuenta_anclada_solo_por_correo");
   }
+};
+
+const reconocerExistente = async (
+  encontrado: { usuario: UsuarioPortal; resueltoPor: "dpi" | "email" },
+  emailDeCartera: string,
+  dpiDeCartera: string | null,
+  advertencias: string[],
+  modo: ModoEnvio,
+  deps: DependenciasProvisionamiento,
+): Promise<ResultadoProvisionamiento> => {
+  const { usuario, resueltoPor } = encontrado;
+
+  anotarIdentidad(encontrado, emailDeCartera, dpiDeCartera, advertencias);
 
   await promoverRol(usuario, advertencias, deps);
 
@@ -366,6 +397,59 @@ const reconocerExistente = async (
     usuarioEmail: usuario.email,
     resueltoPor,
     correo: correoVacio(modo),
+    advertencias,
+    motivo: null,
+  };
+};
+
+/**
+ * ¿Esta persona YA tiene cuenta en el portal? No escribe nada.
+ *
+ * Es lo único que la reconciliación diaria puede permitirse hacer sobre la
+ * tabla entera. `cartera.inversionistas` es escribible por caminos que no
+ * prueban identidad (el registro público del portal, y `POST /api/cartera/investor`
+ * con cualquier sesión de Better Auth, que es de sign-up abierto), así que una
+ * fila —o el CORREO de una fila legítima— puede venir de cualquiera. Mientras
+ * eso siga así, "hay una fila que debería tener cuenta" no puede significar
+ * "creale la cuenta y mandale la contraseña": significa "que alguien lo mire".
+ *
+ * El rol NO se promueve aquí aunque la cuenta exista: promover es escribir, y
+ * esta función corre sin que nadie haya revisado la fila. Esa promoción es del
+ * camino que sí pasa por un humano.
+ */
+export const consultarCuentaInversionista = async (
+  entrada: EntradaCuenta,
+  deps: DependenciasConsulta,
+): Promise<ResultadoProvisionamiento> => {
+  const advertencias: string[] = [];
+  const email = entrada.email.trim().toLowerCase();
+  const correo = {
+    enviado: false,
+    plantilla: null,
+    redirigido: false,
+    destinatarioReal: null,
+  } as ResultadoProvisionamiento["correo"];
+
+  const existente = await resolverUsuario(entrada.dpi, email, deps);
+
+  if (!existente) {
+    return {
+      estado: "candidata",
+      usuarioEmail: null,
+      resueltoPor: null,
+      correo,
+      advertencias,
+      motivo: null,
+    };
+  }
+
+  anotarIdentidad(existente, email, entrada.dpi, advertencias);
+
+  return {
+    estado: "ya_tenia",
+    usuarioEmail: existente.usuario.email,
+    resueltoPor: existente.resueltoPor,
+    correo,
     advertencias,
     motivo: null,
   };

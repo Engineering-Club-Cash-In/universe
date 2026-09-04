@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "bun:test";
 import {
   asegurarCuentaInversionista,
   avisarEmpresaAgregada,
+  consultarCuentaInversionista,
   type DependenciasProvisionamiento,
   type UsuarioPortal,
 } from "./ensureInvestorAccount";
@@ -410,5 +411,50 @@ describe("vínculo frágil: la cuenta se encontró solo por el correo", () => {
     const r = await asegurarCuentaInversionista(entrada(), deps());
 
     expect(r.advertencias).not.toContain("cuenta_anclada_solo_por_correo");
+  });
+});
+
+describe("consultarCuentaInversionista — la mitad que NO escribe", () => {
+  /**
+   * La reconciliación diaria pasa por aquí sobre la tabla entera. Si esto
+   * escribiera aunque fuera una vez, el cron volvería a ser lo que era: un
+   * repartidor automático de contraseñas para filas que cualquiera puede
+   * sembrar.
+   */
+  it("a quien no tiene cuenta lo devuelve como CANDIDATA, sin crear nada", async () => {
+    const r = await consultarCuentaInversionista(entrada(), deps());
+
+    expect(r.estado).toBe("candidata");
+    expect(creados).toEqual([]);
+    expect(actualizaciones).toEqual([]);
+    expect(bienvenidas).toEqual([]);
+    expect(usuarios).toEqual([]);
+  });
+
+  it("a quien ya tiene cuenta lo devuelve como YA_TENIA, y tampoco escribe", async () => {
+    usuarios = [
+      { id: "u1", email: "ana@example.com", nombre: "Ana", role: "CLIENT", dpi: "1234567890101" },
+    ];
+
+    const r = await consultarCuentaInversionista(entrada(), deps());
+
+    expect(r).toMatchObject({ estado: "ya_tenia", resueltoPor: "dpi" });
+    // Ni siquiera promueve el rol: promover es escribir, y esta función se
+    // llama ~200 veces al día sobre filas que nadie revisó.
+    expect(actualizaciones).toEqual([]);
+    expect(creados).toEqual([]);
+    expect(bienvenidas).toEqual([]);
+  });
+
+  it("reporta el correo distinto sin tocarlo", async () => {
+    usuarios = [
+      { id: "u1", email: "otro@example.com", nombre: "Ana", role: "INVESTOR", dpi: "1234567890101" },
+    ];
+
+    const r = await consultarCuentaInversionista(entrada(), deps());
+
+    expect(r.estado).toBe("ya_tenia");
+    expect(r.advertencias).toContain("correo_de_cartera_distinto_al_de_la_cuenta");
+    expect(actualizaciones).toEqual([]);
   });
 });

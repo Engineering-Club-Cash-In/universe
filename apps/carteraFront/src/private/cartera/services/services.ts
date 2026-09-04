@@ -97,6 +97,28 @@ export async function insertInvestorService(
   return res.data;
 }
 
+/**
+ * Abre el acceso al Portal del Inversionista. Es un ACTO HUMANO.
+ *
+ * La reconciliación diaria de cartera detecta a quién le falta acceso y lo
+ * manda en el resumen de las 07:00, pero ya NO le crea la cuenta: crearla
+ * significa mandar una contraseña por correo, y el correo de una fila de
+ * `inversionistas` puede no ser de su dueño (esa tabla se escribe desde
+ * caminos que no prueban identidad). Quien apriete este botón es quien
+ * responde por que ese correo sea el correcto: verificalo antes.
+ *
+ * Esta ruta NO está en el proxy `/api/cartera` de auth-google, así que no es
+ * alcanzable desde el portal: solo desde aquí, con un ADMIN de cartera.
+ */
+export async function otorgarAccesoPortalService(
+  inversionistaIds: number[]
+): Promise<{ message: string; resultados: AccesoPortalRespuesta[] }> {
+  const res = await api.post(`${API_URL}/investor/portal-access`, {
+    inversionista_ids: inversionistaIds,
+  });
+  return res.data;
+}
+
 // Actualizar inversionista(s)
 export async function updateInvestorService(
   data: InvestorPayload | InvestorPayload[]

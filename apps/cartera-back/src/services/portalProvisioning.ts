@@ -225,6 +225,63 @@ export const provisionarInversionista = async (
 };
 
 /**
+ * ¿Este inversionista ya tiene acceso al portal? SOLO LECTURA.
+ *
+ * Es la mitad del provisionamiento que puede correr sola, todos los días,
+ * sobre la tabla entera: pregunta y no escribe. La reconciliación diaria usa
+ * ESTA y nunca `provisionarInversionista`.
+ *
+ * Por qué es una función aparte y no una bandera de `provisionarInversionista`:
+ * una bandera se olvida, y el modo de fallo de olvidarla es exactamente el
+ * agujero que esto cierra —el job creando cuentas y mandando contraseñas sin
+ * que nadie las haya pedido—. Separadas, el job no tiene forma de crear ni por
+ * accidente: la ruta que crea no está en su código.
+ *
+ * NO existe un "degradarse al camino viejo" si el endpoint de consulta no
+ * responde: un 404 (auth-google todavía sin desplegar) o un timeout se
+ * reportan como `fallo` y la corrida no crea nada. Fallar cerrado aquí cuesta
+ * un día de espera; fallar abierto cuesta una cuenta entregada a quien no era.
+ */
+export const consultarAccesoInversionista = async (
+  fila: FilaInversionista,
+  opciones: OpcionesProvisionamiento = {},
+): Promise<ResultadoProvisionamientoCartera> => {
+  try {
+    const decision = decidirProvisionamiento(fila);
+
+    if (decision.accion === "omitir") {
+      return resultado(fila.inversionista_id, "omitida", decision.motivo);
+    }
+
+    // La empresa no recibe cuenta propia: entra con su representante. Aquí ni
+    // se pregunta ni se avisa —el aviso es del camino de alta, que pasa una
+    // sola vez— así que se omite sin salir a la red.
+    if (decision.accion === "notificar_representante") {
+      return resultado(decision.inversionistaId, "omitida", "es_empresa");
+    }
+
+    return llamar(
+      "/internal/provisioning/check-investor-account",
+      {
+        email: decision.email,
+        dpi: decision.dpi,
+        nombre: decision.nombre,
+        inversionistaId: decision.inversionistaId,
+        inversionistaNombre: decision.inversionistaNombre,
+      },
+      decision.inversionistaId,
+      opciones,
+    );
+  } catch (error: any) {
+    return resultado(
+      fila.inversionista_id,
+      "fallo",
+      String(error?.message ?? error),
+    );
+  }
+};
+
+/**
  * El alta creó la fila pero NO pidió acceso al portal.
  *
  * Se nombra en vez de omitirse en silencio: el modo de fallo del guard es un

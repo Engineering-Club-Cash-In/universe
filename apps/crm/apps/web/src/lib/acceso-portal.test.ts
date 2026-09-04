@@ -92,7 +92,7 @@ describe("avisoAccesoPortal", () => {
 
 		expect(aviso.tono).toBe("advertencia");
 		expect(aviso.texto).toContain("sí quedó creado");
-		expect(aviso.texto).toContain("7:00");
+		expect(aviso.texto).toContain("Dar acceso al portal");
 		expect(aviso.texto).not.toContain("timeout");
 	});
 
@@ -122,4 +122,44 @@ describe("avisoAccesoPortal", () => {
 		expect(aviso.texto).toContain("permiso");
 		expect(aviso.texto).toContain("segunda cuenta");
 	});
+});
+
+describe("lo que se le promete a quien captura el alta", () => {
+  /**
+   * La reconciliación diaria DEJÓ de crear cuentas: ahora detecta y reporta, y
+   * abrir la cuenta lo dispara una persona (POST /investor/portal-access).
+   *
+   * Estos textos decían "el sistema lo reintenta mañana a las 7:00 a.m.".
+   * Dejarlos así sería peor que no decir nada: conta cerraría el modal creyendo
+   * que el acceso se resuelve solo, nadie apretaría el botón, y el
+   * inversionista se quedaría sin portal indefinidamente esperando un
+   * automatismo que ya no existe.
+   */
+  it("un fallo del portal manda a abrir el acceso a mano, no a esperar", () => {
+    const aviso = avisoAccesoPortal(
+      acceso({ estado: "fallo", motivo: "timeout", advertencias: [] }),
+    )!;
+
+    expect(aviso.texto).toContain("sí quedó creado");
+    expect(aviso.texto).toContain("Dar acceso al portal");
+    expect(aviso.texto).not.toMatch(/reintenta|7:00/);
+  });
+
+  it("sin correo, primero se captura el correo y DESPUÉS se aprieta el botón", () => {
+    const aviso = avisoAccesoPortal(
+      acceso({ estado: "omitida", motivo: "sin_correo", advertencias: [] }),
+    )!;
+
+    expect(aviso.texto).toContain("Dar acceso al portal");
+    expect(aviso.texto).not.toMatch(/7:00/);
+  });
+
+  it("un alta que no pidió acceso tampoco promete que llegue solo", () => {
+    const aviso = avisoAccesoPortal(
+      acceso({ estado: "omitida", motivo: "no_solicitado", advertencias: [] }),
+    )!;
+
+    expect(aviso.texto).toContain("Dar acceso al portal");
+    expect(aviso.texto).not.toMatch(/7:00/);
+  });
 });

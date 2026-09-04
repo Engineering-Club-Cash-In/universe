@@ -35,7 +35,21 @@ export interface AvisoAccesoPortal {
   texto: string;
 }
 
-const HORA_RECONCILIACION = "mañana a las 7:00 a.m.";
+/**
+ * A dónde se manda a quien quedó sin acceso.
+ *
+ * ANTES esto decía "mañana a las 7:00 a.m.": la reconciliación diaria creaba
+ * las cuentas sola. Ya no. Ahora detecta y reporta, y abrir la cuenta lo
+ * dispara una persona, porque `cartera.inversionistas` se escribe desde
+ * caminos que no prueban identidad y el correo de una fila puede no ser de su
+ * dueño; mandar una contraseña sin que nadie mire ese correo era el agujero.
+ *
+ * Seguir prometiendo el automatismo sería peor que callar: conta cerraría el
+ * modal tranquila, nadie apretaría el botón, y la persona se quedaría sin
+ * portal esperando algo que no va a pasar.
+ */
+const COMO_SE_ARREGLA =
+  'abrile el acceso desde el menú del inversionista, opción "Dar acceso al portal"';
 
 /**
  * Por qué no se pudo, en palabras. Lo que no está en la lista se calla en vez de
@@ -108,7 +122,7 @@ export const avisoAccesoPortal = (
     // estrellen contra el guard de duplicados.
     return {
       tono: "advertencia",
-      texto: `No se le pudo dar acceso al portal${causa(acceso.motivo)}, pero el inversionista sí quedó creado. El sistema lo reintenta ${HORA_RECONCILIACION}; no lo vuelvas a crear.`,
+      texto: `No se le pudo dar acceso al portal${causa(acceso.motivo)}, pero el inversionista sí quedó creado: no lo vuelvas a crear. Cuando quieras, ${COMO_SE_ARREGLA}.`,
     };
   }
 
@@ -116,19 +130,19 @@ export const avisoAccesoPortal = (
     if (acceso.motivo === "sin_correo") {
       return {
         tono: "advertencia",
-        texto: `Quedó sin acceso al portal porque no tiene correo capturado. Agrégaselo y el sistema le crea la cuenta ${HORA_RECONCILIACION}`,
+        texto: `Quedó sin acceso al portal porque no tiene correo capturado. Agrégaselo y después ${COMO_SE_ARREGLA}.`,
       };
     }
     if (acceso.motivo === "sin_nombre") {
       return {
         tono: "advertencia",
-        texto: `Quedó sin acceso al portal porque no tiene nombre capturado. Agrégaselo y el sistema le crea la cuenta ${HORA_RECONCILIACION}`,
+        texto: `Quedó sin acceso al portal porque no tiene nombre capturado. Agrégaselo y después ${COMO_SE_ARREGLA}.`,
       };
     }
     if (acceso.motivo === "no_solicitado") {
       return {
         tono: "advertencia",
-        texto: `Este alta no pidió abrirle acceso al portal. Si le toca tenerlo, el sistema se lo crea ${HORA_RECONCILIACION}`,
+        texto: `Este alta no pidió abrirle acceso al portal. Si le toca tenerlo, ${COMO_SE_ARREGLA}.`,
       };
     }
     if (acceso.motivo === "es_empresa") {

@@ -19,7 +19,14 @@ export interface ResumenProvisionamiento {
   yaTenian: number;
   empresas: number;
   creadas: EntradaResumen[];
-  /** Solo en dry-run: filas que serían provisionadas. */
+  /**
+   * Pendientes: deberían tener cuenta del portal y no la tienen.
+   *
+   * Es el entregable del job, no una curiosidad del dry-run. Como la
+   * reconciliación ya no crea cuentas (provisionarCuentasPortal.ts), esta lista
+   * ES el trabajo: cada fila espera que una persona la mire y dispare
+   * `POST /investor/portal-access`.
+   */
   candidatas: EntradaResumen[];
   fallos: EntradaResumen[];
   sinCorreo: EntradaResumen[];
@@ -107,9 +114,11 @@ export const resumirProvisionamiento = (
       // tiempo; reportarlas cada día sería ruido, no trabajo pendiente.
       if (pareceSociedad(e.nombre)) resumen.dudosas.push(e);
     } else if (r.estado === "candidata") {
-      // El dry-run no sale a la red: no sabe quién ya tiene cuenta. Contarlas
-      // como "ya tenían" sería inventar un dato que no se midió.
       resumen.candidatas.push(e);
+      // La sociedad se marca ANTES del click, no después de crearle la cuenta.
+      // Es la única oportunidad que hay de que alguien vea "esto parece una
+      // S.A. y va a recibir cuenta de persona" mientras todavía se puede evitar.
+      if (pareceSociedad(e.nombre)) resumen.dudosas.push(e);
     } else if (r.estado === "ya_tenia" || r.estado === "avisada") {
       resumen.yaTenian += 1;
     } else if (r.estado === "fallo") {
@@ -144,6 +153,13 @@ export const resumirProvisionamiento = (
   }
 
   resumen.hayQueReportar =
+    // Las pendientes hacen sonar la campana. Detectar sin avisar es no
+    // detectar: desde que el job no provisiona, este correo es el ÚNICO camino
+    // por el que alguien se entera de que a una persona le falta su acceso.
+    // Sí, una pendiente que nadie atienda repite el aviso todos los días —a
+    // diferencia de `sinCorreo` o `vinculosFragiles`, eso no es ruido crónico:
+    // es trabajo abierto, y el volumen esperado es de 0-2 filas.
+    resumen.candidatas.length > 0 ||
     resumen.creadas.length > 0 ||
     resumen.fallos.length > 0 ||
     resumen.correosRedirigidos.length > 0 ||
@@ -234,7 +250,7 @@ export const construirCorreoResumen = (
     ${banner}
     <p>Revisados ${resumen.total} inversionistas: ${resumen.yaTenian} ya tenían
        acceso, ${resumen.empresas} son empresas (entran con su representante).</p>
-    ${lista("Serían provisionadas (corrida en seco)", resumen.candidatas)}
+    ${lista("Sin acceso al portal — hay que abrírselo a mano desde el módulo de inversionistas", resumen.candidatas)}
     ${lista("Cuentas creadas", resumen.creadas)}
     ${lista("Cuenta creada pero SIN contraseña entregada (resetear a mano)", resumen.accesosPerdidos)}
     ${lista("Cuenta creada sin rol o sin DPI (arreglar o mañana se duplica)", resumen.cuentasSinIdentidad)}

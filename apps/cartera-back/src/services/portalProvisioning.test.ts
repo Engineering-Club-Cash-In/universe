@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
+  consultarAccesoInversionista,
   provisionarInversionista,
   resultadoNoSolicitado,
 } from "./portalProvisioning";
@@ -184,5 +185,54 @@ describe("resultadoNoSolicitado", () => {
       advertencias: [],
       motivo: "no_solicitado",
     });
+  });
+});
+
+describe("consultarAccesoInversionista", () => {
+  /**
+   * La mitad de SOLO LECTURA del provisionamiento, y la razón de que exista:
+   * la reconciliación diaria tiene que saber QUIÉN ESTÁ PENDIENTE sin poder
+   * crearle la cuenta a nadie. Es una función distinta y no una bandera del
+   * mismo `provisionarInversionista` a propósito: una bandera se olvida y el
+   * modo de fallo de olvidarla es justo el agujero que esto cierra.
+   */
+  it("pega al endpoint de CONSULTA, nunca al que crea", async () => {
+    const { impl, llamadas } = fetchQueDevuelve({ estado: "candidata" });
+    const r = await consultarAccesoInversionista(fila(), { ...OPTS_BASE, fetchImpl: impl });
+
+    expect(llamadas[0].url).toBe(
+      "http://auth-google:9500/internal/provisioning/check-investor-account",
+    );
+    expect(r).toMatchObject({ inversionistaId: 1, estado: "candidata" });
+  });
+
+  it("a una empresa la omite sin salir a la red: no recibe cuenta propia", async () => {
+    const { impl, llamadas } = fetchQueDevuelve({ estado: "candidata" });
+    const r = await consultarAccesoInversionista(
+      fila({ dpi: null, dpi_rep_legal: "1573661970101" }),
+      { ...OPTS_BASE, fetchImpl: impl },
+    );
+    expect(llamadas).toEqual([]);
+    expect(r).toMatchObject({ estado: "omitida", motivo: "es_empresa" });
+  });
+
+  it("sin correo la omite y no llama a nadie", async () => {
+    const { impl, llamadas } = fetchQueDevuelve({ estado: "candidata" });
+    const r = await consultarAccesoInversionista(fila({ email: null }), {
+      ...OPTS_BASE,
+      fetchImpl: impl,
+    });
+    expect(r).toMatchObject({ estado: "omitida", motivo: "sin_correo" });
+    expect(llamadas).toEqual([]);
+  });
+
+  it("si el endpoint de consulta todavía no existe, falla CERRADO", async () => {
+    // Orden de despliegue: cartera-back puede subir antes que auth-google. Un
+    // 404 tiene que verse como fallo reportable, jamás degradarse a "creá la
+    // cuenta por el camino viejo".
+    const { impl } = fetchQueDevuelve({ error: "not_found" }, 404);
+    const r = await consultarAccesoInversionista(fila(), { ...OPTS_BASE, fetchImpl: impl });
+    expect(r).toMatchObject({ estado: "fallo" });
+    expect(r.motivo).toContain("404");
   });
 });

@@ -19,26 +19,73 @@ const normalizarCorreo = (correo: string | null | undefined): string =>
   typeof correo === "string" ? correo.trim().toLowerCase() : "";
 
 /**
- * ¿La cuenta de Better Auth de este correo ya existe por un intento anterior?
+ * Qué hacer con el alta de Better Auth en este envío del formulario.
  *
- * El correo de la sesión tiene que ser EL MISMO del formulario. Con una sesión
- * de otra cuenta, saltarse el alta ataría el registro a esa cuenta ajena: el
- * rol y el DPI que se piden aquí acabarían escritos sobre ella.
+ * - `crear`: no hay cuenta todavía; se hace el `signUp.email`.
+ * - `reintentar`: la cuenta ya existe con ESTE correo; se salta el alta y se
+ *   repite solo el registro externo.
+ * - `correo_cambiado`: la cuenta ya existe con OTRO correo. No se puede seguir
+ *   por ninguno de los dos lados y hay que decirlo (ver
+ *   `mensajeDeCorreoCambiado`).
+ *
+ * El tercer estado es el que faltaba. Antes esto era un booleano y el "ya está
+ * creada" se daba por hecho sin mirar el correo, así que si el registro externo
+ * fallaba y la persona corregía el correo en el paso 2, el reintento se saltaba
+ * el alta y mandaba `register-external-auth` con la sesión del correo VIEJO. El
+ * servidor ignora el correo del cuerpo a propósito (usa el de la sesión), de
+ * modo que la cuenta, el lead de CRM y la fila de cartera quedaban con el
+ * correo que la persona acababa de descartar, con su DPI real colgando y sin
+ * ningún aviso en pantalla.
+ *
+ * Seguir de largo por el otro lado tampoco vale: caer al `signUp.email` con el
+ * correo nuevo crea una SEGUNDA cuenta y deja huérfana la primera —la que lleva
+ * la sesión abierta—. Eso es lo que pasaba cuando la persona recargaba en vez
+ * de reintentar, y es el mismo estado con dos desenlaces opuestos. Aquí los dos
+ * caminos terminan igual: detectar y negarse.
+ *
+ * El correo del alta se recuerda además de preguntarle a la sesión porque son
+ * evidencias distintas: la sesión sobrevive a la recarga (es la única que cubre
+ * ese caso) pero depende de una llamada que puede fallar; el correo del alta
+ * solo vive mientras vive el formulario, pero no depende de la red.
  */
-export const altaYaHecha = (params: {
-  /** El alta ya se hizo en esta misma vida del formulario. */
-  creadaEnEsteCiclo: boolean;
+export type DecisionDeAlta = "crear" | "reintentar" | "correo_cambiado";
+
+export const decidirAlta = (params: {
+  /** Correo con el que este mismo formulario ya creó la cuenta, si lo hizo. */
+  correoDelAlta: string | null | undefined;
   /** Correo de la sesión abierta, si la hay. */
   correoDeLaSesion: string | null | undefined;
   correoDelFormulario: string;
-}): boolean => {
-  if (params.creadaEnEsteCiclo) {
-    return true;
+}): DecisionDeAlta => {
+  const formulario = normalizarCorreo(params.correoDelFormulario);
+  const cuentas = [
+    normalizarCorreo(params.correoDelAlta),
+    normalizarCorreo(params.correoDeLaSesion),
+  ].filter((correo) => correo !== "");
+
+  if (cuentas.length === 0) {
+    return "crear";
   }
 
-  const sesion = normalizarCorreo(params.correoDeLaSesion);
+  return cuentas.includes(formulario) ? "reintentar" : "correo_cambiado";
+};
 
-  return sesion !== "" && sesion === normalizarCorreo(params.correoDelFormulario);
+/**
+ * Aviso de que la cuenta abierta no es la del correo del formulario.
+ *
+ * Nombra el correo de la cuenta: si el desajuste vino de un dedazo, este
+ * mensaje es el único sitio donde la persona lo va a ver escrito, y sin él
+ * tendría que adivinar qué tecleó para poder entrar. La salida no es reintentar
+ * —el formulario no puede cambiarle el correo a una cuenta ya creada— sino
+ * cerrar sesión, así que se dice.
+ */
+export const mensajeDeCorreoCambiado = (correoDeLaCuenta: string): string => {
+  const correo = correoDeLaCuenta.trim();
+  const cuenta = correo
+    ? `Ya hay una cuenta abierta con ${correo}`
+    : "Ya hay una cuenta abierta con el correo del intento anterior";
+
+  return `${cuenta} y desde aquí no se le puede cambiar el correo. Para registrarte con otro, tienes que cerrar sesión y empezar de nuevo.`;
 };
 
 const MENSAJE_GENERICO =

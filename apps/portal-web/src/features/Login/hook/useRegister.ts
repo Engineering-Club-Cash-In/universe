@@ -7,8 +7,9 @@ import { useNavigate } from "@tanstack/react-router";
 import { registerExternalUserAuth } from "@/features/Profile/services/unifiedService";
 import { conflictoDeRegistro } from "@/features/Profile/services/registroExterno.errors";
 import {
-  altaYaHecha,
+  decidirAlta,
   mensajeDeAltaFallida,
+  mensajeDeCorreoCambiado,
   mensajeDeRegistroFallido,
 } from "./registroPendiente";
 
@@ -63,10 +64,13 @@ export const useRegister = () => {
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
-  // Atajo para no preguntarle al servidor dos veces en el mismo ciclo. NO es
-  // la fuente de verdad: un ref se pierde al recargar, y ahí es donde el
-  // registro a medias se quedaba atrapado. Ver `altaYaHecha`.
-  const cuentaCreada = useRef(false);
+  // Correo con el que ESTE formulario ya creó la cuenta, o `null`. Guarda el
+  // correo y no un booleano a propósito: con un booleano el reintento se
+  // saltaba el alta sin mirar si el formulario seguía llevando ese mismo
+  // correo. No es la fuente de verdad —un ref se pierde al recargar, y ahí es
+  // donde el registro a medias se quedaba atrapado—, por eso se contrasta
+  // también con la sesión. Ver `decidirAlta`.
+  const correoDelAlta = useRef<string | null>(null);
   const navigate = useNavigate();
 
   // Formik
@@ -92,22 +96,32 @@ export const useRegister = () => {
         // falló por algo corregible (un DPI ya tomado), el segundo envío tiene
         // que reintentar SOLO esa parte: repetir el alta fallaría con "el
         // correo ya existe" y el usuario quedaría atrapado en el formulario.
-        // Si el alta ya ocurrió, se pregunta al SERVIDOR, no a la memoria del
+        // Si el alta ya ocurrió lo dice el SERVIDOR, no la memoria del
         // componente: tras `signUp.email` la sesión queda abierta y sobrevive a
-        // una recarga. Antes esto vivía solo en un ref, así que recargar
-        // reiniciaba el estado, el siguiente envío repetía el alta y moría con
-        // "el correo ya existe" sin decir nada.
-        const yaCreada = altaYaHecha({
-          creadaEnEsteCiclo: cuentaCreada.current,
-          // Solo se pregunta si el ref no lo sabe ya, para no gastar una
-          // llamada de más en el camino normal.
-          correoDeLaSesion: cuentaCreada.current
-            ? null
-            : await correoDeLaSesion(),
+        // una recarga. Se le pregunta SIEMPRE, también cuando el ref ya sabe
+        // que la cuenta existe: ahorrarse esta llamada en el reintento era lo
+        // que dejaba el correo del formulario sin comparar con el de la cuenta.
+        const correoDeLaCuenta = await correoDeLaSesion();
+        const decision = decidirAlta({
+          correoDelAlta: correoDelAlta.current,
+          correoDeLaSesion: correoDeLaCuenta,
           correoDelFormulario: values.email,
         });
 
-        if (!yaCreada) {
+        // El correo del formulario ya no es el de la cuenta creada. No se puede
+        // seguir por ninguno de los dos lados: continuar registraría en
+        // CRM/cartera el correo viejo (el servidor toma el de la sesión, no el
+        // del cuerpo), y crear la cuenta nueva dejaría huérfana la primera. Se
+        // corta diciendo con qué correo quedó la cuenta y cómo empezar de
+        // nuevo.
+        if (decision === "correo_cambiado") {
+          helpers.setStatus(
+            mensajeDeCorreoCambiado(correoDeLaCuenta ?? correoDelAlta.current ?? ""),
+          );
+          return;
+        }
+
+        if (decision === "crear") {
           // El rol y el DPI ya no viajan en el alta: el servidor los escribe
           // después, al validar el registro (registerExternalUserAuth).
           const response = await authClient.signUp.email({
@@ -128,7 +142,7 @@ export const useRegister = () => {
           }
         }
 
-        cuentaCreada.current = true;
+        correoDelAlta.current = values.email;
 
         // Registrar en CRM o Cartera según tipo. La variante autenticada usa la
         // sesión recién creada y es la que deja el rol y el DPI en la cuenta.

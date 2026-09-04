@@ -16,6 +16,15 @@ import {
   type PortalUserType,
 } from "../lib/portalIdentity";
 
+/**
+ * Quien ejecuta las consultas: la conexión suelta o la transacción abierta por
+ * `applyRegistrationOutcome`. Se pasa como parámetro —con `db` por defecto—
+ * para no partir la firma que usa `profile.routes.ts`, que llama a `setUserDpi`
+ * fuera de toda transacción.
+ */
+type Transaccion = Parameters<Parameters<typeof db.transaction>[0]>[0];
+type Ejecutor = typeof db | Transaccion;
+
 export class DpiFormatError extends Error {
   constructor() {
     super("El DPI debe tener exactamente 13 dígitos");
@@ -76,6 +85,7 @@ const esViolacionDeUnicidad = (error: unknown): boolean => {
 export async function assertDpiAvailable(
   userId: string,
   dpi: string,
+  ejecutor: Ejecutor = db,
 ): Promise<string> {
   const normalized = normalizeDpi(dpi);
 
@@ -85,7 +95,7 @@ export async function assertDpiAvailable(
 
   // La columna es única; se comprueba antes para poder devolver un 409 claro
   // en vez de un error de constraint.
-  const [taken] = await db
+  const [taken] = await ejecutor
     .select({ id: users.id })
     .from(users)
     .where(and(eq(users.dpi, normalized), ne(users.id, userId)));
@@ -104,12 +114,19 @@ export async function assertDpiAvailable(
  * que la escritura puede chocar igual contra el índice único. Ese 23505 se
  * traduce al mismo `DpiAlreadyTakenError` que devuelve la comprobación previa:
  * quien pierde la carrera recibe un 409 que puede corregir, no un 500 mudo.
+ *
+ * `ejecutor` permite correr contra una transacción abierta. Por defecto es la
+ * conexión suelta, que es como la usa `profile.routes.ts`.
  */
-export async function setUserDpi(userId: string, dpi: string): Promise<string> {
-  const normalized = await assertDpiAvailable(userId, dpi);
+export async function setUserDpi(
+  userId: string,
+  dpi: string,
+  ejecutor: Ejecutor = db,
+): Promise<string> {
+  const normalized = await assertDpiAvailable(userId, dpi, ejecutor);
 
   try {
-    await db
+    await ejecutor
       .update(users)
       .set({ dpi: normalized, updatedAt: new Date() })
       .where(eq(users.id, userId));
@@ -130,56 +147,76 @@ export async function setUserDpi(userId: string, dpi: string): Promise<string> {
  *
  * El rol se decide con `resolveRoleAfterRegistration`, que nunca asigna un rol
  * fuera de los de autoservicio ni pisa uno administrativo.
+ *
+ * Las dos escrituras son ATÓMICAS: o quedan las dos o no queda ninguna. Ver el
+ * porqué en el cuerpo.
  */
 export async function applyRegistrationOutcome(
   userId: string,
   userType: PortalUserType,
   dpi: string | null | undefined,
 ): Promise<{ dpi: string | null; role: PortalUserType | null }> {
-  const [current] = await db
-    .select({ id: users.id, role: users.role, dpi: users.dpi })
-    .from(users)
-    .where(eq(users.id, userId));
+  // Las dos escrituras van en UNA transacción. Sueltas, un fallo entre ellas
+  // —no hace falta un crash: `connectionTimeoutMillis` es de 2 s y la segunda
+  // escritura pide una conexión NUEVA del pool— deja la cuenta con el DPI ya
+  // commiteado y el rol en CLIENT. Ese estado es un callejón sin salida para el
+  // titular: los dos caminos de recuperación del portal (el formulario de
+  // `Profile.tsx` y el reintento del callback de Google en `useProfile.ts`)
+  // están gateados por `!user.dpi`, que ya no se cumple, así que deja de ver la
+  // sección de inversionista sin poder arreglarlo. Deshaciéndolo entero no
+  // queda nada escrito y el reintento —que es idempotente, porque el alta en
+  // cartera reconoce su propia fila— vuelve a estar disponible.
+  //
+  // `DpiAlreadyTakenError` tiene que salir FUERA del callback, nunca capturarse
+  // dentro para seguir: un 23505 aborta la transacción en Postgres y cualquier
+  // statement posterior fallaría con 25P02.
+  return db.transaction(async (tx) => {
+    const [current] = await tx
+      .select({ id: users.id, role: users.role, dpi: users.dpi })
+      .from(users)
+      .where(eq(users.id, userId));
 
-  if (!current) {
-    throw new Error("Usuario no encontrado");
-  }
+    if (!current) {
+      throw new Error("Usuario no encontrado");
+    }
 
-  // El DPI que queda EN VIGOR, no solo el que escribió esta llamada: si la
-  // cuenta ya lo traía de un intento anterior, aquí no hay nada que escribir y
-  // devolver `null` haría parecer que se quedó sin DPI.
-  let appliedDpi: string | null = current.dpi;
-  const normalized = normalizeDpi(dpi);
+    // El DPI que queda EN VIGOR, no solo el que escribió esta llamada: si la
+    // cuenta ya lo traía de un intento anterior, aquí no hay nada que escribir y
+    // devolver `null` haría parecer que se quedó sin DPI.
+    let appliedDpi: string | null = current.dpi;
+    const normalized = normalizeDpi(dpi);
 
-  if (normalized && normalized !== current.dpi) {
-    await setUserDpi(userId, normalized);
-    appliedDpi = normalized;
-  }
+    if (normalized && normalized !== current.dpi) {
+      await setUserDpi(userId, normalized, tx);
+      appliedDpi = normalized;
+    }
 
-  const nextRole = resolveRoleAfterRegistration(current.role, userType);
+    const nextRole = resolveRoleAfterRegistration(current.role, userType);
 
-  if (!nextRole) {
-    return { dpi: appliedDpi, role: null };
-  }
+    if (!nextRole) {
+      return { dpi: appliedDpi, role: null };
+    }
 
-  // El ascenso se condiciona al rol que se leyó arriba, no solo al id. Entre
-  // ese SELECT y este UPDATE median las comprobaciones y la escritura del DPI:
-  // si en esa ventana un administrador cambia la cuenta a un rol
-  // administrativo, un predicado por id lo pisaría con INVESTOR y rompería el
-  // invariante de que el registro del portal nunca toca esos roles.
-  // `resolveRoleAfterRegistration` solo devuelve un rol cuando el actual es
-  // CLIENT, así que `current.role` aquí es siempre ese valor concreto.
-  const ascendidos = await db
-    .update(users)
-    .set({ role: nextRole, updatedAt: new Date() })
-    .where(and(eq(users.id, userId), eq(users.role, current.role)))
-    .returning({ id: users.id });
+    // El ascenso se condiciona al rol que se leyó arriba, no solo al id. Entre
+    // ese SELECT y este UPDATE media la escritura del DPI: si en esa ventana un
+    // administrador cambia la cuenta a un rol administrativo, un predicado por
+    // id lo pisaría con INVESTOR y rompería el invariante de que el registro del
+    // portal nunca toca esos roles. `resolveRoleAfterRegistration` solo devuelve
+    // un rol cuando el actual es CLIENT, así que `current.role` aquí es siempre
+    // ese valor concreto.
+    const ascendidos = await tx
+      .update(users)
+      .set({ role: nextRole, updatedAt: new Date() })
+      .where(and(eq(users.id, userId), eq(users.role, current.role)))
+      .returning({ id: users.id });
 
-  // Cero filas = el rol cambió bajo nuestros pies. Se respeta el rol nuevo y
-  // se reporta que no hubo ascenso.
-  if (ascendidos.length === 0) {
-    return { dpi: appliedDpi, role: null };
-  }
+    // Cero filas = el rol cambió bajo nuestros pies. Se respeta el rol nuevo y
+    // se reporta que no hubo ascenso. NO se deshace la transacción: el DPI sí
+    // es correcto y el rol nuevo es el que manda.
+    if (ascendidos.length === 0) {
+      return { dpi: appliedDpi, role: null };
+    }
 
-  return { dpi: appliedDpi, role: nextRole };
+    return { dpi: appliedDpi, role: nextRole };
+  });
 }

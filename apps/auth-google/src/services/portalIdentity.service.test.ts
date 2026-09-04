@@ -11,50 +11,98 @@ const aSql = (condicion: unknown) => dialecto.sqlToQuery(condicion as SQL);
 let filasSelect: Record<string, unknown>[][] = [];
 // Predicado de cada SELECT, para poder afirmar sobre la exclusión que aplica.
 let selects: unknown[] = [];
-// Fuerza el choque contra el índice único en el siguiente UPDATE.
+// Fuerza el choque contra el índice único en el UPDATE del DPI.
 let updateChocaConElIndice = false;
-// Cada UPDATE que hizo el servicio: qué escribió y bajo qué predicado.
+// Fuerza que reviente el UPDATE del rol, que es la SEGUNDA de las dos
+// escrituras. Es el fallo de infraestructura del que se defiende la
+// transacción: con `connectionTimeoutMillis: 2000` basta un pico de carga.
+let updateDeRolFalla = false;
+// Cada UPDATE que EMITIÓ el servicio: qué escribió y bajo qué predicado.
 let updates: { valores: Record<string, unknown>; condicion: unknown }[] = [];
+// Solo los UPDATE que quedaron COMPROMETIDOS. Los de fuera de transacción
+// cuentan al emitirse; los de dentro, únicamente si el callback terminó bien.
+let updatesComprometidos: {
+  valores: Record<string, unknown>;
+  condicion: unknown;
+}[] = [];
+// Cuántas transacciones se deshicieron porque el callback lanzó.
+let rollbacks = 0;
 // Filas que devuelve el `returning` del UPDATE de rol. Vacío = el predicado no
 // casó con ninguna fila, es decir, se perdió la carrera.
 let filasActualizadas: Record<string, unknown>[] = [];
 
+type Escritura = { valores: Record<string, unknown>; condicion: unknown };
+
+// Un ejecutor de consultas con el API que comparten `db` y el `tx` que entrega
+// `db.transaction`. `registrar` es lo único que los distingue: es lo que separa
+// una escritura EMITIDA de una COMPROMETIDA.
+const ejecutorFalso = (registrar: (escritura: Escritura) => void) => ({
+  select: () => ({
+    from: () => ({
+      where: (condicion: unknown) => {
+        selects.push(condicion);
+        return Promise.resolve(filasSelect.shift() ?? []);
+      },
+    }),
+  }),
+  update: () => ({
+    set: (valores: Record<string, unknown>) => ({
+      where: (condicion: unknown) => {
+        updates.push({ valores, condicion });
+
+        if (updateChocaConElIndice && valores.dpi !== undefined) {
+          const fallo = Object.assign(
+            new Error(
+              'duplicate key value violates unique constraint "users_dpi_unique"',
+            ),
+            { code: "23505" },
+          );
+          const rechazo = Promise.reject(fallo);
+          return Object.assign(rechazo, { returning: () => rechazo });
+        }
+
+        if (updateDeRolFalla && valores.role !== undefined) {
+          const rechazo = Promise.reject(
+            new Error("timeout exceeded when trying to connect"),
+          );
+          return Object.assign(rechazo, { returning: () => rechazo });
+        }
+
+        registrar({ valores, condicion });
+
+        // El builder de Drizzle es encadenable y "thenable" a la vez: se
+        // puede await directamente o pedirle `.returning()`.
+        const resultado = Promise.resolve(filasActualizadas);
+        return Object.assign(resultado, {
+          returning: () => Promise.resolve(filasActualizadas),
+        });
+      },
+    }),
+  }),
+});
+
 mock.module("../db/connection", () => ({
-  db: {
-    select: () => ({
-      from: () => ({
-        where: (condicion: unknown) => {
-          selects.push(condicion);
-          return Promise.resolve(filasSelect.shift() ?? []);
-        },
-      }),
-    }),
-    update: () => ({
-      set: (valores: Record<string, unknown>) => ({
-        where: (condicion: unknown) => {
-          updates.push({ valores, condicion });
+  db: Object.assign(
+    ejecutorFalso((escritura) => updatesComprometidos.push(escritura)),
+    {
+      transaction: async (callback: (tx: unknown) => Promise<unknown>) => {
+        const pendientes: Escritura[] = [];
+        const tx = ejecutorFalso((escritura) => pendientes.push(escritura));
 
-          if (updateChocaConElIndice) {
-            const fallo = Object.assign(
-              new Error(
-                'duplicate key value violates unique constraint "users_dpi_unique"',
-              ),
-              { code: "23505" },
-            );
-            const rechazo = Promise.reject(fallo);
-            return Object.assign(rechazo, { returning: () => rechazo });
-          }
+        try {
+          const resultado = await callback(tx);
 
-          // El builder de Drizzle es encadenable y "thenable" a la vez: se
-          // puede await directamente o pedirle `.returning()`.
-          const resultado = Promise.resolve(filasActualizadas);
-          return Object.assign(resultado, {
-            returning: () => Promise.resolve(filasActualizadas),
-          });
-        },
-      }),
-    }),
-  },
+          updatesComprometidos.push(...pendientes);
+
+          return resultado;
+        } catch (error) {
+          // ROLLBACK: lo escrito dentro del callback no llega a comprometerse.
+          rollbacks += 1;
+          throw error;
+        }
+      },
+    },
+  ),
 }));
 
 // Se carga dentro de `beforeAll` para que el mock de la conexión ya esté puesto.
@@ -77,6 +125,9 @@ describe("applyRegistrationOutcome", () => {
     filasSelect = [];
     selects = [];
     updates = [];
+    updatesComprometidos = [];
+    rollbacks = 0;
+    updateDeRolFalla = false;
     filasActualizadas = [{ id: "u1" }];
     updateChocaConElIndice = false;
   });
@@ -122,6 +173,26 @@ describe("applyRegistrationOutcome", () => {
     expect(resultado.role).toBeNull();
   });
 
+  // Las dos escrituras —DPI y rol— tienen que ser UNA. Si la segunda muere
+  // (basta un timeout del pool: `connectionTimeoutMillis: 2000` en
+  // db/connection.ts), un DPI ya comprometido deja la cuenta con la identidad
+  // partida y sin salida: el formulario de completar perfil se gatea con
+  // `!user.dpi`, así que deja de aparecer, y el rol se queda en CLIENT.
+  it("no deja el DPI escrito si el ascenso de rol falla", async () => {
+    filasSelect = [[{ id: "u1", role: "CLIENT", dpi: null }], []];
+    updateDeRolFalla = true;
+
+    await expect(
+      applyRegistrationOutcome("u1", "INVESTOR", "1234567890123"),
+    ).rejects.toThrow("timeout exceeded when trying to connect");
+
+    // El UPDATE del DPI llegó a emitirse...
+    expect(updates.some((u) => u.valores.dpi === "1234567890123")).toBe(true);
+    // ...pero no quedó comprometido: la transacción se deshizo entera.
+    expect(updatesComprometidos).toEqual([]);
+    expect(rollbacks).toBe(1);
+  });
+
   it("no toca un rol administrativo", async () => {
     filasSelect = [[{ id: "u1", role: "ADMIN", dpi: "1234567890123" }]];
 
@@ -153,6 +224,9 @@ describe("assertDpiAvailable", () => {
     filasSelect = [];
     selects = [];
     updates = [];
+    updatesComprometidos = [];
+    rollbacks = 0;
+    updateDeRolFalla = false;
     updateChocaConElIndice = false;
   });
 
@@ -207,6 +281,9 @@ describe("setUserDpi", () => {
     filasSelect = [];
     selects = [];
     updates = [];
+    updatesComprometidos = [];
+    rollbacks = 0;
+    updateDeRolFalla = false;
     filasActualizadas = [{ id: "u1" }];
     updateChocaConElIndice = false;
   });

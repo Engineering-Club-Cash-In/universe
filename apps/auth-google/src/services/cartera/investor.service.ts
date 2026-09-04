@@ -160,7 +160,16 @@ export const getInvestorProfileById = async (
     throw new Error("Error al obtener perfil del inversionista");
   }
 
-  return (await response.json()) as InvestorProfile;
+  const perfil = (await response.json()) as Record<string, unknown>;
+
+  // `/investor` adjunta TODOS los documentos del inversionista —el left join de
+  // getInvestors no filtra `visible`— y cada uno ya viene con su URL firmada.
+  // El portal pide los suyos por `client-by-id`, que sí respeta la visibilidad,
+  // así que acá se descartan: aunque la UI ignore la propiedad, los documentos
+  // internos viajarían igual hasta el navegador.
+  delete perfil.documentos;
+
+  return perfil as unknown as InvestorProfile;
 };
 
 /**

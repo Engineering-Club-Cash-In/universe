@@ -72,7 +72,9 @@ test("rebuild audit only records investor IDs whose amount changed", () => {
   expect(controller).toContain("montoAportadoPadreCambiados");
   expect(controller).toContain("montoAportadoEspejoCambiados");
   expect(controller).toContain("getChangedExistingInvestorIds");
-  expect(controller).toContain("if (!inversionistas) return new Map();");
+  expect(controller).toContain(
+    "if (!inversionistas || inversionistas.length === 0) return new Map();",
+  );
   expect(controller).toContain("inversionistas !== undefined");
   expect(auditSettings).toContain("app.monto_aportado_rebuild_${sufijo}");
   expect(auditSettings).toContain("app.monto_aportado_ids_${sufijo}");
@@ -89,4 +91,17 @@ test("cuota-only rebuild has an empty audit context", () => {
   expect(controller).toContain("if (!bodyTraeInversionistas) {");
   expect(controller).toContain("const suppressTechnicalMontoAudit = async () =>");
   expect(controller).toContain("await suppressTechnicalMontoAudit();");
+});
+
+test("omitted investor list stays undefined through the rebuild guards", () => {
+  const controller = readFileSync(controllerFile, "utf8");
+
+  // El default `inversionistas = []` hacía que un body sin la lista se leyera
+  // como baja de todas las participaciones: exigía motivo y, si se daba, el
+  // rebuild borraba las filas del padre sin reinsertarlas.
+  expect(controller).not.toContain("inversionistas = [],");
+  expect(controller).toContain("(inversionistas ?? []).some(");
+  expect(controller).toContain(
+    "if (!inversionistas || inversionistas.length === 0) return new Map();",
+  );
 });

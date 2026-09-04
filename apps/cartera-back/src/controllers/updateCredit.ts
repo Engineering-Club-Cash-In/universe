@@ -1117,7 +1117,10 @@ export const updateInvestors = async (
   parentCuotas?: Map<number, string>,
   dbInstance: typeof db = db,
 ): Promise<Map<number, string>> => {
-  if (!inversionistas) return new Map();
+  // Un array vacío no reconstruye nada: el DELETE de abajo dejaría el crédito
+  // sin inversionistas. Vaciar la lista es una operación explícita de otros
+  // controllers, no un efecto colateral de este rebuild.
+  if (!inversionistas || inversionistas.length === 0) return new Map();
 
   // 🔥 NUEVO: Obtener los datos existentes ANTES de borrar para preservar el estado
   const existingRecords = await dbInstance
@@ -1468,7 +1471,10 @@ export const updateCredit = async ({ body, set, request }: any) => {
 
     const {
       credito_id,
-      inversionistas = [],
+      // Sin default: `undefined` significa "campo omitido" y debe distinguirse
+      // de `[]`, que es la orden explícita de dejar el crédito sin
+      // inversionistas. El rebuild (delete+insert) se guía por esa diferencia.
+      inversionistas,
       inversionistas_espejo,
       mora,
       cuota,
@@ -1724,7 +1730,7 @@ export const updateCredit = async ({ body, set, request }: any) => {
     if (formato_credito !== undefined) {
       updateFields.formato_credito = formato_credito;
     } else {
-      const formatCredit = inversionistas.some(
+      const formatCredit = (inversionistas ?? []).some(
         (inv) => Number(inv.porcentaje_inversion) > 0,
       )
         ? "Pool"

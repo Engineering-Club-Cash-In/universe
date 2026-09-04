@@ -62,7 +62,16 @@ export const conflictoDeRegistro = (
     return null;
   }
 
-  if (error.codigo === "dpi_ya_registrado" || error.status === 409) {
+  // Los dos conflictos de identidad del registro llegan aquí y salen por el
+  // mismo campo: `dpi_ya_registrado` (el DPI pertenece a otra cuenta del
+  // portal, camino de INVESTOR) y `dpi_no_coincide` (el CRM ya tiene un lead
+  // bajo este correo con otro DPI, camino de CLIENT). El 409 pelado se acepta
+  // igual por si el servidor no manda código.
+  if (
+    error.codigo === "dpi_ya_registrado" ||
+    error.codigo === "dpi_no_coincide" ||
+    error.status === 409
+  ) {
     return {
       campo: "dpi",
       mensaje: error.message || "El DPI ya está registrado en otra cuenta",

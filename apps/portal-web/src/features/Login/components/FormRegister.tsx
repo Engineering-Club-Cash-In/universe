@@ -13,6 +13,7 @@ export const FormRegister = () => {
     isLoading,
     isGoogleLoading,
     currentStep,
+    prevStep,
   } = useRegister();
   const isMobile = useIsMobile();
   const [isTermsOpen, setIsTermsOpen] = useState(false);
@@ -137,6 +138,20 @@ export const FormRegister = () => {
         {/* Paso 2: Métodos de registro */}
         {currentStep === 2 && (
           <div className="w-full mt-4 flex flex-col gap-6">
+            {/* Volver al paso del DPI.
+                El paso 2 no tenía salida hacia atrás, y el tipo de usuario y el
+                DPI —lo único que el servidor pide corregir cuando rechaza el
+                registro— se piden en el paso 1. Sin este control, un conflicto
+                de DPI dejaba a la persona leyendo "corrige tu DPI" frente a un
+                formulario donde ese campo no existe. */}
+            <button
+              type="button"
+              onClick={prevStep}
+              className="self-start text-sm text-white/65 hover:text-white transition-colors"
+            >
+              ← Volver a tipo de usuario y DPI
+            </button>
+
             {/* Botón de Google */}
             <ButtonIcon
               icon={<IconGoogle />}

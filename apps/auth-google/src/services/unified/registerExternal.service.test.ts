@@ -10,10 +10,27 @@ type PayloadCartera = {
 let payloadCartera: PayloadCartera | null = null;
 let payloadCrm: Record<string, unknown> | null = null;
 
+class CrmLeadError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "CrmLeadError";
+  }
+}
+
+// Respuesta que da el mock del CRM al crear el lead. Un error se lanza.
+let respuestaCrm: unknown = { data: { ok: true } };
+
 mock.module("../crm/profile.service", () => ({
+  CrmLeadError,
   sendLead: (payload: Record<string, unknown>) => {
     payloadCrm = payload;
-    return Promise.resolve({ data: { ok: true } });
+
+    return respuestaCrm instanceof Error
+      ? Promise.reject(respuestaCrm)
+      : Promise.resolve(respuestaCrm);
   },
 }));
 
@@ -67,6 +84,7 @@ beforeEach(() => {
   payloadCartera = null;
   payloadCrm = null;
   respuestaCrear = { success: true, message: "ok", data: { id: 1 } };
+  respuestaCrm = { data: { ok: true } };
 });
 
 /** Registro del que se quiere comprobar el reintento. */
@@ -160,6 +178,27 @@ describe("registerExternalUser", () => {
       await expect(
         registerExternalUser(registroDeAna, { usuarioPortalId: CUENTA_DE_ANA }),
       ).rejects.toThrow("No se pudo completar el registro del inversionista");
+    });
+  });
+
+  // El espejo del conflicto de cartera, en el camino de CLIENT. Aquí el motivo
+  // SÍ sale: el 409 del CRM habla del lead que cuelga del correo de la sesión
+  // —el de quien pregunta—, no de si un DPI ajeno existe, así que no es un
+  // oráculo. Y es lo único que la persona puede corregir sola.
+  describe("rechazo del CRM", () => {
+    it("propaga el 409 del CRM con su status intacto", async () => {
+      respuestaCrm = new CrmLeadError(
+        409,
+        "Ya existe un registro con este correo y otro DPI.",
+      );
+
+      const error = await registerExternalUser({
+        ...registroDeAna,
+        userType: "CLIENT",
+      }).catch((e) => e);
+
+      expect(error).toBeInstanceOf(CrmLeadError);
+      expect(error.status).toBe(409);
     });
   });
 

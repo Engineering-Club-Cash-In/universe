@@ -48,6 +48,24 @@ describe("conflictoDeRegistro", () => {
     });
   });
 
+  // El espejo del anterior en el camino de CLIENT: el CRM ya tiene un lead
+  // bajo este correo con OTRO DPI. La salida es la misma —corregir el DPI—, así
+  // que va al mismo campo por el mismo camino.
+  it("lleva al campo dpi el lead del CRM con otro DPI", () => {
+    const conflicto = conflictoDeRegistro(
+      new RegistroExternoError(
+        409,
+        "dpi_no_coincide",
+        "Ya existe un registro con este correo y otro DPI.",
+      ),
+    );
+
+    expect(conflicto).toEqual({
+      campo: "dpi",
+      mensaje: "Ya existe un registro con este correo y otro DPI.",
+    });
+  });
+
   it("no inventa un conflicto de campo para una caída del servidor", () => {
     expect(
       conflictoDeRegistro(new RegistroExternoError(500, null, "Boom")),

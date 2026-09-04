@@ -79,6 +79,33 @@ export interface SendLeadPayload {
 }
 
 // ============================================
+// ERRORES
+// ============================================
+
+/**
+ * Rechazo del CRM al dar de alta un lead, con el status y el motivo que dio.
+ *
+ * Es el espejo de `CarteraInvestorError` en el camino de INVESTOR. `sendLead`
+ * convertía CUALQUIER respuesta no-OK en un `Error` pelado, así que el 409 con
+ * el que el CRM rechaza un reintento que trae otro DPI llegaba a la ruta
+ * indistinguible de una caída y salía como 500. El formulario no podía
+ * reconocerlo como conflicto corregible y dejaba a la persona en el paso 2,
+ * con el campo del DPI —lo único que se le pedía corregir— en el paso 1.
+ *
+ * Conservar el status es lo que permite que la ruta lo conteste como 409 con
+ * un código, igual que ya hace el conflicto de DPI del camino de inversionista.
+ */
+export class CrmLeadError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "CrmLeadError";
+  }
+}
+
+// ============================================
 // FUNCIONES
 // ============================================
 
@@ -174,7 +201,12 @@ export const sendLead = async (
   const result = (await response.json()) as { success: boolean; data?: any; error?: string };
 
   if (!response.ok) {
-    throw new Error(result.error || "Error al crear el lead");
+    // El status viaja con el error: sin él, el 409 del reintento con otro DPI
+    // —lo único que la persona puede corregir sola— se vuelve un 500 mudo.
+    throw new CrmLeadError(
+      response.status,
+      result.error || "Error al crear el lead",
+    );
   }
 
   return result;

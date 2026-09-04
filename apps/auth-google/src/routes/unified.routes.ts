@@ -16,6 +16,7 @@ import {
   DpiAlreadyTakenError,
   DpiFormatError,
 } from "../services/portalIdentity.service";
+import { CrmLeadError } from "../services/crm/profile.service";
 import { env } from "../config/env";
 import { db } from "../db/connection";
 import { users } from "../db/schema";
@@ -177,6 +178,22 @@ unifiedRoutes.post("/register-external-auth", requireAuth, async (c) => {
 
     if (error instanceof DpiFormatError) {
       return c.json({ message: error.message, error: "dpi_invalido" }, 400);
+    }
+
+    // Mismo trato para el conflicto del camino de CLIENT: el CRM contesta 409
+    // cuando el correo de la sesión ya tiene un lead con OTRO DPI. Es un
+    // conflicto de identidad, no una caída, y el titular puede corregirlo
+    // cambiando el DPI —el mismo campo, la misma salida y el mismo formato de
+    // respuesta que `dpi_ya_registrado`, para que el formulario no necesite un
+    // segundo mecanismo.
+    //
+    // El motivo sí sale, a diferencia del de cartera: habla del lead que cuelga
+    // del correo de QUIEN PREGUNTA, no de si un DPI ajeno está dado de alta.
+    //
+    // Solo el 409. Cualquier otro rechazo del CRM sigue cayendo al 500 de
+    // abajo: no es algo que se corrija en el formulario.
+    if (error instanceof CrmLeadError && error.status === 409) {
+      return c.json({ message: error.message, error: "dpi_no_coincide" }, 409);
     }
 
     throw new HTTPException(500, {

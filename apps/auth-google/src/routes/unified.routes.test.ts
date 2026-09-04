@@ -166,8 +166,12 @@ mock.module("../services/unified", () => ({
 }));
 
 let app: Hono;
+// La clase real, para que el `instanceof` de la ruta sea el de verdad.
+let CrmLeadError: typeof import("../services/crm/profile.service").CrmLeadError;
 
 beforeAll(async () => {
+  CrmLeadError = (await import("../services/crm/profile.service")).CrmLeadError;
+
   const { default: unifiedRoutes } = await import("./unified.routes");
 
   app = new Hono();
@@ -347,6 +351,49 @@ describe("POST /register-external-auth", () => {
 
     expect(res.status).toBe(200);
     expect(llamadasExternas).toBe(1);
+  });
+
+  // El camino de CLIENT: el CRM contesta 409 cuando el correo de la sesión ya
+  // tiene un lead con OTRO DPI. Ese 409 salía de aquí como 500, el formulario
+  // no lo reconocía como conflicto corregible y dejaba a la persona en el paso
+  // 2 —sin el campo del DPI, que vive en el paso 1— leyendo "corrige tu DPI".
+  it("propaga como 409 el rechazo del CRM por otro DPI", async () => {
+    sessionActual = sesionDeAna;
+    filaUsuario = cuentaDeAna();
+    fallaRegistroExterno = new CrmLeadError(
+      409,
+      "Ya existe un registro con este correo y otro DPI.",
+    );
+
+    const res = await postJson("/register-external-auth", {
+      userType: "CLIENT",
+      fullName: "Ana Pérez",
+      dpi: "1234567890123",
+    });
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      error: "dpi_no_coincide",
+      message: "Ya existe un registro con este correo y otro DPI.",
+    });
+    // Y la identidad no se escribe: el alta externa no llegó a existir.
+    expect(escrituras).toEqual([]);
+  });
+
+  // Un rechazo del CRM que la persona NO puede corregir en el formulario sigue
+  // siendo un 500: solo el conflicto de identidad se promueve.
+  it("no convierte en conflicto cualquier otro rechazo del CRM", async () => {
+    sessionActual = sesionDeAna;
+    filaUsuario = cuentaDeAna();
+    fallaRegistroExterno = new CrmLeadError(500, "CRM caído");
+
+    const res = await postJson("/register-external-auth", {
+      userType: "CLIENT",
+      fullName: "Ana Pérez",
+      dpi: "1234567890123",
+    });
+
+    expect(res.status).toBe(500);
   });
 
   it("rechaza sin sesión", async () => {

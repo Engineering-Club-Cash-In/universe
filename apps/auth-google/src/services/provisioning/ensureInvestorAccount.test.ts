@@ -336,3 +336,79 @@ describe("asegurarCuentaInversionista — nada puede tirar después de crear la 
     expect(r.advertencias).not.toContain("cuenta_creada_sin_contrasena_entregada");
   });
 });
+
+describe("vínculo frágil: la cuenta se encontró solo por el correo", () => {
+  it("lo reporta y NO escribe el DPI", async () => {
+    usuarios.push({
+      id: "u1",
+      email: "ana@example.com",
+      nombre: "Ana",
+      role: "CLIENT",
+      dpi: null,
+    });
+
+    const r = await asegurarCuentaInversionista(entrada(), deps());
+
+    expect(r.estado).toBe("ya_tenia");
+    expect(r.resueltoPor).toBe("email");
+    expect(r.advertencias).toContain("cuenta_anclada_solo_por_correo");
+    // NO se escribe el DPI: `resolverUsuario` busca por DPI PRIMERO, así que
+    // escribirlo dejaría esta cuenta ganando para siempre y corregir el correo
+    // en cartera —el remedio que el propio sistema pide con
+    // `correo_de_cartera_distinto_al_de_la_cuenta`— dejaría de servir. Además
+    // `users.dpi` es UNIQUE y es llave de ESCRITURA contra cartera
+    // (POST /api/cartera/investor resuelve la fila por DPI y aplica
+    // numero_cuenta): afirmar identidad sobre la evidencia más débil del
+    // módulo (un correo sin verificar) es peor que el duplicado que evita.
+    expect(actualizaciones).toEqual([{ id: "u1", role: "INVESTOR" }]);
+    expect(usuarios[0].dpi).toBeNull();
+  });
+
+  it("no lo reporta cuando la cuenta se resolvió por DPI", async () => {
+    usuarios.push({
+      id: "u1",
+      email: "otro@example.com",
+      nombre: "Ana",
+      role: "INVESTOR",
+      dpi: "1234567890101",
+    });
+
+    const r = await asegurarCuentaInversionista(entrada(), deps());
+
+    expect(r.resueltoPor).toBe("dpi");
+    expect(r.advertencias).not.toContain("cuenta_anclada_solo_por_correo");
+  });
+
+  it("reporta también cuando el DPI de la cuenta NO es el que tiene cartera", async () => {
+    // Por correo se llegó a una cuenta con OTRO DPI: el vínculo tampoco se
+    // sostiene, y aquí escribir sería pisar un dato de identidad ajeno.
+    usuarios.push({
+      id: "u1",
+      email: "ana@example.com",
+      nombre: "Ana",
+      role: "INVESTOR",
+      dpi: "9999999999999",
+    });
+
+    const r = await asegurarCuentaInversionista(entrada(), deps());
+
+    expect(r.resueltoPor).toBe("email");
+    expect(r.advertencias).toContain("cuenta_anclada_solo_por_correo");
+    expect(usuarios[0].dpi).toBe("9999999999999");
+  });
+
+  it("no lo reporta cuando el DPI de la cuenta ya es el de cartera", async () => {
+    usuarios.push({
+      id: "u1",
+      email: "ana@example.com",
+      nombre: "Ana",
+      role: "INVESTOR",
+      // Mismo DPI, escrito con ceros a la izquierda: es el MISMO vínculo.
+      dpi: "01234567890101",
+    });
+
+    const r = await asegurarCuentaInversionista(entrada(), deps());
+
+    expect(r.advertencias).not.toContain("cuenta_anclada_solo_por_correo");
+  });
+});

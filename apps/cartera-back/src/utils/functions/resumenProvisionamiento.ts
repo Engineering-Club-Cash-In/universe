@@ -39,6 +39,17 @@ export interface ResumenProvisionamiento {
    * le corrige el correo en cartera la corrida siguiente le crea OTRA cuenta.
    */
   cuentasSinIdentidad: EntradaResumen[];
+  /**
+   * Cuenta que solo está atada por el CORREO: se la encontró por correo y su
+   * `users.dpi` no es el de cartera (o no tiene ninguno). El día que alguien
+   * corrija ese correo en cartera, la corrida siguiente no la encuentra ni por
+   * DPI ni por el correo nuevo y le crea una SEGUNDA cuenta a la misma persona.
+   *
+   * No se corrige escribiendo el DPI: la búsqueda va por DPI primero, así que
+   * escribirlo dejaría a la cuenta equivocada ganando para siempre. Es una
+   * decisión de identidad, y se lista para que la tome un humano.
+   */
+  vinculosFragiles: EntradaResumen[];
   dudosas: EntradaResumen[];
   hayQueReportar: boolean;
 }
@@ -81,6 +92,7 @@ export const resumirProvisionamiento = (
     correoDistinto: [],
     accesosPerdidos: [],
     cuentasSinIdentidad: [],
+    vinculosFragiles: [],
     dudosas: [],
     hayQueReportar: false,
   };
@@ -126,6 +138,9 @@ export const resumirProvisionamiento = (
     ) {
       resumen.cuentasSinIdentidad.push(e);
     }
+    if (r.advertencias.includes("cuenta_anclada_solo_por_correo")) {
+      resumen.vinculosFragiles.push(e);
+    }
   }
 
   resumen.hayQueReportar =
@@ -137,6 +152,11 @@ export const resumirProvisionamiento = (
     resumen.accesosPerdidos.length > 0 ||
     resumen.cuentasSinIdentidad.length > 0 ||
     resumen.sinNombre.length > 0;
+  // `vinculosFragiles` NO suma a `hayQueReportar` a propósito: son las mismas
+  // filas todos los días hasta que un humano decida cuál cuenta es la buena.
+  // Si dispararan el resumen, llegaría un correo idéntico para siempre y a la
+  // semana nadie lo abriría — mismo criterio que los "sin correo". Se listan
+  // cuando el resumen sale por otra razón, así que nunca quedan ocultos.
 
   return resumen;
 };
@@ -221,6 +241,7 @@ export const construirCorreoResumen = (
     ${lista("No se pudo dar acceso", resumen.fallos)}
     ${lista("El correo no salió", resumen.correosNoEnviados)}
     ${lista("Correo de cartera distinto al de la cuenta (revisar a mano)", resumen.correoDistinto)}
+    ${lista("Atados SOLO por el correo: si se les corrige el correo, mañana se les crea una segunda cuenta", resumen.vinculosFragiles)}
     ${lista("Parecen sociedades y recibieron cuenta propia: falta capturarles el representante legal", resumen.dudosas)}
     ${lista("Sin correo en cartera: no pueden tener acceso", resumen.sinCorreo)}
     ${lista("Sin nombre en cartera", resumen.sinNombre)}

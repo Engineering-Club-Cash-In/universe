@@ -162,6 +162,38 @@ describe("resumirProvisionamiento — accesos perdidos", () => {
     expect(res.hayQueReportar).toBe(true);
   });
 
+  it("lista el vínculo frágil, pero NO hace sonar la campana por él", () => {
+    // La cuenta se encontró SOLO por el correo y no tiene el DPI de cartera:
+    // el día que alguien corrija ese correo, mañana se le crea una segunda
+    // cuenta. Se lista para que operaciones lo revise ANTES de tocar el correo.
+    //
+    // No dispara el resumen a propósito: es estado CRÓNICO, no algo que cambió
+    // ni algo que falló. Si lo disparara, llegaría un correo idéntico todos los
+    // días con las mismas filas y a la semana nadie lo abriría — el mismo
+    // criterio que ya se aplica a los "sin correo".
+    const res = resumirProvisionamiento(
+      [r({ estado: "ya_tenia", advertencias: ["cuenta_anclada_solo_por_correo"] })],
+      nombres,
+    );
+
+    expect(res.vinculosFragiles).toHaveLength(1);
+    expect(res.vinculosFragiles[0]).toMatchObject({ inversionistaId: 1 });
+    expect(res.hayQueReportar).toBe(false);
+  });
+
+  it("el vínculo frágil sale en el correo cuando el resumen suena por otra cosa", () => {
+    const res = resumirProvisionamiento(
+      [
+        r({ estado: "ya_tenia", advertencias: ["cuenta_anclada_solo_por_correo"] }),
+        r({ inversionistaId: 43, estado: "fallo", motivo: "timeout" }),
+      ],
+      nombres,
+    );
+
+    expect(res.hayQueReportar).toBe(true);
+    expect(construirCorreoResumen(res).html).toContain("Ana Pérez");
+  });
+
   it("el rol que no se pudo promover también se reporta", () => {
     const res = resumirProvisionamiento(
       [r({ estado: "ya_tenia", advertencias: ["rol_no_promovido"] })],

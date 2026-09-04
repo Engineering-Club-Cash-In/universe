@@ -219,7 +219,14 @@ export const asegurarCuentaInversionista = async (
   const existente = await resolverUsuario(entrada.dpi, email, deps);
 
   if (existente) {
-    return reconocerExistente(existente, email, advertencias, modo, deps);
+    return reconocerExistente(
+      existente,
+      email,
+      entrada.dpi,
+      advertencias,
+      modo,
+      deps,
+    );
   }
 
   const password = (deps.generarPassword ?? generarPasswordPortal)();
@@ -236,7 +243,14 @@ export const asegurarCuentaInversionista = async (
     // inversionista.
     const reintento = await resolverUsuario(entrada.dpi, email, deps);
     if (reintento) {
-      return reconocerExistente(reintento, email, advertencias, modo, deps);
+      return reconocerExistente(
+        reintento,
+        email,
+        entrada.dpi,
+        advertencias,
+        modo,
+        deps,
+      );
     }
     return {
       estado: "fallo",
@@ -307,6 +321,7 @@ export const asegurarCuentaInversionista = async (
 const reconocerExistente = async (
   encontrado: { usuario: UsuarioPortal; resueltoPor: "dpi" | "email" },
   emailDeCartera: string,
+  dpiDeCartera: string | null,
   advertencias: string[],
   modo: ModoEnvio,
   deps: DependenciasProvisionamiento,
@@ -317,6 +332,31 @@ const reconocerExistente = async (
     // Se reporta y NO se corrige. Reescribir `users.email` le rompería el login
     // a esa persona; cuál de los dos correos es el bueno lo decide un humano.
     advertencias.push("correo_de_cartera_distinto_al_de_la_cuenta");
+  }
+
+  // Vínculo frágil: a esta cuenta se llegó SOLO por el correo, y su `dpi` no es
+  // el que tiene cartera (o no tiene ninguno). El día que operaciones corrija
+  // ese correo —que es justo lo que pide
+  // `correo_de_cartera_distinto_al_de_la_cuenta`— la corrida siguiente no
+  // encuentra a esta persona ni por DPI ni por el correo nuevo, y le crea una
+  // SEGUNDA cuenta con una segunda contraseña.
+  //
+  // Se REPORTA y NO se escribe el DPI, misma política que el correo de arriba.
+  // Escribirlo cerraría el duplicado y abriría algo peor: `resolverUsuario`
+  // busca por DPI PRIMERO, así que la cuenta equivocada ganaría PARA SIEMPRE y
+  // corregir el correo dejaría de servir — se cambiaría un síntoma ruidoso y
+  // autocorregible por uno silencioso y permanente. Y `users.dpi` no es
+  // cosmético: es llave de ESCRITURA contra cartera (POST /api/cartera/investor
+  // resuelve la fila objetivo por DPI y le aplica `numero_cuenta`), y es UNIQUE,
+  // así que el slot quedaría quemado para la cuenta legítima. Afirmar la
+  // identidad MÁS fuerte a partir de la evidencia MÁS débil del módulo —un
+  // correo que Better Auth no verifica— no le toca a un provisionamiento
+  // automático. Que lo confirme un humano con esta lista en la mano.
+  if (
+    resueltoPor === "email" &&
+    normalizarDpiPortal(usuario.dpi) !== normalizarDpiPortal(dpiDeCartera)
+  ) {
+    advertencias.push("cuenta_anclada_solo_por_correo");
   }
 
   await promoverRol(usuario, advertencias, deps);

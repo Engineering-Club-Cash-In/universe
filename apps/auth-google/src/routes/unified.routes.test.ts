@@ -8,46 +8,97 @@ let sessionActual: {
   user: { id: string; name?: string; email?: string };
 } | null = null;
 
-// Payload con el que la ruta invocó al registro externo.
+// Payload con el que la ruta invocó al registro externo, y cuántas veces.
 let payloadExterno: RegisterExternalUserPayload | null = null;
+let llamadasExternas = 0;
+// Si se pone, `registerExternalUser` falla con este error.
+let fallaRegistroExterno: Error | null = null;
 
-// Filas que devuelve el `select` de la BD de Better Auth, en orden de consulta.
+// La fila de `users` de la cuenta que se está registrando. El `select` la
+// devuelve cuando la proyección pide algo más que el id, y las escrituras la
+// mutan, igual que haría la BD.
+let filaUsuario: Record<string, unknown>[] = [];
+// Cola de respuestas para los `select({ id })`: los que buscan por correo o
+// por DPI en la importación masiva.
 let filasSelect: Record<string, unknown>[][] = [];
-// Escrituras que hizo la ruta sobre la tabla de usuarios.
+
+// Modelo del índice único de `users.dpi`. Es lo que hace atómica la reserva.
+let dpisReservados = new Set<string>();
+// Escrituras aceptadas sobre la tabla de usuarios.
 let escrituras: Record<string, unknown>[] = [];
 // Ids de usuario borrados (el rollback de la importación masiva).
 let borrados: unknown[] = [];
-// Simula el choque contra la restricción única de `users.dpi`.
+// Fuerza el fallo del update aunque el DPI esté libre.
 let updateFalla = false;
 // Altas que pidió la importación masiva a Better Auth.
 let altas: { name: string; email: string }[] = [];
+
+/** El error que devuelve Postgres al chocar contra un índice único. */
+const errorDeUnicidad = () =>
+  Object.assign(
+    new Error(
+      'duplicate key value violates unique constraint "users_dpi_unique"',
+    ),
+    { code: "23505", constraint: "users_dpi_unique" },
+  );
 
 mock.module("../config/env", () => ({
   env: { INTERNAL_API_SECRET: "secreto-de-servicio" },
 }));
 
-// La BD se falsea a nivel de conexión, no de servicio: así el test ejercita el
-// `portalIdentity.service` de verdad, que es donde vive la comprobación de DPI
-// duplicado.
+// La BD se falsea a nivel de conexión, no de servicio: así el test ejercita de
+// verdad el `portalIdentity.service`, que es donde vive la reserva del DPI.
 mock.module("../db/connection", () => ({
   db: {
-    select: () => ({
+    select: (proyeccion: Record<string, unknown>) => ({
       from: () => ({
-        where: () => Promise.resolve(filasSelect.shift() ?? []),
+        where: () => {
+          // Una proyección que pide más que el id es la lectura de la cuenta
+          // propia; la de solo id son las búsquedas por correo/DPI.
+          const pideLaCuenta =
+            proyeccion && Object.keys(proyeccion).some((k) => k !== "id");
+
+          // Copias, como devuelve drizzle: el llamador no puede quedarse con
+          // una referencia viva a la fila y ver los cambios que él mismo hace.
+          return Promise.resolve(
+            (pideLaCuenta ? filaUsuario : (filasSelect.shift() ?? [])).map(
+              (fila) => ({ ...fila }),
+            ),
+          );
+        },
       }),
     }),
     update: () => ({
       set: (valores: Record<string, unknown>) => ({
         where: () => {
           if (updateFalla) {
-            return Promise.reject(
-              new Error(
-                'duplicate key value violates unique constraint "users_dpi_unique"',
-              ),
-            );
+            return Promise.reject(errorDeUnicidad());
+          }
+
+          const dpi = valores.dpi;
+
+          if (typeof dpi === "string") {
+            if (dpisReservados.has(dpi)) {
+              return Promise.reject(errorDeUnicidad());
+            }
+
+            dpisReservados.add(dpi);
+          }
+
+          // La liberación devuelve el DPI al pozo.
+          if (dpi === null && typeof filaUsuario[0]?.dpi === "string") {
+            dpisReservados.delete(filaUsuario[0].dpi as string);
           }
 
           escrituras.push(valores);
+
+          if (filaUsuario[0] && "dpi" in valores) {
+            filaUsuario[0].dpi = dpi;
+          }
+          if (filaUsuario[0] && "role" in valores) {
+            filaUsuario[0].role = valores.role;
+          }
+
           return Promise.resolve();
         },
       }),
@@ -64,7 +115,18 @@ mock.module("../db/connection", () => ({
 mock.module("../lib/auth", () => ({
   auth: {
     api: {
-      getSession: () => Promise.resolve(sessionActual),
+      // Permite que dos peticiones en paralelo lleven sesiones distintas.
+      getSession: ({ headers }: { headers: Headers }) => {
+        const id = headers?.get?.("x-test-user");
+
+        if (id) {
+          return Promise.resolve({
+            user: { id, name: "Ana Pérez", email: `${id}@example.com` },
+          });
+        }
+
+        return Promise.resolve(sessionActual);
+      },
       signUpEmail: ({ body }: { body: { name: string; email: string } }) => {
         altas.push({ name: body.name, email: body.email });
         return Promise.resolve({ user: { id: `nuevo-${body.email}` } });
@@ -76,6 +138,12 @@ mock.module("../lib/auth", () => ({
 mock.module("../services/unified", () => ({
   registerExternalUser: (payload: RegisterExternalUserPayload) => {
     payloadExterno = payload;
+    llamadasExternas += 1;
+
+    if (fallaRegistroExterno) {
+      return Promise.reject(fallaRegistroExterno);
+    }
+
     return Promise.resolve({
       success: true,
       message: "ok",
@@ -93,7 +161,11 @@ beforeAll(async () => {
   app.route("/api/unified", unifiedRoutes);
 });
 
-const postJson = (path: string, body: unknown, headers: Record<string, string> = {}) =>
+const postJson = (
+  path: string,
+  body: unknown,
+  headers: Record<string, string> = {},
+) =>
   app.request(`http://localhost/api/unified${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...headers },
@@ -104,13 +176,17 @@ const sesionDeAna = {
   user: { id: "user-1", name: "Ana Pérez", email: "ana@example.com" },
 };
 
-/** La cuenta de la sesión, tal como la lee `applyRegistrationOutcome`. */
-const cuentaDeAna = { id: "user-1", role: "CLIENT", dpi: null };
+/** La cuenta de la sesión, tal como la leen la reserva y el alta de identidad. */
+const cuentaDeAna = () => [{ id: "user-1", role: "CLIENT", dpi: null }];
 
 beforeEach(() => {
   sessionActual = null;
   payloadExterno = null;
+  llamadasExternas = 0;
+  fallaRegistroExterno = null;
+  filaUsuario = [];
   filasSelect = [];
+  dpisReservados = new Set();
   escrituras = [];
   borrados = [];
   altas = [];
@@ -120,8 +196,7 @@ beforeEach(() => {
 describe("POST /register-external-auth", () => {
   it("normaliza el DPI con separadores antes de tocar el sistema externo", async () => {
     sessionActual = sesionDeAna;
-    // 1) DPI libre, 2) la cuenta de la sesión, 3) DPI libre (en setUserDpi)
-    filasSelect = [[], [cuentaDeAna], []];
+    filaUsuario = cuentaDeAna();
 
     const res = await postJson("/register-external-auth", {
       userType: "INVESTOR",
@@ -133,13 +208,12 @@ describe("POST /register-external-auth", () => {
     // Cartera hace `parseInt` sobre este valor: con los separadores crudos
     // registraría el DPI 1234 mientras Better Auth guarda los 13 dígitos.
     expect(payloadExterno?.dpi).toBe("1234567890123");
-    expect(escrituras).toContainEqual(
-      expect.objectContaining({ dpi: "1234567890123" }),
-    );
+    expect(filaUsuario[0].dpi).toBe("1234567890123");
   });
 
   it("rechaza un DPI que no llega a 13 dígitos", async () => {
     sessionActual = sesionDeAna;
+    filaUsuario = cuentaDeAna();
 
     const res = await postJson("/register-external-auth", {
       userType: "INVESTOR",
@@ -148,13 +222,14 @@ describe("POST /register-external-auth", () => {
     });
 
     expect(res.status).toBe(400);
-    expect(payloadExterno).toBeNull();
+    expect(llamadasExternas).toBe(0);
   });
 
   it("con el DPI tomado por otra cuenta responde 409 y no crea nada afuera", async () => {
     sessionActual = sesionDeAna;
+    filaUsuario = cuentaDeAna();
     // El DPI ya pertenece a otra cuenta de Better Auth.
-    filasSelect = [[{ id: "otro-usuario" }]];
+    dpisReservados.add("1234567890123");
 
     const res = await postJson("/register-external-auth", {
       userType: "INVESTOR",
@@ -165,10 +240,84 @@ describe("POST /register-external-auth", () => {
     // El conflicto tiene que salir ANTES del efecto externo: si cartera ya creó
     // al inversionista, el usuario se queda con el correo ocupado por una
     // cuenta sin identidad y una fila huérfana en cartera.
-    expect(payloadExterno).toBeNull();
+    expect(llamadasExternas).toBe(0);
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ error: "dpi_ya_registrado" });
-    expect(escrituras).toHaveLength(0);
+  });
+
+  it("reserva el DPI ANTES de llamar al servicio externo", async () => {
+    sessionActual = sesionDeAna;
+    filaUsuario = cuentaDeAna();
+    // Si el registro externo se ejecuta, para entonces el DPI ya tiene que
+    // estar escrito: es lo único que hace atómica la reserva.
+    fallaRegistroExterno = Object.assign(new Error("cartera caída"), {});
+
+    await postJson("/register-external-auth", {
+      userType: "INVESTOR",
+      fullName: "Ana Pérez",
+      dpi: "1234567890123",
+    });
+
+    expect(llamadasExternas).toBe(1);
+    expect(escrituras[0]).toMatchObject({ dpi: "1234567890123" });
+  });
+
+  it("libera la reserva si el registro externo falla, para poder reintentar", async () => {
+    sessionActual = sesionDeAna;
+    filaUsuario = cuentaDeAna();
+    fallaRegistroExterno = new Error("cartera caída");
+
+    const res = await postJson("/register-external-auth", {
+      userType: "INVESTOR",
+      fullName: "Ana Pérez",
+      dpi: "1234567890123",
+    });
+
+    expect(res.status).toBe(500);
+    // Una reserva que no se libera deja el DPI bloqueado por un registro que
+    // nunca se completó.
+    expect(dpisReservados.has("1234567890123")).toBeFalse();
+    expect(filaUsuario[0].dpi).toBeNull();
+  });
+
+  it("dos cuentas con el mismo DPI a la vez: una gana y la otra recibe 409", async () => {
+    // Las dos leen la misma cuenta con el DPI libre, así que las dos pasan
+    // cualquier comprobación que sea solo un SELECT.
+    filaUsuario = [{ id: "user-a", role: "CLIENT", dpi: null }];
+
+    const cuerpo = {
+      userType: "INVESTOR",
+      fullName: "Ana Pérez",
+      dpi: "1234567890123",
+    };
+
+    const [unaRes, otraRes] = await Promise.all([
+      postJson("/register-external-auth", cuerpo, { "x-test-user": "user-a" }),
+      postJson("/register-external-auth", cuerpo, { "x-test-user": "user-b" }),
+    ]);
+
+    const estados = [unaRes.status, otraRes.status].sort();
+
+    // Sin reserva atómica las dos autorizan el registro externo y la perdedora
+    // revienta después contra la restricción única con un 500 genérico.
+    expect(estados).toEqual([200, 409]);
+    expect(llamadasExternas).toBe(1);
+  });
+
+  it("un reintento del mismo usuario no choca contra su propia reserva", async () => {
+    sessionActual = sesionDeAna;
+    // El intento anterior ya dejó el DPI reservado en esta misma cuenta.
+    filaUsuario = [{ id: "user-1", role: "CLIENT", dpi: "1234567890123" }];
+    dpisReservados.add("1234567890123");
+
+    const res = await postJson("/register-external-auth", {
+      userType: "INVESTOR",
+      fullName: "Ana Pérez",
+      dpi: "1234567890123",
+    });
+
+    expect(res.status).toBe(200);
+    expect(llamadasExternas).toBe(1);
   });
 
   it("rechaza sin sesión", async () => {
@@ -179,7 +328,7 @@ describe("POST /register-external-auth", () => {
     });
 
     expect(res.status).toBe(401);
-    expect(payloadExterno).toBeNull();
+    expect(llamadasExternas).toBe(0);
   });
 });
 

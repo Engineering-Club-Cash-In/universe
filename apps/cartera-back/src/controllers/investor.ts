@@ -34,7 +34,11 @@ import {
   statusCreditoInversionistaEspejoEnum,
 } from "../database/db/schema";
 import { getSignedDocumentUrl } from "../utils/functions/uploadsFiles";
-import { provisionarInversionista } from "../services/portalProvisioning";
+import {
+  provisionarInversionista,
+  resultadoNoSolicitado,
+} from "../services/portalProvisioning";
+import { solicitaProvisionamiento } from "../utils/functions/provisionamientoPortal";
 import { buscarRepresentanteEnCartera } from "../utils/functions/buscarRepresentante";
 import { calcularAjusteCompras } from "../utils/comprasAjuste";
 import { eq, and, or, sql, inArray, ilike, like, desc, asc, count, SQL, isNull, isNotNull, ne } from "drizzle-orm";
@@ -559,7 +563,9 @@ export const insertInvestor = async ({ body, set }: any) => {
     const resultados: any[] = [];
     // Solo las filas INSERTADAS en esta pasada: son las únicas que pueden
     // necesitar una cuenta nueva o disparar el aviso a un representante.
-    const recienCreados: any[] = [];
+    // Cada una viaja con si su alta PIDIÓ acceso al portal: el permiso es del
+    // payload, no de quién firma la petición (ver `solicitaProvisionamiento`).
+    const recienCreados: { fila: any; solicitado: boolean }[] = [];
 
     // 🔥 PROCESAR UNO POR UNO para manejar INSERT vs UPDATE
     for (const inv of inversionistasToUpsert) {
@@ -732,7 +738,10 @@ export const insertInvestor = async ({ body, set }: any) => {
         resultados.push(inserted);
         // Solo los INSERT provisionan. Un update no da acceso nuevo a nadie, y
         // hacerlo aquí mandaría el aviso de empresa agregada en cada edición.
-        recienCreados.push(inserted);
+        recienCreados.push({
+          fila: inserted,
+          solicitado: solicitaProvisionamiento(inv),
+        });
       }
     }
 
@@ -742,10 +751,20 @@ export const insertInvestor = async ({ body, set }: any) => {
     // reintento muere en el guard de duplicados sin volver a pasar por aquí.
     // El resultado viaja en la respuesta; el job diario recoge lo que falló.
     const provisioning = await Promise.all(
-      recienCreados.map((fila) =>
-        provisionarInversionista(fila, {
-          buscarRepresentante: buscarRepresentanteEnCartera,
-        }),
+      recienCreados.map(({ fila, solicitado }) =>
+        // El guard: sin `provisionar_portal` en el payload NO se crea cuenta,
+        // no sale correo con contraseña y no se ocupa un DPI en `users`.
+        // Cierra el camino anónimo (POST /api/unified/register-external, sin
+        // requireAuth) sin depender del orden de merge de otro PR: esa ruta
+        // arma un objeto FIJO {nombre, dpi, email} y no puede colar la llave.
+        // No sirve mirar el rol de quien llama: todo auth-google entra con el
+        // mismo token de servicio ADMIN, así que el alta pública y la de back
+        // office son indistinguibles por identidad.
+        solicitado
+          ? provisionarInversionista(fila, {
+              buscarRepresentante: buscarRepresentanteEnCartera,
+            })
+          : Promise.resolve(resultadoNoSolicitado(fila.inversionista_id)),
       ),
     );
 

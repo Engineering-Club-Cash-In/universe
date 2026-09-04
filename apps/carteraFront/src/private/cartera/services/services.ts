@@ -34,6 +34,15 @@ export interface InvestorPayload {
   tipo_reinversion?: string | null;
   monto_reinversion?: number | null;
   email?: string | null;
+  /**
+   * Pide que el alta le abra cuenta en el Portal del Inversionista.
+   *
+   * Cartera NO provisiona sin esta llave: es el permiso explícito que separa un
+   * alta de back office del registro público de auth-google, que llega a
+   * cartera con el mismo token de servicio ADMIN y sería indistinguible por
+   * identidad. Solo tiene efecto en las filas que se INSERTAN.
+   */
+  provisionar_portal?: boolean;
 }
 export interface InvestorResponse {
   inversionista_id: number;

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "bun:test";
-import { provisionarInversionista } from "./portalProvisioning";
+import {
+  provisionarInversionista,
+  resultadoNoSolicitado,
+} from "./portalProvisioning";
 
 const OPTS_BASE = {
   baseUrl: "http://auth-google:9500",
@@ -158,5 +161,28 @@ describe("provisionarInversionista", () => {
     const r = await provisionarInversionista(fila(), { ...OPTS_BASE, fetchImpl: impl });
     expect(r.correo).toMatchObject({ redirigido: true, destinatarioReal: "jalvarado@clubcashin.com" });
     expect(r.advertencias).toContain("correo_redirigido_por_modo_no_prod");
+  });
+});
+
+describe("resultadoNoSolicitado", () => {
+  it("nombra el motivo en vez de callar", () => {
+    // El modo de fallo del guard es un alta legítima que olvidó pedir el
+    // acceso. Si eso se reportara como un silencio, operaciones vería
+    // "creado correctamente" y creería que el portal no funciona. Se nombra
+    // para que el bloque `provisioning` de la respuesta lo diga.
+    expect(resultadoNoSolicitado(7)).toEqual({
+      inversionistaId: 7,
+      estado: "omitida",
+      usuarioEmail: null,
+      resueltoPor: null,
+      correo: {
+        enviado: false,
+        plantilla: null,
+        redirigido: false,
+        destinatarioReal: null,
+      },
+      advertencias: [],
+      motivo: "no_solicitado",
+    });
   });
 });

@@ -223,3 +223,17 @@ export const provisionarInversionista = async (
     );
   }
 };
+
+/**
+ * El alta creó la fila pero NO pidió acceso al portal.
+ *
+ * Se nombra en vez de omitirse en silencio: el modo de fallo del guard es un
+ * alta legítima a la que se le olvidó mandar `provisionar_portal`, y sin este
+ * motivo explícito operaciones vería un alta "correcta" sin acceso y creería
+ * que el módulo no sirve. La red de seguridad sigue siendo el job diario, que
+ * recoge cualquier fila con nombre y correo sin cuenta.
+ */
+export const resultadoNoSolicitado = (
+  inversionistaId: number,
+): ResultadoProvisionamientoCartera =>
+  resultado(inversionistaId, "omitida", "no_solicitado");

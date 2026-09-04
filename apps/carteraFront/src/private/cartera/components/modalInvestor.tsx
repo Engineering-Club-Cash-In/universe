@@ -134,6 +134,12 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
     const payload = {
       ...data,
       ...(mode === "create" ? { operation: "CREATE" as const } : {}),
+      // El alta de back office SÍ pide acceso al portal. Sin esta llave cartera
+      // no crea cuenta ni manda la contraseña: es el permiso explícito que
+      // impide que el registro público de auth-google (que arma un payload fijo
+      // y no puede colarla) se fabrique una cuenta con el DPI que quiera. En
+      // modo editar es inocua: cartera solo provisiona las filas que INSERTA.
+      provisionar_portal: true,
       // Llave siempre presente: vacío = borrar. Es seguro en ambos modos porque
       // la creación estricta garantiza que el alta jamás escribe sobre otra fila.
       // Sin "¿Es empresa?" marcado no se manda nada del representante (null).

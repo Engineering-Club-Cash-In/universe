@@ -5,6 +5,7 @@ import {
   type FilaInversionista,
   normalizarDpiParaComparar,
   pareceSociedad,
+  solicitaProvisionamiento,
 } from "./provisionamientoPortal";
 
 const fila = (over: Partial<Parameters<typeof decidirProvisionamiento>[0]> = {}) => ({
@@ -181,5 +182,31 @@ describe("la regla de empresa vive en un solo sitio", () => {
         notifica: esEmpresaRepresentada(fila),
       });
     }
+  });
+});
+
+describe("solicitaProvisionamiento", () => {
+  it("solo provisiona cuando el body lo PIDE explícitamente", () => {
+    expect(solicitaProvisionamiento({ provisionar_portal: true })).toBe(true);
+    // Los clientes que mandan formularios serializan el booleano como texto.
+    expect(solicitaProvisionamiento({ provisionar_portal: "true" })).toBe(true);
+  });
+
+  it("un body que no trae la llave NO provisiona", () => {
+    // Este es el guard: la ruta pública /api/unified/register-external arma un
+    // objeto FIJO con {nombre, dpi, email} (registerExternal.service.ts:62-68).
+    // Nadie de afuera puede colar la llave, así que un alta anónima no puede
+    // fabricar una cuenta del portal ni mandarle la contraseña a su propio
+    // correo.
+    expect(solicitaProvisionamiento({ nombre: "Ana", dpi: 1, email: "a@b.com" })).toBe(false);
+    expect(solicitaProvisionamiento({})).toBe(false);
+    expect(solicitaProvisionamiento(null)).toBe(false);
+    expect(solicitaProvisionamiento(undefined)).toBe(false);
+  });
+
+  it("mandarla en falso es decir que no, no un descuido", () => {
+    expect(solicitaProvisionamiento({ provisionar_portal: false })).toBe(false);
+    expect(solicitaProvisionamiento({ provisionar_portal: "false" })).toBe(false);
+    expect(solicitaProvisionamiento({ provisionar_portal: 1 })).toBe(false);
   });
 });

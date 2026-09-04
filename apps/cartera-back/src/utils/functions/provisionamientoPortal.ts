@@ -165,3 +165,30 @@ export const decidirProvisionamiento = (
     dpi: dpiParaCuenta(inv.dpi),
   };
 };
+
+/**
+ * ¿El alta PIDIÓ que se le abra cuenta en el portal?
+ *
+ * Guard de la ruta pública. `POST /investor` no es solo el formulario de back
+ * office: `auth-google` lo alcanza desde `/api/unified/register-external`, que
+ * NO lleva `requireAuth`, y desde `/api/cartera/investor`, que sí lo lleva pero
+ * no mira el rol y cualquiera se fabrica esa sesión (el sign-up de Better Auth
+ * está abierto y sin verificación de correo). Como las dos llegan a cartera con
+ * el MISMO token de servicio ADMIN, dentro de cartera el alta anónima y la de
+ * back office son indistinguibles por identidad: el permiso tiene que venir del
+ * PAYLOAD, no de quién firma.
+ *
+ * Funciona porque el registro público arma un objeto FIJO con
+ * `{nombre, dpi, email}` y no reenvía llaves del cuerpo original: nadie de
+ * afuera puede colar `provisionar_portal`. Sin ella no se crea cuenta, no sale
+ * correo con contraseña y no se ocupa un DPI en `users`.
+ *
+ * Se acepta el string "true" porque hay clientes que serializan el booleano al
+ * mandar formularios; el modo de fallo de NO aceptarlo es un alta legítima que
+ * queda sin cuenta hasta la reconciliación del día siguiente.
+ */
+export const solicitaProvisionamiento = (cuerpo: unknown): boolean => {
+  if (!cuerpo || typeof cuerpo !== "object") return false;
+  const valor = (cuerpo as Record<string, unknown>).provisionar_portal;
+  return valor === true || valor === "true";
+};

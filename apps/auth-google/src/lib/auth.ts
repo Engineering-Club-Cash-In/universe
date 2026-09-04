@@ -110,7 +110,9 @@ export const auth = betterAuth({
   },
   secret: env.BETTER_AUTH_SECRET,
   baseURL: env.BETTER_AUTH_URL,
-  trustedOrigins: [env.CORS_ORIGIN, env.BETTER_AUTH_URL],
+  // Better Auth compara por igualdad exacta (sin partir por comas), así que
+  // recibe la lista ya interpretada y no la variable cruda.
+  trustedOrigins: env.TRUSTED_ORIGINS,
 });
 
 export type Auth = typeof auth;

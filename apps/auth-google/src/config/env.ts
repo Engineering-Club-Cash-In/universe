@@ -1,5 +1,7 @@
 import dotenv from "dotenv";
 
+import { parseOriginList } from "../lib/origins";
+
 dotenv.config();
 
 export interface EnvConfig {
@@ -13,6 +15,12 @@ export interface EnvConfig {
   CORS_ORIGIN: string;
   // Frontend URL for password reset
   FRONTEND_URL: string;
+  // Orígenes de navegador en los que confía el servicio, ya canonizados y sin
+  // repetir. Es la ÚNICA lista: la consumen el CORS global, los
+  // `trustedOrigins` de Better Auth y la defensa anti-CSRF. `CORS_ORIGIN`
+  // admite varios dominios separados por comas para desplegar el portal en más
+  // de uno; las otras dos variables aportan su propio origen.
+  TRUSTED_ORIGINS: string[];
   // Cartera API Config
   CARTERA_API_URL: string;
   CARTERA_USER: string;
@@ -59,18 +67,55 @@ function validateEnv(): EnvConfig {
     );
   }
 
+  // Orígenes de confianza: se interpretan UNA vez aquí para que las tres capas
+  // que los usan no puedan divergir. Un valor sin esquema (`portal.cci.com`)
+  // tumba el arranque a propósito: el fallo silencioso equivalente era un CORS
+  // roto en el navegador, sin un solo log del lado servidor que lo explicara.
+  const corsOrigin = process.env.CORS_ORIGIN || "http://localhost:5173";
+  const frontendUrl =
+    process.env.FRONTEND_URL || process.env.CORS_ORIGIN || "http://localhost:5173";
+  const betterAuthUrl = process.env.BETTER_AUTH_URL || "http://localhost:3000";
+
+  const trustedOrigins: string[] = [];
+  const origenesInvalidos: string[] = [];
+
+  for (const [nombre, valor] of [
+    ["CORS_ORIGIN", corsOrigin],
+    ["FRONTEND_URL", frontendUrl],
+    ["BETTER_AUTH_URL", betterAuthUrl],
+  ] as const) {
+    const { origenes, invalidos } = parseOriginList(valor);
+
+    for (const invalido of invalidos) {
+      origenesInvalidos.push(`${nombre}="${invalido}"`);
+    }
+
+    for (const origen of origenes) {
+      if (!trustedOrigins.includes(origen)) {
+        trustedOrigins.push(origen);
+      }
+    }
+  }
+
+  if (origenesInvalidos.length > 0) {
+    throw new Error(
+      `❌ Origen inválido en ${origenesInvalidos.join(", ")}: se espera ` +
+        `esquema://host[:puerto] (varios se separan con comas).`
+    );
+  }
+
   return {
     DATABASE_URL: dbUrl,
     PORT: port,
     NODE_ENV: process.env.NODE_ENV || "development",
     BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET!,
-    BETTER_AUTH_URL:
-      process.env.BETTER_AUTH_URL || "http://localhost:3000",
+    BETTER_AUTH_URL: betterAuthUrl,
     GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID!,
     GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET!,
-    CORS_ORIGIN: process.env.CORS_ORIGIN || "http://localhost:5173",
+    CORS_ORIGIN: corsOrigin,
     // Frontend
-    FRONTEND_URL: process.env.FRONTEND_URL || process.env.CORS_ORIGIN || "http://localhost:5173",
+    FRONTEND_URL: frontendUrl,
+    TRUSTED_ORIGINS: trustedOrigins,
     // Cartera API
     CARTERA_API_URL: process.env.CARTERA_API_URL || "http://localhost:5000",
     CARTERA_USER: process.env.CARTERA_USER || "",
@@ -94,6 +139,7 @@ console.log(`   - NODE_ENV: ${env.NODE_ENV}`);
 console.log(`   - PORT: ${env.PORT}`);
 console.log(`   - BETTER_AUTH_URL: ${env.BETTER_AUTH_URL}`);
 console.log(`   - CORS_ORIGIN: ${env.CORS_ORIGIN}`);
+console.log(`   - TRUSTED_ORIGINS: ${env.TRUSTED_ORIGINS.join(", ")}`);
 console.log(
   `   - DATABASE_URL: ${env.DATABASE_URL.substring(0, 20)}...`
 );

@@ -292,6 +292,27 @@ describe("POST /register-external-auth", () => {
     expect(filaUsuario[0].dpi).toBeNull();
   });
 
+  // Invariante del que depende la barrera de POST /api/cartera/investor: una
+  // cuenta cuyo registro externo NO salió bien se queda en CLIENT. Es lo que
+  // impide que quien crea una cuenta con el correo de un inversionista ajeno
+  // llegue a INVESTOR (su alta choca en modo estricto con la fila que ya tiene
+  // ese correo, y la reconciliación no la reconoce porque no lleva su sello).
+  it("no asciende el rol si el registro externo falló", async () => {
+    sessionActual = sesionDeAna;
+    filaUsuario = cuentaDeAna();
+    fallaRegistroExterno = new Error("ya existe un inversionista con ese email");
+
+    const res = await postJson("/register-external-auth", {
+      userType: "INVESTOR",
+      fullName: "Ana Pérez",
+      dpi: "1234567890123",
+    });
+
+    expect(res.status).toBe(500);
+    expect(filaUsuario[0].role).toBe("CLIENT");
+    expect(escrituras.some((e) => e.role === "INVESTOR")).toBeFalse();
+  });
+
   it("dos cuentas con el mismo DPI a la vez: una gana y la otra recibe 409", async () => {
     // Las dos leen la misma cuenta con el DPI libre, así que las dos pasan
     // cualquier comprobación que sea solo un SELECT.

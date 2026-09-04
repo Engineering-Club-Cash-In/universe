@@ -23,6 +23,7 @@ import {
   PortalInvestorPayloadError,
   buildPortalInvestorUpdate,
 } from "../lib/portalInvestorPayload";
+import { puedeEditarInversionista } from "../lib/portalInvestorWriteAccess";
 import { requireAuth, type AuthedVariables } from "../middleware/requireAuth";
 import { getSignedUrlFromBucket } from "../lib/storage";
 
@@ -92,6 +93,26 @@ carteraRoutes.post("/investor", async (c) => {
   if (!investor) {
     throw new HTTPException(404, {
       message: "No encontramos un inversionista asociado a tu cuenta",
+    });
+  }
+
+  // El correo de la sesión NO basta para autorizar la escritura:
+  // `requireEmailVerification` está en false, así que una sesión no prueba que
+  // el correo sea de quien lo usa. Sin esto, bastaba con crear una cuenta con
+  // el correo de un inversionista —si aún no estaba en Better Auth— para
+  // reescribirle la cuenta bancaria, sin acertar su DPI ni su nombre. Ver
+  // `puedeEditarInversionista`: la verificación de correo sigue pendiente de
+  // una decisión de producto, esto solo cierra este camino.
+  if (
+    !puedeEditarInversionista({
+      sesion: { id: user.id, role: user.role },
+      creadoPorUsuarioPortal: investor.creado_por_usuario_portal,
+    })
+  ) {
+    throw new HTTPException(403, {
+      message:
+        "Tu cuenta todavía no está habilitada para editar los datos del inversionista. " +
+        "Completa tu registro como inversionista o contacta a soporte.",
     });
   }
 

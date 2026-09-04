@@ -13,6 +13,12 @@
  * `Origin` tiene que estar en la lista de confianza. Los navegadores mandan
  * `Origin` en TODA petición que no sea GET/HEAD, así que exigirlo no rompe al
  * cliente legítimo; que falte es señal de que quien llama no es el portal.
+ *
+ * EXCEPCIÓN: con `NODE_ENV=development` se acepta cualquier origen
+ * (`allowAnyOrigin`), replicando la política laxa del CORS local para no
+ * obligar a declarar cada puerto de Vite ni cada túnel. En desarrollo, por
+ * tanto, esta defensa NO está activa; la protección real es la de producción,
+ * donde el flag nunca se enciende.
  */
 
 import type { Context } from "hono";

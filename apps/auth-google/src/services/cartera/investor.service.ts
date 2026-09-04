@@ -22,7 +22,7 @@ export interface CreateInvestorPayload {
   operation?: "CREATE";
   /**
    * Id de la cuenta de auth-google que da de alta la fila desde el registro
-   * del portal. Cartera solo lo escribe al CREAR (migración 0033), nunca al
+   * del portal. Cartera solo lo escribe al CREAR (migración 0034), nunca al
    * actualizar, así que es prueba de creación y no de mera edición.
    */
   creado_por_usuario_portal?: string;

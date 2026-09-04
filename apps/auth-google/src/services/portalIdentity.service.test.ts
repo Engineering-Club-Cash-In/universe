@@ -144,8 +144,10 @@ describe("applyRegistrationOutcome", () => {
 // qué petición es dueña de la reserva.
 //
 // Se borraron al volver idempotente la única escritura externa que importa: el
-// alta en cartera. Lo que queda es una comprobación barata para el caso común;
-// la exclusión de verdad la dan los índices únicos.
+// alta en cartera —idempotente cuando el alta lleva `creado_por_usuario_portal`,
+// que es lo que manda el flujo autenticado; sin esa marca el choque sigue siendo
+// un 409—. Lo que queda es una comprobación barata para el caso común; la
+// exclusión de verdad la dan los índices únicos.
 describe("assertDpiAvailable", () => {
   beforeEach(() => {
     filasSelect = [];

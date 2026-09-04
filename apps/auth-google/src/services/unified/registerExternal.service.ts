@@ -35,7 +35,7 @@ export interface RegisterExternalUserOptions {
   /**
    * Id de la cuenta de auth-google que pide el registro. Solo lo pasa el flujo
    * autenticado, y sirve para una cosa: sellar la fila nueva de cartera con esa
-   * cuenta (`creado_por_usuario_portal`, migración 0033).
+   * cuenta (`creado_por_usuario_portal`, migración 0034).
    *
    * Ese sello es lo que permite que el alta sea IDEMPOTENTE, y la decisión la
    * toma cartera, no este servicio: ante un choque, cartera devuelve la fila

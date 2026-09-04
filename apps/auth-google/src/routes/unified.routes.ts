@@ -71,10 +71,13 @@ const requireAuth = async (c: Context<{ Variables: Variables }>, next: () => Pro
 // con solo conocer uno de los dos datos —y, si ese lead tenía el correo vacío,
 // provocar que el CRM le escribiera el suyo encima.
 //
-// No tenía ningún consumidor: el registro del portal pasa por
-// `/register-external-auth`, que saca el correo de la sesión. El único
-// llamador en el código era una rama de `CompleteProfileForm` (`onlyApi`) que
-// nunca se activaba, retirada junto con la ruta.
+// SÍ tenía consumidores, y por eso el retiro no fue solo borrar: en
+// `origin/develop` la llamaban los tres caminos de alta del portal
+// —`useRegister` tras el signup, `useProfile` al volver de OAuth y
+// `CompleteProfileForm`—, todos a través del helper `registerExternalUser`.
+// Los tres se migraron en este mismo PR a `/register-external-auth`, que saca
+// el correo de la sesión en vez de aceptarlo del cuerpo; el helper sin sesión
+// se retiró junto con la ruta. Hoy no queda ningún llamador.
 
 // ============================================
 // RUTAS PROTEGIDAS (con auth)

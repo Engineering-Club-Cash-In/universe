@@ -427,10 +427,12 @@ export const condicionInversionistaPorEmail = (email: string) =>
  *
  * Las dos preguntas son distintas y hacen falta las dos:
  *
- * 1. ¿De quién es la fila? Lo responde SOLO `creado_por_usuario_portal`, que
- *    esta misma función escribe únicamente en el INSERT. Ningún dato de la fila
- *    sirve para esto: coincidir en correo, DPI y nombre prueba que una fila
- *    TIENE los valores pedidos, no que este registro la haya creado.
+ * 1. ¿De quién es la fila? Lo responde SOLO `creado_por_usuario_portal`, una
+ *    marca que `insertInvestor` escribe únicamente en el INSERT —esta función
+ *    no escribe nada: recibe las filas en conflicto y devuelve una o `null`—.
+ *    Ningún dato de la fila sirve para esto: coincidir en correo, DPI y nombre
+ *    prueba que una fila TIENE los valores pedidos, no que este registro la
+ *    haya creado.
  * 2. ¿Se está pidiendo lo mismo que ya se creó? Lo responde el DPI, como
  *    comprobación SECUNDARIA sobre una fila cuya propiedad ya quedó probada.
  *
@@ -643,7 +645,7 @@ export const insertInvestor = async ({ body, set }: any) => {
     for (const inv of inversionistasToUpsert) {
       const isStrictCreate = inv.operation === "CREATE" || inv.mode === "create";
 
-      // Marca de procedencia del registro del portal (migración 0033). Se
+      // Marca de procedencia del registro del portal (migración 0034). Se
       // resuelve arriba porque la usan dos cosas: reconocer el reintento de un
       // alta que esta misma cuenta ya completó, y sellar la fila nueva en el
       // INSERT de más abajo.
@@ -752,6 +754,11 @@ export const insertInvestor = async ({ body, set }: any) => {
           // registro creó, SIN tocarla. Es lo que vuelve idempotente la única
           // escritura externa del portal, y por tanto lo que hace que un fallo
           // posterior en auth-google deje de ser un callejón sin salida.
+          //
+          // Solo el alta que trae `creado_por_usuario_portal` —la del flujo
+          // autenticado— llega hasta aquí. El registro público sigue creando la
+          // fila con la marca en NULL, y para él un choque es un 409 como
+          // siempre: sin marca no hay nada que reconocer.
           //
           // Que no se escriba nada es la propiedad de seguridad: reconocer no
           // puede pisarle los datos a nadie. Y devolver la fila solo cuando la

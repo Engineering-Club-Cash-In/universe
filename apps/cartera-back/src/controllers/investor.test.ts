@@ -532,7 +532,7 @@ describe("insertInvestor", () => {
   });
 
   // `creado_por_usuario_portal` es la marca de procedencia del registro del
-  // portal (migración 0033). Es lo único que prueba que una fila la creó una
+  // portal (migración 0034). Es lo único que prueba que una fila la creó una
   // cuenta concreta, así que solo puede escribirse al CREARLA.
   describe("creado_por_usuario_portal", () => {
     it("sella la fila en el mismo INSERT que la crea", async () => {
@@ -796,7 +796,7 @@ describe("insertInvestor · reintento del registro del portal", () => {
     expect(updateWasCalled).toBeFalse();
   });
 
-  // Toda fila anterior a la migración 0033 tiene la marca en NULL, incluidas
+  // Toda fila anterior a la migración 0034 tiene la marca en NULL, incluidas
   // las 10 filas de sociedad cuyo `dpi` es NULL y cuyo `dpi_rep_legal` sí
   // existe. Ese NULL es lo que impide que se reclamen.
   it("no reclama una fila sin marca de procedencia", async () => {

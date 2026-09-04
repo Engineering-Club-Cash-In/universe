@@ -4,10 +4,12 @@
  * Todo el router exige sesión y la cuenta afectada sale SIEMPRE de esa sesión.
  * Aquí vivieron rutas `/:userId/...` que leían y escribían el perfil de
  * cualquiera con solo poner su id en la URL, y un `check-dpi/:dpi` público que
- * confirmaba si un DPI estaba registrado. Ninguna tenía consumidor (el portal
- * solo usa `/me/dpi`), así que se eliminaron en vez de protegerse: la
- * verificación de un DPI repetido la hace ya el propio registro, que responde
- * 409 al fijarlo sobre la cuenta.
+ * confirmaba si un DPI estaba registrado —un oráculo de DPIs abierto a
+ * internet—. Las `/:userId/...` no tenían consumidor; `check-dpi` sí: lo
+ * llamaba `features/Login/hook/useRegister.ts` para avisar del DPI repetido
+ * antes de enviar el formulario. Aun así se eliminaron en vez de protegerse,
+ * porque esa verificación ya la hace el propio registro: fijar el DPI sobre la
+ * cuenta responde 409, y ese 409 es el que el formulario muestra ahora.
  */
 
 import { Hono } from "hono";

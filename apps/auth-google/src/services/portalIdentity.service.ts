@@ -65,7 +65,9 @@ const esViolacionDeUnicidad = (error: unknown): boolean => {
  * (`claimDpi`/`releaseDpiClaim` con compare-and-set) que intentaba hacer
  * recuperable la orquestación entre los tres sistemas; se retiró al volver
  * idempotente el alta en cartera, que es la única escritura externa que
- * importa.
+ * importa. Esa idempotencia NO es universal: solo la hay cuando el alta viaja
+ * con `creado_por_usuario_portal`, es decir, en el flujo autenticado, que es
+ * el único desde el que se llega aquí.
  *
  * No es un endpoint: se llama siempre dentro de un flujo con sesión y contra el
  * `userId` de esa sesión, así que no reintroduce el oráculo público de DPIs que

@@ -48,6 +48,15 @@ export interface OpcionesProvisionamiento {
   baseUrl?: string;
   secreto?: string;
   timeoutMs?: number;
+  /**
+   * Solo asegura la CUENTA; no manda el aviso de empresa agregada.
+   *
+   * Lo usa la reconciliación diaria: no puede distinguir una empresa nueva de
+   * una de hace un año, así que avisar desde ahí sería repetirle el mismo
+   * correo a los diez representantes todos los días. Ese aviso pertenece al
+   * camino de alta, que pasa una sola vez.
+   */
+  soloAsegurarCuenta?: boolean;
   /** Resuelve al representante legal contra cartera. Recibe el DPI normalizado. */
   buscarRepresentante?: (
     dpiNormalizado: string,
@@ -159,6 +168,10 @@ export const provisionarInversionista = async (
     }
 
     if (decision.accion === "notificar_representante") {
+      if (opciones.soloAsegurarCuenta) {
+        return resultado(decision.inversionistaId, "omitida", "es_empresa");
+      }
+
       const buscar = opciones.buscarRepresentante;
       const representante = buscar
         ? await buscar(decision.dpiRepresentante)

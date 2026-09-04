@@ -131,6 +131,24 @@ describe("provisionarInversionista", () => {
     expect(r).toMatchObject({ estado: "fallo", motivo: "timeout" });
   });
 
+  it("con soloAsegurarCuenta, la empresa NO vuelve a avisar a su representante", async () => {
+    // Es lo que usa la reconciliación diaria: no distingue una empresa nueva de
+    // una de hace un año, así que avisar desde ahí sería repetirle el mismo
+    // correo a los diez representantes todos los días.
+    const { impl, llamadas } = fetchQueDevuelve(RESPUESTA_OK);
+    const r = await provisionarInversionista(
+      fila({ inversionista_id: 86, dpi: null, dpi_rep_legal: "1573661970101" }),
+      {
+        ...OPTS_BASE,
+        fetchImpl: impl,
+        soloAsegurarCuenta: true,
+        buscarRepresentante: async () => ({ nombre: "Richard", email: "r@x.com" }),
+      },
+    );
+    expect(llamadas).toEqual([]);
+    expect(r).toMatchObject({ estado: "omitida", motivo: "es_empresa" });
+  });
+
   it("propaga las advertencias del envío para que queden en audit_logs", async () => {
     const { impl } = fetchQueDevuelve({
       ...RESPUESTA_OK,

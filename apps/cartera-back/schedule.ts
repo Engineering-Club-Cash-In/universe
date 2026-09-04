@@ -9,6 +9,10 @@ import {
 } from './src/controllers/verificarFacturasSat';
 import { generarSnapshotDiario } from './src/controllers/facturacionSnapshot';
 import { verificarCuadreLiquidaciones } from './src/controllers/verificarCuadreLiquidaciones';
+import {
+  enviarResumenProvisionamiento,
+  provisionarCuentasPortal,
+} from './src/controllers/provisionarCuentasPortal';
 import { runScheduledJob, runScheduledJobAttempts } from './scheduledJobRunner';
 
 const TZ_GUATEMALA = 'America/Guatemala';
@@ -117,6 +121,27 @@ export function iniciarTareasProgramadas() {
     await runScheduledJob(
       'verify_liquidation_balance',
       () => verificarCuadreLiquidaciones(),
+    );
+  });
+
+  // 🔑 Acceso al Portal del Inversionista - 07:00 hora Guatemala, todos los días.
+  //    Recorre a todos los inversionistas y le crea la cuenta a quien deba
+  //    tenerla y no la tenga. Es idempotente (la existencia del usuario es la
+  //    llave), así que correrlo a diario no crea cuentas de más ni repite
+  //    correos de bienvenida.
+  //
+  //    Es la red que recoge lo que el alta no pudo: si auth-google estaba caído
+  //    cuando se creó el inversionista, el operador no tiene forma de
+  //    reintentarlo —el segundo POST muere en el guard de duplicados— y sin
+  //    este job esa persona se quedaba sin acceso para siempre.
+  //
+  //    Solo asegura cuentas: el aviso de "ahora representas a X" se manda
+  //    únicamente en el alta, porque desde aquí se le repetiría a los mismos
+  //    representantes todos los días.
+  schedule.scheduleJob({ rule: '0 7 * * *', tz: TZ_GUATEMALA }, async () => {
+    await runScheduledJob(
+      'provision_portal_accounts',
+      () => provisionarCuentasPortal({ enviarResumen: enviarResumenProvisionamiento }),
     );
   });
 }

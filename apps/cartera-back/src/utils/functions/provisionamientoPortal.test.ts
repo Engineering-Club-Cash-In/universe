@@ -49,14 +49,43 @@ describe("decidirProvisionamiento", () => {
     expect(d).toMatchObject({ accion: "provisionar", email: "ana@example.com" });
   });
 
-  it("una empresa NO recibe cuenta propia: su representante ya la tiene", () => {
+  it("una empresa NO recibe cuenta propia: avisa a su representante", () => {
     // Cube Investments S.A. (86): representada por Richard, que entra con su
-    // propio correo y la ve en su lista.
+    // propio correo y la ve en su lista. Él es quien recibe el aviso de
+    // "ahora también representas a...", que es la regla 1 del pedido: si la
+    // persona YA tiene usuario, se le asocia el inversionista nuevo y se le
+    // manda ese correo en vez del de bienvenida.
     expect(
       decidirProvisionamiento(
-        fila({ inversionista_id: 86, dpi: null, dpi_rep_legal: "1573661970101" }),
+        fila({
+          inversionista_id: 86,
+          nombre: "Cube Investments S.A.",
+          dpi: null,
+          dpi_rep_legal: "1573661970101",
+        }),
       ),
-    ).toEqual({ accion: "omitir", motivo: "es_empresa" });
+    ).toEqual({
+      accion: "notificar_representante",
+      inversionistaId: 86,
+      inversionistaNombre: "Cube Investments S.A.",
+      dpiRepresentante: "1573661970101",
+    });
+  });
+
+  it("la empresa avisa al representante aunque ELLA no tenga correo", () => {
+    // MENFER (66) no tiene correo propio, pero su representante (Juan Carlos
+    // Mendez, 50) sí: el aviso tiene a dónde llegar.
+    expect(
+      decidirProvisionamiento(
+        fila({
+          inversionista_id: 66,
+          nombre: "MENFER",
+          email: "",
+          dpi: null,
+          dpi_rep_legal: "1578569841301",
+        }),
+      ),
+    ).toMatchObject({ accion: "notificar_representante", dpiRepresentante: "1578569841301" });
   });
 
   it("quien se representa a sí mismo SÍ recibe cuenta, aunque tenga rep legal", () => {
@@ -84,16 +113,6 @@ describe("decidirProvisionamiento", () => {
       accion: "omitir",
       motivo: "sin_correo",
     });
-  });
-
-  it("en una empresa sin correo manda 'es_empresa': su rep NO se queda sin acceso", () => {
-    // MENFER (66) no tiene correo, pero su representante sí tiene cuenta. Decir
-    // 'sin_correo' mandaría a operaciones a buscar un correo que no hace falta.
-    expect(
-      decidirProvisionamiento(
-        fila({ inversionista_id: 66, email: "", dpi: null, dpi_rep_legal: "1578569841301" }),
-      ),
-    ).toEqual({ accion: "omitir", motivo: "es_empresa" });
   });
 
   it("un rep legal vacío o basura deja a la fila como persona", () => {

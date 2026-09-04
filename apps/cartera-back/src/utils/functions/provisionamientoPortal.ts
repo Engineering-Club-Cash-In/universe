@@ -20,10 +20,23 @@ export interface FilaInversionista {
   dpi_rep_legal: string | null;
 }
 
-export type MotivoOmision = "es_empresa" | "sin_correo" | "sin_nombre";
+export type MotivoOmision = "sin_correo" | "sin_nombre";
 
 export type DecisionProvisionamiento =
   | { accion: "omitir"; motivo: MotivoOmision }
+  /**
+   * La fila es una empresa: no recibe cuenta propia, pero su REPRESENTANTE sí
+   * tiene que enterarse de que ahora la representa en el portal. Quién es ese
+   * representante lo resuelve el llamador contra cartera (`dpi` = este valor):
+   * esta función es pura y no consulta la base.
+   */
+  | {
+      accion: "notificar_representante";
+      inversionistaId: number;
+      inversionistaNombre: string;
+      /** Dígitos sin ceros a la izquierda, listo para comparar contra `dpi`. */
+      dpiRepresentante: string;
+    }
   | {
       accion: "provisionar";
       inversionistaId: number;
@@ -104,17 +117,30 @@ const dpiParaCuenta = (dpi: FilaInversionista["dpi"]): string | null =>
 export const decidirProvisionamiento = (
   inv: FilaInversionista,
 ): DecisionProvisionamiento => {
-  // El orden importa. "es_empresa" va primero porque es la respuesta más
-  // informativa: MENFER (66) no tiene correo Y es empresa; decir "sin_correo"
-  // mandaría a operaciones a conseguir un correo que no hace falta, cuando su
-  // representante ya entra con el suyo.
-  if (esEmpresaRepresentada(inv)) {
-    return { accion: "omitir", motivo: "es_empresa" };
-  }
-
   const nombre = (inv.nombre ?? "").trim();
   if (!nombre) {
     return { accion: "omitir", motivo: "sin_nombre" };
+  }
+
+  // La rama de empresa va PRIMERO y no es un "omitir".
+  //
+  // Que la empresa no reciba cuenta propia no significa que no pase nada: es
+  // justo el caso en que su representante —que ya tiene usuario— debe recibir
+  // el aviso de "ahora también representas a X". Tratarlo como omisión dejaba
+  // ese correo sin ninguna forma de dispararse.
+  //
+  // Va antes que la validación de correo a propósito: MENFER (66) no tiene
+  // correo propio, y aun así su representante sí tiene a dónde recibir el
+  // aviso. Pedirle correo a la empresa mandaría a operaciones a conseguir uno
+  // que no hace falta.
+  const dpiRepresentante = normalizarDpiParaComparar(inv.dpi_rep_legal);
+  if (dpiRepresentante !== null && dpiRepresentante !== normalizarDpiParaComparar(inv.dpi)) {
+    return {
+      accion: "notificar_representante",
+      inversionistaId: inv.inversionista_id,
+      inversionistaNombre: nombre,
+      dpiRepresentante,
+    };
   }
 
   const email = (inv.email ?? "").trim().toLowerCase();

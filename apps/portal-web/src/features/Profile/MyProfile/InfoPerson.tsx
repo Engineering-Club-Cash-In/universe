@@ -12,6 +12,7 @@ import { ModalConfirmChange } from "./ModalConfirmChange";
 import { getProfile } from "../services";
 import { getInvestorProfile, getBancos } from "../services/investorService";
 import { useEntidades } from "../hooks/useEntidades";
+import { ErrorCarga } from "../components/ErrorCarga";
 import { CACHE_CATALOGO, CACHE_FICHA } from "../constants/cache";
 import { useAuth } from "@/lib";
 
@@ -33,7 +34,12 @@ export const InfoPerson = () => {
   const [numeroCuenta, setNumeroCuenta] = useState("");
   const [editingField, setEditingField] = useState<EditField>(null);
   const { user } = useAuth();
-  const { inversionistaId, isLoading: cargandoEntidades } = useEntidades();
+  const {
+    inversionistaId,
+    isLoading: cargandoEntidades,
+    error: errorEntidades,
+    reintentar: reintentarEntidades,
+  } = useEntidades();
 
   const isInvestor = user?.role === "INVESTOR";
 
@@ -170,22 +176,14 @@ export const InfoPerson = () => {
 
   // Una ficha en blanco se lee como "esta entidad no tiene datos bancarios" y
   // llevaría al inversionista a llenarlos de nuevo sobre lo que ya existe.
-  if (isInvestor && errorInvestor) {
+  if (isInvestor && (errorEntidades || errorInvestor)) {
     return (
-      <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-6">
-        <p className="font-semibold mb-1">No pudimos cargar este perfil</p>
-        <p className="text-gray text-sm mb-4">
-          Puede ser una falla momentánea de conexión. Volvé a intentarlo en un
-          momento.
-        </p>
-        <button
-          type="button"
-          onClick={() => refetch()}
-          className="px-4 py-2 text-sm font-semibold text-primary border border-primary/30 rounded-lg hover:bg-primary/10 transition-colors"
-        >
-          Reintentar
-        </button>
-      </div>
+      <ErrorCarga
+        titulo="No pudimos cargar este perfil"
+        onReintentar={() =>
+          errorEntidades ? reintentarEntidades() : refetch()
+        }
+      />
     );
   }
 

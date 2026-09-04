@@ -5,14 +5,25 @@ import { getInvestorDocuments, type InvestorDocument } from "../services/investo
 import { useIsMobile } from "@/hooks";
 import { DocumentViewerModal } from "./DocumentViewerModal";
 import { useEntidades } from "../hooks/useEntidades";
+import { ErrorCarga } from "../components/ErrorCarga";
 import { CACHE_FICHA } from "../constants/cache";
 
 export const InvestorDocuments = () => {
   const isMobile = useIsMobile();
   const [selectedDocument, setSelectedDocument] = useState<InvestorDocument | null>(null);
-  const { inversionistaId, isLoading: cargandoEntidades } = useEntidades();
+  const {
+    inversionistaId,
+    isLoading: cargandoEntidades,
+    error: errorEntidades,
+    reintentar: reintentarEntidades,
+  } = useEntidades();
 
-  const { data: documents, isLoading } = useQuery({
+  const {
+    data: documents,
+    isLoading,
+    error: errorDocumentos,
+    refetch,
+  } = useQuery({
     queryKey: ["investor-documents", inversionistaId],
     queryFn: () => getInvestorDocuments(inversionistaId!),
     enabled: !!inversionistaId,
@@ -21,6 +32,17 @@ export const InvestorDocuments = () => {
 
   if (cargandoEntidades || (!!inversionistaId && isLoading)) {
     return <Loading />;
+  }
+
+  // Sin esto, un fallo de red se veía igual que "esta entidad no tiene
+  // documentos".
+  if (errorEntidades || errorDocumentos) {
+    return (
+      <ErrorCarga
+        titulo="No pudimos cargar los documentos"
+        onReintentar={() => (errorEntidades ? reintentarEntidades() : refetch())}
+      />
+    );
   }
 
   return (

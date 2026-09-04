@@ -20,7 +20,7 @@ export const useEntidades = () => {
   const porUsuario = useEntidadActivaStore((s) => s.porUsuario);
   const setEntidadActiva = useEntidadActivaStore((s) => s.setEntidadActiva);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isSuccess, error, refetch } = useQuery({
     queryKey: ["entidades", userId],
     queryFn: getEntidades,
     enabled: !!userId && isInvestor,
@@ -54,7 +54,15 @@ export const useEntidades = () => {
     inversionistaId: entidadActiva?.inversionista_id ?? null,
     seleccionar,
     isLoading: isLoading && isInvestor,
-    /** El usuario es inversionista pero no tiene ninguna entidad en cartera. */
-    sinEntidades: isInvestor && !isLoading && entidades.length === 0,
+    /** La consulta falló: no se sabe qué entidades tiene, no que no tenga. */
+    error: isInvestor ? error : null,
+    reintentar: refetch,
+    /**
+     * El usuario es inversionista y cartera respondió que no tiene ninguna
+     * entidad. Exige `isSuccess` a propósito: con la consulta caída, `data`
+     * también queda en undefined, y sin esa condición se le decía a un
+     * inversionista con sus sociedades al día que su usuario no está vinculado.
+     */
+    sinEntidades: isInvestor && isSuccess && entidades.length === 0,
   };
 };

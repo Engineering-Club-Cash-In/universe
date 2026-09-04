@@ -17,6 +17,7 @@ import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/lib";
 import { useEntidades } from "../hooks/useEntidades";
+import { ErrorCarga } from "../components/ErrorCarga";
 import { CACHE_FICHA, CACHE_MOVIMIENTOS } from "../constants/cache";
 
 export const MyInvestments = () => {
@@ -25,6 +26,8 @@ export const MyInvestments = () => {
     inversionistaId,
     isLoading: cargandoEntidades,
     sinEntidades,
+    error: errorEntidades,
+    reintentar: reintentarEntidades,
   } = useEntidades();
   const [expandedLiquidacion, setExpandedLiquidacion] = useState<number | null>(
     null,
@@ -139,6 +142,23 @@ export const MyInvestments = () => {
         <ContainerMenu>
           <div className="max-w-7xl mx-auto mt-26 mb-20">
             <Loading />
+          </div>
+        </ContainerMenu>
+      </div>
+    );
+  }
+
+  if (errorEntidades) {
+    return (
+      <div>
+        <NavBar />
+        <ContainerMenu>
+          <div className="mt-10 mb-20">
+            <h1 className="text-2xl font-bold mb-6">Mis Inversiones</h1>
+            <ErrorCarga
+              titulo="No pudimos cargar tus perfiles"
+              onReintentar={() => reintentarEntidades()}
+            />
           </div>
         </ContainerMenu>
       </div>

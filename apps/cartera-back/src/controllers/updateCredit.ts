@@ -31,7 +31,7 @@ import { consultarEstadoCuentaPrestamo } from "../services/sifcoIntegrations";
 import {
   withAuditContext,
   setCapitalSource,
-  setMontoAportadoMotivo,
+  setMontoAportadoAuditContext,
 } from "../utils/withAuditContext";
 import { clasificarCompraCreditoInversionista, tieneConflictoExcedenteVariable } from "./purchaseClassification";
 import { withCreditoEspejoLocks } from "../utils/creditoEspejoLock";
@@ -516,8 +516,9 @@ const creditUpdateSchema = z.object({
   bandera_reinversion: z.boolean().optional(),
   // Motivo del ajuste manual de capital (se registra en historial_capital_credito).
   motivo_ajuste_capital: z.string().max(500).optional(),
-  // Motivo del ajuste de monto (se registra en historico_monto_aportado_espejo).
-  motivo_ajuste_monto_aportado: z.string().max(500).optional(),
+  // Motivos independientes para historial de monto fiscal y espejo.
+  motivo_ajuste_monto_aportado_padre: z.string().max(500).optional(),
+  motivo_ajuste_monto_aportado_espejo: z.string().max(500).optional(),
 });
 
 type CreditUpdateData = z.infer<typeof creditUpdateSchema>;
@@ -1484,7 +1485,8 @@ export const updateCredit = async ({ body, set, request }: any) => {
       motivo_devolucion,
       bandera_reinversion,
       motivo_ajuste_capital,
-      motivo_ajuste_monto_aportado,
+      motivo_ajuste_monto_aportado_padre,
+      motivo_ajuste_monto_aportado_espejo,
       ...fieldsToUpdate
     } = parseResult.data;
 
@@ -1513,6 +1515,37 @@ export const updateCredit = async ({ body, set, request }: any) => {
       return { message: "El motivo del ajuste de capital es obligatorio" };
     }
 
+    const inversionistasPadreActuales = await db
+      .select({
+        inversionista_id: creditos_inversionistas.inversionista_id,
+        monto_aportado: creditos_inversionistas.monto_aportado,
+      })
+      .from(creditos_inversionistas)
+      .where(eq(creditos_inversionistas.credito_id, credito_id));
+    const montoPadreActualPorInversionista = new Map(
+      inversionistasPadreActuales.map((inversionista) => [
+        inversionista.inversionista_id,
+        inversionista.monto_aportado,
+      ]),
+    );
+    const montoAportadoPadreCambiados = (inversionistas ?? []).flatMap(
+      (inversionista) => {
+        const montoActual = montoPadreActualPorInversionista.get(
+          inversionista.inversionista_id,
+        );
+        return montoActual !== undefined &&
+          !new Big(inversionista.monto_aportado).eq(new Big(montoActual))
+          ? [inversionista.inversionista_id]
+          : [];
+      },
+    );
+    const montoAportadoPadreCambia = montoAportadoPadreCambiados.length > 0;
+    const motivoMontoAportadoPadre = motivo_ajuste_monto_aportado_padre?.trim();
+    if (montoAportadoPadreCambia && !motivoMontoAportadoPadre) {
+      set.status = 400;
+      return { message: "El motivo del ajuste de monto aportado del padre es obligatorio" };
+    }
+
     const inversionistasEspejoActuales = await db
       .select({
         inversionista_id: creditos_inversionistas_espejo.inversionista_id,
@@ -1526,21 +1559,22 @@ export const updateCredit = async ({ body, set, request }: any) => {
         inversionista.monto_aportado,
       ]),
     );
-    const montoAportadoCambia = (inversionistas_espejo ?? []).some(
+    const montoAportadoEspejoCambiados = (inversionistas_espejo ?? []).flatMap(
       (inversionista) => {
         const montoActual = montoEspejoActualPorInversionista.get(
           inversionista.inversionista_id,
         );
-        return (
-          montoActual !== undefined &&
+        return montoActual !== undefined &&
           !new Big(inversionista.monto_aportado).eq(new Big(montoActual))
-        );
+          ? [inversionista.inversionista_id]
+          : [];
       },
     );
-    const motivoMontoAportado = motivo_ajuste_monto_aportado?.trim();
-    if (montoAportadoCambia && !motivoMontoAportado) {
+    const montoAportadoEspejoCambia = montoAportadoEspejoCambiados.length > 0;
+    const motivoMontoAportadoEspejo = motivo_ajuste_monto_aportado_espejo?.trim();
+    if (montoAportadoEspejoCambia && !motivoMontoAportadoEspejo) {
       set.status = 400;
-      return { message: "El motivo del ajuste de monto aportado es obligatorio" };
+      return { message: "El motivo del ajuste de monto aportado del espejo es obligatorio" };
     }
 
     // Estados de cierre: el crédito se puede editar, pero su calendario de
@@ -2065,9 +2099,20 @@ export const updateCredit = async ({ body, set, request }: any) => {
         (inversionistas_espejo && inversionistas_espejo.length > 0) ||
         inversionistasNuevos.length > 0)
     ) {
-      if (montoAportadoCambia && motivoMontoAportado) {
-        await setMontoAportadoMotivo(db, motivoMontoAportado);
-      }
+      // updateInvestors reconstruye filas con DELETE + INSERT. El trigger usa
+      // este contexto solo en rebuild final, no en recálculos intermedios.
+      await setMontoAportadoAuditContext(
+        db,
+        "PADRE",
+        motivoMontoAportadoPadre,
+        montoAportadoPadreCambiados,
+      );
+      await setMontoAportadoAuditContext(
+        db,
+        "ESPEJO",
+        motivoMontoAportadoEspejo,
+        montoAportadoEspejoCambiados,
+      );
       await runInvestorRebuild(db);
     }
 

@@ -37,6 +37,33 @@ interface InvestorOption {
   saldo_reinversion?: string | null;
 }
 
+type InvestorMonto = Pick<
+  InvestorItem,
+  "inversionista_id" | "monto_aportado"
+>;
+
+const hasMontoAportadoChanged = (
+  valores: InvestorMonto[],
+  originales: InvestorMonto[],
+): boolean => {
+  const montoOriginalPorInversionista = new Map(
+    originales.map((inversionista) => [
+      Number(inversionista.inversionista_id),
+      Number(inversionista.monto_aportado),
+    ]),
+  );
+
+  return valores.some((inversionista) => {
+    const montoOriginal = montoOriginalPorInversionista.get(
+      Number(inversionista.inversionista_id),
+    );
+    return (
+      montoOriginal !== undefined &&
+      montoOriginal !== Number(inversionista.monto_aportado)
+    );
+  });
+};
+
 interface ModalEditCreditProps {
   open: boolean;
   onClose: () => void;
@@ -209,7 +236,8 @@ export function ModalEditCredit({
       estado_devolucion: safeInitialValues.estado_devolucion ?? "NO_APLICA",
       motivo_devolucion: "",
       motivo_ajuste_capital: "",
-      motivo_ajuste_monto_aportado: "",
+      motivo_ajuste_monto_aportado_padre: "",
+      motivo_ajuste_monto_aportado_espejo: "",
       investors: parsedInvestors,
       investorsMirror: parsedInvestorsMirror, // 🆕 Campo para espejo
     },
@@ -257,17 +285,14 @@ export function ModalEditCredit({
         return;
       }
 
-      const montoAportadoCambia = values.investorsMirror.some((inversionista) => {
-        const original = parsedInvestorsMirror.find(
-          (item) =>
-            Number(item.inversionista_id) ===
-            Number(inversionista.inversionista_id),
-        );
-        return (
-          original !== undefined &&
-          Number(original.monto_aportado) !== Number(inversionista.monto_aportado)
-        );
-      });
+      const montoAportadoPadreCambia = hasMontoAportadoChanged(
+        values.investors,
+        parsedInvestors,
+      );
+      const montoAportadoEspejoCambia = hasMontoAportadoChanged(
+        values.investorsMirror,
+        parsedInvestorsMirror,
+      );
       if (
         values.investors.some((inversionista) => Number(inversionista.monto_aportado) < 0) ||
         values.investorsMirror.some((inversionista) => Number(inversionista.monto_aportado) < 0)
@@ -275,8 +300,18 @@ export function ModalEditCredit({
         toast.error("El monto aportado no puede ser negativo.");
         return;
       }
-      if (montoAportadoCambia && !values.motivo_ajuste_monto_aportado?.trim()) {
-        toast.error("Ingresá el motivo del ajuste de monto aportado.");
+      if (
+        montoAportadoPadreCambia &&
+        !values.motivo_ajuste_monto_aportado_padre?.trim()
+      ) {
+        toast.error("Ingresá el motivo del ajuste de monto aportado del padre.");
+        return;
+      }
+      if (
+        montoAportadoEspejoCambia &&
+        !values.motivo_ajuste_monto_aportado_espejo?.trim()
+      ) {
+        toast.error("Ingresá el motivo del ajuste de monto aportado del espejo.");
         return;
       }
 
@@ -382,9 +417,13 @@ export function ModalEditCredit({
           capitalCambia
             ? values.motivo_ajuste_capital?.trim() || undefined
             : undefined,
-        motivo_ajuste_monto_aportado:
-          montoAportadoCambia
-            ? values.motivo_ajuste_monto_aportado?.trim() || undefined
+        motivo_ajuste_monto_aportado_padre:
+          montoAportadoPadreCambia
+            ? values.motivo_ajuste_monto_aportado_padre?.trim() || undefined
+            : undefined,
+        motivo_ajuste_monto_aportado_espejo:
+          montoAportadoEspejoCambia
+            ? values.motivo_ajuste_monto_aportado_espejo?.trim() || undefined
             : undefined,
 
         // Lista Principal. Los nuevos viajan con es_nuevo + tipo_operacion para
@@ -443,12 +482,23 @@ export function ModalEditCredit({
     },
   });
 
+  const montoAportadoPadreCambia = hasMontoAportadoChanged(
+    formik.values.investors,
+    parsedInvestors,
+  );
+  const montoAportadoEspejoCambia = hasMontoAportadoChanged(
+    formik.values.investorsMirror,
+    parsedInvestorsMirror,
+  );
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent
         onInteractOutside={(e) => e.preventDefault()}
-        className="w-[calc(100vw-2rem)] max-w-7xl bg-white text-gray-800 shadow-2xl border border-blue-100 p-0 sm:w-[calc(100vw-3rem)]"
+        className="bg-white text-gray-800 shadow-2xl border border-blue-100 p-0"
         style={{
+          width: "min(96vw, 80rem)",
+          maxWidth: "calc(100vw - 2rem)",
           maxHeight: "94vh",
           display: "flex",
           flexDirection: "column",
@@ -544,7 +594,7 @@ export function ModalEditCredit({
             style={{ minHeight: 0 }}
           >
             {/* Datos del crédito */}
-            <div className="space-y-4">
+            <div className="mt-4 space-y-4">
               <div>
                 <h3 className="text-lg font-bold text-blue-800">
                   Información del Crédito
@@ -916,7 +966,7 @@ export function ModalEditCredit({
             </div>
 
             {/* Datos del usuario */}
-            <div className="space-y-4 mt-4 rounded-xl border border-blue-100 bg-blue-50/40 p-4">
+            <div className="mt-4 space-y-4 rounded-xl border border-blue-100 bg-blue-50/40 p-4">
               <h3 className="text-lg font-bold text-blue-800">
                 Datos del Usuario
               </h3>
@@ -949,62 +999,75 @@ export function ModalEditCredit({
             </div>
 
             {/* 🔥 LISTA UNIFICADA DE INVERSIONISTAS (CON ESPEJO INTEGRADO) */}
-            <InvestorsList
-              investors={formik.values.investors}
-              investorsMirror={formik.values.investorsMirror} // Pasamos los espejos
-              investorsOptions={investorsOptions}
-              formik={formik}
-              fieldName="investors" // Base name, el componente manejará el espejo internamente
-              labelTitle="Inversionistas Asociados"
-              errorMessage={formik.errors.investors as string}
-              errorMessageMirror={formik.errors.investorsMirror as string}
-              onSaldoChanges={(changes) => { saldoChangesRef.current = changes; }}
-              recalculatedQuotas={nuevasCuotasInvestors}
-              recalculatedQuotasMirror={nuevasCuotasInvestorsMirror}
-              onClearRecalculatedQuota={(invId, isMirror) => {
-                if (isMirror) {
-                  setNuevasCuotasInvestorsMirror((prev) => {
-                    const next = { ...prev };
-                    delete next[invId];
-                    return next;
-                  });
-                } else {
-                  setNuevasCuotasInvestors((prev) => {
-                    const next = { ...prev };
-                    delete next[invId];
-                    return next;
-                  });
-                }
-              }}
-              blockedInvestorIds={originalInvestorIds}
-            />
+            <div className="mt-4">
+              <InvestorsList
+                investors={formik.values.investors}
+                investorsMirror={formik.values.investorsMirror} // Pasamos los espejos
+                investorsOptions={investorsOptions}
+                formik={formik}
+                fieldName="investors" // Base name, el componente manejará el espejo internamente
+                labelTitle="Inversionistas Asociados"
+                errorMessage={formik.errors.investors as string}
+                errorMessageMirror={formik.errors.investorsMirror as string}
+                onSaldoChanges={(changes) => {
+                  saldoChangesRef.current = changes;
+                }}
+                recalculatedQuotas={nuevasCuotasInvestors}
+                recalculatedQuotasMirror={nuevasCuotasInvestorsMirror}
+                onClearRecalculatedQuota={(invId, isMirror) => {
+                  if (isMirror) {
+                    setNuevasCuotasInvestorsMirror((prev) => {
+                      const next = { ...prev };
+                      delete next[invId];
+                      return next;
+                    });
+                  } else {
+                    setNuevasCuotasInvestors((prev) => {
+                      const next = { ...prev };
+                      delete next[invId];
+                      return next;
+                    });
+                  }
+                }}
+                blockedInvestorIds={originalInvestorIds}
+              />
 
-            {formik.values.investorsMirror.some((inversionista) => {
-              const original = parsedInvestorsMirror.find(
-                (item) =>
-                  Number(item.inversionista_id) ===
-                  Number(inversionista.inversionista_id),
-              );
-              return (
-                original !== undefined &&
-                Number(original.monto_aportado) !== Number(inversionista.monto_aportado)
-              );
-            }) && (
-              <div className="mt-3 p-3 rounded-lg border border-purple-200 bg-purple-50">
-                <Label className="text-purple-800 font-medium">
-                  Motivo del ajuste de monto aportado
-                </Label>
-                <Input
-                  type="text"
-                  name="motivo_ajuste_monto_aportado"
-                  value={formik.values.motivo_ajuste_monto_aportado || ""}
-                  onChange={formik.handleChange}
-                  onBlur={formik.handleBlur}
-                  placeholder="¿Por qué se está ajustando el monto aportado? (queda en historial espejo)"
-                  className="mt-1 border-purple-300 bg-white"
-                />
-              </div>
-            )}
+              {montoAportadoPadreCambia && (
+                <div className="mt-3 p-3 rounded-lg border border-amber-200 bg-amber-50">
+                  <Label className="text-amber-800 font-medium">
+                    Motivo del ajuste de monto aportado (padre)
+                  </Label>
+                  <Input
+                    type="text"
+                    name="motivo_ajuste_monto_aportado_padre"
+                    value={formik.values.motivo_ajuste_monto_aportado_padre || ""}
+                    onChange={formik.handleChange}
+                    onBlur={formik.handleBlur}
+                    placeholder="¿Por qué se ajusta el monto fiscal? (queda en historial)"
+                    className="mt-1 border-amber-300 bg-white"
+                  />
+                </div>
+              )}
+
+              {montoAportadoEspejoCambia && (
+                <div className="mt-3 p-3 rounded-lg border border-purple-200 bg-purple-50">
+                  <Label className="text-purple-800 font-medium">
+                    Motivo del ajuste de monto aportado (espejo)
+                  </Label>
+                  <Input
+                    type="text"
+                    name="motivo_ajuste_monto_aportado_espejo"
+                    value={
+                      formik.values.motivo_ajuste_monto_aportado_espejo || ""
+                    }
+                    onChange={formik.handleChange}
+                    onBlur={formik.handleBlur}
+                    placeholder="¿Por qué se ajusta el monto espejo? (queda en historial)"
+                    className="mt-1 border-purple-300 bg-white"
+                  />
+                </div>
+              )}
+            </div>
 
           </form>
         </div>

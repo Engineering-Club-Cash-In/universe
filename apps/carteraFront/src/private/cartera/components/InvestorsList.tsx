@@ -206,14 +206,6 @@ export function InvestorsList({
     }
 
     formik.setFieldValue(`${fieldName}.${index}.monto_aportado`, newValue);
-    // El espejo es la tabla auditada para monto_aportado. Mantenerlo en línea
-    // con el monto visible asegura que el ajuste y su motivo queden trazados.
-    if (investorsMirror[index]) {
-      formik.setFieldValue(
-        `investorsMirror.${index}.monto_aportado`,
-        newValue,
-      );
-    }
 
     if (invId > 0) {
       const saldoOriginal = getOriginalSaldo(invId);

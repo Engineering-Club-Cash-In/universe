@@ -2014,7 +2014,7 @@
     monto: numeric("monto", { precision: 18, scale: 2 }).notNull(),
   });
 
-  // ── Historial de cambios de monto_aportado en creditos_inversionistas_espejo ──
+  // ── Historial compartido de monto_aportado (filtrar siempre por origen) ──
   export const historico_monto_aportado_espejo = customSchema.table(
     "historico_monto_aportado_espejo",
     {
@@ -2029,12 +2029,19 @@
       user_email: varchar("user_email", { length: 200 }),
       source: text("source").notNull().default("unknown"),
       motivo: text("motivo"),
+      origen: text("origen").notNull().default("ESPEJO"),
       fecha: timestamp("fecha", { withTimezone: true }).notNull().defaultNow(),
     },
     (t) => ({
       ixTxid:   index("ix_hist_mont_txid").on(t.txid),
       ixCred:   index("ix_hist_mont_cred").on(t.credito_id, t.inversionista_id),
       ixFecha:  index("ix_hist_mont_fecha").on(t.fecha),
+      ixOrigenCredFecha: index("ix_hist_mont_origen_cred_fecha").on(
+        t.origen,
+        t.credito_id,
+        t.inversionista_id,
+        t.fecha,
+      ),
     })
   );
 

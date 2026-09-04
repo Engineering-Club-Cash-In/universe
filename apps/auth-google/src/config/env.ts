@@ -19,6 +19,17 @@ export interface EnvConfig {
   CARTERA_PASSWORD: string;
   // CRM API Config
   CRM_API_URL: string;
+  /**
+   * Secreto compartido con cartera-back para el endpoint interno de
+   * provisionamiento. Sin él, ese endpoint responde 503 (fail-closed).
+   *
+   * NO va en `requiredVars` a propósito: hacerlo obligatorio dejaría al
+   * servicio entero sin arrancar en cualquier deploy que todavía no lo tenga
+   * cargado, y quedarse sin login es peor que quedarse sin provisionar. El
+   * fallo se avisa fuerte al arrancar y el job diario de reconciliación lo
+   * reporta hasta que alguien lo cargue.
+   */
+  PORTAL_PROVISIONING_SECRET: string;
 }
 
 function validateEnv(): EnvConfig {
@@ -70,6 +81,8 @@ function validateEnv(): EnvConfig {
     CARTERA_PASSWORD: process.env.CARTERA_PASSWORD || "",
     // CRM API
     CRM_API_URL: process.env.CRM_API_URL || "http://localhost:4000",
+    // Provisionamiento del portal
+    PORTAL_PROVISIONING_SECRET: process.env.PORTAL_PROVISIONING_SECRET || "",
   };
 }
 
@@ -86,3 +99,13 @@ console.log(`   - CORS_ORIGIN: ${env.CORS_ORIGIN}`);
 console.log(
   `   - DATABASE_URL: ${env.DATABASE_URL.substring(0, 20)}...`
 );
+console.log(
+  `   - FRONTEND_URL (portal): ${env.FRONTEND_URL}`
+);
+if (!env.PORTAL_PROVISIONING_SECRET) {
+  console.warn(
+    "⚠️  PORTAL_PROVISIONING_SECRET no está seteada: el provisionamiento de\n" +
+      "   cuentas del portal quedará cerrado (503) y los inversionistas nuevos\n" +
+      "   NO recibirán acceso. El job diario de cartera lo va a reportar."
+  );
+}

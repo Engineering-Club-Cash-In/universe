@@ -8,6 +8,7 @@ import profileRoutes from "./routes/profile.routes";
 import carteraRoutes from "./routes/cartera.routes";
 import crmRoutes from "./routes/crm.routes";
 import unifiedRoutes from "./routes/unified.routes";
+import internalRoutes from "./routes/internal.routes";
 import { errorHandler, notFoundHandler } from "./middleware/error";
 import {
   apiLimiter,
@@ -59,6 +60,13 @@ app.route("/api/crm", crmRoutes);
 
 // Unified routes (operaciones que involucran CRM + Cartera)
 app.route("/api/unified", unifiedRoutes);
+
+// Rutas internas servicio-a-servicio (cartera-back → auth-google).
+// Montadas FUERA de /api/* a propósito: ahí se aplica apiLimiter (100 req /
+// 15 min por IP y path) y cartera-back sale por una sola IP, así que un
+// backfill o un import masivo se estrellarían contra su propio límite.
+// La puerta es el secreto compartido del middleware, no el rate limit.
+app.route("/internal", internalRoutes);
 
 // 404 handler
 app.notFound(notFoundHandler);

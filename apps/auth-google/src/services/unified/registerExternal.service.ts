@@ -51,11 +51,27 @@ export interface RegisterExternalUserOptions {
 // ============================================
 
 /**
- * Devuelve la fila de cartera que creó ESTA MISMA cuenta del portal, o `null`.
+ * Devuelve la fila de cartera que creó ESTA MISMA cuenta del portal Y que
+ * corresponde al DPI que se está registrando ahora. `null` en cualquier otro
+ * caso.
  *
- * La única prueba admisible es la marca de procedencia
- * (`creado_por_usuario_portal`), que cartera escribe solo en el INSERT del
- * alta. No se compara ningún dato de la fila.
+ * Son dos preguntas distintas y hacen falta las dos:
+ *
+ * 1. ¿De quién es la fila? Lo responde SOLO la marca de procedencia
+ *    (`creado_por_usuario_portal`), que cartera escribe únicamente en el INSERT
+ *    del alta. Ningún dato de la fila sirve para esto.
+ * 2. ¿Es el mismo registro que se está reintentando? Lo responde el DPI. El
+ *    reintento admite un DPI corregido, y ese DPI se escribe en Better Auth
+ *    (la reserva ocurre ANTES del alta externa). Aceptar una fila con otro DPI
+ *    dejaría cartera con uno y la cuenta del portal con otro, y ese otro puede
+ *    pertenecer a un inversionista antiguo.
+ *
+ * OJO con el orden: el DPI aquí es una comprobación SECUNDARIA sobre una fila
+ * cuya propiedad ya quedó probada, no un criterio de identidad. Usarlo para
+ * decidir de quién es la fila es justo lo que estaba roto antes (ver abajo).
+ * Sobre una fila creada por el portal el dato es fiable, porque el portal no
+ * escribe `dpi_rep_legal` y la consulta por correo solo sustituye el DPI cuando
+ * ese campo tiene valor; si aun así no coincidiera, se rechaza.
  *
  * Antes se comparaban correo, DPI y nombre, y esa heurística no podía
  * funcionar: coincidir en esos tres campos prueba que una fila TIENE los
@@ -70,6 +86,7 @@ export interface RegisterExternalUserOptions {
 const recuperarRegistroPropio = async (
   email: string,
   usuarioPortalId: string,
+  dpi: string,
 ): Promise<InvestorProfile | null> => {
   let existente: InvestorProfile | null = null;
 
@@ -84,9 +101,17 @@ const recuperarRegistroPropio = async (
     return null;
   }
 
-  return existente.creado_por_usuario_portal === usuarioPortalId
-    ? existente
-    : null;
+  if (existente.creado_por_usuario_portal !== usuarioPortalId) {
+    return null;
+  }
+
+  // Fail closed: sin DPI en la fila (o con otro) no se puede afirmar que sea
+  // este mismo registro.
+  if (typeof existente.dpi !== "number" || existente.dpi !== Number(dpi)) {
+    return null;
+  }
+
+  return existente;
 };
 
 /**
@@ -182,6 +207,7 @@ export const registerExternalUser = async (
       const propio = await recuperarRegistroPropio(
         email,
         options.usuarioPortalId,
+        dpi,
       );
 
       if (propio) {

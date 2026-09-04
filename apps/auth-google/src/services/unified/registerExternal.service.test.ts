@@ -175,6 +175,29 @@ describe("registerExternalUser", () => {
       ).rejects.toThrow();
     });
 
+    // La marca prueba de QUIÉN es la fila, no que el reintento pida lo mismo.
+    // El DPI del reintento se escribe en Better Auth (la reserva ocurre antes
+    // del alta externa), así que aceptar una fila con otro DPI dejaría cartera
+    // con uno y la cuenta del portal con otro — y ese otro puede pertenecer a
+    // un inversionista antiguo.
+    it("no reconoce su propia fila si el reintento trae otro DPI", async () => {
+      respuestaCrear = conflictoDeCartera();
+      inversionistaPorCorreo = { ...filaDeAna, dpi: 9999999999999 };
+
+      await expect(
+        registerExternalUser(registroDeAna, { usuarioPortalId: CUENTA_DE_ANA }),
+      ).rejects.toThrow();
+    });
+
+    it("no reconoce su propia fila si en cartera quedó sin DPI", async () => {
+      respuestaCrear = conflictoDeCartera();
+      inversionistaPorCorreo = { ...filaDeAna, dpi: null };
+
+      await expect(
+        registerExternalUser(registroDeAna, { usuarioPortalId: CUENTA_DE_ANA }),
+      ).rejects.toThrow();
+    });
+
     it("no reconoce una fila sin marca de procedencia", async () => {
       respuestaCrear = conflictoDeCartera();
       inversionistaPorCorreo = {

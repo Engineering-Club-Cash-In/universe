@@ -429,3 +429,156 @@ describe("lockPendingReturnCreditsForLiquidation", () => {
     expect(forLock).toHaveBeenCalledWith("no key update");
   });
 });
+
+// ============================================================================
+// Idempotencia del alta que pide el registro del portal.
+//
+// El registro del portal toca dos sistemas (auth-google y cartera) y no es
+// atómico: cartera puede insertar la fila y auth-google caerse antes de
+// escribir el DPI y el rol de la cuenta. Con la creación estricta a secas, TODO
+// reintento choca contra la fila que él mismo creó y la cuenta se queda
+// incompleta para siempre.
+//
+// La decisión se toma AQUÍ, no en auth-google: cartera es quien tiene las
+// restricciones de unicidad, así que es el único que puede resolver el choque y
+// devolver la fila en una sola operación. Intentar hacerlo desde fuera obligaba
+// a reconstruir la exclusión con reservas, liberaciones y compare-and-set, y ahí
+// cayeron ocho hallazgos seguidos.
+// ============================================================================
+describe("insertInvestor · reintento del registro del portal", () => {
+  const CUENTA_DE_ANA = "usuario-portal-de-ana";
+
+  /** La fila que dejó el intento anterior de Ana, con su marca de procedencia. */
+  const filaDeAna = {
+    inversionista_id: 77,
+    nombre: "Ana Pérez",
+    dpi: 1234567890123,
+    email: "ana@example.com",
+    creado_por_usuario_portal: CUENTA_DE_ANA,
+  };
+
+  /** El alta que Ana reintenta: exactamente la misma que ya se ejecutó. */
+  const altaDeAna = {
+    operation: "CREATE",
+    nombre: "Ana Pérez",
+    dpi: 1234567890123,
+    email: "ana@example.com",
+    creado_por_usuario_portal: CUENTA_DE_ANA,
+  };
+
+  beforeEach(() => {
+    selectResponses = [];
+    updateWasCalled = false;
+    insertWasCalled = false;
+    lastUpdateData = undefined;
+    lastInsertData = undefined;
+  });
+
+  it("devuelve la fila que creó ese mismo registro, sin escribir nada", async () => {
+    // Los tres choques (email, DPI, nombre) apuntan a la fila de Ana.
+    selectResponses = [[filaDeAna], [filaDeAna], [filaDeAna]];
+    const set = { status: 200 };
+
+    const result = await insertInvestor({ body: altaDeAna, set });
+
+    expect(set.status).toBe(201);
+    expect(result.data).toEqual([filaDeAna]);
+    // Reconocer no es escribir: la fila se devuelve tal cual.
+    expect(insertWasCalled).toBeFalse();
+    expect(updateWasCalled).toBeFalse();
+  });
+
+  it("no reclama una fila sellada por otra cuenta del portal", async () => {
+    const filaDeOtro = {
+      ...filaDeAna,
+      creado_por_usuario_portal: "usuario-portal-de-otro",
+    };
+    selectResponses = [[filaDeOtro], [filaDeOtro], [filaDeOtro]];
+    const set = { status: 200 };
+
+    const result = await insertInvestor({ body: altaDeAna, set });
+
+    expect(set.status).toBe(409);
+    expect(result.error).toBe("duplicate_email");
+    expect(insertWasCalled).toBeFalse();
+    expect(updateWasCalled).toBeFalse();
+  });
+
+  // Toda fila anterior a la migración 0033 tiene la marca en NULL, incluidas
+  // las 10 filas de sociedad cuyo `dpi` es NULL y cuyo `dpi_rep_legal` sí
+  // existe. Ese NULL es lo que impide que se reclamen.
+  it("no reclama una fila sin marca de procedencia", async () => {
+    const filaHeredada = { ...filaDeAna, creado_por_usuario_portal: null };
+    selectResponses = [[filaHeredada], [filaHeredada], [filaHeredada]];
+    const set = { status: 200 };
+
+    const result = await insertInvestor({ body: altaDeAna, set });
+
+    expect(set.status).toBe(409);
+    expect(insertWasCalled).toBeFalse();
+  });
+
+  // La marca prueba de QUIÉN es la fila, no que el reintento pida lo mismo. El
+  // DPI del reintento es el que auth-google escribe en la cuenta del portal:
+  // aceptar la fila vieja dejaría cartera con un DPI y el portal con otro, y ese
+  // otro puede pertenecer a un inversionista antiguo. Se falla cerrado.
+  it("no reclama su propia fila si el reintento trae otro DPI", async () => {
+    // El DPI nuevo está libre, así que solo chocan el correo y el nombre.
+    selectResponses = [[filaDeAna], [], [filaDeAna]];
+    const set = { status: 200 };
+
+    const result = await insertInvestor({
+      body: { ...altaDeAna, dpi: 9999999999999 },
+      set,
+    });
+
+    expect(set.status).toBe(409);
+    expect(insertWasCalled).toBeFalse();
+    expect(updateWasCalled).toBeFalse();
+  });
+
+  // Si el correo casa con la fila propia pero el DPI casa con la de otro
+  // inversionista, reconocer la propia daría por bueno un alta que deja los dos
+  // sistemas apuntando a identidades distintas.
+  it("no reclama nada si los choques apuntan a filas distintas", async () => {
+    const filaAjena = {
+      inversionista_id: 86,
+      nombre: "Cube Investments",
+      dpi: 1234567890123,
+      email: "cube@example.com",
+      creado_por_usuario_portal: null,
+    };
+    selectResponses = [[filaDeAna], [filaAjena], [filaDeAna]];
+    const set = { status: 200 };
+
+    const result = await insertInvestor({ body: altaDeAna, set });
+
+    expect(set.status).toBe(409);
+    expect(insertWasCalled).toBeFalse();
+    expect(updateWasCalled).toBeFalse();
+  });
+
+  // Un alta que no viene del registro del portal no tiene nada que reclamar:
+  // carteraFront, el CRM y las importaciones dejan la marca en NULL.
+  it("un alta sin marca sigue chocando con 409", async () => {
+    selectResponses = [[filaDeAna], [filaDeAna], [filaDeAna]];
+    const set = { status: 200 };
+
+    const { creado_por_usuario_portal: _sinMarca, ...altaAjena } = altaDeAna;
+    const result = await insertInvestor({ body: altaAjena, set });
+
+    expect(set.status).toBe(409);
+    expect(result.error).toBe("duplicate_email");
+    expect(insertWasCalled).toBeFalse();
+  });
+
+  it("sin choque ninguno crea la fila y la sella, como siempre", async () => {
+    selectResponses = [[], [], []];
+    const set = { status: 200 };
+
+    await insertInvestor({ body: altaDeAna, set });
+
+    expect(insertWasCalled).toBeTrue();
+    expect(lastInsertData?.creado_por_usuario_portal).toBe(CUENTA_DE_ANA);
+  });
+});

@@ -347,6 +347,70 @@ async function consultarPagosBulkAmbos(
 // FIN DE CONFIGURACIÓN ORIGINALES/ESPEJO
 // ============================================
 
+/**
+ * Fila del portal reclamable por un reintento, o `null` si no se puede afirmar.
+ *
+ * El registro del portal toca dos sistemas y no es atómico: cartera puede haber
+ * insertado la fila y auth-google caerse antes de escribir el DPI y el rol de
+ * la cuenta. Con la creación estricta a secas, TODO reintento choca contra la
+ * fila que él mismo creó y la cuenta queda incompleta para siempre.
+ *
+ * La decisión se toma aquí, y no en auth-google, porque aquí están las
+ * restricciones de unicidad: resolver el choque y devolver la fila es una sola
+ * operación. Reconstruir esa exclusión desde fuera obligaba a reservar el DPI,
+ * liberarlo y comparar-y-fijar, y esa maquinaria nunca llegó a ser correcta.
+ *
+ * Las dos preguntas son distintas y hacen falta las dos:
+ *
+ * 1. ¿De quién es la fila? Lo responde SOLO `creado_por_usuario_portal`, que
+ *    esta misma función escribe únicamente en el INSERT. Ningún dato de la fila
+ *    sirve para esto: coincidir en correo, DPI y nombre prueba que una fila
+ *    TIENE los valores pedidos, no que este registro la haya creado.
+ * 2. ¿Se está pidiendo lo mismo que ya se creó? Lo responde el DPI, como
+ *    comprobación SECUNDARIA sobre una fila cuya propiedad ya quedó probada.
+ *
+ * Se falla cerrado en todo lo demás. En particular, los choques tienen que
+ * apuntar todos a la MISMA fila: si el correo casa con la fila propia y el DPI
+ * con la de otro inversionista, devolver la propia daría por bueno un alta que
+ * deja auth-google y cartera con identidades distintas.
+ */
+export const filaReclamablePorElPortal = <
+  T extends {
+    inversionista_id: number;
+    dpi: number | null;
+    creado_por_usuario_portal: string | null;
+  },
+>(
+  filasEnConflicto: T[],
+  creadoPorUsuarioPortal: string | null,
+  dpiSolicitado: unknown,
+): T | null => {
+  // Sin marca no hay nada que reclamar: el alta no viene del registro del
+  // portal (carteraFront, el CRM y las importaciones la dejan en NULL) y su
+  // choque se contesta 409 y ya.
+  if (!creadoPorUsuarioPortal) return null;
+
+  if (filasEnConflicto.length === 0) return null;
+
+  const ids = new Set(filasEnConflicto.map((f) => f.inversionista_id));
+  if (ids.size !== 1) return null;
+
+  const fila = filasEnConflicto[0]!;
+
+  if (fila.creado_por_usuario_portal !== creadoPorUsuarioPortal) return null;
+
+  // El DPI del reintento es el que auth-google escribe en la cuenta del portal.
+  // Aceptar una fila con otro DPI dejaría cartera con el viejo y el portal con
+  // el nuevo, y ese nuevo puede pertenecer a un inversionista antiguo. Cambiar
+  // el DPI de una fila de cartera es una operación de back office, no un efecto
+  // colateral de reintentar un registro.
+  if (typeof dpiSolicitado !== "number" || fila.dpi !== dpiSolicitado) {
+    return null;
+  }
+
+  return fila;
+};
+
 export const insertInvestor = async ({ body, set }: any) => {
   try {
     const inversionistasToUpsert = Array.isArray(body) ? body : [body];
@@ -461,6 +525,22 @@ export const insertInvestor = async ({ body, set }: any) => {
     // 🔥 PROCESAR UNO POR UNO para manejar INSERT vs UPDATE
     for (const inv of inversionistasToUpsert) {
       const isStrictCreate = inv.operation === "CREATE" || inv.mode === "create";
+
+      // Marca de procedencia del registro del portal (migración 0033). Se
+      // resuelve arriba porque la usan dos cosas: reconocer el reintento de un
+      // alta que esta misma cuenta ya completó, y sellar la fila nueva en el
+      // INSERT de más abajo.
+      //
+      // Nunca se escribe en el UPDATE, y eso es deliberado: si una edición
+      // pudiera sellar una fila existente, cualquiera capaz de editarla podría
+      // ponerla a su nombre y reclamarla después. La marca solo prueba algo
+      // mientras sea exclusiva de la creación.
+      const creadoPorUsuarioPortal =
+        typeof inv.creado_por_usuario_portal === "string" &&
+        inv.creado_por_usuario_portal.trim()
+          ? inv.creado_por_usuario_portal.trim()
+          : null;
+
       let existente = null;
       // Con qué criterio se resolvió la fila destino. El correo es la
       // identidad del inversionista en el portal y el destino de sus avisos,
@@ -489,6 +569,17 @@ export const insertInvestor = async ({ body, set }: any) => {
       }
 
       if (!existente && isStrictCreate) {
+        // Se recogen TODOS los choques antes de decidir, en vez de contestar al
+        // primero: la idempotencia del registro del portal necesita saber si
+        // apuntan todos a la misma fila. El ORDEN de esta lista es el del
+        // mensaje que se devuelve cuando no hay nada que reclamar, y es el
+        // mismo de siempre: email, DPI, nombre.
+        const conflictos: {
+          error: "duplicate_email" | "duplicate_dpi" | "duplicate_nombre";
+          message: string;
+          fila: typeof inversionistas.$inferSelect;
+        }[] = [];
+
         if (inv.email?.trim()) {
           const email = inv.email.trim().toLowerCase();
           const result = await db
@@ -498,11 +589,11 @@ export const insertInvestor = async ({ body, set }: any) => {
             .limit(1);
 
           if (result[0]) {
-            set.status = 409;
-            return {
-              message: "Ya existe un inversionista con ese email",
+            conflictos.push({
               error: "duplicate_email",
-            };
+              message: "Ya existe un inversionista con ese email",
+              fila: result[0],
+            });
           }
         }
 
@@ -514,11 +605,11 @@ export const insertInvestor = async ({ body, set }: any) => {
             .limit(1);
 
           if (result[0]) {
-            set.status = 409;
-            return {
-              message: "Ya existe un inversionista con ese DPI",
+            conflictos.push({
               error: "duplicate_dpi",
-            };
+              message: "Ya existe un inversionista con ese DPI",
+              fila: result[0],
+            });
           }
         }
 
@@ -530,12 +621,40 @@ export const insertInvestor = async ({ body, set }: any) => {
             .limit(1);
 
           if (result[0]) {
-            set.status = 409;
-            return {
-              message: "Ya existe un inversionista con ese nombre",
+            conflictos.push({
               error: "duplicate_nombre",
-            };
+              message: "Ya existe un inversionista con ese nombre",
+              fila: result[0],
+            });
           }
+        }
+
+        if (conflictos.length > 0) {
+          const propia = filaReclamablePorElPortal(
+            conflictos.map((c) => c.fila),
+            creadoPorUsuarioPortal,
+            inv.dpi,
+          );
+
+          // Reintento del MISMO registro del portal: se devuelve la fila que ese
+          // registro creó, SIN tocarla. Es lo que vuelve idempotente la única
+          // escritura externa del portal, y por tanto lo que hace que un fallo
+          // posterior en auth-google deje de ser un callejón sin salida.
+          //
+          // Que no se escriba nada es la propiedad de seguridad: reconocer no
+          // puede pisarle los datos a nadie. Y devolver la fila solo cuando la
+          // marca es la de la cuenta que pide el alta significa que no se afirma
+          // nada sobre filas ajenas: no hay oráculo nuevo.
+          if (propia) {
+            resultados.push(propia);
+            continue;
+          }
+
+          set.status = 409;
+          return {
+            message: conflictos[0].message,
+            error: conflictos[0].error,
+          };
         }
       }
 
@@ -626,21 +745,9 @@ export const insertInvestor = async ({ body, set }: any) => {
           continue;
         }
 
-        // Marca de procedencia del registro del portal (migración 0033). Se
-        // escribe AQUÍ, en el mismo INSERT que crea la fila: una escritura
-        // posterior que se cayera a medias dejaría la fila sin dueño
+        // La marca viaja en el MISMO INSERT que crea la fila. Sellarla en una
+        // escritura posterior que se cayera a medias dejaría la fila sin dueño
         // reconocible y devolvería el problema que la columna resuelve.
-        //
-        // Nunca se escribe en el UPDATE de más arriba, y eso es deliberado: si
-        // una edición pudiera sellar una fila existente, cualquiera capaz de
-        // editarla podría ponerla a su nombre y reclamarla después. La marca
-        // solo prueba algo mientras sea exclusiva de la creación.
-        const creadoPorUsuarioPortal =
-          typeof inv.creado_por_usuario_portal === "string" &&
-          inv.creado_por_usuario_portal.trim()
-            ? inv.creado_por_usuario_portal.trim()
-            : null;
-
         const insertData = {
           nombre,
           creado_por_usuario_portal: creadoPorUsuarioPortal,

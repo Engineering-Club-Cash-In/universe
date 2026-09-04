@@ -1120,10 +1120,10 @@ export const updateInvestors = async (
   parentCuotas?: Map<number, string>,
   dbInstance: typeof db = db,
 ): Promise<Map<number, string>> => {
-  // Un array vacío no reconstruye nada: el DELETE de abajo dejaría el crédito
-  // sin inversionistas. Vaciar la lista es una operación explícita de otros
-  // controllers, no un efecto colateral de este rebuild.
-  if (!inversionistas || inversionistas.length === 0) return new Map();
+  // Solo `undefined` (campo omitido) evita el rebuild. Una lista vacía no
+  // llega hasta acá: updateCredit la rechaza con 400 y los llamadores internos
+  // se protegen con `.length > 0` antes de invocar.
+  if (!inversionistas) return new Map();
 
   // 🔥 NUEVO: Obtener los datos existentes ANTES de borrar para preservar el estado
   const existingRecords = await dbInstance
@@ -1523,6 +1523,19 @@ export const updateCredit = async ({ body, set, request }: any) => {
     if (capitalCambiaSolicitado && !motivoCapital) {
       set.status = 400;
       return { message: "El motivo del ajuste de capital es obligatorio" };
+    }
+
+    // Vaciar la lista dejaría el crédito sin quién aporte su capital: los
+    // porcentajes de cash-in e inversión ya no sumarían y no habría a quién
+    // liquidar. Sacar un inversionista se hace por su flujo propio
+    // (liquidateInvestor / replaceInvestorCredit), que registra la compra y la
+    // liquidación; acá se rechaza en vez de aceptarlo en silencio.
+    if (inversionistas?.length === 0 || inversionistas_espejo?.length === 0) {
+      set.status = 400;
+      return {
+        message:
+          "Un crédito no puede quedarse sin inversionistas. Usá el flujo de liquidación o reemplazo.",
+      };
     }
 
     const inversionistasPadreActuales = await db

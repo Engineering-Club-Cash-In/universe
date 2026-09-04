@@ -259,6 +259,10 @@ export function InvestorsList({
   };
 
   const removeInvestor = (indexToRemove: number) => {
+    // El backend rechaza una lista vacía: sacar al único inversionista se hace
+    // por el flujo de liquidación o reemplazo, no vaciando la lista acá.
+    if (investors.length <= 1) return;
+
     // 1. Actualizar estado de expansión (Shift Logic)
     const newExpandedSet = new Set<number>();
 
@@ -436,6 +440,9 @@ export function InvestorsList({
         const invMirror = listMirror[index] || {}; // Fallback safe
         const isNew = inv.es_nuevo === true;
         const tipoInversion = inv.tipo_operacion;
+        // El backend rechaza una lista vacía (400): no se puede quitar al
+        // último inversionista desde acá.
+        const esUltimoInversionista = listToRender.length <= 1;
 
         // Para filas nuevas: no ofrecer a quienes participan HOY en el crédito
         // (blockedInvestorIds) ni a los ya elegidos en otra fila del
@@ -717,8 +724,18 @@ export function InvestorsList({
                 <Button
                     type="button"
                     variant="outline"
-                    className="h-10 w-10 border-red-200 text-red-500 hover:bg-red-50 hover:text-red-700 hover:border-red-300 p-0"
+                    className={`h-10 w-10 p-0 ${
+                      esUltimoInversionista
+                        ? "border-gray-200 text-gray-300 cursor-not-allowed"
+                        : "border-red-200 text-red-500 hover:bg-red-50 hover:text-red-700 hover:border-red-300"
+                    }`}
                     onClick={() => removeInvestor(index)}
+                    disabled={esUltimoInversionista}
+                    title={
+                      esUltimoInversionista
+                        ? "Un crédito no puede quedarse sin inversionistas: usá el flujo de liquidación o reemplazo"
+                        : undefined
+                    }
                 >
                     <Trash2 className="w-4 h-4" />
                 </Button>

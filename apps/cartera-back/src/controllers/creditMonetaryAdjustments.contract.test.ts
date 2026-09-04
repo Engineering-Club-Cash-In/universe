@@ -41,6 +41,15 @@ test("credit monetary adjustments keep capital and investor reasons separate", (
   expect(controller).toContain(
     "if (new Big(fieldsToUpdate.capital).lt(1) && !capitalActualEnCero)",
   );
+  // Vaciar la lista se rechaza: `[]` entraba al rebuild y updateInvestors
+  // retornaba temprano, devolviendo 200 sin borrar ni auditar la baja.
+  expect(controller).toContain(
+    "if (inversionistas?.length === 0 || inversionistas_espejo?.length === 0)",
+  );
+  expect(controller).toContain(
+    "Un crédito no puede quedarse sin inversionistas",
+  );
+  expect(controller).toContain("if (!inversionistas) return new Map();");
   expect(auditSettings).toContain("app.monto_aportado_motivo_${sufijo}");
 });
 
@@ -77,9 +86,7 @@ test("rebuild audit only records investor IDs whose amount changed", () => {
   expect(controller).toContain("montoAportadoPadreCambiados");
   expect(controller).toContain("montoAportadoEspejoCambiados");
   expect(controller).toContain("getChangedExistingInvestorIds");
-  expect(controller).toContain(
-    "if (!inversionistas || inversionistas.length === 0) return new Map();",
-  );
+  expect(controller).toContain("if (!inversionistas) return new Map();");
   expect(controller).toContain("inversionistas !== undefined");
   expect(auditSettings).toContain("app.monto_aportado_rebuild_${sufijo}");
   expect(auditSettings).toContain("app.monto_aportado_ids_${sufijo}");
@@ -106,7 +113,5 @@ test("omitted investor list stays undefined through the rebuild guards", () => {
   // rebuild borraba las filas del padre sin reinsertarlas.
   expect(controller).not.toContain("inversionistas = [],");
   expect(controller).toContain("(inversionistas ?? []).some(");
-  expect(controller).toContain(
-    "if (!inversionistas || inversionistas.length === 0) return new Map();",
-  );
+  expect(controller).toContain("if (!inversionistas) return new Map();");
 });

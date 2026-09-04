@@ -399,6 +399,20 @@ export const repLegalExiste = async (valor: string): Promise<boolean> => {
 };
 
 /**
+ * Condición para encontrar al inversionista dueño de un correo.
+ *
+ * `ilike` sin comodines es una igualdad que no distingue mayúsculas, y es el
+ * mismo criterio con el que este controller ya resuelve el correo al insertar y
+ * al actualizar. Hace falta en la lectura por la misma razón: los INSERT
+ * guardan el correo en minúsculas, pero quien pregunta manda el de la sesión de
+ * auth-google tal cual lo escribió la persona. Con una igualdad sensible a
+ * mayúsculas, un correo con una sola letra en mayúscula no encontraba la fila y
+ * el titular se quedaba sin poder ver ni editar sus propios datos de cobro.
+ */
+export const condicionInversionistaPorEmail = (email: string) =>
+  ilike(inversionistas.email, email.trim().toLowerCase());
+
+/**
  * Fila del portal reclamable por un reintento, o `null` si no se puede afirmar.
  *
  * El registro del portal toca dos sistemas y no es atómico: cartera puede haber
@@ -957,7 +971,7 @@ export const getInvestors = async ({ query, set }: any) => {
         .select({ inversionista: inversionistas, documento: documentos_inversionista })
         .from(inversionistas)
         .leftJoin(documentos_inversionista, eq(inversionistas.inversionista_id, documentos_inversionista.inversionista_id))
-        .where(eq(inversionistas.email, query.email));
+        .where(condicionInversionistaPorEmail(query.email));
 
       const result = await agruparInversionistasConDocumentos(rows);
       set.status = result.length ? 200 : 404;

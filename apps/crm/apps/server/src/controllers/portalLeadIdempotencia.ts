@@ -26,15 +26,18 @@ export const normalizarParaComparar = (
 
 export type DecisionDeLead =
 	| { tipo: "aceptar" }
+	| { tipo: "aceptar_sin_dpi" }
 	| { tipo: "conflicto_dpi" };
 
 /**
  * ¿Se puede dar por bueno este lead como respuesta al registro que se pide?
  *
- * - Lead sin DPI: se acepta. No hay nada con qué discrepar, y RELLENARLO sería
+ * - Lead sin DPI: se acepta, pero como `aceptar_sin_dpi`. RELLENARLO sería
  *   peor: con el correo todavía sin verificar (`requireEmailVerification` sigue
  *   en `false`), quien controle un correo podría estamparle su DPI al lead de
- *   otra persona.
+ *   otra persona. Pero tampoco puede pasar como un éxito liso: la ficha se
+ *   queda sin DPI para siempre y el portal creería que quedó registrado, así
+ *   que el caso se distingue para que la respuesta lo diga.
  * - Lead con el MISMO DPI: se acepta. Es el reintento del mismo registro, que
  *   es exactamente el caso que hay que dejar terminar.
  * - Lead con OTRO DPI: se rechaza. Aceptarlo dejaría el CRM con un DPI y la
@@ -50,7 +53,7 @@ export const decidirLeadDelPortal = (
 	const pedido = normalizarParaComparar(dpiSolicitado);
 
 	if (!guardado) {
-		return { tipo: "aceptar" };
+		return { tipo: "aceptar_sin_dpi" };
 	}
 
 	return guardado === pedido ? { tipo: "aceptar" } : { tipo: "conflicto_dpi" };

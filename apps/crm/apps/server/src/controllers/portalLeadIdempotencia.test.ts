@@ -31,13 +31,16 @@ describe("decidirLeadDelPortal", () => {
 	});
 
 	// Rellenarlo sería peor: con el correo sin verificar, quien controle un
-	// correo le estamparía su DPI al lead de otra persona.
-	it("acepta un lead sin DPI sin escribirle nada", () => {
+	// correo le estamparía su DPI al lead de otra persona. Pero tampoco es el
+	// mismo "aceptar" que el reintento que coincide: la ficha se queda SIN DPI
+	// y nadie se entera, así que el caso se distingue para poder reportarlo en
+	// la respuesta en vez de contestar un éxito liso.
+	it("acepta un lead sin DPI, pero marcando que no se le escribió", () => {
 		expect(decidirLeadDelPortal(null, "1234567890123")).toEqual({
-			tipo: "aceptar",
+			tipo: "aceptar_sin_dpi",
 		});
 		expect(decidirLeadDelPortal("   ", "1234567890123")).toEqual({
-			tipo: "aceptar",
+			tipo: "aceptar_sin_dpi",
 		});
 	});
 });

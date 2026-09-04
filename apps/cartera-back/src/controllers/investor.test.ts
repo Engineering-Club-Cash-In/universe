@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 
 import { lockPoolMock } from "../utils/testMocks";
 
@@ -73,6 +75,7 @@ const {
   updateInvestor,
   lockPendingReturnCreditsForLiquidation,
   orderUniqueCreditIds,
+  condicionInversionistaPorEmail,
 } = await import("./investor");
 
 describe("insertInvestor", () => {
@@ -869,5 +872,30 @@ describe("insertInvestor · reintento del registro del portal", () => {
 
     expect(insertWasCalled).toBeTrue();
     expect(lastInsertData?.creado_por_usuario_portal).toBe(CUENTA_DE_ANA);
+  });
+});
+
+// El correo es la identidad del inversionista en el portal: es lo que resuelve
+// a quién se le escriben los datos de cobro. La columna guarda minúsculas —los
+// INSERT de este mismo controller normalizan— pero la sesión de auth-google
+// manda el correo tal cual lo escribió la persona, así que la búsqueda no puede
+// distinguir mayúsculas o el titular no encuentra su propia fila.
+describe("condicionInversionistaPorEmail", () => {
+  const aSql = (condicion: unknown) =>
+    new PgDialect().sqlToQuery(condicion as SQL);
+
+  it("compara sin distinguir mayúsculas", () => {
+    const consulta = aSql(condicionInversionistaPorEmail("Ana@Ejemplo.COM"));
+
+    expect(consulta.sql.toLowerCase()).toContain("ilike");
+    expect(consulta.params).toEqual(["ana@ejemplo.com"]);
+  });
+
+  it("da la misma condición sin importar cómo venga escrito el correo", () => {
+    const comoLoEscribe = aSql(condicionInversionistaPorEmail("  Ana@Ejemplo.COM "));
+    const comoEstaGuardado = aSql(condicionInversionistaPorEmail("ana@ejemplo.com"));
+
+    expect(comoLoEscribe.sql).toBe(comoEstaGuardado.sql);
+    expect(comoLoEscribe.params).toEqual(comoEstaGuardado.params);
   });
 });

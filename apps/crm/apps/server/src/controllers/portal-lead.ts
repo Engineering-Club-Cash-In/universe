@@ -686,8 +686,21 @@ export async function createPortalRegisterLead(c: Context) {
 			// endpoint devolvía el lead como éxito sin actualizarlo mientras
 			// auth-google escribía el DPI nuevo en la cuenta, y los dos sistemas
 			// quedaban asociados a identidades diferentes —y ese DPI nuevo puede
-			// ser el de otra persona. Se falla cerrado: ni se acepta ni se
-			// reescribe el DPI de una ficha existente.
+			// ser el de otra persona.
+			//
+			// El DPI de una ficha existente NUNCA se reescribe aquí: cambiarlo es
+			// una operación de back office, no un efecto colateral de reintentar
+			// un registro. Lo que se hace con el que trae la petición depende de
+			// lo que la ficha ya tenga:
+			//
+			// - Mismo DPI: se acepta, es el reintento del mismo registro.
+			// - Otro DPI: se rechaza con 409.
+			// - Lead SIN DPI: se acepta —bloquearlo dejaría fuera del portal a
+			//   todas las fichas que ventas creó sin DPI— pero el DPI tampoco se
+			//   escribe: mientras el correo no esté verificado, rellenarlo dejaría
+			//   estampar el propio en la ficha de otra persona. Como la ficha se
+			//   queda sin DPI, el caso viaja explícito en la respuesta en vez de
+			//   pasar por un alta completa.
 			const decision = decidirLeadDelPortal(existingLead.dpi, dpi);
 
 			if (decision.tipo === "conflicto_dpi") {
@@ -728,9 +741,28 @@ export async function createPortalRegisterLead(c: Context) {
 				});
 			}
 
+			if (decision.tipo === "aceptar_sin_dpi") {
+				// No es un alta completa: el lead sigue sin DPI y solo un humano
+				// puede ponérselo. Se dice en la respuesta para que quien llame no
+				// dé por hecho que el CRM quedó con la misma identidad que la
+				// cuenta del portal.
+				console.warn(
+					`[portal] lead ${existingLead.id} reconocido SIN DPI; no se escribe el DPI del registro`,
+				);
+
+				return c.json({
+					success: true,
+					data: existingLead,
+					dpiRegistradoEnLead: false,
+					message:
+						"Lead ya existe sin DPI: acceso autorizado, pero el DPI no se registró en la ficha",
+				});
+			}
+
 			return c.json({
 				success: true,
 				data: existingLead,
+				dpiRegistradoEnLead: true,
 				message: "Lead ya existe, acceso autorizado sin nueva oportunidad",
 			});
 		}

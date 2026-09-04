@@ -13,6 +13,10 @@ mock.module("../lib/auth", () => ({
   },
 }));
 
+// OJO: `mock.module` es global y sobrevive a este archivo. Este doble deja
+// `setUserDpi` sustituido para toda la corrida, y por eso
+// `portalIdentity.service.test.ts` ve una versión que nunca rechaza cuando la
+// suite corre entera (está explicado allí).
 mock.module("../services/portalIdentity.service", () => ({
   DpiFormatError: class DpiFormatError extends Error {},
   DpiAlreadyTakenError: class DpiAlreadyTakenError extends Error {},

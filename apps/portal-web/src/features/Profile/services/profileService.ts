@@ -5,6 +5,8 @@
 import apiAuth from "@/lib/api/apiAuth";
 import type { AxiosError } from "axios";
 
+import { mensajeDelServidor } from "./mensajeDelServidor";
+
 export interface ProfileData {
   name: string;
   lastName: string;
@@ -144,11 +146,10 @@ export const updateOwnDpi = async (dpi: string): Promise<string> => {
 
     return response.data.data.dpi;
   } catch (error) {
-    const axiosError = error as AxiosError<{ error?: string; message?: string }>;
-    throw new Error(
-      axiosError.response?.data?.message ||
-        axiosError.response?.data?.error ||
-        "Error al actualizar el DPI"
-    );
+    // El motivo se lee con `mensajeDelServidor`: los errores de esta ruta son
+    // `HTTPException`, y el manejador global de auth-google los serializa como
+    // `{ error: { message } }`. Leer `data.error` como texto le mostraba al
+    // usuario "[object Object]" en lugar del 409 que sí puede corregir.
+    throw new Error(mensajeDelServidor(error, "Error al actualizar el DPI"));
   }
 };

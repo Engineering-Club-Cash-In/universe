@@ -176,6 +176,30 @@ describe("assertDpiAvailable", () => {
   });
 });
 
+// ⚠️ AISLADO PASA, EN LA SUITE COMPLETA FALLA — y es fuga de mocks, no la prueba.
+//
+// `bun test src/services/portalIdentity.service.test.ts` da 7/7. En
+// `bun test` (toda la suite) falla la de más abajo con "Expected promise that
+// rejects. Received promise that resolved". Reproducible al mínimo con:
+//
+//   bun test src/routes/profile.routes.test.ts \
+//            src/routes/unified.routes.test.ts \
+//            src/services/portalIdentity.service.test.ts
+//
+// El mecanismo: `mock.module` de bun es GLOBAL y no se deshace al terminar el
+// archivo que lo registró. `profile.routes.test.ts` sustituye el módulo entero
+// `../services/portalIdentity.service` por un doble cuyo `setUserDpi` siempre
+// resuelve. Después `unified.routes.test.ts` importa el módulo REAL y recupera
+// lo que él usa —`applyRegistrationOutcome`, `assertDpiAvailable` y las dos
+// clases de error—, que es justo por lo que el resto de este archivo sigue
+// pasando. `setUserDpi` es el ÚNICO export que esa ruta no importa, así que es
+// el único que se queda con el doble puesto: la prueba de abajo llama al doble,
+// que resuelve, y por eso no ve el rechazo.
+//
+// Lo que se prueba aquí sí es correcto: el `catch` de `setUserDpi` traduce el
+// 23505 a `DpiAlreadyTakenError` (ver `portalIdentity.service.ts`). No se
+// silencia la prueba porque cubre la exclusión REAL —la del índice único—, que
+// es lo único que impide que dos cuentas se queden con el mismo DPI.
 describe("setUserDpi", () => {
   beforeEach(() => {
     filasSelect = [];

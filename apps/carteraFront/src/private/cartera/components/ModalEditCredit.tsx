@@ -283,7 +283,11 @@ export function ModalEditCredit({
 
       const capitalCambia =
         Number(values.capital) !== Number(safeInitialValues.capital ?? 0);
-      if (!capitalActualEnCero && !(Number(values.capital) >= 1)) {
+      // La excepción al mínimo es solo dejar en 0 lo que ya vale 0; un monto
+      // fraccionario como 0.50 es un valor nuevo y le aplica el mínimo.
+      const capitalSigueEnCero =
+        Number(values.capital) === 0 && capitalActualEnCero;
+      if (!capitalSigueEnCero && !(Number(values.capital) >= 1)) {
         toast.error("El capital debe ser mayor o igual a 1.");
         return;
       }

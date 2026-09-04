@@ -38,8 +38,13 @@ test("credit monetary adjustments keep capital and investor reasons separate", (
   // El mínimo se valida en el cuerpo, no en el schema: un crédito CANCELADO
   // se persiste con capital 0 y el modal lo reenvía en cada guardado.
   expect(controller).toContain("capital: z.number().nonnegative()");
+  // La excepción al mínimo cubre solo el 0 que no cambia: un capital
+  // fraccionario (0.50) sobre un crédito en 0 debe seguir rechazándose.
   expect(controller).toContain(
-    "if (new Big(fieldsToUpdate.capital).lt(1) && !capitalActualEnCero)",
+    "capitalNuevo.eq(0) && new Big(current.capital || 0).eq(0)",
+  );
+  expect(controller).toContain(
+    "if (capitalNuevo.lt(1) && !capitalSigueEnCero)",
   );
   // Vaciar la lista se rechaza: `[]` entraba al rebuild y updateInvestors
   // retornaba temprano, devolviendo 200 sin borrar ni auditar la baja.

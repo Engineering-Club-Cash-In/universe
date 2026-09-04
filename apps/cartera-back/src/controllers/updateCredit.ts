@@ -1587,13 +1587,16 @@ export const updateCredit = async ({ body, set, request }: any) => {
     const esCreditoFinalizado =
       current.statusCredit === "CANCELADO" || current.statusCredit === "CAIDO";
 
-    // No se puede PONER el capital en 0: un crédito vivo sin capital es un dato
-    // inválido. Pero sí se puede dejarlo en 0 si ya venía así — cancelar
-    // (credits.ts) y reiniciarCredito lo zerean, y el modal reenvía el capital
-    // actual en cada guardado, así que rechazarlo bloquearía la edición de
-    // cualquier otro campo del crédito.
-    const capitalActualEnCero = new Big(current.capital || 0).eq(0);
-    if (new Big(fieldsToUpdate.capital).lt(1) && !capitalActualEnCero) {
+    // El mínimo es Q1, con una sola excepción: dejar en 0 un crédito que YA
+    // está en 0. Cancelar (credits.ts) y reiniciarCredito lo zerean, y el modal
+    // reenvía el capital actual en cada guardado, así que rechazarlo bloquearía
+    // la edición de cualquier otro campo. La excepción exige que el capital
+    // enviado también sea 0: un valor fraccionario como 0.50 no es "dejarlo
+    // como estaba", es un monto nuevo y le aplica el mínimo.
+    const capitalNuevo = new Big(fieldsToUpdate.capital);
+    const capitalSigueEnCero =
+      capitalNuevo.eq(0) && new Big(current.capital || 0).eq(0);
+    if (capitalNuevo.lt(1) && !capitalSigueEnCero) {
       set.status = 400;
       return { message: "El capital debe ser mayor o igual a 1" };
     }

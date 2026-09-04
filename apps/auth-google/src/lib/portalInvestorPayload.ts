@@ -49,9 +49,18 @@ export const TIPOS_CUENTA = [
   "Capital",
 ] as const;
 
-// Dígitos, letras y guiones: cubre cuentas locales e IBAN, y deja fuera
-// espacios y separadores que solo aparecen por un copiar/pegar mal hecho.
-const NUMERO_CUENTA = /^[A-Za-z0-9-]{4,34}$/;
+// Alineado con lo que cartera REALMENTE acepta: `numero_cuenta` es varchar(100)
+// sin restricción, y hay valores guardados que una regla más estrecha rechaza.
+// La versión anterior (solo letras, dígitos y guiones, 4-34) dejaba fuera:
+//   · puntos — el importador de Excel los conserva a propósito
+//     (`limpiar_numero_cuenta` quita asteriscos, comas y espacios, pero NO puntos)
+//   · asteriscos y valores como "N/A" — hay 3 filas así en producción
+// El efecto era que esas personas no podían ni volver a guardar su propio valor.
+// Se valida solo lo que importa: que no venga vacío, que quepa en la columna, y
+// que no traiga caracteres de control.
+const NUMERO_CUENTA_MAX = 100; // varchar(100) en cartera.inversionistas
+// biome-ignore lint/suspicious/noControlCharactersInRegex: es justo lo que se rechaza
+const CARACTERES_DE_CONTROL = /[\x00-\x1F\x7F]/;
 
 const esEnteroPositivo = (valor: number): boolean =>
   Number.isInteger(valor) && valor > 0;
@@ -92,7 +101,17 @@ const parsearTipoCuenta = (valor: unknown): string => {
 const parsearNumeroCuenta = (valor: unknown): string => {
   const normalizado = typeof valor === "string" ? valor.trim() : "";
 
-  if (!NUMERO_CUENTA.test(normalizado)) {
+  if (normalizado === "") {
+    throw new PortalInvestorPayloadError("El número de cuenta no puede ir vacío");
+  }
+
+  if (normalizado.length > NUMERO_CUENTA_MAX) {
+    throw new PortalInvestorPayloadError(
+      `El número de cuenta admite máximo ${NUMERO_CUENTA_MAX} caracteres`,
+    );
+  }
+
+  if (CARACTERES_DE_CONTROL.test(normalizado)) {
     throw new PortalInvestorPayloadError("El número de cuenta no es válido");
   }
 

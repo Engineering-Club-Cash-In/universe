@@ -1,0 +1,14 @@
+# Secret material and generated runtime state must never enter a build context.
+central/secrets
+central/secrets/**
+central/runtime
+central/runtime/**
+.env
+.env.*
+**/.env
+**/.env.*
+
+# Local caches and test artifacts.
+**/__pycache__
+**/*.pyc
+*.log

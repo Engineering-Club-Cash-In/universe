@@ -1,0 +1,214 @@
+import { describe, expect, test } from "bun:test";
+import {
+	calcularAjusteFechaIdeal,
+	getDiaPagoOriginalSistema,
+} from "./fecha-ideal-pago-ajuste";
+
+describe("getDiaPagoOriginalSistema", () => {
+	test("día 15 (≤20) devuelve 15", () => {
+		expect(getDiaPagoOriginalSistema(new Date("2026-07-15T18:00:00Z"))).toBe(
+			15,
+		);
+	});
+
+	test("día 20 exacto (≤20) devuelve 15", () => {
+		expect(getDiaPagoOriginalSistema(new Date("2026-07-20T18:00:00Z"))).toBe(
+			15,
+		);
+	});
+
+	test("día 21 (>20) devuelve 30", () => {
+		expect(getDiaPagoOriginalSistema(new Date("2026-07-21T18:00:00Z"))).toBe(
+			30,
+		);
+	});
+
+	test("día 27 (>20) devuelve 30", () => {
+		expect(getDiaPagoOriginalSistema(new Date("2026-07-27T18:00:00Z"))).toBe(
+			30,
+		);
+	});
+});
+
+describe("calcularAjusteFechaIdeal", () => {
+	test("día IA después del original: prorratea interés, membresía y servicios", () => {
+		// fechaReferencia en marzo (hora Guatemala) → primera cuota cae en abril (30 días)
+		const fechaReferencia = new Date("2026-03-10T18:00:00Z");
+
+		const resultado = calcularAjusteFechaIdeal({
+			diaPagoOriginalSistema: 15,
+			diaPagoMensualElegido: 17,
+			capital: 10000,
+			porcentajeInteres: 3, // interés mensual = 300
+			membresiaMensual: 90,
+			seguroMensual: 45,
+			gpsMensual: 15, // servicios = 60
+			fechaReferencia,
+		});
+
+		expect(resultado).not.toBeNull();
+		expect(resultado?.diasDiferencia).toBe(2);
+		expect(resultado?.diasDelMes).toBe(30);
+		expect(resultado?.montoInteres).toBe(22.4); // ((300 + IVA 36)/30)*2
+		expect(resultado?.montoMembresia).toBe(6); // (90/30)*2
+		expect(resultado?.montoServicios).toBe(4); // (60/30)*2
+		expect(resultado?.montoTotal).toBe(32.4);
+	});
+
+	test("redondea a 2 decimales cuando la división no es exacta", () => {
+		// fechaReferencia en junio (hora Guatemala) → primera cuota cae en julio (31 días)
+		const fechaReferencia = new Date("2026-06-10T18:00:00Z");
+
+		const resultado = calcularAjusteFechaIdeal({
+			diaPagoOriginalSistema: 15,
+			diaPagoMensualElegido: 17,
+			capital: 10000,
+			porcentajeInteres: 1, // interés mensual = 100
+			membresiaMensual: 50,
+			seguroMensual: 20,
+			gpsMensual: 10, // servicios = 30
+			fechaReferencia,
+		});
+
+		expect(resultado?.diasDelMes).toBe(31);
+		expect(resultado?.montoInteres).toBe(7.23); // ((100 + IVA 12)/31)*2
+		expect(resultado?.montoMembresia).toBe(3.23); // (50/31)*2 = 3.2258...
+		expect(resultado?.montoServicios).toBe(1.94); // (30/31)*2 = 1.9354...
+		expect(resultado?.montoTotal).toBe(12.4);
+	});
+
+	test("redondea base e IVA mensual antes del proporcional", () => {
+		const resultado = calcularAjusteFechaIdeal({
+			diaPagoOriginalSistema: 15,
+			diaPagoMensualElegido: 26,
+			capital: 29762,
+			porcentajeInteres: 3,
+			membresiaMensual: 0,
+			seguroMensual: 0,
+			gpsMensual: 0,
+			fechaReferencia: new Date("2026-03-10T18:00:00Z"),
+		});
+
+		// Q892.86 + Q107.14 = Q1,000; Q1,000 × 11 / 30 = Q366.67.
+		expect(resultado?.montoInteres).toBe(366.67);
+		expect(resultado?.montoTotal).toBe(366.67);
+	});
+
+	test("redondea la base antes de IVA y vuelve a redondear el proporcional", () => {
+		const resultado = calcularAjusteFechaIdeal({
+			diaPagoOriginalSistema: 15,
+			diaPagoMensualElegido: 30,
+			capital: 0.5,
+			porcentajeInteres: 1,
+			membresiaMensual: 0,
+			seguroMensual: 0,
+			gpsMensual: 0,
+			fechaReferencia: new Date("2026-03-10T18:00:00Z"),
+		});
+
+		// Q0.005 → base Q0.01; Q0.01 × 15 / 30 = Q0.005 → Q0.01.
+		expect(resultado?.montoInteres).toBe(0.01);
+	});
+
+	test("redondea el IVA mensual antes de prorratearlo", () => {
+		const resultado = calcularAjusteFechaIdeal({
+			diaPagoOriginalSistema: 15,
+			diaPagoMensualElegido: 26,
+			capital: 3.5,
+			porcentajeInteres: 1,
+			membresiaMensual: 0,
+			seguroMensual: 0,
+			gpsMensual: 0,
+			fechaReferencia: new Date("2026-03-10T18:00:00Z"),
+		});
+
+		// Base Q0.035 → Q0.04; IVA Q0.0048 → Q0.00; Q0.04 × 11/30 → Q0.01.
+		// Sin redondear el IVA mensual, el resultado sería Q0.02.
+		expect(resultado?.montoInteres).toBe(0.01);
+	});
+
+	test("día IA igual al original: no hay ajuste (null)", () => {
+		const resultado = calcularAjusteFechaIdeal({
+			diaPagoOriginalSistema: 15,
+			diaPagoMensualElegido: 15,
+			capital: 10000,
+			porcentajeInteres: 3,
+			membresiaMensual: 90,
+			seguroMensual: 45,
+			gpsMensual: 15,
+		});
+
+		expect(resultado).toBeNull();
+	});
+
+	test("día IA antes del original: no hay ajuste (null), no negativo", () => {
+		const resultado = calcularAjusteFechaIdeal({
+			diaPagoOriginalSistema: 30,
+			diaPagoMensualElegido: 17,
+			capital: 10000,
+			porcentajeInteres: 3,
+			membresiaMensual: 90,
+			seguroMensual: 45,
+			gpsMensual: 15,
+		});
+
+		expect(resultado).toBeNull();
+	});
+
+	test("interpreta la frontera mensual con calendario Guatemala", () => {
+		// 2026-02-01T01:00:00Z = 31 ene 7pm GT, pero ya 1 feb en hora server (UTC).
+		const fechaReferencia = new Date("2026-02-01T01:00:00Z");
+
+		const resultado = calcularAjusteFechaIdeal({
+			diaPagoOriginalSistema: 15,
+			diaPagoMensualElegido: 17,
+			capital: 10000,
+			porcentajeInteres: 1,
+			membresiaMensual: 0,
+			seguroMensual: 0,
+			gpsMensual: 0,
+			fechaReferencia,
+		});
+
+		// Enero en Guatemala → primera cuota en febrero de 2026 = 28 días.
+		expect(resultado?.diasDelMes).toBe(28);
+	});
+
+	test("clampa el día elegido al último día del mes si el mes tiene menos días (día 31 en abril de 30 días)", () => {
+		const fechaReferencia = new Date("2026-03-10T18:00:00Z"); // marzo GT → primera cuota en abril (30 días)
+
+		const resultado = calcularAjusteFechaIdeal({
+			diaPagoOriginalSistema: 15,
+			diaPagoMensualElegido: 31,
+			capital: 10000,
+			porcentajeInteres: 3,
+			membresiaMensual: 0,
+			seguroMensual: 0,
+			gpsMensual: 0,
+			fechaReferencia,
+		});
+
+		expect(resultado?.diasDelMes).toBe(30);
+		// 30 - 15 = 15, NO 31 - 15 = 16 (el día 31 no existe en abril)
+		expect(resultado?.diasDiferencia).toBe(15);
+	});
+
+	test("clampa hasta 3 días de diferencia en febrero (el mes más corto)", () => {
+		const fechaReferencia = new Date("2026-01-10T18:00:00Z"); // enero GT → primera cuota en febrero (28 días, 2026 no bisiesto)
+
+		const resultado = calcularAjusteFechaIdeal({
+			diaPagoOriginalSistema: 15,
+			diaPagoMensualElegido: 31,
+			capital: 10000,
+			porcentajeInteres: 3,
+			membresiaMensual: 0,
+			seguroMensual: 0,
+			gpsMensual: 0,
+			fechaReferencia,
+		});
+
+		expect(resultado?.diasDelMes).toBe(28);
+		// 28 - 15 = 13, NO 31 - 15 = 16
+		expect(resultado?.diasDiferencia).toBe(13);
+	});
+});

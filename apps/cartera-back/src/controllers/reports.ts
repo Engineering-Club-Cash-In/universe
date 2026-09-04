@@ -28,6 +28,91 @@ export const esStatusExcluidoMora = (status?: string | null) =>
 export const esStatusSinFacturacion = (status?: string | null) =>
   !!status && STATUS_SIN_FACTURACION.includes(status);
 
+// Fallback legado para créditos sin auditoría de capital. Se conserva sin cambios
+// porque pagos históricos y filas directas a capital no tienen una semántica
+// uniforme de `total_restante`.
+export const buildPreviousCapitalBalanceLateral = (fechaInicio: string) => sql`
+  LEFT JOIN LATERAL (
+    SELECT pc_a.total_restante::numeric AS total_restante
+    FROM cartera.pagos_credito pc_a
+    LEFT JOIN cartera.cuotas_credito qcc_a ON pc_a.cuota_id = qcc_a.cuota_id
+    WHERE pc_a.credito_id = c.credito_id
+      AND pc_a."paymentFalse" = false
+      AND pc_a.total_restante IS NOT NULL
+      AND pc_a.total_restante::numeric > 0
+      AND COALESCE(
+        qcc_a.fecha_vencimiento::date,
+        GREATEST(
+          COALESCE(
+            pc_a.fecha_boleta::date,
+            pc_a.fecha_pago::date,
+            '1900-01-01'::date
+          ),
+          COALESCE(
+            pc_a.fecha_pago::date,
+            pc_a.fecha_boleta::date,
+            '1900-01-01'::date
+          )
+        )
+      ) < ${fechaInicio}::date
+    ORDER BY COALESCE(
+      qcc_a.fecha_vencimiento::date,
+      GREATEST(
+        COALESCE(
+          pc_a.fecha_boleta::date,
+          pc_a.fecha_pago::date,
+          '1900-01-01'::date
+        ),
+        COALESCE(
+          pc_a.fecha_pago::date,
+          pc_a.fecha_boleta::date,
+          '1900-01-01'::date
+        )
+      )
+    ) DESC, pc_a.pago_id DESC
+    LIMIT 1
+  ) cap_anterior ON true
+`;
+
+// Fuente canónica para períodos cubiertos por el trigger de auditoría: registra
+// el capital realmente movido, no el snapshot ambiguo guardado en una fila de pago.
+export const buildCapitalHistoryBeforePeriodLateral = (fechaInicio: string) => sql`
+  LEFT JOIN LATERAL (
+    SELECT GREATEST(h.capital_nuevo::numeric, 0) AS capital_nuevo
+    FROM cartera.historial_capital_credito h
+    WHERE h.credito_id = c.credito_id
+      AND h.fecha < (${fechaInicio}::date AT TIME ZONE 'America/Guatemala')
+    ORDER BY h.fecha DESC, h.id DESC
+    LIMIT 1
+  ) capital_historial ON true
+`;
+
+export const capitalAtPeriodStartSql = sql`CASE
+  WHEN capital_historial.capital_nuevo <= 0 THEN 0
+  ELSE GREATEST(
+    COALESCE(cap_anterior.total_restante, c.capital::numeric),
+    0
+  )
+END`;
+
+export const resolveCapitalAtPeriodStart = ({
+  historicalCapital,
+  legacyCapital,
+  currentCapital,
+}: {
+  historicalCapital?: string | number | null;
+  legacyCapital?: string | number | null;
+  currentCapital?: string | number | null;
+}) => {
+  if (historicalCapital !== null && historicalCapital !== undefined) {
+    const auditedAmount = new Big(historicalCapital);
+    if (auditedAmount.lte(0)) return "0.00";
+  }
+  const candidate = legacyCapital ?? currentCapital ?? 0;
+  const amount = new Big(candidate);
+  return (amount.lt(0) ? new Big(0) : amount).toFixed(2);
+};
+
 // Escala el capital de las cuotas vencidas para que su suma no exceda el principal remanente
 // del crédito (no se puede deber más capital que el que queda). Morosos normales (suma ≤
 // principal) → factor 1, intactos. Recalcula total_restante = capital topado + demás rubros.
@@ -118,6 +203,19 @@ export function sortEstadoCuentaPayments<T extends EstadoCuentaPagoRow>(pagos: T
 export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(pagos: T[]) {
   let capitalRestante: Big | null = null;
 
+  // Una fila de abono a capital puro "ya viene neta" (la sync con el Excel
+  // escribe en todos los pagos de la cuota el saldo neto de sus abonos) cuando
+  // su total_restante == saldo al inicio de la cuota − Σ abono_capital de la
+  // cuota HASTA esta fila (prefijo, en orden de pago). Con prefijo:
+  //  - un cierre de parcial normal (registerPayment hereda el total_restante
+  //    de la hermana sin restar su capital) no cumple y se le sigue restando;
+  //  - un abono agregado DESPUÉS de la sync tampoco cumple (el snapshot no lo
+  //    incluye) y se resta normal, sin invalidar a las filas ya netas.
+  // Caso 01010214106990 cuota 35: el PDF mostraba 45,434.39 en vez de 47,874.89.
+  let cuotaActual: string | null = null;
+  let saldoInicioCuota: Big | null = null;
+  let abonosAcumCuota = new Big(0);
+
   return pagos.map((pago) => {
     const abonoCapital = new Big(pago.abono_capital || 0);
     const totalRestanteFila = new Big(pago.total_restante || 0);
@@ -125,13 +223,36 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
     const snapshotConfiable =
       pago.pagado === true && tieneRubrosDeCuota && totalRestanteFila.gt(0);
 
+    const key = String(pago.numero_cuota ?? "");
+
     if (capitalRestante === null) {
       capitalRestante = snapshotConfiable
         ? totalRestanteFila
         : totalRestanteFila.plus(abonoCapital);
+      // Primera cuota visible sin saldo previo: su apertura se reconstruye como
+      // snapshot + Σ abonos de la cuota (el snapshot ya es post-pago).
+      cuotaActual = key;
+      saldoInicioCuota = snapshotConfiable
+        ? totalRestanteFila.plus(
+            pagos
+              .filter((p) => String(p.numero_cuota ?? "") === key)
+              .reduce((acc, p) => acc.plus(p.abono_capital || 0), new Big(0)),
+          )
+        : capitalRestante;
+      abonosAcumCuota = new Big(0);
+    } else if (key !== cuotaActual) {
+      cuotaActual = key;
+      saldoInicioCuota = capitalRestante;
+      abonosAcumCuota = new Big(0);
     }
+    abonosAcumCuota = abonosAcumCuota.plus(abonoCapital);
 
-    capitalRestante = snapshotConfiable
+    const abonoYaRestado =
+      !snapshotConfiable &&
+      totalRestanteFila.gt(0) &&
+      totalRestanteFila.minus(saldoInicioCuota!.minus(abonosAcumCuota)).abs().lte(0.05);
+
+    capitalRestante = snapshotConfiable || abonoYaRestado
       ? totalRestanteFila
       : capitalRestante.minus(abonoCapital);
 
@@ -1776,30 +1897,9 @@ export async function getPagosByVencimiento({
   )`;
 
   // Fragmentos SQL reutilizables entre query paginada y query de totales
-  const lateralCapAnterior = sql`
-    LEFT JOIN LATERAL (
-      SELECT pc_a.total_restante::numeric AS total_restante
-      FROM cartera.pagos_credito pc_a
-      LEFT JOIN cartera.cuotas_credito qcc_a ON pc_a.cuota_id = qcc_a.cuota_id
-      WHERE pc_a.credito_id = c.credito_id
-        AND pc_a."paymentFalse" = false
-        AND pc_a.total_restante IS NOT NULL
-        AND pc_a.total_restante::numeric > 0
-        AND COALESCE(qcc_a.fecha_vencimiento::date,
-              GREATEST(
-                COALESCE(pc_a.fecha_boleta::date, pc_a.fecha_pago::date, '1900-01-01'::date),
-                COALESCE(pc_a.fecha_pago::date,   pc_a.fecha_boleta::date, '1900-01-01'::date)
-              )
-            ) < ${fechaInicio}::date
-      ORDER BY COALESCE(qcc_a.fecha_vencimiento::date,
-                 GREATEST(
-                   COALESCE(pc_a.fecha_boleta::date, pc_a.fecha_pago::date, '1900-01-01'::date),
-                   COALESCE(pc_a.fecha_pago::date,   pc_a.fecha_boleta::date, '1900-01-01'::date)
-                 )
-               ) DESC, pc_a.pago_id DESC
-      LIMIT 1
-    ) cap_anterior ON true
-  `;
+  const lateralCapAnterior = buildPreviousCapitalBalanceLateral(fechaInicio);
+  const lateralCapitalHistorial =
+    buildCapitalHistoryBeforePeriodLateral(fechaInicio);
 
   const commonFromJoins = sql`
     FROM ${pagosDeduped}
@@ -1824,6 +1924,7 @@ export async function getPagosByVencimiento({
         )
     ) mora_real ON true
     ${cubeSubquery}
+    ${lateralCapitalHistorial}
     ${lateralCapAnterior}
     WHERE ${whereClause}
   `;
@@ -1832,7 +1933,7 @@ export async function getPagosByVencimiento({
     GROUP BY
       c.credito_id, c.numero_credito_sifco, u.nombre, a.nombre, c.royalti, c."statusCredit",
       c.capital, c.porcentaje_interes, c.cuota, c.seguro_10_cuotas, c.gps, c.membresias_pago,
-      cap_anterior.total_restante, mora_real.cuotas_atrasadas
+      capital_historial.capital_nuevo, cap_anterior.total_restante, mora_real.cuotas_atrasadas
     HAVING SUM(${totalFilaSql}) <> 0
   `;
 
@@ -1849,7 +1950,9 @@ export async function getPagosByVencimiento({
       c.seguro_10_cuotas,
       c.gps,
       c.membresias_pago,
-      COALESCE(cap_anterior.total_restante, c.capital::numeric) AS capital_mes_anterior,
+      capital_historial.capital_nuevo AS capital_historial_inicio,
+      cap_anterior.total_restante AS capital_legado_inicio,
+      c.capital::numeric AS capital_actual,
       AVG(COALESCE(cube_data.cash_in_pct, 0))::numeric AS cash_in_pct,
       MIN(q.numero_cuota) AS cuota_min,
       MAX(q.numero_cuota) AS cuota_max,
@@ -1869,7 +1972,13 @@ export async function getPagosByVencimiento({
   `;
 
   const recalcRow = (row: any) => {
-    const capitalAnterior = new Big(row.capital_mes_anterior || 0);
+    const capitalAnterior = new Big(
+      resolveCapitalAtPeriodStart({
+        historicalCapital: row.capital_historial_inicio,
+        legacyCapital: row.capital_legado_inicio,
+        currentCapital: row.capital_actual,
+      })
+    );
     const porcentajeInteres = new Big(row.porcentaje_interes || 0).div(100);
     const interesCalculado = capitalAnterior.times(porcentajeInteres).round(2);
     const ivaCalculado = interesCalculado.times(0.12).round(2);
@@ -2189,7 +2298,7 @@ export async function getPagosByVencimiento({
         SELECT
           c.credito_id AS credito_id,
           c."statusCredit" AS status,
-          COALESCE(cap_anterior.total_restante, c.capital::numeric) AS cap_ant,
+          ${capitalAtPeriodStartSql} AS cap_ant,
           c.porcentaje_interes::numeric / 100 AS tasa,
           c.cuota::numeric AS cuota_c,
           COALESCE(c.seguro_10_cuotas::numeric, 0) AS seguro,

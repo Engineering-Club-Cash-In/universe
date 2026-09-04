@@ -5,13 +5,15 @@ import jwt from "jsonwebtoken";
 import { authMiddleware } from "./midleware";
 import { SATClientService } from "../cofidi/satClientService";
 import { DTEService } from "../cofidi/dteService";
-import { generarHTMLFacturaPro } from "../cofidi/functions";
+import { generarPDFFacturaEnBackground } from "../utils/functions/facturaPdf";
 import {
   cuentaParaRubroInv,
   decidirRubroInteresInversionistas,
 } from "../cofidi/rubroInteresInversionistas";
+import { calcularSplitInteresPci } from "../cofidi/splitInteresPci";
 import { db } from "../database";
 import {
+  audit_logs,
   compras_credito_inversionista,
   credit_cancelations,
   creditos,
@@ -22,12 +24,14 @@ import {
   inversionistas,
   pagos_credito,
   pagos_credito_inversionistas,
+  pagos_credito_inversionistas_facturado,
   usuarios,
 } from "../database/db";
 import { eq, desc, and, sql, gte, lte, inArray } from "drizzle-orm";
 import ExcelJS from "exceljs";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { NITSoapClient } from "../cofidi/nitGenerator";
+import { formatearFechaSAT } from "../utils/functions/fechaSAT";
 import type { DTERequest } from "../cofidi/types";
 import {
   SAT_CONFIG,
@@ -1073,13 +1077,19 @@ if (facturasExistentes.length > 0) {
             Date.UTC(fechaCorte.getUTCFullYear(), fechaCorte.getUTCMonth() + 1, 0)
           ).getUTCDate();
 
-          // Fracción de mes ANTES del corte: días vigentes con la vieja distribución.
-          //   Ej: corte día 15 de 30 → fraccionAntes = 15/30 = 0.5 (50%)
-          const fraccionAntes = new Big(diaCorte).div(ultimoDiaMes);
-
           // Fracción de mes DESPUÉS del corte: el resto del mes con la nueva.
-          //   Ej: 1 − 0.5 = 0.5 (50%)
-          const fraccionDespues = new Big(1).minus(fraccionAntes);
+          //   Ej: corte día 15 de 30 → 15 días → fraccionDespues = 15/30 = 0.5 (50%)
+          // 🩹 Piso de 1 día: si el corte cae el ÚLTIMO día del mes la resta da 0 y
+          //    esta ventana pesaría cero — el comprador se quedaría sin interés del mes
+          //    y el vendedor (CUBE) se lo llevaría completo. Le garantizamos 1 día.
+          //    Mismo piso que el reparto a inversionistas (cofidi/prorrateoPciInteres.ts),
+          //    para que la factura y el pci no divergan en ese borde.
+          const diasDespues = Math.max(1, ultimoDiaMes - diaCorte);
+          const fraccionDespues = new Big(diasDespues).div(ultimoDiaMes);
+
+          // Fracción de mes ANTES del corte: días vigentes con la vieja distribución.
+          //   Ej: 1 − 0.5 = 0.5 (50%). Fuera del borde equivale al viejo diaCorte/ultimoDiaMes.
+          const fraccionAntes = new Big(1).minus(fraccionDespues);
 
           console.log(`   🗓️  Fecha corte: ${fechaCorte.toISOString().split("T")[0]} | día ${diaCorte}/${ultimoDiaMes}`);
           console.log(`   📊 Fracción ANTES: ${fraccionAntes.times(100).toFixed(2)}% | Fracción DESPUÉS: ${fraccionDespues.times(100).toFixed(2)}%`);
@@ -2062,6 +2072,133 @@ if (facturasExistentes.length > 0) {
         );
       }
 
+      // ============================================
+      // 🔒 CONGELAR EL REPARTO DE INTERÉS POR INVERSIONISTA
+      //    Best-effort: si falla, NO rompe la facturación (solo loguea).
+      //
+      //    Un pago PARCIAL no tiene filas en `pagos_credito_inversionistas` (pci):
+      //    el reparto real se escribe hasta que la cuota se COMPLETA. Hasta
+      //    entonces el reporte lo SIMULA y el cierre lo RECALCULA, los dos con el
+      //    roster VIVO de `creditos_inversionistas`. Si entre el parcial y el
+      //    cierre entra una reinversión o una compra de cartera, ese mismo pago
+      //    pasa a repartirse distinto — pero los DTEs que se acaban de emitir ya
+      //    no cambian (caso crédito 01010214118190: se facturó Q6.42 al
+      //    inversionista y el reporte pasó a mostrar Q9.24 tres días después).
+      //
+      //    Acá se sella el reparto tal como quedó HOY, con la MISMA función pura
+      //    que usan el reporte y el cierre, para que ambos lean el congelado en
+      //    vez de recalcular.
+      // ============================================
+      try {
+        const interesPago = new Big(pagoData.abono_interes || "0");
+        const ivaPago = new Big(pagoData.abono_iva_12 || "0");
+        const creditoIdPago = pagoData.credito_id;
+
+        // Solo se congela lo que se reparte con ESTA fórmula (participación sobre
+        // monto_aportado). Los demás flujos calculan distinto y no aplican.
+        const motivoNoCongelar = !interesFlujoOk
+          ? "el flujo de interés no se completó"
+          : esCancelacion
+          ? "es cancelación (reparte por cuota_inversionista, no por aportado)"
+          : interesPago.plus(ivaPago).lte(0)
+          ? "el pago no tiene interés"
+          : null;
+
+        if (motivoNoCongelar) {
+          console.log(`🔒 Reparto no congelado (pago ${pago_id}): ${motivoNoCongelar}`);
+        } else if (creditoIdPago == null) {
+          console.log(`🔒 Reparto no congelado (pago ${pago_id}): el pago no tiene crédito asociado`);
+        } else {
+          // Si ya existe el reparto real (cuota completa), ESE manda: no se congela.
+          const pciRes = await db.execute(sql`
+            SELECT COUNT(*)::int AS n
+            FROM cartera.pagos_credito_inversionistas
+            WHERE pago_id = ${pago_id}
+          `);
+          const hayPci = Number((pciRes as any).rows?.[0]?.n ?? 0) > 0;
+
+          // Con compra de cartera pendiente el interés se prorratea por días
+          // (calcularFactoresProrrateoInteresV2), no por monto_aportado.
+          const compraRes = await db.execute(sql`
+            SELECT COUNT(*)::int AS n
+            FROM cartera.compras_credito_inversionista
+            WHERE credito_id = ${creditoIdPago}
+              AND pendiente_facturar = true
+              AND tipo_operacion = 'compra_cartera'
+          `);
+          const hayCompraPendiente = Number((compraRes as any).rows?.[0]?.n ?? 0) > 0;
+
+          if (hayPci || hayCompraPendiente) {
+            console.log(
+              `🔒 Reparto no congelado (pago ${pago_id}): ${
+                hayPci ? "ya tiene reparto en pci" : "compra de cartera pendiente (prorrateo por días)"
+              }`
+            );
+          } else {
+            const split = calcularSplitInteresPci({
+              inversionistas: inversionistasDelPago.map((inv) => ({
+                inversionista_id: inv.inversionista_id,
+                nombre: inv.nombre,
+                porcentaje_participacion_inversionista: inv.porcentaje_participacion ?? 0,
+                porcentaje_cash_in: inv.porcentaje_cash_in ?? 0,
+                monto_aportado: inv.monto_aportado ?? 0,
+              })),
+              pagoAbonoInteres: interesPago,
+              pagoAbonoIva: ivaPago,
+            });
+            const splitPorInv = new Map(split.map((sp) => [sp.inversionista_id, sp]));
+
+            const filasCongeladas = inversionistasDelPago.map((inv) => {
+              const sp = splitPorInv.get(inv.inversionista_id);
+              return {
+                pago_id,
+                credito_id: creditoIdPago,
+                inversionista_id: inv.inversionista_id,
+                abono_interes: (sp?.abono_interes ?? new Big(0)).round(2).toFixed(2),
+                abono_iva_12: (sp?.abono_iva_12 ?? new Big(0)).round(2).toFixed(2),
+                monto_aportado: String(inv.monto_aportado ?? "0"),
+                porcentaje_participacion: String(inv.porcentaje_participacion ?? "0"),
+                porcentaje_cash_in: String(inv.porcentaje_cash_in ?? "0"),
+                // Mismo criterio que el PASO 1 del loop de intereses: su parte ya
+                // viaja dentro del rubro INTERES de CUBE.
+                redirigido_a_cube:
+                  pagoData.bandera_reinversion === true &&
+                  (inv.status_espejo === "pendiente_reinversion" ||
+                    inv.status_espejo === "pendiente_compra_cartera"),
+              };
+            });
+
+            if (filasCongeladas.length > 0) {
+              // REEMPLAZO, no "sellar una sola vez": llegar hasta acá significa que
+              // se acaban de emitir DTEs. El guard de facturas activas corta con 400
+              // antes, así que el único modo de volver a pasar es que TODAS las
+              // facturas del pago se hayan anulado y se esté re-facturando. En ese
+              // caso los DTEs nuevos se emitieron con el roster de HOY: conservar el
+              // congelado viejo haría que el reporte y el cierre repartieran según
+              // unas facturas que ya no existen (Codex P1, PR #1335).
+              // DELETE + INSERT (no upsert) para no dejar filas de inversionistas
+              // que ya no participan. Mismo patrón que facturacion_desglose.
+              await db.transaction(async (tx) => {
+                await tx.execute(
+                  sql`DELETE FROM cartera.pagos_credito_inversionistas_facturado WHERE pago_id = ${pago_id}`
+                );
+                await tx
+                  .insert(pagos_credito_inversionistas_facturado)
+                  .values(filasCongeladas);
+              });
+              console.log(
+                `🔒 Reparto congelado: ${filasCongeladas.length} inversionista(s) para pago ${pago_id}`
+              );
+            }
+          }
+        }
+      } catch (congelarError: any) {
+        console.error(
+          `⚠️ No se pudo congelar el reparto de interés del pago ${pago_id} (NO afecta la facturación):`,
+          congelarError?.message
+        );
+      }
+
       // Pago solo-capital (sin DTE que emitir y sin errores): no es fallo.
       // El desglose ya quedó guardado arriba (capital de CUBE).
       if (facturasExitosas.length === 0) {
@@ -2377,21 +2514,9 @@ if (facturasExistentes.length > 0) {
     // 3️⃣ PREPARAR FECHAS PARA XML
     // ============================================
     
-    // 🔥 FORMATO SIN MILISEGUNDOS (como SAT lo espera)
-    // Se lee con getUTC* a propósito: las fechas que recibe ya vienen expresadas en
-    // hora de Guatemala (igual que fechaHoraEmision al certificar), así que con los
-    // getters locales se desplazarían según la zona horaria del proceso — que en el
-    // contenedor es UTC.
-    const formatearFechaSAT = (fecha: Date): string => {
-      const year = fecha.getUTCFullYear();
-      const month = String(fecha.getUTCMonth() + 1).padStart(2, '0');
-      const day = String(fecha.getUTCDate()).padStart(2, '0');
-      const hours = String(fecha.getUTCHours()).padStart(2, '0');
-      const minutes = String(fecha.getUTCMinutes()).padStart(2, '0');
-      const seconds = String(fecha.getUTCSeconds()).padStart(2, '0');
-
-      return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
-    };
+    // 🔥 FORMATO SIN MILISEGUNDOS (como SAT lo espera) — ver utils/functions/fechaSAT.
+    // Vivía acá adentro, así que la reversa de pago no podía reusarla y tenía su
+    // propia versión con `.toISOString()`, que SAT rechaza.
 
     // 📄 FechaEmisionDocumentoAnular tiene que coincidir con la FechaHoraEmision del
     // DTE original, y `fecha_emision` se persiste justamente desde ese campo. Se reusa
@@ -2580,6 +2705,31 @@ if (facturasExistentes.length > 0) {
         console.error(
           '⚠️ No se pudo limpiar el desglose genérico de la factura anulada (NO afecta la anulación):',
           (limpiezaError as Error).message
+        );
+      }
+
+      // 🔒 Si esta era la ÚLTIMA factura ACTIVA del pago, el reparto congelado deja
+      //    de tener respaldo: quedaría el reparto de unos DTEs que ya no existen, y
+      //    el reporte y el cierre repartirían con él. Se borra; si el pago se
+      //    re-factura, la facturación lo vuelve a sellar con el roster de ese día
+      //    (Codex P1, PR #1335). Mientras no haya congelado, el reporte cae al
+      //    comportamiento de siempre (simular). Best-effort: no rompe la anulación.
+      try {
+        if (facturaAnulada.pago_id != null) {
+          await db.execute(sql`
+            DELETE FROM cartera.pagos_credito_inversionistas_facturado
+            WHERE pago_id = ${facturaAnulada.pago_id}
+              AND NOT EXISTS (
+                SELECT 1 FROM cartera.facturas_electronicas fe
+                WHERE fe.pago_id = ${facturaAnulada.pago_id}
+                  AND fe.status = 'ACTIVA'
+              )
+          `);
+        }
+      } catch (limpiezaCongelado) {
+        console.error(
+          '⚠️ No se pudo limpiar el reparto congelado de la factura anulada (NO afecta la anulación):',
+          (limpiezaCongelado as Error).message
         );
       }
 
@@ -3894,6 +4044,228 @@ if (facturasExistentes.length > 0) {
 
 ;
 
+// Deja rastro consultable de que una factura entró por el camino degradado.
+// Sin esto, una recuperación es indistinguible de una certificación normal y
+// una racha de timeouts de COFIDI no deja señal en ningún lado — el mismo hueco
+// de visibilidad que dejó al pago 54783 sin descubrir por días.
+// No es fatal: si el log falla, la factura igual se guarda.
+async function registrarRecuperacion(datos: {
+  pago_id?: number | null;
+  idInterno: string;
+  serie: string;
+  numero: string;
+  uuid: string;
+  motivo: string;
+}) {
+  try {
+    await db.insert(audit_logs).values({
+      user_email: "SISTEMA",
+      method: "POST",
+      path: "/api/dte/factura-recuperada",
+      status_code: 200,
+      body: JSON.stringify({
+        pago_id: datos.pago_id ?? null,
+        idInterno: datos.idInterno,
+      }),
+      response: JSON.stringify({
+        serie: datos.serie,
+        numero: datos.numero,
+        uuid: datos.uuid,
+        motivo: datos.motivo,
+      }),
+    });
+  } catch (error) {
+    console.error(`   ⚠️ No se pudo registrar la recuperación en audit_logs:`, error);
+  }
+}
+
+// ============================================
+// 🔥 RECUPERAR UNA FACTURA YA CERTIFICADA EN SAT
+// ============================================
+// COFIDI puede certificar y aun así dejarnos sin respuesta utilizable: timeout
+// de 60s del fetch, SOAP mal formado, o Identifier sin ResponseData1. En esos
+// casos la factura EXISTE en SAT pero nunca llega al INSERT y queda huérfana
+// (pasó el 2026-08-06 con el pago 54783; la halló conta días después).
+// Como el idInterno lo generamos nosotros ANTES de certificar, podemos
+// preguntarle a COFIDI si el documento ya existe y seguir el flujo normal.
+//
+// Son DOS llamadas, no una: LOOKUP_ISSUED_INTERNAL_ID NO devuelve el DTE sino
+// un índice <DocsFoundBy> con metadatos (uuid, taxId, total). El XML certificado
+// hay que pedirlo aparte con GET_DOCUMENT por UUID.
+//
+// Nunca lanza: si no la encuentra, o si lo que encuentra no cuadra con lo que
+// se intentó certificar, devuelve null y el llamador sigue con su error.
+async function recuperarFacturaCertificada(
+  satClient: SATClientService,
+  idInterno: string,
+  esperado: {
+    emisorNit: string;
+    receptorNit: string;
+    granTotal: number;
+    fechaHoraEmision: string;
+  }
+): Promise<{
+  xmlCertificado: string;
+  serie: string;
+  numero: string;
+  uuid: string;
+} | null> {
+  // Esto corre DESPUÉS de que un intento de certificación ya gastó hasta 60s
+  // dentro del request HTTP. Con el timeout por defecto, el peor caso se iría a
+  // 180s entre las tres llamadas; 10s alcanza de sobra para una consulta y acota
+  // lo que paga un error que ni siquiera salió de la máquina (validación local,
+  // DNS, ECONNREFUSED), que cae en el mismo catch genérico.
+  const TIMEOUT_CONSULTA_MS = 10000;
+
+  // COFIDI puede seguir procesando el DTE cuando nuestro fetch ya abortó: el
+  // documento aparece en su índice unos segundos después. Un único lookup
+  // inmediato lo daría por inexistente y volveríamos a perder la factura, que es
+  // justo el caso que este helper existe para cubrir (verificarFacturasSat ya
+  // trabaja con un grace por la misma razón).
+  // Solo se reinsiste cuando COFIDI RESPONDE que no está. Si la consulta lanza
+  // (red caída, timeout), insistir no aporta nada y solo alarga el request.
+  const ESPERAS_MS = [0, 5000, 7000];
+
+  try {
+    // ---- 1) ¿Existe un documento emitido con este idInterno? ----
+    let lookup: Awaited<
+      ReturnType<SATClientService["consultarPorIdInterno"]>
+    > | null = null;
+
+    for (const espera of ESPERAS_MS) {
+      if (espera > 0) {
+        console.log(`   ⏳ Documento aún no visible; reintento en ${espera / 1000}s...`);
+        await new Promise((resolve) => setTimeout(resolve, espera));
+      }
+      const intento = await satClient.consultarPorIdInterno(
+        idInterno,
+        TIMEOUT_CONSULTA_MS
+      );
+      if (intento.encontrado && intento.xmlCertificado) {
+        lookup = intento;
+        break;
+      }
+    }
+
+    if (!lookup?.xmlCertificado) return null;
+
+    const { XMLParser } = await import("fast-xml-parser");
+    // parseTagValue:false: batch es hexadecimal y serial un entero largo; el
+    // parser los convertiría a Infinity o a notación científica.
+    const indice = new XMLParser({
+      ignoreAttributes: false,
+      attributeNamePrefix: "@_",
+      parseTagValue: false,
+    }).parse(satClient.decodificarXMLCertificado(lookup.xmlCertificado));
+
+    const docs = indice?.["DocsFoundBy"]?.["doc"];
+    const encontrados = docs ? (Array.isArray(docs) ? docs : [docs]) : [];
+    if (encontrados.length !== 1) {
+      console.error(
+        `   ⚠️ idInterno ${idInterno}: ${encontrados.length} documentos en COFIDI. Ambiguo, no se recupera.`
+      );
+      return null;
+    }
+
+    // El idInterno son 8 dígitos de Math.random() que no persistimos, así que
+    // puede chocar con un documento histórico del mismo emisor. Sin estos
+    // chequeos, una certificación que falló de verdad podría traer la factura
+    // de otro cliente y guardarla amarrada a ESTE pago.
+    const doc = encontrados[0];
+    const uuidLookup = String(doc?.["uuid"] ?? "");
+    const totalLookup = parseFloat(String(doc?.["total"] ?? "NaN"));
+
+    // Emisor + receptor + total NO alcanzan: en este negocio el mismo cliente
+    // paga el mismo monto todos los meses, así que un documento histórico los
+    // cumpliría los tres. La fecha de emisión sí lo distingue — el índice
+    // devuelve la misma FechaHoraEmision que mandamos en el XML, y este helper
+    // corre en la misma invocación que la certificación que acaba de fallar.
+    const emitido = Date.parse(String(doc?.["issued"] ?? ""));
+    const emitidoAhora =
+      Number.isFinite(emitido) &&
+      Math.abs(emitido - Date.parse(esperado.fechaHoraEmision)) <= 5 * 60 * 1000;
+
+    if (
+      !uuidLookup ||
+      String(doc?.["taxId"] ?? "") !== esperado.emisorNit ||
+      !Number.isFinite(totalLookup) ||
+      Math.abs(totalLookup - esperado.granTotal) > 0.01 ||
+      !emitidoAhora
+    ) {
+      console.error(
+        `   ⚠️ idInterno ${idInterno} no corresponde a esta factura ` +
+          `(emisor ${doc?.["taxId"]} vs ${esperado.emisorNit}, total ${doc?.["total"]} vs ${esperado.granTotal}, ` +
+          `emitido ${doc?.["issued"]} vs ${esperado.fechaHoraEmision}). No se recupera.`
+      );
+      return null;
+    }
+
+    // ---- 2) Ahora sí, el XML certificado ----
+    const documento = await satClient.obtenerPorUUID(
+      uuidLookup,
+      TIMEOUT_CONSULTA_MS
+    );
+    if (!documento.encontrado || !documento.xmlCertificado) {
+      console.error(
+        `   ⚠️ ${uuidLookup} salió en el índice pero GET_DOCUMENT no lo devolvió: ${documento.mensaje}`
+      );
+      return null;
+    }
+    const xmlCertificado = satClient.decodificarXMLCertificado(
+      documento.xmlCertificado
+    );
+
+    const dte = new XMLParser({
+      ignoreAttributes: false,
+      attributeNamePrefix: "@_",
+    }).parse(xmlCertificado)?.["dte:GTDocumento"]?.["dte:SAT"]?.["dte:DTE"];
+    const numAut = dte?.["dte:Certificacion"]?.["dte:NumeroAutorizacion"];
+    const serie = numAut?.["@_Serie"];
+    const numero = numAut?.["@_Numero"];
+    const uuidXml = numAut?.["#text"];
+
+    // Un NumeroAutorizacion sin atributos parsea como string plano y no lanza:
+    // sin este guard, String(undefined) metería el literal "undefined" en la BD.
+    if (serie === undefined || numero === undefined || uuidXml === undefined) {
+      console.error(
+        `   ⚠️ El XML de ${uuidLookup} no trae un NumeroAutorizacion utilizable. No se recupera.`
+      );
+      return null;
+    }
+    if (String(uuidXml).toUpperCase() !== uuidLookup.toUpperCase()) {
+      console.error(
+        `   ⚠️ El XML devuelto es de ${uuidXml}, no de ${uuidLookup}. No se recupera.`
+      );
+      return null;
+    }
+
+    // Último cerrojo contra colisión: el documento tiene que ser del cliente al
+    // que le estábamos facturando.
+    const receptorXml = String(
+      dte?.["dte:DatosEmision"]?.["dte:Receptor"]?.["@_IDReceptor"] ?? ""
+    );
+    if (receptorXml !== esperado.receptorNit) {
+      console.error(
+        `   ⚠️ El documento ${uuidLookup} es del receptor ${receptorXml}, no de ${esperado.receptorNit}. No se recupera.`
+      );
+      return null;
+    }
+
+    return {
+      xmlCertificado,
+      serie: String(serie),
+      numero: String(numero),
+      uuid: String(uuidXml),
+    };
+  } catch (error) {
+    console.error(
+      `   ⚠️ No se pudo recuperar la factura por idInterno ${idInterno}:`,
+      error
+    );
+    return null;
+  }
+}
+
 // ============================================
 // 🔥 FUNCIÓN HELPER PARA CERTIFICAR FACTURA
 // ============================================
@@ -4035,6 +4407,19 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
 
     const dteService = new DTEService(satClient);
 
+    // Lo que la recuperación tiene que ver del otro lado para aceptar un
+    // documento como "esta misma factura". El granTotal se calcula igual que
+    // DTEService.calcularTotales (suma de los totales de ítem).
+    const esperadoRecuperacion = {
+      emisorNit: String(emisorConfig.emisor.nit),
+      receptorNit: String(receptor.idReceptor),
+      granTotal: items.reduce(
+        (suma: number, item: any) => suma + Number(item.total ?? 0),
+        0
+      ),
+      fechaHoraEmision,
+    };
+
     let resultado;
     try {
       resultado = await dteService.generarYCertificarDTE(
@@ -4098,8 +4483,64 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
         );
       }
 
-      // Error genérico
-      throw new Error(`Error en certificación SAT: ${errorMessage}`);
+      // 🔥 Antes de darla por perdida: los errores de arriba son de validación
+      // (COFIDI rechazó y NO emitió), pero este camino genérico incluye timeout
+      // y respuestas ilegibles, donde el DTE sí pudo quedar certificado en SAT.
+      const recuperada = await recuperarFacturaCertificada(
+        satClient,
+        idInterno,
+        esperadoRecuperacion
+      );
+      if (recuperada) {
+        console.log(
+          `   ♻️ Recuperada de COFIDI tras el fallo: ${recuperada.serie}-${recuperada.numero} (${recuperada.uuid})`
+        );
+        await registrarRecuperacion({
+          pago_id,
+          idInterno,
+          serie: recuperada.serie,
+          numero: recuperada.numero,
+          uuid: recuperada.uuid,
+          motivo: errorMessage,
+        });
+        resultado = recuperada;
+      } else {
+        // Error genérico
+        throw new Error(`Error en certificación SAT: ${errorMessage}`);
+      }
+    }
+
+    // 🔥 COFIDI devolvió Identifier (serie/número/UUID válidos) pero sin el XML:
+    // el parseo de abajo reventaría y perderíamos una factura ya emitida.
+    if (!resultado.xmlCertificado) {
+      const recuperada = await recuperarFacturaCertificada(
+        satClient,
+        idInterno,
+        esperadoRecuperacion
+      );
+      // El Identifier y el XML vienen de dos consultas independientes: si no son
+      // del mismo DTE, la fila y el PDF quedarían con datos cruzados.
+      if (
+        !recuperada ||
+        recuperada.uuid.toUpperCase() !== String(resultado.uuid).toUpperCase()
+      ) {
+        throw new Error(
+          `COFIDI certificó ${resultado.serie}-${resultado.numero} (UUID ${resultado.uuid}) pero no devolvió el XML ` +
+            `y no se pudo recuperar con idInterno ${idInterno}${
+              recuperada ? ` (la consulta devolvió otro DTE: ${recuperada.uuid})` : ""
+            }. La factura EXISTE en SAT: recuperarla con el script de backfill.`
+        );
+      }
+      console.log(`   ♻️ XML recuperado de COFIDI para ${resultado.serie}-${resultado.numero}`);
+      await registrarRecuperacion({
+        pago_id,
+        idInterno,
+        serie: String(resultado.serie),
+        numero: String(resultado.numero),
+        uuid: String(resultado.uuid),
+        motivo: "Identifier sin ResponseData1 (XML vacío)",
+      });
+      resultado = { ...resultado, xmlCertificado: recuperada.xmlCertificado };
     }
 
     // ============================================
@@ -4160,60 +4601,59 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
       process.env.LOGO_URL ||
       "https://pub-8081c8d6e5e743f9adfc9e0db92e5a88.r2.dev/reports/logo-cashin.png";
 
-    const html = generarHTMLFacturaPro(
-      {
-        tipo: datosGenerales["@_Tipo"],
-        serie: certificacion["dte:NumeroAutorizacion"]["@_Serie"],
-        numero: certificacion["dte:NumeroAutorizacion"]["@_Numero"],
-        uuid: certificacion["dte:NumeroAutorizacion"]["#text"],
-        fechaEmision: datosGenerales["@_FechaHoraEmision"],
-        fechaCertificacion: certificacion["dte:FechaHoraCertificacion"],
+    // Los datos del PDF se arman acá (el XML ya está parseado) pero el HTML y
+    // el render se hacen FUERA del request, después de guardar en BD (paso 7).
+    const datosFactura = {
+      tipo: datosGenerales["@_Tipo"],
+      serie: certificacion["dte:NumeroAutorizacion"]["@_Serie"],
+      numero: certificacion["dte:NumeroAutorizacion"]["@_Numero"],
+      uuid: certificacion["dte:NumeroAutorizacion"]["#text"],
+      fechaEmision: datosGenerales["@_FechaHoraEmision"],
+      fechaCertificacion: certificacion["dte:FechaHoraCertificacion"],
 
-        emisor: {
-          nit: emisor["@_NITEmisor"],
-          nombre: emisor["@_NombreEmisor"],
-          nombreComercial: emisor["@_NombreComercial"],
-          direccion: emisor["dte:DireccionEmisor"],
-        },
-
-        receptor: {
-          nit: receptorXML["@_IDReceptor"],
-          nombre: receptorXML["@_NombreReceptor"],
-          direccion: receptorXML["dte:DireccionReceptor"]?.["dte:Direccion"],
-        },
-
-        items: itemsXML.map((item: any) => ({
-          numeroLinea: item["@_NumeroLinea"],
-          cantidad: item["dte:Cantidad"],
-          unidad: item["dte:UnidadMedida"],
-          descripcion: item["dte:Descripcion"],
-          precioUnitario: parseFloat(item["dte:PrecioUnitario"]),
-          total: parseFloat(item["dte:Total"]),
-        })),
-
-        totales: {
-          iva: parseFloat(
-            totales["dte:TotalImpuestos"]["dte:TotalImpuesto"][
-              "@_TotalMontoImpuesto"
-            ]
-          ),
-          granTotal: parseFloat(totales["dte:GranTotal"]),
-        },
-
-        // 🔥 Si no hay pago_id (factura genérica), no mostrar plan de pagos
-        abonos: pago_id ? abonos.map((abono: any) => ({
-          numero: abono["cfc:NumeroAbono"],
-          fechaVencimiento: abono["cfc:FechaVencimiento"],
-          monto: parseFloat(abono["cfc:MontoAbono"]),
-        })) : [],
-
-        certificador: {
-          nit: certificacion["dte:NITCertificador"],
-          nombre: certificacion["dte:NombreCertificador"],
-        },
+      emisor: {
+        nit: emisor["@_NITEmisor"],
+        nombre: emisor["@_NombreEmisor"],
+        nombreComercial: emisor["@_NombreComercial"],
+        direccion: emisor["dte:DireccionEmisor"],
       },
-      logoUrl
-    );
+
+      receptor: {
+        nit: receptorXML["@_IDReceptor"],
+        nombre: receptorXML["@_NombreReceptor"],
+        direccion: receptorXML["dte:DireccionReceptor"]?.["dte:Direccion"],
+      },
+
+      items: itemsXML.map((item: any) => ({
+        numeroLinea: item["@_NumeroLinea"],
+        cantidad: item["dte:Cantidad"],
+        unidad: item["dte:UnidadMedida"],
+        descripcion: item["dte:Descripcion"],
+        precioUnitario: parseFloat(item["dte:PrecioUnitario"]),
+        total: parseFloat(item["dte:Total"]),
+      })),
+
+      totales: {
+        iva: parseFloat(
+          totales["dte:TotalImpuestos"]["dte:TotalImpuesto"][
+            "@_TotalMontoImpuesto"
+          ]
+        ),
+        granTotal: parseFloat(totales["dte:GranTotal"]),
+      },
+
+      // 🔥 Si no hay pago_id (factura genérica), no mostrar plan de pagos
+      abonos: pago_id ? abonos.map((abono: any) => ({
+        numero: abono["cfc:NumeroAbono"],
+        fechaVencimiento: abono["cfc:FechaVencimiento"],
+        monto: parseFloat(abono["cfc:MontoAbono"]),
+      })) : [],
+
+      certificador: {
+        nit: certificacion["dte:NITCertificador"],
+        nombre: certificacion["dte:NombreCertificador"],
+      },
+    };
 
     // ============================================
     // 6️⃣ GUARDAR EN BASE DE DATOS *PRIMERO* (antes del PDF, que es frágil)
@@ -4265,63 +4705,22 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
     console.log('📅 Fecha certificación guardada (Guatemala):', facturaGuardada.fecha_certificacion);
 
     // ============================================
-    // 7️⃣ GENERAR PDF + SUBIR A R2 (best-effort, NO fatal)
+    // 7️⃣ GENERAR PDF + SUBIR A R2 (EN BACKGROUND, best-effort, NO fatal)
     // ------------------------------------------------------------
-    // Si esto falla, la factura YA quedó guardada arriba: NO relanzamos, solo
-    // logueamos para monitoreo/reintento. El PDF se puede regenerar luego con
-    // el mismo filename determinístico -> misma URL (script de backfill).
+    // NO se espera: la factura YA está certificada en SAT y guardada arriba, y
+    // el pdf_url es determinístico. Tener a Puppeteer + R2 dentro del request
+    // fue lo que colgó un handler 34s el 2026-08-07: el CRM abortó a los 30s,
+    // reintentó el POST y SAT certificó la MISMA factura dos veces.
+    // Si el PDF falla NO se pierde el registro: se regenera después con el
+    // mismo filename -> misma URL (script backfill-facturas-faltantes).
     // ============================================
-    try {
-      console.log(`   🎨 Generando PDF...`);
-      const { launchBrowser } = await import("../utils/functions/browser");
-      const browser = await launchBrowser();
-      try {
-        const page = await browser.newPage();
-        await page.setContent(html, { waitUntil: "networkidle0" });
-
-        const pdfBuffer = await page.pdf({
-          format: "A4",
-          printBackground: true,
-          margin: {
-            top: "20px",
-            bottom: "20px",
-            left: "20px",
-            right: "20px",
-          },
-        });
-        console.log(`   ✅ PDF generado`);
-
-        const { S3Client, PutObjectCommand } = await import("@aws-sdk/client-s3");
-        const s3 = new S3Client({
-          endpoint: process.env.BUCKET_REPORTS_URL,
-          region: "auto",
-          credentials: {
-            accessKeyId: process.env.R2_ACCESS_KEY_ID as string,
-            secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
-          },
-        });
-
-        await s3.send(
-          new PutObjectCommand({
-            Bucket: process.env.BUCKET_REPORTS,
-            Key: filename,
-            Body: pdfBuffer,
-            ContentType: "application/pdf",
-          })
-        );
-        console.log(`   ✅ PDF subido a R2: ${filename}`);
-      } finally {
-        await browser.close();
-      }
-    } catch (pdfError) {
-      // La factura YA está guardada en la BD (paso 6). No se pierde el registro.
-      console.error(
-        `⚠️ [certificarFactura] Factura ${resultado.serie}-${resultado.numero} ` +
-          `(${resultado.uuid}) GUARDADA en BD (id ${facturaGuardada.factura_id}) ` +
-          `pero FALLÓ el PDF/R2. Se puede regenerar el PDF luego:`,
-        pdfError
-      );
-    }
+    console.log(`   🎨 PDF encolado en background...`);
+    generarPDFFacturaEnBackground({
+      datos: datosFactura,
+      logoUrl,
+      filename,
+      referencia: `${resultado.serie}-${resultado.numero} (${resultado.uuid}) id ${facturaGuardada.factura_id}`,
+    });
 
     // ============================================
     // 9️⃣ RETORNAR RESULTADO

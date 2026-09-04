@@ -8,6 +8,7 @@ import crypto from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
+import { auditRecord, auditedTransaction } from "../lib/audit";
 import {
 	carteraBackReferences,
 	carteraBackSyncLog,
@@ -19,6 +20,8 @@ import {
 } from "../db/schema";
 import { contratosFinanciamiento } from "../db/schema/cobros";
 import { clients, leads, opportunities } from "../db/schema/crm";
+import { eqDpi } from "../lib/dpi-lookup";
+import { calcularAjusteFechaIdeal } from "../lib/fecha-ideal-pago-ajuste";
 import { formatMissingFields, getMissingFields } from "../lib/vehicle-helpers";
 import type { FacturaItem } from "../types/cartera-back";
 import { carteraBackClient } from "./cartera-back-client";
@@ -27,6 +30,7 @@ import {
 	createCreditoInCarteraBack,
 	isCarteraBackEnabled,
 } from "./cartera-back-integration";
+import { resolveMembershipForCartera } from "./membership-cartera";
 
 // ============================================================================
 // CONSTANTS
@@ -100,6 +104,7 @@ interface OpportunityData {
 	cuotaMensual: string | null;
 	fechaInicio: Date | null;
 	diaPagoMensual: number | null;
+	diaPagoOriginalSistema: number | null;
 	// Additional fields
 	seguro: string | null;
 	customerInsuranceCost?: string | null;
@@ -138,6 +143,7 @@ interface CreateCreditParams {
 	numeroSifco: string;
 	userId: string;
 	cuotaMensual?: string;
+	membershipCost?: number;
 	isVehicleOwned?: boolean;
 	// Info del vehículo para el correo
 	vehiculo_marca?: string;
@@ -187,6 +193,8 @@ interface QuotationDataForBilling {
 	insuredAmount: string | null; // Monto asegurado (para correo)
 	value: string | null; // Valor del vehículo (para correo)
 	monthlyPayment: string | null; // Cuota mensual (para asegurar el valor que es)
+	membershipCost: string | null; // Membresía efectiva que debe viajar a cartera
+	isInterno: boolean; // Créditos internos no cobran membresía
 	insuranceProvider: string | null; // Aseguradora elegida (gyt | universales)
 }
 
@@ -385,21 +393,68 @@ function validateOpportunityForClose(opp: OpportunityData): string[] {
 // ============================================================================
 
 /**
- * Registra un log de sincronización de facturación
+ * Registra un log de sincronización de facturación.
+ * Devuelve el id de la fila para poder cerrarla después con
+ * `closeInvoiceSyncOperation` (null si el log falló, que no rompe nada).
  */
 async function logInvoiceSyncOperation(
 	log: NewCarteraBackSyncLog,
-): Promise<void> {
+): Promise<string | null> {
 	try {
-		await db.insert(carteraBackSyncLog).values(log);
+		const [row] = await db
+			.insert(carteraBackSyncLog)
+			.values(log)
+			.returning({ id: carteraBackSyncLog.id });
+		return row?.id ?? null;
 	} catch (error) {
 		console.error("[CloseOpportunity] Failed to log invoice operation:", error);
+		return null;
 	}
 }
 
 /**
- * Obtiene la última cotización aprobada de una oportunidad
+ * Cierra una fila de log abierta en "pending" con su resultado final.
+ *
+ * El par abrir/cerrar existe por el incidente del 2026-08-07: la llamada que
+ * abortó por timeout no dejó NINGUNA fila (solo se logueaba al final), así que
+ * la factura que sí se emitió en SAT quedó invisible para el CRM. Con la fila
+ * abierta antes de salir a la red, un intento que nunca vuelve se queda en
+ * "pending" y se puede auditar.
  */
+async function closeInvoiceSyncOperation(
+	id: string | null,
+	patch: Partial<NewCarteraBackSyncLog> & { startedAt: Date },
+): Promise<void> {
+	if (!id) return;
+	try {
+		await db
+			.update(carteraBackSyncLog)
+			.set({
+				...patch,
+				completedAt: new Date(),
+				durationMs: Date.now() - patch.startedAt.getTime(),
+			})
+			.where(eq(carteraBackSyncLog.id, id));
+	} catch (error) {
+		console.error("[CloseOpportunity] Failed to close invoice log:", error);
+	}
+}
+
+/**
+ * Un abort/timeout deja la operación EN DUDA: cartera pudo haberla ejecutado
+ * igual (certificar en SAT no se cancela porque el cliente cuelgue). Se marca
+ * distinto para que se pueda auditar antes de re-facturar a mano.
+ */
+function esTimeout(error: unknown): boolean {
+	const nombre = error instanceof Error ? error.name : "";
+	const mensaje = error instanceof Error ? error.message : String(error);
+	return (
+		nombre === "TimeoutError" ||
+		nombre === "AbortError" ||
+		/timeout|aborted|abort/i.test(mensaje)
+	);
+}
+
 /** Mapea el provider interno (gyt | universales) a la etiqueta de aseguradora. */
 function aseguradoraLabel(
 	provider: string | null | undefined,
@@ -407,7 +462,8 @@ function aseguradoraLabel(
 	return provider === "gyt" ? "GyT" : "Universales";
 }
 
-async function getLatestApprovedQuotation(
+/** Obtiene la última cotización aceptada, con la más reciente como respaldo legacy. */
+export async function getLatestApprovedQuotation(
 	opportunityId: string,
 ): Promise<QuotationDataForBilling | null> {
 	try {
@@ -425,6 +481,8 @@ async function getLatestApprovedQuotation(
 				insuredAmount: quotations.insuredAmount,
 				value: quotations.vehicleValue,
 				monthlyPayment: quotations.monthlyPayment,
+				membershipCost: quotations.membershipCost,
+				isInterno: quotations.isInterno,
 				insuranceProvider: quotations.insuranceProvider,
 			})
 			.from(quotations)
@@ -433,7 +491,10 @@ async function getLatestApprovedQuotation(
 					eq(quotations.opportunityId, opportunityId)
 				),
 			)
-			.orderBy(desc(quotations.createdAt))
+			.orderBy(
+				desc(eq(quotations.status, "accepted")),
+				desc(quotations.createdAt),
+			)
 			.limit(1);
 
 		return quotation || null;
@@ -689,40 +750,47 @@ function generateInvoicesInBackground(params: GenerateInvoicesParams): void {
 			// snapshot del día una sola vez al final, si hubo al menos uno).
 			let gastosRegistrados = 0;
 
+
 			for (const invoice of invoices) {
 				const startTime = Date.now();
+				const entityId = `${opportunityId}-${invoice.name}`;
+
+				// Construir el payload exacto que se envía al endpoint
+				const requestBody = {
+					nit: nit,
+					items: invoice.items,
+					emisor: "CUBE",
+					created_by: FACTURACION_CREATED_BY,
+					credito_nuevo: true, // Indicamos que es un crédito nuevo para que cartera-back lo maneje como tal
+				};
+
+				// Fila de log ABIERTA antes de salir a la red: si la respuesta
+				// nunca llega, queda en "pending" en vez de desaparecer.
+				const logId = await logInvoiceSyncOperation({
+					operation: "generate_invoice",
+					entityType: "factura",
+					entityId,
+					status: "pending",
+					requestPayload: JSON.stringify(requestBody),
+					startedAt: new Date(startTime),
+					userId,
+					source: "crm",
+				});
 
 				try {
 					console.log(
 						`[CloseOpportunity] Generating invoice: ${invoice.name} with ${invoice.items.length} item(s)`,
 					);
 
-					// Construir el payload exacto que se envía al endpoint
-					const requestBody = {
-						nit: nit,
-						items: invoice.items,
-						emisor: "CUBE",
-						created_by: FACTURACION_CREATED_BY,
-						credito_nuevo: true, // Indicamos que es un crédito nuevo para que cartera-back lo maneje como tal
-					};
-
 					// Llamar al endpoint de facturación genérica
 					const response =
 						await carteraBackClient.facturarGenerico(requestBody);
 
-					// Registrar éxito en el log con el payload exacto enviado
-					await logInvoiceSyncOperation({
-						operation: "generate_invoice",
-						entityType: "factura",
-						entityId: `${opportunityId}-${invoice.name}`,
+					// Cerrar el log con el resultado
+					await closeInvoiceSyncOperation(logId, {
 						status: "success",
-						requestPayload: JSON.stringify(requestBody),
 						responsePayload: JSON.stringify(response),
 						startedAt: new Date(startTime),
-						completedAt: new Date(),
-						durationMs: Date.now() - startTime,
-						userId,
-						source: "crm",
 					});
 
 					successCount++;
@@ -749,26 +817,30 @@ function generateInvoicesInBackground(params: GenerateInvoicesParams): void {
 						};
 						const gastoEntityId = `${opportunityId}-${invoice.name}-gasto`;
 
+						// 📝 Log persistente en cartera_back_sync_log (por cualquier
+						// cosa): deja traza en BD de cada gasto, no solo en consola.
+						// Se abre ANTES de la llamada, igual que la factura, para que un
+						// intento que no vuelve quede como "pending".
+						const gastoLogId = await logInvoiceSyncOperation({
+							operation: "register_gasto_administrativo",
+							entityType: "gasto",
+							entityId: gastoEntityId,
+							status: "pending",
+							requestPayload: JSON.stringify(gastoBody),
+							startedAt: new Date(gastoStart),
+							userId,
+							source: "crm",
+						});
+
 						try {
 							const gastoResp =
 								await carteraBackClient.crearGastoAdministrativo(gastoBody);
 							gastosRegistrados++;
 
-							// 📝 Log persistente en cartera_back_sync_log (por cualquier
-							// cosa): deja traza en BD de cada gasto registrado, no solo en
-							// consola. logInvoiceSyncOperation ya atrapa sus propios errores.
-							await logInvoiceSyncOperation({
-								operation: "register_gasto_administrativo",
-								entityType: "gasto",
-								entityId: gastoEntityId,
+							await closeInvoiceSyncOperation(gastoLogId, {
 								status: "success",
-								requestPayload: JSON.stringify(gastoBody),
 								responsePayload: JSON.stringify(gastoResp),
 								startedAt: new Date(gastoStart),
-								completedAt: new Date(),
-								durationMs: Date.now() - gastoStart,
-								userId,
-								source: "crm",
 							});
 
 							console.log(
@@ -780,19 +852,12 @@ function generateInvoicesInBackground(params: GenerateInvoicesParams): void {
 									? gastoError.message
 									: String(gastoError);
 
-							// 📝 Log persistente del fallo (por cualquier cosa).
-							await logInvoiceSyncOperation({
-								operation: "register_gasto_administrativo",
-								entityType: "gasto",
-								entityId: gastoEntityId,
+							await closeInvoiceSyncOperation(gastoLogId, {
 								status: "error",
-								errorMessage: gastoMsg,
-								requestPayload: JSON.stringify(gastoBody),
+								errorMessage: esTimeout(gastoError)
+									? `TIMEOUT (el gasto pudo haberse registrado igual, verificar antes de repetirlo): ${gastoMsg}`
+									: gastoMsg,
 								startedAt: new Date(gastoStart),
-								completedAt: new Date(),
-								durationMs: Date.now() - gastoStart,
-								userId,
-								source: "crm",
 							});
 
 							console.error(
@@ -808,26 +873,15 @@ function generateInvoicesInBackground(params: GenerateInvoicesParams): void {
 						`[CloseOpportunity] ✗ Failed to generate invoice "${invoice.name}": ${errorMessage}`,
 					);
 
-					// Construir el payload para el log de error
-					const errorRequestBody = {
-						nit: nit || "CF",
-						items: invoice.items,
-						created_by: FACTURACION_CREATED_BY,
-					};
-
-					// Registrar error en el log con el payload exacto
-					await logInvoiceSyncOperation({
-						operation: "generate_invoice",
-						entityType: "factura",
-						entityId: `${opportunityId}-${invoice.name}`,
+					// Un timeout NO significa "no se facturó": cartera pudo haber
+					// certificado igual. Se marca distinto para que soporte lo revise
+					// antes de re-facturar a mano.
+					await closeInvoiceSyncOperation(logId, {
 						status: "error",
-						errorMessage,
-						requestPayload: JSON.stringify(errorRequestBody),
+						errorMessage: esTimeout(error)
+							? `TIMEOUT (la factura pudo haberse emitido en SAT, verificar antes de re-facturar): ${errorMessage}`
+							: errorMessage,
 						startedAt: new Date(startTime),
-						completedAt: new Date(),
-						durationMs: Date.now() - startTime,
-						userId,
-						source: "crm",
 					});
 
 					errorCount++;
@@ -843,6 +897,13 @@ function generateInvoicesInBackground(params: GenerateInvoicesParams): void {
 			// tras insertar los gastos hay que aplicar los manuales del día para que
 			// queden en las columnas administrativos/otros_cobros (mismo paso que
 			// hace la UI manual). Best-effort: si falla, se loguea y sigue.
+			// Solo se refresca cuando la escritura está CONFIRMADA. Tras un timeout
+			// la operación queda en duda y refrescar sería una carrera: cartera
+			// puede estar todavía escribiendo su facturacion_desglose, y
+			// aplicarManualesDia, al no encontrarlo, pre-crearía la fila del día
+			// incompleta. De esos casos se encarga el job de las 01:00 GT
+			// (schedule.ts), que regenera por la fuerza los últimos 3 días
+			// justamente para capturar facturación que entró tarde.
 			if (gastosRegistrados > 0) {
 				try {
 					await carteraBackClient.aplicarManualesDia(fechaGuatemala);
@@ -918,7 +979,7 @@ async function createCredit(
 		const [renapInfoData] = await db
 			.select()
 			.from(renapInfo)
-			.where(eq(renapInfo.dpi, lead.dpi ?? ""))
+			.where(eqDpi(renapInfo.dpi, lead.dpi ?? ""))
 			.limit(1);
 
 		console.log(
@@ -941,9 +1002,9 @@ async function createCredit(
 		const reserva = opportunity.reserva
 			? Number.parseFloat(opportunity.reserva)
 			: undefined;
-		const membresiaPago = opportunity.membresiaPago
-			? Number.parseFloat(opportunity.membresiaPago)
-			: undefined;
+		const membresiaPago =
+			params.membershipCost ??
+			resolveMembershipForCartera(null, opportunity.membresiaPago);
 		const gastosAdministrativos = opportunity.gastosAdministrativos
 			? Number(opportunity.gastosAdministrativos)
 			: 0;
@@ -956,6 +1017,41 @@ async function createCredit(
 					"La oportunidad debe tener un día de pago válido (1-31) para crear el crédito en cartera-back",
 			};
 		}
+
+		// Ingreso adicional por elegir un día IA que cae después del día que el
+		// sistema hubiera asignado por default. Solo aplica cuando diaPagoOriginalSistema
+		// quedó capturado en el 50% (assignInvestorAndAdvance) — es decir, solo cuando
+		// se eligió un día IA, nunca cuando se eligió 15/30 manualmente.
+		const fechaReferenciaPrimeraCuota = new Date();
+		const ajusteCalculado =
+			opportunity.diaPagoOriginalSistema != null
+				? calcularAjusteFechaIdeal({
+						diaPagoOriginalSistema: opportunity.diaPagoOriginalSistema,
+						diaPagoMensualElegido: diaPagoMensual,
+						capital: Number.parseFloat(opportunity.value as string),
+						porcentajeInteres: Number.parseFloat(
+							opportunity.tasaInteres as string,
+						),
+						membresiaMensual: membresiaPago ?? 0,
+						seguroMensual: seguro ?? 0,
+						gpsMensual: gps ?? 0,
+						fechaReferencia: fechaReferenciaPrimeraCuota,
+					})
+				: null;
+
+		const ajusteFechaIdeal = ajusteCalculado
+			? {
+					dia_pago_original_sistema: opportunity.diaPagoOriginalSistema as number,
+					dia_pago_mensual_elegido: diaPagoMensual,
+					dias_diferencia: ajusteCalculado.diasDiferencia,
+					dias_del_mes: ajusteCalculado.diasDelMes,
+					monto_interes: ajusteCalculado.montoInteres,
+					monto_membresia: ajusteCalculado.montoMembresia,
+					monto_servicios: ajusteCalculado.montoServicios,
+					monto_total: ajusteCalculado.montoTotal,
+					fecha_referencia: fechaReferenciaPrimeraCuota.toISOString(),
+				}
+			: undefined;
 
 		const creditoResult = await createCreditoInCarteraBack({
 			opportunityId: opportunity.id,
@@ -971,16 +1067,12 @@ async function createCredit(
 				? Number(params.cuotaMensual)
 				: Number.parseFloat(opportunity.cuotaMensual as string),
 			dia_pago_mensual: diaPagoMensual,
+			ajuste_fecha_ideal: ajusteFechaIdeal,
 			tipoCredito: opportunity.creditType || "autocompra",
 			observaciones: `Crédito generado desde CRM - Oportunidad: ${opportunity.title}`,
 			seguro_10_cuotas: seguro,
 			gps: gps,
-			// Si la aseguradora elegida es GyT, en cartera SIEMPRE se manda como
-			// Universales. El resto del flujo (CRM, cotización) conserva el valor real.
-			aseguradora:
-				opportunity.insuranceProvider === "gyt"
-					? "Universales"
-					: aseguradoraLabel(opportunity.insuranceProvider),
+			aseguradora: aseguradoraLabel(opportunity.insuranceProvider),
 			categoria: opportunity.categoria ?? undefined,
 			nit: cleanNit(opportunity.nit),
 			royalti: royalti,
@@ -1196,6 +1288,7 @@ export async function closeOpportunity(
 				cuotaMensual: opportunities.cuotaMensual,
 				fechaInicio: opportunities.fechaInicio,
 				diaPagoMensual: opportunities.diaPagoMensual,
+				diaPagoOriginalSistema: opportunities.diaPagoOriginalSistema,
 				seguro: opportunities.seguro,
 				gps: opportunities.gps,
 				insuranceProvider: opportunities.insuranceProvider,
@@ -1383,6 +1476,12 @@ export async function closeOpportunity(
 				.update(opportunities)
 				.set({ insuranceProvider })
 				.where(eq(opportunities.id, opportunityId));
+			auditRecord({
+				entity: "opportunity",
+				id: opportunityId,
+				action: "set_insurance_provider",
+				data: { insuranceProvider },
+			});
 			opportunity.insuranceProvider = insuranceProvider;
 		}
 
@@ -1395,6 +1494,11 @@ export async function closeOpportunity(
 			cuotaMensual: quotation?.monthlyPayment
 				? String(quotation.monthlyPayment)
 				: undefined,
+			membershipCost: resolveMembershipForCartera(
+				quotation?.membershipCost,
+				opportunity.membresiaPago,
+				quotation?.isInterno ?? false,
+			),
 			isVehicleOwned: vehicleData?.isOwned ?? false,
 			// Enviar info del vehículo para que llegue en el correo de cartera
 			vehiculo_marca: vehicleData?.make ?? undefined,
@@ -1443,7 +1547,7 @@ export async function closeOpportunity(
 
 		// 4. Complete local operations in a transaction for atomicity
 		// This ensures that if any local operation fails, all changes are rolled back
-		const transactionResult = await db.transaction(async (tx) => {
+		const transactionResult = await auditedTransaction(async (tx) => {
 			// Complete client flow (client, contract, references)
 			const clientResult = await completeClient({
 				opportunity,
@@ -1470,6 +1574,12 @@ export async function closeOpportunity(
 					updatedAt: new Date(),
 				})
 				.where(eq(opportunities.id, opportunityId));
+			auditRecord({
+				entity: "opportunity",
+				id: opportunityId,
+				action: "mark_won",
+				data: { numeroSifco },
+			});
 
 			// Update vehicle status to 'sold'
 			if (opportunity.vehicleId) {
@@ -1480,6 +1590,12 @@ export async function closeOpportunity(
 						updatedAt: new Date(),
 					})
 					.where(eq(vehicles.id, opportunity.vehicleId));
+				auditRecord({
+					entity: "vehicle",
+					id: opportunity.vehicleId,
+					action: "mark_sold",
+					data: { opportunityId },
+				});
 				console.log(
 					`[CloseOpportunity] ✓ Vehicle ${opportunity.vehicleId} marked as sold`,
 				);

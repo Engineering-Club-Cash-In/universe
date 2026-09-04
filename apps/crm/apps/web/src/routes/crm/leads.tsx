@@ -125,6 +125,28 @@ type CreditAnalysis = Awaited<
 	ReturnType<typeof client.getCreditAnalysisByLeadId>
 >;
 
+function validatePositiveFinancialValue(
+	value: string,
+	label: string,
+) {
+	const normalizedValue = value.trim();
+
+	if (!normalizedValue) {
+		return undefined;
+	}
+
+	const numericValue = Number(normalizedValue);
+	if (!Number.isFinite(numericValue) || numericValue <= 0) {
+		return `${label} debe ser mayor a 0`;
+	}
+
+	return undefined;
+}
+
+function getUniqueFieldErrors(errors: readonly unknown[]) {
+	return Array.from(new Set(errors.map((error) => String(error))));
+}
+
 function RouteComponent() {
 	const {
 		data: session,
@@ -375,6 +397,10 @@ function RouteComponent() {
 					errors.lastName = "El apellido es requerido";
 				}
 
+				if (!editingLead && !value.phone.trim()) {
+					errors.phone = "El teléfono es requerido";
+				}
+
 				if (
 					value.email.trim() &&
 					!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.email)
@@ -387,7 +413,7 @@ function RouteComponent() {
 				}
 
 				if (Object.keys(errors).length > 0) {
-					return errors;
+					return { fields: errors };
 				}
 
 				return undefined;
@@ -436,12 +462,12 @@ function RouteComponent() {
 			};
 
 			if (editingLead) {
-				updateLeadMutation.mutate({
+				await updateLeadMutation.mutateAsync({
 					id: editingLead.id,
 					...leadData,
 				});
 			} else {
-				createLeadMutation.mutate(leadData);
+				await createLeadMutation.mutateAsync(leadData);
 			}
 		},
 	});
@@ -768,11 +794,13 @@ function RouteComponent() {
 			);
 			createLeadForm.setFieldValue(
 				"monthlyIncome",
-				editingLead.monthlyIncome ? String(editingLead.monthlyIncome) : "",
+				editingLead.monthlyIncome != null
+					? String(editingLead.monthlyIncome)
+					: "",
 			);
 			createLeadForm.setFieldValue(
 				"loanAmount",
-				editingLead.loanAmount ? String(editingLead.loanAmount) : "",
+				editingLead.loanAmount != null ? String(editingLead.loanAmount) : "",
 			);
 			createLeadForm.setFieldValue(
 				"occupation",
@@ -980,7 +1008,7 @@ function RouteComponent() {
 									onSubmit={(e) => {
 										e.preventDefault();
 										e.stopPropagation();
-										void createLeadForm.handleSubmit();
+										void createLeadForm.handleSubmit().catch(() => undefined);
 									}}
 									autoComplete="off"
 									className="space-y-4"
@@ -991,12 +1019,6 @@ function RouteComponent() {
 												name="firstName"
 												validators={{
 													onChange: ({ value }) => {
-														if (!value.trim()) {
-															return "El nombre es requerido";
-														}
-														return undefined;
-													},
-													onBlur: ({ value }) => {
 														if (!value.trim()) {
 															return "El nombre es requerido";
 														}
@@ -1027,11 +1049,13 @@ function RouteComponent() {
 																	: ""
 															}
 														/>
-														{field.state.meta.errors.map((error, index) => (
-															<p key={index} className="text-red-500 text-sm">
-																{String(error)}
-															</p>
-														))}
+														{getUniqueFieldErrors(field.state.meta.errors).map(
+															(error) => (
+																<p key={error} className="text-red-500 text-sm">
+																	{error}
+																</p>
+															),
+														)}
 													</div>
 												)}
 											</createLeadForm.Field>
@@ -1067,12 +1091,6 @@ function RouteComponent() {
 														}
 														return undefined;
 													},
-													onBlur: ({ value }) => {
-														if (!value.trim()) {
-															return "El apellido es requerido";
-														}
-														return undefined;
-													},
 												}}
 											>
 												{(field) => (
@@ -1096,11 +1114,13 @@ function RouteComponent() {
 																	: ""
 															}
 														/>
-														{field.state.meta.errors.map((error, index) => (
-															<p key={index} className="text-red-500 text-sm">
-																{String(error)}
+													{getUniqueFieldErrors(field.state.meta.errors).map(
+														(error) => (
+															<p key={error} className="text-red-500 text-sm">
+																{error}
 															</p>
-														))}
+														),
+													)}
 													</div>
 												)}
 											</createLeadForm.Field>
@@ -1142,15 +1162,6 @@ function RouteComponent() {
 														}
 														return undefined;
 													},
-													onBlur: ({ value }) => {
-														if (
-															value.trim() &&
-															!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
-														) {
-															return "El correo electrónico no es válido";
-														}
-														return undefined;
-													},
 												}}
 											>
 												{(field) => (
@@ -1173,11 +1184,13 @@ function RouteComponent() {
 																	: ""
 															}
 														/>
-														{field.state.meta.errors.map((error, index) => (
-															<p key={index} className="text-red-500 text-sm">
-																{String(error)}
-															</p>
-														))}
+														{getUniqueFieldErrors(field.state.meta.errors).map(
+															(error) => (
+																<p key={error} className="text-red-500 text-sm">
+																	{error}
+																</p>
+															),
+														)}
 													</div>
 												)}
 											</createLeadForm.Field>
@@ -1187,12 +1200,6 @@ function RouteComponent() {
 												name="phone"
 												validators={{
 													onChange: ({ value }) => {
-														if (!value.trim()) {
-															return "El teléfono es requerido";
-														}
-														return undefined;
-													},
-													onBlur: ({ value }) => {
 														if (!value.trim()) {
 															return "El teléfono es requerido";
 														}
@@ -1220,11 +1227,13 @@ function RouteComponent() {
 																	: ""
 															}
 														/>
-														{field.state.meta.errors.map((error, index) => (
-															<p key={index} className="text-red-500 text-sm">
-																{String(error)}
-															</p>
-														))}
+														{getUniqueFieldErrors(field.state.meta.errors).map(
+															(error) => (
+																<p key={error} className="text-red-500 text-sm">
+																	{error}
+																</p>
+															),
+														)}
 													</div>
 												)}
 											</createLeadForm.Field>
@@ -1284,12 +1293,6 @@ function RouteComponent() {
 													}
 													return undefined;
 												},
-												onBlur: ({ value }) => {
-													if (!value) {
-														return "La fuente del lead es requerida";
-													}
-													return undefined;
-												},
 											}}
 										>
 											{(field) => (
@@ -1324,14 +1327,16 @@ function RouteComponent() {
 															))}
 														</SelectContent>
 													</Select>
-													{field.state.meta.errors.map((error) => (
-														<p
-															key={String(error)}
-															className="text-red-500 text-sm"
-														>
-															{String(error)}
-														</p>
-													))}
+													{getUniqueFieldErrors(field.state.meta.errors).map(
+														(error) => (
+															<p
+																key={error}
+																className="text-red-500 text-sm"
+															>
+																{error}
+															</p>
+														),
+													)}
 												</div>
 											)}
 										</createLeadForm.Field>
@@ -1721,7 +1726,16 @@ function RouteComponent() {
 										</h3>
 										<div className="grid grid-cols-2 gap-4">
 											<div>
-												<createLeadForm.Field name="monthlyIncome">
+												<createLeadForm.Field
+													name="monthlyIncome"
+													validators={{
+														onChange: ({ value }) =>
+															validatePositiveFinancialValue(
+																value,
+																"El ingreso mensual",
+															),
+													}}
+												>
 													{(field) => (
 														<div className="space-y-2">
 															<Label htmlFor={field.name}>
@@ -1739,13 +1753,32 @@ function RouteComponent() {
 																placeholder="0.00"
 																step="0.01"
 																min="0"
+																className={
+																	field.state.meta.errors.length > 0
+																		? "border-red-500"
+																		: ""
+																}
 															/>
+															{field.state.meta.errors.map((error, index) => (
+																<p key={index} className="text-red-500 text-sm">
+																	{String(error)}
+																</p>
+															))}
 														</div>
 													)}
 												</createLeadForm.Field>
 											</div>
 											<div>
-												<createLeadForm.Field name="loanAmount">
+												<createLeadForm.Field
+													name="loanAmount"
+													validators={{
+														onChange: ({ value }) =>
+															validatePositiveFinancialValue(
+																value,
+																"El monto a financiar",
+															),
+													}}
+												>
 													{(field) => (
 														<div className="space-y-2">
 															<Label htmlFor={field.name}>
@@ -1763,7 +1796,17 @@ function RouteComponent() {
 																placeholder="0.00"
 																step="0.01"
 																min="0"
+																className={
+																	field.state.meta.errors.length > 0
+																		? "border-red-500"
+																		: ""
+																}
 															/>
+															{field.state.meta.errors.map((error, index) => (
+																<p key={index} className="text-red-500 text-sm">
+																	{String(error)}
+																</p>
+															))}
 														</div>
 													)}
 												</createLeadForm.Field>
@@ -1984,10 +2027,13 @@ function RouteComponent() {
 												disabled={
 													!state.canSubmit ||
 													state.isSubmitting ||
-													createLeadMutation.isPending
+													createLeadMutation.isPending ||
+													updateLeadMutation.isPending
 												}
 											>
-												{state.isSubmitting || createLeadMutation.isPending
+												{state.isSubmitting ||
+												createLeadMutation.isPending ||
+												updateLeadMutation.isPending
 													? "Cargando..."
 													: editingLead
 														? "Editar Lead"

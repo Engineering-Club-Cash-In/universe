@@ -1,14 +1,22 @@
 import { describe, expect, test } from "bun:test";
+import Big from "big.js";
 import {
   allocateRoundedAmounts,
   allocateRoundedPurchaseAmounts,
+  aggregateInvestorLiquidationRows,
   assertModeReconciliation,
   assertReportReconciliation,
+  assertLiquidationRowsReinvestmentIntegrity,
+  buildLiquidationComposition,
+  buildPurchaseTicketHistory,
   calculateActiveCapital,
   buildCubeNetInterest,
+  canonicalizeLiquidationModeRows,
   canonicalizePurchaseSummaries,
   buildNetInterestDetail,
   getPublicReinvestmentDetailError,
+  normalizeReinvestmentComponents,
+  summarizePurchaseDetails,
   shouldIncludeInvestorPosition,
 } from "./reinvestmentReport";
 
@@ -18,6 +26,296 @@ test("CUBE deriva el neto de los componentes redondeados", () => {
     iva: "0.12",
     neto: "1.12",
   });
+});
+
+test("CUBE conserva centavos antes de calcular IVA para montos numeric grandes", () => {
+  expect(buildCubeNetInterest("900719925474000.91")).toEqual({
+    interes: "900719925474000.91",
+    iva: "108086391056880.11",
+    neto: "1008806316530881.02",
+  });
+});
+
+test("asigna una sola vez el residuo de centavo entre modalidades", () => {
+  const rows = canonicalizeLiquidationModeRows([
+    {
+      tipo: "reinversion_variable",
+      reinversion_capital: "0.005",
+      reinversion_interes: "0",
+      reinversion_total: "0.005",
+      total_capital: "0.005",
+      total_interes: "0",
+      total_iva: "0",
+      total_isr: "0",
+      total_distribuido: "0.005",
+    },
+    {
+      tipo: "sin_reinversion",
+      reinversion_capital: "0.005",
+      reinversion_interes: "0",
+      reinversion_total: "0.005",
+      total_capital: "0.005",
+      total_interes: "0",
+      total_iva: "0",
+      total_isr: "0",
+      total_distribuido: "0.005",
+    },
+  ]);
+
+  expect(rows.map((row) => row.total_capital).sort()).toEqual(["0.00", "0.01"]);
+  expect(rows.map((row) => row.total_distribuido).sort()).toEqual(["0.00", "0.01"]);
+  expect(rows.map((row) => row.reinversion_total).sort()).toEqual(["0.00", "0.01"]);
+  expect(rows.map((row) => row.total_cuota)).toEqual(["0.00", "0.00"]);
+});
+
+test("conserva el cursor histórico cuando una fila llega a cero", () => {
+  const rows = canonicalizeLiquidationModeRows([
+    {
+      reinversion_capital: "0",
+      reinversion_interes: "0.01",
+      reinversion_total: "0.01",
+      total_capital: "0",
+      total_interes: "0",
+      total_iva: "0",
+      total_isr: "0",
+      total_distribuido: "0.01",
+    },
+    {
+      reinversion_capital: "0",
+      reinversion_interes: "0.01",
+      reinversion_total: "0",
+      total_capital: "0",
+      total_interes: "0",
+      total_iva: "0",
+      total_isr: "0",
+      total_distribuido: "0",
+    },
+    {
+      reinversion_capital: "0",
+      reinversion_interes: "0.01",
+      reinversion_total: "0",
+      total_capital: "0",
+      total_interes: "0",
+      total_iva: "0",
+      total_isr: "0",
+      total_distribuido: "0",
+    },
+  ]);
+
+  expect(rows.map((row) => row.reinversion_interes)).toEqual([
+    "0.00",
+    "0.01",
+    "0.00",
+  ]);
+});
+
+test("distribuye un ajuste monetario grande en tiempo acotado", () => {
+  const rows = [
+    {
+      reinversion_capital: "473.9982",
+      reinversion_interes: "0",
+      reinversion_total: "473.9982",
+      total_capital: "473.9982",
+      total_interes: "333.4669",
+      total_iva: "40.0159",
+      total_isr: "0",
+      total_distribuido: "847.481",
+    },
+    {
+      reinversion_capital: "0",
+      reinversion_interes: "0",
+      reinversion_total: "23871.4168",
+      total_capital: "29423.6614",
+      total_interes: "9575.2555",
+      total_iva: "1150.3373",
+      total_isr: "107.6698",
+      total_distribuido: "39867.8965",
+    },
+  ];
+
+  const startedAt = performance.now();
+  const result = canonicalizeLiquidationModeRows(rows);
+  const elapsedMs = performance.now() - startedAt;
+
+  expect(result.map((row) => row.reinversion_total)).toEqual([
+    "474.00",
+    "10817.72",
+  ]);
+  expect(elapsedMs).toBeLessThan(250);
+});
+
+test("preserva reinversión de capital dentro del capital al repartir un centavo", () => {
+  const rows = canonicalizeLiquidationModeRows([
+    {
+      tipo: "reinversion_capital",
+      reinversion_capital: "0.005",
+      reinversion_interes: "0",
+      reinversion_total: "0.005",
+      total_capital: "0.005",
+      total_interes: "0",
+      total_iva: "0",
+      total_isr: "0",
+      total_distribuido: "0.005",
+    },
+    {
+      tipo: "sin_reinversion",
+      reinversion_capital: "0",
+      reinversion_interes: "0",
+      reinversion_total: "0",
+      total_capital: "0.005",
+      total_interes: "0",
+      total_iva: "0",
+      total_isr: "0",
+      total_distribuido: "0.005",
+    },
+  ]);
+
+  expect(rows[0]).toMatchObject({
+    reinversion_capital: "0.01",
+    total_capital: "0.01",
+  });
+  expect(rows[1]).toMatchObject({
+    reinversion_capital: "0.00",
+    total_capital: "0.00",
+  });
+  expect(() =>
+    rows.forEach((row) =>
+      buildLiquidationComposition({
+        totalCapital: row.total_capital,
+        paidTotal: row.total_cuota,
+        reinvestedCapital: row.reinversion_capital,
+        reinvestedRest: row.reinversion_interes,
+        reinvestedTotal: row.reinversion_total,
+      }),
+    ),
+  ).not.toThrow();
+});
+
+test("alinea el centavo de capital pagado con el flujo pagado", () => {
+  const rows = canonicalizeLiquidationModeRows([
+    {
+      tipo: "sin_reinversion_a",
+      reinversion_capital: "0",
+      reinversion_interes: "0",
+      reinversion_total: "0",
+      total_capital: "0.005",
+      total_interes: "0",
+      total_iva: "0",
+      total_isr: "0",
+      total_distribuido: "0.005",
+    },
+    {
+      tipo: "sin_reinversion_b",
+      reinversion_capital: "0",
+      reinversion_interes: "0",
+      reinversion_total: "0",
+      total_capital: "0.005",
+      total_interes: "0",
+      total_iva: "0",
+      total_isr: "0",
+      total_distribuido: "0.005",
+    },
+  ]);
+
+  expect(rows.map(({ total_capital, total_cuota }) => ({ total_capital, total_cuota }))).toEqual([
+    { total_capital: "0.01", total_cuota: "0.01" },
+    { total_capital: "0.00", total_cuota: "0.00" },
+  ]);
+  expect(() =>
+    rows.forEach((row) =>
+      buildLiquidationComposition({
+        totalCapital: row.total_capital,
+        paidTotal: row.total_cuota,
+        reinvestedCapital: row.reinversion_capital,
+        reinvestedRest: row.reinversion_interes,
+        reinvestedTotal: row.reinversion_total,
+      }),
+    ),
+  ).not.toThrow();
+});
+
+test("deriva el objetivo pagado del flujo total para no perder el centavo", () => {
+  const [row] = canonicalizeLiquidationModeRows([
+    {
+      tipo: "reinversion_capital",
+      reinversion_capital: "100.0049",
+      reinversion_interes: "0",
+      reinversion_total: "100.0049",
+      total_capital: "100.0051",
+      total_interes: "0.0047",
+      total_iva: "0",
+      total_isr: "0",
+      total_distribuido: "100.0098",
+    },
+  ]);
+
+  expect(row).toMatchObject({
+    reinversion_capital: "100.00",
+    reinversion_total: "100.00",
+    total_capital: "100.01",
+    total_cuota: "0.01",
+    total_distribuido: "100.01",
+  });
+  expect(() =>
+    buildLiquidationComposition({
+      totalCapital: row!.total_capital,
+      paidTotal: row!.total_cuota,
+      reinvestedCapital: row!.reinversion_capital,
+      reinvestedRest: row!.reinversion_interes,
+      reinvestedTotal: row!.reinversion_total,
+    }),
+  ).not.toThrow();
+});
+
+test("nunca resta centavos a una fila cero al reducir un objetivo jerárquico", () => {
+  const rows = canonicalizeLiquidationModeRows([
+    {
+      tipo: "sin_flujo",
+      reinversion_capital: "0",
+      reinversion_interes: "0",
+      reinversion_total: "0",
+      total_capital: "0",
+      total_interes: "0",
+      total_iva: "0",
+      total_isr: "0",
+      total_distribuido: "0",
+    },
+    {
+      tipo: "flujo_redondeado",
+      reinversion_capital: "0",
+      reinversion_interes: "0.005",
+      reinversion_total: "0.015",
+      total_capital: "0.005",
+      total_interes: "0.015",
+      total_iva: "0",
+      total_isr: "0",
+      total_distribuido: "0.020",
+    },
+  ]);
+
+  expect(
+    rows.every((row) =>
+      [
+        row.reinversion_capital,
+        row.reinversion_interes,
+        row.reinversion_total,
+        row.total_capital,
+        row.total_cuota,
+        row.total_distribuido,
+      ].every((value) => new Big(value).gte(0)),
+    ),
+  ).toBe(true);
+  expect(() =>
+    rows.forEach((row) =>
+      buildLiquidationComposition({
+        totalCapital: row.total_capital,
+        paidTotal: row.total_cuota,
+        reinvestedCapital: row.reinversion_capital,
+        reinvestedRest: row.reinversion_interes,
+        reinvestedTotal: row.reinversion_total,
+      }),
+    ),
+  ).not.toThrow();
 });
 
 test("distribuye el centavo residual sin cambiar el orden de los pagos", () => {
@@ -44,6 +342,12 @@ test("distribuye el centavo residual sin cambiar el orden de los pagos", () => {
       detalleComprasMes: [],
     }),
   ).toMatchObject({ pagosExtras: true });
+});
+
+test("distribuye numeric grandes sin desbordar el residuo en Number", () => {
+  expect(
+    allocateRoundedAmounts(["900719925474000.901", "0.009"]),
+  ).toEqual(["900719925474000.90", "0.01"]);
 });
 
 test("distribuye residuos de compras por modalidad sin cambiar cantidad ni orden", () => {
@@ -156,15 +460,239 @@ test("el reporte conserva y totaliza al inversionista con capital activo y flujo
 });
 
 test("capital activo conserva la posición aceptada al restar una compra pendiente", () => {
-  expect(calculateActiveCapital(1250, 250)).toBe(1000);
+  expect(calculateActiveCapital(1250, 250)).toBe("1000.00");
 });
 
 test("capital activo resta múltiples compras pendientes ya agregadas", () => {
-  expect(calculateActiveCapital(1250, 250 + 100)).toBe(900);
+  expect(calculateActiveCapital(1250, 250 + 100)).toBe("900.00");
 });
 
 test("capital activo no resta compras completadas", () => {
-  expect(calculateActiveCapital(1250, 0)).toBe(1250);
+  expect(calculateActiveCapital(1250, 0)).toBe("1250.00");
+});
+
+test("capital activo resta numeric sin perder precisión antes de redondear", () => {
+  expect(calculateActiveCapital("90071992547409.91", "0.01")).toBe(
+    "90071992547409.90",
+  );
+});
+
+test("separa capital y resto cuando la composición liquidada es completa", () => {
+  expect(buildLiquidationComposition({
+    totalCapital: "90.00",
+    paidTotal: "35.00",
+    reinvestedCapital: "60.00",
+    reinvestedRest: "5.00",
+    reinvestedTotal: "65.00",
+  })).toEqual({
+    pagado: { capital: "30.00", resto: "5.00", sin_clasificar: "0.00", total: "35.00" },
+    reinvertido: { capital: "60.00", resto: "5.00", sin_clasificar: "0.00", total: "65.00" },
+    flujo: { capital: "90.00", resto: "10.00", total: "100.00" },
+    estado: "exacto",
+  });
+});
+
+test("no inventa el destino capital/resto cuando falta composición de reinversión", () => {
+  expect(buildLiquidationComposition({
+    totalCapital: "80.00",
+    paidTotal: "40.00",
+    reinvestedCapital: "10.00",
+    reinvestedRest: "5.00",
+    reinvestedTotal: "60.00",
+  })).toEqual({
+    pagado: { capital: "0.00", resto: "0.00", sin_clasificar: "40.00", total: "40.00" },
+    reinvertido: { capital: "10.00", resto: "5.00", sin_clasificar: "45.00", total: "60.00" },
+    flujo: { capital: "80.00", resto: "20.00", total: "100.00" },
+    estado: "sin_clasificar",
+  });
+});
+
+test("absorbe en el resto un centavo de deriva histórica sin romper el reporte", () => {
+  expect(buildLiquidationComposition({
+    totalCapital: "380.36",
+    paidTotal: "0.00",
+    reinvestedCapital: "380.36",
+    reinvestedRest: "390.53",
+    reinvestedTotal: "770.88",
+  })).toEqual({
+    pagado: { capital: "0.00", resto: "0.00", sin_clasificar: "0.00", total: "0.00" },
+    reinvertido: { capital: "380.36", resto: "390.52", sin_clasificar: "0.00", total: "770.88" },
+    flujo: { capital: "380.36", resto: "390.52", total: "770.88" },
+    estado: "exacto",
+  });
+});
+
+test("normaliza numeric grandes sin perder sus centavos", () => {
+  expect(normalizeReinvestmentComponents({
+    reinvestedCapital: "900719925474000.91",
+    reinvestedRest: "1.01",
+    reinvestedTotal: "900719925474001.91",
+  })).toEqual({
+    capital: "900719925474000.91",
+    rest: "1.00",
+    total: "900719925474001.91",
+    unclassified: "0.00",
+  });
+  expect(buildLiquidationComposition({
+    totalCapital: "900719925474000.91",
+    paidTotal: "0.00",
+    reinvestedCapital: "900719925474000.91",
+    reinvestedRest: "1.01",
+    reinvestedTotal: "900719925474001.91",
+  })).toEqual({
+    pagado: { capital: "0.00", resto: "0.00", sin_clasificar: "0.00", total: "0.00" },
+    reinvertido: {
+      capital: "900719925474000.91",
+      resto: "1.00",
+      sin_clasificar: "0.00",
+      total: "900719925474001.91",
+    },
+    flujo: {
+      capital: "900719925474000.91",
+      resto: "1.00",
+      total: "900719925474001.91",
+    },
+    estado: "exacto",
+  });
+});
+
+test("no oculta una inconsistencia mayor a un centavo", () => {
+  expect(() => buildLiquidationComposition({
+    totalCapital: "380.36",
+    paidTotal: "0.00",
+    reinvestedCapital: "380.36",
+    reinvestedRest: "390.54",
+    reinvestedTotal: "770.88",
+  })).toThrow("Composición de liquidación inválida");
+});
+
+test("valida cada liquidación antes de que derivas opuestas se compensen", () => {
+  expect(() => assertLiquidationRowsReinvestmentIntegrity([
+    {
+      reinvestedCapital: "100.00",
+      reinvestedRest: "100.05",
+      reinvestedTotal: "200.00",
+    },
+    {
+      reinvestedCapital: "100.00",
+      reinvestedRest: "99.96",
+      reinvestedTotal: "200.00",
+    },
+  ])).toThrow("Composición de liquidación inválida");
+});
+
+test("normaliza cada liquidación antes de sumar derivas por inversionista", () => {
+  expect(aggregateInvestorLiquidationRows([
+    {
+      inversionistaId: 7,
+      nombre: "Inversionista",
+      tipoReinversion: "reinversion_total",
+      reinvestedCapital: "100.00",
+      reinvestedRest: "100.01",
+      reinvestedTotal: "200.00",
+      paidTotal: "0.00",
+      totalCapital: "100.00",
+    },
+    {
+      inversionistaId: 7,
+      nombre: "Inversionista",
+      tipoReinversion: "reinversion_total",
+      reinvestedCapital: "50.00",
+      reinvestedRest: "50.01",
+      reinvestedTotal: "100.00",
+      paidTotal: "0.00",
+      totalCapital: "50.00",
+    },
+  ])).toEqual([{
+    inversionista_id: 7,
+    nombre: "Inversionista",
+    tipo_reinversion: "reinversion_total",
+    reinversion_capital: "150.00",
+    reinversion_interes: "150.00",
+    reinversion: "300.00",
+    a_recibir: "0.00",
+    total_capital: "150.00",
+  }]);
+});
+
+test("resume compras por modalidad de facturación, tipo de reinversión y clasificación", () => {
+  expect(summarizePurchaseDetails([
+    {
+      modalidad_facturacion: "interes_mas_iva",
+      tipo_reinversion: "reinversion_capital",
+      tipo_compra: "nueva_posicion",
+      monto: "10.005",
+    },
+    {
+      modalidad_facturacion: "interes_mas_iva",
+      tipo_reinversion: "reinversion_capital",
+      tipo_compra: "nueva_posicion",
+      monto: "20.005",
+    },
+    {
+      modalidad_facturacion: "sin_modalidad",
+      tipo_reinversion: "sin_reinversion",
+      tipo_compra: "sin_clasificar",
+      monto: "7.00",
+    },
+  ])).toEqual([
+    {
+      modalidad_facturacion: "interes_mas_iva",
+      tipo_reinversion: "reinversion_capital",
+      tipo_compra: "nueva_posicion",
+      cantidad: 2,
+      monto: "30.01",
+    },
+    {
+      modalidad_facturacion: "sin_modalidad",
+      tipo_reinversion: "sin_reinversion",
+      tipo_compra: "sin_clasificar",
+      cantidad: 1,
+      monto: "7.00",
+    },
+  ]);
+});
+
+test("ticket histórico usa solo nuevas posiciones y compara el mes calendario anterior", () => {
+  expect(buildPurchaseTicketHistory([
+    { periodo: "2026-06", tipo_compra: "nueva_posicion", monto: "100.00", cantidad: 2 },
+    { periodo: "2026-07", tipo_compra: "nueva_posicion", monto: "100.00" },
+    { periodo: "2026-07", tipo_compra: "ampliacion_posicion", monto: "900.00" },
+    { periodo: "2026-08", tipo_compra: "nueva_posicion", monto: "100.00" },
+    { periodo: "2026-08", tipo_compra: "nueva_posicion", monto: "200.00" },
+    { periodo: "2026-08", tipo_compra: "sin_clasificar", monto: "1000.00" },
+  ], "2026-08")).toEqual({
+    actual: {
+      periodo: "2026-08",
+      cantidad: 2,
+      monto_total: "300.00",
+      ticket_promedio: "150.00",
+      variacion_porcentual: "50.00",
+    },
+    historico: [
+      { periodo: "2026-06", cantidad: 2, monto_total: "100.00", ticket_promedio: "50.00" },
+      { periodo: "2026-07", cantidad: 1, monto_total: "100.00", ticket_promedio: "100.00" },
+      { periodo: "2026-08", cantidad: 2, monto_total: "300.00", ticket_promedio: "150.00" },
+    ],
+  });
+});
+
+test("reporte agrupa liquidaciones por snapshot y publica legacy como sin clasificar", async () => {
+  const source = await Bun.file(new URL("./reportes.ts", import.meta.url)).text();
+  const report = source.slice(
+    source.indexOf("export async function getReinversionLiquidaciones"),
+  );
+
+  expect(report).toContain("l.tipo_reinversion_snapshot");
+  expect(report).toContain("cartera.historico_liquidaciones_espejo");
+  expect(report).toContain("cartera.pagos_credito_inversionistas_espejo");
+  expect(report).toContain("reinversion_residual");
+  expect(report).toContain("reinversion_interes_report");
+  expect(report).toContain("d.reinversion_interes_report * d.peso_interes");
+  expect(report).toContain("a.reinversion_total_report - SUM(");
+  expect(report).toContain("COUNT(DISTINCT f.liquidacion_id)");
+  expect(report).toContain("'sin_clasificar'");
+  expect(report).not.toContain("GROUP BY i.tipo_reinversion");
 });
 
 test("capital activo agrega compras pendientes por posición antes de restarlas", async () => {
@@ -197,11 +725,11 @@ test("capital activo agrega compras pendientes por posición antes de restarlas"
   );
   expect(activeCapitalQuery).toContain("GROUP BY ce.inversionista_id");
   expect(activeCapitalQuery).toContain(
-    "calculateActiveCapital(\n        Number(r.monto_espejo ?? 0),\n        Number(r.monto_compra_pendiente ?? 0)",
+    "calculateActiveCapital(\n        String(r.monto_espejo ?? 0),\n        String(r.monto_compra_pendiente ?? 0)",
   );
 });
 
-test("el resumen de compras canoniza NULL y sin_reinversion en la misma modalidad", async () => {
+test("el resumen de compras usa modalidad de facturación y conserva tipo de reinversión", async () => {
   const source = await Bun.file(
     new URL("./reportes.ts", import.meta.url),
   ).text();
@@ -211,8 +739,12 @@ test("el resumen de compras canoniza NULL y sin_reinversion en la misma modalida
   );
 
   expect(purchasesQuery).toContain(
-    "GROUP BY COALESCE(c.tipo_reinversion::text, 'sin_reinversion')",
+    "COALESCE(c.modalidad_facturacion::text, 'sin_modalidad') AS modalidad_facturacion",
   );
+  expect(purchasesQuery).toContain(
+    "COALESCE(c.tipo_reinversion::text, 'sin_reinversion') AS tipo_reinversion",
+  );
+  expect(purchasesQuery).toContain("c.tipo_compra::text AS tipo_compra");
 });
 
 test("compras legacy NULL y sin_reinversion se agregan bajo una sola llave pública", () => {
@@ -222,6 +754,15 @@ test("compras legacy NULL y sin_reinversion se agregan bajo una sola llave públ
   ])).toEqual([{ tipo: "sin_reinversion", cantidad: 3, monto: "30.00" }]);
 });
 
+test("resumen de compras suma numeric grandes sin perder centavos", () => {
+  expect(canonicalizePurchaseSummaries([
+    { tipo: "sin_reinversion", cantidad: 1, monto: "900719925474000.91" },
+    { tipo: "sin_reinversion", cantidad: 1, monto: "0.01" },
+  ])).toEqual([
+    { tipo: "sin_reinversion", cantidad: 2, monto: "900719925474000.92" },
+  ]);
+});
+
 test("el contrato v2 no publica monto_aportado histórico incorrecto", async () => {
   const source = await Bun.file(
     new URL("./reportes.ts", import.meta.url),
@@ -229,6 +770,18 @@ test("el contrato v2 no publica monto_aportado histórico incorrecto", async () 
 
   expect(source).not.toContain("const montoAportadoRows");
   expect(source).not.toContain("monto_aportado: Number");
+});
+
+test("peso de flujo mixto usa capital más interés neto con IVA o ISR", async () => {
+  const source = await Bun.file(new URL("./reportes.ts", import.meta.url)).text();
+  const query = source.slice(
+    source.indexOf("pesos_mixtos AS"),
+    source.indexOf("pesos AS"),
+  );
+
+  expect(query).toContain("pe.abono_iva_12::numeric");
+  expect(query).toContain("l.descuenta_impuestos = true OR l.total_isr::numeric > 0");
+  expect(query).toContain("-(pe.abono_interes::numeric * 0.07)");
 });
 
 test("consulta de interés no deja una coma antes de FROM", async () => {

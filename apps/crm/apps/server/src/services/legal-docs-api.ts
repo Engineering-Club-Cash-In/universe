@@ -74,9 +74,12 @@ export interface Field {
 export interface DocumentByDpiResponse {
 	success: boolean;
 	message: string;
-	renapData: RenapData;
+	/** null cuando RENAP no tiene a la persona: se usan los datos del CRM */
+	renapData: RenapData | null;
 	documents: Document[];
 	campos: Field[];
+	renapUnavailable?: boolean;
+	renapError?: string | null;
 }
 
 // Datos de deudor adicional para contratos con múltiples deudores
@@ -152,13 +155,14 @@ export async function getDocumentTypes(): Promise<DocumentsResponse> {
 export async function getDocumentsByDpi(
 	dpi: string,
 	documentNames: string[],
+	genero?: "hombre" | "mujer",
 ): Promise<DocumentByDpiResponse> {
 	const response = await fetch(`${LEGAL_API_URL}/docuSeal/document-by-dpi`, {
 		method: "POST",
 		headers: {
 			"Content-Type": "application/json",
 		},
-		body: JSON.stringify({ dpi, documentNames }),
+		body: JSON.stringify({ dpi, documentNames, ...(genero ? { genero } : {}) }),
 	});
 
 	if (!response.ok) {

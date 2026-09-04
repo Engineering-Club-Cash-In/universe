@@ -14,11 +14,12 @@ import {
 	type SimulacionInversionistaResult,
 } from "../services/cartera-back-client";
 
-// Duplicados que valida cartera al crear (controllers/investor.ts revisa email
-// → DPI → nombre y corta con 409 en el primero que choca). El código de máquina
-// es lo estable; el texto y el campo los ponemos acá para que el modal marque
-// exactamente qué dato hay que corregir.
-const DUPLICADOS_INVERSIONISTA = {
+// Errores de cartera que apuntan a un campo del formulario. Los duplicados
+// (controllers/investor.ts revisa email → DPI → nombre y corta con 409 en el
+// primero que choca) y el representante legal inexistente (400 de la validación
+// de dpi_rep_legal). El código de máquina es lo estable; el texto y el campo los
+// ponemos acá para que el modal marque exactamente qué dato hay que corregir.
+const ERRORES_POR_CAMPO = {
 	duplicate_dpi: {
 		campo: "dpi",
 		mensaje: "Ya existe un inversionista registrado con ese DPI",
@@ -31,12 +32,17 @@ const DUPLICADOS_INVERSIONISTA = {
 		campo: "nombre",
 		mensaje: "Ya existe un inversionista registrado con ese nombre",
 	},
+	rep_legal_inexistente: {
+		campo: "dpi_rep_legal",
+		mensaje:
+			"El DPI del representante legal no existe como inversionista. Primero hay que darlo de alta.",
+	},
 } as const;
 
-type CodigoDuplicado = keyof typeof DUPLICADOS_INVERSIONISTA;
+type CodigoConCampo = keyof typeof ERRORES_POR_CAMPO;
 
-function esCodigoDuplicado(codigo?: string): codigo is CodigoDuplicado {
-	return !!codigo && codigo in DUPLICADOS_INVERSIONISTA;
+function esCodigoConCampo(codigo?: string): codigo is CodigoConCampo {
+	return !!codigo && codigo in ERRORES_POR_CAMPO;
 }
 
 // Traduce una falla de cartera-back a un error de oRPC con mensaje legible.
@@ -58,14 +64,19 @@ export function toCarteraOrpcError(
 			.filter(Boolean)
 			.join(". ");
 
-		// Duplicado conocido: mandamos el campo culpable para que el modal lo
-		// marque, en vez de dejarle al usuario adivinar si fue el DPI o el email.
-		if (esCodigoDuplicado(codigo)) {
-			const { campo, mensaje } = DUPLICADOS_INVERSIONISTA[codigo];
-			return new ORPCError("CONFLICT", {
-				message: mensaje,
-				data: { codigo, campo },
-			});
+		// Error conocido y atribuible a un campo: mandamos el campo culpable para
+		// que el modal lo marque, en vez de dejarle al usuario adivinar si fue el
+		// DPI, el email o el representante legal. El status importa: los
+		// duplicados son 409, el representante inexistente es un 400.
+		if (esCodigoConCampo(codigo)) {
+			const { campo, mensaje } = ERRORES_POR_CAMPO[codigo];
+			return new ORPCError(
+				codigo.startsWith("duplicate_") ? "CONFLICT" : "BAD_REQUEST",
+				{
+					message: mensaje,
+					data: { codigo, campo },
+				},
+			);
 		}
 
 		if (error.status === 409) {
@@ -244,22 +255,42 @@ export const investorDocumentsRouter = {
 				montoReinversion: z.number().optional(),
 				moneda: z.enum(["quetzales", "dolares"]).optional(),
 				emiteFactura: z.boolean().optional(),
+				// Solo dígitos, hasta 20 (varchar(20) en cartera). Cadena vacía = borrar.
+				// Se valida acá para atajar el formato antes de salir a la red; la
+				// existencia del representante la revisa cartera y su 400 vuelve
+				// traducido por `toCarteraOrpcError`.
+				dpiRepLegal: z
+					.string()
+					.regex(/^\d*$/, "El DPI del representante legal solo admite dígitos")
+					.max(20, "El DPI del representante legal admite máximo 20 dígitos")
+					.optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
-			const result = await carteraBackClient.createInvestor({
-				inversionista_id: input.inversionistaId,
-				nombre: input.nombre,
-				dpi: input.dpi ? Number(input.dpi) : null,
-				email: input.email ?? null,
-				banco: input.banco ?? null,
-				tipo_cuenta: input.tipoCuenta ?? null,
-				numero_cuenta: input.numeroCuenta ?? null,
-				tipo_reinversion: input.tipoReinversion ?? "sin_reinversion",
-				monto_reinversion: input.montoReinversion ?? null,
-				moneda: input.moneda ?? "quetzales",
-				emite_factura: input.emiteFactura ?? false,
-			});
+			// Sin el try/catch cualquier 400 de cartera (representante legal
+			// inexistente, duplicados) llegaba al navegador como "Internal server
+			// error", porque oRPC solo conserva el mensaje de los ORPCError.
+			let result: Awaited<ReturnType<typeof carteraBackClient.createInvestor>>;
+			try {
+				result = await carteraBackClient.createInvestor({
+					inversionista_id: input.inversionistaId,
+					nombre: input.nombre,
+					dpi: input.dpi ? Number(input.dpi) : null,
+					email: input.email ?? null,
+					banco: input.banco ?? null,
+					tipo_cuenta: input.tipoCuenta ?? null,
+					numero_cuenta: input.numeroCuenta ?? null,
+					tipo_reinversion: input.tipoReinversion ?? "sin_reinversion",
+					monto_reinversion: input.montoReinversion ?? null,
+					moneda: input.moneda ?? "quetzales",
+					emite_factura: input.emiteFactura ?? false,
+					// Sin `?? null`: si la llave no viene, cartera deja el valor como
+					// está; si viene vacía, lo borra.
+					dpi_rep_legal: input.dpiRepLegal,
+				});
+			} catch (error) {
+				throw toCarteraOrpcError(error, "Editar inversionista");
+			}
 
 			try {
 				await db.insert(investorActivityLog).values({
@@ -343,6 +374,13 @@ export const investorDocumentsRouter = {
 					// modalidad), sin importar si corresponde al monto.
 					modalidadFacturacionSpreadId: z.number().int().positive().optional(),
 					fechaInicioParticipacion: z.string().optional(),
+					// Solo dígitos, hasta 20 (varchar(20) en cartera). Cadena vacía =
+					// borrar. Se valida acá para rechazarlo antes de salir a cartera.
+					dpiRepLegal: z
+						.string()
+						.regex(/^\d*$/, "El DPI del representante legal solo admite dígitos")
+						.max(20, "El DPI del representante legal admite máximo 20 dígitos")
+						.optional(),
 				})
 				.refine(
 					(data) => !data.hacerCompraCartera || !!data.modalidadFacturacion,
@@ -375,6 +413,9 @@ export const investorDocumentsRouter = {
 					monto_reinversion: input.montoReinversion ?? null,
 					moneda: input.moneda ?? "quetzales",
 					emite_factura: input.emiteFactura ?? false,
+					// Sin `?? null`: si la llave no viene, cartera deja el valor como
+					// está; si viene vacía, lo borra.
+					dpi_rep_legal: input.dpiRepLegal,
 				});
 			} catch (error) {
 				throw toCarteraOrpcError(error, "Crear inversionista");

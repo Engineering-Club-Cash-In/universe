@@ -129,6 +129,9 @@ export const PERMISSIONS = {
 		role === ROLES.SALES ||
 		role === ROLES.SALES_SUPERVISOR,
 
+	canManageAllCompanies: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.SALES_SUPERVISOR,
+
 	canCreateLeads: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN ||
 		role === ROLES.SALES ||
@@ -149,6 +152,10 @@ export const PERMISSIONS = {
 		role === ROLES.SALES_SUPERVISOR,
 
 	canApproveOpportunities: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.ANALYST,
+
+	// Override manual de Buró/RENAP (fuente externa caída, verificación manual del analista)
+	canOverrideValidacionManual: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.ANALYST,
 
 	canDeleteOpportunities: (role: UserRole | string): boolean =>

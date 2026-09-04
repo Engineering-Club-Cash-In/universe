@@ -663,7 +663,19 @@ function LiquidacionCard({ item }: { item: any }) {
 						className="inline-flex items-center gap-1.5 rounded-lg border bg-background px-3.5 py-2 font-semibold text-foreground text-xs shadow-sm transition-colors hover:bg-muted"
 					>
 						<FileText className="h-3.5 w-3.5" />
-						Reporte
+						{/* Solo se rotula la moneda cuando hay dos reportes que distinguir. */}
+						{item.reporte_liquidacion_url_gtq ? "Reporte $" : "Reporte"}
+					</a>
+				)}
+				{item.reporte_liquidacion_url_gtq && (
+					<a
+						href={item.reporte_liquidacion_url_gtq}
+						target="_blank"
+						rel="noopener noreferrer"
+						className="inline-flex items-center gap-1.5 rounded-lg border bg-background px-3.5 py-2 font-semibold text-foreground text-xs shadow-sm transition-colors hover:bg-muted"
+					>
+						<FileText className="h-3.5 w-3.5" />
+						Reporte Q
 					</a>
 				)}
 				{!boleta?.boleta_url && !item.reporte_liquidacion_url && (
@@ -813,10 +825,27 @@ function InvestorLiquidacionesPage() {
 	const [editBanco, setEditBanco] = useState("");
 	const [editTipoCuenta, setEditTipoCuenta] = useState("");
 	const [editNumeroCuenta, setEditNumeroCuenta] = useState("");
+	const [editDpiRepLegal, setEditDpiRepLegal] = useState("");
 	const [editMoneda, setEditMoneda] = useState("quetzales");
 	const [editEmiteFactura, setEditEmiteFactura] = useState(false);
 	const [editTipoReinversion, setEditTipoReinversion] = useState("sin_reinversion");
 	const [editMontoReinversion, setEditMontoReinversion] = useState("");
+	// Campo que cartera rechazó (dpi | email | nombre duplicado, o
+	// dpi_rep_legal inexistente): lo manda el backend en err.data.campo para
+	// marcar el input exacto, igual que en el modal de crear.
+	const [campoConError, setCampoConError] = useState<{
+		campo: string;
+		mensaje: string;
+	} | null>(null);
+	const errorEn = (campo: string) => campoConError?.campo === campo;
+	// Al corregir el dato que falló, la marca deja de aplicar.
+	const limpiarError = (campo: string) => {
+		if (errorEn(campo)) setCampoConError(null);
+	};
+	const MensajeCampo = ({ campo }: { campo: string }) =>
+		errorEn(campo) ? (
+			<p className="text-destructive text-xs">{campoConError?.mensaje}</p>
+		) : null;
 
 	const bancosQuery = useQuery({
 		...orpc.getBancosCartera.queryOptions({ input: undefined as never }),
@@ -831,10 +860,12 @@ function InvestorLiquidacionesPage() {
 		setEditBanco(inv.banco_id ? String(inv.banco_id) : "");
 		setEditTipoCuenta(inv.tipoCuenta ?? inv.tipo_cuenta ?? "");
 		setEditNumeroCuenta(inv.numeroCuenta ?? inv.numero_cuenta ?? "");
+		setEditDpiRepLegal(inv.dpiRepLegal ?? inv.dpi_rep_legal ?? "");
 		setEditMoneda(inv.moneda ?? "quetzales");
 		setEditEmiteFactura(inv.emiteFactura ?? inv.emite_factura ?? false);
 		setEditTipoReinversion(inv.tipoReinversion ?? inv.tipo_reinversion ?? "sin_reinversion");
 		setEditMontoReinversion(inv.monto_reinversion ? String(inv.monto_reinversion) : "");
+		setCampoConError(null);
 		setEditOpen(true);
 	};
 
@@ -857,7 +888,17 @@ function InvestorLiquidacionesPage() {
 			});
 		},
 		onError: (err: any) => {
-			toast.error(err?.message ?? "Error al actualizar inversionista");
+			const texto = err?.message ?? "Error al actualizar inversionista";
+			// El id del input va en kebab-case y el campo del backend en
+			// snake_case (dpi_rep_legal → edit-dpi-rep-legal).
+			const campo: string | undefined = err?.data?.campo;
+			if (campo) {
+				setCampoConError({ campo, mensaje: texto });
+				document.getElementById(`edit-${campo.replace(/_/g, "-")}`)?.focus();
+			} else {
+				setCampoConError(null);
+			}
+			toast.error(texto);
 		},
 	});
 
@@ -1427,8 +1468,16 @@ function InvestorLiquidacionesPage() {
 							<Input
 								id="edit-nombre"
 								value={editNombre}
-								onChange={(e) => setEditNombre(e.target.value)}
+								onChange={(e) => {
+									setEditNombre(e.target.value);
+									limpiarError("nombre");
+								}}
+								aria-invalid={errorEn("nombre")}
+								className={
+									errorEn("nombre") ? "border-destructive" : undefined
+								}
 							/>
+							<MensajeCampo campo="nombre" />
 						</div>
 
 						<div className="grid grid-cols-2 gap-3">
@@ -1437,8 +1486,16 @@ function InvestorLiquidacionesPage() {
 								<Input
 									id="edit-dpi"
 									value={editDpi}
-									onChange={(e) => setEditDpi(e.target.value)}
+									onChange={(e) => {
+										setEditDpi(e.target.value);
+										limpiarError("dpi");
+									}}
+									aria-invalid={errorEn("dpi")}
+									className={
+										errorEn("dpi") ? "border-destructive" : undefined
+									}
 								/>
+								<MensajeCampo campo="dpi" />
 							</div>
 							<div className="space-y-1.5">
 								<Label htmlFor="edit-email">Email</Label>
@@ -1446,8 +1503,16 @@ function InvestorLiquidacionesPage() {
 									id="edit-email"
 									type="email"
 									value={editEmail}
-									onChange={(e) => setEditEmail(e.target.value)}
+									onChange={(e) => {
+										setEditEmail(e.target.value);
+										limpiarError("email");
+									}}
+									aria-invalid={errorEn("email")}
+									className={
+										errorEn("email") ? "border-destructive" : undefined
+									}
 								/>
+								<MensajeCampo campo="email" />
 							</div>
 						</div>
 
@@ -1496,6 +1561,28 @@ function InvestorLiquidacionesPage() {
 								value={editNumeroCuenta}
 								onChange={(e) => setEditNumeroCuenta(e.target.value)}
 							/>
+						</div>
+
+						<div className="space-y-1.5">
+							<Label htmlFor="edit-dpi-rep-legal">
+								DPI del representante legal
+							</Label>
+							<Input
+								id="edit-dpi-rep-legal"
+								value={editDpiRepLegal}
+								onChange={(e) => {
+									setEditDpiRepLegal(e.target.value.replace(/\D/g, ""));
+									limpiarError("dpi_rep_legal");
+								}}
+								placeholder="DPI de quien representa a la empresa"
+								maxLength={20}
+								inputMode="numeric"
+								aria-invalid={errorEn("dpi_rep_legal")}
+								className={
+									errorEn("dpi_rep_legal") ? "border-destructive" : undefined
+								}
+							/>
+							<MensajeCampo campo="dpi_rep_legal" />
 						</div>
 
 						<div className="grid grid-cols-2 gap-3">
@@ -1579,6 +1666,10 @@ function InvestorLiquidacionesPage() {
 									banco: editBanco ? Number(editBanco) : null,
 									tipoCuenta: editTipoCuenta || undefined,
 									numeroCuenta: editNumeroCuenta.trim() || undefined,
+									// Siempre el string: vaciar el campo tiene que poder BORRAR el
+									// DPI guardado, y `|| undefined` haría que el valor viejo
+									// sobreviviera sin que el operador se entere.
+									dpiRepLegal: editDpiRepLegal.trim(),
 									moneda: editMoneda as "quetzales" | "dolares",
 									emiteFactura: editEmiteFactura,
 									tipoReinversion: editTipoReinversion,

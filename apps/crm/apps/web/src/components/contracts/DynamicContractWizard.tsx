@@ -6,8 +6,10 @@ import {
 	ChevronRight,
 	Link2,
 	Loader2,
+	TriangleAlert,
 	User,
 	Users,
+	UserX,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -21,6 +23,7 @@ import {
 	AlertDialogHeader,
 	AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -107,6 +110,27 @@ export interface CRMData {
 		correo?: string;
 		genero?: "M" | "F";
 	};
+	// Vendedor del vehículo (Declaración de Vendedor). Opcional: asignarlo en la
+	// oportunidad todavía no es obligatorio.
+	vendedor?: {
+		nombreMayusculas?: string;
+		dpi?: string;
+		dpiLetras?: string;
+	};
+	// Filas de la Carta de Emisión de Cheques, ya formateadas por el servidor
+	// {agencia}: la empresa que vende el carro nuevo
+	agencia?: string;
+	desembolso?: {
+		filas: Array<{ cuenta: string; valor: string }>;
+		sobrantes: number;
+		omitidosPorMoneda: number;
+	};
+	// {empresa} NO se mapea: la API ya lo llena con su propio default
+	// {entidad}/{tipoEntidad}: acreedor = inversionista del análisis del 50%
+	entidad?: {
+		nombre?: string;
+		tipo?: string;
+	};
 	vehiculo: {
 		tipo?: string;
 		marca?: string;
@@ -122,6 +146,7 @@ export interface CRMData {
 		asientos?: string;
 		cilindros?: string;
 		iscv?: string;
+		esNuevo?: boolean;
 	};
 	credito: {
 		capitalAdeudado?: number;
@@ -177,9 +202,11 @@ interface DynamicContractWizardProps {
 		documentNames: string[],
 	) => Promise<{
 		success: boolean;
-		renapData: RenapData;
+		/** null cuando RENAP no tiene a la persona: se usan los datos del CRM */
+		renapData: RenapData | null;
 		documents: Document[];
 		fields: Field[];
+		renapUnavailable?: boolean;
 	}>;
 	onGenerate: (data: {
 		contracts: Array<{
@@ -227,6 +254,22 @@ interface DynamicContractWizardProps {
 const HIDDEN_FIELDS = ["firma", "firmacashin", "signature", "sign"];
 
 // Date-derived fields that are auto-calculated from date pickers
+/**
+ * Datos técnicos del vehículo que el CRM casi nunca tiene (cm3 y cilindros
+ * solo se piden en la inspección; el ISCV es opcional). Cuando faltan se
+ * llenan con un guion para no bloquear la generación.
+ */
+const OPTIONAL_VEHICLE_FIELDS = [
+	"cm3vehiculo",
+	"cilindrosvehiculo",
+	"iscvvehiculo",
+];
+
+const MISSING_FIELD_PLACEHOLDER = "-";
+
+/** Campos que se llenan solo si la oportunidad tiene vendedor asignado. */
+const VENDOR_FIELDS = ["nombrevendedor", "dpivendedor", "dpitextovendedor"];
+
 const DATE_DERIVED_FIELDS = [
 	"diapago",
 	"diatextovencimiento",
@@ -591,6 +634,8 @@ export function DynamicContractWizard({
 
 	// Data from API
 	const [renapData, setRenapData] = useState<RenapData | null>(null);
+	// RENAP no encontró el DPI: los campos se llenaron solo con datos del CRM
+	const [renapUnavailable, setRenapUnavailable] = useState(false);
 	const [documents, setDocuments] = useState<Document[]>([]);
 	const [fields, setFields] = useState<Field[]>([]);
 	const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
@@ -603,6 +648,8 @@ export function DynamicContractWizard({
 	const [coDebtorFields, setCoDebtorFields] = useState<
 		EditableCoDebtorFields[]
 	>([]);
+
+	const touchedFieldsRef = useRef<Set<string>>(new Set());
 
 	// Store generation data for snapshot using ref to avoid state timing issues
 	const generationDataRef = useRef<
@@ -874,7 +921,15 @@ export function DynamicContractWizard({
 				"diciembre",
 			];
 
-			const { cliente, vehiculo, credito } = crmData;
+			const {
+				cliente,
+				vehiculo,
+				credito,
+				vendedor,
+				desembolso,
+				entidad,
+				agencia,
+			} = crmData;
 			const gender = cliente.genero || renapInfo?.gender || "M";
 
 			fieldsData.forEach((field) => {
@@ -1182,6 +1237,85 @@ export function DynamicContractWizard({
 						return;
 				}
 
+				// === VENDEDOR DEL VEHICULO (from CRM) ===
+				switch (fieldKeyLower) {
+					case "nombrevendedor":
+						if (vendedor?.nombreMayusculas) {
+							initialValues[field.key] = vendedor.nombreMayusculas;
+							return;
+						}
+						break;
+					case "dpivendedor":
+						if (vendedor?.dpi) {
+							initialValues[field.key] = vendedor.dpi;
+							return;
+						}
+						break;
+					case "dpitextovendedor":
+						// Mismo helper que "dpitexto" para que los dos DPI del
+						// documento se lean igual.
+						if (vendedor?.dpi) {
+							initialValues[field.key] = dpiToWords(vendedor.dpi);
+							return;
+						}
+						break;
+					case "agencia":
+						// La empresa asignada a la oportunidad. En un usado no aplica y
+						// se resuelve más abajo con un guion.
+						if (vehiculo.esNuevo === true && agencia) {
+							initialValues[field.key] = agencia.toUpperCase();
+							return;
+						}
+						break;
+					case "gendervendedor":
+						// No se puede inferir el género del vendedor desde su registro.
+						break;
+				}
+
+				// === DESEMBOLSO: cheques ya registrados (from CRM) ===
+				switch (fieldKeyLower) {
+					case "cuenta":
+						if (desembolso?.filas[0]) {
+							initialValues[field.key] = desembolso.filas[0].cuenta;
+							return;
+						}
+						break;
+					case "valor":
+						if (desembolso?.filas[0]) {
+							initialValues[field.key] = desembolso.filas[0].valor;
+							return;
+						}
+						break;
+					case "cuenta2":
+						if (desembolso?.filas[1]) {
+							initialValues[field.key] = desembolso.filas[1].cuenta;
+							return;
+						}
+						break;
+					case "valor2":
+						if (desembolso?.filas[1]) {
+							initialValues[field.key] = desembolso.filas[1].valor;
+							return;
+						}
+						break;
+				}
+
+				// === ENTIDAD ACREEDORA (inversionista del 50%) ===
+				switch (fieldKeyLower) {
+					case "entidad":
+						if (entidad?.nombre) {
+							initialValues[field.key] = entidad.nombre;
+							return;
+						}
+						break;
+					case "tipoentidad":
+						if (entidad?.tipo) {
+							initialValues[field.key] = entidad.tipo;
+							return;
+						}
+						break;
+				}
+
 				// === DEFAULT VALUES from API field definition ===
 				if (field.default && field.default.trim()) {
 					initialValues[field.key] = field.default;
@@ -1206,9 +1340,30 @@ export function DynamicContractWizard({
 							return;
 					}
 				}
+
+				// === ÚLTIMO RECURSO: datos técnicos del vehículo ===
+				// Van al final a propósito: si el CRM tiene el dato, o la API define un
+				// default, esos ganan. El guion evita que un dato que nadie tiene
+				// bloquee la generación; cada campo avisa debajo que quedó así.
+				if (OPTIONAL_VEHICLE_FIELDS.includes(fieldKeyLower)) {
+					initialValues[field.key] = MISSING_FIELD_PLACEHOLDER;
+				}
+
+				// La agencia solo aplica a carro nuevo. En un usado no existe, así que
+				// se marca con guion y sin aviso: no es un dato que falte, no aplica.
+				if (fieldKeyLower === "agencia" && vehiculo.esNuevo === false) {
+					initialValues[field.key] = MISSING_FIELD_PLACEHOLDER;
+				}
 			});
 
-			setFieldValues(initialValues);
+			
+			setFieldValues((prev) => {
+				const editadosAMano: Record<string, string> = {};
+				for (const key of touchedFieldsRef.current) {
+					if (prev[key] !== undefined) editadosAMano[key] = prev[key];
+				}
+				return { ...initialValues, ...editadosAMano };
+			});
 		},
 		[crmData, numberToText, moneyToText],
 	);
@@ -1228,6 +1383,17 @@ export function DynamicContractWizard({
 				setDocuments(response.documents);
 				setFields(response.fields);
 				prefillFields(response.fields, response.renapData);
+
+				// RENAP no siempre tiene a la persona aunque el DPI sea correcto:
+				// se sigue con los datos de la oportunidad, pero hay que revisarlos.
+				const sinRenap = response.renapUnavailable ?? !response.renapData;
+				setRenapUnavailable(sinRenap);
+				if (sinRenap) {
+					toast.warning(
+						"RENAP no devolvió datos de este DPI. Los campos se llenaron con la información del CRM: revíselos antes de generar.",
+						{ duration: 8000 },
+					);
+				}
 
 				// Auto-calculate fecha de vencimiento if we have credit data
 				if (crmData.credito?.mesesPrestamo) {
@@ -1254,7 +1420,10 @@ export function DynamicContractWizard({
 						// 50%: ese es el default aquí, en vez del algoritmo por fecha de hoy.
 						diaPagoDefault = `día ${numberToText(diaAnalisis)}`;
 						diaVenc = Math.min(diaAnalisis, diasEnMesVenc);
-						setAnalysisSuggestedDay({ dia: diaAnalisis, label: diaPagoDefault });
+						setAnalysisSuggestedDay({
+							dia: diaAnalisis,
+							label: diaPagoDefault,
+						});
 					} else if (diaActual <= 20) {
 						// Del 1 al 20: día de pago es 15, vencimiento día 15 del mes siguiente
 						diaPagoDefault = "día quince";
@@ -1390,6 +1559,9 @@ export function DynamicContractWizard({
 			? validateInputOnType(field.regex, value)
 			: value;
 
+		// Para que un re-prefill no borre esta corrección
+		touchedFieldsRef.current.add(fieldKey);
+
 		setFieldValues((prev) => ({ ...prev, [fieldKey]: processedValue }));
 
 		// Validate and update errors
@@ -1411,6 +1583,33 @@ export function DynamicContractWizard({
 	);
 
 	// Count filled vs required fields
+	// Campos tecnicos que quedaron con guion: se avisan para que juridico los corrija 
+	// Aviso corto bajo un campo cuando el valor autollenado necesita una
+	// aclaración: dato que el CRM no tiene, o vendedor sin asignar.
+	const avisoDelCampo = (field: Field): string | null => {
+		const key = field.key?.toLowerCase();
+
+		if (
+			OPTIONAL_VEHICLE_FIELDS.includes(key) &&
+			fieldValues[field.key] === MISSING_FIELD_PLACEHOLDER
+		) {
+			return "El CRM no tiene este dato del vehículo.";
+		}
+
+		if (VENDOR_FIELDS.includes(key) && !crmData.vendedor) {
+			return "La oportunidad no tiene vendedor asignado.";
+		}
+
+		if (
+			(key === "cuenta2" || key === "valor2") &&
+			(crmData.desembolso?.sobrantes ?? 0) > 0
+		) {
+			return `Hay ${crmData.desembolso?.sobrantes} cheque(s) más que no caben en la carta.`;
+		}
+
+		return null;
+	};
+
 	const fieldStats = useMemo(() => {
 		const required = relevantFields.filter((f) => f.required);
 		const filledRequired = required.filter((f) => fieldHasValue(f.key));
@@ -1447,16 +1646,46 @@ export function DynamicContractWizard({
 		selectedDocuments.length === documentTypes.length;
 
 	const canProceedStep1 = selectedDocuments.length > 0;
+	const vendorDeclarationSelected = selectedDocuments.includes(
+		"declaracion_vendedor",
+	);
+	const vendorGenderSelected =
+		fieldValues.genderVendedor === "male" ||
+		fieldValues.genderVendedor === "female";
+	const unsupportedDisbursementCount = selectedDocuments.includes(
+		"carta_emision_cheques",
+	)
+		? (crmData.desembolso?.omitidosPorMoneda ?? 0)
+		: 0;
 	const canProceedStep2 =
-		fieldStats.required === 0 ||
-		fieldStats.filledRequired === fieldStats.required;
+		(fieldStats.required === 0 ||
+			fieldStats.filledRequired === fieldStats.required) &&
+		(!vendorDeclarationSelected || vendorGenderSelected) &&
+		unsupportedDisbursementCount === 0;
 
 	const handleNext = async () => {
 		if (step === 1 && canProceedStep1) {
 			await fetchDocumentsData();
 			setStep(2);
-		} else if (step === 2 && canProceedStep2) {
+		} else if (step === 2) {
+			if (unsupportedDisbursementCount > 0) {
+				toast.error(
+					`No se puede generar la carta: ${unsupportedDisbursementCount} cheque(s) no están en GTQ. Corrige la moneda en el detalle de crédito.`,
+				);
+				return;
+			}
+			if (!canProceedStep2) return;
+
 			try {
+				if (vendorDeclarationSelected && !vendorGenderSelected) {
+					setFieldErrors((prev) => ({
+						...prev,
+						genderVendedor: "Selecciona el género del vendedor",
+					}));
+					toast.error("Selecciona el género del vendedor antes de generar");
+					return;
+				}
+
 				// Build contracts payload
 				const clientEmail = crmData.cliente.correo;
 				const hasCoDebtors = coDebtorFields.length > 0;
@@ -1498,8 +1727,7 @@ export function DynamicContractWizard({
 						let isPlural = false;
 
 						if (isVendorDeclaration) {
-							gender =
-								fieldValues.genderVendedor === "female" ? "female" : "male";
+							gender = fieldValues.genderVendedor as "male" | "female";
 							// Vendor declaration is always singular
 							isPlural = false;
 						} else {
@@ -1732,6 +1960,28 @@ export function DynamicContractWizard({
 							</div>
 						) : (
 							<>
+								{unsupportedDisbursementCount > 0 && (
+									<Card className="border-red-300 bg-red-50/70 dark:border-red-900/60 dark:bg-red-950/30">
+										<CardHeader>
+											<CardTitle className="flex items-center gap-2 text-red-900 dark:text-red-200">
+												<TriangleAlert className="h-5 w-5 shrink-0" />
+												Moneda no soportada en desembolsos
+											</CardTitle>
+										</CardHeader>
+										<CardContent>
+											<p className="text-red-800 text-sm dark:text-red-200">
+												Se encontraron {unsupportedDisbursementCount} cheque(s) en
+												una moneda distinta de GTQ. Esos cheques no pueden
+												incluirse correctamente en la carta.
+											</p>
+											<p className="mt-2 text-red-800 text-sm dark:text-red-200">
+												Corrige la moneda en el detalle de crédito antes de
+												generar el contrato.
+											</p>
+										</CardContent>
+									</Card>
+								)}
+
 								{/* RENAP Info */}
 								{renapData && (
 									<Card>
@@ -1766,6 +2016,49 @@ export function DynamicContractWizard({
 														{renapData.gender === "F"
 															? "Femenino"
 															: "Masculino"}
+													</p>
+												</div>
+											</div>
+										</CardContent>
+									</Card>
+								)}
+
+								{/* RENAP no tiene el DPI: se muestran los datos del CRM */}
+								{!renapData && renapUnavailable && (
+									<Card className="border-amber-300 bg-amber-50/70 dark:border-amber-900/60 dark:bg-amber-950/30">
+										<CardHeader>
+											<CardTitle className="flex flex-wrap items-center gap-2 text-amber-900 dark:text-amber-200">
+												<TriangleAlert className="h-5 w-5 shrink-0" />
+												Información del Firmante (datos del CRM)
+												<Badge
+													variant="outline"
+													className="border-amber-400 bg-amber-100 text-amber-900 dark:border-amber-700 dark:bg-amber-900/50 dark:text-amber-100"
+												>
+													Revisar
+												</Badge>
+											</CardTitle>
+										</CardHeader>
+										<CardContent>
+											<div className="flex items-start space-x-4">
+												<div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg border-2 border-amber-400 border-dashed bg-amber-100/60 dark:border-amber-800 dark:bg-amber-900/30">
+													<UserX className="h-7 w-7 text-amber-600 dark:text-amber-400" />
+												</div>
+												<div className="space-y-1">
+													<h3 className="font-semibold">
+														{crmData.cliente.nombreCompleto?.toUpperCase() ||
+															"Sin nombre en el CRM"}
+													</h3>
+													<p className="text-muted-foreground">
+														DPI: {crmData.cliente.dpi || "—"}
+													</p>
+													<p className="text-amber-800 text-sm dark:text-amber-200">
+														<strong>
+															No se encontró este DPI en RENAP, así que no hay
+															foto ni datos oficiales que mostrar.
+														</strong>{" "}
+														Los campos se llenaron con la información de la
+														oportunidad: revíselos antes de generar los
+														contratos.
 													</p>
 												</div>
 											</div>
@@ -1918,12 +2211,15 @@ export function DynamicContractWizard({
 															{/* Input o Select según el campo */}
 															{field.key?.toLowerCase() === "gendervendedor" ? (
 																<select
-																	value={fieldValues[field.key] || "male"}
+																	value={fieldValues[field.key] || ""}
 																	onChange={(e) =>
 																		handleFieldChange(field.key, e.target.value)
 																	}
 																	className={`flex h-9 w-full rounded-md border border-input bg-white px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${hasError ? "border-red-500" : ""}`}
 																>
+																	<option value="" disabled>
+																		Selecciona el género
+																	</option>
 																	<option value="male">Masculino</option>
 																	<option value="female">Femenino</option>
 																</select>
@@ -1939,13 +2235,20 @@ export function DynamicContractWizard({
 															)}
 
 															{/* Error message */}
-															<div className="mt-1 min-h-[20px]">
+															<div className="mt-1 min-h-[20px] space-y-1">
 																{fieldErrors[field.key] && (
 																	<p className="flex items-center gap-1 text-red-600 text-sm">
 																		<AlertCircle className="h-3 w-3" />
 																		{fieldErrors[field.key]}
 																	</p>
 																)}
+																{!fieldErrors[field.key] &&
+																	avisoDelCampo(field) && (
+																		<p className="flex items-center gap-1 text-amber-600 text-xs dark:text-amber-500">
+																			<AlertCircle className="h-3 w-3 shrink-0" />
+																			{avisoDelCampo(field)}
+																		</p>
+																	)}
 															</div>
 														</div>
 													);

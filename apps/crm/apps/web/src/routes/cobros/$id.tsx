@@ -654,10 +654,11 @@ function RouteComponent() {
 									</div>
 									<p className="font-bold text-lg text-orange-600">
 										Q
-										{(
-											caso.cuotaConvenio != null
-												? Number(caso.cuotaConvenio) + Number(caso.cuotaMensual || 0)
-												: Number(caso.montoEnMora) + Number(caso.cuotaMensual || 0)
+										{(caso.cuotaConvenio != null
+											? Number(caso.cuotaConvenio) +
+												Number(caso.cuotaMensual || 0)
+											: Number(caso.montoEnMora) +
+												Number(caso.cuotaMensual || 0)
 										).toLocaleString()}
 									</p>
 								</div>
@@ -753,10 +754,13 @@ function RouteComponent() {
 													Convenio:{" "}
 													<strong>
 														Q
-														{Number(caso.cuotaConvenio ?? 0).toLocaleString("es-GT", {
-															minimumFractionDigits: 2,
-															maximumFractionDigits: 2,
-														})}
+														{Number(caso.cuotaConvenio ?? 0).toLocaleString(
+															"es-GT",
+															{
+																minimumFractionDigits: 2,
+																maximumFractionDigits: 2,
+															},
+														)}
 													</strong>
 												</span>
 												<span>+</span>
@@ -764,10 +768,13 @@ function RouteComponent() {
 													Cuota:{" "}
 													<strong>
 														Q
-														{Number(caso.cuotaMensual || 0).toLocaleString("es-GT", {
-															minimumFractionDigits: 2,
-															maximumFractionDigits: 2,
-														})}
+														{Number(caso.cuotaMensual || 0).toLocaleString(
+															"es-GT",
+															{
+																minimumFractionDigits: 2,
+																maximumFractionDigits: 2,
+															},
+														)}
 													</strong>
 												</span>
 											</div>
@@ -1100,18 +1107,15 @@ function RouteComponent() {
 											).toLocaleString()}
 											placa={caso.vehiculoPlaca || ""}
 											marcaLineaModelo={`${caso.vehiculoMarca || ""} ${caso.vehiculoModelo || ""} ${caso.vehiculoYear || ""}`.trim()}
-											montoAdeudado={(
-												Number(caso.montoEnMora || 0) +
-												Number(caso.cuotaMensual || 0)
-											).toLocaleString("es-GT", {
-												minimumFractionDigits: 2,
-												maximumFractionDigits: 2,
-											})}
+											montoAdeudado={caso.montoAdeudado || ""}
 											cuotasAtraso={caso.cuotasVencidas ?? 0}
 											estadoMora={caso.estadoMora || undefined}
 											fechaInicio={caso.fechaInicio || null}
 											nombreAsesor={caso.asesor?.nombre || ""}
 											telefonoAsesor={caso.asesor?.telefono || ""}
+											expectativaMora={caso.expectativaMora || ""}
+											aseguradora={caso.aseguradora || ""}
+											cabinaSeguro={caso.cabinaSeguro || ""}
 										>
 											<Button className="flex items-center gap-2">
 												<Phone className="h-4 w-4" />
@@ -1136,18 +1140,15 @@ function RouteComponent() {
 											).toLocaleString()}
 											placa={caso.vehiculoPlaca || ""}
 											marcaLineaModelo={`${caso.vehiculoMarca || ""} ${caso.vehiculoModelo || ""} ${caso.vehiculoYear || ""}`.trim()}
-											montoAdeudado={(
-												Number(caso.montoEnMora || 0) +
-												Number(caso.cuotaMensual || 0)
-											).toLocaleString("es-GT", {
-												minimumFractionDigits: 2,
-												maximumFractionDigits: 2,
-											})}
+											montoAdeudado={caso.montoAdeudado || ""}
 											cuotasAtraso={caso.cuotasVencidas ?? 0}
 											estadoMora={caso.estadoMora || undefined}
 											fechaInicio={caso.fechaInicio || null}
 											nombreAsesor={caso.asesor?.nombre || ""}
 											telefonoAsesor={caso.asesor?.telefono || ""}
+											expectativaMora={caso.expectativaMora || ""}
+											aseguradora={caso.aseguradora || ""}
+											cabinaSeguro={caso.cabinaSeguro || ""}
 										>
 											<Button
 												variant="outline"
@@ -1175,18 +1176,15 @@ function RouteComponent() {
 											).toLocaleString()}
 											placa={caso.vehiculoPlaca || ""}
 											marcaLineaModelo={`${caso.vehiculoMarca || ""} ${caso.vehiculoModelo || ""} ${caso.vehiculoYear || ""}`.trim()}
-											montoAdeudado={(
-												Number(caso.montoEnMora || 0) +
-												Number(caso.cuotaMensual || 0)
-											).toLocaleString("es-GT", {
-												minimumFractionDigits: 2,
-												maximumFractionDigits: 2,
-											})}
+											montoAdeudado={caso.montoAdeudado || ""}
 											cuotasAtraso={caso.cuotasVencidas ?? 0}
 											estadoMora={caso.estadoMora || undefined}
 											fechaInicio={caso.fechaInicio || null}
 											nombreAsesor={caso.asesor?.nombre || ""}
 											telefonoAsesor={caso.asesor?.telefono || ""}
+											expectativaMora={caso.expectativaMora || ""}
+											aseguradora={caso.aseguradora || ""}
+											cabinaSeguro={caso.cabinaSeguro || ""}
 										>
 											<Button
 												variant="outline"

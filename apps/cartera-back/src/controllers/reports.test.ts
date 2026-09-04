@@ -1,8 +1,10 @@
 import { describe, expect, it, mock } from "bun:test";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { lockPoolMock } from "../utils/testMocks";
 
 mock.module("../database", () => ({
   db: {},
+  client: {},
   // Requerido por la cadena de imports (addInvestorToCredit → creditoEspejoLock),
   // aunque estos tests no lo usen. Ver testMocks.ts.
   lockPool: lockPoolMock,
@@ -25,7 +27,89 @@ mock.module("@cci/email", () => ({
   sendInvestorAddedToCreditsNotification: mock(() => Promise.resolve()),
 }));
 
-const { applyEstadoCuentaRunningCapital, buildEstadoCuentaTableHeader, renderEstadoCuentaPaymentRow, shouldIncludeEstadoCuentaPayment, sortEstadoCuentaPayments, esStatusExcluidoMora, esStatusSinFacturacion, escalarCapitalAlPrincipal } = await import("./reports");
+const { applyEstadoCuentaRunningCapital, buildCapitalHistoryBeforePeriodLateral, buildEstadoCuentaTableHeader, buildPreviousCapitalBalanceLateral, capitalAtPeriodStartSql, renderEstadoCuentaPaymentRow, resolveCapitalAtPeriodStart, shouldIncludeEstadoCuentaPayment, sortEstadoCuentaPayments, esStatusExcluidoMora, esStatusSinFacturacion, escalarCapitalAlPrincipal } = await import("./reports");
+
+describe("Pagos por Vencimiento: saldo anterior", () => {
+  it("prioriza el capital auditado en cero sobre el saldo positivo legado", () => {
+    expect(
+      resolveCapitalAtPeriodStart({
+        historicalCapital: "0.00",
+        legacyCapital: "7410.25",
+        currentCapital: "-0.01",
+      }),
+    ).toBe("0.00");
+  });
+
+  it("conserva el fallback legado para créditos sin historial de capital", () => {
+    expect(
+      resolveCapitalAtPeriodStart({
+        historicalCapital: null,
+        legacyCapital: "7410.25",
+        currentCapital: "5200.00",
+      }),
+    ).toBe("7410.25");
+  });
+
+  it("no cambia saldos positivos existentes fuera del caso de liquidación", () => {
+    expect(
+      resolveCapitalAtPeriodStart({
+        historicalCapital: "5200.00",
+        legacyCapital: "7410.25",
+        currentCapital: "5200.00",
+      }),
+    ).toBe("7410.25");
+  });
+
+  it("nunca convierte un capital actual negativo en expectativa", () => {
+    expect(
+      resolveCapitalAtPeriodStart({
+        historicalCapital: null,
+        legacyCapital: null,
+        currentCapital: "-0.01",
+      }),
+    ).toBe("0.00");
+  });
+
+  it("lee el último cambio auditado anterior al período en hora de Guatemala", () => {
+    const query = new PgDialect().sqlToQuery(
+      buildCapitalHistoryBeforePeriodLateral("2026-08-01"),
+    );
+
+    expect(query.sql).toContain("cartera.historial_capital_credito");
+    expect(query.sql).toContain("capital_nuevo");
+    expect(query.sql).toContain("AT TIME ZONE 'America/Guatemala'");
+    expect(query.sql).toContain("ORDER BY h.fecha DESC, h.id DESC");
+    expect(query.sql).not.toContain("pagos_credito");
+    expect(query.params).toEqual(["2026-08-01"]);
+  });
+
+  it("mantiene el fallback legado sin ampliar filas de pago elegibles", () => {
+    const query = new PgDialect().sqlToQuery(
+      buildPreviousCapitalBalanceLateral("2026-08-01"),
+    );
+
+    expect(query.sql).toContain("pc_a.total_restante::numeric > 0");
+    expect(query.sql).not.toContain("validation_status");
+    expect(query.sql).not.toContain("fecha_aplicado");
+    expect(query.sql).toContain("pc_a.fecha_boleta::date");
+    expect(query.sql).toContain("pc_a.fecha_pago::date");
+    expect(query.sql).toContain("'1900-01-01'::date");
+    const normalizedSql = query.sql.replace(/\s+/g, " ");
+    const baselineDateExpression =
+      "COALESCE( qcc_a.fecha_vencimiento::date, GREATEST( COALESCE( pc_a.fecha_boleta::date, pc_a.fecha_pago::date, '1900-01-01'::date ), COALESCE( pc_a.fecha_pago::date, pc_a.fecha_boleta::date, '1900-01-01'::date ) ) )";
+    expect(normalizedSql.split(baselineDateExpression)).toHaveLength(3);
+  });
+
+  it("usa el historial solo como guard de liquidación en los totales SQL", () => {
+    const query = new PgDialect().sqlToQuery(capitalAtPeriodStartSql);
+
+    expect(query.sql).toContain(
+      "WHEN capital_historial.capital_nuevo <= 0 THEN 0",
+    );
+    expect(query.sql).toContain("cap_anterior.total_restante");
+    expect(query.sql).toContain("c.capital::numeric");
+  });
+});
 
 describe("estado de cuenta PDF", () => {
   it("incluye la columna de fecha de aplicacion del pago", () => {
@@ -204,6 +288,59 @@ describe("estado de cuenta PDF", () => {
       "115196.94",
       "40196.94",
     ]);
+  });
+
+  it("no resta dos veces el abono a capital cuando la fila ya viene neta (sync Excel)", () => {
+    // Crédito 01010214106990, cuota 35: la sync escribe el mismo total_restante
+    // (ya neto del abono de Q2,440.50) en ambos pagos de la cuota.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 10747, numero_cuota: 33, pagado: true, abono_capital: "1841.92", abono_interes: "850.00", total_restante: "54555.42" },
+      { pago_id: 10748, numero_cuota: 34, pagado: true, abono_capital: "1880.27", abono_interes: "818.33", total_restante: "52234.65" },
+      { pago_id: 144022, numero_cuota: 34, pagado: true, abono_capital: "440.50", total_restante: "52234.65" },
+      { pago_id: 10749, numero_cuota: 35, pagado: true, abono_capital: "1919.26", abono_interes: "783.52", total_restante: "47874.89" },
+      { pago_id: 150049, numero_cuota: 35, pagado: true, abono_capital: "2440.50", total_restante: "47874.89" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["54555.42", "52234.65", "52234.65", "47874.89", "47874.89"]);
+  });
+
+  it("abono puro que llega antes que la cuota regular del mismo mes: saldo corrido real, luego la hermana lo cierra", () => {
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 1, numero_cuota: 29, pagado: true, abono_capital: "3456.78", abono_interes: "900.00", total_restante: "62139.83" },
+      { pago_id: 3, numero_cuota: 30, pagado: true, abono_capital: "440.50", total_restante: "59946.48" },
+      { pago_id: 2, numero_cuota: 30, pagado: true, abono_capital: "1752.85", abono_interes: "850.00", total_restante: "59946.48" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["62139.83", "61699.33", "59946.48"]);
+  });
+
+  it("abono agregado DESPUÉS de la sync no desarma a las filas ya netas de la cuota", () => {
+    // Saldo Q100; sync escribió Q85 (neto de 10+5) en ambas filas; luego entra
+    // un abono de Q2 que hereda el snapshot Q85. Esperado: 85, 85, 83 (no 78).
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 1, numero_cuota: 4, pagado: true, abono_capital: "0.00", abono_interes: "1.00", total_restante: "100.00" },
+      { pago_id: 2, numero_cuota: 5, pagado: true, abono_capital: "10.00", abono_interes: "1.00", total_restante: "85.00" },
+      { pago_id: 3, numero_cuota: 5, pagado: true, abono_capital: "5.00", total_restante: "85.00" },
+      { pago_id: 4, numero_cuota: 5, pagado: true, abono_capital: "2.00", total_restante: "85.00" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["100.00", "85.00", "85.00", "83.00"]);
+  });
+
+  it("primera cuota visible sin saldo previo: siembra la apertura y respeta la fila neta", () => {
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 10749, numero_cuota: 35, pagado: true, abono_capital: "1919.26", abono_interes: "783.52", total_restante: "47874.89" },
+      { pago_id: 150049, numero_cuota: 35, pagado: true, abono_capital: "2440.50", total_restante: "47874.89" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["47874.89", "47874.89"]);
+  });
+
+  it("parcial normal (registerPayment): el cierre solo-capital hereda el saldo de la hermana y SÍ se resta", () => {
+    // La 1a parte cubre interés/servicios + parte del capital; el cierre trae solo
+    // capital y total_restante = el de la hermana (sin restar su propio capital).
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 1, numero_cuota: 10, pagado: true, abono_capital: "1000.00", abono_interes: "500.00", total_restante: "50000.00" },
+      { pago_id: 2, numero_cuota: 11, pagado: true, abono_capital: "600.00", abono_interes: "500.00", total_restante: "49400.00" },
+      { pago_id: 3, numero_cuota: 11, pagado: true, abono_capital: "400.00", total_restante: "49400.00" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["50000.00", "49400.00", "49000.00"]);
   });
 });
 

@@ -1,14 +1,16 @@
-import { and, eq, inArray, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, ne, or, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { db } from "../db";
+import { auditRecord } from "../lib/audit";
 import { user } from "../db/schema/auth";
 import { leads, opportunities } from "../db/schema/crm";
 import { opportunityDocuments } from "../db/schema/documents";
 import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import { vehiclePhotos, vehicles } from "../db/schema/vehicles";
+import { eqDpi } from "../lib/dpi-lookup";
 import { getFileUrl, getFileUrlWithBucketInKey } from "../lib/storage";
+import { normalizarDpi, validarDpi } from "../utils/cui-validation";
 import { getOnlyRenapInfoController } from "./bot";
-import { validarDpi } from "../utils/cui-validation";
 import {
 	createOpportunityForLead,
 	getSalesUserWithLeastLeads,
@@ -30,15 +32,28 @@ async function findLeadByEmailOrDpi(email?: string, dpi?: string) {
 		conditions.push(eq(leads.email, email));
 	}
 	if (dpi && dpi.trim() !== "") {
-		conditions.push(eq(leads.dpi, dpi));
+		conditions.push(eqDpi(leads.dpi, dpi));
 	}
 
-	// Buscar el lead
-	const [lead] = await db
+	// Buscar el lead.
+	// Se traen todos los candidatos en orden estable en vez de un `limit(1)`
+	// suelto: el DPI puede empatar con duplicados que solo difieren en el
+	// formato, y sin orden Postgres puede devolver cualquiera de ellos.
+	const matches = await db
 		.select()
 		.from(leads)
 		.where(or(...conditions))
-		.limit(1);
+		.orderBy(asc(leads.createdAt));
+
+	// El email es la identidad exacta con la que entra el usuario al portal, así
+	// que esa fila manda sobre cualquier empate por DPI. Si no vino email, o
+	// ninguna coincide, se usa la más antigua, que es la que arrastra historial.
+	const leadPorEmail =
+		email && email.trim() !== ""
+			? matches.find((candidate) => candidate.email === email)
+			: undefined;
+
+	const lead = leadPorEmail ?? matches[0];
 
 	if (!lead) {
 		return { error: "Lead no encontrado", status: 404 as const };
@@ -164,7 +179,10 @@ export async function getLeadByEmail(c: Context) {
 export async function updateLeadByEmail(c: Context) {
 	try {
 		const body = await c.req.json();
-		const { email, dpi, address, phone } = body;
+		const { email, dpi: dpiRaw, address, phone } = body;
+		// Se guarda siempre normalizado; si no, el mismo DPI escrito con espacios
+		// queda como un registro distinto y deja de detectarse como duplicado.
+		let dpi: string | undefined = dpiRaw;
 
 		// Buscar el lead usando la función auxiliar (email o dpi como identificadores)
 		const result = await findLeadByEmailOrDpi(email);
@@ -191,6 +209,7 @@ export async function updateLeadByEmail(c: Context) {
 					400,
 				);
 			}
+			dpi = resultadoDpi.dpiLimpio;
 		}
 
 		// Check if new DPI or phone already exists in another lead
@@ -199,7 +218,7 @@ export async function updateLeadByEmail(c: Context) {
 			const orConditions = [];
 
 			if (dpi !== undefined) {
-				orConditions.push(eq(leads.dpi, dpi));
+				orConditions.push(eqDpi(leads.dpi, dpi));
 			}
 
 			if (phone !== undefined) {
@@ -213,7 +232,11 @@ export async function updateLeadByEmail(c: Context) {
 				.limit(1);
 
 			if (conflict) {
-				if (dpi !== undefined && conflict.dpi === dpi) {
+				if (
+					dpi !== undefined &&
+					conflict.dpi &&
+					normalizarDpi(conflict.dpi) === dpi
+				) {
 					return c.json(
 						{
 							success: false,
@@ -266,6 +289,12 @@ export async function updateLeadByEmail(c: Context) {
 				direccion: leads.direccion,
 				updatedAt: leads.updatedAt,
 			});
+		auditRecord({
+			entity: "lead",
+			id: existingLead.id,
+			action: "update",
+			data: updateData,
+		});
 
 		// If address was updated, also update the lead direccion
 		if (address !== undefined && updatedLead) {
@@ -641,7 +670,7 @@ export async function createPortalRegisterLead(c: Context) {
 		const [existingLead] = await db
 			.select()
 			.from(leads)
-			.where(or(eq(leads.email, email), eq(leads.dpi, dpi)))
+			.where(or(eq(leads.email, email), eqDpi(leads.dpi, dpi)))
 			.limit(1);
 
 		if (existingLead) {
@@ -649,12 +678,22 @@ export async function createPortalRegisterLead(c: Context) {
 			const isEmptyEmail =
 				!existingLead.email || existingLead.email.trim() === "";
 
-			if (existingLead.dpi === dpi && isEmptyEmail) {
+			if (
+				existingLead.dpi &&
+				normalizarDpi(existingLead.dpi) === dpi &&
+				isEmptyEmail
+			) {
 				const [updatedLead] = await db
 					.update(leads)
 					.set({ email, updatedAt: new Date() })
 					.where(eq(leads.id, existingLead.id))
 					.returning();
+				auditRecord({
+					entity: "lead",
+					id: existingLead.id,
+					action: "update",
+					data: { email },
+				});
 
 				return c.json({
 					success: true,
@@ -704,6 +743,12 @@ export async function createPortalRegisterLead(c: Context) {
 				updatedAt: new Date(),
 			})
 			.returning();
+		auditRecord({
+			entity: "lead",
+			id: newLead.id,
+			action: "create",
+			data: { email, phone, dpi, assignedTo: salesUserForLead.id },
+		});
 
 		let renapInfo = null;
 		if (dpi) {

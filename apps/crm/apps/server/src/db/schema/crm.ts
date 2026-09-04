@@ -335,6 +335,12 @@ export const opportunities = pgTable("opportunities", {
 	cuotaMensual: decimal("cuota_mensual", { precision: 12, scale: 2 }), // Monthly payment amount
 	fechaInicio: timestamp("fecha_inicio"), // Contract start date
 	diaPagoMensual: integer("dia_pago_mensual"), // Payment day of month (1-31)
+	// Día que el sistema hubiera asignado por default (día≤20→15, día>20→30) al
+	// momento de la asignación de inversión (50%), antes de elegir un día IA.
+	// Se captura una sola vez ahí (depende de qué día es "hoy" en ese instante)
+	// y se usa junto con diaPagoMensual para calcular el ingreso adicional por
+	// fecha ideal de pago.
+	diaPagoOriginalSistema: integer("dia_pago_original_sistema"),
 
 	// Additional fields
 	seguro: decimal("seguro", { precision: 12, scale: 2 }), // Insurance amount

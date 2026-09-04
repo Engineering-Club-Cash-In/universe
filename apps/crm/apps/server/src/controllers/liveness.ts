@@ -7,6 +7,7 @@ import {
 import { eq } from "drizzle-orm";
 import { leads, magicUrls, renapInfo } from "@/db/schema";
 import { db } from "../db";
+import { auditRecord } from "../lib/audit";
 
 const rekognition = new RekognitionClient({
 	region: process.env.AWS_REGION || "us-east-1",
@@ -115,6 +116,12 @@ export const livenessController = {
 					.update(leads)
 					.set({ livenessValidated: true })
 					.where(eq(leads.id, user.leadId));
+				auditRecord({
+					entity: "lead",
+					id: user.leadId,
+					action: "liveness_validated",
+					data: { dpi: userDpi },
+				});
 			}
 
 			return {

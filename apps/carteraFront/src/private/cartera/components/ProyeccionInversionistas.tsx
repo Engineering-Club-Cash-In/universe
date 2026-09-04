@@ -5,6 +5,7 @@ import { Combobox, Transition } from "@headlessui/react";
 import { getInvestors, type InvestorResponse, type CreditoSimulado, type DesgloseMes } from "../services/services";
 import { useSimulacionInversionista } from "../hooks/useSimulacionInversionista";
 import { useQuery } from "@tanstack/react-query";
+import { matchesSearch } from "@/lib/utils";
 
 const MESES = [
   "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -256,7 +257,7 @@ export function ProyeccionInversionistas() {
   const filteredInvestors =
     investorQuery === ""
       ? investors
-      : investors.filter((inv) => inv.nombre.toLowerCase().includes(investorQuery.toLowerCase()));
+      : investors.filter((inv) => matchesSearch(inv.nombre, investorQuery));
   // Backend siempre recibe sin mesLiquidacion — devuelve toda la proyección
   const { data, isLoading, isError, refetch } = useSimulacionInversionista(selectedId, queryEnabled);
 

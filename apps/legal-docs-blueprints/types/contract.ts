@@ -761,6 +761,12 @@ export interface ContractGeneratorOptions {
   /** Directorio de salida */
   outputDir?: string;
 
+  /** Timeout duro (ms) de cada conversión DOCX→PDF en Gotenberg. Default 60000 */
+  pdfTimeoutMs?: number;
+
+  /** Tiempo máximo (ms) que una conversión espera un slot libre antes de fallar. Default 90000 */
+  pdfQueueTimeoutMs?: number;
+
   /** Generar PDF además de DOCX */
   generatePdf?: boolean;
 

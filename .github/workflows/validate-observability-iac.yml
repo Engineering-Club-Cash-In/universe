@@ -1,0 +1,53 @@
+name: Validate observability IaC
+
+on:
+  pull_request:
+    paths:
+      - "infra/observability/victorialogs/**"
+      - ".github/workflows/validate-observability-iac.yml"
+  push:
+    branches:
+      - develop
+    paths:
+      - "infra/observability/victorialogs/**"
+      - ".github/workflows/validate-observability-iac.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: observability-iac-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Podman Compose provider
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes podman podman-compose
+
+      - name: Validate IaC and runtime configs
+        run: infra/observability/victorialogs/scripts/validate.sh
+
+      - name: Run isolated functional smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=infra/observability/victorialogs
+          cleanup() {
+            python -c 'import shutil,sys; shutil.rmtree(sys.argv[1], ignore_errors=True)' "$BASE/central/secrets"
+          }
+          trap cleanup EXIT
+          mkdir -p "$BASE/central/secrets"
+          umask 077
+          printf '%s' 'query-ci' > "$BASE/central/secrets/query_username"
+          openssl rand -hex 24 > "$BASE/central/secrets/query_password"
+          printf '%s' 'ingest-ci' > "$BASE/central/secrets/ingest_username"
+          openssl rand -hex 24 > "$BASE/central/secrets/ingest_password"
+          "$BASE/scripts/smoke-local.sh"

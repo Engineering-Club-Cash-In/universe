@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
 	DISBURSEMENT_SALE_LABEL,
+	formatInsuranceProviderLabel,
 	formatQuotationClientName,
 	formatVehicleWithClient,
 } from "./quotation-display";
@@ -34,5 +35,15 @@ describe("quotation display helpers", () => {
 
 	test("renames inspection line item label", () => {
 		expect(DISBURSEMENT_SALE_LABEL).toBe("Desembolso por venta");
+	});
+
+	test("hides the GyT provider label in the quoter", () => {
+		expect(formatInsuranceProviderLabel("gyt")).toBeNull();
+	});
+
+	test("keeps the Universales provider label in the quoter", () => {
+		expect(formatInsuranceProviderLabel("universales")).toBe(
+			"Seguro: Universales",
+		);
 	});
 });

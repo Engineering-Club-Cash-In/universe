@@ -1,0 +1,525 @@
+{
+  "commit": "56717ddef8f0bbd8c8633172c8ca2c85c248dfd7",
+  "entries": [
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 123,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 124,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 125,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 126,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 136,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 147,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 169,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 191,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 194,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 204,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 236,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 243,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 253,
+      "method": "console.error",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 265,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 266,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 267,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 268,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 269,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 270,
+      "method": "console.log",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.due_date",
+      "outcome": "completed",
+      "rationale": "due_date_update_terminal"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 281,
+      "method": "console.error",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.due_date",
+      "outcome": "failed",
+      "rationale": "due_date_update_failed"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 306,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 307,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 308,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 332,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 374,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 378,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 388,
+      "method": "console.error",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.due_date",
+      "outcome": "failed",
+      "rationale": "due_date_february_repair_failed"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 442,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 443,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 444,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 445,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 446,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 540,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 545,
+      "method": "console.log",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.due_date",
+      "outcome": "completed",
+      "rationale": "due_date_start_change_completed"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 555,
+      "method": "console.error",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.due_date",
+      "outcome": "failed",
+      "rationale": "due_date_start_change_failed"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 599,
+      "method": "console.error",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.due_date",
+      "outcome": "failed",
+      "rationale": "due_date_history_failed"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 660,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 661,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 662,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 667,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 684,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 686,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 688,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 699,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 751,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 755,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 756,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 757,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 758,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 759,
+      "method": "console.log",
+      "classification": "remove",
+      "disposition": "remove",
+      "event": null,
+      "outcome": null,
+      "rationale": "sensitive_or_intermediate_debug_trace"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 760,
+      "method": "console.log",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.due_date",
+      "outcome": "completed",
+      "rationale": "due_date_json_import_completed"
+    },
+    {
+      "path": "apps/cartera-back/src/controllers/updateDueDate.ts",
+      "line": 772,
+      "method": "console.error",
+      "classification": "replace",
+      "disposition": "event",
+      "event": "credit.due_date",
+      "outcome": "failed",
+      "rationale": "due_date_json_import_failed"
+    }
+  ]
+}

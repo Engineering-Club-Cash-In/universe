@@ -34,7 +34,8 @@ import {
   liquidaciones,
   pagos_credito_inversionistas_espejo,
 } from "../database/db/schema";
-import { formatToUSD } from "../utils/functions/currencyConverter";
+import { getTipoCambioUSD } from "../utils/functions/currencyConverter";
+import { convertirReporteAUSD } from "../utils/functions/reporteMoneda";
 import { descuentoImpuestos } from "../utils/functions/taxes";
 import { generarYSubirExcelInversionista } from "../utils/functions/generalFunctions";
 import { resumeInvestor } from "./investor";
@@ -845,6 +846,7 @@ export async function ajustarPagosLiquidacion(input: AjustarPagosLiquidacionInpu
         true,
         liquidacion_id,
         undefined,
+        true, // rawValues: montos en quetzales
       );
 
       if (!result.inversionistas.length) {
@@ -864,14 +866,14 @@ export async function ajustarPagosLiquidacion(input: AjustarPagosLiquidacionInpu
         };
       }
 
-      const inversionista = result.inversionistas[0] as any;
+      const inversionistaQ = result.inversionistas[0] as any;
 
       // Filtrar / ajustar créditos del Excel
       const ajustadoPorIdStr = new Map(
         creditos_ajustados_reporte.map((c) => [c.credito_id, c.monto_ajustado]),
       );
       const creditosFiltrados: any[] = [];
-      for (const c of inversionista.creditos ?? []) {
+      for (const c of inversionistaQ.creditos ?? []) {
         if (excluidosSet.has(c.credito_id)) continue;
         const ajustado = ajustadoPorIdStr.get(c.credito_id);
         if (ajustado != null) {
@@ -880,16 +882,15 @@ export async function ajustarPagosLiquidacion(input: AjustarPagosLiquidacionInpu
           creditosFiltrados.push(c);
         }
       }
-      inversionista.creditos = creditosFiltrados;
+      inversionistaQ.creditos = creditosFiltrados;
 
-      // Subtotales consistentes con el filtro. Recomputados en Q y luego
-      // convertidos a USD si el inversionista usa esa moneda (para que el
-      // Excel los muestre correctamente formateados).
+      // Subtotales consistentes con el filtro, en quetzales. La versión en
+      // dólares se deriva después con convertirReporteAUSD, de una sola pasada
+      // sobre el objeto completo: así el subtotal, los créditos y los pagos se
+      // convierten todos igual y `monto_ajustado` (que se calcula en Q más
+      // arriba) deja de mezclarse con columnas ya convertidas.
       const esDolares = totalesFiltrados.moneda === "dolares";
-      const fmt = (val: Big): number =>
-        esDolares
-          ? formatToUSD(val.toString(), inversionista_id)
-          : Number(val.round(2).toString());
+      const fmt = (val: Big): number => Number(val.round(2).toString());
 
       // Carril descuenta_impuestos: solo con el flag en true; con false nada cambia.
       const totalAbonoIvaShown = totalesFiltrados.descuenta_impuestos
@@ -902,7 +903,7 @@ export async function ajustarPagosLiquidacion(input: AjustarPagosLiquidacionInpu
         ? descuentoImpuestos(totalesFiltrados.total_abono_interes).neto
         : totalesFiltrados.total_abono_interes;
 
-      inversionista.subtotal = {
+      inversionistaQ.subtotal = {
         total_abono_capital: fmt(totalesFiltrados.total_abono_capital),
         total_abono_interes: fmt(totalAbonoInteresShown),
         total_abono_iva: fmt(totalAbonoIvaShown),
@@ -920,13 +921,33 @@ export async function ajustarPagosLiquidacion(input: AjustarPagosLiquidacionInpu
         total_reinversion_interes: fmt(totalesFiltrados.total_reinversion_interes),
       };
 
-      const logoUrl = (import.meta as any).env?.LOGO_URL || "";
-      const filename = `ajuste_liquidados_${liquidacion_id}_${Date.now()}.xlsx`;
-      const { url } = await generarYSubirExcelInversionista(
-        inversionista,
-        filename,
-        logoUrl,
-      );
+      // El reporte principal va en la moneda del inversionista.
+      const inversionista: any = esDolares
+        ? convertirReporteAUSD(inversionistaQ)
+        : inversionistaQ;
+
+      const assetsBaseUrl = process.env.EMAIL_ASSETS_BASE_URL || (import.meta as any).env?.EMAIL_ASSETS_BASE_URL;
+      const logoUrl = assetsBaseUrl ? `${assetsBaseUrl}/isologo-cashin.png` : ((import.meta as any).env?.LOGO_URL || "");
+      const redesUrl = assetsBaseUrl ? `${assetsBaseUrl}/redes-cashin.png` : undefined;
+      const stamp = Date.now();
+      const filename = `ajuste_liquidados_${liquidacion_id}_${stamp}.xlsx`;
+
+      // Para inversionistas en dólares se regenera también la copia en
+      // quetzales, armada con los mismos créditos filtrados. Antes se limpiaba,
+      // y la liquidación quedaba sin copia en Q hasta la siguiente corrida.
+      const filenameGtq = esDolares
+        ? `ajuste_liquidados_${liquidacion_id}_${stamp}_GTQ.xlsx`
+        : null;
+
+      const [excelResult, excelResultGtq] = await Promise.all([
+        generarYSubirExcelInversionista(inversionista, filename, logoUrl, false, redesUrl),
+        filenameGtq
+          ? generarYSubirExcelInversionista(inversionistaQ, filenameGtq, logoUrl, false, redesUrl)
+          : Promise.resolve(null),
+      ]);
+
+      const url = excelResult.url;
+      const urlGtq = excelResultGtq?.url ?? null;
       reporte_url = url;
 
       // En modo aplicar (no dry-run), persistir la nueva URL en la
@@ -935,7 +956,13 @@ export async function ajustarPagosLiquidacion(input: AjustarPagosLiquidacionInpu
       if (!isDryRun) {
         await db
           .update(liquidaciones)
-          .set({ reporte_liquidacion_url: url })
+          .set({
+            reporte_liquidacion_url: url,
+            reporte_liquidacion_url_gtq: urlGtq,
+            tipo_cambio_reporte: esDolares
+              ? String(getTipoCambioUSD(inversionista_id))
+              : null,
+          })
           .where(eq(liquidaciones.liquidacion_id, liquidacion_id));
       }
     } catch (err) {

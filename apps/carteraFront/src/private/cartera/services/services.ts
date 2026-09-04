@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import api from "@/Provider/interceptor";
+import { esDetalleTecnicoCrudo } from "@/lib/apiError";
 import type { PagoFormValues } from "../hooks/registerPayment";
 import type { ReactNode } from "react";
 import type { InstallmentContributionSummary } from "./installmentContribution";
@@ -13,12 +14,19 @@ export const getInvestors = async () => {
 };
 export interface InvestorPayload {
   inversionista_id?: number;
+  /**
+   * "CREATE" activa la creación estricta en cartera: una colisión de
+   * nombre/DPI/email devuelve 409 en vez de convertir el alta en un UPDATE
+   * sobre el inversionista existente (upsert legacy).
+   */
+  operation?: "CREATE";
   nombre: string;
   emite_factura: boolean;
   descuenta_impuestos: boolean;
   reinversion: boolean;
   banco: number | null;
   dpi:number | null;
+  dpi_rep_legal?: string | null;
   tipo_cuenta: string | null;
   re_inversion: string | null;
   numero_cuenta: string | null;
@@ -34,6 +42,7 @@ export interface InvestorResponse {
   descuenta_impuestos: boolean;
   reinversion: boolean;
   banco: string | null;
+  dpi_rep_legal?: string | null;
   tipo_cuenta: string | null;
   numero_cuenta: string | null;
   moneda?: string;
@@ -185,6 +194,8 @@ export interface Credito {
   statusCredit: string; // ACTIVO, CANCELADO, INCOBRABLE
   permite_abono_capital?: boolean;
   no_amortiza_capital?: boolean;
+  // Excluye el crédito de la asignación de capital a inversionistas
+  excluir_compras?: boolean;
   estado_devolucion?: 'NO_APLICA' | 'PENDIENTE_AUTORIZACION' | 'VERIFICADO' | 'RECHAZADO';
 }
 
@@ -456,6 +467,8 @@ export interface Credito {
   mora: string;
   permite_abono_capital?: boolean;
   no_amortiza_capital?: boolean;
+  // Excluye el crédito de la asignación de capital a inversionistas
+  excluir_compras?: boolean;
   estado_devolucion?: 'NO_APLICA' | 'PENDIENTE_AUTORIZACION' | 'VERIFICADO' | 'RECHAZADO';
 }
 
@@ -731,6 +744,15 @@ export interface InversionistaPayload {
    */
   es_nuevo?: boolean;
   tipo_operacion?: "compra_cartera" | "reinversion";
+  tipo_reinversion?:
+    | "sin_reinversion"
+     | "reinversion_capital"
+     | "reinversion_interes"
+     | "reinversion_total"
+     | "reinversion_variable"
+     | "reinversion_excedente";
+  modalidad_facturacion?: ModalidadFacturacion;
+  modalidad_facturacion_spread_id?: number;
 }
 
 export interface UpdateCreditBody {
@@ -769,11 +791,16 @@ export interface UpdateCreditBody {
   // Abono capital
   permite_abono_capital?: boolean;
   no_amortiza_capital?: boolean;
+  // Excluye el crédito de la asignación de capital a inversionistas
+  excluir_compras?: boolean;
   estado_devolucion?: 'NO_APLICA' | 'PENDIENTE_AUTORIZACION' | 'VERIFICADO' | 'RECHAZADO';
   motivo_devolucion?: string;
 
   // Motivo del ajuste manual de capital (se registra en el historial de capital)
   motivo_ajuste_capital?: string;
+  // Motivos separados según tabla fiscal o espejo.
+  motivo_ajuste_monto_aportado_padre?: string;
+  motivo_ajuste_monto_aportado_espejo?: string;
 
   // Inversionistas nuevos
   inversionistas?: InversionistaPayload[];
@@ -1037,6 +1064,12 @@ export async function getInvestorTotalsService(
 // ============================================================
 // calcularPagosEspejo — POST /calcularPagosEspejo
 // ============================================================
+export interface PendingReturnBlockedCredit {
+  credito_id: number;
+  numero_credito_sifco: string;
+  estado_devolucion: "PENDIENTE_AUTORIZACION";
+}
+
 export interface CalcularPagosEspejoResponse {
   success: boolean;
   message: string;
@@ -1083,7 +1116,11 @@ export function formatMensajeFallido(mensaje: string): string {
   if (match) {
     return ERROR_MESSAGES[match[1]] ?? "Error al procesar el crédito. Contacta soporte.";
   }
-  return mensaje;
+  const trimmed = mensaje.trim();
+  if (!trimmed || esDetalleTecnicoCrudo(trimmed)) {
+    return "Error al procesar el crédito. Contacta soporte.";
+  }
+  return trimmed;
 }
 
 // ============================================================
@@ -1241,9 +1278,18 @@ export interface LiquidateByInvestorRequest {
 export interface LiquidateByInvestorResponse {
   message: string;
   updatedCount: number;
+  success?: boolean;
+  warning?: boolean;
+  code?: string;
+  creditos_bloqueados?: PendingReturnBlockedCredit[];
   liquidaciones_creadas?: number;
   inversionistas_saltados?: number;
-  errores?: Array<{ inversionista_id: number; razon: string }>;
+  errores?: Array<{
+    inversionista_id: number;
+    razon: string;
+    code?: string;
+    creditos_bloqueados?: PendingReturnBlockedCredit[];
+  }>;
 }
 export async function liquidateByInvestorService(
   data: LiquidateByInvestorRequest
@@ -2227,6 +2273,8 @@ export interface LiquidacionResumen {
   boleta_pendiente: string | null;
   boleta_liquidacion: BoletaLiquidacion | null;
   reporte_liquidacion_url: string | null;
+  /** Mismo reporte expresado en quetzales. Solo lo tienen los inversionistas en dólares. */
+  reporte_liquidacion_url_gtq?: string | null;
   estado_liquidacion_resumen:
     | "pending"
     | "uploaded"

@@ -48,8 +48,19 @@ test("credit monetary adjustments keep capital and investor reasons separate", (
   );
   // Vaciar la lista se rechaza: `[]` entraba al rebuild y updateInvestors
   // retornaba temprano, devolviendo 200 sin borrar ni auditar la baja.
+  // La lista vacía se rechaza solo en créditos vivos: mergeCreditosAndUpdate
+  // deja el origen CANCELADO sin participaciones, y ahí el payload se ignora.
   expect(controller).toContain(
-    "if (inversionistas?.length === 0 || inversionistas_espejo?.length === 0)",
+    "(inversionistas?.length === 0 || inversionistas_espejo?.length === 0)",
+  );
+  expect(controller).toContain(
+    "!esCreditoFinalizado &&\n      (inversionistas?.length === 0",
+  );
+  expect(controller).toContain(
+    "!esCreditoFinalizado && montoAportadoPadreCambiados.length > 0",
+  );
+  expect(controller).toContain(
+    "!esCreditoFinalizado && montoAportadoEspejoCambiados.length > 0",
   );
   expect(controller).toContain(
     "Un crédito no puede quedarse sin inversionistas",

@@ -1528,12 +1528,28 @@ export const updateCredit = async ({ body, set, request }: any) => {
       return { message: "El motivo del ajuste de capital es obligatorio" };
     }
 
-    // Vaciar la lista dejaría el crédito sin quién aporte su capital: los
+    // Estados de cierre: el crédito se puede editar, pero su calendario de
+    // pagos es historia congelada — la cancelación deja los pagos no pagados
+    // en paymentFalse=true con restantes en 0 (credits.ts) y el caído conserva
+    // solo el desembolso de cuota 0 (fallenCredits.ts), ancla de
+    // repararTotalRestante. Re-proyectarlos resucitaría deuda fantasma.
+    const esCreditoFinalizado =
+      current.statusCredit === "CANCELADO" || current.statusCredit === "CAIDO";
+
+    // Vaciar la lista dejaría un crédito VIVO sin quién aporte su capital: los
     // porcentajes de cash-in e inversión ya no sumarían y no habría a quién
     // liquidar. Sacar un inversionista se hace por su flujo propio
     // (liquidateInvestor / replaceInvestorCredit), que registra la compra y la
     // liquidación; acá se rechaza en vez de aceptarlo en silencio.
-    if (inversionistas?.length === 0 || inversionistas_espejo?.length === 0) {
+    //
+    // En uno finalizado la lista vacía es un estado legítimo: mergeCreditosAndUpdate
+    // traslada las participaciones del origen al destino y deja el origen
+    // CANCELADO sin ninguna (credits.ts). Ahí el payload de inversionistas ya se
+    // ignora más abajo, así que rechazarlo solo bloquearía editar su metadata.
+    if (
+      !esCreditoFinalizado &&
+      (inversionistas?.length === 0 || inversionistas_espejo?.length === 0)
+    ) {
       set.status = 400;
       return {
         message:
@@ -1559,7 +1575,11 @@ export const updateCredit = async ({ body, set, request }: any) => {
       inversionistasPadreActuales,
       inversionistas,
     );
-    const montoAportadoPadreCambia = montoAportadoPadreCambiados.length > 0;
+    // En un crédito finalizado el payload de inversionistas se ignora más abajo
+    // (la participación es historia congelada), así que no se pide motivo por
+    // diferencias que nunca se van a aplicar.
+    const montoAportadoPadreCambia =
+      !esCreditoFinalizado && montoAportadoPadreCambiados.length > 0;
     const motivoMontoAportadoPadre = motivo_ajuste_monto_aportado_padre?.trim();
     if (montoAportadoPadreCambia && !motivoMontoAportadoPadre) {
       set.status = 400;
@@ -1581,7 +1601,8 @@ export const updateCredit = async ({ body, set, request }: any) => {
       inversionistasEspejoActuales,
       inversionistas_espejo,
     );
-    const montoAportadoEspejoCambia = montoAportadoEspejoCambiados.length > 0;
+    const montoAportadoEspejoCambia =
+      !esCreditoFinalizado && montoAportadoEspejoCambiados.length > 0;
     const motivoMontoAportadoEspejo = motivo_ajuste_monto_aportado_espejo?.trim();
     if (montoAportadoEspejoCambia && !motivoMontoAportadoEspejo) {
       set.status = 400;
@@ -1592,14 +1613,6 @@ export const updateCredit = async ({ body, set, request }: any) => {
       await setMontoAportadoAuditContext(db, "PADRE", undefined, []);
       await setMontoAportadoAuditContext(db, "ESPEJO", undefined, []);
     };
-
-    // Estados de cierre: el crédito se puede editar, pero su calendario de
-    // pagos es historia congelada — la cancelación deja los pagos no pagados
-    // en paymentFalse=true con restantes en 0 (credits.ts) y el caído conserva
-    // solo el desembolso de cuota 0 (fallenCredits.ts), ancla de
-    // repararTotalRestante. Re-proyectarlos resucitaría deuda fantasma.
-    const esCreditoFinalizado =
-      current.statusCredit === "CANCELADO" || current.statusCredit === "CAIDO";
 
     // El mínimo es Q1, con una sola excepción: dejar en 0 un crédito que YA
     // está en 0. Cancelar (credits.ts) y reiniciarCredito lo zerean, y el modal

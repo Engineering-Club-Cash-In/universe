@@ -1,24 +1,48 @@
 import { useState } from "react";
 import { IconTarget, Loading } from "@/components";
 import { useQuery } from "@tanstack/react-query";
-import { useAuth } from "@/lib";
 import { getInvestorDocuments, type InvestorDocument } from "../services/investorService";
 import { useIsMobile } from "@/hooks";
 import { DocumentViewerModal } from "./DocumentViewerModal";
+import { useEntidades } from "../hooks/useEntidades";
+import { ErrorCarga } from "../components/ErrorCarga";
+import { CACHE_FICHA } from "../constants/cache";
 
 export const InvestorDocuments = () => {
-  const { user } = useAuth();
   const isMobile = useIsMobile();
   const [selectedDocument, setSelectedDocument] = useState<InvestorDocument | null>(null);
+  const {
+    inversionistaId,
+    isLoading: cargandoEntidades,
+    error: errorEntidades,
+    reintentar: reintentarEntidades,
+  } = useEntidades();
 
-  const { data: documents, isLoading } = useQuery({
-    queryKey: ["investor-documents", user?.email],
-    queryFn: () => getInvestorDocuments(user?.email || ""),
-    enabled: !!user?.email,
+  const {
+    data: documents,
+    isLoading,
+    error: errorDocumentos,
+    refetch,
+  } = useQuery({
+    queryKey: ["investor-documents", inversionistaId],
+    queryFn: () => getInvestorDocuments(inversionistaId!),
+    enabled: !!inversionistaId,
+    ...CACHE_FICHA,
   });
 
-  if (isLoading) {
+  if (cargandoEntidades || (!!inversionistaId && isLoading)) {
     return <Loading />;
+  }
+
+  // Sin esto, un fallo de red se veía igual que "esta entidad no tiene
+  // documentos".
+  if (errorEntidades || errorDocumentos) {
+    return (
+      <ErrorCarga
+        titulo="No pudimos cargar los documentos"
+        onReintentar={() => (errorEntidades ? reintentarEntidades() : refetch())}
+      />
+    );
   }
 
   return (

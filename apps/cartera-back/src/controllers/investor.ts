@@ -489,6 +489,114 @@ export const filaReclamablePorElPortal = <
   return fila;
 };
 
+// ============================================================
+// 🪪 ENTIDADES DEL PORTAL
+// ============================================================
+// Una persona puede operar varios inversionistas: el suyo y el de cada sociedad
+// que representa. El portal solo conoce el correo de la sesión, así que acá se
+// traduce ese correo al conjunto de filas que esa persona puede ver.
+//
+//   set₀ = filas cuyo email es el de la sesión
+//   dpis = { fila.dpi } ∪ { fila.dpi_rep_legal }  para cada fila de set₀
+//   set₁ = set₀ ∪ filas con dpi ∈ dpis OR dpi_rep_legal ∈ dpis
+//
+// El ancla es SIEMPRE el correo guardado en cartera, que solo escribe el staff.
+// Nunca el DPI que el usuario declaró al registrarse en el portal: ese campo no
+// lo verifica nadie, y tomarlo como llave dejaría entrar a las sociedades de
+// cualquiera cuyo DPI se adivine.
+export type EntidadPortal = {
+  inversionista_id: number;
+  nombre: string;
+  tipo: "persona" | "empresa";
+  /** true si esta fila es la que matcheó por correo (la puerta de entrada). */
+  es_ancla: boolean;
+  dpi: string | null;
+  dpi_rep_legal: string | null;
+  email: string | null;
+  moneda: string;
+  status: string;
+};
+
+// `dpi` es bigint y `dpi_rep_legal` varchar guardado tal cual ("04036613").
+// Compararlos como número es lo único que los hace casar — mismo criterio que
+// repLegalExiste.
+const dpiComparable = (valor: unknown): number | null => {
+  if (valor === undefined || valor === null) return null;
+  const limpio = String(valor).replace(/\D/g, "");
+  if (limpio === "") return null;
+  const numero = Number(limpio);
+  return Number.isSafeInteger(numero) ? numero : null;
+};
+
+// La misma normalización, pero del lado de Postgres, para poder comparar la
+// columna varchar contra la lista de DPIs numéricos.
+//
+// El CASE no es adorno: la columna es varchar(20) y el CRM deja escribir 20
+// dígitos, pero bigint aguanta 19. Sin el guard, un dedazo en UNA fila haría
+// reventar la consulta para todos ("bigint out of range").
+const REP_LEGAL_NUMERICO = sql<number>`CASE
+  WHEN regexp_replace(coalesce(${inversionistas.dpi_rep_legal}, ''), '\\D', '', 'g') ~ '^[0-9]{1,18}$'
+  THEN regexp_replace(coalesce(${inversionistas.dpi_rep_legal}, ''), '\\D', '', 'g')::bigint
+END`;
+
+export async function getEntidadesPorCorreo(
+  correo: string
+): Promise<EntidadPortal[]> {
+  const email = correo?.trim().toLowerCase() ?? "";
+  if (!email) return [];
+
+  const ancla = await db
+    .select()
+    .from(inversionistas)
+    .where(condicionInversionistaPorEmail(email));
+
+  if (ancla.length === 0) return [];
+
+  const dpis = new Set<number>();
+  for (const fila of ancla) {
+    const propio = dpiComparable(fila.dpi);
+    if (propio !== null) dpis.add(propio);
+    const rep = dpiComparable(fila.dpi_rep_legal);
+    if (rep !== null) dpis.add(rep);
+  }
+
+  const porId = new Map<number, (typeof ancla)[number]>();
+  for (const fila of ancla) porId.set(fila.inversionista_id, fila);
+  const idsAncla = new Set(porId.keys());
+
+  if (dpis.size > 0) {
+    const lista = [...dpis];
+    const expandidas = await db
+      .select()
+      .from(inversionistas)
+      .where(
+        or(inArray(inversionistas.dpi, lista), inArray(REP_LEGAL_NUMERICO, lista))
+      );
+    for (const fila of expandidas) porId.set(fila.inversionista_id, fila);
+  }
+
+  return [...porId.values()]
+    .map((fila) => ({
+      inversionista_id: fila.inversionista_id,
+      nombre: fila.nombre,
+      // Sin columna que distinga jurídicas: en las sociedades el `dpi` propio
+      // va vacío y el del humano vive en dpi_rep_legal.
+      tipo: (fila.dpi !== null ? "persona" : "empresa") as "persona" | "empresa",
+      es_ancla: idsAncla.has(fila.inversionista_id),
+      dpi: fila.dpi === null ? null : String(fila.dpi),
+      dpi_rep_legal: fila.dpi_rep_legal ?? null,
+      email: fila.email ?? null,
+      moneda: fila.moneda,
+      status: fila.status,
+    }))
+    .sort((a, b) => {
+      // La persona primero: es la entidad con la que el inversionista se
+      // identifica, y suele ser la que quiere ver al entrar.
+      if (a.tipo !== b.tipo) return a.tipo === "persona" ? -1 : 1;
+      return a.nombre.localeCompare(b.nombre, "es");
+    });
+}
+
 export const insertInvestor = async ({ body, set }: any) => {
   try {
     const inversionistasToUpsert = Array.isArray(body) ? body : [body];
@@ -520,12 +628,10 @@ export const insertInvestor = async ({ body, set }: any) => {
     for (let index = 0; index < inversionistasToUpsert.length; index++) {
       const inv = inversionistasToUpsert[index];
 
-      // 🔥 Debe venir DPI o nombre (al menos uno).
-      // Salvo que venga `inversionista_id`: ese identifica la fila mejor que
-      // cualquiera de los dos, y es la forma en que el portal manda sus
-      // ediciones (solo campos de cobro, sin datos de identidad). Sin id sí
-      // hacen falta, porque son los únicos criterios con los que se puede
-      // resolver o crear la fila más abajo.
+      // 🔥 Debe venir DPI o nombre (al menos uno) para poder ubicar o crear la
+      // fila. No aplica cuando el body trae `inversionista_id`: ahí la fila ya
+      // está señalada y el resto de campos son opcionales (es lo que manda el
+      // portal cuando el inversionista cambia solo su cuenta bancaria).
       if (!inv.inversionista_id && !inv.dpi && !inv.nombre?.trim()) {
         errores.push(
           `Inversionista #${index + 1}: debe proporcionar DPI o nombre`
@@ -9232,10 +9338,15 @@ export async function getLiquidaciones({
     conditions.push(eq(liquidaciones.liquidacion_id, liquidacion_id));
   }
 
-   if (!isNullorEmpty(email)) {
-    conditions.push(eq(inversionistas.email, email));
-  } else if (!isNullorEmpty(dpi)) {
-    conditions.push(eq(inversionistas.dpi, parseInt(dpi)));
+  // El id es EXCLUYENTE, no se suma: si se acumulara con el correo, un
+  // inversionista que comparte correo con otra de sus entidades pediría una y
+  // recibiría vacío (las dos condiciones van con AND).
+  if (!inversionista_id) {
+    if (!isNullorEmpty(email)) {
+      conditions.push(eq(inversionistas.email, email));
+    } else if (!isNullorEmpty(dpi)) {
+      conditions.push(eq(inversionistas.dpi, parseInt(dpi)));
+    }
   }
 
 
@@ -9465,13 +9576,21 @@ export async function getLiquidaciones({
  * Obtiene el rendimiento de un inversionista por DPI
  * @param dpi - DPI del inversionista
  */
-export async function getInvestorPerformance(dpi?: string, email?: string) {
-  if (!dpi && !email) {
-    throw new Error("Se requiere al menos 'dpi' o 'email'");
+export async function getInvestorPerformance(
+  dpi?: string,
+  email?: string,
+  inversionistaId?: number
+) {
+  if (!dpi && !email && !inversionistaId) {
+    throw new Error("Se requiere al menos 'inversionista_id', 'dpi' o 'email'");
   }
 
-  // 1️⃣ Buscar inversionista (Prioridad: Email > DPI)
-  const whereClause = email
+  // 1️⃣ Buscar inversionista (Prioridad: id > Email > DPI)
+  // El id manda porque es el único que identifica una fila sola: por correo hay
+  // personas con varias entidades y el .limit(1) de abajo elegiría una al azar.
+  const whereClause = inversionistaId
+    ? eq(inversionistas.inversionista_id, inversionistaId)
+    : email
     ? eq(inversionistas.email, email)
     : eq(inversionistas.dpi, parseInt(dpi!));
 
@@ -9486,7 +9605,12 @@ export async function getInvestorPerformance(dpi?: string, email?: string) {
     .limit(1);
 
   if (!inversionista) {
-    throw new Error(`No se encontró inversionista con ${dpi ? 'DPI: ' + dpi : 'email: ' + email}`);
+    const buscadoPor = inversionistaId
+      ? `id: ${inversionistaId}`
+      : email
+      ? `email: ${email}`
+      : `DPI: ${dpi}`;
+    throw new Error(`No se encontró inversionista con ${buscadoPor}`);
   }
 
   // 2️⃣ Obtener totales de inversiones de forma agregada

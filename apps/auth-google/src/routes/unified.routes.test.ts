@@ -170,6 +170,25 @@ describe("POST /register-external-auth", () => {
   });
 });
 
+// La ruta pública mandaba al CRM el secreto de servicio con datos que elegía
+// quien llamaba, y `createPortalRegisterLead` devuelve el lead ENTERO cuando
+// coincide el correo O el DPI. Cualquiera en internet podía sacar por ahí la
+// ficha de un lead conocido —y, si ese lead tenía el correo vacío, hacer que el
+// CRM le escribiera el suyo.
+describe("POST /register-external (retirada)", () => {
+  it("ya no existe: no hay forma de llegar al CRM sin sesión", async () => {
+    const res = await postJson("/register-external", {
+      userType: "CLIENT",
+      fullName: "Ana Pérez",
+      email: "victima@example.com",
+      dpi: "1234567890123",
+    });
+
+    expect(res.status).toBe(404);
+    expect(payloadExterno).toBeNull();
+  });
+});
+
 describe("POST /bulk-import-investors", () => {
   const conSecreto = { Authorization: "Bearer secreto-de-servicio" };
 

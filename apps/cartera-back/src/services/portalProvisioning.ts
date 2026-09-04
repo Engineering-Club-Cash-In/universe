@@ -189,6 +189,23 @@ export const provisionarInversionista = async (
         );
       }
 
+      // DEPENDE DE QUE EL SELECTOR MULTIENTIDAD YA ESTÉ VIVO.
+      //
+      // El correo que dispara esta llamada no es vago: promete la función.
+      // `PortalCompanyAddedTemplate.tsx` dice "vas a ver esta empresa junto con
+      // lo que ya tenías, y puedes cambiar entre una y otra desde el selector
+      // del portal". Ese selector lo da `getEntidadesPorCorreo`, que NO está en
+      // esta rama: llega con la de multientidad. Sin ella, el representante
+      // recibe el aviso, entra, y ve únicamente su propia ficha.
+      //
+      // Si por lo que sea este camino llega a producción antes que esa
+      // expansión: AJUSTAR LA COPIA del correo, NO suprimir el envío. El aviso
+      // existe solo en el alta: los otros dos llamadores (`soloAsegurarCuenta`
+      // de la reconciliación diaria y `consultarAccesoInversionista`) devuelven
+      // "omitida"/"es_empresa" a propósito, así que no hay reenvío. Retenerlo no
+      // lo aplaza, lo pierde para siempre en toda empresa creada mientras dure
+      // la ventana, y sin backfill posible. Cambiar un ticket de soporte
+      // temporal por un silencio irreversible es mal negocio.
       return llamar(
         "/internal/provisioning/notify-company-added",
         {

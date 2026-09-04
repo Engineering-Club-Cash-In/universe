@@ -6,6 +6,10 @@ import NewCreditEmail from "./templates/NewCreditTemplate";
 import PortalWelcomeEmail from "./templates/PortalWelcomeTemplate";
 import PortalCompanyAddedEmail from "./templates/PortalCompanyAddedTemplate";
 import * as React from "react";
+import {
+  DEFAULT_DEV_RECIPIENT,
+  EMAIL_DELIVERY_MODE,
+} from "./deliveryMode";
 
 import { z } from "zod";
 
@@ -36,11 +40,14 @@ const resend = new Resend(apiKey);
 // Por seguridad, el default es DEV: si la env no está seteada, NO se
 // mandan correos a destinatarios reales.
 // ================================================================
-const SERVER = (process.env.SERVER ?? "DEV").toUpperCase();
-const EMAIL_DEV_RECIPIENT =
-  process.env.EMAIL_DEV_RECIPIENT ?? "jalvarado@clubcashin.com";
+// El modo lo resuelve `deliveryMode.ts` y se exporta: quien manda un correo
+// necesita poder saber si de verdad llegó a su destinatario. Una sola lectura
+// del entorno alimenta el interceptor y el reporte, para que no se contradigan.
+const { server: SERVER, redirige: REDIRIGE, destinatarioUnico } =
+  EMAIL_DELIVERY_MODE;
+const EMAIL_DEV_RECIPIENT = destinatarioUnico ?? DEFAULT_DEV_RECIPIENT;
 
-if (SERVER !== "PROD") {
+if (REDIRIGE) {
   const originalSend = resend.emails.send.bind(resend.emails);
   resend.emails.send = (async (payload: any, options?: any) => {
     const original = { to: payload?.to, cc: payload?.cc, bcc: payload?.bcc };
@@ -57,6 +64,12 @@ if (SERVER !== "PROD") {
     return originalSend(overridden, options);
   }) as typeof resend.emails.send;
 }
+
+export {
+  getEmailDeliveryMode,
+  resolveEmailDeliveryMode,
+  type EmailDeliveryMode,
+} from "./deliveryMode";
 
 // Schema para validación de correo
 const emailSchema = z.string().email({ message: "Formato de correo electrónico inválido" });

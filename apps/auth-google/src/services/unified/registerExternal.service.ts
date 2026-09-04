@@ -7,8 +7,6 @@ import { sendLead } from "../crm/profile.service";
 import {
   CarteraInvestorError,
   createInvestor,
-  findInvestorByEmail,
-  type InvestorProfile,
 } from "../cartera/investor.service";
 import { normalizeDpi } from "../../lib/portalIdentity";
 
@@ -36,12 +34,13 @@ export interface RegisterExternalUserResponse {
 export interface RegisterExternalUserOptions {
   /**
    * Id de la cuenta de auth-google que pide el registro. Solo lo pasa el flujo
-   * autenticado, y hace dos cosas: sella la fila nueva en cartera con esa
-   * cuenta, y habilita reconocer al reintentar la fila que ESE MISMO sello
-   * identifica como propia.
+   * autenticado, y sirve para una cosa: sellar la fila nueva de cartera con esa
+   * cuenta (`creado_por_usuario_portal`, migración 0033).
    *
-   * Sin él no hay reconciliación, y así debe ser en el flujo público: allí
-   * convertiría el 409 en un oráculo de correos y DPIs dados de alta.
+   * Ese sello es lo que permite que el alta sea IDEMPOTENTE, y la decisión la
+   * toma cartera, no este servicio: ante un choque, cartera devuelve la fila
+   * existente solo si lleva esta misma marca, y 409 en cualquier otro caso.
+   * Aquí no queda ninguna reconciliación que mantener.
    */
   usuarioPortalId?: string;
 }
@@ -49,70 +48,6 @@ export interface RegisterExternalUserOptions {
 // ============================================
 // SERVICIO UNIFICADO
 // ============================================
-
-/**
- * Devuelve la fila de cartera que creó ESTA MISMA cuenta del portal Y que
- * corresponde al DPI que se está registrando ahora. `null` en cualquier otro
- * caso.
- *
- * Son dos preguntas distintas y hacen falta las dos:
- *
- * 1. ¿De quién es la fila? Lo responde SOLO la marca de procedencia
- *    (`creado_por_usuario_portal`), que cartera escribe únicamente en el INSERT
- *    del alta. Ningún dato de la fila sirve para esto.
- * 2. ¿Es el mismo registro que se está reintentando? Lo responde el DPI. El
- *    reintento admite un DPI corregido, y ese DPI se escribe en Better Auth
- *    (la reserva ocurre ANTES del alta externa). Aceptar una fila con otro DPI
- *    dejaría cartera con uno y la cuenta del portal con otro, y ese otro puede
- *    pertenecer a un inversionista antiguo.
- *
- * OJO con el orden: el DPI aquí es una comprobación SECUNDARIA sobre una fila
- * cuya propiedad ya quedó probada, no un criterio de identidad. Usarlo para
- * decidir de quién es la fila es justo lo que estaba roto antes (ver abajo).
- * Sobre una fila creada por el portal el dato es fiable, porque el portal no
- * escribe `dpi_rep_legal` y la consulta por correo solo sustituye el DPI cuando
- * ese campo tiene valor; si aun así no coincidiera, se rechaza.
- *
- * Antes se comparaban correo, DPI y nombre, y esa heurística no podía
- * funcionar: coincidir en esos tres campos prueba que una fila TIENE los
- * valores pedidos, no que este registro la haya creado. Peor aún, el DPI que
- * llegaba no era el de la fila: la consulta por correo de cartera devuelve
- * `dpi: dpi_rep_legal` cuando hay representante legal, así que las filas de
- * sociedad —`dpi` NULL, `dpi_rep_legal` puesto, imposibles de crear desde el
- * portal— pasaban la comparación con el DPI del representante. Con el registro
- * por correo sin verificar, bastaba con crear una cuenta con el correo del
- * inversionista y mandar su nombre y ese DPI para quedarse con la fila.
- */
-const recuperarRegistroPropio = async (
-  email: string,
-  usuarioPortalId: string,
-  dpi: string,
-): Promise<InvestorProfile | null> => {
-  let existente: InvestorProfile | null = null;
-
-  try {
-    existente = await findInvestorByEmail(email);
-  } catch {
-    // Un correo ambiguo o un fallo de cartera no permiten afirmar nada.
-    return null;
-  }
-
-  if (!existente) {
-    return null;
-  }
-
-  if (existente.creado_por_usuario_portal !== usuarioPortalId) {
-    return null;
-  }
-
-  // Fail closed: sin DPI en la fila (o con otro) no se puede afirmar que sea
-  // este mismo registro.
-  if (typeof existente.dpi !== "number" || existente.dpi !== Number(dpi)) {
-    return null;
-  }
-
-  return existente;
-};
 
 /**
  * Registrar usuario externo según su tipo
@@ -164,6 +99,13 @@ export const registerExternalUser = async (
       // estricto un DPI, correo o nombre repetido responde 409 y no se toca
       // ninguna fila: enlazar una cuenta del portal con un inversionista que ya
       // existe es una operación de back office, no algo que decida el registro.
+      //
+      // La única excepción la decide cartera y no este servicio: si la fila con
+      // la que se choca lleva la marca de procedencia de ESTA MISMA cuenta,
+      // cartera la devuelve tal cual, sin escribir nada. Eso hace idempotente el
+      // alta —un reintento repite y obtiene la misma fila— y es lo que permitió
+      // borrar de aquí la reconciliación por correo, con su búsqueda, su
+      // comparación de campos y la trampa del `dpi_rep_legal`.
       const result = await createInvestor({
         operation: "CREATE",
         nombre: fullName,
@@ -190,40 +132,12 @@ export const registerExternalUser = async (
   } catch (error) {
     console.error(`Error al registrar usuario externo (${userType}):`, error);
 
-    // El registro toca dos sistemas y no es atómico: cartera puede haber
-    // insertado al inversionista y auth-google caerse (o fallar
-    // `applyRegistrationOutcome`) antes de dejar el DPI y el rol en la cuenta
-    // del portal. Con la creación estricta a secas, el reintento choca contra
-    // la fila que él mismo creó y la cuenta se queda incompleta para siempre.
-    //
-    // Solo se recupera lo que este registro habría creado, y solo en el flujo
-    // autenticado. Nada se escribe en cartera.
-    if (
-      options.usuarioPortalId &&
-      userType === "INVESTOR" &&
-      error instanceof CarteraInvestorError &&
-      error.status === 409
-    ) {
-      const propio = await recuperarRegistroPropio(
-        email,
-        options.usuarioPortalId,
-        dpi,
-      );
-
-      if (propio) {
-        return {
-          success: true,
-          message: "El inversionista ya estaba creado por este mismo registro",
-          userType,
-          data: propio,
-        };
-      }
-    }
-
-    // El motivo exacto de cartera NO sale por aquí. Este servicio lo usa
-    // también `POST /api/unified/register-external`, que no pide sesión:
-    // devolver "ya existe un inversionista con ese DPI" convertiría el registro
-    // en un oráculo para averiguar qué DPIs están dados de alta.
+    // El motivo exacto de cartera NO sale por aquí: "ya existe un inversionista
+    // con ese DPI" convertiría el registro en un oráculo para averiguar qué
+    // DPIs y correos están dados de alta en cartera. El conflicto que el
+    // titular SÍ puede corregir por su cuenta —un DPI que ya pertenece a otra
+    // cuenta del portal— se detecta antes, en la ruta, y se contesta 409 con
+    // `dpi_ya_registrado`.
     if (error instanceof CarteraInvestorError) {
       throw new Error("No se pudo completar el registro del inversionista");
     }

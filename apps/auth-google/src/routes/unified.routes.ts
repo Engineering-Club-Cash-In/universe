@@ -12,8 +12,7 @@ import { requireServiceSecret } from "../lib/serviceAuth";
 import { isPortalUserType, normalizeDpi } from "../lib/portalIdentity";
 import {
   applyRegistrationOutcome,
-  claimDpi,
-  releaseDpiClaim,
+  assertDpiAvailable,
   DpiAlreadyTakenError,
   DpiFormatError,
 } from "../services/portalIdentity.service";
@@ -115,22 +114,22 @@ unifiedRoutes.post("/register-external-auth", requireAuth, async (c) => {
       });
     }
 
-    // El DPI se RESERVA —escribiéndolo— antes de cualquier efecto externo.
+    // Comprobación barata y ANTES del efecto externo: la cuenta de Better Auth
+    // ya existe cuando se llega aquí, así que un DPI que pertenece a otra cuenta
+    // del portal debe cortar el flujo antes de dar de alta nada en CRM/cartera.
     //
-    // El orden importa por dos motivos. Uno: la cuenta de Better Auth ya existe
-    // cuando se llega aquí, y `applyRegistrationOutcome` (que es donde vivía la
-    // única comprobación de DPI duplicado) corre DESPUÉS del alta en
-    // CRM/cartera, así que un DPI ya tomado dejaba el correo ocupado por una
-    // cuenta sin identidad y un registro externo ya creado. Dos: un `SELECT` de
-    // comprobación no excluye nada — dos registros simultáneos con el mismo DPI
-    // libre lo pasaban los dos y el perdedor reventaba al final contra la
-    // restricción única con un 500 genérico. La exclusión la da el índice
-    // único, y para eso hay que escribir.
+    // Es un `SELECT` y no excluye nada; su trabajo es el mensaje, no la
+    // exclusión. Esta ruta ya no reserva el DPI ni lo libera: la exclusión la
+    // dan los índices únicos de cada sistema, y la recuperabilidad la da que el
+    // alta en cartera sea IDEMPOTENTE (ver `usuarioPortalId` más abajo). Si el
+    // registro externo falla, no hay reserva que soltar y el reintento repite la
+    // misma llamada y obtiene la misma fila.
     //
     // Esto no reabre el oráculo de DPIs que se eliminó: ocurre dentro de la
     // operación autenticada, contra el usuario de la sesión, y no como una ruta
-    // que cualquiera pueda consultar.
-    const claim = await claimDpi(user.id, dpi);
+    // que cualquiera pueda consultar. Es la misma señal que ya daba
+    // `POST /api/profile/me/dpi` sobre la propia cuenta.
+    await assertDpiAvailable(user.id, dpi);
 
     // El correo sale SIEMPRE de la sesión: es la identidad de la cuenta sobre
     // la que se van a escribir rol y DPI, así que no puede venir del body.
@@ -142,36 +141,28 @@ unifiedRoutes.post("/register-external-auth", requireAuth, async (c) => {
       phone: body.phone,
     };
 
-    try {
-      // `usuarioPortalId` hace reintentable este flujo: el alta sella la fila
-      // de cartera con la cuenta de la sesión, y si un intento anterior ya la
-      // creó pero no llegó a escribir el DPI/rol del portal, el reintento
-      // reconoce ESA fila por el sello —no por parecerse a lo que se pidió— y
-      // termina la identidad en vez de quedarse en un 409 permanente. Solo
-      // aquí: la ruta pública no manda id y por tanto no reconcilia nada.
-      const result = await registerExternalUser(payload, {
-        usuarioPortalId: user.id,
-      });
+    // `usuarioPortalId` sella la fila de cartera con la cuenta de la sesión
+    // (`creado_por_usuario_portal`). Ese sello es lo que hace reintentable este
+    // flujo, y la decisión la toma CARTERA, que es quien tiene las restricciones
+    // de unicidad: si un intento anterior ya creó la fila pero no llegó a
+    // escribir el DPI/rol del portal, el reintento choca, cartera reconoce la
+    // marca y devuelve esa misma fila sin tocarla, y aquí se termina la
+    // identidad. Cualquier otro choque sigue siendo 409.
+    const result = await registerExternalUser(payload, {
+      usuarioPortalId: user.id,
+    });
 
-      // El rol se escribe aquí, en el servidor, y solo después de que el
-      // registro externo salió bien. El cliente ya no puede fijarlo.
-      // `applyRegistrationOutcome` no asigna roles fuera de los de autoservicio
-      // ni pisa un rol administrativo. El DPI ya quedó puesto por la reserva.
-      const identity = await applyRegistrationOutcome(
-        user.id,
-        payload.userType,
-        payload.dpi,
-      );
+    // El rol se escribe aquí, en el servidor, y solo después de que el registro
+    // externo salió bien. El cliente ya no puede fijarlo.
+    // `applyRegistrationOutcome` no asigna roles fuera de los de autoservicio ni
+    // pisa un rol administrativo.
+    const identity = await applyRegistrationOutcome(
+      user.id,
+      payload.userType,
+      payload.dpi,
+    );
 
-      return c.json({ ...result, identity });
-    } catch (error) {
-      // El registro no llegó a completarse: se suelta la reserva para no dejar
-      // el DPI bloqueado por un alta que nunca ocurrió. Solo se libera lo que
-      // reservó ESTA petición; si la cuenta ya lo traía, se respeta.
-      await releaseDpiClaim(user.id, claim);
-
-      throw error;
-    }
+    return c.json({ ...result, identity });
   } catch (error) {
     if (error instanceof HTTPException) {
       throw error;

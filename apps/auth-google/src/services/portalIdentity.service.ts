@@ -50,121 +50,26 @@ const esViolacionDeUnicidad = (error: unknown): boolean => {
 };
 
 /**
- * Reserva del DPI sobre una cuenta concreta.
- *
- * `previousDpi` es lo que había antes, para poder deshacerla; `claimedNow`
- * distingue la reserva que hizo ESTA petición de la que la cuenta ya traía.
- */
-export type DpiClaim = {
-  dpi: string;
-  previousDpi: string | null;
-  claimedNow: boolean;
-};
-
-/**
- * Reserva el DPI para la cuenta indicada de forma ATÓMICA.
- *
- * Un `SELECT` previo no sirve para esto: dos registros simultáneos con el mismo
- * DPI libre lo pasan los dos, los dos siguen hasta CRM/cartera y el perdedor
- * revienta al final contra la restricción única, con un 500 genérico y la
- * cuenta a medias. Aquí la exclusión la da el índice único: se ESCRIBE el DPI
- * antes de cualquier efecto externo y quien pierde la carrera recibe 23505, que
- * se traduce a `DpiAlreadyTakenError` (409).
- *
- * Si la cuenta ya tiene ese mismo DPI, la reserva se reconoce como propia en
- * vez de chocar consigo misma: es lo que permite reintentar un registro que
- * quedó a medias.
- */
-export async function claimDpi(
-  userId: string,
-  dpi: string,
-): Promise<DpiClaim> {
-  const normalized = normalizeDpi(dpi);
-
-  if (!normalized) {
-    throw new DpiFormatError();
-  }
-
-  const [current] = await db
-    .select({ id: users.id, role: users.role, dpi: users.dpi })
-    .from(users)
-    .where(eq(users.id, userId));
-
-  if (!current) {
-    throw new Error("Usuario no encontrado");
-  }
-
-  // Se guarda ANTES de escribir: es lo que hay que devolver si la reserva se
-  // deshace, y leerlo después de la escritura sería leer el valor nuevo.
-  const previousDpi = current.dpi ?? null;
-
-  // Ya es suya: no hay nada que reservar ni que deshacer después.
-  if (previousDpi === normalized) {
-    return { dpi: normalized, previousDpi: normalized, claimedNow: false };
-  }
-
-  try {
-    await db
-      .update(users)
-      .set({ dpi: normalized, updatedAt: new Date() })
-      .where(eq(users.id, userId));
-  } catch (error) {
-    if (esViolacionDeUnicidad(error)) {
-      throw new DpiAlreadyTakenError();
-    }
-
-    throw error;
-  }
-
-  return { dpi: normalized, previousDpi, claimedNow: true };
-}
-
-/**
- * Deshace una reserva hecha por esta misma petición, para que un registro que
- * no llegó a completarse no deje el DPI bloqueado.
- *
- * No propaga el fallo a propósito: se invoca desde el camino de error y tapar
- * la causa original con el fallo de la limpieza sería peor. Si la liberación
- * falla, el DPI queda reservado en la cuenta de quien lo pidió, y el modo de
- * fallo es benigno: su propio reintento reconoce la reserva como propia
- * (`claimedNow: false`) y sigue adelante.
- *
- * La restauración es un compare-and-set: solo escribe mientras el DPI de la
- * cuenta siga siendo el que reservó ESTA petición. Con dos registros solapados
- * sobre la misma cuenta, el segundo puede reservar y terminar bien después de
- * que el primero leyera su `previousDpi`; si el primero falla, una restauración
- * incondicional le borraría al segundo el DPI que sí quedó bien y dejaría la
- * cuenta desalineada con el registro externo que ya se hizo.
- */
-export async function releaseDpiClaim(
-  userId: string,
-  claim: DpiClaim,
-): Promise<void> {
-  if (!claim.claimedNow) {
-    return;
-  }
-
-  try {
-    await db
-      .update(users)
-      .set({ dpi: claim.previousDpi, updatedAt: new Date() })
-      .where(and(eq(users.id, userId), eq(users.dpi, claim.dpi)));
-  } catch (error) {
-    console.error(
-      `[ERROR] No se pudo liberar la reserva del DPI de la cuenta ${userId}; queda reservado y el titular puede reintentar sobre él.`,
-      error,
-    );
-  }
-}
-
-/**
  * Comprueba que el DPI esté libre para la cuenta indicada y devuelve su forma
  * normalizada. Lanza `DpiFormatError` o `DpiAlreadyTakenError`.
  *
- * Existe como paso independiente para poder detectar el conflicto ANTES de los
- * efectos externos del registro (CRM/cartera). No es un endpoint: se llama
- * siempre dentro de un flujo con sesión y contra el `userId` de esa sesión, así
- * que no reintroduce el oráculo público de DPIs que se eliminó.
+ * Es un `SELECT`, y por tanto NO excluye nada: dos peticiones simultáneas con
+ * el mismo DPI libre lo pasan las dos. No es su trabajo. La exclusión real la
+ * dan los índices únicos —`cartera.inversionistas.dpi` para la fila del
+ * inversionista y `users.dpi` para la identidad del portal—, y `setUserDpi`
+ * traduce ese choque a `DpiAlreadyTakenError` para que el perdedor reciba un
+ * 409 con sentido en vez de un 500 genérico.
+ *
+ * Esto existe solo para el caso común y secuencial: dar un mensaje claro antes
+ * de gastar una llamada a un sistema externo. Aquí vivió una reserva escrita
+ * (`claimDpi`/`releaseDpiClaim` con compare-and-set) que intentaba hacer
+ * recuperable la orquestación entre los tres sistemas; se retiró al volver
+ * idempotente el alta en cartera, que es la única escritura externa que
+ * importa.
+ *
+ * No es un endpoint: se llama siempre dentro de un flujo con sesión y contra el
+ * `userId` de esa sesión, así que no reintroduce el oráculo público de DPIs que
+ * se eliminó.
  */
 export async function assertDpiAvailable(
   userId: string,
@@ -192,14 +97,27 @@ export async function assertDpiAvailable(
 
 /**
  * Fija el DPI de la cuenta indicada. `userId` debe venir de la sesión.
+ *
+ * El `SELECT` de `assertDpiAvailable` no excluye a una petición simultánea, así
+ * que la escritura puede chocar igual contra el índice único. Ese 23505 se
+ * traduce al mismo `DpiAlreadyTakenError` que devuelve la comprobación previa:
+ * quien pierde la carrera recibe un 409 que puede corregir, no un 500 mudo.
  */
 export async function setUserDpi(userId: string, dpi: string): Promise<string> {
   const normalized = await assertDpiAvailable(userId, dpi);
 
-  await db
-    .update(users)
-    .set({ dpi: normalized, updatedAt: new Date() })
-    .where(eq(users.id, userId));
+  try {
+    await db
+      .update(users)
+      .set({ dpi: normalized, updatedAt: new Date() })
+      .where(eq(users.id, userId));
+  } catch (error) {
+    if (esViolacionDeUnicidad(error)) {
+      throw new DpiAlreadyTakenError();
+    }
+
+    throw error;
+  }
 
   return normalized;
 }
@@ -225,9 +143,9 @@ export async function applyRegistrationOutcome(
     throw new Error("Usuario no encontrado");
   }
 
-  // El DPI que queda EN VIGOR, no solo el que escribió esta llamada: cuando el
-  // registro ya lo reservó con `claimDpi`, aquí no hay nada que escribir y
-  // devolver `null` haría parecer que la cuenta se quedó sin DPI.
+  // El DPI que queda EN VIGOR, no solo el que escribió esta llamada: si la
+  // cuenta ya lo traía de un intento anterior, aquí no hay nada que escribir y
+  // devolver `null` haría parecer que se quedó sin DPI.
   let appliedDpi: string | null = current.dpi;
   const normalized = normalizeDpi(dpi);
 

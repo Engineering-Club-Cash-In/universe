@@ -22,7 +22,8 @@ let filaUsuario: Record<string, unknown>[] = [];
 // por DPI en la importación masiva.
 let filasSelect: Record<string, unknown>[][] = [];
 
-// Modelo del índice único de `users.dpi`. Es lo que hace atómica la reserva.
+// Modelo del índice único de `users.dpi`. Es la exclusión REAL: la
+// comprobación previa es solo un SELECT y no excluye nada.
 let dpisReservados = new Set<string>();
 // Escrituras aceptadas sobre la tabla de usuarios.
 let escrituras: Record<string, unknown>[] = [];
@@ -240,8 +241,8 @@ describe("POST /register-external-auth", () => {
   it("con el DPI tomado por otra cuenta responde 409 y no crea nada afuera", async () => {
     sessionActual = sesionDeAna;
     filaUsuario = cuentaDeAna();
-    // El DPI ya pertenece a otra cuenta de Better Auth.
-    dpisReservados.add("1234567890123");
+    // La comprobación previa encuentra el DPI en otra fila de `users`.
+    filasSelect = [[{ id: "otra-cuenta" }]];
 
     const res = await postJson("/register-external-auth", {
       userType: "INVESTOR",
@@ -257,24 +258,11 @@ describe("POST /register-external-auth", () => {
     expect(await res.json()).toMatchObject({ error: "dpi_ya_registrado" });
   });
 
-  it("reserva el DPI ANTES de llamar al servicio externo", async () => {
-    sessionActual = sesionDeAna;
-    filaUsuario = cuentaDeAna();
-    // Si el registro externo se ejecuta, para entonces el DPI ya tiene que
-    // estar escrito: es lo único que hace atómica la reserva.
-    fallaRegistroExterno = Object.assign(new Error("cartera caída"), {});
-
-    await postJson("/register-external-auth", {
-      userType: "INVESTOR",
-      fullName: "Ana Pérez",
-      dpi: "1234567890123",
-    });
-
-    expect(llamadasExternas).toBe(1);
-    expect(escrituras[0]).toMatchObject({ dpi: "1234567890123" });
-  });
-
-  it("libera la reserva si el registro externo falla, para poder reintentar", async () => {
+  // Antes, un fallo del registro externo obligaba a soltar una reserva escrita
+  // del DPI. Ya no hay reserva que soltar: la ruta no escribe NADA hasta que el
+  // alta externa sale bien, y el reintento repite la misma llamada y obtiene la
+  // misma fila porque el alta en cartera es idempotente.
+  it("no escribe identidad si el registro externo falla", async () => {
     sessionActual = sesionDeAna;
     filaUsuario = cuentaDeAna();
     fallaRegistroExterno = new Error("cartera caída");
@@ -286,10 +274,11 @@ describe("POST /register-external-auth", () => {
     });
 
     expect(res.status).toBe(500);
-    // Una reserva que no se libera deja el DPI bloqueado por un registro que
-    // nunca se completó.
-    expect(dpisReservados.has("1234567890123")).toBeFalse();
+    expect(llamadasExternas).toBe(1);
+    expect(escrituras).toEqual([]);
     expect(filaUsuario[0].dpi).toBeNull();
+    // Y el DPI queda libre para el reintento, sin necesitar limpieza.
+    expect(dpisReservados.has("1234567890123")).toBeFalse();
   });
 
   // Una cuenta cuyo registro externo NO salió bien se queda en CLIENT. El rol
@@ -311,9 +300,16 @@ describe("POST /register-external-auth", () => {
     expect(escrituras.some((e) => e.role === "INVESTOR")).toBeFalse();
   });
 
+  // Dos cuentas distintas mandan el mismo DPI libre a la vez. La comprobación
+  // previa es un SELECT y las dos la pasan: no es ella quien excluye.
+  //
+  // El reparto de responsabilidades es el que cambió. Que no se creen DOS
+  // inversionistas lo garantiza el índice único de `cartera.inversionistas.dpi`,
+  // que es de quien depende ahora (aquí el registro externo está falseado, así
+  // que ese caso vive en la suite de cartera). Lo que esta ruta tiene que
+  // garantizar es lo otro: que la perdedora de la carrera por `users.dpi`
+  // reciba un 409 que puede corregir, y no el 500 genérico que daba antes.
   it("dos cuentas con el mismo DPI a la vez: una gana y la otra recibe 409", async () => {
-    // Las dos leen la misma cuenta con el DPI libre, así que las dos pasan
-    // cualquier comprobación que sea solo un SELECT.
     filaUsuario = [{ id: "user-a", role: "CLIENT", dpi: null }];
 
     const cuerpo = {
@@ -329,17 +325,19 @@ describe("POST /register-external-auth", () => {
 
     const estados = [unaRes.status, otraRes.status].sort();
 
-    // Sin reserva atómica las dos autorizan el registro externo y la perdedora
-    // revienta después contra la restricción única con un 500 genérico.
     expect(estados).toEqual([200, 409]);
-    expect(llamadasExternas).toBe(1);
+    expect(await (estados[0] === 409 ? unaRes : otraRes).json()).toMatchObject({
+      error: "dpi_ya_registrado",
+    });
   });
 
-  it("un reintento del mismo usuario no choca contra su propia reserva", async () => {
+  it("un reintento del mismo usuario no choca contra su propio DPI", async () => {
     sessionActual = sesionDeAna;
-    // El intento anterior ya dejó el DPI reservado en esta misma cuenta.
+    // El intento anterior ya dejó el DPI escrito en esta misma cuenta.
     filaUsuario = [{ id: "user-1", role: "CLIENT", dpi: "1234567890123" }];
     dpisReservados.add("1234567890123");
+    // La comprobación previa se excluye a sí misma, así que no encuentra nada.
+    filasSelect = [[]];
 
     const res = await postJson("/register-external-auth", {
       userType: "INVESTOR",

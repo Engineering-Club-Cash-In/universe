@@ -798,6 +798,8 @@ export interface UpdateCreditBody {
 
   // Motivo del ajuste manual de capital (se registra en el historial de capital)
   motivo_ajuste_capital?: string;
+  // Motivo del ajuste de monto aportado (se registra en historial espejo)
+  motivo_ajuste_monto_aportado?: string;
 
   // Inversionistas nuevos
   inversionistas?: InversionistaPayload[];

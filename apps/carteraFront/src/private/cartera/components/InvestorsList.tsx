@@ -196,6 +196,8 @@ export function InvestorsList({
   };
 
   const handleMontoAportadoChange = (index: number, newValue: number) => {
+    if (!Number.isFinite(newValue) || newValue < 0) return;
+
     const invId = Number(investors[index]?.inversionista_id);
 
     // Guardar el monto original solo la primera vez que se edita
@@ -204,6 +206,14 @@ export function InvestorsList({
     }
 
     formik.setFieldValue(`${fieldName}.${index}.monto_aportado`, newValue);
+    // El espejo es la tabla auditada para monto_aportado. Mantenerlo en línea
+    // con el monto visible asegura que el ajuste y su motivo queden trazados.
+    if (investorsMirror[index]) {
+      formik.setFieldValue(
+        `investorsMirror.${index}.monto_aportado`,
+        newValue,
+      );
+    }
 
     if (invId > 0) {
       const saldoOriginal = getOriginalSaldo(invId);
@@ -580,6 +590,8 @@ export function InvestorsList({
                 <Input
                   className="mt-1"
                   type="number"
+                  min={0}
+                  step="0.01"
                   name={`${fieldName}.${index}.monto_aportado`}
                   value={inv.monto_aportado}
                   onFocus={(e) => e.target.select()}
@@ -854,13 +866,25 @@ export function InvestorsList({
                         <Input
                         className={`mt-1 h-9 text-sm border-purple-200 ${isNew ? "bg-gray-100 cursor-not-allowed" : ""}`}
                         type="number"
+                        min={0}
+                        step="0.01"
                         name={`investorsMirror.${index}.monto_aportado`}
                         value={invMirror.monto_aportado}
                         onFocus={(e) => e.target.select()}
-                        onChange={formik.handleChange}
+                        onChange={(e) => {
+                          const value = Number(e.target.value);
+                          if (Number.isFinite(value) && value >= 0) {
+                            formik.setFieldValue(
+                              `investorsMirror.${index}.monto_aportado`,
+                              value,
+                            );
+                          }
+                        }}
                         onBlur={(e) => {
                           const val = Number(e.target.value);
-                          formik.setFieldValue(`investorsMirror.${index}.monto_aportado`, Number(val.toFixed(2)));
+                          if (Number.isFinite(val) && val >= 0) {
+                            formik.setFieldValue(`investorsMirror.${index}.monto_aportado`, Number(val.toFixed(2)));
+                          }
                         }}
                         disabled={isNew}
                         />

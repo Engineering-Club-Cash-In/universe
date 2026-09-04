@@ -28,7 +28,11 @@ import {
 import z from "zod";
 import type { WSCrEstadoCuentaResponse } from "../services/sifco.interface";
 import { consultarEstadoCuentaPrestamo } from "../services/sifcoIntegrations";
-import { withAuditContext, setCapitalSource } from "../utils/withAuditContext";
+import {
+  withAuditContext,
+  setCapitalSource,
+  setMontoAportadoMotivo,
+} from "../utils/withAuditContext";
 import { clasificarCompraCreditoInversionista, tieneConflictoExcedenteVariable } from "./purchaseClassification";
 import { withCreditoEspejoLocks } from "../utils/creditoEspejoLock";
 import {
@@ -492,7 +496,7 @@ const creditUpdateSchema = z.object({
     )
     .min(0)
     .optional(),
-  capital: z.number().nonnegative(),
+  capital: z.number().min(1),
   porcentaje_interes: z.number().min(0).max(100),
   seguro_10_cuotas: z.number().min(0),
   membresias_pago: z.number().min(0),
@@ -512,6 +516,8 @@ const creditUpdateSchema = z.object({
   bandera_reinversion: z.boolean().optional(),
   // Motivo del ajuste manual de capital (se registra en historial_capital_credito).
   motivo_ajuste_capital: z.string().max(500).optional(),
+  // Motivo del ajuste de monto (se registra en historico_monto_aportado_espejo).
+  motivo_ajuste_monto_aportado: z.string().max(500).optional(),
 });
 
 type CreditUpdateData = z.infer<typeof creditUpdateSchema>;
@@ -1478,6 +1484,7 @@ export const updateCredit = async ({ body, set, request }: any) => {
       motivo_devolucion,
       bandera_reinversion,
       motivo_ajuste_capital,
+      motivo_ajuste_monto_aportado,
       ...fieldsToUpdate
     } = parseResult.data;
 
@@ -1495,6 +1502,45 @@ export const updateCredit = async ({ body, set, request }: any) => {
     if (!current) {
       set.status = 400;
       return { message: "Credit not found" };
+    }
+
+    const capitalCambiaSolicitado = !new Big(fieldsToUpdate.capital).eq(
+      new Big(current.capital || 0),
+    );
+    const motivoCapital = motivo_ajuste_capital?.trim();
+    if (capitalCambiaSolicitado && !motivoCapital) {
+      set.status = 400;
+      return { message: "El motivo del ajuste de capital es obligatorio" };
+    }
+
+    const inversionistasEspejoActuales = await db
+      .select({
+        inversionista_id: creditos_inversionistas_espejo.inversionista_id,
+        monto_aportado: creditos_inversionistas_espejo.monto_aportado,
+      })
+      .from(creditos_inversionistas_espejo)
+      .where(eq(creditos_inversionistas_espejo.credito_id, credito_id));
+    const montoEspejoActualPorInversionista = new Map(
+      inversionistasEspejoActuales.map((inversionista) => [
+        inversionista.inversionista_id,
+        inversionista.monto_aportado,
+      ]),
+    );
+    const montoAportadoCambia = (inversionistas_espejo ?? []).some(
+      (inversionista) => {
+        const montoActual = montoEspejoActualPorInversionista.get(
+          inversionista.inversionista_id,
+        );
+        return (
+          montoActual !== undefined &&
+          !new Big(inversionista.monto_aportado).eq(new Big(montoActual))
+        );
+      },
+    );
+    const motivoMontoAportado = motivo_ajuste_monto_aportado?.trim();
+    if (montoAportadoCambia && !motivoMontoAportado) {
+      set.status = 400;
+      return { message: "El motivo del ajuste de monto aportado es obligatorio" };
     }
 
     // Estados de cierre: el crédito se puede editar, pero su calendario de
@@ -1783,7 +1829,7 @@ export const updateCredit = async ({ body, set, request }: any) => {
         db,
         "AJUSTE_MANUAL",
         espejoUserId,
-        motivo_ajuste_capital,
+        motivoCapital,
       );
       [updatedCredit] = await ejecutarUpdateCredito(db);
     } else {
@@ -2019,6 +2065,9 @@ export const updateCredit = async ({ body, set, request }: any) => {
         (inversionistas_espejo && inversionistas_espejo.length > 0) ||
         inversionistasNuevos.length > 0)
     ) {
+      if (montoAportadoCambia && motivoMontoAportado) {
+        await setMontoAportadoMotivo(db, motivoMontoAportado);
+      }
       await runInvestorRebuild(db);
     }
 

@@ -64,6 +64,21 @@ const creditFields = [
 ] as const;
 
 type CreditField = (typeof creditFields)[number];
+const creditFieldGroups: { title: string; fields: CreditField[] }[] = [
+  {
+    title: "Condiciones del crédito",
+    fields: ["capital", "porcentaje_interes", "plazo", "cuota"],
+  },
+  {
+    title: "Contrato y referencia",
+    fields: ["no_poliza", "numero_credito_sifco", "asesor_id", "formato_credito"],
+  },
+  {
+    title: "Cargos mensuales",
+    fields: ["otros", "seguro_10_cuotas", "membresias_pago", "observaciones"],
+  },
+];
+
 const fieldLabels: Record<CreditField, string> = {
   capital: "Capital",
   porcentaje_interes: "Interés (%)",
@@ -194,6 +209,7 @@ export function ModalEditCredit({
       estado_devolucion: safeInitialValues.estado_devolucion ?? "NO_APLICA",
       motivo_devolucion: "",
       motivo_ajuste_capital: "",
+      motivo_ajuste_monto_aportado: "",
       investors: parsedInvestors,
       investorsMirror: parsedInvestorsMirror, // 🆕 Campo para espejo
     },
@@ -227,6 +243,40 @@ export function ModalEditCredit({
             toast.error(String(error));
           }
         });
+        return;
+      }
+
+      const capitalCambia =
+        Number(values.capital) !== Number(safeInitialValues.capital ?? 0);
+      if (!(Number(values.capital) >= 1)) {
+        toast.error("El capital debe ser mayor o igual a 1.");
+        return;
+      }
+      if (capitalCambia && !values.motivo_ajuste_capital?.trim()) {
+        toast.error("Ingresá el motivo del ajuste de capital.");
+        return;
+      }
+
+      const montoAportadoCambia = values.investorsMirror.some((inversionista) => {
+        const original = parsedInvestorsMirror.find(
+          (item) =>
+            Number(item.inversionista_id) ===
+            Number(inversionista.inversionista_id),
+        );
+        return (
+          original !== undefined &&
+          Number(original.monto_aportado) !== Number(inversionista.monto_aportado)
+        );
+      });
+      if (
+        values.investors.some((inversionista) => Number(inversionista.monto_aportado) < 0) ||
+        values.investorsMirror.some((inversionista) => Number(inversionista.monto_aportado) < 0)
+      ) {
+        toast.error("El monto aportado no puede ser negativo.");
+        return;
+      }
+      if (montoAportadoCambia && !values.motivo_ajuste_monto_aportado?.trim()) {
+        toast.error("Ingresá el motivo del ajuste de monto aportado.");
         return;
       }
 
@@ -329,8 +379,12 @@ export function ModalEditCredit({
             : undefined,
         // Motivo del ajuste manual de capital: solo si el capital realmente cambió
         motivo_ajuste_capital:
-          Number(values.capital) !== Number(safeInitialValues.capital ?? 0)
+          capitalCambia
             ? values.motivo_ajuste_capital?.trim() || undefined
+            : undefined,
+        motivo_ajuste_monto_aportado:
+          montoAportadoCambia
+            ? values.motivo_ajuste_monto_aportado?.trim() || undefined
             : undefined,
 
         // Lista Principal. Los nuevos viajan con es_nuevo + tipo_operacion para
@@ -393,7 +447,7 @@ export function ModalEditCredit({
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent
         onInteractOutside={(e) => e.preventDefault()}
-        className="max-w-3xl w-full bg-white text-gray-800 shadow-2xl border border-blue-100 p-0"
+        className="w-[calc(100vw-2rem)] max-w-7xl bg-white text-gray-800 shadow-2xl border border-blue-100 p-0 sm:w-[calc(100vw-3rem)]"
         style={{
           maxHeight: "94vh",
           display: "flex",
@@ -409,7 +463,7 @@ export function ModalEditCredit({
 
         {/* Scrollable content container */}
         <div
-          className="flex-1 overflow-y-auto px-6 pb-4"
+          className="flex-1 overflow-y-auto px-6 pb-6 lg:px-8"
           style={{ maxHeight: "75vh" }}
         >
           <Button
@@ -491,11 +545,22 @@ export function ModalEditCredit({
           >
             {/* Datos del crédito */}
             <div className="space-y-4">
-              <h3 className="text-lg font-bold text-blue-800 mb-2">
-                Información del Crédito
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {creditFields.map((name) => {
+              <div>
+                <h3 className="text-lg font-bold text-blue-800">
+                  Información del Crédito
+                </h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  Condiciones, referencias y cargos del crédito.
+                </p>
+              </div>
+              {creditFieldGroups.map(({ title, fields }) => (
+                <section
+                  key={title}
+                  className="rounded-xl border border-blue-100 bg-blue-50/40 p-4"
+                >
+                  <h4 className="text-sm font-bold text-blue-800">{title}</h4>
+                  <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    {fields.map((name) => {
                   if (name === "asesor_id") {
                     return (
                       <div key={name} className="flex flex-col gap-1">
@@ -620,7 +685,11 @@ export function ModalEditCredit({
                           formik.handleBlur(e);
                           if (!["observaciones", "no_poliza", "numero_credito_sifco", "formato_credito"].includes(name)) {
                             const val = Number(e.target.value);
-                            formik.setFieldValue(name, Number(val.toFixed(2)));
+                            const normalizedVal =
+                              name === "capital"
+                                ? Math.max(1, val)
+                                : val;
+                            formik.setFieldValue(name, Number(normalizedVal.toFixed(2)));
                           }
                         }}
                         className={`border-blue-200 text-gray-800 ${name === "cuota" && nuevaCuota !== null ? "bg-green-50 border-green-400 ring-2 ring-green-200" : "bg-blue-50"}`}
@@ -632,7 +701,9 @@ export function ModalEditCredit({
                             "formato_credito",
                           ].includes(name)
                             ? undefined
-                            : 0
+                            : name === "capital"
+                              ? 1
+                              : 0
                         }
                         step="any"
                       />
@@ -643,8 +714,10 @@ export function ModalEditCredit({
                       )}
                     </div>
                   );
-                })}
-              </div>
+                    })}
+                  </div>
+                </section>
+              ))}
 
               {/* Motivo del ajuste de capital: aparece solo cuando el capital cambió */}
               {Number(formik.values.capital ?? 0) !==
@@ -678,7 +751,9 @@ export function ModalEditCredit({
 
             {/* Opciones del crédito */}
             <div className="mt-4 p-4 rounded-xl border border-blue-100 bg-blue-50/50 space-y-4">
-              <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold text-blue-800">Opciones del crédito</h3>
+              <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+              <div className="flex items-center justify-between rounded-lg border border-blue-100 bg-white/80 px-4 py-3">
                 <div>
                   <Label className="text-gray-800 font-bold text-sm">
                     Permite Abono a Capital
@@ -713,7 +788,7 @@ export function ModalEditCredit({
                 </button>
               </div>
 
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between rounded-lg border border-blue-100 bg-white/80 px-4 py-3">
                 <div>
                   <Label className="text-gray-800 font-bold text-sm">
                     Crédito solo interés (no amortiza capital)
@@ -748,7 +823,7 @@ export function ModalEditCredit({
                 </button>
               </div>
 
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between rounded-lg border border-blue-100 bg-white/80 px-4 py-3">
                 <div>
                   <Label className="text-gray-800 font-bold text-sm">
                     Excluir de compras a inversionistas
@@ -783,7 +858,7 @@ export function ModalEditCredit({
                 </button>
               </div>
 
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between rounded-lg border border-blue-100 bg-white/80 px-4 py-3">
                 <div className="space-y-1">
                   <Label className="text-gray-800 font-bold text-sm">
                     Solicitar devolución de crédito
@@ -820,7 +895,7 @@ export function ModalEditCredit({
                 </button>
               </div>
               {formik.values.estado_devolucion === 'PENDIENTE_AUTORIZACION' && (
-                <div className="mt-2">
+                <div className="xl:col-span-2">
                   <Label className="text-gray-700 font-medium">Motivo de devolución *</Label>
                   <Input
                     type="text"
@@ -837,14 +912,15 @@ export function ModalEditCredit({
                   )}
                 </div>
               )}
+              </div>
             </div>
 
             {/* Datos del usuario */}
-            <div className="space-y-4 mt-4">
-              <h3 className="text-lg font-bold text-blue-800 mb-2">
+            <div className="space-y-4 mt-4 rounded-xl border border-blue-100 bg-blue-50/40 p-4">
+              <h3 className="text-lg font-bold text-blue-800">
                 Datos del Usuario
               </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
                 {userFields.map((name) => (
                   <div key={name} className="flex flex-col gap-1">
                     <Label className="text-gray-700 font-medium">
@@ -902,6 +978,34 @@ export function ModalEditCredit({
               }}
               blockedInvestorIds={originalInvestorIds}
             />
+
+            {formik.values.investorsMirror.some((inversionista) => {
+              const original = parsedInvestorsMirror.find(
+                (item) =>
+                  Number(item.inversionista_id) ===
+                  Number(inversionista.inversionista_id),
+              );
+              return (
+                original !== undefined &&
+                Number(original.monto_aportado) !== Number(inversionista.monto_aportado)
+              );
+            }) && (
+              <div className="mt-3 p-3 rounded-lg border border-purple-200 bg-purple-50">
+                <Label className="text-purple-800 font-medium">
+                  Motivo del ajuste de monto aportado
+                </Label>
+                <Input
+                  type="text"
+                  name="motivo_ajuste_monto_aportado"
+                  value={formik.values.motivo_ajuste_monto_aportado || ""}
+                  onChange={formik.handleChange}
+                  onBlur={formik.handleBlur}
+                  placeholder="¿Por qué se está ajustando el monto aportado? (queda en historial espejo)"
+                  className="mt-1 border-purple-300 bg-white"
+                />
+              </div>
+            )}
+
           </form>
         </div>
 

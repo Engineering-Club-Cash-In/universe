@@ -62,3 +62,17 @@ export async function setCapitalSource(
     await tx.execute(sql`select set_config('app.capital_motivo', ${motivo}, true)`);
   }
 }
+
+/**
+ * Contexto para el trigger de historico_monto_aportado_espejo. Debe correr en
+ * la misma transacción que el rebuild del espejo para que cada fila de
+ * auditoría reciba únicamente el motivo de su propio ajuste de monto.
+ */
+export async function setMontoAportadoMotivo(
+  tx: SqlExecutor,
+  motivo: string,
+): Promise<void> {
+  await tx.execute(
+    sql`select set_config('app.monto_aportado_motivo', ${motivo}, true)`,
+  );
+}

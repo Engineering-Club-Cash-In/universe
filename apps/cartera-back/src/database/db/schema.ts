@@ -2028,6 +2028,7 @@
       platform_user_id: integer("platform_user_id").references(() => platform_users.id, { onDelete: "set null" }),
       user_email: varchar("user_email", { length: 200 }),
       source: text("source").notNull().default("unknown"),
+      motivo: text("motivo"),
       fecha: timestamp("fecha", { withTimezone: true }).notNull().defaultNow(),
     },
     (t) => ({

@@ -10,21 +10,65 @@ let sessionActual: {
 
 // Payload con el que la ruta invocó al registro externo.
 let payloadExterno: RegisterExternalUserPayload | null = null;
-// DPI con el que la ruta escribió la identidad del portal.
-let dpiAplicado: string | null = null;
+
+// Filas que devuelve el `select` de la BD de Better Auth, en orden de consulta.
+let filasSelect: Record<string, unknown>[][] = [];
+// Escrituras que hizo la ruta sobre la tabla de usuarios.
+let escrituras: Record<string, unknown>[] = [];
+// Ids de usuario borrados (el rollback de la importación masiva).
+let borrados: unknown[] = [];
+// Simula el choque contra la restricción única de `users.dpi`.
+let updateFalla = false;
+// Altas que pidió la importación masiva a Better Auth.
+let altas: { name: string; email: string }[] = [];
 
 mock.module("../config/env", () => ({
   env: { INTERNAL_API_SECRET: "secreto-de-servicio" },
 }));
 
+// La BD se falsea a nivel de conexión, no de servicio: así el test ejercita el
+// `portalIdentity.service` de verdad, que es donde vive la comprobación de DPI
+// duplicado.
 mock.module("../db/connection", () => ({
-  db: {},
+  db: {
+    select: () => ({
+      from: () => ({
+        where: () => Promise.resolve(filasSelect.shift() ?? []),
+      }),
+    }),
+    update: () => ({
+      set: (valores: Record<string, unknown>) => ({
+        where: () => {
+          if (updateFalla) {
+            return Promise.reject(
+              new Error(
+                'duplicate key value violates unique constraint "users_dpi_unique"',
+              ),
+            );
+          }
+
+          escrituras.push(valores);
+          return Promise.resolve();
+        },
+      }),
+    }),
+    delete: () => ({
+      where: (condicion: unknown) => {
+        borrados.push(condicion);
+        return Promise.resolve();
+      },
+    }),
+  },
 }));
 
 mock.module("../lib/auth", () => ({
   auth: {
     api: {
       getSession: () => Promise.resolve(sessionActual),
+      signUpEmail: ({ body }: { body: { name: string; email: string } }) => {
+        altas.push({ name: body.name, email: body.email });
+        return Promise.resolve({ user: { id: `nuevo-${body.email}` } });
+      },
     },
   },
 }));
@@ -40,13 +84,6 @@ mock.module("../services/unified", () => ({
   },
 }));
 
-mock.module("../services/portalIdentity.service", () => ({
-  applyRegistrationOutcome: (_userId: string, userType: string, dpi: string) => {
-    dpiAplicado = dpi;
-    return Promise.resolve({ dpi, role: userType });
-  },
-}));
-
 let app: Hono;
 
 beforeAll(async () => {
@@ -56,24 +93,35 @@ beforeAll(async () => {
   app.route("/api/unified", unifiedRoutes);
 });
 
-const postJson = (path: string, body: unknown) =>
+const postJson = (path: string, body: unknown, headers: Record<string, string> = {}) =>
   app.request(`http://localhost/api/unified${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...headers },
     body: JSON.stringify(body),
   });
 
-describe("POST /register-external-auth", () => {
-  beforeEach(() => {
-    sessionActual = null;
-    payloadExterno = null;
-    dpiAplicado = null;
-  });
+const sesionDeAna = {
+  user: { id: "user-1", name: "Ana Pérez", email: "ana@example.com" },
+};
 
+/** La cuenta de la sesión, tal como la lee `applyRegistrationOutcome`. */
+const cuentaDeAna = { id: "user-1", role: "CLIENT", dpi: null };
+
+beforeEach(() => {
+  sessionActual = null;
+  payloadExterno = null;
+  filasSelect = [];
+  escrituras = [];
+  borrados = [];
+  altas = [];
+  updateFalla = false;
+});
+
+describe("POST /register-external-auth", () => {
   it("normaliza el DPI con separadores antes de tocar el sistema externo", async () => {
-    sessionActual = {
-      user: { id: "user-1", name: "Ana Pérez", email: "ana@example.com" },
-    };
+    sessionActual = sesionDeAna;
+    // 1) la cuenta de la sesión, 2) DPI libre (dentro de setUserDpi)
+    filasSelect = [[cuentaDeAna], []];
 
     const res = await postJson("/register-external-auth", {
       userType: "INVESTOR",
@@ -85,13 +133,13 @@ describe("POST /register-external-auth", () => {
     // Cartera hace `parseInt` sobre este valor: con los separadores crudos
     // registraría el DPI 1234 mientras Better Auth guarda los 13 dígitos.
     expect(payloadExterno?.dpi).toBe("1234567890123");
-    expect(dpiAplicado).toBe("1234567890123");
+    expect(escrituras).toContainEqual(
+      expect.objectContaining({ dpi: "1234567890123" }),
+    );
   });
 
   it("rechaza un DPI que no llega a 13 dígitos", async () => {
-    sessionActual = {
-      user: { id: "user-1", name: "Ana Pérez", email: "ana@example.com" },
-    };
+    sessionActual = sesionDeAna;
 
     const res = await postJson("/register-external-auth", {
       userType: "INVESTOR",
@@ -101,5 +149,93 @@ describe("POST /register-external-auth", () => {
 
     expect(res.status).toBe(400);
     expect(payloadExterno).toBeNull();
+  });
+
+  it("rechaza sin sesión", async () => {
+    const res = await postJson("/register-external-auth", {
+      userType: "INVESTOR",
+      fullName: "Ana Pérez",
+      dpi: "1234567890123",
+    });
+
+    expect(res.status).toBe(401);
+    expect(payloadExterno).toBeNull();
+  });
+});
+
+describe("POST /bulk-import-investors", () => {
+  const conSecreto = { Authorization: "Bearer secreto-de-servicio" };
+
+  const importar = (filas: unknown[]) =>
+    postJson("/bulk-import-investors", filas, conSecreto);
+
+  const unaFila = [
+    { nombre: "Ana Pérez", dpi: "1234567890123", correo: "ana@example.com" },
+  ];
+
+  it("crea la cuenta y la deja como INVESTOR con su DPI", async () => {
+    // Correo libre, DPI libre.
+    filasSelect = [[], []];
+
+    const res = await importar(unaFila);
+    const cuerpo = (await res.json()) as { exitosos: number };
+
+    expect(cuerpo.exitosos).toBe(1);
+    expect(altas).toHaveLength(1);
+    expect(escrituras).toContainEqual({
+      role: "INVESTOR",
+      dpi: "1234567890123",
+    });
+  });
+
+  it("no crea la cuenta si el DPI ya pertenece a otro usuario", async () => {
+    // Correo libre, pero el DPI ya está tomado por otra fila de `users`.
+    filasSelect = [[], [{ id: "otro-usuario" }]];
+
+    const res = await importar(unaFila);
+    const cuerpo = (await res.json()) as {
+      omitidos: number;
+      omitidosDetalle: { motivo: string }[];
+    };
+
+    // El alta iba PRIMERO y el DPI se escribía después: la restricción única
+    // reventaba el update y dejaba una cuenta huérfana como CLIENT, con una
+    // contraseña aleatoria que nadie conoce y que el propio importador ya no
+    // podía terminar (el chequeo de correo la marcaba "omitido" para siempre).
+    expect(altas).toHaveLength(0);
+    expect(cuerpo.omitidos).toBe(1);
+    expect(cuerpo.omitidosDetalle[0].motivo).toContain("DPI");
+  });
+
+  it("borra la cuenta recién creada si la escritura del DPI falla", async () => {
+    // Las dos comprobaciones pasan y aun así el update choca: es la carrera
+    // entre dos filas del mismo lote con el mismo DPI.
+    filasSelect = [[], []];
+    updateFalla = true;
+
+    const res = await importar(unaFila);
+    const cuerpo = (await res.json()) as { fallidos: number };
+
+    expect(cuerpo.fallidos).toBe(1);
+    // Sin rollback, la cuenta a medias bloquea el reintento para siempre.
+    expect(borrados).toHaveLength(1);
+  });
+
+  it("sigue omitiendo un correo que ya existe sin tocarlo", async () => {
+    filasSelect = [[{ id: "ya-existe" }]];
+
+    const res = await importar(unaFila);
+    const cuerpo = (await res.json()) as { omitidos: number };
+
+    expect(cuerpo.omitidos).toBe(1);
+    expect(altas).toHaveLength(0);
+    expect(borrados).toHaveLength(0);
+  });
+
+  it("rechaza sin el secreto de servicio", async () => {
+    const res = await postJson("/bulk-import-investors", unaFila);
+
+    expect(res.status).toBe(401);
+    expect(altas).toHaveLength(0);
   });
 });

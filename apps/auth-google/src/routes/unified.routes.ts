@@ -236,6 +236,32 @@ unifiedRoutes.post(
       };
     }
 
+    // El DPI se comprueba ANTES del alta.
+    //
+    // `users.dpi` es único y no viaja en el alta de Better Auth, así que el
+    // orden anterior (crear y después escribir el DPI) reventaba el update
+    // contra la restricción y dejaba una cuenta huérfana: CLIENT, sin DPI y
+    // con una contraseña aleatoria que nadie conoce. Peor todavía, el chequeo
+    // de correo de arriba marcaba todo reintento como "omitido", así que el
+    // importador no podía terminar nunca a ese inversionista.
+    if (cleanDpi?.trim()) {
+      const [dpiTomado] = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.dpi, cleanDpi));
+
+      if (dpiTomado) {
+        return {
+          correo: email,
+          nombre,
+          dpi: cleanDpi,
+          status: "omitido" as const,
+          motivo:
+            "El DPI ya pertenece a otra cuenta; se omite para no crear una cuenta a medias.",
+        };
+      }
+    }
+
     // Credencial aleatoria que no se comunica a nadie: el titular la define
     // con el flujo de recuperación de contraseña.
     const password = randomBytes(32).toString("hex");
@@ -244,10 +270,39 @@ unifiedRoutes.post(
       body: { name: nombre, email, password },
     });
 
-    await db
-      .update(users)
-      .set({ role: "INVESTOR", dpi: cleanDpi })
-      .where(eq(users.id, created.user.id));
+    // La comprobación de arriba cierra el caso secuencial, pero no la carrera:
+    // dos filas del mismo lote con el mismo DPI la pasan las dos y una pierde
+    // contra la restricción única. Si eso ocurre se deshace el alta, porque una
+    // cuenta a medias bloquea el reintento para siempre. `accounts` y
+    // `sessions` cuelgan de `users.id` con ON DELETE CASCADE, así que borrar la
+    // fila del usuario limpia también lo que creó Better Auth.
+    try {
+      await db
+        .update(users)
+        .set({ role: "INVESTOR", dpi: cleanDpi })
+        .where(eq(users.id, created.user.id));
+    } catch (error) {
+      try {
+        await db.delete(users).where(eq(users.id, created.user.id));
+      } catch (errorDeLimpieza) {
+        console.error(
+          `[ERROR] bulk-import-investors: no se pudo deshacer la cuenta ${email} tras fallar la escritura del DPI. Queda una cuenta incompleta que hay que borrar a mano.`,
+          errorDeLimpieza,
+        );
+
+        throw new Error(
+          `No se pudo asignar el DPI y la cuenta quedó creada e incompleta; hay que borrarla a mano: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+
+      throw new Error(
+        `No se pudo asignar el DPI; el alta se deshizo y la fila se puede reintentar: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
 
     return { correo: email, nombre, dpi: cleanDpi, status: "creado" as const };
   };

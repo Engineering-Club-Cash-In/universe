@@ -42,7 +42,8 @@ DECLARE
   v_email    VARCHAR(200);
   v_source   TEXT;
   v_setting  TEXT;
-  v_motivo   TEXT;
+  v_motivo     TEXT;
+  v_motivo_ctx TEXT;
   v_origen   TEXT;
   v_rebuild  BOOLEAN;
   v_ids      TEXT;
@@ -66,7 +67,13 @@ BEGIN
     v_source  := 'manual';
   END IF;
 
-  v_motivo := NULLIF(
+  -- El motivo describe UN ajuste concreto, así que solo se guarda en las filas
+  -- de ese ajuste. El contexto vive toda la transacción y el rebuild arranca
+  -- actualizando tipo_reinversion del inversionista en TODOS sus créditos: sin
+  -- este recorte, esas filas ajenas quedarían firmadas con el motivo del
+  -- crédito que se estaba editando. Se aplica más abajo, cuando ya se sabe si
+  -- la fila corresponde a un ID en alcance con cambio real de monto.
+  v_motivo_ctx := NULLIF(
     current_setting(
       CASE v_origen
         WHEN 'PADRE' THEN 'app.monto_aportado_motivo_padre'
@@ -119,6 +126,17 @@ BEGIN
   -- los créditos que solo registraron un UPDATE de otra columna
   -- (mirrorInvestor, investor con monto igual) y su pendiente dejaría de
   -- contarse, produciendo descuadres falsos.
+
+  -- El motivo solo firma filas del ajuste que lo declaró: el ID tiene que estar
+  -- en el set marcado por el backend y el monto tiene que haber cambiado de
+  -- verdad (un UPDATE de otra columna se audita, pero sin motivo).
+  v_motivo := CASE
+    WHEN v_es_monto_cambiado
+      AND (TG_OP <> 'UPDATE'
+           OR OLD.monto_aportado IS DISTINCT FROM NEW.monto_aportado)
+      THEN v_motivo_ctx
+    ELSE NULL
+  END;
 
   INSERT INTO cartera.historico_monto_aportado_espejo
     (txid, operacion, origen, credito_id, inversionista_id,

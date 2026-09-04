@@ -74,6 +74,11 @@ test("shared investor amount history distinguishes parent from mirror", () => {
   expect(migration).toContain("trg_audit_monto_aportado_padre");
   expect(migration).toContain("app.monto_aportado_motivo_padre");
   expect(migration).toContain("app.monto_aportado_motivo_espejo");
+  // El motivo solo firma las filas del ajuste que lo declaró: el rebuild
+  // actualiza tipo_reinversion del inversionista en todos sus créditos y esas
+  // filas no deben quedar con el motivo del crédito editado.
+  expect(migration).toContain("v_motivo_ctx");
+  expect(migration).toContain("WHEN v_es_monto_cambiado");
   expect(migration).toContain("ix_hist_mont_origen_cred_fecha");
   // El índice NO puede ser CONCURRENTLY: la migración corre como un statement
   // múltiple, que Postgres envuelve en una transacción implícita, y ahí

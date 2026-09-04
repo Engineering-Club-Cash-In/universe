@@ -292,11 +292,9 @@ describe("POST /register-external-auth", () => {
     expect(filaUsuario[0].dpi).toBeNull();
   });
 
-  // Invariante del que depende la barrera de POST /api/cartera/investor: una
-  // cuenta cuyo registro externo NO salió bien se queda en CLIENT. Es lo que
-  // impide que quien crea una cuenta con el correo de un inversionista ajeno
-  // llegue a INVESTOR (su alta choca en modo estricto con la fila que ya tiene
-  // ese correo, y la reconciliación no la reconoce porque no lleva su sello).
+  // Una cuenta cuyo registro externo NO salió bien se queda en CLIENT. El rol
+  // es lo que decide privilegios, así que no puede subir por un alta que nunca
+  // llegó a existir en CRM/cartera.
   it("no asciende el rol si el registro externo falló", async () => {
     sessionActual = sesionDeAna;
     filaUsuario = cuentaDeAna();

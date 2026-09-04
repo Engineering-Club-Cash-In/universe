@@ -23,7 +23,6 @@ import {
   PortalInvestorPayloadError,
   buildPortalInvestorUpdate,
 } from "../lib/portalInvestorPayload";
-import { puedeEditarInversionista } from "../lib/portalInvestorWriteAccess";
 import { requireAuth, type AuthedVariables } from "../middleware/requireAuth";
 import { getSignedUrlFromBucket } from "../lib/storage";
 
@@ -96,25 +95,19 @@ carteraRoutes.post("/investor", async (c) => {
     });
   }
 
-  // El correo de la sesión NO basta para autorizar la escritura:
-  // `requireEmailVerification` está en false, así que una sesión no prueba que
-  // el correo sea de quien lo usa. Sin esto, bastaba con crear una cuenta con
-  // el correo de un inversionista —si aún no estaba en Better Auth— para
-  // reescribirle la cuenta bancaria, sin acertar su DPI ni su nombre. Ver
-  // `puedeEditarInversionista`: la verificación de correo sigue pendiente de
-  // una decisión de producto, esto solo cierra este camino.
-  if (
-    !puedeEditarInversionista({
-      sesion: { id: user.id, role: user.role },
-      creadoPorUsuarioPortal: investor.creado_por_usuario_portal,
-    })
-  ) {
-    throw new HTTPException(403, {
-      message:
-        "Tu cuenta todavía no está habilitada para editar los datos del inversionista. " +
-        "Completa tu registro como inversionista o contacta a soporte.",
-    });
-  }
+  // RIESGO CONOCIDO Y ABIERTO, a la espera de una decisión de negocio:
+  // `requireEmailVerification` está en false (lib/auth.ts), así que la sesión
+  // NO prueba que el correo sea de quien lo usa. Como el inversionista se
+  // resuelve por ese correo, si el de un inversionista todavía no estaba
+  // registrado en Better Auth, alguien podía crear una cuenta con él y
+  // reescribirle los datos de cobro sin acertar su DPI ni su nombre.
+  //
+  // Aquí NO se pone una barrera parcial a propósito: cualquier apaño local da
+  // falsa tranquilidad y deja el problema real —que la identidad del portal se
+  // apoya en un correo sin verificar— fuera de la vista. La salida es exigir
+  // verificación de correo; el ataque necesita una cuenta NUEVA, así que
+  // exigirla solo a los registros nuevos cierra el hueco sin tocar a las
+  // cuentas que ya existen. Ver el hilo del review en el PR #1545.
 
   let payload;
   try {

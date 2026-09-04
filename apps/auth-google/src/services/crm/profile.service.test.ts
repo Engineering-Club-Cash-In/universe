@@ -79,4 +79,29 @@ describe("sendLead", () => {
       data: { id: "lead-1" },
     });
   });
+
+  // El CRM contesta 200 con `dpiRegistradoEnLead: false` cuando reconoce un lead
+  // que ventas creó SIN DPI: autoriza el acceso pero NO le escribe el DPI del
+  // registro. La bandera viaja como campo HERMANO de `data`, así que quedarse
+  // solo con `data` la pierde y el llamador da por hecho que el CRM quedó con la
+  // misma identidad que la cuenta del portal.
+  it("conserva la bandera con la que el CRM avisa que no escribió el DPI", async () => {
+    crmResponde(200, {
+      success: true,
+      data: { id: "lead-1" },
+      dpiRegistradoEnLead: false,
+    });
+
+    expect(await sendLead(registroDeAna)).toMatchObject({
+      dpiRegistradoEnLead: false,
+    });
+  });
+
+  // Un alta nueva no emite la bandera. Ausente NO es lo mismo que `false`: ahí
+  // el CRM sí se quedó con el DPI del registro.
+  it("deja la bandera en undefined cuando el CRM no la manda", async () => {
+    crmResponde(200, { success: true, data: { id: "lead-1" } });
+
+    expect((await sendLead(registroDeAna)).dpiRegistradoEnLead).toBeUndefined();
+  });
 });

@@ -202,6 +202,64 @@ describe("registerExternalUser", () => {
     });
   });
 
+  // La bandera del CRM es lo único que distingue "el lead se quedó con este
+  // DPI" de "el lead sigue sin DPI y solo un humano puede ponérselo". Si se
+  // queda dentro de este servicio, la ruta escribe el DPI en Better Auth igual y
+  // la persona queda clavada: el formulario deja de pedírselo porque ya lo
+  // tiene, y el CRM sigue diciendo que su ficha está incompleta.
+  describe("bandera dpiRegistradoEnLead", () => {
+    it("propaga el aviso de que el CRM no escribió el DPI", async () => {
+      respuestaCrm = {
+        success: true,
+        data: { id: "lead-1" },
+        dpiRegistradoEnLead: false,
+      };
+
+      const resultado = await registerExternalUser({
+        ...registroDeAna,
+        userType: "CLIENT",
+      });
+
+      expect(resultado.dpiRegistradoEnLead).toBeFalse();
+    });
+
+    it("propaga también el caso en que el CRM sí lo escribió", async () => {
+      respuestaCrm = {
+        success: true,
+        data: { id: "lead-1" },
+        dpiRegistradoEnLead: true,
+      };
+
+      const resultado = await registerExternalUser({
+        ...registroDeAna,
+        userType: "CLIENT",
+      });
+
+      expect(resultado.dpiRegistradoEnLead).toBeTrue();
+    });
+
+    // El alta nueva del CRM no emite la bandera, y el camino de INVESTOR no
+    // pasa por el CRM. En los dos casos el DPI del registro SÍ es el que quedó,
+    // así que `undefined` tiene que llegar como `undefined` y no aplanarse a
+    // `false`: tratarlo como rechazo rompería los dos caminos.
+    it("deja undefined el alta nueva del CRM, que no manda bandera", async () => {
+      respuestaCrm = { success: true, data: { id: "lead-1" } };
+
+      const resultado = await registerExternalUser({
+        ...registroDeAna,
+        userType: "CLIENT",
+      });
+
+      expect(resultado.dpiRegistradoEnLead).toBeUndefined();
+    });
+
+    it("deja undefined el camino de INVESTOR, que no pasa por el CRM", async () => {
+      const resultado = await registerExternalUser(registroDeAna);
+
+      expect(resultado.dpiRegistradoEnLead).toBeUndefined();
+    });
+  });
+
   it("rechaza un DPI que no llega a 13 dígitos sin tocar cartera", async () => {
     await expect(
       registerExternalUser({

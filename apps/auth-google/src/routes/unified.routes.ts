@@ -160,10 +160,28 @@ unifiedRoutes.post("/register-external-auth", requireAuth, async (c) => {
     // externo salió bien. El cliente ya no puede fijarlo.
     // `applyRegistrationOutcome` no asigna roles fuera de los de autoservicio ni
     // pisa un rol administrativo.
+    //
+    // El DPI, en cambio, solo se escribe si el sistema externo se quedó con ÉL.
+    // El CRM contesta 200 con `dpiRegistradoEnLead: false` cuando reconoce un
+    // lead que ventas creó sin DPI: da el acceso pero no le escribe el DPI del
+    // registro, porque ahí solo un humano puede ponerlo. Escribirlo igual en
+    // Better Auth deja a la persona clavada —el formulario de completar perfil
+    // ya no le aparece, porque su cuenta sí tiene DPI, mientras el CRM sigue
+    // diciendo que su ficha está incompleta— y quema un DPI que nadie verificó
+    // en una columna ÚNICA: si escribió el de otra persona, esa persona no se
+    // puede registrar nunca. Sin DPI, el formulario se lo vuelve a pedir.
+    //
+    // La comparación es estricta a propósito. `undefined` significa que nadie
+    // dijo nada —el alta nueva del CRM no emite la bandera, y el camino de
+    // INVESTOR no pasa por el CRM—, y ahí el DPI del registro SÍ es el que
+    // quedó: un `!result.dpiRegistradoEnLead` dejaría sin DPI a todo registro
+    // nuevo y a todos los inversionistas.
+    //
+    // El rol se resuelve igual: saltarse el DPI no es saltarse el registro.
     const identity = await applyRegistrationOutcome(
       user.id,
       payload.userType,
-      payload.dpi,
+      result.dpiRegistradoEnLead === false ? null : payload.dpi,
     );
 
     return c.json({ ...result, identity });

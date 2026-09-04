@@ -13,6 +13,9 @@ let payloadExterno: RegisterExternalUserPayload | null = null;
 let llamadasExternas = 0;
 // Si se pone, `registerExternalUser` falla con este error.
 let fallaRegistroExterno: Error | null = null;
+// Bandera con la que el registro externo avisa si el DPI quedó escrito afuera.
+// `undefined` = no dijo nada (alta nueva del CRM, o el camino de INVESTOR).
+let banderaDpiRegistrado: boolean | undefined;
 
 // La fila de `users` de la cuenta que se está registrando. El `select` la
 // devuelve cuando la proyección pide algo más que el id, y las escrituras la
@@ -161,6 +164,7 @@ mock.module("../services/unified", () => ({
       success: true,
       message: "ok",
       userType: payload.userType,
+      dpiRegistradoEnLead: banderaDpiRegistrado,
     });
   },
 }));
@@ -201,6 +205,7 @@ beforeEach(() => {
   payloadExterno = null;
   llamadasExternas = 0;
   fallaRegistroExterno = null;
+  banderaDpiRegistrado = undefined;
   filaUsuario = [];
   filasSelect = [];
   dpisReservados = new Set();
@@ -394,6 +399,115 @@ describe("POST /register-external-auth", () => {
     });
 
     expect(res.status).toBe(500);
+  });
+
+  // El CRM se niega DELIBERADAMENTE a escribir el DPI cuando el correo de la
+  // sesión ya cuelga de un lead que ventas creó sin DPI: autoriza el acceso y lo
+  // avisa con `dpiRegistradoEnLead: false`. Bloquearlo con 409 dejaría fuera del
+  // portal a todas esas fichas, así que la respuesta es un 200 y el aviso.
+  //
+  // Nadie leía el aviso. Better Auth se quedaba igual con el DPI y la persona
+  // quedaba clavada: el formulario de completar perfil ya no le aparece —porque
+  // la cuenta ya tiene DPI—, el campo está deshabilitado, y el CRM sigue
+  // diciendo que su ficha está incompleta. Peor: ese DPI sin verificar quema una
+  // columna ÚNICA, así que si escribió el de otra persona, esa persona no puede
+  // registrarse nunca.
+  describe("aviso del CRM de que no registró el DPI", () => {
+    it("no escribe el DPI cuando el CRM avisa que no lo registró", async () => {
+      sessionActual = sesionDeAna;
+      filaUsuario = cuentaDeAna();
+      banderaDpiRegistrado = false;
+
+      const res = await postJson("/register-external-auth", {
+        userType: "CLIENT",
+        fullName: "Ana Pérez",
+        dpi: "1234567890123",
+      });
+
+      // El acceso SÍ se autoriza: el CRM contestó 200.
+      expect(res.status).toBe(200);
+      expect(llamadasExternas).toBe(1);
+      // Pero la cuenta queda sin DPI, así que el formulario se lo vuelve a
+      // pedir y el reintento sigue siendo posible.
+      expect(escrituras.some((e) => "dpi" in e)).toBeFalse();
+      expect(filaUsuario[0].dpi).toBeNull();
+      expect(await res.json()).toMatchObject({ identity: { dpi: null } });
+      // Y el DPI no queda quemado en la columna única a nombre de nadie.
+      expect(dpisReservados.has("1234567890123")).toBeFalse();
+    });
+
+    it("escribe el DPI cuando el CRM confirma que lo registró", async () => {
+      sessionActual = sesionDeAna;
+      filaUsuario = cuentaDeAna();
+      banderaDpiRegistrado = true;
+
+      const res = await postJson("/register-external-auth", {
+        userType: "CLIENT",
+        fullName: "Ana Pérez",
+        dpi: "1234567890123",
+      });
+
+      expect(res.status).toBe(200);
+      expect(filaUsuario[0].dpi).toBe("1234567890123");
+    });
+
+    // La comparación tiene que ser estricta contra `false`. El alta nueva del
+    // CRM no manda bandera, y ahí el DPI del registro SÍ es el que quedó en el
+    // lead: un `!bandera` dejaría sin DPI a todo registro nuevo.
+    it("escribe el DPI en el alta nueva, donde el CRM no manda bandera", async () => {
+      sessionActual = sesionDeAna;
+      filaUsuario = cuentaDeAna();
+      banderaDpiRegistrado = undefined;
+
+      const res = await postJson("/register-external-auth", {
+        userType: "CLIENT",
+        fullName: "Ana Pérez",
+        dpi: "1234567890123",
+      });
+
+      expect(res.status).toBe(200);
+      expect(filaUsuario[0].dpi).toBe("1234567890123");
+    });
+
+    // El camino de INVESTOR no pasa por el CRM y nunca emite la bandera: si
+    // `undefined` se tratara como rechazo, ningún inversionista volvería a
+    // quedarse con su DPI ni ascendería de rol.
+    it("escribe el DPI y asciende el rol en el camino de INVESTOR", async () => {
+      sessionActual = sesionDeAna;
+      filaUsuario = cuentaDeAna();
+      banderaDpiRegistrado = undefined;
+
+      const res = await postJson("/register-external-auth", {
+        userType: "INVESTOR",
+        fullName: "Ana Pérez",
+        dpi: "1234567890123",
+      });
+
+      expect(res.status).toBe(200);
+      expect(filaUsuario[0].dpi).toBe("1234567890123");
+      expect(filaUsuario[0].role).toBe("INVESTOR");
+    });
+
+    // Saltarse el DPI no puede saltarse el rol: `applyRegistrationOutcome` se
+    // sigue llamando, solo que sin DPI que escribir.
+    it("resuelve el rol aunque el DPI no se escriba", async () => {
+      sessionActual = sesionDeAna;
+      filaUsuario = cuentaDeAna();
+      banderaDpiRegistrado = false;
+
+      const res = await postJson("/register-external-auth", {
+        userType: "INVESTOR",
+        fullName: "Ana Pérez",
+        dpi: "1234567890123",
+      });
+
+      expect(res.status).toBe(200);
+      expect(filaUsuario[0].dpi).toBeNull();
+      expect(filaUsuario[0].role).toBe("INVESTOR");
+      expect(await res.json()).toMatchObject({
+        identity: { dpi: null, role: "INVESTOR" },
+      });
+    });
   });
 
   it("rechaza sin sesión", async () => {

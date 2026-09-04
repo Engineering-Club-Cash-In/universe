@@ -185,10 +185,25 @@ export const getNumbersSifco = async (
 
 /**
  * Enviar/Crear un lead en el CRM
+ *
+ * `dpiRegistradoEnLead` viaja como campo HERMANO de `data`, no dentro de él, y
+ * tiene que quedar declarado aquí: es el único aviso de que el CRM autorizó el
+ * acceso PERO no se quedó con el DPI del registro (le pasa a los leads que
+ * ventas creó sin DPI, donde solo un humano puede ponérselo). Perderlo deja que
+ * el DPI se escriba igual en Better Auth y la persona queda clavada: el
+ * formulario ya no se lo pide —porque la cuenta ya lo tiene— y el CRM sigue
+ * diciendo que su ficha está incompleta.
+ *
+ * Ausente NO es `false`: el alta nueva no emite la bandera y ahí el DPI SÍ es el
+ * que quedó en el lead.
  */
 export const sendLead = async (
   payload: SendLeadPayload
-): Promise<{ success: boolean; data?: any }> => {
+): Promise<{
+  success: boolean;
+  data?: any;
+  dpiRegistradoEnLead?: boolean;
+}> => {
   const response = await fetch(`${env.CRM_API_URL}/api/portal/lead`, {
     method: "POST",
     headers: {
@@ -198,7 +213,12 @@ export const sendLead = async (
     body: JSON.stringify(payload),
   });
 
-  const result = (await response.json()) as { success: boolean; data?: any; error?: string };
+  const result = (await response.json()) as {
+    success: boolean;
+    data?: any;
+    dpiRegistradoEnLead?: boolean;
+    error?: string;
+  };
 
   if (!response.ok) {
     // El status viaja con el error: sin él, el 409 del reintento con otro DPI

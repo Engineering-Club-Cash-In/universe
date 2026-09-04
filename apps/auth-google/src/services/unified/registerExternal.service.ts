@@ -29,6 +29,18 @@ export interface RegisterExternalUserResponse {
   message: string;
   userType: UserType;
   data?: any;
+  /**
+   * Aviso del CRM: `false` significa que autorizó el acceso pero NO escribió el
+   * DPI del registro en la ficha —le pasa a los leads que ventas creó sin DPI,
+   * donde solo un humano puede ponérselo—. Quien llame no puede dar por hecho
+   * que el CRM quedó con la misma identidad que la cuenta del portal.
+   *
+   * `undefined` NO es `false`, y la diferencia es la que sostiene los dos
+   * caminos que no emiten bandera: el alta nueva del CRM y todo INVESTOR, donde
+   * el DPI del registro SÍ es el que quedó. Por eso quien lo lea tiene que
+   * comparar estrictamente contra `false`.
+   */
+  dpiRegistradoEnLead?: boolean;
 }
 
 export interface RegisterExternalUserOptions {
@@ -88,6 +100,10 @@ export const registerExternalUser = async (
         message: "Cliente registrado exitosamente en CRM",
         userType,
         data: result.data,
+        // Se saca de `result`, no de `result.data`: el CRM la manda como campo
+        // hermano, así que quedarse solo con `data` la perdía y la ruta escribía
+        // el DPI en Better Auth aunque el CRM hubiera dicho que no lo registró.
+        dpiRegistradoEnLead: result.dpiRegistradoEnLead,
       };
     } else if (userType === "INVESTOR") {
       // Crear inversionista en Cartera.

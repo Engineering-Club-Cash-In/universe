@@ -35,7 +35,12 @@ test("credit monetary adjustments keep capital and investor reasons separate", (
   expect(controller).toContain("El motivo del ajuste de capital es obligatorio");
   expect(controller).toContain("El motivo del ajuste de monto aportado del padre es obligatorio");
   expect(controller).toContain("El motivo del ajuste de monto aportado del espejo es obligatorio");
-  expect(controller).toContain("capital: z.number().min(1)");
+  // El mínimo se valida en el cuerpo, no en el schema: un crédito CANCELADO
+  // se persiste con capital 0 y el modal lo reenvía en cada guardado.
+  expect(controller).toContain("capital: z.number().nonnegative()");
+  expect(controller).toContain(
+    "if (new Big(fieldsToUpdate.capital).lt(1) && !capitalActualEnCero)",
+  );
   expect(auditSettings).toContain("app.monto_aportado_motivo_${sufijo}");
 });
 

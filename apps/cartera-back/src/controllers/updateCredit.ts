@@ -497,7 +497,10 @@ const creditUpdateSchema = z.object({
     )
     .min(0)
     .optional(),
-  capital: z.number().min(1),
+  // El mínimo real (>= 1) se valida en el cuerpo, contra el capital actual: un
+  // crédito cancelado o reiniciado se persiste en 0 (credits.ts) y el modal
+  // reenvía ese valor, así que el schema no puede rechazarlo de plano.
+  capital: z.number().nonnegative(),
   porcentaje_interes: z.number().min(0).max(100),
   seguro_10_cuotas: z.number().min(0),
   membresias_pago: z.number().min(0),
@@ -1570,6 +1573,17 @@ export const updateCredit = async ({ body, set, request }: any) => {
     // repararTotalRestante. Re-proyectarlos resucitaría deuda fantasma.
     const esCreditoFinalizado =
       current.statusCredit === "CANCELADO" || current.statusCredit === "CAIDO";
+
+    // No se puede PONER el capital en 0: un crédito vivo sin capital es un dato
+    // inválido. Pero sí se puede dejarlo en 0 si ya venía así — cancelar
+    // (credits.ts) y reiniciarCredito lo zerean, y el modal reenvía el capital
+    // actual en cada guardado, así que rechazarlo bloquearía la edición de
+    // cualquier otro campo del crédito.
+    const capitalActualEnCero = new Big(current.capital || 0).eq(0);
+    if (new Big(fieldsToUpdate.capital).lt(1) && !capitalActualEnCero) {
+      set.status = 400;
+      return { message: "El capital debe ser mayor o igual a 1" };
+    }
 
     // 3.0. En un crédito finalizado no entran inversionistas nuevos: la compra
     // o reinversión crearía una participación "viva" (con su fila en

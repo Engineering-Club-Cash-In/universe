@@ -24,7 +24,30 @@ export type PortalInvestorUpdate = {
   numero_cuenta?: string;
 };
 
-const TIPOS_CUENTA = ["MONETARIA", "AHORRO"] as const;
+/**
+ * Tipos de cuenta que acepta el portal.
+ *
+ * Es una copia literal de `tipo_cuenta_enum` (cartera-back,
+ * `src/database/db/schema.ts`). No se importa el schema de cartera para no
+ * arrastrar drizzle y el modelo entero hasta este módulo, que es puro a
+ * propósito; el cruce lo hace la prueba de contrato
+ * `portalInvestorContract.test.ts`, que compara esta lista contra
+ * `tipoCuentaEnum.enumValues` y falla en cuanto se desalinean.
+ *
+ * Recortarla no es una medida de seguridad: la columna acepta estos valores y
+ * el portal ya los muestra, así que un inversionista que abría el modal y
+ * confirmaba el valor que ya tenía recibía un 400.
+ */
+export const TIPOS_CUENTA = [
+  "AHORRO",
+  "AHORRO Q",
+  "AHORROS",
+  "AHORRO $",
+  "MONETARIA",
+  "MONETARIA Q",
+  "MONETARIA $",
+  "Capital",
+] as const;
 
 // Dígitos, letras y guiones: cubre cuentas locales e IBAN, y deja fuera
 // espacios y separadores que solo aparecen por un copiar/pegar mal hecho.
@@ -49,14 +72,21 @@ const parsearBancoId = (valor: unknown): number => {
 };
 
 const parsearTipoCuenta = (valor: unknown): string => {
-  const normalizado =
-    typeof valor === "string" ? valor.trim().toUpperCase() : "";
+  const entrada =
+    typeof valor === "string" ? valor.trim().replace(/\s+/g, " ") : "";
 
-  if (!TIPOS_CUENTA.includes(normalizado as (typeof TIPOS_CUENTA)[number])) {
+  // Se compara sin distinguir mayúsculas pero se devuelve el valor CANÓNICO del
+  // enum: `toUpperCase()` a secas convertía "Capital" en "CAPITAL", que la
+  // columna no admite.
+  const canonico = TIPOS_CUENTA.find(
+    (tipo) => tipo.toUpperCase() === entrada.toUpperCase(),
+  );
+
+  if (!canonico) {
     throw new PortalInvestorPayloadError("El tipo de cuenta no es válido");
   }
 
-  return normalizado;
+  return canonico;
 };
 
 const parsearNumeroCuenta = (valor: unknown): string => {

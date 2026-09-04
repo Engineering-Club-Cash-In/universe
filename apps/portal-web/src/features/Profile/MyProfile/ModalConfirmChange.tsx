@@ -4,6 +4,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { updateLead, updateOwnDpi } from "../services";
 import { updateOwnInvestor, getBancos } from "../services/investorService";
 import { useAuth } from "@/lib";
+import { OPCIONES_TIPO_CUENTA } from "../tiposDeCuenta";
 
 type FieldType = 'dpi' | 'phone' | 'address' | 'banco_id' | 'tipo_cuenta' | 'numero_cuenta';
 
@@ -206,10 +207,7 @@ export const ModalConfirmChange = ({
                 setTempValue(value);
                 if (serverError) setServerError("");
               }}
-              options={[
-                { value: "MONETARIA", label: "Monetaria" },
-                { value: "AHORRO", label: "Ahorro" },
-              ]}
+              options={[...OPCIONES_TIPO_CUENTA]}
               placeholder={getFieldPlaceholder()}
             />
           )}

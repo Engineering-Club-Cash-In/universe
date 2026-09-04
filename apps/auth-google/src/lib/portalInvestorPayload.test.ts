@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 
 import {
   PortalInvestorPayloadError,
+  TIPOS_CUENTA,
   buildPortalInvestorUpdate,
 } from "./portalInvestorPayload";
 
@@ -50,13 +51,34 @@ describe("buildPortalInvestorUpdate", () => {
     }
   });
 
-  it("acota tipo_cuenta al catálogo y lo normaliza a mayúsculas", () => {
+  it("acota tipo_cuenta al catálogo y devuelve el valor canónico", () => {
     expect(buildPortalInvestorUpdate(12, { tipo_cuenta: "monetaria" }).tipo_cuenta).toBe(
       "MONETARIA",
     );
     expect(() =>
       buildPortalInvestorUpdate(12, { tipo_cuenta: "PLAZO_FIJO" }),
     ).toThrow(PortalInvestorPayloadError);
+  });
+
+  it("acepta los tipos de cuenta que el portal muestra y la BD guarda", () => {
+    // Un inversionista que ya tiene uno de estos valores abre el modal,
+    // confirma el que trae, y la lista recortada le devolvía un 400.
+    for (const tipo of TIPOS_CUENTA) {
+      expect(buildPortalInvestorUpdate(12, { tipo_cuenta: tipo }).tipo_cuenta).toBe(
+        tipo,
+      );
+    }
+
+    expect(TIPOS_CUENTA).toContain("MONETARIA Q");
+    expect(TIPOS_CUENTA).toContain("MONETARIA $");
+  });
+
+  it("no destroza la caja de un valor que el enum guarda en minúsculas", () => {
+    // `Capital` es un valor real del enum. Pasarlo por `toUpperCase()` lo
+    // convertía en "CAPITAL", que cartera rechaza al escribir.
+    expect(buildPortalInvestorUpdate(12, { tipo_cuenta: "capital" }).tipo_cuenta).toBe(
+      "Capital",
+    );
   });
 
   it("limpia y valida el número de cuenta", () => {

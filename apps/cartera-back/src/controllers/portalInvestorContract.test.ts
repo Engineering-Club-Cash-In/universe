@@ -15,7 +15,11 @@
 
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 
-import { buildPortalInvestorUpdate } from "../../../auth-google/src/lib/portalInvestorPayload";
+import {
+  TIPOS_CUENTA,
+  buildPortalInvestorUpdate,
+} from "../../../auth-google/src/lib/portalInvestorPayload";
+import { tipoCuentaEnum } from "../database/db/schema";
 import { lockPoolMock } from "../utils/testMocks";
 
 const inversionistaDelPortal = {
@@ -160,5 +164,32 @@ describe("contrato portal → cartera", () => {
     expect("email" in lastUpdateData!).toBeFalse();
     expect("dpi" in lastUpdateData!).toBeFalse();
     expect("nombre" in lastUpdateData!).toBeFalse();
+  });
+
+  // El allowlist del portal vive en auth-google porque el payload se arma allá,
+  // pero la verdad es el enum de esta base. Una lista copiada a mano se
+  // desalinea al primer valor nuevo y el portal empieza a devolver 400 sobre
+  // valores que la columna sí acepta; esto lo cruza en cada corrida.
+  it("el catálogo de tipo de cuenta del portal es el enum de la base", () => {
+    expect([...TIPOS_CUENTA].sort()).toEqual(
+      [...tipoCuentaEnum.enumValues].sort(),
+    );
+  });
+
+  it("cartera acepta cualquier tipo de cuenta que el portal deje pasar", async () => {
+    for (const tipo of TIPOS_CUENTA) {
+      const payload = buildPortalInvestorUpdate(
+        inversionistaDelPortal.inversionista_id,
+        { tipo_cuenta: tipo },
+      );
+
+      selectResponses = [[inversionistaDelPortal]];
+      const set = { status: 200 };
+
+      const result: any = await insertInvestor({ body: payload, set });
+
+      expect(result.errores).toBeUndefined();
+      expect(lastUpdateData).toEqual({ tipo_cuenta: tipo });
+    }
   });
 });

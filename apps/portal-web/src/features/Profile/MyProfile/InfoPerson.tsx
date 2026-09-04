@@ -9,6 +9,7 @@ import {
 } from "@/components";
 import { useQuery } from "@tanstack/react-query";
 import { ModalConfirmChange } from "./ModalConfirmChange";
+import { OPCIONES_TIPO_CUENTA } from "../tiposDeCuenta";
 import { getProfile } from "../services";
 import { getInvestorProfile, getBancos } from "../services/investorService";
 import { useAuth } from "@/lib";
@@ -314,12 +315,7 @@ export const InfoPerson = () => {
                   value={tipoCuenta}
                   onChange={() => {}}
                   disabled
-                  options={[
-                    { value: "MONETARIA", label: "Monetaria" },
-                    { value: "MONETARIA Q", label: "Monetaria Q" },
-                    { value: "MONETARIA $", label: "Monetaria $" },
-                    { value: "AHORRO", label: "Ahorro" },
-                  ]}
+                  options={[...OPCIONES_TIPO_CUENTA]}
                   placeholder="Selecciona tipo de cuenta"
                 />
                 <button

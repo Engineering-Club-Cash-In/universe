@@ -401,16 +401,27 @@ export const repLegalExiste = async (valor: string): Promise<boolean> => {
 /**
  * Condición para encontrar al inversionista dueño de un correo.
  *
- * `ilike` sin comodines es una igualdad que no distingue mayúsculas, y es el
- * mismo criterio con el que este controller ya resuelve el correo al insertar y
- * al actualizar. Hace falta en la lectura por la misma razón: los INSERT
- * guardan el correo en minúsculas, pero quien pregunta manda el de la sesión de
- * auth-google tal cual lo escribió la persona. Con una igualdad sensible a
- * mayúsculas, un correo con una sola letra en mayúscula no encontraba la fila y
- * el titular se quedaba sin poder ver ni editar sus propios datos de cobro.
+ * Tiene que ignorar mayúsculas: los INSERT guardan el correo en minúsculas,
+ * pero quien pregunta manda el de la sesión de auth-google tal cual lo escribió
+ * la persona, así que con una igualdad sensible a mayúsculas un correo con una
+ * sola letra en mayúscula no encontraba la fila y el titular se quedaba sin
+ * poder ver ni editar sus propios datos de cobro.
+ *
+ * Y tiene que ser una IGUALDAD, no un `ilike`. `ilike` lee `_` y `%` del correo
+ * que llega como comodines aunque la consulta vaya parametrizada —el parámetro
+ * evita la inyección, no que el patrón se interprete—, así que la cuenta
+ * `john_smith@ejemplo.com` casaba con el inversionista guardado como
+ * `john.smith@ejemplo.com`. Cuando esa era la única fila que coincidía, el
+ * portal la daba por la del titular y `POST /api/cartera/investor` le mandaba
+ * ahí los datos bancarios. `lower(...) = ...` compara el texto completo y no
+ * interpreta nada.
+ *
+ * Es el mismo criterio con el que este controller resuelve el correo al
+ * insertar y al actualizar, y por eso esos dos sitios también pasan por aquí:
+ * la búsqueda del dueño de un correo es una sola regla.
  */
-export const condicionInversionistaPorEmail = (email: string) =>
-  ilike(inversionistas.email, email.trim().toLowerCase());
+export const condicionInversionistaPorEmail = (email: string): SQL =>
+  sql`lower(${inversionistas.email}) = ${email.trim().toLowerCase()}`;
 
 /**
  * Fila del portal reclamable por un reintento, o `null` si no se puede afirmar.
@@ -699,7 +710,7 @@ export const insertInvestor = async ({ body, set }: any) => {
           const result = await db
             .select()
             .from(inversionistas)
-            .where(ilike(inversionistas.email, email))
+            .where(condicionInversionistaPorEmail(email))
             .limit(1);
 
           if (result[0]) {
@@ -795,7 +806,7 @@ export const insertInvestor = async ({ body, set }: any) => {
           const result = await db
             .select()
             .from(inversionistas)
-            .where(ilike(inversionistas.email, email))
+            .where(condicionInversionistaPorEmail(email))
             .limit(1);
           existente = result[0] || null;
           if (existente) resueltoPor = "email";

@@ -887,8 +887,19 @@ describe("condicionInversionistaPorEmail", () => {
   it("compara sin distinguir mayúsculas", () => {
     const consulta = aSql(condicionInversionistaPorEmail("Ana@Ejemplo.COM"));
 
-    expect(consulta.sql.toLowerCase()).toContain("ilike");
+    expect(consulta.sql.toLowerCase()).toContain("lower(");
     expect(consulta.params).toEqual(["ana@ejemplo.com"]);
+  });
+
+  // `ILIKE` interpreta `_` y `%` del correo que llega como comodines, aunque la
+  // consulta vaya parametrizada: la cuenta `john_smith@ejemplo.com` casaba con
+  // el inversionista guardado como `john.smith@ejemplo.com`, y si esa era la
+  // única fila, el portal la daba por suya y le mandaba ahí los datos de cobro.
+  it("no trata los comodines del correo como patrón", () => {
+    const consulta = aSql(condicionInversionistaPorEmail("john_smith@ejemplo.com"));
+
+    expect(consulta.sql.toLowerCase()).not.toContain("like");
+    expect(consulta.params).toEqual(["john_smith@ejemplo.com"]);
   });
 
   it("da la misma condición sin importar cómo venga escrito el correo", () => {

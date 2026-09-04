@@ -40,15 +40,22 @@ mock.module("../db/connection", () => ({
       set: (valores: Record<string, unknown>) => ({
         where: () => {
           if (updateFalla) {
-            return Promise.reject(
+            const fallo = Promise.reject(
               new Error(
                 'duplicate key value violates unique constraint "users_dpi_unique"',
               ),
             );
+            return Object.assign(fallo, { returning: () => fallo });
           }
 
           escrituras.push(valores);
-          return Promise.resolve();
+          // El builder de Drizzle es "thenable" y encadenable a la vez: se
+          // puede await directo o pedirle `.returning()`, que es lo que hace
+          // el ascenso de rol para detectar que perdió la carrera.
+          const resultado = Promise.resolve([{ id: "fila-actualizada" }]);
+          return Object.assign(resultado, {
+            returning: () => Promise.resolve([{ id: "fila-actualizada" }]),
+          });
         },
       }),
     }),

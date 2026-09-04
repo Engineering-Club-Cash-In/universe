@@ -60,6 +60,7 @@ test("shared investor amount history distinguishes parent from mirror", () => {
   expect(migration).toContain("app.monto_aportado_motivo_padre");
   expect(migration).toContain("app.monto_aportado_motivo_espejo");
   expect(migration).toContain("app.monto_aportado_motivo', true");
+  expect(migration).toContain("NULLIF(\n      current_setting(");
   expect(migration).toContain("ix_hist_mont_origen_cred_fecha");
 });
 
@@ -70,6 +71,9 @@ test("rebuild audit only records investor IDs whose amount changed", () => {
 
   expect(controller).toContain("montoAportadoPadreCambiados");
   expect(controller).toContain("montoAportadoEspejoCambiados");
+  expect(controller).toContain("getChangedExistingInvestorIds");
+  expect(controller).toContain("if (!inversionistas) return new Map();");
+  expect(controller).toContain("inversionistas !== undefined");
   expect(auditSettings).toContain("app.monto_aportado_rebuild_${sufijo}");
   expect(auditSettings).toContain("app.monto_aportado_ids_${sufijo}");
   expect(migration).toContain("v_rebuild");
@@ -79,10 +83,10 @@ test("rebuild audit only records investor IDs whose amount changed", () => {
   expect(migration).toContain("v_rebuild AND NOT v_es_monto_cambiado");
 });
 
-test("audit context is set only for the final investor rebuild", () => {
+test("cuota-only rebuild has an empty audit context", () => {
   const controller = readFileSync(controllerFile, "utf8");
 
-  expect(controller.indexOf("await setMontoAportadoAuditContext(")).toBeGreaterThan(
-    controller.indexOf("const runInvestorRebuild"),
-  );
+  expect(controller).toContain("if (!bodyTraeInversionistas) {");
+  expect(controller).toContain("const suppressTechnicalMontoAudit = async () =>");
+  expect(controller).toContain("await suppressTechnicalMontoAudit();");
 });

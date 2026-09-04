@@ -61,7 +61,9 @@ const hasMontoAportadoChanged = (
       montoOriginal !== undefined &&
       montoOriginal !== Number(inversionista.monto_aportado)
     );
-  });
+  }) || originales.some((inversionista) => !valores.some(
+    (valor) => Number(valor.inversionista_id) === Number(inversionista.inversionista_id),
+  ));
 };
 
 interface ModalEditCreditProps {

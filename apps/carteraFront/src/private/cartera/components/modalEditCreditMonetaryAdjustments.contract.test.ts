@@ -18,6 +18,7 @@ test("credit edit renders and submits separate reason for changed investor amoun
   expect(modal).toContain("Ingresá el motivo del ajuste de monto aportado del padre.");
   expect(modal).toContain("Ingresá el motivo del ajuste de monto aportado del espejo.");
   expect(modal).toContain("hasMontoAportadoChanged");
+  expect(modal).toContain("originales.some((inversionista) =>");
   expect(modal).not.toContain("values.investors.some((inversionista) => {");
   expect(modal).not.toContain("formik.values.investors.some((inversionista) => {");
   expect(modal).toContain('name === "capital"');

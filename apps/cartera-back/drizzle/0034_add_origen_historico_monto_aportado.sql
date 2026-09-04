@@ -75,12 +75,15 @@ BEGIN
   );
 
   v_rebuild := COALESCE(
-    current_setting(
-      CASE v_origen
-        WHEN 'PADRE' THEN 'app.monto_aportado_rebuild_padre'
-        ELSE 'app.monto_aportado_rebuild_espejo'
-      END,
-      true
+    NULLIF(
+      current_setting(
+        CASE v_origen
+          WHEN 'PADRE' THEN 'app.monto_aportado_rebuild_padre'
+          ELSE 'app.monto_aportado_rebuild_espejo'
+        END,
+        true
+      ),
+      ''
     ),
     'false'
   )::BOOLEAN;

@@ -39,6 +39,7 @@ import {
   getModalidadFacturacionSpreadById,
   resolveModalidadFacturacionSpread,
 } from "./modalidadFacturacion";
+import { getChangedExistingInvestorIds } from "../utils/montoAportadoAuditContext";
 
 interface UpdateInstallmentsParams {
   numero_credito_sifco: string;
@@ -1116,7 +1117,7 @@ export const updateInvestors = async (
   parentCuotas?: Map<number, string>,
   dbInstance: typeof db = db,
 ): Promise<Map<number, string>> => {
-  if (!inversionistas || inversionistas.length === 0) return new Map();
+  if (!inversionistas) return new Map();
 
   // 🔥 NUEVO: Obtener los datos existentes ANTES de borrar para preservar el estado
   const existingRecords = await dbInstance
@@ -1522,22 +1523,9 @@ export const updateCredit = async ({ body, set, request }: any) => {
       })
       .from(creditos_inversionistas)
       .where(eq(creditos_inversionistas.credito_id, credito_id));
-    const montoPadreActualPorInversionista = new Map(
-      inversionistasPadreActuales.map((inversionista) => [
-        inversionista.inversionista_id,
-        inversionista.monto_aportado,
-      ]),
-    );
-    const montoAportadoPadreCambiados = (inversionistas ?? []).flatMap(
-      (inversionista) => {
-        const montoActual = montoPadreActualPorInversionista.get(
-          inversionista.inversionista_id,
-        );
-        return montoActual !== undefined &&
-          !new Big(inversionista.monto_aportado).eq(new Big(montoActual))
-          ? [inversionista.inversionista_id]
-          : [];
-      },
+    const montoAportadoPadreCambiados = getChangedExistingInvestorIds(
+      inversionistasPadreActuales,
+      inversionistas,
     );
     const montoAportadoPadreCambia = montoAportadoPadreCambiados.length > 0;
     const motivoMontoAportadoPadre = motivo_ajuste_monto_aportado_padre?.trim();
@@ -1553,22 +1541,9 @@ export const updateCredit = async ({ body, set, request }: any) => {
       })
       .from(creditos_inversionistas_espejo)
       .where(eq(creditos_inversionistas_espejo.credito_id, credito_id));
-    const montoEspejoActualPorInversionista = new Map(
-      inversionistasEspejoActuales.map((inversionista) => [
-        inversionista.inversionista_id,
-        inversionista.monto_aportado,
-      ]),
-    );
-    const montoAportadoEspejoCambiados = (inversionistas_espejo ?? []).flatMap(
-      (inversionista) => {
-        const montoActual = montoEspejoActualPorInversionista.get(
-          inversionista.inversionista_id,
-        );
-        return montoActual !== undefined &&
-          !new Big(inversionista.monto_aportado).eq(new Big(montoActual))
-          ? [inversionista.inversionista_id]
-          : [];
-      },
+    const montoAportadoEspejoCambiados = getChangedExistingInvestorIds(
+      inversionistasEspejoActuales,
+      inversionistas_espejo,
     );
     const montoAportadoEspejoCambia = montoAportadoEspejoCambiados.length > 0;
     const motivoMontoAportadoEspejo = motivo_ajuste_monto_aportado_espejo?.trim();
@@ -1576,6 +1551,11 @@ export const updateCredit = async ({ body, set, request }: any) => {
       set.status = 400;
       return { message: "El motivo del ajuste de monto aportado del espejo es obligatorio" };
     }
+
+    const suppressTechnicalMontoAudit = async () => {
+      await setMontoAportadoAuditContext(db, "PADRE", undefined, []);
+      await setMontoAportadoAuditContext(db, "ESPEJO", undefined, []);
+    };
 
     // Estados de cierre: el crédito se puede editar, pero su calendario de
     // pagos es historia congelada — la cancelación deja los pagos no pagados
@@ -1891,10 +1871,10 @@ export const updateCredit = async ({ body, set, request }: any) => {
         }, db);
 
       const bodyTraeInversionistas =
-        (inversionistas && inversionistas.length > 0) ||
-        (inversionistas_espejo && inversionistas_espejo.length > 0);
+        inversionistas !== undefined || inversionistas_espejo !== undefined;
 
       if (!bodyTraeInversionistas) {
+        await suppressTechnicalMontoAudit();
         const invsPadreActuales = await db
           .select()
           .from(creditos_inversionistas)
@@ -2011,7 +1991,7 @@ export const updateCredit = async ({ body, set, request }: any) => {
       }
       // 9. Actualizar inversionistas (Principal)
       let parentCuotasTx: Map<number, string> = new Map();
-      if (inversionistas && inversionistas.length > 0) {
+      if (inversionistas !== undefined) {
         const nuevosPorId = new Map(
           inversionistasNuevos.map((inv) => [inv.inversionista_id, inv]),
         );
@@ -2041,7 +2021,7 @@ export const updateCredit = async ({ body, set, request }: any) => {
       }
 
       // 10. Actualizar inversionistas (Espejo)
-      if (inversionistas_espejo && inversionistas_espejo.length > 0) {
+      if (inversionistas_espejo !== undefined) {
         // 🔒 Sincronización forzada solo de cuota_inversionista desde el padre.
         // El monto_aportado del espejo se respeta tal como viene del frontend
         // porque representa el saldo vivo del inversionista (capital - abonos)
@@ -2095,8 +2075,8 @@ export const updateCredit = async ({ body, set, request }: any) => {
 
     if (
       !esCreditoFinalizado &&
-      ((inversionistas && inversionistas.length > 0) ||
-        (inversionistas_espejo && inversionistas_espejo.length > 0) ||
+      (inversionistas !== undefined ||
+        inversionistas_espejo !== undefined ||
         inversionistasNuevos.length > 0)
     ) {
       // updateInvestors reconstruye filas con DELETE + INSERT. El trigger usa

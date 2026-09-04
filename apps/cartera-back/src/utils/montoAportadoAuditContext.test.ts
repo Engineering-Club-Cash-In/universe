@@ -1,5 +1,8 @@
 import { expect, test } from "bun:test";
-import { buildMontoAportadoAuditSettings } from "./montoAportadoAuditContext";
+import {
+  buildMontoAportadoAuditSettings,
+  getChangedExistingInvestorIds,
+} from "./montoAportadoAuditContext";
 
 test("builds independent parent audit settings with changed investor IDs", () => {
   expect(
@@ -20,4 +23,19 @@ test("builds empty mirror context without reusing parent values", () => {
     { name: "app.monto_aportado_ids_espejo", value: "" },
     { name: "app.monto_aportado_motivo_espejo", value: "" },
   ]);
+});
+
+test("includes modified and removed existing investors but not additions", () => {
+  expect(
+    getChangedExistingInvestorIds(
+      [
+        { inversionista_id: 12, monto_aportado: "100.00" },
+        { inversionista_id: 48, monto_aportado: "200.00" },
+      ],
+      [
+        { inversionista_id: 12, monto_aportado: "125.00" },
+        { inversionista_id: 99, monto_aportado: "300.00" },
+      ],
+    ),
+  ).toEqual([12, 48]);
 });

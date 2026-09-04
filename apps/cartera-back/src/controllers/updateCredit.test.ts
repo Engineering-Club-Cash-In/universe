@@ -29,15 +29,24 @@ const fakeCredito = {
 let creditoActual: any = fakeCredito;
 // Filas que devuelve el select de pagos (vacío = early return del recálculo).
 let pagosActuales: any[] = [];
+// Filas que devuelven los selects de monto_aportado (padre y espejo).
+let inversionistasActuales: any[] = [];
 const capturedUpdates: { vals: any; cond: any }[] = [];
 const capturedInserts: any[] = [];
 const dbMock = {
   select: () => ({
     from: () => ({
       // select del crédito: .where(cond).limit(1)
+      // select de montos de inversionistas: .where(cond) y se await directo,
+      // por eso el retorno es thenable además de traer .limit().
       where: (cond: any) => {
         capturedCreditWheres.push(cond);
-        return { limit: () => Promise.resolve([creditoActual]) };
+        const filas = inversionistasActuales;
+        return {
+          limit: () => Promise.resolve([creditoActual]),
+          then: (resolve: any, reject: any) =>
+            Promise.resolve(filas).then(resolve, reject),
+        };
       },
       // select de pagos: .innerJoin().where(cond).orderBy()
       innerJoin: () => ({
@@ -90,6 +99,7 @@ beforeEach(() => {
   capturedUpdates.length = 0;
   capturedInserts.length = 0;
   pagosActuales = [];
+  inversionistasActuales = [];
   creditoActual = fakeCredito;
 });
 
@@ -480,5 +490,105 @@ describe("updateCredit — calendario congelado en créditos finalizados", () =>
     expect(result.message).toBe(
       "No se pueden registrar inversionistas nuevos en un crédito CANCELADO",
     );
+  });
+});
+
+describe("updateCredit — validaciones monetarias", () => {
+  const invPayload = (monto: number) => [
+    {
+      inversionista_id: 7,
+      monto_aportado: monto,
+      porcentaje_cash_in: 50,
+      porcentaje_inversion: 50,
+    },
+  ];
+
+  it("rechaza vaciar la lista de un crédito que sí tiene participaciones", async () => {
+    inversionistasActuales = [{ inversionista_id: 7, monto_aportado: "1000" }];
+    const { set, request } = makeCtx();
+    const result: any = await updateCredit({
+      body: { ...baseBody, inversionistas: [], motivo_ajuste_monto_aportado_padre: "x" },
+      set,
+      request,
+    });
+
+    expect(set.status).toBe(400);
+    expect(result.message).toContain("no puede quedarse sin inversionistas");
+  });
+
+  it("acepta lista vacía cuando el crédito nunca tuvo participaciones", async () => {
+    inversionistasActuales = [];
+    const { set, request } = makeCtx();
+    const result: any = await updateCredit({
+      body: { ...baseBody, inversionistas: [] },
+      set,
+      request,
+    });
+
+    // El flujo sigue hasta el recálculo de cuotas, que este mock no cubre; lo
+    // que se afirma es que la validación de lista vacía no lo rechazó.
+    expect(set.status).not.toBe(400);
+  });
+
+  it("exige motivo cuando cambia el monto de un inversionista existente", async () => {
+    inversionistasActuales = [{ inversionista_id: 7, monto_aportado: "1000" }];
+    const { set, request } = makeCtx();
+    const result: any = await updateCredit({
+      body: { ...baseBody, inversionistas: invPayload(1500) },
+      set,
+      request,
+    });
+
+    expect(set.status).toBe(400);
+    expect(result.message).toContain("monto aportado del padre");
+  });
+
+  it("no exige motivo cuando el monto del inversionista no cambia", async () => {
+    inversionistasActuales = [{ inversionista_id: 7, monto_aportado: "1000" }];
+    const { set, request } = makeCtx();
+    const result: any = await updateCredit({
+      body: { ...baseBody, inversionistas: invPayload(1000) },
+      set,
+      request,
+    });
+
+    expect(set.status).not.toBe(400);
+  });
+
+  it("valida el rango del capital antes que su motivo", async () => {
+    const { set, request } = makeCtx();
+    const result: any = await updateCredit({
+      body: { ...baseBody, capital: 0.5 },
+      set,
+      request,
+    });
+
+    expect(set.status).toBe(400);
+    expect(result.message).toBe("El capital debe ser mayor o igual a 1");
+  });
+
+  it("permite capital 0 en un crédito INCOBRABLE", async () => {
+    creditoActual = { ...fakeCredito, statusCredit: "INCOBRABLE" };
+    const { set, request } = makeCtx();
+    const result: any = await updateCredit({
+      body: { ...baseBody, capital: 0, motivo_ajuste_capital: "castigo" },
+      set,
+      request,
+    });
+
+    // No lo frena el mínimo de Q1; sigue al resto del flujo.
+    expect(result.message).not.toBe("El capital debe ser mayor o igual a 1");
+  });
+
+  it("rechaza capital 0 en un crédito vivo", async () => {
+    const { set, request } = makeCtx();
+    const result: any = await updateCredit({
+      body: { ...baseBody, capital: 0, motivo_ajuste_capital: "x" },
+      set,
+      request,
+    });
+
+    expect(set.status).toBe(400);
+    expect(result.message).toBe("El capital debe ser mayor o igual a 1");
   });
 });

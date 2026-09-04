@@ -213,9 +213,12 @@ export function ModalEditCredit({
     safeInitialValues.statusCredit === "CAIDO" ||
     safeInitialValues.statusCredit === "INCOBRABLE" ||
     Number(safeInitialValues.capital ?? 0) === 0;
-  // Solo se bloquea el campo cuando ya vale 0 y no hay nada que ajustar.
+  // El campo se bloquea por estado, no por valor: un crédito vivo que quedó en
+  // 0 por importación o por un reinicio a medias debe poder corregirse acá (el
+  // backend acepta cualquier monto >= 1), en vez de terminar en un repair SQL.
   const capitalBloqueado =
-    Number(safeInitialValues.capital ?? 0) === 0 && admiteCapitalEnCero;
+    safeInitialValues.statusCredit === "CANCELADO" ||
+    safeInitialValues.statusCredit === "CAIDO";
 
   const parsedInvestors = parseInvestors(investorsInitial);
   // 🔥 Sincronización Real (Por ID de Inversionista)
@@ -756,6 +759,18 @@ export function ModalEditCredit({
                         onBlur={(e) => {
                           formik.handleBlur(e);
                           if (!["observaciones", "no_poliza", "numero_credito_sifco", "formato_credito"].includes(name)) {
+                            // Campo vaciado: restaurar el valor original. Number("")
+                            // da 0 y el clamp lo dejaría en 1, marcando un cambio
+                            // de capital que nadie pidió.
+                            if (e.target.value.trim() === "") {
+                              formik.setFieldValue(
+                                name,
+                                Number(
+                                  (safeInitialValues as any)[name] ?? 0,
+                                ),
+                              );
+                              return;
+                            }
                             const val = Number(e.target.value);
                             const normalizedVal =
                               name === "capital" && !admiteCapitalEnCero
@@ -781,7 +796,7 @@ export function ModalEditCredit({
                         readOnly={name === "capital" && capitalBloqueado}
                         title={
                           name === "capital" && capitalBloqueado
-                            ? "Este crédito está en capital 0 (cancelado o reiniciado): asignarle capital se hace desde su propio flujo, no acá"
+                            ? "El capital de un crédito cerrado no se edita desde acá"
                             : undefined
                         }
                       />

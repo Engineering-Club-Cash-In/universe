@@ -44,29 +44,13 @@ test("credit monetary adjustments keep capital and investor reasons separate", (
   // monto fraccionario sigue rechazado en todos los casos.
   expect(controller).toContain('current.statusCredit === "INCOBRABLE"');
   expect(controller).toContain("const admiteCapitalEnCero =");
-  expect(controller).toContain(
-    "if (capitalNuevo.lt(1) && !(capitalNuevo.eq(0) && admiteCapitalEnCero))",
-  );
   // Vaciar la lista se rechaza: `[]` entraba al rebuild y updateInvestors
   // retornaba temprano, devolviendo 200 sin borrar ni auditar la baja.
-  // La lista vacía se rechaza solo en créditos vivos: mergeCreditosAndUpdate
-  // deja el origen CANCELADO sin participaciones, y ahí el payload se ignora.
-  expect(controller).toContain(
-    "(inversionistas?.length === 0 || inversionistas_espejo?.length === 0)",
-  );
-  expect(controller).toContain(
-    "!esCreditoFinalizado &&\n      (inversionistas?.length === 0",
-  );
-  expect(controller).toContain(
-    "!esCreditoFinalizado && montoAportadoPadreCambiados.length > 0",
-  );
-  expect(controller).toContain(
-    "!esCreditoFinalizado && montoAportadoEspejoCambiados.length > 0",
-  );
+  // La conducta de estas validaciones se ejercita en updateCredit.test.ts;
+  // acá solo queda el contrato de nombres y mensajes.
   expect(controller).toContain(
     "Un crédito no puede quedarse sin inversionistas",
   );
-  expect(controller).toContain("if (!inversionistas) return new Map();");
   expect(auditSettings).toContain("app.monto_aportado_motivo_${sufijo}");
 });
 
@@ -90,7 +74,6 @@ test("shared investor amount history distinguishes parent from mirror", () => {
   expect(migration).toContain("trg_audit_monto_aportado_padre");
   expect(migration).toContain("app.monto_aportado_motivo_padre");
   expect(migration).toContain("app.monto_aportado_motivo_espejo");
-  expect(migration).toContain("app.monto_aportado_motivo', true");
   expect(migration).toContain("NULLIF(\n      current_setting(");
   expect(migration).toContain("ix_hist_mont_origen_cred_fecha");
 });
@@ -108,7 +91,6 @@ test("rebuild audit only records investor IDs whose amount changed", () => {
   expect(controller).toContain("getAuditableInvestorIds");
   expect(controller).toContain("montoAportadoPadreAuditables");
   expect(controller).toContain("montoAportadoEspejoAuditables");
-  expect(controller).toContain("if (!inversionistas) return new Map();");
   expect(controller).toContain("inversionistas !== undefined");
   expect(auditSettings).toContain("app.monto_aportado_rebuild_${sufijo}");
   expect(auditSettings).toContain("app.monto_aportado_ids_${sufijo}");
@@ -135,5 +117,4 @@ test("omitted investor list stays undefined through the rebuild guards", () => {
   // rebuild borraba las filas del padre sin reinsertarlas.
   expect(controller).not.toContain("inversionistas = [],");
   expect(controller).toContain("(inversionistas ?? []).some(");
-  expect(controller).toContain("if (!inversionistas) return new Map();");
 });

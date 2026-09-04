@@ -1519,15 +1519,6 @@ export const updateCredit = async ({ body, set, request }: any) => {
       return { message: "Credit not found" };
     }
 
-    const capitalCambiaSolicitado = !new Big(fieldsToUpdate.capital).eq(
-      new Big(current.capital || 0),
-    );
-    const motivoCapital = motivo_ajuste_capital?.trim();
-    if (capitalCambiaSolicitado && !motivoCapital) {
-      set.status = 400;
-      return { message: "El motivo del ajuste de capital es obligatorio" };
-    }
-
     // Estados de cierre: el crédito se puede editar, pero su calendario de
     // pagos es historia congelada — la cancelación deja los pagos no pagados
     // en paymentFalse=true con restantes en 0 (credits.ts) y el caído conserva
@@ -1536,20 +1527,78 @@ export const updateCredit = async ({ body, set, request }: any) => {
     const esCreditoFinalizado =
       current.statusCredit === "CANCELADO" || current.statusCredit === "CAIDO";
 
+    // El rango del capital se valida antes que su motivo: pedir el motivo
+    // primero deja al usuario escribiéndolo para recién entonces enterarse de
+    // que el monto estaba fuera de rango.
+    //
+    // El mínimo es Q1 mientras el crédito esté vivo. Queda en 0 si:
+    //   - el estado es de cierre (CANCELADO, CAIDO o INCOBRABLE): ahí un capital
+    //     0 es un valor válido y se puede fijar explícitamente;
+    //   - o el capital YA vale 0 (cancelar y reiniciarCredito lo zerean, y el
+    //     modal reenvía el capital actual en cada guardado, así que rechazarlo
+    //     bloquearía la edición de cualquier otro campo).
+    // En ambos casos el valor enviado debe ser 0 exacto: un monto fraccionario
+    // como 0.50 no es "dejarlo en cero", es un monto nuevo y le aplica el mínimo.
+    const capitalNuevo = new Big(fieldsToUpdate.capital);
+    const admiteCapitalEnCero =
+      current.statusCredit === "CANCELADO" ||
+      current.statusCredit === "CAIDO" ||
+      current.statusCredit === "INCOBRABLE" ||
+      new Big(current.capital || 0).eq(0);
+    if (capitalNuevo.lt(1) && !(capitalNuevo.eq(0) && admiteCapitalEnCero)) {
+      set.status = 400;
+      return { message: "El capital debe ser mayor o igual a 1" };
+    }
+
+    const capitalCambiaSolicitado = !capitalNuevo.eq(
+      new Big(current.capital || 0),
+    );
+    const motivoCapital = motivo_ajuste_capital?.trim();
+    if (capitalCambiaSolicitado && !motivoCapital) {
+      set.status = 400;
+      return { message: "El motivo del ajuste de capital es obligatorio" };
+    }
+
+    // Los montos actuales solo se consultan si el body trae la lista
+    // correspondiente: sin ella no hay nada que comparar y los helpers
+    // devuelven [] de inmediato (la ruta del CRM y la de solo cuota no traen
+    // ninguna de las dos).
+    const leerMontosActuales = async (tabla: typeof creditos_inversionistas) =>
+      await db
+        .select({
+          inversionista_id: tabla.inversionista_id,
+          monto_aportado: tabla.monto_aportado,
+        })
+        .from(tabla)
+        .where(eq(tabla.credito_id, credito_id));
+
+    // En un crédito finalizado el payload de inversionistas se ignora por
+    // completo más abajo, así que tampoco hay nada que comparar contra la DB.
+    const inversionistasPadreActuales =
+      inversionistas && !esCreditoFinalizado
+        ? await leerMontosActuales(creditos_inversionistas)
+        : [];
+    const inversionistasEspejoActuales =
+      inversionistas_espejo && !esCreditoFinalizado
+        ? await leerMontosActuales(creditos_inversionistas_espejo as any)
+        : [];
+
     // Vaciar la lista dejaría un crédito VIVO sin quién aporte su capital: los
     // porcentajes de cash-in e inversión ya no sumarían y no habría a quién
     // liquidar. Sacar un inversionista se hace por su flujo propio
     // (liquidateInvestor / replaceInvestorCredit), que registra la compra y la
     // liquidación; acá se rechaza en vez de aceptarlo en silencio.
     //
-    // En uno finalizado la lista vacía es un estado legítimo: mergeCreditosAndUpdate
-    // traslada las participaciones del origen al destino y deja el origen
-    // CANCELADO sin ninguna (credits.ts). Ahí el payload de inversionistas ya se
-    // ignora más abajo, así que rechazarlo solo bloquearía editar su metadata.
-    if (
-      !esCreditoFinalizado &&
-      (inversionistas?.length === 0 || inversionistas_espejo?.length === 0)
-    ) {
+    // Solo cuenta como vaciar si HAY participaciones que borrar: un crédito
+    // importado de CRM/SIFCO o reservado no tiene ninguna, el modal igual manda
+    // [] y ahí la lista vacía es un no-op, no una baja. En un finalizado
+    // también es legítima: mergeCreditosAndUpdate traslada las participaciones
+    // al destino y deja el origen CANCELADO sin ninguna (credits.ts).
+    const vaciaParticipacionesExistentes =
+      (inversionistas?.length === 0 && inversionistasPadreActuales.length > 0) ||
+      (inversionistas_espejo?.length === 0 &&
+        inversionistasEspejoActuales.length > 0);
+    if (vaciaParticipacionesExistentes) {
       set.status = 400;
       return {
         message:
@@ -1557,13 +1606,6 @@ export const updateCredit = async ({ body, set, request }: any) => {
       };
     }
 
-    const inversionistasPadreActuales = await db
-      .select({
-        inversionista_id: creditos_inversionistas.inversionista_id,
-        monto_aportado: creditos_inversionistas.monto_aportado,
-      })
-      .from(creditos_inversionistas)
-      .where(eq(creditos_inversionistas.credito_id, credito_id));
     // El motivo se exige solo por ajustes sobre participaciones existentes; la
     // auditoría además cubre las altas, que el verificador de cuadre necesita
     // ver en el historial ESPEJO para descubrir el crédito destino.
@@ -1586,16 +1628,13 @@ export const updateCredit = async ({ body, set, request }: any) => {
       return { message: "El motivo del ajuste de monto aportado del padre es obligatorio" };
     }
 
-    const inversionistasEspejoActuales = await db
-      .select({
-        inversionista_id: creditos_inversionistas_espejo.inversionista_id,
-        monto_aportado: creditos_inversionistas_espejo.monto_aportado,
-      })
-      .from(creditos_inversionistas_espejo)
-      .where(eq(creditos_inversionistas_espejo.credito_id, credito_id));
+    // El alcance es el roster del padre: el modal deriva el espejo de esa lista,
+    // así que un espejo huérfano (sin fila en el padre) no puede venir en el
+    // payload ni recibir motivo desde la UI.
     const montoAportadoEspejoCambiados = getAdjustedExistingInvestorIds(
       inversionistasEspejoActuales,
       inversionistas_espejo,
+      inversionistasPadreActuales,
     );
     const montoAportadoEspejoAuditables = getAuditableInvestorIds(
       inversionistasEspejoActuales,
@@ -1613,25 +1652,6 @@ export const updateCredit = async ({ body, set, request }: any) => {
       await setMontoAportadoAuditContext(db, "PADRE", undefined, []);
       await setMontoAportadoAuditContext(db, "ESPEJO", undefined, []);
     };
-
-    // El mínimo es Q1 mientras el crédito esté vivo. Queda en 0 si:
-    //   - el estado es de cierre (CANCELADO, CAIDO o INCOBRABLE): ahí un capital
-    //     0 es un valor válido y se puede fijar explícitamente;
-    //   - o el capital YA vale 0 (cancelar y reiniciarCredito lo zerean, y el
-    //     modal reenvía el capital actual en cada guardado, así que rechazarlo
-    //     bloquearía la edición de cualquier otro campo).
-    // En ambos casos el valor enviado debe ser 0 exacto: un monto fraccionario
-    // como 0.50 no es "dejarlo en cero", es un monto nuevo y le aplica el mínimo.
-    const capitalNuevo = new Big(fieldsToUpdate.capital);
-    const admiteCapitalEnCero =
-      current.statusCredit === "CANCELADO" ||
-      current.statusCredit === "CAIDO" ||
-      current.statusCredit === "INCOBRABLE" ||
-      new Big(current.capital || 0).eq(0);
-    if (capitalNuevo.lt(1) && !(capitalNuevo.eq(0) && admiteCapitalEnCero)) {
-      set.status = 400;
-      return { message: "El capital debe ser mayor o igual a 1" };
-    }
 
     // 3.0. En un crédito finalizado no entran inversionistas nuevos: la compra
     // o reinversión crearía una participación "viva" (con su fila en

@@ -89,13 +89,23 @@ export function getAuditableInvestorIds(
 export function getAdjustedExistingInvestorIds(
   originales: InvestorMonto[],
   enviados: InvestorMonto[] | undefined,
+  alcance?: InvestorMonto[],
 ): number[] {
   if (!enviados) return [];
 
   const idsOriginales = new Set(
     originales.map((inversionista) => inversionista.inversionista_id),
   );
-  return getAuditableInvestorIds(originales, enviados).filter((id) =>
-    idsOriginales.has(id),
+  // El payload solo puede hablar de los inversionistas que el cliente pudo ver.
+  // El modal arma el espejo mapeando sobre el padre, así que una fila de espejo
+  // sin par en el padre nunca viaja: leerla como baja pediría un motivo que la
+  // UI no tiene forma de mostrar ni enviar, dejando el crédito sin poder
+  // guardarse. Con `alcance` esas filas quedan fuera del motivo (siguen
+  // auditadas por getAuditableInvestorIds).
+  const idsEnAlcance = alcance
+    ? new Set(alcance.map((inversionista) => inversionista.inversionista_id))
+    : undefined;
+  return getAuditableInvestorIds(originales, enviados).filter(
+    (id) => idsOriginales.has(id) && (!idsEnAlcance || idsEnAlcance.has(id)),
   );
 }

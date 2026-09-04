@@ -115,9 +115,6 @@ integrationTest(
       await pool.query("TRUNCATE cartera.historico_monto_aportado_espejo");
       await pool.query("BEGIN");
       await pool.query(
-        "SELECT set_config('app.monto_aportado_motivo', 'Motivo legacy', true)",
-      );
-      await pool.query(
         "DELETE FROM cartera.creditos_inversionistas_espejo WHERE credito_id = 1",
       );
       await pool.query(
@@ -137,7 +134,7 @@ integrationTest(
           inversionista_id: 10,
           monto_anterior: "125",
           monto_nuevo: null,
-          motivo: "Motivo legacy",
+          motivo: null,
         },
         {
           operacion: "INSERT",
@@ -145,7 +142,7 @@ integrationTest(
           inversionista_id: 10,
           monto_anterior: null,
           monto_nuevo: "130",
-          motivo: "Motivo legacy",
+          motivo: null,
         },
       ]);
     } finally {

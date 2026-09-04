@@ -23,7 +23,12 @@ BEGIN
 END;
 $$;
 
-CREATE INDEX IF NOT EXISTS ix_hist_mont_origen_cred_fecha
+-- CONCURRENTLY para no bloquear las escrituras del trigger mientras se
+-- construye: esta tabla recibe una fila por cada movimiento de inversionistas,
+-- y un CREATE INDEX normal congelaría pagos, liquidaciones y rebuild de espejo.
+-- Debe ejecutarse FUERA de transacción (no dentro de un bloque DO ni de un
+-- BEGIN/COMMIT); si falla deja el índice INVALID y se reintenta tras un DROP.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_hist_mont_origen_cred_fecha
   ON cartera.historico_monto_aportado_espejo
   (origen, credito_id, inversionista_id, fecha);
 
@@ -58,20 +63,15 @@ BEGIN
     v_source  := 'manual';
   END IF;
 
-  -- Fallback temporal al nombre previo: permite aplicar migración antes del
-  -- deploy sin perder motivos generados por código aún no actualizado.
-  v_motivo := COALESCE(
-    NULLIF(
-      current_setting(
-        CASE v_origen
-          WHEN 'PADRE' THEN 'app.monto_aportado_motivo_padre'
-          ELSE 'app.monto_aportado_motivo_espejo'
-        END,
-        true
-      ),
-      ''
+  v_motivo := NULLIF(
+    current_setting(
+      CASE v_origen
+        WHEN 'PADRE' THEN 'app.monto_aportado_motivo_padre'
+        ELSE 'app.monto_aportado_motivo_espejo'
+      END,
+      true
     ),
-    NULLIF(current_setting('app.monto_aportado_motivo', true), '')
+    ''
   );
 
   v_rebuild := COALESCE(
@@ -109,12 +109,13 @@ BEGIN
     RETURN COALESCE(NEW, OLD);
   END IF;
 
-  -- El trigger espejo también observa UPDATE de otras columnas. Un UPDATE sin
-  -- cambio real de monto no constituye ajuste monetario.
-  IF TG_OP = 'UPDATE'
-    AND OLD.monto_aportado IS NOT DISTINCT FROM NEW.monto_aportado THEN
-    RETURN NEW;
-  END IF;
+  -- Los UPDATE se auditan siempre, incluso sin cambio de monto: el trigger
+  -- original (0004) no acotaba por columna y verificarCuadreLiquidaciones
+  -- descubre los créditos movidos tras una liquidación por la sola presencia
+  -- de filas ESPEJO posteriores (creditos_rel). Filtrarlos sacaría del set a
+  -- los créditos que solo registraron un UPDATE de otra columna
+  -- (mirrorInvestor, investor con monto igual) y su pendiente dejaría de
+  -- contarse, produciendo descuadres falsos.
 
   INSERT INTO cartera.historico_monto_aportado_espejo
     (txid, operacion, origen, credito_id, inversionista_id,

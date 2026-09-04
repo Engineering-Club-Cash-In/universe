@@ -2,17 +2,15 @@ import { useState } from "react";
 import { InputIcon, Button, IconPerson } from "@/components";
 import { useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/lib";
-import { registerExternalUser, registerExternalUserAuth } from "../services";
+import { registerExternalUserAuth } from "../services";
 import { rolFueEstablecido } from "../identidadDelPortal";
 
 interface CompleteProfileFormProps {
   onSuccess: () => void;
-  onlyApi?: boolean; // Si es true, no actualiza el rol en better-auth (usado para completar perfil desde admin)
 }
 
 export const CompleteProfileForm = ({
   onSuccess,
-  onlyApi = false,
 }: CompleteProfileFormProps) => {
   const { user } = useAuth();
   const [dpi, setDpi] = useState("");
@@ -35,23 +33,15 @@ export const CompleteProfileForm = ({
       }
 
       // El rol y el DPI los escribe el servidor al validar el registro, no el
-      // cliente. `onlyApi` conserva su sentido: cuando es true solo se crea en
-      // CRM/Cartera, sin tocar la cuenta de Better Auth.
-      if (onlyApi) {
-        await registerExternalUser({
-          userType: userType,
-          fullName: user?.name || user?.email.split("@")[0] || "",
-          email: user?.email ?? "",
-          dpi: dpi,
-        });
-      } else {
-        await registerExternalUserAuth({
-          userType: userType,
-          fullName: user?.name || user?.email.split("@")[0] || "",
-          email: user?.email ?? "",
-          dpi: dpi,
-        });
-      }
+      // cliente. Antes había aquí una rama `onlyApi` que llamaba a la variante
+      // SIN sesión; nunca se activaba (nadie pasaba la prop) y se retiró junto
+      // con esa ruta, que filtraba fichas del CRM a cualquiera.
+      await registerExternalUserAuth({
+        userType: userType,
+        fullName: user?.name || user?.email.split("@")[0] || "",
+        email: user?.email ?? "",
+        dpi: dpi,
+      });
     },
     onSuccess: () => {
       setError("");

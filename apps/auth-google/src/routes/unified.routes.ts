@@ -60,60 +60,21 @@ const requireAuth = async (c: Context<{ Variables: Variables }>, next: () => Pro
 };
 
 // ============================================
-// RUTAS PÚBLICAS (sin auth - para registro)
+// RUTAS PÚBLICAS (sin auth)
 // ============================================
-
-/**
- * POST /api/unified/register-external
- * Registro unificado de usuario externo
- * Decide automáticamente si crear en CRM (cliente) o Cartera (inversionista)
- * 
- * Esta ruta NO requiere autenticación porque se llama durante el registro
- */
-unifiedRoutes.post("/register-external", async (c) => {
-  try {
-    const body = await c.req.json<RegisterExternalUserPayload>();
-
-    // Validaciones
-    if (!body.userType || !["CLIENT", "INVESTOR"].includes(body.userType)) {
-      throw new HTTPException(400, {
-        message: "El campo userType es requerido y debe ser 'CLIENT' o 'INVESTOR'",
-      });
-    }
-
-    if (!body.fullName) {
-      throw new HTTPException(400, { message: "El campo fullName es requerido" });
-    }
-
-    if (!body.email) {
-      throw new HTTPException(400, { message: "El campo email es requerido" });
-    }
-
-    if (!body.dpi) {
-      throw new HTTPException(400, { message: "El campo dpi es requerido" });
-    }
-
-    // Validar formato DPI (13 dígitos)
-    if (!/^\d{13}$/.test(body.dpi)) {
-      throw new HTTPException(400, {
-        message: "El DPI debe tener exactamente 13 dígitos",
-      });
-    }
-
-    const result = await registerExternalUser(body);
-
-    return c.json(result);
-  } catch (error) {
-    if (error instanceof HTTPException) {
-      throw error;
-    }
-    
-    // Si el error viene de los servicios externos, devolver 500
-    throw new HTTPException(500, {
-      message: error instanceof Error ? error.message : "Error al registrar usuario externo",
-    });
-  }
-});
+//
+// Ya no hay ninguna. `POST /register-external` se retiró: era una ruta sin
+// sesión que llamaba al CRM con el secreto de servicio usando el correo y el
+// DPI que mandara quien fuera. Como `createPortalRegisterLead` devuelve el lead
+// COMPLETO cuando coincide el correo O el DPI, y esta ruta reenviaba esa
+// respuesta tal cual, cualquiera en internet podía sacar la ficha de un lead
+// con solo conocer uno de los dos datos —y, si ese lead tenía el correo vacío,
+// provocar que el CRM le escribiera el suyo encima.
+//
+// No tenía ningún consumidor: el registro del portal pasa por
+// `/register-external-auth`, que saca el correo de la sesión. El único
+// llamador en el código era una rama de `CompleteProfileForm` (`onlyApi`) que
+// nunca se activaba, retirada junto con la ruta.
 
 // ============================================
 // RUTAS PROTEGIDAS (con auth)

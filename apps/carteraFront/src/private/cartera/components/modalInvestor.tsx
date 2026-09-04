@@ -8,6 +8,7 @@ import { useBancos } from "../hooks/bancos";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { InvestorPayload } from "../services/services";
+import { avisoAccesoPortal } from "./accesoPortal";
 import { ModalReinversionCombinada } from "./ModalReinversionCombinada";
 import {
   errorRepLegal,
@@ -166,12 +167,25 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
     // Mismo endpoint para crear y editar: en crear va con creación estricta,
     // en editar el `inversionista_id` del payload apunta la fila a actualizar.
     insertInvestor.mutate(payload, {
-      onSuccess: () => {
-        toast.success(
+      onSuccess: (respuesta) => {
+        const base =
           mode === "create"
             ? "Inversionista creado correctamente"
-            : "Inversionista actualizado correctamente"
-        );
+            : "Inversionista actualizado correctamente";
+
+        // El alta puede salir perfecta y el acceso al portal no. Con el toast
+        // verde de siempre, quien captura cerraría el modal creyendo que todo
+        // salió y el inversionista quedaría con una cuenta que no sabe que
+        // tiene —o sin cuenta— y nadie se enteraría hasta el resumen del día
+        // siguiente. Editar no provisiona, así que aquí solo habla el alta.
+        const aviso = avisoAccesoPortal(respuesta?.provisioning?.[0]);
+        const mensaje = aviso ? `${base}. ${aviso.texto}` : base;
+        if (aviso?.tono === "advertencia") {
+          // Dura más que el toast normal: es lo que hay que leer y actuar.
+          toast.warning(mensaje, { duration: 15000 });
+        } else {
+          toast.success(mensaje);
+        }
         queryClient.invalidateQueries({ queryKey: ["investors"] });
         queryClient.invalidateQueries({ queryKey: ["investor-mirror-summary"] });
         queryClient.invalidateQueries({ queryKey: ["investor-totals"] });

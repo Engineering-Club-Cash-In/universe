@@ -62,9 +62,37 @@ export interface InvestorResponse {
 }
 
 // Crear inversionista(s)
+/**
+ * Respuesta real de `POST /investor`: un objeto, no el array de filas.
+ *
+ * Estaba tipado `InvestorResponse[]` y no lo es — por eso el bloque
+ * `provisioning`, que dice qué pasó con el acceso al portal de cada
+ * inversionista recién creado, no se podía leer sin castear. Va aparte de
+ * `data` a propósito: el alta puede haber salido perfecta y el acceso no.
+ */
+export interface AccesoPortalRespuesta {
+  inversionistaId: number;
+  estado: string;
+  usuarioEmail: string | null;
+  correo: {
+    enviado: boolean;
+    plantilla: string | null;
+    redirigido: boolean;
+    destinatarioReal: string | null;
+  };
+  advertencias: string[];
+  motivo: string | null;
+}
+
+export interface InsertInvestorRespuesta {
+  message: string;
+  data: InvestorResponse[];
+  provisioning?: AccesoPortalRespuesta[];
+}
+
 export async function insertInvestorService(
   data: InvestorPayload | InvestorPayload[]
-): Promise<InvestorResponse[]> {
+): Promise<InsertInvestorRespuesta> {
   const res = await api.post(`${API_URL}/investor`, data);
   return res.data;
 }

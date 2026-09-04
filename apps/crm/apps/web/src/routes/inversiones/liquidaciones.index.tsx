@@ -36,6 +36,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { avisoAccesoPortal } from "@/lib/acceso-portal";
 import { authClient } from "@/lib/auth-client";
 import { errorRepLegal, valorRepLegalAEnviar } from "@/lib/rep-legal-empresa";
 import { PERMISSIONS } from "@/lib/roles";
@@ -186,10 +187,23 @@ function LiquidacionesInversionistas() {
 	const crearMutation = useMutation({
 		...orpc.crearInversionista.mutationOptions(),
 		onSuccess: async (data: any) => {
-			const msg = data.compraCartera
+			const base = data.compraCartera
 				? "Inversionista creado y compra de cartera registrada"
 				: "Inversionista creado correctamente";
-			toast.success(msg);
+
+			// El alta puede salir perfecta y el acceso al portal no. Si eso se
+			// resolviera con el toast verde de siempre, conta cerraría el modal
+			// creyendo que todo salió y el inversionista quedaría con una cuenta
+			// que no sabe que tiene: nadie se enteraría hasta el resumen del día
+			// siguiente. Con el aviso aquí se entera con la persona al teléfono.
+			const aviso = avisoAccesoPortal(data.accesoPortal);
+			const msg = aviso ? `${base}. ${aviso.texto}` : base;
+			if (aviso?.tono === "advertencia") {
+				// Dura más que el toast normal: es lo que hay que leer y actuar.
+				toast.warning(msg, { duration: 15000 });
+			} else {
+				toast.success(msg);
+			}
 			setCrearOpen(false);
 			resetForm();
 			await queryClient.invalidateQueries({

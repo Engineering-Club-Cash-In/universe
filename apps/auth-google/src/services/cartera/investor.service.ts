@@ -44,6 +44,22 @@ export interface Banco {
   codigo: string;
 }
 
+/**
+ * Una de las entidades que la persona logueada puede operar: su propio
+ * inversionista y el de cada sociedad que representa.
+ */
+export interface EntidadPortal {
+  inversionista_id: number;
+  nombre: string;
+  tipo: "persona" | "empresa";
+  es_ancla: boolean;
+  dpi: string | null;
+  dpi_rep_legal: string | null;
+  email: string | null;
+  moneda: string;
+  status: string;
+}
+
 export interface InvestorDocument {
   documento_id: number;
   inversionista_id: number;
@@ -92,6 +108,87 @@ export const createInvestor = async (
     console.error("Error al crear inversionista:", error);
     throw error;
   }
+};
+
+/**
+ * Resolver las entidades que puede operar la persona dueña de ese correo.
+ * El correo lo pone SIEMPRE la sesión, nunca el cliente.
+ */
+export const getEntidades = async (
+  email: string,
+): Promise<EntidadPortal[]> => {
+  const token = await ensureCarteraAuth();
+
+  const response = await fetch(
+    `${env.CARTERA_API_URL}/investor/entidades?email=${encodeURIComponent(email)}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Error al resolver las entidades del inversionista");
+  }
+
+  const json = (await response.json()) as {
+    success: boolean;
+    data: EntidadPortal[];
+  };
+  return json.data ?? [];
+};
+
+/**
+ * Obtener perfil de inversionista por su id
+ */
+export const getInvestorProfileById = async (
+  inversionistaId: number,
+): Promise<InvestorProfile> => {
+  const token = await ensureCarteraAuth();
+
+  const response = await fetch(
+    `${env.CARTERA_API_URL}/investor?id=${inversionistaId}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Error al obtener perfil del inversionista");
+  }
+
+  return (await response.json()) as InvestorProfile;
+};
+
+/**
+ * Obtener documentos visibles de un inversionista por su id
+ */
+export const getInvestorDocumentsById = async (
+  inversionistaId: number,
+): Promise<InvestorDocument[]> => {
+  const token = await ensureCarteraAuth();
+
+  const response = await fetch(
+    `${env.CARTERA_API_URL}/investor-documents/client-by-id/${inversionistaId}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Error al obtener documentos del inversionista");
+  }
+
+  const json = (await response.json()) as {
+    success: boolean;
+    data: InvestorDocument[];
+  };
+  return json.data;
 };
 
 /**

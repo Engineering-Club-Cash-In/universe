@@ -1,23 +1,25 @@
 import { useState } from "react";
 import { IconTarget, Loading } from "@/components";
 import { useQuery } from "@tanstack/react-query";
-import { useAuth } from "@/lib";
 import { getInvestorDocuments, type InvestorDocument } from "../services/investorService";
 import { useIsMobile } from "@/hooks";
 import { DocumentViewerModal } from "./DocumentViewerModal";
+import { useEntidades } from "../hooks/useEntidades";
+import { CACHE_FICHA } from "../constants/cache";
 
 export const InvestorDocuments = () => {
-  const { user } = useAuth();
   const isMobile = useIsMobile();
   const [selectedDocument, setSelectedDocument] = useState<InvestorDocument | null>(null);
+  const { inversionistaId, isLoading: cargandoEntidades } = useEntidades();
 
   const { data: documents, isLoading } = useQuery({
-    queryKey: ["investor-documents", user?.email],
-    queryFn: () => getInvestorDocuments(user?.email || ""),
-    enabled: !!user?.email,
+    queryKey: ["investor-documents", inversionistaId],
+    queryFn: () => getInvestorDocuments(inversionistaId!),
+    enabled: !!inversionistaId,
+    ...CACHE_FICHA,
   });
 
-  if (isLoading) {
+  if (cargandoEntidades || (!!inversionistaId && isLoading)) {
     return <Loading />;
   }
 

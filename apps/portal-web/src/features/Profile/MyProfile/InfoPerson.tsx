@@ -11,6 +11,8 @@ import { useQuery } from "@tanstack/react-query";
 import { ModalConfirmChange } from "./ModalConfirmChange";
 import { getProfile } from "../services";
 import { getInvestorProfile, getBancos } from "../services/investorService";
+import { useEntidades } from "../hooks/useEntidades";
+import { CACHE_CATALOGO, CACHE_FICHA } from "../constants/cache";
 import { useAuth } from "@/lib";
 
 type EditField =
@@ -31,6 +33,7 @@ export const InfoPerson = () => {
   const [numeroCuenta, setNumeroCuenta] = useState("");
   const [editingField, setEditingField] = useState<EditField>(null);
   const { user } = useAuth();
+  const { inversionistaId, isLoading: cargandoEntidades } = useEntidades();
 
   const isInvestor = user?.role === "INVESTOR";
 
@@ -43,6 +46,7 @@ export const InfoPerson = () => {
     queryKey: ["profile", user?.id],
     queryFn: () => getProfile(user?.email || "", user?.dpi || ""),
     enabled: !!user?.id && !isInvestor,
+    ...CACHE_FICHA,
   });
 
   // Obtener perfil del inversionista (Cartera) - solo si es INVESTOR
@@ -51,9 +55,10 @@ export const InfoPerson = () => {
     isLoading: isLoadingInvestor,
     refetch: refetchInvestor,
   } = useQuery({
-    queryKey: ["investor-profile", user?.id],
-    queryFn: () => getInvestorProfile(user?.dpi || "", user?.email || ""),
-    enabled: !!user?.id && isInvestor,
+    queryKey: ["investor-profile", inversionistaId],
+    queryFn: () => getInvestorProfile(inversionistaId!),
+    enabled: !!inversionistaId && isInvestor,
+    ...CACHE_FICHA,
   });
 
   // Obtener catálogo de bancos - solo si es INVESTOR
@@ -61,18 +66,30 @@ export const InfoPerson = () => {
     queryKey: ["bancos"],
     queryFn: getBancos,
     enabled: isInvestor,
+    ...CACHE_CATALOGO,
   });
 
   const profileData: any = isInvestor ? investorProfile : clientProfile;
-  const isLoading = isInvestor ? isLoadingInvestor : isLoadingClient;
+  // Sin columna que marque a las jurídicas: la señal es que la ficha no tiene
+  // DPI propio pero sí el de un representante.
+  const esSociedad =
+    isInvestor && !profileData?.dpi && !!profileData?.dpi_rep_legal;
+  const isLoading = isInvestor
+    ? cargandoEntidades || (!!inversionistaId && isLoadingInvestor)
+    : isLoadingClient;
   const refetch = isInvestor ? refetchInvestor : refetchClient;
 
   // Actualizar campos cuando se carga el perfil
   useEffect(() => {
     if (profileData) {
       if (isInvestor) {
-        // Datos de inversionista
-        setDpi(profileData.dpi?.toString() || "");
+        // Datos de inversionista. En las sociedades el `dpi` propio va vacío y
+        // el del humano vive en dpi_rep_legal, así que se muestra ese.
+        setDpi(
+          profileData.dpi?.toString() ||
+            profileData.dpi_rep_legal?.toString() ||
+            "",
+        );
         setBanco(profileData.banco_id?.toString() || "");
         setTipoCuenta(profileData.tipo_cuenta || "");
         setNumeroCuenta(profileData.numero_cuenta || "");
@@ -135,7 +152,7 @@ export const InfoPerson = () => {
     if (!profileData) return false;
     return isInvestor
       ? !!(
-          profileData.dpi &&
+          (profileData.dpi || profileData.dpi_rep_legal) &&
           profileData.banco_id &&
           profileData.tipo_cuenta &&
           profileData.numero_cuenta
@@ -211,7 +228,9 @@ export const InfoPerson = () => {
           {/* DPI - Solo informativo */}
           <div className="text-[#6B7280]">
             <label className="text-sm text-white/65 mb-2 block">
-              DPI (Documento Personal de Identificación)
+              {esSociedad
+                ? "DPI del representante legal"
+                : "DPI (Documento Personal de Identificación)"}
             </label>
             <InputIcon
               icon={<IconPerson />}
@@ -364,7 +383,6 @@ export const InfoPerson = () => {
         initialValue={getCurrentValue()}
         onClose={handleCloseModal}
         onSuccess={handleSuccess}
-        profileData={profileData}
       />
     </div>
   );

@@ -13,12 +13,19 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { useModalOptionsCall } from "@/hooks";
 import { ContainerMenu } from "../components/ContainerMenu";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/lib";
+import { useEntidades } from "../hooks/useEntidades";
+import { CACHE_FICHA, CACHE_MOVIMIENTOS } from "../constants/cache";
 
 export const MyInvestments = () => {
   const { user } = useAuth();
+  const {
+    inversionistaId,
+    isLoading: cargandoEntidades,
+    sinEntidades,
+  } = useEntidades();
   const [expandedLiquidacion, setExpandedLiquidacion] = useState<number | null>(
     null,
   );
@@ -30,11 +37,20 @@ export const MyInvestments = () => {
   const { isModalOpen, modalOptionsInvestors, setIsModalOpen } =
     useModalOptionsCall();
 
-  // Obtener estadísticas usando email o DPI del perfil
+  // Al cambiar de entidad hay que volver al principio: la entidad nueva puede
+  // tener una sola liquidación y el usuario quedaría parado en la página 3.
+  useEffect(() => {
+    setCurrentPage(1);
+    setPagosPage(1);
+    setExpandedLiquidacion(null);
+  }, [inversionistaId]);
+
+  // Estadísticas de la entidad activa
   const { data: stats, isLoading: loadingStats } = useQuery({
-    queryKey: ["investments-stats", user?.id],
-    queryFn: () => getInvestmentsStats(user?.dpi || "", user?.email || ""),
-    enabled: !!user?.id,
+    queryKey: ["investments-stats", inversionistaId],
+    queryFn: () => getInvestmentsStats(inversionistaId!),
+    enabled: !!inversionistaId,
+    ...CACHE_MOVIMIENTOS,
   });
 
   // Obtener liquidaciones con paginación
@@ -43,26 +59,25 @@ export const MyInvestments = () => {
     isLoading: loadingLiquidaciones,
     isFetching: fetchingLiquidaciones,
   } = useQuery({
-    queryKey: ["liquidaciones", user?.id, currentPage, perPage],
-    queryFn: () =>
-      getLiquidaciones(
-        user?.dpi || "",
-        user?.email || "",
-        currentPage,
-        perPage,
-      ),
-    enabled: !!user?.id,
+    queryKey: ["liquidaciones", inversionistaId, currentPage, perPage],
+    queryFn: () => getLiquidaciones(inversionistaId!, currentPage, perPage),
+    enabled: !!inversionistaId,
+    ...CACHE_MOVIMIENTOS,
   });
 
   // Obtener historial de reporte de liquidaciones
   const { data: historialReporte } = useQuery({
     queryKey: ["historial-reporte", user?.email],
-    queryFn: () => getHistorialReporte(user?.email || ""),
+    queryFn: getHistorialReporte,
     enabled: !!user?.email,
+    ...CACHE_FICHA,
   });
 
   // Solo mostrar loading de página completa en la carga inicial
-  const isInitialLoading = loadingStats || loadingLiquidaciones;
+  // Con `enabled: false` react-query no reporta loading, así que sin incluir a
+  // las entidades la pantalla se pintaría vacía mientras resuelven.
+  const isInitialLoading =
+    cargandoEntidades || (!!inversionistaId && (loadingStats || loadingLiquidaciones));
   const liquidaciones = liquidacionesData?.liquidaciones || [];
   const totalPages = liquidacionesData?.totalPages || 1;
   const totalItems = liquidacionesData?.totalItems || 0;
@@ -124,6 +139,23 @@ export const MyInvestments = () => {
         <ContainerMenu>
           <div className="max-w-7xl mx-auto mt-26 mb-20">
             <Loading />
+          </div>
+        </ContainerMenu>
+      </div>
+    );
+  }
+
+  if (sinEntidades) {
+    return (
+      <div>
+        <NavBar />
+        <ContainerMenu>
+          <div className="max-w-2xl mt-10 mb-20 bg-white/5 border border-white/10 rounded-2xl p-8">
+            <h1 className="text-2xl font-bold mb-3">Mis Inversiones</h1>
+            <p className="text-gray">
+              Tu usuario todavía no está vinculado a un inversionista. Escribile
+              a tu asesor para que lo asocien y acá vas a ver tus inversiones.
+            </p>
           </div>
         </ContainerMenu>
       </div>

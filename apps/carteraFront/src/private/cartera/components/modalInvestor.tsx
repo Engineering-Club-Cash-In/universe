@@ -574,6 +574,13 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
               tipo_reinversion: "reinversion_combinada",
               re_inversion: "reinversion_combinada",
             };
+            // Esta ruta también puede terminar borrando el `dpi_rep_legal` (si el
+            // operador desmarcó "¿Es empresa?" antes de configurar la
+            // combinada): pasa por la misma confirmación que el guardado normal.
+            if (requiereConfirmacionBorrado(repLegalOriginal, esEmpresa)) {
+              setPayloadPorConfirmar(payload);
+              return;
+            }
             insertInvestor.mutate(payload, {
               onSuccess: () => {
                 toast.success("Inversionista actualizado con reinversión combinada.");

@@ -90,7 +90,12 @@ test("rebuild audit only records investor IDs whose amount changed", () => {
 
   expect(controller).toContain("montoAportadoPadreCambiados");
   expect(controller).toContain("montoAportadoEspejoCambiados");
-  expect(controller).toContain("getChangedExistingInvestorIds");
+  // Dos alcances distintos: el motivo se exige solo por ajustes sobre
+  // participaciones existentes, la auditoría cubre además las altas.
+  expect(controller).toContain("getAdjustedExistingInvestorIds");
+  expect(controller).toContain("getAuditableInvestorIds");
+  expect(controller).toContain("montoAportadoPadreAuditables");
+  expect(controller).toContain("montoAportadoEspejoAuditables");
   expect(controller).toContain("if (!inversionistas) return new Map();");
   expect(controller).toContain("inversionistas !== undefined");
   expect(auditSettings).toContain("app.monto_aportado_rebuild_${sufijo}");

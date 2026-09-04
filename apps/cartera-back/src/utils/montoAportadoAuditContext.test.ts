@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import {
   buildMontoAportadoAuditSettings,
-  getChangedExistingInvestorIds,
+  getAuditableInvestorIds,
+  getAdjustedExistingInvestorIds,
 } from "./montoAportadoAuditContext";
 
 test("builds independent parent audit settings with changed investor IDs", () => {
@@ -25,9 +26,9 @@ test("builds empty mirror context without reusing parent values", () => {
   ]);
 });
 
-test("includes modified and removed existing investors but not additions", () => {
+test("motivo scope covers modified and removed investors but not additions", () => {
   expect(
-    getChangedExistingInvestorIds(
+    getAdjustedExistingInvestorIds(
       [
         { inversionista_id: 12, monto_aportado: "100.00" },
         { inversionista_id: 48, monto_aportado: "200.00" },
@@ -40,6 +41,21 @@ test("includes modified and removed existing investors but not additions", () =>
   ).toEqual([12, 48]);
 });
 
+test("audit scope also covers additions so the mirror INSERT is recorded", () => {
+  // Un alta no exige motivo, pero sí debe quedar en el historial ESPEJO:
+  // verificarCuadreLiquidaciones descubre el crédito destino de una
+  // reinversión solo por esas filas.
+  expect(
+    getAuditableInvestorIds(
+      [{ inversionista_id: 12, monto_aportado: "100.00" }],
+      [
+        { inversionista_id: 12, monto_aportado: "100.00" },
+        { inversionista_id: 77, monto_aportado: "5000.00" },
+      ],
+    ),
+  ).toEqual([77]);
+});
+
 test("omitted investor list is not read as a full removal", () => {
   const persistidos = [
     { inversionista_id: 12, monto_aportado: "100.00" },
@@ -49,8 +65,8 @@ test("omitted investor list is not read as a full removal", () => {
   // El body sin la lista llega como undefined: no hay nada que auditar ni
   // motivo que exigir. Con el default `[]` que existía en updateCredit, cada
   // participación persistida se leía como baja y el rebuild las borraba.
-  expect(getChangedExistingInvestorIds(persistidos, undefined)).toEqual([]);
+  expect(getAdjustedExistingInvestorIds(persistidos, undefined)).toEqual([]);
 
   // Una lista vacía explícita sí es una baja de todas las participaciones.
-  expect(getChangedExistingInvestorIds(persistidos, [])).toEqual([12, 48]);
+  expect(getAdjustedExistingInvestorIds(persistidos, [])).toEqual([12, 48]);
 });

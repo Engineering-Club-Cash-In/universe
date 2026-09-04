@@ -30,10 +30,21 @@ type InvestorMonto = {
 };
 
 /**
- * Incluye cambios de monto y bajas de participaciones existentes. Las altas
- * no entran: se registran en compras_credito_inversionista, no como ajuste.
+ * IDs cuyo INSERT/DELETE debe quedar en el historial de monto_aportado:
+ * cambios de monto, bajas y altas.
+ *
+ * Las altas entran aunque `compras_credito_inversionista` ya registre la
+ * operación: verificarCuadreLiquidaciones descubre los créditos movidos tras
+ * una liquidación EXCLUSIVAMENTE por el historial ESPEJO (creditos_rel), y
+ * `compras_por_credito_ajustada` hace inner join contra ese conjunto. Sin la
+ * fila de auditoría, el crédito destino de una reinversión nunca se descubre
+ * y el verificador resta la reinversión sin sumar el saldo que la recibió,
+ * reportando un descuadre falso.
+ *
+ * Para decidir si se exige motivo usar `getAdjustedExistingInvestorIds`: un
+ * alta es una compra o reinversión, no un ajuste que haya que justificar.
  */
-export function getChangedExistingInvestorIds(
+export function getAuditableInvestorIds(
   originales: InvestorMonto[],
   enviados: InvestorMonto[] | undefined,
 ): number[] {
@@ -59,6 +70,32 @@ export function getChangedExistingInvestorIds(
   const eliminados = originales
     .filter((inversionista) => !idsEnviados.has(inversionista.inversionista_id))
     .map((inversionista) => inversionista.inversionista_id);
+  const agregados = enviados
+    .filter(
+      (inversionista) =>
+        originalPorId.get(inversionista.inversionista_id) === undefined,
+    )
+    .map((inversionista) => inversionista.inversionista_id);
 
-  return [...new Set([...modificados, ...eliminados])];
+  return [...new Set([...modificados, ...eliminados, ...agregados])];
+}
+
+/**
+ * IDs que representan un ajuste sobre una participación que ya existía
+ * (cambio de monto o baja) y por lo tanto exigen motivo. Las altas quedan
+ * fuera: son compras o reinversiones, registradas en
+ * compras_credito_inversionista con su monto y tipo de operación.
+ */
+export function getAdjustedExistingInvestorIds(
+  originales: InvestorMonto[],
+  enviados: InvestorMonto[] | undefined,
+): number[] {
+  if (!enviados) return [];
+
+  const idsOriginales = new Set(
+    originales.map((inversionista) => inversionista.inversionista_id),
+  );
+  return getAuditableInvestorIds(originales, enviados).filter((id) =>
+    idsOriginales.has(id),
+  );
 }

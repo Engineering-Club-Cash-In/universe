@@ -39,7 +39,10 @@ import {
   getModalidadFacturacionSpreadById,
   resolveModalidadFacturacionSpread,
 } from "./modalidadFacturacion";
-import { getChangedExistingInvestorIds } from "../utils/montoAportadoAuditContext";
+import {
+  getAuditableInvestorIds,
+  getAdjustedExistingInvestorIds,
+} from "../utils/montoAportadoAuditContext";
 
 interface UpdateInstallmentsParams {
   numero_credito_sifco: string;
@@ -1545,7 +1548,14 @@ export const updateCredit = async ({ body, set, request }: any) => {
       })
       .from(creditos_inversionistas)
       .where(eq(creditos_inversionistas.credito_id, credito_id));
-    const montoAportadoPadreCambiados = getChangedExistingInvestorIds(
+    // El motivo se exige solo por ajustes sobre participaciones existentes; la
+    // auditoría además cubre las altas, que el verificador de cuadre necesita
+    // ver en el historial ESPEJO para descubrir el crédito destino.
+    const montoAportadoPadreCambiados = getAdjustedExistingInvestorIds(
+      inversionistasPadreActuales,
+      inversionistas,
+    );
+    const montoAportadoPadreAuditables = getAuditableInvestorIds(
       inversionistasPadreActuales,
       inversionistas,
     );
@@ -1563,7 +1573,11 @@ export const updateCredit = async ({ body, set, request }: any) => {
       })
       .from(creditos_inversionistas_espejo)
       .where(eq(creditos_inversionistas_espejo.credito_id, credito_id));
-    const montoAportadoEspejoCambiados = getChangedExistingInvestorIds(
+    const montoAportadoEspejoCambiados = getAdjustedExistingInvestorIds(
+      inversionistasEspejoActuales,
+      inversionistas_espejo,
+    );
+    const montoAportadoEspejoAuditables = getAuditableInvestorIds(
       inversionistasEspejoActuales,
       inversionistas_espejo,
     );
@@ -2121,13 +2135,13 @@ export const updateCredit = async ({ body, set, request }: any) => {
         db,
         "PADRE",
         motivoMontoAportadoPadre,
-        montoAportadoPadreCambiados,
+        montoAportadoPadreAuditables,
       );
       await setMontoAportadoAuditContext(
         db,
         "ESPEJO",
         motivoMontoAportadoEspejo,
-        montoAportadoEspejoCambiados,
+        montoAportadoEspejoAuditables,
       );
       await runInvestorRebuild(db);
     }

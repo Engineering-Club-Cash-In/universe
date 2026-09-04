@@ -128,6 +128,13 @@ export async function claimDpi(
  * falla, el DPI queda reservado en la cuenta de quien lo pidió, y el modo de
  * fallo es benigno: su propio reintento reconoce la reserva como propia
  * (`claimedNow: false`) y sigue adelante.
+ *
+ * La restauración es un compare-and-set: solo escribe mientras el DPI de la
+ * cuenta siga siendo el que reservó ESTA petición. Con dos registros solapados
+ * sobre la misma cuenta, el segundo puede reservar y terminar bien después de
+ * que el primero leyera su `previousDpi`; si el primero falla, una restauración
+ * incondicional le borraría al segundo el DPI que sí quedó bien y dejaría la
+ * cuenta desalineada con el registro externo que ya se hizo.
  */
 export async function releaseDpiClaim(
   userId: string,
@@ -141,7 +148,7 @@ export async function releaseDpiClaim(
     await db
       .update(users)
       .set({ dpi: claim.previousDpi, updatedAt: new Date() })
-      .where(eq(users.id, userId));
+      .where(and(eq(users.id, userId), eq(users.dpi, claim.dpi)));
   } catch (error) {
     console.error(
       `[ERROR] No se pudo liberar la reserva del DPI de la cuenta ${userId}; queda reservado y el titular puede reintentar sobre él.`,

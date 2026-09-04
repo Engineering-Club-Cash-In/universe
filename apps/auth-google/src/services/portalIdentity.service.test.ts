@@ -40,10 +40,13 @@ mock.module("../db/connection", () => ({
 
 // Se carga dentro de `beforeAll` para que el mock de la conexión ya esté puesto.
 let applyRegistrationOutcome: (typeof import("./portalIdentity.service"))["applyRegistrationOutcome"];
+let releaseDpiClaim: (typeof import("./portalIdentity.service"))["releaseDpiClaim"];
 
 beforeAll(async () => {
-  applyRegistrationOutcome = (await import("./portalIdentity.service"))
-    .applyRegistrationOutcome;
+  const servicio = await import("./portalIdentity.service");
+
+  applyRegistrationOutcome = servicio.applyRegistrationOutcome;
+  releaseDpiClaim = servicio.releaseDpiClaim;
 });
 
 describe("applyRegistrationOutcome", () => {
@@ -105,5 +108,43 @@ describe("applyRegistrationOutcome", () => {
 
     expect(resultado.role).toBeNull();
     expect(updates).toEqual([]);
+  });
+});
+
+describe("releaseDpiClaim", () => {
+  beforeEach(() => {
+    filasSelect = [];
+    updates = [];
+    filasActualizadas = [{ id: "u1" }];
+  });
+
+  it("no toca nada si la reserva no fue de esta petición", async () => {
+    await releaseDpiClaim("u1", {
+      dpi: "1234567890123",
+      previousDpi: null,
+      claimedNow: false,
+    });
+
+    expect(updates).toEqual([]);
+  });
+
+  // Dos registros solapados sobre la MISMA cuenta: el segundo reserva y termina
+  // bien después de que el primero leyera su `previousDpi`. Si el primero
+  // falla, una restauración incondicional le borra al segundo el DPI que sí
+  // quedó bien y deja la cuenta desalineada con el registro externo.
+  it("restaura solo mientras el DPI siga siendo el que reservó", async () => {
+    await releaseDpiClaim("u1", {
+      dpi: "1234567890123",
+      previousDpi: null,
+      claimedNow: true,
+    });
+
+    expect(updates).toHaveLength(1);
+
+    const predicado = aSql(updates[0]!.condicion);
+
+    expect(predicado.sql).toContain('"dpi"');
+    expect(predicado.params).toEqual(["u1", "1234567890123"]);
+    expect(updates[0]!.valores.dpi).toBeNull();
   });
 });

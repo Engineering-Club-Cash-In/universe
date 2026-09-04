@@ -197,14 +197,25 @@ export function ModalEditCredit({
     })) || [];
 
   const safeInitialValues =
-    (initialValues ?? {}) as Omit<UpdateCreditBody, "inversionistas">;
+    (initialValues ?? {}) as Omit<UpdateCreditBody, "inversionistas"> & {
+      statusCredit?: string;
+    };
 
   // Cancelar (credits.ts) y reiniciarCredito dejan el crédito en capital 0, y
   // este modal reenvía el capital actual en cada guardado. Forzarlo a 1
   // reviviría el capital de un crédito cerrado o reiniciado, así que cuando ya
   // vale 0 el campo queda de solo lectura. Poner en 0 uno que tiene capital
   // sigue prohibido.
-  const capitalActualEnCero = Number(safeInitialValues.capital ?? 0) === 0;
+  // El capital puede quedar en 0 si el crédito está en un estado de cierre o si
+  // ya vale 0. En el resto el mínimo es Q1.
+  const admiteCapitalEnCero =
+    safeInitialValues.statusCredit === "CANCELADO" ||
+    safeInitialValues.statusCredit === "CAIDO" ||
+    safeInitialValues.statusCredit === "INCOBRABLE" ||
+    Number(safeInitialValues.capital ?? 0) === 0;
+  // Solo se bloquea el campo cuando ya vale 0 y no hay nada que ajustar.
+  const capitalBloqueado =
+    Number(safeInitialValues.capital ?? 0) === 0 && admiteCapitalEnCero;
 
   const parsedInvestors = parseInvestors(investorsInitial);
   // 🔥 Sincronización Real (Por ID de Inversionista)
@@ -285,9 +296,9 @@ export function ModalEditCredit({
         Number(values.capital) !== Number(safeInitialValues.capital ?? 0);
       // La excepción al mínimo es solo dejar en 0 lo que ya vale 0; un monto
       // fraccionario como 0.50 es un valor nuevo y le aplica el mínimo.
-      const capitalSigueEnCero =
-        Number(values.capital) === 0 && capitalActualEnCero;
-      if (!capitalSigueEnCero && !(Number(values.capital) >= 1)) {
+      const capitalPuedeSerCero =
+        Number(values.capital) === 0 && admiteCapitalEnCero;
+      if (!capitalPuedeSerCero && !(Number(values.capital) >= 1)) {
         toast.error("El capital debe ser mayor o igual a 1.");
         return;
       }
@@ -747,13 +758,13 @@ export function ModalEditCredit({
                           if (!["observaciones", "no_poliza", "numero_credito_sifco", "formato_credito"].includes(name)) {
                             const val = Number(e.target.value);
                             const normalizedVal =
-                              name === "capital" && !capitalActualEnCero
+                              name === "capital" && !admiteCapitalEnCero
                                 ? Math.max(1, val)
                                 : val;
                             formik.setFieldValue(name, Number(normalizedVal.toFixed(2)));
                           }
                         }}
-                        className={`border-blue-200 text-gray-800 ${name === "capital" && capitalActualEnCero ? "bg-gray-100 cursor-not-allowed" : name === "cuota" && nuevaCuota !== null ? "bg-green-50 border-green-400 ring-2 ring-green-200" : "bg-blue-50"}`}
+                        className={`border-blue-200 text-gray-800 ${name === "capital" && capitalBloqueado ? "bg-gray-100 cursor-not-allowed" : name === "cuota" && nuevaCuota !== null ? "bg-green-50 border-green-400 ring-2 ring-green-200" : "bg-blue-50"}`}
                         min={
                           [
                             "observaciones",
@@ -762,14 +773,14 @@ export function ModalEditCredit({
                             "formato_credito",
                           ].includes(name)
                             ? undefined
-                            : name === "capital" && !capitalActualEnCero
+                            : name === "capital" && !admiteCapitalEnCero
                               ? 1
                               : 0
                         }
                         step="any"
-                        readOnly={name === "capital" && capitalActualEnCero}
+                        readOnly={name === "capital" && capitalBloqueado}
                         title={
-                          name === "capital" && capitalActualEnCero
+                          name === "capital" && capitalBloqueado
                             ? "Este crédito está en capital 0 (cancelado o reiniciado): asignarle capital se hace desde su propio flujo, no acá"
                             : undefined
                         }

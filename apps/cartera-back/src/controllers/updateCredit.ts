@@ -1614,16 +1614,21 @@ export const updateCredit = async ({ body, set, request }: any) => {
       await setMontoAportadoAuditContext(db, "ESPEJO", undefined, []);
     };
 
-    // El mínimo es Q1, con una sola excepción: dejar en 0 un crédito que YA
-    // está en 0. Cancelar (credits.ts) y reiniciarCredito lo zerean, y el modal
-    // reenvía el capital actual en cada guardado, así que rechazarlo bloquearía
-    // la edición de cualquier otro campo. La excepción exige que el capital
-    // enviado también sea 0: un valor fraccionario como 0.50 no es "dejarlo
-    // como estaba", es un monto nuevo y le aplica el mínimo.
+    // El mínimo es Q1 mientras el crédito esté vivo. Queda en 0 si:
+    //   - el estado es de cierre (CANCELADO, CAIDO o INCOBRABLE): ahí un capital
+    //     0 es un valor válido y se puede fijar explícitamente;
+    //   - o el capital YA vale 0 (cancelar y reiniciarCredito lo zerean, y el
+    //     modal reenvía el capital actual en cada guardado, así que rechazarlo
+    //     bloquearía la edición de cualquier otro campo).
+    // En ambos casos el valor enviado debe ser 0 exacto: un monto fraccionario
+    // como 0.50 no es "dejarlo en cero", es un monto nuevo y le aplica el mínimo.
     const capitalNuevo = new Big(fieldsToUpdate.capital);
-    const capitalSigueEnCero =
-      capitalNuevo.eq(0) && new Big(current.capital || 0).eq(0);
-    if (capitalNuevo.lt(1) && !capitalSigueEnCero) {
+    const admiteCapitalEnCero =
+      current.statusCredit === "CANCELADO" ||
+      current.statusCredit === "CAIDO" ||
+      current.statusCredit === "INCOBRABLE" ||
+      new Big(current.capital || 0).eq(0);
+    if (capitalNuevo.lt(1) && !(capitalNuevo.eq(0) && admiteCapitalEnCero)) {
       set.status = 400;
       return { message: "El capital debe ser mayor o igual a 1" };
     }

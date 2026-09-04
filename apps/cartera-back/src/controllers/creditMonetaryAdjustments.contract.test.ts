@@ -40,11 +40,12 @@ test("credit monetary adjustments keep capital and investor reasons separate", (
   expect(controller).toContain("capital: z.number().nonnegative()");
   // La excepción al mínimo cubre solo el 0 que no cambia: un capital
   // fraccionario (0.50) sobre un crédito en 0 debe seguir rechazándose.
+  // El capital puede fijarse en 0 en estados de cierre o si ya vale 0; un
+  // monto fraccionario sigue rechazado en todos los casos.
+  expect(controller).toContain('current.statusCredit === "INCOBRABLE"');
+  expect(controller).toContain("const admiteCapitalEnCero =");
   expect(controller).toContain(
-    "capitalNuevo.eq(0) && new Big(current.capital || 0).eq(0)",
-  );
-  expect(controller).toContain(
-    "if (capitalNuevo.lt(1) && !capitalSigueEnCero)",
+    "if (capitalNuevo.lt(1) && !(capitalNuevo.eq(0) && admiteCapitalEnCero))",
   );
   // Vaciar la lista se rechaza: `[]` entraba al rebuild y updateInvestors
   // retornaba temprano, devolviendo 200 sin borrar ni auditar la baja.

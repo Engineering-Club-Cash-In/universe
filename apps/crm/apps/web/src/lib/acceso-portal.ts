@@ -15,6 +15,10 @@
  * `private/cartera/components/accesoPortal.ts`. Son dos apps sin paquete común
  * (mismo caso que rep-legal-empresa.ts); si cambian los códigos del backend hay
  * que tocar los dos.
+ *
+ * Pero NO son idénticos ni deben serlo: `COMO_SE_ARREGLA` diverge a propósito,
+ * porque el botón que se manda a apretar existe en carteraFront y no aquí.
+ * Resincronizar los dos archivos a ciegas reintroduce el bug.
  */
 
 export interface AccesoPortal {
@@ -47,9 +51,18 @@ export interface AvisoAccesoPortal {
  * Seguir prometiendo el automatismo sería peor que callar: conta cerraría el
  * modal tranquila, nadie apretaría el botón, y la persona se quedaría sin
  * portal esperando algo que no va a pasar.
+ *
+ * Y dice "pedile a cartera" porque ese botón NO está en esta aplicación: vive
+ * en carteraFront (`tableInvestors.tsx`), la ruta es ADMIN de cartera a
+ * propósito (`otorgarAccesoPortal.ts`), y el CRM habla con cartera-back con una
+ * credencial de servicio compartida, así que exponerlo aquí le daría a
+ * cualquiera con acceso a liquidaciones la facultad de mandar contraseñas.
+ * Mandar a conta a un botón que en su pantalla no existe la deja buscándolo:
+ * el aviso llega, pero a alguien que no puede ejecutarlo. El gemelo de
+ * carteraFront dice "abrile el acceso" a secas, y ahí es correcto.
  */
 const COMO_SE_ARREGLA =
-  'abrile el acceso desde el menú del inversionista, opción "Dar acceso al portal"';
+  'pedile a cartera que le abra el acceso desde el menú del inversionista, opción "Dar acceso al portal"';
 
 /**
  * Por qué no se pudo, en palabras. Lo que no está en la lista se calla en vez de

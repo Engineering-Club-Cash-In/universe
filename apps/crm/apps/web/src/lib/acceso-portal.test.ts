@@ -162,4 +162,31 @@ describe("lo que se le promete a quien captura el alta", () => {
     expect(aviso.texto).toContain("Dar acceso al portal");
     expect(aviso.texto).not.toMatch(/7:00/);
   });
+
+  /**
+   * El botón "Dar acceso al portal" NO existe en el CRM: vive solo en
+   * carteraFront (tableInvestors.tsx:1583), y la ruta está cerrada a ADMIN de
+   * cartera a propósito (otorgarAccesoPortal.ts:50-53). En el CRM ni siquiera
+   * hay menú por fila donde buscarlo.
+   *
+   * Sin esta prueba el texto vuelve a mandar a conta a apretar un botón que en
+   * su aplicación no existe: se pone a buscarlo, no lo encuentra, y el
+   * inversionista queda sin portal — el mismo fallo silencioso que este PR vino
+   * a cerrar, movido de "nadie avisa" a "se avisa y no se puede ejecutar".
+   *
+   * NO copiar esta prueba al gemelo de carteraFront: ahí el botón SÍ está en la
+   * misma pantalla y mandar a pedírselo a otro sería falso.
+   */
+  it.each([
+    ["fallo", "timeout"],
+    ["omitida", "sin_correo"],
+    ["omitida", "sin_nombre"],
+    ["omitida", "no_solicitado"],
+  ])("desde el CRM el aviso (%s/%s) manda a pedírselo a cartera, no a apretar un botón que aquí no existe", (estado, motivo) => {
+    const aviso = avisoAccesoPortal(
+      acceso({ estado, motivo, advertencias: [] }),
+    )!;
+
+    expect(aviso.texto).toContain("cartera");
+  });
 });

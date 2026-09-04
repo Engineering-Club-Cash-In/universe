@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { validateCoolifyEnvironment } from "./validate-coolify-envs.mjs";
 
@@ -79,4 +80,49 @@ test("fails closed on malformed Coolify responses", () => {
 		() => validateCoolifyEnvironment({ envs: [] }, manifest),
 		/expected an array/,
 	);
+});
+
+/**
+ * Las dos pruebas de abajo no miran al validador: miran al MANIFIESTO real.
+ *
+ * El gate de `deploy-prod.yaml` solo comprueba lo que el manifiesto lista, así
+ * que una variable que el código lee pero el manifiesto no nombra pasa el
+ * deploy en verde y revienta en caliente. Eso ya pasó con el provisionamiento
+ * del portal: `portalProvisioning.ts` lee AUTH_GOOGLE_URL y
+ * PORTAL_PROVISIONING_SECRET, ninguna estaba en el manifiesto, y sin ellas cada
+ * alta responde `provisionamiento_no_configurado`.
+ *
+ * Se comprueba contra el FUENTE, no contra una lista escrita a mano: así la
+ * próxima variable que alguien lea desde ese servicio también queda cubierta.
+ */
+const manifiestoProduccion = JSON.parse(
+	readFileSync(new URL("../required-env.production.json", import.meta.url), "utf8"),
+);
+
+const leidasPorElServicio = (rutaRelativa) => {
+	const fuente = readFileSync(new URL(rutaRelativa, import.meta.url), "utf8");
+	return [...fuente.matchAll(/process\.env\.([A-Z0-9_]+)/g)].map((m) => m[1]);
+};
+
+test("el manifiesto de producción declara toda variable que lee el provisionamiento del portal", () => {
+	const declaradas = new Map(
+		manifiestoProduccion.required.map((e) => [e.key, e.runtime]),
+	);
+
+	for (const clave of leidasPorElServicio("../src/services/portalProvisioning.ts")) {
+		assert.ok(
+			declaradas.has(clave),
+			`${clave} se lee en portalProvisioning.ts pero no está en required-env.production.json: el deploy pasaría en verde sin ella`,
+		);
+		assert.equal(
+			declaradas.get(clave),
+			true,
+			`${clave} tiene que ser runtime: se lee de process.env al atender la petición, no al buildear`,
+		);
+	}
+});
+
+test("el manifiesto de producción no repite claves", () => {
+	const claves = manifiestoProduccion.required.map((e) => e.key);
+	assert.equal(new Set(claves).size, claves.length);
 });

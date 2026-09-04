@@ -12,6 +12,7 @@ import { extractBearerToken, secretsMatch } from "../lib/service-token";
 import { getFileUrl, getFileUrlWithBucketInKey } from "../lib/storage";
 import { normalizarDpi, validarDpi } from "../utils/cui-validation";
 import { getOnlyRenapInfoController } from "./bot";
+import { decidirLeadDelPortal } from "./portalLeadIdempotencia";
 import {
 	createOpportunityForLead,
 	getSalesUserWithLeastLeads,
@@ -674,7 +675,32 @@ export async function createPortalRegisterLead(c: Context) {
 			.limit(1);
 
 		if (existingLead) {
-			// Lead ya existe → solo retornar sin crear oportunidad
+			// Lead ya existe → solo retornar sin crear oportunidad.
+			//
+			// Devolverlo es la idempotencia que necesita el registro del portal:
+			// el alta toca dos sistemas y no es atómica, así que un intento que
+			// creó el lead y se cayó después en auth-google tiene que poder
+			// reintentar y terminar.
+			//
+			// Pero solo si el reintento pide LO MISMO. Con un DPI distinto, este
+			// endpoint devolvía el lead como éxito sin actualizarlo mientras
+			// auth-google escribía el DPI nuevo en la cuenta, y los dos sistemas
+			// quedaban asociados a identidades diferentes —y ese DPI nuevo puede
+			// ser el de otra persona. Se falla cerrado: ni se acepta ni se
+			// reescribe el DPI de una ficha existente.
+			const decision = decidirLeadDelPortal(existingLead.dpi, dpi);
+
+			if (decision.tipo === "conflicto_dpi") {
+				return c.json(
+					{
+						success: false,
+						error:
+							"Ya existe un registro con este correo y otro DPI. Reintenta con el DPI del registro original o contacta a soporte.",
+					},
+					409,
+				);
+			}
+
 			const isEmptyEmail =
 				!existingLead.email || existingLead.email.trim() === "";
 

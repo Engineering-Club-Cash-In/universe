@@ -231,11 +231,27 @@ export async function applyRegistrationOutcome(
 
   const nextRole = resolveRoleAfterRegistration(current.role, userType);
 
-  if (nextRole) {
-    await db
-      .update(users)
-      .set({ role: nextRole, updatedAt: new Date() })
-      .where(eq(users.id, userId));
+  if (!nextRole) {
+    return { dpi: appliedDpi, role: null };
+  }
+
+  // El ascenso se condiciona al rol que se leyó arriba, no solo al id. Entre
+  // ese SELECT y este UPDATE median las comprobaciones y la escritura del DPI:
+  // si en esa ventana un administrador cambia la cuenta a un rol
+  // administrativo, un predicado por id lo pisaría con INVESTOR y rompería el
+  // invariante de que el registro del portal nunca toca esos roles.
+  // `resolveRoleAfterRegistration` solo devuelve un rol cuando el actual es
+  // CLIENT, así que `current.role` aquí es siempre ese valor concreto.
+  const ascendidos = await db
+    .update(users)
+    .set({ role: nextRole, updatedAt: new Date() })
+    .where(and(eq(users.id, userId), eq(users.role, current.role)))
+    .returning({ id: users.id });
+
+  // Cero filas = el rol cambió bajo nuestros pies. Se respeta el rol nuevo y
+  // se reporta que no hubo ascenso.
+  if (ascendidos.length === 0) {
+    return { dpi: appliedDpi, role: null };
   }
 
   return { dpi: appliedDpi, role: nextRole };

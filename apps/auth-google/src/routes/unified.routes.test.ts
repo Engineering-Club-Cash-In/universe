@@ -33,6 +33,18 @@ let updateFalla = false;
 // Altas que pidió la importación masiva a Better Auth.
 let altas: { name: string; email: string }[] = [];
 
+// Filas que devuelve el `returning` del UPDATE. Vacío = el predicado no casó
+// con ninguna fila, que es como el ascenso de rol detecta que perdió la carrera
+// contra un cambio de rol hecho por un administrador.
+let filasActualizadas: Record<string, unknown>[] = [{ id: "fila-actualizada" }];
+
+/**
+ * El builder de Drizzle es "thenable" y encadenable a la vez: el llamador puede
+ * await-earlo directo o pedirle `.returning()`.
+ */
+const builder = (resultado: Promise<unknown>) =>
+  Object.assign(resultado, { returning: () => resultado });
+
 /** El error que devuelve Postgres al chocar contra un índice único. */
 const errorDeUnicidad = () =>
   Object.assign(
@@ -72,14 +84,14 @@ mock.module("../db/connection", () => ({
       set: (valores: Record<string, unknown>) => ({
         where: () => {
           if (updateFalla) {
-            return Promise.reject(errorDeUnicidad());
+            return builder(Promise.reject(errorDeUnicidad()));
           }
 
           const dpi = valores.dpi;
 
           if (typeof dpi === "string") {
             if (dpisReservados.has(dpi)) {
-              return Promise.reject(errorDeUnicidad());
+              return builder(Promise.reject(errorDeUnicidad()));
             }
 
             dpisReservados.add(dpi);
@@ -99,7 +111,7 @@ mock.module("../db/connection", () => ({
             filaUsuario[0].role = valores.role;
           }
 
-          return Promise.resolve();
+          return builder(Promise.resolve(filasActualizadas));
         },
       }),
     }),

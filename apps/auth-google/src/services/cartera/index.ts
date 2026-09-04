@@ -19,11 +19,15 @@ export {
 // Investor
 export {
   createInvestor,
+  getEntidades,
   getInvestorProfile,
+  getInvestorProfileById,
   getInvestorDocuments,
+  getInvestorDocumentsById,
   getBancos,
   type CreateInvestorPayload,
   type CreateInvestorResponse,
+  type EntidadPortal,
   type InvestorProfile,
   type InvestorDocument,
   type Banco,

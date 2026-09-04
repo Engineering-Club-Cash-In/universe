@@ -9,14 +9,15 @@ import { auth } from "../lib/auth";
 import {
   // Investor
   createInvestor,
-  getInvestorProfile,
-  getInvestorDocuments,
+  getEntidades,
+  getInvestorProfileById,
+  getInvestorDocumentsById,
   getBancos,
   // Investments
   getLiquidaciones,
   getInvestmentsStats,
   getAsesorById,
-  type CreateInvestorPayload,
+  type EntidadPortal,
 } from "../services/cartera";
 import { getSignedUrlFromBucket } from "../lib/storage";
 
@@ -56,22 +57,159 @@ const requireAuth = async (c: any, next: () => Promise<void>) => {
 carteraRoutes.use("*", requireAuth);
 
 // ============================================
+// ENTIDADES DE LA SESIÓN
+// ============================================
+// Un login del portal puede operar varios inversionistas: el propio y el de
+// cada sociedad que representa. Cartera resuelve ese conjunto a partir del
+// correo, y acá se decide cuál de ellos atiende cada request.
+//
+// El correo sale SIEMPRE de la sesión, nunca del query string: tomarlo del
+// cliente dejaba que cualquier usuario logueado leyera los datos de otro
+// pasando `?email=`.
+
+const TTL_ENTIDADES_MS = 60 * 1000;
+
+const cacheEntidades = new Map<
+  string,
+  { entidades: EntidadPortal[]; expiraEn: number }
+>();
+
+/** Correo de la sesión, normalizado. Lanza 401 si no hay. */
+const correoDeSesion = (c: any): string => {
+  const user = c.get("user") as { email?: string | null } | undefined;
+  const email = user?.email?.trim().toLowerCase();
+
+  if (!email) {
+    throw new HTTPException(401, { message: "No autorizado. Inicia sesión." });
+  }
+
+  return email;
+};
+
+/**
+ * Entidades que puede operar el usuario de la sesión.
+ * Cacheadas un minuto: el CRM da de alta sociedades en caliente y no queremos
+ * que el inversionista tenga que volver a entrar para verlas.
+ */
+const resolverEntidades = async (c: any): Promise<EntidadPortal[]> => {
+  const email = correoDeSesion(c);
+
+  const cacheado = cacheEntidades.get(email);
+  if (cacheado && cacheado.expiraEn > Date.now()) {
+    return cacheado.entidades;
+  }
+
+  const entidades = await getEntidades(email);
+  cacheEntidades.set(email, {
+    entidades,
+    expiraEn: Date.now() + TTL_ENTIDADES_MS,
+  });
+
+  return entidades;
+};
+
+/**
+ * Resuelve a qué entidad apunta el request y verifica que sea del usuario.
+ *
+ * @param idCrudo id pedido por el cliente (query o body). Sin él se usa la
+ *                primera entidad, que es como se comportaba el portal antes de
+ *                que existiera el selector.
+ */
+const entidadPedida = async (
+  c: any,
+  idCrudo?: unknown,
+): Promise<EntidadPortal> => {
+  const entidades = await resolverEntidades(c);
+
+  if (entidades.length === 0) {
+    throw new HTTPException(404, {
+      message:
+        "Tu usuario todavía no está vinculado a un inversionista. Escribile a tu asesor.",
+    });
+  }
+
+  if (idCrudo === undefined || idCrudo === null || idCrudo === "") {
+    return entidades[0];
+  }
+
+  const id = Number(idCrudo);
+  const entidad = entidades.find((e) => e.inversionista_id === id);
+
+  // El id lo manda el navegador: sin esta comprobación cualquiera podría leer
+  // (o escribirle) a un inversionista ajeno solo cambiando el número.
+  if (!entidad) {
+    throw new HTTPException(403, {
+      message: "Esa entidad no pertenece a tu usuario",
+    });
+  }
+
+  return entidad;
+};
+
+/**
+ * GET /api/cartera/entidades
+ * Entidades que el usuario de la sesión puede operar. Sin parámetros: es lo que
+ * el portal pide, no lo que le manden.
+ */
+carteraRoutes.get("/entidades", async (c) => {
+  try {
+    const entidades = await resolverEntidades(c);
+
+    return c.json({
+      success: true,
+      data: entidades,
+    });
+  } catch (error) {
+    if (error instanceof HTTPException) {
+      throw error;
+    }
+    throw new HTTPException(500, {
+      message:
+        error instanceof Error ? error.message : "Error al obtener las entidades",
+    });
+  }
+});
+
+// ============================================
 // RUTAS DE INVERSIONISTAS
 // ============================================
 
 /**
  * POST /api/cartera/investor
- * Crear o actualizar un inversionista
+ * Actualiza los datos bancarios de una de las entidades del usuario.
+ *
+ * El body se reconstruye a mano a propósito: antes se reenviaba crudo a cartera
+ * con el token de admin, y el upsert de allá acepta `nombre`, `dpi`, `email`,
+ * `emite_factura`, `descuenta_impuestos`, `tipo_reinversion` y `dpi_rep_legal`.
+ * Ese último concede acceso a entidades, así que un usuario del portal podía
+ * auto-asignarse las sociedades de cualquiera.
  */
 carteraRoutes.post("/investor", async (c) => {
   try {
-    const body = await c.req.json<CreateInvestorPayload>();
+    const body = await c.req.json<{
+      inversionista_id?: number | string;
+      banco_id?: number | string;
+      tipo_cuenta?: string;
+      numero_cuenta?: string;
+    }>();
 
-    const result = await createInvestor(body);
+    const entidad = await entidadPedida(c, body.inversionista_id);
+
+    // Whitelist: lo único que el inversionista edita de su propia ficha.
+    const payload: Record<string, unknown> = {
+      inversionista_id: entidad.inversionista_id,
+    };
+    if (body.banco_id !== undefined && body.banco_id !== null && body.banco_id !== "") {
+      payload.banco_id = Number(body.banco_id);
+    }
+    if (body.tipo_cuenta) payload.tipo_cuenta = body.tipo_cuenta;
+    if (body.numero_cuenta) payload.numero_cuenta = body.numero_cuenta;
+
+    const result = await createInvestor(payload as any);
 
     return c.json({
       success: true,
-      message: "Inversionista creado/actualizado correctamente",
+      message: "Inversionista actualizado correctamente",
       data: result,
     });
   } catch (error) {
@@ -79,25 +217,21 @@ carteraRoutes.post("/investor", async (c) => {
       throw error;
     }
     throw new HTTPException(500, {
-      message: error instanceof Error ? error.message : "Error al crear inversionista",
+      message:
+        error instanceof Error ? error.message : "Error al actualizar inversionista",
     });
   }
 });
 
 /**
  * GET /api/cartera/investor
- * Obtener perfil de inversionista por DPI
+ * Perfil de la entidad activa
  */
 carteraRoutes.get("/investor", async (c) => {
   try {
-    const dpi = c.req.query("dpi");
-    const email = c.req.query("email");
+    const entidad = await entidadPedida(c, c.req.query("inversionista_id"));
 
-    if (!dpi && !email) {
-      throw new HTTPException(400, { message: "Se requiere dpi o email" });
-    }
-
-    const profile = await getInvestorProfile(dpi || "", email || "");
+    const profile = await getInvestorProfileById(entidad.inversionista_id);
 
     return c.json({
       success: true,
@@ -140,18 +274,40 @@ carteraRoutes.get("/bancos", async (c) => {
 // ============================================
 
 /**
+ * GET /api/cartera/investor-documents
+ * Documentos visibles de la entidad activa
+ */
+carteraRoutes.get("/investor-documents", async (c) => {
+  try {
+    const entidad = await entidadPedida(c, c.req.query("inversionista_id"));
+
+    const documents = await getInvestorDocumentsById(entidad.inversionista_id);
+
+    return c.json({
+      success: true,
+      data: documents,
+    });
+  } catch (error) {
+    if (error instanceof HTTPException) {
+      throw error;
+    }
+    throw new HTTPException(500, {
+      message: error instanceof Error ? error.message : "Error al obtener documentos del inversionista",
+    });
+  }
+});
+
+/**
  * GET /api/cartera/investor-documents/client/:email
- * Obtener documentos de un inversionista por email
+ * Alias de compatibilidad para el portal anterior al selector. El :email se
+ * ignora — se atiende la entidad de la sesión — para que auth-google se pueda
+ * desplegar sin esperar al front.
  */
 carteraRoutes.get("/investor-documents/client/:email", async (c) => {
   try {
-    const email = c.req.param("email");
+    const entidad = await entidadPedida(c);
 
-    if (!email) {
-      throw new HTTPException(400, { message: "El parámetro email es requerido" });
-    }
-
-    const documents = await getInvestorDocuments(email);
+    const documents = await getInvestorDocumentsById(entidad.inversionista_id);
 
     return c.json({
       success: true,
@@ -173,20 +329,19 @@ carteraRoutes.get("/investor-documents/client/:email", async (c) => {
 
 /**
  * GET /api/cartera/liquidaciones
- * Obtener liquidaciones del inversionista por DPI
+ * Liquidaciones de la entidad activa
  */
 carteraRoutes.get("/liquidaciones", async (c) => {
   try {
-    const dpi = c.req.query("dpi");
-    const email = c.req.query("email");
+    const entidad = await entidadPedida(c, c.req.query("inversionista_id"));
     const page = parseInt(c.req.query("page") || "1", 10);
     const perPage = parseInt(c.req.query("perPage") || "10", 10);
 
-    if (!dpi && !email) {
-      throw new HTTPException(400, { message: "Se requiere dpi o email" });
-    }
-
-    const liquidaciones = await getLiquidaciones(dpi || "", email || "", page, perPage);
+    const liquidaciones = await getLiquidaciones(
+      entidad.inversionista_id,
+      page,
+      perPage,
+    );
 
     return c.json({
       success: true,
@@ -204,18 +359,13 @@ carteraRoutes.get("/liquidaciones", async (c) => {
 
 /**
  * GET /api/cartera/investments/stats
- * Obtener estadísticas de inversiones
+ * Estadísticas de la entidad activa
  */
 carteraRoutes.get("/investments/stats", async (c) => {
   try {
-    const dpi = c.req.query("dpi");
-    const email = c.req.query("email");
+    const entidad = await entidadPedida(c, c.req.query("inversionista_id"));
 
-    if (!dpi && !email) {
-      throw new HTTPException(400, { message: "Se requiere dpi o email" });
-    }
-
-    const stats = await getInvestmentsStats(dpi || "", email || "");
+    const stats = await getInvestmentsStats(entidad.inversionista_id);
 
     return c.json({
       success: true,
@@ -273,15 +423,16 @@ carteraRoutes.get("/advisor", async (c) => {
 // ============================================
 
 /**
- * GET /api/cartera/liquidaciones/reporte?email=correo@ejemplo.com
- * Genera URL temporal del reporte xlsx almacenado en R2
+ * GET /api/cartera/liquidaciones/reporte
+ * Genera URL temporal del reporte xlsx almacenado en R2.
+ *
+ * Sigue resolviendo por el correo de la sesión: es el histórico de los
+ * inversionistas viejos y el archivo está nombrado así en R2. No aplica a los
+ * que se den de alta de ahora en adelante.
  */
 carteraRoutes.get("/liquidaciones/reporte", async (c) => {
   try {
-    const email = c.req.query("email");
-    if (!email) {
-      throw new HTTPException(400, { message: "El parámetro 'email' es requerido" });
-    }
+    const email = correoDeSesion(c);
 
     const bucket = process.env.R2_BUCKET_NAME || "reports";
     const key = `settlement-history/${email}.xlsx`;

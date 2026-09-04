@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import {
   getEmailDeliveryMode,
   sendPortalCompanyAddedEmail,
@@ -8,6 +8,11 @@ import { db } from "../../db/connection";
 import { users } from "../../db/schema";
 import { auth } from "../../lib/auth";
 import { env } from "../../config/env";
+import {
+  condicionDpiNormalizado,
+  condicionEmail,
+  ordenDesempateDpi,
+} from "./dpiLookup";
 import type {
   DependenciasProvisionamiento,
   UsuarioPortal,
@@ -31,28 +36,16 @@ const aUsuarioPortal = (fila: typeof users.$inferSelect): UsuarioPortal => ({
 /**
  * Busca por DPI normalizando EN SQL, no en JS.
  *
- * Normaliza los dos lados porque la columna trae basura de captura
- * ('1573 66197 01', '1852752810101.'): comparar el texto crudo no encontraría a
- * esas personas y el alta intentaría crearles una cuenta que ya existe.
- *
- * El ORDER BY no es decorativo. Normalizar puede empatar a dos usuarios
- * distintos: hoy `1852752810101` lo tienen Oscar Massis (su DPI real) y la
- * cuenta de Inversiones Monaco (que quedó capturada con el DPI de su
- * representante, más un punto). Con `LIMIT 1` a secas, cuál de los dos sale es
- * cosa del planificador — y el aviso de "ahora representas a Monaco" podía
- * terminar en la bandeja de la propia empresa en vez de en la de Oscar.
- *
- * Gana la coincidencia EXACTA sobre la columna cruda: el dato limpio le gana al
- * sucio. `created_at` desempata para que el resultado sea siempre el mismo.
+ * La condición y el desempate viven en `dpiLookup.ts` para poder probarlos: ahí
+ * está explicado por qué el ORDER BY no es decorativo. Este archivo solo los
+ * ejecuta.
  */
 const buscarPorDpi = async (dpiNormalizado: string): Promise<UsuarioPortal | null> => {
   const filas = await db
     .select()
     .from(users)
-    .where(
-      sql`ltrim(regexp_replace(coalesce(${users.dpi}, ''), '[[:space:].-]', '', 'g'), '0') = ${dpiNormalizado}`,
-    )
-    .orderBy(sql`(${users.dpi} = ${dpiNormalizado}) DESC, ${users.createdAt} ASC`)
+    .where(condicionDpiNormalizado(dpiNormalizado))
+    .orderBy(ordenDesempateDpi(dpiNormalizado))
     .limit(1);
 
   return filas[0] ? aUsuarioPortal(filas[0]) : null;
@@ -62,7 +55,7 @@ const buscarPorEmail = async (email: string): Promise<UsuarioPortal | null> => {
   const filas = await db
     .select()
     .from(users)
-    .where(sql`lower(${users.email}) = ${email}`)
+    .where(condicionEmail(email))
     .limit(1);
 
   return filas[0] ? aUsuarioPortal(filas[0]) : null;

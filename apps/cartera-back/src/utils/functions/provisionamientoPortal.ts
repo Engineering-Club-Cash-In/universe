@@ -133,8 +133,13 @@ export const decidirProvisionamiento = (
   // correo propio, y aun así su representante sí tiene a dónde recibir el
   // aviso. Pedirle correo a la empresa mandaría a operaciones a conseguir uno
   // que no hace falta.
+  //
+  // La condición NO se reescribe aquí: la decide `esEmpresaRepresentada`, que
+  // es donde está documentada la excepción del autorrepresentado. Tenerla dos
+  // veces era tenerla en un sitio que nadie ejecutaba y en otro que sí, y la
+  // que se lee no era la que corría.
   const dpiRepresentante = normalizarDpiParaComparar(inv.dpi_rep_legal);
-  if (dpiRepresentante !== null && dpiRepresentante !== normalizarDpiParaComparar(inv.dpi)) {
+  if (dpiRepresentante !== null && esEmpresaRepresentada(inv)) {
     return {
       accion: "notificar_representante",
       inversionistaId: inv.inversionista_id,

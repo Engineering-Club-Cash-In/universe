@@ -1,6 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import {
   decidirProvisionamiento,
+  esEmpresaRepresentada,
+  type FilaInversionista,
   normalizarDpiParaComparar,
   pareceSociedad,
 } from "./provisionamientoPortal";
@@ -148,5 +150,36 @@ describe("pareceSociedad", () => {
     expect(pareceSociedad("Central de Carga S.A.")).toBe(true);
     expect(pareceSociedad("Ana Pérez")).toBe(false);
     expect(pareceSociedad(null)).toBe(false);
+  });
+});
+
+// `esEmpresaRepresentada` documenta la regla (incluida la excepción del
+// autorrepresentado 187) y `decidirProvisionamiento` la aplica. Estaban
+// escritas dos veces, y la copia documentada era justamente la que NO se
+// ejecutaba. Ahora hay una sola; este test es el que se da cuenta si vuelven a
+// separarse.
+describe("la regla de empresa vive en un solo sitio", () => {
+  const casos: FilaInversionista[] = [
+    { inversionista_id: 1, nombre: "Ana", email: "a@b.com", dpi: 1234567890101, dpi_rep_legal: null },
+    // El 187: se representa a sí mismo, con cero a la izquierda en rep_legal.
+    { inversionista_id: 187, nombre: "Javier Kafie", email: "j@k.com", dpi: 4036613, dpi_rep_legal: "04036613" },
+    { inversionista_id: 86, nombre: "Cube S.A.", email: "c@b.com", dpi: 999, dpi_rep_legal: "1573661970101" },
+    { inversionista_id: 66, nombre: "Menfer", email: null, dpi: null, dpi_rep_legal: "1852752810101" },
+    { inversionista_id: 5, nombre: "Sin nada", email: "s@b.com", dpi: null, dpi_rep_legal: null },
+    { inversionista_id: 6, nombre: "Rep basura", email: "r@b.com", dpi: 7, dpi_rep_legal: "  " },
+    { inversionista_id: 7, nombre: "Rep en cero", email: "r7@b.com", dpi: 7, dpi_rep_legal: "000" },
+  ];
+
+  it("decidirProvisionamiento notifica al representante EXACTAMENTE cuando la regla dice empresa", () => {
+    for (const fila of casos) {
+      const decision = decidirProvisionamiento(fila);
+      expect({
+        id: fila.inversionista_id,
+        notifica: decision.accion === "notificar_representante",
+      }).toEqual({
+        id: fila.inversionista_id,
+        notifica: esEmpresaRepresentada(fila),
+      });
+    }
   });
 });

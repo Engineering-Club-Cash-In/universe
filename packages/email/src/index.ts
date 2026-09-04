@@ -235,11 +235,16 @@ export const sendPortalWelcomeEmail = async ({
   portalUrl,
   companyNames,
 }: SendPortalWelcomeEmailParams) => {
-  emailSchema.parse(to);
-
   const emailAssets = getPortalEmailAssets("sendPortalWelcomeEmail");
 
   try {
+    // La validación va DENTRO del try. Estos dos correos se mandan cuando la
+    // cuenta del portal YA está creada: si `parse` tirara hacia afuera, el
+    // llamador se llevaría una excepción en vez del `{success:false}` que
+    // promete la firma, y una cuenta recién creada se quedaría sin que nadie
+    // reporte que su contraseña no salió.
+    emailSchema.parse(to);
+
     const { data, error } = await resend.emails.send({
       from: `Club Cash In <no-reply@${domain}>`,
       to: [to],
@@ -286,11 +291,16 @@ export const sendPortalCompanyAddedEmail = async ({
   companyName,
   portalUrl,
 }: SendPortalCompanyAddedEmailParams) => {
-  emailSchema.parse(to);
-
   const emailAssets = getPortalEmailAssets("sendPortalCompanyAddedEmail");
 
   try {
+    // La validación va DENTRO del try. Estos dos correos se mandan cuando la
+    // cuenta del portal YA está creada: si `parse` tirara hacia afuera, el
+    // llamador se llevaría una excepción en vez del `{success:false}` que
+    // promete la firma, y una cuenta recién creada se quedaría sin que nadie
+    // reporte que su contraseña no salió.
+    emailSchema.parse(to);
+
     const { data, error } = await resend.emails.send({
       from: `Club Cash In <no-reply@${domain}>`,
       to: [to],

@@ -27,6 +27,18 @@ export interface ResumenProvisionamiento {
   correosRedirigidos: EntradaResumen[];
   correosNoEnviados: EntradaResumen[];
   correoDistinto: EntradaResumen[];
+  /**
+   * Cuenta creada cuya contraseña NO se entregó. El peor desenlace, y el único
+   * que no se arregla solo: la contraseña no se persiste ni se devuelve, y no
+   * hay ruta de reenvío. Hay que resetearles el acceso a mano.
+   */
+  accesosPerdidos: EntradaResumen[];
+  /**
+   * Cuenta que quedó sin rol o sin DPI escrito. Importa más de lo que parece:
+   * sin DPI, a esa persona solo se la encuentra por correo, y en cuanto alguien
+   * le corrige el correo en cartera la corrida siguiente le crea OTRA cuenta.
+   */
+  cuentasSinIdentidad: EntradaResumen[];
   dudosas: EntradaResumen[];
   hayQueReportar: boolean;
 }
@@ -67,6 +79,8 @@ export const resumirProvisionamiento = (
     correosRedirigidos: [],
     correosNoEnviados: [],
     correoDistinto: [],
+    accesosPerdidos: [],
+    cuentasSinIdentidad: [],
     dudosas: [],
     hayQueReportar: false,
   };
@@ -103,6 +117,15 @@ export const resumirProvisionamiento = (
     if (r.advertencias.includes("correo_de_cartera_distinto_al_de_la_cuenta")) {
       resumen.correoDistinto.push(e);
     }
+    if (r.advertencias.includes("cuenta_creada_sin_contrasena_entregada")) {
+      resumen.accesosPerdidos.push(e);
+    }
+    if (
+      r.advertencias.includes("cuenta_creada_sin_rol_ni_dpi") ||
+      r.advertencias.includes("rol_no_promovido")
+    ) {
+      resumen.cuentasSinIdentidad.push(e);
+    }
   }
 
   resumen.hayQueReportar =
@@ -111,20 +134,38 @@ export const resumirProvisionamiento = (
     resumen.correosRedirigidos.length > 0 ||
     resumen.correosNoEnviados.length > 0 ||
     resumen.correoDistinto.length > 0 ||
+    resumen.accesosPerdidos.length > 0 ||
+    resumen.cuentasSinIdentidad.length > 0 ||
     resumen.sinNombre.length > 0;
 
   return resumen;
 };
 
+/**
+ * Escapa el texto que viene de la base antes de meterlo en el HTML del correo.
+ *
+ * `nombre` y `motivo` salen de `cartera.inversionistas` y de mensajes de error:
+ * texto libre capturado a mano. Sin escapar, un nombre con `<` rompe el
+ * resumen, y uno con etiquetas mete markup ajeno en un correo interno que leen
+ * las personas que tienen las contraseñas de todos.
+ */
+const escaparHtml = (valor: string): string =>
+  valor
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+
 const lista = (titulo: string, filas: EntradaResumen[]): string => {
   if (filas.length === 0) return "";
   const items = filas
-    .map(
-      (f) =>
-        `<li>#${f.inversionistaId} — ${f.nombre}${f.motivo ? ` <em>(${f.motivo})</em>` : ""}</li>`,
-    )
+    .map((f) => {
+      const nombre = escaparHtml(f.nombre);
+      const motivo = f.motivo ? ` <em>(${escaparHtml(f.motivo)})</em>` : "";
+      return `<li>#${f.inversionistaId} — ${nombre}${motivo}</li>`;
+    })
     .join("");
-  return `<h3>${titulo} (${filas.length})</h3><ul>${items}</ul>`;
+  return `<h3>${escaparHtml(titulo)} (${filas.length})</h3><ul>${items}</ul>`;
 };
 
 export const construirCorreoResumen = (
@@ -147,16 +188,36 @@ export const construirCorreoResumen = (
        </p>`
     : "";
 
-  const subject = redirigido
-    ? "⚠️ Portal: cuentas creadas con los correos DESVIADOS"
-    : "Portal del Inversionista: resumen de accesos";
+  // El acceso perdido manda sobre todo lo demás en el asunto: es lo único que
+  // no se puede ver mañana. A partir de la corrida siguiente esa cuenta se
+  // cuenta como "ya tenía acceso", indistinguible de una sana.
+  const perdidos = resumen.accesosPerdidos.length;
+
+  const avisoPerdidos = perdidos
+    ? `<p style="background:#fee;border:2px solid #c00;padding:12px">
+         <strong>⚠️ ${perdidos} cuenta(s) creada(s) SIN entregar la contraseña.</strong>
+         Sus dueños no pueden entrar y no lo saben. La contraseña no se guarda en
+         ningún lado, así que hay que resetearles el acceso A MANO. Este aviso
+         sale UNA sola vez: desde mañana esas cuentas se cuentan como "ya tenían
+         acceso".
+       </p>`
+    : "";
+
+  const subject = perdidos
+    ? `⚠️ Portal: ${perdidos} cuenta(s) creada(s) SIN contraseña entregada`
+    : redirigido
+      ? "⚠️ Portal: cuentas creadas con los correos DESVIADOS"
+      : "Portal del Inversionista: resumen de accesos";
 
   const html = `
+    ${avisoPerdidos}
     ${banner}
     <p>Revisados ${resumen.total} inversionistas: ${resumen.yaTenian} ya tenían
        acceso, ${resumen.empresas} son empresas (entran con su representante).</p>
     ${lista("Serían provisionadas (corrida en seco)", resumen.candidatas)}
     ${lista("Cuentas creadas", resumen.creadas)}
+    ${lista("Cuenta creada pero SIN contraseña entregada (resetear a mano)", resumen.accesosPerdidos)}
+    ${lista("Cuenta creada sin rol o sin DPI (arreglar o mañana se duplica)", resumen.cuentasSinIdentidad)}
     ${lista("No se pudo dar acceso", resumen.fallos)}
     ${lista("El correo no salió", resumen.correosNoEnviados)}
     ${lista("Correo de cartera distinto al de la cuenta (revisar a mano)", resumen.correoDistinto)}

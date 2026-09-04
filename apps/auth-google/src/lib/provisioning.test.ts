@@ -1,56 +1,48 @@
 import { describe, expect, it } from "bun:test";
 import {
   generarPasswordPortal,
-  normalizarDpiParaBuscar,
-  normalizarDpiParaGuardar,
+  normalizarDpiPortal,
   resolveRoleAfterRegistration,
 } from "./provisioning";
 
-describe("normalizarDpiParaBuscar (lectura: permisivo a propósito)", () => {
-  it("encuentra los DPI sucios que YA están en producción", () => {
-    // Las cuatro filas sucias reales de "auth-google".users. El normalizador de
-    // lectura tiene que ser MÁS permisivo que el de escritura: si no encuentra
-    // al usuario que ya existe, el alta intenta crearlo de nuevo y revienta
-    // contra users_dpi_key en vez de reconocer que ya tenía cuenta.
-    expect(normalizarDpiParaBuscar("1852752810101.")).toBe("1852752810101");
-    expect(normalizarDpiParaBuscar("1573 66197 01")).toBe("15736619701");
-    expect(normalizarDpiParaBuscar("2603 899 5101")).toBe("26038995101");
-    expect(normalizarDpiParaBuscar("")).toBeNull();
+describe("normalizarDpiPortal (UNA sola forma: lo que se busca es lo que se guarda)", () => {
+  it("limpia la basura de captura que ya existe en producción", () => {
+    expect(normalizarDpiPortal("1852752810101.")).toBe("1852752810101");
+    expect(normalizarDpiPortal("1573 66197 01")).toBe("15736619701");
+    expect(normalizarDpiPortal("2603 899 5101")).toBe("26038995101");
   });
 
-  it("compara sin ceros a la izquierda, como el lado de cartera", () => {
-    expect(normalizarDpiParaBuscar("04036613")).toBe("4036613");
-    expect(normalizarDpiParaBuscar("1234-5678-90101")).toBe("123456789 0101".replace(" ", ""));
+  it("quita los ceros a la izquierda, como el bigint de cartera", () => {
+    expect(normalizarDpiPortal("04036613")).toBe("4036613");
+    expect(normalizarDpiPortal("0185275281010")).toBe("185275281010");
   });
 
-  it("no inventa: lo que no son dígitos es null", () => {
-    expect(normalizarDpiParaBuscar("no-aplica")).toBeNull();
-    expect(normalizarDpiParaBuscar(null)).toBeNull();
-    expect(normalizarDpiParaBuscar("   ")).toBeNull();
-    expect(normalizarDpiParaBuscar("000")).toBeNull();
+  it("acepta las cédulas cortas: son personas reales, no basura", () => {
+    // El inversionista 187 tiene dpi=4036613. Exigirle 13 dígitos lo dejaba sin
+    // identidad, y sin identidad la corrida siguiente le crea otra cuenta.
+    expect(normalizarDpiPortal("4036613")).toBe("4036613");
+    expect(normalizarDpiPortal("15736619701")).toBe("15736619701");
+  });
+
+  it("lo que no son dígitos es null, y NUNCA cadena vacía", () => {
+    // El slot del '' en users.dpi (UNIQUE) ya está ocupado en producción.
+    expect(normalizarDpiPortal("")).toBeNull();
+    expect(normalizarDpiPortal("   ")).toBeNull();
+    expect(normalizarDpiPortal("no-aplica")).toBeNull();
+    expect(normalizarDpiPortal(null)).toBeNull();
+    expect(normalizarDpiPortal(undefined)).toBeNull();
+    expect(normalizarDpiPortal("000")).toBeNull();
+  });
+
+  it("es idempotente: normalizar lo ya normalizado no lo cambia", () => {
+    // Es la propiedad que hace que guardar y volver a buscar se encuentren.
+    for (const crudo of ["04036613", "1852752810101.", "1573 66197 01", "4036613"]) {
+      const unaVez = normalizarDpiPortal(crudo);
+      expect(normalizarDpiPortal(unaVez)).toBe(unaVez);
+    }
   });
 });
 
-describe("normalizarDpiParaGuardar (escritura: estricto)", () => {
-  it("solo acepta 13 dígitos exactos", () => {
-    expect(normalizarDpiParaGuardar("1852752810101")).toBe("1852752810101");
-    expect(normalizarDpiParaGuardar("1852 7528 10101")).toBe("1852752810101");
-  });
-
-  it("devuelve null antes que escribir basura en una columna UNIQUE", () => {
-    // users.dpi es UNIQUE y la cadena vacía YA ocupa el slot
-    // (direccion@grupowad.com): un segundo '' revienta con 23505.
-    expect(normalizarDpiParaGuardar("")).toBeNull();
-    expect(normalizarDpiParaGuardar("   ")).toBeNull();
-    expect(normalizarDpiParaGuardar("15736619701")).toBeNull(); // 11 dígitos
-    expect(normalizarDpiParaGuardar("4036613")).toBeNull(); // el 187: no es un DPI
-    expect(normalizarDpiParaGuardar(null)).toBeNull();
-  });
-
-  it("no guarda con ceros a la izquierda si eso lo deja en 13", () => {
-    expect(normalizarDpiParaGuardar("0185275281010")).toBe("0185275281010");
-  });
-});
 
 describe("resolveRoleAfterRegistration", () => {
   it("asciende CLIENT a INVESTOR: el rol por defecto es el único que sube", () => {
@@ -71,6 +63,43 @@ describe("resolveRoleAfterRegistration", () => {
     expect(resolveRoleAfterRegistration(null, "INVESTOR")).toBeNull();
     expect(resolveRoleAfterRegistration(undefined, "INVESTOR")).toBeNull();
     expect(resolveRoleAfterRegistration("LO_QUE_SEA", "INVESTOR")).toBeNull();
+  });
+
+  it("un requestedType que no es del portal no escribe nada", () => {
+    // El tipo lo impide, pero el valor llega de un JSON por la red.
+    expect(resolveRoleAfterRegistration("CLIENT", "ADMIN" as any)).toBeNull();
+    expect(resolveRoleAfterRegistration("CLIENT", "" as any)).toBeNull();
+    expect(resolveRoleAfterRegistration("CLIENT", undefined as any)).toBeNull();
+  });
+
+  // La función tiene DOS guardas que se cubren la una a la otra: el
+  // `!isPortalUserType(currentRole)` y el `currentRole === "CLIENT"`. Quitar
+  // cualquiera de las dos por separado deja el comportamiento intacto, así que
+  // ningún caso suelto las prueba individualmente. Es redundancia DELIBERADA
+  // —esta función decide roles a partir de datos de la red— y no se debe
+  // "simplificar" quitando una.
+  //
+  // Lo que sí se puede sellar es la propiedad completa: de todo el espacio de
+  // entradas, el ÚNICO par que escribe algo es (CLIENT, INVESTOR). Cualquier
+  // reescritura que se salte una de las dos guardas y cambie el resultado tiene
+  // que fallar aquí.
+  it("de todo el espacio de entradas, solo (CLIENT, INVESTOR) escribe", () => {
+    const rolesActuales = [
+      "CLIENT", "INVESTOR", "ADMIN", "SELLER", "DEBTOR", "client", "Investor",
+      "LO_QUE_SEA", "", " CLIENT", "CLIENT ", null, undefined,
+    ];
+    const pedidos = ["CLIENT", "INVESTOR", "ADMIN", "SELLER", "", null, undefined];
+
+    const escriben: string[] = [];
+    for (const actual of rolesActuales) {
+      for (const pedido of pedidos) {
+        if (resolveRoleAfterRegistration(actual as any, pedido as any) !== null) {
+          escriben.push(`${String(actual)}->${String(pedido)}`);
+        }
+      }
+    }
+
+    expect(escriben).toEqual(["CLIENT->INVESTOR"]);
   });
 });
 

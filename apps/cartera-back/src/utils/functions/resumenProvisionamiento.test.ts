@@ -1,5 +1,8 @@
 import { describe, expect, it } from "bun:test";
-import { resumirProvisionamiento } from "./resumenProvisionamiento";
+import {
+  construirCorreoResumen,
+  resumirProvisionamiento,
+} from "./resumenProvisionamiento";
 
 const r = (over: any = {}) => ({
   inversionistaId: 1,
@@ -118,5 +121,71 @@ describe("resumirProvisionamiento", () => {
     const res = resumirProvisionamiento([r({ estado: "omitida", motivo: "es_empresa" })], nombres);
     expect(res.empresas).toBe(1);
     expect(res.hayQueReportar).toBe(false);
+  });
+});
+
+// La cuenta quedó creada pero su dueño no puede entrar y no lo sabe. Es el peor
+// desenlace del provisionamiento y el único IRRECUPERABLE por sí solo: la
+// contraseña no se persiste ni se devuelve, y no hay ruta de reenvío. Encima
+// mañana ese mismo estado se ve como "ya tenía cuenta", así que el único
+// momento en que se puede ver es el día que pasa.
+describe("resumirProvisionamiento — accesos perdidos", () => {
+  it("saca aparte la cuenta creada cuya contraseña no salió", () => {
+    const res = resumirProvisionamiento(
+      [r({
+        estado: "creada",
+        correo: { enviado: false, plantilla: "bienvenida", redirigido: false, destinatarioReal: null },
+        advertencias: ["correo_no_enviado", "cuenta_creada_sin_contrasena_entregada"],
+      })],
+      nombres,
+    );
+
+    expect(res.accesosPerdidos).toHaveLength(1);
+    expect(res.accesosPerdidos[0]).toMatchObject({ inversionistaId: 1, nombre: "Ana Pérez" });
+    expect(res.hayQueReportar).toBe(true);
+  });
+
+  it("saca aparte la cuenta que quedó sin rol ni DPI", () => {
+    // Un DPI que no se escribió es justo lo que vuelve a producir cuentas
+    // duplicadas en la corrida siguiente: sin DPI solo se la encuentra por
+    // correo, y el correo es lo que a esta gente le cambian.
+    const res = resumirProvisionamiento(
+      [r({
+        estado: "creada",
+        correo: { enviado: true, plantilla: "bienvenida", redirigido: false, destinatarioReal: null },
+        advertencias: ["cuenta_creada_sin_rol_ni_dpi"],
+      })],
+      nombres,
+    );
+
+    expect(res.cuentasSinIdentidad).toHaveLength(1);
+    expect(res.hayQueReportar).toBe(true);
+  });
+
+  it("el rol que no se pudo promover también se reporta", () => {
+    const res = resumirProvisionamiento(
+      [r({ estado: "ya_tenia", advertencias: ["rol_no_promovido"] })],
+      nombres,
+    );
+
+    expect(res.cuentasSinIdentidad).toHaveLength(1);
+    expect(res.hayQueReportar).toBe(true);
+  });
+});
+
+// El resumen se arma con nombres que vienen de `cartera.inversionistas`, que es
+// texto libre capturado a mano, y se manda como HTML.
+describe("construirCorreoResumen — el nombre no puede inyectar HTML", () => {
+  it("escapa el nombre y el motivo", () => {
+    const { html } = construirCorreoResumen(
+      resumirProvisionamiento(
+        [r({ inversionistaId: 9, estado: "fallo", motivo: "<b>boom</b>" })],
+        new Map([[9, "<script>alert(1)</script>"]]),
+      ),
+    );
+
+    expect(html).not.toContain("<script>");
+    expect(html).toContain("&lt;script&gt;");
+    expect(html).not.toContain("<b>boom</b>");
   });
 });

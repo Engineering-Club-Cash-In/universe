@@ -1,7 +1,6 @@
 import {
   generarPasswordPortal,
-  normalizarDpiParaBuscar,
-  normalizarDpiParaGuardar,
+  normalizarDpiPortal,
   resolveRoleAfterRegistration,
   type PortalUserType,
 } from "../../lib/provisioning";
@@ -122,7 +121,7 @@ const resolverUsuario = async (
   email: string,
   deps: DependenciasProvisionamiento,
 ): Promise<{ usuario: UsuarioPortal; resueltoPor: "dpi" | "email" } | null> => {
-  const dpiBusqueda = normalizarDpiParaBuscar(dpi);
+  const dpiBusqueda = normalizarDpiPortal(dpi);
   if (dpiBusqueda) {
     const porDpi = await deps.buscarPorDpi(dpiBusqueda);
     if (porDpi) return { usuario: porDpi, resueltoPor: "dpi" };
@@ -136,14 +135,44 @@ const resolverUsuario = async (
   return null;
 };
 
-/** Sube CLIENT→INVESTOR y nada más. Nunca degrada ni toca un rol administrativo. */
+/**
+ * Sube CLIENT→INVESTOR y nada más. Nunca degrada ni toca un rol administrativo.
+ *
+ * No propaga el fallo: cuando se llama, la cuenta ya existe. Un throw aquí
+ * convertiría "esta persona ya tenía acceso, no pude subirle el rol" en un 500
+ * que cartera lee como "no se pudo dar acceso" — falso, y encima pierde el
+ * dato de qué fue lo que falló.
+ */
 const promoverRol = async (
   usuario: UsuarioPortal,
+  advertencias: string[],
   deps: DependenciasProvisionamiento,
 ): Promise<void> => {
   const nuevoRol = resolveRoleAfterRegistration(usuario.role, "INVESTOR");
-  if (nuevoRol) {
+  if (!nuevoRol) return;
+
+  try {
     await deps.actualizarUsuario(usuario.id, { role: nuevoRol });
+  } catch {
+    advertencias.push("rol_no_promovido");
+  }
+};
+
+/**
+ * Envía sin dejar que el envío tire.
+ *
+ * `enviarBienvenida` promete devolver `{success}`, pero el paquete de correo
+ * valida el destinatario con `emailSchema.parse(to)` FUERA de su propio
+ * try/catch: un correo que Better Auth aceptó y Zod rechaza tira. Si eso sube,
+ * se lleva por delante una cuenta que ya está creada.
+ */
+const enviarSinTirar = async (
+  enviar: () => Promise<ResultadoEnvio>,
+): Promise<ResultadoEnvio> => {
+  try {
+    return await enviar();
+  } catch (error) {
+    return { success: false, error };
   }
 };
 
@@ -219,21 +248,45 @@ export const asegurarCuentaInversionista = async (
     };
   }
 
-  // El rol y el DPI van en un UPDATE posterior porque Better Auth no los acepta
-  // en el signUp. El DPI solo si son 13 dígitos: lo demás sería basura en una
-  // columna de identidad UNIQUE.
-  await deps.actualizarUsuario(creado.id, {
-    role: "INVESTOR",
-    dpi: normalizarDpiParaGuardar(entrada.dpi),
-  });
+  // DE AQUÍ EN ADELANTE LA CUENTA YA EXISTE, y la contraseña solo vive en la
+  // variable `password`: no se persiste, no se devuelve y no hay ninguna ruta
+  // de reenvío. Cualquier throw a partir de este punto dejaría a una persona
+  // con una cuenta que no sabe que tiene y a la que no puede entrar, así que
+  // nada de lo que sigue puede tirar: todo se degrada a una advertencia.
 
-  const envio = await deps.enviarBienvenida({
-    to: email,
-    investorName: entrada.nombre,
-    password,
-    portalUrl: deps.portalUrl,
-  });
+  // El rol y el DPI van en un UPDATE posterior porque Better Auth no los acepta
+  // en el signUp. El DPI se guarda en la MISMA forma canónica con la que se
+  // busca: si se guardara distinto, la corrida siguiente no encontraría esta
+  // cuenta y le crearía otra a la misma persona.
+  try {
+    await deps.actualizarUsuario(creado.id, {
+      role: "INVESTOR",
+      dpi: normalizarDpiPortal(entrada.dpi),
+    });
+  } catch {
+    // La cuenta sirve sin rol ni DPI —se entra igual— y la contraseña todavía
+    // se puede entregar, que es lo irrecuperable. El rol lo arregla un humano.
+    advertencias.push("cuenta_creada_sin_rol_ni_dpi");
+  }
+
+  const envio = await enviarSinTirar(() =>
+    deps.enviarBienvenida({
+      to: email,
+      investorName: entrada.nombre,
+      password,
+      portalUrl: deps.portalUrl,
+    }),
+  );
   anotarEnvio(advertencias, envio.success, modo);
+
+  if (!envio.success) {
+    // El caso que de otro modo se vuelve invisible: la cuenta quedó creada y su
+    // dueño no tiene cómo entrar ni sabe que existe. Se nombra aparte de
+    // `correo_no_enviado` porque en el aviso de empresa ese mismo fallo solo
+    // pierde un aviso; aquí pierde el ACCESO, y la corrida de mañana ya lo verá
+    // como un "ya tenía cuenta" indistinguible de una cuenta sana.
+    advertencias.push("cuenta_creada_sin_contrasena_entregada");
+  }
 
   return {
     estado: "creada",
@@ -266,7 +319,7 @@ const reconocerExistente = async (
     advertencias.push("correo_de_cartera_distinto_al_de_la_cuenta");
   }
 
-  await promoverRol(usuario, deps);
+  await promoverRol(usuario, advertencias, deps);
 
   return {
     estado: "ya_tenia",
@@ -306,15 +359,17 @@ export const avisarEmpresaAgregada = async (
     };
   }
 
-  await promoverRol(existente.usuario, deps);
+  await promoverRol(existente.usuario, advertencias, deps);
 
-  const envio = await deps.enviarEmpresaAgregada({
-    // Al correo de la CUENTA, no al que tenga cartera: es donde esa persona lee.
-    to: existente.usuario.email,
-    investorName: entrada.representanteNombre,
-    companyName: entrada.inversionistaNombre,
-    portalUrl: deps.portalUrl,
-  });
+  const envio = await enviarSinTirar(() =>
+    deps.enviarEmpresaAgregada({
+      // Al correo de la CUENTA, no al que tenga cartera: ahí lee esa persona.
+      to: existente.usuario.email,
+      investorName: entrada.representanteNombre,
+      companyName: entrada.inversionistaNombre,
+      portalUrl: deps.portalUrl,
+    }),
+  );
   anotarEnvio(advertencias, envio.success, modo);
 
   return {

@@ -76,15 +76,9 @@ describe("asegurarCuentaInversionista — cuenta nueva", () => {
     });
   });
 
-  it("promueve a INVESTOR y guarda el DPI de 13 dígitos", async () => {
+  it("promueve a INVESTOR y guarda el DPI", async () => {
     await asegurarCuentaInversionista(entrada(), deps());
     expect(actualizaciones[0]).toMatchObject({ role: "INVESTOR", dpi: "1234567890101" });
-  });
-
-  it("un DPI que no son 13 dígitos se guarda como NULL, jamás como ''", async () => {
-    // El slot del '' en users.dpi (UNIQUE) YA está ocupado en producción.
-    await asegurarCuentaInversionista(entrada({ dpi: "4036613" }), deps());
-    expect(actualizaciones[0]).toMatchObject({ dpi: null });
   });
 
   it("NUNCA devuelve la contraseña: la respuesta queda en audit_logs", async () => {
@@ -221,5 +215,124 @@ describe("avisarEmpresaAgregada", () => {
   it("sin correo ni cuenta del representante, lo dice explícito", async () => {
     const r = await avisarEmpresaAgregada(empresa({ representanteEmail: null, representanteDpi: null }), deps());
     expect(r).toMatchObject({ estado: "fallo", motivo: "representante_sin_cuenta" });
+  });
+});
+
+// El escenario que producía la cuenta duplicada. Cartera manda el DPI sin ceros
+// a la izquierda ("4036613"); el normalizador de ESCRITURA exigía 13 dígitos
+// exactos y guardaba NULL, así que a esa persona solo se la encontraba por
+// correo. En cuanto alguien corrige el correo en cartera —cosa que este mismo
+// sistema PIDE con `correo_de_cartera_distinto_al_de_la_cuenta`— la corrida
+// siguiente no la encuentra ni por DPI (es NULL) ni por correo (cambió), y le
+// crea otra cuenta: dos cuentas, un humano, dos contraseñas.
+describe("asegurarCuentaInversionista — lo que se guarda es lo que se busca", () => {
+  it("guarda el DPI corto, y por eso sobrevive a que le corrijan el correo", async () => {
+    const d = deps();
+
+    const primera = await asegurarCuentaInversionista(
+      entrada({ dpi: "4036613", email: "jckafie@gmail.com" }),
+      d,
+    );
+    expect(primera.estado).toBe("creada");
+    expect(actualizaciones[0]).toMatchObject({ dpi: "4036613" });
+
+    // Operación corrige el correo en cartera y el job vuelve a correr.
+    const segunda = await asegurarCuentaInversionista(
+      entrada({ dpi: "4036613", email: "jckafie@outlook.com" }),
+      d,
+    );
+
+    expect(segunda).toMatchObject({ estado: "ya_tenia", resueltoPor: "dpi" });
+    expect(usuarios).toHaveLength(1);
+    expect(creados).toHaveLength(1);
+  });
+
+  it("guarda el DPI en la MISMA forma con la que después se busca", async () => {
+    // Guardarlo con ceros a la izquierda o con basura de captura sería guardar
+    // algo que la búsqueda normalizada no vuelve a encontrar tal cual.
+    await asegurarCuentaInversionista(entrada({ dpi: "04036613" }), deps());
+    expect(actualizaciones[0]).toMatchObject({ dpi: "4036613" });
+  });
+
+  it("lo que no es un DPI sigue quedando en NULL, jamás en cadena vacía", async () => {
+    // El slot del '' en users.dpi (UNIQUE) YA está ocupado en producción.
+    for (const basura of ["", "   ", "no-aplica", "000"]) {
+      actualizaciones.length = 0;
+      usuarios.length = 0;
+      await asegurarCuentaInversionista(
+        entrada({ dpi: basura, email: `x${basura.length}@example.com` }),
+        deps(),
+      );
+      expect(actualizaciones[0]).toMatchObject({ dpi: null });
+    }
+  });
+});
+
+// A partir de que `crearUsuario` devuelve, la cuenta EXISTE y la contraseña
+// solo vive en una variable local: no se persiste, no se devuelve (a propósito,
+// para que no acabe en audit_logs) y no hay ninguna ruta de reenvío en todo el
+// sistema. Cualquier throw después de ese punto deja a una persona con una
+// cuenta que no sabe que tiene y a la que no puede entrar.
+describe("asegurarCuentaInversionista — nada puede tirar después de crear la cuenta", () => {
+  it("si el UPDATE de rol/DPI falla, igual manda la contraseña y lo reporta", async () => {
+    const d = {
+      ...deps(),
+      actualizarUsuario: async () => {
+        // Real: 23505 sobre users_dpi_key contra una fila sucia, o una carrera.
+        throw new Error("duplicate key value violates unique constraint users_dpi_key");
+      },
+    };
+
+    const r = await asegurarCuentaInversionista(entrada(), d);
+
+    expect(r.estado).toBe("creada");
+    expect(bienvenidas).toHaveLength(1);
+    expect(r.advertencias).toContain("cuenta_creada_sin_rol_ni_dpi");
+  });
+
+  it("si el envío TIRA, no se traga la cuenta creada: la reporta como acceso perdido", async () => {
+    const d = {
+      ...deps(),
+      enviarBienvenida: async () => {
+        // Real: `emailSchema.parse(to)` de @cci/email tira fuera de su try.
+        throw new Error("Invalid email");
+      },
+    };
+
+    const r = await asegurarCuentaInversionista(entrada(), d);
+
+    expect(r.estado).toBe("creada");
+    expect(r.correo.enviado).toBe(false);
+    expect(r.advertencias).toContain("correo_no_enviado");
+    expect(r.advertencias).toContain("cuenta_creada_sin_contrasena_entregada");
+  });
+
+  it("un envío que devuelve success:false también es un acceso perdido", async () => {
+    // Distinto de `correo_no_enviado` a secas: en `avisarEmpresaAgregada` un
+    // correo que no sale es un aviso perdido, aquí es un ACCESO perdido.
+    const d = { ...deps(), enviarBienvenida: async () => ({ success: false, error: "resend caído" }) };
+
+    const r = await asegurarCuentaInversionista(entrada(), d);
+
+    expect(r.advertencias).toContain("cuenta_creada_sin_contrasena_entregada");
+  });
+
+  it("el aviso de empresa que falla NO se marca como acceso perdido", async () => {
+    usuarios.push({ id: "u1", email: "r@example.com", nombre: "R", role: "INVESTOR", dpi: "1573661970101" });
+    const d = { ...deps(), enviarEmpresaAgregada: async () => { throw new Error("resend caído"); } };
+
+    const r = await avisarEmpresaAgregada(
+      {
+        representanteEmail: "r@example.com",
+        representanteDpi: "1573661970101",
+        representanteNombre: "R",
+        inversionistaId: 86,
+        inversionistaNombre: "Cube Investments S.A.",
+      },
+      d,
+    );
+
+    expect(r.advertencias).toContain("correo_no_enviado");
+    expect(r.advertencias).not.toContain("cuenta_creada_sin_contrasena_entregada");
   });
 });

@@ -34,6 +34,8 @@ import {
   statusCreditoInversionistaEspejoEnum,
 } from "../database/db/schema";
 import { getSignedDocumentUrl } from "../utils/functions/uploadsFiles";
+import { provisionarInversionista } from "../services/portalProvisioning";
+import { buscarRepresentanteEnCartera } from "../utils/functions/buscarRepresentante";
 import { calcularAjusteCompras } from "../utils/comprasAjuste";
 import { eq, and, or, sql, inArray, ilike, like, desc, asc, count, SQL, isNull, isNotNull, ne } from "drizzle-orm";
 import { promises as fsPromises } from "node:fs";
@@ -555,6 +557,9 @@ export const insertInvestor = async ({ body, set }: any) => {
     }
 
     const resultados: any[] = [];
+    // Solo las filas INSERTADAS en esta pasada: son las únicas que pueden
+    // necesitar una cuenta nueva o disparar el aviso a un representante.
+    const recienCreados: any[] = [];
 
     // 🔥 PROCESAR UNO POR UNO para manejar INSERT vs UPDATE
     for (const inv of inversionistasToUpsert) {
@@ -725,12 +730,32 @@ export const insertInvestor = async ({ body, set }: any) => {
           .returning();
 
         resultados.push(inserted);
+        // Solo los INSERT provisionan. Un update no da acceso nuevo a nadie, y
+        // hacerlo aquí mandaría el aviso de empresa agregada en cada edición.
+        recienCreados.push(inserted);
       }
     }
+
+    // El acceso al portal se resuelve DESPUÉS de escribir, y no puede tumbar el
+    // alta: las filas ya están insertadas (fuera de transacción, sin rollback
+    // posible) y un error acá se vería como "falló, reintentá" — pero el
+    // reintento muere en el guard de duplicados sin volver a pasar por aquí.
+    // El resultado viaja en la respuesta; el job diario recoge lo que falló.
+    const provisioning = await Promise.all(
+      recienCreados.map((fila) =>
+        provisionarInversionista(fila, {
+          buscarRepresentante: buscarRepresentanteEnCartera,
+        }),
+      ),
+    );
 
     set.status = 201;
     return {
       message: `Procesados exitosamente ${resultados.length} inversionista(s)`,
+      // ANTES de `data` a propósito: auditLog trunca la respuesta a 4000
+      // caracteres, y un alta con muchos inversionistas se comería justo la
+      // cola. Este bloque es el único registro durable de si el correo salió.
+      provisioning,
       data: resultados,
     };
   } catch (error: any) {

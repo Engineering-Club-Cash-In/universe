@@ -53,6 +53,7 @@ export const InfoPerson = () => {
   const {
     data: investorProfile,
     isLoading: isLoadingInvestor,
+    error: errorInvestor,
     refetch: refetchInvestor,
   } = useQuery({
     queryKey: ["investor-profile", inversionistaId],
@@ -79,26 +80,29 @@ export const InfoPerson = () => {
     : isLoadingClient;
   const refetch = isInvestor ? refetchInvestor : refetchClient;
 
-  // Actualizar campos cuando se carga el perfil
+  // Sincronizar los campos con el perfil cargado.
+  //
+  // Sin `else`, al cambiar de entidad los campos se quedaban con los datos de
+  // la anterior: si la consulta de la nueva fallaba, se mostraban como si
+  // fueran suyos y al editar cualquiera se escribía ese valor viejo sobre la
+  // entidad nueva (el modal manda el inversionista_id actual). Por eso se
+  // limpian siempre que no haya datos.
   useEffect(() => {
-    if (profileData) {
-      if (isInvestor) {
-        // Datos de inversionista. En las sociedades el `dpi` propio va vacío y
-        // el del humano vive en dpi_rep_legal, así que se muestra ese.
-        setDpi(
-          profileData.dpi?.toString() ||
-            profileData.dpi_rep_legal?.toString() ||
-            "",
-        );
-        setBanco(profileData.banco_id?.toString() || "");
-        setTipoCuenta(profileData.tipo_cuenta || "");
-        setNumeroCuenta(profileData.numero_cuenta || "");
-      } else {
-        // Datos de cliente
-        setDpi(profileData.dpi || "");
-        setPhone(profileData.phone || "");
-        setAddress(profileData.direccion || "");
-      }
+    if (isInvestor) {
+      // En las sociedades el `dpi` propio va vacío y el del humano vive en
+      // dpi_rep_legal, así que se muestra ese.
+      setDpi(
+        profileData?.dpi?.toString() ||
+          profileData?.dpi_rep_legal?.toString() ||
+          "",
+      );
+      setBanco(profileData?.banco_id?.toString() || "");
+      setTipoCuenta(profileData?.tipo_cuenta || "");
+      setNumeroCuenta(profileData?.numero_cuenta || "");
+    } else {
+      setDpi(profileData?.dpi || "");
+      setPhone(profileData?.phone || "");
+      setAddress(profileData?.direccion || "");
     }
   }, [profileData, isInvestor]);
 
@@ -162,6 +166,27 @@ export const InfoPerson = () => {
 
   if (isLoading) {
     return <Loading />;
+  }
+
+  // Una ficha en blanco se lee como "esta entidad no tiene datos bancarios" y
+  // llevaría al inversionista a llenarlos de nuevo sobre lo que ya existe.
+  if (isInvestor && errorInvestor) {
+    return (
+      <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-6">
+        <p className="font-semibold mb-1">No pudimos cargar este perfil</p>
+        <p className="text-gray text-sm mb-4">
+          Puede ser una falla momentánea de conexión. Volvé a intentarlo en un
+          momento.
+        </p>
+        <button
+          type="button"
+          onClick={() => refetch()}
+          className="px-4 py-2 text-sm font-semibold text-primary border border-primary/30 rounded-lg hover:bg-primary/10 transition-colors"
+        >
+          Reintentar
+        </button>
+      </div>
+    );
   }
 
   return (

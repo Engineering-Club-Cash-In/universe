@@ -3,6 +3,8 @@ import { Resend } from "resend";
 import LiquidationEmail from "./templates/LiquidationTemplate";
 import PasswordResetEmail, { type PasswordResetRole } from "./templates/PasswordResetTemplate";
 import NewCreditEmail from "./templates/NewCreditTemplate";
+import PortalWelcomeEmail from "./templates/PortalWelcomeTemplate";
+import PortalCompanyAddedEmail from "./templates/PortalCompanyAddedTemplate";
 import * as React from "react";
 
 import { z } from "zod";
@@ -167,6 +169,138 @@ export const sendPasswordResetEmail = async (
     return { success: true, data };
   } catch (err) {
     console.error("[sendPasswordResetEmail] Unexpected Error:", err);
+    return { success: false, error: err };
+  }
+};
+
+// ================================================================
+// PORTAL DEL INVERSIONISTA
+// Correos que se disparan cuando back office da de alta a un
+// inversionista en el portal, o cuando se le suma otra empresa.
+// ================================================================
+
+/**
+ * Banners del layout de correos del portal. Son decorativos: si falta
+ * EMAIL_ASSETS_BASE_URL el correo igual sale (sin banners) en vez de
+ * reventar el alta del inversionista.
+ */
+const getPortalEmailAssets = (caller: string) => {
+  const assetsBaseUrl = process.env.EMAIL_ASSETS_BASE_URL;
+  if (!assetsBaseUrl) {
+    console.warn(
+      `[${caller}] EMAIL_ASSETS_BASE_URL is missing. Sending without header/footer banners.`
+    );
+    return undefined;
+  }
+  return {
+    headerBanner: `${assetsBaseUrl}/header-mail-V2.png`,
+    footerBanner: `${assetsBaseUrl}/footer-mail.png`,
+  };
+};
+
+export interface SendPortalWelcomeEmailParams {
+  /** Correo del inversionista: es a la vez el destinatario y su usuario. */
+  to: string;
+  investorName: string;
+  /** Contraseña generada por quien da de alta la cuenta. */
+  password: string;
+  /** URL de login del portal (ej. https://portal.clubcashin.com). */
+  portalUrl: string;
+  /** Empresas que ya quedan ligadas a la cuenta, si es representante legal. */
+  companyNames?: string[];
+}
+
+/**
+ * Correo de bienvenida al portal, con las credenciales de ingreso.
+ * La contraseña viaja en el cuerpo del correo — nunca en el asunto ni en el
+ * Preview, para que no quede visible en la lista de la bandeja.
+ */
+export const sendPortalWelcomeEmail = async ({
+  to,
+  investorName,
+  password,
+  portalUrl,
+  companyNames,
+}: SendPortalWelcomeEmailParams) => {
+  emailSchema.parse(to);
+
+  const emailAssets = getPortalEmailAssets("sendPortalWelcomeEmail");
+
+  try {
+    const { data, error } = await resend.emails.send({
+      from: `Club Cash In <no-reply@${domain}>`,
+      to: [to],
+      subject: "Tu acceso al Portal del Inversionista - CashIn",
+      react: React.createElement(PortalWelcomeEmail, {
+        investorName,
+        loginEmail: to,
+        password,
+        portalUrl,
+        companyNames,
+        assets: emailAssets,
+      }),
+    });
+
+    if (error) {
+      console.error("[sendPortalWelcomeEmail] Resend API Error:", error);
+      return { success: false, error };
+    }
+
+    console.log(`[sendPortalWelcomeEmail] Welcome email sent to ${to}. ID: ${data?.id}`);
+    return { success: true, data };
+  } catch (err) {
+    console.error("[sendPortalWelcomeEmail] Unexpected Error:", err);
+    return { success: false, error: err };
+  }
+};
+
+export interface SendPortalCompanyAddedEmailParams {
+  /** Correo de la cuenta que YA existe. */
+  to: string;
+  investorName: string;
+  /** Razón social de la empresa que se le suma. */
+  companyName: string;
+  portalUrl: string;
+}
+
+/**
+ * Aviso para quien ya tiene cuenta y pasa a representar una sociedad más.
+ * No lleva credenciales: esa persona sigue entrando con su contraseña actual.
+ */
+export const sendPortalCompanyAddedEmail = async ({
+  to,
+  investorName,
+  companyName,
+  portalUrl,
+}: SendPortalCompanyAddedEmailParams) => {
+  emailSchema.parse(to);
+
+  const emailAssets = getPortalEmailAssets("sendPortalCompanyAddedEmail");
+
+  try {
+    const { data, error } = await resend.emails.send({
+      from: `Club Cash In <no-reply@${domain}>`,
+      to: [to],
+      subject: `Ahora también representas a ${companyName} en el portal`,
+      react: React.createElement(PortalCompanyAddedEmail, {
+        investorName,
+        companyName,
+        portalUrl,
+        assets: emailAssets,
+      }),
+    });
+
+    if (error) {
+      console.error("[sendPortalCompanyAddedEmail] Resend API Error:", error);
+      return { success: false, error };
+    }
+
+    console.log(
+      `[sendPortalCompanyAddedEmail] Company-added email sent to ${to}. ID: ${data?.id}`
+    );
+    return { success: true, data };
+  } catch (err) {
+    console.error("[sendPortalCompanyAddedEmail] Unexpected Error:", err);
     return { success: false, error: err };
   }
 };

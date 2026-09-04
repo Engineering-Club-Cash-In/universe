@@ -214,6 +214,47 @@ describe("POST /bulk-import-investors", () => {
     });
   });
 
+  // Un DPI vacío o mal escrito creaba igual la cuenta como INVESTOR, con ese
+  // valor inservible en `users.dpi`. La corrección después no servía de nada:
+  // el chequeo de correo marcaba la fila "omitido" para siempre y el importador
+  // ya no podía terminar a ese inversionista.
+  it("no crea la cuenta si el DPI no es válido", async () => {
+    for (const dpi of ["", "   ", "1234", "12345678901234", "abcdefghijklm"]) {
+      filasSelect = [[], []];
+      altas = [];
+
+      const res = await importar([
+        { nombre: "Ana Pérez", dpi, correo: "ana@example.com" },
+      ]);
+      const cuerpo = (await res.json()) as {
+        omitidos: number;
+        omitidosDetalle: { motivo: string }[];
+      };
+
+      expect(altas).toHaveLength(0);
+      expect(cuerpo.omitidos).toBe(1);
+      expect(cuerpo.omitidosDetalle[0].motivo).toContain("DPI");
+    }
+  });
+
+  // Mismo problema que ya se arregló en el registro: `normalizeDpi` acepta
+  // separadores, así que sin normalizar la importación guardaba en `users.dpi`
+  // una cadena distinta de los 13 dígitos que usa el resto del sistema.
+  it("normaliza el DPI con separadores antes de guardarlo", async () => {
+    filasSelect = [[], []];
+
+    const res = await importar([
+      { nombre: "Ana Pérez", dpi: "1234-56789-0123", correo: "ana@example.com" },
+    ]);
+    const cuerpo = (await res.json()) as { exitosos: number };
+
+    expect(cuerpo.exitosos).toBe(1);
+    expect(escrituras).toContainEqual({
+      role: "INVESTOR",
+      dpi: "1234567890123",
+    });
+  });
+
   it("no crea la cuenta si el DPI ya pertenece a otro usuario", async () => {
     // Correo libre, pero el DPI ya está tomado por otra fila de `users`.
     filasSelect = [[], [{ id: "otro-usuario" }]];

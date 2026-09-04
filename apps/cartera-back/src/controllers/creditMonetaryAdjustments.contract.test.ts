@@ -74,8 +74,11 @@ test("shared investor amount history distinguishes parent from mirror", () => {
   expect(migration).toContain("trg_audit_monto_aportado_padre");
   expect(migration).toContain("app.monto_aportado_motivo_padre");
   expect(migration).toContain("app.monto_aportado_motivo_espejo");
-  expect(migration).toContain("NULLIF(\n      current_setting(");
   expect(migration).toContain("ix_hist_mont_origen_cred_fecha");
+  // El índice NO puede ser CONCURRENTLY: la migración corre como un statement
+  // múltiple, que Postgres envuelve en una transacción implícita, y ahí
+  // CONCURRENTLY aborta y revierte todo el archivo.
+  expect(migration).not.toContain("CREATE INDEX CONCURRENTLY");
 });
 
 test("rebuild audit only records investor IDs whose amount changed", () => {

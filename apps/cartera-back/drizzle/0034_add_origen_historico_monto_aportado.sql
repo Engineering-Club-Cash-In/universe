@@ -23,12 +23,15 @@ BEGIN
 END;
 $$;
 
--- CONCURRENTLY para no bloquear las escrituras del trigger mientras se
--- construye: esta tabla recibe una fila por cada movimiento de inversionistas,
--- y un CREATE INDEX normal congelaría pagos, liquidaciones y rebuild de espejo.
--- Debe ejecutarse FUERA de transacción (no dentro de un bloque DO ni de un
--- BEGIN/COMMIT); si falla deja el índice INVALID y se reintenta tras un DROP.
-CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_hist_mont_origen_cred_fecha
+-- Índice para las lecturas por origen (verificarCuadreLiquidaciones filtra por
+-- origen en sus cinco consultas).
+--
+-- Sin CONCURRENTLY a propósito: este archivo se ejecuta como un statement
+-- múltiple y Postgres lo envuelve en una transacción implícita, donde
+-- CONCURRENTLY aborta con "cannot run inside a transaction block" y hace
+-- rollback de toda la migración. La tabla ronda las 11k filas / 2.4 MB, así
+-- que la construcción es instantánea y el lock, despreciable.
+CREATE INDEX IF NOT EXISTS ix_hist_mont_origen_cred_fecha
   ON cartera.historico_monto_aportado_espejo
   (origen, credito_id, inversionista_id, fecha);
 

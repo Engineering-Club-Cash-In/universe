@@ -906,7 +906,10 @@ function InvestorLiquidacionesPage() {
 			});
 		},
 		onError: (err: any) => {
+			// Si el fallo vino desde la confirmación de borrado, se devuelve al
+			// operador al formulario en vez de dejarlo sin modal.
 			setConfirmarQuitarRepOpen(false);
+			setEditOpen(true);
 			const texto = err?.message ?? "Error al actualizar inversionista";
 			// El id del input va en kebab-case y el campo del backend en
 			// snake_case (dpi_rep_legal → edit-dpi-rep-legal).
@@ -1739,6 +1742,10 @@ function InvestorLiquidacionesPage() {
 										editEsEmpresa,
 									)
 								) {
+									// Un modal a la vez: se cierra el de edición (su estado
+									// vive fuera, así que no se pierde nada) y al cancelar
+									// la confirmación se vuelve a abrir tal cual estaba.
+									setEditOpen(false);
 									setConfirmarQuitarRepOpen(true);
 									return;
 								}
@@ -1764,6 +1771,9 @@ function InvestorLiquidacionesPage() {
 				onOpenChange={(open) => {
 					if (editMutation.isPending) return;
 					setConfirmarQuitarRepOpen(open);
+					// Cerrar la confirmación (Esc, clic afuera, Cancelar) devuelve al
+					// formulario de edición con todo lo que ya se había tecleado.
+					if (!open) setEditOpen(true);
 				}}
 			>
 				<DialogContent className="sm:max-w-md">
@@ -1788,7 +1798,10 @@ function InvestorLiquidacionesPage() {
 					<DialogFooter className="gap-2 sm:justify-between">
 						<Button
 							variant="outline"
-							onClick={() => setConfirmarQuitarRepOpen(false)}
+							onClick={() => {
+								setConfirmarQuitarRepOpen(false);
+								setEditOpen(true);
+							}}
 							disabled={editMutation.isPending}
 						>
 							Cancelar

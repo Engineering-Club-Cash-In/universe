@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { EstadosCuentaContent } from "./estados-cuenta";
 import { LicenciasContent } from "./licencias";
 
 export const Route = createFileRoute("/crm/documentacion/")({
@@ -16,10 +17,14 @@ function RouteComponent() {
 				</p>
 			</div>
 
-			<Tabs defaultValue="licencias" className="space-y-6">
+			<Tabs defaultValue="estados-cuenta" className="space-y-6">
 				<TabsList>
+					<TabsTrigger value="estados-cuenta">Estados de cuenta</TabsTrigger>
 					<TabsTrigger value="licencias">Licencias</TabsTrigger>
 				</TabsList>
+				<TabsContent value="estados-cuenta" className="space-y-6">
+					<EstadosCuentaContent />
+				</TabsContent>
 
 				<TabsContent value="licencias" className="space-y-6">
 					<LicenciasContent />

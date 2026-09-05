@@ -8,6 +8,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import {
 	AlertCircle,
 	AlertTriangle,
+	Ban,
 	Banknote,
 	Building,
 	Calculator,
@@ -19,6 +20,7 @@ import {
 	Clock,
 	Download,
 	ExternalLink,
+	FileCheck2,
 	FileSignature,
 	FileSpreadsheet,
 	FileText,
@@ -3940,6 +3942,55 @@ const LICENSE_STATUS_META: Record<
 	},
 };
 
+const DOCUMENT_INTEGRITY_STATUS_META: Record<
+	"valido" | "observacion" | "revision_manual" | "rechazado" | "error",
+	{ label: string; rowClassName: string; Icon: typeof CheckCircle2 }
+> = {
+	valido: {
+		label: "Válido",
+		rowClassName: "border-green-200 bg-green-50 text-green-800",
+		Icon: CheckCircle2,
+	},
+	observacion: {
+		label: "Con observación",
+		rowClassName: "border-amber-200 bg-amber-50 text-amber-800",
+		Icon: AlertTriangle,
+	},
+	revision_manual: {
+		label: "Revisión manual",
+		rowClassName: "border-blue-200 bg-blue-50 text-blue-800",
+		Icon: HelpCircle,
+	},
+	rechazado: {
+		label: "Rechazado",
+		rowClassName: "border-red-200 bg-red-50 text-red-800",
+		Icon: XCircle,
+	},
+	error: {
+		label: "Error de validación",
+		rowClassName: "border-gray-200 bg-gray-50 text-gray-800",
+		Icon: Ban,
+	},
+};
+
+const BANK_STATEMENT_DOCUMENT_TYPES = new Set([
+	"estados_cuenta_1",
+	"estados_cuenta_2",
+	"estados_cuenta_3",
+	"bank_statement",
+]);
+
+function isBankStatementDocument(document: {
+	documentType: string;
+	description?: string | null;
+}) {
+	return (
+		BANK_STATEMENT_DOCUMENT_TYPES.has(document.documentType) ||
+		(document.documentType === "other" &&
+			document.description?.startsWith("Estado de cuenta"))
+	);
+}
+
 function DocumentsManager({
 	opportunityId,
 	opportunityStatus,
@@ -3986,6 +4037,27 @@ function DocumentsManager({
 		enabled: !!leadId,
 	});
 	const latestLicenseVerification = licenseVerificationQuery.data?.[0] ?? null;
+	const integrityStatusQuery = useQuery({
+		...orpc.getDocumentIntegrityStatus.queryOptions({
+			input: { opportunityId },
+		}),
+		enabled: !!opportunityId,
+	});
+	const integrityStatusByDocument = useMemo(
+		() =>
+			new Map(
+				(integrityStatusQuery.data ?? []).map((status) => [
+					status.opportunityDocumentId,
+					status,
+				]),
+			),
+		[integrityStatusQuery.data],
+	);
+	const canReviewDocumentIntegrity = [
+		"admin",
+		"analyst",
+		"sales_supervisor",
+	].includes(userProfile.data?.role ?? "");
 
 	// Upload a single document with a specific type
 	const uploadSingleDocument = async (docType: string) => {
@@ -4251,6 +4323,13 @@ function DocumentsManager({
 	const otherDocuments = documentsQuery.data?.filter(
 		(doc) => (doc.documentType as string) !== "detalle_analisis",
 	);
+	const bankDocuments = (otherDocuments ?? []).filter(isBankStatementDocument);
+	const staleIntegrityCount = bankDocuments.filter(
+		(document) => integrityStatusByDocument.get(document.id)?.isStale,
+	).length;
+	const unvalidatedIntegrityCount = bankDocuments.filter(
+		(document) => !integrityStatusByDocument.has(document.id),
+	).length;
 
 	return (
 		<div className="space-y-6">
@@ -4382,6 +4461,41 @@ function DocumentsManager({
 					)}
 				</CardContent>
 			</Card>
+
+			{bankDocuments.length > 0 && !integrityStatusQuery.isLoading && (
+				<div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-slate-800 text-sm">
+					<div className="flex items-center gap-2">
+						<FileCheck2 className="h-4 w-4 shrink-0" />
+						<span className="font-medium">Integridad de estados de cuenta</span>
+						<Badge variant="outline">
+							{bankDocuments.length} documento
+							{bankDocuments.length === 1 ? "" : "s"}
+						</Badge>
+						{unvalidatedIntegrityCount > 0 && (
+							<Badge className="bg-amber-100 text-amber-800">
+								{unvalidatedIntegrityCount} sin validar
+							</Badge>
+						)}
+						{staleIntegrityCount > 0 && (
+							<Badge className="bg-orange-100 text-orange-800">
+								{staleIntegrityCount} desactualizada
+								{staleIntegrityCount === 1 ? "" : "s"}
+							</Badge>
+						)}
+					</div>
+					{canReviewDocumentIntegrity && (
+						<Button asChild size="sm" variant="ghost" className="h-6 px-2 text-xs">
+							<Link
+								to="/crm/documentacion/estados-cuenta"
+								search={{ opportunityId }}
+							>
+								Abrir validaciones
+								<ExternalLink className="ml-1 h-3 w-3" />
+							</Link>
+						</Button>
+					)}
+				</div>
+			)}
 
 			{leadId && !licenseVerificationQuery.isLoading && licenseVerificationQuery.isError && (
 				<div className="flex items-center gap-2 rounded-md border border-destructive/30 px-3 py-1.5 text-destructive text-sm">
@@ -4602,14 +4716,34 @@ function DocumentsManager({
 													{doc.originalName}
 												</span>
 												<Badge
-													variant="outline"
-													className="flex-shrink-0 text-xs"
-												>
-													{documentTypeOptions.find(
-														(t) => t.value === doc.documentType,
-													)?.label || doc.documentType}
-												</Badge>
-											</div>
+											variant="outline"
+											className="flex-shrink-0 text-xs"
+										>
+											{documentTypeOptions.find(
+												(t) => t.value === doc.documentType,
+											)?.label || doc.documentType}
+										</Badge>
+										{isBankStatementDocument(doc) &&
+											(() => {
+												const status = integrityStatusByDocument.get(doc.id);
+								if (status?.isStale)
+													return (
+														<Badge className="bg-orange-100 text-orange-800">
+															Desactualizada
+														</Badge>
+													);
+												if (!status)
+													return <Badge variant="outline">Sin validar</Badge>;
+												const meta = DOCUMENT_INTEGRITY_STATUS_META[status.result];
+												const Icon = meta?.Icon ?? HelpCircle;
+												return (
+													<Badge className={meta?.rowClassName}>
+														<Icon className="mr-1 h-3 w-3" />
+														{meta?.label ?? status.result}
+													</Badge>
+												);
+											})()}
+									</div>
 											{doc.description && (
 												<p className="mt-1 text-muted-foreground text-xs">
 													{doc.description}
@@ -4625,8 +4759,22 @@ function DocumentsManager({
 											</div>
 										</div>
 									</div>
-									<div className="flex flex-shrink-0 items-center gap-2">
-										<Button
+								<div className="flex flex-shrink-0 items-center gap-2">
+									{isBankStatementDocument(doc) &&
+										canReviewDocumentIntegrity &&
+										(!integrityStatusByDocument.has(doc.id) ||
+											integrityStatusByDocument.get(doc.id)?.isStale) && (
+											<Button asChild size="sm" variant="outline">
+												<Link
+													to="/crm/documentacion/estados-cuenta"
+													search={{ opportunityId }}
+												>
+													<FileCheck2 className="mr-1 h-3 w-3" />
+													Validar lote
+												</Link>
+											</Button>
+										)}
+									<Button
 											size="sm"
 											variant="outline"
 											onClick={() => window.open(doc.url, "_blank")}

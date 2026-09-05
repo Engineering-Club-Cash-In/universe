@@ -67,7 +67,17 @@ carteraRoutes.post("/investor", async (c) => {
   try {
     const body = await c.req.json<CreateInvestorPayload>();
 
-    const result = await createInvestor(body);
+    // El cuerpo se reenvía CRUDO a cartera, así que aquí se le quita la llave
+    // que autoriza abrir una cuenta del portal. `requireAuth` de esta ruta no
+    // mira el rol —y no puede: el portal la usa con sesiones INVESTOR normales
+    // para cambiar la cuenta bancaria (portal-web/investorService.ts:64)— y el
+    // sign-up de Better Auth está abierto, así que cualquiera se fabrica una
+    // sesión. Cartera no distingue quién llama (todo entra con el mismo token
+    // de servicio ADMIN): el permiso es la llave, y por esta ruta no pasa.
+    const { provisionar_portal: _descartado, ...cuerpoSaneado } = body as
+      CreateInvestorPayload & { provisionar_portal?: unknown };
+
+    const result = await createInvestor(cuerpoSaneado);
 
     return c.json({
       success: true,

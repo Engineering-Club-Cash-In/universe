@@ -430,6 +430,14 @@ export const investorDocumentsRouter = {
 				});
 			}
 
+			// Qué pasó con su acceso al portal. Cartera nunca falla el alta por
+			// esto, así que el dato viaja aparte: el inversionista puede haber
+			// quedado perfecto y el acceso no, y son dos cosas distintas.
+			const accesoPortal =
+				createResult.provisioning?.find(
+					(p) => p.inversionistaId === created.inversionista_id,
+				) ?? null;
+
 			// 2. Log de creación
 			await db.insert(investorActivityLog).values({
 				inversionistaId: created.inversionista_id,
@@ -439,6 +447,10 @@ export const investorDocumentsRouter = {
 					dpi: input.dpi,
 					email: input.email,
 					moneda: input.moneda,
+					// Queda registrado acá también: si el correo con la contraseña
+					// se desvió por SERVER != PROD, la cuenta existe y su dueño no
+					// puede entrar, y sin este rastro nadie se enteraría.
+					accesoPortal,
 				},
 				performedBy: context.session.user.id,
 				performedByName:
@@ -502,6 +514,7 @@ export const investorDocumentsRouter = {
 				success: true,
 				inversionista: created,
 				compraCartera: compraResult,
+				accesoPortal,
 			};
 		}),
 

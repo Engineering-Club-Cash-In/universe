@@ -46,6 +46,7 @@ import ExcelJS from "exceljs";
 import { promises as fsp } from "node:fs";
 import path from "node:path";
 import { guardDescuentaImpuestos } from "./investorGuards";
+import { otorgarAccesoPortal } from "../controllers/otorgarAccesoPortal";
 import { buildPendingReturnAuthorizationWarningFromErrors } from "../utils/pendingReturnGuard";
 // 🔥 IMPORTAR SERVICIO DE BOLETAS
 
@@ -339,6 +340,30 @@ export const inversionistasRouter = new Elysia()
           "CUBE y el row del inversionista se elimina. Lo mismo en el espejo, dejando " +
           "status='completado'. Al final, el inversionista pasa a status='inactivo' y " +
           "se envía correo de notificación a la lista hardcodeada.",
+        tags: ["Inversionistas"],
+      },
+    }
+  )
+  .post(
+    "/investor/portal-access",
+    // `ctx: any` como en `/investor` (línea 292): el handler de Elysia se tipa
+    // con un índice abierto y el controller pide `body`/`set`/`user` concretos.
+    // El tipado fuerte vive en el controller, que es donde está la lógica.
+    (ctx: any) => otorgarAccesoPortal(ctx),
+    {
+      body: t.Object({
+        inversionista_ids: t.Array(t.Number({ minimum: 1 }), { minItems: 1 }),
+      }),
+      detail: {
+        summary: "Abre el acceso al Portal del Inversionista (acto humano, solo ADMIN)",
+        description:
+          "Crea la cuenta del portal de los inversionistas indicados y les manda " +
+          "la contraseña. Es el paso que la reconciliación diaria DEJÓ de hacer sola: " +
+          "el cron detecta a quién le falta acceso y lo reporta, pero abrir la cuenta " +
+          "pasa por una persona, porque cartera.inversionistas se escribe desde " +
+          "caminos que no prueban identidad y el correo de una fila legítima puede " +
+          "estar envenenado. NO agregar esta ruta al proxy de auth-google " +
+          "(cartera.routes.ts): ahí queda alcanzable desde el portal.",
         tags: ["Inversionistas"],
       },
     }

@@ -36,7 +36,9 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { avisoAccesoPortal } from "@/lib/acceso-portal";
 import { authClient } from "@/lib/auth-client";
+import { errorRepLegal, valorRepLegalAEnviar } from "@/lib/rep-legal-empresa";
 import { PERMISSIONS } from "@/lib/roles";
 import {
 	MODALIDAD_FACTURACION_LABELS,
@@ -62,6 +64,9 @@ function LiquidacionesInversionistas() {
 	const [formBanco, setFormBanco] = useState("");
 	const [formTipoCuenta, setFormTipoCuenta] = useState("");
 	const [formNumeroCuenta, setFormNumeroCuenta] = useState("");
+	// "¿Es empresa?" no tiene columna en cartera: solo existe `dpi_rep_legal`
+	// con valor o sin él. En el alta siempre arranca sin marcar.
+	const [formEsEmpresa, setFormEsEmpresa] = useState(false);
 	const [formDpiRepLegal, setFormDpiRepLegal] = useState("");
 	const [formMoneda, setFormMoneda] = useState("quetzales");
 	const [formEmiteFactura, setFormEmiteFactura] = useState(false);
@@ -166,6 +171,7 @@ function LiquidacionesInversionistas() {
 		setFormBanco("");
 		setFormTipoCuenta("");
 		setFormNumeroCuenta("");
+		setFormEsEmpresa(false);
 		setFormDpiRepLegal("");
 		setFormMoneda("quetzales");
 		setFormEmiteFactura(false);
@@ -181,10 +187,23 @@ function LiquidacionesInversionistas() {
 	const crearMutation = useMutation({
 		...orpc.crearInversionista.mutationOptions(),
 		onSuccess: async (data: any) => {
-			const msg = data.compraCartera
+			const base = data.compraCartera
 				? "Inversionista creado y compra de cartera registrada"
 				: "Inversionista creado correctamente";
-			toast.success(msg);
+
+			// El alta puede salir perfecta y el acceso al portal no. Si eso se
+			// resolviera con el toast verde de siempre, conta cerraría el modal
+			// creyendo que todo salió y el inversionista quedaría con una cuenta
+			// que no sabe que tiene: nadie se enteraría hasta el resumen del día
+			// siguiente. Con el aviso aquí se entera con la persona al teléfono.
+			const aviso = avisoAccesoPortal(data.accesoPortal);
+			const msg = aviso ? `${base}. ${aviso.texto}` : base;
+			if (aviso?.tono === "advertencia") {
+				// Dura más que el toast normal: es lo que hay que leer y actuar.
+				toast.warning(msg, { duration: 15000 });
+			} else {
+				toast.success(msg);
+			}
 			setCrearOpen(false);
 			resetForm();
 			await queryClient.invalidateQueries({
@@ -554,27 +573,44 @@ function LiquidacionesInversionistas() {
 							/>
 						</div>
 
-						{/* DPI del representante legal */}
-						<div className="space-y-1.5">
-							<Label htmlFor="inv-dpi-rep-legal">
-								DPI del representante legal
-							</Label>
-							<Input
-								id="inv-dpi-rep-legal"
-								value={formDpiRepLegal}
-								onChange={(e) => {
-									setFormDpiRepLegal(e.target.value.replace(/\D/g, ""));
-									limpiarDuplicado("dpi_rep_legal");
-								}}
-								placeholder="DPI de quien representa a la empresa"
-								maxLength={20}
-								inputMode="numeric"
-								aria-invalid={duplicadoEn("dpi_rep_legal")}
-								className={
-									duplicadoEn("dpi_rep_legal") ? "border-destructive" : undefined
-								}
-							/>
-							<MensajeDuplicado campo="dpi_rep_legal" />
+						{/* ¿Es empresa? → DPI del representante legal */}
+						<div className="space-y-3">
+							<div className="flex items-center gap-2">
+								<Checkbox
+									id="inv-es-empresa"
+									checked={formEsEmpresa}
+									onCheckedChange={(v) => {
+										setFormEsEmpresa(v === true);
+										// El "obligatorio" cuelga del interruptor: al
+										// desmarcar, la marca del campo deja de aplicar.
+										limpiarDuplicado("dpi_rep_legal");
+									}}
+								/>
+								<Label htmlFor="inv-es-empresa">¿Es empresa?</Label>
+							</div>
+							{formEsEmpresa && (
+								<div className="space-y-1.5">
+									<Label htmlFor="inv-dpi-rep-legal">
+										DPI del representante legal
+									</Label>
+									<Input
+										id="inv-dpi-rep-legal"
+										value={formDpiRepLegal}
+										onChange={(e) => {
+											setFormDpiRepLegal(e.target.value.replace(/\D/g, ""));
+											limpiarDuplicado("dpi_rep_legal");
+										}}
+										placeholder="DPI de quien representa a la empresa"
+										maxLength={20}
+										inputMode="numeric"
+										aria-invalid={duplicadoEn("dpi_rep_legal")}
+										className={
+											duplicadoEn("dpi_rep_legal") ? "border-destructive" : undefined
+										}
+									/>
+									<MensajeDuplicado campo="dpi_rep_legal" />
+								</div>
+							)}
 						</div>
 
 						{/* Moneda + Factura */}
@@ -784,6 +820,18 @@ function LiquidacionesInversionistas() {
 							}
 							onClick={() => {
 								if (hacerCompra && !compraSpreadRow) return;
+								// Con "¿Es empresa?" marcado el DPI del representante es
+								// obligatorio: se marca el input con el mismo mecanismo que
+								// usan los rechazos de cartera, en vez de un toast suelto.
+								const errorRep = errorRepLegal(formEsEmpresa, formDpiRepLegal);
+								if (errorRep) {
+									setCampoDuplicado({
+										campo: "dpi_rep_legal",
+										mensaje: errorRep,
+									});
+									document.getElementById("inv-dpi-rep-legal")?.focus();
+									return;
+								}
 								crearMutation.mutate({
 									nombre: formNombre.trim(),
 									dpi: formDpi.trim() || undefined,
@@ -791,7 +839,13 @@ function LiquidacionesInversionistas() {
 									banco: formBanco ? Number(formBanco) : null,
 									tipoCuenta: formTipoCuenta || undefined,
 									numeroCuenta: formNumeroCuenta.trim() || undefined,
-									dpiRepLegal: formDpiRepLegal.trim() || undefined,
+									// Sin "¿Es empresa?" la llave va ausente: al crear no hay
+									// nada que borrar y cartera deja el campo en blanco.
+									dpiRepLegal: valorRepLegalAEnviar(
+										formEsEmpresa,
+										formDpiRepLegal,
+										{ borrarSiNoEsEmpresa: false },
+									),
 									moneda: formMoneda as "quetzales" | "dolares",
 									emiteFactura: formEmiteFactura,
 									tipoReinversion: formTipoReinversion,

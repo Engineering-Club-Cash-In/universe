@@ -34,6 +34,15 @@ export interface InvestorPayload {
   tipo_reinversion?: string | null;
   monto_reinversion?: number | null;
   email?: string | null;
+  /**
+   * Pide que el alta le abra cuenta en el Portal del Inversionista.
+   *
+   * Cartera NO provisiona sin esta llave: es el permiso explícito que separa un
+   * alta de back office del registro público de auth-google, que llega a
+   * cartera con el mismo token de servicio ADMIN y sería indistinguible por
+   * identidad. Solo tiene efecto en las filas que se INSERTAN.
+   */
+  provisionar_portal?: boolean;
 }
 export interface InvestorResponse {
   inversionista_id: number;
@@ -53,10 +62,60 @@ export interface InvestorResponse {
 }
 
 // Crear inversionista(s)
+/**
+ * Respuesta real de `POST /investor`: un objeto, no el array de filas.
+ *
+ * Estaba tipado `InvestorResponse[]` y no lo es — por eso el bloque
+ * `provisioning`, que dice qué pasó con el acceso al portal de cada
+ * inversionista recién creado, no se podía leer sin castear. Va aparte de
+ * `data` a propósito: el alta puede haber salido perfecta y el acceso no.
+ */
+export interface AccesoPortalRespuesta {
+  inversionistaId: number;
+  estado: string;
+  usuarioEmail: string | null;
+  correo: {
+    enviado: boolean;
+    plantilla: string | null;
+    redirigido: boolean;
+    destinatarioReal: string | null;
+  };
+  advertencias: string[];
+  motivo: string | null;
+}
+
+export interface InsertInvestorRespuesta {
+  message: string;
+  data: InvestorResponse[];
+  provisioning?: AccesoPortalRespuesta[];
+}
+
 export async function insertInvestorService(
   data: InvestorPayload | InvestorPayload[]
-): Promise<InvestorResponse[]> {
+): Promise<InsertInvestorRespuesta> {
   const res = await api.post(`${API_URL}/investor`, data);
+  return res.data;
+}
+
+/**
+ * Abre el acceso al Portal del Inversionista. Es un ACTO HUMANO.
+ *
+ * La reconciliación diaria de cartera detecta a quién le falta acceso y lo
+ * manda en el resumen de las 07:00, pero ya NO le crea la cuenta: crearla
+ * significa mandar una contraseña por correo, y el correo de una fila de
+ * `inversionistas` puede no ser de su dueño (esa tabla se escribe desde
+ * caminos que no prueban identidad). Quien apriete este botón es quien
+ * responde por que ese correo sea el correcto: verificalo antes.
+ *
+ * Esta ruta NO está en el proxy `/api/cartera` de auth-google, así que no es
+ * alcanzable desde el portal: solo desde aquí, con un ADMIN de cartera.
+ */
+export async function otorgarAccesoPortalService(
+  inversionistaIds: number[]
+): Promise<{ message: string; resultados: AccesoPortalRespuesta[] }> {
+  const res = await api.post(`${API_URL}/investor/portal-access`, {
+    inversionista_ids: inversionistaIds,
+  });
   return res.data;
 }
 

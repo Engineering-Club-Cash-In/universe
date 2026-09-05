@@ -34,6 +34,16 @@ import {
   statusCreditoInversionistaEspejoEnum,
 } from "../database/db/schema";
 import { getSignedDocumentUrl } from "../utils/functions/uploadsFiles";
+import {
+  provisionarInversionista,
+  resultadoNoSolicitado,
+  resultadoOrigenNoAutorizado,
+} from "../services/portalProvisioning";
+import {
+  permisoParaProvisionar,
+  type PermisoProvisionamiento,
+} from "../utils/functions/provisionamientoPortal";
+import { buscarRepresentanteEnCartera } from "../utils/functions/buscarRepresentante";
 import { calcularAjusteCompras } from "../utils/comprasAjuste";
 import { eq, and, or, sql, inArray, ilike, like, desc, asc, count, SQL, isNull, isNotNull, ne } from "drizzle-orm";
 import { promises as fsPromises } from "node:fs";
@@ -398,7 +408,7 @@ export const repLegalExiste = async (valor: string): Promise<boolean> => {
   return filas.length > 0;
 };
 
-export const insertInvestor = async ({ body, set }: any) => {
+export const insertInvestor = async ({ body, set, user }: any) => {
   try {
     const inversionistasToUpsert = Array.isArray(body) ? body : [body];
 
@@ -555,6 +565,13 @@ export const insertInvestor = async ({ body, set }: any) => {
     }
 
     const resultados: any[] = [];
+    // Solo las filas INSERTADAS en esta pasada: son las únicas que pueden
+    // necesitar una cuenta nueva o disparar el aviso a un representante.
+    // Cada una viaja con el permiso ya resuelto: la llave del payload dice que
+    // el alta lo PIDIÓ, y el rol del token dice si quien la mandó podía pedirlo
+    // (ver `permisoParaProvisionar`). Son dos negativas distintas y se guardan
+    // como una sola respuesta para que el motivo llegue intacto a `provisioning`.
+    const recienCreados: { fila: any; permiso: PermisoProvisionamiento }[] = [];
 
     // 🔥 PROCESAR UNO POR UNO para manejar INSERT vs UPDATE
     for (const inv of inversionistasToUpsert) {
@@ -725,12 +742,59 @@ export const insertInvestor = async ({ body, set }: any) => {
           .returning();
 
         resultados.push(inserted);
+        // Solo los INSERT provisionan. Un update no da acceso nuevo a nadie, y
+        // hacerlo aquí mandaría el aviso de empresa agregada en cada edición.
+        recienCreados.push({
+          fila: inserted,
+          permiso: permisoParaProvisionar(inv, user),
+        });
       }
     }
+
+    // El acceso al portal se resuelve DESPUÉS de escribir, y no puede tumbar el
+    // alta: las filas ya están insertadas (fuera de transacción, sin rollback
+    // posible) y un error acá se vería como "falló, reintentá" — pero el
+    // reintento muere en el guard de duplicados sin volver a pasar por aquí.
+    // El resultado viaja en la respuesta; el job diario recoge lo que falló.
+    const provisioning = await Promise.all(
+      recienCreados.map(({ fila, permiso }) => {
+        // Guard 1 — la LLAVE: sin `provisionar_portal` en el payload NO se crea
+        // cuenta, no sale correo con contraseña y no se ocupa un DPI en `users`.
+        // Cierra el camino anónimo (POST /api/unified/register-external, sin
+        // requireAuth): esa ruta arma un objeto FIJO {nombre, dpi, email} y no
+        // puede colar la llave. Contra auth-google el rol no sirve de nada —todo
+        // entra con el mismo token de servicio ADMIN—, así que este guard es el
+        // único que cubre ese camino.
+        if (permiso === "no_solicitado") {
+          return Promise.resolve(resultadoNoSolicitado(fila.inversionista_id));
+        }
+
+        // Guard 2 — el ROL: mandar la llave con un token que no es de ADMIN ya
+        // no dispara nada. `authMiddleware` solo verifica la firma, así que sin
+        // esto cualquier token vivo de cartera (ASESOR, CONTA, uno robado) hacía
+        // salir una cuenta del portal con la contraseña al correo del payload,
+        // aunque la pantalla que lo ofrece sea solo-ADMIN (App.tsx:121).
+        // OJO: esto NO tapa el ADMIN auto-emitido de `POST /auth/admin`, que es
+        // un agujero preexistente y ajeno a este archivo.
+        if (permiso === "origen_no_autorizado") {
+          return Promise.resolve(
+            resultadoOrigenNoAutorizado(fila.inversionista_id),
+          );
+        }
+
+        return provisionarInversionista(fila, {
+          buscarRepresentante: buscarRepresentanteEnCartera,
+        });
+      }),
+    );
 
     set.status = 201;
     return {
       message: `Procesados exitosamente ${resultados.length} inversionista(s)`,
+      // ANTES de `data` a propósito: auditLog trunca la respuesta a 4000
+      // caracteres, y un alta con muchos inversionistas se comería justo la
+      // cola. Este bloque es el único registro durable de si el correo salió.
+      provisioning,
       data: resultados,
     };
   } catch (error: any) {

@@ -2,25 +2,57 @@ import { useState } from "react";
 import { InputIcon, Button, IconPerson } from "@/components";
 import { useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/lib";
-import { authClient } from "@/lib/auth";
-import { registerExternalUser } from "../services";
+import { registerExternalUserAuth } from "../services";
+import {
+  mensajeDeDpiPendiente,
+  mensajeDeWhatsAppPorDpiPendiente,
+} from "../services/registroSinDpi";
+import { recordarSiQuedoSinDpi } from "../services/avisoDpiPendiente";
+import {
+  rolFueEstablecido,
+  tipoInicialDelFormulario,
+} from "../identidadDelPortal";
+import { openWhatsApp } from "@/hooks/useModalOptionsCall";
 
 interface CompleteProfileFormProps {
   onSuccess: () => void;
-  onlyApi?: boolean; // Si es true, no actualiza el rol en better-auth (usado para completar perfil desde admin)
+  /**
+   * Tipo que la persona eligió en un registro que no llegó a terminar (el
+   * camino de Google lo lleva en la URL del callback). Sin esto el formulario
+   * arrancaba en CLIENT, que es el valor por defecto, no su elección.
+   */
+  tipoSolicitado?: "CLIENT" | "INVESTOR" | null;
+  /** Motivo por el que ese registro falló, para no llegar aquí en silencio. */
+  mensajeInicial?: string;
+  /**
+   * Aviso de que el registro del camino de Google salió BIEN pero quedó sin
+   * DPI. Va aparte de `mensajeInicial` porque no es un error suyo: se muestra
+   * en el bloque de espera, no en el rojo, y bloquea el reintento.
+   */
+  pendienteInicial?: string;
 }
 
 export const CompleteProfileForm = ({
   onSuccess,
-  onlyApi = false,
+  tipoSolicitado = null,
+  mensajeInicial = "",
+  pendienteInicial = "",
 }: CompleteProfileFormProps) => {
   const { user } = useAuth();
   const [dpi, setDpi] = useState("");
-  const hasRole = user?.role === "CLIENT" || user?.role === "INVESTOR";
-  const [userType, setUserType] = useState<"CLIENT" | "INVESTOR">(
-    user?.role ?? "CLIENT",
+  // `CLIENT` a secas NO cuenta como rol elegido: es el valor por defecto de
+  // toda cuenta nueva, así que una cuenta cuyo registro falló llegaba aquí como
+  // cliente, con el selector escondido, y se reinscribía como cliente para
+  // siempre. Ver `rolFueEstablecido`.
+  const hasRole = rolFueEstablecido(user);
+  const [userType, setUserType] = useState<"CLIENT" | "INVESTOR">(() =>
+    tipoInicialDelFormulario({ tipoSolicitado, user }),
   );
-  const [error, setError] = useState("");
+  const [error, setError] = useState(mensajeInicial);
+  // Aparte de `error` a propósito: no es algo que la persona pueda corregir
+  // aquí, así que no se limpia al editar el DPI ni deja reintentar. Ver
+  // `registroQuedoSinDpi`.
+  const [pendiente, setPendiente] = useState(pendienteInicial);
 
   const completeMutation = useMutation({
     mutationFn: async () => {
@@ -28,23 +60,45 @@ export const CompleteProfileForm = ({
         throw new Error("El DPI debe tener 13 dígitos");
       }
 
-      // 1. Actualizar usuario en better-auth
-      if (!onlyApi) {
-        await authClient.updateUser({
-          dpi: dpi,
-          role: userType,
-        } as any);
-      }
-
-      await registerExternalUser({
+      // El rol y el DPI los escribe el servidor al validar el registro, no el
+      // cliente. Antes había aquí una rama `onlyApi` que llamaba a la variante
+      // SIN sesión; nunca se activaba (nadie pasaba la prop) y se retiró junto
+      // con esa ruta, que filtraba fichas del CRM a cualquiera.
+      //
+      // La respuesta se DEVUELVE: un 200 no siempre significa que la cuenta
+      // quedó con DPI, y descartarla era lo que dejaba a la persona dando
+      // vueltas en este mismo formulario.
+      return await registerExternalUserAuth({
         userType: userType,
         fullName: user?.name || user?.email.split("@")[0] || "",
         email: user?.email ?? "",
         dpi: dpi,
       });
     },
-    onSuccess: () => {
+    onSuccess: (resultado) => {
       setError("");
+
+      // El servidor se negó a escribir el DPI porque la ficha la abrió un
+      // asesor y solo él puede completarla. Recargar aquí volvería a abrir este
+      // mismo formulario —la puerta de `Profile.tsx` es `!user?.dpi`— sin un
+      // solo texto que explique por qué: el bucle mudo. Se corta y se dice.
+      // El aviso queda GUARDADO, no solo en el estado de este componente: si
+      // la persona recarga antes de que el asesor complete la ficha, el perfil
+      // lo recupera y le vuelve a explicar por qué le pide el DPI, en vez de
+      // sacarle este mismo formulario en blanco. Se apaga solo en cuanto la
+      // cuenta tenga DPI (ver `avisoDpiPendiente`).
+      if (
+        recordarSiQuedoSinDpi({
+          respuesta: resultado,
+          correo: user?.email ?? "",
+          tipoSolicitado: userType,
+        })
+      ) {
+        setPendiente(mensajeDeDpiPendiente(user?.email ?? ""));
+        return;
+      }
+
+      setPendiente("");
       onSuccess();
     },
     onError: (err: any) => {
@@ -54,6 +108,15 @@ export const CompleteProfileForm = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Reintentar es inútil por construcción: el DPI de esa ficha solo lo puede
+    // poner un humano del equipo, así que otro envío devolvería exactamente lo
+    // mismo. Se corta aquí porque el `Button` compartido no tiene `disabled` y
+    // no vale la pena ampliarle la API por este caso.
+    if (pendiente) {
+      return;
+    }
+
     setError("");
     await completeMutation.mutateAsync();
   };
@@ -158,6 +221,7 @@ export const CompleteProfileForm = ({
             type="text"
             name="dpi"
             maxLength={13}
+            disabled={Boolean(pendiente)}
           />
         </div>
 
@@ -167,13 +231,38 @@ export const CompleteProfileForm = ({
           </div>
         )}
 
+        {/* Ámbar y no rojo: no es un error de la persona ni hay nada que
+            corregir en este formulario. La salida es hablar con nosotros. */}
+        {pendiente && (
+          <div className="bg-amber-500/15 border border-amber-500/50 rounded-lg p-4 space-y-4">
+            <div>
+              <p className="text-amber-200 font-semibold mb-1">
+                Tu registro quedó guardado, pero falta un paso de nuestro lado
+              </p>
+              <p className="text-amber-100/90 text-sm">{pendiente}</p>
+            </div>
+            <Button
+              type="button"
+              size="lg"
+              variant="whatsapp"
+              onClick={() =>
+                openWhatsApp(mensajeDeWhatsAppPorDpiPendiente(user?.email ?? ""))
+              }
+            >
+              Escribirnos por WhatsApp
+            </Button>
+          </div>
+        )}
+
         <div className="flex justify-end">
           <Button
             type="submit"
             isLoading={completeMutation.isPending}
             size="lg"
             className={
-              !dpi || dpi.length !== 13 ? "opacity-50 cursor-not-allowed" : ""
+              !dpi || dpi.length !== 13 || pendiente
+                ? "opacity-50 cursor-not-allowed"
+                : ""
             }
           >
             {completeMutation.isPending

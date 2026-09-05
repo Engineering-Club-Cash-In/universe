@@ -4,6 +4,7 @@ import { db } from "../db/connection";
 import * as schema from "../db/schema";
 import { env } from "../config/env";
 import { sendPasswordResetEmail } from "../services/email.service";
+import { SESSION_COOKIE_PREFIX } from "./portalCookies";
 
 export const auth = betterAuth({
   database: drizzleAdapter(db, {
@@ -60,16 +61,21 @@ export const auth = betterAuth({
   },
   user: {
     additionalFields: {
+      // `input: false` en ambos: ni el rol ni el DPI se aceptan desde el
+      // cliente. El rol define privilegios, así que solo lo escribe el
+      // servidor tras validar el registro (ver POST /api/unified/
+      // register-external-auth). El DPI se fija con POST /api/profile/me/dpi,
+      // que lo aplica siempre sobre la cuenta de la sesión.
       role: {
         type: "string",
         required: false,
         defaultValue: "CLIENT",
-        input: true, // Permitir que se envíe desde el cliente
+        input: false,
       },
       dpi: {
         type: "string",
         required: false,
-        input: true, // Permitir que se envíe desde el cliente
+        input: false,
       },
     },
   },
@@ -91,7 +97,9 @@ export const auth = betterAuth({
     },
   },
   advanced: {
-    cookiePrefix: "better-auth",
+    // Compartido con la defensa anti-CSRF, que necesita reconocer la cookie
+    // de sesión para saber cuándo exigir un Origin de confianza.
+    cookiePrefix: SESSION_COOKIE_PREFIX,
     crossSubDomainCookies: {
       enabled: false,
     },
@@ -102,7 +110,9 @@ export const auth = betterAuth({
   },
   secret: env.BETTER_AUTH_SECRET,
   baseURL: env.BETTER_AUTH_URL,
-  trustedOrigins: [env.CORS_ORIGIN, env.BETTER_AUTH_URL],
+  // Better Auth compara por igualdad exacta (sin partir por comas), así que
+  // recibe la lista ya interpretada y no la variable cruda.
+  trustedOrigins: env.TRUSTED_ORIGINS,
 });
 
 export type Auth = typeof auth;

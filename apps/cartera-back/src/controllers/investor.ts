@@ -398,6 +398,205 @@ export const repLegalExiste = async (valor: string): Promise<boolean> => {
   return filas.length > 0;
 };
 
+/**
+ * Condición para encontrar al inversionista dueño de un correo.
+ *
+ * Tiene que ignorar mayúsculas: los INSERT guardan el correo en minúsculas,
+ * pero quien pregunta manda el de la sesión de auth-google tal cual lo escribió
+ * la persona, así que con una igualdad sensible a mayúsculas un correo con una
+ * sola letra en mayúscula no encontraba la fila y el titular se quedaba sin
+ * poder ver ni editar sus propios datos de cobro.
+ *
+ * Y tiene que ser una IGUALDAD, no un `ilike`. `ilike` lee `_` y `%` del correo
+ * que llega como comodines aunque la consulta vaya parametrizada —el parámetro
+ * evita la inyección, no que el patrón se interprete—, así que la cuenta
+ * `john_smith@ejemplo.com` casaba con el inversionista guardado como
+ * `john.smith@ejemplo.com`. Cuando esa era la única fila que coincidía, el
+ * portal la daba por la del titular y `POST /api/cartera/investor` le mandaba
+ * ahí los datos bancarios. `lower(...) = ...` compara el texto completo y no
+ * interpreta nada.
+ *
+ * Es el mismo criterio con el que este controller resuelve el correo al
+ * insertar y al actualizar, y por eso esos dos sitios también pasan por aquí:
+ * la búsqueda del dueño de un correo es una sola regla.
+ */
+export const condicionInversionistaPorEmail = (email: string): SQL =>
+  sql`lower(${inversionistas.email}) = ${email.trim().toLowerCase()}`;
+
+/**
+ * Fila del portal reclamable por un reintento, o `null` si no se puede afirmar.
+ *
+ * El registro del portal toca dos sistemas y no es atómico: cartera puede haber
+ * insertado la fila y auth-google caerse antes de escribir el DPI y el rol de
+ * la cuenta. Con la creación estricta a secas, TODO reintento choca contra la
+ * fila que él mismo creó y la cuenta queda incompleta para siempre.
+ *
+ * La decisión se toma aquí, y no en auth-google, porque aquí están las
+ * restricciones de unicidad: resolver el choque y devolver la fila es una sola
+ * operación. Reconstruir esa exclusión desde fuera obligaba a reservar el DPI,
+ * liberarlo y comparar-y-fijar, y esa maquinaria nunca llegó a ser correcta.
+ *
+ * Las dos preguntas son distintas y hacen falta las dos:
+ *
+ * 1. ¿De quién es la fila? Lo responde SOLO `creado_por_usuario_portal`, una
+ *    marca que `insertInvestor` escribe únicamente en el INSERT —esta función
+ *    no escribe nada: recibe las filas en conflicto y devuelve una o `null`—.
+ *    Ningún dato de la fila sirve para esto: coincidir en correo, DPI y nombre
+ *    prueba que una fila TIENE los valores pedidos, no que este registro la
+ *    haya creado.
+ * 2. ¿Se está pidiendo lo mismo que ya se creó? Lo responde el DPI, como
+ *    comprobación SECUNDARIA sobre una fila cuya propiedad ya quedó probada.
+ *
+ * Se falla cerrado en todo lo demás. En particular, los choques tienen que
+ * apuntar todos a la MISMA fila: si el correo casa con la fila propia y el DPI
+ * con la de otro inversionista, devolver la propia daría por bueno un alta que
+ * deja auth-google y cartera con identidades distintas.
+ */
+export const filaReclamablePorElPortal = <
+  T extends {
+    inversionista_id: number;
+    dpi: number | null;
+    creado_por_usuario_portal: string | null;
+  },
+>(
+  filasEnConflicto: T[],
+  creadoPorUsuarioPortal: string | null,
+  dpiSolicitado: unknown,
+): T | null => {
+  // Sin marca no hay nada que reclamar: el alta no viene del registro del
+  // portal (carteraFront, el CRM y las importaciones la dejan en NULL) y su
+  // choque se contesta 409 y ya.
+  if (!creadoPorUsuarioPortal) return null;
+
+  if (filasEnConflicto.length === 0) return null;
+
+  const ids = new Set(filasEnConflicto.map((f) => f.inversionista_id));
+  if (ids.size !== 1) return null;
+
+  const fila = filasEnConflicto[0]!;
+
+  if (fila.creado_por_usuario_portal !== creadoPorUsuarioPortal) return null;
+
+  // El DPI del reintento es el que auth-google escribe en la cuenta del portal.
+  // Aceptar una fila con otro DPI dejaría cartera con el viejo y el portal con
+  // el nuevo, y ese nuevo puede pertenecer a un inversionista antiguo. Cambiar
+  // el DPI de una fila de cartera es una operación de back office, no un efecto
+  // colateral de reintentar un registro.
+  if (typeof dpiSolicitado !== "number" || fila.dpi !== dpiSolicitado) {
+    return null;
+  }
+
+  return fila;
+};
+
+// ============================================================
+// 🪪 ENTIDADES DEL PORTAL
+// ============================================================
+// Una persona puede operar varios inversionistas: el suyo y el de cada sociedad
+// que representa. El portal solo conoce el correo de la sesión, así que acá se
+// traduce ese correo al conjunto de filas que esa persona puede ver.
+//
+//   set₀ = filas cuyo email es el de la sesión
+//   dpis = { fila.dpi } ∪ { fila.dpi_rep_legal }  para cada fila de set₀
+//   set₁ = set₀ ∪ filas con dpi ∈ dpis OR dpi_rep_legal ∈ dpis
+//
+// El ancla es SIEMPRE el correo guardado en cartera, que solo escribe el staff.
+// Nunca el DPI que el usuario declaró al registrarse en el portal: ese campo no
+// lo verifica nadie, y tomarlo como llave dejaría entrar a las sociedades de
+// cualquiera cuyo DPI se adivine.
+export type EntidadPortal = {
+  inversionista_id: number;
+  nombre: string;
+  tipo: "persona" | "empresa";
+  /** true si esta fila es la que matcheó por correo (la puerta de entrada). */
+  es_ancla: boolean;
+  dpi: string | null;
+  dpi_rep_legal: string | null;
+  email: string | null;
+  moneda: string;
+  status: string;
+};
+
+// `dpi` es bigint y `dpi_rep_legal` varchar guardado tal cual ("04036613").
+// Compararlos como número es lo único que los hace casar — mismo criterio que
+// repLegalExiste.
+const dpiComparable = (valor: unknown): number | null => {
+  if (valor === undefined || valor === null) return null;
+  const limpio = String(valor).replace(/\D/g, "");
+  if (limpio === "") return null;
+  const numero = Number(limpio);
+  return Number.isSafeInteger(numero) ? numero : null;
+};
+
+// La misma normalización, pero del lado de Postgres, para poder comparar la
+// columna varchar contra la lista de DPIs numéricos.
+//
+// El CASE no es adorno: la columna es varchar(20) y el CRM deja escribir 20
+// dígitos, pero bigint aguanta 19. Sin el guard, un dedazo en UNA fila haría
+// reventar la consulta para todos ("bigint out of range").
+const REP_LEGAL_NUMERICO = sql<number>`CASE
+  WHEN regexp_replace(coalesce(${inversionistas.dpi_rep_legal}, ''), '\\D', '', 'g') ~ '^[0-9]{1,18}$'
+  THEN regexp_replace(coalesce(${inversionistas.dpi_rep_legal}, ''), '\\D', '', 'g')::bigint
+END`;
+
+export async function getEntidadesPorCorreo(
+  correo: string
+): Promise<EntidadPortal[]> {
+  const email = correo?.trim().toLowerCase() ?? "";
+  if (!email) return [];
+
+  const ancla = await db
+    .select()
+    .from(inversionistas)
+    .where(condicionInversionistaPorEmail(email));
+
+  if (ancla.length === 0) return [];
+
+  const dpis = new Set<number>();
+  for (const fila of ancla) {
+    const propio = dpiComparable(fila.dpi);
+    if (propio !== null) dpis.add(propio);
+    const rep = dpiComparable(fila.dpi_rep_legal);
+    if (rep !== null) dpis.add(rep);
+  }
+
+  const porId = new Map<number, (typeof ancla)[number]>();
+  for (const fila of ancla) porId.set(fila.inversionista_id, fila);
+  const idsAncla = new Set(porId.keys());
+
+  if (dpis.size > 0) {
+    const lista = [...dpis];
+    const expandidas = await db
+      .select()
+      .from(inversionistas)
+      .where(
+        or(inArray(inversionistas.dpi, lista), inArray(REP_LEGAL_NUMERICO, lista))
+      );
+    for (const fila of expandidas) porId.set(fila.inversionista_id, fila);
+  }
+
+  return [...porId.values()]
+    .map((fila) => ({
+      inversionista_id: fila.inversionista_id,
+      nombre: fila.nombre,
+      // Sin columna que distinga jurídicas: en las sociedades el `dpi` propio
+      // va vacío y el del humano vive en dpi_rep_legal.
+      tipo: (fila.dpi !== null ? "persona" : "empresa") as "persona" | "empresa",
+      es_ancla: idsAncla.has(fila.inversionista_id),
+      dpi: fila.dpi === null ? null : String(fila.dpi),
+      dpi_rep_legal: fila.dpi_rep_legal ?? null,
+      email: fila.email ?? null,
+      moneda: fila.moneda,
+      status: fila.status,
+    }))
+    .sort((a, b) => {
+      // La persona primero: es la entidad con la que el inversionista se
+      // identifica, y suele ser la que quiere ver al entrar.
+      if (a.tipo !== b.tipo) return a.tipo === "persona" ? -1 : 1;
+      return a.nombre.localeCompare(b.nombre, "es");
+    });
+}
+
 export const insertInvestor = async ({ body, set }: any) => {
   try {
     const inversionistasToUpsert = Array.isArray(body) ? body : [body];
@@ -429,8 +628,11 @@ export const insertInvestor = async ({ body, set }: any) => {
     for (let index = 0; index < inversionistasToUpsert.length; index++) {
       const inv = inversionistasToUpsert[index];
 
-      // 🔥 Debe venir DPI o nombre (al menos uno)
-      if (!inv.dpi && !inv.nombre?.trim()) {
+      // 🔥 Debe venir DPI o nombre (al menos uno) para poder ubicar o crear la
+      // fila. No aplica cuando el body trae `inversionista_id`: ahí la fila ya
+      // está señalada y el resto de campos son opcionales (es lo que manda el
+      // portal cuando el inversionista cambia solo su cuenta bancaria).
+      if (!inv.inversionista_id && !inv.dpi && !inv.nombre?.trim()) {
         errores.push(
           `Inversionista #${index + 1}: debe proporcionar DPI o nombre`
         );
@@ -559,11 +761,34 @@ export const insertInvestor = async ({ body, set }: any) => {
     // 🔥 PROCESAR UNO POR UNO para manejar INSERT vs UPDATE
     for (const inv of inversionistasToUpsert) {
       const isStrictCreate = inv.operation === "CREATE" || inv.mode === "create";
+
+      // Marca de procedencia del registro del portal (migración 0034). Se
+      // resuelve arriba porque la usan dos cosas: reconocer el reintento de un
+      // alta que esta misma cuenta ya completó, y sellar la fila nueva en el
+      // INSERT de más abajo.
+      //
+      // Nunca se escribe en el UPDATE, y eso es deliberado: si una edición
+      // pudiera sellar una fila existente, cualquiera capaz de editarla podría
+      // ponerla a su nombre y reclamarla después. La marca solo prueba algo
+      // mientras sea exclusiva de la creación.
+      const creadoPorUsuarioPortal =
+        typeof inv.creado_por_usuario_portal === "string" &&
+        inv.creado_por_usuario_portal.trim()
+          ? inv.creado_por_usuario_portal.trim()
+          : null;
+
       let existente = null;
+      // Con qué criterio se resolvió la fila destino. El correo es la
+      // identidad del inversionista en el portal y el destino de sus avisos,
+      // así que solo se reescribe cuando la petición apuntó a esa fila de
+      // forma explícita (por id) o cuando fue el propio correo el que la
+      // encontró. Ver el UPDATE más abajo.
+      let resueltoPor: "id" | "dpi" | "email" | "nombre" | null = null;
 
       // Buscar por inversionista_id primero (para ediciones directas)
       if (inv.inversionista_id) {
         existente = await buscarExistentePorId(Number(inv.inversionista_id));
+        if (existente) resueltoPor = "id";
 
         if (!existente) {
           set.status = 404;
@@ -575,20 +800,31 @@ export const insertInvestor = async ({ body, set }: any) => {
       }
 
       if (!existente && isStrictCreate) {
+        // Se recogen TODOS los choques antes de decidir, en vez de contestar al
+        // primero: la idempotencia del registro del portal necesita saber si
+        // apuntan todos a la misma fila. El ORDEN de esta lista es el del
+        // mensaje que se devuelve cuando no hay nada que reclamar, y es el
+        // mismo de siempre: email, DPI, nombre.
+        const conflictos: {
+          error: "duplicate_email" | "duplicate_dpi" | "duplicate_nombre";
+          message: string;
+          fila: typeof inversionistas.$inferSelect;
+        }[] = [];
+
         if (inv.email?.trim()) {
           const email = inv.email.trim().toLowerCase();
           const result = await db
             .select()
             .from(inversionistas)
-            .where(ilike(inversionistas.email, email))
+            .where(condicionInversionistaPorEmail(email))
             .limit(1);
 
           if (result[0]) {
-            set.status = 409;
-            return {
-              message: "Ya existe un inversionista con ese email",
+            conflictos.push({
               error: "duplicate_email",
-            };
+              message: "Ya existe un inversionista con ese email",
+              fila: result[0],
+            });
           }
         }
 
@@ -600,11 +836,11 @@ export const insertInvestor = async ({ body, set }: any) => {
             .limit(1);
 
           if (result[0]) {
-            set.status = 409;
-            return {
-              message: "Ya existe un inversionista con ese DPI",
+            conflictos.push({
               error: "duplicate_dpi",
-            };
+              message: "Ya existe un inversionista con ese DPI",
+              fila: result[0],
+            });
           }
         }
 
@@ -616,12 +852,45 @@ export const insertInvestor = async ({ body, set }: any) => {
             .limit(1);
 
           if (result[0]) {
-            set.status = 409;
-            return {
-              message: "Ya existe un inversionista con ese nombre",
+            conflictos.push({
               error: "duplicate_nombre",
-            };
+              message: "Ya existe un inversionista con ese nombre",
+              fila: result[0],
+            });
           }
+        }
+
+        if (conflictos.length > 0) {
+          const propia = filaReclamablePorElPortal(
+            conflictos.map((c) => c.fila),
+            creadoPorUsuarioPortal,
+            inv.dpi,
+          );
+
+          // Reintento del MISMO registro del portal: se devuelve la fila que ese
+          // registro creó, SIN tocarla. Es lo que vuelve idempotente la única
+          // escritura externa del portal, y por tanto lo que hace que un fallo
+          // posterior en auth-google deje de ser un callejón sin salida.
+          //
+          // Solo el alta que trae `creado_por_usuario_portal` —la del flujo
+          // autenticado— llega hasta aquí. El registro público sigue creando la
+          // fila con la marca en NULL, y para él un choque es un 409 como
+          // siempre: sin marca no hay nada que reconocer.
+          //
+          // Que no se escriba nada es la propiedad de seguridad: reconocer no
+          // puede pisarle los datos a nadie. Y devolver la fila solo cuando la
+          // marca es la de la cuenta que pide el alta significa que no se afirma
+          // nada sobre filas ajenas: no hay oráculo nuevo.
+          if (propia) {
+            resultados.push(propia);
+            continue;
+          }
+
+          set.status = 409;
+          return {
+            message: conflictos[0].message,
+            error: conflictos[0].error,
+          };
         }
       }
 
@@ -634,6 +903,7 @@ export const insertInvestor = async ({ body, set }: any) => {
             .where(eq(inversionistas.dpi, inv.dpi))
             .limit(1);
           existente = result[0] || null;
+          if (existente) resueltoPor = "dpi";
         }
 
         if (!existente && inv.email?.trim()) {
@@ -642,9 +912,10 @@ export const insertInvestor = async ({ body, set }: any) => {
           const result = await db
             .select()
             .from(inversionistas)
-            .where(ilike(inversionistas.email, email))
+            .where(condicionInversionistaPorEmail(email))
             .limit(1);
           existente = result[0] || null;
+          if (existente) resueltoPor = "email";
         }
 
         if (!existente && inv.nombre?.trim()) {
@@ -655,6 +926,7 @@ export const insertInvestor = async ({ body, set }: any) => {
             .where(eq(inversionistas.nombre, inv.nombre.trim()))
             .limit(1);
           existente = result[0] || null;
+          if (existente) resueltoPor = "nombre";
         }
       }
 
@@ -663,7 +935,16 @@ export const insertInvestor = async ({ body, set }: any) => {
         const updateData: any = {};
 
         if (inv.nombre?.trim()) updateData.nombre = inv.nombre.trim();
-        if (inv.email?.trim())
+
+        // El correo solo se escribe si la fila se resolvió por id (edición
+        // dirigida) o por ese mismo correo. Cuando la fila apareció por DPI o
+        // por nombre, un correo equivocado en el payload dejaría a dos
+        // inversionistas compartiendo correo: las búsquedas por correo pasan a
+        // devolver una fila no determinista y los avisos del portal terminan
+        // en el buzón de otra persona.
+        const puedeEscribirEmail =
+          resueltoPor === "id" || resueltoPor === "email";
+        if (puedeEscribirEmail && inv.email?.trim())
           updateData.email = inv.email.trim().toLowerCase();
         if (inv.emite_factura !== undefined)
           updateData.emite_factura = inv.emite_factura;
@@ -704,8 +985,12 @@ export const insertInvestor = async ({ body, set }: any) => {
           continue;
         }
 
+        // La marca viaja en el MISMO INSERT que crea la fila. Sellarla en una
+        // escritura posterior que se cayera a medias dejaría la fila sin dueño
+        // reconocible y devolvería el problema que la columna resuelve.
         const insertData = {
           nombre,
+          creado_por_usuario_portal: creadoPorUsuarioPortal,
           dpi: inv.dpi || null,
           email: inv.email?.trim().toLowerCase() || null,
           emite_factura: inv.emite_factura ?? false,
@@ -810,14 +1095,18 @@ export const getInvestors = async ({ query, set }: any) => {
         .select({ inversionista: inversionistas, documento: documentos_inversionista })
         .from(inversionistas)
         .leftJoin(documentos_inversionista, eq(inversionistas.inversionista_id, documentos_inversionista.inversionista_id))
-        .where(eq(inversionistas.email, query.email));
+        .where(condicionInversionistaPorEmail(query.email));
 
       const result = await agruparInversionistasConDocumentos(rows);
       set.status = result.length ? 200 : 404;
       if (!result.length) {
         return { message: "Inversionista no encontrado con ese email" };
       }
-      const investor = result[0];
+      // El correo NO es único en la tabla: hay inversionistas distintos que lo
+      // comparten. Devolver `result[0]` es elegir uno según el plan de
+      // ejecución, así que se informa cuántos coincidieron para que quien use
+      // esto para escribir pueda negarse en vez de acertar por casualidad.
+      const investor = { ...result[0], coincidencias_email: result.length };
       if (investor.dpi_rep_legal) {
         return { ...investor, dpi: investor.dpi_rep_legal };
       }
@@ -9049,10 +9338,15 @@ export async function getLiquidaciones({
     conditions.push(eq(liquidaciones.liquidacion_id, liquidacion_id));
   }
 
-   if (!isNullorEmpty(email)) {
-    conditions.push(eq(inversionistas.email, email));
-  } else if (!isNullorEmpty(dpi)) {
-    conditions.push(eq(inversionistas.dpi, parseInt(dpi)));
+  // El id es EXCLUYENTE, no se suma: si se acumulara con el correo, un
+  // inversionista que comparte correo con otra de sus entidades pediría una y
+  // recibiría vacío (las dos condiciones van con AND).
+  if (!inversionista_id) {
+    if (!isNullorEmpty(email)) {
+      conditions.push(eq(inversionistas.email, email));
+    } else if (!isNullorEmpty(dpi)) {
+      conditions.push(eq(inversionistas.dpi, parseInt(dpi)));
+    }
   }
 
 
@@ -9282,13 +9576,21 @@ export async function getLiquidaciones({
  * Obtiene el rendimiento de un inversionista por DPI
  * @param dpi - DPI del inversionista
  */
-export async function getInvestorPerformance(dpi?: string, email?: string) {
-  if (!dpi && !email) {
-    throw new Error("Se requiere al menos 'dpi' o 'email'");
+export async function getInvestorPerformance(
+  dpi?: string,
+  email?: string,
+  inversionistaId?: number
+) {
+  if (!dpi && !email && !inversionistaId) {
+    throw new Error("Se requiere al menos 'inversionista_id', 'dpi' o 'email'");
   }
 
-  // 1️⃣ Buscar inversionista (Prioridad: Email > DPI)
-  const whereClause = email
+  // 1️⃣ Buscar inversionista (Prioridad: id > Email > DPI)
+  // El id manda porque es el único que identifica una fila sola: por correo hay
+  // personas con varias entidades y el .limit(1) de abajo elegiría una al azar.
+  const whereClause = inversionistaId
+    ? eq(inversionistas.inversionista_id, inversionistaId)
+    : email
     ? eq(inversionistas.email, email)
     : eq(inversionistas.dpi, parseInt(dpi!));
 
@@ -9303,7 +9605,12 @@ export async function getInvestorPerformance(dpi?: string, email?: string) {
     .limit(1);
 
   if (!inversionista) {
-    throw new Error(`No se encontró inversionista con ${dpi ? 'DPI: ' + dpi : 'email: ' + email}`);
+    const buscadoPor = inversionistaId
+      ? `id: ${inversionistaId}`
+      : email
+      ? `email: ${email}`
+      : `DPI: ${dpi}`;
+    throw new Error(`No se encontró inversionista con ${buscadoPor}`);
   }
 
   // 2️⃣ Obtener totales de inversiones de forma agregada

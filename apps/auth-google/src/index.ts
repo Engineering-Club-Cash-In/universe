@@ -10,10 +10,15 @@ import crmRoutes from "./routes/crm.routes";
 import unifiedRoutes from "./routes/unified.routes";
 import { errorHandler, notFoundHandler } from "./middleware/error";
 import {
+  COOKIE_AUTHENTICATED_PREFIXES,
+  requireTrustedOrigin,
+} from "./middleware/requireTrustedOrigin";
+import {
   apiLimiter,
   authLimiter,
   signUpLimiter,
 } from "./middleware/rateLimiter";
+import { resolveCorsOrigin } from "./lib/origins";
 import { env } from "./config/env";
 
 const app = new Hono();
@@ -23,13 +28,16 @@ app.use("*", logger());
 app.use(
   "*",
   cors({
-    origin: (origin) => {
-      // Permitir localhost en desarrollo
-      if (env.NODE_ENV === "development") {
-        return origin || "*";
-      }
-      return env.CORS_ORIGIN;
-    },
+    // `Access-Control-Allow-Origin` admite UN origen o `*`, nunca una lista:
+    // hay que devolver el origen de esta petición, no la variable entera.
+    // Devolver `null` hace que Hono omita la cabecera, que es el cierre
+    // correcto. En desarrollo se permite cualquier origen (localhost, túneles).
+    origin: (origin) =>
+      resolveCorsOrigin({
+        origin,
+        trustedOrigins: env.TRUSTED_ORIGINS,
+        allowAnyOrigin: env.NODE_ENV === "development",
+      }),
     credentials: true,
     allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allowHeaders: ["Content-Type", "Authorization", "Cookie", "Set-Cookie"],
@@ -39,6 +47,14 @@ app.use(
 
 // Rate limiting
 app.use("/api/*", apiLimiter);
+
+// Anti-CSRF: la cookie de sesión es SameSite=None en producción, así que el
+// navegador la adjunta también en peticiones nacidas en un sitio ajeno. Toda
+// escritura que llegue con esa cookie debe traer un Origin de confianza.
+// `/api/auth/*` no se lista: Better Auth ya valida el origen por su cuenta.
+for (const ruta of COOKIE_AUTHENTICATED_PREFIXES) {
+  app.use(ruta, requireTrustedOrigin);
+}
 
 // Routes
 app.route("/health", healthRoutes);

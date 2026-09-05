@@ -12,8 +12,8 @@ export const FormRegister = () => {
     handleNextStep,
     isLoading,
     isGoogleLoading,
-    isCheckingDpi,
     currentStep,
+    prevStep,
   } = useRegister();
   const isMobile = useIsMobile();
   const [isTermsOpen, setIsTermsOpen] = useState(false);
@@ -120,9 +120,8 @@ export const FormRegister = () => {
               onClick={handleNextStep}
               size={isMobile ? "sm" : "md"}
               type="button"
-              isLoading={isCheckingDpi}
             >
-              {isCheckingDpi ? "Verificando DPI..." : "Continuar"}
+              Continuar
             </Button>
 
             <div className="flex justify-center items-center gap-1 flex-col text-sm lg:text-base">
@@ -139,6 +138,20 @@ export const FormRegister = () => {
         {/* Paso 2: Métodos de registro */}
         {currentStep === 2 && (
           <div className="w-full mt-4 flex flex-col gap-6">
+            {/* Volver al paso del DPI.
+                El paso 2 no tenía salida hacia atrás, y el tipo de usuario y el
+                DPI —lo único que el servidor pide corregir cuando rechaza el
+                registro— se piden en el paso 1. Sin este control, un conflicto
+                de DPI dejaba a la persona leyendo "corrige tu DPI" frente a un
+                formulario donde ese campo no existe. */}
+            <button
+              type="button"
+              onClick={prevStep}
+              className="self-start text-sm text-white/65 hover:text-white transition-colors"
+            >
+              ← Volver a tipo de usuario y DPI
+            </button>
+
             {/* Botón de Google */}
             <ButtonIcon
               icon={<IconGoogle />}
@@ -249,6 +262,12 @@ export const FormRegister = () => {
                 <p className="text-red-500 text-sm -mt-4">
                   {formik.errors.acceptTerms}
                 </p>
+              )}
+
+              {formik.status && (
+                <div className="bg-red-500/20 border border-red-500/50 rounded-lg p-4">
+                  <p className="text-red-300 text-sm">{formik.status}</p>
+                </div>
               )}
 
               <div className="flex flex-col gap-4 mt-4">

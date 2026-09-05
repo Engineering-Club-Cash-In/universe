@@ -1,11 +1,18 @@
 import { useFormik } from "formik";
 import * as Yup from "yup";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { RegisterCredentials } from "@/lib/auth";
 import { authClient } from "@/lib/auth";
 import { useNavigate } from "@tanstack/react-router";
-import { registerExternalUser } from "@/features/Profile/services/unifiedService";
-import { apiAuth } from "@/lib/api/apiAuth";
+import { registerExternalUserAuth } from "@/features/Profile/services/unifiedService";
+import { conflictoDeRegistro } from "@/features/Profile/services/registroExterno.errors";
+import { recordarSiQuedoSinDpi } from "@/features/Profile/services/avisoDpiPendiente";
+import {
+  decidirAlta,
+  mensajeDeAltaFallida,
+  mensajeDeCorreoCambiado,
+  mensajeDeRegistroFallido,
+} from "./registroPendiente";
 
 // Esquema de validación con Yup
 const validationSchema = Yup.object({
@@ -37,20 +44,34 @@ const validationSchema = Yup.object({
     .required("Debes seleccionar qué deseas hacer"),
 });
 
-const checkDpiExists = async (dpi: string): Promise<boolean> => {
+/**
+ * Correo de la sesión abierta, o `null`. Es la prueba, del lado del servidor,
+ * de que un intento anterior ya creó la cuenta de Better Auth.
+ */
+const correoDeLaSesion = async (): Promise<string | null> => {
   try {
-    const response = await apiAuth.get(`/api/profile/check-dpi/${dpi}`);
-    return response.data?.data?.exists ?? false;
+    const sesion = await authClient.getSession();
+    const correo = sesion?.data?.user?.email;
+
+    return typeof correo === "string" ? correo : null;
   } catch {
-    return false;
+    // Sin respuesta del servidor no se puede afirmar que la cuenta exista; se
+    // intenta el alta, que es lo que hacía antes.
+    return null;
   }
 };
 
 export const useRegister = () => {
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [isCheckingDpi, setIsCheckingDpi] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
+  // Correo con el que ESTE formulario ya creó la cuenta, o `null`. Guarda el
+  // correo y no un booleano a propósito: con un booleano el reintento se
+  // saltaba el alta sin mirar si el formulario seguía llevando ese mismo
+  // correo. No es la fuente de verdad —un ref se pierde al recargar, y ahí es
+  // donde el registro a medias se quedaba atrapado—, por eso se contrasta
+  // también con la sesión. Ver `decidirAlta`.
+  const correoDelAlta = useRef<string | null>(null);
   const navigate = useNavigate();
 
   // Formik
@@ -66,32 +87,124 @@ export const useRegister = () => {
       userType: "CLIENT" as "CLIENT" | "INVESTOR",
     },
     validationSchema,
-    onSubmit: async (values) => {
+    onSubmit: async (values, helpers) => {
       try {
         setIsLoading(true);
-        const response = await authClient.signUp.email({
-          email: values.email,
-          password: values.password,
-          name: values.fullName,
-          callbackURL: `${import.meta.env.VITE_FRONTEND_URL}/profile`,
-          dpi: values.dpi,
-          role: values.userType, // Enviar el role al backend
-        } as any);
+        // Un intento nuevo parte sin el error del anterior.
+        helpers.setStatus(undefined);
 
-        // Si el registro fue exitoso, registrar en CRM o Cartera según tipo
-        if (response?.data?.user?.id) {
-          try {
-            await registerExternalUser({
-              userType: values.userType,
-              fullName: values.fullName,
-              email: values.email,
-              dpi: values.dpi,
-              phone: values.phone,
-            });
-          } catch (error) {
-            console.error("Error al registrar usuario adicional:", error);
-            // No detener el flujo si falla, el usuario ya fue registrado en better-auth
+        // La cuenta de Better Auth solo se crea una vez. Si el registro externo
+        // falló por algo corregible (un DPI ya tomado), el segundo envío tiene
+        // que reintentar SOLO esa parte: repetir el alta fallaría con "el
+        // correo ya existe" y el usuario quedaría atrapado en el formulario.
+        // Si el alta ya ocurrió lo dice el SERVIDOR, no la memoria del
+        // componente: tras `signUp.email` la sesión queda abierta y sobrevive a
+        // una recarga. Se le pregunta SIEMPRE, también cuando el ref ya sabe
+        // que la cuenta existe: ahorrarse esta llamada en el reintento era lo
+        // que dejaba el correo del formulario sin comparar con el de la cuenta.
+        const correoDeLaCuenta = await correoDeLaSesion();
+        const decision = decidirAlta({
+          correoDelAlta: correoDelAlta.current,
+          correoDeLaSesion: correoDeLaCuenta,
+          correoDelFormulario: values.email,
+        });
+
+        // El correo del formulario ya no es el de la cuenta creada. No se puede
+        // seguir por ninguno de los dos lados: continuar registraría en
+        // CRM/cartera el correo viejo (el servidor toma el de la sesión, no el
+        // del cuerpo), y crear la cuenta nueva dejaría huérfana la primera. Se
+        // corta diciendo con qué correo quedó la cuenta y cómo empezar de
+        // nuevo.
+        if (decision === "correo_cambiado") {
+          helpers.setStatus(
+            mensajeDeCorreoCambiado(correoDeLaCuenta ?? correoDelAlta.current ?? ""),
+          );
+          return;
+        }
+
+        if (decision === "crear") {
+          // El rol y el DPI ya no viajan en el alta: el servidor los escribe
+          // después, al validar el registro (registerExternalUserAuth).
+          const response = await authClient.signUp.email({
+            email: values.email,
+            password: values.password,
+            name: values.fullName,
+            callbackURL: `${import.meta.env.VITE_FRONTEND_URL}/profile`,
+          });
+
+          if (!response?.data?.user?.id) {
+            // Un alta fallida ya no se traga en silencio. El caso normal aquí
+            // es el correo ocupado por un registro anterior a medias, y su
+            // salida es iniciar sesión: el formulario de completar perfil
+            // termina la identidad (y muestra el selector de tipo, porque un
+            // CLIENT sin DPI no cuenta como rol elegido).
+            helpers.setStatus(mensajeDeAltaFallida(response));
+            return;
           }
+        }
+
+        correoDelAlta.current = values.email;
+
+        // Registrar en CRM o Cartera según tipo. La variante autenticada usa la
+        // sesión recién creada y es la que deja el rol y el DPI en la cuenta.
+        try {
+          // La respuesta ya no se tira. Un 200 no siempre deja DPI en la
+          // cuenta: cuando el correo ya tiene una ficha que un asesor abrió sin
+          // DPI, el CRM da el acceso pero no escribe el dato —ahí solo puede
+          // ponerlo un humano— y el servidor respeta esa decisión. Descartar el
+          // resultado y navegar al perfil dejaba a la persona frente a OTRO
+          // formulario de DPI en blanco, sin la explicación ni la salida por
+          // soporte que sí tienen los caminos de Google y de completar perfil,
+          // reenviando el mismo valor para nada.
+          const resultado = await registerExternalUserAuth({
+            userType: values.userType,
+            fullName: values.fullName,
+            email: values.email,
+            dpi: values.dpi,
+            phone: values.phone,
+          });
+
+          // Se navega al perfil en los DOS casos —la cuenta existe y la persona
+          // ya tiene acceso—; lo que cambia es con qué la recibe el perfil. El
+          // aviso viaja por el almacén y no por el estado de React porque este
+          // camino cruza de ruta y además tiene que aguantar una recarga.
+          // La decisión la toma el mismo módulo que los otros dos caminos: una
+          // sola definición de "quedó sin DPI", con su regla de mirar
+          // `identity.dpi` y nunca `dpiRegistradoEnLead`.
+          recordarSiQuedoSinDpi({
+            respuesta: resultado,
+            correo: values.email,
+            tipoSolicitado: values.userType,
+          });
+        } catch (error) {
+          console.error("Error al registrar usuario adicional:", error);
+
+          // Un conflicto de DPI no se traga: el servidor lo detecta antes de
+          // crear nada en CRM/cartera, así que el usuario puede corregirlo y
+          // reintentar. Mandarlo al perfil como si nada le dejaba el correo
+          // ocupado por una cuenta sin identidad y sin ninguna señal de qué
+          // pasó.
+          const conflicto = conflictoDeRegistro(error);
+
+          if (conflicto) {
+            helpers.setFieldTouched(conflicto.campo, true, false);
+            helpers.setFieldError(conflicto.campo, conflicto.mensaje);
+            // El DPI se pide en el primer paso del formulario.
+            setCurrentStep(1);
+            return;
+          }
+
+          // Ningún fallo se traga. Esta llamada es la ÚNICA que escribe el rol
+          // y el DPI de la cuenta, así que mandar al perfil como si nada dejaba
+          // al usuario con el rol por defecto (CLIENT) y sin DPI: quien pidió
+          // ser inversionista quedaba clasificado como cliente sin enterarse.
+          // Se queda en el formulario, con su tipo elegido intacto, y puede
+          // reintentar — el alta de Better Auth ya no se repite.
+          // El motivo sale del mismo sitio que el del camino de Google: los dos
+          // mueren en esta llamada y no tiene sentido que digan cosas
+          // distintas.
+          helpers.setStatus(mensajeDeRegistroFallido(error));
+          return;
         }
 
         // enviar al profile
@@ -104,6 +217,10 @@ export const useRegister = () => {
     },
   });
 
+  // Solo formato. Que el DPI ya esté tomado lo decide el servidor al fijarlo
+  // sobre la cuenta (409 en POST /api/profile/me/dpi): preguntarlo antes
+  // obligaba a exponer una ruta pública que confirmaba, para cualquier DPI, si
+  // estaba registrado.
   const validateDpi = async (): Promise<boolean> => {
     formik.setFieldTouched("userType", true);
     formik.setFieldTouched("dpi", true);
@@ -116,17 +233,7 @@ export const useRegister = () => {
       return false;
     }
 
-    setIsCheckingDpi(true);
-    try {
-      const exists = await checkDpiExists(formik.values.dpi);
-      if (exists) {
-        formik.setFieldError("dpi", "Este DPI ya está registrado");
-        return false;
-      }
-      return true;
-    } finally {
-      setIsCheckingDpi(false);
-    }
+    return true;
   };
 
   const handleGoogleRegister = async () => {
@@ -171,7 +278,6 @@ export const useRegister = () => {
     handleNextStep,
     isLoading,
     isGoogleLoading,
-    isCheckingDpi,
     currentStep,
     nextStep,
     prevStep,

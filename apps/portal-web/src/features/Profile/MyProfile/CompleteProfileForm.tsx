@@ -6,8 +6,8 @@ import { registerExternalUserAuth } from "../services";
 import {
   mensajeDeDpiPendiente,
   mensajeDeWhatsAppPorDpiPendiente,
-  registroQuedoSinDpi,
 } from "../services/registroSinDpi";
+import { recordarSiQuedoSinDpi } from "../services/avisoDpiPendiente";
 import {
   rolFueEstablecido,
   tipoInicialDelFormulario,
@@ -82,7 +82,18 @@ export const CompleteProfileForm = ({
       // asesor y solo él puede completarla. Recargar aquí volvería a abrir este
       // mismo formulario —la puerta de `Profile.tsx` es `!user?.dpi`— sin un
       // solo texto que explique por qué: el bucle mudo. Se corta y se dice.
-      if (registroQuedoSinDpi(resultado)) {
+      // El aviso queda GUARDADO, no solo en el estado de este componente: si
+      // la persona recarga antes de que el asesor complete la ficha, el perfil
+      // lo recupera y le vuelve a explicar por qué le pide el DPI, en vez de
+      // sacarle este mismo formulario en blanco. Se apaga solo en cuanto la
+      // cuenta tenga DPI (ver `avisoDpiPendiente`).
+      if (
+        recordarSiQuedoSinDpi({
+          respuesta: resultado,
+          correo: user?.email ?? "",
+          tipoSolicitado: userType,
+        })
+      ) {
         setPendiente(mensajeDeDpiPendiente(user?.email ?? ""));
         return;
       }

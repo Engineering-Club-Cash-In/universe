@@ -2,10 +2,11 @@ import { useEffect, useState } from "react";
 import { registerExternalUserAuth } from "../services/unifiedService";
 import { useAuth } from "@/lib";
 import { mensajeDeRegistroFallido } from "@/features/Login/hook/registroPendiente";
+import { mensajeDeDpiPendiente } from "../services/registroSinDpi";
 import {
-  mensajeDeDpiPendiente,
-  registroQuedoSinDpi,
-} from "../services/registroSinDpi";
+  avisoDpiPendienteVigente,
+  recordarSiQuedoSinDpi,
+} from "../services/avisoDpiPendiente";
 
 interface UserData {
   id: string;
@@ -90,7 +91,18 @@ export const useProfile = () => {
           // ciego que tenía el formulario— y la persona daba una vuelta muda
           // antes de entrar al bucle. Se corta la recarga y el motivo viaja con
           // ella hasta el formulario.
-          if (registroQuedoSinDpi(resultado)) {
+          // El aviso se DEJA GUARDADO antes de pintarlo. Solo en el estado de
+          // React moría con la primera recarga, y como la cuenta sigue siendo
+          // CLIENT y sin DPI, `Profile.tsx` volvía a sacar el formulario en
+          // blanco, sin explicación y dejando reenviar el mismo DPI para nada.
+          // El ciclo de vida (cuándo se apaga) vive en `avisoDpiPendiente`.
+          if (
+            recordarSiQuedoSinDpi({
+              respuesta: resultado,
+              correo: user.email,
+              tipoSolicitado: userType,
+            })
+          ) {
             setRegistroPendiente({
               tipoSolicitado: userType,
               mensaje: mensajeDeDpiPendiente(user.email),
@@ -122,6 +134,24 @@ export const useProfile = () => {
         // Solo limpiar URL si no hay parámetros de registro
         const newUrl = window.location.pathname;
         window.history.replaceState({}, "", newUrl);
+
+        // Sin parámetros en la URL se llega aquí por una recarga, por volver al
+        // perfil o por el registro con correo, que ya navegó. Si un intento
+        // anterior quedó sin DPI, el aviso se recupera y la persona ve por qué
+        // le siguen pidiendo el dato, en vez del formulario mudo.
+        // `avisoDpiPendienteVigente` es el que decide si sigue vigente: en
+        // cuanto el asesor pone el DPI, deja de devolverlo y se borra solo.
+        const aviso = avisoDpiPendienteVigente({ usuario: user });
+
+        setRegistroPendiente(
+          aviso
+            ? {
+                tipoSolicitado: aviso.tipoSolicitado,
+                mensaje: mensajeDeDpiPendiente(aviso.correo),
+                dpiPendiente: true,
+              }
+            : null,
+        );
         setIsLoading(false);
       }
     };

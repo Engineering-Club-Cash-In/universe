@@ -13,10 +13,6 @@ import { getFileUrl, getFileUrlWithBucketInKey } from "../lib/storage";
 import { normalizarDpi, validarDpi } from "../utils/cui-validation";
 import { getOnlyRenapInfoController } from "./bot";
 import {
-	decidirLeadDelPortal,
-	normalizarCorreoParaComparar,
-} from "./portalLeadIdempotencia";
-import {
 	createOpportunityForLead,
 	getSalesUserWithLeastLeads,
 } from "./public-lead";
@@ -670,125 +666,45 @@ export async function createPortalRegisterLead(c: Context) {
 		}
 		const dpi = resultadoDpi.dpiLimpio;
 
-		// Verificar si ya existe un lead con ese DPI (o email).
-		//
-		// Se traen TODOS los candidatos en orden estable en vez de un `limit(1)`
-		// suelto: la búsqueda es `correo O DPI`, así que puede empatar a la vez con
-		// la ficha de quien llama y con una ficha vieja que comparte el DPI, y sin
-		// orden Postgres devuelve cualquiera de las dos. Se prefiere siempre la que
-		// cuelga del correo de la sesión, que es la única que se puede probar que es
-		// suya; si no, un homónimo de DPI convertiría el registro legítimo en un 409
-		// que además cambia de resultado entre intentos.
-		const candidatos = await db
+		// Verificar si ya existe un lead con ese DPI (o email)
+		const [existingLead] = await db
 			.select()
 			.from(leads)
 			.where(or(eq(leads.email, email), eqDpi(leads.dpi, dpi)))
-			.orderBy(asc(leads.createdAt));
-
-		const correoDeLaSesion = normalizarCorreoParaComparar(email);
-		const existingLead =
-			candidatos.find(
-				(candidato) =>
-					normalizarCorreoParaComparar(candidato.email) === correoDeLaSesion,
-			) ?? candidatos[0];
+			.limit(1);
 
 		if (existingLead) {
-			// Lead ya existe → solo retornar sin crear oportunidad.
-			//
-			// Devolverlo es la idempotencia que necesita el registro del portal:
-			// el alta toca dos sistemas y no es atómica, así que un intento que
-			// creó el lead y se cayó después en auth-google tiene que poder
-			// reintentar y terminar.
-			//
-			// Pero solo si el reintento es del MISMO dueño y pide LO MISMO, y eso
-			// son dos comprobaciones, no una:
-			//
-			// - De quién es la ficha lo dice el correo, que aquí es SIEMPRE el de la
-			//   sesión de auth-google (`register-external-auth` lo saca de la cuenta,
-			//   no del cuerpo). Como la búsqueda es `correo O DPI`, sin este chequeo
-			//   bastaba con mandar el DPI de un lead ajeno —que auth-google deja
-			//   pasar mientras no esté en `users.dpi`— para que el CRM lo devolviera
-			//   entero y auth-google grabara ese DPI en la cuenta de quien preguntó.
-			// - Qué se pide escribir lo dice el DPI: con uno distinto, este endpoint
-			//   devolvía el lead como éxito sin actualizarlo mientras auth-google
-			//   escribía el DPI nuevo, y los dos sistemas quedaban asociados a
-			//   identidades diferentes.
-			//
-			// Ni el DPI ni el correo de una ficha existente se reescriben aquí:
-			// cambiarlos es una operación de back office, no un efecto colateral de
-			// reintentar un registro. Lo que se hace con lo que trae la petición
-			// depende de lo que la ficha ya tenga:
-			//
-			// - Otro correo, o ningún correo: se rechaza con 409. La ficha sin correo
-			//   no está ligada a nadie, así que rellenársela a quien acierte el DPI
-			//   sería regalar la ficha —y eso es justo lo que hacía—.
-			// - Mismo correo y mismo DPI: se acepta, es el reintento del mismo
-			//   registro.
-			// - Mismo correo y otro DPI: se rechaza con 409.
-			// - Mismo correo y lead SIN DPI: se acepta —bloquearlo dejaría fuera del
-			//   portal a todas las fichas que ventas creó sin DPI— pero el DPI
-			//   tampoco se escribe: mientras el correo no esté verificado, rellenarlo
-			//   dejaría estampar el propio en la ficha de otra persona. Como la ficha
-			//   se queda sin DPI, el caso viaja explícito en la respuesta en vez de
-			//   pasar por un alta completa.
-			const decision = decidirLeadDelPortal(
-				existingLead.dpi,
-				dpi,
-				existingLead.email,
-				email,
-			);
+			// Lead ya existe → solo retornar sin crear oportunidad
+			const isEmptyEmail =
+				!existingLead.email || existingLead.email.trim() === "";
 
-			if (decision.tipo === "conflicto_correo") {
-				// El motivo concreto se queda en el log: decirle a quien llama que ese
-				// DPI tiene ficha y no es la suya convertiría el endpoint en un oráculo
-				// de DPIs ajenos, que es lo que se acaba de cerrar.
-				console.warn(
-					`[portal] lead ${existingLead.id} casó por DPI pero no cuelga del correo de la sesión; registro rechazado`,
-				);
-
-				return c.json(
-					{
-						success: false,
-						error:
-							"El DPI no corresponde al registro de este correo. Verifica el DPI o contacta a soporte.",
-					},
-					409,
-				);
-			}
-
-			if (decision.tipo === "conflicto_dpi") {
-				return c.json(
-					{
-						success: false,
-						error:
-							"Ya existe un registro con este correo y otro DPI. Reintenta con el DPI del registro original o contacta a soporte.",
-					},
-					409,
-				);
-			}
-
-			if (decision.tipo === "aceptar_sin_dpi") {
-				// No es un alta completa: el lead sigue sin DPI y solo un humano
-				// puede ponérselo. Se dice en la respuesta para que quien llame no
-				// dé por hecho que el CRM quedó con la misma identidad que la
-				// cuenta del portal.
-				console.warn(
-					`[portal] lead ${existingLead.id} reconocido SIN DPI; no se escribe el DPI del registro`,
-				);
+			if (
+				existingLead.dpi &&
+				normalizarDpi(existingLead.dpi) === dpi &&
+				isEmptyEmail
+			) {
+				const [updatedLead] = await db
+					.update(leads)
+					.set({ email, updatedAt: new Date() })
+					.where(eq(leads.id, existingLead.id))
+					.returning();
+				auditRecord({
+					entity: "lead",
+					id: existingLead.id,
+					action: "update",
+					data: { email },
+				});
 
 				return c.json({
 					success: true,
-					data: existingLead,
-					dpiRegistradoEnLead: false,
-					message:
-						"Lead ya existe sin DPI: acceso autorizado, pero el DPI no se registró en la ficha",
+					data: updatedLead,
+					message: "Lead encontrado por DPI, email actualizado",
 				});
 			}
 
 			return c.json({
 				success: true,
 				data: existingLead,
-				dpiRegistradoEnLead: true,
 				message: "Lead ya existe, acceso autorizado sin nueva oportunidad",
 			});
 		}

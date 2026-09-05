@@ -194,6 +194,18 @@ describe("estado de cuenta PDF", () => {
     ).toBe(false);
   });
 
+  it("mantiene incluidos los pagos parciales que ya están marcados como pagados", () => {
+    expect(
+      shouldIncludeEstadoCuentaPayment({
+        pagado: true,
+        paymentFalse: false,
+        validationStatus: "validated",
+        abono_capital: "400.00",
+        monto_aplicado: "400.00",
+      }),
+    ).toBe(true);
+  });
+
   it("incluye reducciones de capital mixtas cuando ya fueron aplicadas", () => {
     expect(
       shouldIncludeEstadoCuentaPayment({
@@ -324,12 +336,12 @@ describe("estado de cuenta PDF", () => {
     expect(rows.map((p) => p.total_restante)).toEqual(["100.00", "85.00", "85.00", "83.00"]);
   });
 
-  it("primera cuota visible sin saldo previo: siembra la apertura y respeta la fila neta", () => {
+  it("primera cuota visible sin saldo previo: conserva el snapshot inicial y descuenta el siguiente parcial", () => {
     const rows = applyEstadoCuentaRunningCapital([
-      { pago_id: 10749, numero_cuota: 35, pagado: true, abono_capital: "1919.26", abono_interes: "783.52", total_restante: "47874.89" },
-      { pago_id: 150049, numero_cuota: 35, pagado: true, abono_capital: "2440.50", total_restante: "47874.89" },
+      { pago_id: 1, numero_cuota: 35, pagado: true, abono_capital: "600.00", abono_interes: "100.00", total_restante: "49400.00" },
+      { pago_id: 2, numero_cuota: 35, pagado: true, abono_capital: "400.00", total_restante: "49400.00" },
     ]);
-    expect(rows.map((p) => p.total_restante)).toEqual(["50315.39", "47874.89"]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["49400.00", "49000.00"]);
   });
 
   it("muestra el capital corrido de cada pago cuando la cuota comparte el saldo final", () => {

@@ -11,6 +11,7 @@ import { clientFormsRouter } from "./client-forms";
 import { cobrosRouter } from "./cobros";
 import { contractGenerationRouter } from "./contract-generation";
 import { crmRouter } from "./crm";
+import { documentIntegrityProcedures } from "./document-integrity";
 import { insuranceRouter } from "./insurance";
 import { investorDocumentsRouter } from "./investor-documents";
 import { juridicoDashboardRouter } from "./juridico-dashboard";
@@ -432,6 +433,7 @@ export const appRouter = Object.assign(
 	legalAppRouter,
 	miscAppRouter,
 	reportsAppRouter,
+	documentIntegrityProcedures,
 );
 
 // Disbursement routes exported separately to avoid TS7056 with declaration emit.
@@ -479,4 +481,5 @@ export type AppRouter = typeof healthRouter &
 	typeof formsAppRouter &
 	typeof legalAppRouter &
 	typeof miscAppRouter &
-	typeof reportsAppRouter;
+	typeof reportsAppRouter &
+	typeof documentIntegrityProcedures;

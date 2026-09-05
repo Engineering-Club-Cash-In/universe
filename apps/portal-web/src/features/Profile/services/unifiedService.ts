@@ -5,6 +5,7 @@
 
 import apiAuth from "@/lib/api/apiAuth";
 import { registroExternoErrorDesde } from "./registroExterno.errors";
+import type { IdentidadDelRegistro } from "./registroSinDpi";
 
 export type UserType = "CLIENT" | "INVESTOR";
 
@@ -21,6 +22,20 @@ export interface RegisterExternalUserResponse {
   message: string;
   userType: UserType;
   data?: any;
+  /**
+   * Identidad que quedó EN VIGOR en la cuenta tras el registro. La manda
+   * `register-external-auth` y no se declaraba, así que el formulario no podía
+   * ver que el servidor se había negado a escribir el DPI y trataba ese 200
+   * como éxito. Ver `registroQuedoSinDpi`.
+   */
+  identity?: IdentidadDelRegistro | null;
+  /**
+   * Aviso del CRM de que reconoció la ficha pero NO le escribió el DPI. Se
+   * declara para no perderla de vista, pero la decisión del formulario se toma
+   * con `identity.dpi`: esta bandera solo la emite el camino de CLIENT y viene
+   * `undefined` en el de INVESTOR y en las altas nuevas.
+   */
+  dpiRegistradoEnLead?: boolean;
 }
 
 // `registerExternalUser` (sin sesión, contra POST /api/unified/register-external)

@@ -2,6 +2,10 @@ import { useEffect, useState } from "react";
 import { registerExternalUserAuth } from "../services/unifiedService";
 import { useAuth } from "@/lib";
 import { mensajeDeRegistroFallido } from "@/features/Login/hook/registroPendiente";
+import {
+  mensajeDeDpiPendiente,
+  registroQuedoSinDpi,
+} from "../services/registroSinDpi";
 
 interface UserData {
   id: string;
@@ -27,6 +31,13 @@ interface UserData {
 export type RegistroPendiente = {
   tipoSolicitado: "CLIENT" | "INVESTOR";
   mensaje: string;
+  /**
+   * El registro NO falló: salió 200 pero el servidor se negó a escribir el DPI
+   * porque la ficha la abrió un asesor. No es un error de la persona y no hay
+   * nada que corregir, así que el formulario lo muestra en su bloque de espera
+   * y no en el de error. Ver `registroQuedoSinDpi`.
+   */
+  dpiPendiente?: boolean;
 };
 
 export const useProfile = () => {
@@ -61,7 +72,7 @@ export const useProfile = () => {
           // Servicio unificado (variante autenticada): registra en CRM o
           // Cartera y, ya del lado del servidor, deja el DPI y el rol en la
           // cuenta de la sesión. El cliente ya no los escribe.
-          await registerExternalUserAuth({
+          const resultado = await registerExternalUserAuth({
             userType: userType,
             fullName: user.name || user.email.split("@")[0],
             email: user.email,
@@ -69,11 +80,28 @@ export const useProfile = () => {
             phone: phone,
           });
 
-          console.log(`${userType} creado exitosamente`);
-
-          // Limpiar parámetros de la URL y recargar
+          // Limpiar parámetros de la URL: ya se consumieron y no deben volver a
+          // dispararse en la recarga.
           const newUrl = window.location.pathname;
           window.history.replaceState({}, "", newUrl);
+
+          // Un 200 no siempre deja DPI en la cuenta. Recargar aquí aterrizaba
+          // en el formulario de completar perfil sin decir nada —el mismo punto
+          // ciego que tenía el formulario— y la persona daba una vuelta muda
+          // antes de entrar al bucle. Se corta la recarga y el motivo viaja con
+          // ella hasta el formulario.
+          if (registroQuedoSinDpi(resultado)) {
+            setRegistroPendiente({
+              tipoSolicitado: userType,
+              mensaje: mensajeDeDpiPendiente(user.email),
+              dpiPendiente: true,
+            });
+            setIsLoading(false);
+            return;
+          }
+
+          console.log(`${userType} creado exitosamente`);
+
           // NO quitar isLoading aquí porque vamos a recargar
           window.location.reload();
           return; // Salir antes de setIsLoading(false)

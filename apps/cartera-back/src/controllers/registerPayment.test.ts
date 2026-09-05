@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { readFileSync } from "node:fs";
 import Big from "big.js";
 import {
   applyCapitalPaymentAndBuildResponse,
@@ -1257,5 +1258,61 @@ describe("pagoSchema — observaciones", () => {
     expect(
       pagoSchema.safeParse({ ...base, observaciones: "x".repeat(500) }).success
     ).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Contrato de `fecha_aplicado` en el pago PENDIENTE
+// ---------------------------------------------------------------------------
+// `pagoData` se arma inline dentro de `insertPayment` (no hay helper puro que
+// exponerle a un test de unidad), así que se verifica sobre la fuente, igual
+// que creditMonetaryAdjustments.contract.test.ts. Lo que importa acá es que el
+// MISMO objeto que se spreadea en el UPDATE de una fila ya existente traiga la
+// columna: sin ella el UPDATE no la toca y la fila reescrita conserva la
+// `fecha_aplicado` de su vida anterior (los placeholders `no_required` de la
+// importación SIFCO suelen traerla), dejando un pago pendiente con fecha de
+// aplicación heredada.
+const registerPaymentSource = readFileSync(
+  new URL("./registerPayment.ts", import.meta.url),
+  "utf8",
+);
+
+function extraerObjetoPagoDataPendiente(source: string): string {
+  const inicio = source.indexOf("        const pagoData = {");
+  if (inicio === -1) {
+    throw new Error("No se encontró el objeto pagoData del pago pendiente");
+  }
+  const fin = source.indexOf("\n        };", inicio);
+  if (fin === -1) {
+    throw new Error("No se encontró el cierre del objeto pagoData");
+  }
+  return source.slice(inicio, fin);
+}
+
+describe("fecha_aplicado del pago pendiente", () => {
+  it("el payload del pago pendiente limpia fecha_aplicado", () => {
+    const pagoData = extraerObjetoPagoDataPendiente(registerPaymentSource);
+
+    expect(pagoData).toContain('validationStatus: "pending" as const');
+    expect(pagoData).toContain("fecha_aplicado: null");
+  });
+
+  it("el UPDATE sobre una fila existente sigue spreadeando ese payload", () => {
+    // Si esta rama deja de usar el spread, el test de arriba deja de proteger
+    // nada y hay que revisar la nueva escritura a mano.
+    expect(registerPaymentSource).toContain(
+      ".set({ ...pagoData, pagoConvenio: \"0\" })",
+    );
+  });
+
+  it("los writers de aplicación siguen estampando la fecha", () => {
+    // El fix es solo para pagos NO aplicados: validar/aplicar tiene que seguir
+    // poniendo fecha.
+    expect(registerPaymentSource).toContain(
+      '.set({ validationStatus: "validated", fecha_aplicado: new Date() })',
+    );
+    expect(
+      registerPaymentSource.match(/fecha_aplicado: new Date\(\)/g)?.length ?? 0,
+    ).toBeGreaterThanOrEqual(3);
   });
 });

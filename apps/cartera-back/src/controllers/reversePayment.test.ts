@@ -12,6 +12,7 @@ Object.assign(process.env, syntheticEnvironment);
 
 const { createReversePayment, reversePayment } = await import("./reversePayment");
 const { createCarteraStructuredLogger } = await import("../utils/structuredLogger");
+const { pagos_credito } = await import("../database/db/schema");
 for (const key of Object.keys(syntheticEnvironment) as Array<keyof typeof syntheticEnvironment>) {
   const previous = previousEnvironment[key];
   if (previous === undefined) delete process.env[key];
@@ -106,8 +107,13 @@ const activeCredit = {
 };
 const user = { usuario_id: 20, saldo_a_favor: "0" };
 
-function createTransactionTx() {
-  const selectResults: unknown[][] = [[pendingPayment], [activeCredit], [user], []];
+type RecordedUpdate = { table: unknown; payload: Record<string, unknown> };
+
+function createTransactionTx(
+  payment: Record<string, unknown> = pendingPayment,
+  recordedUpdates: RecordedUpdate[] = [],
+) {
+  const selectResults: unknown[][] = [[payment], [activeCredit], [user], []];
   const takeRows = () => {
     const rows = selectResults.shift() ?? [];
     return Object.assign(Promise.resolve(rows), { limit: () => Promise.resolve(rows) });
@@ -123,15 +129,29 @@ function createTransactionTx() {
         where: takeRows,
       }),
     })),
-    update: mock(() => ({ set: () => ({ where: updateWhere }) })),
-    delete: mock(() => ({ where: () => Promise.resolve() })),
+    update: mock((table: unknown) => ({
+      set: (payload: Record<string, unknown>) => {
+        recordedUpdates.push({ table, payload });
+        return { where: updateWhere };
+      },
+    })),
+    delete: mock(() => ({
+      where: () =>
+        Object.assign(Promise.resolve([]), {
+          returning: () => Promise.resolve([]),
+        }),
+    })),
+    // `setCapitalSource` (rama de pago YA aplicado) emite un SET de sesión.
+    execute: mock(() => Promise.resolve([])),
   };
 }
 
 function createPersistenceHarness(
   reverseInvestors: ReversePaymentDependencies["reverseInvestors"],
+  payment: Record<string, unknown> = pendingPayment,
+  recordedUpdates: RecordedUpdate[] = [],
 ) {
-  const tx = createTransactionTx();
+  const tx = createTransactionTx(payment, recordedUpdates);
   const runTransaction = mock(async (callback: (value: typeof tx) => Promise<unknown>) => {
     await callback(tx);
     throw new Error("synthetic later transaction failure");
@@ -230,6 +250,66 @@ describe("reversePayment global-persistence evidence", () => {
       outcome: "partially_completed",
       manual_action_required: true,
       reason_code: "local_state_inconsistent",
+    });
+  });
+});
+
+describe("reversePayment limpia fecha_aplicado", () => {
+  const noopInvestors = mock(async (
+    _creditoId: number,
+    _pagoId: number,
+    _onPersisted?: () => void,
+  ) => []) as unknown as ReversePaymentDependencies["reverseInvestors"];
+
+  async function reversarYCapturarResetDelPago(
+    payment: Record<string, unknown>,
+  ) {
+    const recordedUpdates: RecordedUpdate[] = [];
+    const { handler } = createPersistenceHarness(
+      noopInvestors,
+      payment,
+      recordedUpdates,
+    );
+
+    await handler({
+      body: { credito_id: 10, pago_id: 30 },
+      set: { status: 0 },
+      telemetryLogger: createCarteraStructuredLogger({ sink: () => {} }),
+    });
+
+    // El reset de la fila es el único UPDATE sobre pagos_credito que devuelve
+    // el pago a `no_required`; el resto de UPDATEs de la reversa van a otras
+    // tablas (ajuste_fecha_ideal_pago, creditos, usuarios, cuotas_credito).
+    return recordedUpdates.filter(
+      (update) =>
+        update.table === pagos_credito &&
+        update.payload.validationStatus === "no_required",
+    );
+  }
+
+  test("deja fecha_aplicado en null al resetear una cuota que estaba pagada", async () => {
+    const resets = await reversarYCapturarResetDelPago({
+      ...pendingPayment,
+      pagado: true,
+      validationStatus: "validated",
+    });
+
+    expect(resets).toHaveLength(1);
+    expect(resets[0]?.payload).toMatchObject({
+      monto_aplicado: "0",
+      fecha_pago: null,
+      fecha_aplicado: null,
+    });
+  });
+
+  test("deja fecha_aplicado en null al resetear el único parcial de la cuota", async () => {
+    const resets = await reversarYCapturarResetDelPago(pendingPayment);
+
+    expect(resets).toHaveLength(1);
+    expect(resets[0]?.payload).toMatchObject({
+      monto_aplicado: "0",
+      fecha_pago: null,
+      fecha_aplicado: null,
     });
   });
 });

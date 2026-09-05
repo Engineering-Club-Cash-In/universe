@@ -1542,6 +1542,11 @@ export const insertPayment = async ({ body, set }: any) => {
           observaciones: observaciones,
           validate: false,
           validationStatus: "pending" as const,
+          // Explícito porque este objeto se spreadea en el UPDATE de la rama
+          // "cierre sobre fila desechable": sin la columna en el payload, la
+          // fila reescrita conserva la `fecha_aplicado` de su vida anterior
+          // (los placeholders `no_required` de SIFCO suelen traerla).
+          fecha_aplicado: null,
           paymentFalse: paymentFalse,
           numeroAutorizacion: numeroAutorizacion,
           banco_id: banco_id,

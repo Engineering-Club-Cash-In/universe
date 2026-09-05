@@ -84,6 +84,36 @@ describe("decidirAlta", () => {
     ).toBe("correo_cambiado");
   });
 
+  // Las dos evidencias en DESACUERDO, que es el caso que ninguna de las de
+  // arriba pone a prueba. Pasa con dos pestañas en /register: la primera falla
+  // y queda con su ref en el correo viejo, en la segunda un `signUp.email`
+  // crea otra cuenta y ABRE SU SESIÓN (la cookie es del dominio), y al volver a
+  // enviar en la primera el ref dice "es la mía" mientras la sesión —contra la
+  // que de verdad va a correr `register-external-auth`— es de la otra cuenta.
+  // La sesión manda: es la identidad que el servidor va a usar para escribir.
+  it("corta si la sesión abierta es de otra cuenta, aunque el alta de este ciclo sí sea del correo del formulario", () => {
+    expect(
+      decidirAlta({
+        correoDelAlta: "ana@example.com",
+        correoDeLaSesion: "beto@example.com",
+        correoDelFormulario: "ana@example.com",
+      }),
+    ).toBe("correo_cambiado");
+  });
+
+  // El reverso: el ref quedó en el correo viejo y la sesión es la del correo
+  // que el formulario lleva AHORA. Reintentar es correcto porque el registro
+  // externo va a escribir sobre esa misma cuenta.
+  it("reintenta si la sesión abierta es la del correo del formulario, aunque el ref recuerde otro", () => {
+    expect(
+      decidirAlta({
+        correoDelAlta: "ana@example.com",
+        correoDeLaSesion: "beto@example.com",
+        correoDelFormulario: "beto@example.com",
+      }),
+    ).toBe("reintentar");
+  });
+
   it("crea la cuenta cuando no hay alta previa ni sesión", () => {
     expect(
       decidirAlta({

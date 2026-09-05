@@ -47,6 +47,12 @@ const normalizarCorreo = (correo: string | null | undefined): string =>
  * evidencias distintas: la sesión sobrevive a la recarga (es la única que cubre
  * ese caso) pero depende de una llamada que puede fallar; el correo del alta
  * solo vive mientras vive el formulario, pero no depende de la red.
+ *
+ * No se suman: la sesión MANDA y el ref solo es el respaldo para cuando no la
+ * hay. Sumarlas con un OR —bastaba que CUALQUIERA casara— dejaba pasar el
+ * envío cuando el ref decía una cuenta y la sesión otra, que es justo el estado
+ * que dos pestañas de /register producen, y el registro externo se escribía
+ * sobre la cuenta de la sesión con el DPI y el nombre del otro formulario.
  */
 export type DecisionDeAlta = "crear" | "reintentar" | "correo_cambiado";
 
@@ -58,26 +64,41 @@ export const decidirAlta = (params: {
   correoDelFormulario: string;
 }): DecisionDeAlta => {
   const formulario = normalizarCorreo(params.correoDelFormulario);
-  const cuentas = [
-    normalizarCorreo(params.correoDelAlta),
-    normalizarCorreo(params.correoDeLaSesion),
-  ].filter((correo) => correo !== "");
+  const sesion = normalizarCorreo(params.correoDeLaSesion);
+  const alta = normalizarCorreo(params.correoDelAlta);
 
-  if (cuentas.length === 0) {
-    return "crear";
+  // La sesión NO es una evidencia más que se suma a la del ref: es LA cuenta
+  // contra la que va a correr `register-external-auth`, porque el servidor saca
+  // de ahí la identidad y descarta el correo del cuerpo. El ref solo dice qué
+  // creó ESTE formulario, y otra pestaña pudo haber cambiado la sesión debajo
+  // (la cookie es del dominio), así que el ref nunca puede validar un envío que
+  // se va a escribir sobre otra cuenta.
+  if (sesion) {
+    return sesion === formulario ? "reintentar" : "correo_cambiado";
   }
 
-  return cuentas.includes(formulario) ? "reintentar" : "correo_cambiado";
+  // Sin sesión —o con un `getSession` que no contestó— manda el ref, que es su
+  // único trabajo real: sobrevivir a un hipo de red sin que el reintento se lea
+  // como una cuenta por crear (eso duplicaría la cuenta).
+  if (alta) {
+    return alta === formulario ? "reintentar" : "correo_cambiado";
+  }
+
+  return "crear";
 };
 
 /**
  * Aviso de que la cuenta abierta no es la del correo del formulario.
  *
- * Nombra el correo de la cuenta: si el desajuste vino de un dedazo, este
- * mensaje es el único sitio donde la persona lo va a ver escrito, y sin él
- * tendría que adivinar qué tecleó para poder entrar. La salida no es reintentar
- * —el formulario no puede cambiarle el correo a una cuenta ya creada— sino
- * cerrar sesión, así que se dice.
+ * Nombra el correo de la cuenta: es el único sitio donde la persona lo va a ver
+ * escrito, y sin él tendría que adivinar contra qué cuenta está atrapada. La
+ * salida no es reintentar —el formulario no puede cambiarle el correo a una
+ * cuenta ya creada— sino cerrar sesión, así que se dice.
+ *
+ * El texto no le achaca a la persona haber cambiado el correo: puede no haber
+ * tocado nada y ser la SESIÓN la que cambió debajo, desde otra pestaña. Se
+ * describe el estado ("hay una cuenta abierta con X") y la salida, sin suponer
+ * un dedazo que quizá no hubo.
  */
 export const mensajeDeCorreoCambiado = (correoDeLaCuenta: string): string => {
   const correo = correoDeLaCuenta.trim();
@@ -85,7 +106,7 @@ export const mensajeDeCorreoCambiado = (correoDeLaCuenta: string): string => {
     ? `Ya hay una cuenta abierta con ${correo}`
     : "Ya hay una cuenta abierta con el correo del intento anterior";
 
-  return `${cuenta} y desde aquí no se le puede cambiar el correo. Para registrarte con otro, tienes que cerrar sesión y empezar de nuevo.`;
+  return `${cuenta}, y este formulario solo puede terminar el registro de esa cuenta. Para registrarte con otro correo, tienes que cerrar sesión y empezar de nuevo.`;
 };
 
 const MENSAJE_GENERICO =

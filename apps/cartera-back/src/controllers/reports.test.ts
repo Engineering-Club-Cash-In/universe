@@ -177,7 +177,7 @@ describe("estado de cuenta PDF", () => {
     ).toBe(true);
   });
 
-  it("mantiene incluidos los pagos parciales que ya estan marcados como pagados", () => {
+  it("excluye pagos pendientes aunque la cuota ya esté marcada como pagada", () => {
     expect(
       shouldIncludeEstadoCuentaPayment({
         pagado: true,
@@ -191,7 +191,7 @@ describe("estado de cuenta PDF", () => {
         membresias_pago: "0.00",
         monto_aplicado: "147.78",
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("incluye reducciones de capital mixtas cuando ya fueron aplicadas", () => {
@@ -300,7 +300,7 @@ describe("estado de cuenta PDF", () => {
       { pago_id: 10749, numero_cuota: 35, pagado: true, abono_capital: "1919.26", abono_interes: "783.52", total_restante: "47874.89" },
       { pago_id: 150049, numero_cuota: 35, pagado: true, abono_capital: "2440.50", total_restante: "47874.89" },
     ]);
-    expect(rows.map((p) => p.total_restante)).toEqual(["54555.42", "52234.65", "52234.65", "47874.89", "47874.89"]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["54555.42", "52675.15", "52234.65", "50315.39", "47874.89"]);
   });
 
   it("abono puro que llega antes que la cuota regular del mismo mes: saldo corrido real, luego la hermana lo cierra", () => {
@@ -329,7 +329,35 @@ describe("estado de cuenta PDF", () => {
       { pago_id: 10749, numero_cuota: 35, pagado: true, abono_capital: "1919.26", abono_interes: "783.52", total_restante: "47874.89" },
       { pago_id: 150049, numero_cuota: 35, pagado: true, abono_capital: "2440.50", total_restante: "47874.89" },
     ]);
-    expect(rows.map((p) => p.total_restante)).toEqual(["47874.89", "47874.89"]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["50315.39", "47874.89"]);
+  });
+
+  it("muestra el capital corrido de cada pago cuando la cuota comparte el saldo final", () => {
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 50408, numero_cuota: 33, pagado: true, abono_capital: "198.70", total_restante: "25163.02" },
+      { pago_id: 137961, numero_cuota: 34, pagado: true, abono_capital: "0.00", abono_interes: "377.45", total_restante: "24418.79" },
+      { pago_id: 143511, numero_cuota: 34, pagado: true, abono_capital: "544.53", abono_seguro: "183.67", total_restante: "24418.79" },
+      { pago_id: 50409, numero_cuota: 34, pagado: true, abono_capital: "199.70", total_restante: "24418.79" },
+      { pago_id: 147279, numero_cuota: 35, pagado: true, abono_capital: "0.00", abono_interes: "366.28", total_restante: "23662.05" },
+      { pago_id: 151685, numero_cuota: 35, abono_capital: "407.04", abono_seguro: "171.16", total_restante: "23662.05" },
+      { pago_id: 50410, numero_cuota: 35, pagado: true, abono_capital: "349.70", total_restante: "23662.05" },
+      { pago_id: 159296, numero_cuota: 36, pagado: true, abono_capital: "0.00", abono_interes: "200.00", total_restante: "22892.60" },
+      { pago_id: 159297, numero_cuota: 36, pagado: true, abono_capital: "0.00", abono_interes: "154.93", total_restante: "22892.60" },
+      { pago_id: 159777, numero_cuota: 36, pagado: true, abono_capital: "472.75", abono_seguro: "46.45", total_restante: "22892.60" },
+    ]);
+
+    expect(rows.map((p) => p.total_restante)).toEqual([
+      "25163.02",
+      "25163.02",
+      "24618.49",
+      "24418.79",
+      "24418.79",
+      "24011.75",
+      "23662.05",
+      "23662.05",
+      "23662.05",
+      "23189.30",
+    ]);
   });
 
   it("parcial normal (registerPayment): el cierre solo-capital hereda el saldo de la hermana y SÍ se resta", () => {

@@ -169,6 +169,7 @@ const getEstadoCuentaOtrosRubros = (pago: EstadoCuentaPagoRow) =>
 
 export function shouldIncludeEstadoCuentaPayment(pago: EstadoCuentaPagoRow) {
   if (pago.paymentFalse === true) return false;
+  if (pago.validationStatus === "pending") return false;
   if (pago.pagado === true) return true;
 
   const abonoCapital = Number(pago.abono_capital || 0);
@@ -202,19 +203,40 @@ export function sortEstadoCuentaPayments<T extends EstadoCuentaPagoRow>(pagos: T
 
 export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(pagos: T[]) {
   let capitalRestante: Big | null = null;
-
-  // Una fila de abono a capital puro "ya viene neta" (la sync con el Excel
-  // escribe en todos los pagos de la cuota el saldo neto de sus abonos) cuando
-  // su total_restante == saldo al inicio de la cuota − Σ abono_capital de la
-  // cuota HASTA esta fila (prefijo, en orden de pago). Con prefijo:
-  //  - un cierre de parcial normal (registerPayment hereda el total_restante
-  //    de la hermana sin restar su capital) no cumple y se le sigue restando;
-  //  - un abono agregado DESPUÉS de la sync tampoco cumple (el snapshot no lo
-  //    incluye) y se resta normal, sin invalidar a las filas ya netas.
-  // Caso 01010214106990 cuota 35: el PDF mostraba 45,434.39 en vez de 47,874.89.
   let cuotaActual: string | null = null;
   let saldoInicioCuota: Big | null = null;
   let abonosAcumCuota = new Big(0);
+  let cuotaVieneNeta = false;
+
+  const getCuotaNeta = (key: string, saldoInicio?: Big) => {
+    if (!key) return null;
+    const filas = pagos.filter((p) => String(p.numero_cuota ?? "") === key);
+    const abonos = filas.reduce(
+      (acc, p) => acc.plus(p.abono_capital || 0),
+      new Big(0),
+    );
+    const snapshot = [...filas]
+      .reverse()
+      .map((p) => new Big(p.total_restante || 0))
+      .find((total) => total.gt(0));
+    if (!snapshot) return null;
+
+    let prefijo = new Big(0);
+    const snapshotCoincideConPrefijo =
+      saldoInicio !== undefined &&
+      filas.some((p) => {
+        prefijo = prefijo.plus(p.abono_capital || 0);
+        return snapshot.minus(saldoInicio.minus(prefijo)).abs().lte(0.05);
+      });
+
+    return {
+      apertura: saldoInicio ?? snapshot.plus(abonos),
+      esNeta:
+        saldoInicio === undefined ||
+        snapshot.minus(saldoInicio.minus(abonos)).abs().lte(0.05) ||
+        !snapshotCoincideConPrefijo,
+    };
+  };
 
   return pagos.map((pago) => {
     const abonoCapital = new Big(pago.abono_capital || 0);
@@ -226,23 +248,19 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
     const key = String(pago.numero_cuota ?? "");
 
     if (capitalRestante === null) {
-      capitalRestante = snapshotConfiable
-        ? totalRestanteFila
-        : totalRestanteFila.plus(abonoCapital);
-      // Primera cuota visible sin saldo previo: su apertura se reconstruye como
-      // snapshot + Σ abonos de la cuota (el snapshot ya es post-pago).
+      const cuotaNeta = getCuotaNeta(key);
+      capitalRestante = cuotaNeta?.apertura ??
+        (snapshotConfiable
+          ? totalRestanteFila
+          : totalRestanteFila.plus(abonoCapital));
       cuotaActual = key;
-      saldoInicioCuota = snapshotConfiable
-        ? totalRestanteFila.plus(
-            pagos
-              .filter((p) => String(p.numero_cuota ?? "") === key)
-              .reduce((acc, p) => acc.plus(p.abono_capital || 0), new Big(0)),
-          )
-        : capitalRestante;
+      saldoInicioCuota = capitalRestante;
+      cuotaVieneNeta = cuotaNeta?.esNeta ?? false;
       abonosAcumCuota = new Big(0);
     } else if (key !== cuotaActual) {
       cuotaActual = key;
       saldoInicioCuota = capitalRestante;
+      cuotaVieneNeta = getCuotaNeta(key, capitalRestante)?.esNeta ?? false;
       abonosAcumCuota = new Big(0);
     }
     abonosAcumCuota = abonosAcumCuota.plus(abonoCapital);
@@ -252,9 +270,11 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
       totalRestanteFila.gt(0) &&
       totalRestanteFila.minus(saldoInicioCuota!.minus(abonosAcumCuota)).abs().lte(0.05);
 
-    capitalRestante = snapshotConfiable || abonoYaRestado
-      ? totalRestanteFila
-      : capitalRestante.minus(abonoCapital);
+    capitalRestante = cuotaVieneNeta
+      ? capitalRestante.minus(abonoCapital)
+      : snapshotConfiable || abonoYaRestado
+        ? totalRestanteFila
+        : capitalRestante.minus(abonoCapital);
 
     return {
       ...pago,

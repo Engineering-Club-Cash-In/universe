@@ -6,6 +6,7 @@ import { authClient } from "@/lib/auth";
 import { useNavigate } from "@tanstack/react-router";
 import { registerExternalUserAuth } from "@/features/Profile/services/unifiedService";
 import { conflictoDeRegistro } from "@/features/Profile/services/registroExterno.errors";
+import { recordarSiQuedoSinDpi } from "@/features/Profile/services/avisoDpiPendiente";
 import {
   decidirAlta,
   mensajeDeAltaFallida,
@@ -147,12 +148,33 @@ export const useRegister = () => {
         // Registrar en CRM o Cartera según tipo. La variante autenticada usa la
         // sesión recién creada y es la que deja el rol y el DPI en la cuenta.
         try {
-          await registerExternalUserAuth({
+          // La respuesta ya no se tira. Un 200 no siempre deja DPI en la
+          // cuenta: cuando el correo ya tiene una ficha que un asesor abrió sin
+          // DPI, el CRM da el acceso pero no escribe el dato —ahí solo puede
+          // ponerlo un humano— y el servidor respeta esa decisión. Descartar el
+          // resultado y navegar al perfil dejaba a la persona frente a OTRO
+          // formulario de DPI en blanco, sin la explicación ni la salida por
+          // soporte que sí tienen los caminos de Google y de completar perfil,
+          // reenviando el mismo valor para nada.
+          const resultado = await registerExternalUserAuth({
             userType: values.userType,
             fullName: values.fullName,
             email: values.email,
             dpi: values.dpi,
             phone: values.phone,
+          });
+
+          // Se navega al perfil en los DOS casos —la cuenta existe y la persona
+          // ya tiene acceso—; lo que cambia es con qué la recibe el perfil. El
+          // aviso viaja por el almacén y no por el estado de React porque este
+          // camino cruza de ruta y además tiene que aguantar una recarga.
+          // La decisión la toma el mismo módulo que los otros dos caminos: una
+          // sola definición de "quedó sin DPI", con su regla de mirar
+          // `identity.dpi` y nunca `dpiRegistradoEnLead`.
+          recordarSiQuedoSinDpi({
+            respuesta: resultado,
+            correo: values.email,
+            tipoSolicitado: values.userType,
           });
         } catch (error) {
           console.error("Error al registrar usuario adicional:", error);

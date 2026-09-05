@@ -95,3 +95,22 @@ export function resolveCorsOrigin(params: {
 
   return solicitado && trustedOrigins.includes(solicitado) ? solicitado : null;
 }
+
+/**
+ * ¿La variable declara MÁS DE UN origen?
+ *
+ * Existe porque no todas las variables de origen valen para lo mismo. Una lista
+ * está bien donde se usa como permiso (`CORS_ORIGIN`), y está mal donde se usa
+ * como BASE de una URL: `FRONTEND_URL` cae por default a `CORS_ORIGIN`, así que
+ * un despliegue en dos dominios que solo declare `CORS_ORIGIN` copia la lista
+ * entera en el enlace del correo de recuperación de contraseña y produce
+ * `https://a,https://b/reset-password?token=…`, que el navegador no rechaza:
+ * lo resuelve a un host inexistente y el clic muere en DNS.
+ *
+ * Se apoya en `parseOriginList`, así que una coma suelta o un dominio repetido
+ * no cuentan, y las entradas inválidas tampoco: ese error tiene su propia
+ * comprobación, con su propio mensaje.
+ */
+export function declaraVariosOrigenes(valor: string | null | undefined): boolean {
+  return parseOriginList(valor).origenes.length > 1;
+}

@@ -1,6 +1,6 @@
 import dotenv from "dotenv";
 
-import { parseOriginList } from "../lib/origins";
+import { declaraVariosOrigenes, parseOriginList } from "../lib/origins";
 
 dotenv.config();
 
@@ -101,6 +101,32 @@ function validateEnv(): EnvConfig {
     throw new Error(
       `❌ Origen inválido en ${origenesInvalidos.join(", ")}: se espera ` +
         `esquema://host[:puerto] (varios se separan con comas).`
+    );
+  }
+
+  // `FRONTEND_URL` no es una lista de permisos como `CORS_ORIGIN`: es la BASE
+  // del enlace del correo de recuperación de contraseña (`lib/auth.ts`), así
+  // que tiene que ser UN origen. Y cae por default a `CORS_ORIGIN`, de modo que
+  // un despliegue en dos dominios que solo declare esa variable copia la lista
+  // entera y manda `https://a,https://b/reset-password?token=…`. El navegador
+  // no lo rechaza: lo resuelve a un host que no existe ("a,https"), el clic
+  // muere en DNS y la recuperación de contraseña queda caída al 100% sin un
+  // solo error del lado servidor.
+  //
+  // Se tumba el arranque en vez de quedarse con el primer origen a propósito, y
+  // es el mismo criterio que ya aplica la comprobación de esquema de arriba:
+  // elegir uno arrancaría bien y mandaría a todo el mundo al dominio que nadie
+  // declaró como canónico —el orden de `CORS_ORIGIN` es una lista de permisos,
+  // no una jerarquía—, y nadie reportaría nunca nada. Esto falla en la consola
+  // de despliegue, con el nombre de la variable, y se arregla en dos minutos.
+  //
+  // Se valida `frontendUrl` y no "CORS_ORIGIN tiene comas" para atrapar con una
+  // sola comprobación a quien declare la lista directamente en FRONTEND_URL.
+  if (declaraVariosOrigenes(frontendUrl)) {
+    throw new Error(
+      `❌ FRONTEND_URL debe ser UN solo origen (hoy: "${frontendUrl}").\n` +
+        `Es la base del enlace de recuperación de contraseña, no una lista de permisos.\n` +
+        `Con CORS_ORIGIN multi-dominio, declara FRONTEND_URL con el dominio canónico del portal.`
     );
   }
 

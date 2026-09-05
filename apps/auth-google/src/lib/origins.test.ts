@@ -2,7 +2,12 @@ import { describe, expect, it } from "bun:test";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 
-import { normalizeOrigin, parseOriginList, resolveCorsOrigin } from "./origins";
+import {
+  declaraVariosOrigenes,
+  normalizeOrigin,
+  parseOriginList,
+  resolveCorsOrigin,
+} from "./origins";
 
 const PORTAL_A = "https://portal.clubcashin.com";
 const PORTAL_B = "https://inversionistas.clubcashin.com";
@@ -158,5 +163,39 @@ describe("cabecera Access-Control-Allow-Origin con Hono", () => {
     });
 
     expect(res.headers.get("vary")).toContain("Origin");
+  });
+});
+
+describe("declaraVariosOrigenes", () => {
+  // El caso que motiva la comprobación: `FRONTEND_URL` cae por default a
+  // `CORS_ORIGIN`, así que un despliegue en dos dominios que solo declara
+  // `CORS_ORIGIN` copia la lista ENTERA en la base del enlace de recuperación
+  // de contraseña. El correo sale con
+  // `https://a,https://b/reset-password?token=…`, que el navegador resuelve a
+  // un host inexistente.
+  it("reconoce una lista de dos dominios", () => {
+    expect(declaraVariosOrigenes(`${PORTAL_A},${PORTAL_B}`)).toBe(true);
+    expect(declaraVariosOrigenes(` ${PORTAL_A} , ${PORTAL_B} `)).toBe(true);
+  });
+
+  it("no se queja de un solo origen", () => {
+    expect(declaraVariosOrigenes(PORTAL_A)).toBe(false);
+    expect(declaraVariosOrigenes(`${PORTAL_A}/`)).toBe(false);
+  });
+
+  // Una coma suelta o un valor repetido no declaran dos dominios distintos:
+  // `parseOriginList` ya canoniza y deduplica, así que no hay nada ambiguo que
+  // bloquear.
+  it("no cuenta comas vacías ni repetidos", () => {
+    expect(declaraVariosOrigenes(`${PORTAL_A},`)).toBe(false);
+    expect(declaraVariosOrigenes(`${PORTAL_A},${PORTAL_A}`)).toBe(false);
+  });
+
+  // Un valor inválido no es "varios orígenes": ese error ya lo reporta la
+  // comprobación de esquema, que corre antes y con su propio mensaje.
+  it("ignora las entradas que no son un origen", () => {
+    expect(declaraVariosOrigenes("portal.cci.com")).toBe(false);
+    expect(declaraVariosOrigenes("")).toBe(false);
+    expect(declaraVariosOrigenes(undefined)).toBe(false);
   });
 });

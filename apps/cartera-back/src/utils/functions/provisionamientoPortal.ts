@@ -175,8 +175,12 @@ export const decidirProvisionamiento = (
  * no mira el rol y cualquiera se fabrica esa sesión (el sign-up de Better Auth
  * está abierto y sin verificación de correo). Como las dos llegan a cartera con
  * el MISMO token de servicio ADMIN, dentro de cartera el alta anónima y la de
- * back office son indistinguibles por identidad: el permiso tiene que venir del
- * PAYLOAD, no de quién firma.
+ * back office son indistinguibles por identidad: contra ESE camino el permiso
+ * tiene que venir del PAYLOAD, porque mirar quién firma no distingue nada.
+ *
+ * Es la MITAD del permiso, no todo. La otra mitad —quién firma sí importa
+ * cuando el token NO viene de auth-google— la pone `origenPuedeProvisionar`
+ * más abajo; `permisoParaProvisionar` es el que hay que llamar.
  *
  * Funciona porque el registro público arma un objeto FIJO con
  * `{nombre, dpi, email}` y no reenvía llaves del cuerpo original: nadie de
@@ -191,4 +195,60 @@ export const solicitaProvisionamiento = (cuerpo: unknown): boolean => {
   if (!cuerpo || typeof cuerpo !== "object") return false;
   const valor = (cuerpo as Record<string, unknown>).provisionar_portal;
   return valor === true || valor === "true";
+};
+
+/**
+ * ¿Quién llamó puede hacer que salga un correo con contraseña?
+ *
+ * La llave `provisionar_portal` dice que el alta lo PIDIÓ; esto dice si quien
+ * la mandó tenía con qué pedirlo. Son dos preguntas distintas y por eso son dos
+ * motivos distintos en la respuesta: `no_solicitado` manda a revisar el
+ * payload, `origen_no_autorizado` manda a revisar el token.
+ *
+ * POR QUÉ ADMIN
+ * -------------
+ * `POST /investor` corre bajo `authMiddleware`, que solo verifica la firma del
+ * JWT: no mira el rol. O sea que hasta aquí CUALQUIER token vivo de cartera
+ * —el de un ASESOR, el de CONTA, uno robado de una laptop— podía provocar que
+ * se creara una cuenta del portal y se mandara su contraseña al correo que
+ * viniera en el payload. La API era más ancha que su propia UI: la pantalla de
+ * inversionistas de carteraFront ya es solo-ADMIN (App.tsx:121), y la ruta
+ * hermana que abre accesos a mano exige ADMIN explícitamente
+ * (otorgarAccesoPortal.ts:50). Esto empareja las tres.
+ *
+ * LO QUE ESTO **NO** HACE
+ * -----------------------
+ * NO defiende contra un ADMIN falso. `POST /auth/admin` no tiene guard y
+ * cualquiera se fabrica un ADMIN real en la base (auth.ts:12 y
+ * controllers/auth.ts:22-41); contra eso ningún chequeo de rol sirve, porque
+ * el atacante ES ADMIN. Ese agujero es PREEXISTENTE, vive fuera de este módulo
+ * y se cierra en `routers/auth.ts`, no aquí.
+ *
+ * Tampoco sirve un secreto compartido en su lugar: el otro llamador legítimo
+ * es carteraFront, una SPA de Vite (`import.meta.env.VITE_BACK_URL`,
+ * interceptor.ts:4-5), y todo lo que ella lleve viaja en un bundle público.
+ */
+export const origenPuedeProvisionar = (
+  usuario: { role?: unknown } | null | undefined,
+): boolean => usuario?.role === "ADMIN";
+
+export type PermisoProvisionamiento =
+  | "provisionar"
+  | "no_solicitado"
+  | "origen_no_autorizado";
+
+/**
+ * Las dos preguntas juntas, en el orden en que importan.
+ *
+ * El "no lo pidió" gana sobre el "no puede": un alta que ni siquiera mandó la
+ * llave no es un intento de saltarse un permiso, y reportarla como problema de
+ * rol mandaría a operaciones a pedir accesos que no le faltan.
+ */
+export const permisoParaProvisionar = (
+  cuerpo: unknown,
+  usuario: { role?: unknown } | null | undefined,
+): PermisoProvisionamiento => {
+  if (!solicitaProvisionamiento(cuerpo)) return "no_solicitado";
+  if (!origenPuedeProvisionar(usuario)) return "origen_no_autorizado";
+  return "provisionar";
 };

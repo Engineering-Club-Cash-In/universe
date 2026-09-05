@@ -311,3 +311,22 @@ export const resultadoNoSolicitado = (
   inversionistaId: number,
 ): ResultadoProvisionamientoCartera =>
   resultado(inversionistaId, "omitida", "no_solicitado");
+
+/**
+ * El alta PIDIÓ acceso al portal, pero el token que la mandó no es de ADMIN.
+ *
+ * Se degrada a omisión en vez de tumbar el alta, por la misma razón que todo
+ * este módulo no tira: la fila del inversionista YA está escrita cuando se
+ * decide el acceso. Devolver 403 aquí dejaría al operador creyendo que el alta
+ * falló, y su reintento moriría en el guard de duplicados (409) sin volver a
+ * pasar nunca por el provisionamiento.
+ *
+ * El motivo es PROPIO y no `no_solicitado` a propósito: son dos arreglos
+ * distintos. `no_solicitado` se arregla mandando la llave; este se arregla con
+ * un ADMIN apretando el botón de acceso al portal, que es justo la ruta que
+ * existe para eso (otorgarAccesoPortal.ts).
+ */
+export const resultadoOrigenNoAutorizado = (
+  inversionistaId: number,
+): ResultadoProvisionamientoCartera =>
+  resultado(inversionistaId, "omitida", "origen_no_autorizado");

@@ -5,6 +5,7 @@ import {
   type FilaInversionista,
   normalizarDpiParaComparar,
   pareceSociedad,
+  permisoParaProvisionar,
   solicitaProvisionamiento,
 } from "./provisionamientoPortal";
 
@@ -208,5 +209,45 @@ describe("solicitaProvisionamiento", () => {
     expect(solicitaProvisionamiento({ provisionar_portal: false })).toBe(false);
     expect(solicitaProvisionamiento({ provisionar_portal: "false" })).toBe(false);
     expect(solicitaProvisionamiento({ provisionar_portal: 1 })).toBe(false);
+  });
+});
+
+describe("permisoParaProvisionar", () => {
+  const admin = { role: "ADMIN" };
+
+  it("un ADMIN que PIDE acceso, provisiona", () => {
+    expect(permisoParaProvisionar({ provisionar_portal: true }, admin)).toBe("provisionar");
+    expect(permisoParaProvisionar({ provisionar_portal: "true" }, admin)).toBe("provisionar");
+  });
+
+  it("sin la llave en el payload no se provisiona, aunque llame un ADMIN", () => {
+    // No pedirlo NO es un problema de permiso: se nombra distinto para que
+    // operaciones no salga a buscar un rol cuando lo que faltó fue la llave.
+    expect(permisoParaProvisionar({ nombre: "Ana" }, admin)).toBe("no_solicitado");
+    expect(permisoParaProvisionar({}, admin)).toBe("no_solicitado");
+  });
+
+  it("un token que NO es ADMIN no dispara correos con contraseña", () => {
+    // La pantalla de inversionistas de carteraFront ya es solo-ADMIN
+    // (App.tsx:121) y la ruta hermana de este mismo PR exige ADMIN
+    // (otorgarAccesoPortal.ts:50). POST /investor no exigía nada: cualquier
+    // token vivo de cartera —ASESOR, CONTA, uno robado— podía provocar que
+    // saliera una cuenta del portal con la contraseña al correo del payload.
+    expect(permisoParaProvisionar({ provisionar_portal: true }, { role: "ASESOR" })).toBe(
+      "origen_no_autorizado",
+    );
+    expect(permisoParaProvisionar({ provisionar_portal: true }, { role: "CONTA" })).toBe(
+      "origen_no_autorizado",
+    );
+    expect(permisoParaProvisionar({ provisionar_portal: true }, null)).toBe(
+      "origen_no_autorizado",
+    );
+    expect(permisoParaProvisionar({ provisionar_portal: true }, undefined)).toBe(
+      "origen_no_autorizado",
+    );
+    // Nada de comparaciones laxas: "admin" en minúsculas no es el rol.
+    expect(permisoParaProvisionar({ provisionar_portal: true }, { role: "admin" })).toBe(
+      "origen_no_autorizado",
+    );
   });
 });

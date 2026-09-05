@@ -37,8 +37,12 @@ import { getSignedDocumentUrl } from "../utils/functions/uploadsFiles";
 import {
   provisionarInversionista,
   resultadoNoSolicitado,
+  resultadoOrigenNoAutorizado,
 } from "../services/portalProvisioning";
-import { solicitaProvisionamiento } from "../utils/functions/provisionamientoPortal";
+import {
+  permisoParaProvisionar,
+  type PermisoProvisionamiento,
+} from "../utils/functions/provisionamientoPortal";
 import { buscarRepresentanteEnCartera } from "../utils/functions/buscarRepresentante";
 import { calcularAjusteCompras } from "../utils/comprasAjuste";
 import { eq, and, or, sql, inArray, ilike, like, desc, asc, count, SQL, isNull, isNotNull, ne } from "drizzle-orm";
@@ -404,7 +408,7 @@ export const repLegalExiste = async (valor: string): Promise<boolean> => {
   return filas.length > 0;
 };
 
-export const insertInvestor = async ({ body, set }: any) => {
+export const insertInvestor = async ({ body, set, user }: any) => {
   try {
     const inversionistasToUpsert = Array.isArray(body) ? body : [body];
 
@@ -563,9 +567,11 @@ export const insertInvestor = async ({ body, set }: any) => {
     const resultados: any[] = [];
     // Solo las filas INSERTADAS en esta pasada: son las únicas que pueden
     // necesitar una cuenta nueva o disparar el aviso a un representante.
-    // Cada una viaja con si su alta PIDIÓ acceso al portal: el permiso es del
-    // payload, no de quién firma la petición (ver `solicitaProvisionamiento`).
-    const recienCreados: { fila: any; solicitado: boolean }[] = [];
+    // Cada una viaja con el permiso ya resuelto: la llave del payload dice que
+    // el alta lo PIDIÓ, y el rol del token dice si quien la mandó podía pedirlo
+    // (ver `permisoParaProvisionar`). Son dos negativas distintas y se guardan
+    // como una sola respuesta para que el motivo llegue intacto a `provisioning`.
+    const recienCreados: { fila: any; permiso: PermisoProvisionamiento }[] = [];
 
     // 🔥 PROCESAR UNO POR UNO para manejar INSERT vs UPDATE
     for (const inv of inversionistasToUpsert) {
@@ -740,7 +746,7 @@ export const insertInvestor = async ({ body, set }: any) => {
         // hacerlo aquí mandaría el aviso de empresa agregada en cada edición.
         recienCreados.push({
           fila: inserted,
-          solicitado: solicitaProvisionamiento(inv),
+          permiso: permisoParaProvisionar(inv, user),
         });
       }
     }
@@ -751,21 +757,35 @@ export const insertInvestor = async ({ body, set }: any) => {
     // reintento muere en el guard de duplicados sin volver a pasar por aquí.
     // El resultado viaja en la respuesta; el job diario recoge lo que falló.
     const provisioning = await Promise.all(
-      recienCreados.map(({ fila, solicitado }) =>
-        // El guard: sin `provisionar_portal` en el payload NO se crea cuenta,
-        // no sale correo con contraseña y no se ocupa un DPI en `users`.
+      recienCreados.map(({ fila, permiso }) => {
+        // Guard 1 — la LLAVE: sin `provisionar_portal` en el payload NO se crea
+        // cuenta, no sale correo con contraseña y no se ocupa un DPI en `users`.
         // Cierra el camino anónimo (POST /api/unified/register-external, sin
-        // requireAuth) sin depender del orden de merge de otro PR: esa ruta
-        // arma un objeto FIJO {nombre, dpi, email} y no puede colar la llave.
-        // No sirve mirar el rol de quien llama: todo auth-google entra con el
-        // mismo token de servicio ADMIN, así que el alta pública y la de back
-        // office son indistinguibles por identidad.
-        solicitado
-          ? provisionarInversionista(fila, {
-              buscarRepresentante: buscarRepresentanteEnCartera,
-            })
-          : Promise.resolve(resultadoNoSolicitado(fila.inversionista_id)),
-      ),
+        // requireAuth): esa ruta arma un objeto FIJO {nombre, dpi, email} y no
+        // puede colar la llave. Contra auth-google el rol no sirve de nada —todo
+        // entra con el mismo token de servicio ADMIN—, así que este guard es el
+        // único que cubre ese camino.
+        if (permiso === "no_solicitado") {
+          return Promise.resolve(resultadoNoSolicitado(fila.inversionista_id));
+        }
+
+        // Guard 2 — el ROL: mandar la llave con un token que no es de ADMIN ya
+        // no dispara nada. `authMiddleware` solo verifica la firma, así que sin
+        // esto cualquier token vivo de cartera (ASESOR, CONTA, uno robado) hacía
+        // salir una cuenta del portal con la contraseña al correo del payload,
+        // aunque la pantalla que lo ofrece sea solo-ADMIN (App.tsx:121).
+        // OJO: esto NO tapa el ADMIN auto-emitido de `POST /auth/admin`, que es
+        // un agujero preexistente y ajeno a este archivo.
+        if (permiso === "origen_no_autorizado") {
+          return Promise.resolve(
+            resultadoOrigenNoAutorizado(fila.inversionista_id),
+          );
+        }
+
+        return provisionarInversionista(fila, {
+          buscarRepresentante: buscarRepresentanteEnCartera,
+        });
+      }),
     );
 
     set.status = 201;

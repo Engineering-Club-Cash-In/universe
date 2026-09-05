@@ -3,6 +3,7 @@ import {
   consultarAccesoInversionista,
   provisionarInversionista,
   resultadoNoSolicitado,
+  resultadoOrigenNoAutorizado,
 } from "./portalProvisioning";
 
 const OPTS_BASE = {
@@ -184,6 +185,30 @@ describe("resultadoNoSolicitado", () => {
       },
       advertencias: [],
       motivo: "no_solicitado",
+    });
+  });
+});
+
+describe("resultadoOrigenNoAutorizado", () => {
+  it("el alta NO se cae: se crea el inversionista y se dice por qué no hubo cuenta", () => {
+    // Es el modo de fallo aceptable: la fila ya está escrita cuando se decide
+    // el acceso, así que negar el permiso NUNCA puede convertirse en un 500
+    // sobre un inversionista que sí quedó creado. Sale como omisión con motivo
+    // propio —distinto de `no_solicitado`— para que se vea que faltó PERMISO,
+    // no la llave del payload, y un ADMIN lo resuelva con el botón de acceso.
+    expect(resultadoOrigenNoAutorizado(7)).toEqual({
+      inversionistaId: 7,
+      estado: "omitida",
+      usuarioEmail: null,
+      resueltoPor: null,
+      correo: {
+        enviado: false,
+        plantilla: null,
+        redirigido: false,
+        destinatarioReal: null,
+      },
+      advertencias: [],
+      motivo: "origen_no_autorizado",
     });
   });
 });

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test";
 
 const existingInvestor = {
   inversionista_id: 10,
@@ -392,6 +392,93 @@ describe("insertInvestor", () => {
     expect(set.status).toBe(400);
     expect(result.errores?.[0]).toContain("DPI de representante legal");
     expect(insertWasCalled).toBeFalse();
+  });
+
+  // ── Quién puede hacer que salga un correo con contraseña ──────────────────
+  //
+  // `authMiddleware` solo verifica la firma del JWT (midleware.ts:16-22): no
+  // mira el rol. Así que hasta aquí CUALQUIER token vivo de cartera podía
+  // mandar `provisionar_portal` y provocar una cuenta del portal con la
+  // contraseña al correo del payload — aunque la única pantalla que lo ofrece
+  // sea solo-ADMIN (App.tsx:121) y la ruta hermana exija ADMIN
+  // (otorgarAccesoPortal.ts:50).
+  //
+  // El discriminante de estas pruebas es el fail-closed de
+  // `portalProvisioning`: sin AUTH_GOOGLE_URL/PORTAL_PROVISIONING_SECRET la
+  // llamada ni sale a la red y devuelve `provisionamiento_no_configurado`. Ver
+  // ese motivo prueba que SÍ se intentó; ver `origen_no_autorizado` prueba que
+  // ni se intentó.
+  describe("permiso de provisionamiento", () => {
+    const authGoogleUrl = process.env.AUTH_GOOGLE_URL;
+    const secreto = process.env.PORTAL_PROVISIONING_SECRET;
+
+    beforeEach(() => {
+      delete process.env.AUTH_GOOGLE_URL;
+      delete process.env.PORTAL_PROVISIONING_SECRET;
+    });
+
+    afterAll(() => {
+      if (authGoogleUrl === undefined) delete process.env.AUTH_GOOGLE_URL;
+      else process.env.AUTH_GOOGLE_URL = authGoogleUrl;
+      if (secreto === undefined) delete process.env.PORTAL_PROVISIONING_SECRET;
+      else process.env.PORTAL_PROVISIONING_SECRET = secreto;
+    });
+
+    const altaConPortal = (user: unknown) =>
+      insertInvestor({
+        body: {
+          operation: "CREATE",
+          nombre: "Nueva Persona",
+          email: "nueva@example.com",
+          provisionar_portal: true,
+        },
+        set: { status: 200 },
+        user,
+      });
+
+    it("un ASESOR no dispara el provisionamiento, y el alta NO se cae", async () => {
+      const result = await altaConPortal({ role: "ASESOR" });
+
+      // El inversionista SÍ queda creado: negar el permiso nunca puede
+      // convertirse en un 500 sobre una fila que ya está escrita.
+      expect(insertWasCalled).toBeTrue();
+      expect(result.data).toHaveLength(1);
+      expect(result.provisioning?.[0].estado).toBe("omitida");
+      expect(result.provisioning?.[0].motivo).toBe("origen_no_autorizado");
+    });
+
+    it("un token sin rol tampoco", async () => {
+      const result = await altaConPortal(undefined);
+
+      expect(insertWasCalled).toBeTrue();
+      expect(result.provisioning?.[0].motivo).toBe("origen_no_autorizado");
+    });
+
+    it("un ADMIN sí lo dispara", async () => {
+      const result = await altaConPortal({ role: "ADMIN" });
+
+      expect(insertWasCalled).toBeTrue();
+      // Llegó hasta el cliente de provisionamiento: se frenó por
+      // configuración, no por permiso.
+      expect(result.provisioning?.[0].motivo).toBe("provisionamiento_no_configurado");
+    });
+
+    it("sin la llave en el payload el motivo sigue siendo `no_solicitado`", async () => {
+      // No pedirlo no es un problema de permiso: si esto reportara
+      // `origen_no_autorizado`, operaciones saldría a pedir accesos que no
+      // le faltan.
+      const result = await insertInvestor({
+        body: {
+          operation: "CREATE",
+          nombre: "Nueva Persona",
+          email: "nueva@example.com",
+        },
+        set: { status: 200 },
+        user: { role: "ASESOR" },
+      });
+
+      expect(result.provisioning?.[0].motivo).toBe("no_solicitado");
+    });
   });
 });
 

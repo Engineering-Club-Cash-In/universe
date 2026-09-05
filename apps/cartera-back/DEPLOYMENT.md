@@ -49,3 +49,14 @@ auth-google deliberately has no equivalent gate. `src/config/env.ts` reads the s
 with a `|| ""` fallback and only warns, because losing login is worse than losing
 provisioning; the endpoint closes itself with a 503 instead. A CI gate there would
 block a login hotfix, which is exactly what that decision avoids.
+
+### The service account behind `CARTERA_USER` must be `ADMIN`
+
+`POST /investor` only provisions a portal account when the caller's cartera JWT
+carries `role: "ADMIN"` (`src/utils/functions/provisionamientoPortal.ts`). The CRM
+server reaches cartera through `CARTERA_USER` / `CARTERA_PASSWORD`
+(`apps/crm/apps/server/src/services/cartera-auth.service.ts`), so if that account is
+`ASESOR` or `CONTA`, investors created from the CRM are still created — the alta never
+fails — but they come back with `provisioning[].motivo = "origen_no_autorizado"` and no
+portal account. Verify the role before deploying; the recovery path is an ADMIN using
+the portal-access button in carteraFront.

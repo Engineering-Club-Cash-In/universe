@@ -1,16 +1,17 @@
+import { createHash } from "node:crypto";
 import { google } from "@ai-sdk/google";
 import { ORPCError } from "@orpc/server";
 import { generateObject } from "ai";
 import { and, eq, isNull, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { opportunityDocuments } from "../db/schema/documents";
 import {
 	coDebtors,
 	creditAnalysis,
 	leads,
 	opportunities,
 } from "../db/schema/crm";
+import { opportunityDocuments } from "../db/schema/documents";
 import {
 	BANK_ANALYSIS_PROMPT,
 	type BankStatementAnalysis,
@@ -39,6 +40,11 @@ import {
 	uploadFileToR2,
 	verifyUploadedDocumentInR2,
 } from "../lib/storage";
+import {
+	assertUploadedBankStatementsValidated,
+	DocumentIntegrityError,
+	linkUploadedValidationToDocument,
+} from "../services/document-integrity";
 
 const MAX_AI_ATTEMPTS = 2;
 const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024; // 15MB por archivo
@@ -88,7 +94,9 @@ function convertAnalysisToQuetzales(
 			promedio_ingresos_variables: toQuetzales(
 				promedio_mensual.promedio_ingresos_variables,
 			),
-			promedio_gastos_fijos: toQuetzales(promedio_mensual.promedio_gastos_fijos),
+			promedio_gastos_fijos: toQuetzales(
+				promedio_mensual.promedio_gastos_fijos,
+			),
 			promedio_gastos_variables: toQuetzales(
 				promedio_mensual.promedio_gastos_variables,
 			),
@@ -117,6 +125,11 @@ export const bankAnalysisRouter = {
 						)
 						.min(1)
 						.max(9),
+					integrityValidationIds: z
+						.array(z.string().uuid())
+						.min(1)
+						.max(9)
+						.optional(),
 					annualRate: z.number().default(0.18),
 					termMonths: z.number().int().min(12).max(120).default(60),
 					maxDebtRatio: z.number().min(0).max(1).default(0.2),
@@ -131,7 +144,16 @@ export const bankAnalysisRouter = {
 				})
 				.refine((data) => !(data.leadId && data.coDebtorId), {
 					message: "No puede analizar un lead y un co-deudor a la vez",
-				}),
+				})
+				.refine(
+					(data) =>
+						!data.leadId ||
+						data.integrityValidationIds?.length === data.files.length,
+					{
+						message:
+							"Valide la legitimidad de todos los documentos antes de analizar la capacidad de pago",
+					},
+				),
 		)
 		.handler(async ({ input, context }) => {
 			const isForLead = !!input.leadId;
@@ -229,6 +251,7 @@ export const bankAnalysisRouter = {
 				// 2. Validar archivos: descargar de R2 y verificar formato PDF
 				const downloadedFiles: {
 					name: string;
+					key: string;
 					buffer: Buffer;
 					mimeType: string;
 					size: number;
@@ -256,10 +279,38 @@ export const bankAnalysisRouter = {
 
 					downloadedFiles.push({
 						name: file.name,
+						key: uploadedFile.key,
 						buffer,
 						mimeType: uploadedFile.mimeType,
 						size: uploadedFile.size,
 					});
+				}
+
+				if (isForLead) {
+					if (!input.opportunityId) {
+						throw new ORPCError("BAD_REQUEST", {
+							message: "Debe proporcionar opportunityId para analizar un lead",
+						});
+					}
+					try {
+						await assertUploadedBankStatementsValidated({
+							opportunityId: input.opportunityId,
+							validationIds: input.integrityValidationIds ?? [],
+							files: downloadedFiles.map((file) => ({
+								filePath: file.key,
+								contentSha256: createHash("sha256")
+									.update(file.buffer)
+									.digest("hex"),
+							})),
+						});
+					} catch (error) {
+						if (error instanceof DocumentIntegrityError) {
+							throw new ORPCError("PRECONDITION_FAILED", {
+								message: error.message,
+							});
+						}
+						throw error;
+					}
 				}
 
 				// 3. Incremento atómico del contador para evitar race conditions
@@ -511,7 +562,8 @@ export const bankAnalysisRouter = {
 						});
 
 						for (let slot = 0; slot < documentSlots.length; slot++) {
-							const documentType = getBankStatementOpportunityDocumentType(slot);
+							const documentType =
+								getBankStatementOpportunityDocumentType(slot);
 							const file = filesToUpload[documentSlots[slot]];
 							if (!documentType || !file) {
 								continue;
@@ -519,7 +571,9 @@ export const bankAnalysisRouter = {
 
 							const uniqueFilename = generateUniqueFilename(file.name);
 							const { key } = await uploadFileToR2(
-								new Blob([new Uint8Array(file.buffer)], { type: file.mimeType }),
+								new Blob([new Uint8Array(file.buffer)], {
+									type: file.mimeType,
+								}),
 								uniqueFilename,
 								opportunityForDocuments.id,
 							);
@@ -543,6 +597,12 @@ export const bankAnalysisRouter = {
 
 							if (newDocument) {
 								savedDocuments.push({ id: newDocument.id, documentType });
+								await linkUploadedValidationToDocument({
+									opportunityId: opportunityForDocuments.id,
+									documentId: newDocument.id,
+									documentFilePath: key,
+									buffer: file.buffer,
+								});
 								await updateChecklistForClientDocument(
 									opportunityForDocuments.id,
 									documentType,
@@ -578,13 +638,16 @@ export const bankAnalysisRouter = {
 							),
 						);
 
-						console.error("Failed to save bank statement opportunity documents", {
-							opportunityId: opportunityForDocuments.id,
-							savedDocuments: savedDocuments.length,
-							savedFiles: savedKeys.length,
-							failedCleanups: failedCleanups.length,
-							error: error instanceof Error ? error.message : String(error),
-						});
+						console.error(
+							"Failed to save bank statement opportunity documents",
+							{
+								opportunityId: opportunityForDocuments.id,
+								savedDocuments: savedDocuments.length,
+								savedFiles: savedKeys.length,
+								failedCleanups: failedCleanups.length,
+								error: error instanceof Error ? error.message : String(error),
+							},
+						);
 					}
 
 					// El checklist solo tiene tres casillas, pero el análisis acepta hasta
@@ -637,6 +700,12 @@ export const bankAnalysisRouter = {
 
 								if (newDocument) {
 									savedExtraDocumentIds.push(newDocument.id);
+									await linkUploadedValidationToDocument({
+										opportunityId: opportunityForDocuments.id,
+										documentId: newDocument.id,
+										documentFilePath: key,
+										buffer: file.buffer,
+									});
 								}
 							}
 						} catch (error) {

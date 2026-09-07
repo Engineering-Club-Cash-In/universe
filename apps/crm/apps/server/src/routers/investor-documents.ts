@@ -114,6 +114,41 @@ export const investorDocumentsRouter = {
 			return result;
 		}),
 
+	/**
+	 * ¿De quién es este DPI o este correo? Alimenta la detección del alta: si el
+	 * dato ya es de alguien, conta no está duplicando — está por dar de alta su
+	 * empresa.
+	 *
+	 * Devuelve `null` cuando no hay nadie, que es el caso normal de un alta
+	 * corriente. No es un error y no debe tratarse como tal.
+	 */
+	identidadInversionista: crmCobrosOrInvestmentsProcedure
+		.input(
+			z.object({
+				dpi: z.string().optional(),
+				email: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const dpi = input.dpi?.trim();
+			const email = input.email?.trim();
+			if (!dpi && !email) return null;
+
+			try {
+				const result = await carteraBackClient.buscarIdentidadInversionista({
+					...(dpi ? { dpi } : {}),
+					...(email ? { email } : {}),
+				});
+				return result.data ?? null;
+			} catch (error) {
+				// La detección es una ayuda, no un requisito: si cartera no responde,
+				// el alta sigue funcionando como antes y el duplicado se rechaza en el
+				// submit. Tumbar el formulario por esto sería peor.
+				console.error("[identidadInversionista] error en cartera-back:", error);
+				return null;
+			}
+		}),
+
 	getInvestorDocumentsAdmin: crmCobrosOrInvestmentsProcedure
 		.input(
 			z.object({

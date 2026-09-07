@@ -788,6 +788,15 @@ export type MoraRecoveryMetric = {
 // HTTP CLIENT
 // ============================================================================
 
+export interface IdentidadInversionista {
+	inversionista_id: number;
+	nombre: string;
+	email: string | null;
+	dpi: string;
+	via: "directo" | "representante_de_la_sociedad";
+	sociedad: string | null;
+}
+
 export class CarteraBackClient {
 	private config: CarteraBackClientConfig;
 	private circuitBreaker: CircuitBreaker;
@@ -1415,6 +1424,26 @@ export class CarteraBackClient {
 			};
 		}>(`/inversionistas/rendimiento?${queryParams}`, { method: "GET" }, true);
 		return response;
+	}
+
+	/**
+	 * Persona dueña de un DPI o de un correo. `data: null` = no existe.
+	 *
+	 * La usa el alta del CRM para detectar que conta no está duplicando por
+	 * error, sino dando de alta la empresa de alguien que ya es inversionista.
+	 */
+	async buscarIdentidadInversionista(params: {
+		dpi?: string;
+		email?: string;
+	}): Promise<{ success: boolean; data: IdentidadInversionista | null }> {
+		const queryParams = new URLSearchParams();
+		if (params.dpi) queryParams.set("dpi", params.dpi);
+		if (params.email) queryParams.set("email", params.email);
+
+		return this.request<{
+			success: boolean;
+			data: IdentidadInversionista | null;
+		}>(`/investor/identidad?${queryParams}`, { method: "GET" }, true);
 	}
 
 	async getInvestorReport(

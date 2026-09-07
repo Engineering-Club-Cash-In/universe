@@ -97,7 +97,8 @@ export function resolveCorsOrigin(params: {
 }
 
 /**
- * ¿La variable declara MÁS DE UN origen?
+ * Devuelve el origen canónico si el valor crudo es UNA sola URL canónica, y
+ * `null` si es cualquier otra cosa.
  *
  * Existe porque no todas las variables de origen valen para lo mismo. Una lista
  * está bien donde se usa como permiso (`CORS_ORIGIN`), y está mal donde se usa
@@ -107,10 +108,54 @@ export function resolveCorsOrigin(params: {
  * `https://a,https://b/reset-password?token=…`, que el navegador no rechaza:
  * lo resuelve a un host inexistente y el clic muere en DNS.
  *
- * Se apoya en `parseOriginList`, así que una coma suelta o un dominio repetido
- * no cuentan, y las entradas inválidas tampoco: ese error tiene su propia
- * comprobación, con su propio mensaje.
+ * Mira el valor CRUDO y no la lista ya partida por comas, que es donde estaba
+ * el hueco: partir primero hace desaparecer las entradas vacías y los
+ * repetidos, así que `https://portal.example,` y
+ * `https://portal.example,https://portal.example` daban "un solo origen" y
+ * dejaban pasar la coma al enlace. Por eso la coma descalifica el valor sin
+ * más: nunca forma parte de un origen canónico, pero `new URL` sí se la traga
+ * dentro del host.
+ *
+ * Se canoniza en vez de devolver un booleano para que quien llama guarde la
+ * forma limpia: el enlace se arma concatenando, y una barra final en la
+ * variable salía como `https://portal.example//reset-password`.
+ *
+ * Lo que SÍ acepta, porque no hay ninguna duda de a dónde va la gente y sale
+ * canonizado: espacios alrededor, barra final y el host en mayúsculas. Lo que
+ * NO acepta, aunque `new URL` lo parsee: una ruta, query o fragmento. Quedarse
+ * con el origen y tirar el resto es justo el fallo silencioso que la variable
+ * quiere evitar.
  */
-export function declaraVariosOrigenes(valor: string | null | undefined): boolean {
-  return parseOriginList(valor).origenes.length > 1;
+export function origenUnicoCanonico(
+  valor: string | null | undefined,
+): string | null {
+  if (typeof valor !== "string") {
+    return null;
+  }
+
+  const bruto = valor.trim();
+
+  if (!bruto || bruto.includes(",")) {
+    return null;
+  }
+
+  let url: URL;
+
+  try {
+    url = new URL(bruto);
+  } catch {
+    return null;
+  }
+
+  // `origin` es el literal "null" en los esquemas que no tienen uno (`data:`,
+  // `file:` y cualquier esquema no estándar).
+  if (url.origin === "null") {
+    return null;
+  }
+
+  if (url.pathname !== "/" || url.search || url.hash || url.username || url.password) {
+    return null;
+  }
+
+  return url.origin;
 }

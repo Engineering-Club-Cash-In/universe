@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 
 import {
-  declaraVariosOrigenes,
+  origenUnicoCanonico,
   normalizeOrigin,
   parseOriginList,
   resolveCorsOrigin,
@@ -166,36 +166,52 @@ describe("cabecera Access-Control-Allow-Origin con Hono", () => {
   });
 });
 
-describe("declaraVariosOrigenes", () => {
+describe("origenUnicoCanonico", () => {
   // El caso que motiva la comprobación: `FRONTEND_URL` cae por default a
   // `CORS_ORIGIN`, así que un despliegue en dos dominios que solo declara
   // `CORS_ORIGIN` copia la lista ENTERA en la base del enlace de recuperación
   // de contraseña. El correo sale con
   // `https://a,https://b/reset-password?token=…`, que el navegador resuelve a
   // un host inexistente.
-  it("reconoce una lista de dos dominios", () => {
-    expect(declaraVariosOrigenes(`${PORTAL_A},${PORTAL_B}`)).toBe(true);
-    expect(declaraVariosOrigenes(` ${PORTAL_A} , ${PORTAL_B} `)).toBe(true);
+  it("rechaza una lista de dos dominios", () => {
+    expect(origenUnicoCanonico(`${PORTAL_A},${PORTAL_B}`)).toBeNull();
+    expect(origenUnicoCanonico(` ${PORTAL_A} , ${PORTAL_B} `)).toBeNull();
   });
 
-  it("no se queja de un solo origen", () => {
-    expect(declaraVariosOrigenes(PORTAL_A)).toBe(false);
-    expect(declaraVariosOrigenes(`${PORTAL_A}/`)).toBe(false);
+  it("devuelve el origen cuando hay uno solo", () => {
+    expect(origenUnicoCanonico(PORTAL_A)).toBe(PORTAL_A);
   });
 
-  // Una coma suelta o un valor repetido no declaran dos dominios distintos:
-  // `parseOriginList` ya canoniza y deduplica, así que no hay nada ambiguo que
-  // bloquear.
-  it("no cuenta comas vacías ni repetidos", () => {
-    expect(declaraVariosOrigenes(`${PORTAL_A},`)).toBe(false);
-    expect(declaraVariosOrigenes(`${PORTAL_A},${PORTAL_A}`)).toBe(false);
+  // El hueco de la versión anterior, que contaba la lista YA partida por comas:
+  // la entrada vacía y el repetido desaparecían al parsear, así que ambos
+  // valores contaban como "un solo origen" y la coma llegaba entera al enlace.
+  it("rechaza la coma suelta y el origen repetido", () => {
+    expect(origenUnicoCanonico(`${PORTAL_A},`)).toBeNull();
+    expect(origenUnicoCanonico(`${PORTAL_A},${PORTAL_A}`)).toBeNull();
   });
 
-  // Un valor inválido no es "varios orígenes": ese error ya lo reporta la
-  // comprobación de esquema, que corre antes y con su propio mensaje.
-  it("ignora las entradas que no son un origen", () => {
-    expect(declaraVariosOrigenes("portal.cci.com")).toBe(false);
-    expect(declaraVariosOrigenes("")).toBe(false);
-    expect(declaraVariosOrigenes(undefined)).toBe(false);
+  // Se canoniza en vez de rechazar: no hay ninguna duda de a dónde va la gente
+  // y el valor limpio es el que evita `https://portal//reset-password`.
+  it("canoniza espacios, barra final y mayúsculas del host", () => {
+    expect(origenUnicoCanonico(`  ${PORTAL_A}  `)).toBe(PORTAL_A);
+    expect(origenUnicoCanonico(`${PORTAL_A}/`)).toBe(PORTAL_A);
+    expect(origenUnicoCanonico("https://PORTAL.Cci.Com")).toBe(
+      "https://portal.cci.com",
+    );
+  });
+
+  // Quedarse con el origen y tirar la ruta arrancaría bien y mandaría a la
+  // gente a una URL que nadie declaró: es el fallo silencioso que se evita.
+  it("rechaza rutas, query y fragmento", () => {
+    expect(origenUnicoCanonico(`${PORTAL_A}/portal`)).toBeNull();
+    expect(origenUnicoCanonico(`${PORTAL_A}/?x=1`)).toBeNull();
+    expect(origenUnicoCanonico(`${PORTAL_A}/#hash`)).toBeNull();
+  });
+
+  it("rechaza lo que no es un origen", () => {
+    expect(origenUnicoCanonico("portal.cci.com")).toBeNull();
+    expect(origenUnicoCanonico(",")).toBeNull();
+    expect(origenUnicoCanonico("")).toBeNull();
+    expect(origenUnicoCanonico(undefined)).toBeNull();
   });
 });

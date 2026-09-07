@@ -1,6 +1,6 @@
 import dotenv from "dotenv";
 
-import { declaraVariosOrigenes, parseOriginList } from "../lib/origins";
+import { origenUnicoCanonico, parseOriginList } from "../lib/origins";
 
 dotenv.config();
 
@@ -122,10 +122,21 @@ function validateEnv(): EnvConfig {
   //
   // Se valida `frontendUrl` y no "CORS_ORIGIN tiene comas" para atrapar con una
   // sola comprobación a quien declare la lista directamente en FRONTEND_URL.
-  if (declaraVariosOrigenes(frontendUrl)) {
+  //
+  // Se mira el valor CRUDO, no su lista parseada. Contar los orígenes después
+  // de partir por comas dejaba un hueco: `https://portal.example,` y
+  // `https://portal.example,https://portal.example` daban UNO —las entradas
+  // vacías se ignoran y los repetidos se deduplican—, pero la variable seguía
+  // guardando la cadena con la coma dentro y el correo salía con
+  // `https://portal.example,/reset-password?token=…`, o sea el mismo enlace
+  // muerto que la comprobación venía a evitar.
+  const frontendUrlCanonico = origenUnicoCanonico(frontendUrl);
+
+  if (!frontendUrlCanonico) {
     throw new Error(
-      `❌ FRONTEND_URL debe ser UN solo origen (hoy: "${frontendUrl}").\n` +
-        `Es la base del enlace de recuperación de contraseña, no una lista de permisos.\n` +
+      `❌ FRONTEND_URL debe ser UNA sola URL canónica (hoy: "${frontendUrl}").\n` +
+        `Es la base del enlace de recuperación de contraseña, no una lista de permisos:\n` +
+        `se espera esquema://host[:puerto], sin comas, ruta, query ni fragmento.\n` +
         `Con CORS_ORIGIN multi-dominio, declara FRONTEND_URL con el dominio canónico del portal.`
     );
   }
@@ -139,8 +150,11 @@ function validateEnv(): EnvConfig {
     GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID!,
     GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET!,
     CORS_ORIGIN: corsOrigin,
-    // Frontend
-    FRONTEND_URL: frontendUrl,
+    // Frontend: canonizado a propósito. El enlace de recuperación se arma
+    // concatenando (`${FRONTEND_URL}/reset-password`), así que guardar el valor
+    // crudo dejaba `https://portal.example//reset-password` con una barra final
+    // en la variable.
+    FRONTEND_URL: frontendUrlCanonico,
     TRUSTED_ORIGINS: trustedOrigins,
     // Cartera API
     CARTERA_API_URL: process.env.CARTERA_API_URL || "http://localhost:5000",

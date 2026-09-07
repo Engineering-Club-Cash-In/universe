@@ -1,12 +1,18 @@
 import { betterAuth } from "better-auth";
-import { createAuthMiddleware } from "better-auth/api";
+import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { db } from "../db/connection";
 import * as schema from "../db/schema";
 import { env } from "../config/env";
 import { sendPasswordResetEmail } from "../services/email.service";
-import { registrarPasswordPropia } from "../services/password/passwordPropia";
-import { usuarioQueCambioSuPassword } from "./cambioDePassword";
+import {
+  exigirInvalidacionDeEnlaces,
+  registrarPasswordPropia,
+} from "../services/password/passwordPropia";
+import {
+  RUTA_CAMBIO_DE_PASSWORD,
+  usuarioQueCambioSuPassword,
+} from "./cambioDePassword";
 import { SESSION_COOKIE_PREFIX } from "./portalCookies";
 
 /**
@@ -44,9 +50,9 @@ export const auth = betterAuth({
     // porque cree que alguien más la tenía, espera exactamente esto.
     revokeSessionsOnPasswordReset: true,
     /**
-     * Better Auth borra el token que se USÓ, pero no los otros que esa persona
-     * tenga pendientes. Acá se cierran todos, y de paso deja de estar marcada
-     * como "todavía usa la contraseña que le generamos".
+     * La cuenta deja de estar marcada como "todavía usa la contraseña que le
+     * generamos". Los enlaces pendientes ya se cerraron ANTES del cambio, en el
+     * hook `before`: hacerlo aquí dejaba una ventana que no se podía cerrar.
      */
     onPasswordReset: async ({ user }) => {
       await registrarPasswordPropia(user.id, "enlace");
@@ -148,6 +154,54 @@ export const auth = betterAuth({
     },
   },
   hooks: {
+    /**
+     * Los enlaces de recuperación pendientes mueren ANTES de que la contraseña
+     * cambie, no después.
+     *
+     * Better Auth borra el token que se USA, pero no los otros que esa persona
+     * tenga vivos, y con 24 horas de vigencia esa es una ventana real: quien
+     * tenga un correo viejo puede volver a cambiar la contraseña que se acaba
+     * de elegir. Hacer la limpieza después dejaba el caso sin salida —si el
+     * DELETE falla, la contraseña ya cambió y no hay vuelta atrás—, así que va
+     * antes: si la base falla, esto tira, el cambio no llega a ocurrir y la
+     * persona reintenta sobre un estado limpio.
+     */
+    before: createAuthMiddleware(async (ctx) => {
+      try {
+        if (ctx.path === "/reset-password") {
+          const token = ctx.body?.token ?? ctx.query?.token;
+          if (typeof token !== "string" || token === "") return;
+
+          const fila = await ctx.context.internalAdapter.findVerificationValue(
+            `reset-password:${token}`,
+          );
+          // Sin fila el token no sirve; que conteste Better Auth con su
+          // INVALID_TOKEN de siempre en vez de inventar otro error aquí.
+          if (!fila?.value) return;
+
+          await exigirInvalidacionDeEnlaces(fila.value, token);
+          return;
+        }
+
+        if (ctx.path === RUTA_CAMBIO_DE_PASSWORD) {
+          const sesion = await getSessionFromCtx(ctx);
+          // Sin sesión no hay a quién limpiarle nada: el endpoint responde 401.
+          if (!sesion?.user?.id) return;
+
+          await exigirInvalidacionDeEnlaces(sesion.user.id);
+        }
+      } catch (error) {
+        console.error(
+          "[password] no se pudieron invalidar los enlaces pendientes; se rechaza el cambio.",
+          error,
+        );
+
+        throw new APIError("INTERNAL_SERVER_ERROR", {
+          message:
+            "No pudimos completar el cambio de contraseña. Intentá de nuevo en un momento.",
+        });
+      }
+    }),
     /**
      * El equivalente de `onPasswordReset` para el otro camino.
      *

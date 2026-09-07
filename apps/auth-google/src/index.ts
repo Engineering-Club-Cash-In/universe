@@ -95,13 +95,18 @@ app.notFound(notFoundHandler);
 // Error handler
 app.onError(errorHandler);
 
-// Verificar conexión a la base de datos al iniciar
-testConnection().then(async (connected) => {
-  if (connected) {
-    // Antes de anunciar que el servicio está arriba: sin estas columnas el
-    // login se cae entero, y el despliegue no corre migraciones.
-    await asegurarColumnasRequeridas();
+// El esquema se prepara UNA vez y ninguna petición se atiende antes.
+//
+// Bun levanta el servidor en cuanto termina de evaluar este módulo, así que
+// dejar esto en un `.then()` suelto lo dejaba corriendo mientras Coolify ya
+// daba la instancia por lista y le mandaba peticiones de sesión: justo las que
+// necesitan la columna que este paso está creando. El handler espera esta
+// promesa; después de la primera vez ya está resuelta y no cuesta nada.
+const esquemaListo = asegurarColumnasRequeridas();
 
+// Verificar conexión a la base de datos al iniciar
+testConnection().then((connected) => {
+  if (connected) {
     console.log(`
 ╔═══════════════════════════════════════════════╗
 ║   🚀 Auth Google Service Running              ║
@@ -124,5 +129,8 @@ testConnection().then(async (connected) => {
 // Exportar app - Bun detecta esto y levanta el servidor automáticamente
 export default {
   port: env.PORT,
-  fetch: app.fetch,
+  fetch: async (request: Request) => {
+    await esquemaListo;
+    return app.fetch(request);
+  },
 };

@@ -1,4 +1,4 @@
-import { and, eq, like } from "drizzle-orm";
+import { and, eq, like, ne } from "drizzle-orm";
 import { db } from "../../db/connection";
 import { users, verificationTokens } from "../../db/schema";
 
@@ -54,7 +54,7 @@ export const enlaceDeResetSigueVivo = async (
 };
 
 /**
- * Borra TODOS los enlaces de recuperación pendientes de una persona.
+ * Borra los enlaces de recuperación pendientes de una persona, menos uno.
  *
  * Este es el bug que se está arreglando. Better Auth sí borra el token que se
  * usó, pero cada solicitud crea una fila distinta y nadie toca las demás: quien
@@ -68,15 +68,28 @@ export const enlaceDeResetSigueVivo = async (
  */
 export const invalidarEnlacesDeReset = async (
   userId: string,
+  tokenQueSeEstaUsando?: string,
 ): Promise<number> => {
+  const condiciones = [
+    like(verificationTokens.identifier, `${PREFIJO_RESET}%`),
+    eq(verificationTokens.value, userId),
+  ];
+
+  // El enlace que se está canjeando NO se toca: Better Auth todavía no lo ha
+  // leído cuando esto corre, y borrarlo convertiría el canje legítimo en un
+  // INVALID_TOKEN. Lo borra él mismo al terminar.
+  if (tokenQueSeEstaUsando) {
+    condiciones.push(
+      ne(
+        verificationTokens.identifier,
+        `${PREFIJO_RESET}${tokenQueSeEstaUsando}`,
+      ),
+    );
+  }
+
   const borrados = await db
     .delete(verificationTokens)
-    .where(
-      and(
-        like(verificationTokens.identifier, `${PREFIJO_RESET}%`),
-        eq(verificationTokens.value, userId),
-      ),
-    )
+    .where(and(...condiciones))
     .returning({ id: verificationTokens.id });
 
   return borrados.length;
@@ -98,30 +111,47 @@ export const limpiarMarcaDePasswordProvisionada = async (
 };
 
 /**
- * Las dos cosas juntas, sin propagar fallos.
+ * Invalida los enlaces pendientes ANTES de que la contraseña cambie.
  *
- * Se reportan por separado en el log a propósito: que no se pueda limpiar la
- * marca solo repite una pantalla; que no se puedan invalidar los enlaces deja
- * abierta una forma de entrar a la cuenta, y eso hay que poder verlo.
+ * El orden es el arreglo. Hacerlo después dejaba una ventana imposible de
+ * cerrar: si el DELETE fallaba, la contraseña ya estaba cambiada y no había
+ * forma de deshacerlo, así que los enlaces viejos seguían sirviendo —hasta 24
+ * horas— y cualquiera que tuviera uno podía volver a cambiarla. Un log no
+ * arregla eso.
+ *
+ * Haciéndolo antes, un fallo de base tira y el cambio de contraseña no llega a
+ * ocurrir: la persona reintenta y no queda ningún estado a medias. Es la única
+ * forma de que "cambiaste la contraseña" implique SIEMPRE "los enlaces viejos
+ * murieron", sin depender de reintentos ni de una transacción que no podemos
+ * abrir alrededor de Better Auth.
+ */
+export const exigirInvalidacionDeEnlaces = async (
+  userId: string,
+  tokenQueSeEstaUsando?: string,
+): Promise<void> => {
+  const invalidados = await invalidarEnlacesDeReset(userId, tokenQueSeEstaUsando);
+
+  if (invalidados > 0) {
+    console.log(
+      `[password] se invalidaron ${invalidados} enlace(s) de recuperación pendientes.`,
+    );
+  }
+};
+
+/**
+ * Quita la marca de primer ingreso, sin propagar fallos.
+ *
+ * Esto SÍ puede ser best-effort, y la diferencia con lo de arriba es lo que
+ * cuesta equivocarse: que la marca no se limpie hace que el portal vuelva a
+ * pedir la pantalla de primer ingreso una vez más. No deja ninguna puerta
+ * abierta. Y cuando corre, la contraseña ya cambió: tirar acá convertiría un
+ * cambio exitoso en un 500 y la persona reintentaría con una contraseña que ya
+ * no es la suya.
  */
 export const registrarPasswordPropia = async (
   userId: string,
   origen: "enlace" | "cambio_en_sesion",
 ): Promise<void> => {
-  try {
-    const invalidados = await invalidarEnlacesDeReset(userId);
-    if (invalidados > 0) {
-      console.log(
-        `[password] ${origen}: se invalidaron ${invalidados} enlace(s) de recuperación pendientes.`,
-      );
-    }
-  } catch (error) {
-    console.error(
-      `[password] ${origen}: NO se pudieron invalidar los enlaces de recuperación pendientes.`,
-      error,
-    );
-  }
-
   try {
     await limpiarMarcaDePasswordProvisionada(userId);
   } catch (error) {

@@ -34,6 +34,7 @@ import {
   statusCreditoInversionistaEspejoEnum,
 } from "../database/db/schema";
 import { getSignedDocumentUrl } from "../utils/functions/uploadsFiles";
+import { normalizarDpiParaComparar } from "../utils/functions/provisionamientoPortal";
 import {
   provisionarInversionista,
   resultadoNoSolicitado,
@@ -765,6 +766,38 @@ export async function getEntidadesPorCorreo(
     });
 }
 
+/**
+ * ¿Esta empresa nueva está reusando el correo de su propio representante?
+ *
+ * Una sociedad no tiene correo propio: quien lee es el humano que la
+ * representa, y es el mismo que ya recibe los correos de su ficha personal y de
+ * sus otras sociedades. Exigirle uno distinto es lo que llenó producción de
+ * correos inventados —cuatro para Richard Kachler, tres para Escondrillas— y lo
+ * que rompía el portal cuando alguien se negaba a dar más.
+ *
+ * Con el selector de entidades, compartir correo dejó de ser un problema: la
+ * resolución devuelve el grupo entero y el inversionista elige. Así que el
+ * choque se perdona, PERO solo dentro del mismo grupo: la fila que choca tiene
+ * que ser la del representante o la de otra sociedad suya. Un alta cualquiera
+ * sigue sin poder quedarse con el correo de un tercero.
+ */
+export const correoCompartidoConSuGrupo = (
+  nueva: { dpi?: number | null; dpi_rep_legal?: unknown },
+  filaQueChoca: typeof inversionistas.$inferSelect,
+): boolean => {
+  const representante = normalizarDpiParaComparar(nueva.dpi_rep_legal);
+  if (representante === null) return false;
+
+  // Con DPI propio no es una sociedad, es una persona; y dos personas no
+  // comparten correo.
+  if (normalizarDpiParaComparar(nueva.dpi) !== null) return false;
+
+  return (
+    normalizarDpiParaComparar(filaQueChoca.dpi) === representante ||
+    normalizarDpiParaComparar(filaQueChoca.dpi_rep_legal) === representante
+  );
+};
+
 export const insertInvestor = async ({ body, set, user }: any) => {
   // Fuera del `try` a propósito: el `catch` también tiene que poder resolverles
   // el acceso a las filas que YA se insertaron antes del error (ver
@@ -1003,7 +1036,8 @@ export const insertInvestor = async ({ body, set, user }: any) => {
             .where(condicionInversionistaPorEmail(email))
             .limit(1);
 
-          if (result[0]) {
+          // La empresa de un inversionista comparte su correo a propósito.
+          if (result[0] && !correoCompartidoConSuGrupo(inv, result[0])) {
             conflictos.push({
               error: "duplicate_email",
               message: "Ya existe un inversionista con ese email",

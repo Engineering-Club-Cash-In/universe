@@ -34,6 +34,7 @@ import {
   getCreditosEspejoPendientes,
   simularInversionista,
 } from "../controllers/investor";
+import { buscarIdentidad } from "../controllers/identidadInversionista";
 import { ajustarPagosLiquidacion } from "../controllers/ajustarPagosLiquidacion";
 import { InversionistaReporte, RespuestaReporte } from "../utils/interface";
 import { generarYSubirPDFInversionista, generarYSubirExcelInversionista } from "../utils/functions/generalFunctions";
@@ -327,6 +328,45 @@ export const inversionistasRouter = new Elysia()
       query: t.Object({ email: t.String() }),
       detail: {
         summary: "Entidades que puede operar la persona dueña de ese correo",
+        tags: ["Inversionistas"],
+      },
+    }
+  )
+  // ¿De quién es este DPI o este correo? La usa el alta del CRM para detectar
+  // que conta no está duplicando por error, sino dando de alta la empresa de
+  // alguien que ya es inversionista.
+  .get(
+    "/investor/identidad",
+    async ({ query, set }) => {
+      try {
+        const dpi = query.dpi?.trim() || null;
+        const email = query.email?.trim() || null;
+
+        if (!dpi && !email) {
+          set.status = 400;
+          return { success: false, message: "Se requiere 'dpi' o 'email'" };
+        }
+
+        const data = await buscarIdentidad(dpi, email);
+        set.status = 200;
+        return { success: true, data };
+      } catch (error) {
+        console.error("[GET /investor/identidad] Error:", error);
+        set.status = 500;
+        return {
+          success: false,
+          message: "Error al identificar al inversionista",
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+    {
+      query: t.Object({
+        dpi: t.Optional(t.String()),
+        email: t.Optional(t.String()),
+      }),
+      detail: {
+        summary: "Persona dueña de un DPI o correo (para detectar empresas)",
         tags: ["Inversionistas"],
       },
     }

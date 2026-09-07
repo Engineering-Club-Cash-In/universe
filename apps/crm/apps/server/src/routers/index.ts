@@ -384,6 +384,7 @@ export const reportsAppRouter = {
 
 	// Investor Documents routes (Documentos de inversionista)
 	getInvestorRendimiento: investorDocumentsRouter.getInvestorRendimiento,
+	identidadInversionista: investorDocumentsRouter.identidadInversionista,
 	getInvestorDocumentsAdmin: investorDocumentsRouter.getInvestorDocumentsAdmin,
 	createInvestorDocument: investorDocumentsRouter.createInvestorDocument,
 	toggleInvestorDocumentVisibility:

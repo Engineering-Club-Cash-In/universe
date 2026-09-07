@@ -1,5 +1,5 @@
 import { betterAuth } from "better-auth";
-import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
+import { createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { db } from "../db/connection";
 import * as schema from "../db/schema";
@@ -10,9 +10,9 @@ import {
   registrarPasswordPropia,
 } from "../services/password/passwordPropia";
 import {
-  RUTA_CAMBIO_DE_PASSWORD,
-  usuarioQueCambioSuPassword,
-} from "./cambioDePassword";
+  antesDeCambiarPassword,
+  despuesDeCambiarPassword,
+} from "./hooksDePassword";
 import {
   exigirPasswordDistintaALaActual,
   type PruebaDeIdentidad,
@@ -56,8 +56,9 @@ export const auth = betterAuth({
     revokeSessionsOnPasswordReset: true,
     /**
      * La cuenta deja de estar marcada como "todavía usa la contraseña que le
-     * generamos". Los enlaces pendientes ya se cerraron ANTES del cambio, en el
-     * hook `before`: hacerlo aquí dejaba una ventana que no se podía cerrar.
+     * generamos". Los enlaces hermanos de ESTE camino ya se cerraron antes del
+     * cambio, en el hook `before`, donde el token vigente ya había probado
+     * identidad: hacerlo aquí dejaba una ventana que no se podía cerrar.
      */
     onPasswordReset: async ({ user }) => {
       await registrarPasswordPropia(user.id, "enlace");
@@ -160,86 +161,37 @@ export const auth = betterAuth({
   },
   hooks: {
     /**
-     * Todo lo que tiene que ser cierto ANTES de que una contraseña cambie.
+     * Lo que tiene que ser cierto ANTES de que una contraseña cambie.
      *
-     * Los dos caminos —el enlace del correo y el cambio con la sesión abierta—
-     * pasan por aquí, y las dos comprobaciones van antes y no después por la
-     * misma razón: después el cambio ya ocurrió y no hay vuelta atrás.
-     *
-     * 1. La contraseña nueva tiene que ser DISTINTA de la actual. Better Auth
-     *    no lo comprueba, así que `/change-password` aceptaba la misma
-     *    contraseña en los dos campos y respondía 200. Eso bastaba para que se
-     *    limpiara la marca de primer ingreso sin que la credencial hubiera
-     *    cambiado: quien tuviera la contraseña que mandamos por correo se
-     *    quitaba el candado de encima y seguía usándola. La regla existía solo
-     *    en el Yup del formulario, que es un `curl` de distancia. Solo contesta
-     *    a quien ya probó ser quien dice —el token vigente, o la contraseña
-     *    actual—, porque decir "esa ya la tenés puesta" es decir "acertaste".
-     * 2. Los enlaces de recuperación pendientes mueren. Better Auth borra el
-     *    token que se USA, pero no los otros que esa persona tenga vivos, y con
-     *    24 horas de vigencia esa es una ventana real. Hacerlo después dejaba
-     *    el caso sin salida: si el DELETE falla, la contraseña ya cambió.
+     * El reparto entre este hook y el de abajo —y por qué no es el mismo para
+     * el camino del enlace que para el de la sesión— vive en
+     * `hooksDePassword.ts`, que es donde se puede probar. Acá solo se desenvuelve
+     * el `ctx` de Better Auth y se le enchufan los efectos de verdad.
      */
     before: createAuthMiddleware(async (ctx) => {
-      const esReset = ctx.path === "/reset-password";
-      const esCambio = ctx.path === RUTA_CAMBIO_DE_PASSWORD;
-      if (!esReset && !esCambio) return;
-
-      const nueva = ctx.body?.newPassword;
-      // Que el cuerpo esté bien formado lo valida Better Auth; acá solo se sale
-      // sin hacer nada para no adelantarse a su propio error.
-      if (typeof nueva !== "string" || nueva === "") return;
-
-      let userId: string | null = null;
-      // El token que se está canjeando, para no borrarlo junto con los demás.
-      let tokenEnUso: string | undefined;
-      // Con qué probó ser quien dice quien pide el cambio.
-      let prueba: PruebaDeIdentidad = { via: "sesion", actual: undefined };
-
-      try {
-        if (esReset) {
-          const token = ctx.body?.token ?? ctx.query?.token;
-          if (typeof token !== "string" || token === "") return;
-
-          const fila = await ctx.context.internalAdapter.findVerificationValue(
-            `reset-password:${token}`,
-          );
-
-          // Vigente, no solo existente: Better Auth deja las filas vencidas ahí
-          // y las rechaza comparando la fecha. Sin este chequeo, mandar un
-          // enlace viejo mataba el enlace NUEVO de esa persona y encima el
-          // viejo se rechazaba igual, dejándola sin ninguno de los dos.
-          if (!tokenDeResetVigente(fila)) return;
-
-          userId = fila!.value;
-          tokenEnUso = token;
-          prueba = { via: "enlace" };
-        } else {
-          const sesion = await getSessionFromCtx(ctx);
-          // Sin sesión no hay a quién limpiarle nada: el endpoint responde 401.
-          if (!sesion?.user?.id) return;
-
-          userId = sesion.user.id;
-          prueba = { via: "sesion", actual: ctx.body?.currentPassword };
-        }
-
-        await exigirPasswordDistintaALaActual(ctx, userId, nueva, prueba);
-        await exigirInvalidacionDeEnlaces(userId, tokenEnUso);
-      } catch (error) {
-        // Un rechazo con causa —la contraseña repetida— viaja tal cual: es lo
-        // único que la persona puede corregir sola.
-        if (error instanceof APIError) throw error;
-
-        console.error(
-          "[password] no se pudieron invalidar los enlaces pendientes; se rechaza el cambio.",
-          error,
-        );
-
-        throw new APIError("INTERNAL_SERVER_ERROR", {
-          message:
-            "No pudimos completar el cambio de contraseña. Intentá de nuevo en un momento.",
-        });
-      }
+      await antesDeCambiarPassword(
+        {
+          path: ctx.path,
+          nueva: ctx.body?.newPassword,
+          actual: ctx.body?.currentPassword,
+          token: ctx.body?.token ?? ctx.query?.token,
+        },
+        {
+          usuarioDeLaSesion: async () => {
+            const sesion = await getSessionFromCtx(ctx);
+            return sesion?.user?.id ?? null;
+          },
+          usuarioDelEnlaceVigente: async (token) => {
+            const fila = await ctx.context.internalAdapter.findVerificationValue(
+              `reset-password:${token}`,
+            );
+            return tokenDeResetVigente(fila) ? fila!.value : null;
+          },
+          exigirDistinta: (userId, nueva, prueba) =>
+            exigirPasswordDistintaALaActual(ctx, userId, nueva, prueba),
+          invalidarEnlaces: exigirInvalidacionDeEnlaces,
+        },
+      );
     }),
     /**
      * El equivalente de `onPasswordReset` para el otro camino.
@@ -250,10 +202,11 @@ export const auth = betterAuth({
      * `usuarioQueCambioSuPassword`, que es donde se puede probar.
      */
     after: createAuthMiddleware(async (ctx) => {
-      const userId = usuarioQueCambioSuPassword(ctx.path, ctx.context.returned);
-      if (!userId) return;
-
-      await registrarPasswordPropia(userId, "cambio_en_sesion");
+      await despuesDeCambiarPassword(ctx.path, ctx.context.returned, {
+        invalidarEnlaces: (userId) => exigirInvalidacionDeEnlaces(userId),
+        registrarPasswordPropia: (userId) =>
+          registrarPasswordPropia(userId, "cambio_en_sesion"),
+      });
     }),
   },
   secret: env.BETTER_AUTH_SECRET,

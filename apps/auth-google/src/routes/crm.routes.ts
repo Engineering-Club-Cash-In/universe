@@ -5,7 +5,6 @@
 
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { auth } from "../lib/auth";
 import {
   // Profile / Lead
   getProfile,
@@ -19,47 +18,75 @@ import {
   getCreditByNumeroSifco,
   type UpdateLeadPayload,
 } from "../services/crm";
+import { requireAuth, type AuthedVariables } from "../middleware/requireAuth";
 
-// Tipado para el contexto de Hono con variables de autenticación
-type Variables = {
-  user: any;
-  session: any;
-};
-
-const crmRoutes = new Hono<{ Variables: Variables }>();
+const crmRoutes = new Hono<{ Variables: AuthedVariables }>();
 
 // ============================================
 // MIDDLEWARE DE AUTENTICACIÓN
 // ============================================
 
-const requireAuth = async (c: any, next: () => Promise<void>) => {
-  try {
-    const session = await auth.api.getSession({
-      headers: c.req.raw.headers,
-    });
+// Aplicar middleware a todas las rutas. `requireAuth` deja en el contexto el
+// usuario ya validado, que es de donde salen las identidades que usan los
+// handlers.
+//
+// El token de sesión NO se reenvía al CRM: esas rutas son servicio-a-servicio
+// y se autorizan con el secreto compartido (ver services/crm/portalAuth.ts).
+// Esta sesión autoriza el acceso del usuario a este servicio, no la llamada al
+// CRM: por eso tener sesión no puede ser lo único que decida QUÉ lead se
+// devuelve.
+crmRoutes.use("*", requireAuth);
 
-    if (!session || !session.user) {
-      throw new HTTPException(401, { message: "No autorizado. Inicia sesión." });
-    }
+// ============================================
+// IDENTIDAD DE LA SESIÓN
+// ============================================
+// Estas rutas devuelven la ficha completa de un cliente (ingresos, dirección,
+// DPI), URLs firmadas de sus documentos escaneados, los PDF de sus contratos y
+// el detalle de sus créditos. Antes elegían a QUIÉN devolvérselos con el
+// `email`/`dpi` del query string —y con el `email` del cuerpo, en la de
+// escritura—, así que cualquier cuenta del portal, donde el registro es
+// abierto, podía leer y reescribir los datos de otra persona con solo cambiar
+// un parámetro.
+//
+// Es el mismo arreglo que ya se hizo en `cartera.routes.ts`: la identidad sale
+// de la sesión, lo que manda el navegador se ignora.
 
-    c.set("user", session.user);
-    c.set("session", session.session);
-    // El token de sesión NO se reenvía al CRM: esas rutas son
-    // servicio-a-servicio y se autorizan con el secreto compartido
-    // (ver services/crm/portalAuth.ts). Esta sesión autoriza el acceso del
-    // usuario a este servicio, no la llamada al CRM.
+/** Correo de la sesión, la única llave con la que se resuelve el lead. */
+const correoDeSesion = (c: any): string => {
+  const user = c.get("user") as AuthedVariables["user"] | undefined;
+  // Sin `toLowerCase()`: el CRM compara el correo del lead con `=`, así que
+  // normalizarlo aquí cambiaría a qué fila apunta. Se manda tal cual, que es
+  // lo que el front venía mandando.
+  const email = user?.email?.trim();
 
-    await next();
-  } catch (error) {
-    if (error instanceof HTTPException) {
-      throw error;
-    }
-    throw new HTTPException(401, { message: "Token inválido o expirado" });
+  if (!email) {
+    throw new HTTPException(401, { message: "No autorizado. Inicia sesión." });
   }
+
+  return email;
 };
 
-// Aplicar middleware a todas las rutas
-crmRoutes.use("*", requireAuth);
+/**
+ * El DPI NO viaja como llave de búsqueda, y por eso va vacío.
+ *
+ * El CRM resuelve el lead con `OR(email, dpi)`, y el DPI de la sesión lo
+ * autodeclara el propio usuario (POST /api/profile/me/dpi lo escribe sin
+ * contrastarlo contra RENAP ni contra el lead). Reenviarlo reabriría el mismo
+ * agujero por otra puerta: bastaría reclamar el DPI de alguien que todavía no
+ * tiene cuenta en el portal para que la rama del DPI resolviera a SU lead.
+ *
+ * Con el correo solo, el alcance de una cuenta es el lead de su propio correo.
+ */
+const SIN_DPI = "";
+
+/** Números SIFCO de las oportunidades del lead de la sesión. */
+const sifcoDeSesion = async (c: any): Promise<string[]> => {
+  const oportunidades = await getNumbersSifco(correoDeSesion(c), SIN_DPI);
+
+  return (oportunidades ?? [])
+    .map((o) => o?.numeroSifco?.trim())
+    .filter((n): n is string => !!n);
+};
 
 // ============================================
 // RUTAS DE PERFIL / LEAD
@@ -67,18 +94,15 @@ crmRoutes.use("*", requireAuth);
 
 /**
  * GET /api/crm/profile
- * Obtener perfil del lead
+ * Perfil del lead de la sesión.
+ *
+ * Los parámetros `email` y `dpi` se siguen aceptando pero se IGNORAN, para que
+ * auth-google se pueda desplegar sin esperar al front. Conviene retirarlos del
+ * front en una release posterior.
  */
 crmRoutes.get("/profile", async (c) => {
   try {
-    const email = c.req.query("email");
-    const dpi = c.req.query("dpi");
-
-    if (!email || !dpi) {
-      throw new HTTPException(400, { message: "Los parámetros email y dpi son requeridos" });
-    }
-
-    const profile = await getProfile(email, dpi);
+    const profile = await getProfile(correoDeSesion(c), SIN_DPI);
 
     return c.json({
       success: true,
@@ -96,17 +120,51 @@ crmRoutes.get("/profile", async (c) => {
 
 /**
  * POST /api/crm/profile/update
- * Actualizar información del lead
+ * Actualiza el lead de la sesión.
+ *
+ * El destino NO se acepta del cuerpo: el `email` que decide sobre qué lead se
+ * escribe es el de la sesión. Del cuerpo solo sobreviven los campos editables,
+ * y el DPI se toma de la cuenta —nunca el del cuerpo—: escribir un DPI
+ * arbitrario en un lead envenena la resolución de identidad del portal (el CRM
+ * casa leads por DPI) y deja al dueño legítimo fuera con un 409.
  */
 crmRoutes.post("/profile/update", async (c) => {
+  let body: Partial<UpdateLeadPayload> | null;
   try {
-    const body = await c.req.json<UpdateLeadPayload>();
+    body = await c.req.json();
+  } catch {
+    throw new HTTPException(400, { message: "Cuerpo de la petición inválido" });
+  }
 
-    if (!body.email) {
-      throw new HTTPException(400, { message: "El campo email es requerido" });
+  try {
+    const user = c.get("user") as AuthedVariables["user"] | undefined;
+
+    const payload: UpdateLeadPayload = { email: correoDeSesion(c) };
+
+    if (typeof body?.phone === "string") {
+      payload.phone = body.phone;
     }
 
-    const result = await updateLead(body);
+    if (typeof body?.address === "string") {
+      payload.address = body.address;
+    }
+
+    // El cuerpo solo expresa la INTENCIÓN de fijar el DPI; el valor sale de la
+    // cuenta, que es donde el portal ya lo fijó (POST /api/profile/me/dpi).
+    if (body?.dpi !== undefined) {
+      const dpiDeSesion = user?.dpi?.trim();
+
+      if (!dpiDeSesion) {
+        throw new HTTPException(409, {
+          message:
+            "Tu cuenta todavía no tiene DPI registrado. Registralo antes de actualizar tus datos.",
+        });
+      }
+
+      payload.dpi = dpiDeSesion;
+    }
+
+    const result = await updateLead(payload);
 
     return c.json({
       success: true,
@@ -125,18 +183,11 @@ crmRoutes.post("/profile/update", async (c) => {
 
 /**
  * GET /api/crm/sifco
- * Obtener números SIFCO del lead
+ * Números SIFCO del lead de la sesión. `email` y `dpi` del query se ignoran.
  */
 crmRoutes.get("/sifco", async (c) => {
   try {
-    const email = c.req.query("email");
-    const dpi = c.req.query("dpi");
-
-    if (!email || !dpi) {
-      throw new HTTPException(400, { message: "Los parámetros email y dpi son requeridos" });
-    }
-
-    const opportunities = await getNumbersSifco(email, dpi);
+    const opportunities = await getNumbersSifco(correoDeSesion(c), SIN_DPI);
 
     return c.json({
       success: true,
@@ -158,18 +209,15 @@ crmRoutes.get("/sifco", async (c) => {
 
 /**
  * GET /api/crm/documents
- * Obtener documentos del lead
+ * Documentos del lead de la sesión. `email` y `dpi` del query se ignoran.
+ *
+ * La respuesta trae URLs FIRMADAS de DPI escaneado, estados de cuenta y títulos
+ * de propiedad: elegir el lead con un parámetro del cliente las repartía a
+ * cualquiera.
  */
 crmRoutes.get("/documents", async (c) => {
   try {
-    const email = c.req.query("email");
-    const dpi = c.req.query("dpi");
-
-    if (!email || !dpi) {
-      throw new HTTPException(400, { message: "Los parámetros email y dpi son requeridos" });
-    }
-
-    const documents = await getPersonalDocuments(email, dpi);
+    const documents = await getPersonalDocuments(correoDeSesion(c), SIN_DPI);
 
     return c.json({
       success: true,
@@ -187,18 +235,11 @@ crmRoutes.get("/documents", async (c) => {
 
 /**
  * GET /api/crm/contracts
- * Obtener contratos del lead
+ * Contratos del lead de la sesión. `email` y `dpi` del query se ignoran.
  */
 crmRoutes.get("/contracts", async (c) => {
   try {
-    const email = c.req.query("email");
-    const dpi = c.req.query("dpi");
-
-    if (!email || !dpi) {
-      throw new HTTPException(400, { message: "Los parámetros email y dpi son requeridos" });
-    }
-
-    const contracts = await getContracts(email, dpi);
+    const contracts = await getContracts(correoDeSesion(c), SIN_DPI);
 
     return c.json({
       success: true,
@@ -220,18 +261,19 @@ crmRoutes.get("/contracts", async (c) => {
 
 /**
  * GET /api/crm/credits
- * Obtener créditos por números SIFCO (array en query param separado por comas)
+ * Créditos del lead de la sesión.
+ *
+ * El `numerosSifco` del query es decorativo y se IGNORA: no tenía ningún
+ * vínculo con la identidad, así que cualquier sesión podía enumerar la cartera
+ * entera pidiendo números ajenos —auth-google los consultaba en cartera con su
+ * token de servicio—. El conjunto se deriva ahora de las oportunidades del
+ * lead, que es exactamente lo que el front ya pedía.
  */
 crmRoutes.get("/credits", async (c) => {
   try {
-    const numerosSifcoParam = c.req.query("numerosSifco");
+    const numerosSifco = await sifcoDeSesion(c);
 
-    if (!numerosSifcoParam) {
-      throw new HTTPException(400, { message: "El parámetro numerosSifco es requerido" });
-    }
-
-    const numerosSifco = numerosSifcoParam.split(",").map((n) => n.trim());
-    const credits = await getCredits(numerosSifco);
+    const credits = numerosSifco.length > 0 ? await getCredits(numerosSifco) : [];
 
     return c.json({
       success: true,
@@ -249,14 +291,27 @@ crmRoutes.get("/credits", async (c) => {
 
 /**
  * GET /api/crm/credit
- * Obtener un crédito específico por número SIFCO
+ * Un crédito del lead de la sesión.
+ *
+ * Aquí el número SÍ hace falta —identifica cuál de los créditos del titular se
+ * pide—, así que se comprueba que esté entre los suyos y se responde 403 si no.
+ * El 403 es el mismo tanto si el crédito existe como si no: contestar 404 solo
+ * para los inexistentes convertiría la ruta en un oráculo de números SIFCO.
  */
 crmRoutes.get("/credit", async (c) => {
   try {
-    const numeroSifco = c.req.query("numeroSifco");
+    const numeroSifco = c.req.query("numeroSifco")?.trim();
 
     if (!numeroSifco) {
       throw new HTTPException(400, { message: "El parámetro numeroSifco es requerido" });
+    }
+
+    const permitidos = await sifcoDeSesion(c);
+
+    if (!permitidos.includes(numeroSifco)) {
+      throw new HTTPException(403, {
+        message: "Ese crédito no pertenece a tu usuario",
+      });
     }
 
     const credit = await getCreditByNumeroSifco(numeroSifco);

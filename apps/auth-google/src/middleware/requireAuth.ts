@@ -12,7 +12,15 @@ import { HTTPException } from "hono/http-exception";
 import { auth } from "../lib/auth";
 
 export type AuthedVariables = {
-  user: { id: string; email?: string; name?: string; role?: string };
+  // `role` y `dpi` son los `additionalFields` de Better Auth (ver lib/auth.ts).
+  // Ambos con `input: false`: los escribe el servidor, no el cliente.
+  user: {
+    id: string;
+    email?: string;
+    name?: string;
+    role?: string;
+    dpi?: string | null;
+  };
   session: any;
 };
 

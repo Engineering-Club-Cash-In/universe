@@ -14,7 +14,8 @@ export const FormRegister = () => {
     isGoogleLoading,
     currentStep,
     prevStep,
-  } = useRegister();
+  
+    tipoBloqueado,} = useRegister();
   const isMobile = useIsMobile();
   const [isTermsOpen, setIsTermsOpen] = useState(false);
 
@@ -56,6 +57,7 @@ export const FormRegister = () => {
                     type="radio"
                     name="userType"
                     value="CLIENT"
+                    disabled={tipoBloqueado}
                     checked={formik.values.userType === "CLIENT"}
                     onChange={() => formik.setFieldValue("userType", "CLIENT")}
                     onBlur={formik.handleBlur}
@@ -80,6 +82,7 @@ export const FormRegister = () => {
                     type="radio"
                     name="userType"
                     value="INVESTOR"
+                    disabled={tipoBloqueado}
                     checked={formik.values.userType === "INVESTOR"}
                     onChange={() =>
                       formik.setFieldValue("userType", "INVESTOR")
@@ -95,6 +98,19 @@ export const FormRegister = () => {
                   </div>
                 </label>
               </div>
+              {/* Con la cuenta ya creada, cambiar de tipo aquí haría que el
+                  reintento llamara al OTRO sistema y dejara huérfana la ficha
+                  del primer intento. El DPI sí se puede corregir. */}
+              {tipoBloqueado && (
+                <p className="text-left text-sm text-white/65">
+                  Tu cuenta ya se creó como{" "}
+                  {formik.values.userType === "INVESTOR"
+                    ? "inversionista"
+                    : "solicitante de crédito"}
+                  . Si necesitas cambiarlo, escríbele a tu asesor. Aquí puedes
+                  corregir tu DPI y volver a intentar.
+                </p>
+              )}
               {formik.touched.userType && formik.errors.userType && (
                 <p className="text-red-500 text-sm text-left">
                   {formik.errors.userType}

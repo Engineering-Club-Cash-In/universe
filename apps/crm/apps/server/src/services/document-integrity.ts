@@ -9,7 +9,6 @@ import {
 	inArray,
 	isNull,
 	lt,
-	lte,
 	ne,
 	sql,
 } from "drizzle-orm";
@@ -52,13 +51,12 @@ import {
 
 export const DOC_INTEGRITY_MODEL =
 	process.env.DOC_INTEGRITY_MODEL || "gemini-3-flash-preview";
-const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
 const MAX_BATCH_SIZE_BYTES = 45 * 1024 * 1024;
+const MAX_DOCUMENT_INTEGRITY_FILE_SIZE_BYTES = 15 * 1024 * 1024;
 const AI_TIMEOUT_MS = 120_000;
 const RETRY_WINDOW_MS = 5 * 60_000;
 const RUN_STALE_AFTER_MS = AI_TIMEOUT_MS + 60_000;
 export const MAX_DOCUMENT_INTEGRITY_ATTEMPTS = 2;
-const MAX_ERROR_RUNS_IN_HISTORY = 3;
 
 export class DocumentIntegrityError extends Error {
 	constructor(
@@ -727,7 +725,7 @@ export async function validateUploadedBankStatements(params: {
 					expectedPrefix,
 					filename: file.name,
 					mimeType: file.mimeType,
-					maxSizeBytes: MAX_FILE_SIZE_BYTES,
+					maxSizeBytes: MAX_DOCUMENT_INTEGRITY_FILE_SIZE_BYTES,
 				});
 				const buffer = await getFileBuffer(uploaded.key);
 				return {
@@ -865,6 +863,24 @@ export async function assertUploadedBankStatementsValidated(params: {
 	const resetAfterAttemptNumber = await getLatestResetAttemptNumber(
 		params.opportunityId,
 	);
+	const [latestCompletedRun] = await db
+		.select({
+			id: documentIntegrityValidationRuns.id,
+			attemptNumber: documentIntegrityValidationRuns.attemptNumber,
+		})
+		.from(documentIntegrityValidationRuns)
+		.where(
+			and(
+				eq(documentIntegrityValidationRuns.opportunityId, params.opportunityId),
+				eq(documentIntegrityValidationRuns.status, "completed"),
+				gt(
+					documentIntegrityValidationRuns.attemptNumber,
+					resetAfterAttemptNumber,
+				),
+			),
+		)
+		.orderBy(desc(documentIntegrityValidationRuns.attemptNumber))
+		.limit(1);
 	const uniqueValidationIds = [...new Set(params.validationIds)];
 	if (
 		uniqueValidationIds.length !== params.validationIds.length ||
@@ -912,12 +928,29 @@ export async function assertUploadedBankStatementsValidated(params: {
 			"El cupo de validaciones documentales fue reiniciado. Vuelve a validar estos documentos antes de analizar la capacidad de pago.",
 		);
 	}
+	const selectedRunIds = new Set(
+		validations.map((validation) => validation.validationRunId),
+	);
 	if (
+		latestCompletedRun &&
+		validations.length === uniqueValidationIds.length &&
+		selectedRunIds.size === 1 &&
+		!selectedRunIds.has(latestCompletedRun.id)
+	) {
+		throw new DocumentIntegrityError(
+			"BAD_REQUEST",
+			"Existe una validación documental más reciente. Actualiza la pantalla y utiliza el último lote validado.",
+		);
+	}
+	if (
+		!latestCompletedRun ||
 		!uploadedValidationPairsMatch({
 			validationIds: params.validationIds,
 			files: params.files,
 			validations: validations.filter(
-				(validation) => validation.attemptNumber > resetAfterAttemptNumber,
+				(validation) =>
+					validation.attemptNumber > resetAfterAttemptNumber &&
+					validation.validationRunId === latestCompletedRun.id,
 			),
 		})
 	) {
@@ -928,40 +961,54 @@ export async function assertUploadedBankStatementsValidated(params: {
 	}
 }
 
-export async function linkUploadedValidationToDocument(params: {
+export async function linkUploadedValidationsToDocuments(params: {
 	opportunityId: string;
-	documentId: string;
-	documentFilePath: string;
-	buffer: Buffer;
+	links: Array<{
+		documentId: string;
+		documentFilePath: string;
+		sourceFilePath: string;
+		buffer: Buffer;
+	}>;
 }) {
-	const sha256 = scanPdfBytes(params.buffer).sha256;
-	const [candidate] = await db
-		.select({ id: documentIntegrityValidations.id })
-		.from(documentIntegrityValidations)
-		.innerJoin(
-			documentIntegrityValidationRuns,
-			eq(
-				documentIntegrityValidations.validationRunId,
-				documentIntegrityValidationRuns.id,
-			),
-		)
-		.where(
-			and(
-				eq(documentIntegrityValidationRuns.opportunityId, params.opportunityId),
-				eq(documentIntegrityValidations.contentSha256, sha256),
-				isNull(documentIntegrityValidations.opportunityDocumentId),
-			),
-		)
-		.orderBy(desc(documentIntegrityValidationRuns.attemptNumber))
-		.limit(1);
-	if (!candidate) return;
-	await db
-		.update(documentIntegrityValidations)
-		.set({
-			opportunityDocumentId: params.documentId,
-			documentFilePath: params.documentFilePath,
-		})
-		.where(eq(documentIntegrityValidations.id, candidate.id));
+	return db.transaction(async (tx) => {
+		const linkedSourceFilePaths = new Set<string>();
+		for (const link of params.links) {
+			const sha256 = scanPdfBytes(link.buffer).sha256;
+			if (linkedSourceFilePaths.has(link.sourceFilePath)) continue;
+			const [candidate] = await tx
+				.select({ id: documentIntegrityValidations.id })
+				.from(documentIntegrityValidations)
+				.innerJoin(
+					documentIntegrityValidationRuns,
+					eq(
+						documentIntegrityValidations.validationRunId,
+						documentIntegrityValidationRuns.id,
+					),
+				)
+				.where(
+					and(
+						eq(
+							documentIntegrityValidationRuns.opportunityId,
+							params.opportunityId,
+						),
+						eq(documentIntegrityValidations.contentSha256, sha256),
+						isNull(documentIntegrityValidations.opportunityDocumentId),
+					),
+				)
+				.orderBy(desc(documentIntegrityValidationRuns.attemptNumber))
+				.limit(1);
+			if (!candidate) continue;
+			await tx
+				.update(documentIntegrityValidations)
+				.set({
+					opportunityDocumentId: link.documentId,
+					documentFilePath: link.documentFilePath,
+				})
+				.where(eq(documentIntegrityValidations.id, candidate.id));
+			linkedSourceFilePaths.add(link.sourceFilePath);
+		}
+		return [...linkedSourceFilePaths];
+	});
 }
 
 export async function getDocumentIntegrityStatuses(params: {
@@ -1180,29 +1227,16 @@ export async function listDocumentIntegrityValidations(params: {
 	limit: number;
 	offset: number;
 }) {
-	const conditions = [];
-	const cycleStartAfterAttemptNumber = sql<number>`coalesce((
-		select max(quota_reset.reset_after_attempt_number)
-		from document_integrity_validation_resets quota_reset
-		where quota_reset.opportunity_id = ${documentIntegrityValidationRuns.opportunityId}
-			and quota_reset.reset_after_attempt_number < ${documentIntegrityValidationRuns.attemptNumber}
-	), 0)::int`;
-	const isLatestDocumentValidation = sql<boolean>`
-		${documentIntegrityValidationRuns.attemptNumber} = (
-			select max(r2.attempt_number)
-			from document_integrity_validations v2
-			inner join document_integrity_validation_runs r2
-				on r2.id = v2.validation_run_id
-			where r2.opportunity_id = ${documentIntegrityValidationRuns.opportunityId}
-				and coalesce(v2.opportunity_document_id::text, v2.content_sha256) =
-					coalesce(${documentIntegrityValidations.opportunityDocumentId}::text, ${documentIntegrityValidations.contentSha256})
-				and coalesce((
-					select max(quota_reset_2.reset_after_attempt_number)
-					from document_integrity_validation_resets quota_reset_2
-					where quota_reset_2.opportunity_id = r2.opportunity_id
-						and quota_reset_2.reset_after_attempt_number < r2.attempt_number
-				), 0) = ${cycleStartAfterAttemptNumber}
+	const latestFinalizedRun = sql`
+		${documentIntegrityValidationRuns.id} = (
+			select latest_run.id
+			from document_integrity_validation_runs latest_run
+			where latest_run.opportunity_id = ${documentIntegrityValidationRuns.opportunityId}
+				and latest_run.status in ('completed', 'error')
+			order by latest_run.attempt_number desc
+			limit 1
 		)`;
+	const conditions = [latestFinalizedRun];
 	if (params.opportunityId)
 		conditions.push(
 			eq(documentIntegrityValidationRuns.opportunityId, params.opportunityId),
@@ -1210,7 +1244,7 @@ export async function listDocumentIntegrityValidations(params: {
 	const havingConditions = [];
 	if (params.requiresReviewOnly)
 		havingConditions.push(
-			sql<boolean>`bool_or(${isLatestDocumentValidation} and ${documentIntegrityValidations.autoResult} in ('revision_manual', 'rechazado', 'error'))`,
+			sql<boolean>`bool_or(${documentIntegrityValidationRuns.status} = 'error' or ${documentIntegrityValidations.autoResult} in ('revision_manual', 'rechazado', 'error'))`,
 		);
 	if (params.search) {
 		const pattern = `%${params.search}%`;
@@ -1227,30 +1261,29 @@ export async function listDocumentIntegrityValidations(params: {
 	return db
 		.select({
 			opportunityId: documentIntegrityValidationRuns.opportunityId,
-			cycleStartAfterAttemptNumber,
+			attemptNumber: documentIntegrityValidationRuns.attemptNumber,
 			opportunityTitle: opportunities.title,
 			leadFirstName: leads.firstName,
 			leadLastName: leads.lastName,
 			latestValidatedAt: sql<Date>`max(coalesce(${documentIntegrityValidationRuns.completedAt}, ${documentIntegrityValidationRuns.startedAt}))`,
 			documentCount: sql<number>`count(distinct coalesce(${documentIntegrityValidations.opportunityDocumentId}::text, ${documentIntegrityValidations.contentSha256}))::int`,
-			validationCount: sql<number>`count(*)::int`,
-			attemptCount: sql<number>`count(distinct ${documentIntegrityValidationRuns.id}) filter (where ${documentIntegrityValidationRuns.status} = 'completed')::int`,
 			aggregateResult: sql<
 				"valido" | "observacion" | "revision_manual" | "rechazado" | "error"
 			>`case
-				when bool_or(${isLatestDocumentValidation} and ${documentIntegrityValidations.autoResult} = 'rechazado') then 'rechazado'
-				when bool_or(${isLatestDocumentValidation} and ${documentIntegrityValidations.autoResult} = 'error') then 'error'
-				when bool_or(${isLatestDocumentValidation} and ${documentIntegrityValidations.autoResult} = 'revision_manual') then 'revision_manual'
-				when bool_or(${isLatestDocumentValidation} and ${documentIntegrityValidations.autoResult} = 'observacion') then 'observacion'
+				when bool_or(${documentIntegrityValidationRuns.status} = 'error') then 'error'
+				when bool_or(${documentIntegrityValidations.autoResult} = 'rechazado') then 'rechazado'
+				when bool_or(${documentIntegrityValidations.autoResult} = 'error') then 'error'
+				when bool_or(${documentIntegrityValidations.autoResult} = 'revision_manual') then 'revision_manual'
+				when bool_or(${documentIntegrityValidations.autoResult} = 'observacion') then 'observacion'
 				else 'valido'
 			end`,
 		})
-		.from(documentIntegrityValidations)
-		.innerJoin(
-			documentIntegrityValidationRuns,
+		.from(documentIntegrityValidationRuns)
+		.leftJoin(
+			documentIntegrityValidations,
 			eq(
-				documentIntegrityValidations.validationRunId,
 				documentIntegrityValidationRuns.id,
+				documentIntegrityValidations.validationRunId,
 			),
 		)
 		.innerJoin(
@@ -1268,7 +1301,8 @@ export async function listDocumentIntegrityValidations(params: {
 		.where(conditions.length ? and(...conditions) : undefined)
 		.groupBy(
 			documentIntegrityValidationRuns.opportunityId,
-			cycleStartAfterAttemptNumber,
+			documentIntegrityValidationRuns.id,
+			documentIntegrityValidationRuns.attemptNumber,
 			opportunities.title,
 			leads.firstName,
 			leads.lastName,
@@ -1284,15 +1318,12 @@ export async function listDocumentIntegrityValidations(params: {
 export async function getDocumentIntegrityValidationGroup(params: {
 	opportunityId?: string;
 	validationId?: string;
-	cycleStartAfterAttemptNumber?: number;
 }) {
 	let opportunityId = params.opportunityId;
-	let validationAttemptNumber: number | undefined;
 	if (!opportunityId && params.validationId) {
 		const [validation] = await db
 			.select({
 				opportunityId: documentIntegrityValidationRuns.opportunityId,
-				attemptNumber: documentIntegrityValidationRuns.attemptNumber,
 			})
 			.from(documentIntegrityValidations)
 			.innerJoin(
@@ -1307,7 +1338,6 @@ export async function getDocumentIntegrityValidationGroup(params: {
 		if (!validation)
 			throw new DocumentIntegrityError("NOT_FOUND", "Validación no encontrada");
 		opportunityId = validation.opportunityId;
-		validationAttemptNumber = validation.attemptNumber;
 	}
 	if (!opportunityId)
 		throw new DocumentIntegrityError(
@@ -1343,71 +1373,25 @@ export async function getDocumentIntegrityValidationGroup(params: {
 		.innerJoin(user, eq(documentIntegrityValidationResets.resetBy, user.id))
 		.where(eq(documentIntegrityValidationResets.opportunityId, opportunityId))
 		.orderBy(documentIntegrityValidationResets.resetAfterAttemptNumber);
-	const latestCycleStart = resets.at(-1)?.resetAfterAttemptNumber ?? 0;
-	const cycleStartAfterAttemptNumber =
-		params.cycleStartAfterAttemptNumber ??
-		(validationAttemptNumber === undefined
-			? latestCycleStart
-			: (resets
-					.filter(
-						(reset) => reset.resetAfterAttemptNumber < validationAttemptNumber,
-					)
-					.at(-1)?.resetAfterAttemptNumber ?? 0));
-	if (
-		cycleStartAfterAttemptNumber !== 0 &&
-		!resets.some(
-			(reset) => reset.resetAfterAttemptNumber === cycleStartAfterAttemptNumber,
-		)
-	) {
-		throw new DocumentIntegrityError(
-			"BAD_REQUEST",
-			"El ciclo de validación solicitado no existe",
-		);
-	}
-	const nextCycleStart = resets.find(
-		(reset) => reset.resetAfterAttemptNumber > cycleStartAfterAttemptNumber,
-	)?.resetAfterAttemptNumber;
-	const cycleConditions = [
-		eq(documentIntegrityValidationRuns.opportunityId, opportunityId),
-		gt(
-			documentIntegrityValidationRuns.attemptNumber,
-			cycleStartAfterAttemptNumber,
-		),
-	];
-	if (nextCycleStart !== undefined) {
-		cycleConditions.push(
-			lte(documentIntegrityValidationRuns.attemptNumber, nextCycleStart),
-		);
-	}
-
-	const completedHistoryRuns = await db
-		.select({ id: documentIntegrityValidationRuns.id })
+	const [latestFinalizedRun] = await db
+		.select({
+			id: documentIntegrityValidationRuns.id,
+			attemptNumber: documentIntegrityValidationRuns.attemptNumber,
+			status: documentIntegrityValidationRuns.status,
+			validationSource: documentIntegrityValidationRuns.validationSource,
+			validatedAt: sql<Date>`coalesce(${documentIntegrityValidationRuns.completedAt}, ${documentIntegrityValidationRuns.startedAt})`,
+		})
 		.from(documentIntegrityValidationRuns)
 		.where(
 			and(
-				...cycleConditions,
-				eq(documentIntegrityValidationRuns.status, "completed"),
+				eq(documentIntegrityValidationRuns.opportunityId, opportunityId),
+				inArray(documentIntegrityValidationRuns.status, ["completed", "error"]),
 			),
 		)
 		.orderBy(desc(documentIntegrityValidationRuns.attemptNumber))
-		.limit(MAX_DOCUMENT_INTEGRITY_ATTEMPTS);
-	const recentErrorHistoryRuns = await db
-		.select({ id: documentIntegrityValidationRuns.id })
-		.from(documentIntegrityValidationRuns)
-		.where(
-			and(
-				...cycleConditions,
-				eq(documentIntegrityValidationRuns.status, "error"),
-			),
-		)
-		.orderBy(desc(documentIntegrityValidationRuns.attemptNumber))
-		.limit(MAX_ERROR_RUNS_IN_HISTORY);
-	const historyRunIds = [
-		...completedHistoryRuns,
-		...recentErrorHistoryRuns,
-	].map((run) => run.id);
+		.limit(1);
 
-	const rows = historyRunIds.length
+	const rows = latestFinalizedRun
 		? await db
 				.select({
 					id: documentIntegrityValidations.id,
@@ -1443,9 +1427,11 @@ export async function getDocumentIntegrityValidationGroup(params: {
 					),
 				)
 				.where(
-					inArray(documentIntegrityValidations.validationRunId, historyRunIds),
+					eq(
+						documentIntegrityValidations.validationRunId,
+						latestFinalizedRun.id,
+					),
 				)
-				.orderBy(desc(documentIntegrityValidationRuns.attemptNumber))
 		: [];
 
 	const validationDetails = await Promise.all(
@@ -1465,66 +1451,30 @@ export async function getDocumentIntegrityValidationGroup(params: {
 			};
 		}),
 	);
-	const attemptsByRun = new Map<
-		string,
-		{
-			validationRunId: string;
-			attemptNumber: number;
-			validationSource: (typeof validationDetails)[number]["validationSource"];
-			validatedAt: Date;
-			validations: typeof validationDetails;
-		}
-	>();
-	for (const validation of validationDetails) {
-		const attempt = attemptsByRun.get(validation.validationRunId) ?? {
-			validationRunId: validation.validationRunId,
-			attemptNumber: validation.attemptNumber,
-			validationSource: validation.validationSource,
-			validatedAt: validation.validatedAt,
-			validations: [],
-		};
-		attempt.validations.push(validation);
-		attemptsByRun.set(validation.validationRunId, attempt);
-	}
-	const attempts = [...attemptsByRun.values()].sort(
-		(left, right) => right.attemptNumber - left.attemptNumber,
-	);
-	const completedHistoryRunIds = new Set(
-		completedHistoryRuns.map((run) => run.id),
-	);
-	const validations =
-		attempts.find((attempt) =>
-			completedHistoryRunIds.has(attempt.validationRunId),
-		)?.validations ?? [];
-	const cycleReset = resets.find(
-		(reset) => reset.resetAfterAttemptNumber === cycleStartAfterAttemptNumber,
-	);
-	const attemptCount = completedHistoryRuns.length;
-	const isCurrentCycle = cycleStartAfterAttemptNumber === latestCycleStart;
-	const attemptStatus = {
-		attemptCount,
-		maxAttempts: MAX_DOCUMENT_INTEGRITY_ATTEMPTS,
-		remainingAttempts: Math.max(
-			0,
-			MAX_DOCUMENT_INTEGRITY_ATTEMPTS - attemptCount,
-		),
-		canValidate: isCurrentCycle && currentAttemptStatus.canValidate,
-		hasProcessingRun: isCurrentCycle && currentAttemptStatus.hasProcessingRun,
-	};
+	const validations = validationDetails;
+	const attempts = latestFinalizedRun
+		? [
+				{
+					validationRunId: latestFinalizedRun.id,
+					attemptNumber: latestFinalizedRun.attemptNumber,
+					status: latestFinalizedRun.status,
+					validationSource: latestFinalizedRun.validationSource,
+					validatedAt: latestFinalizedRun.validatedAt,
+					validations,
+				},
+			]
+		: [];
+	const latestReset = resets.at(-1);
 
 	return {
 		...opportunity,
-		...attemptStatus,
-		cycleNumber:
-			[0, ...resets.map((reset) => reset.resetAfterAttemptNumber)].indexOf(
-				cycleStartAfterAttemptNumber,
-			) + 1,
-		cycleStartAfterAttemptNumber,
-		reset: cycleReset
+		...currentAttemptStatus,
+		reset: latestReset
 			? {
-					resetAt: cycleReset.resetAt,
-					resetByName: cycleReset.resetByName,
-					resetByEmail: cycleReset.resetByEmail,
+					resetAfterAttemptNumber: latestReset.resetAfterAttemptNumber,
+					resetAt: latestReset.resetAt,
+					resetByName: latestReset.resetByName,
+					resetByEmail: latestReset.resetByEmail,
 				}
 			: null,
 		validations,

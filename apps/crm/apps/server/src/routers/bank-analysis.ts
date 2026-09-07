@@ -43,7 +43,7 @@ import {
 import {
 	assertUploadedBankStatementsValidated,
 	DocumentIntegrityError,
-	linkUploadedValidationToDocument,
+	linkUploadedValidationsToDocuments,
 } from "../services/document-integrity";
 
 const MAX_AI_ATTEMPTS = 2;
@@ -246,6 +246,7 @@ export const bankAnalysisRouter = {
 			}
 
 			const uploadedKeys: string[] = [];
+			const uploadedKeysToDelete = new Set<string>();
 
 			try {
 				// 2. Validar archivos: descargar de R2 y verificar formato PDF
@@ -546,6 +547,12 @@ export const bankAnalysisRouter = {
 				if (opportunityForDocuments) {
 					const savedDocuments: { id: string; documentType: string }[] = [];
 					const savedKeys: string[] = [];
+					const pendingValidationLinks: Array<{
+						documentId: string;
+						documentFilePath: string;
+						sourceFilePath: string;
+						buffer: Buffer;
+					}> = [];
 					let checklistDocumentsSaved = false;
 
 					try {
@@ -597,10 +604,10 @@ export const bankAnalysisRouter = {
 
 							if (newDocument) {
 								savedDocuments.push({ id: newDocument.id, documentType });
-								await linkUploadedValidationToDocument({
-									opportunityId: opportunityForDocuments.id,
+								pendingValidationLinks.push({
 									documentId: newDocument.id,
 									documentFilePath: key,
+									sourceFilePath: file.key,
 									buffer: file.buffer,
 								});
 								await updateChecklistForClientDocument(
@@ -611,6 +618,14 @@ export const bankAnalysisRouter = {
 									opportunityForDocuments.vehicleId || undefined,
 								);
 							}
+						}
+						const linkedSourceFilePaths =
+							await linkUploadedValidationsToDocuments({
+								opportunityId: opportunityForDocuments.id,
+								links: pendingValidationLinks,
+							});
+						for (const filePath of linkedSourceFilePaths) {
+							uploadedKeysToDelete.add(filePath);
 						}
 
 						checklistDocumentsSaved = true;
@@ -667,6 +682,12 @@ export const bankAnalysisRouter = {
 					if (checklistDocumentsSaved && extraFiles.length > 0) {
 						const savedExtraDocumentIds: string[] = [];
 						const savedExtraKeys: string[] = [];
+						const pendingExtraValidationLinks: Array<{
+							documentId: string;
+							documentFilePath: string;
+							sourceFilePath: string;
+							buffer: Buffer;
+						}> = [];
 
 						try {
 							for (const [index, file] of extraFiles.entries()) {
@@ -700,13 +721,21 @@ export const bankAnalysisRouter = {
 
 								if (newDocument) {
 									savedExtraDocumentIds.push(newDocument.id);
-									await linkUploadedValidationToDocument({
-										opportunityId: opportunityForDocuments.id,
+									pendingExtraValidationLinks.push({
 										documentId: newDocument.id,
 										documentFilePath: key,
+										sourceFilePath: file.key,
 										buffer: file.buffer,
 									});
 								}
+							}
+							const linkedSourceFilePaths =
+								await linkUploadedValidationsToDocuments({
+									opportunityId: opportunityForDocuments.id,
+									links: pendingExtraValidationLinks,
+								});
+							for (const filePath of linkedSourceFilePaths) {
+								uploadedKeysToDelete.add(filePath);
 							}
 						} catch (error) {
 							const cleanupResults = await Promise.allSettled([
@@ -734,15 +763,17 @@ export const bankAnalysisRouter = {
 						}
 					}
 				}
-
 				// 8. Retornar resultados
 				return {
 					analysis,
 					creditCapacity,
 				};
 			} finally {
+				const cleanupKeys = isForLead
+					? [...uploadedKeysToDelete]
+					: uploadedKeys;
 				const cleanupResults = await Promise.allSettled(
-					uploadedKeys.map((key) => deleteFileFromR2(key)),
+					cleanupKeys.map((key) => deleteFileFromR2(key)),
 				);
 				const failedDeletes = cleanupResults.filter(
 					(result) => result.status === "rejected",
@@ -751,7 +782,7 @@ export const bankAnalysisRouter = {
 				if (failedDeletes.length > 0) {
 					console.error("Failed to cleanup bank statement uploads from R2", {
 						resourceId,
-						keys: uploadedKeys,
+						keys: cleanupKeys,
 						failedDeletes: failedDeletes.length,
 					});
 				}

@@ -246,6 +246,50 @@ function inspectFontDicts(document: PDFDocument): FontClassification {
 function inspectPageContent(
 	document: PDFDocument,
 ): PageContentClassification[] {
+	const inspectOperators = (
+		operators: string,
+		resources: PDFDict | undefined,
+		visitedForms: Set<PDFRawStream>,
+	): Pick<PageContentClassification, "hasText" | "hasImage"> => {
+		let hasText = /\bBT\b[\s\S]*?\bET\b/.test(operators);
+		let hasImage = false;
+		const xObjects = resources?.lookupMaybe(PDFName.of("XObject"), PDFDict);
+		if (!xObjects) return { hasText, hasImage };
+
+		const invokedNames = operators.matchAll(/\/([A-Za-z0-9_.-]+)\s+Do\b/g);
+		for (const match of invokedNames) {
+			const value = xObjects.get(PDFName.of(match[1]));
+			const object =
+				value instanceof PDFRef ? document.context.lookup(value) : value;
+			if (!(object instanceof PDFRawStream)) continue;
+
+			const subtype = pdfName(object.dict.get(PDFName.of("Subtype")));
+			if (subtype === "Image") {
+				hasImage = true;
+				continue;
+			}
+			if (subtype !== "Form" || visitedForms.has(object)) continue;
+
+			visitedForms.add(object);
+			let formOperators = "";
+			try {
+				formOperators = decodeStream(object);
+			} catch {
+				continue;
+			}
+			const formResources =
+				object.dict.lookupMaybe(PDFName.of("Resources"), PDFDict) ?? resources;
+			const formContent = inspectOperators(
+				formOperators,
+				formResources,
+				visitedForms,
+			);
+			hasText ||= formContent.hasText;
+			hasImage ||= formContent.hasImage;
+		}
+		return { hasText, hasImage };
+	};
+
 	return document.getPages().map((page, index) => {
 		const contents = page.node.get(PDFName.of("Contents"));
 		const refs =
@@ -260,10 +304,14 @@ function inspectPageContent(
 			if (stream instanceof PDFRawStream)
 				operators += `\n${decodeStream(stream)}`;
 		}
+		const classification = inspectOperators(
+			operators,
+			page.node.Resources(),
+			new Set(),
+		);
 		return {
 			page: index + 1,
-			hasText: /\bBT\b[\s\S]*?\bET\b/.test(operators),
-			hasImage: /\/[A-Za-z0-9_.-]+\s+Do\b/.test(operators),
+			...classification,
 		};
 	});
 }

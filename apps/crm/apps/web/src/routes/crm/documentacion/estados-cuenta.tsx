@@ -68,7 +68,6 @@ export const Route = createFileRoute("/crm/documentacion/estados-cuenta")({
 		.object({
 			validationId: z.string().uuid(),
 			opportunityId: z.string().uuid(),
-			cycleStart: z.coerce.number().int().nonnegative(),
 		})
 		.partial().parse,
 });
@@ -80,7 +79,6 @@ function RouteComponent() {
 			<EstadosCuentaContent
 				initialValidationId={search.validationId}
 				initialOpportunityId={search.opportunityId}
-				initialCycleStart={search.cycleStart}
 			/>
 		</div>
 	);
@@ -140,11 +138,9 @@ export function ResultBadge({ result }: { result: string }) {
 export function EstadosCuentaContent({
 	initialValidationId,
 	initialOpportunityId,
-	initialCycleStart,
 }: {
 	initialValidationId?: string;
 	initialOpportunityId?: string;
-	initialCycleStart?: number;
 } = {}) {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
@@ -154,9 +150,6 @@ export function EstadosCuentaContent({
 	const [selectedValidationId, setSelectedValidationId] = useState<
 		string | null
 	>(initialValidationId ?? null);
-	const [selectedCycleStart, setSelectedCycleStart] = useState<
-		number | undefined
-	>(initialCycleStart);
 	const [newDialogOpen, setNewDialogOpen] = useState(false);
 	const [newDialogOpportunityId, setNewDialogOpportunityId] = useState<
 		string | undefined
@@ -210,7 +203,6 @@ export function EstadosCuentaContent({
 			input: {
 				opportunityId: selectedOpportunityId ?? undefined,
 				validationId: selectedValidationId ?? undefined,
-				cycleStartAfterAttemptNumber: selectedCycleStart,
 			},
 		}),
 		enabled: !!(selectedOpportunityId || selectedValidationId),
@@ -240,7 +232,6 @@ export function EstadosCuentaContent({
 								setNewDialogOpen(false);
 								setSelectedOpportunityId(opportunityId);
 								setSelectedValidationId(null);
-								setSelectedCycleStart(undefined);
 								queryClient.invalidateQueries({
 									queryKey: orpc.listDocumentIntegrityValidations.key(),
 								});
@@ -283,7 +274,6 @@ export function EstadosCuentaContent({
 								<TableHead>Fecha</TableHead>
 								<TableHead>Cliente</TableHead>
 								<TableHead>Oportunidad</TableHead>
-								<TableHead>Ciclo</TableHead>
 								<TableHead>Documentos</TableHead>
 								<TableHead>Resultado</TableHead>
 							</TableRow>
@@ -292,7 +282,7 @@ export function EstadosCuentaContent({
 							{listQuery.isLoading && (
 								<TableRow>
 									<TableCell
-										colSpan={6}
+										colSpan={5}
 										className="text-center text-muted-foreground"
 									>
 										Cargando…
@@ -302,7 +292,7 @@ export function EstadosCuentaContent({
 							{listQuery.isError && (
 								<TableRow>
 									<TableCell
-										colSpan={6}
+										colSpan={5}
 										className="text-center text-destructive"
 									>
 										No se pudo cargar la bandeja.
@@ -314,7 +304,7 @@ export function EstadosCuentaContent({
 								rows.length === 0 && (
 									<TableRow>
 										<TableCell
-											colSpan={6}
+											colSpan={5}
 											className="text-center text-muted-foreground"
 										>
 											No hay validaciones para este filtro.
@@ -322,14 +312,13 @@ export function EstadosCuentaContent({
 									</TableRow>
 								)}
 							{rows.map((row) => (
-								<TableRow
-									key={`${row.opportunityId}:${row.cycleStartAfterAttemptNumber}`}
-									className="cursor-pointer hover:bg-muted/50"
-									onClick={() => {
-										setSelectedOpportunityId(row.opportunityId);
-										setSelectedValidationId(null);
-										setSelectedCycleStart(row.cycleStartAfterAttemptNumber);
-									}}
+				<TableRow
+					key={row.opportunityId}
+					className="cursor-pointer hover:bg-muted/50"
+					onClick={() => {
+						setSelectedOpportunityId(row.opportunityId);
+						setSelectedValidationId(null);
+					}}
 								>
 									<TableCell className="whitespace-nowrap">
 										{new Date(row.latestValidatedAt).toLocaleString("es-GT")}
@@ -341,24 +330,10 @@ export function EstadosCuentaContent({
 									</TableCell>
 									<TableCell>{row.opportunityTitle}</TableCell>
 									<TableCell>
-										{row.cycleStartAfterAttemptNumber === 0
-											? "Inicial"
-											: `Posterior al reset de la ejecución ${row.cycleStartAfterAttemptNumber}`}
-									</TableCell>
-									<TableCell>
 										{row.documentCount} documento
 										{row.documentCount === 1 ? "" : "s"}
 										<span className="block text-muted-foreground text-xs">
-											{row.attemptCount}{" "}
-											{row.attemptCount === 1
-												? "validación utilizada"
-												: "validaciones utilizadas"}
-											{row.validationCount > row.documentCount && (
-												<>
-													{" · "}
-													{row.validationCount} validaciones históricas
-												</>
-											)}
+											Ejecución {row.attemptNumber}
 										</span>
 									</TableCell>
 									<TableCell>
@@ -404,14 +379,13 @@ export function EstadosCuentaContent({
 					if (!open) {
 						setSelectedOpportunityId(null);
 						setSelectedValidationId(null);
-						setSelectedCycleStart(undefined);
 					}
 				}}
 			>
 				<DialogContent className="max-h-[95vh] max-w-[95vw] overflow-y-auto lg:max-w-6xl">
 					<DialogHeader>
 						<DialogTitle>
-							Detalle de validación documental por oportunidad y ciclo
+							Detalle de la última validación documental
 						</DialogTitle>
 					</DialogHeader>
 					{detailQuery.isLoading && (
@@ -424,7 +398,6 @@ export function EstadosCuentaContent({
 								const opportunityId = detailQuery.data.opportunityId;
 								setSelectedOpportunityId(null);
 								setSelectedValidationId(null);
-								setSelectedCycleStart(undefined);
 								setNewDialogOpportunityId(opportunityId);
 								setNewDialogOpen(true);
 							}}
@@ -779,10 +752,26 @@ function getDocumentTabKey(result: ValidationDetails) {
 }
 
 function getAttemptResult(attempt: ValidationAttempt): IntegrityResult {
+	if (attempt.status === "error") return "error";
 	return aggregateIntegrityResult(attempt.validations);
 }
 
 function ValidationAttemptDetails({ attempt }: { attempt: ValidationAttempt }) {
+	if (attempt.validations.length === 0) {
+		return (
+			<div className="rounded-md border border-destructive/30 bg-destructive/5 p-4">
+				<div className="flex items-center gap-2">
+					<ResultBadge result="error" />
+					<p className="font-medium">La ejecución no pudo completarse</p>
+				</div>
+				<p className="mt-2 text-muted-foreground text-sm">
+					El proceso terminó antes de generar resultados individuales por
+					documento. Puede volver a validar sin consumir el cupo.
+				</p>
+			</div>
+		);
+	}
+
 	if (attempt.validations.length === 1) {
 		return <ValidationDetailsView result={attempt.validations[0]} />;
 	}
@@ -826,6 +815,7 @@ function OpportunityValidationDetails({
 	const clientName = [group.leadFirstName, group.leadLastName]
 		.filter(Boolean)
 		.join(" ");
+	const latestAttempt = group.attempts[0];
 
 	return (
 		<div className="space-y-4">
@@ -837,13 +827,17 @@ function OpportunityValidationDetails({
 					)}
 				</div>
 				<div className="flex flex-wrap items-center gap-2">
-					<Badge variant="secondary">Ciclo {group.cycleNumber}</Badge>
+					{latestAttempt && (
+						<Badge variant="secondary">
+							Ejecución {latestAttempt.attemptNumber}
+						</Badge>
+					)}
 					<Badge variant="outline">
 						{group.validations.length} documento
 						{group.validations.length === 1 ? "" : "s"}
 					</Badge>
 					<Badge variant="outline">
-						{group.attemptCount}/{group.maxAttempts} validaciones utilizadas
+						Cupo actual: {group.attemptCount}/{group.maxAttempts}
 					</Badge>
 					{group.attempts.length > 0 && group.canValidate && (
 						<Button size="sm" onClick={onCreateValidation}>
@@ -857,14 +851,13 @@ function OpportunityValidationDetails({
 					<p className="font-medium">Cupo de validaciones reiniciado</p>
 					<p className="text-xs">
 						Por {group.reset.resetByName || group.reset.resetByEmail} el{" "}
-						{new Date(group.reset.resetAt).toLocaleString("es-GT")}. Este ciclo
-						comenzó después de la ejecución {group.cycleStartAfterAttemptNumber}
-						.
+						{new Date(group.reset.resetAt).toLocaleString("es-GT")}, después de
+						la ejecución {group.reset.resetAfterAttemptNumber}.
 					</p>
 				</div>
 			)}
 
-			{group.attempts.length === 0 ? (
+			{!latestAttempt ? (
 				<div className="space-y-3 py-8 text-center">
 					<p className="text-muted-foreground text-sm">
 						Esta oportunidad todavía no tiene validaciones documentales.
@@ -875,48 +868,23 @@ function OpportunityValidationDetails({
 							: "Límite de validaciones alcanzado"}
 					</Button>
 				</div>
-			) : group.attempts.length === 1 ? (
-				<ValidationAttemptDetails attempt={group.attempts[0]} />
 			) : (
-				<Tabs
-					defaultValue={group.attempts[0].validationRunId}
-					className="w-full"
-				>
-					<TabsList className="h-auto max-w-full flex-wrap justify-start gap-1">
-						{group.attempts.map((attempt, index) => (
-							<TabsTrigger
-								key={attempt.validationRunId}
-								value={attempt.validationRunId}
-								className="gap-2"
-							>
-								Ejecución {attempt.attemptNumber}
-								{index === 0 && <Badge variant="secondary">Último</Badge>}
-								<ResultBadge result={getAttemptResult(attempt)} />
-							</TabsTrigger>
-						))}
-					</TabsList>
-					{group.attempts.map((attempt) => (
-						<TabsContent
-							key={attempt.validationRunId}
-							value={attempt.validationRunId}
-							className="mt-3"
-						>
-							<div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border bg-muted/30 px-3 py-2 text-sm">
-								<span className="font-medium">
-									Ejecución {attempt.attemptNumber}
-								</span>
-								<span className="text-muted-foreground">
-									{new Date(attempt.validatedAt).toLocaleString("es-GT")}
-								</span>
-								<span className="text-muted-foreground">
-									{attempt.validations.length} documento
-									{attempt.validations.length === 1 ? "" : "s"}
-								</span>
-							</div>
-							<ValidationAttemptDetails attempt={attempt} />
-						</TabsContent>
-					))}
-				</Tabs>
+				<div className="space-y-3">
+					<div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border bg-muted/30 px-3 py-2 text-sm">
+						<span className="font-medium">
+							Ejecución {latestAttempt.attemptNumber}
+						</span>
+						<ResultBadge result={getAttemptResult(latestAttempt)} />
+						<span className="text-muted-foreground">
+							{new Date(latestAttempt.validatedAt).toLocaleString("es-GT")}
+						</span>
+						<span className="text-muted-foreground">
+							{latestAttempt.validations.length} documento
+							{latestAttempt.validations.length === 1 ? "" : "s"}
+						</span>
+					</div>
+					<ValidationAttemptDetails attempt={latestAttempt} />
+				</div>
 			)}
 		</div>
 	);

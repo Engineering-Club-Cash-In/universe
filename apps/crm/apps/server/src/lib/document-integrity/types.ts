@@ -64,7 +64,7 @@ export function createDocumentIntegrityAiSchema<
 >(observationCodes: TObservation, issuerValues: TIssuer) {
 	const nullableText = z.string().trim().min(1).nullable().catch(null);
 	return z.object({
-		corresponde_al_tipo_declarado: z.boolean().catch(false),
+		corresponde_al_tipo_declarado: z.boolean(),
 		confianza_tipo_documento: z.number().min(0).max(100).catch(0),
 		tipo_documento_detectado: z.string().trim().min(1).catch("desconocido"),
 		emisor_normalizado: z.enum(issuerValues).catch("otro" as TIssuer[number]),
@@ -77,7 +77,7 @@ export function createDocumentIntegrityAiSchema<
 			.catch(null),
 		titular_detectado: nullableText,
 		identificador_detectado: nullableText,
-		es_legible: z.boolean().catch(false),
+		es_legible: z.boolean(),
 		observaciones_forenses: z
 			.array(
 				z.object({

@@ -7,6 +7,7 @@ import {
 import { isNotNull } from "drizzle-orm";
 import { db } from "../db";
 import {
+	documentIntegrityValidations,
 	generatedLegalContracts,
 	licenseQrVerifications,
 	notificationDocuments,
@@ -117,6 +118,7 @@ async function loadReferencedKeys(): Promise<Set<string>> {
 		notificationRows,
 		legalContractRows,
 		licenseVerificationRows,
+		documentIntegrityValidationRows,
 	] = await Promise.all([
 		db
 			.select({ key: opportunityDocuments.filePath })
@@ -133,6 +135,9 @@ async function loadReferencedKeys(): Promise<Set<string>> {
 			.select({ key: licenseQrVerifications.documentKey })
 			.from(licenseQrVerifications)
 			.where(isNotNull(licenseQrVerifications.documentKey)),
+		db
+			.select({ key: documentIntegrityValidations.documentFilePath })
+			.from(documentIntegrityValidations),
 	]);
 
 	const referencedKeys = new Set<string>();
@@ -142,6 +147,7 @@ async function loadReferencedKeys(): Promise<Set<string>> {
 		...notificationRows,
 		...legalContractRows,
 		...licenseVerificationRows,
+		...documentIntegrityValidationRows,
 	]) {
 		const normalized = normalizeStoredKey(row.key);
 		if (normalized) {
@@ -201,7 +207,10 @@ async function main() {
 				continue;
 			}
 
-			if (prefix === "bank-statements/") {
+			if (
+				prefix === "bank-statements/" &&
+				!referencedKeys.has(object.Key)
+			) {
 				orphanedObjects.push({
 					key: object.Key,
 					size: object.Size ?? 0,

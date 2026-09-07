@@ -184,11 +184,6 @@ export const documentIntegrityProcedures = {
 				.object({
 					opportunityId: z.string().uuid().optional(),
 					validationId: z.string().uuid().optional(),
-					cycleStartAfterAttemptNumber: z
-						.number()
-						.int()
-						.nonnegative()
-						.optional(),
 				})
 				.refine((input) => input.opportunityId || input.validationId, {
 					message: "Indica una oportunidad o validación",

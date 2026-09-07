@@ -405,14 +405,16 @@ export function BankStatementAnalysis({
 		<Card className="border-dashed">
 			<CardHeader className="pb-3">
 				<CardTitle className="font-medium text-sm">
-					{leadId && !validatedBatch
+					{leadId && !hasSuccessfulAnalysis && !validatedBatch
 						? "Validación de Estados de Cuenta"
 						: "Análisis de Estados de Cuenta"}
 				</CardTitle>
 				<CardDescription className="text-xs">
-					{leadId && !validatedBatch
+					{leadId && !hasSuccessfulAnalysis && !validatedBatch
 						? "Suba de 1 a 9 estados de cuenta bancarios en PDF para evaluar su legitimidad y legibilidad."
-						: "Los documentos ya fueron validados. Revise el resultado y decida si desea continuar con el análisis de capacidad de pago."}
+						: hasSuccessfulAnalysis
+							? "El análisis de capacidad de pago ya fue completado."
+							: "Los documentos ya fueron validados. Revise el resultado y decida si desea continuar con el análisis de capacidad de pago."}
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="space-y-3">
@@ -421,7 +423,7 @@ export function BankStatementAnalysis({
 						Seleccione una oportunidad para consultar o crear su análisis.
 					</p>
 				)}
-				{leadId && !validatedBatch && (
+				{leadId && !hasSuccessfulAnalysis && !validatedBatch && (
 					<div className="flex gap-2 rounded-md border border-blue-200 bg-blue-50 p-3 text-blue-900 text-xs">
 						<ShieldCheck className="h-4 w-4 shrink-0" />
 						<span>
@@ -495,6 +497,7 @@ export function BankStatementAnalysis({
 					)}
 				{leadId &&
 					opportunityId &&
+					!hasSuccessfulAnalysis &&
 					!validatedBatch &&
 					!canValidateIntegrity && (
 						<div className="flex gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-800 text-xs">
@@ -505,7 +508,7 @@ export function BankStatementAnalysis({
 						</div>
 					)}
 				{/* File input */}
-				<div>
+				<div className={hasSuccessfulAnalysis ? "hidden" : undefined}>
 					<input
 						ref={fileInputRef}
 						type="file"
@@ -539,7 +542,7 @@ export function BankStatementAnalysis({
 				</div>
 
 				{/* File list */}
-				{files.length > 0 && (
+				{!hasSuccessfulAnalysis && files.length > 0 && (
 					<div className="space-y-1.5">
 						{files.map((file, index) => (
 							<div
@@ -568,7 +571,7 @@ export function BankStatementAnalysis({
 					</div>
 				)}
 
-				{leadId && !validatedBatch && (
+				{leadId && !hasSuccessfulAnalysis && !validatedBatch && (
 					<Button
 						type="button"
 						size="sm"

@@ -133,6 +133,9 @@ function LiquidacionesInversionistas() {
 		return () => clearTimeout(timer);
 	}, [claveActual]);
 
+	const deteccionDescartada =
+		!!claveActual && deteccionesDescartadas.includes(claveActual);
+
 	const identidadQuery = useQuery({
 		...orpc.identidadInversionista.queryOptions({
 			input: disparador ?? {},
@@ -143,7 +146,12 @@ function LiquidacionesInversionistas() {
 			claveDebounced === claveActual &&
 			// Ya se está creando una empresa: no hay nada más que detectar.
 			!formDpiRepLegal &&
-			!(claveActual && deteccionesDescartadas.includes(claveActual)),
+			!deteccionDescartada,
+		// Sin esto, el resultado de una consulta anterior se sigue dando por
+		// bueno cinco minutos, y hay dos formas de que ese resultado ya no valga:
+		// crear al inversionista (el `null` de "no existe" se vuelve mentira, ver
+		// la invalidación en `crearMutation`) y descartar la detección (el hit
+		// sigue en caché aunque la query esté apagada, ver abajo).
 		staleTime: 5 * 60 * 1000,
 	});
 
@@ -151,6 +159,12 @@ function LiquidacionesInversionistas() {
 	useEffect(() => {
 		const identidad = identidadQuery.data as IdentidadDetectada | null | undefined;
 		if (!identidad || formDpiRepLegal) return;
+		// Apagar la query NO borra lo que ya tiene en caché: al descartar la
+		// detección, el DPI vuelve al campo, la clave vuelve a ser la de antes y
+		// `identidadQuery.data` sirve el mismo hit de siempre. Sin esta guarda el
+		// efecto lo reaplicaba al instante y el botón "no era esa persona" no
+		// llegaba a devolver el DPI editable.
+		if (deteccionDescartada) return;
 
 		const campos = camposAlDetectar(identidad, formEmail);
 		setFormDpi(campos.dpi);
@@ -160,7 +174,7 @@ function LiquidacionesInversionistas() {
 		// El choque que conta acaba de ver deja de aplicar: ya no es duplicado,
 		// es el representante.
 		setCampoDuplicado(null);
-	}, [identidadQuery.data, formDpiRepLegal, formEmail]);
+	}, [identidadQuery.data, formDpiRepLegal, formEmail, deteccionDescartada]);
 
 	// "No era esa persona": el DPI vuelve al campo donde lo escribieron y ese
 	// disparador queda descartado para no volver a proponerlo al instante.
@@ -277,8 +291,20 @@ function LiquidacionesInversionistas() {
 			setCrearOpen(false);
 			resetForm();
 			await queryClient.invalidateQueries({
-				predicate: (query) =>
-					JSON.stringify(query.queryKey).includes("getInversionistas"),
+				predicate: (query) => {
+					const clave = JSON.stringify(query.queryKey);
+					// `identidadInversionista` también: acabamos de crear a alguien,
+					// así que el "no existe" que se cacheó hace un momento ya es
+					// falso. Sin esto, dar de alta a una persona y enseguida abrir el
+					// modal para crear SU empresa reusaba ese `null`, la detección no
+					// corría, el DPI no se movía a representante legal y el alta
+					// rebotaba como duplicada — justo el caso que esta pantalla viene
+					// a resolver.
+					return (
+						clave.includes("getInversionistas") ||
+						clave.includes("identidadInversionista")
+					);
+				},
 			});
 		},
 		onError: (err: any) => {

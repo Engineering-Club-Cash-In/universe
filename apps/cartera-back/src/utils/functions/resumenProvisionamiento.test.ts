@@ -259,3 +259,45 @@ describe("resumirProvisionamiento: la pendiente es trabajo, no estadística", ()
     expect(html).not.toContain("corrida en seco");
   });
 });
+
+/**
+ * La cuenta existe, el correo cuadra, pero el rol quedó en CLIENT.
+ *
+ * Es el falso positivo más silencioso del resumen: `consultarCuentaInversionista`
+ * devuelve `ya_tenia`, así que la fila entra en el contador "N ya tenían acceso"
+ * —un número, no una lista— y desaparece. Nadie leía la advertencia. La persona
+ * entra al portal y no ve ninguna inversión: `useEntidades` solo carga con
+ * INVESTOR.
+ */
+describe("resumirProvisionamiento — cuenta sin el rol de inversionista", () => {
+  it("saca de las estadísticas a quien tiene cuenta pero no el rol", () => {
+    const res = resumirProvisionamiento(
+      [r({ estado: "ya_tenia", advertencias: ["cuenta_sin_rol_de_inversionista"] })],
+      nombres,
+    );
+
+    expect(res.sinRolDeInversionista).toHaveLength(1);
+    expect(res.sinRolDeInversionista[0]).toMatchObject({
+      inversionistaId: 1,
+      nombre: "Ana Pérez",
+    });
+    // Hace sonar la campana: es una persona sin acceso esperando un click, el
+    // mismo trabajo abierto que una candidata.
+    expect(res.hayQueReportar).toBe(true);
+    expect(construirCorreoResumen(res).html).toContain("Ana Pérez");
+  });
+
+  it("NO se mezcla con las cuentas creadas sin rol ni DPI: el remedio es otro", () => {
+    // `cuenta_creada_sin_rol_ni_dpi` y `rol_no_promovido` son escrituras que
+    // FALLARON: las arregla sistemas. Ésta es una cuenta sana a la que nadie le
+    // pidió el ascenso todavía —el job diario no escribe— y la arregla
+    // operaciones apretando "Dar acceso al portal". Bajo el rótulo equivocado,
+    // la fila sale con la instrucción equivocada.
+    const res = resumirProvisionamiento(
+      [r({ estado: "ya_tenia", advertencias: ["cuenta_sin_rol_de_inversionista"] })],
+      nombres,
+    );
+
+    expect(res.cuentasSinIdentidad).toEqual([]);
+  });
+});

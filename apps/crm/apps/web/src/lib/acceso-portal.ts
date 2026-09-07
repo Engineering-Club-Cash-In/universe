@@ -73,6 +73,10 @@ const CAUSA_EN_PALABRAS: Record<string, string> = {
 	provisionamiento_no_configurado: "al servidor le falta configuración",
 	representante_no_encontrado_en_cartera:
 		"no se encontró a su representante legal",
+	correo_de_cartera_distinto_al_de_la_cuenta:
+		"ya tiene cuenta con otro correo y hasta cuadrarlos no vería sus inversiones",
+	sin_rol_de_inversionista:
+		"su cuenta quedó sin el permiso de inversionista",
 	representante_sin_cuenta:
 		"su representante legal todavía no tiene cuenta en el portal",
 };
@@ -103,7 +107,11 @@ const texto = (
 		case "rol_no_promovido":
 			return "Ya tenía cuenta, pero no se le pudo dar el permiso de inversionista: al entrar no va a ver su información. Avisa a sistemas.";
 		case "correo_de_cartera_distinto_al_de_la_cuenta":
-			return `Ya tenía cuenta en el portal con otro correo: ${acceso.usuarioEmail ?? "uno distinto"}. Entra con ese, no con el que acabas de capturar.`;
+			// NO se le dice "entra con ese". El portal resuelve qué inversionistas
+			// ve una sesión buscando su correo en cartera, así que mientras los dos
+			// correos no sean el mismo, esa cuenta entra y no ve NADA. Mandarla a
+			// entrar es mandarla a una pantalla vacía.
+			return `Ya tenía cuenta en el portal con otro correo: ${acceso.usuarioEmail ?? "uno distinto"}. Hasta que los dos correos sean el mismo no va a ver sus inversiones al entrar. Avisa a sistemas para cuadrarlos.`;
 		case "cuenta_anclada_solo_por_correo":
 			return "Ya tenía cuenta y se le reconoció solo por el correo. Si alguien le cambia el correo, se le va a crear una segunda cuenta. Avisa a sistemas.";
 		case "correo_no_enviado":

@@ -3018,10 +3018,14 @@ if (facturasExistentes.length > 0) {
       try {
         const { nit } = body;
 
-        console.log("🔍 Consultando NIT en COFIDI:", nit);
+        // Se normaliza igual que en /facturar-generico: sin guiones y en mayúscula,
+        // porque el dígito verificador puede ser K y COFIDI no reconoce "1937979-k".
+        const nitNormalizado = (nit || "").replace(/[-\s]/g, "").toUpperCase();
+
+        console.log("🔍 Consultando NIT en COFIDI:", nitNormalizado);
 
         // Validar formato de NIT (básico)
-        if (!nit || nit.length < 5) {
+        if (nitNormalizado.length < 5) {
           return {
             success: false,
             mensaje: "NIT inválido",
@@ -3033,7 +3037,7 @@ if (facturasExistentes.length > 0) {
 
         // Consultar NIT
         const resultado = await nitClient.consultarNIT({
-          nit: nit,
+          nit: nitNormalizado,
           entity: COFIDI_CONFIG.entity,
           requestor: COFIDI_CONFIG.requestor,
         });
@@ -3042,7 +3046,7 @@ if (facturasExistentes.length > 0) {
           return {
             success: true,
             data: {
-              nit: nit,
+              nit: nitNormalizado,
               nombre: resultado.nombre,
             },
             mensaje: "NIT consultado exitosamente",
@@ -3052,7 +3056,7 @@ if (facturasExistentes.length > 0) {
             success: false,
             mensaje: resultado.error || "NIT no encontrado en el registro",
             data: {
-              nit: nit,
+              nit: nitNormalizado,
               nombre: null,
             },
           };
@@ -3449,7 +3453,9 @@ if (facturasExistentes.length > 0) {
         // ============================================
         // 1️⃣ VALIDAR NIT Y CONSULTAR EN COFIDI
         // ============================================
-        const nitNormalizado = (nit || "").trim().replace(/-/g, "").toUpperCase();
+        // Se quitan también los espacios internos: un "1937979 K" llegaba tal cual
+        // a COFIDI y volvía como no encontrado.
+        const nitNormalizado = (nit || "").replace(/[-\s]/g, "").toUpperCase();
 
         if (!nitNormalizado || nitNormalizado === "CF") {
           set.status = 400;

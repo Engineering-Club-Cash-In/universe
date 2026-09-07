@@ -679,6 +679,37 @@ function LiquidacionesInversionistas() {
 
 						{/* Empresa detectada. No hay interruptor: si el DPI o el correo
 						    ya son de alguien, lo que se está creando es su empresa. */}
+						{/*
+							La verificación falló. Se dice, en vez de dejar creer que el DPI
+							está libre: como ya no existe el interruptor "¿Es empresa?", si
+							la detección no corre no hay forma de mover el DPI a
+							representante legal, y el alta rebota como duplicada sin que se
+							entienda por qué.
+						*/}
+						{!personaDetectada && identidadQuery.isError && (
+							<div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 space-y-2">
+								<p className="text-sm font-medium">
+									No pudimos verificar ese dato
+								</p>
+								<p className="text-muted-foreground text-xs">
+									No se pudo comprobar si el DPI o el correo ya son de alguien.
+									Si lo son y guardás así, el alta se va a rechazar por
+									duplicada.
+								</p>
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									onClick={() => identidadQuery.refetch()}
+									disabled={identidadQuery.isFetching}
+								>
+									{identidadQuery.isFetching
+										? "Verificando..."
+										: "Reintentar verificación"}
+								</Button>
+							</div>
+						)}
+
 						{personaDetectada && (
 							<div className="rounded-md border border-amber-500/40 bg-amber-50 p-3 space-y-2 dark:bg-amber-950/20">
 								<p className="text-sm font-medium">

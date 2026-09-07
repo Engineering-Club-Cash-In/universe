@@ -23,6 +23,7 @@ import {
 import { type ComponentType, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
+import { ManualDocumentApprovalButton } from "@/components/credit/ManualDocumentApprovalButton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -58,6 +59,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
 	aggregateIntegrityResult,
 	type IntegrityResult,
+	requiresManualApproval,
 } from "@/lib/document-integrity-flow";
 import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
 import { client, orpc } from "@/utils/orpc";
@@ -158,6 +160,12 @@ export function EstadosCuentaContent({
 	const [searchInput, setSearchInput] = useState("");
 	const [search, setSearch] = useState("");
 	const [requiresReviewOnly, setRequiresReviewOnly] = useState(true);
+	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
+	const canUseValidationHistory = [
+		"admin",
+		"analyst",
+		"sales_supervisor",
+	].includes(userProfile.data?.role ?? "");
 
 	useEffect(() => {
 		const timeout = setTimeout(() => {
@@ -196,6 +204,7 @@ export function EstadosCuentaContent({
 			},
 		}),
 		placeholderData: keepPreviousData,
+		enabled: canUseValidationHistory,
 	});
 	const rows = listQuery.data ?? [];
 	const detailQuery = useQuery({
@@ -217,28 +226,31 @@ export function EstadosCuentaContent({
 						Historial de resultados automáticos y evidencia forense.
 					</p>
 				</div>
-				<Dialog open={newDialogOpen} onOpenChange={setNewDialogOpen}>
-					<DialogTrigger asChild>
-						<Button onClick={() => setNewDialogOpportunityId(undefined)}>
-							<FileCheck2 className="mr-2 h-4 w-4" />
-							Nueva validación
-						</Button>
-					</DialogTrigger>
-					{newDialogOpen && (
-						<NewValidationDialog
-							initialOpportunityId={newDialogOpportunityId}
-							onClose={() => setNewDialogOpen(false)}
-							onCreated={(opportunityId) => {
-								setNewDialogOpen(false);
-								setSelectedOpportunityId(opportunityId);
-								setSelectedValidationId(null);
-								queryClient.invalidateQueries({
-									queryKey: orpc.listDocumentIntegrityValidations.key(),
-								});
-							}}
-						/>
-					)}
-				</Dialog>
+				{canUseValidationHistory && (
+					<Dialog open={newDialogOpen} onOpenChange={setNewDialogOpen}>
+						<DialogTrigger asChild>
+							<Button onClick={() => setNewDialogOpportunityId(undefined)}>
+								<FileCheck2 className="mr-2 h-4 w-4" />
+								Nueva validación
+							</Button>
+						</DialogTrigger>
+						{newDialogOpen && (
+							<NewValidationDialog
+								initialOpportunityId={newDialogOpportunityId}
+								onClose={() => setNewDialogOpen(false)}
+								onCreated={(opportunityId) => {
+									setNewDialogOpen(false);
+									setSelectedOpportunityId(opportunityId);
+									setSelectedValidationId(null);
+									queryClient.invalidateQueries({
+										queryKey:
+											orpc.listDocumentIntegrityValidations.key(),
+									});
+								}}
+							/>
+						)}
+					</Dialog>
+				)}
 			</div>
 
 			<Card>
@@ -394,6 +406,8 @@ export function EstadosCuentaContent({
 					{detailQuery.data && (
 						<OpportunityValidationDetails
 							group={detailQuery.data}
+							initialValidationId={selectedValidationId ?? undefined}
+							canCreateValidation={canUseValidationHistory}
 							onCreateValidation={() => {
 								const opportunityId = detailQuery.data.opportunityId;
 								setSelectedOpportunityId(null);
@@ -756,7 +770,15 @@ function getAttemptResult(attempt: ValidationAttempt): IntegrityResult {
 	return aggregateIntegrityResult(attempt.validations);
 }
 
-function ValidationAttemptDetails({ attempt }: { attempt: ValidationAttempt }) {
+function ValidationAttemptDetails({
+	attempt,
+	canApproveManual,
+	initialValidationId,
+}: {
+	attempt: ValidationAttempt;
+	canApproveManual: boolean;
+	initialValidationId?: string;
+}) {
 	if (attempt.validations.length === 0) {
 		return (
 			<div className="rounded-md border border-destructive/30 bg-destructive/5 p-4">
@@ -773,12 +795,23 @@ function ValidationAttemptDetails({ attempt }: { attempt: ValidationAttempt }) {
 	}
 
 	if (attempt.validations.length === 1) {
-		return <ValidationDetailsView result={attempt.validations[0]} />;
+		return (
+			<ValidationDetailsView
+				result={attempt.validations[0]}
+				canApproveManual={canApproveManual}
+			/>
+		);
 	}
+
+	const initialValidation = attempt.validations.find(
+		(validation) => validation.id === initialValidationId,
+	);
 
 	return (
 		<Tabs
-			defaultValue={getDocumentTabKey(attempt.validations[0])}
+			defaultValue={getDocumentTabKey(
+				initialValidation ?? attempt.validations[0],
+			)}
 			className="w-full"
 		>
 			<TabsList className="h-auto max-w-full flex-wrap justify-start">
@@ -798,7 +831,10 @@ function ValidationAttemptDetails({ attempt }: { attempt: ValidationAttempt }) {
 					value={getDocumentTabKey(result)}
 					className="mt-3"
 				>
-					<ValidationDetailsView result={result} />
+					<ValidationDetailsView
+						result={result}
+						canApproveManual={canApproveManual}
+					/>
 				</TabsContent>
 			))}
 		</Tabs>
@@ -808,9 +844,13 @@ function ValidationAttemptDetails({ attempt }: { attempt: ValidationAttempt }) {
 function OpportunityValidationDetails({
 	group,
 	onCreateValidation,
+	initialValidationId,
+	canCreateValidation,
 }: {
 	group: ValidationGroup;
 	onCreateValidation: () => void;
+	initialValidationId?: string;
+	canCreateValidation: boolean;
 }) {
 	const clientName = [group.leadFirstName, group.leadLastName]
 		.filter(Boolean)
@@ -839,11 +879,13 @@ function OpportunityValidationDetails({
 					<Badge variant="outline">
 						Cupo actual: {group.attemptCount}/{group.maxAttempts}
 					</Badge>
-					{group.attempts.length > 0 && group.canValidate && (
+					{canCreateValidation &&
+						group.attempts.length > 0 &&
+						group.canValidate && (
 						<Button size="sm" onClick={onCreateValidation}>
 							Nueva validación por oportunidad
 						</Button>
-					)}
+						)}
 				</div>
 			</div>
 			{group.reset && (
@@ -862,11 +904,13 @@ function OpportunityValidationDetails({
 					<p className="text-muted-foreground text-sm">
 						Esta oportunidad todavía no tiene validaciones documentales.
 					</p>
-					<Button onClick={onCreateValidation} disabled={!group.canValidate}>
-						{group.canValidate
-							? "Nueva validación"
-							: "Límite de validaciones alcanzado"}
-					</Button>
+					{canCreateValidation && (
+						<Button onClick={onCreateValidation} disabled={!group.canValidate}>
+							{group.canValidate
+								? "Nueva validación"
+								: "Límite de validaciones alcanzado"}
+						</Button>
+					)}
 				</div>
 			) : (
 				<div className="space-y-3">
@@ -883,7 +927,11 @@ function OpportunityValidationDetails({
 							{latestAttempt.validations.length === 1 ? "" : "s"}
 						</span>
 					</div>
-					<ValidationAttemptDetails attempt={latestAttempt} />
+					<ValidationAttemptDetails
+						attempt={latestAttempt}
+						canApproveManual={group.canApproveManual}
+						initialValidationId={initialValidationId}
+					/>
 				</div>
 			)}
 		</div>
@@ -892,8 +940,10 @@ function OpportunityValidationDetails({
 
 export function ValidationDetailsView({
 	result,
+	canApproveManual,
 }: {
 	result: ValidationDetails;
+	canApproveManual: boolean;
 }) {
 	return (
 		<div className="space-y-5">
@@ -928,6 +978,24 @@ export function ValidationDetailsView({
 							<p>{result.autoReason}</p>
 						</div>
 					</div>
+					{result.manualApproval && (
+						<div className="rounded-md border border-green-200 bg-green-50 p-3 text-green-900 text-sm dark:border-green-900 dark:bg-green-950/30 dark:text-green-200">
+							<p className="font-semibold">Aprobado manualmente</p>
+							<p className="mt-1 text-xs">
+								Por {result.manualApproval.approvedByName ||
+									result.manualApproval.approvedByEmail} el{" "}
+								{new Date(result.manualApproval.approvedAt).toLocaleString(
+									"es-GT",
+								)}
+							</p>
+							<p className="mt-2">{result.manualApproval.reason}</p>
+						</div>
+					)}
+					{requiresManualApproval(result.autoResult) &&
+						!result.manualApproval &&
+						canApproveManual && (
+							<ManualDocumentApprovalButton validationId={result.id} />
+						)}
 					{result.positiveChecks.length > 0 && (
 						<div className="space-y-2">
 							<h3 className="font-semibold">

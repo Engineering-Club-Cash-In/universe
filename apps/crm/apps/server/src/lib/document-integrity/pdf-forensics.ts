@@ -12,6 +12,7 @@ import {
 export const MAX_PDF_SIZE_BYTES = 20 * 1024 * 1024;
 export const MAX_PDF_PAGES = 200;
 export const PARSE_BUDGET_MS = 8_000;
+export const MAX_DECOMPRESSED_PDF_CONTENT_BYTES = 32 * 1024 * 1024;
 
 export interface PdfByteScan {
 	hasPdfHeader: boolean;
@@ -200,16 +201,59 @@ function pdfName(value: unknown): string | null {
 	return value.asString().replace(/^\//, "");
 }
 
-function decodeStream(stream: PDFRawStream): string {
+class PdfContentBudgetExceededError extends Error {
+	constructor() {
+		super("El contenido descomprimido del PDF excede el límite de inspección");
+		this.name = "PdfContentBudgetExceededError";
+	}
+}
+
+interface PdfContentBudget {
+	remainingBytes: number;
+}
+
+function consumeContentBudget(budget: PdfContentBudget, size: number) {
+	if (size > budget.remainingBytes) throw new PdfContentBudgetExceededError();
+	budget.remainingBytes -= size;
+}
+
+export function inflatePdfStreamBounded(
+	raw: Buffer | Uint8Array,
+	maxOutputBytes: number,
+): Buffer {
+	if (maxOutputBytes <= 0) throw new PdfContentBudgetExceededError();
+	try {
+		return inflateSync(raw, { maxOutputLength: maxOutputBytes });
+	} catch (error) {
+		if (
+			typeof error === "object" &&
+			error !== null &&
+			"code" in error &&
+			error.code === "ERR_BUFFER_TOO_LARGE"
+		)
+			throw new PdfContentBudgetExceededError();
+		throw error;
+	}
+}
+
+function decodeStream(
+	stream: PDFRawStream,
+	budget: PdfContentBudget,
+): string {
 	const raw = Buffer.from(stream.contents);
 	const filter = stream.dict.get(PDFName.of("Filter"));
 	const filters =
 		filter instanceof PDFArray
 			? filter.asArray().map(pdfName).filter(Boolean)
 			: [pdfName(filter)].filter(Boolean);
-	if (filters.length === 0) return raw.toString("latin1");
+	if (filters.length === 0) {
+		consumeContentBudget(budget, raw.length);
+		return raw.toString("latin1");
+	}
 	if (filters.length === 1 && filters[0] === "FlateDecode") {
-		return inflateSync(raw).toString("latin1");
+		const inflated = inflatePdfStreamBounded(raw, budget.remainingBytes);
+		consumeContentBudget(budget, inflated.length);
+		return inflated.toString("latin1");
 	}
 	return "";
 }
@@ -246,6 +290,9 @@ function inspectFontDicts(document: PDFDocument): FontClassification {
 function inspectPageContent(
 	document: PDFDocument,
 ): PageContentClassification[] {
+	const budget: PdfContentBudget = {
+		remainingBytes: MAX_DECOMPRESSED_PDF_CONTENT_BYTES,
+	};
 	const inspectOperators = (
 		operators: string,
 		resources: PDFDict | undefined,
@@ -273,8 +320,9 @@ function inspectPageContent(
 			visitedForms.add(object);
 			let formOperators = "";
 			try {
-				formOperators = decodeStream(object);
-			} catch {
+				formOperators = decodeStream(object, budget);
+			} catch (error) {
+				if (error instanceof PdfContentBudgetExceededError) throw error;
 				continue;
 			}
 			const formResources =
@@ -302,7 +350,7 @@ function inspectPageContent(
 		for (const ref of refs) {
 			const stream = ref instanceof PDFRef ? document.context.lookup(ref) : ref;
 			if (stream instanceof PDFRawStream)
-				operators += `\n${decodeStream(stream)}`;
+				operators += `\n${decodeStream(stream, budget)}`;
 		}
 		const classification = inspectOperators(
 			operators,
@@ -385,8 +433,13 @@ export async function inspectPdf(
 		try {
 			base.pages = inspectPageContent(document);
 		} catch (error) {
-			base.parseError ??=
-				error instanceof Error ? error.message : String(error);
+			if (error instanceof PdfContentBudgetExceededError) {
+				base.budgetExceeded = true;
+				base.degradedToL0 = true;
+			} else {
+				base.parseError ??=
+					error instanceof Error ? error.message : String(error);
+			}
 		}
 	} else {
 		base.budgetExceeded = true;

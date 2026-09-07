@@ -129,3 +129,39 @@ export function uploadedValidationPairsMatch(params: {
 		validatedFiles.has(`${file.filePath}\u0000${file.contentSha256}`),
 	);
 }
+
+export function getPendingManualApprovalCount(
+	validations: Array<{
+		autoResult: string;
+		manualApprovalId?: string | null;
+	}>,
+): number {
+	return validations.filter(
+		(validation) =>
+			["revision_manual", "rechazado"].includes(validation.autoResult) &&
+			!validation.manualApprovalId,
+	).length;
+}
+
+export function getManualApprovalAvailability(params: {
+	autoResult: string;
+	validationRunId: string;
+	runStatus: "processing" | "completed" | "error";
+	attemptNumber: number;
+	resetAfterAttemptNumber: number;
+	latestRunId?: string;
+	latestRunStatus?: "processing" | "completed" | "error";
+}):
+	| { allowed: true }
+	| { allowed: false; reason: "wrong_result" | "stale_run" } {
+	if (!["revision_manual", "rechazado"].includes(params.autoResult))
+		return { allowed: false, reason: "wrong_result" };
+	if (
+		params.runStatus !== "completed" ||
+		params.attemptNumber <= params.resetAfterAttemptNumber ||
+		params.latestRunId !== params.validationRunId ||
+		params.latestRunStatus !== "completed"
+	)
+		return { allowed: false, reason: "stale_run" };
+	return { allowed: true };
+}

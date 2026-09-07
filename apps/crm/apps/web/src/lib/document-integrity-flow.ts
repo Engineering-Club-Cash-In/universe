@@ -7,7 +7,16 @@ export type IntegrityResult =
 
 export interface IntegrityValidatedBatchLike {
 	payloads: unknown[];
-	results: Array<{ validation: { result: IntegrityResult } | null }>;
+	results: Array<{
+		validation: {
+			result: IntegrityResult;
+			manualApproval?: unknown | null;
+		} | null;
+	}>;
+}
+
+export function requiresManualApproval(result: IntegrityResult): boolean {
+	return result === "revision_manual" || result === "rechazado";
 }
 
 export function hasCompleteIntegrityValidation(
@@ -18,7 +27,11 @@ export function hasCompleteIntegrityValidation(
 		batch.payloads.length > 0 &&
 		batch.results.length === batch.payloads.length &&
 		batch.results.every(
-			(result) => !!result.validation && result.validation.result !== "error",
+			(result) =>
+				!!result.validation &&
+				result.validation.result !== "error" &&
+				(!requiresManualApproval(result.validation.result) ||
+					!!result.validation.manualApproval),
 		)
 	);
 }

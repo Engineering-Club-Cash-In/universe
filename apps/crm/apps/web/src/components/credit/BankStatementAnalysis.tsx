@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import type { ManualDocumentApproval } from "@/components/credit/ManualDocumentApprovalButton";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -39,6 +40,7 @@ import { Label } from "@/components/ui/label";
 import {
 	getReusableBatchSyncAction,
 	hasCompleteIntegrityValidation,
+	requiresManualApproval,
 	type IntegrityResult,
 } from "@/lib/document-integrity-flow";
 import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
@@ -69,6 +71,7 @@ interface ValidatedUploadBatch {
 			result: IntegrityResult;
 			reason: string;
 			validatedAt: Date;
+			manualApproval: ManualDocumentApproval | null;
 		} | null;
 	}>;
 }
@@ -163,6 +166,9 @@ export function BankStatementAnalysis({
 	const reusableRunRef = useRef(latestValidatedRunQuery.data);
 	reusableRunRef.current = latestValidatedRunQuery.data;
 	const reusableRunId = latestValidatedRunQuery.data?.runId;
+	const approvalKey = latestValidatedRunQuery.data?.results
+		.map((result) => result.validation?.manualApproval?.id ?? "")
+		.join("|");
 	useEffect(() => {
 		const reusableRun = reusableRunRef.current;
 		const action = getReusableBatchSyncAction({
@@ -178,7 +184,7 @@ export function BankStatementAnalysis({
 			restoredRunIdRef.current = undefined;
 			setValidatedBatch(null);
 		}
-	}, [reusableRunId, opportunityId]);
+	}, [reusableRunId, approvalKey, opportunityId]);
 
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
 	const canViewIntegrityHistory = [
@@ -393,6 +399,12 @@ export function BankStatementAnalysis({
 		(result) => result.validation?.result === "rechazado",
 	);
 	const allDocumentsValidated = hasCompleteIntegrityValidation(validatedBatch);
+	const hasPendingManualApproval = validatedBatch?.results.some(
+		(result) =>
+			!!result.validation &&
+			requiresManualApproval(result.validation.result) &&
+			!result.validation.manualApproval,
+	);
 	const hasIncompleteValidation = !!validatedBatch && !allDocumentsValidated;
 	const activeFileCount = validatedBatch?.payloads.length ?? files.length;
 	const isBusy =
@@ -602,7 +614,12 @@ export function BankStatementAnalysis({
 					<div className="space-y-2 rounded-md border p-3">
 						{validatedBatch.results.map((result) => {
 							const status = result.validation?.result ?? "error";
-							const meta = INTEGRITY_META[status];
+							const meta = result.validation?.manualApproval
+								? {
+										label: "Aprobado manualmente",
+										className: "bg-green-100 text-green-800",
+									}
+								: INTEGRITY_META[status];
 							return (
 								<div key={result.file} className="space-y-1 text-xs">
 									<div className="flex items-center justify-between gap-2">
@@ -614,6 +631,21 @@ export function BankStatementAnalysis({
 											result.error ??
 											"No se pudo validar el archivo."}
 									</p>
+					{result.validation &&
+						requiresManualApproval(result.validation.result) &&
+						!result.validation.manualApproval && (
+											<Button asChild size="sm" variant="outline">
+												<Link
+													to="/crm/documentacion/estados-cuenta"
+													search={{
+														opportunityId,
+														validationId: result.validation.id,
+													}}
+												>
+													Aprobar
+												</Link>
+											</Button>
+										)}
 								</div>
 							);
 						})}
@@ -637,9 +669,18 @@ export function BankStatementAnalysis({
 					<div className="flex gap-2 rounded-md border border-red-300 bg-red-50 p-3 text-red-800 text-xs">
 						<AlertTriangle className="h-4 w-4 shrink-0" />
 						<span>
-							Uno o más archivos no son estados de cuenta. Si continúa, las
-							cifras del análisis saldrán de esos archivos; la decisión queda a
-							cargo del analista.
+							Uno o más archivos fueron rechazados por el motor. Utilizarlos en
+							el análisis exige una aprobación manual auditada.
+						</span>
+					</div>
+				)}
+				{hasPendingManualApproval && (
+					<div className="flex gap-2 rounded-md border border-blue-300 bg-blue-50 p-3 text-blue-800 text-xs">
+						<AlertTriangle className="h-4 w-4 shrink-0" />
+						<span>
+							El análisis de capacidad de pago permanecerá bloqueado hasta
+							que se aprueben todos los documentos pendientes, incluidos los
+							rechazados.
 						</span>
 					</div>
 				)}
@@ -648,8 +689,9 @@ export function BankStatementAnalysis({
 					<div className="border-t pt-3">
 						<p className="font-medium text-sm">Análisis de capacidad de pago</p>
 						<p className="text-muted-foreground text-xs">
-							La validación documental terminó. Puede continuar con estos
-							archivos o solicitar documentos nuevos.
+							{hasPendingManualApproval
+								? "Hay documentos pendientes de aprobación manual."
+								: "La validación documental terminó. Puede continuar con estos archivos o solicitar documentos nuevos."}
 						</p>
 					</div>
 				)}

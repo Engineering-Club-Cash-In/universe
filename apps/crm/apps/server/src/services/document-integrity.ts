@@ -16,6 +16,7 @@ import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { coDebtors, leads, opportunities } from "../db/schema/crm";
 import {
+	documentIntegrityValidationApprovals,
 	documentIntegrityValidationResets,
 	documentIntegrityValidationRuns,
 	documentIntegrityValidations,
@@ -38,6 +39,8 @@ import type { DocumentIntegrityAiResult } from "../lib/document-integrity/types"
 import {
 	getAttemptAvailability,
 	getAttemptStatus,
+	getManualApprovalAvailability,
+	getPendingManualApprovalCount,
 	getResetAvailability,
 	isCompleteValidationRun,
 	uploadedValidationPairsMatch,
@@ -53,9 +56,13 @@ export const DOC_INTEGRITY_MODEL =
 	process.env.DOC_INTEGRITY_MODEL || "gemini-3-flash-preview";
 const MAX_BATCH_SIZE_BYTES = 45 * 1024 * 1024;
 const MAX_DOCUMENT_INTEGRITY_FILE_SIZE_BYTES = 15 * 1024 * 1024;
+const MAX_DOCUMENTS_PER_VALIDATION = 9;
+const AI_FALLBACK_CONCURRENCY = 2;
 const AI_TIMEOUT_MS = 120_000;
 const RETRY_WINDOW_MS = 5 * 60_000;
-const RUN_STALE_AFTER_MS = AI_TIMEOUT_MS + 60_000;
+const MAX_AI_CALL_WAVES =
+	1 + Math.ceil(MAX_DOCUMENTS_PER_VALIDATION / AI_FALLBACK_CONCURRENCY);
+const RUN_STALE_AFTER_MS = AI_TIMEOUT_MS * MAX_AI_CALL_WAVES + 60_000;
 export const MAX_DOCUMENT_INTEGRITY_ATTEMPTS = 2;
 
 export class DocumentIntegrityError extends Error {
@@ -280,7 +287,12 @@ async function finishValidationRun(
 	const [finished] = await db
 		.update(documentIntegrityValidationRuns)
 		.set({ status, completedAt: sql`clock_timestamp()` })
-		.where(eq(documentIntegrityValidationRuns.id, runId))
+		.where(
+			and(
+				eq(documentIntegrityValidationRuns.id, runId),
+				eq(documentIntegrityValidationRuns.status, "processing"),
+			),
+		)
 		.returning({ completedAt: documentIntegrityValidationRuns.completedAt });
 	if (!finished?.completedAt)
 		throw new Error("No se pudo finalizar el intento de validación documental");
@@ -557,7 +569,7 @@ async function callIntegrityAiBatchWithFallback(
 	return executeBatchWithFallback(documents, {
 		maxBatchSizeBytes: MAX_BATCH_SIZE_BYTES,
 		callBatch: callIntegrityAiBatch,
-		fallbackConcurrency: 2,
+		fallbackConcurrency: AI_FALLBACK_CONCURRENCY,
 		shouldFallback: (error) => !isRateLimitError(error),
 		onBatchFailure: (batchError) =>
 			console.warn("Batch document integrity analysis failed; using fallback", {
@@ -863,16 +875,16 @@ export async function assertUploadedBankStatementsValidated(params: {
 	const resetAfterAttemptNumber = await getLatestResetAttemptNumber(
 		params.opportunityId,
 	);
-	const [latestCompletedRun] = await db
+	const [latestRun] = await db
 		.select({
 			id: documentIntegrityValidationRuns.id,
 			attemptNumber: documentIntegrityValidationRuns.attemptNumber,
+			status: documentIntegrityValidationRuns.status,
 		})
 		.from(documentIntegrityValidationRuns)
 		.where(
 			and(
 				eq(documentIntegrityValidationRuns.opportunityId, params.opportunityId),
-				eq(documentIntegrityValidationRuns.status, "completed"),
 				gt(
 					documentIntegrityValidationRuns.attemptNumber,
 					resetAfterAttemptNumber,
@@ -902,6 +914,7 @@ export async function assertUploadedBankStatementsValidated(params: {
 			filePath: documentIntegrityValidations.documentFilePath,
 			contentSha256: documentIntegrityValidations.contentSha256,
 			autoResult: documentIntegrityValidations.autoResult,
+			manualApprovalId: documentIntegrityValidationApprovals.id,
 		})
 		.from(documentIntegrityValidations)
 		.innerJoin(
@@ -909,6 +922,13 @@ export async function assertUploadedBankStatementsValidated(params: {
 			eq(
 				documentIntegrityValidations.validationRunId,
 				documentIntegrityValidationRuns.id,
+			),
+		)
+		.leftJoin(
+			documentIntegrityValidationApprovals,
+			eq(
+				documentIntegrityValidationApprovals.validationId,
+				documentIntegrityValidations.id,
 			),
 		)
 		.where(
@@ -932,10 +952,10 @@ export async function assertUploadedBankStatementsValidated(params: {
 		validations.map((validation) => validation.validationRunId),
 	);
 	if (
-		latestCompletedRun &&
+		latestRun &&
 		validations.length === uniqueValidationIds.length &&
 		selectedRunIds.size === 1 &&
-		!selectedRunIds.has(latestCompletedRun.id)
+		!selectedRunIds.has(latestRun.id)
 	) {
 		throw new DocumentIntegrityError(
 			"BAD_REQUEST",
@@ -943,14 +963,15 @@ export async function assertUploadedBankStatementsValidated(params: {
 		);
 	}
 	if (
-		!latestCompletedRun ||
+		!latestRun ||
+		latestRun.status !== "completed" ||
 		!uploadedValidationPairsMatch({
 			validationIds: params.validationIds,
 			files: params.files,
 			validations: validations.filter(
 				(validation) =>
 					validation.attemptNumber > resetAfterAttemptNumber &&
-					validation.validationRunId === latestCompletedRun.id,
+					validation.validationRunId === latestRun.id,
 			),
 		})
 	) {
@@ -959,6 +980,147 @@ export async function assertUploadedBankStatementsValidated(params: {
 			"Los archivos del análisis no coinciden con la validación documental realizada.",
 		);
 	}
+	const pendingManualApprovalCount =
+		getPendingManualApprovalCount(validations);
+	if (pendingManualApprovalCount > 0) {
+		throw new DocumentIntegrityError(
+			"BAD_REQUEST",
+			`${pendingManualApprovalCount} documento${pendingManualApprovalCount === 1 ? " requiere" : "s requieren"} aprobación manual antes de analizar la capacidad de pago.`,
+		);
+	}
+}
+
+export async function approveDocumentIntegrityValidation(params: {
+	validationId: string;
+	reason: string;
+	userId: string;
+	userRole: string;
+}) {
+	const reason = params.reason.trim();
+	if (reason.length < 5 || reason.length > 1000)
+		throw new DocumentIntegrityError(
+			"BAD_REQUEST",
+			"La justificación debe tener entre 5 y 1,000 caracteres",
+		);
+
+	const [validation] = await db
+		.select({
+			id: documentIntegrityValidations.id,
+			autoResult: documentIntegrityValidations.autoResult,
+			validationRunId: documentIntegrityValidations.validationRunId,
+			runStatus: documentIntegrityValidationRuns.status,
+			attemptNumber: documentIntegrityValidationRuns.attemptNumber,
+			opportunityId: documentIntegrityValidationRuns.opportunityId,
+			opportunityAssignedTo: opportunities.assignedTo,
+			existingApprovalId: documentIntegrityValidationApprovals.id,
+		})
+		.from(documentIntegrityValidations)
+		.innerJoin(
+			documentIntegrityValidationRuns,
+			eq(
+				documentIntegrityValidations.validationRunId,
+				documentIntegrityValidationRuns.id,
+			),
+		)
+		.innerJoin(
+			opportunities,
+			eq(documentIntegrityValidationRuns.opportunityId, opportunities.id),
+		)
+		.leftJoin(
+			documentIntegrityValidationApprovals,
+			eq(
+				documentIntegrityValidationApprovals.validationId,
+				documentIntegrityValidations.id,
+			),
+		)
+		.where(eq(documentIntegrityValidations.id, params.validationId))
+		.limit(1);
+	if (!validation)
+		throw new DocumentIntegrityError("NOT_FOUND", "Validación no encontrada");
+	if (
+		!canWriteOpportunityCreditAnalysis(
+			params.userRole,
+			params.userId,
+			validation.opportunityAssignedTo,
+		)
+	) {
+		throw new DocumentIntegrityError(
+			"FORBIDDEN",
+			"No tienes permiso para aprobar documentos de esta oportunidad",
+		);
+	}
+	const resetAfterAttemptNumber = await getLatestResetAttemptNumber(
+		validation.opportunityId,
+	);
+	const [latestRun] = await db
+		.select({
+			id: documentIntegrityValidationRuns.id,
+			status: documentIntegrityValidationRuns.status,
+		})
+		.from(documentIntegrityValidationRuns)
+		.where(
+			eq(
+				documentIntegrityValidationRuns.opportunityId,
+				validation.opportunityId,
+			),
+		)
+		.orderBy(desc(documentIntegrityValidationRuns.attemptNumber))
+		.limit(1);
+	const availability = getManualApprovalAvailability({
+		autoResult: validation.autoResult,
+		validationRunId: validation.validationRunId,
+		runStatus: validation.runStatus,
+		attemptNumber: validation.attemptNumber,
+		resetAfterAttemptNumber,
+		latestRunId: latestRun?.id,
+		latestRunStatus: latestRun?.status,
+	});
+	if (!availability.allowed) {
+		throw new DocumentIntegrityError(
+			"BAD_REQUEST",
+			availability.reason === "wrong_result"
+				? "Solo se pueden aprobar documentos enviados a revisión manual o rechazados"
+				: "Solo puede aprobar documentos de la última validación completada del ciclo vigente",
+		);
+	}
+	if (validation.existingApprovalId)
+		throw new DocumentIntegrityError(
+			"BAD_REQUEST",
+			"Este documento ya fue aprobado manualmente",
+		);
+
+	const [approval] = await db
+		.insert(documentIntegrityValidationApprovals)
+		.values({
+			validationId: validation.id,
+			approvedBy: params.userId,
+			reason,
+		})
+		.onConflictDoNothing()
+		.returning({
+			id: documentIntegrityValidationApprovals.id,
+			reason: documentIntegrityValidationApprovals.reason,
+			approvedAt: documentIntegrityValidationApprovals.approvedAt,
+			approvedBy: documentIntegrityValidationApprovals.approvedBy,
+		});
+	if (!approval)
+		throw new DocumentIntegrityError(
+			"BAD_REQUEST",
+			"Este documento ya fue aprobado manualmente",
+		);
+	const [approver] = await db
+		.select({ name: user.name, email: user.email })
+		.from(user)
+		.where(eq(user.id, approval.approvedBy))
+		.limit(1);
+
+	return {
+		id: approval.id,
+		reason: approval.reason,
+		approvedAt: approval.approvedAt,
+		approvedByName: approver?.name ?? "",
+		approvedByEmail: approver?.email ?? "",
+	};
 }
 
 export async function linkUploadedValidationsToDocuments(params: {
@@ -1053,6 +1215,7 @@ export async function getDocumentIntegrityStatuses(params: {
 			autoResult: documentIntegrityValidations.autoResult,
 			validatedAt: sql<Date>`coalesce(${documentIntegrityValidationRuns.completedAt}, ${documentIntegrityValidationRuns.startedAt})`,
 			documentFilePath: documentIntegrityValidations.documentFilePath,
+			manualApprovalId: documentIntegrityValidationApprovals.id,
 			signalCount: sql<number>`(
 				select count(*)::int
 				from jsonb_array_elements(${documentIntegrityValidations.signals}) as signal
@@ -1065,6 +1228,13 @@ export async function getDocumentIntegrityStatuses(params: {
 			eq(
 				documentIntegrityValidations.validationRunId,
 				documentIntegrityValidationRuns.id,
+			),
+		)
+		.leftJoin(
+			documentIntegrityValidationApprovals,
+			eq(
+				documentIntegrityValidationApprovals.validationId,
+				documentIntegrityValidations.id,
 			),
 		)
 		.where(
@@ -1084,6 +1254,7 @@ export async function getDocumentIntegrityStatuses(params: {
 		opportunityDocumentId: row.opportunityDocumentId,
 		documentType: row.documentType,
 		result: row.autoResult,
+		manuallyApproved: !!row.manualApprovalId,
 		validatedAt: row.validatedAt,
 		isStale:
 			currentPaths.get(row.opportunityDocumentId ?? "") !==
@@ -1179,8 +1350,21 @@ export async function getLatestReusableDocumentIntegrityRun(params: {
 			filePath: documentIntegrityValidations.documentFilePath,
 			result: documentIntegrityValidations.autoResult,
 			reason: documentIntegrityValidations.autoReason,
+			manualApprovalId: documentIntegrityValidationApprovals.id,
+			manualApprovalReason: documentIntegrityValidationApprovals.reason,
+			manualApprovedAt: documentIntegrityValidationApprovals.approvedAt,
+			manualApprovedByName: user.name,
+			manualApprovedByEmail: user.email,
 		})
 		.from(documentIntegrityValidations)
+		.leftJoin(
+			documentIntegrityValidationApprovals,
+			eq(
+				documentIntegrityValidationApprovals.validationId,
+				documentIntegrityValidations.id,
+			),
+		)
+		.leftJoin(user, eq(documentIntegrityValidationApprovals.approvedBy, user.id))
 		.where(eq(documentIntegrityValidations.validationRunId, run.id))
 		.orderBy(documentIntegrityValidations.documentType);
 	const expectedPrefix = buildUploadPrefix(
@@ -1215,6 +1399,16 @@ export async function getLatestReusableDocumentIntegrityRun(params: {
 				result: validation.result,
 				reason: validation.reason,
 				validatedAt: run.completedAt ?? run.startedAt,
+				manualApproval:
+					validation.manualApprovalId && validation.manualApprovedAt
+					? {
+							id: validation.manualApprovalId,
+							reason: validation.manualApprovalReason ?? "",
+							approvedAt: validation.manualApprovedAt,
+							approvedByName: validation.manualApprovedByName ?? "",
+							approvedByEmail: validation.manualApprovedByEmail ?? "",
+						}
+					: null,
 			},
 		})),
 	};
@@ -1244,7 +1438,14 @@ export async function listDocumentIntegrityValidations(params: {
 	const havingConditions = [];
 	if (params.requiresReviewOnly)
 		havingConditions.push(
-			sql<boolean>`bool_or(${documentIntegrityValidationRuns.status} = 'error' or ${documentIntegrityValidations.autoResult} in ('revision_manual', 'rechazado', 'error'))`,
+			sql<boolean>`bool_or(
+				${documentIntegrityValidationRuns.status} = 'error'
+					or ${documentIntegrityValidations.autoResult} = 'error'
+					or (
+						${documentIntegrityValidations.autoResult} in ('revision_manual', 'rechazado')
+							and ${documentIntegrityValidationApprovals.id} is null
+					)
+			)`,
 		);
 	if (params.search) {
 		const pattern = `%${params.search}%`;
@@ -1286,6 +1487,13 @@ export async function listDocumentIntegrityValidations(params: {
 				documentIntegrityValidations.validationRunId,
 			),
 		)
+		.leftJoin(
+			documentIntegrityValidationApprovals,
+			eq(
+				documentIntegrityValidationApprovals.validationId,
+				documentIntegrityValidations.id,
+			),
+		)
 		.innerJoin(
 			opportunities,
 			eq(documentIntegrityValidationRuns.opportunityId, opportunities.id),
@@ -1318,6 +1526,7 @@ export async function listDocumentIntegrityValidations(params: {
 export async function getDocumentIntegrityValidationGroup(params: {
 	opportunityId?: string;
 	validationId?: string;
+	salesUserId?: string;
 }) {
 	let opportunityId = params.opportunityId;
 	if (!opportunityId && params.validationId) {
@@ -1354,12 +1563,20 @@ export async function getDocumentIntegrityValidationGroup(params: {
 		})
 		.from(opportunities)
 		.leftJoin(leads, eq(opportunities.leadId, leads.id))
-		.where(eq(opportunities.id, opportunityId))
+		.where(
+			and(
+				eq(opportunities.id, opportunityId),
+				params.salesUserId
+					? eq(opportunities.assignedTo, params.salesUserId)
+					: undefined,
+			),
+		)
 		.limit(1);
 	if (!opportunity)
 		throw new DocumentIntegrityError("NOT_FOUND", "Oportunidad no encontrada");
 	const currentAttemptStatus = await getDocumentIntegrityAttemptStatus({
 		opportunityId,
+		salesUserId: params.salesUserId,
 	});
 	const resets = await db
 		.select({
@@ -1410,6 +1627,11 @@ export async function getDocumentIntegrityValidationGroup(params: {
 					attemptNumber: documentIntegrityValidationRuns.attemptNumber,
 					validatedAt: sql<Date>`coalesce(${documentIntegrityValidationRuns.completedAt}, ${documentIntegrityValidationRuns.startedAt})`,
 					documentName: opportunityDocuments.originalName,
+					manualApprovalId: documentIntegrityValidationApprovals.id,
+					manualApprovalReason: documentIntegrityValidationApprovals.reason,
+					manualApprovedAt: documentIntegrityValidationApprovals.approvedAt,
+					manualApprovedByName: user.name,
+					manualApprovedByEmail: user.email,
 				})
 				.from(documentIntegrityValidations)
 				.innerJoin(
@@ -1426,6 +1648,17 @@ export async function getDocumentIntegrityValidationGroup(params: {
 						opportunityDocuments.id,
 					),
 				)
+				.leftJoin(
+					documentIntegrityValidationApprovals,
+					eq(
+						documentIntegrityValidationApprovals.validationId,
+						documentIntegrityValidations.id,
+					),
+				)
+				.leftJoin(
+					user,
+					eq(documentIntegrityValidationApprovals.approvedBy, user.id),
+				)
 				.where(
 					eq(
 						documentIntegrityValidations.validationRunId,
@@ -1436,7 +1669,16 @@ export async function getDocumentIntegrityValidationGroup(params: {
 
 	const validationDetails = await Promise.all(
 		rows.map(async (row) => {
-			const { documentFilePath, aiRawResponse, ...details } = row;
+			const {
+				documentFilePath,
+				aiRawResponse,
+				manualApprovalId,
+				manualApprovalReason,
+				manualApprovedAt,
+				manualApprovedByName,
+				manualApprovedByEmail,
+				...details
+			} = row;
 			const positiveChecks = buildDocumentPositiveChecks({
 				aiRawResponse,
 				signals: row.signals,
@@ -1447,6 +1689,15 @@ export async function getDocumentIntegrityValidationGroup(params: {
 					(signal) => signal.code !== "identidad_comparada",
 				),
 				positiveChecks,
+				manualApproval: manualApprovalId && manualApprovedAt
+					? {
+							id: manualApprovalId,
+							reason: manualApprovalReason ?? "",
+							approvedAt: manualApprovedAt,
+							approvedByName: manualApprovedByName ?? "",
+							approvedByEmail: manualApprovedByEmail ?? "",
+						}
+					: null,
 				signedUrl: await getFileUrl(documentFilePath),
 			};
 		}),
@@ -1465,10 +1716,16 @@ export async function getDocumentIntegrityValidationGroup(params: {
 			]
 		: [];
 	const latestReset = resets.at(-1);
+	const canApproveManual =
+		latestFinalizedRun?.status === "completed" &&
+		latestFinalizedRun.attemptNumber >
+			(latestReset?.resetAfterAttemptNumber ?? 0) &&
+		!currentAttemptStatus.hasProcessingRun;
 
 	return {
 		...opportunity,
 		...currentAttemptStatus,
+		canApproveManual,
 		reset: latestReset
 			? {
 					resetAfterAttemptNumber: latestReset.resetAfterAttemptNumber,

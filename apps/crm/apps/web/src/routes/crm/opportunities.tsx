@@ -4732,9 +4732,16 @@ function DocumentsManager({
 															Desactualizada
 														</Badge>
 													);
-												if (!status)
-													return <Badge variant="outline">Sin validar</Badge>;
-												const meta = DOCUMENT_INTEGRITY_STATUS_META[status.result];
+								if (!status)
+									return <Badge variant="outline">Sin validar</Badge>;
+								if (status.manuallyApproved)
+									return (
+										<Badge className="bg-green-100 text-green-800">
+											<CheckCircle2 className="mr-1 h-3 w-3" />
+											Aprobado manualmente
+										</Badge>
+									);
+								const meta = DOCUMENT_INTEGRITY_STATUS_META[status.result];
 												const Icon = meta?.Icon ?? HelpCircle;
 												return (
 													<Badge className={meta?.rowClassName}>

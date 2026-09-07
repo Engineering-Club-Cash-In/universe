@@ -2,6 +2,7 @@ import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import { analystProcedure, crmOnlyProcedure, crmProcedure } from "../lib/orpc";
 import {
+	approveDocumentIntegrityValidation,
 	DocumentIntegrityError,
 	getDocumentIntegrityAttemptStatus,
 	getDocumentIntegrityStatuses,
@@ -36,6 +37,25 @@ const uploadedFileSchema = z.object({
 });
 
 export const documentIntegrityProcedures = {
+	approveDocumentIntegrityValidation: crmProcedure
+		.input(
+			z.object({
+				validationId: z.string().uuid(),
+				reason: z.string().trim().min(5).max(1000),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			try {
+				return await approveDocumentIntegrityValidation({
+					...input,
+					userId: context.userId,
+					userRole: context.userRole,
+				});
+			} catch (error) {
+				translateDomainError(error);
+			}
+		}),
+
 	resetDocumentIntegrityAttempts: crmProcedure
 		.input(z.object({ opportunityId: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
@@ -124,6 +144,7 @@ export const documentIntegrityProcedures = {
 								result: row.validation.autoResult,
 								reason: row.validation.autoReason,
 								validatedAt: row.validation.validatedAt,
+								manualApproval: null,
 							}
 						: null,
 				}));
@@ -178,7 +199,7 @@ export const documentIntegrityProcedures = {
 			}),
 		),
 
-	getDocumentIntegrityValidationGroup: analystProcedure
+	getDocumentIntegrityValidationGroup: crmProcedure
 		.input(
 			z
 				.object({
@@ -189,9 +210,13 @@ export const documentIntegrityProcedures = {
 					message: "Indica una oportunidad o validación",
 				}),
 		)
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
 			try {
-				return await getDocumentIntegrityValidationGroup(input);
+				return await getDocumentIntegrityValidationGroup({
+					...input,
+					salesUserId:
+						context.userRole === "sales" ? context.userId : undefined,
+				});
 			} catch (error) {
 				translateDomainError(error);
 			}

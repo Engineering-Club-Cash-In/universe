@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+	check,
 	index,
 	integer,
 	jsonb,
@@ -129,5 +130,33 @@ export const documentIntegrityValidations = pgTable(
 			sql`upper(regexp_replace(coalesce(${table.aiRawResponse}->>'identificador_detectado', ''), '[^A-Za-z0-9]', '', 'g'))`,
 		),
 		index("doc_integrity_val_signals_gin_idx").using("gin", table.signals),
+	],
+);
+
+export const documentIntegrityValidationApprovals = pgTable(
+	"document_integrity_validation_approvals",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		validationId: uuid("validation_id")
+			.notNull()
+			.references(() => documentIntegrityValidations.id, {
+				onDelete: "cascade",
+			}),
+		approvedBy: text("approved_by")
+			.notNull()
+			.references(() => user.id),
+		reason: text("reason").notNull(),
+		approvedAt: timestamp("approved_at", { withTimezone: true })
+			.notNull()
+			.default(sql`clock_timestamp()`),
+	},
+	(table) => [
+		uniqueIndex("doc_integrity_approval_validation_unique").on(
+			table.validationId,
+		),
+		check(
+			"doc_integrity_approval_reason_not_blank",
+			sql`length(btrim(${table.reason})) between 5 and 1000`,
+		),
 	],
 );

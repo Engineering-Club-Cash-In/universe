@@ -27,6 +27,14 @@ describe("cuándo vale la pena consultar", () => {
 		expect(dpiConsultable("1573 66197 0101")).toBe("1573661970101");
 	});
 
+	// Las cédulas viejas de producción: el inversionista 187 tiene `4036613`.
+	// Con el umbral en 13 nunca se le consultaba, así que crear su empresa era
+	// imposible desde que desapareció el interruptor "¿Es empresa?".
+	it("consulta también las cédulas viejas de 7 y 8 dígitos", () => {
+		expect(dpiConsultable("4036613")).toBe("4036613");
+		expect(dpiConsultable("04036613")).toBe("04036613");
+	});
+
 	it("no consulta un correo incompleto", () => {
 		expect(emailConsultable("richard@")).toBeNull();
 		expect(emailConsultable("richard@gmail")).toBeNull();

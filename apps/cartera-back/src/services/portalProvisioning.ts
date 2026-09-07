@@ -170,10 +170,6 @@ export const provisionarInversionista = async (
     }
 
     if (decision.accion === "notificar_representante") {
-      if (opciones.soloAsegurarCuenta) {
-        return resultado(decision.inversionistaId, "omitida", "es_empresa");
-      }
-
       const buscar = opciones.buscarRepresentante;
       const representante = buscar
         ? await buscar(decision.dpiRepresentante)
@@ -186,6 +182,38 @@ export const provisionarInversionista = async (
           decision.inversionistaId,
           "fallo",
           "representante_no_encontrado_en_cartera",
+        );
+      }
+
+      // EL BOTÓN MANUAL SOBRE UNA EMPRESA.
+      //
+      // `soloAsegurarCuenta` tiene UN solo llamador: `otorgarAccesoPortal`, el
+      // botón que aprieta un ADMIN. (La reconciliación diaria usa
+      // `consultarAccesoInversionista`, que no puede escribir.) Antes esto
+      // devolvía `omitida/es_empresa`, que el traductor del front pinta de
+      // VERDE: el alta reportaba "su representante legal todavía no tiene
+      // cuenta", el operador seguía esa instrucción sobre la fila de la
+      // empresa, no pasaba nada, y el toast decía que sí.
+      //
+      // Y NO se le abre la cuenta al representante desde aquí, aunque ya
+      // sepamos quién es y a dónde escribirle. El único control que tiene este
+      // botón es humano: el diálogo de confirmación enseña EL CORREO al que va
+      // a caer la contraseña y quien confirma responde por él. Sobre una fila
+      // de empresa ese diálogo enseña el correo de la EMPRESA, así que
+      // provisionar al representante desde aquí mandaría una contraseña a una
+      // dirección que nadie miró — y el correo de una fila de
+      // `inversionistas` es justo lo que el upsert legacy por DPI deja
+      // reescribir (investor.ts:672-678). Sería cambiar un no-op visible por
+      // un salto silencioso del único candado.
+      //
+      // Así que se devuelve un pendiente HONESTO y accionable: el acceso se
+      // abre desde la fila del representante, que ya sabemos que existe en
+      // cartera, y ahí el diálogo sí enseña su correo.
+      if (opciones.soloAsegurarCuenta) {
+        return resultado(
+          decision.inversionistaId,
+          "fallo",
+          "es_empresa_el_acceso_es_del_representante",
         );
       }
 

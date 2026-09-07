@@ -414,6 +414,33 @@ const reconocerExistente = async (
 
   anotarIdentidad(encontrado, emailDeCartera, dpiDeCartera, advertencias);
 
+  // ESTE ORDEN ES LA SEGURIDAD, no una preferencia de estilo.
+  //
+  // A esta cuenta se puede haber llegado POR DPI, y un DPI ajeno no cuesta
+  // nada: el registro de Better Auth es abierto y no verifica el correo, así
+  // que cualquiera se hace una cuenta con SU correo y el DPI de otra persona.
+  // El día que el staff provisione a esa otra persona, la búsqueda por DPI
+  // —que va primero— aterriza justo en la cuenta del impostor.
+  //
+  // `promoverRol` ESCRIBE. Y el rol INVESTOR es exactamente la llave que abre
+  // la carga de entidades del portal (`useEntidades`). Promover primero y
+  // devolver "fallo" después no deshace nada: el UPDATE ya está en la base y
+  // el acceso queda concedido con el aviso de que no se concedió.
+  //
+  // El correo es lo único que ata la cuenta a lo que cartera reconoce
+  // (`getEntidadesPorCorreo`), así que mientras no coincida, esta cuenta no
+  // gana NADA aquí: se reporta y se sale sin escribir.
+  if (!correoDeCarteraCoincide(usuario.email, emailDeCartera)) {
+    return {
+      estado: "fallo",
+      usuarioEmail: usuario.email,
+      resueltoPor,
+      correo: correoVacio(modo),
+      advertencias,
+      motivo: "correo_de_cartera_distinto_al_de_la_cuenta",
+    };
+  }
+
   const tieneAccesoDeInversionista = await promoverRol(
     usuario,
     advertencias,
@@ -430,22 +457,6 @@ const reconocerExistente = async (
       correo: correoVacio(modo),
       advertencias,
       motivo: "sin_rol_de_inversionista",
-    };
-  }
-
-  // La cuenta existe, pero con este correo el portal no le va a mostrar nada:
-  // cartera ancla las entidades por correo y el de esta cuenta no está en la
-  // fila. Decir "ya tenía acceso" acá es una promesa falsa —el aviso verde del
-  // CRM manda a la persona a entrar y a encontrarse una pantalla vacía—, así
-  // que se reporta como pendiente hasta que un humano cuadre los dos correos.
-  if (!correoDeCarteraCoincide(usuario.email, emailDeCartera)) {
-    return {
-      estado: "fallo",
-      usuarioEmail: usuario.email,
-      resueltoPor,
-      correo: correoVacio(modo),
-      advertencias,
-      motivo: "correo_de_cartera_distinto_al_de_la_cuenta",
     };
   }
 
@@ -562,28 +573,10 @@ export const avisarEmpresaAgregada = async (
     };
   }
 
-  const tieneAccesoDeInversionista = await promoverRol(
-    existente.usuario,
-    advertencias,
-    deps,
-  );
-
-  // El aviso promete que la empresa aparece al entrar. Sin el rol de
-  // inversionista no aparece nada, y sin el correo cuadrado tampoco: cartera
-  // ancla las entidades por correo. Mandarlo igual es citar a alguien a mirar
-  // una pantalla vacía, así que en esos dos casos NO se manda y el pendiente
-  // queda reportado para que un humano lo cuadre.
-  if (!tieneAccesoDeInversionista) {
-    return {
-      estado: "fallo",
-      usuarioEmail: existente.usuario.email,
-      resueltoPor: existente.resueltoPor,
-      correo: correoVacio(modo),
-      advertencias,
-      motivo: "sin_rol_de_inversionista",
-    };
-  }
-
+  // Mismo orden y misma razón que en `reconocerExistente`: la búsqueda por DPI
+  // va primero, un DPI ajeno lo pone cualquiera en una cuenta de sign-up
+  // abierto, y `promoverRol` escribe el rol que habilita el portal. Se
+  // comprueba el correo ANTES de tocar la cuenta.
   if (!correoDeCarteraCoincide(existente.usuario.email, email)) {
     // Este camino ni siquiera lo anotaba: `anotarIdentidad` es del alta.
     advertencias.push("correo_de_cartera_distinto_al_de_la_cuenta");
@@ -595,6 +588,27 @@ export const avisarEmpresaAgregada = async (
       correo: correoVacio(modo),
       advertencias,
       motivo: "correo_de_cartera_distinto_al_de_la_cuenta",
+    };
+  }
+
+  const tieneAccesoDeInversionista = await promoverRol(
+    existente.usuario,
+    advertencias,
+    deps,
+  );
+
+  // El aviso promete que la empresa aparece al entrar. Sin el rol de
+  // inversionista no aparece nada: mandarlo igual es citar a alguien a mirar
+  // una pantalla vacía, así que NO se manda y el pendiente queda reportado
+  // para que un humano lo cuadre.
+  if (!tieneAccesoDeInversionista) {
+    return {
+      estado: "fallo",
+      usuarioEmail: existente.usuario.email,
+      resueltoPor: existente.resueltoPor,
+      correo: correoVacio(modo),
+      advertencias,
+      motivo: "sin_rol_de_inversionista",
     };
   }
 

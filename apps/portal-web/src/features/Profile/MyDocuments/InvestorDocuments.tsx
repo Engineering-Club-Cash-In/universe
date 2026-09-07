@@ -6,6 +6,8 @@ import { useIsMobile } from "@/hooks";
 import { DocumentViewerModal } from "./DocumentViewerModal";
 import { useEntidades } from "../hooks/useEntidades";
 import { ErrorCarga } from "../components/ErrorCarga";
+import { SinEntidades } from "../components/SinEntidades";
+import { pantallaDeEntidad } from "../pantallaDeEntidad";
 import { CACHE_FICHA } from "../constants/cache";
 
 export const InvestorDocuments = () => {
@@ -16,6 +18,7 @@ export const InvestorDocuments = () => {
     isLoading: cargandoEntidades,
     error: errorEntidades,
     reintentar: reintentarEntidades,
+    sinEntidades,
   } = useEntidades();
 
   const {
@@ -30,19 +33,31 @@ export const InvestorDocuments = () => {
     ...CACHE_FICHA,
   });
 
-  if (cargandoEntidades || (!!inversionistaId && isLoading)) {
+  // Sin esto, un fallo de red se veía igual que "esta entidad no tiene
+  // documentos" —y no tener NINGUNA entidad se veía igual también: sin ficha no
+  // hay documentos que traer, así que salía "No tienes documentos" cuando lo
+  // cierto es que a su usuario le falta que lo asocien.
+  const pantalla = pantallaDeEntidad({
+    cargando: cargandoEntidades || (!!inversionistaId && isLoading),
+    hayError: !!(errorEntidades || errorDocumentos),
+    sinEntidades,
+  });
+
+  if (pantalla === "cargando") {
     return <Loading />;
   }
 
-  // Sin esto, un fallo de red se veía igual que "esta entidad no tiene
-  // documentos".
-  if (errorEntidades || errorDocumentos) {
+  if (pantalla === "error") {
     return (
       <ErrorCarga
         titulo="No pudimos cargar los documentos"
         onReintentar={() => (errorEntidades ? reintentarEntidades() : refetch())}
       />
     );
+  }
+
+  if (pantalla === "sin-entidades") {
+    return <SinEntidades queVerias="tus documentos" />;
   }
 
   return (

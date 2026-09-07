@@ -57,6 +57,19 @@ export interface ResumenProvisionamiento {
    * decisión de identidad, y se lista para que la tome un humano.
    */
   vinculosFragiles: EntradaResumen[];
+  /**
+   * Tiene cuenta y el correo cuadra, pero el rol quedó en CLIENT: entra al
+   * portal y no ve ninguna inversión (`useEntidades` solo carga con INVESTOR).
+   *
+   * Va aparte de `cuentasSinIdentidad` a propósito, aunque las tres hablen del
+   * rol. Aquellas son escrituras que FALLARON y las arregla sistemas; ésta es
+   * una cuenta sana a la que nadie le pidió el ascenso todavía —la corrida
+   * diaria no escribe— y la arregla operaciones con el mismo click que una
+   * candidata. Bajo el rótulo "Cuenta creada sin rol o sin DPI" la fila saldría
+   * con la instrucción equivocada, y encima con dos datos falsos: ni se acaba
+   * de crear ni le falta el DPI.
+   */
+  sinRolDeInversionista: EntradaResumen[];
   dudosas: EntradaResumen[];
   hayQueReportar: boolean;
 }
@@ -100,6 +113,7 @@ export const resumirProvisionamiento = (
     accesosPerdidos: [],
     cuentasSinIdentidad: [],
     vinculosFragiles: [],
+    sinRolDeInversionista: [],
     dudosas: [],
     hayQueReportar: false,
   };
@@ -150,6 +164,13 @@ export const resumirProvisionamiento = (
     if (r.advertencias.includes("cuenta_anclada_solo_por_correo")) {
       resumen.vinculosFragiles.push(e);
     }
+    // La produce `consultarCuentaInversionista` y hasta ahora no la leía nadie.
+    // Es el falso positivo más silencioso del resumen: esa fila vuelve como
+    // `ya_tenia`, entra en el CONTADOR de "ya tenían acceso" —un número, no una
+    // lista— y desaparece.
+    if (r.advertencias.includes("cuenta_sin_rol_de_inversionista")) {
+      resumen.sinRolDeInversionista.push(e);
+    }
   }
 
   resumen.hayQueReportar =
@@ -167,6 +188,10 @@ export const resumirProvisionamiento = (
     resumen.correoDistinto.length > 0 ||
     resumen.accesosPerdidos.length > 0 ||
     resumen.cuentasSinIdentidad.length > 0 ||
+    // Suma por la misma razón que `candidatas` y NO por la de `vinculosFragiles`:
+    // es una persona sin acceso esperando un click, o sea trabajo abierto, no
+    // estado crónico. Que se repita mañana significa que nadie lo atendió.
+    resumen.sinRolDeInversionista.length > 0 ||
     resumen.sinNombre.length > 0;
   // `vinculosFragiles` NO suma a `hayQueReportar` a propósito: son las mismas
   // filas todos los días hasta que un humano decida cuál cuenta es la buena.
@@ -254,6 +279,7 @@ export const construirCorreoResumen = (
     ${lista("Cuentas creadas", resumen.creadas)}
     ${lista("Cuenta creada pero SIN contraseña entregada (resetear a mano)", resumen.accesosPerdidos)}
     ${lista("Cuenta creada sin rol o sin DPI (arreglar o mañana se duplica)", resumen.cuentasSinIdentidad)}
+    ${lista("Tienen cuenta pero SIN el permiso de inversionista: al entrar no ven nada — abrirles el acceso desde el módulo de inversionistas (van contados arriba como \"ya tenían acceso\")", resumen.sinRolDeInversionista)}
     ${lista("No se pudo dar acceso", resumen.fallos)}
     ${lista("El correo no salió", resumen.correosNoEnviados)}
     ${lista("Correo de cartera distinto al de la cuenta (revisar a mano)", resumen.correoDistinto)}

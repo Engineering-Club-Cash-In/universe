@@ -9,6 +9,10 @@ import {
 } from "../services/registroSinDpi";
 import { recordarSiQuedoSinDpi } from "../services/avisoDpiPendiente";
 import {
+  accionDeReintento,
+  dpiCompleto,
+} from "../services/reintentoDpiPendiente";
+import {
   rolFueEstablecido,
   tipoInicialDelFormulario,
 } from "../identidadDelPortal";
@@ -27,7 +31,8 @@ interface CompleteProfileFormProps {
   /**
    * Aviso de que el registro del camino de Google salió BIEN pero quedó sin
    * DPI. Va aparte de `mensajeInicial` porque no es un error suyo: se muestra
-   * en el bloque de espera, no en el rojo, y bloquea el reintento.
+   * en el bloque de espera, no en el rojo, y frena el envío hasta que la
+   * persona diga que ya le avisaron.
    */
   pendienteInicial?: string;
 }
@@ -50,13 +55,13 @@ export const CompleteProfileForm = ({
   );
   const [error, setError] = useState(mensajeInicial);
   // Aparte de `error` a propósito: no es algo que la persona pueda corregir
-  // aquí, así que no se limpia al editar el DPI ni deja reintentar. Ver
-  // `registroQuedoSinDpi`.
+  // aquí, así que no se limpia al editar el DPI. Sí se puede reintentar, pero
+  // solo a mano y desde su propio bloque: ver `reintentoDpiPendiente`.
   const [pendiente, setPendiente] = useState(pendienteInicial);
 
   const completeMutation = useMutation({
     mutationFn: async () => {
-      if (!dpi || dpi.length !== 13) {
+      if (!dpiCompleto(dpi)) {
         throw new Error("El DPI debe tener 13 dígitos");
       }
 
@@ -109,16 +114,34 @@ export const CompleteProfileForm = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Reintentar es inútil por construcción: el DPI de esa ficha solo lo puede
-    // poner un humano del equipo, así que otro envío devolvería exactamente lo
-    // mismo. Se corta aquí porque el `Button` compartido no tiene `disabled` y
-    // no vale la pena ampliarle la API por este caso.
+    // Mientras el ámbar esté arriba, reenviar lo mismo devolvería lo mismo: lo
+    // que falta lo tiene que poner un humano del equipo. Se corta aquí porque
+    // el `Button` compartido no tiene `disabled` y no vale la pena ampliarle la
+    // API por este caso. La salida es el botón de reintento del propio bloque
+    // ámbar, que primero baja el aviso.
     if (pendiente) {
       return;
     }
 
     setError("");
     await completeMutation.mutateAsync();
+  };
+
+  // "Ya me avisaron que está listo": la persona sabe algo que el portal no
+  // puede averiguar solo, así que baja el aviso y se vuelve a preguntar.
+  //
+  // El aviso GUARDADO no se toca: si recarga sin llegar a reenviar, tiene que
+  // volver a ver la explicación en vez del formulario mudo (por eso existe
+  // `avisoDpiPendiente`). Se apaga solo, cuando el servidor devuelva el DPI.
+  const handleReintentar = () => {
+    setError("");
+    setPendiente("");
+
+    // Tras una recarga el aviso vuelve pero el DPI escrito no. Mandarlo vacío
+    // solo pintaría un error rojo por un campo que la persona no está viendo.
+    if (accionDeReintento(dpi) === "reenviar") {
+      completeMutation.mutate();
+    }
   };
 
   return (
@@ -232,7 +255,8 @@ export const CompleteProfileForm = ({
         )}
 
         {/* Ámbar y no rojo: no es un error de la persona ni hay nada que
-            corregir en este formulario. La salida es hablar con nosotros. */}
+            corregir en este formulario. Las dos salidas son hablar con
+            nosotros y, cuando ya le avisaron, volver a intentar. */}
         {pendiente && (
           <div className="bg-amber-500/15 border border-amber-500/50 rounded-lg p-4 space-y-4">
             <div>
@@ -241,16 +265,30 @@ export const CompleteProfileForm = ({
               </p>
               <p className="text-amber-100/90 text-sm">{pendiente}</p>
             </div>
-            <Button
-              type="button"
-              size="lg"
-              variant="whatsapp"
-              onClick={() =>
-                openWhatsApp(mensajeDeWhatsAppPorDpiPendiente(user?.email ?? ""))
-              }
-            >
-              Escribirnos por WhatsApp
-            </Button>
+            <div className="flex flex-col lg:flex-row lg:items-center gap-3">
+              <Button
+                type="button"
+                size="lg"
+                variant="whatsapp"
+                onClick={() =>
+                  openWhatsApp(
+                    mensajeDeWhatsAppPorDpiPendiente(user?.email ?? ""),
+                  )
+                }
+              >
+                Escribirnos por WhatsApp
+              </Button>
+              {/* Estilo de `ErrorCarga` y no el `Button` compartido: es la
+                  acción secundaria y su texto no entra en una píldora de alto
+                  fijo. */}
+              <button
+                type="button"
+                onClick={handleReintentar}
+                className="px-4 py-2 text-sm font-semibold text-amber-200 border border-amber-500/50 rounded-lg hover:bg-amber-500/10 transition-colors"
+              >
+                Ya me avisaron que está listo — reintentar
+              </button>
+            </div>
           </div>
         )}
 
@@ -260,7 +298,7 @@ export const CompleteProfileForm = ({
             isLoading={completeMutation.isPending}
             size="lg"
             className={
-              !dpi || dpi.length !== 13 || pendiente
+              !dpiCompleto(dpi) || pendiente
                 ? "opacity-50 cursor-not-allowed"
                 : ""
             }

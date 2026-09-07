@@ -12,8 +12,14 @@ import { beforeAll, beforeEach, describe, expect, it, mock } from "bun:test";
 import { Hono } from "hono";
 
 // Sesión que devuelve el mock de Better Auth. `null` = petición sin sesión.
-let sessionActual: { user: { id: string; email?: string; dpi?: string } } | null =
-  null;
+let sessionActual: {
+  user: {
+    id: string;
+    email?: string;
+    dpi?: string;
+    passwordProvisionadaAt?: string | null;
+  };
+} | null = null;
 
 mock.module("../lib/auth", () => ({
   auth: {
@@ -98,6 +104,40 @@ describe("rutas del CRM: el destinatario sale de la sesión", () => {
 
     expect(res.status).toBe(401);
     expect(llamadas).toHaveLength(0);
+  });
+
+  // La pantalla de primer ingreso vive en el cliente y se salta con un `curl`.
+  // Si el candado no estuviera también aquí, entrar con la contraseña que
+  // mandamos por correo bastaría para seguir usando los datos indefinidamente.
+  it("rechaza a quien todavía usa la contraseña que le generamos", async () => {
+    sessionActual = {
+      user: {
+        id: "user-atacante",
+        email: ATACANTE,
+        dpi: DPI_ATACANTE,
+        passwordProvisionadaAt: "2026-09-07T12:00:00.000Z",
+      },
+    };
+
+    const res = await pedir("/profile");
+
+    expect(res.status).toBe(403);
+    expect(llamadas).toHaveLength(0);
+  });
+
+  it("deja pasar a quien ya eligió la suya", async () => {
+    sessionActual = {
+      user: {
+        id: "user-atacante",
+        email: ATACANTE,
+        dpi: DPI_ATACANTE,
+        passwordProvisionadaAt: null,
+      },
+    };
+
+    const res = await pedir("/profile");
+
+    expect(res.status).toBe(200);
   });
 
   // ------------------------------------------------------------------

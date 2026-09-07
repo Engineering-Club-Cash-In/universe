@@ -11,6 +11,11 @@
 -- ORDEN DE DESPLIEGUE: esta migración va ANTES de subir el código. auth-google
 -- lee la columna en cada consulta de sesión; si el código sube primero, el
 -- login se cae con "column does not exist".
+--
+-- Como el despliegue de producción NO corre migraciones —ninguna app de este
+-- repo las corre desde CI—, `src/db/columnasRequeridas.ts` repite esta misma
+-- sentencia al arrancar el servicio, por si el despliegue llega antes. Esta
+-- sigue siendo la migración de verdad; aquello es solo la red.
 
 ALTER TABLE "auth-google"."users"
   ADD COLUMN IF NOT EXISTS "password_provisionada_at" timestamp;

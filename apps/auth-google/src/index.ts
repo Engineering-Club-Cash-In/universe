@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { testConnection } from "./db/connection";
+import { asegurarColumnasRequeridas } from "./db/columnasRequeridas";
 import authRoutes from "./routes/auth.routes";
 import healthRoutes from "./routes/health.routes";
 import passwordRoutes from "./routes/password.routes";
@@ -95,8 +96,12 @@ app.notFound(notFoundHandler);
 app.onError(errorHandler);
 
 // Verificar conexión a la base de datos al iniciar
-testConnection().then((connected) => {
+testConnection().then(async (connected) => {
   if (connected) {
+    // Antes de anunciar que el servicio está arriba: sin estas columnas el
+    // login se cae entero, y el despliegue no corre migraciones.
+    await asegurarColumnasRequeridas();
+
     console.log(`
 ╔═══════════════════════════════════════════════╗
 ║   🚀 Auth Google Service Running              ║

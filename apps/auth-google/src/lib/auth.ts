@@ -13,6 +13,7 @@ import {
   RUTA_CAMBIO_DE_PASSWORD,
   usuarioQueCambioSuPassword,
 } from "./cambioDePassword";
+import { tokenDeResetVigente } from "./tokenDeReset";
 import { SESSION_COOKIE_PREFIX } from "./portalCookies";
 
 /**
@@ -29,6 +30,58 @@ import { SESSION_COOKIE_PREFIX } from "./portalCookies";
  * solo vive mientras nadie lo haya usado.
  */
 const VIGENCIA_ENLACE_RESET_SEGUNDOS = 60 * 60 * 24;
+
+/**
+ * Se niega a poner como contraseña nueva la que ya está puesta.
+ *
+ * Better Auth no lo comprueba en ninguno de los dos caminos, y con la marca de
+ * primer ingreso eso deja de ser un no-op inocente: `/change-password` con la
+ * MISMA contraseña temporal en los dos campos respondía 200, y ese 200 limpiaba
+ * la marca. La credencial que viajó por correo seguía siendo la buena y encima
+ * ya no había candado. La comprobación del formulario no cuenta: se salta con
+ * una petición directa.
+ *
+ * Se compara contra el hash guardado y no contra `currentPassword`, y eso cubre
+ * los dos caminos con una sola regla: el del enlace ni siquiera manda la
+ * contraseña actual.
+ */
+const exigirPasswordDistintaALaActual = async (
+  ctx: {
+    context: {
+      internalAdapter: {
+        findAccounts: (userId: string) => Promise<
+          { providerId: string; password?: string | null }[]
+        >;
+      };
+      password: {
+        verify: (params: { hash: string; password: string }) => Promise<boolean>;
+      };
+    };
+  },
+  userId: string,
+  nueva: string,
+): Promise<void> => {
+  const cuentas = await ctx.context.internalAdapter.findAccounts(userId);
+  const credencial = cuentas.find(
+    (cuenta) => cuenta.providerId === "credential" && cuenta.password,
+  );
+
+  // Sin cuenta de credenciales no hay contraseña que repetir: es alguien que
+  // entra por Google y el reset se la va a crear.
+  if (!credencial?.password) return;
+
+  const esLaMisma = await ctx.context.password.verify({
+    hash: credencial.password,
+    password: nueva,
+  });
+
+  if (!esLaMisma) return;
+
+  throw new APIError("BAD_REQUEST", {
+    message:
+      "La contraseña nueva tiene que ser distinta de la que estás usando.",
+  });
+};
 
 export const auth = betterAuth({
   database: drizzleAdapter(db, {
@@ -155,42 +208,70 @@ export const auth = betterAuth({
   },
   hooks: {
     /**
-     * Los enlaces de recuperación pendientes mueren ANTES de que la contraseña
-     * cambie, no después.
+     * Todo lo que tiene que ser cierto ANTES de que una contraseña cambie.
      *
-     * Better Auth borra el token que se USA, pero no los otros que esa persona
-     * tenga vivos, y con 24 horas de vigencia esa es una ventana real: quien
-     * tenga un correo viejo puede volver a cambiar la contraseña que se acaba
-     * de elegir. Hacer la limpieza después dejaba el caso sin salida —si el
-     * DELETE falla, la contraseña ya cambió y no hay vuelta atrás—, así que va
-     * antes: si la base falla, esto tira, el cambio no llega a ocurrir y la
-     * persona reintenta sobre un estado limpio.
+     * Los dos caminos —el enlace del correo y el cambio con la sesión abierta—
+     * pasan por aquí, y las dos comprobaciones van antes y no después por la
+     * misma razón: después el cambio ya ocurrió y no hay vuelta atrás.
+     *
+     * 1. La contraseña nueva tiene que ser DISTINTA de la actual. Better Auth
+     *    no lo comprueba, así que `/change-password` aceptaba la misma
+     *    contraseña en los dos campos y respondía 200. Eso bastaba para que se
+     *    limpiara la marca de primer ingreso sin que la credencial hubiera
+     *    cambiado: quien tuviera la contraseña que mandamos por correo se
+     *    quitaba el candado de encima y seguía usándola. La regla existía solo
+     *    en el Yup del formulario, que es un `curl` de distancia.
+     * 2. Los enlaces de recuperación pendientes mueren. Better Auth borra el
+     *    token que se USA, pero no los otros que esa persona tenga vivos, y con
+     *    24 horas de vigencia esa es una ventana real. Hacerlo después dejaba
+     *    el caso sin salida: si el DELETE falla, la contraseña ya cambió.
      */
     before: createAuthMiddleware(async (ctx) => {
+      const esReset = ctx.path === "/reset-password";
+      const esCambio = ctx.path === RUTA_CAMBIO_DE_PASSWORD;
+      if (!esReset && !esCambio) return;
+
+      const nueva = ctx.body?.newPassword;
+      // Que el cuerpo esté bien formado lo valida Better Auth; acá solo se sale
+      // sin hacer nada para no adelantarse a su propio error.
+      if (typeof nueva !== "string" || nueva === "") return;
+
+      let userId: string | null = null;
+      // El token que se está canjeando, para no borrarlo junto con los demás.
+      let tokenEnUso: string | undefined;
+
       try {
-        if (ctx.path === "/reset-password") {
+        if (esReset) {
           const token = ctx.body?.token ?? ctx.query?.token;
           if (typeof token !== "string" || token === "") return;
 
           const fila = await ctx.context.internalAdapter.findVerificationValue(
             `reset-password:${token}`,
           );
-          // Sin fila el token no sirve; que conteste Better Auth con su
-          // INVALID_TOKEN de siempre en vez de inventar otro error aquí.
-          if (!fila?.value) return;
 
-          await exigirInvalidacionDeEnlaces(fila.value, token);
-          return;
-        }
+          // Vigente, no solo existente: Better Auth deja las filas vencidas ahí
+          // y las rechaza comparando la fecha. Sin este chequeo, mandar un
+          // enlace viejo mataba el enlace NUEVO de esa persona y encima el
+          // viejo se rechazaba igual, dejándola sin ninguno de los dos.
+          if (!tokenDeResetVigente(fila)) return;
 
-        if (ctx.path === RUTA_CAMBIO_DE_PASSWORD) {
+          userId = fila!.value;
+          tokenEnUso = token;
+        } else {
           const sesion = await getSessionFromCtx(ctx);
           // Sin sesión no hay a quién limpiarle nada: el endpoint responde 401.
           if (!sesion?.user?.id) return;
 
-          await exigirInvalidacionDeEnlaces(sesion.user.id);
+          userId = sesion.user.id;
         }
+
+        await exigirPasswordDistintaALaActual(ctx, userId, nueva);
+        await exigirInvalidacionDeEnlaces(userId, tokenEnUso);
       } catch (error) {
+        // Un rechazo con causa —la contraseña repetida— viaja tal cual: es lo
+        // único que la persona puede corregir sola.
+        if (error instanceof APIError) throw error;
+
         console.error(
           "[password] no se pudieron invalidar los enlaces pendientes; se rechaza el cambio.",
           error,

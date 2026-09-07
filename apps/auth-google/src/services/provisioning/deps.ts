@@ -87,6 +87,9 @@ export const dependenciasReales = (): DependenciasProvisionamiento => ({
     // `dpi: null` es un cambio válido (limpiar), pero solo se manda cuando la
     // llave viene: `undefined` es "no tocar".
     if (cambios.dpi !== undefined) set.dpi = cambios.dpi;
+    if (cambios.passwordProvisionadaAt !== undefined) {
+      set.passwordProvisionadaAt = cambios.passwordProvisionadaAt;
+    }
     if (Object.keys(set).length === 0) return;
 
     await db.update(users).set(set).where(eq(users.id, id));

@@ -52,7 +52,15 @@ export interface DependenciasProvisionamiento {
   }) => Promise<{ id: string }>;
   actualizarUsuario: (
     id: string,
-    cambios: { role?: PortalUserType; dpi?: string | null },
+    cambios: {
+      role?: PortalUserType;
+      dpi?: string | null;
+      /**
+       * Marca de "esta contraseña la generamos nosotros". Solo la pone el alta
+       * que CREA la cuenta; el cambio de contraseña la limpia.
+       */
+      passwordProvisionadaAt?: Date | null;
+    },
   ) => Promise<void>;
   enviarBienvenida: (params: {
     to: string;
@@ -288,10 +296,17 @@ export const asegurarCuentaInversionista = async (
     await deps.actualizarUsuario(creado.id, {
       role: "INVESTOR",
       dpi: normalizarDpiPortal(entrada.dpi),
+      // La contraseña de esta cuenta la elegimos nosotros y viajó por correo:
+      // queda marcada para que el portal le pida a su dueño que ponga la suya
+      // antes de dejarlo ver nada. Se marca SOLO acá, en el alta que de verdad
+      // creó la cuenta: a quien ya la tenía no se le toca la suya.
+      passwordProvisionadaAt: new Date(),
     });
   } catch {
     // La cuenta sirve sin rol ni DPI —se entra igual— y la contraseña todavía
     // se puede entregar, que es lo irrecuperable. El rol lo arregla un humano.
+    // Sin la marca tampoco se le pedirá cambiar la contraseña: se pierde el
+    // empujón, no el acceso, y el correo igual se lo recomienda.
     advertencias.push("cuenta_creada_sin_rol_ni_dpi");
   }
 

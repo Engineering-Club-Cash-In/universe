@@ -16,6 +16,7 @@ import { Route as SellRouteImport } from './routes/sell'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as RegisterRouteImport } from './routes/register'
 import { Route as ProfileRouteImport } from './routes/profile'
+import { Route as PrimerIngresoRouteImport } from './routes/primer-ingreso'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as LoansRouteImport } from './routes/loans'
 import { Route as LeadsRouteImport } from './routes/leads'
@@ -65,6 +66,11 @@ const RegisterRoute = RegisterRouteImport.update({
 const ProfileRoute = ProfileRouteImport.update({
   id: '/profile',
   path: '/profile',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PrimerIngresoRoute = PrimerIngresoRouteImport.update({
+  id: '/primer-ingreso',
+  path: '/primer-ingreso',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -156,6 +162,7 @@ export interface FileRoutesByFullPath {
   '/leads': typeof LeadsRoute
   '/loans': typeof LoansRoute
   '/login': typeof LoginRoute
+  '/primer-ingreso': typeof PrimerIngresoRoute
   '/profile': typeof ProfileRoute
   '/register': typeof RegisterRoute
   '/reset-password': typeof ResetPasswordRoute
@@ -180,6 +187,7 @@ export interface FileRoutesByTo {
   '/leads': typeof LeadsRoute
   '/loans': typeof LoansRoute
   '/login': typeof LoginRoute
+  '/primer-ingreso': typeof PrimerIngresoRoute
   '/profile': typeof ProfileRoute
   '/register': typeof RegisterRoute
   '/reset-password': typeof ResetPasswordRoute
@@ -205,6 +213,7 @@ export interface FileRoutesById {
   '/leads': typeof LeadsRoute
   '/loans': typeof LoansRoute
   '/login': typeof LoginRoute
+  '/primer-ingreso': typeof PrimerIngresoRoute
   '/profile': typeof ProfileRoute
   '/register': typeof RegisterRoute
   '/reset-password': typeof ResetPasswordRoute
@@ -231,6 +240,7 @@ export interface FileRouteTypes {
     | '/leads'
     | '/loans'
     | '/login'
+    | '/primer-ingreso'
     | '/profile'
     | '/register'
     | '/reset-password'
@@ -255,6 +265,7 @@ export interface FileRouteTypes {
     | '/leads'
     | '/loans'
     | '/login'
+    | '/primer-ingreso'
     | '/profile'
     | '/register'
     | '/reset-password'
@@ -279,6 +290,7 @@ export interface FileRouteTypes {
     | '/leads'
     | '/loans'
     | '/login'
+    | '/primer-ingreso'
     | '/profile'
     | '/register'
     | '/reset-password'
@@ -304,6 +316,7 @@ export interface RootRouteChildren {
   LeadsRoute: typeof LeadsRoute
   LoansRoute: typeof LoansRoute
   LoginRoute: typeof LoginRoute
+  PrimerIngresoRoute: typeof PrimerIngresoRoute
   ProfileRoute: typeof ProfileRoute
   RegisterRoute: typeof RegisterRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
@@ -365,6 +378,13 @@ declare module '@tanstack/react-router' {
       path: '/profile'
       fullPath: '/profile'
       preLoaderRoute: typeof ProfileRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/primer-ingreso': {
+      id: '/primer-ingreso'
+      path: '/primer-ingreso'
+      fullPath: '/primer-ingreso'
+      preLoaderRoute: typeof PrimerIngresoRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -488,6 +508,7 @@ const rootRouteChildren: RootRouteChildren = {
   LeadsRoute: LeadsRoute,
   LoansRoute: LoansRoute,
   LoginRoute: LoginRoute,
+  PrimerIngresoRoute: PrimerIngresoRoute,
   ProfileRoute: ProfileRoute,
   RegisterRoute: RegisterRoute,
   ResetPasswordRoute: ResetPasswordRoute,

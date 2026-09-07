@@ -1,10 +1,28 @@
 import { betterAuth } from "better-auth";
+import { createAuthMiddleware } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { db } from "../db/connection";
 import * as schema from "../db/schema";
 import { env } from "../config/env";
 import { sendPasswordResetEmail } from "../services/email.service";
+import { registrarPasswordPropia } from "../services/password/passwordPropia";
+import { usuarioQueCambioSuPassword } from "./cambioDePassword";
 import { SESSION_COOKIE_PREFIX } from "./portalCookies";
+
+/**
+ * Cuánto vive un enlace de recuperación: 24 horas.
+ *
+ * Explícito y no el default de la librería (1 hora): la ventana en la que un
+ * correo reenviado sigue sirviendo para entrar a una cuenta es una decisión, no
+ * un detalle de implementación. Se eligieron 24 horas porque el enlace también
+ * lo usa gente a la que le dimos de alta la cuenta y que abre el correo cuando
+ * puede; una hora los dejaba afuera y los obligaba a pedir otro.
+ *
+ * Lo que hace que alargarlo no sea un problema es lo de abajo: cambiar la
+ * contraseña invalida TODOS los enlaces pendientes, así que el enlace largo
+ * solo vive mientras nadie lo haya usado.
+ */
+const VIGENCIA_ENLACE_RESET_SEGUNDOS = 60 * 60 * 24;
 
 export const auth = betterAuth({
   database: drizzleAdapter(db, {
@@ -21,6 +39,18 @@ export const auth = betterAuth({
     requireEmailVerification: false, // Cambiar a true si quieres verificación
     minPasswordLength: 8,
     maxPasswordLength: 128,
+    resetPasswordTokenExpiresIn: VIGENCIA_ENLACE_RESET_SEGUNDOS,
+    // Cambiar la contraseña cierra las sesiones abiertas. Quien la cambia
+    // porque cree que alguien más la tenía, espera exactamente esto.
+    revokeSessionsOnPasswordReset: true,
+    /**
+     * Better Auth borra el token que se USÓ, pero no los otros que esa persona
+     * tenga pendientes. Acá se cierran todos, y de paso deja de estar marcada
+     * como "todavía usa la contraseña que le generamos".
+     */
+    onPasswordReset: async ({ user }) => {
+      await registrarPasswordPropia(user.id, "enlace");
+    },
     sendResetPassword: async ({ user, url }) => {
       // Log para debug - ver estructura de la URL
       console.log("🔗 Reset password URL from Better Auth:", url);
@@ -77,6 +107,15 @@ export const auth = betterAuth({
         required: false,
         input: false,
       },
+      // Viaja en la sesión para que el portal sepa, sin pedir nada más, que a
+      // esta persona todavía hay que pedirle que elija su contraseña.
+      // `input: false` como los otros dos: lo escribe el provisionamiento y lo
+      // limpia el cambio de contraseña, nunca el cliente.
+      passwordProvisionadaAt: {
+        type: "date",
+        required: false,
+        input: false,
+      },
     },
   },
   socialProviders: {
@@ -107,6 +146,22 @@ export const auth = betterAuth({
     cookies: {
       sameSite: env.NODE_ENV === "production" ? "none" : "lax" as const,
     },
+  },
+  hooks: {
+    /**
+     * El equivalente de `onPasswordReset` para el otro camino.
+     *
+     * `/change-password` es el que usa la pantalla de primer ingreso, y Better
+     * Auth no expone un hook propio para él. `hooks.after` corre para todos los
+     * endpoints, así que la ruta y la forma de la respuesta se filtran en
+     * `usuarioQueCambioSuPassword`, que es donde se puede probar.
+     */
+    after: createAuthMiddleware(async (ctx) => {
+      const userId = usuarioQueCambioSuPassword(ctx.path, ctx.context.returned);
+      if (!userId) return;
+
+      await registrarPasswordPropia(userId, "cambio_en_sesion");
+    }),
   },
   secret: env.BETTER_AUTH_SECRET,
   baseURL: env.BETTER_AUTH_URL,

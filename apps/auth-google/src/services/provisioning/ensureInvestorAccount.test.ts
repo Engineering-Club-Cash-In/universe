@@ -86,6 +86,11 @@ describe("asegurarCuentaInversionista — cuenta nueva", () => {
     const r = await asegurarCuentaInversionista(entrada(), deps());
     expect(JSON.stringify(r)).not.toContain("PASSWORD-FIJA");
   });
+
+  it("marca la cuenta para que su dueño elija contraseña al entrar", async () => {
+    await asegurarCuentaInversionista(entrada(), deps());
+    expect(actualizaciones[0].passwordProvisionadaAt).toBeInstanceOf(Date);
+  });
 });
 
 describe("asegurarCuentaInversionista — ya tenía cuenta", () => {
@@ -127,6 +132,17 @@ describe("asegurarCuentaInversionista — ya tenía cuenta", () => {
     expect(bienvenidas).toEqual([]);
     expect(avisos).toEqual([]);
     expect(r.correo.enviado).toBe(false);
+  });
+
+  it("NO marca a quien ya tenía cuenta: esa contraseña es suya, no nuestra", async () => {
+    // La razón por la que la marca existe: quien ya entraba al portal con su
+    // propia contraseña no puede quedar obligado a cambiarla porque le dieron
+    // de alta un inversionista.
+    usuarios.push({ id: "u1", email: "ana@example.com", nombre: "Ana", role: "CLIENT", dpi: "1234567890101" });
+    await asegurarCuentaInversionista(entrada(), deps());
+    for (const cambio of actualizaciones) {
+      expect(cambio.passwordProvisionadaAt).toBeUndefined();
+    }
   });
 
   it("promueve CLIENT a INVESTOR pero no toca un ADMIN", async () => {

@@ -4,6 +4,7 @@ import { logger } from "hono/logger";
 import { testConnection } from "./db/connection";
 import authRoutes from "./routes/auth.routes";
 import healthRoutes from "./routes/health.routes";
+import passwordRoutes from "./routes/password.routes";
 import profileRoutes from "./routes/profile.routes";
 import carteraRoutes from "./routes/cartera.routes";
 import crmRoutes from "./routes/crm.routes";
@@ -67,6 +68,9 @@ app.route("/api/auth", authRoutes);
 
 // Profile routes
 app.route("/api/profile", profileRoutes);
+
+// Estado de un enlace de recuperación (sin sesión: quien lo abre no la tiene)
+app.route("/api/password", passwordRoutes);
 
 // Cartera routes (proxy a la API de cartera)
 app.route("/api/cartera", carteraRoutes);

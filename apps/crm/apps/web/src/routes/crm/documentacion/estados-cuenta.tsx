@@ -856,6 +856,12 @@ function OpportunityValidationDetails({
 		.filter(Boolean)
 		.join(" ");
 	const latestAttempt = group.attempts[0];
+	const requestedValidationMissing =
+		!!initialValidationId &&
+		!!latestAttempt &&
+		!latestAttempt.validations.some(
+			(validation) => validation.id === initialValidationId,
+		);
 
 	return (
 		<div className="space-y-4">
@@ -895,6 +901,18 @@ function OpportunityValidationDetails({
 						Por {group.reset.resetByName || group.reset.resetByEmail} el{" "}
 						{new Date(group.reset.resetAt).toLocaleString("es-GT")}, después de
 						la ejecución {group.reset.resetAfterAttemptNumber}.
+					</p>
+				</div>
+			)}
+
+			{requestedValidationMissing && (
+				<div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-900 text-sm">
+					<p className="font-medium">
+						El documento solicitado no pertenece a esta ejecución
+					</p>
+					<p className="text-xs">
+						El enlace apunta a una validación que ya no es la vigente. Se
+						muestra la ejecución más reciente de la oportunidad.
 					</p>
 				</div>
 			)}

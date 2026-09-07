@@ -14,6 +14,8 @@ import { getProfile } from "../services";
 import { getInvestorProfile, getBancos } from "../services/investorService";
 import { useEntidades } from "../hooks/useEntidades";
 import { ErrorCarga } from "../components/ErrorCarga";
+import { SinEntidades } from "../components/SinEntidades";
+import { pantallaDeEntidad } from "../pantallaDeEntidad";
 import { CACHE_CATALOGO, CACHE_FICHA } from "../constants/cache";
 import { useAuth } from "@/lib";
 
@@ -40,6 +42,7 @@ export const InfoPerson = () => {
     isLoading: cargandoEntidades,
     error: errorEntidades,
     reintentar: reintentarEntidades,
+    sinEntidades,
   } = useEntidades();
 
   const isInvestor = user?.role === "INVESTOR";
@@ -171,13 +174,22 @@ export const InfoPerson = () => {
       : !!(profileData.dpi && profileData.phone);
   }, [profileData, isInvestor]);
 
-  if (isLoading) {
+  // Una ficha en blanco se lee como "esta entidad no tiene datos bancarios" y
+  // llevaría al inversionista a llenarlos de nuevo sobre lo que ya existe. Sin
+  // NINGUNA entidad es peor todavía: se pintaba el perfil entero con los
+  // botones de editar banco, y cada uno reventaba en `ModalConfirmChange.tsx:60`
+  // porque no hay entidad que actualizar.
+  const pantalla = pantallaDeEntidad({
+    cargando: isLoading,
+    hayError: isInvestor && !!(errorEntidades || errorInvestor),
+    sinEntidades,
+  });
+
+  if (pantalla === "cargando") {
     return <Loading />;
   }
 
-  // Una ficha en blanco se lee como "esta entidad no tiene datos bancarios" y
-  // llevaría al inversionista a llenarlos de nuevo sobre lo que ya existe.
-  if (isInvestor && (errorEntidades || errorInvestor)) {
+  if (pantalla === "error") {
     return (
       <ErrorCarga
         titulo="No pudimos cargar este perfil"
@@ -186,6 +198,10 @@ export const InfoPerson = () => {
         }
       />
     );
+  }
+
+  if (pantalla === "sin-entidades") {
+    return <SinEntidades queVerias="tus datos" />;
   }
 
   return (

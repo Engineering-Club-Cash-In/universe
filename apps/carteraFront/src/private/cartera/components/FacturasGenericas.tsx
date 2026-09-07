@@ -64,10 +64,15 @@ const formatDate = (d?: string) => {
 // legítimos que terminan en letra ("1937979K") y exigir solo números los bloqueaba.
 // Acá solo se valida el formato: quién dice si el NIT existe es el SAT, que se
 // consulta en el back al momento de facturar.
+// Lo que se valida y lo que se manda a facturar tienen que ser el mismo valor:
+// si se acepta "1937979 K" y se envía con el espacio, el SAT no lo encuentra.
+const normalizarNIT = (nit: string): string =>
+  nit.replace(/[-\s]/g, "").toUpperCase();
+
 const validarNIT = (nit: string): boolean => {
   if (!nit) return false;
 
-  const nitLimpio = nit.replace(/[-\s]/g, "").toUpperCase();
+  const nitLimpio = normalizarNIT(nit);
 
   // CF es válido
   if (nitLimpio === "CF") return true;
@@ -218,7 +223,7 @@ export function FacturasGenericas() {
 
       facturar(
         {
-          nit: values.nit.toUpperCase(),
+          nit: normalizarNIT(values.nit),
           items: values.items.map((item) => ({
             rubro: item.rubro,
             monto: Number(item.monto),

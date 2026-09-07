@@ -3020,7 +3020,7 @@ if (facturasExistentes.length > 0) {
 
         // Se normaliza igual que en /facturar-generico: sin guiones y en mayúscula,
         // porque el dígito verificador puede ser K y COFIDI no reconoce "1937979-k".
-        const nitNormalizado = (nit || "").trim().replace(/[-\s]/g, "").toUpperCase();
+        const nitNormalizado = (nit || "").replace(/[-\s]/g, "").toUpperCase();
 
         console.log("🔍 Consultando NIT en COFIDI:", nitNormalizado);
 
@@ -3453,7 +3453,9 @@ if (facturasExistentes.length > 0) {
         // ============================================
         // 1️⃣ VALIDAR NIT Y CONSULTAR EN COFIDI
         // ============================================
-        const nitNormalizado = (nit || "").trim().replace(/-/g, "").toUpperCase();
+        // Se quitan también los espacios internos: un "1937979 K" llegaba tal cual
+        // a COFIDI y volvía como no encontrado.
+        const nitNormalizado = (nit || "").replace(/[-\s]/g, "").toUpperCase();
 
         if (!nitNormalizado || nitNormalizado === "CF") {
           set.status = 400;

@@ -748,9 +748,12 @@ export async function validateUploadedBankStatements(params: {
 				} satisfies PreparedValidationDocument;
 			} catch (error) {
 				if (error instanceof DocumentIntegrityError) throw error;
+				// El key lo suministra el cliente y aqui ya fallo la verificacion de
+				// prefijo, asi que no puede persistirse: getFileUrl firmaria una ruta
+				// ajena. Se guarda un centinela que ningun prefijo valido produce.
 				return {
 					documentType,
-					filePath: file.key,
+					filePath: `unverified://${params.opportunityId}/${index + 1}`,
 					fileName: file.name,
 					buffer: null,
 					storageError: errorMessage(error),
@@ -1667,6 +1670,13 @@ export async function getDocumentIntegrityValidationGroup(params: {
 				)
 		: [];
 
+	// Defensa en profundidad: solo se firma lo que vive bajo un prefijo propio de
+	// la oportunidad. Si alguna ruta no verificada llegara a persistirse, no se
+	// convierte en una URL firmada.
+	const signablePrefixes = [
+		`${buildUploadPrefix("bank_statement", opportunityId)}/`,
+		`${buildUploadPrefix("opportunity_document", opportunityId)}/`,
+	];
 	const validationDetails = await Promise.all(
 		rows.map(async (row) => {
 			const {
@@ -1698,7 +1708,11 @@ export async function getDocumentIntegrityValidationGroup(params: {
 							approvedByEmail: manualApprovedByEmail ?? "",
 						}
 					: null,
-				signedUrl: await getFileUrl(documentFilePath),
+				signedUrl: signablePrefixes.some((prefix) =>
+					documentFilePath.startsWith(prefix),
+				)
+					? await getFileUrl(documentFilePath)
+					: null,
 			};
 		}),
 	);

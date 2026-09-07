@@ -966,11 +966,18 @@ export function ValidationDetailsView({
 	return (
 		<div className="space-y-5">
 			<div className="grid gap-5 lg:grid-cols-2">
-				<iframe
-					title="Estado de cuenta"
-					src={result.signedUrl}
-					className="h-[65vh] w-full rounded-md border bg-muted"
-				/>
+				{result.signedUrl ? (
+					<iframe
+						title="Estado de cuenta"
+						src={result.signedUrl}
+						className="h-[65vh] w-full rounded-md border bg-muted"
+					/>
+				) : (
+					<div className="flex h-[65vh] w-full items-center justify-center rounded-md border bg-muted p-6 text-center text-muted-foreground text-sm">
+						El archivo no está disponible para previsualizar. La validación no
+						llegó a guardar un documento en esta oportunidad.
+					</div>
+				)}
 				<div className="space-y-4">
 					<div className="flex flex-wrap items-center justify-between gap-2">
 						<ResultBadge result={result.autoResult} />

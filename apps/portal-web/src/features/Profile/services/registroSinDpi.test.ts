@@ -95,12 +95,25 @@ describe("mensajeDeDpiPendiente", () => {
   // Reintentar es inútil por construcción: solo un humano del equipo puede
   // poner ese DPI en la ficha. El texto tiene que decirlo, nombrar el correo
   // con el que ubicarla, y no soltar jerga interna.
-  it("dice que ya hay acceso, que no sirve reintentar y con qué correo ubicarla", () => {
+  it("dice que ya hay acceso, quién completa el dato y con qué correo ubicarla", () => {
     const mensaje = mensajeDeDpiPendiente("ana@example.com");
 
     expect(mensaje).toContain("ana@example.com");
     expect(mensaje.toLowerCase()).toContain("asesor");
-    expect(mensaje.toLowerCase()).toContain("recarga");
+  });
+
+  // El texto vive 18 líneas ARRIBA del botón de reintentar, en el mismo bloque.
+  // Antes decía "no hace falta que lo vuelvas a enviar" y "recarga la página":
+  // con el botón ahí, esa frase mandaba a la persona al callejón que el botón
+  // existe para cerrar. Quien lea el párrafo y quien mire el control tienen que
+  // recibir la misma instrucción, así que el texto no puede desdecirlo.
+  it("no contradice al botón de reintentar que vive debajo", () => {
+    const mensaje = mensajeDeDpiPendiente("ana@example.com").toLowerCase();
+
+    expect(mensaje).not.toContain("recarga");
+    expect(mensaje).not.toContain("no hace falta");
+    expect(mensaje).not.toContain("el resultado va a ser el mismo");
+    expect(mensaje).toContain("botón");
   });
 
   it("no filtra jerga interna", () => {

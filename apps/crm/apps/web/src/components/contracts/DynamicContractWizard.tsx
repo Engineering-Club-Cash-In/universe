@@ -1830,7 +1830,7 @@ export function DynamicContractWizard({
 
 	// Handle linking contracts to opportunity
 	const handleLinkContracts = async () => {
-		if (!generationResult || !leadId) return;
+		if (!generationResult || !leadId || retryingType) return;
 
 		const successfulContracts = generationResult.results.filter(
 			(r) => r.success,
@@ -2610,7 +2610,11 @@ export function DynamicContractWizard({
 						disabled={
 							!generationResult?.results.some((r) => r.success) ||
 							!leadId ||
-							isLinking
+							isLinking ||
+							// Enlazar con un reintento en vuelo guardaría los resultados viejos
+							// y se saldría de la pantalla: el PDF recién generado quedaría suelto.
+							Boolean(retryingType) ||
+							isGenerating
 						}
 						className="bg-green-600 hover:bg-green-700"
 					>
@@ -2693,7 +2697,7 @@ export function DynamicContractWizard({
 						<AlertDialogCancel disabled={isLinking}>Cancelar</AlertDialogCancel>
 						<AlertDialogAction
 							onClick={handleLinkContracts}
-							disabled={isLinking}
+							disabled={isLinking || Boolean(retryingType) || isGenerating}
 							className="bg-green-600 hover:bg-green-700"
 						>
 							{isLinking ? (

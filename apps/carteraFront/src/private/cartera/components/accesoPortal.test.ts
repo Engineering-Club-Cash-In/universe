@@ -163,3 +163,33 @@ describe("lo que se le promete a quien captura el alta", () => {
     expect(aviso.texto).not.toMatch(/7:00/);
   });
 });
+
+/**
+ * El botón "Dar acceso al portal" apretado sobre una fila de EMPRESA.
+ *
+ * El acceso no es de la empresa: es de su representante legal, y la
+ * contraseña aterriza en el buzón de ÉL. El diálogo de confirmación enseña el
+ * correo de la EMPRESA —que es el único control que tiene todo este botón: un
+ * humano mirando a dónde va a caer una contraseña—, así que abrirlo desde aquí
+ * mandaría la contraseña a una dirección que nadie revisó. Se manda al operador
+ * a la fila del representante, donde el diálogo sí enseña el correo correcto.
+ */
+describe("avisoAccesoPortal — el botón sobre una empresa", () => {
+  it("no se pinta de verde: dice a quién hay que abrírselo", () => {
+    const aviso = avisoAccesoPortal(
+      acceso({ estado: "fallo", motivo: "es_empresa_el_acceso_es_del_representante" }),
+    )!;
+
+    expect(aviso.tono).toBe("advertencia");
+    expect(aviso.texto).toContain("representante legal");
+  });
+
+  it("el representante que no está en cartera también se explica", () => {
+    const aviso = avisoAccesoPortal(
+      acceso({ estado: "fallo", motivo: "representante_no_encontrado_en_cartera" }),
+    )!;
+
+    expect(aviso.tono).toBe("advertencia");
+    expect(aviso.texto).toContain("representante legal");
+  });
+});

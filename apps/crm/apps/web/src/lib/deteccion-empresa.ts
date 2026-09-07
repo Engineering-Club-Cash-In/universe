@@ -23,10 +23,27 @@ export interface IdentidadDetectada {
 	sociedad: string | null;
 }
 
-/** Un DPI de Guatemala tiene 13 dígitos: antes no vale la pena preguntar. */
+/**
+ * Cuántos dígitos hacen falta para que valga la pena preguntar.
+ *
+ * NO son 13. El DPI moderno los tiene, pero en producción hay cédulas viejas de
+ * 7 y 8 dígitos —el inversionista 187 tiene `4036613`— y son personas que
+ * existen y que también pueden tener empresas. Con el umbral en 13 nunca se les
+ * consultaba, y como ya no existe el interruptor "¿Es empresa?", su DPI se
+ * quedaba en el campo personal y el alta de su sociedad rebotaba como duplicada
+ * sin ninguna salida.
+ *
+ * Bajar el umbral no convierte un DPI a medio escribir en el de otra persona:
+ * cartera busca por igualdad exacta, no por prefijo (`eq(inversionistas.dpi,…)`
+ * en `identidadInversionista.ts`). Para que saltara de más, los primeros 7 u 8
+ * dígitos de lo que se está tecleando tendrían que ser EXACTAMENTE la cédula
+ * completa de alguien, y aun así el panel se descarta con un clic.
+ */
+const MINIMO_DIGITOS_CONSULTABLES = 7;
+
 export const dpiConsultable = (valor: string): string | null => {
 	const digitos = valor.replace(/\D/g, "");
-	return digitos.length >= 13 ? digitos : null;
+	return digitos.length >= MINIMO_DIGITOS_CONSULTABLES ? digitos : null;
 };
 
 /** Correo con forma suficiente para consultarlo. */

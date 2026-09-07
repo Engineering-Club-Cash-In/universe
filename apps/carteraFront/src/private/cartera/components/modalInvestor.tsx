@@ -82,8 +82,17 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
     }
   }, [open, bancos.length, loadBancos]);
 
-  // ✅ Resetea cuando cambie initialData o mode
+  // Resetea al ABRIR, y cuando cambie initialData o mode.
+  //
+  // `open` va en las dependencias porque el modal no se desmonta al cerrarse
+  // (más abajo hay un `if (!open) return null`). Sin él, marcar "¿Es empresa?"
+  // y cancelar —o crear una empresa y volver a abrir— dejaba el interruptor
+  // puesto: `mode` sigue en "create" e `initialData` sigue en `undefined`, así
+  // que el efecto no volvía a correr. A la persona siguiente se la presentaba
+  // como empresa y el alta quedaba bloqueada pidiendo un DPI de representante.
   useEffect(() => {
+    if (!open) return;
+
     if (mode === "update" && initialData) {
       console.log("Reseteando con initialData:", initialData);
       reset(initialData);
@@ -112,7 +121,7 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
         email: "",
       });
     }
-  }, [initialData, mode, reset]);
+  }, [open, initialData, mode, reset]);
 
   const onSubmit = (data: InvestorPayload) => {
     // Con "¿Es empresa?" marcado el DPI del representante es obligatorio. Se

@@ -167,14 +167,19 @@ const promoverRol = async (
   usuario: UsuarioPortal,
   advertencias: string[],
   deps: DependenciasProvisionamiento,
-): Promise<void> => {
+): Promise<boolean> => {
   const nuevoRol = resolveRoleAfterRegistration(usuario.role, "INVESTOR");
-  if (!nuevoRol) return;
+  // Sin nada que promover, el acceso depende de lo que ya era. Un rol ajeno al
+  // portal (ADMIN, SELLER) se respeta —no se degrada a nadie— pero tampoco ve
+  // inversiones: `useEntidades` solo carga con INVESTOR.
+  if (!nuevoRol) return usuario.role === "INVESTOR";
 
   try {
     await deps.actualizarUsuario(usuario.id, { role: nuevoRol });
+    return true;
   } catch {
     advertencias.push("rol_no_promovido");
+    return false;
   }
 };
 
@@ -353,6 +358,25 @@ export const asegurarCuentaInversionista = async (
  * divergieran, el resumen diario diría una cosa y el alta otra sobre la misma
  * persona.
  */
+/**
+ * ¿El correo de la cuenta es el mismo con el que cartera la va a encontrar?
+ *
+ * No es cosmético: el portal resuelve QUÉ inversionistas puede ver una sesión
+ * anclando por el correo (`getEntidadesPorCorreo` en cartera corta con
+ * `if (ancla.length === 0) return []`). El DPI de la cuenta NO entra en esa
+ * resolución. Así que una cuenta cuyo correo no está en ninguna fila de cartera
+ * entra al portal y no ve NADA, por más que exista y tenga el rol.
+ */
+export const correoDeCarteraCoincide = (
+  correoDeLaCuenta: string | null | undefined,
+  correoDeCartera: string | null | undefined,
+): boolean => {
+  const cuenta = (correoDeLaCuenta ?? "").trim().toLowerCase();
+  const cartera = (correoDeCartera ?? "").trim().toLowerCase();
+
+  return cuenta !== "" && cuenta === cartera;
+};
+
 const anotarIdentidad = (
   encontrado: { usuario: UsuarioPortal; resueltoPor: "dpi" | "email" },
   emailDeCartera: string,
@@ -361,7 +385,7 @@ const anotarIdentidad = (
 ): void => {
   const { usuario, resueltoPor } = encontrado;
 
-  if (usuario.email.toLowerCase() !== emailDeCartera) {
+  if (!correoDeCarteraCoincide(usuario.email, emailDeCartera)) {
     // Se reporta y NO se corrige. Reescribir `users.email` le rompería el login
     // a esa persona; cuál de los dos correos es el bueno lo decide un humano.
     advertencias.push("correo_de_cartera_distinto_al_de_la_cuenta");
@@ -405,7 +429,40 @@ const reconocerExistente = async (
 
   anotarIdentidad(encontrado, emailDeCartera, dpiDeCartera, advertencias);
 
-  await promoverRol(usuario, advertencias, deps);
+  const tieneAccesoDeInversionista = await promoverRol(
+    usuario,
+    advertencias,
+    deps,
+  );
+
+  // Sin el rol, la cuenta entra al portal y no carga ninguna inversión. Es el
+  // mismo "existe pero no sirve" del correo: se reporta, no se celebra.
+  if (!tieneAccesoDeInversionista) {
+    return {
+      estado: "fallo",
+      usuarioEmail: usuario.email,
+      resueltoPor,
+      correo: correoVacio(modo),
+      advertencias,
+      motivo: "sin_rol_de_inversionista",
+    };
+  }
+
+  // La cuenta existe, pero con este correo el portal no le va a mostrar nada:
+  // cartera ancla las entidades por correo y el de esta cuenta no está en la
+  // fila. Decir "ya tenía acceso" acá es una promesa falsa —el aviso verde del
+  // CRM manda a la persona a entrar y a encontrarse una pantalla vacía—, así
+  // que se reporta como pendiente hasta que un humano cuadre los dos correos.
+  if (!correoDeCarteraCoincide(usuario.email, emailDeCartera)) {
+    return {
+      estado: "fallo",
+      usuarioEmail: usuario.email,
+      resueltoPor,
+      correo: correoVacio(modo),
+      advertencias,
+      motivo: "correo_de_cartera_distinto_al_de_la_cuenta",
+    };
+  }
 
   return {
     estado: "ya_tenia",
@@ -460,6 +517,28 @@ export const consultarCuentaInversionista = async (
 
   anotarIdentidad(existente, email, entrada.dpi, advertencias);
 
+  // Tener cuenta no es tener acceso. El portal solo carga entidades cuando el
+  // rol es INVESTOR (`useEntidades` en portal-web), así que un CLIENT entra y
+  // no ve sus inversiones. Contarlo como "ya tenía" además hacía desaparecer de
+  // la revisión diaria un ascenso de rol que falló en un alta anterior: el
+  // síntoma se tapaba solo.
+  if (existente.usuario.role !== "INVESTOR") {
+    advertencias.push("cuenta_sin_rol_de_inversionista");
+  }
+
+  // Mismo motivo que en el alta: con un correo que cartera no tiene, esta
+  // cuenta entra y no ve nada. No es acceso.
+  if (!correoDeCarteraCoincide(existente.usuario.email, email)) {
+    return {
+      estado: "candidata",
+      usuarioEmail: existente.usuario.email,
+      resueltoPor: existente.resueltoPor,
+      correo,
+      advertencias,
+      motivo: "correo_de_cartera_distinto_al_de_la_cuenta",
+    };
+  }
+
   return {
     estado: "ya_tenia",
     usuarioEmail: existente.usuario.email,
@@ -498,7 +577,41 @@ export const avisarEmpresaAgregada = async (
     };
   }
 
-  await promoverRol(existente.usuario, advertencias, deps);
+  const tieneAccesoDeInversionista = await promoverRol(
+    existente.usuario,
+    advertencias,
+    deps,
+  );
+
+  // El aviso promete que la empresa aparece al entrar. Sin el rol de
+  // inversionista no aparece nada, y sin el correo cuadrado tampoco: cartera
+  // ancla las entidades por correo. Mandarlo igual es citar a alguien a mirar
+  // una pantalla vacía, así que en esos dos casos NO se manda y el pendiente
+  // queda reportado para que un humano lo cuadre.
+  if (!tieneAccesoDeInversionista) {
+    return {
+      estado: "fallo",
+      usuarioEmail: existente.usuario.email,
+      resueltoPor: existente.resueltoPor,
+      correo: correoVacio(modo),
+      advertencias,
+      motivo: "sin_rol_de_inversionista",
+    };
+  }
+
+  if (!correoDeCarteraCoincide(existente.usuario.email, email)) {
+    // Este camino ni siquiera lo anotaba: `anotarIdentidad` es del alta.
+    advertencias.push("correo_de_cartera_distinto_al_de_la_cuenta");
+
+    return {
+      estado: "fallo",
+      usuarioEmail: existente.usuario.email,
+      resueltoPor: existente.resueltoPor,
+      correo: correoVacio(modo),
+      advertencias,
+      motivo: "correo_de_cartera_distinto_al_de_la_cuenta",
+    };
+  }
 
   const envio = await enviarSinTirar(() =>
     deps.enviarEmpresaAgregada({

@@ -99,8 +99,24 @@ describe("asegurarCuentaInversionista — ya tenía cuenta", () => {
     // correo primero las estrellaría contra users_dpi_key; por DPI son ya_tenia.
     usuarios.push({ id: "u1", email: "esdras@gmail.com", nombre: "Esdras", role: "INVESTOR", dpi: "1234567890101" });
     const r = await asegurarCuentaInversionista(entrada({ email: "esdrasgamboa8@gmail.com" }), deps());
-    expect(r).toMatchObject({ estado: "ya_tenia", resueltoPor: "dpi", usuarioEmail: "esdras@gmail.com" });
+    // Se resolvió por DPI y NO se creó una segunda cuenta, que es lo que este
+    // caso vino a fijar. El desenlace no es "ya tenía acceso" porque con dos
+    // correos distintos cartera no le ancla ninguna entidad: queda pendiente
+    // de que un humano los cuadre.
+    expect(r).toMatchObject({
+      estado: "fallo",
+      motivo: "correo_de_cartera_distinto_al_de_la_cuenta",
+      resueltoPor: "dpi",
+      usuarioEmail: "esdras@gmail.com",
+    });
     expect(creados).toEqual([]);
+  });
+
+  it("con el correo cuadrado sí es un ya_tenia limpio", async () => {
+    usuarios.push({ id: "u1", email: "ana@example.com", nombre: "Ana", role: "INVESTOR", dpi: "1234567890101" });
+    const r = await asegurarCuentaInversionista(entrada(), deps());
+    expect(r).toMatchObject({ estado: "ya_tenia", resueltoPor: "dpi", motivo: null });
+    expect(r.advertencias).toEqual([]);
   });
 
   it("avisa cuando el correo de cartera no es el de la cuenta, y NO lo reescribe", async () => {
@@ -112,7 +128,9 @@ describe("asegurarCuentaInversionista — ya tenía cuenta", () => {
   });
 
   it("encuentra los DPI sucios que ya están en producción", async () => {
-    usuarios.push({ id: "u1", email: "inmonaco@gmail.com", nombre: "Monaco", role: "INVESTOR", dpi: "1852752810101." });
+    // Mismo correo en los dos lados: acá lo que se prueba es que el DPI sucio
+    // de producción se encuentre, no lo que pasa cuando los correos difieren.
+    usuarios.push({ id: "u1", email: "ana@example.com", nombre: "Monaco", role: "INVESTOR", dpi: "1852752810101." });
     const r = await asegurarCuentaInversionista(entrada({ dpi: "1852752810101" }), deps());
     expect(r).toMatchObject({ estado: "ya_tenia", resueltoPor: "dpi" });
   });
@@ -212,14 +230,39 @@ describe("avisarEmpresaAgregada", () => {
   });
 
   it("manda el aviso al correo de la CUENTA del representante", async () => {
-    usuarios.push({ id: "u1", email: "richardkachler93@gmail.com", nombre: "Richard", role: "INVESTOR", dpi: "1573661970101" });
+    usuarios.push({ id: "u1", email: "richard@example.com", nombre: "Richard", role: "INVESTOR", dpi: "1573661970101" });
     const r = await avisarEmpresaAgregada(empresa(), deps());
     expect(r).toMatchObject({ estado: "avisada", resueltoPor: "dpi" });
     expect(avisos[0]).toMatchObject({
-      to: "richardkachler93@gmail.com",
+      to: "richard@example.com",
       companyName: "Cube Investments S.A.",
       portalUrl: PORTAL,
     });
+  });
+
+  // El aviso dice "la empresa te aparece al entrar". Si eso no va a ser verdad,
+  // mandarlo es citar a alguien a mirar una pantalla vacía.
+  it("NO avisa si el correo de la cuenta no es el que tiene cartera", async () => {
+    usuarios.push({ id: "u1", email: "richardkachler93@gmail.com", nombre: "Richard", role: "INVESTOR", dpi: "1573661970101" });
+    const r = await avisarEmpresaAgregada(empresa(), deps());
+    expect(r).toMatchObject({
+      estado: "fallo",
+      motivo: "correo_de_cartera_distinto_al_de_la_cuenta",
+    });
+    expect(avisos).toEqual([]);
+  });
+
+  it("NO avisa si el ascenso de rol falló: sin INVESTOR no ve nada", async () => {
+    usuarios.push({ id: "u1", email: "richard@example.com", nombre: "Richard", role: "CLIENT", dpi: "1573661970101" });
+    const r = await avisarEmpresaAgregada(empresa(), {
+      ...deps(),
+      actualizarUsuario: async () => {
+        throw new Error("update falló");
+      },
+    });
+    expect(r).toMatchObject({ estado: "fallo", motivo: "sin_rol_de_inversionista" });
+    expect(r.advertencias).toContain("rol_no_promovido");
+    expect(avisos).toEqual([]);
   });
 
   it("nunca crea una cuenta: si el representante no tiene, lo reporta", async () => {
@@ -259,7 +302,15 @@ describe("asegurarCuentaInversionista — lo que se guarda es lo que se busca", 
       d,
     );
 
-    expect(segunda).toMatchObject({ estado: "ya_tenia", resueltoPor: "dpi" });
+    // Lo que importa: se la encontró por DPI y NO se le creó una segunda
+    // cuenta con una segunda contraseña, que era el bug. Que el desenlace sea
+    // "pendiente" y no "ya_tenia" es correcto: hasta que los dos correos
+    // coincidan, esa cuenta entra al portal y no ve sus inversiones.
+    expect(segunda).toMatchObject({
+      estado: "fallo",
+      motivo: "correo_de_cartera_distinto_al_de_la_cuenta",
+      resueltoPor: "dpi",
+    });
     expect(usuarios).toHaveLength(1);
     expect(creados).toHaveLength(1);
   });
@@ -469,8 +520,36 @@ describe("consultarCuentaInversionista — la mitad que NO escribe", () => {
 
     const r = await consultarCuentaInversionista(entrada(), deps());
 
-    expect(r.estado).toBe("ya_tenia");
+    // "Candidata" y no "ya_tenia": la cuenta existe pero con ese correo el
+    // portal no le ancla ninguna entidad, así que sigue siendo trabajo
+    // pendiente y tiene que salir en el resumen diario.
+    expect(r.estado).toBe("candidata");
     expect(r.advertencias).toContain("correo_de_cartera_distinto_al_de_la_cuenta");
     expect(actualizaciones).toEqual([]);
+  });
+
+  // Tener cuenta no es tener acceso: el portal solo carga entidades con
+  // INVESTOR. Contarlo como "ya tenía" hacía desaparecer del resumen un
+  // ascenso de rol que falló en un alta anterior.
+  it("delata la cuenta que quedó como CLIENT", async () => {
+    usuarios = [
+      { id: "u1", email: "ana@example.com", nombre: "Ana", role: "CLIENT", dpi: "1234567890101" },
+    ];
+
+    const r = await consultarCuentaInversionista(entrada(), deps());
+
+    expect(r.advertencias).toContain("cuenta_sin_rol_de_inversionista");
+    expect(actualizaciones).toEqual([]);
+  });
+
+  it("no delata a quien ya es INVESTOR", async () => {
+    usuarios = [
+      { id: "u1", email: "ana@example.com", nombre: "Ana", role: "INVESTOR", dpi: "1234567890101" },
+    ];
+
+    const r = await consultarCuentaInversionista(entrada(), deps());
+
+    expect(r.estado).toBe("ya_tenia");
+    expect(r.advertencias).toEqual([]);
   });
 });

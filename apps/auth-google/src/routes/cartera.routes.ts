@@ -50,10 +50,42 @@ carteraRoutes.use("*", requireAuth);
 
 const TTL_ENTIDADES_MS = 60 * 1000;
 
+/**
+ * Techo de correos cacheados a la vez.
+ *
+ * El TTL por sí solo no libera nada: solo hace que un valor vencido se ignore
+ * o se pise CUANDO ESA MISMA persona vuelve. Quien entra una vez y no vuelve
+ * deja su entrada ahí para siempre, y el proceso es de vida larga. Con el
+ * registro abierto y sin verificación de correo, eso es memoria que crece sola.
+ *
+ * 500 correos activos a la vez es holgado para el portal —hoy hay 16 cuentas—
+ * y acota el peor caso a algo que no importa.
+ */
+const MAX_ENTIDADES_CACHE = 500;
+
 const cacheEntidades = new Map<
   string,
   { entidades: EntidadPortal[]; expiraEn: number }
 >();
+
+/**
+ * Deja sitio antes de guardar: primero lo vencido, y si aún así se llegó al
+ * techo, lo más viejo. `Map` conserva el orden de inserción, así que la primera
+ * llave es la que lleva más tiempo dentro.
+ */
+const hacerSitioEnCache = (): void => {
+  const ahora = Date.now();
+
+  for (const [correo, valor] of cacheEntidades) {
+    if (valor.expiraEn <= ahora) cacheEntidades.delete(correo);
+  }
+
+  while (cacheEntidades.size >= MAX_ENTIDADES_CACHE) {
+    const masViejo = cacheEntidades.keys().next();
+    if (masViejo.done) break;
+    cacheEntidades.delete(masViejo.value);
+  }
+};
 
 /** Correo de la sesión, normalizado. Lanza 401 si no hay. */
 const correoDeSesion = (c: any): string => {
@@ -81,6 +113,7 @@ const resolverEntidades = async (c: any): Promise<EntidadPortal[]> => {
   }
 
   const entidades = await getEntidades(email);
+  hacerSitioEnCache();
   cacheEntidades.set(email, {
     entidades,
     expiraEn: Date.now() + TTL_ENTIDADES_MS,

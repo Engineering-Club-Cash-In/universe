@@ -13,6 +13,10 @@ import {
   RUTA_CAMBIO_DE_PASSWORD,
   usuarioQueCambioSuPassword,
 } from "./cambioDePassword";
+import {
+  exigirPasswordDistintaALaActual,
+  type PruebaDeIdentidad,
+} from "./passwordDistinta";
 import { tokenDeResetVigente } from "./tokenDeReset";
 import { SESSION_COOKIE_PREFIX } from "./portalCookies";
 
@@ -30,58 +34,6 @@ import { SESSION_COOKIE_PREFIX } from "./portalCookies";
  * solo vive mientras nadie lo haya usado.
  */
 const VIGENCIA_ENLACE_RESET_SEGUNDOS = 60 * 60 * 24;
-
-/**
- * Se niega a poner como contraseña nueva la que ya está puesta.
- *
- * Better Auth no lo comprueba en ninguno de los dos caminos, y con la marca de
- * primer ingreso eso deja de ser un no-op inocente: `/change-password` con la
- * MISMA contraseña temporal en los dos campos respondía 200, y ese 200 limpiaba
- * la marca. La credencial que viajó por correo seguía siendo la buena y encima
- * ya no había candado. La comprobación del formulario no cuenta: se salta con
- * una petición directa.
- *
- * Se compara contra el hash guardado y no contra `currentPassword`, y eso cubre
- * los dos caminos con una sola regla: el del enlace ni siquiera manda la
- * contraseña actual.
- */
-const exigirPasswordDistintaALaActual = async (
-  ctx: {
-    context: {
-      internalAdapter: {
-        findAccounts: (userId: string) => Promise<
-          { providerId: string; password?: string | null }[]
-        >;
-      };
-      password: {
-        verify: (params: { hash: string; password: string }) => Promise<boolean>;
-      };
-    };
-  },
-  userId: string,
-  nueva: string,
-): Promise<void> => {
-  const cuentas = await ctx.context.internalAdapter.findAccounts(userId);
-  const credencial = cuentas.find(
-    (cuenta) => cuenta.providerId === "credential" && cuenta.password,
-  );
-
-  // Sin cuenta de credenciales no hay contraseña que repetir: es alguien que
-  // entra por Google y el reset se la va a crear.
-  if (!credencial?.password) return;
-
-  const esLaMisma = await ctx.context.password.verify({
-    hash: credencial.password,
-    password: nueva,
-  });
-
-  if (!esLaMisma) return;
-
-  throw new APIError("BAD_REQUEST", {
-    message:
-      "La contraseña nueva tiene que ser distinta de la que estás usando.",
-  });
-};
 
 export const auth = betterAuth({
   database: drizzleAdapter(db, {
@@ -220,7 +172,9 @@ export const auth = betterAuth({
      *    limpiara la marca de primer ingreso sin que la credencial hubiera
      *    cambiado: quien tuviera la contraseña que mandamos por correo se
      *    quitaba el candado de encima y seguía usándola. La regla existía solo
-     *    en el Yup del formulario, que es un `curl` de distancia.
+     *    en el Yup del formulario, que es un `curl` de distancia. Solo contesta
+     *    a quien ya probó ser quien dice —el token vigente, o la contraseña
+     *    actual—, porque decir "esa ya la tenés puesta" es decir "acertaste".
      * 2. Los enlaces de recuperación pendientes mueren. Better Auth borra el
      *    token que se USA, pero no los otros que esa persona tenga vivos, y con
      *    24 horas de vigencia esa es una ventana real. Hacerlo después dejaba
@@ -239,6 +193,8 @@ export const auth = betterAuth({
       let userId: string | null = null;
       // El token que se está canjeando, para no borrarlo junto con los demás.
       let tokenEnUso: string | undefined;
+      // Con qué probó ser quien dice quien pide el cambio.
+      let prueba: PruebaDeIdentidad = { via: "sesion", actual: undefined };
 
       try {
         if (esReset) {
@@ -257,15 +213,17 @@ export const auth = betterAuth({
 
           userId = fila!.value;
           tokenEnUso = token;
+          prueba = { via: "enlace" };
         } else {
           const sesion = await getSessionFromCtx(ctx);
           // Sin sesión no hay a quién limpiarle nada: el endpoint responde 401.
           if (!sesion?.user?.id) return;
 
           userId = sesion.user.id;
+          prueba = { via: "sesion", actual: ctx.body?.currentPassword };
         }
 
-        await exigirPasswordDistintaALaActual(ctx, userId, nueva);
+        await exigirPasswordDistintaALaActual(ctx, userId, nueva, prueba);
         await exigirInvalidacionDeEnlaces(userId, tokenEnUso);
       } catch (error) {
         // Un rechazo con causa —la contraseña repetida— viaja tal cual: es lo

@@ -643,6 +643,8 @@ export function DynamicContractWizard({
 
 	const [generationResult, setGenerationResult] =
 		useState<GenerationResultWithData | null>(null);
+	// Tipo de contrato que se está reintentando, para bloquear el resto de botones
+	const [retryingType, setRetryingType] = useState<string | null>(null);
 
 	// State for editable co-debtor fields
 	const [coDebtorFields, setCoDebtorFields] = useState<
@@ -1767,6 +1769,55 @@ export function DynamicContractWizard({
 		}
 	};
 
+	/**
+	 * Reintenta un solo documento y reemplaza su tarjeta en los resultados.
+	 *
+	 * Se manda únicamente el contrato que falló: los que ya salieron bien conservan
+	 * su PDF y sus links, así que no hay que esperar a que se regenere todo el lote.
+	 */
+	const handleRetryContract = async (contractType: string) => {
+		const contrato = generationDataRef.current.find(
+			(c) => c.contractType === contractType,
+		);
+		if (!contrato || retryingType) return;
+
+		setRetryingType(contractType);
+		try {
+			const retryResult = await onGenerate({ contracts: [contrato] });
+			const nuevo = retryResult.results[0];
+			if (!nuevo) return;
+
+			setGenerationResult((prev) => {
+				if (!prev) return prev;
+				const results = prev.results.map((r) =>
+					r.contractType === contractType ? nuevo : r,
+				);
+				const successCount = results.filter((r) => r.success).length;
+				return {
+					...prev,
+					results,
+					successCount,
+					failCount: results.length - successCount,
+					success: successCount === results.length,
+				};
+			});
+
+			if (nuevo.success) {
+				toast.success(`${nuevo.contractName} se generó correctamente`);
+			} else {
+				toast.error(
+					nuevo.error ||
+						`${nuevo.contractName} volvió a fallar. Intenta de nuevo.`,
+				);
+			}
+		} catch (error) {
+			console.error("Error retrying contract:", error);
+			toast.error("No se pudo reintentar el documento");
+		} finally {
+			setRetryingType(null);
+		}
+	};
+
 	const handlePrevious = () => {
 		if (step === 2) {
 			setStep(1);
@@ -2497,6 +2548,8 @@ export function DynamicContractWizard({
 							totalRequested={generationResult.totalRequested}
 							successCount={generationResult.successCount}
 							failCount={generationResult.failCount}
+							onRetry={handleRetryContract}
+							retryingType={retryingType}
 						/>
 
 						{/* Instructions for user */}
@@ -2514,8 +2567,13 @@ export function DynamicContractWizard({
 												haciendo clic en el botón morado "Ver PDF"
 											</li>
 											<li>
-												Si algún documento tiene errores, haz clic en "Corregir
-												y Regenerar" para volver a editarlo
+												Si algún documento salió en rojo, haz clic en{" "}
+												<strong>"Reintentar"</strong> en esa tarjeta: se vuelve
+												a generar solo ese, los demás se quedan como están
+											</li>
+											<li>
+												Si un documento tiene datos equivocados, haz clic en
+												"Corregir y Regenerar" para volver a editarlo
 											</li>
 											<li>
 												Cuando estés satisfecho, haz clic en{" "}
@@ -2613,6 +2671,17 @@ export function DynamicContractWizard({
 								</strong>{" "}
 								a la oportunidad.
 							</p>
+							{(generationResult?.failCount ?? 0) > 0 && (
+								<p className="text-red-600">
+									<strong>Ojo:</strong>{" "}
+									{generationResult?.results
+										.filter((r) => !r.success)
+										.map((r) => r.contractName)
+										.join(", ")}{" "}
+									no se generó y <strong>no se va a enlazar</strong>. Reintenta
+									ese documento antes de continuar si lo necesitas.
+								</p>
+							)}
 							<p className="text-amber-600">
 								<strong>Nota importante:</strong> Esta acción solo enlaza los
 								contratos a la oportunidad. No envía a análisis ni avanza la

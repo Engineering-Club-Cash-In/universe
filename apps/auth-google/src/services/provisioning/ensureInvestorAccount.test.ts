@@ -553,3 +553,69 @@ describe("consultarCuentaInversionista — la mitad que NO escribe", () => {
     expect(r.advertencias).toEqual([]);
   });
 });
+
+/**
+ * El rol NO se promueve sobre una cuenta cuyo correo no es el de cartera.
+ *
+ * El registro de Better Auth es abierto y no verifica el correo, así que
+ * cualquiera se hace una cuenta con SU correo y el DPI de OTRA persona. Cuando
+ * el staff provisiona a esa otra persona, la búsqueda por DPI —que va primero—
+ * cae en la cuenta del impostor. Promoverla a INVESTOR antes de comprobar el
+ * correo le entrega el rol que habilita la carga de entidades del portal: el
+ * "fallo" que se devuelve después no lo quita, porque el UPDATE ya ocurrió.
+ *
+ * El desenlace tiene que ser fallo Y sin escritura: la única evidencia que se
+ * tiene de esa cuenta es un DPI que nadie probó.
+ */
+describe("el rol no se promueve antes de validar el correo", () => {
+  it("cuenta encontrada por DPI con otro correo: falla y NO promueve el rol", async () => {
+    usuarios.push({
+      id: "u1",
+      email: "impostor@example.com",
+      nombre: "Impostor",
+      role: "CLIENT",
+      dpi: "1234567890101",
+    });
+
+    const r = await asegurarCuentaInversionista(entrada(), deps());
+
+    expect(r).toMatchObject({
+      estado: "fallo",
+      motivo: "correo_de_cartera_distinto_al_de_la_cuenta",
+      resueltoPor: "dpi",
+      usuarioEmail: "impostor@example.com",
+    });
+    // Lo que de verdad se está fijando: ni un solo UPDATE sobre esa cuenta.
+    expect(actualizaciones).toEqual([]);
+    expect(usuarios[0].role).toBe("CLIENT");
+  });
+
+  it("el aviso de empresa tampoco promueve a una cuenta con otro correo", async () => {
+    usuarios.push({
+      id: "u1",
+      email: "impostor@example.com",
+      nombre: "Impostor",
+      role: "CLIENT",
+      dpi: "1573661970101",
+    });
+
+    const r = await avisarEmpresaAgregada(
+      {
+        representanteEmail: "richard@example.com",
+        representanteDpi: "1573661970101",
+        representanteNombre: "Richard Kachler",
+        inversionistaId: 86,
+        inversionistaNombre: "Cube Investments S.A.",
+      },
+      deps(),
+    );
+
+    expect(r).toMatchObject({
+      estado: "fallo",
+      motivo: "correo_de_cartera_distinto_al_de_la_cuenta",
+    });
+    expect(actualizaciones).toEqual([]);
+    expect(usuarios[0].role).toBe("CLIENT");
+    expect(avisos).toEqual([]);
+  });
+});

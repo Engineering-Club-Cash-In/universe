@@ -1440,10 +1440,18 @@ export class CarteraBackClient {
 		if (params.dpi) queryParams.set("dpi", params.dpi);
 		if (params.email) queryParams.set("email", params.email);
 
+		// Sin cache: el `data: null` de "no es de nadie" es un 200 y se guardaría
+		// cinco minutos. Con cache en memoria + varias instancias, el invalidate
+		// de `createInvestor` no llega a las demás —y el alta puede venir de
+		// cartera, donde no hay invalidate ninguno—, así que el negativo viejo
+		// sobrevive: la detección no ve a la persona recién creada y, sin el
+		// interruptor "¿Es empresa?", su sociedad rebota como duplicada.
+		// Es una consulta por DPI tecleado, disparada por un humano llenando un
+		// formulario: no hay volumen que justifique cachearla.
 		return this.request<{
 			success: boolean;
 			data: IdentidadInversionista | null;
-		}>(`/investor/identidad?${queryParams}`, { method: "GET" }, true);
+		}>(`/investor/identidad?${queryParams}`, { method: "GET" }, false);
 	}
 
 	async getInvestorReport(

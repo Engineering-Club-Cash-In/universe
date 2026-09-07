@@ -126,6 +126,25 @@ export const avisoAccesoPortal = (
   }
 
   if (acceso.estado === "fallo") {
+    // El botón apretado sobre una fila de EMPRESA.
+    //
+    // Sale del `causa()` genérico porque ese texto termina en "abrile el
+    // acceso desde el menú del inversionista" — o sea, mandaría a apretar OTRA
+    // VEZ el mismo botón sobre la misma fila, en círculo.
+    //
+    // Y el acceso no se abre desde la empresa a propósito: la contraseña cae en
+    // el buzón del REPRESENTANTE, y el diálogo de confirmación —el único
+    // control que tiene este botón, un humano mirando a dónde va a caer una
+    // contraseña— enseña el correo de la EMPRESA. Abrirlo desde aquí mandaría
+    // la contraseña a una dirección que nadie revisó.
+    if (acceso.motivo === "es_empresa_el_acceso_es_del_representante") {
+      return {
+        tono: "advertencia",
+        texto:
+          "No se le abrió acceso: es una empresa, y al portal entra con su representante legal. Abrile el acceso desde la fila del representante (su DPI está en Editar → Representante legal); ahí vas a poder revisar su correo antes de mandarle la contraseña.",
+      };
+    }
+
     // El alta SÍ salió: decirlo es lo que evita que lo vuelvan a crear y se
     // estrellen contra el guard de duplicados.
     return {

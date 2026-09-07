@@ -137,9 +137,16 @@ describe("provisionarInversionista", () => {
   });
 
   it("con soloAsegurarCuenta, la empresa NO vuelve a avisar a su representante", async () => {
-    // Es lo que usa la reconciliación diaria: no distingue una empresa nueva de
-    // una de hace un año, así que avisar desde ahí sería repetirle el mismo
-    // correo a los diez representantes todos los días.
+    // El aviso "ahora representas a X" es del camino de ALTA, que pasa una sola
+    // vez. Desde el botón se le repetiría al representante cada vez que alguien
+    // lo apriete, así que sigue sin salir ninguna llamada.
+    //
+    // (El comentario que estaba aquí decía que este camino "es lo que usa la
+    // reconciliación diaria". No lo es desde que el job dejó de escribir: la
+    // diaria pasa por `consultarAccesoInversionista`, y `soloAsegurarCuenta`
+    // tiene un solo llamador, `otorgarAccesoPortal`. Con esa premisa falsa, el
+    // desenlace `omitida/es_empresa` —que el front pinta de VERDE— parecía
+    // correcto. El desenlace correcto se fija abajo.)
     const { impl, llamadas } = fetchQueDevuelve(RESPUESTA_OK);
     const r = await provisionarInversionista(
       fila({ inversionista_id: 86, dpi: null, dpi_rep_legal: "1573661970101" }),
@@ -151,7 +158,7 @@ describe("provisionarInversionista", () => {
       },
     );
     expect(llamadas).toEqual([]);
-    expect(r).toMatchObject({ estado: "omitida", motivo: "es_empresa" });
+    expect(r.estado).not.toBe("omitida");
   });
 
   it("propaga las advertencias del envío para que queden en audit_logs", async () => {
@@ -259,5 +266,64 @@ describe("consultarAccesoInversionista", () => {
     const r = await consultarAccesoInversionista(fila(), { ...OPTS_BASE, fetchImpl: impl });
     expect(r).toMatchObject({ estado: "fallo" });
     expect(r.motivo).toContain("404");
+  });
+});
+
+/**
+ * El botón manual sobre una fila de EMPRESA.
+ *
+ * `otorgarAccesoPortal` es el ÚNICO llamador de `soloAsegurarCuenta` (la
+ * reconciliación diaria usa `consultarAccesoInversionista`, que ni siquiera
+ * puede escribir). Sobre una empresa devolvía `omitida/es_empresa`, que el
+ * traductor del front pinta de VERDE: el operador seguía la instrucción del
+ * alta —"su representante legal todavía no tiene cuenta"—, apretaba el botón
+ * sobre la empresa, no pasaba nada, y el toast decía que sí.
+ */
+describe("provisionarInversionista — el botón sobre una empresa", () => {
+  const empresa = () =>
+    fila({ inversionista_id: 86, nombre: "Cube Investments S.A.", email: null, dpi: null, dpi_rep_legal: "1573661970101" });
+
+  it("no reporta éxito: dice que el acceso es del representante", async () => {
+    const { impl, llamadas } = fetchQueDevuelve(RESPUESTA_OK);
+    const r = await provisionarInversionista(empresa(), {
+      ...OPTS_BASE,
+      fetchImpl: impl,
+      soloAsegurarCuenta: true,
+      buscarRepresentante: async () => ({ nombre: "Richard", email: "r@x.com" }),
+    });
+
+    expect(r).toMatchObject({
+      inversionistaId: 86,
+      estado: "fallo",
+      motivo: "es_empresa_el_acceso_es_del_representante",
+    });
+    // Sigue sin mandar el aviso de "ahora representas a X": ese es del alta.
+    expect(llamadas).toEqual([]);
+  });
+
+  it("si el representante ni siquiera está en cartera, lo dice", async () => {
+    const { impl, llamadas } = fetchQueDevuelve(RESPUESTA_OK);
+    const r = await provisionarInversionista(empresa(), {
+      ...OPTS_BASE,
+      fetchImpl: impl,
+      soloAsegurarCuenta: true,
+      buscarRepresentante: async () => null,
+    });
+
+    expect(r).toMatchObject({
+      estado: "fallo",
+      motivo: "representante_no_encontrado_en_cartera",
+    });
+    expect(llamadas).toEqual([]);
+  });
+
+  it("la corrida diaria SÍ sigue omitiendo la empresa en silencio", async () => {
+    // `consultarAccesoInversionista` es de solo lectura y corre sobre la tabla
+    // entera: ahí una empresa no es trabajo pendiente de nadie.
+    const { impl, llamadas } = fetchQueDevuelve(RESPUESTA_OK);
+    const r = await consultarAccesoInversionista(empresa(), { ...OPTS_BASE, fetchImpl: impl });
+
+    expect(r).toMatchObject({ estado: "omitida", motivo: "es_empresa" });
+    expect(llamadas).toEqual([]);
   });
 });

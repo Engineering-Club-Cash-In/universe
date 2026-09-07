@@ -59,9 +59,13 @@ export const registroQuedoSinDpi = (respuesta: RespuestaConIdentidad): boolean =
  * Lo que ve la persona cuando su registro quedó a la espera de un humano.
  *
  * No es un error suyo y no hay nada que corregir en el formulario, así que el
- * texto no pide reintentar: dice que ya tiene acceso, por qué falta el dato,
- * que reintentar dará lo mismo, y por dónde salir. Sin jerga: aquí no aparecen
- * "CRM", "lead" ni nombres de campos.
+ * texto no la culpa: dice que ya tiene acceso, por qué falta el dato, y por
+ * dónde salir. Sin jerga: aquí no aparecen "CRM", "lead" ni nombres de campos.
+ *
+ * El cierre apunta al botón de reintentar que vive justo debajo, en el mismo
+ * bloque. Antes decía "no hace falta que lo vuelvas a enviar" y "recarga la
+ * página": con el botón ahí, esa frase mandaba a la persona al callejón que el
+ * botón existe para cerrar. El texto y el control tienen que decir lo mismo.
  */
 export const mensajeDeDpiPendiente = (correo: string): string => {
   const email = correo.trim();
@@ -72,10 +76,9 @@ export const mensajeDeDpiPendiente = (correo: string): string => {
   return (
     "Ya tienes acceso a la plataforma. Lo que no pudimos guardar es tu número de " +
     "identificación, porque tu registro lo abrió antes uno de nuestros asesores y " +
-    "solo él puede completarlo desde su sistema. No hace falta que lo vuelvas a " +
-    "enviar: el resultado va a ser el mismo." +
+    "solo él puede completarlo desde su sistema." +
     referencia +
-    " Si ya te avisaron que quedó listo, recarga la página."
+    " Cuando te confirmen que ya lo registraron, usa el botón de abajo."
   );
 };
 

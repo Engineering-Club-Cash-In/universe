@@ -34,6 +34,17 @@ export interface EnvConfig {
   // Opcional al arrancar (no queremos tumbar el login si falta), pero los
   // endpoints que lo exigen rechazan cuando viene vacío.
   INTERNAL_API_SECRET: string;
+  /**
+   * Secreto compartido con cartera-back para el endpoint interno de
+   * provisionamiento. Sin él, ese endpoint responde 503 (fail-closed).
+   *
+   * NO va en `requiredVars` a propósito: hacerlo obligatorio dejaría al
+   * servicio entero sin arrancar en cualquier deploy que todavía no lo tenga
+   * cargado, y quedarse sin login es peor que quedarse sin provisionar. El
+   * fallo se avisa fuerte al arrancar y el job diario de reconciliación lo
+   * reporta hasta que alguien lo cargue.
+   */
+  PORTAL_PROVISIONING_SECRET: string;
 }
 
 function validateEnv(): EnvConfig {
@@ -166,6 +177,8 @@ function validateEnv(): EnvConfig {
     CRM_PORTAL_SECRET: process.env.CRM_PORTAL_SECRET || "",
     // Sin default: si no viene, los endpoints internos rechazan todo.
     INTERNAL_API_SECRET: process.env.INTERNAL_API_SECRET || "",
+    // Provisionamiento del portal
+    PORTAL_PROVISIONING_SECRET: process.env.PORTAL_PROVISIONING_SECRET || "",
   };
 }
 
@@ -183,6 +196,9 @@ console.log(`   - TRUSTED_ORIGINS: ${env.TRUSTED_ORIGINS.join(", ")}`);
 console.log(
   `   - DATABASE_URL: ${env.DATABASE_URL.substring(0, 20)}...`
 );
+console.log(
+  `   - FRONTEND_URL (portal): ${env.FRONTEND_URL}`
+);
 
 // Aviso temprano para operaciones: sin este secreto los endpoints internos
 // quedan cerrados (fail closed) y el import masivo responde 401.
@@ -197,5 +213,13 @@ if (!env.INTERNAL_API_SECRET) {
 if (!env.CRM_PORTAL_SECRET) {
   console.warn(
     "⚠️  CRM_PORTAL_SECRET no está configurado: el CRM rechazará las llamadas del portal."
+  );
+}
+
+if (!env.PORTAL_PROVISIONING_SECRET) {
+  console.warn(
+    "⚠️  PORTAL_PROVISIONING_SECRET no está seteada: el provisionamiento de\n" +
+      "   cuentas del portal quedará cerrado (503) y los inversionistas nuevos\n" +
+      "   NO recibirán acceso. El job diario de cartera lo va a reportar."
   );
 }

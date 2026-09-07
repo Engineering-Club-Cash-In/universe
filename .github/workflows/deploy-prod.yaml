@@ -74,6 +74,12 @@ jobs:
         run: |
           bun test apps/cartera-back/src/routers/health.test.ts
           node --test apps/cartera-back/scripts/validate-coolify-envs.test.mjs
+          # El catalogo del logger y su lista canonica tienen que declarar los
+          # MISMOS job_name: si se desincronizan, createStructuredLogger tira al
+          # inicializarse y cartera-back no arranca. Estas pruebas ya cazaban el
+          # desfase; lo que faltaba era que alguien las corriera.
+          bun test packages/structured-logger/__tests__/catalog.test.ts \
+                   packages/structured-logger/__tests__/logger.test.ts
 
   # 1) Decide qué apps construir: por diff en pushes, por input en dispatch
   changes:

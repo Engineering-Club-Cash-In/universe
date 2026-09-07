@@ -1851,10 +1851,43 @@ export class CarteraBackClient {
 	}): Promise<{
 		message: string;
 		data: { inversionista_id: number; nombre: string; [key: string]: any }[];
+		/**
+		 * Qué pasó con el acceso al portal de cada inversionista recién creado.
+		 *
+		 * Viaja aparte de `data` porque el alta puede haber salido perfecta y el
+		 * acceso no: son dos desenlaces distintos y el operador tiene que poder
+		 * distinguirlos. Cartera nunca falla el alta por esto.
+		 */
+		provisioning?: {
+			inversionistaId: number;
+			estado: "creada" | "ya_tenia" | "avisada" | "omitida" | "fallo";
+			usuarioEmail: string | null;
+			correo: {
+				enviado: boolean;
+				plantilla: string | null;
+				redirigido: boolean;
+				destinatarioReal: string | null;
+			};
+			advertencias: string[];
+			motivo: string | null;
+		}[];
 	}> {
 		const response = await this.request<{
 			message: string;
 			data: { inversionista_id: number; nombre: string; [key: string]: any }[];
+			provisioning?: {
+				inversionistaId: number;
+				estado: "creada" | "ya_tenia" | "avisada" | "omitida" | "fallo";
+				usuarioEmail: string | null;
+				correo: {
+					enviado: boolean;
+					plantilla: string | null;
+					redirigido: boolean;
+					destinatarioReal: string | null;
+				};
+				advertencias: string[];
+				motivo: string | null;
+			}[];
 		}>("/investor", {
 			method: "POST",
 			body: JSON.stringify({
@@ -1872,6 +1905,13 @@ export class CarteraBackClient {
 				tipo_reinversion: input.tipo_reinversion ?? "sin_reinversion",
 				monto_reinversion: input.monto_reinversion ?? null,
 				moneda: input.moneda ?? "quetzales",
+				// El alta de back office SÍ pide acceso al portal. La llave es el
+				// permiso: cartera no provisiona sin ella, para que el registro
+				// público de auth-google no pueda fabricarse una cuenta con la
+				// contraseña en su propio correo. Va explícita porque no hay
+				// forma de distinguir por identidad quién llama (todo entra con
+				// el mismo token de servicio ADMIN).
+				provisionar_portal: true,
 				// A propósito NO usamos `?? null`: cartera distingue "la llave no
 				// viene" (no tocar) de "viene vacía" (borrar). Mandar null siempre
 				// borraría el DPI del representante en cada edición que no lo

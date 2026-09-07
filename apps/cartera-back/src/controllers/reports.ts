@@ -169,6 +169,7 @@ const getEstadoCuentaOtrosRubros = (pago: EstadoCuentaPagoRow) =>
 
 export function shouldIncludeEstadoCuentaPayment(pago: EstadoCuentaPagoRow) {
   if (pago.paymentFalse === true) return false;
+  if (pago.validationStatus === "pending") return false;
   if (pago.pagado === true) return true;
 
   const abonoCapital = Number(pago.abono_capital || 0);

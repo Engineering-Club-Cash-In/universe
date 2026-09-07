@@ -177,7 +177,7 @@ describe("estado de cuenta PDF", () => {
     ).toBe(true);
   });
 
-  it("mantiene incluidos los pagos parciales que ya estan marcados como pagados", () => {
+  it("excluye pagos pendientes aunque la cuota ya esté marcada como pagada", () => {
     expect(
       shouldIncludeEstadoCuentaPayment({
         pagado: true,
@@ -190,6 +190,18 @@ describe("estado de cuenta PDF", () => {
         abono_gps: "0.00",
         membresias_pago: "0.00",
         monto_aplicado: "147.78",
+      }),
+    ).toBe(false);
+  });
+
+  it("mantiene incluidos los pagos parciales aplicados que están marcados como pagados", () => {
+    expect(
+      shouldIncludeEstadoCuentaPayment({
+        pagado: true,
+        paymentFalse: false,
+        validationStatus: "validated",
+        abono_capital: "400.00",
+        monto_aplicado: "400.00",
       }),
     ).toBe(true);
   });

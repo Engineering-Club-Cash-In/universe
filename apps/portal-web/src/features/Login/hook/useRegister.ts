@@ -67,6 +67,12 @@ export const useRegister = () => {
   // la fuente de verdad: un ref se pierde al recargar, y ahí es donde el
   // registro a medias se quedaba atrapado. Ver `altaYaHecha`.
   const cuentaCreada = useRef(false);
+  // Tipo con el que se creó la cuenta. Ver por qué no se puede cambiar después
+  // en el comentario de `tipoAEnviar`, más abajo.
+  const tipoDelAlta = useRef<"CLIENT" | "INVESTOR" | null>(null);
+  // Espejo reactivo del anterior, para que el formulario pueda bloquear el
+  // selector en vez de dejar elegir algo que después se ignora.
+  const [tipoBloqueado, setTipoBloqueado] = useState(false);
   const navigate = useNavigate();
 
   // Formik
@@ -130,11 +136,25 @@ export const useRegister = () => {
 
         cuentaCreada.current = true;
 
+        // A partir de aquí el tipo elegido queda FIJO. El botón de "atrás" del
+        // paso 2 permite volver a tocarlo, y con la cuenta ya creada el
+        // reintento se salta el alta y llama al OTRO sistema: si el primer
+        // intento llegó a crear la fila de inversionista en cartera y falló
+        // después, elegir CLIENT crearía además un lead de CRM y la cuenta
+        // terminaría como cliente con esa fila huérfana (y al revés, con el
+        // lead). El DPI sí se puede seguir corrigiendo, que es lo que la
+        // persona necesita para reintentar.
+        if (!tipoDelAlta.current) {
+          tipoDelAlta.current = values.userType;
+          setTipoBloqueado(true);
+        }
+        const tipoAEnviar = tipoDelAlta.current;
+
         // Registrar en CRM o Cartera según tipo. La variante autenticada usa la
         // sesión recién creada y es la que deja el rol y el DPI en la cuenta.
         try {
           await registerExternalUserAuth({
-            userType: values.userType,
+            userType: tipoAEnviar,
             fullName: values.fullName,
             email: values.email,
             dpi: values.dpi,
@@ -242,6 +262,7 @@ export const useRegister = () => {
     handleNextStep,
     isLoading,
     isGoogleLoading,
+    tipoBloqueado,
     currentStep,
     nextStep,
     prevStep,

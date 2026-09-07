@@ -59,19 +59,21 @@ const formatDate = (d?: string) => {
   });
 };
 
-// --- Validación NIT Guatemala (mínimo 5 dígitos o CF) ---
+// --- Validación NIT Guatemala (mínimo 5 caracteres o CF) ---
+// El dígito verificador del NIT es K cuando el módulo 11 da 10, así que hay NITs
+// legítimos que terminan en letra ("1937979K") y exigir solo números los bloqueaba.
+// Acá solo se valida el formato: quién dice si el NIT existe es el SAT, que se
+// consulta en el back al momento de facturar.
 const validarNIT = (nit: string): boolean => {
   if (!nit) return false;
 
+  const nitLimpio = nit.replace(/[-\s]/g, "").toUpperCase();
+
   // CF es válido
-  if (nit.toUpperCase() === "CF") return true;
+  if (nitLimpio === "CF") return true;
 
-  // Solo números, mínimo 5 dígitos
-  const nitLimpio = nit.replace(/[-\s]/g, "");
-  if (!/^\d+$/.test(nitLimpio)) return false;
-
-  // Debe tener mínimo 5 dígitos
-  return nitLimpio.length >= 5;
+  // Dígitos con dígito verificador opcional en K, mínimo 5 caracteres
+  return /^\d{4,}[\dK]$/.test(nitLimpio);
 };
 
 // --- Opciones de emisor ---
@@ -88,7 +90,7 @@ const EMISORES_OPTIONS: { value: EmisorKey; label: string }[] = [
 const validationSchema = Yup.object({
   nit: Yup.string()
     .required("El NIT es requerido")
-    .test("nit-valido", "NIT inválido (mínimo 5 dígitos o CF)", (value) =>
+    .test("nit-valido", "NIT inválido (mínimo 5 caracteres o CF)", (value) =>
       validarNIT(value || "")
     ),
   emisor: Yup.string()
@@ -729,7 +731,7 @@ export function FacturasGenericas() {
                   </label>
                   <Input
                     name="nit"
-                    placeholder="Ej: 12345 o CF"
+                    placeholder="Ej: 1937979K o CF"
                     value={formik.values.nit}
                     onChange={formik.handleChange}
                     onBlur={formik.handleBlur}
@@ -745,7 +747,8 @@ export function FacturasGenericas() {
                     </p>
                   )}
                   <p className="text-purple-500 text-xs mt-1">
-                    Ingresa mínimo 5 dígitos o "CF" para consumidor final
+                    Ingresa mínimo 5 caracteres o "CF" para consumidor final. El
+                    dígito verificador puede ser K (ej: 1937979K).
                   </p>
                 </div>
 

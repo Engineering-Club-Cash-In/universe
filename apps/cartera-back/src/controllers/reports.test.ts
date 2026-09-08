@@ -384,6 +384,25 @@ describe("estado de cuenta PDF", () => {
     ]);
     expect(rows.map((p) => p.total_restante)).toEqual(["50000.00", "49400.00", "49000.00"]);
   });
+
+  it("el cierre por registerPayment no arrastra su saldo heredado a la cuota siguiente", () => {
+    // La cuota 11 guarda Q49,400 en sus dos filas (el cierre solo-capital
+    // hereda el total_restante de su hermana sin restar su propio abono), pero
+    // su cierre real es Q49,000. Anclar la cuota 12 en el snapshot la dejaría
+    // Q400 arriba en todas sus filas.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 1, numero_cuota: 10, pagado: true, abono_capital: "1000.00", abono_interes: "500.00", total_restante: "50000.00" },
+      { pago_id: 2, numero_cuota: 11, pagado: true, abono_capital: "600.00", abono_interes: "500.00", total_restante: "49400.00" },
+      { pago_id: 3, numero_cuota: 11, pagado: true, abono_capital: "400.00", total_restante: "49400.00" },
+      { pago_id: 4, numero_cuota: 12, pagado: true, abono_capital: "1000.00", abono_interes: "500.00", total_restante: "48000.00" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual([
+      "50000.00",
+      "49400.00",
+      "49000.00",
+      "48000.00",
+    ]);
+  });
 });
 
 // ──────────────────────────────────────────────────────────────────────────

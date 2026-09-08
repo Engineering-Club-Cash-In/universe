@@ -231,6 +231,9 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
 
   let cuotaActual: string | null = null;
   let saldo = new Big(0);
+  // Abono a capital de la última fila procesada: sirve para reconocer el
+  // snapshot "pre-cierre" que hereda el cierre solo-capital de registerPayment.
+  let ultimoAbonoDeLaCuota = new Big(0);
 
   return pagos.map((pago) => {
     const key = String(pago.numero_cuota ?? "");
@@ -241,19 +244,38 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
       // 1. La primera cuota real reconstruye su propia apertura y de la 2 en
       // adelante cada una se ancla en el cierre guardado de la anterior.
       const arrancaCadena = cuotaActual === null || cuotaActual === "0";
-      saldo = arrancaCadena
-        ? // Sin cierre previo utilizable: la apertura se reconstruye como
-          // snapshot + Σ abonos de la cuota (el snapshot ya es post-pago), así
-          // la última fila aterriza exacto en el saldo guardado.
-          (cierreGuardado.get(key) ?? new Big(0)).plus(
-            abonosPorCuota.get(key) ?? new Big(0),
-          )
-        : // Si la cuota anterior no dejó snapshot usable, sigue el corrido.
-          (cierreGuardado.get(cuotaActual) ?? saldo);
+      if (arrancaCadena) {
+        // Sin cierre previo utilizable: la apertura se reconstruye como
+        // snapshot + Σ abonos de la cuota (el snapshot ya es post-pago), así
+        // la última fila aterriza exacto en el saldo guardado.
+        saldo = (cierreGuardado.get(key) ?? new Big(0)).plus(
+          abonosPorCuota.get(key) ?? new Big(0),
+        );
+      } else {
+        // Ancla de la cuota anterior: su snapshot guardado, salvo que ese
+        // snapshot sea "pre-cierre".
+        //
+        // El cierre solo-capital de registerPayment hereda el total_restante
+        // de su hermana SIN restar su propio abono, así que el snapshot queda
+        // por encima del cierre real. Se reconoce exacto: equivale al saldo de
+        // justo ANTES de aplicar el abono de la última fila de la cuota. En
+        // ese caso el cierre bueno es el corrido; anclar en el snapshot le
+        // arrastraría ese exceso a toda la cuota siguiente.
+        //
+        // Fuera de ese caso manda el snapshot: donde los abonos registrados no
+        // explican la caída del saldo, el corrido queda por encima y sin
+        // re-anclar la diferencia se acumula hasta el final del crédito.
+        const snapshotPrevio = cierreGuardado.get(cuotaActual);
+        const preCierre =
+          snapshotPrevio !== undefined &&
+          snapshotPrevio.minus(saldo.plus(ultimoAbonoDeLaCuota)).abs().lte(0.02);
+        saldo = snapshotPrevio !== undefined && !preCierre ? snapshotPrevio : saldo;
+      }
       cuotaActual = key;
     }
 
-    saldo = saldo.minus(pago.abono_capital || 0);
+    ultimoAbonoDeLaCuota = new Big(pago.abono_capital || 0);
+    saldo = saldo.minus(ultimoAbonoDeLaCuota);
 
     return {
       ...pago,

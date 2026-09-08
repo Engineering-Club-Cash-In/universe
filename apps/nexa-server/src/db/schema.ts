@@ -7,7 +7,17 @@ export const tokenIdentifierSequence = pgSequence("nexa_token_identifier_seq", {
   maxValue: 999_999_999,
 });
 
-export const processingStatus = pgEnum("nexa_processing_status", ["PENDING", "APPLIED", "REJECTED", "FAILED"]);
+export const processingStatus = pgEnum("nexa_processing_status", [
+  "PENDING",
+  "RECEIVED",
+  "APPLYING",
+  "APPLIED",
+  "REVIEW_PENDING",
+  "COMPLETED",
+  "REJECTED",
+  "FAILED",
+  "MANUAL_REVIEW",
+]);
 export const reviewStatus = pgEnum("nexa_review_status", ["APPROVED", "REJECTED"]);
 export const pollRunStatus = pgEnum("nexa_poll_run_status", ["RUNNING", "COMPLETED", "FAILED"]);
 
@@ -54,10 +64,17 @@ export const nexaPaymentTransactions = pgTable("nexa_payment_transactions", {
   tokenPrefix: varchar("token_prefix", { length: 7 }).notNull(),
   wasReturn: integer("was_return").notNull(),
   transactionId: varchar("transaction_id", { length: 120 }).notNull().default(""),
-  processingStatus: processingStatus("processing_status").notNull().default("PENDING"),
+  processingStatus: processingStatus("processing_status").notNull().default("RECEIVED"),
   carteraPaymentId: integer("cartera_payment_id"),
   failureReason: text("failure_reason"),
   rawPayload: jsonb("raw_payload").notNull(),
+  payloadFingerprint: varchar("payload_fingerprint", { length: 64 }),
+  attemptCount: integer("attempt_count").notNull().default(0),
+  nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+  lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
+  leaseUntil: timestamp("lease_until", { withTimezone: true }),
+  reviewAttemptCount: integer("review_attempt_count").notNull().default(0),
+  reviewNextAttemptAt: timestamp("review_next_attempt_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({

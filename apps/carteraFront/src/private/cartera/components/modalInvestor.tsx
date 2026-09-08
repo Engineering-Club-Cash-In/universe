@@ -32,12 +32,14 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
   const [prevTipoReinversion, setPrevTipoReinversion] = useState<string>(
     initialData?.tipo_reinversion ?? "sin_reinversion"
   );
-  // "¿Es empresa?" no tiene columna: se deriva de si la fila ya trae
-  // `dpi_rep_legal`. `repLegalOriginal` guarda el valor con el que se abrió el
+  // "¿Es empresa?" no tiene columna: se deriva de si la fila trae el
+  // `dpi_rep_legal` de OTRA persona. `repLegalOriginal` guarda el valor con el que se abrió el
   // modal para saber si al guardar se le estaría quitando el representante a
   // alguien que sí lo tenía.
   const [esEmpresa, setEsEmpresa] = useState(
-    esEmpresaInicial(initialData?.dpi_rep_legal)
+    // El `dpi` de la fila entra en la derivación: un representante que es la
+    // PROPIA fila (dpi 4036613 / dpi_rep_legal '04036613') no la vuelve empresa.
+    esEmpresaInicial(initialData?.dpi_rep_legal, initialData?.dpi)
   );
   const [repLegalOriginal, setRepLegalOriginal] = useState(
     initialData?.dpi_rep_legal ?? ""
@@ -97,7 +99,7 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
       console.log("Reseteando con initialData:", initialData);
       reset(initialData);
       setPrevTipoReinversion(initialData.tipo_reinversion ?? "sin_reinversion");
-      setEsEmpresa(esEmpresaInicial(initialData.dpi_rep_legal));
+      setEsEmpresa(esEmpresaInicial(initialData.dpi_rep_legal, initialData.dpi));
       setRepLegalOriginal(initialData.dpi_rep_legal ?? "");
       setPayloadPorConfirmar(null);
     } else if (mode === "create") {
@@ -163,7 +165,9 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
     // Desmarcar "¿Es empresa?" en alguien que YA tenía representante borra su
     // acceso al portal, y esa persona no está frente a la pantalla para
     // enterarse: se pide confirmación explícita antes de guardar.
-    if (requiereConfirmacionBorrado(repLegalOriginal, esEmpresa)) {
+    // Contra el `dpi` ORIGINAL de la fila, no el del formulario: la pregunta es
+    // si la fila tal como estaba tenía representante de VERDAD.
+    if (requiereConfirmacionBorrado(repLegalOriginal, esEmpresa, initialData?.dpi)) {
       setPayloadPorConfirmar(payload);
       return;
     }
@@ -606,7 +610,13 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
             // Esta ruta también puede terminar borrando el `dpi_rep_legal` (si el
             // operador desmarcó "¿Es empresa?" antes de configurar la
             // combinada): pasa por la misma confirmación que el guardado normal.
-            if (requiereConfirmacionBorrado(repLegalOriginal, esEmpresa)) {
+            if (
+              requiereConfirmacionBorrado(
+                repLegalOriginal,
+                esEmpresa,
+                initialData?.dpi
+              )
+            ) {
               setPayloadPorConfirmar(payload);
               return;
             }

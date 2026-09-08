@@ -9,14 +9,14 @@ import {
 
 describe("interruptor ¿Es empresa?", () => {
 	it("arranca marcado cuando la fila ya tiene representante", () => {
-		expect(esEmpresaInicial("01234567")).toBe(true);
+		expect(esEmpresaInicial("01234567", null)).toBe(true);
 	});
 
 	it("arranca sin marcar sin representante guardado", () => {
-		expect(esEmpresaInicial(undefined)).toBe(false);
-		expect(esEmpresaInicial(null)).toBe(false);
-		expect(esEmpresaInicial("")).toBe(false);
-		expect(esEmpresaInicial("   ")).toBe(false);
+		expect(esEmpresaInicial(undefined, null)).toBe(false);
+		expect(esEmpresaInicial(null, null)).toBe(false);
+		expect(esEmpresaInicial("", null)).toBe(false);
+		expect(esEmpresaInicial("   ", null)).toBe(false);
 	});
 });
 
@@ -57,14 +57,45 @@ describe("valor a enviar", () => {
 
 describe("confirmación de borrado", () => {
 	it("la pide al desmarcar a quien ya tenía representante", () => {
-		expect(requiereConfirmacionBorrado("123", false)).toBe(true);
+		expect(requiereConfirmacionBorrado("123", false, null)).toBe(true);
 	});
 
 	it("no la pide si nunca tuvo representante", () => {
-		expect(requiereConfirmacionBorrado(null, false)).toBe(false);
+		expect(requiereConfirmacionBorrado(null, false, null)).toBe(false);
 	});
 
 	it("no la pide si el interruptor sigue marcado", () => {
-		expect(requiereConfirmacionBorrado("123", true)).toBe(false);
+		expect(requiereConfirmacionBorrado("123", true, null)).toBe(false);
+	});
+});
+
+/**
+ * Representarse a sí mismo NO es ser una empresa.
+ *
+ * Caso real de producción: el inversionista 187 (Javier Kafie) tiene
+ * `dpi = 4036613` y `dpi_rep_legal = '04036613'`. Es el MISMO número con un
+ * cero delante, porque `dpi` es bigint y `dpi_rep_legal` varchar. El backend ya
+ * los normaliza y lo trata como PERSONA (`esEmpresaRepresentada` en
+ * `cartera-back/src/utils/functions/provisionamientoPortal.ts`).
+ *
+ * Mientras el front derive el interruptor de "el campo no está vacío", esa fila
+ * se abre etiquetada como empresa y, al desmarcar, se le advierte al operador
+ * que le va a quitar el acceso "a otra persona". No hay otra persona.
+ */
+describe("el que se representa a sí mismo es una persona", () => {
+	it("no marca el interruptor cuando el representante es la propia fila", () => {
+		expect(esEmpresaInicial("04036613", 4036613)).toBe(false);
+	});
+
+	it("sigue marcándolo cuando el representante es OTRO", () => {
+		expect(esEmpresaInicial("1573661970101", 4036613)).toBe(true);
+	});
+
+	it("tampoco pide confirmación para quitarle un representante que es él mismo", () => {
+		expect(requiereConfirmacionBorrado("04036613", false, 4036613)).toBe(false);
+	});
+
+	it("sí la pide cuando el representante era otra persona", () => {
+		expect(requiereConfirmacionBorrado("1573661970101", false, 4036613)).toBe(true);
 	});
 });

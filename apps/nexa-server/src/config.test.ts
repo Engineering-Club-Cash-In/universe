@@ -11,11 +11,24 @@ const baseEnv = {
   NEXA_PAYMENT_TOKEN_NAME: "Cashin",
   NEXA_WEBHOOK_FLOW_ID: "production-flow",
   NEXA_WEBHOOK_BEARER_TOKEN: "production-webhook-token",
-  INTERNAL_API_KEY: "production-internal-key",
+  NEXA_ADMIN_API_KEY: "production-admin-key",
+  CARTERA_INTERNAL_API_SECRET: "production-cartera-secret",
   CARTERA_API_BASE_URL: "https://cartera.example.com",
   NODE_ENV: "production",
   NEXA_DEPLOYMENT_MODE: "integration",
   MOCK_CARTERA: "true",
+};
+
+const qaRealEnv = {
+  ...baseEnv,
+  NEXA_DEPLOYMENT_MODE: "qa_real_payments",
+  MOCK_CARTERA: "false",
+  NEXA_MTLS_MODE: "required",
+  NEXA_CLIENT_CERT_PATH: "/certs/client.crt",
+  NEXA_CLIENT_KEY_PATH: "/certs/client.key",
+  NEXA_CA_CERT_PATH: "/certs/ca.crt",
+  CARTERA_TARGET_ENV: "qa",
+  ENABLE_TEST_UI: "false",
 };
 
 describe("loadConfig", () => {
@@ -51,7 +64,7 @@ describe("loadConfig", () => {
   });
 
   it("rechaza credenciales de desarrollo en producción", () => {
-    expect(() => loadConfig({ ...baseEnv, INTERNAL_API_KEY: "dev-secret" })).toThrow(
+    expect(() => loadConfig({ ...baseEnv, NEXA_ADMIN_API_KEY: "dev-secret" })).toThrow(
       "uses a forbidden development credential",
     );
   });
@@ -75,5 +88,22 @@ describe("loadConfig", () => {
         MOCK_CARTERA: "false",
       }),
     ).toThrow("Integration deployment requires mock cartera");
+  });
+
+  it("acepta qa_real_payments cerrado con target development o qa", () => {
+    expect(loadConfig(qaRealEnv).deploymentMode).toBe("qa_real_payments");
+    expect(loadConfig({ ...qaRealEnv, CARTERA_TARGET_ENV: "development" }).carteraTargetEnv).toBe("development");
+  });
+
+  it.each([
+    ["mock cartera", { MOCK_CARTERA: "true" }],
+    ["mTLS disabled", { NEXA_MTLS_MODE: "disabled", NEXA_CLIENT_CERT_PATH: undefined, NEXA_CLIENT_KEY_PATH: undefined, NEXA_CA_CERT_PATH: undefined }],
+    ["target production", { CARTERA_TARGET_ENV: "production" }],
+    ["test UI", { ENABLE_TEST_UI: "true" }],
+    ["admin secret missing", { NEXA_ADMIN_API_KEY: undefined }],
+    ["cartera secret missing", { CARTERA_INTERNAL_API_SECRET: undefined }],
+    ["shared credentials", { CARTERA_INTERNAL_API_SECRET: "production-admin-key" }],
+  ])("rechaza qa_real_payments con %s", (_case, overrides) => {
+    expect(() => loadConfig({ ...qaRealEnv, ...overrides })).toThrow();
   });
 });

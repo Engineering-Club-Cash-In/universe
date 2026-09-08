@@ -145,6 +145,10 @@ export const agendaCobrosRouter = {
 					bucketSnapshot: agendaCobrosSnapshotItems.bucketSnapshot,
 					promesaCumplida: agendaCobrosSnapshotItems.promesaCumplida,
 					promesaCumplidaEn: agendaCobrosSnapshotItems.promesaCumplidaEn,
+					// Dueño REAL del snapshot del item (titular o el propio suplente):
+					// cerrarItemsAgenda exige contacto.realizadoPor === item.asesorId, y
+					// con cobertura ese dueño no siempre es el usuario logueado.
+					snapshotAsesorId: agendaCobrosSnapshots.asesorId,
 				})
 				.from(agendaCobrosSnapshotItems)
 				.innerJoin(
@@ -242,6 +246,12 @@ export const agendaCobrosRouter = {
 			// cierre nocturno (contactoPerteneceAlItem) — un item con
 			// casoCobroId=null (sin caso CRM vinculado) solo puede matchear por
 			// SIFCO, nunca por caso.
+			// Mismos dueños que `asesoresFuente` arriba: si el titular ya gestionó
+			// un crédito antes de que arrancara/se registrara la cobertura, el
+			// suplente debe verlo atendido, no pendiente — sin esto el filtro de
+			// snapshots ya traía sus items, pero el de contactos solo miraba al
+			// suplente y el trabajo del titular quedaba invisible acá (riesgo de
+			// llamar dos veces al mismo cliente).
 			const contactos = await db
 				.select({
 					id: contactosCobros.id,
@@ -256,7 +266,7 @@ export const agendaCobrosRouter = {
 				.innerJoin(casosCobros, eq(contactosCobros.casoCobroId, casosCobros.id))
 				.where(
 					and(
-						eq(contactosCobros.realizadoPor, asesorId),
+						inArray(contactosCobros.realizadoPor, asesoresFuente),
 						gte(contactosCobros.fechaContacto, desde),
 						lt(contactosCobros.fechaContacto, hasta),
 					),
@@ -265,7 +275,7 @@ export const agendaCobrosRouter = {
 			const cerrados = cerrarItemsAgenda(
 				fecha,
 				items.map((item) => ({
-					asesorId,
+					asesorId: item.snapshotAsesorId,
 					asesorNombre: "",
 					numeroCreditoSifco: item.numeroCreditoSifco,
 					casoCobroId: item.casoCobroId,
@@ -281,12 +291,13 @@ export const agendaCobrosRouter = {
 			return {
 				...base,
 				items: items.map((item) => {
+					const { snapshotAsesorId: _snapshotAsesorId, ...itemPublico } = item;
 					const cerrado = cerradoPorSifco.get(item.numeroCreditoSifco);
 					const contratoId = item.casoCobroId
 						? contratoIdPorCasoCobroId.get(item.casoCobroId)
 						: casoPorSifco.get(item.numeroCreditoSifco)?.contratoId;
 					return {
-						...item,
+						...itemPublico,
 						clienteNombre: contratoId
 							? (clienteNombrePorContratoAgenda.get(contratoId) ?? null)
 							: null,

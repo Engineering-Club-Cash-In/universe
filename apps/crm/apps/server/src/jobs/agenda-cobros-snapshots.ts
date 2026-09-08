@@ -186,7 +186,11 @@ export async function cerrarSnapshotsAgenda(
 				-- de arriba ya colapsa a una por item.
 				LEFT JOIN coberturas_agenda_cobros cobertura
 				  ON cobertura.titular_id = s.asesor_id
-				 AND cobertura.cancelada_en IS NULL
+				 -- Vigente PARA EL DÍA que se cierra, no al momento de correr este
+				 -- job: si se cancela después de que el suplente ya trabajó pero
+				 -- antes del cierre nocturno de ese mismo día, exigir NULL borraba
+				 -- sus gestiones válidas del cómputo de cumplimiento.
+				 AND (cobertura.cancelada_en IS NULL OR cobertura.cancelada_en::date > $1::date)
 				 AND cobertura.desde <= $1::date
 				 AND cobertura.hasta >= $1::date
 				JOIN contactos_cobros cc

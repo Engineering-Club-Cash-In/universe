@@ -95,7 +95,6 @@ import {
 import {
 	agruparCuotasParaConvenio,
 	bucketPermiteConvenio,
-	calcularTotalConvenio,
 	elegiblesParaConvenio,
 	leerMaxMesesConvenio,
 	resolverPagoIdsDeCuotas,
@@ -2757,8 +2756,15 @@ export const cobrosRouter = {
 				numeroMeses: z.number().int().min(1).max(60),
 				motivo: z.string().trim().min(3).max(1000),
 				observaciones: z.string().trim().max(2000).optional(),
-				// Si el asesor editó el total a mano; si no, cuota × n + mora.
-				montoTotal: z.number().positive().optional(),
+				// El total que el asesor VIO y confirmó en el modal (suma de los
+				// montos reales de las cuotas elegidas + mora, o lo que haya
+				// escrito a mano — el campo es editable por diseño, igual que en
+				// carteraFront). Es obligatorio a propósito: cuando era opcional
+				// el server recalculaba con `cuota estándar × n + mora` y el
+				// convenio podía quedar por un monto distinto al confirmado si
+				// alguna cuota tenía otro monto o la mora cambió entre medio
+				// (hallazgo de Codex, PR #1570).
+				montoTotal: z.number().positive(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -2804,6 +2810,31 @@ export const cobrosRouter = {
 			// Sin cache: cuotas, mora y convenio activo tienen que ser el dato
 			// real al momento de acordar (mismo criterio que registrarPagoCompleto).
 			const credito = await carteraBackClient.getCredito(numeroSifco, false);
+			// El caso NO alcanza como autorización: getDetallesCreditoCarteraBack
+			// AUTO-CREA un caso con responsableCobros = quien consulta cuando el
+			// crédito no tiene uno activo, así que un asesor podía fabricarse el
+			// acceso consultando un SIFCO enumerable y después pasar el gate de
+			// arriba (hallazgo de Codex, PR #1570). La fuente autoritativa de
+			// "de quién es este crédito" no es el CRM sino CARTERA: el asesor
+			// asignado al crédito. Se compara por `email_cash_in` contra el
+			// correo de login — el mismo puente por correo que usa el resto del
+			// módulo (getConveniosListado, getAgendaDia), porque
+			// platform_users.email está desactualizado para varios asesores.
+			//
+			// Admin y supervisor de cobros quedan fuera del chequeo: ellos sí
+			// operan sobre cualquier crédito.
+			if (!PERMISSIONS.canViewAllCasosCobros(context.userRole ?? "")) {
+				const emailAsesorCredito = credito.asesor?.emailCashIn
+					?.trim()
+					.toLowerCase();
+				if (!emailAsesorCredito || emailAsesorCredito !== email) {
+					throw new ORPCError("FORBIDDEN", {
+						message:
+							"Este crédito no está asignado a vos en cartera; no podés crear un convenio sobre él.",
+					});
+				}
+			}
+
 			const statusCredit = credito.credito.statusCredit;
 			if (statusCredit === "EN_CONVENIO" || credito.convenioActivo) {
 				throw new ORPCError("CONFLICT", {
@@ -2866,16 +2897,16 @@ export const cobrosRouter = {
 			}
 
 			const cantidadCuotas = new Set(input.cuotaIds).size;
-			const montoTotal =
-				input.montoTotal ??
-				calcularTotalConvenio(
-					credito.credito.cuota,
-					cantidadCuotas,
-					credito.moraActual,
-				);
-			if (!(montoTotal > 0)) {
+			// El monto es el que confirmó el asesor. No se recalcula: hacerlo
+			// significaría crear el convenio por una cifra distinta a la que se
+			// aprobó. Lo único que se valida es cordura — un convenio no puede
+			// superar la deuda total del crédito (atrapa un dedazo, sin estorbar
+			// la edición legítima del campo).
+			const montoTotal = input.montoTotal;
+			const deudaTotal = Number(credito.credito.deudatotal ?? 0);
+			if (deudaTotal > 0 && montoTotal > deudaTotal) {
 				throw new ORPCError("BAD_REQUEST", {
-					message: "El monto total del convenio debe ser mayor a 0",
+					message: `El monto del convenio (Q${montoTotal.toFixed(2)}) supera la deuda total del crédito (Q${deudaTotal.toFixed(2)}). Revisá el monto.`,
 				});
 			}
 

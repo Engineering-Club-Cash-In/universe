@@ -140,22 +140,6 @@ export function resolverPagoIdsDeCuotas(
 }
 
 /**
- * Total sugerido del convenio = cuota mensual × cuotas seleccionadas + mora
- * vigente. Misma fórmula que carteraFront (`totalAmountCalculado`): la mora
- * entra siempre porque al crearse el convenio cartera la BORRA — si no se
- * suma acá, se condona sin que nadie lo decida. Redondeado a centavos.
- */
-export function calcularTotalConvenio(
-	cuotaMensual: string | number | null | undefined,
-	cantidadCuotas: number,
-	moraActual: string | number | null | undefined,
-): number {
-	const cuota = Number(cuotaMensual) || 0;
-	const mora = Number(moraActual) || 0;
-	return Math.round((cuota * cantidadCuotas + mora) * 100) / 100;
-}
-
-/**
  * ¿El bucket actual del crédito permite convenio? Regla CB-032: a partir de
  * B2. Compara por `orden` del catálogo (no por número literal) contra la fila
  * cuyo `estado_mora` es la key mínima. Si el catálogo no trae esa fila, cae al

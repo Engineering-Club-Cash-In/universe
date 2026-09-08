@@ -43,18 +43,13 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import {
+	type CuotaConvenio,
+	soloVencidasYActual,
+} from "@/lib/cobros/convenio-cuotas";
 import { formatFechaLocal } from "@/lib/date-utils";
 import { cn } from "@/lib/utils";
 import { client, orpc } from "@/utils/orpc";
-
-export interface CuotaConvenioUI {
-	cuotaId: number;
-	numeroCuota: number;
-	fechaVencimiento?: string | null;
-	monto: number;
-	/** Ya vencida (la ficha lo decide con el mismo criterio que la promesa). */
-	vencida: boolean;
-}
 
 interface ConvenioModalProps {
 	open: boolean;
@@ -66,8 +61,12 @@ interface ConvenioModalProps {
 	 */
 	casoCobroId: string;
 	clienteNombre: string;
-	/** Cuotas PENDIENTES del crédito (no pagadas, no en validación). */
-	cuotas: CuotaConvenioUI[];
+	/**
+	 * Cuotas elegibles del crédito, ya filtradas por
+	 * `cuotasElegiblesParaConvenio` (pendientes de verdad, sin pagos esperando
+	 * a conta, con `vencida` medida en días GT).
+	 */
+	cuotas: CuotaConvenio[];
 	cuotaMensual: number;
 	/** Mora vigente del crédito. Entra SIEMPRE al convenio (cartera la borra). */
 	montoMora: number;
@@ -115,12 +114,7 @@ export function ConvenioModal({
 	// la cuota ACTUAL (la primera que todavía no venció). Las futuras no: un
 	// convenio reestructura deuda exigible, no adelanta el calendario. El
 	// server aplica la misma regla sobre la data real de cartera.
-	const cuotasOrdenadas = useMemo(() => {
-		const ordenadas = [...cuotas].sort((a, b) => a.numeroCuota - b.numeroCuota);
-		const vencidas = ordenadas.filter((c) => c.vencida);
-		const actual = ordenadas.find((c) => !c.vencida);
-		return actual ? [...vencidas, actual] : vencidas;
-	}, [cuotas]);
+	const cuotasOrdenadas = useMemo(() => soloVencidasYActual(cuotas), [cuotas]);
 	const cuotaActualId = useMemo(
 		() => cuotasOrdenadas.find((c) => !c.vencida)?.cuotaId ?? null,
 		[cuotasOrdenadas],
@@ -179,10 +173,13 @@ export function ConvenioModal({
 				numeroMeses: meses,
 				motivo: motivo.trim(),
 				observaciones: observaciones.trim() || undefined,
-				montoTotal:
-					montoManual !== null && Number.isFinite(montoManualNum)
-						? montoManualNum
-						: undefined,
+				// SIEMPRE el total que el asesor tiene en pantalla, lo haya
+				// editado o no. Antes solo se mandaba el editado y el server
+				// recalculaba con la cuota estándar del crédito: si alguna cuota
+				// tenía otro monto, o la mora cambiaba entre que se abrió el
+				// modal y se confirmó, el convenio nacía por una cifra distinta
+				// a la aprobada (hallazgo de Codex, PR #1570).
+				montoTotal: total,
 			})) as ResultadoConvenio,
 		onSuccess: (r) => {
 			toast.success(

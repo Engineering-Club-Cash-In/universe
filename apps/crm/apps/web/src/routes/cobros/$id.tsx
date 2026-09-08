@@ -96,12 +96,13 @@ import {
 	numeroDeEstadoMora,
 	useBucketsCatalogo,
 } from "@/lib/cobros/buckets-catalogo";
+import { cuotasElegiblesParaConvenio } from "@/lib/cobros/convenio-cuotas";
 import {
 	type EstadoPromesaUI,
 	inicioDelDiaGT,
 	tienePromesaActiva,
 } from "@/lib/cobros/promesa-activa";
-import { estaVencidaGT, formatFechaLocal } from "@/lib/date-utils";
+import { formatFechaLocal } from "@/lib/date-utils";
 import { ROLES } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
 
@@ -1381,21 +1382,14 @@ function RouteComponent() {
 										onOpenChange={setConvenioAbierto}
 										casoCobroId={caso.id ?? ""}
 										clienteNombre={caso.clienteNombre || ""}
-										cuotas={(cuotas as any[])
-											.filter((c: any) => c.estadoMora === "pendiente")
-											.map((c: any) => ({
-												cuotaId: Number(c.id),
-												numeroCuota: c.numeroCuota,
-												fechaVencimiento: c.fechaVencimiento,
-												monto: Number(c.montoCuota ?? caso.cuotaMensual ?? 0),
-												// Días calendario GT, no `new Date(...) < new Date()`:
-												// la cuota que vence HOY es la ACTUAL, no una vencida
-												// (ver estaVencidaGT). Con la comparación ingenua se
-												// preseleccionaba sola e inflaba el convenio, y además
-												// corría la "actual" a una cuota futura, que el server
-												// rechaza (hallazgo de Codex, PR #1570).
-												vencida: estaVencidaGT(c.fechaVencimiento),
-											}))}
+										// La regla de elegibilidad vive en un módulo aparte
+										// (con tests) porque tiene que decir lo mismo que el
+										// server: qué cuota puede entrar y cuál ya está vencida
+										// según el día de Guatemala.
+										cuotas={cuotasElegiblesParaConvenio(
+											cuotas as any[],
+											Number(caso.cuotaMensual || 0),
+										)}
 										cuotaMensual={Number(caso.cuotaMensual || 0)}
 										montoMora={Number(caso.montoEnMora || 0)}
 										maxMeses={maxMesesConvenio}

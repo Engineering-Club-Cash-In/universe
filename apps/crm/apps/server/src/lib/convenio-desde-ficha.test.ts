@@ -4,7 +4,6 @@ import {
 	agruparCuotasParaConvenio,
 	bucketPermiteConvenio,
 	CONVENIO_MAX_MESES_DEFAULT,
-	calcularTotalConvenio,
 	elegiblesParaConvenio,
 	leerMaxMesesConvenio,
 	resolverPagoIdsDeCuotas,
@@ -108,13 +107,6 @@ describe("resolverPagoIdsDeCuotas", () => {
 		expect(r.pagoIds).toEqual([102]);
 		expect(r.faltantes).toEqual([99]);
 		expect(r.sinRecibo).toEqual([3]);
-	});
-});
-
-describe("calcularTotalConvenio", () => {
-	it("suma cuota × n + mora, a centavos", () => {
-		expect(calcularTotalConvenio("2568.16", 2, "361.36")).toBe(5497.68);
-		expect(calcularTotalConvenio(null, 3, undefined)).toBe(0);
 	});
 });
 

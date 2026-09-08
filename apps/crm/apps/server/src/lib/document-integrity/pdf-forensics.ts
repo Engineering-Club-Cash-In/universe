@@ -379,6 +379,311 @@ function safeDocumentMetadata(document: PDFDocument): PdfMetadata {
 	};
 }
 
+type RawPdfValue =
+	| { kind: "name"; value: string }
+	| { kind: "number"; value: number }
+	| { kind: "ref"; objectNumber: number; generationNumber: number }
+	| { kind: "array"; values: RawPdfValue[] }
+	| { kind: "other" };
+
+interface RawPdfValueRead {
+	value: RawPdfValue;
+	nextIndex: number;
+}
+
+interface RawPdfObject {
+	key: string;
+	value?: RawPdfValue;
+	dictionary?: { start: number; end: number };
+	streamStart?: number;
+}
+
+function isPdfDelimiter(character: string | undefined) {
+	return !character || isPdfWhitespace(character) || /[()<>\[\]{}/%]/.test(character);
+}
+
+function isPdfWhitespace(character: string | undefined) {
+	return !!character && /[\x00\x09\x0a\x0c\x0d\x20]/.test(character);
+}
+
+function skipPdfWhitespaceAndComments(text: string, fromIndex: number) {
+	let index = fromIndex;
+	while (index < text.length) {
+		if (isPdfWhitespace(text[index])) {
+			index++;
+			continue;
+		}
+		if (text[index] !== "%") break;
+		while (index < text.length && text[index] !== "\n" && text[index] !== "\r")
+			index++;
+	}
+	return index;
+}
+
+function skipPdfLiteralString(text: string, fromIndex: number) {
+	let depth = 0;
+	for (let index = fromIndex; index < text.length; index++) {
+		if (text[index] === "\\") {
+			index++;
+			continue;
+		}
+		if (text[index] === "(") depth++;
+		if (text[index] === ")" && --depth === 0) return index + 1;
+	}
+	return -1;
+}
+
+function findPdfDictionaryEnd(text: string, fromIndex: number) {
+	if (text.slice(fromIndex, fromIndex + 2) !== "<<") return -1;
+	let depth = 0;
+	for (let index = fromIndex; index < text.length; index++) {
+		if (text[index] === "%") {
+			index = skipPdfWhitespaceAndComments(text, index) - 1;
+			continue;
+		}
+		if (text[index] === "(") {
+			const end = skipPdfLiteralString(text, index);
+			if (end < 0) return -1;
+			index = end - 1;
+			continue;
+		}
+		if (text[index] === "<" && text[index + 1] !== "<") {
+			const end = text.indexOf(">", index + 1);
+			if (end < 0) return -1;
+			index = end;
+			continue;
+		}
+		if (text.slice(index, index + 2) === "<<") {
+			depth++;
+			index++;
+			continue;
+		}
+		if (text.slice(index, index + 2) === ">>") {
+			depth--;
+			if (depth === 0) return index + 2;
+			index++;
+		}
+	}
+	return -1;
+}
+
+function decodeRawPdfName(value: string) {
+	return value.replace(/#([0-9a-f]{2})/gi, (_, hex: string) =>
+		String.fromCharCode(Number.parseInt(hex, 16)),
+	);
+}
+
+function readRawPdfValue(text: string, fromIndex: number): RawPdfValueRead | null {
+	const index = skipPdfWhitespaceAndComments(text, fromIndex);
+	const first = text[index];
+	if (!first) return null;
+
+	if (first === "/") {
+		let end = index + 1;
+		while (!isPdfDelimiter(text[end])) end++;
+		return {
+			value: {
+				kind: "name",
+				value: decodeRawPdfName(text.slice(index + 1, end)),
+			},
+			nextIndex: end,
+		};
+	}
+
+	if (first === "[") {
+		const values: RawPdfValue[] = [];
+		let cursor = index + 1;
+		while (cursor < text.length) {
+			cursor = skipPdfWhitespaceAndComments(text, cursor);
+			if (text[cursor] === "]") {
+				return { value: { kind: "array", values }, nextIndex: cursor + 1 };
+			}
+			const item = readRawPdfValue(text, cursor);
+			if (!item || item.nextIndex <= cursor) return null;
+			values.push(item.value);
+			cursor = item.nextIndex;
+		}
+		return null;
+	}
+
+	if (text.slice(index, index + 2) === "<<") {
+		const end = findPdfDictionaryEnd(text, index);
+		return end < 0
+			? null
+			: { value: { kind: "other" }, nextIndex: end };
+	}
+
+	if (first === "(") {
+		const end = skipPdfLiteralString(text, index);
+		return end < 0
+			? null
+			: { value: { kind: "other" }, nextIndex: end };
+	}
+
+	if (first === "<") {
+		const end = text.indexOf(">", index + 1);
+		return end < 0
+			? null
+			: { value: { kind: "other" }, nextIndex: end + 1 };
+	}
+
+	const number = text.slice(index).match(/^[+-]?(?:\d+\.\d*|\.\d+|\d+)/);
+	if (number) {
+		const afterFirst = index + number[0].length;
+		if (/^\d+$/.test(number[0])) {
+			const secondStart = skipPdfWhitespaceAndComments(text, afterFirst);
+			const second = text.slice(secondStart).match(/^\d+/);
+			if (second) {
+				const refMarker = skipPdfWhitespaceAndComments(
+					text,
+					secondStart + second[0].length,
+				);
+				if (text[refMarker] === "R" && isPdfDelimiter(text[refMarker + 1])) {
+					return {
+						value: {
+							kind: "ref",
+							objectNumber: Number(number[0]),
+							generationNumber: Number(second[0]),
+						},
+						nextIndex: refMarker + 1,
+					};
+				}
+			}
+		}
+		return {
+			value: { kind: "number", value: Number(number[0]) },
+			nextIndex: afterFirst,
+		};
+	}
+
+	let end = index + 1;
+	while (!isPdfDelimiter(text[end])) end++;
+	return { value: { kind: "other" }, nextIndex: end };
+}
+
+function readRawPdfDictionaryValue(
+	text: string,
+	dictionary: { start: number; end: number },
+	key: string,
+) {
+	let cursor = dictionary.start + 2;
+	let found: RawPdfValue | null = null;
+	while (cursor < dictionary.end - 2) {
+		cursor = skipPdfWhitespaceAndComments(text, cursor);
+		if (cursor >= dictionary.end - 2) break;
+		const keyRead = readRawPdfValue(text, cursor);
+		if (!keyRead || keyRead.value.kind !== "name") return null;
+		const valueRead = readRawPdfValue(text, keyRead.nextIndex);
+		if (!valueRead) return null;
+		// PDFDict conserva el último valor cuando una clave está duplicada.
+		if (keyRead.value.value === key) found = valueRead.value;
+		cursor = valueRead.nextIndex;
+	}
+	return found;
+}
+
+function parseRawPdfObjects(text: string) {
+	const objects = new Map<string, RawPdfObject>();
+	const records: RawPdfObject[] = [];
+	const headers = text.matchAll(
+		/(\d+)(?:[\x00\x09\x0a\x0c\x0d\x20]+|%[^\r\n]*(?:\r\n|\r|\n))+(\d+)(?:[\x00\x09\x0a\x0c\x0d\x20]+|%[^\r\n]*(?:\r\n|\r|\n))+obj\b/g,
+	);
+	for (const match of headers) {
+		const key = `${match[1]}:${match[2]}`;
+		const valueStart = skipPdfWhitespaceAndComments(
+			text,
+			(match.index ?? 0) + match[0].length,
+		);
+		if (text.slice(valueStart, valueStart + 2) === "<<") {
+			const dictionaryEnd = findPdfDictionaryEnd(text, valueStart);
+			if (dictionaryEnd < 0) continue;
+			const afterDictionary = skipPdfWhitespaceAndComments(text, dictionaryEnd);
+			let streamStart: number | undefined;
+			if (
+				text.slice(afterDictionary, afterDictionary + 6) === "stream" &&
+				isPdfDelimiter(text[afterDictionary + 6])
+			) {
+				let cursor = afterDictionary + 6;
+				while (text[cursor] === " " || text[cursor] === "\t") cursor++;
+				if (text.slice(cursor, cursor + 2) === "\r\n") streamStart = cursor + 2;
+				else if (text[cursor] === "\n" || text[cursor] === "\r")
+					streamStart = cursor + 1;
+			}
+			const object = {
+				key,
+				dictionary: { start: valueStart, end: dictionaryEnd },
+				streamStart,
+			};
+			records.push(object);
+			objects.set(key, object);
+			continue;
+		}
+
+		const value = readRawPdfValue(text, valueStart);
+		if (value) {
+			const object = { key, value: value.value };
+			records.push(object);
+			objects.set(key, object);
+		}
+	}
+	return { objects, records };
+}
+
+function resolveRawPdfValue(
+	value: RawPdfValue | null,
+	objects: Map<string, RawPdfObject>,
+	visited = new Set<string>(),
+): RawPdfValue | null {
+	if (!value || value.kind !== "ref") return value;
+	const key = `${value.objectNumber}:${value.generationNumber}`;
+	if (visited.has(key)) return null;
+	visited.add(key);
+	return resolveRawPdfValue(objects.get(key)?.value ?? null, objects, visited);
+}
+
+function getRawStreamFilters(
+	value: RawPdfValue | null,
+	objects: Map<string, RawPdfObject>,
+) {
+	if (value?.kind === "ref") return null;
+	const resolved = resolveRawPdfValue(value, objects);
+	if (!resolved) return [];
+	if (resolved.kind === "name") return [resolved.value];
+	if (resolved.kind !== "array") return null;
+	if (resolved.values.some((item) => item.kind === "ref")) return null;
+	const names = resolved.values.map((item) => resolveRawPdfValue(item, objects));
+	return names.every((item) => item?.kind === "name")
+		? names.map((item) => (item as { kind: "name"; value: string }).value)
+		: null;
+}
+
+function getResolvedPdfNumber(
+	value: RawPdfValue | null,
+	objects: Map<string, RawPdfObject>,
+) {
+	const resolved = resolveRawPdfValue(value, objects);
+	return resolved?.kind === "number" ? resolved.value : null;
+}
+
+function getDirectPdfNumber(value: RawPdfValue | null) {
+	return value?.kind === "number" ? value.value : null;
+}
+
+function isSafeParserControlValue(value: number | null, maximum: number) {
+	return (
+		value !== null &&
+		Number.isSafeInteger(value) &&
+		value >= 0 &&
+		value <= maximum
+	);
+}
+
+function getDirectPdfNumberArray(value: RawPdfValue | null) {
+	if (value?.kind !== "array") return null;
+	const numbers = value.values.map((item) => getDirectPdfNumber(item));
+	return numbers.every((item) => item !== null) ? (numbers as number[]) : null;
+}
+
 // pdf-lib descomprime los object streams dentro de load(), fuera de nuestro
 // presupuesto. Aqui se inflan primero con el inflater acotado: si revientan el
 // limite, load() no llega a ejecutarse.
@@ -389,26 +694,111 @@ export function isPdfSafeToParse(
 	const bytes = Buffer.from(buffer);
 	const text = bytes.toString("latin1");
 
-	for (const match of text.matchAll(/\/Size\s+(\d+)/g)) {
+	for (const match of text.matchAll(
+		/\/Size(?:[\x00\x09\x0a\x0c\x0d\x20]+|%[^\r\n]*(?:\r\n|\r|\n))+(\d+)/g,
+	)) {
 		if (Number(match[1]) > MAX_DECLARED_PDF_OBJECTS) return false;
 	}
 
 	const budget: PdfContentBudget = { remainingBytes: maxDecompressedBytes };
-	const objectStream =
-		/\/Type\s*\/ObjStm[\s\S]{0,512}?\/Length\s+(\d+)[\s\S]{0,512}?stream\r?\n/g;
-	for (const match of text.matchAll(objectStream)) {
-		const declaredLength = Number(match[1]);
-		const start = (match.index ?? 0) + match[0].length;
-		if (!declaredLength || start + declaredLength > bytes.length) return false;
-		try {
-			const inflated = inflatePdfStreamBounded(
-				bytes.subarray(start, start + declaredLength),
-				budget.remainingBytes,
+	const { objects, records } = parseRawPdfObjects(text);
+	for (const object of records) {
+		if (!object.dictionary) continue;
+		const type = readRawPdfDictionaryValue(text, object.dictionary, "Type");
+		// pdf-lib resuelve referencias para Type; no podemos confiar en un mapa
+		// global que también ve bytes comprimidos, así que ese caso se degrada.
+		if (type?.kind === "ref") return false;
+		if (
+			type?.kind !== "name" ||
+			(type.value !== "ObjStm" && type.value !== "XRef")
+		)
+			continue;
+
+		if (type.value === "ObjStm") {
+			const objectCount = getDirectPdfNumber(
+				readRawPdfDictionaryValue(text, object.dictionary, "N"),
 			);
-			consumeContentBudget(budget, inflated.length);
+			const firstOffset = getDirectPdfNumber(
+				readRawPdfDictionaryValue(text, object.dictionary, "First"),
+			);
+			if (
+				!isSafeParserControlValue(objectCount, MAX_DECLARED_PDF_OBJECTS) ||
+				!isSafeParserControlValue(firstOffset, maxDecompressedBytes)
+			)
+				return false;
+		} else {
+			const size = getDirectPdfNumber(
+				readRawPdfDictionaryValue(text, object.dictionary, "Size"),
+			);
+			const widths = getDirectPdfNumberArray(
+				readRawPdfDictionaryValue(text, object.dictionary, "W"),
+			);
+			const indexValue = readRawPdfDictionaryValue(
+				text,
+				object.dictionary,
+				"Index",
+			);
+			const subsections = indexValue
+				? getDirectPdfNumberArray(indexValue)
+				: size === null
+					? null
+					: [0, size];
+			if (
+				!isSafeParserControlValue(size, MAX_DECLARED_PDF_OBJECTS) ||
+				!widths ||
+				widths.length !== 3 ||
+				widths.some((width) => !isSafeParserControlValue(width, 8)) ||
+				!subsections ||
+				subsections.length % 2 !== 0 ||
+				subsections.some(
+					(value) => !isSafeParserControlValue(value, MAX_DECLARED_PDF_OBJECTS),
+				) ||
+				subsections.reduce(
+					(total, value, index) => total + (index % 2 === 1 ? value : 0),
+					0,
+				) > MAX_DECLARED_PDF_OBJECTS
+			)
+				return false;
+		}
+
+		const declaredLength = getResolvedPdfNumber(
+			readRawPdfDictionaryValue(text, object.dictionary, "Length"),
+			objects,
+		);
+		const start = object.streamStart;
+		const endMarker =
+			start !== undefined && declaredLength !== null
+				? skipPdfWhitespaceAndComments(text, start + declaredLength)
+				: -1;
+		if (
+			start === undefined ||
+			declaredLength === null ||
+			!Number.isSafeInteger(declaredLength) ||
+			declaredLength <= 0 ||
+			start + declaredLength > bytes.length ||
+			text.slice(endMarker, endMarker + 9) !== "endstream" ||
+			!isPdfDelimiter(text[endMarker + 9])
+		)
+			return false;
+
+		const filters = getRawStreamFilters(
+			readRawPdfDictionaryValue(text, object.dictionary, "Filter"),
+			objects,
+		);
+		if (filters === null || filters.length > 1) return false;
+		try {
+			if (filters.length === 0) consumeContentBudget(budget, declaredLength);
+			else if (filters[0] === "FlateDecode" || filters[0] === "Fl") {
+				const inflated = inflatePdfStreamBounded(
+					bytes.subarray(start, start + declaredLength),
+					budget.remainingBytes,
+				);
+				consumeContentBudget(budget, inflated.length);
+			} else return false;
 		} catch (error) {
 			if (error instanceof PdfContentBudgetExceededError) return false;
-			// Un stream que no infla no es una bomba; que lo resuelva pdf-lib.
+			// Si no podemos comprobar el stream, no se delega su expansión a pdf-lib.
+			return false;
 		}
 	}
 	return true;

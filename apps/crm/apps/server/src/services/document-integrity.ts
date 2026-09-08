@@ -176,7 +176,7 @@ async function assertNoActiveCapacityAnalysis(
 	if (analysis?.token) {
 		throw new DocumentIntegrityError(
 			"TOO_MANY_REQUESTS",
-			"No se puede validar ni reiniciar documentos mientras el análisis de capacidad está en proceso.",
+			"Hay un análisis de capacidad en proceso. Espera a que finalice antes de validar, editar o reiniciar.",
 		);
 	}
 }
@@ -1214,6 +1214,83 @@ export async function releaseCapacityAnalysisReservation(params: {
 				eq(creditAnalysis.analysisReservationToken, params.token),
 			),
 		);
+}
+
+export async function resetOpportunityCreditAnalysis(params: {
+	opportunityId: string;
+	leadId: string;
+}) {
+	return db.transaction(async (tx) => {
+		await tx.execute(lockOpportunity(params.opportunityId));
+		await assertNoActiveCapacityAnalysis(tx, params.opportunityId);
+		const [deleted] = await tx
+			.delete(creditAnalysis)
+			.where(
+				and(
+					eq(creditAnalysis.opportunityId, params.opportunityId),
+					eq(creditAnalysis.leadId, params.leadId),
+				),
+			)
+			.returning({ id: creditAnalysis.id });
+		return deleted ?? null;
+	});
+}
+
+export async function upsertOpportunityCreditAnalysis(params: {
+	opportunityId: string;
+	leadId: string;
+	userId: string;
+	analysisData: {
+		monthlyFixedIncome?: string;
+		monthlyVariableIncome?: string;
+		monthlyFixedExpenses?: string;
+		monthlyVariableExpenses?: string;
+		economicAvailability?: string;
+		maxPayment?: string;
+		maxCreditAmount?: string;
+	};
+}) {
+	return db.transaction(async (tx) => {
+		await tx.execute(lockOpportunity(params.opportunityId));
+		await assertNoActiveCapacityAnalysis(tx, params.opportunityId);
+		const [existing] = await tx
+			.select({
+				id: creditAnalysis.id,
+				analyzedAt: creditAnalysis.analyzedAt,
+			})
+			.from(creditAnalysis)
+			.where(
+				and(
+					eq(creditAnalysis.opportunityId, params.opportunityId),
+					eq(creditAnalysis.leadId, params.leadId),
+				),
+			)
+			.limit(1);
+		if (existing) {
+			const [updated] = await tx
+				.update(creditAnalysis)
+				.set({
+					...params.analysisData,
+					analyzedAt: existing.analyzedAt ?? new Date(),
+					updatedAt: new Date(),
+				})
+				.where(eq(creditAnalysis.id, existing.id))
+				.returning();
+			return updated;
+		}
+
+		const [created] = await tx
+			.insert(creditAnalysis)
+			.values({
+				leadId: params.leadId,
+				opportunityId: params.opportunityId,
+				...params.analysisData,
+				createdBy: params.userId,
+				analyzedAt: new Date(),
+			})
+			.returning();
+		return created;
+	});
 }
 
 export async function approveDocumentIntegrityValidation(params: {

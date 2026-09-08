@@ -104,6 +104,11 @@ import {
 	getMissingFieldsForContracts,
 } from "../lib/vehicle-helpers";
 import { carteraBackClient } from "../services/cartera-back-client";
+import {
+	DocumentIntegrityError,
+	resetOpportunityCreditAnalysis,
+	upsertOpportunityCreditAnalysis,
+} from "../services/document-integrity";
 import { scoreLead } from "../services/lead-scoring";
 import {
 	ejecutarValidaciones,
@@ -1511,42 +1516,21 @@ export const crmRouter = {
 					});
 				}
 
-				const ownerCondition = getCreditAnalysisOwnerCondition({
-					leadId,
-					opportunityId: opportunityId!,
-				});
-
-				// Check if analysis already exists
-				const existing = await db
-					.select()
-					.from(creditAnalysis)
-					.where(ownerCondition)
-					.limit(1);
-
-				if (existing.length > 0) {
-					const updated = await db
-						.update(creditAnalysis)
-						.set({
-							...dataForDb,
-							analyzedAt: existing[0].analyzedAt ?? new Date(),
-							updatedAt: new Date(),
-						})
-						.where(ownerCondition)
-						.returning();
-					return updated[0];
-				}
-
-				const created = await db
-					.insert(creditAnalysis)
-					.values({
+				try {
+					return await upsertOpportunityCreditAnalysis({
 						leadId,
 						opportunityId: opportunityId!,
-						...dataForDb,
-						createdBy: context.userId,
-						analyzedAt: new Date(),
-					})
-					.returning();
-				return created[0];
+						userId: context.userId,
+						analysisData: dataForDb,
+					});
+				} catch (error) {
+					if (error instanceof DocumentIntegrityError) {
+						throw new ORPCError("PRECONDITION_FAILED", {
+							message: error.message,
+						});
+					}
+					throw error;
+				}
 			}
 
 			// Si es para un co-deudor
@@ -1649,18 +1633,30 @@ export const crmRouter = {
 				}
 			}
 
-			const whereCondition = getCreditAnalysisOwnerCondition(
-				input.leadId
-					? { leadId: input.leadId, opportunityId: input.opportunityId! }
-					: { coDebtorId: input.coDebtorId! },
-			);
+			let deleted: { id: string } | null;
+			if (input.leadId) {
+				try {
+					deleted = await resetOpportunityCreditAnalysis({
+						opportunityId: input.opportunityId!,
+						leadId: input.leadId,
+					});
+				} catch (error) {
+					if (error instanceof DocumentIntegrityError) {
+						throw new ORPCError("PRECONDITION_FAILED", {
+							message: error.message,
+						});
+					}
+					throw error;
+				}
+			} else {
+				const [coDebtorAnalysis] = await db
+					.delete(creditAnalysis)
+					.where(eq(creditAnalysis.coDebtorId, input.coDebtorId!))
+					.returning({ id: creditAnalysis.id });
+				deleted = coDebtorAnalysis ?? null;
+			}
 
-			const deleted = await db
-				.delete(creditAnalysis)
-				.where(whereCondition)
-				.returning({ id: creditAnalysis.id });
-
-			if (deleted.length === 0) {
+			if (!deleted) {
 				throw new ORPCError("NOT_FOUND", {
 					message: "No se encontró análisis crediticio para resetear",
 				});

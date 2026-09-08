@@ -1,5 +1,6 @@
 // routes/buckets.ts — COBROS-02 · endpoints del motor de buckets (histórico + listado).
 import { Elysia, t } from "elysia";
+import { ZodError } from "zod";
 import { authMiddleware } from "./midleware";
 import {
   getBucketsHistorial,
@@ -20,6 +21,7 @@ import { actualizarCapacidadAsesorBucket } from "../controllers/buckets/actualiz
 import { getColaDiaSLA } from "../controllers/buckets/colaDia";
 import { getAperturaDia } from "../controllers/buckets/aperturaDia";
 import { actualizarDiasSlaBuckets } from "../controllers/buckets/actualizarDiasSla";
+import { confirmarTrasladoCarteraMasivo, previsualizarTrasladoCarteraMasivo, listarTrasladosCartera, TrasladoConflict } from "../controllers/buckets/trasladosCartera";
 import { procesarBucketsConvenio } from "../controllers/bucketsConvenio";
 import {
   getPromesaActivaPorCredito,
@@ -121,6 +123,40 @@ export const fechaEnRangoApertura = (s: string, refHoy?: string): boolean => {
 
 export const bucketsRouter = new Elysia()
   .use(authMiddleware)
+
+  .post("/buckets/traslados/previsualizar", async ({ body, set, user }: any) => {
+    if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+    // Mismo mapeo a 409 que confirmar: construirPlan valida el destino de
+    // cuentas especiales y el pool, así que un TrasladoConflict acá es un
+    // error del usuario con mensaje accionable, no una falla del servidor.
+    try { return await previsualizarTrasladoCarteraMasivo(body); }
+    catch (error) {
+      if (error instanceof ZodError) {
+        set.status = 400;
+        return { success: false, message: error.issues[0]?.message ?? "Solicitud de traslado inválida" };
+      }
+      if (!(error instanceof TrasladoConflict)) throw error;
+      set.status = 409;
+      return { success: false, message: error.message };
+    }
+  }, { body: t.Object({ asesorOrigenId: t.Integer({ minimum: 1 }), asesorDestinoId: t.Optional(t.Integer({ minimum: 1 })), asesorDestinoEspecialId: t.Optional(t.Integer({ minimum: 1 })), destinosPorBucket: t.Optional(t.Record(t.String(), t.Integer({ minimum: 1 }))), modo: t.Union([t.Literal("traslado_completo"), t.Literal("redistribucion"), t.Literal("destino_por_bucket")]), motivo: t.String({ minLength: 1, maxLength: 1000 }), actorEmail: t.String({ format: "email" }) }) })
+  .post("/buckets/traslados/confirmar", async ({ body, set, user }: any) => {
+    if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+    try { return await confirmarTrasladoCarteraMasivo(body); }
+    catch (error) {
+      if (error instanceof ZodError) {
+        set.status = 400;
+        return { success: false, message: error.issues[0]?.message ?? "Solicitud de traslado inválida" };
+      }
+      if (!(error instanceof TrasladoConflict)) throw error;
+      set.status = 409;
+      return { success: false, message: error.message };
+    }
+  }, { body: t.Object({ previewId: t.String({ format: "uuid" }), idempotencyKey: t.String({ format: "uuid" }), actorEmail: t.String({ format: "email" }) }) })
+  .get("/buckets/traslados", async ({ query, set, user }: any) => {
+    if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+    return listarTrasladosCartera(Number(query.page ?? 1));
+  }, { query: t.Object({ page: t.Optional(t.Numeric({ minimum: 1, maximum: 100000 })) }) })
 
   // Histórico de transiciones de bucket, paginado y con filtros + resumen.
   .get(

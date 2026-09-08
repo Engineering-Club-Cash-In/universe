@@ -17,6 +17,7 @@ import {
   elegirAsesorParaBucket,
   getBucketsCatalogoConEstado,
 } from "./latefee";
+import { BUCKETS_CONVENIO_LOCK_KEY } from "../lib/buckets-job-locks";
 
 // ============================================================
 // 🪣 MOTOR DE BUCKETS PARA CONVENIOS (COBROS-02)
@@ -65,7 +66,6 @@ import {
 
 // Clave del advisory lock — adyacente a la de procesarMoras (728193), distinta
 // para que ambos jobs puedan correr sin bloquearse entre sí.
-const BUCKETS_CONVENIO_LOCK_KEY = 728194;
 
 /**
  * ¿La fecha de vencimiento ya pasó HOY (hora Guatemala)? Mismo criterio de fecha

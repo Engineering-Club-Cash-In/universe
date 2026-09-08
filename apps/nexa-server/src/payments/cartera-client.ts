@@ -1,12 +1,15 @@
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import { z } from "zod";
-import type { TokenTransaction } from "../nexa/schemas";
-
 export type CarteraApplyPaymentResult =
   | { status: "APPLIED"; paymentId: number; idempotent?: boolean }
   | { status: "REJECTED"; reason: string };
 
-type CarteraTransaction = Omit<TokenTransaction, "transactionId"> & { transactionId?: string | number | null };
+type CarteraTransaction = {
+  reference: string | number;
+  amount: number;
+  currency: "GTQ" | "USD";
+  transactionId?: string | number | null;
+};
 
 export interface CarteraPaymentClient {
   applyNexaPayment(input: { creditoId: number; transaction: CarteraTransaction }): Promise<CarteraApplyPaymentResult>;

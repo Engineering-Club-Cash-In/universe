@@ -107,9 +107,14 @@ export const nexaReviews = pgTable("nexa_reviews", {
   responsePayload: jsonb("response_payload"),
   attempts: integer("attempts").notNull().default(1),
   lastError: text("last_error"),
+  nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+  leaseUntil: timestamp("lease_until", { withTimezone: true }),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => ({
+  transactionIdx: uniqueIndex("nexa_reviews_transaction_id_idx").on(table.transactionId),
+}));
 
 export const mockCarteraCredits = pgTable("mock_cartera_credits", {
   id: serial("id").primaryKey(),

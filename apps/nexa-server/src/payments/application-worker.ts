@@ -1,18 +1,31 @@
+import type { ReviewTransferStatus } from "../nexa/schemas";
+import type { CarteraPaymentClient } from "./cartera-client";
+
 export type ApplicationClaim = {
   id: number;
   reference: string;
+  amount: number;
+  currency: "GTQ" | "USD";
+  tokenIdentifier: string;
+  tokenPrefix: string;
+  transactionId: string;
   attemptCount: number;
 };
 
 export type ApplicationWorkerRepository = {
   claimNextApplication(now: Date, leaseSeconds: number): Promise<ApplicationClaim | null>;
-  markApplicationApplied(id: number, now: Date): Promise<void>;
+  resolveCreditoId(tokenIdentifier: string, tokenPrefix: string): Promise<number | null>;
+  finalizeApplication(id: number, outcome: {
+    paymentId: number | null;
+    reviewStatus: ReviewTransferStatus;
+    failureReason: string | null;
+  }, now: Date): Promise<void>;
   markApplicationFailed(id: number, reason: string, nextAttemptAt: Date | null, now: Date): Promise<void>;
 };
 
 export async function runApplicationWorkerOnce(options: {
   repository: ApplicationWorkerRepository;
-  process: (claim: ApplicationClaim) => Promise<void>;
+  cartera: CarteraPaymentClient;
   now?: () => Date;
   leaseSeconds: number;
   maxAttempts: number;
@@ -24,14 +37,42 @@ export async function runApplicationWorkerOnce(options: {
   if (!claim) return false;
 
   try {
-    await options.process(claim);
+    const creditoId = await options.repository.resolveCreditoId(claim.tokenIdentifier, claim.tokenPrefix);
+    if (!creditoId) {
+      await options.repository.finalizeApplication(claim.id, {
+        paymentId: null,
+        reviewStatus: "REJECTED",
+        failureReason: "token_user_not_found",
+      }, now);
+      return true;
+    }
+
+    const result = await options.cartera.applyNexaPayment({
+      creditoId,
+      transaction: {
+        reference: claim.reference,
+        amount: claim.amount,
+        currency: claim.currency,
+        transactionId: claim.transactionId,
+      },
+    });
+    await options.repository.finalizeApplication(claim.id, result.status === "APPLIED" ? {
+      paymentId: result.paymentId,
+      reviewStatus: "APPROVED",
+      failureReason: null,
+    } : {
+      paymentId: null,
+      reviewStatus: "REJECTED",
+      failureReason: "cartera_rejected",
+    }, now);
   } catch {
-    const nextAttemptAt = claim.attemptCount >= options.maxAttempts
-      ? null
-      : new Date(now.getTime() + Math.min(
-        options.maxBackoffSeconds,
-        options.backoffSeconds * 2 ** (claim.attemptCount - 1),
-      ) * 1_000);
+    const nextAttemptAt = getNextAttemptAt(
+      now,
+      claim.attemptCount,
+      options.maxAttempts,
+      options.backoffSeconds,
+      options.maxBackoffSeconds,
+    );
     await options.repository.markApplicationFailed(
       claim.id,
       "application_processing_failed",
@@ -40,7 +81,11 @@ export async function runApplicationWorkerOnce(options: {
     );
     return true;
   }
-
-  await options.repository.markApplicationApplied(claim.id, now);
   return true;
+}
+
+export function getNextAttemptAt(now: Date, attemptCount: number, maxAttempts: number, backoffSeconds: number, maxBackoffSeconds: number) {
+  return attemptCount >= maxAttempts
+    ? null
+    : new Date(now.getTime() + Math.min(maxBackoffSeconds, backoffSeconds * 2 ** (attemptCount - 1)) * 1_000);
 }

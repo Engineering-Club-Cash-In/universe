@@ -385,6 +385,37 @@ describe("estado de cuenta PDF", () => {
     expect(rows.map((p) => p.total_restante)).toEqual(["50000.00", "49400.00", "49000.00"]);
   });
 
+  it("la cuota que siembra la cadena reconoce su snapshot pre-cierre por la siguiente", () => {
+    // Con la cuota 0 presente, la cuota 1 siembra la cadena y no tiene una
+    // anterior contra la cual reconocer que su snapshot es pre-cierre. La
+    // evidencia sale de la cuota 2: su apertura implícita (48,000 + 1,000) cae
+    // exacto en 49,000, o sea que el cierre real de la 1 es ese y no 49,400.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 1, numero_cuota: 0, pagado: true, abono_capital: "0.00", abono_interes: "500.00", total_restante: "50000.00" },
+      { pago_id: 2, numero_cuota: 1, pagado: true, abono_capital: "600.00", abono_interes: "500.00", total_restante: "49400.00" },
+      { pago_id: 3, numero_cuota: 1, pagado: true, abono_capital: "400.00", total_restante: "49400.00" },
+      { pago_id: 4, numero_cuota: 2, pagado: true, abono_capital: "1000.00", abono_interes: "500.00", total_restante: "48000.00" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual([
+      "50000.00",
+      "49400.00",
+      "49000.00",
+      "48000.00",
+    ]);
+  });
+
+  it("la cuota que siembra respeta su snapshot cuando los abonos no explican la caida", () => {
+    // Crédito 1085: el saldo baja ~Q3,112 por cuota pero el capital registrado
+    // es ~Q1,767. La apertura implícita de la cuota 2 no cae sobre ninguno de
+    // los dos candidatos de la 1, así que manda su snapshot guardado.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 60434, numero_cuota: 0, pagado: true, abono_capital: "0.00", abono_interes: "900.00", total_restante: "98908.24" },
+      { pago_id: 60435, numero_cuota: 1, pagado: true, abono_capital: "1737.73", abono_interes: "2664.42", total_restante: "95848.01" },
+      { pago_id: 60436, numero_cuota: 2, pagado: true, abono_capital: "1766.93", abono_interes: "2638.35", total_restante: "92736.38" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["98908.24", "95848.01", "94081.08"]);
+  });
+
   it("el cierre por registerPayment no arrastra su saldo heredado a la cuota siguiente", () => {
     // La cuota 11 guarda Q49,400 en sus dos filas (el cierre solo-capital
     // hereda el total_restante de su hermana sin restar su propio abono), pero

@@ -218,16 +218,39 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
   // Q24,662.55 entre dos Q25,162.55).
   const cierreGuardado = new Map<string, Big>();
   const abonosPorCuota = new Map<string, Big>();
+  const ultimoAbonoPorCuota = new Map<string, Big>();
+  const ordenCuotas: string[] = [];
   for (const pago of pagos) {
     const key = String(pago.numero_cuota ?? "");
+    if (ordenCuotas[ordenCuotas.length - 1] !== key) ordenCuotas.push(key);
     const totalRestante = new Big(pago.total_restante || 0);
     // Última fila de la cuota con snapshot positivo: es su saldo de cierre.
     if (totalRestante.gt(0)) cierreGuardado.set(key, totalRestante);
-    abonosPorCuota.set(
-      key,
-      (abonosPorCuota.get(key) ?? new Big(0)).plus(pago.abono_capital || 0),
-    );
+    const abono = new Big(pago.abono_capital || 0);
+    abonosPorCuota.set(key, (abonosPorCuota.get(key) ?? new Big(0)).plus(abono));
+    ultimoAbonoPorCuota.set(key, abono);
   }
+
+  // Cierre real de la cuota que siembra la cadena. Su snapshot también puede
+  // ser pre-cierre, pero acá no hay cuota anterior contra la cual reconocerlo,
+  // así que se usa la SIGUIENTE: su apertura implícita —snapshot + Σ abonos—
+  // tiene que caer EXACTO sobre el cierre descontado para tratarlo como tal.
+  // Exacto y no "el más cercano": donde los abonos registrados no explican la
+  // caída del saldo, el implícito no cae sobre ninguno de los dos candidatos y
+  // manda el snapshot, que es lo que la cuota tiene guardado.
+  const cierreDeArranque = (key: string): Big => {
+    const snapshot = cierreGuardado.get(key) ?? new Big(0);
+    const siguiente = ordenCuotas[ordenCuotas.indexOf(key) + 1];
+    const snapshotSiguiente =
+      siguiente === undefined ? undefined : cierreGuardado.get(siguiente);
+    if (snapshotSiguiente === undefined) return snapshot;
+
+    const aperturaImplicita = snapshotSiguiente.plus(
+      abonosPorCuota.get(siguiente) ?? new Big(0),
+    );
+    const descontado = snapshot.minus(ultimoAbonoPorCuota.get(key) ?? new Big(0));
+    return aperturaImplicita.minus(descontado).abs().lte(0.02) ? descontado : snapshot;
+  };
 
   let cuotaActual: string | null = null;
   let saldo = new Big(0);
@@ -248,9 +271,7 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
         // Sin cierre previo utilizable: la apertura se reconstruye como
         // snapshot + Σ abonos de la cuota (el snapshot ya es post-pago), así
         // la última fila aterriza exacto en el saldo guardado.
-        saldo = (cierreGuardado.get(key) ?? new Big(0)).plus(
-          abonosPorCuota.get(key) ?? new Big(0),
-        );
+        saldo = cierreDeArranque(key).plus(abonosPorCuota.get(key) ?? new Big(0));
       } else {
         // Ancla de la cuota anterior: su snapshot guardado, salvo que ese
         // snapshot sea "pre-cierre".

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import type { TokenTransaction } from "../nexa/schemas";
 import type { MockCreditLedger } from "../payments/mock-ledger";
@@ -54,30 +55,61 @@ export class DbTokenUserRepository implements TokenUserRepository, TokenUserCrea
 export class DbPaymentTransactionRepository implements PaymentTransactionRepository {
   constructor(private readonly db: NexaDb) {}
 
-  async existsByReference(reference: string) {
-    const [transaction] = await this.db.select({ id: nexaPaymentTransactions.id }).from(nexaPaymentTransactions).where(eq(nexaPaymentTransactions.reference, reference)).limit(1);
-    return Boolean(transaction);
-  }
-
-  async createPending(transaction: TokenTransaction) {
-    const [created] = await this.db.insert(nexaPaymentTransactions).values({
-      reference: String(transaction.reference),
-      amount: String(transaction.amount),
-      bank: transaction.bank,
-      comments: transaction.comments ?? "",
+  async upsertReceived(transaction: TokenTransaction) {
+    const reference = String(transaction.reference);
+    const payloadFingerprint = fingerprint(reference, transaction.amount, transaction.token, transaction.transactionId);
+    const sanitizedPayload = {
+      reference,
+      amount: transaction.amount,
       currency: transaction.currency,
-      account: transaction.account,
-      token: transaction.token,
       tokenDate: transaction.tokenDate,
       tokenIdentifier: transaction.tokenIdentifier,
-      tokenName: transaction.tokenName,
       tokenPrefix: transaction.tokenPrefix,
       wasReturn: transaction.wasReturn,
       transactionId: transaction.transactionId,
-      rawPayload: transaction,
-    }).returning();
+    };
+    const [stored] = await this.db.insert(nexaPaymentTransactions).values({
+      reference,
+      amount: String(transaction.amount),
+      bank: "",
+      comments: "",
+      currency: transaction.currency,
+      account: "",
+      token: "",
+      tokenDate: transaction.tokenDate,
+      tokenIdentifier: transaction.tokenIdentifier,
+      tokenName: "",
+      tokenPrefix: transaction.tokenPrefix,
+      wasReturn: transaction.wasReturn,
+      transactionId: transaction.transactionId,
+      rawPayload: sanitizedPayload,
+      payloadFingerprint,
+    }).onConflictDoUpdate({
+      target: nexaPaymentTransactions.reference,
+      set: { reference: sql`excluded.reference` },
+    }).returning({
+      id: nexaPaymentTransactions.id,
+      reference: nexaPaymentTransactions.reference,
+      amount: nexaPaymentTransactions.amount,
+      token: nexaPaymentTransactions.token,
+      transactionId: nexaPaymentTransactions.transactionId,
+      processingStatus: nexaPaymentTransactions.processingStatus,
+      payloadFingerprint: nexaPaymentTransactions.payloadFingerprint,
+      created: sql<boolean>`xmax = 0`,
+    });
 
-    return { id: created.id, ...transaction };
+    const storedFingerprint = stored.payloadFingerprint
+      ?? (stored.token ? fingerprint(stored.reference, Number(stored.amount), stored.token, stored.transactionId) : null);
+    if (storedFingerprint !== payloadFingerprint) {
+      throw new Error(`Incompatible replay for reference ${reference}`);
+    }
+
+    return {
+      id: stored.id,
+      reference: stored.reference,
+      processingStatus: stored.processingStatus,
+      created: stored.created,
+    };
   }
 
   async markApplied(id: number, paymentId: number) {
@@ -95,6 +127,10 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
   async list() {
     return this.db.select().from(nexaPaymentTransactions).orderBy(nexaPaymentTransactions.id);
   }
+}
+
+function fingerprint(reference: string, amount: number, token: string, transactionId: string) {
+  return createHash("sha256").update(JSON.stringify([reference, amount, token, transactionId])).digest("hex");
 }
 
 export class PollRunRepository {

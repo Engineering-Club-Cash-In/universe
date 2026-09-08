@@ -66,6 +66,13 @@ export interface SendLiquidationEmailParams {
   creditNumber: string;
   date: string;
   currencySymbol?: string;
+  /**
+   * Nombre de quien abre el correo, cuando NO es la entidad liquidada: el
+   * representante legal de una sociedad. Un representante de varias sociedades
+   * recibe todos los correos en su propio buzón, así que el cuerpo tiene que
+   * saludarlo a él y decir a qué entidad corresponde cada uno.
+   */
+  representativeName?: string;
   attachment?: {
     filename: string;
     content: Buffer;
@@ -81,6 +88,7 @@ export const sendLiquidationEmail = async ({
   creditNumber,
   date,
   currencySymbol,
+  representativeName,
   attachment,
   reportUrl,
 }: SendLiquidationEmailParams) => {
@@ -104,9 +112,13 @@ export const sendLiquidationEmail = async ({
     const { data, error } = await resend.emails.send({
       from: `Club Cash In <no-reply@${domain}>`,
       to: [to],
-      subject: `Liquidación Procesada - ${date}`,
+      // El nombre de la entidad va en el asunto porque un representante de
+      // varias sociedades recibe varios de estos el mismo día, en el mismo
+      // buzón: sin el nombre, los cuatro asuntos son idénticos.
+      subject: `Liquidación Procesada - ${investorName} - ${date}`,
       react: React.createElement(LiquidationEmail, {
         investorName,
+        representativeName,
         amount,
         creditNumber,
         date,

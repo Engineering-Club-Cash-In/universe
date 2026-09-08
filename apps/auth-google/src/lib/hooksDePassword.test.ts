@@ -16,7 +16,7 @@ const TOKEN = "tok-vigente";
 
 type Registro = {
   distintas: { userId: string; nueva: string; prueba: PruebaDeIdentidad }[];
-  borrados: { userId: string; tokenEnUso?: string }[];
+  borrados: { userId: string; tokenEnUso: string | null }[];
 };
 
 const efectosAntes = (
@@ -36,6 +36,11 @@ const efectosAntes = (
     invalidarEnlaces: async (userId, tokenEnUso) => {
       borrados.push({ userId, tokenEnUso });
     },
+    // Por defecto la contraseña actual cuadra: el caso normal del formulario.
+    credencialProbada: async () => true,
+    invalidarTodosLosEnlaces: async (userId) => {
+      borrados.push({ userId, tokenEnUso: null });
+    },
     ...ajustes,
   };
 };
@@ -51,17 +56,41 @@ const peticionDeSesion = (
 });
 
 describe("antesDeCambiarPassword — camino de la sesión", () => {
-  it("no le borra a nadie los enlaces de recuperación", async () => {
-    // El borrado corría acá, ANTES de que Better Auth mirara la contraseña
-    // actual. O sea: cualquiera con la cookie de sesión —o el dueño mismo con
-    // un dedazo en la contraseña actual— destruía los enlaces pendientes en un
-    // intento que no cambiaba nada. Quien acababa de pedir un correo de
-    // recuperación se quedaba sin él por equivocarse al teclear.
-    const efectos = efectosAntes();
+  // El borrado corría acá sin probar nada, ANTES de que Better Auth mirara la
+  // contraseña actual. O sea: cualquiera con la cookie de sesión —o el dueño
+  // mismo con un dedazo— destruía los enlaces pendientes en un intento que no
+  // cambiaba nada. Quien acababa de pedir un correo de recuperación se quedaba
+  // sin él por equivocarse al teclear.
+  it("no le borra a nadie los enlaces si la contraseña actual no cuadra", async () => {
+    const efectos = efectosAntes({ credencialProbada: async () => false });
 
     await antesDeCambiarPassword(peticionDeSesion(), efectos);
 
     expect(efectos.borrados).toEqual([]);
+  });
+
+  // Y con la credencial probada sí borra, en el `before`. Mudarlo al `after`
+  // evitaba el destrozo de arriba pero volvía la invalidación un "si se puede":
+  // con la contraseña ya cambiada, un DELETE que falla deja 24 horas de enlaces
+  // vivos para pisarla.
+  it("borra los enlaces cuando la contraseña actual ya se probó", async () => {
+    const efectos = efectosAntes();
+
+    await antesDeCambiarPassword(peticionDeSesion(), efectos);
+
+    expect(efectos.borrados).toEqual([{ userId: USER, tokenEnUso: null }]);
+  });
+
+  it("rechaza el cambio si la base no deja invalidarlos", async () => {
+    const efectos = efectosAntes({
+      invalidarTodosLosEnlaces: async () => {
+        throw new Error("la base no responde");
+      },
+    });
+
+    await expect(
+      antesDeCambiarPassword(peticionDeSesion(), efectos),
+    ).rejects.toThrow();
   });
 
   it("sigue comprobando que la nueva sea distinta, con la contraseña actual como prueba", async () => {

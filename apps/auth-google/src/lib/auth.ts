@@ -14,6 +14,7 @@ import {
   despuesDeCambiarPassword,
 } from "./hooksDePassword";
 import {
+  credencialCoincide,
   exigirPasswordDistintaALaActual,
   type PruebaDeIdentidad,
 } from "./passwordDistinta";
@@ -190,6 +191,10 @@ export const auth = betterAuth({
           exigirDistinta: (userId, nueva, prueba) =>
             exigirPasswordDistintaALaActual(ctx, userId, nueva, prueba),
           invalidarEnlaces: exigirInvalidacionDeEnlaces,
+          credencialProbada: (userId, actual) =>
+            credencialCoincide(ctx, userId, actual),
+          invalidarTodosLosEnlaces: (userId) =>
+            exigirInvalidacionDeEnlaces(userId),
         },
       );
     }),

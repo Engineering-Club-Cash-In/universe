@@ -66,6 +66,38 @@ export type PruebaDeIdentidad =
  * más de argon2 no agrega nada: lo que esa diferencia de tiempo delata —si la
  * contraseña actual era la buena— ya lo dice la respuesta en voz alta.
  */
+/**
+ * ¿La contraseña que vino como "actual" es de verdad la de esta cuenta?
+ *
+ * Es la MISMA verificación que hace Better Auth unos milisegundos después, y se
+ * expone porque el hook `before` la necesita para otra cosa: sin ella, el
+ * camino de la sesión no puede borrar los enlaces pendientes sin destruirlos
+ * también en los intentos fallidos. Con ella, se sabe que el cambio va a
+ * ocurrir y el borrado puede fallar cerrado. Ver `hooksDePassword.ts`.
+ *
+ * Devuelve `false` —y no tira— cuando la cuenta no tiene credenciales: quien
+ * entra por Google no tiene ninguna contraseña actual que probar, y ahí
+ * `/change-password` va a rechazar por su cuenta.
+ */
+export const credencialCoincide = async (
+  ctx: ContextoDePassword,
+  userId: string,
+  actual: unknown,
+): Promise<boolean> => {
+  if (typeof actual !== "string" || actual === "") return false;
+
+  const cuentas = await ctx.context.internalAdapter.findAccounts(userId);
+  const credencial = cuentas.find(
+    (cuenta) => cuenta.providerId === "credential" && cuenta.password,
+  );
+  if (!credencial?.password) return false;
+
+  return ctx.context.password.verify({
+    hash: credencial.password,
+    password: actual,
+  });
+};
+
 const puedeContestar = async (
   ctx: ContextoDePassword,
   hash: string,

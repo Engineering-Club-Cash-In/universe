@@ -22,12 +22,19 @@ import type { PruebaDeIdentidad } from "./passwordDistinta";
  *   seguirían sirviendo sus 24 horas.
  *
  * - Camino de la SESIÓN. La cookie no prueba nada: quien manda
- *   `/change-password` es cualquiera que la tenga, y lo que lo desmiente es
- *   `currentPassword`, que verifica Better Auth después de este hook. Por eso
- *   acá el `before` NO borra nada. Borraba, y eso significaba que un intento
- *   fallido —un dedazo del dueño, o alguien con la sesión robada
- *   repitiéndolo— destruía enlaces de recuperación pendientes sin cambiar
- *   ninguna contraseña.
+ *   `/change-password` es cualquiera que la tenga. Por eso el `before` borraba
+ *   sin más y un intento fallido —un dedazo del dueño, o alguien con la sesión
+ *   robada repitiéndolo— destruía enlaces de recuperación pendientes sin
+ *   cambiar ninguna contraseña. La salida no era mudarlo al `after`: ahí el
+ *   borrado ya no puede rechazar nada y un DELETE que falle deja 24 horas de
+ *   enlaces vivos para pisar la contraseña recién elegida. La salida es
+ *   PROBAR la credencial en el `before` —la misma verificación que Better Auth
+ *   hará después— y borrar solo entonces.
+ *
+ * El `after` sigue borrando igual, y no es redundante: cubre la rendija entre
+ * el DELETE y el cambio de contraseña, donde un enlace emitido en ese instante
+ * no estaba entre las filas borradas. Ahí sí es best-effort, porque llegado ese
+ * punto la contraseña ya cambió y tirar solo empeoraría las cosas.
  */
 
 export const RUTA_RESET_DE_PASSWORD = "/reset-password";
@@ -61,6 +68,16 @@ export interface EfectosAntesDelCambio {
    * sesión —donde no hay ninguno— no compile.
    */
   invalidarEnlaces: (userId: string, tokenEnUso: string) => Promise<void>;
+  /**
+   * ¿La `currentPassword` que vino es de verdad la de esta cuenta?
+   *
+   * Es lo que le falta al camino de la sesión para poder trabajar en el
+   * `before`. La cookie no prueba nada, pero esto sí, y es la MISMA
+   * verificación que Better Auth hará unos milisegundos después.
+   */
+  credencialProbada: (userId: string, actual: unknown) => Promise<boolean>;
+  /** Borra TODOS los enlaces pendientes. Solo el camino de la sesión. */
+  invalidarTodosLosEnlaces: (userId: string) => Promise<void>;
 }
 
 export const antesDeCambiarPassword = async (
@@ -96,15 +113,29 @@ export const antesDeCambiarPassword = async (
     // Sin sesión no hay nada que hacer: el endpoint responde 401.
     if (!userId) return;
 
-    // Lo único que corre acá. `exigirDistinta` tiene que ser previa porque su
-    // trabajo es RECHAZAR el cambio, y para eso el cambio no puede haber
-    // ocurrido; se protege sola verificando `currentPassword` antes de
-    // contestar. El borrado de enlaces no tiene esa excusa y se mudó al
-    // `after`.
+    // `exigirDistinta` tiene que ser previa porque su trabajo es RECHAZAR el
+    // cambio, y para eso el cambio no puede haber ocurrido; se protege sola
+    // verificando `currentPassword` antes de contestar.
     await efectos.exigirDistinta(userId, nueva, {
       via: "sesion",
       actual: peticion.actual,
     });
+
+    // Y el borrado, solo DESPUÉS de probar la credencial.
+    //
+    // Es lo que faltaba para no tener que elegir entre dos fallos. Borrar sin
+    // probar destruía enlaces pendientes en cada intento fallido —un dedazo del
+    // dueño, o alguien con la sesión robada repitiéndolo—. Borrar en el `after`
+    // lo arreglaba pero volvía la invalidación un "si se puede": con la
+    // contraseña ya cambiada, un DELETE que falla deja vivos 24 horas de
+    // enlaces que sirven para pisarla.
+    //
+    // Probando la credencial acá se sabe que Better Auth va a aceptar el
+    // cambio, así que el borrado puede volver a ser previo y fallar cerrado: si
+    // la base falla, esto tira y la contraseña no llega a cambiar.
+    if (await efectos.credencialProbada(userId, peticion.actual)) {
+      await efectos.invalidarTodosLosEnlaces(userId);
+    }
   } catch (error) {
     // Un rechazo con causa —la contraseña repetida— viaja tal cual: es lo único
     // que la persona puede corregir sola.

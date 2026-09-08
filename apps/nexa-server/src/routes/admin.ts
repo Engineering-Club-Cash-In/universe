@@ -20,7 +20,7 @@ const mockCreditSchema = z.object({
 });
 
 export function createAdminRouter(deps: {
-  internalApiKey: string;
+  adminApiKey: string;
   nexa: NexaClient;
   cartera: CarteraPaymentClient;
   paymentTokens: PaymentTokenRepository;
@@ -38,7 +38,7 @@ export function createAdminRouter(deps: {
 
   router.use("/*", async (c, next) => {
     const token = c.req.header("Authorization")?.replace("Bearer ", "").trim();
-    if (token !== deps.internalApiKey) {
+    if (token !== deps.adminApiKey) {
       return c.json({ error: "Unauthorized" }, 401);
     }
     await next();

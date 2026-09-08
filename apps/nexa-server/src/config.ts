@@ -20,13 +20,15 @@ const configSchema = z.object({
   nexaWebhookBearerToken: z.string().min(1),
   nexaPollIntervalSeconds: z.coerce.number().int().positive().default(30),
   nexaPollLookbackDays: z.coerce.number().int().min(0).default(1),
-  internalApiKey: z.string().min(1),
+  nexaAdminApiKey: z.string().trim().min(1),
+  carteraInternalApiSecret: z.string().trim().min(1),
   carteraApiBaseUrl: z.string().url(),
+  carteraTargetEnv: z.enum(["development", "qa"]).optional(),
   mockCartera: envBoolean.default(false),
   enableAdminApi: envBoolean.default(false),
   enableTestUi: envBoolean.default(false),
   nodeEnv: z.string().default("development"),
-  deploymentMode: z.enum(["integration", "production"]).default("integration"),
+  deploymentMode: z.enum(["integration", "qa_real_payments", "production"]).default("integration"),
 }).superRefine((config, context) => {
   const tlsPaths = [config.nexaClientCertPath, config.nexaClientKeyPath, config.nexaCaCertPath];
   if (config.nexaMtlsMode === "required" && tlsPaths.some((value) => !value)) {
@@ -46,7 +48,8 @@ const configSchema = z.object({
   if (config.nodeEnv === "production") {
     const forbidden = new Set(["dev-secret", "local-flow", "local-webhook-token"]);
     for (const [path, value] of [
-      ["internalApiKey", config.internalApiKey],
+      ["nexaAdminApiKey", config.nexaAdminApiKey],
+      ["carteraInternalApiSecret", config.carteraInternalApiSecret],
       ["nexaWebhookFlowId", config.nexaWebhookFlowId],
       ["nexaWebhookBearerToken", config.nexaWebhookBearerToken],
     ] as const) {
@@ -89,6 +92,23 @@ const configSchema = z.object({
       message: "Integration deployment requires mock cartera",
     });
   }
+  if (config.deploymentMode === "qa_real_payments") {
+    if (config.mockCartera) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["mockCartera"], message: "qa_real_payments cannot use mock cartera" });
+    }
+    if (config.nexaMtlsMode !== "required") {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["nexaMtlsMode"], message: "qa_real_payments requires mTLS" });
+    }
+    if (!config.carteraTargetEnv) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["carteraTargetEnv"], message: "qa_real_payments requires CARTERA_TARGET_ENV development or qa" });
+    }
+    if (config.enableTestUi) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["enableTestUi"], message: "qa_real_payments cannot expose the test UI" });
+    }
+    if (config.nexaAdminApiKey === config.carteraInternalApiSecret) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["carteraInternalApiSecret"], message: "qa_real_payments requires separate credentials" });
+    }
+  }
 });
 
 export function loadConfig(env = process.env) {
@@ -108,8 +128,10 @@ export function loadConfig(env = process.env) {
     nexaWebhookBearerToken: env.NEXA_WEBHOOK_BEARER_TOKEN,
     nexaPollIntervalSeconds: env.NEXA_POLL_INTERVAL_SECONDS,
     nexaPollLookbackDays: env.NEXA_POLL_LOOKBACK_DAYS,
-    internalApiKey: env.INTERNAL_API_KEY,
+    nexaAdminApiKey: env.NEXA_ADMIN_API_KEY,
+    carteraInternalApiSecret: env.CARTERA_INTERNAL_API_SECRET,
     carteraApiBaseUrl: env.CARTERA_API_BASE_URL,
+    carteraTargetEnv: env.CARTERA_TARGET_ENV,
     mockCartera: env.MOCK_CARTERA,
     enableAdminApi: env.ENABLE_ADMIN_API,
     enableTestUi: env.ENABLE_TEST_UI,

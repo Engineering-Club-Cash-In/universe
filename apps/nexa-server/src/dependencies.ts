@@ -22,7 +22,7 @@ export function createDependencies(config: AppConfig) {
   const mockCredits = new MockCreditRepository(db);
   const cartera = config.mockCartera
     ? new MockCarteraPaymentClient(mockCredits)
-    : new HttpCarteraPaymentClient({ baseUrl: config.carteraApiBaseUrl, internalApiKey: config.internalApiKey });
+    : new HttpCarteraPaymentClient({ baseUrl: config.carteraApiBaseUrl, secret: config.carteraInternalApiSecret });
 
   return {
     db,

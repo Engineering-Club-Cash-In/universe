@@ -4,7 +4,7 @@ import { createAdminRouter } from "./admin";
 describe("admin router", () => {
   test("lists token users and transactions for the test console", async () => {
     const router = createAdminRouter({
-      internalApiKey: "dev-secret",
+      adminApiKey: "dev-secret",
       nexa: {} as never,
       cartera: {} as never,
       paymentTokens: {} as never,
@@ -37,7 +37,7 @@ describe("admin router", () => {
 
   test("returns a validation response when Nexa rejects token user creation", async () => {
     const router = createAdminRouter({
-      internalApiKey: "dev-secret",
+      adminApiKey: "dev-secret",
       nexa: {
         createPaymentToken: async () => ({ id: 455, prefix: "32200" }),
         createTokenUsers: async () => ({

@@ -362,6 +362,47 @@ export const correoDeCarteraCoincide = (
   return cuenta !== "" && cuenta === cartera;
 };
 
+/**
+ * ¿Hay algo MÁS que el correo atando esta cuenta a la persona de cartera?
+ *
+ * `correoDeCarteraCoincide` no sirve para esto cuando la cuenta se resolvió POR
+ * correo: se llegó a ella BUSCANDO ese correo, así que la comprobación es
+ * tautológica y siempre da `true`. Y el correo es la evidencia más débil que
+ * hay aquí — `lib/auth.ts` fija `requireEmailVerification: false`, así que el
+ * de la cuenta lo eligió quien se registró y nadie lo comprobó nunca. El de
+ * cartera, en cambio, lo escribió el staff. Esa asimetría es todo el problema.
+ *
+ * Respaldar significa que el DPI de la CUENTA existe y es el de cartera. Los
+ * dos en `null` NO respaldan nada: comparados con `===` "coinciden", pero es la
+ * ausencia de evidencia, no evidencia. La normalización es la misma de todo el
+ * módulo (`normalizarDpiPortal`), la misma que usa el SQL de `dpiLookup.ts`.
+ *
+ * Sigue sin ser un DPI verificado —también lo teclea quien se registra— pero es
+ * el segundo dato independiente que el staff sí tiene en cartera, y es
+ * exactamente el mismo listón que el camino por DPI (que además exige el
+ * correo). Aquí no se puede pedir más sin verificar el correo.
+ */
+export const dpiRespaldaLaCuenta = (
+  dpiDeLaCuenta: string | null | undefined,
+  dpiDeCartera: string | null | undefined,
+): boolean => {
+  const cuenta = normalizarDpiPortal(dpiDeLaCuenta);
+
+  return cuenta !== null && cuenta === normalizarDpiPortal(dpiDeCartera);
+};
+
+/**
+ * ¿Promover a esta cuenta implicaría un UPDATE?
+ *
+ * Es lo que separa "concederle el acceso a alguien" de "reconocer el que ya
+ * tenía". A quien ya es INVESTOR esta corrida no le da nada, así que ahí no hay
+ * privilegio que proteger; bloquearlo solo llenaría el resumen diario de falsos
+ * pendientes (producción tiene cuentas legítimas con `users.dpi` NULL, herencia
+ * del normalizador viejo) y dejaría sin avisar a representantes reales.
+ */
+const promoverEscribiria = (usuario: UsuarioPortal): boolean =>
+  resolveRoleAfterRegistration(usuario.role, "INVESTOR") !== null;
+
 const anotarIdentidad = (
   encontrado: { usuario: UsuarioPortal; resueltoPor: "dpi" | "email" },
   emailDeCartera: string,
@@ -394,10 +435,7 @@ const anotarIdentidad = (
   // identidad MÁS fuerte a partir de la evidencia MÁS débil del módulo —un
   // correo que Better Auth no verifica— no le toca a un provisionamiento
   // automático. Que lo confirme un humano con esta lista en la mano.
-  if (
-    resueltoPor === "email" &&
-    normalizarDpiPortal(usuario.dpi) !== normalizarDpiPortal(dpiDeCartera)
-  ) {
+  if (resueltoPor === "email" && !dpiRespaldaLaCuenta(usuario.dpi, dpiDeCartera)) {
     advertencias.push("cuenta_anclada_solo_por_correo");
   }
 };
@@ -438,6 +476,34 @@ const reconocerExistente = async (
       correo: correoVacio(modo),
       advertencias,
       motivo: "correo_de_cartera_distinto_al_de_la_cuenta",
+    };
+  }
+
+  // La otra mitad del mismo cierre. Arriba se comprueba el correo, que es lo
+  // que ata la cuenta a lo que cartera reconoce; pero si a la cuenta se llegó
+  // POR ese correo, la comprobación no dice nada: se buscó justo ese valor.
+  //
+  // Lo único que queda entonces es un correo que nadie verificó. Cualquiera
+  // registra el correo de un inversionista conocido con la contraseña que él
+  // elige, y esta llamada le entrega INVESTOR — el rol que habilita la carga de
+  // entidades del portal, que ancla por correo. Sin un segundo dato que lo
+  // respalde, ese ascenso no lo puede decidir un provisionamiento automático:
+  // es la misma política que el módulo ya aplica al DPI unas líneas más abajo.
+  //
+  // Se corta solo lo que ESCRIBE. A quien ya es INVESTOR se le reconoce igual:
+  // esta corrida no le concede nada.
+  if (
+    resueltoPor === "email" &&
+    promoverEscribiria(usuario) &&
+    !dpiRespaldaLaCuenta(usuario.dpi, dpiDeCartera)
+  ) {
+    return {
+      estado: "fallo",
+      usuarioEmail: usuario.email,
+      resueltoPor,
+      correo: correoVacio(modo),
+      advertencias,
+      motivo: "cuenta_anclada_solo_por_correo",
     };
   }
 
@@ -588,6 +654,27 @@ export const avisarEmpresaAgregada = async (
       correo: correoVacio(modo),
       advertencias,
       motivo: "correo_de_cartera_distinto_al_de_la_cuenta",
+    };
+  }
+
+  // Mismo cierre que en `reconocerExistente`: si a la cuenta se llegó por el
+  // correo, el correo no prueba nada, y sin un DPI que lo respalde no se
+  // escribe el rol. Este camino no pasa por `anotarIdentidad`, así que la
+  // advertencia se anota aquí.
+  if (
+    existente.resueltoPor === "email" &&
+    promoverEscribiria(existente.usuario) &&
+    !dpiRespaldaLaCuenta(existente.usuario.dpi, entrada.representanteDpi)
+  ) {
+    advertencias.push("cuenta_anclada_solo_por_correo");
+
+    return {
+      estado: "fallo",
+      usuarioEmail: existente.usuario.email,
+      resueltoPor: existente.resueltoPor,
+      correo: correoVacio(modo),
+      advertencias,
+      motivo: "cuenta_anclada_solo_por_correo",
     };
   }
 

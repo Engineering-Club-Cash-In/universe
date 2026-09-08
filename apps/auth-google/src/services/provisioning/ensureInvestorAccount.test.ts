@@ -131,9 +131,15 @@ describe("asegurarCuentaInversionista — ya tenía cuenta", () => {
   });
 
   it("cae a la búsqueda por correo cuando no hay DPI", async () => {
-    usuarios.push({ id: "u1", email: "ana@example.com", nombre: "Ana", role: "CLIENT", dpi: null });
+    // La cuenta es INVESTOR y sin DPI: el caso real de producción, herencia del
+    // normalizador viejo que guardaba NULL. El fallback por correo la reconoce
+    // y no escribe nada. (Antes esta prueba usaba un CLIENT y daba por bueno el
+    // ascenso; eso es justo lo que se cerró: ver "el rol no se promueve sobre
+    // un vínculo que es solo el correo".)
+    usuarios.push({ id: "u1", email: "ana@example.com", nombre: "Ana", role: "INVESTOR", dpi: null });
     const r = await asegurarCuentaInversionista(entrada({ dpi: null }), deps());
     expect(r).toMatchObject({ estado: "ya_tenia", resueltoPor: "email" });
+    expect(actualizaciones).toEqual([]);
   });
 
   it("NO manda correo a quien ya tenía cuenta", async () => {
@@ -148,10 +154,15 @@ describe("asegurarCuentaInversionista — ya tenía cuenta", () => {
   });
 
   it("promueve CLIENT a INVESTOR pero no toca un ADMIN", async () => {
-    usuarios.push({ id: "u1", email: "ana@example.com", nombre: "Ana", role: "CLIENT", dpi: null });
+    // El CLIENT lleva el DPI de cartera: es el ascenso legítimo, el de quien se
+    // registró solo y a quien el staff da de alta después. Sin ese respaldo el
+    // ascenso ya no ocurre (ver "el rol no se promueve sobre un vínculo que es
+    // solo el correo"), y lo que esta prueba fija es la otra mitad: que a un
+    // rol administrativo no se le toca ni con respaldo ni sin él.
+    usuarios.push({ id: "u1", email: "ana@example.com", nombre: "Ana", role: "CLIENT", dpi: "1234567890101" });
     usuarios.push({ id: "u2", email: "jefe@example.com", nombre: "Jefe", role: "ADMIN", dpi: null });
 
-    await asegurarCuentaInversionista(entrada({ dpi: null }), deps());
+    await asegurarCuentaInversionista(entrada(), deps());
     expect(actualizaciones).toContainEqual({ id: "u1", role: "INVESTOR" });
 
     actualizaciones.length = 0;
@@ -171,7 +182,11 @@ describe("asegurarCuentaInversionista — ya tenía cuenta", () => {
     const d = deps();
     fallarCreacion = () => {
       // Simula el 23505: otro proceso creó la cuenta entre la búsqueda y el insert.
-      usuarios.push({ id: "u9", email: "ana@example.com", nombre: "Ana", role: "CLIENT", dpi: null });
+      // El proceso que gana la carrera deja la cuenta como la deja el alta:
+      // con rol y DPI escritos. Si el perdedor la alcanza ANTES de ese UPDATE,
+      // hoy la ve como "anclada solo por el correo" y sale reportada — no se
+      // pierde acceso, lo concede el que ganó.
+      usuarios.push({ id: "u9", email: "ana@example.com", nombre: "Ana", role: "INVESTOR", dpi: "1234567890101" });
       throw new Error("duplicate key value violates unique constraint users_email_key");
     };
     const r = await asegurarCuentaInversionista(entrada(), d);
@@ -401,7 +416,10 @@ describe("vínculo frágil: la cuenta se encontró solo por el correo", () => {
 
     const r = await asegurarCuentaInversionista(entrada(), deps());
 
-    expect(r.estado).toBe("ya_tenia");
+    // Ya no es un "ya_tenia": sobre un vínculo que es solo el correo tampoco se
+    // escribe el ROL. Queda como pendiente para que lo mire un humano.
+    expect(r.estado).toBe("fallo");
+    expect(r.motivo).toBe("cuenta_anclada_solo_por_correo");
     expect(r.resueltoPor).toBe("email");
     expect(r.advertencias).toContain("cuenta_anclada_solo_por_correo");
     // NO se escribe el DPI: `resolverUsuario` busca por DPI PRIMERO, así que
@@ -412,7 +430,7 @@ describe("vínculo frágil: la cuenta se encontró solo por el correo", () => {
     // (POST /api/cartera/investor resuelve la fila por DPI y aplica
     // numero_cuenta): afirmar identidad sobre la evidencia más débil del
     // módulo (un correo sin verificar) es peor que el duplicado que evita.
-    expect(actualizaciones).toEqual([{ id: "u1", role: "INVESTOR" }]);
+    expect(actualizaciones).toEqual([]);
     expect(usuarios[0].dpi).toBeNull();
   });
 
@@ -598,6 +616,150 @@ describe("el rol no se promueve antes de validar el correo", () => {
       estado: "fallo",
       motivo: "correo_de_cartera_distinto_al_de_la_cuenta",
     });
+    expect(actualizaciones).toEqual([]);
+    expect(usuarios[0].role).toBe("CLIENT");
+    expect(avisos).toEqual([]);
+  });
+});
+
+/**
+ * El rol tampoco se promueve sobre una cuenta que solo casa por CORREO.
+ *
+ * Es la otra mitad del mismo agujero, y la ASIMETRÍA es la clave: el correo de
+ * cartera lo escribió el STAFF; el de la cuenta lo eligió quien se registró, y
+ * `requireEmailVerification: false` (`lib/auth.ts`) deja que nadie lo haya
+ * comprobado nunca. Cuando NINGUNA cuenta casa por DPI, `resolverUsuario` cae
+ * al correo — y ahí `correoDeCarteraCoincide` no prueba nada: a esa cuenta se
+ * llegó BUSCANDO ese correo, así que la comprobación es tautológica.
+ *
+ * El ataque completo: alguien registra el correo de un inversionista conocido
+ * con la contraseña que él elige; el siguiente provisionamiento del staff
+ * encuentra esa cuenta CLIENT por correo, le regala INVESTOR, y la búsqueda de
+ * entidades por correo del portal le entrega las inversiones de la víctima.
+ *
+ * Para ESCRIBIR el rol hace falta que el DPI de la cuenta respalde al de
+ * cartera. Es el mismo criterio del camino por DPI —que además exige el
+ * correo— y la misma política que el módulo ya aplica al DPI: no afirmar la
+ * identidad más fuerte desde la evidencia más débil.
+ */
+describe("el rol no se promueve sobre un vínculo que es solo el correo", () => {
+  it("cuenta CLIENT hallada solo por correo: falla y NO promueve", async () => {
+    // El impostor: se registró con el correo de Ana y su cuenta no tiene DPI.
+    usuarios.push({
+      id: "u1",
+      email: "ana@example.com",
+      nombre: "Ana",
+      role: "CLIENT",
+      dpi: null,
+    });
+
+    const r = await asegurarCuentaInversionista(entrada(), deps());
+
+    expect(r).toMatchObject({
+      estado: "fallo",
+      motivo: "cuenta_anclada_solo_por_correo",
+      resueltoPor: "email",
+    });
+    expect(actualizaciones).toEqual([]);
+    expect(usuarios[0].role).toBe("CLIENT");
+  });
+
+  it("tampoco promueve si la cuenta trae OTRO DPI", async () => {
+    usuarios.push({
+      id: "u1",
+      email: "ana@example.com",
+      nombre: "Ana",
+      role: "CLIENT",
+      dpi: "9999999999999",
+    });
+
+    const r = await asegurarCuentaInversionista(entrada(), deps());
+
+    expect(r).toMatchObject({
+      estado: "fallo",
+      motivo: "cuenta_anclada_solo_por_correo",
+      resueltoPor: "email",
+    });
+    expect(actualizaciones).toEqual([]);
+  });
+
+  it("ni cuando cartera tampoco tiene DPI: sin nada que cotejar, no se escribe", async () => {
+    // Los dos lados en NULL "coinciden" si se comparan con ===. No es un
+    // respaldo: es la ausencia de cualquier evidencia.
+    usuarios.push({
+      id: "u1",
+      email: "ana@example.com",
+      nombre: "Ana",
+      role: "CLIENT",
+      dpi: null,
+    });
+
+    const r = await asegurarCuentaInversionista(entrada({ dpi: null }), deps());
+
+    expect(r).toMatchObject({ estado: "fallo", motivo: "cuenta_anclada_solo_por_correo" });
+    expect(actualizaciones).toEqual([]);
+  });
+
+  // El control positivo: con el DPI de cartera en la cuenta el ascenso sigue
+  // pasando. Lo que se cerró es la promoción SIN respaldo, no la promoción.
+  it("con el DPI de cartera en la cuenta sí promueve a INVESTOR", async () => {
+    usuarios.push({
+      id: "u1",
+      email: "ana@example.com",
+      nombre: "Ana",
+      role: "CLIENT",
+      dpi: "1234567890101",
+    });
+
+    const r = await asegurarCuentaInversionista(entrada(), deps());
+
+    expect(r).toMatchObject({ estado: "ya_tenia", resueltoPor: "dpi" });
+    expect(actualizaciones).toEqual([{ id: "u1", role: "INVESTOR" }]);
+  });
+
+  // A quien YA es INVESTOR no se le escribe nada, así que aquí no hay nada que
+  // cerrar: el acceso que tiene no se lo da esta corrida. Bloquearlo solo
+  // llenaría el resumen diario de falsos pendientes —hay cuentas legítimas de
+  // producción con `users.dpi` NULL— y dejaría sin avisar a representantes
+  // reales.
+  it("a quien ya es INVESTOR lo sigue reconociendo, y sigue sin escribir", async () => {
+    usuarios.push({
+      id: "u1",
+      email: "ana@example.com",
+      nombre: "Ana",
+      role: "INVESTOR",
+      dpi: null,
+    });
+
+    const r = await asegurarCuentaInversionista(entrada(), deps());
+
+    expect(r).toMatchObject({ estado: "ya_tenia", resueltoPor: "email" });
+    expect(r.advertencias).toContain("cuenta_anclada_solo_por_correo");
+    expect(actualizaciones).toEqual([]);
+  });
+
+  it("el aviso de empresa tampoco promueve a una cuenta hallada solo por correo", async () => {
+    usuarios.push({
+      id: "u1",
+      email: "richard@example.com",
+      nombre: "Richard",
+      role: "CLIENT",
+      dpi: null,
+    });
+
+    const r = await avisarEmpresaAgregada(
+      {
+        representanteEmail: "richard@example.com",
+        representanteDpi: "1573661970101",
+        representanteNombre: "Richard Kachler",
+        inversionistaId: 86,
+        inversionistaNombre: "Cube Investments S.A.",
+      },
+      deps(),
+    );
+
+    expect(r).toMatchObject({ estado: "fallo", motivo: "cuenta_anclada_solo_por_correo" });
+    expect(r.advertencias).toContain("cuenta_anclada_solo_por_correo");
     expect(actualizaciones).toEqual([]);
     expect(usuarios[0].role).toBe("CLIENT");
     expect(avisos).toEqual([]);

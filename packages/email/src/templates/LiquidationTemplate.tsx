@@ -62,11 +62,17 @@ export const LiquidationEmail = ({
       />
     </Head>
     {/*
-      El nombre de la entidad va en el preview igual que en el asunto: en la
-      bandeja de un representante de varias sociedades, es la única forma de
-      distinguir cuatro correos que llegan el mismo día.
+      El nombre de la entidad va en el preview igual que en el asunto, pero
+      SOLO cuando el correo cae en el buzón de un representante: en la bandeja
+      de quien recibe cuatro liquidaciones el mismo día es la única forma de
+      distinguirlas. Los 182 inversionistas que no son sociedad no ganan nada
+      con eso, así que conservan el preview de siempre, sin cambios.
     */}
-    <Preview>{`Confirmación de Liquidación ${investorName} - ${date}`}</Preview>
+    <Preview>
+      {representativeName
+        ? `Confirmación de Liquidación ${investorName} - ${date}`
+        : "Confirmación de Liquidación - CashIn"}
+    </Preview>
     <Body style={main}>
       <Container style={container}>
         {assets ? (
@@ -85,12 +91,17 @@ export const LiquidationEmail = ({
 
         <Section style={content}>
           {/*
-            La entidad va en el encabezado, no solo en el saludo: cuando el
-            correo cae en el buzón del representante, el saludo lleva el nombre
-            de él y la entidad tiene que seguir visible de un vistazo.
+            La entidad va en el encabezado SOLO cuando el saludo no la nombra:
+            si el correo cae en el buzón del representante, el saludo lleva el
+            nombre de él y la entidad tiene que seguir visible de un vistazo.
+            A una persona esa línea le duplicaría el nombre —una vez acá y otra
+            en "Estimado(a) X"—, así que su encabezado queda como siempre,
+            separación incluida.
           */}
-          <Heading style={h1}>Confirmación de Liquidación</Heading>
-          <Text style={entityLine}>{investorName}</Text>
+          <Heading style={representativeName ? h1ConEntidad : h1}>
+            Confirmación de Liquidación
+          </Heading>
+          {representativeName && <Text style={entityLine}>{investorName}</Text>}
 
           <Text style={greeting}>
             Estimado(a) <strong>{representativeName ?? investorName}</strong>,
@@ -208,8 +219,12 @@ const h1 = {
   fontSize: '24px',
   fontWeight: '700' as const,
   textAlign: 'center' as const,
-  margin: '0 0 6px',
+  margin: '0 0 28px',
 };
+
+// Cuando debajo va la línea de entidad, el encabezado cede su separación: las
+// dos líneas son un solo bloque y los 28px los pone la de abajo.
+const h1ConEntidad = { ...h1, margin: '0 0 6px' };
 
 const entityLine = {
   color: '#4E57EA',

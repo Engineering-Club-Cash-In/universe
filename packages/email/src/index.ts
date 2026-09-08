@@ -4,6 +4,7 @@ import LiquidationEmail from "./templates/LiquidationTemplate";
 import PasswordResetEmail, { type PasswordResetRole } from "./templates/PasswordResetTemplate";
 import NewCreditEmail from "./templates/NewCreditTemplate";
 import * as React from "react";
+import { asuntoDeLiquidacion } from "./asuntoLiquidacion";
 
 import { z } from "zod";
 
@@ -112,10 +113,7 @@ export const sendLiquidationEmail = async ({
     const { data, error } = await resend.emails.send({
       from: `Club Cash In <no-reply@${domain}>`,
       to: [to],
-      // El nombre de la entidad va en el asunto porque un representante de
-      // varias sociedades recibe varios de estos el mismo día, en el mismo
-      // buzón: sin el nombre, los cuatro asuntos son idénticos.
-      subject: `Liquidación Procesada - ${investorName} - ${date}`,
+      subject: asuntoDeLiquidacion(investorName, date, representativeName),
       react: React.createElement(LiquidationEmail, {
         investorName,
         representativeName,

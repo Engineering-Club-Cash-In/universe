@@ -6,6 +6,7 @@ const envBoolean = z.union([z.boolean(), z.enum(["true", "false"])]).transform((
 const envOrigins = z.string().transform((value) =>
   value.split(",").map((origin) => origin.trim()).filter(Boolean),
 ).optional();
+const positiveFiniteInteger = z.coerce.number().int().finite().positive();
 
 const configSchema = z.object({
   port: z.coerce.number().int().positive().default(7010),
@@ -23,6 +24,10 @@ const configSchema = z.object({
   nexaWebhookBearerToken: z.string().min(1),
   nexaPollIntervalSeconds: z.coerce.number().int().positive().default(30),
   nexaPollLookbackDays: z.coerce.number().int().min(0).default(1),
+  workerLeaseSeconds: positiveFiniteInteger.default(60),
+  workerMaxAttempts: positiveFiniteInteger.default(5),
+  workerBackoffSeconds: positiveFiniteInteger.default(5),
+  workerMaxBackoffSeconds: positiveFiniteInteger.default(300),
   nexaAdminApiKey: z.string().trim().min(1).optional(),
   carteraInternalApiSecret: z.string().trim().min(1).optional(),
   carteraApiBaseUrl: z.string().url().optional(),
@@ -158,6 +163,10 @@ export function loadConfig(env = process.env) {
     nexaWebhookBearerToken: env.NEXA_WEBHOOK_BEARER_TOKEN,
     nexaPollIntervalSeconds: env.NEXA_POLL_INTERVAL_SECONDS,
     nexaPollLookbackDays: env.NEXA_POLL_LOOKBACK_DAYS,
+    workerLeaseSeconds: env.WORKER_LEASE_SECONDS,
+    workerMaxAttempts: env.WORKER_MAX_ATTEMPTS,
+    workerBackoffSeconds: env.WORKER_BACKOFF_SECONDS,
+    workerMaxBackoffSeconds: env.WORKER_MAX_BACKOFF_SECONDS,
     nexaAdminApiKey: env.NEXA_ADMIN_API_KEY,
     carteraInternalApiSecret: env.CARTERA_INTERNAL_API_SECRET,
     carteraApiBaseUrl: env.CARTERA_API_BASE_URL,

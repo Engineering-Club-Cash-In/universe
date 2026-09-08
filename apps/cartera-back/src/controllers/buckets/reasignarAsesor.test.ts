@@ -82,7 +82,7 @@ const fakeDb: any = {
   select: () => crearBuilderSelect(),
   ...crearMutadores(),
   execute: async () => estado.executeResult,
-  transaction: async (cb: any) => cb(crearMutadores()),
+  transaction: async (cb: any) => cb({ ...crearMutadores(), execute: fakeDb.execute }),
 };
 
 mock.module("../../database", () => ({ db: fakeDb, client: {} }));

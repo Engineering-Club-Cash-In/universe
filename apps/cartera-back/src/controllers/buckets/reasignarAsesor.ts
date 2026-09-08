@@ -9,6 +9,7 @@ import {
   SQL_CARTERA_SCHEMA,
 } from "../../database/db/schema";
 import { bucketActualSql, STATUS_BUCKET_FUERA } from "../../lib/buckets-classification";
+import { CREDITO_ASESOR_LOCK_NAMESPACE } from "../../lib/buckets-job-locks";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // COBROS-02 · Buckets — Reasignación MANUAL de asesor (supervisor/gerente).
@@ -143,6 +144,7 @@ export async function reasignarAsesorManual(params: {
   // cosas; en ese caso no se inserta historia basada en dueño viejo ni se pisa
   // su destino. UPDATE + bitácora siguen siendo una sola transacción.
   const actualizado = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(${CREDITO_ASESOR_LOCK_NAMESPACE}, ${credito_id})`);
     const filas = await tx
       .update(creditos)
       .set({ asesor_id: asesor_nuevo_id })

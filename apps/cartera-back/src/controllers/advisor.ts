@@ -1,12 +1,14 @@
 // controllers/advisors.ts
-import { db } from '../database/index';
+import { db, lockPool } from '../database/index';
 import { asesores, creditos, moras_credito, platform_users, usuarios } from '../database/db/schema';
 import { and, eq, like, or, sql } from 'drizzle-orm';
 import bcrypt from "bcrypt";
 import Big from 'big.js';
+import type { PoolClient } from 'pg';
 // 🔥 Mismo valor normalizado (trim + minúsculas) para asesores.email_cash_in y platform_users.email:
 // los filtros de cobro (reportes.ts, /stats) comparan por igualdad exacta contra el email de sesión.
 import { normalizeEmail } from '../utils/functions/email';
+import { CREDITO_ASESOR_LOCK_NAMESPACE } from '../lib/buckets-job-locks';
 
 export const insertAdvisor = async ({ body, set }: any) => {
   try {
@@ -591,6 +593,9 @@ export const getCreditosCRM = async ({ set }: any) => {
 };
 
 export const updateCreditAdvisor = async ({ body, set }: any) => {
+  let lockConnection: PoolClient | undefined;
+  let lockHeld = false;
+  let creditoBloqueado: number | undefined;
   try {
     const { credito_id, nombre_asesor } = body;
 
@@ -599,10 +604,36 @@ export const updateCreditAdvisor = async ({ body, set }: any) => {
       return { success: false, message: "credito_id y nombre_asesor son requeridos" };
     }
 
+    lockConnection = await lockPool.connect();
+    creditoBloqueado = credito_id;
+    await lockConnection.query("SELECT pg_advisory_lock($1, $2)", [
+      CREDITO_ASESOR_LOCK_NAMESPACE,
+      creditoBloqueado,
+    ]);
+    lockHeld = true;
+
     const asesor = await findOrCreateAdvisorByName(nombre_asesor);
     if (!asesor) {
       set.status = 404;
       return { success: false, message: `No se pudo encontrar/crear asesor: ${nombre_asesor}` };
+    }
+
+    // Compare-and-swap: un traslado masivo puede cambiar el dueño después de
+    // que este endpoint empezó. No se debe reanudar y sobrescribir su detalle
+    // e historial con una foto vieja del asesor.
+    const [actual] = await db
+      .select({ asesor_id: creditos.asesor_id })
+      .from(creditos)
+      .where(
+        and(
+          eq(creditos.credito_id, credito_id),
+          like(creditos.numero_credito_sifco, "%CRM%"),
+        ),
+      )
+      .limit(1);
+    if (!actual) {
+      set.status = 404;
+      return { success: false, message: `Crédito ${credito_id} no encontrado o no es CRM` };
     }
 
     const updated = await db
@@ -611,14 +642,15 @@ export const updateCreditAdvisor = async ({ body, set }: any) => {
       .where(
         and(
           eq(creditos.credito_id, credito_id),
-          like(creditos.numero_credito_sifco, "%CRM%")
+          like(creditos.numero_credito_sifco, "%CRM%"),
+          sql`${creditos.asesor_id} IS NOT DISTINCT FROM ${actual.asesor_id ?? null}`,
         )
       )
       .returning({ credito_id: creditos.credito_id, asesor_id: creditos.asesor_id });
 
     if (updated.length === 0) {
-      set.status = 404;
-      return { success: false, message: `Crédito ${credito_id} no encontrado o no es CRM` };
+      set.status = 409;
+      return { success: false, message: "El asesor del crédito cambió durante la actualización. Actualiza la vista e intenta de nuevo." };
     }
 
     set.status = 200;
@@ -631,5 +663,22 @@ export const updateCreditAdvisor = async ({ body, set }: any) => {
     console.error("❌ Error updateCreditAdvisor:", error);
     set.status = 500;
     return { success: false, message: "Error actualizando asesor", error: String(error) };
+  } finally {
+    if (lockConnection) {
+      let releaseError: Error | undefined;
+      try {
+        if (lockHeld && creditoBloqueado !== undefined) {
+          await lockConnection.query("SELECT pg_advisory_unlock($1, $2)", [
+            CREDITO_ASESOR_LOCK_NAMESPACE,
+            creditoBloqueado,
+          ]);
+        }
+      } catch (error) {
+        // No devolver al pool una sesión que podría conservar lock advisory.
+        releaseError = error instanceof Error ? error : new Error(String(error));
+      } finally {
+        lockConnection.release(releaseError);
+      }
+    }
   }
 };

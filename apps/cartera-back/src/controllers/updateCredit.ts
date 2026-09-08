@@ -1,4 +1,5 @@
 import Big from "big.js";
+import type { PoolClient } from "pg";
 import {
   eq,
   ne,
@@ -14,7 +15,7 @@ import {
   sql,
 } from "drizzle-orm";
 import jwt from "jsonwebtoken";
-import { db } from "../database";
+import { db, lockPool } from "../database";
 import {
   creditos,
   creditos_inversionistas,
@@ -30,6 +31,7 @@ import z from "zod";
 import type { WSCrEstadoCuentaResponse } from "../services/sifco.interface";
 import { consultarEstadoCuentaPrestamo } from "../services/sifcoIntegrations";
 import { withAuditContext, withCapitalContext } from "../utils/withAuditContext";
+import { CREDITO_ASESOR_LOCK_NAMESPACE } from "../lib/buckets-job-locks";
 
 interface UpdateInstallmentsParams {
   numero_credito_sifco: string;
@@ -1274,6 +1276,9 @@ const extractUserId = (request: Request): number | null => {
 };
 
 export const updateCredit = async ({ body, set, request }: any) => {
+  let lockConnection: PoolClient | undefined;
+  let lockHeld = false;
+  let creditoBloqueado: number | undefined;
   try {
     console.log("Updating credit with body:", body);
 
@@ -1286,6 +1291,18 @@ export const updateCredit = async ({ body, set, request }: any) => {
         errors: parseResult.error.flatten().fieldErrors,
       };
     }
+
+    // Se toma ANTES de leer el crédito y se conserva hasta terminar todos los
+    // efectos de esta edición. El traslado masivo usa la misma llave por
+    // crédito, así que ambos flujos se ordenan sin un CAS tardío que pudiera
+    // dejar cuotas o datos del cliente aplicados antes de un 409.
+    lockConnection = await lockPool.connect();
+    creditoBloqueado = parseResult.data.credito_id;
+    await lockConnection.query("SELECT pg_advisory_lock($1, $2)", [
+      CREDITO_ASESOR_LOCK_NAMESPACE,
+      creditoBloqueado,
+    ]);
+    lockHeld = true;
 
     const {
       credito_id,
@@ -1545,11 +1562,20 @@ export const updateCredit = async ({ body, set, request }: any) => {
       fieldsToUpdate.capital !== undefined &&
       !new Big(fieldsToUpdate.capital).eq(new Big(current.capital || 0));
 
+    // Si este request cambia asesor, el dueño leído al inicio debe seguir
+    // vigente al escribir. Así un update iniciado antes de un traslado masivo
+    // no puede reanudar después y pisar su asignación auditada.
+    const condicionCredito = asesor_id === undefined
+      ? eq(creditos.credito_id, credito_id)
+      : and(
+          eq(creditos.credito_id, credito_id),
+          sql`${creditos.asesor_id} IS NOT DISTINCT FROM ${current.asesor_id ?? null}`,
+        );
     const ejecutarUpdateCredito = (dbInstance: typeof db) =>
       dbInstance
         .update(creditos)
         .set(updateFields)
-        .where(eq(creditos.credito_id, credito_id))
+        .where(condicionCredito)
         .returning();
 
     let updatedCredit;
@@ -1563,6 +1589,13 @@ export const updateCredit = async ({ body, set, request }: any) => {
       );
     } else {
       [updatedCredit] = await ejecutarUpdateCredito(db);
+    }
+    if (!updatedCredit) {
+      set.status = 409;
+      return {
+        success: false,
+        message: "El asesor del crédito cambió durante la actualización. Actualiza la vista e intenta de nuevo.",
+      };
     }
 
     // 8.1 Si la cuota cambió, sincronizar cuotas pendientes y recalcular
@@ -1732,6 +1765,24 @@ export const updateCredit = async ({ body, set, request }: any) => {
     console.error("Error al actualizar el crédito:", error);
     set.status = 500;
     return { message: "Error al actualizar el crédito" };
+  } finally {
+    if (lockConnection) {
+      let releaseError: Error | undefined;
+      try {
+        if (lockHeld && creditoBloqueado !== undefined) {
+          await lockConnection.query("SELECT pg_advisory_unlock($1, $2)", [
+            CREDITO_ASESOR_LOCK_NAMESPACE,
+            creditoBloqueado,
+          ]);
+        }
+      } catch (error) {
+        // Destruir conexión: devolverla al pool después de un unlock fallido
+        // podría dejar un lock de sesión vivo para la siguiente petición.
+        releaseError = error instanceof Error ? error : new Error(String(error));
+      } finally {
+        lockConnection.release(releaseError);
+      }
+    }
   }
 };
 // ========================================

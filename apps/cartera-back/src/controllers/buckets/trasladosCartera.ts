@@ -6,6 +6,7 @@ import { SQL_CARTERA_SCHEMA as schema } from "../../database/db/schema";
 import { bucketActualSql, STATUS_READER_FUERA } from "../../lib/buckets-classification";
 import {
   BUCKETS_CONVENIO_LOCK_KEY,
+  CREDITO_ASESOR_LOCK_NAMESPACE,
   PROCESAR_MORAS_LOCK_KEY,
 } from "../../lib/buckets-job-locks";
 import { previsualizarTrasladoCartera } from "../../lib/plan-traslado-cartera";
@@ -145,6 +146,26 @@ function esTimeoutDeLock(error: unknown): boolean {
   return false;
 }
 
+async function bloquearCreditosAsesor(
+  tx: Executor,
+  creditoIds: number[],
+) {
+  const ids = [...new Set(creditoIds)].sort((a, b) => a - b);
+  if (!ids.length) return;
+  // CTE materializada y ordenada: dos traslados que comparten créditos adquieren los
+  // locks en mismo orden y no forman ciclo. pg_advisory_xact_lock se libera al
+  // terminar esta transacción; los endpoints individuales usan misma llave.
+  await tx.execute(sql`
+    WITH creditos_ordenados AS MATERIALIZED (
+      SELECT value::integer AS credito_id
+      FROM jsonb_array_elements_text(${JSON.stringify(ids)}::jsonb)
+      ORDER BY value::integer
+    )
+    SELECT pg_advisory_xact_lock(${CREDITO_ASESOR_LOCK_NAMESPACE}, credito_id)
+    FROM creditos_ordenados
+  `);
+}
+
 /**
  * `actorEmail` llega en el CUERPO de la petición, no del token: el CRM
  * autentica con una credencial de SERVICIO compartida, así que el `user` del
@@ -195,13 +216,13 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
       SELECT * FROM ${schema}.operaciones_traslado_cartera WHERE id = ${input.previewId}::uuid FOR UPDATE
     `)).rows[0];
     if (!row || row.actor_email !== input.actorEmail) throw new TrasladoConflict("Previsualización no encontrada para este usuario");
-    // También al confirmar: es el paso que ESCRIBE el historial, y el usuario
-    // pudo desactivarse entre la previsualización y la confirmación.
-    await exigirActorRegistrado(tx, input.actorEmail);
     if (row.estado === "confirmada") {
       if (row.idempotency_key !== input.idempotencyKey) throw new TrasladoConflict("La operación ya fue confirmada con otra solicitud");
       return { success: true as const, operacionId: row.id, cuentas: row.preview.asignaciones.length };
     }
+    // Solo una confirmación NUEVA escribe historial. Un replay idempotente no
+    // debe depender de que el actor siga activo después de su operación.
+    await exigirActorRegistrado(tx, input.actorEmail);
     if (new Date(row.vence_en).getTime() <= Date.now()) throw new TrasladoConflict("La previsualización venció. Vuelve a previsualizar.");
     // Locks cortos durante revalidación y escritura; ninguna llamada HTTP en transacción.
     await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
@@ -212,7 +233,12 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
     // espere al job en curso; mientras confirma, la siguiente corrida se omite.
     await tx.execute(sql`SELECT pg_advisory_xact_lock(${PROCESAR_MORAS_LOCK_KEY})`);
     await tx.execute(sql`SELECT pg_advisory_xact_lock(${BUCKETS_CONVENIO_LOCK_KEY})`);
-    const plan = await construirPlan(tx, row.solicitud);
+    // Primera foto descubre qué créditos hay que proteger. Tras tomar sus
+    // locks se lee de nuevo: un editor que ya estaba en curso termina antes y
+    // el hash obliga a generar un preview nuevo, en vez de mezclar ambas fotos.
+    let plan = await construirPlan(tx, row.solicitud);
+    await bloquearCreditosAsesor(tx, plan.asignaciones.map((a) => a.creditoId));
+    plan = await construirPlan(tx, row.solicitud);
     if (hash(plan) !== row.payload_hash) throw new TrasladoConflict("La cartera cambió. Vuelve a previsualizar antes de confirmar.");
     if (plan.excluidos.length) {
       throw new TrasladoConflict(

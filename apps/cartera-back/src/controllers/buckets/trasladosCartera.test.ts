@@ -137,12 +137,16 @@ test("confirmación espera los locks de jobs y escribe lote sin bloquear tablas 
   });
   const lockMoras = queries.findIndex((q) => q.includes("pg_advisory_xact_lock") && q.includes("728193"));
   const lockConvenio = queries.findIndex((q) => q.includes("pg_advisory_xact_lock") && q.includes("728194"));
+  const lockCreditos = queries.findIndex((q) => q.includes("pg_advisory_xact_lock") && q.includes("728195"));
   const escritura = queries.findIndex((q) => q.includes("WITH asignaciones"));
   expect(lockMoras).toBeGreaterThanOrEqual(0);
   expect(lockConvenio).toBeGreaterThanOrEqual(0);
   expect(escritura).toBeGreaterThanOrEqual(0);
   expect(lockMoras).toBeLessThan(escritura);
   expect(lockConvenio).toBeLessThan(escritura);
+  expect(lockCreditos).toBeGreaterThan(lockConvenio);
+  expect(lockCreditos).toBeLessThan(escritura);
+  expect(queries.slice(lockCreditos + 1).some((q) => q.includes("SELECT c.credito_id"))).toBe(true);
   expect(queries.some((q) => q.includes("LOCK TABLE"))).toBe(false);
 });
 
@@ -257,4 +261,16 @@ test("rechaza al confirmar si el actor se desactivó tras previsualizar", async 
     }),
   ).rejects.toThrow(/no está registrado o está inactivo/);
   expect(writes.some((q) => q.includes("credito_asesor_historial"))).toBe(false);
+});
+
+test("reintento idempotente conserva éxito aunque actor se desactive después", async () => {
+  const p = await previsualizarTrasladoCarteraMasivo(entrada);
+  const input = {
+    previewId: p.previewId,
+    idempotencyKey: crypto.randomUUID(),
+    actorEmail: entrada.actorEmail,
+  };
+  const primero = await confirmarTrasladoCarteraMasivo(input);
+  actorRegistrado = false;
+  await expect(confirmarTrasladoCarteraMasivo(input)).resolves.toEqual(primero);
 });

@@ -147,12 +147,23 @@ function LiquidacionesInversionistas() {
 			// Ya se está creando una empresa: no hay nada más que detectar.
 			!formDpiRepLegal &&
 			!deteccionDescartada,
-		// Sin esto, el resultado de una consulta anterior se sigue dando por
-		// bueno cinco minutos, y hay dos formas de que ese resultado ya no valga:
-		// crear al inversionista (el `null` de "no existe" se vuelve mentira, ver
-		// la invalidación en `crearMutation`) y descartar la detección (el hit
-		// sigue en caché aunque la query esté apagada, ver abajo).
-		staleTime: 5 * 60 * 1000,
+		// `staleTime: 0`: este resultado NO se puede dar por bueno ni un segundo.
+		//
+		// La invalidación de `crearMutation` solo alcanza a ESTE navegador. Si la
+		// persona la da de alta otro operador del CRM —o carteraFront, o el propio
+		// cartera-back—, el `null` de "no existe" que este navegador cacheó sigue
+		// pareciendo fresco: el DPI no se mueve a `dpiRepLegal`, y la creación
+		// estricta falla como duplicado una y otra vez sin que haya forma de
+		// reintentar. Un negativo de identidad no envejece bien: lo que ayer no
+		// existía puede existir ahora, y quien lo creó no fue necesariamente quien
+		// está mirando esta pantalla.
+		//
+		// Es el gemelo de cliente del mismo defecto que se cerró en el servidor
+		// (`cartera-back-client.ts`, la consulta de identidad va sin caché). El
+		// coste es una consulta por DPI tecleado, ya con umbral de 7 dígitos y
+		// debounce: la dispara un humano llenando un formulario, no un bucle.
+		staleTime: 0,
+		gcTime: 0,
 	});
 
 	// Al encontrar a la persona, el formulario pasa a modo empresa solo.

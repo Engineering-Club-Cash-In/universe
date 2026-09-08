@@ -71,7 +71,7 @@ export function createDocumentIntegrityAiSchema<
 	const nullableText = z.string().trim().min(1).nullable().catch(null);
 	return z.object({
 		corresponde_al_tipo_declarado: z.boolean(),
-		confianza_tipo_documento: z.number().min(0).max(100).catch(0),
+		confianza_tipo_documento: z.number().min(0).max(100),
 		tipo_documento_detectado: z.string().trim().min(1).catch("desconocido"),
 		emisor_normalizado: z.enum(issuerValues).catch(fallbacks.issuer),
 		periodo: z

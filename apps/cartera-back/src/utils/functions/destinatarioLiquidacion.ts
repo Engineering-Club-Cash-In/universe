@@ -55,6 +55,12 @@ export interface DestinatarioLiquidacion {
    * qué entidad es la liquidación.
    */
   nombreRepresentante: string | null;
+  /**
+   * Buzón que va en COPIA, o `null`. Solo se llena cuando el correo se desvió
+   * al representante: es el de la entidad, que hasta ahora recibía esta
+   * liquidación y no tiene por qué dejar de recibirla.
+   */
+  emailCopia: string | null;
   /** Para el log: por qué salió por esa vía. */
   motivo:
     | "representante_con_correo"
@@ -137,6 +143,17 @@ const esCorreoEnviable = (correo: string): boolean =>
  * `nombreRepresentante` por definición y por lo tanto no puede quedar
  * incoherente — su buzón además ya era el suyo.
  *
+ * LA ENTIDAD NO PIERDE SU COPIA. Cuando el correo se desvía al representante,
+ * el buzón de la sociedad va en `emailCopia`. Ese buzón lo suele leer un
+ * contador o un asistente que HOY recibe la liquidación: desviarla sin copia se
+ * la quitaría en silencio a alguien que ni se entera. Así nadie pierde lo que
+ * ya recibe y el representante gana lo que le faltaba.
+ *
+ * La copia se valida con la MISMA regla que el destinatario, y por un motivo
+ * más duro: Resend rechaza el envío ENTERO si una dirección de `cc` no le
+ * gusta, así que una copia malformada costaría el correo que la mejora venía a
+ * asegurar. Es un extra y se comporta como tal: ante la duda, no va.
+ *
  * El que se representa a sí mismo (id 187, `dpi=4036613` vs
  * `dpi_rep_legal='04036613'`) resuelve a su propia fila y termina en su propio
  * buzón: la vía dice "representante" pero el buzón no cambia. El CUERPO sí
@@ -171,10 +188,17 @@ export const destinatarioDeLiquidacion = (
     representanteEsAlcanzable &&
     sePuedeSaludar
   ) {
+    const emailFila = limpiar(fila.email);
+    const esOtroBuzon =
+      emailFila !== null &&
+      emailFila.toLowerCase() !== emailRepresentante.toLowerCase();
+
     return {
       email: emailRepresentante,
       via: "representante",
       nombreRepresentante: seRepresentaASiMismo ? null : nombreRepresentante,
+      emailCopia:
+        esOtroBuzon && esCorreoEnviable(emailFila) ? emailFila : null,
       motivo: seRepresentaASiMismo
         ? "autorrepresentado"
         : "representante_con_correo",
@@ -185,6 +209,9 @@ export const destinatarioDeLiquidacion = (
     email: limpiar(fila.email),
     via: "fila",
     nombreRepresentante: null,
+    // Sin desvío no hay a quién copiar: el único destinatario ya es el de
+    // siempre.
+    emailCopia: null,
     motivo: !representante
       ? "sin_representante"
       : !representanteEsAlcanzable

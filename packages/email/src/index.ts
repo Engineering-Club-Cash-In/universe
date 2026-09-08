@@ -74,6 +74,16 @@ export interface SendLiquidationEmailParams {
    * saludarlo a él y decir a qué entidad corresponde cada uno.
    */
   representativeName?: string;
+  /**
+   * Buzón en copia. Se usa para que la entidad no pierda la liquidación cuando
+   * el correo se desvía a su representante legal: ese buzón lo suele leer un
+   * contador o un asistente que ya la recibía.
+   *
+   * Una dirección que zod rechace se DESCARTA con una advertencia en vez de
+   * tirar: Resend rechaza el envío entero si un `cc` no le gusta, y una copia
+   * nunca puede costar el correo principal.
+   */
+  cc?: string;
   attachment?: {
     filename: string;
     content: Buffer;
@@ -90,11 +100,22 @@ export const sendLiquidationEmail = async ({
   date,
   currencySymbol,
   representativeName,
+  cc,
   attachment,
   reportUrl,
 }: SendLiquidationEmailParams) => {
   // Validar formato de correo antes de enviar
   emailSchema.parse(to);
+
+  // La copia se valida aparte y sin tirar: es un extra, no puede llevarse el
+  // envío. (Con SERVER != PROD el desvío de más arriba la borra junto con el
+  // destinatario original, así que en DEV nada sale a un buzón real.)
+  const copia = cc && emailSchema.safeParse(cc).success ? cc : undefined;
+  if (cc && !copia) {
+    console.warn(
+      `[sendLiquidationEmail] Copia descartada por formato inválido: ${cc}. El correo sale solo a ${to}.`
+    );
+  }
 
   const assetsBaseUrl = process.env.EMAIL_ASSETS_BASE_URL;
   const emailAssets = assetsBaseUrl
@@ -113,6 +134,7 @@ export const sendLiquidationEmail = async ({
     const { data, error } = await resend.emails.send({
       from: `Club Cash In <no-reply@${domain}>`,
       to: [to],
+      cc: copia ? [copia] : undefined,
       subject: asuntoDeLiquidacion(investorName, date, representativeName),
       react: React.createElement(LiquidationEmail, {
         investorName,

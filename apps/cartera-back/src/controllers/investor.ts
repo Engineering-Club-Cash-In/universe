@@ -4805,7 +4805,7 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
               );
             }
             console.log(
-              `  📧 Preparando envío de correo para ${destinoCorreo.email} (vía: ${destinoCorreo.via}, motivo: ${destinoCorreo.motivo}, entidad: ${inversionista.nombre_inversionista})...`
+              `  📧 Preparando envío de correo para ${destinoCorreo.email} (vía: ${destinoCorreo.via}, motivo: ${destinoCorreo.motivo}, entidad: ${inversionista.nombre_inversionista}${destinoCorreo.emailCopia ? `, copia: ${destinoCorreo.emailCopia}` : ""})...`
             );
             try {
               // Validar que subtotal existe para evitar crash
@@ -4818,6 +4818,9 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
                 // hace que el cuerpo salude al representante sin dejar de
                 // decir de qué entidad es esta liquidación.
                 representativeName: destinoCorreo.nombreRepresentante ?? undefined,
+                // La entidad conserva su copia cuando el correo se desvía: su
+                // buzón lo lee gente que hoy recibe esta liquidación.
+                cc: destinoCorreo.emailCopia ?? undefined,
                 amount: subtotalStr,
                 creditNumber: "Múltiples",
                 date: dayjs(fechaLiquidacion ?? new Date()).format("MMMM YYYY"),

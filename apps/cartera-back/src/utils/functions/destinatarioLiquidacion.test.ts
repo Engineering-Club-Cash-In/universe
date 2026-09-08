@@ -118,6 +118,62 @@ describe("destinatarioDeLiquidacion", () => {
     expect(destino.motivo).toBe("representante_con_correo");
   });
 
+  it("la sociedad conserva su copia: su buzón va en cc", () => {
+    // El buzón de la sociedad lo lee su contador o su asistente, y hoy recibe
+    // la liquidación. Desviarla al representante sin copia se la quita en
+    // silencio a alguien que ni se entera.
+    const destino = destinatarioDeLiquidacion(
+      { nombre: "CUBE, S.A.", email: "  Contabilidad@Cube.com " },
+      { nombre: "Richard Kachler", email: "richard@ejemplo.com" },
+    );
+
+    expect(destino.email).toBe("richard@ejemplo.com");
+    expect(destino.emailCopia).toBe("Contabilidad@Cube.com");
+  });
+
+  it("no se manda copia a sí mismo cuando el buzón es el mismo", () => {
+    // Da igual la caja: `inversionistas.email` no está normalizado y
+    // `buscarRepresentanteEnCartera` sí baja el suyo a minúsculas.
+    const destino = destinatarioDeLiquidacion(
+      { nombre: "CUBE, S.A.", email: "Richard@Ejemplo.com" },
+      { nombre: "Richard Kachler", email: "richard@ejemplo.com" },
+    );
+
+    expect(destino.email).toBe("richard@ejemplo.com");
+    expect(destino.emailCopia).toBeNull();
+  });
+
+  it("el autorrepresentado no se copia a sí mismo", () => {
+    const destino = destinatarioDeLiquidacion(
+      { nombre: "Javier Camilo Kafie", email: "javier@ejemplo.com", dpi: 4036613 },
+      { nombre: "Javier Camilo Kafie", email: "javier@ejemplo.com", dpi: "04036613" },
+    );
+
+    expect(destino.emailCopia).toBeNull();
+  });
+
+  it("un correo de fila malformado NO se manda en copia", () => {
+    // Una copia inválida haría que Resend rechace el envío ENTERO: la mejora
+    // del representante se pagaría perdiendo el correo. La copia es un extra y
+    // se comporta como tal.
+    const destino = destinatarioDeLiquidacion(
+      { nombre: "CUBE, S.A.", email: "contabilidad cube.com" },
+      { nombre: "Richard Kachler", email: "richard@ejemplo.com" },
+    );
+
+    expect(destino.email).toBe("richard@ejemplo.com");
+    expect(destino.emailCopia).toBeNull();
+  });
+
+  it("cuando el correo sale por la fila no hay copia que mandar", () => {
+    const destino = destinatarioDeLiquidacion(
+      { nombre: "Ana Pérez", email: "ana@ejemplo.com" },
+      null,
+    );
+
+    expect(destino.emailCopia).toBeNull();
+  });
+
   it("un representante sin nombre no se lleva el correo: cae al de la fila", () => {
     // Lo peor de los dos mundos era mandarlo al buzón del representante y
     // dirigir el cuerpo a la entidad. Sin nombre no hay a quién saludar, y un

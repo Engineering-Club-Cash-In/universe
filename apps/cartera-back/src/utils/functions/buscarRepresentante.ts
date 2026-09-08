@@ -14,7 +14,13 @@ import { inversionistas } from "../../database/db/schema";
 export const buscarRepresentanteEnCartera = async (
   dpiNormalizado: string,
 ): Promise<{
-  nombre: string;
+  /**
+   * Tal como está en la base, sin rellenos. Antes se devolvía "Inversionista"
+   * cuando venía vacío, y ese genérico tapaba el caso en vez de resolverlo: el
+   * correo terminaba desviado al buzón del representante saludando a nadie.
+   * Quien decide qué hacer sin nombre es `destinatarioDeLiquidacion`.
+   */
+  nombre: string | null;
   email: string | null;
   dpi: number | string | null;
 } | null> => {
@@ -39,7 +45,7 @@ export const buscarRepresentanteEnCartera = async (
   if (!fila) return null;
 
   return {
-    nombre: fila.nombre ?? "Inversionista",
+    nombre: fila.nombre?.trim() ? fila.nombre.trim() : null,
     email: fila.email?.trim() ? fila.email.trim().toLowerCase() : null,
     dpi: fila.dpi ?? null,
   };

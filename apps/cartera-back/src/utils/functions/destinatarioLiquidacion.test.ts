@@ -118,6 +118,47 @@ describe("destinatarioDeLiquidacion", () => {
     expect(destino.motivo).toBe("representante_con_correo");
   });
 
+  it("un representante sin nombre no se lleva el correo: cae al de la fila", () => {
+    // Lo peor de los dos mundos era mandarlo al buzón del representante y
+    // dirigir el cuerpo a la entidad. Sin nombre no hay a quién saludar, y un
+    // saludo genérico a un buzón desviado es un cambio de identidad silencioso:
+    // mejor el buzón de siempre, que es la política de fallo de esta rama.
+    const destino = destinatarioDeLiquidacion(
+      { nombre: "CUBE, S.A.", email: "contabilidad@cube.com" },
+      { nombre: null, email: "rep@ejemplo.com" },
+    );
+
+    expect(destino.email).toBe("contabilidad@cube.com");
+    expect(destino.via).toBe("fila");
+    expect(destino.nombreRepresentante).toBeNull();
+    expect(destino.motivo).toBe("representante_sin_nombre");
+  });
+
+  it("un nombre de representante que es solo espacios tampoco cuenta", () => {
+    const destino = destinatarioDeLiquidacion(
+      { nombre: "CUBE, S.A.", email: "contabilidad@cube.com" },
+      { nombre: "   ", email: "rep@ejemplo.com" },
+    );
+
+    expect(destino.via).toBe("fila");
+    expect(destino.motivo).toBe("representante_sin_nombre");
+  });
+
+  it("al autorrepresentado no le hace falta nombre: el saludo no lo usa", () => {
+    // El id 187 va sin `nombreRepresentante` por definición, así que la falta
+    // de nombre no genera ninguna incoherencia y no hay por qué desviarlo del
+    // buzón que ya era el suyo.
+    const destino = destinatarioDeLiquidacion(
+      { nombre: "Javier Camilo Kafie", email: "javier@ejemplo.com", dpi: 4036613 },
+      { nombre: null, email: "javier@ejemplo.com", dpi: "04036613" },
+    );
+
+    expect(destino.email).toBe("javier@ejemplo.com");
+    expect(destino.via).toBe("representante");
+    expect(destino.motivo).toBe("autorrepresentado");
+    expect(destino.nombreRepresentante).toBeNull();
+  });
+
   it("una fila sin correo propio SÍ se envía si el representante tiene buzón", () => {
     // AUMENTO DE VOLUMEN DELIBERADO, fijado acá para que no se cuele sin
     // querer. El guard de envío era `if (inversionista.email && excelBuffer)`:

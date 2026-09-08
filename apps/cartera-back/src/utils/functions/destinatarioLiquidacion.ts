@@ -34,7 +34,12 @@ export interface FilaLiquidacion {
 }
 
 export interface RepresentanteLiquidacion {
-  nombre: string;
+  /**
+   * Puede faltar: `inversionistas.nombre` es nullable. Sin él no hay a quién
+   * saludar, y esta función prefiere el buzón de la entidad antes que un
+   * saludo genérico en un buzón desviado.
+   */
+  nombre: string | null;
   email: string | null;
   /** DPI de la fila del representante, para compararlo con el de la entidad. */
   dpi?: number | string | null;
@@ -56,6 +61,7 @@ export interface DestinatarioLiquidacion {
     | "autorrepresentado"
     | "representante_sin_correo"
     | "representante_con_correo_invalido"
+    | "representante_sin_nombre"
     | "sin_representante";
 }
 
@@ -122,6 +128,15 @@ const esCorreoEnviable = (correo: string): boolean =>
  * registra, igual que antes de este cambio. Esta función decide a QUIÉN se
  * elige, no reescribe el camino de siempre.
  *
+ * Un representante SIN NOMBRE también cae a la fila. `inversionistas.nombre` es
+ * nullable, y desviar el correo a su buzón sin poder saludarlo deja lo peor de
+ * los dos mundos: llega a un buzón distinto y el cuerpo sigue dirigido a la
+ * entidad. Tampoco sirve un genérico tipo "Estimado(a) Inversionista": un
+ * saludo sin nombre en un buzón que no es el de siempre es un cambio de
+ * identidad silencioso. La excepción es el autorrepresentado, que va sin
+ * `nombreRepresentante` por definición y por lo tanto no puede quedar
+ * incoherente — su buzón además ya era el suyo.
+ *
  * El que se representa a sí mismo (id 187, `dpi=4036613` vs
  * `dpi_rep_legal='04036613'`) resuelve a su propia fila y termina en su propio
  * buzón: la vía dice "representante" pero el buzón no cambia. El CUERPO sí
@@ -145,14 +160,21 @@ export const destinatarioDeLiquidacion = (
   const seRepresentaASiMismo = dpiFila !== null && dpiFila === dpiRepresentante;
   const representanteEsAlcanzable =
     emailRepresentante !== null && esCorreoEnviable(emailRepresentante);
+  const nombreRepresentante = limpiar(representante?.nombre);
+  // Al autorrepresentado no le hace falta: su correo sale sin saludo de
+  // representante y a su propio buzón.
+  const sePuedeSaludar = seRepresentaASiMismo || nombreRepresentante !== null;
 
-  if (representante && emailRepresentante && representanteEsAlcanzable) {
+  if (
+    representante &&
+    emailRepresentante &&
+    representanteEsAlcanzable &&
+    sePuedeSaludar
+  ) {
     return {
       email: emailRepresentante,
       via: "representante",
-      nombreRepresentante: seRepresentaASiMismo
-        ? null
-        : limpiar(representante.nombre),
+      nombreRepresentante: seRepresentaASiMismo ? null : nombreRepresentante,
       motivo: seRepresentaASiMismo
         ? "autorrepresentado"
         : "representante_con_correo",
@@ -165,8 +187,10 @@ export const destinatarioDeLiquidacion = (
     nombreRepresentante: null,
     motivo: !representante
       ? "sin_representante"
-      : emailRepresentante
-        ? "representante_con_correo_invalido"
-        : "representante_sin_correo",
+      : !representanteEsAlcanzable
+        ? emailRepresentante
+          ? "representante_con_correo_invalido"
+          : "representante_sin_correo"
+        : "representante_sin_nombre",
   };
 };

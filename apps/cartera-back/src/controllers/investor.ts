@@ -36,7 +36,10 @@ import {
 import { getSignedDocumentUrl } from "../utils/functions/uploadsFiles";
 import { normalizarDpiParaComparar } from "../utils/functions/normalizarDpi";
 import { buscarRepresentanteEnCartera } from "../utils/functions/buscarRepresentante";
-import { destinatarioDeLiquidacion } from "../utils/functions/destinatarioLiquidacion";
+import {
+  destinatarioDeLiquidacion,
+  type RepresentanteLiquidacion,
+} from "../utils/functions/destinatarioLiquidacion";
 import { calcularAjusteCompras } from "../utils/comprasAjuste";
 import { eq, and, or, sql, inArray, ilike, like, desc, asc, count, SQL, isNull, isNotNull, ne } from "drizzle-orm";
 import { promises as fsPromises } from "node:fs";
@@ -4742,11 +4745,7 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
           // liquidación YA está escrita en base en este punto, así que ni una
           // consulta caída ni un representante inexistente pueden costar el
           // correo. Cualquier tropiezo termina en el `email` de la fila.
-          let representanteLiquidacion: {
-            nombre: string;
-            email: string | null;
-            dpi: number | string | null;
-          } | null = null;
+          let representanteLiquidacion: RepresentanteLiquidacion | null = null;
           // El `dpi` de la entidad liquidada: es lo que distingue a una
           // sociedad de verdad del que se representa a sí mismo. Vive fuera del
           // try porque la decisión de más abajo lo necesita.

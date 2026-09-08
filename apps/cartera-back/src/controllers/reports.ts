@@ -252,23 +252,39 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
     return rezagos;
   };
 
-  // Cierre real de la cuota que siembra la cadena. Su snapshot también puede
-  // ser pre-cierre, pero acá no hay cuota anterior contra la cual reconocerlo,
-  // así que se usa la SIGUIENTE: su apertura implícita —snapshot + Σ abonos—
-  // tiene que caer EXACTO sobre el cierre descontado para tratarlo como tal.
-  // Exacto y no "el más cercano": donde los abonos registrados no explican la
-  // caída del saldo, el implícito no cae sobre ninguno de los dos candidatos y
-  // manda el snapshot, que es lo que la cuota tiene guardado.
-  const cierreDeArranque = (key: string): Big => {
-    const snapshot = cierreGuardado.get(key) ?? new Big(0);
-    const siguiente = ordenCuotas[ordenCuotas.indexOf(key) + 1];
+  const siguienteCuota = new Map<string, string>();
+  for (let i = 0; i < ordenCuotas.length - 1; i++) {
+    siguienteCuota.set(ordenCuotas[i]!, ordenCuotas[i + 1]!);
+  }
+
+  // Cierre real de una cuota. Su snapshot puede haber quedado atrás del cierre
+  // (lo escribió una fila que no es la última), así que los candidatos son el
+  // snapshot y el snapshot menos cada rezago. Quien desempata es la cuota
+  // SIGUIENTE: su apertura implícita —snapshot + Σ abonos— es, por definición,
+  // el cierre de esta.
+  //
+  // El snapshot se prueba primero y gana los empates: si la evidencia lo
+  // respalda, ningún rezago que cuadre por casualidad puede desplazarlo. Pasa
+  // cuando los abonos de una cuota sincronizada suman más de lo que baja su
+  // snapshot y la diferencia da justo el abono de una de sus últimas filas.
+  //
+  // Si la evidencia no respalda a ninguno —los créditos donde los abonos
+  // registrados no explican la caída del saldo— manda el snapshot guardado, que
+  // es lo que encierra el descuadre en su cuota en vez de arrastrarlo.
+  const cierreDeCuota = (key: string, corrido: Big): Big => {
+    const snapshot = cierreGuardado.get(key);
+    if (snapshot === undefined) return corrido;
+
+    const siguiente = siguienteCuota.get(key);
     const snapshotSiguiente =
       siguiente === undefined ? undefined : cierreGuardado.get(siguiente);
     if (snapshotSiguiente === undefined) return snapshot;
 
     const aperturaImplicita = snapshotSiguiente.plus(
-      abonosPorCuota.get(siguiente) ?? new Big(0),
+      abonosPorCuota.get(siguiente!) ?? new Big(0),
     );
+    if (aperturaImplicita.minus(snapshot).abs().lte(0.02)) return snapshot;
+
     for (const rezago of rezagosPosibles(key)) {
       const candidato = snapshot.minus(rezago);
       if (aperturaImplicita.minus(candidato).abs().lte(0.02)) return candidato;
@@ -292,29 +308,13 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
         // Sin cierre previo utilizable: la apertura se reconstruye como
         // snapshot + Σ abonos de la cuota (el snapshot ya es post-pago), así
         // la última fila aterriza exacto en el saldo guardado.
-        saldo = cierreDeArranque(key).plus(abonosPorCuota.get(key) ?? new Big(0));
+        saldo = cierreDeCuota(key, new Big(0)).plus(
+          abonosPorCuota.get(key) ?? new Big(0),
+        );
       } else {
-        // Ancla de la cuota anterior: su snapshot guardado, salvo que ese
-        // snapshot sea "pre-cierre".
-        //
-        // El cierre solo-capital de registerPayment hereda el total_restante
-        // de su hermana SIN restar su propio abono, así que el snapshot queda
-        // por encima del cierre real. Se reconoce exacto: equivale al saldo de
-        // justo ANTES de aplicar el abono de la última fila de la cuota. En
-        // ese caso el cierre bueno es el corrido; anclar en el snapshot le
-        // arrastraría ese exceso a toda la cuota siguiente.
-        //
-        // Fuera de ese caso manda el snapshot: donde los abonos registrados no
-        // explican la caída del saldo, el corrido queda por encima y sin
-        // re-anclar la diferencia se acumula hasta el final del crédito.
-        const snapshotPrevio = cierreGuardado.get(cuotaActual);
-        const explicadoPorElCorrido =
-          snapshotPrevio !== undefined &&
-          rezagosPosibles(cuotaActual).some((rezago) =>
-            snapshotPrevio.minus(saldo.plus(rezago)).abs().lte(0.02),
-          );
-        saldo =
-          snapshotPrevio !== undefined && !explicadoPorElCorrido ? snapshotPrevio : saldo;
+        // Ancla de la cuota anterior: su cierre real, resuelto con la misma
+        // evidencia. Si esa cuota no dejó snapshot usable, sigue el corrido.
+        saldo = cierreDeCuota(cuotaActual, saldo);
       }
       cuotaActual = key;
     }

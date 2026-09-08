@@ -385,6 +385,24 @@ describe("estado de cuenta PDF", () => {
     expect(rows.map((p) => p.total_restante)).toEqual(["50000.00", "49400.00", "49000.00"]);
   });
 
+  it("un sufijo que cuadra por casualidad no desplaza al snapshot que la siguiente confirma", () => {
+    // Cuota sincronizada cuyos abonos (10 + 5) suman más que la baja de su
+    // snapshot (100 → 90). El sufijo de Q5 hace cuadrar el saldo corrido Q85,
+    // pero la cuota 12 confirma que su apertura es Q90: manda el snapshot.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 1, numero_cuota: 10, pagado: true, abono_capital: "0.00", abono_interes: "5.00", total_restante: "100.00" },
+      { pago_id: 2, numero_cuota: 11, pagado: true, abono_capital: "10.00", abono_interes: "5.00", total_restante: "90.00" },
+      { pago_id: 3, numero_cuota: 11, pagado: true, abono_capital: "5.00", total_restante: "90.00" },
+      { pago_id: 4, numero_cuota: 12, pagado: true, abono_capital: "10.00", abono_interes: "5.00", total_restante: "80.00" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual([
+      "100.00",
+      "90.00",
+      "85.00",
+      "80.00",
+    ]);
+  });
+
   it("varios pagos de capital directo seguidos: el snapshot queda atras por todos ellos", () => {
     // El capital directo se cuelga de la última cuota pagada y guarda
     // total_restante 0, así que el snapshot de la cuota se queda en una fila

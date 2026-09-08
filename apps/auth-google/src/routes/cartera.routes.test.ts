@@ -141,6 +141,52 @@ describe("cartera: el caché de entidades no autoriza escrituras", () => {
     expect(escrituras[0]).toMatchObject({ inversionista_id: PROPIA });
   });
 
+  // `inversionistas.email` no es único: el representante de una sociedad suele
+  // tener su correo en su ficha personal Y en la de la empresa. Con el id lo
+  // elige la persona; sin él, elegir por el orden de la lista es escribirle la
+  // cuenta bancaria a la entidad equivocada. Es el 409 que hacía
+  // `findInvestorByEmail` con `coincidencias_email > 1`.
+  it("sin id y con el correo en VARIAS, no escribe en ninguna", async () => {
+    entidadesEnCartera = [
+      { inversionista_id: PROPIA, nombre: "Persona", es_ancla: true },
+      { inversionista_id: SOCIEDAD, nombre: "Sociedad", es_ancla: true },
+    ];
+
+    const res = await pedir("/investor", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ numero_cuenta: "123" }),
+    });
+
+    expect(res.status).toBe(409);
+    expect(escrituras).toEqual([]);
+  });
+
+  // Con el id, la ambigüedad no existe: la eligió la persona.
+  it("con id sí escribe aunque el correo esté en varias", async () => {
+    entidadesEnCartera = [
+      { inversionista_id: PROPIA, nombre: "Persona", es_ancla: true },
+      { inversionista_id: SOCIEDAD, nombre: "Sociedad", es_ancla: true },
+    ];
+
+    await escribirBanco(SOCIEDAD);
+
+    expect(escrituras[0]).toMatchObject({ inversionista_id: SOCIEDAD });
+  });
+
+  // Leer la entidad equivocada se corrige mirando otra vez; escribirla, no. Así
+  // que las lecturas siguen enseñando el ancla en vez de romperse.
+  it("las lecturas no se rompen por la ambigüedad", async () => {
+    entidadesEnCartera = [
+      { inversionista_id: PROPIA, nombre: "Persona", es_ancla: true },
+      { inversionista_id: SOCIEDAD, nombre: "Sociedad", es_ancla: true },
+    ];
+
+    const res = await pedir("/entidades");
+
+    expect(res.status).toBe(200);
+  });
+
   it("las lecturas sí aprovechan el caché", async () => {
     await pedir("/entidades");
     await pedir(`/investor?inversionista_id=${SOCIEDAD}`);

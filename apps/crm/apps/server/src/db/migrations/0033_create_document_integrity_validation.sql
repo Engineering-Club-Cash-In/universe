@@ -1,6 +1,9 @@
 CREATE TYPE "public"."document_validation_result" AS ENUM('valido', 'observacion', 'revision_manual', 'rechazado', 'error');--> statement-breakpoint
 CREATE TYPE "public"."document_validation_source" AS ENUM('documentacion', 'analisis_capacidad');--> statement-breakpoint
 CREATE TYPE "public"."document_validation_run_status" AS ENUM('processing', 'completed', 'error');--> statement-breakpoint
+ALTER TABLE "public"."credit_analysis" ADD COLUMN "analysis_reservation_token" uuid;--> statement-breakpoint
+ALTER TABLE "public"."credit_analysis" ADD COLUMN "analysis_reservation_started_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "public"."credit_analysis" ADD CONSTRAINT "credit_analysis_reservation_pair_check" CHECK (("analysis_reservation_token" IS NULL) = ("analysis_reservation_started_at" IS NULL));--> statement-breakpoint
 CREATE TABLE "public"."document_integrity_validation_runs" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"opportunity_id" uuid NOT NULL,

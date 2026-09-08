@@ -1,7 +1,18 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { google } from "@ai-sdk/google";
 import { generateObject } from "ai";
-import { and, desc, eq, gt, inArray, isNull, lt, ne, sql } from "drizzle-orm";
+import {
+	and,
+	desc,
+	eq,
+	gt,
+	inArray,
+	isNotNull,
+	isNull,
+	lt,
+	ne,
+	sql,
+} from "drizzle-orm";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import {
@@ -70,6 +81,9 @@ export const MAX_DOCUMENT_INTEGRITY_ATTEMPTS = 2;
 // Techo de ejecuciones por ciclo sin importar su estado. Acota el gasto en IA
 // que producen los fallos tecnicos, que a proposito no consumen cupo.
 const MAX_RUNS_PER_CYCLE = 6;
+const CAPACITY_ANALYSIS_RESERVATION_STALE_AFTER_MS = 5 * 60_000;
+
+type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 export class DocumentIntegrityError extends Error {
 	constructor(
@@ -126,6 +140,47 @@ function lockOpportunity(opportunityId: string) {
 	return sql`SELECT pg_advisory_xact_lock(hashtextextended(${opportunityId}, 0))`;
 }
 
+async function clearStaleCapacityAnalysisReservation(
+	tx: Transaction,
+	opportunityId: string,
+) {
+	await tx
+		.update(creditAnalysis)
+		.set({
+			analysisReservationToken: null,
+			analysisReservationStartedAt: null,
+			updatedAt: new Date(),
+		})
+		.where(
+			and(
+				eq(creditAnalysis.opportunityId, opportunityId),
+				isNotNull(creditAnalysis.analysisReservationToken),
+				lt(
+					creditAnalysis.analysisReservationStartedAt,
+					new Date(Date.now() - CAPACITY_ANALYSIS_RESERVATION_STALE_AFTER_MS),
+				),
+			),
+		);
+}
+
+async function assertNoActiveCapacityAnalysis(
+	tx: Transaction,
+	opportunityId: string,
+) {
+	await clearStaleCapacityAnalysisReservation(tx, opportunityId);
+	const [analysis] = await tx
+		.select({ token: creditAnalysis.analysisReservationToken })
+		.from(creditAnalysis)
+		.where(eq(creditAnalysis.opportunityId, opportunityId))
+		.limit(1);
+	if (analysis?.token) {
+		throw new DocumentIntegrityError(
+			"TOO_MANY_REQUESTS",
+			"No se puede validar ni reiniciar documentos mientras el análisis de capacidad está en proceso.",
+		);
+	}
+}
+
 async function createValidationRun(params: {
 	opportunityId: string;
 	validationSource: ValidationSource;
@@ -134,6 +189,7 @@ async function createValidationRun(params: {
 }) {
 	return db.transaction(async (tx) => {
 		await tx.execute(lockOpportunity(params.opportunityId));
+		await assertNoActiveCapacityAnalysis(tx, params.opportunityId);
 		// Bajo el mismo lock que reserva el intento: fuera de la transaccion la
 		// ventana abarca las descargas de R2.
 		if (params.rejectIfAnalysisCompleted) {
@@ -234,6 +290,7 @@ export async function resetDocumentIntegrityAttempts(params: {
 }) {
 	return db.transaction(async (tx) => {
 		await tx.execute(lockOpportunity(params.opportunityId));
+		await assertNoActiveCapacityAnalysis(tx, params.opportunityId);
 		const [opportunity] = await tx
 			.select({ id: opportunities.id })
 			.from(opportunities)
@@ -277,6 +334,7 @@ export async function resetDocumentIntegrityAttempts(params: {
 			.select({
 				latest: sql<number>`coalesce(max(${documentIntegrityValidationRuns.attemptNumber}), 0)::int`,
 				completed: sql<number>`count(*) filter (where ${documentIntegrityValidationRuns.status} = 'completed' and ${documentIntegrityValidationRuns.attemptNumber} > ${resetAfterAttemptNumber})::int`,
+				runsInCycle: sql<number>`count(*) filter (where ${documentIntegrityValidationRuns.attemptNumber} > ${resetAfterAttemptNumber})::int`,
 				hasProcessingRun: sql<boolean>`coalesce(bool_or(${documentIntegrityValidationRuns.status} = 'processing'), false)`,
 			})
 			.from(documentIntegrityValidationRuns)
@@ -286,8 +344,10 @@ export async function resetDocumentIntegrityAttempts(params: {
 		const resetAvailability = getResetAvailability({
 			latestAttempt: attempts?.latest ?? 0,
 			completedAttempts: attempts?.completed ?? 0,
+			runsInCycle: attempts?.runsInCycle ?? 0,
 			hasProcessingRun: attempts?.hasProcessingRun ?? false,
 			maxAttempts: MAX_DOCUMENT_INTEGRITY_ATTEMPTS,
+			maxRunsPerCycle: MAX_RUNS_PER_CYCLE,
 		});
 		if (
 			!resetAvailability.allowed &&
@@ -918,15 +978,16 @@ export async function validateExistingOpportunityDocuments(params: {
 	});
 }
 
-export async function assertUploadedBankStatementsValidated(params: {
+interface UploadedBankStatementsValidationParams {
 	opportunityId: string;
 	validationIds: string[];
 	files: Array<{ filePath: string; contentSha256: string }>;
-}) {
-	// Mismo lock que el reset: sin transaccion, el watermark y las validaciones se
-	// leian a ambos lados de la frontera.
-	return db.transaction(async (tx) => {
-		await tx.execute(lockOpportunity(params.opportunityId));
+}
+
+async function assertUploadedBankStatementsValidatedWithTransaction(
+	tx: Transaction,
+	params: UploadedBankStatementsValidationParams,
+) {
 		const [reset] = await tx
 			.select({
 				attemptNumber: sql<number>`coalesce(max(${documentIntegrityValidationResets.resetAfterAttemptNumber}), 0)::int`,
@@ -1058,7 +1119,101 @@ export async function assertUploadedBankStatementsValidated(params: {
 				`${pendingManualApprovalCount} documento${pendingManualApprovalCount === 1 ? " requiere" : "s requieren"} aprobación manual antes de analizar la capacidad de pago.`,
 			);
 		}
+	}
+
+export async function reserveCapacityAnalysis(params: {
+	opportunityId: string;
+	leadId: string;
+	validationIds: string[];
+	files: Array<{ filePath: string; contentSha256: string }>;
+	userId: string;
+	maxAttempts: number;
+}) {
+	return db.transaction(async (tx) => {
+		await tx.execute(lockOpportunity(params.opportunityId));
+		await assertNoActiveCapacityAnalysis(tx, params.opportunityId);
+		const [existingAnalysis] = await tx
+			.select({
+				id: creditAnalysis.id,
+				attemptCount: creditAnalysis.attemptCount,
+				analyzedAt: creditAnalysis.analyzedAt,
+			})
+			.from(creditAnalysis)
+			.where(eq(creditAnalysis.opportunityId, params.opportunityId))
+			.limit(1);
+		if (existingAnalysis?.analyzedAt) {
+			throw new DocumentIntegrityError(
+				"BAD_REQUEST",
+				"Esta oportunidad ya tiene un análisis de capacidad de pago completado.",
+			);
+		}
+		if ((existingAnalysis?.attemptCount ?? 0) >= params.maxAttempts) {
+			throw new DocumentIntegrityError(
+				"TOO_MANY_REQUESTS",
+				`Se alcanzó el límite de ${params.maxAttempts} intentos de análisis. Contacte al administrador.`,
+			);
+		}
+
+		await assertUploadedBankStatementsValidatedWithTransaction(tx, params);
+		const token = randomUUID();
+		const startedAt = new Date();
+		const [reserved] = existingAnalysis
+			? await tx
+					.update(creditAnalysis)
+					.set({
+						attemptCount: sql`${creditAnalysis.attemptCount} + 1`,
+						analysisReservationToken: token,
+						analysisReservationStartedAt: startedAt,
+						updatedAt: startedAt,
+					})
+					.where(
+						and(
+							eq(creditAnalysis.id, existingAnalysis.id),
+							isNull(creditAnalysis.analysisReservationToken),
+							isNull(creditAnalysis.analyzedAt),
+							lt(creditAnalysis.attemptCount, params.maxAttempts),
+						),
+					)
+					.returning({ attemptCount: creditAnalysis.attemptCount })
+			: await tx
+					.insert(creditAnalysis)
+					.values({
+						leadId: params.leadId,
+						opportunityId: params.opportunityId,
+						attemptCount: 1,
+						createdBy: params.userId,
+						analysisReservationToken: token,
+						analysisReservationStartedAt: startedAt,
+					})
+					.onConflictDoNothing()
+					.returning({ attemptCount: creditAnalysis.attemptCount });
+		if (!reserved) {
+			throw new DocumentIntegrityError(
+				"TOO_MANY_REQUESTS",
+				"No se pudo reservar el análisis de capacidad. Actualiza la pantalla e inténtalo nuevamente.",
+			);
+		}
+		return { token, attemptCount: reserved.attemptCount };
 	});
+}
+
+export async function releaseCapacityAnalysisReservation(params: {
+	opportunityId: string;
+	token: string;
+}) {
+	await db
+		.update(creditAnalysis)
+		.set({
+			analysisReservationToken: null,
+			analysisReservationStartedAt: null,
+			updatedAt: new Date(),
+		})
+		.where(
+			and(
+				eq(creditAnalysis.opportunityId, params.opportunityId),
+				eq(creditAnalysis.analysisReservationToken, params.token),
+			),
+		);
 }
 
 export async function approveDocumentIntegrityValidation(params: {
@@ -1368,6 +1523,7 @@ export async function getDocumentIntegrityAttemptStatus(params: {
 		runs,
 		resetAfterAttemptNumber,
 		maxAttempts: MAX_DOCUMENT_INTEGRITY_ATTEMPTS,
+		maxRunsPerCycle: MAX_RUNS_PER_CYCLE,
 		staleAfterMs: RUN_STALE_AFTER_MS,
 	});
 }

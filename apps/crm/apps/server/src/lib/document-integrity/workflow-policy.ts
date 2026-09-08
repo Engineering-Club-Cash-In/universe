@@ -40,11 +40,16 @@ export function getAttemptAvailability(params: {
 export function getResetAvailability(params: {
 	latestAttempt: number;
 	completedAttempts: number;
+	runsInCycle?: number;
 	hasProcessingRun: boolean;
 	maxAttempts: number;
+	maxRunsPerCycle?: number;
 }): ResetAvailability {
 	if (params.hasProcessingRun) return { allowed: false, reason: "processing" };
-	if (params.completedAttempts < params.maxAttempts)
+	const costCapReached =
+		params.maxRunsPerCycle !== undefined &&
+		(params.runsInCycle ?? 0) >= params.maxRunsPerCycle;
+	if (params.completedAttempts < params.maxAttempts && !costCapReached)
 		return { allowed: false, reason: "quota_available" };
 	return {
 		allowed: true,
@@ -56,6 +61,7 @@ export function getAttemptStatus(params: {
 	runs: ValidationRunState[];
 	resetAfterAttemptNumber?: number;
 	maxAttempts: number;
+	maxRunsPerCycle?: number;
 	staleAfterMs: number;
 	now?: number;
 }) {
@@ -71,12 +77,19 @@ export function getAttemptStatus(params: {
 			run.status === "processing" &&
 			now - run.startedAt.getTime() < params.staleAfterMs,
 	);
+	const costCapReached =
+		params.maxRunsPerCycle !== undefined &&
+		currentRuns.length >= params.maxRunsPerCycle;
 	return {
 		attemptCount,
 		maxAttempts: params.maxAttempts,
 		remainingAttempts: Math.max(0, params.maxAttempts - attemptCount),
-		canValidate: attemptCount < params.maxAttempts && !hasProcessingRun,
+		canValidate:
+			attemptCount < params.maxAttempts &&
+			!hasProcessingRun &&
+			!costCapReached,
 		hasProcessingRun,
+		costCapReached,
 	};
 }
 

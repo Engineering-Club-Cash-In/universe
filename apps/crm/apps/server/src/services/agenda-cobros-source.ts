@@ -6,6 +6,7 @@ import {
 	isNotNull,
 	isNull,
 	lt,
+	lte,
 	max,
 	or,
 } from "drizzle-orm";
@@ -13,6 +14,7 @@ import { db } from "../db";
 import { user } from "../db/schema/auth";
 import {
 	casosCobros,
+	coberturasAgendaCobros,
 	contactosCobros,
 	contactosCobrosAudit,
 } from "../db/schema/cobros";
@@ -131,6 +133,120 @@ export function filtrarAsesoresAgenda(
 		: [...asesores];
 }
 
+/** Un asesor de cartera cuya agenda le toca trabajar al usuario de la sesión. */
+export interface AsesorEfectivo {
+	asesorId: number;
+	nombre: string;
+	/** true = cartera de un titular ausente, no la propia (badge en la UI). */
+	cubierto: boolean;
+}
+
+export interface CoberturaVigente {
+	titularId: string;
+	suplenteId: string;
+}
+
+/**
+ * CB-114: a quién le trabaja la agenda el usuario de la sesión HOY.
+ *
+ * Una cobertura NO mueve la cartera (el crédito conserva su `asesor_id`): solo
+ * redirige las tareas del día. Por eso se resuelve en LECTURA, acá, y no con un
+ * job que reasigne — así una cobertura registrada a media mañana surte efecto
+ * de inmediato, y al cancelarse la agenda vuelve sola a su dueño.
+ *
+ * Reglas, en orden:
+ *   1. El titular ausente NO ve su propia agenda (si la viera, dos personas
+ *      trabajarían la misma cuenta y el titular no estaría de vacaciones).
+ *   2. El suplente ve la suya MÁS la de cada titular que cubre.
+ *
+ * Función pura: el caller trae las coberturas vigentes del día. Mismo criterio
+ * de "vigente" que `getMiAgendaHoy` (no cancelada y `desde <= hoy <= hasta`).
+ */
+export function resolverAsesoresEfectivos(
+	propio: { asesorId: number; nombre: string },
+	sesionUserId: string,
+	coberturas: readonly CoberturaVigente[],
+	asesorPorUserId: ReadonlyMap<string, { asesorId: number; nombre: string }>,
+): AsesorEfectivo[] {
+	const ausente = coberturas.some(
+		(cobertura) => cobertura.titularId === sesionUserId,
+	);
+	const efectivos: AsesorEfectivo[] = ausente
+		? []
+		: [{ ...propio, cubierto: false }];
+	for (const cobertura of coberturas) {
+		if (cobertura.suplenteId !== sesionUserId) continue;
+		const titular = asesorPorUserId.get(cobertura.titularId);
+		// Titular sin asesor de cartera vinculado (email_cash_in desalineado):
+		// no hay agenda que mostrar, pero tampoco debe romper la del suplente.
+		if (!titular || titular.asesorId === propio.asesorId) continue;
+		if (efectivos.some((e) => e.asesorId === titular.asesorId)) continue;
+		efectivos.push({ ...titular, cubierto: true });
+	}
+	return efectivos;
+}
+
+/** Coberturas vigentes hoy donde el usuario es titular ausente o suplente. */
+export async function obtenerCoberturasVigentes(
+	sesionUserId: string,
+	fechaGT: string,
+): Promise<CoberturaVigente[]> {
+	return db
+		.select({
+			titularId: coberturasAgendaCobros.titularId,
+			suplenteId: coberturasAgendaCobros.suplenteId,
+		})
+		.from(coberturasAgendaCobros)
+		.where(
+			and(
+				or(
+					eq(coberturasAgendaCobros.titularId, sesionUserId),
+					eq(coberturasAgendaCobros.suplenteId, sesionUserId),
+				),
+				isNull(coberturasAgendaCobros.canceladaEn),
+				lte(coberturasAgendaCobros.desde, fechaGT),
+				gte(coberturasAgendaCobros.hasta, fechaGT),
+			),
+		);
+}
+
+/**
+ * Resuelve, para el usuario de la sesión, todas las carteras cuya agenda del
+ * día le toca trabajar: la propia (salvo que esté ausente) más las que cubre.
+ *
+ * Devuelve `[]` cuando el usuario es un titular ausente sin nada que cubrir —
+ * caso distinto de "no está vinculado a un asesor", que el caller detecta antes.
+ */
+export async function resolverAgendaEfectivaDelUsuario(
+	propio: { asesorId: number; nombre: string },
+	sesionUserId: string,
+	pool: readonly PoolPorAsesorRow[],
+	fechaGT: string,
+): Promise<AsesorEfectivo[]> {
+	const coberturas = await obtenerCoberturasVigentes(sesionUserId, fechaGT);
+	if (coberturas.length === 0) return [{ ...propio, cubierto: false }];
+	const usuarios = await db
+		.select({
+			id: user.id,
+			email: user.email,
+			role: user.role,
+			banned: user.banned,
+		})
+		.from(user);
+	const asesorPorUserId = new Map(
+		resolverAsesoresAgenda(usuarios, pool).map((asesor) => [
+			asesor.userId,
+			{ asesorId: asesor.asesorCarteraId, nombre: asesor.nombre },
+		]),
+	);
+	return resolverAsesoresEfectivos(
+		propio,
+		sesionUserId,
+		coberturas,
+		asesorPorUserId,
+	);
+}
+
 export async function obtenerPaginaAgenda(
 	dia: number,
 	opciones: { asesorId?: number; page: number; perPage: number },
@@ -149,6 +265,72 @@ const fetchAgendaPageProduccion: FetchAgendaPage = (
 	asesorId,
 	perPage,
 ) => obtenerPaginaAgenda(dia, { asesorId, page, perPage });
+
+const PAGE_SIZE_AGENDA_FUSIONADA = 200;
+
+/**
+ * CB-114: agenda de VARIAS carteras (la propia + las cubiertas) como una sola
+ * lista paginada.
+ *
+ * `getCuotasProximasVencer` filtra por un `asesor_id` a la vez, así que no se
+ * puede pedir "la página N de la unión" en una llamada: hay que traer el
+ * universo de cada cartera y cortar la página acá. Solo se usa cuando hay
+ * cobertura vigente — sin ella el caller conserva la paginación en el SQL.
+ *
+ * El orden de cartera-back (por nombre de cliente) se pierde al concatenar dos
+ * universos, así que se reordena por el mismo criterio para que la paginación
+ * sea estable entre páginas.
+ */
+export async function obtenerAgendaFusionada(
+	dia: number,
+	asesores: readonly { asesorId: number }[],
+	page: number,
+	perPage: number,
+): Promise<{
+	cuotas: CarteraCuotaProximaVencer[];
+	total: number;
+	totalPages: number;
+	page: number;
+}> {
+	const universos = await Promise.all(
+		asesores.map((asesor) =>
+			fetchAllPages(
+				async (paginaActual) => {
+					const respuesta = await obtenerPaginaAgenda(dia, {
+						asesorId: asesor.asesorId,
+						page: paginaActual,
+						perPage: PAGE_SIZE_AGENDA_FUSIONADA,
+					});
+					return {
+						data: respuesta.data ?? [],
+						totalPages: respuesta.totalPages ?? 0,
+					};
+				},
+				{ maxPages: 200 },
+			),
+		),
+	);
+	const cuotas = universos.flat().sort((a, b) => {
+		// Mismo ORDER BY que cartera-back (nombre de cliente); el SIFCO desempata
+		// para que el corte de página no dependa del orden de llegada.
+		const porCliente = (a.cliente ?? "").localeCompare(b.cliente ?? "", "es");
+		return porCliente !== 0
+			? porCliente
+			: a.numero_credito_sifco.localeCompare(b.numero_credito_sifco);
+	});
+	const total = cuotas.length;
+	const totalPages = Math.max(1, Math.ceil(total / perPage));
+	// Página fuera de rango (la cartera encogió entre dos cargas): devolver la
+	// última válida, igual que hace cartera-back con su clamp.
+	const pageEfectiva = Math.min(Math.max(1, page), totalPages);
+	const offset = (pageEfectiva - 1) * perPage;
+	return {
+		cuotas: cuotas.slice(offset, offset + perPage),
+		total,
+		totalPages,
+		page: pageEfectiva,
+	};
+}
 
 /**
  * Limitación conocida (catch-up de boot tardío): `getCuotasProximasVencer`

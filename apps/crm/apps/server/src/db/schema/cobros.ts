@@ -431,6 +431,54 @@ export const agendaCobrosSnapshotItems = pgTable(
 	],
 );
 
+// CB-114: cobertura temporal. El dueño de cartera no cambia; esta tabla indica
+// quién atiende la agenda durante la ausencia y conserva titular/suplente.
+export const coberturasAgendaCobros = pgTable(
+	"coberturas_agenda_cobros",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		titularId: text("titular_id")
+			.notNull()
+			.references(() => user.id),
+		suplenteId: text("suplente_id")
+			.notNull()
+			.references(() => user.id),
+		motivo: text("motivo").notNull(),
+		desde: date("desde").notNull(),
+		hasta: date("hasta").notNull(),
+		creadaPor: text("creada_por")
+			.notNull()
+			.references(() => user.id),
+		canceladaEn: timestamp("cancelada_en"),
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+	},
+	// Espejo EXACTO de la migración 0051 (nombres incluidos): esta definición no
+	// crea la tabla —la migración ya corrió— pero sí es contra la que
+	// `drizzle-kit generate` compara. Con el índice mal nombrado, sin el WHERE
+	// parcial y sin los CHECK, la próxima generación emitía un DROP del índice
+	// bueno y dejaba los tres guards del lado DB sin declarar.
+	//
+	// Los nombres de los CHECK son los que Postgres asignó solo al aplicar 0051
+	// (verificados contra pg_constraint), no inventados acá.
+	(table) => [
+		index("coberturas_agenda_cobros_titular_rango_idx")
+			.on(table.titularId, table.desde, table.hasta)
+			.where(sql`${table.canceladaEn} IS NULL`),
+		check(
+			"coberturas_agenda_cobros_motivo_check",
+			sql`${table.motivo} IN ('vacaciones', 'permiso')`,
+		),
+		check(
+			"coberturas_agenda_cobros_check",
+			sql`${table.desde} <= ${table.hasta}`,
+		),
+		check(
+			"coberturas_agenda_cobros_check1",
+			sql`${table.titularId} <> ${table.suplenteId}`,
+		),
+	],
+);
+
 // CB-128 — auditoría de escrituras sobre contactos_cobros (AC-6: "no se
 // eliminan ni alteran registros históricos sin auditoría").
 //

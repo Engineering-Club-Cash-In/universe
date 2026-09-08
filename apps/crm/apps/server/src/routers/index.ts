@@ -27,6 +27,7 @@ import { quotationsRouter } from "./quotations";
 import { reportesCarteraRouter } from "./reportes-cartera";
 import * as reportsRouter from "./reports";
 import { seguimientosRouter } from "./seguimientos";
+import { trasladosCobrosRouter } from "./traslados-cobros";
 import { uploadRouter } from "./upload";
 import { vehiclesRouter } from "./vehicles";
 import { vendorsRouter } from "./vendors";
@@ -133,6 +134,13 @@ export const vehicleAppRouter = {
  * Cobros specific routes
  */
 export const cobrosAppRouter = {
+	getAsesoresTraslados: trasladosCobrosRouter.getAsesoresTraslados,
+	previsualizarTraslado: trasladosCobrosRouter.previsualizarTraslado,
+	confirmarTraslado: trasladosCobrosRouter.confirmarTraslado,
+	listarTraslados: trasladosCobrosRouter.listarTraslados,
+	crearCobertura: trasladosCobrosRouter.crearCobertura,
+	listarCoberturas: trasladosCobrosRouter.listarCoberturas,
+	cancelarCobertura: trasladosCobrosRouter.cancelarCobertura,
 	// Cobros routes
 	getCobrosDashboardStats: cobrosRouter.getDashboardStats,
 	getCasosCobros: cobrosRouter.getCasosCobros,

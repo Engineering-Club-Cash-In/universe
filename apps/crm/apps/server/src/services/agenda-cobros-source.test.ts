@@ -4,6 +4,7 @@ import {
 	filtrarAsesoresAgenda,
 	obtenerAgendaAsesor,
 	resolverAsesoresAgenda,
+	resolverAsesoresEfectivos,
 } from "./agenda-cobros-source";
 
 describe("resolverAsesoresAgenda", () => {
@@ -107,6 +108,99 @@ test("filtra captura manual al asesor CRM indicado", () => {
 			"crm-octavio",
 		),
 	).toEqual([{ userId: "crm-octavio", asesorCarteraId: 8, nombre: "Octavio" }]);
+});
+
+describe("resolverAsesoresEfectivos (CB-114)", () => {
+	const octavio = { asesorId: 8, nombre: "Octavio" };
+	const wilson = { asesorId: 3, nombre: "Wilson" };
+	const asesorPorUserId = new Map([
+		["u-octavio", octavio],
+		["u-wilson", wilson],
+	]);
+
+	test("sin coberturas devuelve solo la cartera propia", () => {
+		expect(
+			resolverAsesoresEfectivos(wilson, "u-wilson", [], asesorPorUserId),
+		).toEqual([{ asesorId: 3, nombre: "Wilson", cubierto: false }]);
+	});
+
+	test("el suplente ve la suya y la del titular, marcada como cubierta", () => {
+		expect(
+			resolverAsesoresEfectivos(
+				wilson,
+				"u-wilson",
+				[{ titularId: "u-octavio", suplenteId: "u-wilson" }],
+				asesorPorUserId,
+			),
+		).toEqual([
+			{ asesorId: 3, nombre: "Wilson", cubierto: false },
+			{ asesorId: 8, nombre: "Octavio", cubierto: true },
+		]);
+	});
+
+	test("el titular ausente no ve su propia agenda", () => {
+		expect(
+			resolverAsesoresEfectivos(
+				octavio,
+				"u-octavio",
+				[{ titularId: "u-octavio", suplenteId: "u-wilson" }],
+				asesorPorUserId,
+			),
+		).toEqual([]);
+	});
+
+	test("un suplente que además está ausente solo ve lo que cubre", () => {
+		expect(
+			resolverAsesoresEfectivos(
+				wilson,
+				"u-wilson",
+				[
+					{ titularId: "u-octavio", suplenteId: "u-wilson" },
+					{ titularId: "u-wilson", suplenteId: "u-otro" },
+				],
+				asesorPorUserId,
+			),
+		).toEqual([{ asesorId: 8, nombre: "Octavio", cubierto: true }]);
+	});
+
+	test("titular sin asesor de cartera vinculado no rompe la agenda propia", () => {
+		expect(
+			resolverAsesoresEfectivos(
+				wilson,
+				"u-wilson",
+				[{ titularId: "u-sin-cartera", suplenteId: "u-wilson" }],
+				asesorPorUserId,
+			),
+		).toEqual([{ asesorId: 3, nombre: "Wilson", cubierto: false }]);
+	});
+
+	test("no duplica cuando dos titulares mapean al mismo asesor de cartera", () => {
+		expect(
+			resolverAsesoresEfectivos(
+				wilson,
+				"u-wilson",
+				[
+					{ titularId: "u-octavio", suplenteId: "u-wilson" },
+					{ titularId: "u-octavio-bis", suplenteId: "u-wilson" },
+				],
+				new Map([...asesorPorUserId, ["u-octavio-bis", octavio]]),
+			),
+		).toEqual([
+			{ asesorId: 3, nombre: "Wilson", cubierto: false },
+			{ asesorId: 8, nombre: "Octavio", cubierto: true },
+		]);
+	});
+
+	test("ignora coberturas donde el usuario no es titular ni suplente", () => {
+		expect(
+			resolverAsesoresEfectivos(
+				wilson,
+				"u-wilson",
+				[{ titularId: "u-octavio", suplenteId: "u-tercero" }],
+				asesorPorUserId,
+			),
+		).toEqual([{ asesorId: 3, nombre: "Wilson", cubierto: false }]);
+	});
 });
 
 describe("obtenerAgendaAsesor", () => {

@@ -1,4 +1,16 @@
-import { and, asc, count, desc, eq, gte, inArray, lt, max } from "drizzle-orm";
+import {
+	and,
+	asc,
+	count,
+	desc,
+	eq,
+	gte,
+	inArray,
+	isNull,
+	lt,
+	lte,
+	max,
+} from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
@@ -6,6 +18,7 @@ import {
 	agendaCobrosSnapshotItems,
 	agendaCobrosSnapshots,
 	casosCobros,
+	coberturasAgendaCobros,
 	contactosCobros,
 	contratosFinanciamiento,
 } from "../db/schema/cobros";
@@ -66,9 +79,49 @@ export const agendaCobrosRouter = {
 				};
 			}
 			const fecha = toDateStrGT(new Date());
+			// Una cobertura reemplaza tareas de agenda, nunca el dueño de cartera.
+			// Se resuelve en lectura para que una cobertura creada antes o después
+			// de la captura del snapshot produzca el mismo resultado.
+			const coberturas = await db
+				.select({ titularId: coberturasAgendaCobros.titularId })
+				.from(coberturasAgendaCobros)
+				.where(
+					and(
+						eq(coberturasAgendaCobros.suplenteId, asesorId),
+						isNull(coberturasAgendaCobros.canceladaEn),
+						lte(coberturasAgendaCobros.desde, fecha),
+						gte(coberturasAgendaCobros.hasta, fecha),
+					),
+				);
+			const ausenciaPropia = await db
+				.select({ id: coberturasAgendaCobros.id })
+				.from(coberturasAgendaCobros)
+				.where(
+					and(
+						eq(coberturasAgendaCobros.titularId, asesorId),
+						isNull(coberturasAgendaCobros.canceladaEn),
+						lte(coberturasAgendaCobros.desde, fecha),
+						gte(coberturasAgendaCobros.hasta, fecha),
+					),
+				)
+				.limit(1);
+			const asesoresFuente = [
+				...(ausenciaPropia.length ? [] : [asesorId]),
+				...coberturas.map((c) => c.titularId),
+			];
+			if (!asesoresFuente.length) {
+				return {
+					fecha,
+					page: input.page,
+					perPage: input.perPage,
+					total: 0,
+					totalPages: 1,
+					items: [],
+				};
+			}
 			const where = and(
 				eq(agendaCobrosSnapshots.fechaGt, fecha),
-				eq(agendaCobrosSnapshots.asesorId, asesorId),
+				inArray(agendaCobrosSnapshots.asesorId, asesoresFuente),
 			);
 			// Paginado server-side: un asesor puede tener 16k+ créditos
 			// planificados en el mismo snapshot (ver CHUNK_SIZE_SNAPSHOT_ITEMS en
@@ -462,6 +515,31 @@ export const agendaCobrosRouter = {
 				contratos.map((c) => [c.id, c.clienteNombre]),
 			);
 
+			// CB-114: nombre de quien REALMENTE gestionó cada item. Durante una
+			// cobertura el trabajo del suplente se acredita al titular (ver el
+			// LEFT JOIN a coberturas_agenda_cobros en
+			// jobs/agenda-cobros-snapshots.ts), así que la agenda de un titular
+			// ausente puede salir 100% atendida sin que él tocara nada. Sin decir
+			// quién fue, el supervisor lee "cumplió" de alguien que estaba de
+			// vacaciones. `realizado_por` ya venía en el item, pero como id crudo.
+			const realizadoPorIds = [
+				...new Set(
+					items
+						.map((item) => item.realizadoPor)
+						.filter((id): id is string => id !== null),
+				),
+			];
+			const nombrePorUserId = new Map(
+				realizadoPorIds.length
+					? (
+							await db
+								.select({ id: user.id, name: user.name })
+								.from(user)
+								.where(inArray(user.id, realizadoPorIds))
+						).map((u) => [u.id, u.name])
+					: [],
+			);
+
 			return {
 				fecha: input.fecha,
 				asesorId: input.asesorId,
@@ -473,8 +551,22 @@ export const agendaCobrosRouter = {
 					const contratoId = item.casoCobroId
 						? contratoIdPorCasoCobroId.get(item.casoCobroId)
 						: casoPorSifco.get(item.numeroCreditoSifco)?.contratoId;
+					// Cubierto = lo gestionó alguien distinto del dueño de la agenda.
+					// Sale del `realizado_por` del PROPIO item (un hecho que el
+					// cierre ya registró), no de cruzar SIFCOs entre agendas: si
+					// dice que fue otro, fue otro. Por eso acá no hace falta
+					// verificar la cobertura —a diferencia de
+					// `columnaEnAgendaDeTitular`, que sí infiere y sin ese chequeo
+					// confundía pool compartido con cobertura—, y además un día
+					// histórico sigue contando lo que pasó ESE día aunque la
+					// cobertura se haya cancelado después.
+					const cubiertoPor =
+						item.realizadoPor && item.realizadoPor !== input.asesorId
+							? (nombrePorUserId.get(item.realizadoPor) ?? null)
+							: null;
 					return {
 						...item,
+						cubiertoPor,
 						clienteNombre: contratoId
 							? (clienteNombrePorContrato.get(contratoId) ?? null)
 							: null,

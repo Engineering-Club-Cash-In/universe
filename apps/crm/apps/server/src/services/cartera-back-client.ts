@@ -11,12 +11,12 @@ import type {
 	BoletaPagoInversionista,
 	CargaPorAsesorBucketResponse,
 	CarteraAsesor,
+	CarteraAsignacionesPoolPorSifcoResponse,
 	CarteraBackApiResponse,
 	CarteraBackAuthError,
 	CarteraBackConnectionError,
 	CarteraBackError,
 	CarteraBackValidationError,
-	CarteraAsignacionesPoolPorSifcoResponse,
 	CarteraBucketActualCredito,
 	CarteraBucketCatalogo,
 	CarteraBucketHistorialEvento,
@@ -29,10 +29,10 @@ import type {
 	CarteraConvenioProximosResponse,
 	CarteraCredito,
 	CarteraCuotasProximasResponse,
-	CarteraSifcosPoolAutoritativosResponse,
 	CarteraInversionista,
 	CarteraPagoCredito,
 	CarteraPagoCreditoInversionista,
+	CarteraSifcosPoolAutoritativosResponse,
 	CarteraStatsResponse,
 	CarteraUsuario,
 	CreateBoletaInput,
@@ -49,8 +49,8 @@ import type {
 	FacturarGenericoResponse,
 	GetAdvisorsParams,
 	GetAllCreditsParams,
-	GetAsignacionesPoolPorSifcoParams,
 	GetAsesorHistorialParams,
+	GetAsignacionesPoolPorSifcoParams,
 	GetBucketsHistorialParams,
 	GetCargaPorAsesorBucketParams,
 	GetColaDiaSLAParams,
@@ -73,6 +73,12 @@ import type {
 	ReversePagoInput,
 	UpdateCreditoInput,
 } from "../types/cartera-back";
+import type {
+	HistorialTraslado,
+	PreviewTraslado,
+	ResultadoTraslado,
+	SolicitudTraslado,
+} from "../types/traslados-cobros";
 import {
 	getCarteraAccessToken,
 	invalidateAndReauth,
@@ -1150,7 +1156,9 @@ export class CarteraBackClient {
 		numeroSifco: string,
 	): Promise<ResumenCreditoResponse["asesor"]> {
 		try {
-			const resumen = await this.request<Pick<ResumenCreditoResponse, "asesor">>(
+			const resumen = await this.request<
+				Pick<ResumenCreditoResponse, "asesor">
+			>(
 				`/credito/resumen?numero_credito_sifco=${encodeURIComponent(numeroSifco)}`,
 				{ method: "GET" },
 				false,
@@ -1331,8 +1339,6 @@ export class CarteraBackClient {
 			return null;
 		}
 	}
-
-
 
 	/**
 	 * Genera el estado de cuenta del crédito y devuelve su URL.
@@ -2382,6 +2388,41 @@ export class CarteraBackClient {
 			}),
 		});
 		return result;
+	}
+
+	async previsualizarTrasladoCartera(
+		input: SolicitudTraslado & { actorEmail: string },
+	) {
+		return this.request<PreviewTraslado>("/buckets/traslados/previsualizar", {
+			method: "POST",
+			body: JSON.stringify(input),
+		});
+	}
+
+	async confirmarTrasladoCartera(input: {
+		previewId: string;
+		actorEmail: string;
+		idempotencyKey: string;
+	}) {
+		const result = await this.request<ResultadoTraslado>(
+			"/buckets/traslados/confirmar",
+			{ method: "POST", body: JSON.stringify(input) },
+		);
+		for (const key of [
+			"/credito?",
+			"getAllCredits",
+			"stats",
+			"mora-por-etapa-asesor",
+			"/buckets/",
+		])
+			this.cache.invalidate(key);
+		return result;
+	}
+	async listarTrasladosCartera(page: number) {
+		return this.request<HistorialTraslado[]>(
+			`/buckets/traslados?page=${page}`,
+			{ method: "GET" },
+		);
 	}
 
 	// Bitácora de cambios de asesor (credito_asesor_historial) — auditoría de

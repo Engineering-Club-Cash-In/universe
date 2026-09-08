@@ -145,8 +145,11 @@ import {
 	sendWhatsappTemplateBatch,
 } from "../lib/simpletech";
 import {
+	type AsesorEfectivo,
 	buscarAsesorCarteraPorEmail,
+	obtenerAgendaFusionada,
 	obtenerPaginaAgenda,
+	resolverAgendaEfectivaDelUsuario,
 } from "../services/agenda-cobros-source";
 import {
 	CarteraBackHttpError,
@@ -3168,6 +3171,9 @@ export const cobrosRouter = {
 				// eligen uno o ven todos.
 				let asesorForzado: { asesorId: number; nombre: string } | null = null;
 				let asesorIdFiltro: number | undefined;
+				// CB-114: carteras cubiertas HOY por este usuario (vacío = sin
+				// cobertura vigente, camino normal de un solo asesor).
+				let cubiertos: AsesorEfectivo[] = [];
 				if (!puedeVerTodos) {
 					const email = context.session?.user?.email?.trim().toLowerCase();
 					// email_cash_in, NO getAdvisors()/platform_users.email: ese campo
@@ -3198,28 +3204,79 @@ export const cobrosRouter = {
 						nombre: propio.nombre,
 					};
 					asesorIdFiltro = propio.asesor_id;
+					// CB-114: durante una cobertura el suplente trabaja también la
+					// agenda del titular ausente (y el titular deja de ver la suya).
+					const efectivos = await resolverAgendaEfectivaDelUsuario(
+						asesorForzado,
+						context.session?.user?.id ?? "",
+						asesoresConBuckets,
+						toDateStrGT(new Date()),
+					);
+					if (efectivos.length === 0) {
+						// Titular ausente hoy: su agenda la trabaja el suplente.
+						return {
+							success: true,
+							sinAsesor: false,
+							asesorForzado,
+							ausente: true,
+							dia: input.dia,
+							items: [],
+							total: 0,
+							page,
+							perPage,
+							totalPages: 1,
+						};
+					}
+					// Cualquier resultado que no sea "solo mi propia cartera" pasa por
+					// el camino fusionado. La condición anterior (`length > 1`) se
+					// saltaba el caso de UNA sola cartera CUBIERTA —un titular ausente
+					// que además es suplente de alguien— y caía al camino normal con
+					// `asesorIdFiltro`, que apunta a la cartera ausente: la agenda que
+					// esa persona debía trabajar no la veía nadie.
+					if (efectivos.some((a) => a.cubierto)) cubiertos = efectivos;
 				} else if (input.asesorId) {
 					asesorIdFiltro = input.asesorId;
 				}
+				const cubiertosAgendaPorAsesorId = new Set(
+					cubiertos.filter((a) => a.cubierto).map((a) => a.asesorId),
+				);
 
 				// Todo el funnel (soloAlDia: false): la agenda es pareja para todos
 				// — cuentas al día Y en mora con cuota próxima. Los recordatorios
 				// WhatsApp (premora) siguen siendo solo B0. Filtro de asesor +
 				// paginación EN EL SQL: el día pesado llega de a perPage y el LIMIT
 				// aplica sobre las filas del asesor, no sobre el universo.
-				const respuesta = await obtenerPaginaAgenda(input.dia, {
-					asesorId: asesorIdFiltro,
-					page,
-					perPage,
-				});
-				const cuotas = respuesta.data ?? [];
-				const total = respuesta.total ?? cuotas.length;
-				const totalPages = respuesta.totalPages ?? 1;
-				// Página EFECTIVA: cartera-back clampa la página a la última válida
-				// si la pedida quedó fuera de rango (día encogido); hay que devolver
-				// ESA, no la pedida, o el paginador del front queda pegado en una
-				// página imposible (review Codex).
-				const pageEfectiva = respuesta.page ?? page;
+				//
+				// CB-114: con cobertura vigente son VARIAS carteras y cartera-back
+				// solo filtra por un `asesor_id` a la vez (ver getCuotasProximasVencer),
+				// así que ahí hay que traer el universo de cada una y paginar en
+				// memoria — mismo patrón que ya usa getColaDia, abajo. Sin cobertura
+				// (el 99% de los días) se conserva intacta la paginación en el SQL.
+				const {
+					cuotas,
+					total,
+					totalPages,
+					page: pageEfectiva,
+				} = cubiertos.length
+					? await obtenerAgendaFusionada(input.dia, cubiertos, page, perPage)
+					: await (async () => {
+							const respuesta = await obtenerPaginaAgenda(input.dia, {
+								asesorId: asesorIdFiltro,
+								page,
+								perPage,
+							});
+							const data = respuesta.data ?? [];
+							return {
+								cuotas: data,
+								total: respuesta.total ?? data.length,
+								totalPages: respuesta.totalPages ?? 1,
+								// Página EFECTIVA: cartera-back clampa la página a la última
+								// válida si la pedida quedó fuera de rango (día encogido);
+								// hay que devolver ESA, no la pedida, o el paginador del
+								// front queda pegado en una página imposible (review Codex).
+								page: respuesta.page ?? page,
+							};
+						})();
 
 				if (cuotas.length === 0) {
 					return {
@@ -3359,6 +3416,11 @@ export const cobrosRouter = {
 						casoId: caso?.id ?? null,
 						asesorId: c.asesor_id,
 						asesor: c.asesor,
+						// CB-114: cuenta de un titular ausente que este usuario cubre hoy
+						// — badge en la UI; la cartera no cambió de dueño.
+						cubierto:
+							c.asesor_id != null &&
+							cubiertosAgendaPorAsesorId.has(c.asesor_id),
 						recordatorios: (() => {
 							// Claims exactos por cuota + envíos por SIFCO (dedupe por
 							// tipo; el claim real gana sobre el log).
@@ -3679,6 +3741,8 @@ export const cobrosRouter = {
 
 				let asesorForzado: { asesorId: number; nombre: string } | null = null;
 				let asesorIdFiltro: number | undefined;
+				// CB-114: carteras que este usuario trabaja hoy (la propia + cubiertas).
+				let asesoresEfectivos: AsesorEfectivo[] = [];
 				if (!puedeVerTodos) {
 					const email = context.session?.user?.email?.trim().toLowerCase();
 					// email_cash_in, NO getAdvisors()/platform_users.email (ver el
@@ -3705,6 +3769,28 @@ export const cobrosRouter = {
 						nombre: propio.nombre,
 					};
 					asesorIdFiltro = propio.asesor_id;
+					// CB-114: durante una cobertura el suplente trabaja también la cola
+					// del titular ausente (y el titular deja de ver la suya).
+					asesoresEfectivos = await resolverAgendaEfectivaDelUsuario(
+						asesorForzado,
+						context.session?.user?.id ?? "",
+						asesoresConBuckets,
+						toDateStrGT(new Date()),
+					);
+					if (asesoresEfectivos.length === 0) {
+						// Titular ausente hoy: su cola la trabaja el suplente.
+						return {
+							success: true,
+							sinAsesor: false,
+							asesorForzado,
+							ausente: true,
+							items: [],
+							total: 0,
+							page,
+							perPage,
+							totalPages: 1,
+						};
+					}
 				} else if (input.asesorId) {
 					asesorIdFiltro = input.asesorId;
 				}
@@ -3736,18 +3822,33 @@ export const cobrosRouter = {
 				// la intersección real ocurre más abajo: venceHoySet solo se
 				// consulta para SIFCOs que ya están en `universo` (el pool SLA), así
 				// que el scoping correcto lo sigue dando el universo, no esta query.
-				const [universoData, cuotasHoyData] = await Promise.all([
-					fetchAllPages(
-						async (page) => {
-							const resp = await carteraBackClient.getColaDiaSLA({
-								asesorId: asesorIdFiltro,
-								buckets: input.buckets,
-								page,
-								perPage: 100,
-							});
-							return { data: resp.data, totalPages: resp.totalPages ?? 0 };
-						},
-						{ maxPages: 200 }, // 200 * 100 = 20k créditos, muy por encima de la cartera real
+				// CB-114: con cobertura vigente son VARIAS carteras y getColaDiaSLA
+				// filtra por un `asesor_id` a la vez — se trae el universo de cada una
+				// y se concatena. La paginación de este endpoint ya ocurre en memoria
+				// (después de clasificar, más abajo), así que la unión no la rompe.
+				const asesoresUniverso: (number | undefined)[] =
+					asesoresEfectivos.length
+						? asesoresEfectivos.map((a) => a.asesorId)
+						: [asesorIdFiltro];
+				const cubiertosPorAsesorId = new Set(
+					asesoresEfectivos.filter((a) => a.cubierto).map((a) => a.asesorId),
+				);
+				const [universoPorAsesor, cuotasHoyData] = await Promise.all([
+					Promise.all(
+						asesoresUniverso.map((asesorUniverso) =>
+							fetchAllPages(
+								async (page) => {
+									const resp = await carteraBackClient.getColaDiaSLA({
+										asesorId: asesorUniverso,
+										buckets: input.buckets,
+										page,
+										perPage: 100,
+									});
+									return { data: resp.data, totalPages: resp.totalPages ?? 0 };
+								},
+								{ maxPages: 200 }, // 200 * 100 = 20k créditos, muy por encima de la cartera real
+							),
+						),
 					),
 					fetchAllPages(
 						async (page) => {
@@ -3763,7 +3864,19 @@ export const cobrosRouter = {
 						{ maxPages: 200 },
 					),
 				]);
-				const universo = { data: universoData };
+				// Dedupe por SIFCO: el pool de un bucket puede incluir a más de un
+				// asesor (ver docs/features/cobros-02/04-operacion-diaria.md), así que
+				// con cobertura el mismo crédito puede venir en dos universos — sin
+				// esto saldría duplicado en la cola del suplente.
+				const universo = {
+					data: [
+						...new Map(
+							universoPorAsesor
+								.flat()
+								.map((credito) => [credito.numero_credito_sifco, credito]),
+						).values(),
+					],
+				};
 				// venceHoy solo se marca sobre créditos que ya están en el pool SLA
 				// (getColaDiaSLA excluye B0 — "Cartera Sana" no tiene SLA). Un
 				// crédito B0 con cuota venciendo hoy no entra a esta cola; mismo
@@ -3993,6 +4106,10 @@ export const cobrosRouter = {
 							cliente: credito.cliente,
 							asesorId: credito.asesor_id,
 							asesor: credito.asesor,
+							// CB-114: cuenta de un titular ausente que este usuario cubre
+							// hoy — la UI la marca con un badge para que el suplente sepa
+							// que no es suya (la cartera no cambió de dueño).
+							cubierto: cubiertosPorAsesorId.has(credito.asesor_id),
 							bucket: credito.bucket,
 							bucketPrefijo: credito.bucket_prefijo,
 							bucketNombre: credito.bucket_nombre,
@@ -8055,6 +8172,9 @@ export const cobrosRouter = {
 					cliente: c.usuarios?.nombre ?? "",
 					asesorId: c.creditos.asesor_id ?? null,
 					asesorNombre: c.asesores?.nombre ?? null,
+					cuotasAtrasadas: c.mora?.cuotas_atrasadas ?? 0,
+					montoMora: c.mora?.monto_mora ?? "0",
+					totalACobrar: c.deuda_total_con_mora ?? "0",
 					bucket: c.bucket ?? null,
 				})),
 				page: resp.page,

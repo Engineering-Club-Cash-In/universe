@@ -55,12 +55,67 @@ describe("destinatarioDeLiquidacion", () => {
     // dpi_rep_legal='04036613'. El resolutor normaliza los ceros, así que
     // devuelve su propia fila; el correo termina en el mismo buzón de siempre.
     const destino = destinatarioDeLiquidacion(
-      { nombre: "Javier Camilo Kafie", email: "javier@ejemplo.com" },
-      { nombre: "Javier Camilo Kafie", email: "javier@ejemplo.com" },
+      { nombre: "Javier Camilo Kafie", email: "javier@ejemplo.com", dpi: 4036613 },
+      { nombre: "Javier Camilo Kafie", email: "javier@ejemplo.com", dpi: "04036613" },
     );
 
     expect(destino.email).toBe("javier@ejemplo.com");
     expect(destino.via).toBe("representante");
+  });
+
+  it("el que se representa a sí mismo conserva el TEXTO personal del correo", () => {
+    // Hallazgo de Codex: el destino ya estaba bien —su propio buzón— pero el
+    // texto no. `nombreRepresentante` es lo que hace que la plantilla
+    // (packages/email/src/templates/LiquidationTemplate.tsx:99) cambie al
+    // cuerpo de empresa y le diga a Kafie que la liquidación es de "una entidad
+    // que usted representa". La entidad es él.
+    const destino = destinatarioDeLiquidacion(
+      { nombre: "Javier Camilo Kafie", email: "javier@ejemplo.com", dpi: 4036613 },
+      { nombre: "Javier Camilo Kafie", email: "javier@ejemplo.com", dpi: "04036613" },
+    );
+
+    expect(destino.nombreRepresentante).toBeNull();
+    expect(destino.motivo).toBe("autorrepresentado");
+  });
+
+  it("la autorrepresentación se detecta con la misma normalización de DPI que el resto", () => {
+    // Ceros a la izquierda y espacios: `dpi` es bigint (nunca los trae) y
+    // `dpi_rep_legal` es varchar (sí). Si la comparación fuera literal, Kafie
+    // volvería a caer en el texto de empresa por un cero.
+    for (const [dpiFila, dpiRepresentante] of [
+      [4036613, "04036613"],
+      ["4036613", "  04036613 "],
+      ["04036613", "4036613"],
+    ] as const) {
+      const destino = destinatarioDeLiquidacion(
+        { nombre: "Javier Camilo Kafie", email: "javier@ejemplo.com", dpi: dpiFila },
+        { nombre: "Javier Camilo Kafie", email: "javier@ejemplo.com", dpi: dpiRepresentante },
+      );
+
+      expect(destino.nombreRepresentante).toBeNull();
+    }
+  });
+
+  it("una sociedad de verdad sigue llevando el nombre del representante en el cuerpo", () => {
+    const destino = destinatarioDeLiquidacion(
+      { nombre: "CUBE, S.A.", email: "contabilidad@cube.com", dpi: 999 },
+      { nombre: "Richard Kachler", email: "richard@ejemplo.com", dpi: "1573661970101" },
+    );
+
+    expect(destino.nombreRepresentante).toBe("Richard Kachler");
+    expect(destino.motivo).toBe("representante_con_correo");
+  });
+
+  it("dos DPI ausentes no son el mismo DPI: no es autorrepresentación", () => {
+    // Si la fila no tiene `dpi` capturado, `null === null` NO puede leerse como
+    // "es él mismo": sería quitarle el saludo al representante de verdad.
+    const destino = destinatarioDeLiquidacion(
+      { nombre: "SOCIEDAD SIN DPI", email: "socia@ejemplo.com", dpi: null },
+      { nombre: "Rep Legal", email: "rep@ejemplo.com", dpi: null },
+    );
+
+    expect(destino.nombreRepresentante).toBe("Rep Legal");
+    expect(destino.motivo).toBe("representante_con_correo");
   });
 
   it("una fila sin correo y sin representante utilizable queda sin destinatario", () => {

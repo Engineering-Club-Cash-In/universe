@@ -4742,22 +4742,35 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
           // liquidación YA está escrita en base en este punto, así que ni una
           // consulta caída ni un representante inexistente pueden costar el
           // correo. Cualquier tropiezo termina en el `email` de la fila.
-          let representanteLiquidacion: { nombre: string; email: string | null } | null = null;
+          let representanteLiquidacion: {
+            nombre: string;
+            email: string | null;
+            dpi: number | string | null;
+          } | null = null;
+          // El `dpi` de la entidad liquidada: es lo que distingue a una
+          // sociedad de verdad del que se representa a sí mismo. Vive fuera del
+          // try porque la decisión de más abajo lo necesita.
+          let dpiEntidadLiquidada: number | string | null = null;
           try {
             const [filaCartera] = await db
               .select({
+                dpi: inversionistas.dpi,
                 dpi_rep_legal: inversionistas.dpi_rep_legal,
               })
               .from(inversionistas)
               .where(eq(inversionistas.inversionista_id, inv_id))
               .limit(1);
 
+            dpiEntidadLiquidada = filaCartera?.dpi ?? null;
+
             const dpiRepresentante = normalizarDpiParaComparar(filaCartera?.dpi_rep_legal);
             if (dpiRepresentante) {
               // No se filtra al autorrepresentado (id 187: dpi 4036613 con
               // dpi_rep_legal '04036613'): el resolutor normaliza los ceros a
               // la izquierda y devuelve su propia fila, así que el correo cae
-              // en su buzón de siempre.
+              // en su buzón de siempre. Lo que sí cambia para él es el CUERPO:
+              // `destinatarioDeLiquidacion` lo reconoce por el DPI y no le
+              // manda el texto de empresa.
               representanteLiquidacion = await buscarRepresentanteEnCartera(dpiRepresentante);
             }
           } catch (errorRepresentante) {
@@ -4769,7 +4782,11 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
           }
 
           const destinoCorreo = destinatarioDeLiquidacion(
-            { nombre: inversionista.nombre_inversionista, email: inversionista.email },
+            {
+              nombre: inversionista.nombre_inversionista,
+              email: inversionista.email,
+              dpi: dpiEntidadLiquidada,
+            },
             representanteLiquidacion,
           );
 

@@ -13,11 +13,18 @@ import { inversionistas } from "../../database/db/schema";
  */
 export const buscarRepresentanteEnCartera = async (
   dpiNormalizado: string,
-): Promise<{ nombre: string; email: string | null } | null> => {
+): Promise<{
+  nombre: string;
+  email: string | null;
+  dpi: number | string | null;
+} | null> => {
   const filas = await db
     .select({
       nombre: inversionistas.nombre,
       email: inversionistas.email,
+      // Va de vuelta para que el llamador pueda reconocer al que se representa
+      // a sí mismo (id 187) comparándolo con el `dpi` de la entidad liquidada.
+      dpi: inversionistas.dpi,
     })
     .from(inversionistas)
     .where(
@@ -34,5 +41,6 @@ export const buscarRepresentanteEnCartera = async (
   return {
     nombre: fila.nombre ?? "Inversionista",
     email: fila.email?.trim() ? fila.email.trim().toLowerCase() : null,
+    dpi: fila.dpi ?? null,
   };
 };

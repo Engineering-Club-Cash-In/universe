@@ -13,16 +13,25 @@
  * puede ejercitar en una prueba. Aquí sí.
  */
 
+import { normalizarDpiParaComparar } from "./provisionamientoPortal";
+
 export type ViaDeEnvioLiquidacion = "fila" | "representante";
 
 export interface FilaLiquidacion {
   nombre: string | null;
   email: string | null;
+  /**
+   * DPI de la fila que se liquida (`dpi`, bigint: nunca trae ceros a la
+   * izquierda). Solo sirve para reconocer al que se representa a sí mismo.
+   */
+  dpi: number | string | null;
 }
 
 export interface RepresentanteLiquidacion {
   nombre: string;
   email: string | null;
+  /** DPI de la fila del representante, para compararlo con el de la entidad. */
+  dpi: number | string | null;
 }
 
 export interface DestinatarioLiquidacion {
@@ -38,6 +47,7 @@ export interface DestinatarioLiquidacion {
   /** Para el log: por qué salió por esa vía. */
   motivo:
     | "representante_con_correo"
+    | "autorrepresentado"
     | "representante_sin_correo"
     | "representante_con_correo_invalido"
     | "sin_representante";
@@ -108,13 +118,25 @@ const esCorreoEnviable = (correo: string): boolean =>
  *
  * El que se representa a sí mismo (id 187, `dpi=4036613` vs
  * `dpi_rep_legal='04036613'`) resuelve a su propia fila y termina en su propio
- * buzón: la vía dice "representante" pero el buzón no cambia.
+ * buzón: la vía dice "representante" pero el buzón no cambia. El CUERPO sí
+ * cambiaba, y ese era el error: con `nombreRepresentante` la plantilla pasa al
+ * texto de empresa y le dice que la liquidación es de "una entidad que usted
+ * representa" (LiquidationTemplate.tsx:99), siendo que la entidad es él. Por
+ * eso el autorrepresentado va sin `nombreRepresentante` y conserva el texto
+ * personal de siempre.
  */
 export const destinatarioDeLiquidacion = (
   fila: FilaLiquidacion,
   representante: RepresentanteLiquidacion | null,
 ): DestinatarioLiquidacion => {
   const emailRepresentante = limpiar(representante?.email);
+  // Misma normalización que usa el resto del código para cruzar `dpi` (bigint,
+  // sin ceros a la izquierda) contra `dpi_rep_legal` (varchar, con ellos): sin
+  // ella, Kafie deja de reconocerse a sí mismo por un cero. Dos DPI ausentes
+  // NO son el mismo DPI, de ahí el `!== null`.
+  const dpiFila = normalizarDpiParaComparar(fila.dpi);
+  const dpiRepresentante = normalizarDpiParaComparar(representante?.dpi);
+  const seRepresentaASiMismo = dpiFila !== null && dpiFila === dpiRepresentante;
   const representanteEsAlcanzable =
     emailRepresentante !== null && esCorreoEnviable(emailRepresentante);
 
@@ -122,8 +144,12 @@ export const destinatarioDeLiquidacion = (
     return {
       email: emailRepresentante,
       via: "representante",
-      nombreRepresentante: limpiar(representante.nombre),
-      motivo: "representante_con_correo",
+      nombreRepresentante: seRepresentaASiMismo
+        ? null
+        : limpiar(representante.nombre),
+      motivo: seRepresentaASiMismo
+        ? "autorrepresentado"
+        : "representante_con_correo",
     };
   }
 

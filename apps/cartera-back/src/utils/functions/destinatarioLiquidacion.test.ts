@@ -73,6 +73,46 @@ describe("destinatarioDeLiquidacion", () => {
     expect(destino.via).toBe("fila");
   });
 
+  // ── Hallazgo de Codex: la política de fallo no se cumplía con un correo
+  // malformado. `sendLiquidationEmail` valida con `emailSchema.parse(to)` y
+  // TIRA; el llamador (investor.ts) solo registra ese error, no reintenta con
+  // el correo de la entidad. Elegir un correo inválido no degrada el envío:
+  // lo PIERDE. La política declarada es caer al comportamiento de hoy.
+  const correosInvalidosDelRepresentante = [
+    ["con un espacio en medio", "richard ejemplo@correo.com"],
+    ["sin arroba", "richard.ejemplo.com"],
+    ["con dos arrobas", "richard@ejemplo@correo.com"],
+    ["sin dominio", "richard@"],
+    ["sin punto en el dominio", "richard@correo"],
+    ["que es solo una arroba", "@"],
+  ] as const;
+
+  for (const [caso, correo] of correosInvalidosDelRepresentante) {
+    it(`un correo de representante ${caso} no se elige: cae al de la fila`, () => {
+      const destino = destinatarioDeLiquidacion(
+        { nombre: "CUBE, S.A.", email: "contabilidad@cube.com" },
+        { nombre: "Richard Kachler", email: correo },
+      );
+
+      expect(destino.email).toBe("contabilidad@cube.com");
+      expect(destino.via).toBe("fila");
+      expect(destino.nombreRepresentante).toBeNull();
+      expect(destino.motivo).toBe("representante_con_correo_invalido");
+    });
+  }
+
+  it("un correo de representante inválido no arrastra al de la fila", () => {
+    // La fila conserva su correo tal cual: la validación nueva decide a QUIÉN
+    // se elige, no reescribe el camino de siempre.
+    const destino = destinatarioDeLiquidacion(
+      { nombre: "CUBE, S.A.", email: "  contabilidad@cube.com " },
+      { nombre: "Richard Kachler", email: "richard@@ejemplo.com" },
+    );
+
+    expect(destino.email).toBe("contabilidad@cube.com");
+    expect(destino.via).toBe("fila");
+  });
+
   it("recorta los espacios del correo de la fila antes de mandarlo", () => {
     // `emailSchema.parse` en @cci/email tira si el correo trae espacios, y esa
     // excepción aborta el envío de esa iteración.

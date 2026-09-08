@@ -39,6 +39,7 @@ export interface DestinatarioLiquidacion {
   motivo:
     | "representante_con_correo"
     | "representante_sin_correo"
+    | "representante_con_correo_invalido"
     | "sin_representante";
 }
 
@@ -52,14 +53,58 @@ const limpiar = (valor: string | null | undefined): string | null => {
 };
 
 /**
+ * ¿Este correo lo va a aceptar el envío?
+ *
+ * Recortar no alcanza. `sendLiquidationEmail` valida con
+ * `emailSchema.parse(to)` (packages/email/src/index.ts:60,96) y TIRA si el
+ * formato no le gusta; el llamador solo registra la excepción y sigue
+ * (investor.ts:4808), no reintenta con el correo de la entidad. Así que elegir
+ * un correo malformado no degrada el envío: lo PIERDE, justo lo contrario de
+ * la política declarada de caer al comportamiento de siempre. Por eso la
+ * dirección del representante se valida ANTES de elegirla.
+ *
+ * SON DOS DEFINICIONES, a propósito y no por gusto: `emailSchema` es un `const`
+ * privado del módulo (`packages/email/src/index.ts:60`, no exportado), y ese
+ * módulo TIRA al importarse si faltan `RESEND_API_KEY`/`EMAIL_DOMAIN` — o sea
+ * que ni exportándolo podría importarlo un módulo de decisión puro sin
+ * arrastrar el cliente de Resend a una prueba unitaria.
+ *
+ * La regla que mantiene sanas a las dos: esta comprobación tiene que ser a lo
+ * sumo TAN permisiva como la de zod, nunca más. Todo lo que aceptemos acá lo
+ * acepta `emailSchema`, así que nunca elegimos una dirección que el envío vaya
+ * a rechazar. La asimetría que queda apunta al lado seguro: si algún día zod
+ * acepta algo que esta expresión no, ese representante se queda sin la mejora
+ * y su liquidación sale al buzón de la entidad — el comportamiento de hoy, que
+ * es exactamente lo que la política promete.
+ *
+ * Frente a `z.string().email()` de zod 3
+ * (`/^(?!\.)(?!.*\.\.)([A-Z0-9_'+\-\.]*)[A-Z0-9_+-]@([A-Z0-9][A-Z0-9\-]*\.)+[A-Z]{2,}$/i`):
+ * mismo dominio, y en la parte local se exige además que cada tramo entre
+ * puntos termine en carácter "normal". Nada de espacios, ni cero arrobas, ni
+ * dos.
+ */
+const SEGMENTO_LOCAL = "[A-Za-z0-9_'+-]*[A-Za-z0-9_+-]";
+const CORREO_ACEPTADO_POR_EL_ENVIO = new RegExp(
+  `^${SEGMENTO_LOCAL}(\\.${SEGMENTO_LOCAL})*@([A-Za-z0-9][A-Za-z0-9-]*\\.)+[A-Za-z]{2,}$`,
+);
+
+const esCorreoEnviable = (correo: string): boolean =>
+  CORREO_ACEPTADO_POR_EL_ENVIO.test(correo);
+
+/**
  * Regla: si hay representante Y tiene correo, el correo es suyo. En cualquier
  * otro caso se cae al correo de la fila, exactamente como antes.
  *
  * El fallback no es cortesía, es la política: perder un correo de liquidación
  * es peor que mandarlo al buzón de siempre. Por eso "representante sin correo"
- * (INVERSIONES DELFINA, id 34: su representante no tiene correo en cartera) y
- * "representante que no aparece en cartera" terminan en el mismo sitio de hoy
- * en vez de quedar sin enviar.
+ * (INVERSIONES DELFINA, id 34: su representante no tiene correo en cartera),
+ * "representante con un correo que el envío no acepta" y "representante que no
+ * aparece en cartera" terminan en el mismo sitio de hoy en vez de quedar sin
+ * enviar.
+ *
+ * El correo de la FILA no se valida: si viene malformado, el envío tira y se
+ * registra, igual que antes de este cambio. Esta función decide a QUIÉN se
+ * elige, no reescribe el camino de siempre.
  *
  * El que se representa a sí mismo (id 187, `dpi=4036613` vs
  * `dpi_rep_legal='04036613'`) resuelve a su propia fila y termina en su propio
@@ -70,8 +115,10 @@ export const destinatarioDeLiquidacion = (
   representante: RepresentanteLiquidacion | null,
 ): DestinatarioLiquidacion => {
   const emailRepresentante = limpiar(representante?.email);
+  const representanteEsAlcanzable =
+    emailRepresentante !== null && esCorreoEnviable(emailRepresentante);
 
-  if (representante && emailRepresentante) {
+  if (representante && emailRepresentante && representanteEsAlcanzable) {
     return {
       email: emailRepresentante,
       via: "representante",
@@ -84,6 +131,10 @@ export const destinatarioDeLiquidacion = (
     email: limpiar(fila.email),
     via: "fila",
     nombreRepresentante: null,
-    motivo: representante ? "representante_sin_correo" : "sin_representante",
+    motivo: !representante
+      ? "sin_representante"
+      : emailRepresentante
+        ? "representante_con_correo_invalido"
+        : "representante_sin_correo",
   };
 };

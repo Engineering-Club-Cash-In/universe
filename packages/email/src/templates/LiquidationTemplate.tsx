@@ -21,6 +21,11 @@ interface LiquidationEmailAssets {
 
 interface LiquidationEmailProps {
   investorName: string;
+  /**
+   * Presente solo cuando el correo va al representante legal y no a la
+   * entidad. Cambia a quién se saluda, no de quién es la liquidación.
+   */
+  representativeName?: string;
   amount: string;
   creditNumber: string;
   date: string;
@@ -31,6 +36,7 @@ interface LiquidationEmailProps {
 
 export const LiquidationEmail = ({
   investorName,
+  representativeName,
   date,
   reportUrl,
   assets,
@@ -55,7 +61,12 @@ export const LiquidationEmail = ({
         fontStyle="normal"
       />
     </Head>
-    <Preview>Confirmación de Liquidación - CashIn</Preview>
+    {/*
+      El nombre de la entidad va en el preview igual que en el asunto: en la
+      bandeja de un representante de varias sociedades, es la única forma de
+      distinguir cuatro correos que llegan el mismo día.
+    */}
+    <Preview>{`Confirmación de Liquidación ${investorName} - ${date}`}</Preview>
     <Body style={main}>
       <Container style={container}>
         {assets ? (
@@ -73,16 +84,30 @@ export const LiquidationEmail = ({
         )}
 
         <Section style={content}>
+          {/*
+            La entidad va en el encabezado, no solo en el saludo: cuando el
+            correo cae en el buzón del representante, el saludo lleva el nombre
+            de él y la entidad tiene que seguir visible de un vistazo.
+          */}
           <Heading style={h1}>Confirmación de Liquidación</Heading>
+          <Text style={entityLine}>{investorName}</Text>
 
           <Text style={greeting}>
-            Estimado(a) <strong>{investorName}</strong>,
+            Estimado(a) <strong>{representativeName ?? investorName}</strong>,
           </Text>
 
-          <Text style={text}>
-            Le informamos que se ha procesado con éxito la liquidación de sus rendimientos
-            correspondientes al período de <strong>{date}</strong>.
-          </Text>
+          {representativeName ? (
+            <Text style={text}>
+              Le informamos que se ha procesado con éxito la liquidación de los rendimientos
+              de <strong>{investorName}</strong>, entidad que usted representa, correspondientes
+              al período de <strong>{date}</strong>.
+            </Text>
+          ) : (
+            <Text style={text}>
+              Le informamos que se ha procesado con éxito la liquidación de sus rendimientos
+              correspondientes al período de <strong>{date}</strong>.
+            </Text>
+          )}
 
           {reportUrl && (
             <Section style={buttonContainer}>
@@ -181,6 +206,14 @@ const content = {
 const h1 = {
   color: '#111111',
   fontSize: '24px',
+  fontWeight: '700' as const,
+  textAlign: 'center' as const,
+  margin: '0 0 6px',
+};
+
+const entityLine = {
+  color: '#4E57EA',
+  fontSize: '17px',
   fontWeight: '700' as const,
   textAlign: 'center' as const,
   margin: '0 0 28px',

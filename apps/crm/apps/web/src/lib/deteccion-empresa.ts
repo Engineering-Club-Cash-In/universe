@@ -58,6 +58,19 @@ export const emailConsultable = (valor: string): string | null => {
  * El DPI manda: es el dato con el que conta identifica a una persona. El correo
  * solo consulta cuando no hay DPI escrito, para no tener dos disparadores
  * peleando por el mismo formulario cuando dicen cosas distintas.
+ *
+ * "No hay DPI escrito" es el campo VACÍO, no "el DPI todavía no es
+ * consultable". Son cosas distintas y confundirlas creaba empresas bajo la
+ * persona equivocada: con el correo de alguien ya escrito, cada dígito del DPI
+ * de OTRA persona entre el primero y el sexto dejaba el disparador en el
+ * correo. Si la consulta resolvía en esa ventana, se detectaba al dueño del
+ * correo, se le ponía de representante y `camposAlDetectar` limpiaba el DPI a
+ * medio teclear — el operador ni veía qué pasó con lo que estaba escribiendo.
+ *
+ * Mientras haya un dígito en el campo de DPI, entonces, no se consulta nada: el
+ * dato que manda está a medias y el correo no lo suple. En cuanto llega al
+ * séptimo dígito dispara el DPI, y si se borra el campo vuelve a disparar el
+ * correo — sin nada que deshacer en el camino.
  */
 export const disparadorDeteccion = (
 	dpi: string,
@@ -65,6 +78,11 @@ export const disparadorDeteccion = (
 ): { dpi: string } | { email: string } | null => {
 	const porDpi = dpiConsultable(dpi);
 	if (porDpi) return { dpi: porDpi };
+
+	// Se miran dígitos, lo mismo que mira `dpiConsultable`: la identidad de
+	// alguien vive ahí. Un guion o un espacio sueltos no son de nadie y no deben
+	// apagar la detección por correo sin que se vea por qué.
+	if (/\d/.test(dpi)) return null;
 
 	const porEmail = emailConsultable(email);
 	if (porEmail) return { email: porEmail };

@@ -68,7 +68,13 @@ export function createPaymentTokenWebhookRouter(deps: {
           logWebhook(requestId, "token-user-found", {
             elapsedMs: elapsed(startedAt),
           });
-          const carteraResult = await deps.cartera.applyNexaPayment({ creditoId: tokenUser.creditoId, transaction });
+          const carteraResult = await deps.cartera.applyNexaPayment({
+            creditoId: tokenUser.creditoId,
+            transaction,
+          }).catch(async (error) => {
+            await deps.transactions.markFailed(stored.id, error instanceof Error ? error.message : String(error));
+            throw error;
+          });
           logWebhook(requestId, "cartera-result", {
             elapsedMs: elapsed(startedAt),
             status: carteraResult.status,

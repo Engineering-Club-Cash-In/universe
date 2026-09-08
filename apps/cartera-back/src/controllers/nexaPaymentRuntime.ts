@@ -1,4 +1,4 @@
-import { and, asc, eq, ne } from "drizzle-orm";
+import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { client, db, lockPool } from "../database";
 import {
   creditos,
@@ -11,13 +11,10 @@ import { claimNexaPaymentEvent } from "./nexaPaymentRepository";
 import {
   createNexaPaymentHandler,
   formatNexaPaymentDate,
-  NexaPaymentError,
   type NexaPaymentDependencies,
 } from "./nexaPayments";
 
 const NEXA_CREDIT_LOCK_NAMESPACE = 8766;
-const marker = (eventId: number) => `NEXA:${eventId}`;
-
 export const nexaPaymentDependencies: NexaPaymentDependencies = {
   withCreditLock: async (creditoId, work) => {
     const connection = await lockPool.connect();
@@ -80,11 +77,12 @@ export const nexaPaymentDependencies: NexaPaymentDependencies = {
     .select({
       paymentId: pagos_credito.pago_id,
       validationStatus: pagos_credito.validationStatus,
+      amount: sql<string>`COALESCE(${pagos_credito.monto_aplicado}, 0) + COALESCE(${pagos_credito.mora}, 0) + COALESCE(NULLIF(${pagos_credito.otros}, ''), '0')::numeric`,
     })
     .from(pagos_credito)
     .where(and(
       eq(pagos_credito.credito_id, creditoId),
-      eq(pagos_credito.registerBy, marker(eventId)),
+      eq(pagos_credito.nexaPaymentEventId, eventId),
     ))
     .orderBy(asc(pagos_credito.pago_id)),
   registerPayment: async (body, eventId, usuarioId) => {
@@ -99,16 +97,14 @@ export const nexaPaymentDependencies: NexaPaymentDependencies = {
         cuotaApagar: 1,
         url_boletas: [],
         numeroAutorizacion: body.transactionId,
-        registerBy: marker(eventId),
+        registerBy: "NEXA",
         fecha_boleta: date,
         renuevo_o_nuevo: "NEXA",
         origen_pago: "transferencia",
       },
       set,
-    });
-    if (result && "success" in result && result.success === false) {
-      throw new NexaPaymentError("payment_registration_rejected", set.status);
-    }
+    }, { nexaPaymentEventId: eventId });
+    return result && "success" in result ? result : {};
   },
   applyPayment: aplicarPagoAlCredito,
   complete: async (eventId, paymentId) => {
@@ -131,6 +127,7 @@ export const nexaPaymentDependencies: NexaPaymentDependencies = {
         ne(nexa_payment_events.status, "applied"),
       ));
   },
+  now: () => new Date(),
 };
 
 export const nexaPaymentHandler = createNexaPaymentHandler({

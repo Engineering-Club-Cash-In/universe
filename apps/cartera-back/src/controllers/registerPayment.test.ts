@@ -34,10 +34,25 @@ describe("register payment", () => {
         fecha_pago: "2026-09-08",
         cuotaApagar: 1,
         url_boletas: [],
-        registerBy: "NEXA:7",
+        registerBy: "test@clubcashin.com",
         fecha_boleta: "2026-09-08",
       }).success,
     ).toBe(true);
+  });
+
+  it("reserva registerBy NEXA para el flujo interno", () => {
+    const body = {
+      credito_id: 10,
+      usuario_id: 5,
+      monto_boleta: "10.00",
+      fecha_pago: "2026-09-08",
+      cuotaApagar: 1,
+      url_boletas: [],
+      fecha_boleta: "2026-09-08",
+    };
+
+    expect(pagoSchema.safeParse({ ...body, registerBy: "NEXA:7" }).success).toBe(false);
+    expect(pagoSchema.safeParse({ ...body, registerBy: "  nexa:forged" }).success).toBe(false);
   });
 
   it("clasifica un crédito pendiente de cancelación con un mensaje descriptivo", () => {

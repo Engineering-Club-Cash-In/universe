@@ -1,4 +1,16 @@
 import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+test("0035 vincula cada fila de pago al evento Nexa con FK", () => {
+  const migration = readFileSync(
+    join(import.meta.dir, "../../drizzle/0035_add_nexa_internal_payments.sql"),
+    "utf8",
+  );
+
+  expect(migration).toContain("nexa_payment_event_id");
+  expect(migration).toContain("REFERENCES cartera.nexa_payment_events(id)");
+});
 
 test("claim usa el evento persistente para devolver el paymentId aplicado", async () => {
   const module = await import("./nexaPaymentRepository").catch(() => ({}));

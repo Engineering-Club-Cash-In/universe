@@ -30,3 +30,10 @@ CREATE TABLE IF NOT EXISTS cartera.nexa_payment_events (
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_nexa_payment_events_nonce
   ON cartera.nexa_payment_events (nonce);
+
+ALTER TABLE cartera.pagos_credito
+  ADD COLUMN IF NOT EXISTS nexa_payment_event_id INTEGER
+  REFERENCES cartera.nexa_payment_events(id);
+
+CREATE INDEX IF NOT EXISTS idx_pagos_credito_nexa_payment_event_id
+  ON cartera.pagos_credito (nexa_payment_event_id);

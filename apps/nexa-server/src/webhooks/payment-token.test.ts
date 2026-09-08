@@ -177,4 +177,41 @@ describe("payment token webhook", () => {
 
     expect(response.status).toBe(401);
   });
+
+  test("marca failed sin enviar REJECTED cuando Cartera falla de forma retryable", async () => {
+    const states: string[] = [];
+    const reviews: string[] = [];
+    const router = createPaymentTokenWebhookRouter({
+      flowId: "flow-id",
+      bearerToken: "webhook-token",
+      nexa: { reviewTransfer: async ({ status }) => { reviews.push(status); } },
+      cartera: { applyNexaPayment: async () => { throw new Error("retryable"); } },
+      transactions: {
+        existsByReference: async () => false,
+        createPending: async (transaction) => ({ id: 9, ...transaction }),
+        markApplied: async () => { states.push("applied"); },
+        markRejected: async () => { states.push("rejected"); },
+        markFailed: async () => { states.push("failed"); },
+      },
+      tokenUsers: { findByToken: async () => ({ creditoId: 42 }) },
+    });
+
+    const response = await router.request("/webhook/v1/payment-token", {
+      method: "POST",
+      headers: { flowId: "flow-id", Authorization: "Bearer webhook-token", "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: 7293,
+        reference: "4617307",
+        token: "1234567310005010",
+        amount: 50,
+        originAccount: "19451958",
+        originBank: "INDLGTGC",
+        currency: "GTQ",
+      }),
+    });
+
+    expect(response.status).toBe(500);
+    expect(states).toEqual(["failed"]);
+    expect(reviews).toEqual([]);
+  });
 });

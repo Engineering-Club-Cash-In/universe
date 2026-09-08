@@ -24,6 +24,13 @@ mock.module("../database/index", () => ({
 
 mock.module("@cci/email", () => ({
   sendPlainEmail: mock(() => Promise.resolve({ success: true })),
+  // El job pregunta el modo de entrega para no dar por entregado un resumen que
+  // el paquete desvió a la bandeja de pruebas. Por defecto, aquí no desvía.
+  getEmailDeliveryMode: mock(() => ({
+    server: "PROD",
+    redirige: false,
+    destinatarioUnico: null,
+  })),
 }));
 
 let resultadoDoble: any;
@@ -98,6 +105,29 @@ describe("provisionarCuentasPortal: el resumen que no sale", () => {
     await expect(provisionarCuentasPortal({ enviarResumen })).rejects.toThrow(
       /resumen de provisionamiento/i,
     );
+    expect(enviarResumen).toHaveBeenCalledTimes(1);
+  });
+
+  // `success: true` no significa que haya llegado a quien tenía que llegar: sin
+  // `SERVER=PROD` el paquete desvía TODO a una bandeja de pruebas y devuelve
+  // éxito igual. Este resumen es el único camino por el que alguien se entera
+  // de las cuentas pendientes, así que pasar por entregado es peor que fallar.
+  it("tira cuando el resumen se desvió a la bandeja de pruebas", async () => {
+    resultadoDoble = { ...CANDIDATA };
+    const enviarResumen = mock(async () => ({ success: true }));
+
+    await expect(
+      provisionarCuentasPortal({
+        enviarResumen,
+        modoEnvio: () => ({
+          server: "DEV",
+          redirige: true,
+          destinatarioUnico: "pruebas@clubcashin.com",
+        }),
+      }),
+    ).rejects.toThrow(/se desvió a pruebas@clubcashin.com/);
+
+    // Se manda igual: en pruebas el correo sirve para ver el resumen.
     expect(enviarResumen).toHaveBeenCalledTimes(1);
   });
 

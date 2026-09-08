@@ -1,12 +1,17 @@
 import { useFormik } from "formik";
 import * as Yup from "yup";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { RegisterCredentials } from "@/lib/auth";
 import { authClient } from "@/lib/auth";
 import { useNavigate } from "@tanstack/react-router";
 import { registerExternalUserAuth } from "@/features/Profile/services/unifiedService";
 import { conflictoDeRegistro } from "@/features/Profile/services/registroExterno.errors";
 import { recordarSiQuedoSinDpi } from "@/features/Profile/services/avisoDpiPendiente";
+import {
+  olvidarTipoDelAlta,
+  recordarTipoDelAlta,
+  tipoRecordadoDelAlta,
+} from "./tipoDelAltaPersistido";
 import {
   decidirAlta,
   mensajeDeAltaFallida,
@@ -78,6 +83,7 @@ export const useRegister = () => {
   // Espejo reactivo del anterior, para que el formulario pueda bloquear el
   // selector en vez de dejar elegir algo que después se ignora.
   const [tipoBloqueado, setTipoBloqueado] = useState(false);
+
   const navigate = useNavigate();
 
   // Formik
@@ -159,8 +165,19 @@ export const useRegister = () => {
         // terminaría como cliente con esa fila huérfana (y al revés, con el
         // lead). El DPI sí se puede seguir corrigiendo, que es lo que la
         // persona necesita para reintentar.
+        // El recordado del almacén va PRIMERO: el ref muere con la pestaña, y
+        // el escenario que rompe esto es justo una recarga —el registro externo
+        // creó la fila en cartera y falló antes de escribir la identidad, la
+        // persona recarga /register, Formik vuelve a su CLIENT por defecto y la
+        // sesión sigue viva—. Sin esto el reintento salía hacia el OTRO sistema
+        // y dejaba huérfana la fila del primer intento.
         if (!tipoDelAlta.current) {
-          tipoDelAlta.current = values.userType;
+          tipoDelAlta.current =
+            tipoRecordadoDelAlta(values.email) ?? values.userType;
+          recordarTipoDelAlta({
+            correo: values.email,
+            tipo: tipoDelAlta.current,
+          });
           setTipoBloqueado(true);
         }
         const tipoAEnviar = tipoDelAlta.current;
@@ -228,6 +245,11 @@ export const useRegister = () => {
         }
 
         // enviar al profile
+        // El registro terminó: el tipo recordado ya no ata a nadie, y dejarlo
+        // haría que dar de alta a otra persona desde este navegador arrancara
+        // con el tipo de la anterior.
+        olvidarTipoDelAlta();
+
         navigate({ to: "/profile" });
       } catch (error) {
         console.error("Error during registration:", error);
@@ -236,6 +258,19 @@ export const useRegister = () => {
       }
     },
   });
+
+  // Al montar, el tipo recordado se recupera para el correo que el formulario
+  // ya trae (el de "recordar usuario"). Sin esto el bloqueo del selector solo
+  // aparecía después del primer envío.
+  useEffect(() => {
+    const recordado = tipoRecordadoDelAlta(formik.values.email);
+    if (!recordado) return;
+
+    tipoDelAlta.current = recordado;
+    setTipoBloqueado(true);
+    formik.setFieldValue("userType", recordado);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formik.values.email]);
 
   // Solo formato. Que el DPI ya esté tomado lo decide el servidor al fijarlo
   // sobre la cuenta (409 en POST /api/profile/me/dpi): preguntarlo antes

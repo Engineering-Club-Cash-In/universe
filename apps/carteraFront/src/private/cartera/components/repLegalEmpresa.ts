@@ -71,12 +71,26 @@ export const errorRepLegal = (
  * presente con valor vacío como borrado). Desmarcar el interruptor en un
  * inversionista que SÍ tenía representante borra el dato y con él el acceso de
  * esa persona al portal: por eso el borrado pasa antes por `requiereConfirmacionBorrado`.
+ *
+ * `borrarSiNoEsEmpresa` existe porque "no es empresa" tiene DOS causas y solo
+ * una autoriza a borrar. Antes se borraba siempre, y eso se llevaba por delante
+ * al inversionista 187 —`dpi = 4036613`, `dpi_rep_legal = '04036613'`—: abre con
+ * el interruptor apagado por ser su propio representante, así que CUALQUIER
+ * edición suya, aunque fuera solo cambiar un banco, mandaba el borrado y le
+ * dejaba el campo vacío. Y ese campo no es decorativo: `getInvestors` lo prefiere
+ * como DPI de retorno para las búsquedas por correo.
+ *
+ * Solo se borra lo que se desmarcó a propósito, que es justo lo que
+ * `requiereConfirmacionBorrado` ya identifica.
  */
 export const valorRepLegalAEnviar = (
   esEmpresa: boolean,
   valor: string | null | undefined,
-): string | null => {
-  if (!esEmpresa) return null;
+  { borrarSiNoEsEmpresa }: { borrarSiNoEsEmpresa: boolean } = {
+    borrarSiNoEsEmpresa: true,
+  },
+): string | null | undefined => {
+  if (!esEmpresa) return borrarSiNoEsEmpresa ? null : undefined;
   const limpio = (valor ?? "").trim();
   return limpio === "" ? null : limpio;
 };

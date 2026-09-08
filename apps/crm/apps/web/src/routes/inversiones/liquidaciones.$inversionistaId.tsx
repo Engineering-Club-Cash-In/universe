@@ -943,8 +943,16 @@ function InvestorLiquidacionesPage() {
 			// Sin "¿Es empresa?" va la llave presente con cadena vacía: eso es lo
 			// que hace que cartera BORRE el DPI guardado. Mandar `undefined` dejaría
 			// el valor viejo vivo sin que el operador se entere.
+			// `true` a secas borraba también al que es su propio representante
+			// (`dpi = 4036613`, `dpi_rep_legal = '04036613'`): abre con el
+			// interruptor apagado, así que cambiar cualquier otro campo le vaciaba
+			// el DPI guardado. Solo se borra lo que se desmarcó a propósito.
 			dpiRepLegal: valorRepLegalAEnviar(editEsEmpresa, editDpiRepLegal, {
-				borrarSiNoEsEmpresa: true,
+				borrarSiNoEsEmpresa: requiereConfirmacionBorrado(
+					editRepLegalOriginal,
+					editEsEmpresa,
+					editDpiOriginal,
+				),
 			}),
 			moneda: editMoneda as "quetzales" | "dolares",
 			emiteFactura: editEmiteFactura,

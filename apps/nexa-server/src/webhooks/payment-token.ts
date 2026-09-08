@@ -14,21 +14,23 @@ export function createPaymentTokenWebhookRouter(deps: {
   cartera: CarteraPaymentClient;
   transactions: PaymentTransactionRepository;
   tokenUsers: TokenUserRepository;
+  logInfo?: (message: string) => void;
 }) {
   const router = new Hono();
+  const logInfo = deps.logInfo ?? console.log;
 
   router.post("/webhook/v1/payment-token", async (c) => {
     const requestId = crypto.randomUUID();
     const startedAt = Date.now();
     c.header("X-Nexa-Request-Id", requestId);
-    logWebhook(requestId, "received", {
+    logWebhook(logInfo, requestId, "received", {
       contentType: c.req.header("Content-Type") ?? null,
     });
 
     const flowId = c.req.header("flowId");
     const bearerToken = parseAuthorizationToken(c.req.header("Authorization"));
     if (flowId !== deps.flowId || bearerToken !== deps.bearerToken) {
-      logWebhook(requestId, "unauthorized", {
+      logWebhook(logInfo, requestId, "unauthorized", {
         elapsedMs: elapsed(startedAt),
         hasAuthorization: Boolean(c.req.header("Authorization")),
       });
@@ -37,7 +39,7 @@ export function createPaymentTokenWebhookRouter(deps: {
 
     try {
       const rawBody = await c.req.json();
-      logWebhook(requestId, "body-received", {
+      logWebhook(logInfo, requestId, "body-received", {
         elapsedMs: elapsed(startedAt),
         keys: typeof rawBody === "object" && rawBody !== null ? Object.keys(rawBody) : [],
       });
@@ -45,18 +47,18 @@ export function createPaymentTokenWebhookRouter(deps: {
       const webhook = paymentTokenWebhookSchema.parse(rawBody);
       const reference = String(webhook.reference);
 
-      logWebhook(requestId, "parsed", {
+      logWebhook(logInfo, requestId, "parsed", {
         elapsedMs: elapsed(startedAt),
         currency: webhook.currency,
       });
 
       const stored = await deps.transactions.upsertReceived(toTokenTransaction(webhook));
-      logWebhook(requestId, stored.created ? "received-created" : "received-existing", { elapsedMs: elapsed(startedAt) });
+      logWebhook(logInfo, requestId, stored.created ? "received-created" : "received-existing", { elapsedMs: elapsed(startedAt) });
 
-      logWebhook(requestId, "responding-ok", { elapsedMs: elapsed(startedAt) });
+      logWebhook(logInfo, requestId, "responding-ok", { elapsedMs: elapsed(startedAt) });
       return c.json({ reference, status: "OK" });
     } catch (error) {
-      logWebhook(requestId, "failed", {
+      logWebhook(logInfo, requestId, "failed", {
         elapsedMs: elapsed(startedAt),
         errorType: error instanceof Error ? error.name : "UnknownError",
       });
@@ -94,12 +96,12 @@ function parseAuthorizationToken(value: string | undefined) {
   return value?.replace(/^Bearer\s+/i, "").trim();
 }
 
-function logWebhook(requestId: string, event: string, data: Record<string, unknown> = {}) {
+function logWebhook(logInfo: (message: string) => void, requestId: string, event: string, data: Record<string, unknown> = {}) {
   const line = JSON.stringify({
     scope: "nexa-webhook",
     requestId,
     event,
     ...data,
   });
-  console.log(line);
+  logInfo(line);
 }

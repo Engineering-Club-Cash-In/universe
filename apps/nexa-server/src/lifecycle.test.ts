@@ -71,7 +71,7 @@ test("a failed cycle is logged without its error detail and the next cycle runs"
       return false;
     },
   }), { scheduler, logError: (message) => logs.push(message) });
-  await waitFor(() => logs.length === 1 && scheduler.callbacks.length === 3);
+  await waitFor(() => logs.length === 1 && scheduler.callbacks.length === 4);
 
   scheduler.callbacks.forEach((callback) => callback());
   await waitFor(() => applications === 2);
@@ -81,10 +81,53 @@ test("a failed cycle is logged without its error detail and the next cycle runs"
   expect(logs).toEqual(["Application worker cycle failed"]);
 });
 
+test("qa lifecycle scans reconciliation alerts at the worker interval and logs only safe fields", async () => {
+  const scheduler = controlledScheduler();
+  const logs: string[] = [];
+  let scans = 0;
+  const deps = lifecycleDependencies({
+    reconciliation: () => {
+      scans++;
+      return [{
+        alertType: "FAILED_DUE",
+        reference: "safe-reference",
+        processingStatus: "FAILED",
+        attemptCount: 2,
+        reviewAttemptCount: 0,
+        failureReason: "payment_amount_mismatch",
+        updatedAt: new Date("2026-09-08T11:00:00.000Z"),
+        nextAttemptAt: new Date("2026-09-08T12:00:00.000Z"),
+        reviewNextAttemptAt: null,
+      }];
+    },
+  });
+
+  const stop = startPaymentLifecycle(loadConfig(baseEnv), deps, { scheduler, logInfo: (line) => logs.push(line) });
+  await waitFor(() => scans === 1 && logs.length >= 1);
+  stop();
+
+  const alert = logs.map((line) => JSON.parse(line)).find((line) => line.event === "reconciliation_alert");
+  expect(alert).toEqual({
+    scope: "nexa-reconciliation",
+    event: "reconciliation_alert",
+    alertType: "FAILED_DUE",
+    reference: "safe-reference",
+    processingStatus: "FAILED",
+    attemptCount: 2,
+    reviewAttemptCount: 0,
+    failureReason: "payment_amount_mismatch",
+    updatedAt: "2026-09-08T11:00:00.000Z",
+    nextAttemptAt: "2026-09-08T12:00:00.000Z",
+    reviewNextAttemptAt: null,
+  });
+  expect(logs.join(" ")).not.toContain("token");
+});
+
 function lifecycleDependencies(options: {
   poll?: () => void;
   application?: () => boolean;
   review?: () => boolean;
+  reconciliation?: () => Array<Record<string, unknown>>;
 }): AppDependencies {
   return {
     nexa: {
@@ -101,6 +144,7 @@ function lifecycleDependencies(options: {
       finalizeApplication: async () => undefined,
       markApplicationFailed: async () => undefined,
       upsertReceived: async () => ({ id: 1, reference: "1", processingStatus: "RECEIVED" as const, created: true }),
+      listReconciliationAlerts: async () => options.reconciliation?.() ?? [],
     },
     reviews: {
       claimNextReview: async () => options.review?.() ? reviewClaim : null,

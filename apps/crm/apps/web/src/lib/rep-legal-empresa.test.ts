@@ -4,6 +4,7 @@ import {
 	esEmpresaInicial,
 	REP_LEGAL_REQUERIDO,
 	requiereConfirmacionBorrado,
+	valorRepLegalAEnviar,
 	valorRepLegalAlGuardar,
 } from "./rep-legal-empresa";
 
@@ -32,6 +33,22 @@ describe("validación del DPI del representante", () => {
 
 	it("acepta el DPI con ceros a la izquierda", () => {
 		expect(errorRepLegal(true, "01234567")).toBeUndefined();
+	});
+});
+
+// La forma vieja, viva por la única llamada del alta (ver el comentario en
+// `rep-legal-empresa.ts`).
+describe("valor a enviar — la forma del alta", () => {
+	it("crear: sin empresa manda la llave ausente (cartera no toca nada)", () => {
+		expect(
+			valorRepLegalAEnviar(false, "123", { borrarSiNoEsEmpresa: false }),
+		).toBeUndefined();
+	});
+
+	it("conserva los ceros a la izquierda tal cual", () => {
+		expect(
+			valorRepLegalAEnviar(true, "01234567", { borrarSiNoEsEmpresa: false }),
+		).toBe("01234567");
 	});
 });
 

@@ -465,6 +465,96 @@ describe("insertInvestor", () => {
     expect(insertWasCalled).toBeFalse();
   });
 
+  // El inversionista 187 (`dpi = 4036613`, `dpi_rep_legal = '04036613'`) es su
+  // propio representante. Corregirle el DPI mandaba el valor nuevo en las dos
+  // llaves, y la comprobación de existencia mira `inversionistas.dpi` en la
+  // BASE —el DPI VIEJO— así que rechazaba con `rep_legal_inexistente` por un
+  // representante que sí existe: él mismo, un renglón más abajo del payload.
+  it("deja corregirle el DPI a quien es su propio representante", async () => {
+    // Ninguna respuesta de búsqueda de representante: si el código la pidiera,
+    // la vería vacía y rechazaría. Solo la fila que se está editando.
+    selectResponses = [[{ ...existingInvestor, dpi_rep_legal: "04036613" }]];
+    const set = { status: 200 };
+
+    const result = await insertInvestor({
+      body: {
+        inversionista_id: existingInvestor.inversionista_id,
+        dpi: 5551234,
+        dpi_rep_legal: "5551234",
+      },
+      set,
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(updateWasCalled).toBeTrue();
+    expect(lastUpdateData?.dpi_rep_legal).toBe("5551234");
+  });
+
+  // La excepción es SOLO cuando apunta a la propia fila: ahí no hay tercero a
+  // quien darle acceso por error, que es lo único que protege esta regla.
+  it("sigue exigiendo que exista cuando el representante es otro", async () => {
+    selectResponses = [[]];
+    const set = { status: 200 };
+
+    const result = await insertInvestor({
+      body: {
+        operation: "CREATE",
+        nombre: "Empresa Nueva S.A.",
+        dpi: 5551234,
+        dpi_rep_legal: "9999999999999",
+      },
+      set,
+    });
+
+    expect(set.status).toBe(400);
+    expect(result.error).toBe("rep_legal_inexistente");
+  });
+
+  // `POST /investor` acepta un ARREGLO y escribe fila por fila, fuera de
+  // transacción. Un choque en el SEGUNDO elemento cortaba con 409 cuando el
+  // primero ya estaba insertado, y ese return salía seco: la fila quedaba en la
+  // base sin cuenta del portal, sin aviso a ningún representante y sin nada en
+  // la respuesta que dijera que existía. El reintento del lote —lo que
+  // cualquiera hace ante un 409— ya chocaba contra ella misma.
+  describe("un lote que se corta a medias", () => {
+    it("termina y reporta lo que ya se escribió antes del 409", async () => {
+      // 1ª: el nombre del primero, libre. 2ª: el del segundo, ocupado.
+      selectResponses = [[], [{ inversionista_id: 77, nombre: "Ya Existe" }]];
+      const set = { status: 200 };
+
+      const result = await insertInvestor({
+        body: [
+          { operation: "CREATE", nombre: "Primera Nueva" },
+          { operation: "CREATE", nombre: "Ya Existe" },
+        ],
+        set,
+      });
+
+      expect(set.status).toBe(409);
+      expect(result.error).toBe("duplicate_nombre");
+      // La fila que sí se escribió viaja en la respuesta...
+      expect(result.data).toHaveLength(1);
+      expect(result.data?.[0]?.nombre).toBe("Primera Nueva");
+      // ...con su acceso resuelto, igual que en el camino feliz.
+      expect(result.provisioning).toHaveLength(1);
+      expect(result.provisioning?.[0]?.inversionistaId).toBe(99);
+    });
+
+    it("con un solo inversionista no agrega nada a la respuesta", async () => {
+      selectResponses = [[{ inversionista_id: 77, nombre: "Ya Existe" }]];
+      const set = { status: 200 };
+
+      const result = await insertInvestor({
+        body: { operation: "CREATE", nombre: "Ya Existe" },
+        set,
+      });
+
+      expect(set.status).toBe(409);
+      expect(result.data).toBeUndefined();
+      expect(result.provisioning).toBeUndefined();
+    });
+  });
+
   it("no manda el código de representante en errores de validación ajenos", async () => {
     const set = { status: 200 };
 
@@ -752,6 +842,24 @@ describe("updateInvestor", () => {
     expect(result.message).toContain("no existe como inversionista");
     expect(result.error).toBe("rep_legal_inexistente");
     expect(updateWasCalled).toBeFalse();
+  });
+
+  it("deja corregirle el DPI a quien es su propio representante", async () => {
+    selectResponses = [[{ ...existingInvestor, dpi_rep_legal: "04036613" }]];
+    const set = { status: 200 };
+
+    const result = await updateInvestor({
+      body: {
+        inversionista_id: existingInvestor.inversionista_id,
+        dpi: 5551234,
+        dpi_rep_legal: "5551234",
+      },
+      set,
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(updateWasCalled).toBeTrue();
+    expect(lastUpdateData?.dpi_rep_legal).toBe("5551234");
   });
 
   it("no revalida dpi_rep_legal cuando el valor no cambió", async () => {

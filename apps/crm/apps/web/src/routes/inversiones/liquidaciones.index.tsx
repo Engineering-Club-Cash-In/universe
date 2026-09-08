@@ -38,7 +38,7 @@ import {
 } from "@/components/ui/select";
 import { avisoAccesoPortal } from "@/lib/acceso-portal";
 import { authClient } from "@/lib/auth-client";
-import { errorRepLegal, valorRepLegalAlGuardar } from "@/lib/rep-legal-empresa";
+import { errorRepLegal, valorRepLegalAEnviar } from "@/lib/rep-legal-empresa";
 import { PERMISSIONS } from "@/lib/roles";
 import {
 	MODALIDAD_FACTURACION_LABELS,
@@ -841,13 +841,11 @@ function LiquidacionesInversionistas() {
 									numeroCuenta: formNumeroCuenta.trim() || undefined,
 									// Sin "¿Es empresa?" la llave va ausente: al crear no hay
 									// nada que borrar y cartera deja el campo en blanco.
-									dpiRepLegal: valorRepLegalAlGuardar({
-										esEmpresa: formEsEmpresa,
-										valor: formDpiRepLegal,
-										repLegalOriginal: undefined,
-										dpiOriginal: undefined,
-										dpiDelFormulario: formDpi,
-									}),
+									dpiRepLegal: valorRepLegalAEnviar(
+										formEsEmpresa,
+										formDpiRepLegal,
+										{ borrarSiNoEsEmpresa: false },
+									),
 									moneda: formMoneda as "quetzales" | "dolares",
 									emiteFactura: formEmiteFactura,
 									tipoReinversion: formTipoReinversion,

@@ -38,6 +38,7 @@ import {
   provisionarInversionista,
   resultadoNoSolicitado,
   resultadoOrigenNoAutorizado,
+  type ResultadoProvisionamientoCartera,
 } from "../services/portalProvisioning";
 import {
   permisoParaProvisionar,
@@ -409,6 +410,111 @@ export const repLegalExiste = async (valor: string): Promise<boolean> => {
 };
 
 /**
+ * ¿El representante que se manda es la PROPIA fila?
+ *
+ * Es la excepción del autorrepresentado (el inversionista 187: `dpi = 4036613`,
+ * `dpi_rep_legal = '04036613'`), y sin ella su DPI no se puede corregir. La
+ * comprobación de existencia mira `inversionistas.dpi` en la base, o sea el DPI
+ * VIEJO de esa fila; el nuevo llega en este mismo payload y todavía no está
+ * escrito en ninguna parte, así que corregirlo devolvía `rep_legal_inexistente`
+ * por un representante que sí existe: él mismo, un renglón más abajo.
+ *
+ * Saltarse la comprobación aquí no abre nada. Lo que esa comprobación protege es
+ * que un dedazo le dé el acceso al portal de esta fila a un TERCERO, y con
+ * `dpi_rep_legal === dpi` no hay tercero: `esEmpresaRepresentada` lee esa
+ * igualdad como "no es empresa", la fila sigue siendo una persona y el acceso
+ * sigue siendo el suyo.
+ *
+ * Comparación numérica, igual que `repLegalExiste`: "04036613" y 4036613 son el
+ * mismo DPI, y esa diferencia de un cero es justo el caso que existe.
+ */
+export const esAutorrepresentacion = (
+  repLegalNormalizado: string,
+  dpiDelPayload: unknown,
+): boolean => {
+  if (dpiDelPayload === undefined || dpiDelPayload === null) return false;
+
+  const dpi = String(dpiDelPayload).trim();
+  if (!/^\d+$/.test(dpi) || !/^\d+$/.test(repLegalNormalizado)) return false;
+
+  return BigInt(repLegalNormalizado) === BigInt(dpi);
+};
+
+/**
+ * El acceso al portal de las filas que ACABAN de insertarse.
+ *
+ * Vive fuera de `insertInvestor` porque hay que llamarlo desde más de un sitio:
+ * el alta con un ARREGLO puede insertar los dos primeros y morir en el tercero,
+ * y si esto solo corriera al final del camino feliz, esas dos filas quedaban
+ * escritas y sin cuenta, con el llamador viendo únicamente el 409. El reintento
+ * del lote tampoco las arreglaba: ahora chocan con ellas mismas.
+ */
+const resolverAccesosDeLosNuevos = (
+  recienCreados: { fila: any; permiso: PermisoProvisionamiento }[],
+): Promise<ResultadoProvisionamientoCartera[]> =>
+  Promise.all(
+    recienCreados.map(({ fila, permiso }) => {
+      // Guard 1 — la LLAVE: sin `provisionar_portal` en el payload NO se crea
+      // cuenta, no sale correo con contraseña y no se ocupa un DPI en `users`.
+      // Cierra el camino del registro del portal. Ese camino ya no es
+      // anónimo —la ruta pública POST /api/unified/register-external se retiró
+      // al integrar el PR #1545 y hoy solo queda /register-external-auth, con
+      // `requireAuth`—, pero el guard sigue siendo lo que lo cierra: el
+      // registro arma un objeto FIJO {nombre, dpi, email,
+      // creado_por_usuario_portal} y no puede colar la llave. Contra
+      // auth-google el rol no sirve de nada —todo entra con el mismo token de
+      // servicio ADMIN—, así que este guard es el único que cubre ese camino.
+      if (permiso === "no_solicitado") {
+        return Promise.resolve(resultadoNoSolicitado(fila.inversionista_id));
+      }
+
+      // Guard 2 — el ROL: mandar la llave con un token que no es de ADMIN ya
+      // no dispara nada. `authMiddleware` solo verifica la firma, así que sin
+      // esto cualquier token vivo de cartera (ASESOR, CONTA, uno robado) hacía
+      // salir una cuenta del portal con la contraseña al correo del payload,
+      // aunque la pantalla que lo ofrece sea solo-ADMIN (App.tsx:121).
+      // OJO: esto NO tapa el ADMIN auto-emitido de `POST /auth/admin`, que es
+      // un agujero preexistente y ajeno a este archivo.
+      if (permiso === "origen_no_autorizado") {
+        return Promise.resolve(
+          resultadoOrigenNoAutorizado(fila.inversionista_id),
+        );
+      }
+
+      return provisionarInversionista(fila, {
+        buscarRepresentante: buscarRepresentanteEnCartera,
+      });
+    }),
+  );
+
+/**
+ * Lo que ya quedó escrito cuando el alta se corta a medias.
+ *
+ * `POST /investor` acepta un ARREGLO y escribe fila por fila, fuera de
+ * transacción: un id que no existe en el elemento 2, o un choque de creación
+ * estricta en el tercero, corta con 404/409 cuando los anteriores YA están
+ * insertados. Antes esos returns salían secos, así que esas filas quedaban en la
+ * base sin cuenta del portal, sin aviso a ningún representante y sin nada en la
+ * respuesta que dijera que existían; y el reintento del lote, que es lo que
+ * cualquiera hace ante un 409, ya chocaba contra ellas mismas.
+ *
+ * No las deshace —no hay rollback que valga— pero las termina y las cuenta, que
+ * es el mismo trato que reciben en el camino feliz. Con un solo inversionista
+ * (todos los llamadores de hoy) no hay nada escrito y esto devuelve `{}`.
+ */
+const loQueYaSeEscribio = async (
+  recienCreados: { fila: any; permiso: PermisoProvisionamiento }[],
+  resultados: any[],
+): Promise<{ provisioning?: ResultadoProvisionamientoCartera[]; data?: any[] }> => {
+  if (resultados.length === 0) return {};
+
+  return {
+    provisioning: await resolverAccesosDeLosNuevos(recienCreados),
+    data: resultados,
+  };
+};
+
+/**
  * Condición para encontrar al inversionista dueño de un correo.
  *
  * Tiene que ignorar mayúsculas: los INSERT guardan el correo en minúsculas,
@@ -608,6 +714,18 @@ export async function getEntidadesPorCorreo(
 }
 
 export const insertInvestor = async ({ body, set, user }: any) => {
+  // Fuera del `try` a propósito: el `catch` también tiene que poder resolverles
+  // el acceso a las filas que YA se insertaron antes del error (ver
+  // `resolverAccesosDeLosNuevos`).
+  const resultados: any[] = [];
+  // Solo las filas INSERTADAS en esta pasada: son las únicas que pueden
+  // necesitar una cuenta nueva o disparar el aviso a un representante.
+  // Cada una viaja con el permiso ya resuelto: la llave del payload dice que
+  // el alta lo PIDIÓ, y el rol del token dice si quien la mandó podía pedirlo
+  // (ver `permisoParaProvisionar`). Son dos negativas distintas y se guardan
+  // como una sola respuesta para que el motivo llegue intacto a `provisioning`.
+  const recienCreados: { fila: any; permiso: PermisoProvisionamiento }[] = [];
+
   try {
     const inversionistasToUpsert = Array.isArray(body) ? body : [body];
 
@@ -674,6 +792,7 @@ export const insertInvestor = async ({ body, set, user }: any) => {
 
           if (
             guardado !== nuevoRepLegal &&
+            !esAutorrepresentacion(nuevoRepLegal, inv.dpi) &&
             !(await repLegalExiste(nuevoRepLegal))
           ) {
             errores.push(
@@ -766,15 +885,6 @@ export const insertInvestor = async ({ body, set, user }: any) => {
       };
     }
 
-    const resultados: any[] = [];
-    // Solo las filas INSERTADAS en esta pasada: son las únicas que pueden
-    // necesitar una cuenta nueva o disparar el aviso a un representante.
-    // Cada una viaja con el permiso ya resuelto: la llave del payload dice que
-    // el alta lo PIDIÓ, y el rol del token dice si quien la mandó podía pedirlo
-    // (ver `permisoParaProvisionar`). Son dos negativas distintas y se guardan
-    // como una sola respuesta para que el motivo llegue intacto a `provisioning`.
-    const recienCreados: { fila: any; permiso: PermisoProvisionamiento }[] = [];
-
     // 🔥 PROCESAR UNO POR UNO para manejar INSERT vs UPDATE
     for (const inv of inversionistasToUpsert) {
       const isStrictCreate = inv.operation === "CREATE" || inv.mode === "create";
@@ -812,6 +922,11 @@ export const insertInvestor = async ({ body, set, user }: any) => {
           return {
             message: "Inversionista no encontrado",
             error: "investor_not_found",
+            // Con un arreglo, este id malo puede venir DESPUÉS de filas que ya
+            // se insertaron. Se les resuelve el acceso igual y viajan en la
+            // respuesta: son filas escritas, y quedarse callado las dejaba sin
+            // cuenta y sin rastro.
+            ...(await loQueYaSeEscribio(recienCreados, resultados)),
           };
         }
       }
@@ -907,6 +1022,9 @@ export const insertInvestor = async ({ body, set, user }: any) => {
           return {
             message: conflictos[0].message,
             error: conflictos[0].error,
+            // Ídem: el choque puede ser del tercer elemento del arreglo y los
+            // dos primeros ya están escritos.
+            ...(await loQueYaSeEscribio(recienCreados, resultados)),
           };
         }
       }
@@ -1041,40 +1159,7 @@ export const insertInvestor = async ({ body, set, user }: any) => {
     // posible) y un error acá se vería como "falló, reintentá" — pero el
     // reintento muere en el guard de duplicados sin volver a pasar por aquí.
     // El resultado viaja en la respuesta; el job diario recoge lo que falló.
-    const provisioning = await Promise.all(
-      recienCreados.map(({ fila, permiso }) => {
-        // Guard 1 — la LLAVE: sin `provisionar_portal` en el payload NO se crea
-        // cuenta, no sale correo con contraseña y no se ocupa un DPI en `users`.
-        // Cierra el camino del registro del portal. Ese camino ya no es
-        // anónimo —la ruta pública POST /api/unified/register-external se retiró
-        // al integrar el PR #1545 y hoy solo queda /register-external-auth, con
-        // `requireAuth`—, pero el guard sigue siendo lo que lo cierra: el
-        // registro arma un objeto FIJO {nombre, dpi, email,
-        // creado_por_usuario_portal} y no puede colar la llave. Contra
-        // auth-google el rol no sirve de nada —todo entra con el mismo token de
-        // servicio ADMIN—, así que este guard es el único que cubre ese camino.
-        if (permiso === "no_solicitado") {
-          return Promise.resolve(resultadoNoSolicitado(fila.inversionista_id));
-        }
-
-        // Guard 2 — el ROL: mandar la llave con un token que no es de ADMIN ya
-        // no dispara nada. `authMiddleware` solo verifica la firma, así que sin
-        // esto cualquier token vivo de cartera (ASESOR, CONTA, uno robado) hacía
-        // salir una cuenta del portal con la contraseña al correo del payload,
-        // aunque la pantalla que lo ofrece sea solo-ADMIN (App.tsx:121).
-        // OJO: esto NO tapa el ADMIN auto-emitido de `POST /auth/admin`, que es
-        // un agujero preexistente y ajeno a este archivo.
-        if (permiso === "origen_no_autorizado") {
-          return Promise.resolve(
-            resultadoOrigenNoAutorizado(fila.inversionista_id),
-          );
-        }
-
-        return provisionarInversionista(fila, {
-          buscarRepresentante: buscarRepresentanteEnCartera,
-        });
-      }),
-    );
+    const provisioning = await resolverAccesosDeLosNuevos(recienCreados);
 
     set.status = 201;
     return {
@@ -1095,6 +1180,7 @@ export const insertInvestor = async ({ body, set, user }: any) => {
         return {
           message: "Ya existe un inversionista con ese email",
           error: "duplicate_email",
+          ...(await loQueYaSeEscribio(recienCreados, resultados)),
         };
       }
       if (detalle.includes("dpi")) {
@@ -1102,6 +1188,7 @@ export const insertInvestor = async ({ body, set, user }: any) => {
         return {
           message: "Ya existe un inversionista con ese DPI",
           error: "duplicate_dpi",
+          ...(await loQueYaSeEscribio(recienCreados, resultados)),
         };
       }
       if (detalle.includes("nombre")) {
@@ -1109,6 +1196,7 @@ export const insertInvestor = async ({ body, set, user }: any) => {
         return {
           message: "Ya existe un inversionista con ese nombre",
           error: "duplicate_nombre",
+          ...(await loQueYaSeEscribio(recienCreados, resultados)),
         };
       }
     }
@@ -1117,6 +1205,7 @@ export const insertInvestor = async ({ body, set, user }: any) => {
     return {
       message: "Error al procesar inversionistas",
       error: error.message || String(error),
+      ...(await loQueYaSeEscribio(recienCreados, resultados)),
     };
   }
 };
@@ -6158,6 +6247,7 @@ export const updateInvestor = async ({ body, set }: any) => {
 
         if (
           guardado !== nuevoRepLegal &&
+          !esAutorrepresentacion(nuevoRepLegal, inv.dpi) &&
           !(await repLegalExiste(nuevoRepLegal))
         ) {
           set.status = 400;

@@ -77,6 +77,31 @@ export const requiereConfirmacionBorrado = (
 ): boolean => esEmpresaInicial(repLegalOriginal, dpiDeLaFila) && !esEmpresa;
 
 /**
+ * La forma vieja, que sigue viva por UNA sola llamada: el alta de
+ * `liquidaciones.index.tsx`.
+ *
+ * No se migró con el resto a propósito. Ese formulario se reescribe entero en la
+ * rama de detección de empresa por DPI —ahí el interruptor "¿Es empresa?"
+ * desaparece, y esta llamada con él— y tocarlo desde aquí, aunque fuera para
+ * cambiarle el nombre a la función, le mete un conflicto a un PR ya aprobado por
+ * un cambio que no le aporta nada.
+ *
+ * Y no le aporta nada porque al CREAR no hay fila anterior: sin
+ * `repLegalOriginal` ni `dpiOriginal`, `valorRepLegalAlGuardar` hace exactamente
+ * esto. Lo que aquella añade —seguirle el DPI al que es su propio
+ * representante— solo existe al editar.
+ */
+export const valorRepLegalAEnviar = (
+	esEmpresa: boolean,
+	valor: string | null | undefined,
+	{ borrarSiNoEsEmpresa }: { borrarSiNoEsEmpresa: boolean },
+): string | undefined => {
+	if (!esEmpresa) return borrarSiNoEsEmpresa ? "" : undefined;
+	const limpio = (valor ?? "").trim();
+	return limpio === "" ? undefined : limpio;
+};
+
+/**
  * ¿Esta fila era su propio representante? (`dpi = 4036613`,
  * `dpi_rep_legal = '04036613'`: el inversionista 187.)
  *

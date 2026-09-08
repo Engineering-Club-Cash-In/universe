@@ -385,6 +385,42 @@ describe("estado de cuenta PDF", () => {
     expect(rows.map((p) => p.total_restante)).toEqual(["50000.00", "49400.00", "49000.00"]);
   });
 
+  it("varios pagos de capital directo seguidos: el snapshot queda atras por todos ellos", () => {
+    // El capital directo se cuelga de la última cuota pagada y guarda
+    // total_restante 0, así que el snapshot de la cuota se queda en una fila
+    // anterior. Con dos pagos seguidos (Q400 y Q300) el snapshot Q50,000 está
+    // Q700 atrás del cierre real Q49,300, no solo Q300.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 0, numero_cuota: 9, pagado: true, abono_capital: "1000.00", abono_interes: "500.00", total_restante: "51000.00" },
+      { pago_id: 1, numero_cuota: 10, pagado: true, abono_capital: "1000.00", abono_interes: "500.00", total_restante: "50000.00" },
+      { pago_id: 2, numero_cuota: 10, pagado: true, abono_capital: "400.00", total_restante: "0" },
+      { pago_id: 3, numero_cuota: 10, pagado: true, abono_capital: "300.00", total_restante: "0" },
+      { pago_id: 4, numero_cuota: 11, pagado: true, abono_capital: "1000.00", abono_interes: "500.00", total_restante: "48300.00" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual([
+      "51000.00",
+      "50000.00",
+      "49600.00",
+      "49300.00",
+      "48300.00",
+    ]);
+  });
+
+  it("varios capitales directos en la cuota que siembra la cadena", () => {
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 1, numero_cuota: 10, pagado: true, abono_capital: "1000.00", abono_interes: "500.00", total_restante: "50000.00" },
+      { pago_id: 2, numero_cuota: 10, pagado: true, abono_capital: "400.00", total_restante: "0" },
+      { pago_id: 3, numero_cuota: 10, pagado: true, abono_capital: "300.00", total_restante: "0" },
+      { pago_id: 4, numero_cuota: 11, pagado: true, abono_capital: "1000.00", abono_interes: "500.00", total_restante: "48300.00" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual([
+      "50000.00",
+      "49600.00",
+      "49300.00",
+      "48300.00",
+    ]);
+  });
+
   it("la cuota que siembra la cadena reconoce su snapshot pre-cierre por la siguiente", () => {
     // Con la cuota 0 presente, la cuota 1 siembra la cadena y no tiene una
     // anterior contra la cual reconocer que su snapshot es pre-cierre. La

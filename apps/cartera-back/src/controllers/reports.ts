@@ -218,18 +218,39 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
   // Q24,662.55 entre dos Q25,162.55).
   const cierreGuardado = new Map<string, Big>();
   const abonosPorCuota = new Map<string, Big>();
-  const ultimoAbonoPorCuota = new Map<string, Big>();
+  const abonosEnOrden = new Map<string, Big[]>();
   const ordenCuotas: string[] = [];
   for (const pago of pagos) {
     const key = String(pago.numero_cuota ?? "");
     if (ordenCuotas[ordenCuotas.length - 1] !== key) ordenCuotas.push(key);
     const totalRestante = new Big(pago.total_restante || 0);
     // Última fila de la cuota con snapshot positivo: es su saldo de cierre.
+    // Las filas de capital directo guardan total_restante 0 y no cuentan.
     if (totalRestante.gt(0)) cierreGuardado.set(key, totalRestante);
     const abono = new Big(pago.abono_capital || 0);
     abonosPorCuota.set(key, (abonosPorCuota.get(key) ?? new Big(0)).plus(abono));
-    ultimoAbonoPorCuota.set(key, abono);
+    abonosEnOrden.set(key, [...(abonosEnOrden.get(key) ?? []), abono]);
   }
+
+  // Cuánto puede estar atrasado el snapshot de una cuota respecto de su cierre
+  // real: 0, el abono de su última fila, el de las dos últimas, y así. Un
+  // snapshot queda atrás cuando lo escribió una fila que no es la última —el
+  // cierre solo-capital de registerPayment hereda el de su hermana sin restar
+  // su propio abono, y los pagos de capital directo guardan 0 y dejan el
+  // snapshot en una fila anterior— y puede haber varias de esas filas seguidas.
+  // Solo rezagos ESTRICTAMENTE positivos: si el snapshot ya coincide con el
+  // saldo corrido manda el snapshot, para que los centavos de redondeo no se
+  // vayan acumulando cuota tras cuota en vez de re-anclarse.
+  const rezagosPosibles = (key: string): Big[] => {
+    const abonos = abonosEnOrden.get(key) ?? [];
+    const rezagos: Big[] = [];
+    let acumulado = new Big(0);
+    for (let i = abonos.length - 1; i >= 0; i--) {
+      acumulado = acumulado.plus(abonos[i]!);
+      if (acumulado.gt(0)) rezagos.push(acumulado);
+    }
+    return rezagos;
+  };
 
   // Cierre real de la cuota que siembra la cadena. Su snapshot también puede
   // ser pre-cierre, pero acá no hay cuota anterior contra la cual reconocerlo,
@@ -248,15 +269,15 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
     const aperturaImplicita = snapshotSiguiente.plus(
       abonosPorCuota.get(siguiente) ?? new Big(0),
     );
-    const descontado = snapshot.minus(ultimoAbonoPorCuota.get(key) ?? new Big(0));
-    return aperturaImplicita.minus(descontado).abs().lte(0.02) ? descontado : snapshot;
+    for (const rezago of rezagosPosibles(key)) {
+      const candidato = snapshot.minus(rezago);
+      if (aperturaImplicita.minus(candidato).abs().lte(0.02)) return candidato;
+    }
+    return snapshot;
   };
 
   let cuotaActual: string | null = null;
   let saldo = new Big(0);
-  // Abono a capital de la última fila procesada: sirve para reconocer el
-  // snapshot "pre-cierre" que hereda el cierre solo-capital de registerPayment.
-  let ultimoAbonoDeLaCuota = new Big(0);
 
   return pagos.map((pago) => {
     const key = String(pago.numero_cuota ?? "");
@@ -287,16 +308,18 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
         // explican la caída del saldo, el corrido queda por encima y sin
         // re-anclar la diferencia se acumula hasta el final del crédito.
         const snapshotPrevio = cierreGuardado.get(cuotaActual);
-        const preCierre =
+        const explicadoPorElCorrido =
           snapshotPrevio !== undefined &&
-          snapshotPrevio.minus(saldo.plus(ultimoAbonoDeLaCuota)).abs().lte(0.02);
-        saldo = snapshotPrevio !== undefined && !preCierre ? snapshotPrevio : saldo;
+          rezagosPosibles(cuotaActual).some((rezago) =>
+            snapshotPrevio.minus(saldo.plus(rezago)).abs().lte(0.02),
+          );
+        saldo =
+          snapshotPrevio !== undefined && !explicadoPorElCorrido ? snapshotPrevio : saldo;
       }
       cuotaActual = key;
     }
 
-    ultimoAbonoDeLaCuota = new Big(pago.abono_capital || 0);
-    saldo = saldo.minus(ultimoAbonoDeLaCuota);
+    saldo = saldo.minus(pago.abono_capital || 0);
 
     return {
       ...pago,

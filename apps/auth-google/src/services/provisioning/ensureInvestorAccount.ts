@@ -291,27 +291,63 @@ export const asegurarCuentaInversionista = async (
   // variable `password`: no se persiste, no se devuelve y no hay ninguna ruta
   // de reenvío. Cualquier throw a partir de este punto dejaría a una persona
   // con una cuenta que no sabe que tiene y a la que no puede entrar, así que
-  // nada de lo que sigue puede tirar: todo se degrada a una advertencia.
+  // nada de lo que sigue puede tirar: se degrada a una advertencia o se reporta
+  // como `fallo`, nunca se propaga.
+  //
+  // "No tirar" NO quiere decir "seguir siempre": la marca de contraseña
+  // provisionada es la única escritura que, si falla, PARA el envío. El porqué
+  // está justo abajo.
 
-  // El rol y el DPI van en un UPDATE posterior porque Better Auth no los acepta
-  // en el signUp. El DPI se guarda en la MISMA forma canónica con la que se
-  // busca: si se guardara distinto, la corrida siguiente no encontraría esta
-  // cuenta y le crearía otra a la misma persona.
+  // LA MARCA VA SOLA, VA PRIMERO Y NO SE DEGRADA. Es la única de las tres
+  // escrituras que no es best-effort, y por eso no puede compartir UPDATE con
+  // las otras dos: el de rol/DPI se cae de verdad —23505 sobre `users_dpi_key`,
+  // que la prueba de más abajo reproduce— y al caerse arrastraría la marca con
+  // él mientras el correo con la contraseña sale igual.
+  //
+  // Sin marca, `sigueConLaPasswordQueLeDimos` (auth-google) y
+  // `debeElegirPassword` (portal-web) leen NULL como "esta contraseña es suya":
+  // nadie le pide cambiarla, ni al entrar, ni al completar el registro, ni
+  // cuando un humano le repare el rol. La contraseña que mandamos por correo
+  // queda de credencial permanente en una bandeja.
+  //
+  // Va PRIMERO porque desde `crearUsuario` la cuenta ya se puede usar y la
+  // marca es el control de seguridad; el rol y el DPI son comodidad. Primero lo
+  // que protege, después lo que sirve.
+  try {
+    await deps.actualizarUsuario(creado.id, { passwordProvisionadaAt: new Date() });
+  } catch {
+    // FAIL-CLOSED: sin la marca, la contraseña NO sale. Es el único punto donde
+    // se elige dejar a alguien sin correo, y se elige porque los dos daños no
+    // son comparables: quedarse sin correo lo reporta esta misma respuesta y un
+    // humano la vuelve a dar de alta; una contraseña que ya llegó a una bandeja
+    // y que nadie va a pedir que se cambie no la recupera nadie. La contraseña
+    // muere aquí con la variable local: la cuenta queda sin dueño que pueda
+    // entrar, no con un dueño de más.
+    advertencias.push("cuenta_creada_sin_marca_de_password");
+
+    return {
+      estado: "fallo",
+      usuarioEmail: email,
+      resueltoPor: null,
+      correo: correoVacio(modo),
+      advertencias,
+      motivo: "no_se_pudo_marcar_password_provisionada",
+    };
+  }
+
+  // El rol y el DPI van en un UPDATE aparte porque Better Auth no los acepta en
+  // el signUp. El DPI se guarda en la MISMA forma canónica con la que se busca:
+  // si se guardara distinto, la corrida siguiente no encontraría esta cuenta y
+  // le crearía otra a la misma persona.
   try {
     await deps.actualizarUsuario(creado.id, {
       role: "INVESTOR",
       dpi: normalizarDpiPortal(entrada.dpi),
-      // La contraseña de esta cuenta la elegimos nosotros y viajó por correo:
-      // queda marcada para que el portal le pida a su dueño que ponga la suya
-      // antes de dejarlo ver nada. Se marca SOLO acá, en el alta que de verdad
-      // creó la cuenta: a quien ya la tenía no se le toca la suya.
-      passwordProvisionadaAt: new Date(),
     });
   } catch {
-    // La cuenta sirve sin rol ni DPI —se entra igual— y la contraseña todavía
-    // se puede entregar, que es lo irrecuperable. El rol lo arregla un humano.
-    // Sin la marca tampoco se le pedirá cambiar la contraseña: se pierde el
-    // empujón, no el acceso, y el correo igual se lo recomienda.
+    // Esto SÍ se degrada: la cuenta sirve sin rol ni DPI —se entra igual— y la
+    // contraseña todavía se puede entregar, que es lo irrecuperable. El rol lo
+    // repara un humano, y la marca de arriba ya quedó puesta.
     advertencias.push("cuenta_creada_sin_rol_ni_dpi");
   }
 

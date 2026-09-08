@@ -16,7 +16,8 @@ describe("test console UI", () => {
       nexaWebhookBearerToken: "local-webhook-token",
       nexaPollIntervalSeconds: 300,
       nexaPollLookbackDays: 1,
-      internalApiKey: "dev-secret",
+      nexaAdminApiKey: "dev-secret",
+      carteraInternalApiSecret: "cartera-secret",
       carteraApiBaseUrl: "http://localhost:7000",
       mockCartera: true,
       enableAdminApi: true,
@@ -33,7 +34,7 @@ describe("test console UI", () => {
     expect(html).toContain("Nexa UAT Test Console");
     expect(html).toContain("/admin/tokens/bootstrap");
     expect(html).toContain("/webhook/v1/payment-token");
-    expect(html).toContain('id="internalApiKey" type="password" value=""');
+    expect(html).toContain('id="adminApiKey" type="password" value=""');
     expect(html).toContain("Cargar tokens");
     expect(html).toContain("Estado de cuenta local");
     expect(html).toContain("Cartera mock");

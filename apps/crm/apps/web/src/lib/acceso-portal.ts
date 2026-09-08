@@ -125,6 +125,25 @@ const texto = (
 	}
 };
 
+/**
+ * El desenlace cuando el acceso NO se dio.
+ *
+ * Vive aparte de las advertencias porque no compite con ellas: una cuenta
+ * puede volver como `fallo` Y con advertencias, y antes las advertencias se
+ * devolvían solas y se comían la única frase que dice que esa persona no
+ * puede entrar al portal.
+ */
+const mensajeDeFallo = (
+	acceso: AccesoPortal,
+): AvisoAccesoPortal | null => {
+	// El alta SÍ salió: decirlo es lo que evita que lo vuelvan a crear y se
+	// estrellen contra el guard de duplicados.
+	return {
+		tono: "advertencia",
+		texto: `No se le pudo dar acceso al portal${causa(acceso.motivo)}, pero el inversionista sí quedó creado: no lo vuelvas a crear. Cuando quieras, ${COMO_SE_ARREGLA}.`,
+	};
+};
+
 export const avisoAccesoPortal = (
 	acceso: AccesoPortal | null | undefined,
 ): AvisoAccesoPortal | null => {
@@ -134,17 +153,22 @@ export const avisoAccesoPortal = (
 		.map((a) => texto(a, acceso))
 		.filter((t): t is string => t !== null);
 
-	if (avisos.length > 0) {
-		return { tono: "advertencia", texto: avisos.join(" ") };
+	// Las advertencias NO pueden tapar un `fallo`. Se devolvían solas y con eso
+	// se perdía lo más importante: que no se le dio acceso. Pasa de verdad —una
+	// cuenta CLIENT encontrada solo por correo vuelve como `fallo` CON la
+	// advertencia de vínculo frágil— y el operador se quedaba leyendo el detalle
+	// sin enterarse de que esa persona no puede entrar. Primero el desenlace,
+	// después el detalle.
+	const fallo = acceso.estado === "fallo" ? mensajeDeFallo(acceso) : null;
+
+	if (fallo) {
+		return avisos.length > 0
+			? { tono: fallo.tono, texto: [fallo.texto, ...avisos].join(" ") }
+			: fallo;
 	}
 
-	if (acceso.estado === "fallo") {
-		// El alta SÍ salió: decirlo es lo que evita que lo vuelvan a crear y se
-		// estrellen contra el guard de duplicados.
-		return {
-			tono: "advertencia",
-			texto: `No se le pudo dar acceso al portal${causa(acceso.motivo)}, pero el inversionista sí quedó creado: no lo vuelvas a crear. Cuando quieras, ${COMO_SE_ARREGLA}.`,
-		};
+	if (avisos.length > 0) {
+		return { tono: "advertencia", texto: avisos.join(" ") };
 	}
 
 	if (acceso.estado === "omitida") {

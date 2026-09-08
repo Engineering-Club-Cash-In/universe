@@ -112,6 +112,44 @@ const texto = (
   }
 };
 
+/**
+ * El desenlace cuando el acceso NO se dio.
+ *
+ * Vive aparte de las advertencias porque no compite con ellas: una cuenta
+ * puede volver como `fallo` Y con advertencias, y antes las advertencias se
+ * devolvían solas y se comían la única frase que dice que esa persona no
+ * puede entrar al portal.
+ */
+const mensajeDeFallo = (
+  acceso: AccesoPortal,
+): AvisoAccesoPortal | null => {
+  // El botón apretado sobre una fila de EMPRESA.
+  //
+  // Sale del `causa()` genérico porque ese texto termina en "abrile el
+  // acceso desde el menú del inversionista" — o sea, mandaría a apretar OTRA
+  // VEZ el mismo botón sobre la misma fila, en círculo.
+  //
+  // Y el acceso no se abre desde la empresa a propósito: la contraseña cae en
+  // el buzón del REPRESENTANTE, y el diálogo de confirmación —el único
+  // control que tiene este botón, un humano mirando a dónde va a caer una
+  // contraseña— enseña el correo de la EMPRESA. Abrirlo desde aquí mandaría
+  // la contraseña a una dirección que nadie revisó.
+  if (acceso.motivo === "es_empresa_el_acceso_es_del_representante") {
+    return {
+      tono: "advertencia",
+      texto:
+        "No se le abrió acceso: es una empresa, y al portal entra con su representante legal. Abrile el acceso desde la fila del representante (su DPI está en Editar → Representante legal); ahí vas a poder revisar su correo antes de mandarle la contraseña.",
+    };
+  }
+
+  // El alta SÍ salió: decirlo es lo que evita que lo vuelvan a crear y se
+  // estrellen contra el guard de duplicados.
+  return {
+    tono: "advertencia",
+    texto: `No se le pudo dar acceso al portal${causa(acceso.motivo)}, pero el inversionista sí quedó creado: no lo vuelvas a crear. Cuando quieras, ${COMO_SE_ARREGLA}.`,
+  };
+};
+
 export const avisoAccesoPortal = (
   acceso: AccesoPortal | null | undefined,
 ): AvisoAccesoPortal | null => {
@@ -121,36 +159,22 @@ export const avisoAccesoPortal = (
     .map((a) => texto(a, acceso))
     .filter((t): t is string => t !== null);
 
-  if (avisos.length > 0) {
-    return { tono: "advertencia", texto: avisos.join(" ") };
+  // Las advertencias NO pueden tapar un `fallo`. Se devolvían solas y con eso
+  // se perdía lo más importante: que no se le dio acceso. Pasa de verdad —una
+  // cuenta CLIENT encontrada solo por correo vuelve como `fallo` CON la
+  // advertencia de vínculo frágil— y el operador se quedaba leyendo el detalle
+  // sin enterarse de que esa persona no puede entrar. Primero el desenlace,
+  // después el detalle.
+  const fallo = acceso.estado === "fallo" ? mensajeDeFallo(acceso) : null;
+
+  if (fallo) {
+    return avisos.length > 0
+      ? { tono: fallo.tono, texto: [fallo.texto, ...avisos].join(" ") }
+      : fallo;
   }
 
-  if (acceso.estado === "fallo") {
-    // El botón apretado sobre una fila de EMPRESA.
-    //
-    // Sale del `causa()` genérico porque ese texto termina en "abrile el
-    // acceso desde el menú del inversionista" — o sea, mandaría a apretar OTRA
-    // VEZ el mismo botón sobre la misma fila, en círculo.
-    //
-    // Y el acceso no se abre desde la empresa a propósito: la contraseña cae en
-    // el buzón del REPRESENTANTE, y el diálogo de confirmación —el único
-    // control que tiene este botón, un humano mirando a dónde va a caer una
-    // contraseña— enseña el correo de la EMPRESA. Abrirlo desde aquí mandaría
-    // la contraseña a una dirección que nadie revisó.
-    if (acceso.motivo === "es_empresa_el_acceso_es_del_representante") {
-      return {
-        tono: "advertencia",
-        texto:
-          "No se le abrió acceso: es una empresa, y al portal entra con su representante legal. Abrile el acceso desde la fila del representante (su DPI está en Editar → Representante legal); ahí vas a poder revisar su correo antes de mandarle la contraseña.",
-      };
-    }
-
-    // El alta SÍ salió: decirlo es lo que evita que lo vuelvan a crear y se
-    // estrellen contra el guard de duplicados.
-    return {
-      tono: "advertencia",
-      texto: `No se le pudo dar acceso al portal${causa(acceso.motivo)}, pero el inversionista sí quedó creado: no lo vuelvas a crear. Cuando quieras, ${COMO_SE_ARREGLA}.`,
-    };
+  if (avisos.length > 0) {
+    return { tono: "advertencia", texto: avisos.join(" ") };
   }
 
   if (acceso.estado === "omitida") {

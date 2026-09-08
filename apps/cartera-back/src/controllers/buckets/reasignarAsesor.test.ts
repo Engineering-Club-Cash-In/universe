@@ -17,6 +17,7 @@ const estado = {
   executeResult: { rows: [] as Fila[] },
   inserts: [] as { tabla: any; filas: Fila[] }[],
   updates: [] as { tabla: any; set: Fila }[],
+  actualizacionAfecta: true,
 };
 
 function crearBuilderSelect() {
@@ -63,7 +64,14 @@ function crearMutadores() {
       return {
         set(s: Fila) {
           estado.updates.push({ tabla, set: s });
-          return { where: () => Promise.resolve([]) };
+          return {
+            where: () => {
+              const filas = estado.actualizacionAfecta ? [{}] : [];
+              const resultado: any = Promise.resolve(filas);
+              resultado.returning = () => Promise.resolve(filas);
+              return resultado;
+            },
+          };
         },
       };
     },
@@ -97,6 +105,7 @@ beforeEach(() => {
   estado.executeResult = { rows: [] };
   estado.inserts = [];
   estado.updates = [];
+  estado.actualizacionAfecta = true;
 });
 
 describe("getAsesoresPorBucket", () => {
@@ -283,5 +292,25 @@ describe("reasignarAsesorManual — controller real con DB fakeada", () => {
     });
 
     expect(r).toMatchObject({ success: true, asesor_anterior: null, asesor_nuevo: 7 });
+  });
+
+  it("no escribe historial ni pisa traslado que cambió el asesor después de leerlo", async () => {
+    estado.selectsPorTabla.set(schema.creditos, [{ asesor_id: 2 }]);
+    setBucketActual(1);
+    estado.selectsPorTabla.set(schema.asesor_bucket, [
+      { asesor_id: 2, nombre: "Samuel Gamboa" },
+      { asesor_id: 7, nombre: "Erik Rivas" },
+    ]);
+    // Simula que un traslado masivo cambió 2 → otro asesor antes del UPDATE.
+    estado.actualizacionAfecta = false;
+
+    const r = await reasignarAsesorManual({
+      credito_id: 9116,
+      asesor_nuevo_id: 7,
+      motivo: "Rotación por vacaciones",
+    });
+
+    expect(r).toMatchObject({ success: false, status: 409 });
+    expect(estado.inserts).toHaveLength(0);
   });
 });

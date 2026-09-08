@@ -1,5 +1,6 @@
 // routes/buckets.ts — COBROS-02 · endpoints del motor de buckets (histórico + listado).
 import { Elysia, t } from "elysia";
+import { ZodError } from "zod";
 import { authMiddleware } from "./midleware";
 import {
   getBucketsHistorial,
@@ -130,6 +131,10 @@ export const bucketsRouter = new Elysia()
     // error del usuario con mensaje accionable, no una falla del servidor.
     try { return await previsualizarTrasladoCarteraMasivo(body); }
     catch (error) {
+      if (error instanceof ZodError) {
+        set.status = 400;
+        return { success: false, message: error.issues[0]?.message ?? "Solicitud de traslado inválida" };
+      }
       if (!(error instanceof TrasladoConflict)) throw error;
       set.status = 409;
       return { success: false, message: error.message };
@@ -139,6 +144,10 @@ export const bucketsRouter = new Elysia()
     if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
     try { return await confirmarTrasladoCarteraMasivo(body); }
     catch (error) {
+      if (error instanceof ZodError) {
+        set.status = 400;
+        return { success: false, message: error.issues[0]?.message ?? "Solicitud de traslado inválida" };
+      }
       if (!(error instanceof TrasladoConflict)) throw error;
       set.status = 409;
       return { success: false, message: error.message };

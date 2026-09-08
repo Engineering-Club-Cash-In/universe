@@ -138,8 +138,22 @@ export async function reasignarAsesorManual(params: {
     usuarioId = u?.id ?? null;
   }
 
-  // 7. Transacción: bitácora PRIMERO, luego UPDATE (mismo par que el motor auto).
-  await db.transaction(async (tx) => {
+  // 7. Compare-and-swap: el asesor leído arriba debe seguir siendo el dueño
+  // cuando se escribe. Un traslado masivo puede haber terminado entre ambas
+  // cosas; en ese caso no se inserta historia basada en dueño viejo ni se pisa
+  // su destino. UPDATE + bitácora siguen siendo una sola transacción.
+  const actualizado = await db.transaction(async (tx) => {
+    const filas = await tx
+      .update(creditos)
+      .set({ asesor_id: asesor_nuevo_id })
+      .where(
+        and(
+          eq(creditos.credito_id, credito_id),
+          sql`${creditos.asesor_id} IS NOT DISTINCT FROM ${asesorActual}`,
+        ),
+      )
+      .returning({ credito_id: creditos.credito_id });
+    if (filas.length !== 1) return false;
     await tx.insert(credito_asesor_historial).values({
       credito_id,
       asesor_anterior: asesorActual,
@@ -149,11 +163,15 @@ export async function reasignarAsesorManual(params: {
       motivo,
       usuario_id: usuarioId,
     });
-    await tx
-      .update(creditos)
-      .set({ asesor_id: asesor_nuevo_id })
-      .where(eq(creditos.credito_id, credito_id));
+    return true;
   });
+  if (!actualizado) {
+    return {
+      success: false,
+      status: 409,
+      message: "[ERROR] El asesor del crédito cambió durante la reasignación. Actualiza la vista e intenta de nuevo.",
+    };
+  }
 
   return {
     success: true,

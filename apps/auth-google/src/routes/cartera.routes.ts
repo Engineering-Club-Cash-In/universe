@@ -101,15 +101,30 @@ const correoDeSesion = (c: any): string => {
 
 /**
  * Entidades que puede operar el usuario de la sesión.
+ *
  * Cacheadas un minuto: el CRM da de alta sociedades en caliente y no queremos
  * que el inversionista tenga que volver a entrar para verlas.
+ *
+ * El caché es una optimización de LECTURA, no una autorización: lo que guarda
+ * es la respuesta de cartera de hace hasta un minuto, no un permiso vigente.
+ * Por eso quien va a ESCRIBIR pide `{ frescas: true }` y la resuelve de nuevo
+ * (ver `entidadPedida`).
+ *
+ * @param frescas ignora lo cacheado y vuelve a preguntarle a cartera. El
+ *                resultado sí se guarda: refrescar no es saltarse el caché,
+ *                es actualizarlo.
  */
-const resolverEntidades = async (c: any): Promise<EntidadPortal[]> => {
+const resolverEntidades = async (
+  c: any,
+  { frescas = false }: { frescas?: boolean } = {},
+): Promise<EntidadPortal[]> => {
   const email = correoDeSesion(c);
 
-  const cacheado = cacheEntidades.get(email);
-  if (cacheado && cacheado.expiraEn > Date.now()) {
-    return cacheado.entidades;
+  if (!frescas) {
+    const cacheado = cacheEntidades.get(email);
+    if (cacheado && cacheado.expiraEn > Date.now()) {
+      return cacheado.entidades;
+    }
   }
 
   const entidades = await getEntidades(email);
@@ -128,12 +143,23 @@ const resolverEntidades = async (c: any): Promise<EntidadPortal[]> => {
  * @param idCrudo id pedido por el cliente (query o body). Sin él se usa la
  *                primera entidad, que es como se comportaba el portal antes de
  *                que existiera el selector.
+ * @param frescas re-resuelve la pertenencia contra cartera en vez de confiar en
+ *                el caché. Obligatorio para las MUTACIONES: si el staff le quita
+ *                o le cambia el representante legal a una sociedad, la lista
+ *                cacheada la sigue autorizando hasta un minuto, y en esa ventana
+ *                el ex-representante puede reescribirle los datos bancarios a
+ *                una entidad que ya no le corresponde. Va por aquí y no por una
+ *                invalidación del caché a propósito: invalidar exigiría que
+ *                cartera y el CRM avisaran cada vez que cambia una relación de
+ *                representación, y basta con que uno de esos avisos falte para
+ *                que el agujero vuelva sin que nada lo delate.
  */
 const entidadPedida = async (
   c: any,
   idCrudo?: unknown,
+  { frescas = false }: { frescas?: boolean } = {},
 ): Promise<EntidadPortal> => {
-  const entidades = await resolverEntidades(c);
+  const entidades = await resolverEntidades(c, { frescas });
 
   if (entidades.length === 0) {
     throw new HTTPException(404, {
@@ -224,9 +250,12 @@ carteraRoutes.post("/investor", async (c) => {
   // cuentas que ya existen. Ver el hilo del review en el PR #1545.
 
   try {
+    // `frescas: true`: la pertenencia de una escritura no se decide con una
+    // lista de hace un minuto. Ver `entidadPedida`.
     const entidad = await entidadPedida(
       c,
       (body as { inversionista_id?: unknown } | null)?.inversionista_id,
+      { frescas: true },
     );
 
     // Whitelist: lo único que el inversionista edita de su propia ficha, ya

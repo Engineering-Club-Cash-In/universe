@@ -226,6 +226,25 @@ export function esBucketB2(
 }
 
 /**
+ * CB-032: ¿el bucket numérico dado es B2 o más alto? Regla del ticket: un
+ * convenio de pago se registra "a partir de B2" (una promesa, en cualquiera).
+ * Misma filosofía que `esBucketB2`: no compara `numero >= 2` sino el `orden`
+ * del catálogo del bucket actual contra el de la key estable "mora_60" — si
+ * un admin renumera el catálogo, la regla sigue apuntando a la etapa
+ * correcta. `null` (fuera del funnel / sin traza / aún cargando) → false: la
+ * UI muestra por qué está deshabilitado, y el server vuelve a validar.
+ */
+export function esBucketDesdeB2(
+	numero: number | null,
+	catalogo: BucketsCatalogoQueryData | undefined,
+): boolean {
+	if (numero === null) return false;
+	const actual = bucketDeNumero(numero, catalogo);
+	const minimo = bucketDeEstado("mora_60", catalogo);
+	return actual.orden >= minimo.orden;
+}
+
+/**
  * Inverso de `bucketDeNumero`: número de bucket (0-5) a partir de un
  * `estadoMora`, o null si no matchea ninguno (pseudo-buckets de status como
  * "en_convenio"/"pagado" no tienen número — no son filas de aging).

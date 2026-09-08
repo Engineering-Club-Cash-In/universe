@@ -119,6 +119,12 @@ bases en medio del job.
 
 Pantalla: `/cobros/promesas`.
 
+**Promesa ≠ convenio (CB-032).** Desde la Ficha 360 el botón "Promesa / Convenio" abre
+uno u otro: la promesa es una gestión del CRM y aplica en cualquier bucket; el convenio
+es una reestructura que se crea en cartera (a partir de B2, sin convenio vigente,
+máximo 6 meses) y queda pendiente de activación en carteraFront. Detalle en
+[Ficha 360 §3.4](./06-ficha-360.md#34-convenio-de-pago-cb-032).
+
 ---
 
 ## Carga y reasignación

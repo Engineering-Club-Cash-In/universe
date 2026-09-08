@@ -1,37 +1,25 @@
 // src/components/PaymentAgreements/CreatePaymentAgreementForm.tsx
+//
+// CB-032: esta pantalla dejó de CREAR convenios. Los convenios se crean desde
+// la Ficha 360 del CRM de cobros (botón "Promesa / Convenio"), que llama al
+// mismo servicio de cartera-back (POST /payment-agreements — el servicio y el
+// hook useCreatePaymentAgreement siguen existiendo tal cual). Acá solo se
+// consulta el convenio vigente de un crédito. Activar/rechazar sigue en Pagos.
 
-import { useState, useMemo } from "react"; 
+import { useState } from "react";
 
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Calculator,
   FileText,
-  DollarSign,
   User,
   CreditCard,
   AlertCircle,
   CheckCircle,
-  Clock,
-  AlertTriangle,
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import {
-  useCreatePaymentAgreement,
-  useCreditoBySifco,
-} from "../hooks/paymentagreement";
+import { useCreditoBySifco } from "../hooks/paymentagreement";
 import { BuscadorUsuarioSifco } from "./searchByNameSifco";
 
 export function CreatePaymentAgreementForm() {
@@ -39,13 +27,6 @@ export function CreatePaymentAgreementForm() {
   const [resetBuscador, setResetBuscador] = useState(false);
   const [convenioExpanded, setConvenioExpanded] = useState(true);
   
-  // Form state
-  const [selectedInstallments, setSelectedInstallments] = useState<number[]>([]);
-  const [numberOfMonths, setNumberOfMonths] = useState<number>(1);
-  const [montoManual, setMontoManual] = useState<number | null>(null);
-  const [reason, setReason] = useState<string>("");
-  const [observations, setObservations] = useState<string>("");
-  const [showAllInstallments, setShowAllInstallments] = useState(false);
 
   // Get credit data
   const {
@@ -54,204 +35,26 @@ export function CreatePaymentAgreementForm() {
     error,
   } = useCreditoBySifco(sifcoSeleccionado);
 
-  // Create mutation
-  const { mutate: createAgreement, isPending } = useCreatePaymentAgreement();
-
   // 🔥 TYPE NARROWING: Separar data según flujo
   const activoData = creditData?.flujo === "ACTIVO" ? creditData : null;
   const canceladoData = creditData?.flujo === "CANCELADO" ? creditData : null;
  
   const hasActiveAgreement = activoData?.credito?.statusCredit === "EN_CONVENIO";
 
-  // 🔥 ACTUALIZADO: Agrupa por cuota_id pero guarda TODOS los pago_ids
-  const cuotasParaConvenio = useMemo(() => {
-    if (!activoData) return [];
-
-    const atrasadas = (activoData.cuotasAtrasadas || []).map((c) => ({
-      ...c,
-      estado: "atrasada" as const,
-    }));
-    const pendientes = (activoData.cuotasPendientes || []).map((c) => ({
-      ...c,
-      estado: "pendiente" as const,
-    }));
-
-    // Agrupa por cuota_id, guardando TODOS los pago_ids de cada cuota
-    /* eslint-disable @typescript-eslint/no-explicit-any */
-    const cuotasMap = new Map<number, { cuota: any; pago_ids: number[] }>();
-
-    // Prioriza atrasadas sobre pendientes
-    [...atrasadas, ...pendientes].forEach((cuota) => {
-      // El API devuelve cuota_id aunque TypeScript no lo reconozca
-      const cuotaAny = cuota as any;
-      const cuotaId = cuotaAny.cuota_id as number | undefined;
-
-      if (!cuotaId) return;
-
-      if (cuotasMap.has(cuotaId)) {
-        // Ya existe la cuota, agregar el pago_id si no está
-        const existing = cuotasMap.get(cuotaId)!;
-        if (cuota.pago_id && !existing.pago_ids.includes(cuota.pago_id)) {
-          existing.pago_ids.push(cuota.pago_id);
-        }
-      } else {
-        // Nueva cuota
-        cuotasMap.set(cuotaId, {
-          cuota: cuotaAny,
-          pago_ids: cuota.pago_id ? [cuota.pago_id] : [],
-        });
-      }
-    });
-
-    // Convierte de vuelta a array con los pago_ids agregados
-    return Array.from(cuotasMap.values())
-      .map(({ cuota, pago_ids }) => ({
-        ...cuota,
-        all_pago_ids: pago_ids, // Todos los pago_ids de esta cuota
-      }))
-      .sort((a, b) => a.numero_cuota - b.numero_cuota);
-    /* eslint-enable @typescript-eslint/no-explicit-any */
-  }, [activoData]);
-
-  // Cuotas a mostrar (solo primeras 10 o todas si está expandido)
-  const cuotasVisibles = useMemo(() => {
-    if (showAllInstallments) return cuotasParaConvenio;
-    return cuotasParaConvenio.slice(0, 10);
-  }, [cuotasParaConvenio, showAllInstallments]);
-
-  // Calculate total amount based on selected installments
-  const totalAmountCalculado = useMemo(() => {
-    if (!activoData || selectedInstallments.length === 0) return 0;
-
-    const cuotaMensual = parseFloat(activoData.credito?.cuota || "0");
-    const mora = parseFloat(activoData.moraActual?.toString() || "0");
-
-    return cuotaMensual * selectedInstallments.length + mora;
-  }, [activoData, selectedInstallments]);
-
-  const totalAmount = montoManual !== null ? montoManual : totalAmountCalculado;
-
-  // Calculate monthly installment of the agreement
-  const monthlyInstallment = useMemo(() => {
-    if (numberOfMonths === 0) return 0;
-    return totalAmount / numberOfMonths;
-  }, [totalAmount, numberOfMonths]);
-
   const handleSifcoSelect = (sifco: string) => {
     setSifcoSeleccionado(sifco);
-    // Reset form when credit changes
-    setSelectedInstallments([]);
-    setNumberOfMonths(1);
-    setMontoManual(null);
-    setReason("");
-    setObservations("");
-    setShowAllInstallments(false);
   };
 
-  // Ahora selectedInstallments guarda cuota_ids (no pago_ids)
-  const handleInstallmentToggle = (cuotaId: number) => {
-    setSelectedInstallments((prev) =>
-      prev.includes(cuotaId)
-        ? prev.filter((id) => id !== cuotaId)
-        : [...prev, cuotaId]
-    );
-  };
-
-  const handleSelectAllInstallments = () => {
-    if (selectedInstallments.length === cuotasParaConvenio.length) {
-      setSelectedInstallments([]);
-    } else {
-      setSelectedInstallments(cuotasParaConvenio.map((c) => c.cuota_id));
-    }
-  };
-
-  const handleSelectRange = (type: "atrasadas" | "primeras10" | "todas") => {
-    switch (type) {
-      case "atrasadas": {
-        const atrasadas = cuotasParaConvenio.filter(
-          (c) => c.estado === "atrasada"
-        );
-        setSelectedInstallments(atrasadas.map((c) => c.cuota_id));
-        break;
-      }
-      case "primeras10": {
-        const primeras = cuotasParaConvenio.slice(0, 10);
-        setSelectedInstallments(primeras.map((c) => c.cuota_id));
-        break;
-      }
-      case "todas":
-        setSelectedInstallments(cuotasParaConvenio.map((c) => c.cuota_id));
-        break;
-    }
-  };
-
-  // Obtener todos los pago_ids de las cuotas seleccionadas
-  const allSelectedPagoIds = useMemo(() => {
-    return cuotasParaConvenio
-      .filter((c) => selectedInstallments.includes(c.cuota_id))
-      .flatMap((c) => c.all_pago_ids || []);
-  }, [cuotasParaConvenio, selectedInstallments]);
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!activoData) return;
-
-    if (selectedInstallments.length === 0) {
-      alert("Debes seleccionar al menos una cuota");
-      return;
-    }
-
-    if (numberOfMonths < 1) {
-      alert("El número de meses debe ser mayor a 0");
-      return;
-    }
-
-    createAgreement(
-      {
-        credit_id: activoData.credito.credito_id,
-        payment_ids: allSelectedPagoIds, // Envía TODOS los pago_ids de las cuotas seleccionadas
-        total_agreement_amount: totalAmount,
-        number_of_months: numberOfMonths,
-        reason,
-        observations,
-        created_by: 1,
-      },
-      {
-        onSuccess: () => {
-          alert(
-            `¡Convenio creado exitosamente!\n\nSe creó el convenio para ${selectedInstallments.length} cuota(s) (${allSelectedPagoIds.length} pagos)\nMonto total: Q${totalAmount.toLocaleString("es-GT", { minimumFractionDigits: 2 })}\nPlazo: ${numberOfMonths} meses`
-          );
-          // Reset form
-          setSifcoSeleccionado("");
-          setResetBuscador(true);
-          setSelectedInstallments([]);
-          setNumberOfMonths(1);
-          setMontoManual(null);
-          setReason("");
-          setObservations("");
-          setShowAllInstallments(false);
-        },
-        onError: (error) => {
-          alert(`Error al crear el convenio:\n${error.message}`);
-        },
-      }
-    );
-  };
-// Después de las líneas de type narrowing
-console.log("🔍 DEBUG:", {
-  creditData,
-  flujo: creditData?.flujo,
-  activoData: !!activoData,
-  canceladoData: !!canceladoData,
-  hasActiveAgreement,
-});
   return (  <div className="fixed inset-x-0 top-16 xl:top-20 bottom-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-4 sm:px-6 lg:px-8 overflow-auto pt-8 pb-8">
    
       <div className="w-full max-w-4xl">
         <h1 className="text-3xl font-bold text-blue-900 mb-6 text-center">
-          Crear Convenio de Pago
+          Convenios de Pago
         </h1>
+        <p className="text-center text-gray-600 -mt-4 mb-6">
+          Consulta del convenio vigente de un crédito. Los convenios nuevos se
+          crean desde el CRM de cobros.
+        </p>
 
         {/* Credit search */}
         <BuscadorUsuarioSifco
@@ -282,8 +85,8 @@ console.log("🔍 DEBUG:", {
           <Alert className="mb-6 border-red-500 bg-red-50">
             <AlertCircle className="h-4 w-4 text-red-600" />
             <AlertDescription className="text-red-800">
-              Este crédito está cancelado. No se pueden crear convenios de pago
-              para créditos cancelados.
+              Este crédito está cancelado. Un crédito cancelado no tiene
+              convenios de pago.
             </AlertDescription>
           </Alert>
         )}
@@ -650,330 +453,21 @@ console.log("🔍 DEBUG:", {
               </Card>
             )}
 
-            {/* Form - Only show if no active agreement */}
+            {/* CB-032: el convenio ya NO se crea desde cartera. Se crea desde
+                la Ficha 360 del CRM de cobros (botón "Promesa / Convenio"),
+                que llama al mismo servicio de cartera-back. Acá solo se
+                consulta el vigente y, desde Pagos, se activa o rechaza. */}
             {!hasActiveAgreement && (
-              <form onSubmit={handleSubmit} className="space-y-6">
-                {/* Installment selection */}
-                <Card className="p-6 bg-white">
-                  <div className="flex flex-col gap-4 mb-4">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-xl font-bold text-blue-900 flex items-center gap-2">
-                        <FileText className="w-5 h-5" />
-                        Seleccionar Cuotas para Convenio
-                      </h3>
-                    </div>
-
-                    {/* Selección rápida con Select */}
-                    {cuotasParaConvenio.length > 0 && (
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        <Select
-                          onValueChange={(value) =>
-                            handleSelectRange(
-                              value as "atrasadas" | "primeras10" | "todas"
-                            )
-                          }
-                        >
-                          <SelectTrigger className="w-full">
-                            <SelectValue placeholder="Selección rápida..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {activoData.cuotasAtrasadas && activoData.cuotasAtrasadas.length > 0 && (
-                              <SelectItem value="atrasadas">
-                                Solo Atrasadas ({activoData.cuotasAtrasadas.length})
-                              </SelectItem>
-                            )}
-                            <SelectItem value="primeras10">
-                              Primeras 10 cuotas
-                            </SelectItem>
-                            <SelectItem value="todas">
-                              Todas las cuotas ({cuotasParaConvenio.length})
-                            </SelectItem>
-                          </SelectContent>
-                        </Select>
-
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={handleSelectAllInstallments}
-                          className="text-blue-900"
-                        >
-                          {selectedInstallments.length ===
-                          cuotasParaConvenio.length
-                            ? "Deseleccionar todas"
-                            : "Seleccionar todas"}
-                        </Button>
-
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setSelectedInstallments([])}
-                          className="text-red-600"
-                        >
-                          Limpiar selección
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-
-                  {cuotasParaConvenio.length === 0 ? (
-                    <p className="text-gray-500 text-center py-4">
-                      No hay cuotas pendientes o atrasadas para este crédito
-                    </p>
-                  ) : (
-                    <>
-                      {/* Lista de cuotas */}
-                      <div className="space-y-2 max-h-[400px] overflow-y-auto p-2">
-                        {cuotasVisibles.map((installment) => {
-                          const isAtrasada = installment.estado === "atrasada";
-                          const isSelected = selectedInstallments.includes(
-                            installment.cuota_id
-                          );
-
-                          return (
-                            <div
-                              key={installment.cuota_id}
-                              className={`flex items-center justify-between p-3 rounded-lg border-2 transition cursor-pointer ${
-                                isSelected
-                                  ? "border-blue-500 bg-blue-50"
-                                  : isAtrasada
-                                    ? "border-red-200 bg-red-50 hover:border-red-400"
-                                    : "border-gray-200 bg-white hover:border-blue-300"
-                              }`}
-                              onClick={() =>
-                                handleInstallmentToggle(installment.cuota_id)
-                              }
-                            >
-                              <div className="flex items-center gap-3">
-                                <input
-                                  type="checkbox"
-                                  checked={isSelected}
-                                  onChange={() =>
-                                    handleInstallmentToggle(installment.cuota_id)
-                                  }
-                                  className="w-5 h-5 cursor-pointer"
-                                />
-                                <div>
-                                  <span className="font-bold text-blue-900">
-                                    Cuota #{installment.numero_cuota}
-                                  </span>
-                                  {installment.all_pago_ids?.length > 1 && (
-                                    <span className="text-xs text-gray-500 ml-1">
-                                      ({installment.all_pago_ids.length} pagos)
-                                    </span>
-                                  )}
-                                  <div
-                                    className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-full ml-2 ${
-                                      isAtrasada
-                                        ? "bg-red-100 text-red-700"
-                                        : "bg-yellow-100 text-yellow-700"
-                                    }`}
-                                  >
-                                    {isAtrasada ? (
-                                      <>
-                                        <AlertTriangle className="w-3 h-3" />
-                                        <span>Atrasada</span>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <Clock className="w-3 h-3" />
-                                        <span>Pendiente</span>
-                                      </>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      {/* Botón para mostrar más */}
-                      {cuotasParaConvenio.length > 10 && (
-                        <div className="mt-4 text-center">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            onClick={() =>
-                              setShowAllInstallments(!showAllInstallments)
-                            }
-                            className="text-blue-600 hover:text-blue-700"
-                          >
-                            {showAllInstallments ? (
-                              <>
-                                <ChevronUp className="w-4 h-4 mr-2" />
-                                Mostrar menos
-                              </>
-                            ) : (
-                              <>
-                                <ChevronDown className="w-4 h-4 mr-2" />
-                                Mostrar todas ({cuotasParaConvenio.length - 10}{" "}
-                                más)
-                              </>
-                            )}
-                          </Button>
-                        </div>
-                      )}
-                    </>
-                  )}
-
-                  {selectedInstallments.length > 0 && (
-                    <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                      <p className="text-sm text-blue-900 font-semibold">
-                        <strong className="text-lg">
-                          {selectedInstallments.length}
-                        </strong>{" "}
-                        cuota(s) seleccionada(s)
-                      </p>
-                    </div>
-                  )}
-                </Card>
-
-                {/* Agreement configuration */}
-                <Card className="p-6 bg-white">
-                  <h3 className="text-xl font-bold text-blue-900 mb-6 flex items-center gap-2">
-                    <Calculator className="w-5 h-5" />
-                    Configuración del Convenio
-                  </h3>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {/* Number of months */}
-                    <div>
-                      <Label
-                        htmlFor="numberOfMonths"
-                        className="text-blue-900 font-bold text-base mb-2 block"
-                      >
-                        Número de Meses para Pagar
-                      </Label>
-                      <Input
-                        id="numberOfMonths"
-                        type="number"
-                        min="1"
-                        value={numberOfMonths}
-                        onChange={(e) =>
-                          setNumberOfMonths(Number(e.target.value))
-                        }
-                        className="text-gray-900 text-lg font-semibold"
-                      />
-                    </div>
-
-                    {/* Total amount (editable) */}
-                    <div>
-                      <Label className="text-blue-900 font-bold text-base mb-2 block">
-                        Monto Total del Convenio
-                      </Label>
-                      <div className="relative">
-                        <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-green-600" />
-                        <Input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={montoManual !== null ? montoManual : totalAmountCalculado}
-                          onChange={(e) => setMontoManual(Number(e.target.value))}
-                          className="pl-10 text-lg font-bold text-green-700 border-2 border-green-200 bg-gradient-to-br from-green-50 to-emerald-50"
-                        />
-                      </div>
-                      {montoManual !== null && montoManual !== totalAmountCalculado && (
-                        <button
-                          type="button"
-                          onClick={() => setMontoManual(null)}
-                          className="text-xs text-blue-600 hover:underline mt-1"
-                        >
-                          Restablecer al calculado (Q{totalAmountCalculado.toLocaleString("es-GT", { minimumFractionDigits: 2 })})
-                        </button>
-                      )}
-                    </div>
-
-                    {/* Monthly installment (readonly) */}
-                    <div>
-                      <Label className="text-blue-900 font-bold text-base mb-2 block">
-                        Cuota Mensual del Convenio
-                      </Label>
-                      <div className="p-3 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg font-bold text-lg text-blue-700 border-2 border-blue-200">
-                        Q
-                        {monthlyInstallment.toLocaleString("es-GT", {
-                          minimumFractionDigits: 2,
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Included mora */}
-                    {Number(activoData.moraActual) > 0 && (
-                      <div>
-                        <Label className="text-blue-900 font-bold text-base mb-2 block">
-                          Mora Incluida
-                        </Label>
-                        <div className="p-3 bg-gradient-to-br from-red-50 to-pink-50 rounded-lg font-bold text-lg text-red-700 border-2 border-red-200">
-                          Q
-                          {Number(activoData.moraActual).toLocaleString(
-                            "es-GT",
-                            { minimumFractionDigits: 2 }
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Reason */}
-                  <div className="mt-6">
-                    <Label
-                      htmlFor="reason"
-                      className="text-blue-900 font-bold text-base mb-2 block"
-                    >
-                      Motivo del Convenio
-                    </Label>
-                    <Textarea
-                      id="reason"
-                      value={reason}
-                      onChange={(e) => setReason(e.target.value)}
-                      placeholder="Ejemplo: Cliente solicita convenio por dificultades económicas temporales"
-                      className="text-gray-900"
-                      rows={3}
-                    />
-                  </div>
-
-                  {/* Observations */}
-                  <div className="mt-4">
-                    <Label
-                      htmlFor="observations"
-                      className="text-blue-900 font-bold text-base mb-2 block"
-                    >
-                      Observaciones (Opcional)
-                    </Label>
-                    <Textarea
-                      id="observations"
-                      value={observations}
-                      onChange={(e) => setObservations(e.target.value)}
-                      placeholder="Información adicional relevante..."
-                      className="text-gray-900"
-                      rows={3}
-                    />
-                  </div>
-                </Card>
-
-                {/* Submit buttons */}
-                <div className="flex justify-end gap-4">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => {
-                      setSifcoSeleccionado("");
-                      setResetBuscador(true);
-                    }}
-                    className="text-blue-900 font-semibold"
-                  >
-                    Cancelar
-                  </Button>
-                  <Button
-                    type="submit"
-                    disabled={isPending || selectedInstallments.length === 0}
-                    className="bg-blue-600 hover:bg-blue-700 font-semibold"
-                  >
-                    {isPending ? "Creando..." : "Crear Convenio"}
-                  </Button>
-                </div>
-              </form>
+              <Alert className="mb-6 border-blue-500 bg-blue-50">
+                <AlertCircle className="h-4 w-4 text-blue-600" />
+                <AlertDescription className="text-blue-900">
+                  Este crédito no tiene un convenio de pago vigente. Los
+                  convenios se crean desde el <strong>CRM de cobros</strong>,
+                  en la ficha del caso (botón{" "}
+                  <strong>Promesa / Convenio</strong>). Una vez creado, se
+                  activa o rechaza desde la pantalla de Pagos de cartera.
+                </AlertDescription>
+              </Alert>
             )}
           </>
         )}

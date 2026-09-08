@@ -32,9 +32,9 @@ accountability medible (un asesor responde por su bucket, no por una lista hered
 | 1 | [Modelo de buckets](./01-modelo-de-buckets.md) | Qué es un bucket, los seis niveles, cómo se mide el atraso, qué queda fuera del funnel |
 | 2 | [Motor y asignación](./02-motor-y-asignacion.md) | Cómo se deriva el bucket, la bitácora de transiciones, la reasignación automática de asesor |
 | 3 | [Recordatorios automáticos](./03-recordatorios-automaticos.md) | Premora D-5…D-0, recordatorios de convenio, reducción para quien paga bien (CB-010) |
-| 4 | [Operación diaria](./04-operacion-diaria.md) | Apertura, cola del día, SLA, agenda, alertas, promesas, reasignación manual |
+| 4 | [Operación diaria](./04-operacion-diaria.md) | Apertura, cola del día, SLA, agenda, alertas, promesas y convenios, reasignación manual |
 | 5 | [Datos y ambientes](./05-datos-y-ambientes.md) | Dónde vive cada base, el sandbox `cartera_cobros2`, migraciones, trampas conocidas |
-| 6 | [Ficha 360 del crédito](./06-ficha-360.md) | La pantalla de trabajo del asesor: anatomía, fuentes de datos, registro de contactos, estado de cuenta y decisiones |
+| 6 | [Ficha 360 del crédito](./06-ficha-360.md) | La pantalla de trabajo del asesor: anatomía, fuentes de datos, registro de contactos, promesa y convenio de pago, estado de cuenta y decisiones |
 | — | [**Runbook · Refrescar el sandbox**](./RUNBOOK-refrescar-sandbox.md) | Cómo poner el sandbox al día con producción sin perder el historial. Es también el ensayo del pase a producción |
 
 Y aparte, con documentación propia:
@@ -122,6 +122,7 @@ le habla, cuándo y por dónde → CRM. El bot solo habla con el CRM
 | Bot de WhatsApp | 🔵 Paso 1 (identificación) desplegado en dev; pasos 2-4 pendientes |
 | Pagos con link de Págalo | 🔵 Ficha 360 y bot generan links; el pago entra validado a cartera. Facturación automática **apagada** hasta poner `PAGALO_FACTURACION_ACTIVA=true` |
 | Visibilidad de la facturación | ✅ Estado por pago y rubro por factura — ver [Operación diaria](./04-operacion-diaria.md#facturación-qué-quedó-sin-factura). **No refactura solo**, por diseño |
+| Convenio de pago **desde la Ficha 360** (CB-032) | ✅ Implementado — botón "Promesa / Convenio", solo B2+ y cuotas vencidas + actual; carteraFront quedó de consulta. Ver [Ficha 360 §3.4](./06-ficha-360.md#34-convenio-de-pago-cb-032) |
 | Convenio y promesa **por el bot** | 🔴 Bloqueado — falta aprobación de gerencia |
 | Sandbox al día con producción | ✅ Refrescado el 2026-08-17 — ver el [runbook](./RUNBOOK-refrescar-sandbox.md) |
 | Carga inicial en producción | ⚪ Pendiente — mismo runbook, pero **sin replay**: línea base limpia |

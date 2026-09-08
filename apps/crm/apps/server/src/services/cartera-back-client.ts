@@ -23,6 +23,7 @@ import type {
 	CarteraBucketsHistorialResponse,
 	CarteraColaDiaResponse,
 	CarteraComportamientoPagoResponse,
+	CarteraConvenio,
 	CarteraConvenioCuota,
 	CarteraConvenioListado,
 	CarteraConvenioProximosResponse,
@@ -37,6 +38,7 @@ import type {
 	CreateBoletaInput,
 	CreateCreditoInput,
 	CreatePagoInput,
+	CreateConvenioInput,
 	CreateUsuarioInput,
 	CreditActionInput,
 	CreditoBucketResponse,
@@ -2095,6 +2097,37 @@ export class CarteraBackClient {
 			data: CarteraConvenioCuota[];
 		}>(`/payment-agreements/${convenioId}/cuotas`, { method: "GET" });
 		return response.data ?? [];
+	}
+
+	/**
+	 * CB-032 — crear un convenio de pago desde la Ficha 360 del CRM. Mismo
+	 * endpoint que usa carteraFront; cartera valida negocio (pagos del crédito,
+	 * cuotas no pagadas, sin convenio activo) y responde 400 con `message` —
+	 * el caller lee `payload.message` de CarteraBackHttpError para mostrarlo.
+	 * No idempotente: `request` no reintenta POST (ver comentario ahí).
+	 */
+	async createConvenio(input: CreateConvenioInput): Promise<CarteraConvenio> {
+		const response = await this.request<{
+			success: boolean;
+			data: CarteraConvenio;
+			message?: string;
+		}>("/payment-agreements", {
+			method: "POST",
+			body: JSON.stringify(input),
+		});
+		// El convenio cambia statusCredit (EN_CONVENIO), borra la mora y saca al
+		// crédito del funnel: todo lo cacheado que muestra eso queda viejo.
+		this.cache.invalidate("/credito?");
+		this.cache.invalidate("payment-agreements");
+		this.cache.invalidate("getAllCredits");
+		this.cache.invalidate("stats");
+		this.cache.invalidate("/buckets/credito/");
+		if (!response?.success || !response.data) {
+			throw new Error(
+				response?.message || "cartera-back no devolvió el convenio creado",
+			);
+		}
+		return response.data;
 	}
 
 	// CB-020: universo SLA de la Cola del Día — créditos del POOL de buckets

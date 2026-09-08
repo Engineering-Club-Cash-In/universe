@@ -5,6 +5,8 @@ import { cors } from "@elysiajs/cors";
 import { iniciarTareasProgramadas } from "../schedule";
 import { auditLogMiddleware } from "./middleware/auditLog";
 import { validationErrorMiddleware } from "./middleware/validationError";
+import { nexaPaymentHandler } from "./controllers/nexaPaymentRuntime";
+import { createNexaInternalRouter } from "./routers/nexa";
 
 const app = new Elysia()
   .use(validationErrorMiddleware)
@@ -14,6 +16,7 @@ const app = new Elysia()
     allowedHeaders: ["Content-Type", "Authorization"],
   }))
   .use(auditLogMiddleware)
+  .use(createNexaInternalRouter(config.environment, nexaPaymentHandler))
   .use(routers.healthRouter)
   .use(routers.defaultRouter)
   .use(routers.inversionistasRouter)

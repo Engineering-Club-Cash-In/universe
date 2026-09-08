@@ -25,6 +25,21 @@ import {
 } from "./registerPaymentPolicy";
 
 describe("register payment", () => {
+  it("acepta monto_boleta decimal como string sin perder centavos", () => {
+    expect(
+      pagoSchema.safeParse({
+        credito_id: 10,
+        usuario_id: 5,
+        monto_boleta: "90071992547409.91",
+        fecha_pago: "2026-09-08",
+        cuotaApagar: 1,
+        url_boletas: [],
+        registerBy: "NEXA:7",
+        fecha_boleta: "2026-09-08",
+      }).success,
+    ).toBe(true);
+  });
+
   it("clasifica un crédito pendiente de cancelación con un mensaje descriptivo", () => {
     expect(getCreditPaymentBlock("PENDIENTE_CANCELACION")).toEqual({
       code: "CREDIT_PENDING_CANCELLATION",

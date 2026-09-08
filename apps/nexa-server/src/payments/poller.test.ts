@@ -24,7 +24,6 @@ test("poller upserts a FAILED reference once without processing or reviewing it"
     date: "2026-05-04",
     nexa: {
       getPaymentTokenStatement: async () => ({ transactions: [transaction] }),
-      reviewTransfer: async () => { throw new Error("reviewTransfer must not run during ingestion"); },
     },
     cartera: { applyNexaPayment: async () => { throw new Error("Cartera must not run during ingestion"); } },
     transactions: {

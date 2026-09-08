@@ -17,6 +17,7 @@ describe("test console UI", () => {
       nexaPollIntervalSeconds: 300,
       nexaPollLookbackDays: 1,
       workerLeaseSeconds: 60,
+      workerIntervalSeconds: 1,
       workerMaxAttempts: 5,
       workerBackoffSeconds: 5,
       workerMaxBackoffSeconds: 300,

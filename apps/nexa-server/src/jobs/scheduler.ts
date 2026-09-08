@@ -1,7 +1,17 @@
 import type { NexaClient } from "../nexa/client";
+import type { DbPaymentTransactionRepository, DbTokenUserRepository, PollRunRepository } from "../db/repositories";
 import type { CarteraPaymentClient } from "../payments/cartera-client";
 import { pollPaymentTokenDate } from "../payments/poller";
-import type { DbPaymentTransactionRepository, DbTokenUserRepository, PollRunRepository } from "../db/repositories";
+
+export type Scheduler = {
+  setTimeout(callback: () => void, delayMs: number): unknown;
+  clearTimeout(handle: unknown): void;
+};
+
+export const defaultScheduler: Scheduler = {
+  setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
+  clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+};
 
 export function getGuatemalaPollingDates(now: Date, lookbackDays: number) {
   const formatter = new Intl.DateTimeFormat("en-CA", {
@@ -24,36 +34,47 @@ export function getGuatemalaPollingDates(now: Date, lookbackDays: number) {
 export function startPaymentPolling(options: {
   intervalSeconds: number;
   lookbackDays: number;
-  nexa: NexaClient;
+  nexa: Pick<NexaClient, "getPaymentTokenStatement">;
   cartera: CarteraPaymentClient;
   transactions: DbPaymentTransactionRepository;
   tokenUsers: DbTokenUserRepository;
   pollRuns: PollRunRepository;
+  scheduler?: Scheduler;
+  logError?: (message: string) => void;
 }) {
+  const scheduler = options.scheduler ?? defaultScheduler;
+  const logError = options.logError ?? console.error;
+  let stopped = false;
   let running = false;
+  let timer: unknown;
 
   const poll = async () => {
-    if (running) return;
+    if (stopped || running) return;
     running = true;
     try {
-      for (const date of getGuatemalaPollingDates(new Date(), options.lookbackDays)) {
-        await options.pollRuns.run(date, () => pollPaymentTokenDate({
-          date,
-          nexa: options.nexa,
-          cartera: options.cartera,
-          transactions: options.transactions,
-          tokenUsers: options.tokenUsers,
-        }));
-      }
-    } catch (error) {
-      console.error("Nexa polling failed", error);
+      await options.pollRuns.runAsLeader(async () => {
+        for (const date of getGuatemalaPollingDates(new Date(), options.lookbackDays)) {
+          await options.pollRuns.run(date, () => pollPaymentTokenDate({
+            date,
+            nexa: options.nexa,
+            cartera: options.cartera,
+            transactions: options.transactions,
+            tokenUsers: options.tokenUsers,
+          }));
+        }
+      });
+    } catch {
+      logError("Nexa polling cycle failed");
     } finally {
       running = false;
+      if (!stopped) timer = scheduler.setTimeout(() => void poll(), options.intervalSeconds * 1000);
     }
   };
 
-  const timer = setInterval(poll, options.intervalSeconds * 1000);
   void poll();
 
-  return () => clearInterval(timer);
+  return () => {
+    stopped = true;
+    if (timer) scheduler.clearTimeout(timer);
+  };
 }

@@ -1,10 +1,9 @@
-import type { ReviewTransferStatus, TokenTransaction } from "../nexa/schemas";
+import type { TokenTransaction } from "../nexa/schemas";
 import type { CarteraPaymentClient } from "./cartera-client";
 import type { PaymentTransactionRepository, TokenUserRepository } from "./repositories";
 
 interface NexaPaymentClient {
   getPaymentTokenStatement(date: string): Promise<{ transactions: TokenTransaction[] }>;
-  reviewTransfer(payload: { id: number; reference: number; status: ReviewTransferStatus }): Promise<unknown>;
 }
 
 export async function pollPaymentTokenDate(options: {

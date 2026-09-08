@@ -1,6 +1,6 @@
 import type { AppConfig } from "./config";
 import { createDb } from "./db";
-import { DbPaymentTransactionRepository, DbTokenUserRepository, MockCreditRepository, PaymentTokenRepository, PollRunRepository } from "./db/repositories";
+import { DbPaymentTransactionRepository, DbReviewRepository, DbTokenUserRepository, MockCreditRepository, PaymentTokenRepository, PollRunRepository } from "./db/repositories";
 import { NexaClient } from "./nexa/client";
 import { HttpCarteraPaymentClient } from "./payments/cartera-client";
 import { MockCarteraPaymentClient } from "./payments/mock-cartera-client";
@@ -35,6 +35,7 @@ export function createDependencies(config: AppConfig) {
     paymentTokens: new PaymentTokenRepository(db),
     tokenUsers: new DbTokenUserRepository(db),
     transactions: new DbPaymentTransactionRepository(db),
+    reviews: new DbReviewRepository(db),
     pollRuns: new PollRunRepository(db),
     mockCredits,
   };

@@ -169,7 +169,21 @@ const entidadPedida = async (
   }
 
   if (idCrudo === undefined || idCrudo === null || idCrudo === "") {
-    return entidades[0];
+    // Sin id, la de SIEMPRE: la que cuelga del correo de la sesión.
+    //
+    // Es el camino de compatibilidad —el portal anterior al selector no manda
+    // `inversionista_id`— y por eso tiene que comportarse como antes, cuando
+    // cartera resolvía por correo y nada más. Devolver `entidades[0]` cambiaba
+    // esa respuesta: la lista viene ordenada con la persona primero, así que a
+    // quien tiene su correo puesto en una SOCIEDAD y además una fila personal,
+    // una edición bancaria pensada para la sociedad le caía encima a su fila
+    // personal. Y el perfil, los documentos y las inversiones le mostraban la
+    // entidad equivocada.
+    //
+    // `es_ancla` es justo eso: la fila cuyo correo casó con el de la sesión.
+    // `entidades[0]` queda de respaldo para las que solo llegaron por
+    // expansión de DPI, donde no hay ancla que preferir.
+    return entidades.find((e) => e.es_ancla) ?? entidades[0];
   }
 
   const id = Number(idCrudo);

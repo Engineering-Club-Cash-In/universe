@@ -25,7 +25,11 @@ mock.module("../lib/auth", () => ({
 }));
 
 /** Entidades que cartera dice que el correo de la sesión puede operar. */
-let entidadesEnCartera: { inversionista_id: number; nombre: string }[] = [];
+let entidadesEnCartera: {
+  inversionista_id: number;
+  nombre: string;
+  es_ancla?: boolean;
+}[] = [];
 
 /** Cuántas veces se preguntó realmente a cartera. */
 let llamadasAEntidades = 0;
@@ -101,6 +105,40 @@ describe("cartera: el caché de entidades no autoriza escrituras", () => {
       { inversionista_id: PROPIA, nombre: "Persona" },
       { inversionista_id: SOCIEDAD, nombre: "Sociedad" },
     ];
+  });
+
+  // El portal anterior al selector no manda `inversionista_id`, y ese camino
+  // tiene que seguir resolviendo lo de siempre: la fila cuyo correo es el de la
+  // sesión. La lista viene con la persona primero, así que tomar la primera le
+  // aplicaba a la fila PERSONAL una edición pensada para la sociedad.
+  it("sin id, atiende la entidad que cuelga del correo de la sesión", async () => {
+    entidadesEnCartera = [
+      { inversionista_id: PROPIA, nombre: "Persona", es_ancla: false },
+      { inversionista_id: SOCIEDAD, nombre: "Sociedad", es_ancla: true },
+    ];
+
+    await pedir("/investor", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ numero_cuenta: "123" }),
+    });
+
+    expect(escrituras[0]).toMatchObject({ inversionista_id: SOCIEDAD });
+  });
+
+  it("sin ancla y sin id, cae a la primera de la lista", async () => {
+    entidadesEnCartera = [
+      { inversionista_id: PROPIA, nombre: "Persona" },
+      { inversionista_id: SOCIEDAD, nombre: "Sociedad" },
+    ];
+
+    await pedir("/investor", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ numero_cuenta: "123" }),
+    });
+
+    expect(escrituras[0]).toMatchObject({ inversionista_id: PROPIA });
   });
 
   it("las lecturas sí aprovechan el caché", async () => {

@@ -129,3 +129,44 @@ export const tipoRecordadoDelAlta = (
     return null;
   }
 };
+
+/**
+ * Qué hacer con el tipo puesto cuando el correo del formulario cambia.
+ *
+ * Existe porque restaurar era la única mitad implementada. El formulario
+ * arranca con el correo de "recordar usuario", y si ese correo tiene un alta
+ * recordada, el tipo se restaura y el selector se bloquea. Hasta ahí bien; lo
+ * que faltaba era el camino de vuelta: al escribir OTRO correo, `null` se
+ * trataba como "no hay nada que restaurar" y se salía dejando puesto el tipo
+ * del correo anterior, con el selector todavía bloqueado. Ese tipo no es
+ * decorativo —es el que decide si la cuenta nueva sale como inversionista o
+ * como cliente— así que la persona terminaba dada de alta en el sistema
+ * equivocado, sin sesión previa que la frenara y sin haber podido tocar el
+ * selector.
+ *
+ * `huboAltaEnEstaPestana` es lo que impide arreglar un bug creando otro. Un
+ * tipo que puso un alta de VERDAD no se suelta nunca: ahí el ref es el candado
+ * que evita que el reintento salga hacia el otro sistema y deje huérfana la
+ * fila del primer intento. Y no hace falta soltarlo, porque con el alta ya
+ * hecha cambiar el correo lo corta `decidirAlta` con "correo_cambiado". Lo que
+ * se suelta es solo lo que dejó puesto una restauración.
+ */
+export type DecisionDelTipo =
+  | { accion: "restaurar"; tipo: TipoDelPortal }
+  | { accion: "soltar" }
+  | { accion: "no_tocar" };
+
+export const tipoAlCambiarElCorreo = (
+  {
+    correoDelFormulario,
+    huboAltaEnEstaPestana,
+  }: { correoDelFormulario: string; huboAltaEnEstaPestana: boolean },
+  almacen?: AlmacenDelAlta | null,
+): DecisionDelTipo => {
+  const recordado = tipoRecordadoDelAlta(correoDelFormulario, almacen);
+  if (recordado) return { accion: "restaurar", tipo: recordado };
+
+  if (huboAltaEnEstaPestana) return { accion: "no_tocar" };
+
+  return { accion: "soltar" };
+};

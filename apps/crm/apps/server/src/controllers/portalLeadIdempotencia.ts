@@ -106,3 +106,70 @@ export const decidirLeadDelPortal = (
 
 	return guardado === pedido ? { tipo: "aceptar" } : { tipo: "conflicto_dpi" };
 };
+
+/**
+ * Cuál de las fichas encontradas es la de quien está entrando al portal.
+ *
+ * `leads.email` no tiene índice único, así que dos fichas pueden colgar del
+ * mismo correo con solo diferir en la caja o en un espacio —"Ana@x.com" y
+ * "ana@x.com"—, y la búsqueda normaliza los dos lados, de modo que las trae a
+ * las dos. Antes se tomaba la primera en silencio, y a partir de ahí TODO lo
+ * que el portal hace colgado de la sesión —perfil, documentos, contratos,
+ * créditos y actualizaciones— leía y escribía sobre una ficha elegida por
+ * antigüedad. Con dos personas distintas capturadas bajo el mismo correo (pasa:
+ * el contacto de una empresa, un familiar), eso es enseñarle a una los datos de
+ * la otra.
+ *
+ * El DPI sí desempata, y no es un dato que elija quien llama: auth-google manda
+ * el de la CUENTA. Además solo se usa para escoger entre fichas que YA cuelgan
+ * de ese correo, así que no puede traer una ajena.
+ *
+ * Sin desempate se responde "ambiguo" y no se elige ninguna. Es lo mismo que
+ * decide el registro un poco más arriba —correo y DPI, o nada— y por la misma
+ * razón: quedarse sin ver el perfil se arregla unificando dos fichas; haber
+ * escrito en la de otra persona, no.
+ *
+ * El camino sin correo no cambia: ahí no hay identidad de sesión que anclar y
+ * los empates son los duplicados de DPI con formatos distintos, entre los que
+ * la más antigua es la que arrastra el historial.
+ */
+export interface LeadCandidato {
+	id: unknown;
+	email: string | null;
+	dpi: string | null;
+}
+
+export type EleccionDeLead<T extends LeadCandidato> =
+	| { tipo: "uno"; lead: T }
+	| { tipo: "ninguno" }
+	| { tipo: "ambiguo"; ids: unknown[] };
+
+export const elegirLeadDelPortal = <T extends LeadCandidato>(
+	/** Candidatos YA ordenados de más antiguo a más nuevo. */
+	candidatos: T[],
+	busqueda: { correo?: string | null; dpi?: string | null },
+): EleccionDeLead<T> => {
+	const correo = normalizarCorreoParaComparar(busqueda.correo);
+
+	if (correo) {
+		const porCorreo = candidatos.filter(
+			(c) => normalizarCorreoParaComparar(c.email) === correo,
+		);
+
+		if (porCorreo.length === 1) return { tipo: "uno", lead: porCorreo[0] };
+
+		if (porCorreo.length > 1) {
+			const dpi = normalizarParaComparar(busqueda.dpi);
+			const porDpi = dpi
+				? porCorreo.filter((c) => normalizarParaComparar(c.dpi) === dpi)
+				: [];
+
+			if (porDpi.length === 1) return { tipo: "uno", lead: porDpi[0] };
+
+			return { tipo: "ambiguo", ids: porCorreo.map((c) => c.id) };
+		}
+	}
+
+	const masAntigua = candidatos[0];
+	return masAntigua ? { tipo: "uno", lead: masAntigua } : { tipo: "ninguno" };
+};

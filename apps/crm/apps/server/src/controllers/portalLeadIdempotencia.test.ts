@@ -1,6 +1,9 @@
 import { describe, expect, it } from "bun:test";
 
-import { decidirLeadDelPortal } from "./portalLeadIdempotencia";
+import {
+	decidirLeadDelPortal,
+	elegirLeadDelPortal,
+} from "./portalLeadIdempotencia";
 
 const CORREO = "ana@ejemplo.com";
 
@@ -102,5 +105,86 @@ describe("decidirLeadDelPortal: el lead tiene que colgar del correo de la sesió
 				CORREO,
 			),
 		).toEqual({ tipo: "aceptar" });
+	});
+});
+
+// `leads.email` no tiene índice único, así que dos fichas pueden colgar del
+// mismo correo con solo diferir en la caja o en un espacio. La búsqueda
+// normaliza los dos lados, de modo que las trae a las dos, y antes se tomaba la
+// primera en silencio: a partir de ahí todo lo que el portal hace colgado de la
+// sesión —perfil, documentos, contratos, créditos, actualizaciones— leía y
+// escribía sobre una ficha elegida por antigüedad.
+describe("elegirLeadDelPortal", () => {
+	const ana = { id: 1, email: "ana@ejemplo.com", dpi: "1234567890123" };
+	const anaOtraCaja = { id: 2, email: "  Ana@Ejemplo.COM ", dpi: "9999999999999" };
+	const porDpi = { id: 3, email: "otro@ejemplo.com", dpi: "1234567890123" };
+
+	it("elige la ficha que cuelga del correo de la sesión", () => {
+		expect(
+			elegirLeadDelPortal([porDpi, ana], {
+				correo: "ana@ejemplo.com",
+				dpi: "1234567890123",
+			}),
+		).toEqual({ tipo: "uno", lead: ana });
+	});
+
+	it("la reconoce aunque su correo esté guardado con otro formato", () => {
+		expect(
+			elegirLeadDelPortal([anaOtraCaja], { correo: "ana@ejemplo.com" }),
+		).toEqual({ tipo: "uno", lead: anaOtraCaja });
+	});
+
+	// Con dos personas distintas capturadas bajo el mismo correo —pasa: el
+	// contacto de una empresa, un familiar— elegir por antigüedad es enseñarle a
+	// una los datos de la otra.
+	it("no elige ninguna cuando dos fichas cuelgan del mismo correo", () => {
+		expect(
+			elegirLeadDelPortal([ana, anaOtraCaja], { correo: "ana@ejemplo.com" }),
+		).toEqual({ tipo: "ambiguo", ids: [1, 2] });
+	});
+
+	// El DPI sí desempata, y no lo elige quien llama: auth-google manda el de la
+	// CUENTA. Y solo escoge entre fichas que ya cuelgan de ese correo, así que no
+	// puede traer una ajena.
+	it("deja que el DPI de la cuenta desempate", () => {
+		expect(
+			elegirLeadDelPortal([ana, anaOtraCaja], {
+				correo: "ana@ejemplo.com",
+				dpi: "9999-9999-99999",
+			}),
+		).toEqual({ tipo: "uno", lead: anaOtraCaja });
+	});
+
+	it("sigue siendo ambiguo si el DPI no está en ninguna de las dos", () => {
+		expect(
+			elegirLeadDelPortal([ana, anaOtraCaja], {
+				correo: "ana@ejemplo.com",
+				dpi: "5555555555555",
+			}),
+		).toEqual({ tipo: "ambiguo", ids: [1, 2] });
+	});
+
+	// El camino sin correo no cambia: ahí no hay identidad de sesión que anclar y
+	// los empates son duplicados de DPI con formatos distintos, entre los que la
+	// más antigua arrastra el historial.
+	it("sin correo se queda con la más antigua", () => {
+		expect(elegirLeadDelPortal([porDpi, ana], { dpi: "1234567890123" })).toEqual(
+			{ tipo: "uno", lead: porDpi },
+		);
+	});
+
+	it("y también cuando ninguna cuelga de ese correo", () => {
+		expect(
+			elegirLeadDelPortal([porDpi], {
+				correo: "nadie@ejemplo.com",
+				dpi: "1234567890123",
+			}),
+		).toEqual({ tipo: "uno", lead: porDpi });
+	});
+
+	it("dice que no hay ninguna cuando no hay candidatos", () => {
+		expect(elegirLeadDelPortal([], { correo: "ana@ejemplo.com" })).toEqual({
+			tipo: "ninguno",
+		});
 	});
 });

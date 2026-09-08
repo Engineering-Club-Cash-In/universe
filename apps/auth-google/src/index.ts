@@ -102,7 +102,19 @@ app.onError(errorHandler);
 // daba la instancia por lista y le mandaba peticiones de sesión: justo las que
 // necesitan la columna que este paso está creando. El handler espera esta
 // promesa; después de la primera vez ya está resuelta y no cuesta nada.
-const esquemaListo = asegurarColumnasRequeridas();
+//
+// Y si el esquema no queda listo, el proceso MUERE. Arrancar igual era peor que
+// no arrancar: el contenedor levantaba, `/health` decía que todo bien —solo
+// mira la conexión— y Coolify le mandaba tráfico a un servicio donde cada
+// consulta de sesión reventaba. Muriendo, Coolify deja viva la versión
+// anterior y el log dice qué migración falta.
+const esquemaListo = asegurarColumnasRequeridas().catch((error) => {
+  console.error(
+    "❌ [auth-google] El esquema no está listo: el servicio NO va a atender.",
+    error,
+  );
+  process.exit(1);
+});
 
 // Verificar conexión a la base de datos al iniciar
 testConnection().then((connected) => {

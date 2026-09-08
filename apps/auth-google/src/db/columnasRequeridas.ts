@@ -21,33 +21,77 @@ import { db } from "./connection";
  */
 
 interface ColumnaRequerida {
-  descripcion: string;
+  esquema: string;
+  tabla: string;
+  columna: string;
   ddl: ReturnType<typeof sql>;
 }
 
 const COLUMNAS: ColumnaRequerida[] = [
   {
-    descripcion: '"auth-google".users.password_provisionada_at',
+    esquema: "auth-google",
+    tabla: "users",
+    columna: "password_provisionada_at",
     ddl: sql`ALTER TABLE "auth-google"."users"
       ADD COLUMN IF NOT EXISTS "password_provisionada_at" timestamp`,
   },
 ];
 
+const nombreDe = (c: ColumnaRequerida) => `"${c.esquema}".${c.tabla}.${c.columna}`;
+
 /**
- * Se asegura de que estén, antes de atender la primera petición.
+ * Lo que decide si el servicio puede atender: que la columna ESTÉ, no que el
+ * DDL haya corrido.
  *
- * No tira: si el usuario de base no tiene permisos de DDL, el arranque sigue y
- * el log dice exactamente qué correr. Tirar aquí cambiaría una caída por otra.
+ * La diferencia importa en los dos sentidos. Un rol de base que no es dueño de
+ * la tabla no puede correr ni un `ADD COLUMN IF NOT EXISTS` que sobra —Postgres
+ * exige propiedad antes de mirar el `IF NOT EXISTS`—, así que dar por rota la
+ * base porque el DDL falló tumbaría un despliegue perfectamente sano. Y al
+ * revés: que el DDL no tire tampoco prueba que la columna quedó.
+ */
+const columnaExiste = async (c: ColumnaRequerida): Promise<boolean> => {
+  const filas: any = await db.execute(sql`
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = ${c.esquema}
+      AND table_name = ${c.tabla}
+      AND column_name = ${c.columna}
+    LIMIT 1
+  `);
+
+  const cuantas = Array.isArray(filas) ? filas.length : (filas?.rows?.length ?? 0);
+  return cuantas > 0;
+};
+
+/**
+ * Se asegura de que estén, ANTES de atender la primera petición.
+ *
+ * Tira si al final la columna no está, y esa es la corrección: antes se tragaba
+ * el fallo del DDL y el arranque seguía, así que el contenedor levantaba,
+ * `/health` decía que todo bien —solo mira la conexión— y Coolify le mandaba
+ * tráfico a un servicio donde CADA consulta de sesión reventaba. Un
+ * despliegue que no arranca deja viva la versión anterior; uno que arranca roto
+ * saca a todo el mundo del portal.
  */
 export async function asegurarColumnasRequeridas(): Promise<void> {
   for (const columna of COLUMNAS) {
+    const nombre = nombreDe(columna);
+
     try {
       await db.execute(columna.ddl);
     } catch (error) {
-      console.error(
-        `❌ No se pudo asegurar ${columna.descripcion}. Si la columna no existe, el login se va a caer: corré apps/auth-google/migrations/ a mano.`,
+      // Todavía no es un fallo: puede ser un rol sin propiedad sobre una tabla
+      // que ya tiene la columna. Lo decide la comprobación de abajo.
+      console.warn(
+        `⚠️  No se pudo ejecutar el ALTER de ${nombre}; se comprueba si ya existe.`,
         error,
       );
     }
+
+    if (await columnaExiste(columna)) continue;
+
+    throw new Error(
+      `Falta ${nombre} y no se pudo crear. El login se cae sin ella: corré apps/auth-google/migrations/ contra esta base y volvé a desplegar.`,
+    );
   }
 }

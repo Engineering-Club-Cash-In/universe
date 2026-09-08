@@ -65,20 +65,22 @@ export const auth = betterAuth({
       await registrarPasswordPropia(user.id, "enlace");
     },
     sendResetPassword: async ({ user, url }) => {
-      // Log para debug - ver estructura de la URL
-      console.log("🔗 Reset password URL from Better Auth:", url);
-      
-      // Better Auth envía la URL completa del backend, extraemos el token
-      // La URL viene como: http://localhost:3000/api/auth/reset-password/TOKEN
-      // O puede venir con query params
+      // NADA de esto se loguea. El token ES la credencial: quien lo tenga puede
+      // cambiar la contraseña de esa cuenta sin saber la anterior, y con la
+      // vigencia en 24 horas el que quedó escrito en el log de producción sirve
+      // durante todo un día. Aquí había tres `console.log` —la URL de Better
+      // Auth, el token suelto y la URL final— así que cualquiera con acceso a
+      // los logs agregados podía entrar a cualquier cuenta del portal.
+      //
+      // Better Auth manda la URL de su propio endpoint
+      // (`.../api/auth/reset-password/TOKEN`, a veces con el token en query), y
+      // de ahí se extrae para armar la del portal.
       let token: string | null = null;
-      
+
       try {
         const urlObj = new URL(url);
-        // Primero intentar obtener de query params
         token = urlObj.searchParams.get("token");
-        
-        // Si no hay token en query params, puede estar en el path
+
         if (!token) {
           const pathParts = urlObj.pathname.split("/");
           token = pathParts[pathParts.length - 1];
@@ -87,11 +89,8 @@ export const auth = betterAuth({
         // Si la URL no es válida, usar directamente
         token = url;
       }
-      
-      console.log("🎫 Extracted token:", token);
-      
+
       const resetUrl = `${env.FRONTEND_URL}/reset-password?token=${token}`;
-      console.log("📧 Final reset URL:", resetUrl);
       
       // El portal permite registrarse como CLIENT o INVESTOR, así que el
       // correo adapta su saludo al rol de la cuenta.

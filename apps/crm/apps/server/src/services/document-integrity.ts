@@ -1,20 +1,15 @@
 import { createHash } from "node:crypto";
 import { google } from "@ai-sdk/google";
 import { generateObject } from "ai";
-import {
-	and,
-	desc,
-	eq,
-	gt,
-	inArray,
-	isNull,
-	lt,
-	ne,
-	sql,
-} from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, lt, ne, sql } from "drizzle-orm";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
-import { coDebtors, leads, opportunities } from "../db/schema/crm";
+import {
+	coDebtors,
+	creditAnalysis,
+	leads,
+	opportunities,
+} from "../db/schema/crm";
 import {
 	documentIntegrityValidationApprovals,
 	documentIntegrityValidationResets,
@@ -34,7 +29,10 @@ import {
 	estadoCuentaBatchAiSchema,
 	normalizeStatementIdentifier,
 } from "../lib/document-integrity/kinds/estado-cuenta";
-import { scanPdfBytes } from "../lib/document-integrity/pdf-forensics";
+import {
+	MAX_PDF_PARSE_LEASE_MS,
+	scanPdfBytes,
+} from "../lib/document-integrity/pdf-forensics";
 import type { DocumentIntegrityAiResult } from "../lib/document-integrity/types";
 import {
 	getAttemptAvailability,
@@ -62,7 +60,12 @@ const AI_TIMEOUT_MS = 120_000;
 const RETRY_WINDOW_MS = 5 * 60_000;
 const MAX_AI_CALL_WAVES =
 	1 + Math.ceil(MAX_DOCUMENTS_PER_VALIDATION / AI_FALLBACK_CONCURRENCY);
-const RUN_STALE_AFTER_MS = AI_TIMEOUT_MS * MAX_AI_CALL_WAVES + 60_000;
+// Cubre las olas de Gemini mas la fase forense secuencial. Usa el arriendo y no
+// PARSE_BUDGET_MS, que es cooperativo y PDFDocument.load() puede rebasarlo.
+const RUN_STALE_AFTER_MS =
+	AI_TIMEOUT_MS * MAX_AI_CALL_WAVES +
+	MAX_DOCUMENTS_PER_VALIDATION * MAX_PDF_PARSE_LEASE_MS +
+	60_000;
 export const MAX_DOCUMENT_INTEGRITY_ATTEMPTS = 2;
 
 export class DocumentIntegrityError extends Error {
@@ -113,15 +116,36 @@ async function getLatestResetAttemptNumber(opportunityId: string) {
 	return reset?.attemptNumber ?? 0;
 }
 
+// Todos los sitios que bloquean una oportunidad deben usar esta funcion, o
+// dejarian de excluirse entre si. hashtextextended da 64 bits; hashtext (int4)
+// colisiona entre oportunidades distintas.
+function lockOpportunity(opportunityId: string) {
+	return sql`SELECT pg_advisory_xact_lock(hashtextextended(${opportunityId}, 0))`;
+}
+
 async function createValidationRun(params: {
 	opportunityId: string;
 	validationSource: ValidationSource;
 	requestedBy: string;
+	rejectIfAnalysisCompleted?: boolean;
 }) {
 	return db.transaction(async (tx) => {
-		await tx.execute(
-			sql`SELECT pg_advisory_xact_lock(hashtext(${params.opportunityId}))`,
-		);
+		await tx.execute(lockOpportunity(params.opportunityId));
+		// Bajo el mismo lock que reserva el intento: fuera de la transaccion la
+		// ventana abarca las descargas de R2.
+		if (params.rejectIfAnalysisCompleted) {
+			const [existingAnalysis] = await tx
+				.select({ analyzedAt: creditAnalysis.analyzedAt })
+				.from(creditAnalysis)
+				.where(eq(creditAnalysis.opportunityId, params.opportunityId))
+				.limit(1);
+			if (existingAnalysis?.analyzedAt) {
+				throw new DocumentIntegrityError(
+					"BAD_REQUEST",
+					"Esta oportunidad ya tiene un análisis de capacidad de pago completado.",
+				);
+			}
+		}
 		await tx
 			.update(documentIntegrityValidationRuns)
 			.set({ status: "error", completedAt: sql`clock_timestamp()` })
@@ -197,9 +221,7 @@ export async function resetDocumentIntegrityAttempts(params: {
 	userId: string;
 }) {
 	return db.transaction(async (tx) => {
-		await tx.execute(
-			sql`SELECT pg_advisory_xact_lock(hashtext(${params.opportunityId}))`,
-		);
+		await tx.execute(lockOpportunity(params.opportunityId));
 		const [opportunity] = await tx
 			.select({ id: opportunities.id })
 			.from(opportunities)
@@ -658,6 +680,7 @@ async function executeValidationRun(params: {
 	leadId: string | null;
 	validationSource: ValidationSource;
 	requestedBy: string;
+	rejectIfAnalysisCompleted?: boolean;
 }) {
 	const run = await createValidationRun(params);
 	try {
@@ -768,6 +791,7 @@ export async function validateUploadedBankStatements(params: {
 		leadId: context.leadId,
 		validationSource: "analisis_capacidad",
 		requestedBy: params.userId,
+		rejectIfAnalysisCompleted: true,
 	});
 	return results.map((result, index) => {
 		if (result.validation)
@@ -875,122 +899,142 @@ export async function assertUploadedBankStatementsValidated(params: {
 	validationIds: string[];
 	files: Array<{ filePath: string; contentSha256: string }>;
 }) {
-	const resetAfterAttemptNumber = await getLatestResetAttemptNumber(
-		params.opportunityId,
-	);
-	const [latestRun] = await db
-		.select({
-			id: documentIntegrityValidationRuns.id,
-			attemptNumber: documentIntegrityValidationRuns.attemptNumber,
-			status: documentIntegrityValidationRuns.status,
-		})
-		.from(documentIntegrityValidationRuns)
-		.where(
-			and(
-				eq(documentIntegrityValidationRuns.opportunityId, params.opportunityId),
-				gt(
-					documentIntegrityValidationRuns.attemptNumber,
-					resetAfterAttemptNumber,
+	// Mismo lock que el reset: sin transaccion, el watermark y las validaciones se
+	// leian a ambos lados de la frontera.
+	return db.transaction(async (tx) => {
+		await tx.execute(lockOpportunity(params.opportunityId));
+		const [reset] = await tx
+			.select({
+				attemptNumber: sql<number>`coalesce(max(${documentIntegrityValidationResets.resetAfterAttemptNumber}), 0)::int`,
+			})
+			.from(documentIntegrityValidationResets)
+			.where(
+				eq(
+					documentIntegrityValidationResets.opportunityId,
+					params.opportunityId,
 				),
-			),
-		)
-		.orderBy(desc(documentIntegrityValidationRuns.attemptNumber))
-		.limit(1);
-	const uniqueValidationIds = [...new Set(params.validationIds)];
-	if (
-		uniqueValidationIds.length !== params.validationIds.length ||
-		new Set(params.files.map((file) => file.filePath)).size !==
-			params.files.length ||
-		uniqueValidationIds.length !== params.files.length
-	) {
-		throw new DocumentIntegrityError(
-			"BAD_REQUEST",
-			"Cada archivo debe tener una validación documental propia antes del análisis.",
-		);
-	}
+			);
+		const resetAfterAttemptNumber = reset?.attemptNumber ?? 0;
+		const [latestRun] = await tx
+			.select({
+				id: documentIntegrityValidationRuns.id,
+				attemptNumber: documentIntegrityValidationRuns.attemptNumber,
+				status: documentIntegrityValidationRuns.status,
+			})
+			.from(documentIntegrityValidationRuns)
+			.where(
+				and(
+					eq(
+						documentIntegrityValidationRuns.opportunityId,
+						params.opportunityId,
+					),
+					gt(
+						documentIntegrityValidationRuns.attemptNumber,
+						resetAfterAttemptNumber,
+					),
+				),
+			)
+			.orderBy(desc(documentIntegrityValidationRuns.attemptNumber))
+			.limit(1);
+		const uniqueValidationIds = [...new Set(params.validationIds)];
+		if (
+			uniqueValidationIds.length !== params.validationIds.length ||
+			new Set(params.files.map((file) => file.filePath)).size !==
+				params.files.length ||
+			uniqueValidationIds.length !== params.files.length
+		) {
+			throw new DocumentIntegrityError(
+				"BAD_REQUEST",
+				"Cada archivo debe tener una validación documental propia antes del análisis.",
+			);
+		}
 
-	const validations = await db
-		.select({
-			id: documentIntegrityValidations.id,
-			validationRunId: documentIntegrityValidations.validationRunId,
-			attemptNumber: documentIntegrityValidationRuns.attemptNumber,
-			filePath: documentIntegrityValidations.documentFilePath,
-			contentSha256: documentIntegrityValidations.contentSha256,
-			autoResult: documentIntegrityValidations.autoResult,
-			manualApprovalId: documentIntegrityValidationApprovals.id,
-		})
-		.from(documentIntegrityValidations)
-		.innerJoin(
-			documentIntegrityValidationRuns,
-			eq(
-				documentIntegrityValidations.validationRunId,
-				documentIntegrityValidationRuns.id,
-			),
-		)
-		.leftJoin(
-			documentIntegrityValidationApprovals,
-			eq(
-				documentIntegrityValidationApprovals.validationId,
-				documentIntegrityValidations.id,
-			),
-		)
-		.where(
-			and(
-				eq(documentIntegrityValidationRuns.opportunityId, params.opportunityId),
-				eq(documentIntegrityValidationRuns.status, "completed"),
-				inArray(documentIntegrityValidations.id, uniqueValidationIds),
-			),
+		const validations = await tx
+			.select({
+				id: documentIntegrityValidations.id,
+				validationRunId: documentIntegrityValidations.validationRunId,
+				attemptNumber: documentIntegrityValidationRuns.attemptNumber,
+				filePath: documentIntegrityValidations.documentFilePath,
+				contentSha256: documentIntegrityValidations.contentSha256,
+				autoResult: documentIntegrityValidations.autoResult,
+				manualApprovalId: documentIntegrityValidationApprovals.id,
+			})
+			.from(documentIntegrityValidations)
+			.innerJoin(
+				documentIntegrityValidationRuns,
+				eq(
+					documentIntegrityValidations.validationRunId,
+					documentIntegrityValidationRuns.id,
+				),
+			)
+			.leftJoin(
+				documentIntegrityValidationApprovals,
+				eq(
+					documentIntegrityValidationApprovals.validationId,
+					documentIntegrityValidations.id,
+				),
+			)
+			.where(
+				and(
+					eq(
+						documentIntegrityValidationRuns.opportunityId,
+						params.opportunityId,
+					),
+					eq(documentIntegrityValidationRuns.status, "completed"),
+					inArray(documentIntegrityValidations.id, uniqueValidationIds),
+				),
+			);
+		if (
+			validations.some(
+				(validation) => validation.attemptNumber <= resetAfterAttemptNumber,
+			)
+		) {
+			throw new DocumentIntegrityError(
+				"BAD_REQUEST",
+				"El cupo de validaciones documentales fue reiniciado. Vuelve a validar estos documentos antes de analizar la capacidad de pago.",
+			);
+		}
+		const selectedRunIds = new Set(
+			validations.map((validation) => validation.validationRunId),
 		);
-	if (
-		validations.some(
-			(validation) => validation.attemptNumber <= resetAfterAttemptNumber,
-		)
-	) {
-		throw new DocumentIntegrityError(
-			"BAD_REQUEST",
-			"El cupo de validaciones documentales fue reiniciado. Vuelve a validar estos documentos antes de analizar la capacidad de pago.",
-		);
-	}
-	const selectedRunIds = new Set(
-		validations.map((validation) => validation.validationRunId),
-	);
-	if (
-		latestRun &&
-		validations.length === uniqueValidationIds.length &&
-		selectedRunIds.size === 1 &&
-		!selectedRunIds.has(latestRun.id)
-	) {
-		throw new DocumentIntegrityError(
-			"BAD_REQUEST",
-			"Existe una validación documental más reciente. Actualiza la pantalla y utiliza el último lote validado.",
-		);
-	}
-	if (
-		!latestRun ||
-		latestRun.status !== "completed" ||
-		!uploadedValidationPairsMatch({
-			validationIds: params.validationIds,
-			files: params.files,
-			validations: validations.filter(
-				(validation) =>
-					validation.attemptNumber > resetAfterAttemptNumber &&
-					validation.validationRunId === latestRun.id,
-			),
-		})
-	) {
-		throw new DocumentIntegrityError(
-			"BAD_REQUEST",
-			"Los archivos del análisis no coinciden con la validación documental realizada.",
-		);
-	}
-	const pendingManualApprovalCount =
-		getPendingManualApprovalCount(validations);
-	if (pendingManualApprovalCount > 0) {
-		throw new DocumentIntegrityError(
-			"BAD_REQUEST",
-			`${pendingManualApprovalCount} documento${pendingManualApprovalCount === 1 ? " requiere" : "s requieren"} aprobación manual antes de analizar la capacidad de pago.`,
-		);
-	}
+		if (
+			latestRun &&
+			validations.length === uniqueValidationIds.length &&
+			selectedRunIds.size === 1 &&
+			!selectedRunIds.has(latestRun.id)
+		) {
+			throw new DocumentIntegrityError(
+				"BAD_REQUEST",
+				"Existe una validación documental más reciente. Actualiza la pantalla y utiliza el último lote validado.",
+			);
+		}
+		if (
+			!latestRun ||
+			latestRun.status !== "completed" ||
+			!uploadedValidationPairsMatch({
+				validationIds: params.validationIds,
+				files: params.files,
+				validations: validations.filter(
+					(validation) =>
+						validation.attemptNumber > resetAfterAttemptNumber &&
+						validation.validationRunId === latestRun.id,
+				),
+			})
+		) {
+			throw new DocumentIntegrityError(
+				"BAD_REQUEST",
+				"Los archivos del análisis no coinciden con la validación documental realizada.",
+			);
+		}
+		const pendingManualApprovalCount =
+			getPendingManualApprovalCount(validations);
+		if (pendingManualApprovalCount > 0) {
+			throw new DocumentIntegrityError(
+				"BAD_REQUEST",
+				`${pendingManualApprovalCount} documento${pendingManualApprovalCount === 1 ? " requiere" : "s requieren"} aprobación manual antes de analizar la capacidad de pago.`,
+			);
+		}
+	});
 }
 
 export async function approveDocumentIntegrityValidation(params: {
@@ -1367,7 +1411,10 @@ export async function getLatestReusableDocumentIntegrityRun(params: {
 				documentIntegrityValidations.id,
 			),
 		)
-		.leftJoin(user, eq(documentIntegrityValidationApprovals.approvedBy, user.id))
+		.leftJoin(
+			user,
+			eq(documentIntegrityValidationApprovals.approvedBy, user.id),
+		)
 		.where(eq(documentIntegrityValidations.validationRunId, run.id))
 		.orderBy(documentIntegrityValidations.documentType);
 	const expectedPrefix = buildUploadPrefix(
@@ -1404,14 +1451,14 @@ export async function getLatestReusableDocumentIntegrityRun(params: {
 				validatedAt: run.completedAt ?? run.startedAt,
 				manualApproval:
 					validation.manualApprovalId && validation.manualApprovedAt
-					? {
-							id: validation.manualApprovalId,
-							reason: validation.manualApprovalReason ?? "",
-							approvedAt: validation.manualApprovedAt,
-							approvedByName: validation.manualApprovedByName ?? "",
-							approvedByEmail: validation.manualApprovedByEmail ?? "",
-						}
-					: null,
+						? {
+								id: validation.manualApprovalId,
+								reason: validation.manualApprovalReason ?? "",
+								approvedAt: validation.manualApprovedAt,
+								approvedByName: validation.manualApprovedByName ?? "",
+								approvedByEmail: validation.manualApprovedByEmail ?? "",
+							}
+						: null,
 			},
 		})),
 	};
@@ -1699,15 +1746,16 @@ export async function getDocumentIntegrityValidationGroup(params: {
 					(signal) => signal.code !== "identidad_comparada",
 				),
 				positiveChecks,
-				manualApproval: manualApprovalId && manualApprovedAt
-					? {
-							id: manualApprovalId,
-							reason: manualApprovalReason ?? "",
-							approvedAt: manualApprovedAt,
-							approvedByName: manualApprovedByName ?? "",
-							approvedByEmail: manualApprovedByEmail ?? "",
-						}
-					: null,
+				manualApproval:
+					manualApprovalId && manualApprovedAt
+						? {
+								id: manualApprovalId,
+								reason: manualApprovalReason ?? "",
+								approvedAt: manualApprovedAt,
+								approvedByName: manualApprovedByName ?? "",
+								approvedByEmail: manualApprovedByEmail ?? "",
+							}
+						: null,
 				signedUrl: signablePrefixes.some((prefix) =>
 					documentFilePath.startsWith(prefix),
 				)

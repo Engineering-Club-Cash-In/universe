@@ -11,7 +11,13 @@ import {
 
 export const MAX_PDF_SIZE_BYTES = 20 * 1024 * 1024;
 export const MAX_PDF_PAGES = 200;
+// Cooperativo: se consulta entre etapas. PDFDocument.load() corre antes del
+// primer chequeo y puede excederlo.
 export const PARSE_BUDGET_MS = 8_000;
+
+// Techo pesimista por documento para dimensionar esperas. inspectPdf no lo
+// impone.
+export const MAX_PDF_PARSE_LEASE_MS = 15_000;
 export const MAX_DECOMPRESSED_PDF_CONTENT_BYTES = 32 * 1024 * 1024;
 
 export interface PdfByteScan {
@@ -236,10 +242,7 @@ export function inflatePdfStreamBounded(
 	}
 }
 
-function decodeStream(
-	stream: PDFRawStream,
-	budget: PdfContentBudget,
-): string {
+function decodeStream(stream: PDFRawStream, budget: PdfContentBudget): string {
 	const raw = Buffer.from(stream.contents);
 	const filter = stream.dict.get(PDFName.of("Filter"));
 	const filters =

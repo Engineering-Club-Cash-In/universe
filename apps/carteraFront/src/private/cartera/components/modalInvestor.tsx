@@ -155,7 +155,15 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
       // Llave siempre presente: vacío = borrar. Es seguro en ambos modos porque
       // la creación estricta garantiza que el alta jamás escribe sobre otra fila.
       // Sin "¿Es empresa?" marcado no se manda nada del representante (null).
-      dpi_rep_legal: valorRepLegalAEnviar(esEmpresa, data.dpi_rep_legal),
+      // Solo borra si ANTES era empresa. Sin esto, editar cualquier campo de
+      // quien es su propio representante le vaciaba el `dpi_rep_legal`.
+      dpi_rep_legal: valorRepLegalAEnviar(esEmpresa, data.dpi_rep_legal, {
+        borrarSiNoEsEmpresa: requiereConfirmacionBorrado(
+          repLegalOriginal,
+          esEmpresa,
+          initialData?.dpi
+        ),
+      }),
       dpi: data.dpi ? Number(data.dpi) : null,
       banco: data.banco ? Number(data.banco) : null,
       monto_reinversion: data.monto_reinversion ? Number(data.monto_reinversion) : 0,
@@ -600,7 +608,14 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
               dpi: currentFormData.dpi ? Number(currentFormData.dpi) : null,
               dpi_rep_legal: valorRepLegalAEnviar(
                 esEmpresa,
-                currentFormData.dpi_rep_legal
+                currentFormData.dpi_rep_legal,
+                {
+                  borrarSiNoEsEmpresa: requiereConfirmacionBorrado(
+                    repLegalOriginal,
+                    esEmpresa,
+                    initialData?.dpi
+                  ),
+                }
               ),
               banco: currentFormData.banco ? Number(currentFormData.banco) : null,
               monto_reinversion: currentFormData.monto_reinversion ? Number(currentFormData.monto_reinversion) : 0,

@@ -1516,6 +1516,21 @@ export async function getDocumentIntegrityStatuses(params: {
 			opportunityDocumentId: documentIntegrityValidations.opportunityDocumentId,
 			documentType: documentIntegrityValidations.documentType,
 			autoResult: documentIntegrityValidations.autoResult,
+			isCurrentCompletedRun: sql<boolean>`(
+				${documentIntegrityValidationRuns.status} = 'completed'
+				and ${documentIntegrityValidationRuns.id} = (
+					select current_run.id
+					from document_integrity_validation_runs current_run
+					where current_run.opportunity_id = ${params.opportunityId}
+						and current_run.attempt_number > coalesce((
+							select max(current_reset.reset_after_attempt_number)
+							from document_integrity_validation_resets current_reset
+							where current_reset.opportunity_id = ${params.opportunityId}
+						), 0)
+					order by current_run.attempt_number desc
+					limit 1
+				)
+			)`,
 			validatedAt: sql<Date>`coalesce(${documentIntegrityValidationRuns.completedAt}, ${documentIntegrityValidationRuns.startedAt})`,
 			documentFilePath: documentIntegrityValidations.documentFilePath,
 			manualApprovalId: documentIntegrityValidationApprovals.id,
@@ -1560,6 +1575,7 @@ export async function getDocumentIntegrityStatuses(params: {
 		manuallyApproved: !!row.manualApprovalId,
 		validatedAt: row.validatedAt,
 		isStale:
+			!row.isCurrentCompletedRun ||
 			currentPaths.get(row.opportunityDocumentId ?? "") !==
 			row.documentFilePath,
 		signalCount: row.signalCount,

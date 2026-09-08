@@ -23,15 +23,21 @@ export interface FilaLiquidacion {
   /**
    * DPI de la fila que se liquida (`dpi`, bigint: nunca trae ceros a la
    * izquierda). Solo sirve para reconocer al que se representa a sí mismo.
+   *
+   * OPCIONAL a propósito, y no para que compilen las pruebas: ausente y `null`
+   * significan lo mismo acá —"no sé quién es"— y `normalizarDpiParaComparar`
+   * devuelve `null` para los dos. Un DPI que falta no cambia el destinatario,
+   * solo impide reconocer la autorrepresentación, que es exactamente lo que la
+   * regla hace con `null`.
    */
-  dpi: number | string | null;
+  dpi?: number | string | null;
 }
 
 export interface RepresentanteLiquidacion {
   nombre: string;
   email: string | null;
   /** DPI de la fila del representante, para compararlo con el de la entidad. */
-  dpi: number | string | null;
+  dpi?: number | string | null;
 }
 
 export interface DestinatarioLiquidacion {

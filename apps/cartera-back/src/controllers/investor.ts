@@ -4791,7 +4791,20 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
           );
 
           // Enviar correo (best-effort)
+          //
+          // El guard se ENSANCHÓ a propósito: antes era
+          // `if (inversionista.email && excelBuffer)`, así que una fila sin
+          // correo capturado no le llegaba a nadie. Ahora, si su representante
+          // tiene buzón, sale por ahí. Está fijado en
+          // destinatarioLiquidacion.test.ts ("una fila sin correo propio SÍ se
+          // envía...") para que el aumento de volumen no vuelva a ser
+          // accidental, y se registra aparte para que se vea en los logs.
           if (destinoCorreo.email && excelBuffer) {
+            if (!inversionista.email && destinoCorreo.via === "representante") {
+              console.log(
+                `  ➕ El inversionista ${inversionista.nombre_inversionista} (${inv_id}) no tiene correo propio: esta liquidación antes no se enviaba y ahora sale al buzón de su representante legal.`
+              );
+            }
             console.log(
               `  📧 Preparando envío de correo para ${destinoCorreo.email} (vía: ${destinoCorreo.via}, motivo: ${destinoCorreo.motivo}, entidad: ${inversionista.nombre_inversionista})...`
             );

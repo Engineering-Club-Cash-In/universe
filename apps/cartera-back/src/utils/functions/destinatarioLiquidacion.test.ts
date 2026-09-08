@@ -118,6 +118,22 @@ describe("destinatarioDeLiquidacion", () => {
     expect(destino.motivo).toBe("representante_con_correo");
   });
 
+  it("una fila sin correo propio SÍ se envía si el representante tiene buzón", () => {
+    // AUMENTO DE VOLUMEN DELIBERADO, fijado acá para que no se cuele sin
+    // querer. El guard de envío era `if (inversionista.email && excelBuffer)`:
+    // una sociedad sin correo capturado no le llegaba a NADIE. Ahora sale por
+    // el buzón del representante. Es la mejora, no un efecto colateral: esa
+    // liquidación antes se perdía en silencio.
+    const destino = destinatarioDeLiquidacion(
+      { nombre: "SOCIEDAD SIN CORREO", email: null },
+      { nombre: "Rep Legal", email: "rep@ejemplo.com" },
+    );
+
+    expect(destino.email).toBe("rep@ejemplo.com");
+    expect(destino.via).toBe("representante");
+    expect(destino.motivo).toBe("representante_con_correo");
+  });
+
   it("una fila sin correo y sin representante utilizable queda sin destinatario", () => {
     const destino = destinatarioDeLiquidacion(
       { nombre: "SIN CORREO", email: "   " },

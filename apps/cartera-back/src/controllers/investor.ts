@@ -34,7 +34,7 @@ import {
   statusCreditoInversionistaEspejoEnum,
 } from "../database/db/schema";
 import { getSignedDocumentUrl } from "../utils/functions/uploadsFiles";
-import { normalizarDpiParaComparar } from "../utils/functions/provisionamientoPortal";
+import { normalizarDpiParaComparar } from "../utils/functions/normalizarDpi";
 import { buscarRepresentanteEnCartera } from "../utils/functions/buscarRepresentante";
 import { destinatarioDeLiquidacion } from "../utils/functions/destinatarioLiquidacion";
 import { calcularAjusteCompras } from "../utils/comprasAjuste";

@@ -13,7 +13,7 @@
  * puede ejercitar en una prueba. Aquí sí.
  */
 
-import { normalizarDpiParaComparar } from "./provisionamientoPortal";
+import { normalizarDpiParaComparar } from "./normalizarDpi";
 
 export type ViaDeEnvioLiquidacion = "fila" | "representante";
 

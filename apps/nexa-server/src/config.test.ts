@@ -161,4 +161,10 @@ describe("loadConfig", () => {
       expect(() => loadConfig({ ...baseEnv, [name]: value })).toThrow();
     }
   });
+
+  it("configura un intervalo positivo compartido por los workers", () => {
+    expect(loadConfig(baseEnv).workerIntervalSeconds).toBe(1);
+    expect(loadConfig({ ...baseEnv, WORKER_INTERVAL_SECONDS: "3" }).workerIntervalSeconds).toBe(3);
+    expect(() => loadConfig({ ...baseEnv, WORKER_INTERVAL_SECONDS: "0" })).toThrow();
+  });
 });

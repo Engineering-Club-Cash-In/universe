@@ -323,6 +323,15 @@ function storedReviewStatus(value: unknown): "APPROVED" | "REJECTED" {
 export class PollRunRepository {
   constructor(private readonly db: NexaDb) {}
 
+  async runAsLeader<T>(callback: () => Promise<T>) {
+    return this.db.transaction(async (tx) => {
+      const lock = await tx.execute<{ acquired: boolean }>(sql`
+        SELECT pg_try_advisory_xact_lock(hashtextextended('nexa-payment-poll', 0)) AS acquired
+      `);
+      return lock.rows[0]?.acquired ? callback() : null;
+    });
+  }
+
   async run<T>(date: string, callback: () => Promise<T & { found: number; created: number; applied: number; rejected: number; skipped: number; failed: number }>) {
     const [run] = await this.db.insert(nexaPollRuns).values({ date, status: "RUNNING" }).returning();
     try {
@@ -339,7 +348,7 @@ export class PollRunRepository {
       }).where(eq(nexaPollRuns.id, run.id));
       return result;
     } catch (error) {
-      await this.db.update(nexaPollRuns).set({ status: "FAILED", error: error instanceof Error ? error.message : String(error), finishedAt: new Date() }).where(eq(nexaPollRuns.id, run.id));
+      await this.db.update(nexaPollRuns).set({ status: "FAILED", error: "polling_failed", finishedAt: new Date() }).where(eq(nexaPollRuns.id, run.id));
       throw error;
     }
   }

@@ -59,8 +59,12 @@ export interface CuotaConvenioUI {
 interface ConvenioModalProps {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
-	numeroSifco: string;
-	casoCobroId?: string | null;
+	/**
+	 * Caso de cobro: es la LLAVE DE ACCESO del procedure, no un extra. El
+	 * servidor verifica que el asesor tenga el caso y resuelve el crédito
+	 * desde ahí — por eso el SIFCO ya no viaja en el input.
+	 */
+	casoCobroId: string;
 	clienteNombre: string;
 	/** Cuotas PENDIENTES del crédito (no pagadas, no en validación). */
 	cuotas: CuotaConvenioUI[];
@@ -97,7 +101,6 @@ const Q = (n: number) =>
 export function ConvenioModal({
 	open,
 	onOpenChange,
-	numeroSifco,
 	casoCobroId,
 	clienteNombre,
 	cuotas,
@@ -171,8 +174,7 @@ export function ConvenioModal({
 	const crear = useMutation({
 		mutationFn: async (): Promise<ResultadoConvenio> =>
 			(await client.crearConvenioDesdeFicha({
-				numeroSifco,
-				casoCobroId: casoCobroId ?? undefined,
+				casoCobroId,
 				cuotaIds: seleccion,
 				numeroMeses: meses,
 				motivo: motivo.trim(),

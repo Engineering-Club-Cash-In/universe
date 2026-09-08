@@ -2744,8 +2744,15 @@ export const cobrosRouter = {
 	crearConvenioDesdeFicha: cobrosProcedure
 		.input(
 			z.object({
-				numeroSifco: z.string().min(1).max(100),
-				casoCobroId: z.string().uuid().optional(),
+				// El caso es OBLIGATORIO y es la llave de acceso: `cobrosProcedure`
+				// solo verifica el rol global de cobros, así que sin este gate un
+				// asesor podía crear un convenio (una operación financiera) sobre
+				// un crédito que no tiene asignado — y de paso etiquetar un caso
+				// ajeno (hallazgo de Codex, PR #1570). El SIFCO NO se recibe por
+				// input: lo resuelve el servidor desde el caso, mismo patrón que
+				// getPagaloHistorial — recibirlo dejaría pasar un caso propio con
+				// un crédito ajeno.
+				casoCobroId: z.string().uuid(),
 				cuotaIds: z.array(z.number().int().positive()).min(1).max(120),
 				numeroMeses: z.number().int().min(1).max(60),
 				motivo: z.string().trim().min(3).max(1000),
@@ -2767,6 +2774,26 @@ export const cobrosRouter = {
 				});
 			}
 
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
+
+			// El crédito sale del CASO, no del input (ver el comentario del schema).
+			const [casoDelConvenio] = await db
+				.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
+				.from(casosCobros)
+				.where(eq(casosCobros.id, input.casoCobroId))
+				.limit(1);
+			const numeroSifco = casoDelConvenio?.numeroCreditoSifco;
+			if (!numeroSifco) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"El caso no tiene un crédito de cartera asociado; no se puede crear el convenio.",
+				});
+			}
+
 			const maxMeses = leerMaxMesesConvenio();
 			if (input.numeroMeses > maxMeses) {
 				throw new ORPCError("BAD_REQUEST", {
@@ -2776,10 +2803,7 @@ export const cobrosRouter = {
 
 			// Sin cache: cuotas, mora y convenio activo tienen que ser el dato
 			// real al momento de acordar (mismo criterio que registrarPagoCompleto).
-			const credito = await carteraBackClient.getCredito(
-				input.numeroSifco,
-				false,
-			);
+			const credito = await carteraBackClient.getCredito(numeroSifco, false);
 			const statusCredit = credito.credito.statusCredit;
 			if (statusCredit === "EN_CONVENIO" || credito.convenioActivo) {
 				throw new ORPCError("CONFLICT", {
@@ -2797,7 +2821,7 @@ export const cobrosRouter = {
 			// motor de cartera; se compara por la key del catálogo, no por el
 			// número literal (ver bucketPermiteConvenio).
 			const [bucketActual, catalogo] = await Promise.all([
-				carteraBackClient.getBucketActualCredito(input.numeroSifco),
+				carteraBackClient.getBucketActualCredito(numeroSifco),
 				carteraBackClient.getBucketsCatalogo(),
 			]);
 			const gate = bucketPermiteConvenio(bucketActual?.bucket, catalogo);
@@ -2855,7 +2879,9 @@ export const cobrosRouter = {
 				});
 			}
 
-			let convenio: Awaited<ReturnType<typeof carteraBackClient.createConvenio>>;
+			let convenio: Awaited<
+				ReturnType<typeof carteraBackClient.createConvenio>
+			>;
 			try {
 				convenio = await carteraBackClient.createConvenio({
 					credit_id: credito.credito.credito_id,
@@ -2882,7 +2908,10 @@ export const cobrosRouter = {
 							"Cartera rechazó el convenio. Revisá las cuotas elegidas.",
 					});
 				}
-				console.error("[crearConvenioDesdeFicha] Error de cartera-back:", error);
+				console.error(
+					"[crearConvenioDesdeFicha] Error de cartera-back:",
+					error,
+				);
 				throw new ORPCError("INTERNAL_SERVER_ERROR", {
 					message:
 						"No se pudo crear el convenio en cartera. Intentá de nuevo; si persiste, verificá en cartera que no haya quedado creado.",
@@ -2892,28 +2921,27 @@ export const cobrosRouter = {
 			// Etiqueta propia del concepto (CB-032): el caso queda marcado
 			// "convenio" en el CRM. Best-effort — el convenio YA existe en
 			// cartera; un fallo acá no debe reportarse como fallo del convenio.
-			if (input.casoCobroId) {
-				try {
-					const [caso] = await db
-						.select({ etiquetas: casosCobros.etiquetas })
-						.from(casosCobros)
-						.where(eq(casosCobros.id, input.casoCobroId))
-						.limit(1);
-					if (caso && !(caso.etiquetas ?? []).includes("convenio")) {
-						await db
-							.update(casosCobros)
-							.set({
-								etiquetas: [...(caso.etiquetas ?? []), "convenio"],
-								updatedAt: new Date(),
-							})
-							.where(eq(casosCobros.id, input.casoCobroId));
-					}
-				} catch (error) {
-					console.warn(
-						"[crearConvenioDesdeFicha] Convenio creado pero no se pudo etiquetar el caso:",
-						error instanceof Error ? error.message : error,
-					);
+			// El caso ya pasó por assertAccesoCasoCobro arriba.
+			try {
+				const [caso] = await db
+					.select({ etiquetas: casosCobros.etiquetas })
+					.from(casosCobros)
+					.where(eq(casosCobros.id, input.casoCobroId))
+					.limit(1);
+				if (caso && !(caso.etiquetas ?? []).includes("convenio")) {
+					await db
+						.update(casosCobros)
+						.set({
+							etiquetas: [...(caso.etiquetas ?? []), "convenio"],
+							updatedAt: new Date(),
+						})
+						.where(eq(casosCobros.id, input.casoCobroId));
 				}
+			} catch (error) {
+				console.warn(
+					"[crearConvenioDesdeFicha] Convenio creado pero no se pudo etiquetar el caso:",
+					error instanceof Error ? error.message : error,
+				);
 			}
 
 			return {
@@ -4861,6 +4889,17 @@ export const cobrosRouter = {
 					fechaInicio: creditoCompleto.credito.fecha_creacion,
 					diaPagoMensual,
 					estadoContrato,
+					// Status CRUDO de cartera (ACTIVO, MOROSO, EN_CONVENIO, CAIDO…).
+					// `estadoContrato` es una simplificación con fines de display que
+					// colapsa ACTIVO/MOROSO/EN_CONVENIO en "activo", así que no sirve
+					// para decidir reglas de negocio. Lo necesita la ficha para saber
+					// que un crédito está EN_CONVENIO: cartera solo devuelve
+					// `convenioActivo` cuando el convenio tiene activo=true, y uno
+					// recién creado nace en false (lo activa conta) — sin este campo,
+					// el convenio pendiente era invisible para la ficha y el crédito
+					// aparecía como "sin bucket" en vez de "en convenio" (hallazgo de
+					// Codex, PR #1570).
+					statusCredit,
 
 					// Datos del cliente (de cartera-back o lead)
 					clienteNombre: leadInfo?.nombre || creditoCompleto.usuario.nombre,

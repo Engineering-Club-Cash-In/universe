@@ -37,13 +37,13 @@ import {
 } from "server/src/lib/gestion-temprana-b1";
 import { toast } from "sonner";
 import { ActividadBot } from "@/components/cobros/actividad-bot";
+import { ConvenioModal } from "@/components/cobros/convenio-modal";
 import { PagaloHistorial } from "@/components/cobros/pagalo-historial";
 import { PagaloLinkDialog } from "@/components/cobros/pagalo-link-dialog";
 import { Pagination } from "@/components/cobros/pagination";
 import { PromesaActivaBadge } from "@/components/cobros/promesa-activa-badge";
 import { ReferenciasView } from "@/components/cobros/ReferenciasView";
 import { SeguimientoRecurrenteModal } from "@/components/cobros/seguimiento-recurrente-modal";
-import { ConvenioModal } from "@/components/cobros/convenio-modal";
 import { ContactoModal } from "@/components/contacto-modal";
 import {
 	OpportunityDetailModal,
@@ -101,7 +101,7 @@ import {
 	inicioDelDiaGT,
 	tienePromesaActiva,
 } from "@/lib/cobros/promesa-activa";
-import { formatFechaLocal } from "@/lib/date-utils";
+import { estaVencidaGT, formatFechaLocal } from "@/lib/date-utils";
 import { ROLES } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
 
@@ -1077,15 +1077,25 @@ function RouteComponent() {
 	// a partir de B2 y sin convenio vigente. El motivo del bloqueo se muestra
 	// en el propio item del dropdown (no se esconde la opción: el asesor tiene
 	// que saber que existe y por qué hoy no aplica). El server re-valida todo.
+	//
+	// `statusCredit` (crudo de cartera) es la señal que manda, no
+	// `convenioActivo`: cartera solo devuelve ese objeto cuando el convenio
+	// tiene activo=true, y uno recién creado nace en false hasta que conta lo
+	// activa. Mirando solo `convenioActivo`, el convenio que acaba de crear
+	// este mismo flujo era invisible acá (hallazgo de Codex, PR #1570).
+	const convenioPendienteActivacion =
+		caso.statusCredit === "EN_CONVENIO" && !caso.convenioActivo;
 	const tieneConvenioVigente =
 		!!caso.convenioActivo || caso.statusCredit === "EN_CONVENIO";
-	const convenioMotivoBloqueo: string | null = tieneConvenioVigente
-		? "Este crédito ya tiene un convenio de pago vigente."
-		: bucketActual.isPending
-			? "Cargando el bucket del crédito…"
-			: !esBucketDesdeB2(bucketNumero, bucketsCatalogo.data)
-				? `Disponible a partir de B2. Este caso está en ${bucketPrefijo ?? "un bucket sin definir"}; registrá una promesa de pago.`
-				: null;
+	const convenioMotivoBloqueo: string | null = convenioPendienteActivacion
+		? "Este crédito ya tiene un convenio pendiente de activación en cartera."
+		: tieneConvenioVigente
+			? "Este crédito ya tiene un convenio de pago vigente."
+			: bucketActual.isPending
+				? "Cargando el bucket del crédito…"
+				: !esBucketDesdeB2(bucketNumero, bucketsCatalogo.data)
+					? `Disponible a partir de B2. Este caso está en ${bucketPrefijo ?? "un bucket sin definir"}; registrá una promesa de pago.`
+					: null;
 	const convenioHabilitado = convenioMotivoBloqueo === null;
 	// El cliente ORPC infiere `{}` para esta query (mismo caso que CasoDetalle).
 	const maxMesesConvenio =
@@ -1369,8 +1379,7 @@ function RouteComponent() {
 									<ConvenioModal
 										open={convenioAbierto}
 										onOpenChange={setConvenioAbierto}
-										numeroSifco={caso.numeroCreditoSifco || id}
-										casoCobroId={caso.id}
+										casoCobroId={caso.id ?? ""}
 										clienteNombre={caso.clienteNombre || ""}
 										cuotas={(cuotas as any[])
 											.filter((c: any) => c.estadoMora === "pendiente")
@@ -1379,9 +1388,13 @@ function RouteComponent() {
 												numeroCuota: c.numeroCuota,
 												fechaVencimiento: c.fechaVencimiento,
 												monto: Number(c.montoCuota ?? caso.cuotaMensual ?? 0),
-												vencida:
-													!!c.fechaVencimiento &&
-													new Date(c.fechaVencimiento) < new Date(),
+												// Días calendario GT, no `new Date(...) < new Date()`:
+												// la cuota que vence HOY es la ACTUAL, no una vencida
+												// (ver estaVencidaGT). Con la comparación ingenua se
+												// preseleccionaba sola e inflaba el convenio, y además
+												// corría la "actual" a una cuota futura, que el server
+												// rechaza (hallazgo de Codex, PR #1570).
+												vencida: estaVencidaGT(c.fechaVencimiento),
 											}))}
 										cuotaMensual={Number(caso.cuotaMensual || 0)}
 										montoMora={Number(caso.montoEnMora || 0)}

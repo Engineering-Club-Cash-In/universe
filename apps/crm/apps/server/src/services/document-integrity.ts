@@ -23,6 +23,7 @@ import {
 } from "../db/schema/crm";
 import {
 	documentIntegrityValidationApprovals,
+	documentIntegrityValidationDocuments,
 	documentIntegrityValidationResets,
 	documentIntegrityValidationRuns,
 	documentIntegrityValidations,
@@ -611,24 +612,33 @@ async function persistValidation(params: {
 		duplicates,
 		pipelineError,
 	});
-	const [saved] = await db
-		.insert(documentIntegrityValidations)
-		.values({
-			validationRunId: params.validationRunId,
-			opportunityDocumentId: params.opportunityDocumentId,
-			documentType: params.documentType,
-			documentFilePath: params.filePath,
-			contentSha256: sha256,
-			autoResult: engineResult.result,
-			autoScore: engineResult.score,
-			autoReason: engineResult.reason,
-			signals: engineResult.signals,
-			technicalFingerprint: engineResult.technicalFingerprint,
-			aiRawResponse: llm as Record<string, unknown> | null,
-			retryCount: pipelineError ? retryCount || 1 : 0,
-			errorMessage: pipelineError,
-		})
-		.returning();
+	const saved = await db.transaction(async (tx) => {
+		const [validation] = await tx
+			.insert(documentIntegrityValidations)
+			.values({
+				validationRunId: params.validationRunId,
+				documentType: params.documentType,
+				documentFilePath: params.filePath,
+				contentSha256: sha256,
+				autoResult: engineResult.result,
+				autoScore: engineResult.score,
+				autoReason: engineResult.reason,
+				signals: engineResult.signals,
+				technicalFingerprint: engineResult.technicalFingerprint,
+				aiRawResponse: llm as Record<string, unknown> | null,
+				retryCount: pipelineError ? retryCount || 1 : 0,
+				errorMessage: pipelineError,
+			})
+			.returning();
+		if (validation && params.opportunityDocumentId) {
+			await tx.insert(documentIntegrityValidationDocuments).values({
+				validationId: validation.id,
+				opportunityDocumentId: params.opportunityDocumentId,
+				linkedFilePath: params.filePath,
+			});
+		}
+		return validation;
+	});
 	return saved;
 }
 
@@ -1437,9 +1447,16 @@ export async function linkUploadedValidationsToDocuments(params: {
 }) {
 	return db.transaction(async (tx) => {
 		const linkedSourceFilePaths = new Set<string>();
+		const linksBySource = new Map<string, typeof params.links>();
 		for (const link of params.links) {
-			const sha256 = scanPdfBytes(link.buffer).sha256;
-			if (linkedSourceFilePaths.has(link.sourceFilePath)) continue;
+			const groupedLinks = linksBySource.get(link.sourceFilePath) ?? [];
+			groupedLinks.push(link);
+			linksBySource.set(link.sourceFilePath, groupedLinks);
+		}
+		for (const [sourceFilePath, links] of linksBySource) {
+			const primaryLink = links[0];
+			if (!primaryLink) continue;
+			const sha256 = scanPdfBytes(primaryLink.buffer).sha256;
 			const [candidate] = await tx
 				.select({ id: documentIntegrityValidations.id })
 				.from(documentIntegrityValidations)
@@ -1457,7 +1474,8 @@ export async function linkUploadedValidationsToDocuments(params: {
 							params.opportunityId,
 						),
 						eq(documentIntegrityValidations.contentSha256, sha256),
-						isNull(documentIntegrityValidations.opportunityDocumentId),
+						eq(documentIntegrityValidations.documentFilePath, sourceFilePath),
+						eq(documentIntegrityValidationRuns.status, "completed"),
 					),
 				)
 				.orderBy(desc(documentIntegrityValidationRuns.attemptNumber))
@@ -1466,11 +1484,17 @@ export async function linkUploadedValidationsToDocuments(params: {
 			await tx
 				.update(documentIntegrityValidations)
 				.set({
-					opportunityDocumentId: link.documentId,
-					documentFilePath: link.documentFilePath,
+					documentFilePath: primaryLink.documentFilePath,
 				})
 				.where(eq(documentIntegrityValidations.id, candidate.id));
-			linkedSourceFilePaths.add(link.sourceFilePath);
+			await tx.insert(documentIntegrityValidationDocuments).values(
+				links.map((link) => ({
+					validationId: candidate.id,
+					opportunityDocumentId: link.documentId,
+					linkedFilePath: link.documentFilePath,
+				})),
+			);
+			linkedSourceFilePaths.add(sourceFilePath);
 		}
 		return [...linkedSourceFilePaths];
 	});
@@ -1512,35 +1536,46 @@ export async function getDocumentIntegrityStatuses(params: {
 	if (bankDocuments.length === 0) return [];
 
 	const rows = await db
-		.selectDistinctOn([documentIntegrityValidations.opportunityDocumentId], {
-			opportunityDocumentId: documentIntegrityValidations.opportunityDocumentId,
-			documentType: documentIntegrityValidations.documentType,
-			autoResult: documentIntegrityValidations.autoResult,
-			isCurrentCompletedRun: sql<boolean>`(
-				${documentIntegrityValidationRuns.status} = 'completed'
-				and ${documentIntegrityValidationRuns.id} = (
-					select current_run.id
-					from document_integrity_validation_runs current_run
-					where current_run.opportunity_id = ${params.opportunityId}
-						and current_run.attempt_number > coalesce((
-							select max(current_reset.reset_after_attempt_number)
-							from document_integrity_validation_resets current_reset
-							where current_reset.opportunity_id = ${params.opportunityId}
-						), 0)
-					order by current_run.attempt_number desc
-					limit 1
-				)
-			)`,
-			validatedAt: sql<Date>`coalesce(${documentIntegrityValidationRuns.completedAt}, ${documentIntegrityValidationRuns.startedAt})`,
-			documentFilePath: documentIntegrityValidations.documentFilePath,
-			manualApprovalId: documentIntegrityValidationApprovals.id,
-			signalCount: sql<number>`(
-				select count(*)::int
-				from jsonb_array_elements(${documentIntegrityValidations.signals}) as signal
-				where signal->>'code' <> 'identidad_comparada'
-			)`,
-		})
-		.from(documentIntegrityValidations)
+		.selectDistinctOn(
+			[documentIntegrityValidationDocuments.opportunityDocumentId],
+			{
+				opportunityDocumentId:
+					documentIntegrityValidationDocuments.opportunityDocumentId,
+				documentType: documentIntegrityValidations.documentType,
+				autoResult: documentIntegrityValidations.autoResult,
+				isCurrentCompletedRun: sql<boolean>`(
+					${documentIntegrityValidationRuns.status} = 'completed'
+					and ${documentIntegrityValidationRuns.id} = (
+						select current_run.id
+						from document_integrity_validation_runs current_run
+						where current_run.opportunity_id = ${params.opportunityId}
+							and current_run.attempt_number > coalesce((
+								select max(current_reset.reset_after_attempt_number)
+								from document_integrity_validation_resets current_reset
+								where current_reset.opportunity_id = ${params.opportunityId}
+							), 0)
+						order by current_run.attempt_number desc
+						limit 1
+					)
+				)`,
+				validatedAt: sql<Date>`coalesce(${documentIntegrityValidationRuns.completedAt}, ${documentIntegrityValidationRuns.startedAt})`,
+				linkedFilePath: documentIntegrityValidationDocuments.linkedFilePath,
+				manualApprovalId: documentIntegrityValidationApprovals.id,
+				signalCount: sql<number>`(
+					select count(*)::int
+					from jsonb_array_elements(${documentIntegrityValidations.signals}) as signal
+					where signal->>'code' <> 'identidad_comparada'
+				)`,
+			},
+		)
+		.from(documentIntegrityValidationDocuments)
+		.innerJoin(
+			documentIntegrityValidations,
+			eq(
+				documentIntegrityValidationDocuments.validationId,
+				documentIntegrityValidations.id,
+			),
+		)
 		.innerJoin(
 			documentIntegrityValidationRuns,
 			eq(
@@ -1557,12 +1592,12 @@ export async function getDocumentIntegrityStatuses(params: {
 		)
 		.where(
 			inArray(
-				documentIntegrityValidations.opportunityDocumentId,
+				documentIntegrityValidationDocuments.opportunityDocumentId,
 				bankDocuments.map((document) => document.id),
 			),
 		)
 		.orderBy(
-			documentIntegrityValidations.opportunityDocumentId,
+			documentIntegrityValidationDocuments.opportunityDocumentId,
 			desc(documentIntegrityValidationRuns.attemptNumber),
 		);
 	const currentPaths = new Map(
@@ -1576,8 +1611,7 @@ export async function getDocumentIntegrityStatuses(params: {
 		validatedAt: row.validatedAt,
 		isStale:
 			!row.isCurrentCompletedRun ||
-			currentPaths.get(row.opportunityDocumentId ?? "") !==
-			row.documentFilePath,
+			currentPaths.get(row.opportunityDocumentId) !== row.linkedFilePath,
 		signalCount: row.signalCount,
 	}));
 }
@@ -1665,7 +1699,11 @@ export async function getLatestReusableDocumentIntegrityRun(params: {
 	const validations = await db
 		.select({
 			id: documentIntegrityValidations.id,
-			opportunityDocumentId: documentIntegrityValidations.opportunityDocumentId,
+			hasLinkedDocuments: sql<boolean>`exists (
+				select 1
+				from document_integrity_validation_documents linked_document
+				where linked_document.validation_id = ${documentIntegrityValidations.id}
+			)`,
 			documentType: documentIntegrityValidations.documentType,
 			filePath: documentIntegrityValidations.documentFilePath,
 			result: documentIntegrityValidations.autoResult,
@@ -1699,7 +1737,7 @@ export async function getLatestReusableDocumentIntegrityRun(params: {
 		validations.some(
 			(validation) =>
 				validation.result === "error" ||
-				validation.opportunityDocumentId !== null ||
+				validation.hasLinkedDocuments ||
 				!validation.filePath.startsWith(`${expectedPrefix}/`),
 		)
 	)
@@ -1777,7 +1815,14 @@ export async function listDocumentIntegrityValidations(params: {
 				${opportunities.title} ilike ${pattern}
 				or ${leads.firstName} ilike ${pattern}
 				or ${leads.lastName} ilike ${pattern}
-				or ${opportunityDocuments.originalName} ilike ${pattern}
+				or exists (
+					select 1
+					from document_integrity_validation_documents linked_document
+					inner join opportunity_documents linked_opportunity_document
+						on linked_opportunity_document.id = linked_document.opportunity_document_id
+					where linked_document.validation_id = ${documentIntegrityValidations.id}
+						and linked_opportunity_document.original_name ilike ${pattern}
+				)
 				or ${documentIntegrityValidations.documentFilePath} ilike ${pattern}
 			)`,
 		);
@@ -1790,7 +1835,7 @@ export async function listDocumentIntegrityValidations(params: {
 			leadFirstName: leads.firstName,
 			leadLastName: leads.lastName,
 			latestValidatedAt: sql<Date>`max(coalesce(${documentIntegrityValidationRuns.completedAt}, ${documentIntegrityValidationRuns.startedAt}))`,
-			documentCount: sql<number>`count(distinct coalesce(${documentIntegrityValidations.opportunityDocumentId}::text, ${documentIntegrityValidations.contentSha256}))::int`,
+			documentCount: sql<number>`count(distinct ${documentIntegrityValidations.id})::int`,
 			aggregateResult: sql<
 				"valido" | "observacion" | "revision_manual" | "rechazado" | "error"
 			>`case
@@ -1822,13 +1867,6 @@ export async function listDocumentIntegrityValidations(params: {
 			eq(documentIntegrityValidationRuns.opportunityId, opportunities.id),
 		)
 		.leftJoin(leads, eq(opportunities.leadId, leads.id))
-		.leftJoin(
-			opportunityDocuments,
-			eq(
-				documentIntegrityValidations.opportunityDocumentId,
-				opportunityDocuments.id,
-			),
-		)
 		.where(conditions.length ? and(...conditions) : undefined)
 		.groupBy(
 			documentIntegrityValidationRuns.opportunityId,
@@ -1930,14 +1968,28 @@ export async function getDocumentIntegrityValidationGroup(params: {
 		)
 		.orderBy(desc(documentIntegrityValidationRuns.attemptNumber))
 		.limit(1);
+	const [latestRun] = await db
+		.select({
+			id: documentIntegrityValidationRuns.id,
+			status: documentIntegrityValidationRuns.status,
+		})
+		.from(documentIntegrityValidationRuns)
+		.where(eq(documentIntegrityValidationRuns.opportunityId, opportunityId))
+		.orderBy(desc(documentIntegrityValidationRuns.attemptNumber))
+		.limit(1);
 
 	const rows = latestFinalizedRun
 		? await db
 				.select({
 					id: documentIntegrityValidations.id,
 					validationRunId: documentIntegrityValidations.validationRunId,
-					opportunityDocumentId:
-						documentIntegrityValidations.opportunityDocumentId,
+					opportunityDocumentId: sql<string | null>`(
+						select linked_document.opportunity_document_id
+						from document_integrity_validation_documents linked_document
+						where linked_document.validation_id = ${documentIntegrityValidations.id}
+						order by linked_document.opportunity_document_id
+						limit 1
+					)`,
 					documentType: documentIntegrityValidations.documentType,
 					documentFilePath: documentIntegrityValidations.documentFilePath,
 					contentSha256: documentIntegrityValidations.contentSha256,
@@ -1949,7 +2001,15 @@ export async function getDocumentIntegrityValidationGroup(params: {
 					validationSource: documentIntegrityValidationRuns.validationSource,
 					attemptNumber: documentIntegrityValidationRuns.attemptNumber,
 					validatedAt: sql<Date>`coalesce(${documentIntegrityValidationRuns.completedAt}, ${documentIntegrityValidationRuns.startedAt})`,
-					documentName: opportunityDocuments.originalName,
+					documentName: sql<string | null>`(
+						select linked_opportunity_document.original_name
+						from document_integrity_validation_documents linked_document
+						inner join opportunity_documents linked_opportunity_document
+							on linked_opportunity_document.id = linked_document.opportunity_document_id
+						where linked_document.validation_id = ${documentIntegrityValidations.id}
+						order by linked_document.opportunity_document_id
+						limit 1
+					)`,
 					manualApprovalId: documentIntegrityValidationApprovals.id,
 					manualApprovalReason: documentIntegrityValidationApprovals.reason,
 					manualApprovedAt: documentIntegrityValidationApprovals.approvedAt,
@@ -1962,13 +2022,6 @@ export async function getDocumentIntegrityValidationGroup(params: {
 					eq(
 						documentIntegrityValidations.validationRunId,
 						documentIntegrityValidationRuns.id,
-					),
-				)
-				.leftJoin(
-					opportunityDocuments,
-					eq(
-						documentIntegrityValidations.opportunityDocumentId,
-						opportunityDocuments.id,
 					),
 				)
 				.leftJoin(
@@ -2053,6 +2106,8 @@ export async function getDocumentIntegrityValidationGroup(params: {
 	const latestReset = resets.at(-1);
 	const canApproveManual =
 		latestFinalizedRun?.status === "completed" &&
+		latestRun?.status === "completed" &&
+		latestRun.id === latestFinalizedRun.id &&
 		latestFinalizedRun.attemptNumber >
 			(latestReset?.resetAfterAttemptNumber ?? 0) &&
 		!currentAttemptStatus.hasProcessingRun;

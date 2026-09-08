@@ -21,7 +21,7 @@ export const SIGNAL_WEIGHTS: Record<string, number> = {
 	pdf_protegido_no_abre: 0,
 	paginas_mixtas_texto_e_imagen: 7,
 	todas_las_paginas_rasterizadas: 4,
-	fuente_no_embebida: 3,
+	fuente_no_embebida: 0,
 	fuente_type3: 2,
 	huella_coincide_con_emisor: -2,
 	huella_no_coincide_con_emisor: 3,

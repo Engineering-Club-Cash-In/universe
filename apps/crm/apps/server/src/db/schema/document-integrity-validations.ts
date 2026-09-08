@@ -6,6 +6,7 @@ import {
 	jsonb,
 	pgEnum,
 	pgTable,
+	primaryKey,
 	text,
 	timestamp,
 	uniqueIndex,
@@ -96,10 +97,6 @@ export const documentIntegrityValidations = pgTable(
 			.references(() => documentIntegrityValidationRuns.id, {
 				onDelete: "cascade",
 			}),
-		opportunityDocumentId: uuid("opportunity_document_id").references(
-			() => opportunityDocuments.id,
-			{ onDelete: "set null" },
-		),
 		documentType: documentTypeEnum("document_type").notNull(),
 
 		documentFilePath: text("document_file_path").notNull(),
@@ -123,13 +120,38 @@ export const documentIntegrityValidations = pgTable(
 	},
 	(table) => [
 		index("doc_integrity_val_run_idx").on(table.validationRunId),
-		index("doc_integrity_val_opp_doc_idx").on(table.opportunityDocumentId),
 		index("doc_integrity_val_result_idx").on(table.autoResult),
 		index("doc_integrity_val_sha_idx").on(table.contentSha256),
 		index("doc_integrity_val_identifier_normalized_idx").on(
 			sql`upper(regexp_replace(coalesce(${table.aiRawResponse}->>'identificador_detectado', ''), '[^A-Za-z0-9]', '', 'g'))`,
 		),
 		index("doc_integrity_val_signals_gin_idx").using("gin", table.signals),
+	],
+);
+
+export const documentIntegrityValidationDocuments = pgTable(
+	"document_integrity_validation_documents",
+	{
+		validationId: uuid("validation_id")
+			.notNull()
+			.references(() => documentIntegrityValidations.id, {
+				onDelete: "cascade",
+			}),
+		opportunityDocumentId: uuid("opportunity_document_id")
+			.notNull()
+			.references(() => opportunityDocuments.id, {
+				onDelete: "cascade",
+			}),
+		linkedFilePath: text("linked_file_path").notNull(),
+	},
+	(table) => [
+		primaryKey({
+			name: "doc_integrity_val_document_pk",
+			columns: [table.validationId, table.opportunityDocumentId],
+		}),
+		index("doc_integrity_val_document_opp_doc_idx").on(
+			table.opportunityDocumentId,
+		),
 	],
 );
 

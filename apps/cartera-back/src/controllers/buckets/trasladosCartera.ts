@@ -331,6 +331,7 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
       bucket: a.bucket,
       prioridad: a.prioridad,
       estado_anterior: a.estadoActual,
+      compromiso_anterior: a.prioridad === 0,
     }));
     // Misma definición de bucket que construirPlan. Además del dueño y estado,
     // el lote debe seguir viendo el bucket que previsualizó: una edición manual
@@ -340,10 +341,11 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
       actualizados: number;
       historiales: number;
       detalles: number;
+      restantes_origen: number;
     }>(sql`
       WITH asignaciones AS (
         SELECT * FROM jsonb_to_recordset(${JSON.stringify(detalles)}::jsonb)
-          AS a(credito_id integer, asesor_anterior_id integer, asesor_nuevo_id integer, bucket integer, prioridad integer, estado_anterior text)
+          AS a(credito_id integer, asesor_anterior_id integer, asesor_nuevo_id integer, bucket integer, prioridad integer, estado_anterior text, compromiso_anterior boolean)
       ), actualizados AS (
         UPDATE ${schema}.creditos c SET asesor_id = a.asesor_nuevo_id
         FROM asignaciones a
@@ -351,6 +353,14 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
         WHERE c.credito_id = a.credito_id
           AND c.asesor_id IS NOT DISTINCT FROM a.asesor_anterior_id
           AND c."statusCredit" IS NOT DISTINCT FROM a.estado_anterior
+          AND (
+            EXISTS (
+              SELECT 1 FROM ${schema}.promesas_pago_espejo p
+              WHERE p.credito_id = c.credito_id
+                AND p.activa
+                AND p.fecha_promesa >= (now() AT TIME ZONE 'America/Guatemala')::date
+            )
+          ) IS NOT DISTINCT FROM a.compromiso_anterior
           AND (
             CASE WHEN c."statusCredit" IN (${fuera}) THEN NULL
             ELSE ${bucketActualSql("c", "m")}
@@ -380,15 +390,22 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
         SELECT ${row.id}::uuid, credito_id, asesor_anterior_id, asesor_nuevo_id, bucket, prioridad
         FROM actualizados
         RETURNING credito_id
+      ), restantes_origen AS (
+        SELECT c.credito_id
+        FROM ${schema}.creditos c
+        WHERE c.asesor_id = ${row.solicitud.asesorOrigenId}
+        EXCEPT
+        SELECT credito_id FROM actualizados
       )
       SELECT
         (SELECT count(*)::int FROM actualizados) AS actualizados,
         (SELECT count(*)::int FROM historiales) AS historiales,
-        (SELECT count(*)::int FROM detalles_insertados) AS detalles
+        (SELECT count(*)::int FROM detalles_insertados) AS detalles,
+        (SELECT count(*)::int FROM restantes_origen) AS restantes_origen
     `);
     const esperados = plan.asignaciones.length;
     const conteos = escrito.rows[0];
-    if (!conteos || conteos.actualizados !== esperados || conteos.historiales !== esperados || conteos.detalles !== esperados) {
+    if (!conteos || conteos.actualizados !== esperados || conteos.historiales !== esperados || conteos.detalles !== esperados || conteos.restantes_origen !== 0) {
       throw new TrasladoConflict("El propietario cambió durante la operación");
     }
     // `idempotency_key` es UNIQUE global: la misma clave reusada contra OTRA

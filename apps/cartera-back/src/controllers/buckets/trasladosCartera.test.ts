@@ -18,6 +18,7 @@ let queries: string[];
 let updateMatches: boolean;
 let actorRegistrado: boolean;
 let lockTimeout: boolean;
+let quedanCreditosEnOrigen: boolean;
 const executor = {
   async execute(statement: SQL) {
     const { sql: query, params } = dialect.sqlToQuery(statement);
@@ -31,8 +32,8 @@ const executor = {
       const serializadas = params.find((param) => typeof param === "string" && param.startsWith("["));
       const cantidad = JSON.parse(serializadas as string).length;
       return { rows: updateMatches
-        ? [{ actualizados: cantidad, historiales: cantidad, detalles: cantidad }]
-        : [{ actualizados: 0, historiales: 0, detalles: 0 }] };
+        ? [{ actualizados: cantidad, historiales: cantidad, detalles: cantidad, restantes_origen: quedanCreditosEnOrigen ? 1 : 0 }]
+        : [{ actualizados: 0, historiales: 0, detalles: 0, restantes_origen: 0 }] };
     }
     // Actor registrado (CB-114): por defecto existe; `actorRegistrado = false`
     // simula un correo que no está en platform_users o está inactivo.
@@ -67,7 +68,7 @@ const { previsualizarTrasladoCarteraMasivo, confirmarTrasladoCarteraMasivo, soli
 const entrada = { asesorOrigenId: 10, modo: "redistribucion", motivo: "Renuncia", actorEmail: "supervisor@example.com" };
 
 beforeEach(() => {
-  saved = undefined; writes = []; queries = []; updateMatches = true; actorRegistrado = true; lockTimeout = false;
+  saved = undefined; writes = []; queries = []; updateMatches = true; actorRegistrado = true; lockTimeout = false; quedanCreditosEnOrigen = false;
   creditos = [10, 20, 20, 20, 20].map((asesor_id, i) => ({ credito_id: i + 1, sifco: `S${i + 1}`, asesor_id, bucket: 1, compromiso: i === 0 }));
 });
 
@@ -157,7 +158,10 @@ test("confirmación espera los locks de jobs y escribe lote sin bloquear tablas 
   expect(lockDestinos).toBeGreaterThan(lockCreditos);
   expect(lockDestinos).toBeLessThan(escritura);
   expect(queries.slice(lockCreditos + 1).some((q) => q.includes("SELECT c.credito_id"))).toBe(true);
-  expect(writes[0]).toContain("estado_anterior text");
+  expect(writes[0]).toContain("estado_anterior text, compromiso_anterior boolean");
+  expect(writes[0]).toContain("promesas_pago_espejo p");
+  expect(writes[0]).toContain("IS NOT DISTINCT FROM a.compromiso_anterior");
+  expect(writes[0]).toContain("restantes_origen AS");
   expect(writes[0]).toContain('c."statusCredit" IS NOT DISTINCT FROM a.estado_anterior');
   expect(writes[0]).toContain("LEFT JOIN cartera_cobros2.moras_credito m");
   expect(writes[0]).toContain("m.cuotas_atrasadas");
@@ -190,6 +194,17 @@ test("CAS que no afecta crédito revierte lote y no confirma operación", async 
   const p = await previsualizarTrasladoCarteraMasivo(entrada);
   updateMatches = false;
   await expect(confirmarTrasladoCarteraMasivo({ previewId: p.previewId, idempotencyKey: crypto.randomUUID(), actorEmail: entrada.actorEmail })).rejects.toThrow("propietario cambió");
+  expect(writes.some(q => q.includes("SET estado = 'confirmada'"))).toBe(false);
+});
+
+test("rechaza confirmación si entra un crédito nuevo al asesor origen", async () => {
+  const p = await previsualizarTrasladoCarteraMasivo(entrada);
+  quedanCreditosEnOrigen = true;
+  await expect(confirmarTrasladoCarteraMasivo({
+    previewId: p.previewId,
+    idempotencyKey: crypto.randomUUID(),
+    actorEmail: entrada.actorEmail,
+  })).rejects.toThrow("propietario cambió");
   expect(writes.some(q => q.includes("SET estado = 'confirmada'"))).toBe(false);
 });
 

@@ -26,11 +26,30 @@ export const CACHE_CATALOGO = {
 
 /**
  * Qué entidades puede operar la persona. Solo cambia cuando el CRM le da de
- * alta una sociedad nueva, y para eso ya hay un minuto de caché en el servidor.
+ * alta una sociedad nueva.
+ *
+ * EL MINUTO NO ES UN NÚMERO SUELTO: es el TTL que ya tiene la resolución en
+ * auth-google. Poner aquí más que allá no ahorra ninguna llamada —la de más ya
+ * la contesta el servidor de su propio caché— y sí alarga lo que se tarda en
+ * ver una sociedad nueva. Con cinco minutos, una recarga hecha dentro del TTL
+ * del servidor se traía la lista vieja y la daba por fresca otros cinco.
+ *
+ * Y refresca al volver a la pestaña, que es lo único que rompe la asimetría de
+ * este dato. Perder una entidad se cura solo: la petición siguiente contesta
+ * 403 y el manejador global invalida esta consulta. GANAR una no dispara
+ * ningún 403 —nada falla— así que sin esto la sociedad recién dada de alta no
+ * aparecía hasta que la pantalla se desmontara con el caché ya vencido, o sea
+ * nunca si la persona se queda mirando. Y el momento en que vuelve a la
+ * pestaña es exactamente cuando le acaban de decir "listo, ya te la agregué".
+ *
+ * Se eligió el foco y no un `refetchInterval` a propósito: esto le pasa a una
+ * persona cada varios meses, y sondear cada minuto en todos los portales
+ * abiertos para siempre es mucho tráfico por un aviso que el foco ya da gratis.
  */
 export const CACHE_ENTIDADES = {
-  staleTime: 5 * MINUTO,
+  staleTime: 1 * MINUTO,
   gcTime: 30 * MINUTO,
+  refetchOnWindowFocus: true,
 } as const;
 
 /** Ficha de la entidad: perfil y documentos. Se mueve de vez en cuando. */

@@ -12,7 +12,7 @@ import {
   type ResumenProvisionamiento,
 } from "../utils/functions/resumenProvisionamiento";
 import { INVESTOR_STATUS_CHANGE_RECIPIENTS } from "../utils/functions/investorStatusRecipients";
-import { sendPlainEmail } from "@cci/email";
+import { getEmailDeliveryMode, sendPlainEmail } from "@cci/email";
 
 /**
  * Reconciliación diaria del acceso al portal: DETECTA, no ejecuta.
@@ -76,6 +76,12 @@ export interface OpcionesJob {
     subject: string;
     html: string;
   }) => Promise<{ success?: boolean; error?: unknown } | void>;
+  /**
+   * Cómo está mandando correo este proceso. Inyectable solo para poder probar
+   * el desvío sin tocar `process.env`, que `@cci/email` lee una sola vez al
+   * cargar el módulo.
+   */
+  modoEnvio?: () => { server: string; redirige: boolean; destinatarioUnico: string | null };
 }
 
 /** Envío por defecto del resumen: el mismo canal de los avisos de inversionista. */
@@ -191,6 +197,27 @@ export const provisionarCuentasPortal = async (
       );
       throw new Error(
         `Falló el envío del resumen de provisionamiento: ${JSON.stringify(envio.error)}`,
+      );
+    }
+
+    // Un `success: true` no significa que haya llegado a quien tenía que
+    // llegar. `@cci/email` desvía TODO a una sola bandeja cuando `SERVER` no es
+    // "PROD" —y el default sin la variable es "DEV"—, así que un despliegue de
+    // producción al que se le olvidó `SERVER` mandaba este resumen a la bandeja
+    // de pruebas, devolvía éxito y dejaba la corrida como `completed`. Este es
+    // el ÚNICO camino por el que alguien se entera de las cuentas pendientes:
+    // perderlo en silencio es peor que no mandarlo.
+    //
+    // Se comprueba DESPUÉS de enviar a propósito: en un entorno de pruebas el
+    // correo igual sirve para ver el resumen; lo que no puede es pasar por
+    // entregado.
+    const modo = (opciones.modoEnvio ?? getEmailDeliveryMode)();
+    if (modo.redirige) {
+      console.error(
+        `❌ [provisionarCuentasPortal] El resumen se desvió a ${modo.destinatarioUnico} porque SERVER=${modo.server}.`,
+      );
+      throw new Error(
+        `El resumen de provisionamiento no llegó a sus destinatarios: se desvió a ${modo.destinatarioUnico} porque SERVER=${modo.server}. Configurá SERVER=PROD en cartera-back.`,
       );
     }
   }

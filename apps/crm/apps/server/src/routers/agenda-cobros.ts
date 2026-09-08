@@ -106,14 +106,22 @@ export const agendaCobrosRouter = {
 					),
 				)
 				.limit(1);
-			// Cobertura cancelada HOY MISMO: sin esto, un titular cuya cobertura
-			// se cancela a mitad de día desaparece de golpe de `asesoresFuente` y
-			// el suplente pierde de su vista, sin aviso, el crédito que ya había
-			// trabajado esta mañana (antes de la cancelación) — el cierre
-			// nocturno sí lo acredita igual (mismo criterio en
-			// jobs/agenda-cobros-snapshots.ts), pero la vista en vivo del propio
-			// día quedaba ciega a ese trabajo. Se sigue mostrando el resto del
-			// día; mañana, sin la cobertura vigente, ya no aparece.
+			// Solo cobertura ACTIVA decide qué agenda completa se muestra. Una
+			// cobertura cancelada hoy NO vuelve a traer al titular acá — mostrar
+			// TODA su agenda de nuevo expondría al suplente los mismos pendientes
+			// que el titular, ya sin cobertura, vuelve a ver por su cuenta (dos
+			// personas podían terminar llamando al mismo cliente).
+			const asesoresFuente = [
+				...(ausenciaPropia.length ? [] : [asesorId]),
+				...coberturas.map((c) => c.titularId),
+			];
+			// Cobertura cancelada HOY MISMO: el trabajo que el suplente YA HIZO
+			// esta mañana (antes de cancelar) no debe perderse de su propia
+			// vista — el cierre nocturno lo acredita igual (mismo criterio en
+			// jobs/agenda-cobros-snapshots.ts), pero la vista en vivo del día
+			// quedaba ciega a él. A diferencia de arriba, esto NO agrega la
+			// agenda completa del titular: más abajo se cruza contra los
+			// contactos reales del suplente para traer solo lo ya gestionado.
 			const coberturasCanceladasHoy = await db
 				.select({ titularId: coberturasAgendaCobros.titularId })
 				.from(coberturasAgendaCobros)
@@ -125,14 +133,10 @@ export const agendaCobrosRouter = {
 						gte(coberturasAgendaCobros.hasta, fecha),
 					),
 				);
-			const asesoresFuente = [
-				...(ausenciaPropia.length ? [] : [asesorId]),
-				...new Set([
-					...coberturas.map((c) => c.titularId),
-					...coberturasCanceladasHoy.map((c) => c.titularId),
-				]),
-			];
-			if (!asesoresFuente.length) {
+			const titularesCanceladosHoy = coberturasCanceladasHoy.map(
+				(c) => c.titularId,
+			);
+			if (!asesoresFuente.length && !titularesCanceladosHoy.length) {
 				return {
 					fecha,
 					page: input.page,
@@ -146,22 +150,23 @@ export const agendaCobrosRouter = {
 				eq(agendaCobrosSnapshots.fechaGt, fecha),
 				inArray(agendaCobrosSnapshots.asesorId, asesoresFuente),
 			);
+			const selectItemsBase = {
+				id: agendaCobrosSnapshotItems.id,
+				numeroCreditoSifco: agendaCobrosSnapshotItems.numeroCreditoSifco,
+				casoCobroId: agendaCobrosSnapshotItems.casoCobroId,
+				motivoAgenda: agendaCobrosSnapshotItems.motivoAgenda,
+				bucketSnapshot: agendaCobrosSnapshotItems.bucketSnapshot,
+				promesaCumplida: agendaCobrosSnapshotItems.promesaCumplida,
+				promesaCumplidaEn: agendaCobrosSnapshotItems.promesaCumplidaEn,
+				// Dueño REAL del snapshot del item (titular o el propio
+				// suplente): cerrarItemsAgenda exige
+				// contacto.realizadoPor === item.asesorId, y con cobertura
+				// ese dueño no siempre es el usuario logueado.
+				snapshotAsesorId: agendaCobrosSnapshots.asesorId,
+			};
 			const consultarItems = () =>
 				db
-					.select({
-						id: agendaCobrosSnapshotItems.id,
-						numeroCreditoSifco: agendaCobrosSnapshotItems.numeroCreditoSifco,
-						casoCobroId: agendaCobrosSnapshotItems.casoCobroId,
-						motivoAgenda: agendaCobrosSnapshotItems.motivoAgenda,
-						bucketSnapshot: agendaCobrosSnapshotItems.bucketSnapshot,
-						promesaCumplida: agendaCobrosSnapshotItems.promesaCumplida,
-						promesaCumplidaEn: agendaCobrosSnapshotItems.promesaCumplidaEn,
-						// Dueño REAL del snapshot del item (titular o el propio
-						// suplente): cerrarItemsAgenda exige
-						// contacto.realizadoPor === item.asesorId, y con cobertura
-						// ese dueño no siempre es el usuario logueado.
-						snapshotAsesorId: agendaCobrosSnapshots.asesorId,
-					})
+					.select(selectItemsBase)
 					.from(agendaCobrosSnapshotItems)
 					.innerJoin(
 						agendaCobrosSnapshots,
@@ -169,9 +174,56 @@ export const agendaCobrosRouter = {
 					)
 					.where(where)
 					.orderBy(asc(agendaCobrosSnapshotItems.numeroCreditoSifco));
+			// Items de un titular cuya cobertura se canceló HOY: a diferencia de
+			// arriba, no se trae su agenda completa (eso duplicaría exposición
+			// con el titular, que ya recuperó la suya) — solo los créditos que
+			// el SUPLENTE mismo ya contactó HOY bajo esa cobertura, para que su
+			// propio trabajo no desaparezca de su vista sin dejar rastro. La
+			// ventana de fecha es la misma que usa la query de `contactos` más
+			// abajo: sin acotarla, un contacto de días atrás (de antes de que
+			// existiera esta cobertura) también calificaría.
+			const ventanaHoy = ventanaDiaGuatemala(fecha);
+			const itemsCanceladosHoyContactados = titularesCanceladosHoy.length
+				? await db
+						.selectDistinctOn([agendaCobrosSnapshotItems.numeroCreditoSifco], {
+							...selectItemsBase,
+						})
+						.from(agendaCobrosSnapshotItems)
+						.innerJoin(
+							agendaCobrosSnapshots,
+							eq(
+								agendaCobrosSnapshotItems.snapshotId,
+								agendaCobrosSnapshots.id,
+							),
+						)
+						.innerJoin(
+							casosCobros,
+							eq(
+								casosCobros.numeroCreditoSifco,
+								agendaCobrosSnapshotItems.numeroCreditoSifco,
+							),
+						)
+						.innerJoin(
+							contactosCobros,
+							and(
+								eq(contactosCobros.casoCobroId, casosCobros.id),
+								eq(contactosCobros.realizadoPor, asesorId),
+								gte(contactosCobros.fechaContacto, ventanaHoy.desde),
+								lt(contactosCobros.fechaContacto, ventanaHoy.hasta),
+							),
+						)
+						.where(
+							and(
+								eq(agendaCobrosSnapshots.fechaGt, fecha),
+								inArray(agendaCobrosSnapshots.asesorId, titularesCanceladosHoy),
+							),
+						)
+				: [];
 			let total: number;
-			let items: Awaited<ReturnType<typeof consultarItems>>;
-			if (asesoresFuente.length > 1) {
+			let items: (Awaited<ReturnType<typeof consultarItems>>[number] & {
+				dueniosSnapshot: string[];
+			})[];
+			if (asesoresFuente.length > 1 || itemsCanceladosHoyContactados.length) {
 				// Con cobertura, titular y suplente comparten pool de bucket (lo
 				// exige crearCobertura), así que un mismo crédito SLA puede salir
 				// en AMBOS snapshots. Deduplicar en la página ya cortada no
@@ -180,12 +232,35 @@ export const agendaCobrosRouter = {
 				// problema (routers/cobros.ts): traer todo y paginar en memoria.
 				// Caso raro (solo mientras hay cobertura vigente) — sin cobertura
 				// sigue paginando en DB, sin cambio de comportamiento.
-				const todos = await consultarItems();
-				const deduplicados = [
-					...new Map(
-						todos.map((item) => [item.numeroCreditoSifco, item]),
-					).values(),
+				//
+				// FUSIONAR dueños, no descartar: si el mismo SIFCO sale en el
+				// snapshot del titular Y en el del suplente, quedarse con una
+				// fila arbitraria pierde el `snapshotAsesorId` de la otra. Si
+				// sobrevive la del suplente, un contacto ya hecho por el titular
+				// deja de matchear más abajo (`realizadoPorValidos` quedaba sin
+				// ese dueño) y el item se veía pendiente aunque ya estaba resuelto.
+				const todos = [
+					...(asesoresFuente.length ? await consultarItems() : []),
+					...itemsCanceladosHoyContactados,
 				];
+				const porSifco = new Map<
+					string,
+					Awaited<ReturnType<typeof consultarItems>>[number] & {
+						dueniosSnapshot: string[];
+					}
+				>();
+				for (const item of todos) {
+					const previo = porSifco.get(item.numeroCreditoSifco);
+					if (previo) {
+						previo.dueniosSnapshot.push(item.snapshotAsesorId);
+					} else {
+						porSifco.set(item.numeroCreditoSifco, {
+							...item,
+							dueniosSnapshot: [item.snapshotAsesorId],
+						});
+					}
+				}
+				const deduplicados = [...porSifco.values()];
 				total = deduplicados.length;
 				items = deduplicados.slice(
 					(input.page - 1) * input.perPage,
@@ -206,9 +281,13 @@ export const agendaCobrosRouter = {
 					)
 					.where(where);
 				total = totalDb;
-				items = await consultarItems()
+				const pagina = await consultarItems()
 					.limit(input.perPage)
 					.offset((input.page - 1) * input.perPage);
+				items = pagina.map((item) => ({
+					...item,
+					dueniosSnapshot: [item.snapshotAsesorId],
+				}));
 			}
 			const base = {
 				fecha,
@@ -292,18 +371,20 @@ export const agendaCobrosRouter = {
 
 			// Ventana de fecha empujada al SQL (no en JS): con miles de contactos
 			// históricos por caso, traer todo y filtrar en memoria no escala.
-			const { desde, hasta } = ventanaDiaGuatemala(fecha);
+			const { desde, hasta } = ventanaHoy;
 			// numeroCreditoSifco del caso: mismo fallback de matching que usa el
 			// cierre nocturno (contactoPerteneceAlItem) — un item con
 			// casoCobroId=null (sin caso CRM vinculado) solo puede matchear por
 			// SIFCO, nunca por caso.
-			// Mismos dueños que `asesoresFuente` arriba (que ya incluye
-			// coberturas canceladas hoy): si el titular ya gestionó un crédito
-			// antes de que arrancara/se registrara la cobertura, el suplente debe
-			// verlo atendido, no pendiente — sin esto el filtro de snapshots ya
-			// traía sus items, pero el de contactos solo miraba al suplente y el
-			// trabajo del titular quedaba invisible acá (riesgo de llamar dos
-			// veces al mismo cliente).
+			// Mismos dueños que `asesoresFuente` arriba: si el titular ya gestionó
+			// un crédito antes de que arrancara/se registrara la cobertura, el
+			// suplente debe verlo atendido, no pendiente — sin esto el filtro de
+			// snapshots ya traía sus items, pero el de contactos solo miraba al
+			// suplente y el trabajo del titular quedaba invisible acá (riesgo de
+			// llamar dos veces al mismo cliente). El contacto del propio suplente
+			// sobre un item de cobertura cancelada hoy también entra acá, porque
+			// `asesorId` (él mismo) sigue en `asesoresFuente` — es lo único que
+			// hace falta para que matchee contra `realizadoPorValidos` más abajo.
 			const contactos = await db
 				.select({
 					id: contactosCobros.id,
@@ -327,7 +408,7 @@ export const agendaCobrosRouter = {
 			const cerrados = cerrarItemsAgenda(
 				fecha,
 				items.map((item) => ({
-					asesorId: item.snapshotAsesorId,
+					asesorId: item.dueniosSnapshot[0],
 					asesorNombre: "",
 					numeroCreditoSifco: item.numeroCreditoSifco,
 					casoCobroId: item.casoCobroId,
@@ -335,13 +416,15 @@ export const agendaCobrosRouter = {
 					motivoAgenda: item.motivoAgenda as MotivoAgenda,
 					// El usuario logueado es el único suplente posible en esta vista
 					// (es su propia agenda). Si el item es de un titular que cubre,
-					// el suplente (él mismo) también puede haberlo cerrado — sin esto
-					// contactoPerteneceAlItem exige EXACTO snapshotAsesorId y el
-					// trabajo del suplente quedaba pendiente igual.
-					realizadoPorValidos:
-						item.snapshotAsesorId === asesorId
-							? undefined
-							: [item.snapshotAsesorId, asesorId],
+					// el suplente (él mismo) también puede haberlo cerrado — y si el
+					// mismo SIFCO salió en AMBOS snapshots (pool compartido), el
+					// dedupe de arriba fusionó los dos dueños en `dueniosSnapshot` en
+					// vez de quedarse con uno arbitrario. Sin esto, un contacto ya
+					// hecho por el dueño descartado en el dedupe dejaba de matchear y
+					// el item se veía pendiente aunque ya estaba resuelto.
+					realizadoPorValidos: [
+						...new Set([...item.dueniosSnapshot, asesorId]),
+					],
 				})),
 				contactos,
 			);
@@ -352,7 +435,11 @@ export const agendaCobrosRouter = {
 			return {
 				...base,
 				items: items.map((item) => {
-					const { snapshotAsesorId: _snapshotAsesorId, ...itemPublico } = item;
+					const {
+						snapshotAsesorId: _snapshotAsesorId,
+						dueniosSnapshot: _dueniosSnapshot,
+						...itemPublico
+					} = item;
 					const cerrado = cerradoPorSifco.get(item.numeroCreditoSifco);
 					const contratoId = item.casoCobroId
 						? contratoIdPorCasoCobroId.get(item.casoCobroId)

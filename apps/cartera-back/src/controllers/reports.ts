@@ -202,64 +202,62 @@ export function sortEstadoCuentaPayments<T extends EstadoCuentaPagoRow>(pagos: T
 }
 
 export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(pagos: T[]) {
-  let capitalRestante: Big | null = null;
+  // El saldo de cada fila se corre DENTRO de su cuota: arranca en la apertura
+  // (el cierre guardado de la cuota anterior) y le resta los abonos a capital
+  // de la cuota hasta esa fila. Así el saldo baja boleta por boleta en vez de
+  // repetir el cierre en todas las filas de una cuota pagada en parciales.
+  //
+  // Cada cuota se ancla al `total_restante` guardado de la ANTERIOR, no al
+  // saldo corrido: si los abonos de una cuota no suman su salto de saldo
+  // (~20% de las cuotas en cartera), el descuadre queda encerrado en esa
+  // cuota y la siguiente vuelve a arrancar del snapshot bueno.
+  //
+  // Antes se confiaba fila por fila en el snapshot: una fila de capital puro
+  // en MEDIO de la cuota restaba su abono de un saldo que ya venía neto y el
+  // PDF mostraba un bajón que la última fila revertía (crédito 872, cuota 33:
+  // Q24,662.55 entre dos Q25,162.55).
+  const cierreGuardado = new Map<string, Big>();
+  const abonosPorCuota = new Map<string, Big>();
+  for (const pago of pagos) {
+    const key = String(pago.numero_cuota ?? "");
+    const totalRestante = new Big(pago.total_restante || 0);
+    // Última fila de la cuota con snapshot positivo: es su saldo de cierre.
+    if (totalRestante.gt(0)) cierreGuardado.set(key, totalRestante);
+    abonosPorCuota.set(
+      key,
+      (abonosPorCuota.get(key) ?? new Big(0)).plus(pago.abono_capital || 0),
+    );
+  }
 
-  // Una fila de abono a capital puro "ya viene neta" (la sync con el Excel
-  // escribe en todos los pagos de la cuota el saldo neto de sus abonos) cuando
-  // su total_restante == saldo al inicio de la cuota − Σ abono_capital de la
-  // cuota HASTA esta fila (prefijo, en orden de pago). Con prefijo:
-  //  - un cierre de parcial normal (registerPayment hereda el total_restante
-  //    de la hermana sin restar su capital) no cumple y se le sigue restando;
-  //  - un abono agregado DESPUÉS de la sync tampoco cumple (el snapshot no lo
-  //    incluye) y se resta normal, sin invalidar a las filas ya netas.
-  // Caso 01010214106990 cuota 35: el PDF mostraba 45,434.39 en vez de 47,874.89.
   let cuotaActual: string | null = null;
-  let saldoInicioCuota: Big | null = null;
-  let abonosAcumCuota = new Big(0);
+  let saldo = new Big(0);
 
   return pagos.map((pago) => {
-    const abonoCapital = new Big(pago.abono_capital || 0);
-    const totalRestanteFila = new Big(pago.total_restante || 0);
-    const tieneRubrosDeCuota = getEstadoCuentaOtrosRubros(pago) > 0;
-    const snapshotConfiable =
-      pago.pagado === true && tieneRubrosDeCuota && totalRestanteFila.gt(0);
-
     const key = String(pago.numero_cuota ?? "");
 
-    if (capitalRestante === null) {
-      capitalRestante = snapshotConfiable
-        ? totalRestanteFila
-        : totalRestanteFila.plus(abonoCapital);
-      // Primera cuota visible sin saldo previo: su apertura se reconstruye como
-      // snapshot + Σ abonos de la cuota (el snapshot ya es post-pago).
-      cuotaActual = key;
-      saldoInicioCuota = snapshotConfiable
-        ? totalRestanteFila.plus(
-            pagos
-              .filter((p) => String(p.numero_cuota ?? "") === key)
-              .reduce((acc, p) => acc.plus(p.abono_capital || 0), new Big(0)),
+    if (key !== cuotaActual) {
+      // La cuota 0 es el desembolso, no una cuota: su snapshot puede venir de
+      // otra tabla de amortización que la del calendario, así que NO ancla a la
+      // 1. La primera cuota real reconstruye su propia apertura y de la 2 en
+      // adelante cada una se ancla en el cierre guardado de la anterior.
+      const arrancaCadena = cuotaActual === null || cuotaActual === "0";
+      saldo = arrancaCadena
+        ? // Sin cierre previo utilizable: la apertura se reconstruye como
+          // snapshot + Σ abonos de la cuota (el snapshot ya es post-pago), así
+          // la última fila aterriza exacto en el saldo guardado.
+          (cierreGuardado.get(key) ?? new Big(0)).plus(
+            abonosPorCuota.get(key) ?? new Big(0),
           )
-        : capitalRestante;
-      abonosAcumCuota = new Big(0);
-    } else if (key !== cuotaActual) {
+        : // Si la cuota anterior no dejó snapshot usable, sigue el corrido.
+          (cierreGuardado.get(cuotaActual) ?? saldo);
       cuotaActual = key;
-      saldoInicioCuota = capitalRestante;
-      abonosAcumCuota = new Big(0);
     }
-    abonosAcumCuota = abonosAcumCuota.plus(abonoCapital);
 
-    const abonoYaRestado =
-      !snapshotConfiable &&
-      totalRestanteFila.gt(0) &&
-      totalRestanteFila.minus(saldoInicioCuota!.minus(abonosAcumCuota)).abs().lte(0.05);
-
-    capitalRestante = snapshotConfiable || abonoYaRestado
-      ? totalRestanteFila
-      : capitalRestante.minus(abonoCapital);
+    saldo = saldo.minus(pago.abono_capital || 0);
 
     return {
       ...pago,
-      total_restante: capitalRestante.toFixed(2),
+      total_restante: saldo.toFixed(2),
     };
   });
 }

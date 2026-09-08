@@ -5,6 +5,7 @@ import { createPaymentTokenWebhookRouter } from "./payment-token";
 describe("payment token webhook", () => {
   test("persists once without processing or reviewing the payment", async () => {
     const persisted: TokenTransaction[] = [];
+    const logs: string[] = [];
     const router = createPaymentTokenWebhookRouter({
       flowId: "flow-id",
       bearerToken: "webhook-token",
@@ -20,6 +21,7 @@ describe("payment token webhook", () => {
         markFailed: async () => undefined,
       },
       tokenUsers: { findByToken: async () => { throw new Error("Token lookup must not run during ingestion"); } },
+      logInfo: (line) => logs.push(line),
     });
 
     const response = await router.request("/webhook/v1/payment-token", {
@@ -46,6 +48,10 @@ describe("payment token webhook", () => {
     expect(await response.json()).toEqual({ reference: "4617307", status: "OK" });
     expect(persisted).toHaveLength(1);
     expect(persisted[0]).toMatchObject({ reference: "4617307", transactionId: "7293" });
+    expect(JSON.parse(logs[0] ?? "{}")).toMatchObject({ scope: "nexa-webhook", event: "received" });
+    expect(logs.join(" ")).not.toContain("webhook-token");
+    expect(logs.join(" ")).not.toContain("1234567310005010");
+    expect(logs.join(" ")).not.toContain("19451958");
   });
 
   test("rejects notifications without configured flowId", async () => {

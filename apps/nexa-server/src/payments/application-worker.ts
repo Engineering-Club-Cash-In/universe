@@ -63,7 +63,7 @@ export async function runApplicationWorkerOnce(options: {
     } : {
       paymentId: null,
       reviewStatus: "REJECTED",
-      failureReason: "cartera_rejected",
+      failureReason: safeRejectionReason(result.reason),
     }, now);
   } catch {
     const nextAttemptAt = getNextAttemptAt(
@@ -82,6 +82,12 @@ export async function runApplicationWorkerOnce(options: {
     return true;
   }
   return true;
+}
+
+function safeRejectionReason(reason: string) {
+  const trimmed = reason.trim().slice(0, 128);
+  if (/^[a-z0-9_]{1,64}$/.test(trimmed)) return trimmed;
+  return trimmed.match(/\(([a-z0-9_]{1,64})\)$/)?.[1] ?? "cartera_rejected";
 }
 
 export function getNextAttemptAt(now: Date, attemptCount: number, maxAttempts: number, backoffSeconds: number, maxBackoffSeconds: number) {

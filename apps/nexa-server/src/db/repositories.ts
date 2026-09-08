@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, lte, or, sql } from "drizzle-orm";
 import type { TokenTransaction } from "../nexa/schemas";
 import type { ApplicationClaim } from "../payments/application-worker";
 import type { MockCreditLedger } from "../payments/mock-ledger";
@@ -222,8 +222,32 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
     }).where(eq(nexaPaymentTransactions.id, id));
   }
 
-  async list() {
-    return this.db.select().from(nexaPaymentTransactions).orderBy(nexaPaymentTransactions.id);
+  async listReconciliation() {
+    return (await reconciliationQuery(this.db)).map(toSafeReconciliationRow);
+  }
+
+  async listReconciliationAlerts(now: Date, staleBefore: Date) {
+    const rows = await reconciliationQuery(this.db, or(
+      eq(nexaPaymentTransactions.processingStatus, "MANUAL_REVIEW"),
+      and(
+        eq(nexaPaymentTransactions.processingStatus, "FAILED"),
+        or(
+          lte(nexaPaymentTransactions.nextAttemptAt, now),
+          and(isNull(nexaPaymentTransactions.nextAttemptAt), lte(nexaPaymentTransactions.updatedAt, staleBefore)),
+        ),
+      ),
+      and(eq(nexaPaymentTransactions.processingStatus, "REVIEW_PENDING"), lte(nexaPaymentTransactions.updatedAt, staleBefore)),
+    ));
+    return rows.map((row) => ({
+      ...toSafeReconciliationRow(row),
+      alertType: row.processingStatus === "MANUAL_REVIEW"
+        ? "MANUAL_REVIEW" as const
+        : row.processingStatus === "REVIEW_PENDING"
+          ? "REVIEW_PENDING_AGED" as const
+          : row.nextAttemptAt && row.nextAttemptAt <= now
+            ? "FAILED_DUE" as const
+            : "FAILED_AGED" as const,
+    }));
   }
 }
 
@@ -318,6 +342,54 @@ function paymentCurrency(value: unknown): "GTQ" | "USD" {
 function storedReviewStatus(value: unknown): "APPROVED" | "REJECTED" {
   if (value !== "APPROVED" && value !== "REJECTED") throw new Error("Stored review status is invalid");
   return value;
+}
+
+function reconciliationQuery(db: NexaDb, where?: ReturnType<typeof or>) {
+  const token = sql<string>`COALESCE(NULLIF(${nexaPaymentTransactions.token}, ''), CASE WHEN ${nexaPaymentTokens.id} IS NOT NULL THEN ${nexaTokenUsers.token} END, ${nexaPaymentTransactions.tokenPrefix} || ${nexaPaymentTransactions.tokenIdentifier})`;
+  const query = db.select({
+    reference: nexaPaymentTransactions.reference,
+    token: sql<string>`CASE WHEN length(${token}) <= 4 THEN repeat('*', length(${token})) ELSE repeat('*', length(${token}) - 4) || right(${token}, 4) END`,
+    creditoId: sql<number | null>`CASE WHEN ${nexaPaymentTokens.id} IS NOT NULL THEN ${nexaTokenUsers.creditoId} END`,
+    carteraPaymentId: nexaPaymentTransactions.carteraPaymentId,
+    amount: nexaPaymentTransactions.amount,
+    processingStatus: nexaPaymentTransactions.processingStatus,
+    attemptCount: nexaPaymentTransactions.attemptCount,
+    reviewAttempts: nexaReviews.attempts,
+    storedReviewAttemptCount: nexaPaymentTransactions.reviewAttemptCount,
+    failureReason: nexaPaymentTransactions.failureReason,
+    createdAt: nexaPaymentTransactions.createdAt,
+    updatedAt: nexaPaymentTransactions.updatedAt,
+    nextAttemptAt: nexaPaymentTransactions.nextAttemptAt,
+    reviewNextAttemptAt: nexaReviews.nextAttemptAt,
+    storedReviewNextAttemptAt: nexaPaymentTransactions.reviewNextAttemptAt,
+  }).from(nexaPaymentTransactions)
+    .leftJoin(nexaTokenUsers, eq(nexaTokenUsers.identifier, nexaPaymentTransactions.tokenIdentifier))
+    .leftJoin(nexaPaymentTokens, and(
+      eq(nexaPaymentTokens.id, nexaTokenUsers.paymentTokenId),
+      eq(nexaPaymentTokens.prefix, nexaPaymentTransactions.tokenPrefix),
+    ))
+    .leftJoin(nexaReviews, eq(nexaReviews.transactionId, nexaPaymentTransactions.id));
+  return (where ? query.where(where) : query).orderBy(nexaPaymentTransactions.id);
+}
+
+function toSafeReconciliationRow<T extends {
+  failureReason: string | null;
+  reviewAttempts: number | null;
+  storedReviewAttemptCount: number;
+  reviewNextAttemptAt: Date | null;
+  storedReviewNextAttemptAt: Date | null;
+}>(row: T) {
+  const { reviewAttempts, storedReviewAttemptCount, reviewNextAttemptAt, storedReviewNextAttemptAt, ...safeRow } = row;
+  return {
+    ...safeRow,
+    reviewAttemptCount: reviewAttempts ?? storedReviewAttemptCount,
+    reviewNextAttemptAt: reviewNextAttemptAt ?? storedReviewNextAttemptAt,
+    failureReason: row.failureReason && /^[a-z0-9_]{1,64}$/.test(row.failureReason)
+      ? row.failureReason
+      : row.failureReason
+        ? "processing_failed"
+        : null,
+  };
 }
 
 export class PollRunRepository {

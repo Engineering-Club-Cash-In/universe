@@ -9,12 +9,13 @@ export type LifecycleScheduler = Scheduler;
 export function startPaymentLifecycle(
   config: AppConfig,
   deps: AppDependencies,
-  options: { scheduler?: Scheduler; logError?: (message: string) => void } = {},
+  options: { scheduler?: Scheduler; logError?: (message: string) => void; logInfo?: (message: string) => void } = {},
 ) {
   if (config.deploymentMode !== "qa_real_payments") return () => {};
 
   const scheduler = options.scheduler ?? defaultScheduler;
   const logError = options.logError ?? console.error;
+  const logInfo = options.logInfo ?? console.log;
   const workerOptions = {
     leaseSeconds: config.workerLeaseSeconds,
     maxAttempts: config.workerMaxAttempts,
@@ -32,6 +33,7 @@ export function startPaymentLifecycle(
       pollRuns: deps.pollRuns,
       scheduler,
       logError,
+      logInfo,
     }),
     startWorkerLoop("Application worker", config.workerIntervalSeconds, () => runApplicationWorkerOnce({
       repository: deps.transactions,
@@ -43,6 +45,27 @@ export function startPaymentLifecycle(
       nexa: deps.nexa,
       ...workerOptions,
     }), scheduler, logError),
+    startWorkerLoop("Reconciliation scanner", config.workerIntervalSeconds, async () => {
+      const now = new Date();
+      const staleBefore = new Date(now.getTime() - config.workerIntervalSeconds * 1_000);
+      const alerts = await deps.transactions.listReconciliationAlerts(now, staleBefore);
+      for (const alert of alerts) {
+        logInfo(JSON.stringify({
+          scope: "nexa-reconciliation",
+          event: "reconciliation_alert",
+          alertType: alert.alertType,
+          reference: alert.reference,
+          processingStatus: alert.processingStatus,
+          attemptCount: alert.attemptCount,
+          reviewAttemptCount: alert.reviewAttemptCount,
+          failureReason: alert.failureReason,
+          updatedAt: alert.updatedAt.toISOString(),
+          nextAttemptAt: alert.nextAttemptAt?.toISOString() ?? null,
+          reviewNextAttemptAt: alert.reviewNextAttemptAt?.toISOString() ?? null,
+        }));
+      }
+      return false;
+    }, scheduler, logError),
   ];
 
   return () => stops.forEach((stop) => stop());

@@ -41,9 +41,11 @@ export function startPaymentPolling(options: {
   pollRuns: PollRunRepository;
   scheduler?: Scheduler;
   logError?: (message: string) => void;
+  logInfo?: (message: string) => void;
 }) {
   const scheduler = options.scheduler ?? defaultScheduler;
   const logError = options.logError ?? console.error;
+  const logInfo = options.logInfo ?? console.log;
   let stopped = false;
   let running = false;
   let timer: unknown;
@@ -52,7 +54,7 @@ export function startPaymentPolling(options: {
     if (stopped || running) return;
     running = true;
     try {
-      await options.pollRuns.runAsLeader(async () => {
+      const result = await options.pollRuns.runAsLeader(async () => {
         for (const date of getGuatemalaPollingDates(new Date(), options.lookbackDays)) {
           await options.pollRuns.run(date, () => pollPaymentTokenDate({
             date,
@@ -62,7 +64,9 @@ export function startPaymentPolling(options: {
             tokenUsers: options.tokenUsers,
           }));
         }
+        return true;
       });
+      logInfo(JSON.stringify({ scope: "nexa-polling", event: "cycle_completed", leader: result !== null }));
     } catch {
       logError("Nexa polling cycle failed");
     } finally {

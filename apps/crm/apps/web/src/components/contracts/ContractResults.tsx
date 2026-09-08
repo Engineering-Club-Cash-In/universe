@@ -4,6 +4,8 @@ import {
 	Copy,
 	ExternalLink,
 	FileText,
+	Loader2,
+	RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -27,6 +29,10 @@ interface ContractResultsProps {
 	totalRequested: number;
 	successCount: number;
 	failCount: number;
+	/** Vuelve a generar un solo documento, sin tocar los que ya salieron bien */
+	onRetry?: (contractType: string) => void;
+	/** Tipo de contrato que se está reintentando en este momento */
+	retryingType?: string | null;
 }
 
 export function ContractResults({
@@ -34,7 +40,12 @@ export function ContractResults({
 	totalRequested,
 	successCount,
 	failCount,
+	onRetry,
+	retryingType,
 }: ContractResultsProps) {
+	const failedNames = results
+		.filter((r) => !r.success)
+		.map((r) => r.contractName);
 	const copyToClipboard = (text: string, label: string) => {
 		navigator.clipboard.writeText(text);
 		toast.success(`Link de ${label} copiado al portapapeles`);
@@ -65,7 +76,7 @@ export function ContractResults({
 						<p className="text-muted-foreground text-sm">
 							{failCount === 0
 								? "Los links de firma están disponibles abajo"
-								: `${failCount} contrato(s) fallaron. Revise los detalles abajo.`}
+								: `No se generó: ${failedNames.join(", ")}. Usa "Reintentar" en el documento marcado en rojo; los demás no se vuelven a generar.`}
 						</p>
 					</div>
 				</div>
@@ -172,9 +183,37 @@ export function ContractResults({
 							</div>
 						)}
 
-						{!result.success && result.error && (
-							<div className="mt-2 rounded bg-red-100 p-2 text-red-700 text-sm">
-								<strong>Error:</strong> {result.error}
+						{!result.success && (
+							<div className="mt-2 space-y-2">
+								<div className="rounded bg-red-100 p-2 text-red-700 text-sm">
+									<strong>Error:</strong>{" "}
+									{result.error || "No se pudo generar el documento"}
+								</div>
+								{onRetry && (
+									<div className="flex items-center justify-between gap-3 rounded bg-white p-2">
+										<span className="text-muted-foreground text-sm">
+											Este documento no se va a enlazar a la oportunidad.
+										</span>
+										<Button
+											size="sm"
+											variant="destructive"
+											disabled={Boolean(retryingType)}
+											onClick={() => onRetry(result.contractType)}
+										>
+											{retryingType === result.contractType ? (
+												<>
+													<Loader2 className="mr-1 h-4 w-4 animate-spin" />
+													Reintentando...
+												</>
+											) : (
+												<>
+													<RefreshCw className="mr-1 h-4 w-4" />
+													Reintentar
+												</>
+											)}
+										</Button>
+									</div>
+								)}
 							</div>
 						)}
 					</div>

@@ -563,6 +563,46 @@
     fecha_aplicado: timestamp("fecha_aplicado"), // Fecha en que se aplicó el pago al crédito
     origen_pago: origenPagoEnum("origen_pago"),
   });
+  export const nexa_credit_bindings = customSchema.table("nexa_credit_bindings", {
+    credito_id: integer("credito_id")
+      .primaryKey()
+      .references(() => creditos.credito_id, { onDelete: "cascade" }),
+    activo: boolean("activo").notNull().default(true),
+    expires_at: timestamp("expires_at", { withTimezone: true }),
+    max_payment_amount: numeric("max_payment_amount", { precision: 18, scale: 2 }),
+    created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  });
+  export const nexa_payment_nonces = customSchema.table("nexa_payment_nonces", {
+    nonce: varchar("nonce", { length: 150 }).primaryKey(),
+    created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  });
+  export const nexa_payment_events = customSchema.table(
+    "nexa_payment_events",
+    {
+      id: serial("id").primaryKey(),
+      provider: varchar("provider", { length: 20 }).notNull().default("NEXA"),
+      external_reference: varchar("external_reference", { length: 150 }).notNull(),
+      nonce: varchar("nonce", { length: 150 }).notNull(),
+      credito_id: integer("credito_id")
+        .notNull()
+        .references(() => creditos.credito_id),
+      amount: numeric("amount", { precision: 18, scale: 2 }).notNull(),
+      currency: varchar("currency", { length: 3 }).notNull(),
+      payload_hash: varchar("payload_hash", { length: 64 }).notNull(),
+      status: varchar("status", { length: 20 }).notNull().default("processing"),
+      pago_id: integer("pago_id").references(() => pagos_credito.pago_id),
+      error: text("error"),
+      created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+      updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    },
+    (table) => ({
+      uqProviderReference: unique("uq_nexa_payment_events_provider_reference").on(
+        table.provider,
+        table.external_reference,
+      ),
+      uqNonce: uniqueIndex("uq_nexa_payment_events_nonce").on(table.nonce),
+    }),
+  );
   export const boletas = customSchema.table("boletas", {
     id: serial("id").primaryKey(),
     pago_id: integer("pago_id")

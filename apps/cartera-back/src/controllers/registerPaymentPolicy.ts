@@ -8,7 +8,10 @@ type BigInput = number | string | Big;
 export const pagoSchema = z.object({
   credito_id: z.number().int().positive(),
   usuario_id: z.number().int().positive(),
-  monto_boleta: z.number().min(0),
+  monto_boleta: z.union([
+    z.number().min(0),
+    z.string().regex(/^\d{1,16}\.\d{2}$/),
+  ]),
   fecha_pago: z.string(),
   llamada: z.string().optional(),
   renuevo_o_nuevo: z.string().optional(),

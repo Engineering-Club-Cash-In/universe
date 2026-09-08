@@ -564,6 +564,23 @@ export interface CarteraConvenio {
 }
 
 /** Fila de `convenio_cuotas` — plan de pagos del convenio (CB-027). */
+/**
+ * CB-032 — body de `POST /payment-agreements` (cartera-back). El CRM manda
+ * `created_by_email` (correo de login del asesor) en vez de `created_by`:
+ * cartera lo resuelve a platform_users.id. `payment_ids` son los recibos
+ * (pagos_credito pre-sembrados) de las cuotas que entran al convenio — es lo
+ * que la creación suma y valida, no los cuota_id.
+ */
+export interface CreateConvenioInput {
+	credit_id: number;
+	payment_ids: number[];
+	total_agreement_amount: number;
+	number_of_months: number;
+	reason?: string;
+	observations?: string;
+	created_by_email: string;
+}
+
 export interface CarteraConvenioCuota {
 	cuota_convenio_id: number;
 	convenio_id: number;

@@ -35,6 +35,30 @@ interface CreatePaymentAgreementInput {
   created_by: number;
 }
 
+/**
+ * CB-032 — id de platform_users a partir del correo de login (case-insensitive,
+ * sin espacios). El CRM crea convenios desde la Ficha 360 con el correo del
+ * asesor; el controlador de creación sigue exigiendo el id numérico. null si
+ * no existe o está inactivo — el caller decide cómo reportarlo.
+ */
+export async function resolverPlatformUserIdPorEmail(
+  email: string
+): Promise<number | null> {
+  const normalizado = email.trim().toLowerCase();
+  if (!normalizado) return null;
+  const [usuario] = await db
+    .select({ id: platform_users.id })
+    .from(platform_users)
+    .where(
+      and(
+        sql`lower(${platform_users.email}) = ${normalizado}`,
+        eq(platform_users.is_active, true)
+      )
+    )
+    .limit(1);
+  return usuario?.id ?? null;
+}
+
 export async function createPaymentAgreement(
   input: CreatePaymentAgreementInput
 ) {

@@ -92,6 +92,13 @@ import {
 	clasificarCreditoColaDia,
 	ordenColaDia,
 } from "../lib/cola-dia";
+import {
+	agruparCuotasParaConvenio,
+	bucketPermiteConvenio,
+	elegiblesParaConvenio,
+	leerMaxMesesConvenio,
+	resolverPagoIdsDeCuotas,
+} from "../lib/convenio-desde-ficha";
 import { eqDpi } from "../lib/dpi-lookup";
 import { fetchAllPages } from "../lib/fetch-all-pages";
 import { gtDateStrToDate, toDateStrGT } from "../lib/guatemala-month-window";
@@ -2716,6 +2723,270 @@ export const cobrosRouter = {
 			}
 		}),
 
+	// CB-032: parámetros del convenio que la Ficha 360 necesita para pintar el
+	// modal (tope de meses del select). Env CONVENIO_MAX_MESES, default 6.
+	getConvenioConfig: cobrosProcedure.handler(async () => {
+		return { maxMeses: leerMaxMesesConvenio() };
+	}),
+
+	// CB-032: crear un CONVENIO de pago desde la Ficha 360 — la misma acción
+	// que hoy solo existe en carteraFront ("Crear Convenio de Pago"). Promesa y
+	// convenio son conceptos distintos: la promesa es una gestión del CRM
+	// (contactos_cobros); el convenio es una reestructura que vive en cartera
+	// (convenios_pago) y la crea cartera-back con sus propias validaciones.
+	//
+	// El front manda las CUOTAS que eligió el asesor; acá se traducen a los
+	// `pago_id` que cartera espera (misma agrupación que carteraFront hace en
+	// el navegador) sobre la data fresca de /credito — así el CRM nunca manda
+	// ids que el asesor no vio. Reglas del ticket: a partir de B2, máximo
+	// CONVENIO_MAX_MESES meses.
+	crearConvenioDesdeFicha: cobrosProcedure
+		.input(
+			z.object({
+				// El caso es OBLIGATORIO y es la llave de acceso: `cobrosProcedure`
+				// solo verifica el rol global de cobros, así que sin este gate un
+				// asesor podía crear un convenio (una operación financiera) sobre
+				// un crédito que no tiene asignado — y de paso etiquetar un caso
+				// ajeno (hallazgo de Codex, PR #1570). El SIFCO NO se recibe por
+				// input: lo resuelve el servidor desde el caso, mismo patrón que
+				// getPagaloHistorial — recibirlo dejaría pasar un caso propio con
+				// un crédito ajeno.
+				casoCobroId: z.string().uuid(),
+				cuotaIds: z.array(z.number().int().positive()).min(1).max(120),
+				numeroMeses: z.number().int().min(1).max(60),
+				motivo: z.string().trim().min(3).max(1000),
+				observaciones: z.string().trim().max(2000).optional(),
+				// El total que el asesor VIO y confirmó en el modal (suma de los
+				// montos reales de las cuotas elegidas + mora, o lo que haya
+				// escrito a mano — el campo es editable por diseño, igual que en
+				// carteraFront). Es obligatorio a propósito: cuando era opcional
+				// el server recalculaba con `cuota estándar × n + mora` y el
+				// convenio podía quedar por un monto distinto al confirmado si
+				// alguna cuota tenía otro monto o la mora cambió entre medio
+				// (hallazgo de Codex, PR #1570).
+				montoTotal: z.number().positive(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			if (!isCarteraBackEnabled()) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "La integración con cartera no está habilitada",
+				});
+			}
+			const email = context.session?.user?.email?.trim().toLowerCase();
+			if (!email) {
+				throw new ORPCError("UNAUTHORIZED", {
+					message: "Usuario no autenticado",
+				});
+			}
+
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
+
+			// El crédito sale del CASO, no del input (ver el comentario del schema).
+			const [casoDelConvenio] = await db
+				.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
+				.from(casosCobros)
+				.where(eq(casosCobros.id, input.casoCobroId))
+				.limit(1);
+			const numeroSifco = casoDelConvenio?.numeroCreditoSifco;
+			if (!numeroSifco) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"El caso no tiene un crédito de cartera asociado; no se puede crear el convenio.",
+				});
+			}
+
+			const maxMeses = leerMaxMesesConvenio();
+			if (input.numeroMeses > maxMeses) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `El convenio no puede superar ${maxMeses} meses`,
+				});
+			}
+
+			// Sin cache: cuotas, mora y convenio activo tienen que ser el dato
+			// real al momento de acordar (mismo criterio que registrarPagoCompleto).
+			const credito = await carteraBackClient.getCredito(numeroSifco, false);
+			// El caso NO alcanza como autorización: getDetallesCreditoCarteraBack
+			// AUTO-CREA un caso con responsableCobros = quien consulta cuando el
+			// crédito no tiene uno activo, así que un asesor podía fabricarse el
+			// acceso consultando un SIFCO enumerable y después pasar el gate de
+			// arriba (hallazgo de Codex, PR #1570). La fuente autoritativa de
+			// "de quién es este crédito" no es el CRM sino CARTERA: el asesor
+			// asignado al crédito. Se compara por `email_cash_in` contra el
+			// correo de login — el mismo puente por correo que usa el resto del
+			// módulo (getConveniosListado, getAgendaDia), porque
+			// platform_users.email está desactualizado para varios asesores.
+			//
+			// Admin y supervisor de cobros quedan fuera del chequeo: ellos sí
+			// operan sobre cualquier crédito.
+			if (!PERMISSIONS.canViewAllCasosCobros(context.userRole ?? "")) {
+				const emailAsesorCredito = credito.asesor?.emailCashIn
+					?.trim()
+					.toLowerCase();
+				if (!emailAsesorCredito || emailAsesorCredito !== email) {
+					throw new ORPCError("FORBIDDEN", {
+						message:
+							"Este crédito no está asignado a vos en cartera; no podés crear un convenio sobre él.",
+					});
+				}
+			}
+
+			const statusCredit = credito.credito.statusCredit;
+			if (statusCredit === "EN_CONVENIO" || credito.convenioActivo) {
+				throw new ORPCError("CONFLICT", {
+					message:
+						"El crédito ya tiene un convenio de pago. Para cambiarlo hay que rechazar el vigente desde cartera.",
+				});
+			}
+			if (statusCredit !== "ACTIVO" && statusCredit !== "MOROSO") {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `No se puede crear un convenio sobre un crédito ${statusCredit}`,
+				});
+			}
+
+			// Regla CB-032: convenio a partir de B2. El bucket real lo da el
+			// motor de cartera; se compara por la key del catálogo, no por el
+			// número literal (ver bucketPermiteConvenio).
+			const [bucketActual, catalogo] = await Promise.all([
+				carteraBackClient.getBucketActualCredito(numeroSifco),
+				carteraBackClient.getBucketsCatalogo(),
+			]);
+			const gate = bucketPermiteConvenio(bucketActual?.bucket, catalogo);
+			if (!gate.permitido) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						bucketActual?.bucket == null
+							? "El crédito no tiene bucket asignado todavía; un convenio se registra a partir de " +
+								`${gate.prefijoMinimo}`
+							: `Un convenio se registra a partir de ${gate.prefijoMinimo}; este crédito está en B${bucketActual.bucket}. Registrá una promesa de pago.`,
+				});
+			}
+
+			// Solo vencidas + la cuota actual: las futuras no entran (regla de
+			// negocio, ver elegiblesParaConvenio). El modal ya las esconde; acá
+			// se vuelve a aplicar sobre la data real de cartera.
+			const elegibles = elegiblesParaConvenio(
+				agruparCuotasParaConvenio(
+					credito.cuotasAtrasadas,
+					credito.cuotasPendientes,
+				),
+			);
+			const { pagoIds, faltantes, sinRecibo } = resolverPagoIdsDeCuotas(
+				elegibles,
+				input.cuotaIds,
+			);
+			if (faltantes.length > 0) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"Al convenio solo entran las cuotas vencidas y la cuota actual. Alguna de las elegidas es futura o ya no está pendiente; recargá la ficha y volvé a elegir.",
+				});
+			}
+			if (sinRecibo.length > 0) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `Las cuotas ${sinRecibo.join(", ")} no tienen recibo en cartera y no pueden entrar al convenio. Reportalo a contabilidad.`,
+				});
+			}
+			if (pagoIds.length === 0) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "No se encontraron recibos para las cuotas elegidas",
+				});
+			}
+
+			const cantidadCuotas = new Set(input.cuotaIds).size;
+			// El monto es el que confirmó el asesor. No se recalcula: hacerlo
+			// significaría crear el convenio por una cifra distinta a la que se
+			// aprobó. Lo único que se valida es cordura — un convenio no puede
+			// superar la deuda total del crédito (atrapa un dedazo, sin estorbar
+			// la edición legítima del campo).
+			const montoTotal = input.montoTotal;
+			const deudaTotal = Number(credito.credito.deudatotal ?? 0);
+			if (deudaTotal > 0 && montoTotal > deudaTotal) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `El monto del convenio (Q${montoTotal.toFixed(2)}) supera la deuda total del crédito (Q${deudaTotal.toFixed(2)}). Revisá el monto.`,
+				});
+			}
+
+			let convenio: Awaited<
+				ReturnType<typeof carteraBackClient.createConvenio>
+			>;
+			try {
+				convenio = await carteraBackClient.createConvenio({
+					credit_id: credito.credito.credito_id,
+					payment_ids: pagoIds,
+					total_agreement_amount: montoTotal,
+					number_of_months: input.numeroMeses,
+					reason: input.motivo,
+					observations: input.observaciones || undefined,
+					created_by_email: email,
+				});
+			} catch (error) {
+				// Un 4xx de cartera trae el motivo de negocio en payload.message
+				// ("El crédito ya tiene un convenio de pago activo", "Algunos
+				// pagos no existen", "El usuario X no existe en cartera"): eso es
+				// lo que el asesor tiene que leer, no "Validation failed: …".
+				if (
+					error instanceof CarteraBackHttpError &&
+					error.status >= 400 &&
+					error.status < 500
+				) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							error.payload.message ||
+							"Cartera rechazó el convenio. Revisá las cuotas elegidas.",
+					});
+				}
+				console.error(
+					"[crearConvenioDesdeFicha] Error de cartera-back:",
+					error,
+				);
+				throw new ORPCError("INTERNAL_SERVER_ERROR", {
+					message:
+						"No se pudo crear el convenio en cartera. Intentá de nuevo; si persiste, verificá en cartera que no haya quedado creado.",
+				});
+			}
+
+			// Etiqueta propia del concepto (CB-032): el caso queda marcado
+			// "convenio" en el CRM. Best-effort — el convenio YA existe en
+			// cartera; un fallo acá no debe reportarse como fallo del convenio.
+			// El caso ya pasó por assertAccesoCasoCobro arriba.
+			try {
+				const [caso] = await db
+					.select({ etiquetas: casosCobros.etiquetas })
+					.from(casosCobros)
+					.where(eq(casosCobros.id, input.casoCobroId))
+					.limit(1);
+				if (caso && !(caso.etiquetas ?? []).includes("convenio")) {
+					await db
+						.update(casosCobros)
+						.set({
+							etiquetas: [...(caso.etiquetas ?? []), "convenio"],
+							updatedAt: new Date(),
+						})
+						.where(eq(casosCobros.id, input.casoCobroId));
+				}
+			} catch (error) {
+				console.warn(
+					"[crearConvenioDesdeFicha] Convenio creado pero no se pudo etiquetar el caso:",
+					error instanceof Error ? error.message : error,
+				);
+			}
+
+			return {
+				convenioId: convenio.convenio_id,
+				montoTotal: Number(convenio.monto_total_convenio),
+				cuotaMensual: Number(convenio.cuota_mensual),
+				numeroMeses: convenio.numero_meses,
+				cantidadCuotas,
+				// cartera crea el convenio con activo=false: alguien de conta/admin
+				// lo ACTIVA desde carteraFront. El crédito ya quedó EN_CONVENIO.
+				pendienteActivacion: convenio.activo === false,
+			};
+		}),
+
 	// Asignar responsable de cobros
 	asignarResponsableCobros: cobrosSupervisorProcedure
 		.input(
@@ -4649,6 +4920,17 @@ export const cobrosRouter = {
 					fechaInicio: creditoCompleto.credito.fecha_creacion,
 					diaPagoMensual,
 					estadoContrato,
+					// Status CRUDO de cartera (ACTIVO, MOROSO, EN_CONVENIO, CAIDO…).
+					// `estadoContrato` es una simplificación con fines de display que
+					// colapsa ACTIVO/MOROSO/EN_CONVENIO en "activo", así que no sirve
+					// para decidir reglas de negocio. Lo necesita la ficha para saber
+					// que un crédito está EN_CONVENIO: cartera solo devuelve
+					// `convenioActivo` cuando el convenio tiene activo=true, y uno
+					// recién creado nace en false (lo activa conta) — sin este campo,
+					// el convenio pendiente era invisible para la ficha y el crédito
+					// aparecía como "sin bucket" en vez de "en convenio" (hallazgo de
+					// Codex, PR #1570).
+					statusCredit,
 
 					// Datos del cliente (de cartera-back o lead)
 					clienteNombre: leadInfo?.nombre || creditoCompleto.usuario.nombre,

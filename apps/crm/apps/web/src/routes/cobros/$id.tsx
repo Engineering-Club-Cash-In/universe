@@ -13,6 +13,7 @@ import {
 	Eye,
 	FileText,
 	HandCoins,
+	Handshake,
 	Loader,
 	Mail,
 	MapPin,
@@ -36,6 +37,7 @@ import {
 } from "server/src/lib/gestion-temprana-b1";
 import { toast } from "sonner";
 import { ActividadBot } from "@/components/cobros/actividad-bot";
+import { ConvenioModal } from "@/components/cobros/convenio-modal";
 import { PagaloHistorial } from "@/components/cobros/pagalo-historial";
 import { PagaloLinkDialog } from "@/components/cobros/pagalo-link-dialog";
 import { Pagination } from "@/components/cobros/pagination";
@@ -89,10 +91,12 @@ import {
 	bucketDeNumero,
 	catalogoDeNumero,
 	esBucketB2,
+	esBucketDesdeB2,
 	estiloBucket,
 	numeroDeEstadoMora,
 	useBucketsCatalogo,
 } from "@/lib/cobros/buckets-catalogo";
+import { cuotasElegiblesParaConvenio } from "@/lib/cobros/convenio-cuotas";
 import {
 	type EstadoPromesaUI,
 	inicioDelDiaGT,
@@ -163,6 +167,8 @@ interface CasoDetalle {
 	fechaInicio?: string | null;
 	diaPagoMensual?: number | null;
 	estadoContrato?: string | null;
+	/** statusCredit crudo de cartera (ACTIVO, MOROSO, EN_CONVENIO, …). */
+	statusCredit?: string | null;
 	clienteNombre?: string | null;
 	clienteNit?: string | null;
 	vehicleId?: string | null;
@@ -432,6 +438,12 @@ function RouteComponent() {
 		null,
 	);
 	const [confirmarEstadoCuenta, setConfirmarEstadoCuenta] = useState(false);
+	// CB-032: el botón "Promesa / Convenio" abre UNO de dos modales distintos.
+	// Promesa = gestión del CRM (ContactoModal variante promesa); convenio =
+	// reestructura en cartera (ConvenioModal). Estados controlados para que un
+	// solo trigger (el dropdown) decida cuál.
+	const [promesaAbierta, setPromesaAbierta] = useState(false);
+	const [convenioAbierto, setConvenioAbierto] = useState(false);
 	// Generar links dejó de ser un botón suelto: ahora es una de las dos formas
 	// de registrar un pago, así que el diálogo lo abre el dropdown principal.
 	const [pagaloAbierto, setPagaloAbierto] = useState(false);
@@ -513,6 +525,13 @@ function RouteComponent() {
 	const bucketActual = useQuery({
 		...orpc.getBucketActualCredito.queryOptions({ input: { creditoId: id } }),
 		enabled: !!session && !!id,
+	});
+
+	// CB-032: tope de meses del convenio (env del server, default 6).
+	const convenioConfig = useQuery({
+		...orpc.getConvenioConfig.queryOptions(),
+		enabled: !!session,
+		staleTime: 5 * 60 * 1000,
 	});
 
 	// Obtener detalles del contrato/caso
@@ -1055,6 +1074,34 @@ function RouteComponent() {
 		!bucketActual.isPending &&
 		(bucketPrevio === null || esBucketB2(bucketPrevio, bucketsCatalogo.data));
 
+	// CB-032: ¿se puede registrar un CONVENIO desde acá? Reglas del ticket:
+	// a partir de B2 y sin convenio vigente. El motivo del bloqueo se muestra
+	// en el propio item del dropdown (no se esconde la opción: el asesor tiene
+	// que saber que existe y por qué hoy no aplica). El server re-valida todo.
+	//
+	// `statusCredit` (crudo de cartera) es la señal que manda, no
+	// `convenioActivo`: cartera solo devuelve ese objeto cuando el convenio
+	// tiene activo=true, y uno recién creado nace en false hasta que conta lo
+	// activa. Mirando solo `convenioActivo`, el convenio que acaba de crear
+	// este mismo flujo era invisible acá (hallazgo de Codex, PR #1570).
+	const convenioPendienteActivacion =
+		caso.statusCredit === "EN_CONVENIO" && !caso.convenioActivo;
+	const tieneConvenioVigente =
+		!!caso.convenioActivo || caso.statusCredit === "EN_CONVENIO";
+	const convenioMotivoBloqueo: string | null = convenioPendienteActivacion
+		? "Este crédito ya tiene un convenio pendiente de activación en cartera."
+		: tieneConvenioVigente
+			? "Este crédito ya tiene un convenio de pago vigente."
+			: bucketActual.isPending
+				? "Cargando el bucket del crédito…"
+				: !esBucketDesdeB2(bucketNumero, bucketsCatalogo.data)
+					? `Disponible a partir de B2. Este caso está en ${bucketPrefijo ?? "un bucket sin definir"}; registrá una promesa de pago.`
+					: null;
+	const convenioHabilitado = convenioMotivoBloqueo === null;
+	// El cliente ORPC infiere `{}` para esta query (mismo caso que CasoDetalle).
+	const maxMesesConvenio =
+		(convenioConfig.data as { maxMeses?: number } | undefined)?.maxMeses ?? 6;
+
 	// CB-030: subestado "Promesa activa" — se muestra JUNTO al bucket, nunca
 	// en su lugar. El bucket YA viene congelado desde el servidor mientras la
 	// promesa esté vigente (el motor de cartera-back excluye del conteo las
@@ -1236,18 +1283,67 @@ function RouteComponent() {
 										</DropdownMenuContent>
 									</DropdownMenu>
 
-									{/* 2 · Promesa de Pago: visible porque es una gestión con
-									    peso propio (CB-020: modal reducido — solo Detalles de
-									    la Conversación + fecha prometida obligatoria). */}
+									{/* 2 · Promesa / Convenio (CB-032): dos conceptos distintos
+									    detrás de UN botón, para que el asesor los elija a
+									    conciencia. Promesa = gestión del CRM (cualquier bucket).
+									    Convenio = reestructura en cartera (a partir de B2, sin
+									    convenio vigente). Cada uno abre su propio modal. */}
+									<DropdownMenu>
+										<DropdownMenuTrigger asChild>
+											<Button
+												variant="outline"
+												className="flex items-center gap-2"
+											>
+												<HandCoins className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+												Promesa / Convenio
+												<ChevronDown className="h-3.5 w-3.5 opacity-60" />
+											</Button>
+										</DropdownMenuTrigger>
+										<DropdownMenuContent align="end" className="w-72">
+											<DropdownMenuItem
+												className="cursor-pointer items-start gap-2 py-2"
+												onClick={() => setPromesaAbierta(true)}
+											>
+												<HandCoins className="mt-0.5 h-4 w-4 text-amber-600 dark:text-amber-400" />
+												<div>
+													<p className="font-medium">
+														{promesaActiva
+															? "Editar promesa de pago"
+															: "Promesa de pago"}
+													</p>
+													<p className="text-muted-foreground text-xs">
+														El cliente se compromete a pagar un monto en una
+														fecha. Cualquier bucket.
+													</p>
+												</div>
+											</DropdownMenuItem>
+											<DropdownMenuItem
+												className="cursor-pointer items-start gap-2 py-2"
+												disabled={!convenioHabilitado}
+												onClick={() => setConvenioAbierto(true)}
+											>
+												<Handshake className="mt-0.5 h-4 w-4 text-blue-700 dark:text-blue-300" />
+												<div>
+													<p className="font-medium">Convenio de pago</p>
+													<p className="text-muted-foreground text-xs">
+														{convenioMotivoBloqueo ??
+															`Reparte la deuda vencida en hasta ${maxMesesConvenio} cuotas. A partir de B2.`}
+													</p>
+												</div>
+											</DropdownMenuItem>
+										</DropdownMenuContent>
+									</DropdownMenu>
+
+									{/* Modal de PROMESA (CB-020/CB-029), controlado desde el
+									    dropdown de arriba. Mismo criterio que el card "Total a
+									    Pagar": con convenio activo la mora se reemplaza por la
+									    cuota del convenio, no se suma (Codex, PR #1191). */}
 									<ContactoModal
 										{...propsContacto}
 										metodoInicial="llamada"
 										variante="promesa"
-										// Mismo criterio que el card "Total a Pagar" de arriba
-										// (líneas ~728-742): con convenio activo la mora se
-										// reemplaza por la cuota del convenio, no se suma a
-										// ella — si no, la sugerencia acá no coincide con lo
-										// que el asesor ve en pantalla (Codex, PR #1191).
+										open={promesaAbierta}
+										onOpenChange={setPromesaAbierta}
 										montoSugerido={
 											caso.cuotaConvenio != null
 												? Number(caso.cuotaConvenio) +
@@ -1276,15 +1372,47 @@ function RouteComponent() {
 												: undefined
 										}
 										promesaActiva={promesaActiva}
-									>
-										<Button
-											variant="outline"
-											className="flex items-center gap-2"
-										>
-											<HandCoins className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-											Promesa de Pago
-										</Button>
-									</ContactoModal>
+									/>
+
+									{/* Modal de CONVENIO (CB-032). Solo cuotas PENDIENTES de
+									    verdad (ni pagadas ni en validación): es lo mismo que
+									    cartera considera elegible y el server lo re-valida. */}
+									<ConvenioModal
+										open={convenioAbierto}
+										onOpenChange={setConvenioAbierto}
+										casoCobroId={caso.id ?? ""}
+										clienteNombre={caso.clienteNombre || ""}
+										// La regla de elegibilidad vive en un módulo aparte
+										// (con tests) porque tiene que decir lo mismo que el
+										// server: qué cuota puede entrar y cuál ya está vencida
+										// según el día de Guatemala.
+										cuotas={cuotasElegiblesParaConvenio(
+											cuotas as any[],
+											Number(caso.cuotaMensual || 0),
+										)}
+										cuotaMensual={Number(caso.cuotaMensual || 0)}
+										montoMora={Number(caso.montoEnMora || 0)}
+										maxMeses={maxMesesConvenio}
+										onCreado={() => {
+											// El convenio cambia status, mora, bucket y cuotas del
+											// crédito: todo lo que la ficha lee de cartera.
+											queryClient.invalidateQueries(
+												orpc.getDetallesCreditoCarteraBack.queryOptions({
+													input: { creditoId: id },
+												}),
+											);
+											queryClient.invalidateQueries(
+												orpc.getHistorialPagos.queryOptions({
+													input: { numeroSifco: id || "" },
+												}),
+											);
+											queryClient.invalidateQueries(
+												orpc.getBucketActualCredito.queryOptions({
+													input: { creditoId: id },
+												}),
+											);
+										}}
+									/>
 
 									{/* 3 · Lo demás — y lo que se venga a futuro — cabe acá
 									    sin estirar la fila. */}

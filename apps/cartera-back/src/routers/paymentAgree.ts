@@ -1,6 +1,6 @@
 // src/routes/paymentAgreements.routes.ts
 import { Elysia, t } from "elysia";
-import { createPaymentAgreement, getPaymentAgreements, updateConvenioStatus, listPaymentAgreements, getConvenioCuotas } from "../controllers/paymentAgreement";
+import { createPaymentAgreement, getPaymentAgreements, updateConvenioStatus, listPaymentAgreements, getConvenioCuotas, resolverPlatformUserIdPorEmail } from "../controllers/paymentAgreement";
 import { authMiddleware } from "./midleware";
  
 
@@ -11,7 +11,33 @@ export const paymentAgreementsRouter = new Elysia({ prefix: "/payment-agreements
     "/",
     async ({ body, set }) => {
       try {
-        const result = await createPaymentAgreement(body);
+        // CB-032: el CRM crea convenios desde la Ficha 360 y no conoce el id de
+        // platform_users del asesor — manda su correo de login. Se resuelve acá
+        // y el controlador sigue recibiendo `created_by` numérico como siempre
+        // (carteraFront lo manda directo). Si viene el id, gana el id.
+        let createdBy = body.created_by;
+        if (createdBy == null) {
+          if (!body.created_by_email) {
+            set.status = 400;
+            return {
+              success: false,
+              message: "Se requiere created_by o created_by_email",
+              error: "created_by_required",
+            };
+          }
+          createdBy = await resolverPlatformUserIdPorEmail(body.created_by_email);
+          if (createdBy == null) {
+            set.status = 400;
+            return {
+              success: false,
+              message: `El usuario ${body.created_by_email} no existe en cartera (platform_users); no se puede atribuir el convenio`,
+              error: "created_by_not_found",
+            };
+          }
+        }
+
+        const { created_by_email: _emailCreador, ...rest } = body;
+        const result = await createPaymentAgreement({ ...rest, created_by: createdBy });
 
         if (!result.success) {
           set.status = 400;
@@ -41,7 +67,10 @@ export const paymentAgreementsRouter = new Elysia({ prefix: "/payment-agreements
         number_of_months: t.Number({ minimum: 1 }),
         reason: t.Optional(t.String()),
         observations: t.Optional(t.String()),
-        created_by: t.Number(),
+        // Uno de los dos. `created_by` = id de platform_users (carteraFront);
+        // `created_by_email` = correo de login (CRM, CB-032), se resuelve arriba.
+        created_by: t.Optional(t.Number()),
+        created_by_email: t.Optional(t.String({ minLength: 3 })),
       }),
       detail: {
         summary: "Create payment agreement",

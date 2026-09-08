@@ -12,6 +12,24 @@ import {
 	carteraBackClient,
 } from "../services/cartera-back-client";
 
+/**
+ * cartera-back devuelve 400 (validación) o 409 (`TrasladoConflict`) para
+ * previsualizar/confirmar — nunca 500 en el camino esperado. Sin traducir
+ * eso acá, `CarteraBackHttpError` sube como excepción no controlada y ORPC
+ * la expone como error interno genérico en vez de un conflicto accionable.
+ */
+function traducirErrorTraslado(error: unknown): never {
+	if (
+		error instanceof CarteraBackHttpError &&
+		(error.status === 400 || error.status === 409)
+	) {
+		throw new ORPCError(error.status === 400 ? "BAD_REQUEST" : "CONFLICT", {
+			message: error.message,
+		});
+	}
+	throw error;
+}
+
 const fecha = z.string().refine((v) => {
 	try {
 		ventanaDiaGuatemala(v);
@@ -81,12 +99,16 @@ export const trasladosCobrosRouter = {
 						});
 				}),
 		)
-		.handler(async ({ input, context }) =>
-			carteraBackClient.previsualizarTrasladoCartera({
-				...input,
-				actorEmail: context.user.email,
-			}),
-		),
+		.handler(async ({ input, context }) => {
+			try {
+				return await carteraBackClient.previsualizarTrasladoCartera({
+					...input,
+					actorEmail: context.user.email,
+				});
+			} catch (error) {
+				traducirErrorTraslado(error);
+			}
+		}),
 	confirmarTraslado: cobrosSupervisorProcedure
 		.input(
 			z.object({
@@ -101,9 +123,7 @@ export const trasladosCobrosRouter = {
 					actorEmail: context.user.email,
 				});
 			} catch (error) {
-				if (error instanceof CarteraBackHttpError && error.status === 409)
-					throw new ORPCError("CONFLICT", { message: error.message });
-				throw error;
+				traducirErrorTraslado(error);
 			}
 		}),
 	listarTraslados: cobrosSupervisorProcedure

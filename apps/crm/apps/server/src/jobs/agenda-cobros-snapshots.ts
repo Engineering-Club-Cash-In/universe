@@ -186,15 +186,20 @@ export async function cerrarSnapshotsAgenda(
 				-- de arriba ya colapsa a una por item.
 				LEFT JOIN coberturas_agenda_cobros cobertura
 				  ON cobertura.titular_id = s.asesor_id
-				 -- Vigente PARA EL DÍA que se cierra, no al momento de correr este
-				 -- job: si se cancela después de que el suplente ya trabajó pero
-				 -- antes del cierre nocturno de ese mismo día, exigir NULL borraba
-				 -- sus gestiones válidas del cómputo de cumplimiento.
-				 AND (cobertura.cancelada_en IS NULL OR cobertura.cancelada_en::date > $1::date)
 				 AND cobertura.desde <= $1::date
 				 AND cobertura.hasta >= $1::date
 				JOIN contactos_cobros cc
 				  ON cc.realizado_por IN (s.asesor_id, cobertura.suplente_id)
+				 -- El corte es contra el INSTANTE del contacto, no la fecha del
+				 -- cierre: cancelar el MISMO día después de que el suplente ya
+				 -- trabajó (ej. contacto 09:00, cancelación 14:00) seguía
+				 -- descartando ese contacto legítimo si se colapsaban ambos a
+				 -- ::date, porque "cancelado el día X" y "cerrando el día X" son
+				 -- iguales en fecha aunque el contacto haya sido antes.
+				 AND (cobertura.suplente_id IS NULL
+				      OR cc.realizado_por = s.asesor_id
+				      OR cobertura.cancelada_en IS NULL
+				      OR cobertura.cancelada_en > cc.fecha_contacto)
 				 AND cc.fecha_contacto >= ($1::date + interval '6 hours')
 				 AND cc.fecha_contacto < ($1::date + interval '1 day 6 hours')
 				 AND cc.estado_contacto = ANY($2::estado_contacto[])

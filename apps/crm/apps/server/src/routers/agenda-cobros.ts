@@ -281,6 +281,15 @@ export const agendaCobrosRouter = {
 					casoCobroId: item.casoCobroId,
 					bucketSnapshot: item.bucketSnapshot,
 					motivoAgenda: item.motivoAgenda as MotivoAgenda,
+					// El usuario logueado es el único suplente posible en esta vista
+					// (es su propia agenda). Si el item es de un titular que cubre,
+					// el suplente (él mismo) también puede haberlo cerrado — sin esto
+					// contactoPerteneceAlItem exige EXACTO snapshotAsesorId y el
+					// trabajo del suplente quedaba pendiente igual.
+					realizadoPorValidos:
+						item.snapshotAsesorId === asesorId
+							? undefined
+							: [item.snapshotAsesorId, asesorId],
 				})),
 				contactos,
 			);

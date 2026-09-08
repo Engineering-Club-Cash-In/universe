@@ -9,6 +9,15 @@ export interface AgendaSnapshotItemFuente {
 	casoCobroId: string | null;
 	bucketSnapshot: number | null;
 	motivoAgenda: MotivoAgenda;
+	/**
+	 * CB-114: durante una cobertura, tanto el titular (asesorId) como el
+	 * suplente pueden cerrar el item. Sin esto, `contactoPerteneceAlItem`
+	 * solo aceptaba una gestión de exactamente `asesorId` — con cobertura
+	 * eso deja SIEMPRE afuera a uno de los dos según cuál se use ahí.
+	 * Opcional: los callers sin cobertura no lo mandan y el comportamiento
+	 * es idéntico al de antes (solo `asesorId`).
+	 */
+	realizadoPorValidos?: readonly string[];
 }
 
 export interface ContactoAgenda {
@@ -117,8 +126,9 @@ function contactoPerteneceAlItem(
 	item: AgendaSnapshotItemFuente,
 	contacto: ContactoAgenda,
 ): boolean {
+	const dueniosValidos = item.realizadoPorValidos ?? [item.asesorId];
 	return (
-		contacto.realizadoPor === item.asesorId &&
+		dueniosValidos.includes(contacto.realizadoPor) &&
 		((item.casoCobroId !== null && contacto.casoCobroId === item.casoCobroId) ||
 			contacto.numeroCreditoSifco === item.numeroCreditoSifco)
 	);

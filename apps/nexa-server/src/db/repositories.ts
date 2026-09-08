@@ -1,12 +1,13 @@
 import { createHash } from "node:crypto";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { TokenTransaction } from "../nexa/schemas";
 import type { ApplicationClaim } from "../payments/application-worker";
 import type { MockCreditLedger } from "../payments/mock-ledger";
+import type { ReviewClaim, ReviewWorkerRepository } from "../payments/review-worker";
 import type { PaymentTransactionRepository, TokenUserRepository } from "../payments/repositories";
 import type { TokenUserCreationRepository } from "../tokens/service";
 import type { NexaDb } from "./index";
-import { mockCarteraCredits, nexaPaymentTokens, nexaPaymentTransactions, nexaPollRuns, nexaTokenUsers } from "./schema";
+import { mockCarteraCredits, nexaPaymentTokens, nexaPaymentTransactions, nexaPollRuns, nexaReviews, nexaTokenUsers } from "./schema";
 
 export class PaymentTokenRepository {
   constructor(private readonly db: NexaDb) {}
@@ -147,24 +148,68 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
           updated_at = ${now}
       FROM candidate
       WHERE payment.id = candidate.id
-      RETURNING payment.id, payment.reference, payment.attempt_count AS "attemptCount"
+      RETURNING payment.id,
+        payment.reference,
+        payment.amount,
+        payment.currency,
+        payment.token_identifier AS "tokenIdentifier",
+        payment.token_prefix AS "tokenPrefix",
+        payment.transaction_id AS "transactionId",
+        payment.attempt_count AS "attemptCount"
     `);
     const row = result.rows[0];
     return row ? {
       id: Number(row.id),
       reference: String(row.reference),
+      amount: Number(row.amount),
+      currency: paymentCurrency(row.currency),
+      tokenIdentifier: String(row.tokenIdentifier),
+      tokenPrefix: String(row.tokenPrefix),
+      transactionId: String(row.transactionId),
       attemptCount: Number(row.attemptCount),
     } : null;
   }
 
-  async markApplicationApplied(id: number, now: Date) {
-    await this.db.update(nexaPaymentTransactions).set({
-      processingStatus: "APPLIED",
-      failureReason: null,
-      nextAttemptAt: null,
-      leaseUntil: null,
-      updatedAt: now,
-    }).where(eq(nexaPaymentTransactions.id, id));
+  async resolveCreditoId(tokenIdentifier: string, tokenPrefix: string) {
+    const [user] = await this.db.select({ creditoId: nexaTokenUsers.creditoId })
+      .from(nexaTokenUsers)
+      .innerJoin(nexaPaymentTokens, eq(nexaTokenUsers.paymentTokenId, nexaPaymentTokens.id))
+      .where(and(
+        eq(nexaTokenUsers.identifier, tokenIdentifier),
+        eq(nexaPaymentTokens.prefix, tokenPrefix),
+        eq(nexaTokenUsers.active, true),
+        eq(nexaPaymentTokens.active, true),
+      ))
+      .limit(1);
+    return user?.creditoId ?? null;
+  }
+
+  async finalizeApplication(id: number, outcome: {
+    paymentId: number | null;
+    reviewStatus: "APPROVED" | "REJECTED";
+    failureReason: string | null;
+  }, now: Date) {
+    await this.db.transaction(async (tx) => {
+      const [payment] = await tx.update(nexaPaymentTransactions).set({
+        processingStatus: "REVIEW_PENDING",
+        carteraPaymentId: outcome.paymentId,
+        failureReason: outcome.failureReason,
+        nextAttemptAt: null,
+        leaseUntil: null,
+        updatedAt: now,
+      }).where(eq(nexaPaymentTransactions.id, id)).returning({
+        reference: nexaPaymentTransactions.reference,
+      });
+      if (!payment) throw new Error("Application payment not found");
+      await tx.insert(nexaReviews).values({
+        transactionId: id,
+        reference: payment.reference,
+        status: outcome.reviewStatus,
+        requestPayload: { reference: payment.reference, status: outcome.reviewStatus },
+        attempts: 0,
+        nextAttemptAt: now,
+      }).onConflictDoNothing({ target: nexaReviews.transactionId });
+    });
   }
 
   async markApplicationFailed(id: number, reason: string, nextAttemptAt: Date | null, now: Date) {
@@ -182,8 +227,97 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
   }
 }
 
+export class DbReviewRepository implements ReviewWorkerRepository {
+  constructor(private readonly db: NexaDb) {}
+
+  async claimNextReview(now: Date, leaseSeconds: number): Promise<ReviewClaim | null> {
+    const result = await this.db.execute(sql<ReviewClaim>`
+      WITH candidate AS (
+        SELECT review.id,
+          payment.id AS payment_transaction_id,
+          payment.transaction_id AS nexa_transaction_id,
+          payment.reference,
+          review.status
+        FROM nexa_reviews AS review
+        INNER JOIN nexa_payment_transactions AS payment ON payment.id = review.transaction_id
+        WHERE review.completed_at IS NULL
+          AND (review.next_attempt_at IS NULL OR review.next_attempt_at <= ${now})
+          AND (review.lease_until IS NULL OR review.lease_until <= ${now})
+        ORDER BY review.created_at, review.id
+        FOR UPDATE OF review SKIP LOCKED
+        LIMIT 1
+      )
+      UPDATE nexa_reviews AS review
+      SET attempts = review.attempts + 1,
+          lease_until = ${now}::timestamptz + ${leaseSeconds} * INTERVAL '1 second',
+          next_attempt_at = NULL,
+          updated_at = ${now}
+      FROM candidate
+      WHERE review.id = candidate.id
+      RETURNING review.id,
+        candidate.payment_transaction_id AS "paymentTransactionId",
+        candidate.nexa_transaction_id AS "nexaTransactionId",
+        candidate.reference,
+        candidate.status,
+        review.attempts AS "attemptCount"
+    `);
+    const row = result.rows[0];
+    return row ? {
+      id: Number(row.id),
+      paymentTransactionId: Number(row.paymentTransactionId),
+      nexaTransactionId: String(row.nexaTransactionId),
+      reference: String(row.reference),
+      status: storedReviewStatus(row.status),
+      attemptCount: Number(row.attemptCount),
+    } : null;
+  }
+
+  async completeReview(claim: ReviewClaim, responsePayload: { reference: number; status: "APPROVED" | "REJECTED" } | null, now: Date) {
+    await this.db.transaction(async (tx) => {
+      await tx.update(nexaReviews).set({
+        responsePayload,
+        lastError: null,
+        nextAttemptAt: null,
+        leaseUntil: null,
+        completedAt: now,
+        updatedAt: now,
+      }).where(eq(nexaReviews.id, claim.id));
+      await tx.update(nexaPaymentTransactions).set({
+        processingStatus: "COMPLETED",
+        updatedAt: now,
+      }).where(eq(nexaPaymentTransactions.id, claim.paymentTransactionId));
+    });
+  }
+
+  async failReview(claim: ReviewClaim, nextAttemptAt: Date | null, now: Date) {
+    await this.db.transaction(async (tx) => {
+      await tx.update(nexaReviews).set({
+        lastError: "review_processing_failed",
+        nextAttemptAt,
+        leaseUntil: null,
+        completedAt: nextAttemptAt ? null : now,
+        updatedAt: now,
+      }).where(eq(nexaReviews.id, claim.id));
+      await tx.update(nexaPaymentTransactions).set({
+        processingStatus: nextAttemptAt ? "REVIEW_PENDING" : "MANUAL_REVIEW",
+        updatedAt: now,
+      }).where(eq(nexaPaymentTransactions.id, claim.paymentTransactionId));
+    });
+  }
+}
+
 function fingerprint(reference: string, amount: number, token: string, transactionId: string) {
   return createHash("sha256").update(JSON.stringify([reference, amount, token, transactionId])).digest("hex");
+}
+
+function paymentCurrency(value: unknown): "GTQ" | "USD" {
+  if (value !== "GTQ" && value !== "USD") throw new Error("Stored payment currency is invalid");
+  return value;
+}
+
+function storedReviewStatus(value: unknown): "APPROVED" | "REJECTED" {
+  if (value !== "APPROVED" && value !== "REJECTED") throw new Error("Stored review status is invalid");
+  return value;
 }
 
 export class PollRunRepository {

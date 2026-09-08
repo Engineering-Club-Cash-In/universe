@@ -610,7 +610,10 @@ const insertarBoletas = async (pago_id: number, urlCompletas: string[]) => {
 // FUNCIÓN PRINCIPAL
 // ========================================
 
-export const insertPayment = async ({ body, set }: any) => {
+export const insertPayment = async (
+  { body, set }: any,
+  { nexaPaymentEventId }: { nexaPaymentEventId?: number } = {},
+) => {
   // 🔒 Conexión dedicada para el advisory lock (se libera en finally).
   let lockConn: PaymentAdvisoryLockConnection | undefined;
   let lockedCreditoId: number | undefined;
@@ -650,9 +653,10 @@ export const insertPayment = async ({ body, set }: any) => {
     // termine y vea el saldo ya actualizado.
     // Conexión del pool DEDICADO de locks: los waiters de pg_advisory_lock no
     // deben consumir conexiones del pool de trabajo (deadlock de pool).
-    lockConn = await lockPool.connect();
+    const acquiredLockConn = await lockPool.connect();
+    lockConn = acquiredLockConn;
     lockedCreditoId = credito_id;
-    await lockConn.query("SELECT pg_advisory_lock($1, $2)", [
+    await acquiredLockConn.query("SELECT pg_advisory_lock($1, $2)", [
       PAYMENT_ADVISORY_LOCK_NAMESPACE,
       credito_id,
     ]);
@@ -774,6 +778,7 @@ export const insertPayment = async ({ body, set }: any) => {
         fecha_boleta,
         monto_aplicado: pagoEspecialCuota.montoAplicado,
         observaciones,
+        nexaPaymentEventId,
       });
     }
 
@@ -824,6 +829,7 @@ export const insertPayment = async ({ body, set }: any) => {
             fecha_boleta,
             monto_aplicado: pagoEspecialCuota.montoAplicado,
             observaciones,
+            nexaPaymentEventId,
           });
         }
 
@@ -845,6 +851,7 @@ export const insertPayment = async ({ body, set }: any) => {
             fecha_boleta,
             monto_aplicado: pagoEspecialCuota.montoAplicado,
             observaciones,
+            nexaPaymentEventId,
           });
         }
         return {
@@ -872,6 +879,7 @@ export const insertPayment = async ({ body, set }: any) => {
           fecha_boleta,
           monto_aplicado: pagoEspecialCuota.montoAplicado,
           observaciones,
+          nexaPaymentEventId,
         });
       }
       return {
@@ -1556,6 +1564,7 @@ export const insertPayment = async ({ body, set }: any) => {
           fecha_boleta: fecha_boleta,
           monto_aplicado: totalPagado.toString(),
           origen_pago: origen_pago,
+          nexaPaymentEventId,
         };
 
         // Insertar o actualizar pago
@@ -1758,6 +1767,7 @@ export const insertPayment = async ({ body, set }: any) => {
                   // Paridad con la rama UPDATE de cierre (que persiste pagoData
                   // completo): conservar el origen del pago en la fila de cierre.
                   origen_pago: pagoData.origen_pago,
+                  nexaPaymentEventId,
                 })
                 .returning();
               const [inserted] = rows;
@@ -1928,6 +1938,7 @@ export const insertPayment = async ({ body, set }: any) => {
                   pagoConvenio: "0",
                   fecha_boleta:pagoData.fecha_boleta,
                   monto_aplicado: pagoData.monto_aplicado,
+                  nexaPaymentEventId,
                 })
                 .returning();
               const [inserted] = rows;
@@ -2194,6 +2205,7 @@ export const insertPayment = async ({ body, set }: any) => {
         fecha_boleta: fecha_boleta,
         monto_aplicado: abonoCapital.toString(),
         origen_pago: origen_pago,
+        nexaPaymentEventId,
       };
 
 
@@ -2376,6 +2388,7 @@ export const insertPayment = async ({ body, set }: any) => {
           monto_aplicado: pagoEspecialCuota.montoAplicado,
           pagoConvenio: 0,
           observaciones,
+          nexaPaymentEventId,
         });
         if (new Big(pagoConvenioParaFila).gt(0)) {
           pagoConvenioPagoId = pagoEspecialInsertado.pago_id;
@@ -2509,6 +2522,7 @@ interface InsertarPagoParams {
   monto_aplicado: number;
   pagoConvenio?: number;
   observaciones?: string;
+  nexaPaymentEventId?: number;
 }
 export async function insertarPago({
   numero_credito_sifco,
@@ -2525,7 +2539,8 @@ export async function insertarPago({
   fecha_boleta,
   monto_aplicado,
   pagoConvenio = 0,
-  observaciones = ""
+  observaciones = "",
+  nexaPaymentEventId,
 }: InsertarPagoParams) {
 
 
@@ -2666,6 +2681,7 @@ export async function insertarPago({
       registerBy: registerBy,
       pagoConvenio: pagoConvenio.toString(),
       monto_aplicado: monto_aplicado.toString(),
+      nexaPaymentEventId,
     })
     .returning();
 

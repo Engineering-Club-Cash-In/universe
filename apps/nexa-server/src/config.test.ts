@@ -11,8 +11,8 @@ const baseEnv = {
   NEXA_PAYMENT_TOKEN_NAME: "Cashin",
   NEXA_WEBHOOK_FLOW_ID: "production-flow",
   NEXA_WEBHOOK_BEARER_TOKEN: "production-webhook-token",
-  NEXA_ADMIN_API_KEY: "production-admin-key",
-  CARTERA_INTERNAL_API_SECRET: "production-cartera-secret",
+  NEXA_ADMIN_API_KEY: "a".repeat(32),
+  CARTERA_INTERNAL_API_SECRET: "c".repeat(32),
   CARTERA_API_BASE_URL: "https://cartera.example.com",
   NODE_ENV: "production",
   NEXA_DEPLOYMENT_MODE: "integration",
@@ -28,6 +28,7 @@ const qaRealEnv = {
   NEXA_CLIENT_KEY_PATH: "/certs/client.key",
   NEXA_CA_CERT_PATH: "/certs/ca.crt",
   CARTERA_TARGET_ENV: "qa",
+  CARTERA_QA_ALLOWED_ORIGINS: "https://cartera.example.com",
   ENABLE_TEST_UI: "false",
 };
 
@@ -51,6 +52,15 @@ describe("loadConfig", () => {
     const config = loadConfig(baseEnv);
     expect(config.enableTestUi).toBe(false);
     expect(config.enableAdminApi).toBe(false);
+  });
+
+  it("no exige secretos ni URL de Cartera cuando usa mock sin API administrativa", () => {
+    const { NEXA_ADMIN_API_KEY, CARTERA_INTERNAL_API_SECRET, CARTERA_API_BASE_URL, ...env } = baseEnv;
+    const config = loadConfig(env);
+
+    expect(config.nexaAdminApiKey).toBeUndefined();
+    expect(config.carteraInternalApiSecret).toBeUndefined();
+    expect(config.carteraApiBaseUrl).toBeUndefined();
   });
 
   it("permite iniciar sin certificados solo en modo mTLS disabled", () => {
@@ -92,7 +102,12 @@ describe("loadConfig", () => {
 
   it("acepta qa_real_payments cerrado con target development o qa", () => {
     expect(loadConfig(qaRealEnv).deploymentMode).toBe("qa_real_payments");
-    expect(loadConfig({ ...qaRealEnv, CARTERA_TARGET_ENV: "development" }).carteraTargetEnv).toBe("development");
+    expect(loadConfig({
+      ...qaRealEnv,
+      CARTERA_TARGET_ENV: "development",
+      CARTERA_API_BASE_URL: "http://127.0.0.1:7000",
+      CARTERA_DEVELOPMENT_ALLOWED_ORIGINS: "http://127.0.0.1:7000",
+    }).carteraTargetEnv).toBe("development");
   });
 
   it.each([
@@ -100,10 +115,31 @@ describe("loadConfig", () => {
     ["mTLS disabled", { NEXA_MTLS_MODE: "disabled", NEXA_CLIENT_CERT_PATH: undefined, NEXA_CLIENT_KEY_PATH: undefined, NEXA_CA_CERT_PATH: undefined }],
     ["target production", { CARTERA_TARGET_ENV: "production" }],
     ["test UI", { ENABLE_TEST_UI: "true" }],
-    ["admin secret missing", { NEXA_ADMIN_API_KEY: undefined }],
     ["cartera secret missing", { CARTERA_INTERNAL_API_SECRET: undefined }],
-    ["shared credentials", { CARTERA_INTERNAL_API_SECRET: "production-admin-key" }],
+    ["shared credentials", { CARTERA_INTERNAL_API_SECRET: "a".repeat(32) }],
+    ["short cartera secret", { CARTERA_INTERNAL_API_SECRET: "short" }],
+    ["HTTP qa", { CARTERA_API_BASE_URL: "http://cartera.example.com" }],
+    ["origin fuera de allowlist", { CARTERA_QA_ALLOWED_ORIGINS: "https://other.example.com" }],
+    ["allowlist faltante", { CARTERA_QA_ALLOWED_ORIGINS: undefined }],
   ])("rechaza qa_real_payments con %s", (_case, overrides) => {
     expect(() => loadConfig({ ...qaRealEnv, ...overrides })).toThrow();
+  });
+
+  it("exige secretos separados y fuertes siempre que Cartera sea real", () => {
+    expect(() => loadConfig({
+      ...baseEnv,
+      NEXA_DEPLOYMENT_MODE: "production",
+      MOCK_CARTERA: "false",
+      NEXA_MTLS_MODE: "required",
+      NEXA_CLIENT_CERT_PATH: "/certs/client.crt",
+      NEXA_CLIENT_KEY_PATH: "/certs/client.key",
+      NEXA_CA_CERT_PATH: "/certs/ca.crt",
+      CARTERA_INTERNAL_API_SECRET: "a".repeat(32),
+    })).toThrow("separate credentials");
+  });
+
+  it("configura un timeout finito positivo para Cartera", () => {
+    expect(loadConfig({ ...qaRealEnv, CARTERA_API_TIMEOUT_MS: "2500" }).carteraApiTimeoutMs).toBe(2500);
+    expect(() => loadConfig({ ...qaRealEnv, CARTERA_API_TIMEOUT_MS: "0" })).toThrow();
   });
 });

@@ -23,7 +23,9 @@ export const pagoSchema = z.object({
   url_boletas: z.array(z.string()),
   banco_id: z.number().int().positive().optional(),
   numeroAutorizacion: z.string().optional(),
-  registerBy: z.string().min(1),
+  registerBy: z.string().min(1).refine(
+    (value) => !value.trim().toUpperCase().startsWith("NEXA:"),
+  ),
   fecha_boleta: z.string(),
   origen_pago: z.enum(["transferencia", "cheque", "boleta"]).optional().default("transferencia"),
 });

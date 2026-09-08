@@ -41,7 +41,7 @@ export function createApp(config: AppConfig, deps: AppDependencies = createDepen
   }));
   if (config.enableAdminApi) {
     app.route("/admin", createAdminRouter({
-      adminApiKey: config.nexaAdminApiKey,
+      adminApiKey: config.nexaAdminApiKey!,
       nexa: deps.nexa,
       cartera: deps.cartera,
       paymentTokens: deps.paymentTokens,

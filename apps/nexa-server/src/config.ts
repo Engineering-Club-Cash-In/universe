@@ -3,6 +3,9 @@ import { z } from "zod";
 const envBoolean = z.union([z.boolean(), z.enum(["true", "false"])]).transform((value) =>
   typeof value === "boolean" ? value : value === "true",
 );
+const envOrigins = z.string().transform((value) =>
+  value.split(",").map((origin) => origin.trim()).filter(Boolean),
+).optional();
 
 const configSchema = z.object({
   port: z.coerce.number().int().positive().default(7010),
@@ -20,10 +23,13 @@ const configSchema = z.object({
   nexaWebhookBearerToken: z.string().min(1),
   nexaPollIntervalSeconds: z.coerce.number().int().positive().default(30),
   nexaPollLookbackDays: z.coerce.number().int().min(0).default(1),
-  nexaAdminApiKey: z.string().trim().min(1),
-  carteraInternalApiSecret: z.string().trim().min(1),
-  carteraApiBaseUrl: z.string().url(),
+  nexaAdminApiKey: z.string().trim().min(1).optional(),
+  carteraInternalApiSecret: z.string().trim().min(1).optional(),
+  carteraApiBaseUrl: z.string().url().optional(),
+  carteraApiTimeoutMs: z.coerce.number().int().positive().default(10_000),
   carteraTargetEnv: z.enum(["development", "qa"]).optional(),
+  carteraDevelopmentAllowedOrigins: envOrigins,
+  carteraQaAllowedOrigins: envOrigins,
   mockCartera: envBoolean.default(false),
   enableAdminApi: envBoolean.default(false),
   enableTestUi: envBoolean.default(false),
@@ -53,13 +59,27 @@ const configSchema = z.object({
       ["nexaWebhookFlowId", config.nexaWebhookFlowId],
       ["nexaWebhookBearerToken", config.nexaWebhookBearerToken],
     ] as const) {
-      if (forbidden.has(value)) {
+      if (value && forbidden.has(value)) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
           path: [path],
           message: `${path} uses a forbidden development credential`,
         });
       }
+    }
+  }
+  if (config.enableAdminApi && !config.nexaAdminApiKey) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["nexaAdminApiKey"], message: "Admin API requires NEXA_ADMIN_API_KEY" });
+  }
+  if (!config.mockCartera) {
+    if (!config.carteraApiBaseUrl) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["carteraApiBaseUrl"], message: "Real cartera requires CARTERA_API_BASE_URL" });
+    }
+    if (!config.carteraInternalApiSecret || config.carteraInternalApiSecret.length < 32 || Buffer.byteLength(config.carteraInternalApiSecret) < 32) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["carteraInternalApiSecret"], message: "Real cartera requires CARTERA_INTERNAL_API_SECRET with at least 32 characters and bytes" });
+    }
+    if (config.nexaAdminApiKey && config.nexaAdminApiKey === config.carteraInternalApiSecret) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["carteraInternalApiSecret"], message: "Real cartera requires separate credentials" });
     }
   }
   if (config.deploymentMode === "production") {
@@ -105,8 +125,18 @@ const configSchema = z.object({
     if (config.enableTestUi) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ["enableTestUi"], message: "qa_real_payments cannot expose the test UI" });
     }
-    if (config.nexaAdminApiKey === config.carteraInternalApiSecret) {
-      context.addIssue({ code: z.ZodIssueCode.custom, path: ["carteraInternalApiSecret"], message: "qa_real_payments requires separate credentials" });
+    if (config.carteraApiBaseUrl && config.carteraTargetEnv) {
+      const url = new URL(config.carteraApiBaseUrl);
+      const loopback = ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
+      if (url.protocol !== "https:" && !(config.carteraTargetEnv === "development" && loopback)) {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ["carteraApiBaseUrl"], message: "qa_real_payments requires HTTPS except development loopback" });
+      }
+      const origins = config.carteraTargetEnv === "development"
+        ? config.carteraDevelopmentAllowedOrigins
+        : config.carteraQaAllowedOrigins;
+      if (!origins?.length || !origins.includes(url.origin)) {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ["carteraApiBaseUrl"], message: "Cartera origin is not allowed for CARTERA_TARGET_ENV" });
+      }
     }
   }
 });
@@ -131,7 +161,10 @@ export function loadConfig(env = process.env) {
     nexaAdminApiKey: env.NEXA_ADMIN_API_KEY,
     carteraInternalApiSecret: env.CARTERA_INTERNAL_API_SECRET,
     carteraApiBaseUrl: env.CARTERA_API_BASE_URL,
+    carteraApiTimeoutMs: env.CARTERA_API_TIMEOUT_MS,
     carteraTargetEnv: env.CARTERA_TARGET_ENV,
+    carteraDevelopmentAllowedOrigins: env.CARTERA_DEVELOPMENT_ALLOWED_ORIGINS,
+    carteraQaAllowedOrigins: env.CARTERA_QA_ALLOWED_ORIGINS,
     mockCartera: env.MOCK_CARTERA,
     enableAdminApi: env.ENABLE_ADMIN_API,
     enableTestUi: env.ENABLE_TEST_UI,

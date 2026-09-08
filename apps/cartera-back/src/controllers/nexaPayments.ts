@@ -6,10 +6,10 @@ import { verifyNexaHmac } from "./nexaHmac";
 export const nexaPaymentSchema = z
   .object({
     externalReference: z.string().trim().min(1).max(150),
-    creditoId: z.number().int().positive(),
+    creditoId: z.number().int().positive().max(2_147_483_647),
     amount: z.string().regex(/^(?=.*[1-9])(?:0|[1-9]\d{0,15})\.\d{2}$/),
     currency: z.literal("GTQ"),
-    transactionId: z.string().trim().min(1).max(100).optional(),
+    transactionId: z.string().trim().max(100).transform((value) => value || undefined).optional(),
   })
   .strict();
 
@@ -110,15 +110,17 @@ export type NexaPaymentDependencies = {
   findPayments: (eventId: number, creditoId: number) => Promise<{
     paymentId: number;
     validationStatus: string;
+    amount: string;
   }[]>;
   registerPayment: (
     body: NexaPaymentBody,
     eventId: number,
     usuarioId: number,
-  ) => Promise<void>;
+  ) => Promise<{ success?: boolean }>;
   applyPayment: (paymentId: number) => Promise<{ success?: boolean }>;
   complete: (eventId: number, paymentId: number) => Promise<void>;
   fail: (eventId: number, code: string) => Promise<void>;
+  now?: () => Date;
 };
 
 export class NexaPaymentError extends Error {
@@ -135,6 +137,8 @@ export const processNexaPayment = (
   context: NexaPaymentContext,
   dependencies: NexaPaymentDependencies,
 ) => dependencies.withCreditLock(body.creditoId, async () => {
+  const existingCredit = await dependencies.loadCredit(body.creditoId);
+  if (!existingCredit) throw new NexaPaymentError("credit_not_found", 404);
   const claim = await dependencies.claim(body, context);
   if ("paymentId" in claim) {
     return { paymentId: claim.paymentId, idempotent: true };
@@ -147,7 +151,11 @@ export const processNexaPayment = (
   try {
     const credit = await dependencies.loadCredit(body.creditoId);
     if (!credit) throw new NexaPaymentError("credit_not_found", 404);
-    const bindingRejection = getNexaBindingRejection(credit.binding, body.amount, context.now);
+    const bindingRejection = getNexaBindingRejection(
+      credit.binding,
+      body.amount,
+      dependencies.now?.() ?? new Date(),
+    );
     if (bindingRejection) throw new NexaPaymentError(bindingRejection, 403);
     if (!["ACTIVO", "MOROSO", "EN_CONVENIO", "INCOBRABLE"].includes(credit.statusCredit)) {
       throw new NexaPaymentError("credit_not_payable", 409);
@@ -155,15 +163,22 @@ export const processNexaPayment = (
 
     let payments = await dependencies.findPayments(eventId, body.creditoId);
     if (payments.length === 0) {
-      await dependencies.registerPayment(body, eventId, credit.usuarioId);
+      const registered = await dependencies.registerPayment(body, eventId, credit.usuarioId);
+      if (registered.success !== true) {
+        throw new NexaPaymentError("payment_registration_rejected", 409);
+      }
       payments = await dependencies.findPayments(eventId, body.creditoId);
     }
     if (payments.length === 0) throw new NexaPaymentError("payment_not_created", 500);
+    const linkedAmount = payments.reduce((total, payment) => total.plus(payment.amount), new Big(0));
+    if (!linkedAmount.eq(body.amount)) {
+      throw new NexaPaymentError("payment_amount_mismatch", 409);
+    }
 
     for (const payment of payments) {
       if (["validated", "capital_validated"].includes(payment.validationStatus)) continue;
       const applied = await dependencies.applyPayment(payment.paymentId);
-      if (!applied.success) throw new NexaPaymentError("payment_not_applied", 409);
+      if (applied.success !== true) throw new NexaPaymentError("payment_not_applied", 409);
     }
     await dependencies.complete(eventId, payments[0]!.paymentId);
     return { paymentId: payments[0]!.paymentId, idempotent: false };
@@ -189,7 +204,8 @@ export const createNexaPaymentHandler = ({
   body: unknown;
   set: { status?: number | string };
 }) => {
-  if (!secret) {
+  const normalizedSecret = secret.trim();
+  if (normalizedSecret.length < 32 || Buffer.byteLength(normalizedSecret) < 32) {
     set.status = 503;
     return { error: "configuration_error" };
   }
@@ -202,7 +218,7 @@ export const createNexaPaymentHandler = ({
     method: request.method,
     path: new URL(request.url).pathname,
     body: rawBody,
-    secret,
+    secret: normalizedSecret,
     timestamp,
     nonce,
     signature,

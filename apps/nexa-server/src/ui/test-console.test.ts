@@ -19,6 +19,7 @@ describe("test console UI", () => {
       nexaAdminApiKey: "dev-secret",
       carteraInternalApiSecret: "cartera-secret",
       carteraApiBaseUrl: "http://localhost:7000",
+      carteraApiTimeoutMs: 10_000,
       mockCartera: true,
       enableAdminApi: true,
       enableTestUi: true,

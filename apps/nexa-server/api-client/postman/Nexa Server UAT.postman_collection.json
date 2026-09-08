@@ -6,7 +6,7 @@
   },
   "variable": [
     {
-      "key": "internal_api_key",
+      "key": "nexa_admin_api_key",
       "value": "",
       "type": "secret"
     }
@@ -27,7 +27,7 @@
         "header": [
           {
             "key": "Authorization",
-            "value": "Bearer {{internal_api_key}}"
+            "value": "Bearer {{nexa_admin_api_key}}"
           }
         ],
         "url": "https://lkgg0okc8444owcw8gok4s0o.s2.devteamatcci.site/admin/tokens/bootstrap",
@@ -41,7 +41,7 @@
         "header": [
           {
             "key": "Authorization",
-            "value": "Bearer {{internal_api_key}}"
+            "value": "Bearer {{nexa_admin_api_key}}"
           },
           {
             "key": "Content-Type",
@@ -63,7 +63,7 @@
         "header": [
           {
             "key": "Authorization",
-            "value": "Bearer {{internal_api_key}}"
+            "value": "Bearer {{nexa_admin_api_key}}"
           },
           {
             "key": "Content-Type",
@@ -85,7 +85,7 @@
         "header": [
           {
             "key": "Authorization",
-            "value": "Bearer {{internal_api_key}}"
+            "value": "Bearer {{nexa_admin_api_key}}"
           }
         ],
         "url": "https://lkgg0okc8444owcw8gok4s0o.s2.devteamatcci.site/admin/token-users"
@@ -98,7 +98,7 @@
         "header": [
           {
             "key": "Authorization",
-            "value": "Bearer {{internal_api_key}}"
+            "value": "Bearer {{nexa_admin_api_key}}"
           }
         ],
         "url": "https://lkgg0okc8444owcw8gok4s0o.s2.devteamatcci.site/admin/mock-credits"
@@ -111,7 +111,7 @@
         "header": [
           {
             "key": "Authorization",
-            "value": "Bearer {{internal_api_key}}"
+            "value": "Bearer {{nexa_admin_api_key}}"
           }
         ],
         "url": "https://lkgg0okc8444owcw8gok4s0o.s2.devteamatcci.site/admin/transactions"

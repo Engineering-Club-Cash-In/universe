@@ -68,6 +68,23 @@ test("limita referencias al tamaño persistible", async () => {
   ).toBe(false);
 });
 
+test("normaliza referencias y limita creditoId al integer de PostgreSQL", async () => {
+  const { nexaPaymentSchema } = await import("./nexaPayments");
+  const base = { amount: "10.00", currency: "GTQ" as const };
+
+  expect(nexaPaymentSchema.parse({
+    ...base,
+    externalReference: "  qa-payment-1  ",
+    creditoId: 2_147_483_647,
+    transactionId: "   ",
+  })).toEqual({ ...base, externalReference: "qa-payment-1", creditoId: 2_147_483_647 });
+  expect(nexaPaymentSchema.safeParse({
+    ...base,
+    externalReference: "qa-payment-2",
+    creditoId: 2_147_483_648,
+  }).success).toBe(false);
+});
+
 test("rechaza binding ausente, inactivo, expirado o con monto sobre el límite", async () => {
   const module = await import("./nexaPayments");
   const rejectBinding = Reflect.get(module, "getNexaBindingRejection");
@@ -127,9 +144,9 @@ test("registra y aplica una vez por el flujo canónico", async () => {
         binding: { activo: true, expires_at: null, max_payment_amount: null },
       }),
       findPayments: async () => registered
-        ? [{ paymentId: 17, validationStatus: "pending" }]
+        ? [{ paymentId: 17, validationStatus: "pending", amount: "10.00" }]
         : [],
-      registerPayment: async () => { registered += 1; },
+      registerPayment: async () => { registered += 1; return { success: true }; },
       applyPayment: async () => { applied += 1; return { success: true }; },
       complete: async () => { completed += 1; },
       fail: async () => undefined,
@@ -138,6 +155,128 @@ test("registra y aplica una vez por el flujo canónico", async () => {
 
   expect(result).toEqual({ paymentId: 17, idempotent: false });
   expect({ registered, applied, completed }).toEqual({ registered: 1, applied: 1, completed: 1 });
+});
+
+test("no consume claim cuando el crédito no existe", async () => {
+  const { NexaPaymentError, processNexaPayment } = await import("./nexaPayments");
+  let claimed = false;
+
+  await expect(processNexaPayment(
+    { externalReference: "missing-credit", creditoId: 10, amount: "10.00", currency: "GTQ" },
+    { nonce: "nonce-missing", payloadHash: "a".repeat(64), now: new Date() },
+    {
+      withCreditLock: async (_creditoId, work) => work(),
+      claim: async () => { claimed = true; return { kind: "new", eventId: 7 }; },
+      loadCredit: async () => null,
+      findPayments: async () => [],
+      registerPayment: async () => ({ success: true }),
+      applyPayment: async () => ({ success: true }),
+      complete: async () => undefined,
+      fail: async () => undefined,
+    },
+  )).rejects.toEqual(new NexaPaymentError("credit_not_found", 404));
+  expect(claimed).toBe(false);
+});
+
+test("revalida el binding con reloj fresco dentro del lock", async () => {
+  const { NexaPaymentError, processNexaPayment } = await import("./nexaPayments");
+  const calls: string[] = [];
+
+  await expect(processNexaPayment(
+    { externalReference: "expired-in-lock", creditoId: 10, amount: "10.00", currency: "GTQ" },
+    { nonce: "nonce-expired", payloadHash: "a".repeat(64), now: new Date("2026-09-08T11:59:00Z") },
+    {
+      now: () => new Date("2026-09-08T12:01:00Z"),
+      withCreditLock: async (_creditoId, work) => { calls.push("lock"); return work(); },
+      claim: async () => { calls.push("claim"); return { kind: "new", eventId: 7 }; },
+      loadCredit: async () => ({
+        usuarioId: 5,
+        statusCredit: "ACTIVO",
+        binding: { activo: true, expires_at: new Date("2026-09-08T12:00:00Z"), max_payment_amount: null },
+      }),
+      findPayments: async () => [],
+      registerPayment: async () => { calls.push("mutate"); return { success: true }; },
+      applyPayment: async () => ({ success: true }),
+      complete: async () => undefined,
+      fail: async () => undefined,
+    },
+  )).rejects.toEqual(new NexaPaymentError("binding_expired", 403));
+  expect(calls).toEqual(["lock", "claim"]);
+});
+
+test("solo completa cuando todas las filas vinculadas suman el monto exacto", async () => {
+  const { NexaPaymentError, processNexaPayment } = await import("./nexaPayments");
+  let applied = 0;
+  let completed = false;
+
+  await expect(processNexaPayment(
+    { externalReference: "partial-link", creditoId: 10, amount: "10.00", currency: "GTQ" },
+    { nonce: "nonce-partial", payloadHash: "a".repeat(64), now: new Date() },
+    {
+      withCreditLock: async (_creditoId, work) => work(),
+      claim: async () => ({ kind: "retry", eventId: 7 }),
+      loadCredit: async () => ({
+        usuarioId: 5,
+        statusCredit: "ACTIVO",
+        binding: { activo: true, expires_at: null, max_payment_amount: null },
+      }),
+      findPayments: async () => [{ paymentId: 17, validationStatus: "pending", amount: "6.00" }],
+      registerPayment: async () => ({ success: true }),
+      applyPayment: async () => { applied += 1; return { success: true }; },
+      complete: async () => { completed = true; },
+      fail: async () => undefined,
+    },
+  )).rejects.toEqual(new NexaPaymentError("payment_amount_mismatch", 409));
+  expect({ applied, completed }).toEqual({ applied: 0, completed: false });
+});
+
+test("exige success true al aplicar cada fila", async () => {
+  const { NexaPaymentError, processNexaPayment } = await import("./nexaPayments");
+
+  await expect(processNexaPayment(
+    { externalReference: "undefined-success", creditoId: 10, amount: "10.00", currency: "GTQ" },
+    { nonce: "nonce-undefined", payloadHash: "a".repeat(64), now: new Date() },
+    {
+      withCreditLock: async (_creditoId, work) => work(),
+      claim: async () => ({ kind: "retry", eventId: 7 }),
+      loadCredit: async () => ({
+        usuarioId: 5,
+        statusCredit: "ACTIVO",
+        binding: { activo: true, expires_at: null, max_payment_amount: null },
+      }),
+      findPayments: async () => [{ paymentId: 17, validationStatus: "pending", amount: "10.00" }],
+      registerPayment: async () => ({ success: true }),
+      applyPayment: async () => ({}),
+      complete: async () => undefined,
+      fail: async () => undefined,
+    },
+  )).rejects.toEqual(new NexaPaymentError("payment_not_applied", 409));
+});
+
+test("exige success true al registrar el pago", async () => {
+  const { NexaPaymentError, processNexaPayment } = await import("./nexaPayments");
+  let registered = false;
+
+  await expect(processNexaPayment(
+    { externalReference: "registration-result", creditoId: 10, amount: "10.00", currency: "GTQ" },
+    { nonce: "nonce-registration", payloadHash: "a".repeat(64), now: new Date() },
+    {
+      withCreditLock: async (_creditoId, work) => work(),
+      claim: async () => ({ kind: "new", eventId: 7 }),
+      loadCredit: async () => ({
+        usuarioId: 5,
+        statusCredit: "ACTIVO",
+        binding: { activo: true, expires_at: null, max_payment_amount: null },
+      }),
+      findPayments: async () => registered
+        ? [{ paymentId: 17, validationStatus: "pending", amount: "10.00" }]
+        : [],
+      registerPayment: async () => { registered = true; return {}; },
+      applyPayment: async () => ({ success: true }),
+      complete: async () => undefined,
+      fail: async () => undefined,
+    },
+  )).rejects.toEqual(new NexaPaymentError("payment_registration_rejected", 409));
 });
 
 test("devuelve el mismo paymentId en un reintento ya aplicado", async () => {
@@ -149,9 +288,13 @@ test("devuelve el mismo paymentId en un reintento ya aplicado", async () => {
     {
       withCreditLock: async (_creditoId, work) => work(),
       claim: async () => ({ kind: "applied", paymentId: 17 }),
-      loadCredit: async () => { mutated = true; return null; },
+      loadCredit: async () => ({
+        usuarioId: 5,
+        statusCredit: "ACTIVO",
+        binding: { activo: true, expires_at: null, max_payment_amount: null },
+      }),
       findPayments: async () => [],
-      registerPayment: async () => { mutated = true; },
+      registerPayment: async () => { mutated = true; return { success: true }; },
       applyPayment: async () => { mutated = true; return { success: true }; },
       complete: async () => { mutated = true; },
       fail: async () => { mutated = true; },
@@ -171,9 +314,13 @@ test.each(["conflict", "replay"] as const)("rechaza un claim %s sin mutar", asyn
     {
       withCreditLock: async (_creditoId, work) => work(),
       claim: async () => ({ kind }),
-      loadCredit: async () => { mutated = true; return null; },
+      loadCredit: async () => ({
+        usuarioId: 5,
+        statusCredit: "ACTIVO",
+        binding: { activo: true, expires_at: null, max_payment_amount: null },
+      }),
       findPayments: async () => [],
-      registerPayment: async () => { mutated = true; },
+      registerPayment: async () => { mutated = true; return { success: true }; },
       applyPayment: async () => { mutated = true; return { success: true }; },
       complete: async () => { mutated = true; },
       fail: async () => { mutated = true; },
@@ -235,17 +382,22 @@ test("el handler verifica el body exacto antes de procesar", async () => {
     nonce,
     createHash("sha256").update(rawBody).digest("hex"),
   ].join("\n");
-  const signature = createHmac("sha256", "synthetic-secret").update(canonical).digest("hex");
+  const secret = "s".repeat(32);
+  const signature = createHmac("sha256", secret).update(canonical).digest("hex");
   const set: { status?: number | string } = {};
   const handler = createHandler({
-    secret: "synthetic-secret",
+    secret: `  ${secret}  `,
     now: () => 1_800_000_000_000,
     dependencies: {
       withCreditLock: async (_creditoId, work) => work(),
       claim: async () => ({ kind: "applied", paymentId: 17 }),
-      loadCredit: async () => null,
+      loadCredit: async () => ({
+        usuarioId: 5,
+        statusCredit: "ACTIVO",
+        binding: { activo: true, expires_at: null, max_payment_amount: null },
+      }),
       findPayments: async () => [],
-      registerPayment: async () => undefined,
+      registerPayment: async () => ({ success: true }),
       applyPayment: async () => ({ success: true }),
       complete: async () => undefined,
       fail: async () => undefined,
@@ -288,9 +440,9 @@ test("un fallo queda reintentable sin registrar ni aplicar dos veces", async () 
       binding: { activo: true, expires_at: null, max_payment_amount: null },
     }),
     findPayments: async () => registered
-      ? [{ paymentId: 17, validationStatus: paymentStatus }]
+      ? [{ paymentId: 17, validationStatus: paymentStatus, amount: "10.00" }]
       : [],
-    registerPayment: async () => { registered += 1; },
+    registerPayment: async () => { registered += 1; return { success: true }; },
     applyPayment: async () => {
       applyAttempts += 1;
       if (applyAttempts === 1) throw new Error("synthetic failure");
@@ -334,9 +486,9 @@ test("serializa requests concurrentes y devuelve un único paymentId", async () 
       binding: { activo: true, expires_at: null, max_payment_amount: null },
     }),
     findPayments: async () => registered
-      ? [{ paymentId: 17, validationStatus: applied ? "validated" : "pending" }]
+      ? [{ paymentId: 17, validationStatus: applied ? "validated" : "pending", amount: "10.00" }]
       : [],
-    registerPayment: async () => { registered += 1; },
+    registerPayment: async () => { registered += 1; return { success: true }; },
     applyPayment: async () => { applied += 1; return { success: true }; },
     complete: async () => { eventStatus = "applied"; },
     fail: async () => { eventStatus = "failed"; },
@@ -388,13 +540,14 @@ test("serializa referencias distintas del mismo crédito", async () => {
       binding: { activo: true, expires_at: null, max_payment_amount: null },
     }),
     findPayments: async (eventId: number) => registered.has(eventId)
-      ? [{ paymentId: eventId + 10, validationStatus: "pending" }]
+      ? [{ paymentId: eventId + 10, validationStatus: "pending", amount: "10.00" }]
       : [],
     registerPayment: async (_body: unknown, eventId: number) => {
       active += 1;
       maxActive = Math.max(maxActive, active);
       await Bun.sleep(10);
       registered.add(eventId);
+      return { success: true };
     },
     applyPayment: async () => {
       active -= 1;

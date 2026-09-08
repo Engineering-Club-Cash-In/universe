@@ -554,6 +554,7 @@
       banco_id: integer("banco_id").references(() => bancos.banco_id), // 👈 OPCIONAL
     numeroAutorizacion: varchar("numeroautorizacion", { length: 100 }),
     registerBy:varchar("registerby",{length:150}).notNull(),
+    nexaPaymentEventId: integer("nexa_payment_event_id"),
       cuenta_empresa_id: integer("cuenta_empresa_id")
       .references(() => cuentasEmpresa.cuentaId), //
     pagoConvenio :numeric("pago_convenio",{precision:18,scale:2}).notNull(),

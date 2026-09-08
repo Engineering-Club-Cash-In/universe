@@ -14,12 +14,16 @@ export interface CarteraPaymentClient {
 
 const applyPaymentResponseSchema = z.object({
   status: z.literal("APPLIED"),
-  paymentId: z.number(),
+  paymentId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   idempotent: z.boolean().optional(),
 });
 const safeErrorResponseSchema = z.object({ error: z.string().regex(/^[a-z0-9_]{1,64}$/) });
 
 type Fetcher = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
+
+export class CarteraPaymentRequestError extends Error {
+  readonly retryable = true;
+}
 
 function formatAmount(amount: number) {
   const value = String(amount);
@@ -35,7 +39,7 @@ function formatAmount(amount: number) {
 }
 
 export class HttpCarteraPaymentClient implements CarteraPaymentClient {
-  constructor(private readonly options: { baseUrl: string; secret: string; fetch?: Fetcher; clock?: () => number }) {}
+  constructor(private readonly options: { baseUrl: string; secret: string; timeoutMs?: number; fetch?: Fetcher; clock?: () => number }) {}
 
   async applyNexaPayment(input: { creditoId: number; transaction: CarteraTransaction }): Promise<CarteraApplyPaymentResult> {
     if (!Number.isInteger(input.creditoId) || input.creditoId <= 0) {
@@ -44,16 +48,26 @@ export class HttpCarteraPaymentClient implements CarteraPaymentClient {
     if (input.transaction.currency !== "GTQ") {
       throw new Error("Cartera payments require GTQ currency");
     }
+    const externalReference = String(input.transaction.reference).trim();
+    if (!externalReference || externalReference.length > 150) {
+      throw new Error("externalReference must contain 1 to 150 characters");
+    }
+    const transactionId = input.transaction.transactionId == null
+      ? ""
+      : String(input.transaction.transactionId).trim();
+    if (transactionId.length > 100) {
+      throw new Error("transactionId must contain at most 100 characters");
+    }
 
     const fetcher = this.options.fetch ?? fetch;
     const path = "/internal/nexa/payments/apply";
     const body = JSON.stringify({
-      externalReference: String(input.transaction.reference),
+      externalReference,
       creditoId: input.creditoId,
       amount: formatAmount(input.transaction.amount),
       currency: "GTQ",
-      ...(input.transaction.transactionId !== null && input.transaction.transactionId !== undefined && input.transaction.transactionId !== ""
-        ? { transactionId: String(input.transaction.transactionId) }
+      ...(transactionId
+        ? { transactionId }
         : {}),
     });
     const timestamp = String(Math.floor((this.options.clock?.() ?? Date.now()) / 1000));
@@ -71,6 +85,7 @@ export class HttpCarteraPaymentClient implements CarteraPaymentClient {
         "x-nexa-signature": signature,
       },
       body,
+      signal: AbortSignal.timeout(this.options.timeoutMs ?? 10_000),
     });
 
     if (!response.ok) {
@@ -78,6 +93,10 @@ export class HttpCarteraPaymentClient implements CarteraPaymentClient {
       const error = await response.json()
         .then((body: unknown) => safeErrorResponseSchema.safeParse(body))
         .catch(() => undefined);
+      const retryableCode = error?.success && ["invalid_authentication", "configuration_error"].includes(error.data.error);
+      if ([401, 408, 429].includes(response.status) || response.status >= 500 || (response.status === 403 && (!error?.success || retryableCode))) {
+        throw new CarteraPaymentRequestError(`Cartera payment request failed: HTTP ${status}`);
+      }
       return {
         status: "REJECTED",
         reason: `Cartera payment rejected: HTTP ${status}${error?.success ? ` (${error.data.error})` : ""}`,

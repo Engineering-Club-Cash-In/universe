@@ -24,7 +24,7 @@ function capturingClient(response: Response = Response.json({ status: "APPLIED",
   let request: { url: string; init?: RequestInit } | undefined;
   const client = new HttpCarteraPaymentClient({
     baseUrl: "https://cartera.example.com/",
-    secret: "cartera-secret",
+    secret: "c".repeat(32),
     clock: () => 1_757_332_800_000,
     fetch: async (input, init) => {
       request = { url: String(input), init };
@@ -69,7 +69,7 @@ describe("HttpCarteraPaymentClient", () => {
       headers["x-nexa-nonce"],
       createHash("sha256").update(String(body)).digest("hex"),
     ].join("\n");
-    expect(headers["x-nexa-signature"]).toBe(createHmac("sha256", "cartera-secret").update(canonical).digest("hex"));
+    expect(headers["x-nexa-signature"]).toBe(createHmac("sha256", "c".repeat(32)).update(canonical).digest("hex"));
     expect(result).toEqual({ status: "APPLIED", paymentId: 77, idempotent: true });
   });
 
@@ -82,6 +82,36 @@ describe("HttpCarteraPaymentClient", () => {
       amount: "10.00",
       currency: "GTQ",
     }));
+  });
+
+  test("recorta referencias y omite transactionId con solo espacios", async () => {
+    const { client, getRequest } = capturingClient();
+    await client.applyNexaPayment({
+      creditoId: 123,
+      transaction: transaction({ reference: "  ref-1  ", transactionId: "   " }),
+    });
+    expect(getRequest()?.init?.body).toBe(JSON.stringify({
+      externalReference: "ref-1",
+      creditoId: 123,
+      amount: "10.00",
+      currency: "GTQ",
+    }));
+  });
+
+  test("limita externalReference y transactionId antes de enviar", async () => {
+    const { client } = capturingClient();
+    await expect(client.applyNexaPayment({
+      creditoId: 123,
+      transaction: transaction({ reference: " ", transactionId: "tx" }),
+    })).rejects.toThrow("externalReference");
+    await expect(client.applyNexaPayment({
+      creditoId: 123,
+      transaction: transaction({ reference: "r".repeat(151), transactionId: "tx" }),
+    })).rejects.toThrow("externalReference");
+    await expect(client.applyNexaPayment({
+      creditoId: 123,
+      transaction: transaction({ transactionId: ` ${"t".repeat(101)} ` }),
+    })).rejects.toThrow("transactionId");
   });
 
   test("envía transactionId numérico cero", async () => {
@@ -117,13 +147,64 @@ describe("HttpCarteraPaymentClient", () => {
     });
   });
 
-  test.each([
-    [{ error: "binding_expired" }, "Cartera payment rejected: HTTP 403 Forbidden (binding_expired)"],
-    [{ error: "binding_expired secret=cartera-secret" }, "Cartera payment rejected: HTTP 403 Forbidden"],
-  ])("solo propaga códigos de error JSON seguros", async (body, reason) => {
+  test("solo propaga códigos de error JSON seguros", async () => {
+    const body = { error: "binding_expired" };
+    const reason = "Cartera payment rejected: HTTP 403 Forbidden (binding_expired)";
     const { client } = capturingClient(Response.json(body, { status: 403, statusText: "Forbidden" }));
     const result = await client.applyNexaPayment({ creditoId: 123, transaction: transaction() });
     expect(result).toEqual({ status: "REJECTED", reason });
     expect(JSON.stringify(result)).not.toContain("cartera-secret");
+  });
+
+  test("no convierte un 403 sin código seguro en rechazo terminal", async () => {
+    const { client } = capturingClient(Response.json(
+      { error: "binding_expired secret=cartera-secret" },
+      { status: 403, statusText: "Forbidden" },
+    ));
+    await expect(client.applyNexaPayment({ creditoId: 123, transaction: transaction() }))
+      .rejects.toThrow("HTTP 403 Forbidden");
+  });
+
+  test.each([500, 503, 408, 429, 401])("mantiene HTTP %s como fallo retryable", async (status) => {
+    const { client } = capturingClient(new Response("upstream failure", { status }));
+    await expect(client.applyNexaPayment({ creditoId: 123, transaction: transaction() }))
+      .rejects.toThrow(`HTTP ${status}`);
+  });
+
+  test("mantiene un rechazo de autenticación explícito como retryable", async () => {
+    const { client } = capturingClient(Response.json(
+      { error: "invalid_authentication" },
+      { status: 403, statusText: "Forbidden" },
+    ));
+    await expect(client.applyNexaPayment({ creditoId: 123, transaction: transaction() }))
+      .rejects.toThrow("HTTP 403 Forbidden");
+  });
+
+  test.each([
+    new Response("", { status: 204 }),
+    new Response("not-json", { status: 200 }),
+    Response.json({ status: "APPLIED", paymentId: 0 }),
+    Response.json({ status: "APPLIED", paymentId: Number.MAX_SAFE_INTEGER + 1 }),
+  ])("rechaza respuesta APPLIED vacía, inválida o malformada", async (response) => {
+    const { client } = capturingClient(response);
+    await expect(client.applyNexaPayment({ creditoId: 123, transaction: transaction() })).rejects.toThrow();
+  });
+
+  test("aborta la llamada al vencer el timeout", async () => {
+    let aborted = false;
+    const client = new HttpCarteraPaymentClient({
+      baseUrl: "https://cartera.example.com",
+      secret: "c".repeat(32),
+      timeoutMs: 5,
+      fetch: async (_input, init) => new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          aborted = true;
+          reject(init.signal?.reason);
+        });
+      }),
+    });
+
+    await expect(client.applyNexaPayment({ creditoId: 123, transaction: transaction() })).rejects.toThrow();
+    expect(aborted).toBe(true);
   });
 });

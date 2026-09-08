@@ -114,6 +114,12 @@ const texto = (
 			return `Ya tenía cuenta en el portal con otro correo: ${acceso.usuarioEmail ?? "uno distinto"}. Hasta que los dos correos sean el mismo no va a ver sus inversiones al entrar. Avisa a sistemas para cuadrarlos.`;
 		case "cuenta_anclada_solo_por_correo":
 			return "Ya tenía cuenta y se le reconoció solo por el correo. Si alguien le cambia el correo, se le va a crear una segunda cuenta. Avisa a sistemas.";
+		// La marca cartera al crear, mirando el nombre (`pareceSociedad`).
+		// Se avisa AQUÍ y no solo en el resumen diario porque el resumen no la ve: el
+		// job no crea cuentas, así que por su lado esta fila vuelve como "ya tenía" y
+		// se pierde entre las sanas. Aquí quien captura la tiene todavía delante.
+		case "parece_sociedad_con_cuenta_propia":
+			return "El nombre parece de una sociedad y se le creó cuenta PROPIA del portal, con su contraseña por correo. Si es una empresa, al portal entra su representante legal: capturáselo en Editar → ¿Es empresa? y avisa a sistemas de la cuenta que se creó de más.";
 		case "correo_no_enviado":
 			return acceso.advertencias.includes(
 				"cuenta_creada_sin_contrasena_entregada",

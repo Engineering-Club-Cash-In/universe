@@ -62,7 +62,32 @@ describe("resumirProvisionamiento", () => {
     // dpi_rep_legal capturado, así que la regla le da cuenta propia. No se
     // corrige por heurística: se reporta para que alguien capture el
     // representante que falta.
-    const res = resumirProvisionamiento([r({ inversionistaId: 140, estado: "creada" })], nombres);
+    //
+    // La marca la trae la ADVERTENCIA, y no se recalcula aquí por el nombre: a
+    // esta rama no llega el job —no crea cuentas— sino el alta, que ya viene
+    // marcada de `provisionarInversionista`. Mirar el nombre otra vez era tener
+    // el criterio en dos sitios y ejecutarlo en ninguno, porque el único
+    // resultado `creada` que existe nace allá.
+    const res = resumirProvisionamiento(
+      [
+        r({
+          inversionistaId: 140,
+          estado: "creada",
+          advertencias: ["parece_sociedad_con_cuenta_propia"],
+        }),
+      ],
+      nombres,
+    );
+    expect(res.dudosas.map((d: any) => d.inversionistaId)).toEqual([140]);
+  });
+
+  it("y la sigue marcando cuando todavía no tiene cuenta (ahí sí manda el nombre)", () => {
+    // La candidata es la única oportunidad de verla ANTES de crearle la cuenta,
+    // y ahí no hay advertencia que valga: no se creó nada.
+    const res = resumirProvisionamiento(
+      [r({ inversionistaId: 140, estado: "candidata" })],
+      nombres,
+    );
     expect(res.dudosas.map((d: any) => d.inversionistaId)).toEqual([140]);
   });
 

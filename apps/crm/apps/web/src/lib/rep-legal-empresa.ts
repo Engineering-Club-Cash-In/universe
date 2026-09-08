@@ -66,21 +66,6 @@ export const errorRepLegal = (
 	esEmpresa && (valor ?? "").trim() === "" ? REP_LEGAL_REQUERIDO : undefined;
 
 /**
- * Valor para el input `dpiRepLegal` del router. `undefined` = llave ausente,
- * cartera no toca el campo (lo correcto al crear); `""` = llave presente vacía,
- * cartera BORRA el representante (lo correcto al editar).
- */
-export const valorRepLegalAEnviar = (
-	esEmpresa: boolean,
-	valor: string | null | undefined,
-	{ borrarSiNoEsEmpresa }: { borrarSiNoEsEmpresa: boolean },
-): string | undefined => {
-	if (!esEmpresa) return borrarSiNoEsEmpresa ? "" : undefined;
-	const limpio = (valor ?? "").trim();
-	return limpio === "" ? undefined : limpio;
-};
-
-/**
  * ¿Guardar así le quita el representante a alguien que ya lo tenía? Es el
  * único caso que merece confirmación: borra en silencio el acceso al portal de
  * un tercero que no está frente a la pantalla.
@@ -90,3 +75,79 @@ export const requiereConfirmacionBorrado = (
 	esEmpresa: boolean,
 	dpiDeLaFila: string | number | null | undefined,
 ): boolean => esEmpresaInicial(repLegalOriginal, dpiDeLaFila) && !esEmpresa;
+
+/**
+ * ¿Esta fila era su propio representante? (`dpi = 4036613`,
+ * `dpi_rep_legal = '04036613'`: el inversionista 187.)
+ *
+ * Es el complemento exacto de `esEmpresaInicial` cuando hay valor guardado: con
+ * `dpi_rep_legal` puesto, o representa a OTRO —empresa— o se representa a sí
+ * mismo. El valor guardado significa cosas distintas en cada caso: en el
+ * primero es el acceso al portal de un tercero; en el segundo es una copia del
+ * DPI de la propia fila, y tiene que seguir siéndolo.
+ */
+const esAutorrepresentado = (
+	repLegalOriginal: string | null | undefined,
+	dpiDeLaFila: string | number | null | undefined,
+): boolean => {
+	const rep = normalizarDpiParaComparar(repLegalOriginal);
+	return rep !== null && rep === normalizarDpiParaComparar(dpiDeLaFila);
+};
+
+/**
+ * Valor para el input `dpiRepLegal` del router. `undefined` = llave ausente,
+ * cartera no toca el campo (lo correcto al crear); `""` = llave presente vacía,
+ * cartera BORRA el representante (lo correcto al editar).
+ *
+ * Los tres casos de "no es empresa", que no son lo mismo:
+ *
+ * 1. ANTES SÍ ERA. Se desmarcó el interruptor a propósito: se borra, y eso le
+ *    quita el acceso al portal a un tercero, por lo que pasa antes por
+ *    `requiereConfirmacionBorrado`.
+ *
+ * 2. SE REPRESENTA A SÍ MISMO. Abre con el interruptor apagado, así que
+ *    cualquier edición suya —cambiar un banco— llegaba aquí; borrar era
+ *    vaciarle un campo que no es decorativo (`getInvestors` lo prefiere como
+ *    DPI de retorno en las búsquedas por correo). Por eso no se toca... salvo
+ *    que lo que se esté editando sea EL DPI. Ahí "no tocar" deja
+ *    `dpi_rep_legal` con el DPI viejo y `dpi` con el nuevo, o sea dos números
+ *    distintos, y eso es exactamente la definición de empresa que usa el
+ *    backend (`esEmpresaRepresentada`): la fila deja de recibir cuenta propia y
+ *    pasa a estar "representada" por una identidad anterior que ya no es la
+ *    suya. El valor guardado era una copia de su DPI, así que sigue al DPI: si
+ *    el nuevo está vacío se borra, porque conservar el viejo es justo lo que
+ *    convierte la fila en una empresa falsa.
+ *
+ * 3. NUNCA TUVO. No hay nada que borrar ni que seguir: llave ausente. Es
+ *    también el caso de crear.
+ */
+export const valorRepLegalAlGuardar = ({
+	esEmpresa,
+	valor,
+	repLegalOriginal,
+	dpiOriginal,
+	dpiDelFormulario,
+}: {
+	esEmpresa: boolean;
+	valor: string | null | undefined;
+	repLegalOriginal: string | null | undefined;
+	dpiOriginal: string | number | null | undefined;
+	dpiDelFormulario: string | number | null | undefined;
+}): string | undefined => {
+	if (esEmpresa) {
+		const limpio = (valor ?? "").trim();
+		return limpio === "" ? undefined : limpio;
+	}
+
+	if (requiereConfirmacionBorrado(repLegalOriginal, esEmpresa, dpiOriginal)) {
+		return "";
+	}
+
+	if (!esAutorrepresentado(repLegalOriginal, dpiOriginal)) return undefined;
+
+	const nuevo = normalizarDpiParaComparar(dpiDelFormulario);
+	if (nuevo === normalizarDpiParaComparar(dpiOriginal)) return undefined;
+
+	// Sin DPI nuevo, conservar el viejo es lo que convierte la fila en empresa.
+	return nuevo ?? "";
+};

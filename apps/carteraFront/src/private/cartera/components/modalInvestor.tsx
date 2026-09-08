@@ -14,7 +14,7 @@ import {
   errorRepLegal,
   esEmpresaInicial,
   requiereConfirmacionBorrado,
-  valorRepLegalAEnviar,
+  valorRepLegalAlGuardar,
 } from "./repLegalEmpresa";
 
 interface InvestorModalProps {
@@ -168,17 +168,16 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
       // y no puede colarla) se fabrique una cuenta con el DPI que quiera. En
       // modo editar es inocua: cartera solo provisiona las filas que INSERTA.
       provisionar_portal: true,
-      // Llave siempre presente: vacío = borrar. Es seguro en ambos modos porque
-      // la creación estricta garantiza que el alta jamás escribe sobre otra fila.
-      // Sin "¿Es empresa?" marcado no se manda nada del representante (null).
-      // Solo borra si ANTES era empresa. Sin esto, editar cualquier campo de
-      // quien es su propio representante le vaciaba el `dpi_rep_legal`.
-      dpi_rep_legal: valorRepLegalAEnviar(esEmpresa, data.dpi_rep_legal, {
-        borrarSiNoEsEmpresa: requiereConfirmacionBorrado(
-          repLegalOriginal,
-          esEmpresa,
-          initialData?.dpi
-        ),
+      // Qué se manda del representante lo decide entero `valorRepLegalAlGuardar`:
+      // borra solo lo que se desmarcó a propósito, no toca al que es su propio
+      // representante, y le sigue el DPI cuando es el DPI lo que se editó (si no,
+      // la fila se convertía en una empresa representada por su identidad vieja).
+      dpi_rep_legal: valorRepLegalAlGuardar({
+        esEmpresa,
+        valor: data.dpi_rep_legal,
+        repLegalOriginal,
+        dpiOriginal: initialData?.dpi,
+        dpiDelFormulario: data.dpi,
       }),
       dpi: data.dpi ? Number(data.dpi) : null,
       banco: data.banco ? Number(data.banco) : null,
@@ -650,17 +649,13 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
             const payload = {
               ...currentFormData,
               dpi: currentFormData.dpi ? Number(currentFormData.dpi) : null,
-              dpi_rep_legal: valorRepLegalAEnviar(
+              dpi_rep_legal: valorRepLegalAlGuardar({
                 esEmpresa,
-                currentFormData.dpi_rep_legal,
-                {
-                  borrarSiNoEsEmpresa: requiereConfirmacionBorrado(
-                    repLegalOriginal,
-                    esEmpresa,
-                    initialData?.dpi
-                  ),
-                }
-              ),
+                valor: currentFormData.dpi_rep_legal,
+                repLegalOriginal,
+                dpiOriginal: initialData?.dpi,
+                dpiDelFormulario: currentFormData.dpi,
+              }),
               banco: currentFormData.banco ? Number(currentFormData.banco) : null,
               monto_reinversion: currentFormData.monto_reinversion ? Number(currentFormData.monto_reinversion) : 0,
               tipo_reinversion: "reinversion_combinada",

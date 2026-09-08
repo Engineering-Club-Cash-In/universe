@@ -6,23 +6,34 @@ export type ValidationRunState = {
 
 export type AttemptAvailability =
 	| { allowed: true; nextAttempt: number }
-	| { allowed: false; reason: "processing" | "limit"; nextAttempt: number };
+	| {
+			allowed: false;
+			reason: "processing" | "limit" | "cost_cap";
+			nextAttempt: number;
+	  };
 
 export type ResetAvailability =
 	| { allowed: true; resetAfterAttemptNumber: number }
 	| { allowed: false; reason: "processing" | "quota_available" };
 
+// El cupo limita validaciones del negocio y solo cuenta ejecuciones completadas,
+// para que un fallo tecnico no lo consuma. Eso deja las ejecuciones fallidas sin
+// cota, y cada una paga llamadas a Gemini: runsInCycle pone el techo de costo.
 export function getAttemptAvailability(params: {
 	latestAttempt: number;
 	completedAttempts: number;
+	runsInCycle: number;
 	hasProcessingRun: boolean;
 	maxAttempts: number;
+	maxRunsPerCycle: number;
 }): AttemptAvailability {
 	const nextAttempt = params.latestAttempt + 1;
 	if (params.hasProcessingRun)
 		return { allowed: false, reason: "processing", nextAttempt };
 	if (params.completedAttempts >= params.maxAttempts)
 		return { allowed: false, reason: "limit", nextAttempt };
+	if (params.runsInCycle >= params.maxRunsPerCycle)
+		return { allowed: false, reason: "cost_cap", nextAttempt };
 	return { allowed: true, nextAttempt };
 }
 

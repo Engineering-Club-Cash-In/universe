@@ -19,6 +19,9 @@ export const PARSE_BUDGET_MS = 8_000;
 // impone.
 export const MAX_PDF_PARSE_LEASE_MS = 15_000;
 export const MAX_DECOMPRESSED_PDF_CONTENT_BYTES = 32 * 1024 * 1024;
+// Techo de objetos declarados en el trailer. Un /Size disparatado hace que
+// pdf-lib reserve estructuras enormes durante load().
+export const MAX_DECLARED_PDF_OBJECTS = 500_000;
 
 export interface PdfByteScan {
 	hasPdfHeader: boolean;
@@ -376,6 +379,41 @@ function safeDocumentMetadata(document: PDFDocument): PdfMetadata {
 	};
 }
 
+// pdf-lib descomprime los object streams dentro de load(), fuera de nuestro
+// presupuesto. Aqui se inflan primero con el inflater acotado: si revientan el
+// limite, load() no llega a ejecutarse.
+export function isPdfSafeToParse(
+	buffer: Buffer | Uint8Array,
+	maxDecompressedBytes = MAX_DECOMPRESSED_PDF_CONTENT_BYTES,
+): boolean {
+	const bytes = Buffer.from(buffer);
+	const text = bytes.toString("latin1");
+
+	for (const match of text.matchAll(/\/Size\s+(\d+)/g)) {
+		if (Number(match[1]) > MAX_DECLARED_PDF_OBJECTS) return false;
+	}
+
+	const budget: PdfContentBudget = { remainingBytes: maxDecompressedBytes };
+	const objectStream =
+		/\/Type\s*\/ObjStm[\s\S]{0,512}?\/Length\s+(\d+)[\s\S]{0,512}?stream\r?\n/g;
+	for (const match of text.matchAll(objectStream)) {
+		const declaredLength = Number(match[1]);
+		const start = (match.index ?? 0) + match[0].length;
+		if (!declaredLength || start + declaredLength > bytes.length) return false;
+		try {
+			const inflated = inflatePdfStreamBounded(
+				bytes.subarray(start, start + declaredLength),
+				budget.remainingBytes,
+			);
+			consumeContentBudget(budget, inflated.length);
+		} catch (error) {
+			if (error instanceof PdfContentBudgetExceededError) return false;
+			// Un stream que no infla no es una bomba; que lo resuelva pdf-lib.
+		}
+	}
+	return true;
+}
+
 export async function inspectPdf(
 	buffer: Buffer | Uint8Array,
 ): Promise<PdfForensicsResult> {
@@ -394,6 +432,11 @@ export async function inspectPdf(
 		degradedToL0: Buffer.byteLength(buffer) > MAX_PDF_SIZE_BYTES,
 	};
 	if (base.degradedToL0 || !bytes.hasPdfHeader) return base;
+	if (!isPdfSafeToParse(buffer)) {
+		base.degradedToL0 = true;
+		base.budgetExceeded = true;
+		return base;
+	}
 
 	let document: PDFDocument;
 	try {

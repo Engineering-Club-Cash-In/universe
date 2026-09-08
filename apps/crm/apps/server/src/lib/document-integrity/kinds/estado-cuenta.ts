@@ -34,6 +34,7 @@ export const ESTADO_CUENTA_ISSUERS = [
 export const estadoCuentaAiSchema = createDocumentIntegrityAiSchema(
 	ESTADO_CUENTA_OBSERVATION_CODES,
 	ESTADO_CUENTA_ISSUERS,
+	{ observationCode: "otro", issuer: "otro" },
 );
 
 export const estadoCuentaBatchAiSchema = z.object({

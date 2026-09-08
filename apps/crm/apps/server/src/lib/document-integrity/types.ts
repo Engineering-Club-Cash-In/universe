@@ -61,13 +61,19 @@ export interface ValidationOutcome {
 export function createDocumentIntegrityAiSchema<
 	const TObservation extends readonly [string, ...string[]],
 	const TIssuer extends readonly [string, ...string[]],
->(observationCodes: TObservation, issuerValues: TIssuer) {
+>(
+	observationCodes: TObservation,
+	issuerValues: TIssuer,
+	// Tipados contra los valores recibidos: el compilador prueba que pertenecen
+	// al enum, en vez de afirmarlo con un cast.
+	fallbacks: { observationCode: TObservation[number]; issuer: TIssuer[number] },
+) {
 	const nullableText = z.string().trim().min(1).nullable().catch(null);
 	return z.object({
 		corresponde_al_tipo_declarado: z.boolean(),
 		confianza_tipo_documento: z.number().min(0).max(100).catch(0),
 		tipo_documento_detectado: z.string().trim().min(1).catch("desconocido"),
-		emisor_normalizado: z.enum(issuerValues).catch("otro" as TIssuer[number]),
+		emisor_normalizado: z.enum(issuerValues).catch(fallbacks.issuer),
 		periodo: z
 			.object({
 				inicio: z.string().date(),
@@ -78,15 +84,16 @@ export function createDocumentIntegrityAiSchema<
 		titular_detectado: nullableText,
 		identificador_detectado: nullableText,
 		es_legible: z.boolean(),
-		observaciones_forenses: z
-			.array(
-				z.object({
-					codigo: z.enum(observationCodes),
-					pagina: z.number().int().positive().nullable().catch(null),
-					descripcion: z.string().trim().max(240).catch("Observación visual"),
-					confianza: z.number().min(0).max(100).catch(0),
-				}),
-			)
-			.catch([]),
+		// Un codigo desconocido se degrada al de respaldo en vez de descartar toda
+		// la evidencia. Sin catch en el array: una respuesta estructuralmente rota
+		// debe fallar, no volverse permisiva.
+		observaciones_forenses: z.array(
+			z.object({
+				codigo: z.enum(observationCodes).catch(fallbacks.observationCode),
+				pagina: z.number().int().positive().nullable().catch(null),
+				descripcion: z.string().trim().max(240).catch("Observación visual"),
+				confianza: z.number().min(0).max(100).catch(0),
+			}),
+		),
 	});
 }

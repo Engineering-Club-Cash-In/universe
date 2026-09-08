@@ -67,6 +67,9 @@ const RUN_STALE_AFTER_MS =
 	MAX_DOCUMENTS_PER_VALIDATION * MAX_PDF_PARSE_LEASE_MS +
 	60_000;
 export const MAX_DOCUMENT_INTEGRITY_ATTEMPTS = 2;
+// Techo de ejecuciones por ciclo sin importar su estado. Acota el gasto en IA
+// que producen los fallos tecnicos, que a proposito no consumen cupo.
+const MAX_RUNS_PER_CYCLE = 6;
 
 export class DocumentIntegrityError extends Error {
 	constructor(
@@ -178,6 +181,7 @@ async function createValidationRun(params: {
 			.select({
 				latest: sql<number>`coalesce(max(${documentIntegrityValidationRuns.attemptNumber}), 0)::int`,
 				completed: sql<number>`count(*) filter (where ${documentIntegrityValidationRuns.status} = 'completed' and ${documentIntegrityValidationRuns.attemptNumber} > ${resetAfterAttemptNumber})::int`,
+				runsInCycle: sql<number>`count(*) filter (where ${documentIntegrityValidationRuns.attemptNumber} > ${resetAfterAttemptNumber})::int`,
 				hasProcessingRun: sql<boolean>`coalesce(bool_or(${documentIntegrityValidationRuns.status} = 'processing'), false)`,
 			})
 			.from(documentIntegrityValidationRuns)
@@ -187,13 +191,21 @@ async function createValidationRun(params: {
 		const availability = getAttemptAvailability({
 			latestAttempt: attempts?.latest ?? 0,
 			completedAttempts: attempts?.completed ?? 0,
+			runsInCycle: attempts?.runsInCycle ?? 0,
 			hasProcessingRun: attempts?.hasProcessingRun ?? false,
 			maxAttempts: MAX_DOCUMENT_INTEGRITY_ATTEMPTS,
+			maxRunsPerCycle: MAX_RUNS_PER_CYCLE,
 		});
 		if (!availability.allowed && availability.reason === "processing") {
 			throw new DocumentIntegrityError(
 				"TOO_MANY_REQUESTS",
 				"Esta oportunidad ya tiene una validación documental en proceso.",
+			);
+		}
+		if (!availability.allowed && availability.reason === "cost_cap") {
+			throw new DocumentIntegrityError(
+				"TOO_MANY_REQUESTS",
+				"Esta oportunidad acumuló demasiadas validaciones fallidas. Pide a un supervisor que reinicie el cupo.",
 			);
 		}
 		if (!availability.allowed) {
@@ -784,6 +796,18 @@ export async function validateUploadedBankStatements(params: {
 			}
 		}),
 	);
+	// Un lote a medias haria que Gemini analice el resto y el run quede en error,
+	// que no consume cupo: repetirlo con un archivo invalido rinde analisis pagados
+	// sin gastar intentos.
+	const unreadableFiles = prepared.filter((document) => !document.buffer);
+	if (unreadableFiles.length > 0) {
+		throw new DocumentIntegrityError(
+			"BAD_REQUEST",
+			`No se pudo leer ${unreadableFiles
+				.map((document) => document.fileName)
+				.join(", ")}. Vuelve a cargar los archivos e intenta de nuevo.`,
+		);
+	}
 	const results = await executeValidationRun({
 		documents: prepared,
 		opportunityId: params.opportunityId,

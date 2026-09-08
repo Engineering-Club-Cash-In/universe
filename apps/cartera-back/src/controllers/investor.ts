@@ -863,14 +863,23 @@ export const insertInvestor = async ({ body, set, user }: any) => {
 
         if (inv.email?.trim()) {
           const email = inv.email.trim().toLowerCase();
+          // TODAS las filas de ese correo, no la primera: un correo puede ser de
+          // varias (Autocash y Blokfund comparten uno en producción) y basta con
+          // que UNA sea del grupo para que no haya duplicado. Con `limit(1)` la
+          // misma alta se aceptaba o se rechazaba según qué fila devolviera
+          // Postgres. El orden por id es para que el mensaje tampoco cambie.
           const result = await db
             .select()
             .from(inversionistas)
             .where(condicionInversionistaPorEmail(email))
-            .limit(1);
+            .orderBy(asc(inversionistas.inversionista_id));
 
           // La empresa de un inversionista comparte su correo a propósito.
-          if (result[0] && !correoCompartidoConSuGrupo(inv, result[0])) {
+          const esDeSuGrupo = result.some((fila) =>
+            correoCompartidoConSuGrupo(inv, fila),
+          );
+
+          if (result[0] && !esDeSuGrupo) {
             conflictos.push({
               error: "duplicate_email",
               message: "Ya existe un inversionista con ese email",

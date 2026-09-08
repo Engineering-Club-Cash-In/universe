@@ -13,6 +13,7 @@ let usuarios: UsuarioPortal[];
 let bienvenidas: any[];
 let avisos: any[];
 let creados: any[];
+let borrados: string[];
 let actualizaciones: any[];
 let fallarCreacion: null | (() => void);
 let modo: { server: string; redirige: boolean; destinatarioUnico: string | null };
@@ -38,6 +39,10 @@ const deps = (): DependenciasProvisionamiento => ({
     if (cambios.role) u.role = cambios.role;
     if (cambios.dpi !== undefined) u.dpi = cambios.dpi;
   },
+  eliminarUsuario: async (id) => {
+    borrados.push(id);
+    usuarios = usuarios.filter((u) => u.id !== id);
+  },
   enviarBienvenida: async (p) => { bienvenidas.push(p); return { success: true }; },
   enviarEmpresaAgregada: async (p) => { avisos.push(p); return { success: true }; },
 });
@@ -47,6 +52,7 @@ beforeEach(() => {
   bienvenidas = [];
   avisos = [];
   creados = [];
+  borrados = [];
   actualizaciones = [];
   fallarCreacion = null;
   modo = { server: "PROD", redirige: false, destinatarioUnico: null };
@@ -377,8 +383,12 @@ describe("asegurarCuentaInversionista — nada puede tirar después de crear la 
       estado: "fallo",
       motivo: "no_se_pudo_marcar_password_provisionada",
     });
-    expect(r.advertencias).toContain("cuenta_creada_sin_marca_de_password");
     expect(bienvenidas).toEqual([]);
+    // Y la cuenta a medias se deshace, así que el reintento la recupera. La
+    // advertencia queda reservada para cuando ni eso se pudo (ver el describe
+    // de la marca fail-closed).
+    expect(usuarios).toEqual([]);
+    expect(r.advertencias).not.toContain("cuenta_creada_sin_marca_de_password");
   });
 
   it("si el envío TIRA, no se traga la cuenta creada: la reporta como acceso perdido", async () => {
@@ -851,7 +861,60 @@ describe("asegurarCuentaInversionista — la marca de contraseña temporal es fa
       estado: "fallo",
       motivo: "no_se_pudo_marcar_password_provisionada",
     });
+  });
+
+  // "Un humano la vuelve a dar de alta" era falso mientras la cuenta a medias
+  // siguiera en pie: con su correo y su DPI ya escritos, el reintento deja de
+  // entrar por el camino que CREA y cae en `reconocerExistente`, que a una
+  // cuenta existente no le manda contraseña —nunca lo hace— y encima suele
+  // negarle el rol porque la fila recién creada no tiene DPI. Ningún reintento
+  // la recuperaba: el único arreglo era a mano en la base.
+  it("deshace la cuenta a medias, así el reintento SÍ la recupera", async () => {
+    const marcaRota = (base: DependenciasProvisionamiento) => ({
+      ...base,
+      actualizarUsuario: async (id: string, cambios: any) => {
+        if (cambios.passwordProvisionadaAt !== undefined) {
+          throw new Error("update falló");
+        }
+        return base.actualizarUsuario(id, cambios);
+      },
+    });
+
+    const primera = await asegurarCuentaInversionista(entrada(), marcaRota(deps()));
+
+    expect(primera.estado).toBe("fallo");
+    expect(borrados).toHaveLength(1);
+    expect(usuarios).toEqual([]);
+    // Deshecha, no hay nada a medias que reportar ni que arreglar a mano.
+    expect(primera.advertencias).not.toContain("cuenta_creada_sin_marca_de_password");
+
+    // Y el reintento entra por donde tiene que entrar: crea y manda contraseña.
+    const segunda = await asegurarCuentaInversionista(entrada(), deps());
+
+    expect(segunda.estado).toBe("creada");
+    expect(bienvenidas).toHaveLength(1);
+  });
+
+  it("si tampoco se puede deshacer, lo dice: ahí reintentar no sirve", async () => {
+    const base = deps();
+    const d = {
+      ...base,
+      actualizarUsuario: async (id: string, cambios: any) => {
+        if (cambios.passwordProvisionadaAt !== undefined) {
+          throw new Error("update falló");
+        }
+        return base.actualizarUsuario(id, cambios);
+      },
+      eliminarUsuario: async () => {
+        throw new Error("la base sigue sin responder");
+      },
+    };
+
+    const r = await asegurarCuentaInversionista(entrada(), d);
+
+    expect(r.estado).toBe("fallo");
     expect(r.advertencias).toContain("cuenta_creada_sin_marca_de_password");
+    expect(bienvenidas).toEqual([]);
   });
 
   it("pone la marca ANTES de que el correo salga, no después", async () => {

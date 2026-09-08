@@ -94,6 +94,12 @@ export const dependenciasReales = (): DependenciasProvisionamiento => ({
 
     await db.update(users).set(set).where(eq(users.id, id));
   },
+  // Solo la usa el rollback del alta, sobre la cuenta que se acaba de crear en
+  // esa misma llamada. `accounts` y `sessions` caen con ella por el ON DELETE
+  // CASCADE del esquema.
+  eliminarUsuario: async (id) => {
+    await db.delete(users).where(eq(users.id, id));
+  },
   enviarBienvenida: (params) => sendPortalWelcomeEmail(params),
   enviarEmpresaAgregada: (params) => sendPortalCompanyAddedEmail(params),
 });

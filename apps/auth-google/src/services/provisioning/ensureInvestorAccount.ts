@@ -62,6 +62,16 @@ export interface DependenciasProvisionamiento {
       passwordProvisionadaAt?: Date | null;
     },
   ) => Promise<void>;
+  /**
+   * Deshace una cuenta que ACABA de crearse en esta misma llamada.
+   *
+   * No es una operación de mantenimiento ni hay ninguna ruta que la exponga:
+   * existe para un solo punto, el rollback de más abajo, y solo se le pasa el
+   * id que devolvió `crearUsuario` unos milisegundos antes. Esa cuenta no tiene
+   * sesiones, no tiene dueño que la conozca y su contraseña no salió de la
+   * variable local, así que borrarla no le quita nada a nadie.
+   */
+  eliminarUsuario: (id: string) => Promise<void>;
   enviarBienvenida: (params: {
     to: string;
     investorName: string;
@@ -201,6 +211,28 @@ const enviarSinTirar = async (
   }
 };
 
+/**
+ * Deshace sin dejar que el rollback tire, y dice si lo consiguió.
+ *
+ * Corre dentro del `catch` de un fallo de base, o sea con la base ya dando
+ * problemas: lo más probable es que este DELETE se caiga también. Que se caiga
+ * no puede convertir un fallo reportado en una excepción que suba, porque
+ * arriba de esto está `provisionarInversionista`, cuya regla de oro es no tirar
+ * nunca: el inversionista ya está escrito y un throw lo haría parecer fallido.
+ */
+const deshacerSinTirar = async (borrar: () => Promise<void>): Promise<boolean> => {
+  try {
+    await borrar();
+    return true;
+  } catch (error) {
+    console.error(
+      "[provisioning] no se pudo deshacer la cuenta creada sin marca.",
+      error,
+    );
+    return false;
+  }
+};
+
 const correoVacio = (modo: ModoEnvio): ResultadoProvisionamiento["correo"] => ({
   enviado: false,
   plantilla: null,
@@ -323,7 +355,27 @@ export const asegurarCuentaInversionista = async (
     // y que nadie va a pedir que se cambie no la recupera nadie. La contraseña
     // muere aquí con la variable local: la cuenta queda sin dueño que pueda
     // entrar, no con un dueño de más.
-    advertencias.push("cuenta_creada_sin_marca_de_password");
+    //
+    // Y SE DESHACE LA CUENTA, que es lo que hace cierta la frase anterior.
+    // Dejarla en pie convertía "un humano la vuelve a dar de alta" en una
+    // instrucción falsa: la fila queda con correo y DPI, así que el reintento
+    // ya no entra por aquí sino por `reconocerExistente`, que a una cuenta que
+    // ya existe NO le manda contraseña —nunca lo hace, para no sacarle el
+    // acceso a alguien— y encima suele negarle el rol porque la fila recién
+    // creada no tiene DPI. O sea que ningún reintento la recuperaba, y el único
+    // arreglo era a mano en la base, sin que nada dijera que hacía falta.
+    //
+    // Se borra solo lo que se acaba de crear en esta misma llamada, sin
+    // sesiones, sin dueño que sepa que existe y con la contraseña muerta en una
+    // variable local: no le quita nada a nadie. Y `accounts` cae con ella por
+    // el ON DELETE CASCADE del esquema.
+    const deshecha = await deshacerSinTirar(() => deps.eliminarUsuario(creado.id));
+
+    // Dos desenlaces distintos y dos instrucciones distintas. Deshecha, el
+    // reintento normal la recupera y no hace falta decir nada más. Sin deshacer,
+    // reintentar NO sirve y hace falta un humano; por eso esa advertencia sí
+    // llega hasta el modal.
+    if (!deshecha) advertencias.push("cuenta_creada_sin_marca_de_password");
 
     return {
       estado: "fallo",

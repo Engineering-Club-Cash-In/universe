@@ -102,6 +102,13 @@ const texto = (
 			return "Se le creó la cuenta del portal pero el correo con su contraseña NO salió: no puede entrar y no lo sabe. La contraseña no queda guardada, así que hay que restablecerle el acceso a mano. Avisa a sistemas.";
 		case "correo_redirigido_por_modo_no_prod":
 			return `El correo con su contraseña NO le llegó: el sistema está mandando todos los correos a ${acceso.correo.destinatarioReal ?? "una sola bandeja de pruebas"}. La cuenta sí quedó creada. Avisa a sistemas antes de decirle que ya puede entrar.`;
+		// Es distinta de la de arriba: aquí la cuenta ni siquiera llegó a quedar usable,
+		// y el alta intentó deshacerla y no pudo. Se dice porque cambia la instrucción:
+		// el mensaje de "no se pudo dar acceso" manda a apretar otra vez el botón, y
+		// sobre esta cuenta a medias ese reintento no crea nada — encuentra la cuenta ya
+		// existente y a esas nunca se les manda contraseña.
+		case "cuenta_creada_sin_marca_de_password":
+			return "La cuenta del portal quedó a medias: se creó pero no se le pudo mandar la contraseña, y tampoco se pudo deshacer. Volver a intentarlo NO la arregla. Avisa a sistemas.";
 		case "cuenta_creada_sin_rol_ni_dpi":
 			return "La cuenta quedó creada pero sin quedar ligada a este inversionista: si no se corrige, mañana se le puede crear una segunda cuenta. Avisa a sistemas.";
 		case "rol_no_promovido":

@@ -13,6 +13,7 @@ import {
   antesDeCambiarPassword,
   despuesDeCambiarPassword,
 } from "./hooksDePassword";
+import { exigirPasswordPropia } from "./puertaDeBetterAuth";
 import {
   credencialCoincide,
   exigirPasswordDistintaALaActual,
@@ -200,6 +201,27 @@ export const auth = betterAuth({
      * el `ctx` de Better Auth y se le enchufan los efectos de verdad.
      */
     before: createAuthMiddleware(async (ctx) => {
+      // PRIMERO la puerta, y sobre TODOS los endpoints de Better Auth.
+      //
+      // `requireAuth` cierra las superficies de datos, pero `/api/auth/*` no lo
+      // lleva: ahí Better Auth atiende con sus propios endpoints autenticados, y
+      // uno de ellos —`/link-social`— engancha una identidad de Google a la
+      // cuenta. Esa es la que sobrevive al cambio de contraseña y a la
+      // revocación de sesiones, así que quien tuviera la contraseña del correo
+      // se quedaba dentro para siempre. El porqué de cada ruta permitida está
+      // en `puertaDeBetterAuth.ts`.
+      await exigirPasswordPropia(ctx.path, {
+        cuentaDeLaSesion: async () => {
+          const usuario = (await getSessionFromCtx(ctx))?.user;
+          if (!usuario) return null;
+
+          // Se copia SOLO la marca: es el único dato que decide esto, y pasar
+          // el usuario entero ataría la puerta a la forma que Better Auth le dé
+          // a su sesión en la versión que toque.
+          return { passwordProvisionadaAt: usuario.passwordProvisionadaAt };
+        },
+      });
+
       await antesDeCambiarPassword(
         {
           path: ctx.path,

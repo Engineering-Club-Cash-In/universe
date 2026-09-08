@@ -39,6 +39,40 @@ import type { PruebaDeIdentidad } from "./passwordDistinta";
 
 export const RUTA_RESET_DE_PASSWORD = "/reset-password";
 
+/**
+ * Lo que el servidor le impone al cuerpo de `/change-password`, decida lo que
+ * decida el cliente.
+ *
+ * `revokeOtherSessions` es un campo del cuerpo, o sea del NAVEGADOR. La pantalla
+ * de primer ingreso manda `true`, pero eso es una costumbre suya, no una
+ * garantía: un `curl` que lo omita cambia la contraseña sin cerrar nada, y el
+ * hook `after` limpia igual la marca de primer ingreso porque el cambio salió
+ * bien. La otra sesión —la que se abrió con la contraseña que mandamos por
+ * correo, que es justo la que puede no ser del dueño— sigue viva, y ahora
+ * además pasa las dos puertas: la marca ya no está.
+ *
+ * O sea que el control que la marca representa se apagaba sin que se hubiera
+ * cumplido lo que lo justifica. Por eso se fuerza aquí y no se comprueba: si se
+ * exigiera, un cliente que lo omita recibiría un 400 y no habría forma de
+ * salir del estado; forzándolo, la petición funciona y la revocación pasa.
+ *
+ * Better Auth borra TODAS las sesiones del usuario y le emite una nueva a este
+ * navegador (`update-user.mjs`), así que quien está cambiando su contraseña no
+ * se queda fuera y cualquier otra copia sí. Y si eso falla, tira: el `after` ve
+ * el fallo y no limpia la marca.
+ *
+ * Vale para todos y no solo para las cuentas marcadas, a propósito. El único
+ * llamador de hoy ya manda `true`, así que no cambia nada en la práctica, y la
+ * política ya está escrita para el otro camino: el del enlace revoca siempre
+ * (`revokeSessionsOnPasswordReset`). Que dos caminos que hacen lo mismo se
+ * comporten distinto según lo que pida el cliente es la clase de diferencia que
+ * nadie recuerda al leer el código.
+ */
+export const cuerpoForzadoDelCambio = (
+  path: string | undefined,
+): { revokeOtherSessions: true } | null =>
+  path === RUTA_CAMBIO_DE_PASSWORD ? { revokeOtherSessions: true } : null;
+
 /** Lo que el hook `before` necesita de la petición, ya desenvuelto del `ctx`. */
 export interface PeticionDeCambio {
   path?: string;

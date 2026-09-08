@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { APIError } from "better-auth/api";
 import {
   antesDeCambiarPassword,
+  cuerpoForzadoDelCambio,
   despuesDeCambiarPassword,
   RUTA_RESET_DE_PASSWORD,
   type EfectosAntesDelCambio,
@@ -264,5 +265,27 @@ describe("despuesDeCambiarPassword", () => {
     await despuesDeCambiarPassword(RUTA_CAMBIO_DE_PASSWORD, exito, efectos);
 
     expect(efectos.marcados).toEqual([USER]);
+  });
+});
+
+// `revokeOtherSessions` es un campo del CUERPO, o sea del navegador. Que la
+// pantalla de primer ingreso mande `true` es una costumbre suya, no una
+// garantía: un `curl` que lo omita cambia la contraseña sin cerrar nada, y el
+// `after` limpia la marca igual porque el cambio salió bien. La otra sesión
+// —la que se abrió con la contraseña que mandamos por correo— sigue viva y
+// ahora además pasa las dos puertas.
+describe("cuerpoForzadoDelCambio", () => {
+  it("obliga a cerrar las otras sesiones al cambiar la contraseña", () => {
+    expect(cuerpoForzadoDelCambio(RUTA_CAMBIO_DE_PASSWORD)).toEqual({
+      revokeOtherSessions: true,
+    });
+  });
+
+  // Se fuerza en vez de exigirse: un 400 ante un cliente que lo omita dejaría a
+  // esa persona sin forma de salir del primer ingreso.
+  it("no se mete con ningún otro endpoint", () => {
+    expect(cuerpoForzadoDelCambio(RUTA_RESET_DE_PASSWORD)).toBeNull();
+    expect(cuerpoForzadoDelCambio("/sign-in/email")).toBeNull();
+    expect(cuerpoForzadoDelCambio(undefined)).toBeNull();
   });
 });

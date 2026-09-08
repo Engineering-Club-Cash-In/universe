@@ -11,6 +11,7 @@ import {
 } from "../services/password/passwordPropia";
 import {
   antesDeCambiarPassword,
+  cuerpoForzadoDelCambio,
   despuesDeCambiarPassword,
 } from "./hooksDePassword";
 import { exigirPasswordPropia } from "./puertaDeBetterAuth";
@@ -250,6 +251,18 @@ export const auth = betterAuth({
             exigirInvalidacionDeEnlaces(userId),
         },
       );
+
+      // Cerrar las otras sesiones deja de depender de que el cliente lo pida.
+      // El porqué está en `cuerpoForzadoDelCambio`; en resumen: la marca de
+      // primer ingreso se limpia porque el cambio salió bien, así que si la
+      // revocación no ocurre, la sesión abierta con la contraseña que mandamos
+      // por correo sobrevive Y además pasa las puertas.
+      //
+      // Devolver `{ context }` es la forma que tiene Better Auth de dejar que
+      // un hook `before` modifique la petición: lo funde con el contexto real
+      // (`to-auth-endpoints.mjs`) y el endpoint lee ya el cuerpo corregido.
+      const forzado = cuerpoForzadoDelCambio(ctx.path);
+      if (forzado) return { context: { body: forzado } };
     }),
     /**
      * El equivalente de `onPasswordReset` para el otro camino.

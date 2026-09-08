@@ -61,6 +61,16 @@ export const RUTA_RESET_DE_PASSWORD = "/reset-password";
  * se queda fuera y cualquier otra copia sí. Y si eso falla, tira: el `after` ve
  * el fallo y no limpia la marca.
  *
+ * DEVUELVE EL CUERPO ENTERO, no solo la llave que fuerza. Hoy no haría falta:
+ * lo que el hook devuelve se funde con `defu`, que entra en los objetos y
+ * conserva `currentPassword` y `newPassword`. Pero esa fusión es un detalle de
+ * cómo Better Auth junta los contextos (`to-auth-endpoints.mjs`), no algo que
+ * él prometa, y el día que ahí haya un `Object.assign` en vez de un `defu` el
+ * cuerpo se quedaría con esta única llave. El fallo de ese día no sería sutil:
+ * nadie podría elegir su contraseña, o sea que la pantalla de primer ingreso
+ * dejaría de tener salida. Copiando el cuerpo, el resultado es el mismo con
+ * fusión y sin ella.
+ *
  * Vale para todos y no solo para las cuentas marcadas, a propósito. El único
  * llamador de hoy ya manda `true`, así que no cambia nada en la práctica, y la
  * política ya está escrita para el otro camino: el del enlace revoca siempre
@@ -70,8 +80,15 @@ export const RUTA_RESET_DE_PASSWORD = "/reset-password";
  */
 export const cuerpoForzadoDelCambio = (
   path: string | undefined,
-): { revokeOtherSessions: true } | null =>
-  path === RUTA_CAMBIO_DE_PASSWORD ? { revokeOtherSessions: true } : null;
+  cuerpo: unknown,
+): Record<string, unknown> | null => {
+  if (path !== RUTA_CAMBIO_DE_PASSWORD) return null;
+
+  const original =
+    cuerpo && typeof cuerpo === "object" ? (cuerpo as Record<string, unknown>) : {};
+
+  return { ...original, revokeOtherSessions: true };
+};
 
 /** Lo que el hook `before` necesita de la petición, ya desenvuelto del `ctx`. */
 export interface PeticionDeCambio {

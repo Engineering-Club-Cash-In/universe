@@ -260,8 +260,10 @@ export const auth = betterAuth({
       //
       // Devolver `{ context }` es la forma que tiene Better Auth de dejar que
       // un hook `before` modifique la petición: lo funde con el contexto real
-      // (`to-auth-endpoints.mjs`) y el endpoint lee ya el cuerpo corregido.
-      const forzado = cuerpoForzadoDelCambio(ctx.path);
+      // (`to-auth-endpoints.mjs`) y el endpoint lee ya el cuerpo corregido. Va
+      // el cuerpo ENTERO y no solo la llave forzada; el porqué, en
+      // `cuerpoForzadoDelCambio`.
+      const forzado = cuerpoForzadoDelCambio(ctx.path, ctx.body);
       if (forzado) return { context: { body: forzado } };
     }),
     /**

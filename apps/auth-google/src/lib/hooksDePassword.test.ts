@@ -275,8 +275,39 @@ describe("despuesDeCambiarPassword", () => {
 // —la que se abrió con la contraseña que mandamos por correo— sigue viva y
 // ahora además pasa las dos puertas.
 describe("cuerpoForzadoDelCambio", () => {
+  const CUERPO = { currentPassword: "la-que-le-dimos", newPassword: "la-suya" };
+
   it("obliga a cerrar las otras sesiones al cambiar la contraseña", () => {
-    expect(cuerpoForzadoDelCambio(RUTA_CAMBIO_DE_PASSWORD)).toEqual({
+    expect(cuerpoForzadoDelCambio(RUTA_CAMBIO_DE_PASSWORD, CUERPO)).toEqual({
+      ...CUERPO,
+      revokeOtherSessions: true,
+    });
+  });
+
+  // El cuerpo sale ENTERO, no solo la llave forzada. Devolver únicamente la
+  // llave funciona hoy porque Better Auth funde los contextos con `defu`, que
+  // entra en los objetos; pero eso es un detalle suyo, no una promesa, y el día
+  // que ahí hubiera un `Object.assign` el cuerpo se quedaría sin las
+  // contraseñas y nadie podría elegir la suya: la pantalla de primer ingreso se
+  // quedaría sin salida.
+  it("no se lleva por delante las contraseñas que venían en la petición", () => {
+    const forzado = cuerpoForzadoDelCambio(RUTA_CAMBIO_DE_PASSWORD, CUERPO);
+
+    expect(forzado?.currentPassword).toBe("la-que-le-dimos");
+    expect(forzado?.newPassword).toBe("la-suya");
+  });
+
+  it("pisa el `false` que mande el cliente", () => {
+    const forzado = cuerpoForzadoDelCambio(RUTA_CAMBIO_DE_PASSWORD, {
+      ...CUERPO,
+      revokeOtherSessions: false,
+    });
+
+    expect(forzado?.revokeOtherSessions).toBe(true);
+  });
+
+  it("aguanta una petición sin cuerpo", () => {
+    expect(cuerpoForzadoDelCambio(RUTA_CAMBIO_DE_PASSWORD, undefined)).toEqual({
       revokeOtherSessions: true,
     });
   });
@@ -284,8 +315,8 @@ describe("cuerpoForzadoDelCambio", () => {
   // Se fuerza en vez de exigirse: un 400 ante un cliente que lo omita dejaría a
   // esa persona sin forma de salir del primer ingreso.
   it("no se mete con ningún otro endpoint", () => {
-    expect(cuerpoForzadoDelCambio(RUTA_RESET_DE_PASSWORD)).toBeNull();
-    expect(cuerpoForzadoDelCambio("/sign-in/email")).toBeNull();
-    expect(cuerpoForzadoDelCambio(undefined)).toBeNull();
+    expect(cuerpoForzadoDelCambio(RUTA_RESET_DE_PASSWORD, CUERPO)).toBeNull();
+    expect(cuerpoForzadoDelCambio("/sign-in/email", CUERPO)).toBeNull();
+    expect(cuerpoForzadoDelCambio(undefined, CUERPO)).toBeNull();
   });
 });

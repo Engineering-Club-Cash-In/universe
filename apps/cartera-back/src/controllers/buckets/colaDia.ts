@@ -68,8 +68,26 @@ export async function getColaDiaSLA(
 			: 50;
 	const offset = (page - 1) * perPage;
 
+	// Filtro por DUEÑO del crédito (`creditos.asesor_id`), no por pool
+	// (`asesor_bucket`). El pool sigue definiendo qué buckets entran a la cola
+	// —de ahí el INNER JOIN a asesor_bucket, abajo—, pero no QUIÉN ve cada
+	// crédito.
+	//
+	// Antes filtraba por `ab.asesor_id`: con dos asesores en el mismo bucket,
+	// la condición `ab.bucket = X AND ab.asesor_id = <cualquiera de los dos>`
+	// se cumplía para TODOS los créditos del bucket, así que ambos veían la
+	// misma cola sin saber de quién era cada cuenta. Y como el snapshot diario
+	// (CRM, obtenerColaOperacionAsesor) consume este mismo endpoint por asesor,
+	// el mismo crédito se contaba como "planificado" para cada uno: medido en
+	// 2026-09-06, dos asesores de B1 con 470 planificados cada uno sobre 471
+	// créditos únicos entre ambos — el % de cumplimiento del supervisor salía
+	// inflado al doble.
+	//
+	// Repartir cuentas entre asesores del mismo bucket se hace reasignando el
+	// crédito o registrando una cobertura temporal (CB-114), no dejando que dos
+	// personas vean la misma lista.
 	const filtroAsesor = params.asesor_id
-		? sql`AND ab.asesor_id = ${params.asesor_id}`
+		? sql`AND c.asesor_id = ${params.asesor_id}`
 		: sql``;
 	const filtroBuckets =
 		params.buckets && params.buckets.length > 0

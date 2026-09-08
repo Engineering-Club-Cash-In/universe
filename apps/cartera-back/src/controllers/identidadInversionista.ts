@@ -1,6 +1,6 @@
 import { db } from "../database/index";
 import { inversionistas } from "../database/db/schema";
-import { eq, or, sql } from "drizzle-orm";
+import { asc, eq, or, sql } from "drizzle-orm";
 import {
   normalizarDpiParaComparar,
   esEmpresaRepresentada,
@@ -70,9 +70,22 @@ const buscarFila = async (
     .select()
     .from(inversionistas)
     .where(or(...condiciones))
-    // La persona primero: si el dato casa con una sociedad Y con su
-    // representante, interesa el humano.
-    .orderBy(sql`${inversionistas.dpi} IS NULL`)
+    // El orden ES la decisión: un correo puede ser de varias filas (89 y 97
+    // comparten uno en producción) y sin desempate ganaba la que Postgres
+    // devolviera primero.
+    //
+    // 1. La persona primero: si el dato casa con una sociedad Y con su
+    //    representante, interesa el humano.
+    // 2. Entre filas sin DPI propio, la que al menos apunta a un representante.
+    //    Es justo el caso de 89 y 97: ninguna es una persona y solo una tiene
+    //    `dpi_rep_legal`, así que quedarse con la otra devolvía `null` y el CRM
+    //    no detectaba nada — el alta de la empresa rebotaba como duplicada.
+    // 3. Por id, para que el resultado no dependa nunca del orden físico.
+    .orderBy(
+      sql`${inversionistas.dpi} IS NULL`,
+      sql`NULLIF(btrim(coalesce(${inversionistas.dpi_rep_legal}, '')), '') IS NULL`,
+      asc(inversionistas.inversionista_id),
+    )
     .limit(1);
 
   return filas[0] ?? null;

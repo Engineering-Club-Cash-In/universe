@@ -136,6 +136,19 @@ const texto = (
 const mensajeDeFallo = (
 	acceso: AccesoPortal,
 ): AvisoAccesoPortal | null => {
+	// El timeout no es un "no se pudo": es un "no sabemos". Abortamos la
+	// espera, pero del otro lado la cuenta pudo quedar creada. Sale del
+	// `causa()` genérico porque ese texto termina mandando a apretar otra vez
+	// "Dar acceso al portal", y eso es justo lo que NO sirve: si la cuenta
+	// existe, el reintento contesta "ya tenía" y no manda ninguna contraseña.
+	if (acceso.motivo === "timeout") {
+		return {
+			tono: "advertencia",
+			texto:
+				"No sabemos si quedó con acceso: el portal no respondió a tiempo y la cuenta pudo haberse creado igual. NO le des acceso de nuevo —si la cuenta existe, el sistema dirá que \"ya tenía\" y no le manda ninguna contraseña—. Avisa a sistemas para que confirmen si le llegó y, si no, le reseteen la contraseña.",
+		};
+	}
+
 	// El alta SÍ salió: decirlo es lo que evita que lo vuelvan a crear y se
 	// estrellen contra el guard de duplicados.
 	return {
@@ -182,6 +195,16 @@ export const avisoAccesoPortal = (
 			return {
 				tono: "advertencia",
 				texto: `Quedó sin acceso al portal porque no tiene nombre capturado. Agrégaselo y después ${COMO_SE_ARREGLA}.`,
+			};
+		}
+		// El servicio del CRM no es ADMIN, así que cartera ni lo intentó. Es un
+		// fallo de configuración documentado (`apps/cartera-back/DEPLOYMENT.md`) y sin
+		// esto caía al `null` de abajo: el modal decía "Inversionista creado
+		// correctamente" y se cerraba, con la persona sin acceso y nadie enterado.
+		if (acceso.motivo === "origen_no_autorizado") {
+			return {
+				tono: "advertencia",
+				texto: `Quedó sin acceso al portal: este servicio no tiene permiso para abrirlo. Avisa a sistemas, y mientras tanto ${COMO_SE_ARREGLA}.`,
 			};
 		}
 		if (acceso.motivo === "no_solicitado") {

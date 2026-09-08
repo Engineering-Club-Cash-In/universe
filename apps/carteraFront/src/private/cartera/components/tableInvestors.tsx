@@ -54,6 +54,7 @@ import {
 } from "../hooks/useModalidadFacturacion";
 import { InvestorModal } from "./modalInvestor";
 import { avisoAccesoPortal } from "./accesoPortal";
+import { esEmpresaInicial } from "./repLegalEmpresa";
 import { useFalsePayments } from "../hooks/falsePayments";
 import {
   Dialog,
@@ -432,7 +433,20 @@ export function TableInvestors() {
    * hay que ver. Ese par de ojos es todo el arreglo.
    */
   const [accesoPortalTarget, setAccesoPortalTarget] = useState<
-    { id: number; nombre: string; email: string } | null
+    {
+      id: number;
+      nombre: string;
+      email: string;
+      /**
+       * Si la fila es una sociedad con representante. Se lleva al diálogo
+       * porque cambia lo que hay que hacer: a una empresa no se le abre acceso
+       * —entra con su representante— y cartera lo contesta con un mensaje que
+       * dice a qué fila ir. Sin esto, el guard de "sin correo" cortaba antes y
+       * a las empresas SIN correo propio (que es lo normal) se les pedía
+       * capturar un correo que no hace falta.
+       */
+      esEmpresa: boolean;
+    } | null
   >(null);
   const [accesoPortalPending, setAccesoPortalPending] = useState(false);
 
@@ -1588,6 +1602,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                       id: inv.inversionista_id,
                       nombre: inv.nombre_inversionista,
                       email: inv.email ?? "",
+                      esEmpresa: esEmpresaInicial(inv.dpi_rep_legal, inv.dpi),
                     });
                   }}
                   className="cursor-pointer rounded-lg px-3 py-2.5 focus:bg-sky-50"
@@ -2736,10 +2751,17 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                   reciba ese mensaje va a poder entrar a ver sus liquidaciones, sus
                   documentos y sus datos bancarios.
                 </p>
-                {!accesoPortalTarget?.email && (
+                {!accesoPortalTarget?.email && !accesoPortalTarget?.esEmpresa && (
                   <p className="text-sm font-bold text-red-700 dark:text-red-400">
                     Sin correo capturado no se le puede abrir la cuenta. Agregáselo
                     primero desde Editar.
+                  </p>
+                )}
+                {accesoPortalTarget?.esEmpresa && (
+                  <p className="text-sm font-bold text-amber-700 dark:text-amber-400">
+                    Es una empresa: al portal entra con su representante legal. Al
+                    continuar, cartera te va a decir a qué fila ir — no hace falta
+                    capturarle un correo propio.
                   </p>
                 )}
               </DialogDescription>
@@ -2755,7 +2777,14 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
               <button
                 className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-bold transition-colors disabled:opacity-50 inline-flex items-center gap-2"
                 onClick={handleConfirmarAccesoPortal}
-                disabled={accesoPortalPending || !accesoPortalTarget?.email}
+                // A una empresa se la deja pasar aunque no tenga correo: es
+                // cartera la que contesta `es_empresa_el_acceso_es_del_
+                // representante` y explica a qué fila ir, y ese mensaje no
+                // llegaba nunca porque este guard cortaba antes.
+                disabled={
+                  accesoPortalPending ||
+                  (!accesoPortalTarget?.email && !accesoPortalTarget?.esEmpresa)
+                }
               >
                 {accesoPortalPending ? (
                   <><Loader2 className="h-4 w-4 animate-spin" /><span>Abriendo…</span></>

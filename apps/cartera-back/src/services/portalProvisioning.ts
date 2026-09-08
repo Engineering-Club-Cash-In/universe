@@ -66,10 +66,20 @@ export interface OpcionesProvisionamiento {
 }
 
 /**
- * 8 segundos. Es tiempo de sobra para un insert y un Resend (~300ms) y sigue
- * siendo poco para alguien esperando el alta en un formulario.
+ * 15 segundos. Eran 8, y el cálculo estaba mal planteado: no es "cuánto tarda
+ * normalmente" sino "cuánto cuesta equivocarse".
+ *
+ * Abortar aquí NO cancela nada del otro lado. auth-google puede haber creado ya
+ * la cuenta y estar esperando a Resend, así que un corte prematuro deja una
+ * cuenta creada, una contraseña que quizá salió y quizá no, y del lado de
+ * cartera un `fallo` que el reintento va a convertir en "ya tenía" —sin volver
+ * a mandar la contraseña, a propósito—. O sea: la persona se queda sin poder
+ * entrar y sin que nadie lo note.
+ *
+ * Los segundos de más solo se pagan cuando algo ya va mal; el camino normal
+ * sigue siendo un insert y un Resend (~300ms).
  */
-const TIMEOUT_POR_DEFECTO_MS = 8_000;
+const TIMEOUT_POR_DEFECTO_MS = 15_000;
 
 const SIN_CORREO = {
   enviado: false,

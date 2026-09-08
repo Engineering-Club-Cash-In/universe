@@ -87,12 +87,27 @@ describe("avisoAccesoPortal", () => {
 
 	it("un fallo del portal no se confunde con un alta fallida", () => {
 		const aviso = avisoAccesoPortal(
-			acceso({ estado: "fallo", motivo: "timeout", advertencias: [] }),
+			acceso({ estado: "fallo", motivo: "http_500", advertencias: [] }),
 		)!;
 
 		expect(aviso.tono).toBe("advertencia");
 		expect(aviso.texto).toContain("sí quedó creado");
 		expect(aviso.texto).toContain("Dar acceso al portal");
+		expect(aviso.texto).not.toContain("http_500");
+	});
+
+	// El timeout NO es "no se pudo": es "no sabemos". Abortamos la espera y
+	// del otro lado la cuenta pudo quedar creada, así que el consejo de
+	// siempre —volver a apretar "Dar acceso al portal"— es justo el que no
+	// sirve: el reintento contesta "ya tenía" y no manda ninguna contraseña.
+	it("el timeout dice que no se sabe, y que reintentar no va a servir", () => {
+		const aviso = avisoAccesoPortal(
+			acceso({ estado: "fallo", motivo: "timeout", advertencias: [] }),
+		)!;
+
+		expect(aviso.tono).toBe("advertencia");
+		expect(aviso.texto).toContain("No sabemos");
+		expect(aviso.texto).toContain("NO le des acceso de nuevo");
 		expect(aviso.texto).not.toContain("timeout");
 	});
 
@@ -137,7 +152,7 @@ describe("lo que se le promete a quien captura el alta", () => {
    */
   it("un fallo del portal manda a abrir el acceso a mano, no a esperar", () => {
     const aviso = avisoAccesoPortal(
-      acceso({ estado: "fallo", motivo: "timeout", advertencias: [] }),
+      acceso({ estado: "fallo", motivo: "http_500", advertencias: [] }),
     )!;
 
     expect(aviso.texto).toContain("sí quedó creado");
@@ -178,7 +193,7 @@ describe("lo que se le promete a quien captura el alta", () => {
    * misma pantalla y mandar a pedírselo a otro sería falso.
    */
   it.each([
-    ["fallo", "timeout"],
+    ["fallo", "http_500"],
     ["omitida", "sin_correo"],
     ["omitida", "sin_nombre"],
     ["omitida", "no_solicitado"],

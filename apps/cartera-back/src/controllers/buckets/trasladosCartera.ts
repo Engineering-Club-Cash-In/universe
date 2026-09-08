@@ -104,7 +104,8 @@ async function construirPlan(executor: Executor, entrada: Entrada) {
     return {
       ...a,
       numeroCreditoSifco: credito.sifco,
-		cliente: credito.cliente,
+      cliente: credito.cliente,
+      estadoActual: credito.estado,
       ...(credito.especial ? { estadoEspecial: credito.estado } : {}),
     };
   });
@@ -163,6 +164,30 @@ async function bloquearCreditosAsesor(
     )
     SELECT pg_advisory_xact_lock(${CREDITO_ASESOR_LOCK_NAMESPACE}, credito_id)
     FROM creditos_ordenados
+  `);
+}
+
+async function bloquearDestinos(
+  tx: Executor,
+  asesorIds: number[],
+) {
+  const ids = [...new Set(asesorIds)].sort((a, b) => a - b);
+  if (!ids.length) return;
+  // updateAdvisor toma un lock de escritura sobre asesores y los cambios de
+  // pool lo toman sobre asesor_bucket. Este lock conserva ambos hasta
+  // confirmar, para que ninguna baja invalide el plan final.
+  await tx.execute(sql`
+    WITH destinos_ordenados AS MATERIALIZED (
+      SELECT value::integer AS asesor_id
+      FROM jsonb_array_elements_text(${JSON.stringify(ids)}::jsonb)
+      ORDER BY value::integer
+    )
+    SELECT a.asesor_id
+    FROM destinos_ordenados d
+    JOIN ${schema}.asesores a ON a.asesor_id = d.asesor_id
+    JOIN ${schema}.asesor_bucket pool ON pool.asesor_id = a.asesor_id
+    ORDER BY a.asesor_id, pool.id
+    FOR SHARE OF a, pool
   `);
 }
 
@@ -238,6 +263,7 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
     // el hash obliga a generar un preview nuevo, en vez de mezclar ambas fotos.
     let plan = await construirPlan(tx, row.solicitud);
     await bloquearCreditosAsesor(tx, plan.asignaciones.map((a) => a.creditoId));
+    await bloquearDestinos(tx, plan.asignaciones.map((a) => a.asesorNuevoId));
     plan = await construirPlan(tx, row.solicitud);
     if (hash(plan) !== row.payload_hash) throw new TrasladoConflict("La cartera cambió. Vuelve a previsualizar antes de confirmar.");
     if (plan.excluidos.length) {
@@ -256,6 +282,7 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
       asesor_nuevo_id: a.asesorNuevoId,
       bucket: a.bucket,
       prioridad: a.prioridad,
+      estado_anterior: a.estadoActual,
     }));
     const escrito = await tx.execute<{
       actualizados: number;
@@ -264,12 +291,22 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
     }>(sql`
       WITH asignaciones AS (
         SELECT * FROM jsonb_to_recordset(${JSON.stringify(detalles)}::jsonb)
-          AS a(credito_id integer, asesor_anterior_id integer, asesor_nuevo_id integer, bucket integer, prioridad integer)
+          AS a(credito_id integer, asesor_anterior_id integer, asesor_nuevo_id integer, bucket integer, prioridad integer, estado_anterior text)
       ), actualizados AS (
         UPDATE ${schema}.creditos c SET asesor_id = a.asesor_nuevo_id
         FROM asignaciones a
         WHERE c.credito_id = a.credito_id
           AND c.asesor_id IS NOT DISTINCT FROM a.asesor_anterior_id
+          AND c."statusCredit" IS NOT DISTINCT FROM a.estado_anterior
+          AND EXISTS (
+            SELECT 1
+            FROM ${schema}.asesores destino
+            JOIN ${schema}.asesor_bucket pool ON pool.asesor_id = destino.asesor_id
+            WHERE destino.asesor_id = a.asesor_nuevo_id
+              AND destino.activo
+              AND pool.activo
+              AND (a.bucket IS NULL OR pool.bucket = a.bucket)
+          )
         RETURNING c.credito_id, a.asesor_anterior_id, a.asesor_nuevo_id, a.bucket, a.prioridad
       ), historiales AS (
         INSERT INTO ${schema}.credito_asesor_historial

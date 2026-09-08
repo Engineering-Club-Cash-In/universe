@@ -138,6 +138,7 @@ test("confirmación espera los locks de jobs y escribe lote sin bloquear tablas 
   const lockMoras = queries.findIndex((q) => q.includes("pg_advisory_xact_lock") && q.includes("728193"));
   const lockConvenio = queries.findIndex((q) => q.includes("pg_advisory_xact_lock") && q.includes("728194"));
   const lockCreditos = queries.findIndex((q) => q.includes("pg_advisory_xact_lock") && q.includes("728195"));
+  const lockDestinos = queries.findIndex((q) => q.includes("FOR SHARE OF a, pool"));
   const escritura = queries.findIndex((q) => q.includes("WITH asignaciones"));
   expect(lockMoras).toBeGreaterThanOrEqual(0);
   expect(lockConvenio).toBeGreaterThanOrEqual(0);
@@ -146,7 +147,13 @@ test("confirmación espera los locks de jobs y escribe lote sin bloquear tablas 
   expect(lockConvenio).toBeLessThan(escritura);
   expect(lockCreditos).toBeGreaterThan(lockConvenio);
   expect(lockCreditos).toBeLessThan(escritura);
+  expect(lockDestinos).toBeGreaterThan(lockCreditos);
+  expect(lockDestinos).toBeLessThan(escritura);
   expect(queries.slice(lockCreditos + 1).some((q) => q.includes("SELECT c.credito_id"))).toBe(true);
+  expect(writes[0]).toContain("estado_anterior text");
+  expect(writes[0]).toContain('c."statusCredit" IS NOT DISTINCT FROM a.estado_anterior');
+  expect(writes[0]).toContain("FROM cartera_cobros2.asesores destino");
+  expect(writes[0]).toContain("cartera_cobros2.asesor_bucket pool");
   expect(queries.some((q) => q.includes("LOCK TABLE"))).toBe(false);
 });
 

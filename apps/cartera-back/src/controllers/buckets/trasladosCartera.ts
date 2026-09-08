@@ -4,6 +4,10 @@ import { z } from "zod";
 import { db } from "../../database";
 import { SQL_CARTERA_SCHEMA as schema } from "../../database/db/schema";
 import { bucketActualSql, STATUS_READER_FUERA } from "../../lib/buckets-classification";
+import {
+  BUCKETS_CONVENIO_LOCK_KEY,
+  PROCESAR_MORAS_LOCK_KEY,
+} from "../../lib/buckets-job-locks";
 import { previsualizarTrasladoCartera } from "../../lib/plan-traslado-cartera";
 
 export const solicitudTrasladoSchema = z.object({
@@ -187,10 +191,22 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
     if (new Date(row.vence_en).getTime() <= Date.now()) throw new TrasladoConflict("La previsualización venció. Vuelve a previsualizar.");
     // Locks cortos durante revalidación y escritura; ninguna llamada HTTP en transacción.
     await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
+    // Los jobs de mora y convenio calculan su reasignación desde una foto de
+    // dueño previa. Sin sus mismos locks, un job que ya leyó podía esperar este
+    // `LOCK TABLE`, reanudar al confirmar y volver a escribir el asesor viejo.
+    // Tomarlos antes de la foto y de las escrituras hace que una confirmación
+    // espere al job en curso; mientras confirma, la siguiente corrida se omite.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(${PROCESAR_MORAS_LOCK_KEY})`);
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(${BUCKETS_CONVENIO_LOCK_KEY})`);
     await tx.execute(sql`LOCK TABLE ${schema}.creditos, ${schema}.asesor_bucket, ${schema}.asesores,
       ${schema}.buckets_historial, ${schema}.moras_credito, ${schema}.buckets, ${schema}.promesas_pago_espejo IN SHARE ROW EXCLUSIVE MODE`);
     const plan = await construirPlan(tx, row.solicitud);
     if (hash(plan) !== row.payload_hash) throw new TrasladoConflict("La cartera cambió. Vuelve a previsualizar antes de confirmar.");
+    if (plan.excluidos.length) {
+      throw new TrasladoConflict(
+        `Hay ${plan.excluidos.length} crédito(s) activos sin bucket operativo. Asigna su bucket antes de confirmar el traslado.`,
+      );
+    }
     if (plan.bloqueos.length || !plan.asignaciones.length) throw new TrasladoConflict("No hay un reparto completo disponible para confirmar");
     for (const a of plan.asignaciones) {
       const actualizados = await tx.execute(sql`UPDATE ${schema}.creditos SET asesor_id = ${a.asesorNuevoId}

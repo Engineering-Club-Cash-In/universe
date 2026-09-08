@@ -12,6 +12,7 @@ import { validarCatalogoBuckets } from "../lib/buckets-validation";
 // El resto del re-export de buckets-classification está más abajo, junto al
 // comentario que explica por qué esos tipos viven en otro archivo.
 import { hoyGtISO } from "../lib/buckets-classification";
+import { PROCESAR_MORAS_LOCK_KEY } from "../lib/buckets-job-locks";
 
 type MoraEventoTipo =
   | "CREACION"
@@ -861,7 +862,6 @@ export async function updateMora(params: UpdateMoraParams) {
  * 5. Log every step for debugging and monitoring.
  */
 // Clave fija para el advisory lock de procesarMoras (cualquier int estable sirve).
-const PROCESAR_MORAS_LOCK_KEY = 728193;
 
 export async function procesarMoras() {
   // 🔒 Lock entre instancias: con varias réplicas del back, todas agendan el cron

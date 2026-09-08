@@ -3,14 +3,24 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import type { SQL } from "drizzle-orm";
 
 const dialect = new PgDialect();
-let creditos: { credito_id: number; sifco: string; asesor_id: number; bucket: number; compromiso: boolean }[];
+let creditos: {
+  credito_id: number;
+  sifco: string;
+  asesor_id: number;
+  bucket: number | null;
+  compromiso: boolean;
+  especial?: boolean;
+  estado?: string;
+}[];
 let saved: Record<string, any> | undefined;
 let writes: string[];
+let queries: string[];
 let updateMatches: boolean;
 let actorRegistrado: boolean;
 const executor = {
   async execute(statement: SQL) {
     const { sql: query, params } = dialect.sqlToQuery(statement);
+    queries.push(`${query} | ${JSON.stringify(params)}`);
     // Actor registrado (CB-114): por defecto existe; `actorRegistrado = false`
     // simula un correo que no está en platform_users o está inactivo.
     if (query.includes("FROM cartera_cobros2.platform_users") || query.includes("platform_users"))
@@ -44,7 +54,7 @@ const { previsualizarTrasladoCarteraMasivo, confirmarTrasladoCarteraMasivo, soli
 const entrada = { asesorOrigenId: 10, modo: "redistribucion", motivo: "Renuncia", actorEmail: "supervisor@example.com" };
 
 beforeEach(() => {
-  saved = undefined; writes = []; updateMatches = true; actorRegistrado = true;
+  saved = undefined; writes = []; queries = []; updateMatches = true; actorRegistrado = true;
   creditos = [10, 20, 20, 20, 20].map((asesor_id, i) => ({ credito_id: i + 1, sifco: `S${i + 1}`, asesor_id, bucket: 1, compromiso: i === 0 }));
 });
 
@@ -79,6 +89,47 @@ test("cambio de carga después del preview rechaza sin escribir", async () => {
   creditos.push({ credito_id: 6, sifco: "S6", asesor_id: 30, bucket: 1, compromiso: false });
   await expect(confirmarTrasladoCarteraMasivo({ previewId: p.previewId, idempotencyKey: crypto.randomUUID(), actorEmail: entrada.actorEmail })).rejects.toThrow("La cartera cambió");
   expect(writes).toEqual([]);
+});
+
+test("no confirma créditos activos sin bucket operativo", async () => {
+  creditos = [
+    { credito_id: 1, sifco: "S1", asesor_id: 10, bucket: 1, compromiso: false },
+    {
+      credito_id: 2,
+      sifco: "S2",
+      asesor_id: 10,
+      bucket: null,
+      compromiso: false,
+      especial: false,
+      estado: "EN_CONVENIO",
+    },
+  ];
+  const p = await previsualizarTrasladoCarteraMasivo(entrada);
+  expect(p.excluidos).toHaveLength(1);
+  await expect(
+    confirmarTrasladoCarteraMasivo({
+      previewId: p.previewId,
+      idempotencyKey: crypto.randomUUID(),
+      actorEmail: entrada.actorEmail,
+    }),
+  ).rejects.toThrow(/sin bucket operativo/);
+  expect(writes).toEqual([]);
+});
+
+test("confirmación espera los locks de jobs de bucket antes de escribir", async () => {
+  const p = await previsualizarTrasladoCarteraMasivo(entrada);
+  await confirmarTrasladoCarteraMasivo({
+    previewId: p.previewId,
+    idempotencyKey: crypto.randomUUID(),
+    actorEmail: entrada.actorEmail,
+  });
+  const lockMoras = queries.findIndex((q) => q.includes("pg_advisory_xact_lock") && q.includes("728193"));
+  const lockConvenio = queries.findIndex((q) => q.includes("pg_advisory_xact_lock") && q.includes("728194"));
+  const lockTablas = queries.findIndex((q) => q.includes("LOCK TABLE"));
+  expect(lockMoras).toBeGreaterThanOrEqual(0);
+  expect(lockConvenio).toBeGreaterThanOrEqual(0);
+  expect(lockMoras).toBeLessThan(lockTablas);
+  expect(lockConvenio).toBeLessThan(lockTablas);
 });
 
 test("preview vencido o de otro usuario no confirma", async () => {

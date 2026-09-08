@@ -101,13 +101,43 @@ export const invalidarEnlacesDeReset = async (
  * Con la marca en NULL, el portal deja de mandarla a la pantalla de primer
  * ingreso. No se toca nada más de la cuenta.
  */
+/**
+ * Se reintenta porque quedarse a medias encierra a la persona.
+ *
+ * Si este UPDATE falla, la contraseña YA cambió pero la marca sigue puesta, así
+ * que el guard del portal y `requireAuth` la siguen mandando a la pantalla de
+ * primer ingreso — que le pide la contraseña temporal, la que acaba de dejar de
+ * existir. No es una pantalla de más: es una cuenta sin salida.
+ *
+ * Tres intentos con una pausa corta cubren el fallo transitorio, que es el
+ * único que un reintento puede arreglar. Si igual no pasa, la salida está en la
+ * pantalla: el enlace por correo vuelve a intentar esta misma limpieza.
+ */
+const INTENTOS_LIMPIEZA = 3;
+const PAUSA_ENTRE_INTENTOS_MS = 200;
+
+const esperar = (ms: number) =>
+  new Promise((resolver) => setTimeout(resolver, ms));
+
 export const limpiarMarcaDePasswordProvisionada = async (
   userId: string,
 ): Promise<void> => {
-  await db
-    .update(users)
-    .set({ passwordProvisionadaAt: null })
-    .where(eq(users.id, userId));
+  let ultimoError: unknown;
+
+  for (let intento = 1; intento <= INTENTOS_LIMPIEZA; intento += 1) {
+    try {
+      await db
+        .update(users)
+        .set({ passwordProvisionadaAt: null })
+        .where(eq(users.id, userId));
+      return;
+    } catch (error) {
+      ultimoError = error;
+      if (intento < INTENTOS_LIMPIEZA) await esperar(PAUSA_ENTRE_INTENTOS_MS);
+    }
+  }
+
+  throw ultimoError;
 };
 
 /**
@@ -155,8 +185,11 @@ export const registrarPasswordPropia = async (
   try {
     await limpiarMarcaDePasswordProvisionada(userId);
   } catch (error) {
+    // La persona queda encerrada en la pantalla de primer ingreso: pide la
+    // contraseña temporal, que ya no sirve. Su salida es el enlace por correo,
+    // que reintenta esta misma limpieza — y por eso esa pantalla lo ofrece.
     console.error(
-      `[password] ${origen}: no se pudo limpiar password_provisionada_at.`,
+      `[password] ${origen}: NO se pudo limpiar password_provisionada_at de ${userId}. Esa cuenta queda pidiendo el primer ingreso con una contraseña que ya cambió.`,
       error,
     );
   }

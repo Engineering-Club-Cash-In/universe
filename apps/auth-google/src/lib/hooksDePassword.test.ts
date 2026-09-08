@@ -45,6 +45,9 @@ const efectosAntes = (
   };
 };
 
+/** Los mismos que Better Auth. */
+const LARGOS = { min: 8, max: 128 };
+
 const peticionDeSesion = (
   ajustes: Partial<PeticionDeCambio> = {},
 ): PeticionDeCambio => ({
@@ -52,6 +55,7 @@ const peticionDeSesion = (
   nueva: "una-nueva-larga",
   actual: "la-que-tiene-puesta",
   token: undefined,
+  limites: LARGOS,
   ...ajustes,
 });
 
@@ -115,6 +119,30 @@ describe("antesDeCambiarPassword — camino de la sesión", () => {
     expect(efectos.distintas).toEqual([]);
     expect(efectos.borrados).toEqual([]);
   });
+
+  // El portal solo valida el mínimo, así que una contraseña más larga que el
+  // máximo de Better Auth llegaba hasta acá: pasaba la prueba de credencial, se
+  // llevaba por delante todos los enlaces pendientes y recién después la
+  // rechazaba él. Enlaces perdidos y contraseña sin cambiar.
+  it("no toca nada si la contraseña nueva no va a pasar el largo", async () => {
+    const efectos = efectosAntes();
+
+    await antesDeCambiarPassword(
+      peticionDeSesion({ nueva: "x".repeat(LARGOS.max + 1) }),
+      efectos,
+    );
+
+    expect(efectos.borrados).toEqual([]);
+    expect(efectos.distintas).toEqual([]);
+  });
+
+  it("tampoco por debajo del mínimo", async () => {
+    const efectos = efectosAntes();
+
+    await antesDeCambiarPassword(peticionDeSesion({ nueva: "corta" }), efectos);
+
+    expect(efectos.borrados).toEqual([]);
+  });
 });
 
 describe("antesDeCambiarPassword — camino del enlace", () => {
@@ -125,6 +153,7 @@ describe("antesDeCambiarPassword — camino del enlace", () => {
     nueva: "una-nueva-larga",
     actual: undefined,
     token: TOKEN,
+    limites: LARGOS,
     ...ajustes,
   });
 

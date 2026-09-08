@@ -48,6 +48,17 @@ export interface PeticionDeCambio {
   actual: unknown;
   /** El token del enlace. Solo existe en el camino del correo. */
   token: unknown;
+  /**
+   * Los mismos largos que Better Auth va a exigir.
+   *
+   * Se piden porque este hook hace cosas IRREVERSIBLES antes de que Better Auth
+   * mire la contraseña nueva. El portal solo valida el mínimo, así que una
+   * contraseña de más de 128 caracteres llegaba hasta acá, pasaba la prueba de
+   * credencial, se llevaba por delante todos los enlaces pendientes y recién
+   * después Better Auth la rechazaba: la persona perdía sus enlaces y no cambió
+   * ninguna contraseña.
+   */
+  limites: { min: number; max: number };
 }
 
 export interface EfectosAntesDelCambio {
@@ -92,6 +103,16 @@ export const antesDeCambiarPassword = async (
   // hacer nada para no adelantarse a su propio error.
   const nueva = peticion.nueva;
   if (typeof nueva !== "string" || nueva === "") return;
+
+  // Una contraseña que Better Auth va a rechazar no puede costarle a nadie sus
+  // enlaces de recuperación. Se sale en silencio para que el error lo dé él,
+  // con su mensaje de siempre.
+  if (
+    nueva.length < peticion.limites.min ||
+    nueva.length > peticion.limites.max
+  ) {
+    return;
+  }
 
   try {
     if (esReset) {

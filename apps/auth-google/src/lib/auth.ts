@@ -36,6 +36,16 @@ import { SESSION_COOKIE_PREFIX } from "./portalCookies";
  */
 const VIGENCIA_ENLACE_RESET_SEGUNDOS = 60 * 60 * 24;
 
+/**
+ * Largos de contraseña, en una sola constante.
+ *
+ * La usan Better Auth y el hook `before`, y tienen que ser LA MISMA: ese hook
+ * borra los enlaces de recuperación antes de que Better Auth mire la contraseña
+ * nueva, así que si los límites se separaran, una contraseña que uno acepta y
+ * el otro rechaza le costaría a alguien todos sus enlaces sin cambiar nada.
+ */
+const LARGO_PASSWORD = { min: 8, max: 128 } as const;
+
 export const auth = betterAuth({
   database: drizzleAdapter(db, {
     provider: "pg",
@@ -49,8 +59,8 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
     requireEmailVerification: false, // Cambiar a true si quieres verificación
-    minPasswordLength: 8,
-    maxPasswordLength: 128,
+    minPasswordLength: LARGO_PASSWORD.min,
+    maxPasswordLength: LARGO_PASSWORD.max,
     resetPasswordTokenExpiresIn: VIGENCIA_ENLACE_RESET_SEGUNDOS,
     // Cambiar la contraseña cierra las sesiones abiertas. Quien la cambia
     // porque cree que alguien más la tenía, espera exactamente esto.
@@ -62,6 +72,27 @@ export const auth = betterAuth({
      * identidad: hacerlo aquí dejaba una ventana que no se podía cerrar.
      */
     onPasswordReset: async ({ user }) => {
+      // Segunda pasada de borrado, igual que el `after` del cambio en sesión.
+      //
+      // El `before` ya borró los hermanos, pero entre ese DELETE y el UPDATE de
+      // la contraseña cabe un enlace nuevo: si alguien pide recuperación justo
+      // ahí, ese token no estaba entre las filas borradas y sobrevive sus 24
+      // horas para pisar la contraseña que se acaba de elegir. Corriendo acá,
+      // ese enlace ya existe cuando se borra.
+      //
+      // El token que se canjeó lo borra Better Auth antes de llamar a este
+      // hook, así que no hay ninguno que preservar.
+      try {
+        await exigirInvalidacionDeEnlaces(user.id);
+      } catch (error) {
+        // La contraseña YA cambió: tirar acá haría que la persona reintente con
+        // una que ya no es la suya. Queda en el log.
+        console.error(
+          "[password] la contraseña se restableció pero quedaron enlaces sin invalidar.",
+          error,
+        );
+      }
+
       await registrarPasswordPropia(user.id, "enlace");
     },
     sendResetPassword: async ({ user, url }) => {
@@ -175,6 +206,7 @@ export const auth = betterAuth({
           nueva: ctx.body?.newPassword,
           actual: ctx.body?.currentPassword,
           token: ctx.body?.token ?? ctx.query?.token,
+          limites: LARGO_PASSWORD,
         },
         {
           usuarioDeLaSesion: async () => {

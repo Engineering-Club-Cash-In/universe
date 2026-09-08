@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import type { TokenTransaction } from "../nexa/schemas";
+import type { ApplicationClaim } from "../payments/application-worker";
 import type { MockCreditLedger } from "../payments/mock-ledger";
 import type { PaymentTransactionRepository, TokenUserRepository } from "../payments/repositories";
 import type { TokenUserCreationRepository } from "../tokens/service";
@@ -122,6 +123,58 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
 
   async markFailed(id: number, reason: string) {
     await this.db.update(nexaPaymentTransactions).set({ processingStatus: "FAILED", failureReason: reason, updatedAt: new Date() }).where(eq(nexaPaymentTransactions.id, id));
+  }
+
+  async claimNextApplication(now: Date, leaseSeconds: number): Promise<ApplicationClaim | null> {
+    const result = await this.db.execute(sql<ApplicationClaim>`
+      WITH candidate AS (
+        SELECT id
+        FROM nexa_payment_transactions
+        WHERE processing_status = 'RECEIVED'
+          OR (processing_status = 'FAILED' AND next_attempt_at <= ${now})
+          OR (processing_status = 'APPLYING' AND lease_until <= ${now})
+        ORDER BY created_at, id
+        FOR UPDATE SKIP LOCKED
+        LIMIT 1
+      )
+      UPDATE nexa_payment_transactions AS payment
+      SET processing_status = 'APPLYING',
+          attempt_count = payment.attempt_count + 1,
+          last_attempt_at = ${now},
+          lease_until = ${now}::timestamptz + ${leaseSeconds} * INTERVAL '1 second',
+          next_attempt_at = NULL,
+          failure_reason = NULL,
+          updated_at = ${now}
+      FROM candidate
+      WHERE payment.id = candidate.id
+      RETURNING payment.id, payment.reference, payment.attempt_count AS "attemptCount"
+    `);
+    const row = result.rows[0];
+    return row ? {
+      id: Number(row.id),
+      reference: String(row.reference),
+      attemptCount: Number(row.attemptCount),
+    } : null;
+  }
+
+  async markApplicationApplied(id: number, now: Date) {
+    await this.db.update(nexaPaymentTransactions).set({
+      processingStatus: "APPLIED",
+      failureReason: null,
+      nextAttemptAt: null,
+      leaseUntil: null,
+      updatedAt: now,
+    }).where(eq(nexaPaymentTransactions.id, id));
+  }
+
+  async markApplicationFailed(id: number, reason: string, nextAttemptAt: Date | null, now: Date) {
+    await this.db.update(nexaPaymentTransactions).set({
+      processingStatus: nextAttemptAt ? "FAILED" : "MANUAL_REVIEW",
+      failureReason: reason,
+      nextAttemptAt,
+      leaseUntil: null,
+      updatedAt: now,
+    }).where(eq(nexaPaymentTransactions.id, id));
   }
 
   async list() {

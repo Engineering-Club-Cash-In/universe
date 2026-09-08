@@ -4,6 +4,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Pool } from "pg";
 import type { TokenTransaction } from "../nexa/schemas";
+import { runApplicationWorkerOnce } from "../payments/application-worker";
 import { DbPaymentTransactionRepository } from "./repositories";
 import * as schema from "./schema";
 import { nexaPaymentTransactions } from "./schema";
@@ -83,6 +84,71 @@ integrationTest("upsertReceived is concurrent, idempotent, fail-closed and keeps
     wasReturn: 0,
     transactionId: "7293",
   });
+});
+
+integrationTest("application worker claims once, recovers expired work, backs off and stops retrying", async () => {
+  if (!db) throw new Error("TEST_DATABASE_URL is required");
+  const repository = new DbPaymentTransactionRepository(db);
+  await db.delete(nexaPaymentTransactions);
+  const stored = await repository.upsertReceived({ ...transaction, reference: "worker-1" });
+  const startedAt = new Date("2026-09-08T12:00:00.000Z");
+
+  const claims = await Promise.all([
+    repository.claimNextApplication(startedAt, 10),
+    repository.claimNextApplication(startedAt, 10),
+  ]);
+  expect(claims.filter(Boolean)).toHaveLength(1);
+  expect(claims.find(Boolean)).toMatchObject({ id: stored.id, reference: "worker-1", attemptCount: 1 });
+
+  expect(await repository.claimNextApplication(new Date("2026-09-08T12:00:09.000Z"), 10)).toBeNull();
+
+  let now = new Date("2026-09-08T12:00:11.000Z");
+  const fail = () => runApplicationWorkerOnce({
+    repository,
+    process: async () => { throw new Error("token=1234567310005010 sensitive comment"); },
+    now: () => now,
+    leaseSeconds: 10,
+    maxAttempts: 3,
+    backoffSeconds: 2,
+    maxBackoffSeconds: 3,
+  });
+
+  expect(await fail()).toBe(true);
+  let [row] = await db.select().from(nexaPaymentTransactions).where(eq(nexaPaymentTransactions.id, stored.id));
+  expect(row).toMatchObject({ processingStatus: "FAILED", attemptCount: 2, failureReason: "application_processing_failed" });
+  expect(row?.nextAttemptAt).toEqual(new Date("2026-09-08T12:00:14.000Z"));
+  expect(row?.leaseUntil).toBeNull();
+
+  now = new Date("2026-09-08T12:00:13.999Z");
+  expect(await fail()).toBe(false);
+  now = new Date("2026-09-08T12:00:14.000Z");
+  expect(await fail()).toBe(true);
+
+  [row] = await db.select().from(nexaPaymentTransactions).where(eq(nexaPaymentTransactions.id, stored.id));
+  expect(row).toMatchObject({ processingStatus: "MANUAL_REVIEW", attemptCount: 3, failureReason: "application_processing_failed" });
+  expect(row?.nextAttemptAt).toBeNull();
+  now = new Date("2027-01-01T00:00:00.000Z");
+  expect(await fail()).toBe(false);
+
+  const successful = await repository.upsertReceived({
+    ...transaction,
+    reference: "worker-2",
+    transactionId: "7294",
+  });
+  let processedReference = "";
+  expect(await runApplicationWorkerOnce({
+    repository,
+    process: async (claim) => { processedReference = claim.reference; },
+    now: () => now,
+    leaseSeconds: 10,
+    maxAttempts: 3,
+    backoffSeconds: 2,
+    maxBackoffSeconds: 3,
+  })).toBe(true);
+  expect(processedReference).toBe("worker-2");
+  const [applied] = await db.select().from(nexaPaymentTransactions).where(eq(nexaPaymentTransactions.id, successful.id));
+  expect(applied).toMatchObject({ processingStatus: "APPLIED", attemptCount: 1, failureReason: null });
+  expect(applied?.rawPayload).not.toHaveProperty("token");
 });
 
 function safeTestDatabaseUrl(value: string) {

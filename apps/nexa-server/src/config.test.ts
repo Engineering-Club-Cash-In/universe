@@ -142,4 +142,23 @@ describe("loadConfig", () => {
     expect(loadConfig({ ...qaRealEnv, CARTERA_API_TIMEOUT_MS: "2500" }).carteraApiTimeoutMs).toBe(2500);
     expect(() => loadConfig({ ...qaRealEnv, CARTERA_API_TIMEOUT_MS: "0" })).toThrow();
   });
+
+  it("configura límites positivos y finitos para el worker de aplicación", () => {
+    const defaults = loadConfig(baseEnv);
+    expect({
+      lease: defaults.workerLeaseSeconds,
+      attempts: defaults.workerMaxAttempts,
+      backoff: defaults.workerBackoffSeconds,
+      maxBackoff: defaults.workerMaxBackoffSeconds,
+    }).toEqual({ lease: 60, attempts: 5, backoff: 5, maxBackoff: 300 });
+
+    for (const [name, value] of [
+      ["WORKER_LEASE_SECONDS", "0"],
+      ["WORKER_MAX_ATTEMPTS", "-1"],
+      ["WORKER_BACKOFF_SECONDS", "Infinity"],
+      ["WORKER_MAX_BACKOFF_SECONDS", "NaN"],
+    ]) {
+      expect(() => loadConfig({ ...baseEnv, [name]: value })).toThrow();
+    }
+  });
 });

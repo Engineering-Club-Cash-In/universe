@@ -7,6 +7,7 @@ import Big from 'big.js';
 // 🔥 Mismo valor normalizado (trim + minúsculas) para asesores.email_cash_in y platform_users.email:
 // los filtros de cobro (reportes.ts, /stats) comparan por igualdad exacta contra el email de sesión.
 import { normalizeEmail } from '../utils/functions/email';
+import { elegirAsesorConMenorCarga, type AsesorCarga } from '../utils/advisorLoadBalancing';
 
 export const insertAdvisor = async ({ body, set }: any) => {
   try {
@@ -458,90 +459,53 @@ export async function getCreditosPorAsesorController(
 
 
 
-interface AsesorConCarga {
-  asesor_id: number;
-  nombre: string; 
-  total_creditos: number;
-  capital_total: string;
-}
-
 export async function getAsesorConMenorCarga(): Promise<number> {
   try {
-    console.log("🔍 Buscando asesor con menor carga de capital...");
+    console.log("🔍 Buscando asesor con menor carga de créditos...");
 
-    // 1️⃣ Obtener todos los asesores activos
-    const asesoresActivos = await db
+    // 1️⃣ Conteo y capital de los créditos vivos por asesor, en una sola consulta.
+    // El filtro de estado va en el ON del LEFT JOIN y NO en el WHERE: en el WHERE
+    // convertiría el LEFT JOIN en INNER y desaparecería el asesor con cero créditos,
+    // que es justamente el que debe ganar el balanceo.
+    const asesoresConCarga: AsesorCarga[] = await db
       .select({
         asesor_id: asesores.asesor_id,
         nombre: asesores.nombre,
+        // count sobre la columna (no count(*)) para que un asesor sin créditos dé 0 y no 1
+        total_creditos: sql<number>`count(${creditos.credito_id})::int`,
+        capital_total: sql<string>`coalesce(sum(${creditos.capital}), 0)::text`,
       })
       .from(asesores)
+      .leftJoin(
+        creditos,
+        and(
+          eq(creditos.asesor_id, asesores.asesor_id),
+          or(
+            eq(creditos.statusCredit, "ACTIVO"),
+            eq(creditos.statusCredit, "MOROSO")
+          )
+        )
+      )
       .where(
         and(
           eq(asesores.activo, true),
           // 🔥 Solo asesores marcados para recibir créditos (reemplaza el hardcode != 'Gerencia')
           eq(asesores.activo_para_creditos, true)
         )
-      );
+      )
+      .groupBy(asesores.asesor_id, asesores.nombre);
 
-    if (asesoresActivos.length === 0) {
-      throw new Error("No hay asesores activos disponibles");
-    }
-
-    console.log(`👥 Asesores activos encontrados: ${asesoresActivos.length}`);
-
-    // 2️⃣ Calcular carga de capital por cada asesor
-    const asesoresConCarga: AsesorConCarga[] = await Promise.all(
-      asesoresActivos.map(async (asesor) => {
-        // Obtener todos los créditos ACTIVOS del asesor
-         const creditosAsesor = await db
-          .select({
-            capital: creditos.capital,
-            statusCredit: creditos.statusCredit,
-          })
-          .from(creditos)
-          .where(
-            and(
-              eq(creditos.asesor_id, asesor.asesor_id),
-              or(
-                eq(creditos.statusCredit, "ACTIVO"),
-                eq(creditos.statusCredit, "MOROSO")
-              )
-            )
-          );
-
-
-        // Sumar el capital total
-        let capitalTotal = new Big(0);
-        creditosAsesor.forEach((c) => {
-          capitalTotal = capitalTotal.plus(c.capital || 0);
-        });
-
-        return {
-          asesor_id: asesor.asesor_id,
-          nombre: asesor.nombre,
-          total_creditos: creditosAsesor.length,
-          capital_total: capitalTotal.toFixed(2),
-        };
-      })
-    );
-
-    // 3️⃣ Ordenar por capital total (menor a mayor)
-    asesoresConCarga.sort((a, b) => {
-      return new Big(a.capital_total).cmp(new Big(b.capital_total));
-    });
-
-    console.log("📊 Carga de asesores:");
+    console.log(`👥 Asesores activos encontrados: ${asesoresConCarga.length}`);
     asesoresConCarga.forEach((a) => {
       console.log(
         `   - ${a.nombre}: ${a.total_creditos} créditos, Capital: Q${a.capital_total}`
       );
     });
 
-    // 4️⃣ Retornar el ID del asesor con menor carga
-    const asesorSeleccionado = asesoresConCarga[0];
+    // 2️⃣ Menos créditos gana; empata por menor capital y luego por menor asesor_id
+    const asesorSeleccionado = elegirAsesorConMenorCarga(asesoresConCarga);
     console.log(
-      `✅ Asesor seleccionado: ${asesorSeleccionado.nombre} (ID: ${asesorSeleccionado.asesor_id})`
+      `✅ Asesor seleccionado: ${asesorSeleccionado.nombre} (ID: ${asesorSeleccionado.asesor_id}, ${asesorSeleccionado.total_creditos} créditos)`
     );
 
     return asesorSeleccionado.asesor_id;

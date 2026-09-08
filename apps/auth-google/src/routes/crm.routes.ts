@@ -54,10 +54,14 @@ crmRoutes.use("*", requireAuth);
 /** Correo de la sesión, la única llave con la que se resuelve el lead. */
 const correoDeSesion = (c: any): string => {
   const user = c.get("user") as AuthedVariables["user"] | undefined;
-  // Sin `toLowerCase()`: el CRM compara el correo del lead con `=`, así que
-  // normalizarlo aquí cambiaría a qué fila apunta. Se manda tal cual, que es
-  // lo que el front venía mandando.
-  const email = user?.email?.trim();
+  // Normalizado igual que en el registro (`decidirLeadDelPortal` del CRM) y que
+  // en `cartera.routes.ts`. Antes se mandaba tal cual para no cambiar a qué
+  // fila apuntaba el `=` exacto del CRM, pero eso dejaba la asimetría del otro
+  // lado: el registro aceptaba a quien se dio de alta como "Ana@Ejemplo.com"
+  // contra el lead "ana@ejemplo.com", y después perfil, documentos, contratos,
+  // créditos y actualización le fallaban todos. El CRM ya compara normalizado
+  // (`eqEmail`), así que la llave viaja en su forma canónica.
+  const email = user?.email?.trim().toLowerCase();
 
   if (!email) {
     throw new HTTPException(401, { message: "No autorizado. Inicia sesión." });

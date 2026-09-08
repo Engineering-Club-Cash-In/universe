@@ -52,8 +52,33 @@ describe("qué campo dispara la búsqueda", () => {
 		});
 	});
 
-	it("el correo consulta solo si no hay DPI utilizable", () => {
-		expect(disparadorDeteccion("157", "richard@gmail.com")).toEqual({
+	it("el correo consulta cuando el campo de DPI está vacío", () => {
+		expect(disparadorDeteccion("", "richard@gmail.com")).toEqual({
+			email: "richard@gmail.com",
+		});
+	});
+
+	// El agujero: conta ya escribió el correo de Richard y empieza a teclear el
+	// DPI de OTRA persona. Entre el primer dígito y el séptimo, el DPI todavía no
+	// es consultable; si en esa ventana el correo dispara, se detecta a Richard,
+	// se le pone de representante y se BORRA el DPI a medio teclear. La empresa
+	// se termina creando bajo la persona equivocada.
+	it("un DPI a medio teclear NO deja que el correo dispare", () => {
+		expect(disparadorDeteccion("1", "richard@gmail.com")).toBeNull();
+		expect(disparadorDeteccion("157366", "richard@gmail.com")).toBeNull();
+	});
+
+	it("al borrar el DPI el correo vuelve a consultar", () => {
+		expect(disparadorDeteccion("  ", "richard@gmail.com")).toEqual({
+			email: "richard@gmail.com",
+		});
+	});
+
+	// Un guion suelto no es la identidad de nadie: `dpiConsultable` solo mira
+	// dígitos, así que el bloqueo mira lo mismo. Si no, un separador tecleado por
+	// error apaga la detección por correo sin que se vea por qué.
+	it("un separador suelto no cuenta como DPI escrito", () => {
+		expect(disparadorDeteccion("-", "richard@gmail.com")).toEqual({
 			email: "richard@gmail.com",
 		});
 	});

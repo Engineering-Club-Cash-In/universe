@@ -28,9 +28,13 @@
  * mismo DPI que la ficha ya guarda. La solución estructural es una marca de
  * procedencia como la de cartera, pero los leads no tienen esa columna.
  *
- * Módulo puro y sin dependencias a propósito: es la única parte con reglas y
- * así se puede probar sin levantar la base ni el resto del servidor.
+ * Módulo puro a propósito: es la única parte con reglas y así se puede probar
+ * sin levantar la base ni el resto del servidor. Lo único que importa es la
+ * normalización de correo, que también es pura y que comparte con la capa de
+ * SQL para que las dos no puedan divergir.
  */
+
+import { normalizarCorreo } from "../utils/email-normalization";
 
 /** Quita separadores para poder comparar DPIs guardados con formatos distintos. */
 export const normalizarParaComparar = (
@@ -40,13 +44,12 @@ export const normalizarParaComparar = (
 /**
  * Deja los correos comparables entre sí.
  *
- * La búsqueda en base es un `=` exacto, así que un lead guardado como
- * "Ana@Ejemplo.com " no casa por correo y solo aparece por el DPI. Sin
- * normalizar, esa ficha —que SÍ es de quien pregunta— se rechazaría como ajena.
+ * Es exactamente la misma normalización que aplica la búsqueda en base
+ * (`eqEmail`), y por eso se toma de ahí en vez de repetirla: cuando el registro
+ * normaliza y la consulta compara exacto, la cuenta se da de alta con éxito y
+ * después no encuentra su propia ficha.
  */
-export const normalizarCorreoParaComparar = (
-	correo: string | null | undefined,
-): string => (correo ?? "").trim().toLowerCase();
+export const normalizarCorreoParaComparar = normalizarCorreo;
 
 export type DecisionDeLead =
 	| { tipo: "aceptar" }

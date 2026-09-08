@@ -95,6 +95,22 @@ describe("rutas del CRM: el destinatario sale de la sesión", () => {
     };
   });
 
+  // El registro (`decidirLeadDelPortal`) normaliza los dos correos antes de
+  // compararlos, así que una cuenta creada como "Ana@Ejemplo.com " se registra
+  // bien contra el lead "ana@ejemplo.com". Si estas rutas mandan el correo tal
+  // cual, el CRM lo busca con un `=` exacto y no encuentra nada: la cuenta se
+  // registra con éxito y después no puede ver ni su perfil.
+  it("manda el correo de la sesión normalizado, como lo normaliza el registro", async () => {
+    sessionActual = {
+      user: { id: "user-1", email: "  Ana@Ejemplo.COM  ", dpi: DPI_ATACANTE },
+    };
+
+    const res = await pedir("/profile");
+
+    expect(res.status).toBe(200);
+    expect(argsDe("getProfile")?.[0]).toBe("ana@ejemplo.com");
+  });
+
   it("rechaza sin sesión", async () => {
     sessionActual = null;
 

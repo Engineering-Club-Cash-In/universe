@@ -832,11 +832,15 @@ function InvestorLiquidacionesPage() {
 	const [editTipoCuenta, setEditTipoCuenta] = useState("");
 	const [editNumeroCuenta, setEditNumeroCuenta] = useState("");
 	// "¿Es empresa?" no tiene columna en cartera: se DERIVA de si la fila trae
-	// `dpi_rep_legal`. `editRepLegalOriginal` guarda el valor con el que se abrió
+	// el `dpi_rep_legal` de OTRA persona. `editRepLegalOriginal` guarda el valor con el que se abrió
 	// el modal, para detectar que guardar le quitaría el representante a alguien
 	// que sí lo tenía.
 	const [editEsEmpresa, setEditEsEmpresa] = useState(false);
 	const [editRepLegalOriginal, setEditRepLegalOriginal] = useState("");
+	// El `dpi` con el que se abrió el modal. Va aparte de `editDpi` (que el
+	// operador puede estar tecleando) porque la derivación y la advertencia
+	// hablan de la fila TAL COMO ESTABA guardada.
+	const [editDpiOriginal, setEditDpiOriginal] = useState("");
 	const [confirmarQuitarRepOpen, setConfirmarQuitarRepOpen] = useState(false);
 	const [editDpiRepLegal, setEditDpiRepLegal] = useState("");
 	const [editMoneda, setEditMoneda] = useState("quetzales");
@@ -876,7 +880,10 @@ function InvestorLiquidacionesPage() {
 		const repLegalGuardado = inv.dpiRepLegal ?? inv.dpi_rep_legal ?? "";
 		setEditDpiRepLegal(repLegalGuardado);
 		setEditRepLegalOriginal(repLegalGuardado);
-		setEditEsEmpresa(esEmpresaInicial(repLegalGuardado));
+		setEditDpiOriginal(inv.dpi ? String(inv.dpi) : "");
+		// El `dpi` de la fila entra en la derivación: un representante que es la
+		// PROPIA fila (dpi 4036613 / dpi_rep_legal '04036613') no la vuelve empresa.
+		setEditEsEmpresa(esEmpresaInicial(repLegalGuardado, inv.dpi));
 		setConfirmarQuitarRepOpen(false);
 		setEditMoneda(inv.moneda ?? "quetzales");
 		setEditEmiteFactura(inv.emiteFactura ?? inv.emite_factura ?? false);
@@ -1740,6 +1747,7 @@ function InvestorLiquidacionesPage() {
 									requiereConfirmacionBorrado(
 										editRepLegalOriginal,
 										editEsEmpresa,
+										editDpiOriginal,
 									)
 								) {
 									// Un modal a la vez: se cierra el de edición (su estado

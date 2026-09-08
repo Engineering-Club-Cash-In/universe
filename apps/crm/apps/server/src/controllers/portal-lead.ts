@@ -8,6 +8,7 @@ import { opportunityDocuments } from "../db/schema/documents";
 import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import { vehiclePhotos, vehicles } from "../db/schema/vehicles";
 import { eqDpi } from "../lib/dpi-lookup";
+import { eqEmail } from "../lib/email-lookup";
 import { extractBearerToken, secretsMatch } from "../lib/service-token";
 import { getFileUrl, getFileUrlWithBucketInKey } from "../lib/storage";
 import { normalizarDpi, validarDpi } from "../utils/cui-validation";
@@ -31,10 +32,16 @@ async function findLeadByEmailOrDpi(email?: string, dpi?: string) {
 		return { error: "Se debe proporcionar email o DPI", status: 400 as const };
 	}
 
-	// Construir condiciones de búsqueda
+	// Construir condiciones de búsqueda.
+	// El correo se compara normalizado en AMBOS lados (`eqEmail`), igual que el
+	// DPI con `eqDpi` y igual que el registro con `normalizarCorreoParaComparar`.
+	// Con un `=` exacto, la cuenta que se acaba de registrar como
+	// "Ana@Ejemplo.com" —el registro sí la aceptó, porque allá se normaliza—
+	// dejaba de encontrar su propio lead "ana@ejemplo.com", y con ella se caían
+	// perfil, documentos, contratos, créditos y actualizaciones.
 	const conditions = [];
 	if (email && email.trim() !== "") {
-		conditions.push(eq(leads.email, email));
+		conditions.push(eqEmail(leads.email, email));
 	}
 	if (dpi && dpi.trim() !== "") {
 		conditions.push(eqDpi(leads.dpi, dpi));
@@ -50,13 +57,20 @@ async function findLeadByEmailOrDpi(email?: string, dpi?: string) {
 		.where(or(...conditions))
 		.orderBy(asc(leads.createdAt));
 
-	// El email es la identidad exacta con la que entra el usuario al portal, así
-	// que esa fila manda sobre cualquier empate por DPI. Si no vino email, o
-	// ninguna coincide, se usa la más antigua, que es la que arrastra historial.
-	const leadPorEmail =
-		email && email.trim() !== ""
-			? matches.find((candidate) => candidate.email === email)
-			: undefined;
+	// El email es la identidad con la que entra el usuario al portal, así que esa
+	// fila manda sobre cualquier empate por DPI. Si no vino email, o ninguna
+	// coincide, se usa la más antigua, que es la que arrastra historial.
+	//
+	// El desempate compara normalizado por el mismo motivo que la consulta: si
+	// no, la fila que SÍ es del titular pierde contra un homónimo de DPI solo
+	// por estar guardada con otra caja.
+	const correoBuscado = normalizarCorreoParaComparar(email);
+	const leadPorEmail = correoBuscado
+		? matches.find(
+				(candidate) =>
+					normalizarCorreoParaComparar(candidate.email) === correoBuscado,
+			)
+		: undefined;
 
 	const lead = leadPorEmail ?? matches[0];
 
@@ -682,7 +696,7 @@ export async function createPortalRegisterLead(c: Context) {
 		const candidatos = await db
 			.select()
 			.from(leads)
-			.where(or(eq(leads.email, email), eqDpi(leads.dpi, dpi)))
+			.where(or(eqEmail(leads.email, email), eqDpi(leads.dpi, dpi)))
 			.orderBy(asc(leads.createdAt));
 
 		const correoDeLaSesion = normalizarCorreoParaComparar(email);

@@ -167,6 +167,29 @@ async function bloquearCreditosAsesor(
   `);
 }
 
+async function bloquearFilasCredito(
+  tx: Executor,
+  creditoIds: number[],
+) {
+  const ids = [...new Set(creditoIds)].sort((a, b) => a - b);
+  if (!ids.length) return;
+  // Un escritor de mora bloquea esta misma fila antes de cambiar cuotas y
+  // estado. Así no puede quedar una mora sin confirmar entre la foto final y
+  // el UPDATE del traslado. Mismo orden por ID que el advisory lock anterior.
+  await tx.execute(sql`
+    WITH creditos_ordenados AS MATERIALIZED (
+      SELECT value::integer AS credito_id
+      FROM jsonb_array_elements_text(${JSON.stringify(ids)}::jsonb)
+      ORDER BY value::integer
+    )
+    SELECT c.credito_id
+    FROM creditos_ordenados ids
+    JOIN ${schema}.creditos c ON c.credito_id = ids.credito_id
+    ORDER BY c.credito_id
+    FOR UPDATE OF c
+  `);
+}
+
 async function bloquearDestinos(
   tx: Executor,
   asesorIds: number[],
@@ -178,7 +201,7 @@ async function bloquearDestinos(
   // confirmar, para que ninguna baja invalide el plan final.
   await tx.execute(sql`
     WITH destinos_ordenados AS MATERIALIZED (
-      SELECT value::integer AS asesor_id
+ ´     SELECT value::integer AS asesor_id
       FROM jsonb_array_elements_text(${JSON.stringify(ids)}::jsonb)
       ORDER BY value::integer
     )
@@ -263,6 +286,7 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
     // el hash obliga a generar un preview nuevo, en vez de mezclar ambas fotos.
     let plan = await construirPlan(tx, row.solicitud);
     await bloquearCreditosAsesor(tx, plan.asignaciones.map((a) => a.creditoId));
+    await bloquearFilasCredito(tx, plan.asignaciones.map((a) => a.creditoId));
     await bloquearDestinos(tx, plan.asignaciones.map((a) => a.asesorNuevoId));
     plan = await construirPlan(tx, row.solicitud);
     if (hash(plan) !== row.payload_hash) throw new TrasladoConflict("La cartera cambió. Vuelve a previsualizar antes de confirmar.");
@@ -284,6 +308,10 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
       prioridad: a.prioridad,
       estado_anterior: a.estadoActual,
     }));
+    // Misma definición de bucket que construirPlan. Además del dueño y estado,
+    // el lote debe seguir viendo el bucket que previsualizó: una edición manual
+    // de cuotas_atrasadas puede mantener MOROSO pero mover B1 a B3.
+    const fuera = sql.join(STATUS_READER_FUERA.map((estado) => sql`${estado}`), sql`, `);
     const escrito = await tx.execute<{
       actualizados: number;
       historiales: number;
@@ -295,9 +323,15 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
       ), actualizados AS (
         UPDATE ${schema}.creditos c SET asesor_id = a.asesor_nuevo_id
         FROM asignaciones a
+        LEFT JOIN ${schema}.moras_credito m ON m.credito_id = a.credito_id AND m.activa
         WHERE c.credito_id = a.credito_id
           AND c.asesor_id IS NOT DISTINCT FROM a.asesor_anterior_id
           AND c."statusCredit" IS NOT DISTINCT FROM a.estado_anterior
+          AND (
+            CASE WHEN c."statusCredit" IN (${fuera}) THEN NULL
+            ELSE ${bucketActualSql("c", "m")}
+            END
+          ) IS NOT DISTINCT FROM a.bucket
           AND EXISTS (
             SELECT 1
             FROM ${schema}.asesores destino

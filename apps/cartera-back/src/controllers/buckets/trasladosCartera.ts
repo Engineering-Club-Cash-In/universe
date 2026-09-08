@@ -167,6 +167,29 @@ async function bloquearCreditosAsesor(
   `);
 }
 
+async function bloquearFilasMora(
+  tx: Executor,
+  creditoIds: number[],
+) {
+  const ids = [...new Set(creditoIds)].sort((a, b) => a - b);
+  if (!ids.length) return;
+  // updateMoraEnTx toma primero esta fila y después creditos. El traslado
+  // respeta orden mora → crédito: si una edición ya cambió cuotas_atrasadas,
+  // termina antes y la foto final invalida el preview; si no, espera al lote.
+  await tx.execute(sql`
+    WITH creditos_ordenados AS MATERIALIZED (
+      SELECT value::integer AS credito_id
+      FROM jsonb_array_elements_text(${JSON.stringify(ids)}::jsonb)
+      ORDER BY value::integer
+    )
+    SELECT m.mora_id
+    FROM creditos_ordenados ids
+    JOIN ${schema}.moras_credito m ON m.credito_id = ids.credito_id AND m.activa
+    ORDER BY ids.credito_id
+    FOR UPDATE OF m
+  `);
+}
+
 async function bloquearFilasCredito(
   tx: Executor,
   creditoIds: number[],
@@ -201,7 +224,7 @@ async function bloquearDestinos(
   // confirmar, para que ninguna baja invalide el plan final.
   await tx.execute(sql`
     WITH destinos_ordenados AS MATERIALIZED (
- ´     SELECT value::integer AS asesor_id
+      SELECT value::integer AS asesor_id
       FROM jsonb_array_elements_text(${JSON.stringify(ids)}::jsonb)
       ORDER BY value::integer
     )
@@ -286,6 +309,7 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
     // el hash obliga a generar un preview nuevo, en vez de mezclar ambas fotos.
     let plan = await construirPlan(tx, row.solicitud);
     await bloquearCreditosAsesor(tx, plan.asignaciones.map((a) => a.creditoId));
+    await bloquearFilasMora(tx, plan.asignaciones.map((a) => a.creditoId));
     await bloquearFilasCredito(tx, plan.asignaciones.map((a) => a.creditoId));
     await bloquearDestinos(tx, plan.asignaciones.map((a) => a.asesorNuevoId));
     plan = await construirPlan(tx, row.solicitud);

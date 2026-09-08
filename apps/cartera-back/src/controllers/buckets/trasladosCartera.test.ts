@@ -22,6 +22,7 @@ const executor = {
   async execute(statement: SQL) {
     const { sql: query, params } = dialect.sqlToQuery(statement);
     queries.push(`${query} | ${JSON.stringify(params)}`);
+    if (query.includes("´")) throw new Error("SQL contiene carácter inválido");
     if (query.includes("pg_advisory_xact_lock") && lockTimeout) {
       throw { cause: { code: "55P03" } };
     }
@@ -138,6 +139,7 @@ test("confirmación espera los locks de jobs y escribe lote sin bloquear tablas 
   const lockMoras = queries.findIndex((q) => q.includes("pg_advisory_xact_lock") && q.includes("728193"));
   const lockConvenio = queries.findIndex((q) => q.includes("pg_advisory_xact_lock") && q.includes("728194"));
   const lockCreditos = queries.findIndex((q) => q.includes("pg_advisory_xact_lock") && q.includes("728195"));
+  const lockFilasMora = queries.findIndex((q) => q.includes("FOR UPDATE OF m"));
   const lockFilasCredito = queries.findIndex((q) => q.includes("FOR UPDATE OF c"));
   const lockDestinos = queries.findIndex((q) => q.includes("FOR SHARE OF a, pool"));
   const escritura = queries.findIndex((q) => q.includes("WITH asignaciones"));
@@ -148,6 +150,8 @@ test("confirmación espera los locks de jobs y escribe lote sin bloquear tablas 
   expect(lockConvenio).toBeLessThan(escritura);
   expect(lockCreditos).toBeGreaterThan(lockConvenio);
   expect(lockCreditos).toBeLessThan(escritura);
+  expect(lockFilasMora).toBeGreaterThan(lockCreditos);
+  expect(lockFilasMora).toBeLessThan(lockFilasCredito);
   expect(lockFilasCredito).toBeGreaterThan(lockCreditos);
   expect(lockFilasCredito).toBeLessThan(escritura);
   expect(lockDestinos).toBeGreaterThan(lockCreditos);

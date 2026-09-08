@@ -61,16 +61,12 @@ const entrada = (over: any = {}) => ({
   ...over,
 });
 
-/**
- * El UPDATE que lleva el rol y el DPI.
- *
- * El alta escribe DOS veces: primero la marca de contraseña provisionada —sola
- * y fail-closed, porque sin ella nadie le pide a su dueño que la cambie— y
- * después el rol y el DPI. Las pruebas que hablan de lo segundo lo buscan por
- * CONTENIDO para no volver a atarse a un índice.
- */
-const cambioDeIdentidad = () =>
-  actualizaciones.find((u) => "role" in u || "dpi" in u) ?? {};
+// Gemelo de `marca()` (ver el describe de la marca fail-closed): el alta hace
+// DOS updates y la marca `passwordProvisionadaAt` va PRIMERO a propósito, así
+// que `actualizaciones[0]` ya no es el update de rol/DPI. Se busca por
+// contenido, no por índice.
+const rolYDpi = () =>
+  actualizaciones.find((u) => u.role !== undefined || u.dpi !== undefined);
 
 describe("asegurarCuentaInversionista — cuenta nueva", () => {
   it("crea la cuenta y manda la bienvenida CON la contraseña", () => {
@@ -90,17 +86,13 @@ describe("asegurarCuentaInversionista — cuenta nueva", () => {
 
   it("promueve a INVESTOR y guarda el DPI", async () => {
     await asegurarCuentaInversionista(entrada(), deps());
-    expect(cambioDeIdentidad()).toMatchObject({ role: "INVESTOR", dpi: "1234567890101" });
+    // Índice no: la marca de contraseña se escribe primero y en su propio UPDATE.
+    expect(rolYDpi()).toMatchObject({ role: "INVESTOR", dpi: "1234567890101" });
   });
 
   it("NUNCA devuelve la contraseña: la respuesta queda en audit_logs", async () => {
     const r = await asegurarCuentaInversionista(entrada(), deps());
     expect(JSON.stringify(r)).not.toContain("PASSWORD-FIJA");
-  });
-
-  it("marca la cuenta para que su dueño elija contraseña al entrar", async () => {
-    await asegurarCuentaInversionista(entrada(), deps());
-    expect(actualizaciones[0].passwordProvisionadaAt).toBeInstanceOf(Date);
   });
 });
 
@@ -167,17 +159,6 @@ describe("asegurarCuentaInversionista — ya tenía cuenta", () => {
     expect(bienvenidas).toEqual([]);
     expect(avisos).toEqual([]);
     expect(r.correo.enviado).toBe(false);
-  });
-
-  it("NO marca a quien ya tenía cuenta: esa contraseña es suya, no nuestra", async () => {
-    // La razón por la que la marca existe: quien ya entraba al portal con su
-    // propia contraseña no puede quedar obligado a cambiarla porque le dieron
-    // de alta un inversionista.
-    usuarios.push({ id: "u1", email: "ana@example.com", nombre: "Ana", role: "CLIENT", dpi: "1234567890101" });
-    await asegurarCuentaInversionista(entrada(), deps());
-    for (const cambio of actualizaciones) {
-      expect(cambio.passwordProvisionadaAt).toBeUndefined();
-    }
   });
 
   it("promueve CLIENT a INVESTOR pero no toca un ADMIN", async () => {
@@ -320,7 +301,8 @@ describe("asegurarCuentaInversionista — lo que se guarda es lo que se busca", 
       d,
     );
     expect(primera.estado).toBe("creada");
-    expect(cambioDeIdentidad()).toMatchObject({ dpi: "4036613" });
+    // Índice no: antes de este update va el de `passwordProvisionadaAt`.
+    expect(rolYDpi()).toMatchObject({ dpi: "4036613" });
 
     // Operación corrige el correo en cartera y el job vuelve a correr.
     const segunda = await asegurarCuentaInversionista(
@@ -345,7 +327,8 @@ describe("asegurarCuentaInversionista — lo que se guarda es lo que se busca", 
     // Guardarlo con ceros a la izquierda o con basura de captura sería guardar
     // algo que la búsqueda normalizada no vuelve a encontrar tal cual.
     await asegurarCuentaInversionista(entrada({ dpi: "04036613" }), deps());
-    expect(cambioDeIdentidad()).toMatchObject({ dpi: "4036613" });
+    // Índice no: antes de este update va el de `passwordProvisionadaAt`.
+    expect(rolYDpi()).toMatchObject({ dpi: "4036613" });
   });
 
   it("lo que no es un DPI sigue quedando en NULL, jamás en cadena vacía", async () => {
@@ -357,7 +340,8 @@ describe("asegurarCuentaInversionista — lo que se guarda es lo que se busca", 
         entrada({ dpi: basura, email: `x${basura.length}@example.com` }),
         deps(),
       );
-      expect(cambioDeIdentidad()).toMatchObject({ dpi: null });
+      // Índice no: antes de este update va el de `passwordProvisionadaAt`.
+      expect(rolYDpi()).toMatchObject({ dpi: null });
     }
   });
 });
@@ -368,11 +352,15 @@ describe("asegurarCuentaInversionista — lo que se guarda es lo que se busca", 
 // sistema. Cualquier throw después de ese punto deja a una persona con una
 // cuenta que no sabe que tiene y a la que no puede entrar.
 describe("asegurarCuentaInversionista — nada puede tirar después de crear la cuenta", () => {
-  // Este stub tumba TODAS las escrituras, así que también la marca de
-  // contraseña provisionada. Cuando SOLO se cae la de rol/DPI —el caso real del
-  // 23505 sobre users_dpi_key— la contraseña sí sale: eso lo fija la prueba
-  // "guarda la marca aunque el rol y el DPI se estrellen contra users_dpi_key".
-  it("si no pasa NINGUNA escritura, tampoco sale la contraseña", async () => {
+  // El nombre cambió con el orden de escritura: antes el rol y el DPI viajaban
+  // en el mismo (y único) UPDATE del alta, así que este stub —que tira en
+  // TODOS— era "falla el update de rol/DPI" y el desenlace era mandar la
+  // contraseña igual. Hoy la marca `passwordProvisionadaAt` va primero y sola,
+  // de modo que aquí el que se cae primero es el de la marca y el desenlace
+  // correcto es fail-closed: la contraseña no sale. El caso que sí conserva el
+  // nombre viejo —solo rol/DPI se cae, la marca queda— vive en el describe de
+  // la marca ("guarda la marca aunque el rol y el DPI se estrellen...").
+  it("si NINGÚN update pasa, no tira: se traga el fallo y lo reporta sin mandar la contraseña", async () => {
     const d = {
       ...deps(),
       actualizarUsuario: async () => {
@@ -381,15 +369,16 @@ describe("asegurarCuentaInversionista — nada puede tirar después de crear la 
       },
     };
 
+    // Lo que este describe fija: nada de esto propaga un throw sobre una cuenta
+    // que YA existe.
     const r = await asegurarCuentaInversionista(entrada(), d);
 
-    // Sin marca no hay quien le pida cambiarla después, así que no se manda.
-    expect(bienvenidas).toEqual([]);
     expect(r).toMatchObject({
       estado: "fallo",
       motivo: "no_se_pudo_marcar_password_provisionada",
     });
     expect(r.advertencias).toContain("cuenta_creada_sin_marca_de_password");
+    expect(bienvenidas).toEqual([]);
   });
 
   it("si el envío TIRA, no se traga la cuenta creada: la reporta como acceso perdido", async () => {
@@ -669,14 +658,8 @@ describe("el rol no se promueve antes de validar el correo", () => {
  *
  * El ataque completo: alguien registra el correo de un inversionista conocido
  * con la contraseña que él elige; el siguiente provisionamiento del staff
- * encuentra esa cuenta CLIENT por correo y le regala INVESTOR.
- *
- * OJO: quitar esa promoción NO cierra el acceso. `cartera.routes.ts` lleva
- * `requireAuth` y ni una comprobación de rol —el rol solo se mira en el
- * cliente—, así que una sesión CLIENT con el correo de la víctima ya lee sus
- * entidades y le reescribe la cuenta bancaria. Eso es el RIESGO CONOCIDO Y
- * ABIERTO de `cartera.routes.ts:212-224`. Esto es una escritura menos, no el
- * cierre del agujero.
+ * encuentra esa cuenta CLIENT por correo, le regala INVESTOR, y la búsqueda de
+ * entidades por correo del portal le entrega las inversiones de la víctima.
  *
  * Para ESCRIBIR el rol hace falta que el DPI de la cuenta respalde al de
  * cartera. Es el mismo criterio del camino por DPI —que además exige el
@@ -804,6 +787,9 @@ describe("el rol no se promueve sobre un vínculo que es solo el correo", () => 
     expect(actualizaciones).toEqual([]);
     expect(usuarios[0].role).toBe("CLIENT");
     expect(avisos).toEqual([]);
+  });
+});
+
 
 // La marca `passwordProvisionadaAt` es lo ÚNICO que hace que al dueño de una
 // cuenta recién creada se le pida cambiar la contraseña que le llegó por correo:

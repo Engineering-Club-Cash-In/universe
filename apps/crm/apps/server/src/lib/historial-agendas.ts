@@ -252,11 +252,11 @@ export function columnaEnAgenda(
  * La cobertura se busca por RANGO DE FECHAS (no por "vigente hoy"), y por eso
  * `cancelada_en` no exige que la cobertura siga activa: un día histórico debe
  * seguir contando lo que pasó ESE día, aunque la cobertura se haya cancelado
- * después. Pero sí se compara la fecha del día consultado contra
- * `cancelada_en`: sin eso, cancelar el día 3 una cobertura que iba del 1 al
- * 10 no acorta nada — el rango original sigue matcheando hasta el 10, y una
- * gestión del día 7 sobre un crédito compartido por pool (sin cobertura real
- * desde el día 3) se etiqueta igual como "En agenda de <titular>".
+ * después. Pero sí se compara contra el INSTANTE del contacto (fecha_contacto,
+ * no la fecha del día consultado): colapsar ambos a ::date pierde el caso de
+ * cancelar el MISMO día después del contacto — "cancelado el día X" y
+ * "contacto del día X" son iguales en fecha aunque el contacto haya sido
+ * antes. Mismo bug (y mismo fix) que en cerrarSnapshotsAgenda.
  */
 export function columnaEnAgendaDeTitular(
 	fecha: string | null,
@@ -274,7 +274,7 @@ export function columnaEnAgendaDeTitular(
 		 AND cob.suplente_id = ${contactosCobros.realizadoPor}
 		 AND cob.desde <= ${fecha}::date
 		 AND cob.hasta >= ${fecha}::date
-		 AND (cob.cancelada_en IS NULL OR ${fecha}::date < cob.cancelada_en::date)
+		 AND (cob.cancelada_en IS NULL OR cob.cancelada_en > ${contactosCobros.fechaContacto})
 		WHERE asnap.fecha_gt = ${fecha}::date
 		  AND asnap.asesor_id <> ${contactosCobros.realizadoPor}
 		  AND (

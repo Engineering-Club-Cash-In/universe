@@ -10,6 +10,7 @@ import {
 	lt,
 	lte,
 	max,
+	sql,
 } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
@@ -105,9 +106,31 @@ export const agendaCobrosRouter = {
 					),
 				)
 				.limit(1);
+			// Cobertura cancelada HOY MISMO: sin esto, un titular cuya cobertura
+			// se cancela a mitad de día desaparece de golpe de `asesoresFuente` y
+			// el suplente pierde de su vista, sin aviso, el crédito que ya había
+			// trabajado esta mañana (antes de la cancelación) — el cierre
+			// nocturno sí lo acredita igual (mismo criterio en
+			// jobs/agenda-cobros-snapshots.ts), pero la vista en vivo del propio
+			// día quedaba ciega a ese trabajo. Se sigue mostrando el resto del
+			// día; mañana, sin la cobertura vigente, ya no aparece.
+			const coberturasCanceladasHoy = await db
+				.select({ titularId: coberturasAgendaCobros.titularId })
+				.from(coberturasAgendaCobros)
+				.where(
+					and(
+						eq(coberturasAgendaCobros.suplenteId, asesorId),
+						sql`${coberturasAgendaCobros.canceladaEn}::date = ${fecha}::date`,
+						lte(coberturasAgendaCobros.desde, fecha),
+						gte(coberturasAgendaCobros.hasta, fecha),
+					),
+				);
 			const asesoresFuente = [
 				...(ausenciaPropia.length ? [] : [asesorId]),
-				...coberturas.map((c) => c.titularId),
+				...new Set([
+					...coberturas.map((c) => c.titularId),
+					...coberturasCanceladasHoy.map((c) => c.titularId),
+				]),
 			];
 			if (!asesoresFuente.length) {
 				return {
@@ -123,42 +146,70 @@ export const agendaCobrosRouter = {
 				eq(agendaCobrosSnapshots.fechaGt, fecha),
 				inArray(agendaCobrosSnapshots.asesorId, asesoresFuente),
 			);
-			// Paginado server-side: un asesor puede tener 16k+ créditos
-			// planificados en el mismo snapshot (ver CHUNK_SIZE_SNAPSHOT_ITEMS en
-			// jobs/agenda-cobros-snapshots.ts) — traer todo de una vez, correr
-			// cerrarItemsAgenda sobre el total y devolverlo entero puede colgar
-			// al cliente eventual de este endpoint (Codex PR #1332).
-			const [{ total }] = await db
-				.select({ total: count() })
-				.from(agendaCobrosSnapshotItems)
-				.innerJoin(
-					agendaCobrosSnapshots,
-					eq(agendaCobrosSnapshotItems.snapshotId, agendaCobrosSnapshots.id),
-				)
-				.where(where);
-			const items = await db
-				.select({
-					id: agendaCobrosSnapshotItems.id,
-					numeroCreditoSifco: agendaCobrosSnapshotItems.numeroCreditoSifco,
-					casoCobroId: agendaCobrosSnapshotItems.casoCobroId,
-					motivoAgenda: agendaCobrosSnapshotItems.motivoAgenda,
-					bucketSnapshot: agendaCobrosSnapshotItems.bucketSnapshot,
-					promesaCumplida: agendaCobrosSnapshotItems.promesaCumplida,
-					promesaCumplidaEn: agendaCobrosSnapshotItems.promesaCumplidaEn,
-					// Dueño REAL del snapshot del item (titular o el propio suplente):
-					// cerrarItemsAgenda exige contacto.realizadoPor === item.asesorId, y
-					// con cobertura ese dueño no siempre es el usuario logueado.
-					snapshotAsesorId: agendaCobrosSnapshots.asesorId,
-				})
-				.from(agendaCobrosSnapshotItems)
-				.innerJoin(
-					agendaCobrosSnapshots,
-					eq(agendaCobrosSnapshotItems.snapshotId, agendaCobrosSnapshots.id),
-				)
-				.where(where)
-				.orderBy(asc(agendaCobrosSnapshotItems.numeroCreditoSifco))
-				.limit(input.perPage)
-				.offset((input.page - 1) * input.perPage);
+			const consultarItems = () =>
+				db
+					.select({
+						id: agendaCobrosSnapshotItems.id,
+						numeroCreditoSifco: agendaCobrosSnapshotItems.numeroCreditoSifco,
+						casoCobroId: agendaCobrosSnapshotItems.casoCobroId,
+						motivoAgenda: agendaCobrosSnapshotItems.motivoAgenda,
+						bucketSnapshot: agendaCobrosSnapshotItems.bucketSnapshot,
+						promesaCumplida: agendaCobrosSnapshotItems.promesaCumplida,
+						promesaCumplidaEn: agendaCobrosSnapshotItems.promesaCumplidaEn,
+						// Dueño REAL del snapshot del item (titular o el propio
+						// suplente): cerrarItemsAgenda exige
+						// contacto.realizadoPor === item.asesorId, y con cobertura
+						// ese dueño no siempre es el usuario logueado.
+						snapshotAsesorId: agendaCobrosSnapshots.asesorId,
+					})
+					.from(agendaCobrosSnapshotItems)
+					.innerJoin(
+						agendaCobrosSnapshots,
+						eq(agendaCobrosSnapshotItems.snapshotId, agendaCobrosSnapshots.id),
+					)
+					.where(where)
+					.orderBy(asc(agendaCobrosSnapshotItems.numeroCreditoSifco));
+			let total: number;
+			let items: Awaited<ReturnType<typeof consultarItems>>;
+			if (asesoresFuente.length > 1) {
+				// Con cobertura, titular y suplente comparten pool de bucket (lo
+				// exige crearCobertura), así que un mismo crédito SLA puede salir
+				// en AMBOS snapshots. Deduplicar en la página ya cortada no
+				// alcanza — infla `total` y puede partir el duplicado entre dos
+				// páginas. Mismo patrón que ya usa getColaDia para este mismo
+				// problema (routers/cobros.ts): traer todo y paginar en memoria.
+				// Caso raro (solo mientras hay cobertura vigente) — sin cobertura
+				// sigue paginando en DB, sin cambio de comportamiento.
+				const todos = await consultarItems();
+				const deduplicados = [
+					...new Map(
+						todos.map((item) => [item.numeroCreditoSifco, item]),
+					).values(),
+				];
+				total = deduplicados.length;
+				items = deduplicados.slice(
+					(input.page - 1) * input.perPage,
+					input.page * input.perPage,
+				);
+			} else {
+				// Paginado server-side: un asesor puede tener 16k+ créditos
+				// planificados en el mismo snapshot (ver CHUNK_SIZE_SNAPSHOT_ITEMS
+				// en jobs/agenda-cobros-snapshots.ts) — traer todo de una vez, correr
+				// cerrarItemsAgenda sobre el total y devolverlo entero puede colgar
+				// al cliente eventual de este endpoint (Codex PR #1332).
+				const [{ total: totalDb }] = await db
+					.select({ total: count() })
+					.from(agendaCobrosSnapshotItems)
+					.innerJoin(
+						agendaCobrosSnapshots,
+						eq(agendaCobrosSnapshotItems.snapshotId, agendaCobrosSnapshots.id),
+					)
+					.where(where);
+				total = totalDb;
+				items = await consultarItems()
+					.limit(input.perPage)
+					.offset((input.page - 1) * input.perPage);
+			}
 			const base = {
 				fecha,
 				page: input.page,
@@ -246,12 +297,13 @@ export const agendaCobrosRouter = {
 			// cierre nocturno (contactoPerteneceAlItem) — un item con
 			// casoCobroId=null (sin caso CRM vinculado) solo puede matchear por
 			// SIFCO, nunca por caso.
-			// Mismos dueños que `asesoresFuente` arriba: si el titular ya gestionó
-			// un crédito antes de que arrancara/se registrara la cobertura, el
-			// suplente debe verlo atendido, no pendiente — sin esto el filtro de
-			// snapshots ya traía sus items, pero el de contactos solo miraba al
-			// suplente y el trabajo del titular quedaba invisible acá (riesgo de
-			// llamar dos veces al mismo cliente).
+			// Mismos dueños que `asesoresFuente` arriba (que ya incluye
+			// coberturas canceladas hoy): si el titular ya gestionó un crédito
+			// antes de que arrancara/se registrara la cobertura, el suplente debe
+			// verlo atendido, no pendiente — sin esto el filtro de snapshots ya
+			// traía sus items, pero el de contactos solo miraba al suplente y el
+			// trabajo del titular quedaba invisible acá (riesgo de llamar dos
+			// veces al mismo cliente).
 			const contactos = await db
 				.select({
 					id: contactosCobros.id,

@@ -132,6 +132,19 @@ async function construirPlan(executor: Executor, entrada: Entrada) {
 function hash(value: unknown) { return createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
 export class TrasladoConflict extends Error {}
 
+// `lock_timeout` aborta la transacción con 55P03 cuando un job de bucket ya
+// posee su advisory lock. No es un error interno: el usuario puede volver a
+// intentar cuando termine esa corrida. Drizzle conserva el código de PG en el
+// error o en su causa según el driver usado.
+function esTimeoutDeLock(error: unknown): boolean {
+  let actual = error as { code?: string; cause?: unknown } | undefined;
+  while (actual) {
+    if (actual.code === "55P03") return true;
+    actual = actual.cause as { code?: string; cause?: unknown } | undefined;
+  }
+  return false;
+}
+
 /**
  * `actorEmail` llega en el CUERPO de la petición, no del token: el CRM
  * autentica con una credencial de SERVICIO compartida, así que el `user` del
@@ -176,7 +189,8 @@ export async function previsualizarTrasladoCarteraMasivo(raw: unknown) {
 
 export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
   const input = z.object({ previewId: z.string().uuid(), idempotencyKey: z.string().uuid(), actorEmail: z.string().email() }).parse(raw);
-  return db.transaction(async tx => {
+  try {
+    return await db.transaction(async tx => {
     const row = (await tx.execute<{ id: string; estado: string; idempotency_key: string | null; payload_hash: string; actor_email: string; solicitud: Entrada; preview: Awaited<ReturnType<typeof previsualizarTrasladoCarteraMasivo>>; vence_en: Date }>(sql`
       SELECT * FROM ${schema}.operaciones_traslado_cartera WHERE id = ${input.previewId}::uuid FOR UPDATE
     `)).rows[0];
@@ -198,8 +212,6 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
     // espere al job en curso; mientras confirma, la siguiente corrida se omite.
     await tx.execute(sql`SELECT pg_advisory_xact_lock(${PROCESAR_MORAS_LOCK_KEY})`);
     await tx.execute(sql`SELECT pg_advisory_xact_lock(${BUCKETS_CONVENIO_LOCK_KEY})`);
-    await tx.execute(sql`LOCK TABLE ${schema}.creditos, ${schema}.asesor_bucket, ${schema}.asesores,
-      ${schema}.buckets_historial, ${schema}.moras_credito, ${schema}.buckets, ${schema}.promesas_pago_espejo IN SHARE ROW EXCLUSIVE MODE`);
     const plan = await construirPlan(tx, row.solicitud);
     if (hash(plan) !== row.payload_hash) throw new TrasladoConflict("La cartera cambió. Vuelve a previsualizar antes de confirmar.");
     if (plan.excluidos.length) {
@@ -208,18 +220,55 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
       );
     }
     if (plan.bloqueos.length || !plan.asignaciones.length) throw new TrasladoConflict("No hay un reparto completo disponible para confirmar");
-    for (const a of plan.asignaciones) {
-      const actualizados = await tx.execute(sql`UPDATE ${schema}.creditos SET asesor_id = ${a.asesorNuevoId}
-        WHERE credito_id = ${a.creditoId} AND asesor_id IS NOT DISTINCT FROM ${a.asesorAnteriorId} RETURNING credito_id`);
-      if (actualizados.rows.length !== 1) throw new TrasladoConflict("El propietario cambió durante la operación");
-      await tx.execute(sql`INSERT INTO ${schema}.credito_asesor_historial
-        (credito_id, asesor_anterior, asesor_nuevo, bucket, origen, motivo, usuario_id)
-        VALUES (${a.creditoId}, ${a.asesorAnteriorId}, ${a.asesorNuevoId}, ${a.bucket}, 'API_MANUAL',
+    // Un solo CTE mantiene UPDATE, historial y detalle atómicos. El CAS por
+    // fila preserva la protección frente a reasignaciones manuales; si una
+    // sola fila cambió, se lanza conflicto y la transacción revierte lote
+    // completo. Sin LOCK TABLE: crédito ajeno puede seguir escribiéndose.
+    const detalles = plan.asignaciones.map((a) => ({
+      credito_id: a.creditoId,
+      asesor_anterior_id: a.asesorAnteriorId,
+      asesor_nuevo_id: a.asesorNuevoId,
+      bucket: a.bucket,
+      prioridad: a.prioridad,
+    }));
+    const escrito = await tx.execute<{
+      actualizados: number;
+      historiales: number;
+      detalles: number;
+    }>(sql`
+      WITH asignaciones AS (
+        SELECT * FROM jsonb_to_recordset(${JSON.stringify(detalles)}::jsonb)
+          AS a(credito_id integer, asesor_anterior_id integer, asesor_nuevo_id integer, bucket integer, prioridad integer)
+      ), actualizados AS (
+        UPDATE ${schema}.creditos c SET asesor_id = a.asesor_nuevo_id
+        FROM asignaciones a
+        WHERE c.credito_id = a.credito_id
+          AND c.asesor_id IS NOT DISTINCT FROM a.asesor_anterior_id
+        RETURNING c.credito_id, a.asesor_anterior_id, a.asesor_nuevo_id, a.bucket, a.prioridad
+      ), historiales AS (
+        INSERT INTO ${schema}.credito_asesor_historial
+          (credito_id, asesor_anterior, asesor_nuevo, bucket, origen, motivo, usuario_id)
+        SELECT credito_id, asesor_anterior_id, asesor_nuevo_id, bucket, 'API_MANUAL',
           ${`${row.solicitud.motivo} · Operación ${row.id} · ${input.actorEmail}`},
-          (SELECT id FROM ${schema}.platform_users WHERE lower(email) = lower(${input.actorEmail}) LIMIT 1))`);
-      await tx.execute(sql`INSERT INTO ${schema}.operaciones_traslado_cartera_detalle
-        (operacion_id, credito_id, asesor_anterior_id, asesor_nuevo_id, bucket, prioridad)
-        VALUES (${row.id}::uuid, ${a.creditoId}, ${a.asesorAnteriorId}, ${a.asesorNuevoId}, ${a.bucket}, ${a.prioridad})`);
+          (SELECT id FROM ${schema}.platform_users WHERE lower(email) = lower(${input.actorEmail}) LIMIT 1)
+        FROM actualizados
+        RETURNING credito_id
+      ), detalles_insertados AS (
+        INSERT INTO ${schema}.operaciones_traslado_cartera_detalle
+          (operacion_id, credito_id, asesor_anterior_id, asesor_nuevo_id, bucket, prioridad)
+        SELECT ${row.id}::uuid, credito_id, asesor_anterior_id, asesor_nuevo_id, bucket, prioridad
+        FROM actualizados
+        RETURNING credito_id
+      )
+      SELECT
+        (SELECT count(*)::int FROM actualizados) AS actualizados,
+        (SELECT count(*)::int FROM historiales) AS historiales,
+        (SELECT count(*)::int FROM detalles_insertados) AS detalles
+    `);
+    const esperados = plan.asignaciones.length;
+    const conteos = escrito.rows[0];
+    if (!conteos || conteos.actualizados !== esperados || conteos.historiales !== esperados || conteos.detalles !== esperados) {
+      throw new TrasladoConflict("El propietario cambió durante la operación");
     }
     // `idempotency_key` es UNIQUE global: la misma clave reusada contra OTRA
     // previsualización choca acá. Sin mapearlo, la violación sube cruda,
@@ -235,7 +284,13 @@ export async function confirmarTrasladoCarteraMasivo(raw: unknown) {
       throw error;
     }
     return { success: true as const, operacionId: row.id, cuentas: plan.asignaciones.length };
-  });
+    });
+  } catch (error) {
+    if (esTimeoutDeLock(error)) {
+      throw new TrasladoConflict("Otra operación de buckets está en curso. Intenta de nuevo en unos segundos.");
+    }
+    throw error;
+  }
 }
 
 export async function listarTrasladosCartera(page: number) {

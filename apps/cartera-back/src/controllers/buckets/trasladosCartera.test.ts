@@ -17,10 +17,22 @@ let writes: string[];
 let queries: string[];
 let updateMatches: boolean;
 let actorRegistrado: boolean;
+let lockTimeout: boolean;
 const executor = {
   async execute(statement: SQL) {
     const { sql: query, params } = dialect.sqlToQuery(statement);
     queries.push(`${query} | ${JSON.stringify(params)}`);
+    if (query.includes("pg_advisory_xact_lock") && lockTimeout) {
+      throw { cause: { code: "55P03" } };
+    }
+    if (query.includes("WITH asignaciones")) {
+      writes.push(query);
+      const serializadas = params.find((param) => typeof param === "string" && param.startsWith("["));
+      const cantidad = JSON.parse(serializadas as string).length;
+      return { rows: updateMatches
+        ? [{ actualizados: cantidad, historiales: cantidad, detalles: cantidad }]
+        : [{ actualizados: 0, historiales: 0, detalles: 0 }] };
+    }
     // Actor registrado (CB-114): por defecto existe; `actorRegistrado = false`
     // simula un correo que no está en platform_users o está inactivo.
     if (query.includes("FROM cartera_cobros2.platform_users") || query.includes("platform_users"))
@@ -54,7 +66,7 @@ const { previsualizarTrasladoCarteraMasivo, confirmarTrasladoCarteraMasivo, soli
 const entrada = { asesorOrigenId: 10, modo: "redistribucion", motivo: "Renuncia", actorEmail: "supervisor@example.com" };
 
 beforeEach(() => {
-  saved = undefined; writes = []; queries = []; updateMatches = true; actorRegistrado = true;
+  saved = undefined; writes = []; queries = []; updateMatches = true; actorRegistrado = true; lockTimeout = false;
   creditos = [10, 20, 20, 20, 20].map((asesor_id, i) => ({ credito_id: i + 1, sifco: `S${i + 1}`, asesor_id, bucket: 1, compromiso: i === 0 }));
 });
 
@@ -116,7 +128,7 @@ test("no confirma créditos activos sin bucket operativo", async () => {
   expect(writes).toEqual([]);
 });
 
-test("confirmación espera los locks de jobs de bucket antes de escribir", async () => {
+test("confirmación espera los locks de jobs y escribe lote sin bloquear tablas ajenas", async () => {
   const p = await previsualizarTrasladoCarteraMasivo(entrada);
   await confirmarTrasladoCarteraMasivo({
     previewId: p.previewId,
@@ -125,11 +137,23 @@ test("confirmación espera los locks de jobs de bucket antes de escribir", async
   });
   const lockMoras = queries.findIndex((q) => q.includes("pg_advisory_xact_lock") && q.includes("728193"));
   const lockConvenio = queries.findIndex((q) => q.includes("pg_advisory_xact_lock") && q.includes("728194"));
-  const lockTablas = queries.findIndex((q) => q.includes("LOCK TABLE"));
+  const escritura = queries.findIndex((q) => q.includes("WITH asignaciones"));
   expect(lockMoras).toBeGreaterThanOrEqual(0);
   expect(lockConvenio).toBeGreaterThanOrEqual(0);
-  expect(lockMoras).toBeLessThan(lockTablas);
-  expect(lockConvenio).toBeLessThan(lockTablas);
+  expect(escritura).toBeGreaterThanOrEqual(0);
+  expect(lockMoras).toBeLessThan(escritura);
+  expect(lockConvenio).toBeLessThan(escritura);
+  expect(queries.some((q) => q.includes("LOCK TABLE"))).toBe(false);
+});
+
+test("timeout al esperar job se vuelve conflicto reintentable", async () => {
+  const p = await previsualizarTrasladoCarteraMasivo(entrada);
+  lockTimeout = true;
+  await expect(confirmarTrasladoCarteraMasivo({
+    previewId: p.previewId,
+    idempotencyKey: crypto.randomUUID(),
+    actorEmail: entrada.actorEmail,
+  })).rejects.toThrow(/operación de buckets está en curso/);
 });
 
 test("preview vencido o de otro usuario no confirma", async () => {
@@ -141,11 +165,25 @@ test("preview vencido o de otro usuario no confirma", async () => {
   expect(writes).toEqual([]);
 });
 
-test("UPDATE que no afecta crédito falla antes de insertar historial", async () => {
+test("CAS que no afecta crédito revierte lote y no confirma operación", async () => {
   const p = await previsualizarTrasladoCarteraMasivo(entrada);
   updateMatches = false;
   await expect(confirmarTrasladoCarteraMasivo({ previewId: p.previewId, idempotencyKey: crypto.randomUUID(), actorEmail: entrada.actorEmail })).rejects.toThrow("propietario cambió");
-  expect(writes.some(q => q.includes("credito_asesor_historial"))).toBe(false);
+  expect(writes.some(q => q.includes("SET estado = 'confirmada'"))).toBe(false);
+});
+
+test("un lote con varios créditos usa una sola escritura atómica", async () => {
+  creditos = [10, 10, 20, 20, 20].map((asesor_id, i) => ({
+    credito_id: i + 1, sifco: `S${i + 1}`, asesor_id, bucket: 1, compromiso: false,
+  }));
+  const p = await previsualizarTrasladoCarteraMasivo(entrada);
+  const resultado = await confirmarTrasladoCarteraMasivo({
+    previewId: p.previewId,
+    idempotencyKey: crypto.randomUUID(),
+    actorEmail: entrada.actorEmail,
+  });
+  expect(resultado.cuentas).toBe(2);
+  expect(writes.filter((q) => q.includes("WITH asignaciones"))).toHaveLength(1);
 });
 
 test("contrato rechaza nivelación no implementada, IDs inválidos y destino ausente", () => {

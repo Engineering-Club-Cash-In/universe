@@ -10,7 +10,6 @@ import {
 	lt,
 	lte,
 	max,
-	sql,
 } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
@@ -80,6 +79,7 @@ export const agendaCobrosRouter = {
 				};
 			}
 			const fecha = toDateStrGT(new Date());
+			const ventanaHoy = ventanaDiaGuatemala(fecha);
 			// Una cobertura reemplaza tareas de agenda, nunca el dueño de cartera.
 			// Se resuelve en lectura para que una cobertura creada antes o después
 			// de la captura del snapshot produzca el mismo resultado.
@@ -122,13 +122,26 @@ export const agendaCobrosRouter = {
 			// quedaba ciega a él. A diferencia de arriba, esto NO agrega la
 			// agenda completa del titular: más abajo se cruza contra los
 			// contactos reales del suplente para traer solo lo ya gestionado.
+			//
+			// "Hoy" se mide con la MISMA ventana GT que el resto del endpoint
+			// (06:00 UTC a 06:00 UTC del día siguiente), no con `::date` crudo:
+			// `cancelada_en` se guarda en UTC, y una cancelación de 18:00-23:59
+			// hora Guatemala cae en el ::date del día SIGUIENTE en UTC — con la
+			// comparación cruda esas cancelaciones tardías (justo las más
+			// comunes, al cierre del día laboral) perdían el trabajo previo del
+			// suplente, el mismo bug que este cambio quería resolver.
 			const coberturasCanceladasHoy = await db
-				.select({ titularId: coberturasAgendaCobros.titularId })
+				.select({
+					id: coberturasAgendaCobros.id,
+					titularId: coberturasAgendaCobros.titularId,
+					canceladaEn: coberturasAgendaCobros.canceladaEn,
+				})
 				.from(coberturasAgendaCobros)
 				.where(
 					and(
 						eq(coberturasAgendaCobros.suplenteId, asesorId),
-						sql`${coberturasAgendaCobros.canceladaEn}::date = ${fecha}::date`,
+						gte(coberturasAgendaCobros.canceladaEn, ventanaHoy.desde),
+						lt(coberturasAgendaCobros.canceladaEn, ventanaHoy.hasta),
 						lte(coberturasAgendaCobros.desde, fecha),
 						gte(coberturasAgendaCobros.hasta, fecha),
 					),
@@ -178,11 +191,14 @@ export const agendaCobrosRouter = {
 			// arriba, no se trae su agenda completa (eso duplicaría exposición
 			// con el titular, que ya recuperó la suya) — solo los créditos que
 			// el SUPLENTE mismo ya contactó HOY bajo esa cobertura, para que su
-			// propio trabajo no desaparezca de su vista sin dejar rastro. La
-			// ventana de fecha es la misma que usa la query de `contactos` más
-			// abajo: sin acotarla, un contacto de días atrás (de antes de que
-			// existiera esta cobertura) también calificaría.
-			const ventanaHoy = ventanaDiaGuatemala(fecha);
+			// propio trabajo no desaparezca de su vista sin dejar rastro.
+			//
+			// El JOIN a `coberturasAgendaCobros` (no solo la lista de IDs) es
+			// necesario para exigir `fechaContacto < canceladaEn`: sin ese corte
+			// exacto, un contacto del EX-suplente sobre un crédito de pool
+			// compartido DESPUÉS de la cancelación real también calificaba —
+			// trabajo que ya no era de esta cobertura, mientras el titular
+			// también lo tiene de vuelta en la suya.
 			const itemsCanceladosHoyContactados = titularesCanceladosHoy.length
 				? await db
 						.selectDistinctOn([agendaCobrosSnapshotItems.numeroCreditoSifco], {
@@ -194,6 +210,18 @@ export const agendaCobrosRouter = {
 							eq(
 								agendaCobrosSnapshotItems.snapshotId,
 								agendaCobrosSnapshots.id,
+							),
+						)
+						.innerJoin(
+							coberturasAgendaCobros,
+							and(
+								eq(
+									coberturasAgendaCobros.titularId,
+									agendaCobrosSnapshots.asesorId,
+								),
+								eq(coberturasAgendaCobros.suplenteId, asesorId),
+								gte(coberturasAgendaCobros.canceladaEn, ventanaHoy.desde),
+								lt(coberturasAgendaCobros.canceladaEn, ventanaHoy.hasta),
 							),
 						)
 						.innerJoin(
@@ -209,7 +237,10 @@ export const agendaCobrosRouter = {
 								eq(contactosCobros.casoCobroId, casosCobros.id),
 								eq(contactosCobros.realizadoPor, asesorId),
 								gte(contactosCobros.fechaContacto, ventanaHoy.desde),
-								lt(contactosCobros.fechaContacto, ventanaHoy.hasta),
+								lt(
+									contactosCobros.fechaContacto,
+									coberturasAgendaCobros.canceladaEn,
+								),
 							),
 						)
 						.where(

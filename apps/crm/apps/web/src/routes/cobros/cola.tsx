@@ -10,7 +10,7 @@ import {
 	UserCheck,
 	UserRound,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { BucketMultiSelect } from "@/components/cobros/bucket-multi-select";
 import { ConfigurarSlaModal } from "@/components/cobros/configurar-sla-modal";
 import { PromesaActivaBadge } from "@/components/cobros/promesa-activa-badge";
@@ -264,6 +264,19 @@ function ColaDiaPage() {
 		}),
 		enabled: !!session && esSupervisor,
 	});
+	const data = colaQuery.data as ColaResponse | undefined;
+	const items = data?.items ?? [];
+	const total = data?.total ?? 0;
+	const totalPages = data?.totalPages ?? 1;
+	const sinAsesor = !!data?.sinAsesor;
+	// CB-114: hoy estoy de vacaciones/permiso y un suplente trabaja mi cola.
+	const ausente = !!data?.ausente;
+	const asesorForzado = data?.asesorForzado ?? null;
+	// Una cobertura puede reducir la cola durante el sondeo y dejar la página
+	// actual fuera de rango. Volver a la última válida evita tabla vacía.
+	useEffect(() => {
+		if (page > totalPages) setPage(totalPages);
+	}, [page, totalPages]);
 
 	if (!userRole || !PERMISSIONS.canAccessCobros(userRole)) {
 		return (
@@ -279,15 +292,6 @@ function ColaDiaPage() {
 			</div>
 		);
 	}
-
-	const data = colaQuery.data as ColaResponse | undefined;
-	const items = data?.items ?? [];
-	const total = data?.total ?? 0;
-	const totalPages = data?.totalPages ?? 1;
-	const sinAsesor = !!data?.sinAsesor;
-	// CB-114: hoy estoy de vacaciones/permiso y un suplente trabaja mi cola.
-	const ausente = !!data?.ausente;
-	const asesorForzado = data?.asesorForzado ?? null;
 
 	const asesores = (
 		(asesoresQuery.data as { asesores?: AsesorOption[] } | undefined)

@@ -14,7 +14,7 @@ import {
 	TriangleAlert,
 	UserCheck,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PanelGestionRapida } from "@/components/cobros/panel-gestion-rapida";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -514,47 +514,6 @@ function MiDiaPage() {
 			refetchInterval: 60_000,
 		})),
 	});
-
-	if (userRole && !PERMISSIONS.canAccessCobros(userRole)) {
-		return (
-			<div className="flex min-h-screen items-center justify-center">
-				<div className="text-center">
-					<h1 className="mb-4 font-bold text-2xl text-gray-800">
-						Acceso Denegado
-					</h1>
-					<p className="text-gray-600">
-						Solo el equipo de cobros puede ver esta pantalla.
-					</p>
-				</div>
-			</div>
-		);
-	}
-
-	if (userRole && !esVistaPersonal) {
-		return (
-			<div className="flex min-h-screen items-center justify-center">
-				<div className="max-w-md text-center">
-					<h1 className="mb-4 font-bold text-2xl text-gray-800">
-						Esta pantalla es personal
-					</h1>
-					<p className="text-gray-600">
-						"Mi día" muestra la agenda de un asesor específico y tu rol puede
-						ver la cartera de todos, así que no aplica. Para revisar la cola de
-						un asesor puntual, usá{" "}
-						<button
-							type="button"
-							className="text-indigo-600 underline hover:text-indigo-700"
-							onClick={() => navigate({ to: "/cobros/cola" })}
-						>
-							Cola del día
-						</button>
-						.
-					</p>
-				</div>
-			</div>
-		);
-	}
-
 	const data = colaQuery.data as ColaResponse | undefined;
 	const items = data?.items ?? [];
 	const total = data?.total ?? 0;
@@ -603,6 +562,51 @@ function MiDiaPage() {
 		alcanceManual ??
 		(ausente || total > 0 || filtro ? "prioritarios" : "cartera");
 	const enCartera = alcance === "cartera";
+	// La cola puede achicarse al terminar una cobertura mientras está abierta.
+	// Solo se ajusta Prioritarios: cartera completa usa paginación independiente.
+	useEffect(() => {
+		if (!enCartera && page > totalPages) setPage(totalPages);
+	}, [enCartera, page, totalPages]);
+
+	if (userRole && !PERMISSIONS.canAccessCobros(userRole)) {
+		return (
+			<div className="flex min-h-screen items-center justify-center">
+				<div className="text-center">
+					<h1 className="mb-4 font-bold text-2xl text-gray-800">
+						Acceso Denegado
+					</h1>
+					<p className="text-gray-600">
+						Solo el equipo de cobros puede ver esta pantalla.
+					</p>
+				</div>
+			</div>
+		);
+	}
+
+	if (userRole && !esVistaPersonal) {
+		return (
+			<div className="flex min-h-screen items-center justify-center">
+				<div className="max-w-md text-center">
+					<h1 className="mb-4 font-bold text-2xl text-gray-800">
+						Esta pantalla es personal
+					</h1>
+					<p className="text-gray-600">
+						"Mi día" muestra la agenda de un asesor específico y tu rol puede
+						ver la cartera de todos, así que no aplica. Para revisar la cola de
+						un asesor puntual, usá{" "}
+						<button
+							type="button"
+							className="text-indigo-600 underline hover:text-indigo-700"
+							onClick={() => navigate({ to: "/cobros/cola" })}
+						>
+							Cola del día
+						</button>
+						.
+					</p>
+				</div>
+			</div>
+		);
+	}
 
 	const primerNombre = (session?.user?.name ?? "").trim().split(/\s+/)[0] || "";
 

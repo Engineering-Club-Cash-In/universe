@@ -25,6 +25,16 @@ export interface AgendaSnapshotItemFuente {
 	 * item del titular. Mismo criterio que ya aplican `cerrarSnapshotsAgenda`
 	 * y `columnaEnAgendaDeTitular`.
 	 *
+	 * LISTA de ventanas, no una sola: la validación de solape al crear
+	 * cobertura solo mira coberturas ACTIVAS (ver `crearCobertura`), así que
+	 * cancelar y recrear el mismo par titular/suplente el mismo día es
+	 * válido. Con un único intervalo, un contacto legítimo hecho durante la
+	 * cobertura VIEJA (ya cancelada) se evaluaba contra el `createdAt` de la
+	 * NUEVA y se rechazaba de más. El contacto es válido si cae dentro de
+	 * CUALQUIERA de las ventanas — mismo criterio que ya aplica el job
+	 * nocturno en SQL (ahí no hace falta esta lista porque el `LEFT JOIN`
+	 * evalúa cada fila de cobertura por separado antes del `DISTINCT ON`).
+	 *
 	 * Se aplica SOLO a contactos de usuarios AJENOS al item — no basta con
 	 * excluir a `asesorId`: si el mismo crédito ya estaba en el propio
 	 * snapshot del suplente (pool compartido, fusionado por el dedupe), ese
@@ -34,7 +44,7 @@ export interface AgendaSnapshotItemFuente {
 	 * snapshot que trajo este item (no solo `asesorId`); se aplica junto con
 	 * `realizadoPorValidos`, nunca en su lugar.
 	 */
-	contactoValidoDesde?: Date;
+	ventanasCoberturaValida?: readonly { desde: Date; hasta: Date | null }[];
 	contactoExentoDelCorte?: readonly string[];
 }
 
@@ -162,11 +172,20 @@ function contactoPerteneceAlItem(
 	// `asesorId` del item termine siendo el titular.
 	const dueniosReales = item.contactoExentoDelCorte ?? [item.asesorId];
 	if (
-		item.contactoValidoDesde &&
-		!dueniosReales.includes(contacto.realizadoPor) &&
-		contacto.fechaContacto < item.contactoValidoDesde
-	)
-		return false;
+		item.ventanasCoberturaValida &&
+		!dueniosReales.includes(contacto.realizadoPor)
+	) {
+		// Válido si cae en CUALQUIERA de las ventanas: cancelar y recrear la
+		// cobertura el mismo par el mismo día es posible (la validación de
+		// solape solo mira coberturas activas), y un contacto legítimo bajo
+		// la ventana VIEJA no debe rechazarse solo porque exista una nueva.
+		const dentroDeAlgunaVentana = item.ventanasCoberturaValida.some(
+			(v) =>
+				contacto.fechaContacto >= v.desde &&
+				(v.hasta === null || contacto.fechaContacto < v.hasta),
+		);
+		if (!dentroDeAlgunaVentana) return false;
+	}
 	return (
 		(item.casoCobroId !== null && contacto.casoCobroId === item.casoCobroId) ||
 		contacto.numeroCreditoSifco === item.numeroCreditoSifco

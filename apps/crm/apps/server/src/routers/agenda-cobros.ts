@@ -91,6 +91,7 @@ export const agendaCobrosRouter = {
 				.select({
 					titularId: coberturasAgendaCobros.titularId,
 					createdAt: coberturasAgendaCobros.createdAt,
+					canceladaEn: coberturasAgendaCobros.canceladaEn,
 				})
 				.from(coberturasAgendaCobros)
 				.where(
@@ -141,6 +142,7 @@ export const agendaCobrosRouter = {
 				.select({
 					id: coberturasAgendaCobros.id,
 					titularId: coberturasAgendaCobros.titularId,
+					createdAt: coberturasAgendaCobros.createdAt,
 					canceladaEn: coberturasAgendaCobros.canceladaEn,
 				})
 				.from(coberturasAgendaCobros)
@@ -508,15 +510,25 @@ export const agendaCobrosRouter = {
 					),
 				);
 
-			// Cuándo se registró la cobertura ACTIVA de cada titular: un item
-			// cuyo `dueniosSnapshot` incluye a un titular con cobertura vigente
-			// hoy solo debe aceptar contactos del suplente POSTERIORES a ese
-			// registro. Los items de `itemsCanceladosHoyContactados` ya vienen
-			// resueltos por su propio `id` exacto en la query — no necesitan
-			// esto (por eso `createdAt` no se les pide ahí).
-			const createdAtPorTitular = new Map(
-				coberturas.map((c) => [c.titularId, c.createdAt]),
-			);
+			// Ventanas [created_at, cancelada_en) de cada titular: un item cuyo
+			// `dueniosSnapshot` incluye a un titular con cobertura vigente hoy
+			// solo debe aceptar contactos del suplente que caigan en ALGUNA de
+			// sus coberturas. Se combinan la(s) activa(s) y la(s) canceladas hoy
+			// (no solo la activa): cancelar y recrear el mismo par el mismo día
+			// es posible (la validación de solape solo mira coberturas
+			// activas), y un contacto legítimo bajo la cobertura VIEJA no debe
+			// evaluarse contra el registro de la NUEVA. Los items de
+			// `itemsCanceladosHoyContactados` ya vienen resueltos por su propio
+			// `id` exacto en la query — no necesitan esto.
+			const ventanasPorTitular = new Map<
+				string,
+				{ desde: Date; hasta: Date | null }[]
+			>();
+			for (const c of [...coberturas, ...coberturasCanceladasHoy]) {
+				const ventanas = ventanasPorTitular.get(c.titularId) ?? [];
+				ventanas.push({ desde: c.createdAt, hasta: c.canceladaEn });
+				ventanasPorTitular.set(c.titularId, ventanas);
+			}
 			const cerrados = cerrarItemsAgenda(
 				fecha,
 				items.map((item) => {
@@ -553,7 +565,7 @@ export const agendaCobrosRouter = {
 						realizadoPorValidos: [
 							...new Set([...item.dueniosSnapshot, asesorId]),
 						],
-						contactoValidoDesde: createdAtPorTitular.get(titular),
+						ventanasCoberturaValida: ventanasPorTitular.get(titular),
 						// `dueniosSnapshot`, no `[titular]`: si el crédito ya estaba en
 						// el propio snapshot del suplente (pool compartido), su trabajo
 						// sobre ese item es legítimo sin importar cuándo se registró la

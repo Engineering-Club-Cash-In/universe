@@ -1105,3 +1105,51 @@ describe("condicionInversionistaPorEmail", () => {
     expect(comoLoEscribe.params).toEqual(comoEstaGuardado.params);
   });
 });
+
+describe("insertInvestor · la marca del registro del portal", () => {
+  beforeEach(() => {
+    selectResponses = [];
+    updateWasCalled = false;
+    insertWasCalled = false;
+    lastUpdateData = undefined;
+    lastInsertData = undefined;
+  });
+
+  // `getEntidadesPorCorreo` no deja que una fila creada por el registro del
+  // portal amplíe el grupo por DPI: ese DPI lo tecleó quien se registró y no lo
+  // verificó nadie. Sin forma de quitar la marca, la exclusión era para siempre,
+  // y quien se registró por el portal y después resulta ser representante de una
+  // sociedad no la vería nunca. Escribir el DPI desde back office es el acto de
+  // verificación, y es el único que el portal no puede hacerse a sí mismo: su
+  // proxy lleva una whitelist de tres campos bancarios.
+  it("escribir el DPI desde back office limpia la marca del registro del portal", async () => {
+    selectResponses = [[{ ...existingInvestor, creado_por_usuario_portal: "usr_1" }]];
+    const set = { status: 200 };
+
+    await insertInvestor({
+      body: {
+        inversionista_id: existingInvestor.inversionista_id,
+        dpi: 1234567890101,
+      },
+      set,
+    });
+
+    expect(lastUpdateData?.creado_por_usuario_portal).toBeNull();
+  });
+
+  it("una edición que no toca el DPI la deja como estaba", async () => {
+    selectResponses = [[{ ...existingInvestor, creado_por_usuario_portal: "usr_1" }]];
+    const set = { status: 200 };
+
+    await insertInvestor({
+      body: {
+        inversionista_id: existingInvestor.inversionista_id,
+        numero_cuenta: "123456",
+      },
+      set,
+    });
+
+    // Lo que manda el portal por su proxy: tres campos bancarios y ningún DPI.
+    expect("creado_por_usuario_portal" in lastUpdateData!).toBeFalse();
+  });
+});

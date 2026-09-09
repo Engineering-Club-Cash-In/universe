@@ -668,8 +668,41 @@ export async function getEntidadesPorCorreo(
 
   if (ancla.length === 0) return [];
 
+  // De qué DPIs se puede tirar para ampliar el grupo. NO de los que la propia
+  // persona se puso.
+  //
+  // El registro del portal escribe una fila con el DPI que TECLEA quien se
+  // registra y con su correo, y la marca con `creado_por_usuario_portal`. Ese
+  // DPI no lo verificó nadie: el sign-up de Better Auth está abierto y no
+  // comprueba el correo, así que cualquiera se fabrica una sesión, se registra
+  // como inversionista con el DPI del representante legal de una sociedad
+  // ajena —un dato que se adivina o se consigue— y su fila queda con ese DPI y
+  // con su propio correo. Sin este filtro, la expansión de abajo casaba ese DPI
+  // contra `dpi_rep_legal` y le metía en la lista la sociedad de la víctima:
+  // ficha, documentos, inversiones y la escritura de cuenta bancaria.
+  //
+  // El choque de creación estricta no lo frena, porque el DPI del representante
+  // vive en `dpi_rep_legal` y no en `inversionistas.dpi`: no hay contra qué
+  // chocar. Y `users.dpi` tampoco, si ese representante todavía no tiene cuenta.
+  //
+  // Su propia fila SÍ sigue apareciendo: entró por el correo, que es lo único
+  // que esa persona puede probar. Lo que no puede es traerse a nadie más.
+  //
+  // Es el mismo listón que ya aplican el CRM (`decidirLeadDelPortal`: la ficha
+  // tiene que colgar del correo de la sesión) y el provisionamiento
+  // (`cuenta_anclada_solo_por_correo`, que se reporta y no se escribe). Aquí
+  // faltaba.
+  //
+  // El precio: quien se registró solo por el portal y DESPUÉS resulta ser el
+  // representante de una sociedad no la verá hasta que back office le escriba el
+  // DPI desde el módulo de inversionistas o el CRM. Esa escritura limpia la
+  // marca (ver el UPDATE de `insertInvestor`) y es el acto de verificación que
+  // convierte la identidad en confiable: es la única que el portal no puede
+  // hacerse a sí mismo. Hasta entonces el caso es indistinguible del ataque.
   const dpis = new Set<number>();
   for (const fila of ancla) {
+    if (fila.creado_por_usuario_portal !== null) continue;
+
     const propio = dpiComparable(fila.dpi);
     if (propio !== null) dpis.add(propio);
     const rep = dpiComparable(fila.dpi_rep_legal);
@@ -688,7 +721,21 @@ export async function getEntidadesPorCorreo(
       .where(
         or(inArray(inversionistas.dpi, lista), inArray(REP_LEGAL_NUMERICO, lista))
       );
-    for (const fila of expandidas) porId.set(fila.inversionista_id, fila);
+    for (const fila of expandidas) {
+      // Y tampoco entran POR expansión las filas que se hizo el portal a sí
+      // mismo. Es la otra mitad de lo mismo: con un DPI ajeno tecleado, esa
+      // fila aparecía en la lista de su dueño legítimo —con el nombre y el
+      // correo del que la creó— sin que él hubiera hecho nada. Las suyas
+      // propias no se pierden: entran por el correo, como anclas.
+      if (
+        fila.creado_por_usuario_portal !== null &&
+        !idsAncla.has(fila.inversionista_id)
+      ) {
+        continue;
+      }
+
+      porId.set(fila.inversionista_id, fila);
+    }
   }
 
   return [...porId.values()]
@@ -1092,7 +1139,30 @@ export const insertInvestor = async ({ body, set, user }: any) => {
           updateData.tipo_cuenta = inv.tipo_cuenta.trim();
         if (inv.numero_cuenta?.trim())
           updateData.numero_cuenta = inv.numero_cuenta.trim();
-        if (inv.dpi) updateData.dpi = inv.dpi;
+        if (inv.dpi) {
+          updateData.dpi = inv.dpi;
+          // Y con eso la fila deja de ser "identidad que se puso uno mismo".
+          //
+          // `creado_por_usuario_portal` marca las filas que creó el registro del
+          // portal con un DPI que nadie verificó, y por eso `getEntidadesPorCorreo`
+          // no las deja ampliar el grupo. Sin una forma de quitar esa marca, la
+          // exclusión era para siempre: quien se registró por el portal y DESPUÉS
+          // resulta ser el representante de una sociedad no la vería nunca, ni
+          // aunque back office capturara la relación. Prometerlo en un comentario
+          // sin implementarlo es peor que no prometerlo.
+          //
+          // Escribir el DPI desde back office ES el acto de verificación que
+          // faltaba, y es el único que el portal no puede hacerse a sí mismo: su
+          // proxy (`buildPortalInvestorUpdate`) lleva una whitelist de tres campos
+          // bancarios, y el registro arma un objeto fijo que solo INSERTA. Para
+          // llegar a esta línea hace falta una edición dirigida desde el módulo de
+          // inversionistas o desde el CRM, o sea un humano mirando la ficha.
+          //
+          // Lo que se pierde: esa fila deja de ser reclamable como reintento del
+          // registro (`filaReclamablePorElPortal`). No importa — eso vive los
+          // minutos siguientes al alta, y esto pasa cuando alguien la edita.
+          updateData.creado_por_usuario_portal = null;
+        }
         // Solo se toca si el body trae la llave: mandar "" es borrarlo a
         // propósito, no mandarla es dejarlo como está.
         if (typeof inv.dpi_rep_legal !== "undefined")
@@ -6295,7 +6365,13 @@ export const updateInvestor = async ({ body, set }: any) => {
         updateData.tipo_cuenta = tipo_cuenta;
       if (typeof numero_cuenta !== "undefined")
         updateData.numero_cuenta = numero_cuenta;
-      if (typeof dpi !== "undefined") updateData.dpi = dpi;
+      if (typeof dpi !== "undefined") {
+        updateData.dpi = dpi;
+        // Misma transición que en `insertInvestor`: escribir el DPI desde back
+        // office es lo que vuelve confiable una identidad que se puso uno mismo.
+        // El porqué, largo, está allá.
+        updateData.creado_por_usuario_portal = null;
+      }
       if (typeof dpi_rep_legal !== "undefined")
         updateData.dpi_rep_legal = normalizarDpiRepLegal(dpi_rep_legal);
       if (typeof moneda !== "undefined") updateData.moneda = moneda;

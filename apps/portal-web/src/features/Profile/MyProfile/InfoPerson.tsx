@@ -51,6 +51,7 @@ export const InfoPerson = () => {
   const {
     data: clientProfile,
     isLoading: isLoadingClient,
+    error: errorClient,
     refetch: refetchClient,
   } = useQuery({
     queryKey: ["profile", user?.id],
@@ -181,7 +182,16 @@ export const InfoPerson = () => {
   // porque no hay entidad que actualizar.
   const pantalla = pantallaDeEntidad({
     cargando: isLoading,
-    hayError: isInvestor && !!(errorEntidades || errorInvestor),
+    // El fallo del CLIENTE cuenta igual que el del inversionista. Antes se
+    // ignoraba, y con la ficha sin cargar esta pantalla no se quedaba en
+    // blanco: pintaba el formulario de "Perfil Incompleto", que es lo que se
+    // muestra cuando faltan datos. O sea que un error del servidor se leía como
+    // "todavía no llenaste tu perfil" y la persona se ponía a teclear lo que ya
+    // tenía. El CRM ahora puede contestar que su correo está en más de una
+    // ficha —una respuesta con instrucción— y ese texto se perdía entero.
+    hayError: isInvestor
+      ? !!(errorEntidades || errorInvestor)
+      : !!errorClient,
     sinEntidades,
   });
 

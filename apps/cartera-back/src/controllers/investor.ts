@@ -495,6 +495,161 @@ export const filaReclamablePorElPortal = <
   return fila;
 };
 
+// ============================================================
+// 🪪 ENTIDADES DEL PORTAL
+// ============================================================
+// Una persona puede operar varios inversionistas: el suyo y el de cada sociedad
+// que representa. El portal solo conoce el correo de la sesión, así que acá se
+// traduce ese correo al conjunto de filas que esa persona puede ver.
+//
+//   set₀ = filas cuyo email es el de la sesión
+//   dpis = { fila.dpi } ∪ { fila.dpi_rep_legal }  para cada fila de set₀
+//   set₁ = set₀ ∪ filas con dpi ∈ dpis OR dpi_rep_legal ∈ dpis
+//
+// El ancla es SIEMPRE el correo guardado en cartera, que solo escribe el staff.
+// Nunca el DPI que el usuario declaró al registrarse en el portal: ese campo no
+// lo verifica nadie, y tomarlo como llave dejaría entrar a las sociedades de
+// cualquiera cuyo DPI se adivine.
+export type EntidadPortal = {
+  inversionista_id: number;
+  nombre: string;
+  tipo: "persona" | "empresa";
+  /** true si esta fila es la que matcheó por correo (la puerta de entrada). */
+  es_ancla: boolean;
+  dpi: string | null;
+  dpi_rep_legal: string | null;
+  email: string | null;
+  moneda: string;
+  status: string;
+};
+
+// `dpi` es bigint y `dpi_rep_legal` varchar guardado tal cual ("04036613").
+// Compararlos como número es lo único que los hace casar — mismo criterio que
+// repLegalExiste.
+const dpiComparable = (valor: unknown): number | null => {
+  if (valor === undefined || valor === null) return null;
+  const limpio = String(valor).replace(/\D/g, "");
+  if (limpio === "") return null;
+  const numero = Number(limpio);
+  return Number.isSafeInteger(numero) ? numero : null;
+};
+
+// La misma normalización, pero del lado de Postgres, para poder comparar la
+// columna varchar contra la lista de DPIs numéricos.
+//
+// El CASE no es adorno: la columna es varchar(20) y el CRM deja escribir 20
+// dígitos, pero bigint aguanta 19. Sin el guard, un dedazo en UNA fila haría
+// reventar la consulta para todos ("bigint out of range").
+const REP_LEGAL_NUMERICO = sql<number>`CASE
+  WHEN regexp_replace(coalesce(${inversionistas.dpi_rep_legal}, ''), '\\D', '', 'g') ~ '^[0-9]{1,18}$'
+  THEN regexp_replace(coalesce(${inversionistas.dpi_rep_legal}, ''), '\\D', '', 'g')::bigint
+END`;
+
+export async function getEntidadesPorCorreo(
+  correo: string
+): Promise<EntidadPortal[]> {
+  const email = correo?.trim().toLowerCase() ?? "";
+  if (!email) return [];
+
+  const ancla = await db
+    .select()
+    .from(inversionistas)
+    .where(condicionInversionistaPorEmail(email));
+
+  if (ancla.length === 0) return [];
+
+  // De qué DPIs se puede tirar para ampliar el grupo. NO de los que la propia
+  // persona se puso.
+  //
+  // El registro del portal escribe una fila con el DPI que TECLEA quien se
+  // registra y con su correo, y la marca con `creado_por_usuario_portal`. Ese
+  // DPI no lo verificó nadie: el sign-up de Better Auth está abierto y no
+  // comprueba el correo, así que cualquiera se fabrica una sesión, se registra
+  // como inversionista con el DPI del representante legal de una sociedad
+  // ajena —un dato que se adivina o se consigue— y su fila queda con ese DPI y
+  // con su propio correo. Sin este filtro, la expansión de abajo casaba ese DPI
+  // contra `dpi_rep_legal` y le metía en la lista la sociedad de la víctima:
+  // ficha, documentos, inversiones y la escritura de cuenta bancaria.
+  //
+  // El choque de creación estricta no lo frena, porque el DPI del representante
+  // vive en `dpi_rep_legal` y no en `inversionistas.dpi`: no hay contra qué
+  // chocar. Y `users.dpi` tampoco, si ese representante todavía no tiene cuenta.
+  //
+  // Su propia fila SÍ sigue apareciendo: entró por el correo, que es lo único
+  // que esa persona puede probar. Lo que no puede es traerse a nadie más.
+  //
+  // Es el mismo listón que ya aplican el CRM (`decidirLeadDelPortal`: la ficha
+  // tiene que colgar del correo de la sesión) y el provisionamiento
+  // (`cuenta_anclada_solo_por_correo`, que se reporta y no se escribe). Aquí
+  // faltaba.
+  //
+  // El precio: quien se registró solo por el portal y DESPUÉS resulta ser el
+  // representante de una sociedad no la verá hasta que back office le escriba el
+  // DPI desde el módulo de inversionistas o el CRM. Esa escritura limpia la
+  // marca (ver el UPDATE de `insertInvestor`) y es el acto de verificación que
+  // convierte la identidad en confiable: es la única que el portal no puede
+  // hacerse a sí mismo. Hasta entonces el caso es indistinguible del ataque.
+  const dpis = new Set<number>();
+  for (const fila of ancla) {
+    if (fila.creado_por_usuario_portal !== null) continue;
+
+    const propio = dpiComparable(fila.dpi);
+    if (propio !== null) dpis.add(propio);
+    const rep = dpiComparable(fila.dpi_rep_legal);
+    if (rep !== null) dpis.add(rep);
+  }
+
+  const porId = new Map<number, (typeof ancla)[number]>();
+  for (const fila of ancla) porId.set(fila.inversionista_id, fila);
+  const idsAncla = new Set(porId.keys());
+
+  if (dpis.size > 0) {
+    const lista = [...dpis];
+    const expandidas = await db
+      .select()
+      .from(inversionistas)
+      .where(
+        or(inArray(inversionistas.dpi, lista), inArray(REP_LEGAL_NUMERICO, lista))
+      );
+    for (const fila of expandidas) {
+      // Y tampoco entran POR expansión las filas que se hizo el portal a sí
+      // mismo. Es la otra mitad de lo mismo: con un DPI ajeno tecleado, esa
+      // fila aparecía en la lista de su dueño legítimo —con el nombre y el
+      // correo del que la creó— sin que él hubiera hecho nada. Las suyas
+      // propias no se pierden: entran por el correo, como anclas.
+      if (
+        fila.creado_por_usuario_portal !== null &&
+        !idsAncla.has(fila.inversionista_id)
+      ) {
+        continue;
+      }
+
+      porId.set(fila.inversionista_id, fila);
+    }
+  }
+
+  return [...porId.values()]
+    .map((fila) => ({
+      inversionista_id: fila.inversionista_id,
+      nombre: fila.nombre,
+      // Sin columna que distinga jurídicas: en las sociedades el `dpi` propio
+      // va vacío y el del humano vive en dpi_rep_legal.
+      tipo: (fila.dpi !== null ? "persona" : "empresa") as "persona" | "empresa",
+      es_ancla: idsAncla.has(fila.inversionista_id),
+      dpi: fila.dpi === null ? null : String(fila.dpi),
+      dpi_rep_legal: fila.dpi_rep_legal ?? null,
+      email: fila.email ?? null,
+      moneda: fila.moneda,
+      status: fila.status,
+    }))
+    .sort((a, b) => {
+      // La persona primero: es la entidad con la que el inversionista se
+      // identifica, y suele ser la que quiere ver al entrar.
+      if (a.tipo !== b.tipo) return a.tipo === "persona" ? -1 : 1;
+      return a.nombre.localeCompare(b.nombre, "es");
+    });
+}
+
 export const insertInvestor = async ({ body, set }: any) => {
   try {
     const inversionistasToUpsert = Array.isArray(body) ? body : [body];
@@ -526,12 +681,10 @@ export const insertInvestor = async ({ body, set }: any) => {
     for (let index = 0; index < inversionistasToUpsert.length; index++) {
       const inv = inversionistasToUpsert[index];
 
-      // 🔥 Debe venir DPI o nombre (al menos uno).
-      // Salvo que venga `inversionista_id`: ese identifica la fila mejor que
-      // cualquiera de los dos, y es la forma en que el portal manda sus
-      // ediciones (solo campos de cobro, sin datos de identidad). Sin id sí
-      // hacen falta, porque son los únicos criterios con los que se puede
-      // resolver o crear la fila más abajo.
+      // 🔥 Debe venir DPI o nombre (al menos uno) para poder ubicar o crear la
+      // fila. No aplica cuando el body trae `inversionista_id`: ahí la fila ya
+      // está señalada y el resto de campos son opcionales (es lo que manda el
+      // portal cuando el inversionista cambia solo su cuenta bancaria).
       if (!inv.inversionista_id && !inv.dpi && !inv.nombre?.trim()) {
         errores.push(
           `Inversionista #${index + 1}: debe proporcionar DPI o nombre`
@@ -857,7 +1010,30 @@ export const insertInvestor = async ({ body, set }: any) => {
           updateData.tipo_cuenta = inv.tipo_cuenta.trim();
         if (inv.numero_cuenta?.trim())
           updateData.numero_cuenta = inv.numero_cuenta.trim();
-        if (inv.dpi) updateData.dpi = inv.dpi;
+        if (inv.dpi) {
+          updateData.dpi = inv.dpi;
+          // Y con eso la fila deja de ser "identidad que se puso uno mismo".
+          //
+          // `creado_por_usuario_portal` marca las filas que creó el registro del
+          // portal con un DPI que nadie verificó, y por eso `getEntidadesPorCorreo`
+          // no las deja ampliar el grupo. Sin una forma de quitar esa marca, la
+          // exclusión era para siempre: quien se registró por el portal y DESPUÉS
+          // resulta ser el representante de una sociedad no la vería nunca, ni
+          // aunque back office capturara la relación. Prometerlo en un comentario
+          // sin implementarlo es peor que no prometerlo.
+          //
+          // Escribir el DPI desde back office ES el acto de verificación que
+          // faltaba, y es el único que el portal no puede hacerse a sí mismo: su
+          // proxy (`buildPortalInvestorUpdate`) lleva una whitelist de tres campos
+          // bancarios, y el registro arma un objeto fijo que solo INSERTA. Para
+          // llegar a esta línea hace falta una edición dirigida desde el módulo de
+          // inversionistas o desde el CRM, o sea un humano mirando la ficha.
+          //
+          // Lo que se pierde: esa fila deja de ser reclamable como reintento del
+          // registro (`filaReclamablePorElPortal`). No importa — eso vive los
+          // minutos siguientes al alta, y esto pasa cuando alguien la edita.
+          updateData.creado_por_usuario_portal = null;
+        }
         // Solo se toca si el body trae la llave: mandar "" es borrarlo a
         // propósito, no mandarla es dejarlo como está.
         if (typeof inv.dpi_rep_legal !== "undefined")
@@ -6116,7 +6292,13 @@ export const updateInvestor = async ({ body, set }: any) => {
         updateData.tipo_cuenta = tipo_cuenta;
       if (typeof numero_cuenta !== "undefined")
         updateData.numero_cuenta = numero_cuenta;
-      if (typeof dpi !== "undefined") updateData.dpi = dpi;
+      if (typeof dpi !== "undefined") {
+        updateData.dpi = dpi;
+        // Misma transición que en `insertInvestor`: escribir el DPI desde back
+        // office es lo que vuelve confiable una identidad que se puso uno mismo.
+        // El porqué, largo, está allá.
+        updateData.creado_por_usuario_portal = null;
+      }
       if (typeof dpi_rep_legal !== "undefined")
         updateData.dpi_rep_legal = normalizarDpiRepLegal(dpi_rep_legal);
       if (typeof moneda !== "undefined") updateData.moneda = moneda;
@@ -9316,10 +9498,15 @@ export async function getLiquidaciones({
     conditions.push(eq(liquidaciones.liquidacion_id, liquidacion_id));
   }
 
-   if (!isNullorEmpty(email)) {
-    conditions.push(eq(inversionistas.email, email));
-  } else if (!isNullorEmpty(dpi)) {
-    conditions.push(eq(inversionistas.dpi, parseInt(dpi)));
+  // El id es EXCLUYENTE, no se suma: si se acumulara con el correo, un
+  // inversionista que comparte correo con otra de sus entidades pediría una y
+  // recibiría vacío (las dos condiciones van con AND).
+  if (!inversionista_id) {
+    if (!isNullorEmpty(email)) {
+      conditions.push(eq(inversionistas.email, email));
+    } else if (!isNullorEmpty(dpi)) {
+      conditions.push(eq(inversionistas.dpi, parseInt(dpi)));
+    }
   }
 
 
@@ -9549,13 +9736,21 @@ export async function getLiquidaciones({
  * Obtiene el rendimiento de un inversionista por DPI
  * @param dpi - DPI del inversionista
  */
-export async function getInvestorPerformance(dpi?: string, email?: string) {
-  if (!dpi && !email) {
-    throw new Error("Se requiere al menos 'dpi' o 'email'");
+export async function getInvestorPerformance(
+  dpi?: string,
+  email?: string,
+  inversionistaId?: number
+) {
+  if (!dpi && !email && !inversionistaId) {
+    throw new Error("Se requiere al menos 'inversionista_id', 'dpi' o 'email'");
   }
 
-  // 1️⃣ Buscar inversionista (Prioridad: Email > DPI)
-  const whereClause = email
+  // 1️⃣ Buscar inversionista (Prioridad: id > Email > DPI)
+  // El id manda porque es el único que identifica una fila sola: por correo hay
+  // personas con varias entidades y el .limit(1) de abajo elegiría una al azar.
+  const whereClause = inversionistaId
+    ? eq(inversionistas.inversionista_id, inversionistaId)
+    : email
     ? eq(inversionistas.email, email)
     : eq(inversionistas.dpi, parseInt(dpi!));
 
@@ -9570,7 +9765,12 @@ export async function getInvestorPerformance(dpi?: string, email?: string) {
     .limit(1);
 
   if (!inversionista) {
-    throw new Error(`No se encontró inversionista con ${dpi ? 'DPI: ' + dpi : 'email: ' + email}`);
+    const buscadoPor = inversionistaId
+      ? `id: ${inversionistaId}`
+      : email
+      ? `email: ${email}`
+      : `DPI: ${dpi}`;
+    throw new Error(`No se encontró inversionista con ${buscadoPor}`);
   }
 
   // 2️⃣ Obtener totales de inversiones de forma agregada

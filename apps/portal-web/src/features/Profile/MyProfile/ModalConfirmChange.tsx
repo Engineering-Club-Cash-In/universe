@@ -2,8 +2,10 @@ import { useState, useEffect } from "react";
 import { InputIcon, Button, IconAddress, IconPhone, IconUser, Select } from "@/components";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { updateLead, updateOwnDpi } from "../services";
-import { updateOwnInvestor, getBancos } from "../services/investorService";
+import { updateInvestorAccount, getBancos } from "../services/investorService";
 import { useAuth } from "@/lib";
+import { useEntidades } from "../hooks/useEntidades";
+import { CACHE_CATALOGO } from "../constants/cache";
 import { OPCIONES_TIPO_CUENTA } from "../tiposDeCuenta";
 
 type FieldType = 'dpi' | 'phone' | 'address' | 'banco_id' | 'tipo_cuenta' | 'numero_cuenta';
@@ -26,6 +28,7 @@ export const ModalConfirmChange = ({
   const [tempValue, setTempValue] = useState(initialValue);
   const [serverError, setServerError] = useState<string>("");
   const { user } = useAuth();
+  const { inversionistaId } = useEntidades();
 
   const isInvestorField = field && ['banco_id', 'tipo_cuenta', 'numero_cuenta'].includes(field);
 
@@ -34,6 +37,7 @@ export const ModalConfirmChange = ({
     queryKey: ["bancos"],
     queryFn: getBancos,
     enabled: isOpen && field === 'banco_id',
+    ...CACHE_CATALOGO,
   });
 
   // Actualizar tempValue cuando cambia initialValue
@@ -47,22 +51,28 @@ export const ModalConfirmChange = ({
     mutationFn: async ({ field, value }: { field: FieldType; value: string }) => {
       const email = user?.email;
 
-      // Campos de cobro del inversionista: van a Cartera. El destino lo
-      // resuelve el servidor con la sesión, así que aquí solo viaja el campo
-      // que se está editando; mandar DPI o correo no elegiría otra fila, pero
-      // sugeriría que sí.
-      if (isInvestorField) {
+      // Si es campo de inversionista, actualizar en Cartera.
+      // Se identifica la ficha por id: mandando dpi/email, el upsert de cartera
+      // resolvía primero por DPI y terminaba editando la ficha personal aunque
+      // el inversionista estuviera parado en una de sus sociedades.
+      if (isInvestorField || user?.role === "INVESTOR") {
+        if (!inversionistaId) {
+          throw new Error("No se pudo identificar la entidad a actualizar");
+        }
+
         const payload: {
+          inversionista_id: number;
           banco_id?: number;
           tipo_cuenta?: string;
           numero_cuenta?: string;
-        } = {};
+        } = { inversionista_id: inversionistaId };
 
+        // Solo enviar el campo que se está actualizando
         if (field === 'banco_id') payload.banco_id = Number(value);
         if (field === 'tipo_cuenta') payload.tipo_cuenta = value;
         if (field === 'numero_cuenta') payload.numero_cuenta = value;
 
-        return updateOwnInvestor(payload);
+        return updateInvestorAccount(payload);
       }
 
       // Si es campo de cliente, actualizar en CRM
@@ -77,7 +87,9 @@ export const ModalConfirmChange = ({
 
       const payload: UpdateLeadPayload = { email };
       if (field === 'dpi') {
-        // El DPI de la cuenta lo escribe el servidor sobre la sesión actual.
+        // El DPI de la cuenta lo escribe el servidor sobre la sesión actual:
+        // `dpi` está declarado `input: false` en Better Auth, así que
+        // `authClient.updateUser({ dpi })` ya no puede escribirlo.
         await updateOwnDpi(value);
         payload.dpi = value;
       }

@@ -1,14 +1,22 @@
 import { useFormik } from "formik";
 import * as Yup from "yup";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { RegisterCredentials } from "@/lib/auth";
 import { authClient } from "@/lib/auth";
 import { useNavigate } from "@tanstack/react-router";
 import { registerExternalUserAuth } from "@/features/Profile/services/unifiedService";
 import { conflictoDeRegistro } from "@/features/Profile/services/registroExterno.errors";
+import { recordarSiQuedoSinDpi } from "@/features/Profile/services/avisoDpiPendiente";
 import {
-  altaYaHecha,
+  olvidarTipoDelAlta,
+  recordarTipoDelAlta,
+  tipoAlCambiarElCorreo,
+  tipoRecordadoDelAlta,
+} from "./tipoDelAltaPersistido";
+import {
+  decidirAlta,
   mensajeDeAltaFallida,
+  mensajeDeCorreoCambiado,
   mensajeDeRegistroFallido,
 } from "./registroPendiente";
 
@@ -63,16 +71,20 @@ export const useRegister = () => {
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
-  // Atajo para no preguntarle al servidor dos veces en el mismo ciclo. NO es
-  // la fuente de verdad: un ref se pierde al recargar, y ahí es donde el
-  // registro a medias se quedaba atrapado. Ver `altaYaHecha`.
-  const cuentaCreada = useRef(false);
+  // Correo con el que ESTE formulario ya creó la cuenta, o `null`. Guarda el
+  // correo y no un booleano a propósito: con un booleano el reintento se
+  // saltaba el alta sin mirar si el formulario seguía llevando ese mismo
+  // correo. No es la fuente de verdad —un ref se pierde al recargar, y ahí es
+  // donde el registro a medias se quedaba atrapado—, por eso se contrasta
+  // también con la sesión. Ver `decidirAlta`.
+  const correoDelAlta = useRef<string | null>(null);
   // Tipo con el que se creó la cuenta. Ver por qué no se puede cambiar después
   // en el comentario de `tipoAEnviar`, más abajo.
   const tipoDelAlta = useRef<"CLIENT" | "INVESTOR" | null>(null);
   // Espejo reactivo del anterior, para que el formulario pueda bloquear el
   // selector en vez de dejar elegir algo que después se ignora.
   const [tipoBloqueado, setTipoBloqueado] = useState(false);
+
   const navigate = useNavigate();
 
   // Formik
@@ -98,22 +110,32 @@ export const useRegister = () => {
         // falló por algo corregible (un DPI ya tomado), el segundo envío tiene
         // que reintentar SOLO esa parte: repetir el alta fallaría con "el
         // correo ya existe" y el usuario quedaría atrapado en el formulario.
-        // Si el alta ya ocurrió, se pregunta al SERVIDOR, no a la memoria del
+        // Si el alta ya ocurrió lo dice el SERVIDOR, no la memoria del
         // componente: tras `signUp.email` la sesión queda abierta y sobrevive a
-        // una recarga. Antes esto vivía solo en un ref, así que recargar
-        // reiniciaba el estado, el siguiente envío repetía el alta y moría con
-        // "el correo ya existe" sin decir nada.
-        const yaCreada = altaYaHecha({
-          creadaEnEsteCiclo: cuentaCreada.current,
-          // Solo se pregunta si el ref no lo sabe ya, para no gastar una
-          // llamada de más en el camino normal.
-          correoDeLaSesion: cuentaCreada.current
-            ? null
-            : await correoDeLaSesion(),
+        // una recarga. Se le pregunta SIEMPRE, también cuando el ref ya sabe
+        // que la cuenta existe: ahorrarse esta llamada en el reintento era lo
+        // que dejaba el correo del formulario sin comparar con el de la cuenta.
+        const correoDeLaCuenta = await correoDeLaSesion();
+        const decision = decidirAlta({
+          correoDelAlta: correoDelAlta.current,
+          correoDeLaSesion: correoDeLaCuenta,
           correoDelFormulario: values.email,
         });
 
-        if (!yaCreada) {
+        // El correo del formulario ya no es el de la cuenta creada. No se puede
+        // seguir por ninguno de los dos lados: continuar registraría en
+        // CRM/cartera el correo viejo (el servidor toma el de la sesión, no el
+        // del cuerpo), y crear la cuenta nueva dejaría huérfana la primera. Se
+        // corta diciendo con qué correo quedó la cuenta y cómo empezar de
+        // nuevo.
+        if (decision === "correo_cambiado") {
+          helpers.setStatus(
+            mensajeDeCorreoCambiado(correoDeLaCuenta ?? correoDelAlta.current ?? ""),
+          );
+          return;
+        }
+
+        if (decision === "crear") {
           // El rol y el DPI ya no viajan en el alta: el servidor los escribe
           // después, al validar el registro (registerExternalUserAuth).
           const response = await authClient.signUp.email({
@@ -134,7 +156,7 @@ export const useRegister = () => {
           }
         }
 
-        cuentaCreada.current = true;
+        correoDelAlta.current = values.email;
 
         // A partir de aquí el tipo elegido queda FIJO. El botón de "atrás" del
         // paso 2 permite volver a tocarlo, y con la cuenta ya creada el
@@ -144,8 +166,19 @@ export const useRegister = () => {
         // terminaría como cliente con esa fila huérfana (y al revés, con el
         // lead). El DPI sí se puede seguir corrigiendo, que es lo que la
         // persona necesita para reintentar.
+        // El recordado del almacén va PRIMERO: el ref muere con la pestaña, y
+        // el escenario que rompe esto es justo una recarga —el registro externo
+        // creó la fila en cartera y falló antes de escribir la identidad, la
+        // persona recarga /register, Formik vuelve a su CLIENT por defecto y la
+        // sesión sigue viva—. Sin esto el reintento salía hacia el OTRO sistema
+        // y dejaba huérfana la fila del primer intento.
         if (!tipoDelAlta.current) {
-          tipoDelAlta.current = values.userType;
+          tipoDelAlta.current =
+            tipoRecordadoDelAlta(values.email) ?? values.userType;
+          recordarTipoDelAlta({
+            correo: values.email,
+            tipo: tipoDelAlta.current,
+          });
           setTipoBloqueado(true);
         }
         const tipoAEnviar = tipoDelAlta.current;
@@ -153,12 +186,33 @@ export const useRegister = () => {
         // Registrar en CRM o Cartera según tipo. La variante autenticada usa la
         // sesión recién creada y es la que deja el rol y el DPI en la cuenta.
         try {
-          await registerExternalUserAuth({
+          // La respuesta ya no se tira. Un 200 no siempre deja DPI en la
+          // cuenta: cuando el correo ya tiene una ficha que un asesor abrió sin
+          // DPI, el CRM da el acceso pero no escribe el dato —ahí solo puede
+          // ponerlo un humano— y el servidor respeta esa decisión. Descartar el
+          // resultado y navegar al perfil dejaba a la persona frente a OTRO
+          // formulario de DPI en blanco, sin la explicación ni la salida por
+          // soporte que sí tienen los caminos de Google y de completar perfil,
+          // reenviando el mismo valor para nada.
+          const resultado = await registerExternalUserAuth({
             userType: tipoAEnviar,
             fullName: values.fullName,
             email: values.email,
             dpi: values.dpi,
             phone: values.phone,
+          });
+
+          // Se navega al perfil en los DOS casos —la cuenta existe y la persona
+          // ya tiene acceso—; lo que cambia es con qué la recibe el perfil. El
+          // aviso viaja por el almacén y no por el estado de React porque este
+          // camino cruza de ruta y además tiene que aguantar una recarga.
+          // La decisión la toma el mismo módulo que los otros dos caminos: una
+          // sola definición de "quedó sin DPI", con su regla de mirar
+          // `identity.dpi` y nunca `dpiRegistradoEnLead`.
+          recordarSiQuedoSinDpi({
+            respuesta: resultado,
+            correo: values.email,
+            tipoSolicitado: values.userType,
           });
         } catch (error) {
           console.error("Error al registrar usuario adicional:", error);
@@ -192,6 +246,11 @@ export const useRegister = () => {
         }
 
         // enviar al profile
+        // El registro terminó: el tipo recordado ya no ata a nadie, y dejarlo
+        // haría que dar de alta a otra persona desde este navegador arrancara
+        // con el tipo de la anterior.
+        olvidarTipoDelAlta();
+
         navigate({ to: "/profile" });
       } catch (error) {
         console.error("Error during registration:", error);
@@ -200,6 +259,35 @@ export const useRegister = () => {
       }
     },
   });
+
+  // El tipo recordado sigue al CORREO que tiene puesto el formulario, en los dos
+  // sentidos. Al montar se recupera para el correo que ya trae (el de "recordar
+  // usuario"), que es lo que hace aparecer el bloqueo del selector antes del
+  // primer envío; y al cambiar a un correo sin alta recordada se SUELTA. Sin lo
+  // segundo, escribir otro correo dejaba puesto el tipo del anterior con el
+  // selector bloqueado, y la cuenta nueva se registraba en el sistema del alta
+  // vieja. Qué se suelta y qué no lo decide `tipoAlCambiarElCorreo`.
+  useEffect(() => {
+    const decision = tipoAlCambiarElCorreo({
+      correoDelFormulario: formik.values.email,
+      // Un tipo que puso un alta de verdad no se suelta: es el candado que
+      // impide que el reintento salga hacia el otro sistema.
+      huboAltaEnEstaPestana: correoDelAlta.current !== null,
+    });
+
+    if (decision.accion === "no_tocar") return;
+
+    if (decision.accion === "soltar") {
+      tipoDelAlta.current = null;
+      setTipoBloqueado(false);
+      return;
+    }
+
+    tipoDelAlta.current = decision.tipo;
+    setTipoBloqueado(true);
+    formik.setFieldValue("userType", decision.tipo);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formik.values.email]);
 
   // Solo formato. Que el DPI ya esté tomado lo decide el servidor al fijarlo
   // sobre la cuenta (409 en POST /api/profile/me/dpi): preguntarlo antes

@@ -2,6 +2,9 @@ import { beforeAll, beforeEach, describe, expect, it, mock } from "bun:test";
 import { Hono } from "hono";
 
 const ORIGEN_PORTAL = "https://portal.clubcashin.com";
+// Segundo dominio del portal: `CORS_ORIGIN` admite una lista separada por comas.
+const ORIGEN_PORTAL_2 = "https://inversionistas.clubcashin.com";
+const ORIGEN_AUTH = "https://auth-portal.clubcashin.com";
 const ORIGEN_ATACANTE = "https://sitio-malicioso.example";
 const COOKIE_SESION =
   "__Secure-better-auth.session_token=lo-que-el-navegador-adjunta";
@@ -10,12 +13,15 @@ const COOKIE_SESION =
 // defensa funciona, un intento cross-site las deja vacías.
 let escrituras: Record<string, unknown>[] = [];
 
+// `TRUSTED_ORIGINS` la interpreta `config/env.ts` a partir de estas variables
+// (ver `lib/origins.test.ts`); aquí se inyecta ya resuelta.
 mock.module("../config/env", () => ({
   env: {
     NODE_ENV: "production",
-    CORS_ORIGIN: ORIGEN_PORTAL,
+    CORS_ORIGIN: `${ORIGEN_PORTAL},${ORIGEN_PORTAL_2}`,
     FRONTEND_URL: ORIGEN_PORTAL,
-    BETTER_AUTH_URL: "https://auth-portal.clubcashin.com",
+    BETTER_AUTH_URL: ORIGEN_AUTH,
+    TRUSTED_ORIGINS: [ORIGEN_PORTAL, ORIGEN_PORTAL_2, ORIGEN_AUTH],
   },
 }));
 
@@ -162,10 +168,13 @@ describe("evaluateOriginPolicy", () => {
 });
 
 describe("resolveTrustedOrigins", () => {
-  it("canonicaliza y deduplica los orígenes del entorno", () => {
+  // La lista viene de `env`, no se vuelve a interpretar aquí: es lo que impide
+  // que esta defensa y el CORS global confíen en conjuntos distintos.
+  it("usa la lista ya resuelta del entorno, con todos los dominios", () => {
     expect(resolveTrustedOrigins()).toEqual([
       ORIGEN_PORTAL,
-      "https://auth-portal.clubcashin.com",
+      ORIGEN_PORTAL_2,
+      ORIGEN_AUTH,
     ]);
   });
 });
@@ -233,6 +242,25 @@ describe("POST /api/profile/me/dpi detrás del middleware", () => {
 
     expect(res.status).toBe(403);
     expect(escrituras).toEqual([]);
+  });
+
+  // Antes, con dos dominios declarados, la cadena entera era el único "origen
+  // de confianza" y ninguno de los dos casaba.
+  it("deja pasar el POST del segundo dominio del portal", async () => {
+    const res = await construirApp().request("/api/profile/me/dpi", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: ORIGEN_PORTAL_2,
+        Cookie: COOKIE_SESION,
+      },
+      body: JSON.stringify({ dpi: "1234567890123" }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(escrituras).toEqual([
+      { dpi: "1234567890123", updatedAt: expect.any(Date) },
+    ]);
   });
 
   it("deja pasar el POST del portal", async () => {

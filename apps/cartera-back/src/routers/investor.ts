@@ -15,6 +15,7 @@ import {
   resumenTransferencias,
   getLiquidaciones,
   getInvestorPerformance,
+  getEntidadesPorCorreo,
   getInvestorTotalsGlobales,
   getInvestorMirrorSummary,
   upsertPagosEspejo,             // 🆕 Recalcular pagos espejo desde el front
@@ -294,6 +295,41 @@ export const inversionistasRouter = new Elysia()
     return insertInvestor(ctx);
   })
   .get("/investor", getInvestors)
+  // Traduce el correo de la sesión del portal al conjunto de inversionistas que
+  // esa persona puede operar (el suyo + las sociedades que representa). Lo
+  // consume auth-google, que es quien tiene la sesión; el portal nunca manda
+  // este correo a mano.
+  .get(
+    "/investor/entidades",
+    async ({ query, set }) => {
+      try {
+        const email = query.email?.trim();
+        if (!email) {
+          set.status = 400;
+          return { success: false, message: "Se requiere 'email'" };
+        }
+
+        const data = await getEntidadesPorCorreo(email);
+        set.status = 200;
+        return { success: true, data };
+      } catch (error) {
+        console.error("[GET /investor/entidades] Error:", error);
+        set.status = 500;
+        return {
+          success: false,
+          message: "Error al resolver las entidades del inversionista",
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+    {
+      query: t.Object({ email: t.String() }),
+      detail: {
+        summary: "Entidades que puede operar la persona dueña de ese correo",
+        tags: ["Inversionistas"],
+      },
+    }
+  )
   .post("/investor/update", (ctx: any) => {
     guardDescuentaImpuestos(ctx); // no-ADMIN: quita descuenta_impuestos del body
     return updateInvestor(ctx);
@@ -1606,17 +1642,21 @@ export const inversionistasRouter = new Elysia()
     "/inversionistas/rendimiento",
     async ({ query, set }) => {
       try {
-        const { dpi, email } = query;
+        const { dpi, email, inversionista_id } = query;
 
-        if (!dpi && !email) {
+        if (!dpi && !email && !inversionista_id) {
           set.status = 400;
           return {
             success: false,
-            message: "Se requiere al menos 'dpi' o 'email'",
+            message: "Se requiere al menos 'inversionista_id', 'dpi' o 'email'",
           };
         }
 
-        const result = await getInvestorPerformance(dpi, email);
+        const result = await getInvestorPerformance(
+          dpi,
+          email,
+          inversionista_id ? Number(inversionista_id) : undefined
+        );
 
         set.status = 200;
         return {
@@ -1635,11 +1675,12 @@ export const inversionistasRouter = new Elysia()
     },
     {
       query: t.Object({
+        inversionista_id: t.Optional(t.String()),
         dpi: t.Optional(t.String()),
         email: t.Optional(t.String()),
       }),
       detail: {
-        summary: "Obtener rendimiento de inversionista por DPI o email",
+        summary: "Obtener rendimiento de inversionista por id, DPI o email",
         tags: ["Inversionistas"],
       },
     }

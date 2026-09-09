@@ -2,6 +2,11 @@ import { useEffect, useState } from "react";
 import { registerExternalUserAuth } from "../services/unifiedService";
 import { useAuth } from "@/lib";
 import { mensajeDeRegistroFallido } from "@/features/Login/hook/registroPendiente";
+import { mensajeDeDpiPendiente } from "../services/registroSinDpi";
+import {
+  avisoDpiPendienteVigente,
+  recordarSiQuedoSinDpi,
+} from "../services/avisoDpiPendiente";
 
 interface UserData {
   id: string;
@@ -27,6 +32,13 @@ interface UserData {
 export type RegistroPendiente = {
   tipoSolicitado: "CLIENT" | "INVESTOR";
   mensaje: string;
+  /**
+   * El registro NO falló: salió 200 pero el servidor se negó a escribir el DPI
+   * porque la ficha la abrió un asesor. No es un error de la persona y no hay
+   * nada que corregir, así que el formulario lo muestra en su bloque de espera
+   * y no en el de error. Ver `registroQuedoSinDpi`.
+   */
+  dpiPendiente?: boolean;
 };
 
 export const useProfile = () => {
@@ -61,7 +73,7 @@ export const useProfile = () => {
           // Servicio unificado (variante autenticada): registra en CRM o
           // Cartera y, ya del lado del servidor, deja el DPI y el rol en la
           // cuenta de la sesión. El cliente ya no los escribe.
-          await registerExternalUserAuth({
+          const resultado = await registerExternalUserAuth({
             userType: userType,
             fullName: user.name || user.email.split("@")[0],
             email: user.email,
@@ -69,11 +81,39 @@ export const useProfile = () => {
             phone: phone,
           });
 
-          console.log(`${userType} creado exitosamente`);
-
-          // Limpiar parámetros de la URL y recargar
+          // Limpiar parámetros de la URL: ya se consumieron y no deben volver a
+          // dispararse en la recarga.
           const newUrl = window.location.pathname;
           window.history.replaceState({}, "", newUrl);
+
+          // Un 200 no siempre deja DPI en la cuenta. Recargar aquí aterrizaba
+          // en el formulario de completar perfil sin decir nada —el mismo punto
+          // ciego que tenía el formulario— y la persona daba una vuelta muda
+          // antes de entrar al bucle. Se corta la recarga y el motivo viaja con
+          // ella hasta el formulario.
+          // El aviso se DEJA GUARDADO antes de pintarlo. Solo en el estado de
+          // React moría con la primera recarga, y como la cuenta sigue siendo
+          // CLIENT y sin DPI, `Profile.tsx` volvía a sacar el formulario en
+          // blanco, sin explicación y dejando reenviar el mismo DPI para nada.
+          // El ciclo de vida (cuándo se apaga) vive en `avisoDpiPendiente`.
+          if (
+            recordarSiQuedoSinDpi({
+              respuesta: resultado,
+              correo: user.email,
+              tipoSolicitado: userType,
+            })
+          ) {
+            setRegistroPendiente({
+              tipoSolicitado: userType,
+              mensaje: mensajeDeDpiPendiente(user.email),
+              dpiPendiente: true,
+            });
+            setIsLoading(false);
+            return;
+          }
+
+          console.log(`${userType} creado exitosamente`);
+
           // NO quitar isLoading aquí porque vamos a recargar
           window.location.reload();
           return; // Salir antes de setIsLoading(false)
@@ -94,6 +134,24 @@ export const useProfile = () => {
         // Solo limpiar URL si no hay parámetros de registro
         const newUrl = window.location.pathname;
         window.history.replaceState({}, "", newUrl);
+
+        // Sin parámetros en la URL se llega aquí por una recarga, por volver al
+        // perfil o por el registro con correo, que ya navegó. Si un intento
+        // anterior quedó sin DPI, el aviso se recupera y la persona ve por qué
+        // le siguen pidiendo el dato, en vez del formulario mudo.
+        // `avisoDpiPendienteVigente` es el que decide si sigue vigente: en
+        // cuanto el asesor pone el DPI, deja de devolverlo y se borra solo.
+        const aviso = avisoDpiPendienteVigente({ usuario: user });
+
+        setRegistroPendiente(
+          aviso
+            ? {
+                tipoSolicitado: aviso.tipoSolicitado,
+                mensaje: mensajeDeDpiPendiente(aviso.correo),
+                dpiPendiente: true,
+              }
+            : null,
+        );
         setIsLoading(false);
       }
     };

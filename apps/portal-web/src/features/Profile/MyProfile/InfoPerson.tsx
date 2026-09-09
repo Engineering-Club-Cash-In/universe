@@ -12,6 +12,11 @@ import { ModalConfirmChange } from "./ModalConfirmChange";
 import { OPCIONES_TIPO_CUENTA } from "../tiposDeCuenta";
 import { getProfile } from "../services";
 import { getInvestorProfile, getBancos } from "../services/investorService";
+import { useEntidades } from "../hooks/useEntidades";
+import { ErrorCarga } from "../components/ErrorCarga";
+import { SinEntidades } from "../components/SinEntidades";
+import { pantallaDeEntidad } from "../pantallaDeEntidad";
+import { CACHE_CATALOGO, CACHE_FICHA } from "../constants/cache";
 import { useAuth } from "@/lib";
 
 type EditField =
@@ -32,6 +37,13 @@ export const InfoPerson = () => {
   const [numeroCuenta, setNumeroCuenta] = useState("");
   const [editingField, setEditingField] = useState<EditField>(null);
   const { user } = useAuth();
+  const {
+    inversionistaId,
+    isLoading: cargandoEntidades,
+    error: errorEntidades,
+    reintentar: reintentarEntidades,
+    sinEntidades,
+  } = useEntidades();
 
   const isInvestor = user?.role === "INVESTOR";
 
@@ -39,22 +51,26 @@ export const InfoPerson = () => {
   const {
     data: clientProfile,
     isLoading: isLoadingClient,
+    error: errorClient,
     refetch: refetchClient,
   } = useQuery({
     queryKey: ["profile", user?.id],
     queryFn: () => getProfile(user?.email || "", user?.dpi || ""),
     enabled: !!user?.id && !isInvestor,
+    ...CACHE_FICHA,
   });
 
   // Obtener perfil del inversionista (Cartera) - solo si es INVESTOR
   const {
     data: investorProfile,
     isLoading: isLoadingInvestor,
+    error: errorInvestor,
     refetch: refetchInvestor,
   } = useQuery({
-    queryKey: ["investor-profile", user?.id],
-    queryFn: () => getInvestorProfile(user?.dpi || "", user?.email || ""),
-    enabled: !!user?.id && isInvestor,
+    queryKey: ["investor-profile", inversionistaId],
+    queryFn: () => getInvestorProfile(inversionistaId!),
+    enabled: !!inversionistaId && isInvestor,
+    ...CACHE_FICHA,
   });
 
   // Obtener catálogo de bancos - solo si es INVESTOR
@@ -62,27 +78,42 @@ export const InfoPerson = () => {
     queryKey: ["bancos"],
     queryFn: getBancos,
     enabled: isInvestor,
+    ...CACHE_CATALOGO,
   });
 
   const profileData: any = isInvestor ? investorProfile : clientProfile;
-  const isLoading = isInvestor ? isLoadingInvestor : isLoadingClient;
+  // Sin columna que marque a las jurídicas: la señal es que la ficha no tiene
+  // DPI propio pero sí el de un representante.
+  const esSociedad =
+    isInvestor && !profileData?.dpi && !!profileData?.dpi_rep_legal;
+  const isLoading = isInvestor
+    ? cargandoEntidades || (!!inversionistaId && isLoadingInvestor)
+    : isLoadingClient;
   const refetch = isInvestor ? refetchInvestor : refetchClient;
 
-  // Actualizar campos cuando se carga el perfil
+  // Sincronizar los campos con el perfil cargado.
+  //
+  // Sin `else`, al cambiar de entidad los campos se quedaban con los datos de
+  // la anterior: si la consulta de la nueva fallaba, se mostraban como si
+  // fueran suyos y al editar cualquiera se escribía ese valor viejo sobre la
+  // entidad nueva (el modal manda el inversionista_id actual). Por eso se
+  // limpian siempre que no haya datos.
   useEffect(() => {
-    if (profileData) {
-      if (isInvestor) {
-        // Datos de inversionista
-        setDpi(profileData.dpi?.toString() || "");
-        setBanco(profileData.banco_id?.toString() || "");
-        setTipoCuenta(profileData.tipo_cuenta || "");
-        setNumeroCuenta(profileData.numero_cuenta || "");
-      } else {
-        // Datos de cliente
-        setDpi(profileData.dpi || "");
-        setPhone(profileData.phone || "");
-        setAddress(profileData.direccion || "");
-      }
+    if (isInvestor) {
+      // En las sociedades el `dpi` propio va vacío y el del humano vive en
+      // dpi_rep_legal, así que se muestra ese.
+      setDpi(
+        profileData?.dpi?.toString() ||
+          profileData?.dpi_rep_legal?.toString() ||
+          "",
+      );
+      setBanco(profileData?.banco_id?.toString() || "");
+      setTipoCuenta(profileData?.tipo_cuenta || "");
+      setNumeroCuenta(profileData?.numero_cuenta || "");
+    } else {
+      setDpi(profileData?.dpi || "");
+      setPhone(profileData?.phone || "");
+      setAddress(profileData?.direccion || "");
     }
   }, [profileData, isInvestor]);
 
@@ -136,7 +167,7 @@ export const InfoPerson = () => {
     if (!profileData) return false;
     return isInvestor
       ? !!(
-          profileData.dpi &&
+          (profileData.dpi || profileData.dpi_rep_legal) &&
           profileData.banco_id &&
           profileData.tipo_cuenta &&
           profileData.numero_cuenta
@@ -144,8 +175,43 @@ export const InfoPerson = () => {
       : !!(profileData.dpi && profileData.phone);
   }, [profileData, isInvestor]);
 
-  if (isLoading) {
+  // Una ficha en blanco se lee como "esta entidad no tiene datos bancarios" y
+  // llevaría al inversionista a llenarlos de nuevo sobre lo que ya existe. Sin
+  // NINGUNA entidad es peor todavía: se pintaba el perfil entero con los
+  // botones de editar banco, y cada uno reventaba en `ModalConfirmChange.tsx:60`
+  // porque no hay entidad que actualizar.
+  const pantalla = pantallaDeEntidad({
+    cargando: isLoading,
+    // El fallo del CLIENTE cuenta igual que el del inversionista. Antes se
+    // ignoraba, y con la ficha sin cargar esta pantalla no se quedaba en
+    // blanco: pintaba el formulario de "Perfil Incompleto", que es lo que se
+    // muestra cuando faltan datos. O sea que un error del servidor se leía como
+    // "todavía no llenaste tu perfil" y la persona se ponía a teclear lo que ya
+    // tenía. El CRM ahora puede contestar que su correo está en más de una
+    // ficha —una respuesta con instrucción— y ese texto se perdía entero.
+    hayError: isInvestor
+      ? !!(errorEntidades || errorInvestor)
+      : !!errorClient,
+    sinEntidades,
+  });
+
+  if (pantalla === "cargando") {
     return <Loading />;
+  }
+
+  if (pantalla === "error") {
+    return (
+      <ErrorCarga
+        titulo="No pudimos cargar este perfil"
+        onReintentar={() =>
+          errorEntidades ? reintentarEntidades() : refetch()
+        }
+      />
+    );
+  }
+
+  if (pantalla === "sin-entidades") {
+    return <SinEntidades queVerias="tus datos" />;
   }
 
   return (
@@ -212,7 +278,9 @@ export const InfoPerson = () => {
           {/* DPI - Solo informativo */}
           <div className="text-[#6B7280]">
             <label className="text-sm text-white/65 mb-2 block">
-              DPI (Documento Personal de Identificación)
+              {esSociedad
+                ? "DPI del representante legal"
+                : "DPI (Documento Personal de Identificación)"}
             </label>
             <InputIcon
               icon={<IconPerson />}

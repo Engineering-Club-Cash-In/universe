@@ -13,18 +13,14 @@ mock.module("./carteraAuth.service", () => ({
 // admite y `bun run build` lo marcaría).
 type Servicio = typeof import("./investor.service");
 
-let AmbiguousInvestorEmailError: Servicio["AmbiguousInvestorEmailError"];
 let CarteraInvestorError: Servicio["CarteraInvestorError"];
 let createInvestor: Servicio["createInvestor"];
-let findInvestorByEmail: Servicio["findInvestorByEmail"];
 
 beforeAll(async () => {
   const servicio = await import("./investor.service");
 
-  AmbiguousInvestorEmailError = servicio.AmbiguousInvestorEmailError;
   CarteraInvestorError = servicio.CarteraInvestorError;
   createInvestor = servicio.createInvestor;
-  findInvestorByEmail = servicio.findInvestorByEmail;
 });
 
 type Respuesta = { status: number; body: unknown };
@@ -57,54 +53,6 @@ beforeEach(() => {
 const restaurarFetch = () => {
   globalThis.fetch = fetchOriginal;
 };
-
-describe("findInvestorByEmail", () => {
-  it("devuelve el inversionista cuando el correo identifica a uno solo", async () => {
-    respuesta = {
-      status: 200,
-      body: { inversionista_id: 89, nombre: "Autocash", coincidencias_email: 1 },
-    };
-
-    const investor = await findInvestorByEmail("richardkachler@sepresta.com");
-
-    expect(investor?.inversionista_id).toBe(89);
-    expect(ultimaUrl).toContain("email=richardkachler%40sepresta.com");
-    restaurarFetch();
-  });
-
-  it("falla ruidosamente si el correo resuelve a más de un inversionista", async () => {
-    // Caso real de producción: 89 (Autocash) y 97 (Blokfund) comparten correo.
-    // Cuál de los dos devuelve cartera depende del plan de ejecución, así que
-    // aquí no se elige ninguno.
-    respuesta = {
-      status: 200,
-      body: { inversionista_id: 89, nombre: "Autocash", coincidencias_email: 2 },
-    };
-
-    await expect(
-      findInvestorByEmail("richardkachler@sepresta.com"),
-    ).rejects.toBeInstanceOf(AmbiguousInvestorEmailError);
-    restaurarFetch();
-  });
-
-  it("devuelve null cuando no hay inversionista con ese correo", async () => {
-    respuesta = { status: 404, body: { message: "no encontrado" } };
-
-    expect(await findInvestorByEmail("nadie@example.com")).toBeNull();
-    restaurarFetch();
-  });
-
-  it("trata como único un cartera que todavía no informa coincidencias", async () => {
-    // Compatibilidad durante el despliegue: si cartera aún no manda el conteo,
-    // se comporta como antes en vez de bloquear a todo el mundo.
-    respuesta = { status: 200, body: { inversionista_id: 89 } };
-
-    const investor = await findInvestorByEmail("uno@example.com");
-
-    expect(investor?.inversionista_id).toBe(89);
-    restaurarFetch();
-  });
-});
 
 describe("createInvestor", () => {
   it("propaga el motivo con el que cartera rechazó la escritura", async () => {

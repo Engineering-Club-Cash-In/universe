@@ -8,12 +8,14 @@ import { opportunityDocuments } from "../db/schema/documents";
 import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import { vehiclePhotos, vehicles } from "../db/schema/vehicles";
 import { eqDpi } from "../lib/dpi-lookup";
+import { eqEmail } from "../lib/email-lookup";
 import { extractBearerToken, secretsMatch } from "../lib/service-token";
 import { getFileUrl, getFileUrlWithBucketInKey } from "../lib/storage";
 import { normalizarDpi, validarDpi } from "../utils/cui-validation";
 import { getOnlyRenapInfoController } from "./bot";
 import {
 	decidirLeadDelPortal,
+	elegirLeadDelPortal,
 	normalizarCorreoParaComparar,
 } from "./portalLeadIdempotencia";
 import {
@@ -31,10 +33,16 @@ async function findLeadByEmailOrDpi(email?: string, dpi?: string) {
 		return { error: "Se debe proporcionar email o DPI", status: 400 as const };
 	}
 
-	// Construir condiciones de búsqueda
+	// Construir condiciones de búsqueda.
+	// El correo se compara normalizado en AMBOS lados (`eqEmail`), igual que el
+	// DPI con `eqDpi` y igual que el registro con `normalizarCorreoParaComparar`.
+	// Con un `=` exacto, la cuenta que se acaba de registrar como
+	// "Ana@Ejemplo.com" —el registro sí la aceptó, porque allá se normaliza—
+	// dejaba de encontrar su propio lead "ana@ejemplo.com", y con ella se caían
+	// perfil, documentos, contratos, créditos y actualizaciones.
 	const conditions = [];
 	if (email && email.trim() !== "") {
-		conditions.push(eq(leads.email, email));
+		conditions.push(eqEmail(leads.email, email));
 	}
 	if (dpi && dpi.trim() !== "") {
 		conditions.push(eqDpi(leads.dpi, dpi));
@@ -50,21 +58,34 @@ async function findLeadByEmailOrDpi(email?: string, dpi?: string) {
 		.where(or(...conditions))
 		.orderBy(asc(leads.createdAt));
 
-	// El email es la identidad exacta con la que entra el usuario al portal, así
-	// que esa fila manda sobre cualquier empate por DPI. Si no vino email, o
-	// ninguna coincide, se usa la más antigua, que es la que arrastra historial.
-	const leadPorEmail =
-		email && email.trim() !== ""
-			? matches.find((candidate) => candidate.email === email)
-			: undefined;
+	// El email es la identidad con la que entra el usuario al portal, así que esa
+	// fila manda sobre cualquier empate por DPI. La regla entera —incluido qué
+	// hacer cuando DOS fichas cuelgan del mismo correo— vive en
+	// `elegirLeadDelPortal`, que es donde se puede probar.
+	const eleccion = elegirLeadDelPortal(matches, { correo: email, dpi });
 
-	const lead = leadPorEmail ?? matches[0];
-
-	if (!lead) {
+	if (eleccion.tipo === "ninguno") {
 		return { error: "Lead no encontrado", status: 404 as const };
 	}
 
-	return { lead };
+	if (eleccion.tipo === "ambiguo") {
+		// No se elige ninguna. Los ids van al log del servidor y no a la
+		// respuesta: quien la lee es el titular, y los ids de fichas ajenas no
+		// son suyos. Lo que hay que hacer con esto es unificar los duplicados en
+		// el CRM, y eso no lo hace él.
+		console.error(
+			"[ERROR] findLeadByEmailOrDpi: más de un lead cuelga del mismo correo normalizado; no se elige ninguno. Unificar en el CRM:",
+			eleccion.ids,
+		);
+
+		return {
+			error:
+				"Hay más de una ficha registrada con este correo y no podemos saber cuál es la tuya. Escríbenos para unificarlas.",
+			status: 409 as const,
+		};
+	}
+
+	return { lead: eleccion.lead };
 }
 
 /**
@@ -682,15 +703,37 @@ export async function createPortalRegisterLead(c: Context) {
 		const candidatos = await db
 			.select()
 			.from(leads)
-			.where(or(eq(leads.email, email), eqDpi(leads.dpi, dpi)))
+			.where(or(eqEmail(leads.email, email), eqDpi(leads.dpi, dpi)))
 			.orderBy(asc(leads.createdAt));
 
-		const correoDeLaSesion = normalizarCorreoParaComparar(email);
-		const existingLead =
-			candidatos.find(
-				(candidato) =>
-					normalizarCorreoParaComparar(candidato.email) === correoDeLaSesion,
-			) ?? candidatos[0];
+		// La misma regla que usa el resto del portal (`elegirLeadDelPortal`), y no
+		// una copia: dos fichas pueden colgar del mismo correo —`leads.email` no
+		// tiene índice único— y aquí eso se resolvía tomando la más antigua. Con
+		// el DPI de la petición desempatando, quien es el titular de la segunda
+		// ficha puede registrarse; antes su DPI chocaba contra el de la primera y
+		// se llevaba un 409 del que no había salida.
+		const eleccion = elegirLeadDelPortal(candidatos, { correo: email, dpi });
+
+		if (eleccion.tipo === "ambiguo") {
+			// Ni se elige ni se crea: crear sería un tercer duplicado sobre el
+			// mismo correo. Los ids se quedan en el log por lo mismo que en
+			// `conflicto_correo`: son de fichas que pueden no ser suyas.
+			console.error(
+				"[portal] más de un lead cuelga de este correo y el DPI no desempata; registro detenido. Unificar en el CRM:",
+				eleccion.ids,
+			);
+
+			return c.json(
+				{
+					success: false,
+					error:
+						"Hay más de una ficha registrada con este correo y no podemos saber cuál es la tuya. Contacta a soporte para unificarlas.",
+				},
+				409,
+			);
+		}
+
+		const existingLead = eleccion.tipo === "uno" ? eleccion.lead : undefined;
 
 		if (existingLead) {
 			// Lead ya existe → solo retornar sin crear oportunidad.

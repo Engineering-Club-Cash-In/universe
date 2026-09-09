@@ -43,10 +43,23 @@ export const Profile = () => {
           {/* Si necesita completar perfil, mostrar formulario especial */}
           {needsProfileCompletion ? (
             <div className="py-12">
+              {/* Un registro que FALLÓ va al bloque de error (rojo, corregible
+                  y reintentable); uno que salió bien pero quedó sin DPI va al
+                  de espera (ámbar, sin reintento). Mandarlos al mismo sitio
+                  invitaba a reintentar algo que no depende de la persona. */}
               <CompleteProfileForm
                 onSuccess={handleProfileCompleted}
                 tipoSolicitado={registroPendiente?.tipoSolicitado ?? null}
-                mensajeInicial={registroPendiente?.mensaje}
+                mensajeInicial={
+                  registroPendiente?.dpiPendiente
+                    ? undefined
+                    : registroPendiente?.mensaje
+                }
+                pendienteInicial={
+                  registroPendiente?.dpiPendiente
+                    ? registroPendiente.mensaje
+                    : undefined
+                }
               />
             </div>
           ) : (

@@ -25,7 +25,10 @@ import type { Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 
 import { env } from "../config/env";
+import { normalizeOrigin } from "../lib/origins";
 import { hasSessionCookie } from "../lib/portalCookies";
+
+export { normalizeOrigin };
 
 /** Métodos que por definición no mutan estado. */
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
@@ -44,42 +47,14 @@ export const COOKIE_AUTHENTICATED_PREFIXES = [
 ] as const;
 
 /**
- * Reduce un origen a su forma canónica (`esquema://host[:puerto]`) para poder
- * compararlo. Devuelve `null` para lo que no sea un origen real: ausente,
- * vacío o el literal `"null"` que mandan los iframes en sandbox y los
- * documentos `data:`.
- */
-export function normalizeOrigin(
-  origin: string | null | undefined,
-): string | null {
-  if (typeof origin !== "string") {
-    return null;
-  }
-
-  const trimmed = origin.trim();
-
-  if (!trimmed || trimmed === "null") {
-    return null;
-  }
-
-  try {
-    return new URL(trimmed).origin;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Orígenes de confianza declarados por entorno. `CORS_ORIGIN` admite una lista
- * separada por comas para desplegar el portal en varios dominios.
+ * Orígenes de confianza declarados por entorno. La lista se interpreta una sola
+ * vez en `config/env.ts` (ver `TRUSTED_ORIGINS`) y la comparten esta defensa,
+ * el CORS global de `index.ts` y los `trustedOrigins` de Better Auth: si cada
+ * capa la interpretara por su cuenta, declarar un segundo dominio del portal
+ * dejaría a unas confiando en él y a otras no.
  */
 export function resolveTrustedOrigins(): string[] {
-  const candidatos = [env.CORS_ORIGIN, env.FRONTEND_URL, env.BETTER_AUTH_URL]
-    .flatMap((valor) => (valor ? valor.split(",") : []))
-    .map((valor) => normalizeOrigin(valor))
-    .filter((valor): valor is string => valor !== null);
-
-  return [...new Set(candidatos)];
+  return env.TRUSTED_ORIGINS;
 }
 
 export type OriginDecision = "allow" | "deny";

@@ -5,20 +5,20 @@
 import apiAuth from "@/lib/api/apiAuth";
 
 // Interfaces
-
 /**
- * Campos de cobro que el titular puede editar de su propio inversionista.
- *
- * La identidad no viaja en el cuerpo: el servidor resuelve el inversionista
- * con el correo de la sesión y dirige la escritura por su id.
+ * Lo único que el inversionista puede editar de su propia ficha desde el
+ * portal. El servidor descarta cualquier otro campo, y la entidad se identifica
+ * por id — mandar dpi/email hacía que el upsert de cartera resolviera por DPI y
+ * terminara editando la ficha personal en vez de la de la sociedad.
  */
-export interface UpdateInvestorPayload {
+export interface UpdateInvestorAccountPayload {
+  inversionista_id: number;
   banco_id?: number;
   tipo_cuenta?: string;
   numero_cuenta?: string;
 }
 
-export interface CreateInvestorResponse {
+export interface UpdateInvestorAccountResponse {
   success: boolean;
   message: string;
   data?: any;
@@ -27,7 +27,9 @@ export interface CreateInvestorResponse {
 export interface InvestorProfile {
   inversionista_id: number;
   nombre: string;
-  dpi: number;
+  /** null en las sociedades: ahí el DPI del humano va en dpi_rep_legal. */
+  dpi: number | null;
+  dpi_rep_legal: string | null;
   email: string;
   emite_factura: boolean;
   tipo_reinversion: string;
@@ -56,13 +58,13 @@ export interface Banco {
 }
 
 /**
- * Actualizar los datos de cobro del inversionista de la cuenta autenticada
+ * Actualizar los datos bancarios de una de las entidades del usuario
  */
-export const updateOwnInvestor = async (
-  payload: UpdateInvestorPayload
-): Promise<CreateInvestorResponse> => {
+export const updateInvestorAccount = async (
+  payload: UpdateInvestorAccountPayload
+): Promise<UpdateInvestorAccountResponse> => {
   try {
-    const response = await apiAuth.post<CreateInvestorResponse>(
+    const response = await apiAuth.post<UpdateInvestorAccountResponse>(
       "/api/cartera/investor",
       payload
     );
@@ -74,15 +76,14 @@ export const updateOwnInvestor = async (
 };
 
 /**
- * Obtener perfil de inversionista por DPI
+ * Obtener perfil de la entidad indicada
  */
 export const getInvestorProfile = async (
-  dpi: string = "",
-  email: string = ""
+  inversionistaId: number
 ): Promise<InvestorProfile> => {
   try {
     const response = await apiAuth.get<{ data: InvestorProfile }>(
-      `/api/cartera/investor?dpi=${encodeURIComponent(dpi)}&email=${encodeURIComponent(email)}`
+      `/api/cartera/investor?inversionista_id=${inversionistaId}`
     );
     return response.data.data;
   } catch (error) {
@@ -92,14 +93,14 @@ export const getInvestorProfile = async (
 };
 
 /**
- * Obtener documentos del inversionista por email
+ * Obtener documentos visibles de la entidad indicada
  */
 export const getInvestorDocuments = async (
-  email: string
+  inversionistaId: number
 ): Promise<InvestorDocument[]> => {
   try {
     const response = await apiAuth.get<{ data: InvestorDocument[] }>(
-      `/api/cartera/investor-documents/client/${encodeURIComponent(email)}`
+      `/api/cartera/investor-documents?inversionista_id=${inversionistaId}`
     );
     return response.data.data;
   } catch (error) {

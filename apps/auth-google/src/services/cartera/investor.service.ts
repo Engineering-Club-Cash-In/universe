@@ -69,6 +69,22 @@ export interface Banco {
   codigo: string;
 }
 
+/**
+ * Una de las entidades que la persona logueada puede operar: su propio
+ * inversionista y el de cada sociedad que representa.
+ */
+export interface EntidadPortal {
+  inversionista_id: number;
+  nombre: string;
+  tipo: "persona" | "empresa";
+  es_ancla: boolean;
+  dpi: string | null;
+  dpi_rep_legal: string | null;
+  email: string | null;
+  moneda: string;
+  status: string;
+}
+
 export interface InvestorDocument {
   documento_id: number;
   inversionista_id: number;
@@ -101,20 +117,6 @@ export class CarteraInvestorError extends Error {
   ) {
     super(message);
     this.name = "CarteraInvestorError";
-  }
-}
-
-/**
- * El correo de la sesión corresponde a más de un inversionista.
- *
- * `inversionistas.email` no es único y la consulta que lo resuelve no tiene
- * desempate, así que no hay forma de saber a cuál de ellos quiso escribir el
- * titular. No se elige uno: la operación se rechaza.
- */
-export class AmbiguousInvestorEmailError extends Error {
-  constructor(readonly coincidencias: number) {
-    super("El correo está asociado a más de un inversionista");
-    this.name = "AmbiguousInvestorEmailError";
   }
 }
 
@@ -189,51 +191,93 @@ export const createInvestor = async (
 };
 
 /**
- * Busca el inversionista dueño de un correo.
- *
- * Es la forma en que el portal resuelve "cuál es MI inversionista": el correo
- * sale de la sesión, que es lo único que Better Auth autentica. Devuelve
- * `null` cuando no hay ninguno, en vez de tratarlo como error.
+ * Resolver las entidades que puede operar la persona dueña de ese correo.
+ * El correo lo pone SIEMPRE la sesión, nunca el cliente.
  */
-export const findInvestorByEmail = async (
+export const getEntidades = async (
   email: string,
-): Promise<InvestorProfile | null> => {
+): Promise<EntidadPortal[]> => {
   const token = await ensureCarteraAuth();
 
-  const url = new URL(`${env.CARTERA_API_URL}/investor`);
-  url.searchParams.set("email", email);
-
-  const response = await fetch(url.toString(), {
-    headers: {
-      Authorization: `Bearer ${token}`,
+  const response = await fetch(
+    `${env.CARTERA_API_URL}/investor/entidades?email=${encodeURIComponent(email)}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
     },
-  });
+  );
 
-  if (response.status === 404) {
-    return null;
+  if (!response.ok) {
+    throw new Error("Error al resolver las entidades del inversionista");
   }
+
+  const json = (await response.json()) as {
+    success: boolean;
+    data: EntidadPortal[];
+  };
+  return json.data ?? [];
+};
+
+/**
+ * Obtener perfil de inversionista por su id
+ */
+export const getInvestorProfileById = async (
+  inversionistaId: number,
+): Promise<InvestorProfile> => {
+  const token = await ensureCarteraAuth();
+
+  const response = await fetch(
+    `${env.CARTERA_API_URL}/investor?id=${inversionistaId}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+  );
 
   if (!response.ok) {
     throw new Error("Error al obtener perfil del inversionista");
   }
 
-  const data = (await response.json()) as
-    | (InvestorProfile & { coincidencias_email?: number })
-    | null;
+  const perfil = (await response.json()) as Record<string, unknown>;
 
-  if (!data?.inversionista_id) {
-    return null;
+  // `/investor` adjunta TODOS los documentos del inversionista —el left join de
+  // getInvestors no filtra `visible`— y cada uno ya viene con su URL firmada.
+  // El portal pide los suyos por `client-by-id`, que sí respeta la visibilidad,
+  // así que acá se descartan: aunque la UI ignore la propiedad, los documentos
+  // internos viajarían igual hasta el navegador.
+  delete perfil.documentos;
+
+  return perfil as unknown as InvestorProfile;
+};
+
+/**
+ * Obtener documentos visibles de un inversionista por su id
+ */
+export const getInvestorDocumentsById = async (
+  inversionistaId: number,
+): Promise<InvestorDocument[]> => {
+  const token = await ensureCarteraAuth();
+
+  const response = await fetch(
+    `${env.CARTERA_API_URL}/investor-documents/client-by-id/${inversionistaId}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Error al obtener documentos del inversionista");
   }
 
-  // Cartera informa cuántos inversionistas comparten el correo. Si son varios,
-  // el que viene en `data` es el que haya salido primero del plan de ejecución,
-  // no "el del titular": mejor no poder editar que editarle la cuenta bancaria
-  // a la empresa equivocada.
-  if ((data.coincidencias_email ?? 1) > 1) {
-    throw new AmbiguousInvestorEmailError(data.coincidencias_email!);
-  }
-
-  return data;
+  const json = (await response.json()) as {
+    success: boolean;
+    data: InvestorDocument[];
+  };
+  return json.data;
 };
 
 /**

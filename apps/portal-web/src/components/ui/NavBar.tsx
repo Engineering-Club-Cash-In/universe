@@ -17,6 +17,8 @@ import { authClient } from "@/lib/auth";
 import { useQueryClient } from "@tanstack/react-query";
 import { IconCCI } from "../IconCCI";
 import { Button } from "./Button";
+import { ChipEntidadNavbar } from "@/features/Profile/components/SelectorEntidad";
+import { useContextoEntidadStore } from "@/features/Profile/store/useContextoEntidad";
 
 export const NavBar = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = React.useState(false);
@@ -92,6 +94,13 @@ export const NavBar = () => {
   const closeMobileMenu = () => setIsMobileMenuOpen(false);
   const isMobile = useIsMobile();
 
+  // El chip solo aparece cuando existe un bloque "Estás viendo" en la pantalla
+  // y ya se fue de la vista. Así no se duplica arriba, y en las pantallas
+  // públicas ni se monta (no consulta entidades).
+  const contextoRegistrado = useContextoEntidadStore((s) => s.registrado);
+  const contextoVisible = useContextoEntidadStore((s) => s.visible);
+  const mostrarChipEntidad = contextoRegistrado && !contextoVisible;
+
   return (
     <>
       {/* Desktop: fondo gradiente full-width detrás de la navbar */}
@@ -116,13 +125,36 @@ export const NavBar = () => {
             : {}
         }
       >
-        {/* Mobile: Logo a la izquierda */}
-        <Link href={"/"} className="lg:hidden font-semibold text-lg flex gap-2">
+        {/* Mobile: Logo a la izquierda. Con el chip visible se queda solo el
+            isotipo: el nombre de la entidad necesita ese ancho. */}
+        <Link
+          href={"/"}
+          className="lg:hidden font-semibold text-lg flex gap-2 shrink-0"
+        >
           <div className="w-6 h-6">
             <IconCCI />
           </div>
-          CashIn
+          {!mostrarChipEntidad && "CashIn"}
         </Link>
+
+        {/* Mobile: contexto de la entidad al scrollear */}
+        <AnimatePresence>
+          {mostrarChipEntidad && (
+            <motion.div
+              key="chip-entidad"
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.16 }}
+              // Topado: a ancho completo el chip se lee como barra de búsqueda
+              // y se come el navbar. Truncado a media barra sigue dando el
+              // contexto y se ve como lo que es.
+              className="lg:hidden flex-1 min-w-0 max-w-[60%]"
+            >
+              <ChipEntidadNavbar />
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Desktop navbar */}
         <div

@@ -64,68 +64,77 @@ mock.module("../config/env", () => ({
 
 // La BD se falsea a nivel de conexión, no de servicio: así el test ejercita de
 // verdad el `portalIdentity.service`, que es donde vive la reserva del DPI.
-mock.module("../db/connection", () => ({
-  db: {
-    select: (proyeccion: Record<string, unknown>) => ({
-      from: () => ({
-        where: () => {
-          // Una proyección que pide más que el id es la lectura de la cuenta
-          // propia; la de solo id son las búsquedas por correo/DPI.
-          const pideLaCuenta =
-            proyeccion && Object.keys(proyeccion).some((k) => k !== "id");
+const dbFalso: Record<string, unknown> = {
+  select: (proyeccion: Record<string, unknown>) => ({
+    from: () => ({
+      where: () => {
+        // Una proyección que pide más que el id es la lectura de la cuenta
+        // propia; la de solo id son las búsquedas por correo/DPI.
+        const pideLaCuenta =
+          proyeccion && Object.keys(proyeccion).some((k) => k !== "id");
 
-          // Copias, como devuelve drizzle: el llamador no puede quedarse con
-          // una referencia viva a la fila y ver los cambios que él mismo hace.
-          return Promise.resolve(
-            (pideLaCuenta ? filaUsuario : (filasSelect.shift() ?? [])).map(
-              (fila) => ({ ...fila }),
-            ),
-          );
-        },
-      }),
+        // Copias, como devuelve drizzle: el llamador no puede quedarse con
+        // una referencia viva a la fila y ver los cambios que él mismo hace.
+        return Promise.resolve(
+          (pideLaCuenta ? filaUsuario : (filasSelect.shift() ?? [])).map(
+            (fila) => ({ ...fila }),
+          ),
+        );
+      },
     }),
-    update: () => ({
-      set: (valores: Record<string, unknown>) => ({
-        where: () => {
-          if (updateFalla) {
+  }),
+  update: () => ({
+    set: (valores: Record<string, unknown>) => ({
+      where: () => {
+        if (updateFalla) {
+          return builder(Promise.reject(errorDeUnicidad()));
+        }
+
+        const dpi = valores.dpi;
+
+        if (typeof dpi === "string") {
+          if (dpisReservados.has(dpi)) {
             return builder(Promise.reject(errorDeUnicidad()));
           }
 
-          const dpi = valores.dpi;
+          dpisReservados.add(dpi);
+        }
 
-          if (typeof dpi === "string") {
-            if (dpisReservados.has(dpi)) {
-              return builder(Promise.reject(errorDeUnicidad()));
-            }
+        // La liberación devuelve el DPI al pozo.
+        if (dpi === null && typeof filaUsuario[0]?.dpi === "string") {
+          dpisReservados.delete(filaUsuario[0].dpi as string);
+        }
 
-            dpisReservados.add(dpi);
-          }
+        escrituras.push(valores);
 
-          // La liberación devuelve el DPI al pozo.
-          if (dpi === null && typeof filaUsuario[0]?.dpi === "string") {
-            dpisReservados.delete(filaUsuario[0].dpi as string);
-          }
+        if (filaUsuario[0] && "dpi" in valores) {
+          filaUsuario[0].dpi = dpi;
+        }
+        if (filaUsuario[0] && "role" in valores) {
+          filaUsuario[0].role = valores.role;
+        }
 
-          escrituras.push(valores);
-
-          if (filaUsuario[0] && "dpi" in valores) {
-            filaUsuario[0].dpi = dpi;
-          }
-          if (filaUsuario[0] && "role" in valores) {
-            filaUsuario[0].role = valores.role;
-          }
-
-          return builder(Promise.resolve(filasActualizadas));
-        },
-      }),
-    }),
-    delete: () => ({
-      where: (condicion: unknown) => {
-        borrados.push(condicion);
-        return Promise.resolve();
+        return builder(Promise.resolve(filasActualizadas));
       },
     }),
-  },
+  }),
+  delete: () => ({
+    where: (condicion: unknown) => {
+      borrados.push(condicion);
+      return Promise.resolve();
+    },
+  }),
+};
+
+// `applyRegistrationOutcome` mete sus dos escrituras —DPI y rol— en UNA
+// transacción, así que el doble tiene que ofrecerla. La ejecuta contra sí mismo
+// y no simula el ROLLBACK: ninguna prueba de este archivo lo necesita, y la
+// atomicidad se cubre en `portalIdentity.service.test.ts`.
+dbFalso.transaction = (callback: (tx: unknown) => Promise<unknown>) =>
+  callback(dbFalso);
+
+mock.module("../db/connection", () => ({
+  db: dbFalso,
 }));
 
 mock.module("../lib/auth", () => ({

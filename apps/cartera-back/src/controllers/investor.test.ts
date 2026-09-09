@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 
@@ -465,6 +465,96 @@ describe("insertInvestor", () => {
     expect(insertWasCalled).toBeFalse();
   });
 
+  // El inversionista 187 (`dpi = 4036613`, `dpi_rep_legal = '04036613'`) es su
+  // propio representante. Corregirle el DPI mandaba el valor nuevo en las dos
+  // llaves, y la comprobación de existencia mira `inversionistas.dpi` en la
+  // BASE —el DPI VIEJO— así que rechazaba con `rep_legal_inexistente` por un
+  // representante que sí existe: él mismo, un renglón más abajo del payload.
+  it("deja corregirle el DPI a quien es su propio representante", async () => {
+    // Ninguna respuesta de búsqueda de representante: si el código la pidiera,
+    // la vería vacía y rechazaría. Solo la fila que se está editando.
+    selectResponses = [[{ ...existingInvestor, dpi_rep_legal: "04036613" }]];
+    const set = { status: 200 };
+
+    const result = await insertInvestor({
+      body: {
+        inversionista_id: existingInvestor.inversionista_id,
+        dpi: 5551234,
+        dpi_rep_legal: "5551234",
+      },
+      set,
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(updateWasCalled).toBeTrue();
+    expect(lastUpdateData?.dpi_rep_legal).toBe("5551234");
+  });
+
+  // La excepción es SOLO cuando apunta a la propia fila: ahí no hay tercero a
+  // quien darle acceso por error, que es lo único que protege esta regla.
+  it("sigue exigiendo que exista cuando el representante es otro", async () => {
+    selectResponses = [[]];
+    const set = { status: 200 };
+
+    const result = await insertInvestor({
+      body: {
+        operation: "CREATE",
+        nombre: "Empresa Nueva S.A.",
+        dpi: 5551234,
+        dpi_rep_legal: "9999999999999",
+      },
+      set,
+    });
+
+    expect(set.status).toBe(400);
+    expect(result.error).toBe("rep_legal_inexistente");
+  });
+
+  // `POST /investor` acepta un ARREGLO y escribe fila por fila, fuera de
+  // transacción. Un choque en el SEGUNDO elemento cortaba con 409 cuando el
+  // primero ya estaba insertado, y ese return salía seco: la fila quedaba en la
+  // base sin cuenta del portal, sin aviso a ningún representante y sin nada en
+  // la respuesta que dijera que existía. El reintento del lote —lo que
+  // cualquiera hace ante un 409— ya chocaba contra ella misma.
+  describe("un lote que se corta a medias", () => {
+    it("termina y reporta lo que ya se escribió antes del 409", async () => {
+      // 1ª: el nombre del primero, libre. 2ª: el del segundo, ocupado.
+      selectResponses = [[], [{ inversionista_id: 77, nombre: "Ya Existe" }]];
+      const set = { status: 200 };
+
+      const result = await insertInvestor({
+        body: [
+          { operation: "CREATE", nombre: "Primera Nueva" },
+          { operation: "CREATE", nombre: "Ya Existe" },
+        ],
+        set,
+      });
+
+      expect(set.status).toBe(409);
+      expect(result.error).toBe("duplicate_nombre");
+      // La fila que sí se escribió viaja en la respuesta...
+      expect(result.data).toHaveLength(1);
+      expect(result.data?.[0]?.nombre).toBe("Primera Nueva");
+      // ...con su acceso resuelto, igual que en el camino feliz.
+      expect(result.provisioning).toHaveLength(1);
+      expect(result.provisioning?.[0]?.inversionistaId).toBe(99);
+    });
+
+    it("con un solo inversionista no agrega nada a la respuesta", async () => {
+      selectResponses = [[{ inversionista_id: 77, nombre: "Ya Existe" }]];
+      const set = { status: 200 };
+
+      const result = await insertInvestor({
+        body: { operation: "CREATE", nombre: "Ya Existe" },
+        set,
+      });
+
+      expect(set.status).toBe(409);
+      expect(result.data).toBeUndefined();
+      expect(result.provisioning).toBeUndefined();
+    });
+  });
+
   it("no manda el código de representante en errores de validación ajenos", async () => {
     const set = { status: 200 };
 
@@ -605,6 +695,93 @@ describe("insertInvestor", () => {
       expect(lastInsertData?.creado_por_usuario_portal).toBeNull();
     });
   });
+
+  // ── Quién puede hacer que salga un correo con contraseña ──────────────────
+  //
+  // `authMiddleware` solo verifica la firma del JWT (midleware.ts:16-22): no
+  // mira el rol. Así que hasta aquí CUALQUIER token vivo de cartera podía
+  // mandar `provisionar_portal` y provocar una cuenta del portal con la
+  // contraseña al correo del payload — aunque la única pantalla que lo ofrece
+  // sea solo-ADMIN (App.tsx:121) y la ruta hermana exija ADMIN
+  // (otorgarAccesoPortal.ts:50).
+  //
+  // El discriminante de estas pruebas es el fail-closed de
+  // `portalProvisioning`: sin AUTH_GOOGLE_URL/PORTAL_PROVISIONING_SECRET la
+  // llamada ni sale a la red y devuelve `provisionamiento_no_configurado`. Ver
+  // ese motivo prueba que SÍ se intentó; ver `origen_no_autorizado` prueba que
+  // ni se intentó.
+  describe("permiso de provisionamiento", () => {
+    const authGoogleUrl = process.env.AUTH_GOOGLE_URL;
+    const secreto = process.env.PORTAL_PROVISIONING_SECRET;
+
+    beforeEach(() => {
+      delete process.env.AUTH_GOOGLE_URL;
+      delete process.env.PORTAL_PROVISIONING_SECRET;
+    });
+
+    afterAll(() => {
+      if (authGoogleUrl === undefined) delete process.env.AUTH_GOOGLE_URL;
+      else process.env.AUTH_GOOGLE_URL = authGoogleUrl;
+      if (secreto === undefined) delete process.env.PORTAL_PROVISIONING_SECRET;
+      else process.env.PORTAL_PROVISIONING_SECRET = secreto;
+    });
+
+    const altaConPortal = (user: unknown) =>
+      insertInvestor({
+        body: {
+          operation: "CREATE",
+          nombre: "Nueva Persona",
+          email: "nueva@example.com",
+          provisionar_portal: true,
+        },
+        set: { status: 200 },
+        user,
+      });
+
+    it("un ASESOR no dispara el provisionamiento, y el alta NO se cae", async () => {
+      const result = await altaConPortal({ role: "ASESOR" });
+
+      // El inversionista SÍ queda creado: negar el permiso nunca puede
+      // convertirse en un 500 sobre una fila que ya está escrita.
+      expect(insertWasCalled).toBeTrue();
+      expect(result.data).toHaveLength(1);
+      expect(result.provisioning?.[0].estado).toBe("omitida");
+      expect(result.provisioning?.[0].motivo).toBe("origen_no_autorizado");
+    });
+
+    it("un token sin rol tampoco", async () => {
+      const result = await altaConPortal(undefined);
+
+      expect(insertWasCalled).toBeTrue();
+      expect(result.provisioning?.[0].motivo).toBe("origen_no_autorizado");
+    });
+
+    it("un ADMIN sí lo dispara", async () => {
+      const result = await altaConPortal({ role: "ADMIN" });
+
+      expect(insertWasCalled).toBeTrue();
+      // Llegó hasta el cliente de provisionamiento: se frenó por
+      // configuración, no por permiso.
+      expect(result.provisioning?.[0].motivo).toBe("provisionamiento_no_configurado");
+    });
+
+    it("sin la llave en el payload el motivo sigue siendo `no_solicitado`", async () => {
+      // No pedirlo no es un problema de permiso: si esto reportara
+      // `origen_no_autorizado`, operaciones saldría a pedir accesos que no
+      // le faltan.
+      const result = await insertInvestor({
+        body: {
+          operation: "CREATE",
+          nombre: "Nueva Persona",
+          email: "nueva@example.com",
+        },
+        set: { status: 200 },
+        user: { role: "ASESOR" },
+      });
+
+      expect(result.provisioning?.[0].motivo).toBe("no_solicitado");
+    });
+  });
 });
 
 describe("updateInvestor", () => {
@@ -665,6 +842,24 @@ describe("updateInvestor", () => {
     expect(result.message).toContain("no existe como inversionista");
     expect(result.error).toBe("rep_legal_inexistente");
     expect(updateWasCalled).toBeFalse();
+  });
+
+  it("deja corregirle el DPI a quien es su propio representante", async () => {
+    selectResponses = [[{ ...existingInvestor, dpi_rep_legal: "04036613" }]];
+    const set = { status: 200 };
+
+    const result = await updateInvestor({
+      body: {
+        inversionista_id: existingInvestor.inversionista_id,
+        dpi: 5551234,
+        dpi_rep_legal: "5551234",
+      },
+      set,
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(updateWasCalled).toBeTrue();
+    expect(lastUpdateData?.dpi_rep_legal).toBe("5551234");
   });
 
   it("no revalida dpi_rep_legal cuando el valor no cambió", async () => {

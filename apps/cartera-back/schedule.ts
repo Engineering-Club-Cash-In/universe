@@ -9,6 +9,10 @@ import {
 } from './src/controllers/verificarFacturasSat';
 import { generarSnapshotDiario } from './src/controllers/facturacionSnapshot';
 import { verificarCuadreLiquidaciones } from './src/controllers/verificarCuadreLiquidaciones';
+import {
+  enviarResumenProvisionamiento,
+  provisionarCuentasPortal,
+} from './src/controllers/provisionarCuentasPortal';
 import { runScheduledJob, runScheduledJobAttempts } from './scheduledJobRunner';
 
 const TZ_GUATEMALA = 'America/Guatemala';
@@ -117,6 +121,30 @@ export function iniciarTareasProgramadas() {
     await runScheduledJob(
       'verify_liquidation_balance',
       () => verificarCuadreLiquidaciones(),
+    );
+  });
+
+  // 🔑 Acceso al Portal del Inversionista - 07:00 hora Guatemala, todos los días.
+  //    DETECTA, no ejecuta. Recorre a todos los inversionistas, PREGUNTA quién
+  //    debería tener cuenta y no la tiene, y lo manda en el resumen. No crea
+  //    nada y no manda ninguna contraseña: sale de aquí en solo lectura.
+  //
+  //    Es la red que recoge lo que el alta no pudo: si auth-google estaba caído
+  //    cuando se creó el inversionista, el operador no tiene forma de
+  //    reintentarlo —el segundo POST muere en el guard de duplicados— y sin
+  //    este job esa persona se quedaba sin acceso para siempre. Eso se sigue
+  //    detectando y reportando solo; lo que cambió es que abrir la cuenta lo
+  //    dispara una persona desde POST /investor/portal-access.
+  //
+  //    Por qué no la abre él: su universo es la tabla entera y no puede saber
+  //    quién escribió cada fila —`cartera.inversionistas` se escribe desde
+  //    caminos que no prueban identidad—, así que "esta fila debería tener
+  //    cuenta" no puede significar "mandale la contraseña a ese correo".
+  //    Ver el encabezado de provisionarCuentasPortal.ts.
+  schedule.scheduleJob({ rule: '0 7 * * *', tz: TZ_GUATEMALA }, async () => {
+    await runScheduledJob(
+      'provision_portal_accounts',
+      () => provisionarCuentasPortal({ enviarResumen: enviarResumenProvisionamiento }),
     );
   });
 }

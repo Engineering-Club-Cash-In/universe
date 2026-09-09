@@ -90,6 +90,7 @@ export const carteraCatalog = {
         'process_late_fees', 'upsert_advisor_effectiveness', 'expire_portfolio_purchases',
         'generate_monthly_close', 'verify_sat_invoices', 'report_failed_sat_invoices',
         'generate_daily_invoice_snapshot', 'verify_liquidation_balance',
+        'provision_portal_accounts',
       ],
     },
     provider: {

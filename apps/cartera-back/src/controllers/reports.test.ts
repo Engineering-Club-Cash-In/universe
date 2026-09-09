@@ -270,6 +270,7 @@ describe("estado de cuenta PDF", () => {
     const rows = applyEstadoCuentaRunningCapital([
       {
         pago_id: 17419,
+        numero_cuota: 12,
         pagado: true,
         abono_capital: "1319.93",
         abono_interes: "1767.89",
@@ -277,11 +278,13 @@ describe("estado de cuenta PDF", () => {
       },
       {
         pago_id: 127060,
+        numero_cuota: 12,
         abono_capital: "0.00",
         total_restante: "0.00",
       },
       {
         pago_id: 17420,
+        numero_cuota: 13,
         pagado: true,
         abono_capital: "1342.11",
         abono_interes: "1748.09",
@@ -289,22 +292,27 @@ describe("estado de cuenta PDF", () => {
       },
       {
         pago_id: 134345,
+        numero_cuota: 13,
         abono_capital: "75000.00",
         total_restante: "39720.74",
       },
     ]);
 
+    // La cuota 13 arranca en el cierre guardado de la 12 y baja abono por
+    // abono; los 2 centavos vienen del propio descuadre de los datos.
     expect(rows.map((p) => p.total_restante)).toEqual([
       "116539.07",
       "116539.07",
-      "115196.94",
-      "40196.94",
+      "115196.96",
+      "40196.96",
     ]);
   });
 
-  it("no resta dos veces el abono a capital cuando la fila ya viene neta (sync Excel)", () => {
+  it("cada cuota cierra en su snapshot aunque la sync repita el saldo en todas sus filas", () => {
     // Crédito 01010214106990, cuota 35: la sync escribe el mismo total_restante
-    // (ya neto del abono de Q2,440.50) en ambos pagos de la cuota.
+    // (ya neto del abono de Q2,440.50) en ambos pagos de la cuota. El saldo se
+    // corre desde la apertura, así que la 1a fila muestra su propio saldo y la
+    // última aterriza en el snapshot guardado.
     const rows = applyEstadoCuentaRunningCapital([
       { pago_id: 10747, numero_cuota: 33, pagado: true, abono_capital: "1841.92", abono_interes: "850.00", total_restante: "54555.42" },
       { pago_id: 10748, numero_cuota: 34, pagado: true, abono_capital: "1880.27", abono_interes: "818.33", total_restante: "52234.65" },
@@ -312,7 +320,7 @@ describe("estado de cuenta PDF", () => {
       { pago_id: 10749, numero_cuota: 35, pagado: true, abono_capital: "1919.26", abono_interes: "783.52", total_restante: "47874.89" },
       { pago_id: 150049, numero_cuota: 35, pagado: true, abono_capital: "2440.50", total_restante: "47874.89" },
     ]);
-    expect(rows.map((p) => p.total_restante)).toEqual(["54555.42", "52234.65", "52234.65", "47874.89", "47874.89"]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["54555.42", "52675.15", "52234.65", "50315.39", "47874.89"]);
   });
 
   it("abono puro que llega antes que la cuota regular del mismo mes: saldo corrido real, luego la hermana lo cierra", () => {
@@ -326,22 +334,44 @@ describe("estado de cuenta PDF", () => {
 
   it("abono agregado DESPUÉS de la sync no desarma a las filas ya netas de la cuota", () => {
     // Saldo Q100; sync escribió Q85 (neto de 10+5) en ambas filas; luego entra
-    // un abono de Q2 que hereda el snapshot Q85. Esperado: 85, 85, 83 (no 78).
+    // un abono de Q2 que hereda el snapshot Q85. El saldo baja 10, 5 y 2 desde
+    // la apertura Q100 y cierra en Q83, sin restar dos veces.
     const rows = applyEstadoCuentaRunningCapital([
       { pago_id: 1, numero_cuota: 4, pagado: true, abono_capital: "0.00", abono_interes: "1.00", total_restante: "100.00" },
       { pago_id: 2, numero_cuota: 5, pagado: true, abono_capital: "10.00", abono_interes: "1.00", total_restante: "85.00" },
       { pago_id: 3, numero_cuota: 5, pagado: true, abono_capital: "5.00", total_restante: "85.00" },
       { pago_id: 4, numero_cuota: 5, pagado: true, abono_capital: "2.00", total_restante: "85.00" },
     ]);
-    expect(rows.map((p) => p.total_restante)).toEqual(["100.00", "85.00", "85.00", "83.00"]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["100.00", "90.00", "85.00", "83.00"]);
   });
 
-  it("primera cuota visible sin saldo previo: siembra la apertura y respeta la fila neta", () => {
+  it("primera cuota visible sin saldo previo: siembra la apertura y corre el saldo", () => {
     const rows = applyEstadoCuentaRunningCapital([
       { pago_id: 10749, numero_cuota: 35, pagado: true, abono_capital: "1919.26", abono_interes: "783.52", total_restante: "47874.89" },
       { pago_id: 150049, numero_cuota: 35, pagado: true, abono_capital: "2440.50", total_restante: "47874.89" },
     ]);
-    expect(rows.map((p) => p.total_restante)).toEqual(["47874.89", "47874.89"]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["50315.39", "47874.89"]);
+  });
+
+  it("capital puro en MEDIO de la cuota no hunde el saldo (crédito 872, cuota 33)", () => {
+    // Cuatro boletas para una cuota: los rubros se agotan en las dos primeras,
+    // así que la 3a queda como capital puro en medio. Antes restaba su abono de
+    // un saldo que ya venía neto y el PDF mostraba Q24,662.55 entre dos
+    // Q25,162.55; ahora el saldo baja parejo y cierra donde debe.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 50407, numero_cuota: 32, pagado: true, abono_capital: "719.85", abono_interes: "399.22", total_restante: "25894.49" },
+      { pago_id: 130230, numero_cuota: 33, pagado: true, abono_capital: "0.00", abono_interes: "388.42", abono_seguro: "260.93", total_restante: "25162.55" },
+      { pago_id: 134346, numero_cuota: 33, pagado: true, abono_capital: "33.24", abono_gps: "120.95", membresias_pago: "145.80", total_restante: "25162.55" },
+      { pago_id: 135163, numero_cuota: 33, pagado: true, abono_capital: "500.00", total_restante: "25162.55" },
+      { pago_id: 50408, numero_cuota: 33, pagado: true, abono_capital: "198.70", total_restante: "25162.55" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual([
+      "25894.49",
+      "25894.49",
+      "25861.25",
+      "25361.25",
+      "25162.55",
+    ]);
   });
 
   it("parcial normal (registerPayment): el cierre solo-capital hereda el saldo de la hermana y SÍ se resta", () => {
@@ -353,6 +383,228 @@ describe("estado de cuenta PDF", () => {
       { pago_id: 3, numero_cuota: 11, pagado: true, abono_capital: "400.00", total_restante: "49400.00" },
     ]);
     expect(rows.map((p) => p.total_restante)).toEqual(["50000.00", "49400.00", "49000.00"]);
+  });
+
+  it("tras un hueco, una cancelacion en 0 no arrastra el saldo heredado", () => {
+    // La cuota 2 no se ve y bajaba Q1,000; la 3 cancela pagando Q49,000. Si se
+    // arrastra el cierre de la 1 quedan Q1,000 debiéndose. Tras un hueco el
+    // saldo heredado ya no sirve, así que la cuota se reconstruye desde su
+    // propio cierre aunque no tenga snapshot positivo.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 1, numero_cuota: 1, pagado: true, abono_capital: "1000.00", abono_interes: "500.00", total_restante: "50000.00" },
+      { pago_id: 2, numero_cuota: 3, pagado: true, abono_capital: "49000.00", abono_interes: "500.00", total_restante: "0" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["50000.00", "0.00"]);
+  });
+
+  it("capital directo sin vecina que confirme: el snapshot se descuenta igual", () => {
+    // Primera cuota visible con snapshot Q50,000 y un capital directo de Q400
+    // que guarda 0. No hay cuota vecina que desempate, pero esa fila va DETRÁS
+    // del snapshot en el orden del reporte, así que su capital no puede estar
+    // adentro. Antes se mostraba Q50,400 y Q50,000.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 1, numero_cuota: 10, pagado: true, abono_capital: "1000.00", abono_interes: "500.00", total_restante: "50000.00" },
+      { pago_id: 2, numero_cuota: 10, pagado: true, abono_capital: "400.00", total_restante: "0" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["50000.00", "49600.00"]);
+  });
+
+  it("un cero ANTES de la fila regular no cierra la cuota", () => {
+    // registerPayment puede colgar capital directo de una cuota pendiente y
+    // que esa cuota se pague después: el cero queda ANTES del snapshot. Que
+    // algún sufijo de abonos coincida con el snapshot no alcanza — solo los
+    // ceros posteriores dicen que el snapshot ya se agotó.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 1, numero_cuota: 5, pagado: true, abono_capital: "10.00", total_restante: "0" },
+      { pago_id: 2, numero_cuota: 5, pagado: true, abono_capital: "40.00", abono_interes: "5.00", total_restante: "40.00" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["80.00", "40.00"]);
+  });
+
+  it("una cancelacion despues de una fila positiva cierra la cuota en 0", () => {
+    // La cuota trae su fila normal (snapshot Q40) y después la que cancela,
+    // que guarda 0. El snapshot positivo tapaba ese cero y, al arrancar
+    // cadena, la apertura se reconstruía desde Q40: la cuota terminaba en Q40
+    // en vez de Q0. Los abonos de la cola agotan exacto el snapshot, así que
+    // el cierre en 0 lo confirma su propia aritmética.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 1, numero_cuota: 5, pagado: true, abono_capital: "10.00", abono_interes: "5.00", total_restante: "40.00" },
+      { pago_id: 2, numero_cuota: 5, pagado: true, abono_capital: "40.00", total_restante: "0" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["40.00", "0.00"]);
+  });
+
+  it("un hueco de cuotas corta la cadena en vez de saltarselo", () => {
+    // La cuota 2 quedó entera fuera del estado de cuenta (sus pagos siguen
+    // pendientes) y cerraba en Q49,000. Encadenar la 1 con la 3 como si fueran
+    // vecinas dejaba a la 3 en Q49,300, alta por los Q1,000 de capital que la 2
+    // sí redujo. Cortando la cadena, la 3 se resuelve con su propio snapshot.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 1, numero_cuota: 1, pagado: true, abono_capital: "500.00", abono_interes: "500.00", total_restante: "50000.00" },
+      { pago_id: 2, numero_cuota: 3, pagado: true, abono_capital: "700.00", abono_interes: "500.00", total_restante: "48300.00" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["50000.00", "48300.00"]);
+  });
+
+  it("una cuota de solo capital directo sigue desde el saldo de la cuota 0", () => {
+    // registerPayment puede colgar capital directo de una primera cuota que
+    // sigue pendiente: su fila regular queda filtrada y solo sobrevive la del
+    // capital, que guarda total_restante 0. Sin snapshot propio no hay cierre
+    // que reconstruir, pero la apertura sí se conoce —es el saldo de la cuota
+    // 0— así que se sigue desde ahí. Antes el crédito arrancaba en Q0.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 1, numero_cuota: 0, pagado: true, abono_capital: "0.00", abono_interes: "5.00", total_restante: "100.00" },
+      { pago_id: 2, numero_cuota: 1, pagado: true, abono_capital: "10.00", total_restante: "0" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["100.00", "90.00"]);
+  });
+
+  it("una cancelacion en 0 confirma el cierre de la cuota anterior", () => {
+    // La cuota 2 cancela el crédito y guarda total_restante 0. Ese cero no se
+    // toma como snapshot (para que un cero de capital directo no ancle a
+    // nadie) pero sí vale como evidencia: la apertura implícita de la 2 es
+    // 0 + 49,000, que confirma que la 1 cierra en Q49,000 y no en su Q50,000
+    // heredado. Sin esto la cancelación se mostraba en Q1,000.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 1, numero_cuota: 0, pagado: true, abono_capital: "0.00", abono_interes: "500.00", total_restante: "50400.00" },
+      { pago_id: 2, numero_cuota: 1, pagado: true, abono_capital: "600.00", abono_interes: "500.00", total_restante: "50000.00" },
+      { pago_id: 3, numero_cuota: 1, pagado: true, abono_capital: "400.00", total_restante: "50000.00" },
+      { pago_id: 4, numero_cuota: 2, pagado: true, abono_capital: "49000.00", abono_interes: "500.00", total_restante: "0" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual([
+      "50400.00",
+      "49400.00",
+      "49000.00",
+      "0.00",
+    ]);
+  });
+
+  it("ultima cuota visible: la anterior confirma su snapshot pre-cierre", () => {
+    // La cuota 1 es la última y la cerró registerPayment, así que no hay
+    // siguiente que la desempate. La evidencia sale de la cuota 0: su cierre
+    // Q50,000 es la apertura de la 1, y solo el candidato Q49,000 más los
+    // Q1,000 de abonos cae ahí.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 1, numero_cuota: 0, pagado: true, abono_capital: "0.00", abono_interes: "500.00", total_restante: "50000.00" },
+      { pago_id: 2, numero_cuota: 1, pagado: true, abono_capital: "600.00", abono_interes: "500.00", total_restante: "49400.00" },
+      { pago_id: 3, numero_cuota: 1, pagado: true, abono_capital: "400.00", total_restante: "49400.00" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["50000.00", "49400.00", "49000.00"]);
+  });
+
+  it("ultima cuota visible: si la anterior no confirma nada, manda su snapshot", () => {
+    // Crédito 1085: los abonos no explican la caída del saldo, así que la
+    // apertura implícita no cae sobre ningún candidato y la cuota conserva el
+    // suyo. Es lo que impide que la cuota 0 termine anclando a la 1.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 60434, numero_cuota: 0, pagado: true, abono_capital: "0.00", abono_interes: "900.00", total_restante: "98908.24" },
+      { pago_id: 60435, numero_cuota: 1, pagado: true, abono_capital: "1737.73", abono_interes: "2664.42", total_restante: "95848.01" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["98908.24", "95848.01"]);
+  });
+
+  it("un sufijo que cuadra por casualidad no desplaza al snapshot que la siguiente confirma", () => {
+    // Cuota sincronizada cuyos abonos (10 + 5) suman más que la baja de su
+    // snapshot (100 → 90). El sufijo de Q5 hace cuadrar el saldo corrido Q85,
+    // pero la cuota 12 confirma que su apertura es Q90: manda el snapshot.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 1, numero_cuota: 10, pagado: true, abono_capital: "0.00", abono_interes: "5.00", total_restante: "100.00" },
+      { pago_id: 2, numero_cuota: 11, pagado: true, abono_capital: "10.00", abono_interes: "5.00", total_restante: "90.00" },
+      { pago_id: 3, numero_cuota: 11, pagado: true, abono_capital: "5.00", total_restante: "90.00" },
+      { pago_id: 4, numero_cuota: 12, pagado: true, abono_capital: "10.00", abono_interes: "5.00", total_restante: "80.00" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual([
+      "100.00",
+      "90.00",
+      "85.00",
+      "80.00",
+    ]);
+  });
+
+  it("varios pagos de capital directo seguidos: el snapshot queda atras por todos ellos", () => {
+    // El capital directo se cuelga de la última cuota pagada y guarda
+    // total_restante 0, así que el snapshot de la cuota se queda en una fila
+    // anterior. Con dos pagos seguidos (Q400 y Q300) el snapshot Q50,000 está
+    // Q700 atrás del cierre real Q49,300, no solo Q300.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 0, numero_cuota: 9, pagado: true, abono_capital: "1000.00", abono_interes: "500.00", total_restante: "51000.00" },
+      { pago_id: 1, numero_cuota: 10, pagado: true, abono_capital: "1000.00", abono_interes: "500.00", total_restante: "50000.00" },
+      { pago_id: 2, numero_cuota: 10, pagado: true, abono_capital: "400.00", total_restante: "0" },
+      { pago_id: 3, numero_cuota: 10, pagado: true, abono_capital: "300.00", total_restante: "0" },
+      { pago_id: 4, numero_cuota: 11, pagado: true, abono_capital: "1000.00", abono_interes: "500.00", total_restante: "48300.00" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual([
+      "51000.00",
+      "50000.00",
+      "49600.00",
+      "49300.00",
+      "48300.00",
+    ]);
+  });
+
+  it("varios capitales directos en la cuota que siembra la cadena", () => {
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 1, numero_cuota: 10, pagado: true, abono_capital: "1000.00", abono_interes: "500.00", total_restante: "50000.00" },
+      { pago_id: 2, numero_cuota: 10, pagado: true, abono_capital: "400.00", total_restante: "0" },
+      { pago_id: 3, numero_cuota: 10, pagado: true, abono_capital: "300.00", total_restante: "0" },
+      { pago_id: 4, numero_cuota: 11, pagado: true, abono_capital: "1000.00", abono_interes: "500.00", total_restante: "48300.00" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual([
+      "50000.00",
+      "49600.00",
+      "49300.00",
+      "48300.00",
+    ]);
+  });
+
+  it("la cuota que siembra la cadena reconoce su snapshot pre-cierre por la siguiente", () => {
+    // Con la cuota 0 presente, la cuota 1 siembra la cadena y no tiene una
+    // anterior contra la cual reconocer que su snapshot es pre-cierre. La
+    // evidencia sale de la cuota 2: su apertura implícita (48,000 + 1,000) cae
+    // exacto en 49,000, o sea que el cierre real de la 1 es ese y no 49,400.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 1, numero_cuota: 0, pagado: true, abono_capital: "0.00", abono_interes: "500.00", total_restante: "50000.00" },
+      { pago_id: 2, numero_cuota: 1, pagado: true, abono_capital: "600.00", abono_interes: "500.00", total_restante: "49400.00" },
+      { pago_id: 3, numero_cuota: 1, pagado: true, abono_capital: "400.00", total_restante: "49400.00" },
+      { pago_id: 4, numero_cuota: 2, pagado: true, abono_capital: "1000.00", abono_interes: "500.00", total_restante: "48000.00" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual([
+      "50000.00",
+      "49400.00",
+      "49000.00",
+      "48000.00",
+    ]);
+  });
+
+  it("la cuota que siembra respeta su snapshot cuando los abonos no explican la caida", () => {
+    // Crédito 1085: el saldo baja ~Q3,112 por cuota pero el capital registrado
+    // es ~Q1,767. La apertura implícita de la cuota 2 no cae sobre ninguno de
+    // los dos candidatos de la 1, así que manda su snapshot guardado.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 60434, numero_cuota: 0, pagado: true, abono_capital: "0.00", abono_interes: "900.00", total_restante: "98908.24" },
+      { pago_id: 60435, numero_cuota: 1, pagado: true, abono_capital: "1737.73", abono_interes: "2664.42", total_restante: "95848.01" },
+      { pago_id: 60436, numero_cuota: 2, pagado: true, abono_capital: "1766.93", abono_interes: "2638.35", total_restante: "92736.38" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["98908.24", "95848.01", "94081.08"]);
+  });
+
+  it("el cierre por registerPayment no arrastra su saldo heredado a la cuota siguiente", () => {
+    // La cuota 11 guarda Q49,400 en sus dos filas (el cierre solo-capital
+    // hereda el total_restante de su hermana sin restar su propio abono), pero
+    // su cierre real es Q49,000. Anclar la cuota 12 en el snapshot la dejaría
+    // Q400 arriba en todas sus filas.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 1, numero_cuota: 10, pagado: true, abono_capital: "1000.00", abono_interes: "500.00", total_restante: "50000.00" },
+      { pago_id: 2, numero_cuota: 11, pagado: true, abono_capital: "600.00", abono_interes: "500.00", total_restante: "49400.00" },
+      { pago_id: 3, numero_cuota: 11, pagado: true, abono_capital: "400.00", total_restante: "49400.00" },
+      { pago_id: 4, numero_cuota: 12, pagado: true, abono_capital: "1000.00", abono_interes: "500.00", total_restante: "48000.00" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual([
+      "50000.00",
+      "49400.00",
+      "49000.00",
+      "48000.00",
+    ]);
   });
 });
 

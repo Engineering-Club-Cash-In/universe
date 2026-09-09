@@ -306,7 +306,18 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
   // es lo que encierra el descuadre en su cuota en vez de arrastrarlo.
   const cierreDeCuota = (key: string, corrido: Big): Big => {
     const snapshot = cierreGuardado.get(key);
-    if (snapshot === undefined) return corrido;
+    if (snapshot === undefined) {
+      // Sin snapshot propio —puras filas de capital directo, que guardan el
+      // centinela 0— el cierre lo da la cuota siguiente: su apertura implícita
+      // es, por definición, el cierre de esta. Sin eso la apertura se
+      // reconstruía desde el propio abono y la cuota terminaba en Q0.00.
+      const sig = siguienteCuota.get(key);
+      const snapshotSig = sig === undefined ? undefined : cierreGuardado.get(sig);
+      if (snapshotSig !== undefined) {
+        return snapshotSig.plus(abonosPorCuota.get(sig!) ?? new Big(0));
+      }
+      return corrido;
+    }
 
     // Cuando ninguna evidencia resuelve, el default es el snapshot — salvo que
     // la cuota traiga una fila con 0 explícito Y los abonos de su cola agoten
@@ -315,10 +326,13 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
     // que llega después de una fila normal, donde el snapshot positivo tapaba
     // el cero y la cuota terminaba en su saldo viejo en vez de en Q0.
     const porDefecto = (): Big => {
-      if (
-        cerosTrasSnapshot.has(key) &&
-        rezagosPosibles(key).some((rezago) => snapshot.minus(rezago).abs().lte(0.02))
-      ) {
+      // El cierre en 0 se compara SOLO contra la cola posterior al snapshot. Un
+      // sufijo que cruza la fila del snapshot mezcla capital anterior a él y
+      // puede coincidir por casualidad: con abonos 70, 20 (snapshot 100) y 10,
+      // el sufijo 70+20+10 da 100 y la cuota se daba por cancelada cuando
+      // después del snapshot solo se abonaron 10.
+      const cola = rezagoCierto.get(key) ?? new Big(0);
+      if (cerosTrasSnapshot.has(key) && cola.gt(0) && snapshot.minus(cola).abs().lte(0.02)) {
         return new Big(0);
       }
       // Sin vecina que confirme, el snapshot se descuenta igual por lo que se

@@ -385,6 +385,30 @@ describe("estado de cuenta PDF", () => {
     expect(rows.map((p) => p.total_restante)).toEqual(["50000.00", "49400.00", "49000.00"]);
   });
 
+  it("la primera cuota visible sin snapshot toma su cierre de la siguiente", () => {
+    // La cuota 5 son puras filas de capital directo (centinela 0) y no hay
+    // nada antes. Su cierre lo da la 6: apertura implícita 48,500 + 500.
+    // Reconstruir desde el propio abono la dejaba en Q0 y hundía a la 6 en
+    // negativo.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 1, numero_cuota: 5, pagado: true, abono_capital: "1000.00", total_restante: "0" },
+      { pago_id: 2, numero_cuota: 6, pagado: true, abono_capital: "500.00", abono_interes: "300.00", total_restante: "48500.00" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["49000.00", "48500.00"]);
+  });
+
+  it("el cierre en 0 solo mira la cola posterior al snapshot", () => {
+    // Abonos 70, 20 (snapshot Q100) y 10. El sufijo completo 70+20+10 da 100 y
+    // la cuota se daba por cancelada, cuando después del snapshot solo se
+    // abonaron Q10 y el cierre real es Q90.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 1, numero_cuota: 7, pagado: true, abono_capital: "70.00", total_restante: "0" },
+      { pago_id: 2, numero_cuota: 7, pagado: true, abono_capital: "20.00", abono_interes: "5.00", total_restante: "100.00" },
+      { pago_id: 3, numero_cuota: 7, pagado: true, abono_capital: "10.00", total_restante: "0" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["120.00", "100.00", "90.00"]);
+  });
+
   it("tras un hueco, un capital directo en 0 no se presenta como cancelacion", () => {
     // La cuota 3 son puras filas de capital directo: su 0 es el centinela que
     // guarda registerPayment, no un cierre. Sembrar desde 0 mostraría un abono

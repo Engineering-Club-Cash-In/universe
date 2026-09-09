@@ -126,8 +126,8 @@ export const PortalWelcomeEmail = ({
                         </Section>
 
                         <Text style={hint}>
-                          Te recomendamos cambiar la contraseña la primera vez que entres,
-                          desde tu perfil.
+                          Esta contraseña es solo para entrar la primera vez: apenas
+                          entres, el portal te va a pedir que elijas la tuya.
                         </Text>
                       </Section>
                     </Section>

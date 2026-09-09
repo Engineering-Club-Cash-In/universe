@@ -87,9 +87,18 @@ export const dependenciasReales = (): DependenciasProvisionamiento => ({
     // `dpi: null` es un cambio válido (limpiar), pero solo se manda cuando la
     // llave viene: `undefined` es "no tocar".
     if (cambios.dpi !== undefined) set.dpi = cambios.dpi;
+    if (cambios.passwordProvisionadaAt !== undefined) {
+      set.passwordProvisionadaAt = cambios.passwordProvisionadaAt;
+    }
     if (Object.keys(set).length === 0) return;
 
     await db.update(users).set(set).where(eq(users.id, id));
+  },
+  // Solo la usa el rollback del alta, sobre la cuenta que se acaba de crear en
+  // esa misma llamada. `accounts` y `sessions` caen con ella por el ON DELETE
+  // CASCADE del esquema.
+  eliminarUsuario: async (id) => {
+    await db.delete(users).where(eq(users.id, id));
   },
   enviarBienvenida: (params) => sendPortalWelcomeEmail(params),
   enviarEmpresaAgregada: (params) => sendPortalCompanyAddedEmail(params),

@@ -52,8 +52,26 @@ export interface DependenciasProvisionamiento {
   }) => Promise<{ id: string }>;
   actualizarUsuario: (
     id: string,
-    cambios: { role?: PortalUserType; dpi?: string | null },
+    cambios: {
+      role?: PortalUserType;
+      dpi?: string | null;
+      /**
+       * Marca de "esta contraseña la generamos nosotros". Solo la pone el alta
+       * que CREA la cuenta; el cambio de contraseña la limpia.
+       */
+      passwordProvisionadaAt?: Date | null;
+    },
   ) => Promise<void>;
+  /**
+   * Deshace una cuenta que ACABA de crearse en esta misma llamada.
+   *
+   * No es una operación de mantenimiento ni hay ninguna ruta que la exponga:
+   * existe para un solo punto, el rollback de más abajo, y solo se le pasa el
+   * id que devolvió `crearUsuario` unos milisegundos antes. Esa cuenta no tiene
+   * sesiones, no tiene dueño que la conozca y su contraseña no salió de la
+   * variable local, así que borrarla no le quita nada a nadie.
+   */
+  eliminarUsuario: (id: string) => Promise<void>;
   enviarBienvenida: (params: {
     to: string;
     investorName: string;
@@ -193,6 +211,28 @@ const enviarSinTirar = async (
   }
 };
 
+/**
+ * Deshace sin dejar que el rollback tire, y dice si lo consiguió.
+ *
+ * Corre dentro del `catch` de un fallo de base, o sea con la base ya dando
+ * problemas: lo más probable es que este DELETE se caiga también. Que se caiga
+ * no puede convertir un fallo reportado en una excepción que suba, porque
+ * arriba de esto está `provisionarInversionista`, cuya regla de oro es no tirar
+ * nunca: el inversionista ya está escrito y un throw lo haría parecer fallido.
+ */
+const deshacerSinTirar = async (borrar: () => Promise<void>): Promise<boolean> => {
+  try {
+    await borrar();
+    return true;
+  } catch (error) {
+    console.error(
+      "[provisioning] no se pudo deshacer la cuenta creada sin marca.",
+      error,
+    );
+    return false;
+  }
+};
+
 const correoVacio = (modo: ModoEnvio): ResultadoProvisionamiento["correo"] => ({
   enviado: false,
   plantilla: null,
@@ -283,20 +323,83 @@ export const asegurarCuentaInversionista = async (
   // variable `password`: no se persiste, no se devuelve y no hay ninguna ruta
   // de reenvío. Cualquier throw a partir de este punto dejaría a una persona
   // con una cuenta que no sabe que tiene y a la que no puede entrar, así que
-  // nada de lo que sigue puede tirar: todo se degrada a una advertencia.
+  // nada de lo que sigue puede tirar: se degrada a una advertencia o se reporta
+  // como `fallo`, nunca se propaga.
+  //
+  // "No tirar" NO quiere decir "seguir siempre": la marca de contraseña
+  // provisionada es la única escritura que, si falla, PARA el envío. El porqué
+  // está justo abajo.
 
-  // El rol y el DPI van en un UPDATE posterior porque Better Auth no los acepta
-  // en el signUp. El DPI se guarda en la MISMA forma canónica con la que se
-  // busca: si se guardara distinto, la corrida siguiente no encontraría esta
-  // cuenta y le crearía otra a la misma persona.
+  // LA MARCA VA SOLA, VA PRIMERO Y NO SE DEGRADA. Es la única de las tres
+  // escrituras que no es best-effort, y por eso no puede compartir UPDATE con
+  // las otras dos: el de rol/DPI se cae de verdad —23505 sobre `users_dpi_key`,
+  // que la prueba de más abajo reproduce— y al caerse arrastraría la marca con
+  // él mientras el correo con la contraseña sale igual.
+  //
+  // Sin marca, `sigueConLaPasswordQueLeDimos` (auth-google) y
+  // `debeElegirPassword` (portal-web) leen NULL como "esta contraseña es suya":
+  // nadie le pide cambiarla, ni al entrar, ni al completar el registro, ni
+  // cuando un humano le repare el rol. La contraseña que mandamos por correo
+  // queda de credencial permanente en una bandeja.
+  //
+  // Va PRIMERO porque desde `crearUsuario` la cuenta ya se puede usar y la
+  // marca es el control de seguridad; el rol y el DPI son comodidad. Primero lo
+  // que protege, después lo que sirve.
+  try {
+    await deps.actualizarUsuario(creado.id, { passwordProvisionadaAt: new Date() });
+  } catch {
+    // FAIL-CLOSED: sin la marca, la contraseña NO sale. Es el único punto donde
+    // se elige dejar a alguien sin correo, y se elige porque los dos daños no
+    // son comparables: quedarse sin correo lo reporta esta misma respuesta y un
+    // humano la vuelve a dar de alta; una contraseña que ya llegó a una bandeja
+    // y que nadie va a pedir que se cambie no la recupera nadie. La contraseña
+    // muere aquí con la variable local: la cuenta queda sin dueño que pueda
+    // entrar, no con un dueño de más.
+    //
+    // Y SE DESHACE LA CUENTA, que es lo que hace cierta la frase anterior.
+    // Dejarla en pie convertía "un humano la vuelve a dar de alta" en una
+    // instrucción falsa: la fila queda con correo y DPI, así que el reintento
+    // ya no entra por aquí sino por `reconocerExistente`, que a una cuenta que
+    // ya existe NO le manda contraseña —nunca lo hace, para no sacarle el
+    // acceso a alguien— y encima suele negarle el rol porque la fila recién
+    // creada no tiene DPI. O sea que ningún reintento la recuperaba, y el único
+    // arreglo era a mano en la base, sin que nada dijera que hacía falta.
+    //
+    // Se borra solo lo que se acaba de crear en esta misma llamada, sin
+    // sesiones, sin dueño que sepa que existe y con la contraseña muerta en una
+    // variable local: no le quita nada a nadie. Y `accounts` cae con ella por
+    // el ON DELETE CASCADE del esquema.
+    const deshecha = await deshacerSinTirar(() => deps.eliminarUsuario(creado.id));
+
+    // Dos desenlaces distintos y dos instrucciones distintas. Deshecha, el
+    // reintento normal la recupera y no hace falta decir nada más. Sin deshacer,
+    // reintentar NO sirve y hace falta un humano; por eso esa advertencia sí
+    // llega hasta el modal.
+    if (!deshecha) advertencias.push("cuenta_creada_sin_marca_de_password");
+
+    return {
+      estado: "fallo",
+      usuarioEmail: email,
+      resueltoPor: null,
+      correo: correoVacio(modo),
+      advertencias,
+      motivo: "no_se_pudo_marcar_password_provisionada",
+    };
+  }
+
+  // El rol y el DPI van en un UPDATE aparte porque Better Auth no los acepta en
+  // el signUp. El DPI se guarda en la MISMA forma canónica con la que se busca:
+  // si se guardara distinto, la corrida siguiente no encontraría esta cuenta y
+  // le crearía otra a la misma persona.
   try {
     await deps.actualizarUsuario(creado.id, {
       role: "INVESTOR",
       dpi: normalizarDpiPortal(entrada.dpi),
     });
   } catch {
-    // La cuenta sirve sin rol ni DPI —se entra igual— y la contraseña todavía
-    // se puede entregar, que es lo irrecuperable. El rol lo arregla un humano.
+    // Esto SÍ se degrada: la cuenta sirve sin rol ni DPI —se entra igual— y la
+    // contraseña todavía se puede entregar, que es lo irrecuperable. El rol lo
+    // repara un humano, y la marca de arriba ya quedó puesta.
     advertencias.push("cuenta_creada_sin_rol_ni_dpi");
   }
 

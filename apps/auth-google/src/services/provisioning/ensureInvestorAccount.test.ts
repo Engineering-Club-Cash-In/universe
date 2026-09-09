@@ -13,6 +13,7 @@ let usuarios: UsuarioPortal[];
 let bienvenidas: any[];
 let avisos: any[];
 let creados: any[];
+let borrados: string[];
 let actualizaciones: any[];
 let fallarCreacion: null | (() => void);
 let modo: { server: string; redirige: boolean; destinatarioUnico: string | null };
@@ -38,6 +39,10 @@ const deps = (): DependenciasProvisionamiento => ({
     if (cambios.role) u.role = cambios.role;
     if (cambios.dpi !== undefined) u.dpi = cambios.dpi;
   },
+  eliminarUsuario: async (id) => {
+    borrados.push(id);
+    usuarios = usuarios.filter((u) => u.id !== id);
+  },
   enviarBienvenida: async (p) => { bienvenidas.push(p); return { success: true }; },
   enviarEmpresaAgregada: async (p) => { avisos.push(p); return { success: true }; },
 });
@@ -47,6 +52,7 @@ beforeEach(() => {
   bienvenidas = [];
   avisos = [];
   creados = [];
+  borrados = [];
   actualizaciones = [];
   fallarCreacion = null;
   modo = { server: "PROD", redirige: false, destinatarioUnico: null };
@@ -60,6 +66,13 @@ const entrada = (over: any = {}) => ({
   inversionistaNombre: "Ana Pérez",
   ...over,
 });
+
+// Gemelo de `marca()` (ver el describe de la marca fail-closed): el alta hace
+// DOS updates y la marca `passwordProvisionadaAt` va PRIMERO a propósito, así
+// que `actualizaciones[0]` ya no es el update de rol/DPI. Se busca por
+// contenido, no por índice.
+const rolYDpi = () =>
+  actualizaciones.find((u) => u.role !== undefined || u.dpi !== undefined);
 
 describe("asegurarCuentaInversionista — cuenta nueva", () => {
   it("crea la cuenta y manda la bienvenida CON la contraseña", () => {
@@ -79,7 +92,8 @@ describe("asegurarCuentaInversionista — cuenta nueva", () => {
 
   it("promueve a INVESTOR y guarda el DPI", async () => {
     await asegurarCuentaInversionista(entrada(), deps());
-    expect(actualizaciones[0]).toMatchObject({ role: "INVESTOR", dpi: "1234567890101" });
+    // Índice no: la marca de contraseña se escribe primero y en su propio UPDATE.
+    expect(rolYDpi()).toMatchObject({ role: "INVESTOR", dpi: "1234567890101" });
   });
 
   it("NUNCA devuelve la contraseña: la respuesta queda en audit_logs", async () => {
@@ -293,7 +307,8 @@ describe("asegurarCuentaInversionista — lo que se guarda es lo que se busca", 
       d,
     );
     expect(primera.estado).toBe("creada");
-    expect(actualizaciones[0]).toMatchObject({ dpi: "4036613" });
+    // Índice no: antes de este update va el de `passwordProvisionadaAt`.
+    expect(rolYDpi()).toMatchObject({ dpi: "4036613" });
 
     // Operación corrige el correo en cartera y el job vuelve a correr.
     const segunda = await asegurarCuentaInversionista(
@@ -318,7 +333,8 @@ describe("asegurarCuentaInversionista — lo que se guarda es lo que se busca", 
     // Guardarlo con ceros a la izquierda o con basura de captura sería guardar
     // algo que la búsqueda normalizada no vuelve a encontrar tal cual.
     await asegurarCuentaInversionista(entrada({ dpi: "04036613" }), deps());
-    expect(actualizaciones[0]).toMatchObject({ dpi: "4036613" });
+    // Índice no: antes de este update va el de `passwordProvisionadaAt`.
+    expect(rolYDpi()).toMatchObject({ dpi: "4036613" });
   });
 
   it("lo que no es un DPI sigue quedando en NULL, jamás en cadena vacía", async () => {
@@ -330,7 +346,8 @@ describe("asegurarCuentaInversionista — lo que se guarda es lo que se busca", 
         entrada({ dpi: basura, email: `x${basura.length}@example.com` }),
         deps(),
       );
-      expect(actualizaciones[0]).toMatchObject({ dpi: null });
+      // Índice no: antes de este update va el de `passwordProvisionadaAt`.
+      expect(rolYDpi()).toMatchObject({ dpi: null });
     }
   });
 });
@@ -341,7 +358,15 @@ describe("asegurarCuentaInversionista — lo que se guarda es lo que se busca", 
 // sistema. Cualquier throw después de ese punto deja a una persona con una
 // cuenta que no sabe que tiene y a la que no puede entrar.
 describe("asegurarCuentaInversionista — nada puede tirar después de crear la cuenta", () => {
-  it("si el UPDATE de rol/DPI falla, igual manda la contraseña y lo reporta", async () => {
+  // El nombre cambió con el orden de escritura: antes el rol y el DPI viajaban
+  // en el mismo (y único) UPDATE del alta, así que este stub —que tira en
+  // TODOS— era "falla el update de rol/DPI" y el desenlace era mandar la
+  // contraseña igual. Hoy la marca `passwordProvisionadaAt` va primero y sola,
+  // de modo que aquí el que se cae primero es el de la marca y el desenlace
+  // correcto es fail-closed: la contraseña no sale. El caso que sí conserva el
+  // nombre viejo —solo rol/DPI se cae, la marca queda— vive en el describe de
+  // la marca ("guarda la marca aunque el rol y el DPI se estrellen...").
+  it("si NINGÚN update pasa, no tira: se traga el fallo y lo reporta sin mandar la contraseña", async () => {
     const d = {
       ...deps(),
       actualizarUsuario: async () => {
@@ -350,11 +375,20 @@ describe("asegurarCuentaInversionista — nada puede tirar después de crear la 
       },
     };
 
+    // Lo que este describe fija: nada de esto propaga un throw sobre una cuenta
+    // que YA existe.
     const r = await asegurarCuentaInversionista(entrada(), d);
 
-    expect(r.estado).toBe("creada");
-    expect(bienvenidas).toHaveLength(1);
-    expect(r.advertencias).toContain("cuenta_creada_sin_rol_ni_dpi");
+    expect(r).toMatchObject({
+      estado: "fallo",
+      motivo: "no_se_pudo_marcar_password_provisionada",
+    });
+    expect(bienvenidas).toEqual([]);
+    // Y la cuenta a medias se deshace, así que el reintento la recupera. La
+    // advertencia queda reservada para cuando ni eso se pudo (ver el describe
+    // de la marca fail-closed).
+    expect(usuarios).toEqual([]);
+    expect(r.advertencias).not.toContain("cuenta_creada_sin_marca_de_password");
   });
 
   it("si el envío TIRA, no se traga la cuenta creada: la reporta como acceso perdido", async () => {
@@ -763,5 +797,143 @@ describe("el rol no se promueve sobre un vínculo que es solo el correo", () => 
     expect(actualizaciones).toEqual([]);
     expect(usuarios[0].role).toBe("CLIENT");
     expect(avisos).toEqual([]);
+  });
+});
+
+
+// La marca `passwordProvisionadaAt` es lo ÚNICO que hace que al dueño de una
+// cuenta recién creada se le pida cambiar la contraseña que le llegó por correo:
+// el back la mira en `sigueConLaPasswordQueLeDimos` (403 sobre toda la
+// superficie autenticada) y el portal en `debeElegirPassword`. Los dos leen NULL
+// como "esta contraseña es suya, no hay nada que pedirle".
+//
+// Por eso la marca NO puede viajar en el mismo UPDATE que el rol y el DPI: ese
+// update se cae de verdad —23505 sobre `users_dpi_key`, que las pruebas de
+// arriba ya cubren— y al caerse se lleva la marca con él, mientras el correo con
+// la contraseña sale igual. Queda una credencial que viajó por correo y que
+// nadie va a pedir que se cambie, ni después de completar el registro ni después
+// de que un humano le repare el rol.
+describe("asegurarCuentaInversionista — la marca de contraseña temporal es fail-closed", () => {
+  const marca = () =>
+    actualizaciones.find((u) => u.passwordProvisionadaAt !== undefined);
+
+  it("guarda la marca aunque el rol y el DPI se estrellen contra users_dpi_key", async () => {
+    const d = {
+      ...deps(),
+      actualizarUsuario: async (id: string, cambios: any) => {
+        if (cambios.role !== undefined || cambios.dpi !== undefined) {
+          throw new Error(
+            "duplicate key value violates unique constraint users_dpi_key",
+          );
+        }
+        actualizaciones.push({ id, ...cambios });
+      },
+    };
+
+    const r = await asegurarCuentaInversionista(entrada(), d);
+
+    // El rol se pierde —eso lo repara un humano— pero la marca queda puesta, así
+    // que la contraseña que va en este correo se le va a pedir cambiar al entrar.
+    expect(marca()?.passwordProvisionadaAt).toBeInstanceOf(Date);
+    expect(r.estado).toBe("creada");
+    expect(r.advertencias).toContain("cuenta_creada_sin_rol_ni_dpi");
+    expect(bienvenidas).toHaveLength(1);
+  });
+
+  it("si la marca no se pudo guardar, la contraseña NO sale por correo", async () => {
+    const d = {
+      ...deps(),
+      actualizarUsuario: async (id: string, cambios: any) => {
+        if (cambios.passwordProvisionadaAt !== undefined) {
+          throw new Error("update falló");
+        }
+        actualizaciones.push({ id, ...cambios });
+      },
+    };
+
+    const r = await asegurarCuentaInversionista(entrada(), d);
+
+    // Quedarse sin correo es recuperable: sale en el reporte de la corrida y un
+    // humano la vuelve a dar de alta. Una contraseña que ya llegó a una bandeja
+    // y que nadie va a pedir que se cambie, no.
+    expect(bienvenidas).toEqual([]);
+    expect(r).toMatchObject({
+      estado: "fallo",
+      motivo: "no_se_pudo_marcar_password_provisionada",
+    });
+  });
+
+  // "Un humano la vuelve a dar de alta" era falso mientras la cuenta a medias
+  // siguiera en pie: con su correo y su DPI ya escritos, el reintento deja de
+  // entrar por el camino que CREA y cae en `reconocerExistente`, que a una
+  // cuenta existente no le manda contraseña —nunca lo hace— y encima suele
+  // negarle el rol porque la fila recién creada no tiene DPI. Ningún reintento
+  // la recuperaba: el único arreglo era a mano en la base.
+  it("deshace la cuenta a medias, así el reintento SÍ la recupera", async () => {
+    const marcaRota = (base: DependenciasProvisionamiento) => ({
+      ...base,
+      actualizarUsuario: async (id: string, cambios: any) => {
+        if (cambios.passwordProvisionadaAt !== undefined) {
+          throw new Error("update falló");
+        }
+        return base.actualizarUsuario(id, cambios);
+      },
+    });
+
+    const primera = await asegurarCuentaInversionista(entrada(), marcaRota(deps()));
+
+    expect(primera.estado).toBe("fallo");
+    expect(borrados).toHaveLength(1);
+    expect(usuarios).toEqual([]);
+    // Deshecha, no hay nada a medias que reportar ni que arreglar a mano.
+    expect(primera.advertencias).not.toContain("cuenta_creada_sin_marca_de_password");
+
+    // Y el reintento entra por donde tiene que entrar: crea y manda contraseña.
+    const segunda = await asegurarCuentaInversionista(entrada(), deps());
+
+    expect(segunda.estado).toBe("creada");
+    expect(bienvenidas).toHaveLength(1);
+  });
+
+  it("si tampoco se puede deshacer, lo dice: ahí reintentar no sirve", async () => {
+    const base = deps();
+    const d = {
+      ...base,
+      actualizarUsuario: async (id: string, cambios: any) => {
+        if (cambios.passwordProvisionadaAt !== undefined) {
+          throw new Error("update falló");
+        }
+        return base.actualizarUsuario(id, cambios);
+      },
+      eliminarUsuario: async () => {
+        throw new Error("la base sigue sin responder");
+      },
+    };
+
+    const r = await asegurarCuentaInversionista(entrada(), d);
+
+    expect(r.estado).toBe("fallo");
+    expect(r.advertencias).toContain("cuenta_creada_sin_marca_de_password");
+    expect(bienvenidas).toEqual([]);
+  });
+
+  it("pone la marca ANTES de que el correo salga, no después", async () => {
+    const orden: string[] = [];
+    const base = deps();
+    const d = {
+      ...base,
+      actualizarUsuario: async (id: string, cambios: any) => {
+        if (cambios.passwordProvisionadaAt !== undefined) orden.push("marca");
+        return base.actualizarUsuario(id, cambios);
+      },
+      enviarBienvenida: async (p: any) => {
+        orden.push("correo");
+        return base.enviarBienvenida(p);
+      },
+    };
+
+    await asegurarCuentaInversionista(entrada(), d);
+
+    expect(orden).toEqual(["marca", "correo"]);
   });
 });

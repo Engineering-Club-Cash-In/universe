@@ -9,6 +9,7 @@ import { randomBytes } from "crypto";
 import { eq } from "drizzle-orm";
 import { auth } from "../lib/auth";
 import { requireServiceSecret } from "../lib/serviceAuth";
+import { requireAuth } from "../middleware/requireAuth";
 import { isPortalUserType, normalizeDpi } from "../lib/portalIdentity";
 import {
   applyRegistrationOutcome,
@@ -33,31 +34,15 @@ type Variables = {
 
 const unifiedRoutes = new Hono<{ Variables: Variables }>();
 
-// ============================================
-// MIDDLEWARE DE AUTENTICACIÓN (opcional para algunas rutas)
-// ============================================
-
-const requireAuth = async (c: Context<{ Variables: Variables }>, next: () => Promise<void>) => {
-  try {
-    const session = await auth.api.getSession({
-      headers: c.req.raw.headers,
-    });
-
-    if (!session || !session.user) {
-      throw new HTTPException(401, { message: "No autorizado. Inicia sesión." });
-    }
-
-    c.set("user", session.user);
-    c.set("session", session.session);
-
-    await next();
-  } catch (error) {
-    if (error instanceof HTTPException) {
-      throw error;
-    }
-    throw new HTTPException(401, { message: "Token inválido o expirado" });
-  }
-};
+/*
+ * La sesión la valida `middleware/requireAuth`, el MISMO que usan cartera, CRM
+ * y perfil. Aquí vivía una copia que solo comprobaba que hubiera sesión, y esa
+ * copia se quedó fuera del candado de primer ingreso: esta ruta escribe en CRM
+ * y cartera y fija el DPI y el rol de la cuenta, así que quien entrara con la
+ * contraseña que le mandamos por correo podía usarla igual sin pasar por
+ * `/primer-ingreso`. Un solo middleware es lo que evita que la próxima puerta
+ * se quede otra vez sin cerrojo.
+ */
 
 // ============================================
 // RUTAS PÚBLICAS (sin auth)

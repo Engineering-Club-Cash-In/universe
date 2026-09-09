@@ -10,16 +10,19 @@ import type { Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 
 import { auth } from "../lib/auth";
+import { sigueConLaPasswordQueLeDimos } from "../lib/passwordProvisionada";
 
 export type AuthedVariables = {
-  // `role` y `dpi` son los `additionalFields` de Better Auth (ver lib/auth.ts).
-  // Ambos con `input: false`: los escribe el servidor, no el cliente.
+  // `role`, `dpi` y `passwordProvisionadaAt` son los `additionalFields` de
+  // Better Auth (ver lib/auth.ts). Los tres con `input: false`: los escribe el
+  // servidor, no el cliente.
   user: {
     id: string;
     email?: string;
     name?: string;
     role?: string;
     dpi?: string | null;
+    passwordProvisionadaAt?: string | Date | null;
   };
   session: any;
 };
@@ -42,7 +45,26 @@ export const requireAuth = async (
     throw new HTTPException(401, { message: "No autorizado. Inicia sesión." });
   }
 
-  c.set("user", session.user as AuthedVariables["user"]);
+  const user = session.user as AuthedVariables["user"];
+
+  // La pantalla de primer ingreso del portal es una cortesía, no una puerta:
+  // vive en el cliente y se salta con un `curl`. Quien entre con la contraseña
+  // que le mandamos por correo no puede seguir usándola contra los datos
+  // —cartera, CRM, perfil— solo por no pasar por esa pantalla.
+  //
+  // Cerrar aquí alcanza para las tres superficies: `/api/cartera/*`,
+  // `/api/crm/*` y `/api/profile/*` usan este mismo middleware. Lo que hace
+  // falta para SALIR de este estado no pasa por aquí: cambiar la contraseña
+  // (`/api/auth/change-password`), pedir un enlace, y cerrar sesión viven bajo
+  // `/api/auth/*`, que es de Better Auth y no lleva este middleware.
+  if (sigueConLaPasswordQueLeDimos(user)) {
+    throw new HTTPException(403, {
+      message:
+        "Tenés que elegir tu propia contraseña antes de seguir usando el portal.",
+    });
+  }
+
+  c.set("user", user);
   c.set("session", session.session);
 
   await next();

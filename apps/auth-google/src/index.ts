@@ -2,8 +2,10 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { testConnection } from "./db/connection";
+import { asegurarColumnasRequeridas } from "./db/columnasRequeridas";
 import authRoutes from "./routes/auth.routes";
 import healthRoutes from "./routes/health.routes";
+import passwordRoutes from "./routes/password.routes";
 import profileRoutes from "./routes/profile.routes";
 import carteraRoutes from "./routes/cartera.routes";
 import crmRoutes from "./routes/crm.routes";
@@ -68,6 +70,9 @@ app.route("/api/auth", authRoutes);
 // Profile routes
 app.route("/api/profile", profileRoutes);
 
+// Estado de un enlace de recuperación (sin sesión: quien lo abre no la tiene)
+app.route("/api/password", passwordRoutes);
+
 // Cartera routes (proxy a la API de cartera)
 app.route("/api/cartera", carteraRoutes);
 
@@ -89,6 +94,27 @@ app.notFound(notFoundHandler);
 
 // Error handler
 app.onError(errorHandler);
+
+// El esquema se prepara UNA vez y ninguna petición se atiende antes.
+//
+// Bun levanta el servidor en cuanto termina de evaluar este módulo, así que
+// dejar esto en un `.then()` suelto lo dejaba corriendo mientras Coolify ya
+// daba la instancia por lista y le mandaba peticiones de sesión: justo las que
+// necesitan la columna que este paso está creando. El handler espera esta
+// promesa; después de la primera vez ya está resuelta y no cuesta nada.
+//
+// Y si el esquema no queda listo, el proceso MUERE. Arrancar igual era peor que
+// no arrancar: el contenedor levantaba, `/health` decía que todo bien —solo
+// mira la conexión— y Coolify le mandaba tráfico a un servicio donde cada
+// consulta de sesión reventaba. Muriendo, Coolify deja viva la versión
+// anterior y el log dice qué migración falta.
+const esquemaListo = asegurarColumnasRequeridas().catch((error) => {
+  console.error(
+    "❌ [auth-google] El esquema no está listo: el servicio NO va a atender.",
+    error,
+  );
+  process.exit(1);
+});
 
 // Verificar conexión a la base de datos al iniciar
 testConnection().then((connected) => {
@@ -115,5 +141,8 @@ testConnection().then((connected) => {
 // Exportar app - Bun detecta esto y levanta el servidor automáticamente
 export default {
   port: env.PORT,
-  fetch: app.fetch,
+  fetch: async (request: Request) => {
+    await esquemaListo;
+    return app.fetch(request);
+  },
 };

@@ -454,10 +454,19 @@ export const agendaCobrosRouter = {
 			// suplente debe verlo atendido, no pendiente — sin esto el filtro de
 			// snapshots ya traía sus items, pero el de contactos solo miraba al
 			// suplente y el trabajo del titular quedaba invisible acá (riesgo de
-			// llamar dos veces al mismo cliente). El contacto del propio suplente
-			// sobre un item de cobertura cancelada hoy también entra acá, porque
-			// `asesorId` (él mismo) sigue en `asesoresFuente` — es lo único que
-			// hace falta para que matchee contra `realizadoPorValidos` más abajo.
+			// llamar dos veces al mismo cliente).
+			//
+			// `asesoresFuente` NO siempre incluye a `asesorId`: si el usuario
+			// logueado está ausente hoy (`ausenciaPropia`), se excluye a sí
+			// mismo de ahí a propósito. Pero puede seguir siendo suplente de OTRA
+			// cobertura ya cancelada hoy (`itemsCanceladosHoyContactados`), y ese
+			// contacto propio también tiene que entrar acá — si no,
+			// `cerrarItemsAgenda` no encuentra ningún contacto para esos items
+			// recuperados y los devuelve pendientes pese al contacto efectivo
+			// que ya calificó para recuperarlos.
+			const asesoresParaContactos = titularesCanceladosHoy.length
+				? [...new Set([...asesoresFuente, asesorId])]
+				: asesoresFuente;
 			const contactos = await db
 				.select({
 					id: contactosCobros.id,
@@ -472,7 +481,7 @@ export const agendaCobrosRouter = {
 				.innerJoin(casosCobros, eq(contactosCobros.casoCobroId, casosCobros.id))
 				.where(
 					and(
-						inArray(contactosCobros.realizadoPor, asesoresFuente),
+						inArray(contactosCobros.realizadoPor, asesoresParaContactos),
 						gte(contactosCobros.fechaContacto, desde),
 						lt(contactosCobros.fechaContacto, hasta),
 					),
@@ -507,7 +516,17 @@ export const agendaCobrosRouter = {
 					realizadoPorValidos: [
 						...new Set([...item.dueniosSnapshot, asesorId]),
 					],
-					contactoValidoDesde: createdAtPorTitular.get(item.dueniosSnapshot[0]),
+					// `dueniosSnapshot[0]` NO sirve para esto: el orden entre las dos
+					// filas fusionadas del dedupe no está garantizado, así que podía
+					// devolver al propio `asesorId` en vez del titular — y
+					// `createdAtPorTitular` no tiene entrada para el suplente, dejando
+					// `contactoValidoDesde` en `undefined` (el guard completo se salta
+					// sin él). El titular es el único dueño del array que NO es el
+					// usuario logueado.
+					contactoValidoDesde: createdAtPorTitular.get(
+						item.dueniosSnapshot.find((d) => d !== asesorId) ??
+							item.dueniosSnapshot[0],
+					),
 				})),
 				contactos,
 			);

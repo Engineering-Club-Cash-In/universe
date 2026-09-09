@@ -344,7 +344,17 @@ export const agendaCobrosRouter = {
 						});
 					}
 				}
-				const deduplicados = [...porSifco.values()];
+				// `itemsCanceladosHoyContactados` no tiene `.orderBy()` (su
+				// `selectDistinctOn` solo garantiza una fila por SIFCO, no el orden
+				// entre SIFCOs distintos) — si es la única fuente (el usuario no
+				// tiene cobertura activa, solo items recuperados de una ya
+				// cancelada), el `Map` hereda ese orden no determinista de
+				// Postgres. Paginar con `slice` sobre un orden inestable repite o
+				// salta items entre requests cuando hay más créditos que
+				// `perPage`. Mismo criterio de orden que ya usa `consultarItems`.
+				const deduplicados = [...porSifco.values()].sort((a, b) =>
+					a.numeroCreditoSifco.localeCompare(b.numeroCreditoSifco),
+				);
 				total = deduplicados.length;
 				items = deduplicados.slice(
 					(input.page - 1) * input.perPage,

@@ -106,34 +106,29 @@ describe("condonación masiva: el alcance es el total global, no el de la págin
   });
 
   test("no se puede confirmar sin conocer el alcance", () => {
-    // El botón se deshabilita...
-    expect(latefee).toMatch(/disabled=\{condonarMorasMasivo\.isPending \|\|/);
-    // ...y el handler vuelve a chequear, por si el estado cambia entre el
-    // render y el click.
-    expect(latefee).toContain(
-      "Esperá a que se calcule el alcance de la condonación"
+    // El botón de confirmar exige algo más que "no está mutando".
+    expect(latefee).toMatch(
+      /disabled=\{[\s\S]{0,120}condonarMorasMasivo\.isPending\s*\|\|/
     );
   });
 });
 
-// ⚠️ Este bloque fija el cableado CONCRETO de esta rama, donde la pantalla no
-// tiene filtros: el listado ya trae `estado: MOROSO` y nada más, así que su
-// `pagination.total` ES el universo que va a tocar `/moras/condonar-masivo`.
-// En el PR de pantallas, con filtros de por medio, ese total deja de ser el
-// global y el diálogo pasa a pedir el alcance por separado; el bloque se
-// reescribe allá contra esa implementación.
-describe("condonación masiva: cableado de esta rama (sin filtros)", () => {
-  test("el total es el del propio listado, que acá no está filtrado", () => {
-    expect(latefee).toContain("const totalMorosos = creditosPag?.total;");
-    expect(latefee).toContain("{totalMorosos} créditos");
-    expect(latefee).toContain("No respeta la paginación");
+// ⚠️ Cableado CONCRETO de esta rama. En el PR de listados la pantalla no tenía
+// filtros, así que el `pagination.total` del propio listado ERA el universo de
+// `/moras/condonar-masivo`. Acá el listado sí se filtra, de modo que su total ya
+// no sirve: el alcance se pide aparte (`globalMorosos`), sin filtros.
+describe("condonación masiva: cableado de esta rama (listado filtrado)", () => {
+  test("el alcance se consulta aparte, sin los filtros de pantalla", () => {
+    expect(latefee).toContain('queryKey: ["creditosMora", "globalMorosos"]');
+    expect(latefee).toContain("globalMorosos.data?.pagination?.total");
+    // Sin filtros y con pageSize 1: solo interesan `pagination.total` y los
+    // totales, no las filas.
+    expect(latefee).toMatch(
+      /getCreditosWithMorasService\(\{\s*estado:[^}]*page:\s*1,\s*pageSize:\s*1,\s*\}\)/
+    );
   });
 
-  test("el guard usa ese total", () => {
-    expect(latefee).toContain(
-      "disabled={condonarMorasMasivo.isPending || totalMorosos == null}"
-    );
-    expect(latefee).toContain("if (totalMorosos == null)");
-    expect(latefee).toContain("Son ${totalMorosos} créditos.");
+  test("el botón de confirmar espera a esa consulta", () => {
+    expect(latefee).toMatch(/condonarMorasMasivo\.isPending \|\|\s*globalMorosos\./);
   });
 });

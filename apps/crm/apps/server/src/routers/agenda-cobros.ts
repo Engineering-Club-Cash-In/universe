@@ -252,7 +252,18 @@ export const agendaCobrosRouter = {
 							and(
 								eq(contactosCobros.casoCobroId, casosCobros.id),
 								eq(contactosCobros.realizadoPor, asesorId),
-								gte(contactosCobros.fechaContacto, ventanaHoy.desde),
+								// Cota inferior: NO `ventanaHoy.desde` (todo el día
+								// calendario), sino el registro real de la cobertura. Sin
+								// esto, un contacto del ex-suplente sobre un crédito de
+								// pool compartido ANTES de que la cobertura existiera
+								// también calificaba — mismo hueco de atribución
+								// retroactiva ya cerrado en el job nocturno,
+								// columnaEnAgendaDeTitular y la query de contactos
+								// "en vivo" de más abajo.
+								gte(
+									contactosCobros.fechaContacto,
+									coberturasAgendaCobros.createdAt,
+								),
 								lt(
 									contactosCobros.fechaContacto,
 									coberturasAgendaCobros.canceladaEn,
@@ -498,36 +509,43 @@ export const agendaCobrosRouter = {
 			);
 			const cerrados = cerrarItemsAgenda(
 				fecha,
-				items.map((item) => ({
-					asesorId: item.dueniosSnapshot[0],
-					asesorNombre: "",
-					numeroCreditoSifco: item.numeroCreditoSifco,
-					casoCobroId: item.casoCobroId,
-					bucketSnapshot: item.bucketSnapshot,
-					motivoAgenda: item.motivoAgenda as MotivoAgenda,
-					// El usuario logueado es el único suplente posible en esta vista
-					// (es su propia agenda). Si el item es de un titular que cubre,
-					// el suplente (él mismo) también puede haberlo cerrado — y si el
-					// mismo SIFCO salió en AMBOS snapshots (pool compartido), el
-					// dedupe de arriba fusionó los dos dueños en `dueniosSnapshot` en
-					// vez de quedarse con uno arbitrario. Sin esto, un contacto ya
-					// hecho por el dueño descartado en el dedupe dejaba de matchear y
-					// el item se veía pendiente aunque ya estaba resuelto.
-					realizadoPorValidos: [
-						...new Set([...item.dueniosSnapshot, asesorId]),
-					],
-					// `dueniosSnapshot[0]` NO sirve para esto: el orden entre las dos
-					// filas fusionadas del dedupe no está garantizado, así que podía
-					// devolver al propio `asesorId` en vez del titular — y
-					// `createdAtPorTitular` no tiene entrada para el suplente, dejando
-					// `contactoValidoDesde` en `undefined` (el guard completo se salta
-					// sin él). El titular es el único dueño del array que NO es el
-					// usuario logueado.
-					contactoValidoDesde: createdAtPorTitular.get(
+				items.map((item) => {
+					// `dueniosSnapshot[0]` NO sirve para identificar al dueño real: el
+					// orden entre las dos filas fusionadas del dedupe (pool
+					// compartido entre titular y suplente) no está garantizado, así
+					// que podía devolver al propio `asesorId` en vez del titular. Eso
+					// rompía dos cosas a la vez: `contactoPerteneceAlItem` trataría al
+					// SUPLENTE como dueño real (exento del corte de fecha) y al
+					// TITULAR como ajeno (sujeto a él, cuando el titular siempre debe
+					// estar exento); y `createdAtPorTitular` no tiene entrada para el
+					// suplente, dejando `contactoValidoDesde` en `undefined` (el guard
+					// completo se saltaba sin él). El titular es el único dueño del
+					// array que NO es el usuario logueado.
+					const titular =
 						item.dueniosSnapshot.find((d) => d !== asesorId) ??
-							item.dueniosSnapshot[0],
-					),
-				})),
+						item.dueniosSnapshot[0];
+					return {
+						asesorId: titular,
+						asesorNombre: "",
+						numeroCreditoSifco: item.numeroCreditoSifco,
+						casoCobroId: item.casoCobroId,
+						bucketSnapshot: item.bucketSnapshot,
+						motivoAgenda: item.motivoAgenda as MotivoAgenda,
+						// El usuario logueado es el único suplente posible en esta
+						// vista (es su propia agenda). Si el item es de un titular que
+						// cubre, el suplente (él mismo) también puede haberlo cerrado
+						// — y si el mismo SIFCO salió en AMBOS snapshots (pool
+						// compartido), el dedupe de arriba fusionó los dos dueños en
+						// `dueniosSnapshot` en vez de quedarse con uno arbitrario. Sin
+						// esto, un contacto ya hecho por el dueño descartado en el
+						// dedupe dejaba de matchear y el item se veía pendiente aunque
+						// ya estaba resuelto.
+						realizadoPorValidos: [
+							...new Set([...item.dueniosSnapshot, asesorId]),
+						],
+						contactoValidoDesde: createdAtPorTitular.get(titular),
+					};
+				}),
 				contactos,
 			);
 			const cerradoPorSifco = new Map(

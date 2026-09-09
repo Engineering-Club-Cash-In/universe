@@ -292,6 +292,18 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
     const snapshot = cierreGuardado.get(key);
     if (snapshot === undefined) return corrido;
 
+    // Cuando ninguna evidencia resuelve, el default es el snapshot — salvo que
+    // la cuota traiga una fila con 0 explícito Y los abonos de su cola agoten
+    // exactamente ese snapshot. Ahí cerró en 0 y no hace falta evidencia
+    // externa: lo confirma su propia aritmética. Es el caso de la cancelación
+    // que llega después de una fila normal, donde el snapshot positivo tapaba
+    // el cero y la cuota terminaba en su saldo viejo en vez de en Q0.
+    const porDefecto = (): Big =>
+      cuotasConCeros.has(key) &&
+      rezagosPosibles(key).some((rezago) => snapshot.minus(rezago).abs().lte(0.02))
+        ? new Big(0)
+        : snapshot;
+
     const siguiente = siguienteCuota.get(key);
     // Una cuota SIN ninguna fila positiva y con ceros explícitos es una
     // cancelación: su cierre real es 0. Ese cero vale como EVIDENCIA para
@@ -313,7 +325,7 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
         const candidato = snapshot.minus(rezago);
         if (aperturaImplicita.minus(candidato).abs().lte(0.02)) return candidato;
       }
-      return snapshot;
+      return porDefecto();
     }
 
     // Última cuota visible: no hay siguiente que la confirme, así que la
@@ -324,7 +336,7 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
     const anterior = anteriorCuota.get(key);
     const snapshotAnterior =
       anterior === undefined ? undefined : cierreGuardado.get(anterior);
-    if (snapshotAnterior === undefined) return snapshot;
+    if (snapshotAnterior === undefined) return porDefecto();
 
     const abonosDeEsta = abonosPorCuota.get(key) ?? new Big(0);
     if (snapshot.plus(abonosDeEsta).minus(snapshotAnterior).abs().lte(0.02)) return snapshot;
@@ -333,7 +345,7 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
       const candidato = snapshot.minus(rezago);
       if (candidato.plus(abonosDeEsta).minus(snapshotAnterior).abs().lte(0.02)) return candidato;
     }
-    return snapshot;
+    return porDefecto();
   };
 
   let cuotaActual: string | null = null;

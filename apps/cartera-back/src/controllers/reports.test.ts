@@ -385,6 +385,19 @@ describe("estado de cuenta PDF", () => {
     expect(rows.map((p) => p.total_restante)).toEqual(["50000.00", "49400.00", "49000.00"]);
   });
 
+  it("una cancelacion despues de una fila positiva cierra la cuota en 0", () => {
+    // La cuota trae su fila normal (snapshot Q40) y después la que cancela,
+    // que guarda 0. El snapshot positivo tapaba ese cero y, al arrancar
+    // cadena, la apertura se reconstruía desde Q40: la cuota terminaba en Q40
+    // en vez de Q0. Los abonos de la cola agotan exacto el snapshot, así que
+    // el cierre en 0 lo confirma su propia aritmética.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 1, numero_cuota: 5, pagado: true, abono_capital: "10.00", abono_interes: "5.00", total_restante: "40.00" },
+      { pago_id: 2, numero_cuota: 5, pagado: true, abono_capital: "40.00", total_restante: "0" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["40.00", "0.00"]);
+  });
+
   it("un hueco de cuotas corta la cadena en vez de saltarselo", () => {
     // La cuota 2 quedó entera fuera del estado de cuenta (sus pagos siguen
     // pendientes) y cerraba en Q49,000. Encadenar la 1 con la 3 como si fueran

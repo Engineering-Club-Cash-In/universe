@@ -60,6 +60,8 @@ interface ColaItem {
 	asesor: string;
 	/** CB-114: cuenta de un titular ausente que estoy cubriendo hoy. */
 	cubierto?: boolean;
+	/** Nombre del suplente cuando el titular está cubierto. */
+	suplente?: string | null;
 	bucket: number;
 	bucketPrefijo: string;
 	bucketNombre: string;
@@ -492,9 +494,13 @@ function ColaDiaPage() {
 																className="shrink-0 gap-1 font-normal text-xs"
 															>
 																<UserCheck className="h-3 w-3" />
-																{item.asesor
-																	? `Cubriendo a ${item.asesor}`
-																	: "Cobertura"}
+																{esSupervisor &&
+																asesorSel === "todos" &&
+																item.suplente
+																	? `Cubierto por ${item.suplente}`
+																	: item.asesor
+																		? `Cubriendo a ${item.asesor}`
+																		: "Cobertura"}
 															</Badge>
 														)}
 													</div>

@@ -73,6 +73,8 @@ interface AgendaItem {
 	asesor: string | null;
 	/** CB-114: cuenta de un titular ausente que estoy cubriendo hoy. */
 	cubierto?: boolean;
+	/** Nombre del suplente cuando el titular está cubierto. */
+	suplente?: string | null;
 	recordatorios: AgendaRecordatorio[];
 }
 
@@ -470,9 +472,11 @@ function AgendaDiaPage() {
 																className="shrink-0 gap-1 font-normal text-xs"
 															>
 																<UserCheck className="h-3 w-3" />
-																{item.asesor
-																	? `Cubriendo a ${item.asesor}`
-																	: "Cobertura"}
+																{mostrandoTodos && item.suplente
+																	? `Cubierto por ${item.suplente}`
+																	: item.asesor
+																		? `Cubriendo a ${item.asesor}`
+																		: "Cobertura"}
 															</Badge>
 														)}
 													</div>

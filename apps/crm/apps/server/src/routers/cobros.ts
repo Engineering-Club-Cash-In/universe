@@ -151,6 +151,7 @@ import {
 	obtenerPaginaAgenda,
 	resolverAgendaEfectivaDelAsesorSeleccionado,
 	resolverAgendaEfectivaDelUsuario,
+	resolverCoberturasParaVistaGlobal,
 } from "../services/agenda-cobros-source";
 import {
 	CarteraBackHttpError,
@@ -3175,6 +3176,10 @@ export const cobrosRouter = {
 				// CB-114: carteras cubiertas HOY por este usuario (vacío = sin
 				// cobertura vigente, camino normal de un solo asesor).
 				let cubiertos: AsesorEfectivo[] = [];
+				let suplentePorTitularId = new Map<
+					number,
+					{ asesorId: number; nombre: string }
+				>();
 				if (!puedeVerTodos) {
 					const email = context.session?.user?.email?.trim().toLowerCase();
 					// email_cash_in, NO getAdvisors()/platform_users.email: ese campo
@@ -3262,6 +3267,12 @@ export const cobrosRouter = {
 						}
 						if (efectivos.some((a) => a.cubierto)) cubiertos = efectivos;
 					}
+				} else {
+					const asesoresConBuckets = await carteraBackClient.getPoolPorAsesor();
+					suplentePorTitularId = await resolverCoberturasParaVistaGlobal(
+						asesoresConBuckets,
+						toDateStrGT(new Date()),
+					);
 				}
 				const cubiertosAgendaPorAsesorId = new Set(
 					cubiertos.filter((a) => a.cubierto).map((a) => a.asesorId),
@@ -3442,11 +3453,16 @@ export const cobrosRouter = {
 						casoId: caso?.id ?? null,
 						asesorId: c.asesor_id,
 						asesor: c.asesor,
-						// CB-114: cuenta de un titular ausente que este usuario cubre hoy
-						// — badge en la UI; la cartera no cambió de dueño.
+						// CB-114: la cartera no cambia de dueño; este campo muestra
+						// quién atiende al titular ausente durante la cobertura.
 						cubierto:
 							c.asesor_id != null &&
-							cubiertosAgendaPorAsesorId.has(c.asesor_id),
+							(cubiertosAgendaPorAsesorId.has(c.asesor_id) ||
+								suplentePorTitularId.has(c.asesor_id)),
+						suplente:
+							c.asesor_id == null
+								? null
+								: (suplentePorTitularId.get(c.asesor_id)?.nombre ?? null),
 						recordatorios: (() => {
 							// Claims exactos por cuota + envíos por SIFCO (dedupe por
 							// tipo; el claim real gana sobre el log).
@@ -3769,6 +3785,10 @@ export const cobrosRouter = {
 				let asesorIdFiltro: number | undefined;
 				// CB-114: carteras que este usuario trabaja hoy (la propia + cubiertas).
 				let asesoresEfectivos: AsesorEfectivo[] = [];
+				let suplentePorTitularId = new Map<
+					number,
+					{ asesorId: number; nombre: string }
+				>();
 				if (!puedeVerTodos) {
 					const email = context.session?.user?.email?.trim().toLowerCase();
 					// email_cash_in, NO getAdvisors()/platform_users.email (ver el
@@ -3842,6 +3862,12 @@ export const cobrosRouter = {
 							};
 						}
 					}
+				} else {
+					const asesoresConBuckets = await carteraBackClient.getPoolPorAsesor();
+					suplentePorTitularId = await resolverCoberturasParaVistaGlobal(
+						asesoresConBuckets,
+						toDateStrGT(new Date()),
+					);
 				}
 
 				// Universo SLA: TODOS los créditos del pool del asesor (o de todos
@@ -3879,9 +3905,10 @@ export const cobrosRouter = {
 					asesoresEfectivos.length
 						? asesoresEfectivos.map((a) => a.asesorId)
 						: [asesorIdFiltro];
-				const cubiertosPorAsesorId = new Set(
-					asesoresEfectivos.filter((a) => a.cubierto).map((a) => a.asesorId),
-				);
+				const cubiertosPorAsesorId = new Set([
+					...asesoresEfectivos.filter((a) => a.cubierto).map((a) => a.asesorId),
+					...suplentePorTitularId.keys(),
+				]);
 				const [universoPorAsesor, cuotasHoyData] = await Promise.all([
 					Promise.all(
 						asesoresUniverso.map((asesorUniverso) =>
@@ -4159,6 +4186,8 @@ export const cobrosRouter = {
 							// hoy — la UI la marca con un badge para que el suplente sepa
 							// que no es suya (la cartera no cambió de dueño).
 							cubierto: cubiertosPorAsesorId.has(credito.asesor_id),
+							suplente:
+								suplentePorTitularId.get(credito.asesor_id)?.nombre ?? null,
 							bucket: credito.bucket,
 							bucketPrefijo: credito.bucket_prefijo,
 							bucketNombre: credito.bucket_nombre,

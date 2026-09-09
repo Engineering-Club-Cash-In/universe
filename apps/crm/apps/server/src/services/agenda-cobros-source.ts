@@ -160,6 +160,29 @@ export interface CoberturaVigente {
 }
 
 /**
+ * Para supervisión global: asocia cada titular ausente con el suplente que
+ * atiende su agenda. La cartera conserva titular; el mapa solo informa quién
+ * trabaja la tarea durante la cobertura.
+ */
+export function resolverCoberturasPorTitular(
+	coberturas: readonly CoberturaVigente[],
+	asesorPorUserId: ReadonlyMap<string, { asesorId: number; nombre: string }>,
+): Map<number, { asesorId: number; nombre: string }> {
+	const suplentePorTitularId = new Map<
+		number,
+		{ asesorId: number; nombre: string }
+	>();
+	for (const cobertura of coberturas) {
+		const titular = asesorPorUserId.get(cobertura.titularId);
+		const suplente = asesorPorUserId.get(cobertura.suplenteId);
+		if (!titular || !suplente || titular.asesorId === suplente.asesorId)
+			continue;
+		suplentePorTitularId.set(titular.asesorId, suplente);
+	}
+	return suplentePorTitularId;
+}
+
+/**
  * CB-114: a quién le trabaja la agenda el usuario de la sesión HOY.
  *
  * Una cobertura NO mueve la cartera (el crédito conserva su `asesor_id`): solo
@@ -221,6 +244,43 @@ export async function obtenerCoberturasVigentes(
 				gte(coberturasAgendaCobros.hasta, fechaGT),
 			),
 		);
+}
+
+/** Coberturas vigentes de todo el equipo, usadas por la vista de supervisor. */
+export async function resolverCoberturasParaVistaGlobal(
+	pool: readonly PoolPorAsesorRow[],
+	fechaGT: string,
+): Promise<Map<number, { asesorId: number; nombre: string }>> {
+	const [coberturas, usuarios] = await Promise.all([
+		db
+			.select({
+				titularId: coberturasAgendaCobros.titularId,
+				suplenteId: coberturasAgendaCobros.suplenteId,
+			})
+			.from(coberturasAgendaCobros)
+			.where(
+				and(
+					isNull(coberturasAgendaCobros.canceladaEn),
+					lte(coberturasAgendaCobros.desde, fechaGT),
+					gte(coberturasAgendaCobros.hasta, fechaGT),
+				),
+			),
+		db
+			.select({
+				id: user.id,
+				email: user.email,
+				role: user.role,
+				banned: user.banned,
+			})
+			.from(user),
+	]);
+	const asesorPorUserId = new Map(
+		resolverAsesoresAgenda(usuarios, pool).map((asesor) => [
+			asesor.userId,
+			{ asesorId: asesor.asesorCarteraId, nombre: asesor.nombre },
+		]),
+	);
+	return resolverCoberturasPorTitular(coberturas, asesorPorUserId);
 }
 
 /**

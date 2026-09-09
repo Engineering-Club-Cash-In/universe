@@ -6,6 +6,7 @@ import {
 	obtenerAgendaAsesor,
 	resolverAsesoresAgenda,
 	resolverAsesoresEfectivos,
+	resolverCoberturasPorTitular,
 } from "./agenda-cobros-source";
 
 describe("resolverAsesoresAgenda", () => {
@@ -162,6 +163,14 @@ describe("resolverAsesoresEfectivos (CB-114)", () => {
 			{ asesorId: 3, nombre: "Wilson", cubierto: false },
 			{ asesorId: 8, nombre: "Octavio", cubierto: true },
 		]);
+	});
+
+	test("mapea titular a suplente para la vista global", () => {
+		const coberturas = resolverCoberturasPorTitular(
+			[{ titularId: "u-octavio", suplenteId: "u-wilson" }],
+			asesorPorUserId,
+		);
+		expect(coberturas.get(8)).toEqual(wilson);
 	});
 
 	test("el titular ausente no ve su propia agenda", () => {

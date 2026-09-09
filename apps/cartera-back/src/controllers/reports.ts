@@ -253,8 +253,10 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
   };
 
   const siguienteCuota = new Map<string, string>();
+  const anteriorCuota = new Map<string, string>();
   for (let i = 0; i < ordenCuotas.length - 1; i++) {
     siguienteCuota.set(ordenCuotas[i]!, ordenCuotas[i + 1]!);
+    anteriorCuota.set(ordenCuotas[i + 1]!, ordenCuotas[i]!);
   }
 
   // Cierre real de una cuota. Su snapshot puede haber quedado atrás del cierre
@@ -278,16 +280,36 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
     const siguiente = siguienteCuota.get(key);
     const snapshotSiguiente =
       siguiente === undefined ? undefined : cierreGuardado.get(siguiente);
-    if (snapshotSiguiente === undefined) return snapshot;
 
-    const aperturaImplicita = snapshotSiguiente.plus(
-      abonosPorCuota.get(siguiente!) ?? new Big(0),
-    );
-    if (aperturaImplicita.minus(snapshot).abs().lte(0.02)) return snapshot;
+    if (snapshotSiguiente !== undefined) {
+      const aperturaImplicita = snapshotSiguiente.plus(
+        abonosPorCuota.get(siguiente!) ?? new Big(0),
+      );
+      if (aperturaImplicita.minus(snapshot).abs().lte(0.02)) return snapshot;
+
+      for (const rezago of rezagosPosibles(key)) {
+        const candidato = snapshot.minus(rezago);
+        if (aperturaImplicita.minus(candidato).abs().lte(0.02)) return candidato;
+      }
+      return snapshot;
+    }
+
+    // Última cuota visible: no hay siguiente que la confirme, así que la
+    // evidencia sale de la ANTERIOR. Su cierre guardado es la apertura de esta,
+    // y la apertura es el cierre más los abonos de la cuota. Solo confirma —el
+    // snapshot se prueba primero y si nada cuadra manda igual—, así que la
+    // cuota 0 sigue sin poder anclar a la 1.
+    const anterior = anteriorCuota.get(key);
+    const snapshotAnterior =
+      anterior === undefined ? undefined : cierreGuardado.get(anterior);
+    if (snapshotAnterior === undefined) return snapshot;
+
+    const abonosDeEsta = abonosPorCuota.get(key) ?? new Big(0);
+    if (snapshot.plus(abonosDeEsta).minus(snapshotAnterior).abs().lte(0.02)) return snapshot;
 
     for (const rezago of rezagosPosibles(key)) {
       const candidato = snapshot.minus(rezago);
-      if (aperturaImplicita.minus(candidato).abs().lte(0.02)) return candidato;
+      if (candidato.plus(abonosDeEsta).minus(snapshotAnterior).abs().lte(0.02)) return candidato;
     }
     return snapshot;
   };

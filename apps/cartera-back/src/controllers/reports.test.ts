@@ -385,6 +385,30 @@ describe("estado de cuenta PDF", () => {
     expect(rows.map((p) => p.total_restante)).toEqual(["50000.00", "49400.00", "49000.00"]);
   });
 
+  it("ultima cuota visible: la anterior confirma su snapshot pre-cierre", () => {
+    // La cuota 1 es la última y la cerró registerPayment, así que no hay
+    // siguiente que la desempate. La evidencia sale de la cuota 0: su cierre
+    // Q50,000 es la apertura de la 1, y solo el candidato Q49,000 más los
+    // Q1,000 de abonos cae ahí.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 1, numero_cuota: 0, pagado: true, abono_capital: "0.00", abono_interes: "500.00", total_restante: "50000.00" },
+      { pago_id: 2, numero_cuota: 1, pagado: true, abono_capital: "600.00", abono_interes: "500.00", total_restante: "49400.00" },
+      { pago_id: 3, numero_cuota: 1, pagado: true, abono_capital: "400.00", total_restante: "49400.00" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["50000.00", "49400.00", "49000.00"]);
+  });
+
+  it("ultima cuota visible: si la anterior no confirma nada, manda su snapshot", () => {
+    // Crédito 1085: los abonos no explican la caída del saldo, así que la
+    // apertura implícita no cae sobre ningún candidato y la cuota conserva el
+    // suyo. Es lo que impide que la cuota 0 termine anclando a la 1.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 60434, numero_cuota: 0, pagado: true, abono_capital: "0.00", abono_interes: "900.00", total_restante: "98908.24" },
+      { pago_id: 60435, numero_cuota: 1, pagado: true, abono_capital: "1737.73", abono_interes: "2664.42", total_restante: "95848.01" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["98908.24", "95848.01"]);
+  });
+
   it("un sufijo que cuadra por casualidad no desplaza al snapshot que la siguiente confirma", () => {
     // Cuota sincronizada cuyos abonos (10 + 5) suman más que la baja de su
     // snapshot (100 → 90). El sufijo de Q5 hace cuadrar el saldo corrido Q85,

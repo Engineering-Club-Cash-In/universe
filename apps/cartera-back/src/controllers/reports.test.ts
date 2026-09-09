@@ -385,6 +385,18 @@ describe("estado de cuenta PDF", () => {
     expect(rows.map((p) => p.total_restante)).toEqual(["50000.00", "49400.00", "49000.00"]);
   });
 
+  it("tras un hueco, un capital directo en 0 no se presenta como cancelacion", () => {
+    // La cuota 3 son puras filas de capital directo: su 0 es el centinela que
+    // guarda registerPayment, no un cierre. Sembrar desde 0 mostraría un abono
+    // parcial de Q1,000 como si cancelara el crédito, así que se arrastra el
+    // saldo previo aun sabiéndolo alto por la cuota escondida.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 1, numero_cuota: 1, pagado: true, abono_capital: "1000.00", abono_interes: "500.00", total_restante: "50000.00" },
+      { pago_id: 2, numero_cuota: 3, pagado: true, abono_capital: "1000.00", total_restante: "0" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["50000.00", "49000.00"]);
+  });
+
   it("tras un hueco, una cancelacion en 0 no arrastra el saldo heredado", () => {
     // La cuota 2 no se ve y bajaba Q1,000; la 3 cancela pagando Q49,000. Si se
     // arrastra el cierre de la 1 quedan Q1,000 debiéndose. Tras un hueco el

@@ -220,6 +220,7 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
   const cuotasConCeros = new Set<string>();
   const rezagoCierto = new Map<string, Big>();
   const cerosTrasSnapshot = new Set<string>();
+  const cuotasConRubros = new Set<string>();
   const abonosPorCuota = new Map<string, Big>();
   const abonosEnOrden = new Map<string, Big[]>();
   const ordenCuotas: string[] = [];
@@ -243,6 +244,10 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
     // fila regular no cierra nada.
     if (totalRestante.gt(0)) cerosTrasSnapshot.delete(key);
     else cerosTrasSnapshot.add(key);
+    // Las filas de capital directo son capital puro por construcción. Que la
+    // cuota traiga algún rubro (interés, IVA, seguro, GPS, membresía) es lo que
+    // la delata como cuota de verdad y no como una colgada de capital suelto.
+    if (getEstadoCuentaOtrosRubros(pago) > 0) cuotasConRubros.add(key);
   }
 
   // Cuánto puede estar atrasado el snapshot de una cuota respecto de su cierre
@@ -394,7 +399,13 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
         // redujo— así que la cuota se reconstruye igual aunque no tenga
         // snapshot propio: una cancelación que deja 0 cierra en 0.
         const tieneSnapshot = cierreGuardado.get(key) !== undefined;
-        if (tieneSnapshot || cuotaActual === null || hayHueco) {
+        // Sin snapshot propio, el 0 de la cuota solo significa "cerró en 0" si
+        // es una cuota de verdad. Si son puras filas de capital directo, ese 0
+        // es el centinela que guarda registerPayment y presentarlo como cierre
+        // mostraría un abono parcial como si cancelara el crédito: ahí conviene
+        // arrastrar el saldo previo, aun sabiéndolo alto por la cuota escondida.
+        const cierraEnCero = cuotasConRubros.has(key);
+        if (tieneSnapshot || cuotaActual === null || (hayHueco && cierraEnCero)) {
           // Sin cierre previo utilizable: la apertura se reconstruye como
           // snapshot + Σ abonos de la cuota (el snapshot ya es post-pago), así
           // la última fila aterriza exacto en el saldo guardado.

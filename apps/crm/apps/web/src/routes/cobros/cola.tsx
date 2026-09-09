@@ -431,7 +431,7 @@ function ColaDiaPage() {
 			{!colaQuery.isPending && !colaQuery.isError && ausente && (
 				<Card>
 					<CardContent className="py-10 text-center text-muted-foreground">
-						{asesorForzado
+						{esSupervisor && asesorForzado
 							? `${asesorForzado.nombre} está registrado como ausente hoy: su cola la está trabajando su suplente.`
 							: `Estás registrado como ausente hoy: tu cola la está trabajando tu suplente. Tu cartera sigue siendo tuya.`}
 					</CardContent>

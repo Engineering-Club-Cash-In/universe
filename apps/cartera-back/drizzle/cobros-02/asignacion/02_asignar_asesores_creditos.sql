@@ -21,10 +21,25 @@
 -- re-actualiza (el round-robin es determinístico y los no-cambios se filtran).
 -- =====================================================================
 
+-- Schema destino por variable de psql: -v schema=cartera_cobros2 (default: cartera_cobros2).
+-- Lo pasa carga_inicial.sh; a mano, psql -v schema=... -f este_archivo.
+\if :{?schema}
+\else
+\set schema cartera_cobros2
+\endif
+-- Modo de reparto: -v conservar=1 (alineación desde prod) deja en su lugar al crédito
+-- cuyo dueño actual YA es elegible en el pool de su bucket y solo reparte los
+-- huérfanos, empezando por el asesor con menos carga (mismo criterio que
+-- elegirAsesorParaBucket en el motor). Default 0 = carga inicial: round-robin
+-- puro sobre el pool, como siempre.
+\if :{?conservar}
+\else
+\set conservar 0
+\endif
+
 BEGIN;
 
--- ⇦ Sandbox de pruebas. Cambiar a `cartera` cuando toque el ambiente real.
-SET LOCAL search_path TO cartera_cobros2;
+SET LOCAL search_path TO :"schema";
 
 -- 1) Derivar bucket por crédito (misma derivación que 03_linea_base).
 CREATE TEMP TABLE tmp_bucket ON COMMIT DROP AS
@@ -66,29 +81,58 @@ BEGIN
   END IF;
 END $$;
 
--- 3) Repartir: round-robin sobre el pool del bucket (con 1 asesor queda
---    directo; con N queda parejo).
-CREATE TEMP TABLE tmp_asignacion ON COMMIT DROP AS
-SELECT
-  t.credito_id,
-  t.asesor_actual,
-  t.bucket,
-  p.asesores[1 + ((row_number() OVER (PARTITION BY t.bucket ORDER BY t.credito_id) - 1)
-                  % array_length(p.asesores, 1))::int] AS asesor_nuevo
+-- 3) Repartir.
+--    conservar=0: round-robin determinístico sobre el pool del bucket (1 asesor
+--    → directo; N → parejo, ordenado por credito_id y asesor_id).
+--    conservar=1: los créditos cuyo dueño ya está en el pool de su bucket se
+--    quedan; solo los huérfanos entran al round-robin, y el orden de los
+--    asesores es por carga conservada ascendente (empate: menor asesor_id).
+--    Con conservar=0 la carga conservada es 0 para todos → mismo orden de antes.
+CREATE TEMP TABLE tmp_pool_bucket ON COMMIT DROP AS
+SELECT ab.bucket, ab.asesor_id FROM asesor_bucket ab WHERE ab.activo;
+
+CREATE TEMP TABLE tmp_conservados ON COMMIT DROP AS
+SELECT t.credito_id, t.asesor_actual, t.bucket, t.asesor_actual AS asesor_nuevo
 FROM tmp_bucket t
-JOIN (
-  SELECT bucket, array_agg(asesor_id ORDER BY asesor_id) AS asesores
-  FROM asesor_bucket WHERE activo
-  GROUP BY bucket
-) p ON p.bucket = t.bucket
-WHERE t.bucket IS NOT NULL;
+WHERE :conservar::int = 1
+  AND t.bucket IS NOT NULL
+  AND EXISTS (SELECT 1 FROM tmp_pool_bucket p
+               WHERE p.bucket = t.bucket AND p.asesor_id = t.asesor_actual);
+
+CREATE TEMP TABLE tmp_asignacion ON COMMIT DROP AS
+WITH carga AS (
+  SELECT bucket, asesor_nuevo AS asesor_id, count(*) AS n
+  FROM tmp_conservados GROUP BY 1, 2
+),
+pool AS (
+  SELECT p.bucket,
+         array_agg(p.asesor_id ORDER BY COALESCE(c.n, 0), p.asesor_id) AS asesores
+  FROM tmp_pool_bucket p
+  LEFT JOIN carga c ON c.bucket = p.bucket AND c.asesor_id = p.asesor_id
+  GROUP BY p.bucket
+),
+huerfanos AS (
+  SELECT t.credito_id, t.asesor_actual, t.bucket,
+         row_number() OVER (PARTITION BY t.bucket ORDER BY t.credito_id) AS rn
+  FROM tmp_bucket t
+  WHERE t.bucket IS NOT NULL
+    AND NOT EXISTS (SELECT 1 FROM tmp_conservados k WHERE k.credito_id = t.credito_id)
+)
+SELECT h.credito_id, h.asesor_actual, h.bucket,
+       p.asesores[1 + ((h.rn - 1) % array_length(p.asesores, 1))::int] AS asesor_nuevo
+FROM huerfanos h
+JOIN pool p ON p.bucket = h.bucket
+UNION ALL
+SELECT credito_id, asesor_actual, bucket, asesor_nuevo FROM tmp_conservados;
 
 -- 4) Bitácora PRIMERO (captura el asesor_anterior antes del UPDATE).
 --    usuario_id NULL: es una carga masiva por script, no un supervisor.
 INSERT INTO credito_asesor_historial
   (credito_id, asesor_anterior, asesor_nuevo, bucket, origen, motivo)
 SELECT credito_id, asesor_actual, asesor_nuevo, bucket, 'API_MANUAL',
-       'Asignación inicial por bucket — carga COBROS-02 (SQL)'
+       CASE WHEN :conservar::int = 1
+            THEN 'Reasignación por alineación — dueño fuera del pool de su bucket (SQL)'
+            ELSE 'Asignación inicial por bucket — carga COBROS-02 (SQL)' END
 FROM tmp_asignacion
 WHERE asesor_actual IS DISTINCT FROM asesor_nuevo;
 

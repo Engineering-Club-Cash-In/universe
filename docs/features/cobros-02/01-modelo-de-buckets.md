@@ -52,6 +52,14 @@ Los buckets viven en **`cartera.buckets`**, no en el código:
 | `estado_mora` | Puente hacia el vocabulario viejo (`al_dia`, `mora_30`, …, `mora_120_plus`) |
 | `es_operativo` | Si entra al funnel de cobro del día a día (B5 no) |
 | `dias_sla` | Días para contactar desde que el crédito entra al bucket. B0 = `NULL`, no aplica |
+
+Los `dias_sla` que siembra la migración son un **placeholder**: el valor vigente se edita
+desde `/cobros/cola` (supervisor) o con un `UPDATE`, y hoy en el sandbox están en 4 días
+para B1-B4 y 1 para B5, no en los del seed. Al leer el catálogo, mirar la tabla, no el SQL.
+
+> B5 no es operativo pero **sí tiene SLA**, así que sus cuentas aparecen en la cola del día
+> de quien lo cubra. Lo que lo saca del funnel es que ya no se le calcula mora, no que nadie
+> lo vea.
 | `color`, `orden`, `activo` | Presentación y control |
 
 **Por qué así:** cambiar un rango, un color o un SLA es editar una fila, no desplegar. La

@@ -124,7 +124,9 @@ le habla, cuándo y por dónde → CRM. El bot solo habla con el CRM
 | Visibilidad de la facturación | ✅ Estado por pago y rubro por factura — ver [Operación diaria](./04-operacion-diaria.md#facturación-qué-quedó-sin-factura). **No refactura solo**, por diseño |
 | Convenio de pago **desde la Ficha 360** (CB-032) | ✅ Implementado — botón "Promesa / Convenio", solo B2+ y cuotas vencidas + actual; carteraFront quedó de consulta. Ver [Ficha 360 §3.4](./06-ficha-360.md#34-convenio-de-pago-cb-032) |
 | Convenio y promesa **por el bot** | 🔴 Bloqueado — falta aprobación de gerencia |
-| Sandbox al día con producción | ✅ Refrescado el 2026-08-17 — ver el [runbook](./RUNBOOK-refrescar-sandbox.md) |
+| Traslado masivo de cartera (CB-114) | ✅ Implementado — preview + confirmación idempotente, 3 modos. Ver [motor y asignación](./02-motor-y-asignacion.md#traslado-masivo-de-cartera-cb-114) |
+| Coberturas temporales (CC2-23) | ✅ Implementado — vacaciones y permisos redirigen el día **sin mover la cartera** |
+| Sandbox al día con producción | ✅ Scriptado y a demanda: `alinear_desde_prod.sh`. Corre el motor, así que las bajadas de quien ya pagó quedan registradas. Ver [datos y ambientes](./05-datos-y-ambientes.md#poner-el-sandbox-al-día-con-producción) |
 | Carga inicial en producción | ⚪ Pendiente — mismo runbook, pero **sin replay**: línea base limpia |
 
 ---

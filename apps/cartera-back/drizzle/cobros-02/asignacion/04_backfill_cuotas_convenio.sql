@@ -21,13 +21,19 @@
 -- NOTA: Cartera aplica el SQL a mano. Se aplica DESPUÉS de crear la columna.
 -- =====================================================================
 
-BEGIN;
-
 -- Apunta a PRODUCCIÓN (`cartera`) por defecto: es el ambiente real del backfill,
 -- y correrlo contra el schema equivocado deja las filas de prod en NULL (los
--- convenios viejos se bucketearían de más). Para el sandbox de COBROS-02 cambiar
--- a `cartera_cobros2` (ya corrido ahí).
-SET LOCAL search_path TO cartera;
+-- convenios viejos se bucketearían de más). Para el sandbox: -v schema=cartera_cobros2.
+-- Schema destino por variable de psql: -v schema=cartera_cobros2 (default: cartera).
+-- Lo pasa carga_inicial.sh; a mano, psql -v schema=... -f este_archivo.
+\if :{?schema}
+\else
+\set schema cartera
+\endif
+
+BEGIN;
+
+SET LOCAL search_path TO :"schema";
 
 UPDATE convenios_pago cp
    SET cuotas_convenio = sub.cuotas,

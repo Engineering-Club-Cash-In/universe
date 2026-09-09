@@ -1846,12 +1846,6 @@ export async function condonarMoraService(payload: CondonarMoraPayload) {
 }
 
 // ---------- Paginación / totales de moras ----------
-/**
- * `/moras/creditos` y `/moras/condonaciones` pagean server-side con 20 por
- * página por defecto: quien no mande `page`/`pageSize` recibe SOLO la primera
- * página, sin ninguna señal de que hay más. Por eso `pagination` viaja en la
- * respuesta y la pantalla está obligada a leerlo.
- */
 export interface MoraPagination {
   page: number;
   pageSize: number;
@@ -1862,6 +1856,7 @@ export interface MoraPagination {
 export interface CreditosConMoraParams {
   page?: number;
   pageSize?: number;
+  nombre_usuario?: string;
   numero_credito_sifco?: string;
   cuotas_atrasadas?: number;
   estado?: EstadoCredito;
@@ -1882,9 +1877,17 @@ export interface CreditosConMoraResponse {
 export interface CondonacionesMoraParams {
   page?: number;
   pageSize?: number;
+  nombre_usuario?: string;
   numero_credito_sifco?: string;
   usuario_email?: string;
+  /**
+   * Día de GUATEMALA `YYYY-MM-DD` (inclusive). `moras_condonaciones.fecha` es un
+   * timestamp sin zona con el instante en UTC: el backend convierte estos días
+   * a los instantes UTC del día GT, así el filtro coincide con la fecha que se
+   * ve en pantalla. Los dos son independientes: se puede mandar solo uno.
+   */
   fecha_desde?: string;
+  /** Día de GUATEMALA `YYYY-MM-DD` (inclusive, entra el día completo). */
   fecha_hasta?: string;
   excel?: boolean;
 }
@@ -1909,6 +1912,13 @@ export async function getCondonacionesMoraService(params?: CondonacionesMoraPara
   const { data } = await api.get<CondonacionesMoraResponse>(`/moras/condonaciones`, { params });
   return data;
 }
+
+// Historial de eventos de mora de un crédito (ADMIN, CONTA, ASESOR)
+export type { MoraEvento } from "./moraHistorial.services";
+export {
+  getMoraHistorialCredito,
+  descargarMoraHistorialCreditoExcel,
+} from "./moraHistorial.services";
 
 
 export interface CuotaPago {

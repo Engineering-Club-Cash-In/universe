@@ -26,7 +26,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import React from "react";
-import { Hash, Info, ListOrdered, RefreshCw, CalendarClock } from "lucide-react";
+import { Hash, History, Info, ListOrdered, RefreshCw, CalendarClock } from "lucide-react";
 import { useMemo } from "react";
 import { AlertCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -40,6 +40,7 @@ import { openReportInNewTab, useActivateCredit, useToggleCancelacionActivo } fro
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useAuth } from "@/Provider/authProvider";
 import { ModalCreateMora } from "./createMoraModal";
+import { ModalHistorialMora } from "./ModalHistorialMora";
 import { ModalMarcarCuotas } from "./ModalMarcarCuotas";
 import { ModalCambiarFechaInicio } from "./ModalCambiarFechaInicio";
 import { useReport } from "../hooks/reports";
@@ -279,6 +280,9 @@ export function ListaCreditosPagos() {
   const [selectedCreditMora, setSelectedCreditMora] = useState<any | null>(
     null
   );
+  const [openHistorialMoraModal, setOpenHistorialMoraModal] = useState(false);
+  const [selectedCreditHistorialMora, setSelectedCreditHistorialMora] =
+    useState<any | null>(null);
   const [openMarcarCuotasModal, setOpenMarcarCuotasModal] = useState(false);
   const [selectedCreditMarcarCuotas, setSelectedCreditMarcarCuotas] = useState<string>("");
   const [modalOpen, setModalOpen] = useState(false);
@@ -752,6 +756,8 @@ export function ListaCreditosPagos() {
               handleOpenEdit={handleOpenEdit}
               setSelectedCreditMora={setSelectedCreditMora}
               setOpenMoraModal={setOpenMoraModal}
+              setSelectedCreditHistorialMora={setSelectedCreditHistorialMora}
+              setOpenHistorialMoraModal={setOpenHistorialMoraModal}
               setSelectedCreditMarcarCuotas={setSelectedCreditMarcarCuotas}
               setOpenMarcarCuotasModal={setOpenMarcarCuotasModal}
               setSelectedCreditForReport={setSelectedCreditForReport}
@@ -780,6 +786,8 @@ export function ListaCreditosPagos() {
               handleOpenEdit={handleOpenEdit}
               setSelectedCreditMora={setSelectedCreditMora}
               setOpenMoraModal={setOpenMoraModal}
+              setSelectedCreditHistorialMora={setSelectedCreditHistorialMora}
+              setOpenHistorialMoraModal={setOpenHistorialMoraModal}
               setSelectedCreditMarcarCuotas={setSelectedCreditMarcarCuotas}
               setOpenMarcarCuotasModal={setOpenMarcarCuotasModal}
               setSelectedCreditForReport={setSelectedCreditForReport}
@@ -877,6 +885,18 @@ export function ListaCreditosPagos() {
     }, 50); // 👈 Otro delay pequeño acá
   }}
 />
+
+      {/* Historial de mora del crédito (solo lectura) */}
+      <ModalHistorialMora
+        open={openHistorialMoraModal}
+        onClose={() => {
+          setOpenHistorialMoraModal(false);
+          setSelectedCreditHistorialMora(null);
+        }}
+        creditoId={selectedCreditHistorialMora?.credito_id}
+        numeroCreditoSifco={selectedCreditHistorialMora?.numero_credito_sifco}
+        isAdmin={isAdmin}
+      />
 
       {/* Modal de Marcar Cuotas */}
       <ModalMarcarCuotas
@@ -1270,6 +1290,8 @@ function MobileView({
   handleOpenEdit,
   setSelectedCreditMora,
   setOpenMoraModal,
+  setSelectedCreditHistorialMora,
+  setOpenHistorialMoraModal,
   setSelectedCreditMarcarCuotas,
   setOpenMarcarCuotasModal,
   setSelectedCreditForReport,
@@ -1397,6 +1419,26 @@ function MobileView({
             >
               <Eye className="w-4 h-4 mr-1" /> Ver pagos
             </Button>
+
+            {/* Historial de mora: ADMIN, CONTA y ASESOR. Va acá y no dentro del
+                bloque de ADMIN porque ASESOR no tiene acceso a /mora: si el
+                botón solo existiera en escritorio, en teléfono se quedaba sin
+                ninguna forma de ver el historial. */}
+            {(user?.role === "ADMIN" ||
+              user?.role === "CONTA" ||
+              user?.role === "ASESOR") && (
+              <Button
+                variant="outline"
+                className="text-indigo-700 border-indigo-300 hover:bg-indigo-50"
+                onClick={() => {
+                  setSelectedCreditHistorialMora(item.creditos);
+                  setOpenHistorialMoraModal(true);
+                }}
+              >
+                <History className="w-4 h-4 mr-1" /> Historial de mora
+              </Button>
+            )}
+
             {canCancel(item.creditos.statusCredit) && (
               <Button
                 variant="outline"
@@ -1572,6 +1614,8 @@ function DesktopView({
   handleOpenEdit,
   setSelectedCreditMora,
   setOpenMoraModal,
+  setSelectedCreditHistorialMora,
+  setOpenHistorialMoraModal,
   setSelectedCreditMarcarCuotas,
   setOpenMarcarCuotasModal,
   setSelectedCreditForReport,
@@ -1783,6 +1827,25 @@ function DesktopView({
                               ➕ Mora
                             </Button>
                           )}
+
+                        {/* Historial de mora: ADMIN, CONTA y ASESOR */}
+                        {(user?.role === "ADMIN" ||
+                          user?.role === "CONTA" ||
+                          user?.role === "ASESOR") && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="flex items-center gap-1 text-indigo-700 border-indigo-300 hover:bg-indigo-50"
+                            onClick={() => {
+                              setSelectedCreditHistorialMora(item.creditos);
+                              setOpenHistorialMoraModal(true);
+                            }}
+                          >
+                            <History className="w-4 h-4" />
+                            Historial de mora
+                          </Button>
+                        )}
+
                           {user?.role === "ADMIN" && (
                             <Button
                               variant="outline"

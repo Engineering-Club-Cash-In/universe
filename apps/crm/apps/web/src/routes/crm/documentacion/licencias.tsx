@@ -380,7 +380,7 @@ export function LicenciasContent({
 				open={!!selectedVerificationId}
 				onOpenChange={(open) => !open && setSelectedVerificationId(null)}
 			>
-				<DialogContent className="max-h-[90vh] w-[95vw] max-w-[1800px] overflow-y-auto">
+				<DialogContent className="max-h-[90vh] w-[95vw] max-w-[1800px] overflow-y-auto sm:max-w-[1800px]">
 					<DialogHeader>
 						<DialogTitle>Detalle de verificación</DialogTitle>
 					</DialogHeader>
@@ -560,7 +560,7 @@ function NewVerificationDialog({
 		<DialogContent
 			className={
 				result
-					? "max-h-[90vh] w-[95vw] max-w-[1800px] overflow-y-auto"
+					? "max-h-[90vh] w-[95vw] max-w-[1800px] overflow-y-auto sm:max-w-[1800px]"
 					: "max-h-[90vh] max-w-lg overflow-y-auto"
 			}
 		>

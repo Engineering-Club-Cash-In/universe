@@ -217,6 +217,7 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
   // PDF mostraba un bajón que la última fila revertía (crédito 872, cuota 33:
   // Q24,662.55 entre dos Q25,162.55).
   const cierreGuardado = new Map<string, Big>();
+  const cuotasConCeros = new Set<string>();
   const abonosPorCuota = new Map<string, Big>();
   const abonosEnOrden = new Map<string, Big[]>();
   const ordenCuotas: string[] = [];
@@ -227,6 +228,7 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
     // Última fila de la cuota con snapshot positivo: es su saldo de cierre.
     // Las filas de capital directo guardan total_restante 0 y no cuentan.
     if (totalRestante.gt(0)) cierreGuardado.set(key, totalRestante);
+    else cuotasConCeros.add(key);
     const abono = new Big(pago.abono_capital || 0);
     abonosPorCuota.set(key, (abonosPorCuota.get(key) ?? new Big(0)).plus(abono));
     abonosEnOrden.set(key, [...(abonosEnOrden.get(key) ?? []), abono]);
@@ -278,8 +280,15 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
     if (snapshot === undefined) return corrido;
 
     const siguiente = siguienteCuota.get(key);
+    // Una cuota SIN ninguna fila positiva y con ceros explícitos es una
+    // cancelación: su cierre real es 0. Ese cero vale como EVIDENCIA para
+    // confirmar el cierre de esta cuota, pero no se guarda como snapshot para
+    // que un cero de una fila de capital directo no termine anclando a nadie.
     const snapshotSiguiente =
-      siguiente === undefined ? undefined : cierreGuardado.get(siguiente);
+      siguiente === undefined
+        ? undefined
+        : (cierreGuardado.get(siguiente) ??
+           (cuotasConCeros.has(siguiente) ? new Big(0) : undefined));
 
     if (snapshotSiguiente !== undefined) {
       const aperturaImplicita = snapshotSiguiente.plus(

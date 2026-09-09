@@ -385,6 +385,26 @@ describe("estado de cuenta PDF", () => {
     expect(rows.map((p) => p.total_restante)).toEqual(["50000.00", "49400.00", "49000.00"]);
   });
 
+  it("una cancelacion en 0 confirma el cierre de la cuota anterior", () => {
+    // La cuota 2 cancela el crédito y guarda total_restante 0. Ese cero no se
+    // toma como snapshot (para que un cero de capital directo no ancle a
+    // nadie) pero sí vale como evidencia: la apertura implícita de la 2 es
+    // 0 + 49,000, que confirma que la 1 cierra en Q49,000 y no en su Q50,000
+    // heredado. Sin esto la cancelación se mostraba en Q1,000.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 1, numero_cuota: 0, pagado: true, abono_capital: "0.00", abono_interes: "500.00", total_restante: "50400.00" },
+      { pago_id: 2, numero_cuota: 1, pagado: true, abono_capital: "600.00", abono_interes: "500.00", total_restante: "50000.00" },
+      { pago_id: 3, numero_cuota: 1, pagado: true, abono_capital: "400.00", total_restante: "50000.00" },
+      { pago_id: 4, numero_cuota: 2, pagado: true, abono_capital: "49000.00", abono_interes: "500.00", total_restante: "0" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual([
+      "50400.00",
+      "49400.00",
+      "49000.00",
+      "0.00",
+    ]);
+  });
+
   it("ultima cuota visible: la anterior confirma su snapshot pre-cierre", () => {
     // La cuota 1 es la última y la cerró registerPayment, así que no hay
     // siguiente que la desempate. La evidencia sale de la cuota 0: su cierre

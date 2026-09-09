@@ -111,7 +111,10 @@ const CANALES = [
 /** Badges de resultado de gestión — mismos labels/colores que la Ficha 360. */
 const ESTADO_GESTION: Record<string, { label: string; color: string }> = {
 	contactado: { label: "Contactado", color: "bg-green-100 text-green-800" },
-	promesa_pago: { label: "Promesa de Pago", color: "bg-blue-100 text-blue-800" },
+	promesa_pago: {
+		label: "Promesa de Pago",
+		color: "bg-blue-100 text-blue-800",
+	},
 	no_contesta: { label: "No Contesta", color: "bg-yellow-100 text-yellow-800" },
 	mensaje_enviado: {
 		label: "Mensaje enviado",
@@ -129,6 +132,10 @@ const ESTADO_GESTION: Record<string, { label: string; color: string }> = {
 	pago_registrado: {
 		label: "Pago registrado",
 		color: "bg-emerald-100 text-emerald-800",
+	},
+	link_pago_generado: {
+		label: "Link de pago generado",
+		color: "bg-violet-100 text-violet-800",
 	},
 };
 

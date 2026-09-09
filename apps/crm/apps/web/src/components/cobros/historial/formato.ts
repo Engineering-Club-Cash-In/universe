@@ -24,6 +24,7 @@ export const ESTADOS_CONTACTO = [
 	// "Registrar pago") — sin esto etiquetaEstado() caía en "—" y la fila no
 	// se distinguía de una gestión de llamada/contacto normal.
 	{ value: "pago_registrado", label: "Pago registrado" },
+	{ value: "link_pago_generado", label: "Link de pago generado" },
 ] as const;
 
 export const METODOS_CONTACTO = [

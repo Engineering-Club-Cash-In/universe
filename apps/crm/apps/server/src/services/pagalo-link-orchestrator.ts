@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray, ne, notInArray } from "drizzle-orm";
 import { db } from "../db";
-import { casosCobros } from "../db/schema/cobros";
+import { casosCobros, contactosCobros } from "../db/schema/cobros";
 import { leads, opportunities } from "../db/schema/crm";
 import {
 	pagaloPaymentEvents,
@@ -14,6 +14,7 @@ import {
 	buildPagaloAllocations,
 	type PagaloInstallment,
 } from "../lib/pagalo-allocations";
+import { construirComentarioGestionLinkPagalo } from "../lib/pagalo-gestion";
 import { deduplicarCuotasPagalo } from "../lib/pagalo-installments";
 import { primeraRevisionPoll } from "../lib/pagalo-poll-cadencia";
 import {
@@ -22,6 +23,7 @@ import {
 } from "../lib/pagalo-selection";
 import { primerTelefono } from "../lib/phone-utils";
 import { carteraBackClient } from "./cartera-back-client";
+import { isCarteraBackEnabled } from "./cartera-back-integration";
 import {
 	createPagaloClient,
 	getPagaloSandboxConfig,
@@ -57,6 +59,85 @@ type CreatePagaloLinksInput = {
 // real al proveedor.
 const PAGALO_TEST_EMAIL = "j.alvarez@clubcashin.com";
 const PAGALO_TEST_PHONE = "35219722";
+const TIMEOUT_BUCKET_GESTION_MS = 3000;
+
+async function capturarBucketGestionPagalo(
+	numeroSifco: string,
+): Promise<number | null> {
+	if (!isCarteraBackEnabled()) return null;
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		const actual = await Promise.race([
+			carteraBackClient.getBucketActualCredito(numeroSifco),
+			new Promise<null>((resolve) => {
+				timer = setTimeout(() => resolve(null), TIMEOUT_BUCKET_GESTION_MS);
+			}),
+		]);
+		return actual?.bucket ?? null;
+	} catch (error) {
+		console.error(
+			`[Págalo] No se pudo capturar bucket para gestión ${numeroSifco}:`,
+			error,
+		);
+		return null;
+	} finally {
+		if (timer) clearTimeout(timer);
+	}
+}
+
+/** Una gestión por grupo; fallo de auditoría no revierte links creados. */
+async function registrarGestionLinkPagalo(params: {
+	groupId: string;
+	casoCobroId: string;
+	numeroSifco: string;
+	requestedBy: string;
+	totalAmount: string;
+	cantidadLinks: number;
+	whatsappEnviado: boolean | null;
+	fechaContacto?: Date;
+	bucketSnapshot?: number | null;
+}): Promise<boolean> {
+	if (params.cantidadLinks === 0) return false;
+	const bucketSnapshot =
+		params.bucketSnapshot === undefined
+			? await capturarBucketGestionPagalo(params.numeroSifco)
+			: params.bucketSnapshot;
+	try {
+		return await db.transaction(async (tx) => {
+			const [grupo] = await tx
+				.select({ contactoCobroId: pagaloPaymentGroups.contactoCobroId })
+				.from(pagaloPaymentGroups)
+				.where(eq(pagaloPaymentGroups.id, params.groupId))
+				.for("update");
+			if (!grupo) return false;
+			if (grupo.contactoCobroId) return true;
+			const [gestion] = await tx
+				.insert(contactosCobros)
+				.values({
+					casoCobroId: params.casoCobroId,
+					fechaContacto: params.fechaContacto,
+					metodoContacto: "pago",
+					estadoContacto: "link_pago_generado",
+					comentarios: construirComentarioGestionLinkPagalo(params),
+					realizadoPor: params.requestedBy,
+					bucketSnapshot,
+				})
+				.returning({ id: contactosCobros.id });
+			if (!gestion) return false;
+			await tx
+				.update(pagaloPaymentGroups)
+				.set({ contactoCobroId: gestion.id, updatedAt: new Date() })
+				.where(eq(pagaloPaymentGroups.id, params.groupId));
+			return true;
+		});
+	} catch (error) {
+		console.error(
+			`[Págalo] Links creados, pero no se pudo registrar gestión ${params.groupId}:`,
+			error,
+		);
+		return false;
+	}
+}
 
 /**
  * Un link ERROR puede venir de dos caminos con riesgo muy distinto:
@@ -245,6 +326,10 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 			groupId: pagaloPaymentGroups.id,
 			status: pagaloPaymentGroups.status,
 			origen: pagaloPaymentGroups.origen,
+			createdBy: pagaloPaymentGroups.createdBy,
+			contactoCobroId: pagaloPaymentGroups.contactoCobroId,
+			casoCobroId: pagaloPaymentGroups.casoCobroId,
+			createdAt: pagaloPaymentGroups.createdAt,
 			capitalTotal: pagaloPaymentGroups.capitalTotal,
 			facturableTotal: pagaloPaymentGroups.facturableTotal,
 			totalAmount: pagaloPaymentGroups.totalAmount,
@@ -265,6 +350,37 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 		);
 	if (grupoActivo.length > 0) {
 		const group = grupoActivo[0]!;
+		const links = grupoActivo.flatMap((link) =>
+			link.linkType && link.paymentUrl && link.linkStatus === "ACTIVE"
+				? [
+						{
+							linkType: link.linkType,
+							paymentUrl: link.paymentUrl,
+							status: link.linkStatus as "ACTIVE",
+							amount:
+								link.linkType === "CAPITAL"
+									? group.capitalTotal
+									: group.facturableTotal,
+						},
+					]
+				: [],
+		);
+		const gestionRegistrada =
+			group.origen === "ASESOR" && group.casoCobroId && links.length > 0
+				? group.contactoCobroId
+					? true
+					: await registrarGestionLinkPagalo({
+							groupId: group.groupId,
+							casoCobroId: group.casoCobroId,
+							numeroSifco: input.numeroSifco,
+							requestedBy: group.createdBy,
+							totalAmount: group.totalAmount,
+							cantidadLinks: links.length,
+							whatsappEnviado: null,
+							fechaContacto: group.createdAt,
+							bucketSnapshot: null,
+						})
+				: undefined;
 		return {
 			groupId: group.groupId,
 			status: group.status,
@@ -272,21 +388,8 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 			capitalTotal: group.capitalTotal,
 			facturableTotal: group.facturableTotal,
 			totalAmount: group.totalAmount,
-			links: grupoActivo.flatMap((link) =>
-				link.linkType && link.paymentUrl && link.linkStatus === "ACTIVE"
-					? [
-							{
-								linkType: link.linkType,
-								paymentUrl: link.paymentUrl,
-								status: link.linkStatus as "ACTIVE",
-								amount:
-									link.linkType === "CAPITAL"
-										? group.capitalTotal
-										: group.facturableTotal,
-							},
-						]
-					: [],
-			),
+			links,
+			gestionRegistrada,
 			// Grupo ya existía (reintento o creado por otro asesor/el BOT) — este
 			// llamado no intentó enviar WhatsApp, `null` distingue "no aplica" de
 			// "se intentó y falló" (whatsappEnviado: false), para no instruir al
@@ -352,6 +455,15 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 		config,
 		enviarWhatsapp: true,
 	});
+	const gestionRegistrada = await registrarGestionLinkPagalo({
+		groupId: group.id,
+		casoCobroId: input.casoCobroId,
+		numeroSifco: input.numeroSifco,
+		requestedBy: input.requestedBy,
+		totalAmount: calculation.totalAmount,
+		cantidadLinks: emitido.links.length,
+		whatsappEnviado: emitido.whatsappEnviado,
+	});
 
 	return {
 		groupId: group.id,
@@ -361,6 +473,7 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 		totalAmount: calculation.totalAmount,
 		links: emitido.links,
 		whatsappEnviado: emitido.whatsappEnviado,
+		gestionRegistrada,
 	};
 }
 

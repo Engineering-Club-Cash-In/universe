@@ -194,6 +194,10 @@ export function PagaloLinkDialog({
 				toast.success(
 					`Links Págalo listos: ${q(result.totalAmount)}. No se pudo enviar el WhatsApp al cliente, compartí el link manualmente.`,
 				);
+			if (result.gestionRegistrada === false)
+				toast.warning(
+					"Links creados, pero no se pudo registrar la gestión. Puedes reintentar sin generar links duplicados.",
+				);
 		},
 		onError: (error: Error) =>
 			toast.error(error.message || "No se pudieron crear links Págalo"),

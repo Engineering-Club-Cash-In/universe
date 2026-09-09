@@ -53,7 +53,7 @@ type Update = { pago_id: number; datos: Record<string, unknown> };
  * - 1 pago  → valores del Excel directo.
  * - N pagos → cascada del monto_aplicado sobre los totales del Excel.
  */
-function construirUpdatesCuota(
+export function construirUpdatesCuota(
   excel: PagoCarteraExcel,
   pagos: Array<{ pago_id: number; monto_aplicado: any; fecha_pago: any }>,
 ): Update[] {

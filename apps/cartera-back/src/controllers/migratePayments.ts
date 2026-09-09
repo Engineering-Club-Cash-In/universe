@@ -1,5 +1,5 @@
 import Big from "big.js";
-import { eq, and, gt, asc, inArray, lte } from "drizzle-orm";
+import { eq, and, gt, asc, inArray, lte, sql } from "drizzle-orm";
 import { db } from "../database";
 import { creditos, cuotas_credito, pagos_credito } from "../database/db";
 import { consultarEstadoCuentaPrestamo } from "../services/sifcoIntegrations";
@@ -215,26 +215,41 @@ export const ajustarCuotasConSIFCO = async ({
       .orderBy(asc(cuotas_credito.numero_cuota));
 
 
-    await Promise.all(
-      cuotasConPagos.map((row) => {
-        const fechaVencimientoCuota = calcularFechaVencimiento(row.numero_cuota);
-        const ops: Promise<unknown>[] = [
-          tx
-            .update(cuotas_credito)
-            .set({ fecha_vencimiento: fechaVencimientoCuota })
-            .where(eq(cuotas_credito.cuota_id, row.cuota_id)),
-        ];
-        if (row.pago_id) {
-          ops.push(
-            tx
-              .update(pagos_credito)
-              .set({ fecha_vencimiento: fechaVencimientoCuota })
-              .where(eq(pagos_credito.pago_id, row.pago_id))
-          );
-        }
-        return Promise.all(ops);
-      })
+    // Un UPDATE por tabla contra una lista de VALUES en vez de dos por cuota.
+    // El Promise.all anterior no paralelizaba nada: dentro de la transacción
+    // todas las queries comparten el mismo cliente de pg y se serializan (de
+    // ahí el DeprecationWarning de "client is already executing a query"), así
+    // que un crédito de 60 cuotas costaba ~120 round-trips contra el pooler.
+    // Los valores escritos son exactamente los mismos.
+    const fechasPorCuota = cuotasConPagos.map((row) => ({
+      cuota_id: row.cuota_id,
+      pago_id: row.pago_id,
+      fecha: calcularFechaVencimiento(row.numero_cuota),
+    }));
+
+    const paresCuotas = fechasPorCuota.map(
+      (f) => sql`(${f.cuota_id}::int, ${f.fecha}::date)`,
     );
+    if (paresCuotas.length > 0) {
+      await tx.execute(sql`
+        UPDATE ${cuotas_credito} AS c
+        SET fecha_vencimiento = v.fecha
+        FROM (VALUES ${sql.join(paresCuotas, sql`, `)}) AS v(cuota_id, fecha)
+        WHERE c.cuota_id = v.cuota_id
+      `);
+    }
+
+    const paresPagos = fechasPorCuota
+      .filter((f) => f.pago_id)
+      .map((f) => sql`(${f.pago_id}::int, ${f.fecha}::date)`);
+    if (paresPagos.length > 0) {
+      await tx.execute(sql`
+        UPDATE ${pagos_credito} AS p
+        SET fecha_vencimiento = v.fecha
+        FROM (VALUES ${sql.join(paresPagos, sql`, `)}) AS v(pago_id, fecha)
+        WHERE p.pago_id = v.pago_id
+      `);
+    }
 
   });
 

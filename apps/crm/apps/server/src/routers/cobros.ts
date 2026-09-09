@@ -915,9 +915,12 @@ export const cobrosRouter = {
 						.select({ count: count() })
 						.from(contactosCobros)
 						.where(
-							gte(
-								contactosCobros.fechaContacto,
-								new Date(new Date().setHours(0, 0, 0, 0)),
+							and(
+								gte(
+									contactosCobros.fechaContacto,
+									new Date(new Date().setHours(0, 0, 0, 0)),
+								),
+								ne(contactosCobros.estadoContacto, "link_pago_generado"),
 							),
 						);
 
@@ -1063,9 +1066,12 @@ export const cobrosRouter = {
 				.select({ count: count() })
 				.from(contactosCobros)
 				.where(
-					gte(
-						contactosCobros.fechaContacto,
-						new Date(new Date().setHours(0, 0, 0, 0)),
+					and(
+						gte(
+							contactosCobros.fechaContacto,
+							new Date(new Date().setHours(0, 0, 0, 0)),
+						),
+						ne(contactosCobros.estadoContacto, "link_pago_generado"),
 					),
 				);
 

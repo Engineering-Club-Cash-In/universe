@@ -201,67 +201,300 @@ export function sortEstadoCuentaPayments<T extends EstadoCuentaPagoRow>(pagos: T
   });
 }
 
-export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(pagos: T[]) {
-  let capitalRestante: Big | null = null;
+export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(
+  pagos: T[],
+  // CIERRE de último recurso: `creditos.capital`. Ojo que es el saldo POSTERIOR
+  // a los pagos —registerPayment le resta el abono antes de actualizarlo— así
+  // que es el cierre de la cuota, no su apertura: usarlo como apertura restaría
+  // los abonos dos veces. Solo se usa cuando el estado de cuenta arranca con
+  // una cuota de puras filas de capital directo, que guardan el centinela 0 y
+  // no dejan snapshot, y no hay ninguna cuota vecina de la que sacarlo. Sin
+  // esto la apertura se reconstruía desde el propio abono y el estado de cuenta
+  // terminaba en Q0.00, presentando un abono parcial como si cancelara el
+  // crédito.
+  cierreFallback?: number | string | null,
+) {
+  // El saldo de cada fila se corre DENTRO de su cuota: arranca en la apertura
+  // (el cierre guardado de la cuota anterior) y le resta los abonos a capital
+  // de la cuota hasta esa fila. Así el saldo baja boleta por boleta en vez de
+  // repetir el cierre en todas las filas de una cuota pagada en parciales.
+  //
+  // Cada cuota se ancla al `total_restante` guardado de la ANTERIOR, no al
+  // saldo corrido: si los abonos de una cuota no suman su salto de saldo
+  // (~20% de las cuotas en cartera), el descuadre queda encerrado en esa
+  // cuota y la siguiente vuelve a arrancar del snapshot bueno.
+  //
+  // Antes se confiaba fila por fila en el snapshot: una fila de capital puro
+  // en MEDIO de la cuota restaba su abono de un saldo que ya venía neto y el
+  // PDF mostraba un bajón que la última fila revertía (crédito 872, cuota 33:
+  // Q24,662.55 entre dos Q25,162.55).
+  const cierreGuardado = new Map<string, Big>();
+  const cuotasConCeros = new Set<string>();
+  const rezagoCierto = new Map<string, Big>();
+  const cerosTrasSnapshot = new Set<string>();
+  const cuotasConRubros = new Set<string>();
+  const abonosPorCuota = new Map<string, Big>();
+  const abonosEnOrden = new Map<string, Big[]>();
+  const ordenCuotas: string[] = [];
+  for (const pago of pagos) {
+    const key = String(pago.numero_cuota ?? "");
+    if (ordenCuotas[ordenCuotas.length - 1] !== key) ordenCuotas.push(key);
+    const totalRestante = new Big(pago.total_restante || 0);
+    // Última fila de la cuota con snapshot positivo: es su saldo de cierre.
+    // Las filas de capital directo guardan total_restante 0 y no cuentan.
+    if (totalRestante.gt(0)) cierreGuardado.set(key, totalRestante);
+    else cuotasConCeros.add(key);
+    const abono = new Big(pago.abono_capital || 0);
+    abonosPorCuota.set(key, (abonosPorCuota.get(key) ?? new Big(0)).plus(abono));
+    abonosEnOrden.set(key, [...(abonosEnOrden.get(key) ?? []), abono]);
+    // Abonos de las filas POSTERIORES al último snapshot positivo. Ese
+    // snapshot lo escribió una fila concreta, así que lo que se abonó después
+    // no puede estar incluido en él: es un rezago cierto, no una conjetura.
+    rezagoCierto.set(key, totalRestante.gt(0) ? new Big(0) : (rezagoCierto.get(key) ?? new Big(0)).plus(abono));
+    // ¿Quedan filas en cero DESPUÉS del último snapshot positivo? Solo esas
+    // pueden decir que el snapshot ya se agotó; un cero que va ANTES de la
+    // fila regular no cierra nada.
+    if (totalRestante.gt(0)) cerosTrasSnapshot.delete(key);
+    else cerosTrasSnapshot.add(key);
+    // Las filas de capital directo son capital puro por construcción. Que la
+    // cuota traiga algún rubro (interés, IVA, seguro, GPS, membresía) es lo que
+    // la delata como cuota de verdad y no como una colgada de capital suelto.
+    if (getEstadoCuentaOtrosRubros(pago) > 0) cuotasConRubros.add(key);
+  }
 
-  // Una fila de abono a capital puro "ya viene neta" (la sync con el Excel
-  // escribe en todos los pagos de la cuota el saldo neto de sus abonos) cuando
-  // su total_restante == saldo al inicio de la cuota − Σ abono_capital de la
-  // cuota HASTA esta fila (prefijo, en orden de pago). Con prefijo:
-  //  - un cierre de parcial normal (registerPayment hereda el total_restante
-  //    de la hermana sin restar su capital) no cumple y se le sigue restando;
-  //  - un abono agregado DESPUÉS de la sync tampoco cumple (el snapshot no lo
-  //    incluye) y se resta normal, sin invalidar a las filas ya netas.
-  // Caso 01010214106990 cuota 35: el PDF mostraba 45,434.39 en vez de 47,874.89.
+  // Cuánto puede estar atrasado el snapshot de una cuota respecto de su cierre
+  // real: 0, el abono de su última fila, el de las dos últimas, y así. Un
+  // snapshot queda atrás cuando lo escribió una fila que no es la última —el
+  // cierre solo-capital de registerPayment hereda el de su hermana sin restar
+  // su propio abono, y los pagos de capital directo guardan 0 y dejan el
+  // snapshot en una fila anterior— y puede haber varias de esas filas seguidas.
+  // Solo rezagos ESTRICTAMENTE positivos: si el snapshot ya coincide con el
+  // saldo corrido manda el snapshot, para que los centavos de redondeo no se
+  // vayan acumulando cuota tras cuota en vez de re-anclarse.
+  const rezagosPosibles = (key: string): Big[] => {
+    const abonos = abonosEnOrden.get(key) ?? [];
+    const rezagos: Big[] = [];
+    let acumulado = new Big(0);
+    for (let i = abonos.length - 1; i >= 0; i--) {
+      acumulado = acumulado.plus(abonos[i]!);
+      if (acumulado.gt(0)) rezagos.push(acumulado);
+    }
+    return rezagos;
+  };
+
+  // Solo se encadenan cuotas numéricamente consecutivas. Una cuota puede quedar
+  // entera fuera del estado de cuenta —si todos sus pagos siguen pendientes— y
+  // entonces las visibles no son vecinas: su reducción de capital no está a la
+  // vista y encadenarlas dejaría a la posterior alta por ese monto. Ante un
+  // hueco cada lado se resuelve con su propio snapshot.
+  const sonConsecutivas = (a: string, b: string) => {
+    const na = Number(a);
+    const nb = Number(b);
+    if (!Number.isFinite(na) || !Number.isFinite(nb)) return true;
+    return nb === na + 1;
+  };
+
+  const siguienteCuota = new Map<string, string>();
+  const anteriorCuota = new Map<string, string>();
+  for (let i = 0; i < ordenCuotas.length - 1; i++) {
+    if (!sonConsecutivas(ordenCuotas[i]!, ordenCuotas[i + 1]!)) continue;
+    siguienteCuota.set(ordenCuotas[i]!, ordenCuotas[i + 1]!);
+    anteriorCuota.set(ordenCuotas[i + 1]!, ordenCuotas[i]!);
+  }
+
+  // Cierre real de una cuota. Su snapshot puede haber quedado atrás del cierre
+  // (lo escribió una fila que no es la última), así que los candidatos son el
+  // snapshot y el snapshot menos cada rezago. Quien desempata es la cuota
+  // SIGUIENTE: su apertura implícita —snapshot + Σ abonos— es, por definición,
+  // el cierre de esta.
+  //
+  // El snapshot se prueba primero y gana los empates: si la evidencia lo
+  // respalda, ningún rezago que cuadre por casualidad puede desplazarlo. Pasa
+  // cuando los abonos de una cuota sincronizada suman más de lo que baja su
+  // snapshot y la diferencia da justo el abono de una de sus últimas filas.
+  //
+  // Si la evidencia no respalda a ninguno —los créditos donde los abonos
+  // registrados no explican la caída del saldo— manda el snapshot guardado, que
+  // es lo que encierra el descuadre en su cuota en vez de arrastrarlo.
+  // Apertura implícita de una cuota: su cierre más sus abonos. El cierre parte
+  // del snapshot menos lo abonado DESPUÉS de él, porque ese snapshot también
+  // puede haber quedado rezagado por sus propias filas de capital directo. Sin
+  // ese descuento la apertura sale alta por esa cola y arrastra el error a la
+  // cuota anterior, que la usa como evidencia.
+  const aperturaImplicitaDe = (key: string): Big | undefined => {
+    const abonos = abonosPorCuota.get(key) ?? new Big(0);
+    const snapshot = cierreGuardado.get(key);
+    // Sin snapshot positivo, un cero explícito significa que la cuota cerró en
+    // 0: ahí el cierre ES 0 y no hay cola que descontar. La resta solo aplica
+    // cuando el snapshot lo escribió una fila positiva y quedaron abonos
+    // detrás de ella.
+    if (snapshot === undefined) {
+      return cuotasConCeros.has(key) ? abonos : undefined;
+    }
+    return snapshot.minus(rezagoCierto.get(key) ?? new Big(0)).plus(abonos);
+  };
+
+  const cierreDeCuota = (key: string, corrido: Big): Big => {
+    const snapshot = cierreGuardado.get(key);
+    if (snapshot === undefined) {
+      // Sin snapshot propio —puras filas de capital directo, que guardan el
+      // centinela 0— el cierre lo da la cuota siguiente: su apertura implícita
+      // es, por definición, el cierre de esta. Sin eso la apertura se
+      // reconstruía desde el propio abono y la cuota terminaba en Q0.00.
+      const sig = siguienteCuota.get(key);
+      const apertura = sig === undefined ? undefined : aperturaImplicitaDe(sig);
+      if (apertura !== undefined) return apertura;
+      return corrido;
+    }
+
+    // Cuando ninguna evidencia resuelve, el default es el snapshot — salvo que
+    // la cuota traiga una fila con 0 explícito Y los abonos de su cola agoten
+    // exactamente ese snapshot. Ahí cerró en 0 y no hace falta evidencia
+    // externa: lo confirma su propia aritmética. Es el caso de la cancelación
+    // que llega después de una fila normal, donde el snapshot positivo tapaba
+    // el cero y la cuota terminaba en su saldo viejo en vez de en Q0.
+    const porDefecto = (): Big => {
+      // El cierre en 0 se compara SOLO contra la cola posterior al snapshot. Un
+      // sufijo que cruza la fila del snapshot mezcla capital anterior a él y
+      // puede coincidir por casualidad: con abonos 70, 20 (snapshot 100) y 10,
+      // el sufijo 70+20+10 da 100 y la cuota se daba por cancelada cuando
+      // después del snapshot solo se abonaron 10.
+      const cola = rezagoCierto.get(key) ?? new Big(0);
+      if (cerosTrasSnapshot.has(key) && cola.gt(0) && snapshot.minus(cola).abs().lte(0.02)) {
+        return new Big(0);
+      }
+      // Sin vecina que confirme, el snapshot se descuenta igual por lo que se
+      // abonó DESPUÉS de él. No hace falta evidencia externa: esas filas van
+      // detrás en el orden del reporte, así que su capital no está adentro.
+      return snapshot.minus(rezagoCierto.get(key) ?? new Big(0));
+    };
+
+    const siguiente = siguienteCuota.get(key);
+    // Una cuota SIN ninguna fila positiva y con ceros explícitos es una
+    // cancelación: su cierre real es 0. Ese cero vale como EVIDENCIA para
+    // confirmar el cierre de esta cuota, pero no se guarda como snapshot para
+    // que un cero de una fila de capital directo no termine anclando a nadie.
+    const aperturaImplicita = siguiente === undefined ? undefined : aperturaImplicitaDe(siguiente);
+
+    if (aperturaImplicita !== undefined) {
+      if (aperturaImplicita.minus(snapshot).abs().lte(0.02)) return snapshot;
+
+      for (const rezago of rezagosPosibles(key)) {
+        const candidato = snapshot.minus(rezago);
+        if (aperturaImplicita.minus(candidato).abs().lte(0.02)) return candidato;
+      }
+      return porDefecto();
+    }
+
+    // Última cuota visible: no hay siguiente que la confirme, así que la
+    // evidencia sale de la ANTERIOR. Su cierre guardado es la apertura de esta,
+    // y la apertura es el cierre más los abonos de la cuota. Solo confirma —el
+    // snapshot se prueba primero y si nada cuadra manda igual—, así que la
+    // cuota 0 sigue sin poder anclar a la 1.
+    const anterior = anteriorCuota.get(key);
+    const snapshotAnterior =
+      anterior === undefined ? undefined : cierreGuardado.get(anterior);
+    if (snapshotAnterior === undefined) return porDefecto();
+
+    const abonosDeEsta = abonosPorCuota.get(key) ?? new Big(0);
+    if (snapshot.plus(abonosDeEsta).minus(snapshotAnterior).abs().lte(0.02)) return snapshot;
+
+    for (const rezago of rezagosPosibles(key)) {
+      const candidato = snapshot.minus(rezago);
+      if (candidato.plus(abonosDeEsta).minus(snapshotAnterior).abs().lte(0.02)) return candidato;
+    }
+    return porDefecto();
+  };
+
   let cuotaActual: string | null = null;
-  let saldoInicioCuota: Big | null = null;
-  let abonosAcumCuota = new Big(0);
+  let saldo = new Big(0);
 
-  return pagos.map((pago) => {
-    const abonoCapital = new Big(pago.abono_capital || 0);
-    const totalRestanteFila = new Big(pago.total_restante || 0);
-    const tieneRubrosDeCuota = getEstadoCuentaOtrosRubros(pago) > 0;
-    const snapshotConfiable =
-      pago.pagado === true && tieneRubrosDeCuota && totalRestanteFila.gt(0);
-
+  const filas = pagos.map((pago) => {
     const key = String(pago.numero_cuota ?? "");
 
-    if (capitalRestante === null) {
-      capitalRestante = snapshotConfiable
-        ? totalRestanteFila
-        : totalRestanteFila.plus(abonoCapital);
-      // Primera cuota visible sin saldo previo: su apertura se reconstruye como
-      // snapshot + Σ abonos de la cuota (el snapshot ya es post-pago).
+    if (key !== cuotaActual) {
+      // La cuota 0 es el desembolso, no una cuota: su snapshot puede venir de
+      // otra tabla de amortización que la del calendario, así que NO ancla a la
+      // 1. La primera cuota real reconstruye su propia apertura y de la 2 en
+      // adelante cada una se ancla en el cierre guardado de la anterior.
+      // Tras un hueco la cadena se corta: la cuota reconstruye su apertura desde
+      // su propio snapshot en vez de heredar el cierre de una que no es su
+      // vecina.
+      const hayHueco =
+        cuotaActual !== null && cuotaActual !== "0" && !sonConsecutivas(cuotaActual, key);
+      const arrancaCadena = cuotaActual === null || cuotaActual === "0" || hayHueco;
+      if (arrancaCadena) {
+        // Una cuota representada SOLO por filas de capital directo no tiene
+        // snapshot propio, así que su cierre no se puede reconstruir. Pero su
+        // apertura sí se conoce: es el saldo con el que viene la cuota 0, y
+        // desde ahí se le restan sus abonos como a cualquier otra. Sin esto la
+        // apertura salía del cierre inexistente (0) y el crédito arrancaba en
+        // Q0 en vez de en su saldo real.
+        // Tras un hueco el saldo heredado ya no sirve —la cuota escondida lo
+        // redujo— así que la cuota se reconstruye igual aunque no tenga
+        // snapshot propio: una cancelación que deja 0 cierra en 0.
+        const tieneSnapshot = cierreGuardado.get(key) !== undefined;
+        // Sin snapshot propio, el 0 de la cuota solo significa "cerró en 0" si
+        // es una cuota de verdad. Si son puras filas de capital directo, ese 0
+        // es el centinela que guarda registerPayment y presentarlo como cierre
+        // mostraría un abono parcial como si cancelara el crédito: ahí conviene
+        // arrastrar el saldo previo, aun sabiéndolo alto por la cuota escondida.
+        const cierraEnCero = cuotasConRubros.has(key);
+        const sig = siguienteCuota.get(key);
+        const sinVecinaQueAncle = sig === undefined || aperturaImplicitaDe(sig) === undefined;
+        if (
+          !tieneSnapshot &&
+          !cierraEnCero &&
+          sinVecinaQueAncle &&
+          cuotaActual === null &&
+          cierreFallback != null &&
+          Number(cierreFallback) > 0
+        ) {
+          // Puras filas de capital directo abriendo el estado de cuenta y sin
+          // vecina: no hay nada en las filas de donde sacar la apertura. El
+          // capital del crédito es el CIERRE, así que la apertura sale de
+          // sumarle los abonos de la cuota, igual que con cualquier snapshot.
+          saldo = new Big(cierreFallback).plus(abonosPorCuota.get(key) ?? new Big(0));
+        } else if (tieneSnapshot || cuotaActual === null || (hayHueco && cierraEnCero)) {
+          // Sin cierre previo utilizable: la apertura se reconstruye como
+          // snapshot + Σ abonos de la cuota (el snapshot ya es post-pago), así
+          // la última fila aterriza exacto en el saldo guardado.
+          saldo = cierreDeCuota(key, new Big(0)).plus(
+            abonosPorCuota.get(key) ?? new Big(0),
+          );
+        }
+        // Si no hay snapshot propio, `saldo` ya trae el cierre de la cuota 0 y
+        // se usa tal cual como apertura.
+      } else {
+        // Ancla de la cuota anterior: su cierre real, resuelto con la misma
+        // evidencia. Si esa cuota no dejó snapshot usable, sigue el corrido.
+        saldo = cierreDeCuota(cuotaActual, saldo);
+      }
       cuotaActual = key;
-      saldoInicioCuota = snapshotConfiable
-        ? totalRestanteFila.plus(
-            pagos
-              .filter((p) => String(p.numero_cuota ?? "") === key)
-              .reduce((acc, p) => acc.plus(p.abono_capital || 0), new Big(0)),
-          )
-        : capitalRestante;
-      abonosAcumCuota = new Big(0);
-    } else if (key !== cuotaActual) {
-      cuotaActual = key;
-      saldoInicioCuota = capitalRestante;
-      abonosAcumCuota = new Big(0);
     }
-    abonosAcumCuota = abonosAcumCuota.plus(abonoCapital);
 
-    const abonoYaRestado =
-      !snapshotConfiable &&
-      totalRestanteFila.gt(0) &&
-      totalRestanteFila.minus(saldoInicioCuota!.minus(abonosAcumCuota)).abs().lte(0.05);
-
-    capitalRestante = snapshotConfiable || abonoYaRestado
-      ? totalRestanteFila
-      : capitalRestante.minus(abonoCapital);
+    saldo = saldo.minus(pago.abono_capital || 0);
 
     return {
       ...pago,
-      total_restante: capitalRestante.toFixed(2),
+      total_restante: saldo.toFixed(2),
     };
   });
+
+  // El cierre de cada cuota se resuelve en la transición a la siguiente, así
+  // que la última se quedaba sin resolver y mostraba el saldo corrido. Donde
+  // los abonos registrados no explican la caída del saldo eso deja el saldo
+  // FINAL del estado de cuenta por encima del guardado, que es el número que
+  // más mira el cliente. Se le aplica el mismo criterio que a las demás.
+  if (cuotaActual !== null && filas.length > 0) {
+    const cierre = cierreDeCuota(cuotaActual, saldo);
+    filas[filas.length - 1] = {
+      ...filas[filas.length - 1]!,
+      total_restante: cierre.toFixed(2),
+    };
+  }
+
+  return filas;
 }
 
 const formatEstadoCuentaMoney = (n: number) =>
@@ -650,8 +883,17 @@ export async function exportPagosToExcel(credito_sifco: string) {
   let totalCapital = 0;
   let totalInteres = 0;
 
+  // getAllPagosWithCreditAndInversionistas devuelve { pago, inversionistasData,
+  // pagosInversionistas } y su query no trae el capital del crédito, así que se
+  // consulta aparte. Solo se usa como apertura de último recurso cuando las
+  // filas no dan ninguna.
+  const capitalResult = await db.execute<{ capital: string | null }>(
+    sql`SELECT capital FROM cartera.creditos WHERE numero_credito_sifco = ${credito_sifco} LIMIT 1`,
+  );
+
   const pagosOrdenados = applyEstadoCuentaRunningCapital(
-    sortEstadoCuentaPayments(pagosFiltrados.map(({ pago }) => pago))
+    sortEstadoCuentaPayments(pagosFiltrados.map(({ pago }) => pago)),
+    capitalResult.rows[0]?.capital,
   );
 
   const tableRows = pagosOrdenados.map((pago, index) => {

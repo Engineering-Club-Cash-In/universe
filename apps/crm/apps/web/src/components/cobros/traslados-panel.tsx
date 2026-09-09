@@ -181,12 +181,21 @@ export function TrasladosPanel() {
 	> | null>(null);
 	const [page, setPage] = useState(1);
 	const nombres = new Map(asesores.data?.map((a) => [a.asesor_id, a.nombre]));
-	const asesorOrigen = asesores.data?.find(
-		(asesor) => String(asesor.asesor_id) === origen,
-	);
-	const bucketsOrigen = [...new Set(asesorOrigen?.buckets ?? [])].sort(
-		(a, b) => a - b,
-	);
+	const origenSeleccionado = /^\d+$/.test(origen) && Number(origen) > 0;
+	const cargaOrigen = useQuery({
+		...orpc.getCargaPorAsesorBucket.queryOptions({
+			input: { asesorId: Number(origen) },
+		}),
+		enabled: origenSeleccionado,
+	});
+	const cargaOrigenPendiente = origenSeleccionado && cargaOrigen.isPending;
+	const bucketsOrigen = [
+		...new Set(
+			cargaOrigen.data?.porAsesor
+				.find((asesor) => asesor.asesor_id === Number(origen))
+				?.porBucket.map((bucket) => bucket.bucket) ?? [],
+		),
+	].sort((a, b) => a - b);
 	const motivos: Record<string, string> = {
 		redistribucion: "Redistribución operativa",
 		despido: "Despido",
@@ -198,16 +207,20 @@ export function TrasladosPanel() {
 			? detalle.trim()
 			: `${motivos[razon]}${detalle.trim() ? `: ${detalle.trim()}` : ""}`;
 	const requiereDestinoEspecial = razon === "despido" || razon === "renuncia";
-	const errorFormulario = validarFormularioTraslado({
-		modo,
-		origen,
-		destino,
-		destinoEspecial,
-		requiereDestinoEspecial,
-		destinosPorBucket,
-		bucketsOrigen,
-		motivo,
-	});
+	const errorFormulario = cargaOrigen.isError
+		? "No se pudieron cargar los buckets de la cartera. Intenta de nuevo."
+		: cargaOrigenPendiente
+			? "Cargando buckets de la cartera…"
+			: validarFormularioTraslado({
+					modo,
+					origen,
+					destino,
+					destinoEspecial,
+					requiereDestinoEspecial,
+					destinosPorBucket,
+					bucketsOrigen,
+					motivo,
+				});
 	const limpiar = () => {
 		setPreview(null);
 		setResultado(null);
@@ -377,13 +390,18 @@ export function TrasladosPanel() {
 													String(a.asesor_id) !== origen &&
 													puedeRecibirTodosBuckets(bucketsOrigen, a.buckets),
 											)}
+											disabled={cargaOrigenPendiente}
 										/>
 									</div>
 								)}
 								{modo === "destino_por_bucket" && (
 									<div className="space-y-3 sm:col-span-2">
 										<Label>Destino por bucket</Label>
-										{bucketsOrigen.length ? (
+										{cargaOrigenPendiente ? (
+											<p className="text-muted-foreground text-sm">
+												Cargando buckets de la cartera…
+											</p>
+										) : bucketsOrigen.length ? (
 											bucketsOrigen.map((bucket) => (
 												<div
 													key={bucket}
@@ -431,7 +449,10 @@ export function TrasladosPanel() {
 											limpiar();
 										}}
 										asesores={(asesores.data ?? []).filter(
-											(a) => a.activo && String(a.asesor_id) !== origen,
+											(a) =>
+												a.activo &&
+												a.buckets.length > 0 &&
+												String(a.asesor_id) !== origen,
 										)}
 									/>
 									<p className="text-muted-foreground text-xs">
@@ -659,7 +680,8 @@ export function TrasladosPanel() {
 							>
 								<p className="font-semibold">Créditos sin destino</p>
 								<p className="mb-3 text-muted-foreground text-sm">
-									No se puede confirmar hasta asignar bucket operativo a estas cuentas.
+									No se puede confirmar hasta asignar bucket operativo a estas
+									cuentas.
 								</p>
 								<div className="max-h-56 overflow-auto">
 									<Table>
@@ -693,7 +715,7 @@ export function TrasladosPanel() {
 													<TableCell>
 														{excluido.estado?.replaceAll("_", " ") ??
 															"Sin bucket"}
-														</TableCell>
+													</TableCell>
 													<TableCell>
 														No se trasladará hasta asignar bucket operativo.
 													</TableCell>

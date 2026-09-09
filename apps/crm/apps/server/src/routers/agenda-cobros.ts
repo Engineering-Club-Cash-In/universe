@@ -27,6 +27,7 @@ import { clients } from "../db/schema/crm";
 import {
 	cerrarItemsAgenda,
 	type MotivoAgenda,
+	prioridadMotivo,
 	ventanaDiaGuatemala,
 } from "../lib/agenda-cobros-snapshot";
 import { agruparCasosVigentesPorSifco } from "../lib/caso-vigente";
@@ -87,7 +88,10 @@ export const agendaCobrosRouter = {
 			// Se resuelve en lectura para que una cobertura creada antes o después
 			// de la captura del snapshot produzca el mismo resultado.
 			const coberturas = await db
-				.select({ titularId: coberturasAgendaCobros.titularId })
+				.select({
+					titularId: coberturasAgendaCobros.titularId,
+					createdAt: coberturasAgendaCobros.createdAt,
+				})
 				.from(coberturasAgendaCobros)
 				.where(
 					and(
@@ -291,6 +295,13 @@ export const agendaCobrosRouter = {
 				// sobrevive la del suplente, un contacto ya hecho por el titular
 				// deja de matchear más abajo (`realizadoPorValidos` quedaba sin
 				// ese dueño) y el item se veía pendiente aunque ya estaba resuelto.
+				//
+				// Los DEMÁS campos (sobre todo `motivoAgenda`) sí necesitan un
+				// criterio de desempate, no "la primera fila que llega" —el orden
+				// de dos filas con igual SIFCO no está garantizado por la query—:
+				// si el crédito es D-0 en un snapshot y sla_hoy en el otro, debe
+				// prevalecer D-0 (más urgente), igual que ya decide
+				// `deduplicarAgenda` para el caso de un asesor único.
 				const todos = [
 					...(asesoresFuente.length ? await consultarItems() : []),
 					...itemsCanceladosHoyContactados,
@@ -303,12 +314,22 @@ export const agendaCobrosRouter = {
 				>();
 				for (const item of todos) {
 					const previo = porSifco.get(item.numeroCreditoSifco);
-					if (previo) {
-						previo.dueniosSnapshot.push(item.snapshotAsesorId);
-					} else {
+					if (!previo) {
 						porSifco.set(item.numeroCreditoSifco, {
 							...item,
 							dueniosSnapshot: [item.snapshotAsesorId],
+						});
+						continue;
+					}
+					previo.dueniosSnapshot.push(item.snapshotAsesorId);
+					if (
+						prioridadMotivo(item.motivoAgenda as MotivoAgenda) <
+						prioridadMotivo(previo.motivoAgenda as MotivoAgenda)
+					) {
+						const dueniosAcumulados = previo.dueniosSnapshot;
+						porSifco.set(item.numeroCreditoSifco, {
+							...item,
+							dueniosSnapshot: dueniosAcumulados,
 						});
 					}
 				}
@@ -457,6 +478,15 @@ export const agendaCobrosRouter = {
 					),
 				);
 
+			// Cuándo se registró la cobertura ACTIVA de cada titular: un item
+			// cuyo `dueniosSnapshot` incluye a un titular con cobertura vigente
+			// hoy solo debe aceptar contactos del suplente POSTERIORES a ese
+			// registro. Los items de `itemsCanceladosHoyContactados` ya vienen
+			// resueltos por su propio `id` exacto en la query — no necesitan
+			// esto (por eso `createdAt` no se les pide ahí).
+			const createdAtPorTitular = new Map(
+				coberturas.map((c) => [c.titularId, c.createdAt]),
+			);
 			const cerrados = cerrarItemsAgenda(
 				fecha,
 				items.map((item) => ({
@@ -477,6 +507,7 @@ export const agendaCobrosRouter = {
 					realizadoPorValidos: [
 						...new Set([...item.dueniosSnapshot, asesorId]),
 					],
+					contactoValidoDesde: createdAtPorTitular.get(item.dueniosSnapshot[0]),
 				})),
 				contactos,
 			);

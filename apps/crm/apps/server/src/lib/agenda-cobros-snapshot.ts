@@ -18,6 +18,16 @@ export interface AgendaSnapshotItemFuente {
 	 * es idéntico al de antes (solo `asesorId`).
 	 */
 	realizadoPorValidos?: readonly string[];
+	/**
+	 * CB-114: si la cobertura se registró a mitad de día, un contacto del
+	 * suplente ANTERIOR a ese registro no era trabajo de cobertura —podía
+	 * ser una coincidencia de pool sin relación real— y no debe cerrar el
+	 * item del titular. Mismo criterio que ya aplican `cerrarSnapshotsAgenda`
+	 * y `columnaEnAgendaDeTitular`. Solo corta contactos AJENOS (no del
+	 * propio `asesorId`, que siempre cuentan): se aplica junto con
+	 * `realizadoPorValidos`, nunca en su lugar.
+	 */
+	contactoValidoDesde?: Date;
 }
 
 export interface ContactoAgenda {
@@ -46,7 +56,15 @@ export interface AgendaSnapshotRepository {
 	): Promise<boolean>;
 }
 
-function prioridadMotivo(motivo: MotivoAgenda): number {
+/**
+ * D-0 (pago programado) es más urgente que sla_hoy, que a su vez es más
+ * urgente que el resto. `deduplicarAgenda` la usa para decidir cuál motivo
+ * gana cuando el mismo crédito aparece dos veces en la agenda de UN asesor;
+ * `getMiAgendaHoy` (routers/agenda-cobros.ts) la reutiliza para el mismo
+ * criterio al fusionar el mismo crédito entre DOS snapshots distintos
+ * (titular/suplente compartiendo pool de bucket).
+ */
+export function prioridadMotivo(motivo: MotivoAgenda): number {
 	if (motivo === "D-0") return 0;
 	if (motivo === "sla_hoy") return 1;
 	return 2;
@@ -127,10 +145,19 @@ function contactoPerteneceAlItem(
 	contacto: ContactoAgenda,
 ): boolean {
 	const dueniosValidos = item.realizadoPorValidos ?? [item.asesorId];
+	if (!dueniosValidos.includes(contacto.realizadoPor)) return false;
+	// El corte por fecha de registro solo aplica a un contacto AJENO (de un
+	// suplente gestionando el item de otro): el dueño real del item siempre
+	// pudo haberlo trabajado antes de que existiera cualquier cobertura.
+	if (
+		item.contactoValidoDesde &&
+		contacto.realizadoPor !== item.asesorId &&
+		contacto.fechaContacto < item.contactoValidoDesde
+	)
+		return false;
 	return (
-		dueniosValidos.includes(contacto.realizadoPor) &&
-		((item.casoCobroId !== null && contacto.casoCobroId === item.casoCobroId) ||
-			contacto.numeroCreditoSifco === item.numeroCreditoSifco)
+		(item.casoCobroId !== null && contacto.casoCobroId === item.casoCobroId) ||
+		contacto.numeroCreditoSifco === item.numeroCreditoSifco
 	);
 }
 

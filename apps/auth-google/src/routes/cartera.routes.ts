@@ -157,7 +157,10 @@ const resolverEntidades = async (
 const entidadPedida = async (
   c: any,
   idCrudo?: unknown,
-  { frescas = false }: { frescas?: boolean } = {},
+  {
+    frescas = false,
+    exigeUnaSola = false,
+  }: { frescas?: boolean; exigeUnaSola?: boolean } = {},
 ): Promise<EntidadPortal> => {
   const entidades = await resolverEntidades(c, { frescas });
 
@@ -169,7 +172,45 @@ const entidadPedida = async (
   }
 
   if (idCrudo === undefined || idCrudo === null || idCrudo === "") {
-    return entidades[0];
+    // Sin id, la de SIEMPRE: la que cuelga del correo de la sesión.
+    //
+    // Es el camino de compatibilidad —el portal anterior al selector no manda
+    // `inversionista_id`— y por eso tiene que comportarse como antes, cuando
+    // cartera resolvía por correo y nada más. Devolver `entidades[0]` cambiaba
+    // esa respuesta: la lista viene ordenada con la persona primero, así que a
+    // quien tiene su correo puesto en una SOCIEDAD y además una fila personal,
+    // una edición bancaria pensada para la sociedad le caía encima a su fila
+    // personal. Y el perfil, los documentos y las inversiones le mostraban la
+    // entidad equivocada.
+    //
+    // `es_ancla` es justo eso: la fila cuyo correo casó con el de la sesión.
+    // `entidades[0]` queda de respaldo para las que solo llegaron por
+    // expansión de DPI, donde no hay ancla que preferir.
+    const anclas = entidades.filter((e) => e.es_ancla);
+
+    // Y si el correo casó con VARIAS, escribir sin id no se hace.
+    //
+    // `inversionistas.email` no es único: el representante de una sociedad
+    // suele tener su correo puesto en su ficha personal Y en la de la empresa,
+    // que es justo el caso que este PR viene a resolver con el selector. Con el
+    // id, la elección la hace la persona; sin él, elegir por el orden de la
+    // lista es escribirle la cuenta bancaria a la entidad equivocada, sin que
+    // nadie se entere y con la anterior ya pisada.
+    //
+    // Es el 409 que hacía `findInvestorByEmail` con `coincidencias_email > 1`,
+    // que se perdió al mudar la resolución al selector: mismo texto, para que
+    // el portal viejo siga viendo la misma respuesta. Solo aplica a las
+    // ESCRITURAS —las lecturas siguen enseñando el ancla— porque leer la
+    // entidad equivocada se corrige mirando otra vez, y escribirla no.
+    if (exigeUnaSola && anclas.length > 1) {
+      throw new HTTPException(409, {
+        message:
+          "Tu correo está asociado a más de un inversionista. " +
+          "Contacta a soporte para que lo corrijan antes de editar tus datos.",
+      });
+    }
+
+    return anclas[0] ?? entidades[0];
   }
 
   const id = Number(idCrudo);
@@ -255,7 +296,7 @@ carteraRoutes.post("/investor", async (c) => {
     const entidad = await entidadPedida(
       c,
       (body as { inversionista_id?: unknown } | null)?.inversionista_id,
-      { frescas: true },
+      { frescas: true, exigeUnaSola: true },
     );
 
     // Whitelist: lo único que el inversionista edita de su propia ficha, ya

@@ -14,7 +14,7 @@ import {
   errorRepLegal,
   esEmpresaInicial,
   requiereConfirmacionBorrado,
-  valorRepLegalAEnviar,
+  valorRepLegalAlGuardar,
 } from "./repLegalEmpresa";
 
 interface InvestorModalProps {
@@ -29,6 +29,16 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
   const { bancos, loading: loadingBancos, loadBancos } = useBancos();
   const queryClient = useQueryClient();
   const [showCombinada, setShowCombinada] = useState(false);
+  // Quitar el representante legal se confirma ANTES de entrar a la reinversión
+  // combinada, no al guardar. `ModalReinversionCombinada` persiste cada
+  // asignación de crédito por su cuenta antes de avisar acá, así que preguntar
+  // después dejaba lo peor de los dos mundos: cancelar mantenía las asignaciones
+  // ya escritas mientras el inversionista conservaba su representante y su tipo
+  // de reinversión anterior. Se pregunta antes y se recuerda la respuesta.
+  const [confirmarAntesDeCombinada, setConfirmarAntesDeCombinada] =
+    useState(false);
+  const [borradoRepLegalConfirmado, setBorradoRepLegalConfirmado] =
+    useState(false);
   const [prevTipoReinversion, setPrevTipoReinversion] = useState<string>(
     initialData?.tipo_reinversion ?? "sin_reinversion"
   );
@@ -102,10 +112,16 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
       setEsEmpresa(esEmpresaInicial(initialData.dpi_rep_legal, initialData.dpi));
       setRepLegalOriginal(initialData.dpi_rep_legal ?? "");
       setPayloadPorConfirmar(null);
+      // Se limpia con el resto: heredarlo abriría a otro inversionista con el
+      // borrado ya "confirmado" por el anterior.
+      setConfirmarAntesDeCombinada(false);
+      setBorradoRepLegalConfirmado(false);
     } else if (mode === "create") {
       setEsEmpresa(false);
       setRepLegalOriginal("");
       setPayloadPorConfirmar(null);
+      setConfirmarAntesDeCombinada(false);
+      setBorradoRepLegalConfirmado(false);
       reset({
         nombre: "",
         dpi: undefined,
@@ -152,17 +168,16 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
       // y no puede colarla) se fabrique una cuenta con el DPI que quiera. En
       // modo editar es inocua: cartera solo provisiona las filas que INSERTA.
       provisionar_portal: true,
-      // Llave siempre presente: vacío = borrar. Es seguro en ambos modos porque
-      // la creación estricta garantiza que el alta jamás escribe sobre otra fila.
-      // Sin "¿Es empresa?" marcado no se manda nada del representante (null).
-      // Solo borra si ANTES era empresa. Sin esto, editar cualquier campo de
-      // quien es su propio representante le vaciaba el `dpi_rep_legal`.
-      dpi_rep_legal: valorRepLegalAEnviar(esEmpresa, data.dpi_rep_legal, {
-        borrarSiNoEsEmpresa: requiereConfirmacionBorrado(
-          repLegalOriginal,
-          esEmpresa,
-          initialData?.dpi
-        ),
+      // Qué se manda del representante lo decide entero `valorRepLegalAlGuardar`:
+      // borra solo lo que se desmarcó a propósito, no toca al que es su propio
+      // representante, y le sigue el DPI cuando es el DPI lo que se editó (si no,
+      // la fila se convertía en una empresa representada por su identidad vieja).
+      dpi_rep_legal: valorRepLegalAlGuardar({
+        esEmpresa,
+        valor: data.dpi_rep_legal,
+        repLegalOriginal,
+        dpiOriginal: initialData?.dpi,
+        dpiDelFormulario: data.dpi,
       }),
       dpi: data.dpi ? Number(data.dpi) : null,
       banco: data.banco ? Number(data.banco) : null,
@@ -180,6 +195,19 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
       return;
     }
     enviarPayload(payload);
+  };
+
+  /** Falta confirmar que se le quita el representante a alguien que lo tenía. */
+  const faltaConfirmarBorrado = () =>
+    !borradoRepLegalConfirmado &&
+    requiereConfirmacionBorrado(repLegalOriginal, esEmpresa, initialData?.dpi);
+
+  const abrirCombinada = () => {
+    if (faltaConfirmarBorrado()) {
+      setConfirmarAntesDeCombinada(true);
+      return;
+    }
+    setShowCombinada(true);
   };
 
   const enviarPayload = (payload: Parameters<typeof insertInvestor.mutate>[0]) => {
@@ -434,7 +462,7 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
                       }
                       if (val === "reinversion_combinada") {
                         setPrevTipoReinversion(prev === "reinversion_combinada" ? "sin_reinversion" : prev);
-                        setShowCombinada(true);
+                        abrirCombinada();
                       }
                     },
                   })}
@@ -450,7 +478,7 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
                 {watch("tipo_reinversion") === "reinversion_combinada" && mode === "update" && initialData?.inversionista_id && (
                   <button
                     type="button"
-                    onClick={() => setShowCombinada(true)}
+                    onClick={abrirCombinada}
                     className="px-3 py-2 rounded-lg bg-purple-100 hover:bg-purple-200 text-purple-700 font-semibold text-sm transition whitespace-nowrap border border-purple-300"
                   >
                     Configurar
@@ -546,7 +574,7 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
       </div>
 
       {/* Confirmación — quitar el representante legal borra su acceso al portal */}
-      {payloadPorConfirmar && (
+      {(payloadPorConfirmar || confirmarAntesDeCombinada) && (
         <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-[9999] p-4">
           <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md">
             <h3 className="text-lg font-bold text-red-700 mb-3">
@@ -562,20 +590,35 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
             <div className="flex justify-end gap-3 mt-6">
               <button
                 type="button"
-                onClick={() => setPayloadPorConfirmar(null)}
+                onClick={() => {
+                  setPayloadPorConfirmar(null);
+                  setConfirmarAntesDeCombinada(false);
+                }}
                 className="px-4 py-2 rounded-lg bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold transition"
               >
                 Cancelar
               </button>
               <button
                 type="button"
-                onClick={() => enviarPayload(payloadPorConfirmar)}
+                onClick={() => {
+                  if (payloadPorConfirmar) {
+                    enviarPayload(payloadPorConfirmar);
+                    return;
+                  }
+                  // Confirmado antes de la combinada: se recuerda para no
+                  // volver a preguntar al guardar, cuando ya no serviría.
+                  setBorradoRepLegalConfirmado(true);
+                  setConfirmarAntesDeCombinada(false);
+                  setShowCombinada(true);
+                }}
                 className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white font-bold transition disabled:opacity-50"
                 disabled={insertInvestor.isPending}
               >
                 {insertInvestor.isPending
                   ? "Guardando..."
-                  : "Sí, quitar el representante"}
+                  : payloadPorConfirmar
+                    ? "Sí, quitar el representante"
+                    : "Sí, quitar el representante y continuar"}
               </button>
             </div>
           </div>
@@ -606,35 +649,23 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
             const payload = {
               ...currentFormData,
               dpi: currentFormData.dpi ? Number(currentFormData.dpi) : null,
-              dpi_rep_legal: valorRepLegalAEnviar(
+              dpi_rep_legal: valorRepLegalAlGuardar({
                 esEmpresa,
-                currentFormData.dpi_rep_legal,
-                {
-                  borrarSiNoEsEmpresa: requiereConfirmacionBorrado(
-                    repLegalOriginal,
-                    esEmpresa,
-                    initialData?.dpi
-                  ),
-                }
-              ),
+                valor: currentFormData.dpi_rep_legal,
+                repLegalOriginal,
+                dpiOriginal: initialData?.dpi,
+                dpiDelFormulario: currentFormData.dpi,
+              }),
               banco: currentFormData.banco ? Number(currentFormData.banco) : null,
               monto_reinversion: currentFormData.monto_reinversion ? Number(currentFormData.monto_reinversion) : 0,
               tipo_reinversion: "reinversion_combinada",
               re_inversion: "reinversion_combinada",
             };
-            // Esta ruta también puede terminar borrando el `dpi_rep_legal` (si el
-            // operador desmarcó "¿Es empresa?" antes de configurar la
-            // combinada): pasa por la misma confirmación que el guardado normal.
-            if (
-              requiereConfirmacionBorrado(
-                repLegalOriginal,
-                esEmpresa,
-                initialData?.dpi
-              )
-            ) {
-              setPayloadPorConfirmar(payload);
-              return;
-            }
+            // Acá ya NO se pregunta: para llegar hasta aquí las asignaciones de
+            // crédito ya están escritas, así que una cancelación no podría
+            // deshacerlas. La confirmación se pidió antes de abrir la
+            // combinada (`abrirCombinada`), que es el último punto en el que
+            // cancelar todavía no cuesta nada.
             insertInvestor.mutate(payload, {
               onSuccess: () => {
                 toast.success("Inversionista actualizado con reinversión combinada.");

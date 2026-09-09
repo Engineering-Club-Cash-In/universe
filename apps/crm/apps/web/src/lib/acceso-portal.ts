@@ -114,6 +114,12 @@ const texto = (
 			return `Ya tenía cuenta en el portal con otro correo: ${acceso.usuarioEmail ?? "uno distinto"}. Hasta que los dos correos sean el mismo no va a ver sus inversiones al entrar. Avisa a sistemas para cuadrarlos.`;
 		case "cuenta_anclada_solo_por_correo":
 			return "Ya tenía cuenta y se le reconoció solo por el correo. Si alguien le cambia el correo, se le va a crear una segunda cuenta. Avisa a sistemas.";
+		// La marca cartera al crear, mirando el nombre (`pareceSociedad`).
+		// Se avisa AQUÍ y no solo en el resumen diario porque el resumen no la ve: el
+		// job no crea cuentas, así que por su lado esta fila vuelve como "ya tenía" y
+		// se pierde entre las sanas. Aquí quien captura la tiene todavía delante.
+		case "parece_sociedad_con_cuenta_propia":
+			return "El nombre parece de una sociedad y se le creó cuenta PROPIA del portal, con su contraseña por correo. Si es una empresa, al portal entra su representante legal: capturáselo en Editar → ¿Es empresa? y avisa a sistemas de la cuenta que se creó de más.";
 		case "correo_no_enviado":
 			return acceso.advertencias.includes(
 				"cuenta_creada_sin_contrasena_entregada",
@@ -125,6 +131,38 @@ const texto = (
 	}
 };
 
+/**
+ * El desenlace cuando el acceso NO se dio.
+ *
+ * Vive aparte de las advertencias porque no compite con ellas: una cuenta
+ * puede volver como `fallo` Y con advertencias, y antes las advertencias se
+ * devolvían solas y se comían la única frase que dice que esa persona no
+ * puede entrar al portal.
+ */
+const mensajeDeFallo = (
+	acceso: AccesoPortal,
+): AvisoAccesoPortal | null => {
+	// El timeout no es un "no se pudo": es un "no sabemos". Abortamos la
+	// espera, pero del otro lado la cuenta pudo quedar creada. Sale del
+	// `causa()` genérico porque ese texto termina mandando a apretar otra vez
+	// "Dar acceso al portal", y eso es justo lo que NO sirve: si la cuenta
+	// existe, el reintento contesta "ya tenía" y no manda ninguna contraseña.
+	if (acceso.motivo === "timeout") {
+		return {
+			tono: "advertencia",
+			texto:
+				"No sabemos si quedó con acceso: el portal no respondió a tiempo y la cuenta pudo haberse creado igual. NO le des acceso de nuevo —si la cuenta existe, el sistema dirá que \"ya tenía\" y no le manda ninguna contraseña—. Avisa a sistemas para que confirmen si le llegó y, si no, le reseteen la contraseña.",
+		};
+	}
+
+	// El alta SÍ salió: decirlo es lo que evita que lo vuelvan a crear y se
+	// estrellen contra el guard de duplicados.
+	return {
+		tono: "advertencia",
+		texto: `No se le pudo dar acceso al portal${causa(acceso.motivo)}, pero el inversionista sí quedó creado: no lo vuelvas a crear. Cuando quieras, ${COMO_SE_ARREGLA}.`,
+	};
+};
+
 export const avisoAccesoPortal = (
 	acceso: AccesoPortal | null | undefined,
 ): AvisoAccesoPortal | null => {
@@ -134,17 +172,22 @@ export const avisoAccesoPortal = (
 		.map((a) => texto(a, acceso))
 		.filter((t): t is string => t !== null);
 
-	if (avisos.length > 0) {
-		return { tono: "advertencia", texto: avisos.join(" ") };
+	// Las advertencias NO pueden tapar un `fallo`. Se devolvían solas y con eso
+	// se perdía lo más importante: que no se le dio acceso. Pasa de verdad —una
+	// cuenta CLIENT encontrada solo por correo vuelve como `fallo` CON la
+	// advertencia de vínculo frágil— y el operador se quedaba leyendo el detalle
+	// sin enterarse de que esa persona no puede entrar. Primero el desenlace,
+	// después el detalle.
+	const fallo = acceso.estado === "fallo" ? mensajeDeFallo(acceso) : null;
+
+	if (fallo) {
+		return avisos.length > 0
+			? { tono: fallo.tono, texto: [fallo.texto, ...avisos].join(" ") }
+			: fallo;
 	}
 
-	if (acceso.estado === "fallo") {
-		// El alta SÍ salió: decirlo es lo que evita que lo vuelvan a crear y se
-		// estrellen contra el guard de duplicados.
-		return {
-			tono: "advertencia",
-			texto: `No se le pudo dar acceso al portal${causa(acceso.motivo)}, pero el inversionista sí quedó creado: no lo vuelvas a crear. Cuando quieras, ${COMO_SE_ARREGLA}.`,
-		};
+	if (avisos.length > 0) {
+		return { tono: "advertencia", texto: avisos.join(" ") };
 	}
 
 	if (acceso.estado === "omitida") {
@@ -158,6 +201,16 @@ export const avisoAccesoPortal = (
 			return {
 				tono: "advertencia",
 				texto: `Quedó sin acceso al portal porque no tiene nombre capturado. Agrégaselo y después ${COMO_SE_ARREGLA}.`,
+			};
+		}
+		// El servicio del CRM no es ADMIN, así que cartera ni lo intentó. Es un
+		// fallo de configuración documentado (`apps/cartera-back/DEPLOYMENT.md`) y sin
+		// esto caía al `null` de abajo: el modal decía "Inversionista creado
+		// correctamente" y se cerraba, con la persona sin acceso y nadie enterado.
+		if (acceso.motivo === "origen_no_autorizado") {
+			return {
+				tono: "advertencia",
+				texto: `Quedó sin acceso al portal: este servicio no tiene permiso para abrirlo. Avisa a sistemas, y mientras tanto ${COMO_SE_ARREGLA}.`,
 			};
 		}
 		if (acceso.motivo === "no_solicitado") {

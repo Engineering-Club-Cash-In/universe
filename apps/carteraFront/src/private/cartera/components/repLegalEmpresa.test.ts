@@ -4,7 +4,7 @@ import {
   errorRepLegal,
   esEmpresaInicial,
   requiereConfirmacionBorrado,
-  valorRepLegalAEnviar,
+  valorRepLegalAlGuardar,
 } from "./repLegalEmpresa";
 
 describe("interruptor ¿Es empresa?", () => {
@@ -37,16 +37,72 @@ describe("validación del DPI del representante", () => {
 });
 
 describe("valor a enviar", () => {
+  const guardar = (over: Partial<Parameters<typeof valorRepLegalAlGuardar>[0]> = {}) =>
+    valorRepLegalAlGuardar({
+      esEmpresa: true,
+      valor: "01234567",
+      repLegalOriginal: null,
+      dpiOriginal: null,
+      dpiDelFormulario: null,
+      ...over,
+    });
+
   it("conserva los ceros a la izquierda tal cual", () => {
-    expect(valorRepLegalAEnviar(true, "01234567")).toBe("01234567");
+    expect(guardar()).toBe("01234567");
   });
 
   it("recorta espacios", () => {
-    expect(valorRepLegalAEnviar(true, " 123 ")).toBe("123");
+    expect(guardar({ valor: " 123 " })).toBe("123");
   });
 
-  it("manda null (borrar) cuando el interruptor está sin marcar, aunque quede texto tecleado", () => {
-    expect(valorRepLegalAEnviar(false, "123")).toBeNull();
+  it("manda null (borrar) al desmarcar a quien SÍ tenía representante", () => {
+    expect(
+      guardar({
+        esEmpresa: false,
+        valor: "123",
+        repLegalOriginal: "999",
+        dpiOriginal: "111",
+        dpiDelFormulario: "111",
+      }),
+    ).toBeNull();
+  });
+
+  it("no manda nada de quien nunca tuvo representante", () => {
+    expect(
+      guardar({ esEmpresa: false, valor: "123", repLegalOriginal: "" }),
+    ).toBeUndefined();
+  });
+});
+
+// El inversionista 187: `dpi = 4036613`, `dpi_rep_legal = '04036613'`. Abre con
+// el interruptor apagado porque se representa a sí mismo.
+describe("el que es su propio representante", () => {
+  const guardar = (dpiDelFormulario: string | number | null) =>
+    valorRepLegalAlGuardar({
+      esEmpresa: false,
+      valor: "",
+      repLegalOriginal: "04036613",
+      dpiOriginal: 4036613,
+      dpiDelFormulario,
+    });
+
+  it("no se le toca el campo si lo editado fue otra cosa", () => {
+    expect(guardar(4036613)).toBeUndefined();
+    // El mismo número con el cero delante sigue siendo el mismo número.
+    expect(guardar("04036613")).toBeUndefined();
+  });
+
+  // Sin esto, `dpi_rep_legal` se quedaba con el DPI VIEJO y `dpi` con el nuevo:
+  // dos números distintos, que es literalmente la definición de empresa que usa
+  // el backend. La fila dejaba de recibir cuenta propia y pasaba a estar
+  // representada por una identidad que ya no es la suya.
+  it("le sigue el DPI cuando lo editado fue el DPI", () => {
+    expect(guardar(5551234)).toBe("5551234");
+  });
+
+  it("se borra si el DPI se dejó vacío: conservar el viejo lo volvía empresa", () => {
+    expect(guardar("")).toBeNull();
+    expect(guardar(null)).toBeNull();
   });
 });
 

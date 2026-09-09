@@ -10,6 +10,7 @@ import { recordarSiQuedoSinDpi } from "@/features/Profile/services/avisoDpiPendi
 import {
   olvidarTipoDelAlta,
   recordarTipoDelAlta,
+  tipoAlCambiarElCorreo,
   tipoRecordadoDelAlta,
 } from "./tipoDelAltaPersistido";
 import {
@@ -259,16 +260,32 @@ export const useRegister = () => {
     },
   });
 
-  // Al montar, el tipo recordado se recupera para el correo que el formulario
-  // ya trae (el de "recordar usuario"). Sin esto el bloqueo del selector solo
-  // aparecía después del primer envío.
+  // El tipo recordado sigue al CORREO que tiene puesto el formulario, en los dos
+  // sentidos. Al montar se recupera para el correo que ya trae (el de "recordar
+  // usuario"), que es lo que hace aparecer el bloqueo del selector antes del
+  // primer envío; y al cambiar a un correo sin alta recordada se SUELTA. Sin lo
+  // segundo, escribir otro correo dejaba puesto el tipo del anterior con el
+  // selector bloqueado, y la cuenta nueva se registraba en el sistema del alta
+  // vieja. Qué se suelta y qué no lo decide `tipoAlCambiarElCorreo`.
   useEffect(() => {
-    const recordado = tipoRecordadoDelAlta(formik.values.email);
-    if (!recordado) return;
+    const decision = tipoAlCambiarElCorreo({
+      correoDelFormulario: formik.values.email,
+      // Un tipo que puso un alta de verdad no se suelta: es el candado que
+      // impide que el reintento salga hacia el otro sistema.
+      huboAltaEnEstaPestana: correoDelAlta.current !== null,
+    });
 
-    tipoDelAlta.current = recordado;
+    if (decision.accion === "no_tocar") return;
+
+    if (decision.accion === "soltar") {
+      tipoDelAlta.current = null;
+      setTipoBloqueado(false);
+      return;
+    }
+
+    tipoDelAlta.current = decision.tipo;
     setTipoBloqueado(true);
-    formik.setFieldValue("userType", recordado);
+    formik.setFieldValue("userType", decision.tipo);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formik.values.email]);
 

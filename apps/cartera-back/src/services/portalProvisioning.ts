@@ -1,5 +1,6 @@
 import {
   decidirProvisionamiento,
+  pareceSociedad,
   type FilaInversionista,
 } from "../utils/functions/provisionamientoPortal";
 
@@ -66,10 +67,20 @@ export interface OpcionesProvisionamiento {
 }
 
 /**
- * 8 segundos. Es tiempo de sobra para un insert y un Resend (~300ms) y sigue
- * siendo poco para alguien esperando el alta en un formulario.
+ * 15 segundos. Eran 8, y el cálculo estaba mal planteado: no es "cuánto tarda
+ * normalmente" sino "cuánto cuesta equivocarse".
+ *
+ * Abortar aquí NO cancela nada del otro lado. auth-google puede haber creado ya
+ * la cuenta y estar esperando a Resend, así que un corte prematuro deja una
+ * cuenta creada, una contraseña que quizá salió y quizá no, y del lado de
+ * cartera un `fallo` que el reintento va a convertir en "ya tenía" —sin volver
+ * a mandar la contraseña, a propósito—. O sea: la persona se queda sin poder
+ * entrar y sin que nadie lo note.
+ *
+ * Los segundos de más solo se pagan cuando algo ya va mal; el camino normal
+ * sigue siendo un insert y un Resend (~300ms).
  */
-const TIMEOUT_POR_DEFECTO_MS = 8_000;
+const TIMEOUT_POR_DEFECTO_MS = 15_000;
 
 const SIN_CORREO = {
   enviado: false,
@@ -151,6 +162,39 @@ const llamar = async (
   } finally {
     clearTimeout(timeout);
   }
+};
+
+/**
+ * "Esto parece una S.A. y acaba de recibir cuenta de persona."
+ *
+ * La detección por nombre ya existía, pero solo la miraba el resumen diario, y
+ * ahí no alcanza a nadie: el job no crea cuentas —usa
+ * `consultarAccesoInversionista`— así que por su lado ningún resultado llega
+ * nunca con estado `creada`. La sociedad a la que se le olvidó marcar "¿Es
+ * empresa?" se provisiona en el ALTA, y desde la corrida siguiente vuelve como
+ * `ya_tenia`, que el resumen cuenta y no lista. O sea que la única fila que la
+ * salvaguarda existía para atrapar era justo la que no pasaba por ella.
+ *
+ * Se marca aquí, en el camino que SÍ crea, y viaja en la respuesta del alta:
+ * quien captura lo ve en el modal con el inversionista todavía delante, que es
+ * cuando corregirlo cuesta un campo. Y queda en `audit_logs`.
+ *
+ * Solo sobre `creada`. A las que ya tenían cuenta no se les avisa nada: es el
+ * estado normal del sistema desde hace tiempo y repetirlo en cada alta sería
+ * ruido, no trabajo pendiente.
+ */
+export const ADVERTENCIA_PARECE_SOCIEDAD = "parece_sociedad_con_cuenta_propia";
+
+const marcarSiPareceSociedad = (
+  resultado: ResultadoProvisionamientoCartera,
+  nombre: string,
+): ResultadoProvisionamientoCartera => {
+  if (resultado.estado !== "creada" || !pareceSociedad(nombre)) return resultado;
+
+  return {
+    ...resultado,
+    advertencias: [...resultado.advertencias, ADVERTENCIA_PARECE_SOCIEDAD],
+  };
 };
 
 /**
@@ -248,17 +292,20 @@ export const provisionarInversionista = async (
       );
     }
 
-    return llamar(
-      "/internal/provisioning/ensure-investor-account",
-      {
-        email: decision.email,
-        dpi: decision.dpi,
-        nombre: decision.nombre,
-        inversionistaId: decision.inversionistaId,
-        inversionistaNombre: decision.inversionistaNombre,
-      },
-      decision.inversionistaId,
-      opciones,
+    return marcarSiPareceSociedad(
+      await llamar(
+        "/internal/provisioning/ensure-investor-account",
+        {
+          email: decision.email,
+          dpi: decision.dpi,
+          nombre: decision.nombre,
+          inversionistaId: decision.inversionistaId,
+          inversionistaNombre: decision.inversionistaNombre,
+        },
+        decision.inversionistaId,
+        opciones,
+      ),
+      decision.inversionistaNombre,
     );
   } catch (error: any) {
     return resultado(

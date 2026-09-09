@@ -368,10 +368,17 @@ export const investorDocumentsRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
-			const result = await carteraBackClient.setInvestorStatus({
-				inversionista_id: input.inversionistaId,
-				status: input.status,
-			});
+			let result: Awaited<
+				ReturnType<typeof carteraBackClient.setInvestorStatus>
+			>;
+			try {
+				result = await carteraBackClient.setInvestorStatus({
+					inversionista_id: input.inversionistaId,
+					status: input.status,
+				});
+			} catch (error) {
+				throw toCarteraOrpcError(error, "Cambiar status de inversionista");
+			}
 
 			try {
 				await db.insert(investorActivityLog).values({

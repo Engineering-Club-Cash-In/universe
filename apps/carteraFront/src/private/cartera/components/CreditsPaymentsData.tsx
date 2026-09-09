@@ -109,6 +109,10 @@ export function ListaCreditosPagos() {
   const [creditToEdit, setCreditToEdit] = useState<any | null>(null);
   const [investorsToEdit, setInvestorsToEdit] = useState<any[]>([]);
   const [investorsMirrorToEdit, setInvestorsMirrorToEdit] = useState<any[]>([]);
+  // Aparte de creditToEdit: no es parte de UpdateCreditBody, no debe viajar
+  // en el submit del modal (ver ModalEditCredit.tsx, arma el body con spread).
+  const [creditToEditTienePagosSinLiquidar, setCreditToEditTienePagosSinLiquidar] =
+    useState(false);
   const [fechaInicioModalOpen, setFechaInicioModalOpen] = useState(false);
   const [selectedCreditFechaInicio, setSelectedCreditFechaInicio] = useState<{ sifco: string; fechaActual: string | null } | null>(null);
   const queryClient = useQueryClient();
@@ -203,6 +207,7 @@ export function ListaCreditosPagos() {
 
   const handleOpenEdit = (credit: any, inversionistas: any, usuario?: any) => {
     console.log(credit);
+    setCreditToEditTienePagosSinLiquidar(!!credit.tiene_pagos_sin_liquidar);
     setCreditToEdit({
       capital: credit.capital,
       porcentaje_interes: credit.porcentaje_interes,
@@ -832,6 +837,7 @@ export function ListaCreditosPagos() {
         initialValues={creditToEdit}
         investorsInitial={investorsToEdit}
         investorsMirrorInitial={investorsMirrorToEdit}
+        tienePagosSinLiquidar={creditToEditTienePagosSinLiquidar}
         onSuccess={() => {
           setEditModalOpen(false);
           queryClient.invalidateQueries({
@@ -1435,6 +1441,7 @@ function MobileView({
                         ...item.creditos,
                         creditos_inversionistas_espejo:
                           item.creditos_inversionistas_espejo,
+                        tiene_pagos_sin_liquidar: item.tiene_pagos_sin_liquidar,
                       },
                       item.inversionistas,
                       item.usuarios
@@ -1735,6 +1742,8 @@ function DesktopView({
                                     ...item.creditos,
                                     creditos_inversionistas_espejo:
                                       item.creditos_inversionistas_espejo,
+                                    tiene_pagos_sin_liquidar:
+                                      item.tiene_pagos_sin_liquidar,
                                   },
                                   item.inversionistas,
                                   item.usuarios

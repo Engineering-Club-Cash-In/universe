@@ -75,6 +75,10 @@ import type { ModalidadFacturacion } from "./modalidadFacturacion";
 import { calcularExpiracionCompraCartera, startOfDayGT } from "../utils/functions/businessDays";
 import { withCreditoEspejoLocks } from "../utils/creditoEspejoLock";
 import {
+  checkInvestorHasUnliquidatedDrafts,
+  UnliquidatedDraftPaymentsError,
+} from "../utils/draftPaymentsGuard";
+import {
   buildPendingReturnAuthorizationWarning,
   PendingReturnAuthorizationError,
   PENDING_RETURN_AUTHORIZATION_CODE,
@@ -6583,11 +6587,64 @@ export const updateInvestorStatus = async ({ body, set, request }: any) => {
       updateData.tipo_reinversion = "sin_reinversion";
     }
 
-    const [updated] = await db
-      .update(inversionistas)
-      .set(updateData)
-      .where(eq(inversionistas.inversionista_id, inversionista_id))
-      .returning();
+    // Solo se bloquea la ENTRADA a pendiente_devolucion. Salir (activo/
+    // inactivo) sigue libre para no dejar a nadie atrapado. Un borrador
+    // NO_LIQUIDADO es plata que todavía no se repartió: si el inversionista
+    // entra a devolución con borradores vivos, la próxima liquidación le
+    // devuelve el monto_aportado completo (payments.ts) saltándose esos
+    // abonos pendientes, y quedan colgados.
+    //
+    // Guard + update van en UNA transacción que toma FOR NO KEY UPDATE sobre
+    // los créditos del inversionista antes de consultar. La generación de
+    // pagos (payments.ts, withPendingReturnCreditLocks) toma el mismo lock
+    // de fila sobre creditos antes de insertar un borrador — sin lockear acá
+    // también, el guard puede leer "sin borradores" justo antes de que
+    // generación inserte uno, y este UPDATE de todos modos deja al
+    // inversionista en pendiente_devolucion con el borrador recién creado.
+    // Con el lock, quien llegue primero bloquea al otro hasta su
+    // commit/rollback, así el guard siempre ve el estado final.
+    const [updated] = await db.transaction(async (tx) => {
+      if (status === "pendiente_devolucion") {
+        const creditosDelInversionista = await tx
+          .select({ credito_id: creditos_inversionistas_espejo.credito_id })
+          .from(creditos_inversionistas_espejo)
+          .where(eq(creditos_inversionistas_espejo.inversionista_id, inversionista_id));
+
+        const creditoIds = [
+          ...new Set(creditosDelInversionista.map((c) => c.credito_id)),
+        ].sort((a, b) => a - b);
+
+        if (creditoIds.length > 0) {
+          // ORDER BY explícito: un IN no preserva el orden de entrada, así
+          // que sin esto dos transacciones con créditos superpuestos pueden
+          // lockear en órdenes distintos y producir deadlock (40P01 -> 500
+          // en el catch general). Mismo criterio que withPendingReturnCreditLocks
+          // (payments.ts), que ya ordena por credito_id antes de lockear.
+          await tx
+            .select({ credito_id: creditos.credito_id })
+            .from(creditos)
+            .where(inArray(creditos.credito_id, creditoIds))
+            .orderBy(asc(creditos.credito_id))
+            .for("no key update");
+        }
+
+        const bloqueo = await checkInvestorHasUnliquidatedDrafts(
+          inversionista_id,
+          tx as unknown as typeof db,
+        );
+        if (bloqueo) {
+          // Se captura en el catch general de la función (más abajo), que
+          // ya existe para todo error de este handler.
+          throw new UnliquidatedDraftPaymentsError(bloqueo);
+        }
+      }
+
+      return tx
+        .update(inversionistas)
+        .set(updateData)
+        .where(eq(inversionistas.inversionista_id, inversionista_id))
+        .returning();
+    });
 
     let usuarioEmail: string | undefined;
     let usuarioNombre: string | undefined;
@@ -6688,6 +6745,15 @@ export const updateInvestorStatus = async ({ body, set, request }: any) => {
       total_destinatarios: INVESTOR_STATUS_CHANGE_RECIPIENTS.length,
     };
   } catch (error) {
+    if (error instanceof UnliquidatedDraftPaymentsError) {
+      set.status = 400;
+      return {
+        success: false,
+        code: error.code,
+        message: error.message,
+        creditos_bloqueantes: error.creditos_bloqueantes,
+      };
+    }
     console.error("[updateInvestorStatus] Error:", error);
     set.status = 500;
     return {

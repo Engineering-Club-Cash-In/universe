@@ -471,6 +471,8 @@ export interface CreditoUsuarioPago {
   usuarios: Usuario;
   /** Aseguradora vinculada al crédito (nombre, null si no tiene). */
   aseguradora?: string | null;
+  /** Hay filas en el espejo de pagos aún sin liquidar → no puede entrar a devolución a CUBE. */
+  tiene_pagos_sin_liquidar?: boolean;
   inversionistas: AporteInversionista[];
   creditos_inversionistas_espejo?: InversionistaEspejo[];
   resumen: ResumenCreditos;

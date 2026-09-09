@@ -218,6 +218,7 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
   // Q24,662.55 entre dos Q25,162.55).
   const cierreGuardado = new Map<string, Big>();
   const cuotasConCeros = new Set<string>();
+  const rezagoCierto = new Map<string, Big>();
   const abonosPorCuota = new Map<string, Big>();
   const abonosEnOrden = new Map<string, Big[]>();
   const ordenCuotas: string[] = [];
@@ -232,6 +233,10 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
     const abono = new Big(pago.abono_capital || 0);
     abonosPorCuota.set(key, (abonosPorCuota.get(key) ?? new Big(0)).plus(abono));
     abonosEnOrden.set(key, [...(abonosEnOrden.get(key) ?? []), abono]);
+    // Abonos de las filas POSTERIORES al último snapshot positivo. Ese
+    // snapshot lo escribió una fila concreta, así que lo que se abonó después
+    // no puede estar incluido en él: es un rezago cierto, no una conjetura.
+    rezagoCierto.set(key, totalRestante.gt(0) ? new Big(0) : (rezagoCierto.get(key) ?? new Big(0)).plus(abono));
   }
 
   // Cuánto puede estar atrasado el snapshot de una cuota respecto de su cierre
@@ -298,11 +303,18 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
     // externa: lo confirma su propia aritmética. Es el caso de la cancelación
     // que llega después de una fila normal, donde el snapshot positivo tapaba
     // el cero y la cuota terminaba en su saldo viejo en vez de en Q0.
-    const porDefecto = (): Big =>
-      cuotasConCeros.has(key) &&
-      rezagosPosibles(key).some((rezago) => snapshot.minus(rezago).abs().lte(0.02))
-        ? new Big(0)
-        : snapshot;
+    const porDefecto = (): Big => {
+      if (
+        cuotasConCeros.has(key) &&
+        rezagosPosibles(key).some((rezago) => snapshot.minus(rezago).abs().lte(0.02))
+      ) {
+        return new Big(0);
+      }
+      // Sin vecina que confirme, el snapshot se descuenta igual por lo que se
+      // abonó DESPUÉS de él. No hace falta evidencia externa: esas filas van
+      // detrás en el orden del reporte, así que su capital no está adentro.
+      return snapshot.minus(rezagoCierto.get(key) ?? new Big(0));
+    };
 
     const siguiente = siguienteCuota.get(key);
     // Una cuota SIN ninguna fila positiva y con ceros explícitos es una
@@ -362,10 +374,9 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
       // Tras un hueco la cadena se corta: la cuota reconstruye su apertura desde
       // su propio snapshot en vez de heredar el cierre de una que no es su
       // vecina.
-      const arrancaCadena =
-        cuotaActual === null ||
-        cuotaActual === "0" ||
-        !sonConsecutivas(cuotaActual, key);
+      const hayHueco =
+        cuotaActual !== null && cuotaActual !== "0" && !sonConsecutivas(cuotaActual, key);
+      const arrancaCadena = cuotaActual === null || cuotaActual === "0" || hayHueco;
       if (arrancaCadena) {
         // Una cuota representada SOLO por filas de capital directo no tiene
         // snapshot propio, así que su cierre no se puede reconstruir. Pero su
@@ -373,8 +384,11 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
         // desde ahí se le restan sus abonos como a cualquier otra. Sin esto la
         // apertura salía del cierre inexistente (0) y el crédito arrancaba en
         // Q0 en vez de en su saldo real.
+        // Tras un hueco el saldo heredado ya no sirve —la cuota escondida lo
+        // redujo— así que la cuota se reconstruye igual aunque no tenga
+        // snapshot propio: una cancelación que deja 0 cierra en 0.
         const tieneSnapshot = cierreGuardado.get(key) !== undefined;
-        if (tieneSnapshot || cuotaActual === null) {
+        if (tieneSnapshot || cuotaActual === null || hayHueco) {
           // Sin cierre previo utilizable: la apertura se reconstruye como
           // snapshot + Σ abonos de la cuota (el snapshot ya es post-pago), así
           // la última fila aterriza exacto en el saldo guardado.

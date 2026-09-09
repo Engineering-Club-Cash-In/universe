@@ -385,6 +385,30 @@ describe("estado de cuenta PDF", () => {
     expect(rows.map((p) => p.total_restante)).toEqual(["50000.00", "49400.00", "49000.00"]);
   });
 
+  it("tras un hueco, una cancelacion en 0 no arrastra el saldo heredado", () => {
+    // La cuota 2 no se ve y bajaba Q1,000; la 3 cancela pagando Q49,000. Si se
+    // arrastra el cierre de la 1 quedan Q1,000 debiéndose. Tras un hueco el
+    // saldo heredado ya no sirve, así que la cuota se reconstruye desde su
+    // propio cierre aunque no tenga snapshot positivo.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 1, numero_cuota: 1, pagado: true, abono_capital: "1000.00", abono_interes: "500.00", total_restante: "50000.00" },
+      { pago_id: 2, numero_cuota: 3, pagado: true, abono_capital: "49000.00", abono_interes: "500.00", total_restante: "0" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["50000.00", "0.00"]);
+  });
+
+  it("capital directo sin vecina que confirme: el snapshot se descuenta igual", () => {
+    // Primera cuota visible con snapshot Q50,000 y un capital directo de Q400
+    // que guarda 0. No hay cuota vecina que desempate, pero esa fila va DETRÁS
+    // del snapshot en el orden del reporte, así que su capital no puede estar
+    // adentro. Antes se mostraba Q50,400 y Q50,000.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 1, numero_cuota: 10, pagado: true, abono_capital: "1000.00", abono_interes: "500.00", total_restante: "50000.00" },
+      { pago_id: 2, numero_cuota: 10, pagado: true, abono_capital: "400.00", total_restante: "0" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["50000.00", "49600.00"]);
+  });
+
   it("una cancelacion despues de una fila positiva cierra la cuota en 0", () => {
     // La cuota trae su fila normal (snapshot Q40) y después la que cancela,
     // que guarda 0. El snapshot positivo tapaba ese cero y, al arrancar

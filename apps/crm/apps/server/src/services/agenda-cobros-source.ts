@@ -100,13 +100,15 @@ export function buscarAsesorCarteraPorEmail(
 // recibiendo snapshot diario ni contar en el ranking de supervisor.
 const ROLES_AGENDA_COBROS = new Set(["cobros", "cobros_supervisor", "admin"]);
 
+type UsuarioAgenda = {
+	id: string;
+	email: string;
+	role: string;
+	banned: boolean | null;
+};
+
 export function resolverAsesoresAgenda(
-	usuarios: readonly {
-		id: string;
-		email: string;
-		role: string;
-		banned: boolean | null;
-	}[],
+	usuarios: readonly UsuarioAgenda[],
 	pool: readonly PoolPorAsesorRow[],
 ): AsesorAgenda[] {
 	const usuarioPorEmail = new Map(
@@ -122,6 +124,17 @@ export function resolverAsesoresAgenda(
 			? [{ userId, asesorCarteraId: asesor.asesor_id, nombre: asesor.nombre }]
 			: [];
 	});
+}
+
+/** Asesor CRM seleccionado por supervisor, resuelto por id de cartera. */
+export function buscarAsesorAgendaPorCarteraId(
+	asesorCarteraId: number,
+	usuarios: readonly UsuarioAgenda[],
+	pool: readonly PoolPorAsesorRow[],
+): AsesorAgenda | undefined {
+	return resolverAsesoresAgenda(usuarios, pool).find(
+		(asesor) => asesor.asesorCarteraId === asesorCarteraId,
+	);
 }
 
 export function filtrarAsesoresAgenda(
@@ -222,17 +235,20 @@ export async function resolverAgendaEfectivaDelUsuario(
 	sesionUserId: string,
 	pool: readonly PoolPorAsesorRow[],
 	fechaGT: string,
+	usuariosAgenda?: readonly UsuarioAgenda[],
 ): Promise<AsesorEfectivo[]> {
 	const coberturas = await obtenerCoberturasVigentes(sesionUserId, fechaGT);
 	if (coberturas.length === 0) return [{ ...propio, cubierto: false }];
-	const usuarios = await db
-		.select({
-			id: user.id,
-			email: user.email,
-			role: user.role,
-			banned: user.banned,
-		})
-		.from(user);
+	const usuarios =
+		usuariosAgenda ??
+		(await db
+			.select({
+				id: user.id,
+				email: user.email,
+				role: user.role,
+				banned: user.banned,
+			})
+			.from(user));
 	const asesorPorUserId = new Map(
 		resolverAsesoresAgenda(usuarios, pool).map((asesor) => [
 			asesor.userId,
@@ -245,6 +261,46 @@ export async function resolverAgendaEfectivaDelUsuario(
 		coberturas,
 		asesorPorUserId,
 	);
+}
+
+/**
+ * Mismo cálculo de cobertura para un asesor elegido por supervisor. La sesión
+ * sigue autorizando acceso; este helper solo identifica al usuario del asesor
+ * seleccionado para aplicar sus ausencias y suplencias.
+ */
+export async function resolverAgendaEfectivaDelAsesorSeleccionado(
+	asesorCarteraId: number,
+	pool: readonly PoolPorAsesorRow[],
+	fechaGT: string,
+): Promise<{
+	propio: { asesorId: number; nombre: string };
+	efectivos: AsesorEfectivo[];
+} | null> {
+	const usuarios = await db
+		.select({
+			id: user.id,
+			email: user.email,
+			role: user.role,
+			banned: user.banned,
+		})
+		.from(user);
+	const asesor = buscarAsesorAgendaPorCarteraId(
+		asesorCarteraId,
+		usuarios,
+		pool,
+	);
+	if (!asesor) return null;
+	const propio = { asesorId: asesor.asesorCarteraId, nombre: asesor.nombre };
+	return {
+		propio,
+		efectivos: await resolverAgendaEfectivaDelUsuario(
+			propio,
+			asesor.userId,
+			pool,
+			fechaGT,
+			usuarios,
+		),
+	};
 }
 
 export async function obtenerPaginaAgenda(

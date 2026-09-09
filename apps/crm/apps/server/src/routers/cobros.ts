@@ -149,6 +149,7 @@ import {
 	buscarAsesorCarteraPorEmail,
 	obtenerAgendaFusionada,
 	obtenerPaginaAgenda,
+	resolverAgendaEfectivaDelAsesorSeleccionado,
 	resolverAgendaEfectivaDelUsuario,
 } from "../services/agenda-cobros-source";
 import {
@@ -3236,36 +3237,20 @@ export const cobrosRouter = {
 					if (efectivos.some((a) => a.cubierto)) cubiertos = efectivos;
 				} else if (input.asesorId) {
 					asesorIdFiltro = input.asesorId;
-					// `crearCobertura` acepta admin/cobros_supervisor como titular o
-					// suplente (traslados-cobros.ts), así que un supervisor que
-					// también es asesor de cartera puede tener cobertura vigente
-					// igual que un asesor `cobros` puro. El bloqueo de arriba
-					// (`!puedeVerTodos`) solo debía saltar el FORZADO por rol
-					// (supervisor eligiendo agenda ajena, o "todos") — no la
-					// resolución de cobertura cuando el supervisor elige verse a sí
-					// mismo. Antes esa resolución vivía únicamente dentro del
-					// `if (!puedeVerTodos)`: un supervisor suplente perdía la cartera
-					// cubierta al seleccionar su propio asesor, y uno titular seguía
-					// viendo su agenda vacía en vez del aviso de "ausente".
-					const email = context.session?.user?.email?.trim().toLowerCase();
 					const asesoresConBuckets = await carteraBackClient.getPoolPorAsesor();
-					const propio = buscarAsesorCarteraPorEmail(asesoresConBuckets, email);
-					if (propio && propio.asesor_id === input.asesorId) {
-						const asesorPropio = {
-							asesorId: propio.asesor_id,
-							nombre: propio.nombre,
-						};
-						const efectivos = await resolverAgendaEfectivaDelUsuario(
-							asesorPropio,
-							context.session?.user?.id ?? "",
-							asesoresConBuckets,
-							toDateStrGT(new Date()),
-						);
+					const seleccion = await resolverAgendaEfectivaDelAsesorSeleccionado(
+						input.asesorId,
+						asesoresConBuckets,
+						toDateStrGT(new Date()),
+					);
+					if (seleccion) {
+						asesorForzado = seleccion.propio;
+						const { efectivos } = seleccion;
 						if (efectivos.length === 0) {
 							return {
 								success: true,
 								sinAsesor: false,
-								asesorForzado: asesorPropio,
+								asesorForzado: seleccion.propio,
 								ausente: true,
 								dia: input.dia,
 								items: [],
@@ -3834,32 +3819,20 @@ export const cobrosRouter = {
 					}
 				} else if (input.asesorId) {
 					asesorIdFiltro = input.asesorId;
-					// Mismo caso que getAgendaDia: un supervisor/admin que también es
-					// asesor de cartera puede tener cobertura vigente (`crearCobertura`
-					// acepta esos roles como titular o suplente). El bloqueo por
-					// `puedeVerTodos` de arriba solo debía saltar el FORZADO por rol,
-					// no la resolución de cobertura cuando eligió su propio asesor.
-					const email = context.session?.user?.email?.trim().toLowerCase();
 					const asesoresConBuckets = await carteraBackClient.getPoolPorAsesor();
-					const propio = asesoresConBuckets.find(
-						(a) => a.email_cash_in?.trim().toLowerCase() === email,
+					const seleccion = await resolverAgendaEfectivaDelAsesorSeleccionado(
+						input.asesorId,
+						asesoresConBuckets,
+						toDateStrGT(new Date()),
 					);
-					if (propio && propio.asesor_id === input.asesorId) {
-						const asesorPropio = {
-							asesorId: propio.asesor_id,
-							nombre: propio.nombre,
-						};
-						asesoresEfectivos = await resolverAgendaEfectivaDelUsuario(
-							asesorPropio,
-							context.session?.user?.id ?? "",
-							asesoresConBuckets,
-							toDateStrGT(new Date()),
-						);
+					if (seleccion) {
+						asesorForzado = seleccion.propio;
+						asesoresEfectivos = seleccion.efectivos;
 						if (asesoresEfectivos.length === 0) {
 							return {
 								success: true,
 								sinAsesor: false,
-								asesorForzado: asesorPropio,
+								asesorForzado: seleccion.propio,
 								ausente: true,
 								items: [],
 								total: 0,

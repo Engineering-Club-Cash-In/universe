@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+	buscarAsesorAgendaPorCarteraId,
 	buscarAsesorCarteraPorEmail,
 	filtrarAsesoresAgenda,
 	obtenerAgendaAsesor,
@@ -8,6 +9,31 @@ import {
 } from "./agenda-cobros-source";
 
 describe("resolverAsesoresAgenda", () => {
+	test("resuelve usuario CRM del asesor seleccionado por supervisor", () => {
+		expect(
+			buscarAsesorAgendaPorCarteraId(
+				8,
+				[
+					{
+						id: "crm-octavio",
+						email: "octavio@ejemplo.com",
+						role: "cobros",
+						banned: false,
+					},
+				],
+				[
+					{
+						asesor_id: 8,
+						nombre: "Octavio",
+						email_cash_in: "octavio@ejemplo.com",
+						activo: true,
+						buckets: [1],
+					},
+				],
+			),
+		).toEqual({ userId: "crm-octavio", asesorCarteraId: 8, nombre: "Octavio" });
+	});
+
 	test("busca asesor por email_cash_in normalizado", () => {
 		expect(
 			buscarAsesorCarteraPorEmail(

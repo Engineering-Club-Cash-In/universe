@@ -14,7 +14,10 @@ import {
 	buildPagaloAllocations,
 	type PagaloInstallment,
 } from "../lib/pagalo-allocations";
-import { construirComentarioGestionLinkPagalo } from "../lib/pagalo-gestion";
+import {
+	construirComentarioGestionLinkPagalo,
+	totalDeLinksPagalo,
+} from "../lib/pagalo-gestion";
 import { deduplicarCuotasPagalo } from "../lib/pagalo-installments";
 import { primeraRevisionPoll } from "../lib/pagalo-poll-cadencia";
 import {
@@ -467,9 +470,7 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 				casoCobroId: input.casoCobroId,
 				numeroSifco: input.numeroSifco,
 				requestedBy: input.requestedBy,
-				totalAmount: links
-					.reduce((total, link) => total + Number(link.amount), 0)
-					.toFixed(2),
+				totalAmount: totalDeLinksPagalo(links),
 				cantidadLinks: links.length,
 				whatsappEnviado: null,
 			});
@@ -480,7 +481,7 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 		casoCobroId: input.casoCobroId,
 		numeroSifco: input.numeroSifco,
 		requestedBy: input.requestedBy,
-		totalAmount: calculation.totalAmount,
+		totalAmount: totalDeLinksPagalo(emitido.links),
 		cantidadLinks: emitido.links.length,
 		whatsappEnviado: emitido.whatsappEnviado,
 	});

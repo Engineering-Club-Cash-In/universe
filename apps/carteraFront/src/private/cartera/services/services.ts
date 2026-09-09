@@ -1745,6 +1745,8 @@ export interface UpdateMoraPayload {
   tipo: "INCREMENTO" | "DECREMENTO";
   cuotas_atrasadas?: number;
   activa?: boolean;
+  /** Obligatorio: el backend responde 400 si viene vacío. */
+  motivo: string;
 }
 
 export interface CondonarMoraPayload {
@@ -1782,33 +1784,80 @@ export async function condonarMoraService(payload: CondonarMoraPayload) {
   return data;
 }
 
-// Listar créditos con mora
-export async function getCreditosWithMorasService(params?: {
+// ---------- Paginación / totales de moras ----------
+export interface MoraPagination {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
+export interface CreditosConMoraParams {
+  page?: number;
+  pageSize?: number;
+  nombre_usuario?: string;
   numero_credito_sifco?: string;
   cuotas_atrasadas?: number;
   estado?: EstadoCredito;
   excel?: boolean;
-}) {
-  const { data } = await api.get<{ success: boolean; data: CreditoConMora[]; excelUrl?: string }>(
-    `/moras/creditos`,
-    { params }
-  );
+}
+
+// Con excel=true el backend responde solo { success, excelUrl, count }: por eso
+// pagination y totales son opcionales, para que nadie los lea sin comprobarlos.
+export interface CreditosConMoraResponse {
+  success: boolean;
+  data?: CreditoConMora[];
+  pagination?: MoraPagination;
+  totales?: { mora_total: string; creditos: number };
+  excelUrl?: string;
+  count?: number;
+}
+
+export interface CondonacionesMoraParams {
+  page?: number;
+  pageSize?: number;
+  nombre_usuario?: string;
+  numero_credito_sifco?: string;
+  usuario_email?: string;
+  /**
+   * Día de GUATEMALA `YYYY-MM-DD` (inclusive). `moras_condonaciones.fecha` es un
+   * timestamp sin zona con el instante en UTC: el backend convierte estos días
+   * a los instantes UTC del día GT, así el filtro coincide con la fecha que se
+   * ve en pantalla. Los dos son independientes: se puede mandar solo uno.
+   */
+  fecha_desde?: string;
+  /** Día de GUATEMALA `YYYY-MM-DD` (inclusive, entra el día completo). */
+  fecha_hasta?: string;
+  excel?: boolean;
+}
+
+export interface CondonacionesMoraResponse {
+  success: boolean;
+  data?: Condonacion[];
+  pagination?: MoraPagination;
+  totales?: { monto_total: string; condonaciones: number };
+  excelUrl?: string;
+  count?: number;
+}
+
+// Listar créditos con mora (paginado)
+export async function getCreditosWithMorasService(params?: CreditosConMoraParams) {
+  const { data } = await api.get<CreditosConMoraResponse>(`/moras/creditos`, { params });
   return data;
 }
 
-// Listar condonaciones
-export async function getCondonacionesMoraService(params?: {
-  numero_credito_sifco?: string;
-  usuario_email?: string;
-  fecha_desde?: string;
-  fecha_hasta?: string;
-  excel?: boolean;
-}) {
-  const { data } = await api.get<{ success: boolean; data: Condonacion[]; excelUrl?: string }>(
-    `/moras/condonaciones`,
-    { params }
-  );
-  return data;}
+// Listar condonaciones (paginado)
+export async function getCondonacionesMoraService(params?: CondonacionesMoraParams) {
+  const { data } = await api.get<CondonacionesMoraResponse>(`/moras/condonaciones`, { params });
+  return data;
+}
+
+// Historial de eventos de mora de un crédito (ADMIN, CONTA, ASESOR)
+export type { MoraEvento } from "./moraHistorial.services";
+export {
+  getMoraHistorialCredito,
+  descargarMoraHistorialCreditoExcel,
+} from "./moraHistorial.services";
 
 
 export interface CuotaPago {

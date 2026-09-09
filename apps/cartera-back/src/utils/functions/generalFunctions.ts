@@ -2,7 +2,7 @@ import { generarHTMLReporte } from "../../controllers/investor";
 import { GetCreditDTO, InversionistaReporte } from "../interface";
 import { launchBrowser } from "./browser";
 import ExcelJS from "exceljs";
-import axios from "axios";
+import { CASHIN_COLOR, fetchImageBase64 } from "./excelBrand";
 import Big from "big.js";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { sql, type SQL } from "drizzle-orm";
@@ -392,22 +392,6 @@ function paintCard(ws: ExcelJS.Worksheet, range: string) {
   }
 }
 
-/** trae imagen como base64 (evita tipos de Buffer) */
-async function fetchImageBase64(
-  url?: string
-): Promise<{ data: string; ext: "png" | "jpeg" } | null> {
-  if (!url) return null;
-  try {
-    const res = await axios.get(url, { responseType: "arraybuffer" });
-    // infiere extensión simple
-    const ct = String(res.headers["content-type"] || "");
-    const ext: "png" | "jpeg" = ct.includes("png") ? "png" : "jpeg";
-    const b64 = Buffer.from(res.data).toString("base64");
-    return { data: b64, ext };
-  } catch {
-    return null;
-  }
-}
 
 /** ───────── builder principal ───────── */
 export async function buildCancelationWorkbook(
@@ -677,21 +661,9 @@ export async function buildInversionistaWorkbook(
 
   baseWidths.forEach((w, i) => (ws.getColumn(i + 1).width = w));
 
-  const CINV = {
-    purple:      "FF4E57EA",
-    purpleLight: "FFF0F0FF",
-    navy:        "FF0F1B4C",
-    blue:        "FF0485C2",
-    text:        "FF0F172A",
-    slate:       "FF334155",
-    white:       "FFFFFFFF",
-    line:        "FFE0E7EF",
-    zebra:       "FFF9FBFF",
-    total:       "FFF0F9FF",
-    gray:        "FF8C98B5",
-    // Resalte para filas con interés "partido" (cálculo dividido por compras)
-    partido:     "FFFEF3C7",
-  };
+  // Paleta compartida con el resto de los Excel de CashIn (excelBrand.ts): antes
+  // esta constante y CASHIN_COLOR eran dos copias con 9 de 10 hex idénticos.
+  const CINV = CASHIN_COLOR;
 
   const esDolares = inv.moneda === "dolares";
   const sym = esDolares ? "$" : "Q";

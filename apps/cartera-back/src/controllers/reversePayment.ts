@@ -339,6 +339,7 @@ export function createReversePayment(
           monto_cambio: Number(pago.mora),
           tipo: "INCREMENTO",
           activa: true,
+          motivo: `Reversa de pago #${pago_id}: se restituye la mora que ese pago había cubierto`,
         });
 
         if (!reverseMoraResult.success) {

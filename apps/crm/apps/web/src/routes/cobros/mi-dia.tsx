@@ -12,6 +12,7 @@ import {
 	Phone,
 	PhoneOff,
 	TriangleAlert,
+	UserCheck,
 } from "lucide-react";
 import { useRef, useState } from "react";
 import { PanelGestionRapida } from "@/components/cobros/panel-gestion-rapida";
@@ -60,6 +61,8 @@ interface ColaItem {
 	cliente: string;
 	asesorId: number;
 	asesor: string;
+	/** CB-114: cuenta de un titular ausente que estoy cubriendo hoy. */
+	cubierto?: boolean;
 	bucket: number;
 	bucketPrefijo: string;
 	bucketNombre: string;
@@ -84,6 +87,8 @@ interface ColaItem {
 interface ColaResponse {
 	success: boolean;
 	sinAsesor: boolean;
+	/** CB-114: soy el titular ausente — mi cola la trabaja el suplente. */
+	ausente?: boolean;
 	asesorForzado: { asesorId: number; nombre: string } | null;
 	items: ColaItem[];
 	total: number;
@@ -100,12 +105,31 @@ interface AgendaItem {
 	cliente: string | null;
 	bucket: number | null;
 	montoCuota: string;
+	asesor?: string | null;
+	/** CB-114: cuenta de un titular ausente que estoy cubriendo hoy. */
+	cubierto?: boolean;
 }
 
 interface AgendaResponse {
 	items: AgendaItem[];
 	total: number;
 	sinAsesor: boolean;
+	/** CB-114: soy el titular ausente — mi agenda la trabaja el suplente. */
+	ausente?: boolean;
+}
+
+/**
+ * CB-114: marca una cuenta que se trabaja por cobertura temporal. La cartera
+ * NO cambió de dueño — el badge deja claro de quién es la cuenta para que el
+ * suplente no la confunda con la propia.
+ */
+function BadgeCobertura({ asesor }: { asesor?: string | null }) {
+	return (
+		<Badge variant="outline" className="shrink-0 gap-1 font-normal text-xs">
+			<UserCheck className="h-3 w-3" />
+			{asesor ? `Cubriendo a ${asesor}` : "Cobertura"}
+		</Badge>
+	);
 }
 
 /** Fila de la cartera completa (getTodosLosCreditos), NO de la cola. */
@@ -532,6 +556,10 @@ function MiDiaPage() {
 	const total = data?.total ?? 0;
 	const totalPages = data?.totalPages ?? 1;
 	const sinAsesor = !!data?.sinAsesor;
+	// CB-114: hoy estoy de vacaciones/permiso y un suplente trabaja mi agenda.
+	// Listas vacías SIN aviso se leen como "no tengo nada que hacer" o como un
+	// error de carga — hay que decir por qué están vacías.
+	const ausente = !!data?.ausente;
 	const conteos = data?.conteos;
 	const proximosDias = DIAS_AGENDA.map((dia, index) => ({
 		dia,
@@ -553,6 +581,9 @@ function MiDiaPage() {
 	// "Próximos días" mostraba "no tenés vencimientos" en vez del mismo aviso
 	// que ya usa la cola principal para este caso (Codex PR #1334).
 	const sinAsesorAgenda = proximosDias.some(({ data }) => data?.sinAsesor);
+	// Mismo caso que `ausente` para la cola: sin aviso, "Próximos días" diría
+	// "no tenés vencimientos" a alguien que está de vacaciones.
+	const ausenteAgenda = proximosDias.some(({ data }) => data?.ausente);
 
 	const cartera = carteraQuery.data as
 		| { data: CarteraItem[]; total: number; totalPages: number }
@@ -721,6 +752,11 @@ function MiDiaPage() {
 									Tu usuario no está vinculado a un asesor de cartera (por
 									correo). Pedile al supervisor que revise tu correo de asesor.
 								</p>
+							) : ausenteAgenda ? (
+								<p className="text-muted-foreground text-sm">
+									Estás registrado como ausente hoy: tu agenda la está
+									trabajando tu suplente.
+								</p>
 							) : resumenProximosDias.total === 0 && !errorAgenda ? (
 								<p className="text-muted-foreground text-sm">
 									No tenés vencimientos durante próximos cinco días.
@@ -759,8 +795,13 @@ function MiDiaPage() {
 															catalogo={catalogo}
 														/>
 														<div className="min-w-0">
-															<div className="truncate font-medium text-sm">
-																{item.cliente ?? "Cliente sin nombre"}
+															<div className="flex items-center gap-2">
+																<span className="truncate font-medium text-sm">
+																	{item.cliente ?? "Cliente sin nombre"}
+																</span>
+																{item.cubierto && (
+																	<BadgeCobertura asesor={item.asesor} />
+																)}
 															</div>
 															<div className="text-muted-foreground text-xs">
 																SIFCO {item.numeroCreditoSifco} ·{" "}
@@ -852,6 +893,11 @@ function MiDiaPage() {
 						<div className="py-10 text-center text-muted-foreground text-sm">
 							Tu usuario no está vinculado a un asesor de cartera (por correo).
 							Pedile al supervisor que revise tu correo de asesor.
+						</div>
+					) : !enCartera && ausente ? (
+						<div className="py-10 text-center text-muted-foreground text-sm">
+							Estás registrado como ausente hoy: tu agenda la está trabajando tu
+							suplente. Tu cartera sigue siendo tuya.
 						</div>
 					) : enCartera ? (
 						carteraTotal === 0 ? (
@@ -977,8 +1023,13 @@ function MiDiaPage() {
 												onClick={() => setDetalle(filaDeCola(item))}
 											>
 												<TableCell className="max-w-64">
-													<div className="truncate font-medium">
-														{item.cliente}
+													<div className="flex items-center gap-2">
+														<span className="truncate font-medium">
+															{item.cliente}
+														</span>
+														{item.cubierto && (
+															<BadgeCobertura asesor={item.asesor} />
+														)}
 													</div>
 													<div className="truncate font-mono text-muted-foreground text-xs">
 														{item.numeroCreditoSifco}

@@ -339,7 +339,7 @@ export default function Header() {
 												className="cursor-pointer"
 											>
 												<UserCog className="mr-2 h-4 w-4" />
-												Reasignar Cuentas
+												Traslados y coberturas
 											</Link>
 										</DropdownMenuItem>
 									)}
@@ -759,7 +759,7 @@ function MobileNav({
 												className={MOBILE_LINK_CLASS}
 											>
 												<UserCog />
-												Reasignar Cuentas
+												Traslados y coberturas
 											</Link>
 										)}
 										{PERMISSIONS.canAssignCobros(userRole) && (

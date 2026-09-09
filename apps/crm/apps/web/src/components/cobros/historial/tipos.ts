@@ -49,6 +49,11 @@ export type FilaHistorialData = {
 	 * reabrir este archivo compartido en ese PR solo por un campo.
 	 */
 	enAgenda?: boolean | null;
+	/**
+	 * CB-114: nombre del titular en cuya agenda estaba la cuenta, cuando la
+	 * gestión la hizo su suplente durante una cobertura.
+	 */
+	enAgendaDeTitular?: string | null;
 };
 
 export type RespuestaHistorial = {

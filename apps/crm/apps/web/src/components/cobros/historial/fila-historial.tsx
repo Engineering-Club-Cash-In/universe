@@ -145,7 +145,7 @@ export function FilaHistorial({
 			</td>
 			{mostrarEnAgenda && (
 				<td className="px-3 py-2">
-					{fila.enAgenda == null ? (
+					{fila.enAgenda == null && !fila.enAgendaDeTitular ? (
 						<span className="text-gray-400">—</span>
 					) : (
 						<Badge
@@ -153,10 +153,15 @@ export function FilaHistorial({
 							className={
 								fila.enAgenda
 									? "border-emerald-300 text-emerald-700 dark:text-emerald-400"
-									: "border-gray-300 text-gray-500"
+									: // CB-114: cubrir a un titular ausente ES trabajo
+										// planificado — no debe verse igual que una gestión
+										// fuera de agenda.
+										fila.enAgendaDeTitular
+										? "border-sky-300 text-sky-700 dark:text-sky-400"
+										: "border-gray-300 text-gray-500"
 							}
 						>
-							{etiquetaEnAgenda(fila.enAgenda)}
+							{etiquetaEnAgenda(fila.enAgenda, fila.enAgendaDeTitular)}
 						</Badge>
 					)}
 				</td>

@@ -8,6 +8,7 @@ import {
 	Loader2,
 	MessageCircle,
 	Phone,
+	UserCheck,
 	UserRound,
 } from "lucide-react";
 import { useState } from "react";
@@ -70,12 +71,16 @@ interface AgendaItem {
 	casoId: string | null;
 	asesorId: number | null;
 	asesor: string | null;
+	/** CB-114: cuenta de un titular ausente que estoy cubriendo hoy. */
+	cubierto?: boolean;
 	recordatorios: AgendaRecordatorio[];
 }
 
 interface AgendaResponse {
 	success: boolean;
 	sinAsesor: boolean;
+	/** CB-114: soy el titular ausente — mi agenda la trabaja el suplente. */
+	ausente?: boolean;
 	asesorForzado: { asesorId: number; nombre: string } | null;
 	dia: number;
 	items: AgendaItem[];
@@ -251,6 +256,8 @@ function AgendaDiaPage() {
 	).filter((a) => a.activo);
 
 	const sinAsesor = secciones.some((s) => s.data?.sinAsesor);
+	// CB-114: hoy estoy de vacaciones/permiso y un suplente trabaja mi agenda.
+	const ausente = secciones.some((s) => s.data?.ausente);
 	const asesorForzado =
 		secciones.find((s) => s.data?.asesorForzado)?.data?.asesorForzado ?? null;
 	// Total real (no limitado por la página): suma del `total` de cada día.
@@ -262,7 +269,10 @@ function AgendaDiaPage() {
 
 	const primeraCarga = dayQueries.every((q) => q.isPending);
 	const sinCuotas =
-		!sinAsesor && dayQueries.every((q) => !q.isPending) && totalCuentas === 0;
+		!sinAsesor &&
+		!ausente &&
+		dayQueries.every((q) => !q.isPending) &&
+		totalCuentas === 0;
 
 	// Con "todos" el bucket va por FILA (varía); con UN asesor (elegido o
 	// forzado por rol) va GENERAL en el header — sus buckets, sin repetirse.
@@ -370,6 +380,17 @@ function AgendaDiaPage() {
 				</Card>
 			)}
 
+			{/* CB-114: sin este aviso, un titular de vacaciones vería el mismo
+			    "Sin cuotas próximas 🎉" que alguien sin vencimientos reales. */}
+			{ausente && (
+				<Card>
+					<CardContent className="py-10 text-center text-muted-foreground">
+						Estás registrado como ausente hoy: tu agenda la está trabajando tu
+						suplente. Tu cartera sigue siendo tuya.
+					</CardContent>
+				</Card>
+			)}
+
 			{sinCuotas && (
 				<Card>
 					<CardContent className="py-10 text-center text-muted-foreground">
@@ -435,7 +456,22 @@ function AgendaDiaPage() {
 												onClick={() => irAlDetalle(item.numeroCreditoSifco)}
 											>
 												<TableCell className="font-medium">
-													{item.cliente ?? "—"}
+													<div className="flex items-center gap-2">
+														<span className="truncate">
+															{item.cliente ?? "—"}
+														</span>
+														{item.cubierto && (
+															<Badge
+																variant="outline"
+																className="shrink-0 gap-1 font-normal text-xs"
+															>
+																<UserCheck className="h-3 w-3" />
+																{item.asesor
+																	? `Cubriendo a ${item.asesor}`
+																	: "Cobertura"}
+															</Badge>
+														)}
+													</div>
 												</TableCell>
 												{mostrandoTodos && (
 													<TableCell>

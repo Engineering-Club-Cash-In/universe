@@ -7,6 +7,7 @@ import {
 	Clock,
 	Loader2,
 	Phone,
+	UserCheck,
 	UserRound,
 } from "lucide-react";
 import { useState } from "react";
@@ -57,6 +58,8 @@ interface ColaItem {
 	cliente: string;
 	asesorId: number;
 	asesor: string;
+	/** CB-114: cuenta de un titular ausente que estoy cubriendo hoy. */
+	cubierto?: boolean;
 	bucket: number;
 	bucketPrefijo: string;
 	bucketNombre: string;
@@ -77,6 +80,8 @@ interface ColaItem {
 interface ColaResponse {
 	success: boolean;
 	sinAsesor: boolean;
+	/** CB-114: soy el titular ausente — mi cola la trabaja el suplente. */
+	ausente?: boolean;
 	asesorForzado: { asesorId: number; nombre: string } | null;
 	items: ColaItem[];
 	total: number;
@@ -278,6 +283,8 @@ function ColaDiaPage() {
 	const total = data?.total ?? 0;
 	const totalPages = data?.totalPages ?? 1;
 	const sinAsesor = !!data?.sinAsesor;
+	// CB-114: hoy estoy de vacaciones/permiso y un suplente trabaja mi cola.
+	const ausente = !!data?.ausente;
 	const asesorForzado = data?.asesorForzado ?? null;
 
 	const asesores = (
@@ -413,9 +420,21 @@ function ColaDiaPage() {
 				</Card>
 			)}
 
+			{/* CB-114: sin este aviso, un titular de vacaciones vería el mismo
+			    "Sin cuentas pendientes 🎉" que alguien que ya terminó su día. */}
+			{!colaQuery.isPending && !colaQuery.isError && ausente && (
+				<Card>
+					<CardContent className="py-10 text-center text-muted-foreground">
+						Estás registrado como ausente hoy: tu cola la está trabajando tu
+						suplente. Tu cartera sigue siendo tuya.
+					</CardContent>
+				</Card>
+			)}
+
 			{!colaQuery.isPending &&
 				!colaQuery.isError &&
 				!sinAsesor &&
+				!ausente &&
 				total === 0 && (
 					<Card>
 						<CardContent className="py-10 text-center text-muted-foreground">
@@ -454,7 +473,24 @@ function ColaDiaPage() {
 												onClick={() => irAlDetalle(item.numeroCreditoSifco)}
 											>
 												<TableCell className="font-medium">
-													{item.cliente}
+													<div className="flex items-center gap-2">
+														<span className="truncate">{item.cliente}</span>
+														{/* CB-114: la columna "Asesor" solo sale para el
+														    supervisor viendo todos, así que sin este badge
+														    un suplente no distinguiría las cuentas que
+														    cubre de las propias. */}
+														{item.cubierto && (
+															<Badge
+																variant="outline"
+																className="shrink-0 gap-1 font-normal text-xs"
+															>
+																<UserCheck className="h-3 w-3" />
+																{item.asesor
+																	? `Cubriendo a ${item.asesor}`
+																	: "Cobertura"}
+															</Badge>
+														)}
+													</div>
 												</TableCell>
 												<TableCell>
 													<BucketBadge

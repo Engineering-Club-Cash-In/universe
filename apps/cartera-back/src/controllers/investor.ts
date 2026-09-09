@@ -45,6 +45,11 @@ import {
   type PermisoProvisionamiento,
 } from "../utils/functions/provisionamientoPortal";
 import { buscarRepresentanteEnCartera } from "../utils/functions/buscarRepresentante";
+import { normalizarDpiParaComparar } from "../utils/functions/normalizarDpi";
+import {
+  destinatarioDeLiquidacion,
+  type RepresentanteLiquidacion,
+} from "../utils/functions/destinatarioLiquidacion";
 import { calcularAjusteCompras } from "../utils/comprasAjuste";
 import { eq, and, or, sql, inArray, ilike, like, desc, asc, count, SQL, isNull, isNotNull, ne } from "drizzle-orm";
 import { promises as fsPromises } from "node:fs";
@@ -5242,16 +5247,94 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
             })
             .where(eq(liquidaciones.liquidacion_id, liquidacion.liquidacion_id));
 
+          // A quién le toca este correo.
+          //
+          // Si la fila es una sociedad, su `email` puede no ser el de quien la
+          // representa: en producción, 10 de las 11 filas con `dpi_rep_legal`
+          // tienen un correo que no es el del representante. El representante
+          // recibe entonces un correo por cada entidad —incluida la suya— pero
+          // todos en SU buzón, en vez de repartidos por buzones que no mira.
+          //
+          // Todo el bloque falla abierto hacia el comportamiento anterior: la
+          // liquidación YA está escrita en base en este punto, así que ni una
+          // consulta caída ni un representante inexistente pueden costar el
+          // correo. Cualquier tropiezo termina en el `email` de la fila.
+          let representanteLiquidacion: RepresentanteLiquidacion | null = null;
+          // El `dpi` de la entidad liquidada: es lo que distingue a una
+          // sociedad de verdad del que se representa a sí mismo. Vive fuera del
+          // try porque la decisión de más abajo lo necesita.
+          let dpiEntidadLiquidada: number | string | null = null;
+          try {
+            const [filaCartera] = await db
+              .select({
+                dpi: inversionistas.dpi,
+                dpi_rep_legal: inversionistas.dpi_rep_legal,
+              })
+              .from(inversionistas)
+              .where(eq(inversionistas.inversionista_id, inv_id))
+              .limit(1);
+
+            dpiEntidadLiquidada = filaCartera?.dpi ?? null;
+
+            const dpiRepresentante = normalizarDpiParaComparar(filaCartera?.dpi_rep_legal);
+            if (dpiRepresentante) {
+              // No se filtra al autorrepresentado (id 187: dpi 4036613 con
+              // dpi_rep_legal '04036613'): el resolutor normaliza los ceros a
+              // la izquierda y devuelve su propia fila, así que el correo cae
+              // en su buzón de siempre. Lo que sí cambia para él es el CUERPO:
+              // `destinatarioDeLiquidacion` lo reconoce por el DPI y no le
+              // manda el texto de empresa.
+              representanteLiquidacion = await buscarRepresentanteEnCartera(dpiRepresentante);
+            }
+          } catch (errorRepresentante) {
+            console.error(
+              `  ⚠️ No se pudo resolver al representante legal del inversionista ${inv_id}; el correo va al de la ficha:`,
+              errorRepresentante,
+            );
+            representanteLiquidacion = null;
+          }
+
+          const destinoCorreo = destinatarioDeLiquidacion(
+            {
+              nombre: inversionista.nombre_inversionista,
+              email: inversionista.email,
+              dpi: dpiEntidadLiquidada,
+            },
+            representanteLiquidacion,
+          );
+
           // Enviar correo (best-effort)
-          if (inversionista.email && excelBuffer) {
-            console.log(`  📧 Preparando envío de correo para ${inversionista.email}...`);
+          //
+          // El guard se ENSANCHÓ a propósito: antes era
+          // `if (inversionista.email && excelBuffer)`, así que una fila sin
+          // correo capturado no le llegaba a nadie. Ahora, si su representante
+          // tiene buzón, sale por ahí. Está fijado en
+          // destinatarioLiquidacion.test.ts ("una fila sin correo propio SÍ se
+          // envía...") para que el aumento de volumen no vuelva a ser
+          // accidental, y se registra aparte para que se vea en los logs.
+          if (destinoCorreo.email && excelBuffer) {
+            if (!inversionista.email && destinoCorreo.via === "representante") {
+              console.log(
+                `  ➕ El inversionista ${inversionista.nombre_inversionista} (${inv_id}) no tiene correo propio: esta liquidación antes no se enviaba y ahora sale al buzón de su representante legal.`
+              );
+            }
+            console.log(
+              `  📧 Preparando envío de correo para ${destinoCorreo.email} (vía: ${destinoCorreo.via}, motivo: ${destinoCorreo.motivo}, entidad: ${inversionista.nombre_inversionista}${destinoCorreo.emailCopia ? `, copia: ${destinoCorreo.emailCopia}` : ""})...`
+            );
             try {
               // Validar que subtotal existe para evitar crash
               const subtotalStr = inversionista.subtotal?.total_cuota_con_reinversion?.toString() || "0";
 
               const emailResult = await sendLiquidationEmail({
-                to: inversionista.email,
+                to: destinoCorreo.email,
                 investorName: inversionista.nombre_inversionista,
+                // Solo va cuando el buzón NO es el de la entidad: es lo que
+                // hace que el cuerpo salude al representante sin dejar de
+                // decir de qué entidad es esta liquidación.
+                representativeName: destinoCorreo.nombreRepresentante ?? undefined,
+                // La entidad conserva su copia cuando el correo se desvía: su
+                // buzón lo lee gente que hoy recibe esta liquidación.
+                cc: destinoCorreo.emailCopia ?? undefined,
                 amount: subtotalStr,
                 creditNumber: "Múltiples",
                 date: dayjs(fechaLiquidacion ?? new Date()).format("MMMM YYYY"),
@@ -5264,16 +5347,16 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
               });
 
               if (emailResult.success) {
-                console.log(`  ✅ Correo enviado exitosamente a ${inversionista.email}`);
+                console.log(`  ✅ Correo enviado exitosamente a ${destinoCorreo.email} (vía: ${destinoCorreo.via})`);
               } else {
-                console.error(`  ❌ Error devuelto por el servicio de correo para ${inversionista.email}:`, emailResult.error);
+                console.error(`  ❌ Error devuelto por el servicio de correo para ${destinoCorreo.email}:`, emailResult.error);
               }
             } catch (emailError) {
-              console.error(`  ❌ Error inesperado al intentar enviar correo a ${inversionista.email}:`, emailError);
+              console.error(`  ❌ Error inesperado al intentar enviar correo a ${destinoCorreo.email}:`, emailError);
             }
           } else {
-            if (!inversionista.email) {
-              console.warn(`  ⚠️ El inversionista ${inversionista.nombre_inversionista} (${inv_id}) no tiene un correo electrónico configurado en su ficha. Se omitió la notificación.`);
+            if (!destinoCorreo.email) {
+              console.warn(`  ⚠️ El inversionista ${inversionista.nombre_inversionista} (${inv_id}) no tiene un correo electrónico configurado en su ficha, ni un representante legal con correo. Se omitió la notificación.`);
             }
             if (!excelBuffer) {
               console.error(`  ❌ No se pudo adjuntar el reporte Excel porque el generador devolvió un buffer vacío para el inversionista ${inv_id}.`);

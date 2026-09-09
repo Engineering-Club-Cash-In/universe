@@ -222,6 +222,9 @@ export function ListaCreditosPagos() {
       no_amortiza_capital: !!credit.no_amortiza_capital,
       excluir_compras: !!credit.excluir_compras,
       estado_devolucion: credit.estado_devolucion ?? "NO_APLICA",
+      // Solo lectura en el modal: habilita fijar el capital en 0 cuando el
+      // crédito está en un estado de cierre.
+      statusCredit: credit.statusCredit,
       nombre: usuario?.nombre ?? (usuario?.nombres ? `${usuario.nombres} ${usuario.apellidos ?? ""}`.trim() : ""),
       nit: usuario?.nit ?? "",
       direccion: usuario?.direccion ?? "",

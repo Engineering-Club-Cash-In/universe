@@ -28,13 +28,21 @@ import {
 import z from "zod";
 import type { WSCrEstadoCuentaResponse } from "../services/sifco.interface";
 import { consultarEstadoCuentaPrestamo } from "../services/sifcoIntegrations";
-import { withAuditContext, setCapitalSource } from "../utils/withAuditContext";
+import {
+  withAuditContext,
+  setCapitalSource,
+  setMontoAportadoAuditContext,
+} from "../utils/withAuditContext";
 import { clasificarCompraCreditoInversionista, tieneConflictoExcedenteVariable } from "./purchaseClassification";
 import { withCreditoEspejoLocks } from "../utils/creditoEspejoLock";
 import {
   getModalidadFacturacionSpreadById,
   resolveModalidadFacturacionSpread,
 } from "./modalidadFacturacion";
+import {
+  getAuditableInvestorIds,
+  getAdjustedExistingInvestorIds,
+} from "../utils/montoAportadoAuditContext";
 
 interface UpdateInstallmentsParams {
   numero_credito_sifco: string;
@@ -331,39 +339,56 @@ export const recalculateQuota = async ({ body, set }: any) => {
       fecha_inicio_participacion: inv.fecha_inicio_participacion,
     });
 
+    // updateInvestors reconstruye las filas con DELETE + INSERT, pero acá solo
+    // se recalcula la cuota: el monto no cambia. Sin el contexto de rebuild el
+    // trigger registraría cada participación como una baja y un alta de monto,
+    // sin motivo. Va todo en una transacción porque set_config(..., true) es
+    // tx-local: fuera de ella el contexto se perdería entre statements, y de
+    // paso el delete+insert deja de poder quedar a medias.
     let parentCuotas: Map<number, string> = new Map();
-    if (invsPadre.length > 0) {
-      parentCuotas = await updateInvestors(
-        credito.credito_id,
-        invsPadre.map(mapToInvestorInput) as any,
-        updateFieldsRecalc,
-        credito,
-        numero_credito_sifco,
-        Number(credito.seguro_10_cuotas ?? 0),
-        Number(credito.membresias_pago ?? 0),
-        Number(credito.gps ?? 0),
-        creditos_inversionistas,
-      );
-    }
+    if (invsPadre.length > 0 || invsEspejo.length > 0) {
+      await db.transaction(async (tx) => {
+        const txDb = tx as unknown as typeof db;
+        await setMontoAportadoAuditContext(txDb, "PADRE", undefined, []);
+        await setMontoAportadoAuditContext(txDb, "ESPEJO", undefined, []);
 
-    if (invsEspejo.length > 0) {
-      const espejoSincronizado = invsEspejo.map((inv) => ({
-        ...mapToInvestorInput(inv),
-        cuota_inversionista: parentCuotas.get(inv.inversionista_id),
-      }));
+        if (invsPadre.length > 0) {
+          parentCuotas = await updateInvestors(
+            credito.credito_id,
+            invsPadre.map(mapToInvestorInput) as any,
+            updateFieldsRecalc,
+            credito,
+            numero_credito_sifco,
+            Number(credito.seguro_10_cuotas ?? 0),
+            Number(credito.membresias_pago ?? 0),
+            Number(credito.gps ?? 0),
+            creditos_inversionistas,
+            undefined,
+            txDb,
+          );
+        }
 
-      await updateInvestors(
-        credito.credito_id,
-        espejoSincronizado as any,
-        updateFieldsRecalc,
-        credito,
-        numero_credito_sifco,
-        Number(credito.seguro_10_cuotas ?? 0),
-        Number(credito.membresias_pago ?? 0),
-        Number(credito.gps ?? 0),
-        creditos_inversionistas_espejo,
-        parentCuotas,
-      );
+        if (invsEspejo.length > 0) {
+          const espejoSincronizado = invsEspejo.map((inv) => ({
+            ...mapToInvestorInput(inv),
+            cuota_inversionista: parentCuotas.get(inv.inversionista_id),
+          }));
+
+          await updateInvestors(
+            credito.credito_id,
+            espejoSincronizado as any,
+            updateFieldsRecalc,
+            credito,
+            numero_credito_sifco,
+            Number(credito.seguro_10_cuotas ?? 0),
+            Number(credito.membresias_pago ?? 0),
+            Number(credito.gps ?? 0),
+            creditos_inversionistas_espejo,
+            parentCuotas,
+            txDb,
+          );
+        }
+      });
     }
 
     // 6. Traer los inversionistas ya recalculados para devolverlos
@@ -492,6 +517,9 @@ const creditUpdateSchema = z.object({
     )
     .min(0)
     .optional(),
+  // El mínimo real (>= 1) se valida en el cuerpo, contra el capital actual: un
+  // crédito cancelado o reiniciado se persiste en 0 (credits.ts) y el modal
+  // reenvía ese valor, así que el schema no puede rechazarlo de plano.
   capital: z.number().nonnegative(),
   porcentaje_interes: z.number().min(0).max(100),
   seguro_10_cuotas: z.number().min(0),
@@ -512,6 +540,9 @@ const creditUpdateSchema = z.object({
   bandera_reinversion: z.boolean().optional(),
   // Motivo del ajuste manual de capital (se registra en historial_capital_credito).
   motivo_ajuste_capital: z.string().max(500).optional(),
+  // Motivos independientes para historial de monto fiscal y espejo.
+  motivo_ajuste_monto_aportado_padre: z.string().max(500).optional(),
+  motivo_ajuste_monto_aportado_espejo: z.string().max(500).optional(),
 });
 
 type CreditUpdateData = z.infer<typeof creditUpdateSchema>;
@@ -1109,7 +1140,10 @@ export const updateInvestors = async (
   parentCuotas?: Map<number, string>,
   dbInstance: typeof db = db,
 ): Promise<Map<number, string>> => {
-  if (!inversionistas || inversionistas.length === 0) return new Map();
+  // Solo `undefined` (campo omitido) evita el rebuild. Una lista vacía no
+  // llega hasta acá: updateCredit la rechaza con 400 y los llamadores internos
+  // se protegen con `.length > 0` antes de invocar.
+  if (!inversionistas) return new Map();
 
   // 🔥 NUEVO: Obtener los datos existentes ANTES de borrar para preservar el estado
   const existingRecords = await dbInstance
@@ -1460,7 +1494,10 @@ export const updateCredit = async ({ body, set, request }: any) => {
 
     const {
       credito_id,
-      inversionistas = [],
+      // Sin default: `undefined` significa "campo omitido" y debe distinguirse
+      // de `[]`, que es la orden explícita de dejar el crédito sin
+      // inversionistas. El rebuild (delete+insert) se guía por esa diferencia.
+      inversionistas,
       inversionistas_espejo,
       mora,
       cuota,
@@ -1478,6 +1515,8 @@ export const updateCredit = async ({ body, set, request }: any) => {
       motivo_devolucion,
       bandera_reinversion,
       motivo_ajuste_capital,
+      motivo_ajuste_monto_aportado_padre,
+      motivo_ajuste_monto_aportado_espejo,
       ...fieldsToUpdate
     } = parseResult.data;
 
@@ -1504,6 +1543,132 @@ export const updateCredit = async ({ body, set, request }: any) => {
     // repararTotalRestante. Re-proyectarlos resucitaría deuda fantasma.
     const esCreditoFinalizado =
       current.statusCredit === "CANCELADO" || current.statusCredit === "CAIDO";
+
+    // El rango del capital se valida antes que su motivo: pedir el motivo
+    // primero deja al usuario escribiéndolo para recién entonces enterarse de
+    // que el monto estaba fuera de rango.
+    //
+    // El mínimo es Q1 mientras el crédito esté vivo. Queda en 0 si:
+    //   - el estado es de cierre (CANCELADO, CAIDO o INCOBRABLE): ahí un capital
+    //     0 es un valor válido y se puede fijar explícitamente;
+    //   - o el capital YA vale 0 (cancelar y reiniciarCredito lo zerean, y el
+    //     modal reenvía el capital actual en cada guardado, así que rechazarlo
+    //     bloquearía la edición de cualquier otro campo).
+    // En ambos casos el valor enviado debe ser 0 exacto: un monto fraccionario
+    // como 0.50 no es "dejarlo en cero", es un monto nuevo y le aplica el mínimo.
+    const capitalNuevo = new Big(fieldsToUpdate.capital);
+    const admiteCapitalEnCero =
+      current.statusCredit === "CANCELADO" ||
+      current.statusCredit === "CAIDO" ||
+      current.statusCredit === "INCOBRABLE" ||
+      new Big(current.capital || 0).eq(0);
+    if (capitalNuevo.lt(1) && !(capitalNuevo.eq(0) && admiteCapitalEnCero)) {
+      set.status = 400;
+      return { message: "El capital debe ser mayor o igual a 1" };
+    }
+
+    const capitalCambiaSolicitado = !capitalNuevo.eq(
+      new Big(current.capital || 0),
+    );
+    const motivoCapital = motivo_ajuste_capital?.trim();
+    if (capitalCambiaSolicitado && !motivoCapital) {
+      set.status = 400;
+      return { message: "El motivo del ajuste de capital es obligatorio" };
+    }
+
+    // Los montos actuales solo se consultan si el body trae la lista
+    // correspondiente: sin ella no hay nada que comparar y los helpers
+    // devuelven [] de inmediato (la ruta del CRM y la de solo cuota no traen
+    // ninguna de las dos).
+    const leerMontosActuales = async (tabla: typeof creditos_inversionistas) =>
+      await db
+        .select({
+          inversionista_id: tabla.inversionista_id,
+          monto_aportado: tabla.monto_aportado,
+        })
+        .from(tabla)
+        .where(eq(tabla.credito_id, credito_id));
+
+    // En un crédito finalizado el payload de inversionistas se ignora por
+    // completo más abajo, así que tampoco hay nada que comparar contra la DB.
+    const inversionistasPadreActuales =
+      inversionistas && !esCreditoFinalizado
+        ? await leerMontosActuales(creditos_inversionistas)
+        : [];
+    const inversionistasEspejoActuales =
+      inversionistas_espejo && !esCreditoFinalizado
+        ? await leerMontosActuales(creditos_inversionistas_espejo as any)
+        : [];
+
+    // Vaciar la lista dejaría un crédito VIVO sin quién aporte su capital: los
+    // porcentajes de cash-in e inversión ya no sumarían y no habría a quién
+    // liquidar. Sacar un inversionista se hace por su flujo propio
+    // (liquidateInvestor / replaceInvestorCredit), que registra la compra y la
+    // liquidación; acá se rechaza en vez de aceptarlo en silencio.
+    //
+    // Solo cuenta como vaciar si HAY participaciones que borrar: un crédito
+    // importado de CRM/SIFCO o reservado no tiene ninguna, el modal igual manda
+    // [] y ahí la lista vacía es un no-op, no una baja. En un finalizado
+    // también es legítima: mergeCreditosAndUpdate traslada las participaciones
+    // al destino y deja el origen CANCELADO sin ninguna (credits.ts).
+    const vaciaParticipacionesExistentes =
+      (inversionistas?.length === 0 && inversionistasPadreActuales.length > 0) ||
+      (inversionistas_espejo?.length === 0 &&
+        inversionistasEspejoActuales.length > 0);
+    if (vaciaParticipacionesExistentes) {
+      set.status = 400;
+      return {
+        message:
+          "Un crédito no puede quedarse sin inversionistas. Usá el flujo de liquidación o reemplazo.",
+      };
+    }
+
+    // El motivo se exige solo por ajustes sobre participaciones existentes; la
+    // auditoría además cubre las altas, que el verificador de cuadre necesita
+    // ver en el historial ESPEJO para descubrir el crédito destino.
+    const montoAportadoPadreCambiados = getAdjustedExistingInvestorIds(
+      inversionistasPadreActuales,
+      inversionistas,
+    );
+    const montoAportadoPadreAuditables = getAuditableInvestorIds(
+      inversionistasPadreActuales,
+      inversionistas,
+    );
+    // En un crédito finalizado el payload de inversionistas se ignora más abajo
+    // (la participación es historia congelada), así que no se pide motivo por
+    // diferencias que nunca se van a aplicar.
+    const montoAportadoPadreCambia =
+      !esCreditoFinalizado && montoAportadoPadreCambiados.length > 0;
+    const motivoMontoAportadoPadre = motivo_ajuste_monto_aportado_padre?.trim();
+    if (montoAportadoPadreCambia && !motivoMontoAportadoPadre) {
+      set.status = 400;
+      return { message: "El motivo del ajuste de monto aportado del padre es obligatorio" };
+    }
+
+    // El alcance es el roster del padre: el modal deriva el espejo de esa lista,
+    // así que un espejo huérfano (sin fila en el padre) no puede venir en el
+    // payload ni recibir motivo desde la UI.
+    const montoAportadoEspejoCambiados = getAdjustedExistingInvestorIds(
+      inversionistasEspejoActuales,
+      inversionistas_espejo,
+      inversionistasPadreActuales,
+    );
+    const montoAportadoEspejoAuditables = getAuditableInvestorIds(
+      inversionistasEspejoActuales,
+      inversionistas_espejo,
+    );
+    const montoAportadoEspejoCambia =
+      !esCreditoFinalizado && montoAportadoEspejoCambiados.length > 0;
+    const motivoMontoAportadoEspejo = motivo_ajuste_monto_aportado_espejo?.trim();
+    if (montoAportadoEspejoCambia && !motivoMontoAportadoEspejo) {
+      set.status = 400;
+      return { message: "El motivo del ajuste de monto aportado del espejo es obligatorio" };
+    }
+
+    const suppressTechnicalMontoAudit = async () => {
+      await setMontoAportadoAuditContext(db, "PADRE", undefined, []);
+      await setMontoAportadoAuditContext(db, "ESPEJO", undefined, []);
+    };
 
     // 3.0. En un crédito finalizado no entran inversionistas nuevos: la compra
     // o reinversión crearía una participación "viva" (con su fila en
@@ -1664,7 +1829,7 @@ export const updateCredit = async ({ body, set, request }: any) => {
     if (formato_credito !== undefined) {
       updateFields.formato_credito = formato_credito;
     } else {
-      const formatCredit = inversionistas.some(
+      const formatCredit = (inversionistas ?? []).some(
         (inv) => Number(inv.porcentaje_inversion) > 0,
       )
         ? "Pool"
@@ -1783,7 +1948,7 @@ export const updateCredit = async ({ body, set, request }: any) => {
         db,
         "AJUSTE_MANUAL",
         espejoUserId,
-        motivo_ajuste_capital,
+        motivoCapital,
       );
       [updatedCredit] = await ejecutarUpdateCredito(db);
     } else {
@@ -1811,10 +1976,10 @@ export const updateCredit = async ({ body, set, request }: any) => {
         }, db);
 
       const bodyTraeInversionistas =
-        (inversionistas && inversionistas.length > 0) ||
-        (inversionistas_espejo && inversionistas_espejo.length > 0);
+        inversionistas !== undefined || inversionistas_espejo !== undefined;
 
       if (!bodyTraeInversionistas) {
+        await suppressTechnicalMontoAudit();
         const invsPadreActuales = await db
           .select()
           .from(creditos_inversionistas)
@@ -1931,7 +2096,7 @@ export const updateCredit = async ({ body, set, request }: any) => {
       }
       // 9. Actualizar inversionistas (Principal)
       let parentCuotasTx: Map<number, string> = new Map();
-      if (inversionistas && inversionistas.length > 0) {
+      if (inversionistas !== undefined) {
         const nuevosPorId = new Map(
           inversionistasNuevos.map((inv) => [inv.inversionista_id, inv]),
         );
@@ -1961,7 +2126,7 @@ export const updateCredit = async ({ body, set, request }: any) => {
       }
 
       // 10. Actualizar inversionistas (Espejo)
-      if (inversionistas_espejo && inversionistas_espejo.length > 0) {
+      if (inversionistas_espejo !== undefined) {
         // 🔒 Sincronización forzada solo de cuota_inversionista desde el padre.
         // El monto_aportado del espejo se respeta tal como viene del frontend
         // porque representa el saldo vivo del inversionista (capital - abonos)
@@ -2015,10 +2180,24 @@ export const updateCredit = async ({ body, set, request }: any) => {
 
     if (
       !esCreditoFinalizado &&
-      ((inversionistas && inversionistas.length > 0) ||
-        (inversionistas_espejo && inversionistas_espejo.length > 0) ||
+      (inversionistas !== undefined ||
+        inversionistas_espejo !== undefined ||
         inversionistasNuevos.length > 0)
     ) {
+      // updateInvestors reconstruye filas con DELETE + INSERT. El trigger usa
+      // este contexto solo en rebuild final, no en recálculos intermedios.
+      await setMontoAportadoAuditContext(
+        db,
+        "PADRE",
+        motivoMontoAportadoPadre,
+        montoAportadoPadreAuditables,
+      );
+      await setMontoAportadoAuditContext(
+        db,
+        "ESPEJO",
+        motivoMontoAportadoEspejo,
+        montoAportadoEspejoAuditables,
+      );
       await runInvestorRebuild(db);
     }
 

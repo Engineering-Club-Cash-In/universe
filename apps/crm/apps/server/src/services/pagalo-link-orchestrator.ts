@@ -109,11 +109,17 @@ async function registrarGestionLinkPagalo(params: {
 	try {
 		return await db.transaction(async (tx) => {
 			const [grupo] = await tx
-				.select({ contactoCobroId: pagaloPaymentGroups.contactoCobroId })
+				.select({
+					contactoCobroId: pagaloPaymentGroups.contactoCobroId,
+					status: pagaloPaymentGroups.status,
+				})
 				.from(pagaloPaymentGroups)
 				.where(eq(pagaloPaymentGroups.id, params.groupId))
 				.for("update");
 			if (!grupo) return false;
+			if (grupo.status === "CANCELLED" || grupo.status === "COMPLETED") {
+				return false;
+			}
 			if (grupo.contactoCobroId) return true;
 			const [gestion] = await tx
 				.insert(contactosCobros)
@@ -1509,11 +1515,15 @@ export async function regenerarGrupo(params: {
 			)
 			.orderBy(pagaloPaymentGroups.id)
 			.for("update");
-		await tx
-			.select({ id: pagaloPaymentGroups.id })
+		const [grupoBloqueado] = await tx
+			.select({ contactoCobroId: pagaloPaymentGroups.contactoCobroId })
 			.from(pagaloPaymentGroups)
 			.where(eq(pagaloPaymentGroups.id, params.groupId))
 			.for("update");
+
+		if (!grupoBloqueado) {
+			throw new Error("Grupo Págalo no encontrado.");
+		}
 
 		// linksViejos se leía ANTES de esta transacción (sin candado): si una
 		// regeneración individual concurrente insertaba una generación nueva
@@ -1624,7 +1634,7 @@ export async function regenerarGrupo(params: {
 		// para esos casos (hallazgo de code review). Soltar la asociación del
 		// viejo, en la MISMA transacción, antes de insertar el nuevo con esa
 		// misma gestión.
-		if (grupoViejo.contactoCobroId) {
+		if (grupoBloqueado.contactoCobroId) {
 			await tx
 				.update(pagaloPaymentGroups)
 				.set({ contactoCobroId: null, updatedAt: new Date() })
@@ -1635,7 +1645,7 @@ export async function regenerarGrupo(params: {
 			.insert(pagaloPaymentGroups)
 			.values({
 				casoCobroId: grupoViejo.casoCobroId,
-				contactoCobroId: grupoViejo.contactoCobroId,
+				contactoCobroId: grupoBloqueado.contactoCobroId,
 				numeroCreditoSifco: grupoViejo.numeroCreditoSifco,
 				carteraCreditoId: grupoViejo.carteraCreditoId,
 				pagaloEnvironment: grupoViejo.pagaloEnvironment,

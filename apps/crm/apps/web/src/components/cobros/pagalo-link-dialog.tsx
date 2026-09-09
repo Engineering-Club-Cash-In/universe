@@ -154,6 +154,24 @@ export function PagaloLinkDialog({
 		return { capital, facturable, otros, total: capital + facturable };
 	}, [cuotas, selected, tieneMora, data, otrosParseado]);
 	const queryClient = useQueryClient();
+	const invalidarDatosPagalo = () => {
+		queryClient.invalidateQueries({
+			queryKey: orpc.getPagaloHistorial.key(),
+		});
+		queryClient.invalidateQueries(
+			orpc.getPagaloGrupoActivo.queryOptions({
+				input: { casoCobroId, creditoId },
+			}),
+		);
+		queryClient.invalidateQueries(
+			orpc.getHistorialContactos.queryOptions({ input: { casoCobroId } }),
+		);
+		queryClient.invalidateQueries(
+			orpc.getHistorialContactosPaginado.queryOptions({
+				input: { casoCobroId },
+			}),
+		);
+	};
 	const mutation = useMutation({
 		mutationFn: (input: {
 			casoCobroId: string;
@@ -163,24 +181,7 @@ export function PagaloLinkDialog({
 			otros?: string;
 		}) => (client as any).crearLinksPagalo(input),
 		onSuccess: (result: any) => {
-			// .key() = prefijo del path → invalida TODAS las páginas del
-			// historial, que ahora va por crédito y paginado.
-			queryClient.invalidateQueries({
-				queryKey: orpc.getPagaloHistorial.key(),
-			});
-			queryClient.invalidateQueries(
-				orpc.getPagaloGrupoActivo.queryOptions({
-					input: { casoCobroId, creditoId },
-				}),
-			);
-			queryClient.invalidateQueries(
-				orpc.getHistorialContactos.queryOptions({ input: { casoCobroId } }),
-			);
-			queryClient.invalidateQueries(
-				orpc.getHistorialContactosPaginado.queryOptions({
-					input: { casoCobroId },
-				}),
-			);
+			invalidarDatosPagalo();
 			if (result.status === "REVIEW_REQUIRED")
 				toast.error("Grupo Págalo existente requiere revisión.");
 			else if (result.origen === "BOT")
@@ -207,8 +208,10 @@ export function PagaloLinkDialog({
 					"Links creados, pero no se pudo registrar la gestión. Puedes reintentar sin generar links duplicados.",
 				);
 		},
-		onError: (error: Error) =>
-			toast.error(error.message || "No se pudieron crear links Págalo"),
+		onError: (error: Error) => {
+			invalidarDatosPagalo();
+			toast.error(error.message || "No se pudieron crear links Págalo");
+		},
 	});
 	const grupoPendiente = grupoActivo.data as any;
 	const linksRecienCreados = mutation.data?.links ?? [];

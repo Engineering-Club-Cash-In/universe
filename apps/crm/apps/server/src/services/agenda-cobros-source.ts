@@ -8,6 +8,7 @@ import {
 	lt,
 	lte,
 	max,
+	ne,
 	or,
 } from "drizzle-orm";
 import { db } from "../db";
@@ -616,6 +617,7 @@ export async function obtenerColaOperacionAsesor(
 					.where(
 						and(
 							inArray(contactosCobros.casoCobroId, casoIds),
+							ne(contactosCobros.estadoContacto, "link_pago_generado"),
 							lt(contactosCobros.fechaContacto, hoy),
 						),
 					)

@@ -4086,7 +4086,12 @@ export const cobrosRouter = {
 									ultimaFecha: max(contactosCobros.fechaContacto),
 								})
 								.from(contactosCobros)
-								.where(inArray(contactosCobros.casoCobroId, casoIds))
+								.where(
+									and(
+										inArray(contactosCobros.casoCobroId, casoIds),
+										ne(contactosCobros.estadoContacto, "link_pago_generado"),
+									),
+								)
 								.groupBy(contactosCobros.casoCobroId),
 				]);
 				const promesasPorCaso = new Map<

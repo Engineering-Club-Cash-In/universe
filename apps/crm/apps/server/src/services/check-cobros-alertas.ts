@@ -15,7 +15,7 @@
  * devuelve un resumen y loguea (patrón premora / checkPromesasPago).
  */
 
-import { and, eq, inArray, max } from "drizzle-orm";
+import { and, eq, inArray, max, ne } from "drizzle-orm";
 import { db } from "../db";
 import { casosCobros, contactosCobros } from "../db/schema/cobros";
 import type { NewNotification } from "../db/schema/notifications";
@@ -333,7 +333,12 @@ async function maxContactoPorCaso(
 			ultima: max(contactosCobros.fechaContacto),
 		})
 		.from(contactosCobros)
-		.where(inArray(contactosCobros.casoCobroId, casoIds))
+		.where(
+			and(
+				inArray(contactosCobros.casoCobroId, casoIds),
+				ne(contactosCobros.estadoContacto, "link_pago_generado"),
+			),
+		)
 		.groupBy(contactosCobros.casoCobroId);
 	const map = new Map<string, Date>();
 	for (const r of rows) if (r.ultima) map.set(r.casoId, r.ultima);

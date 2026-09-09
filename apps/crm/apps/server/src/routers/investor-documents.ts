@@ -114,6 +114,52 @@ export const investorDocumentsRouter = {
 			return result;
 		}),
 
+	/**
+	 * ¿De quién es este DPI o este correo? Alimenta la detección del alta: si el
+	 * dato ya es de alguien, conta no está duplicando — está por dar de alta su
+	 * empresa.
+	 *
+	 * Devuelve `null` cuando no hay nadie, que es el caso normal de un alta
+	 * corriente. No es un error y no debe tratarse como tal.
+	 *
+	 * Un fallo de cartera SÍ es un error y se propaga. Antes se tragaba y se
+	 * devolvía el mismo `null` que "no hay nadie", cuando eso ya no es inocuo:
+	 * al desaparecer el interruptor "¿Es empresa?", la única forma de mover el
+	 * DPI a representante legal es que la detección haya corrido. Con el fallo
+	 * disfrazado de "no existe", conta enviaba el alta con el DPI en su sitio y
+	 * cartera la rechazaba por duplicada, sin ninguna salida.
+	 */
+	identidadInversionista: crmCobrosOrInvestmentsProcedure
+		.input(
+			z.object({
+				dpi: z.string().optional(),
+				email: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const dpi = input.dpi?.trim();
+			const email = input.email?.trim();
+			if (!dpi && !email) return null;
+
+			try {
+				const result = await carteraBackClient.buscarIdentidadInversionista({
+					...(dpi ? { dpi } : {}),
+					...(email ? { email } : {}),
+				});
+				return result.data ?? null;
+			} catch (error) {
+				console.error("[identidadInversionista] error en cartera-back:", error);
+
+				// Se distingue de "no hay nadie" a propósito: el formulario tiene que
+				// poder decir "no pudimos verificar" y ofrecer reintentar, en vez de
+				// dejar creer que el DPI está libre.
+				throw new ORPCError("SERVICE_UNAVAILABLE", {
+					message:
+						"No pudimos verificar el DPI contra cartera. Reintenta en un momento.",
+				});
+			}
+		}),
+
 	getInvestorDocumentsAdmin: crmCobrosOrInvestmentsProcedure
 		.input(
 			z.object({

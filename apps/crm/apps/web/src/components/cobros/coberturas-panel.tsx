@@ -91,6 +91,9 @@ export function CoberturasPanel() {
 			setRevision(false);
 			setGuardada(data.id);
 			setId(crypto.randomUUID());
+			setFiltroDesde(desde);
+			setFiltroHasta(hasta);
+			setRango({ desde, hasta });
 			void refrescar();
 			toast.success("Cobertura registrada");
 		},

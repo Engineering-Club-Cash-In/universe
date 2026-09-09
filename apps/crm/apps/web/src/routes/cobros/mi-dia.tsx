@@ -484,6 +484,8 @@ function MiDiaPage() {
 		}),
 		enabled: !!session && esVistaPersonal,
 		placeholderData: keepPreviousData,
+		// Cobertura puede crearse o cancelarse desde otra sesión.
+		refetchInterval: 60_000,
 	});
 	// Cartera COMPLETA del asesor. La cola sale del pool de buckets y excluye
 	// B0 (Cartera Sana no tiene SLA), así que un asesor con toda su cartera al
@@ -508,6 +510,8 @@ function MiDiaPage() {
 			}),
 			enabled: !!session && esVistaPersonal,
 			placeholderData: keepPreviousData,
+			// La agenda del suplente o titular puede cambiar desde Coberturas.
+			refetchInterval: 60_000,
 		})),
 	});
 

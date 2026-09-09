@@ -254,6 +254,8 @@ function ColaDiaPage() {
 		}),
 		enabled: !!session,
 		placeholderData: keepPreviousData,
+		// Cobertura puede crearse o cancelarse desde otra sesión.
+		refetchInterval: 60_000,
 	});
 
 	const asesoresQuery = useQuery({

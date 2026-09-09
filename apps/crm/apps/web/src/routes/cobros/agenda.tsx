@@ -219,6 +219,9 @@ function AgendaDiaPage() {
 			}),
 			enabled: !!session,
 			placeholderData: keepPreviousData,
+			// Coberturas creadas por otro supervisor cambian agenda sin cambiar
+			// dueño de cartera; refrescar evita que una pestaña abierta quede vieja.
+			refetchInterval: 60_000,
 		})),
 	});
 

@@ -1,6 +1,8 @@
 import { sql } from "drizzle-orm";
 import ExcelJS from "exceljs";
 import { db } from "../database";
+import { buildReporteCashInWorkbook, sanitizarSheetName } from "../utils/functions/excelCashInReport";
+import { clampPagination, contienePatron } from "../utils/functions/pagination";
 import { snapCte } from "./moraSnapshotSql";
 
 export { snapCte } from "./moraSnapshotSql";
@@ -36,11 +38,13 @@ function buildSnapshotWhere(a: SnapshotArgs) {
   else if (a.etapa === "31-60") filters.push(sql`s.cuotas = 2`);
   else if (a.etapa === "61-90") filters.push(sql`s.cuotas = 3`);
   else if (a.etapa === "+90") filters.push(sql`s.cuotas >= 4`);
-  if (a.numero_credito_sifco) filters.push(sql`c.numero_credito_sifco ILIKE ${"%" + a.numero_credito_sifco + "%"}`);
-  if (a.nombre_usuario) filters.push(sql`u.nombre ILIKE ${"%" + a.nombre_usuario + "%"}`);
+  // `contienePatron` escapa % _ \ del término: son comodines de ILIKE y sin
+  // escapar, buscar "_" matchea a TODOS.
+  if (a.numero_credito_sifco) filters.push(sql`c.numero_credito_sifco ILIKE ${contienePatron(a.numero_credito_sifco)}`);
+  if (a.nombre_usuario) filters.push(sql`u.nombre ILIKE ${contienePatron(a.nombre_usuario)}`);
   if (a.asesor) {
     const names = a.asesor.split(",").map((n) => n.trim()).filter(Boolean);
-    if (names.length) filters.push(sql`(${sql.join(names.map((n) => sql`a.nombre ILIKE ${"%" + n + "%"}`), sql` OR `)})`);
+    if (names.length) filters.push(sql`(${sql.join(names.map((n) => sql`a.nombre ILIKE ${contienePatron(n)}`), sql` OR `)})`);
   }
   return sql.join(filters, sql` AND `);
 }
@@ -54,10 +58,8 @@ const snapFromJoins = sql`
 // Snapshot por crédito de la mora a una fecha, con totales y filtros.
 export async function getMoraHistorialSnapshot(a: SnapshotArgs) {
   const fecha = a.fecha;
-  // Clamp defensivo: evita OFFSET negativo / NaN si llega page/pageSize inválido.
-  const page = Number.isFinite(a.page) && (a.page as number) > 0 ? Math.floor(a.page as number) : 1;
-  const pageSize = Number.isFinite(a.pageSize) && (a.pageSize as number) > 0 ? Math.min(Math.floor(a.pageSize as number), 500) : 20;
-  const offset = (page - 1) * pageSize;
+  // Clamp defensivo compartido con los listados de latefee.ts.
+  const { page, pageSize, offset } = clampPagination(a.page, a.pageSize);
   const where = buildSnapshotWhere(a);
 
   const [totRes, dataRes] = await Promise.all([
@@ -122,7 +124,7 @@ export async function getMoraTimeline({ desde, hasta, asesor, etapa }: { desde: 
       asesorFilter = sql` AND h.credito_id IN (
         SELECT c.credito_id FROM cartera.creditos c
         INNER JOIN cartera.asesores a ON a.asesor_id = c.asesor_id
-        WHERE (${sql.join(names.map((n) => sql`a.nombre ILIKE ${"%" + n + "%"}`), sql` OR `)})
+        WHERE (${sql.join(names.map((n) => sql`a.nombre ILIKE ${contienePatron(n)}`), sql` OR `)})
       )`;
     }
   }
@@ -184,6 +186,56 @@ export async function getMoraHistorialCredito({ credito_id }: { credito_id: numb
   return { success: true, data: res.rows };
 }
 
+// Cabecera del crédito para titular el Excel del drill-down (número SIFCO y
+// cliente). Va aparte para poder lanzarla en paralelo con el historial.
+// `async` a propósito: dentro del Promise.all, si `db.execute` llegara a tirar
+// de forma síncrona, sin async la promesa hermana queda sin handler y se
+// convierte en una unhandled rejection del proceso en vez de un 500 limpio.
+async function datosDelCredito(credito_id: number) {
+  return db.execute<any>(sql`
+    SELECT c.numero_credito_sifco, u.nombre AS cliente
+    FROM cartera.creditos c
+    INNER JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
+    WHERE c.credito_id = ${credito_id}
+    LIMIT 1
+  `);
+}
+
+// Excel del historial de mora de un crédito (drill-down), mismo conjunto de filas
+// que getMoraHistorialCredito.
+export async function getMoraHistorialCreditoExcel({ credito_id }: { credito_id: number }): Promise<Buffer> {
+  // Mismas filas que el JSON: se reusa la función en vez de repetir el SELECT
+  // (eran dos copias palabra por palabra). Las dos consultas no dependen entre
+  // sí, así que van en paralelo.
+  const [historial, credRes] = await Promise.all([
+    getMoraHistorialCredito({ credito_id }),
+    datosDelCredito(credito_id),
+  ]);
+  const cred = credRes.rows[0] ?? {};
+  const numeroSifco = cred.numero_credito_sifco ?? credito_id;
+  const cliente = cred.cliente ?? "";
+
+  // Mismo lenguaje visual que el Excel de inversionistas (helper compartido).
+  return buildReporteCashInWorkbook({
+    sheetName: `Historial ${numeroSifco}`,
+    titulo: `Historial de mora del crédito ${numeroSifco}`,
+    subtitulo: cliente ? String(cliente) : undefined,
+    filas: historial.data,
+    columnas: [
+      { header: "Historial ID", key: "historial_id", width: 14, type: "number" },
+      { header: "Fecha (GT)", key: "fecha", width: 20, type: "datetime" },
+      { header: "Evento", key: "tipo_evento", width: 18 },
+      { header: "Origen", key: "origen", width: 16 },
+      { header: "Monto anterior", key: "monto_anterior", width: 16, type: "money" },
+      { header: "Monto nuevo", key: "monto_nuevo", width: 16, type: "money" },
+      { header: "Cuotas atrasadas antes", key: "cuotas_atrasadas_anterior", width: 20, type: "number" },
+      { header: "Cuotas atrasadas después", key: "cuotas_atrasadas_nuevas", width: 22, type: "number" },
+      { header: "Motivo", key: "motivo", width: 32 },
+      { header: "Usuario", key: "usuario", width: 26 },
+    ],
+  });
+}
+
 // Excel del snapshot (todas las filas, sin paginar).
 export async function getMoraHistorialExcel(a: SnapshotArgs): Promise<Buffer> {
   const where = buildSnapshotWhere(a);
@@ -196,7 +248,8 @@ export async function getMoraHistorialExcel(a: SnapshotArgs): Promise<Buffer> {
     ORDER BY s.monto DESC
   `);
   const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet(`Mora al ${a.fecha}`);
+  // `a.fecha` llega del query string: sin sanitizar, un "/" tumba addWorksheet.
+  const ws = wb.addWorksheet(sanitizarSheetName(`Mora al ${a.fecha}`));
   ws.columns = [
     { header: "No. SIFCO", key: "numero_credito_sifco", width: 18 },
     { header: "Cliente", key: "cliente", width: 32 },

@@ -4,6 +4,7 @@
  */
 
 import apiAuth from "@/lib/api/apiAuth";
+import { registroExternoErrorDesde } from "./registroExterno.errors";
 
 export type UserType = "CLIENT" | "INVESTOR";
 
@@ -22,25 +23,10 @@ export interface RegisterExternalUserResponse {
   data?: any;
 }
 
-/**
- * Registrar usuario externo (sin autenticación requerida)
- * La API decide automáticamente si crear en CRM o Cartera según userType
- */
-export const registerExternalUser = async (
-  payload: RegisterExternalUserPayload
-): Promise<RegisterExternalUserResponse> => {
-  try {
-    const response = await apiAuth.post<RegisterExternalUserResponse>(
-      "/api/unified/register-external",
-      payload
-    );
-    return response.data;
-  } catch (error: any) {
-    const message = error.response?.data?.message || "Error al registrar usuario externo";
-    console.error("Error al registrar usuario externo:", error);
-    throw new Error(message);
-  }
-};
+// `registerExternalUser` (sin sesión, contra POST /api/unified/register-external)
+// se retiró junto con esa ruta: llamaba al CRM con el secreto de servicio
+// usando datos que elegía quien llamara, y devolvía el lead completo cuando
+// coincidía el correo o el DPI. No tenía ningún llamador vivo.
 
 /**
  * Registrar usuario externo (con autenticación)
@@ -56,8 +42,9 @@ export const registerExternalUserAuth = async (
     );
     return response.data;
   } catch (error: any) {
-    const message = error.response?.data?.message || "Error al registrar usuario externo";
     console.error("Error al registrar usuario externo:", error);
-    throw new Error(message);
+    // Se conserva el status/código: el formulario necesita distinguir el DPI
+    // ya tomado (corregible por el titular) de un fallo cualquiera.
+    throw registroExternoErrorDesde(error);
   }
 };

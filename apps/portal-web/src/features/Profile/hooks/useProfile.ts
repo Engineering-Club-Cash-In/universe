@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { registerExternalUser } from "../services/unifiedService";
+import { registerExternalUserAuth } from "../services/unifiedService";
 import { useAuth } from "@/lib";
-import { authClient } from "@/lib/auth";
+import { mensajeDeRegistroFallido } from "@/features/Login/hook/registroPendiente";
 
 interface UserData {
   id: string;
@@ -14,10 +14,27 @@ interface UserData {
   cachedImage?: string;
 }
 
+/**
+ * Registro por Google que llegó al perfil sin terminar.
+ *
+ * `register-external-auth` es la única llamada que escribe el rol y el DPI. Si
+ * muere —el caso normal es un DPI ya tomado por otra cuenta— la persona se
+ * queda con una cuenta a medias, y lo que sabemos del intento (qué pidió ser y
+ * por qué falló) solo existe aquí. Antes esto era un `console.error`: el
+ * formulario de recuperación aparecía mudo y puesto en CLIENT, así que quien
+ * pidió invertir se reinscribía como cliente sin enterarse.
+ */
+export type RegistroPendiente = {
+  tipoSolicitado: "CLIENT" | "INVESTOR";
+  mensaje: string;
+};
+
 export const useProfile = () => {
   const { user } = useAuth();
 
   const [isLoading, setIsLoading] = useState(true);
+  const [registroPendiente, setRegistroPendiente] =
+    useState<RegistroPendiente | null>(null);
 
   // Crear lead o investor según parámetros de URL (para registro con Google)
   useEffect(() => {
@@ -41,20 +58,16 @@ export const useProfile = () => {
         console.log(`Creando usuario tipo ${userType} desde OAuth`);
         // Mantener isLoading en true mientras se procesa y recarga
         try {
-          // Usar el servicio unificado para registrar en CRM o Cartera
-          await registerExternalUser({
+          // Servicio unificado (variante autenticada): registra en CRM o
+          // Cartera y, ya del lado del servidor, deja el DPI y el rol en la
+          // cuenta de la sesión. El cliente ya no los escribe.
+          await registerExternalUserAuth({
             userType: userType,
             fullName: user.name || user.email.split("@")[0],
             email: user.email,
             dpi: dpi,
             phone: phone,
           });
-
-          // Actualizar DPI y role en Better Auth
-          await authClient.updateUser({
-            dpi: dpi,
-            ...(userType === "INVESTOR" && { role: "INVESTOR" }),
-          } as any);
 
           console.log(`${userType} creado exitosamente`);
 
@@ -66,6 +79,15 @@ export const useProfile = () => {
           return; // Salir antes de setIsLoading(false)
         } catch (error) {
           console.error(`Error al crear ${userType}:`, error);
+
+          // El fallo se le muestra a la persona y su elección sobrevive hasta
+          // el formulario de recuperación, igual que en el registro por correo.
+          // Los parámetros de la URL se dejan como están a propósito: son lo
+          // único que conserva la intención si recarga la página.
+          setRegistroPendiente({
+            tipoSolicitado: userType,
+            mensaje: mensajeDeRegistroFallido(error),
+          });
           setIsLoading(false);
         }
       } else {
@@ -106,5 +128,6 @@ export const useProfile = () => {
   return {
     user,
     isLoading,
+    registroPendiente,
   };
 };

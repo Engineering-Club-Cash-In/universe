@@ -5,14 +5,16 @@
 import apiAuth from "@/lib/api/apiAuth";
 
 // Interfaces
-export interface CreateInvestorPayload {
-  nombre?: string;
-  dpi?: number;
-  email?: string;
-  emite_factura?: boolean;
-  tipo_reinversion: string;
-  banco_id?: string | null;
-  tipo_cuenta?: string | null;
+
+/**
+ * Campos de cobro que el titular puede editar de su propio inversionista.
+ *
+ * La identidad no viaja en el cuerpo: el servidor resuelve el inversionista
+ * con el correo de la sesión y dirige la escritura por su id.
+ */
+export interface UpdateInvestorPayload {
+  banco_id?: number;
+  tipo_cuenta?: string;
   numero_cuenta?: string;
 }
 
@@ -54,10 +56,10 @@ export interface Banco {
 }
 
 /**
- * Crear o actualizar un inversionista
+ * Actualizar los datos de cobro del inversionista de la cuenta autenticada
  */
-export const createInvestor = async (
-  payload: CreateInvestorPayload
+export const updateOwnInvestor = async (
+  payload: UpdateInvestorPayload
 ): Promise<CreateInvestorResponse> => {
   try {
     const response = await apiAuth.post<CreateInvestorResponse>(
@@ -66,7 +68,7 @@ export const createInvestor = async (
     );
     return response.data;
   } catch (error) {
-    console.error("Error al crear inversionista:", error);
+    console.error("Error al actualizar inversionista:", error);
     throw error;
   }
 };

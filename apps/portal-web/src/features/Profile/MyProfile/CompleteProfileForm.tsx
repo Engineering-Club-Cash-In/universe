@@ -2,25 +2,40 @@ import { useState } from "react";
 import { InputIcon, Button, IconPerson } from "@/components";
 import { useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/lib";
-import { authClient } from "@/lib/auth";
-import { registerExternalUser } from "../services";
+import { registerExternalUserAuth } from "../services";
+import {
+  rolFueEstablecido,
+  tipoInicialDelFormulario,
+} from "../identidadDelPortal";
 
 interface CompleteProfileFormProps {
   onSuccess: () => void;
-  onlyApi?: boolean; // Si es true, no actualiza el rol en better-auth (usado para completar perfil desde admin)
+  /**
+   * Tipo que la persona eligió en un registro que no llegó a terminar (el
+   * camino de Google lo lleva en la URL del callback). Sin esto el formulario
+   * arrancaba en CLIENT, que es el valor por defecto, no su elección.
+   */
+  tipoSolicitado?: "CLIENT" | "INVESTOR" | null;
+  /** Motivo por el que ese registro falló, para no llegar aquí en silencio. */
+  mensajeInicial?: string;
 }
 
 export const CompleteProfileForm = ({
   onSuccess,
-  onlyApi = false,
+  tipoSolicitado = null,
+  mensajeInicial = "",
 }: CompleteProfileFormProps) => {
   const { user } = useAuth();
   const [dpi, setDpi] = useState("");
-  const hasRole = user?.role === "CLIENT" || user?.role === "INVESTOR";
-  const [userType, setUserType] = useState<"CLIENT" | "INVESTOR">(
-    user?.role ?? "CLIENT",
+  // `CLIENT` a secas NO cuenta como rol elegido: es el valor por defecto de
+  // toda cuenta nueva, así que una cuenta cuyo registro falló llegaba aquí como
+  // cliente, con el selector escondido, y se reinscribía como cliente para
+  // siempre. Ver `rolFueEstablecido`.
+  const hasRole = rolFueEstablecido(user);
+  const [userType, setUserType] = useState<"CLIENT" | "INVESTOR">(() =>
+    tipoInicialDelFormulario({ tipoSolicitado, user }),
   );
-  const [error, setError] = useState("");
+  const [error, setError] = useState(mensajeInicial);
 
   const completeMutation = useMutation({
     mutationFn: async () => {
@@ -28,15 +43,11 @@ export const CompleteProfileForm = ({
         throw new Error("El DPI debe tener 13 dígitos");
       }
 
-      // 1. Actualizar usuario en better-auth
-      if (!onlyApi) {
-        await authClient.updateUser({
-          dpi: dpi,
-          role: userType,
-        } as any);
-      }
-
-      await registerExternalUser({
+      // El rol y el DPI los escribe el servidor al validar el registro, no el
+      // cliente. Antes había aquí una rama `onlyApi` que llamaba a la variante
+      // SIN sesión; nunca se activaba (nadie pasaba la prop) y se retiró junto
+      // con esa ruta, que filtraba fichas del CRM a cualquiera.
+      await registerExternalUserAuth({
         userType: userType,
         fullName: user?.name || user?.email.split("@")[0] || "",
         email: user?.email ?? "",

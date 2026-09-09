@@ -6,7 +6,7 @@ import { useProfile } from "../hooks/useProfile";
 import { useState } from "react";
 
 export const Profile = () => {
-  const { user, isLoading } = useProfile();
+  const { user, isLoading, registroPendiente } = useProfile();
   const [isCompletingProfile, setIsCompletingProfile] = useState(false);
 
   const needsProfileCompletion = !user?.dpi && !isCompletingProfile && user?.role !== "INVESTOR";
@@ -43,7 +43,11 @@ export const Profile = () => {
           {/* Si necesita completar perfil, mostrar formulario especial */}
           {needsProfileCompletion ? (
             <div className="py-12">
-              <CompleteProfileForm onSuccess={handleProfileCompleted} />
+              <CompleteProfileForm
+                onSuccess={handleProfileCompleted}
+                tipoSolicitado={registroPendiente?.tipoSolicitado ?? null}
+                mensajeInicial={registroPendiente?.mensaje}
+              />
             </div>
           ) : (
             <>

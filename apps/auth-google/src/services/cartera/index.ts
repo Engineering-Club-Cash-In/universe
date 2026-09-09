@@ -18,7 +18,10 @@ export {
 
 // Investor
 export {
+  AmbiguousInvestorEmailError,
+  CarteraInvestorError,
   createInvestor,
+  findInvestorByEmail,
   getInvestorProfile,
   getInvestorDocuments,
   getBancos,

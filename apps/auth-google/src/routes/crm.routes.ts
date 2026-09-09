@@ -24,7 +24,6 @@ import {
 type Variables = {
   user: any;
   session: any;
-  token: string;
 };
 
 const crmRoutes = new Hono<{ Variables: Variables }>();
@@ -45,8 +44,10 @@ const requireAuth = async (c: any, next: () => Promise<void>) => {
 
     c.set("user", session.user);
     c.set("session", session.session);
-    // Guardar el token para reenviarlo al CRM
-    c.set("token", session.session.token);
+    // El token de sesión NO se reenvía al CRM: esas rutas son
+    // servicio-a-servicio y se autorizan con el secreto compartido
+    // (ver services/crm/portalAuth.ts). Esta sesión autoriza el acceso del
+    // usuario a este servicio, no la llamada al CRM.
 
     await next();
   } catch (error) {
@@ -72,13 +73,12 @@ crmRoutes.get("/profile", async (c) => {
   try {
     const email = c.req.query("email");
     const dpi = c.req.query("dpi");
-    const token = c.get("token") as string;
 
     if (!email || !dpi) {
       throw new HTTPException(400, { message: "Los parámetros email y dpi son requeridos" });
     }
 
-    const profile = await getProfile(email, dpi, token);
+    const profile = await getProfile(email, dpi);
 
     return c.json({
       success: true,
@@ -101,13 +101,12 @@ crmRoutes.get("/profile", async (c) => {
 crmRoutes.post("/profile/update", async (c) => {
   try {
     const body = await c.req.json<UpdateLeadPayload>();
-    const token = c.get("token") as string;
 
     if (!body.email) {
       throw new HTTPException(400, { message: "El campo email es requerido" });
     }
 
-    const result = await updateLead(body, token);
+    const result = await updateLead(body);
 
     return c.json({
       success: true,
@@ -132,13 +131,12 @@ crmRoutes.get("/sifco", async (c) => {
   try {
     const email = c.req.query("email");
     const dpi = c.req.query("dpi");
-    const token = c.get("token") as string;
 
     if (!email || !dpi) {
       throw new HTTPException(400, { message: "Los parámetros email y dpi son requeridos" });
     }
 
-    const opportunities = await getNumbersSifco(email, dpi, token);
+    const opportunities = await getNumbersSifco(email, dpi);
 
     return c.json({
       success: true,
@@ -166,13 +164,12 @@ crmRoutes.get("/documents", async (c) => {
   try {
     const email = c.req.query("email");
     const dpi = c.req.query("dpi");
-    const token = c.get("token") as string;
 
     if (!email || !dpi) {
       throw new HTTPException(400, { message: "Los parámetros email y dpi son requeridos" });
     }
 
-    const documents = await getPersonalDocuments(email, dpi, token);
+    const documents = await getPersonalDocuments(email, dpi);
 
     return c.json({
       success: true,
@@ -196,13 +193,12 @@ crmRoutes.get("/contracts", async (c) => {
   try {
     const email = c.req.query("email");
     const dpi = c.req.query("dpi");
-    const token = c.get("token") as string;
 
     if (!email || !dpi) {
       throw new HTTPException(400, { message: "Los parámetros email y dpi son requeridos" });
     }
 
-    const contracts = await getContracts(email, dpi, token);
+    const contracts = await getContracts(email, dpi);
 
     return c.json({
       success: true,

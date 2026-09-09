@@ -5,10 +5,12 @@
 
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { auth } from "../lib/auth";
 import {
   // Investor
+  AmbiguousInvestorEmailError,
+  CarteraInvestorError,
   createInvestor,
+  findInvestorByEmail,
   getInvestorProfile,
   getInvestorDocuments,
   getBancos,
@@ -16,43 +18,23 @@ import {
   getLiquidaciones,
   getInvestmentsStats,
   getAsesorById,
-  type CreateInvestorPayload,
 } from "../services/cartera";
+import {
+  PortalInvestorPayloadError,
+  buildPortalInvestorUpdate,
+} from "../lib/portalInvestorPayload";
+import { requireAuth, type AuthedVariables } from "../middleware/requireAuth";
 import { getSignedUrlFromBucket } from "../lib/storage";
 
-const carteraRoutes = new Hono();
+const carteraRoutes = new Hono<{ Variables: AuthedVariables }>();
 
 // ============================================
 // MIDDLEWARE DE AUTENTICACIÓN
 // ============================================
 
-/**
- * Middleware para verificar sesión de Better Auth
- */
-const requireAuth = async (c: any, next: () => Promise<void>) => {
-  try {
-    const session = await auth.api.getSession({
-      headers: c.req.raw.headers,
-    });
-
-    if (!session || !session.user) {
-      throw new HTTPException(401, { message: "No autorizado. Inicia sesión." });
-    }
-
-    // Agregar usuario a context para uso posterior
-    c.set("user", session.user);
-    c.set("session", session.session);
-
-    await next();
-  } catch (error) {
-    if (error instanceof HTTPException) {
-      throw error;
-    }
-    throw new HTTPException(401, { message: "Token inválido o expirado" });
-  }
-};
-
-// Aplicar middleware a todas las rutas
+// Aplicar middleware a todas las rutas. `requireAuth` deja en el contexto el
+// usuario ya validado, que es de donde salen las identidades que usan los
+// handlers.
 carteraRoutes.use("*", requireAuth);
 
 // ============================================
@@ -61,25 +43,105 @@ carteraRoutes.use("*", requireAuth);
 
 /**
  * POST /api/cartera/investor
- * Crear o actualizar un inversionista
+ * Actualiza los datos de cobro del inversionista de la cuenta autenticada.
+ *
+ * El destino NO sale de la petición. El correo de la sesión resuelve el
+ * inversionista y la escritura viaja dirigida por `inversionista_id`; del
+ * cuerpo solo se conservan los campos editables (ver
+ * `buildPortalInvestorUpdate`). Así el titular solo puede modificar su propia
+ * fila, aunque mande otro DPI u otro correo.
  */
 carteraRoutes.post("/investor", async (c) => {
-  try {
-    const body = await c.req.json<CreateInvestorPayload>();
+  const user = c.get("user");
+  // Tal cual viene de la sesión, igual que la consulta del perfil: así el
+  // inversionista que se puede editar es exactamente el que el titular ve.
+  const email = user?.email?.trim();
 
-    const result = await createInvestor(body);
+  if (!email) {
+    throw new HTTPException(401, { message: "No autorizado. Inicia sesión." });
+  }
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    throw new HTTPException(400, { message: "Cuerpo de la petición inválido" });
+  }
+
+  let investor: Awaited<ReturnType<typeof findInvestorByEmail>>;
+  try {
+    investor = await findInvestorByEmail(email);
+  } catch (error) {
+    // El correo lo comparten varios inversionistas: no hay forma de saber a
+    // cuál quiso escribir el titular, así que no se escribe a ninguno. Es
+    // preferible bloquear la edición hasta que se limpien los datos antes que
+    // cambiarle la cuenta bancaria a la empresa equivocada.
+    if (error instanceof AmbiguousInvestorEmailError) {
+      throw new HTTPException(409, {
+        message:
+          "Tu correo está asociado a más de un inversionista. " +
+          "Contacta a soporte para que lo corrijan antes de editar tus datos.",
+      });
+    }
+
+    throw new HTTPException(502, {
+      message: "Error al obtener perfil del inversionista",
+    });
+  }
+
+  if (!investor) {
+    throw new HTTPException(404, {
+      message: "No encontramos un inversionista asociado a tu cuenta",
+    });
+  }
+
+  // RIESGO CONOCIDO Y ABIERTO, a la espera de una decisión de negocio:
+  // `requireEmailVerification` está en false (lib/auth.ts), así que la sesión
+  // NO prueba que el correo sea de quien lo usa. Como el inversionista se
+  // resuelve por ese correo, si el de un inversionista todavía no estaba
+  // registrado en Better Auth, alguien podía crear una cuenta con él y
+  // reescribirle los datos de cobro sin acertar su DPI ni su nombre.
+  //
+  // Aquí NO se pone una barrera parcial a propósito: cualquier apaño local da
+  // falsa tranquilidad y deja el problema real —que la identidad del portal se
+  // apoya en un correo sin verificar— fuera de la vista. La salida es exigir
+  // verificación de correo; el ataque necesita una cuenta NUEVA, así que
+  // exigirla solo a los registros nuevos cierra el hueco sin tocar a las
+  // cuentas que ya existen. Ver el hilo del review en el PR #1545.
+
+  let payload;
+  try {
+    payload = buildPortalInvestorUpdate(investor.inversionista_id, body);
+  } catch (error) {
+    if (error instanceof PortalInvestorPayloadError) {
+      throw new HTTPException(400, { message: error.message });
+    }
+    throw error;
+  }
+
+  try {
+    const result = await createInvestor(payload);
 
     return c.json({
       success: true,
-      message: "Inversionista creado/actualizado correctamente",
+      message: "Inversionista actualizado correctamente",
       data: result,
     });
   } catch (error) {
     if (error instanceof HTTPException) {
       throw error;
     }
-    throw new HTTPException(500, {
-      message: error instanceof Error ? error.message : "Error al crear inversionista",
+
+    // Un rechazo de cartera viaja con su motivo. La escritura ya está acotada
+    // a la fila del titular, así que el mensaje no puede hablar de terceros.
+    if (error instanceof CarteraInvestorError) {
+      const status =
+        error.status === 400 || error.status === 409 ? error.status : 502;
+      throw new HTTPException(status, { message: error.message });
+    }
+
+    throw new HTTPException(502, {
+      message: "Error al actualizar inversionista",
     });
   }
 });

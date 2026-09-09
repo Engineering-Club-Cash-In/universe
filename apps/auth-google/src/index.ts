@@ -10,6 +10,10 @@ import crmRoutes from "./routes/crm.routes";
 import unifiedRoutes from "./routes/unified.routes";
 import { errorHandler, notFoundHandler } from "./middleware/error";
 import {
+  COOKIE_AUTHENTICATED_PREFIXES,
+  requireTrustedOrigin,
+} from "./middleware/requireTrustedOrigin";
+import {
   apiLimiter,
   authLimiter,
   signUpLimiter,
@@ -39,6 +43,14 @@ app.use(
 
 // Rate limiting
 app.use("/api/*", apiLimiter);
+
+// Anti-CSRF: la cookie de sesión es SameSite=None en producción, así que el
+// navegador la adjunta también en peticiones nacidas en un sitio ajeno. Toda
+// escritura que llegue con esa cookie debe traer un Origin de confianza.
+// `/api/auth/*` no se lista: Better Auth ya valida el origen por su cuenta.
+for (const ruta of COOKIE_AUTHENTICATED_PREFIXES) {
+  app.use(ruta, requireTrustedOrigin);
+}
 
 // Routes
 app.route("/health", healthRoutes);

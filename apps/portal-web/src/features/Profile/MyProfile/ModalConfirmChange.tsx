@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react";
 import { InputIcon, Button, IconAddress, IconPhone, IconUser, Select } from "@/components";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { updateLead } from "../services";
-import { createInvestor, getBancos } from "../services/investorService";
+import { updateLead, updateOwnDpi } from "../services";
+import { updateOwnInvestor, getBancos } from "../services/investorService";
 import { useAuth } from "@/lib";
-import { authClient } from "@/lib/auth";
+import { OPCIONES_TIPO_CUENTA } from "../tiposDeCuenta";
 
 type FieldType = 'dpi' | 'phone' | 'address' | 'banco_id' | 'tipo_cuenta' | 'numero_cuenta';
 
@@ -14,7 +14,6 @@ interface ModalConfirmChangeProps {
   initialValue: string;
   onClose: () => void;
   onSuccess: () => void;
-  profileData?: any;
 }
 
 export const ModalConfirmChange = ({
@@ -23,7 +22,6 @@ export const ModalConfirmChange = ({
   initialValue,
   onClose,
   onSuccess,
-  profileData
 }: ModalConfirmChangeProps) => {
   const [tempValue, setTempValue] = useState(initialValue);
   const [serverError, setServerError] = useState<string>("");
@@ -48,23 +46,23 @@ export const ModalConfirmChange = ({
   const updateMutation = useMutation({
     mutationFn: async ({ field, value }: { field: FieldType; value: string }) => {
       const email = user?.email;
-      const dpi = user?.dpi ?? profileData?.dpi;
 
-      // Si es campo de inversionista, actualizar en Cartera
-      if (isInvestorField || user?.role === "INVESTOR") {
-       // if (!dpi) throw new Error("DPI no disponible");
+      // Campos de cobro del inversionista: van a Cartera. El destino lo
+      // resuelve el servidor con la sesión, así que aquí solo viaja el campo
+      // que se está editando; mandar DPI o correo no elegiría otra fila, pero
+      // sugeriría que sí.
+      if (isInvestorField) {
+        const payload: {
+          banco_id?: number;
+          tipo_cuenta?: string;
+          numero_cuenta?: string;
+        } = {};
 
-        const payload: any = {
-          dpi: dpi ? parseInt(dpi) : undefined,
-          email,
-        };
-
-        // Solo enviar el campo que se está actualizando
         if (field === 'banco_id') payload.banco_id = Number(value);
         if (field === 'tipo_cuenta') payload.tipo_cuenta = value;
         if (field === 'numero_cuenta') payload.numero_cuenta = value;
 
-        return createInvestor({ ...payload });
+        return updateOwnInvestor(payload);
       }
 
       // Si es campo de cliente, actualizar en CRM
@@ -79,9 +77,8 @@ export const ModalConfirmChange = ({
 
       const payload: UpdateLeadPayload = { email };
       if (field === 'dpi') {
-        // eslint-disable-next-line
-        // @ts-ignore
-        await authClient.updateUser({ dpi: value });
+        // El DPI de la cuenta lo escribe el servidor sobre la sesión actual.
+        await updateOwnDpi(value);
         payload.dpi = value;
       }
       if (field === 'phone') payload.phone = value;
@@ -210,10 +207,7 @@ export const ModalConfirmChange = ({
                 setTempValue(value);
                 if (serverError) setServerError("");
               }}
-              options={[
-                { value: "MONETARIA", label: "Monetaria" },
-                { value: "AHORRO", label: "Ahorro" },
-              ]}
+              options={[...OPCIONES_TIPO_CUENTA]}
               placeholder={getFieldPlaceholder()}
             />
           )}

@@ -416,11 +416,12 @@ describe("estado de cuenta PDF", () => {
     // Si el estado de cuenta arranca con puras filas de capital directo y no
     // hay ninguna cuota vecina, en las filas no queda nada de donde sacar la
     // apertura y el saldo terminaba en Q0.00, como si el crédito estuviera
-    // cancelado. El capital del crédito es la apertura de último recurso.
+    // cancelado. `creditos.capital` es el saldo POSTERIOR al pago, o sea el
+    // cierre: la apertura sale de sumarle los abonos de la cuota.
     const filas = [
       { pago_id: 1, numero_cuota: 5, pagado: true, abono_capital: "1000.00", total_restante: "0" },
     ];
-    expect(applyEstadoCuentaRunningCapital(filas, "50000.00").map((p) => p.total_restante))
+    expect(applyEstadoCuentaRunningCapital(filas, "49000.00").map((p) => p.total_restante))
       .toEqual(["49000.00"]);
   });
 

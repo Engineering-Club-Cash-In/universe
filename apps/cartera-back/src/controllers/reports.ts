@@ -203,13 +203,16 @@ export function sortEstadoCuentaPayments<T extends EstadoCuentaPagoRow>(pagos: T
 
 export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(
   pagos: T[],
-  // Apertura de último recurso: `creditos.capital`. Solo se usa cuando el
-  // estado de cuenta arranca con una cuota de puras filas de capital directo,
-  // que guardan el centinela 0 y no dejan snapshot, y no hay ninguna cuota
-  // vecina de la que sacarlo. Sin esto la apertura se reconstruía desde el
-  // propio abono y el estado de cuenta terminaba en Q0.00, presentando un
-  // abono parcial como si cancelara el crédito.
-  aperturaFallback?: number | string | null,
+  // CIERRE de último recurso: `creditos.capital`. Ojo que es el saldo POSTERIOR
+  // a los pagos —registerPayment le resta el abono antes de actualizarlo— así
+  // que es el cierre de la cuota, no su apertura: usarlo como apertura restaría
+  // los abonos dos veces. Solo se usa cuando el estado de cuenta arranca con
+  // una cuota de puras filas de capital directo, que guardan el centinela 0 y
+  // no dejan snapshot, y no hay ninguna cuota vecina de la que sacarlo. Sin
+  // esto la apertura se reconstruía desde el propio abono y el estado de cuenta
+  // terminaba en Q0.00, presentando un abono parcial como si cancelara el
+  // crédito.
+  cierreFallback?: number | string | null,
 ) {
   // El saldo de cada fila se corre DENTRO de su cuota: arranca en la apertura
   // (el cierre guardado de la cuota anterior) y le resta los abonos a capital
@@ -444,12 +447,14 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(
           !cierraEnCero &&
           sinVecinaQueAncle &&
           cuotaActual === null &&
-          aperturaFallback != null &&
-          Number(aperturaFallback) > 0
+          cierreFallback != null &&
+          Number(cierreFallback) > 0
         ) {
           // Puras filas de capital directo abriendo el estado de cuenta y sin
-          // vecina: no hay nada en las filas de donde sacar la apertura.
-          saldo = new Big(aperturaFallback);
+          // vecina: no hay nada en las filas de donde sacar la apertura. El
+          // capital del crédito es el CIERRE, así que la apertura sale de
+          // sumarle los abonos de la cuota, igual que con cualquier snapshot.
+          saldo = new Big(cierreFallback).plus(abonosPorCuota.get(key) ?? new Big(0));
         } else if (tieneSnapshot || cuotaActual === null || (hayHueco && cierraEnCero)) {
           // Sin cierre previo utilizable: la apertura se reconstruye como
           // snapshot + Σ abonos de la cuota (el snapshot ya es post-pago), así

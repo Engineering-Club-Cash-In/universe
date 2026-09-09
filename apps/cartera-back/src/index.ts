@@ -16,7 +16,7 @@ const app = new Elysia()
     allowedHeaders: ["Content-Type", "Authorization"],
   }))
   .use(auditLogMiddleware)
-  .use(createNexaInternalRouter(config.environment, nexaPaymentHandler))
+  .use(createNexaInternalRouter(config.environment, config.nexaInternalPaymentsEnabled, nexaPaymentHandler))
   .use(routers.healthRouter)
   .use(routers.defaultRouter)
   .use(routers.inversionistasRouter)

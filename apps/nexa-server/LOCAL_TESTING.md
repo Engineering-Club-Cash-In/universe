@@ -123,5 +123,4 @@ Use a new reference for each re-test unless you intentionally want to validate d
 ## Log events to monitor
 
 - `scope=nexa-webhook event=received`: webhook receipt heartbeat; absence alone cannot prove silence without external request telemetry.
-- `scope=nexa-polling event=cycle_completed`: polling cycle heartbeat; alert when missing for longer than the configured polling interval.
 - `scope=nexa-reconciliation event=reconciliation_alert`: actionable `FAILED_DUE`, `FAILED_AGED`, `MANUAL_REVIEW`, or `REVIEW_PENDING_AGED` row. Fields are bounded to reconciliation identifiers and safe failure codes.

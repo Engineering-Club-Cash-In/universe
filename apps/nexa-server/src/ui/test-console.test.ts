@@ -14,8 +14,6 @@ describe("test console UI", () => {
       nexaPaymentTokenName: "Club Cashin GTQ UAT",
       nexaWebhookFlowId: "local-flow",
       nexaWebhookBearerToken: "local-webhook-token",
-      nexaPollIntervalSeconds: 300,
-      nexaPollLookbackDays: 1,
       workerLeaseSeconds: 60,
       workerIntervalSeconds: 1,
       workerMaxAttempts: 5,

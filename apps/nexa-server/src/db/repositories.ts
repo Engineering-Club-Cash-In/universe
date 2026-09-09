@@ -395,15 +395,6 @@ function toSafeReconciliationRow<T extends {
 export class PollRunRepository {
   constructor(private readonly db: NexaDb) {}
 
-  async runAsLeader<T>(callback: () => Promise<T>) {
-    return this.db.transaction(async (tx) => {
-      const lock = await tx.execute<{ acquired: boolean }>(sql`
-        SELECT pg_try_advisory_xact_lock(hashtextextended('nexa-payment-poll', 0)) AS acquired
-      `);
-      return lock.rows[0]?.acquired ? callback() : null;
-    });
-  }
-
   async run<T>(date: string, callback: () => Promise<T & { found: number; created: number; applied: number; rejected: number; skipped: number; failed: number }>) {
     const [run] = await this.db.insert(nexaPollRuns).values({ date, status: "RUNNING" }).returning();
     try {

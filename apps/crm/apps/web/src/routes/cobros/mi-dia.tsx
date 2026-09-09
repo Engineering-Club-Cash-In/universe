@@ -593,9 +593,11 @@ function MiDiaPage() {
 	const carteraTotalPages = cartera?.totalPages ?? 1;
 
 	// Sin nada urgente, la pantalla cae sola a la cartera completa: esta vista
-	// vive abierta todo el día, nunca debe quedar en blanco.
+	// vive abierta todo el día, nunca debe quedar en blanco. Una ausencia es
+	// excepción: la cola vacía tiene una explicación y debe mostrarla primero.
 	const alcance: Alcance =
-		alcanceManual ?? (total > 0 || filtro ? "prioritarios" : "cartera");
+		alcanceManual ??
+		(ausente || total > 0 || filtro ? "prioritarios" : "cartera");
 	const enCartera = alcance === "cartera";
 
 	const primerNombre = (session?.user?.name ?? "").trim().split(/\s+/)[0] || "";

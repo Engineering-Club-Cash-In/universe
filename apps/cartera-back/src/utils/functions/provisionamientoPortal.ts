@@ -50,27 +50,15 @@ export type DecisionProvisionamiento =
       dpi: string | null;
     };
 
-/**
- * Deja un DPI en forma comparable entre `dpi` (bigint) y `dpi_rep_legal`
- * (varchar con ceros a la izquierda).
- *
- * Compara como TEXTO sin ceros a la izquierda a propósito, en vez de convertir
- * a número: `dpi_rep_legal` admite 20 dígitos y un bigint topa en 19, así que
- * un `BigInt(...)` podría desbordar con un valor mal capturado. Quitar los
- * ceros y comparar strings da el mismo resultado para dígitos y no revienta.
- *
- * NOTA DE MERGE: `feat/portal-lista-inversionistas` (Fase A) tiene esta misma
- * función en `grupoInversionistas.ts`. Va duplicada aquí porque esta rama no
- * sale de aquella; al mergear las dos, dejar UNA sola y que este archivo la
- * importe. Son idénticas: el criterio no puede divergir entre "a qué grupo
- * pertenezco" y "quién recibe cuenta".
- */
-export const normalizarDpiParaComparar = (valor: unknown): string | null => {
-  const texto = String(valor ?? "").trim();
-  if (!/^\d+$/.test(texto)) return null;
-  const sinCeros = texto.replace(/^0+/, "");
-  return sinCeros === "" ? null : sinCeros;
-};
+// `normalizarDpiParaComparar` vive ahora en `./normalizarDpi`, una sola definición
+// para todo el repo. Se re-exporta desde aquí para no romper a quien ya la
+// importaba de este módulo: dos copias del mismo normalizador es exactamente
+// cómo se cuela una divergencia silenciosa entre lo que se guarda y lo que se
+// busca — y con los ceros a la izquierda del DPI ya nos pasó dos veces.
+import { normalizarDpiParaComparar } from "./normalizarDpi";
+
+export { normalizarDpiParaComparar } from "./normalizarDpi";
+
 
 /**
  * Una empresa es una fila con representante legal DISTINTO de ella misma.

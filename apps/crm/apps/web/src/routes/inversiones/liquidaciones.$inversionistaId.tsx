@@ -60,7 +60,7 @@ import {
 	errorRepLegal,
 	esEmpresaInicial,
 	requiereConfirmacionBorrado,
-	valorRepLegalAEnviar,
+	valorRepLegalAlGuardar,
 } from "@/lib/rep-legal-empresa";
 import {
 	MODALIDAD_FACTURACION_LABELS,
@@ -940,19 +940,19 @@ function InvestorLiquidacionesPage() {
 			banco: editBanco ? Number(editBanco) : null,
 			tipoCuenta: editTipoCuenta || undefined,
 			numeroCuenta: editNumeroCuenta.trim() || undefined,
-			// Sin "¿Es empresa?" va la llave presente con cadena vacía: eso es lo
-			// que hace que cartera BORRE el DPI guardado. Mandar `undefined` dejaría
-			// el valor viejo vivo sin que el operador se entere.
-			// `true` a secas borraba también al que es su propio representante
-			// (`dpi = 4036613`, `dpi_rep_legal = '04036613'`): abre con el
-			// interruptor apagado, así que cambiar cualquier otro campo le vaciaba
-			// el DPI guardado. Solo se borra lo que se desmarcó a propósito.
-			dpiRepLegal: valorRepLegalAEnviar(editEsEmpresa, editDpiRepLegal, {
-				borrarSiNoEsEmpresa: requiereConfirmacionBorrado(
-					editRepLegalOriginal,
-					editEsEmpresa,
-					editDpiOriginal,
-				),
+			// Qué se manda del representante lo decide entero
+			// `valorRepLegalAlGuardar`: la llave presente con cadena vacía BORRA, y
+			// solo se borra lo que se desmarcó a propósito. Al que es su propio
+			// representante (`dpi = 4036613`, `dpi_rep_legal = '04036613'`) no se le
+			// toca... salvo que se le esté editando el DPI, y entonces el valor
+			// guardado le sigue: dejarlo con el viejo convertía la fila en una
+			// empresa representada por su identidad anterior.
+			dpiRepLegal: valorRepLegalAlGuardar({
+				esEmpresa: editEsEmpresa,
+				valor: editDpiRepLegal,
+				repLegalOriginal: editRepLegalOriginal,
+				dpiOriginal: editDpiOriginal,
+				dpiDelFormulario: editDpi,
 			}),
 			moneda: editMoneda as "quetzales" | "dolares",
 			emiteFactura: editEmiteFactura,

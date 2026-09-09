@@ -327,3 +327,63 @@ describe("provisionarInversionista — el botón sobre una empresa", () => {
     expect(llamadas).toEqual([]);
   });
 });
+
+// La detección por nombre existía desde el principio, pero solo la miraba el
+// resumen diario, y ahí no alcanzaba a nadie: el job no crea cuentas, así que
+// por su lado ningún resultado llega nunca con estado `creada`. La sociedad a la
+// que se le olvidó marcar "¿Es empresa?" se provisiona en el ALTA y desde la
+// corrida siguiente vuelve como `ya_tenia`, que el resumen cuenta y no lista.
+describe("provisionarInversionista — la sociedad que recibió cuenta de persona", () => {
+  it("la marca en la respuesta del alta, que es donde alguien la va a leer", async () => {
+    const { impl } = fetchQueDevuelve(RESPUESTA_OK);
+
+    const r = await provisionarInversionista(
+      fila({ nombre: "CENTRAL DE CARGA, S.A." }),
+      { ...OPTS_BASE, fetchImpl: impl },
+    );
+
+    expect(r.estado).toBe("creada");
+    expect(r.advertencias).toContain("parece_sociedad_con_cuenta_propia");
+  });
+
+  it("no toca las advertencias que ya venían de auth-google", async () => {
+    const { impl } = fetchQueDevuelve({
+      ...RESPUESTA_OK,
+      advertencias: ["cuenta_creada_sin_rol_ni_dpi"],
+    });
+
+    const r = await provisionarInversionista(
+      fila({ nombre: "SOCIEDAD ANONIMA DE PRUEBA" }),
+      { ...OPTS_BASE, fetchImpl: impl },
+    );
+
+    expect(r.advertencias).toEqual([
+      "cuenta_creada_sin_rol_ni_dpi",
+      "parece_sociedad_con_cuenta_propia",
+    ]);
+  });
+
+  it("no dice nada de una persona", async () => {
+    const { impl } = fetchQueDevuelve(RESPUESTA_OK);
+
+    const r = await provisionarInversionista(fila(), {
+      ...OPTS_BASE,
+      fetchImpl: impl,
+    });
+
+    expect(r.advertencias).not.toContain("parece_sociedad_con_cuenta_propia");
+  });
+
+  // A las que ya tenían cuenta no se les avisa: es el estado normal del sistema
+  // desde hace tiempo y repetirlo en cada alta sería ruido, no trabajo abierto.
+  it("no dice nada cuando la cuenta ya existía", async () => {
+    const { impl } = fetchQueDevuelve({ ...RESPUESTA_OK, estado: "ya_tenia" });
+
+    const r = await provisionarInversionista(
+      fila({ nombre: "CENTRAL DE CARGA, S.A." }),
+      { ...OPTS_BASE, fetchImpl: impl },
+    );
+
+    expect(r.advertencias).toEqual([]);
+  });
+});

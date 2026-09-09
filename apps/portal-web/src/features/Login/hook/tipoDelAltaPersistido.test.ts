@@ -3,6 +3,7 @@ import {
   CLAVE_DEL_ALTA,
   olvidarTipoDelAlta,
   recordarTipoDelAlta,
+  tipoAlCambiarElCorreo,
   tipoRecordadoDelAlta,
   type AlmacenDelAlta,
 } from "./tipoDelAltaPersistido";
@@ -75,5 +76,56 @@ describe("tipoRecordadoDelAlta", () => {
     expect(() => recordarTipoDelAlta({ correo: "a@b.com", tipo: "CLIENT" }, roto)).not.toThrow();
     expect(() => olvidarTipoDelAlta(roto)).not.toThrow();
     expect(tipoRecordadoDelAlta("a@b.com", roto)).toBeNull();
+  });
+});
+
+describe("tipoAlCambiarElCorreo", () => {
+  const decidir = (correoDelFormulario: string, huboAltaEnEstaPestana = false) =>
+    tipoAlCambiarElCorreo(
+      { correoDelFormulario, huboAltaEnEstaPestana },
+      almacen(),
+    );
+
+  it("restaura el tipo del correo que el formulario trae puesto", () => {
+    recordarTipoDelAlta({ correo: "ana@example.com", tipo: "INVESTOR" }, almacen());
+
+    expect(decidir("ana@example.com")).toEqual({
+      accion: "restaurar",
+      tipo: "INVESTOR",
+    });
+  });
+
+  // El bug: al escribir OTRO correo se salía dejando puesto el tipo del
+  // anterior y el selector bloqueado. Sin sesión abierta el envío no se corta
+  // por ningún lado, así que la cuenta nueva se creaba y su registro externo
+  // salía con el tipo del alta vieja: quien pedía cliente terminaba de
+  // inversionista, o al revés, sin haber podido tocar el selector.
+  it("suelta el tipo restaurado en cuanto el correo deja de ser el suyo", () => {
+    recordarTipoDelAlta({ correo: "ana@example.com", tipo: "INVESTOR" }, almacen());
+
+    expect(decidir("otra@example.com")).toEqual({ accion: "soltar" });
+  });
+
+  it("también con el formulario todavía vacío", () => {
+    recordarTipoDelAlta({ correo: "ana@example.com", tipo: "INVESTOR" }, almacen());
+
+    expect(decidir("")).toEqual({ accion: "soltar" });
+  });
+
+  // Lo que NO se puede soltar: el tipo que dejó un alta de esta misma pestaña.
+  // Ahí el ref es el candado que impide que el reintento salga hacia el otro
+  // sistema y deje huérfana la fila del primer intento. Y no hace falta
+  // soltarlo: con el alta ya hecha, cambiar el correo lo corta `decidirAlta`.
+  it("no toca el tipo cuando el alta ya ocurrió en esta pestaña", () => {
+    expect(decidir("otra@example.com", true)).toEqual({ accion: "no_tocar" });
+  });
+
+  it("el alta recordada gana igual sobre el alta de la pestaña", () => {
+    recordarTipoDelAlta({ correo: "ana@example.com", tipo: "CLIENT" }, almacen());
+
+    expect(decidir("ana@example.com", true)).toEqual({
+      accion: "restaurar",
+      tipo: "CLIENT",
+    });
   });
 });

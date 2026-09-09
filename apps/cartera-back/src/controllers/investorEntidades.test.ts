@@ -28,6 +28,7 @@ const fila = (over: Record<string, unknown>) => ({
   dpi: null,
   email: null,
   dpi_rep_legal: null,
+  creado_por_usuario_portal: null,
   moneda: "quetzales",
   status: "activo",
   ...over,
@@ -149,5 +150,72 @@ describe("getEntidadesPorCorreo", () => {
     const entidades = await getEntidadesPorCorreo("  Richardkachler93@GMAIL.com ");
 
     expect(entidades).toHaveLength(1);
+  });
+});
+
+// El registro del portal escribe la fila con el DPI que TECLEA quien se
+// registra. El sign-up de Better Auth está abierto y no verifica el correo, así
+// que cualquiera se fabrica una sesión y se da de alta como inversionista con el
+// DPI del representante legal de una sociedad ajena — un dato que se adivina o
+// se consigue. La creación estricta no lo frena: ese DPI vive en
+// `dpi_rep_legal` y no en `inversionistas.dpi`, así que no hay contra qué
+// chocar.
+describe("getEntidadesPorCorreo · el DPI que se puso uno mismo no amplía nada", () => {
+  beforeEach(() => {
+    selectResponses = [];
+    wheres.length = 0;
+  });
+
+  const intruso = fila({
+    inversionista_id: 900,
+    nombre: "Quien Sea",
+    dpi: 1573661970101,
+    email: "atacante@example.com",
+    creado_por_usuario_portal: "usr_atacante",
+  });
+
+  it("no alcanza la sociedad de la víctima con un DPI tecleado en el registro", async () => {
+    selectResponses = [[intruso]];
+
+    const entidades = await getEntidadesPorCorreo("atacante@example.com");
+
+    // Su fila sí: entró por el correo, que es lo único que puede probar.
+    expect(entidades.map((e) => e.inversionista_id)).toEqual([900]);
+    // Y no se pregunta por la expansión siquiera: sin DPIs de confianza no hay
+    // segunda consulta.
+    expect(wheres).toHaveLength(1);
+  });
+
+  it("la misma fila creada por back office SÍ amplía", async () => {
+    // La diferencia es solo la marca: aquí el DPI lo capturó un humano.
+    selectResponses = [
+      [fila({ ...intruso, creado_por_usuario_portal: null })],
+      [cube],
+    ];
+
+    const entidades = await getEntidadesPorCorreo("atacante@example.com");
+
+    expect(entidades.map((e) => e.inversionista_id).sort()).toEqual([86, 900]);
+  });
+
+  // La otra mitad: con un DPI ajeno tecleado, esa fila aparecía en la lista de
+  // su dueño legítimo —con el nombre y el correo del que la creó— sin que él
+  // hubiera hecho nada.
+  it("tampoco se cuela en la lista del dueño legítimo del DPI", async () => {
+    selectResponses = [[persona], [cube, intruso]];
+
+    const entidades = await getEntidadesPorCorreo("richardkachler93@gmail.com");
+
+    expect(entidades.map((e) => e.inversionista_id).sort()).toEqual([76, 86]);
+  });
+
+  // Lo que no se puede romper: quien se registró por el portal sigue viendo SU
+  // fila, que es su ancla por correo, aunque venga también por la expansión.
+  it("el que se registró por el portal sigue viendo su propia ficha", async () => {
+    selectResponses = [[persona, intruso], [intruso]];
+
+    const entidades = await getEntidadesPorCorreo("richardkachler93@gmail.com");
+
+    expect(entidades.map((e) => e.inversionista_id).sort()).toEqual([76, 900]);
   });
 });

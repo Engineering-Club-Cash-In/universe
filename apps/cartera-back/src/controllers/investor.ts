@@ -39,12 +39,18 @@ import {
   provisionarInversionista,
   resultadoNoSolicitado,
   resultadoOrigenNoAutorizado,
+  type ResultadoProvisionamientoCartera,
 } from "../services/portalProvisioning";
 import {
   permisoParaProvisionar,
   type PermisoProvisionamiento,
 } from "../utils/functions/provisionamientoPortal";
 import { buscarRepresentanteEnCartera } from "../utils/functions/buscarRepresentante";
+import { normalizarDpiParaComparar } from "../utils/functions/normalizarDpi";
+import {
+  destinatarioDeLiquidacion,
+  type RepresentanteLiquidacion,
+} from "../utils/functions/destinatarioLiquidacion";
 import { calcularAjusteCompras } from "../utils/comprasAjuste";
 import { eq, and, or, sql, inArray, ilike, like, desc, asc, count, SQL, isNull, isNotNull, ne } from "drizzle-orm";
 import { promises as fsPromises } from "node:fs";
@@ -410,6 +416,111 @@ export const repLegalExiste = async (valor: string): Promise<boolean> => {
 };
 
 /**
+ * ¿El representante que se manda es la PROPIA fila?
+ *
+ * Es la excepción del autorrepresentado (el inversionista 187: `dpi = 4036613`,
+ * `dpi_rep_legal = '04036613'`), y sin ella su DPI no se puede corregir. La
+ * comprobación de existencia mira `inversionistas.dpi` en la base, o sea el DPI
+ * VIEJO de esa fila; el nuevo llega en este mismo payload y todavía no está
+ * escrito en ninguna parte, así que corregirlo devolvía `rep_legal_inexistente`
+ * por un representante que sí existe: él mismo, un renglón más abajo.
+ *
+ * Saltarse la comprobación aquí no abre nada. Lo que esa comprobación protege es
+ * que un dedazo le dé el acceso al portal de esta fila a un TERCERO, y con
+ * `dpi_rep_legal === dpi` no hay tercero: `esEmpresaRepresentada` lee esa
+ * igualdad como "no es empresa", la fila sigue siendo una persona y el acceso
+ * sigue siendo el suyo.
+ *
+ * Comparación numérica, igual que `repLegalExiste`: "04036613" y 4036613 son el
+ * mismo DPI, y esa diferencia de un cero es justo el caso que existe.
+ */
+export const esAutorrepresentacion = (
+  repLegalNormalizado: string,
+  dpiDelPayload: unknown,
+): boolean => {
+  if (dpiDelPayload === undefined || dpiDelPayload === null) return false;
+
+  const dpi = String(dpiDelPayload).trim();
+  if (!/^\d+$/.test(dpi) || !/^\d+$/.test(repLegalNormalizado)) return false;
+
+  return BigInt(repLegalNormalizado) === BigInt(dpi);
+};
+
+/**
+ * El acceso al portal de las filas que ACABAN de insertarse.
+ *
+ * Vive fuera de `insertInvestor` porque hay que llamarlo desde más de un sitio:
+ * el alta con un ARREGLO puede insertar los dos primeros y morir en el tercero,
+ * y si esto solo corriera al final del camino feliz, esas dos filas quedaban
+ * escritas y sin cuenta, con el llamador viendo únicamente el 409. El reintento
+ * del lote tampoco las arreglaba: ahora chocan con ellas mismas.
+ */
+const resolverAccesosDeLosNuevos = (
+  recienCreados: { fila: any; permiso: PermisoProvisionamiento }[],
+): Promise<ResultadoProvisionamientoCartera[]> =>
+  Promise.all(
+    recienCreados.map(({ fila, permiso }) => {
+      // Guard 1 — la LLAVE: sin `provisionar_portal` en el payload NO se crea
+      // cuenta, no sale correo con contraseña y no se ocupa un DPI en `users`.
+      // Cierra el camino del registro del portal. Ese camino ya no es
+      // anónimo —la ruta pública POST /api/unified/register-external se retiró
+      // al integrar el PR #1545 y hoy solo queda /register-external-auth, con
+      // `requireAuth`—, pero el guard sigue siendo lo que lo cierra: el
+      // registro arma un objeto FIJO {nombre, dpi, email,
+      // creado_por_usuario_portal} y no puede colar la llave. Contra
+      // auth-google el rol no sirve de nada —todo entra con el mismo token de
+      // servicio ADMIN—, así que este guard es el único que cubre ese camino.
+      if (permiso === "no_solicitado") {
+        return Promise.resolve(resultadoNoSolicitado(fila.inversionista_id));
+      }
+
+      // Guard 2 — el ROL: mandar la llave con un token que no es de ADMIN ya
+      // no dispara nada. `authMiddleware` solo verifica la firma, así que sin
+      // esto cualquier token vivo de cartera (ASESOR, CONTA, uno robado) hacía
+      // salir una cuenta del portal con la contraseña al correo del payload,
+      // aunque la pantalla que lo ofrece sea solo-ADMIN (App.tsx:121).
+      // OJO: esto NO tapa el ADMIN auto-emitido de `POST /auth/admin`, que es
+      // un agujero preexistente y ajeno a este archivo.
+      if (permiso === "origen_no_autorizado") {
+        return Promise.resolve(
+          resultadoOrigenNoAutorizado(fila.inversionista_id),
+        );
+      }
+
+      return provisionarInversionista(fila, {
+        buscarRepresentante: buscarRepresentanteEnCartera,
+      });
+    }),
+  );
+
+/**
+ * Lo que ya quedó escrito cuando el alta se corta a medias.
+ *
+ * `POST /investor` acepta un ARREGLO y escribe fila por fila, fuera de
+ * transacción: un id que no existe en el elemento 2, o un choque de creación
+ * estricta en el tercero, corta con 404/409 cuando los anteriores YA están
+ * insertados. Antes esos returns salían secos, así que esas filas quedaban en la
+ * base sin cuenta del portal, sin aviso a ningún representante y sin nada en la
+ * respuesta que dijera que existían; y el reintento del lote, que es lo que
+ * cualquiera hace ante un 409, ya chocaba contra ellas mismas.
+ *
+ * No las deshace —no hay rollback que valga— pero las termina y las cuenta, que
+ * es el mismo trato que reciben en el camino feliz. Con un solo inversionista
+ * (todos los llamadores de hoy) no hay nada escrito y esto devuelve `{}`.
+ */
+const loQueYaSeEscribio = async (
+  recienCreados: { fila: any; permiso: PermisoProvisionamiento }[],
+  resultados: any[],
+): Promise<{ provisioning?: ResultadoProvisionamientoCartera[]; data?: any[] }> => {
+  if (resultados.length === 0) return {};
+
+  return {
+    provisioning: await resolverAccesosDeLosNuevos(recienCreados),
+    data: resultados,
+  };
+};
+
+/**
  * Condición para encontrar al inversionista dueño de un correo.
  *
  * Tiene que ignorar mayúsculas: los INSERT guardan el correo en minúsculas,
@@ -563,8 +674,41 @@ export async function getEntidadesPorCorreo(
 
   if (ancla.length === 0) return [];
 
+  // De qué DPIs se puede tirar para ampliar el grupo. NO de los que la propia
+  // persona se puso.
+  //
+  // El registro del portal escribe una fila con el DPI que TECLEA quien se
+  // registra y con su correo, y la marca con `creado_por_usuario_portal`. Ese
+  // DPI no lo verificó nadie: el sign-up de Better Auth está abierto y no
+  // comprueba el correo, así que cualquiera se fabrica una sesión, se registra
+  // como inversionista con el DPI del representante legal de una sociedad
+  // ajena —un dato que se adivina o se consigue— y su fila queda con ese DPI y
+  // con su propio correo. Sin este filtro, la expansión de abajo casaba ese DPI
+  // contra `dpi_rep_legal` y le metía en la lista la sociedad de la víctima:
+  // ficha, documentos, inversiones y la escritura de cuenta bancaria.
+  //
+  // El choque de creación estricta no lo frena, porque el DPI del representante
+  // vive en `dpi_rep_legal` y no en `inversionistas.dpi`: no hay contra qué
+  // chocar. Y `users.dpi` tampoco, si ese representante todavía no tiene cuenta.
+  //
+  // Su propia fila SÍ sigue apareciendo: entró por el correo, que es lo único
+  // que esa persona puede probar. Lo que no puede es traerse a nadie más.
+  //
+  // Es el mismo listón que ya aplican el CRM (`decidirLeadDelPortal`: la ficha
+  // tiene que colgar del correo de la sesión) y el provisionamiento
+  // (`cuenta_anclada_solo_por_correo`, que se reporta y no se escribe). Aquí
+  // faltaba.
+  //
+  // El precio: quien se registró solo por el portal y DESPUÉS resulta ser el
+  // representante de una sociedad no la verá hasta que back office le escriba el
+  // DPI desde el módulo de inversionistas o el CRM. Esa escritura limpia la
+  // marca (ver el UPDATE de `insertInvestor`) y es el acto de verificación que
+  // convierte la identidad en confiable: es la única que el portal no puede
+  // hacerse a sí mismo. Hasta entonces el caso es indistinguible del ataque.
   const dpis = new Set<number>();
   for (const fila of ancla) {
+    if (fila.creado_por_usuario_portal !== null) continue;
+
     const propio = dpiComparable(fila.dpi);
     if (propio !== null) dpis.add(propio);
     const rep = dpiComparable(fila.dpi_rep_legal);
@@ -583,7 +727,21 @@ export async function getEntidadesPorCorreo(
       .where(
         or(inArray(inversionistas.dpi, lista), inArray(REP_LEGAL_NUMERICO, lista))
       );
-    for (const fila of expandidas) porId.set(fila.inversionista_id, fila);
+    for (const fila of expandidas) {
+      // Y tampoco entran POR expansión las filas que se hizo el portal a sí
+      // mismo. Es la otra mitad de lo mismo: con un DPI ajeno tecleado, esa
+      // fila aparecía en la lista de su dueño legítimo —con el nombre y el
+      // correo del que la creó— sin que él hubiera hecho nada. Las suyas
+      // propias no se pierden: entran por el correo, como anclas.
+      if (
+        fila.creado_por_usuario_portal !== null &&
+        !idsAncla.has(fila.inversionista_id)
+      ) {
+        continue;
+      }
+
+      porId.set(fila.inversionista_id, fila);
+    }
   }
 
   return [...porId.values()]
@@ -641,6 +799,18 @@ export const correoCompartidoConSuGrupo = (
 };
 
 export const insertInvestor = async ({ body, set, user }: any) => {
+  // Fuera del `try` a propósito: el `catch` también tiene que poder resolverles
+  // el acceso a las filas que YA se insertaron antes del error (ver
+  // `resolverAccesosDeLosNuevos`).
+  const resultados: any[] = [];
+  // Solo las filas INSERTADAS en esta pasada: son las únicas que pueden
+  // necesitar una cuenta nueva o disparar el aviso a un representante.
+  // Cada una viaja con el permiso ya resuelto: la llave del payload dice que
+  // el alta lo PIDIÓ, y el rol del token dice si quien la mandó podía pedirlo
+  // (ver `permisoParaProvisionar`). Son dos negativas distintas y se guardan
+  // como una sola respuesta para que el motivo llegue intacto a `provisioning`.
+  const recienCreados: { fila: any; permiso: PermisoProvisionamiento }[] = [];
+
   try {
     const inversionistasToUpsert = Array.isArray(body) ? body : [body];
 
@@ -707,6 +877,7 @@ export const insertInvestor = async ({ body, set, user }: any) => {
 
           if (
             guardado !== nuevoRepLegal &&
+            !esAutorrepresentacion(nuevoRepLegal, inv.dpi) &&
             !(await repLegalExiste(nuevoRepLegal))
           ) {
             errores.push(
@@ -799,15 +970,6 @@ export const insertInvestor = async ({ body, set, user }: any) => {
       };
     }
 
-    const resultados: any[] = [];
-    // Solo las filas INSERTADAS en esta pasada: son las únicas que pueden
-    // necesitar una cuenta nueva o disparar el aviso a un representante.
-    // Cada una viaja con el permiso ya resuelto: la llave del payload dice que
-    // el alta lo PIDIÓ, y el rol del token dice si quien la mandó podía pedirlo
-    // (ver `permisoParaProvisionar`). Son dos negativas distintas y se guardan
-    // como una sola respuesta para que el motivo llegue intacto a `provisioning`.
-    const recienCreados: { fila: any; permiso: PermisoProvisionamiento }[] = [];
-
     // 🔥 PROCESAR UNO POR UNO para manejar INSERT vs UPDATE
     for (const inv of inversionistasToUpsert) {
       const isStrictCreate = inv.operation === "CREATE" || inv.mode === "create";
@@ -845,6 +1007,11 @@ export const insertInvestor = async ({ body, set, user }: any) => {
           return {
             message: "Inversionista no encontrado",
             error: "investor_not_found",
+            // Con un arreglo, este id malo puede venir DESPUÉS de filas que ya
+            // se insertaron. Se les resuelve el acceso igual y viajan en la
+            // respuesta: son filas escritas, y quedarse callado las dejaba sin
+            // cuenta y sin rastro.
+            ...(await loQueYaSeEscribio(recienCreados, resultados)),
           };
         }
       }
@@ -950,6 +1117,9 @@ export const insertInvestor = async ({ body, set, user }: any) => {
           return {
             message: conflictos[0].message,
             error: conflictos[0].error,
+            // Ídem: el choque puede ser del tercer elemento del arreglo y los
+            // dos primeros ya están escritos.
+            ...(await loQueYaSeEscribio(recienCreados, resultados)),
           };
         }
       }
@@ -1017,7 +1187,30 @@ export const insertInvestor = async ({ body, set, user }: any) => {
           updateData.tipo_cuenta = inv.tipo_cuenta.trim();
         if (inv.numero_cuenta?.trim())
           updateData.numero_cuenta = inv.numero_cuenta.trim();
-        if (inv.dpi) updateData.dpi = inv.dpi;
+        if (inv.dpi) {
+          updateData.dpi = inv.dpi;
+          // Y con eso la fila deja de ser "identidad que se puso uno mismo".
+          //
+          // `creado_por_usuario_portal` marca las filas que creó el registro del
+          // portal con un DPI que nadie verificó, y por eso `getEntidadesPorCorreo`
+          // no las deja ampliar el grupo. Sin una forma de quitar esa marca, la
+          // exclusión era para siempre: quien se registró por el portal y DESPUÉS
+          // resulta ser el representante de una sociedad no la vería nunca, ni
+          // aunque back office capturara la relación. Prometerlo en un comentario
+          // sin implementarlo es peor que no prometerlo.
+          //
+          // Escribir el DPI desde back office ES el acto de verificación que
+          // faltaba, y es el único que el portal no puede hacerse a sí mismo: su
+          // proxy (`buildPortalInvestorUpdate`) lleva una whitelist de tres campos
+          // bancarios, y el registro arma un objeto fijo que solo INSERTA. Para
+          // llegar a esta línea hace falta una edición dirigida desde el módulo de
+          // inversionistas o desde el CRM, o sea un humano mirando la ficha.
+          //
+          // Lo que se pierde: esa fila deja de ser reclamable como reintento del
+          // registro (`filaReclamablePorElPortal`). No importa — eso vive los
+          // minutos siguientes al alta, y esto pasa cuando alguien la edita.
+          updateData.creado_por_usuario_portal = null;
+        }
         // Solo se toca si el body trae la llave: mandar "" es borrarlo a
         // propósito, no mandarla es dejarlo como está.
         if (typeof inv.dpi_rep_legal !== "undefined")
@@ -1084,40 +1277,7 @@ export const insertInvestor = async ({ body, set, user }: any) => {
     // posible) y un error acá se vería como "falló, reintentá" — pero el
     // reintento muere en el guard de duplicados sin volver a pasar por aquí.
     // El resultado viaja en la respuesta; el job diario recoge lo que falló.
-    const provisioning = await Promise.all(
-      recienCreados.map(({ fila, permiso }) => {
-        // Guard 1 — la LLAVE: sin `provisionar_portal` en el payload NO se crea
-        // cuenta, no sale correo con contraseña y no se ocupa un DPI en `users`.
-        // Cierra el camino del registro del portal. Ese camino ya no es
-        // anónimo —la ruta pública POST /api/unified/register-external se retiró
-        // al integrar el PR #1545 y hoy solo queda /register-external-auth, con
-        // `requireAuth`—, pero el guard sigue siendo lo que lo cierra: el
-        // registro arma un objeto FIJO {nombre, dpi, email,
-        // creado_por_usuario_portal} y no puede colar la llave. Contra
-        // auth-google el rol no sirve de nada —todo entra con el mismo token de
-        // servicio ADMIN—, así que este guard es el único que cubre ese camino.
-        if (permiso === "no_solicitado") {
-          return Promise.resolve(resultadoNoSolicitado(fila.inversionista_id));
-        }
-
-        // Guard 2 — el ROL: mandar la llave con un token que no es de ADMIN ya
-        // no dispara nada. `authMiddleware` solo verifica la firma, así que sin
-        // esto cualquier token vivo de cartera (ASESOR, CONTA, uno robado) hacía
-        // salir una cuenta del portal con la contraseña al correo del payload,
-        // aunque la pantalla que lo ofrece sea solo-ADMIN (App.tsx:121).
-        // OJO: esto NO tapa el ADMIN auto-emitido de `POST /auth/admin`, que es
-        // un agujero preexistente y ajeno a este archivo.
-        if (permiso === "origen_no_autorizado") {
-          return Promise.resolve(
-            resultadoOrigenNoAutorizado(fila.inversionista_id),
-          );
-        }
-
-        return provisionarInversionista(fila, {
-          buscarRepresentante: buscarRepresentanteEnCartera,
-        });
-      }),
-    );
+    const provisioning = await resolverAccesosDeLosNuevos(recienCreados);
 
     set.status = 201;
     return {
@@ -1138,6 +1298,7 @@ export const insertInvestor = async ({ body, set, user }: any) => {
         return {
           message: "Ya existe un inversionista con ese email",
           error: "duplicate_email",
+          ...(await loQueYaSeEscribio(recienCreados, resultados)),
         };
       }
       if (detalle.includes("dpi")) {
@@ -1145,6 +1306,7 @@ export const insertInvestor = async ({ body, set, user }: any) => {
         return {
           message: "Ya existe un inversionista con ese DPI",
           error: "duplicate_dpi",
+          ...(await loQueYaSeEscribio(recienCreados, resultados)),
         };
       }
       if (detalle.includes("nombre")) {
@@ -1152,6 +1314,7 @@ export const insertInvestor = async ({ body, set, user }: any) => {
         return {
           message: "Ya existe un inversionista con ese nombre",
           error: "duplicate_nombre",
+          ...(await loQueYaSeEscribio(recienCreados, resultados)),
         };
       }
     }
@@ -1160,6 +1323,7 @@ export const insertInvestor = async ({ body, set, user }: any) => {
     return {
       message: "Error al procesar inversionistas",
       error: error.message || String(error),
+      ...(await loQueYaSeEscribio(recienCreados, resultados)),
     };
   }
 };
@@ -5126,16 +5290,94 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
             })
             .where(eq(liquidaciones.liquidacion_id, liquidacion.liquidacion_id));
 
+          // A quién le toca este correo.
+          //
+          // Si la fila es una sociedad, su `email` puede no ser el de quien la
+          // representa: en producción, 10 de las 11 filas con `dpi_rep_legal`
+          // tienen un correo que no es el del representante. El representante
+          // recibe entonces un correo por cada entidad —incluida la suya— pero
+          // todos en SU buzón, en vez de repartidos por buzones que no mira.
+          //
+          // Todo el bloque falla abierto hacia el comportamiento anterior: la
+          // liquidación YA está escrita en base en este punto, así que ni una
+          // consulta caída ni un representante inexistente pueden costar el
+          // correo. Cualquier tropiezo termina en el `email` de la fila.
+          let representanteLiquidacion: RepresentanteLiquidacion | null = null;
+          // El `dpi` de la entidad liquidada: es lo que distingue a una
+          // sociedad de verdad del que se representa a sí mismo. Vive fuera del
+          // try porque la decisión de más abajo lo necesita.
+          let dpiEntidadLiquidada: number | string | null = null;
+          try {
+            const [filaCartera] = await db
+              .select({
+                dpi: inversionistas.dpi,
+                dpi_rep_legal: inversionistas.dpi_rep_legal,
+              })
+              .from(inversionistas)
+              .where(eq(inversionistas.inversionista_id, inv_id))
+              .limit(1);
+
+            dpiEntidadLiquidada = filaCartera?.dpi ?? null;
+
+            const dpiRepresentante = normalizarDpiParaComparar(filaCartera?.dpi_rep_legal);
+            if (dpiRepresentante) {
+              // No se filtra al autorrepresentado (id 187: dpi 4036613 con
+              // dpi_rep_legal '04036613'): el resolutor normaliza los ceros a
+              // la izquierda y devuelve su propia fila, así que el correo cae
+              // en su buzón de siempre. Lo que sí cambia para él es el CUERPO:
+              // `destinatarioDeLiquidacion` lo reconoce por el DPI y no le
+              // manda el texto de empresa.
+              representanteLiquidacion = await buscarRepresentanteEnCartera(dpiRepresentante);
+            }
+          } catch (errorRepresentante) {
+            console.error(
+              `  ⚠️ No se pudo resolver al representante legal del inversionista ${inv_id}; el correo va al de la ficha:`,
+              errorRepresentante,
+            );
+            representanteLiquidacion = null;
+          }
+
+          const destinoCorreo = destinatarioDeLiquidacion(
+            {
+              nombre: inversionista.nombre_inversionista,
+              email: inversionista.email,
+              dpi: dpiEntidadLiquidada,
+            },
+            representanteLiquidacion,
+          );
+
           // Enviar correo (best-effort)
-          if (inversionista.email && excelBuffer) {
-            console.log(`  📧 Preparando envío de correo para ${inversionista.email}...`);
+          //
+          // El guard se ENSANCHÓ a propósito: antes era
+          // `if (inversionista.email && excelBuffer)`, así que una fila sin
+          // correo capturado no le llegaba a nadie. Ahora, si su representante
+          // tiene buzón, sale por ahí. Está fijado en
+          // destinatarioLiquidacion.test.ts ("una fila sin correo propio SÍ se
+          // envía...") para que el aumento de volumen no vuelva a ser
+          // accidental, y se registra aparte para que se vea en los logs.
+          if (destinoCorreo.email && excelBuffer) {
+            if (!inversionista.email && destinoCorreo.via === "representante") {
+              console.log(
+                `  ➕ El inversionista ${inversionista.nombre_inversionista} (${inv_id}) no tiene correo propio: esta liquidación antes no se enviaba y ahora sale al buzón de su representante legal.`
+              );
+            }
+            console.log(
+              `  📧 Preparando envío de correo para ${destinoCorreo.email} (vía: ${destinoCorreo.via}, motivo: ${destinoCorreo.motivo}, entidad: ${inversionista.nombre_inversionista}${destinoCorreo.emailCopia ? `, copia: ${destinoCorreo.emailCopia}` : ""})...`
+            );
             try {
               // Validar que subtotal existe para evitar crash
               const subtotalStr = inversionista.subtotal?.total_cuota_con_reinversion?.toString() || "0";
 
               const emailResult = await sendLiquidationEmail({
-                to: inversionista.email,
+                to: destinoCorreo.email,
                 investorName: inversionista.nombre_inversionista,
+                // Solo va cuando el buzón NO es el de la entidad: es lo que
+                // hace que el cuerpo salude al representante sin dejar de
+                // decir de qué entidad es esta liquidación.
+                representativeName: destinoCorreo.nombreRepresentante ?? undefined,
+                // La entidad conserva su copia cuando el correo se desvía: su
+                // buzón lo lee gente que hoy recibe esta liquidación.
+                cc: destinoCorreo.emailCopia ?? undefined,
                 amount: subtotalStr,
                 creditNumber: "Múltiples",
                 date: dayjs(fechaLiquidacion ?? new Date()).format("MMMM YYYY"),
@@ -5148,16 +5390,16 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
               });
 
               if (emailResult.success) {
-                console.log(`  ✅ Correo enviado exitosamente a ${inversionista.email}`);
+                console.log(`  ✅ Correo enviado exitosamente a ${destinoCorreo.email} (vía: ${destinoCorreo.via})`);
               } else {
-                console.error(`  ❌ Error devuelto por el servicio de correo para ${inversionista.email}:`, emailResult.error);
+                console.error(`  ❌ Error devuelto por el servicio de correo para ${destinoCorreo.email}:`, emailResult.error);
               }
             } catch (emailError) {
-              console.error(`  ❌ Error inesperado al intentar enviar correo a ${inversionista.email}:`, emailError);
+              console.error(`  ❌ Error inesperado al intentar enviar correo a ${destinoCorreo.email}:`, emailError);
             }
           } else {
-            if (!inversionista.email) {
-              console.warn(`  ⚠️ El inversionista ${inversionista.nombre_inversionista} (${inv_id}) no tiene un correo electrónico configurado en su ficha. Se omitió la notificación.`);
+            if (!destinoCorreo.email) {
+              console.warn(`  ⚠️ El inversionista ${inversionista.nombre_inversionista} (${inv_id}) no tiene un correo electrónico configurado en su ficha, ni un representante legal con correo. Se omitió la notificación.`);
             }
             if (!excelBuffer) {
               console.error(`  ❌ No se pudo adjuntar el reporte Excel porque el generador devolvió un buffer vacío para el inversionista ${inv_id}.`);
@@ -6201,6 +6443,7 @@ export const updateInvestor = async ({ body, set }: any) => {
 
         if (
           guardado !== nuevoRepLegal &&
+          !esAutorrepresentacion(nuevoRepLegal, inv.dpi) &&
           !(await repLegalExiste(nuevoRepLegal))
         ) {
           set.status = 400;
@@ -6248,7 +6491,13 @@ export const updateInvestor = async ({ body, set }: any) => {
         updateData.tipo_cuenta = tipo_cuenta;
       if (typeof numero_cuenta !== "undefined")
         updateData.numero_cuenta = numero_cuenta;
-      if (typeof dpi !== "undefined") updateData.dpi = dpi;
+      if (typeof dpi !== "undefined") {
+        updateData.dpi = dpi;
+        // Misma transición que en `insertInvestor`: escribir el DPI desde back
+        // office es lo que vuelve confiable una identidad que se puso uno mismo.
+        // El porqué, largo, está allá.
+        updateData.creado_por_usuario_portal = null;
+      }
       if (typeof dpi_rep_legal !== "undefined")
         updateData.dpi_rep_legal = normalizarDpiRepLegal(dpi_rep_legal);
       if (typeof moneda !== "undefined") updateData.moneda = moneda;

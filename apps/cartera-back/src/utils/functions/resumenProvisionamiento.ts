@@ -1,4 +1,7 @@
-import type { ResultadoProvisionamientoCartera } from "../../services/portalProvisioning";
+import {
+  ADVERTENCIA_PARECE_SOCIEDAD,
+  type ResultadoProvisionamientoCartera,
+} from "../../services/portalProvisioning";
 import { pareceSociedad } from "./provisionamientoPortal";
 
 /**
@@ -123,10 +126,13 @@ export const resumirProvisionamiento = (
 
     if (r.estado === "creada") {
       resumen.creadas.push(e);
-      // Solo se marca dudosa la sociedad que acaba de recibir cuenta PROPIA.
-      // Las que ya la tenían son el estado normal del sistema desde hace
-      // tiempo; reportarlas cada día sería ruido, no trabajo pendiente.
-      if (pareceSociedad(e.nombre)) resumen.dudosas.push(e);
+      // La sociedad que acaba de recibir cuenta PROPIA se marca por su
+      // ADVERTENCIA, más abajo, y no volviendo a mirarle el nombre aquí. El
+      // nombre solo se mira en la rama de las candidatas: allí no se creó nada,
+      // así que no hay quien la ponga. Esta rama, en cambio, no la alcanza el
+      // job —no crea cuentas— sino el alta, que ya viene marcada de
+      // `provisionarInversionista`; repetir el criterio aquí era tenerlo en dos
+      // sitios y ejecutarlo en ninguno.
     } else if (r.estado === "candidata") {
       resumen.candidatas.push(e);
       // La sociedad se marca ANTES del click, no después de crearle la cuenta.
@@ -163,6 +169,10 @@ export const resumirProvisionamiento = (
     }
     if (r.advertencias.includes("cuenta_anclada_solo_por_correo")) {
       resumen.vinculosFragiles.push(e);
+    }
+    // La pone el camino que CREA (`provisionarInversionista`), no este resumen.
+    if (r.advertencias.includes(ADVERTENCIA_PARECE_SOCIEDAD)) {
+      resumen.dudosas.push(e);
     }
     // La produce `consultarCuentaInversionista` y hasta ahora no la leía nadie.
     // Es el falso positivo más silencioso del resumen: esa fila vuelve como

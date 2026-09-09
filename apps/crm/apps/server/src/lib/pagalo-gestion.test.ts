@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import {
 	construirComentarioGestionLinkPagalo,
+	esLinkPagaloGenerado,
 	totalDeLinksPagalo,
 } from "./pagalo-gestion";
 
@@ -26,4 +27,10 @@ test("suma solo links Págalo emitidos", () => {
 	expect(
 		totalDeLinksPagalo([{ amount: "1307.40" }, { amount: "1197.41" }]),
 	).toBe("2504.81");
+});
+
+test("solo links activos o pagados cuentan como emitidos", () => {
+	expect(esLinkPagaloGenerado("ACTIVE")).toBe(true);
+	expect(esLinkPagaloGenerado("PAID")).toBe(true);
+	expect(esLinkPagaloGenerado("ERROR")).toBe(false);
 });

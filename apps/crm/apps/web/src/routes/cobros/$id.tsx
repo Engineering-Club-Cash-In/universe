@@ -1157,6 +1157,10 @@ function RouteComponent() {
 				label: "Número Equivocado",
 				color: "bg-gray-100 text-gray-800",
 			},
+			link_pago_generado: {
+				label: "Link de pago generado",
+				color: "bg-violet-100 text-violet-800",
+			},
 		};
 		return (
 			estados[estado] || { label: estado, color: "bg-gray-100 text-gray-800" }

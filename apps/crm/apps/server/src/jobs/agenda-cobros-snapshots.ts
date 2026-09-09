@@ -173,8 +173,38 @@ export async function cerrarSnapshotsAgenda(
 					cc.realizado_por
 				FROM agenda_cobros_snapshots s
 				JOIN agenda_cobros_snapshot_items i ON i.snapshot_id = s.id
+				-- CB-114: durante una cobertura, el trabajo del SUPLENTE también
+				-- acredita la agenda del titular. El titular SIGUE acreditando la
+				-- suya: la cobertura AGREGA a quién se le cuenta, no lo reemplaza
+				-- (con COALESCE, un titular que trabajó por la mañana y quedó
+				-- cubierto a mediodía perdía todas sus gestiones del día).
+				--
+				-- IN (a, b) con b NULL es correcto acá: sin cobertura el término
+				-- NULL evalúa UNKNOWN, no FALSE, así que el match por s.asesor_id
+				-- sigue igual que antes. Y si un titular tuviera dos coberturas el
+				-- mismo día, el LEFT JOIN multiplica filas pero el DISTINCT ON (i.id)
+				-- de arriba ya colapsa a una por item.
+				LEFT JOIN coberturas_agenda_cobros cobertura
+				  ON cobertura.titular_id = s.asesor_id
+				 AND cobertura.desde <= $1::date
+				 AND cobertura.hasta >= $1::date
 				JOIN contactos_cobros cc
-				  ON cc.realizado_por = s.asesor_id
+				  ON cc.realizado_por IN (s.asesor_id, cobertura.suplente_id)
+				 -- El corte es contra el INSTANTE del contacto, no la fecha del
+				 -- cierre: cancelar el MISMO día después de que el suplente ya
+				 -- trabajó (ej. contacto 09:00, cancelación 14:00) seguía
+				 -- descartando ese contacto legítimo si se colapsaban ambos a
+				 -- ::date, porque "cancelado el día X" y "cerrando el día X" son
+				 -- iguales en fecha aunque el contacto haya sido antes. El mismo
+				 -- corte aplica al REGISTRO: si la cobertura se crea a mitad de
+				 -- día, un contacto del suplente ANTERIOR a ese registro no era
+				 -- trabajo de cobertura (podía ser una coincidencia de pool sin
+				 -- relación) y no debe acreditarse al titular retroactivamente.
+				 AND (cobertura.suplente_id IS NULL
+				      OR cc.realizado_por = s.asesor_id
+				      OR (cobertura.created_at <= cc.fecha_contacto
+				          AND (cobertura.cancelada_en IS NULL
+				               OR cobertura.cancelada_en > cc.fecha_contacto)))
 				 AND cc.fecha_contacto >= ($1::date + interval '6 hours')
 				 AND cc.fecha_contacto < ($1::date + interval '1 day 6 hours')
 				 AND cc.estado_contacto = ANY($2::estado_contacto[])
@@ -188,7 +218,15 @@ export async function cerrarSnapshotsAgenda(
 					i.caso_cobro_id = cc.caso_cobro_id
 					OR caso_contacto.numero_credito_sifco = i.numero_credito_sifco
 				  )
-				ORDER BY i.id, cc.fecha_contacto ASC, cc.id ASC
+				-- El DUEÑO de la agenda gana sobre el suplente cuando los dos
+				-- gestionaron el mismo item: ordenando solo por fecha_contacto, una
+				-- llamada del suplente a las 08:00 tapaba el trabajo propio del
+				-- titular de las 10:00 y la evidencia atribuía mal la gestión.
+				-- Dentro de cada uno se conserva el criterio de siempre: el
+				-- PRIMER contacto del día.
+				ORDER BY i.id,
+				         (cc.realizado_por = s.asesor_id) DESC,
+				         cc.fecha_contacto ASC, cc.id ASC
 			)
 			UPDATE agenda_cobros_snapshot_items i
 			SET atendido = true,

@@ -34,7 +34,9 @@ import {
 } from "drizzle-orm";
 import {
 	agendaCobrosSnapshotItems,
+	agendaCobrosSnapshots,
 	casosCobros,
+	coberturasAgendaCobros,
 	contactosCobros,
 } from "../db/schema/cobros";
 import {
@@ -225,6 +227,69 @@ export function columnaEnAgenda(
 		      AND ai.numero_credito_sifco = ${casosCobros.numeroCreditoSifco}
 		    )
 		  )
+	)`;
+}
+
+/**
+ * CB-114: nombre del TITULAR en cuya agenda estaba la cuenta, cuando la gestión
+ * la hizo su suplente.
+ *
+ * `columnaEnAgenda` solo mira la agenda del propio asesor, así que una cuenta
+ * trabajada durante una cobertura sale `enAgenda: false` → la UI la etiqueta
+ * "Fuera de agenda". Es cierto —no estaba en la agenda del suplente— pero se
+ * lee como trabajo no planificado, cuando era trabajo planificado de otro que
+ * el suplente cubrió. Esta columna da el dato que falta para decir "En agenda
+ * de <titular>".
+ *
+ * EXIGE una cobertura registrada de ese titular hacia quien gestionó, vigente
+ * la fecha consultada. Sin esa condición bastaba que el crédito apareciera en
+ * la agenda de CUALQUIER otro asesor para inventar un "En agenda de <fulano>":
+ * dos asesores del mismo pool de bucket comparten créditos y ambos los reciben
+ * en su snapshot del día (la misma duplicación que documenta el filtro por
+ * dueño de `colaDia.ts` en cartera-back), así que la etiqueta salía por
+ * coincidencia de pool, no por una cobertura real.
+ *
+ * La cobertura se busca por RANGO DE FECHAS (no por "vigente hoy"), y por eso
+ * `cancelada_en` no exige que la cobertura siga activa: un día histórico debe
+ * seguir contando lo que pasó ESE día, aunque la cobertura se haya cancelado
+ * después. Pero sí se compara contra el INSTANTE del contacto (fecha_contacto,
+ * no la fecha del día consultado): colapsar ambos a ::date pierde el caso de
+ * cancelar el MISMO día después del contacto — "cancelado el día X" y
+ * "contacto del día X" son iguales en fecha aunque el contacto haya sido
+ * antes. Mismo bug (y mismo fix) que en cerrarSnapshotsAgenda. Por la misma
+ * razón se exige `cob.created_at <= fecha_contacto`: si la cobertura se
+ * registra a mitad de día, un contacto del suplente ANTERIOR a ese registro
+ * no era trabajo de cobertura (podía ser una coincidencia de pool sin
+ * relación) y no debe etiquetarse como "En agenda de <titular>".
+ */
+export function columnaEnAgendaDeTitular(
+	fecha: string | null,
+): SQL<string | null> {
+	if (!fecha) {
+		return sql<string | null>`NULL::text`;
+	}
+	return sql<string | null>`(
+		SELECT tu.name
+		FROM ${agendaCobrosSnapshotItems} ai
+		JOIN ${agendaCobrosSnapshots} asnap ON asnap.id = ai.snapshot_id
+		JOIN "user" tu ON tu.id = asnap.asesor_id
+		JOIN ${coberturasAgendaCobros} cob
+		  ON cob.titular_id = asnap.asesor_id
+		 AND cob.suplente_id = ${contactosCobros.realizadoPor}
+		 AND cob.desde <= ${fecha}::date
+		 AND cob.hasta >= ${fecha}::date
+		 AND cob.created_at <= ${contactosCobros.fechaContacto}
+		 AND (cob.cancelada_en IS NULL OR cob.cancelada_en > ${contactosCobros.fechaContacto})
+		WHERE asnap.fecha_gt = ${fecha}::date
+		  AND asnap.asesor_id <> ${contactosCobros.realizadoPor}
+		  AND (
+		    ai.caso_cobro_id = ${contactosCobros.casoCobroId}
+		    OR (
+		      ai.caso_cobro_id IS NULL
+		      AND ai.numero_credito_sifco = ${casosCobros.numeroCreditoSifco}
+		    )
+		  )
+		LIMIT 1
 	)`;
 }
 

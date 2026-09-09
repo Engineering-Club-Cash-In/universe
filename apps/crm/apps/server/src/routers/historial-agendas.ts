@@ -49,6 +49,7 @@ import {
 	BUCKET_SIN_ASIGNAR,
 	calcularTotalPaginas,
 	columnaEnAgenda,
+	columnaEnAgendaDeTitular,
 	columnaOrigen,
 	esContactoEfectivo,
 	esSinContacto,
@@ -263,6 +264,14 @@ export const historialAgendasRouter = {
 					// como gestión del asesor.
 					origen: columnaOrigen(),
 					enAgenda: columnaEnAgenda(snapshotAgendaId),
+					// CB-114: si no estaba en SU agenda, ¿estaba en la de un titular
+					// que cubría? Solo se evalúa cuando ya se pidió `marcarEnAgenda`
+					// (mismo gate de permisos): sin eso no hay columna que explicar.
+					enAgendaDeTitular: columnaEnAgendaDeTitular(
+						huboBusquedaDeSnapshot && marcarEnAgenda
+							? marcarEnAgenda.fecha
+							: null,
+					),
 				})
 				.from(contactosCobros)
 				.innerJoin(user, eq(contactosCobros.realizadoPor, user.id))

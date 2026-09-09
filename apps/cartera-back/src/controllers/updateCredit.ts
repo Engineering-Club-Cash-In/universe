@@ -14,6 +14,7 @@ import {
 } from "drizzle-orm";
 import jwt from "jsonwebtoken";
 import { db } from "../database";
+import { checkCreditHasUnliquidatedDrafts } from "../utils/draftPaymentsGuard";
 import {
   creditos,
   creditos_inversionistas,
@@ -1800,6 +1801,19 @@ export const updateCredit = async ({ body, set, request }: any) => {
       if (esSolicitudValida && (!motivo_devolucion || motivo_devolucion.trim() === "")) {
         set.status = 400;
         return { message: "Motivo de devolución es obligatorio al solicitar devolución" };
+      }
+      // Un borrador NO_LIQUIDADO es plata que todavía no se repartió. Si el
+      // crédito entra a devolución con borradores vivos, la liquidación que
+      // los cerraría queda bloqueada por pendingReturnGuard y quedan
+      // colgados. Solo aplica al SOLICITAR (esSolicitudValida): desactivar
+      // (-> NO_APLICA) sigue libre para no dejar el crédito atrapado si los
+      // borradores aparecieron después de la solicitud.
+      if (esSolicitudValida) {
+        const bloqueo = await checkCreditHasUnliquidatedDrafts(credito_id, db);
+        if (bloqueo) {
+          set.status = 400;
+          return bloqueo;
+        }
       }
       historialDevolucion = {
         credito_id,

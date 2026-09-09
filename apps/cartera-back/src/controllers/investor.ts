@@ -74,6 +74,7 @@ import { resolverModosEfectivosLiquidacion } from "./purchaseClassification";
 import type { ModalidadFacturacion } from "./modalidadFacturacion";
 import { calcularExpiracionCompraCartera, startOfDayGT } from "../utils/functions/businessDays";
 import { withCreditoEspejoLocks } from "../utils/creditoEspejoLock";
+import { checkInvestorHasUnliquidatedDrafts } from "../utils/draftPaymentsGuard";
 import {
   buildPendingReturnAuthorizationWarning,
   PendingReturnAuthorizationError,
@@ -6567,6 +6568,20 @@ export const updateInvestorStatus = async ({ body, set, request }: any) => {
         inversionista: current,
         correos_enviados: 0,
       };
+    }
+
+    // Solo se bloquea la ENTRADA a pendiente_devolucion. Salir (activo/
+    // inactivo) sigue libre para no dejar a nadie atrapado. Un borrador
+    // NO_LIQUIDADO es plata que todavía no se repartió: si el inversionista
+    // entra a devolución con borradores vivos, la próxima liquidación le
+    // devuelve el monto_aportado completo (payments.ts) saltándose esos
+    // abonos pendientes, y quedan colgados.
+    if (status === "pendiente_devolucion") {
+      const bloqueo = await checkInvestorHasUnliquidatedDrafts(inversionista_id);
+      if (bloqueo) {
+        set.status = 400;
+        return { success: false, ...bloqueo };
+      }
     }
 
     // Cuando el inversionista pasa a "pendiente_devolucion", forzamos que

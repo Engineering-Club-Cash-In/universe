@@ -88,6 +88,15 @@ mock.module("../database", () => ({
 mock.module("../services/sifcoIntegrations", () => ({
   consultarEstadoCuentaPrestamo: () => Promise.resolve(null),
 }));
+// Guard de borradores sin liquidar (draftPaymentsGuard.test.ts prueba sus
+// builders puros por separado): acá se mockea para controlar exactamente
+// cuándo bloquea la transición de estado_devolucion, sin reconstruir su
+// query de selectDistinct/innerJoin dentro de este dbMock ya complejo.
+let draftsWarning: any = null;
+const checkCreditHasUnliquidatedDraftsMock = mock(() => Promise.resolve(draftsWarning));
+mock.module("../utils/draftPaymentsGuard", () => ({
+  checkCreditHasUnliquidatedDrafts: checkCreditHasUnliquidatedDraftsMock,
+}));
 
 const { recalcularPagosCredito, updateCredit } = await import("./updateCredit");
 
@@ -101,6 +110,8 @@ beforeEach(() => {
   pagosActuales = [];
   inversionistasActuales = [];
   creditoActual = fakeCredito;
+  draftsWarning = null;
+  checkCreditHasUnliquidatedDraftsMock.mockClear();
 });
 
 describe("recalcularPagosCredito — exclusión de pagos de reset", () => {
@@ -363,6 +374,133 @@ describe("updateCredit — validaciones antes de escribir", () => {
     expect(result.message).toContain("Transición de estado de devolución no permitida");
     expect(capturedUpdates).toHaveLength(0);
     expect(capturedInserts).toHaveLength(0);
+  });
+});
+
+describe("updateCredit — guard de borradores sin liquidar al solicitar devolución", () => {
+  const bloqueo = {
+    warning: true,
+    code: "UNLIQUIDATED_DRAFT_PAYMENTS",
+    message:
+      "No se puede solicitar la devolución: este crédito tiene pagos sin liquidar de Ana Pérez. Liquidalos antes de enviarlo a devolución.",
+    inversionistas_bloqueantes: [{ inversionista_id: 10, nombre: "Ana Pérez" }],
+  };
+
+  it("bloquea NO_APLICA -> PENDIENTE_AUTORIZACION si hay pagos espejo sin liquidar", async () => {
+    creditoActual = { ...fakeCredito, estado_devolucion: "NO_APLICA" };
+    draftsWarning = bloqueo;
+    const { set, request } = makeCtx();
+
+    const result: any = await updateCredit({
+      body: {
+        ...baseBody,
+        estado_devolucion: "PENDIENTE_AUTORIZACION",
+        motivo_devolucion: "Solicitud de prueba",
+      },
+      set,
+      request,
+    });
+
+    expect(set.status).toBe(400);
+    expect(result.code).toBe("UNLIQUIDATED_DRAFT_PAYMENTS");
+    expect(result.message).toContain("Ana Pérez");
+    expect(capturedUpdates).toHaveLength(0);
+    expect(capturedInserts).toHaveLength(0);
+  });
+
+  it("permite NO_APLICA -> PENDIENTE_AUTORIZACION sin borradores pendientes", async () => {
+    creditoActual = { ...fakeCredito, estado_devolucion: "NO_APLICA" };
+    draftsWarning = null;
+    const { set, request } = makeCtx();
+
+    const result: any = await updateCredit({
+      body: {
+        ...baseBody,
+        estado_devolucion: "PENDIENTE_AUTORIZACION",
+        motivo_devolucion: "Solicitud de prueba",
+      },
+      set,
+      request,
+    });
+
+    expect(set.status).toBe(200);
+    expect(result.credito_id).toBe(794);
+    expect(capturedUpdates.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("permite salir de PENDIENTE_AUTORIZACION aunque haya borradores sin liquidar", async () => {
+    creditoActual = { ...fakeCredito, estado_devolucion: "PENDIENTE_AUTORIZACION" };
+    draftsWarning = bloqueo;
+    const { set, request } = makeCtx();
+
+    const result: any = await updateCredit({
+      body: { ...baseBody, estado_devolucion: "NO_APLICA" },
+      set,
+      request,
+    });
+
+    expect(set.status).toBe(200);
+    expect(result.credito_id).toBe(794);
+    // El guard solo se consulta al SOLICITAR devolución, no al desactivarla.
+    expect(checkCreditHasUnliquidatedDraftsMock).not.toHaveBeenCalled();
+  });
+
+  it("no consulta el guard cuando estado_devolucion se reenvía sin cambios", async () => {
+    creditoActual = { ...fakeCredito, estado_devolucion: "PENDIENTE_AUTORIZACION" };
+    draftsWarning = bloqueo;
+    const { set, request } = makeCtx();
+
+    // ModalEditCredit.tsx manda estado_devolucion en cada guardado, cambie o
+    // no — esto reproduce ese reenvío incondicional.
+    const result: any = await updateCredit({
+      body: { ...baseBody, estado_devolucion: "PENDIENTE_AUTORIZACION" },
+      set,
+      request,
+    });
+
+    expect(set.status).toBe(200);
+    expect(result.credito_id).toBe(794);
+    expect(checkCreditHasUnliquidatedDraftsMock).not.toHaveBeenCalled();
+  });
+
+  it("bloquea RECHAZADO -> PENDIENTE_AUTORIZACION si hay pagos espejo sin liquidar", async () => {
+    creditoActual = { ...fakeCredito, estado_devolucion: "RECHAZADO" };
+    draftsWarning = bloqueo;
+    const { set, request } = makeCtx();
+
+    const result: any = await updateCredit({
+      body: {
+        ...baseBody,
+        estado_devolucion: "PENDIENTE_AUTORIZACION",
+        motivo_devolucion: "Reintento de solicitud",
+      },
+      set,
+      request,
+    });
+
+    expect(set.status).toBe(400);
+    expect(result.code).toBe("UNLIQUIDATED_DRAFT_PAYMENTS");
+    expect(capturedUpdates).toHaveLength(0);
+  });
+
+  it("bloquea VERIFICADO -> PENDIENTE_AUTORIZACION si hay pagos espejo sin liquidar", async () => {
+    creditoActual = { ...fakeCredito, estado_devolucion: "VERIFICADO" };
+    draftsWarning = bloqueo;
+    const { set, request } = makeCtx();
+
+    const result: any = await updateCredit({
+      body: {
+        ...baseBody,
+        estado_devolucion: "PENDIENTE_AUTORIZACION",
+        motivo_devolucion: "Re-solicitud tras verificación",
+      },
+      set,
+      request,
+    });
+
+    expect(set.status).toBe(400);
+    expect(result.code).toBe("UNLIQUIDATED_DRAFT_PAYMENTS");
+    expect(capturedUpdates).toHaveLength(0);
   });
 });
 

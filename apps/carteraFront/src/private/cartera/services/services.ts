@@ -256,6 +256,8 @@ export interface Credito {
   // Excluye el crédito de la asignación de capital a inversionistas
   excluir_compras?: boolean;
   estado_devolucion?: 'NO_APLICA' | 'PENDIENTE_AUTORIZACION' | 'VERIFICADO' | 'RECHAZADO';
+  /** Hay filas en el espejo de pagos aún sin liquidar → no puede entrar a devolución a CUBE. */
+  tiene_pagos_sin_liquidar?: boolean;
 }
 
 export interface Usuario {

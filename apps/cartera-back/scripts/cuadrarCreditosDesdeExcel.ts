@@ -24,7 +24,7 @@
  * paga el escaneo de los 55MB y las siguientes arrancan al instante.
  */
 import Big from "big.js";
-import { and, asc, eq, ne } from "drizzle-orm";
+import { and, asc, eq, gt, ne } from "drizzle-orm";
 import { db } from "../src/database";
 import { creditos, cuotas_credito, pagos_credito } from "../src/database/db";
 import { ajustarCuotasConSIFCO } from "../src/controllers/migratePayments";
@@ -162,6 +162,28 @@ for (const sifco of sifcos) {
     // calendarios.
     const maxCuotaDb = cuotasDb.reduce((m, c) => Math.max(m, c.numero_cuota), 0);
     const plazoSeguro = Math.max(credito.plazo ?? 0, maxCuotaDb);
+
+    // Cinturón y tirantes: aunque plazoSeguro nunca sea menor que la última
+    // cuota, si el cálculo fallara la función borraría cuotas CON SUS PAGOS.
+    // Se verifica que ninguna cuota por encima del plazo tenga plata aplicada
+    // y, si la hubiera, el crédito se salta en vez de arriesgarse.
+    const enRiesgo = await db
+      .select({ pago_id: pagos_credito.pago_id })
+      .from(pagos_credito)
+      .innerJoin(cuotas_credito, eq(pagos_credito.cuota_id, cuotas_credito.cuota_id))
+      .where(
+        and(
+          eq(pagos_credito.credito_id, credito.credito_id),
+          gt(cuotas_credito.numero_cuota, plazoSeguro),
+        ),
+      )
+      .limit(1);
+    if (enRiesgo.length > 0) {
+      res.fechas = { estado: "saltado_borraria_pagos" };
+      resultados.push(res);
+      console.log(`${sifco}  SALTADO: el ajuste borraría cuotas con pagos`);
+      continue;
+    }
 
     // El calendario bueno es el del Excel: su columna "#" es el número de cuota
     // y su columna "Pago" la fecha de vencimiento. Se ancla en la cuota más

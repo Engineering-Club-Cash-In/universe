@@ -3,6 +3,10 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { Search, UserCog } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import {
+	HistorialTrasladosPanel,
+	TrasladosPanel,
+} from "@/components/cobros/traslados-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -34,6 +38,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { authClient } from "@/lib/auth-client";
 import { estiloBucket } from "@/lib/cobros/buckets-catalogo";
+import { formatCurrency } from "@/lib/crm-formatters";
 import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc, queryClient } from "@/utils/orpc";
 
@@ -59,6 +64,9 @@ type CreditoFila = {
 	cliente: string;
 	asesorId: number | null;
 	asesorNombre: string | null;
+	cuotasAtrasadas: number;
+	montoMora: string;
+	totalACobrar: string;
 	bucket: {
 		numero: number;
 		prefijo: string;
@@ -501,8 +509,7 @@ function HistorialReasignaciones() {
 							<TableHeader>
 								<TableRow>
 									<TableHead>Fecha</TableHead>
-									<TableHead>No. SIFCO</TableHead>
-									<TableHead>Cliente</TableHead>
+									<TableHead>Crédito / cliente</TableHead>
 									<TableHead>Cambio de asesor</TableHead>
 									<TableHead className="text-center">Bucket</TableHead>
 									<TableHead className="text-center">Origen</TableHead>
@@ -516,18 +523,20 @@ function HistorialReasignaciones() {
 										<TableCell className="whitespace-nowrap text-muted-foreground text-xs">
 											{fmtFecha(r.fecha)}
 										</TableCell>
-										<TableCell className="font-medium text-xs">
+										<TableCell className="max-w-[180px] text-xs">
 											<Link
 												to="/cobros/$id"
 												params={{ id: r.numero_credito_sifco }}
 												search={{ tipo: "caso" }}
-												className="text-primary hover:underline"
+												className="block rounded-sm outline-none hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring"
 											>
-												{r.numero_credito_sifco}
+												<p className="font-medium text-primary hover:underline">
+													{r.numero_credito_sifco}
+												</p>
+												<p className="truncate text-muted-foreground">
+													{r.cliente}
+												</p>
 											</Link>
-										</TableCell>
-										<TableCell className="max-w-[140px] truncate text-xs">
-											{r.cliente}
 										</TableCell>
 										<TableCell className="text-xs">
 											<span className="text-muted-foreground">
@@ -687,12 +696,24 @@ function RouteComponent() {
 	}
 
 	const filas = (query.data?.data ?? []) as CreditoFila[];
+	const totalCreditos = query.data?.total ?? 0;
 	const totalPages = query.data?.totalPages ?? 1;
 
 	const aplicarBusqueda = () => {
 		setBuscar(buscarInput.trim());
 		setPage(1);
 	};
+
+	const limpiarFiltros = () => {
+		setBucket("todos");
+		setAsesor("todos");
+		setBuscarInput("");
+		setBuscar("");
+		setPage(1);
+	};
+
+	const hayFiltrosActivos =
+		bucket !== "todos" || asesor !== "todos" || buscar.length > 0;
 
 	return (
 		<div className="container mx-auto space-y-6 p-4 md:p-8">
@@ -708,8 +729,10 @@ function RouteComponent() {
 			</p>
 
 			<Tabs defaultValue="buckets">
-				<TabsList>
+				<TabsList className="h-auto flex-wrap justify-start">
 					<TabsTrigger value="buckets">Buckets</TabsTrigger>
+					<TabsTrigger value="traslados">Traslado masivo</TabsTrigger>
+					<TabsTrigger value="operaciones">Operaciones</TabsTrigger>
 					<TabsTrigger value="historial">
 						Historial de reasignaciones
 					</TabsTrigger>
@@ -717,10 +740,20 @@ function RouteComponent() {
 
 				<TabsContent value="buckets" className="space-y-6">
 					<Card>
-						<CardHeader>
-							<CardTitle className="text-base">Filtros</CardTitle>
+						<CardHeader className="flex flex-row items-center justify-between pb-3">
+							<div>
+								<CardTitle className="text-base">Buscar cartera</CardTitle>
+								<p className="mt-1 text-muted-foreground text-xs">
+									Filtra por bucket, asesor o número de crédito.
+								</p>
+							</div>
+							{hayFiltrosActivos && (
+								<Button size="sm" variant="ghost" onClick={limpiarFiltros}>
+									Limpiar filtros
+								</Button>
+							)}
 						</CardHeader>
-						<CardContent className="flex flex-wrap items-end gap-4">
+						<CardContent className="grid gap-4 md:grid-cols-[minmax(12rem,0.8fr)_minmax(12rem,0.8fr)_minmax(18rem,1.6fr)_auto] md:items-end">
 							<div className="space-y-2">
 								<Label>Bucket</Label>
 								<Select
@@ -730,7 +763,7 @@ function RouteComponent() {
 										setPage(1);
 									}}
 								>
-									<SelectTrigger className="w-[220px]">
+									<SelectTrigger className="w-full">
 										<SelectValue />
 									</SelectTrigger>
 									<SelectContent>
@@ -752,7 +785,7 @@ function RouteComponent() {
 										setPage(1);
 									}}
 								>
-									<SelectTrigger className="w-[200px]">
+									<SelectTrigger className="w-full">
 										<SelectValue placeholder="Todos los asesores" />
 									</SelectTrigger>
 									<SelectContent>
@@ -771,7 +804,7 @@ function RouteComponent() {
 									</p>
 								)}
 							</div>
-							<div className="min-w-[200px] flex-1 space-y-2">
+							<div className="space-y-2">
 								<Label>No. SIFCO</Label>
 								<Input
 									placeholder="Buscar por número de crédito..."
@@ -872,6 +905,19 @@ function RouteComponent() {
 					)}
 
 					<Card>
+						<CardHeader className="flex flex-row items-center justify-between border-b py-4">
+							<div>
+								<CardTitle className="text-base">Créditos asignados</CardTitle>
+								<p className="mt-1 text-muted-foreground text-xs">
+									Selecciona un crédito para abrir Ficha 360 o reasignar asesor.
+								</p>
+							</div>
+							{!query.isLoading && !query.isError && (
+								<Badge variant="secondary">
+									{totalCreditos} crédito{totalCreditos === 1 ? "" : "s"}
+								</Badge>
+							)}
+						</CardHeader>
 						<CardContent className="p-0">
 							{query.isLoading ? (
 								<div className="py-16 text-center text-muted-foreground">
@@ -887,29 +933,70 @@ function RouteComponent() {
 								</div>
 							) : (
 								<div className="overflow-x-auto">
-									<Table>
+									<Table className="table-fixed">
 										<TableHeader>
 											<TableRow>
-												<TableHead>No. SIFCO</TableHead>
-												<TableHead>Cliente</TableHead>
-												<TableHead>Asesor actual</TableHead>
-												<TableHead className="text-center">Bucket</TableHead>
-												<TableHead className="text-right">Acción</TableHead>
+												<TableHead className="w-[34%]">
+													Crédito / cliente
+												</TableHead>
+												<TableHead className="w-[17%]">Asesor actual</TableHead>
+												<TableHead className="w-[14%]">Mora</TableHead>
+												<TableHead className="w-[15%] text-right">
+													Total a cobrar
+												</TableHead>
+												<TableHead className="w-[8%] text-center">
+													Bucket
+												</TableHead>
+												<TableHead className="w-[12%] text-right">
+													Acción
+												</TableHead>
 											</TableRow>
 										</TableHeader>
 										<TableBody>
 											{filas.map((c) => (
 												<TableRow key={c.creditoId}>
-													<TableCell className="font-medium">
-														{c.numeroCreditoSifco}
+													<TableCell className="min-w-[18rem]">
+														<Link
+															to="/cobros/$id"
+															params={{ id: c.numeroCreditoSifco }}
+															search={{ tipo: "caso" }}
+															className="block rounded-sm outline-none hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring"
+														>
+															<p className="font-medium text-primary hover:underline">
+																{c.numeroCreditoSifco}
+															</p>
+															<p className="text-muted-foreground text-xs">
+																{c.cliente}
+															</p>
+														</Link>
 													</TableCell>
-													<TableCell>{c.cliente}</TableCell>
 													<TableCell>
 														{c.asesorNombre ?? (
 															<span className="text-muted-foreground italic">
 																Sin asesor
 															</span>
 														)}
+													</TableCell>
+													<TableCell>
+														{c.cuotasAtrasadas > 0 ? (
+															<>
+																<p className="font-medium text-destructive">
+																	{c.cuotasAtrasadas} cuota
+																	{c.cuotasAtrasadas === 1 ? "" : "s"} vencida
+																	{c.cuotasAtrasadas === 1 ? "" : "s"}
+																</p>
+																<p className="text-muted-foreground text-xs">
+																	{formatCurrency(c.montoMora)}
+																</p>
+															</>
+														) : (
+															<span className="text-muted-foreground">
+																Sin mora
+															</span>
+														)}
+													</TableCell>
+													<TableCell className="text-right font-medium">
+														{formatCurrency(c.totalACobrar)}
 													</TableCell>
 													<TableCell className="text-center">
 														<BucketBadge bucket={c.bucket} />
@@ -959,6 +1046,12 @@ function RouteComponent() {
 
 				<TabsContent value="historial">
 					<HistorialReasignaciones />
+				</TabsContent>
+				<TabsContent value="traslados">
+					<TrasladosPanel />
+				</TabsContent>
+				<TabsContent value="operaciones">
+					<HistorialTrasladosPanel />
 				</TabsContent>
 			</Tabs>
 

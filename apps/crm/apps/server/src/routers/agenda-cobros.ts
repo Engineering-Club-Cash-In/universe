@@ -554,6 +554,13 @@ export const agendaCobrosRouter = {
 							...new Set([...item.dueniosSnapshot, asesorId]),
 						],
 						contactoValidoDesde: createdAtPorTitular.get(titular),
+						// `dueniosSnapshot`, no `[titular]`: si el crédito ya estaba en
+						// el propio snapshot del suplente (pool compartido), su trabajo
+						// sobre ese item es legítimo sin importar cuándo se registró la
+						// cobertura — el corte de arriba es solo para atribuir
+						// retroactivamente trabajo AJENO al titular, no para invalidar
+						// el trabajo que el suplente ya tenía en su propia cartera.
+						contactoExentoDelCorte: item.dueniosSnapshot,
 					};
 				}),
 				contactos,

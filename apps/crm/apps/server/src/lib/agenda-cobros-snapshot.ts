@@ -23,11 +23,19 @@ export interface AgendaSnapshotItemFuente {
 	 * suplente ANTERIOR a ese registro no era trabajo de cobertura —podía
 	 * ser una coincidencia de pool sin relación real— y no debe cerrar el
 	 * item del titular. Mismo criterio que ya aplican `cerrarSnapshotsAgenda`
-	 * y `columnaEnAgendaDeTitular`. Solo corta contactos AJENOS (no del
-	 * propio `asesorId`, que siempre cuentan): se aplica junto con
+	 * y `columnaEnAgendaDeTitular`.
+	 *
+	 * Se aplica SOLO a contactos de usuarios AJENOS al item — no basta con
+	 * excluir a `asesorId`: si el mismo crédito ya estaba en el propio
+	 * snapshot del suplente (pool compartido, fusionado por el dedupe), ese
+	 * crédito ya era legítimamente suyo antes de que existiera la cobertura,
+	 * y su contacto no puede sufrir un corte pensado para trabajo AJENO.
+	 * `contactoExentoDelCorte` lista a todos los dueños reales de ALGÚN
+	 * snapshot que trajo este item (no solo `asesorId`); se aplica junto con
 	 * `realizadoPorValidos`, nunca en su lugar.
 	 */
 	contactoValidoDesde?: Date;
+	contactoExentoDelCorte?: readonly string[];
 }
 
 export interface ContactoAgenda {
@@ -146,12 +154,16 @@ function contactoPerteneceAlItem(
 ): boolean {
 	const dueniosValidos = item.realizadoPorValidos ?? [item.asesorId];
 	if (!dueniosValidos.includes(contacto.realizadoPor)) return false;
-	// El corte por fecha de registro solo aplica a un contacto AJENO (de un
-	// suplente gestionando el item de otro): el dueño real del item siempre
-	// pudo haberlo trabajado antes de que existiera cualquier cobertura.
+	// El corte por fecha de registro solo aplica a un contacto AJENO — de
+	// alguien cuyo PROPIO snapshot no traía este crédito. No basta con
+	// comparar contra `item.asesorId`: si el crédito ya estaba en el
+	// snapshot del suplente (pool compartido, fusionado por el dedupe), ya
+	// era legítimamente suyo antes de la cobertura, sin importar que
+	// `asesorId` del item termine siendo el titular.
+	const dueniosReales = item.contactoExentoDelCorte ?? [item.asesorId];
 	if (
 		item.contactoValidoDesde &&
-		contacto.realizadoPor !== item.asesorId &&
+		!dueniosReales.includes(contacto.realizadoPor) &&
 		contacto.fechaContacto < item.contactoValidoDesde
 	)
 		return false;

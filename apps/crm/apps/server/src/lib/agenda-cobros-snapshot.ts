@@ -44,7 +44,11 @@ export interface AgendaSnapshotItemFuente {
 	 * snapshot que trajo este item (no solo `asesorId`); se aplica junto con
 	 * `realizadoPorValidos`, nunca en su lugar.
 	 */
-	ventanasCoberturaValida?: readonly { desde: Date; hasta: Date | null }[];
+	ventanasCoberturaValida?: readonly {
+		suplenteId: string;
+		desde: Date;
+		hasta: Date | null;
+	}[];
 	contactoExentoDelCorte?: readonly string[];
 }
 
@@ -181,6 +185,7 @@ function contactoPerteneceAlItem(
 		// la ventana VIEJA no debe rechazarse solo porque exista una nueva.
 		const dentroDeAlgunaVentana = item.ventanasCoberturaValida.some(
 			(v) =>
+				v.suplenteId === contacto.realizadoPor &&
 				contacto.fechaContacto >= v.desde &&
 				(v.hasta === null || contacto.fechaContacto < v.hasta),
 		);

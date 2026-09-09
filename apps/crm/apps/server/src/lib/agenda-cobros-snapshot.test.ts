@@ -142,6 +142,63 @@ describe("cerrarItemsAgenda", () => {
 		expect(cerrado?.atendido).toBe(false);
 	});
 
+	test("cada suplente solo usa su propia ventana de cobertura", () => {
+		const [cerrado] = cerrarItemsAgenda(
+			fecha,
+			[
+				item({
+					realizadoPorValidos: ["asesor-jose", "suplente-a", "suplente-b"],
+					ventanasCoberturaValida: [
+						{
+							suplenteId: "suplente-a",
+							desde: new Date("2026-08-17T06:00:00.000Z"),
+							hasta: new Date("2026-08-17T10:00:00.000Z"),
+						},
+						{
+							suplenteId: "suplente-b",
+							desde: new Date("2026-08-17T12:00:00.000Z"),
+							hasta: null,
+						},
+					],
+				}),
+			],
+			[
+				{
+					...baseContacto,
+					realizadoPor: "suplente-a",
+					fechaContacto: new Date("2026-08-17T13:00:00.000Z"),
+				},
+			],
+		);
+		expect(cerrado?.atendido).toBe(false);
+	});
+
+	test("suplente cuenta dentro de su propia ventana de cobertura", () => {
+		const [cerrado] = cerrarItemsAgenda(
+			fecha,
+			[
+				item({
+					realizadoPorValidos: ["asesor-jose", "suplente-a"],
+					ventanasCoberturaValida: [
+						{
+							suplenteId: "suplente-a",
+							desde: new Date("2026-08-17T06:00:00.000Z"),
+							hasta: new Date("2026-08-17T10:00:00.000Z"),
+						},
+					],
+				}),
+			],
+			[
+				{
+					...baseContacto,
+					realizadoPor: "suplente-a",
+					fechaContacto: new Date("2026-08-17T09:00:00.000Z"),
+				},
+			],
+		);
+		expect(cerrado?.atendido).toBe(true);
+	});
+
 	test("primer contacto efectivo cronológico gana", () => {
 		const [cerrado] = cerrarItemsAgenda(
 			fecha,

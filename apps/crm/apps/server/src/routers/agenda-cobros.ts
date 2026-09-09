@@ -90,6 +90,7 @@ export const agendaCobrosRouter = {
 			const coberturas = await db
 				.select({
 					titularId: coberturasAgendaCobros.titularId,
+					suplenteId: coberturasAgendaCobros.suplenteId,
 					createdAt: coberturasAgendaCobros.createdAt,
 					canceladaEn: coberturasAgendaCobros.canceladaEn,
 				})
@@ -168,6 +169,7 @@ export const agendaCobrosRouter = {
 				.select({
 					id: coberturasAgendaCobros.id,
 					titularId: coberturasAgendaCobros.titularId,
+					suplenteId: coberturasAgendaCobros.suplenteId,
 					createdAt: coberturasAgendaCobros.createdAt,
 					canceladaEn: coberturasAgendaCobros.canceladaEn,
 				})
@@ -560,7 +562,7 @@ export const agendaCobrosRouter = {
 			// `id` exacto en la query — no necesitan esto.
 			const ventanasPorTitular = new Map<
 				string,
-				{ desde: Date; hasta: Date | null }[]
+				{ suplenteId: string; desde: Date; hasta: Date | null }[]
 			>();
 			for (const c of [
 				...coberturas,
@@ -573,7 +575,11 @@ export const agendaCobrosRouter = {
 				})),
 			]) {
 				const ventanas = ventanasPorTitular.get(c.titularId) ?? [];
-				ventanas.push({ desde: c.createdAt, hasta: c.canceladaEn });
+				ventanas.push({
+					suplenteId: c.suplenteId,
+					desde: c.createdAt,
+					hasta: c.canceladaEn,
+				});
 				ventanasPorTitular.set(c.titularId, ventanas);
 			}
 			const cerrados = cerrarItemsAgenda(

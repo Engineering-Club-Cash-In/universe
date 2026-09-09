@@ -1441,6 +1441,7 @@ function MobileView({
                         ...item.creditos,
                         creditos_inversionistas_espejo:
                           item.creditos_inversionistas_espejo,
+                        tiene_pagos_sin_liquidar: item.tiene_pagos_sin_liquidar,
                       },
                       item.inversionistas,
                       item.usuarios
@@ -1741,6 +1742,8 @@ function DesktopView({
                                     ...item.creditos,
                                     creditos_inversionistas_espejo:
                                       item.creditos_inversionistas_espejo,
+                                    tiene_pagos_sin_liquidar:
+                                      item.tiene_pagos_sin_liquidar,
                                   },
                                   item.inversionistas,
                                   item.usuarios

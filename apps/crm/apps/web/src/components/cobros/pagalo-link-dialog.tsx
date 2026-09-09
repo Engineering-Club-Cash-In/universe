@@ -173,6 +173,14 @@ export function PagaloLinkDialog({
 					input: { casoCobroId, creditoId },
 				}),
 			);
+			queryClient.invalidateQueries(
+				orpc.getHistorialContactos.queryOptions({ input: { casoCobroId } }),
+			);
+			queryClient.invalidateQueries(
+				orpc.getHistorialContactosPaginado.queryOptions({
+					input: { casoCobroId },
+				}),
+			);
 			if (result.status === "REVIEW_REQUIRED")
 				toast.error("Grupo Págalo existente requiere revisión.");
 			else if (result.origen === "BOT")

@@ -1,5 +1,8 @@
 import { expect, test } from "bun:test";
-import { construirComentarioGestionLinkPagalo } from "./pagalo-gestion";
+import {
+	construirComentarioGestionLinkPagalo,
+	totalDeLinksPagalo,
+} from "./pagalo-gestion";
 
 test("describe links Págalo y resultado de WhatsApp para historial", () => {
 	expect(
@@ -16,4 +19,11 @@ test("describe links Págalo y resultado de WhatsApp para historial", () => {
 			whatsappEnviado: false,
 		}),
 	).toBe("Links Págalo generados: 1 link por Q100.00. WhatsApp no enviado.");
+});
+
+test("suma solo links Págalo emitidos", () => {
+	expect(totalDeLinksPagalo([{ amount: "1307.40" }])).toBe("1307.40");
+	expect(
+		totalDeLinksPagalo([{ amount: "1307.40" }, { amount: "1197.41" }]),
+	).toBe("2504.81");
 });

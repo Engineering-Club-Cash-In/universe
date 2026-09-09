@@ -409,6 +409,18 @@ describe("estado de cuenta PDF", () => {
     expect(rows.map((p) => p.total_restante)).toEqual(["50000.00", "49600.00"]);
   });
 
+  it("un cero ANTES de la fila regular no cierra la cuota", () => {
+    // registerPayment puede colgar capital directo de una cuota pendiente y
+    // que esa cuota se pague después: el cero queda ANTES del snapshot. Que
+    // algún sufijo de abonos coincida con el snapshot no alcanza — solo los
+    // ceros posteriores dicen que el snapshot ya se agotó.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 1, numero_cuota: 5, pagado: true, abono_capital: "10.00", total_restante: "0" },
+      { pago_id: 2, numero_cuota: 5, pagado: true, abono_capital: "40.00", abono_interes: "5.00", total_restante: "40.00" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["80.00", "40.00"]);
+  });
+
   it("una cancelacion despues de una fila positiva cierra la cuota en 0", () => {
     // La cuota trae su fila normal (snapshot Q40) y después la que cancela,
     // que guarda 0. El snapshot positivo tapaba ese cero y, al arrancar

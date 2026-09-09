@@ -219,6 +219,7 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
   const cierreGuardado = new Map<string, Big>();
   const cuotasConCeros = new Set<string>();
   const rezagoCierto = new Map<string, Big>();
+  const cerosTrasSnapshot = new Set<string>();
   const abonosPorCuota = new Map<string, Big>();
   const abonosEnOrden = new Map<string, Big[]>();
   const ordenCuotas: string[] = [];
@@ -237,6 +238,11 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
     // snapshot lo escribió una fila concreta, así que lo que se abonó después
     // no puede estar incluido en él: es un rezago cierto, no una conjetura.
     rezagoCierto.set(key, totalRestante.gt(0) ? new Big(0) : (rezagoCierto.get(key) ?? new Big(0)).plus(abono));
+    // ¿Quedan filas en cero DESPUÉS del último snapshot positivo? Solo esas
+    // pueden decir que el snapshot ya se agotó; un cero que va ANTES de la
+    // fila regular no cierra nada.
+    if (totalRestante.gt(0)) cerosTrasSnapshot.delete(key);
+    else cerosTrasSnapshot.add(key);
   }
 
   // Cuánto puede estar atrasado el snapshot de una cuota respecto de su cierre
@@ -305,7 +311,7 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
     // el cero y la cuota terminaba en su saldo viejo en vez de en Q0.
     const porDefecto = (): Big => {
       if (
-        cuotasConCeros.has(key) &&
+        cerosTrasSnapshot.has(key) &&
         rezagosPosibles(key).some((rezago) => snapshot.minus(rezago).abs().lte(0.02))
       ) {
         return new Big(0);

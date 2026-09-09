@@ -299,12 +299,13 @@ describe("estado de cuenta PDF", () => {
     ]);
 
     // La cuota 13 arranca en el cierre guardado de la 12 y baja abono por
-    // abono; los 2 centavos vienen del propio descuadre de los datos.
+    // abono; los 2 centavos vienen del propio descuadre de los datos. Su última
+    // fila cierra el estado de cuenta, así que se reancla al saldo guardado.
     expect(rows.map((p) => p.total_restante)).toEqual([
       "116539.07",
       "116539.07",
       "115196.96",
-      "40196.96",
+      "39720.74",
     ]);
   });
 
@@ -396,6 +397,31 @@ describe("estado de cuenta PDF", () => {
       { pago_id: 3, numero_cuota: 6, pagado: true, abono_capital: "400.00", total_restante: "0" },
     ]);
     expect(rows.map((p) => p.total_restante)).toEqual(["49000.00", "48500.00", "48100.00"]);
+  });
+
+  it("la ultima cuota visible se reancla a su saldo guardado", () => {
+    // El cierre de cada cuota se resuelve en la transición a la siguiente, así
+    // que la última se quedaba con el saldo corrido. En los créditos donde los
+    // abonos no explican la caída del saldo eso deja el saldo FINAL por encima
+    // del guardado: acá mostraba Q94,081.08 en vez de Q92,736.38.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 60434, numero_cuota: 0, pagado: true, abono_capital: "0.00", abono_interes: "900.00", total_restante: "98908.24" },
+      { pago_id: 60435, numero_cuota: 1, pagado: true, abono_capital: "1737.73", abono_interes: "2664.42", total_restante: "95848.01" },
+      { pago_id: 60436, numero_cuota: 2, pagado: true, abono_capital: "1766.93", abono_interes: "2638.35", total_restante: "92736.38" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["98908.24", "95848.01", "92736.38"]);
+  });
+
+  it("una cuota de solo capital directo sin vecina usa el capital del credito", () => {
+    // Si el estado de cuenta arranca con puras filas de capital directo y no
+    // hay ninguna cuota vecina, en las filas no queda nada de donde sacar la
+    // apertura y el saldo terminaba en Q0.00, como si el crédito estuviera
+    // cancelado. El capital del crédito es la apertura de último recurso.
+    const filas = [
+      { pago_id: 1, numero_cuota: 5, pagado: true, abono_capital: "1000.00", total_restante: "0" },
+    ];
+    expect(applyEstadoCuentaRunningCapital(filas, "50000.00").map((p) => p.total_restante))
+      .toEqual(["49000.00"]);
   });
 
   it("la primera cuota visible sin snapshot toma su cierre de la siguiente", () => {
@@ -634,7 +660,9 @@ describe("estado de cuenta PDF", () => {
       { pago_id: 60435, numero_cuota: 1, pagado: true, abono_capital: "1737.73", abono_interes: "2664.42", total_restante: "95848.01" },
       { pago_id: 60436, numero_cuota: 2, pagado: true, abono_capital: "1766.93", abono_interes: "2638.35", total_restante: "92736.38" },
     ]);
-    expect(rows.map((p) => p.total_restante)).toEqual(["98908.24", "95848.01", "94081.08"]);
+    // La cuota 2 cierra el estado de cuenta, así que su fila se reancla al
+    // saldo guardado en vez de quedarse con el corrido.
+    expect(rows.map((p) => p.total_restante)).toEqual(["98908.24", "95848.01", "92736.38"]);
   });
 
   it("el cierre por registerPayment no arrastra su saldo heredado a la cuota siguiente", () => {

@@ -201,7 +201,16 @@ export function sortEstadoCuentaPayments<T extends EstadoCuentaPagoRow>(pagos: T
   });
 }
 
-export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(pagos: T[]) {
+export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(
+  pagos: T[],
+  // Apertura de último recurso: `creditos.capital`. Solo se usa cuando el
+  // estado de cuenta arranca con una cuota de puras filas de capital directo,
+  // que guardan el centinela 0 y no dejan snapshot, y no hay ninguna cuota
+  // vecina de la que sacarlo. Sin esto la apertura se reconstruía desde el
+  // propio abono y el estado de cuenta terminaba en Q0.00, presentando un
+  // abono parcial como si cancelara el crédito.
+  aperturaFallback?: number | string | null,
+) {
   // El saldo de cada fila se corre DENTRO de su cuota: arranca en la apertura
   // (el cierre guardado de la cuota anterior) y le resta los abonos a capital
   // de la cuota hasta esa fila. Así el saldo baja boleta por boleta en vez de
@@ -397,7 +406,7 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
   let cuotaActual: string | null = null;
   let saldo = new Big(0);
 
-  return pagos.map((pago) => {
+  const filas = pagos.map((pago) => {
     const key = String(pago.numero_cuota ?? "");
 
     if (key !== cuotaActual) {
@@ -428,7 +437,20 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
         // mostraría un abono parcial como si cancelara el crédito: ahí conviene
         // arrastrar el saldo previo, aun sabiéndolo alto por la cuota escondida.
         const cierraEnCero = cuotasConRubros.has(key);
-        if (tieneSnapshot || cuotaActual === null || (hayHueco && cierraEnCero)) {
+        const sig = siguienteCuota.get(key);
+        const sinVecinaQueAncle = sig === undefined || aperturaImplicitaDe(sig) === undefined;
+        if (
+          !tieneSnapshot &&
+          !cierraEnCero &&
+          sinVecinaQueAncle &&
+          cuotaActual === null &&
+          aperturaFallback != null &&
+          Number(aperturaFallback) > 0
+        ) {
+          // Puras filas de capital directo abriendo el estado de cuenta y sin
+          // vecina: no hay nada en las filas de donde sacar la apertura.
+          saldo = new Big(aperturaFallback);
+        } else if (tieneSnapshot || cuotaActual === null || (hayHueco && cierraEnCero)) {
           // Sin cierre previo utilizable: la apertura se reconstruye como
           // snapshot + Σ abonos de la cuota (el snapshot ya es post-pago), así
           // la última fila aterriza exacto en el saldo guardado.
@@ -453,6 +475,21 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
       total_restante: saldo.toFixed(2),
     };
   });
+
+  // El cierre de cada cuota se resuelve en la transición a la siguiente, así
+  // que la última se quedaba sin resolver y mostraba el saldo corrido. Donde
+  // los abonos registrados no explican la caída del saldo eso deja el saldo
+  // FINAL del estado de cuenta por encima del guardado, que es el número que
+  // más mira el cliente. Se le aplica el mismo criterio que a las demás.
+  if (cuotaActual !== null && filas.length > 0) {
+    const cierre = cierreDeCuota(cuotaActual, saldo);
+    filas[filas.length - 1] = {
+      ...filas[filas.length - 1]!,
+      total_restante: cierre.toFixed(2),
+    };
+  }
+
+  return filas;
 }
 
 const formatEstadoCuentaMoney = (n: number) =>
@@ -842,7 +879,8 @@ export async function exportPagosToExcel(credito_sifco: string) {
   let totalInteres = 0;
 
   const pagosOrdenados = applyEstadoCuentaRunningCapital(
-    sortEstadoCuentaPayments(pagosFiltrados.map(({ pago }) => pago))
+    sortEstadoCuentaPayments(pagosFiltrados.map(({ pago }) => pago)),
+    (pagosFiltrados[0] as any)?.creditos?.capital,
   );
 
   const tableRows = pagosOrdenados.map((pago, index) => {

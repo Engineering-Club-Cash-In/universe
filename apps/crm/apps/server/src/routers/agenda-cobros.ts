@@ -114,6 +114,32 @@ export const agendaCobrosRouter = {
 					),
 				)
 				.limit(1);
+			// Coberturas donde el usuario logueado fue TITULAR, canceladas hoy:
+			// el espejo de `coberturasCanceladasHoy` de abajo, pero del otro
+			// lado. Al cancelarse, `ausenciaPropia` deja de bloquearlo y
+			// recupera su agenda completa de inmediato — pero el trabajo que el
+			// EX-suplente ya hizo esa mañana, antes de cancelar, no queda en
+			// ningún lado si no se trae acá: el titular la vería pendiente pese
+			// al contacto efectivo real, riesgo de llamar dos veces al mismo
+			// cliente. Se necesita el `suplenteId` de esas filas (no solo saber
+			// que existieron) para incluirlo en `asesoresParaContactos` más
+			// abajo.
+			const coberturasPropiasCanceladasHoy = await db
+				.select({
+					suplenteId: coberturasAgendaCobros.suplenteId,
+					createdAt: coberturasAgendaCobros.createdAt,
+					canceladaEn: coberturasAgendaCobros.canceladaEn,
+				})
+				.from(coberturasAgendaCobros)
+				.where(
+					and(
+						eq(coberturasAgendaCobros.titularId, asesorId),
+						gte(coberturasAgendaCobros.canceladaEn, ventanaHoy.desde),
+						lt(coberturasAgendaCobros.canceladaEn, ventanaHoy.hasta),
+						lte(coberturasAgendaCobros.desde, fecha),
+						gte(coberturasAgendaCobros.hasta, fecha),
+					),
+				);
 			// Solo cobertura ACTIVA decide qué agenda completa se muestra. Una
 			// cobertura cancelada hoy NO vuelve a traer al titular acá — mostrar
 			// TODA su agenda de nuevo expondría al suplente los mismos pendientes
@@ -487,9 +513,21 @@ export const agendaCobrosRouter = {
 			// `cerrarItemsAgenda` no encuentra ningún contacto para esos items
 			// recuperados y los devuelve pendientes pese al contacto efectivo
 			// que ya calificó para recuperarlos.
-			const asesoresParaContactos = titularesCanceladosHoy.length
-				? [...new Set([...asesoresFuente, asesorId])]
-				: asesoresFuente;
+			//
+			// El caso INVERSO también aplica: si el usuario logueado es TITULAR
+			// y su cobertura se cancela hoy, `ausenciaPropia` deja de bloquearlo
+			// y recupera de inmediato TODA su agenda (`asesoresFuente` vuelve a
+			// incluirlo) — pero sin agregar al EX-SUPLENTE acá, sus contactos de
+			// esa mañana (antes de cancelar) quedan invisibles: el titular ve
+			// pendiente algo que ya estaba resuelto.
+			const asesoresParaContactos = [
+				...new Set([
+					...(titularesCanceladosHoy.length
+						? [...asesoresFuente, asesorId]
+						: asesoresFuente),
+					...coberturasPropiasCanceladasHoy.map((c) => c.suplenteId),
+				]),
+			];
 			const contactos = await db
 				.select({
 					id: contactosCobros.id,
@@ -524,7 +562,16 @@ export const agendaCobrosRouter = {
 				string,
 				{ desde: Date; hasta: Date | null }[]
 			>();
-			for (const c of [...coberturas, ...coberturasCanceladasHoy]) {
+			for (const c of [
+				...coberturas,
+				...coberturasCanceladasHoy,
+				// El titular es el propio `asesorId`: estas filas se leyeron con
+				// `titularId = asesorId` fijo, así que no vienen como columna.
+				...coberturasPropiasCanceladasHoy.map((c) => ({
+					...c,
+					titularId: asesorId,
+				})),
+			]) {
 				const ventanas = ventanasPorTitular.get(c.titularId) ?? [];
 				ventanas.push({ desde: c.createdAt, hasta: c.canceladaEn });
 				ventanasPorTitular.set(c.titularId, ventanas);
@@ -562,8 +609,28 @@ export const agendaCobrosRouter = {
 						// esto, un contacto ya hecho por el dueño descartado en el
 						// dedupe dejaba de matchear y el item se veía pendiente aunque
 						// ya estaba resuelto.
+						// `dueniosSnapshot` por sí solo NO alcanza cuando el titular
+						// recupera su agenda tras cancelar: el ex-suplente nunca tuvo su
+						// PROPIO snapshot con este crédito (lo trabajó vía cobertura, no
+						// por pool), así que no aparece ahí. Sin agregar explícitamente
+						// a los ex-suplentes de `coberturasPropiasCanceladasHoy`, este
+						// guard los rechazaba ANTES de siquiera llegar al corte de
+						// `ventanasCoberturaValida` — su contacto efectivo, ya calificado
+						// por la ventana, nunca se evaluaba.
+						//
+						// Solo cuando `titular === asesorId`: si el usuario logueado
+						// tiene AL MISMO TIEMPO cobertura activa cubriendo a otro Y su
+						// propia cobertura (como titular) cancelada hoy, los items del
+						// OTRO titular no deben aceptar al ex-suplente de esta persona
+						// — sin relación real con esos créditos.
 						realizadoPorValidos: [
-							...new Set([...item.dueniosSnapshot, asesorId]),
+							...new Set([
+								...item.dueniosSnapshot,
+								asesorId,
+								...(titular === asesorId
+									? coberturasPropiasCanceladasHoy.map((c) => c.suplenteId)
+									: []),
+							]),
 						],
 						ventanasCoberturaValida: ventanasPorTitular.get(titular),
 						// `dueniosSnapshot`, no `[titular]`: si el crédito ya estaba en

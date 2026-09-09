@@ -385,6 +385,18 @@ describe("estado de cuenta PDF", () => {
     expect(rows.map((p) => p.total_restante)).toEqual(["50000.00", "49400.00", "49000.00"]);
   });
 
+  it("un hueco de cuotas corta la cadena en vez de saltarselo", () => {
+    // La cuota 2 quedó entera fuera del estado de cuenta (sus pagos siguen
+    // pendientes) y cerraba en Q49,000. Encadenar la 1 con la 3 como si fueran
+    // vecinas dejaba a la 3 en Q49,300, alta por los Q1,000 de capital que la 2
+    // sí redujo. Cortando la cadena, la 3 se resuelve con su propio snapshot.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 1, numero_cuota: 1, pagado: true, abono_capital: "500.00", abono_interes: "500.00", total_restante: "50000.00" },
+      { pago_id: 2, numero_cuota: 3, pagado: true, abono_capital: "700.00", abono_interes: "500.00", total_restante: "48300.00" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["50000.00", "48300.00"]);
+  });
+
   it("una cuota de solo capital directo sigue desde el saldo de la cuota 0", () => {
     // registerPayment puede colgar capital directo de una primera cuota que
     // sigue pendiente: su fila regular queda filtrada y solo sobrevive la del

@@ -254,9 +254,22 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
     return rezagos;
   };
 
+  // Solo se encadenan cuotas numéricamente consecutivas. Una cuota puede quedar
+  // entera fuera del estado de cuenta —si todos sus pagos siguen pendientes— y
+  // entonces las visibles no son vecinas: su reducción de capital no está a la
+  // vista y encadenarlas dejaría a la posterior alta por ese monto. Ante un
+  // hueco cada lado se resuelve con su propio snapshot.
+  const sonConsecutivas = (a: string, b: string) => {
+    const na = Number(a);
+    const nb = Number(b);
+    if (!Number.isFinite(na) || !Number.isFinite(nb)) return true;
+    return nb === na + 1;
+  };
+
   const siguienteCuota = new Map<string, string>();
   const anteriorCuota = new Map<string, string>();
   for (let i = 0; i < ordenCuotas.length - 1; i++) {
+    if (!sonConsecutivas(ordenCuotas[i]!, ordenCuotas[i + 1]!)) continue;
     siguienteCuota.set(ordenCuotas[i]!, ordenCuotas[i + 1]!);
     anteriorCuota.set(ordenCuotas[i + 1]!, ordenCuotas[i]!);
   }
@@ -334,7 +347,13 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
       // otra tabla de amortización que la del calendario, así que NO ancla a la
       // 1. La primera cuota real reconstruye su propia apertura y de la 2 en
       // adelante cada una se ancla en el cierre guardado de la anterior.
-      const arrancaCadena = cuotaActual === null || cuotaActual === "0";
+      // Tras un hueco la cadena se corta: la cuota reconstruye su apertura desde
+      // su propio snapshot en vez de heredar el cierre de una que no es su
+      // vecina.
+      const arrancaCadena =
+        cuotaActual === null ||
+        cuotaActual === "0" ||
+        !sonConsecutivas(cuotaActual, key);
       if (arrancaCadena) {
         // Una cuota representada SOLO por filas de capital directo no tiene
         // snapshot propio, así que su cierre no se puede reconstruir. Pero su

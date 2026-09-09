@@ -157,6 +157,13 @@ class PagaloRespuestaAmbigua extends Error {
 	}
 }
 
+type LinkPagaloEmitido = {
+	linkType: "CAPITAL" | "MORA_INTERES";
+	paymentUrl: string;
+	status: "ACTIVE";
+	amount: string;
+};
+
 const pickString = (value: unknown, names: string[]): string | undefined => {
 	if (!value || typeof value !== "object") return undefined;
 	for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
@@ -454,6 +461,19 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 		telefono,
 		config,
 		enviarWhatsapp: true,
+		onEmisionParcial: async (links) => {
+			await registrarGestionLinkPagalo({
+				groupId: group.id,
+				casoCobroId: input.casoCobroId,
+				numeroSifco: input.numeroSifco,
+				requestedBy: input.requestedBy,
+				totalAmount: links
+					.reduce((total, link) => total + Number(link.amount), 0)
+					.toFixed(2),
+				cantidadLinks: links.length,
+				whatsappEnviado: null,
+			});
+		},
 	});
 	const gestionRegistrada = await registrarGestionLinkPagalo({
 		groupId: group.id,
@@ -1178,6 +1198,9 @@ export async function emitirLinksDeGrupo(params: {
 	// grupo de reemplazo, pero una regeneración no manda mensaje — decisión
 	// de producto: el envío es únicamente al crear por primera vez.
 	enviarWhatsapp: boolean;
+	// La creación inicial registra los links activos si otro componente falla.
+	// Regenerar grupo no pasa callback: conserva su error y flujo actuales.
+	onEmisionParcial?: (links: readonly LinkPagaloEmitido[]) => Promise<void>;
 }) {
 	const client = createPagaloClient(params.config);
 	const components = [
@@ -1198,50 +1221,52 @@ export async function emitirLinksDeGrupo(params: {
 	const etiquetaPago = (linkType: "CAPITAL" | "MORA_INTERES") =>
 		dosLinks ? `Pago ${ORDEN_LINKS_PAGALO.indexOf(linkType) + 1} de 2` : "Pago";
 
-	const links = [] as Array<{
-		linkType: "CAPITAL" | "MORA_INTERES";
-		paymentUrl: string;
-		status: "ACTIVE";
-		amount: string;
-	}>;
-	for (const component of components) {
-		const [linkType, amount] = component;
-		if (amount === "0.00") continue;
-		const providerAmount = providerAmounts.get(linkType);
-		if (providerAmount === undefined)
-			throw new Error("Monto Págalo no disponible.");
-		const generacion = params.generacionPorTipo?.[linkType];
-		const emitido = await emitirUnLink({
-			client,
-			groupId: params.groupId,
-			numeroSifco: params.numeroSifco,
-			requestedBy: params.requestedBy,
-			clienteNombre: params.clienteNombre,
-			clientContact: params.clientContact,
-			config: params.config,
-			linkType,
-			amount,
-			providerAmount,
-			etiqueta: etiquetaPago(linkType),
-			generation: generacion?.generation,
-			supersedesLinkId: generacion?.supersedesLinkId,
-			// El catch de fallo escala el grupo a REVIEW_REQUIRED: correcto acá
-			// (creación normal, todo el grupo depende de que ambos links salgan
-			// bien), pero NO para regenerarLinkIndividual (ver esa función).
-			grupoAReviewSiFalla: true,
-		});
-		// activo=false: la respuesta de Págalo llegó después de que el link
-		// fue invalidado — el link real existe y es cobrable en Págalo, pero
-		// no se manda por WhatsApp ni se cuenta como parte de la emisión
-		// (hallazgo de code review). Sin esto, un cliente podía recibir y
-		// pagar un link que un supervisor invalidó segundos antes.
-		if (!emitido.activo) continue;
-		links.push({
-			linkType,
-			paymentUrl: emitido.paymentUrl,
-			status: "ACTIVE",
-			amount,
-		});
+	const links: LinkPagaloEmitido[] = [];
+	try {
+		for (const component of components) {
+			const [linkType, amount] = component;
+			if (amount === "0.00") continue;
+			const providerAmount = providerAmounts.get(linkType);
+			if (providerAmount === undefined)
+				throw new Error("Monto Págalo no disponible.");
+			const generacion = params.generacionPorTipo?.[linkType];
+			const emitido = await emitirUnLink({
+				client,
+				groupId: params.groupId,
+				numeroSifco: params.numeroSifco,
+				requestedBy: params.requestedBy,
+				clienteNombre: params.clienteNombre,
+				clientContact: params.clientContact,
+				config: params.config,
+				linkType,
+				amount,
+				providerAmount,
+				etiqueta: etiquetaPago(linkType),
+				generation: generacion?.generation,
+				supersedesLinkId: generacion?.supersedesLinkId,
+				// El catch de fallo escala el grupo a REVIEW_REQUIRED: correcto acá
+				// (creación normal, todo el grupo depende de que ambos links salgan
+				// bien), pero NO para regenerarLinkIndividual (ver esa función).
+				grupoAReviewSiFalla: true,
+			});
+			// activo=false: la respuesta de Págalo llegó después de que el link
+			// fue invalidado — el link real existe y es cobrable en Págalo, pero
+			// no se manda por WhatsApp ni se cuenta como parte de la emisión
+			// (hallazgo de code review). Sin esto, un cliente podía recibir y
+			// pagar un link que un supervisor invalidó segundos antes.
+			if (!emitido.activo) continue;
+			links.push({
+				linkType,
+				paymentUrl: emitido.paymentUrl,
+				status: "ACTIVE",
+				amount,
+			});
+		}
+	} catch (error) {
+		if (links.length > 0 && params.onEmisionParcial) {
+			await params.onEmisionParcial(links);
+		}
+		throw error;
 	}
 	// Grupo de dos componentes: si uno se invalida concurrentemente mientras
 	// el otro ya salió bien (activo=true), `links` queda con solo el

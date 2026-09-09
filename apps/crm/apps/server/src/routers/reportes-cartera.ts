@@ -144,6 +144,7 @@ export const reportesCarteraRouter = {
 										SELECT COUNT(*) as total, MAX(fecha_contacto) as ultimo
 										FROM contactos_cobros
 										WHERE caso_cobro_id = ${casoCobros[0].id}
+										AND estado_contacto != 'link_pago_generado'
 									`,
 								);
 

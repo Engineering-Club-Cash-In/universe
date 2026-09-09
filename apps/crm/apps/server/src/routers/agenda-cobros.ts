@@ -10,6 +10,7 @@ import {
 	lt,
 	lte,
 	max,
+	not,
 } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
@@ -29,7 +30,9 @@ import {
 	ventanaDiaGuatemala,
 } from "../lib/agenda-cobros-snapshot";
 import { agruparCasosVigentesPorSifco } from "../lib/caso-vigente";
+import { ESTADOS_CONTESTO } from "../lib/gestion-temprana-b1";
 import { toDateStrGT } from "../lib/guatemala-month-window";
+import { esGestionAutomatica } from "../lib/historial-agendas";
 import { cobrosProcedure, cobrosSupervisorProcedure } from "../lib/orpc";
 
 const fechaSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -241,6 +244,15 @@ export const agendaCobrosRouter = {
 									contactosCobros.fechaContacto,
 									coberturasAgendaCobros.canceladaEn,
 								),
+								// Mismo criterio de "contacto efectivo" que usa
+								// `cerrarItemsAgenda` para decidir `atendido`. Sin esto,
+								// un `no_contesta` o un WhatsApp automático hacía que este
+								// JOIN "recuperara" el item, pero cerrarItemsAgenda lo
+								// rechazaba después y lo devolvía como pendiente — visible
+								// para el suplente mientras el titular también lo recupera
+								// pendiente en la suya.
+								inArray(contactosCobros.estadoContacto, ESTADOS_CONTESTO),
+								not(esGestionAutomatica()),
 							),
 						)
 						.where(

@@ -195,11 +195,16 @@ export async function cerrarSnapshotsAgenda(
 				 -- trabajó (ej. contacto 09:00, cancelación 14:00) seguía
 				 -- descartando ese contacto legítimo si se colapsaban ambos a
 				 -- ::date, porque "cancelado el día X" y "cerrando el día X" son
-				 -- iguales en fecha aunque el contacto haya sido antes.
+				 -- iguales en fecha aunque el contacto haya sido antes. El mismo
+				 -- corte aplica al REGISTRO: si la cobertura se crea a mitad de
+				 -- día, un contacto del suplente ANTERIOR a ese registro no era
+				 -- trabajo de cobertura (podía ser una coincidencia de pool sin
+				 -- relación) y no debe acreditarse al titular retroactivamente.
 				 AND (cobertura.suplente_id IS NULL
 				      OR cc.realizado_por = s.asesor_id
-				      OR cobertura.cancelada_en IS NULL
-				      OR cobertura.cancelada_en > cc.fecha_contacto)
+				      OR (cobertura.created_at <= cc.fecha_contacto
+				          AND (cobertura.cancelada_en IS NULL
+				               OR cobertura.cancelada_en > cc.fecha_contacto)))
 				 AND cc.fecha_contacto >= ($1::date + interval '6 hours')
 				 AND cc.fecha_contacto < ($1::date + interval '1 day 6 hours')
 				 AND cc.estado_contacto = ANY($2::estado_contacto[])

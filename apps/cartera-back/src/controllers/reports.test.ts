@@ -385,6 +385,19 @@ describe("estado de cuenta PDF", () => {
     expect(rows.map((p) => p.total_restante)).toEqual(["50000.00", "49400.00", "49000.00"]);
   });
 
+  it("una cuota de solo capital directo sigue desde el saldo de la cuota 0", () => {
+    // registerPayment puede colgar capital directo de una primera cuota que
+    // sigue pendiente: su fila regular queda filtrada y solo sobrevive la del
+    // capital, que guarda total_restante 0. Sin snapshot propio no hay cierre
+    // que reconstruir, pero la apertura sí se conoce —es el saldo de la cuota
+    // 0— así que se sigue desde ahí. Antes el crédito arrancaba en Q0.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 1, numero_cuota: 0, pagado: true, abono_capital: "0.00", abono_interes: "5.00", total_restante: "100.00" },
+      { pago_id: 2, numero_cuota: 1, pagado: true, abono_capital: "10.00", total_restante: "0" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["100.00", "90.00"]);
+  });
+
   it("una cancelacion en 0 confirma el cierre de la cuota anterior", () => {
     // La cuota 2 cancela el crédito y guarda total_restante 0. Ese cero no se
     // toma como snapshot (para que un cero de capital directo no ancle a

@@ -336,12 +336,23 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
       // adelante cada una se ancla en el cierre guardado de la anterior.
       const arrancaCadena = cuotaActual === null || cuotaActual === "0";
       if (arrancaCadena) {
-        // Sin cierre previo utilizable: la apertura se reconstruye como
-        // snapshot + Σ abonos de la cuota (el snapshot ya es post-pago), así
-        // la última fila aterriza exacto en el saldo guardado.
-        saldo = cierreDeCuota(key, new Big(0)).plus(
-          abonosPorCuota.get(key) ?? new Big(0),
-        );
+        // Una cuota representada SOLO por filas de capital directo no tiene
+        // snapshot propio, así que su cierre no se puede reconstruir. Pero su
+        // apertura sí se conoce: es el saldo con el que viene la cuota 0, y
+        // desde ahí se le restan sus abonos como a cualquier otra. Sin esto la
+        // apertura salía del cierre inexistente (0) y el crédito arrancaba en
+        // Q0 en vez de en su saldo real.
+        const tieneSnapshot = cierreGuardado.get(key) !== undefined;
+        if (tieneSnapshot || cuotaActual === null) {
+          // Sin cierre previo utilizable: la apertura se reconstruye como
+          // snapshot + Σ abonos de la cuota (el snapshot ya es post-pago), así
+          // la última fila aterriza exacto en el saldo guardado.
+          saldo = cierreDeCuota(key, new Big(0)).plus(
+            abonosPorCuota.get(key) ?? new Big(0),
+          );
+        }
+        // Si no hay snapshot propio, `saldo` ya trae el cierre de la cuota 0 y
+        // se usa tal cual como apertura.
       } else {
         // Ancla de la cuota anterior: su cierre real, resuelto con la misma
         // evidencia. Si esa cuota no dejó snapshot usable, sigue el corrido.

@@ -20,3 +20,7 @@ export function totalDeLinksPagalo(
 		.reduce((total, link) => total + Number(link.amount), 0)
 		.toFixed(2);
 }
+
+export function esLinkPagaloGenerado(status: string | null): boolean {
+	return status === "ACTIVE" || status === "PAID";
+}

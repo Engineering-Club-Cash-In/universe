@@ -124,6 +124,7 @@ async function _generarCierreContactos(client: RawClient, fecha: string) {
 		FROM contactos_cobros cc
 		JOIN casos_cobros ccb ON ccb.id = cc.caso_cobro_id
 		WHERE (cc.fecha_contacto - INTERVAL '6 hours')::date = $1::date
+			AND cc.estado_contacto != 'link_pago_generado'
 		ON CONFLICT (contacto_id) WHERE contacto_id IS NOT NULL DO NOTHING
 		RETURNING asesor_id`,
 		[fecha, PREFIJO_PREMORA_AUTO, PREFIJO_WSP_MASIVO],

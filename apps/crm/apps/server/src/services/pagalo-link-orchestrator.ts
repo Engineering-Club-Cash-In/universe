@@ -16,6 +16,7 @@ import {
 } from "../lib/pagalo-allocations";
 import {
 	construirComentarioGestionLinkPagalo,
+	esLinkPagaloGenerado,
 	totalDeLinksPagalo,
 } from "../lib/pagalo-gestion";
 import { deduplicarCuotasPagalo } from "../lib/pagalo-installments";
@@ -375,8 +376,22 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 					]
 				: [],
 		);
+		const linksParaGestion = grupoActivo.flatMap((link) =>
+			link.linkType && link.paymentUrl && esLinkPagaloGenerado(link.linkStatus)
+				? [
+						{
+							amount:
+								link.linkType === "CAPITAL"
+									? group.capitalTotal
+									: group.facturableTotal,
+						},
+					]
+				: [],
+		);
 		const gestionRegistrada =
-			group.origen === "ASESOR" && group.casoCobroId && links.length > 0
+			group.origen === "ASESOR" &&
+			group.casoCobroId &&
+			linksParaGestion.length > 0
 				? group.contactoCobroId
 					? true
 					: await registrarGestionLinkPagalo({
@@ -384,8 +399,8 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 							casoCobroId: group.casoCobroId,
 							numeroSifco: input.numeroSifco,
 							requestedBy: group.createdBy,
-							totalAmount: group.totalAmount,
-							cantidadLinks: links.length,
+							totalAmount: totalDeLinksPagalo(linksParaGestion),
+							cantidadLinks: linksParaGestion.length,
 							whatsappEnviado: null,
 							fechaContacto: group.createdAt,
 							bucketSnapshot: null,

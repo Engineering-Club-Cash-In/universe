@@ -8518,7 +8518,7 @@ export const cobrosRouter = {
 					// Promesa se reporta aparte (línea de arriba) — no cuenta en el
 					// denominador de "efectivos/total", sería mezclar dos categorías
 					// excluyentes en un mismo ratio.
-					totalContactos: sql<number>`COUNT(*) FILTER (WHERE ${cierreDiarioCreditoCobros.tipo} = 'contacto' AND ${cierreDiarioCreditoCobros.estadoContacto} != 'promesa_pago' AND NOT ${esAutomatico})`,
+					totalContactos: sql<number>`COUNT(*) FILTER (WHERE ${cierreDiarioCreditoCobros.tipo} = 'contacto' AND ${cierreDiarioCreditoCobros.estadoContacto} != 'promesa_pago' AND ${cierreDiarioCreditoCobros.estadoContacto} != 'link_pago_generado' AND NOT ${esAutomatico})`,
 					// Movimientos que SALIERON del bucket del pool del asesor ese día.
 					subieron: sql<number>`COUNT(*) FILTER (WHERE ${cierreDiarioCreditoCobros.tipo} = 'subida')`,
 					bajaron: sql<number>`COUNT(*) FILTER (WHERE ${cierreDiarioCreditoCobros.tipo} = 'bajada')`,

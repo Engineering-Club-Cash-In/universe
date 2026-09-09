@@ -79,6 +79,7 @@ const ESTADOS_CONTACTO = [
 	// "Registrar pago") — el filtro del historial (components/cobros/
 	// historial/formato.ts) ya la ofrece como opción seleccionable.
 	"pago_registrado",
+	"link_pago_generado",
 ] as const;
 
 /** Espejo del enum `metodo_contacto`. */

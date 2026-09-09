@@ -93,6 +93,7 @@ export const estadoContactoEnum = pgEnum("estado_contacto", [
 	"acuerdo_parcial",
 	"rechaza_pagar",
 	"pago_registrado",
+	"link_pago_generado",
 ]);
 
 // CB-020: estado de cumplimiento de una promesa de pago (solo aplica a filas

@@ -1808,7 +1808,24 @@ export const updateCredit = async ({ body, set, request }: any) => {
       // colgados. Solo aplica al SOLICITAR (esSolicitudValida): desactivar
       // (-> NO_APLICA) sigue libre para no dejar el crédito atrapado si los
       // borradores aparecieron después de la solicitud.
+      //
+      // FOR NO KEY UPDATE antes de consultar: sin esto, el SELECT del guard
+      // no se serializa con withPendingReturnCreditLocks (payments.ts), que
+      // toma el mismo lock de fila sobre creditos antes de insertar un
+      // borrador. Sin este lock, la carrera es real: el guard puede leer
+      // "sin borradores", generación de pagos inserta uno justo después, y
+      // esta transacción de todos modos deja el crédito en
+      // PENDIENTE_AUTORIZACION con el borrador recién creado — exactamente
+      // el estado que el guard existe para impedir. Con el lock, cualquiera
+      // de las dos transacciones que llegue primero bloquea a la otra hasta
+      // su commit/rollback, así que el guard siempre ve el estado final.
       if (esSolicitudValida) {
+        await db
+          .select({ credito_id: creditos.credito_id })
+          .from(creditos)
+          .where(eq(creditos.credito_id, credito_id))
+          .for("no key update");
+
         const bloqueo = await checkCreditHasUnliquidatedDrafts(credito_id, db);
         if (bloqueo) {
           set.status = 400;

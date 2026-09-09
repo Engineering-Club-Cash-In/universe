@@ -15,6 +15,30 @@ let currentInvestorRows: unknown[] = [];
 let updateWasCalled = false;
 let lastUpdateData: Record<string, unknown> | undefined;
 
+// tx.select().from().where() dentro de la transacción del guard sirve dos
+// queries: creditos_inversionistas_espejo (se resuelve directo, .then) y el
+// FOR NO KEY UPDATE de creditos (encadena .for(), nunca se resuelve sin él).
+// checkInvestorHasUnliquidatedDrafts está mockeado aparte (no toca este tx),
+// así que el contenido de creditosEspejoRows no cambia el resultado del
+// guard — solo hace falta que la cadena no truene.
+let creditosEspejoRows: { credito_id: number }[] = [];
+// Regresión: sin FOR NO KEY UPDATE acá, el guard no se serializa con
+// withPendingReturnCreditLocks (payments.ts), que toma el mismo lock de fila
+// sobre creditos antes de insertar un borrador — la carrera vuelve a abrirse.
+let forCallsCount = 0;
+let lastForArg: unknown;
+let transactionWasUsed = false;
+function makeWhereResult() {
+  const promise = Promise.resolve(creditosEspejoRows);
+  return Object.assign(promise, {
+    for: (strength: unknown) => {
+      forCallsCount++;
+      lastForArg = strength;
+      return Promise.resolve([]);
+    },
+  });
+}
+
 mock.module("../database/index", () => ({
   client: {},
   lockPool: {},
@@ -24,6 +48,9 @@ mock.module("../database/index", () => ({
         where: () => Promise.resolve(currentInvestorRows),
       }),
     }),
+    // Suelto (fuera de transacción): no debería usarse para el update una
+    // vez que status === 'pendiente_devolucion' pasa por el guard, pero se
+    // deja definido por si algún camino lo sigue llamando directo.
     update: () => ({
       set: (data: Record<string, unknown>) => {
         updateWasCalled = true;
@@ -36,6 +63,29 @@ mock.module("../database/index", () => ({
         };
       },
     }),
+    transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
+      transactionWasUsed = true;
+      const tx = {
+        select: () => ({
+          from: () => ({
+            where: makeWhereResult,
+          }),
+        }),
+        update: () => ({
+          set: (data: Record<string, unknown>) => {
+            updateWasCalled = true;
+            lastUpdateData = data;
+            return {
+              where: () => ({
+                returning: () =>
+                  Promise.resolve([{ ...existingInvestor, ...data }]),
+              }),
+            };
+          },
+        }),
+      };
+      return fn(tx);
+    },
   },
 }));
 
@@ -52,14 +102,23 @@ mock.module("./addInvestorToCredit", () => ({
 }));
 
 // Guard B bajo prueba en su propio archivo (draftPaymentsGuard.test.ts) — acá
-// se mockea para controlar exactamente cuándo bloquea, sin reconstruir su
-// query de selectDistinct/innerJoin.
+// se mockea checkInvestorHasUnliquidatedDrafts para controlar exactamente
+// cuándo bloquea, sin reconstruir su query de selectDistinct/innerJoin.
+// UnliquidatedDraftPaymentsError SÍ se importa real (es pura, sin queries):
+// investor.ts hace `throw new UnliquidatedDraftPaymentsError(...)` y
+// `instanceof` contra ella en su catch — con una clase mockeada aparte esas
+// dos referencias apuntarían a constructores distintos y el catch nunca
+// matchearía.
+const { UnliquidatedDraftPaymentsError: RealUnliquidatedDraftPaymentsError } =
+  await import("../utils/draftPaymentsGuard");
+
 let draftsWarning: unknown = null;
 const checkInvestorHasUnliquidatedDraftsMock = mock(() =>
   Promise.resolve(draftsWarning),
 );
 mock.module("../utils/draftPaymentsGuard", () => ({
   checkInvestorHasUnliquidatedDrafts: checkInvestorHasUnliquidatedDraftsMock,
+  UnliquidatedDraftPaymentsError: RealUnliquidatedDraftPaymentsError,
 }));
 
 const { updateInvestorStatus } = await import("./investor");
@@ -75,6 +134,10 @@ beforeEach(() => {
   lastUpdateData = undefined;
   draftsWarning = null;
   checkInvestorHasUnliquidatedDraftsMock.mockClear();
+  creditosEspejoRows = [];
+  forCallsCount = 0;
+  lastForArg = undefined;
+  transactionWasUsed = false;
 });
 
 describe("updateInvestorStatus — guard de borradores sin liquidar", () => {
@@ -101,6 +164,7 @@ describe("updateInvestorStatus — guard de borradores sin liquidar", () => {
 
   it("permite activo -> pendiente_devolucion sin borradores pendientes", async () => {
     draftsWarning = null;
+    creditosEspejoRows = [{ credito_id: 5 }];
 
     const ctx = makeCtx({ inversionista_id: 10, status: "pendiente_devolucion" });
     const res: any = await updateInvestorStatus(ctx);
@@ -112,6 +176,26 @@ describe("updateInvestorStatus — guard de borradores sin liquidar", () => {
       status: "pendiente_devolucion",
       tipo_reinversion: "sin_reinversion",
     });
+    // Regresión: guard + update corren dentro de la MISMA transacción,
+    // tomando FOR NO KEY UPDATE sobre los créditos del inversionista antes
+    // de consultar el guard.
+    expect(transactionWasUsed).toBe(true);
+    expect(forCallsCount).toBe(1);
+    expect(lastForArg).toBe("no key update");
+  });
+
+  it("no toma el lock cuando el inversionista no tiene créditos en el espejo", async () => {
+    draftsWarning = null;
+    creditosEspejoRows = [];
+
+    const ctx = makeCtx({ inversionista_id: 10, status: "pendiente_devolucion" });
+    await updateInvestorStatus(ctx);
+
+    // Sin créditos, no hay fila que lockear — el guard igual se consulta
+    // (checkInvestorHasUnliquidatedDraftsMock corre siempre que
+    // status === 'pendiente_devolucion').
+    expect(forCallsCount).toBe(0);
+    expect(checkInvestorHasUnliquidatedDraftsMock).toHaveBeenCalled();
   });
 
   it("permite salir de pendiente_devolucion aunque haya borradores sin liquidar", async () => {

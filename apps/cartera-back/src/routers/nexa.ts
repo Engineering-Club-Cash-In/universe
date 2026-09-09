@@ -8,10 +8,11 @@ type NexaHandler = (context: {
 
 export const createNexaInternalRouter = (
   environment: string,
+  enabled: boolean,
   handler: NexaHandler,
 ) => {
   const router = new Elysia();
-  return ["dev", "development", "qa"].includes(environment.toLowerCase())
+  return enabled && ["dev", "development", "qa"].includes(environment.toLowerCase())
     ? router.post("/internal/nexa/payments/apply", handler, { parse: "none" })
     : router;
 };

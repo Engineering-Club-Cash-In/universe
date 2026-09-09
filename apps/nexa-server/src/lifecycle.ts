@@ -1,6 +1,6 @@
 import type { AppConfig } from "./config";
 import type { AppDependencies } from "./dependencies";
-import { defaultScheduler, startPaymentPolling, type Scheduler } from "./jobs/scheduler";
+import { defaultScheduler, type Scheduler } from "./jobs/scheduler";
 import { runApplicationWorkerOnce } from "./payments/application-worker";
 import { runReviewWorkerOnce } from "./payments/review-worker";
 
@@ -23,18 +23,6 @@ export function startPaymentLifecycle(
     maxBackoffSeconds: config.workerMaxBackoffSeconds,
   };
   const stops = [
-    startPaymentPolling({
-      intervalSeconds: config.nexaPollIntervalSeconds,
-      lookbackDays: config.nexaPollLookbackDays,
-      nexa: deps.nexa,
-      cartera: deps.cartera,
-      transactions: deps.transactions,
-      tokenUsers: deps.tokenUsers,
-      pollRuns: deps.pollRuns,
-      scheduler,
-      logError,
-      logInfo,
-    }),
     startWorkerLoop("Application worker", config.workerIntervalSeconds, () => runApplicationWorkerOnce({
       repository: deps.transactions,
       cartera: deps.cartera,

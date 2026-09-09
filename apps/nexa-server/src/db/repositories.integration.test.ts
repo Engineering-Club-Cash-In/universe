@@ -4,7 +4,6 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Pool } from "pg";
 import type { ReviewTransferStatus, TokenTransaction } from "../nexa/schemas";
-import { startPaymentPolling } from "../jobs/scheduler";
 import { runApplicationWorkerOnce } from "../payments/application-worker";
 import { runReviewWorkerOnce } from "../payments/review-worker";
 import { createAdminRouter } from "../routes/admin";
@@ -52,49 +51,6 @@ beforeEach(async () => {
   await db.delete(nexaPaymentTransactions);
   await db.delete(nexaTokenUsers);
   await db.delete(nexaPaymentTokens);
-});
-
-integrationTest("two polling coordinators elect one PostgreSQL leader while the Nexa call is running", async () => {
-  if (!db) throw new Error("TEST_DATABASE_URL is required");
-  let release: (() => void) | undefined;
-  const blocked = new Promise<void>((resolve) => { release = resolve; });
-  let nexaCalls = 0;
-  let completedCycles = 0;
-  const options = {
-    intervalSeconds: 3_600,
-    lookbackDays: 1,
-    nexa: {
-      getPaymentTokenStatement: async () => {
-        nexaCalls++;
-        await blocked;
-        return { transactions: [] };
-      },
-      reviewTransfer: async () => undefined,
-    },
-    cartera: { applyNexaPayment: async () => ({ status: "REJECTED" as const, reason: "unused" }) },
-    transactions: new DbPaymentTransactionRepository(db),
-    tokenUsers: new DbTokenUserRepository(db),
-    scheduler: {
-      setTimeout: () => { completedCycles++; },
-      clearTimeout: () => undefined,
-    },
-  };
-
-  const stopFirst = startPaymentPolling({ ...options, pollRuns: new PollRunRepository(db) });
-  const stopSecond = startPaymentPolling({ ...options, pollRuns: new PollRunRepository(db) });
-  await waitFor(() => nexaCalls === 1);
-  await waitFor(() => completedCycles === 1);
-
-  const callsWhileLeaderWasBlocked = nexaCalls;
-  release?.();
-  await waitFor(async () => {
-    const runs = await db.select().from(nexaPollRuns);
-    return runs.length === 2 && runs.every((run) => run.status === "COMPLETED");
-  });
-  expect(callsWhileLeaderWasBlocked).toBe(1);
-  expect(await db.select().from(nexaPollRuns)).toHaveLength(2);
-  stopFirst();
-  stopSecond();
 });
 
 integrationTest("upsertReceived is concurrent, idempotent, fail-closed and keeps FAILED rows", async () => {

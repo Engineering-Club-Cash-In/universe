@@ -26,7 +26,7 @@ const baseEnv = {
   NEXA_CA_CERT_PATH: "/certs/ca.crt",
 };
 
-test("qa lifecycle drains polling, application and review work, then stop prevents later cycles", async () => {
+test("qa lifecycle drains application and review work without polling, then stop prevents later cycles", async () => {
   const scheduler = controlledScheduler();
   let polls = 0;
   let applications = 0;
@@ -38,13 +38,13 @@ test("qa lifecycle drains polling, application and review work, then stop preven
   });
 
   const stop = startPaymentLifecycle(loadConfig(baseEnv), deps, { scheduler });
-  await waitFor(() => polls === 2 && applications === 3 && reviews === 2);
+  await waitFor(() => applications === 3 && reviews === 2);
   const scheduled = [...scheduler.callbacks];
   stop();
   scheduled.forEach((callback) => callback());
   await Bun.sleep(1);
 
-  expect({ polls, applications, reviews }).toEqual({ polls: 2, applications: 3, reviews: 2 });
+  expect({ polls, applications, reviews }).toEqual({ polls: 0, applications: 3, reviews: 2 });
 });
 
 test.each(["integration", "production"] as const)("%s lifecycle does not start payment loops", async (deploymentMode) => {
@@ -60,6 +60,7 @@ test.each(["integration", "production"] as const)("%s lifecycle does not start p
   expect(calls).toBe(0);
 });
 
+
 test("a failed cycle is logged without its error detail and the next cycle runs", async () => {
   const scheduler = controlledScheduler();
   const logs: string[] = [];
@@ -71,7 +72,7 @@ test("a failed cycle is logged without its error detail and the next cycle runs"
       return false;
     },
   }), { scheduler, logError: (message) => logs.push(message) });
-  await waitFor(() => logs.length === 1 && scheduler.callbacks.length === 4);
+  await waitFor(() => logs.length === 1 && scheduler.callbacks.length === 3);
 
   scheduler.callbacks.forEach((callback) => callback());
   await waitFor(() => applications === 2);
@@ -153,7 +154,6 @@ function lifecycleDependencies(options: {
     },
     tokenUsers: {},
     pollRuns: {
-      runAsLeader: async (callback: () => Promise<unknown>) => callback(),
       run: async (_date: string, callback: () => Promise<unknown>) => callback(),
     },
   } as unknown as AppDependencies;

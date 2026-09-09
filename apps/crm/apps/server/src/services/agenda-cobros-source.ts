@@ -100,13 +100,15 @@ export function buscarAsesorCarteraPorEmail(
 // recibiendo snapshot diario ni contar en el ranking de supervisor.
 const ROLES_AGENDA_COBROS = new Set(["cobros", "cobros_supervisor", "admin"]);
 
+type UsuarioAgenda = {
+	id: string;
+	email: string;
+	role: string;
+	banned: boolean | null;
+};
+
 export function resolverAsesoresAgenda(
-	usuarios: readonly {
-		id: string;
-		email: string;
-		role: string;
-		banned: boolean | null;
-	}[],
+	usuarios: readonly UsuarioAgenda[],
 	pool: readonly PoolPorAsesorRow[],
 ): AsesorAgenda[] {
 	const usuarioPorEmail = new Map(
@@ -122,6 +124,17 @@ export function resolverAsesoresAgenda(
 			? [{ userId, asesorCarteraId: asesor.asesor_id, nombre: asesor.nombre }]
 			: [];
 	});
+}
+
+/** Asesor CRM seleccionado por supervisor, resuelto por id de cartera. */
+export function buscarAsesorAgendaPorCarteraId(
+	asesorCarteraId: number,
+	usuarios: readonly UsuarioAgenda[],
+	pool: readonly PoolPorAsesorRow[],
+): AsesorAgenda | undefined {
+	return resolverAsesoresAgenda(usuarios, pool).find(
+		(asesor) => asesor.asesorCarteraId === asesorCarteraId,
+	);
 }
 
 export function filtrarAsesoresAgenda(
@@ -144,6 +157,29 @@ export interface AsesorEfectivo {
 export interface CoberturaVigente {
 	titularId: string;
 	suplenteId: string;
+}
+
+/**
+ * Para supervisión global: asocia cada titular ausente con el suplente que
+ * atiende su agenda. La cartera conserva titular; el mapa solo informa quién
+ * trabaja la tarea durante la cobertura.
+ */
+export function resolverCoberturasPorTitular(
+	coberturas: readonly CoberturaVigente[],
+	asesorPorUserId: ReadonlyMap<string, { asesorId: number; nombre: string }>,
+): Map<number, { asesorId: number; nombre: string }> {
+	const suplentePorTitularId = new Map<
+		number,
+		{ asesorId: number; nombre: string }
+	>();
+	for (const cobertura of coberturas) {
+		const titular = asesorPorUserId.get(cobertura.titularId);
+		const suplente = asesorPorUserId.get(cobertura.suplenteId);
+		if (!titular || !suplente || titular.asesorId === suplente.asesorId)
+			continue;
+		suplentePorTitularId.set(titular.asesorId, suplente);
+	}
+	return suplentePorTitularId;
 }
 
 /**
@@ -210,6 +246,43 @@ export async function obtenerCoberturasVigentes(
 		);
 }
 
+/** Coberturas vigentes de todo el equipo, usadas por la vista de supervisor. */
+export async function resolverCoberturasParaVistaGlobal(
+	pool: readonly PoolPorAsesorRow[],
+	fechaGT: string,
+): Promise<Map<number, { asesorId: number; nombre: string }>> {
+	const [coberturas, usuarios] = await Promise.all([
+		db
+			.select({
+				titularId: coberturasAgendaCobros.titularId,
+				suplenteId: coberturasAgendaCobros.suplenteId,
+			})
+			.from(coberturasAgendaCobros)
+			.where(
+				and(
+					isNull(coberturasAgendaCobros.canceladaEn),
+					lte(coberturasAgendaCobros.desde, fechaGT),
+					gte(coberturasAgendaCobros.hasta, fechaGT),
+				),
+			),
+		db
+			.select({
+				id: user.id,
+				email: user.email,
+				role: user.role,
+				banned: user.banned,
+			})
+			.from(user),
+	]);
+	const asesorPorUserId = new Map(
+		resolverAsesoresAgenda(usuarios, pool).map((asesor) => [
+			asesor.userId,
+			{ asesorId: asesor.asesorCarteraId, nombre: asesor.nombre },
+		]),
+	);
+	return resolverCoberturasPorTitular(coberturas, asesorPorUserId);
+}
+
 /**
  * Resuelve, para el usuario de la sesión, todas las carteras cuya agenda del
  * día le toca trabajar: la propia (salvo que esté ausente) más las que cubre.
@@ -222,17 +295,20 @@ export async function resolverAgendaEfectivaDelUsuario(
 	sesionUserId: string,
 	pool: readonly PoolPorAsesorRow[],
 	fechaGT: string,
+	usuariosAgenda?: readonly UsuarioAgenda[],
 ): Promise<AsesorEfectivo[]> {
 	const coberturas = await obtenerCoberturasVigentes(sesionUserId, fechaGT);
 	if (coberturas.length === 0) return [{ ...propio, cubierto: false }];
-	const usuarios = await db
-		.select({
-			id: user.id,
-			email: user.email,
-			role: user.role,
-			banned: user.banned,
-		})
-		.from(user);
+	const usuarios =
+		usuariosAgenda ??
+		(await db
+			.select({
+				id: user.id,
+				email: user.email,
+				role: user.role,
+				banned: user.banned,
+			})
+			.from(user));
 	const asesorPorUserId = new Map(
 		resolverAsesoresAgenda(usuarios, pool).map((asesor) => [
 			asesor.userId,
@@ -245,6 +321,46 @@ export async function resolverAgendaEfectivaDelUsuario(
 		coberturas,
 		asesorPorUserId,
 	);
+}
+
+/**
+ * Mismo cálculo de cobertura para un asesor elegido por supervisor. La sesión
+ * sigue autorizando acceso; este helper solo identifica al usuario del asesor
+ * seleccionado para aplicar sus ausencias y suplencias.
+ */
+export async function resolverAgendaEfectivaDelAsesorSeleccionado(
+	asesorCarteraId: number,
+	pool: readonly PoolPorAsesorRow[],
+	fechaGT: string,
+): Promise<{
+	propio: { asesorId: number; nombre: string };
+	efectivos: AsesorEfectivo[];
+} | null> {
+	const usuarios = await db
+		.select({
+			id: user.id,
+			email: user.email,
+			role: user.role,
+			banned: user.banned,
+		})
+		.from(user);
+	const asesor = buscarAsesorAgendaPorCarteraId(
+		asesorCarteraId,
+		usuarios,
+		pool,
+	);
+	if (!asesor) return null;
+	const propio = { asesorId: asesor.asesorCarteraId, nombre: asesor.nombre };
+	return {
+		propio,
+		efectivos: await resolverAgendaEfectivaDelUsuario(
+			propio,
+			asesor.userId,
+			pool,
+			fechaGT,
+			usuarios,
+		),
+	};
 }
 
 export async function obtenerPaginaAgenda(

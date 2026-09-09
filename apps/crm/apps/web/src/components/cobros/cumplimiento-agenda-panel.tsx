@@ -5,6 +5,7 @@ import {
 	CircleCheck,
 	CircleDashed,
 	Loader2,
+	UserCheck,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { GestionesDelDiaPanel } from "@/components/cobros/gestiones-del-dia-panel";
@@ -72,6 +73,8 @@ type DetalleItem = {
 	promesaCumplida: boolean;
 	promesaContactoCobroId: string | null;
 	promesaCumplidaEn: string | Date | null;
+	/** CB-114: quién gestionó, si fue un suplente y no el dueño de la agenda. */
+	cubiertoPor?: string | null;
 };
 
 type DetalleData = {
@@ -195,6 +198,17 @@ function DetalleAgenda({
 									{item.promesaCumplida && (
 										<span className="flex items-center gap-1 font-medium text-sky-600">
 											<CircleCheck className="h-4 w-4" /> Pago confirmado
+										</span>
+									)}
+									{/* CB-114: durante una cobertura el trabajo del suplente se
+									    acredita al titular, así que un asesor de vacaciones
+									    puede salir 100% atendido sin haber tocado nada. Sin
+									    esta marca el supervisor lee "cumplió" de quien no
+									    trabajó. */}
+									{item.cubiertoPor && (
+										<span className="flex items-center gap-1 text-sky-600 text-xs">
+											<UserCheck className="h-3 w-3" />
+											Cubierto por {item.cubiertoPor}
 										</span>
 									)}
 								</div>

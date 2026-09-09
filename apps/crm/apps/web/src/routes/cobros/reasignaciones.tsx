@@ -3,6 +3,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { Search, UserCog } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { CoberturasPanel } from "@/components/cobros/coberturas-panel";
 import {
 	HistorialTrasladosPanel,
 	TrasladosPanel,
@@ -732,6 +733,7 @@ function RouteComponent() {
 				<TabsList className="h-auto flex-wrap justify-start">
 					<TabsTrigger value="buckets">Buckets</TabsTrigger>
 					<TabsTrigger value="traslados">Traslado masivo</TabsTrigger>
+					<TabsTrigger value="coberturas">Coberturas</TabsTrigger>
 					<TabsTrigger value="operaciones">Operaciones</TabsTrigger>
 					<TabsTrigger value="historial">
 						Historial de reasignaciones
@@ -1049,6 +1051,9 @@ function RouteComponent() {
 				</TabsContent>
 				<TabsContent value="traslados">
 					<TrasladosPanel />
+				</TabsContent>
+				<TabsContent value="coberturas">
+					<CoberturasPanel />
 				</TabsContent>
 				<TabsContent value="operaciones">
 					<HistorialTrasladosPanel />

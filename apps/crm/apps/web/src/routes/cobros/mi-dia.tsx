@@ -12,8 +12,9 @@ import {
 	Phone,
 	PhoneOff,
 	TriangleAlert,
+	UserCheck,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PanelGestionRapida } from "@/components/cobros/panel-gestion-rapida";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -60,6 +61,8 @@ interface ColaItem {
 	cliente: string;
 	asesorId: number;
 	asesor: string;
+	/** CB-114: cuenta de un titular ausente que estoy cubriendo hoy. */
+	cubierto?: boolean;
 	bucket: number;
 	bucketPrefijo: string;
 	bucketNombre: string;
@@ -84,6 +87,8 @@ interface ColaItem {
 interface ColaResponse {
 	success: boolean;
 	sinAsesor: boolean;
+	/** CB-114: soy el titular ausente — mi cola la trabaja el suplente. */
+	ausente?: boolean;
 	asesorForzado: { asesorId: number; nombre: string } | null;
 	items: ColaItem[];
 	total: number;
@@ -100,12 +105,31 @@ interface AgendaItem {
 	cliente: string | null;
 	bucket: number | null;
 	montoCuota: string;
+	asesor?: string | null;
+	/** CB-114: cuenta de un titular ausente que estoy cubriendo hoy. */
+	cubierto?: boolean;
 }
 
 interface AgendaResponse {
 	items: AgendaItem[];
 	total: number;
 	sinAsesor: boolean;
+	/** CB-114: soy el titular ausente — mi agenda la trabaja el suplente. */
+	ausente?: boolean;
+}
+
+/**
+ * CB-114: marca una cuenta que se trabaja por cobertura temporal. La cartera
+ * NO cambió de dueño — el badge deja claro de quién es la cuenta para que el
+ * suplente no la confunda con la propia.
+ */
+function BadgeCobertura({ asesor }: { asesor?: string | null }) {
+	return (
+		<Badge variant="outline" className="shrink-0 gap-1 font-normal text-xs">
+			<UserCheck className="h-3 w-3" />
+			{asesor ? `Cubriendo a ${asesor}` : "Cobertura"}
+		</Badge>
+	);
 }
 
 /** Fila de la cartera completa (getTodosLosCreditos), NO de la cola. */
@@ -460,6 +484,8 @@ function MiDiaPage() {
 		}),
 		enabled: !!session && esVistaPersonal,
 		placeholderData: keepPreviousData,
+		// Cobertura puede crearse o cancelarse desde otra sesión.
+		refetchInterval: 60_000,
 	});
 	// Cartera COMPLETA del asesor. La cola sale del pool de buckets y excluye
 	// B0 (Cartera Sana no tiene SLA), así que un asesor con toda su cartera al
@@ -484,8 +510,63 @@ function MiDiaPage() {
 			}),
 			enabled: !!session && esVistaPersonal,
 			placeholderData: keepPreviousData,
+			// La agenda del suplente o titular puede cambiar desde Coberturas.
+			refetchInterval: 60_000,
 		})),
 	});
+	const data = colaQuery.data as ColaResponse | undefined;
+	const items = data?.items ?? [];
+	const total = data?.total ?? 0;
+	const totalPages = data?.totalPages ?? 1;
+	const sinAsesor = !!data?.sinAsesor;
+	// CB-114: hoy estoy de vacaciones/permiso y un suplente trabaja mi agenda.
+	// Listas vacías SIN aviso se leen como "no tengo nada que hacer" o como un
+	// error de carga — hay que decir por qué están vacías.
+	const ausente = !!data?.ausente;
+	const conteos = data?.conteos;
+	const proximosDias = DIAS_AGENDA.map((dia, index) => ({
+		dia,
+		data: agendaQueries[index]?.data as AgendaResponse | undefined,
+	}));
+	const resumenProximosDias = resumirVencimientosAgenda(
+		proximosDias.map(({ dia, data }) => ({ dia, total: data?.total ?? 0 })),
+	);
+	const cargandoAgenda = agendaQueries.some((query) => query.isPending);
+	// Si una query D-1..D-5 falla (no solo está pending), su `data` queda
+	// undefined y el fallback `?? 0` de arriba la convierte silenciosamente en
+	// "0 vencimientos ese día" — el resumen puede mostrar "no tenés
+	// vencimientos" aunque en realidad uno de los días nunca se pudo consultar
+	// (Codex PR #1334).
+	const errorAgenda = agendaQueries.some((query) => query.isError);
+	// getAgendaDia devuelve sinAsesor:true (con total:0) cuando el usuario
+	// cobros no tiene asesor de cartera vinculado por correo — un fallo de
+	// CONFIGURACIÓN, no de red, así que errorAgenda no lo detecta. Sin esto,
+	// "Próximos días" mostraba "no tenés vencimientos" en vez del mismo aviso
+	// que ya usa la cola principal para este caso (Codex PR #1334).
+	const sinAsesorAgenda = proximosDias.some(({ data }) => data?.sinAsesor);
+	// Mismo caso que `ausente` para la cola: sin aviso, "Próximos días" diría
+	// "no tenés vencimientos" a alguien que está de vacaciones.
+	const ausenteAgenda = proximosDias.some(({ data }) => data?.ausente);
+
+	const cartera = carteraQuery.data as
+		| { data: CarteraItem[]; total: number; totalPages: number }
+		| undefined;
+	const carteraItems = cartera?.data ?? [];
+	const carteraTotal = cartera?.total ?? 0;
+	const carteraTotalPages = cartera?.totalPages ?? 1;
+
+	// Sin nada urgente, la pantalla cae sola a la cartera completa: esta vista
+	// vive abierta todo el día, nunca debe quedar en blanco. Una ausencia es
+	// excepción: la cola vacía tiene una explicación y debe mostrarla primero.
+	const alcance: Alcance =
+		alcanceManual ??
+		(ausente || total > 0 || filtro ? "prioritarios" : "cartera");
+	const enCartera = alcance === "cartera";
+	// La cola puede achicarse al terminar una cobertura mientras está abierta.
+	// Solo se ajusta Prioritarios: cartera completa usa paginación independiente.
+	useEffect(() => {
+		if (!enCartera && page > totalPages) setPage(totalPages);
+	}, [enCartera, page, totalPages]);
 
 	if (userRole && !PERMISSIONS.canAccessCobros(userRole)) {
 		return (
@@ -526,46 +607,6 @@ function MiDiaPage() {
 			</div>
 		);
 	}
-
-	const data = colaQuery.data as ColaResponse | undefined;
-	const items = data?.items ?? [];
-	const total = data?.total ?? 0;
-	const totalPages = data?.totalPages ?? 1;
-	const sinAsesor = !!data?.sinAsesor;
-	const conteos = data?.conteos;
-	const proximosDias = DIAS_AGENDA.map((dia, index) => ({
-		dia,
-		data: agendaQueries[index]?.data as AgendaResponse | undefined,
-	}));
-	const resumenProximosDias = resumirVencimientosAgenda(
-		proximosDias.map(({ dia, data }) => ({ dia, total: data?.total ?? 0 })),
-	);
-	const cargandoAgenda = agendaQueries.some((query) => query.isPending);
-	// Si una query D-1..D-5 falla (no solo está pending), su `data` queda
-	// undefined y el fallback `?? 0` de arriba la convierte silenciosamente en
-	// "0 vencimientos ese día" — el resumen puede mostrar "no tenés
-	// vencimientos" aunque en realidad uno de los días nunca se pudo consultar
-	// (Codex PR #1334).
-	const errorAgenda = agendaQueries.some((query) => query.isError);
-	// getAgendaDia devuelve sinAsesor:true (con total:0) cuando el usuario
-	// cobros no tiene asesor de cartera vinculado por correo — un fallo de
-	// CONFIGURACIÓN, no de red, así que errorAgenda no lo detecta. Sin esto,
-	// "Próximos días" mostraba "no tenés vencimientos" en vez del mismo aviso
-	// que ya usa la cola principal para este caso (Codex PR #1334).
-	const sinAsesorAgenda = proximosDias.some(({ data }) => data?.sinAsesor);
-
-	const cartera = carteraQuery.data as
-		| { data: CarteraItem[]; total: number; totalPages: number }
-		| undefined;
-	const carteraItems = cartera?.data ?? [];
-	const carteraTotal = cartera?.total ?? 0;
-	const carteraTotalPages = cartera?.totalPages ?? 1;
-
-	// Sin nada urgente, la pantalla cae sola a la cartera completa: esta vista
-	// vive abierta todo el día, nunca debe quedar en blanco.
-	const alcance: Alcance =
-		alcanceManual ?? (total > 0 || filtro ? "prioritarios" : "cartera");
-	const enCartera = alcance === "cartera";
 
 	const primerNombre = (session?.user?.name ?? "").trim().split(/\s+/)[0] || "";
 
@@ -721,6 +762,11 @@ function MiDiaPage() {
 									Tu usuario no está vinculado a un asesor de cartera (por
 									correo). Pedile al supervisor que revise tu correo de asesor.
 								</p>
+							) : ausenteAgenda ? (
+								<p className="text-muted-foreground text-sm">
+									Estás registrado como ausente hoy: tu agenda la está
+									trabajando tu suplente.
+								</p>
 							) : resumenProximosDias.total === 0 && !errorAgenda ? (
 								<p className="text-muted-foreground text-sm">
 									No tenés vencimientos durante próximos cinco días.
@@ -759,8 +805,13 @@ function MiDiaPage() {
 															catalogo={catalogo}
 														/>
 														<div className="min-w-0">
-															<div className="truncate font-medium text-sm">
-																{item.cliente ?? "Cliente sin nombre"}
+															<div className="flex items-center gap-2">
+																<span className="truncate font-medium text-sm">
+																	{item.cliente ?? "Cliente sin nombre"}
+																</span>
+																{item.cubierto && (
+																	<BadgeCobertura asesor={item.asesor} />
+																)}
 															</div>
 															<div className="text-muted-foreground text-xs">
 																SIFCO {item.numeroCreditoSifco} ·{" "}
@@ -852,6 +903,11 @@ function MiDiaPage() {
 						<div className="py-10 text-center text-muted-foreground text-sm">
 							Tu usuario no está vinculado a un asesor de cartera (por correo).
 							Pedile al supervisor que revise tu correo de asesor.
+						</div>
+					) : !enCartera && ausente ? (
+						<div className="py-10 text-center text-muted-foreground text-sm">
+							Estás registrado como ausente hoy: tu agenda la está trabajando tu
+							suplente. Tu cartera sigue siendo tuya.
 						</div>
 					) : enCartera ? (
 						carteraTotal === 0 ? (
@@ -977,8 +1033,13 @@ function MiDiaPage() {
 												onClick={() => setDetalle(filaDeCola(item))}
 											>
 												<TableCell className="max-w-64">
-													<div className="truncate font-medium">
-														{item.cliente}
+													<div className="flex items-center gap-2">
+														<span className="truncate font-medium">
+															{item.cliente}
+														</span>
+														{item.cubierto && (
+															<BadgeCobertura asesor={item.asesor} />
+														)}
 													</div>
 													<div className="truncate font-mono text-muted-foreground text-xs">
 														{item.numeroCreditoSifco}

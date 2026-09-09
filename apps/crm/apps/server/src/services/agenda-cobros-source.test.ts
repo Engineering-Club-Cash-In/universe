@@ -1,13 +1,40 @@
 import { describe, expect, test } from "bun:test";
 import {
+	buscarAsesorAgendaPorCarteraId,
 	buscarAsesorCarteraPorEmail,
 	filtrarAsesoresAgenda,
 	obtenerAgendaAsesor,
 	resolverAsesoresAgenda,
 	resolverAsesoresEfectivos,
+	resolverCoberturasPorTitular,
 } from "./agenda-cobros-source";
 
 describe("resolverAsesoresAgenda", () => {
+	test("resuelve usuario CRM del asesor seleccionado por supervisor", () => {
+		expect(
+			buscarAsesorAgendaPorCarteraId(
+				8,
+				[
+					{
+						id: "crm-octavio",
+						email: "octavio@ejemplo.com",
+						role: "cobros",
+						banned: false,
+					},
+				],
+				[
+					{
+						asesor_id: 8,
+						nombre: "Octavio",
+						email_cash_in: "octavio@ejemplo.com",
+						activo: true,
+						buckets: [1],
+					},
+				],
+			),
+		).toEqual({ userId: "crm-octavio", asesorCarteraId: 8, nombre: "Octavio" });
+	});
+
 	test("busca asesor por email_cash_in normalizado", () => {
 		expect(
 			buscarAsesorCarteraPorEmail(
@@ -136,6 +163,14 @@ describe("resolverAsesoresEfectivos (CB-114)", () => {
 			{ asesorId: 3, nombre: "Wilson", cubierto: false },
 			{ asesorId: 8, nombre: "Octavio", cubierto: true },
 		]);
+	});
+
+	test("mapea titular a suplente para la vista global", () => {
+		const coberturas = resolverCoberturasPorTitular(
+			[{ titularId: "u-octavio", suplenteId: "u-wilson" }],
+			asesorPorUserId,
+		);
+		expect(coberturas.get(8)).toEqual(wilson);
 	});
 
 	test("el titular ausente no ve su propia agenda", () => {

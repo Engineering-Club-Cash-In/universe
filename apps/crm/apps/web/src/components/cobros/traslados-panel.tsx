@@ -289,6 +289,7 @@ export function TrasladosPanel() {
 	const asignacionesPreview = (preview?.asignaciones ??
 		[]) as AsignacionPreview[];
 	const excluidosPreview = (preview?.excluidos ?? []) as ExcluidoPreview[];
+	const hayExcluidos = excluidosPreview.length > 0;
 	const asignacionesOperativas = asignacionesPreview.filter(
 		(asignacion) => !asignacion.estadoEspecial,
 	);
@@ -651,12 +652,14 @@ export function TrasladosPanel() {
 								</details>
 							</div>
 						)}
-						{excluidosPreview.length > 0 && (
-							<div className="rounded-md border p-4">
+						{hayExcluidos && (
+							<div
+								role="alert"
+								className="rounded-md border border-destructive p-4"
+							>
 								<p className="font-semibold">Créditos sin destino</p>
 								<p className="mb-3 text-muted-foreground text-sm">
-									No se trasladarán. Selecciona responsable de cuentas sin
-									bucket operativo.
+									No se puede confirmar hasta asignar bucket operativo a estas cuentas.
 								</p>
 								<div className="max-h-56 overflow-auto">
 									<Table>
@@ -690,9 +693,9 @@ export function TrasladosPanel() {
 													<TableCell>
 														{excluido.estado?.replaceAll("_", " ") ??
 															"Sin bucket"}
-													</TableCell>
+														</TableCell>
 													<TableCell>
-														No se trasladará; conservará responsable actual.
+														No se trasladará hasta asignar bucket operativo.
 													</TableCell>
 												</TableRow>
 											))}
@@ -825,6 +828,7 @@ export function TrasladosPanel() {
 							disabled={
 								ocupado ||
 								vencido ||
+								hayExcluidos ||
 								!!preview.bloqueos.length ||
 								!preview.asignaciones.length
 							}
@@ -858,7 +862,7 @@ export function TrasladosPanel() {
 							Volver
 						</AlertDialogCancel>
 						<AlertDialogAction
-							disabled={confirmar.isPending}
+							disabled={confirmar.isPending || vencido}
 							onClick={(e) => {
 								e.preventDefault();
 								confirmar.mutate();

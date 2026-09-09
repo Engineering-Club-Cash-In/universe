@@ -388,8 +388,9 @@ function AgendaDiaPage() {
 			{ausente && (
 				<Card>
 					<CardContent className="py-10 text-center text-muted-foreground">
-						Estás registrado como ausente hoy: tu agenda la está trabajando tu
-						suplente. Tu cartera sigue siendo tuya.
+						{asesorForzado
+							? `${asesorForzado.nombre} está registrado como ausente hoy: su agenda la está trabajando su suplente.`
+							: `Estás registrado como ausente hoy: tu agenda la está trabajando tu suplente. Tu cartera sigue siendo tuya.`}
 					</CardContent>
 				</Card>
 			)}

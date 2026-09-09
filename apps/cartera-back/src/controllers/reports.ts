@@ -304,6 +304,24 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
   // Si la evidencia no respalda a ninguno —los créditos donde los abonos
   // registrados no explican la caída del saldo— manda el snapshot guardado, que
   // es lo que encierra el descuadre en su cuota en vez de arrastrarlo.
+  // Apertura implícita de una cuota: su cierre más sus abonos. El cierre parte
+  // del snapshot menos lo abonado DESPUÉS de él, porque ese snapshot también
+  // puede haber quedado rezagado por sus propias filas de capital directo. Sin
+  // ese descuento la apertura sale alta por esa cola y arrastra el error a la
+  // cuota anterior, que la usa como evidencia.
+  const aperturaImplicitaDe = (key: string): Big | undefined => {
+    const abonos = abonosPorCuota.get(key) ?? new Big(0);
+    const snapshot = cierreGuardado.get(key);
+    // Sin snapshot positivo, un cero explícito significa que la cuota cerró en
+    // 0: ahí el cierre ES 0 y no hay cola que descontar. La resta solo aplica
+    // cuando el snapshot lo escribió una fila positiva y quedaron abonos
+    // detrás de ella.
+    if (snapshot === undefined) {
+      return cuotasConCeros.has(key) ? abonos : undefined;
+    }
+    return snapshot.minus(rezagoCierto.get(key) ?? new Big(0)).plus(abonos);
+  };
+
   const cierreDeCuota = (key: string, corrido: Big): Big => {
     const snapshot = cierreGuardado.get(key);
     if (snapshot === undefined) {
@@ -312,10 +330,8 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
       // es, por definición, el cierre de esta. Sin eso la apertura se
       // reconstruía desde el propio abono y la cuota terminaba en Q0.00.
       const sig = siguienteCuota.get(key);
-      const snapshotSig = sig === undefined ? undefined : cierreGuardado.get(sig);
-      if (snapshotSig !== undefined) {
-        return snapshotSig.plus(abonosPorCuota.get(sig!) ?? new Big(0));
-      }
+      const apertura = sig === undefined ? undefined : aperturaImplicitaDe(sig);
+      if (apertura !== undefined) return apertura;
       return corrido;
     }
 
@@ -346,16 +362,9 @@ export function applyEstadoCuentaRunningCapital<T extends EstadoCuentaPagoRow>(p
     // cancelación: su cierre real es 0. Ese cero vale como EVIDENCIA para
     // confirmar el cierre de esta cuota, pero no se guarda como snapshot para
     // que un cero de una fila de capital directo no termine anclando a nadie.
-    const snapshotSiguiente =
-      siguiente === undefined
-        ? undefined
-        : (cierreGuardado.get(siguiente) ??
-           (cuotasConCeros.has(siguiente) ? new Big(0) : undefined));
+    const aperturaImplicita = siguiente === undefined ? undefined : aperturaImplicitaDe(siguiente);
 
-    if (snapshotSiguiente !== undefined) {
-      const aperturaImplicita = snapshotSiguiente.plus(
-        abonosPorCuota.get(siguiente!) ?? new Big(0),
-      );
+    if (aperturaImplicita !== undefined) {
       if (aperturaImplicita.minus(snapshot).abs().lte(0.02)) return snapshot;
 
       for (const rezago of rezagosPosibles(key)) {

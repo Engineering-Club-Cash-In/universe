@@ -385,6 +385,19 @@ describe("estado de cuenta PDF", () => {
     expect(rows.map((p) => p.total_restante)).toEqual(["50000.00", "49400.00", "49000.00"]);
   });
 
+  it("la apertura implicita descuenta la cola de la propia cuota siguiente", () => {
+    // La cuota 6 trae su fila regular (snapshot 48,500) y detrás un capital
+    // directo de 400, así que su snapshot también está rezagado. Usarlo sin
+    // descontar esa cola inflaba en Q400 la apertura implícita y, con ella, el
+    // cierre de la cuota 5 que se apoya en esa evidencia.
+    const rows = applyEstadoCuentaRunningCapital([
+      { pago_id: 1, numero_cuota: 5, pagado: true, abono_capital: "1000.00", total_restante: "0" },
+      { pago_id: 2, numero_cuota: 6, pagado: true, abono_capital: "500.00", abono_interes: "300.00", total_restante: "48500.00" },
+      { pago_id: 3, numero_cuota: 6, pagado: true, abono_capital: "400.00", total_restante: "0" },
+    ]);
+    expect(rows.map((p) => p.total_restante)).toEqual(["49000.00", "48500.00", "48100.00"]);
+  });
+
   it("la primera cuota visible sin snapshot toma su cierre de la siguiente", () => {
     // La cuota 5 son puras filas de capital directo (centinela 0) y no hay
     // nada antes. Su cierre lo da la 6: apertura implícita 48,500 + 500.

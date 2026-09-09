@@ -878,9 +878,17 @@ export async function exportPagosToExcel(credito_sifco: string) {
   let totalCapital = 0;
   let totalInteres = 0;
 
+  // getAllPagosWithCreditAndInversionistas devuelve { pago, inversionistasData,
+  // pagosInversionistas } y su query no trae el capital del crédito, así que se
+  // consulta aparte. Solo se usa como apertura de último recurso cuando las
+  // filas no dan ninguna.
+  const capitalResult = await db.execute<{ capital: string | null }>(
+    sql`SELECT capital FROM cartera.creditos WHERE numero_credito_sifco = ${credito_sifco} LIMIT 1`,
+  );
+
   const pagosOrdenados = applyEstadoCuentaRunningCapital(
     sortEstadoCuentaPayments(pagosFiltrados.map(({ pago }) => pago)),
-    (pagosFiltrados[0] as any)?.creditos?.capital,
+    capitalResult.rows[0]?.capital,
   );
 
   const tableRows = pagosOrdenados.map((pago, index) => {

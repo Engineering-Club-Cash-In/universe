@@ -94,6 +94,7 @@ export function CoberturasPanel() {
 			void refrescar();
 			toast.success("Cobertura registrada");
 		},
+		onError: () => setRevision(false),
 	});
 	const cancelar = useMutation({
 		mutationFn: () => {
@@ -106,6 +107,7 @@ export function CoberturasPanel() {
 			void refrescar();
 			toast.success("Cobertura cancelada");
 		},
+		onError: () => setCancelarId(null),
 	});
 	const cambiar = () => {
 		setGuardada(null);

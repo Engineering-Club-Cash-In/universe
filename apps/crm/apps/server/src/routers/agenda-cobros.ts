@@ -202,6 +202,9 @@ export const agendaCobrosRouter = {
 			// compartido DESPUÉS de la cancelación real también calificaba —
 			// trabajo que ya no era de esta cobertura, mientras el titular
 			// también lo tiene de vuelta en la suya.
+			const idsCoberturasCanceladasHoy = coberturasCanceladasHoy.map(
+				(c) => c.id,
+			);
 			const itemsCanceladosHoyContactados = titularesCanceladosHoy.length
 				? await db
 						.selectDistinctOn([agendaCobrosSnapshotItems.numeroCreditoSifco], {
@@ -222,9 +225,15 @@ export const agendaCobrosRouter = {
 									coberturasAgendaCobros.titularId,
 									agendaCobrosSnapshots.asesorId,
 								),
-								eq(coberturasAgendaCobros.suplenteId, asesorId),
-								gte(coberturasAgendaCobros.canceladaEn, ventanaHoy.desde),
-								lt(coberturasAgendaCobros.canceladaEn, ventanaHoy.hasta),
+								// El id, no solo titular+suplente: el mismo par puede
+								// tener otra cobertura histórica (ya cancelada, con
+								// rango de fechas distinto) sin que la validación de
+								// solape la impida — esa validación solo mira
+								// coberturas ACTIVAS. Sin acotar por id, el JOIN podía
+								// enganchar esa otra fila y usar SU canceladaEn como
+								// corte, en vez del de la cobertura real de hoy ya
+								// prefiltrada arriba.
+								inArray(coberturasAgendaCobros.id, idsCoberturasCanceladasHoy),
 							),
 						)
 						.innerJoin(

@@ -256,7 +256,11 @@ export function columnaEnAgenda(
  * no la fecha del día consultado): colapsar ambos a ::date pierde el caso de
  * cancelar el MISMO día después del contacto — "cancelado el día X" y
  * "contacto del día X" son iguales en fecha aunque el contacto haya sido
- * antes. Mismo bug (y mismo fix) que en cerrarSnapshotsAgenda.
+ * antes. Mismo bug (y mismo fix) que en cerrarSnapshotsAgenda. Por la misma
+ * razón se exige `cob.created_at <= fecha_contacto`: si la cobertura se
+ * registra a mitad de día, un contacto del suplente ANTERIOR a ese registro
+ * no era trabajo de cobertura (podía ser una coincidencia de pool sin
+ * relación) y no debe etiquetarse como "En agenda de <titular>".
  */
 export function columnaEnAgendaDeTitular(
 	fecha: string | null,
@@ -274,6 +278,7 @@ export function columnaEnAgendaDeTitular(
 		 AND cob.suplente_id = ${contactosCobros.realizadoPor}
 		 AND cob.desde <= ${fecha}::date
 		 AND cob.hasta >= ${fecha}::date
+		 AND cob.created_at <= ${contactosCobros.fechaContacto}
 		 AND (cob.cancelada_en IS NULL OR cob.cancelada_en > ${contactosCobros.fechaContacto})
 		WHERE asnap.fecha_gt = ${fecha}::date
 		  AND asnap.asesor_id <> ${contactosCobros.realizadoPor}

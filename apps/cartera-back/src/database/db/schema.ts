@@ -981,6 +981,18 @@
       liquidacionIdxEspejo: index("idx_pagos_liquidacion_espejo").on(
         table.liquidacion_id
       ),
+      // draftPaymentsGuard.ts (checkCreditHasUnliquidatedDrafts /
+      // checkInvestorHasUnliquidatedDrafts) y getAllCredits (credits.ts,
+      // tiene_pagos_sin_liquidar) filtran por credito_id/inversionista_id +
+      // estado_liquidacion != 'LIQUIDADO'. Parcial: las filas LIQUIDADO
+      // crecen sin límite y nunca las consulta este patrón.
+      // Migración manual: drizzle/0035_idx_pagos_espejo_credito_no_liquidado.sql
+      creditoNoLiquidadoIdx: index("ix_pcie_credito_no_liquidado")
+        .on(table.credito_id)
+        .where(sql`${table.estado_liquidacion} <> 'LIQUIDADO'`),
+      inversionistaNoLiquidadoIdx: index("ix_pcie_inversionista_no_liquidado")
+        .on(table.inversionista_id)
+        .where(sql`${table.estado_liquidacion} <> 'LIQUIDADO'`),
     })
   );
   export const bancos = customSchema.table('bancos', {

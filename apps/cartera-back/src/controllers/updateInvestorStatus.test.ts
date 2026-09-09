@@ -17,24 +17,32 @@ let lastUpdateData: Record<string, unknown> | undefined;
 
 // tx.select().from().where() dentro de la transacción del guard sirve dos
 // queries: creditos_inversionistas_espejo (se resuelve directo, .then) y el
-// FOR NO KEY UPDATE de creditos (encadena .for(), nunca se resuelve sin él).
-// checkInvestorHasUnliquidatedDrafts está mockeado aparte (no toca este tx),
-// así que el contenido de creditosEspejoRows no cambia el resultado del
-// guard — solo hace falta que la cadena no truene.
+// FOR NO KEY UPDATE de creditos (encadena .orderBy().for(), nunca se resuelve
+// sin ellos). checkInvestorHasUnliquidatedDrafts está mockeado aparte (no
+// toca este tx), así que el contenido de creditosEspejoRows no cambia el
+// resultado del guard — solo hace falta que la cadena no truene.
 let creditosEspejoRows: { credito_id: number }[] = [];
 // Regresión: sin FOR NO KEY UPDATE acá, el guard no se serializa con
 // withPendingReturnCreditLocks (payments.ts), que toma el mismo lock de fila
 // sobre creditos antes de insertar un borrador — la carrera vuelve a abrirse.
+// ORDER BY explícito: sin él, dos transacciones con créditos superpuestos
+// pueden lockear en órdenes distintos y producir deadlock.
 let forCallsCount = 0;
 let lastForArg: unknown;
+let orderByCallsCount = 0;
 let transactionWasUsed = false;
 function makeWhereResult() {
   const promise = Promise.resolve(creditosEspejoRows);
   return Object.assign(promise, {
-    for: (strength: unknown) => {
-      forCallsCount++;
-      lastForArg = strength;
-      return Promise.resolve([]);
+    orderBy: () => {
+      orderByCallsCount++;
+      return {
+        for: (strength: unknown) => {
+          forCallsCount++;
+          lastForArg = strength;
+          return Promise.resolve([]);
+        },
+      };
     },
   });
 }
@@ -137,6 +145,7 @@ beforeEach(() => {
   creditosEspejoRows = [];
   forCallsCount = 0;
   lastForArg = undefined;
+  orderByCallsCount = 0;
   transactionWasUsed = false;
 });
 
@@ -178,8 +187,11 @@ describe("updateInvestorStatus — guard de borradores sin liquidar", () => {
     });
     // Regresión: guard + update corren dentro de la MISMA transacción,
     // tomando FOR NO KEY UPDATE sobre los créditos del inversionista antes
-    // de consultar el guard.
+    // de consultar el guard. ORDER BY explícito antes del FOR: sin él, dos
+    // transacciones con créditos superpuestos pueden lockear en órdenes
+    // distintos y producir deadlock.
     expect(transactionWasUsed).toBe(true);
+    expect(orderByCallsCount).toBe(1);
     expect(forCallsCount).toBe(1);
     expect(lastForArg).toBe("no key update");
   });

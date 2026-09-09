@@ -6615,10 +6615,16 @@ export const updateInvestorStatus = async ({ body, set, request }: any) => {
         ].sort((a, b) => a - b);
 
         if (creditoIds.length > 0) {
+          // ORDER BY explícito: un IN no preserva el orden de entrada, así
+          // que sin esto dos transacciones con créditos superpuestos pueden
+          // lockear en órdenes distintos y producir deadlock (40P01 -> 500
+          // en el catch general). Mismo criterio que withPendingReturnCreditLocks
+          // (payments.ts), que ya ordena por credito_id antes de lockear.
           await tx
             .select({ credito_id: creditos.credito_id })
             .from(creditos)
             .where(inArray(creditos.credito_id, creditoIds))
+            .orderBy(asc(creditos.credito_id))
             .for("no key update");
         }
 

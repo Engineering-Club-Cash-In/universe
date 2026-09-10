@@ -12,8 +12,17 @@ import { readFileSync } from "node:fs";
 //     `/moras/condonar-masivo` opera sobre TODOS los que califican, o sea "20
 //     créditos" en pantalla justo antes de condonar cientos.
 //
-// Estas pruebas son de contrato sobre el código (no hay DOM en la suite): fijan
-// el cableado que hace que la pantalla no se quede atrás del backend.
+// Estas pruebas son de contrato SOBRE EL FUENTE: leen los .tsx como texto en vez
+// de montar la pantalla, porque `carteraFront` no tiene con qué renderizar en la
+// suite — no hay `@testing-library/react` ni un DOM (`happy-dom` / `jsdom`), y
+// `bun test` corre sin `--dom`. Para probar conducta de verdad (hacer click en
+// "Continuar" y observar que el botón nace deshabilitado, que el total que se
+// pinta es el del servidor, que "siguiente" pide la página 2) habría que instalar
+// `@testing-library/react`, `@testing-library/user-event`, `@testing-library/jest-dom`
+// y `happy-dom`, con un preload que registre el DOM global. Mientras tanto, la
+// regla acá es afirmar EN POSITIVO y sobre una REGIÓN ACOTADA del fuente (el
+// diálogo, el handler, el componente), no enumerar formas prohibidas de escribir
+// el bug: una lista de `not.toContain` se burla renombrando una variable.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const latefee = readFileSync(new URL("./Latefee.tsx", import.meta.url), "utf8");
@@ -24,6 +33,31 @@ const hook = readFileSync(
 const services = readFileSync(
   new URL("../services/services.ts", import.meta.url),
   "utf8"
+);
+
+/** Recorta el fuente entre dos anclas; explota si el ancla ya no existe. */
+function region(src: string, desde: string, hasta: string | null, que: string) {
+  const i = src.indexOf(desde);
+  if (i < 0) throw new Error(`Ancla inicial de "${que}" no encontrada: ${desde}`);
+  const j = hasta ? src.indexOf(hasta, i + desde.length) : src.length;
+  if (j < 0) throw new Error(`Ancla final de "${que}" no encontrada: ${hasta}`);
+  return src.slice(i, j);
+}
+
+/** El diálogo de condonación MASIVA entero (paso 1, paso 2 y su footer). */
+const dialogoMasiva = region(
+  latefee,
+  "{/* ---------- Dialog: Condonación Masiva ---------- */}",
+  "{/* ---------- Dialog: Condonación Individual ---------- */}",
+  "diálogo de condonación masiva"
+);
+
+/** El componente de paginación, donde se calcula la página siguiente. */
+const componentePaginacion = region(
+  latefee,
+  "function Paginacion({",
+  "function AvisoDesactualizado(",
+  "componente Paginacion"
 );
 
 describe("servicios de moras: paginación en el contrato", () => {
@@ -57,9 +91,34 @@ describe("useMoras: los parámetros de página viajan al servidor", () => {
   test("la paginación entra en la queryKey (si no, cambiar de página no refresca)", () => {
     expect(hook).toContain('queryKey: ["creditosMora", creditosParams]');
     expect(hook).toContain('queryKey: ["condonacionesMora", condonacionesParams]');
-    // La llamada sin argumentos era la que dejaba al servidor aplicar su
-    // pageSize por defecto sin que el front se enterara.
-    expect(hook).not.toContain("getCondonacionesMoraService()");
+  });
+
+  // El bug era pedir el listado SIN argumentos: el servidor aplicaba su pageSize
+  // por defecto y el front no se enteraba. Prohibir el literal
+  // `getCondonacionesMoraService()` sólo prohíbe esa grafía; lo que hay que fijar
+  // es que TODA invocación lleve params. Se afirma sobre las llamadas reales.
+  test("ninguna invocación de los listados va sin params", () => {
+    const invocaciones = (fn: string) =>
+      [...hook.matchAll(new RegExp(`\\b${fn}\\(([^)]*)\\)`, "g"))].map((m) =>
+        m[1].trim()
+      );
+
+    // Se comparan objetos completos para que el mensaje de fallo diga QUÉ
+    // llamada quedó sin params, no sólo "false !== true".
+    const sinParams = [
+      "getCreditosWithMorasService",
+      "getCondonacionesMoraService",
+    ].flatMap((fn) => {
+      const args = invocaciones(fn);
+      // Si el hook deja de llamar al servicio, eso también es un fallo.
+      if (args.length === 0) return [{ fn, arg: "<sin invocaciones>" }];
+      // Ni vacío ni un objeto literal vacío: tiene que viajar algo.
+      return args
+        .filter((arg) => arg === "" || arg.replace(/\s/g, "") === "{}")
+        .map((arg) => ({ fn, arg }));
+    });
+
+    expect(sinParams).toEqual([]);
   });
 });
 
@@ -82,10 +141,21 @@ describe("pantalla de Moras: controles de paginación", () => {
     expect(latefee).toMatch(
       /condonaciones:\s*\{[\s\S]*?page:\s*cPage,[\s\S]*?pageSize:\s*cPageSize/
     );
-    // `pagination.page` es la respuesta que YA llegó: calcular la siguiente
-    // desde ahí hace que dos clics seguidos apunten a la misma página.
-    expect(latefee).not.toContain("pagination.page + 1");
-    expect(latefee).not.toContain("pagination?.page + 1");
+  });
+
+  // El bug era calcular la página siguiente desde el eco del servidor
+  // (`pagination.page + 1`): esa es la respuesta que YA llegó, así que dos clics
+  // seguidos apuntan a la misma página. Prohibir el literal no sirve —cualquier
+  // alias del eco lo esquiva—, así que se afirma en positivo DENTRO del
+  // componente: navegar es mover el `page` que el propio componente recibe.
+  test("navegar mueve el page que entra por props, no el eco del servidor", () => {
+    // Los dos botones calculan desde el prop `page`.
+    expect(componentePaginacion).toMatch(/onClick=\{\(\) => setPage\(page \+ 1\)\}/);
+    expect(componentePaginacion).toMatch(/onClick=\{\(\) => setPage\(page - 1\)\}/);
+    // Y ese prop es el estado local de cada pestaña, no algo leído de la
+    // respuesta: el componente sólo conoce lo que le pasan.
+    expect(latefee).toMatch(/<Paginacion\s+page=\{page\}\s+setPage=\{setPage\}/);
+    expect(latefee).toMatch(/<Paginacion\s+page=\{cPage\}\s+setPage=\{setCPage\}/);
   });
 
   test("no se puede quedar varado en una página que ya no existe", () => {
@@ -95,14 +165,34 @@ describe("pantalla de Moras: controles de paginación", () => {
 });
 
 describe("condonación masiva: el alcance es el total global, no el de la página", () => {
-  test("el diálogo nunca cuenta filas de la página", () => {
-    // Este era el número engañoso: `data.length` es como mucho el `pageSize`,
-    // así que decía "20 créditos" antes de condonar cientos.
-    expect(latefee).not.toContain("creditosMora?.data?.length");
+  // El número engañoso era el largo de la página (`data.length`, a lo sumo
+  // `pageSize`): decía "20 créditos" antes de condonar cientos. Prohibir la
+  // grafía `creditosMora?.data?.length` no alcanza —hoy existe
+  // `const creditosRows = creditosMora?.data ?? []`, así que `creditosRows.length`
+  // reintroduce el mismo bug—, así que se afirma sobre la expresión que de hecho
+  // se pinta, acotada al diálogo.
+
+  test("la cifra que se pinta sale de un total, no del largo de una lista", () => {
+    // El texto es `{<expresión>} créditos`. Se captura la expresión misma.
+    const cifra = dialogoMasiva.match(/\{([^{}]+)\}\s*créditos/)?.[1];
+    expect(cifra).toBeDefined();
+    // Tiene que derivar de un `total` del servidor...
+    expect(cifra).toMatch(/\btotal\b/);
+    // ...y no del largo de ninguna colección, se llame como se llame la variable.
+    expect(cifra).not.toMatch(/\.length\b/);
   });
 
-  test("el número que se muestra sale de un total del servidor", () => {
-    expect(latefee).toMatch(/pagination\??\.total|creditosPag\?\.total/);
+  test("el diálogo entero no cuenta filas de ninguna lista", () => {
+    // Ni en la cifra ni en el resto del diálogo (leyendas, avisos): cualquier
+    // forma de expresar "el largo de la página" pasa por `.length`.
+    expect(dialogoMasiva).not.toMatch(/\.length\b/);
+  });
+
+  test("ese total es el de la consulta global, no el del listado filtrado", () => {
+    // El listado de pantalla está filtrado; su `pagination.total` NO es el
+    // universo sobre el que opera `/moras/condonar-masivo`.
+    expect(dialogoMasiva).toContain("globalMorosos.data?.pagination?.total");
+    expect(dialogoMasiva).not.toMatch(/\bcreditosPag\b/);
   });
 
   test("no se puede confirmar sin conocer el alcance", () => {
@@ -185,12 +275,16 @@ describe("condonación masiva: entrar a confirmar refresca el alcance", () => {
     expect(definicion).toMatch(/!\s*globalMorosos\.isFetching\b/);
     expect(definicion).toMatch(/!\s*globalMorosos\.isError\b/);
     expect(definicion).toMatch(/globalMorosos\.data != null/);
+    // Y el botón de confirmar del diálogo la exige.
+    expect(dialogoMasiva).toMatch(
+      /onClick=\{confirmCondonacionMasiva\}[\s\S]{0,300}?disabled=\{[^}]*!alcanceMasivoListo/
+    );
   });
 
   test("mientras el alcance está en vuelo se tapa el número, no se muestra el viejo", () => {
     // El cartel de "Calculando alcance..." se gatea con la MISMA señal de vuelo
     // que bloquea el botón, así que no hay render con el total viejo a la vista.
-    expect(latefee).toMatch(
+    expect(dialogoMasiva).toMatch(
       /\{globalMorosos\.isFetching \? \([\s\S]{0,600}?Calculando\s*\n?\s*alcance/
     );
   });

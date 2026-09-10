@@ -182,7 +182,11 @@ export function PagaloLinkDialog({
 		}) => (client as any).crearLinksPagalo(input),
 		onSuccess: (result: any) => {
 			invalidarDatosPagalo();
-			if (result.status === "REVIEW_REQUIRED")
+			if (result.gestionRecuperada)
+				toast.success(
+					"Se recuperó el registro de la gestión Págalo en el historial del caso.",
+				);
+			else if (result.status === "REVIEW_REQUIRED")
 				toast.error("Grupo Págalo existente requiere revisión.");
 			else if (result.origen === "BOT")
 				toast.info(

@@ -1,5 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, inArray, ne, notInArray, sql } from "drizzle-orm";
+import {
+	and,
+	desc,
+	eq,
+	gte,
+	inArray,
+	isNull,
+	ne,
+	notInArray,
+	sql,
+} from "drizzle-orm";
 import { db } from "../db";
 import { casosCobros, contactosCobros } from "../db/schema/cobros";
 import { leads, opportunities } from "../db/schema/crm";
@@ -13,6 +23,7 @@ import { registrarAuditContacto } from "../lib/audit-contactos";
 import { isTestModeEnabled } from "../lib/messaging-test-mode";
 import {
 	buildPagaloAllocations,
+	coincideSeleccionCuotasPagalo,
 	type PagaloInstallment,
 } from "../lib/pagalo-allocations";
 import {
@@ -66,6 +77,10 @@ type CreatePagaloLinksInput = {
 const PAGALO_TEST_EMAIL = "j.alvarez@clubcashin.com";
 const PAGALO_TEST_PHONE = "35219722";
 const TIMEOUT_BUCKET_GESTION_MS = 3000;
+// Recuperación de una auditoría que falló justo antes de que el dispatcher
+// completara el pago. La ventana evita que crear un cobro nuevo reutilice un
+// pago histórico del mismo caso.
+const VENTANA_RECUPERACION_GESTION_PAGALO_MS = 24 * 60 * 60 * 1000;
 
 async function capturarBucketGestionPagalo(
 	numeroSifco: string,
@@ -391,6 +406,101 @@ async function resolverContactoPagalo(
 }
 
 export async function createPagaloLinks(input: CreatePagaloLinksInput) {
+	// Si el pago se completó después de que falló la auditoría, las cuotas ya
+	// no son seleccionables en cartera. Esta recuperación debe ocurrir ANTES
+	// de validar la selección para que el reintento que indica la UI funcione.
+	// Está acotada al mismo asesor, caso, crédito y SIFCO, dentro de 24 horas.
+	const [grupoCompletadoSinGestion] = await db
+		.select({
+			groupId: pagaloPaymentGroups.id,
+			createdBy: pagaloPaymentGroups.createdBy,
+			createdAt: pagaloPaymentGroups.createdAt,
+			capitalTotal: pagaloPaymentGroups.capitalTotal,
+			facturableTotal: pagaloPaymentGroups.facturableTotal,
+			totalAmount: pagaloPaymentGroups.totalAmount,
+			allocationsSnapshot: pagaloPaymentGroups.allocationsSnapshot,
+		})
+		.from(pagaloPaymentGroups)
+		.where(
+			and(
+				eq(pagaloPaymentGroups.carteraCreditoId, input.creditoId),
+				eq(pagaloPaymentGroups.casoCobroId, input.casoCobroId),
+				eq(pagaloPaymentGroups.numeroCreditoSifco, input.numeroSifco),
+				eq(pagaloPaymentGroups.origen, "ASESOR"),
+				eq(pagaloPaymentGroups.createdBy, input.requestedBy),
+				eq(pagaloPaymentGroups.status, "COMPLETED"),
+				isNull(pagaloPaymentGroups.contactoCobroId),
+				gte(
+					pagaloPaymentGroups.createdAt,
+					new Date(Date.now() - VENTANA_RECUPERACION_GESTION_PAGALO_MS),
+				),
+			),
+		)
+		.orderBy(desc(pagaloPaymentGroups.createdAt))
+		.limit(1);
+
+	if (
+		grupoCompletadoSinGestion &&
+		coincideSeleccionCuotasPagalo(
+			grupoCompletadoSinGestion.allocationsSnapshot,
+			input.cuotaIds,
+		)
+	) {
+		const linksCompletados = await db
+			.select({
+				linkType: pagaloPaymentLinks.linkType,
+				linkStatus: pagaloPaymentLinks.status,
+				isApplicationSource: pagaloPaymentLinks.isApplicationSource,
+				paymentUrl: pagaloPaymentLinks.paymentUrl,
+			})
+			.from(pagaloPaymentLinks)
+			.where(eq(pagaloPaymentLinks.groupId, grupoCompletadoSinGestion.groupId));
+		const linksParaGestion = linksCompletados.flatMap((link) =>
+			link.linkType &&
+			link.paymentUrl &&
+			esLinkPagaloContabilizableEnGestion(
+				link.linkStatus,
+				link.isApplicationSource,
+			)
+				? [
+						{
+							amount:
+								link.linkType === "CAPITAL"
+									? grupoCompletadoSinGestion.capitalTotal
+									: grupoCompletadoSinGestion.facturableTotal,
+						},
+					]
+				: [],
+		);
+		if (linksParaGestion.length > 0) {
+			const gestionRegistrada = await registrarGestionLinkPagalo({
+				groupId: grupoCompletadoSinGestion.groupId,
+				casoCobroId: input.casoCobroId,
+				numeroSifco: input.numeroSifco,
+				requestedBy: grupoCompletadoSinGestion.createdBy,
+				totalAmount: totalDeLinksPagalo(linksParaGestion),
+				cantidadLinks: linksParaGestion.length,
+				whatsappEnviado: null,
+				fechaContacto: grupoCompletadoSinGestion.createdAt,
+				bucketSnapshot: null,
+				finalizar: true,
+				repararPreliminar: true,
+			});
+			return {
+				groupId: grupoCompletadoSinGestion.groupId,
+				status: "COMPLETED" as const,
+				origen: "ASESOR" as const,
+				capitalTotal: grupoCompletadoSinGestion.capitalTotal,
+				facturableTotal: grupoCompletadoSinGestion.facturableTotal,
+				totalAmount: grupoCompletadoSinGestion.totalAmount,
+				links: [] as LinkPagaloEmitido[],
+				gestionRegistrada,
+				gestionRecuperada: gestionRegistrada,
+				whatsappEnviado: null as boolean | null,
+			};
+		}
+	}
+
 	const credit = await carteraBackClient.getCredito(input.numeroSifco, false);
 	if (credit.credito.credito_id !== input.creditoId) {
 		throw new Error("Crédito Págalo no coincide con SIFCO.");

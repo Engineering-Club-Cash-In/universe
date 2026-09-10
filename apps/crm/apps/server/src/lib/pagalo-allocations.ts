@@ -27,6 +27,28 @@ export type PagaloAllocation = {
 	facturable: boolean;
 };
 
+/** Distingue reintento de gestión de un cobro nuevo del mismo crédito. */
+export function coincideSeleccionCuotasPagalo(
+	allocationsSnapshot: unknown,
+	cuotaIds: number[],
+): boolean {
+	if (!Array.isArray(allocationsSnapshot)) return false;
+	const cuotasEnSnapshot = new Set<number>();
+	for (const allocation of allocationsSnapshot) {
+		if (!allocation || typeof allocation !== "object") return false;
+		const cuotaId = (allocation as { cartera_cuota_id?: unknown })
+			.cartera_cuota_id;
+		if (!Number.isInteger(cuotaId) || (cuotaId as number) <= 0) return false;
+		cuotasEnSnapshot.add(cuotaId as number);
+	}
+	if (cuotasEnSnapshot.size === 0) return false;
+	const cuotasSolicitadas = new Set(cuotaIds);
+	return (
+		cuotasEnSnapshot.size === cuotasSolicitadas.size &&
+		[...cuotasEnSnapshot].every((cuotaId) => cuotasSolicitadas.has(cuotaId))
+	);
+}
+
 const cents = (value: string | null | undefined) => {
 	const match = String(value ?? "0")
 		.trim()

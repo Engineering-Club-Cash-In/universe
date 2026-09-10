@@ -13,6 +13,7 @@ import {
   getAsesoresPorBucket,
   reasignarAsesorManual,
 } from "../controllers/buckets/reasignarAsesor";
+import { enviarARecuperacionVehiculo } from "../controllers/buckets/recuperacionVehiculo";
 import { getPoolPorAsesor } from "../controllers/buckets/poolPorAsesor";
 import { getSifcosPoolAutoritativos } from "../controllers/buckets/sifcosPoolAutoritativos";
 import { getAsignacionesPoolPorSifco } from "../controllers/buckets/asignacionesPoolPorSifco";
@@ -792,6 +793,47 @@ export const bucketsRouter = new Elysia()
     {
       body: t.Object({
         asesor_nuevo_id: t.Union([t.Number(), t.String()]),
+        motivo: t.String(),
+        usuario_email: t.Optional(t.String()),
+      }),
+    },
+  )
+
+  // Traslado MANUAL a B4 por RECUPERACIÓN DE VEHÍCULO. Único escritor manual de
+  // buckets_historial: la decisión no sale de la mora sino de una persona.
+  // Motivo obligatorio; bitácora API_MANUAL en buckets_historial y —cuando el
+  // dueño cambia— también en credito_asesor_historial.
+  .post(
+    "/buckets/creditos/:credito_id/recuperacion-vehiculo",
+    async ({ params, body, set, user }: any) => {
+      if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+      try {
+        const creditoId = Number(params.credito_id);
+        if (!Number.isInteger(creditoId) || creditoId <= 0) {
+          set.status = 400;
+          return { success: false, message: "[ERROR] credito_id inválido" };
+        }
+        const result = await enviarARecuperacionVehiculo({
+          credito_id: creditoId,
+          motivo: body?.motivo,
+          usuario_email: body?.usuario_email,
+        });
+        if (!result.success) {
+          set.status = result.status ?? 400;
+          return { success: false, message: result.message };
+        }
+        return result;
+      } catch (err) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "[ERROR] No se pudo trasladar el crédito a recuperación de vehículo",
+          error: String(err),
+        };
+      }
+    },
+    {
+      body: t.Object({
         motivo: t.String(),
         usuario_email: t.Optional(t.String()),
       }),

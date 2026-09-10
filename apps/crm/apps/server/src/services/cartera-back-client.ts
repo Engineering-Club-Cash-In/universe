@@ -2390,6 +2390,43 @@ export class CarteraBackClient {
 		return result;
 	}
 
+	// Recuperación de vehículo: traslado MANUAL del crédito a B4 (Última
+	// Instancia / Pre Jurídico). La decisión es humana, no sale de la mora, por
+	// eso el motivo es obligatorio y viaja el email del solicitante para la
+	// bitácora API_MANUAL.
+	async enviarARecuperacionVehiculo(input: {
+		credito_id: number;
+		motivo: string;
+		usuario_email?: string;
+	}): Promise<{
+		success: boolean;
+		credito_id: number;
+		bucket_anterior: number;
+		bucket_nuevo: number;
+		tipo_evento: "SUBIDA" | "BAJADA";
+		asesor_anterior: number | null;
+		asesor_nuevo: number | null;
+		asesor_sin_cambio: boolean;
+	}> {
+		// Mismas invalidaciones que reasignarAsesor (el traslado también cambia
+		// asesor_id) más las lecturas que muestran el bucket, que aquí sí cambia.
+		this.cache.invalidate("/credito?");
+		this.cache.invalidate("getAllCredits");
+		this.cache.invalidate("stats");
+		this.cache.invalidate("mora-por-etapa-asesor");
+		this.cache.invalidate("/buckets");
+		return this.request(
+			`/buckets/creditos/${input.credito_id}/recuperacion-vehiculo`,
+			{
+				method: "POST",
+				body: JSON.stringify({
+					motivo: input.motivo,
+					...(input.usuario_email && { usuario_email: input.usuario_email }),
+				}),
+			},
+		);
+	}
+
 	async previsualizarTrasladoCartera(
 		input: SolicitudTraslado & { actorEmail: string },
 	) {

@@ -1300,7 +1300,13 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
 
         // ── Si el inversionista no existía en el destino, agregarlo en
         //    ambas tablas con el mismo monto (no hay valor histórico previo). ──
-        const hoyStr = new Date().toISOString().split("T")[0];
+        // Misma regla que addInvestorToCredit: reinversion → 2025-12-01 (fija),
+        // compra_cartera → fecha de hoy. Antes se usaba hoy siempre y las
+        // reubicaciones de reinversión quedaban con la fecha del día.
+        const fechaPorDefecto =
+          tipo_operacion === "reinversion"
+            ? "2025-12-01"
+            : new Date().toISOString().split("T")[0];
         if (
           !arrayDestinoPadre.some(
             (inv) => inv.inversionista_id === inversionista_id,
@@ -1311,7 +1317,7 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
             monto_aportado: montoAsignar,
             porcentaje_cash_in: porcCashIn,
             porcentaje_inversion: porcInversion,
-            fecha_inicio_participacion: hoyStr,
+            fecha_inicio_participacion: fechaPorDefecto,
           });
         }
         if (
@@ -1324,7 +1330,7 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
             monto_aportado: montoAsignar,
             porcentaje_cash_in: porcCashIn,
             porcentaje_inversion: porcInversion,
-            fecha_inicio_participacion: hoyStr,
+            fecha_inicio_participacion: fechaPorDefecto,
           });
         }
 

@@ -961,7 +961,16 @@ export default function MorasManager() {
       toast.error("No se pudo obtener el email del usuario");
       return;
     }
+    // El alcance se calculó al ABRIR el diálogo y nada lo revalida solo
+    // (`refetchOnWindowFocus` está apagado). Entre abrir y llegar acá pueden
+    // haber corrido el cron de mora u otro ADMIN: sin este refetch el paso 2
+    // mostraba —y dejaba aprobar— un total arbitrariamente viejo mientras
+    // `/moras/condonar-masivo` opera sobre el conjunto ACTUAL.
+    // `refetch()` deja la consulta en vuelo de forma síncrona, así que
+    // `isFetching` ya es true en el render del paso 2: el botón nace bloqueado
+    // y el cartel tapa el número viejo sin necesidad de una bandera aparte.
     setConfirmandoMasiva(true);
+    globalMorosos.refetch();
   };
 
   const confirmCondonacionMasiva = () => {
@@ -1749,7 +1758,9 @@ export default function MorasManager() {
                 {globalMorosos.isFetching ? (
                   // `isFetching`, no `isLoading`: durante un refetch en segundo
                   // plano `isLoading` es false y se seguía mostrando —y podía
-                  // confirmarse contra— el número anterior.
+                  // confirmarse contra— el número anterior. Cubre también el
+                  // refetch que dispara la propia entrada a este paso, que ya
+                  // está en vuelo en este render.
                   <div className="flex items-center gap-2 text-sm text-orange-700">
                     <Loader2 className="h-4 w-4 animate-spin" /> Calculando
                     alcance...

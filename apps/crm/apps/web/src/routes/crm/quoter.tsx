@@ -70,6 +70,8 @@ import {
 	formatInsuranceProviderLabel,
 	formatQuotationClientName,
 	formatVehicleWithClient,
+	getQuotationInsuranceFieldName,
+	getQuotationInsuranceDisplay,
 } from "@/lib/quotation-display";
 import {
 	EXTRA_COST_FIELDS,
@@ -103,7 +105,7 @@ export const Route = createFileRoute("/crm/quoter")({
 });
 
 import {
-	applyMembershipAdjustment,
+	calculateQuotationInsuranceCosts,
 	getMembershipAdjustment,
 } from "@/utils/membership-adjustment";
 import {
@@ -388,7 +390,11 @@ function ExtraCostsTable({
 						className={`border-2 border-gray-400 ${isComputed ? "opacity-50" : "cursor-pointer hover:border-primary"}`}
 					/>
 				</TableCell>
-				<TableCell className="font-medium">{field.label}</TableCell>
+				<TableCell className="font-medium">
+					{field.name === "extraInsurance"
+						? formatInsuranceProviderLabel(values.insuranceProvider)
+						: field.label}
+				</TableCell>
 				<TableCell className="w-28">
 					{field.type === "percentage" && field.percentageField ? (
 						<div className="flex items-center gap-1">
@@ -875,10 +881,10 @@ function QuoterPage() {
 				vehicleType,
 			});
 
-			const baseInsuranceCost =
-				Math.round(result.baseInsuranceCost * 100) / 100;
+			const customerInsuranceCost =
+				Math.round(result.customerInsuranceCost * 100) / 100;
 			const rawMembershipCostBeforeAdjustment =
-				Math.round(result.effectiveMembershipCost * 100) / 100;
+				Math.round(result.membershipCost * 100) / 100;
 			quoterForm.setFieldValue(
 				"baseMembershipCost",
 				rawMembershipCostBeforeAdjustment,
@@ -900,10 +906,14 @@ function QuoterPage() {
 				condition,
 				origin,
 			});
-			const rawMembershipCost = applyMembershipAdjustment(
-				rawMembershipCostBeforeAdjustment,
-				membershipAdjustment,
-			);
+			const quotationInsuranceCosts = calculateQuotationInsuranceCosts({
+				baseMembershipCost: rawMembershipCostBeforeAdjustment,
+				customerInsuranceCost,
+				insuranceSavingsToMembership: result.insuranceSavingsToMembership,
+				gpsCost: GPS_COST,
+				adjustment: membershipAdjustment,
+			});
+			const rawMembershipCost = quotationInsuranceCosts.membershipCost;
 			quoterForm.setFieldValue(
 				"membershipAdjustmentCategory",
 				membershipAdjustment.category,
@@ -933,23 +943,29 @@ function QuoterPage() {
 
 			if (shouldUseInterno) {
 				// Crédito interno: solo seguro base, sin membresía ni GPS
-				quoterForm.setFieldValue("insuranceCost", baseInsuranceCost);
-				quoterForm.setFieldValue("customerInsuranceCost", baseInsuranceCost);
+				quoterForm.setFieldValue("insuranceCost", customerInsuranceCost);
+				quoterForm.setFieldValue(
+					"customerInsuranceCost",
+					customerInsuranceCost,
+				);
 				quoterForm.setFieldValue("baseMembershipCost", 0);
 				quoterForm.setFieldValue("membershipCost", 0);
-				quoterForm.setFieldValue("extraInsuranceCost", baseInsuranceCost);
+				quoterForm.setFieldValue(
+					"extraInsuranceCost",
+					customerInsuranceCost,
+				);
 				quoterForm.setFieldValue("extraMembershipCost", 0);
 			} else {
 				// El seguro total para cálculos es: base + (membresía - GPS)
-				const netMembershipCost =
-					Math.round((rawMembershipCost - GPS_COST) * 100) / 100;
-				const insuranceCost =
-					Math.round((baseInsuranceCost + netMembershipCost) * 100) / 100;
+				const { insuranceCost, netMembershipCost } = quotationInsuranceCosts;
 
 				quoterForm.setFieldValue("insuranceCost", insuranceCost);
 				quoterForm.setFieldValue("customerInsuranceCost", insuranceCost);
 				quoterForm.setFieldValue("membershipCost", netMembershipCost);
-				quoterForm.setFieldValue("extraInsuranceCost", baseInsuranceCost);
+				quoterForm.setFieldValue(
+					"extraInsuranceCost",
+					customerInsuranceCost,
+				);
 				quoterForm.setFieldValue("extraMembershipCost", rawMembershipCost);
 			}
 			quoterForm.setFieldValue("rcdpCost", result.rcdpCost);
@@ -1358,9 +1374,11 @@ function QuoterPage() {
 			values.vehicleValue > 0
 				? (values.downPayment / values.vehicleValue) * 100
 				: 0;
+		const insuranceDisplay = getQuotationInsuranceDisplay(values);
 
 		return {
 			creditType: values.creditType,
+			insuranceProvider: insuranceDisplay.insuranceProvider,
 			clientName,
 			vehicleBrand: values.vehicleBrand,
 			vehicleLine: values.vehicleLine,
@@ -1373,11 +1391,11 @@ function QuoterPage() {
 			monthlyPayment: calculatedValues.monthlyPayment,
 			termMonths: values.termMonths,
 			interestRate: values.interestRate,
-			insuranceCost: values.insuranceCost,
+			insuranceCost: insuranceDisplay.insuranceCost,
 			gpsCost: values.gpsCost,
 			transferCost: values.transferCost,
 			adminCost: values.adminCost,
-			membershipCost: values.membershipCost,
+			membershipCost: insuranceDisplay.membershipCost,
 			extraCosts: values,
 			amortizationTable: amortizationTable,
 		};
@@ -2052,11 +2070,17 @@ function QuoterPage() {
 									<CardTitle>Costos Adicionales</CardTitle>
 								</CardHeader>
 								<CardContent className="space-y-4">
-									<quoterForm.Field name="insuranceCost">
+									<quoterForm.Field
+										name={getQuotationInsuranceFieldName(
+											quoterForm.state.values.insuranceProvider,
+										)}
+									>
 										{(field) => (
 											<div>
 												<Label htmlFor={field.name} className="mb-2">
-													Seguro
+													{formatInsuranceProviderLabel(
+														quoterForm.state.values.insuranceProvider,
+													)}
 												</Label>
 												<Input
 													id={field.name}
@@ -2072,15 +2096,6 @@ function QuoterPage() {
 											</div>
 										)}
 									</quoterForm.Field>
-									{formatInsuranceProviderLabel(
-										quoterForm.state.values.insuranceProvider,
-									) ? (
-										<p className="text-muted-foreground text-xs">
-											{formatInsuranceProviderLabel(
-												quoterForm.state.values.insuranceProvider,
-											)}
-										</p>
-									) : null}
 									{quoterForm.state.values.membershipAdjustmentCategory ? (
 										<p className="text-muted-foreground text-xs">
 											Membresía: ajuste automático {""}
@@ -2487,8 +2502,10 @@ function QuotationDetailDialog({
 
 		const quotation = quotationQuery.data;
 		const clientName = formatQuotationClientName(quotation);
+		const insuranceDisplay = getQuotationInsuranceDisplay(quotation);
 		const quotationData = {
 			creditType: quotation.creditType,
+			insuranceProvider: insuranceDisplay.insuranceProvider,
 			clientName,
 			vehicleBrand: quotation.vehicleBrand,
 			vehicleLine: quotation.vehicleLine,
@@ -2501,11 +2518,11 @@ function QuotationDetailDialog({
 			monthlyPayment: Number(quotation.monthlyPayment),
 			termMonths: quotation.termMonths,
 			interestRate: Number(quotation.interestRate),
-			insuranceCost: Number(quotation.insuranceCost || 0),
+			insuranceCost: insuranceDisplay.insuranceCost,
 			gpsCost: Number(quotation.gpsCost || 0),
 			transferCost: Number(quotation.transferCost || 0),
 			adminCost: Number(quotation.adminCost || 0),
-			membershipCost: Number(quotation.membershipCost || 0),
+			membershipCost: insuranceDisplay.membershipCost,
 			extraCosts: quotation,
 			amortizationTable: quotation.amortizationTable.map((row) => ({
 				period: row.period,

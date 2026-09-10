@@ -28,38 +28,59 @@ genérico sería la puerta para romper la invariante de que el bucket lo deriva 
 Ficha 360 → Más acciones → Recuperación de vehículo (modal con motivo)
    │
    ▼
-CRM  enviarCreditoARecuperacion   (cobrosSupervisorProcedure)
+CRM  enviarCreditoARecuperacion   (cobrosProcedure + dueño en cartera)
    │
    ▼
 cartera-back  POST /buckets/creditos/:credito_id/recuperacion-vehiculo
    │
    ▼
 enviarARecuperacionVehiculo()  ← controllers/buckets/recuperacionVehiculo.ts
-   ├── INSERT buckets_historial   (SUBIDA|BAJADA, origen=API_MANUAL, motivo)
    ├── elegirAsesorParaBucket(pool B4, carga, dueño actual)
-   └── si cambia el dueño:  UPDATE creditos.asesor_id
-                          + INSERT credito_asesor_historial (API_MANUAL, usuario_id)
+   ├── si cambia el dueño:  UPDATE creditos.asesor_id   ← el UPDATE va PRIMERO
+   │                      + INSERT credito_asesor_historial (API_MANUAL, usuario_id)
+   └── INSERT buckets_historial   (SUBIDA|BAJADA, origen=API_MANUAL, motivo)
 ```
 
-Todo —**la lectura del estado incluida**— dentro de una transacción que toma tres
-advisory locks en el mismo orden que el traslado masivo, que es quien define la convención:
+Todo —**la lectura del estado incluida**— dentro de una transacción que pide tres advisory
+locks **sin esperar**, antes de leer nada:
 
 ```
-lock_timeout = 5s
-pg_advisory_xact_lock(PROCESAR_MORAS_LOCK_KEY)     ← el motor de mora
-pg_advisory_xact_lock(BUCKETS_CONVENIO_LOCK_KEY)   ← el job de convenios
-pg_advisory_xact_lock(CREDITO_ASESOR_LOCK_NAMESPACE, credito_id)
+pg_try_advisory_xact_lock(PROCESAR_MORAS_LOCK_KEY)     ← el motor de mora
+pg_try_advisory_xact_lock(BUCKETS_CONVENIO_LOCK_KEY)   ← el job de convenios
+pg_try_advisory_xact_lock(CREDITO_ASESOR_LOCK_NAMESPACE, credito_id)
 ```
 
 > ⚠️ **El lock por crédito NO alcanza, y creerlo fue un error de este documento.**
 > Ni `procesarMoras` ni el job de convenios lo toman: cada uno usa su llave global. Con
 > solo el lock por crédito, una corrida solapada leía el mismo dueño viejo y escribía
-> historia contradictoria o pisaba la reasignación (review de Codex, P1). Por eso hay que
-> tomar las llaves de los dos jobs **antes** de leer la foto del crédito.
+> historia contradictoria o pisaba la reasignación (review de Codex, P1).
 
-Si un job está corriendo, la petición espera hasta 5 segundos y después falla con un
-mensaje que dice qué esperar (23:59 moras / 00:30 convenios) — mejor eso que escribir
-sobre una foto vieja.
+### Por qué NO se espera por los locks
+
+La política de locks de la casa es **asimétrica**, y desde acá hay que respetarla desde el
+lado débil. El cron de mora pide `PROCESAR_MORAS_LOCK_KEY` con `pg_try_advisory_lock`
+(`latefee.ts`): si no la consigue, **omite la corrida completa de esa noche**, sin reintento,
+y el wrapper de `schedule.ts` la registra igual con un "✅ ejecutado correctamente". El cron
+es `'59 23 * * *'`, una vez al día.
+
+Un botón por crédito que espera 5 segundos sobre esa misma llave puede, si el clic cae en el
+minuto del cron, **costar la mora de toda la cartera de esa noche** — de forma total,
+silenciosa y sin cura hasta 24 horas después. Entre hacer esperar a una persona, que puede
+reintentar, y hacerle perder la noche a un job que no reintenta, gana el job: acá se pide sin
+esperar y se devuelve 409 en el acto (review humana de @jalvaradoatcci).
+
+> 📌 **Deuda que queda abierta, fuera del alcance de este módulo.** El traslado masivo
+> (`trasladosCartera.ts`) sí espera sobre esas mismas llaves con `lock_timeout`, y su
+> comentario asume el trade-off en voz alta. Y más de fondo: que `{skipped:true}` se
+> reporte como corrida exitosa hace que una noche perdida sea invisible. Las dos cosas
+> viven en código compartido y merecen su propio cambio, no colarse en este PR.
+
+**Y la carga del bucket solo se calcula si de verdad decide.** `getCargaDelBucket` es un
+agregado sobre toda la cartera con `bucketActualSql` en el `WHERE` (tres subconsultas
+correlacionadas por fila). Se estaba evaluando siempre por ser un argumento, incluso en el
+caso común —el dueño ya cubre el bucket y `elegirAsesorParaBucket` corta en su primera
+línea sin mirar el mapa—. Ahora se calcula solo cuando hay que repartir, lo que encoge de
+forma notoria el rato que la transacción retiene los locks.
 
 Y el orden de las escrituras importa: **el UPDATE del dueño va antes** de la fila de
 `buckets_historial`, y con compare-and-swap. Devolver un valor desde el callback de

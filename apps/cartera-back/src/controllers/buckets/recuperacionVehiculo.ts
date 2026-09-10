@@ -53,7 +53,10 @@ import { elegirAsesorParaBucket } from "../latefee";
  */
 export const BUCKET_RECUPERACION_VEHICULO = 4;
 
-/** Tope de espera por los locks de los jobs; igual que el traslado masivo. */
+/**
+ * Tope de espera para los locks de FILA (el UPDATE del crédito). Los advisory
+ * locks de abajo NO esperan: se piden con `pg_try_advisory_xact_lock`.
+ */
 const LOCK_TIMEOUT = "5s";
 
 export type RecuperacionVehiculoResultado =
@@ -215,11 +218,30 @@ export async function enviarARecuperacionVehiculo(params: {
   try {
     return await db.transaction(async (tx) => {
       await tx.execute(sql`SET LOCAL lock_timeout = ${sql.raw(`'${LOCK_TIMEOUT}'`)}`);
-      await tx.execute(sql`SELECT pg_advisory_xact_lock(${PROCESAR_MORAS_LOCK_KEY})`);
-      await tx.execute(sql`SELECT pg_advisory_xact_lock(${BUCKETS_CONVENIO_LOCK_KEY})`);
-      await tx.execute(
-        sql`SELECT pg_advisory_xact_lock(${CREDITO_ASESOR_LOCK_NAMESPACE}, ${credito_id})`,
-      );
+
+      // Los tres locks se piden SIN ESPERAR. La política de la casa es asimétrica
+      // y hay que respetarla desde el lado débil: el cron de mora pide esta misma
+      // llave con `pg_try_advisory_lock` (latefee.ts) y, si no la consigue, se
+      // OMITE LA CORRIDA COMPLETA de la noche —sin reintento, y el wrapper la
+      // registra como exitosa—. Un botón por crédito que espera 5s puede, si el
+      // clic cae en el minuto del cron, costar la mora de toda la cartera de esa
+      // noche. Entre hacer esperar a una persona que puede reintentar y hacerle
+      // perder la noche al job que no reintenta, gana el job (review humana de
+      // @jalvaradoatcci). Además evita retener una conexión del pool de trabajo
+      // durante la espera.
+      const locks = await tx.execute<{ moras: boolean; convenio: boolean; credito: boolean }>(sql`
+        SELECT
+          pg_try_advisory_xact_lock(${PROCESAR_MORAS_LOCK_KEY})   AS moras,
+          pg_try_advisory_xact_lock(${BUCKETS_CONVENIO_LOCK_KEY}) AS convenio,
+          pg_try_advisory_xact_lock(${CREDITO_ASESOR_LOCK_NAMESPACE}, ${credito_id}) AS credito
+      `);
+      const tomados = locks.rows?.[0];
+      if (!tomados?.moras || !tomados?.convenio || !tomados?.credito) {
+        throw new RecuperacionAbortada(
+          409,
+          "[ERROR] Hay un proceso de buckets trabajando sobre la cartera en este momento (moras 23:59 / convenios 00:30). Intentá de nuevo en unos minutos.",
+        );
+      }
 
       // 1. El bucket destino tiene que existir y estar activo en el catálogo. Si
       //    alguien lo desactivó, es mejor reventar que sembrar una fila que apunta
@@ -311,20 +333,35 @@ export async function enviarARecuperacionVehiculo(params: {
         );
       }
       const asesorActual = estado.asesor_id;
+      // `getCargaDelBucket` es un agregado sobre TODA la cartera con
+      // `bucketActualSql` en el WHERE (tres subconsultas correlacionadas por
+      // fila), y se estaba evaluando siempre por ser argumento — incluso en el
+      // caso común, donde `elegirAsesorParaBucket` corta en su primera línea
+      // porque el dueño ya cubre el bucket y nunca mira el mapa. Calcularla solo
+      // cuando decide encoge de forma notoria el rato que la transacción retiene
+      // los locks (review humana de @jalvaradoatcci).
+      const hayQueRepartir =
+        asesorActual === null || !pool.includes(asesorActual);
       const asesorElegido = elegirAsesorParaBucket(
         pool,
-        await getCargaDelBucket(destino, tx),
+        hayQueRepartir ? await getCargaDelBucket(destino, tx) : undefined,
         asesorActual,
       );
       const cambiaAsesor = asesorElegido !== null && asesorElegido !== asesorActual;
 
       // 4. Identidad de quien lo pidió (best-effort, mismo patrón que reasignarAsesor).
+      // Se normaliza igual que el texto del motivo: comparar el correo crudo
+      // dejaba `usuario_id` en NULL por un espacio o una mayúscula distinta,
+      // justo en la fila que existe para responder quién reasignó el crédito
+      // (review humana de @jalvaradoatcci).
       let usuarioId: number | null = null;
-      if (params.usuario_email) {
+      const correoActor = params.usuario_email?.trim().toLowerCase();
+      if (correoActor) {
         const [u] = await tx
           .select({ id: platform_users.id })
           .from(platform_users)
-          .where(eq(platform_users.email, params.usuario_email));
+          .where(sql`lower(trim(${platform_users.email})) = ${correoActor}`)
+          .limit(1);
         usuarioId = u?.id ?? null;
       }
 

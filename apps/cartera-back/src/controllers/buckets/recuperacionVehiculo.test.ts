@@ -17,6 +17,7 @@ const estado = {
   // por el texto del SQL, así que agregar o mover un lock no desalinea los tests.
   executeQueue: [] as Fila[][],
   locksTomados: [] as string[],
+  locksDisponibles: true,
   consultas: [] as string[],
   inserts: [] as { tabla: any; filas: Fila[] }[],
   updates: [] as { tabla: any; set: Fila }[],
@@ -81,7 +82,19 @@ function crearMutadores() {
 
 const fakeExecute = async (q: any) => {
   const texto = textoSql(q);
-  if (texto.includes("advisory") || texto.includes("lock_timeout")) {
+  if (texto.includes("advisory")) {
+    estado.locksTomados.push(texto.trim());
+    return {
+      rows: [
+        {
+          moras: estado.locksDisponibles,
+          convenio: estado.locksDisponibles,
+          credito: estado.locksDisponibles,
+        },
+      ],
+    };
+  }
+  if (texto.includes("lock_timeout")) {
     estado.locksTomados.push(texto.trim());
     return { rows: [] };
   }
@@ -154,6 +167,7 @@ beforeEach(() => {
   estado.selectsPorTabla.clear();
   estado.executeQueue = [];
   estado.locksTomados = [];
+  estado.locksDisponibles = true;
   estado.consultas = [];
   estado.inserts = [];
   estado.updates = [];
@@ -369,7 +383,8 @@ describe("enviarARecuperacionVehiculo — controller real con DB fakeada", () =>
   });
 
   it("la carga del bucket excluye los créditos cerrados", async () => {
-    prepararCredito({ bucket: 2, asesor_id: 3 });
+    // asesor 3 NO está en el pool → hay que repartir → sí se calcula la carga.
+    prepararCredito({ bucket: 2, asesor_id: 3, pool: [7, 9] });
     await enviarARecuperacionVehiculo({ credito_id: 9116, motivo: "válido" });
     // `bucketActualSql` prioriza la última fila de buckets_historial y NO excluye
     // estados cerrados: sin este filtro, un CANCELADO con una fila vieja de B4
@@ -379,13 +394,33 @@ describe("enviarARecuperacionVehiculo — controller real con DB fakeada", () =>
     expect(carga).toContain('"statusCredit" NOT IN');
   });
 
-  it("toma los locks de AMBOS jobs y el del crédito antes de leer", async () => {
+  it("pide los locks de AMBOS jobs y el del crédito, y SIN esperar", async () => {
     prepararCredito({ bucket: 2, asesor_id: 3 });
     await enviarARecuperacionVehiculo({ credito_id: 9116, motivo: "válido" });
+    const locks = estado.locksTomados.join(" | ");
     // El lock por crédito solo no serializa contra procesarMoras ni el job de
     // convenios: ninguno de los dos lo toma (usan sus llaves globales).
-    const locks = estado.locksTomados.join(" | ");
-    expect(locks).toContain("lock_timeout");
-    expect(estado.locksTomados.filter((l) => l.includes("advisory"))).toHaveLength(3);
+    expect(locks).toContain("pg_try_advisory_xact_lock");
+    // Esperar por la llave de moras podía costar la corrida completa de la
+    // noche: el cron la pide con try y, si no la consigue, se omite sin
+    // reintento. Nunca debe usarse la variante bloqueante acá.
+    expect(locks).not.toContain("SELECT pg_advisory_xact_lock");
+  });
+
+  it("409 sin escribir nada si un job de buckets tiene la llave", async () => {
+    prepararCredito({ bucket: 2, asesor_id: 3 });
+    estado.locksDisponibles = false;
+    const r = await enviarARecuperacionVehiculo({ credito_id: 9116, motivo: "válido" });
+    expect(r).toMatchObject({ success: false, status: 409 });
+    expect(estado.inserts).toHaveLength(0);
+    expect(estado.updates).toHaveLength(0);
+  });
+
+  it("no calcula la carga cuando el dueño ya cubre B4 (no hay nada que repartir)", async () => {
+    prepararCredito({ bucket: 3, asesor_id: 7, pool: [7, 9] });
+    await enviarARecuperacionVehiculo({ credito_id: 9116, motivo: "válido" });
+    // El agregado de carga barre toda la cartera; hacerlo dentro de los locks
+    // cuando el resultado no se usa alarga la retención sin motivo.
+    expect(estado.consultas.some((q) => q.includes("COUNT(*)"))).toBe(false);
   });
 });

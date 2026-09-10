@@ -372,3 +372,74 @@ describe("Rutas que NO se cerraron (decisión explícita del dueño del producto
     expect(res.status).toBe(403);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Un parámetro inválido en los listados responde 400 con SU mensaje, no 500.
+//
+// `getCreditosWithMoras` y `getCondonacionesMora` lanzan `ParametroInvalidoError`
+// (status 400) para `?cuotas_atrasadas=abc` o `?fecha_desde=2026-02-31`, pero el
+// catch de las rutas respondía 500 fijo y pisaba el mensaje: la validación
+// explícita nunca llegaba al cliente y un typo del usuario se veía —y se
+// alertaba— como una caída del servidor.
+//
+// Se apoya en el mismo montaje sin BD del resto del archivo, y eso es parte de
+// lo que prueban: la validación ocurre ANTES de la primera consulta, así que un
+// 400 acá significa que ni se intentó ir a la base. Los casos válidos siguen
+// cayendo en 500 porque no hay BD, que es justo el control del otro lado.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("GET /moras/creditos — parámetro inválido responde 400, no 500", () => {
+  it("cuotas_atrasadas no numérico: 400 con el mensaje del controlador", async () => {
+    const res = await get("/moras/creditos?cuotas_atrasadas=abc", "ADMIN");
+    expect(res.status).toBe(400);
+    const json: any = await res.json();
+    expect(json.success).toBe(false);
+    expect(json.message).toContain("cuotas_atrasadas inválido");
+    expect(json.parametro).toBe("cuotas_atrasadas");
+  });
+
+  it("cuotas_atrasadas fraccionario: 400", async () => {
+    const res = await get("/moras/creditos?cuotas_atrasadas=2.5", "ADMIN");
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as any).parametro).toBe("cuotas_atrasadas");
+  });
+
+  it("cuotas_atrasadas negativo: 400", async () => {
+    const res = await get("/moras/creditos?cuotas_atrasadas=-1", "ADMIN");
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as any).parametro).toBe("cuotas_atrasadas");
+  });
+
+  it("un fallo inesperado (sin BD) sigue siendo 500 con el mensaje genérico", async () => {
+    const res = await get("/moras/creditos?cuotas_atrasadas=2", "ADMIN");
+    expect(res.status).toBe(500);
+    expect(((await res.json()) as any).message).toContain(
+      "No se pudo obtener créditos con moras"
+    );
+  });
+});
+
+describe("GET /moras/condonaciones — parámetro inválido responde 400, no 500", () => {
+  it("fecha_desde inexistente: 400 con el mensaje del controlador", async () => {
+    const res = await get("/moras/condonaciones?fecha_desde=2026-02-31", "ADMIN");
+    expect(res.status).toBe(400);
+    const json: any = await res.json();
+    expect(json.success).toBe(false);
+    expect(json.message).toContain("fecha_desde inválida");
+    expect(json.parametro).toBe("fecha_desde");
+  });
+
+  it("fecha_hasta malformada: 400", async () => {
+    const res = await get("/moras/condonaciones?fecha_hasta=31/12/2026", "ADMIN");
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as any).parametro).toBe("fecha_hasta");
+  });
+
+  it("un fallo inesperado (sin BD) sigue siendo 500 con el mensaje genérico", async () => {
+    const res = await get("/moras/condonaciones?fecha_desde=2026-02-01", "ADMIN");
+    expect(res.status).toBe(500);
+    expect(((await res.json()) as any).message).toContain(
+      "No se pudo obtener condonaciones"
+    );
+  });
+});

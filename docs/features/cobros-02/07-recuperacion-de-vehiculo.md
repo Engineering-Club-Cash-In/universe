@@ -79,14 +79,13 @@ comparando contra el bucket actual, no se asume.
 
 ## Quién puede hacerlo
 
-`cobrosSupervisorProcedure` → **admin o supervisor de cobros** (`canAssignCobros`), el
-mismo techo que la reasignación manual de asesor. El ítem del menú ni siquiera se le
-pinta a un asesor.
+`cobrosProcedure` → **cualquiera del módulo de cobros** (`canAccessCobros`: asesor,
+supervisor o admin). Lo dispara el asesor que lleva la cuenta: es quien sabe que la unidad
+ya no se recupera por teléfono.
 
-> 🔸 **Supuesto, no requisito confirmado.** Se eligió ese techo porque sacar una unidad es
-> una escalación, no una gestión del día, y porque es el permiso que ya gobierna la otra
-> escritura manual de este módulo. Si la operación quiere que el asesor lo dispare (o que
-> lo *solicite* y el supervisor lo apruebe), es cambiar el `procedure` y el flag del menú.
+La trazabilidad no la da el permiso sino el **motivo obligatorio** y la bitácora
+`API_MANUAL`, que guarda quién lo pidió. En el menú el ítem va separado y en rojo para que
+no se apriete de pasada.
 
 ---
 

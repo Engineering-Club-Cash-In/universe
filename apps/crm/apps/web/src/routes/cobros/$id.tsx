@@ -744,10 +744,10 @@ function RouteComponent() {
 	// hasta un admin veia la ficha recortada.
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
 
-	// Mandar una cuenta a recuperación es una escalación (sale la unidad), no
-	// una gestión del día: mismo techo que la reasignación manual de asesor
-	// (canAssignCobros = admin / supervisor de cobros).
-	const puedeRecuperarVehiculo = PERMISSIONS.canAssignCobros(
+	// Lo dispara el asesor que lleva la cuenta, no solo el supervisor: es quien
+	// sabe que la unidad ya no se recupera por teléfono. Va separada y en rojo
+	// en el menú para que no se apriete de pasada.
+	const puedeRecuperarVehiculo = PERMISSIONS.canAccessCobros(
 		userProfile.data?.role ?? "",
 	);
 
@@ -1543,8 +1543,7 @@ function RouteComponent() {
 
 											{/* Recuperación de vehículo: no es una gestión más, es
 											    sacar la unidad. Va separada y en rojo para que no se
-											    apriete de pasada, y solo la ve quien puede decidirlo
-											    (supervisor/gerencia). */}
+											    apriete de pasada. */}
 											{puedeRecuperarVehiculo && (
 												<>
 													<DropdownMenuSeparator />

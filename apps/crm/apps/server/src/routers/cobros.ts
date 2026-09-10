@@ -8446,14 +8446,15 @@ export const cobrosRouter = {
 		}),
 
 	// Recuperación de vehículo: manda el crédito a B4 (Última Instancia / Pre
-	// Jurídico) sin importar en qué escalón de mora vaya. Es una escalación, no
-	// una consecuencia de las cuotas atrasadas, por eso queda en supervisor /
-	// gerencia igual que la reasignación manual.
+	// Jurídico) sin importar en qué escalón de mora vaya. Lo dispara el asesor
+	// que lleva la cuenta (cobrosProcedure), no solo el supervisor: es él quien
+	// sabe que la unidad ya no se recupera por teléfono. La trazabilidad la da
+	// el motivo obligatorio + la bitácora API_MANUAL con su usuario.
 	//
 	// ⚠️ PENDIENTE: el traslado NO se sostiene solo. El motor de las 23:59 GT
 	// vuelve a derivar el bucket de la mora y devuelve la cuenta a su escalón
 	// (ver docs/features/cobros-02/07-recuperacion-de-vehiculo.md).
-	enviarCreditoARecuperacion: cobrosSupervisorProcedure
+	enviarCreditoARecuperacion: cobrosProcedure
 		.input(
 			z.object({
 				creditoId: z.number().int().positive(),

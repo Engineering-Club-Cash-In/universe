@@ -1,9 +1,16 @@
 /// <reference types="node" />
 import { Resend } from "resend";
 import LiquidationEmail from "./templates/LiquidationTemplate";
-import PasswordResetEmail from "./templates/PasswordResetTemplate";
+import PasswordResetEmail, { type PasswordResetRole } from "./templates/PasswordResetTemplate";
 import NewCreditEmail from "./templates/NewCreditTemplate";
+import PortalWelcomeEmail from "./templates/PortalWelcomeTemplate";
+import PortalCompanyAddedEmail from "./templates/PortalCompanyAddedTemplate";
 import * as React from "react";
+import {
+  DEFAULT_DEV_RECIPIENT,
+  EMAIL_DELIVERY_MODE,
+} from "./deliveryMode";
+import { asuntoDeLiquidacion } from "./asuntoLiquidacion";
 
 import { z } from "zod";
 
@@ -34,11 +41,14 @@ const resend = new Resend(apiKey);
 // Por seguridad, el default es DEV: si la env no está seteada, NO se
 // mandan correos a destinatarios reales.
 // ================================================================
-const SERVER = (process.env.SERVER ?? "DEV").toUpperCase();
-const EMAIL_DEV_RECIPIENT =
-  process.env.EMAIL_DEV_RECIPIENT ?? "jalvarado@clubcashin.com";
+// El modo lo resuelve `deliveryMode.ts` y se exporta: quien manda un correo
+// necesita poder saber si de verdad llegó a su destinatario. Una sola lectura
+// del entorno alimenta el interceptor y el reporte, para que no se contradigan.
+const { server: SERVER, redirige: REDIRIGE, destinatarioUnico } =
+  EMAIL_DELIVERY_MODE;
+const EMAIL_DEV_RECIPIENT = destinatarioUnico ?? DEFAULT_DEV_RECIPIENT;
 
-if (SERVER !== "PROD") {
+if (REDIRIGE) {
   const originalSend = resend.emails.send.bind(resend.emails);
   resend.emails.send = (async (payload: any, options?: any) => {
     const original = { to: payload?.to, cc: payload?.cc, bcc: payload?.bcc };
@@ -56,6 +66,12 @@ if (SERVER !== "PROD") {
   }) as typeof resend.emails.send;
 }
 
+export {
+  getEmailDeliveryMode,
+  resolveEmailDeliveryMode,
+  type EmailDeliveryMode,
+} from "./deliveryMode";
+
 // Schema para validación de correo
 const emailSchema = z.string().email({ message: "Formato de correo electrónico inválido" });
 
@@ -66,6 +82,23 @@ export interface SendLiquidationEmailParams {
   creditNumber: string;
   date: string;
   currencySymbol?: string;
+  /**
+   * Nombre de quien abre el correo, cuando NO es la entidad liquidada: el
+   * representante legal de una sociedad. Un representante de varias sociedades
+   * recibe todos los correos en su propio buzón, así que el cuerpo tiene que
+   * saludarlo a él y decir a qué entidad corresponde cada uno.
+   */
+  representativeName?: string;
+  /**
+   * Buzón en copia. Se usa para que la entidad no pierda la liquidación cuando
+   * el correo se desvía a su representante legal: ese buzón lo suele leer un
+   * contador o un asistente que ya la recibía.
+   *
+   * Una dirección que zod rechace se DESCARTA con una advertencia en vez de
+   * tirar: Resend rechaza el envío entero si un `cc` no le gusta, y una copia
+   * nunca puede costar el correo principal.
+   */
+  cc?: string;
   attachment?: {
     filename: string;
     content: Buffer;
@@ -81,24 +114,52 @@ export const sendLiquidationEmail = async ({
   creditNumber,
   date,
   currencySymbol,
+  representativeName,
+  cc,
   attachment,
   reportUrl,
 }: SendLiquidationEmailParams) => {
   // Validar formato de correo antes de enviar
   emailSchema.parse(to);
 
+  // La copia se valida aparte y sin tirar: es un extra, no puede llevarse el
+  // envío. (Con SERVER != PROD el desvío de más arriba la borra junto con el
+  // destinatario original, así que en DEV nada sale a un buzón real.)
+  const copia = cc && emailSchema.safeParse(cc).success ? cc : undefined;
+  if (cc && !copia) {
+    console.warn(
+      `[sendLiquidationEmail] Copia descartada por formato inválido: ${cc}. El correo sale solo a ${to}.`
+    );
+  }
+
+  const assetsBaseUrl = process.env.EMAIL_ASSETS_BASE_URL;
+  const emailAssets = assetsBaseUrl
+    ? {
+        headerBanner: `${assetsBaseUrl}/header-mail-V3.png`,
+        footerBanner: `${assetsBaseUrl}/footer-mail.png`,
+      }
+    : undefined;
+  if (!emailAssets) {
+    console.warn(
+      "[sendLiquidationEmail] EMAIL_ASSETS_BASE_URL is missing. Sending without header/footer banners."
+    );
+  }
+
   try {
     const { data, error } = await resend.emails.send({
       from: `Club Cash In <no-reply@${domain}>`,
       to: [to],
-      subject: `Liquidación Procesada - ${new Date().toLocaleString("es-GT", { month: "long", year: "numeric" })}`,
+      cc: copia ? [copia] : undefined,
+      subject: asuntoDeLiquidacion(investorName, date, representativeName),
       react: React.createElement(LiquidationEmail, {
         investorName,
+        representativeName,
         amount,
         creditNumber,
         date,
         currencySymbol,
         reportUrl,
+        assets: emailAssets,
       }),
       attachments: attachment ? [attachment] : undefined,
     });
@@ -116,15 +177,32 @@ export const sendLiquidationEmail = async ({
   }
 };
 
-export const sendPasswordResetEmail = async (to: string, resetUrl: string) => {
+export const sendPasswordResetEmail = async (
+  to: string,
+  resetUrl: string,
+  role?: PasswordResetRole,
+) => {
   emailSchema.parse(to);
+
+  const assetsBaseUrl = process.env.EMAIL_ASSETS_BASE_URL;
+  if (!assetsBaseUrl) {
+    throw new Error(
+      "❌ [Email Package] EMAIL_ASSETS_BASE_URL is missing. Please add it to your environment variables."
+    );
+  }
+
+  const emailAssets = {
+    headerBanner: `${assetsBaseUrl}/header-mail-V2.png`,
+    footerBanner: `${assetsBaseUrl}/footer-mail.png`,
+    warningIcon: `${assetsBaseUrl}/warning-mail-gradient-v2.png`,
+  };
 
   try {
     const { data, error } = await resend.emails.send({
       from: `Club Cash In <no-reply@${domain}>`,
       to: [to],
       subject: "Restablecer contraseña - CashIn",
-      react: React.createElement(PasswordResetEmail, { resetUrl }),
+      react: React.createElement(PasswordResetEmail, { resetUrl, assets: emailAssets, role }),
     });
 
     if (error) {
@@ -136,6 +214,148 @@ export const sendPasswordResetEmail = async (to: string, resetUrl: string) => {
     return { success: true, data };
   } catch (err) {
     console.error("[sendPasswordResetEmail] Unexpected Error:", err);
+    return { success: false, error: err };
+  }
+};
+
+// ================================================================
+// PORTAL DEL INVERSIONISTA
+// Correos que se disparan cuando back office da de alta a un
+// inversionista en el portal, o cuando se le suma otra empresa.
+// ================================================================
+
+/**
+ * Banners del layout de correos del portal. Son decorativos: si falta
+ * EMAIL_ASSETS_BASE_URL el correo igual sale (sin banners) en vez de
+ * reventar el alta del inversionista.
+ */
+const getPortalEmailAssets = (caller: string) => {
+  const assetsBaseUrl = process.env.EMAIL_ASSETS_BASE_URL;
+  if (!assetsBaseUrl) {
+    console.warn(
+      `[${caller}] EMAIL_ASSETS_BASE_URL is missing. Sending without header/footer banners.`
+    );
+    return undefined;
+  }
+  return {
+    headerBanner: `${assetsBaseUrl}/header-mail-V2.png`,
+    footerBanner: `${assetsBaseUrl}/footer-mail.png`,
+  };
+};
+
+export interface SendPortalWelcomeEmailParams {
+  /** Correo del inversionista: es a la vez el destinatario y su usuario. */
+  to: string;
+  investorName: string;
+  /** Contraseña generada por quien da de alta la cuenta. */
+  password: string;
+  /** URL de login del portal (ej. https://portal.clubcashin.com). */
+  portalUrl: string;
+  /** Empresas que ya quedan ligadas a la cuenta, si es representante legal. */
+  companyNames?: string[];
+}
+
+/**
+ * Correo de bienvenida al portal, con las credenciales de ingreso.
+ * La contraseña viaja en el cuerpo del correo — nunca en el asunto ni en el
+ * Preview, para que no quede visible en la lista de la bandeja.
+ */
+export const sendPortalWelcomeEmail = async ({
+  to,
+  investorName,
+  password,
+  portalUrl,
+  companyNames,
+}: SendPortalWelcomeEmailParams) => {
+  const emailAssets = getPortalEmailAssets("sendPortalWelcomeEmail");
+
+  try {
+    // La validación va DENTRO del try. Estos dos correos se mandan cuando la
+    // cuenta del portal YA está creada: si `parse` tirara hacia afuera, el
+    // llamador se llevaría una excepción en vez del `{success:false}` que
+    // promete la firma, y una cuenta recién creada se quedaría sin que nadie
+    // reporte que su contraseña no salió.
+    emailSchema.parse(to);
+
+    const { data, error } = await resend.emails.send({
+      from: `Club Cash In <no-reply@${domain}>`,
+      to: [to],
+      subject: "Tu acceso al Portal del Inversionista - CashIn",
+      react: React.createElement(PortalWelcomeEmail, {
+        investorName,
+        loginEmail: to,
+        password,
+        portalUrl,
+        companyNames,
+        assets: emailAssets,
+      }),
+    });
+
+    if (error) {
+      console.error("[sendPortalWelcomeEmail] Resend API Error:", error);
+      return { success: false, error };
+    }
+
+    console.log(`[sendPortalWelcomeEmail] Welcome email sent to ${to}. ID: ${data?.id}`);
+    return { success: true, data };
+  } catch (err) {
+    console.error("[sendPortalWelcomeEmail] Unexpected Error:", err);
+    return { success: false, error: err };
+  }
+};
+
+export interface SendPortalCompanyAddedEmailParams {
+  /** Correo de la cuenta que YA existe. */
+  to: string;
+  investorName: string;
+  /** Razón social de la empresa que se le suma. */
+  companyName: string;
+  portalUrl: string;
+}
+
+/**
+ * Aviso para quien ya tiene cuenta y pasa a representar una sociedad más.
+ * No lleva credenciales: esa persona sigue entrando con su contraseña actual.
+ */
+export const sendPortalCompanyAddedEmail = async ({
+  to,
+  investorName,
+  companyName,
+  portalUrl,
+}: SendPortalCompanyAddedEmailParams) => {
+  const emailAssets = getPortalEmailAssets("sendPortalCompanyAddedEmail");
+
+  try {
+    // La validación va DENTRO del try. Estos dos correos se mandan cuando la
+    // cuenta del portal YA está creada: si `parse` tirara hacia afuera, el
+    // llamador se llevaría una excepción en vez del `{success:false}` que
+    // promete la firma, y una cuenta recién creada se quedaría sin que nadie
+    // reporte que su contraseña no salió.
+    emailSchema.parse(to);
+
+    const { data, error } = await resend.emails.send({
+      from: `Club Cash In <no-reply@${domain}>`,
+      to: [to],
+      subject: `Ahora también representas a ${companyName} en el portal`,
+      react: React.createElement(PortalCompanyAddedEmail, {
+        investorName,
+        companyName,
+        portalUrl,
+        assets: emailAssets,
+      }),
+    });
+
+    if (error) {
+      console.error("[sendPortalCompanyAddedEmail] Resend API Error:", error);
+      return { success: false, error };
+    }
+
+    console.log(
+      `[sendPortalCompanyAddedEmail] Company-added email sent to ${to}. ID: ${data?.id}`
+    );
+    return { success: true, data };
+  } catch (err) {
+    console.error("[sendPortalCompanyAddedEmail] Unexpected Error:", err);
     return { success: false, error: err };
   }
 };

@@ -32,5 +32,8 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  // Las pruebas corren con `bun test` y usan `bun:test`, que no está en los
+  // tipos de la app. Quedan fuera del build del bundle.
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
 }

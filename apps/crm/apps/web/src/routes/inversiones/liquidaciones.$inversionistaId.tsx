@@ -57,6 +57,12 @@ import {
 } from "@/components/ui/dialog";
 import { authClient } from "@/lib/auth-client";
 import {
+	errorRepLegal,
+	esEmpresaInicial,
+	requiereConfirmacionBorrado,
+	valorRepLegalAlGuardar,
+} from "@/lib/rep-legal-empresa";
+import {
 	MODALIDAD_FACTURACION_LABELS,
 	type ModalidadFacturacion,
 } from "@/lib/modalidad-facturacion";
@@ -825,10 +831,38 @@ function InvestorLiquidacionesPage() {
 	const [editBanco, setEditBanco] = useState("");
 	const [editTipoCuenta, setEditTipoCuenta] = useState("");
 	const [editNumeroCuenta, setEditNumeroCuenta] = useState("");
+	// "¿Es empresa?" no tiene columna en cartera: se DERIVA de si la fila trae
+	// el `dpi_rep_legal` de OTRA persona. `editRepLegalOriginal` guarda el valor con el que se abrió
+	// el modal, para detectar que guardar le quitaría el representante a alguien
+	// que sí lo tenía.
+	const [editEsEmpresa, setEditEsEmpresa] = useState(false);
+	const [editRepLegalOriginal, setEditRepLegalOriginal] = useState("");
+	// El `dpi` con el que se abrió el modal. Va aparte de `editDpi` (que el
+	// operador puede estar tecleando) porque la derivación y la advertencia
+	// hablan de la fila TAL COMO ESTABA guardada.
+	const [editDpiOriginal, setEditDpiOriginal] = useState("");
+	const [confirmarQuitarRepOpen, setConfirmarQuitarRepOpen] = useState(false);
+	const [editDpiRepLegal, setEditDpiRepLegal] = useState("");
 	const [editMoneda, setEditMoneda] = useState("quetzales");
 	const [editEmiteFactura, setEditEmiteFactura] = useState(false);
 	const [editTipoReinversion, setEditTipoReinversion] = useState("sin_reinversion");
 	const [editMontoReinversion, setEditMontoReinversion] = useState("");
+	// Campo que cartera rechazó (dpi | email | nombre duplicado, o
+	// dpi_rep_legal inexistente): lo manda el backend en err.data.campo para
+	// marcar el input exacto, igual que en el modal de crear.
+	const [campoConError, setCampoConError] = useState<{
+		campo: string;
+		mensaje: string;
+	} | null>(null);
+	const errorEn = (campo: string) => campoConError?.campo === campo;
+	// Al corregir el dato que falló, la marca deja de aplicar.
+	const limpiarError = (campo: string) => {
+		if (errorEn(campo)) setCampoConError(null);
+	};
+	const MensajeCampo = ({ campo }: { campo: string }) =>
+		errorEn(campo) ? (
+			<p className="text-destructive text-xs">{campoConError?.mensaje}</p>
+		) : null;
 
 	const bancosQuery = useQuery({
 		...orpc.getBancosCartera.queryOptions({ input: undefined as never }),
@@ -843,10 +877,19 @@ function InvestorLiquidacionesPage() {
 		setEditBanco(inv.banco_id ? String(inv.banco_id) : "");
 		setEditTipoCuenta(inv.tipoCuenta ?? inv.tipo_cuenta ?? "");
 		setEditNumeroCuenta(inv.numeroCuenta ?? inv.numero_cuenta ?? "");
+		const repLegalGuardado = inv.dpiRepLegal ?? inv.dpi_rep_legal ?? "";
+		setEditDpiRepLegal(repLegalGuardado);
+		setEditRepLegalOriginal(repLegalGuardado);
+		setEditDpiOriginal(inv.dpi ? String(inv.dpi) : "");
+		// El `dpi` de la fila entra en la derivación: un representante que es la
+		// PROPIA fila (dpi 4036613 / dpi_rep_legal '04036613') no la vuelve empresa.
+		setEditEsEmpresa(esEmpresaInicial(repLegalGuardado, inv.dpi));
+		setConfirmarQuitarRepOpen(false);
 		setEditMoneda(inv.moneda ?? "quetzales");
 		setEditEmiteFactura(inv.emiteFactura ?? inv.emite_factura ?? false);
 		setEditTipoReinversion(inv.tipoReinversion ?? inv.tipo_reinversion ?? "sin_reinversion");
 		setEditMontoReinversion(inv.monto_reinversion ? String(inv.monto_reinversion) : "");
+		setCampoConError(null);
 		setEditOpen(true);
 	};
 
@@ -854,6 +897,7 @@ function InvestorLiquidacionesPage() {
 		...orpc.editarInversionista.mutationOptions(),
 		onSuccess: () => {
 			toast.success("Inversionista actualizado correctamente");
+			setConfirmarQuitarRepOpen(false);
 			setEditOpen(false);
 			queryClient.invalidateQueries({
 				queryKey: orpc.getInversionistas.queryOptions({
@@ -869,9 +913,55 @@ function InvestorLiquidacionesPage() {
 			});
 		},
 		onError: (err: any) => {
-			toast.error(err?.message ?? "Error al actualizar inversionista");
+			// Si el fallo vino desde la confirmación de borrado, se devuelve al
+			// operador al formulario en vez de dejarlo sin modal.
+			setConfirmarQuitarRepOpen(false);
+			setEditOpen(true);
+			const texto = err?.message ?? "Error al actualizar inversionista";
+			// El id del input va en kebab-case y el campo del backend en
+			// snake_case (dpi_rep_legal → edit-dpi-rep-legal).
+			const campo: string | undefined = err?.data?.campo;
+			if (campo) {
+				setCampoConError({ campo, mensaje: texto });
+				document.getElementById(`edit-${campo.replace(/_/g, "-")}`)?.focus();
+			} else {
+				setCampoConError(null);
+			}
+			toast.error(texto);
 		},
 	});
+
+	const guardarEdicion = () => {
+		editMutation.mutate({
+			inversionistaId: investorIdNum,
+			nombre: editNombre.trim(),
+			dpi: editDpi.trim() || undefined,
+			email: editEmail.trim() || undefined,
+			banco: editBanco ? Number(editBanco) : null,
+			tipoCuenta: editTipoCuenta || undefined,
+			numeroCuenta: editNumeroCuenta.trim() || undefined,
+			// Qué se manda del representante lo decide entero
+			// `valorRepLegalAlGuardar`: la llave presente con cadena vacía BORRA, y
+			// solo se borra lo que se desmarcó a propósito. Al que es su propio
+			// representante (`dpi = 4036613`, `dpi_rep_legal = '04036613'`) no se le
+			// toca... salvo que se le esté editando el DPI, y entonces el valor
+			// guardado le sigue: dejarlo con el viejo convertía la fila en una
+			// empresa representada por su identidad anterior.
+			dpiRepLegal: valorRepLegalAlGuardar({
+				esEmpresa: editEsEmpresa,
+				valor: editDpiRepLegal,
+				repLegalOriginal: editRepLegalOriginal,
+				dpiOriginal: editDpiOriginal,
+				dpiDelFormulario: editDpi,
+			}),
+			moneda: editMoneda as "quetzales" | "dolares",
+			emiteFactura: editEmiteFactura,
+			tipoReinversion: editTipoReinversion,
+			montoReinversion: editMontoReinversion
+				? Number(editMontoReinversion)
+				: undefined,
+		});
+	};
 
 	const cambiarStatusMutation = useMutation({
 		...orpc.cambiarStatusInversionista.mutationOptions(),
@@ -1439,8 +1529,16 @@ function InvestorLiquidacionesPage() {
 							<Input
 								id="edit-nombre"
 								value={editNombre}
-								onChange={(e) => setEditNombre(e.target.value)}
+								onChange={(e) => {
+									setEditNombre(e.target.value);
+									limpiarError("nombre");
+								}}
+								aria-invalid={errorEn("nombre")}
+								className={
+									errorEn("nombre") ? "border-destructive" : undefined
+								}
 							/>
+							<MensajeCampo campo="nombre" />
 						</div>
 
 						<div className="grid grid-cols-2 gap-3">
@@ -1449,8 +1547,16 @@ function InvestorLiquidacionesPage() {
 								<Input
 									id="edit-dpi"
 									value={editDpi}
-									onChange={(e) => setEditDpi(e.target.value)}
+									onChange={(e) => {
+										setEditDpi(e.target.value);
+										limpiarError("dpi");
+									}}
+									aria-invalid={errorEn("dpi")}
+									className={
+										errorEn("dpi") ? "border-destructive" : undefined
+									}
 								/>
+								<MensajeCampo campo="dpi" />
 							</div>
 							<div className="space-y-1.5">
 								<Label htmlFor="edit-email">Email</Label>
@@ -1458,8 +1564,16 @@ function InvestorLiquidacionesPage() {
 									id="edit-email"
 									type="email"
 									value={editEmail}
-									onChange={(e) => setEditEmail(e.target.value)}
+									onChange={(e) => {
+										setEditEmail(e.target.value);
+										limpiarError("email");
+									}}
+									aria-invalid={errorEn("email")}
+									className={
+										errorEn("email") ? "border-destructive" : undefined
+									}
 								/>
+								<MensajeCampo campo="email" />
 							</div>
 						</div>
 
@@ -1508,6 +1622,45 @@ function InvestorLiquidacionesPage() {
 								value={editNumeroCuenta}
 								onChange={(e) => setEditNumeroCuenta(e.target.value)}
 							/>
+						</div>
+
+						<div className="space-y-3">
+							<div className="flex items-center gap-2">
+								<Checkbox
+									id="edit-es-empresa"
+									checked={editEsEmpresa}
+									onCheckedChange={(v) => {
+										setEditEsEmpresa(v === true);
+										// El "obligatorio" cuelga del interruptor: al
+										// desmarcar, la marca del campo deja de aplicar.
+										limpiarError("dpi_rep_legal");
+									}}
+								/>
+								<Label htmlFor="edit-es-empresa">¿Es empresa?</Label>
+							</div>
+							{editEsEmpresa && (
+								<div className="space-y-1.5">
+									<Label htmlFor="edit-dpi-rep-legal">
+										DPI del representante legal
+									</Label>
+									<Input
+										id="edit-dpi-rep-legal"
+										value={editDpiRepLegal}
+										onChange={(e) => {
+											setEditDpiRepLegal(e.target.value.replace(/\D/g, ""));
+											limpiarError("dpi_rep_legal");
+										}}
+										placeholder="DPI de quien representa a la empresa"
+										maxLength={20}
+										inputMode="numeric"
+										aria-invalid={errorEn("dpi_rep_legal")}
+										className={
+											errorEn("dpi_rep_legal") ? "border-destructive" : undefined
+										}
+									/>
+									<MensajeCampo campo="dpi_rep_legal" />
+								</div>
+							)}
 						</div>
 
 						<div className="grid grid-cols-2 gap-3">
@@ -1583,21 +1736,36 @@ function InvestorLiquidacionesPage() {
 						<Button
 							disabled={editMutation.isPending || !editNombre.trim()}
 							onClick={() => {
-								editMutation.mutate({
-									inversionistaId: investorIdNum,
-									nombre: editNombre.trim(),
-									dpi: editDpi.trim() || undefined,
-									email: editEmail.trim() || undefined,
-									banco: editBanco ? Number(editBanco) : null,
-									tipoCuenta: editTipoCuenta || undefined,
-									numeroCuenta: editNumeroCuenta.trim() || undefined,
-									moneda: editMoneda as "quetzales" | "dolares",
-									emiteFactura: editEmiteFactura,
-									tipoReinversion: editTipoReinversion,
-									montoReinversion: editMontoReinversion
-										? Number(editMontoReinversion)
-										: undefined,
-								});
+								// Con "¿Es empresa?" marcado el DPI del representante es
+								// obligatorio: se marca el input con el mismo mecanismo que
+								// usan los rechazos de cartera.
+								const errorRep = errorRepLegal(editEsEmpresa, editDpiRepLegal);
+								if (errorRep) {
+									setCampoConError({
+										campo: "dpi_rep_legal",
+										mensaje: errorRep,
+									});
+									document.getElementById("edit-dpi-rep-legal")?.focus();
+									return;
+								}
+								// Desmarcar el interruptor en alguien que YA tenía
+								// representante borra su acceso al portal, y esa persona no
+								// está frente a la pantalla para enterarse: se confirma antes.
+								if (
+									requiereConfirmacionBorrado(
+										editRepLegalOriginal,
+										editEsEmpresa,
+										editDpiOriginal,
+									)
+								) {
+									// Un modal a la vez: se cierra el de edición (su estado
+									// vive fuera, así que no se pierde nada) y al cancelar
+									// la confirmación se vuelve a abrir tal cual estaba.
+									setEditOpen(false);
+									setConfirmarQuitarRepOpen(true);
+									return;
+								}
+								guardarEdicion();
 							}}
 						>
 							{editMutation.isPending ? (
@@ -1607,6 +1775,65 @@ function InvestorLiquidacionesPage() {
 								</>
 							) : (
 								"Guardar cambios"
+							)}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+
+			{/* Modal confirmación — quitar el representante legal */}
+			<Dialog
+				open={confirmarQuitarRepOpen}
+				onOpenChange={(open) => {
+					if (editMutation.isPending) return;
+					setConfirmarQuitarRepOpen(open);
+					// Cerrar la confirmación (Esc, clic afuera, Cancelar) devuelve al
+					// formulario de edición con todo lo que ya se había tecleado.
+					if (!open) setEditOpen(true);
+				}}
+			>
+				<DialogContent className="sm:max-w-md">
+					<DialogHeader>
+						<div className="flex items-center gap-3">
+							<div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-orange-500/15 text-orange-600 dark:text-orange-300">
+								<AlertCircle className="h-5 w-5" />
+							</div>
+							<DialogTitle>Quitar el representante legal</DialogTitle>
+						</div>
+						<DialogDescription className="pt-2">
+							Este inversionista tiene registrado el DPI{" "}
+							<span className="font-semibold">{editRepLegalOriginal}</span> como
+							representante legal. Al guardar sin “¿Es empresa?” ese dato se
+							borra y{" "}
+							<span className="font-semibold text-orange-700 dark:text-orange-300">
+								esa persona pierde el acceso al portal
+							</span>
+							.
+						</DialogDescription>
+					</DialogHeader>
+					<DialogFooter className="gap-2 sm:justify-between">
+						<Button
+							variant="outline"
+							onClick={() => {
+								setConfirmarQuitarRepOpen(false);
+								setEditOpen(true);
+							}}
+							disabled={editMutation.isPending}
+						>
+							Cancelar
+						</Button>
+						<Button
+							variant="destructive"
+							onClick={() => guardarEdicion()}
+							disabled={editMutation.isPending}
+						>
+							{editMutation.isPending ? (
+								<>
+									<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+									Guardando...
+								</>
+							) : (
+								"Sí, quitar el representante"
 							)}
 						</Button>
 					</DialogFooter>

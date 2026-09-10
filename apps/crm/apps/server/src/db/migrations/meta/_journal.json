@@ -138,8 +138,15 @@
 		{
 			"idx": 19,
 			"version": "7",
-			"when": 1787875200000,
-			"tag": "0032_add_partner_tracker",
+			"when": 1788393600000,
+			"tag": "0032_create_opportunity_validation_override_logs",
+			"breakpoints": true
+		},
+		{
+			"idx": 20,
+			"version": "7",
+			"when": 1788480000000,
+			"tag": "0033_add_partner_tracker",
 			"breakpoints": true
 		}
 	]

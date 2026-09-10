@@ -7,9 +7,12 @@ Big.RM = Big.roundHalfUp;
 // ----------------------------------------------------------------------------------------
 // Calcula, por inversionista, el FACTOR (fracción del interés total del pago) que le toca
 // cuando el crédito tiene una compra de cartera pendiente. Replica el mismo cálculo de
-// ventanas antes/después de la facturación (ver ./prorratearIntereses.ts):
-//   • fracciónAntes  = díaCorte / díasDelMes      (cómo estaba el crédito ANTES de la compra)
-//   • fracciónDespués = 1 − fracciónAntes          (cómo está AHORA)
+// ventanas antes/después de la facturación (el cálculo vivo está inline en
+// routers/cofidi.ts; ./prorratearIntereses.ts es una copia sin importadores, que se
+// mantiene alineada a mano — si tocás la fórmula acá, tocala allá también):
+//   • fracciónDespués = max(1, díasDelMes − díaCorte) / díasDelMes  (cómo está AHORA)
+//   • fracciónAntes   = 1 − fracciónDespués                          (cómo estaba ANTES)
+// El max(1, ...) es el piso de un día; ver el comentario en el cuerpo.
 // y en cada ventana reparte por base (monto_aportado del espejo) × el % propio de cada uno
 // (participación para los no-CUBE, cash_in propio para CUBE).
 //
@@ -52,8 +55,14 @@ export function calcularFactoresProrrateoInteresV2(input: {
   const ultimoDiaMes = new Date(
     Date.UTC(fechaCorte.getUTCFullYear(), fechaCorte.getUTCMonth() + 1, 0)
   ).getUTCDate();
-  const fraccionAntes = new Big(diaCorte).div(ultimoDiaMes);
-  const fraccionDespues = new Big(1).minus(fraccionAntes);
+  // 🩹 Piso de 1 día: si el corte cae el ÚLTIMO día del mes, `ultimoDiaMes - diaCorte`
+  //    da 0 y la ventana "después" pesaría cero — el comprador se quedaría sin interés
+  //    del mes y el vendedor (CUBE) se lo llevaría completo. Le garantizamos 1 día.
+  //    Fuera de ese borde el resultado es idéntico al cálculo anterior
+  //    ((u−d)/u ≡ 1 − d/u), y las dos fracciones siguen sumando exactamente 1.
+  const diasDespues = Math.max(1, ultimoDiaMes - diaCorte);
+  const fraccionDespues = new Big(diasDespues).div(ultimoDiaMes);
+  const fraccionAntes = new Big(1).minus(fraccionDespues);
 
   const cubeId =
     invs.find((i) => i.nombre.trim().toUpperCase().includes("CUBE INVESTMENTS"))

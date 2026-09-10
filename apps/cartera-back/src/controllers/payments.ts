@@ -28,6 +28,7 @@ import {
 import { updateMora } from "./latefee";
 import { calcularAjusteCompras, obtenerSumaComprasMesAnterior, obtenerSumaComprasPendientes, obtenerSumaComprasCompletadasMesActual } from "../utils/comprasAjuste";
 import { calcularFactoresProrrateoInteresV2 } from "../cofidi/prorrateoPciInteres";
+import { calcularVentanaProporcional } from "../utils/functions/diasParticipacion";
 import { calcularSplitInteresPci, type InvSplitRow } from "../cofidi/splitInteresPci";
 import { t } from "elysia";
 import { calcularResumenAbonosCuota } from "./registerPaymentPolicy";
@@ -176,6 +177,12 @@ export async function getAllPagosWithCreditAndInversionistas(
         observaciones: pagos_credito.observaciones,
         usuario_id: creditos.usuario_id,
         numero_credito_sifco: creditos.numero_credito_sifco,
+        // Estado del crédito: la pantalla de pagos resalta las cuotas en atraso
+        // con el MISMO criterio que la mora (isOverdueInstallmentForMora), que
+        // excluye EN_CONVENIO / INCOBRABLE / CANCELADO / PENDIENTE_CANCELACION
+        // / CAIDO. Sin este campo el front pintaba "Atrasada" en créditos que
+        // por política no devengan mora.
+        statusCredit: creditos.statusCredit,
         usuario_nombre: usuarios.nombre,
         usuario_categoria: usuarios.categoria,
         usuario_nit: usuarios.nit,
@@ -772,14 +779,14 @@ export async function insertPagosCreditoInversionistas(
     let ivaConCompras: Big | null = null;
 
     if (esMesAnterior) {
-      // Días totales del mes de la fecha de inicio (ej: enero = 31)
-      const diasDelMes = new Date(
-        fechaInicio!.getFullYear(),
-        fechaInicio!.getMonth() + 1,
-        0
-      ).getDate();
-      const diaInicio = fechaInicio!.getDate(); // ej: 7
-      const diasProporcionales = diasDelMes - diaInicio; // ej: 31 - 7 = 24 días restantes
+      // Días totales del mes de la fecha de inicio (ej: enero = 31) y días que le
+      // tocan al inversionista. El piso de 1 día vive en el helper (ver
+      // utils/functions/diasParticipacion.ts): si la fecha cae el ÚLTIMO día del
+      // mes, la resta daría 0 y cobraría cero interés pese a haber participado.
+      // El día 1 no pasa por acá: `esMesAnterior` lo excluye arriba y cobra mes completo.
+      const { diasDelMes, diasProporcionales } = calcularVentanaProporcional(
+        fechaInicio!
+      );
 
       // ¿El inversionista ya era partícipe y además hizo compras este mes?
       // Buscamos compras de tipo 'compra_cartera' completadas en el mes anterior.
@@ -1770,6 +1777,7 @@ export async function insertarPago({
       credito_id: creditData.credito_id,
       monto_cambio: Number(mora),
       tipo: "DECREMENTO", // 👈 bajamos la mora porque el cliente ya pagó
+      motivo: `Registro de pago #${nuevoPago?.pago_id} (crédito ${numero_credito_sifco}, cuota ${numero_cuota}): mora cobrada en la boleta`,
     });
   }
 

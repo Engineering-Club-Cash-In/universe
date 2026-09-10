@@ -21,57 +21,161 @@ type LiquidationCompositionInput = {
   reinvestedTotal: number | string;
 };
 
-export function buildLiquidationComposition(input: LiquidationCompositionInput) {
-  const flowCapital = cents(input.totalCapital);
-  const paidTotal = cents(input.paidTotal);
-  const reinvestedCapital = cents(input.reinvestedCapital);
-  const reinvestedRest = cents(input.reinvestedRest);
-  const reinvestedTotal = cents(input.reinvestedTotal);
-  const flowTotal = paidTotal + reinvestedTotal;
-  const flowRest = flowTotal - flowCapital;
-  const reinvestedUnclassified =
-    reinvestedTotal - reinvestedCapital - reinvestedRest;
+type ReinvestmentComponentsInput = Pick<
+  LiquidationCompositionInput,
+  "reinvestedCapital" | "reinvestedRest" | "reinvestedTotal"
+>;
+
+export function normalizeReinvestmentComponents(
+  input: ReinvestmentComponentsInput,
+) {
+  let capital = new Big(input.reinvestedCapital).times(100).round(0, Big.roundHalfUp);
+  let rest = new Big(input.reinvestedRest).times(100).round(0, Big.roundHalfUp);
+  const total = new Big(input.reinvestedTotal).times(100).round(0, Big.roundHalfUp);
+  let unclassified = total.minus(capital).minus(rest);
+
+  // Liquidaciones históricas redondearon total y componentes por separado. La
+  // deriva observada es de un centavo; el total acreditado a saldo_reinversion
+  // es el techo contable y el resto (interés/IVA/ISR) absorbe ese centavo.
+  if (unclassified.eq(-1)) {
+    if (rest.gt(0)) rest = rest.minus(1);
+    else if (capital.gt(0)) capital = capital.minus(1);
+    unclassified = new Big(0);
+  }
 
   if (
-    [flowCapital, paidTotal, reinvestedCapital, reinvestedRest, reinvestedTotal]
-      .some((value) => value < 0) ||
-    flowRest < 0 ||
-    reinvestedUnclassified < 0
+    [capital, rest, total].some((value) => value.lt(0)) ||
+    unclassified.lt(0)
   ) {
     throw new Error("Composición de liquidación inválida");
   }
 
-  let paidCapital = 0;
-  let paidRest = 0;
+  return {
+    capital: capital.div(100).toFixed(2),
+    rest: rest.div(100).toFixed(2),
+    total: total.div(100).toFixed(2),
+    unclassified: unclassified.div(100).toFixed(2),
+  };
+}
+
+export function assertLiquidationRowsReinvestmentIntegrity(
+  rows: ReinvestmentComponentsInput[],
+) {
+  for (const row of rows) normalizeReinvestmentComponents(row);
+}
+
+type InvestorLiquidationRow = ReinvestmentComponentsInput & {
+  inversionistaId: number;
+  nombre: string;
+  tipoReinversion: string;
+  paidTotal: number | string;
+  totalCapital: number | string;
+};
+
+export function aggregateInvestorLiquidationRows(rows: InvestorLiquidationRow[]) {
+  const totals = new Map<number, {
+    inversionista_id: number;
+    nombre: string;
+    tipo_reinversion: string;
+    reinversion_capital: Big;
+    reinversion_interes: Big;
+    reinversion: Big;
+    a_recibir: Big;
+    total_capital: Big;
+  }>();
+
+  for (const row of rows) {
+    const normalized = normalizeReinvestmentComponents(row);
+    const current = totals.get(row.inversionistaId);
+    if (!current) {
+      totals.set(row.inversionistaId, {
+        inversionista_id: row.inversionistaId,
+        nombre: row.nombre,
+        tipo_reinversion: row.tipoReinversion,
+        reinversion_capital: new Big(normalized.capital),
+        reinversion_interes: new Big(normalized.rest),
+        reinversion: new Big(normalized.total),
+        a_recibir: new Big(row.paidTotal),
+        total_capital: new Big(row.totalCapital),
+      });
+      continue;
+    }
+    if (current.tipo_reinversion !== row.tipoReinversion) {
+      current.tipo_reinversion = "sin_clasificar";
+    }
+    current.reinversion_capital = current.reinversion_capital.plus(normalized.capital);
+    current.reinversion_interes = current.reinversion_interes.plus(normalized.rest);
+    current.reinversion = current.reinversion.plus(normalized.total);
+    current.a_recibir = current.a_recibir.plus(row.paidTotal);
+    current.total_capital = current.total_capital.plus(row.totalCapital);
+  }
+
+  return [...totals.values()].map((row) => ({
+    inversionista_id: row.inversionista_id,
+    nombre: row.nombre,
+    tipo_reinversion: row.tipo_reinversion,
+    reinversion_capital: row.reinversion_capital.toFixed(2),
+    reinversion_interes: row.reinversion_interes.toFixed(2),
+    reinversion: row.reinversion.toFixed(2),
+    a_recibir: row.a_recibir.toFixed(2),
+    total_capital: row.total_capital.toFixed(2),
+  }));
+}
+
+export function buildLiquidationComposition(input: LiquidationCompositionInput) {
+  const toBigCents = (value: number | string) =>
+    new Big(value).times(100).round(0, Big.roundHalfUp);
+  const fromBigCents = (value: Big) => value.div(100).toFixed(2);
+  const flowCapital = toBigCents(input.totalCapital);
+  const paidTotal = toBigCents(input.paidTotal);
+  const normalizedReinvestment = normalizeReinvestmentComponents(input);
+  const reinvestedCapital = toBigCents(normalizedReinvestment.capital);
+  const reinvestedRest = toBigCents(normalizedReinvestment.rest);
+  const reinvestedTotal = toBigCents(normalizedReinvestment.total);
+  const flowTotal = paidTotal.plus(reinvestedTotal);
+  const flowRest = flowTotal.minus(flowCapital);
+  const reinvestedUnclassified = toBigCents(normalizedReinvestment.unclassified);
+
+  if (
+    [flowCapital, paidTotal, reinvestedCapital, reinvestedRest, reinvestedTotal]
+      .some((value) => value.lt(0)) ||
+    flowRest.lt(0) ||
+    reinvestedUnclassified.lt(0)
+  ) {
+    throw new Error("Composición de liquidación inválida");
+  }
+
+  let paidCapital = new Big(0);
+  let paidRest = new Big(0);
   let paidUnclassified = paidTotal;
-  if (reinvestedUnclassified === 0) {
-    paidCapital = flowCapital - reinvestedCapital;
-    paidRest = flowRest - reinvestedRest;
-    if (paidCapital < 0 || paidRest < 0) {
+  if (reinvestedUnclassified.eq(0)) {
+    paidCapital = flowCapital.minus(reinvestedCapital);
+    paidRest = flowRest.minus(reinvestedRest);
+    if (paidCapital.lt(0) || paidRest.lt(0)) {
       throw new Error("Composición de liquidación inválida");
     }
-    paidUnclassified = 0;
+    paidUnclassified = new Big(0);
   }
 
   return {
     pagado: {
-      capital: money(paidCapital),
-      resto: money(paidRest),
-      sin_clasificar: money(paidUnclassified),
-      total: money(paidTotal),
+      capital: fromBigCents(paidCapital),
+      resto: fromBigCents(paidRest),
+      sin_clasificar: fromBigCents(paidUnclassified),
+      total: fromBigCents(paidTotal),
     },
     reinvertido: {
-      capital: money(reinvestedCapital),
-      resto: money(reinvestedRest),
-      sin_clasificar: money(reinvestedUnclassified),
-      total: money(reinvestedTotal),
+      capital: fromBigCents(reinvestedCapital),
+      resto: fromBigCents(reinvestedRest),
+      sin_clasificar: fromBigCents(reinvestedUnclassified),
+      total: fromBigCents(reinvestedTotal),
     },
     flujo: {
-      capital: money(flowCapital),
-      resto: money(flowRest),
-      total: money(flowTotal),
+      capital: fromBigCents(flowCapital),
+      resto: fromBigCents(flowRest),
+      total: fromBigCents(flowTotal),
     },
-    estado: reinvestedUnclassified === 0 ? "exacto" : "sin_clasificar",
+    estado: reinvestedUnclassified.eq(0) ? "exacto" : "sin_clasificar",
   } as const;
 }
 
@@ -188,10 +292,10 @@ function allocateRoundedAmountsToTarget(
 ) {
   const rawCents = values.map((value) => new Big(value).times(100));
   const allocated = rawCents.map((value) => value.round(0, Big.roundDown));
-  const remainder = target
-    .minus(allocated.reduce((total, value) => total.plus(value), new Big(0)))
-    .toNumber();
-  const direction = Math.sign(remainder);
+  const delta = target.minus(
+    allocated.reduce((total, value) => total.plus(value), new Big(0)),
+  );
+  const direction = delta.cmp(0);
   const order = rawCents
     .map((value, index) => ({
       index,
@@ -202,18 +306,63 @@ function allocateRoundedAmountsToTarget(
       return difference !== 0 ? difference : a.index - b.index;
     });
 
-  for (let index = 0; index < Math.abs(remainder); index++) {
-    const eligible =
-      direction < 0
-        ? order.filter(({ index: candidateIndex }) =>
-            allocated[candidateIndex].gt(0),
-          )
-        : order;
-    const destination = eligible[index % eligible.length];
-    if (!destination) {
-      throw new Error("No se pudo distribuir el residuo monetario sin negativos");
+  if (direction > 0) {
+    if (order.length === 0) {
+      throw new Error("No se pudo distribuir el residuo monetario");
     }
-    allocated[destination.index] = allocated[destination.index].plus(direction);
+    const count = new Big(order.length);
+    const rounds = delta.div(count).round(0, Big.roundDown);
+    for (const destination of order) {
+      allocated[destination.index] = allocated[destination.index].plus(rounds);
+    }
+    const residual = delta.minus(rounds.times(count)).toNumber();
+    for (let index = 0; index < residual; index++) {
+      const destination = order[index];
+      if (!destination) break;
+      allocated[destination.index] = allocated[destination.index].plus(1);
+    }
+  } else if (direction < 0) {
+    let remaining = delta.abs();
+    let processed = new Big(0);
+    while (remaining.gt(0)) {
+      const eligible = order.filter(({ index }) => allocated[index].gt(0));
+      if (eligible.length === 0) {
+        throw new Error("No se pudo distribuir el residuo monetario sin negativos");
+      }
+      const count = new Big(eligible.length);
+      const requestedRounds = remaining.div(count).round(0, Big.roundDown);
+      if (requestedRounds.gt(0)) {
+        const firstEligible = eligible[0];
+        if (!firstEligible) {
+          throw new Error("No se pudo distribuir el residuo monetario sin negativos");
+        }
+        const availableRounds = eligible.reduce(
+          (minimum, { index }) =>
+            minimum.lt(allocated[index]) ? minimum : allocated[index],
+          allocated[firstEligible.index],
+        );
+        const safeAvailableRounds = availableRounds.minus(1);
+        const rounds = requestedRounds.lt(safeAvailableRounds)
+          ? requestedRounds
+          : safeAvailableRounds;
+        if (rounds.gt(0)) {
+          for (const destination of eligible) {
+            allocated[destination.index] = allocated[destination.index].minus(rounds);
+          }
+          const distributed = rounds.times(count);
+          remaining = remaining.minus(distributed);
+          processed = processed.plus(distributed);
+          continue;
+        }
+      }
+      const destination = eligible[processed.mod(count).toNumber()];
+      if (!destination) {
+        throw new Error("No se pudo distribuir el residuo monetario sin negativos");
+      }
+      allocated[destination.index] = allocated[destination.index].minus(1);
+      remaining = remaining.minus(1);
+      processed = processed.plus(1);
+    }
   }
 
   return allocated.map((value) => value.div(100).toFixed(2));

@@ -15,6 +15,7 @@ import {
   resumenTransferencias,
   getLiquidaciones,
   getInvestorPerformance,
+  getEntidadesPorCorreo,
   getInvestorTotalsGlobales,
   getInvestorMirrorSummary,
   upsertPagosEspejo,             // 🆕 Recalcular pagos espejo desde el front
@@ -33,6 +34,7 @@ import {
   getCreditosEspejoPendientes,
   simularInversionista,
 } from "../controllers/investor";
+import { buscarIdentidad } from "../controllers/identidadInversionista";
 import { ajustarPagosLiquidacion } from "../controllers/ajustarPagosLiquidacion";
 import { InversionistaReporte, RespuestaReporte } from "../utils/interface";
 import { generarYSubirPDFInversionista, generarYSubirExcelInversionista } from "../utils/functions/generalFunctions";
@@ -46,6 +48,7 @@ import ExcelJS from "exceljs";
 import { promises as fsp } from "node:fs";
 import path from "node:path";
 import { guardDescuentaImpuestos } from "./investorGuards";
+import { otorgarAccesoPortal } from "../controllers/otorgarAccesoPortal";
 import { buildPendingReturnAuthorizationWarningFromErrors } from "../utils/pendingReturnGuard";
 // 🔥 IMPORTAR SERVICIO DE BOLETAS
 
@@ -294,6 +297,80 @@ export const inversionistasRouter = new Elysia()
     return insertInvestor(ctx);
   })
   .get("/investor", getInvestors)
+  // Traduce el correo de la sesión del portal al conjunto de inversionistas que
+  // esa persona puede operar (el suyo + las sociedades que representa). Lo
+  // consume auth-google, que es quien tiene la sesión; el portal nunca manda
+  // este correo a mano.
+  .get(
+    "/investor/entidades",
+    async ({ query, set }) => {
+      try {
+        const email = query.email?.trim();
+        if (!email) {
+          set.status = 400;
+          return { success: false, message: "Se requiere 'email'" };
+        }
+
+        const data = await getEntidadesPorCorreo(email);
+        set.status = 200;
+        return { success: true, data };
+      } catch (error) {
+        console.error("[GET /investor/entidades] Error:", error);
+        set.status = 500;
+        return {
+          success: false,
+          message: "Error al resolver las entidades del inversionista",
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+    {
+      query: t.Object({ email: t.String() }),
+      detail: {
+        summary: "Entidades que puede operar la persona dueña de ese correo",
+        tags: ["Inversionistas"],
+      },
+    }
+  )
+  // ¿De quién es este DPI o este correo? La usa el alta del CRM para detectar
+  // que conta no está duplicando por error, sino dando de alta la empresa de
+  // alguien que ya es inversionista.
+  .get(
+    "/investor/identidad",
+    async ({ query, set }) => {
+      try {
+        const dpi = query.dpi?.trim() || null;
+        const email = query.email?.trim() || null;
+
+        if (!dpi && !email) {
+          set.status = 400;
+          return { success: false, message: "Se requiere 'dpi' o 'email'" };
+        }
+
+        const data = await buscarIdentidad(dpi, email);
+        set.status = 200;
+        return { success: true, data };
+      } catch (error) {
+        console.error("[GET /investor/identidad] Error:", error);
+        set.status = 500;
+        return {
+          success: false,
+          message: "Error al identificar al inversionista",
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+    {
+      query: t.Object({
+        dpi: t.Optional(t.String()),
+        email: t.Optional(t.String()),
+      }),
+      detail: {
+        summary: "Persona dueña de un DPI o correo (para detectar empresas)",
+        tags: ["Inversionistas"],
+      },
+    }
+  )
   .post("/investor/update", (ctx: any) => {
     guardDescuentaImpuestos(ctx); // no-ADMIN: quita descuenta_impuestos del body
     return updateInvestor(ctx);
@@ -339,6 +416,30 @@ export const inversionistasRouter = new Elysia()
           "CUBE y el row del inversionista se elimina. Lo mismo en el espejo, dejando " +
           "status='completado'. Al final, el inversionista pasa a status='inactivo' y " +
           "se envía correo de notificación a la lista hardcodeada.",
+        tags: ["Inversionistas"],
+      },
+    }
+  )
+  .post(
+    "/investor/portal-access",
+    // `ctx: any` como en `/investor` (línea 292): el handler de Elysia se tipa
+    // con un índice abierto y el controller pide `body`/`set`/`user` concretos.
+    // El tipado fuerte vive en el controller, que es donde está la lógica.
+    (ctx: any) => otorgarAccesoPortal(ctx),
+    {
+      body: t.Object({
+        inversionista_ids: t.Array(t.Number({ minimum: 1 }), { minItems: 1 }),
+      }),
+      detail: {
+        summary: "Abre el acceso al Portal del Inversionista (acto humano, solo ADMIN)",
+        description:
+          "Crea la cuenta del portal de los inversionistas indicados y les manda " +
+          "la contraseña. Es el paso que la reconciliación diaria DEJÓ de hacer sola: " +
+          "el cron detecta a quién le falta acceso y lo reporta, pero abrir la cuenta " +
+          "pasa por una persona, porque cartera.inversionistas se escribe desde " +
+          "caminos que no prueban identidad y el correo de una fila legítima puede " +
+          "estar envenenado. NO agregar esta ruta al proxy de auth-google " +
+          "(cartera.routes.ts): ahí queda alcanzable desde el portal.",
         tags: ["Inversionistas"],
       },
     }
@@ -731,12 +832,16 @@ export const inversionistasRouter = new Elysia()
       );
       inversionista.subtotal = totales.totales as any;
 
-      const logoUrl = import.meta.env.LOGO_URL || "";
+      const assetsBaseUrl = process.env.EMAIL_ASSETS_BASE_URL || (import.meta as any).env?.EMAIL_ASSETS_BASE_URL;
+      const logoUrl = assetsBaseUrl ? `${assetsBaseUrl}/isologo-cashin.png` : (import.meta.env.LOGO_URL || "");
+      const redesUrl = assetsBaseUrl ? `${assetsBaseUrl}/redes-cashin.png` : undefined;
       const filename = `reporte_inversionista_${id}_${Date.now()}.xlsx`;
       const { url } = await generarYSubirExcelInversionista(
         inversionista as any,
         filename,
-        logoUrl
+        logoUrl,
+        false,
+        redesUrl
       );
 
       return {
@@ -791,13 +896,16 @@ export const inversionistasRouter = new Elysia()
         );
         inversionista.subtotal = totales.totales as any;
 
-        const logoUrl = import.meta.env.LOGO_URL || "";
+        const assetsBaseUrl = process.env.EMAIL_ASSETS_BASE_URL || (import.meta as any).env?.EMAIL_ASSETS_BASE_URL;
+        const logoUrl = assetsBaseUrl ? `${assetsBaseUrl}/isologo-cashin.png` : (import.meta.env.LOGO_URL || "");
+        const redesUrl = assetsBaseUrl ? `${assetsBaseUrl}/redes-cashin.png` : undefined;
         const filename = `reporte_no_liquidados_${id}_${Date.now()}.xlsx`;
         const { url } = await generarYSubirExcelInversionista(
           inversionista as any,
           filename,
           logoUrl,
-          true
+          true,
+          redesUrl
         );
 
         return {
@@ -894,7 +1002,9 @@ export const inversionistasRouter = new Elysia()
         ? convertirReporteAUSD(inversionistaQ as any)
         : inversionistaQ;
 
-      const logoUrl = import.meta.env.LOGO_URL || "";
+      const assetsBaseUrl = process.env.EMAIL_ASSETS_BASE_URL || (import.meta as any).env?.EMAIL_ASSETS_BASE_URL;
+      const logoUrl = assetsBaseUrl ? `${assetsBaseUrl}/isologo-cashin.png` : (import.meta.env.LOGO_URL || "");
+      const redesUrl = assetsBaseUrl ? `${assetsBaseUrl}/redes-cashin.png` : undefined;
       const stamp = Date.now();
       const filename = `reporte_liquidados_${liquidacionId}_${stamp}.xlsx`;
 
@@ -906,9 +1016,9 @@ export const inversionistasRouter = new Elysia()
         : null;
 
       const [excelResult, excelResultGtq] = await Promise.all([
-        generarYSubirExcelInversionista(inversionista, filename, logoUrl),
+        generarYSubirExcelInversionista(inversionista, filename, logoUrl, false, redesUrl),
         filenameGtq
-          ? generarYSubirExcelInversionista(inversionistaQ as any, filenameGtq, logoUrl)
+          ? generarYSubirExcelInversionista(inversionistaQ as any, filenameGtq, logoUrl, false, redesUrl)
           : Promise.resolve(null),
       ]);
 
@@ -976,7 +1086,11 @@ export const inversionistasRouter = new Elysia()
           reinversion = { skipped: true, reason: "total_reinversion recalculado = 0", monto };
         } else {
           try {
-            const r = await ejecutarReinversionAutomatica(Number(investor_id), monto);
+            const r = await ejecutarReinversionAutomatica(
+              Number(investor_id),
+              monto,
+              liquidacionId ? Number(liquidacionId) : undefined,
+            );
             reinversion = {
               liquidacion_id: liquidacionId,
               inversionista_id: Number(investor_id),
@@ -1593,17 +1707,21 @@ export const inversionistasRouter = new Elysia()
     "/inversionistas/rendimiento",
     async ({ query, set }) => {
       try {
-        const { dpi, email } = query;
+        const { dpi, email, inversionista_id } = query;
 
-        if (!dpi && !email) {
+        if (!dpi && !email && !inversionista_id) {
           set.status = 400;
           return {
             success: false,
-            message: "Se requiere al menos 'dpi' o 'email'",
+            message: "Se requiere al menos 'inversionista_id', 'dpi' o 'email'",
           };
         }
 
-        const result = await getInvestorPerformance(dpi, email);
+        const result = await getInvestorPerformance(
+          dpi,
+          email,
+          inversionista_id ? Number(inversionista_id) : undefined
+        );
 
         set.status = 200;
         return {
@@ -1622,11 +1740,12 @@ export const inversionistasRouter = new Elysia()
     },
     {
       query: t.Object({
+        inversionista_id: t.Optional(t.String()),
         dpi: t.Optional(t.String()),
         email: t.Optional(t.String()),
       }),
       detail: {
-        summary: "Obtener rendimiento de inversionista por DPI o email",
+        summary: "Obtener rendimiento de inversionista por id, DPI o email",
         tags: ["Inversionistas"],
       },
     }

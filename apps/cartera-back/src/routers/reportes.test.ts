@@ -2,6 +2,11 @@ import { describe, expect, it, mock } from "bun:test";
 import jwt from "jsonwebtoken";
 import { getMoraRecoveryPeriod } from "../controllers/moraRecuperacion";
 
+// Mismo secreto que captura midleware.ts al cargarse. Firmar con "supersecreto"
+// a secas rompía apenas el .env local traía un JWT_SECRET propio (401 en vez de
+// 400/500); esta expresión es la misma del middleware, así que no depende del env.
+const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";
+
 const execute = mock(() => Promise.resolve({ rows: [] }));
 
 mock.module("../database", () => ({ db: { execute }, client: {} }));
@@ -11,7 +16,7 @@ const { reportesRouter } = await import("./reportes");
 describe("GET /reportes/mora-recuperacion-por-asesor", () => {
 	it("responde 400 para un ciclo futuro antes de consultar la base de datos", async () => {
 		execute.mockClear();
-		const token = jwt.sign({ role: "ADMIN" }, "supersecreto");
+		const token = jwt.sign({ role: "ADMIN" }, JWT_SECRET);
 		const response = await reportesRouter.handle(
 			new Request(
 				"http://localhost/reportes/mora-recuperacion-por-asesor?mes=1&anio=2100",
@@ -28,7 +33,7 @@ describe("GET /reportes/mora-recuperacion-por-asesor", () => {
 
 	it("responde 500 para un error inesperado", async () => {
 		execute.mockRejectedValueOnce(new Error("fallo de base de datos"));
-		const token = jwt.sign({ role: "ADMIN" }, "supersecreto");
+		const token = jwt.sign({ role: "ADMIN" }, JWT_SECRET);
 		const response = await reportesRouter.handle(
 			new Request(
 				"http://localhost/reportes/mora-recuperacion-por-asesor?mes=1&anio=2000",

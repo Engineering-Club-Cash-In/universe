@@ -79,6 +79,7 @@ import {
 } from "../lib/lead-helpers";
 import { canSyncNitToOpportunity } from "../lib/lead-nit-sync";
 import { getLeadSourceLabel } from "../lib/lead-sources";
+import { buildOpportunityCompanyPatch } from "../lib/opportunity-company-patch";
 import {
 	buildOpportunityRelationshipInvariantCondition,
 	buildWonOpportunityFrozenFieldError,
@@ -2360,6 +2361,7 @@ export const crmRouter = {
 			const {
 				id,
 				assignedTo,
+				companyId,
 				stageChangeReason,
 				seguro,
 				gps,
@@ -2373,8 +2375,12 @@ export const crmRouter = {
 				fechaInicio,
 				expectedUpdatedAt,
 				elegidoDesdeRecomendacionIA,
-				...updateData
+				...updateDataWithoutCompany
 			} = input;
+			const updateData = {
+				...updateDataWithoutCompany,
+				...buildOpportunityCompanyPatch(companyId),
+			};
 
 			// Get current opportunity to check for stage changes
 			const currentOpportunity = await db
@@ -2763,22 +2769,6 @@ export const crmRouter = {
 				input.vehicleId !== undefined &&
 				input.vehicleId !== currentOpportunity[0].vehicleId;
 
-			// La compañía representa la agencia únicamente para vehículos nuevos.
-			// Si se cambia a un usado (o se quita el vehículo), no conservar una
-			// compañía heredada o enviada por un caller de la API.
-			if (vehicleChanged) {
-				const [newVehicle] = input.vehicleId
-					? await db
-							.select({ isNew: vehicles.isNew })
-							.from(vehicles)
-							.where(eq(vehicles.id, input.vehicleId))
-							.limit(1)
-					: [];
-
-				if (newVehicle?.isNew !== true) {
-					updateData.companyId = null;
-				}
-			}
 			const currentInsuranceProvider =
 				currentOpportunity[0].insuranceProvider ?? "universales";
 			const insuranceFallback =

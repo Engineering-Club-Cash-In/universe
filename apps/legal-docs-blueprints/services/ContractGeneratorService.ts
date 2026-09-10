@@ -47,9 +47,22 @@ export class ContractGeneratorService {
   private pdfConversionQueue: Array<() => void> = [];
   private activePdfConversions = 0;
   private readonly maxConcurrentPdfConversions = 3; // Máximo 3 conversiones simultáneas
+  // Timeouts duros. Bajo Bun, el `timeout` de axios NO corta una respuesta que llegó a medias
+  // (headers recibidos, cuerpo que nunca termina): la promesa quedaba viva y el slot tomado para siempre.
+  // Con 3 slots tomados, toda conversión posterior esperaba en la cola sin log ni error.
+  private readonly pdfTimeoutMs: number;
+  private readonly pdfQueueTimeoutMs: number;
+  // Gotenberg se traba de vez en cuando en una conversión suelta y la siguiente sale en
+  // menos de un segundo, así que el reintento resuelve el caso normal sin que nadie se entere.
+  private readonly pdfConversionAttempts: number;
 
   constructor(options: ContractGeneratorOptions = {}) {
     this.gotenbergUrl = options.gotenbergUrl || 'http://localhost:3000';
+    // 20 s con 3 intentos y no 60 s de una sola oportunidad: el p99 real de estas
+    // conversiones es 1.8 s, así que esperar un minuto solo alarga el fallo.
+    this.pdfTimeoutMs = options.pdfTimeoutMs ?? 20000;
+    this.pdfQueueTimeoutMs = options.pdfQueueTimeoutMs ?? 90000;
+    this.pdfConversionAttempts = Math.max(1, options.pdfConversionAttempts ?? 3);
     this.templatesDir = options.templatesDir || path.join(process.cwd(), 'templates');
     this.outputDir = options.outputDir || path.join(process.cwd(), 'output');
     this.templateRegistry = new Map();
@@ -786,9 +799,23 @@ export class ContractGeneratorService {
           pdfPath = path.join(this.outputDir, pdfFilename);
           await fs.writeFile(pdfPath, pdfBuffer);
           console.log(`✓ PDF generado: ${pdfFilename}`);
-        } catch (pdfError) {
+        } catch (pdfError: any) {
+          // Sin PDF no hay nada que subir a R2 ni que mandar a firma, así que devolver
+          // éxito acá dejaba el contrato "generado" pero sin documento ni link: el CRM
+          // lo enlazaba igual y jurídico se enteraba hasta que lo iba a abrir.
           console.error('Error al generar PDF:', pdfError);
-          // No fallar si PDF falla, el DOCX ya está generado
+          await this.cleanupLocalFiles(docxPath);
+          return {
+            templateId: 0,
+            success: false,
+            nameDocument: [{ enum: contractType, label: config.description }],
+            data: [],
+            linkDocument: '',
+            signing_links: undefined,
+            contractType,
+            message: 'Error al generar contrato',
+            error: `No se pudo convertir el documento a PDF: ${pdfError?.message ?? 'error desconocido'}`
+          };
         }
       }
 
@@ -989,13 +1016,36 @@ export class ContractGeneratorService {
       return;
     }
 
-    // Esperar a que se libere un slot
-    return new Promise<void>((resolve) => {
-      this.pdfConversionQueue.push(() => {
+    console.warn(`⏳ Cola de PDF llena (${this.activePdfConversions} activas, ${this.pdfConversionQueue.length} en espera). Esperando slot...`);
+
+    // Esperar a que se libere un slot, con tope: si nunca se libera, fallar en vez de colgar la request
+    return new Promise<void>((resolve, reject) => {
+      const waiter = () => {
+        clearTimeout(timer);
         this.activePdfConversions++;
         resolve();
-      });
+      };
+      const timer = setTimeout(() => {
+        const idx = this.pdfConversionQueue.indexOf(waiter);
+        if (idx !== -1) this.pdfConversionQueue.splice(idx, 1);
+        reject(new Error(
+          `Timeout esperando slot de conversión PDF (${this.pdfQueueTimeoutMs} ms). ` +
+          `Conversiones activas: ${this.activePdfConversions}, en cola: ${this.pdfConversionQueue.length}.`
+        ));
+      }, this.pdfQueueTimeoutMs);
+      this.pdfConversionQueue.push(waiter);
     });
+  }
+
+  /**
+   * Estado de la cola de conversión PDF (para /health y /metrics)
+   */
+  public getPdfQueueStats(): { active: number; queued: number; max: number } {
+    return {
+      active: this.activePdfConversions,
+      queued: this.pdfConversionQueue.length,
+      max: this.maxConcurrentPdfConversions
+    };
   }
 
   /**
@@ -1009,7 +1059,37 @@ export class ContractGeneratorService {
     }
   }
 
+  /**
+   * Convierte a PDF reintentando: el cuelgue de Gotenberg es puntual, no del documento.
+   * Medido sobre las conversiones históricas, el p99 es 1.8 s y el mismo documento que
+   * expiró convierte en menos de un segundo al reintentarlo.
+   */
   private async convertToPdf(docxBuffer: Buffer): Promise<Buffer> {
+    let lastError: Error | undefined;
+
+    for (let attempt = 1; attempt <= this.pdfConversionAttempts; attempt++) {
+      try {
+        return await this.convertToPdfOnce(docxBuffer);
+      } catch (error: any) {
+        lastError = error;
+        const quedanIntentos = attempt < this.pdfConversionAttempts;
+        console.error(
+          `  ⚠ Conversión a PDF fallida (intento ${attempt}/${this.pdfConversionAttempts}): ${error.message}` +
+          (quedanIntentos ? ' — reintentando...' : '')
+        );
+        // Respiro corto antes de reintentar: si Gotenberg viene de un cuelgue,
+        // pegarle de inmediato suele caer en el mismo estado.
+        if (quedanIntentos) await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+
+    throw new Error(
+      `No se pudo convertir a PDF tras ${this.pdfConversionAttempts} intento(s). ` +
+      `Último error: ${lastError?.message ?? 'desconocido'}`
+    );
+  }
+
+  private async convertToPdfOnce(docxBuffer: Buffer): Promise<Buffer> {
     // Esperar a que haya un slot disponible (máximo 3 conversiones simultáneas)
     await this.acquirePdfSlot();
 
@@ -1031,7 +1111,9 @@ export class ContractGeneratorService {
           // Límites razonables para evitar memory leaks
           maxBodyLength: 50 * 1024 * 1024, // 50MB máximo
           maxContentLength: 50 * 1024 * 1024, // 50MB máximo
-          timeout: 60000 // 60 segundos timeout (LibreOffice puede ser lento)
+          timeout: this.pdfTimeoutMs, // Cubre la espera de headers (LibreOffice puede ser lento)
+          // Cubre TODO el request, incluido un cuerpo que se queda a medias: `timeout` no lo corta en Bun
+          signal: AbortSignal.timeout(this.pdfTimeoutMs)
         }
       );
 
@@ -1043,6 +1125,9 @@ export class ContractGeneratorService {
       }
       if (error.code === 'ETIMEDOUT' || error.code === 'ECONNABORTED') {
         throw new Error('Timeout al conectar con Gotenberg. El servicio puede estar sobrecargado.');
+      }
+      if (error.code === 'ERR_CANCELED' || error.name === 'CanceledError' || error.name === 'TimeoutError') {
+        throw new Error(`Timeout de ${this.pdfTimeoutMs} ms convirtiendo a PDF: Gotenberg dejó la respuesta a medias.`);
       }
       if (error.response?.status === 503) {
         throw new Error('Gotenberg está sobrecargado (503). Intente nuevamente en unos segundos.');
@@ -1104,6 +1189,15 @@ export class ContractGeneratorService {
 }
 
 // Exportar instancia singleton por defecto
+const numeroDeEnv = (valor: string | undefined): number | undefined => {
+  const n = Number(valor);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+};
+
 export const contractGenerator = new ContractGeneratorService({
-  gotenbergUrl: process.env.GOTENBERG_URL || 'http://localhost:3000'
+  gotenbergUrl: process.env.GOTENBERG_URL || 'http://localhost:3000',
+  // Ajustables por env para poder afinarlos en caliente si Gotenberg se pone lento
+  pdfTimeoutMs: numeroDeEnv(process.env.PDF_TIMEOUT_MS),
+  pdfQueueTimeoutMs: numeroDeEnv(process.env.PDF_QUEUE_TIMEOUT_MS),
+  pdfConversionAttempts: numeroDeEnv(process.env.PDF_CONVERSION_ATTEMPTS)
 });

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import Big from "big.js";
+import ExcelJS from "exceljs";
 import { lockPoolMock } from "../testMocks";
 
 // Configuración de variables de entorno ficticias para evitar que fallen los imports de paquetes internos (ej. email)
@@ -60,16 +61,88 @@ mock.module("@aws-sdk/client-s3", () => {
     },
     PutObjectCommand: class {},
     GetObjectCommand: class {},
-    DeleteObjectCommand: class {}
+    DeleteObjectCommand: class {},
+    HeadObjectCommand: class {}
   };
 });
 
 const { buildInversionistaWorkbook } = await import("./generalFunctions");
 
 describe("buildInversionistaWorkbook - Reglas de Ajuste de Montos para Excel", () => {
+  const fillArgb = (cell: ExcelJS.Cell) =>
+    cell.fill.type === "pattern" ? cell.fill.fgColor?.argb : undefined;
+
   beforeEach(() => {
     mockHistoricoLiquidacionesEspejo = [];
     mockComprasCreditoInversionista = [];
+  });
+
+  it("matches CashIn liquidation template styling without changing report values", async () => {
+    const buffer = await buildInversionistaWorkbook({
+      nombre_inversionista: "Inversionista de Estilo",
+      moneda: "quetzales",
+      reinversion: "sin_reinversion",
+      subtotal: {
+        total_abono_capital: "200.00",
+        total_abono_general_interes: "475.91",
+        total_cuota_con_reinversion: "675.13",
+        total_reinversion_capital: "0.00",
+        total_reinversion_interes: "0.00",
+        total_reinversion: "0.00",
+      },
+      creditos: [{
+        credito_id: 1001,
+        numero_credito_sifco: "CRED-1001",
+        nombre_usuario: "Cliente de Prueba",
+        monto_aportado: "10000.00",
+        porcentaje_interes: "1.50",
+        plazo: 84,
+        nit_usuario: "1234567-8",
+        pagos: [{
+          estado_liquidacion: "NO_LIQUIDADO",
+          abono_capital: "200.00",
+          abono_interes: "475.91",
+          abono_iva: "0.00",
+          isr: "0.00",
+          abonoGeneralInteres: "475.91",
+          porcentaje_inversor: "80.00",
+          tasaInteresInvesor: "1.20",
+          cuota: 1,
+          mes: "abril",
+          fecha_pago: "2026-04-10",
+        }],
+      }],
+    } as any);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer as any);
+    const sheet = workbook.getWorksheet("Reporte")!;
+
+    expect(sheet.getCell("E1").font.color?.argb).toBe("FF0F1B4C");
+    expect(sheet.getCell("E1").font.name).toBe("Inter");
+    expect(sheet.getCell("E1").font.size).toBe(18);
+    expect(sheet.getCell("E2").font.color?.argb).toBe("FF4E57EA");
+    expect(fillArgb(sheet.getCell("A3"))).toBe("FF4E57EA");
+    expect(sheet.getCell("A3").font.color?.argb).toBe("FFFFFFFF");
+    expect(sheet.getCell("A3").font.size).toBe(12);
+    expect(fillArgb(sheet.getCell("A4"))).not.toBe("FFF0F0FF");
+    expect(sheet.getCell("A4").font.bold).not.toBeTrue();
+    expect(sheet.getCell("A4").border.top?.style).toBe("thin");
+    expect(sheet.getCell("A4").border.top?.color?.argb).toBe("FFFFFFFF");
+    expect(sheet.getCell("A4").border.right?.style).toBe("thin");
+    expect(fillArgb(sheet.getCell("A6"))).toBe("FFF3F3F3");
+    expect(sheet.getCell("A6").font.color?.argb).toBe("FF0F172A");
+    expect(sheet.getCell("A6").font.name).toBe("Inter");
+    expect(sheet.getCell("A6").font.size).toBe(11);
+    expect(sheet.getCell("A6").border.top?.style).toBe("medium");
+    expect(sheet.getRow(6).height).toBe(42.75);
+    expect(sheet.getCell("A6").value).toBe("MESES EN CRÉDITO");
+    expect(sheet.getCell("A6").alignment.vertical).toBe("middle");
+    expect(sheet.getCell("O6").value).toBe("NIT");
+    expect(sheet.model.merges).toContain("A1:D2");
+    expect(sheet.model.merges).toContain("L1:O2");
+    expect(sheet.getCell("A12").value).toBe("REINVERSIÓN CAPITAL");
+    expect(sheet.getCell("C7").value).toBe(10000);
+    expect(sheet.getCell("J7").value).toBe(200);
   });
 
   it("1. validar inv es nuevo y tiene compra de cartera nueva → no debe generar pagos este 10 (monto base calculado es 0)", async () => {

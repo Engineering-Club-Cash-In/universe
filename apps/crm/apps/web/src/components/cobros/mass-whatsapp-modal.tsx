@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { MessageCircle, Send } from "lucide-react";
+import { Eye, MessageCircle, Pencil, Send } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -24,6 +24,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { PLANTILLAS_MENSAJES } from "@/lib/cobros/plantillas-mensajes";
 import { client } from "@/utils/orpc";
+import { WhatsappPreview } from "./whatsapp-preview";
 
 const VARIABLES_DISPONIBLES = [
 	"clienteNombre",
@@ -35,6 +36,11 @@ const VARIABLES_DISPONIBLES = [
 	"cuotasAtraso",
 	"telefonoAsesor",
 	"nombreAsesor",
+	"expectativaMora",
+	"anioImpuesto",
+	"fechaLimiteImpuesto",
+	"aseguradora",
+	"cabinaSeguro",
 ] as const;
 
 interface DescartadoItem {
@@ -135,6 +141,13 @@ export function MassWhatsappModal({
 		DescartadoItem[] | null
 	>(null);
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
+	// El mensaje arranca en modo lectura (vista previa estilo WhatsApp) para no
+	// confundir con los asteriscos de negrita; "Editar mensaje" abre el textarea.
+	const [editando, setEditando] = useState(false);
+
+	useEffect(() => {
+		if (editando) textareaRef.current?.focus();
+	}, [editando]);
 
 	const insertarVariable = (variable: string) => {
 		const token = `{${variable}}`;
@@ -165,6 +178,7 @@ export function MassWhatsappModal({
 	// Pre-poblar el textarea con el cuerpoWhastapp (versión corta aprobada en
 	// Meta) cuando cambia la plantilla. Si no existe, caemos al cuerpo largo.
 	useEffect(() => {
+		setEditando(false);
 		if (!plantillaSeleccionada) {
 			setCuerpoEditado("");
 			return;
@@ -214,237 +228,291 @@ export function MassWhatsappModal({
 
 	return (
 		<>
-		<Dialog open={open} onOpenChange={setOpen}>
-			<DialogTrigger asChild>{children}</DialogTrigger>
-			<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
-				<DialogHeader>
-					<DialogTitle className="flex items-center gap-2">
-						<MessageCircle className="h-5 w-5" />
-						Enviar WhatsApp masivo
-					</DialogTitle>
-					<DialogDescription>
-						Se enviará la plantilla seleccionada a todos los créditos que
-						coincidan con los filtros actuales. Los créditos sin teléfono,
-						sin cuota o sin asesor se descartan automáticamente.
-					</DialogDescription>
-				</DialogHeader>
+			<Dialog open={open} onOpenChange={setOpen}>
+				<DialogTrigger asChild>{children}</DialogTrigger>
+				<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
+					<DialogHeader>
+						<DialogTitle className="flex items-center gap-2">
+							<MessageCircle className="h-5 w-5" />
+							Enviar WhatsApp masivo
+						</DialogTitle>
+						<DialogDescription>
+							Se enviará la plantilla seleccionada a todos los créditos que
+							coincidan con los filtros actuales. Los créditos sin teléfono, sin
+							cuota o sin asesor se descartan automáticamente.
+						</DialogDescription>
+					</DialogHeader>
 
-				<div className="space-y-4">
-					<div className="space-y-2">
-						<Label>Plantilla</Label>
-						<Select value={plantillaId} onValueChange={setPlantillaId}>
-							<SelectTrigger>
-								<SelectValue placeholder="Seleccionar plantilla" />
-							</SelectTrigger>
-							<SelectContent>
-								{PLANTILLAS_MENSAJES.map((p) => (
-									<SelectItem key={p.id} value={p.id}>
-										{p.nombre}
-									</SelectItem>
-								))}
-							</SelectContent>
-						</Select>
+					<div className="space-y-4">
+						<div className="space-y-2">
+							<Label>Plantilla</Label>
+							<Select value={plantillaId} onValueChange={setPlantillaId}>
+								<SelectTrigger>
+									<SelectValue placeholder="Seleccionar plantilla" />
+								</SelectTrigger>
+								<SelectContent>
+									{PLANTILLAS_MENSAJES.map((p) => (
+										<SelectItem key={p.id} value={p.id}>
+											{p.nombre}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						</div>
+
+						{plantillaSeleccionada ? (
+							<>
+								<div className="space-y-2">
+									<div className="flex items-center justify-between gap-2">
+										<Label htmlFor="cuerpo-editado">Mensaje a enviar</Label>
+										<div className="flex items-center gap-3">
+											{editando && (
+												<button
+													type="button"
+													onClick={() =>
+														setCuerpoEditado(
+															plantillaSeleccionada.cuerpoWhastapp ||
+																plantillaSeleccionada.cuerpo,
+														)
+													}
+													className="text-muted-foreground text-xs underline-offset-2 hover:text-foreground hover:underline"
+												>
+													Restaurar plantilla original
+												</button>
+											)}
+											<Button
+												type="button"
+												size="sm"
+												variant={editando ? "outline" : "default"}
+												className="gap-1.5"
+												onClick={() => setEditando((v) => !v)}
+											>
+												{editando ? (
+													<>
+														<Eye className="h-3.5 w-3.5" />
+														Ver como lo verá el cliente
+													</>
+												) : (
+													<>
+														<Pencil className="h-3.5 w-3.5" />
+														Editar mensaje
+													</>
+												)}
+											</Button>
+										</div>
+									</div>
+
+									{editando ? (
+										<>
+											<Textarea
+												ref={textareaRef}
+												id="cuerpo-editado"
+												className="min-h-55 text-sm"
+												value={cuerpoEditado}
+												onChange={(e) => setCuerpoEditado(e.target.value)}
+											/>
+											<p className="text-muted-foreground text-xs">
+												Separá con <strong>una línea en blanco</strong> para
+												crear un nuevo párrafo (= un parámetro del template).
+												Mínimo 1, máximo 5. Las variables entre{" "}
+												<code>{"{llaves}"}</code> se reemplazan por los datos
+												reales de cada crédito; si una variable no existe o
+												queda mal escrita, se manda literal. El texto entre
+												asteriscos (<code>*así*</code>) sale en{" "}
+												<strong>negrita</strong> en WhatsApp — los asteriscos no
+												se ven en el mensaje final.
+											</p>
+											<div className="flex flex-wrap gap-1">
+												{VARIABLES_DISPONIBLES.map((v) => (
+													<button
+														key={v}
+														type="button"
+														onClick={() => insertarVariable(v)}
+														className="cursor-pointer rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+														title={`Insertar {${v}} en la posición del cursor`}
+													>
+														{`{${v}}`}
+													</button>
+												))}
+											</div>
+										</>
+									) : (
+										<>
+											<WhatsappPreview
+												mensaje={cuerpoEditado}
+												className="min-h-55"
+											/>
+											<p className="text-muted-foreground text-xs">
+												Así lo verá el cliente en WhatsApp. Las variables entre{" "}
+												<code>{"{llaves}"}</code> se reemplazan por los datos
+												reales de cada crédito al enviar.
+											</p>
+										</>
+									)}
+
+									{(cuerpoEditado.includes("{aseguradora}") ||
+										cuerpoEditado.includes("{cabinaSeguro}")) && (
+										<p className="rounded-md border border-primary/30 bg-primary/5 p-2 text-muted-foreground text-xs">
+											🛈 El bloque del seguro se ajusta solo:{" "}
+											<code>{"{aseguradora}"}</code> y{" "}
+											<code>{"{cabinaSeguro}"}</code> se reemplazan según la
+											aseguradora registrada en la oportunidad de cada crédito
+											(Seguros Universales, cabina 2384-7400, o Seguro GYT,
+											cabina 1778).
+										</p>
+									)}
+								</div>
+
+								<div className="grid gap-3 md:grid-cols-2">
+									<div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
+										<p className="font-medium">Filtros aplicados</p>
+										<ul className="mt-1 list-inside list-disc text-muted-foreground text-xs">
+											<li>
+												Estado de mora:{" "}
+												{filtros.estadoMora
+													? (ESTADO_MORA_LABELS[filtros.estadoMora] ??
+														filtros.estadoMora)
+													: "Todos"}
+											</li>
+											<li>Rango temporal: {formatRangoTemporal(filtros)}</li>
+											<li>Búsqueda: {filtros.searchTerm ?? "—"}</li>
+											<li>No. SIFCO: {filtros.numeroSifco ?? "—"}</li>
+											<li>
+												Etiquetas:{" "}
+												{filtros.etiquetas && filtros.etiquetas.length > 0
+													? filtros.etiquetas
+															.map((e) => etiquetaLabels?.[e] ?? e)
+															.join(", ")
+													: "Todas"}
+											</li>
+										</ul>
+									</div>
+
+									{typeof totalDestinatarios === "number" && (
+										<div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm">
+											<p className="font-medium">
+												Se enviará a{" "}
+												{totalDestinatarios.toLocaleString("es-GT")}{" "}
+												{totalDestinatarios === 1 ? "crédito" : "créditos"}
+											</p>
+											<p className="mt-1 text-muted-foreground text-xs">
+												Los créditos sin teléfono, sin cuota o sin asesor se
+												descartan automáticamente, por lo que el número final
+												puede ser menor.
+											</p>
+										</div>
+									)}
+								</div>
+							</>
+						) : (
+							<div className="flex flex-col items-center justify-center gap-2 rounded-md border border-border border-dashed bg-muted/20 p-8 text-center">
+								<MessageCircle className="h-8 w-8 text-muted-foreground" />
+								<p className="font-medium text-sm">
+									Selecciona una plantilla para continuar
+								</p>
+								<p className="text-muted-foreground text-xs">
+									Una vez elegida verás la vista previa, los filtros aplicados y
+									la cantidad de destinatarios.
+								</p>
+							</div>
+						)}
 					</div>
 
-					{plantillaSeleccionada ? (
-						<>
-							<div className="space-y-2">
-								<div className="flex items-center justify-between">
-									<Label htmlFor="cuerpo-editado">Mensaje a enviar</Label>
-									<button
-										type="button"
-										onClick={() =>
-											setCuerpoEditado(
-												plantillaSeleccionada.cuerpoWhastapp ||
-													plantillaSeleccionada.cuerpo,
-											)
-										}
-										className="text-muted-foreground text-xs underline-offset-2 hover:text-foreground hover:underline"
-									>
-										Restaurar plantilla original
-									</button>
-								</div>
-								<Textarea
-									ref={textareaRef}
-									id="cuerpo-editado"
-									className="min-h-55 text-sm"
-									value={cuerpoEditado}
-									onChange={(e) => setCuerpoEditado(e.target.value)}
-								/>
-								<p className="text-muted-foreground text-xs">
-									Separá con <strong>una línea en blanco</strong> para crear un
-									nuevo párrafo (= un parámetro del template). Mínimo 1, máximo
-									4. Las variables entre <code>{"{llaves}"}</code> se
-									reemplazan por los datos reales de cada crédito; si una
-									variable no existe o queda mal escrita, se manda literal.
-								</p>
-								<div className="flex flex-wrap gap-1">
-									{VARIABLES_DISPONIBLES.map((v) => (
-										<button
-											key={v}
-											type="button"
-											onClick={() => insertarVariable(v)}
-											className="cursor-pointer rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-											title={`Insertar {${v}} en la posición del cursor`}
+					<DialogFooter>
+						<Button
+							variant="outline"
+							onClick={() => setOpen(false)}
+							disabled={sendMutation.isPending}
+						>
+							Cancelar
+						</Button>
+						<Button
+							onClick={() => sendMutation.mutate()}
+							disabled={sendMutation.isPending || !plantillaId}
+							className="flex items-center gap-2"
+						>
+							<Send className="h-4 w-4" />
+							{sendMutation.isPending ? "Enviando..." : "Enviar a todos"}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+
+			<Dialog
+				open={!!descartadosResult}
+				onOpenChange={(o) => {
+					if (!o) setDescartadosResult(null);
+				}}
+			>
+				<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+					<DialogHeader>
+						<DialogTitle>
+							Descartados del envío masivo ({descartadosResult?.length ?? 0})
+						</DialogTitle>
+						<DialogDescription>
+							Estos créditos no recibieron el mensaje: o les faltaba algún dato
+							(teléfono, cuota o asesor asignado) o el envío falló en el
+							proveedor. El motivo de cada uno se indica en la última columna.
+							Podés exportarlos a CSV para hacer seguimiento manual.
+						</DialogDescription>
+					</DialogHeader>
+
+					{descartadosResult && descartadosResult.length > 0 && (
+						<div className="max-h-96 overflow-y-auto rounded-md border border-border">
+							<table className="w-full text-sm">
+								<thead className="sticky top-0 bg-muted/60 backdrop-blur">
+									<tr className="border-b">
+										<th className="px-3 py-2 text-left font-medium text-muted-foreground text-xs">
+											No. SIFCO
+										</th>
+										<th className="px-3 py-2 text-left font-medium text-muted-foreground text-xs">
+											Cliente
+										</th>
+										<th className="px-3 py-2 text-left font-medium text-muted-foreground text-xs">
+											Motivo
+										</th>
+									</tr>
+								</thead>
+								<tbody>
+									{descartadosResult.map((d, idx) => (
+										<tr
+											key={`${d.numeroSifco ?? "sin-sifco"}-${idx}`}
+											className="border-b last:border-b-0"
 										>
-											{`{${v}}`}
-										</button>
+											<td className="px-3 py-2 font-mono text-muted-foreground text-xs">
+												{d.numeroSifco ?? "—"}
+											</td>
+											<td className="px-3 py-2">{d.clienteNombre ?? "—"}</td>
+											<td className="px-3 py-2">
+												<span className="rounded bg-amber-100 px-2 py-0.5 text-amber-900 text-xs">
+													{d.motivo}
+												</span>
+											</td>
+										</tr>
 									))}
-								</div>
-							</div>
-
-							<div className="grid gap-3 md:grid-cols-2">
-								<div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
-									<p className="font-medium">Filtros aplicados</p>
-									<ul className="mt-1 list-inside list-disc text-muted-foreground text-xs">
-										<li>
-											Estado de mora:{" "}
-											{filtros.estadoMora
-												? (ESTADO_MORA_LABELS[filtros.estadoMora] ??
-													filtros.estadoMora)
-												: "Todos"}
-										</li>
-										<li>Rango temporal: {formatRangoTemporal(filtros)}</li>
-										<li>Búsqueda: {filtros.searchTerm ?? "—"}</li>
-										<li>No. SIFCO: {filtros.numeroSifco ?? "—"}</li>
-										<li>
-											Etiquetas:{" "}
-											{filtros.etiquetas && filtros.etiquetas.length > 0
-												? filtros.etiquetas
-														.map((e) => etiquetaLabels?.[e] ?? e)
-														.join(", ")
-												: "Todas"}
-										</li>
-									</ul>
-								</div>
-
-								{typeof totalDestinatarios === "number" && (
-									<div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm">
-										<p className="font-medium">
-											Se enviará a{" "}
-											{totalDestinatarios.toLocaleString("es-GT")}{" "}
-											{totalDestinatarios === 1 ? "crédito" : "créditos"}
-										</p>
-										<p className="mt-1 text-muted-foreground text-xs">
-											Los créditos sin teléfono, sin cuota o sin asesor se
-											descartan automáticamente, por lo que el número final
-											puede ser menor.
-										</p>
-									</div>
-								)}
-							</div>
-						</>
-					) : (
-						<div className="flex flex-col items-center justify-center gap-2 rounded-md border border-border border-dashed bg-muted/20 p-8 text-center">
-							<MessageCircle className="h-8 w-8 text-muted-foreground" />
-							<p className="font-medium text-sm">
-								Selecciona una plantilla para continuar
-							</p>
-							<p className="text-muted-foreground text-xs">
-								Una vez elegida verás la vista previa, los filtros aplicados y
-								la cantidad de destinatarios.
-							</p>
+								</tbody>
+							</table>
 						</div>
 					)}
-				</div>
 
-				<DialogFooter>
-					<Button
-						variant="outline"
-						onClick={() => setOpen(false)}
-						disabled={sendMutation.isPending}
-					>
-						Cancelar
-					</Button>
-					<Button
-						onClick={() => sendMutation.mutate()}
-						disabled={sendMutation.isPending || !plantillaId}
-						className="flex items-center gap-2"
-					>
-						<Send className="h-4 w-4" />
-						{sendMutation.isPending ? "Enviando..." : "Enviar a todos"}
-					</Button>
-				</DialogFooter>
-			</DialogContent>
-		</Dialog>
-
-		<Dialog
-			open={!!descartadosResult}
-			onOpenChange={(o) => {
-				if (!o) setDescartadosResult(null);
-			}}
-		>
-			<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
-				<DialogHeader>
-					<DialogTitle>
-						Descartados del envío masivo ({descartadosResult?.length ?? 0})
-					</DialogTitle>
-					<DialogDescription>
-						Estos créditos no recibieron el mensaje: o les faltaba algún dato
-						(teléfono, cuota o asesor asignado) o el envío falló en el
-						proveedor. El motivo de cada uno se indica en la última columna.
-						Podés exportarlos a CSV para hacer seguimiento manual.
-					</DialogDescription>
-				</DialogHeader>
-
-				{descartadosResult && descartadosResult.length > 0 && (
-					<div className="max-h-96 overflow-y-auto rounded-md border border-border">
-						<table className="w-full text-sm">
-							<thead className="sticky top-0 bg-muted/60 backdrop-blur">
-								<tr className="border-b">
-									<th className="px-3 py-2 text-left font-medium text-muted-foreground text-xs">
-										No. SIFCO
-									</th>
-									<th className="px-3 py-2 text-left font-medium text-muted-foreground text-xs">
-										Cliente
-									</th>
-									<th className="px-3 py-2 text-left font-medium text-muted-foreground text-xs">
-										Motivo
-									</th>
-								</tr>
-							</thead>
-							<tbody>
-								{descartadosResult.map((d, idx) => (
-									<tr
-										key={`${d.numeroSifco ?? "sin-sifco"}-${idx}`}
-										className="border-b last:border-b-0"
-									>
-										<td className="px-3 py-2 font-mono text-muted-foreground text-xs">
-											{d.numeroSifco ?? "—"}
-										</td>
-										<td className="px-3 py-2">
-											{d.clienteNombre ?? "—"}
-										</td>
-										<td className="px-3 py-2">
-											<span className="rounded bg-amber-100 px-2 py-0.5 text-amber-900 text-xs">
-												{d.motivo}
-											</span>
-										</td>
-									</tr>
-								))}
-							</tbody>
-						</table>
-					</div>
-				)}
-
-				<DialogFooter>
-					<Button
-						variant="outline"
-						onClick={() => setDescartadosResult(null)}
-					>
-						Cerrar
-					</Button>
-					<Button
-						onClick={() =>
-							descartadosResult && descargarCsv(descartadosResult)
-						}
-						disabled={!descartadosResult || descartadosResult.length === 0}
-					>
-						Descargar CSV
-					</Button>
-				</DialogFooter>
-			</DialogContent>
-		</Dialog>
+					<DialogFooter>
+						<Button
+							variant="outline"
+							onClick={() => setDescartadosResult(null)}
+						>
+							Cerrar
+						</Button>
+						<Button
+							onClick={() =>
+								descartadosResult && descargarCsv(descartadosResult)
+							}
+							disabled={!descartadosResult || descartadosResult.length === 0}
+						>
+							Descargar CSV
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 		</>
 	);
 }

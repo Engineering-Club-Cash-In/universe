@@ -36,7 +36,15 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { avisoAccesoPortal } from "@/lib/acceso-portal";
 import { authClient } from "@/lib/auth-client";
+import {
+	camposAlDescartar,
+	camposAlDetectar,
+	claveDisparador,
+	disparadorDeteccion,
+	type IdentidadDetectada,
+} from "@/lib/deteccion-empresa";
 import { PERMISSIONS } from "@/lib/roles";
 import {
 	MODALIDAD_FACTURACION_LABELS,
@@ -62,6 +70,18 @@ function LiquidacionesInversionistas() {
 	const [formBanco, setFormBanco] = useState("");
 	const [formTipoCuenta, setFormTipoCuenta] = useState("");
 	const [formNumeroCuenta, setFormNumeroCuenta] = useState("");
+	// Ya no hay interruptor "¿Es empresa?": se deduce del dato. Si el DPI o el
+	// correo que escribieron ya son de alguien, lo que se está creando es la
+	// empresa de esa persona. `formDpiRepLegal` con valor ES la señal.
+	const [formDpiRepLegal, setFormDpiRepLegal] = useState("");
+	// Persona detectada detrás del DPI/correo escrito.
+	const [personaDetectada, setPersonaDetectada] =
+		useState<IdentidadDetectada | null>(null);
+	// Disparadores que conta ya rechazó ("no era esa persona"), para no volver a
+	// proponer lo mismo en cuanto se vuelva a teclear el valor.
+	const [deteccionesDescartadas, setDeteccionesDescartadas] = useState<
+		string[]
+	>([]);
 	const [formMoneda, setFormMoneda] = useState("quetzales");
 	const [formEmiteFactura, setFormEmiteFactura] = useState(false);
 	const [formTipoReinversion, setFormTipoReinversion] = useState("sin_reinversion");
@@ -71,8 +91,9 @@ function LiquidacionesInversionistas() {
 	const [formMontoCompra, setFormMontoCompra] = useState("");
 	const [formModalidadFacturacion, setFormModalidadFacturacion] =
 		useState<ModalidadFacturacion>("p2p_directa");
-	// Campo que cartera rechazó por duplicado (dpi | email | nombre): lo manda
-	// el backend en err.data.campo para marcar el input exacto.
+	// Campo que cartera rechazó (dpi | email | nombre duplicado, o
+	// dpi_rep_legal inexistente): lo manda el backend en err.data.campo para
+	// marcar el input exacto.
 	const [campoDuplicado, setCampoDuplicado] = useState<{
 		campo: string;
 		mensaje: string;
@@ -102,6 +123,86 @@ function LiquidacionesInversionistas() {
 		);
 		return () => clearTimeout(timer);
 	}, [formMontoCompraNum]);
+	// Detección de empresa: el DPI (o el correo, si no hay DPI) se consulta con
+	// debounce para ver si ya son de alguien.
+	const disparador = disparadorDeteccion(formDpi, formEmail);
+	const claveActual = disparador ? claveDisparador(disparador) : null;
+	const [claveDebounced, setClaveDebounced] = useState<string | null>(null);
+	useEffect(() => {
+		const timer = setTimeout(() => setClaveDebounced(claveActual), 400);
+		return () => clearTimeout(timer);
+	}, [claveActual]);
+
+	const deteccionDescartada =
+		!!claveActual && deteccionesDescartadas.includes(claveActual);
+
+	const identidadQuery = useQuery({
+		...orpc.identidadInversionista.queryOptions({
+			input: disparador ?? {},
+		}),
+		enabled:
+			crearOpen &&
+			!!disparador &&
+			claveDebounced === claveActual &&
+			// Ya se está creando una empresa: no hay nada más que detectar.
+			!formDpiRepLegal &&
+			!deteccionDescartada,
+		// `staleTime: 0`: este resultado NO se puede dar por bueno ni un segundo.
+		//
+		// La invalidación de `crearMutation` solo alcanza a ESTE navegador. Si la
+		// persona la da de alta otro operador del CRM —o carteraFront, o el propio
+		// cartera-back—, el `null` de "no existe" que este navegador cacheó sigue
+		// pareciendo fresco: el DPI no se mueve a `dpiRepLegal`, y la creación
+		// estricta falla como duplicado una y otra vez sin que haya forma de
+		// reintentar. Un negativo de identidad no envejece bien: lo que ayer no
+		// existía puede existir ahora, y quien lo creó no fue necesariamente quien
+		// está mirando esta pantalla.
+		//
+		// Es el gemelo de cliente del mismo defecto que se cerró en el servidor
+		// (`cartera-back-client.ts`, la consulta de identidad va sin caché). El
+		// coste es una consulta por DPI tecleado, ya con umbral de 7 dígitos y
+		// debounce: la dispara un humano llenando un formulario, no un bucle.
+		staleTime: 0,
+		gcTime: 0,
+	});
+
+	// Al encontrar a la persona, el formulario pasa a modo empresa solo.
+	useEffect(() => {
+		const identidad = identidadQuery.data as IdentidadDetectada | null | undefined;
+		if (!identidad || formDpiRepLegal) return;
+		// Apagar la query NO borra lo que ya tiene en caché: al descartar la
+		// detección, el DPI vuelve al campo, la clave vuelve a ser la de antes y
+		// `identidadQuery.data` sirve el mismo hit de siempre. Sin esta guarda el
+		// efecto lo reaplicaba al instante y el botón "no era esa persona" no
+		// llegaba a devolver el DPI editable.
+		if (deteccionDescartada) return;
+
+		const campos = camposAlDetectar(identidad, formEmail);
+		setFormDpi(campos.dpi);
+		setFormDpiRepLegal(campos.dpiRepLegal);
+		setFormEmail(campos.email);
+		setPersonaDetectada(identidad);
+		// El choque que conta acaba de ver deja de aplicar: ya no es duplicado,
+		// es el representante.
+		setCampoDuplicado(null);
+	}, [identidadQuery.data, formDpiRepLegal, formEmail, deteccionDescartada]);
+
+	// "No era esa persona": el DPI vuelve al campo donde lo escribieron y ese
+	// disparador queda descartado para no volver a proponerlo al instante.
+	const descartarDeteccion = () => {
+		if (!personaDetectada) return;
+		const campos = camposAlDescartar(personaDetectada, formEmail);
+		setFormDpi(campos.dpi);
+		setFormDpiRepLegal(campos.dpiRepLegal);
+		setFormEmail(campos.email);
+		setDeteccionesDescartadas((previas) => [
+			...previas,
+			`dpi:${personaDetectada.dpi}`,
+			...(personaDetectada.email ? [`email:${personaDetectada.email}`] : []),
+		]);
+		setPersonaDetectada(null);
+	};
+
 	const modalidadResolverQuery = useQuery({
 		...orpc.resolverModalidadFacturacionSpread.queryOptions({
 			input: { monto: formMontoCompraDebounced },
@@ -164,6 +265,9 @@ function LiquidacionesInversionistas() {
 		setFormBanco("");
 		setFormTipoCuenta("");
 		setFormNumeroCuenta("");
+		setFormDpiRepLegal("");
+		setPersonaDetectada(null);
+		setDeteccionesDescartadas([]);
 		setFormMoneda("quetzales");
 		setFormEmiteFactura(false);
 		setFormTipoReinversion("sin_reinversion");
@@ -178,15 +282,40 @@ function LiquidacionesInversionistas() {
 	const crearMutation = useMutation({
 		...orpc.crearInversionista.mutationOptions(),
 		onSuccess: async (data: any) => {
-			const msg = data.compraCartera
+			const base = data.compraCartera
 				? "Inversionista creado y compra de cartera registrada"
 				: "Inversionista creado correctamente";
-			toast.success(msg);
+
+			// El alta puede salir perfecta y el acceso al portal no. Si eso se
+			// resolviera con el toast verde de siempre, conta cerraría el modal
+			// creyendo que todo salió y el inversionista quedaría con una cuenta
+			// que no sabe que tiene: nadie se enteraría hasta el resumen del día
+			// siguiente. Con el aviso aquí se entera con la persona al teléfono.
+			const aviso = avisoAccesoPortal(data.accesoPortal);
+			const msg = aviso ? `${base}. ${aviso.texto}` : base;
+			if (aviso?.tono === "advertencia") {
+				// Dura más que el toast normal: es lo que hay que leer y actuar.
+				toast.warning(msg, { duration: 15000 });
+			} else {
+				toast.success(msg);
+			}
 			setCrearOpen(false);
 			resetForm();
 			await queryClient.invalidateQueries({
-				predicate: (query) =>
-					JSON.stringify(query.queryKey).includes("getInversionistas"),
+				predicate: (query) => {
+					const clave = JSON.stringify(query.queryKey);
+					// `identidadInversionista` también: acabamos de crear a alguien,
+					// así que el "no existe" que se cacheó hace un momento ya es
+					// falso. Sin esto, dar de alta a una persona y enseguida abrir el
+					// modal para crear SU empresa reusaba ese `null`, la detección no
+					// corría, el DPI no se movía a representante legal y el alta
+					// rebotaba como duplicada — justo el caso que esta pantalla viene
+					// a resolver.
+					return (
+						clave.includes("getInversionistas") ||
+						clave.includes("identidadInversionista")
+					);
+				},
 			});
 		},
 		onError: (err: any) => {
@@ -200,12 +329,14 @@ function LiquidacionesInversionistas() {
 				? "No se pudo crear el inversionista. Verifica los datos e intenta de nuevo."
 				: (mensaje as string);
 
-			// Duplicado: además del toast, marcamos el input culpable y lo
-			// enfocamos para que corrijan ahí mismo.
+			// Error atribuible a un campo: además del toast, marcamos el input
+			// culpable y lo enfocamos para que corrijan ahí mismo. El id del
+			// input va en kebab-case y el campo del backend en snake_case
+			// (dpi_rep_legal → inv-dpi-rep-legal).
 			const campo: string | undefined = err?.data?.campo;
 			if (campo) {
 				setCampoDuplicado({ campo, mensaje: texto });
-				document.getElementById(`inv-${campo}`)?.focus();
+				document.getElementById(`inv-${campo.replace(/_/g, "-")}`)?.focus();
 			} else {
 				setCampoDuplicado(null);
 			}
@@ -457,9 +588,17 @@ function LiquidacionesInversionistas() {
 							<MensajeDuplicado campo="nombre" />
 						</div>
 
-						{/* DPI + Email */}
-						<div className="grid grid-cols-2 gap-3">
-							<div className="space-y-1.5">
+						{/* DPI + Email. El DPI desaparece cuando se detectó a la
+						    persona: la sociedad no tiene DPI propio, el que se escribió
+						    pasó a ser el del representante y se muestra en el aviso. */}
+						<div
+							className={
+								personaDetectada ? "space-y-1.5" : "grid grid-cols-2 gap-3"
+							}
+						>
+							<div
+								className={personaDetectada ? "hidden" : "space-y-1.5"}
+							>
 								<Label htmlFor="inv-dpi">DPI</Label>
 								<Input
 									id="inv-dpi"
@@ -548,6 +687,65 @@ function LiquidacionesInversionistas() {
 								placeholder="Número de cuenta bancaria"
 							/>
 						</div>
+
+						{/* Empresa detectada. No hay interruptor: si el DPI o el correo
+						    ya son de alguien, lo que se está creando es su empresa. */}
+						{/*
+							La verificación falló. Se dice, en vez de dejar creer que el DPI
+							está libre: como ya no existe el interruptor "¿Es empresa?", si
+							la detección no corre no hay forma de mover el DPI a
+							representante legal, y el alta rebota como duplicada sin que se
+							entienda por qué.
+						*/}
+						{!personaDetectada && identidadQuery.isError && (
+							<div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 space-y-2">
+								<p className="text-sm font-medium">
+									No pudimos verificar ese dato
+								</p>
+								<p className="text-muted-foreground text-xs">
+									No se pudo comprobar si el DPI o el correo ya son de alguien.
+									Si lo son y guardás así, el alta se va a rechazar por
+									duplicada.
+								</p>
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									onClick={() => identidadQuery.refetch()}
+									disabled={identidadQuery.isFetching}
+								>
+									{identidadQuery.isFetching
+										? "Verificando..."
+										: "Reintentar verificación"}
+								</Button>
+							</div>
+						)}
+
+						{personaDetectada && (
+							<div className="rounded-md border border-amber-500/40 bg-amber-50 p-3 space-y-2 dark:bg-amber-950/20">
+								<p className="text-sm font-medium">
+									Se va a crear una empresa de {personaDetectada.nombre}
+								</p>
+								<p className="text-muted-foreground text-xs">
+									{personaDetectada.via === "directo"
+										? "Ese dato ya es suyo, así que no es un duplicado."
+										: `Ese dato es de ${personaDetectada.sociedad}, que ${personaDetectada.nombre} ya representa.`}{" "}
+									El DPI{" "}
+									<span className="font-mono">{formDpiRepLegal}</span> se guarda
+									como representante legal y la empresa comparte su correo. El
+									nombre, el banco y la cuenta son los de la empresa: llenalos
+									aparte.
+								</p>
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									onClick={descartarDeteccion}
+								>
+									No es su empresa, corregir el DPI
+								</Button>
+							</div>
+						)}
 
 						{/* Moneda + Factura */}
 						<div className="grid grid-cols-2 gap-3">
@@ -756,6 +954,9 @@ function LiquidacionesInversionistas() {
 							}
 							onClick={() => {
 								if (hacerCompra && !compraSpreadRow) return;
+								// Con "¿Es empresa?" marcado el DPI del representante es
+								// obligatorio: se marca el input con el mismo mecanismo que
+								// usan los rechazos de cartera, en vez de un toast suelto.
 								crearMutation.mutate({
 									nombre: formNombre.trim(),
 									dpi: formDpi.trim() || undefined,
@@ -763,6 +964,9 @@ function LiquidacionesInversionistas() {
 									banco: formBanco ? Number(formBanco) : null,
 									tipoCuenta: formTipoCuenta || undefined,
 									numeroCuenta: formNumeroCuenta.trim() || undefined,
+									// Llave ausente cuando no se detectó a nadie: al crear no hay
+									// nada que borrar y cartera deja el campo en blanco.
+									dpiRepLegal: formDpiRepLegal || undefined,
 									moneda: formMoneda as "quetzales" | "dolares",
 									emiteFactura: formEmiteFactura,
 									tipoReinversion: formTipoReinversion,

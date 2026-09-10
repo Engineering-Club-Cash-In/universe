@@ -5,6 +5,7 @@ import {
 	esLinkPagaloGenerado,
 	gestionLinkPagaloTieneWhatsappConfirmado,
 	resultadoWhatsappGestionLinkPagalo,
+	resumenGestionLinksPagalo,
 	totalDeLinksPagalo,
 } from "./pagalo-gestion";
 
@@ -85,4 +86,13 @@ test("un pago tardío de link reemplazado no cuenta en la gestión", () => {
 	expect(esLinkPagaloContabilizableEnGestion("PAID", false)).toBe(false);
 	expect(esLinkPagaloContabilizableEnGestion("PAID", null)).toBe(false);
 	expect(esLinkPagaloContabilizableEnGestion("REPLACED", false)).toBe(false);
+});
+
+test("resumen de gestión refleja cero links cuando sucesor no emitió ninguno", () => {
+	expect(
+		resumenGestionLinksPagalo([
+			{ amount: "1307.40", status: "ERROR", isApplicationSource: false },
+			{ amount: "1197.41", status: "REPLACED", isApplicationSource: false },
+		]),
+	).toEqual({ cantidadLinks: 0, totalAmount: "0.00" });
 });

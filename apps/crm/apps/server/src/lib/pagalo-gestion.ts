@@ -57,3 +57,19 @@ export function esLinkPagaloContabilizableEnGestion(
 		(status !== "PAID" || isApplicationSource === true)
 	);
 }
+
+export function resumenGestionLinksPagalo(
+	links: readonly {
+		amount: string;
+		status: string | null;
+		isApplicationSource: boolean | null;
+	}[],
+): { cantidadLinks: number; totalAmount: string } {
+	const contabilizables = links.filter((link) =>
+		esLinkPagaloContabilizableEnGestion(link.status, link.isApplicationSource),
+	);
+	return {
+		cantidadLinks: contabilizables.length,
+		totalAmount: totalDeLinksPagalo(contabilizables),
+	};
+}

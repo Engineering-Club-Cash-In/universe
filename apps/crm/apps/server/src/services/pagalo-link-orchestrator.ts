@@ -31,6 +31,7 @@ import {
 	esLinkPagaloContabilizableEnGestion,
 	gestionLinkPagaloTieneWhatsappConfirmado,
 	resultadoWhatsappGestionLinkPagalo,
+	resumenGestionLinksPagalo,
 	totalDeLinksPagalo,
 } from "../lib/pagalo-gestion";
 import { deduplicarCuotasPagalo } from "../lib/pagalo-installments";
@@ -162,7 +163,6 @@ async function registrarGestionLinkPagalo(params: {
 	/** Actualiza links de regeneración sin perder resultado WhatsApp previo. */
 	actualizarGestionParcial?: boolean;
 }): Promise<boolean> {
-	if (params.cantidadLinks === 0) return false;
 	const bucketSnapshot =
 		params.bucketSnapshot === undefined
 			? await capturarBucketGestionPagalo(params.numeroSifco)
@@ -221,6 +221,8 @@ async function registrarGestionLinkPagalo(params: {
 				.select({
 					contactoCobroId: pagaloPaymentGroups.contactoCobroId,
 					status: pagaloPaymentGroups.status,
+					capitalTotal: pagaloPaymentGroups.capitalTotal,
+					facturableTotal: pagaloPaymentGroups.facturableTotal,
 				})
 				.from(pagaloPaymentGroups)
 				.where(eq(pagaloPaymentGroups.id, grupoDestinoId))
@@ -237,6 +239,8 @@ async function registrarGestionLinkPagalo(params: {
 					.select({
 						contactoCobroId: pagaloPaymentGroups.contactoCobroId,
 						status: pagaloPaymentGroups.status,
+						capitalTotal: pagaloPaymentGroups.capitalTotal,
+						facturableTotal: pagaloPaymentGroups.facturableTotal,
 					})
 					.from(pagaloPaymentGroups)
 					.where(eq(pagaloPaymentGroups.id, grupoDestinoId))
@@ -248,7 +252,33 @@ async function registrarGestionLinkPagalo(params: {
 			// parcial en el sucesor; la finalización registrará datos completos.
 			if (!params.finalizar && grupoDestinoId !== params.groupId) return false;
 
+			const resumenDestino =
+				grupoDestinoId === params.groupId && !params.actualizarGestionParcial
+					? null
+					: resumenGestionLinksPagalo(
+							(
+								await tx
+									.select({
+										linkType: pagaloPaymentLinks.linkType,
+										status: pagaloPaymentLinks.status,
+										isApplicationSource: pagaloPaymentLinks.isApplicationSource,
+									})
+									.from(pagaloPaymentLinks)
+									.where(eq(pagaloPaymentLinks.groupId, grupoDestinoId))
+									.for("update")
+							).map((link) => ({
+								...link,
+								amount:
+									link.linkType === "CAPITAL"
+										? grupoDestino.capitalTotal
+										: grupoDestino.facturableTotal,
+							})),
+						);
+			const paramsGestion = resumenDestino
+				? { ...params, ...resumenDestino }
+				: params;
 			const contactoCobroId = grupoDestino.contactoCobroId;
+			if (paramsGestion.cantidadLinks === 0 && !contactoCobroId) return false;
 
 			if (contactoCobroId) {
 				if (params.finalizar) {
@@ -268,7 +298,7 @@ async function registrarGestionLinkPagalo(params: {
 							)
 						: params.whatsappEnviado;
 					const comentarioFinal = construirComentarioGestionLinkPagalo({
-						...params,
+						...paramsGestion,
 						whatsappEnviado: whatsappFinal,
 					});
 					const bucketFinal =
@@ -322,7 +352,7 @@ async function registrarGestionLinkPagalo(params: {
 					fechaContacto: params.fechaContacto,
 					metodoContacto: "pago",
 					estadoContacto: "link_pago_generado",
-					comentarios: construirComentarioGestionLinkPagalo(params),
+					comentarios: construirComentarioGestionLinkPagalo(paramsGestion),
 					realizadoPor: params.requestedBy,
 					bucketSnapshot,
 				})
@@ -1530,8 +1560,8 @@ export async function emitirLinksDeGrupo(params: {
 	// grupo de reemplazo, pero una regeneración no manda mensaje — decisión
 	// de producto: el envío es únicamente al crear por primera vez.
 	enviarWhatsapp: boolean;
-	// La creación inicial registra los links activos si otro componente falla.
-	// Regenerar grupo no pasa callback: conserva su error y flujo actuales.
+	// Permite refrescar historial con links activos si otro componente falla.
+	// Regenerar grupo también lo usa para actualizar gestión heredada.
 	onEmisionParcial?: (links: readonly LinkPagaloEmitido[]) => Promise<void>;
 }) {
 	const client = createPagaloClient(params.config);
@@ -2012,57 +2042,57 @@ export async function regenerarGrupo(params: {
 	}
 
 	const registrarGestion = grupoViejo.origen === "ASESOR";
-	const emitido = await emitirLinksDeGrupo({
-		groupId: groupIdNuevo,
-		numeroSifco: grupoViejo.numeroCreditoSifco,
-		requestedBy: params.actorUserId,
-		capitalTotal: grupoViejo.capitalTotal,
-		facturableTotal: grupoViejo.facturableTotal,
-		clienteNombre: credit.usuario.nombre ?? "",
-		clientContact,
-		identificadorCredito,
-		telefono,
-		config,
-		generacionPorTipo,
-		// WhatsApp solo en la creación real desde el modal — regenerar un
-		// grupo (aunque técnicamente cree links nuevos) no reenvía nada,
-		// decisión de producto.
-		enviarWhatsapp: false,
-		// Si uno de los componentes falla, conservar en historial el que sí
-		// quedó activo. El registrador sigue el sucesor terminal si vuelve a
-		// regenerarse mientras esta emisión está en vuelo.
-		onEmisionParcial: registrarGestion
-			? async (links) => {
-					await registrarGestionLinkPagalo({
-						groupId: groupIdNuevo,
-						casoCobroId,
-						numeroSifco: grupoViejo.numeroCreditoSifco,
-						requestedBy: params.actorUserId,
-						totalAmount: totalDeLinksPagalo(links),
-						cantidadLinks: links.length,
-						whatsappEnviado: null,
-						finalizar: true,
-						repararPreliminar: true,
-						actualizarGestionParcial: true,
-					});
-				}
-			: undefined,
-	});
-	// Regeneración de un asesor no envía WhatsApp, pero sí debe registrar y
-	// finalizar gestión. Si heredó una gestión parcial, cambia total al de
-	// todos los componentes emitidos. Grupos BOT no generan gestión humana.
-	if (registrarGestion) {
-		await registrarGestionLinkPagalo({
+	const finalizarGestionRegenerada = () =>
+		registrarGestionLinkPagalo({
 			groupId: groupIdNuevo,
 			casoCobroId,
 			numeroSifco: grupoViejo.numeroCreditoSifco,
 			requestedBy: params.actorUserId,
-			totalAmount: totalDeLinksPagalo(emitido.links),
-			cantidadLinks: emitido.links.length,
+			// El registrador relee los links terminales bajo candado. Cero permite
+			// corregir una gestión heredada cuando la emisión completa falla.
+			totalAmount: "0.00",
+			cantidadLinks: 0,
 			whatsappEnviado: null,
 			finalizar: true,
 			repararPreliminar: true,
+			actualizarGestionParcial: true,
 		});
+	let emitido: Awaited<ReturnType<typeof emitirLinksDeGrupo>>;
+	try {
+		emitido = await emitirLinksDeGrupo({
+			groupId: groupIdNuevo,
+			numeroSifco: grupoViejo.numeroCreditoSifco,
+			requestedBy: params.actorUserId,
+			capitalTotal: grupoViejo.capitalTotal,
+			facturableTotal: grupoViejo.facturableTotal,
+			clienteNombre: credit.usuario.nombre ?? "",
+			clientContact,
+			identificadorCredito,
+			telefono,
+			config,
+			generacionPorTipo,
+			// WhatsApp solo en la creación real desde el modal — regenerar un
+			// grupo (aunque técnicamente cree links nuevos) no reenvía nada,
+			// decisión de producto.
+			enviarWhatsapp: false,
+			// Si uno de los componentes falla, conservar en historial el que sí
+			// quedó activo. El registrador sigue el sucesor terminal si vuelve a
+			// regenerarse mientras esta emisión está en vuelo.
+			onEmisionParcial: registrarGestion
+				? async () => {
+						await finalizarGestionRegenerada();
+					}
+				: undefined,
+		});
+	} catch (error) {
+		if (registrarGestion) await finalizarGestionRegenerada();
+		throw error;
+	}
+	// Regeneración de un asesor no envía WhatsApp, pero sí debe registrar y
+	// finalizar gestión. Si heredó una gestión parcial, cambia total al de
+	// todos los componentes emitidos. Grupos BOT no generan gestión humana.
+	if (registrarGestion) {
+		await finalizarGestionRegenerada();
 	}
 
 	return {

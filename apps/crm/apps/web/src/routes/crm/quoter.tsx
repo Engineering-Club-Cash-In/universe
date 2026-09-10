@@ -72,8 +72,7 @@ import {
 	formatVehicleWithClient,
 	getQuotationInsuranceFieldName,
 	getQuotationInsuranceDisplay,
-	isQuotationInsuranceCostEditable,
-	isQuotationInsuranceCostRequired,
+	isQuotationInsuranceBreakdownLocked,
 } from "@/lib/quotation-display";
 import {
 	EXTRA_COST_FIELDS,
@@ -285,8 +284,8 @@ function ExtraCostsTable({
 
 	const isFieldActive = (field: ExtraCostFieldConfig) => {
 		if (
-			field.name === "extraInsurance" &&
-			isQuotationInsuranceCostRequired(values.insuranceProvider)
+			(field.name === "extraInsurance" || field.name === "extraMembership") &&
+			isQuotationInsuranceBreakdownLocked(values.insuranceProvider)
 		)
 			return true;
 		if (field.computed) return true;
@@ -380,8 +379,8 @@ function ExtraCostsTable({
 		const isComputed = field.computed ?? false;
 		const isReadOnly =
 			isComputed ||
-			(field.name === "extraInsurance" &&
-				isQuotationInsuranceCostRequired(values.insuranceProvider));
+			((field.name === "extraInsurance" || field.name === "extraMembership") &&
+				isQuotationInsuranceBreakdownLocked(values.insuranceProvider));
 
 		const formatValue = (v: number) =>
 			v.toLocaleString("es-GT", {
@@ -2097,11 +2096,9 @@ function QuoterPage() {
 													id={field.name}
 													type="number"
 													step="0.01"
-													readOnly={
-														!isQuotationInsuranceCostEditable(
-															quoterForm.state.values.insuranceProvider,
-														)
-													}
+													readOnly={isQuotationInsuranceBreakdownLocked(
+														quoterForm.state.values.insuranceProvider,
+													)}
 													value={field.state.value || ""}
 													onChange={(e) => {
 														field.handleChange(Number(e.target.value) || 0);

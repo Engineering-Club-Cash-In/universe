@@ -72,6 +72,8 @@ import {
 	formatVehicleWithClient,
 	getQuotationInsuranceFieldName,
 	getQuotationInsuranceDisplay,
+	isQuotationInsuranceCostEditable,
+	isQuotationInsuranceCostRequired,
 } from "@/lib/quotation-display";
 import {
 	EXTRA_COST_FIELDS,
@@ -282,6 +284,11 @@ function ExtraCostsTable({
 	]);
 
 	const isFieldActive = (field: ExtraCostFieldConfig) => {
+		if (
+			field.name === "extraInsurance" &&
+			isQuotationInsuranceCostRequired(values.insuranceProvider)
+		)
+			return true;
 		if (field.computed) return true;
 		return activeFields[field.name] ?? false;
 	};
@@ -371,6 +378,10 @@ function ExtraCostsTable({
 		const isActive = isFieldActive(field);
 		const percentageValue = localValues[`${field.name}-pct`] ?? 0;
 		const isComputed = field.computed ?? false;
+		const isReadOnly =
+			isComputed ||
+			(field.name === "extraInsurance" &&
+				isQuotationInsuranceCostRequired(values.insuranceProvider));
 
 		const formatValue = (v: number) =>
 			v.toLocaleString("es-GT", {
@@ -386,8 +397,8 @@ function ExtraCostsTable({
 						onCheckedChange={(checked) =>
 							handleToggleField(field, checked === true)
 						}
-						disabled={isComputed}
-						className={`border-2 border-gray-400 ${isComputed ? "opacity-50" : "cursor-pointer hover:border-primary"}`}
+						disabled={isReadOnly}
+						className={`border-2 border-gray-400 ${isReadOnly ? "opacity-50" : "cursor-pointer hover:border-primary"}`}
 					/>
 				</TableCell>
 				<TableCell className="font-medium">
@@ -424,7 +435,7 @@ function ExtraCostsTable({
 					)}
 				</TableCell>
 				<TableCell className="w-32">
-					{isComputed ? (
+					{isReadOnly ? (
 						<span className="flex h-8 w-full items-center justify-end rounded border-2 border-gray-300 bg-gray-100 px-2 text-sm">
 							{formatValue(value)}
 						</span>
@@ -2086,6 +2097,11 @@ function QuoterPage() {
 													id={field.name}
 													type="number"
 													step="0.01"
+													readOnly={
+														!isQuotationInsuranceCostEditable(
+															quoterForm.state.values.insuranceProvider,
+														)
+													}
 													value={field.state.value || ""}
 													onChange={(e) => {
 														field.handleChange(Number(e.target.value) || 0);

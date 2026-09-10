@@ -6,6 +6,8 @@ import {
 	formatVehicleWithClient,
 	getQuotationInsuranceFieldName,
 	getQuotationInsuranceDisplay,
+	isQuotationInsuranceCostEditable,
+	isQuotationInsuranceCostRequired,
 } from "./quotation-display";
 
 describe("quotation display helpers", () => {
@@ -87,5 +89,21 @@ describe("quotation display helpers", () => {
 
 	test("binds the GyT form to the visible provider cost", () => {
 		expect(getQuotationInsuranceFieldName("gyt")).toBe("extraInsuranceCost");
+	});
+
+	test("keeps calculated GyT insurance read-only", () => {
+		expect(isQuotationInsuranceCostEditable("gyt")).toBe(false);
+	});
+
+	test("preserves editable Universales insurance", () => {
+		expect(isQuotationInsuranceCostEditable("universales")).toBe(true);
+	});
+
+	test("keeps GyT insurance active in additional costs", () => {
+		expect(isQuotationInsuranceCostRequired("gyt")).toBe(true);
+	});
+
+	test("preserves optional Universales additional cost", () => {
+		expect(isQuotationInsuranceCostRequired("universales")).toBe(false);
 	});
 });

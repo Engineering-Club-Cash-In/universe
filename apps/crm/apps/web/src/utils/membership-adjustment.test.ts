@@ -4,6 +4,7 @@ import {
 	calculateQuotationInsuranceCosts,
 	getMembershipAdjustment,
 } from "./membership-adjustment";
+import type { MembershipAdjustment } from "./membership-adjustment";
 
 describe("getMembershipAdjustment", () => {
 	test.each([
@@ -151,7 +152,7 @@ describe("applyMembershipAdjustment", () => {
 });
 
 describe("calculateQuotationInsuranceCosts", () => {
-	const adjustment = {
+	const adjustment: MembershipAdjustment = {
 		category: "Nuevo (sedán, SUV, pickup)",
 		percentage: 35,
 		factor: 1.35,

@@ -12,6 +12,18 @@ export function getQuotationInsuranceFieldName(
 	return provider === "gyt" ? "extraInsuranceCost" : "insuranceCost";
 }
 
+export function isQuotationInsuranceCostEditable(
+	provider: "universales" | "gyt",
+): boolean {
+	return provider !== "gyt";
+}
+
+export function isQuotationInsuranceCostRequired(
+	provider: "universales" | "gyt",
+): boolean {
+	return provider === "gyt";
+}
+
 export function getQuotationInsuranceDisplay(input: {
 	insuranceProvider?: string | null;
 	insuranceCost?: number | string | null;
@@ -19,7 +31,7 @@ export function getQuotationInsuranceDisplay(input: {
 	extraInsuranceCost?: number | string | null;
 	extraMembershipCost?: number | string | null;
 }) {
-	const insuranceProvider =
+	const insuranceProvider: "gyt" | "universales" =
 		input.insuranceProvider === "gyt" ? "gyt" : "universales";
 	const isGyt = insuranceProvider === "gyt";
 

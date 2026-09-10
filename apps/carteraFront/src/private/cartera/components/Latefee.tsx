@@ -725,6 +725,21 @@ export default function MorasManager() {
     refetchOnWindowFocus: false,
   });
 
+  /**
+   * ¿El alcance que se está mostrando es una respuesta exitosa Y fresca?
+   *
+   * Es la operación más destructiva del módulo, así que no basta con
+   * `!isLoading`: `isLoading` solo cubre la PRIMERA carga sin datos en caché.
+   * Si la consulta falla, `isLoading` vuelve a false con `isError` en true —el
+   * diálogo decía "No se pudo calcular el alcance" con el botón habilitado— y
+   * durante un refetch en segundo plano se sigue viendo el número viejo. Se
+   * exige que no haya vuelo (`isFetching`), que no haya error y que haya datos.
+   */
+  const alcanceMasivoListo =
+    !globalMorosos.isFetching &&
+    !globalMorosos.isError &&
+    globalMorosos.data != null;
+
   const { user } = useAuth();
   const queryClient = useQueryClient();
 
@@ -826,10 +841,18 @@ export default function MorasManager() {
   /**
    * Las dos pestañas descargan igual: pedir la URL y abrirla.
    *
-   * `window.open` corre DESPUÉS del await, o sea fuera del gesto del usuario:
-   * el bloqueador de emergentes lo cancela devolviendo null, sin excepción ni
-   * aviso, y el botón simplemente volvía a su estado normal. Detectamos ese
-   * null y ofrecemos el enlace (toast con acción + enlace fijo en pantalla).
+   * El backend tarda en generar el Excel, así que abrir la pestaña DESPUÉS del
+   * await la deja fuera del gesto del usuario y el bloqueador de emergentes la
+   * cancela sin excepción ni aviso. Por eso la pestaña se abre en blanco AHORA,
+   * dentro del gesto, y se le navega la URL cuando llega.
+   *
+   * De paso desaparece el falso positivo del aviso de "bloqueado": con
+   * `window.open(url, "_blank", "noopener")` el valor de retorno es null A
+   * PROPÓSITO —`noopener` corta el vínculo con el opener y la spec obliga a
+   * devolver null—, así que la detección se disparaba en TODAS las descargas
+   * exitosas e invitaba a bajar el reporte dos veces. Acá se abre sin
+   * `noopener` (el null vuelve a significar "bloqueado" de verdad) y el vínculo
+   * se corta a mano con `opener = null`, que es la misma protección.
    */
   const descargarExcel = async (opts: {
     que: string;
@@ -838,27 +861,54 @@ export default function MorasManager() {
   }) => {
     opts.setExportando(true);
     setExcelBloqueado(null);
+
+    const ventana = window.open("", "_blank");
+    if (ventana) {
+      try {
+        // Equivalente a `noopener`, pero sin perder el handle: la pestaña nueva
+        // no puede tocar la que la abrió.
+        ventana.opener = null;
+        ventana.document.write(
+          `<title>Generando Excel…</title><p style="font:16px system-ui;padding:24px">Generando el Excel de ${opts.que}…</p>`
+        );
+        ventana.document.close();
+      } catch {
+        // Si el navegador no deja escribir en la pestaña, se queda en blanco un
+        // momento y se navega igual. No es motivo para abortar la descarga.
+      }
+    }
+
     try {
       const res = await opts.pedirUrl();
       if (!res.success || !res.excelUrl) {
+        ventana?.close();
         toast.error(`No se pudo generar el Excel de ${opts.que}`);
         return;
       }
-      const ventana = window.open(res.excelUrl, "_blank", "noopener");
-      if (ventana) return;
 
       const url = res.excelUrl;
+      if (ventana && !ventana.closed) {
+        // `replace` para que la pestaña no guarde el about:blank en su historial.
+        ventana.location.replace(url);
+        return;
+      }
+
+      // Sin pestaña: el bloqueador la frenó o el usuario la cerró mientras se
+      // generaba. El archivo YA existe, así que se ofrece el enlace en vez de
+      // perderlo.
       setExcelBloqueado({ url, que: opts.que });
-      toast.warning("El navegador bloqueó la ventana de descarga", {
+      toast.warning("No se pudo abrir la pestaña de descarga", {
         description: `El Excel de ${opts.que} ya está listo. Abrilo desde el enlace.`,
         duration: 15000,
         action: {
           label: "Abrir Excel",
-          // Este click SÍ es un gesto del usuario: el bloqueador no lo frena.
+          // Este click SÍ es un gesto del usuario: el bloqueador no lo frena, y
+          // acá no se mira el retorno, así que `noopener` no estorba.
           onClick: () => window.open(url, "_blank", "noopener"),
         },
       });
     } catch (err: any) {
+      ventana?.close();
       toast.error(`No se pudo generar el Excel de ${opts.que}`, {
         description: getApiErrorMessage(err, "Error desconocido"),
       });
@@ -916,6 +966,12 @@ export default function MorasManager() {
 
   const confirmCondonacionMasiva = () => {
     if (!user?.email) return;
+    // Mismo criterio que deshabilita el botón, por si el estado cambia entre el
+    // render y el click (el refetch en segundo plano no bloquea la UI).
+    if (!alcanceMasivoListo) {
+      toast.error("Esperá a que se calcule el alcance de la condonación");
+      return;
+    }
 
     condonarMorasMasivo.mutate(
       {
@@ -1690,15 +1746,29 @@ export default function MorasManager() {
           ) : (
             <div className="flex flex-col gap-3 text-gray-800">
               <div className="rounded-xl border border-orange-200 bg-orange-50 p-4">
-                {globalMorosos.isLoading ? (
+                {globalMorosos.isFetching ? (
+                  // `isFetching`, no `isLoading`: durante un refetch en segundo
+                  // plano `isLoading` es false y se seguía mostrando —y podía
+                  // confirmarse contra— el número anterior.
                   <div className="flex items-center gap-2 text-sm text-orange-700">
                     <Loader2 className="h-4 w-4 animate-spin" /> Calculando
                     alcance...
                   </div>
-                ) : globalMorosos.isError ? (
-                  <p className="text-sm text-red-600">
-                    No se pudo calcular el alcance global de la condonación.
-                  </p>
+                ) : globalMorosos.isError || globalMorosos.data == null ? (
+                  <div className="flex flex-col gap-2">
+                    <p className="text-sm text-red-600">
+                      No se pudo calcular el alcance global de la condonación.
+                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="self-start"
+                      onClick={() => globalMorosos.refetch()}
+                    >
+                      Reintentar
+                    </Button>
+                  </div>
                 ) : (
                   <>
                     <p className="text-sm text-orange-800">
@@ -1749,9 +1819,7 @@ export default function MorasManager() {
               <Button
                 onClick={confirmCondonacionMasiva}
                 className="bg-orange-600 hover:bg-orange-700"
-                disabled={
-                  condonarMorasMasivo.isPending || globalMorosos.isLoading
-                }
+                disabled={condonarMorasMasivo.isPending || !alcanceMasivoListo}
               >
                 {condonarMorasMasivo.isPending && (
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />

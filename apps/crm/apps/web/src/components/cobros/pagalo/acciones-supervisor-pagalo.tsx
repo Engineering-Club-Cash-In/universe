@@ -70,6 +70,14 @@ export function AccionesSupervisorPagalo({
 				input: { casoCobroId, creditoId },
 			}),
 		);
+		queryClient.invalidateQueries(
+			orpc.getHistorialContactos.queryOptions({ input: { casoCobroId } }),
+		);
+		queryClient.invalidateQueries(
+			orpc.getHistorialContactosPaginado.queryOptions({
+				input: { casoCobroId },
+			}),
+		);
 	};
 
 	const mutationInvalidar = useMutation({

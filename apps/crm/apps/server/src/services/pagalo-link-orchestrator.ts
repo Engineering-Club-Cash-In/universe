@@ -106,6 +106,45 @@ async function capturarBucketGestionPagalo(
 	}
 }
 
+/** Dueño del primer grupo, aunque supervisores hayan regenerado sucesores. */
+async function resolverCreadorOriginalGrupoPagalo(params: {
+	groupId: string;
+	createdBy: string;
+}): Promise<string | null> {
+	let groupIdActual = params.groupId;
+	let creadorOriginal = params.createdBy;
+	const gruposVisitados = new Set<string>([groupIdActual]);
+	while (true) {
+		const [regeneracion] = await db
+			.select({
+				grupoAnteriorId: sql<string | null>`${pagaloPaymentEvents.payload}->>'grupoAnteriorId'`,
+			})
+			.from(pagaloPaymentEvents)
+			.where(
+				and(
+					eq(pagaloPaymentEvents.groupId, groupIdActual),
+					eq(pagaloPaymentEvents.eventType, "GROUP_REGENERATED"),
+				),
+			)
+			.orderBy(desc(pagaloPaymentEvents.occurredAt))
+			.limit(1);
+		if (!regeneracion?.grupoAnteriorId) return creadorOriginal;
+		if (gruposVisitados.has(regeneracion.grupoAnteriorId)) return null;
+		gruposVisitados.add(regeneracion.grupoAnteriorId);
+		const [grupoAnterior] = await db
+			.select({
+				id: pagaloPaymentGroups.id,
+				createdBy: pagaloPaymentGroups.createdBy,
+			})
+			.from(pagaloPaymentGroups)
+			.where(eq(pagaloPaymentGroups.id, regeneracion.grupoAnteriorId))
+			.limit(1);
+		if (!grupoAnterior) return null;
+		groupIdActual = grupoAnterior.id;
+		creadorOriginal = grupoAnterior.createdBy;
+	}
+}
+
 /** Una gestión por grupo; fallo de auditoría no revierte links creados. */
 async function registrarGestionLinkPagalo(params: {
 	groupId: string;
@@ -410,7 +449,7 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 	// no son seleccionables en cartera. Esta recuperación debe ocurrir ANTES
 	// de validar la selección para que el reintento que indica la UI funcione.
 	// Está acotada al mismo asesor, caso, crédito y SIFCO, dentro de 24 horas.
-	const [grupoCompletadoSinGestion] = await db
+	const gruposCompletadosSinGestion = await db
 		.select({
 			groupId: pagaloPaymentGroups.id,
 			createdBy: pagaloPaymentGroups.createdBy,
@@ -427,7 +466,6 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 				eq(pagaloPaymentGroups.casoCobroId, input.casoCobroId),
 				eq(pagaloPaymentGroups.numeroCreditoSifco, input.numeroSifco),
 				eq(pagaloPaymentGroups.origen, "ASESOR"),
-				eq(pagaloPaymentGroups.createdBy, input.requestedBy),
 				eq(pagaloPaymentGroups.status, "COMPLETED"),
 				isNull(pagaloPaymentGroups.contactoCobroId),
 				gte(
@@ -437,15 +475,27 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 			),
 		)
 		.orderBy(desc(pagaloPaymentGroups.createdAt))
-		.limit(1);
 
-	if (
-		grupoCompletadoSinGestion &&
-		coincideSeleccionCuotasPagalo(
-			grupoCompletadoSinGestion.allocationsSnapshot,
-			input.cuotaIds,
+	let grupoCompletadoSinGestion:
+		| (typeof gruposCompletadosSinGestion)[number]
+		| undefined;
+	let creadorOriginal: string | undefined;
+	for (const candidato of gruposCompletadosSinGestion) {
+		if (
+			!coincideSeleccionCuotasPagalo(
+				candidato.allocationsSnapshot,
+				input.cuotaIds,
+			)
 		)
-	) {
+			continue;
+		const creador = await resolverCreadorOriginalGrupoPagalo(candidato);
+		if (creador !== input.requestedBy) continue;
+		grupoCompletadoSinGestion = candidato;
+		creadorOriginal = creador;
+		break;
+	}
+
+	if (grupoCompletadoSinGestion && creadorOriginal) {
 		const linksCompletados = await db
 			.select({
 				linkType: pagaloPaymentLinks.linkType,
@@ -477,7 +527,7 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 				groupId: grupoCompletadoSinGestion.groupId,
 				casoCobroId: input.casoCobroId,
 				numeroSifco: input.numeroSifco,
-				requestedBy: grupoCompletadoSinGestion.createdBy,
+				requestedBy: creadorOriginal,
 				totalAmount: totalDeLinksPagalo(linksParaGestion),
 				cantidadLinks: linksParaGestion.length,
 				whatsappEnviado: null,

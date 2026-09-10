@@ -166,6 +166,8 @@ export function EstadosCuentaContent({
 		"analyst",
 		"sales_supervisor",
 	].includes(userProfile.data?.role ?? "");
+	const canViewValidationDetail =
+		canUseValidationHistory || userProfile.data?.role === "sales";
 
 	useEffect(() => {
 		const timeout = setTimeout(() => {
@@ -214,7 +216,9 @@ export function EstadosCuentaContent({
 				validationId: selectedValidationId ?? undefined,
 			},
 		}),
-		enabled: !!(selectedOpportunityId || selectedValidationId),
+		enabled:
+			canViewValidationDetail &&
+			!!(selectedOpportunityId || selectedValidationId),
 	});
 
 	return (
@@ -243,8 +247,7 @@ export function EstadosCuentaContent({
 									setSelectedOpportunityId(opportunityId);
 									setSelectedValidationId(null);
 									queryClient.invalidateQueries({
-										queryKey:
-											orpc.listDocumentIntegrityValidations.key(),
+										queryKey: orpc.listDocumentIntegrityValidations.key(),
 									});
 								}}
 							/>
@@ -324,13 +327,13 @@ export function EstadosCuentaContent({
 									</TableRow>
 								)}
 							{rows.map((row) => (
-				<TableRow
-					key={row.opportunityId}
-					className="cursor-pointer hover:bg-muted/50"
-					onClick={() => {
-						setSelectedOpportunityId(row.opportunityId);
-						setSelectedValidationId(null);
-					}}
+								<TableRow
+									key={row.opportunityId}
+									className="cursor-pointer hover:bg-muted/50"
+									onClick={() => {
+										setSelectedOpportunityId(row.opportunityId);
+										setSelectedValidationId(null);
+									}}
 								>
 									<TableCell className="whitespace-nowrap">
 										{new Date(row.latestValidatedAt).toLocaleString("es-GT")}
@@ -888,9 +891,9 @@ function OpportunityValidationDetails({
 					{canCreateValidation &&
 						group.attempts.length > 0 &&
 						group.canValidate && (
-						<Button size="sm" onClick={onCreateValidation}>
-							Nueva validación por oportunidad
-						</Button>
+							<Button size="sm" onClick={onCreateValidation}>
+								Nueva validación por oportunidad
+							</Button>
 						)}
 				</div>
 			</div>
@@ -988,7 +991,11 @@ export function ValidationDetailsView({
 					<div className="grid grid-cols-2 gap-3 rounded-md border p-3 text-sm">
 						<div>
 							<p className="text-muted-foreground text-xs">Score automático</p>
-							<p className="font-semibold">{result.autoScore}</p>
+							<p className="font-semibold">
+								{result.autoResult === "rechazado" && result.autoScore === 0
+									? "No aplica — rechazo directo"
+									: result.autoScore}
+							</p>
 						</div>
 						<div>
 							<p className="text-muted-foreground text-xs">Origen</p>
@@ -1003,15 +1010,31 @@ export function ValidationDetailsView({
 							<p>{result.autoReason}</p>
 						</div>
 					</div>
-					{result.manualApproval && (
+					<div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-blue-900 text-sm dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-200">
+						<p className="font-semibold">Acción recomendada</p>
+						<p className="mt-1">{result.recommendedAction}</p>
+					</div>
+					{result.manualApproval && result.autoResult === "revision_manual" && (
 						<div className="rounded-md border border-green-200 bg-green-50 p-3 text-green-900 text-sm dark:border-green-900 dark:bg-green-950/30 dark:text-green-200">
 							<p className="font-semibold">Aprobado manualmente</p>
 							<p className="mt-1 text-xs">
-								Por {result.manualApproval.approvedByName ||
-									result.manualApproval.approvedByEmail} el{" "}
+								Por{" "}
+								{result.manualApproval.approvedByName ||
+									result.manualApproval.approvedByEmail}{" "}
+								el{" "}
 								{new Date(result.manualApproval.approvedAt).toLocaleString(
 									"es-GT",
 								)}
+							</p>
+							<p className="mt-2">{result.manualApproval.reason}</p>
+						</div>
+					)}
+					{result.manualApproval && result.autoResult === "rechazado" && (
+						<div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-900 text-sm dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+							<p className="font-semibold">Aprobación histórica</p>
+							<p className="mt-1 text-xs">
+								Esta aprobación permanece como evidencia de auditoría, pero ya
+								no habilita un documento rechazado.
 							</p>
 							<p className="mt-2">{result.manualApproval.reason}</p>
 						</div>
@@ -1059,6 +1082,9 @@ export function ValidationDetailsView({
 												className={`h-2.5 w-2.5 rounded-full ${signal.severity === "alta" ? "bg-red-500" : signal.severity === "media" ? "bg-amber-500" : "bg-blue-400"}`}
 											/>
 											<span className="font-medium">{signal.label}</span>
+											{signal.page && (
+												<Badge variant="outline">Página {signal.page}</Badge>
+											)}
 											{signal.weight <= 0 && (
 												<Badge variant="secondary">Informativo</Badge>
 											)}
@@ -1078,7 +1104,8 @@ export function ValidationDetailsView({
 											<div className="mt-2 flex flex-wrap gap-1">
 												{Object.entries(signal.evidence).map(([key, value]) => (
 													<Badge key={key} variant="secondary">
-														{key}: {String(value)}
+														{key === "textoDetectado" ? "Texto detectado" : key}
+														: {String(value)}
 													</Badge>
 												))}
 											</div>

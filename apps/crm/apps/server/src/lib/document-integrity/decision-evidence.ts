@@ -1,4 +1,5 @@
-import type { Signal } from "./types";
+import { isRejectionEligibleSignal } from "./ruleset";
+import type { Signal, ValidationResult } from "./types";
 
 const ISSUER_LABELS: Record<string, string> = {
 	banrural: "Banrural",
@@ -18,6 +19,46 @@ const ISSUER_LABELS: Record<string, string> = {
 export interface PositiveCheck {
 	code: string;
 	label: string;
+}
+
+export function buildDocumentRecommendedAction(params: {
+	result: ValidationResult;
+	signals: Pick<Signal, "code" | "page" | "severity" | "weight">[];
+}): string {
+	const pageSignals =
+		params.result === "rechazado"
+			? params.signals.filter(isRejectionEligibleSignal)
+			: params.signals.filter((signal) => signal.weight > 0);
+	const pages = [
+		...new Set(
+			pageSignals
+				.filter((signal) => typeof signal.page === "number" && signal.page > 0)
+				.map((signal) => signal.page as number),
+		),
+	].sort((left, right) => left - right);
+	const pageText =
+		pages.length > 0
+			? ` la${pages.length === 1 ? "" : "s"} página${pages.length === 1 ? "" : "s"} ${pages.join(", ")}`
+			: null;
+
+	switch (params.result) {
+		case "valido":
+			return "El documento puede continuar al análisis de capacidad de pago.";
+		case "observacion":
+			return pageText
+				? `Verifica${pageText} antes de continuar.`
+				: "Puedes continuar, tomando en cuenta las observaciones indicadas.";
+		case "revision_manual":
+			return pageText
+				? `Revisa${pageText}. Si no puedes confirmar su legitimidad, solicita un nuevo estado de cuenta; solo un supervisor puede aprobarlo con justificación.`
+				: "Revisa las señales del documento completo. Si no puedes confirmar su legitimidad, solicita un nuevo estado de cuenta; solo un supervisor puede aprobarlo con justificación.";
+		case "rechazado":
+			return pageText
+				? `Solicita un nuevo estado de cuenta que reemplace el contenido inválido de${pageText} y realiza una nueva validación documental.`
+				: "Solicita un nuevo estado de cuenta válido y realiza una nueva validación documental antes de continuar.";
+		case "error":
+			return "Vuelve a intentar la validación. Si el error persiste, solicita un nuevo archivo PDF.";
+	}
 }
 
 export function buildDocumentPositiveChecks(params: {

@@ -18,6 +18,7 @@ import type {
 export interface IntegrityDuplicateContext {
 	shaInSameOpportunity?: boolean;
 	shaInOtherOpportunity?: boolean;
+	shaInWonOpportunity?: boolean;
 	identifierInOtherLead?: boolean;
 }
 
@@ -49,7 +50,7 @@ function metadataSignals(
 	switch (classifyProducer(producer)) {
 		case "editor":
 			signals.push(
-				makeSignal("productor_es_editor", 7, "alta", "estructura", {
+				makeSignal("productor_es_editor", 0, "baja", "estructura", {
 					evidence: { producer: producer ?? "" },
 				}),
 			);
@@ -80,7 +81,7 @@ function metadataSignals(
 		metadata?.modificationDate ?? xmp?.modifyDate ?? null;
 	if (!creationDate)
 		signals.push(
-			makeSignal("sin_metadata_de_creacion", 1, "baja", "estructura"),
+			makeSignal("sin_metadata_de_creacion", 0, "baja", "estructura"),
 		);
 	if (
 		creationDate &&
@@ -220,12 +221,21 @@ function identitySignal(
 	});
 }
 
-function aiSignals(llm: DocumentIntegrityAiResult): Signal[] {
+function aiSignals(
+	llm: DocumentIntegrityAiResult,
+	pageCount: number | null,
+): Signal[] {
 	return llm.observaciones_forenses.map((observation) => {
 		const meta =
 			ESTADO_CUENTA_AI_SIGNAL_META[
 				observation.codigo as keyof typeof ESTADO_CUENTA_AI_SIGNAL_META
 			] ?? ESTADO_CUENTA_AI_SIGNAL_META.otro;
+		const verifiedPage =
+			typeof observation.pagina === "number" &&
+			typeof pageCount === "number" &&
+			observation.pagina <= pageCount
+				? observation.pagina
+				: null;
 		return {
 			code: observation.codigo,
 			label: meta.label,
@@ -233,8 +243,11 @@ function aiSignals(llm: DocumentIntegrityAiResult): Signal[] {
 			weight: meta.weight,
 			source: "ia" as const,
 			description: observation.descripcion,
-			page: observation.pagina,
+			page: verifiedPage,
 			confidence: observation.confianza,
+			evidence: observation.texto_detectado
+				? { textoDetectado: observation.texto_detectado }
+				: undefined,
 		};
 	});
 }
@@ -301,7 +314,11 @@ export async function runDocumentIntegrityEngine(params: {
 	);
 	if (identity) signals.push(identity);
 
-	if (params.duplicates?.shaInOtherOpportunity) {
+	if (params.duplicates?.shaInWonOpportunity) {
+		signals.push(
+			makeSignal("sha256_duplicado_oportunidad_ganada", 6, "alta", "duplicado"),
+		);
+	} else if (params.duplicates?.shaInOtherOpportunity) {
 		signals.push(
 			makeSignal("sha256_duplicado_otro_expediente", 0, "baja", "duplicado"),
 		);
@@ -312,10 +329,10 @@ export async function runDocumentIntegrityEngine(params: {
 	}
 	if (params.duplicates?.identifierInOtherLead) {
 		signals.push(
-			makeSignal("identificador_duplicado_otro_lead", 6, "alta", "duplicado"),
+			makeSignal("identificador_duplicado_otro_lead", 0, "baja", "duplicado"),
 		);
 	}
-	if (llm) signals.push(...aiSignals(llm));
+	if (llm) signals.push(...aiSignals(llm, forensics.pageCount));
 	else signals.push(makeSignal("ia_no_disponible", 0, "alta", "ia"));
 
 	const outcome = applyRuleset({

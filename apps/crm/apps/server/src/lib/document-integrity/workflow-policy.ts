@@ -16,6 +16,18 @@ export type ResetAvailability =
 	| { allowed: true; resetAfterAttemptNumber: number }
 	| { allowed: false; reason: "processing" | "quota_available" };
 
+export function canApproveDocumentIntegrityValidation(
+	userRole: string,
+): boolean {
+	return userRole === "admin" || userRole === "sales_supervisor";
+}
+
+export function canViewDocumentIntegrityValidationDetail(
+	userRole: string,
+): boolean {
+	return ["admin", "analyst", "sales_supervisor", "sales"].includes(userRole);
+}
+
 // El cupo limita validaciones del negocio y solo cuenta ejecuciones completadas,
 // para que un fallo tecnico no lo consuma. Eso deja las ejecuciones fallidas sin
 // cota, y cada una paga llamadas a Gemini: runsInCycle pone el techo de costo.
@@ -85,9 +97,7 @@ export function getAttemptStatus(params: {
 		maxAttempts: params.maxAttempts,
 		remainingAttempts: Math.max(0, params.maxAttempts - attemptCount),
 		canValidate:
-			attemptCount < params.maxAttempts &&
-			!hasProcessingRun &&
-			!costCapReached,
+			attemptCount < params.maxAttempts && !hasProcessingRun && !costCapReached,
 		hasProcessingRun,
 		costCapReached,
 	};
@@ -162,8 +172,16 @@ export function getPendingManualApprovalCount(
 ): number {
 	return validations.filter(
 		(validation) =>
-			["revision_manual", "rechazado"].includes(validation.autoResult) &&
+			validation.autoResult === "revision_manual" &&
 			!validation.manualApprovalId,
+	).length;
+}
+
+export function getRejectedDocumentCount(
+	validations: Array<{ autoResult: string }>,
+): number {
+	return validations.filter(
+		(validation) => validation.autoResult === "rechazado",
 	).length;
 }
 
@@ -178,7 +196,7 @@ export function getManualApprovalAvailability(params: {
 }):
 	| { allowed: true }
 	| { allowed: false; reason: "wrong_result" | "stale_run" } {
-	if (!["revision_manual", "rechazado"].includes(params.autoResult))
+	if (params.autoResult !== "revision_manual")
 		return { allowed: false, reason: "wrong_result" };
 	if (
 		params.runStatus !== "completed" ||

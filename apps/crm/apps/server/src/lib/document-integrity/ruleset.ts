@@ -5,15 +5,51 @@ import type {
 } from "./types";
 
 export const LLM_WEIGHT_CAP = 8;
+export const REJECTION_SCORE_THRESHOLD = 7;
+
+const REJECTION_ELIGIBLE_SIGNAL_CODES = new Set([
+	"titular_no_coincide_fuerte",
+	"desalineacion_columnas",
+	"tipografia_inconsistente",
+	"montos_sobrepuestos",
+	"formato_no_corresponde_al_emisor",
+	"documento_declarado_sintetico_o_sin_validez",
+]);
+
+const REJECTION_SCORE_EXCLUDED_SIGNAL_CODES = new Set([
+	"sha256_duplicado_oportunidad_ganada",
+]);
+
+export function isRejectionEligibleSignal(
+	signal: Pick<
+		Signal,
+		"code" | "severity" | "confidence" | "page" | "evidence"
+	>,
+): boolean {
+	const eligible =
+		signal.severity === "alta" &&
+		REJECTION_ELIGIBLE_SIGNAL_CODES.has(signal.code);
+	if (!eligible) return false;
+	if (signal.code !== "documento_declarado_sintetico_o_sin_validez")
+		return true;
+
+	return (
+		(signal.confidence ?? 0) >= 90 &&
+		typeof signal.page === "number" &&
+		signal.page > 0 &&
+		typeof signal.evidence?.textoDetectado === "string" &&
+		signal.evidence.textoDetectado.trim().length > 0
+	);
+}
 
 export const SIGNAL_WEIGHTS: Record<string, number> = {
-	productor_es_editor: 7,
+	productor_es_editor: 0,
 	xmp_historial_de_ediciones: 7,
 	creacion_anterior_al_cierre_del_periodo: 0,
 	xmp_contradice_info_dict: 6,
 	productor_es_navegador_o_ofimatica: 4,
 	moddate_posterior_a_creationdate: 3,
-	sin_metadata_de_creacion: 1,
+	sin_metadata_de_creacion: 0,
 	actualizaciones_incrementales: 4,
 	una_actualizacion_incremental: 2,
 	encrypt_de_emisor_intacto: -2,
@@ -27,16 +63,18 @@ export const SIGNAL_WEIGHTS: Record<string, number> = {
 	huella_no_coincide_con_emisor: 3,
 	titular_no_coincide_fuerte: 6,
 	titular_no_coincide_parcial: 3,
+	sha256_duplicado_oportunidad_ganada: 6,
 	sha256_duplicado_otro_expediente: 0,
-	identificador_duplicado_otro_lead: 6,
+	identificador_duplicado_otro_lead: 0,
 	sha256_duplicado_mismo_expediente: 0,
+	documento_declarado_sintetico_o_sin_validez: 7,
 	ia_no_disponible: 0,
 	inspeccion_tecnica_incompleta: 0,
 	identidad_comparada: 0,
 };
 
 export const SIGNAL_LABELS: Record<string, string> = {
-	productor_es_editor: "El productor del PDF es una herramienta de edición",
+	productor_es_editor: "El PDF fue procesado por una herramienta externa",
 	xmp_historial_de_ediciones: "El historial XMP contiene múltiples guardados",
 	creacion_anterior_al_cierre_del_periodo:
 		"El PDF fue creado antes del cierre del período declarado",
@@ -65,12 +103,16 @@ export const SIGNAL_LABELS: Record<string, string> = {
 		"El titular no coincide con las personas del expediente",
 	titular_no_coincide_parcial:
 		"El titular coincide parcialmente con una persona del expediente",
+	sha256_duplicado_oportunidad_ganada:
+		"El mismo archivo ya fue utilizado en una oportunidad ganada",
 	sha256_duplicado_otro_expediente:
 		"El mismo archivo ya fue utilizado en otra oportunidad",
 	identificador_duplicado_otro_lead:
 		"El mismo identificador aparece en otro lead",
 	sha256_duplicado_mismo_expediente:
 		"El mismo archivo ya existe en este expediente",
+	documento_declarado_sintetico_o_sin_validez:
+		"El documento se identifica como sintético o sin validez",
 	ia_no_disponible: "La inspección visual con IA no estuvo disponible",
 	inspeccion_tecnica_incompleta:
 		"La inspección técnica del PDF no pudo completarse",
@@ -134,16 +176,24 @@ export function applyRuleset(params: {
 		return { result: "error", score: 0, reason: params.pipelineError, signals };
 	}
 
-	const deterministicScore = signals
-		.filter((signal) => signal.source !== "ia")
-		.reduce((sum, signal) => sum + Math.max(0, signal.weight), 0);
-	const aiScore = Math.min(
-		signals
-			.filter((signal) => signal.source === "ia")
-			.reduce((sum, signal) => sum + Math.max(0, signal.weight), 0),
-		LLM_WEIGHT_CAP,
+	const calculateScore = (scoredSignals: Signal[]) => {
+		const deterministicScore = scoredSignals
+			.filter((signal) => signal.source !== "ia")
+			.reduce((sum, signal) => sum + Math.max(0, signal.weight), 0);
+		const aiScore = Math.min(
+			scoredSignals
+				.filter((signal) => signal.source === "ia")
+				.reduce((sum, signal) => sum + Math.max(0, signal.weight), 0),
+			LLM_WEIGHT_CAP,
+		);
+		return Math.max(0, deterministicScore + aiScore);
+	};
+	const score = calculateScore(signals);
+	const rejectionScore = calculateScore(
+		signals.filter(
+			(signal) => !REJECTION_SCORE_EXCLUDED_SIGNAL_CODES.has(signal.code),
+		),
 	);
-	const score = Math.max(0, deterministicScore + aiScore);
 	const requiresManual = signals.some((signal) =>
 		[
 			"ia_no_disponible",
@@ -151,20 +201,27 @@ export function applyRuleset(params: {
 			"inspeccion_tecnica_incompleta",
 		].includes(signal.code),
 	);
+	const mustRejectByScore =
+		rejectionScore >= REJECTION_SCORE_THRESHOLD &&
+		signals.some(isRejectionEligibleSignal);
 
 	const result = requiresManual
 		? "revision_manual"
-		: score === 0
-			? "valido"
-			: score <= 3
-				? "observacion"
-				: "revision_manual";
+		: mustRejectByScore
+			? "rechazado"
+			: score === 0
+				? "valido"
+				: score <= 3
+					? "observacion"
+					: "revision_manual";
 	const reason =
 		result === "valido"
 			? "No se detectaron señales de alteración."
 			: result === "observacion"
 				? "Se detectaron observaciones menores que conviene verificar."
-				: "Se detectaron señales que requieren revisión humana.";
+				: result === "rechazado"
+					? "Se detectó evidencia de alto riesgo. El documento debe reemplazarse antes de continuar."
+					: "Se detectaron señales que requieren revisión humana.";
 
 	return { result, score, reason, signals };
 }

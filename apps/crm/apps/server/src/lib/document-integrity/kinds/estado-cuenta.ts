@@ -12,6 +12,7 @@ export const ESTADO_CUENTA_OBSERVATION_CODES = [
 	"correlativos_fuera_de_secuencia",
 	"texto_borroso_o_rasterizado",
 	"marca_de_agua_ausente",
+	"documento_declarado_sintetico_o_sin_validez",
 	"otro",
 ] as const;
 
@@ -61,9 +62,14 @@ export const ESTADO_CUENTA_PROMPT = `
 Inspeccioná visualmente el PDF adjunto como un posible estado de cuenta bancario de Guatemala.
 Validá únicamente identidad documental, emisor, período, titular, identificador reutilizable y anomalías visuales. No extraigás ni calculés saldos, montos, totales ni resúmenes financieros.
 El número de cuenta puede devolverse en identificador_detectado, porque se usa solamente para detectar reutilización entre expedientes.
+Un mismo PDF puede contener varios estados de cuenta legítimos, incluso de meses, cuentas o bancos distintos, porque el usuario puede haberlos unido antes de cargarlos. El cambio de diseño o emisor entre estados completos no es una anomalía por sí mismo; evaluá las inconsistencias dentro de cada estado de cuenta.
 No emitas un veredicto. No uses las palabras fraude, falso, alterado ni rechazado. Reportá solo lo que observás.
 Si no observás nada anómalo devolvé observaciones_forenses: []. No inventes observaciones para parecer útil.
 Redactá todas las descripciones en español y limitadas a hechos visibles.
+Expresá confianza_tipo_documento y la confianza de cada observación como porcentajes entre 0 y 100; nunca uses escala decimal de 0 a 1.
+Usá documento_declarado_sintetico_o_sin_validez únicamente cuando una leyenda visible declare explícitamente que el documento es sintético, simulado, ficticio, de prueba, una muestra, ejemplo, plantilla, espécimen, demostración, generado por IA, sin validez, no válido, no oficial, sin valor legal o que no debe utilizarse para trámites. Considerá también equivalentes inequívocos en inglés como SAMPLE, SPECIMEN, TEST DOCUMENT, DEMO, MOCK DOCUMENT, AI-GENERATED, NOT VALID, VOID o FOR DEMONSTRATION ONLY.
+Para documento_declarado_sintetico_o_sin_validez, pagina debe identificar dónde aparece la leyenda, texto_detectado debe copiar literalmente el texto visible y confianza debe ser al menos 90. Si falta alguno de esos elementos, reportá la observación como otro.
+No uses esa señal por palabras aisladas dentro de movimientos, nombres, descripciones o cláusulas normales. Tampoco por leyendas legítimas como copia, vista previa, documento informativo o no negociable, ni solamente porque el diseño parezca artificial.
 `;
 
 export const ESTADO_CUENTA_BATCH_PROMPT = `${ESTADO_CUENTA_PROMPT}
@@ -74,7 +80,7 @@ No omitás, dupliqués, combinés ni reordenés la identidad de los documentos.
 
 export const ESTADO_CUENTA_AI_SIGNAL_META: Record<
 	(typeof ESTADO_CUENTA_OBSERVATION_CODES)[number],
-	{ label: string; severity: SignalSeverity; weight: 1 | 2 | 4 }
+	{ label: string; severity: SignalSeverity; weight: 1 | 2 | 4 | 7 }
 > = {
 	desalineacion_columnas: {
 		label: "Columnas desalineadas",
@@ -125,6 +131,11 @@ export const ESTADO_CUENTA_AI_SIGNAL_META: Record<
 		label: "Marca de agua esperada ausente",
 		severity: "baja",
 		weight: 1,
+	},
+	documento_declarado_sintetico_o_sin_validez: {
+		label: "El documento se identifica como sintético o sin validez",
+		severity: "alta",
+		weight: 7,
 	},
 	otro: { label: "Otra observación visual", severity: "baja", weight: 1 },
 };

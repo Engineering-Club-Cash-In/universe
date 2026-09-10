@@ -16,7 +16,7 @@ export interface IntegrityValidatedBatchLike {
 }
 
 export function requiresManualApproval(result: IntegrityResult): boolean {
-	return result === "revision_manual" || result === "rechazado";
+	return result === "revision_manual";
 }
 
 export function hasCompleteIntegrityValidation(
@@ -30,6 +30,7 @@ export function hasCompleteIntegrityValidation(
 			(result) =>
 				!!result.validation &&
 				result.validation.result !== "error" &&
+				result.validation.result !== "rechazado" &&
 				(!requiresManualApproval(result.validation.result) ||
 					!!result.validation.manualApproval),
 		)

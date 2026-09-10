@@ -18,7 +18,7 @@ export const PARSE_BUDGET_MS = 8_000;
 // Techo pesimista por documento para dimensionar esperas. inspectPdf no lo
 // impone.
 export const MAX_PDF_PARSE_LEASE_MS = 15_000;
-export const MAX_DECOMPRESSED_PDF_CONTENT_BYTES = 32 * 1024 * 1024;
+export const MAX_DECOMPRESSED_PDF_CONTENT_BYTES = 16 * 1024 * 1024;
 // Techo de objetos declarados en el trailer. Un /Size disparatado hace que
 // pdf-lib reserve estructuras enormes durante load().
 export const MAX_DECLARED_PDF_OBJECTS = 500_000;
@@ -212,8 +212,19 @@ function pdfName(value: unknown): string | null {
 
 class PdfContentBudgetExceededError extends Error {
 	constructor() {
-		super("El contenido descomprimido del PDF excede el límite de inspección");
+		super(
+			"El PDF tiene una estructura demasiado pesada para procesarse de forma segura. Solicita una versión optimizada o un archivo nuevo.",
+		);
 		this.name = "PdfContentBudgetExceededError";
+	}
+}
+
+class PdfContentTimeBudgetExceededError extends Error {
+	constructor() {
+		super(
+			"El PDF tardó demasiado en procesarse de forma segura. Solicita una versión optimizada o un archivo nuevo.",
+		);
+		this.name = "PdfContentTimeBudgetExceededError";
 	}
 }
 
@@ -293,57 +304,167 @@ function inspectFontDicts(document: PDFDocument): FontClassification {
 	return classifyFonts(fonts);
 }
 
+function assertPdfContentDeadline(deadline: number) {
+	if (performance.now() > deadline)
+		throw new PdfContentTimeBudgetExceededError();
+}
+
+function skipPdfContentLiteralString(
+	text: string,
+	fromIndex: number,
+	deadline: number,
+) {
+	let depth = 0;
+	for (let index = fromIndex; index < text.length; index++) {
+		if ((index & 0x3fff) === 0) assertPdfContentDeadline(deadline);
+		if (text[index] === "\\") {
+			index++;
+			continue;
+		}
+		if (text[index] === "(") depth++;
+		if (text[index] === ")" && --depth === 0) return index + 1;
+	}
+	return text.length;
+}
+
+function skipPdfContentHexString(
+	text: string,
+	fromIndex: number,
+	deadline: number,
+) {
+	for (let index = fromIndex + 1; index < text.length; index++) {
+		if ((index & 0x3fff) === 0) assertPdfContentDeadline(deadline);
+		if (text[index] === ">") return index + 1;
+	}
+	return text.length;
+}
+
+function skipInlineImageData(
+	text: string,
+	fromIndex: number,
+	deadline: number,
+) {
+	let index = fromIndex;
+	if (text[index] === "\r" && text[index + 1] === "\n") index += 2;
+	else if (isPdfWhitespace(text[index])) index++;
+	for (; index < text.length - 1; index++) {
+		if ((index & 0x3fff) === 0) assertPdfContentDeadline(deadline);
+		if (
+			text[index] === "E" &&
+			text[index + 1] === "I" &&
+			isPdfWhitespace(text[index - 1]) &&
+			(isPdfWhitespace(text[index + 2]) || !text[index + 2])
+		)
+			return index + 2;
+	}
+	return text.length;
+}
+
+export function scanPdfContentOperators(
+	operators: string,
+	deadline = Number.POSITIVE_INFINITY,
+): {
+	hasText: boolean;
+	hasInlineImage: boolean;
+	invokedXObjects: string[];
+} {
+	let index = 0;
+	let textObjectOpen = false;
+	let hasText = false;
+	let hasInlineImage = false;
+	let previousName: string | null = null;
+	let readingInlineImageDictionary = false;
+	const invokedXObjects = new Set<string>();
+
+	while (index < operators.length) {
+		if ((index & 0x3fff) === 0) assertPdfContentDeadline(deadline);
+		const character = operators[index];
+		if (isPdfWhitespace(character)) {
+			index++;
+			continue;
+		}
+		if (character === "%") {
+			while (
+				index < operators.length &&
+				operators[index] !== "\n" &&
+				operators[index] !== "\r"
+			)
+				index++;
+			continue;
+		}
+		if (character === "(") {
+			index = skipPdfContentLiteralString(operators, index, deadline);
+			previousName = null;
+			continue;
+		}
+		if (character === "<" && operators[index + 1] !== "<") {
+			index = skipPdfContentHexString(operators, index, deadline);
+			previousName = null;
+			continue;
+		}
+		if (character === "/") {
+			let end = index + 1;
+			while (!isPdfDelimiter(operators[end])) end++;
+			previousName = decodeRawPdfName(operators.slice(index + 1, end));
+			index = end;
+			continue;
+		}
+		if (isPdfDelimiter(character)) {
+			previousName = null;
+			index++;
+			continue;
+		}
+
+		let end = index + 1;
+		while (!isPdfDelimiter(operators[end])) end++;
+		const token = operators.slice(index, end);
+		index = end;
+
+		if (readingInlineImageDictionary) {
+			if (token === "ID") {
+				index = skipInlineImageData(operators, index, deadline);
+				readingInlineImageDictionary = false;
+			}
+			previousName = null;
+			continue;
+		}
+		if (token === "BI") {
+			hasInlineImage = true;
+			readingInlineImageDictionary = true;
+			previousName = null;
+			continue;
+		}
+		if (token === "BT") {
+			textObjectOpen = true;
+			previousName = null;
+			continue;
+		}
+		if (token === "ET") {
+			if (textObjectOpen) hasText = true;
+			textObjectOpen = false;
+			previousName = null;
+			continue;
+		}
+		if (token === "Do" && previousName) {
+			invokedXObjects.add(previousName);
+			previousName = null;
+			continue;
+		}
+		previousName = null;
+	}
+
+	return {
+		hasText,
+		hasInlineImage,
+		invokedXObjects: [...invokedXObjects],
+	};
+}
+
 function inspectPageContent(
 	document: PDFDocument,
+	deadline: number,
+	budget: PdfContentBudget,
 ): PageContentClassification[] {
-	const budget: PdfContentBudget = {
-		remainingBytes: MAX_DECOMPRESSED_PDF_CONTENT_BYTES,
-	};
-	const inspectOperators = (
-		operators: string,
-		resources: PDFDict | undefined,
-		visitedForms: Set<PDFRawStream>,
-	): Pick<PageContentClassification, "hasText" | "hasImage"> => {
-		let hasText = /\bBT\b[\s\S]*?\bET\b/.test(operators);
-		let hasImage = false;
-		const xObjects = resources?.lookupMaybe(PDFName.of("XObject"), PDFDict);
-		if (!xObjects) return { hasText, hasImage };
-
-		const invokedNames = operators.matchAll(/\/([A-Za-z0-9_.-]+)\s+Do\b/g);
-		for (const match of invokedNames) {
-			const value = xObjects.get(PDFName.of(match[1]));
-			const object =
-				value instanceof PDFRef ? document.context.lookup(value) : value;
-			if (!(object instanceof PDFRawStream)) continue;
-
-			const subtype = pdfName(object.dict.get(PDFName.of("Subtype")));
-			if (subtype === "Image") {
-				hasImage = true;
-				continue;
-			}
-			if (subtype !== "Form" || visitedForms.has(object)) continue;
-
-			visitedForms.add(object);
-			let formOperators = "";
-			try {
-				formOperators = decodeStream(object, budget);
-			} catch (error) {
-				if (error instanceof PdfContentBudgetExceededError) throw error;
-				continue;
-			}
-			const formResources =
-				object.dict.lookupMaybe(PDFName.of("Resources"), PDFDict) ?? resources;
-			const formContent = inspectOperators(
-				formOperators,
-				formResources,
-				visitedForms,
-			);
-			hasText ||= formContent.hasText;
-			hasImage ||= formContent.hasImage;
-		}
-		return { hasText, hasImage };
-	};
-
 	return document.getPages().map((page, index) => {
 		const contents = page.node.get(PDFName.of("Contents"));
 		const refs =
@@ -352,21 +473,61 @@ function inspectPageContent(
 				: contents
 					? [contents]
 					: [];
-		let operators = "";
+		const decodedStreams: string[] = [];
 		for (const ref of refs) {
 			const stream = ref instanceof PDFRef ? document.context.lookup(ref) : ref;
 			if (stream instanceof PDFRawStream)
-				operators += `\n${decodeStream(stream, budget)}`;
+				decodedStreams.push(decodeStream(stream, budget));
 		}
-		const classification = inspectOperators(
-			operators,
-			page.node.Resources(),
-			new Set(),
-		);
-		return {
-			page: index + 1,
-			...classification,
-		};
+
+		let hasText = false;
+		let hasImage = false;
+		const visitedForms = new Set<PDFRawStream>();
+		const pendingContent = [
+			{
+				operators: decodedStreams.join("\n"),
+				resources: page.node.Resources(),
+			},
+		];
+		while (pendingContent.length > 0) {
+			const content = pendingContent.pop();
+			if (!content) break;
+			const scanned = scanPdfContentOperators(content.operators, deadline);
+			hasText ||= scanned.hasText;
+			hasImage ||= scanned.hasInlineImage;
+
+			const xObjects = content.resources?.lookupMaybe(
+				PDFName.of("XObject"),
+				PDFDict,
+			);
+			if (!xObjects) continue;
+			for (const invokedName of scanned.invokedXObjects) {
+				const value = xObjects.get(PDFName.of(invokedName));
+				const object =
+					value instanceof PDFRef ? document.context.lookup(value) : value;
+				if (!(object instanceof PDFRawStream)) continue;
+
+				const subtype = pdfName(object.dict.get(PDFName.of("Subtype")));
+				if (subtype === "Image") {
+					hasImage = true;
+					continue;
+				}
+				if (subtype !== "Form" || visitedForms.has(object)) continue;
+
+				visitedForms.add(object);
+				try {
+					pendingContent.push({
+						operators: decodeStream(object, budget),
+						resources:
+							object.dict.lookupMaybe(PDFName.of("Resources"), PDFDict) ??
+							content.resources,
+					});
+				} catch (error) {
+					if (error instanceof PdfContentBudgetExceededError) throw error;
+				}
+			}
+		}
+		return { page: index + 1, hasText, hasImage };
 	});
 }
 
@@ -399,11 +560,14 @@ interface RawPdfObject {
 }
 
 function isPdfDelimiter(character: string | undefined) {
-	return !character || isPdfWhitespace(character) || /[()<>\[\]{}/%]/.test(character);
+	return (
+		!character || isPdfWhitespace(character) || "()<>[]{}/%".includes(character)
+	);
 }
 
 function isPdfWhitespace(character: string | undefined) {
-	return !!character && /[\x00\x09\x0a\x0c\x0d\x20]/.test(character);
+	if (!character) return false;
+	return [0x00, 0x09, 0x0a, 0x0c, 0x0d, 0x20].includes(character.charCodeAt(0));
 }
 
 function skipPdfWhitespaceAndComments(text: string, fromIndex: number) {
@@ -473,7 +637,10 @@ function decodeRawPdfName(value: string) {
 	);
 }
 
-function readRawPdfValue(text: string, fromIndex: number): RawPdfValueRead | null {
+function readRawPdfValue(
+	text: string,
+	fromIndex: number,
+): RawPdfValueRead | null {
 	const index = skipPdfWhitespaceAndComments(text, fromIndex);
 	const first = text[index];
 	if (!first) return null;
@@ -508,23 +675,17 @@ function readRawPdfValue(text: string, fromIndex: number): RawPdfValueRead | nul
 
 	if (text.slice(index, index + 2) === "<<") {
 		const end = findPdfDictionaryEnd(text, index);
-		return end < 0
-			? null
-			: { value: { kind: "other" }, nextIndex: end };
+		return end < 0 ? null : { value: { kind: "other" }, nextIndex: end };
 	}
 
 	if (first === "(") {
 		const end = skipPdfLiteralString(text, index);
-		return end < 0
-			? null
-			: { value: { kind: "other" }, nextIndex: end };
+		return end < 0 ? null : { value: { kind: "other" }, nextIndex: end };
 	}
 
 	if (first === "<") {
 		const end = text.indexOf(">", index + 1);
-		return end < 0
-			? null
-			: { value: { kind: "other" }, nextIndex: end + 1 };
+		return end < 0 ? null : { value: { kind: "other" }, nextIndex: end + 1 };
 	}
 
 	const number = text.slice(index).match(/^[+-]?(?:\d+\.\d*|\.\d+|\d+)/);
@@ -586,6 +747,7 @@ function parseRawPdfObjects(text: string) {
 	const objects = new Map<string, RawPdfObject>();
 	const records: RawPdfObject[] = [];
 	const headers = text.matchAll(
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: PDF define seis bytes ASCII específicos como espacios válidos.
 		/(\d+)(?:[\x00\x09\x0a\x0c\x0d\x20]+|%[^\r\n]*(?:\r\n|\r|\n))+(\d+)(?:[\x00\x09\x0a\x0c\x0d\x20]+|%[^\r\n]*(?:\r\n|\r|\n))+obj\b/g,
 	);
 	for (const match of headers) {
@@ -651,7 +813,9 @@ function getRawStreamFilters(
 	if (resolved.kind === "name") return [resolved.value];
 	if (resolved.kind !== "array") return null;
 	if (resolved.values.some((item) => item.kind === "ref")) return null;
-	const names = resolved.values.map((item) => resolveRawPdfValue(item, objects));
+	const names = resolved.values.map((item) =>
+		resolveRawPdfValue(item, objects),
+	);
 	return names.every((item) => item?.kind === "name")
 		? names.map((item) => (item as { kind: "name"; value: string }).value)
 		: null;
@@ -687,20 +851,22 @@ function getDirectPdfNumberArray(value: RawPdfValue | null) {
 // pdf-lib descomprime los object streams dentro de load(), fuera de nuestro
 // presupuesto. Aqui se inflan primero con el inflater acotado: si revientan el
 // limite, load() no llega a ejecutarse.
-export function isPdfSafeToParse(
+function checkPdfSafeToParse(
 	buffer: Buffer | Uint8Array,
-	maxDecompressedBytes = MAX_DECOMPRESSED_PDF_CONTENT_BYTES,
+	budget: PdfContentBudget,
+	throwOnContentLimit: boolean,
 ): boolean {
 	const bytes = Buffer.from(buffer);
 	const text = bytes.toString("latin1");
+	const maxDecompressedBytes = budget.remainingBytes;
 
 	for (const match of text.matchAll(
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: PDF define seis bytes ASCII específicos como espacios válidos.
 		/\/Size(?:[\x00\x09\x0a\x0c\x0d\x20]+|%[^\r\n]*(?:\r\n|\r|\n))+(\d+)/g,
 	)) {
 		if (Number(match[1]) > MAX_DECLARED_PDF_OBJECTS) return false;
 	}
 
-	const budget: PdfContentBudget = { remainingBytes: maxDecompressedBytes };
 	const { objects, records } = parseRawPdfObjects(text);
 	for (const object of records) {
 		if (!object.dictionary) continue;
@@ -796,12 +962,26 @@ export function isPdfSafeToParse(
 				consumeContentBudget(budget, inflated.length);
 			} else return false;
 		} catch (error) {
-			if (error instanceof PdfContentBudgetExceededError) return false;
+			if (error instanceof PdfContentBudgetExceededError) {
+				if (throwOnContentLimit) throw error;
+				return false;
+			}
 			// Si no podemos comprobar el stream, no se delega su expansión a pdf-lib.
 			return false;
 		}
 	}
 	return true;
+}
+
+export function isPdfSafeToParse(
+	buffer: Buffer | Uint8Array,
+	maxDecompressedBytes = MAX_DECOMPRESSED_PDF_CONTENT_BYTES,
+): boolean {
+	return checkPdfSafeToParse(
+		buffer,
+		{ remainingBytes: maxDecompressedBytes },
+		false,
+	);
 }
 
 export async function inspectPdf(
@@ -822,7 +1002,10 @@ export async function inspectPdf(
 		degradedToL0: Buffer.byteLength(buffer) > MAX_PDF_SIZE_BYTES,
 	};
 	if (base.degradedToL0 || !bytes.hasPdfHeader) return base;
-	if (!isPdfSafeToParse(buffer)) {
+	const contentBudget: PdfContentBudget = {
+		remainingBytes: MAX_DECOMPRESSED_PDF_CONTENT_BYTES,
+	};
+	if (!checkPdfSafeToParse(buffer, contentBudget, true)) {
 		base.degradedToL0 = true;
 		base.budgetExceeded = true;
 		return base;
@@ -842,11 +1025,9 @@ export async function inspectPdf(
 		return base;
 	}
 
-	if (
-		base.pageCount > MAX_PDF_PAGES ||
-		performance.now() - startedAt > PARSE_BUDGET_MS
-	) {
-		base.budgetExceeded = performance.now() - startedAt > PARSE_BUDGET_MS;
+	if (performance.now() - startedAt > PARSE_BUDGET_MS)
+		throw new PdfContentTimeBudgetExceededError();
+	if (base.pageCount > MAX_PDF_PAGES) {
 		base.degradedToL0 = true;
 		return base;
 	}
@@ -867,18 +1048,23 @@ export async function inspectPdf(
 
 	if (performance.now() - startedAt <= PARSE_BUDGET_MS) {
 		try {
-			base.pages = inspectPageContent(document);
+			base.pages = inspectPageContent(
+				document,
+				startedAt + PARSE_BUDGET_MS,
+				contentBudget,
+			);
 		} catch (error) {
-			if (error instanceof PdfContentBudgetExceededError) {
-				base.budgetExceeded = true;
-				base.degradedToL0 = true;
-			} else {
-				base.parseError ??=
-					error instanceof Error ? error.message : String(error);
-			}
+			if (
+				error instanceof PdfContentBudgetExceededError ||
+				error instanceof PdfContentTimeBudgetExceededError
+			)
+				throw error;
+
+			base.parseError ??=
+				error instanceof Error ? error.message : String(error);
 		}
 	} else {
-		base.budgetExceeded = true;
+		throw new PdfContentTimeBudgetExceededError();
 	}
 
 	return base;

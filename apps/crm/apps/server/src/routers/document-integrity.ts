@@ -1,5 +1,7 @@
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
+import { buildDocumentRecommendedAction } from "../lib/document-integrity/decision-evidence";
+import { canViewDocumentIntegrityValidationDetail } from "../lib/document-integrity/workflow-policy";
 import { analystProcedure, crmOnlyProcedure, crmProcedure } from "../lib/orpc";
 import {
 	approveDocumentIntegrityValidation,
@@ -143,6 +145,10 @@ export const documentIntegrityProcedures = {
 								id: row.validation.id,
 								result: row.validation.autoResult,
 								reason: row.validation.autoReason,
+								recommendedAction: buildDocumentRecommendedAction({
+									result: row.validation.autoResult,
+									signals: row.validation.signals,
+								}),
 								validatedAt: row.validation.validatedAt,
 								manualApproval: null,
 							}
@@ -199,7 +205,7 @@ export const documentIntegrityProcedures = {
 			}),
 		),
 
-	getDocumentIntegrityValidationGroup: crmProcedure
+	getDocumentIntegrityValidationGroup: crmOnlyProcedure
 		.input(
 			z
 				.object({
@@ -211,9 +217,16 @@ export const documentIntegrityProcedures = {
 				}),
 		)
 		.handler(async ({ input, context }) => {
+			if (!canViewDocumentIntegrityValidationDetail(context.userRole)) {
+				throw new ORPCError("FORBIDDEN", {
+					message:
+						"No tienes permiso para consultar esta validación documental",
+				});
+			}
 			try {
 				return await getDocumentIntegrityValidationGroup({
 					...input,
+					userRole: context.userRole,
 					salesUserId:
 						context.userRole === "sales" ? context.userId : undefined,
 				});

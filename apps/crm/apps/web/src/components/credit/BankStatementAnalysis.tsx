@@ -40,8 +40,8 @@ import { Label } from "@/components/ui/label";
 import {
 	getReusableBatchSyncAction,
 	hasCompleteIntegrityValidation,
-	requiresManualApproval,
 	type IntegrityResult,
+	requiresManualApproval,
 } from "@/lib/document-integrity-flow";
 import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
 import { client, orpc } from "@/utils/orpc";
@@ -70,6 +70,7 @@ interface ValidatedUploadBatch {
 			id: string;
 			result: IntegrityResult;
 			reason: string;
+			recommendedAction: string;
 			validatedAt: Date;
 			manualApproval: ManualDocumentApproval | null;
 		} | null;
@@ -171,13 +172,20 @@ export function BankStatementAnalysis({
 		.join("|");
 	useEffect(() => {
 		const reusableRun = reusableRunRef.current;
+		const reusableRunApprovalKey = reusableRun?.results
+			.map((result) => result.validation?.manualApproval?.id ?? "")
+			.join("|");
 		const action = getReusableBatchSyncAction({
 			reusableRunId,
 			reusableOpportunityId: reusableRun?.opportunityId,
 			currentOpportunityId: opportunityId,
 			restoredRunId: restoredRunIdRef.current,
 		});
-		if (action === "restore" && reusableRun) {
+		if (
+			action === "restore" &&
+			reusableRun &&
+			reusableRunApprovalKey === approvalKey
+		) {
 			restoredRunIdRef.current = reusableRun.runId;
 			setValidatedBatch(reusableRun);
 		} else if (action === "clear_restored") {
@@ -187,11 +195,15 @@ export function BankStatementAnalysis({
 	}, [reusableRunId, approvalKey, opportunityId]);
 
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
-	const canViewIntegrityHistory = [
+	const canViewIntegrityDetail = [
 		"admin",
 		"analyst",
+		"sales",
 		"sales_supervisor",
 	].includes(userProfile.data?.role ?? "");
+	const canApproveIntegrityDocuments =
+		userProfile.data?.role === "admin" ||
+		userProfile.data?.role === "sales_supervisor";
 	const canReset =
 		userProfile.data?.role === "admin" ||
 		userProfile.data?.role === "sales_supervisor" ||
@@ -452,7 +464,7 @@ export function BankStatementAnalysis({
 							{integrityAttemptQuery.data.maxAttempts}
 						</p>
 						{integrityAttemptQuery.data.attemptCount > 0 &&
-							canViewIntegrityHistory && (
+							canViewIntegrityDetail && (
 								<Button asChild size="sm" variant="outline">
 									<Link
 										to="/crm/documentacion/estados-cuenta"
@@ -614,12 +626,14 @@ export function BankStatementAnalysis({
 					<div className="space-y-2 rounded-md border p-3">
 						{validatedBatch.results.map((result) => {
 							const status = result.validation?.result ?? "error";
-							const meta = result.validation?.manualApproval
-								? {
-										label: "Aprobado manualmente",
-										className: "bg-green-100 text-green-800",
-									}
-								: INTEGRITY_META[status];
+							const meta =
+								status === "revision_manual" &&
+								result.validation?.manualApproval
+									? {
+											label: "Aprobado manualmente",
+											className: "bg-green-100 text-green-800",
+										}
+									: INTEGRITY_META[status];
 							return (
 								<div key={result.file} className="space-y-1 text-xs">
 									<div className="flex items-center justify-between gap-2">
@@ -631,9 +645,16 @@ export function BankStatementAnalysis({
 											result.error ??
 											"No se pudo validar el archivo."}
 									</p>
-					{result.validation &&
-						requiresManualApproval(result.validation.result) &&
-						!result.validation.manualApproval && (
+									{result.validation?.recommendedAction && (
+										<p className="text-foreground">
+											<span className="font-medium">Recomendación:</span>{" "}
+											{result.validation.recommendedAction}
+										</p>
+									)}
+									{result.validation &&
+										(result.validation.result === "rechazado" ||
+											(requiresManualApproval(result.validation.result) &&
+												!result.validation.manualApproval)) && (
 											<Button asChild size="sm" variant="outline">
 												<Link
 													to="/crm/documentacion/estados-cuenta"
@@ -642,7 +663,11 @@ export function BankStatementAnalysis({
 														validationId: result.validation.id,
 													}}
 												>
-													Aprobar
+													{result.validation.result === "rechazado"
+														? "Ver rechazo"
+														: canApproveIntegrityDocuments
+															? "Revisar y aprobar"
+															: "Revisar documento"}
 												</Link>
 											</Button>
 										)}
@@ -669,8 +694,8 @@ export function BankStatementAnalysis({
 					<div className="flex gap-2 rounded-md border border-red-300 bg-red-50 p-3 text-red-800 text-xs">
 						<AlertTriangle className="h-4 w-4 shrink-0" />
 						<span>
-							Uno o más archivos fueron rechazados por el motor. Utilizarlos en
-							el análisis exige una aprobación manual auditada.
+							Uno o más archivos fueron rechazados. Solicita documentos válidos
+							y realiza una nueva validación antes de continuar.
 						</span>
 					</div>
 				)}
@@ -678,9 +703,8 @@ export function BankStatementAnalysis({
 					<div className="flex gap-2 rounded-md border border-blue-300 bg-blue-50 p-3 text-blue-800 text-xs">
 						<AlertTriangle className="h-4 w-4 shrink-0" />
 						<span>
-							El análisis de capacidad de pago permanecerá bloqueado hasta
-							que se aprueben todos los documentos pendientes, incluidos los
-							rechazados.
+							El análisis de capacidad de pago permanecerá bloqueado hasta que
+							se aprueben todos los documentos pendientes de revisión manual.
 						</span>
 					</div>
 				)}
@@ -689,9 +713,11 @@ export function BankStatementAnalysis({
 					<div className="border-t pt-3">
 						<p className="font-medium text-sm">Análisis de capacidad de pago</p>
 						<p className="text-muted-foreground text-xs">
-							{hasPendingManualApproval
-								? "Hay documentos pendientes de aprobación manual."
-								: "La validación documental terminó. Puede continuar con estos archivos o solicitar documentos nuevos."}
+							{hasRejectedDocument
+								? "Hay documentos rechazados. Reemplázalos y realiza una nueva validación documental."
+								: hasPendingManualApproval
+									? "Hay documentos pendientes de aprobación manual."
+									: "La validación documental terminó. Puede continuar con estos archivos o solicitar documentos nuevos."}
 						</p>
 					</div>
 				)}

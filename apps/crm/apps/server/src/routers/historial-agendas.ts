@@ -32,7 +32,7 @@
  */
 
 import { ORPCError } from "@orpc/server";
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
@@ -397,6 +397,12 @@ export const historialAgendasRouter = {
 			const condicionesConRol = input.roles?.length
 				? and(where, inArray(user.role, input.roles))
 				: where;
+			// El link se lista como actividad, pero no es contacto del asesor y no
+			// debe alterar total ni tasa de efectividad de agenda.
+			const condicionesKpi = and(
+				condicionesConRol,
+				ne(contactosCobros.estadoContacto, "link_pago_generado"),
+			);
 
 			const [totales] = await db
 				.select({
@@ -424,7 +430,7 @@ export const historialAgendasRouter = {
 				.from(contactosCobros)
 				.innerJoin(user, eq(contactosCobros.realizadoPor, user.id))
 				.innerJoin(casosCobros, eq(contactosCobros.casoCobroId, casosCobros.id))
-				.where(condicionesConRol);
+				.where(condicionesKpi);
 
 			// Distribución por bucket — el eje que pide el ticket. Las filas sin
 			// snapshot —previas a CB-128, o créditos fuera del funnel
@@ -442,6 +448,16 @@ export const historialAgendasRouter = {
 				{ ...input, buckets: undefined },
 				scopingDe(context),
 			);
+			const condicionesPorBucket = input.roles?.length
+				? and(
+						whereSinBucket,
+						inArray(user.role, input.roles),
+						ne(contactosCobros.estadoContacto, "link_pago_generado"),
+					)
+				: and(
+						whereSinBucket,
+						ne(contactosCobros.estadoContacto, "link_pago_generado"),
+					);
 			const porBucket = await db
 				.select({
 					bucket: contactosCobros.bucketSnapshot,
@@ -450,11 +466,7 @@ export const historialAgendasRouter = {
 				.from(contactosCobros)
 				.innerJoin(user, eq(contactosCobros.realizadoPor, user.id))
 				.innerJoin(casosCobros, eq(contactosCobros.casoCobroId, casosCobros.id))
-				.where(
-					input.roles?.length
-						? and(whereSinBucket, inArray(user.role, input.roles))
-						: whereSinBucket,
-				)
+				.where(condicionesPorBucket)
 				.groupBy(contactosCobros.bucketSnapshot)
 				.orderBy(asc(contactosCobros.bucketSnapshot));
 

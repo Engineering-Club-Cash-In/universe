@@ -733,6 +733,13 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 					]
 				: [],
 		);
+		const creadorOriginal =
+			group.origen === "ASESOR"
+				? await resolverCreadorOriginalGrupoPagalo({
+						groupId: group.groupId,
+						createdBy: group.createdBy,
+					})
+				: null;
 		const gestionRegistrada =
 			group.origen === "ASESOR" &&
 			group.casoCobroId &&
@@ -749,6 +756,8 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 						bucketSnapshot: null,
 						finalizar: group.contactoCobroId !== null,
 						repararPreliminar: group.contactoCobroId !== null,
+						actualizarGestionParcial: group.contactoCobroId !== null,
+						creadorOriginal,
 					})
 				: undefined;
 		return {
@@ -2062,6 +2071,7 @@ export async function regenerarGrupo(params: {
 			totalAmount: "0.00",
 			cantidadLinks: 0,
 			whatsappEnviado: null,
+			bucketSnapshot: null,
 			finalizar: true,
 			repararPreliminar: true,
 			actualizarGestionParcial: true,
@@ -2567,6 +2577,7 @@ export async function regenerarLinkIndividual(params: {
 				totalAmount: totalDeLinksPagalo(linksParaGestion),
 				cantidadLinks: linksParaGestion.length,
 				whatsappEnviado: null,
+				bucketSnapshot: null,
 				finalizar: true,
 				repararPreliminar: true,
 				actualizarGestionParcial: true,

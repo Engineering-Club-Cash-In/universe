@@ -341,8 +341,8 @@ export async function runDocumentIntegrityEngine(params: {
 		invalidPdfHeader: !forensics.bytes.hasPdfHeader,
 		corruptPdf:
 			!!forensics.parseError &&
-			!forensics.bytes.hasXref &&
-			forensics.bytes.eofCount === 0,
+			forensics.pageCount === null &&
+			!forensics.bytes.isEncrypted,
 		pipelineError: params.pipelineError,
 	});
 

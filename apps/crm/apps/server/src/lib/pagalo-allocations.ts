@@ -42,10 +42,12 @@ export function coincideSeleccionCuotasPagalo(
 	allocationsSnapshot: unknown,
 	cuotaIds: number[],
 	otros?: string | null,
+	mora?: string | null,
 ): boolean {
 	if (!Array.isArray(allocationsSnapshot)) return false;
 	const cuotasEnSnapshot = new Set<number>();
 	let otrosEnSnapshot = 0n;
+	let moraEnSnapshot = 0n;
 	for (const allocation of allocationsSnapshot) {
 		if (!allocation || typeof allocation !== "object") return false;
 		const fila = allocation as {
@@ -56,10 +58,11 @@ export function coincideSeleccionCuotasPagalo(
 		const cuotaId = fila.cartera_cuota_id;
 		if (!Number.isInteger(cuotaId) || (cuotaId as number) <= 0) return false;
 		cuotasEnSnapshot.add(cuotaId as number);
-		if (fila.rubro === "OTROS") {
+		if (fila.rubro === "OTROS" || fila.rubro === "MORA") {
 			if (typeof fila.amount !== "string") return false;
 			try {
-				otrosEnSnapshot += cents(fila.amount);
+				if (fila.rubro === "OTROS") otrosEnSnapshot += cents(fila.amount);
+				else moraEnSnapshot += cents(fila.amount);
 			} catch {
 				return false;
 			}
@@ -77,7 +80,13 @@ export function coincideSeleccionCuotasPagalo(
 		);
 	// Mora sola usa la primera cuota vencida como referencia técnica, no como
 	// selección del asesor. Nunca debe recuperar un cobro nuevo de esa cuota.
-	if (snapshotSoloMora) return cuotaIds.length === 0;
+	if (snapshotSoloMora) {
+		try {
+			return cuotaIds.length === 0 && moraEnSnapshot === cents(mora);
+		} catch {
+			return false;
+		}
+	}
 	if (cuotaIds.length === 0) return false;
 	if (cuotasEnSnapshot.size === 0) return false;
 	const cuotasSolicitadas = new Set(cuotaIds);

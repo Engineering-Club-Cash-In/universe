@@ -490,6 +490,10 @@ async function resolverContactoPagalo(
 }
 
 export async function createPagaloLinks(input: CreatePagaloLinksInput) {
+	const credit = await carteraBackClient.getCredito(input.numeroSifco, false);
+	if (credit.credito.credito_id !== input.creditoId) {
+		throw new Error("Crédito Págalo no coincide con SIFCO.");
+	}
 	// Si el pago se completó después de que falló la auditoría, las cuotas ya
 	// no son seleccionables en cartera. Esta recuperación debe ocurrir ANTES
 	// de validar la selección para que el reintento que indica la UI funcione.
@@ -531,6 +535,7 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 				candidato.allocationsSnapshot,
 				input.cuotaIds,
 				input.otros,
+				credit.moraActual,
 			)
 		)
 			continue;
@@ -597,10 +602,6 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 		}
 	}
 
-	const credit = await carteraBackClient.getCredito(input.numeroSifco, false);
-	if (credit.credito.credito_id !== input.creditoId) {
-		throw new Error("Crédito Págalo no coincide con SIFCO.");
-	}
 	const vencidas = deduplicarCuotasPagalo(
 		credit.cuotasAtrasadas.filter((cuota) => cuota.numero_cuota > 0),
 	);

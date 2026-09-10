@@ -6,6 +6,7 @@ import {
 	coincidenciasEnPaso,
 	etiquetaDeEtapa,
 	llegadaEnVentana,
+	mesEnGuatemala,
 	tuvoAvanceEn,
 	ventanaDelMes,
 } from "./pasos";
@@ -154,6 +155,24 @@ describe("anioEnGuatemala", () => {
 	test("una marca de fin de año se atribuye al año que corresponde en Guatemala", () => {
 		// 31 de diciembre 20:00 GT, aunque en UTC ya sea 1 de enero.
 		expect(anioEnGuatemala("2027-01-01T02:00:00.000Z")).toBe(2026);
+	});
+});
+
+describe("mesEnGuatemala", () => {
+	test("usa el mismo borde UTC-6 que ventanaDelMes", () => {
+		expect(mesEnGuatemala("2026-09-01T06:00:00.000Z")).toBe(9);
+		expect(mesEnGuatemala("2026-09-01T05:59:59.000Z")).toBe(8);
+	});
+
+	test("cruza de diciembre a enero en el borde de año", () => {
+		expect(mesEnGuatemala("2027-01-01T05:59:59.000Z")).toBe(12); // aún dic 2026 en GT
+		expect(mesEnGuatemala("2027-01-01T06:00:00.000Z")).toBe(1);
+	});
+
+	test("coincide con el inicio de ventanaDelMes", () => {
+		const septiembre = ventanaDelMes(2026, 9);
+		expect(mesEnGuatemala(new Date(septiembre.inicio))).toBe(9);
+		expect(mesEnGuatemala(new Date(septiembre.inicio - 1))).toBe(8);
 	});
 });
 

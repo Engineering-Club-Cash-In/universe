@@ -33,6 +33,12 @@ export function anioEnGuatemala(fecha: Date | string): number {
 	return new Date(t - 6 * 60 * 60 * 1000).getUTCFullYear();
 }
 
+/** Mes 1-indexado (enero = 1) en hora de Guatemala (UTC-6), igual que anioEnGuatemala. */
+export function mesEnGuatemala(fecha: Date | string): number {
+	const t = typeof fecha === "string" ? new Date(fecha).getTime() : fecha.getTime();
+	return new Date(t - 6 * 60 * 60 * 1000).getUTCMonth() + 1;
+}
+
 function dentroDeVentana(fecha: string, ventana: Ventana) {
 	const t = new Date(fecha).getTime();
 	return t >= ventana.inicio && t < ventana.fin;

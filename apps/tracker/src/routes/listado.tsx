@@ -8,9 +8,13 @@ import {
 	Search,
 	X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { BarraPasos } from "@/components/barra-pasos";
 import { authClient, cerrarSesion } from "@/lib/auth-client";
+import {
+	guardarFiltroPeriodo,
+	leerFiltroPeriodo,
+} from "@/lib/filtro-periodo";
 import {
 	type Caso,
 	anioEnGuatemala,
@@ -19,6 +23,7 @@ import {
 	coincidenciasEnPaso,
 	ESTADOS,
 	etiquetaDeEtapa,
+	mesEnGuatemala,
 	PASOS,
 	formatearFecha,
 	formatearMonto,
@@ -48,16 +53,43 @@ const TAMANOS_PAGINA = [10, 20, 50, 100];
 const TODO_EL_TIEMPO = "todo";
 
 export function ListadoPage() {
-	const ahora = new Date();
-	const [periodo, setPeriodo] = useState<string>(TODO_EL_TIEMPO);
-	const [anio, setAnio] = useState(anioEnGuatemala(ahora));
+	const ahora = new Date(); // misma instancia para mes y año en este render
+	const { data: session } = authClient.useSession();
+	const identificadorSocio = session?.user.id ?? session?.user.email ?? null;
+
+	// Default: el mes en curso, salvo que el socio ya haya elegido un período
+	// antes en esta misma sesión (se restaura desde localStorage; se limpia
+	// en cerrarSesion, así que tras un logout real siempre gana "mes en curso").
+	const [periodo, setPeriodo] = useState<string>(() => {
+		const persistido = leerFiltroPeriodo(identificadorSocio);
+		return persistido?.periodo ?? String(mesEnGuatemala(ahora));
+	});
+	const [anio, setAnio] = useState<number>(() => {
+		const persistido = leerFiltroPeriodo(identificadorSocio);
+		return persistido?.anio ?? anioEnGuatemala(ahora);
+	});
 	const [busqueda, setBusqueda] = useState("");
 	const [pasoFiltro, setPasoFiltro] = useState<number | null>(null);
 	const [pctFiltro, setPctFiltro] = useState<number | null>(null);
 	const [pagina, setPagina] = useState(1);
 	const [porPagina, setPorPagina] = useState(10);
 
-	const { data: session } = authClient.useSession();
+	// Red de seguridad: si identificadorSocio no estaba listo en el primer
+	// render, re-hidrata una sola vez apenas se resuelva, salvo que el socio
+	// ya haya cambiado el filtro a mano en ese ínterin.
+	const huboEdicionManualRef = useRef(false);
+	const hidratadoRef = useRef(identificadorSocio !== null);
+	useEffect(() => {
+		if (hidratadoRef.current || identificadorSocio === null) return;
+		hidratadoRef.current = true;
+		if (huboEdicionManualRef.current) return;
+		const persistido = leerFiltroPeriodo(identificadorSocio);
+		if (persistido) {
+			setPeriodo(persistido.periodo);
+			setAnio(persistido.anio);
+		}
+	}, [identificadorSocio]);
+
 	const casosQuery = useQuery(orpc.getCasos.queryOptions({ input: {} }));
 	const agenciasQuery = useQuery(
 		orpc.getPartnerAgencies.queryOptions({ input: {} }),
@@ -179,6 +211,31 @@ export function ListadoPage() {
 		setPagina(1);
 	};
 
+	// Único punto donde el período cambia a mano: además de aplicar el filtro,
+	// persiste la elección (namespaced por socio) para que sobreviva mientras
+	// la sesión siga activa (ej. entrar a un caso y volver).
+	function cambiarPeriodo(nuevoPeriodo: string, nuevoAnio: number = anioVigente) {
+		huboEdicionManualRef.current = true;
+		cambiarFiltro(() => {
+			setPeriodo(nuevoPeriodo);
+			setAnio(nuevoAnio);
+			setPctFiltro(null);
+		});
+		guardarFiltroPeriodo(identificadorSocio, {
+			periodo: nuevoPeriodo,
+			anio: nuevoAnio,
+		});
+	}
+
+	function cambiarAnio(nuevoAnio: number) {
+		huboEdicionManualRef.current = true;
+		cambiarFiltro(() => {
+			setAnio(nuevoAnio);
+			setPctFiltro(null);
+		});
+		guardarFiltroPeriodo(identificadorSocio, { periodo, anio: nuevoAnio });
+	}
+
 	return (
 		<div className="min-h-screen bg-slate-50">
 			<header className="sticky top-0 z-10 border-slate-200 border-b bg-white">
@@ -204,7 +261,7 @@ export function ListadoPage() {
 					</div>
 					<button
 						type="button"
-						onClick={() => cerrarSesion()}
+						onClick={() => cerrarSesion(identificadorSocio)}
 						className="flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-slate-700 text-sm transition hover:bg-slate-50"
 					>
 						<LogOut className="h-4 w-4" />
@@ -228,12 +285,7 @@ export function ListadoPage() {
 					<div className="flex gap-2">
 						<select
 							value={periodo}
-							onChange={(e) =>
-								cambiarFiltro(() => {
-									setPeriodo(e.target.value);
-									setPctFiltro(null);
-								})
-							}
+							onChange={(e) => cambiarPeriodo(e.target.value)}
 							className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-900"
 						>
 							<option value={TODO_EL_TIEMPO}>Todo el tiempo</option>
@@ -246,12 +298,7 @@ export function ListadoPage() {
 						{hayPeriodo && (
 							<select
 								value={anioVigente}
-								onChange={(e) =>
-									cambiarFiltro(() => {
-										setAnio(Number(e.target.value));
-										setPctFiltro(null);
-									})
-								}
+								onChange={(e) => cambiarAnio(Number(e.target.value))}
 								className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-900"
 							>
 								{aniosDisponibles.map((valor) => (
@@ -388,14 +435,35 @@ export function ListadoPage() {
 					</div>
 				) : filtrados.length === 0 ? (
 					<div className="rounded-xl border border-slate-200 border-dashed bg-white py-16 text-center">
-						<p className="font-medium text-slate-900">
-							No hay casos que mostrar
-						</p>
-						<p className="mt-1 text-slate-500 text-sm">
-							{busqueda || pasoFiltro !== null || hayPeriodo
-								? "Prueba quitando los filtros o eligiendo otro período."
-								: "Aún no hay créditos registrados."}
-						</p>
+						{hayPeriodo && !busqueda && pasoFiltro === null ? (
+							<>
+								<p className="font-medium text-slate-900">
+									Sin movimientos en{" "}
+									{MESES[Number(periodo) - 1].toLowerCase()} {anioVigente}
+								</p>
+								<p className="mt-1 text-slate-500 text-sm">
+									Ningún caso llegó a una etapa nueva ese mes.
+								</p>
+								<button
+									type="button"
+									onClick={() => cambiarPeriodo(TODO_EL_TIEMPO)}
+									className="mt-4 inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 font-medium text-slate-700 text-sm transition hover:bg-slate-50"
+								>
+									Ver todo el tiempo
+								</button>
+							</>
+						) : (
+							<>
+								<p className="font-medium text-slate-900">
+									No hay casos que mostrar
+								</p>
+								<p className="mt-1 text-slate-500 text-sm">
+									{busqueda || pasoFiltro !== null || hayPeriodo
+										? "Prueba quitando los filtros o eligiendo otro período."
+										: "Aún no hay créditos registrados."}
+								</p>
+							</>
+						)}
 					</div>
 				) : (
 					<>

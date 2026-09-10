@@ -3,8 +3,8 @@ import { Elysia, t } from "elysia";
  
  
 import { authMiddleware } from "./midleware";
-import { createMora, updateMora, procesarMoras, condonarMora, getCreditosWithMoras, getCondonacionesMora, condonarTodasLasMoras } from "../controllers/latefee";
-import { getMoraHistorialSnapshot, getMoraTimeline, getMoraHistorialCredito, getMoraHistorialExcel } from "../controllers/moraHistorial";
+import { createMora, updateMora, procesarMoras, condonarMora, getCreditosWithMoras, getCondonacionesMora, condonarTodasLasMoras, ParametroInvalidoError } from "../controllers/latefee";
+import { getMoraHistorialSnapshot, getMoraTimeline, getMoraHistorialCredito, getMoraHistorialExcel, getMoraHistorialCreditoExcel } from "../controllers/moraHistorial";
 
 // Fecha de hoy en zona Guatemala (YYYY-MM-DD), para el corte por defecto del historial.
 const hoyGT = () => {
@@ -31,6 +31,25 @@ const NO_AUTORIZADO = { success: false, message: "[ERROR] No autorizado (requier
 const NO_AUTORIZADO_CONDONACION = { success: false, message: "[ERROR] No autorizado: condonar mora requiere rol ADMIN" };
 const NO_AUTORIZADO_CREDITO = { success: false, message: "[ERROR] No autorizado (requiere ADMIN, CONTA o ASESOR)" };
 const NO_AUTORIZADO_ADMIN = { success: false, message: "[ERROR] No autorizado (requiere ADMIN)" };
+
+/**
+ * Traduce el error de un listado a respuesta HTTP.
+ *
+ * `ParametroInvalidoError` es un error DEL USUARIO (`?cuotas_atrasadas=abc`,
+ * `?fecha_desde=2026-02-31`): trae `status = 400` y un mensaje ya redactado en
+ * español para mostrarlo tal cual. El catch de estas rutas respondía 500 fijo y
+ * lo pisaba con un genérico, así que la validación explícita jamás llegaba al
+ * cliente y un typo del usuario se veía —y se alertaba— como una caída del
+ * servidor. El 500 queda para lo inesperado.
+ */
+const responderErrorListado = (err: unknown, set: any, mensajeGenerico: string) => {
+  if (err instanceof ParametroInvalidoError) {
+    set.status = err.status;
+    return { success: false, message: err.message, parametro: err.parametro };
+  }
+  set.status = 500;
+  return { success: false, message: mensajeGenerico, error: String(err) };
+};
 
 export const morasRouter = new Elysia()
   .use(authMiddleware)
@@ -161,24 +180,29 @@ export const morasRouter = new Elysia()
     // Sin este gate cualquier token vivo —incluido un INVESTOR del portal— la extraía.
     if (!requireRole(["ADMIN", "CONTA"])(user, set)) return NO_AUTORIZADO;
     try {
-      const { numero_credito_sifco, cuotas_atrasadas, estado, excel } = query;
+      const { numero_credito_sifco, nombre_usuario, cuotas_atrasadas, estado, excel, page, pageSize } = query;
       const result = await getCreditosWithMoras({
         numero_credito_sifco,
+        nombre_usuario,
         cuotas_atrasadas: cuotas_atrasadas ? Number(cuotas_atrasadas) : undefined,
         estado: estado as any,
         excel: excel === "true",
+        page: page ? Number(page) : 1,
+        pageSize: pageSize ? Number(pageSize) : 20,
       });
       return result;
     } catch (err) {
-      set.status = 500;
-      return { success: false, message: "[ERROR] No se pudo obtener créditos con moras", error: String(err) };
+      return responderErrorListado(err, set, "[ERROR] No se pudo obtener créditos con moras");
     }
   }, {
     query: t.Object({
       numero_credito_sifco: t.Optional(t.String()),
+      nombre_usuario: t.Optional(t.String()),
       cuotas_atrasadas: t.Optional(t.String()),
       estado: t.Optional(t.String()),
       excel: t.Optional(t.String()),
+      page: t.Optional(t.String()),
+      pageSize: t.Optional(t.String()),
     })
   })
 
@@ -190,26 +214,35 @@ export const morasRouter = new Elysia()
     // cartera (+ Excel a URL pública de R2). ADMIN/CONTA.
     if (!requireRole(["ADMIN", "CONTA"])(user, set)) return NO_AUTORIZADO;
     try {
-      const { numero_credito_sifco, usuario_email, fecha_desde, fecha_hasta, excel } = query;
+      const { numero_credito_sifco, nombre_usuario, usuario_email, fecha_desde, fecha_hasta, excel, page, pageSize } = query;
       const result = await getCondonacionesMora({
         numero_credito_sifco,
+        nombre_usuario,
         usuario_email,
-        fecha_desde: fecha_desde ? new Date(fecha_desde) : undefined,
-        fecha_hasta: fecha_hasta ? new Date(fecha_hasta) : undefined,
+        // `YYYY-MM-DD` tal cual: son DÍAS DE GUATEMALA y el controlador los
+        // convierte a los instantes UTC del día. Envolverlos en `new Date()`
+        // los volvía medianoche UTC y corría el filtro 6 horas.
+        fecha_desde,
+        fecha_hasta,
         excel: excel === "true",
+        page: page ? Number(page) : 1,
+        pageSize: pageSize ? Number(pageSize) : 20,
       });
       return result;
     } catch (err) {
-      set.status = 500;
-      return { success: false, message: "[ERROR] No se pudo obtener condonaciones", error: String(err) };
+      return responderErrorListado(err, set, "[ERROR] No se pudo obtener condonaciones");
     }
   }, {
     query: t.Object({
       numero_credito_sifco: t.Optional(t.String()),
+      nombre_usuario: t.Optional(t.String()),
       usuario_email: t.Optional(t.String()),
-      fecha_desde: t.Optional(t.String()), // ISO date string
-      fecha_hasta: t.Optional(t.String()), // ISO date string
+      // Día de Guatemala `YYYY-MM-DD`. Se pueden mandar por separado.
+      fecha_desde: t.Optional(t.String()),
+      fecha_hasta: t.Optional(t.String()),
       excel: t.Optional(t.String()),
+      page: t.Optional(t.String()),
+      pageSize: t.Optional(t.String()),
     })
   })
  
@@ -366,7 +399,7 @@ export const morasRouter = new Elysia()
   // asesor — cualquier ASESOR puede consultar el historial de CUALQUIER crédito pasando
   // otro credito_id, y con él los montos y los motivos de cada ajuste y condonación.
   // Es una decisión asumida, no un descuido: si se quiere limitar, el token trae
-  // asesor_id y habría que cruzarlo contra creditos.asesor_id acá.
+  // asesor_id y habría que cruzarlo contra creditos.asesor_id acá y en el /excel.
   // Las rutas hermanas (/moras/historial, /timeline, /excel) siguen ADMIN/CONTA porque
   // exponen la cartera completa de una sola vez.
   .get("/moras/historial/credito/:credito_id", async ({ params, set, user }: any) => {
@@ -381,5 +414,27 @@ export const morasRouter = new Elysia()
     } catch (err) {
       set.status = 500;
       return { success: false, message: "[ERROR] No se pudo obtener el historial del crédito", error: String(err) };
+    }
+  })
+
+  // Excel del historial de mora de un crédito (drill-down).
+  .get("/moras/historial/credito/:credito_id/excel", async ({ params, set, user }: any) => {
+    if (!requireRole(["ADMIN", "CONTA", "ASESOR"])(user, set)) return NO_AUTORIZADO_CREDITO;
+    try {
+      const creditoId = Number(params.credito_id);
+      if (!Number.isInteger(creditoId) || creditoId <= 0) {
+        set.status = 400;
+        return { success: false, message: "[ERROR] credito_id inválido" };
+      }
+      const buf = await getMoraHistorialCreditoExcel({ credito_id: creditoId });
+      return new Response(new Uint8Array(buf), {
+        headers: {
+          "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "content-disposition": `attachment; filename="historial-mora-credito-${creditoId}.xlsx"`,
+        },
+      });
+    } catch (err) {
+      set.status = 500;
+      return { success: false, message: "[ERROR] No se pudo generar el Excel del historial del crédito", error: String(err) };
     }
   });

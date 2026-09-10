@@ -1,14 +1,5 @@
 import { randomUUID } from "node:crypto";
-import {
-	and,
-	desc,
-	eq,
-	inArray,
-	isNotNull,
-	ne,
-	notInArray,
-	sql,
-} from "drizzle-orm";
+import { and, desc, eq, inArray, ne, notInArray, sql } from "drizzle-orm";
 import { db } from "../db";
 import { casosCobros, contactosCobros } from "../db/schema/cobros";
 import { leads, opportunities } from "../db/schema/crm";
@@ -139,24 +130,36 @@ async function registrarGestionLinkPagalo(params: {
 				params.finalizar &&
 				grupo.status === "CANCELLED"
 			) {
-				const [sucesor] = await tx
-					.select({ contactoCobroId: pagaloPaymentGroups.contactoCobroId })
-					.from(pagaloPaymentEvents)
-					.innerJoin(
-						pagaloPaymentGroups,
-						eq(pagaloPaymentGroups.id, pagaloPaymentEvents.groupId),
-					)
-					.where(
-						and(
-							eq(pagaloPaymentEvents.eventType, "GROUP_REGENERATED"),
-							sql`${pagaloPaymentEvents.payload}->>'grupoAnteriorId' = ${params.groupId}`,
-							isNotNull(pagaloPaymentGroups.contactoCobroId),
-						),
-					)
-					.orderBy(desc(pagaloPaymentEvents.occurredAt))
-					.limit(1)
-					.for("update");
-				contactoCobroId = sucesor?.contactoCobroId ?? null;
+				// Regenerar puede encadenarse A→B→C mientras el request original
+				// todavía envía WhatsApp. Cada paso mueve contactoCobroId al sucesor;
+				// seguir solo B dejaría la auditoría parcial cuando ya vive en C.
+				let grupoAnteriorId = params.groupId;
+				const gruposVisitados = new Set<string>([params.groupId]);
+				while (!contactoCobroId) {
+					const [eventoSucesor] = await tx
+						.select({ groupId: pagaloPaymentEvents.groupId })
+						.from(pagaloPaymentEvents)
+						.where(
+							and(
+								eq(pagaloPaymentEvents.eventType, "GROUP_REGENERATED"),
+								sql`${pagaloPaymentEvents.payload}->>'grupoAnteriorId' = ${grupoAnteriorId}`,
+							),
+						)
+						.orderBy(desc(pagaloPaymentEvents.occurredAt))
+						.limit(1);
+					if (!eventoSucesor || gruposVisitados.has(eventoSucesor.groupId))
+						break;
+					gruposVisitados.add(eventoSucesor.groupId);
+
+					const [sucesor] = await tx
+						.select({ contactoCobroId: pagaloPaymentGroups.contactoCobroId })
+						.from(pagaloPaymentGroups)
+						.where(eq(pagaloPaymentGroups.id, eventoSucesor.groupId))
+						.for("update");
+					if (!sucesor) break;
+					contactoCobroId = sucesor.contactoCobroId;
+					grupoAnteriorId = eventoSucesor.groupId;
+				}
 			}
 
 			if (contactoCobroId) {

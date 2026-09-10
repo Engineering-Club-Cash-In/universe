@@ -119,6 +119,7 @@ function prepararCredito(opts: {
   cuotas?: number;
   pool?: number[];
   carga?: { asesor_id: number; cuentas: number }[];
+  emailDueno?: string | null;
 }) {
   estado.selectsPorTabla.set(schema.buckets, [
     { numero: BUCKET_RECUPERACION_VEHICULO, nombre: "Última Instancia / Pre Jurídico" },
@@ -140,6 +141,11 @@ function prepararCredito(opts: {
     (opts.pool ?? [7]).map((asesor_id) => ({ asesor_id })),
   );
   estado.selectsPorTabla.set(schema.platform_users, [{ id: 55 }]);
+  // Correo del dueño ACTUAL, para la precondición de dueño.
+  estado.selectsPorTabla.set(
+    schema.asesores,
+    opts.emailDueno === null ? [] : [{ email: opts.emailDueno ?? "duenio@clubcashin.com" }],
+  );
 }
 
 const insertsDe = (tabla: any) => estado.inserts.filter((i) => i.tabla === tabla);
@@ -318,6 +324,48 @@ describe("enviarARecuperacionVehiculo — controller real con DB fakeada", () =>
     // `return false` COMMITEABA, así que el crédito quedaba en B4 mientras la API
     // respondía 409. Ahora el UPDATE guardado va antes y el abort revierte.
     expect(insertsDe(schema.buckets_historial)).toHaveLength(0);
+  });
+
+  it("precondición de dueño: pasa cuando el crédito sigue siendo de quien autorizó", async () => {
+    prepararCredito({ bucket: 2, asesor_id: 3, emailDueno: "asesor@clubcashin.com" });
+    const r = await enviarARecuperacionVehiculo({
+      credito_id: 9116,
+      motivo: "válido",
+      asesor_esperado_email: "  Asesor@ClubCashin.com ",
+    });
+    expect(r).toMatchObject({ success: true });
+  });
+
+  it("precondición de dueño: 409 y CERO escrituras si lo reasignaron entre medio", async () => {
+    // El CRM autorizó al asesor de siempre; para cuando llega acá, el motor (o un
+    // supervisor) ya se lo pasó a otro. Sin esta revalidación bajo lock, quien ya
+    // no lleva la cuenta la movía igual (review de Codex, P1).
+    prepararCredito({ bucket: 2, asesor_id: 3, emailDueno: "otro@clubcashin.com" });
+    const r = await enviarARecuperacionVehiculo({
+      credito_id: 9116,
+      motivo: "válido",
+      asesor_esperado_email: "asesor@clubcashin.com",
+    });
+    expect(r).toMatchObject({ success: false, status: 409 });
+    expect(estado.inserts).toHaveLength(0);
+    expect(estado.updates).toHaveLength(0);
+  });
+
+  it("precondición de dueño: un crédito sin asesor no satisface a nadie", async () => {
+    prepararCredito({ bucket: 2, asesor_id: null, emailDueno: null });
+    const r = await enviarARecuperacionVehiculo({
+      credito_id: 9116,
+      motivo: "válido",
+      asesor_esperado_email: "asesor@clubcashin.com",
+    });
+    expect(r).toMatchObject({ success: false, status: 409 });
+    expect(estado.inserts).toHaveLength(0);
+  });
+
+  it("sin precondición (supervisor) el traslado no exige dueño", async () => {
+    prepararCredito({ bucket: 2, asesor_id: 3, emailDueno: "otro@clubcashin.com" });
+    const r = await enviarARecuperacionVehiculo({ credito_id: 9116, motivo: "válido" });
+    expect(r).toMatchObject({ success: true });
   });
 
   it("la carga del bucket excluye los créditos cerrados", async () => {

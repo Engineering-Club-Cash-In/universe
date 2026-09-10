@@ -2398,6 +2398,12 @@ export class CarteraBackClient {
 		credito_id: number;
 		motivo: string;
 		usuario_email?: string;
+		/**
+		 * Dueño que el CRM verificó al autorizar. Cartera lo revalida bajo lock:
+		 * si el crédito se reasignó entre la autorización y esta escritura, se
+		 * rechaza en vez de dejar mover la cuenta a quien ya no la lleva.
+		 */
+		asesor_esperado_email?: string;
 	}): Promise<{
 		success: boolean;
 		credito_id: number;
@@ -2422,6 +2428,9 @@ export class CarteraBackClient {
 				body: JSON.stringify({
 					motivo: input.motivo,
 					...(input.usuario_email && { usuario_email: input.usuario_email }),
+					...(input.asesor_esperado_email && {
+						asesor_esperado_email: input.asesor_esperado_email,
+					}),
 				}),
 			},
 		);

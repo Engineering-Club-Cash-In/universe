@@ -122,6 +122,18 @@ de cobros quedan fuera del chequeo: ellos sí operan sobre cualquier crédito.
 Es la misma regla que ya defendía `crearConvenioDesdeFicha` desde el PR #1570; se extrajo a
 una función compartida cuando hizo falta la tercera copia.
 
+**La lectura de autorización va SIN cache.** Con `CARTERA_BACK_ENABLE_CACHE=true` el cliente
+cachea `/credito` cinco minutos, y una decisión de permiso tomada sobre esa foto se equivoca
+en las dos direcciones: el asesor viejo sigue pasando y el nuevo queda afuera. Por eso existe
+`assertCreditoAsignadoEnCarteraPorSifco`, que lo garantiza por construcción en vez de
+depender de que quien escribe el guard se acuerde del segundo argumento de `getCredito`.
+
+**Y autorizar no es escribir.** El chequeo del CRM ocurre en una request y el traslado en
+otra; entre medio el motor o un supervisor pueden reasignar el crédito. Por eso el CRM manda
+el correo del dueño que verificó como **precondición** (`asesor_esperado_email`) y cartera lo
+**revalida bajo sus locks** contra el dueño real: si no coincide, 409 y no se escribe nada.
+Va vacío para admin y supervisor, que no tienen un dueño que exigir.
+
 La trazabilidad no la da el permiso sino el **motivo obligatorio** y la bitácora
 `API_MANUAL`, que guarda quién lo pidió. En el menú el ítem va separado y en rojo para que
 no se apriete de pasada.

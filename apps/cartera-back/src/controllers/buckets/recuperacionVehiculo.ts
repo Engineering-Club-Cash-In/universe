@@ -181,6 +181,14 @@ function esLockTimeout(err: unknown): boolean {
  * al asesor que cubre ese bucket. Motivo obligatorio (es una decisión humana y
  * la bitácora tiene que poder responder por qué).
  *
+ * `asesor_esperado_email` es la PRECONDICIÓN de dueño: quien autorizó del lado
+ * del CRM verificó, en otra request, que el crédito era de esa persona. Entre esa
+ * verificación y esta escritura el motor o un supervisor pueden haberlo
+ * reasignado, y sin precondición el asesor que ya lo perdió movía igual la cuenta
+ * (review de Codex, P1). Se revalida acá adentro, bajo los locks, contra el dueño
+ * real. Va vacío cuando quien llama ve toda la cartera (admin / supervisor): ahí
+ * no hay dueño esperado que exigir.
+ *
  * TODO —lectura del estado incluida— corre dentro de una transacción que primero
  * toma los advisory locks de los DOS jobs de bucket y después el del crédito. El
  * lock por crédito solo no alcanzaba: ni `procesarMoras` ni el job de convenios
@@ -193,6 +201,7 @@ export async function enviarARecuperacionVehiculo(params: {
   credito_id: number;
   motivo: string;
   usuario_email?: string;
+  asesor_esperado_email?: string;
 }): Promise<RecuperacionVehiculoResultado> {
   const { credito_id } = params;
   const motivo = (params.motivo ?? "").trim();
@@ -252,6 +261,28 @@ export async function enviarARecuperacionVehiculo(params: {
           400,
           `[ERROR] El crédito ya está en B${destino} (${bucketDestino.nombre}).`,
         );
+      }
+
+      // 2.b Precondición de dueño, YA bajo los locks. La autorización del CRM
+      //     ocurrió en otra request; si entre medio el motor o un supervisor
+      //     reasignaron el crédito, quien pidió esto ya no es su asesor y no
+      //     puede moverlo. Se compara por `email_cash_in`, el mismo puente por
+      //     correo que usa el CRM para decidir la propiedad.
+      const esperado = params.asesor_esperado_email?.trim().toLowerCase();
+      if (esperado) {
+        const [dueno] = estado.asesor_id
+          ? await tx
+              .select({ email: asesores.emailCashIn })
+              .from(asesores)
+              .where(eq(asesores.asesor_id, estado.asesor_id))
+          : [];
+        const emailDueno = dueno?.email?.trim().toLowerCase();
+        if (!emailDueno || emailDueno !== esperado) {
+          throw new RecuperacionAbortada(
+            409,
+            "[ERROR] El crédito se reasignó a otro asesor mientras se enviaba a recuperación. Actualizá la vista e intentá de nuevo.",
+          );
+        }
       }
 
       const bucketAnterior = estado.bucket_actual;

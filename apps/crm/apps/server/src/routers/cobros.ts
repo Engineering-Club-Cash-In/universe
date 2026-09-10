@@ -8506,11 +8506,23 @@ export const cobrosRouter = {
 				userRole: context.userRole,
 				accion: "mandarlo a recuperación de vehículo",
 			});
+			// Autorizar y escribir son dos requests distintas: entre una y otra el
+			// motor o un supervisor pueden reasignar el crédito, y sin precondición
+			// el asesor que acaba de perderlo lo movía igual (review de Codex, P1).
+			// El correo viaja como dueño ESPERADO y cartera lo revalida bajo sus
+			// locks. Para quien ve toda la cartera no hay dueño que exigir: ahí el
+			// chequeo de arriba ni siquiera corre.
+			const dueñoEsperado = PERMISSIONS.canViewAllCasosCobros(
+				context.userRole ?? "",
+			)
+				? undefined
+				: context.session.user.email;
 			try {
 				return await carteraBackClient.enviarARecuperacionVehiculo({
 					credito_id: referencia.carteraCreditoId,
 					motivo: input.motivo,
 					usuario_email: context.session.user.email,
+					asesor_esperado_email: dueñoEsperado,
 				});
 			} catch (err) {
 				throw new ORPCError("BAD_REQUEST", {

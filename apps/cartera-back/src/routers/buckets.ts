@@ -817,6 +817,7 @@ export const bucketsRouter = new Elysia()
           credito_id: creditoId,
           motivo: body?.motivo,
           usuario_email: body?.usuario_email,
+          asesor_esperado_email: body?.asesor_esperado_email,
         });
         if (!result.success) {
           set.status = result.status ?? 400;
@@ -836,6 +837,10 @@ export const bucketsRouter = new Elysia()
       body: t.Object({
         motivo: t.String(),
         usuario_email: t.Optional(t.String()),
+        // Precondición de dueño: el correo del asesor que el CRM verificó como
+        // dueño al autorizar. Se revalida bajo lock. Ausente = quien llama ve
+        // toda la cartera (admin/supervisor) y no hay dueño que exigir.
+        asesor_esperado_email: t.Optional(t.String()),
       }),
     },
   )

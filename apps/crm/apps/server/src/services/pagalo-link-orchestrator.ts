@@ -117,7 +117,7 @@ async function registrarGestionLinkPagalo(params: {
 				.where(eq(pagaloPaymentGroups.id, params.groupId))
 				.for("update");
 			if (!grupo) return false;
-			if (grupo.status === "CANCELLED" || grupo.status === "COMPLETED") {
+			if (grupo.status === "CANCELLED") {
 				return false;
 			}
 			if (grupo.contactoCobroId) return true;

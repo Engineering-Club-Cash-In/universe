@@ -43,6 +43,9 @@ export default function MorasManager() {
   const [tipoCambio, setTipoCambio] = useState<"INCREMENTO" | "DECREMENTO">(
     "INCREMENTO"
   );
+  // `POST /mora/update` ahora exige `motivo` no vacío: sin este campo el
+  // backend rechaza con 400 toda edición y la acción Editar deja de servir.
+  const [motivoEdicion, setMotivoEdicion] = useState("");
 
   const [expandedCondonacionId, setExpandedCondonacionId] = useState<
     number | null
@@ -149,12 +152,18 @@ export default function MorasManager() {
     setMontoMoraSeleccionada(monto);
     setNuevasCuotas(cuotas);
     setTipoCambio("INCREMENTO");
+    setMotivoEdicion("");
     setOpenModalMora(true);
   };
 
   const confirmGuardarMora = () => {
     if (!nuevoMonto || !nuevasCuotas) {
       toast.error("Debes ingresar monto y cuotas");
+      return;
+    }
+
+    if (!motivoEdicion.trim()) {
+      toast.error("El motivo es obligatorio");
       return;
     }
 
@@ -165,6 +174,7 @@ export default function MorasManager() {
           monto_cambio: nuevoMonto,
           tipo: tipoCambio,
           cuotas_atrasadas: nuevasCuotas,
+          motivo: motivoEdicion.trim(),
         },
         {
           onSuccess: () => toast.success("Mora actualizada exitosamente"),
@@ -179,6 +189,7 @@ export default function MorasManager() {
     setOpenModalMora(false);
     setNuevoMonto(undefined);
     setNuevasCuotas(undefined);
+    setMotivoEdicion("");
     setEditCreditoId(null);
   };
 
@@ -629,6 +640,17 @@ export default function MorasManager() {
                   onChange={(e) => setNuevasCuotas(Number(e.target.value))}
                 />
               </div>
+              <div>
+                <Label htmlFor="motivoEdicion">
+                  Motivo <span className="text-red-600">*</span>
+                </Label>
+                <Input
+                  id="motivoEdicion"
+                  value={motivoEdicion}
+                  onChange={(e) => setMotivoEdicion(e.target.value)}
+                  placeholder="Ej: Ajuste por acuerdo con el cliente..."
+                />
+              </div>
               <div className="flex justify-end gap-2 mt-4">
                 <Button
                   variant="secondary"
@@ -636,7 +658,12 @@ export default function MorasManager() {
                 >
                   Cancelar
                 </Button>
-                <Button onClick={confirmGuardarMora}>Guardar</Button>
+                <Button
+                  onClick={confirmGuardarMora}
+                  disabled={!motivoEdicion.trim()}
+                >
+                  Guardar
+                </Button>
               </div>
             </div>
           </div>

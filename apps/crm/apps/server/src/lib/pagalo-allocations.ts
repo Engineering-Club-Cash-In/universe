@@ -37,6 +37,65 @@ const cents = (value: string | null | undefined) => {
 const money = (amount: bigint) =>
 	`${amount / 100n}.${String(amount % 100n).padStart(2, "0")}`;
 
+/** Distingue reintento de gestión de un cobro nuevo del mismo crédito. */
+export function coincideSeleccionCuotasPagalo(
+	allocationsSnapshot: unknown,
+	cuotaIds: number[],
+	otros?: string | null,
+	mora?: string | null,
+): boolean {
+	if (!Array.isArray(allocationsSnapshot)) return false;
+	const cuotasEnSnapshot = new Set<number>();
+	let otrosEnSnapshot = 0n;
+	let moraEnSnapshot = 0n;
+	for (const allocation of allocationsSnapshot) {
+		if (!allocation || typeof allocation !== "object") return false;
+		const fila = allocation as {
+			cartera_cuota_id?: unknown;
+			rubro?: unknown;
+			amount?: unknown;
+		};
+		const cuotaId = fila.cartera_cuota_id;
+		if (!Number.isInteger(cuotaId) || (cuotaId as number) <= 0) return false;
+		cuotasEnSnapshot.add(cuotaId as number);
+		if (fila.rubro === "OTROS" || fila.rubro === "MORA") {
+			if (typeof fila.amount !== "string") return false;
+			try {
+				if (fila.rubro === "OTROS") otrosEnSnapshot += cents(fila.amount);
+				else moraEnSnapshot += cents(fila.amount);
+			} catch {
+				return false;
+			}
+		}
+	}
+	try {
+		if (otrosEnSnapshot !== cents(otros)) return false;
+	} catch {
+		return false;
+	}
+	const snapshotSoloMora =
+		allocationsSnapshot.length > 0 &&
+		allocationsSnapshot.every(
+			(allocation) => (allocation as { rubro?: unknown }).rubro === "MORA",
+		);
+	// Mora sola usa la primera cuota vencida como referencia técnica, no como
+	// selección del asesor. Nunca debe recuperar un cobro nuevo de esa cuota.
+	if (snapshotSoloMora) {
+		try {
+			return cuotaIds.length === 0 && moraEnSnapshot === cents(mora);
+		} catch {
+			return false;
+		}
+	}
+	if (cuotaIds.length === 0) return false;
+	if (cuotasEnSnapshot.size === 0) return false;
+	const cuotasSolicitadas = new Set(cuotaIds);
+	return (
+		cuotasEnSnapshot.size === cuotasSolicitadas.size &&
+		[...cuotasEnSnapshot].every((cuotaId) => cuotasSolicitadas.has(cuotaId))
+	);
+}
+
 export function buildPagaloAllocations({
 	installments,
 	mora,

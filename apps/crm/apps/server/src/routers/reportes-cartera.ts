@@ -144,6 +144,7 @@ export const reportesCarteraRouter = {
 										SELECT COUNT(*) as total, MAX(fecha_contacto) as ultimo
 										FROM contactos_cobros
 										WHERE caso_cobro_id = ${casoCobros[0].id}
+										AND estado_contacto != 'link_pago_generado'
 									`,
 								);
 
@@ -369,6 +370,7 @@ export const reportesCarteraRouter = {
 						COUNT(DISTINCT recuperaciones.id) as total_recuperaciones
 					FROM casos_cobros cc
 					LEFT JOIN contactos_cobros contactos ON contactos.caso_cobro_id = cc.id
+						AND contactos.estado_contacto != 'link_pago_generado'
 					LEFT JOIN convenios_pago convenios ON convenios.caso_cobro_id = cc.id
 					LEFT JOIN recuperaciones_vehiculo recuperaciones ON recuperaciones.caso_cobro_id = cc.id
 					WHERE cc.created_at BETWEEN ${input.fechaInicio} AND ${input.fechaFin}

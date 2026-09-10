@@ -215,6 +215,7 @@ export function evaluarGestionTempranaB1(params: {
 
 	for (const contacto of params.contactos) {
 		if (esContactoAutomatico(contacto.comentarios)) continue;
+		if (contacto.estadoContacto === "link_pago_generado") continue;
 
 		const fecha = aFecha(contacto.fechaContacto);
 		// Sin fecha no se puede ubicar en la ventana: se descarta en vez de

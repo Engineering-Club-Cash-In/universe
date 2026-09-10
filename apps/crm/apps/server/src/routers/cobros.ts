@@ -167,7 +167,10 @@ import {
 	createPagaloClient,
 	getPagaloSandboxConfig,
 } from "../services/pagalo-client";
-import { createPagaloLinks } from "../services/pagalo-link-orchestrator";
+import {
+	createPagaloLinks,
+	reintentarGestionLinkPagalo,
+} from "../services/pagalo-link-orchestrator";
 import { resolverVehiculoCasoPagalo } from "../services/pagalo-vehiculo";
 import {
 	type EstadoCuentaErrorCodigo,
@@ -915,9 +918,12 @@ export const cobrosRouter = {
 						.select({ count: count() })
 						.from(contactosCobros)
 						.where(
-							gte(
-								contactosCobros.fechaContacto,
-								new Date(new Date().setHours(0, 0, 0, 0)),
+							and(
+								gte(
+									contactosCobros.fechaContacto,
+									new Date(new Date().setHours(0, 0, 0, 0)),
+								),
+								ne(contactosCobros.estadoContacto, "link_pago_generado"),
 							),
 						);
 
@@ -1063,9 +1069,12 @@ export const cobrosRouter = {
 				.select({ count: count() })
 				.from(contactosCobros)
 				.where(
-					gte(
-						contactosCobros.fechaContacto,
-						new Date(new Date().setHours(0, 0, 0, 0)),
+					and(
+						gte(
+							contactosCobros.fechaContacto,
+							new Date(new Date().setHours(0, 0, 0, 0)),
+						),
+						ne(contactosCobros.estadoContacto, "link_pago_generado"),
 					),
 				);
 
@@ -4086,7 +4095,12 @@ export const cobrosRouter = {
 									ultimaFecha: max(contactosCobros.fechaContacto),
 								})
 								.from(contactosCobros)
-								.where(inArray(contactosCobros.casoCobroId, casoIds))
+								.where(
+									and(
+										inArray(contactosCobros.casoCobroId, casoIds),
+										ne(contactosCobros.estadoContacto, "link_pago_generado"),
+									),
+								)
 								.groupBy(contactosCobros.casoCobroId),
 				]);
 				const promesasPorCaso = new Map<
@@ -5284,6 +5298,40 @@ export const cobrosRouter = {
 			}
 		}),
 
+	// Repara únicamente gestión/historial de links ya existentes. No recibe
+	// cuotas ni montos, así que nunca puede emitir ni duplicar links.
+	reintentarGestionLinksPagalo: cobrosProcedure
+		.input(
+			z.object({
+				casoCobroId: z.string().uuid(),
+				groupId: z.string().uuid(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
+			const [grupo] = await db
+				.select({ id: pagaloPaymentGroups.id })
+				.from(pagaloPaymentGroups)
+				.where(
+					and(
+						eq(pagaloPaymentGroups.id, input.groupId),
+						eq(pagaloPaymentGroups.casoCobroId, input.casoCobroId),
+					),
+				)
+				.limit(1);
+			if (!grupo) throw new ORPCError("NOT_FOUND");
+			return {
+				gestionRegistrada: await reintentarGestionLinkPagalo({
+					groupId: grupo.id,
+					requestedBy: context.user.id,
+				}),
+			};
+		}),
+
 	// Vehículo del caso para el preview del mensaje de Págalo — usa el mismo
 	// helper que createPagaloLinks (resolverVehiculoCasoPagalo) para que el
 	// preview y el mensaje real de WhatsApp identifiquen siempre el mismo
@@ -5329,6 +5377,7 @@ export const cobrosRouter = {
 					otrosTotal: pagaloPaymentGroups.otrosTotal,
 					totalAmount: pagaloPaymentGroups.totalAmount,
 					createdAt: pagaloPaymentGroups.createdAt,
+					gestionRegistrada: sql<boolean>`${pagaloPaymentGroups.contactoCobroId} IS NOT NULL`,
 					linkId: pagaloPaymentLinks.id,
 					linkType: pagaloPaymentLinks.linkType,
 					linkStatus: pagaloPaymentLinks.status,
@@ -5365,6 +5414,7 @@ export const cobrosRouter = {
 				otrosTotal: grupo.otrosTotal,
 				totalAmount: grupo.totalAmount,
 				createdAt: grupo.createdAt,
+				gestionRegistrada: grupo.gestionRegistrada,
 				links: filas.flatMap((fila) =>
 					fila.linkId && fila.linkType
 						? [
@@ -8518,7 +8568,7 @@ export const cobrosRouter = {
 					// Promesa se reporta aparte (línea de arriba) — no cuenta en el
 					// denominador de "efectivos/total", sería mezclar dos categorías
 					// excluyentes en un mismo ratio.
-					totalContactos: sql<number>`COUNT(*) FILTER (WHERE ${cierreDiarioCreditoCobros.tipo} = 'contacto' AND ${cierreDiarioCreditoCobros.estadoContacto} != 'promesa_pago' AND NOT ${esAutomatico})`,
+					totalContactos: sql<number>`COUNT(*) FILTER (WHERE ${cierreDiarioCreditoCobros.tipo} = 'contacto' AND ${cierreDiarioCreditoCobros.estadoContacto} != 'promesa_pago' AND ${cierreDiarioCreditoCobros.estadoContacto} != 'link_pago_generado' AND NOT ${esAutomatico})`,
 					// Movimientos que SALIERON del bucket del pool del asesor ese día.
 					subieron: sql<number>`COUNT(*) FILTER (WHERE ${cierreDiarioCreditoCobros.tipo} = 'subida')`,
 					bajaron: sql<number>`COUNT(*) FILTER (WHERE ${cierreDiarioCreditoCobros.tipo} = 'bajada')`,

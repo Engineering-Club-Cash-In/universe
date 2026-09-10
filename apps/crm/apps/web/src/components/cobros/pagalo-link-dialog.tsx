@@ -154,6 +154,24 @@ export function PagaloLinkDialog({
 		return { capital, facturable, otros, total: capital + facturable };
 	}, [cuotas, selected, tieneMora, data, otrosParseado]);
 	const queryClient = useQueryClient();
+	const invalidarDatosPagalo = () => {
+		queryClient.invalidateQueries({
+			queryKey: orpc.getPagaloHistorial.key(),
+		});
+		queryClient.invalidateQueries(
+			orpc.getPagaloGrupoActivo.queryOptions({
+				input: { casoCobroId, creditoId },
+			}),
+		);
+		queryClient.invalidateQueries(
+			orpc.getHistorialContactos.queryOptions({ input: { casoCobroId } }),
+		);
+		queryClient.invalidateQueries(
+			orpc.getHistorialContactosPaginado.queryOptions({
+				input: { casoCobroId },
+			}),
+		);
+	};
 	const mutation = useMutation({
 		mutationFn: (input: {
 			casoCobroId: string;
@@ -163,17 +181,12 @@ export function PagaloLinkDialog({
 			otros?: string;
 		}) => (client as any).crearLinksPagalo(input),
 		onSuccess: (result: any) => {
-			// .key() = prefijo del path → invalida TODAS las páginas del
-			// historial, que ahora va por crédito y paginado.
-			queryClient.invalidateQueries({
-				queryKey: orpc.getPagaloHistorial.key(),
-			});
-			queryClient.invalidateQueries(
-				orpc.getPagaloGrupoActivo.queryOptions({
-					input: { casoCobroId, creditoId },
-				}),
-			);
-			if (result.status === "REVIEW_REQUIRED")
+			invalidarDatosPagalo();
+			if (result.gestionRecuperada)
+				toast.success(
+					"Se recuperó el registro de la gestión Págalo en el historial del caso.",
+				);
+			else if (result.status === "REVIEW_REQUIRED")
 				toast.error("Grupo Págalo existente requiere revisión.");
 			else if (result.origen === "BOT")
 				toast.info(
@@ -194,11 +207,35 @@ export function PagaloLinkDialog({
 				toast.success(
 					`Links Págalo listos: ${q(result.totalAmount)}. No se pudo enviar el WhatsApp al cliente, compartí el link manualmente.`,
 				);
+			if (result.gestionRegistrada === false)
+				toast.warning(
+					"Links creados, pero no se pudo registrar la gestión. Puedes reintentar sin generar links duplicados.",
+				);
 		},
-		onError: (error: Error) =>
-			toast.error(error.message || "No se pudieron crear links Págalo"),
+		onError: (error: Error) => {
+			invalidarDatosPagalo();
+			toast.error(error.message || "No se pudieron crear links Págalo");
+		},
 	});
 	const grupoPendiente = grupoActivo.data as any;
+	const reintentarGestionMutation = useMutation({
+		mutationFn: () =>
+			(client as any).reintentarGestionLinksPagalo({
+				casoCobroId,
+				groupId: grupoPendiente.groupId,
+			}),
+		onSuccess: (result: { gestionRegistrada: boolean }) => {
+			invalidarDatosPagalo();
+			if (result.gestionRegistrada)
+				toast.success("Gestión Págalo registrada en el historial del caso.");
+			else
+				toast.error("No se pudo registrar la gestión. Intenta más tarde.");
+		},
+		onError: (error: Error) => {
+			invalidarDatosPagalo();
+			toast.error(error.message || "No se pudo registrar la gestión Págalo");
+		},
+	});
 	const linksRecienCreados = mutation.data?.links ?? [];
 	const links =
 		linksRecienCreados.length > 0
@@ -207,6 +244,9 @@ export function PagaloLinkDialog({
 	const reviewRequired =
 		mutation.data?.status === "REVIEW_REQUIRED" ||
 		grupoPendiente?.status === "REVIEW_REQUIRED";
+	const gestionPendiente =
+		grupoPendiente?.origen === "ASESOR" &&
+		grupoPendiente?.gestionRegistrada === false;
 	const totalPendiente = grupoPendiente?.totalAmount;
 	// Resumen del grupo para la cabecera. Cuando los links vienen de una
 	// creación recién hecha todavía no hay grupo cargado, así que el total se
@@ -747,6 +787,23 @@ export function PagaloLinkDialog({
 											],
 										)}
 									</p>
+								</div>
+							)}
+							{gestionPendiente && (
+								<div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-900 text-xs dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+									<span>La gestión todavía no aparece en el historial.</span>
+									<Button
+										disabled={reintentarGestionMutation.isPending}
+										onClick={() => reintentarGestionMutation.mutate()}
+										size="sm"
+										type="button"
+										variant="outline"
+									>
+										{reintentarGestionMutation.isPending && (
+											<Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+										)}
+										Registrar en historial
+									</Button>
 								</div>
 							)}
 						</div>

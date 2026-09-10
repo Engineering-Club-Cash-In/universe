@@ -1,7 +1,17 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, ne, notInArray } from "drizzle-orm";
+import {
+	and,
+	desc,
+	eq,
+	gte,
+	inArray,
+	isNull,
+	ne,
+	notInArray,
+	sql,
+} from "drizzle-orm";
 import { db } from "../db";
-import { casosCobros } from "../db/schema/cobros";
+import { casosCobros, contactosCobros } from "../db/schema/cobros";
 import { leads, opportunities } from "../db/schema/crm";
 import {
 	pagaloPaymentEvents,
@@ -9,11 +19,22 @@ import {
 	pagaloPaymentLinks,
 } from "../db/schema/pagalo-payments";
 import { reclamarYProcesarGrupo } from "../jobs/pagalo-dispatch";
+import { registrarAuditContacto } from "../lib/audit-contactos";
 import { isTestModeEnabled } from "../lib/messaging-test-mode";
 import {
 	buildPagaloAllocations,
+	coincideSeleccionCuotasPagalo,
 	type PagaloInstallment,
 } from "../lib/pagalo-allocations";
+import {
+	construirComentarioGestionLinkPagalo,
+	esLinkPagaloContabilizableEnGestion,
+	gestionLinkPagaloTieneWhatsappConfirmado,
+	resultadoWhatsappGestionLinkPagalo,
+	responsableGestionLinkPagalo,
+	resumenGestionLinksPagalo,
+	totalDeLinksPagalo,
+} from "../lib/pagalo-gestion";
 import { deduplicarCuotasPagalo } from "../lib/pagalo-installments";
 import { primeraRevisionPoll } from "../lib/pagalo-poll-cadencia";
 import {
@@ -22,6 +43,7 @@ import {
 } from "../lib/pagalo-selection";
 import { primerTelefono } from "../lib/phone-utils";
 import { carteraBackClient } from "./cartera-back-client";
+import { isCarteraBackEnabled } from "./cartera-back-integration";
 import {
 	createPagaloClient,
 	getPagaloSandboxConfig,
@@ -57,6 +79,365 @@ type CreatePagaloLinksInput = {
 // real al proveedor.
 const PAGALO_TEST_EMAIL = "j.alvarez@clubcashin.com";
 const PAGALO_TEST_PHONE = "35219722";
+const TIMEOUT_BUCKET_GESTION_MS = 3000;
+// Recuperación de una auditoría que falló justo antes de que el dispatcher
+// completara el pago. La ventana evita que crear un cobro nuevo reutilice un
+// pago histórico del mismo caso.
+const VENTANA_RECUPERACION_GESTION_PAGALO_MS = 24 * 60 * 60 * 1000;
+
+async function capturarBucketGestionPagalo(
+	numeroSifco: string,
+): Promise<number | null> {
+	if (!isCarteraBackEnabled()) return null;
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		const actual = await Promise.race([
+			carteraBackClient.getBucketActualCredito(numeroSifco),
+			new Promise<null>((resolve) => {
+				timer = setTimeout(() => resolve(null), TIMEOUT_BUCKET_GESTION_MS);
+			}),
+		]);
+		return actual?.bucket ?? null;
+	} catch (error) {
+		console.error(
+			`[Págalo] No se pudo capturar bucket para gestión ${numeroSifco}:`,
+			error,
+		);
+		return null;
+	} finally {
+		if (timer) clearTimeout(timer);
+	}
+}
+
+/** Dueño del primer grupo, aunque supervisores hayan regenerado sucesores. */
+async function resolverCreadorOriginalGrupoPagalo(params: {
+	groupId: string;
+	createdBy: string;
+}): Promise<string | null> {
+	let groupIdActual = params.groupId;
+	let creadorOriginal = params.createdBy;
+	const gruposVisitados = new Set<string>([groupIdActual]);
+	while (true) {
+		const [regeneracion] = await db
+			.select({
+				grupoAnteriorId: sql<string | null>`${pagaloPaymentEvents.payload}->>'grupoAnteriorId'`,
+			})
+			.from(pagaloPaymentEvents)
+			.where(
+				and(
+					eq(pagaloPaymentEvents.groupId, groupIdActual),
+					eq(pagaloPaymentEvents.eventType, "GROUP_REGENERATED"),
+				),
+			)
+			.orderBy(desc(pagaloPaymentEvents.occurredAt))
+			.limit(1);
+		if (!regeneracion?.grupoAnteriorId) return creadorOriginal;
+		if (gruposVisitados.has(regeneracion.grupoAnteriorId)) return null;
+		gruposVisitados.add(regeneracion.grupoAnteriorId);
+		const [grupoAnterior] = await db
+			.select({
+				id: pagaloPaymentGroups.id,
+				createdBy: pagaloPaymentGroups.createdBy,
+			})
+			.from(pagaloPaymentGroups)
+			.where(eq(pagaloPaymentGroups.id, regeneracion.grupoAnteriorId))
+			.limit(1);
+		if (!grupoAnterior) return null;
+		groupIdActual = grupoAnterior.id;
+		creadorOriginal = grupoAnterior.createdBy;
+	}
+}
+
+/** Una gestión por grupo; fallo de auditoría no revierte links creados. */
+async function registrarGestionLinkPagalo(params: {
+	groupId: string;
+	casoCobroId: string;
+	numeroSifco: string;
+	requestedBy: string;
+	totalAmount: string;
+	cantidadLinks: number;
+	whatsappEnviado: boolean | null;
+	fechaContacto?: Date;
+	bucketSnapshot?: number | null;
+	finalizar?: boolean;
+	repararPreliminar?: boolean;
+	/** Actualiza links de regeneración sin perder resultado WhatsApp previo. */
+	actualizarGestionParcial?: boolean;
+	/** Dueño asesor del primer grupo, incluso tras regeneraciones supervisor. */
+	creadorOriginal?: string | null;
+}): Promise<boolean> {
+	const bucketSnapshot =
+		params.bucketSnapshot === undefined
+			? await capturarBucketGestionPagalo(params.numeroSifco)
+			: params.bucketSnapshot;
+	try {
+		return await db.transaction(async (tx) => {
+			const [grupoSinCandado] = await tx
+				.select({ carteraCreditoId: pagaloPaymentGroups.carteraCreditoId })
+				.from(pagaloPaymentGroups)
+				.where(eq(pagaloPaymentGroups.id, params.groupId));
+			if (!grupoSinCandado) return false;
+
+			const buscarGrupoTerminalId = async () => {
+				let grupoTerminalId = params.groupId;
+				const gruposVisitados = new Set<string>([grupoTerminalId]);
+				while (true) {
+					const [eventoSucesor] = await tx
+						.select({ groupId: pagaloPaymentEvents.groupId })
+						.from(pagaloPaymentEvents)
+						.where(
+							and(
+								eq(pagaloPaymentEvents.eventType, "GROUP_REGENERATED"),
+								sql`${pagaloPaymentEvents.payload}->>'grupoAnteriorId' = ${grupoTerminalId}`,
+							),
+						)
+						.orderBy(desc(pagaloPaymentEvents.occurredAt))
+						.limit(1);
+					if (!eventoSucesor || gruposVisitados.has(eventoSucesor.groupId))
+						break;
+					gruposVisitados.add(eventoSucesor.groupId);
+					grupoTerminalId = eventoSucesor.groupId;
+				}
+				return grupoTerminalId;
+			};
+
+			// Mismo orden que regenerarGrupo: predecesores por UUID y grupo
+			// terminal al final. Descubrir primero la terminal evita A→B contra
+			// B→A cuando otra sesión regenera C al mismo tiempo.
+			let grupoDestinoId = await buscarGrupoTerminalId();
+			await tx
+				.select({ id: pagaloPaymentGroups.id })
+				.from(pagaloPaymentGroups)
+				.where(
+					and(
+						eq(
+							pagaloPaymentGroups.carteraCreditoId,
+							grupoSinCandado.carteraCreditoId,
+						),
+						ne(pagaloPaymentGroups.id, grupoDestinoId),
+					),
+				)
+				.orderBy(pagaloPaymentGroups.id)
+				.for("update");
+
+			let [grupoDestino] = await tx
+				.select({
+					contactoCobroId: pagaloPaymentGroups.contactoCobroId,
+					status: pagaloPaymentGroups.status,
+					capitalTotal: pagaloPaymentGroups.capitalTotal,
+					facturableTotal: pagaloPaymentGroups.facturableTotal,
+				})
+				.from(pagaloPaymentGroups)
+				.where(eq(pagaloPaymentGroups.id, grupoDestinoId))
+				.for("update");
+			if (!grupoDestino) return false;
+
+			// Si una regeneración terminó mientras esperábamos candados, sus
+			// predecesores ya están retenidos y nadie puede volver a regenerar.
+			// Releer permite incluir sucesor recién confirmado sin otra carrera.
+			const grupoTerminalConfirmadoId = await buscarGrupoTerminalId();
+			if (grupoTerminalConfirmadoId !== grupoDestinoId) {
+				grupoDestinoId = grupoTerminalConfirmadoId;
+				[grupoDestino] = await tx
+					.select({
+						contactoCobroId: pagaloPaymentGroups.contactoCobroId,
+						status: pagaloPaymentGroups.status,
+						capitalTotal: pagaloPaymentGroups.capitalTotal,
+						facturableTotal: pagaloPaymentGroups.facturableTotal,
+					})
+					.from(pagaloPaymentGroups)
+					.where(eq(pagaloPaymentGroups.id, grupoDestinoId))
+					.for("update");
+				if (!grupoDestino) return false;
+			}
+
+			// Una emisión parcial del grupo reemplazado no debe crear una gestión
+			// parcial en el sucesor; la finalización registrará datos completos.
+			if (!params.finalizar && grupoDestinoId !== params.groupId) return false;
+
+			const resumenDestino =
+				grupoDestinoId === params.groupId && !params.actualizarGestionParcial
+					? null
+					: resumenGestionLinksPagalo(
+							(
+								await tx
+									.select({
+										linkType: pagaloPaymentLinks.linkType,
+										status: pagaloPaymentLinks.status,
+										isApplicationSource: pagaloPaymentLinks.isApplicationSource,
+									})
+									.from(pagaloPaymentLinks)
+									.where(eq(pagaloPaymentLinks.groupId, grupoDestinoId))
+									.for("update")
+							).map((link) => ({
+								...link,
+								amount:
+									link.linkType === "CAPITAL"
+										? grupoDestino.capitalTotal
+										: grupoDestino.facturableTotal,
+							})),
+						);
+			const paramsGestion = resumenDestino
+				? { ...params, ...resumenDestino }
+				: params;
+			const contactoCobroId = grupoDestino.contactoCobroId;
+			if (paramsGestion.cantidadLinks === 0 && !contactoCobroId) return false;
+
+			if (contactoCobroId) {
+				if (params.finalizar) {
+					const [gestionPrevia] = await tx
+						.select({
+							casoCobroId: contactosCobros.casoCobroId,
+							comentarios: contactosCobros.comentarios,
+							bucketSnapshot: contactosCobros.bucketSnapshot,
+						})
+						.from(contactosCobros)
+						.where(eq(contactosCobros.id, contactoCobroId))
+						.for("update");
+
+					const whatsappFinal = params.actualizarGestionParcial
+						? resultadoWhatsappGestionLinkPagalo(
+								gestionPrevia?.comentarios ?? "",
+							)
+						: params.whatsappEnviado;
+					const comentarioFinal = construirComentarioGestionLinkPagalo({
+						...paramsGestion,
+						whatsappEnviado: whatsappFinal,
+					});
+					const bucketFinal =
+						bucketSnapshot ?? gestionPrevia?.bucketSnapshot ?? null;
+					const debeFinalizar =
+						params.whatsappEnviado !== null ||
+						params.actualizarGestionParcial === true ||
+						(params.repararPreliminar === true &&
+							gestionPrevia !== undefined &&
+							!gestionLinkPagaloTieneWhatsappConfirmado(
+								gestionPrevia.comentarios,
+							));
+					if (
+						debeFinalizar &&
+						gestionPrevia &&
+						(gestionPrevia.comentarios !== comentarioFinal ||
+							gestionPrevia.bucketSnapshot !== bucketFinal)
+					) {
+						const ahora = new Date();
+						await tx
+							.update(contactosCobros)
+							.set({
+								comentarios: comentarioFinal,
+								bucketSnapshot: bucketFinal,
+								updatedAt: ahora,
+							})
+							.where(eq(contactosCobros.id, contactoCobroId));
+						await registrarAuditContacto({
+							contactoId: contactoCobroId,
+							casoCobroId: gestionPrevia.casoCobroId,
+							accion: "finalizacion_link_pago",
+							origen: "sistema_pagalo",
+							valoresAnteriores: {
+								comentarios: gestionPrevia.comentarios,
+								bucketSnapshot: gestionPrevia.bucketSnapshot,
+							},
+							tx,
+							editadoEn: ahora,
+						});
+					}
+				}
+				return true;
+			}
+			if (grupoDestino.status === "CANCELLED") {
+				return false;
+			}
+			const [gestion] = await tx
+				.insert(contactosCobros)
+				.values({
+					casoCobroId: params.casoCobroId,
+					fechaContacto: params.fechaContacto,
+					metodoContacto: "pago",
+					estadoContacto: "link_pago_generado",
+					comentarios: construirComentarioGestionLinkPagalo(paramsGestion),
+					realizadoPor: responsableGestionLinkPagalo(params),
+					bucketSnapshot,
+				})
+				.returning({ id: contactosCobros.id });
+			if (!gestion) return false;
+			await tx
+				.update(pagaloPaymentGroups)
+				.set({ contactoCobroId: gestion.id, updatedAt: new Date() })
+				.where(eq(pagaloPaymentGroups.id, grupoDestinoId));
+			return true;
+		});
+	} catch (error) {
+		console.error(
+			`[Págalo] Links creados, pero no se pudo registrar gestión ${params.groupId}:`,
+			error,
+		);
+		return false;
+	}
+}
+
+/** Repara solo historial de un grupo ya emitido; nunca crea links nuevos. */
+export async function reintentarGestionLinkPagalo(params: {
+	groupId: string;
+	requestedBy: string;
+}): Promise<boolean> {
+	const [grupo] = await db
+		.select({
+			casoCobroId: pagaloPaymentGroups.casoCobroId,
+			numeroSifco: pagaloPaymentGroups.numeroCreditoSifco,
+			origen: pagaloPaymentGroups.origen,
+			createdBy: pagaloPaymentGroups.createdBy,
+			createdAt: pagaloPaymentGroups.createdAt,
+			capitalTotal: pagaloPaymentGroups.capitalTotal,
+			facturableTotal: pagaloPaymentGroups.facturableTotal,
+		})
+		.from(pagaloPaymentGroups)
+		.where(eq(pagaloPaymentGroups.id, params.groupId))
+		.limit(1);
+	if (!grupo?.casoCobroId || grupo.origen !== "ASESOR") return false;
+	const creadorOriginal = await resolverCreadorOriginalGrupoPagalo({
+		groupId: params.groupId,
+		createdBy: grupo.createdBy,
+	});
+	if (!creadorOriginal) return false;
+	const linksParaGestion = (
+		await db
+			.select({
+				linkType: pagaloPaymentLinks.linkType,
+				status: pagaloPaymentLinks.status,
+				isApplicationSource: pagaloPaymentLinks.isApplicationSource,
+			})
+			.from(pagaloPaymentLinks)
+			.where(eq(pagaloPaymentLinks.groupId, params.groupId))
+	).flatMap((link) =>
+		esLinkPagaloContabilizableEnGestion(link.status, link.isApplicationSource)
+			? [
+					{
+						amount:
+							link.linkType === "CAPITAL"
+								? grupo.capitalTotal
+								: grupo.facturableTotal,
+					},
+				]
+			: [],
+	);
+	if (linksParaGestion.length === 0) return false;
+	return registrarGestionLinkPagalo({
+		groupId: params.groupId,
+		casoCobroId: grupo.casoCobroId,
+		numeroSifco: grupo.numeroSifco,
+		requestedBy: params.requestedBy,
+		totalAmount: totalDeLinksPagalo(linksParaGestion),
+		cantidadLinks: linksParaGestion.length,
+		whatsappEnviado: null,
+		fechaContacto: grupo.createdAt,
+		bucketSnapshot: null,
+		finalizar: true,
+		repararPreliminar: true,
+		actualizarGestionParcial: true,
+		creadorOriginal,
+	});
+}
 
 /**
  * Un link ERROR puede venir de dos caminos con riesgo muy distinto:
@@ -75,6 +456,13 @@ class PagaloRespuestaAmbigua extends Error {
 		this.name = "PagaloRespuestaAmbigua";
 	}
 }
+
+type LinkPagaloEmitido = {
+	linkType: "CAPITAL" | "MORA_INTERES";
+	paymentUrl: string;
+	status: "ACTIVE";
+	amount: string;
+};
 
 const pickString = (value: unknown, names: string[]): string | undefined => {
 	if (!value || typeof value !== "object") return undefined;
@@ -169,6 +557,114 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 	if (credit.credito.credito_id !== input.creditoId) {
 		throw new Error("Crédito Págalo no coincide con SIFCO.");
 	}
+	// Si el pago se completó después de que falló la auditoría, las cuotas ya
+	// no son seleccionables en cartera. Esta recuperación debe ocurrir ANTES
+	// de validar la selección para que el reintento que indica la UI funcione.
+	// Está acotada al mismo asesor, caso, crédito y SIFCO, dentro de 24 horas.
+	const gruposCompletadosSinGestion = await db
+		.select({
+			groupId: pagaloPaymentGroups.id,
+			createdBy: pagaloPaymentGroups.createdBy,
+			createdAt: pagaloPaymentGroups.createdAt,
+			capitalTotal: pagaloPaymentGroups.capitalTotal,
+			facturableTotal: pagaloPaymentGroups.facturableTotal,
+			totalAmount: pagaloPaymentGroups.totalAmount,
+			allocationsSnapshot: pagaloPaymentGroups.allocationsSnapshot,
+		})
+		.from(pagaloPaymentGroups)
+		.where(
+			and(
+				eq(pagaloPaymentGroups.carteraCreditoId, input.creditoId),
+				eq(pagaloPaymentGroups.casoCobroId, input.casoCobroId),
+				eq(pagaloPaymentGroups.numeroCreditoSifco, input.numeroSifco),
+				eq(pagaloPaymentGroups.origen, "ASESOR"),
+				eq(pagaloPaymentGroups.status, "COMPLETED"),
+				isNull(pagaloPaymentGroups.contactoCobroId),
+				gte(
+					pagaloPaymentGroups.createdAt,
+					new Date(Date.now() - VENTANA_RECUPERACION_GESTION_PAGALO_MS),
+				),
+			),
+		)
+		.orderBy(desc(pagaloPaymentGroups.createdAt))
+
+	let grupoCompletadoSinGestion:
+		| (typeof gruposCompletadosSinGestion)[number]
+		| undefined;
+	let creadorOriginal: string | undefined;
+	for (const candidato of gruposCompletadosSinGestion) {
+		if (
+			!coincideSeleccionCuotasPagalo(
+				candidato.allocationsSnapshot,
+				input.cuotaIds,
+				input.otros,
+				credit.moraActual,
+			)
+		)
+			continue;
+		const creador = await resolverCreadorOriginalGrupoPagalo(candidato);
+		if (creador !== input.requestedBy) continue;
+		grupoCompletadoSinGestion = candidato;
+		creadorOriginal = creador;
+		break;
+	}
+
+	if (grupoCompletadoSinGestion && creadorOriginal) {
+		const linksCompletados = await db
+			.select({
+				linkType: pagaloPaymentLinks.linkType,
+				linkStatus: pagaloPaymentLinks.status,
+				isApplicationSource: pagaloPaymentLinks.isApplicationSource,
+				paymentUrl: pagaloPaymentLinks.paymentUrl,
+			})
+			.from(pagaloPaymentLinks)
+			.where(eq(pagaloPaymentLinks.groupId, grupoCompletadoSinGestion.groupId));
+		const linksParaGestion = linksCompletados.flatMap((link) =>
+			link.linkType &&
+			link.paymentUrl &&
+			esLinkPagaloContabilizableEnGestion(
+				link.linkStatus,
+				link.isApplicationSource,
+			)
+				? [
+						{
+							amount:
+								link.linkType === "CAPITAL"
+									? grupoCompletadoSinGestion.capitalTotal
+									: grupoCompletadoSinGestion.facturableTotal,
+						},
+					]
+				: [],
+		);
+		if (linksParaGestion.length > 0) {
+			const gestionRegistrada = await registrarGestionLinkPagalo({
+				groupId: grupoCompletadoSinGestion.groupId,
+				casoCobroId: input.casoCobroId,
+				numeroSifco: input.numeroSifco,
+				requestedBy: creadorOriginal,
+				totalAmount: totalDeLinksPagalo(linksParaGestion),
+				cantidadLinks: linksParaGestion.length,
+				whatsappEnviado: null,
+				fechaContacto: grupoCompletadoSinGestion.createdAt,
+				bucketSnapshot: null,
+				finalizar: true,
+				repararPreliminar: true,
+			});
+			return {
+				groupId: grupoCompletadoSinGestion.groupId,
+				status: "COMPLETED" as const,
+				origen: "ASESOR" as const,
+				capitalTotal: grupoCompletadoSinGestion.capitalTotal,
+				facturableTotal: grupoCompletadoSinGestion.facturableTotal,
+				totalAmount: grupoCompletadoSinGestion.totalAmount,
+				links: [] as LinkPagaloEmitido[],
+				gestionRegistrada,
+				gestionRecuperada: gestionRegistrada,
+				whatsappEnviado: null as boolean | null,
+			};
+		}
+	}
+
 	const vencidas = deduplicarCuotasPagalo(
 		credit.cuotasAtrasadas.filter((cuota) => cuota.numero_cuota > 0),
 	);
@@ -245,11 +741,16 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 			groupId: pagaloPaymentGroups.id,
 			status: pagaloPaymentGroups.status,
 			origen: pagaloPaymentGroups.origen,
+			createdBy: pagaloPaymentGroups.createdBy,
+			contactoCobroId: pagaloPaymentGroups.contactoCobroId,
+			casoCobroId: pagaloPaymentGroups.casoCobroId,
+			createdAt: pagaloPaymentGroups.createdAt,
 			capitalTotal: pagaloPaymentGroups.capitalTotal,
 			facturableTotal: pagaloPaymentGroups.facturableTotal,
 			totalAmount: pagaloPaymentGroups.totalAmount,
 			linkType: pagaloPaymentLinks.linkType,
 			linkStatus: pagaloPaymentLinks.status,
+			isApplicationSource: pagaloPaymentLinks.isApplicationSource,
 			paymentUrl: pagaloPaymentLinks.paymentUrl,
 		})
 		.from(pagaloPaymentGroups)
@@ -265,6 +766,65 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 		);
 	if (grupoActivo.length > 0) {
 		const group = grupoActivo[0]!;
+		const links = grupoActivo.flatMap((link) =>
+			link.linkType && link.paymentUrl && link.linkStatus === "ACTIVE"
+				? [
+						{
+							linkType: link.linkType,
+							paymentUrl: link.paymentUrl,
+							status: link.linkStatus as "ACTIVE",
+							amount:
+								link.linkType === "CAPITAL"
+									? group.capitalTotal
+									: group.facturableTotal,
+						},
+					]
+				: [],
+		);
+		const linksParaGestion = grupoActivo.flatMap((link) =>
+			link.linkType &&
+			link.paymentUrl &&
+			esLinkPagaloContabilizableEnGestion(
+				link.linkStatus,
+				link.isApplicationSource,
+			)
+				? [
+						{
+							amount:
+								link.linkType === "CAPITAL"
+									? group.capitalTotal
+									: group.facturableTotal,
+						},
+					]
+				: [],
+		);
+		const creadorOriginal =
+			group.origen === "ASESOR"
+				? await resolverCreadorOriginalGrupoPagalo({
+						groupId: group.groupId,
+						createdBy: group.createdBy,
+					})
+				: null;
+		const gestionRegistrada =
+			group.origen === "ASESOR" &&
+			group.casoCobroId &&
+			linksParaGestion.length > 0
+				? await registrarGestionLinkPagalo({
+						groupId: group.groupId,
+						casoCobroId: group.casoCobroId,
+						numeroSifco: input.numeroSifco,
+						requestedBy: group.createdBy,
+						totalAmount: totalDeLinksPagalo(linksParaGestion),
+						cantidadLinks: linksParaGestion.length,
+						whatsappEnviado: null,
+						fechaContacto: group.createdAt,
+						bucketSnapshot: null,
+						finalizar: group.contactoCobroId !== null,
+						repararPreliminar: group.contactoCobroId !== null,
+						actualizarGestionParcial: group.contactoCobroId !== null,
+						creadorOriginal,
+					})
+				: undefined;
 		return {
 			groupId: group.groupId,
 			status: group.status,
@@ -272,21 +832,8 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 			capitalTotal: group.capitalTotal,
 			facturableTotal: group.facturableTotal,
 			totalAmount: group.totalAmount,
-			links: grupoActivo.flatMap((link) =>
-				link.linkType && link.paymentUrl && link.linkStatus === "ACTIVE"
-					? [
-							{
-								linkType: link.linkType,
-								paymentUrl: link.paymentUrl,
-								status: link.linkStatus as "ACTIVE",
-								amount:
-									link.linkType === "CAPITAL"
-										? group.capitalTotal
-										: group.facturableTotal,
-							},
-						]
-					: [],
-			),
+			links,
+			gestionRegistrada,
 			// Grupo ya existía (reintento o creado por otro asesor/el BOT) — este
 			// llamado no intentó enviar WhatsApp, `null` distingue "no aplica" de
 			// "se intentó y falló" (whatsappEnviado: false), para no instruir al
@@ -351,6 +898,30 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 		telefono,
 		config,
 		enviarWhatsapp: true,
+		onEmisionParcial: async (links) => {
+			await registrarGestionLinkPagalo({
+				groupId: group.id,
+				casoCobroId: input.casoCobroId,
+				numeroSifco: input.numeroSifco,
+				requestedBy: input.requestedBy,
+				totalAmount: totalDeLinksPagalo(links),
+				cantidadLinks: links.length,
+				whatsappEnviado: null,
+				finalizar: true,
+				repararPreliminar: true,
+				actualizarGestionParcial: true,
+			});
+		},
+	});
+	const gestionRegistrada = await registrarGestionLinkPagalo({
+		groupId: group.id,
+		casoCobroId: input.casoCobroId,
+		numeroSifco: input.numeroSifco,
+		requestedBy: input.requestedBy,
+		totalAmount: totalDeLinksPagalo(emitido.links),
+		cantidadLinks: emitido.links.length,
+		whatsappEnviado: emitido.whatsappEnviado,
+		finalizar: true,
 	});
 
 	return {
@@ -361,6 +932,7 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 		totalAmount: calculation.totalAmount,
 		links: emitido.links,
 		whatsappEnviado: emitido.whatsappEnviado,
+		gestionRegistrada,
 	};
 }
 
@@ -1065,6 +1637,9 @@ export async function emitirLinksDeGrupo(params: {
 	// grupo de reemplazo, pero una regeneración no manda mensaje — decisión
 	// de producto: el envío es únicamente al crear por primera vez.
 	enviarWhatsapp: boolean;
+	// Permite refrescar historial con links activos si otro componente falla.
+	// Regenerar grupo también lo usa para actualizar gestión heredada.
+	onEmisionParcial?: (links: readonly LinkPagaloEmitido[]) => Promise<void>;
 }) {
 	const client = createPagaloClient(params.config);
 	const components = [
@@ -1085,50 +1660,52 @@ export async function emitirLinksDeGrupo(params: {
 	const etiquetaPago = (linkType: "CAPITAL" | "MORA_INTERES") =>
 		dosLinks ? `Pago ${ORDEN_LINKS_PAGALO.indexOf(linkType) + 1} de 2` : "Pago";
 
-	const links = [] as Array<{
-		linkType: "CAPITAL" | "MORA_INTERES";
-		paymentUrl: string;
-		status: "ACTIVE";
-		amount: string;
-	}>;
-	for (const component of components) {
-		const [linkType, amount] = component;
-		if (amount === "0.00") continue;
-		const providerAmount = providerAmounts.get(linkType);
-		if (providerAmount === undefined)
-			throw new Error("Monto Págalo no disponible.");
-		const generacion = params.generacionPorTipo?.[linkType];
-		const emitido = await emitirUnLink({
-			client,
-			groupId: params.groupId,
-			numeroSifco: params.numeroSifco,
-			requestedBy: params.requestedBy,
-			clienteNombre: params.clienteNombre,
-			clientContact: params.clientContact,
-			config: params.config,
-			linkType,
-			amount,
-			providerAmount,
-			etiqueta: etiquetaPago(linkType),
-			generation: generacion?.generation,
-			supersedesLinkId: generacion?.supersedesLinkId,
-			// El catch de fallo escala el grupo a REVIEW_REQUIRED: correcto acá
-			// (creación normal, todo el grupo depende de que ambos links salgan
-			// bien), pero NO para regenerarLinkIndividual (ver esa función).
-			grupoAReviewSiFalla: true,
-		});
-		// activo=false: la respuesta de Págalo llegó después de que el link
-		// fue invalidado — el link real existe y es cobrable en Págalo, pero
-		// no se manda por WhatsApp ni se cuenta como parte de la emisión
-		// (hallazgo de code review). Sin esto, un cliente podía recibir y
-		// pagar un link que un supervisor invalidó segundos antes.
-		if (!emitido.activo) continue;
-		links.push({
-			linkType,
-			paymentUrl: emitido.paymentUrl,
-			status: "ACTIVE",
-			amount,
-		});
+	const links: LinkPagaloEmitido[] = [];
+	try {
+		for (const component of components) {
+			const [linkType, amount] = component;
+			if (amount === "0.00") continue;
+			const providerAmount = providerAmounts.get(linkType);
+			if (providerAmount === undefined)
+				throw new Error("Monto Págalo no disponible.");
+			const generacion = params.generacionPorTipo?.[linkType];
+			const emitido = await emitirUnLink({
+				client,
+				groupId: params.groupId,
+				numeroSifco: params.numeroSifco,
+				requestedBy: params.requestedBy,
+				clienteNombre: params.clienteNombre,
+				clientContact: params.clientContact,
+				config: params.config,
+				linkType,
+				amount,
+				providerAmount,
+				etiqueta: etiquetaPago(linkType),
+				generation: generacion?.generation,
+				supersedesLinkId: generacion?.supersedesLinkId,
+				// El catch de fallo escala el grupo a REVIEW_REQUIRED: correcto acá
+				// (creación normal, todo el grupo depende de que ambos links salgan
+				// bien), pero NO para regenerarLinkIndividual (ver esa función).
+				grupoAReviewSiFalla: true,
+			});
+			// activo=false: la respuesta de Págalo llegó después de que el link
+			// fue invalidado — el link real existe y es cobrable en Págalo, pero
+			// no se manda por WhatsApp ni se cuenta como parte de la emisión
+			// (hallazgo de code review). Sin esto, un cliente podía recibir y
+			// pagar un link que un supervisor invalidó segundos antes.
+			if (!emitido.activo) continue;
+			links.push({
+				linkType,
+				paymentUrl: emitido.paymentUrl,
+				status: "ACTIVE",
+				amount,
+			});
+		}
+	} catch (error) {
+		if (links.length > 0 && params.onEmisionParcial) {
+			await params.onEmisionParcial(links);
+		}
+		throw error;
 	}
 	// Grupo de dos componentes: si uno se invalida concurrentemente mientras
 	// el otro ya salió bien (activo=true), `links` queda con solo el
@@ -1288,7 +1865,8 @@ export async function regenerarGrupo(params: {
 		.where(eq(pagaloPaymentGroups.id, params.groupId))
 		.limit(1);
 	if (!grupoViejo) throw new Error("Grupo Págalo no encontrado.");
-	if (!grupoViejo.casoCobroId) {
+	const casoCobroId = grupoViejo.casoCobroId;
+	if (!casoCobroId) {
 		throw new Error(
 			"Grupo Págalo sin caso de cobro asociado: no se puede regenerar.",
 		);
@@ -1307,10 +1885,7 @@ export async function regenerarGrupo(params: {
 		);
 	}
 	const { identificadorCredito, telefono, clientContact } =
-		await resolverContactoPagalo(
-			grupoViejo.casoCobroId,
-			grupoViejo.numeroCreditoSifco,
-		);
+		await resolverContactoPagalo(casoCobroId, grupoViejo.numeroCreditoSifco);
 	const credit = await carteraBackClient.getCredito(
 		grupoViejo.numeroCreditoSifco,
 		false,
@@ -1355,11 +1930,15 @@ export async function regenerarGrupo(params: {
 			)
 			.orderBy(pagaloPaymentGroups.id)
 			.for("update");
-		await tx
-			.select({ id: pagaloPaymentGroups.id })
+		const [grupoBloqueado] = await tx
+			.select({ contactoCobroId: pagaloPaymentGroups.contactoCobroId })
 			.from(pagaloPaymentGroups)
 			.where(eq(pagaloPaymentGroups.id, params.groupId))
 			.for("update");
+
+		if (!grupoBloqueado) {
+			throw new Error("Grupo Págalo no encontrado.");
+		}
 
 		// linksViejos se leía ANTES de esta transacción (sin candado): si una
 		// regeneración individual concurrente insertaba una generación nueva
@@ -1470,7 +2049,7 @@ export async function regenerarGrupo(params: {
 		// para esos casos (hallazgo de code review). Soltar la asociación del
 		// viejo, en la MISMA transacción, antes de insertar el nuevo con esa
 		// misma gestión.
-		if (grupoViejo.contactoCobroId) {
+		if (grupoBloqueado.contactoCobroId) {
 			await tx
 				.update(pagaloPaymentGroups)
 				.set({ contactoCobroId: null, updatedAt: new Date() })
@@ -1480,8 +2059,8 @@ export async function regenerarGrupo(params: {
 		const [creado] = await tx
 			.insert(pagaloPaymentGroups)
 			.values({
-				casoCobroId: grupoViejo.casoCobroId,
-				contactoCobroId: grupoViejo.contactoCobroId,
+				casoCobroId,
+				contactoCobroId: grupoBloqueado.contactoCobroId,
 				numeroCreditoSifco: grupoViejo.numeroCreditoSifco,
 				carteraCreditoId: grupoViejo.carteraCreditoId,
 				pagaloEnvironment: grupoViejo.pagaloEnvironment,
@@ -1539,23 +2118,67 @@ export async function regenerarGrupo(params: {
 		};
 	}
 
-	const emitido = await emitirLinksDeGrupo({
-		groupId: groupIdNuevo,
-		numeroSifco: grupoViejo.numeroCreditoSifco,
-		requestedBy: params.actorUserId,
-		capitalTotal: grupoViejo.capitalTotal,
-		facturableTotal: grupoViejo.facturableTotal,
-		clienteNombre: credit.usuario.nombre ?? "",
-		clientContact,
-		identificadorCredito,
-		telefono,
-		config,
-		generacionPorTipo,
-		// WhatsApp solo en la creación real desde el modal — regenerar un
-		// grupo (aunque técnicamente cree links nuevos) no reenvía nada,
-		// decisión de producto.
-		enviarWhatsapp: false,
-	});
+	const registrarGestion = grupoViejo.origen === "ASESOR";
+	const creadorOriginal = registrarGestion
+		? await resolverCreadorOriginalGrupoPagalo({
+				groupId: groupIdNuevo,
+				createdBy: params.actorUserId,
+			})
+		: null;
+	const finalizarGestionRegenerada = () =>
+		registrarGestionLinkPagalo({
+			groupId: groupIdNuevo,
+			casoCobroId,
+			numeroSifco: grupoViejo.numeroCreditoSifco,
+			requestedBy: params.actorUserId,
+			// El registrador relee los links terminales bajo candado. Cero permite
+			// corregir una gestión heredada cuando la emisión completa falla.
+			totalAmount: "0.00",
+			cantidadLinks: 0,
+			whatsappEnviado: null,
+			bucketSnapshot: null,
+			finalizar: true,
+			repararPreliminar: true,
+			actualizarGestionParcial: true,
+			creadorOriginal,
+		});
+	let emitido: Awaited<ReturnType<typeof emitirLinksDeGrupo>>;
+	try {
+		emitido = await emitirLinksDeGrupo({
+			groupId: groupIdNuevo,
+			numeroSifco: grupoViejo.numeroCreditoSifco,
+			requestedBy: params.actorUserId,
+			capitalTotal: grupoViejo.capitalTotal,
+			facturableTotal: grupoViejo.facturableTotal,
+			clienteNombre: credit.usuario.nombre ?? "",
+			clientContact,
+			identificadorCredito,
+			telefono,
+			config,
+			generacionPorTipo,
+			// WhatsApp solo en la creación real desde el modal — regenerar un
+			// grupo (aunque técnicamente cree links nuevos) no reenvía nada,
+			// decisión de producto.
+			enviarWhatsapp: false,
+			// Si uno de los componentes falla, conservar en historial el que sí
+			// quedó activo. El registrador sigue el sucesor terminal si vuelve a
+			// regenerarse mientras esta emisión está en vuelo.
+			onEmisionParcial: registrarGestion
+				? async () => {
+						await finalizarGestionRegenerada();
+					}
+				: undefined,
+		});
+	} catch (error) {
+		if (registrarGestion) await finalizarGestionRegenerada();
+		throw error;
+	}
+	// Regeneración de un asesor no envía WhatsApp, pero sí debe registrar y
+	// finalizar gestión. Si heredó una gestión parcial, cambia total al de
+	// todos los componentes emitidos. Grupos BOT no generan gestión humana.
+	if (registrarGestion) {
+		await finalizarGestionRegenerada();
+	}
 
 	return {
 		groupIdNuevo,
@@ -1668,6 +2291,13 @@ export async function regenerarLinkIndividual(params: {
 			"Grupo Págalo sin caso de cobro asociado: no se puede regenerar el link.",
 		);
 	}
+	const creadorOriginal =
+		grupo.origen === "ASESOR"
+			? await resolverCreadorOriginalGrupoPagalo({
+					groupId: grupo.id,
+					createdBy: grupo.createdBy,
+				})
+			: null;
 
 	const generation = await db.transaction((tx) =>
 		proximaGeneracion(tx, {
@@ -1975,6 +2605,49 @@ export async function regenerarLinkIndividual(params: {
 				`[Págalo] Grupo ${grupo.id} quedó READY_TO_APPLY tras regenerar un link pero falló el dispatch inline:`,
 				error instanceof Error ? error.message : error,
 			);
+		}
+	}
+
+	// Si esta regeneración completó un grupo que antes estaba parcial, el
+	// historial debe reflejar todos sus links vigentes. No crea gestiones
+	// humanas para grupos generados por BOT.
+	if (grupo.origen === "ASESOR" && emitido.activo) {
+		const linksParaGestion = (
+			await db
+				.select({
+					linkType: pagaloPaymentLinks.linkType,
+					status: pagaloPaymentLinks.status,
+					isApplicationSource: pagaloPaymentLinks.isApplicationSource,
+				})
+				.from(pagaloPaymentLinks)
+				.where(eq(pagaloPaymentLinks.groupId, grupo.id))
+		).flatMap((link) =>
+			esLinkPagaloContabilizableEnGestion(link.status, link.isApplicationSource)
+				? [
+						{
+							amount:
+								link.linkType === "CAPITAL"
+									? grupo.capitalTotal
+									: grupo.facturableTotal,
+						},
+					]
+				: [],
+		);
+		if (linksParaGestion.length > 0) {
+			await registrarGestionLinkPagalo({
+				groupId: grupo.id,
+				casoCobroId: grupo.casoCobroId,
+				numeroSifco: grupo.numeroCreditoSifco,
+				requestedBy: params.actorUserId,
+				totalAmount: totalDeLinksPagalo(linksParaGestion),
+				cantidadLinks: linksParaGestion.length,
+				whatsappEnviado: null,
+				bucketSnapshot: null,
+				finalizar: true,
+				repararPreliminar: true,
+				actualizarGestionParcial: true,
+				creadorOriginal,
+			});
 		}
 	}
 

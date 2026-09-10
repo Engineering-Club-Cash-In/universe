@@ -185,6 +185,7 @@ export const cobrosAppRouter = {
 	registrarPagoCompleto: cobrosRouter.registrarPagoCompleto,
 	getCreditoParaPago: cobrosRouter.getCreditoParaPago,
 	crearLinksPagalo: cobrosRouter.crearLinksPagalo,
+	reintentarGestionLinksPagalo: cobrosRouter.reintentarGestionLinksPagalo,
 	getPagaloHistorial: cobrosRouter.getPagaloHistorial,
 	probarPollPagalo: cobrosRouter.probarPollPagalo,
 	getBancosParaPago: cobrosRouter.getBancosParaPago,

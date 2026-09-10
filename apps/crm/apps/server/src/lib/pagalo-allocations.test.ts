@@ -1,7 +1,67 @@
 import { describe, expect, test } from "bun:test";
-import { buildPagaloAllocations } from "./pagalo-allocations";
+import {
+	buildPagaloAllocations,
+	coincideSeleccionCuotasPagalo,
+} from "./pagalo-allocations";
 
 describe("Págalo allocations", () => {
+	test("recovery solo acepta misma selección de cuotas del snapshot", () => {
+		const snapshot = [
+			{ cartera_cuota_id: 11 },
+			{ cartera_cuota_id: 11 },
+			{ cartera_cuota_id: 12 },
+		];
+		expect(coincideSeleccionCuotasPagalo(snapshot, [12, 11])).toBe(true);
+		expect(coincideSeleccionCuotasPagalo(snapshot, [11])).toBe(false);
+		expect(coincideSeleccionCuotasPagalo(snapshot, [11, 12, 13])).toBe(false);
+		expect(coincideSeleccionCuotasPagalo([], [11])).toBe(false);
+		expect(coincideSeleccionCuotasPagalo([], [])).toBe(false);
+		expect(
+			coincideSeleccionCuotasPagalo(
+				[{ cartera_cuota_id: 11, rubro: "MORA", amount: "75.25" }],
+				[],
+				undefined,
+				"75.25",
+			),
+		).toBe(true);
+		expect(
+			coincideSeleccionCuotasPagalo(
+				[{ cartera_cuota_id: 11, rubro: "MORA", amount: "75.25" }],
+				[11],
+				undefined,
+				"75.25",
+			),
+		).toBe(false);
+		expect(
+			coincideSeleccionCuotasPagalo(
+				[{ cartera_cuota_id: 11, rubro: "MORA", amount: "75.25" }],
+				[],
+				undefined,
+				"76.25",
+			),
+		).toBe(false);
+		expect(
+			coincideSeleccionCuotasPagalo(
+				[{ cartera_cuota_id: 11, rubro: "CAPITAL" }],
+				[],
+			),
+		).toBe(false);
+		expect(
+			coincideSeleccionCuotasPagalo([{ cartera_cuota_id: "11" }], [11]),
+		).toBe(false);
+		const snapshotConOtros = [
+			{ cartera_cuota_id: 11, rubro: "CAPITAL", amount: "100.00" },
+			{ cartera_cuota_id: 11, rubro: "OTROS", amount: "12.30" },
+		];
+		expect(coincideSeleccionCuotasPagalo(snapshotConOtros, [11], "12.3")).toBe(
+			true,
+		);
+		expect(coincideSeleccionCuotasPagalo(snapshotConOtros, [11])).toBe(false);
+		expect(coincideSeleccionCuotasPagalo(snapshotConOtros, [11], "5.00")).toBe(
+			false,
+		);
+	});
+
 	test("separa capital, mora y rubros facturables en centavos", () => {
 		const result = buildPagaloAllocations({
 			mora: "12.34",

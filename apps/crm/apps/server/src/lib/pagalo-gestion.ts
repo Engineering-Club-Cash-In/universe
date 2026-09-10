@@ -9,8 +9,17 @@ export function construirComentarioGestionLinkPagalo(params: {
 			? " WhatsApp enviado."
 			: params.whatsappEnviado === false
 				? " WhatsApp no enviado."
-				: "";
+				: " WhatsApp sin confirmación.";
 	return `Links Págalo generados: ${links} por Q${params.totalAmount}.${whatsapp}`.trim();
+}
+
+export function gestionLinkPagaloTieneWhatsappConfirmado(
+	comentarios: string,
+): boolean {
+	return (
+		comentarios.includes("WhatsApp enviado.") ||
+		comentarios.includes("WhatsApp no enviado.")
+	);
 }
 
 export function totalDeLinksPagalo(

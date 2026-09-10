@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import {
 	construirComentarioGestionLinkPagalo,
 	esLinkPagaloGenerado,
+	gestionLinkPagaloTieneWhatsappConfirmado,
 	totalDeLinksPagalo,
 } from "./pagalo-gestion";
 
@@ -20,6 +21,23 @@ test("describe links Págalo y resultado de WhatsApp para historial", () => {
 			whatsappEnviado: false,
 		}),
 	).toBe("Links Págalo generados: 1 link por Q100.00. WhatsApp no enviado.");
+});
+
+test("deja explícito cuando WhatsApp no tiene resultado y lo distingue", () => {
+	const pendiente = construirComentarioGestionLinkPagalo({
+		totalAmount: "100.00",
+		cantidadLinks: 1,
+		whatsappEnviado: null,
+	});
+	expect(pendiente).toBe(
+		"Links Págalo generados: 1 link por Q100.00. WhatsApp sin confirmación.",
+	);
+	expect(gestionLinkPagaloTieneWhatsappConfirmado(pendiente)).toBe(false);
+	expect(
+		gestionLinkPagaloTieneWhatsappConfirmado(
+			"Links Págalo generados: 1 link por Q100.00. WhatsApp enviado.",
+		),
+	).toBe(true);
 });
 
 test("suma solo links Págalo emitidos", () => {

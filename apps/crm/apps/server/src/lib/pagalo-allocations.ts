@@ -41,6 +41,16 @@ export function coincideSeleccionCuotasPagalo(
 		if (!Number.isInteger(cuotaId) || (cuotaId as number) <= 0) return false;
 		cuotasEnSnapshot.add(cuotaId as number);
 	}
+	if (cuotaIds.length === 0) {
+		// Mora sola usa la primera cuota vencida solo como referencia técnica;
+		// no fue parte de la selección original del asesor.
+		return (
+			allocationsSnapshot.length > 0 &&
+			allocationsSnapshot.every(
+				(allocation) => (allocation as { rubro?: unknown }).rubro === "MORA",
+			)
+		);
+	}
 	if (cuotasEnSnapshot.size === 0) return false;
 	const cuotasSolicitadas = new Set(cuotaIds);
 	return (

@@ -738,6 +738,8 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 				totalAmount: totalDeLinksPagalo(links),
 				cantidadLinks: links.length,
 				whatsappEnviado: null,
+				finalizar: true,
+				repararPreliminar: true,
 			});
 		},
 	});
@@ -1693,7 +1695,8 @@ export async function regenerarGrupo(params: {
 		.where(eq(pagaloPaymentGroups.id, params.groupId))
 		.limit(1);
 	if (!grupoViejo) throw new Error("Grupo Págalo no encontrado.");
-	if (!grupoViejo.casoCobroId) {
+	const casoCobroId = grupoViejo.casoCobroId;
+	if (!casoCobroId) {
 		throw new Error(
 			"Grupo Págalo sin caso de cobro asociado: no se puede regenerar.",
 		);
@@ -1712,10 +1715,7 @@ export async function regenerarGrupo(params: {
 		);
 	}
 	const { identificadorCredito, telefono, clientContact } =
-		await resolverContactoPagalo(
-			grupoViejo.casoCobroId,
-			grupoViejo.numeroCreditoSifco,
-		);
+		await resolverContactoPagalo(casoCobroId, grupoViejo.numeroCreditoSifco);
 	const credit = await carteraBackClient.getCredito(
 		grupoViejo.numeroCreditoSifco,
 		false,
@@ -1889,7 +1889,7 @@ export async function regenerarGrupo(params: {
 		const [creado] = await tx
 			.insert(pagaloPaymentGroups)
 			.values({
-				casoCobroId: grupoViejo.casoCobroId,
+				casoCobroId,
 				contactoCobroId: grupoBloqueado.contactoCobroId,
 				numeroCreditoSifco: grupoViejo.numeroCreditoSifco,
 				carteraCreditoId: grupoViejo.carteraCreditoId,
@@ -1964,6 +1964,36 @@ export async function regenerarGrupo(params: {
 		// grupo (aunque técnicamente cree links nuevos) no reenvía nada,
 		// decisión de producto.
 		enviarWhatsapp: false,
+		// Si uno de los componentes falla, conservar en historial el que sí
+		// quedó activo. El registrador sigue el sucesor terminal si vuelve a
+		// regenerarse mientras esta emisión está en vuelo.
+		onEmisionParcial: async (links) => {
+			await registrarGestionLinkPagalo({
+				groupId: groupIdNuevo,
+				casoCobroId,
+				numeroSifco: grupoViejo.numeroCreditoSifco,
+				requestedBy: params.actorUserId,
+				totalAmount: totalDeLinksPagalo(links),
+				cantidadLinks: links.length,
+				whatsappEnviado: null,
+				finalizar: true,
+				repararPreliminar: true,
+			});
+		},
+	});
+	// Regeneración no envía WhatsApp, pero sí debe registrar/finalizar la
+	// gestión de sus links. Si heredó una gestión parcial, finalizarla cambia
+	// el total al de todos los componentes emitidos.
+	await registrarGestionLinkPagalo({
+		groupId: groupIdNuevo,
+		casoCobroId,
+		numeroSifco: grupoViejo.numeroCreditoSifco,
+		requestedBy: params.actorUserId,
+		totalAmount: totalDeLinksPagalo(emitido.links),
+		cantidadLinks: emitido.links.length,
+		whatsappEnviado: null,
+		finalizar: true,
+		repararPreliminar: true,
 	});
 
 	return {

@@ -17,6 +17,18 @@ describe("Págalo allocations", () => {
 		expect(coincideSeleccionCuotasPagalo([], [11])).toBe(false);
 		expect(coincideSeleccionCuotasPagalo([], [])).toBe(false);
 		expect(
+			coincideSeleccionCuotasPagalo(
+				[{ cartera_cuota_id: 11, rubro: "MORA" }],
+				[],
+			),
+		).toBe(true);
+		expect(
+			coincideSeleccionCuotasPagalo(
+				[{ cartera_cuota_id: 11, rubro: "CAPITAL" }],
+				[],
+			),
+		).toBe(false);
+		expect(
 			coincideSeleccionCuotasPagalo([{ cartera_cuota_id: "11" }], [11]),
 		).toBe(false);
 	});

@@ -46,7 +46,8 @@
 #
 #   Sin --prod/--neon toma COBROS02_PROD_URL / COBROS02_NEON_URL del entorno.
 #   --sin-swap    deja el resultado en `<schema>_nuevo` sin cambiarlo por el vivo
-#   --sin-motor   omite el paso 5 (los buckets NO se mueven; solo para depurar)
+#   --sin-motor   omite el paso 5 (los buckets NO se mueven). Solo para depurar,
+#                 y exige --sin-swap: un schema con historial viejo no se promueve
 #   --pool CSV    además re-arma el pool desde el CSV. Sin esto, se conserva el
 #                 pool que ya tenía el sandbox
 #
@@ -99,6 +100,14 @@ NEON_HOST="$(host_de "$NEON")"; PROD_HOST="$(host_de "$PROD")"
 # corre el motor. Dirección única prod → sandbox.
 [[ "$NEON_HOST" == *supabase* ]] && die "El destino ($NEON_HOST) es Supabase. La alineación escribe: el destino es el sandbox, nunca producción."
 [[ "$PROD" == "$NEON" ]] && die "Origen y destino son la misma cadena."
+# Sin el motor los datos se refrescan pero el historial de buckets queda como
+# estaba, así que el swap promovería un sandbox que dice que los créditos están
+# donde estaban ayer, y el `02` encima podría cambiarles el asesor sin que exista
+# la transición que lo justifique. La bandera es para depurar, no para publicar
+# (review de Codex, P1).
+if [[ $SIN_MOTOR -eq 1 && $SIN_SWAP -eq 0 ]]; then
+  die "--sin-motor deja el historial de buckets sin actualizar: no se puede hacer swap con eso. Agregá --sin-swap."
+fi
 
 NUEVO="${SCHEMA}_nuevo"
 STAMP="$(TZ=America/Guatemala date +%Y%m%d_%H%M)"
@@ -225,7 +234,7 @@ SELECT criterio, count(*) FROM mapa_asesor WHERE nuevo IS NOT NULL GROUP BY 1 OR
 -- quedaría sin dueño o, peor, con el dueño equivocado. Los asesores sin pool
 -- que no mapean solo afectan atribuciones históricas y se resuelven a NULL.
 DO $$
-DECLARE faltan text; inactivos text;
+DECLARE faltan text;
 BEGIN
   SELECT string_agg(format('%s (id %s)', m.nombre_viejo, m.viejo), ', ')
     INTO faltan
@@ -234,17 +243,13 @@ BEGIN
   IF faltan IS NOT NULL THEN
     RAISE EXCEPTION 'Asesores del pool que no existen en producción: %. Revisá asesores.email_cash_in antes de alinear.', faltan;
   END IF;
-
-  -- Dado de baja en producción pero con pool activo en el sandbox: si se deja
-  -- pasar, el motor le sigue repartiendo cartera a alguien que ya no cobra.
-  SELECT string_agg(format('%s (id %s → %s)', m.nombre_viejo, m.viejo, m.nuevo), ', ')
-    INTO inactivos
-  FROM mapa_asesor m
-  WHERE m.en_pool AND m.nuevo IS NOT NULL AND m.nuevo_activo IS NOT TRUE;
-  IF inactivos IS NOT NULL THEN
-    RAISE EXCEPTION 'Asesores dados de baja en producción que siguen cubriendo buckets: %. Sacálos del pool (corré con --pool y el CSV al día) o reactiválos antes de alinear.', inactivos;
-  END IF;
 END $$;
+
+-- El pool que quede apuntando a un asesor dado de baja NO se valida acá: si la
+-- corrida trae --pool, el paso 4 aplica el CSV y lo corrige (el `01` es
+-- autoritativo y desactiva lo que el CSV no lista). Abortar en este punto hacía
+-- imposible el remedio que el propio mensaje recomendaba (review de Codex, P2).
+-- La verificación va después del paso 4, sobre el pool ya definitivo.
 
 -- 3a. Catálogo: gana el del sandbox (dias_sla, colores, nombres afinados).
 UPDATE :"nuevo".buckets n SET
@@ -374,6 +379,24 @@ log "4 · línea base de créditos nuevos + backfill de convenios"
   done
   echo "COMMIT;"
 } | pn -v schema="$NUEVO" -v pool_csv="${POOL_CSV:-pool.csv}" -f - | sed '/^SET$/d;/^CREATE TABLE$/d;/^DO$/d;/^BEGIN$/d;/^COMMIT$/d'
+
+# El pool ya es el definitivo (venga del sandbox o del CSV): recién ahora tiene
+# sentido exigir que nadie con pool activo esté dado de baja. El motor solo mira
+# `asesor_bucket.activo`, así que si esto pasa le reparte cartera a quien ya no
+# cobra, y para los EN_CONVENIO nada lo repara después (el 02 los excluye).
+log "4b · el pool no apunta a asesores dados de baja"
+# Nombres calificados y sin `SET search_path`: aunque acá la conexión es
+# directa, esa orden sin LOCAL se queda pegada en la sesión y por el pooler
+# envenena backends compartidos (ver la trampa del pooler en la documentación).
+INACTIVOS_EN_POOL="$(pn -At -c "
+  SELECT COALESCE(string_agg(format('%s (asesor_id %s)', a.nombre, a.asesor_id), ', '), '')
+  FROM \"$NUEVO\".asesor_bucket ab
+  JOIN \"$NUEVO\".asesores a ON a.asesor_id = ab.asesor_id
+  WHERE ab.activo AND a.activo IS NOT TRUE")"
+if [[ -n "$INACTIVOS_EN_POOL" ]]; then
+  die "Asesores dados de baja que siguen cubriendo buckets: $INACTIVOS_EN_POOL. Corré de nuevo con --pool y un CSV que no los liste, o reactivalos."
+fi
+echo "· el pool no tiene asesores dados de baja"
 
 # ── 5. El motor: acá se mueven los buckets ──────────────────────────────────
 # Sin este paso los datos quedan al día pero los buckets siguen describiendo el

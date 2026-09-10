@@ -64,7 +64,7 @@ WHERE trim(coalesce(p.email_cash_in, '')) <> '';
 
 -- 3) Guards.
 DO $$
-DECLARE faltan text; malos text; sin_asesor text; r record;
+DECLARE faltan text; ambiguos text; malos text; sin_asesor text; r record;
 BEGIN
   IF (SELECT count(*) FROM tmp_pool) = 0 THEN
     RAISE EXCEPTION 'El CSV del pool está vacío';
@@ -76,6 +76,19 @@ BEGIN
   WHERE a.asesor_id IS NULL;
   IF faltan IS NOT NULL THEN
     RAISE EXCEPTION 'Correos sin asesor ACTIVO en asesores.email_cash_in: %', faltan;
+  END IF;
+
+  -- Dos asesores ACTIVOS con el mismo correo es ambiguo: elegir uno al azar
+  -- le entrega la cartera de un bucket a quien no toca. Se rechaza.
+  SELECT string_agg(x.correo || ' (' || x.n || ' asesores activos)', ', ') INTO ambiguos
+  FROM (
+    SELECT t.email_cash_in AS correo, count(*) AS n
+    FROM (SELECT DISTINCT email_cash_in FROM tmp_pool) t
+    JOIN asesores a ON lower(a.email_cash_in) = t.email_cash_in AND a.activo
+    GROUP BY t.email_cash_in HAVING count(*) > 1
+  ) x;
+  IF ambiguos IS NOT NULL THEN
+    RAISE EXCEPTION 'Correos con más de un asesor activo en asesores: %. Resolvé el duplicado antes de armar el pool.', ambiguos;
   END IF;
 
   SELECT string_agg(DISTINCT t.bucket::text, ', ') INTO malos
@@ -104,10 +117,15 @@ BEGIN
 END $$;
 
 -- 4) Alta/reactivación de los pares del CSV (conserva capacidad y margen si ya existían).
+-- `a.activo` va en el JOIN, no solo en el guard: `email_cash_in` no es único,
+-- y con dos filas del mismo correo (una activa y otra dada de baja) el guard
+-- se conformaba con encontrar la activa mientras esto insertaba LAS DOS con
+-- activo=true. El motor solo mira `asesor_bucket.activo`, así que le habría
+-- caído cartera a la fila muerta (review de Codex, P1).
 INSERT INTO asesor_bucket (asesor_id, bucket, activo)
 SELECT a.asesor_id, t.bucket, true
 FROM tmp_pool t
-JOIN asesores a ON lower(a.email_cash_in) = t.email_cash_in
+JOIN asesores a ON lower(a.email_cash_in) = t.email_cash_in AND a.activo
 ON CONFLICT (asesor_id, bucket) DO UPDATE
   SET activo = true, updated_at = now()
   WHERE asesor_bucket.activo IS DISTINCT FROM true;
@@ -118,7 +136,7 @@ UPDATE asesor_bucket ab
  WHERE ab.activo
    AND NOT EXISTS (
      SELECT 1 FROM tmp_pool t
-     JOIN asesores a ON lower(a.email_cash_in) = t.email_cash_in
+     JOIN asesores a ON lower(a.email_cash_in) = t.email_cash_in AND a.activo
      WHERE a.asesor_id = ab.asesor_id AND t.bucket = ab.bucket
    );
 

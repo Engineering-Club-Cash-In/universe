@@ -229,6 +229,8 @@ SQL
 #  · sin `buckets` → procesarMoras salió por una rama que no ejecuta el pass.
 #  · omitidoPorFallback → el catálogo vino inconsistente y el pass se salteó a
 #    propósito para no escribir historial con rangos que no son.
+#  · sinPoolDestino > 0 → hubo créditos que cambiaron de bucket y conservaron
+#    su asesor viejo porque el bucket destino no tiene a nadie en el pool.
 #  · el try/catch de latefee.ts se traga los errores del pass sin cambiar el
 #    código de salida ni los contadores: su única huella es esa línea del log.
 #   uso: correr_motores URL SCHEMA DIR_CARTERA_BACK ARCHIVO_LOG
@@ -255,6 +257,11 @@ correr_motores() {
       if (moras?.buckets?.omitidoPorFallback) problemas.push("el pass de buckets se omitió por catálogo inconsistente");
       if (convenio?.skipped) problemas.push("procesarBucketsConvenio se omitió (advisory lock tomado)");
       if (convenio?.omitidoPorFallback) problemas.push("los buckets de convenio se omitieron por catálogo inconsistente");
+      // sinPoolDestino > 0 = ese crédito cambió de bucket pero se quedó con su
+      // asesor viejo porque el bucket destino no tiene pool activo. En los
+      // EN_CONVENIO no lo repara nadie después: el `02` los excluye.
+      if (moras?.buckets?.sinPoolDestino > 0) problemas.push(`${moras.buckets.sinPoolDestino} crédito(s) cambiaron de bucket sin pool destino (mora)`);
+      if (convenio?.sinPoolDestino > 0) problemas.push(`${convenio.sinPoolDestino} crédito(s) en convenio sin pool destino`);
       if (problemas.length) { console.error("MOTOR INCOMPLETO: " + problemas.join(" · ")); process.exit(1); }
       process.exit(0);
     ' ) > "$log" 2>&1; then

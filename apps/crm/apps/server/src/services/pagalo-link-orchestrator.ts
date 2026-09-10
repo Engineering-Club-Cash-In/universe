@@ -125,6 +125,8 @@ async function registrarGestionLinkPagalo(params: {
 			// Si regeneración ya trasladó la gestión al sucesor activo, el request
 			// original aún debe completar ese mismo registro, no crear otro.
 			let contactoCobroId = grupo.contactoCobroId;
+			let grupoDestinoId = params.groupId;
+			let grupoDestinoStatus = grupo.status;
 			if (
 				!contactoCobroId &&
 				params.finalizar &&
@@ -152,13 +154,18 @@ async function registrarGestionLinkPagalo(params: {
 					gruposVisitados.add(eventoSucesor.groupId);
 
 					const [sucesor] = await tx
-						.select({ contactoCobroId: pagaloPaymentGroups.contactoCobroId })
+						.select({
+							contactoCobroId: pagaloPaymentGroups.contactoCobroId,
+							status: pagaloPaymentGroups.status,
+						})
 						.from(pagaloPaymentGroups)
 						.where(eq(pagaloPaymentGroups.id, eventoSucesor.groupId))
 						.for("update");
 					if (!sucesor) break;
 					contactoCobroId = sucesor.contactoCobroId;
 					grupoAnteriorId = eventoSucesor.groupId;
+					grupoDestinoId = eventoSucesor.groupId;
+					grupoDestinoStatus = sucesor.status;
 				}
 			}
 
@@ -215,7 +222,7 @@ async function registrarGestionLinkPagalo(params: {
 				}
 				return true;
 			}
-			if (grupo.status === "CANCELLED") {
+			if (grupoDestinoStatus === "CANCELLED") {
 				return false;
 			}
 			const [gestion] = await tx
@@ -234,7 +241,7 @@ async function registrarGestionLinkPagalo(params: {
 			await tx
 				.update(pagaloPaymentGroups)
 				.set({ contactoCobroId: gestion.id, updatedAt: new Date() })
-				.where(eq(pagaloPaymentGroups.id, params.groupId));
+				.where(eq(pagaloPaymentGroups.id, grupoDestinoId));
 			return true;
 		});
 	} catch (error) {

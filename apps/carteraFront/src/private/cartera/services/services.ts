@@ -1745,6 +1745,8 @@ export interface UpdateMoraPayload {
   tipo: "INCREMENTO" | "DECREMENTO";
   cuotas_atrasadas?: number;
   activa?: boolean;
+  /** Obligatorio: el backend responde 400 si viene vacío. */
+  motivo: string;
 }
 
 export interface CondonarMoraPayload {

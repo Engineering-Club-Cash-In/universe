@@ -1771,6 +1771,7 @@ export async function insertarPago({
       credito_id: creditData.credito_id,
       monto_cambio: Number(mora),
       tipo: "DECREMENTO", // 👈 bajamos la mora porque el cliente ya pagó
+      motivo: `Registro de pago #${nuevoPago?.pago_id} (crédito ${numero_credito_sifco}, cuota ${numero_cuota}): mora cobrada en la boleta`,
     });
   }
 

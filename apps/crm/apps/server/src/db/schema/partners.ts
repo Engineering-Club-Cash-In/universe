@@ -10,9 +10,9 @@ import {
 import { user } from "./auth";
 import { companies } from "./crm";
 
-// Estado exclusivo de autenticaciÃ³n de una cuenta partner. La contraseÃ±a
-// real la administra Better Auth en `account`; aquÃ­ solo registramos si ya
-// completÃ³ el cambio inicial.
+// Estado exclusivo de autenticación de una cuenta partner. La contraseña
+// real la administra Better Auth en `account`; aquí solo registramos si ya
+// completó el cambio inicial.
 export const partnerAccounts = pgTable("partner_accounts", {
 	userId: text("user_id")
 		.primaryKey()

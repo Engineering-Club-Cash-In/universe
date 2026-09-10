@@ -7,11 +7,21 @@
  * en un request.
  */
 export function clampPagination(page?: number, pageSize?: number) {
-  const p = Number.isFinite(page) && (page as number) > 0 ? Math.floor(page as number) : 1;
-  const ps = Number.isFinite(pageSize) && (pageSize as number) > 0
-    ? Math.min(Math.floor(pageSize as number), 500)
-    : 20;
+  // OJO: se redondea PRIMERO y se valida el valor ya redondeado. Al revés
+  // —validar el crudo y truncar después— un fraccionario como 0.5 pasaba el
+  // `> 0` y recién entonces `Math.floor` lo hundía a 0, devolviendo
+  // `page: 0` con `offset: -20`, o `pageSize: 0` (página vacía eterna).
+  const p = enteroPositivo(page) ?? 1;
+  const psPedido = enteroPositivo(pageSize);
+  const ps = psPedido == null ? 20 : Math.min(psPedido, 500);
   return { page: p, pageSize: ps, offset: (p - 1) * ps };
+}
+
+/** El valor truncado a entero, o null si no es un entero >= 1. */
+function enteroPositivo(v?: number): number | null {
+  if (!Number.isFinite(v)) return null;
+  const n = Math.floor(v as number);
+  return n > 0 ? n : null;
 }
 
 /**

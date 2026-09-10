@@ -66,6 +66,26 @@ export function pagoCubreCuota(p: PagoParaAtraso): boolean {
   );
 }
 
+/**
+ * Día `YYYY-MM-DD` del vencimiento, venga como string o como `Date`.
+ *
+ * `String(new Date(...)).slice(0, 10)` produce `"Fri Aug 01"`, que comparado
+ * contra `"2026-09-09"` da SIEMPRE falso: la cuota vencida se caía del mapa en
+ * silencio. Un `Date` se lee por sus componentes UTC porque es como llega:
+ * `fecha_vencimiento` es una columna `date` y el JSON la trae como
+ * "2026-08-01"/"2026-08-01T00:00:00.000Z", que `new Date()` ancla a medianoche
+ * UTC —usar los componentes locales la correría al día anterior en Guatemala.
+ */
+export function diaVencimiento(
+  v?: string | Date | null
+): string {
+  if (v == null) return "";
+  if (v instanceof Date) {
+    return Number.isNaN(v.getTime()) ? "" : v.toISOString().slice(0, 10);
+  }
+  return String(v).slice(0, 10);
+}
+
 /** Día `YYYY-MM-DD` de hoy en Guatemala; "en-CA" ya produce ese formato. */
 export const hoyGT = (ahora: Date = new Date()): string =>
   ahora.toLocaleDateString("en-CA", { timeZone: "America/Guatemala" });
@@ -97,7 +117,7 @@ export function cuotasEnAtraso(
     // El criterio canónico exige exactamente `pagado = false`; null no califica.
     if (p.cuota_pagada !== false) continue;
 
-    const venc = String(p.fecha_vencimiento ?? "").slice(0, 10);
+    const venc = diaVencimiento(p.fecha_vencimiento);
     if (venc && venc < hoy) vencidas.set(p.cuota_id, venc);
   }
 

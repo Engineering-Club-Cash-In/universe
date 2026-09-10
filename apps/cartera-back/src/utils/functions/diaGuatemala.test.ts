@@ -30,6 +30,42 @@ describe("inicioDiaGT — días válidos", () => {
   });
 });
 
+describe("inicioDiaGT — horario de verano de Guatemala (2006)", () => {
+  // El 2006-04-30 el reloj de Guatemala saltó de las 23:59 del 29 a la 01:00
+  // del 30: la medianoche local NO EXISTIÓ. Las dos pasadas de offset oscilan
+  // sobre la transición y quedarse con la última devolvía 05:00Z, que en
+  // Guatemala es el 29 a las 23:00 — el filtro se corría un día entero.
+  it("devuelve el PRIMER instante que sí existe del día del salto", () => {
+    const d = inicioDiaGT("2006-04-30")!;
+    expect(d.toISOString()).toBe("2006-04-30T06:00:00.000Z");
+  });
+
+  it("ese instante ya cae dentro del día pedido, leído en Guatemala", () => {
+    const p = partesGT(inicioDiaGT("2006-04-30")!);
+    expect(`${p.year}-${p.month}-${p.day}`).toBe("2006-04-30");
+    expect(p.hour).toBe("01");
+  });
+
+  it("el literal de timestamp del día del salto también es del 30", () => {
+    expect(inicioDiaGTComoTimestampUTC("2006-04-30")).toBe("2006-04-30 06:00:00.000");
+  });
+
+  it("llegar al día del salto por offsetDias da lo mismo", () => {
+    expect(inicioDiaGT("2006-04-29", 1)!.toISOString()).toBe("2006-04-30T06:00:00.000Z");
+  });
+
+  it("durante el horario de verano la medianoche GT es 05:00 UTC", () => {
+    expect(inicioDiaGT("2006-05-15")!.toISOString()).toBe("2006-05-15T05:00:00.000Z");
+    const p = partesGT(inicioDiaGT("2006-05-15")!);
+    expect(`${p.year}-${p.month}-${p.day} ${p.hour}`).toBe("2006-05-15 00");
+  });
+
+  it("el día en que termina el DST sigue cayendo en su propio día", () => {
+    const p = partesGT(inicioDiaGT("2006-10-01")!);
+    expect(`${p.year}-${p.month}-${p.day} ${p.hour}`).toBe("2006-10-01 00");
+  });
+});
+
 describe("inicioDiaGT — rechaza fechas imposibles (antes las normalizaba)", () => {
   it("31 de febrero: Date.UTC lo corría al 3 de marzo", () => {
     // Evidencia del comportamiento silencioso que se está tapando.

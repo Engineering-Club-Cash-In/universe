@@ -196,4 +196,31 @@ describe("cuotasEnAtraso", () => {
     );
     expect(m.get(1)).toBe("2026-08-01");
   });
+
+  // `PagoParaAtraso.fecha_vencimiento` admite `Date`, y ahí el recorte crudo
+  // producía "Fri Aug 01": comparado lexicográficamente contra "2026-09-09"
+  // daba falso y la cuota vencida se caía del mapa en silencio.
+  it("un vencimiento que llega como Date se compara como día ISO", () => {
+    const m = cuotasEnAtraso(
+      [pagoBase({ fecha_vencimiento: new Date("2026-08-01T00:00:00.000Z") })],
+      HOY
+    );
+    expect(m.get(1)).toBe("2026-08-01");
+  });
+
+  it("un Date futuro sigue sin marcarse en atraso", () => {
+    const m = cuotasEnAtraso(
+      [pagoBase({ fecha_vencimiento: new Date("2026-10-01T00:00:00.000Z") })],
+      HOY
+    );
+    expect(m.size).toBe(0);
+  });
+
+  it("un Date inválido no marca atraso", () => {
+    const m = cuotasEnAtraso(
+      [pagoBase({ fecha_vencimiento: new Date("no-es-fecha") })],
+      HOY
+    );
+    expect(m.size).toBe(0);
+  });
 });

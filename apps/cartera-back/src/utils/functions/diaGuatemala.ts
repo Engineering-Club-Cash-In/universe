@@ -83,6 +83,26 @@ function offsetGTMinutos(instante: Date): number {
 }
 
 /**
+ * ¿El instante `t` es, leído en hora de Guatemala, la medianoche exacta del día
+ * que representa `supuestoUTC` (la misma fecha pero como medianoche UTC)?
+ */
+function esMedianocheGTDe(t: number, supuestoUTC: number): boolean {
+  if (!Number.isFinite(t)) return false;
+  const d = new Date(t);
+  if (Number.isNaN(d.getTime())) return false;
+  const p = partesGT(d);
+  const objetivo = new Date(supuestoUTC);
+  return (
+    Number(p.year) === objetivo.getUTCFullYear() &&
+    Number(p.month) === objetivo.getUTCMonth() + 1 &&
+    Number(p.day) === objetivo.getUTCDate() &&
+    p.hour === "00" &&
+    p.minute === "00" &&
+    p.second === "00"
+  );
+}
+
+/**
  * Instante UTC de la medianoche (00:00:00.000 hora de Guatemala) del día
  * `diaISO` desplazado `offsetDias` días.
  *
@@ -125,8 +145,23 @@ export function inicioDiaGT(diaISO: string, offsetDias = 0): Date | null {
   // Dos pasadas: la primera usa el offset "en" la medianoche supuesta, la
   // segunda lo recalcula ya sobre el instante corregido (importa solo si la
   // zona cambiara de offset justo esa madrugada).
-  let t = supuesto - offsetGTMinutos(new Date(supuesto)) * 60_000;
-  t = supuesto - offsetGTMinutos(new Date(t)) * 60_000;
+  const t1 = supuesto - offsetGTMinutos(new Date(supuesto)) * 60_000;
+  const t2 = supuesto - offsetGTMinutos(new Date(t1)) * 60_000;
+
+  // Guatemala tuvo horario de verano en 2006, así que hay días cuya medianoche
+  // local NO EXISTIÓ: el 2006-04-30 el reloj saltó de las 23:59 del 29 a la
+  // 01:00 del 30. En ese hueco las dos pasadas oscilan (una da 06:00Z, la otra
+  // 05:00Z) y quedarse con la última devolvía 05:00Z, que en Guatemala es el
+  // 29 a las 23:00: el filtro se corría un día entero.
+  //
+  // Se valida cada candidato releyéndolo en hora de Guatemala:
+  //  - si alguno cae exactamente en la medianoche del día pedido, ese es (el
+  //    más temprano, para que un día repetido por fin de DST entre completo);
+  //  - si ninguno cae —el hueco—, se toma el MÁS TARDÍO, que es justo el
+  //    instante de la transición, o sea el primer instante que sí existe de
+  //    ese día (01:00 local = 06:00Z para el 2006-04-30).
+  const validos = [t1, t2].filter((t) => esMedianocheGTDe(t, supuesto));
+  const t = validos.length > 0 ? Math.min(...validos) : Math.max(t1, t2);
 
   const fecha = new Date(t);
   if (Number.isNaN(fecha.getTime())) return null;

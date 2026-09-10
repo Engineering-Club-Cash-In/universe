@@ -31,6 +31,7 @@ import {
 	esLinkPagaloContabilizableEnGestion,
 	gestionLinkPagaloTieneWhatsappConfirmado,
 	resultadoWhatsappGestionLinkPagalo,
+	responsableGestionLinkPagalo,
 	resumenGestionLinksPagalo,
 	totalDeLinksPagalo,
 } from "../lib/pagalo-gestion";
@@ -162,6 +163,8 @@ async function registrarGestionLinkPagalo(params: {
 	repararPreliminar?: boolean;
 	/** Actualiza links de regeneración sin perder resultado WhatsApp previo. */
 	actualizarGestionParcial?: boolean;
+	/** Dueño asesor del primer grupo, incluso tras regeneraciones supervisor. */
+	creadorOriginal?: string | null;
 }): Promise<boolean> {
 	const bucketSnapshot =
 		params.bucketSnapshot === undefined
@@ -353,7 +356,7 @@ async function registrarGestionLinkPagalo(params: {
 					metodoContacto: "pago",
 					estadoContacto: "link_pago_generado",
 					comentarios: construirComentarioGestionLinkPagalo(paramsGestion),
-					realizadoPor: params.requestedBy,
+					realizadoPor: responsableGestionLinkPagalo(params),
 					bucketSnapshot,
 				})
 				.returning({ id: contactosCobros.id });
@@ -2042,6 +2045,12 @@ export async function regenerarGrupo(params: {
 	}
 
 	const registrarGestion = grupoViejo.origen === "ASESOR";
+	const creadorOriginal = registrarGestion
+		? await resolverCreadorOriginalGrupoPagalo({
+				groupId: groupIdNuevo,
+				createdBy: params.actorUserId,
+			})
+		: null;
 	const finalizarGestionRegenerada = () =>
 		registrarGestionLinkPagalo({
 			groupId: groupIdNuevo,
@@ -2056,6 +2065,7 @@ export async function regenerarGrupo(params: {
 			finalizar: true,
 			repararPreliminar: true,
 			actualizarGestionParcial: true,
+			creadorOriginal,
 		});
 	let emitido: Awaited<ReturnType<typeof emitirLinksDeGrupo>>;
 	try {
@@ -2206,6 +2216,13 @@ export async function regenerarLinkIndividual(params: {
 			"Grupo Págalo sin caso de cobro asociado: no se puede regenerar el link.",
 		);
 	}
+	const creadorOriginal =
+		grupo.origen === "ASESOR"
+			? await resolverCreadorOriginalGrupoPagalo({
+					groupId: grupo.id,
+					createdBy: grupo.createdBy,
+				})
+			: null;
 
 	const generation = await db.transaction((tx) =>
 		proximaGeneracion(tx, {
@@ -2553,6 +2570,7 @@ export async function regenerarLinkIndividual(params: {
 				finalizar: true,
 				repararPreliminar: true,
 				actualizarGestionParcial: true,
+				creadorOriginal,
 			});
 		}
 	}

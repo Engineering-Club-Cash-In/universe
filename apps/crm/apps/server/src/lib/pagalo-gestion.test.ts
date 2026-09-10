@@ -5,6 +5,7 @@ import {
 	esLinkPagaloGenerado,
 	gestionLinkPagaloTieneWhatsappConfirmado,
 	resultadoWhatsappGestionLinkPagalo,
+	responsableGestionLinkPagalo,
 	resumenGestionLinksPagalo,
 	totalDeLinksPagalo,
 } from "./pagalo-gestion";
@@ -95,4 +96,19 @@ test("resumen de gestión refleja cero links cuando sucesor no emitió ninguno",
 			{ amount: "1197.41", status: "REPLACED", isApplicationSource: false },
 		]),
 	).toEqual({ cantidadLinks: 0, totalAmount: "0.00" });
+});
+
+test("gestión regenerada conserva asesor original cuando existe", () => {
+	expect(
+		responsableGestionLinkPagalo({
+			creadorOriginal: "asesor-original",
+			requestedBy: "supervisor",
+		}),
+	).toBe("asesor-original");
+	expect(
+		responsableGestionLinkPagalo({
+			creadorOriginal: null,
+			requestedBy: "supervisor",
+		}),
+	).toBe("supervisor");
 });

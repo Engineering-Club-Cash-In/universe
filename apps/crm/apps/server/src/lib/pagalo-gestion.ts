@@ -73,3 +73,11 @@ export function resumenGestionLinksPagalo(
 		totalAmount: totalDeLinksPagalo(contabilizables),
 	};
 }
+
+/** La gestión de una regeneración conserva dueño de solicitud original. */
+export function responsableGestionLinkPagalo(params: {
+	creadorOriginal?: string | null;
+	requestedBy: string;
+}): string {
+	return params.creadorOriginal ?? params.requestedBy;
+}

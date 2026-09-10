@@ -41,9 +41,31 @@ enviarARecuperacionVehiculo()  ← controllers/buckets/recuperacionVehiculo.ts
                           + INSERT credito_asesor_historial (API_MANUAL, usuario_id)
 ```
 
-Todo dentro de **una transacción**, tomando el mismo `pg_advisory_xact_lock`
-(`CREDITO_ASESOR_LOCK_NAMESPACE`) que usan el motor y el traslado masivo: si
-`procesarMoras` está corriendo sobre ese crédito, este traslado espera en vez de pisarse.
+Todo —**la lectura del estado incluida**— dentro de una transacción que toma tres
+advisory locks en el mismo orden que el traslado masivo, que es quien define la convención:
+
+```
+lock_timeout = 5s
+pg_advisory_xact_lock(PROCESAR_MORAS_LOCK_KEY)     ← el motor de mora
+pg_advisory_xact_lock(BUCKETS_CONVENIO_LOCK_KEY)   ← el job de convenios
+pg_advisory_xact_lock(CREDITO_ASESOR_LOCK_NAMESPACE, credito_id)
+```
+
+> ⚠️ **El lock por crédito NO alcanza, y creerlo fue un error de este documento.**
+> Ni `procesarMoras` ni el job de convenios lo toman: cada uno usa su llave global. Con
+> solo el lock por crédito, una corrida solapada leía el mismo dueño viejo y escribía
+> historia contradictoria o pisaba la reasignación (review de Codex, P1). Por eso hay que
+> tomar las llaves de los dos jobs **antes** de leer la foto del crédito.
+
+Si un job está corriendo, la petición espera hasta 5 segundos y después falla con un
+mensaje que dice qué esperar (23:59 moras / 00:30 convenios) — mejor eso que escribir
+sobre una foto vieja.
+
+Y el orden de las escrituras importa: **el UPDATE del dueño va antes** de la fila de
+`buckets_historial`, y con compare-and-swap. Devolver un valor desde el callback de
+`db.transaction` hace COMMIT, no ROLLBACK: con la fila de bucket insertada primero, un
+conflicto de dueño dejaba el crédito movido a B4 mientras la API respondía 409 (review de
+Codex, P1). Ahora el conflicto lanza y revierte todo.
 
 ### El asesor sigue la regla del motor
 
@@ -82,6 +104,12 @@ comparando contra el bucket actual, no se asume.
 `cobrosProcedure` → **cualquiera del módulo de cobros** (`canAccessCobros`: asesor,
 supervisor o admin). Lo dispara el asesor que lleva la cuenta: es quien sabe que la unidad
 ya no se recupera por teléfono.
+
+**El crédito no se recibe del cliente: sale del caso.** El procedure toma un `casoCobroId`,
+pasa por `assertAccesoCasoCobro` y resuelve el `credito_id` contra `carteraBackReferences`.
+Recibir el `credito_id` directo dejaba a un asesor mandar a B4 —y reasignar— el crédito de
+otro con solo cambiar el número, porque `cobrosProcedure` solo valida el rol (review de
+Codex, P1). Es el mismo patrón de `getPagaloGrupoActivo` y las acciones de Págalo.
 
 La trazabilidad no la da el permiso sino el **motivo obligatorio** y la bitácora
 `API_MANUAL`, que guarda quién lo pidió. En el menú el ítem va separado y en rojo para que

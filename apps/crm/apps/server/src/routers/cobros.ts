@@ -8457,14 +8457,50 @@ export const cobrosRouter = {
 	enviarCreditoARecuperacion: cobrosProcedure
 		.input(
 			z.object({
-				creditoId: z.number().int().positive(),
+				casoCobroId: z.string().uuid(),
 				motivo: z.string().trim().min(1, "El motivo es obligatorio"),
 			}),
 		)
 		.handler(async ({ input, context }) => {
+			// El crédito NO se recibe del cliente: sale del caso. `credito_id` es
+			// numérico y enumerable, y `cobrosProcedure` solo valida el rol, así que
+			// recibirlo dejaba a un asesor mandar a B4 el crédito de otro —y de paso
+			// reasignarlo— con solo cambiar el número (review de Codex, P1). Mismo
+			// patrón que getPagaloGrupoActivo y las acciones de Págalo.
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
+			const [caso] = await db
+				.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
+				.from(casosCobros)
+				.where(eq(casosCobros.id, input.casoCobroId))
+				.limit(1);
+			if (!caso?.numeroCreditoSifco) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "El caso no tiene crédito de cartera asociado.",
+				});
+			}
+			const [referencia] = await db
+				.select({ carteraCreditoId: carteraBackReferences.carteraCreditoId })
+				.from(carteraBackReferences)
+				.where(
+					eq(
+						carteraBackReferences.numeroCreditoSifco,
+						caso.numeroCreditoSifco,
+					),
+				)
+				.limit(1);
+			if (!referencia?.carteraCreditoId) {
+				throw new ORPCError("NOT_FOUND", {
+					message:
+						"No se encontró el crédito en cartera para este caso. Abrí la ficha del crédito e intentá de nuevo.",
+				});
+			}
 			try {
 				return await carteraBackClient.enviarARecuperacionVehiculo({
-					credito_id: input.creditoId,
+					credito_id: referencia.carteraCreditoId,
 					motivo: input.motivo,
 					usuario_email: context.session.user.email,
 				});

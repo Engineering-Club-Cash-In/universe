@@ -870,7 +870,9 @@ function RouteComponent() {
 	const recuperacionMutation = useMutation({
 		mutationFn: () =>
 			client.enviarCreditoARecuperacion({
-				creditoId: casoDetails.data?.carteraCreditoId ?? 0,
+				// El crédito lo resuelve el servidor desde el caso: mandarlo desde acá
+				// dejaba mover créditos ajenos (review de Codex, P1).
+				casoCobroId: casoDetails.data?.id ?? "",
 				motivo: motivoRecuperacion.trim(),
 			}),
 		onSuccess: (r) => {
@@ -1549,7 +1551,7 @@ function RouteComponent() {
 													<DropdownMenuSeparator />
 													<DropdownMenuItem
 														className="cursor-pointer text-red-600 focus:bg-red-50 focus:text-red-700 dark:focus:bg-red-950"
-														disabled={!caso.carteraCreditoId}
+														disabled={!caso.id || !caso.numeroCreditoSifco}
 														onClick={() => setRecuperacionAbierta(true)}
 													>
 														<Car className="mr-2 h-4 w-4" />

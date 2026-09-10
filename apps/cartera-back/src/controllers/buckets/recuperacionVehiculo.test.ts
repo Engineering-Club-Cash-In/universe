@@ -12,13 +12,23 @@ type Fila = Record<string, any>;
 
 const estado = {
   selectsPorTabla: new Map<any, Fila[]>(),
-  // db.execute se usa en orden: getEstadoCredito, getCargaDelBucket y el
-  // advisory lock dentro de la transacción. Se sirve una cola; agotada, {rows:[]}.
+  // db.execute sirve dos consultas de datos en orden (getEstadoCredito y
+  // getCargaDelBucket). Los SET/advisory lock NO consumen la cola: se detectan
+  // por el texto del SQL, así que agregar o mover un lock no desalinea los tests.
   executeQueue: [] as Fila[][],
+  locksTomados: [] as string[],
   inserts: [] as { tabla: any; filas: Fila[] }[],
   updates: [] as { tabla: any; set: Fila }[],
   actualizacionAfecta: true,
 };
+
+/** Texto aproximado de un objeto SQL de drizzle, para reconocer los locks. */
+function textoSql(q: any): string {
+  const chunks = q?.queryChunks ?? [];
+  return chunks
+    .map((c: any) => (c?.value ? ([] as string[]).concat(c.value).join("") : ""))
+    .join(" ");
+}
 
 function crearBuilderSelect() {
   let tabla: any = null;
@@ -68,11 +78,27 @@ function crearMutadores() {
   };
 }
 
+const fakeExecute = async (q: any) => {
+  const texto = textoSql(q);
+  if (texto.includes("advisory") || texto.includes("lock_timeout")) {
+    estado.locksTomados.push(texto.trim());
+    return { rows: [] };
+  }
+  return { rows: estado.executeQueue.shift() ?? [] };
+};
+
 const fakeDb: any = {
   select: () => crearBuilderSelect(),
   ...crearMutadores(),
-  execute: async () => ({ rows: estado.executeQueue.shift() ?? [] }),
-  transaction: async (cb: any) => cb({ ...crearMutadores(), execute: fakeDb.execute }),
+  execute: fakeExecute,
+  // Ahora TODO corre dentro de la transacción (incluidas las lecturas), así que
+  // el tx falso necesita `select` además de los mutadores.
+  transaction: async (cb: any) =>
+    cb({
+      ...crearMutadores(),
+      select: () => crearBuilderSelect(),
+      execute: fakeExecute,
+    }),
 };
 
 mock.module("../../database", () => ({ db: fakeDb, client: {} }));
@@ -119,6 +145,7 @@ const insertsDe = (tabla: any) => estado.inserts.filter((i) => i.tabla === tabla
 beforeEach(() => {
   estado.selectsPorTabla.clear();
   estado.executeQueue = [];
+  estado.locksTomados = [];
   estado.inserts = [];
   estado.updates = [];
   estado.actualizacionAfecta = true;
@@ -279,10 +306,24 @@ describe("enviarARecuperacionVehiculo — controller real con DB fakeada", () =>
     expect(estado.inserts).toHaveLength(0);
   });
 
-  it("409 si el dueño cambió entre la lectura y la escritura (compare-and-swap)", async () => {
+  it("409 si el dueño cambió entre la lectura y la escritura, SIN dejar el traslado a medias", async () => {
     prepararCredito({ bucket: 2, asesor_id: 3 });
     estado.actualizacionAfecta = false;
     const r = await enviarARecuperacionVehiculo({ credito_id: 9116, motivo: "válido" });
     expect(r).toMatchObject({ success: false, status: 409 });
+    // El bug que reportó Codex: la fila de bucket se insertaba primero y el
+    // `return false` COMMITEABA, así que el crédito quedaba en B4 mientras la API
+    // respondía 409. Ahora el UPDATE guardado va antes y el abort revierte.
+    expect(insertsDe(schema.buckets_historial)).toHaveLength(0);
+  });
+
+  it("toma los locks de AMBOS jobs y el del crédito antes de leer", async () => {
+    prepararCredito({ bucket: 2, asesor_id: 3 });
+    await enviarARecuperacionVehiculo({ credito_id: 9116, motivo: "válido" });
+    // El lock por crédito solo no serializa contra procesarMoras ni el job de
+    // convenios: ninguno de los dos lo toma (usan sus llaves globales).
+    const locks = estado.locksTomados.join(" | ");
+    expect(locks).toContain("lock_timeout");
+    expect(estado.locksTomados.filter((l) => l.includes("advisory"))).toHaveLength(3);
   });
 });

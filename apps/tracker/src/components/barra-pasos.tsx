@@ -163,7 +163,9 @@ export function BarraPasos({
 											? "El proceso está en pausa"
 											: estado === "desembolsado"
 												? "Crédito finalizado"
-												: "En curso"}
+												: estado === "aprobado"
+													? "Crédito aprobado"
+													: "En curso"}
 								</p>
 							)}
 						</div>

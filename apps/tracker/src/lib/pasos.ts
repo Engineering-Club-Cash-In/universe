@@ -141,6 +141,11 @@ export const ESTADOS: Record<
 		clase: "bg-rose-50 text-rose-700 ring-rose-600/20",
 		punto: "bg-rose-500",
 	},
+	aprobado: {
+		etiqueta: "Aprobado",
+		clase: "bg-indigo-50 text-indigo-700 ring-indigo-600/20",
+		punto: "bg-indigo-500",
+	},
 	desembolsado: {
 		etiqueta: "Finalizada",
 		clase: "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
@@ -150,6 +155,7 @@ export const ESTADOS: Record<
 
 export function etiquetaDeEtapa(paso: number, estado: EstadoCaso): string {
 	if (paso === 5 && estado === "desembolsado") return "Finalizada";
+	if (paso === 5 && estado === "aprobado") return "Aprobado";
 	return rangoDePaso(paso);
 }
 

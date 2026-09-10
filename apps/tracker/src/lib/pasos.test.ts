@@ -194,6 +194,19 @@ describe("etiquetaDeEtapa", () => {
 		expect(etiquetaDeEtapa(2, "en_proceso")).toBe("30–40%");
 		expect(etiquetaDeEtapa(2, "rechazado")).toBe("30–40%");
 	});
+
+	test("un caso ganado en el paso 5 dice 'Aprobado', no 'En proceso'", () => {
+		// won ya recorrió todo el pipeline: no es "en proceso" (todavía se
+		// mueve por el pipeline), pero tampoco "Finalizada" (no hay señal de
+		// que contabilidad ya haya pagado).
+		expect(etiquetaDeEtapa(5, "aprobado")).toBe("Aprobado");
+	});
+
+	test("un caso ganado capturado fuera del paso 5 no se fuerza a 'Aprobado'", () => {
+		// Dato mal capturado en el CRM (sección 8.1 del doc): no se finge que
+		// llegó al final si la etapa real dice otra cosa.
+		expect(etiquetaDeEtapa(4, "aprobado")).toBe("85–90%");
+	});
 });
 
 describe("coincidenciaPrincipal", () => {

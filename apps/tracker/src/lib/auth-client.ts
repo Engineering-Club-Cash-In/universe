@@ -12,10 +12,6 @@ export const authClient = createAuthClient({
 	},
 });
 
-// Limpia el período persistido antes de cerrar sesión: si dos socios
-// comparten terminal en el predio, el siguiente en entrar nunca debe heredar
-// el mes/año que dejó el anterior (mismo criterio que ya se usó para el
-// caché de TanStack Query compartido entre socios).
 export async function cerrarSesion(identificadorSocio: string | null = null) {
 	limpiarFiltroPeriodo(identificadorSocio);
 	await authClient.signOut();

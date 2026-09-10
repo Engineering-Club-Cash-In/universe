@@ -1,8 +1,5 @@
-// Recuerda el período (mes/año) que el socio eligió a mano en el listado,
-// namespaced por socio para que compartir dispositivo en el predio no filtre
-// el filtro de uno al otro. Se limpia en cerrarSesion() (ver auth-client.ts),
-// así que el default de "mes en curso" siempre gana tras un logout real; solo
-// sobrevive mientras la sesión sigue activa (ej. entrar a un caso y volver).
+// Período que el socio eligió a mano, namespaced por socio (localStorage).
+// Se limpia en cerrarSesion() en auth-client.ts.
 
 type AlmacenamientoClaveValor = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
@@ -63,7 +60,5 @@ export function limpiarFiltroPeriodo(
 	if (!identificadorSocio || !storage) return;
 	try {
 		storage.removeItem(claveDe(identificadorSocio));
-	} catch {
-		// No hay nada razonable que hacer si removeItem falla.
-	}
+	} catch {}
 }

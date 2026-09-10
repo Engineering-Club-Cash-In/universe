@@ -53,13 +53,10 @@ const TAMANOS_PAGINA = [10, 20, 50, 100];
 const TODO_EL_TIEMPO = "todo";
 
 export function ListadoPage() {
-	const ahora = new Date(); // misma instancia para mes y año en este render
+	const ahora = new Date();
 	const { data: session } = authClient.useSession();
 	const identificadorSocio = session?.user.id ?? session?.user.email ?? null;
 
-	// Default: el mes en curso, salvo que el socio ya haya elegido un período
-	// antes en esta misma sesión (se restaura desde localStorage; se limpia
-	// en cerrarSesion, así que tras un logout real siempre gana "mes en curso").
 	const [periodo, setPeriodo] = useState<string>(() => {
 		const persistido = leerFiltroPeriodo(identificadorSocio);
 		return persistido?.periodo ?? String(mesEnGuatemala(ahora));
@@ -74,9 +71,6 @@ export function ListadoPage() {
 	const [pagina, setPagina] = useState(1);
 	const [porPagina, setPorPagina] = useState(10);
 
-	// Red de seguridad: si identificadorSocio no estaba listo en el primer
-	// render, re-hidrata una sola vez apenas se resuelva, salvo que el socio
-	// ya haya cambiado el filtro a mano en ese ínterin.
 	const huboEdicionManualRef = useRef(false);
 	const hidratadoRef = useRef(identificadorSocio !== null);
 	useEffect(() => {
@@ -211,9 +205,6 @@ export function ListadoPage() {
 		setPagina(1);
 	};
 
-	// Único punto donde el período cambia a mano: además de aplicar el filtro,
-	// persiste la elección (namespaced por socio) para que sobreviva mientras
-	// la sesión siga activa (ej. entrar a un caso y volver).
 	function cambiarPeriodo(nuevoPeriodo: string, nuevoAnio: number = anioVigente) {
 		huboEdicionManualRef.current = true;
 		cambiarFiltro(() => {

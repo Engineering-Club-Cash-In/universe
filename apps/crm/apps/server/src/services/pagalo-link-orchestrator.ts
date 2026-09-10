@@ -30,6 +30,7 @@ import {
 	construirComentarioGestionLinkPagalo,
 	esLinkPagaloContabilizableEnGestion,
 	gestionLinkPagaloTieneWhatsappConfirmado,
+	resultadoWhatsappGestionLinkPagalo,
 	totalDeLinksPagalo,
 } from "../lib/pagalo-gestion";
 import { deduplicarCuotasPagalo } from "../lib/pagalo-installments";
@@ -158,6 +159,8 @@ async function registrarGestionLinkPagalo(params: {
 	bucketSnapshot?: number | null;
 	finalizar?: boolean;
 	repararPreliminar?: boolean;
+	/** Actualiza links de regeneración sin perder resultado WhatsApp previo. */
+	actualizarGestionParcial?: boolean;
 }): Promise<boolean> {
 	if (params.cantidadLinks === 0) return false;
 	const bucketSnapshot =
@@ -259,11 +262,20 @@ async function registrarGestionLinkPagalo(params: {
 						.where(eq(contactosCobros.id, contactoCobroId))
 						.for("update");
 
-					const comentarioFinal = construirComentarioGestionLinkPagalo(params);
+					const whatsappFinal = params.actualizarGestionParcial
+						? resultadoWhatsappGestionLinkPagalo(
+								gestionPrevia?.comentarios ?? "",
+							)
+						: params.whatsappEnviado;
+					const comentarioFinal = construirComentarioGestionLinkPagalo({
+						...params,
+						whatsappEnviado: whatsappFinal,
+					});
 					const bucketFinal =
 						bucketSnapshot ?? gestionPrevia?.bucketSnapshot ?? null;
 					const debeFinalizar =
 						params.whatsappEnviado !== null ||
+						params.actualizarGestionParcial === true ||
 						(params.repararPreliminar === true &&
 							gestionPrevia !== undefined &&
 							!gestionLinkPagaloTieneWhatsappConfirmado(
@@ -790,6 +802,7 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 				whatsappEnviado: null,
 				finalizar: true,
 				repararPreliminar: true,
+				actualizarGestionParcial: true,
 			});
 		},
 	});
@@ -1998,6 +2011,7 @@ export async function regenerarGrupo(params: {
 		};
 	}
 
+	const registrarGestion = grupoViejo.origen === "ASESOR";
 	const emitido = await emitirLinksDeGrupo({
 		groupId: groupIdNuevo,
 		numeroSifco: grupoViejo.numeroCreditoSifco,
@@ -2017,34 +2031,39 @@ export async function regenerarGrupo(params: {
 		// Si uno de los componentes falla, conservar en historial el que sí
 		// quedó activo. El registrador sigue el sucesor terminal si vuelve a
 		// regenerarse mientras esta emisión está en vuelo.
-		onEmisionParcial: async (links) => {
-			await registrarGestionLinkPagalo({
-				groupId: groupIdNuevo,
-				casoCobroId,
-				numeroSifco: grupoViejo.numeroCreditoSifco,
-				requestedBy: params.actorUserId,
-				totalAmount: totalDeLinksPagalo(links),
-				cantidadLinks: links.length,
-				whatsappEnviado: null,
-				finalizar: true,
-				repararPreliminar: true,
-			});
-		},
+		onEmisionParcial: registrarGestion
+			? async (links) => {
+					await registrarGestionLinkPagalo({
+						groupId: groupIdNuevo,
+						casoCobroId,
+						numeroSifco: grupoViejo.numeroCreditoSifco,
+						requestedBy: params.actorUserId,
+						totalAmount: totalDeLinksPagalo(links),
+						cantidadLinks: links.length,
+						whatsappEnviado: null,
+						finalizar: true,
+						repararPreliminar: true,
+						actualizarGestionParcial: true,
+					});
+				}
+			: undefined,
 	});
-	// Regeneración no envía WhatsApp, pero sí debe registrar/finalizar la
-	// gestión de sus links. Si heredó una gestión parcial, finalizarla cambia
-	// el total al de todos los componentes emitidos.
-	await registrarGestionLinkPagalo({
-		groupId: groupIdNuevo,
-		casoCobroId,
-		numeroSifco: grupoViejo.numeroCreditoSifco,
-		requestedBy: params.actorUserId,
-		totalAmount: totalDeLinksPagalo(emitido.links),
-		cantidadLinks: emitido.links.length,
-		whatsappEnviado: null,
-		finalizar: true,
-		repararPreliminar: true,
-	});
+	// Regeneración de un asesor no envía WhatsApp, pero sí debe registrar y
+	// finalizar gestión. Si heredó una gestión parcial, cambia total al de
+	// todos los componentes emitidos. Grupos BOT no generan gestión humana.
+	if (registrarGestion) {
+		await registrarGestionLinkPagalo({
+			groupId: groupIdNuevo,
+			casoCobroId,
+			numeroSifco: grupoViejo.numeroCreditoSifco,
+			requestedBy: params.actorUserId,
+			totalAmount: totalDeLinksPagalo(emitido.links),
+			cantidadLinks: emitido.links.length,
+			whatsappEnviado: null,
+			finalizar: true,
+			repararPreliminar: true,
+		});
+	}
 
 	return {
 		groupIdNuevo,

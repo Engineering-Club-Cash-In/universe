@@ -4,6 +4,7 @@ import {
 	esLinkPagaloContabilizableEnGestion,
 	esLinkPagaloGenerado,
 	gestionLinkPagaloTieneWhatsappConfirmado,
+	resultadoWhatsappGestionLinkPagalo,
 	totalDeLinksPagalo,
 } from "./pagalo-gestion";
 
@@ -39,6 +40,24 @@ test("deja explícito cuando WhatsApp no tiene resultado y lo distingue", () => 
 			"Links Págalo generados: 1 link por Q100.00. WhatsApp enviado.",
 		),
 	).toBe(true);
+});
+
+test("recupera resultado WhatsApp previo al refrescar links regenerados", () => {
+	expect(
+		resultadoWhatsappGestionLinkPagalo(
+			"Links Págalo generados: 2 links por Q100.00. WhatsApp enviado.",
+		),
+	).toBe(true);
+	expect(
+		resultadoWhatsappGestionLinkPagalo(
+			"Links Págalo generados: 2 links por Q100.00. WhatsApp no enviado.",
+		),
+	).toBe(false);
+	expect(
+		resultadoWhatsappGestionLinkPagalo(
+			"Links Págalo generados: 1 link por Q100.00. WhatsApp sin confirmación.",
+		),
+	).toBeNull();
 });
 
 test("suma solo links Págalo emitidos", () => {

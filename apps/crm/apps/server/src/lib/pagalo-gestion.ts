@@ -22,6 +22,15 @@ export function gestionLinkPagaloTieneWhatsappConfirmado(
 	);
 }
 
+/** Conserva resultado histórico cuando una regeneración refresca sus links. */
+export function resultadoWhatsappGestionLinkPagalo(
+	comentarios: string,
+): boolean | null {
+	if (comentarios.includes("WhatsApp enviado.")) return true;
+	if (comentarios.includes("WhatsApp no enviado.")) return false;
+	return null;
+}
+
 export function totalDeLinksPagalo(
 	links: readonly { amount: string }[],
 ): string {

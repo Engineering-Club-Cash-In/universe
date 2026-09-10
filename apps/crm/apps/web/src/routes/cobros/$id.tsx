@@ -103,7 +103,6 @@ import {
 	tienePromesaActiva,
 } from "@/lib/cobros/promesa-activa";
 import { formatFechaLocal } from "@/lib/date-utils";
-import { ROLES } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
 
 // CB-020 (Codex, PR #1148): toLocaleDateString("es-GT") sin `timeZone`
@@ -734,6 +733,11 @@ function RouteComponent() {
 			casoDetails.data?.estadoMora === "incobrable",
 	});
 
+	// Rol real del usuario: el modal de la oportunidad decide con el que se le
+	// pase (contratos, cotizaciones). Antes se le mandaba ROLES.COBROS fijo y
+	// hasta un admin veia la ficha recortada.
+	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
+
 	// Obtener la oportunidad asociada por numeroSifco para ver detalles completos
 	const opportunityQuery = useQuery({
 		...orpc.getOpportunities.queryOptions({
@@ -756,15 +760,29 @@ function RouteComponent() {
 				typeof matchingOpportunity.lead.dpi === "string"
 					? matchingOpportunity.lead.dpi
 					: null;
+			// getOpportunities ya devuelve todo esto; el mapeo se quedaba con un
+			// pedazo y el modal escondia en silencio lo que no le llegaba
+			// (vehiculo, asignado, fuente, y los documentos del vehiculo, que
+			// dependen de hasVehicle). Los joins son LEFT: sin fila relacionada
+			// vienen los campos en null, por eso se valida el id.
 			const opportunityForModal: OpportunityForModal = {
 				id: matchingOpportunity.id,
 				title: matchingOpportunity.title,
 				value: matchingOpportunity.value,
 				creditType: matchingOpportunity.creditType,
 				status: matchingOpportunity.status,
+				probability: matchingOpportunity.probability,
 				expectedCloseDate: matchingOpportunity.expectedCloseDate,
 				createdAt: matchingOpportunity.createdAt,
-				lead: matchingOpportunity.lead
+				source: matchingOpportunity.source,
+				loanPurpose: matchingOpportunity.loanPurpose,
+				nit: matchingOpportunity.nit,
+				categoria: matchingOpportunity.categoria,
+				diaPagoMensual: matchingOpportunity.diaPagoMensual,
+				royalti: matchingOpportunity.royalti,
+				porcentajeRoyalti: matchingOpportunity.porcentajeRoyalti,
+				inversionistas: matchingOpportunity.inversionistas,
+				lead: matchingOpportunity.lead?.id
 					? {
 							id: matchingOpportunity.lead.id,
 							firstName: matchingOpportunity.lead.firstName,
@@ -774,14 +792,44 @@ function RouteComponent() {
 							email: matchingOpportunity.lead.email,
 							phone: matchingOpportunity.lead.phone,
 							dpi: leadDpi,
+							age: matchingOpportunity.lead.age,
+							direccion: matchingOpportunity.lead.direccion,
+							departamento: matchingOpportunity.lead.departamento,
+							municipio: matchingOpportunity.lead.municipio,
+							zona: matchingOpportunity.lead.zona,
 						}
 					: null,
-				stage: matchingOpportunity.stage
+				company: matchingOpportunity.company?.id
+					? {
+							id: matchingOpportunity.company.id,
+							name: matchingOpportunity.company.name,
+						}
+					: null,
+				stage: matchingOpportunity.stage?.id
 					? {
 							id: matchingOpportunity.stage.id,
 							name: matchingOpportunity.stage.name,
+							order: matchingOpportunity.stage.order ?? undefined,
 							closurePercentage: matchingOpportunity.stage.closurePercentage,
 							color: matchingOpportunity.stage.color || "#888",
+						}
+					: null,
+				assignedUser: matchingOpportunity.assignedUser?.id
+					? {
+							id: matchingOpportunity.assignedUser.id,
+							name: matchingOpportunity.assignedUser.name,
+						}
+					: null,
+				vehicle: matchingOpportunity.vehicle?.id
+					? {
+							id: matchingOpportunity.vehicle.id,
+							make: matchingOpportunity.vehicle.make,
+							model: matchingOpportunity.vehicle.model,
+							year: matchingOpportunity.vehicle.year,
+							licensePlate: matchingOpportunity.vehicle.licensePlate,
+							color: matchingOpportunity.vehicle.color,
+							isNew: matchingOpportunity.vehicle.isNew,
+							isOwned: matchingOpportunity.vehicle.isOwned,
 						}
 					: null,
 			};
@@ -3956,7 +4004,7 @@ function RouteComponent() {
 				onOpenChange={setIsOpportunityModalOpen}
 				opportunity={selectedOpportunityForModal}
 				readOnly
-				userRole={ROLES.COBROS}
+				userRole={userProfile.data?.role}
 			/>
 		</div>
 	);

@@ -71,6 +71,40 @@ aplicar_migraciones() {
     grep -v "^NOTICE:" "$salida" || true
   done
   rm -f "$salida"
+  verificar_constraints "$url" "$schema" "$dir"
+}
+
+# Comprueba que TODAS las constraints que las migraciones dicen crear existan
+# de verdad en el schema destino. La lista sale de los propios archivos, así
+# que se mantiene sola.
+#
+# Por qué hace falta: los bloques `IF NOT EXISTS (SELECT 1 FROM pg_constraint
+# WHERE conname = …)` comparaban solo el NOMBRE, y `conname` no es único por
+# base sino por tabla. Preparando `<schema>_nuevo` al lado del sandbox vivo,
+# las constraints homónimas del vivo daban el IF por satisfecho y las del nuevo
+# NUNCA se creaban; el swap promovía tablas sin sus FKs ni sus CHECK, en
+# silencio (review de Codex, P1). Los bloques ya quedaron acotados por
+# `conrelid`, y esto es la red que lo detecta si vuelve a pasar.
+#   uso: verificar_constraints URL SCHEMA DIR_COBROS02
+verificar_constraints() {
+  local url="$1" schema="$2" dir="$3" esperadas faltan
+  esperadas="$(grep -rh "ADD CONSTRAINT" "$dir"/0*.sql \
+    | sed -E 's/.*ADD CONSTRAINT ([a-z0-9_]+).*/\1/' | sort -u | paste -sd,)"
+  [[ -n "$esperadas" ]] || return 0
+  faltan="$(psql "$url" -X -At -v ON_ERROR_STOP=1 -v schema="$schema" -v esperadas="$esperadas" <<'SQL'
+SELECT string_agg(e.nombre, ', ' ORDER BY e.nombre)
+FROM unnest(string_to_array(:'esperadas', ',')) AS e(nombre)
+WHERE NOT EXISTS (
+  SELECT 1 FROM pg_constraint c
+  JOIN pg_namespace n ON n.oid = c.connamespace
+  WHERE n.nspname = :'schema' AND c.conname = e.nombre
+);
+SQL
+)"
+  if [[ -n "$faltan" ]]; then
+    die "Al schema $schema le faltan constraints que las migraciones debían crear: $faltan. No se sigue (un swap acá promovería tablas sin sus FKs ni sus CHECK)."
+  fi
+  echo "· constraints verificadas en $schema: $(tr ',' '\n' <<<"$esperadas" | wc -l)"
 }
 
 # `sslrootcert=system` lo entiende libpq (psql/pg_dump) y evita tener que crear
@@ -129,4 +163,52 @@ SELECT (SELECT count(*) FROM buckets_historial) AS buckets_historial,
 SELECT count(*) AS sin_cuotas FROM convenios_pago WHERE completado = false AND activo AND cuotas_convenio IS NULL;
 ROLLBACK;
 SQL
+}
+
+# Cuando el destino es OTRA BASE, un `pg_dump --schema=cartera` no se lleva lo
+# que vive fuera de ese schema y del que igual depende: los ENUM de `public`
+# que usan varias columnas (payment_validation_status, estado_liquidacion,
+# tipo_cuenta_enum) y las extensiones. Sin ellos el restore falla al crear las
+# tablas y se cae en cascada (está en el runbook, y el flujo "otra base" se
+# anunciaba sin verificarlo — review de Codex, P2).
+#
+# No se crean solos a propósito: `public` puede ser de otra aplicación (en la
+# Neon de dev es del CRM). Se detecta lo que falta y se entrega el SQL exacto.
+#   uso: verificar_dependencias_externas URL_ORIGEN URL_DESTINO SCHEMA_ORIGEN
+verificar_dependencias_externas() {
+  local origen="$1" destino="$2" schema="$3" tipos faltan sql
+
+  # Tipos de usuario que las columnas de <schema> toman de otros schemas.
+  tipos="$(psql "$origen" -X -At -v ON_ERROR_STOP=1 -v schema="$schema" <<'SQL'
+SELECT string_agg(DISTINCT c.udt_schema || '.' || c.udt_name, ',')
+FROM information_schema.columns c
+JOIN pg_type t ON t.typname = c.udt_name
+JOIN pg_namespace n ON n.oid = t.typnamespace AND n.nspname = c.udt_schema
+WHERE c.table_schema = :'schema'
+  AND c.udt_schema NOT IN (:'schema', 'pg_catalog', 'information_schema')
+  AND t.typtype = 'e';
+SQL
+)"
+  [[ -n "$tipos" ]] || return 0
+
+  faltan="$(psql "$destino" -X -At -v ON_ERROR_STOP=1 -v tipos="$tipos" <<'SQL'
+SELECT string_agg(x.nombre, ',' ORDER BY x.nombre)
+FROM unnest(string_to_array(:'tipos', ',')) AS x(nombre)
+WHERE to_regtype(x.nombre) IS NULL;
+SQL
+)"
+  [[ -n "$faltan" ]] || { echo "· dependencias externas presentes en el destino: $tipos"; return 0; }
+
+  echo "✖ Al destino le faltan tipos de los que depende $schema: $faltan" >&2
+  echo "  Se crean con esto (revisá antes: 'public' puede ser de otra aplicación):" >&2
+  psql "$origen" -X -At -v ON_ERROR_STOP=1 -v faltan="$faltan" <<'SQL' >&2
+SELECT '    CREATE TYPE ' || n.nspname || '.' || t.typname || ' AS ENUM (' ||
+       string_agg(quote_literal(e.enumlabel), ', ' ORDER BY e.enumsortorder) || ');'
+FROM unnest(string_to_array(:'faltan', ',')) AS x(nombre)
+JOIN pg_type t ON t.oid = x.nombre::regtype
+JOIN pg_namespace n ON n.oid = t.typnamespace
+JOIN pg_enum e ON e.enumtypid = t.oid
+GROUP BY n.nspname, t.typname;
+SQL
+  die "Faltan dependencias fuera de $schema en el destino. Creálas y repetí."
 }

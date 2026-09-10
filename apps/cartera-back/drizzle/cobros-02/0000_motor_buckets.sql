@@ -130,7 +130,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS buckets_historial_uq_inicial
 DO $$
 BEGIN
   IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'buckets_historial_evento_coherente_ck'
+    SELECT 1 FROM pg_constraint
+     WHERE conname = 'buckets_historial_evento_coherente_ck'
+       AND conrelid = 'cartera.buckets_historial'::regclass
   ) THEN
     ALTER TABLE cartera.buckets_historial
       ADD CONSTRAINT buckets_historial_evento_coherente_ck CHECK (

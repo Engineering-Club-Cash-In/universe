@@ -36,7 +36,9 @@ ALTER TABLE cartera.asesor_bucket ADD COLUMN IF NOT EXISTS margen_alerta_valor n
 DO $$
 BEGIN
   IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'asesor_bucket_margen_alerta_tipo_check'
+    SELECT 1 FROM pg_constraint
+     WHERE conname = 'asesor_bucket_margen_alerta_tipo_check'
+       AND conrelid = 'cartera.asesor_bucket'::regclass
   ) THEN
     ALTER TABLE cartera.asesor_bucket
       ADD CONSTRAINT asesor_bucket_margen_alerta_tipo_check
@@ -48,7 +50,9 @@ END $$;
 DO $$
 BEGIN
   IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'asesor_bucket_margen_alerta_valor_check'
+    SELECT 1 FROM pg_constraint
+     WHERE conname = 'asesor_bucket_margen_alerta_valor_check'
+       AND conrelid = 'cartera.asesor_bucket'::regclass
   ) THEN
     ALTER TABLE cartera.asesor_bucket
       ADD CONSTRAINT asesor_bucket_margen_alerta_valor_check
@@ -60,7 +64,9 @@ END $$;
 DO $$
 BEGIN
   IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'asesor_bucket_capacidad_base_check'
+    SELECT 1 FROM pg_constraint
+     WHERE conname = 'asesor_bucket_capacidad_base_check'
+       AND conrelid = 'cartera.asesor_bucket'::regclass
   ) THEN
     ALTER TABLE cartera.asesor_bucket
       ADD CONSTRAINT asesor_bucket_capacidad_base_check

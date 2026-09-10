@@ -135,6 +135,12 @@ fase_copiar() {
     echo "· DROP SCHEMA $DESTINO_SCHEMA CASCADE (--reemplazar)"
     psql_dest -c "DROP SCHEMA \"$DESTINO_SCHEMA\" CASCADE"
   fi
+  # Copiar a OTRA base deja fuera lo que el schema toma de `public`; se valida
+  # antes de empezar en vez de fallar a mitad del restore (Codex, P2).
+  if [[ $MISMA_BASE -eq 0 ]]; then
+    echo "· destino en otra base: se validan las dependencias externas"
+    verificar_dependencias_externas "$ORIGEN" "$DESTINO" "$ORIGEN_SCHEMA"
+  fi
   [[ $DRY_RUN -eq 0 ]] || { echo "· (dry-run) se copiaría $ORIGEN_SCHEMA → $DESTINO_SCHEMA. No se toca."; return; }
   echo "· pg_dump --schema=$ORIGEN_SCHEMA (solo lectura del origen)"
   pg_dump "$ORIGEN" --schema="$ORIGEN_SCHEMA" --no-owner --no-privileges -Fp > "$DUMP_DIR/origen.sql"

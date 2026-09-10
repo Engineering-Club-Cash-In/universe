@@ -229,6 +229,8 @@ Aparecieron todas construyendo estos scripts. Ninguna da un error obvio.
 | **`\copy` no interpola variables** | Es la única meta-orden de psql que no lo hace. Hay que armar la orden completa con `\set` y ejecutar esa variable |
 | **`:variables` no entran en `$$ … $$`** | Dentro del cuerpo de una función psql no sustituye nada. Los schemas se pasan como parámetros de la función |
 | **`sslrootcert=system`** | Lo entiende `psql`/`pg_dump` (libpq) y evita tener que crear `~/.postgresql/root.crt`, pero la librería `pg` de Node lo toma como **nombre de archivo** y revienta con `ENOENT: 'system'`. Hay que quitarlo antes de dárselo al motor |
+| **`conname` no es único por base** | Los bloques `IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = …)` daban por creada una constraint que en realidad vivía en **otro schema** de la misma base. Preparando `<schema>_nuevo` al lado del sandbox, las tablas nuevas quedaban sin sus FKs ni sus CHECK, en silencio. Hay que acotar por `conrelid`, y las migraciones ahora verifican al final que las 22 existan de verdad |
+| **Copiar a otra base deja dependencias atrás** | `pg_dump --schema=cartera` no se lleva los ENUM de `public` que usan varias columnas (`payment_validation_status`, `estado_liquidacion`, `tipo_cuenta_enum`) ni las extensiones. El restore falla al crear las tablas y se cae en cascada. Los scripts lo validan antes de empezar y entregan el `CREATE TYPE` exacto |
 | **`pg_dump` y el `search_path`** | Un dump plano abre con `set_config('search_path', '', false)` **sin `LOCAL`**, o sea que persiste en la sesión. Por el pooler eso envenena backends compartidos, ver arriba |
 
 Y una de bash, que costó una corrida entera: un `|| true` sobre el paso del motor se tragó

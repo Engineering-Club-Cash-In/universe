@@ -123,6 +123,10 @@ if [[ "$(schema_existe "$NUEVO")" == "t" ]]; then
   echo "· $NUEVO existía (corrida anterior a medias): se descarta"
   pn -q -o /dev/null -c "DROP SCHEMA \"$NUEVO\" CASCADE" 2>&1 | grep -v "^DETALLE:\|^drop cascades" || true
 fi
+# El origen (producción) y el destino (sandbox) son SIEMPRE bases distintas, así
+# que hay que confirmar que el destino tenga los tipos de `public` de los que
+# depende cartera antes de gastar el dump (Codex, P2).
+verificar_dependencias_externas "$PROD" "$NEON" "$PROD_SCHEMA"
 pg_dump "$PROD" --schema="$PROD_SCHEMA" --no-owner --no-privileges -Fp > "$DUMP_DIR/prod.sql"
 renombrar_dump "$PROD_SCHEMA" "$NUEVO" < "$DUMP_DIR/prod.sql" > "$DUMP_DIR/nuevo.sql"
 pn -1 -q -o /dev/null -f "$DUMP_DIR/nuevo.sql"

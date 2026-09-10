@@ -57,7 +57,9 @@ ON CONFLICT (numero) DO NOTHING;
 DO $$
 BEGIN
   IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'buckets_rango_ck'
+    SELECT 1 FROM pg_constraint
+     WHERE conname = 'buckets_rango_ck'
+       AND conrelid = 'cartera.buckets'::regclass
   ) THEN
     ALTER TABLE cartera.buckets
       ADD CONSTRAINT buckets_rango_ck CHECK (
@@ -71,7 +73,9 @@ END$$;
 DO $$
 BEGIN
   IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'asesor_bucket_bucket_fk'
+    SELECT 1 FROM pg_constraint
+     WHERE conname = 'asesor_bucket_bucket_fk'
+       AND conrelid = 'cartera.asesor_bucket'::regclass
   ) THEN
     ALTER TABLE cartera.asesor_bucket
       ADD CONSTRAINT asesor_bucket_bucket_fk
@@ -84,7 +88,9 @@ END$$;
 DO $$
 BEGIN
   IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'buckets_historial_bucket_nuevo_fk'
+    SELECT 1 FROM pg_constraint
+     WHERE conname = 'buckets_historial_bucket_nuevo_fk'
+       AND conrelid = 'cartera.buckets_historial'::regclass
   ) THEN
     ALTER TABLE cartera.buckets_historial
       ADD CONSTRAINT buckets_historial_bucket_nuevo_fk
@@ -97,7 +103,9 @@ END$$;
 DO $$
 BEGIN
   IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'buckets_historial_bucket_anterior_fk'
+    SELECT 1 FROM pg_constraint
+     WHERE conname = 'buckets_historial_bucket_anterior_fk'
+       AND conrelid = 'cartera.buckets_historial'::regclass
   ) THEN
     ALTER TABLE cartera.buckets_historial
       ADD CONSTRAINT buckets_historial_bucket_anterior_fk

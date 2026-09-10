@@ -94,6 +94,10 @@ describe("columnas type: money — un nulo NO es un cero", () => {
   });
 });
 
+/** Un subrogado sin su pareja: la marca de haber partido un carácter al recortar. */
+const subrogadoSuelto =
+  /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
 describe("sanitizarSheetName", () => {
   it("reemplaza los caracteres que ExcelJS prohíbe", () => {
     expect(sanitizarSheetName("Historial 010/214/1240")).toBe("Historial 010-214-1240");
@@ -110,6 +114,79 @@ describe("sanitizarSheetName", () => {
 
   it("topa en 31 caracteres", () => {
     expect(sanitizarSheetName("x".repeat(60)).length).toBe(31);
+  });
+
+  it("la comilla que el recorte deja al final se limpia (antes: 500 de ExcelJS)", () => {
+    // La comilla cae justo en el índice 30: era interna cuando se limpiaban los
+    // bordes, y quedaba de última recién después del recorte. ExcelJS rechaza
+    // un nombre que termina en comilla simple.
+    const alBorde = `Historial ${"0".repeat(20)}'resto`;
+    expect(sanitizarSheetName(alBorde)).toBe(`Historial ${"0".repeat(20)}`);
+    // Invariante, no un caso puntual: ningún nombre sale con comilla en los extremos.
+    for (let i = 0; i < 40; i++) {
+      const salida = sanitizarSheetName(`${"a".repeat(i)}'${"b".repeat(40)}`);
+      expect(salida.startsWith("'")).toBe(false);
+      expect(salida.endsWith("'")).toBe(false);
+    }
+  });
+
+  it("si el recorte lo deja en puras comillas, cae al fallback y no a cadena vacía", () => {
+    // El guard de vacío tiene que correr sobre el resultado final: una cadena
+    // vacía también la rechaza ExcelJS ("The name can't be empty").
+    expect(sanitizarSheetName("'".repeat(40))).toBe("Reporte");
+    expect(sanitizarSheetName(`${"'".repeat(31)} `)).toBe("Reporte");
+  });
+
+  it("atrapa 'History' aunque aparezca recién después de limpiar los bordes", () => {
+    // ExcelJS reserva el literal: el guard corre al final, sobre el resultado ya
+    // transformado, no sobre la entrada cruda.
+    expect(sanitizarSheetName("'History'")).toBe("Historial");
+    expect(sanitizarSheetName("  History  ")).toBe("Historial");
+    expect(sanitizarSheetName("'HISTORY'")).toBe("Historial");
+  });
+
+  it("recorta por code points: no parte un par subrogado a la mitad", () => {
+    // El nombre sale del número SIFCO y del nombre del cliente: texto libre.
+    const soloEmojis = sanitizarSheetName("\u{1F44D}".repeat(20));
+    expect(soloEmojis.length).toBeLessThanOrEqual(31);
+    expect(subrogadoSuelto.test(soloEmojis)).toBe(false);
+    expect(soloEmojis).toBe("\u{1F44D}".repeat(15));
+
+    // El par arranca justo en el índice 30, así que el corte crudo lo partía.
+    const alBorde = sanitizarSheetName(`${"x".repeat(30)}\u{1F44D}y`);
+    expect(subrogadoSuelto.test(alBorde)).toBe(false);
+    expect(alBorde).toBe("x".repeat(30));
+  });
+
+  it("nunca pasa de 31 unidades: ExcelJS no llega a truncar por su cuenta", () => {
+    // Si ExcelJS trunca él mismo, su chequeo de comillas ya corrió sobre el
+    // nombre largo y puede dejar la pestaña terminada en comilla igual.
+    for (const entrada of [
+      "x".repeat(60),
+      "\u{1F44D}".repeat(20),
+      `Historial ${"0".repeat(20)}'resto`,
+      `${"á".repeat(40)}`,
+    ]) {
+      expect(sanitizarSheetName(entrada).length).toBeLessThanOrEqual(31);
+    }
+  });
+
+  it("el workbook se genera con un nombre que trae comilla y emoji (antes: 500)", async () => {
+    const ws = await construirYLeer({
+      sheetName: `Historial ${"0".repeat(20)}'resto`,
+      columnas: [{ header: "ID", key: "id", type: "number" }],
+      filas: [{ id: 1 }],
+    });
+    expect(ws.name).toBe(`Historial ${"0".repeat(20)}`);
+
+    const wsEmoji = await construirYLeer({
+      sheetName: "\u{1F44D}".repeat(20),
+      columnas: [{ header: "ID", key: "id", type: "number" }],
+      filas: [{ id: 1 }],
+    });
+    // Con el subrogado suelto el nombre volvía del archivo con U+FFFD.
+    expect(wsEmoji.name).toBe("\u{1F44D}".repeat(15));
+    expect(wsEmoji.name).not.toContain("�");
   });
 
   it("el workbook se genera aunque el número SIFCO traiga '/' (antes: 500)", async () => {

@@ -116,21 +116,53 @@ function toDateGT(v: any, soloDia = false): Date | string | null {
   );
 }
 
+/** Caracteres que ExcelJS rechaza en cualquier posición del nombre. */
+const SHEET_NAME_PROHIBIDOS = /[*?:\\/\[\]]/g;
+/** Comillas simples y espacios en los extremos: la comilla la rechaza ExcelJS. */
+const SHEET_NAME_BORDES = /^[\s']+|[\s']+$/g;
+/** Tope de ExcelJS, en unidades UTF-16 (es lo que mide con `.length`). */
+const SHEET_NAME_MAX = 31;
+
+/**
+ * Recorta a `max` unidades UTF-16 sin partir un par subrogado por la mitad.
+ *
+ * Se mide en unidades UTF-16 y no en code points porque ese es el tope que
+ * aplica ExcelJS (`name.length > 31`); contar code points podría dejar pasar un
+ * nombre que él vuelve a truncar por su cuenta, y ese truncado sí parte pares.
+ */
+function recortarSinPartirSubrogado(texto: string, max: number): string {
+  if (texto.length <= max) return texto;
+  const corte = texto.slice(0, max);
+  const ultimo = corte.charCodeAt(max - 1);
+  // Un high surrogate al final se quedó sin su pareja: se cae con él.
+  return ultimo >= 0xd800 && ultimo <= 0xdbff ? corte.slice(0, -1) : corte;
+}
+
 /**
  * Nombre de pestaña aceptable para Excel.
  *
- * ExcelJS rechaza `* ? : \ / [ ]`, el nombre vacío, más de 31 caracteres y el
- * literal reservado "History". El historial de mora arma el nombre con el
- * número SIFCO, que es texto libre: un "/" tumbaba la exportación con un 500.
+ * ExcelJS rechaza `* ? : \ / [ ]`, la comilla simple en los extremos, el nombre
+ * vacío y el literal reservado "History"; arriba de 31 caracteres trunca él
+ * mismo. El historial de mora arma el nombre con el número SIFCO y el nombre
+ * del cliente, que son texto libre: un "/" tumbaba la exportación con un 500.
+ *
+ * El orden es lo que hace la función correcta por construcción:
+ * prohibidos → recorte → limpieza de bordes → guards. La limpieza de bordes va
+ * DESPUÉS del recorte porque el recorte puede dejar de última una comilla que
+ * era interna (ExcelJS: 500), y los guards van al final porque el resultado de
+ * recortar y limpiar puede ser vacío o volverse "History".
  */
 export function sanitizarSheetName(nombre?: string | null): string {
-  const limpio = String(nombre ?? "")
-    .replace(/[*?:\\/\[\]]/g, "-")
-    // Excel tampoco admite comilla simple al principio o al final.
-    .replace(/^'+|'+$/g, "")
-    .trim()
-    .slice(0, 31)
-    .trim();
+  const sinProhibidos = String(nombre ?? "").replace(SHEET_NAME_PROHIBIDOS, "-");
+  // Se limpian los bordes también ANTES de recortar para no gastar los 31
+  // caracteres en espacios o comillas de adorno del principio.
+  const recortado = recortarSinPartirSubrogado(
+    sinProhibidos.replace(SHEET_NAME_BORDES, ""),
+    SHEET_NAME_MAX
+  );
+  // Segunda pasada: solo quita comillas y espacios (ambos BMP), así que no
+  // puede volver a partir un par subrogado ni pasarse del tope.
+  const limpio = recortado.replace(SHEET_NAME_BORDES, "");
   if (!limpio) return "Reporte";
   if (limpio.toLowerCase() === "history") return "Historial";
   return limpio;

@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import {
 	construirComentarioGestionLinkPagalo,
+	esLinkPagaloContabilizableEnGestion,
 	esLinkPagaloGenerado,
 	gestionLinkPagaloTieneWhatsappConfirmado,
 	totalDeLinksPagalo,
@@ -51,4 +52,12 @@ test("solo links activos o pagados cuentan como emitidos", () => {
 	expect(esLinkPagaloGenerado("ACTIVE")).toBe(true);
 	expect(esLinkPagaloGenerado("PAID")).toBe(true);
 	expect(esLinkPagaloGenerado("ERROR")).toBe(false);
+});
+
+test("un pago tardío de link reemplazado no cuenta en la gestión", () => {
+	expect(esLinkPagaloContabilizableEnGestion("ACTIVE", false)).toBe(true);
+	expect(esLinkPagaloContabilizableEnGestion("PAID", true)).toBe(true);
+	expect(esLinkPagaloContabilizableEnGestion("PAID", false)).toBe(false);
+	expect(esLinkPagaloContabilizableEnGestion("PAID", null)).toBe(false);
+	expect(esLinkPagaloContabilizableEnGestion("REPLACED", false)).toBe(false);
 });

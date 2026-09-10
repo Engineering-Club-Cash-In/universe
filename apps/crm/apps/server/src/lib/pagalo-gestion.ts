@@ -33,3 +33,13 @@ export function totalDeLinksPagalo(
 export function esLinkPagaloGenerado(status: string | null): boolean {
 	return status === "ACTIVE" || status === "PAID";
 }
+
+export function esLinkPagaloContabilizableEnGestion(
+	status: string | null,
+	isApplicationSource: boolean | null,
+): boolean {
+	return (
+		esLinkPagaloGenerado(status) &&
+		(status !== "PAID" || isApplicationSource === true)
+	);
+}

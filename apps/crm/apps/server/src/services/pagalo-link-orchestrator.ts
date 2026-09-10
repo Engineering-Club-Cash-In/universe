@@ -9,6 +9,7 @@ import {
 	pagaloPaymentLinks,
 } from "../db/schema/pagalo-payments";
 import { reclamarYProcesarGrupo } from "../jobs/pagalo-dispatch";
+import { registrarAuditContacto } from "../lib/audit-contactos";
 import { isTestModeEnabled } from "../lib/messaging-test-mode";
 import {
 	buildPagaloAllocations,
@@ -16,12 +17,11 @@ import {
 } from "../lib/pagalo-allocations";
 import {
 	construirComentarioGestionLinkPagalo,
-	esLinkPagaloGenerado,
+	esLinkPagaloContabilizableEnGestion,
 	gestionLinkPagaloTieneWhatsappConfirmado,
 	totalDeLinksPagalo,
 } from "../lib/pagalo-gestion";
 import { deduplicarCuotasPagalo } from "../lib/pagalo-installments";
-import { registrarAuditContacto } from "../lib/audit-contactos";
 import { primeraRevisionPoll } from "../lib/pagalo-poll-cadencia";
 import {
 	assertPagaloInstallmentSelection,
@@ -112,39 +112,23 @@ async function registrarGestionLinkPagalo(params: {
 			: params.bucketSnapshot;
 	try {
 		return await db.transaction(async (tx) => {
-			const [grupo] = await tx
-				.select({
-					contactoCobroId: pagaloPaymentGroups.contactoCobroId,
-					status: pagaloPaymentGroups.status,
-				})
+			const [grupoSinCandado] = await tx
+				.select({ carteraCreditoId: pagaloPaymentGroups.carteraCreditoId })
 				.from(pagaloPaymentGroups)
-				.where(eq(pagaloPaymentGroups.id, params.groupId))
-				.for("update");
-			if (!grupo) return false;
+				.where(eq(pagaloPaymentGroups.id, params.groupId));
+			if (!grupoSinCandado) return false;
 
-			// Si regeneración ya trasladó la gestión al sucesor activo, el request
-			// original aún debe completar ese mismo registro, no crear otro.
-			let contactoCobroId = grupo.contactoCobroId;
-			let grupoDestinoId = params.groupId;
-			let grupoDestinoStatus = grupo.status;
-			if (
-				!contactoCobroId &&
-				params.finalizar &&
-				grupo.status === "CANCELLED"
-			) {
-				// Regenerar puede encadenarse A→B→C mientras el request original
-				// todavía envía WhatsApp. Cada paso mueve contactoCobroId al sucesor;
-				// seguir solo B dejaría la auditoría parcial cuando ya vive en C.
-				let grupoAnteriorId = params.groupId;
-				const gruposVisitados = new Set<string>([params.groupId]);
-				while (!contactoCobroId) {
+			const buscarGrupoTerminalId = async () => {
+				let grupoTerminalId = params.groupId;
+				const gruposVisitados = new Set<string>([grupoTerminalId]);
+				while (true) {
 					const [eventoSucesor] = await tx
 						.select({ groupId: pagaloPaymentEvents.groupId })
 						.from(pagaloPaymentEvents)
 						.where(
 							and(
 								eq(pagaloPaymentEvents.eventType, "GROUP_REGENERATED"),
-								sql`${pagaloPaymentEvents.payload}->>'grupoAnteriorId' = ${grupoAnteriorId}`,
+								sql`${pagaloPaymentEvents.payload}->>'grupoAnteriorId' = ${grupoTerminalId}`,
 							),
 						)
 						.orderBy(desc(pagaloPaymentEvents.occurredAt))
@@ -152,22 +136,62 @@ async function registrarGestionLinkPagalo(params: {
 					if (!eventoSucesor || gruposVisitados.has(eventoSucesor.groupId))
 						break;
 					gruposVisitados.add(eventoSucesor.groupId);
-
-					const [sucesor] = await tx
-						.select({
-							contactoCobroId: pagaloPaymentGroups.contactoCobroId,
-							status: pagaloPaymentGroups.status,
-						})
-						.from(pagaloPaymentGroups)
-						.where(eq(pagaloPaymentGroups.id, eventoSucesor.groupId))
-						.for("update");
-					if (!sucesor) break;
-					contactoCobroId = sucesor.contactoCobroId;
-					grupoAnteriorId = eventoSucesor.groupId;
-					grupoDestinoId = eventoSucesor.groupId;
-					grupoDestinoStatus = sucesor.status;
+					grupoTerminalId = eventoSucesor.groupId;
 				}
+				return grupoTerminalId;
+			};
+
+			// Mismo orden que regenerarGrupo: predecesores por UUID y grupo
+			// terminal al final. Descubrir primero la terminal evita A→B contra
+			// B→A cuando otra sesión regenera C al mismo tiempo.
+			let grupoDestinoId = await buscarGrupoTerminalId();
+			await tx
+				.select({ id: pagaloPaymentGroups.id })
+				.from(pagaloPaymentGroups)
+				.where(
+					and(
+						eq(
+							pagaloPaymentGroups.carteraCreditoId,
+							grupoSinCandado.carteraCreditoId,
+						),
+						ne(pagaloPaymentGroups.id, grupoDestinoId),
+					),
+				)
+				.orderBy(pagaloPaymentGroups.id)
+				.for("update");
+
+			let [grupoDestino] = await tx
+				.select({
+					contactoCobroId: pagaloPaymentGroups.contactoCobroId,
+					status: pagaloPaymentGroups.status,
+				})
+				.from(pagaloPaymentGroups)
+				.where(eq(pagaloPaymentGroups.id, grupoDestinoId))
+				.for("update");
+			if (!grupoDestino) return false;
+
+			// Si una regeneración terminó mientras esperábamos candados, sus
+			// predecesores ya están retenidos y nadie puede volver a regenerar.
+			// Releer permite incluir sucesor recién confirmado sin otra carrera.
+			const grupoTerminalConfirmadoId = await buscarGrupoTerminalId();
+			if (grupoTerminalConfirmadoId !== grupoDestinoId) {
+				grupoDestinoId = grupoTerminalConfirmadoId;
+				[grupoDestino] = await tx
+					.select({
+						contactoCobroId: pagaloPaymentGroups.contactoCobroId,
+						status: pagaloPaymentGroups.status,
+					})
+					.from(pagaloPaymentGroups)
+					.where(eq(pagaloPaymentGroups.id, grupoDestinoId))
+					.for("update");
+				if (!grupoDestino) return false;
 			}
+
+			// Una emisión parcial del grupo reemplazado no debe crear una gestión
+			// parcial en el sucesor; la finalización registrará datos completos.
+			if (!params.finalizar && grupoDestinoId !== params.groupId) return false;
+
+			const contactoCobroId = grupoDestino.contactoCobroId;
 
 			if (contactoCobroId) {
 				if (params.finalizar) {
@@ -222,7 +246,7 @@ async function registrarGestionLinkPagalo(params: {
 				}
 				return true;
 			}
-			if (grupoDestinoStatus === "CANCELLED") {
+			if (grupoDestino.status === "CANCELLED") {
 				return false;
 			}
 			const [gestion] = await tx
@@ -456,6 +480,7 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 			totalAmount: pagaloPaymentGroups.totalAmount,
 			linkType: pagaloPaymentLinks.linkType,
 			linkStatus: pagaloPaymentLinks.status,
+			isApplicationSource: pagaloPaymentLinks.isApplicationSource,
 			paymentUrl: pagaloPaymentLinks.paymentUrl,
 		})
 		.from(pagaloPaymentGroups)
@@ -487,7 +512,12 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 				: [],
 		);
 		const linksParaGestion = grupoActivo.flatMap((link) =>
-			link.linkType && link.paymentUrl && esLinkPagaloGenerado(link.linkStatus)
+			link.linkType &&
+			link.paymentUrl &&
+			esLinkPagaloContabilizableEnGestion(
+				link.linkStatus,
+				link.isApplicationSource,
+			)
 				? [
 						{
 							amount:

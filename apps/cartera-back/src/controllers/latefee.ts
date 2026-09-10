@@ -590,6 +590,7 @@ export async function updateMora({
   cuotas_atrasadas,
   activa,
   usuario_email,
+  motivo,
 }: {
   credito_id?: number;
   numero_credito_sifco?: string;
@@ -598,6 +599,12 @@ export async function updateMora({
   cuotas_atrasadas?: number;
   activa?: boolean;
   usuario_email?: string;
+  /**
+   * Justificación del ajuste; queda en moras_historial.motivo. Opcional a nivel de
+   * función (los callers internos pasan uno automático), pero OBLIGATORIO en la
+   * ruta POST /mora/update, la única puerta de entrada desde la interfaz.
+   */
+  motivo?: string;
 }) {
   const startedAt = safeNow();
   try {
@@ -746,6 +753,7 @@ export async function updateMora({
       cuotas_atrasadas_nuevas: cuotas_atrasadas,
       porcentaje_mora: result.updated.porcentaje_mora,
       usuario_id: usuarioId,
+      motivo,
     });
 
     emitCreditLateFee({ outcome: "completed", operation: "update", durationMs: elapsedMilliseconds(startedAt) });

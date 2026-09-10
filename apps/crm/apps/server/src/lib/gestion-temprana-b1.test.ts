@@ -342,6 +342,19 @@ describe("evaluarGestionTempranaB1 — contactos automáticos", () => {
 		expect(r.canalQueContesto).toBeNull();
 	});
 
+	test("link de pago generado no cuenta como intento ni otro canal", () => {
+		const r = aplicable(
+			evaluar([
+				contacto({
+					metodoContacto: "pago",
+					estadoContacto: "link_pago_generado",
+				}),
+			]),
+		);
+		expect(r.otrosCanales).toBe(0);
+		expect(r.canalesFaltantes).toEqual(["whatsapp", "llamada", "sms"]);
+	});
+
 	test("comentarios null cuenta como manual (no revienta)", () => {
 		const r = aplicable(
 			evaluar([contacto({ metodoContacto: "whatsapp", comentarios: null })]),

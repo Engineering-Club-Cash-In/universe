@@ -37,6 +37,17 @@ describe("Págalo allocations", () => {
 		expect(
 			coincideSeleccionCuotasPagalo([{ cartera_cuota_id: "11" }], [11]),
 		).toBe(false);
+		const snapshotConOtros = [
+			{ cartera_cuota_id: 11, rubro: "CAPITAL", amount: "100.00" },
+			{ cartera_cuota_id: 11, rubro: "OTROS", amount: "12.30" },
+		];
+		expect(coincideSeleccionCuotasPagalo(snapshotConOtros, [11], "12.3")).toBe(
+			true,
+		);
+		expect(coincideSeleccionCuotasPagalo(snapshotConOtros, [11])).toBe(false);
+		expect(coincideSeleccionCuotasPagalo(snapshotConOtros, [11], "5.00")).toBe(
+			false,
+		);
 	});
 
 	test("separa capital, mora y rubros facturables en centavos", () => {

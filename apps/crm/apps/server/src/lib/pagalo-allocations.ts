@@ -27,19 +27,48 @@ export type PagaloAllocation = {
 	facturable: boolean;
 };
 
+const cents = (value: string | null | undefined) => {
+	const match = String(value ?? "0")
+		.trim()
+		.match(/^(\d+)(?:\.(\d{1,2}))?$/);
+	if (!match) throw new Error("Monto de cartera inválido para Págalo.");
+	return BigInt(match[1]) * 100n + BigInt((match[2] ?? "").padEnd(2, "0"));
+};
+const money = (amount: bigint) =>
+	`${amount / 100n}.${String(amount % 100n).padStart(2, "0")}`;
+
 /** Distingue reintento de gestión de un cobro nuevo del mismo crédito. */
 export function coincideSeleccionCuotasPagalo(
 	allocationsSnapshot: unknown,
 	cuotaIds: number[],
+	otros?: string | null,
 ): boolean {
 	if (!Array.isArray(allocationsSnapshot)) return false;
 	const cuotasEnSnapshot = new Set<number>();
+	let otrosEnSnapshot = 0n;
 	for (const allocation of allocationsSnapshot) {
 		if (!allocation || typeof allocation !== "object") return false;
-		const cuotaId = (allocation as { cartera_cuota_id?: unknown })
-			.cartera_cuota_id;
+		const fila = allocation as {
+			cartera_cuota_id?: unknown;
+			rubro?: unknown;
+			amount?: unknown;
+		};
+		const cuotaId = fila.cartera_cuota_id;
 		if (!Number.isInteger(cuotaId) || (cuotaId as number) <= 0) return false;
 		cuotasEnSnapshot.add(cuotaId as number);
+		if (fila.rubro === "OTROS") {
+			if (typeof fila.amount !== "string") return false;
+			try {
+				otrosEnSnapshot += cents(fila.amount);
+			} catch {
+				return false;
+			}
+		}
+	}
+	try {
+		if (otrosEnSnapshot !== cents(otros)) return false;
+	} catch {
+		return false;
 	}
 	const snapshotSoloMora =
 		allocationsSnapshot.length > 0 &&
@@ -57,16 +86,6 @@ export function coincideSeleccionCuotasPagalo(
 		[...cuotasEnSnapshot].every((cuotaId) => cuotasSolicitadas.has(cuotaId))
 	);
 }
-
-const cents = (value: string | null | undefined) => {
-	const match = String(value ?? "0")
-		.trim()
-		.match(/^(\d+)(?:\.(\d{1,2}))?$/);
-	if (!match) throw new Error("Monto de cartera inválido para Págalo.");
-	return BigInt(match[1]) * 100n + BigInt((match[2] ?? "").padEnd(2, "0"));
-};
-const money = (amount: bigint) =>
-	`${amount / 100n}.${String(amount % 100n).padStart(2, "0")}`;
 
 export function buildPagaloAllocations({
 	installments,

@@ -530,6 +530,7 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 			!coincideSeleccionCuotasPagalo(
 				candidato.allocationsSnapshot,
 				input.cuotaIds,
+				input.otros,
 			)
 		)
 			continue;

@@ -223,6 +223,19 @@ evento que lo respalda.
 
 ## Permisos
 
+El menú de Cobros del CRM está agrupado por para-qué-sirve, porque el módulo ya pasó de
+catorce pantallas:
+
+| Grupo | Pantallas |
+| --- | --- |
+| *(sin encabezado)* Mi día a día | Dashboard, Mi día, Alertas de promesas, Convenios, Historial de agendas, Supervisión Págalo |
+| Supervisión | Apertura del día, Cierre diario, Carga de cuentas, Traslados y coberturas, Metas de mora |
+| Configuración y análisis | Reducción de recordatorios, Historial de buckets, Reportes |
+
+El asesor solo ve el primer grupo, y para él no se pinta ningún encabezado: sin los otros
+dos, un título suelto no separa nada. *Agenda del día* y *Cola del día* ya no aparecen en el
+menú porque quedaron unificadas en *Mi día*; sus rutas siguen vivas.
+
 | Rol | Ve |
 | --- | --- |
 | `cobros` | Su agenda, su día, el dashboard. Nunca la de otro asesor |

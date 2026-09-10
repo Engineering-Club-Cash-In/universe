@@ -242,6 +242,7 @@ export {
 	DropdownMenu,
 	DropdownMenuTrigger,
 	DropdownMenuContent,
+	DropdownMenuGroup,
 	DropdownMenuLabel,
 	DropdownMenuItem,
 	DropdownMenuSeparator,

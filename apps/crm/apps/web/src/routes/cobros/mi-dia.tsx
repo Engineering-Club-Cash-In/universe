@@ -568,6 +568,17 @@ function MiDiaPage() {
 		if (!enCartera && page > totalPages) setPage(totalPages);
 	}, [enCartera, page, totalPages]);
 
+	// "Mi día" es la agenda de UN asesor. Quien ve la cartera de todos
+	// (admin/supervisor) no tiene un "mi" que mostrar: antes le salía un cartel
+	// explicando que usara la Cola del día, que es un callejón sin salida cuando
+	// llega desde el menú. Se manda directo, y `replace` evita que el botón de
+	// atrás lo devuelva al cartel.
+	useEffect(() => {
+		if (userRole && PERMISSIONS.canAccessCobros(userRole) && !esVistaPersonal) {
+			navigate({ to: "/cobros/cola", replace: true });
+		}
+	}, [userRole, esVistaPersonal, navigate]);
+
 	if (userRole && !PERMISSIONS.canAccessCobros(userRole)) {
 		return (
 			<div className="flex min-h-screen items-center justify-center">
@@ -583,27 +594,12 @@ function MiDiaPage() {
 		);
 	}
 
+	// El efecto de arriba ya disparó la navegación: esto es solo el frame que se
+	// pinta mientras ocurre, no una pantalla a la que se llegue.
 	if (userRole && !esVistaPersonal) {
 		return (
 			<div className="flex min-h-screen items-center justify-center">
-				<div className="max-w-md text-center">
-					<h1 className="mb-4 font-bold text-2xl text-gray-800">
-						Esta pantalla es personal
-					</h1>
-					<p className="text-gray-600">
-						"Mi día" muestra la agenda de un asesor específico y tu rol puede
-						ver la cartera de todos, así que no aplica. Para revisar la cola de
-						un asesor puntual, usá{" "}
-						<button
-							type="button"
-							className="text-indigo-600 underline hover:text-indigo-700"
-							onClick={() => navigate({ to: "/cobros/cola" })}
-						>
-							Cola del día
-						</button>
-						.
-					</p>
-				</div>
+				<p className="text-gray-600 text-sm">Abriendo la Cola del día…</p>
 			</div>
 		);
 	}

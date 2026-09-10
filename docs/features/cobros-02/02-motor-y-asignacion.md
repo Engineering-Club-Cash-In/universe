@@ -93,6 +93,12 @@ Candados en la base, no solo en el código:
 del último evento. Es una decisión consciente: una columna materializada sería una segunda
 fuente de verdad que se desincroniza en cuanto algo escriba sin pasar por el motor.
 
+**Quién escribe esta tabla.** El motor (`procesarMoras`) y el job de convenios, ambos con
+`origen = PROCESO_AUTO`, y desde CC2 la **recuperación de vehículo**, que es el único
+escritor `API_MANUAL`: manda el crédito a B4 por decisión de una persona, no por su atraso
+(ver [documento 7](./07-recuperacion-de-vehiculo.md)). Ese traslado **no sobrevive a la
+corrida del motor** — es un pendiente conocido y documentado ahí, no un descuido.
+
 ---
 
 ## La asignación del asesor
@@ -183,7 +189,7 @@ en el CRM, y al cancelar la cobertura todo vuelve solo sin ningún job de por me
 Se exige que el suplente cubra **todos** los buckets del titular, y no se permiten solapes:
 nadie puede estar en dos coberturas vigentes a la vez, en ningún rol.
 
-### Los cuatro que escriben `creditos.asesor_id`
+### Los cinco que escriben `creditos.asesor_id`
 
 Conviene tenerlos juntos, porque la pregunta "¿por qué cambió de asesor este crédito?" se
 responde siempre mirando `credito_asesor_historial`:
@@ -194,6 +200,7 @@ responde siempre mirando `credito_asesor_historial`:
 | El job de convenios | `PROCESO_AUTO` | Igual, y también en su `INICIAL` |
 | Reasignación manual | `API_MANUAL` | Un crédito, con motivo y usuario |
 | Traslado masivo | `API_MANUAL` | En lote, con el id de la operación en el motivo |
+| Recuperación de vehículo | `API_MANUAL` | Al mandar el crédito a B4, si el dueño no cubre ese bucket ([doc 7](./07-recuperacion-de-vehiculo.md)) |
 
 **¿El motor deshace un traslado?** No mientras el crédito no cambie de bucket. El traslado
 exige que el destino esté en el pool del bucket **actual**, y `elegirAsesorParaBucket`

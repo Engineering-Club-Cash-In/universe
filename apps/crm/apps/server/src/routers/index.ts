@@ -173,6 +173,7 @@ export const cobrosAppRouter = {
 	getCargaPorAsesorBucket: cobrosRouter.getCargaPorAsesorBucket,
 	getAperturaDia: cobrosRouter.getAperturaDia,
 	reasignarAsesorCredito: cobrosRouter.reasignarAsesorCredito,
+	enviarCreditoARecuperacion: cobrosRouter.enviarCreditoARecuperacion,
 	getHistorialReasignaciones: cobrosRouter.getHistorialReasignaciones,
 	getHistorialPagos: cobrosRouter.getHistorialPagos,
 	getEstadoPromesasPago: cobrosRouter.getEstadoPromesasPago,

@@ -11,12 +11,13 @@ import {
 } from "../db/schema/crm";
 import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import { vehicles } from "../db/schema/vehicles";
+import { assertCreditoAsignadoEnCarteraPorSifco } from "../lib/credito-cartera-ownership";
 import {
 	adminProcedure,
 	juridicoProcedure,
 	viewOpportunityContractsProcedure,
 } from "../lib/orpc";
-import { PERMISSIONS } from "../lib/roles";
+import { PERMISSIONS, ROLES } from "../lib/roles";
 import {
 	buildUploadPrefix,
 	getFileUrl,
@@ -287,7 +288,40 @@ export const legalContractsRouter = {
 				opportunityId: z.string().uuid(),
 			}),
 		)
-		.handler(async ({ input, context: _ }) => {
+		.handler(async ({ input, context }) => {
+			// El rol `cobros` entra a este procedure para ver los contratos del
+			// cliente al que le cobra (Ficha 360), pero el handler filtra SOLO por
+			// opportunityId y devuelve DPI, teléfono, correo y URLs firmadas del PDF.
+			// Como `getOpportunities` solo restringe por dueño cuando el rol es
+			// `sales`, un cobrador podía enumerar oportunidades y bajarse los
+			// contratos de cualquier cliente (hallazgo de Codex, PR #1591). Al
+			// cobrador ordinario se lo acota a los créditos que lleva EN CARTERA;
+			// supervisor y admin siguen viendo todo, igual que el resto de roles con
+			// este permiso, cuyo alcance no cambia.
+			if (context.userRole === ROLES.COBROS) {
+				const [oportunidad] = await db
+					.select({ numeroSifco: opportunities.numeroSifco })
+					.from(opportunities)
+					.where(eq(opportunities.id, input.opportunityId))
+					.limit(1);
+				if (!oportunidad?.numeroSifco) {
+					throw new ORPCError("FORBIDDEN", {
+						message:
+							"Esta oportunidad no tiene crédito en cartera; no podés ver sus contratos.",
+					});
+				}
+				// Sin cache a propósito: con `CARTERA_BACK_ENABLE_CACHE=true` una
+				// reasignación reciente dejaba al asesor viejo siguiendo el DPI, los
+				// links y el PDF firmado hasta que expirara la entrada (review de
+				// Codex). `...PorSifco` garantiza la lectura fresca.
+				await assertCreditoAsignadoEnCarteraPorSifco({
+					numeroSifco: oportunidad.numeroSifco,
+					emailUsuario: context.session?.user?.email,
+					userRole: context.userRole,
+					accion: "ver sus contratos",
+				});
+			}
+
 			const contracts = await db
 				.select({
 					contract: generatedLegalContracts,
@@ -841,12 +875,16 @@ export const legalContractsRouter = {
 			}
 
 			// Enviar links de contratos por WhatsApp al cliente (si aplica)
-			if (opportunity.leadId) sendContractLinksToLead({
-				leadId: opportunity.leadId,
-				opportunityId: input.opportunityId,
-			}).catch((err) => {
-				console.error("[confirmContractsSigned] Error enviando WhatsApp:", err);
-			});
+			if (opportunity.leadId)
+				sendContractLinksToLead({
+					leadId: opportunity.leadId,
+					opportunityId: input.opportunityId,
+				}).catch((err) => {
+					console.error(
+						"[confirmContractsSigned] Error enviando WhatsApp:",
+						err,
+					);
+				});
 
 			return {
 				success: true,

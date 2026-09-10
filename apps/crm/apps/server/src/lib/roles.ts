@@ -214,14 +214,20 @@ export const PERMISSIONS = {
 	canAccessJuridico: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.JURIDICO,
 
-	// View contracts in opportunities (for sales to see contract status)
+	// View contracts in opportunities (for sales to see contract status).
+	// Cobros entra en solo-lectura: el asesor abre la ficha del credito y
+	// necesita ver los contratos del cliente al que le esta cobrando.
+	// confirmContractsSigned cuelga de este mismo procedure pero revalida
+	// canConfirmContractsSigning adentro, asi que cobros no gana esa accion.
 	canViewOpportunityContracts: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN ||
 		role === ROLES.JURIDICO ||
 		role === ROLES.SALES ||
 		role === ROLES.SALES_SUPERVISOR ||
 		role === ROLES.ANALYST ||
-		role === ROLES.ACCOUNTING,
+		role === ROLES.ACCOUNTING ||
+		role === ROLES.COBROS ||
+		role === ROLES.COBROS_SUPERVISOR,
 
 	canCreateLegalContracts: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.JURIDICO,

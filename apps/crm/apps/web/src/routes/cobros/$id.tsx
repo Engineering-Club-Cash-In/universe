@@ -75,6 +75,7 @@ import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
+	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -85,6 +86,7 @@ import {
 	PopoverTrigger,
 } from "@/components/ui/popover";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import { authClient } from "@/lib/auth-client";
 import {
 	bucketDeEstado,
@@ -103,7 +105,7 @@ import {
 	tienePromesaActiva,
 } from "@/lib/cobros/promesa-activa";
 import { formatFechaLocal } from "@/lib/date-utils";
-import { ROLES } from "@/lib/roles";
+import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
 
 // CB-020 (Codex, PR #1148): toLocaleDateString("es-GT") sin `timeZone`
@@ -438,6 +440,9 @@ function RouteComponent() {
 		null,
 	);
 	const [confirmarEstadoCuenta, setConfirmarEstadoCuenta] = useState(false);
+	// Recuperación de vehículo: traslado manual a B4. Motivo obligatorio.
+	const [recuperacionAbierta, setRecuperacionAbierta] = useState(false);
+	const [motivoRecuperacion, setMotivoRecuperacion] = useState("");
 	// CB-032: el botón "Promesa / Convenio" abre UNO de dos modales distintos.
 	// Promesa = gestión del CRM (ContactoModal variante promesa); convenio =
 	// reestructura en cartera (ConvenioModal). Estados controlados para que un
@@ -734,6 +739,18 @@ function RouteComponent() {
 			casoDetails.data?.estadoMora === "incobrable",
 	});
 
+	// Rol real del usuario: el modal de la oportunidad decide con el que se le
+	// pase (contratos, cotizaciones). Antes se le mandaba ROLES.COBROS fijo y
+	// hasta un admin veia la ficha recortada.
+	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
+
+	// Lo dispara el asesor que lleva la cuenta, no solo el supervisor: es quien
+	// sabe que la unidad ya no se recupera por teléfono. Va separada y en rojo
+	// en el menú para que no se apriete de pasada.
+	const puedeRecuperarVehiculo = PERMISSIONS.canAccessCobros(
+		userProfile.data?.role ?? "",
+	);
+
 	// Obtener la oportunidad asociada por numeroSifco para ver detalles completos
 	const opportunityQuery = useQuery({
 		...orpc.getOpportunities.queryOptions({
@@ -756,15 +773,29 @@ function RouteComponent() {
 				typeof matchingOpportunity.lead.dpi === "string"
 					? matchingOpportunity.lead.dpi
 					: null;
+			// getOpportunities ya devuelve todo esto; el mapeo se quedaba con un
+			// pedazo y el modal escondia en silencio lo que no le llegaba
+			// (vehiculo, asignado, fuente, y los documentos del vehiculo, que
+			// dependen de hasVehicle). Los joins son LEFT: sin fila relacionada
+			// vienen los campos en null, por eso se valida el id.
 			const opportunityForModal: OpportunityForModal = {
 				id: matchingOpportunity.id,
 				title: matchingOpportunity.title,
 				value: matchingOpportunity.value,
 				creditType: matchingOpportunity.creditType,
 				status: matchingOpportunity.status,
+				probability: matchingOpportunity.probability,
 				expectedCloseDate: matchingOpportunity.expectedCloseDate,
 				createdAt: matchingOpportunity.createdAt,
-				lead: matchingOpportunity.lead
+				source: matchingOpportunity.source,
+				loanPurpose: matchingOpportunity.loanPurpose,
+				nit: matchingOpportunity.nit,
+				categoria: matchingOpportunity.categoria,
+				diaPagoMensual: matchingOpportunity.diaPagoMensual,
+				royalti: matchingOpportunity.royalti,
+				porcentajeRoyalti: matchingOpportunity.porcentajeRoyalti,
+				inversionistas: matchingOpportunity.inversionistas,
+				lead: matchingOpportunity.lead?.id
 					? {
 							id: matchingOpportunity.lead.id,
 							firstName: matchingOpportunity.lead.firstName,
@@ -774,14 +805,44 @@ function RouteComponent() {
 							email: matchingOpportunity.lead.email,
 							phone: matchingOpportunity.lead.phone,
 							dpi: leadDpi,
+							age: matchingOpportunity.lead.age,
+							direccion: matchingOpportunity.lead.direccion,
+							departamento: matchingOpportunity.lead.departamento,
+							municipio: matchingOpportunity.lead.municipio,
+							zona: matchingOpportunity.lead.zona,
 						}
 					: null,
-				stage: matchingOpportunity.stage
+				company: matchingOpportunity.company?.id
+					? {
+							id: matchingOpportunity.company.id,
+							name: matchingOpportunity.company.name,
+						}
+					: null,
+				stage: matchingOpportunity.stage?.id
 					? {
 							id: matchingOpportunity.stage.id,
 							name: matchingOpportunity.stage.name,
+							order: matchingOpportunity.stage.order ?? undefined,
 							closurePercentage: matchingOpportunity.stage.closurePercentage,
 							color: matchingOpportunity.stage.color || "#888",
+						}
+					: null,
+				assignedUser: matchingOpportunity.assignedUser?.id
+					? {
+							id: matchingOpportunity.assignedUser.id,
+							name: matchingOpportunity.assignedUser.name,
+						}
+					: null,
+				vehicle: matchingOpportunity.vehicle?.id
+					? {
+							id: matchingOpportunity.vehicle.id,
+							make: matchingOpportunity.vehicle.make,
+							model: matchingOpportunity.vehicle.model,
+							year: matchingOpportunity.vehicle.year,
+							licensePlate: matchingOpportunity.vehicle.licensePlate,
+							color: matchingOpportunity.vehicle.color,
+							isNew: matchingOpportunity.vehicle.isNew,
+							isOwned: matchingOpportunity.vehicle.isOwned,
 						}
 					: null,
 			};
@@ -801,6 +862,39 @@ function RouteComponent() {
 		},
 		onError: (error: any) => {
 			toast.error(error.message || "No se pudo enviar el estado de cuenta");
+		},
+	});
+
+	// Recuperación de vehículo: manda el crédito a B4 (Última Instancia / Pre
+	// Jurídico). Escalación humana, no consecuencia de la mora.
+	const recuperacionMutation = useMutation({
+		mutationFn: () =>
+			client.enviarCreditoARecuperacion({
+				// El crédito lo resuelve el servidor desde el caso: mandarlo desde acá
+				// dejaba mover créditos ajenos (review de Codex, P1).
+				casoCobroId: casoDetails.data?.id ?? "",
+				motivo: motivoRecuperacion.trim(),
+			}),
+		onSuccess: (r) => {
+			toast.success(
+				r.asesor_sin_cambio
+					? `Crédito trasladado a B${r.bucket_nuevo}. El asesor no cambia: ya cubre ese bucket.`
+					: `Crédito trasladado a B${r.bucket_nuevo} y reasignado.`,
+			);
+			setRecuperacionAbierta(false);
+			setMotivoRecuperacion("");
+			// El badge de bucket y el detalle del crédito cambian con el traslado.
+			queryClient.invalidateQueries({
+				queryKey: orpc.getBucketActualCredito.key(),
+			});
+			queryClient.invalidateQueries({
+				queryKey: orpc.getDetallesCreditoCarteraBack.key(),
+			});
+		},
+		onError: (error: Error) => {
+			toast.error(
+				error.message || "No se pudo enviar el crédito a recuperación",
+			);
 		},
 	});
 
@@ -1452,6 +1546,23 @@ function RouteComponent() {
 													? "Enviando estado de cuenta…"
 													: "Enviar Estado de Cuenta"}
 											</DropdownMenuItem>
+
+											{/* Recuperación de vehículo: no es una gestión más, es
+											    sacar la unidad. Va separada y en rojo para que no se
+											    apriete de pasada. */}
+											{puedeRecuperarVehiculo && (
+												<>
+													<DropdownMenuSeparator />
+													<DropdownMenuItem
+														className="cursor-pointer text-red-600 focus:bg-red-50 focus:text-red-700 dark:focus:bg-red-950"
+														disabled={!caso.id || !caso.numeroCreditoSifco}
+														onClick={() => setRecuperacionAbierta(true)}
+													>
+														<Car className="mr-2 h-4 w-4" />
+														Recuperación de vehículo
+													</DropdownMenuItem>
+												</>
+											)}
 										</DropdownMenuContent>
 									</DropdownMenu>
 
@@ -1545,6 +1656,71 @@ function RouteComponent() {
 												onClick={() => enviarEstadoCuentaMutation.mutate()}
 											>
 												Enviar
+											</AlertDialogAction>
+										</AlertDialogFooter>
+									</AlertDialogContent>
+								</AlertDialog>
+
+								<AlertDialog
+									open={recuperacionAbierta}
+									onOpenChange={(abierto) => {
+										setRecuperacionAbierta(abierto);
+										if (!abierto) setMotivoRecuperacion("");
+									}}
+								>
+									<AlertDialogContent>
+										<AlertDialogHeader>
+											<AlertDialogTitle>
+												¿Enviar a recuperación de vehículo?
+											</AlertDialogTitle>
+											<AlertDialogDescription asChild>
+												<div className="space-y-3">
+													<p>
+														El crédito pasa a{" "}
+														<strong>B4 · Última Instancia / Pre Jurídico</strong>{" "}
+														sin importar cuántas cuotas lleve atrasadas, y queda
+														con el asesor que cubre ese bucket.
+													</p>
+													<p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-900 text-xs dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+														<strong>Ojo:</strong> hoy el traslado no se sostiene
+														solo. El job de moras vuelve a calcular el bucket
+														desde las cuotas atrasadas, así que esta cuenta
+														puede regresar a su escalón en la corrida de las
+														23:59. Está pendiente definir cómo se ancla.
+													</p>
+												</div>
+											</AlertDialogDescription>
+										</AlertDialogHeader>
+										<div className="space-y-2">
+											<Label htmlFor="motivo-recuperacion">
+												Motivo <span className="text-red-600">*</span>
+											</Label>
+											<Textarea
+												id="motivo-recuperacion"
+												value={motivoRecuperacion}
+												onChange={(e) => setMotivoRecuperacion(e.target.value)}
+												placeholder="Por qué se decide recuperar la unidad"
+												rows={3}
+											/>
+										</div>
+										<AlertDialogFooter>
+											<AlertDialogCancel>Cancelar</AlertDialogCancel>
+											<AlertDialogAction
+												disabled={
+													!motivoRecuperacion.trim() ||
+													recuperacionMutation.isPending
+												}
+												onClick={(e) => {
+													// El AlertDialogAction cierra el modal por defecto;
+													// acá se cierra al confirmar el éxito, para no dejar
+													// el motivo escrito perdido si el traslado falla.
+													e.preventDefault();
+													recuperacionMutation.mutate();
+												}}
+											>
+												{recuperacionMutation.isPending
+													? "Enviando…"
+													: "Enviar a recuperación"}
 											</AlertDialogAction>
 										</AlertDialogFooter>
 									</AlertDialogContent>
@@ -3960,7 +4136,7 @@ function RouteComponent() {
 				onOpenChange={setIsOpportunityModalOpen}
 				opportunity={selectedOpportunityForModal}
 				readOnly
-				userRole={ROLES.COBROS}
+				userRole={userProfile.data?.role}
 			/>
 		</div>
 	);

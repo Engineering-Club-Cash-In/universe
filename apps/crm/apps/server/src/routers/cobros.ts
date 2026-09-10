@@ -99,6 +99,10 @@ import {
 	leerMaxMesesConvenio,
 	resolverPagoIdsDeCuotas,
 } from "../lib/convenio-desde-ficha";
+import {
+	assertCreditoAsignadoEnCartera,
+	assertCreditoAsignadoEnCarteraPorSifco,
+} from "../lib/credito-cartera-ownership";
 import { eqDpi } from "../lib/dpi-lookup";
 import { fetchAllPages } from "../lib/fetch-all-pages";
 import { gtDateStrToDate, toDateStrGT } from "../lib/guatemala-month-window";
@@ -2837,17 +2841,12 @@ export const cobrosRouter = {
 			//
 			// Admin y supervisor de cobros quedan fuera del chequeo: ellos sí
 			// operan sobre cualquier crédito.
-			if (!PERMISSIONS.canViewAllCasosCobros(context.userRole ?? "")) {
-				const emailAsesorCredito = credito.asesor?.emailCashIn
-					?.trim()
-					.toLowerCase();
-				if (!emailAsesorCredito || emailAsesorCredito !== email) {
-					throw new ORPCError("FORBIDDEN", {
-						message:
-							"Este crédito no está asignado a vos en cartera; no podés crear un convenio sobre él.",
-					});
-				}
-			}
+			assertCreditoAsignadoEnCartera({
+				emailAsesorCredito: credito.asesor?.emailCashIn,
+				emailUsuario: email,
+				userRole: context.userRole,
+				accion: "crear un convenio sobre él",
+			});
 
 			const statusCredit = credito.credito.statusCredit;
 			if (statusCredit === "EN_CONVENIO" || credito.convenioActivo) {
@@ -8491,6 +8490,96 @@ export const cobrosRouter = {
 						err instanceof Error
 							? err.message
 							: "No se pudo reasignar el asesor",
+				});
+			}
+		}),
+
+	// Recuperación de vehículo: manda el crédito a B4 (Última Instancia / Pre
+	// Jurídico) sin importar en qué escalón de mora vaya. Lo dispara el asesor
+	// que lleva la cuenta (cobrosProcedure), no solo el supervisor: es él quien
+	// sabe que la unidad ya no se recupera por teléfono. La trazabilidad la da
+	// el motivo obligatorio + la bitácora API_MANUAL con su usuario.
+	//
+	// ⚠️ PENDIENTE: el traslado NO se sostiene solo. El motor de las 23:59 GT
+	// vuelve a derivar el bucket de la mora y devuelve la cuenta a su escalón
+	// (ver docs/features/cobros-02/07-recuperacion-de-vehiculo.md).
+	enviarCreditoARecuperacion: cobrosProcedure
+		.input(
+			z.object({
+				casoCobroId: z.string().uuid(),
+				motivo: z.string().trim().min(1, "El motivo es obligatorio"),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			// El crédito NO se recibe del cliente: sale del caso. `credito_id` es
+			// numérico y enumerable, y `cobrosProcedure` solo valida el rol, así que
+			// recibirlo dejaba a un asesor mandar a B4 el crédito de otro —y de paso
+			// reasignarlo— con solo cambiar el número (review de Codex, P1). Mismo
+			// patrón que getPagaloGrupoActivo y las acciones de Págalo.
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
+			const [caso] = await db
+				.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
+				.from(casosCobros)
+				.where(eq(casosCobros.id, input.casoCobroId))
+				.limit(1);
+			if (!caso?.numeroCreditoSifco) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "El caso no tiene crédito de cartera asociado.",
+				});
+			}
+			const [referencia] = await db
+				.select({ carteraCreditoId: carteraBackReferences.carteraCreditoId })
+				.from(carteraBackReferences)
+				.where(
+					eq(carteraBackReferences.numeroCreditoSifco, caso.numeroCreditoSifco),
+				)
+				.limit(1);
+			if (!referencia?.carteraCreditoId) {
+				throw new ORPCError("NOT_FOUND", {
+					message:
+						"No se encontró el crédito en cartera para este caso. Abrí la ficha del crédito e intentá de nuevo.",
+				});
+			}
+			// El caso NO alcanza como autorización: `getDetallesCreditoCarteraBack`
+			// auto-crea uno con `responsableCobros` = quien consulta, así que un
+			// asesor podía fabricarse acceso con un SIFCO enumerable y después pasar
+			// el gate de arriba (hallazgo de Codex, PR #1570 y de nuevo acá). La
+			// verdad de "de quién es este crédito" la tiene cartera, y se lee SIN
+			// cache: sobre la foto cacheada el dueño viejo seguiría pasando.
+			await assertCreditoAsignadoEnCarteraPorSifco({
+				numeroSifco: caso.numeroCreditoSifco,
+				emailUsuario: context.session.user.email,
+				userRole: context.userRole,
+				accion: "mandarlo a recuperación de vehículo",
+			});
+			// Autorizar y escribir son dos requests distintas: entre una y otra el
+			// motor o un supervisor pueden reasignar el crédito, y sin precondición
+			// el asesor que acaba de perderlo lo movía igual (review de Codex, P1).
+			// El correo viaja como dueño ESPERADO y cartera lo revalida bajo sus
+			// locks. Para quien ve toda la cartera no hay dueño que exigir: ahí el
+			// chequeo de arriba ni siquiera corre.
+			const dueñoEsperado = PERMISSIONS.canViewAllCasosCobros(
+				context.userRole ?? "",
+			)
+				? undefined
+				: context.session.user.email;
+			try {
+				return await carteraBackClient.enviarARecuperacionVehiculo({
+					credito_id: referencia.carteraCreditoId,
+					motivo: input.motivo,
+					usuario_email: context.session.user.email,
+					asesor_esperado_email: dueñoEsperado,
+				});
+			} catch (err) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						err instanceof Error
+							? err.message
+							: "No se pudo enviar el crédito a recuperación de vehículo",
 				});
 			}
 		}),

@@ -3,7 +3,7 @@ import { Elysia, t } from "elysia";
  
  
 import { authMiddleware } from "./midleware";
-import { createMora, updateMora, procesarMoras, condonarMora, getCreditosWithMoras, getCondonacionesMora, condonarTodasLasMoras } from "../controllers/latefee";
+import { createMora, updateMora, procesarMoras, condonarMora, getCreditosWithMoras, getCondonacionesMora, condonarTodasLasMoras, ParametroInvalidoError } from "../controllers/latefee";
 import { getMoraHistorialSnapshot, getMoraTimeline, getMoraHistorialCredito, getMoraHistorialExcel, getMoraHistorialCreditoExcel } from "../controllers/moraHistorial";
 
 // Fecha de hoy en zona Guatemala (YYYY-MM-DD), para el corte por defecto del historial.
@@ -31,6 +31,25 @@ const NO_AUTORIZADO = { success: false, message: "[ERROR] No autorizado (requier
 const NO_AUTORIZADO_CONDONACION = { success: false, message: "[ERROR] No autorizado: condonar mora requiere rol ADMIN" };
 const NO_AUTORIZADO_CREDITO = { success: false, message: "[ERROR] No autorizado (requiere ADMIN, CONTA o ASESOR)" };
 const NO_AUTORIZADO_ADMIN = { success: false, message: "[ERROR] No autorizado (requiere ADMIN)" };
+
+/**
+ * Traduce el error de un listado a respuesta HTTP.
+ *
+ * `ParametroInvalidoError` es un error DEL USUARIO (`?cuotas_atrasadas=abc`,
+ * `?fecha_desde=2026-02-31`): trae `status = 400` y un mensaje ya redactado en
+ * español para mostrarlo tal cual. El catch de estas rutas respondía 500 fijo y
+ * lo pisaba con un genérico, así que la validación explícita jamás llegaba al
+ * cliente y un typo del usuario se veía —y se alertaba— como una caída del
+ * servidor. El 500 queda para lo inesperado.
+ */
+const responderErrorListado = (err: unknown, set: any, mensajeGenerico: string) => {
+  if (err instanceof ParametroInvalidoError) {
+    set.status = err.status;
+    return { success: false, message: err.message, parametro: err.parametro };
+  }
+  set.status = 500;
+  return { success: false, message: mensajeGenerico, error: String(err) };
+};
 
 export const morasRouter = new Elysia()
   .use(authMiddleware)
@@ -173,8 +192,7 @@ export const morasRouter = new Elysia()
       });
       return result;
     } catch (err) {
-      set.status = 500;
-      return { success: false, message: "[ERROR] No se pudo obtener créditos con moras", error: String(err) };
+      return responderErrorListado(err, set, "[ERROR] No se pudo obtener créditos con moras");
     }
   }, {
     query: t.Object({
@@ -212,8 +230,7 @@ export const morasRouter = new Elysia()
       });
       return result;
     } catch (err) {
-      set.status = 500;
-      return { success: false, message: "[ERROR] No se pudo obtener condonaciones", error: String(err) };
+      return responderErrorListado(err, set, "[ERROR] No se pudo obtener condonaciones");
     }
   }, {
     query: t.Object({

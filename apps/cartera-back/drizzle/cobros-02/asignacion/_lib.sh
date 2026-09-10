@@ -112,8 +112,14 @@ SQL
 # ARCHIVO y muere con ENOENT: 'system'. Se quita antes de dársela al motor;
 # cartera-back ya fija ssl.rejectUnauthorized=false por su cuenta.
 #   uso: URL_MOTOR="$(url_para_node "$URL")"
+#
+# Ojo con el delimitador: si `sslrootcert` es el PRIMER parámetro, borrarlo junto
+# con su `?` deja `…/db&sslmode=require` y Node toma todo eso como nombre de la
+# base. Por eso son dos reglas: la primera lo quita cuando tiene algo detrás y
+# conserva el delimitador de adelante; la segunda lo quita cuando es el último
+# (y ahí sí se lleva su propio delimitador).
 url_para_node() {
-  sed -E 's/[?&]sslrootcert=[^&]*//; s/\?&/?/; s/[?&]$//' <<<"$1"
+  sed -E 's/([?&])sslrootcert=[^&]*&/\1/; s/[?&]sslrootcert=[^&]*$//' <<<"$1"
 }
 
 # Radiografía de un schema ya cargado: pool, cartera por bucket y asesor,
@@ -211,4 +217,54 @@ JOIN pg_enum e ON e.enumtypid = t.oid
 GROUP BY n.nspname, t.typname;
 SQL
   die "Faltan dependencias fuera de $schema en el destino. Creálas y repetí."
+}
+
+# Corre los dos motores contra URL/SCHEMA y EXIGE que hayan hecho su trabajo.
+# Compartida por la alineación y por la fase `motores` de la carga inicial: que
+# una validara y la otra no era justamente el hueco (review de Codex, P2).
+#
+# "Corrió pero no hizo nada" no puede pasar por bueno:
+#  · skipped → otra corrida tenía el advisory lock (el job programado en la
+#    misma base, u otra alineación). No se registró ni una transición.
+#  · sin `buckets` → procesarMoras salió por una rama que no ejecuta el pass.
+#  · omitidoPorFallback → el catálogo vino inconsistente y el pass se salteó a
+#    propósito para no escribir historial con rangos que no son.
+#  · el try/catch de latefee.ts se traga los errores del pass sin cambiar el
+#    código de salida ni los contadores: su única huella es esa línea del log.
+#   uso: correr_motores URL SCHEMA DIR_CARTERA_BACK ARCHIVO_LOG
+correr_motores() {
+  local url="$1" schema="$2" cartera_back="$3" log="$4"
+  command -v bun >/dev/null || die "Falta bun (o correr sin la fase de motores y dispararlos aparte)."
+  local url_motor; url_motor="$(url_para_node "$url")"
+  if ! ( cd "$cartera_back" && SUPABASE_DB_URL="$url_motor" CARTERA_SCHEMA="$schema" bun -e '
+      // Cinturón: el motor ESCRIBE. Si la cadena apunta a producción, no corre.
+      const url = process.env.SUPABASE_DB_URL ?? "";
+      if (/supabase\.(com|co)/.test(url)) { console.error("El motor apunta a Supabase; abortado."); process.exit(1); }
+
+      const { procesarMoras } = await import("./src/controllers/latefee");
+      const { procesarBucketsConvenio } = await import("./src/controllers/bucketsConvenio");
+
+      const moras = await procesarMoras();
+      console.log("RESUMEN moras:", JSON.stringify(moras.buckets ?? moras));
+      const convenio = await procesarBucketsConvenio();
+      console.log("RESUMEN convenio:", JSON.stringify(convenio));
+
+      const problemas = [];
+      if (moras?.skipped) problemas.push("procesarMoras se omitió (advisory lock tomado por otra corrida)");
+      if (!moras?.skipped && !moras?.buckets) problemas.push("procesarMoras no devolvió el resumen de buckets");
+      if (moras?.buckets?.omitidoPorFallback) problemas.push("el pass de buckets se omitió por catálogo inconsistente");
+      if (convenio?.skipped) problemas.push("procesarBucketsConvenio se omitió (advisory lock tomado)");
+      if (convenio?.omitidoPorFallback) problemas.push("los buckets de convenio se omitieron por catálogo inconsistente");
+      if (problemas.length) { console.error("MOTOR INCOMPLETO: " + problemas.join(" · ")); process.exit(1); }
+      process.exit(0);
+    ' ) > "$log" 2>&1; then
+    echo "── últimas líneas del motor ──"; tail -25 "$log"
+    die "El motor falló o quedó incompleto sobre $schema. No se sigue."
+  fi
+  if grep -q "Error registrando transiciones de bucket" "$log"; then
+    grep -A3 "Error registrando transiciones de bucket" "$log" | head -8
+    die "El pass de buckets falló dentro de procesarMoras (lo atrapa su try/catch). No se sigue."
+  fi
+  grep -E "^RESUMEN " "$log" | sed 's/^/· /'
+  echo "· log completo del motor: $log"
 }

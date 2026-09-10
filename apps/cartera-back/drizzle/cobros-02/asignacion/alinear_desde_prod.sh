@@ -192,19 +192,24 @@ SELECT v.asesor_id AS viejo,
        EXISTS (SELECT 1 FROM :"viejo".asesor_bucket ab
                 WHERE ab.asesor_id = v.asesor_id AND ab.activo) AS en_pool,
        COALESCE(c.nuevo, i.nuevo) AS nuevo,
+       -- Si en producción está dado de baja, el pool del sandbox no puede
+       -- seguir mandándole cartera: el motor solo mira `asesor_bucket.activo`
+       -- y le asignaría créditos igual (review de Codex, P2).
+       COALESCE(c.activo, i.activo) AS nuevo_activo,
        CASE WHEN c.nuevo IS NOT NULL THEN 'correo'
             WHEN i.nuevo IS NOT NULL THEN 'id+nombre' END AS criterio
 FROM :"viejo".asesores v
 LEFT JOIN LATERAL (
-  SELECT n.asesor_id AS nuevo FROM :"nuevo".asesores n
+  SELECT n.asesor_id AS nuevo, n.activo FROM :"nuevo".asesores n
   WHERE v.email_cash_in IS NOT NULL AND btrim(v.email_cash_in) <> ''
     AND lower(btrim(n.email_cash_in)) = lower(btrim(v.email_cash_in))
-  ORDER BY n.asesor_id LIMIT 1
+  -- Con el correo repetido gana el que sigue activo.
+  ORDER BY n.activo DESC, n.asesor_id LIMIT 1
 ) c ON true
 -- Sin correo no hay puente estable; se acepta el mismo id SOLO si además
 -- coincide el nombre, que es la señal de que sigue siendo la misma persona.
 LEFT JOIN LATERAL (
-  SELECT n.asesor_id AS nuevo FROM :"nuevo".asesores n
+  SELECT n.asesor_id AS nuevo, n.activo FROM :"nuevo".asesores n
   WHERE (v.email_cash_in IS NULL OR btrim(v.email_cash_in) = '')
     AND n.asesor_id = v.asesor_id
     AND lower(btrim(coalesce(n.nombre, ''))) = lower(btrim(coalesce(v.nombre, '')))
@@ -220,7 +225,7 @@ SELECT criterio, count(*) FROM mapa_asesor WHERE nuevo IS NOT NULL GROUP BY 1 OR
 -- quedaría sin dueño o, peor, con el dueño equivocado. Los asesores sin pool
 -- que no mapean solo afectan atribuciones históricas y se resuelven a NULL.
 DO $$
-DECLARE faltan text;
+DECLARE faltan text; inactivos text;
 BEGIN
   SELECT string_agg(format('%s (id %s)', m.nombre_viejo, m.viejo), ', ')
     INTO faltan
@@ -228,6 +233,16 @@ BEGIN
   WHERE m.nuevo IS NULL AND m.en_pool;
   IF faltan IS NOT NULL THEN
     RAISE EXCEPTION 'Asesores del pool que no existen en producción: %. Revisá asesores.email_cash_in antes de alinear.', faltan;
+  END IF;
+
+  -- Dado de baja en producción pero con pool activo en el sandbox: si se deja
+  -- pasar, el motor le sigue repartiendo cartera a alguien que ya no cobra.
+  SELECT string_agg(format('%s (id %s → %s)', m.nombre_viejo, m.viejo, m.nuevo), ', ')
+    INTO inactivos
+  FROM mapa_asesor m
+  WHERE m.en_pool AND m.nuevo IS NOT NULL AND m.nuevo_activo IS NOT TRUE;
+  IF inactivos IS NOT NULL THEN
+    RAISE EXCEPTION 'Asesores dados de baja en producción que siguen cubriendo buckets: %. Sacálos del pool (corré con --pool y el CSV al día) o reactiválos antes de alinear.', inactivos;
   END IF;
 END $$;
 
@@ -368,53 +383,10 @@ if [[ $SIN_MOTOR -eq 1 ]]; then
   log "5 · --sin-motor: los buckets NO se mueven en esta corrida"
 else
   log "5 · motor sobre $NUEVO (procesarMoras + buckets de convenio)"
-  command -v bun >/dev/null || die "Falta bun (o correr con --sin-motor y disparar el motor aparte)"
-  # sslrootcert=system rompe la librería pg de Node; ver url_para_node en _lib.sh.
-  URL_MOTOR="$(url_para_node "$NEON")"
-  if ! ( cd "$CARTERA_BACK" && SUPABASE_DB_URL="$URL_MOTOR" CARTERA_SCHEMA="$NUEVO" bun -e '
-      // Cinturón: el motor ESCRIBE. Si por lo que sea la cadena apunta a
-      // producción, o el schema no es el de trabajo, no se corre.
-      const url = process.env.SUPABASE_DB_URL ?? "";
-      if (/supabase\.(com|co)/.test(url)) { console.error("El motor apunta a Supabase; abortado."); process.exit(1); }
-      if (!/_nuevo$/.test(process.env.CARTERA_SCHEMA ?? "")) { console.error("CARTERA_SCHEMA no es el schema de trabajo; abortado."); process.exit(1); }
-
-      const { procesarMoras } = await import("./src/controllers/latefee");
-      const { procesarBucketsConvenio } = await import("./src/controllers/bucketsConvenio");
-
-      const moras = await procesarMoras();
-      console.log("RESUMEN moras:", JSON.stringify(moras.buckets ?? moras));
-      const convenio = await procesarBucketsConvenio();
-      console.log("RESUMEN convenio:", JSON.stringify(convenio));
-
-      // Mover los buckets ES el objetivo de la alineación, así que "corrió pero
-      // no hizo nada" no puede pasar por bueno y llegar al swap:
-      //  · skipped  → otra corrida tenía el advisory lock (el motor programado
-      //    en la misma base, u otra alineación). No se registró ni una transición.
-      //  · sin `buckets` → procesarMoras salió por una rama que no ejecuta el
-      //    pass de buckets.
-      //  · omitidoPorFallback → el catálogo vino inconsistente y el pass se
-      //    salteó a propósito para no escribir historial con rangos que no son.
-      const problemas = [];
-      if (moras?.skipped) problemas.push("procesarMoras se omitió (advisory lock tomado por otra corrida)");
-      if (!moras?.skipped && !moras?.buckets) problemas.push("procesarMoras no devolvió el resumen de buckets");
-      if (moras?.buckets?.omitidoPorFallback) problemas.push("el pass de buckets se omitió por catálogo inconsistente");
-      if (convenio?.skipped) problemas.push("procesarBucketsConvenio se omitió (advisory lock tomado)");
-      if (convenio?.omitidoPorFallback) problemas.push("los buckets de convenio se omitieron por catálogo inconsistente");
-      if (problemas.length) { console.error("MOTOR INCOMPLETO: " + problemas.join(" · ")); process.exit(1); }
-      process.exit(0);
-    ' ) > "$DUMP_DIR/motor.log" 2>&1; then
-    echo "── últimas líneas del motor ──"; tail -25 "$DUMP_DIR/motor.log"
-    die "El motor falló o quedó incompleto. $NUEVO queda para inspección y NO se hizo swap: el sandbox vivo sigue intacto."
-  fi
-  # El pass de buckets vive dentro de un try/catch en latefee.ts para no tumbar
-  # el cálculo de mora, así que un fallo suyo NO cambia el código de salida ni
-  # los contadores: la única señal es esta línea del log (Codex, P1).
-  if grep -q "Error registrando transiciones de bucket" "$DUMP_DIR/motor.log"; then
-    grep -A3 "Error registrando transiciones de bucket" "$DUMP_DIR/motor.log" | head -8
-    die "El pass de buckets falló dentro de procesarMoras (lo atrapa su try/catch). NO se hizo swap."
-  fi
-  grep -E "^RESUMEN " "$DUMP_DIR/motor.log" | sed 's/^/· /'
-  echo "· log completo del motor: $DUMP_DIR/motor.log"
+  # El schema de trabajo es el único destino válido acá: si algo apuntara al
+  # sandbox vivo, el motor escribiría transiciones antes del swap.
+  [[ "$NUEVO" == *_nuevo ]] || die "El motor solo corre contra el schema de trabajo, no contra $NUEVO."
+  correr_motores "$NEON" "$NUEVO" "$CARTERA_BACK" "$DUMP_DIR/motor.log"
 fi
 
 # ── 6. Residuos que el motor no toca ────────────────────────────────────────

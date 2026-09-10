@@ -174,16 +174,9 @@ fase_motores() {
     die "La fase 'motores' es solo para sandbox: contra producción la carga inicial va sin replay (línea base limpia). Quitá 'motores' de --fases."
   fi
   [[ $DRY_RUN -eq 0 ]] || { echo "· (dry-run) motores omitidos."; return; }
-  command -v bun >/dev/null || die "Falta bun"
-  # sslrootcert=system rompe la librería pg de Node; ver url_para_node en _lib.sh.
-  local url_motor; url_motor="$(url_para_node "$DESTINO")"
-  ( cd "$CARTERA_BACK" && SUPABASE_DB_URL="$url_motor" CARTERA_SCHEMA="$DESTINO_SCHEMA" bun -e '
-      const { procesarMoras } = await import("./src/controllers/latefee");
-      const { procesarBucketsConvenio } = await import("./src/controllers/bucketsConvenio");
-      console.log("moras:", JSON.stringify(await procesarMoras()));
-      console.log("convenio:", JSON.stringify(await procesarBucketsConvenio()));
-      process.exit(0);
-    ' )
+  # Misma validación que la alineación: un motor omitido por advisory lock o un
+  # pass de buckets que falló no pueden reportarse como fase cumplida.
+  correr_motores "$DESTINO" "$DESTINO_SCHEMA" "$CARTERA_BACK" "$DUMP_DIR/motor.log"
   echo "· Recordá volver a correr la fase 'asignar': el 02 deriva de la mora recién refrescada."
 }
 

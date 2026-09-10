@@ -124,9 +124,16 @@ describe("Condonación de mora — requiere ADMIN", () => {
 });
 
 describe("GET /moras/historial/credito/:id — abierto a ASESOR", () => {
-  it("ASESOR ya no recibe 403 (pasa el gate)", async () => {
+  // Se afirma la respuesta CONCRETA de después del gate, no un `not.toBe(403)`:
+  // ese 500 lo produce el catch del handler al no haber BD, así que llegar a él
+  // prueba que el ASESOR entró. Un `not.toBe(403)` pelado también pasaría con el
+  // 404 de una ruta que ni existe.
+  it("ASESOR pasa el gate y llega al handler (muere en la BD con 500, no en 403)", async () => {
     const res = await get("/moras/historial/credito/1", "ASESOR");
-    expect(res.status).not.toBe(403);
+    expect(res.status).toBe(500);
+    expect(((await res.json()) as any).message).toContain(
+      "No se pudo obtener el historial del crédito"
+    );
   });
 
   it("un rol ajeno (INVESTOR) sigue recibiendo 403", async () => {
@@ -329,9 +336,25 @@ describe("POST /moras/condonar-masivo — la atribución sale del token, no del 
 });
 
 describe("Rutas que NO se cerraron (decisión explícita del dueño del producto)", () => {
-  it("ASESOR sigue entrando al Excel del historial de UN crédito", async () => {
-    const res = await get("/moras/historial/credito/1/excel", "ASESOR");
-    expect(res.status).not.toBe(403);
+  // ⚠️ Acá vivía un test contra `/moras/historial/credito/1/excel`, ruta que en
+  // ESTA rama no existe todavía (nace con el PR de listados y Excel): el 404 del
+  // ruteo hacía pasar el `not.toBe(403)` sin ejercitar gate alguno — se ponía
+  // verde hasta para un INVESTOR. La cobertura del `/excel` vive donde nace la
+  // ruta. Acá queda la validación de la ruta que SÍ existe, afirmando la
+  // respuesta concreta de después del gate: ese 400 lo redacta el handler, así
+  // que llegar a él prueba que el ASESOR entró.
+  it("ASESOR llega al handler del historial de UN crédito (400 propio, no 403)", async () => {
+    const res = await get("/moras/historial/credito/abc", "ASESOR");
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as any).message).toContain("credito_id inválido");
+  });
+
+  it("INVESTOR se queda en el 403 antes de ese mismo handler", async () => {
+    const res = await get("/moras/historial/credito/abc", "INVESTOR");
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as any).message).toContain(
+      "requiere ADMIN, CONTA o ASESOR"
+    );
   });
 
   it("CONTA sigue entrando al timeline agregado", async () => {

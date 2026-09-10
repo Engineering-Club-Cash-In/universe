@@ -2,12 +2,12 @@
  * CB-128 — auditoría de escrituras sobre `contactos_cobros` (AC-6: "no se
  * eliminan ni alteran registros históricos sin auditoría").
  *
- * `contactos_cobros` es append-only SALVO tres UPDATE, y este módulo es el
+ * `contactos_cobros` es append-only SALVO cuatro UPDATE, y este módulo es el
  * único punto de escritura de su bitácora. Se centraliza acá para que los tres
  * callers no repitan la forma del payload ni el criterio de best-effort — mismo
  * motivo por el que existen promesa-vigente.ts y caso-vigente.ts.
  *
- * ── Los tres UPDATE y por qué se tratan distinto ──────────────────────────
+ * ── Los cuatro UPDATE y por qué se tratan distinto ─────────────────────────
  *
  *  1. Edición manual de la promesa activa (CB-029, `createContactoCobros` rama
  *     `promesaContactoId`). Baja frecuencia, decisión humana, pisa la fila
@@ -16,9 +16,14 @@
  *     se movió al 20.
  *     → `origen: 'manual'`, snapshot COMPLETO de la fila previa.
  *
- *  2. `getEstadoPromesasPago` — recalcula `estado_promesa` en cada apertura de
+ *  2. Finalización de auditoría Págalo (`registrarGestionLinkPagalo`). Un
+ *     reintento puede crear una fila parcial antes de que el request original
+ *     conozca todos los links y resultado de WhatsApp.
+ *     → `origen: 'sistema_pagalo'`, snapshot de los campos reemplazados.
+ *
+ *  3. `getEstadoPromesasPago` — recalcula `estado_promesa` en cada apertura de
  *     Ficha 360.
- *  3. `check-promesas-pago.ts` — mismo recálculo, job nocturno.
+ *  4. `check-promesas-pago.ts` — mismo recálculo, job nocturno.
  *     → `origen: 'sistema_lectura' | 'sistema_job'`, solo `{de, a}`.
  *
  * El snapshot completo NO se guarda en 2 y 3 porque `estado_promesa` es función
@@ -67,7 +72,11 @@ import {
 type EstadoPromesa = (typeof estadoPromesaEnum.enumValues)[number];
 
 /** De dónde vino la escritura. Determina si `editadoPor` va poblado. */
-export type OrigenAudit = "manual" | "sistema_lectura" | "sistema_job";
+export type OrigenAudit =
+	| "manual"
+	| "sistema_lectura"
+	| "sistema_job"
+	| "sistema_pagalo";
 
 /**
  * Payload de auditoría para una edición MANUAL: snapshot completo de la fila
@@ -101,7 +110,10 @@ export function payloadCambioEstado(
 interface RegistrarAuditArgs {
 	contactoId: string;
 	casoCobroId: string;
-	accion: "edicion_promesa" | "cambio_estado_promesa";
+	accion:
+		| "edicion_promesa"
+		| "cambio_estado_promesa"
+		| "finalizacion_link_pago";
 	origen: OrigenAudit;
 	valoresAnteriores: Record<string, unknown>;
 	/** Obligatorio si `origen === 'manual'`; ignorado si no. */

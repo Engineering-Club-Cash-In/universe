@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, ne, notInArray } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, ne, notInArray } from "drizzle-orm";
 import { db } from "../db";
 import { casosCobros, contactosCobros } from "../db/schema/cobros";
 import { leads, opportunities } from "../db/schema/crm";
@@ -20,6 +20,7 @@ import {
 	totalDeLinksPagalo,
 } from "../lib/pagalo-gestion";
 import { deduplicarCuotasPagalo } from "../lib/pagalo-installments";
+import { registrarAuditContacto } from "../lib/audit-contactos";
 import { primeraRevisionPoll } from "../lib/pagalo-poll-cadencia";
 import {
 	assertPagaloInstallmentSelection,
@@ -113,20 +114,81 @@ async function registrarGestionLinkPagalo(params: {
 				.select({
 					contactoCobroId: pagaloPaymentGroups.contactoCobroId,
 					status: pagaloPaymentGroups.status,
+					carteraCreditoId: pagaloPaymentGroups.carteraCreditoId,
 				})
 				.from(pagaloPaymentGroups)
 				.where(eq(pagaloPaymentGroups.id, params.groupId))
 				.for("update");
 			if (!grupo) return false;
-			if (grupo.contactoCobroId) {
+
+			// Si regeneración ya trasladó la gestión al sucesor activo, el request
+			// original aún debe completar ese mismo registro, no crear otro.
+			let contactoCobroId = grupo.contactoCobroId;
+			if (
+				!contactoCobroId &&
+				params.finalizar &&
+				grupo.status === "CANCELLED"
+			) {
+				const [sucesor] = await tx
+					.select({ contactoCobroId: pagaloPaymentGroups.contactoCobroId })
+					.from(pagaloPaymentGroups)
+					.where(
+						and(
+							eq(pagaloPaymentGroups.carteraCreditoId, grupo.carteraCreditoId),
+							ne(pagaloPaymentGroups.id, params.groupId),
+							notInArray(pagaloPaymentGroups.status, [
+								"COMPLETED",
+								"CANCELLED",
+							]),
+							isNotNull(pagaloPaymentGroups.contactoCobroId),
+						),
+					)
+					.for("update");
+				contactoCobroId = sucesor?.contactoCobroId ?? null;
+			}
+
+			if (contactoCobroId) {
 				if (params.finalizar) {
-					await tx
-						.update(contactosCobros)
-						.set({
-							comentarios: construirComentarioGestionLinkPagalo(params),
-							bucketSnapshot,
+					const [gestionPrevia] = await tx
+						.select({
+							casoCobroId: contactosCobros.casoCobroId,
+							comentarios: contactosCobros.comentarios,
+							bucketSnapshot: contactosCobros.bucketSnapshot,
 						})
-						.where(eq(contactosCobros.id, grupo.contactoCobroId));
+						.from(contactosCobros)
+						.where(eq(contactosCobros.id, contactoCobroId))
+						.for("update");
+
+					const comentarioFinal = construirComentarioGestionLinkPagalo(params);
+					const bucketFinal =
+						bucketSnapshot ?? gestionPrevia?.bucketSnapshot ?? null;
+					if (
+						gestionPrevia &&
+						(gestionPrevia.comentarios !== comentarioFinal ||
+							gestionPrevia.bucketSnapshot !== bucketFinal)
+					) {
+						const ahora = new Date();
+						await tx
+							.update(contactosCobros)
+							.set({
+								comentarios: comentarioFinal,
+								bucketSnapshot: bucketFinal,
+								updatedAt: ahora,
+							})
+							.where(eq(contactosCobros.id, contactoCobroId));
+						await registrarAuditContacto({
+							contactoId: contactoCobroId,
+							casoCobroId: gestionPrevia.casoCobroId,
+							accion: "finalizacion_link_pago",
+							origen: "sistema_pagalo",
+							valoresAnteriores: {
+								comentarios: gestionPrevia.comentarios,
+								bucketSnapshot: gestionPrevia.bucketSnapshot,
+							},
+							tx,
+							editadoEn: ahora,
+						});
+					}
 				}
 				return true;
 			}

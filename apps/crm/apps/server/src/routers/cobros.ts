@@ -99,7 +99,10 @@ import {
 	leerMaxMesesConvenio,
 	resolverPagoIdsDeCuotas,
 } from "../lib/convenio-desde-ficha";
-import { assertCreditoAsignadoEnCartera } from "../lib/credito-cartera-ownership";
+import {
+	assertCreditoAsignadoEnCartera,
+	assertCreditoAsignadoEnCarteraPorSifco,
+} from "../lib/credito-cartera-ownership";
 import { eqDpi } from "../lib/dpi-lookup";
 import { fetchAllPages } from "../lib/fetch-all-pages";
 import { gtDateStrToDate, toDateStrGT } from "../lib/guatemala-month-window";
@@ -8495,12 +8498,10 @@ export const cobrosRouter = {
 			// auto-crea uno con `responsableCobros` = quien consulta, así que un
 			// asesor podía fabricarse acceso con un SIFCO enumerable y después pasar
 			// el gate de arriba (hallazgo de Codex, PR #1570 y de nuevo acá). La
-			// verdad de "de quién es este crédito" la tiene cartera.
-			const creditoCartera = await carteraBackClient.getCredito(
-				caso.numeroCreditoSifco,
-			);
-			assertCreditoAsignadoEnCartera({
-				emailAsesorCredito: creditoCartera.asesor?.emailCashIn,
+			// verdad de "de quién es este crédito" la tiene cartera, y se lee SIN
+			// cache: sobre la foto cacheada el dueño viejo seguiría pasando.
+			await assertCreditoAsignadoEnCarteraPorSifco({
+				numeroSifco: caso.numeroCreditoSifco,
 				emailUsuario: context.session.user.email,
 				userRole: context.userRole,
 				accion: "mandarlo a recuperación de vehículo",

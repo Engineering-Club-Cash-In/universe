@@ -11,7 +11,7 @@ import {
 } from "../db/schema/crm";
 import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import { vehicles } from "../db/schema/vehicles";
-import { assertCreditoAsignadoEnCartera } from "../lib/credito-cartera-ownership";
+import { assertCreditoAsignadoEnCarteraPorSifco } from "../lib/credito-cartera-ownership";
 import {
 	adminProcedure,
 	juridicoProcedure,
@@ -24,7 +24,6 @@ import {
 	getFileUrlWithBucketInKey,
 	verifyUploadedDocumentInR2,
 } from "../lib/storage";
-import { carteraBackClient } from "../services/cartera-back-client";
 import { closeOpportunity } from "../services/close-opportunity";
 import { sendCoverageDocument } from "../services/send-coverage-document";
 import { sendWelcomeMessage } from "../services/send-welcome-message";
@@ -311,11 +310,12 @@ export const legalContractsRouter = {
 							"Esta oportunidad no tiene crédito en cartera; no podés ver sus contratos.",
 					});
 				}
-				const credito = await carteraBackClient.getCredito(
-					oportunidad.numeroSifco,
-				);
-				assertCreditoAsignadoEnCartera({
-					emailAsesorCredito: credito.asesor?.emailCashIn,
+				// Sin cache a propósito: con `CARTERA_BACK_ENABLE_CACHE=true` una
+				// reasignación reciente dejaba al asesor viejo siguiendo el DPI, los
+				// links y el PDF firmado hasta que expirara la entrada (review de
+				// Codex). `...PorSifco` garantiza la lectura fresca.
+				await assertCreditoAsignadoEnCarteraPorSifco({
+					numeroSifco: oportunidad.numeroSifco,
 					emailUsuario: context.session?.user?.email,
 					userRole: context.userRole,
 					accion: "ver sus contratos",

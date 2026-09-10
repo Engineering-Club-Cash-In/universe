@@ -25,6 +25,7 @@ import {
   Upload,
   FileText,
   ShoppingCart,
+  KeyRound,
 } from "lucide-react";
 import {
   useGetInvestors,
@@ -37,6 +38,7 @@ import {
 import { useCatalogs } from "../hooks/catalogs";
 import {
   inversionistasService,
+  otorgarAccesoPortalService,
   notificarContabilidadBoletas,
   formatMensajeFallido,
   MODALIDAD_FACTURACION_LABELS,
@@ -51,6 +53,8 @@ import {
   useModalidadFacturacionSpreadByModalidad,
 } from "../hooks/useModalidadFacturacion";
 import { InvestorModal } from "./modalInvestor";
+import { avisoAccesoPortal } from "./accesoPortal";
+import { esEmpresaInicial } from "./repLegalEmpresa";
 import { useFalsePayments } from "../hooks/falsePayments";
 import {
   Dialog,
@@ -420,6 +424,53 @@ export function TableInvestors() {
   const [fechaLiquidacion, setFechaLiquidacion] = useState<string>(() => new Date().toISOString().slice(0, 10));
   // Modal unificado de liquidación: null = todos, number = inversionista_id específico
   const [liquidarModalTarget, setLiquidarModalTarget] = useState<number | null | undefined>(undefined);
+
+  /**
+   * A quién se le va a abrir el acceso al portal. El diálogo enseña su CORREO
+   * antes de confirmar y no por cortesía: ahí es donde aterriza la contraseña,
+   * y `cartera.inversionistas` se escribe desde caminos que no prueban
+   * identidad, así que un correo que no cuadra con el nombre es justo lo que
+   * hay que ver. Ese par de ojos es todo el arreglo.
+   */
+  const [accesoPortalTarget, setAccesoPortalTarget] = useState<
+    {
+      id: number;
+      nombre: string;
+      email: string;
+      /**
+       * Si la fila es una sociedad con representante. Se lleva al diálogo
+       * porque cambia lo que hay que hacer: a una empresa no se le abre acceso
+       * —entra con su representante— y cartera lo contesta con un mensaje que
+       * dice a qué fila ir. Sin esto, el guard de "sin correo" cortaba antes y
+       * a las empresas SIN correo propio (que es lo normal) se les pedía
+       * capturar un correo que no hace falta.
+       */
+      esEmpresa: boolean;
+    } | null
+  >(null);
+  const [accesoPortalPending, setAccesoPortalPending] = useState(false);
+
+  const handleConfirmarAccesoPortal = async () => {
+    if (!accesoPortalTarget) return;
+    setAccesoPortalPending(true);
+    try {
+      const respuesta = await otorgarAccesoPortalService([accesoPortalTarget.id]);
+      // Se reusa el mismo traductor del alta: los códigos son los mismos y las
+      // advertencias que importan —contraseña no entregada, correo desviado—
+      // tienen que leerse igual vengan de donde vengan.
+      const aviso = avisoAccesoPortal(respuesta?.resultados?.[0]);
+      if (!aviso) toast.success("Listo.");
+      else if (aviso.tono === "advertencia") toast.warning(aviso.texto, { duration: 15000 });
+      else toast.success(aviso.texto);
+      setAccesoPortalTarget(null);
+    } catch (error: any) {
+      toast.error(getApiErrorMessage(error, "No se pudo abrir el acceso al portal"), {
+        duration: 15000,
+      });
+    } finally {
+      setAccesoPortalPending(false);
+    }
+  };
   const showLiquidarModal = liquidarModalTarget !== undefined;
   // Consulta con paginación y filtro por id
   // 🔥 NUEVO: Siempre consultar tablas ESPEJO
@@ -608,6 +659,7 @@ export function TableInvestors() {
       re_inversion: inv.re_inversion ?? "sin_reinversion",
       moneda: inv.moneda ?? "quetzales",
       dpi: inv.dpi ?? "",
+      dpi_rep_legal: inv.dpi_rep_legal ?? "",
       tipo_reinversion: inv.re_inversion ?? inv.tipo_reinversion ?? "sin_reinversion",
       monto_reinversion: Number(inv.monto_reinversion ?? 0),
       email: inv.email ?? "",
@@ -770,6 +822,10 @@ export function TableInvestors() {
       re_inversion: cat.tipo_reinversion,
       moneda: cat.moneda,
       dpi: cat.dpi ?? "",
+      // Sin esto, editar desde el header a un inversionista SIN créditos abre el
+      // modal con el campo vacío y al guardar BORRA el DPI del representante
+      // (llave presente + valor vacío = borrar), dejándolo fuera del portal.
+      dpi_rep_legal: cat.dpi_rep_legal ?? "",
       tipo_reinversion: cat.tipo_reinversion,
       monto_reinversion: cat.monto_reinversion ?? 0,
       email: cat.email,
@@ -1536,6 +1592,23 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 >
                   <ShoppingCart className="mr-2.5 h-4 w-4 text-emerald-500" />
                   <span className="text-sm font-medium text-gray-700">Compra de Cartera</span>
+                </DropdownMenuItem>
+
+                {/* Dar acceso al portal — el acto humano que el cron dejó de hacer */}
+                <DropdownMenuItem
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setAccesoPortalTarget({
+                      id: inv.inversionista_id,
+                      nombre: inv.nombre_inversionista,
+                      email: inv.email ?? "",
+                      esEmpresa: esEmpresaInicial(inv.dpi_rep_legal, inv.dpi),
+                    });
+                  }}
+                  className="cursor-pointer rounded-lg px-3 py-2.5 focus:bg-sky-50"
+                >
+                  <KeyRound className="mr-2.5 h-4 w-4 text-sky-500" />
+                  <span className="text-sm font-medium text-gray-700">Dar acceso al portal</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -2643,6 +2716,80 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                   <><Loader2 className="h-4 w-4 animate-spin" /><span>Liquidando...</span></>
                 ) : (
                   <><CheckCircle className="h-4 w-4" /><span>Confirmar</span></>
+                )}
+              </button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Confirmación de acceso al portal.
+            El correo va GRANDE y arriba: es el único dato que hay que revisar
+            antes de que salga una contraseña, y quien confirma responde por él. */}
+        <Dialog
+          open={accesoPortalTarget !== null}
+          onOpenChange={(open) => { if (!open && !accesoPortalPending) setAccesoPortalTarget(null); }}
+        >
+          <DialogContent className="bg-white dark:bg-gray-900 max-w-md">
+            <DialogHeader>
+              <DialogTitle className="text-sky-700 dark:text-sky-400 text-xl font-bold flex items-center gap-2">
+                <KeyRound className="h-5 w-5" />
+                Dar acceso al portal
+              </DialogTitle>
+              <DialogDescription className="space-y-4 pt-4">
+                <p className="text-sm text-gray-700 dark:text-gray-300">
+                  Se le va a crear la cuenta del Portal del Inversionista a{" "}
+                  <strong>{accesoPortalTarget?.nombre}</strong> y se le va a mandar su
+                  contraseña a este correo:
+                </p>
+                <div className="bg-sky-50 dark:bg-sky-900/20 border-2 border-sky-300 dark:border-sky-700 rounded-lg p-4">
+                  <p className="text-sky-900 dark:text-sky-100 text-base font-bold break-all">
+                    {accesoPortalTarget?.email || "— sin correo capturado —"}
+                  </p>
+                </div>
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  Confirmá que ese correo es de esta persona antes de continuar. Quien
+                  reciba ese mensaje va a poder entrar a ver sus liquidaciones, sus
+                  documentos y sus datos bancarios.
+                </p>
+                {!accesoPortalTarget?.email && !accesoPortalTarget?.esEmpresa && (
+                  <p className="text-sm font-bold text-red-700 dark:text-red-400">
+                    Sin correo capturado no se le puede abrir la cuenta. Agregáselo
+                    primero desde Editar.
+                  </p>
+                )}
+                {accesoPortalTarget?.esEmpresa && (
+                  <p className="text-sm font-bold text-amber-700 dark:text-amber-400">
+                    Es una empresa: al portal entra con su representante legal. Al
+                    continuar, cartera te va a decir a qué fila ir — no hace falta
+                    capturarle un correo propio.
+                  </p>
+                )}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="gap-2 sm:gap-0 pt-4">
+              <button
+                className="px-4 py-2 rounded-lg bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-900 dark:text-gray-100 font-medium transition-colors disabled:opacity-50"
+                onClick={() => setAccesoPortalTarget(null)}
+                disabled={accesoPortalPending}
+              >
+                Cancelar
+              </button>
+              <button
+                className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-bold transition-colors disabled:opacity-50 inline-flex items-center gap-2"
+                onClick={handleConfirmarAccesoPortal}
+                // A una empresa se la deja pasar aunque no tenga correo: es
+                // cartera la que contesta `es_empresa_el_acceso_es_del_
+                // representante` y explica a qué fila ir, y ese mensaje no
+                // llegaba nunca porque este guard cortaba antes.
+                disabled={
+                  accesoPortalPending ||
+                  (!accesoPortalTarget?.email && !accesoPortalTarget?.esEmpresa)
+                }
+              >
+                {accesoPortalPending ? (
+                  <><Loader2 className="h-4 w-4 animate-spin" /><span>Abriendo…</span></>
+                ) : (
+                  <><KeyRound className="h-4 w-4" /><span>Sí, mandarle su acceso</span></>
                 )}
               </button>
             </DialogFooter>

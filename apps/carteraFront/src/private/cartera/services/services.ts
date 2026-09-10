@@ -14,12 +14,19 @@ export const getInvestors = async () => {
 };
 export interface InvestorPayload {
   inversionista_id?: number;
+  /**
+   * "CREATE" activa la creación estricta en cartera: una colisión de
+   * nombre/DPI/email devuelve 409 en vez de convertir el alta en un UPDATE
+   * sobre el inversionista existente (upsert legacy).
+   */
+  operation?: "CREATE";
   nombre: string;
   emite_factura: boolean;
   descuenta_impuestos: boolean;
   reinversion: boolean;
   banco: number | null;
   dpi:number | null;
+  dpi_rep_legal?: string | null;
   tipo_cuenta: string | null;
   re_inversion: string | null;
   numero_cuenta: string | null;
@@ -27,6 +34,15 @@ export interface InvestorPayload {
   tipo_reinversion?: string | null;
   monto_reinversion?: number | null;
   email?: string | null;
+  /**
+   * Pide que el alta le abra cuenta en el Portal del Inversionista.
+   *
+   * Cartera NO provisiona sin esta llave: es el permiso explícito que separa un
+   * alta de back office del registro público de auth-google, que llega a
+   * cartera con el mismo token de servicio ADMIN y sería indistinguible por
+   * identidad. Solo tiene efecto en las filas que se INSERTAN.
+   */
+  provisionar_portal?: boolean;
 }
 export interface InvestorResponse {
   inversionista_id: number;
@@ -35,6 +51,7 @@ export interface InvestorResponse {
   descuenta_impuestos: boolean;
   reinversion: boolean;
   banco: string | null;
+  dpi_rep_legal?: string | null;
   tipo_cuenta: string | null;
   numero_cuenta: string | null;
   moneda?: string;
@@ -45,10 +62,60 @@ export interface InvestorResponse {
 }
 
 // Crear inversionista(s)
+/**
+ * Respuesta real de `POST /investor`: un objeto, no el array de filas.
+ *
+ * Estaba tipado `InvestorResponse[]` y no lo es — por eso el bloque
+ * `provisioning`, que dice qué pasó con el acceso al portal de cada
+ * inversionista recién creado, no se podía leer sin castear. Va aparte de
+ * `data` a propósito: el alta puede haber salido perfecta y el acceso no.
+ */
+export interface AccesoPortalRespuesta {
+  inversionistaId: number;
+  estado: string;
+  usuarioEmail: string | null;
+  correo: {
+    enviado: boolean;
+    plantilla: string | null;
+    redirigido: boolean;
+    destinatarioReal: string | null;
+  };
+  advertencias: string[];
+  motivo: string | null;
+}
+
+export interface InsertInvestorRespuesta {
+  message: string;
+  data: InvestorResponse[];
+  provisioning?: AccesoPortalRespuesta[];
+}
+
 export async function insertInvestorService(
   data: InvestorPayload | InvestorPayload[]
-): Promise<InvestorResponse[]> {
+): Promise<InsertInvestorRespuesta> {
   const res = await api.post(`${API_URL}/investor`, data);
+  return res.data;
+}
+
+/**
+ * Abre el acceso al Portal del Inversionista. Es un ACTO HUMANO.
+ *
+ * La reconciliación diaria de cartera detecta a quién le falta acceso y lo
+ * manda en el resumen de las 07:00, pero ya NO le crea la cuenta: crearla
+ * significa mandar una contraseña por correo, y el correo de una fila de
+ * `inversionistas` puede no ser de su dueño (esa tabla se escribe desde
+ * caminos que no prueban identidad). Quien apriete este botón es quien
+ * responde por que ese correo sea el correcto: verificalo antes.
+ *
+ * Esta ruta NO está en el proxy `/api/cartera` de auth-google, así que no es
+ * alcanzable desde el portal: solo desde aquí, con un ADMIN de cartera.
+ */
+export async function otorgarAccesoPortalService(
+  inversionistaIds: number[]
+): Promise<{ message: string; resultados: AccesoPortalRespuesta[] }> {
+  const res = await api.post(`${API_URL}/investor/portal-access`, {
+    inversionista_ids: inversionistaIds,
+  });
   return res.data;
 }
 
@@ -404,6 +471,8 @@ export interface CreditoUsuarioPago {
   usuarios: Usuario;
   /** Aseguradora vinculada al crédito (nombre, null si no tiene). */
   aseguradora?: string | null;
+  /** Hay filas en el espejo de pagos aún sin liquidar → no puede entrar a devolución a CUBE. */
+  tiene_pagos_sin_liquidar?: boolean;
   inversionistas: AporteInversionista[];
   creditos_inversionistas_espejo?: InversionistaEspejo[];
   resumen: ResumenCreditos;
@@ -790,6 +859,9 @@ export interface UpdateCreditBody {
 
   // Motivo del ajuste manual de capital (se registra en el historial de capital)
   motivo_ajuste_capital?: string;
+  // Motivos separados según tabla fiscal o espejo.
+  motivo_ajuste_monto_aportado_padre?: string;
+  motivo_ajuste_monto_aportado_espejo?: string;
 
   // Inversionistas nuevos
   inversionistas?: InversionistaPayload[];
@@ -1734,6 +1806,8 @@ export interface UpdateMoraPayload {
   tipo: "INCREMENTO" | "DECREMENTO";
   cuotas_atrasadas?: number;
   activa?: boolean;
+  /** Obligatorio: el backend responde 400 si viene vacío. */
+  motivo: string;
 }
 
 export interface CondonarMoraPayload {
@@ -1771,33 +1845,80 @@ export async function condonarMoraService(payload: CondonarMoraPayload) {
   return data;
 }
 
-// Listar créditos con mora
-export async function getCreditosWithMorasService(params?: {
+// ---------- Paginación / totales de moras ----------
+export interface MoraPagination {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
+export interface CreditosConMoraParams {
+  page?: number;
+  pageSize?: number;
+  nombre_usuario?: string;
   numero_credito_sifco?: string;
   cuotas_atrasadas?: number;
   estado?: EstadoCredito;
   excel?: boolean;
-}) {
-  const { data } = await api.get<{ success: boolean; data: CreditoConMora[]; excelUrl?: string }>(
-    `/moras/creditos`,
-    { params }
-  );
+}
+
+// Con excel=true el backend responde solo { success, excelUrl, count }: por eso
+// pagination y totales son opcionales, para que nadie los lea sin comprobarlos.
+export interface CreditosConMoraResponse {
+  success: boolean;
+  data?: CreditoConMora[];
+  pagination?: MoraPagination;
+  totales?: { mora_total: string; creditos: number };
+  excelUrl?: string;
+  count?: number;
+}
+
+export interface CondonacionesMoraParams {
+  page?: number;
+  pageSize?: number;
+  nombre_usuario?: string;
+  numero_credito_sifco?: string;
+  usuario_email?: string;
+  /**
+   * Día de GUATEMALA `YYYY-MM-DD` (inclusive). `moras_condonaciones.fecha` es un
+   * timestamp sin zona con el instante en UTC: el backend convierte estos días
+   * a los instantes UTC del día GT, así el filtro coincide con la fecha que se
+   * ve en pantalla. Los dos son independientes: se puede mandar solo uno.
+   */
+  fecha_desde?: string;
+  /** Día de GUATEMALA `YYYY-MM-DD` (inclusive, entra el día completo). */
+  fecha_hasta?: string;
+  excel?: boolean;
+}
+
+export interface CondonacionesMoraResponse {
+  success: boolean;
+  data?: Condonacion[];
+  pagination?: MoraPagination;
+  totales?: { monto_total: string; condonaciones: number };
+  excelUrl?: string;
+  count?: number;
+}
+
+// Listar créditos con mora (paginado)
+export async function getCreditosWithMorasService(params?: CreditosConMoraParams) {
+  const { data } = await api.get<CreditosConMoraResponse>(`/moras/creditos`, { params });
   return data;
 }
 
-// Listar condonaciones
-export async function getCondonacionesMoraService(params?: {
-  numero_credito_sifco?: string;
-  usuario_email?: string;
-  fecha_desde?: string;
-  fecha_hasta?: string;
-  excel?: boolean;
-}) {
-  const { data } = await api.get<{ success: boolean; data: Condonacion[]; excelUrl?: string }>(
-    `/moras/condonaciones`,
-    { params }
-  );
-  return data;}
+// Listar condonaciones (paginado)
+export async function getCondonacionesMoraService(params?: CondonacionesMoraParams) {
+  const { data } = await api.get<CondonacionesMoraResponse>(`/moras/condonaciones`, { params });
+  return data;
+}
+
+// Historial de eventos de mora de un crédito (ADMIN, CONTA, ASESOR)
+export type { MoraEvento } from "./moraHistorial.services";
+export {
+  getMoraHistorialCredito,
+  descargarMoraHistorialCreditoExcel,
+} from "./moraHistorial.services";
 
 
 export interface CuotaPago {

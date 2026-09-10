@@ -6,7 +6,7 @@ import { useProfile } from "../hooks/useProfile";
 import { useState } from "react";
 
 export const Profile = () => {
-  const { user, isLoading } = useProfile();
+  const { user, isLoading, registroPendiente } = useProfile();
   const [isCompletingProfile, setIsCompletingProfile] = useState(false);
 
   const needsProfileCompletion = !user?.dpi && !isCompletingProfile && user?.role !== "INVESTOR";
@@ -43,7 +43,24 @@ export const Profile = () => {
           {/* Si necesita completar perfil, mostrar formulario especial */}
           {needsProfileCompletion ? (
             <div className="py-12">
-              <CompleteProfileForm onSuccess={handleProfileCompleted} />
+              {/* Un registro que FALLÓ va al bloque de error (rojo, corregible
+                  y reintentable); uno que salió bien pero quedó sin DPI va al
+                  de espera (ámbar, sin reintento). Mandarlos al mismo sitio
+                  invitaba a reintentar algo que no depende de la persona. */}
+              <CompleteProfileForm
+                onSuccess={handleProfileCompleted}
+                tipoSolicitado={registroPendiente?.tipoSolicitado ?? null}
+                mensajeInicial={
+                  registroPendiente?.dpiPendiente
+                    ? undefined
+                    : registroPendiente?.mensaje
+                }
+                pendienteInicial={
+                  registroPendiente?.dpiPendiente
+                    ? registroPendiente.mensaje
+                    : undefined
+                }
+              />
             </div>
           ) : (
             <>

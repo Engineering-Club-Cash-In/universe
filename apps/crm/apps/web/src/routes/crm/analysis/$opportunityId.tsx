@@ -521,6 +521,7 @@ function OpportunityDocumentsPage() {
 			<RenapBuroValidation
 				opportunityId={opportunityId}
 				onEjecucionChange={setValidandoBuroRenap}
+				currentUserRole={userProfile.data?.role}
 			/>
 
 			{/* Asignaciones pendientes: informativo, no bloquea la aprobación */}

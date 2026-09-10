@@ -339,6 +339,7 @@ export function createReversePayment(
           monto_cambio: Number(pago.mora),
           tipo: "INCREMENTO",
           activa: true,
+          motivo: `Reversa de pago #${pago_id}: se restituye la mora que ese pago había cubierto`,
         });
 
         if (!reverseMoraResult.success) {
@@ -455,6 +456,10 @@ export function createReversePayment(
 
             // Limpiar metadata
             fecha_pago: null,
+            // La fila queda NO aplicada, y el filtro "Aplicado" del reporte de
+            // pagos a inversionistas mira solo esta columna, no
+            // `validation_status`. Mismo criterio que revertPaymentToPending.
+            fecha_aplicado: null,
             mes_pagado: "",
             pagado: false,
             observaciones: "",
@@ -517,6 +522,8 @@ export function createReversePayment(
               otros: "0",
               pagoConvenio: "0",
               fecha_pago: null,
+              // Ver la nota de la rama de arriba.
+              fecha_aplicado: null,
               mes_pagado: "",
               pagado: false,
               observaciones: "",

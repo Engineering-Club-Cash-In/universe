@@ -131,6 +131,11 @@ const addInvestorToCreditSchema = z.object({
   // por monto. Debe pertenecer a la modalidad enviada en modalidad_facturacion.
   modalidad_facturacion_spread_id: z.number().int().positive().optional(),
   tipo_operacion: z.enum(["reinversion", "compra_cartera"]),
+  // Solo lo manda la reinversión automática de la liquidación: sella la fila de
+  // compra con la liquidación que la originó. Es lo que permite después
+  // distinguirla de una reubicación manual, que también se registra como
+  // "reinversion" y ocurre en fechas cercanas.
+  liquidacion_id: z.number().int().positive().optional(),
   tipo_reinversion: z
     .enum([
       "sin_reinversion",
@@ -401,6 +406,7 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
       modalidad_facturacion_spread_id,
       tipo_operacion,
       tipo_reinversion,
+      liquidacion_id,
       // NOTA: fecha_inicio_participacion se sigue aceptando en el body pero
       // ya NO se desestructura ni se usa: no actualiza la fecha de las filas.
       minimo,
@@ -1564,6 +1570,10 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
           modalidad_facturacion: modalidad_facturacion ?? null,
           modalidad_facturacion_spread_id: modalidadFacturacionSpreadRow?.id ?? null,
           tipo_compra: clasificacionPosicion,
+          // Solo lo manda la reinversión automática de la liquidación, que es
+          // quien conoce su propia liquidacion_id. Deja rastro de procedencia
+          // para poder distinguirla de una reubicación manual.
+          liquidacion_id: liquidacion_id ?? null,
           status: statusEspejo,
         });
 

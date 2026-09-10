@@ -341,6 +341,12 @@ export interface CarteraCuotaCredito {
 	pago_id?: number;
 	cuota?: string | null;
 	validationStatus?: ValidationStatusEnum | null;
+	// Los devuelve la query de cuotas atrasadas de getCredito (cartera los usa
+	// para la cobertura por montos); necesarios para calcular el saldo real de
+	// cada cuota vencida en el CRM.
+	paymentFalse?: boolean | null;
+	membresias_pago?: string | null; // decimal
+	monto_aplicado?: string | null; // decimal
 	monto_boleta?: string; // decimal
 	abono_capital?: string; // decimal
 	abono_interes?: string; // decimal

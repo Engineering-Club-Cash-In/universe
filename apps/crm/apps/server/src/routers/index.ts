@@ -110,6 +110,7 @@ export const crmAppRouter = {
 	ejecutarValidacionesRenapBuro:
 		validationsRouter.ejecutarValidacionesRenapBuro,
 	getValidacionesOportunidad: validationsRouter.getValidacionesOportunidad,
+	marcarValidacionManual: validationsRouter.marcarValidacionManual,
 };
 
 /**
@@ -385,6 +386,7 @@ export const reportsAppRouter = {
 
 	// Investor Documents routes (Documentos de inversionista)
 	getInvestorRendimiento: investorDocumentsRouter.getInvestorRendimiento,
+	identidadInversionista: investorDocumentsRouter.identidadInversionista,
 	getInvestorDocumentsAdmin: investorDocumentsRouter.getInvestorDocumentsAdmin,
 	createInvestorDocument: investorDocumentsRouter.createInvestorDocument,
 	toggleInvestorDocumentVisibility:

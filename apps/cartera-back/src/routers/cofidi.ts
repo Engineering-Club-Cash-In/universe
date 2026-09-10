@@ -1077,13 +1077,19 @@ if (facturasExistentes.length > 0) {
             Date.UTC(fechaCorte.getUTCFullYear(), fechaCorte.getUTCMonth() + 1, 0)
           ).getUTCDate();
 
-          // Fracción de mes ANTES del corte: días vigentes con la vieja distribución.
-          //   Ej: corte día 15 de 30 → fraccionAntes = 15/30 = 0.5 (50%)
-          const fraccionAntes = new Big(diaCorte).div(ultimoDiaMes);
-
           // Fracción de mes DESPUÉS del corte: el resto del mes con la nueva.
-          //   Ej: 1 − 0.5 = 0.5 (50%)
-          const fraccionDespues = new Big(1).minus(fraccionAntes);
+          //   Ej: corte día 15 de 30 → 15 días → fraccionDespues = 15/30 = 0.5 (50%)
+          // 🩹 Piso de 1 día: si el corte cae el ÚLTIMO día del mes la resta da 0 y
+          //    esta ventana pesaría cero — el comprador se quedaría sin interés del mes
+          //    y el vendedor (CUBE) se lo llevaría completo. Le garantizamos 1 día.
+          //    Mismo piso que el reparto a inversionistas (cofidi/prorrateoPciInteres.ts),
+          //    para que la factura y el pci no divergan en ese borde.
+          const diasDespues = Math.max(1, ultimoDiaMes - diaCorte);
+          const fraccionDespues = new Big(diasDespues).div(ultimoDiaMes);
+
+          // Fracción de mes ANTES del corte: días vigentes con la vieja distribución.
+          //   Ej: 1 − 0.5 = 0.5 (50%). Fuera del borde equivale al viejo diaCorte/ultimoDiaMes.
+          const fraccionAntes = new Big(1).minus(fraccionDespues);
 
           console.log(`   🗓️  Fecha corte: ${fechaCorte.toISOString().split("T")[0]} | día ${diaCorte}/${ultimoDiaMes}`);
           console.log(`   📊 Fracción ANTES: ${fraccionAntes.times(100).toFixed(2)}% | Fracción DESPUÉS: ${fraccionDespues.times(100).toFixed(2)}%`);

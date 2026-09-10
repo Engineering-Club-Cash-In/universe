@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
 	index,
 	integer,
@@ -74,8 +75,15 @@ export const opportunityValidations = pgTable(
 		/** Usuario que disparó la ejecución (null si fue el sistema) */
 		ejecutadoPor: text("ejecutado_por").references(() => user.id),
 
-		/** Fecha y hora de la ejecución */
-		ejecutadoAt: timestamp("ejecutado_at").notNull().defaultNow(),
+		/**
+		 * Fecha y hora de la ejecución. `clock_timestamp()`, no `now()`: bajo el
+		 * candado de `pg_advisory_xact_lock` el orden real de los inserts puede
+		 * no coincidir con el de inicio de cada transacción, y `now()` se congela
+		 * al inicio de la transacción en vez de reflejar cuándo corrió el insert.
+		 */
+		ejecutadoAt: timestamp("ejecutado_at")
+			.notNull()
+			.default(sql`clock_timestamp()`),
 	},
 	(table) => [
 		index("opportunity_validations_opportunity_id_idx").on(table.opportunityId),
@@ -83,6 +91,64 @@ export const opportunityValidations = pgTable(
 			table.opportunityId,
 			table.tipo,
 			table.ejecutadoAt.desc(),
+		),
+	],
+);
+
+/**
+ * Log de overrides manuales sobre `opportunity_validations`.
+ *
+ * Cuando una fuente externa (Infornet o Centinela/RENAP) está caída y el
+ * analista verifica al cliente a mano en el portal correspondiente, se
+ * inserta una fila nueva en `opportunity_validations` (nunca se pisa la fila
+ * de error real) y una fila aquí que registra quién lo marcó, con qué motivo
+ * y sobre qué fallo puntual.
+ */
+export const opportunityValidationOverrideLogs = pgTable(
+	"opportunity_validation_overrides_logs",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+
+		/** Oportunidad sobre la que se hizo el override */
+		opportunityId: uuid("opportunity_id")
+			.notNull()
+			.references(() => opportunities.id, { onDelete: "cascade" }),
+
+		/** Fila creada por el override en opportunity_validations */
+		validationId: uuid("validation_id")
+			.notNull()
+			.unique()
+			.references(() => opportunityValidations.id, { onDelete: "cascade" }),
+
+		/**
+		 * Fila con estado:'error' que el override bypassea. NOT NULL a propósito:
+		 * el código nunca inserta sin ella (marcarValidacionManual exige encontrar
+		 * un error antes de overridear) y las filas de opportunity_validations
+		 * nunca se borran, así que este invariante siempre se cumple en la práctica.
+		 */
+		overriddenValidationId: uuid("overridden_validation_id")
+			.notNull()
+			.references(() => opportunityValidations.id),
+
+		/** Tipo de validación overrideada (renap | buro); redundante con `opportunity_validations.tipo` a propósito, para poder filtrar el log sin join */
+		tipo: validationTipoEnum("tipo").notNull(),
+
+		/** Motivo capturado del analista (obligatorio hoy desde la UI/API) */
+		reason: text("reason"),
+
+		/** Usuario que marcó el override */
+		markedBy: text("marked_by")
+			.notNull()
+			.references(() => user.id),
+
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+	},
+	(table) => [
+		index("opportunity_validation_overrides_logs_opportunity_id_idx").on(
+			table.opportunityId,
+		),
+		index("opportunity_validation_overrides_logs_marked_by_idx").on(
+			table.markedBy,
 		),
 	],
 );

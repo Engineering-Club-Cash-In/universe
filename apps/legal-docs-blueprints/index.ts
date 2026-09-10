@@ -35,6 +35,8 @@ const app = new Elysia()
       service: 'Contract Generator API',
       timestamp: new Date().toISOString(),
       gotenberg: gotenbergHealth ? 'available' : 'unavailable',
+      // Si queued > 0 y active == max de forma sostenida, la cola de PDF está trabada
+      pdfQueue: contractGenerator.getPdfQueueStats(),
       memory: {
         heapUsedMB,
         heapTotalMB,
@@ -75,6 +77,7 @@ const app = new Elysia()
         latencyMs: gotenbergLatency,
         timedOut: gotenbergLatency >= 5000
       },
+      pdfQueue: contractGenerator.getPdfQueueStats(),
       process: {
         pid: process.pid,
         nodeVersion: process.version

@@ -788,6 +788,15 @@ export type MoraRecoveryMetric = {
 // HTTP CLIENT
 // ============================================================================
 
+export interface IdentidadInversionista {
+	inversionista_id: number;
+	nombre: string;
+	email: string | null;
+	dpi: string;
+	via: "directo" | "representante_de_la_sociedad";
+	sociedad: string | null;
+}
+
 export class CarteraBackClient {
 	private config: CarteraBackClientConfig;
 	private circuitBreaker: CircuitBreaker;
@@ -1417,6 +1426,34 @@ export class CarteraBackClient {
 		return response;
 	}
 
+	/**
+	 * Persona dueña de un DPI o de un correo. `data: null` = no existe.
+	 *
+	 * La usa el alta del CRM para detectar que conta no está duplicando por
+	 * error, sino dando de alta la empresa de alguien que ya es inversionista.
+	 */
+	async buscarIdentidadInversionista(params: {
+		dpi?: string;
+		email?: string;
+	}): Promise<{ success: boolean; data: IdentidadInversionista | null }> {
+		const queryParams = new URLSearchParams();
+		if (params.dpi) queryParams.set("dpi", params.dpi);
+		if (params.email) queryParams.set("email", params.email);
+
+		// Sin cache: el `data: null` de "no es de nadie" es un 200 y se guardaría
+		// cinco minutos. Con cache en memoria + varias instancias, el invalidate
+		// de `createInvestor` no llega a las demás —y el alta puede venir de
+		// cartera, donde no hay invalidate ninguno—, así que el negativo viejo
+		// sobrevive: la detección no ve a la persona recién creada y, sin el
+		// interruptor "¿Es empresa?", su sociedad rebota como duplicada.
+		// Es una consulta por DPI tecleado, disparada por un humano llenando un
+		// formulario: no hay volumen que justifique cachearla.
+		return this.request<{
+			success: boolean;
+			data: IdentidadInversionista | null;
+		}>(`/investor/identidad?${queryParams}`, { method: "GET" }, false);
+	}
+
 	async getInvestorReport(
 		params: GetInvestorReportParams,
 	): Promise<InversionistaReporte> {
@@ -1847,13 +1884,47 @@ export class CarteraBackClient {
 		tipo_reinversion?: string | null;
 		monto_reinversion?: number | null;
 		moneda?: string;
+		dpi_rep_legal?: string | null;
 	}): Promise<{
 		message: string;
 		data: { inversionista_id: number; nombre: string; [key: string]: any }[];
+		/**
+		 * Qué pasó con el acceso al portal de cada inversionista recién creado.
+		 *
+		 * Viaja aparte de `data` porque el alta puede haber salido perfecta y el
+		 * acceso no: son dos desenlaces distintos y el operador tiene que poder
+		 * distinguirlos. Cartera nunca falla el alta por esto.
+		 */
+		provisioning?: {
+			inversionistaId: number;
+			estado: "creada" | "ya_tenia" | "avisada" | "omitida" | "fallo";
+			usuarioEmail: string | null;
+			correo: {
+				enviado: boolean;
+				plantilla: string | null;
+				redirigido: boolean;
+				destinatarioReal: string | null;
+			};
+			advertencias: string[];
+			motivo: string | null;
+		}[];
 	}> {
 		const response = await this.request<{
 			message: string;
 			data: { inversionista_id: number; nombre: string; [key: string]: any }[];
+			provisioning?: {
+				inversionistaId: number;
+				estado: "creada" | "ya_tenia" | "avisada" | "omitida" | "fallo";
+				usuarioEmail: string | null;
+				correo: {
+					enviado: boolean;
+					plantilla: string | null;
+					redirigido: boolean;
+					destinatarioReal: string | null;
+				};
+				advertencias: string[];
+				motivo: string | null;
+			}[];
 		}>("/investor", {
 			method: "POST",
 			body: JSON.stringify({
@@ -1871,6 +1942,20 @@ export class CarteraBackClient {
 				tipo_reinversion: input.tipo_reinversion ?? "sin_reinversion",
 				monto_reinversion: input.monto_reinversion ?? null,
 				moneda: input.moneda ?? "quetzales",
+				// El alta de back office SÍ pide acceso al portal. La llave es el
+				// permiso: cartera no provisiona sin ella, para que el registro
+				// público de auth-google no pueda fabricarse una cuenta con la
+				// contraseña en su propio correo. Va explícita porque no hay
+				// forma de distinguir por identidad quién llama (todo entra con
+				// el mismo token de servicio ADMIN).
+				provisionar_portal: true,
+				// A propósito NO usamos `?? null`: cartera distingue "la llave no
+				// viene" (no tocar) de "viene vacía" (borrar). Mandar null siempre
+				// borraría el DPI del representante en cada edición que no lo
+				// incluya — y con él, el acceso de esa persona al portal.
+				...(input.dpi_rep_legal !== undefined
+					? { dpi_rep_legal: input.dpi_rep_legal }
+					: {}),
 			}),
 		});
 		this.cache.invalidate("investor");

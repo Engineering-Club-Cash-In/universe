@@ -3,6 +3,7 @@
 		{ "key": "AMJK_PASSWORD", "runtime": true },
 		{ "key": "AMJK_REQUESTOR", "runtime": true },
 		{ "key": "AMJK_USER", "runtime": true },
+		{ "key": "AUTH_GOOGLE_URL", "runtime": true },
 		{ "key": "BUCKET_REPORTS", "runtime": true },
 		{ "key": "BUCKET_REPORTS_URL", "runtime": true },
 
@@ -16,11 +17,13 @@
 		{ "key": "CUBE_PASSWORD", "runtime": true },
 		{ "key": "CUBE_REQUESTOR", "runtime": true },
 		{ "key": "CUBE_USER", "runtime": true },
+		{ "key": "EMAIL_ASSETS_BASE_URL", "runtime": true },
 		{ "key": "EMAIL_DOMAIN", "runtime": true },
 		{ "key": "JWT_REFRESH_SECRET", "runtime": true },
 		{ "key": "JWT_SECRET", "runtime": true },
 
 		{ "key": "PORT", "runtime": true },
+		{ "key": "PORTAL_PROVISIONING_SECRET", "runtime": true },
 		{ "key": "R2_ACCESS_KEY_ID", "runtime": true },
 		{ "key": "R2_BUCKET", "runtime": true },
 		{ "key": "R2_ENDPOINT", "runtime": true },

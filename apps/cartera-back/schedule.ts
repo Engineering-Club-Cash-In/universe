@@ -8,6 +8,11 @@ import {
   reportarFacturasFallidasSat,
 } from './src/controllers/verificarFacturasSat';
 import { generarSnapshotDiario } from './src/controllers/facturacionSnapshot';
+import { verificarCuadreLiquidaciones } from './src/controllers/verificarCuadreLiquidaciones';
+import {
+  enviarResumenProvisionamiento,
+  provisionarCuentasPortal,
+} from './src/controllers/provisionarCuentasPortal';
 import { runScheduledJob, runScheduledJobAttempts } from './scheduledJobRunner';
 
 const TZ_GUATEMALA = 'America/Guatemala';
@@ -102,5 +107,44 @@ export function iniciarTareasProgramadas() {
       }
     }
     await runScheduledJobAttempts('generate_daily_invoice_snapshot', snapshotAttempts());
+  });
+
+  // 🔍 Cuadre de las liquidaciones del mes - 11, 12 y 13 a las 08:00 hora Guatemala.
+  //    El 10 queda fuera a propósito: ese día se está liquidando y todo estaría
+  //    a medio camino. Verifica que el monto aportado del espejo, descontadas
+  //    las compras que la liquidación no absorbió, sea igual al histórico que
+  //    dejó esa liquidación más su reinversión. Solo notifica por correo; no
+  //    corrige nada. De cada liquidación se avisa UNA sola vez: el 12 y el 13
+  //    sirven para cerrar las que ya cuadraron solas y para agarrar las que
+  //    aparecieron después, no para repetir el mismo correo.
+  schedule.scheduleJob({ rule: '0 8 11-13 * *', tz: TZ_GUATEMALA }, async () => {
+    await runScheduledJob(
+      'verify_liquidation_balance',
+      () => verificarCuadreLiquidaciones(),
+    );
+  });
+
+  // 🔑 Acceso al Portal del Inversionista - 07:00 hora Guatemala, todos los días.
+  //    DETECTA, no ejecuta. Recorre a todos los inversionistas, PREGUNTA quién
+  //    debería tener cuenta y no la tiene, y lo manda en el resumen. No crea
+  //    nada y no manda ninguna contraseña: sale de aquí en solo lectura.
+  //
+  //    Es la red que recoge lo que el alta no pudo: si auth-google estaba caído
+  //    cuando se creó el inversionista, el operador no tiene forma de
+  //    reintentarlo —el segundo POST muere en el guard de duplicados— y sin
+  //    este job esa persona se quedaba sin acceso para siempre. Eso se sigue
+  //    detectando y reportando solo; lo que cambió es que abrir la cuenta lo
+  //    dispara una persona desde POST /investor/portal-access.
+  //
+  //    Por qué no la abre él: su universo es la tabla entera y no puede saber
+  //    quién escribió cada fila —`cartera.inversionistas` se escribe desde
+  //    caminos que no prueban identidad—, así que "esta fila debería tener
+  //    cuenta" no puede significar "mandale la contraseña a ese correo".
+  //    Ver el encabezado de provisionarCuentasPortal.ts.
+  schedule.scheduleJob({ rule: '0 7 * * *', tz: TZ_GUATEMALA }, async () => {
+    await runScheduledJob(
+      'provision_portal_accounts',
+      () => provisionarCuentasPortal({ enviarResumen: enviarResumenProvisionamiento }),
+    );
   });
 }

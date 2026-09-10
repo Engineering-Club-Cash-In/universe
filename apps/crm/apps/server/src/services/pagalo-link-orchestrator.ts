@@ -1,5 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, isNotNull, ne, notInArray } from "drizzle-orm";
+import {
+	and,
+	desc,
+	eq,
+	inArray,
+	isNotNull,
+	ne,
+	notInArray,
+	sql,
+} from "drizzle-orm";
 import { db } from "../db";
 import { casosCobros, contactosCobros } from "../db/schema/cobros";
 import { leads, opportunities } from "../db/schema/crm";
@@ -17,6 +26,7 @@ import {
 import {
 	construirComentarioGestionLinkPagalo,
 	esLinkPagaloGenerado,
+	gestionLinkPagaloTieneWhatsappConfirmado,
 	totalDeLinksPagalo,
 } from "../lib/pagalo-gestion";
 import { deduplicarCuotasPagalo } from "../lib/pagalo-installments";
@@ -102,6 +112,7 @@ async function registrarGestionLinkPagalo(params: {
 	fechaContacto?: Date;
 	bucketSnapshot?: number | null;
 	finalizar?: boolean;
+	repararPreliminar?: boolean;
 }): Promise<boolean> {
 	if (params.cantidadLinks === 0) return false;
 	const bucketSnapshot =
@@ -114,7 +125,6 @@ async function registrarGestionLinkPagalo(params: {
 				.select({
 					contactoCobroId: pagaloPaymentGroups.contactoCobroId,
 					status: pagaloPaymentGroups.status,
-					carteraCreditoId: pagaloPaymentGroups.carteraCreditoId,
 				})
 				.from(pagaloPaymentGroups)
 				.where(eq(pagaloPaymentGroups.id, params.groupId))
@@ -131,18 +141,20 @@ async function registrarGestionLinkPagalo(params: {
 			) {
 				const [sucesor] = await tx
 					.select({ contactoCobroId: pagaloPaymentGroups.contactoCobroId })
-					.from(pagaloPaymentGroups)
+					.from(pagaloPaymentEvents)
+					.innerJoin(
+						pagaloPaymentGroups,
+						eq(pagaloPaymentGroups.id, pagaloPaymentEvents.groupId),
+					)
 					.where(
 						and(
-							eq(pagaloPaymentGroups.carteraCreditoId, grupo.carteraCreditoId),
-							ne(pagaloPaymentGroups.id, params.groupId),
-							notInArray(pagaloPaymentGroups.status, [
-								"COMPLETED",
-								"CANCELLED",
-							]),
+							eq(pagaloPaymentEvents.eventType, "GROUP_REGENERATED"),
+							sql`${pagaloPaymentEvents.payload}->>'grupoAnteriorId' = ${params.groupId}`,
 							isNotNull(pagaloPaymentGroups.contactoCobroId),
 						),
 					)
+					.orderBy(desc(pagaloPaymentEvents.occurredAt))
+					.limit(1)
 					.for("update");
 				contactoCobroId = sucesor?.contactoCobroId ?? null;
 			}
@@ -162,7 +174,15 @@ async function registrarGestionLinkPagalo(params: {
 					const comentarioFinal = construirComentarioGestionLinkPagalo(params);
 					const bucketFinal =
 						bucketSnapshot ?? gestionPrevia?.bucketSnapshot ?? null;
+					const debeFinalizar =
+						params.whatsappEnviado !== null ||
+						(params.repararPreliminar === true &&
+							gestionPrevia !== undefined &&
+							!gestionLinkPagaloTieneWhatsappConfirmado(
+								gestionPrevia.comentarios,
+							));
 					if (
+						debeFinalizar &&
 						gestionPrevia &&
 						(gestionPrevia.comentarios !== comentarioFinal ||
 							gestionPrevia.bucketSnapshot !== bucketFinal)
@@ -472,19 +492,19 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 			group.origen === "ASESOR" &&
 			group.casoCobroId &&
 			linksParaGestion.length > 0
-				? group.contactoCobroId
-					? true
-					: await registrarGestionLinkPagalo({
-							groupId: group.groupId,
-							casoCobroId: group.casoCobroId,
-							numeroSifco: input.numeroSifco,
-							requestedBy: group.createdBy,
-							totalAmount: totalDeLinksPagalo(linksParaGestion),
-							cantidadLinks: linksParaGestion.length,
-							whatsappEnviado: null,
-							fechaContacto: group.createdAt,
-							bucketSnapshot: null,
-						})
+				? await registrarGestionLinkPagalo({
+						groupId: group.groupId,
+						casoCobroId: group.casoCobroId,
+						numeroSifco: input.numeroSifco,
+						requestedBy: group.createdBy,
+						totalAmount: totalDeLinksPagalo(linksParaGestion),
+						cantidadLinks: linksParaGestion.length,
+						whatsappEnviado: null,
+						fechaContacto: group.createdAt,
+						bucketSnapshot: null,
+						finalizar: group.contactoCobroId !== null,
+						repararPreliminar: group.contactoCobroId !== null,
+					})
 				: undefined;
 		return {
 			groupId: group.groupId,

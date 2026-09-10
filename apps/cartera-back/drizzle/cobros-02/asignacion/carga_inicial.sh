@@ -158,9 +158,20 @@ fase_backfill()   { encolar_sql "$AQUI/04_backfill_cuotas_convenio.sql"; }
 
 fase_motores() {
   log "motores · procesarMoras + procesarBucketsConvenio contra $DESTINO_SCHEMA"
+  # Esta fase REPLAYEA: comprime en una noche los movimientos de bucket que en
+  # realidad ocurrieron a lo largo de meses, y el historial queda diciendo que
+  # hubo cientos de "cuentas curadas" el mismo día — justo el KPI que el modelo
+  # existe para medir. En un sandbox es aceptable (y sirve de prueba de estrés);
+  # contra producción NO, así que se rechaza aunque venga --permitir-prod: esa
+  # bandera autoriza cargar el modelo, no reescribirle la historia (Codex, P2).
+  if [[ "$DEST_HOST" == *supabase.com* || "$DEST_HOST" == *supabase.co ]]; then
+    die "La fase 'motores' es solo para sandbox: contra producción la carga inicial va sin replay (línea base limpia). Quitá 'motores' de --fases."
+  fi
   [[ $DRY_RUN -eq 0 ]] || { echo "· (dry-run) motores omitidos."; return; }
   command -v bun >/dev/null || die "Falta bun"
-  ( cd "$CARTERA_BACK" && SUPABASE_DB_URL="$DESTINO" CARTERA_SCHEMA="$DESTINO_SCHEMA" bun -e '
+  # sslrootcert=system rompe la librería pg de Node; ver url_para_node en _lib.sh.
+  local url_motor; url_motor="$(url_para_node "$DESTINO")"
+  ( cd "$CARTERA_BACK" && SUPABASE_DB_URL="$url_motor" CARTERA_SCHEMA="$DESTINO_SCHEMA" bun -e '
       const { procesarMoras } = await import("./src/controllers/latefee");
       const { procesarBucketsConvenio } = await import("./src/controllers/bucketsConvenio");
       console.log("moras:", JSON.stringify(await procesarMoras()));

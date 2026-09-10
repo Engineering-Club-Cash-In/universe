@@ -200,6 +200,13 @@ bitácoras, el espejo de promesas, el ledger de Págalo, los traslados, y **el d
 crédito** (producción trae el asesor viejo, que en COBROS-02 ya no aplica). Qué se pierde:
 los pagos y boletas de prueba que se hayan registrado en el sandbox.
 
+> ⚠️ **Todo lo que lleva un asesor se remapea por correo, no por id.** El `asesor_id` es un
+> serial por ambiente: el mismo número puede ser otra persona después de un refresco, y ya
+> pasó (el id que era "Asesor Prueba B1" hoy corresponde a alguien real). Copiar el pool por
+> número le entregaría la cartera de un bucket a quien no es. El trasplante arma un mapa
+> viejo → nuevo cruzando `email_cash_in`, y si un asesor **que tiene pool** no aparece en
+> producción, la alineación aborta en vez de adivinar.
+
 Después del swap hay que **reiniciar cartera-back**: el swap es un rename y sus conexiones
 vivas siguen apuntando al schema que acaba de pasar a backup.
 

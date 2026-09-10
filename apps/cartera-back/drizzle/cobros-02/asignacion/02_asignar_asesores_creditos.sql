@@ -82,12 +82,19 @@ BEGIN
 END $$;
 
 -- 3) Repartir.
---    conservar=0: round-robin determinístico sobre el pool del bucket (1 asesor
---    → directo; N → parejo, ordenado por credito_id y asesor_id).
+--    conservar=0: reparto parejo sobre el pool del bucket (1 asesor → directo).
 --    conservar=1: los créditos cuyo dueño ya está en el pool de su bucket se
---    quedan; solo los huérfanos entran al round-robin, y el orden de los
---    asesores es por carga conservada ascendente (empate: menor asesor_id).
---    Con conservar=0 la carga conservada es 0 para todos → mismo orden de antes.
+--    quedan, y los huérfanos se reparten LLENANDO AL MENOS CARGADO, contando la
+--    carga que cada asesor ya trae — no en partes iguales. Con cargas 0 y 100 y
+--    20 huérfanos, repartir parejo dejaba 10 y 110; así los 20 van al de 0
+--    (review de Codex, P2). Es el mismo criterio de `elegirAsesorParaBucket`
+--    en el motor, que también recalcula la carga después de cada asignación.
+--
+--    Cómo, sin recorrer fila por fila: a cada asesor se le generan "slots"
+--    numerados desde su carga actual + 1. Ordenando todos los slots del bucket
+--    por ese número, el primer crédito cae en el asesor con menos carga, el
+--    siguiente en el que quede más bajo, y así. Con conservar=0 las cargas son
+--    cero y el orden degenera en el round-robin de siempre.
 CREATE TEMP TABLE tmp_pool_bucket ON COMMIT DROP AS
 SELECT ab.bucket, ab.asesor_id FROM asesor_bucket ab WHERE ab.activo;
 
@@ -101,15 +108,8 @@ WHERE :conservar::int = 1
 
 CREATE TEMP TABLE tmp_asignacion ON COMMIT DROP AS
 WITH carga AS (
-  SELECT bucket, asesor_nuevo AS asesor_id, count(*) AS n
+  SELECT bucket, asesor_nuevo AS asesor_id, count(*)::int AS n
   FROM tmp_conservados GROUP BY 1, 2
-),
-pool AS (
-  SELECT p.bucket,
-         array_agg(p.asesor_id ORDER BY COALESCE(c.n, 0), p.asesor_id) AS asesores
-  FROM tmp_pool_bucket p
-  LEFT JOIN carga c ON c.bucket = p.bucket AND c.asesor_id = p.asesor_id
-  GROUP BY p.bucket
 ),
 huerfanos AS (
   SELECT t.credito_id, t.asesor_actual, t.bucket,
@@ -117,11 +117,23 @@ huerfanos AS (
   FROM tmp_bucket t
   WHERE t.bucket IS NOT NULL
     AND NOT EXISTS (SELECT 1 FROM tmp_conservados k WHERE k.credito_id = t.credito_id)
+),
+pendientes AS (
+  SELECT bucket, count(*)::int AS n FROM huerfanos GROUP BY 1
+),
+-- Un slot por cada posición que el asesor podría llegar a ocupar. Basta con
+-- generar tantos como huérfanos tenga el bucket: nadie puede recibir más.
+slots AS (
+  SELECT p.bucket, p.asesor_id,
+         row_number() OVER (PARTITION BY p.bucket ORDER BY gs.nivel, p.asesor_id) AS rn
+  FROM tmp_pool_bucket p
+  JOIN pendientes pe ON pe.bucket = p.bucket
+  LEFT JOIN carga c ON c.bucket = p.bucket AND c.asesor_id = p.asesor_id
+  CROSS JOIN LATERAL generate_series(COALESCE(c.n, 0) + 1, COALESCE(c.n, 0) + pe.n) AS gs(nivel)
 )
-SELECT h.credito_id, h.asesor_actual, h.bucket,
-       p.asesores[1 + ((h.rn - 1) % array_length(p.asesores, 1))::int] AS asesor_nuevo
+SELECT h.credito_id, h.asesor_actual, h.bucket, s.asesor_id AS asesor_nuevo
 FROM huerfanos h
-JOIN pool p ON p.bucket = h.bucket
+JOIN slots s ON s.bucket = h.bucket AND s.rn = h.rn
 UNION ALL
 SELECT credito_id, asesor_actual, bucket, asesor_nuevo FROM tmp_conservados;
 

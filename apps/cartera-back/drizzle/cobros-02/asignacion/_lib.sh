@@ -48,13 +48,38 @@ renombrar_migracion() {
 
 # Aplica el bloque drizzle/cobros-02/*.sql (orden de nombre) + la 0024 de
 # convenios sobre URL/SCHEMA. Idempotentes: re-aplicar no rompe.
+#
+# Los NOTICE de "ya existe, se omite" son ruido esperable en DDL idempotente y
+# se filtran, PERO el estado que manda es el de psql, no el del filtro: se lee
+# de PIPESTATUS. Con un `| grep ... || true` alrededor, una migración que falla
+# dejaba pasar la corrida entera y se podía promover un schema al que le faltaba
+# una tabla (review de Codex, P1).
 #   uso: aplicar_migraciones URL SCHEMA DIR_COBROS02 DIR_DRIZZLE
 aplicar_migraciones() {
-  local url="$1" schema="$2" dir="$3" drizzle="$4" f
+  local url="$1" schema="$2" dir="$3" drizzle="$4" f salida
+  salida="$(mktemp)"
   for f in $(ls "$dir"/0*.sql | sort) "$drizzle/0024_convenios_pago_cuotas_convenio.sql"; do
     echo "· $(basename "$f")"
-    renombrar_migracion "$schema" < "$f" | psql "$url" -X -v ON_ERROR_STOP=1 -q -f -
+    # La salida va a un archivo y DESPUÉS se filtra: así el `if !` evalúa el
+    # estado real del pipeline con psql adentro. (Con `| grep … || true` el
+    # `||` descarta PIPESTATUS y el fallo se perdía.)
+    if ! renombrar_migracion "$schema" < "$f" | psql "$url" -X -v ON_ERROR_STOP=1 -q -f - > "$salida" 2>&1; then
+      grep -v "^NOTICE:" "$salida" || true
+      rm -f "$salida"
+      die "La migración $(basename "$f") falló. No se sigue."
+    fi
+    grep -v "^NOTICE:" "$salida" || true
   done
+  rm -f "$salida"
+}
+
+# `sslrootcert=system` lo entiende libpq (psql/pg_dump) y evita tener que crear
+# ~/.postgresql/root.crt, pero la librería `pg` de Node lo toma como NOMBRE DE
+# ARCHIVO y muere con ENOENT: 'system'. Se quita antes de dársela al motor;
+# cartera-back ya fija ssl.rejectUnauthorized=false por su cuenta.
+#   uso: URL_MOTOR="$(url_para_node "$URL")"
+url_para_node() {
+  sed -E 's/[?&]sslrootcert=[^&]*//; s/\?&/?/; s/[?&]$//' <<<"$1"
 }
 
 # Radiografía de un schema ya cargado: pool, cartera por bucket y asesor,

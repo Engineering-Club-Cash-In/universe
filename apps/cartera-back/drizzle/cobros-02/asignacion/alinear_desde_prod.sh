@@ -130,7 +130,7 @@ pn -At -c "SELECT '· '||count(*)||' créditos, '||(SELECT count(*) FROM \"$NUEV
 
 # ── 2. Migraciones ──────────────────────────────────────────────────────────
 log "2 · migraciones cobros-02 sobre $NUEVO"
-aplicar_migraciones "$NEON" "$NUEVO" "$COBROS02_DIR" "$DRIZZLE_DIR" 2>&1 | grep -v "NOTICE:" || true
+aplicar_migraciones "$NEON" "$NUEVO" "$COBROS02_DIR" "$DRIZZLE_DIR"
 
 # ── 3. Trasplante del sandbox vivo ──────────────────────────────────────────
 log "3 · trasplante $SCHEMA → $NUEVO (historial, pool, catálogo, dueños)"
@@ -173,6 +173,60 @@ BEGIN
   END IF;
 END $$;
 
+-- 3·0. MAPA DE ASESORES viejo → nuevo, por CORREO.
+-- El `asesor_id` es un serial por ambiente: el mismo número puede ser otra
+-- persona después de un refresco (ya pasó — el id que era "Asesor Prueba B1"
+-- hoy es alguien real). Copiar el pool y los dueños por número le entregaría
+-- la cartera de un bucket a quien no es (review de Codex, P1). El puente
+-- estable es `email_cash_in`, que además es el que usan la cola, la agenda y
+-- las alertas para saber quién es quién.
+CREATE TEMP TABLE mapa_asesor ON COMMIT DROP AS
+SELECT v.asesor_id AS viejo,
+       v.nombre     AS nombre_viejo,
+       -- Se marca acá porque el guard de abajo vive en un DO $$, donde psql no
+       -- interpola :variables y no puede consultar el schema viejo.
+       EXISTS (SELECT 1 FROM :"viejo".asesor_bucket ab
+                WHERE ab.asesor_id = v.asesor_id AND ab.activo) AS en_pool,
+       COALESCE(c.nuevo, i.nuevo) AS nuevo,
+       CASE WHEN c.nuevo IS NOT NULL THEN 'correo'
+            WHEN i.nuevo IS NOT NULL THEN 'id+nombre' END AS criterio
+FROM :"viejo".asesores v
+LEFT JOIN LATERAL (
+  SELECT n.asesor_id AS nuevo FROM :"nuevo".asesores n
+  WHERE v.email_cash_in IS NOT NULL AND btrim(v.email_cash_in) <> ''
+    AND lower(btrim(n.email_cash_in)) = lower(btrim(v.email_cash_in))
+  ORDER BY n.asesor_id LIMIT 1
+) c ON true
+-- Sin correo no hay puente estable; se acepta el mismo id SOLO si además
+-- coincide el nombre, que es la señal de que sigue siendo la misma persona.
+LEFT JOIN LATERAL (
+  SELECT n.asesor_id AS nuevo FROM :"nuevo".asesores n
+  WHERE (v.email_cash_in IS NULL OR btrim(v.email_cash_in) = '')
+    AND n.asesor_id = v.asesor_id
+    AND lower(btrim(coalesce(n.nombre, ''))) = lower(btrim(coalesce(v.nombre, '')))
+  LIMIT 1
+) i ON true;
+
+CREATE INDEX ON mapa_asesor (viejo);
+
+\echo '· Mapa de asesores (cómo se resolvió cada uno):'
+SELECT criterio, count(*) FROM mapa_asesor WHERE nuevo IS NOT NULL GROUP BY 1 ORDER BY 1;
+
+-- Un asesor del POOL que no se pueda mapear es motivo de aborto: su bucket
+-- quedaría sin dueño o, peor, con el dueño equivocado. Los asesores sin pool
+-- que no mapean solo afectan atribuciones históricas y se resuelven a NULL.
+DO $$
+DECLARE faltan text;
+BEGIN
+  SELECT string_agg(format('%s (id %s)', m.nombre_viejo, m.viejo), ', ')
+    INTO faltan
+  FROM mapa_asesor m
+  WHERE m.nuevo IS NULL AND m.en_pool;
+  IF faltan IS NOT NULL THEN
+    RAISE EXCEPTION 'Asesores del pool que no existen en producción: %. Revisá asesores.email_cash_in antes de alinear.', faltan;
+  END IF;
+END $$;
+
 -- 3a. Catálogo: gana el del sandbox (dias_sla, colores, nombres afinados).
 UPDATE :"nuevo".buckets n SET
   prefijo = v.prefijo, nombre = v.nombre, descripcion = v.descripcion,
@@ -186,10 +240,16 @@ FROM :"viejo".buckets v WHERE v.numero = n.numero;
 --     opcionales (asesor de atribución, pago de la BAJADA, usuario de la
 --     bitácora) van a NULL si su fila ya no existe — mismo efecto que su
 --     ON DELETE SET NULL, pero validado ANTES del INSERT.
-\echo '· asesor_bucket'
-SELECT pg_temp.trasplantar(:'viejo', :'nuevo', 'asesor_bucket',
-  format('EXISTS (SELECT 1 FROM %I.asesores a WHERE a.asesor_id = v.asesor_id)', :'nuevo')) AS copiadas,
-  (SELECT count(*) FROM :"viejo".asesor_bucket) AS en_sandbox;
+\echo '· asesor_bucket (remapeado por correo)'
+INSERT INTO :"nuevo".asesor_bucket
+  (asesor_id, bucket, activo, capacidad_base, margen_alerta_tipo, margen_alerta_valor, created_at, updated_at)
+SELECT m.nuevo, v.bucket, v.activo, v.capacidad_base,
+       v.margen_alerta_tipo, v.margen_alerta_valor, v.created_at, v.updated_at
+FROM :"viejo".asesor_bucket v
+JOIN mapa_asesor m ON m.viejo = v.asesor_id AND m.nuevo IS NOT NULL
+JOIN :"nuevo".buckets b ON b.numero = v.bucket;
+SELECT (SELECT count(*) FROM :"nuevo".asesor_bucket) AS copiadas,
+       (SELECT count(*) FROM :"viejo".asesor_bucket) AS en_sandbox;
 
 \echo '· buckets_historial'
 INSERT INTO :"nuevo".buckets_historial
@@ -198,7 +258,7 @@ INSERT INTO :"nuevo".buckets_historial
 SELECT v.historial_id, v.credito_id, v.bucket_anterior, v.bucket_nuevo,
        v.tipo_evento::text::bucket_evento_tipo, v.origen::text::bucket_evento_origen,
        v.cuotas_atrasadas_nuevas, v.status_credito,
-       CASE WHEN EXISTS (SELECT 1 FROM :"nuevo".asesores a WHERE a.asesor_id = v.asesor_id) THEN v.asesor_id END,
+       (SELECT m.nuevo FROM mapa_asesor m WHERE m.viejo = v.asesor_id),
        CASE WHEN EXISTS (SELECT 1 FROM :"nuevo".pagos_credito p WHERE p.pago_id = v.pago_id) THEN v.pago_id END,
        v.motivo, v.fecha
 FROM :"viejo".buckets_historial v
@@ -210,8 +270,8 @@ SELECT (SELECT count(*) FROM :"nuevo".buckets_historial) AS copiadas,
 INSERT INTO :"nuevo".credito_asesor_historial
   (historial_id, credito_id, asesor_anterior, asesor_nuevo, bucket, origen, motivo, usuario_id, fecha)
 SELECT v.historial_id, v.credito_id,
-       CASE WHEN EXISTS (SELECT 1 FROM :"nuevo".asesores a WHERE a.asesor_id = v.asesor_anterior) THEN v.asesor_anterior END,
-       CASE WHEN EXISTS (SELECT 1 FROM :"nuevo".asesores a WHERE a.asesor_id = v.asesor_nuevo) THEN v.asesor_nuevo END,
+       (SELECT m.nuevo FROM mapa_asesor m WHERE m.viejo = v.asesor_anterior),
+       (SELECT m.nuevo FROM mapa_asesor m WHERE m.viejo = v.asesor_nuevo),
        v.bucket, v.origen::text::credito_asesor_origen, v.motivo,
        CASE WHEN EXISTS (SELECT 1 FROM :"nuevo".platform_users u WHERE u.id = v.usuario_id) THEN v.usuario_id END,
        v.fecha
@@ -230,31 +290,47 @@ SELECT pg_temp.trasplantar(:'viejo', :'nuevo', 'pagalo_payment_imports',
   format('v.credito_id IS NULL OR EXISTS (SELECT 1 FROM %I.creditos c WHERE c.credito_id = v.credito_id AND c.numero_credito_sifco = v.numero_credito_sifco)', :'nuevo')) AS copiadas,
   (SELECT count(*) FROM :"viejo".pagalo_payment_imports) AS en_sandbox;
 
-\echo '· operaciones_traslado_cartera (+ detalle)'
-SELECT pg_temp.trasplantar(:'viejo', :'nuevo', 'operaciones_traslado_cartera',
-  format('EXISTS (SELECT 1 FROM %I.asesores a WHERE a.asesor_id = v.asesor_origen_id)', :'nuevo')) AS copiadas,
-  (SELECT count(*) FROM :"viejo".operaciones_traslado_cartera) AS en_sandbox;
-SELECT pg_temp.trasplantar(:'viejo', :'nuevo', 'operaciones_traslado_cartera_detalle',
-  format('EXISTS (SELECT 1 FROM %1$I.operaciones_traslado_cartera o WHERE o.id = v.operacion_id)
-      AND EXISTS (SELECT 1 FROM %1$I.creditos c WHERE c.credito_id = v.credito_id)
-      AND EXISTS (SELECT 1 FROM %1$I.asesores a WHERE a.asesor_id = v.asesor_nuevo_id)
-      AND (v.asesor_anterior_id IS NULL OR EXISTS (SELECT 1 FROM %1$I.asesores a WHERE a.asesor_id = v.asesor_anterior_id))', :'nuevo')) AS copiadas,
-  (SELECT count(*) FROM :"viejo".operaciones_traslado_cartera_detalle) AS en_sandbox;
+\echo '· operaciones_traslado_cartera (+ detalle, remapeados por correo)'
+INSERT INTO :"nuevo".operaciones_traslado_cartera
+  (id, idempotency_key, payload_hash, modo, motivo, asesor_origen_id, actor_email,
+   estado, solicitud, preview, vence_en, created_at)
+SELECT v.id, v.idempotency_key, v.payload_hash, v.modo, v.motivo, m.nuevo, v.actor_email,
+       v.estado, v.solicitud, v.preview, v.vence_en, v.created_at
+FROM :"viejo".operaciones_traslado_cartera v
+JOIN mapa_asesor m ON m.viejo = v.asesor_origen_id AND m.nuevo IS NOT NULL;
+SELECT (SELECT count(*) FROM :"nuevo".operaciones_traslado_cartera) AS copiadas,
+       (SELECT count(*) FROM :"viejo".operaciones_traslado_cartera) AS en_sandbox;
+
+INSERT INTO :"nuevo".operaciones_traslado_cartera_detalle
+  (operacion_id, credito_id, asesor_anterior_id, asesor_nuevo_id, bucket, prioridad)
+SELECT v.operacion_id, v.credito_id, ma.nuevo, mn.nuevo, v.bucket, v.prioridad
+FROM :"viejo".operaciones_traslado_cartera_detalle v
+JOIN mapa_asesor mn ON mn.viejo = v.asesor_nuevo_id AND mn.nuevo IS NOT NULL
+LEFT JOIN mapa_asesor ma ON ma.viejo = v.asesor_anterior_id
+WHERE EXISTS (SELECT 1 FROM :"nuevo".operaciones_traslado_cartera o WHERE o.id = v.operacion_id)
+  AND EXISTS (SELECT 1 FROM :"nuevo".creditos c WHERE c.credito_id = v.credito_id);
+SELECT (SELECT count(*) FROM :"nuevo".operaciones_traslado_cartera_detalle) AS copiadas,
+       (SELECT count(*) FROM :"viejo".operaciones_traslado_cartera_detalle) AS en_sandbox;
 
 SELECT pg_temp.resetear_seq(:'nuevo', 'asesor_bucket', 'id');
 SELECT pg_temp.resetear_seq(:'nuevo', 'buckets_historial', 'historial_id');
 SELECT pg_temp.resetear_seq(:'nuevo', 'credito_asesor_historial', 'historial_id');
 SELECT pg_temp.resetear_seq(:'nuevo', 'promesas_pago_espejo', 'promesa_espejo_id');
+-- pagalo_payment_imports.id es serial y el trasplante copia los ids explícitos.
+-- Si producción todavía no tenía esta tabla, su secuencia recién creada queda en
+-- 1 y el siguiente import de Págalo tras el swap chocaría con una PK ya usada
+-- (review de Codex, P1).
+SELECT pg_temp.resetear_seq(:'nuevo', 'pagalo_payment_imports', 'id');
 
 -- 3c. Dueños: el crédito conserva el asesor que tenía en el sandbox (lo puso
 --     el motor/carga por bucket); producción trae al asesor viejo. Solo si ese
 --     asesor sigue existiendo.
 WITH cambiados AS (
-  UPDATE :"nuevo".creditos c SET asesor_id = v.asesor_id
+  UPDATE :"nuevo".creditos c SET asesor_id = m.nuevo
   FROM :"viejo".creditos v
+  JOIN mapa_asesor m ON m.viejo = v.asesor_id AND m.nuevo IS NOT NULL
   WHERE v.credito_id = c.credito_id
-    AND v.asesor_id IS DISTINCT FROM c.asesor_id
-    AND EXISTS (SELECT 1 FROM :"nuevo".asesores a WHERE a.asesor_id = v.asesor_id)
+    AND m.nuevo IS DISTINCT FROM c.asesor_id
   RETURNING 1
 )
 SELECT count(*) AS duenos_conservados_del_sandbox FROM cambiados;
@@ -289,25 +365,49 @@ if [[ $SIN_MOTOR -eq 1 ]]; then
 else
   log "5 · motor sobre $NUEVO (procesarMoras + buckets de convenio)"
   command -v bun >/dev/null || die "Falta bun (o correr con --sin-motor y disparar el motor aparte)"
-  # `sslrootcert=system` lo entiende libpq (psql), pero la librería `pg` de Node
-  # lo toma como ruta de archivo y revienta con ENOENT: 'system'. Se quita para
-  # el motor; cartera-back ya fija ssl.rejectUnauthorized=false por su cuenta.
-  URL_MOTOR="$(sed -E 's/[?&]sslrootcert=[^&]*//; s/\?&/?/; s/[?&]$//' <<<"$NEON")"
+  # sslrootcert=system rompe la librería pg de Node; ver url_para_node en _lib.sh.
+  URL_MOTOR="$(url_para_node "$NEON")"
   if ! ( cd "$CARTERA_BACK" && SUPABASE_DB_URL="$URL_MOTOR" CARTERA_SCHEMA="$NUEVO" bun -e '
       // Cinturón: el motor ESCRIBE. Si por lo que sea la cadena apunta a
       // producción, o el schema no es el de trabajo, no se corre.
       const url = process.env.SUPABASE_DB_URL ?? "";
       if (/supabase\.(com|co)/.test(url)) { console.error("El motor apunta a Supabase; abortado."); process.exit(1); }
       if (!/_nuevo$/.test(process.env.CARTERA_SCHEMA ?? "")) { console.error("CARTERA_SCHEMA no es el schema de trabajo; abortado."); process.exit(1); }
+
       const { procesarMoras } = await import("./src/controllers/latefee");
       const { procesarBucketsConvenio } = await import("./src/controllers/bucketsConvenio");
+
       const moras = await procesarMoras();
       console.log("RESUMEN moras:", JSON.stringify(moras.buckets ?? moras));
-      console.log("RESUMEN convenio:", JSON.stringify(await procesarBucketsConvenio()));
+      const convenio = await procesarBucketsConvenio();
+      console.log("RESUMEN convenio:", JSON.stringify(convenio));
+
+      // Mover los buckets ES el objetivo de la alineación, así que "corrió pero
+      // no hizo nada" no puede pasar por bueno y llegar al swap:
+      //  · skipped  → otra corrida tenía el advisory lock (el motor programado
+      //    en la misma base, u otra alineación). No se registró ni una transición.
+      //  · sin `buckets` → procesarMoras salió por una rama que no ejecuta el
+      //    pass de buckets.
+      //  · omitidoPorFallback → el catálogo vino inconsistente y el pass se
+      //    salteó a propósito para no escribir historial con rangos que no son.
+      const problemas = [];
+      if (moras?.skipped) problemas.push("procesarMoras se omitió (advisory lock tomado por otra corrida)");
+      if (!moras?.skipped && !moras?.buckets) problemas.push("procesarMoras no devolvió el resumen de buckets");
+      if (moras?.buckets?.omitidoPorFallback) problemas.push("el pass de buckets se omitió por catálogo inconsistente");
+      if (convenio?.skipped) problemas.push("procesarBucketsConvenio se omitió (advisory lock tomado)");
+      if (convenio?.omitidoPorFallback) problemas.push("los buckets de convenio se omitieron por catálogo inconsistente");
+      if (problemas.length) { console.error("MOTOR INCOMPLETO: " + problemas.join(" · ")); process.exit(1); }
       process.exit(0);
     ' ) > "$DUMP_DIR/motor.log" 2>&1; then
     echo "── últimas líneas del motor ──"; tail -25 "$DUMP_DIR/motor.log"
-    die "El motor falló. $NUEVO queda para inspección y NO se hizo swap: el sandbox vivo sigue intacto."
+    die "El motor falló o quedó incompleto. $NUEVO queda para inspección y NO se hizo swap: el sandbox vivo sigue intacto."
+  fi
+  # El pass de buckets vive dentro de un try/catch en latefee.ts para no tumbar
+  # el cálculo de mora, así que un fallo suyo NO cambia el código de salida ni
+  # los contadores: la única señal es esta línea del log (Codex, P1).
+  if grep -q "Error registrando transiciones de bucket" "$DUMP_DIR/motor.log"; then
+    grep -A3 "Error registrando transiciones de bucket" "$DUMP_DIR/motor.log" | head -8
+    die "El pass de buckets falló dentro de procesarMoras (lo atrapa su try/catch). NO se hizo swap."
   fi
   grep -E "^RESUMEN " "$DUMP_DIR/motor.log" | sed 's/^/· /'
   echo "· log completo del motor: $DUMP_DIR/motor.log"

@@ -102,6 +102,37 @@ export function getMembershipAdjustment(
 export function applyMembershipAdjustment(
 	membershipCost: number,
 	adjustment: MembershipAdjustment,
+	amountAfterAdjustment = 0,
 ): number {
-	return Math.round(membershipCost * adjustment.factor * 100) / 100;
+	return (
+		Math.round(
+			(membershipCost * adjustment.factor + amountAfterAdjustment) * 100,
+		) / 100
+	);
+}
+
+export function calculateQuotationInsuranceCosts(input: {
+	baseMembershipCost: number;
+	customerInsuranceCost: number;
+	insuranceSavingsToMembership: number;
+	gpsCost: number;
+	adjustment: MembershipAdjustment;
+}) {
+	const membershipCost = applyMembershipAdjustment(
+		input.baseMembershipCost,
+		input.adjustment,
+		input.insuranceSavingsToMembership,
+	);
+	const netMembershipCost =
+		Math.round((membershipCost - input.gpsCost) * 100) / 100;
+
+	return {
+		customerInsuranceCost: input.customerInsuranceCost,
+		membershipCost,
+		netMembershipCost,
+		insuranceCost:
+			Math.round(
+				(input.customerInsuranceCost + netMembershipCost) * 100,
+			) / 100,
+	};
 }

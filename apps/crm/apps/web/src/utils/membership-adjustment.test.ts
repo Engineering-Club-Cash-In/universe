@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
 	applyMembershipAdjustment,
+	calculateQuotationInsuranceCosts,
 	getMembershipAdjustment,
 } from "./membership-adjustment";
+import type { MembershipAdjustment } from "./membership-adjustment";
 
 describe("getMembershipAdjustment", () => {
 	test.each([
@@ -132,5 +134,61 @@ describe("applyMembershipAdjustment", () => {
 		});
 
 		expect(result).toBe(118.75);
+	});
+
+	test("adds GyT savings after the membership adjustment", () => {
+		const result = applyMembershipAdjustment(
+			1476.99,
+			{
+				category: "Nuevo (sedán, SUV, pickup)",
+				percentage: 35,
+				factor: 1.35,
+			},
+			235.18,
+		);
+
+		expect(result).toBe(2229.12);
+	});
+});
+
+describe("calculateQuotationInsuranceCosts", () => {
+	const adjustment: MembershipAdjustment = {
+		category: "Nuevo (sedán, SUV, pickup)",
+		percentage: 35,
+		factor: 1.35,
+	};
+
+	test("preserves the existing Universales quotation", () => {
+		expect(
+			calculateQuotationInsuranceCosts({
+				baseMembershipCost: 1476.99,
+				customerInsuranceCost: 1360.98,
+				insuranceSavingsToMembership: 0,
+				gpsCost: 148.2,
+				adjustment,
+			}),
+		).toEqual({
+			customerInsuranceCost: 1360.98,
+			membershipCost: 1993.94,
+			netMembershipCost: 1845.74,
+			insuranceCost: 3206.72,
+		});
+	});
+
+	test("quotes Lucia with GyT savings added after the adjustment", () => {
+		expect(
+			calculateQuotationInsuranceCosts({
+				baseMembershipCost: 1476.99,
+				customerInsuranceCost: 1125.8,
+				insuranceSavingsToMembership: 235.18,
+				gpsCost: 148.2,
+				adjustment,
+			}),
+		).toEqual({
+			customerInsuranceCost: 1125.8,
+			membershipCost: 2229.12,
+			netMembershipCost: 2080.92,
+			insuranceCost: 3206.72,
+		});
 	});
 });

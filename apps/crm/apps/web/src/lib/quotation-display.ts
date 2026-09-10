@@ -2,8 +2,40 @@ export const DISBURSEMENT_SALE_LABEL = "Desembolso por venta";
 
 export function formatInsuranceProviderLabel(
 	provider: "universales" | "gyt",
-): string | null {
-	return provider === "universales" ? "Seguro: Universales" : null;
+): string {
+	return provider === "gyt" ? "Seguro: GyT" : "Seguro: Universales";
+}
+
+export function getQuotationInsuranceFieldName(
+	provider: "universales" | "gyt",
+): "insuranceCost" | "extraInsuranceCost" {
+	return provider === "gyt" ? "extraInsuranceCost" : "insuranceCost";
+}
+
+export function isQuotationInsuranceBreakdownLocked(
+	provider: "universales" | "gyt",
+): boolean {
+	return provider === "gyt";
+}
+
+export function getQuotationInsuranceDisplay(input: {
+	insuranceProvider?: string | null;
+	insuranceCost?: number | string | null;
+	membershipCost?: number | string | null;
+	extraInsuranceCost?: number | string | null;
+	extraMembershipCost?: number | string | null;
+}) {
+	const insuranceProvider: "gyt" | "universales" =
+		input.insuranceProvider === "gyt" ? "gyt" : "universales";
+	const isGyt = insuranceProvider === "gyt";
+
+	return {
+		insuranceProvider,
+		insuranceCost:
+			Number(isGyt ? input.extraInsuranceCost : input.insuranceCost) || 0,
+		membershipCost:
+			Number(isGyt ? input.extraMembershipCost : input.membershipCost) || 0,
+	};
 }
 
 export function formatQuotationClientName(input: object & {

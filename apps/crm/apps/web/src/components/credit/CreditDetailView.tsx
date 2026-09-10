@@ -60,7 +60,10 @@ import {
 	generateAmortizationTable,
 	generateQuotationPdf,
 } from "@/lib/generate-pdf";
-import { DISBURSEMENT_SALE_LABEL } from "@/lib/quotation-display";
+import {
+	DISBURSEMENT_SALE_LABEL,
+	getQuotationInsuranceDisplay,
+} from "@/lib/quotation-display";
 import type { IOpportunity } from "@/routes/crm/opportunities";
 import { client } from "@/utils/orpc";
 
@@ -679,8 +682,15 @@ export function CreditDetailView({
 	// Usar los campos extra* que se guardaron desde el cotizador
 	const gps = Number.parseFloat(quotation?.extraGpsCost || "0");
 	const seguro = Number.parseFloat(quotation?.extraInsuranceCost || "0");
+	const insuranceDisplay = getQuotationInsuranceDisplay({
+		insuranceProvider: quotation?.insuranceProvider,
+		insuranceCost: quotation?.insuranceCost,
+		membershipCost: quotation?.membershipCost,
+		extraInsuranceCost: quotation?.extraInsuranceCost,
+		extraMembershipCost: quotation?.extraMembershipCost,
+	});
 	const insuranceProviderLabel =
-		quotation?.insuranceProvider === "gyt" ? "GyT" : "Universales";
+		insuranceDisplay.insuranceProvider === "gyt" ? "GyT" : "Universales";
 	const membresia = Number.parseFloat(quotation?.extraMembershipCost || "0");
 	const gastosAdminBase = Number.parseFloat(quotation?.extraAdminCost || "600");
 	const interesAnticipado = Number.parseFloat(quotation?.interestCost || "0");
@@ -2884,6 +2894,7 @@ export function CreditDetailView({
 													);
 													generateQuotationPdf({
 														creditType: quotation.creditType,
+														insuranceProvider: insuranceDisplay.insuranceProvider,
 														vehicleBrand: quotation.vehicleBrand,
 														vehicleLine: quotation.vehicleLine,
 														vehicleModel: quotation.vehicleModel,
@@ -2897,11 +2908,11 @@ export function CreditDetailView({
 														monthlyPayment: Number(quotation.monthlyPayment),
 														termMonths: quotation.termMonths,
 														interestRate: Number(quotation.interestRate),
-														insuranceCost: Number(quotation.insuranceCost),
+														insuranceCost: insuranceDisplay.insuranceCost,
 														gpsCost: Number(quotation.gpsCost),
 														transferCost: Number(quotation.transferCost),
 														adminCost: Number(quotation.adminCost),
-														membershipCost: Number(quotation.membershipCost),
+														membershipCost: insuranceDisplay.membershipCost,
 														extraCosts: quotation,
 														amortizationTable,
 													});
@@ -3059,10 +3070,10 @@ export function CreditDetailView({
 										<div className="grid grid-cols-2 gap-4 md:grid-cols-4">
 											<div>
 												<Label className="text-muted-foreground text-xs">
-													Seguro
+													Seguro {insuranceProviderLabel}
 												</Label>
 												<p className="font-medium">
-													{formatCurrency(quotation.insuranceCost)}
+													{formatCurrency(insuranceDisplay.insuranceCost)}
 												</p>
 											</div>
 											<div>
@@ -3094,7 +3105,7 @@ export function CreditDetailView({
 													Membresía
 												</Label>
 												<p className="font-medium">
-													{formatCurrency(quotation.membershipCost)}
+													{formatCurrency(insuranceDisplay.membershipCost)}
 												</p>
 											</div>
 										</div>
@@ -3271,7 +3282,7 @@ export function CreditDetailView({
 															0 && (
 															<div>
 																<Label className="text-muted-foreground text-xs">
-																	Seguro (Inicial)
+																	Seguro {insuranceProviderLabel} (Inicial)
 																</Label>
 																<p className="font-medium">
 																	{formatCurrency(quotation.extraInsuranceCost)}

@@ -91,6 +91,13 @@ no se apriete de pasada.
 
 ## La pregunta abierta
 
+> ✅ **RESUELTA el 2026-09-10 con el PM.** El estado nuevo se llama `EN_RECUPERACION` y no
+> *clava* el bucket sino que le pone un **piso** en B4: con 5 cuotas sí sube a B5,
+> conservando el estado. Sigue devengando mora. El plan completo, con las 10 decisiones y
+> las fases, está en [el documento 8](./08-plan-convenios-y-recuperacion.md).
+> Lo que sigue abajo es el análisis que llevó a esa decisión.
+
+
 **El traslado no se sostiene solo, y eso es sabido.**
 
 El motor de las 23:59 GT no lee el bucket: lo **deriva** de las cuotas atrasadas y lo

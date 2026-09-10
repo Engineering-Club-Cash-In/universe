@@ -19,6 +19,7 @@ import {
 	Landmark,
 	Layers,
 	LayoutDashboard,
+	ListChecks,
 	Menu,
 	MessageSquare,
 	Moon,
@@ -282,15 +283,26 @@ export default function Header() {
 												Dashboard
 											</Link>
 										</DropdownMenuItem>
-										<DropdownMenuItem asChild>
-											<Link to="/cobros/mi-dia" className="cursor-pointer">
-												<Sunrise className="mr-2 h-4 w-4" />
-												Mi día
-											</Link>
-										</DropdownMenuItem>
-										{/* "Agenda del día" y "Cola del día" salen del menú: ambas quedan
-												unificadas en "Mi día". Sus rutas siguen vivas
-												(/cobros/agenda, /cobros/cola) por si hay que volver. */}
+										{/* "Mi día" es la agenda de UN asesor. Para quien ve la
+												cartera de todos (admin/supervisor) esa pantalla no
+												aplica —antes los mandaba a un cartel muerto— así que en
+												su lugar va directo la Cola del día. "Agenda del día"
+												sigue fuera del menú; su ruta vive (/cobros/agenda). */}
+										{PERMISSIONS.canAssignCobros(userRole) ? (
+											<DropdownMenuItem asChild>
+												<Link to="/cobros/cola" className="cursor-pointer">
+													<ListChecks className="mr-2 h-4 w-4" />
+													Cola del día
+												</Link>
+											</DropdownMenuItem>
+										) : (
+											<DropdownMenuItem asChild>
+												<Link to="/cobros/mi-dia" className="cursor-pointer">
+													<Sunrise className="mr-2 h-4 w-4" />
+													Mi día
+												</Link>
+											</DropdownMenuItem>
+										)}
 										<DropdownMenuItem asChild>
 											<Link to="/cobros/promesas" className="cursor-pointer">
 												<BellRing className="mr-2 h-4 w-4" />
@@ -740,10 +752,17 @@ function MobileNav({
 											<Banknote />
 											Dashboard
 										</Link>
-										<Link to="/cobros/mi-dia" className={MOBILE_LINK_CLASS}>
-											<Sunrise />
-											Mi día
-										</Link>
+										{PERMISSIONS.canAssignCobros(userRole) ? (
+											<Link to="/cobros/cola" className={MOBILE_LINK_CLASS}>
+												<ListChecks />
+												Cola del día
+											</Link>
+										) : (
+											<Link to="/cobros/mi-dia" className={MOBILE_LINK_CLASS}>
+												<Sunrise />
+												Mi día
+											</Link>
+										)}
 										<Link to="/cobros/promesas" className={MOBILE_LINK_CLASS}>
 											<BellRing />
 											Alertas de Promesas

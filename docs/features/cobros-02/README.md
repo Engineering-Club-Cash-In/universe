@@ -36,6 +36,7 @@ accountability medible (un asesor responde por su bucket, no por una lista hered
 | 5 | [Datos y ambientes](./05-datos-y-ambientes.md) | Dónde vive cada base, el sandbox `cartera_cobros2`, migraciones, trampas conocidas |
 | 6 | [Ficha 360 del crédito](./06-ficha-360.md) | La pantalla de trabajo del asesor: anatomía, fuentes de datos, registro de contactos, promesa y convenio de pago, estado de cuenta y decisiones |
 | 7 | [Recuperación de vehículo](./07-recuperacion-de-vehiculo.md) | El traslado manual a B4: por qué es la única decisión humana de bucket, y por qué hoy el motor la deshace |
+| 8 | [**Plan** · Convenios y `EN_RECUPERACION`](./08-plan-convenios-y-recuperacion.md) | Lo acordado con el PM el 10-sep: el convenio congela el bucket, el estado nuevo actúa como piso en B4, y las 4 fases pendientes |
 | — | [**Runbook · Refrescar el sandbox**](./RUNBOOK-refrescar-sandbox.md) | Cómo poner el sandbox al día con producción sin perder el historial. Es también el ensayo del pase a producción |
 
 Y aparte, con documentación propia:
@@ -128,7 +129,8 @@ le habla, cuándo y por dónde → CRM. El bot solo habla con el CRM
 | Traslado masivo de cartera (CB-114) | ✅ Implementado — preview + confirmación idempotente, 3 modos. Ver [motor y asignación](./02-motor-y-asignacion.md#traslado-masivo-de-cartera-cb-114) |
 | Coberturas temporales (CC2-23) | ✅ Implementado — vacaciones y permisos redirigen el día **sin mover la cartera** |
 | Sandbox al día con producción | ✅ Scriptado y a demanda: `alinear_desde_prod.sh`. Corre el motor, así que las bajadas de quien ya pagó quedan registradas. Ver [datos y ambientes](./05-datos-y-ambientes.md#poner-el-sandbox-al-día-con-producción) |
-| Recuperación de vehículo (traslado a B4) | 🟡 El traslado funciona; **cómo se sostiene está pendiente de producto** — hoy el motor lo deshace en la corrida de las 23:59. Ver [doc 7](./07-recuperacion-de-vehiculo.md) |
+| Recuperación de vehículo (traslado a B4) | 🟡 El traslado funciona; **cómo se sostiene ya se definió** con el PM (estado `EN_RECUPERACION` como piso en B4) pero **no está implementado** — ver [el plan, doc 8](./08-plan-convenios-y-recuperacion.md) |
+| Convenios que no bajan de bucket | 🔵 Acordado, sin implementar. Hoy el job hace lo CONTRARIO (un convenio nuevo cae a B0). [Doc 8, fase 2](./08-plan-convenios-y-recuperacion.md) |
 | Carga inicial en producción | ⚪ Pendiente — mismo runbook, pero **sin replay**: línea base limpia |
 
 ---

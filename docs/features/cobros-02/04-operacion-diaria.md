@@ -51,21 +51,42 @@ Pantalla: `/cobros/apertura`.
 
 ## Cola del día y SLA (CB-020)
 
-La **cola** es el universo de trabajo del asesor: los créditos del **pool de sus buckets**
-(`asesor_bucket`), no los que tiene asignados individualmente.
+La **cola** son las cuentas del asesor que hay que trabajar hoy, ordenadas por urgencia. El
+universo lo arma cartera-back y la clasificación la hace el CRM, que es donde viven las
+promesas y los contactos.
 
-La distinción importa:
+El pool (`asesor_bucket`) decide **qué buckets** entran a la cola; el dueño del crédito
+(`creditos.asesor_id`) decide **de quién es cada cuenta**.
 
-| Vista | Eje | Responde a |
+> ⚠️ **Corregido el 2026-09-06.** Antes la cola filtraba por el pool, así que dos asesores
+> del mismo bucket veían exactamente la misma lista sin saber de quién era cada cuenta. Y
+> como el snapshot diario consume ese mismo endpoint por asesor, cada crédito se contaba
+> como planificado para los dos: medido, dos asesores de B1 con 470 planificados cada uno
+> sobre 471 créditos únicos entre ambos, y el cumplimiento del supervisor salía al doble.
+> Repartir cuentas dentro de un bucket se hace **reasignando o con una cobertura**, no
+> dejando que dos personas vean la misma lista.
+
+El SLA da el orden: `buckets.dias_sla` son los días para contactar desde que el crédito
+**entró** al bucket, así que la cola necesita no solo el número del bucket sino **la fecha**
+de esa fila del historial. B0 se excluye siempre: está al día, no tiene SLA.
+
+Un crédito entra si cae en alguna de **seis** categorías, y sale una sola vez con todas las
+que apliquen. Sin filtro, este es el orden:
+
+| # | Categoría | Cuándo |
 | --- | --- | --- |
-| **Cola del día** | El pool de buckets del asesor | "¿Qué cuentas de mis buckets hay que trabajar?" |
-| **Agenda** | `creditos.asesor_id` | "¿Qué cuotas de *mis* créditos vencen pronto?" |
+| 1 | `sla_hoy` | El límite del SLA es hoy **y** nadie lo ha contactado hoy |
+| 2 | `promesa_hoy` | Prometió pagar hoy |
+| 3 | `vence_hoy` | Tiene una cuota que vence hoy. Fuente aparte del SLA |
+| 4 | `incumplida` | Promesa incumplida, o pendiente con fecha ya pasada |
+| 5 | `promesa_proxima` | Promesa futura cuya alerta programada (D-1 por defecto) ya cayó |
+| 6 | `sin_contacto` | Más de 5 días sin que nadie lo toque, sin importar bucket ni SLA |
 
-El orden lo da el **SLA**: `buckets.dias_sla` son los días que hay para contactar desde que
-el crédito **entró** al bucket — por eso la cola necesita no solo el número del bucket sino
-**la fecha** de esa fila del historial. B0 se excluye siempre: no tiene SLA, está al día.
+Que `sla_hoy` se apague al registrar un contacto es a propósito: el SLA mide *contactar a
+tiempo*, no *tener la cuenta abierta*.
 
-Pantallas: `/cobros/cola` (supervisor) y `/cobros/mi-dia` (el asesor).
+Pantallas: `/cobros/cola` (supervisor) y `/cobros/mi-dia` (el asesor). La agenda es otra
+cosa: son las cuotas por vencer de los créditos **propios**, por `creditos.asesor_id`.
 
 ---
 
@@ -133,7 +154,10 @@ máximo 6 meses) y queda pendiente de activación en carteraFront. Detalle en
   cada bucket, contra su `capacidad_base` (default 300) para ver el % de utilización. El
   techo de 300 es **por asesor dentro de un bucket**, no del bucket completo.
 - **Reasignaciones** (`/cobros/reasignaciones`): la bitácora completa de cambios de asesor,
-  automáticos y manuales, con motivo.
+  automáticos y manuales, con motivo. Sus otras dos pestañas son **Traslado masivo** (mover
+  la cartera de un asesor completo, con vista previa antes de aplicar) y **Coberturas**
+  (vacaciones y permisos, que redirigen el trabajo del día sin mover la cartera). Ambas en
+  [motor y asignación](./02-motor-y-asignacion.md#traslado-masivo-de-cartera-cb-114).
 
 ---
 
@@ -198,6 +222,19 @@ evento que lo respalda.
 ---
 
 ## Permisos
+
+El menú de Cobros del CRM está agrupado por para-qué-sirve, porque el módulo ya pasó de
+catorce pantallas:
+
+| Grupo | Pantallas |
+| --- | --- |
+| *(sin encabezado)* Mi día a día | Dashboard, Mi día, Alertas de promesas, Convenios, Historial de agendas, Supervisión Págalo |
+| Supervisión | Apertura del día, Cierre diario, Carga de cuentas, Traslados y coberturas, Metas de mora |
+| Configuración y análisis | Reducción de recordatorios, Historial de buckets, Reportes |
+
+El asesor solo ve el primer grupo, y para él no se pinta ningún encabezado: sin los otros
+dos, un título suelto no separa nada. *Agenda del día* y *Cola del día* ya no aparecen en el
+menú porque quedaron unificadas en *Mi día*; sus rutas siguen vivas.
 
 | Rol | Ve |
 | --- | --- |

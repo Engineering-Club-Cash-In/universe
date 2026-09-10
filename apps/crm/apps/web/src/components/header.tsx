@@ -44,7 +44,9 @@ import { Button } from "./ui/button";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
+	DropdownMenuGroup,
 	DropdownMenuItem,
+	DropdownMenuLabel,
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
@@ -56,6 +58,10 @@ import {
 	SheetTrigger,
 } from "./ui/sheet";
 import UserMenu from "./user-menu";
+
+// Encabezado de grupo dentro de un menú (desktop y mobile comparten estilo).
+const MENU_GROUP_LABEL_CLASS =
+	"px-2 pt-2 pb-1 font-medium text-muted-foreground text-xs uppercase tracking-wider";
 
 export default function Header() {
 	const { data: session } = authClient.useSession();
@@ -260,122 +266,136 @@ export default function Header() {
 										<ChevronDown className="h-3 w-3 opacity-50" />
 									</Button>
 								</DropdownMenuTrigger>
-								<DropdownMenuContent align="start" className="w-48">
-									<DropdownMenuItem asChild>
-										<Link to="/cobros" className="cursor-pointer">
-											<Banknote className="mr-2 h-4 w-4" />
-											Dashboard
-										</Link>
-									</DropdownMenuItem>
-									<DropdownMenuItem asChild>
-										<Link to="/cobros/mi-dia" className="cursor-pointer">
-											<Sunrise className="mr-2 h-4 w-4" />
-											Mi día
-										</Link>
-									</DropdownMenuItem>
-									{/* "Agenda del día" y "Cola del día" salen del menú: ambas quedan
-									    unificadas en "Mi día". Sus rutas siguen vivas
-									    (/cobros/agenda, /cobros/cola) por si hay que volver. */}
-									<DropdownMenuItem asChild>
-										<Link to="/cobros/promesas" className="cursor-pointer">
-											<BellRing className="mr-2 h-4 w-4" />
-											Alertas de Promesas
-										</Link>
-									</DropdownMenuItem>
-									<DropdownMenuItem asChild>
-										<Link to="/cobros/convenios" className="cursor-pointer">
-											<Handshake className="mr-2 h-4 w-4" />
-											Convenios
-										</Link>
-									</DropdownMenuItem>
-									{/* CB-128: va bajo canAccessCobros y NO canAssignCobros — el
-									    asesor también consulta su propio historial (el backend le
-									    fuerza el scope por realizado_por). */}
-									<DropdownMenuItem asChild>
-										<Link
-											to="/cobros/historial-agendas"
-											className="cursor-pointer"
-										>
-											<ScrollText className="mr-2 h-4 w-4" />
-											Historial de agendas
-										</Link>
-									</DropdownMenuItem>
+								<DropdownMenuContent align="start" className="w-64">
+									{/* El módulo sigue creciendo con cada release de COBROS-02, así que los
+											ítems se agrupan por para-qué-sirven. El asesor solo ve el primer
+											grupo: para él no se pinta ningún encabezado. */}
 									{PERMISSIONS.canAssignCobros(userRole) && (
+										<DropdownMenuLabel className={MENU_GROUP_LABEL_CLASS}>
+											Mi día a día
+										</DropdownMenuLabel>
+									)}
+									<DropdownMenuGroup>
 										<DropdownMenuItem asChild>
-											<Link to="/cobros/apertura" className="cursor-pointer">
+											<Link to="/cobros" className="cursor-pointer">
+												<Banknote className="mr-2 h-4 w-4" />
+												Dashboard
+											</Link>
+										</DropdownMenuItem>
+										<DropdownMenuItem asChild>
+											<Link to="/cobros/mi-dia" className="cursor-pointer">
 												<Sunrise className="mr-2 h-4 w-4" />
-												Apertura del día
+												Mi día
 											</Link>
 										</DropdownMenuItem>
-									)}
-									{PERMISSIONS.canAssignCobros(userRole) && (
+										{/* "Agenda del día" y "Cola del día" salen del menú: ambas quedan
+												unificadas en "Mi día". Sus rutas siguen vivas
+												(/cobros/agenda, /cobros/cola) por si hay que volver. */}
 										<DropdownMenuItem asChild>
-											<Link to="/cobros/metas" className="cursor-pointer">
-												<Target className="mr-2 h-4 w-4" />
-												Metas de Mora
+											<Link to="/cobros/promesas" className="cursor-pointer">
+												<BellRing className="mr-2 h-4 w-4" />
+												Alertas de Promesas
 											</Link>
 										</DropdownMenuItem>
-									)}
-									{PERMISSIONS.canAssignCobros(userRole) && (
 										<DropdownMenuItem asChild>
-											<Link to="/cobros/buckets" className="cursor-pointer">
-												<Layers className="mr-2 h-4 w-4" />
-												Historial de Buckets
+											<Link to="/cobros/convenios" className="cursor-pointer">
+												<Handshake className="mr-2 h-4 w-4" />
+												Convenios
 											</Link>
 										</DropdownMenuItem>
-									)}
-									{PERMISSIONS.canAssignCobros(userRole) && (
-										<DropdownMenuItem asChild>
-											<Link to="/cobros/reduccion" className="cursor-pointer">
-												<BellOff className="mr-2 h-4 w-4" />
-												Reducción de recordatorios
-											</Link>
-										</DropdownMenuItem>
-									)}
-									{PERMISSIONS.canAssignCobros(userRole) && (
+										{/* CB-128: va bajo canAccessCobros y NO canAssignCobros — el
+												asesor también consulta su propio historial (el backend le
+												fuerza el scope por realizado_por). */}
 										<DropdownMenuItem asChild>
 											<Link
-												to="/cobros/reasignaciones"
+												to="/cobros/historial-agendas"
 												className="cursor-pointer"
 											>
-												<UserCog className="mr-2 h-4 w-4" />
-												Traslados y coberturas
+												<ScrollText className="mr-2 h-4 w-4" />
+												Historial de agendas
 											</Link>
 										</DropdownMenuItem>
-									)}
-									{PERMISSIONS.canAssignCobros(userRole) && (
-										<DropdownMenuItem asChild>
-											<Link to="/cobros/carga" className="cursor-pointer">
-												<Gauge className="mr-2 h-4 w-4" />
-												Carga de Cuentas
-											</Link>
-										</DropdownMenuItem>
-									)}
-									{PERMISSIONS.canAssignCobros(userRole) && (
-										<DropdownMenuItem asChild>
-											<Link to="/cobros/cierre" className="cursor-pointer">
-												<Moon className="mr-2 h-4 w-4" />
-												Cierre Diario
-											</Link>
-										</DropdownMenuItem>
-									)}
-									{PERMISSIONS.canAccessCobros(userRole) && (
 										<DropdownMenuItem asChild>
 											<Link to="/cobros/pagalo" className="cursor-pointer">
 												<Wallet className="mr-2 h-4 w-4" />
 												Supervisión Págalo
 											</Link>
 										</DropdownMenuItem>
-									)}
+									</DropdownMenuGroup>
 									{PERMISSIONS.canAssignCobros(userRole) && (
 										<>
 											<DropdownMenuSeparator />
-											<DropdownMenuItem asChild>
-												<Link to="/cobros/reportes" className="cursor-pointer">
-													<BarChart3 className="mr-2 h-4 w-4" />
-													Reportes
-												</Link>
-											</DropdownMenuItem>
+											<DropdownMenuLabel className={MENU_GROUP_LABEL_CLASS}>
+												Supervisión
+											</DropdownMenuLabel>
+											<DropdownMenuGroup>
+												<DropdownMenuItem asChild>
+													<Link
+														to="/cobros/apertura"
+														className="cursor-pointer"
+													>
+														<Sunrise className="mr-2 h-4 w-4" />
+														Apertura del día
+													</Link>
+												</DropdownMenuItem>
+												<DropdownMenuItem asChild>
+													<Link to="/cobros/cierre" className="cursor-pointer">
+														<Moon className="mr-2 h-4 w-4" />
+														Cierre Diario
+													</Link>
+												</DropdownMenuItem>
+												<DropdownMenuItem asChild>
+													<Link to="/cobros/carga" className="cursor-pointer">
+														<Gauge className="mr-2 h-4 w-4" />
+														Carga de Cuentas
+													</Link>
+												</DropdownMenuItem>
+												<DropdownMenuItem asChild>
+													<Link
+														to="/cobros/reasignaciones"
+														className="cursor-pointer"
+													>
+														<UserCog className="mr-2 h-4 w-4" />
+														Traslados y coberturas
+													</Link>
+												</DropdownMenuItem>
+												<DropdownMenuItem asChild>
+													<Link to="/cobros/metas" className="cursor-pointer">
+														<Target className="mr-2 h-4 w-4" />
+														Metas de Mora
+													</Link>
+												</DropdownMenuItem>
+											</DropdownMenuGroup>
+											<DropdownMenuSeparator />
+											<DropdownMenuLabel className={MENU_GROUP_LABEL_CLASS}>
+												Configuración y análisis
+											</DropdownMenuLabel>
+											<DropdownMenuGroup>
+												<DropdownMenuItem asChild>
+													<Link
+														to="/cobros/reduccion"
+														className="cursor-pointer"
+													>
+														<BellOff className="mr-2 h-4 w-4" />
+														Reducción de recordatorios
+													</Link>
+												</DropdownMenuItem>
+												<DropdownMenuItem asChild>
+													<Link to="/cobros/buckets" className="cursor-pointer">
+														<Layers className="mr-2 h-4 w-4" />
+														Historial de Buckets
+													</Link>
+												</DropdownMenuItem>
+												<DropdownMenuItem asChild>
+													<Link
+														to="/cobros/reportes"
+														className="cursor-pointer"
+													>
+														<BarChart3 className="mr-2 h-4 w-4" />
+														Reportes
+													</Link>
+												</DropdownMenuItem>
+											</DropdownMenuGroup>
 										</>
 									)}
 								</DropdownMenuContent>
@@ -562,6 +582,16 @@ export default function Header() {
 const MOBILE_LINK_CLASS =
 	"flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors hover:bg-accent [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0 [&_svg]:text-muted-foreground";
 
+// Subtítulo dentro de una MobileSection, para cuando la sección tiene
+// suficientes ítems como para pedir subgrupos (hoy: Cobros para supervisor).
+function MobileGroupLabel({ children }: { children: ReactNode }) {
+	return (
+		<p className="px-3 pt-3 pb-1 text-[11px] text-muted-foreground/70 uppercase tracking-wider">
+			{children}
+		</p>
+	);
+}
+
 function MobileSection({
 	label,
 	children,
@@ -703,6 +733,9 @@ function MobileNav({
 
 								{userRole && PERMISSIONS.canAccessCobros(userRole) && (
 									<MobileSection label="Cobros">
+										{PERMISSIONS.canAssignCobros(userRole) && (
+											<MobileGroupLabel>Mi día a día</MobileGroupLabel>
+										)}
 										<Link to="/cobros" className={MOBILE_LINK_CLASS}>
 											<Banknote />
 											Dashboard
@@ -726,65 +759,64 @@ function MobileNav({
 											<ScrollText />
 											Historial de agendas
 										</Link>
+										<Link to="/cobros/pagalo" className={MOBILE_LINK_CLASS}>
+											<Wallet />
+											Supervisión Págalo
+										</Link>
 										{PERMISSIONS.canAssignCobros(userRole) && (
-											<Link to="/cobros/apertura" className={MOBILE_LINK_CLASS}>
-												<Sunrise />
-												Apertura del día
-											</Link>
-										)}
-										{PERMISSIONS.canAssignCobros(userRole) && (
-											<Link to="/cobros/metas" className={MOBILE_LINK_CLASS}>
-												<Target />
-												Metas de Mora
-											</Link>
-										)}
-										{PERMISSIONS.canAssignCobros(userRole) && (
-											<Link to="/cobros/buckets" className={MOBILE_LINK_CLASS}>
-												<Layers />
-												Historial de Buckets
-											</Link>
-										)}
-										{PERMISSIONS.canAssignCobros(userRole) && (
-											<Link
-												to="/cobros/reduccion"
-												className={MOBILE_LINK_CLASS}
-											>
-												<BellOff />
-												Reducción de recordatorios
-											</Link>
-										)}
-										{PERMISSIONS.canAssignCobros(userRole) && (
-											<Link
-												to="/cobros/reasignaciones"
-												className={MOBILE_LINK_CLASS}
-											>
-												<UserCog />
-												Traslados y coberturas
-											</Link>
-										)}
-										{PERMISSIONS.canAssignCobros(userRole) && (
-											<Link to="/cobros/carga" className={MOBILE_LINK_CLASS}>
-												<Gauge />
-												Carga de Cuentas
-											</Link>
-										)}
-										{PERMISSIONS.canAssignCobros(userRole) && (
-											<Link to="/cobros/cierre" className={MOBILE_LINK_CLASS}>
-												<Moon />
-												Cierre Diario
-											</Link>
-										)}
-										{PERMISSIONS.canAccessCobros(userRole) && (
-											<Link to="/cobros/pagalo" className={MOBILE_LINK_CLASS}>
-												<Wallet />
-												Supervisión Págalo
-											</Link>
-										)}
-										{PERMISSIONS.canAssignCobros(userRole) && (
-											<Link to="/cobros/reportes" className={MOBILE_LINK_CLASS}>
-												<BarChart3 />
-												Reportes
-											</Link>
+											<>
+												<MobileGroupLabel>Supervisión</MobileGroupLabel>
+												<Link
+													to="/cobros/apertura"
+													className={MOBILE_LINK_CLASS}
+												>
+													<Sunrise />
+													Apertura del día
+												</Link>
+												<Link to="/cobros/cierre" className={MOBILE_LINK_CLASS}>
+													<Moon />
+													Cierre Diario
+												</Link>
+												<Link to="/cobros/carga" className={MOBILE_LINK_CLASS}>
+													<Gauge />
+													Carga de Cuentas
+												</Link>
+												<Link
+													to="/cobros/reasignaciones"
+													className={MOBILE_LINK_CLASS}
+												>
+													<UserCog />
+													Traslados y coberturas
+												</Link>
+												<Link to="/cobros/metas" className={MOBILE_LINK_CLASS}>
+													<Target />
+													Metas de Mora
+												</Link>
+												<MobileGroupLabel>
+													Configuración y análisis
+												</MobileGroupLabel>
+												<Link
+													to="/cobros/reduccion"
+													className={MOBILE_LINK_CLASS}
+												>
+													<BellOff />
+													Reducción de recordatorios
+												</Link>
+												<Link
+													to="/cobros/buckets"
+													className={MOBILE_LINK_CLASS}
+												>
+													<Layers />
+													Historial de Buckets
+												</Link>
+												<Link
+													to="/cobros/reportes"
+													className={MOBILE_LINK_CLASS}
+												>
+													<BarChart3 />
+													Reportes
+												</Link>
+											</>
 										)}
 									</MobileSection>
 								)}

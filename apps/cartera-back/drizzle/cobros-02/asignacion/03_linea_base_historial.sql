@@ -17,10 +17,16 @@
 -- impiden duplicar.
 -- =====================================================================
 
+-- Schema destino por variable de psql: -v schema=cartera_cobros2 (default: cartera_cobros2).
+-- Lo pasa carga_inicial.sh; a mano, psql -v schema=... -f este_archivo.
+\if :{?schema}
+\else
+\set schema cartera_cobros2
+\endif
+
 BEGIN;
 
--- ⇦ Sandbox de pruebas. Cambiar a `cartera` cuando toque el ambiente real.
-SET LOCAL search_path TO cartera_cobros2;
+SET LOCAL search_path TO :"schema";
 
 INSERT INTO buckets_historial
   (credito_id, bucket_nuevo, tipo_evento, origen,

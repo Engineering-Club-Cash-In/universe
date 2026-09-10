@@ -141,7 +141,65 @@ Mismo par UPDATE + bitácora, pero con `origen = API_MANUAL`, el `usuario_id` de
 hizo y **motivo obligatorio**. Solo se permite mover a un asesor que ya esté en el pool
 del bucket actual del crédito.
 
----
+### Traslado masivo de cartera (CB-114)
+
+Cuando alguien renuncia, sale de vacaciones largas o hay que rebalancear, mover crédito por
+crédito no sirve. `POST /buckets/traslados/previsualizar` arma un plan y
+`POST /buckets/traslados/confirmar` lo aplica. Pantalla: `/cobros/reasignaciones`, pestaña
+*Traslado masivo*.
+
+| Modo | Qué hace |
+| --- | --- |
+| `traslado_completo` | Todo lo del asesor origen va a un único destino |
+| `redistribucion` | Cada crédito va al asesor con menos carga del pool de **su** bucket, excluyendo al origen |
+| `destino_por_bucket` | Un destino distinto por bucket, definido a mano |
+
+Las cuentas fuera del funnel (`CANCELADO`, `INCOBRABLE`, …) no pertenecen a ningún bucket
+pero igual cambian de responsable: van a un **destino especial** aparte, y si el origen
+tiene de esas y no se indicó uno, la operación **falla cerrado** en vez de dejarlas huérfanas.
+
+Tres cosas que vale conocer del diseño:
+
+- **El preview vence a los 10 minutos** y guarda el hash del plan. Al confirmar se vuelve a
+  calcular: si la cartera cambió en el intervalo, responde 409 en vez de aplicar un plan
+  viejo. La confirmación además es idempotente por `idempotency_key`.
+- **Toma los advisory locks del motor de moras y del de convenios.** Si el job está
+  corriendo, la confirmación espera 5 segundos y devuelve un 409 accionable; y al revés, si
+  hay un traslado en curso, el job se omite esa corrida. No se pisan.
+- **Los créditos con promesa de pago vigente se reparten primero**, para que no queden
+  arrinconados al final de un round-robin.
+
+> `nivelacion` aparece en el `CHECK` de la tabla pero ningún validador lo acepta: hoy es
+> código muerto.
+
+### Coberturas temporales (CB-114 / CC2-23)
+
+Vacaciones y permisos **no mueven la cartera**. Se registra una cobertura
+(titular ausente, suplente, rango de fechas) y durante esos días el suplente ve la cola, la
+agenda y su Mi Día incluyendo lo del titular, marcado con un badge; el titular deja de ver
+lo suyo. `creditos.asesor_id` no se toca en ningún momento: todo se resuelve **en lectura**,
+en el CRM, y al cancelar la cobertura todo vuelve solo sin ningún job de por medio.
+
+Se exige que el suplente cubra **todos** los buckets del titular, y no se permiten solapes:
+nadie puede estar en dos coberturas vigentes a la vez, en ningún rol.
+
+### Los cuatro que escriben `creditos.asesor_id`
+
+Conviene tenerlos juntos, porque la pregunta "¿por qué cambió de asesor este crédito?" se
+responde siempre mirando `credito_asesor_historial`:
+
+| Quién | `origen` | Cuándo |
+| --- | --- | --- |
+| El motor (`procesarMoras`) | `PROCESO_AUTO` | Solo cuando el crédito cambia de bucket |
+| El job de convenios | `PROCESO_AUTO` | Igual, y también en su `INICIAL` |
+| Reasignación manual | `API_MANUAL` | Un crédito, con motivo y usuario |
+| Traslado masivo | `API_MANUAL` | En lote, con el id de la operación en el motivo |
+
+**¿El motor deshace un traslado?** No mientras el crédito no cambie de bucket. El traslado
+exige que el destino esté en el pool del bucket **actual**, y `elegirAsesorParaBucket`
+conserva al asesor que ya es elegible en el destino. El único caso en que el motor
+sobrescribe un destino elegido a mano es si el crédito cambia de bucket **y** ese asesor no
+pertenece al pool del bucket nuevo, que es justamente el comportamiento buscado.
 
 ## Cómo interactúa un pago con el bucket
 

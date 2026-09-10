@@ -174,6 +174,13 @@ que se hayan afinado.
 
 ## Fase 5 · Asignación
 
+> **Desde 2026-09-09 hay orquestador:** `apps/cartera-back/drizzle/cobros-02/asignacion/carga_inicial.sh`
+> corre copia + migraciones + `01→04` parametrizado por `--origen/--destino` (URL y
+> schema) y por `--pool pool.csv` (correo → buckets, admite `1|2`). Las fases `01→04`
+> van en **una sola transacción**, y `--dry-run` las corre con ROLLBACK para ver la
+> distribución antes de tocar nada. El pool ya no va por nombre quemado en el `01`.
+
+
 | Script | ¿Correr? |
 | --- | --- |
 | `01_pool_asesor_bucket.sql` | **No**, si el pool vino en el trasplante. Volver a correrlo duplicaría el asesor de prueba y pisaría capacidades |
@@ -285,6 +292,40 @@ tiene FKs hacia fuera de su propio schema. Todo lo demás viaja adentro del dump
   al schema viejo, que ahora es el backup.
 - **Comprobar que el CRM sigue vivo** (entrar al login), por el tema del `search_path`.
 - El backup se borra **cuando se haya validado**, no antes.
+
+## Alineación desde producción (a demanda, desde 2026-09-09)
+
+Lo de arriba es el procedimiento a mano con docker. Hay una versión scriptada que hace lo
+mismo sin docker, dentro de la misma Neon, y que **se corre cuando alguien la pide**, no en
+automático:
+
+`apps/cartera-back/drizzle/cobros-02/asignacion/alinear_desde_prod.sh`
+
+```bash
+alinear_desde_prod.sh --prod "$PROD_SUPABASE" --neon "$NEON_DIRECTO"
+# --sin-swap para inspeccionar el resultado antes de aplicarlo
+```
+
+| Paso | Qué hace |
+| --- | --- |
+| 1 | `pg_dump` de producción (solo lectura) → `cartera_cobros2_nuevo`, renombrando al vuelo |
+| 2 | Migraciones del bloque cobros-02 sobre el de trabajo |
+| 3 | Trasplante desde el sandbox vivo: catálogo `buckets`, `asesor_bucket`, `buckets_historial`, `credito_asesor_historial`, `promesas_pago_espejo`, ledger Págalo, traslados, **y el dueño de cada crédito** |
+| 4 | `03` línea base para los créditos nuevos, `04` backfill de convenios (`01` si se pasa `--pool`) |
+| 5 | **El motor** (`procesarMoras` + convenios) sobre el schema de trabajo |
+| 6 | `02` con `conservar=1` para los residuos que el motor no toca |
+| 7 | Swap por rename + retención de 2 backups `cartera_cobros2_bk_<fecha>_<hora>` |
+
+**El paso 5 es el que importa.** Copiar los datos no mueve ningún bucket: el bucket vive en
+`buckets_historial` y solo cambia cuando el motor registra la transición. Un crédito que
+está en B1 en el sandbox y que en producción ya pagó y le validaron el pago llega con la
+cuota saldada, pero sigue en B1 hasta que el motor cuenta cero cuotas vencidas y escribe la
+**BAJADA a B0** con su reasignación de asesor. Así cada corrida deja registrado el
+movimiento real de la cartera desde la última vez, en vez de un salto silencioso.
+
+**Lo que se pierde:** los pagos y boletas de prueba registrados en el sandbox. Después del
+swap hay que **reiniciar cartera-back**, porque sus conexiones vivas apuntan al schema que
+acaba de pasar a backup.
 
 ## Rollback
 

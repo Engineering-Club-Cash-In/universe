@@ -31,15 +31,18 @@ para que se sepa que se aplican como bloque cuando salga esa versión.
 ## Asignación inicial (`asignacion/`) — carga de datos, NO schema
 
 Scripts **set-based** (nada de ir crédito por crédito) para poblar el modelo
-una vez aplicadas las migraciones 0000→0003. Pensados para el **sandbox de
-pruebas** (`cartera_cobros2`, copia del schema `cartera` en dev): cada archivo
-abre con `SET LOCAL search_path TO cartera_cobros2;` — cambiar esa línea a
-`cartera` cuando toque el ambiente real. Correr en orden; los 3 son
-idempotentes y revientan (no siguen a medias) si falta un prerequisito.
+una vez aplicadas las migraciones 0000→0003. El schema se pasa como variable de psql (`-v schema=cartera_cobros2`; sin
+ella, 01/02/03 asumen el sandbox y 04 asume `cartera`). Correr en orden; los
+scripts son idempotentes y revientan (no siguen a medias) si falta un
+prerequisito. Lo más cómodo es `carga_inicial.sh`, que hace todo.
 
 | Archivo | Qué hace |
 |---|---|
-| `asignacion/01_pool_asesor_bucket.sql` | Crea el asesor de prueba de B1 y puebla el pool `asesor_bucket` por NOMBRE: B0 Caren Rivera · B1 Diego Gomez + Asesor Prueba B1 · B2 Samuel Gamboa · B3 Jorge Sente · B4 Erik Rivas · B5 Gerencia. |
+| `asignacion/carga_inicial.sh` | **Orquestador parametrizable** (2026-09-09): `--origen/--origen-schema` (solo lectura) → `--destino/--destino-schema`, `--pool pool.csv`, `--fases`, `--dry-run`, `--reemplazar`, `--permitir-prod`. Copia el schema (renombrando al vuelo), aplica las migraciones del bloque, y corre 01→04 con `-v schema=`. Rechaza hosts `-pooler` y prod sin bandera. |
+| `asignacion/alinear_desde_prod.sh` | **Alineación desde producción, a demanda** (no programada): dump de prod a un schema de trabajo, migraciones, trasplante del historial/pool/catálogo/dueños del sandbox, línea base de los créditos nuevos, **el motor** (que es quien mueve los buckets y registra las BAJADAS de quien ya pagó), `02` para residuos, swap por rename y retención. Ver el runbook. |
+| `asignacion/_lib.sh` | Funciones compartidas (renombrado de dump y migraciones, aplicar migraciones, verificación). |
+| `asignacion/pool.csv` | **El parámetro del pool**: `email_cash_in,buckets,nombre_referencia`; varios buckets con `\|` (ej. `1\|2`). La llave es el correo, no el nombre ni el id (cambiaron de persona entre refrescos). |
+| `asignacion/01_pool_asesor_bucket.sql` | Puebla el pool `asesor_bucket` desde `pool.csv` (`-v pool_csv=`). **Autoritativo**: reactiva los pares del CSV y desactiva los que ya no estén. Guards: correo sin asesor activo, bucket fuera de catálogo, bucket sin asesor. Ya no crea el asesor de prueba. |
 | `asignacion/02_asignar_asesores_creditos.sql` | Deriva el bucket de cada crédito (mismas reglas del motor: fuera del funnel no se toca; `estados_incluidos` manda; si no, `cuotas_atrasadas` de la mora activa vs rangos del catálogo) y asigna asesor: 1 asesor → directo, N asesores → round-robin determinístico (parejo). Bitácora en `credito_asesor_historial` PRIMERO, luego `UPDATE creditos SET asesor_id` — **únicamente ese campo**. |
 | `asignacion/03_linea_base_historial.sql` | Siembra el evento `INICIAL` en `buckets_historial` (solo créditos sin ningún registro), espejo de lo que haría el motor — así `procesarMoras` no re-siembra y solo registra SUBIDAs/BAJADAs reales. |
 

@@ -100,6 +100,7 @@ async function registrarGestionLinkPagalo(params: {
 	whatsappEnviado: boolean | null;
 	fechaContacto?: Date;
 	bucketSnapshot?: number | null;
+	finalizar?: boolean;
 }): Promise<boolean> {
 	if (params.cantidadLinks === 0) return false;
 	const bucketSnapshot =
@@ -117,10 +118,21 @@ async function registrarGestionLinkPagalo(params: {
 				.where(eq(pagaloPaymentGroups.id, params.groupId))
 				.for("update");
 			if (!grupo) return false;
+			if (grupo.contactoCobroId) {
+				if (params.finalizar) {
+					await tx
+						.update(contactosCobros)
+						.set({
+							comentarios: construirComentarioGestionLinkPagalo(params),
+							bucketSnapshot,
+						})
+						.where(eq(contactosCobros.id, grupo.contactoCobroId));
+				}
+				return true;
+			}
 			if (grupo.status === "CANCELLED") {
 				return false;
 			}
-			if (grupo.contactoCobroId) return true;
 			const [gestion] = await tx
 				.insert(contactosCobros)
 				.values({
@@ -505,6 +517,7 @@ export async function createPagaloLinks(input: CreatePagaloLinksInput) {
 		totalAmount: totalDeLinksPagalo(emitido.links),
 		cantidadLinks: emitido.links.length,
 		whatsappEnviado: emitido.whatsappEnviado,
+		finalizar: true,
 	});
 
 	return {

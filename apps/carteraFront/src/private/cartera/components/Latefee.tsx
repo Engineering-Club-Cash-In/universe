@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
@@ -15,7 +15,80 @@ import {
   TableBody,
 } from "@/components/ui/table";
 import { useMoras, useMorasMasivo } from "../hooks/useLateFee";
+import type { EstadoCredito } from "../services/services";
 import { useAuth } from "@/Provider/authProvider";
+
+/**
+ * Paginación compartida por las dos pestañas.
+ *
+ * `/moras/creditos` y `/moras/condonaciones` cortan en 20 filas server-side. Sin
+ * estos controles todo lo que cae después de la fila 20 queda inalcanzable: no
+ * hay forma de editar ni condonar individualmente un crédito de la página 2.
+ *
+ * ⚠️ `page` es SIEMPRE el estado local, nunca el eco del servidor: el número que
+ * vuelve en `pagination.page` corresponde a la respuesta que ya se recibió, y
+ * usarlo para calcular el siguiente hacía que dos clics seguidos apuntaran a la
+ * misma página. Del servidor solo se leen `total` y `totalPages`.
+ */
+function Paginacion({
+  page,
+  setPage,
+  pageSize,
+  setPageSize,
+  totalPages,
+  total,
+  label,
+}: {
+  page: number;
+  setPage: (n: number) => void;
+  pageSize: number;
+  setPageSize: (n: number) => void;
+  totalPages: number;
+  total: number;
+  label: string;
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-between mt-5 gap-3">
+      <span className="text-sm text-gray-600">
+        Página {page} de {totalPages || 1} ({total} {label})
+      </span>
+      <div className="flex items-center gap-2">
+        <select
+          className="border border-blue-200 rounded-lg px-3 py-2 text-sm text-blue-800 bg-blue-50"
+          value={pageSize}
+          onChange={(e) => {
+            setPageSize(Number(e.target.value));
+            setPage(1);
+          }}
+        >
+          {[20, 50, 100].map((n) => (
+            <option key={n} value={n}>
+              {n} por página
+            </option>
+          ))}
+        </select>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={page <= 1}
+          onClick={() => setPage(page - 1)}
+          className="border-blue-200 text-blue-700"
+        >
+          ◀
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={page >= (totalPages || 1)}
+          onClick={() => setPage(page + 1)}
+          className="border-blue-200 text-blue-700"
+        >
+          ▶
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 export default function MorasManager() {
   const [tab, setTab] = useState<"creditos" | "condonaciones">("creditos");
@@ -51,6 +124,12 @@ export default function MorasManager() {
     number | null
   >(null);
 
+  // Paginación de cada pestaña (el backend corta en 20 por página).
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [cPage, setCPage] = useState(1);
+  const [cPageSize, setCPageSize] = useState(20);
+
   const {
     creditosMora,
     condonaciones,
@@ -58,11 +137,46 @@ export default function MorasManager() {
     loadingCondonaciones,
     condonarMora,
     updateMora,
-  } = useMoras({ estado: "MOROSO" });
+  } = useMoras({
+    creditos: { estado: "MOROSO" as EstadoCredito, page, pageSize },
+    condonaciones: { page: cPage, pageSize: cPageSize },
+  });
   const { condonarMorasMasivo } = useMorasMasivo();
 
   const { user } = useAuth();
   const queryClient = useQueryClient();
+
+  const creditosPag = creditosMora?.pagination;
+  const condPag = condonaciones?.pagination;
+
+  /**
+   * Total GLOBAL de créditos morosos, el que de verdad va a tocar
+   * `/moras/condonar-masivo`.
+   *
+   * ⚠️ NO se usa `creditosMora.data.length`: eso es el largo de la PÁGINA (20).
+   * El diálogo decía "20 créditos" justo antes de condonar cientos, porque la
+   * ruta masiva ignora la paginación y opera sobre todos los que califican.
+   * `undefined` = todavía no se sabe, y en ese caso no se deja confirmar.
+   */
+  const totalMorosos = creditosPag?.total;
+
+  // Quedarse fuera de rango es un callejón sin salida: si estabas en la última
+  // página con un solo crédito y lo condonás, el refetch devuelve vacío y no hay
+  // botón para volver. Al recortar la página, el propio cambio de estado dispara
+  // la consulta de la página válida.
+  const totalPagesCreditos = creditosPag?.totalPages;
+  useEffect(() => {
+    if (totalPagesCreditos == null) return;
+    const ultima = Math.max(totalPagesCreditos, 1);
+    if (page > ultima) setPage(ultima);
+  }, [totalPagesCreditos, page]);
+
+  const totalPagesCond = condPag?.totalPages;
+  useEffect(() => {
+    if (totalPagesCond == null) return;
+    const ultima = Math.max(totalPagesCond, 1);
+    if (cPage > ultima) setCPage(ultima);
+  }, [totalPagesCond, cPage]);
 
   // --- Condonación Masiva ---
   const handleCondonarMasivo = () => {
@@ -80,9 +194,16 @@ export default function MorasManager() {
       return;
     }
 
+    // Sin el total global no se sabe QUÉ se está condonando: se prefiere no
+    // dejar confirmar antes que confirmar contra un número inventado.
+    if (totalMorosos == null) {
+      toast.error("Esperá a que se calcule el alcance de la condonación");
+      return;
+    }
+
     if (
       !confirm(
-        "⚠️ ¿Estás seguro de condonar TODAS las moras de créditos morosos?"
+        `⚠️ ¿Estás seguro de condonar TODAS las moras de créditos morosos? Son ${totalMorosos} créditos.`
       )
     ) {
       return;
@@ -242,7 +363,9 @@ export default function MorasManager() {
       {tab === "creditos" && (
         <Card>
           <CardHeader className="font-semibold text-lg text-gray-700">
-            Créditos Morosos ({creditosMora?.data?.length || 0})
+            {/* El total del servidor, no el largo de la página: con 300
+                morosos el encabezado decía "20". */}
+            Créditos Morosos ({totalMorosos ?? "…"})
           </CardHeader>
           <CardContent>
             {loadingCreditos ? (
@@ -367,6 +490,16 @@ export default function MorasManager() {
                     </div>
                   ))}
                 </div>
+
+                <Paginacion
+                  page={page}
+                  setPage={setPage}
+                  pageSize={pageSize}
+                  setPageSize={setPageSize}
+                  totalPages={creditosPag?.totalPages ?? 1}
+                  total={creditosPag?.total ?? 0}
+                  label="créditos"
+                />
               </>
             )}
           </CardContent>
@@ -504,6 +637,16 @@ export default function MorasManager() {
                     </div>
                   ))}
                 </div>
+
+                <Paginacion
+                  page={cPage}
+                  setPage={setCPage}
+                  pageSize={cPageSize}
+                  setPageSize={setCPageSize}
+                  totalPages={condPag?.totalPages ?? 1}
+                  total={condPag?.total ?? 0}
+                  label="condonaciones"
+                />
               </>
             )}
           </CardContent>
@@ -519,9 +662,16 @@ export default function MorasManager() {
             </h3>
             <p className="text-sm text-gray-600 mb-4">
               Esta acción condonará la mora de{" "}
-              <span className="font-bold text-red-600">TODOS</span> los
-              créditos con estado MOROSO ({creditosMora?.data?.length || 0}{" "}
-              créditos)
+              <span className="font-bold text-red-600">TODOS</span> los créditos
+              con estado MOROSO{" "}
+              {totalMorosos == null ? (
+                <span className="italic">(calculando alcance...)</span>
+              ) : (
+                <span className="font-bold text-red-600">
+                  ({totalMorosos} créditos)
+                </span>
+              )}
+              . <b>No respeta la paginación ni los filtros de esta pantalla.</b>
             </p>
             <div className="flex flex-col gap-3">
               <div>
@@ -552,7 +702,7 @@ export default function MorasManager() {
                 <Button
                   onClick={confirmCondonacionMasiva}
                   className="bg-orange-600 hover:bg-orange-700"
-                  disabled={condonarMorasMasivo.isPending}
+                  disabled={condonarMorasMasivo.isPending || totalMorosos == null}
                 >
                   {condonarMorasMasivo.isPending
                     ? "Condonando..."

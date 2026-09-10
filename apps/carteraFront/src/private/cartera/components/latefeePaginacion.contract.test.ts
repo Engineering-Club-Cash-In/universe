@@ -129,6 +129,69 @@ describe("condonación masiva: cableado de esta rama (listado filtrado)", () => 
   });
 
   test("el botón de confirmar espera a esa consulta", () => {
-    expect(latefee).toMatch(/condonarMorasMasivo\.isPending \|\|\s*globalMorosos\./);
+    expect(latefee).toContain(
+      "disabled={condonarMorasMasivo.isPending || !alcanceMasivoListo}"
+    );
+    expect(latefee).toContain("const alcanceMasivoListo =");
+    expect(latefee).toContain("!globalMorosos.isError");
+    expect(latefee).toContain("globalMorosos.data != null");
+    // Y el handler vuelve a chequear, por si el estado cambia entre el render
+    // y el click.
+    expect(latefee).toContain("if (!alcanceMasivoListo)");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// El paso 2 no puede aprobar un alcance viejo.
+//
+// La consulta del alcance corre al ABRIR el diálogo y tiene `refetchOnWindowFocus`
+// apagado, así que nada la revalida sola. Si el diálogo queda abierto mientras el
+// cron de mora u otro ADMIN mueven las moras activas, el paso de confirmación
+// mostraba —y aprobaba— un total arbitrariamente viejo, mientras
+// `/moras/condonar-masivo` opera sobre el conjunto ACTUAL.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("condonación masiva: entrar a confirmar refresca el alcance", () => {
+  // El cuerpo del handler que pasa al paso 2, para afirmar sobre él y no sobre
+  // el archivo entero (que tiene otros `refetch()`, como el de "Reintentar").
+  const irAConfirmacion = latefee.match(
+    /const irAConfirmacionMasiva = \(\) => \{([\s\S]*?)\n  \};/
+  )?.[1];
+
+  test("el handler existe y se encontró su cuerpo", () => {
+    expect(irAConfirmacion).toBeDefined();
+  });
+
+  test("pasar al paso 2 vuelve a pedir el alcance", () => {
+    // Antes esto era solo `setConfirmandoMasiva(true)`.
+    expect(irAConfirmacion).toContain("globalMorosos.refetch()");
+    expect(irAConfirmacion).toContain("setConfirmandoMasiva(true)");
+  });
+
+  // NO se prueba ningún orden de sentencias dentro del handler. Hubo acá una
+  // aserción que fijaba "una bandera se prende ANTES del refetch", justificada
+  // en que `refetch()` no marcaría `isFetching` en el mismo tick. Se comprobó
+  // contra el `@tanstack/react-query` instalado que eso es falso:
+  // `observer.getCurrentResult().isFetching` ya es `true` en el mismo tick del
+  // `refetch()` y el observer notifica de forma síncrona, así que el render que
+  // dispara el paso 2 ya ve la consulta en vuelo. La ventana no existía, y la
+  // aserción estaba volviendo invariante permanente un razonamiento falso.
+
+  test("el botón de confirmar espera dato fresco, no sólo 'no está mutando'", () => {
+    // `alcanceMasivoListo` es la condición completa: sin vuelo, sin error y con
+    // datos. Las tres importan — con dos de tres se puede confirmar a ciegas.
+    const definicion = latefee.match(/const alcanceMasivoListo =([\s\S]*?);/)?.[1];
+    expect(definicion).toBeDefined();
+    expect(definicion).toMatch(/!\s*globalMorosos\.isFetching\b/);
+    expect(definicion).toMatch(/!\s*globalMorosos\.isError\b/);
+    expect(definicion).toMatch(/globalMorosos\.data != null/);
+  });
+
+  test("mientras el alcance está en vuelo se tapa el número, no se muestra el viejo", () => {
+    // El cartel de "Calculando alcance..." se gatea con la MISMA señal de vuelo
+    // que bloquea el botón, así que no hay render con el total viejo a la vista.
+    expect(latefee).toMatch(
+      /\{globalMorosos\.isFetching \? \([\s\S]{0,600}?Calculando\s*\n?\s*alcance/
+    );
   });
 });

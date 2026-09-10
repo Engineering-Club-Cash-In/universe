@@ -2486,6 +2486,47 @@ export async function regenerarLinkIndividual(params: {
 		}
 	}
 
+	// Si esta regeneración completó un grupo que antes estaba parcial, el
+	// historial debe reflejar todos sus links vigentes. No crea gestiones
+	// humanas para grupos generados por BOT.
+	if (grupo.origen === "ASESOR" && emitido.activo) {
+		const linksParaGestion = (
+			await db
+				.select({
+					linkType: pagaloPaymentLinks.linkType,
+					status: pagaloPaymentLinks.status,
+					isApplicationSource: pagaloPaymentLinks.isApplicationSource,
+				})
+				.from(pagaloPaymentLinks)
+				.where(eq(pagaloPaymentLinks.groupId, grupo.id))
+		).flatMap((link) =>
+			esLinkPagaloContabilizableEnGestion(link.status, link.isApplicationSource)
+				? [
+						{
+							amount:
+								link.linkType === "CAPITAL"
+									? grupo.capitalTotal
+									: grupo.facturableTotal,
+						},
+					]
+				: [],
+		);
+		if (linksParaGestion.length > 0) {
+			await registrarGestionLinkPagalo({
+				groupId: grupo.id,
+				casoCobroId: grupo.casoCobroId,
+				numeroSifco: grupo.numeroCreditoSifco,
+				requestedBy: params.actorUserId,
+				totalAmount: totalDeLinksPagalo(linksParaGestion),
+				cantidadLinks: linksParaGestion.length,
+				whatsappEnviado: null,
+				finalizar: true,
+				repararPreliminar: true,
+				actualizarGestionParcial: true,
+			});
+		}
+	}
+
 	// WhatsApp solo en la creación real desde el modal (createPagaloLinks) —
 	// regenerar un link individual no reenvía nada, decisión de producto.
 	// El supervisor ve el link nuevo (o el fallo) en la UI y decide si

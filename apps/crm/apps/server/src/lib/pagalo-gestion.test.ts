@@ -67,6 +67,12 @@ test("suma solo links Págalo emitidos", () => {
 	).toBe("2504.81");
 });
 
+test("suma montos numeric sin perder centavos fuera de precisión Number", () => {
+	expect(
+		totalDeLinksPagalo([{ amount: "9999999999999999.99" }, { amount: "0.02" }]),
+	).toBe("10000000000000000.01");
+});
+
 test("solo links activos o pagados cuentan como emitidos", () => {
 	expect(esLinkPagaloGenerado("ACTIVE")).toBe(true);
 	expect(esLinkPagaloGenerado("PAID")).toBe(true);

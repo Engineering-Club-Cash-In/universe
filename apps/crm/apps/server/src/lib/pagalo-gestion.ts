@@ -34,9 +34,14 @@ export function resultadoWhatsappGestionLinkPagalo(
 export function totalDeLinksPagalo(
 	links: readonly { amount: string }[],
 ): string {
-	return links
-		.reduce((total, link) => total + Number(link.amount), 0)
-		.toFixed(2);
+	const totalCentavos = links.reduce((total, link) => {
+		const monto = link.amount.trim().match(/^(\d+)(?:\.(\d{1,2}))?$/);
+		if (!monto) throw new Error("Monto de link Págalo inválido.");
+		return (
+			total + BigInt(monto[1]) * 100n + BigInt((monto[2] ?? "").padEnd(2, "0"))
+		);
+	}, 0n);
+	return `${totalCentavos / 100n}.${String(totalCentavos % 100n).padStart(2, "0")}`;
 }
 
 export function esLinkPagaloGenerado(status: string | null): boolean {

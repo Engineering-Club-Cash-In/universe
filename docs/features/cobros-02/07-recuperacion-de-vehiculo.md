@@ -109,7 +109,18 @@ ya no se recupera por teléfono.
 pasa por `assertAccesoCasoCobro` y resuelve el `credito_id` contra `carteraBackReferences`.
 Recibir el `credito_id` directo dejaba a un asesor mandar a B4 —y reasignar— el crédito de
 otro con solo cambiar el número, porque `cobrosProcedure` solo valida el rol (review de
-Codex, P1). Es el mismo patrón de `getPagaloGrupoActivo` y las acciones de Págalo.
+Codex, P1).
+
+**Y el caso tampoco alcanza como autorización.** `getDetallesCreditoCarteraBack` AUTO-CREA
+un caso con `responsableCobros = quien consulta` cuando el crédito no tiene uno activo, así
+que un asesor puede fabricarse el acceso consultando un SIFCO enumerable y después pasar
+cualquier gate que mire el caso. La verdad de "de quién es este crédito" la tiene **cartera**:
+se compara el `email_cash_in` del asesor asignado contra el correo de login
+(`assertCreditoAsignadoEnCartera`, en `lib/credito-cartera-ownership.ts`). Admin y supervisor
+de cobros quedan fuera del chequeo: ellos sí operan sobre cualquier crédito.
+
+Es la misma regla que ya defendía `crearConvenioDesdeFicha` desde el PR #1570; se extrajo a
+una función compartida cuando hizo falta la tercera copia.
 
 La trazabilidad no la da el permiso sino el **motivo obligatorio** y la bitácora
 `API_MANUAL`, que guarda quién lo pidió. En el menú el ítem va separado y en rojo para que

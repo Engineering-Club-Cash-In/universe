@@ -10,7 +10,11 @@ import {
   platform_users,
   SQL_CARTERA_SCHEMA,
 } from "../../database/db/schema";
-import { bucketActualSql, STATUS_BUCKET_FUERA } from "../../lib/buckets-classification";
+import {
+  bucketActualSql,
+  STATUS_BUCKET_FUERA,
+  STATUS_READER_FUERA,
+} from "../../lib/buckets-classification";
 import {
   BUCKETS_CONVENIO_LOCK_KEY,
   CREDITO_ASESOR_LOCK_NAMESPACE,
@@ -137,17 +141,26 @@ async function getEstadoCredito(
  * Carga viva del pool del bucket destino: cuántas cuentas lleva HOY cada asesor
  * en ese bucket, con la misma derivación de bucket actual que todo lo demás.
  * Alimenta el desempate por menor carga de `elegirAsesorParaBucket`.
+ *
+ * El filtro por `STATUS_READER_FUERA` es el mismo de la query canónica de carga
+ * (`cargaAsesorBucket.ts`) y no es opcional: `bucketActualSql` prioriza la última
+ * fila de `buckets_historial` y NO excluye estados cerrados por su cuenta, así
+ * que un CANCELADO/CAIDO con una fila vieja de B4 seguía contando como carga viva
+ * y mandaba las recuperaciones nuevas al asesor equivocado (review de Codex, P2).
+ * Conserva EN_CONVENIO: esos créditos sí se atienden.
  */
 async function getCargaDelBucket(
   bucket: number,
   ejecutor: Ejecutor,
 ): Promise<Map<number, number>> {
+  const cerradosSql = sql.join(STATUS_READER_FUERA.map((s) => sql`${s}`), sql`, `);
   const res = await ejecutor.execute<{ asesor_id: number; cuentas: number }>(sql`
     SELECT c.asesor_id, COUNT(*)::int AS cuentas
     FROM ${SQL_CARTERA_SCHEMA}.creditos c
     LEFT JOIN ${SQL_CARTERA_SCHEMA}.moras_credito m
       ON m.credito_id = c.credito_id AND m.activa = true
     WHERE c.asesor_id IS NOT NULL
+      AND c."statusCredit" NOT IN (${cerradosSql})
       AND ${bucketActualSql("c", "m")} = ${bucket}
     GROUP BY c.asesor_id
   `);

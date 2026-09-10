@@ -17,6 +17,7 @@ const estado = {
   // por el texto del SQL, así que agregar o mover un lock no desalinea los tests.
   executeQueue: [] as Fila[][],
   locksTomados: [] as string[],
+  consultas: [] as string[],
   inserts: [] as { tabla: any; filas: Fila[] }[],
   updates: [] as { tabla: any; set: Fila }[],
   actualizacionAfecta: true,
@@ -84,6 +85,7 @@ const fakeExecute = async (q: any) => {
     estado.locksTomados.push(texto.trim());
     return { rows: [] };
   }
+  estado.consultas.push(texto);
   return { rows: estado.executeQueue.shift() ?? [] };
 };
 
@@ -146,6 +148,7 @@ beforeEach(() => {
   estado.selectsPorTabla.clear();
   estado.executeQueue = [];
   estado.locksTomados = [];
+  estado.consultas = [];
   estado.inserts = [];
   estado.updates = [];
   estado.actualizacionAfecta = true;
@@ -315,6 +318,17 @@ describe("enviarARecuperacionVehiculo — controller real con DB fakeada", () =>
     // `return false` COMMITEABA, así que el crédito quedaba en B4 mientras la API
     // respondía 409. Ahora el UPDATE guardado va antes y el abort revierte.
     expect(insertsDe(schema.buckets_historial)).toHaveLength(0);
+  });
+
+  it("la carga del bucket excluye los créditos cerrados", async () => {
+    prepararCredito({ bucket: 2, asesor_id: 3 });
+    await enviarARecuperacionVehiculo({ credito_id: 9116, motivo: "válido" });
+    // `bucketActualSql` prioriza la última fila de buckets_historial y NO excluye
+    // estados cerrados: sin este filtro, un CANCELADO con una fila vieja de B4
+    // contaba como carga viva y desviaba la asignación (review de Codex, P2).
+    const carga = estado.consultas.find((q) => q.includes("COUNT(*)"));
+    expect(carga).toBeDefined();
+    expect(carga).toContain('"statusCredit" NOT IN');
   });
 
   it("toma los locks de AMBOS jobs y el del crédito antes de leer", async () => {

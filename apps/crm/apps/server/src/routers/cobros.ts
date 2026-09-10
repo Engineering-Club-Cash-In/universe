@@ -99,6 +99,7 @@ import {
 	leerMaxMesesConvenio,
 	resolverPagoIdsDeCuotas,
 } from "../lib/convenio-desde-ficha";
+import { assertCreditoAsignadoEnCartera } from "../lib/credito-cartera-ownership";
 import { eqDpi } from "../lib/dpi-lookup";
 import { fetchAllPages } from "../lib/fetch-all-pages";
 import { gtDateStrToDate, toDateStrGT } from "../lib/guatemala-month-window";
@@ -2828,17 +2829,12 @@ export const cobrosRouter = {
 			//
 			// Admin y supervisor de cobros quedan fuera del chequeo: ellos sí
 			// operan sobre cualquier crédito.
-			if (!PERMISSIONS.canViewAllCasosCobros(context.userRole ?? "")) {
-				const emailAsesorCredito = credito.asesor?.emailCashIn
-					?.trim()
-					.toLowerCase();
-				if (!emailAsesorCredito || emailAsesorCredito !== email) {
-					throw new ORPCError("FORBIDDEN", {
-						message:
-							"Este crédito no está asignado a vos en cartera; no podés crear un convenio sobre él.",
-					});
-				}
-			}
+			assertCreditoAsignadoEnCartera({
+				emailAsesorCredito: credito.asesor?.emailCashIn,
+				emailUsuario: email,
+				userRole: context.userRole,
+				accion: "crear un convenio sobre él",
+			});
 
 			const statusCredit = credito.credito.statusCredit;
 			if (statusCredit === "EN_CONVENIO" || credito.convenioActivo) {
@@ -8486,10 +8482,7 @@ export const cobrosRouter = {
 				.select({ carteraCreditoId: carteraBackReferences.carteraCreditoId })
 				.from(carteraBackReferences)
 				.where(
-					eq(
-						carteraBackReferences.numeroCreditoSifco,
-						caso.numeroCreditoSifco,
-					),
+					eq(carteraBackReferences.numeroCreditoSifco, caso.numeroCreditoSifco),
 				)
 				.limit(1);
 			if (!referencia?.carteraCreditoId) {
@@ -8498,6 +8491,20 @@ export const cobrosRouter = {
 						"No se encontró el crédito en cartera para este caso. Abrí la ficha del crédito e intentá de nuevo.",
 				});
 			}
+			// El caso NO alcanza como autorización: `getDetallesCreditoCarteraBack`
+			// auto-crea uno con `responsableCobros` = quien consulta, así que un
+			// asesor podía fabricarse acceso con un SIFCO enumerable y después pasar
+			// el gate de arriba (hallazgo de Codex, PR #1570 y de nuevo acá). La
+			// verdad de "de quién es este crédito" la tiene cartera.
+			const creditoCartera = await carteraBackClient.getCredito(
+				caso.numeroCreditoSifco,
+			);
+			assertCreditoAsignadoEnCartera({
+				emailAsesorCredito: creditoCartera.asesor?.emailCashIn,
+				emailUsuario: context.session.user.email,
+				userRole: context.userRole,
+				accion: "mandarlo a recuperación de vehículo",
+			});
 			try {
 				return await carteraBackClient.enviarARecuperacionVehiculo({
 					credito_id: referencia.carteraCreditoId,

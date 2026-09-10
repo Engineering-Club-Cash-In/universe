@@ -10,27 +10,35 @@ import {
   morasService,
   procesarMorasService,
   updateMoraService,
+  type CondonacionesMoraParams,
   type CondonarMoraPayload,
   type CreateMoraPayload,
+  type CreditosConMoraParams,
   type UpdateMoraPayload,
 } from "../services/services";
 
-// 👇 importá el tipo correcto de estado
-import type { CondonarMasivaRequest, EstadoCredito } from "../services/services";  
-export function useMoras(filters?: {
-  numero_credito_sifco?: string;
-  estado?: EstadoCredito; // 👈 corregido
-  cuotas_atrasadas?: number;
-}) {
+import type { CondonarMasivaRequest } from "../services/services";
+
+export interface UseMorasOptions {
+  /** Filtros + paginación de la pestaña "Créditos con Mora" */
+  creditos?: CreditosConMoraParams;
+  /** Filtros + paginación de la pestaña "Condonaciones" */
+  condonaciones?: CondonacionesMoraParams;
+}
+
+export function useMoras(options?: UseMorasOptions) {
   const queryClient = useQueryClient();
+  const creditosParams = options?.creditos ?? {};
+  const condonacionesParams = options?.condonaciones ?? {};
 
   const {
     data: creditosMora,
     isLoading: loadingCreditos,
     refetch: refetchCreditosMora,
   } = useQuery({
-    queryKey: ["creditosMora", filters],
-    queryFn: () => getCreditosWithMorasService(filters),
+    // la paginación va en la key para que refresque al cambiar de página
+    queryKey: ["creditosMora", creditosParams],
+    queryFn: () => getCreditosWithMorasService(creditosParams),
   });
 
   const {
@@ -38,8 +46,8 @@ export function useMoras(filters?: {
     isLoading: loadingCondonaciones,
     refetch: refetchCondonaciones,
   } = useQuery({
-    queryKey: ["condonacionesMora"],
-    queryFn: () => getCondonacionesMoraService(),
+    queryKey: ["condonacionesMora", condonacionesParams],
+    queryFn: () => getCondonacionesMoraService(condonacionesParams),
   });
 
   const createMora = useMutation({

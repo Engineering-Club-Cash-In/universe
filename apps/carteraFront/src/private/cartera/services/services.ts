@@ -1784,33 +1784,70 @@ export async function condonarMoraService(payload: CondonarMoraPayload) {
   return data;
 }
 
-// Listar créditos con mora
-export async function getCreditosWithMorasService(params?: {
+// ---------- Paginación / totales de moras ----------
+/**
+ * `/moras/creditos` y `/moras/condonaciones` pagean server-side con 20 por
+ * página por defecto: quien no mande `page`/`pageSize` recibe SOLO la primera
+ * página, sin ninguna señal de que hay más. Por eso `pagination` viaja en la
+ * respuesta y la pantalla está obligada a leerlo.
+ */
+export interface MoraPagination {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
+export interface CreditosConMoraParams {
+  page?: number;
+  pageSize?: number;
   numero_credito_sifco?: string;
   cuotas_atrasadas?: number;
   estado?: EstadoCredito;
   excel?: boolean;
-}) {
-  const { data } = await api.get<{ success: boolean; data: CreditoConMora[]; excelUrl?: string }>(
-    `/moras/creditos`,
-    { params }
-  );
-  return data;
 }
 
-// Listar condonaciones
-export async function getCondonacionesMoraService(params?: {
+// Con excel=true el backend responde solo { success, excelUrl, count }: por eso
+// pagination y totales son opcionales, para que nadie los lea sin comprobarlos.
+export interface CreditosConMoraResponse {
+  success: boolean;
+  data?: CreditoConMora[];
+  pagination?: MoraPagination;
+  totales?: { mora_total: string; creditos: number };
+  excelUrl?: string;
+  count?: number;
+}
+
+export interface CondonacionesMoraParams {
+  page?: number;
+  pageSize?: number;
   numero_credito_sifco?: string;
   usuario_email?: string;
   fecha_desde?: string;
   fecha_hasta?: string;
   excel?: boolean;
-}) {
-  const { data } = await api.get<{ success: boolean; data: Condonacion[]; excelUrl?: string }>(
-    `/moras/condonaciones`,
-    { params }
-  );
-  return data;}
+}
+
+export interface CondonacionesMoraResponse {
+  success: boolean;
+  data?: Condonacion[];
+  pagination?: MoraPagination;
+  totales?: { monto_total: string; condonaciones: number };
+  excelUrl?: string;
+  count?: number;
+}
+
+// Listar créditos con mora (paginado)
+export async function getCreditosWithMorasService(params?: CreditosConMoraParams) {
+  const { data } = await api.get<CreditosConMoraResponse>(`/moras/creditos`, { params });
+  return data;
+}
+
+// Listar condonaciones (paginado)
+export async function getCondonacionesMoraService(params?: CondonacionesMoraParams) {
+  const { data } = await api.get<CondonacionesMoraResponse>(`/moras/condonaciones`, { params });
+  return data;
+}
 
 
 export interface CuotaPago {

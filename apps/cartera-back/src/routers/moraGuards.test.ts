@@ -443,3 +443,40 @@ describe("GET /moras/condonaciones — parámetro inválido responde 400, no 500
     );
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Gate del Excel del historial de UN crédito, la ruta que nace en ESTE PR.
+//
+// La cobertura estaba en la rama de seguridad, donde la ruta todavía no existía:
+// el 404 del ruteo hacía pasar un `expect(...).not.toBe(403)` sin ejercitar gate
+// alguno (se ponía verde hasta para un INVESTOR). Vive acá, donde la ruta ya
+// existe, y afirma la respuesta CONCRETA de después del gate en vez de "no es
+// 403": el 400 y el 500 los redacta el handler, así que llegar a ellos prueba
+// que el rol pasó.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("GET /moras/historial/credito/:id/excel — abierto a ASESOR", () => {
+  it("ASESOR cruza el gate y llega al handler (muere en la BD con 500)", async () => {
+    const res = await get("/moras/historial/credito/1/excel", "ASESOR");
+    expect(res.status).toBe(500);
+    expect(((await res.json()) as any).message).toContain(
+      "No se pudo generar el Excel del historial del crédito"
+    );
+  });
+
+  it("ASESOR con credito_id inválido recibe el 400 del handler, no un 403", async () => {
+    const res = await get("/moras/historial/credito/abc/excel", "ASESOR");
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as any).message).toContain("credito_id inválido");
+  });
+
+  // Control del otro lado sobre la MISMA ruta: si el gate se cayera, este 403
+  // se volvería el 400 de arriba.
+  it("INVESTOR se queda en 403 antes del handler", async () => {
+    const res = await get("/moras/historial/credito/abc/excel", "INVESTOR");
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as any).message).toContain(
+      "requiere ADMIN, CONTA o ASESOR"
+    );
+  });
+});

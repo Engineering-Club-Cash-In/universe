@@ -613,22 +613,41 @@ async function persistValidation(params: {
 	const retryCount =
 		params.prevalidatedRetryCount ?? (await assertRetryAllowed(sha256));
 	const llm = params.llm ?? null;
-	const pipelineError = params.storageError ?? params.aiError ?? null;
+	const internalPipelineError =
+		params.storageError ??
+		params.aiError ??
+		(params.buffer ? null : "No se recibió el contenido del archivo almacenado");
+	const publicPipelineError =
+		params.storageError || !params.buffer
+			? "No se pudo leer el archivo almacenado. Intenta nuevamente."
+			: params.aiError
+				? "No se pudo completar la validación automática. Intenta nuevamente."
+				: null;
 
-	const identifier = normalizeStatementIdentifier(llm?.identificador_detectado);
-	const duplicates = await duplicateContext({
-		sha256,
-		identifier,
-		opportunityId: params.opportunityId,
-		leadId: params.leadId,
-	});
-	const engineResult = await runDocumentIntegrityEngine({
-		buffer: params.buffer ?? Buffer.from("%PDF-1.4\nxref\n%%EOF"),
-		llm,
-		registeredNames: params.registeredNames,
-		duplicates,
-		pipelineError,
-	});
+	const engineResult = params.buffer
+		? await runDocumentIntegrityEngine({
+				buffer: params.buffer,
+				llm,
+				registeredNames: params.registeredNames,
+				duplicates: await duplicateContext({
+					sha256,
+					identifier: normalizeStatementIdentifier(
+						llm?.identificador_detectado,
+					),
+					opportunityId: params.opportunityId,
+					leadId: params.leadId,
+				}),
+				pipelineError: publicPipelineError,
+			})
+		: {
+				result: "error" as const,
+				score: 0,
+				reason:
+					publicPipelineError ??
+					"No se pudo completar la validación automática. Intenta nuevamente.",
+				signals: [],
+				technicalFingerprint: null,
+			};
 	const saved = await db.transaction(async (tx) => {
 		const [validation] = await tx
 			.insert(documentIntegrityValidations)
@@ -643,8 +662,8 @@ async function persistValidation(params: {
 				signals: engineResult.signals,
 				technicalFingerprint: engineResult.technicalFingerprint,
 				aiRawResponse: llm as Record<string, unknown> | null,
-				retryCount: pipelineError ? retryCount || 1 : 0,
-				errorMessage: pipelineError,
+				retryCount: internalPipelineError ? retryCount || 1 : 0,
+				errorMessage: internalPipelineError,
 			})
 			.returning();
 		if (validation && params.opportunityDocumentId) {

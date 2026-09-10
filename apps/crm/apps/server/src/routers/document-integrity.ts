@@ -1,6 +1,7 @@
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import { buildDocumentRecommendedAction } from "../lib/document-integrity/decision-evidence";
+import type { Signal, ValidationResult } from "../lib/document-integrity/types";
 import { canViewDocumentIntegrityValidationDetail } from "../lib/document-integrity/workflow-policy";
 import { analystProcedure, crmOnlyProcedure, crmProcedure } from "../lib/orpc";
 import {
@@ -37,6 +38,26 @@ const uploadedFileSchema = z.object({
 	key: z.string().trim().min(1),
 	mimeType: z.string().default("application/pdf"),
 });
+
+function toPublicValidation(validation: {
+	id: string;
+	autoResult: ValidationResult;
+	autoReason: string;
+	signals: Signal[];
+	validatedAt: Date;
+}) {
+	return {
+		id: validation.id,
+		result: validation.autoResult,
+		reason: validation.autoReason,
+		recommendedAction: buildDocumentRecommendedAction({
+			result: validation.autoResult,
+			signals: validation.signals,
+		}),
+		validatedAt: validation.validatedAt,
+		manualApproval: null,
+	};
+}
 
 export const documentIntegrityProcedures = {
 	approveDocumentIntegrityValidation: crmProcedure
@@ -141,17 +162,7 @@ export const documentIntegrityProcedures = {
 					file: row.file,
 					error: row.error,
 					validation: row.validation
-						? {
-								id: row.validation.id,
-								result: row.validation.autoResult,
-								reason: row.validation.autoReason,
-								recommendedAction: buildDocumentRecommendedAction({
-									result: row.validation.autoResult,
-									signals: row.validation.signals,
-								}),
-								validatedAt: row.validation.validatedAt,
-								manualApproval: null,
-							}
+						? toPublicValidation(row.validation)
 						: null,
 				}));
 			} catch (error) {
@@ -177,7 +188,12 @@ export const documentIntegrityProcedures = {
 					documentIds: input.opportunityDocumentIds,
 					userId: context.userId,
 				});
-				return results.map(({ errorCode: _errorCode, ...result }) => result);
+				return results.map(
+					({ errorCode: _errorCode, validation, ...result }) => ({
+						...result,
+						validation: validation ? toPublicValidation(validation) : null,
+					}),
+				);
 			} catch (error) {
 				translateDomainError(error);
 			}

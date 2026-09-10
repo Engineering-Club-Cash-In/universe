@@ -146,23 +146,34 @@ export function applyRuleset(params: {
 	pipelineError?: string | null;
 }): ValidationOutcome {
 	const { signals, llm } = params;
+	if (params.pipelineError) {
+		return { result: "error", score: 0, reason: params.pipelineError, signals };
+	}
+
+	if (params.invalidPdfHeader || params.corruptPdf) {
+		return {
+			result: "rechazado",
+			score: 0,
+			reason:
+				"El PDF está dañado o su formato no es válido. Vuelve a cargar una copia válida del estado de cuenta.",
+			signals,
+		};
+	}
+
+	if (llm?.es_legible === false) {
+		return {
+			result: "rechazado",
+			score: 0,
+			reason:
+				"El archivo no se puede leer correctamente. Vuelve a cargar una copia legible del estado de cuenta.",
+			signals,
+		};
+	}
 
 	if (
-		params.invalidPdfHeader ||
-		params.corruptPdf ||
-		llm?.es_legible === false ||
-		(llm?.corresponde_al_tipo_declarado === false &&
-			llm.confianza_tipo_documento >= 70)
+		llm?.corresponde_al_tipo_declarado === false &&
+		llm.confianza_tipo_documento >= 70
 	) {
-		if (llm?.es_legible === false) {
-			return {
-				result: "rechazado",
-				score: 0,
-				reason:
-					"El archivo no se puede leer correctamente. Vuelve a cargar una copia legible del estado de cuenta.",
-				signals,
-			};
-		}
 		const detected = llm?.tipo_documento_detectado || "archivo no reconocible";
 		return {
 			result: "rechazado",
@@ -170,10 +181,6 @@ export function applyRuleset(params: {
 			reason: `El archivo cargado no es un estado de cuenta bancario (se detectó: ${detected}). Vuelve a cargar el documento correcto.`,
 			signals,
 		};
-	}
-
-	if (params.pipelineError) {
-		return { result: "error", score: 0, reason: params.pipelineError, signals };
 	}
 
 	const calculateScore = (scoredSignals: Signal[]) => {

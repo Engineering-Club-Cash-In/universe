@@ -181,6 +181,26 @@ describe("document integrity boundaries", () => {
 		);
 	});
 
+	test("un fallo de almacenamiento no genera evidencia forense ficticia", () => {
+		const persistStart = serviceSource.indexOf(
+			"async function persistValidation",
+		);
+		const persistEnd = serviceSource.indexOf(
+			"function errorMessage",
+			persistStart,
+		);
+		const handler = serviceSource.slice(persistStart, persistEnd);
+		expect(handler).not.toContain('Buffer.from("%PDF');
+		expect(handler).toContain('result: "error" as const');
+		expect(handler).toContain("signals: []");
+		expect(handler).toContain("technicalFingerprint: null");
+		expect(handler).toContain("publicPipelineError");
+		expect(handler).toContain("errorMessage: internalPipelineError");
+		expect(handler).toContain(
+			"No se pudo leer el archivo almacenado. Intenta nuevamente.",
+		);
+	});
+
 	test("cada lote reserva uno de dos intentos por oportunidad", () => {
 		expect(serviceSource).toContain("MAX_DOCUMENT_INTEGRITY_ATTEMPTS = 2");
 		expect(serviceSource).toContain("pg_advisory_xact_lock");
@@ -315,6 +335,24 @@ describe("document integrity boundaries", () => {
 		]) {
 			expect(handler).not.toContain(secret);
 		}
+	});
+
+	test("los endpoints de validación devuelven solo el DTO público", () => {
+		const formatterStart = routerSource.indexOf("function toPublicValidation");
+		const formatterEnd = routerSource.indexOf(
+			"export const documentIntegrityProcedures",
+			formatterStart,
+		);
+		const formatter = routerSource.slice(formatterStart, formatterEnd);
+		for (const internalField of [
+			"technicalFingerprint",
+			"aiRawResponse",
+			"errorMessage",
+			"autoScore",
+		]) {
+			expect(formatter).not.toContain(internalField);
+		}
+		expect(routerSource.match(/toPublicValidation\(/g)).toHaveLength(3);
 	});
 
 	test("pdf-lib nunca serializa ni reescribe el documento", () => {

@@ -285,8 +285,27 @@ describe("document integrity ruleset", () => {
 				.result,
 		).toBe("rechazado");
 		expect(
-			applyRuleset({ signals: [], llm: cleanLlm, corruptPdf: true }).result,
-		).toBe("rechazado");
+			applyRuleset({ signals: [], llm: cleanLlm, corruptPdf: true }),
+		).toMatchObject({
+			result: "rechazado",
+			reason:
+				"El PDF está dañado o su formato no es válido. Vuelve a cargar una copia válida del estado de cuenta.",
+		});
+	});
+
+	test("un error técnico prevalece sobre un rechazo estructural concurrente", () => {
+		const result = applyRuleset({
+			signals: [],
+			llm: cleanLlm,
+			corruptPdf: true,
+			pipelineError: "No se pudo descargar el archivo desde R2",
+		});
+
+		expect(result).toMatchObject({
+			result: "error",
+			score: 0,
+			reason: "No se pudo descargar el archivo desde R2",
+		});
 	});
 
 	test("el aporte total del LLM está topado", () => {

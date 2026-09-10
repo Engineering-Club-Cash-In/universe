@@ -97,7 +97,10 @@ export function AccionesSupervisorPagalo({
 			invalidarQueries();
 			cerrar();
 		},
-		onError: (error: Error) => toast.error(error.message),
+		onError: (error: Error) => {
+			invalidarQueries();
+			toast.error(error.message);
+		},
 	});
 
 	const mutationReintentar = useMutation({

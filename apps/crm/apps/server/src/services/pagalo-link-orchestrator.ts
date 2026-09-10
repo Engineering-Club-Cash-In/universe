@@ -376,6 +376,69 @@ async function registrarGestionLinkPagalo(params: {
 	}
 }
 
+/** Repara solo historial de un grupo ya emitido; nunca crea links nuevos. */
+export async function reintentarGestionLinkPagalo(params: {
+	groupId: string;
+	requestedBy: string;
+}): Promise<boolean> {
+	const [grupo] = await db
+		.select({
+			casoCobroId: pagaloPaymentGroups.casoCobroId,
+			numeroSifco: pagaloPaymentGroups.numeroCreditoSifco,
+			origen: pagaloPaymentGroups.origen,
+			createdBy: pagaloPaymentGroups.createdBy,
+			createdAt: pagaloPaymentGroups.createdAt,
+			capitalTotal: pagaloPaymentGroups.capitalTotal,
+			facturableTotal: pagaloPaymentGroups.facturableTotal,
+		})
+		.from(pagaloPaymentGroups)
+		.where(eq(pagaloPaymentGroups.id, params.groupId))
+		.limit(1);
+	if (!grupo?.casoCobroId || grupo.origen !== "ASESOR") return false;
+	const creadorOriginal = await resolverCreadorOriginalGrupoPagalo({
+		groupId: params.groupId,
+		createdBy: grupo.createdBy,
+	});
+	if (!creadorOriginal) return false;
+	const linksParaGestion = (
+		await db
+			.select({
+				linkType: pagaloPaymentLinks.linkType,
+				status: pagaloPaymentLinks.status,
+				isApplicationSource: pagaloPaymentLinks.isApplicationSource,
+			})
+			.from(pagaloPaymentLinks)
+			.where(eq(pagaloPaymentLinks.groupId, params.groupId))
+	).flatMap((link) =>
+		esLinkPagaloContabilizableEnGestion(link.status, link.isApplicationSource)
+			? [
+					{
+						amount:
+							link.linkType === "CAPITAL"
+								? grupo.capitalTotal
+								: grupo.facturableTotal,
+					},
+				]
+			: [],
+	);
+	if (linksParaGestion.length === 0) return false;
+	return registrarGestionLinkPagalo({
+		groupId: params.groupId,
+		casoCobroId: grupo.casoCobroId,
+		numeroSifco: grupo.numeroSifco,
+		requestedBy: params.requestedBy,
+		totalAmount: totalDeLinksPagalo(linksParaGestion),
+		cantidadLinks: linksParaGestion.length,
+		whatsappEnviado: null,
+		fechaContacto: grupo.createdAt,
+		bucketSnapshot: null,
+		finalizar: true,
+		repararPreliminar: true,
+		actualizarGestionParcial: true,
+		creadorOriginal,
+	});
+}
+
 /**
  * Un link ERROR puede venir de dos caminos con riesgo muy distinto:
  * createPaymentRequest lanzó (Págalo puede no haber visto nada, o pudo

@@ -218,6 +218,24 @@ export function PagaloLinkDialog({
 		},
 	});
 	const grupoPendiente = grupoActivo.data as any;
+	const reintentarGestionMutation = useMutation({
+		mutationFn: () =>
+			(client as any).reintentarGestionLinksPagalo({
+				casoCobroId,
+				groupId: grupoPendiente.groupId,
+			}),
+		onSuccess: (result: { gestionRegistrada: boolean }) => {
+			invalidarDatosPagalo();
+			if (result.gestionRegistrada)
+				toast.success("Gestión Págalo registrada en el historial del caso.");
+			else
+				toast.error("No se pudo registrar la gestión. Intenta más tarde.");
+		},
+		onError: (error: Error) => {
+			invalidarDatosPagalo();
+			toast.error(error.message || "No se pudo registrar la gestión Págalo");
+		},
+	});
 	const linksRecienCreados = mutation.data?.links ?? [];
 	const links =
 		linksRecienCreados.length > 0
@@ -226,6 +244,9 @@ export function PagaloLinkDialog({
 	const reviewRequired =
 		mutation.data?.status === "REVIEW_REQUIRED" ||
 		grupoPendiente?.status === "REVIEW_REQUIRED";
+	const gestionPendiente =
+		grupoPendiente?.origen === "ASESOR" &&
+		grupoPendiente?.gestionRegistrada === false;
 	const totalPendiente = grupoPendiente?.totalAmount;
 	// Resumen del grupo para la cabecera. Cuando los links vienen de una
 	// creación recién hecha todavía no hay grupo cargado, así que el total se
@@ -766,6 +787,23 @@ export function PagaloLinkDialog({
 											],
 										)}
 									</p>
+								</div>
+							)}
+							{gestionPendiente && (
+								<div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-900 text-xs dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+									<span>La gestión todavía no aparece en el historial.</span>
+									<Button
+										disabled={reintentarGestionMutation.isPending}
+										onClick={() => reintentarGestionMutation.mutate()}
+										size="sm"
+										type="button"
+										variant="outline"
+									>
+										{reintentarGestionMutation.isPending && (
+											<Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+										)}
+										Registrar en historial
+									</Button>
 								</div>
 							)}
 						</div>

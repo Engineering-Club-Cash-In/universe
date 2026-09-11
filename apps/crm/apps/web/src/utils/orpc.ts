@@ -15,6 +15,7 @@ import type {
 import type { pagaloGrupoActivoRouter } from "../../../server/src/routers/pagalo-grupo-activo";
 import type { pagaloLinkActionsRouter } from "../../../server/src/routers/pagalo-link-actions";
 import type { pagaloSupervisionRouter } from "../../../server/src/routers/pagalo-supervision";
+import type { recuperacionVehiculoRouter } from "../../../server/src/routers/recuperacion-vehiculo";
 
 type InvestmentsRouter =
 	typeof import("../../../server/src/routers/investments").investmentsRouter;
@@ -86,7 +87,8 @@ type MergedRouter = AppRouter &
 	typeof bucketCapacidadRouter &
 	typeof pagaloGrupoActivoRouter &
 	typeof pagaloLinkActionsRouter &
-	typeof pagaloSupervisionRouter;
+	typeof pagaloSupervisionRouter &
+	typeof recuperacionVehiculoRouter;
 
 export const client: RouterClient<MergedRouter> = createORPCClient(link);
 

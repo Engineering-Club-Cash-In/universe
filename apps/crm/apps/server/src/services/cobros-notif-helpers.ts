@@ -22,7 +22,9 @@ export type CobrosNotifTipo =
 	| "promesa_incumplida"
 	| "cliente_subido"
 	| "sin_contacto_3d"
-	| "promesa_por_vencer";
+	| "promesa_por_vencer"
+	| "convenio_pendiente_aprobacion"
+	| "convenio_resuelto";
 
 /**
  * Mapa `asesor_id (cartera) → user.id (CRM)`, cruzando el correo de cash-in del

@@ -25,10 +25,12 @@ import type {
 	CarteraComportamientoPagoResponse,
 	CarteraConvenio,
 	CarteraConvenioCuota,
+	CarteraConvenioDecision,
 	CarteraConvenioListado,
 	CarteraConvenioProximosResponse,
 	CarteraCredito,
 	CarteraCuotasProximasResponse,
+	CarteraDecidirConvenioResultado,
 	CarteraInversionista,
 	CarteraPagoCredito,
 	CarteraPagoCreditoInversionista,
@@ -36,14 +38,15 @@ import type {
 	CarteraStatsResponse,
 	CarteraUsuario,
 	CreateBoletaInput,
+	CreateConvenioInput,
 	CreateCreditoInput,
 	CreatePagoInput,
-	CreateConvenioInput,
 	CreateUsuarioInput,
 	CreditActionInput,
 	CreditoBucketResponse,
 	CreditoDetailResponse,
 	CreditoDirectoResponse,
+	DecidirConvenioInput,
 	EstadoPagoCartera,
 	FacturarGenericoInput,
 	FacturarGenericoResponse,
@@ -2134,6 +2137,66 @@ export class CarteraBackClient {
 			);
 		}
 		return response.data;
+	}
+
+	// CB-033 — aprobar/rechazar un convenio pendiente. `operacion_id` viaja
+	// desde el caller (nunca se genera acá): es la clave de la idempotencia,
+	// y generarlo en el server por llamada no protegería un reintento del
+	// usuario tras un timeout (cada intento tendría un id distinto). No
+	// reintenta automáticamente por lo mismo — es una escritura, y el
+	// `operacion_id` explícito es lo que hace seguro reintentarla a mano.
+	//
+	// Igual que `createConvenio`: activar/rechazar cambia `statusCredit`, la
+	// mora y el bucket, así que se invalida el mismo set de cache.
+	async decidirConvenio(
+		convenioId: number,
+		input: DecidirConvenioInput,
+	): Promise<CarteraDecidirConvenioResultado> {
+		const response = await this.request<
+			{
+				success: boolean;
+				message?: string;
+				error?: string;
+			} & Partial<CarteraDecidirConvenioResultado>
+		>(`/payment-agreements/${convenioId}/decidir`, {
+			method: "POST",
+			body: JSON.stringify(input),
+		});
+		this.cache.invalidate("/credito?");
+		this.cache.invalidate("payment-agreements");
+		this.cache.invalidate("getAllCredits");
+		this.cache.invalidate("stats");
+		this.cache.invalidate("/buckets/credito/");
+		if (!response?.success || response.decisionId == null) {
+			throw new Error(
+				response?.message ||
+					"cartera-back no devolvió el resultado de la decisión",
+			);
+		}
+		return response as CarteraDecidirConvenioResultado;
+	}
+
+	// CB-033 — historial de decisiones POR CRÉDITO (no por convenio: el
+	// rechazo borra la fila del convenio, así que consultar por convenio_id
+	// perdería el historial justo del caso que hay que auditar). Sin cache:
+	// es el registro de auditoría, tiene que reflejar la última decisión.
+	async getDecisionesConvenio(
+		creditoId: number,
+	): Promise<CarteraConvenioDecision[]> {
+		const response = await this.request<{
+			success: boolean;
+			data: CarteraConvenioDecision[];
+			message?: string;
+		}>(`/payment-agreements/decisiones?credito_id=${creditoId}`, {
+			method: "GET",
+		});
+		if (!response?.success) {
+			throw new Error(
+				response?.message ||
+					"cartera-back no devolvió el historial de decisiones",
+			);
+		}
+		return response.data ?? [];
 	}
 
 	// CB-020: universo SLA de la Cola del Día — créditos del POOL de buckets

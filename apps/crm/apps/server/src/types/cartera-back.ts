@@ -239,7 +239,11 @@ export interface GetCreditosPorBucketParams {
 
 /** CB-027: filtros de GET /payment-agreements/listado. */
 export interface GetConveniosListadoParams {
-	estado?: "active" | "completed" | "inactive" | "all";
+	// CB-033: "pending" = activo=false AND completado=false — la cola de
+	// aprobación. "inactive" (solo activo=false) NO distingue un convenio
+	// pendiente de uno ya cumplido (que también deja activo=false), así que
+	// no sirve para esa cola.
+	estado?: "active" | "completed" | "inactive" | "pending" | "all";
 	numeroCreditoSifco?: string;
 	nombreUsuario?: string;
 	asesorId?: number;
@@ -579,6 +583,70 @@ export interface CreateConvenioInput {
 	reason?: string;
 	observations?: string;
 	created_by_email: string;
+}
+
+/**
+ * CB-033 — input de `POST /payment-agreements/:convenio_id/decidir`. El
+ * servidor de cartera exige `decidido_por_email` cuando el llamante es la
+ * cuenta de servicio del CRM (400 si falta) — es el supervisor cuya sesión
+ * el CRM ya validó en `cobrosSupervisorProcedure`.
+ */
+export interface DecidirConvenioInput {
+	decision: "aprobado" | "rechazado";
+	motivo?: string;
+	operacion_id: string;
+	decidido_por_email: string;
+}
+
+/** Contrato del snapshot que cartera guarda en `convenio_decisiones` (v1). */
+export interface CarteraConvenioSnapshotV1 {
+	convenio_id: number;
+	credito_id: number;
+	numero_credito_sifco: string | null;
+	monto_total_convenio: string;
+	numero_meses: number;
+	cuota_mensual: string;
+	monto_pagado: string;
+	monto_pendiente: string;
+	pagos_realizados: number;
+	pagos_pendientes: number;
+	fecha_convenio: string;
+	motivo_creacion: string | null;
+	observaciones: string | null;
+	/** `cuota_id` de las cuotas del crédito que el convenio reestructuró. */
+	cuotas_convenio: number[];
+	/** `numero_cuota` del calendario de pagos que generó el convenio. */
+	plan_pagos_numeros: number[];
+	created_by: number | null;
+	created_at: string | null;
+}
+
+/** Respuesta de `POST /payment-agreements/:convenio_id/decidir`. */
+export interface CarteraDecidirConvenioResultado {
+	decisionId: number;
+	convenioId: number;
+	creditoId: number;
+	decision: "aprobado" | "rechazado";
+	snapshot: CarteraConvenioSnapshotV1;
+	decidioEn: string;
+	idempotente: boolean;
+}
+
+/** Fila de `GET /payment-agreements/decisiones?credito_id=` — historial append-only por crédito. */
+export interface CarteraConvenioDecision {
+	decisionId: number;
+	operacionId: string;
+	convenioId: number;
+	creditoId: number;
+	decision: "aprobado" | "rechazado";
+	motivo: string | null;
+	snapshotVersion: number;
+	snapshot: CarteraConvenioSnapshotV1;
+	origen: "crm" | "cartera_front";
+	actuadoPor: number;
+	actuadoPorEmail: string;
+	decididoPorEmail: string;
+	decididoEn: string;
 }
 
 export interface CarteraConvenioCuota {

@@ -168,6 +168,10 @@ import {
 	isCarteraBackPaymentsEnabled,
 } from "../services/cartera-back-integration";
 import {
+	notificarConvenioPendienteAprobacion,
+	notificarConvenioResuelto,
+} from "../services/convenio-decision-notif";
+import {
 	createPagaloClient,
 	getPagaloSandboxConfig,
 } from "../services/pagalo-client";
@@ -2648,7 +2652,12 @@ export const cobrosRouter = {
 	getConveniosListado: cobrosProcedure
 		.input(
 			z.object({
-				estado: z.enum(["active", "completed", "inactive", "all"]).optional(),
+				// CB-033: "pending" = pendiente de aprobación del supervisor
+				// (activo=false AND completado=false en cartera). "inactive" se
+				// conserva por compatibilidad pero mezcla convenios ya cumplidos.
+				estado: z
+					.enum(["active", "completed", "inactive", "pending", "all"])
+					.optional(),
 				// Búsqueda libre: matchea SIFCO O nombre de cliente (cartera-back
 				// combina ambos con OR — mandar el mismo texto a los dos campos NO
 				// exige que ambos matcheen a la vez, que era el bug original).
@@ -2988,17 +2997,36 @@ export const cobrosRouter = {
 				);
 			}
 
+			// CB-033: avisar a los supervisores que hay un convenio esperando su
+			// aprobación. Best-effort — mismo criterio que el etiquetado de
+			// arriba, el convenio YA existe y un fallo acá no debe reportarse
+			// como fallo de la creación.
+			if (convenio.activo === false) {
+				await notificarConvenioPendienteAprobacion({
+					casoCobroId: input.casoCobroId,
+					clienteNombre: numeroSifco,
+					montoTotal: Number(convenio.monto_total_convenio),
+					creadoPorUserId: context.userId,
+				});
+			}
+
 			return {
 				convenioId: convenio.convenio_id,
 				montoTotal: Number(convenio.monto_total_convenio),
 				cuotaMensual: Number(convenio.cuota_mensual),
 				numeroMeses: convenio.numero_meses,
 				cantidadCuotas,
-				// cartera crea el convenio con activo=false: alguien de conta/admin
-				// lo ACTIVA desde carteraFront. El crédito ya quedó EN_CONVENIO.
+				// cartera crea el convenio con activo=false: pendiente de que un
+				// cobros_supervisor lo apruebe desde el CRM (CB-033) — reemplaza
+				// el paso de conta/admin en carteraFront.
 				pendienteActivacion: convenio.activo === false,
 			};
 		}),
+
+	// CB-033: decidirConvenio y getDecisionesConvenio viven en su propio
+	// archivo (routers/convenio-decision.ts), no acá — cobrosAppRouter ya
+	// está en el límite donde TS7056 trunca el tipo inferido en el web
+	// (mismo motivo documentado en pagalo-supervision.ts).
 
 	// Asignar responsable de cobros
 	asignarResponsableCobros: cobrosSupervisorProcedure

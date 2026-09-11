@@ -52,6 +52,10 @@ const MESES = [
 
 const TAMANOS_PAGINA = [10, 20, 50, 100];
 
+// Mismo valor y mismo cálculo (UTC, rodante) que MESES_HISTORICO en
+// tracker.ts — si cambia allá, hay que actualizarlo acá también.
+const MESES_HISTORICO = 24;
+
 export function ListadoPage() {
 	const ahora = new Date();
 	const { data: session } = authClient.useSession();
@@ -89,14 +93,18 @@ export function ListadoPage() {
 		orpc.getPartnerAgencies.queryOptions({ input: {} }),
 	);
 
-	// El servidor acota los cerrados a una ventana de retención. Ofrecer años
-	// anteriores solo devuelve listados vacíos sin explicación, así que el
-	// selector se limita a lo que el payload realmente alcanza.
+	// El servidor acota won/lost a MESES_HISTORICO meses rodantes desde ahora
+	// (no desde el 1 de enero); open/on_hold no tienen límite. Replicar el
+	// mismo corte evita ofrecer un año donde los cerrados de esa época ya se
+	// podaron pero un caso activo viejo todavía arrastra una entrada.
 	const aniosDisponibles = useMemo(() => {
 		const actual = anioEnGuatemala(new Date());
+		const piso = new Date();
+		piso.setUTCMonth(piso.getUTCMonth() - MESES_HISTORICO);
 		let minimo = actual;
 		for (const caso of casosQuery.data ?? []) {
 			for (const entrada of caso.historial) {
+				if (new Date(entrada.fecha).getTime() < piso.getTime()) continue;
 				minimo = Math.min(minimo, anioEnGuatemala(entrada.fecha));
 			}
 		}

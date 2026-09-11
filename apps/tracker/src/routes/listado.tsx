@@ -131,6 +131,30 @@ export function ListadoPage() {
 	}, [aniosDisponibles, anio, anioVigente, casosQuery.isSuccess]);
 
 	const hayPeriodo = periodo !== TODO_EL_TIEMPO;
+
+	// En el año donde cae el corte de MESES_HISTORICO, los meses antes del
+	// corte exacto no están garantizados completos aunque el año sí aparezca
+	// en aniosDisponibles (algún caso posterior al corte lo mantiene ahí).
+	// Fuera de ese año, los 12 meses son seguros.
+	const mesesDisponibles = useMemo(() => {
+		const piso = new Date();
+		piso.setUTCMonth(piso.getUTCMonth() - MESES_HISTORICO);
+		const anioDeCorte = anioEnGuatemala(piso);
+		if (anioVigente < anioDeCorte) return [];
+		const todos = MESES.map((_, i) => i + 1);
+		if (anioVigente > anioDeCorte) return todos;
+		return todos.filter((mes) => mes >= mesEnGuatemala(piso));
+	}, [anioVigente]);
+
+	useEffect(() => {
+		if (!hayPeriodo || mesesDisponibles.length === 0) return;
+		if (!mesesDisponibles.includes(Number(periodo))) {
+			setPeriodo(String(mesesDisponibles[0]));
+			setPctFiltro(null);
+			setPagina(1);
+		}
+	}, [mesesDisponibles, periodo, hayPeriodo]);
+
 	const ventana = useMemo(
 		() => (hayPeriodo ? ventanaDelMes(anioVigente, Number(periodo)) : null),
 		[hayPeriodo, anioVigente, periodo],
@@ -298,9 +322,9 @@ export function ListadoPage() {
 							className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-900"
 						>
 							<option value={TODO_EL_TIEMPO}>Todo el tiempo</option>
-							{MESES.map((nombre, i) => (
-								<option key={nombre} value={i + 1}>
-									{nombre}
+							{mesesDisponibles.map((mes) => (
+								<option key={mes} value={mes}>
+									{MESES[mes - 1]}
 								</option>
 							))}
 						</select>

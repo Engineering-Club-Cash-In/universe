@@ -53,6 +53,7 @@ import {
 	MANUAL_VALUATION_TECHNICIAN_NAME,
 } from "../lib/manual-valuation";
 import { canAccessSalesTeamActions } from "../lib/sales-permissions";
+import { hasVehicleIdentityConflict } from "../lib/vehicle-identity";
 
 // Configuration Constants for Evidence Uploads
 const MAX_EVIDENCE_FILES_PER_ITEM = 10;
@@ -1376,20 +1377,30 @@ export const vehiclesRouter = {
 					const vehicleInputId = rawId && rawId.trim() !== "" ? rawId : undefined;
 
 					if (vehicleInputId) {
-						// Try to update existing vehicle by ID
-						const [updated] = await tx
-							.update(vehicles)
-							.set({
-								...vehicleData,
-								updatedAt: new Date(),
-							})
+						const [existingVehicle] = await tx
+							.select()
+							.from(vehicles)
 							.where(eq(vehicles.id, vehicleInputId))
-							.returning();
+							.limit(1)
+							.for("update");
 
-						if (updated) {
-							// Solo si el UPDATE encontró la fila: si no, abajo se crea el
-							// vehículo con ese id y anotar aquí inventaría la edición de
-							// algo que no existía.
+						if (existingVehicle) {
+							if (hasVehicleIdentityConflict(existingVehicle, vehicleData)) {
+								throw new ORPCError("BAD_REQUEST", {
+									message:
+										"El vehículo seleccionado no coincide con la placa o VIN ingresados. Regresa al primer paso, elimina la selección y vuelve a escanear la tarjeta.",
+								});
+							}
+
+							const [updated] = await tx
+								.update(vehicles)
+								.set({
+									...vehicleData,
+									updatedAt: new Date(),
+								})
+								.where(eq(vehicles.id, vehicleInputId))
+								.returning();
+
 							auditRecord({
 								entity: "vehicle",
 								id: updated.id,

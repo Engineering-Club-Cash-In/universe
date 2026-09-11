@@ -12,8 +12,12 @@ function claveDe(identificadorSocio: string): string {
 }
 
 function almacenamiento(): AlmacenamientoClaveValor | null {
-	if (typeof window === "undefined" || !window.localStorage) return null;
-	return window.localStorage;
+	try {
+		if (typeof window === "undefined" || !window.localStorage) return null;
+		return window.localStorage;
+	} catch {
+		return null;
+	}
 }
 
 function esFiltroPeriodoValido(valor: unknown): valor is FiltroPeriodoPersistido {

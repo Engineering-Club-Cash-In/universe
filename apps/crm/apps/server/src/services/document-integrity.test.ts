@@ -236,6 +236,9 @@ describe("document integrity boundaries", () => {
 		expect(serviceSource).toContain(
 			"/validated/${params.validationId}/${params.contentSha256}-",
 		);
+		expect(serviceSource).toContain(
+			"originalNameFromDocumentIntegrityPath(params.sourceFilePath)",
+		);
 		expect(serviceSource).toContain("set({ documentFilePath: item.filePath })");
 		expect(serviceSource).toContain(
 			"fileKey: result.validation.documentFilePath",
@@ -244,6 +247,23 @@ describe("document integrity boundaries", () => {
 		expect(serviceSource).toContain("isImmutableDocumentIntegrityEvidencePath");
 		expect(serviceSource).toContain(
 			"if (!preserveEvidence) sourceFilePathsToDelete.add(sourceFilePath)",
+		);
+		expect(serviceSource).toContain(
+			"eq(opportunityDocuments.filePath, item.sourceFilePath)",
+		);
+		expect(serviceSource).toContain(
+			"set({ linkedFilePath: item.filePath })",
+		);
+		const executeStart = serviceSource.indexOf(
+			"async function executeValidationRun",
+		);
+		const executeEnd = serviceSource.indexOf(
+			"export async function validateUploadedBankStatements",
+			executeStart,
+		);
+		const executeRun = serviceSource.slice(executeStart, executeEnd);
+		expect(executeRun.indexOf("freezeCompletedValidationEvidence")).toBeLessThan(
+			executeRun.indexOf("isCompleteValidationRun"),
 		);
 	});
 

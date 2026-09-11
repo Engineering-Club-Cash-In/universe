@@ -698,7 +698,7 @@ function buildValidationEvidenceFilePath(params: {
 	contentSha256: string;
 	sourceFilePath: string;
 }) {
-	const sourceName = params.sourceFilePath.split("/").at(-1) ?? "document.pdf";
+	const sourceName = originalNameFromDocumentIntegrityPath(params.sourceFilePath);
 	const safeName = sourceName.replace(/[^A-Za-z0-9._-]/g, "_");
 	return `${buildUploadPrefix("bank_statement", params.opportunityId)}/validated/${params.validationId}/${params.contentSha256}-${safeName}`;
 }
@@ -711,6 +711,8 @@ async function freezeCompletedValidationEvidence(params: {
 	const frozen: Array<{
 		validation: NonNullable<PreparedValidationResult["validation"]>;
 		filePath: string;
+		sourceFilePath: string;
+		opportunityDocumentId?: string;
 	}> = [];
 	for (const [index, result] of params.results.entries()) {
 		if (!result.validation || result.validation.autoResult === "error") continue;
@@ -724,7 +726,12 @@ async function freezeCompletedValidationEvidence(params: {
 			sourceFilePath: document.filePath,
 		});
 		await uploadBufferToR2(filePath, document.buffer);
-		frozen.push({ validation: result.validation, filePath });
+		frozen.push({
+			validation: result.validation,
+			filePath,
+			sourceFilePath: document.filePath,
+			opportunityDocumentId: document.opportunityDocumentId,
+		});
 	}
 	if (frozen.length === 0) return;
 
@@ -734,6 +741,39 @@ async function freezeCompletedValidationEvidence(params: {
 				.update(documentIntegrityValidations)
 				.set({ documentFilePath: item.filePath })
 				.where(eq(documentIntegrityValidations.id, item.validation.id));
+			if (item.opportunityDocumentId) {
+				const [repointedDocument] = await tx
+					.update(opportunityDocuments)
+					.set({ filePath: item.filePath })
+					.where(
+						and(
+							eq(opportunityDocuments.id, item.opportunityDocumentId),
+							eq(opportunityDocuments.filePath, item.sourceFilePath),
+						),
+					)
+					.returning({ id: opportunityDocuments.id });
+				if (repointedDocument) {
+					await tx
+						.update(documentIntegrityValidationDocuments)
+						.set({ linkedFilePath: item.filePath })
+						.where(
+							and(
+								eq(
+									documentIntegrityValidationDocuments.validationId,
+									item.validation.id,
+								),
+								eq(
+									documentIntegrityValidationDocuments.opportunityDocumentId,
+									item.opportunityDocumentId,
+								),
+								eq(
+									documentIntegrityValidationDocuments.linkedFilePath,
+									item.sourceFilePath,
+								),
+							),
+						);
+				}
+			}
 		}
 	});
 	for (const item of frozen) item.validation.documentFilePath = item.filePath;
@@ -864,28 +904,26 @@ async function executeValidationRun(params: {
 			leadId: params.leadId,
 			validationRunId: run.id,
 		});
+		try {
+			await freezeCompletedValidationEvidence({
+				opportunityId: params.opportunityId,
+				documents: params.documents,
+				results,
+			});
+		} catch (error) {
+			console.error("Could not preserve completed validation evidence", {
+				runId: run.id,
+				error: errorMessage(error),
+			});
+			throw new DocumentIntegrityError(
+				"BAD_REQUEST",
+				"No se pudo conservar una copia segura de la evidencia documental. Intenta nuevamente.",
+			);
+		}
 		const completedSuccessfully = isCompleteValidationRun(
 			results,
 			params.documents.length,
 		);
-		if (completedSuccessfully) {
-			try {
-				await freezeCompletedValidationEvidence({
-					opportunityId: params.opportunityId,
-					documents: params.documents,
-					results,
-				});
-			} catch (error) {
-				console.error("Could not preserve completed validation evidence", {
-					runId: run.id,
-					error: errorMessage(error),
-				});
-				throw new DocumentIntegrityError(
-					"BAD_REQUEST",
-					"No se pudo preparar una copia segura para la revisión manual. Intenta nuevamente.",
-				);
-			}
-		}
 		const completedAt = await finishValidationRun(
 			run.id,
 			completedSuccessfully ? "completed" : "error",
@@ -1632,8 +1670,8 @@ export async function linkUploadedValidationsToDocuments(params: {
 				bankStatementPrefix,
 			});
 			// El bridge registra todos los documentos definitivos asociados. La copia
-			// congelada, en cambio, sigue siendo la evidencia exacta que vio y aprobó
-			// el supervisor: no se reapunta ni se entrega al cleanup de temporales.
+			// congelada sigue siendo la evidencia exacta evaluada por el motor: no se
+			// reapunta ni se entrega al cleanup de temporales.
 			if (!preserveEvidence) {
 				await tx
 					.update(documentIntegrityValidations)

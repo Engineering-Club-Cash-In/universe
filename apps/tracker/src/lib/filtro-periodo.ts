@@ -5,6 +5,8 @@ type AlmacenamientoClaveValor = Pick<Storage, "getItem" | "setItem" | "removeIte
 
 export type FiltroPeriodoPersistido = { periodo: string; anio: number };
 
+export const TODO_EL_TIEMPO = "todo";
+
 const PREFIJO_CLAVE = "tracker:filtro-periodo:v1:";
 
 function claveDe(identificadorSocio: string): string {
@@ -20,12 +22,20 @@ function almacenamiento(): AlmacenamientoClaveValor | null {
 	}
 }
 
+function esPeriodoValido(periodo: string): boolean {
+	if (periodo === TODO_EL_TIEMPO) return true;
+	const mes = Number(periodo);
+	return Number.isInteger(mes) && mes >= 1 && mes <= 12;
+}
+
 function esFiltroPeriodoValido(valor: unknown): valor is FiltroPeriodoPersistido {
+	if (typeof valor !== "object" || valor === null) return false;
+	const { periodo, anio } = valor as FiltroPeriodoPersistido;
 	return (
-		typeof valor === "object" &&
-		valor !== null &&
-		typeof (valor as FiltroPeriodoPersistido).periodo === "string" &&
-		typeof (valor as FiltroPeriodoPersistido).anio === "number"
+		typeof periodo === "string" &&
+		esPeriodoValido(periodo) &&
+		typeof anio === "number" &&
+		Number.isInteger(anio)
 	);
 }
 

@@ -185,14 +185,17 @@ describe("etiquetaDeEtapa", () => {
 		expect(etiquetaDeEtapa(5, "desembolsado")).toBe("Finalizada");
 	});
 
-	test("en el paso 5 los casos no finalizados muestran solo el porcentaje", () => {
-		expect(etiquetaDeEtapa(5, "rechazado")).toBe("100%");
+	test("en el paso 5 un caso en pausa muestra solo el porcentaje", () => {
 		expect(etiquetaDeEtapa(5, "en_pausa")).toBe("100%");
 	});
 
 	test("en los demás pasos muestra el rango de avance", () => {
 		expect(etiquetaDeEtapa(2, "en_proceso")).toBe("30–40%");
-		expect(etiquetaDeEtapa(2, "rechazado")).toBe("30–40%");
+	});
+
+	test("un caso rechazado dice 'No aprobado' en cualquier paso", () => {
+		expect(etiquetaDeEtapa(2, "rechazado")).toBe("No aprobado");
+		expect(etiquetaDeEtapa(5, "rechazado")).toBe("No aprobado");
 	});
 
 	test("un caso ganado en el paso 5 dice 'Aprobado', no 'En proceso'", () => {

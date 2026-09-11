@@ -54,6 +54,32 @@ describe("filtro-periodo", () => {
 		expect(leerFiltroPeriodo("socio-1", storage2)).toBeNull();
 	});
 
+	test("ignora un período fuera de rango (1-12 o 'todo')", () => {
+		for (const valor of [
+			{ periodo: "13", anio: 2026 },
+			{ periodo: "0", anio: 2026 },
+			{ periodo: "abc", anio: 2026 },
+			{ periodo: "9", anio: Number.NaN },
+			{ periodo: "9", anio: 2026.5 },
+		]) {
+			const storage = almacenamientoDePrueba({
+				"tracker:filtro-periodo:v1:socio-1": JSON.stringify(valor),
+			});
+			expect(leerFiltroPeriodo("socio-1", storage)).toBeNull();
+		}
+
+		const storageValido = almacenamientoDePrueba({
+			"tracker:filtro-periodo:v1:socio-1": JSON.stringify({
+				periodo: "todo",
+				anio: 2026,
+			}),
+		});
+		expect(leerFiltroPeriodo("socio-1", storageValido)).toEqual({
+			periodo: "todo",
+			anio: 2026,
+		});
+	});
+
 	test("limpiarFiltroPeriodo borra solo la clave del socio indicado", () => {
 		const storage = almacenamientoDePrueba();
 		guardarFiltroPeriodo("socio-1", { periodo: "9", anio: 2026 }, storage);

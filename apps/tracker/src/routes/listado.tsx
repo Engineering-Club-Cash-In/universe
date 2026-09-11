@@ -14,6 +14,7 @@ import { authClient, cerrarSesion } from "@/lib/auth-client";
 import {
 	guardarFiltroPeriodo,
 	leerFiltroPeriodo,
+	TODO_EL_TIEMPO,
 } from "@/lib/filtro-periodo";
 import {
 	type Caso,
@@ -50,7 +51,6 @@ const MESES = [
 ];
 
 const TAMANOS_PAGINA = [10, 20, 50, 100];
-const TODO_EL_TIEMPO = "todo";
 
 export function ListadoPage() {
 	const ahora = new Date();
@@ -112,15 +112,21 @@ export function ListadoPage() {
 	// ese render, y este efecto alinea el estado para que el filtro de avance
 	// exacto no quede aplicado en silencio sobre un año que ya no es el elegido.
 	useEffect(() => {
+		// Antes de que casosQuery resuelva, aniosDisponibles es solo el año
+		// actual: corregir contra eso pisaría un año persistido válido.
+		if (!casosQuery.isSuccess) return;
 		if (!aniosDisponibles.includes(anio)) {
 			setAnio(anioVigente);
 			setPctFiltro(null);
 			setPagina(1);
 		}
-	}, [aniosDisponibles, anio, anioVigente]);
+	}, [aniosDisponibles, anio, anioVigente, casosQuery.isSuccess]);
 
 	const hayPeriodo = periodo !== TODO_EL_TIEMPO;
-	const ventana = hayPeriodo ? ventanaDelMes(anioVigente, Number(periodo)) : null;
+	const ventana = useMemo(
+		() => (hayPeriodo ? ventanaDelMes(anioVigente, Number(periodo)) : null),
+		[hayPeriodo, anioVigente, periodo],
+	);
 
 	// Sin período cuenta la etapa actual; con período, la llegada dentro del mes.
 	const coincidencias = useMemo(
@@ -128,29 +134,34 @@ export function ListadoPage() {
 		[ventana],
 	);
 
-	const filtrados = useMemo(() => {
+	// Base compartida por filtrados y los conteos (chips, sub-filtro de %):
+	// todos deben coincidir con la búsqueda, no solo la lista final.
+	const casosBuscados = useMemo(() => {
 		const todos: Caso[] = casosQuery.data ?? [];
 		const termino = busqueda.trim().toLowerCase();
-		return todos.filter((caso) => {
-			if (pasoFiltro === null) {
-				if (ventana && !tuvoAvanceEn(caso, ventana)) return false;
-			} else {
-				const marcas = coincidencias(caso, pasoFiltro);
-				if (marcas.length === 0) return false;
-				if (
-					pctFiltro !== null &&
-					!marcas.some((m) => m.porcentaje === pctFiltro)
-				) {
-					return false;
-				}
-			}
-			if (!termino) return true;
-			return [caso.referencia, caso.cliente, caso.vehiculo ?? ""]
+		if (!termino) return todos;
+		return todos.filter((caso) =>
+			[caso.referencia, caso.cliente, caso.vehiculo ?? ""]
 				.join(" ")
 				.toLowerCase()
-				.includes(termino);
+				.includes(termino),
+		);
+	}, [casosQuery.data, busqueda]);
+
+	const filtrados = useMemo(() => {
+		return casosBuscados.filter((caso) => {
+			if (pasoFiltro === null) {
+				if (ventana && !tuvoAvanceEn(caso, ventana)) return false;
+				return true;
+			}
+			const marcas = coincidencias(caso, pasoFiltro);
+			if (marcas.length === 0) return false;
+			if (pctFiltro !== null && !marcas.some((m) => m.porcentaje === pctFiltro)) {
+				return false;
+			}
+			return true;
 		});
-	}, [casosQuery.data, busqueda, pasoFiltro, pctFiltro, ventana, coincidencias]);
+	}, [casosBuscados, pasoFiltro, pctFiltro, ventana, coincidencias]);
 
 	const totalPaginas = Math.max(1, Math.ceil(filtrados.length / porPagina));
 
@@ -164,7 +175,7 @@ export function ListadoPage() {
 
 	const conteoPorPaso = useMemo(() => {
 		const conteo = new Map<number, number>();
-		for (const caso of casosQuery.data ?? []) {
+		for (const caso of casosBuscados) {
 			for (let paso = 1; paso <= PASOS.length; paso++) {
 				if (coincidencias(caso, paso).length > 0) {
 					conteo.set(paso, (conteo.get(paso) ?? 0) + 1);
@@ -172,25 +183,24 @@ export function ListadoPage() {
 			}
 		}
 		return conteo;
-	}, [casosQuery.data, coincidencias]);
+	}, [casosBuscados, coincidencias]);
 
 	const totalVisible = useMemo(() => {
-		const todos: Caso[] = casosQuery.data ?? [];
-		if (!ventana) return todos.length;
-		return todos.filter((caso) => tuvoAvanceEn(caso, ventana)).length;
-	}, [casosQuery.data, ventana]);
+		if (!ventana) return casosBuscados.length;
+		return casosBuscados.filter((caso) => tuvoAvanceEn(caso, ventana)).length;
+	}, [casosBuscados, ventana]);
 
 	// Porcentajes exactos presentes dentro de la etapa seleccionada.
 	const porcentajesDelPaso = useMemo(() => {
 		if (pasoFiltro === null) return [];
 		const conteo = new Map<number, number>();
-		for (const caso of casosQuery.data ?? []) {
+		for (const caso of casosBuscados) {
 			for (const marca of coincidencias(caso, pasoFiltro)) {
 				conteo.set(marca.porcentaje, (conteo.get(marca.porcentaje) ?? 0) + 1);
 			}
 		}
 		return [...conteo.entries()].sort(([a], [b]) => a - b);
-	}, [casosQuery.data, pasoFiltro, coincidencias]);
+	}, [casosBuscados, pasoFiltro, coincidencias]);
 
 	useEffect(() => {
 		if (pasoFiltro === null || pctFiltro === null) return;

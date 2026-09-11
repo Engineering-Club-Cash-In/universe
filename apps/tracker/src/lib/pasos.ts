@@ -154,6 +154,7 @@ export const ESTADOS: Record<
 };
 
 export function etiquetaDeEtapa(paso: number, estado: EstadoCaso): string {
+	if (estado === "rechazado") return "No aprobado";
 	if (paso === 5 && estado === "desembolsado") return "Finalizada";
 	if (paso === 5 && estado === "aprobado") return "Aprobado";
 	return rangoDePaso(paso);

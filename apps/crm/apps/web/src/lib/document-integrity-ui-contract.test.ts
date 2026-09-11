@@ -49,6 +49,9 @@ describe("document integrity UI contract", () => {
 		expect(capacitySource).toContain("Aprobado manualmente");
 		expect(capacitySource).toContain("getLatestReusableDocumentIntegrityRun");
 		expect(capacitySource).toContain("hasCompleteIntegrityValidation");
+		expect(capacitySource).toContain(
+			"key: results[index]?.fileKey ?? payload.key",
+		);
 		expect(capacitySource).toContain('"sales",');
 		expect(historySource).toContain(
 			'canUseValidationHistory || userProfile.data?.role === "sales"',

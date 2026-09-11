@@ -206,6 +206,24 @@ describe("document integrity boundaries", () => {
 		);
 	});
 
+	test("la revisión manual usa una copia inmutable ligada a la validación", () => {
+		expect(serviceSource).toContain("freezeManualReviewEvidence");
+		expect(serviceSource).toContain(
+			'result.validation?.autoResult !== "revision_manual"',
+		);
+		expect(serviceSource).toContain("uploadBufferToR2(filePath, document.buffer)");
+		expect(serviceSource).toContain(
+			"/validated/${params.validationId}/${params.contentSha256}-",
+		);
+		expect(serviceSource).toContain(
+			"set({ documentFilePath: item.filePath })",
+		);
+		expect(serviceSource).toContain(
+			"fileKey: result.validation.documentFilePath",
+		);
+		expect(serviceSource).toContain("immutableEvidencePrefix");
+	});
+
 	test("cada lote reserva uno de dos intentos por oportunidad", () => {
 		expect(serviceSource).toContain("MAX_DOCUMENT_INTEGRITY_ATTEMPTS = 2");
 		expect(serviceSource).toContain("pg_advisory_xact_lock");

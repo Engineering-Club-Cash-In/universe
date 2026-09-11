@@ -64,6 +64,7 @@ import {
 	buildUploadPrefix,
 	getFileBuffer,
 	getFileUrl,
+	uploadBufferToR2,
 	verifyUploadedDocumentInR2,
 } from "../lib/storage";
 
@@ -684,6 +685,53 @@ interface PreparedValidationResult {
 	errorCode?: DocumentIntegrityError["code"];
 }
 
+function buildValidationEvidenceFilePath(params: {
+	opportunityId: string;
+	validationId: string;
+	contentSha256: string;
+	sourceFilePath: string;
+}) {
+	const sourceName = params.sourceFilePath.split("/").at(-1) ?? "document.pdf";
+	const safeName = sourceName.replace(/[^A-Za-z0-9._-]/g, "_");
+	return `${buildUploadPrefix("bank_statement", params.opportunityId)}/validated/${params.validationId}/${params.contentSha256}-${safeName}`;
+}
+
+async function freezeManualReviewEvidence(params: {
+	opportunityId: string;
+	documents: PreparedValidationDocument[];
+	results: PreparedValidationResult[];
+}) {
+	const frozen: Array<{
+		validation: NonNullable<PreparedValidationResult["validation"]>;
+		filePath: string;
+	}> = [];
+	for (const [index, result] of params.results.entries()) {
+		if (result.validation?.autoResult !== "revision_manual") continue;
+		const document = params.documents[index];
+		if (!document?.buffer)
+			throw new Error("Missing source bytes for manual review evidence");
+		const filePath = buildValidationEvidenceFilePath({
+			opportunityId: params.opportunityId,
+			validationId: result.validation.id,
+			contentSha256: result.validation.contentSha256,
+			sourceFilePath: document.filePath,
+		});
+		await uploadBufferToR2(filePath, document.buffer);
+		frozen.push({ validation: result.validation, filePath });
+	}
+	if (frozen.length === 0) return;
+
+	await db.transaction(async (tx) => {
+		for (const item of frozen) {
+			await tx
+				.update(documentIntegrityValidations)
+				.set({ documentFilePath: item.filePath })
+				.where(eq(documentIntegrityValidations.id, item.validation.id));
+		}
+	});
+	for (const item of frozen) item.validation.documentFilePath = item.filePath;
+}
+
 function errorMessage(error: unknown) {
 	return error instanceof Error ? error.message : String(error);
 }
@@ -813,6 +861,24 @@ async function executeValidationRun(params: {
 			results,
 			params.documents.length,
 		);
+		if (completedSuccessfully) {
+			try {
+				await freezeManualReviewEvidence({
+					opportunityId: params.opportunityId,
+					documents: params.documents,
+					results,
+				});
+			} catch (error) {
+				console.error("Could not preserve manual review evidence", {
+					runId: run.id,
+					error: errorMessage(error),
+				});
+				throw new DocumentIntegrityError(
+					"BAD_REQUEST",
+					"No se pudo preparar una copia segura para la revisión manual. Intenta nuevamente.",
+				);
+			}
+		}
 		const completedAt = await finishValidationRun(
 			run.id,
 			completedSuccessfully ? "completed" : "error",
@@ -925,9 +991,14 @@ export async function validateUploadedBankStatements(params: {
 	});
 	return results.map((result, index) => {
 		if (result.validation)
-			return { file: params.files[index].name, validation: result.validation };
+			return {
+				file: params.files[index].name,
+				fileKey: result.validation.documentFilePath,
+				validation: result.validation,
+			};
 		return {
 			file: params.files[index].name,
+			fileKey: params.files[index].key,
 			validation: null,
 			error: result.error,
 		};
@@ -2135,6 +2206,10 @@ export async function getDocumentIntegrityValidationGroup(params: {
 		`${buildUploadPrefix("bank_statement", opportunityId)}/`,
 		`${buildUploadPrefix("opportunity_document", opportunityId)}/`,
 	];
+	const immutableEvidencePrefix = `${buildUploadPrefix(
+		"bank_statement",
+		opportunityId,
+	)}/validated/`;
 	const validationDetails = await Promise.all(
 		rows.map(async (row) => {
 			const {
@@ -2156,7 +2231,11 @@ export async function getDocumentIntegrityValidationGroup(params: {
 				result: row.autoResult,
 				signals: row.signals,
 			});
-			const previewFilePath = linkedDocumentFilePath ?? documentFilePath;
+			const previewFilePath = documentFilePath.startsWith(
+				immutableEvidencePrefix,
+			)
+				? documentFilePath
+				: (linkedDocumentFilePath ?? documentFilePath);
 			return {
 				...details,
 				signals: details.signals.filter(

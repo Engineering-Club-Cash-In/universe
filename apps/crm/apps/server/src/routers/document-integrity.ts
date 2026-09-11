@@ -171,6 +171,7 @@ export const documentIntegrityProcedures = {
 				});
 				return rows.map((row) => ({
 					file: row.file,
+					fileKey: row.fileKey,
 					error: row.error,
 					validation: row.validation
 						? toPublicValidation(row.validation)

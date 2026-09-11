@@ -292,7 +292,14 @@ export function BankStatementAnalysis({
 				opportunityId,
 				files: filePayloads,
 			});
-			return { payloads: filePayloads, results } as ValidatedUploadBatch;
+			const payloads = filePayloads.map((payload, index) => ({
+				...payload,
+				key: results[index]?.fileKey ?? payload.key,
+			}));
+			const publicResults = results.map(
+				({ fileKey: _fileKey, ...result }) => result,
+			);
+			return { payloads, results: publicResults } as ValidatedUploadBatch;
 		},
 		onSuccess: (batch) => {
 			restoredRunIdRef.current = undefined;

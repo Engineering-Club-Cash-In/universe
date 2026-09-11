@@ -85,6 +85,12 @@ describe("document integrity UI contract", () => {
 		expect(capacitySource).toContain('else if (action === "clear_restored")');
 		expect(capacitySource).toContain("restoredRunIdRef.current = undefined");
 		expect(capacitySource).toContain("Cambiar documentos o volver a validar");
+		expect(capacitySource).toContain("hasIntegrityLookupError");
+		expect(capacitySource).toContain("Reintentar consulta");
+		expect(capacitySource).toContain("latestValidatedRunQuery.refetch()");
+		expect(capacitySource).toContain(
+			"integrityAttemptQuery.data?.canValidate ?? false",
+		);
 	});
 
 	test("la interfaz valida lotes por oportunidad, no documentos aislados", () => {

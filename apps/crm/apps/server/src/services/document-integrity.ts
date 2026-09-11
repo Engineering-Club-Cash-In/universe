@@ -2057,12 +2057,25 @@ export async function getDocumentIntegrityValidationGroup(params: {
 					opportunityDocumentId: sql<string | null>`(
 						select linked_document.opportunity_document_id
 						from document_integrity_validation_documents linked_document
+						inner join opportunity_documents linked_opportunity_document
+							on linked_opportunity_document.id = linked_document.opportunity_document_id
 						where linked_document.validation_id = ${documentIntegrityValidations.id}
+							and linked_opportunity_document.file_path = linked_document.linked_file_path
 						order by linked_document.opportunity_document_id
 						limit 1
 					)`,
 					documentType: documentIntegrityValidations.documentType,
 					documentFilePath: documentIntegrityValidations.documentFilePath,
+					linkedDocumentFilePath: sql<string | null>`(
+						select linked_document.linked_file_path
+						from document_integrity_validation_documents linked_document
+						inner join opportunity_documents linked_opportunity_document
+							on linked_opportunity_document.id = linked_document.opportunity_document_id
+						where linked_document.validation_id = ${documentIntegrityValidations.id}
+							and linked_opportunity_document.file_path = linked_document.linked_file_path
+						order by linked_document.opportunity_document_id
+						limit 1
+					)`,
 					contentSha256: documentIntegrityValidations.contentSha256,
 					autoResult: documentIntegrityValidations.autoResult,
 					autoScore: documentIntegrityValidations.autoScore,
@@ -2078,6 +2091,7 @@ export async function getDocumentIntegrityValidationGroup(params: {
 						inner join opportunity_documents linked_opportunity_document
 							on linked_opportunity_document.id = linked_document.opportunity_document_id
 						where linked_document.validation_id = ${documentIntegrityValidations.id}
+							and linked_opportunity_document.file_path = linked_document.linked_file_path
 						order by linked_document.opportunity_document_id
 						limit 1
 					)`,
@@ -2125,6 +2139,7 @@ export async function getDocumentIntegrityValidationGroup(params: {
 		rows.map(async (row) => {
 			const {
 				documentFilePath,
+				linkedDocumentFilePath,
 				aiRawResponse,
 				manualApprovalId,
 				manualApprovalReason,
@@ -2141,6 +2156,7 @@ export async function getDocumentIntegrityValidationGroup(params: {
 				result: row.autoResult,
 				signals: row.signals,
 			});
+			const previewFilePath = linkedDocumentFilePath ?? documentFilePath;
 			return {
 				...details,
 				signals: details.signals.filter(
@@ -2159,9 +2175,9 @@ export async function getDocumentIntegrityValidationGroup(params: {
 							}
 						: null,
 				signedUrl: signablePrefixes.some((prefix) =>
-					documentFilePath.startsWith(prefix),
+					previewFilePath.startsWith(prefix),
 				)
-					? await getFileUrl(documentFilePath)
+					? await getFileUrl(previewFilePath)
 					: null,
 			};
 		}),

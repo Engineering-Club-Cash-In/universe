@@ -34,7 +34,7 @@ describe("document integrity boundaries", () => {
 			"getDocumentIntegrityValidationGroup: crmOnlyProcedure",
 		);
 		expect(routerSource).toContain(
-			"canViewDocumentIntegrityValidationDetail(context.userRole)",
+			"if (!canViewDocumentIntegrityValidationDetail(userRole))",
 		);
 		expect(routerSource).toContain(
 			'context.userRole === "sales" ? context.userId : undefined',
@@ -53,6 +53,11 @@ describe("document integrity boundaries", () => {
 			"getLatestReusableDocumentIntegrityRun: crmOnlyProcedure",
 		);
 		expect(routerSource).toContain("validarDocumentosSubidos: crmProcedure");
+		expect(
+			routerSource.match(
+				/assertCanViewDocumentIntegrity\(context\.userRole\)/g,
+			),
+		).toHaveLength(4);
 	});
 
 	test("la aprobación humana queda separada del resultado automático", () => {
@@ -309,6 +314,13 @@ describe("document integrity boundaries", () => {
 		expect(serviceSource).toContain("links.map((link) => ({");
 		expect(serviceSource).toContain(
 			"documentIntegrityValidationDocuments.opportunityDocumentId",
+		);
+		expect(serviceSource).toContain("linkedDocumentFilePath");
+		expect(serviceSource).toContain(
+			"linked_opportunity_document.file_path = linked_document.linked_file_path",
+		);
+		expect(serviceSource).toContain(
+			"linkedDocumentFilePath ?? documentFilePath",
 		);
 	});
 

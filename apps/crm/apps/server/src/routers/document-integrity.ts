@@ -33,6 +33,14 @@ function translateDomainError(error: unknown): never {
 	throw error;
 }
 
+function assertCanViewDocumentIntegrity(userRole: string) {
+	if (!canViewDocumentIntegrityValidationDetail(userRole)) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "No tienes permiso para consultar validaciones documentales",
+		});
+	}
+}
+
 const uploadedFileSchema = z.object({
 	name: z.string().trim().min(1).max(255),
 	key: z.string().trim().min(1),
@@ -104,6 +112,7 @@ export const documentIntegrityProcedures = {
 	getDocumentIntegrityAttemptStatus: crmOnlyProcedure
 		.input(z.object({ opportunityId: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
+			assertCanViewDocumentIntegrity(context.userRole);
 			try {
 				return await getDocumentIntegrityAttemptStatus({
 					opportunityId: input.opportunityId,
@@ -118,6 +127,7 @@ export const documentIntegrityProcedures = {
 	getLatestReusableDocumentIntegrityRun: crmOnlyProcedure
 		.input(z.object({ opportunityId: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
+			assertCanViewDocumentIntegrity(context.userRole);
 			try {
 				return await getLatestReusableDocumentIntegrityRun({
 					opportunityId: input.opportunityId,
@@ -132,6 +142,7 @@ export const documentIntegrityProcedures = {
 	getDocumentIntegrityStatus: crmOnlyProcedure
 		.input(z.object({ opportunityId: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
+			assertCanViewDocumentIntegrity(context.userRole);
 			try {
 				return await getDocumentIntegrityStatuses({
 					opportunityId: input.opportunityId,
@@ -233,12 +244,7 @@ export const documentIntegrityProcedures = {
 				}),
 		)
 		.handler(async ({ input, context }) => {
-			if (!canViewDocumentIntegrityValidationDetail(context.userRole)) {
-				throw new ORPCError("FORBIDDEN", {
-					message:
-						"No tienes permiso para consultar esta validación documental",
-				});
-			}
+			assertCanViewDocumentIntegrity(context.userRole);
 			try {
 				return await getDocumentIntegrityValidationGroup({
 					...input,

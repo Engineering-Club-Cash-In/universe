@@ -143,7 +143,7 @@ export function BankStatementAnalysis({
 		}),
 		enabled: !!leadId && !!opportunityId,
 	});
-	const canValidateIntegrity = integrityAttemptQuery.data?.canValidate ?? true;
+	const canValidateIntegrity = integrityAttemptQuery.data?.canValidate ?? false;
 	const latestValidatedRunQuery = useQuery({
 		...orpc.getLatestReusableDocumentIntegrityRun.queryOptions({
 			input: { opportunityId: opportunityId ?? "" },
@@ -423,7 +423,15 @@ export function BankStatementAnalysis({
 		validationMutation.isPending ||
 		analyzeMutation.isPending ||
 		resetIntegrityMutation.isPending;
-	const isRestoringValidation = latestValidatedRunQuery.isLoading;
+	const hasIntegrityLookupError =
+		!!leadId &&
+		!!opportunityId &&
+		!validatedBatch &&
+		(integrityAttemptQuery.isError || latestValidatedRunQuery.isError);
+	const isRetryingIntegrityLookup =
+		integrityAttemptQuery.isFetching || latestValidatedRunQuery.isFetching;
+	const isRestoringValidation =
+		latestValidatedRunQuery.isLoading || hasIntegrityLookupError;
 
 	return (
 		<Card className="border-dashed">
@@ -456,6 +464,37 @@ export function BankStatementAnalysis({
 						</span>
 					</div>
 				)}
+				{leadId &&
+					opportunityId &&
+					!hasSuccessfulAnalysis &&
+					hasIntegrityLookupError && (
+						<div className="space-y-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-900 text-xs">
+							<div className="flex gap-2">
+								<AlertTriangle className="h-4 w-4 shrink-0" />
+								<span>
+									No se pudo consultar la validación documental vigente. Reintenta
+									antes de cargar o validar documentos nuevos.
+								</span>
+							</div>
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								disabled={isRetryingIntegrityLookup}
+								onClick={() => {
+									void Promise.all([
+										integrityAttemptQuery.refetch(),
+										latestValidatedRunQuery.refetch(),
+									]);
+								}}
+							>
+								{isRetryingIntegrityLookup && (
+									<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+								)}
+								Reintentar consulta
+							</Button>
+						</div>
+					)}
 				{leadId && opportunityId && integrityAttemptQuery.data && (
 					<div className="flex flex-wrap items-center justify-between gap-2">
 						<p className="text-muted-foreground text-xs">
@@ -491,7 +530,7 @@ export function BankStatementAnalysis({
 									variant="outline"
 									size="sm"
 									className="w-full text-destructive hover:text-destructive"
-									disabled={isBusy}
+									disabled={isBusy || hasIntegrityLookupError}
 								>
 									<RotateCcw className="mr-2 h-4 w-4" />
 									Resetear validaciones documentales

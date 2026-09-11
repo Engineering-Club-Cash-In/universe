@@ -135,6 +135,11 @@ jobs:
               - 'apps/tracker/**'
               - 'package.json'
               - 'bun.lock'
+              # El Dockerfile copia estas 3 carpetas del server del CRM para
+              # resolver los tipos que el tracker consume (COPY en Dockerfile).
+              - 'apps/crm/apps/server/src/routers/**'
+              - 'apps/crm/apps/server/src/lib/**'
+              - 'apps/crm/apps/server/src/db/**'
             auth-google:
               - 'apps/auth-google/**'
               - 'packages/email/**'

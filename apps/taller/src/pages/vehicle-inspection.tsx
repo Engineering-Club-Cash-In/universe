@@ -148,6 +148,22 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
     } as FormValues,
   });
 
+  const clearVehicleSelection = (preserve?: "licensePlate" | "vinNumber") => {
+    setSelectedVehicle(null);
+    setDuplicateVehicle(null);
+    setMismatchedFields([]);
+    setComparisonMismatches([]);
+    form.setValue("vehicleId", "");
+    if (preserve !== "licensePlate") form.setValue("licensePlate", "");
+    if (preserve !== "vinNumber") form.setValue("vinNumber", "");
+    setFormData((current: FormValues) => ({
+      ...current,
+      vehicleId: "",
+      licensePlate: "",
+      vinNumber: "",
+    }));
+  };
+
   // Exponer método de validación para el wizard
   useImperativeHandle(ref, () => ({
     triggerValidation: async () => {
@@ -409,7 +425,7 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
 
   const handleOCRData = (mappedData: Partial<Record<string, unknown>>) => {
     const ocrValues = mappedData as Partial<FormValues>;
-    form.setValue("vehicleId", "");
+    clearVehicleSelection();
     setRawOcrData(ocrValues);
 
     // Update form with OCR data and trigger validation only for filled fields
@@ -604,21 +620,7 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                       variant="ghost" 
                       size="sm" 
                       type="button"
-                      onClick={() => {
-                        setSelectedVehicle(null);
-                        setDuplicateVehicle(null);
-                        setMismatchedFields([]);
-                        setComparisonMismatches([]);
-                        setFormData((current: FormValues) => ({
-                          ...current,
-                          vehicleId: "",
-                          licensePlate: "",
-                          vinNumber: "",
-                        }));
-                        form.setValue("vehicleId", "");
-                        form.setValue("licensePlate", "");
-                        form.setValue("vinNumber", "");
-                      }}
+                      onClick={() => clearVehicleSelection()}
                       className="text-red-600 hover:bg-red-50 hover:text-red-700 font-bold"
                     >
                       Remover
@@ -776,10 +778,16 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                     <FormItem>
                       <FormLabel>Número de placa</FormLabel>
                       <FormControl>
-                        <Input 
-                          placeholder="Ej. P-345JKL" 
-                          {...field} 
+                        <Input
+                          placeholder="Ej. P-345JKL"
+                          {...field}
                           disabled={!!selectedVehicle && !mismatchedFields.includes("licensePlate")}
+                          onChange={(event) => {
+                            if (form.getValues("vehicleId")) {
+                              clearVehicleSelection("licensePlate");
+                            }
+                            field.onChange(event);
+                          }}
                           onBlur={() => {
                             field.onBlur();
                             if (!duplicateVehicle) {
@@ -804,6 +812,12 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                           placeholder="Número de identificación del vehículo"
                           {...field}
                           disabled={!!selectedVehicle && !mismatchedFields.includes("vinNumber")}
+                          onChange={(event) => {
+                            if (form.getValues("vehicleId")) {
+                              clearVehicleSelection("vinNumber");
+                            }
+                            field.onChange(event);
+                          }}
                           onBlur={() => {
                             field.onBlur();
                             if (!duplicateVehicle) {

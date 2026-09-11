@@ -8,7 +8,7 @@
  */
 
 import { ORPCError } from "@orpc/server";
-import { eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
@@ -190,10 +190,22 @@ export const convenioDecisionRouter = {
 				const numeroSifco = resultado.snapshot.numero_credito_sifco;
 				if (numeroSifco) {
 					const [caso, credito] = await Promise.all([
+						// `numero_credito_sifco` NO es único en casos_cobros, y
+						// `getDetallesCreditoCarteraBack` crea un caso nuevo cuando no
+						// hay uno activo — así que un SIFCO puede tener casos viejos
+						// inactivos además del vigente. Un `limit(1)` sin filtro ni
+						// orden podía colgar el aviso del caso viejo, y como
+						// `getAlertasCaso` compara `relatedEntityId` exacto, el asesor
+						// no vería la resolución en el caso donde gestionó el convenio.
+						// Se prefiere el activo y, a igualdad, el más reciente.
 						db
 							.select({ id: casosCobros.id })
 							.from(casosCobros)
 							.where(eq(casosCobros.numeroCreditoSifco, numeroSifco))
+							.orderBy(
+								desc(sql`${casosCobros.activo} IS TRUE`),
+								desc(casosCobros.createdAt),
+							)
 							.limit(1)
 							.then((rows) => rows[0]),
 						carteraBackClient
@@ -203,11 +215,16 @@ export const convenioDecisionRouter = {
 					const emailAsesor = credito?.asesor?.emailCashIn
 						?.trim()
 						.toLowerCase();
+					// Se normalizan LOS DOS lados: el CRM no normaliza el email al
+					// crear el usuario, así que uno guardado con mayúsculas o espacios
+					// no casaría contra el de cartera ya normalizado, y el aviso se
+					// saltaría en silencio. Mismo criterio que
+					// `construirMapaAsesorUsuario` en cobros-notif-helpers.ts.
 					const asesorUserId = emailAsesor
 						? await db
 								.select({ id: user.id })
 								.from(user)
-								.where(eq(user.email, emailAsesor))
+								.where(eq(sql`lower(btrim(${user.email}))`, emailAsesor))
 								.limit(1)
 								.then((rows) => rows[0]?.id ?? null)
 						: null;

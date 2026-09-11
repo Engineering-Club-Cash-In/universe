@@ -671,12 +671,12 @@ export const bankAnalysisRouter = {
 								);
 							}
 						}
-						const linkedSourceFilePaths =
+						const sourceFilePathsToDelete =
 							await linkUploadedValidationsToDocuments({
 								opportunityId: opportunityForDocuments.id,
 								links: pendingValidationLinks,
 							});
-						for (const filePath of linkedSourceFilePaths) {
+						for (const filePath of sourceFilePathsToDelete) {
 							uploadedKeysToDelete.add(filePath);
 						}
 
@@ -781,12 +781,12 @@ export const bankAnalysisRouter = {
 									});
 								}
 							}
-							const linkedSourceFilePaths =
+							const sourceFilePathsToDelete =
 								await linkUploadedValidationsToDocuments({
 									opportunityId: opportunityForDocuments.id,
 									links: pendingExtraValidationLinks,
 								});
-							for (const filePath of linkedSourceFilePaths) {
+							for (const filePath of sourceFilePathsToDelete) {
 								uploadedKeysToDelete.add(filePath);
 							}
 						} catch (error) {

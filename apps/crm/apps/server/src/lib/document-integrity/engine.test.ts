@@ -34,7 +34,7 @@ describe("document integrity engine", () => {
 		).toBe(true);
 	});
 
-	test("un PDF no cifrado que no puede parsearse se rechaza", async () => {
+	test("un PDF corrupto no evade el rechazo declarando Encrypt en un comentario", async () => {
 		const buffer = Buffer.from(
 			[
 				"%PDF-1.7",
@@ -46,6 +46,7 @@ describe("document integrity engine", () => {
 				"startxref",
 				"9",
 				"%%EOF",
+				"% /Encrypt",
 			].join("\n"),
 		);
 		const result = await runDocumentIntegrityEngine({
@@ -64,6 +65,38 @@ describe("document integrity engine", () => {
 			eofCount: 1,
 		});
 		expect(result.result).toBe("rechazado");
+	});
+
+	test("tokens estructurales en comentarios no limpian señales deterministas", async () => {
+		const document = await PDFDocument.create();
+		document.addPage();
+		document.setProducer("Microsoft Word for Microsoft 365");
+		document.setCreationDate(new Date("2026-08-01T12:00:00Z"));
+		document.setModificationDate(new Date("2026-08-05T12:00:00Z"));
+		const original = Buffer.from(
+			await document.save({ useObjectStreams: false }),
+		);
+		const altered = Buffer.concat([
+			original,
+			Buffer.from("\n% /Encrypt /Linearized /Sig /ByteRange [0 1 2 3]\n"),
+		]);
+
+		const [baseline, adversarial] = await Promise.all(
+			[original, altered].map((buffer) =>
+				runDocumentIntegrityEngine({
+					buffer,
+					llm: cleanAiResult,
+					registeredNames: ["FREDERIC ARIEL SOC MORALES"],
+				}),
+			),
+		);
+
+		expect(adversarial.result).toBe(baseline.result);
+		expect(adversarial.score).toBe(baseline.score);
+		expect(adversarial.signals.map((signal) => signal.code)).toEqual(
+			baseline.signals.map((signal) => signal.code),
+		);
+		expect(adversarial.result).not.toBe("valido");
 	});
 
 	test("una fecha extraída por IA nunca fuerza revisión manual", async () => {

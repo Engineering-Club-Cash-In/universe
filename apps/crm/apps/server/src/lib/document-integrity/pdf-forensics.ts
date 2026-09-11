@@ -4,9 +4,13 @@ import {
 	PDFArray,
 	PDFDict,
 	PDFDocument,
+	PDFHexString,
 	PDFName,
+	PDFNumber,
 	PDFRawStream,
 	PDFRef,
+	PDFSignature,
+	PDFString,
 } from "pdf-lib";
 
 export const MAX_PDF_SIZE_BYTES = 20 * 1024 * 1024;
@@ -102,9 +106,12 @@ export function scanPdfBytes(buffer: Buffer | Uint8Array): PdfByteScan {
 		startxrefCount: countMatches(text, /startxref/g),
 		prevCount: countMatches(text, /\/Prev\b/g),
 		hasXref: /(?:\bxref\b|\/Type\s*\/XRef\b)/.test(text),
-		isEncrypted: /\/Encrypt\b/.test(text),
-		isLinearized: /\/Linearized\b/.test(text),
-		isSigned: /\/Sig\b/.test(text) && /\/ByteRange\s*\[/.test(text),
+		// El cifrado y las firmas se confirman después de que pdf-lib construye
+		// el grafo del documento. Buscar estos nombres en todo el buffer permite
+		// falsificarlos con comentarios o valores de texto inertes.
+		isEncrypted: false,
+		isLinearized: hasStructuralLinearization(text),
+		isSigned: false,
 		xmpRaw: extractRawXmp(text),
 		sha256: createHash("sha256").update(bytes).digest("hex"),
 	};
@@ -540,6 +547,65 @@ function safeDocumentMetadata(document: PDFDocument): PdfMetadata {
 	};
 }
 
+function hasVerifiedAcroFormSignature(
+	document: PDFDocument,
+	documentSize: number,
+): boolean {
+	try {
+		return document
+			.getForm()
+			.getFields()
+			.some((field) => {
+				if (!(field instanceof PDFSignature)) return false;
+				const value = field.acroField.V();
+				const signature =
+					value instanceof PDFRef
+						? document.context.lookup(value, PDFDict)
+						: value instanceof PDFDict
+							? value
+							: null;
+				if (!signature) return false;
+				const byteRange = signature.lookupMaybe(
+					PDFName.of("ByteRange"),
+					PDFArray,
+				);
+				if (!byteRange || byteRange.size() !== 4) return false;
+				const contents = signature.lookupMaybe(
+					PDFName.of("Contents"),
+					PDFString,
+					PDFHexString,
+				);
+				if (!contents || contents.asBytes().length === 0) return false;
+
+				const ranges = byteRange
+					.asArray()
+					.map((item) => (item instanceof PDFNumber ? item.asNumber() : null));
+				if (
+					ranges.some(
+						(item) =>
+							item === null ||
+							!Number.isSafeInteger(item) ||
+							item < 0 ||
+							item > documentSize,
+					)
+				)
+					return false;
+
+				const [firstOffset, firstLength, secondOffset, secondLength] =
+					ranges as number[];
+				return (
+					firstOffset === 0 &&
+					firstLength > 0 &&
+					secondOffset > firstLength &&
+					secondLength > 0 &&
+					secondOffset + secondLength === documentSize
+				);
+			});
+	} catch {
+		return false;
+	}
+}
+
 type RawPdfValue =
 	| { kind: "name"; value: string }
 	| { kind: "number"; value: number }
@@ -848,6 +914,43 @@ function getDirectPdfNumberArray(value: RawPdfValue | null) {
 	return numbers.every((item) => item !== null) ? (numbers as number[]) : null;
 }
 
+// Un diccionario de linearización válido debe ser el primer objeto indirecto
+// inmediatamente posterior al encabezado PDF. Limitar la lectura al primer KB
+// evita que un nombre inerte en comentarios, metadata o streams altere señales.
+function hasStructuralLinearization(text: string): boolean {
+	const prefix = text.slice(0, 1024);
+	const headerEnd = prefix.search(/[\r\n]/);
+	if (headerEnd < 0) return false;
+	let cursor = skipPdfWhitespaceAndComments(prefix, headerEnd);
+
+	const readInteger = () => {
+		const match = prefix.slice(cursor).match(/^\d+/);
+		if (!match || !isPdfDelimiter(prefix[cursor + match[0].length]))
+			return null;
+		cursor += match[0].length;
+		return Number(match[0]);
+	};
+	if (readInteger() === null) return false;
+	cursor = skipPdfWhitespaceAndComments(prefix, cursor);
+	if (readInteger() === null) return false;
+	cursor = skipPdfWhitespaceAndComments(prefix, cursor);
+	if (
+		prefix.slice(cursor, cursor + 3) !== "obj" ||
+		!isPdfDelimiter(prefix[cursor + 3])
+	)
+		return false;
+	cursor = skipPdfWhitespaceAndComments(prefix, cursor + 3);
+	if (prefix.slice(cursor, cursor + 2) !== "<<") return false;
+	const dictionaryEnd = findPdfDictionaryEnd(prefix, cursor);
+	if (dictionaryEnd < 0) return false;
+	const linearized = readRawPdfDictionaryValue(
+		prefix,
+		{ start: cursor, end: dictionaryEnd },
+		"Linearized",
+	);
+	return linearized?.kind === "number" && linearized.value > 0;
+}
+
 // pdf-lib descomprime los object streams dentro de load(), fuera de nuestro
 // presupuesto. Aqui se inflan primero con el inflater acotado: si revientan el
 // limite, load() no llega a ejecutarse.
@@ -992,7 +1095,7 @@ export async function inspectPdf(
 	const base: PdfForensicsResult = {
 		bytes,
 		metadata: null,
-		xmp: bytes.isEncrypted ? null : parseXmpMetadata(bytes.xmpRaw),
+		xmp: parseXmpMetadata(bytes.xmpRaw),
 		pageCount: null,
 		fonts: null,
 		pages: [],
@@ -1019,9 +1122,14 @@ export async function inspectPdf(
 			throwOnInvalidObject: false,
 		});
 		base.pageCount = document.getPageCount();
+		bytes.isEncrypted = document.isEncrypted;
+		bytes.isSigned = hasVerifiedAcroFormSignature(
+			document,
+			Buffer.byteLength(buffer),
+		);
+		base.protectedPdf = document.isEncrypted;
 	} catch (error) {
 		base.parseError = error instanceof Error ? error.message : String(error);
-		base.protectedPdf = bytes.isEncrypted;
 		return base;
 	}
 
@@ -1031,13 +1139,15 @@ export async function inspectPdf(
 		base.degradedToL0 = true;
 		return base;
 	}
+	if (document.isEncrypted) {
+		base.xmp = null;
+		return base;
+	}
 
-	if (!bytes.isEncrypted) {
-		try {
-			base.metadata = safeDocumentMetadata(document);
-		} catch (error) {
-			base.parseError = error instanceof Error ? error.message : String(error);
-		}
+	try {
+		base.metadata = safeDocumentMetadata(document);
+	} catch (error) {
+		base.parseError = error instanceof Error ? error.message : String(error);
 	}
 
 	try {

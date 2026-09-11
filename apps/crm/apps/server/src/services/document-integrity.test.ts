@@ -12,6 +12,9 @@ const forensicsSource = await Bun.file(
 const serviceSource = await Bun.file(
 	new URL("./document-integrity.ts", import.meta.url),
 ).text();
+const uploadRouterSource = await Bun.file(
+	new URL("../routers/upload.ts", import.meta.url),
+).text();
 const migrationSource = await Bun.file(
 	new URL(
 		"../db/migrations/0033_create_document_integrity_validation.sql",
@@ -53,6 +56,19 @@ describe("document integrity boundaries", () => {
 			"getLatestReusableDocumentIntegrityRun: crmOnlyProcedure",
 		);
 		expect(routerSource).toContain("validarDocumentosSubidos: crmProcedure");
+		expect(routerSource).toContain(
+			"if (!canRunDocumentIntegrityValidation(context.userRole))",
+		);
+		expect(serviceSource).toContain(
+			"!canRunDocumentIntegrityValidation(params.userRole)",
+		);
+		expect(uploadRouterSource).toContain(
+			"!canRunDocumentIntegrityValidation(userRole)",
+		);
+		expect(uploadRouterSource).toContain("!canWriteOpportunityCreditAnalysis(");
+		expect(uploadRouterSource).toContain(
+			"Los codeudores conservan el permiso previo",
+		);
 		expect(
 			routerSource.match(
 				/assertCanViewDocumentIntegrity\(context\.userRole\)/g,
@@ -211,17 +227,21 @@ describe("document integrity boundaries", () => {
 		expect(serviceSource).toContain(
 			'result.validation?.autoResult !== "revision_manual"',
 		);
-		expect(serviceSource).toContain("uploadBufferToR2(filePath, document.buffer)");
+		expect(serviceSource).toContain(
+			"uploadBufferToR2(filePath, document.buffer)",
+		);
 		expect(serviceSource).toContain(
 			"/validated/${params.validationId}/${params.contentSha256}-",
 		);
-		expect(serviceSource).toContain(
-			"set({ documentFilePath: item.filePath })",
-		);
+		expect(serviceSource).toContain("set({ documentFilePath: item.filePath })");
 		expect(serviceSource).toContain(
 			"fileKey: result.validation.documentFilePath",
 		);
 		expect(serviceSource).toContain("immutableEvidencePrefix");
+		expect(serviceSource).toContain("isImmutableDocumentIntegrityEvidencePath");
+		expect(serviceSource).toContain(
+			"if (!preserveEvidence) sourceFilePathsToDelete.add(sourceFilePath)",
+		);
 	});
 
 	test("cada lote reserva uno de dos intentos por oportunidad", () => {

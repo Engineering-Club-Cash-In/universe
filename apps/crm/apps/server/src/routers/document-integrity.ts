@@ -2,7 +2,10 @@ import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import { buildDocumentRecommendedAction } from "../lib/document-integrity/decision-evidence";
 import type { Signal, ValidationResult } from "../lib/document-integrity/types";
-import { canViewDocumentIntegrityValidationDetail } from "../lib/document-integrity/workflow-policy";
+import {
+	canRunDocumentIntegrityValidation,
+	canViewDocumentIntegrityValidationDetail,
+} from "../lib/document-integrity/workflow-policy";
 import { analystProcedure, crmOnlyProcedure, crmProcedure } from "../lib/orpc";
 import {
 	approveDocumentIntegrityValidation,
@@ -163,6 +166,11 @@ export const documentIntegrityProcedures = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
+			if (!canRunDocumentIntegrityValidation(context.userRole)) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para ejecutar validaciones documentales",
+				});
+			}
 			try {
 				const rows = await validateUploadedBankStatements({
 					...input,

@@ -125,20 +125,30 @@ function metadataSignals(
 function structureSignals(forensics: PdfForensicsResult): Signal[] {
 	const signals: Signal[] = [];
 	const { bytes } = forensics;
-	if (!bytes.isLinearized && !bytes.isSigned) {
-		if (bytes.prevCount >= 2) {
-			signals.push(
-				makeSignal("actualizaciones_incrementales", 4, "media", "bytes", {
-					evidence: { prevCount: bytes.prevCount },
-				}),
-			);
-		} else if (bytes.prevCount === 1) {
-			signals.push(
-				makeSignal("una_actualizacion_incremental", 2, "baja", "bytes", {
-					evidence: { prevCount: 1 },
-				}),
-			);
-		}
+	const expectedStructuralUpdates =
+		Number(bytes.isLinearized) + Number(bytes.isSigned);
+	const unexplainedUpdates = Math.max(
+		0,
+		bytes.prevCount - expectedStructuralUpdates,
+	);
+	if (unexplainedUpdates >= 2) {
+		signals.push(
+			makeSignal("actualizaciones_incrementales", 4, "media", "bytes", {
+				evidence: {
+					prevCount: bytes.prevCount,
+					expectedStructuralUpdates,
+				},
+			}),
+		);
+	} else if (unexplainedUpdates === 1) {
+		signals.push(
+			makeSignal("una_actualizacion_incremental", 2, "baja", "bytes", {
+				evidence: {
+					prevCount: bytes.prevCount,
+					expectedStructuralUpdates,
+				},
+			}),
+		);
 	}
 	if (forensics.protectedPdf)
 		signals.push(makeSignal("pdf_protegido_no_abre", 0, "alta", "estructura"));
@@ -339,10 +349,7 @@ export async function runDocumentIntegrityEngine(params: {
 		signals,
 		llm,
 		invalidPdfHeader: !forensics.bytes.hasPdfHeader,
-		corruptPdf:
-			!!forensics.parseError &&
-			forensics.pageCount === null &&
-			!forensics.bytes.isEncrypted,
+		corruptPdf: !!forensics.parseError && forensics.pageCount === null,
 		pipelineError: params.pipelineError,
 	});
 

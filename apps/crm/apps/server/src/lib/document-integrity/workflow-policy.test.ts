@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
 	canApproveDocumentIntegrityValidation,
+	canRunDocumentIntegrityValidation,
 	canViewDocumentIntegrityValidationDetail,
 	getAttemptAvailability,
 	getAttemptStatus,
@@ -23,6 +24,18 @@ describe("document integrity workflow policy", () => {
 			"cobros_supervisor",
 		])
 			expect(canViewDocumentIntegrityValidationDetail(role)).toBe(false);
+	});
+
+	test("solo los roles del flujo documental pueden ejecutar validaciones", () => {
+		for (const role of ["admin", "analyst", "sales_supervisor", "sales"])
+			expect(canRunDocumentIntegrityValidation(role)).toBe(true);
+		for (const role of [
+			"juridico",
+			"accounting",
+			"cobros",
+			"cobros_supervisor",
+		])
+			expect(canRunDocumentIntegrityValidation(role)).toBe(false);
 	});
 
 	test("solo administradores y supervisores de ventas pueden aprobar", () => {

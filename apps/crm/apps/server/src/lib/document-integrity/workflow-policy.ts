@@ -28,6 +28,10 @@ export function canViewDocumentIntegrityValidationDetail(
 	return ["admin", "analyst", "sales_supervisor", "sales"].includes(userRole);
 }
 
+export function canRunDocumentIntegrityValidation(userRole: string): boolean {
+	return canViewDocumentIntegrityValidationDetail(userRole);
+}
+
 // El cupo limita validaciones del negocio y solo cuenta ejecuciones completadas,
 // para que un fallo tecnico no lo consuma. Eso deja las ejecuciones fallidas sin
 // cota, y cada una paga llamadas a Gemini: runsInCycle pone el techo de costo.

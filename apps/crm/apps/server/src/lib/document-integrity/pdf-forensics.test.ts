@@ -8,6 +8,7 @@ import {
 	isPdfSafeToParse,
 	MAX_DECOMPRESSED_PDF_CONTENT_BYTES,
 	parseXmpMetadata,
+	scanPdfBytes,
 	scanPdfContentOperators,
 } from "./pdf-forensics";
 
@@ -164,6 +165,67 @@ describe("PDF forensics", () => {
 			"latin1",
 		);
 		expect(isPdfSafeToParse(pdf)).toBe(true);
+	});
+
+	test("comentarios no falsifican cifrado, linearización ni firma", async () => {
+		const document = await PDFDocument.create();
+		document.addPage();
+		const original = Buffer.from(
+			await document.save({ useObjectStreams: false }),
+		);
+		const altered = Buffer.concat([
+			original,
+			Buffer.from("\n% /Encrypt /Linearized /Sig /ByteRange [0 1 2 3]\n"),
+		]);
+
+		expect(scanPdfBytes(altered)).toMatchObject({
+			isEncrypted: false,
+			isLinearized: false,
+			isSigned: false,
+		});
+		const inspected = await inspectPdf(altered);
+		expect(inspected.bytes).toMatchObject({
+			isEncrypted: false,
+			isLinearized: false,
+			isSigned: false,
+		});
+		expect(inspected.pageCount).toBe(1);
+	});
+
+	test("una clave Encrypt inerte en el catálogo no simula cifrado", async () => {
+		const document = await PDFDocument.create();
+		document.addPage();
+		document.catalog.set(PDFName.of("Encrypt"), PDFName.of("Inerte"));
+		const inspected = await inspectPdf(
+			Buffer.from(await document.save({ useObjectStreams: false })),
+		);
+
+		expect(inspected.bytes.isEncrypted).toBe(false);
+		expect(inspected.protectedPdf).toBe(false);
+	});
+
+	test("solo reconoce Linearized en el diccionario del primer objeto", () => {
+		const structural = Buffer.from(
+			"%PDF-1.7\n1 0 obj\n<< /Linearized 1 /L 200 >>\nendobj\n%%EOF",
+			"latin1",
+		);
+		const inert = Buffer.from(
+			"%PDF-1.7\n% /Linearized 1\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF",
+			"latin1",
+		);
+
+		expect(scanPdfBytes(structural).isLinearized).toBe(true);
+		expect(scanPdfBytes(inert).isLinearized).toBe(false);
+	});
+
+	test("un PDF corrupto no deja de serlo por declarar Encrypt en un comentario", async () => {
+		const inspected = await inspectPdf(
+			Buffer.from("%PDF-1.7\nxref\n%%EOF\n% /Encrypt\n", "latin1"),
+		);
+
+		expect(inspected.bytes.isEncrypted).toBe(false);
+		expect(inspected.pageCount).toBeNull();
+		expect(inspected.parseError).not.toBeNull();
 	});
 
 	test("detecta subsets duplicados y fuentes no embebidas/Type3", () => {

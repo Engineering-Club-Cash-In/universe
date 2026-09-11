@@ -39,6 +39,7 @@ import {
 	buildDocumentRecommendedAction,
 } from "../lib/document-integrity/decision-evidence";
 import { runDocumentIntegrityEngine } from "../lib/document-integrity/engine";
+import { isImmutableDocumentIntegrityEvidencePath } from "../lib/document-integrity/evidence-path";
 import {
 	ESTADO_CUENTA_BATCH_PROMPT,
 	estadoCuentaBatchAiSchema,
@@ -51,6 +52,7 @@ import {
 import type { DocumentIntegrityAiResult } from "../lib/document-integrity/types";
 import {
 	canApproveDocumentIntegrityValidation,
+	canRunDocumentIntegrityValidation,
 	getAttemptAvailability,
 	getAttemptStatus,
 	getManualApprovalAvailability,
@@ -617,7 +619,9 @@ async function persistValidation(params: {
 	const internalPipelineError =
 		params.storageError ??
 		params.aiError ??
-		(params.buffer ? null : "No se recibió el contenido del archivo almacenado");
+		(params.buffer
+			? null
+			: "No se recibió el contenido del archivo almacenado");
 	const publicPipelineError =
 		params.storageError || !params.buffer
 			? "No se pudo leer el archivo almacenado. Intenta nuevamente."
@@ -917,6 +921,7 @@ export async function validateUploadedBankStatements(params: {
 		);
 	}
 	if (
+		!canRunDocumentIntegrityValidation(params.userRole) ||
 		!canWriteOpportunityCreditAnalysis(
 			params.userRole,
 			params.userId,
@@ -1580,7 +1585,11 @@ export async function linkUploadedValidationsToDocuments(params: {
 	}>;
 }) {
 	return db.transaction(async (tx) => {
-		const linkedSourceFilePaths = new Set<string>();
+		const sourceFilePathsToDelete = new Set<string>();
+		const bankStatementPrefix = buildUploadPrefix(
+			"bank_statement",
+			params.opportunityId,
+		);
 		const linksBySource = new Map<string, typeof params.links>();
 		for (const link of params.links) {
 			const groupedLinks = linksBySource.get(link.sourceFilePath) ?? [];
@@ -1615,12 +1624,21 @@ export async function linkUploadedValidationsToDocuments(params: {
 				.orderBy(desc(documentIntegrityValidationRuns.attemptNumber))
 				.limit(1);
 			if (!candidate) continue;
-			await tx
-				.update(documentIntegrityValidations)
-				.set({
-					documentFilePath: primaryLink.documentFilePath,
-				})
-				.where(eq(documentIntegrityValidations.id, candidate.id));
+			const preserveEvidence = isImmutableDocumentIntegrityEvidencePath({
+				filePath: sourceFilePath,
+				bankStatementPrefix,
+			});
+			// El bridge registra todos los documentos definitivos asociados. La copia
+			// congelada, en cambio, sigue siendo la evidencia exacta que vio y aprobó
+			// el supervisor: no se reapunta ni se entrega al cleanup de temporales.
+			if (!preserveEvidence) {
+				await tx
+					.update(documentIntegrityValidations)
+					.set({
+						documentFilePath: primaryLink.documentFilePath,
+					})
+					.where(eq(documentIntegrityValidations.id, candidate.id));
+			}
 			await tx.insert(documentIntegrityValidationDocuments).values(
 				links.map((link) => ({
 					validationId: candidate.id,
@@ -1628,9 +1646,9 @@ export async function linkUploadedValidationsToDocuments(params: {
 					linkedFilePath: link.documentFilePath,
 				})),
 			);
-			linkedSourceFilePaths.add(sourceFilePath);
+			if (!preserveEvidence) sourceFilePathsToDelete.add(sourceFilePath);
 		}
-		return [...linkedSourceFilePaths];
+		return [...sourceFilePathsToDelete];
 	});
 }
 

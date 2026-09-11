@@ -25,6 +25,7 @@ import { quotationsRouter } from "./quotations";
 import { reportesCarteraRouter } from "./reportes-cartera";
 import * as reportsRouter from "./reports";
 import { seguimientosRouter } from "./seguimientos";
+import { trackerRouter } from "./tracker";
 import { uploadRouter } from "./upload";
 import { validationsRouter } from "./validations";
 import { vehiclesRouter } from "./vehicles";
@@ -213,6 +214,7 @@ export const adminAppRouter = {
 	toggleUserSuspension: adminRouter.toggleUserSuspension,
 	deleteUser: adminRouter.deleteUser,
 	createUser: adminRouter.createUser,
+	setPartnerCompanies: adminRouter.setPartnerCompanies,
 
 	// Admin Import routes
 	setupImportacion: adminImportRouter.setupImportacion,
@@ -454,6 +456,15 @@ export const disbursementRouter = {
 	// Dashboard jurídico manual
 	getJuridicoDashboardSnapshot: juridicoDashboardRouter.getSnapshot,
 	updateJuridicoDashboardSnapshot: juridicoDashboardRouter.updateSnapshot,
+};
+
+// Tracker de predios/agencias. Aparte del appRouter para no empujar TS7056.
+export const partnerTrackerRouter = {
+	getCasos: trackerRouter.getCasos,
+	getCasoById: trackerRouter.getCasoById,
+	getPartnerAgencies: trackerRouter.getPartnerAgencies,
+	getPartnerPasswordStatus: trackerRouter.getPartnerPasswordStatus,
+	changePartnerPassword: trackerRouter.changePartnerPassword,
 };
 
 export const manualVehicleRouter = {

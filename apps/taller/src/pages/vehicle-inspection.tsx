@@ -409,6 +409,7 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
 
   const handleOCRData = (mappedData: Partial<Record<string, unknown>>) => {
     const ocrValues = mappedData as Partial<FormValues>;
+    form.setValue("vehicleId", "");
     setRawOcrData(ocrValues);
 
     // Update form with OCR data and trigger validation only for filled fields

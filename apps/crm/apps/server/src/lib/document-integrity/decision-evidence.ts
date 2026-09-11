@@ -1,4 +1,7 @@
-import { isRejectionEligibleSignal } from "./ruleset";
+import {
+	isRejectionEligibleSignal,
+	MIN_AI_REJECTION_CONFIDENCE,
+} from "./ruleset";
 import type { Signal, ValidationResult } from "./types";
 
 const ISSUER_LABELS: Record<string, string> = {
@@ -23,7 +26,16 @@ export interface PositiveCheck {
 
 export function buildDocumentRecommendedAction(params: {
 	result: ValidationResult;
-	signals: Pick<Signal, "code" | "page" | "severity" | "weight">[];
+	signals: Pick<
+		Signal,
+		| "code"
+		| "page"
+		| "severity"
+		| "weight"
+		| "source"
+		| "confidence"
+		| "evidence"
+	>[];
 }): string {
 	const pageSignals =
 		params.result === "rechazado"
@@ -74,7 +86,11 @@ export function buildDocumentPositiveChecks(params: {
 			label: "El documento es legible.",
 		});
 	}
-	if (ai?.corresponde_al_tipo_declarado === true) {
+	if (
+		ai?.corresponde_al_tipo_declarado === true &&
+		typeof ai.confianza_tipo_documento === "number" &&
+		ai.confianza_tipo_documento >= MIN_AI_REJECTION_CONFIDENCE
+	) {
 		checks.push({
 			code: "tipo_documento_confirmado",
 			label: "Fue reconocido como un estado de cuenta.",

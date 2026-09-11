@@ -6,6 +6,7 @@ import type {
 
 export const LLM_WEIGHT_CAP = 8;
 export const REJECTION_SCORE_THRESHOLD = 7;
+export const MIN_AI_REJECTION_CONFIDENCE = 70;
 
 const REJECTION_ELIGIBLE_SIGNAL_CODES = new Set([
 	"titular_no_coincide_fuerte",
@@ -23,13 +24,18 @@ const REJECTION_SCORE_EXCLUDED_SIGNAL_CODES = new Set([
 export function isRejectionEligibleSignal(
 	signal: Pick<
 		Signal,
-		"code" | "severity" | "confidence" | "page" | "evidence"
+		"code" | "severity" | "source" | "confidence" | "page" | "evidence"
 	>,
 ): boolean {
 	const eligible =
 		signal.severity === "alta" &&
 		REJECTION_ELIGIBLE_SIGNAL_CODES.has(signal.code);
 	if (!eligible) return false;
+	if (
+		signal.source === "ia" &&
+		(signal.confidence ?? 0) < MIN_AI_REJECTION_CONFIDENCE
+	)
+		return false;
 	if (signal.code !== "documento_declarado_sintetico_o_sin_validez")
 		return true;
 
@@ -40,6 +46,14 @@ export function isRejectionEligibleSignal(
 		typeof signal.evidence?.textoDetectado === "string" &&
 		signal.evidence.textoDetectado.trim().length > 0
 	);
+}
+
+function contributesToRejectionScore(signal: Signal): boolean {
+	if (REJECTION_SCORE_EXCLUDED_SIGNAL_CODES.has(signal.code)) return false;
+	if (signal.source !== "ia") return true;
+	if (signal.code === "documento_declarado_sintetico_o_sin_validez")
+		return isRejectionEligibleSignal(signal);
+	return (signal.confidence ?? 0) >= MIN_AI_REJECTION_CONFIDENCE;
 }
 
 export const SIGNAL_WEIGHTS: Record<string, number> = {
@@ -70,6 +84,7 @@ export const SIGNAL_WEIGHTS: Record<string, number> = {
 	documento_declarado_sintetico_o_sin_validez: 7,
 	ia_no_disponible: 0,
 	inspeccion_tecnica_incompleta: 0,
+	tipo_documento_incierto: 0,
 	identidad_comparada: 0,
 };
 
@@ -116,6 +131,8 @@ export const SIGNAL_LABELS: Record<string, string> = {
 	ia_no_disponible: "La inspección visual con IA no estuvo disponible",
 	inspeccion_tecnica_incompleta:
 		"La inspección técnica del PDF no pudo completarse",
+	tipo_documento_incierto:
+		"No se pudo confirmar que el archivo sea un estado de cuenta",
 	identidad_comparada: "El titular coincide con una persona del expediente",
 };
 
@@ -172,7 +189,7 @@ export function applyRuleset(params: {
 
 	if (
 		llm?.corresponde_al_tipo_declarado === false &&
-		llm.confianza_tipo_documento >= 70
+		llm.confianza_tipo_documento >= MIN_AI_REJECTION_CONFIDENCE
 	) {
 		const detected = llm?.tipo_documento_detectado || "archivo no reconocible";
 		return {
@@ -182,6 +199,16 @@ export function applyRuleset(params: {
 			signals,
 		};
 	}
+	const evaluatedSignals =
+		llm && llm.confianza_tipo_documento < MIN_AI_REJECTION_CONFIDENCE
+			? [
+					...signals,
+					makeSignal("tipo_documento_incierto", 0, "media", "ia", {
+						confidence: llm.confianza_tipo_documento,
+						evidence: { detected: llm.tipo_documento_detectado },
+					}),
+				]
+			: signals;
 
 	const calculateScore = (scoredSignals: Signal[]) => {
 		const deterministicScore = scoredSignals
@@ -195,22 +222,21 @@ export function applyRuleset(params: {
 		);
 		return Math.max(0, deterministicScore + aiScore);
 	};
-	const score = calculateScore(signals);
+	const score = calculateScore(evaluatedSignals);
 	const rejectionScore = calculateScore(
-		signals.filter(
-			(signal) => !REJECTION_SCORE_EXCLUDED_SIGNAL_CODES.has(signal.code),
-		),
+		evaluatedSignals.filter(contributesToRejectionScore),
 	);
-	const requiresManual = signals.some((signal) =>
+	const requiresManual = evaluatedSignals.some((signal) =>
 		[
 			"ia_no_disponible",
 			"pdf_protegido_no_abre",
 			"inspeccion_tecnica_incompleta",
+			"tipo_documento_incierto",
 		].includes(signal.code),
 	);
 	const mustRejectByScore =
 		rejectionScore >= REJECTION_SCORE_THRESHOLD &&
-		signals.some(isRejectionEligibleSignal);
+		evaluatedSignals.some(isRejectionEligibleSignal);
 
 	const result = requiresManual
 		? "revision_manual"
@@ -230,5 +256,5 @@ export function applyRuleset(params: {
 					? "Se detectó evidencia de alto riesgo. El documento debe reemplazarse antes de continuar."
 					: "Se detectaron señales que requieren revisión humana.";
 
-	return { result, score, reason, signals };
+	return { result, score, reason, signals: evaluatedSignals };
 }

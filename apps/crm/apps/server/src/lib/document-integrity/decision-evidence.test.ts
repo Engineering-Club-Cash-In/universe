@@ -7,6 +7,7 @@ import {
 const cleanAiResponse = {
 	es_legible: true,
 	corresponde_al_tipo_declarado: true,
+	confianza_tipo_documento: 99,
 	emisor_normalizado: "gyt_continental",
 	titular_detectado: "FREDERIC ARIEL SOC MORALES",
 	observaciones_forenses: [],
@@ -23,22 +24,38 @@ describe("document integrity decision evidence", () => {
 						page: 9,
 						severity: "alta",
 						weight: 6,
+						source: "identidad",
 					},
 					{
 						code: "huella_no_coincide_con_emisor",
 						page: 9,
 						severity: "media",
 						weight: 3,
+						source: "emisor",
 					},
 					{
 						code: "fuente_no_embebida",
 						page: 2,
 						severity: "media",
 						weight: 0,
+						source: "estructura",
 					},
 				],
 			}),
 		).toContain("la página 9");
+	});
+
+	test("no confirma el tipo documental cuando la confianza es baja", () => {
+		const checks = buildDocumentPositiveChecks({
+			aiRawResponse: {
+				...cleanAiResponse,
+				confianza_tipo_documento: 69,
+			},
+			signals: [],
+		});
+		expect(checks.map((check) => check.code)).not.toContain(
+			"tipo_documento_confirmado",
+		);
 	});
 
 	test("no inventa una pagina para una alerta del documento completo", () => {
@@ -50,6 +67,7 @@ describe("document integrity decision evidence", () => {
 					page: null,
 					severity: "alta",
 					weight: 6,
+					source: "identidad",
 				},
 			],
 		});
@@ -66,12 +84,16 @@ describe("document integrity decision evidence", () => {
 					page: 9,
 					severity: "alta",
 					weight: 4,
+					source: "ia",
+					confidence: 90,
 				},
 				{
 					code: "logo_baja_calidad",
 					page: 2,
 					severity: "baja",
 					weight: 1,
+					source: "ia",
+					confidence: 20,
 				},
 			],
 		});

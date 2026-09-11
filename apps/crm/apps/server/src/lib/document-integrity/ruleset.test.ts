@@ -27,6 +27,7 @@ const nonOverrideSignals = Object.entries(SIGNAL_WEIGHTS)
 				"ia_no_disponible",
 				"pdf_protegido_no_abre",
 				"inspeccion_tecnica_incompleta",
+				"tipo_documento_incierto",
 			].includes(code),
 	)
 	.map(([code, weight]) =>
@@ -66,7 +67,9 @@ describe("document integrity ruleset", () => {
 		const result = applyRuleset({
 			signals: [
 				makeSignal("titular_no_coincide_fuerte", 6, "alta", "identidad"),
-				makeSignal("logo_baja_calidad", 1, "baja", "ia"),
+				makeSignal("logo_baja_calidad", 1, "baja", "ia", {
+					confidence: 90,
+				}),
 			],
 			llm: cleanLlm,
 		});
@@ -145,7 +148,13 @@ describe("document integrity ruleset", () => {
 	])("la señal fuerte habilitada %s puede sustentar un rechazo", (code) => {
 		const result = applyRuleset({
 			signals: [
-				makeSignal(code, 4, "alta", "ia"),
+				makeSignal(
+					code,
+					4,
+					"alta",
+					code === "titular_no_coincide_fuerte" ? "identidad" : "ia",
+					{ confidence: 90 },
+				),
 				makeSignal("huella_no_coincide_con_emisor", 3, "media", "emisor"),
 			],
 			llm: cleanLlm,
@@ -158,7 +167,9 @@ describe("document integrity ruleset", () => {
 		expect(
 			applyRuleset({
 				signals: [
-					makeSignal("formato_no_corresponde_al_emisor", 4, "alta", "ia"),
+					makeSignal("formato_no_corresponde_al_emisor", 4, "alta", "ia", {
+						confidence: 90,
+					}),
 				],
 				llm: cleanLlm,
 			}).result,
@@ -204,7 +215,9 @@ describe("document integrity ruleset", () => {
 					"alta",
 					"duplicado",
 				),
-				makeSignal("formato_no_corresponde_al_emisor", 4, "alta", "ia"),
+				makeSignal("formato_no_corresponde_al_emisor", 4, "alta", "ia", {
+					confidence: 90,
+				}),
 			],
 			llm: cleanLlm,
 		});
@@ -221,7 +234,9 @@ describe("document integrity ruleset", () => {
 					"alta",
 					"duplicado",
 				),
-				makeSignal("formato_no_corresponde_al_emisor", 4, "alta", "ia"),
+				makeSignal("formato_no_corresponde_al_emisor", 4, "alta", "ia", {
+					confidence: 90,
+				}),
 				makeSignal("huella_no_coincide_con_emisor", 3, "media", "emisor"),
 			],
 			llm: cleanLlm,
@@ -306,6 +321,71 @@ describe("document integrity ruleset", () => {
 			score: 0,
 			reason: "No se pudo descargar el archivo desde R2",
 		});
+	});
+
+	test("un tipo documental ambiguo requiere revisión manual", () => {
+		for (const corresponde of [true, false]) {
+			const result = applyRuleset({
+				signals: [],
+				llm: {
+					...cleanLlm,
+					corresponde_al_tipo_declarado: corresponde,
+					confianza_tipo_documento: 69,
+				},
+			});
+			expect(result.result).toBe("revision_manual");
+			expect(result.signals.map((signal) => signal.code)).toContain(
+				"tipo_documento_incierto",
+			);
+		}
+	});
+
+	test("señales visuales de baja confianza no provocan rechazo automático", () => {
+		const result = applyRuleset({
+			llm: cleanLlm,
+			signals: [
+				makeSignal("desalineacion_columnas", 4, "alta", "ia", {
+					confidence: 1,
+				}),
+				makeSignal("tipografia_inconsistente", 4, "alta", "ia", {
+					confidence: 1,
+				}),
+			],
+		});
+		expect(result.score).toBe(8);
+		expect(result.result).toBe("revision_manual");
+	});
+
+	test("una señal confiable no usa otra señal dudosa para alcanzar rechazo", () => {
+		const result = applyRuleset({
+			llm: cleanLlm,
+			signals: [
+				makeSignal("desalineacion_columnas", 4, "alta", "ia", {
+					confidence: 90,
+				}),
+				makeSignal("tipografia_inconsistente", 4, "alta", "ia", {
+					confidence: 1,
+				}),
+			],
+		});
+		expect(result.score).toBe(8);
+		expect(result.result).toBe("revision_manual");
+	});
+
+	test("dos señales visuales confiables sí pueden provocar rechazo", () => {
+		const result = applyRuleset({
+			llm: cleanLlm,
+			signals: [
+				makeSignal("desalineacion_columnas", 4, "alta", "ia", {
+					confidence: 90,
+				}),
+				makeSignal("tipografia_inconsistente", 4, "alta", "ia", {
+					confidence: 90,
+				}),
+			],
+		});
+		expect(result.score).toBe(8);
+		expect(result.result).toBe("rechazado");
 	});
 
 	test("el aporte total del LLM está topado", () => {

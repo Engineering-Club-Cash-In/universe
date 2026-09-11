@@ -109,4 +109,10 @@ describe("document integrity UI contract", () => {
 		expect(historySource).toContain("Reintentar consulta");
 		expect(historySource).toContain("attemptStatusQuery.refetch()");
 	});
+
+	test("un resultado técnico no se anuncia como validación exitosa", () => {
+		expect(historySource).toContain(
+			'result.validation.result !== "error"',
+		);
+	});
 });

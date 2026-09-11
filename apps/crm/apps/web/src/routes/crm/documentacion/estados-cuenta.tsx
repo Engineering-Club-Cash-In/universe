@@ -528,7 +528,9 @@ function NewValidationDialog({
 			return { opportunityId, results };
 		},
 		onSuccess: ({ opportunityId, results }) => {
-			const successful = results.filter((result) => result.validation).length;
+			const successful = results.filter(
+				(result) => result.validation && result.validation.result !== "error",
+			).length;
 			if (successful === 0) {
 				toast.error("No se pudo validar ningún documento");
 				return;

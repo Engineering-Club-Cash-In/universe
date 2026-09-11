@@ -32,7 +32,9 @@ const Q = (n: number) =>
 export async function notificarConvenioPendienteAprobacion(params: {
 	casoCobroId: string;
 	convenioId: number;
+	/** Nombre de la persona, no el número de crédito (ver `numeroCreditoSifco`). */
 	clienteNombre?: string;
+	numeroCreditoSifco?: string;
 	montoTotal: number;
 	creadoPorUserId: string;
 }): Promise<void> {
@@ -43,7 +45,16 @@ export async function notificarConvenioPendienteAprobacion(params: {
 		const usuarioSistema =
 			(await resolverUsuarioSistemaCobros()) ?? params.creadoPorUserId;
 		const titulo = "Convenio pendiente de aprobación";
-		const descripcion = `${params.clienteNombre ?? "Un cliente"} tiene un convenio de pago por ${Q(params.montoTotal)} esperando tu aprobación.`;
+		// El SIFCO va aparte del nombre: identifica el crédito sin reemplazar a
+		// la persona, que es lo que el supervisor reconoce de un vistazo.
+		const quien = params.clienteNombre?.trim()
+			? params.numeroCreditoSifco
+				? `${params.clienteNombre.trim()} (crédito ${params.numeroCreditoSifco})`
+				: params.clienteNombre.trim()
+			: params.numeroCreditoSifco
+				? `El crédito ${params.numeroCreditoSifco}`
+				: "Un cliente";
+		const descripcion = `${quien} tiene un convenio de pago por ${Q(params.montoTotal)} esperando tu aprobación.`;
 
 		await db.insert(notifications).values(
 			supervisores.map((supervisorId) => ({

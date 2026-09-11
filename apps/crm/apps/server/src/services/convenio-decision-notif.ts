@@ -16,10 +16,7 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db";
 import { notifications } from "../db/schema/notifications";
-import {
-	obtenerSupervisoresCobros,
-	resolverUsuarioSistemaCobros,
-} from "./cobros-notif-helpers";
+import { obtenerSupervisoresCobros } from "./cobros-notif-helpers";
 
 /**
  * Roles válidos para `created_by_role` — el enum de la columna, no `string`:
@@ -51,8 +48,6 @@ export async function notificarConvenioPendienteAprobacion(params: {
 		const supervisores = await obtenerSupervisoresCobros();
 		if (supervisores.length === 0) return;
 
-		const usuarioSistema =
-			(await resolverUsuarioSistemaCobros()) ?? params.creadoPorUserId;
 		const titulo = "Convenio pendiente de aprobación";
 		// El SIFCO va aparte del nombre: identifica el crédito sin reemplazar a
 		// la persona, que es lo que el supervisor reconoce de un vistazo.
@@ -78,7 +73,13 @@ export async function notificarConvenioPendienteAprobacion(params: {
 				// los avisos de ESTE, no los de otro convenio del mismo caso.
 				convenioId: params.convenioId,
 				redirectPage: "cobros_detail" as const,
-				createdBy: usuarioSistema,
+				// La UI muestra el NOMBRE de `createdBy` (join) pegado a
+				// `createdByRole`, así que los dos tienen que describir a la
+				// misma persona. Acá es el asesor que creó el convenio: este
+				// aviso lo dispara su acción, no un job de sistema — usar el
+				// usuario de sistema dejaba su nombre etiquetado con el rol del
+				// asesor.
+				createdBy: params.creadoPorUserId,
 				createdByRole: params.creadoPorRole ?? ("cobros" as const),
 				assignedToRole: "cobros_supervisor" as const,
 				assignedTo: supervisorId,

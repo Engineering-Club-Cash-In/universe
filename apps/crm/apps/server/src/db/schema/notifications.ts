@@ -149,6 +149,13 @@ export const notifications = pgTable(
 		uniqueIndex("uq_notifications_convenio_decision")
 			.on(table.convenioDecisionId, table.assignedTo)
 			.where(sql`${table.convenioDecisionId} IS NOT NULL`),
+		// CB-033 — lo usan el cierre de pendientes y la reconciliación, que
+		// filtran por `convenio_id`. Va DECLARADO acá y no solo en la
+		// migración: `db:push` compara la base contra este schema, así que un
+		// índice creado solo por SQL se ve como sobrante y lo dropearía.
+		index("idx_notifications_convenio_pendiente")
+			.on(table.convenioId)
+			.where(sql`${table.convenioId} IS NOT NULL`),
 	],
 );
 

@@ -222,9 +222,12 @@ describe("document integrity boundaries", () => {
 		);
 	});
 
-	test("la revisión manual usa una copia inmutable ligada a la validación", () => {
-		expect(serviceSource).toContain("freezeManualReviewEvidence");
+	test("cada resultado completado usa una copia inmutable ligada a la validación", () => {
+		expect(serviceSource).toContain("freezeCompletedValidationEvidence");
 		expect(serviceSource).toContain(
+			'result.validation.autoResult === "error"',
+		);
+		expect(serviceSource).not.toContain(
 			'result.validation?.autoResult !== "revision_manual"',
 		);
 		expect(serviceSource).toContain(

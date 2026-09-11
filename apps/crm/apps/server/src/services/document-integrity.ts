@@ -700,7 +700,7 @@ function buildValidationEvidenceFilePath(params: {
 	return `${buildUploadPrefix("bank_statement", params.opportunityId)}/validated/${params.validationId}/${params.contentSha256}-${safeName}`;
 }
 
-async function freezeManualReviewEvidence(params: {
+async function freezeCompletedValidationEvidence(params: {
 	opportunityId: string;
 	documents: PreparedValidationDocument[];
 	results: PreparedValidationResult[];
@@ -710,10 +710,10 @@ async function freezeManualReviewEvidence(params: {
 		filePath: string;
 	}> = [];
 	for (const [index, result] of params.results.entries()) {
-		if (result.validation?.autoResult !== "revision_manual") continue;
+		if (!result.validation || result.validation.autoResult === "error") continue;
 		const document = params.documents[index];
 		if (!document?.buffer)
-			throw new Error("Missing source bytes for manual review evidence");
+			throw new Error("Missing source bytes for completed validation evidence");
 		const filePath = buildValidationEvidenceFilePath({
 			opportunityId: params.opportunityId,
 			validationId: result.validation.id,
@@ -867,13 +867,13 @@ async function executeValidationRun(params: {
 		);
 		if (completedSuccessfully) {
 			try {
-				await freezeManualReviewEvidence({
+				await freezeCompletedValidationEvidence({
 					opportunityId: params.opportunityId,
 					documents: params.documents,
 					results,
 				});
 			} catch (error) {
-				console.error("Could not preserve manual review evidence", {
+				console.error("Could not preserve completed validation evidence", {
 					runId: run.id,
 					error: errorMessage(error),
 				});

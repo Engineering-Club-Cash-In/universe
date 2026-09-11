@@ -20,10 +20,10 @@ import {
   calcularAplicacionConvenio,
   calcularCuotasConvenioCompletadas,
 } from "./registerPaymentPolicy";
-import { contarCuotasVencidasReales, createMora } from "./latefee";
 import { getPagosDelMesActual } from "./payments";
 import { calcularProgresoConvenio } from "./paymentAgreement-helpers";
 import { creditRouter } from "../routers";
+import { ConvenioDecisionError, decidirConvenio, generarOperacionId } from "./convenioDecision";
 
 interface CreatePaymentAgreementInput {
   credit_id: number;
@@ -1502,128 +1502,77 @@ export async function processConvenioCuotas(
 }
 
 
+/**
+ * CB-033 — `updateConvenioStatus` YA NO tiene lógica propia: delega en
+ * `decidirConvenio` (convenioDecision.ts), el mismo servicio transaccional
+ * que usa el endpoint nuevo `/decidir`. Cero lógica financiera duplicada —
+ * ver la cabecera de convenioDecision.ts para el detalle de la transacción,
+ * la idempotencia y por qué el rollback es real.
+ *
+ * ── Ventana de compatibilidad (paso 1 del despliegue, ver 06-ficha-360.md §3.5) ──
+ * carteraFront desplegado hoy llama a este endpoint SIN `motivo` ni
+ * `operacion_id` (los agrega recién en el paso 2). Hasta que ese despliegue
+ * salga:
+ *  - Sin `motivo` en un rechazo: se persiste un texto marcador explícito
+ *    (nunca NULL — el CHECK de la DB lo exige). Es una decisión SIN
+ *    justificación humana real — deuda de auditoría, no cumplimiento.
+ *  - Sin `operacion_id`: se genera uno nuevo por llamada, lo que NO protege
+ *    reintentos (dos clicks del usuario = dos operaciones distintas = doble
+ *    efecto). Ambas ramas se eliminan en el paso 3 — buscar "TODO CB-033
+ *    paso 3" para ubicarlas cuando carteraFront ya mande ambos campos.
+ */
 export const updateConvenioStatus = async (
   convenio_id: number,
-  status: boolean
+  status: boolean,
+  opciones: {
+    motivo?: string;
+    operacionId?: string;
+    actuadoPor?: number;
+    actuadoPorEmail?: string;
+  } = {},
 ) => {
   try {
-    // 1. Obtener el convenio para saber el credito_id
-    const [convenio] = await db
-      .select({ credito_id: convenios_pago.credito_id })
-      .from(convenios_pago)
-      .where(eq(convenios_pago.convenio_id, convenio_id));
+    // TODO CB-033 paso 3: eliminar este fallback — operacion_id pasa a ser obligatorio.
+    const operacionId = opciones.operacionId ?? generarOperacionId();
+    // TODO CB-033 paso 3: eliminar este fallback — motivo pasa a ser obligatorio en rechazo.
+    const motivo =
+      opciones.motivo ??
+      (status ? undefined : "[compat] Rechazado desde carteraFront sin motivo registrado");
 
-    if (!convenio) {
-      return { success: false, message: "Convenio no encontrado" };
-    }
+    const resultado = await decidirConvenio({
+      convenioId: convenio_id,
+      decision: status ? "aprobado" : "rechazado",
+      motivo,
+      operacionId,
+      origen: "cartera_front",
+      // carteraFront: actor y ejecutor son la misma persona. Sin identidad
+      // real del JWT en este punto de compatibilidad (el caller original no
+      // la pasaba), se atribuye a la cuenta admin de servicio — deuda de la
+      // misma ventana de compatibilidad, cerrada en el paso 3 cuando el
+      // router extraiga la identidad real del JWT y la pase acá.
+      actuadoPor: opciones.actuadoPor ?? 1,
+      actuadoPorEmail: opciones.actuadoPorEmail ?? "cartera_front@compat.local",
+      decididoPorEmail: opciones.actuadoPorEmail ?? "cartera_front@compat.local",
+    });
 
-    const creditoId = convenio.credito_id;
-
-    // 2. Si status = false, ELIMINAR el convenio y procesar mora
-    if (!status) {
-      console.log("🔴 Eliminando convenio y procesando mora...");
-
-      // Eliminar cuotas del convenio
-      await db
-        .delete(convenio_cuotas)
-        .where(eq(convenio_cuotas.convenio_id, convenio_id));
-      console.log("✅ Cuotas del convenio eliminadas");
-
-      // Eliminar pagos asociados al convenio (pivot)
-      await db
-        .delete(convenios_pagos_resume)
-        .where(eq(convenios_pagos_resume.convenio_id, convenio_id));
-      console.log("✅ Relación pagos-convenio eliminada");
-
-      // Eliminar el convenio
-      await db
-        .delete(convenios_pago)
-        .where(eq(convenios_pago.convenio_id, convenio_id));
-      console.log("✅ Convenio eliminado");
-
-      // Obtener el capital del crédito para calcular mora
-      const [credito] = await db
-        .select({ capital: creditos.capital })
-        .from(creditos)
-        .where(eq(creditos.credito_id, creditoId));
-
-      if (!credito) {
-        return { success: false, message: "Crédito no encontrado" };
-      }
-
-      // Contar cuotas vencidas con la MISMA función que usa createMora/procesarMoras
-      // (contarCuotasVencidasReales) para que el conteo coincida exacto con el que
-      // recalcula createMora y no lo rechace por mismatch — antes este conteo era un
-      // SQL crudo aparte que no conocía promesas_pago_espejo (CB-030): un crédito con
-      // cuotas congeladas por una promesa vigente contaba más acá que en createMora,
-      // que las excluye, y createMora rechazaba la recreación de mora dejando el
-      // crédito huérfano (convenio ya borrado, sin mora) — Codex review PR #1234,
-      // comentario #5. statusCredit="MOROSO" explícito: es el estado DESTINO (recién
-      // seteado abajo antes de llamar createMora), no el EN_CONVENIO actual — pasar
-      // ese excluiría todas las cuotas del conteo.
-      const numCuotasAtrasadas = await contarCuotasVencidasReales(creditoId, "MOROSO");
-
-      console.log(`📊 Cuotas atrasadas encontradas: ${numCuotasAtrasadas}`);
-
-      if (numCuotasAtrasadas > 0) {
-        // Calcular mora: capital * 1.12% * cuotas_atrasadas
-        const capital = new Big(credito.capital);
-        const porcentaje = new Big("0.0112");
-        const montoMora = capital.times(porcentaje).times(numCuotasAtrasadas);
-
-        console.log(`💰 Monto mora calculado: Q${montoMora.toFixed(2)}`);
-
-        // El convenio se eliminó: sacar el crédito de EN_CONVENIO ANTES de recrear la mora.
-        // createMora ya NO escribe mora sobre estados excluidos (no des-castiga); si dejáramos
-        // EN_CONVENIO rechazaría la operación y el crédito quedaría huérfano (sin convenio,
-        // sin mora, nunca MOROSO).
-        await db
-          .update(creditos)
-          .set({ statusCredit: "MOROSO" })
-          .where(eq(creditos.credito_id, creditoId));
-
-        // Recrear la mora (monto = fórmula capital × 1.12% × cuotas). createMora reconfirma MOROSO.
-        const resultMora = await createMora({
-          credito_id: creditoId,
-          monto_mora: Number(montoMora.toFixed(2)),
-          cuotas_atrasadas: numCuotasAtrasadas,
-        });
-        if (!resultMora.success) {
-          // No tragar el fallo: el convenio ya se borró y el crédito quedó MOROSO; si la mora
-          // no se recreó hay que reportarlo (no devolver un success falso).
-          console.error("⚠️ createMora falló al recrear mora tras eliminar convenio:", resultMora.message);
-          return {
-            success: false,
-            message: `Convenio eliminado pero NO se pudo recrear la mora del crédito ${creditoId}: ${resultMora.message}`,
-          };
-        }
-
-        console.log("✅ Resultado createMora:", resultMora);
-      } else {
-        // Si no hay cuotas atrasadas, solo cambiar a ACTIVO
-        await db
-          .update(creditos)
-          .set({ statusCredit: "ACTIVO" })
-          .where(eq(creditos.credito_id, creditoId));
-
-        console.log("✅ Crédito actualizado a ACTIVO (sin cuotas atrasadas)");
-      }
-
-      return { success: true, message: "Convenio eliminado exitosamente" };
-    }
-
-    // Si status = true, solo activar el convenio
-    await db
-      .update(convenios_pago)
-      .set({ activo: status, updated_at: new Date() })
-      .where(eq(convenios_pago.convenio_id, convenio_id));
-
-    return { success: true, message: "Convenio activado exitosamente" };
+    return {
+      success: true,
+      message: status ? "Convenio activado exitosamente" : "Convenio eliminado exitosamente",
+      decisionId: resultado.decisionId,
+      idempotente: resultado.idempotente,
+    };
   } catch (error) {
+    if (error instanceof ConvenioDecisionError) {
+      return { success: false, message: error.message, error: error.code };
+    }
     console.error("Error updating convenio status:", error);
-    return { success: false, message: "Error updating convenio status", error };
+    return {
+      success: false,
+      message: "Error updating convenio status",
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
-}
+};
 
 // ─────────────────────────────────────────────────────────────────────────
 // CB-027 — Listado paginado de convenios para el CRM.
@@ -1635,7 +1584,13 @@ export const updateConvenioStatus = async (
 // ─────────────────────────────────────────────────────────────────────────
 
 export interface ListPaymentAgreementsFilters {
-  estado?: "active" | "completed" | "inactive" | "all";
+  // CB-033: "inactive" (solo activo=false) NO distingue un convenio pendiente
+  // de aprobación de uno YA COMPLETADO (completado=true también deja
+  // activo=false — ver updateConvenioStatus, la rama "completó todas sus
+  // cuotas"). "pending" es el filtro correcto para la cola de aprobación:
+  // activo=false AND completado=false. "inactive" se conserva por
+  // compatibilidad con callers existentes.
+  estado?: "active" | "completed" | "inactive" | "pending" | "all";
   numero_credito_sifco?: string;
   nombre_usuario?: string;
   asesor_id?: number;
@@ -1665,6 +1620,13 @@ export async function listPaymentAgreements(filters: ListPaymentAgreementsFilter
       conditions.push(eq(convenios_pago.completado, true));
     } else if (estado === "inactive") {
       conditions.push(eq(convenios_pago.activo, false));
+    } else if (estado === "pending") {
+      // CB-033: pendiente de aprobación = nunca decidido Y no cumplido. Sin
+      // el segundo AND, un convenio pagado por completo (activo=false,
+      // completado=true) aparecería en la cola de aprobación y "aprobarlo"
+      // lo reactivaría (activo=true sobre completado=true).
+      conditions.push(eq(convenios_pago.activo, false));
+      conditions.push(eq(convenios_pago.completado, false));
     }
 
     // Búsqueda libre (SIFCO o cliente): el CRM manda el mismo texto en ambos

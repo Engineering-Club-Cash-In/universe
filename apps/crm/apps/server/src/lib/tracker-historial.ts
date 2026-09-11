@@ -53,8 +53,12 @@ export function construirHistorial(
 		}
 	}
 
+	// Por fecha, no por porcentaje: con un retroceso real (override de ventas,
+	// devolución de análisis) a un porcentaje nunca antes visitado, ordenar por
+	// porcentaje mostraría esa fecha más nueva por encima de una más vieja
+	// dentro del mismo paso.
 	return [...primeraVez.entries()]
-		.sort(([a], [b]) => a - b)
+		.sort(([, fechaA], [, fechaB]) => fechaA.getTime() - fechaB.getTime())
 		.map(([porcentaje, fecha]) => ({
 			paso: pasoDesdeCierre(porcentaje),
 			porcentaje,

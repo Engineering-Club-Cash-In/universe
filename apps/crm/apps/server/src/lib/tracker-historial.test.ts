@@ -93,6 +93,26 @@ describe("construirHistorial", () => {
 		expect(historial.map((h) => h.porcentaje)).toEqual([20, 30, 50]);
 	});
 
+	test("un retroceso a un porcentaje nunca visitado se ordena por fecha, no por porcentaje", () => {
+		// Real: nace en 50%, sube a 80%, luego un override lo regresa a 65%
+		// (mismo paso 3, nunca antes visitado). Cronológicamente 65% quedó de
+		// último; ordenar por porcentaje lo pondría en medio, antes que el 80%.
+		const historial = construirHistorial(
+			[
+				evento("2026-03-05T10:00:00.000Z", 80, 50),
+				evento("2026-03-10T10:00:00.000Z", 65, 80),
+			],
+			{ createdAt: CREADO, closurePercentage: 65 },
+		);
+
+		expect(historial.map((h) => h.porcentaje)).toEqual([50, 80, 65]);
+		expect(historial.map((h) => h.fecha)).toEqual([
+			CREADO.toISOString(),
+			"2026-03-05T10:00:00.000Z",
+			"2026-03-10T10:00:00.000Z",
+		]);
+	});
+
 	test("tolera from_stage nulo en la primera fila", () => {
 		// 2 de 269 filas reales lo tienen: cae al closurePercentage actual.
 		const historial = construirHistorial(

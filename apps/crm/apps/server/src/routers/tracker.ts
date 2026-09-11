@@ -1,4 +1,5 @@
 import { ORPCError } from "@orpc/server";
+import { APIError } from "better-auth/api";
 import { and, desc, eq, gte, inArray, ne, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
@@ -52,6 +53,17 @@ export type CasoTracker = {
 
 // Fecha de cierre efectiva: los perdidos nunca traen actual_close_date.
 const fechaCierre = sql<Date>`COALESCE(${opportunities.actualCloseDate}, ${opportunities.updatedAt})`;
+
+// open/on_hold siempre entran (el socio los necesita aunque lleven meses
+// parados). won y lost ya están cerrados en el pipeline de ventas — aunque
+// "aprobado" no signifique desembolsado, ambos comparten la misma ventana de
+// retención para que el payload no crezca sin límite.
+function dentroDeVentanaDeRetencion(desde: Date) {
+	return or(
+		inArray(opportunities.status, ["open", "on_hold"]),
+		and(inArray(opportunities.status, ["won", "lost"]), gte(fechaCierre, desde)),
+	);
+}
 
 // Una oportunidad puede tener varias cotizaciones. El tracker solo expone el
 // valor del vehículo de la última cotización actualizada, nunca el valor del
@@ -203,7 +215,7 @@ function aCaso(fila: Fila, historial: EntradaHistorial[]): CasoTracker {
 		pasoActual,
 		porcentaje: fila.closurePercentage,
 		estado: estadoDeCaso(fila.status),
-		cerrado: fila.status === "lost", // "won" no tiene fecha de desembolso confiable
+		cerrado: fila.status === "lost" || fila.status === "won",
 		actualizadoAt: fila.updatedAt.toISOString(),
 		historial,
 	};
@@ -264,13 +276,27 @@ export const trackerRouter = {
 			// botando al socio justo después del cambio exitoso. En su lugar,
 			// borramos directo las demás sesiones del usuario (ej. una contraseña
 			// temporal que alguien más también tenga) sin tocar la actual.
-			await partnerAuth.api.changePassword({
-				headers: context.headers,
-				body: {
-					currentPassword: input.currentPassword,
-					newPassword: input.newPassword,
-				},
-			});
+			try {
+				await partnerAuth.api.changePassword({
+					headers: context.headers,
+					body: {
+						currentPassword: input.currentPassword,
+						newPassword: input.newPassword,
+					},
+				});
+			} catch (error) {
+				// Sin este catch, una contraseña actual incorrecta llegaba al socio
+				// como un 500 genérico en vez de un mensaje que pudiera entender.
+				if (error instanceof APIError) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							error.body?.message === "Invalid password"
+								? "La contraseña actual no es correcta"
+								: "No se pudo cambiar la contraseña",
+					});
+				}
+				throw error;
+			}
 
 			await db
 				.delete(session)
@@ -311,13 +337,7 @@ export const trackerRouter = {
 			.where(
 				and(
 					inArray(opportunities.companyId, context.companyIds),
-					or(
-						inArray(opportunities.status, ["open", "on_hold", "won"]),
-						and(
-							eq(opportunities.status, "lost"),
-							gte(fechaCierre, desde),
-						),
-					),
+					dentroDeVentanaDeRetencion(desde),
 				),
 			)
 			.orderBy(desc(opportunities.updatedAt));
@@ -329,6 +349,11 @@ export const trackerRouter = {
 	getCasoById: partnerProcedure
 		.input(z.object({ id: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
+			// Misma ventana de retención que getCasos: un caso que ya salió de la
+			// lista por antiguo no debe seguir siendo alcanzable por id directo.
+			const desde = new Date();
+			desde.setUTCMonth(desde.getUTCMonth() - MESES_HISTORICO);
+
 			const [fila] = await db
 				.select({ ...filaSelect, companyId: opportunities.companyId })
 				.from(opportunities)
@@ -340,7 +365,12 @@ export const trackerRouter = {
 					ultimaCotizacion,
 					eq(ultimaCotizacion.opportunityId, opportunities.id),
 				)
-				.where(eq(opportunities.id, input.id))
+				.where(
+					and(
+						eq(opportunities.id, input.id),
+						dentroDeVentanaDeRetencion(desde),
+					),
+				)
 				.limit(1);
 
 			if (!fila) {

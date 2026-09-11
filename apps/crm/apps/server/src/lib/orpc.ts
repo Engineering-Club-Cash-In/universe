@@ -703,12 +703,12 @@ async function contextoDeSocio(context: Context) {
 		});
 	}
 
+	// No se rechaza aquí por companyIds vacío: getPartnerAgencies/
+	// getPartnerPasswordStatus/changePartnerPassword (identity) deben seguir
+	// funcionando para que el socio pueda ver su estado y cambiar su contraseña
+	// aunque nadie le haya asignado una agencia todavía. Solo requirePartnerAccess
+	// (los datos del tracker) exige companyIds no vacío.
 	const companyIds = await resolvePartnerScope(userId);
-	if (companyIds.length === 0) {
-		throw new ORPCError("FORBIDDEN", {
-			message: "El usuario no tiene ninguna agencia asignada",
-		});
-	}
 
 	const [partnerAccount] = await db
 		.select({ passwordChangedAt: partnerAccounts.passwordChangedAt })
@@ -732,6 +732,11 @@ const requirePartnerIdentity = o.middleware(async ({ context, next }) => {
 
 const requirePartnerAccess = o.middleware(async ({ context, next }) => {
 	const partnerContext = await contextoDeSocio(context);
+	if (partnerContext.companyIds.length === 0) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "El usuario no tiene ninguna agencia asignada",
+		});
+	}
 	if (!partnerContext.partnerAccount?.passwordChangedAt) {
 		throw new ORPCError("FORBIDDEN", {
 			message: "Debes cambiar tu contrasena antes de continuar",

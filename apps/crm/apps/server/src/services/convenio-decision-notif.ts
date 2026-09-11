@@ -13,7 +13,7 @@
 // fallo de notificación NUNCA se reporta como fallo de la decisión (mismo
 // criterio que el etiquetado del caso en crearConvenioDesdeFicha).
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db";
 import { notifications } from "../db/schema/notifications";
 import {
@@ -31,6 +31,7 @@ const Q = (n: number) =>
  */
 export async function notificarConvenioPendienteAprobacion(params: {
 	casoCobroId: string;
+	convenioId: number;
 	clienteNombre?: string;
 	montoTotal: number;
 	creadoPorUserId: string;
@@ -53,6 +54,9 @@ export async function notificarConvenioPendienteAprobacion(params: {
 				cobrosTipo: "convenio_pendiente_aprobacion" as const,
 				relatedEntityType: "collection_case" as const,
 				relatedEntityId: params.casoCobroId,
+				// Identifica el convenio concreto: al decidir, solo se cierran
+				// los avisos de ESTE, no los de otro convenio del mismo caso.
+				convenioId: params.convenioId,
 				redirectPage: "cobros_detail" as const,
 				createdBy: usuarioSistema,
 				createdByRole: "cobros_supervisor" as const,
@@ -69,26 +73,45 @@ export async function notificarConvenioPendienteAprobacion(params: {
 }
 
 /**
- * Cierra los avisos `convenio_pendiente_aprobacion` del caso: una vez que
- * alguien decidió, el resto de supervisores seguía viendo una acción
- * requerida sobre algo que ya no está pendiente (el contador de no leídas y
- * la lista se guían por `status`, ver routers/notifications.ts).
+ * Estados NO terminales de una notificación. Un aviso en cualquiera de ellos
+ * sigue visible y accionable: solo `resolved` y `dismissed` lo sacan de
+ * circulación.
  *
- * Se resuelven TODOS los del caso, no solo los de otros: quien decidió
- * tampoco necesita seguir viendo su propio pendiente.
+ * Filtrar solo por `pending` no alcanza — abrir la notificación la pasa a
+ * `read` (y "marcar todas como leídas" mueve varias de golpe), y el usuario
+ * puede ponerla en `in_progress` a mano. Esas copias seguían mostrándose
+ * como acción requerida sobre un convenio ya decidido.
+ */
+const ESTADOS_ABIERTOS = ["pending", "read", "in_progress"] as const;
+
+/**
+ * Cierra los avisos `convenio_pendiente_aprobacion` DE ESE CONVENIO: una vez
+ * que alguien decidió, el resto de supervisores seguía viendo una acción
+ * requerida sobre algo que ya no está pendiente (el contador se guía por
+ * `status` y la lista no filtra por él, ver routers/notifications.ts).
+ *
+ * Se acota por `convenio_id`, no por caso: el rechazo borra el convenio y
+ * cartera permite crear uno nuevo para el mismo crédito, así que un caso
+ * puede tener avisos de dos convenios distintos. Un reintento idempotente de
+ * la decisión vieja devuelve el `convenioId` ORIGINAL — filtrando por caso
+ * habría cerrado también los avisos del convenio nuevo, que sí sigue
+ * pendiente.
+ *
+ * Se resuelven todos los de ese convenio, incluido el de quien decidió: su
+ * pendiente tampoco tiene sentido ya.
  *
  * Best-effort igual que el resto: la decisión ya está commiteada en cartera
  * y es irreversible desde acá, así que un fallo acá no puede hacerla fallar.
  */
-async function resolverPendientesDeAprobacion(casoCobroId: string) {
+async function resolverPendientesDeAprobacion(convenioId: number) {
 	await db
 		.update(notifications)
 		.set({ status: "resolved", resolvedAt: new Date(), updatedAt: new Date() })
 		.where(
 			and(
 				eq(notifications.cobrosTipo, "convenio_pendiente_aprobacion"),
-				eq(notifications.relatedEntityId, casoCobroId),
-				eq(notifications.status, "pending"),
+				eq(notifications.convenioId, convenioId),
+				inArray(notifications.status, [...ESTADOS_ABIERTOS]),
 			),
 		);
 }
@@ -106,6 +129,7 @@ async function resolverPendientesDeAprobacion(casoCobroId: string) {
  */
 export async function notificarConvenioResuelto(params: {
 	casoCobroId: string;
+	convenioId: number;
 	asesorUserId: string | null;
 	decisionId: number;
 	decision: "aprobado" | "rechazado";
@@ -115,7 +139,7 @@ export async function notificarConvenioResuelto(params: {
 	// Antes del early return de abajo: los pendientes hay que cerrarlos
 	// aunque no haya asesor a quien avisar — son cosas independientes.
 	try {
-		await resolverPendientesDeAprobacion(params.casoCobroId);
+		await resolverPendientesDeAprobacion(params.convenioId);
 	} catch (error) {
 		console.warn(
 			"[notificarConvenioResuelto] No se pudieron resolver los pendientes de aprobación (best-effort):",

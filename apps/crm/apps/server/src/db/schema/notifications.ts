@@ -113,6 +113,17 @@ export const notifications = pgTable(
 		// el aviso "convenio_pendiente_aprobacion" (todavía no hay decisión).
 		convenioDecisionId: integer("convenio_decision_id"),
 
+		// CB-033: id del convenio en cartera-back (SIN FK — otra DB, y el
+		// rechazo borra la fila). Lo lleva el aviso
+		// "convenio_pendiente_aprobacion", que nace SIN decisión y por eso no
+		// puede identificarse con `convenioDecisionId`. Es lo que permite
+		// cerrar al decidir SOLO los avisos de ESE convenio: un crédito puede
+		// tener un convenio nuevo después de que el anterior se rechazó, y
+		// ambos comparten caso, así que un reintento idempotente del rechazo
+		// viejo (que devuelve el convenio_id original) cerraría también los
+		// avisos del convenio nuevo si el filtro fuera solo por caso.
+		convenioId: integer("convenio_id"),
+
 		// Timestamps de estado
 		readAt: timestamp("read_at"),
 		resolvedAt: timestamp("resolved_at"),

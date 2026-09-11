@@ -3004,6 +3004,7 @@ export const cobrosRouter = {
 			if (convenio.activo === false) {
 				await notificarConvenioPendienteAprobacion({
 					casoCobroId: input.casoCobroId,
+					convenioId: convenio.convenio_id,
 					clienteNombre: numeroSifco,
 					montoTotal: Number(convenio.monto_total_convenio),
 					creadoPorUserId: context.userId,

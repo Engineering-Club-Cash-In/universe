@@ -238,6 +238,10 @@ export const convenioDecisionRouter = {
 					if (caso?.id) {
 						await notificarConvenioResuelto({
 							casoCobroId: caso.id,
+							// El de la respuesta, no el del input: en una respuesta
+							// idempotente es el de la decisión ORIGINAL, que es
+							// justo el convenio cuyos avisos hay que cerrar.
+							convenioId: resultado.convenioId,
 							asesorUserId,
 							decisionId: resultado.decisionId,
 							decision: resultado.decision,

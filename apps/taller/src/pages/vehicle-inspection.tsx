@@ -608,6 +608,7 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                         setDuplicateVehicle(null);
                         setMismatchedFields([]);
                         setComparisonMismatches([]);
+                        form.setValue("vehicleId", "");
                         form.setValue("licensePlate", "");
                         form.setValue("vinNumber", "");
                       }}

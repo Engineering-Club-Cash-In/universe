@@ -9,9 +9,36 @@ import { auth } from "../lib/auth";
 import { adminProcedure } from "../lib/orpc";
 import { ROLES, USER_ROLE_VALUES } from "../lib/roles";
 
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 /**
- * Deja al usuario con exactamente estas agencias. Se usa al crear un socio y al
- * editarlo, para que asignar agencias nunca requiera SQL a mano.
+ * Deja al usuario con exactamente estas agencias, usando la transacción del
+ * llamador. Nunca abre una propia: updateUserRole ya tiene la fila de `user`
+ * bloqueada con FOR UPDATE en su propia transacción, y una segunda conexión
+ * intentando el mismo bloqueo se quedaría esperando a sí misma.
+ */
+async function reemplazarAgencias(tx: Tx, userId: string, companyIds: string[]) {
+	const existentes = await tx
+		.select({ id: companies.id })
+		.from(companies)
+		.where(inArray(companies.id, companyIds));
+
+	if (existentes.length !== companyIds.length) {
+		throw new ORPCError("BAD_REQUEST", {
+			message: "Alguna de las agencias seleccionadas ya no existe",
+		});
+	}
+
+	await tx.delete(partnerMembers).where(eq(partnerMembers.userId, userId));
+	await tx
+		.insert(partnerMembers)
+		.values(companyIds.map((companyId) => ({ userId, companyId })));
+}
+
+/**
+ * Deja al usuario con exactamente estas agencias. Se usa al editar un socio ya
+ * creado (setPartnerCompanies), para que asignar agencias nunca requiera SQL a
+ * mano.
  */
 async function asignarAgencias(userId: string, companyIds: string[]) {
 	// En una transacción: si el insert falla —por ejemplo si borran una agencia
@@ -34,21 +61,7 @@ async function asignarAgencias(userId: string, companyIds: string[]) {
 			});
 		}
 
-		const existentes = await tx
-			.select({ id: companies.id })
-			.from(companies)
-			.where(inArray(companies.id, companyIds));
-
-		if (existentes.length !== companyIds.length) {
-			throw new ORPCError("BAD_REQUEST", {
-				message: "Alguna de las agencias seleccionadas ya no existe",
-			});
-		}
-
-		await tx.delete(partnerMembers).where(eq(partnerMembers.userId, userId));
-		await tx
-			.insert(partnerMembers)
-			.values(companyIds.map((companyId) => ({ userId, companyId })));
+		await reemplazarAgencias(tx, userId, companyIds);
 	});
 }
 
@@ -113,6 +126,8 @@ export const adminRouter = {
 			z.object({
 				userId: z.string(),
 				role: z.enum(USER_ROLE_VALUES),
+				// Solo se usa (y se exige) cuando role === PARTNER, igual que en createUser.
+				companyIds: z.array(z.string().uuid()).optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -139,11 +154,18 @@ export const adminRouter = {
 							"Este correo es externo: solo puede tener el rol de predio/agencia",
 					});
 				}
+			} else if (!input.companyIds || input.companyIds.length === 0) {
+				// Mismo requisito que createUser: requirePartnerAccess (getCasos,
+				// getCasoById) exige al menos una agencia, así que promover a alguien
+				// a socio sin asignarle ninguna lo deja sin poder ver sus casos.
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Selecciona al menos una agencia para el socio",
+				});
 			}
 
-			// El rol y la limpieza de membresías van juntos: si el borrado fallara
-			// después de cambiar el rol, al devolverle el rol de socio recuperaría
-			// agencias viejas sin que nadie las reasigne.
+			// El rol y las membresías van juntos: si algo fallara después de cambiar
+			// el rol, al devolverle el rol de socio recuperaría agencias viejas sin
+			// que nadie las reasigne (o quedaría sin ninguna).
 			const updatedUser = await db.transaction(async (tx) => {
 				const actualizado = await tx
 					.update(user)
@@ -164,6 +186,8 @@ export const adminRouter = {
 					await tx
 						.delete(partnerMembers)
 						.where(eq(partnerMembers.userId, input.userId));
+				} else if (input.companyIds) {
+					await reemplazarAgencias(tx, input.userId, input.companyIds);
 				}
 
 				return actualizado;

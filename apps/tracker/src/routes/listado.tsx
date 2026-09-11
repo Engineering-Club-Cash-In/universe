@@ -56,6 +56,30 @@ const TAMANOS_PAGINA = [10, 20, 50, 100];
 // tracker.ts — si cambia allá, hay que actualizarlo acá también.
 const MESES_HISTORICO = 24;
 
+// Primer año-mes que el servidor garantiza completo. El corte cae en un
+// instante exacto, no al inicio de un mes: si no coincide con el día 1, ese
+// mes queda parcialmente podado y el primero seguro es el siguiente.
+// aniosDisponibles y mesesDisponibles parten de este mismo valor para que
+// nunca puedan desalinearse entre sí.
+function periodoGarantizado(): { anio: number; mes: number; desde: number } {
+	const piso = new Date();
+	piso.setUTCMonth(piso.getUTCMonth() - MESES_HISTORICO);
+	const anioDeCorte = anioEnGuatemala(piso);
+	const mesDeCorte = mesEnGuatemala(piso);
+	const ventanaDeCorte = ventanaDelMes(anioDeCorte, mesDeCorte);
+	if (piso.getTime() === ventanaDeCorte.inicio) {
+		return { anio: anioDeCorte, mes: mesDeCorte, desde: ventanaDeCorte.inicio };
+	}
+	// .fin ya es el inicio del mes siguiente (Date.UTC normaliza el desborde
+	// de diciembre a enero del año siguiente).
+	const siguiente = new Date(ventanaDeCorte.fin);
+	return {
+		anio: anioEnGuatemala(siguiente),
+		mes: mesEnGuatemala(siguiente),
+		desde: ventanaDeCorte.fin,
+	};
+}
+
 export function ListadoPage() {
 	const ahora = new Date();
 	const { data: session } = authClient.useSession();
@@ -93,18 +117,16 @@ export function ListadoPage() {
 		orpc.getPartnerAgencies.queryOptions({ input: {} }),
 	);
 
-	// El servidor acota won/lost a MESES_HISTORICO meses rodantes desde ahora
-	// (no desde el 1 de enero); open/on_hold no tienen límite. Replicar el
-	// mismo corte evita ofrecer un año donde los cerrados de esa época ya se
-	// podaron pero un caso activo viejo todavía arrastra una entrada.
+	// open/on_hold no tienen límite de retención en el servidor; sin este
+	// filtro, un caso activo viejo arrastraría un año donde los casos
+	// cerrados de esa época ya se podaron.
 	const aniosDisponibles = useMemo(() => {
 		const actual = anioEnGuatemala(new Date());
-		const piso = new Date();
-		piso.setUTCMonth(piso.getUTCMonth() - MESES_HISTORICO);
+		const { desde } = periodoGarantizado();
 		let minimo = actual;
 		for (const caso of casosQuery.data ?? []) {
 			for (const entrada of caso.historial) {
-				if (new Date(entrada.fecha).getTime() < piso.getTime()) continue;
+				if (new Date(entrada.fecha).getTime() < desde) continue;
 				minimo = Math.min(minimo, anioEnGuatemala(entrada.fecha));
 			}
 		}
@@ -132,18 +154,12 @@ export function ListadoPage() {
 
 	const hayPeriodo = periodo !== TODO_EL_TIEMPO;
 
-	// En el año donde cae el corte de MESES_HISTORICO, los meses antes del
-	// corte exacto no están garantizados completos aunque el año sí aparezca
-	// en aniosDisponibles (algún caso posterior al corte lo mantiene ahí).
-	// Fuera de ese año, los 12 meses son seguros.
 	const mesesDisponibles = useMemo(() => {
-		const piso = new Date();
-		piso.setUTCMonth(piso.getUTCMonth() - MESES_HISTORICO);
-		const anioDeCorte = anioEnGuatemala(piso);
+		const { anio: anioDeCorte, mes: mesDeCorte } = periodoGarantizado();
 		if (anioVigente < anioDeCorte) return [];
 		const todos = MESES.map((_, i) => i + 1);
 		if (anioVigente > anioDeCorte) return todos;
-		return todos.filter((mes) => mes >= mesEnGuatemala(piso));
+		return todos.filter((mes) => mes >= mesDeCorte);
 	}, [anioVigente]);
 
 	useEffect(() => {

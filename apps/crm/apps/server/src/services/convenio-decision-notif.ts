@@ -155,19 +155,22 @@ async function resolverPendientesDeAprobacion(convenioId: number) {
  * Garantiza que exista la señal "este convenio ya se decidió" que lee
  * `reconciliarSiYaSeDecidio`: una fila `convenio_resuelto` con `convenio_id`.
  *
- * **Es un no-op cuando hay asesor**, porque entonces esa fila la escribe el
- * aviso real unas líneas más abajo. No puede escribir una segunda: el índice
- * único es (convenio_decision_id, assigned_to), y si el decisor resulta ser
- * el mismo asesor, esta marca ganaría el ON CONFLICT y el aviso real se
- * perdería en silencio (verificado contra la DB).
+ * **Es un no-op cuando hay asesor**: esa fila ya la escribe el aviso real
+ * unas líneas más abajo, así que una segunda sería ruido sin uso.
  *
  * Sin asesor sí escribe, porque ahí el aviso real no existe y ninguna otra
  * fuente deja rastro: el cleanup solo produce filas `resolved` si encontró
  * avisos abiertos, y la carrera que hay que cubrir es justo cuando la
  * decisión llega ANTES de que el aviso exista.
  *
- * Se guarda como `dismissed`: la UI lo trata como terminal, así que no
- * aparece en la lista ni en el contador — es una marca interna, no un aviso.
+ * Va con `assigned_to` NULL, que es lo que la mantiene fuera de la vista de
+ * cualquiera: `getNotificationsByAssign` filtra por `assigned_to` y NO por
+ * status, así que una fila `dismissed` con destinatario sí aparece —en la
+ * pestaña "Descartadas" y en su contador—. Sin destinatario no la devuelve
+ * ninguna consulta de bandeja.
+ *
+ * `dismissed` se mantiene igual, por si alguna consulta futura la alcanza:
+ * un estado terminal no pide acción a nadie.
  */
 async function marcarConvenioDecidido(params: {
 	casoCobroId: string;
@@ -193,11 +196,12 @@ async function marcarConvenioDecidido(params: {
 			'Registro interno de la decisión (no se muestra).',
 			'dismissed', 'aviso',
 			${params.creadoPorUserId}, ${params.creadoPorRole ?? "cobros_supervisor"},
-			'cobros_supervisor', ${params.creadoPorUserId},
+			'cobros_supervisor', NULL,
 			'collection_case', ${params.casoCobroId}, 'cobros_detail', 'convenio_resuelto',
 			${params.decisionId}, ${params.convenioId}, now(), now()
 		)
-		ON CONFLICT (convenio_decision_id, assigned_to) WHERE convenio_decision_id IS NOT NULL
+		ON CONFLICT (convenio_decision_id)
+			WHERE convenio_decision_id IS NOT NULL AND assigned_to IS NULL
 		DO NOTHING
 	`);
 }

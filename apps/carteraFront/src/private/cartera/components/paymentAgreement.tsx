@@ -4,9 +4,13 @@
 // la Ficha 360 del CRM de cobros (botón "Promesa / Convenio"), que llama al
 // mismo servicio de cartera-back (POST /payment-agreements — el servicio y el
 // hook useCreatePaymentAgreement siguen existiendo tal cual). Acá solo se
-// consulta el convenio vigente de un crédito. Activar/rechazar sigue en Pagos.
+// consulta el convenio vigente de un crédito.
+//
+// CB-033: aprobar/rechazar un convenio ya no se hace desde carteraFront — lo
+// decide el supervisor desde el CRM (/cobros/convenios), donde la decisión
+// queda auditada con motivo, identidad e idempotencia.
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { Card } from "@/components/ui/card";
 import {
@@ -40,6 +44,29 @@ export function CreatePaymentAgreementForm() {
   const canceladoData = creditData?.flujo === "CANCELADO" ? creditData : null;
  
   const hasActiveAgreement = activoData?.credito?.statusCredit === "EN_CONVENIO";
+
+  // `cuotasAtrasadas` y `cuotasPendientes` son FILAS de un join contra
+  // pagos_credito (controllers/credits.ts), no cuotas únicas, así que `.length`
+  // no cuenta cuotas:
+  //   1. una cuota con varios pagos aparece repetida (el join es 1:N), y
+  //   2. `cuotasPendientes` no filtra por fecha de vencimiento, así que una
+  //      cuota vencida con pago parcial cae también en `cuotasAtrasadas`.
+  // Se cuentan `cuota_id` distintos, que resuelve las dos cosas a la vez.
+  const cuotasAtrasadasCount = useMemo(
+    () => new Set((activoData?.cuotasAtrasadas ?? []).map((c) => c.cuota_id)).size,
+    [activoData?.cuotasAtrasadas]
+  );
+
+  const cuotasPorPagarCount = useMemo(
+    () =>
+      new Set(
+        [
+          ...(activoData?.cuotasAtrasadas ?? []),
+          ...(activoData?.cuotasPendientes ?? []),
+        ].map((c) => c.cuota_id)
+      ).size,
+    [activoData?.cuotasAtrasadas, activoData?.cuotasPendientes]
+  );
 
   const handleSifcoSelect = (sifco: string) => {
     setSifcoSeleccionado(sifco);
@@ -207,7 +234,7 @@ export function CreatePaymentAgreementForm() {
                       Cuotas Atrasadas
                     </span>
                     <span className="text-red-700 font-bold text-xl">
-                      {activoData.cuotasAtrasadas.length}
+                      {cuotasAtrasadasCount}
                     </span>
                   </div>
                 )}
@@ -218,7 +245,7 @@ export function CreatePaymentAgreementForm() {
                     Cuotas por Pagar
                   </span>
                   <span className="text-gray-900 text-xl font-bold">
-                    {cuotasParaConvenio.length}
+                    {cuotasPorPagarCount}
                   </span>
                 </div>
 

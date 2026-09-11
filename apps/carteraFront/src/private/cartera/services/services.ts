@@ -198,6 +198,11 @@ export interface Usuario {
 }
 
 export interface Cuota {
+  // cartera-back lo devuelve en `cuotasAtrasadas`/`cuotasPendientes`
+  // (controllers/credits.ts), pero faltaba acá. Es el identificador real de la
+  // cuota: `numero_cuota` se repite entre créditos y estas listas son filas de
+  // un join contra pagos_credito, así que contar cuotas únicas exige `cuota_id`.
+  cuota_id: number;
   pago_id: number;
   credito_id: number;
   cuota: string;

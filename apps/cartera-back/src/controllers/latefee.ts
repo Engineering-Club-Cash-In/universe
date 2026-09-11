@@ -313,29 +313,64 @@ async function registrarHistorialMora(params: {
 // que sin este guard esos flujos existentes se rompen apenas se despliega el
 // código, no solo el freeze nuevo (Codex review PR #1235, comentario P1).
 // Fail-open: sin tabla = sin promesas conocidas, comportamiento pre-CB-030.
-async function promesasVigentesDelCredito(credito_id: number): Promise<PromesaVigente[]> {
-  try {
-    return await db
-      .select({
-        cuota_inicio: promesas_pago_espejo.cuota_inicio,
-        cuota_fin: promesas_pago_espejo.cuota_fin,
-        fecha_promesa: promesas_pago_espejo.fecha_promesa,
-      })
-      .from(promesas_pago_espejo)
-      .where(and(eq(promesas_pago_espejo.credito_id, credito_id), eq(promesas_pago_espejo.activa, true)));
-  } catch (err: any) {
-    if (err?.code === "42P01") return [];
-    throw err;
-  }
+// Executor genérico para las lecturas de este archivo: `db` o un `tx` de
+// `db.transaction`. Mismo criterio que MoraHistoryExecutor — Pick del método
+// que se usa, no el tipo completo, así ambos (db y tx) encajan sin cast.
+type MoraReadExecutor = Pick<typeof db, "select" | "execute">;
+
+// CB-033 — el fail-open NO puede implementarse atrapando el 42P01 cuando el
+// executor es un `tx`: en Postgres un error dentro de una transacción la deja
+// ABORTADA, y la siguiente sentencia falla con 25P02 ("current transaction is
+// aborted"). Atrapar el error devuelve [] pero no recupera la transacción, así
+// que en un ambiente sin 0007 aplicado TODO rechazo de convenio se revertiría
+// — justo el flujo que este parámetro vino a habilitar.
+//
+// Se comprueba la existencia ANTES de consultar: `to_regclass` devuelve NULL
+// en vez de lanzar, así que no ensucia la transacción. Un savepoint también
+// serviría, pero el único caller llama a esta función dentro de un
+// `Promise.all` sobre la misma conexión, donde el orden real de las sentencias
+// no está garantizado y un SAVEPOINT/ROLLBACK TO podría envolver a la query
+// equivocada.
+async function tablaPromesasExiste(executor: MoraReadExecutor): Promise<boolean> {
+  const res = await executor.execute(
+    sql`SELECT to_regclass(${`${CARTERA_SCHEMA}.promesas_pago_espejo`}) IS NOT NULL AS existe`,
+  );
+  const filas = (res as unknown as { rows?: { existe: boolean }[] }).rows ?? (res as unknown as { existe: boolean }[]);
+  return filas?.[0]?.existe === true;
 }
 
+async function promesasVigentesDelCredito(
+  credito_id: number,
+  executor: MoraReadExecutor = db,
+): Promise<PromesaVigente[]> {
+  // Fail-open: sin tabla = sin promesas conocidas, comportamiento pre-CB-030.
+  if (!(await tablaPromesasExiste(executor))) return [];
+
+  return await executor
+    .select({
+      cuota_inicio: promesas_pago_espejo.cuota_inicio,
+      cuota_fin: promesas_pago_espejo.cuota_fin,
+      fecha_promesa: promesas_pago_espejo.fecha_promesa,
+    })
+    .from(promesas_pago_espejo)
+    .where(and(eq(promesas_pago_espejo.credito_id, credito_id), eq(promesas_pago_espejo.activa, true)));
+}
+
+// CB-033 — `executor` opcional: sin él, cae al `db` global (comportamiento
+// idéntico a antes para todos los callers existentes). Pasado un `tx`, la
+// cuenta ve los cambios recién escritos EN ESA MISMA transacción — crítico
+// para el flujo de rechazo de convenio, que borra cuotas y llama a
+// `createMora` a continuación: fuera del `tx`, este conteo no vería los
+// DELETE y createMora rechazaría por mismatch (el bug de PR #1234 que
+// paymentAgreement.ts:1560 ya documenta).
 export async function contarCuotasVencidasReales(
   credito_id: number,
   statusCredit: string | null,
+  executor: MoraReadExecutor = db,
 ): Promise<number> {
   const hoyMora = new Date();
   const [cuotasDelCredito, promesasDelCredito] = await Promise.all([
-    db
+    executor
       .select({
         numero_cuota: cuotas_credito.numero_cuota,
         fecha_vencimiento: cuotas_credito.fecha_vencimiento,
@@ -349,7 +384,7 @@ export async function contarCuotasVencidasReales(
       })
       .from(cuotas_credito)
       .where(eq(cuotas_credito.credito_id, credito_id)),
-    promesasVigentesDelCredito(credito_id),
+    promesasVigentesDelCredito(credito_id, executor),
   ]);
   const promesasPorCredito = new Map<number, PromesaVigente[]>([[credito_id, promesasDelCredito]]);
   return cuotasDelCredito.filter((c) =>
@@ -357,6 +392,20 @@ export async function contarCuotasVencidasReales(
   ).length;
 }
 
+// Mismo patrón que UpdateMoraTransaction (más abajo, en updateMoraEnTx):
+// el tipo exacto del callback de `db.transaction`, para que un `tx` real
+// encaje sin cast. Declarado acá arriba porque createMora lo necesita antes.
+type CreateMoraTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * CB-033 — `executor` opcional (default `db`, igual comportamiento que
+ * antes para todos los callers existentes: pagos, reversas, jobs). Pasado
+ * un `tx`, TODAS las lecturas y escrituras de esta función —incluidas las
+ * de sus helpers internos— ocurren dentro de esa transacción: es lo que
+ * permite que el rechazo de un convenio (que borra cuotas y llama acá para
+ * recrear la mora) vea sus propios cambios y no cuente mal por leer fuera
+ * del `tx` (paymentAgreement.ts:1560 documenta ese modo de falla, PR #1234).
+ */
 export async function createMora({
   credito_id,
   monto_mora,
@@ -375,7 +424,7 @@ export async function createMora({
   usuario_id?: number;
   usuario_email?: string;
   override?: boolean;
-}) {
+}, executor: CreateMoraTransaction | typeof db = db) {
   const requestId = `${credito_id}-${Date.now()}`;
 
   console.log(`
@@ -410,7 +459,7 @@ export async function createMora({
     }
 
     // Traer el crédito una sola vez: capital (para validar + fotografiar) y status (para no des-castigar).
-    const [credito] = await db
+    const [credito] = await executor
       .select({ capital: creditos.capital, statusCredit: creditos.statusCredit })
       .from(creditos)
       .where(eq(creditos.credito_id, credito_id));
@@ -425,8 +474,9 @@ export async function createMora({
     // del request. Confiar en el valor enviado permitía inflarlo para esquivar el guard de
     // cordura: p.ej. Q27,953.44 pasaba con cuotas_atrasadas: 7 porque el umbral se volvía
     // 10× la fórmula de 7 cuotas. Misma lógica que procesarMoras y promesa-aware (CB-030) —
-    // ver contarCuotasVencidasReales, única fuente de este cálculo.
-    const cuotasReales = await contarCuotasVencidasReales(credito_id, credito.statusCredit);
+    // ver contarCuotasVencidasReales, única fuente de este cálculo. Con `executor` (un `tx`),
+    // este conteo ve los cambios recién escritos EN ESA MISMA transacción.
+    const cuotasReales = await contarCuotasVencidasReales(credito_id, credito.statusCredit, executor);
 
     // Si el cuotas_atrasadas enviado NO coincide con las cuotas vencidas reales, exigir override
     // (el caller no puede inflar el conteo para disparar el umbral del guard).
@@ -480,7 +530,7 @@ export async function createMora({
     // se resuelve por email. Best-effort: la atribución no debe bloquear la operación.
     let usuarioId: number | undefined = usuario_id ?? undefined;
     if (!usuarioId && usuario_email) {
-      const [u] = await db
+      const [u] = await executor
         .select({ id: platform_users.id })
         .from(platform_users)
         .where(eq(platform_users.email, usuario_email));
@@ -490,7 +540,7 @@ export async function createMora({
     // 🔥 VERIFICAR SI YA EXISTE MORA ACTIVA (UPSERT)
     console.log(`[${requestId}] 🔍 Verificando mora activa existente...`);
 
-    const [moraExistente] = await db
+    const [moraExistente] = await executor
       .select({
         mora_id: moras_credito.mora_id,
         monto_mora: moras_credito.monto_mora,
@@ -517,7 +567,7 @@ export async function createMora({
       cuotas_anteriores = moraExistente.cuotas_atrasadas;
       tipo_evento = "RECALCULO";
 
-      [newMora] = await db
+      [newMora] = await executor
         .update(moras_credito)
         .set({
           monto_mora: monto_mora.toString(),
@@ -534,7 +584,7 @@ export async function createMora({
 
       tipo_evento = "CREACION";
 
-      [newMora] = await db
+      [newMora] = await executor
         .insert(moras_credito)
         .values({
           credito_id,
@@ -551,26 +601,35 @@ export async function createMora({
     // Actualizar status a MOROSO. Llegar aquí implica que el crédito NO está en estado
     // excluido (V3 ya los rechaza), así que es seguro marcarlo MOROSO.
     console.log(`[${requestId}] 🔄 Actualizando status a MOROSO...`);
-    await db
+    await executor
       .update(creditos)
       .set({ statusCredit: "MOROSO" })
       .where(eq(creditos.credito_id, credito_id));
     console.log(`[${requestId}] ✅ Status actualizado a MOROSO`);
 
-    await registrarHistorialMora({
-      credito_id,
-      mora_id: newMora.mora_id,
-      tipo_evento,
-      origen,
-      monto_anterior,
-      monto_nuevo: monto_mora,
-      cuotas_atrasadas_anterior: cuotas_anteriores,
-      cuotas_atrasadas_nuevas: cuotas_atrasadas,
-      capital_credito: credito.capital,
-      porcentaje_mora: newMora.porcentaje_mora,
-      usuario_id: usuarioId,
-      motivo,
-    });
+    // CB-033: `required: true` cuando corre dentro de un `tx` explícito —
+    // `registrarHistorialMora` traga errores por default (para no romper
+    // jobs), pero dentro de una transacción del flujo de decisión de
+    // convenio un fallo del historial SÍ debe abortar todo, no seguir en
+    // silencio con la mora recreada y sin rastro en moras_historial.
+    await registrarHistorialMora(
+      {
+        credito_id,
+        mora_id: newMora.mora_id,
+        tipo_evento,
+        origen,
+        monto_anterior,
+        monto_nuevo: monto_mora,
+        cuotas_atrasadas_anterior: cuotas_anteriores,
+        cuotas_atrasadas_nuevas: cuotas_atrasadas,
+        capital_credito: credito.capital,
+        porcentaje_mora: newMora.porcentaje_mora,
+        usuario_id: usuarioId,
+        motivo,
+      },
+      executor,
+      { required: executor !== db },
+    );
 
     console.log(`
 ╔════════════════════════════════════════════════════════════

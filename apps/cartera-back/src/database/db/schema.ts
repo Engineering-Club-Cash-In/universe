@@ -17,6 +17,9 @@
     unique,
     bigint,
     index,
+    uuid,
+    jsonb,
+    smallint,
   } from "drizzle-orm/pg-core";
   import { sql } from "drizzle-orm";
   export enum CategoriaUsuario {
@@ -1724,7 +1727,50 @@
     created_at: timestamp("created_at").defaultNow(),
   });
 
+  // CB-033 — Aprobación de convenios por supervisor. Dos tablas con
+  // responsabilidades distintas (ver drizzle/cobros-02/0016_cb033_convenio_decisiones.sql):
+  //  - convenio_operaciones: reclamo idempotente del operacion_id, MUTA
+  //    cuando la operación termina (guarda el resultado para reproducirlo).
+  //  - convenio_decisiones: la bitácora real, append-only. Un INSERT único
+  //    y completo por decisión; sobrevive al borrado del convenio (el
+  //    rechazo hace DELETE duro sobre convenios_pago).
+  export const convenioOperaciones = customSchema.table("convenio_operaciones", {
+    operacionId: uuid("operacion_id").primaryKey(),
+    requestFingerprint: text("request_fingerprint").notNull(),
+    estado: text("estado").notNull().default("en_curso"),
+    // Sin .references() circular hacia convenio_decisiones acá: la FK real
+    // vive en SQL como DEFERRABLE INITIALLY DEFERRED (ver la migración);
+    // Drizzle no modela ese ciclo de forma limpia, así que el tipo se
+    // declara sin la referencia y la integridad la sostiene la migración.
+    decisionId: integer("decision_id"),
+    resultado: jsonb("resultado"),
+    creadaEn: timestamp("creada_en", { withTimezone: true }).notNull().defaultNow(),
+    completadaEn: timestamp("completada_en", { withTimezone: true }),
+  });
 
+  export const convenioDecisiones = customSchema.table("convenio_decisiones", {
+    decisionId: serial("decision_id").primaryKey(),
+    operacionId: uuid("operacion_id")
+      .notNull()
+      .references(() => convenioOperaciones.operacionId),
+    // Sin FK a convenios_pago: el rechazo borra esa fila y la bitácora
+    // tiene que sobrevivir a ese borrado.
+    convenioId: integer("convenio_id").notNull(),
+    creditoId: integer("credito_id")
+      .notNull()
+      .references(() => creditos.credito_id),
+    decision: text("decision").notNull(),
+    motivo: text("motivo"),
+    snapshotVersion: smallint("snapshot_version").notNull().default(1),
+    snapshot: jsonb("snapshot").notNull(),
+    origen: text("origen").notNull(),
+    actuadoPor: integer("actuado_por")
+      .notNull()
+      .references(() => platform_users.id),
+    actuadoPorEmail: varchar("actuado_por_email", { length: 150 }).notNull(),
+    decididoPorEmail: varchar("decidido_por_email", { length: 150 }).notNull(),
+    decididoEn: timestamp("decidido_en", { withTimezone: true }).notNull().defaultNow(),
+  });
 
   // src/db/schema.ts
 

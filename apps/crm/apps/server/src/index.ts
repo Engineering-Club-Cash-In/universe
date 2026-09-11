@@ -87,6 +87,7 @@ import { investmentsRouter } from "./routers/investments";
 import { pagaloGrupoActivoRouter } from "./routers/pagalo-grupo-activo";
 import { pagaloLinkActionsRouter } from "./routers/pagalo-link-actions";
 import { pagaloSupervisionRouter } from "./routers/pagalo-supervision";
+import { recuperacionVehiculoRouter } from "./routers/recuperacion-vehiculo";
 import externalContractsRouter from "./routes/external-contracts";
 import { carteraBackClient } from "./services/cartera-back-client";
 import { checkCobrosAlertas } from "./services/check-cobros-alertas";
@@ -231,6 +232,7 @@ const handler = new RPCHandler(
 		pagaloGrupoActivoRouter,
 		pagaloLinkActionsRouter,
 		pagaloSupervisionRouter,
+		recuperacionVehiculoRouter,
 	),
 );
 app.use("/rpc/*", async (c, next) => {

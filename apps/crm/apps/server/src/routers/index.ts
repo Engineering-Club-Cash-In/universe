@@ -173,7 +173,9 @@ export const cobrosAppRouter = {
 	getCargaPorAsesorBucket: cobrosRouter.getCargaPorAsesorBucket,
 	getAperturaDia: cobrosRouter.getAperturaDia,
 	reasignarAsesorCredito: cobrosRouter.reasignarAsesorCredito,
-	enviarCreditoARecuperacion: cobrosRouter.enviarCreditoARecuperacion,
+	// enviarCreditoARecuperacion vive en routers/recuperacion-vehiculo.ts:
+	// dentro de cobrosAppRouter el tipo excedía el límite de TS7056 y se
+	// truncaba antes de llegar a él, así que el web no lo veía.
 	getHistorialReasignaciones: cobrosRouter.getHistorialReasignaciones,
 	getHistorialPagos: cobrosRouter.getHistorialPagos,
 	getEstadoPromesasPago: cobrosRouter.getEstadoPromesasPago,

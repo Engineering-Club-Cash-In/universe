@@ -316,25 +316,44 @@ async function registrarHistorialMora(params: {
 // Executor genérico para las lecturas de este archivo: `db` o un `tx` de
 // `db.transaction`. Mismo criterio que MoraHistoryExecutor — Pick del método
 // que se usa, no el tipo completo, así ambos (db y tx) encajan sin cast.
-type MoraReadExecutor = Pick<typeof db, "select">;
+type MoraReadExecutor = Pick<typeof db, "select" | "execute">;
+
+// CB-033 — el fail-open NO puede implementarse atrapando el 42P01 cuando el
+// executor es un `tx`: en Postgres un error dentro de una transacción la deja
+// ABORTADA, y la siguiente sentencia falla con 25P02 ("current transaction is
+// aborted"). Atrapar el error devuelve [] pero no recupera la transacción, así
+// que en un ambiente sin 0007 aplicado TODO rechazo de convenio se revertiría
+// — justo el flujo que este parámetro vino a habilitar.
+//
+// Se comprueba la existencia ANTES de consultar: `to_regclass` devuelve NULL
+// en vez de lanzar, así que no ensucia la transacción. Un savepoint también
+// serviría, pero el único caller llama a esta función dentro de un
+// `Promise.all` sobre la misma conexión, donde el orden real de las sentencias
+// no está garantizado y un SAVEPOINT/ROLLBACK TO podría envolver a la query
+// equivocada.
+async function tablaPromesasExiste(executor: MoraReadExecutor): Promise<boolean> {
+  const res = await executor.execute(
+    sql`SELECT to_regclass(${`${CARTERA_SCHEMA}.promesas_pago_espejo`}) IS NOT NULL AS existe`,
+  );
+  const filas = (res as unknown as { rows?: { existe: boolean }[] }).rows ?? (res as unknown as { existe: boolean }[]);
+  return filas?.[0]?.existe === true;
+}
 
 async function promesasVigentesDelCredito(
   credito_id: number,
   executor: MoraReadExecutor = db,
 ): Promise<PromesaVigente[]> {
-  try {
-    return await executor
-      .select({
-        cuota_inicio: promesas_pago_espejo.cuota_inicio,
-        cuota_fin: promesas_pago_espejo.cuota_fin,
-        fecha_promesa: promesas_pago_espejo.fecha_promesa,
-      })
-      .from(promesas_pago_espejo)
-      .where(and(eq(promesas_pago_espejo.credito_id, credito_id), eq(promesas_pago_espejo.activa, true)));
-  } catch (err: any) {
-    if (err?.code === "42P01") return [];
-    throw err;
-  }
+  // Fail-open: sin tabla = sin promesas conocidas, comportamiento pre-CB-030.
+  if (!(await tablaPromesasExiste(executor))) return [];
+
+  return await executor
+    .select({
+      cuota_inicio: promesas_pago_espejo.cuota_inicio,
+      cuota_fin: promesas_pago_espejo.cuota_fin,
+      fecha_promesa: promesas_pago_espejo.fecha_promesa,
+    })
+    .from(promesas_pago_espejo)
+    .where(and(eq(promesas_pago_espejo.credito_id, credito_id), eq(promesas_pago_espejo.activa, true)));
 }
 
 // CB-033 — `executor` opcional: sin él, cae al `db` global (comportamiento

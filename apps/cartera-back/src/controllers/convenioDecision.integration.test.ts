@@ -15,6 +15,7 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { eq, sql } from "drizzle-orm";
 import { db } from "../database";
 import {
+  CARTERA_SCHEMA,
   convenioDecisiones,
   convenioOperaciones,
   convenio_cuotas,
@@ -638,5 +639,57 @@ describe("decidirConvenio — integración contra Postgres real (cb114_local)", 
       .from(convenios_pago)
       .where(eq(convenios_pago.convenio_id, convenio.convenio_id));
     expect(restante.length).toBe(0);
+  });
+
+  // El equipo aplica 0007_promesas_pago_espejo.sql a mano, así que hay
+  // ambientes donde la tabla no existe todavía y el comportamiento esperado es
+  // fail-open (sin tabla = sin promesas). Eso se implementaba atrapando el
+  // 42P01, que funciona con el `db` global (autocommit) pero NO dentro de una
+  // transacción: Postgres la deja ABORTADA y la siguiente sentencia falla con
+  // 25P02, así que todo rechazo de convenio se revertía. Este test renombra la
+  // tabla dentro de un tx y comprueba que la transacción sigue usable.
+  it("sin la tabla de promesas, dentro de un tx, la transacción NO queda abortada", async () => {
+    let siguienteSentenciaOk = false;
+
+    try {
+      await db.transaction(async (tx) => {
+        await tx.execute(
+          sql`ALTER TABLE ${SQL_CARTERA_SCHEMA}.promesas_pago_espejo RENAME TO promesas_pago_espejo_tmp`,
+        );
+
+        // Import dinámico, igual que el otro test que usa latefee: un
+        // `mock.module` parcial de otro archivo de la suite es global al
+        // proceso y rompería un import estático.
+        const { contarCuotasVencidasReales } = await import("./latefee");
+
+        // Lo que corre el rechazo de convenio dentro de la transacción.
+        const n = await contarCuotasVencidasReales(
+          CREDITO_PLANTILLA_ID,
+          "MOROSO",
+          tx as never,
+        );
+        expect(typeof n).toBe("number");
+
+        // La prueba real: si la transacción hubiera quedado abortada, esto
+        // lanzaría 25P02 en vez de responder.
+        const r = (await tx.execute(sql`SELECT 1 AS ok`)) as unknown as {
+          rows?: { ok: number }[];
+        } & { ok: number }[];
+        siguienteSentenciaOk = (r.rows?.[0]?.ok ?? r[0]?.ok) === 1;
+
+        // Revertir deja la tabla con su nombre original.
+        throw new Error("rollback intencional");
+      });
+    } catch (err) {
+      if ((err as Error)?.message !== "rollback intencional") throw err;
+    }
+
+    expect(siguienteSentenciaOk).toBe(true);
+
+    // La tabla volvió a su nombre con el rollback.
+    const res = (await db.execute(
+      sql`SELECT to_regclass(${`${CARTERA_SCHEMA}.promesas_pago_espejo`}) IS NOT NULL AS existe`,
+    )) as unknown as { rows?: { existe: boolean }[] } & { existe: boolean }[];
+    expect((res.rows?.[0] ?? res[0])?.existe).toBe(true);
   });
 });

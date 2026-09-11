@@ -9,6 +9,7 @@ import { inicioDiaGTComoTimestampUTC } from "../utils/functions/diaGuatemala";
 import { clampPagination, contienePatron } from "../utils/functions/pagination";
 import { stat } from "fs";
 import { emitCreditLateFee } from "../utils/structuredLogger";
+import { STATUS_EXCLUIDOS_MORA } from "../constants/creditStatus";
 import type { PoolClient } from "pg";
 
 function safeNow(): number {
@@ -41,7 +42,10 @@ type MoraEventoOrigen =
   | "CONDONACION_INDIVIDUAL"
   | "CONDONACION_MASIVA";
 
-export const STATUS_EXCLUIDOS_MORA = ["EN_CONVENIO", "INCOBRABLE", "CANCELADO", "PENDIENTE_CANCELACION", "CAIDO"];
+// La lista vive en constants/creditStatus.ts para que un módulo de reglas
+// puras pueda reusarla sin arrastrar la conexión a la base que importa este
+// archivo. Se re-exporta acá porque varios módulos ya la importaban de latefee.
+export { STATUS_EXCLUIDOS_MORA };
 
 export function isOverdueInstallmentForMora(
   cuota: {

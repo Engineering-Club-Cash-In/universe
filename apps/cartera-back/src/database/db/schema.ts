@@ -2162,3 +2162,131 @@
       idx_verif_inv: index("idx_verif_liquidacion_inv").on(t.inversionista_id),
     })
   );
+
+  // ---------------------------------------------------------------------
+  // Rubros: cobros adicionales por crédito (ej. tarjeta de circulación) que
+  // se consumen del disponible de cada pago.
+  //
+  // El TIPO define la naturaleza del cobro —si es obligatorio o no—; el rubro
+  // sólo guarda el caso concreto (a qué crédito, por cuánto, con qué saldo).
+  // No hay periodicidad ni activación programada: un rubro se cobra desde que
+  // se crea, y cuando se salda se puede volver a crear el mismo concepto.
+  // ---------------------------------------------------------------------
+
+  // `customSchema.enum` y no `pgEnum`: la migración los crea como
+  // `cartera.rubro_evento` / `cartera.rubro_origen`, y `pgEnum` los declararía
+  // en `public`. No cambia el runtime (el INSERT que emite drizzle no lleva
+  // cast), pero dejaba a schema.ts describiendo objetos distintos a los que la
+  // base tiene — y `drizzle-kit generate` emitiendo un CREATE TYPE en el schema
+  // equivocado. Mismo patrón que el resto de enums de `cartera` del archivo.
+  export const rubroEventoEnum = customSchema.enum("rubro_evento", [
+    "creacion",
+    "edicion_monto",
+    "edicion",
+    "abono",
+    "activacion",
+    "desactivacion",
+    "reversa",
+    // Un rubro cargado por error no se borra ni se edita a 0 (un rubro de Q0 no
+    // es un rubro): se ANULA. La fila sobrevive con su `monto_original` intacto
+    // —el rastro de cuánto se había llegado a cobrar— y este evento es el que
+    // explica por qué dejó de cobrarse y quién lo decidió.
+    "anulacion",
+  ]);
+
+  // `asesor` está separado de `admin` porque el alta de rubros dejó de ser
+  // ADMIN-only: sin ese valor, el historial —que existe para responder "¿quién
+  // le cobró esto al cliente?"— marcaba "admin" todo lo que daba de alta un
+  // asesor, y la pregunta se volvía irrespondible desde la tabla.
+  export const rubroOrigenEnum = customSchema.enum("rubro_origen", [
+    "admin",
+    "asesor",
+    "job",
+    "pago",
+    "reversa",
+  ]);
+
+  export const rubros_tipos = customSchema.table(
+    "rubros_tipos",
+    {
+      tipo_id: serial("tipo_id").primaryKey(),
+      nombre: text("nombre").notNull(),
+      descripcion: text("descripcion"),
+      // La naturaleza del cobro vive acá, no en cada rubro: "tarjeta de
+      // circulación" ES obligatoria siempre, y quien da de alta el rubro elige
+      // el concepto, no si ese concepto puede saltarse los frenos de mora.
+      obligatorio: boolean("obligatorio").notNull().default(false),
+      activo: boolean("activo").notNull().default(true),
+      created_by: integer("created_by").references(() => platform_users.id),
+      created_at: timestamp("created_at").defaultNow(),
+      updated_at: timestamp("updated_at").defaultNow(),
+    },
+    (t) => [
+      uniqueIndex("rubros_tipos_uq_nombre_activo")
+        .on(sql`lower(${t.nombre})`)
+        .where(sql`${t.activo} = true`),
+    ]
+  );
+
+  export const rubros = customSchema.table(
+    "rubros",
+    {
+      rubro_id: serial("rubro_id").primaryKey(),
+      credito_id: integer("credito_id")
+        .notNull()
+        .references(() => creditos.credito_id, { onDelete: "cascade" }),
+      tipo_id: integer("tipo_id")
+        .notNull()
+        .references(() => rubros_tipos.tipo_id),
+      // NOT NULL: el tipo dice QUÉ se cobra, la descripción dice POR QUÉ este
+      // crédito en particular. Sin ella el historial no explica el cobro.
+      descripcion: text("descripcion").notNull(),
+      monto_original: numeric("monto_original", { precision: 18, scale: 2 }).notNull(),
+      saldo_pendiente: numeric("saldo_pendiente", { precision: 18, scale: 2 }).notNull(),
+      activo: boolean("activo").notNull().default(true),
+      completado: boolean("completado").notNull().default(false),
+      // Anulado NO se deduce del saldo: anulado y pagado quedan los dos en cero
+      // y son hechos distintos. Es el único flag de esta tabla no derivable.
+      anulado: boolean("anulado").notNull().default(false),
+      created_by: integer("created_by").references(() => platform_users.id),
+      // created_at define el orden de consumo.
+      created_at: timestamp("created_at").defaultNow(),
+      updated_at: timestamp("updated_at").defaultNow(),
+    },
+    (t) => [
+      index("rubros_credito_activo_idx").on(t.credito_id, t.activo),
+      // Un solo rubro VIVO por crédito y tipo: dos "tarjeta de circulación"
+      // pendientes a la vez son un cobro duplicado. El filtro por `completado`
+      // es lo que permite volver a cobrar el mismo concepto más adelante —
+      // cuando el anterior ya se saldó, deja de estorbar el índice.
+      uniqueIndex("rubros_uq_credito_tipo_vivo")
+        .on(t.credito_id, t.tipo_id)
+        .where(sql`${t.completado} = false`),
+    ]
+  );
+
+  export const rubros_historial = customSchema.table(
+    "rubros_historial",
+    {
+      historial_id: serial("historial_id").primaryKey(),
+      rubro_id: integer("rubro_id")
+        .notNull()
+        .references(() => rubros.rubro_id, { onDelete: "cascade" }),
+      tipo_evento: rubroEventoEnum("tipo_evento").notNull(),
+      monto_anterior: numeric("monto_anterior", { precision: 18, scale: 2 }),
+      monto_nuevo: numeric("monto_nuevo", { precision: 18, scale: 2 }),
+      saldo_anterior: numeric("saldo_anterior", { precision: 18, scale: 2 }),
+      saldo_nuevo: numeric("saldo_nuevo", { precision: 18, scale: 2 }),
+      pago_id: integer("pago_id").references(() => pagos_credito.pago_id, {
+        onDelete: "set null",
+      }),
+      usuario_id: integer("usuario_id").references(() => platform_users.id),
+      origen: rubroOrigenEnum("origen").notNull(),
+      motivo: text("motivo"),
+      created_at: timestamp("created_at").defaultNow(),
+    },
+    (t) => [
+      index("rubros_historial_rubro_idx").on(t.rubro_id, t.created_at),
+      index("rubros_historial_pago_idx").on(t.pago_id),
+    ]
+  );

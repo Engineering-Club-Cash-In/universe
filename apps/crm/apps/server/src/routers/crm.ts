@@ -90,6 +90,7 @@ import {
 	getWonOpportunityRevokeError,
 	stripUnchangedFrozenFields,
 } from "../lib/opportunity-stage-guard";
+import { isImmutableDocumentIntegrityEvidencePath } from "../lib/document-integrity/evidence-path";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import {
@@ -5226,8 +5227,21 @@ export const crmRouter = {
 				context.userRole === "analyst" ||
 				document.uploadedBy === context.userId
 			) {
-				// Eliminar de R2
-				await deleteFileFromR2(document.filePath);
+				// Si el archivo es la evidencia inmutable de una validación de
+				// integridad documental, no se borra de R2: esa misma ruta queda
+				// referenciada por document_integrity_validations para auditoría.
+				const isDocumentIntegrityEvidence = isImmutableDocumentIntegrityEvidencePath({
+					filePath: document.filePath,
+					bankStatementPrefix: buildUploadPrefix(
+						"bank_statement",
+						document.opportunityId,
+					),
+				});
+
+				if (!isDocumentIntegrityEvidence) {
+					// Eliminar de R2
+					await deleteFileFromR2(document.filePath);
+				}
 
 				// Eliminar de la base de datos
 				await db

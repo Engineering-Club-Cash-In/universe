@@ -1,8 +1,9 @@
 import { ORPCError } from "@orpc/server";
-import { and, desc, eq, gte, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, ne, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { db } from "../db";
+import { session } from "../db/schema/auth";
 import {
 	companies,
 	leads,
@@ -258,9 +259,11 @@ export const trackerRouter = {
 				});
 			}
 
-			// Sin revokeOtherSessions: con true, better-auth rota la sesión y su
-			// Set-Cookie se perdía (llamada server-side sin asResponse), botando
-			// al socio justo después del cambio exitoso.
+			// Sin revokeOtherSessions: con true, better-auth rota la sesión actual
+			// y su Set-Cookie se perdía (llamada server-side sin asResponse),
+			// botando al socio justo después del cambio exitoso. En su lugar,
+			// borramos directo las demás sesiones del usuario (ej. una contraseña
+			// temporal que alguien más también tenga) sin tocar la actual.
 			await partnerAuth.api.changePassword({
 				headers: context.headers,
 				body: {
@@ -268,6 +271,15 @@ export const trackerRouter = {
 					newPassword: input.newPassword,
 				},
 			});
+
+			await db
+				.delete(session)
+				.where(
+					and(
+						eq(session.userId, context.userId),
+						ne(session.id, context.partnerSession.session.id),
+					),
+				);
 
 			const ahora = new Date();
 			await db

@@ -5787,6 +5787,26 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
     errores.forEach(e => {
       console.log(`   - ID ${e.inversionista_id}: ${e.razon}`);
     });
+
+    // La liquidación en background (POST /boletas) no le devuelve estos errores a
+    // nadie: sin guardarlos acá la razón solo quedaba en la consola del servidor,
+    // el lock se cerraba COMPLETADO y la boleta seguía PENDIENTE sin explicación.
+    // Si no se creó ninguna liquidación, el lock queda FALLIDO.
+    try {
+      await db.update(liquidacion_locks)
+        .set({
+          error: errores.map((e) => `Inv ${e.inversionista_id}: ${e.razon}`).join("\n"),
+          ...(totalLiquidaciones === 0 ? { estado: "FALLIDO", finished_at: new Date() } : {}),
+        })
+        .where(
+          and(
+            eq(liquidacion_locks.id, lock.id),
+            eq(liquidacion_locks.estado, "EN_PROCESO")
+          )
+        );
+    } catch (lockError) {
+      console.error(`⚠️ No se pudo guardar el error en liquidacion_locks ${lock.id}:`, lockError);
+    }
   }
 
   return {

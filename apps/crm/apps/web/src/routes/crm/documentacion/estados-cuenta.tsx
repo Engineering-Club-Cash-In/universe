@@ -525,14 +525,21 @@ function NewValidationDialog({
 			const results = await client.validarDocumentosExistentes({
 				opportunityDocumentIds: [...documentIds, ...uploadedDocuments],
 			});
-			return { opportunityId, results };
+			return { opportunityId, results, uploadedDocuments };
 		},
-		onSuccess: ({ opportunityId, results }) => {
+		onSuccess: ({ opportunityId, results, uploadedDocuments }) => {
 			const successful = results.filter(
 				(result) => result.validation && result.validation.result !== "error",
 			).length;
 			if (successful === 0) {
-				toast.error("No se pudo validar ningún documento");
+				// Los archivos ya se subieron y registraron como opportunityDocuments;
+				// se mueven a documentIds para que un reintento los revalide en vez
+				// de volver a subirlos y duplicar el registro.
+				setDocumentIds((current) => [...current, ...uploadedDocuments]);
+				setNewFiles([]);
+				toast.error(
+					"No se pudo validar ningún documento. Los archivos quedaron registrados; puedes reintentar la validación.",
+				);
 				return;
 			}
 			if (successful < results.length)

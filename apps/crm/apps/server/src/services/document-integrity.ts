@@ -735,8 +735,13 @@ async function freezeCompletedValidationEvidence(params: {
 	}
 	if (frozen.length === 0) return;
 
-	await db.transaction(async (tx) => {
-		for (const item of frozen) {
+	// Cada documento se congela en su propia transacción: si uno se topa con
+	// un vínculo roto (documento borrado/reemplazado a mitad de la
+	// validación), eso no debe deshacer la evidencia ya confirmada de sus
+	// hermanos en el mismo lote (ver "freeze all validated document evidence").
+	let staleLinkDetected = false;
+	for (const item of frozen) {
+		await db.transaction(async (tx) => {
 			await tx
 				.update(documentIntegrityValidations)
 				.set({ documentFilePath: item.filePath })
@@ -752,31 +757,43 @@ async function freezeCompletedValidationEvidence(params: {
 						),
 					)
 					.returning({ id: opportunityDocuments.id });
-				if (repointedDocument) {
-					await tx
-						.update(documentIntegrityValidationDocuments)
-						.set({ linkedFilePath: item.filePath })
-						.where(
-							and(
-								eq(
-									documentIntegrityValidationDocuments.validationId,
-									item.validation.id,
-								),
-								eq(
-									documentIntegrityValidationDocuments.opportunityDocumentId,
-									item.opportunityDocumentId,
-								),
-								eq(
-									documentIntegrityValidationDocuments.linkedFilePath,
-									item.sourceFilePath,
-								),
-							),
-						);
+				if (!repointedDocument) {
+					// El documento fue eliminado o su archivo cambió mientras se
+					// validaba: no hay a qué repuntar el vínculo. Los bytes ya
+					// quedaron congelados en `documentIntegrityValidations`, pero
+					// se marca la corrida para que termine en error y no cupo,
+					// sin descartar la evidencia de los demás documentos del lote.
+					staleLinkDetected = true;
+					return;
 				}
+				await tx
+					.update(documentIntegrityValidationDocuments)
+					.set({ linkedFilePath: item.filePath })
+					.where(
+						and(
+							eq(
+								documentIntegrityValidationDocuments.validationId,
+								item.validation.id,
+							),
+							eq(
+								documentIntegrityValidationDocuments.opportunityDocumentId,
+								item.opportunityDocumentId,
+							),
+							eq(
+								documentIntegrityValidationDocuments.linkedFilePath,
+								item.sourceFilePath,
+							),
+						),
+					);
 			}
-		}
-	});
+		});
+	}
 	for (const item of frozen) item.validation.documentFilePath = item.filePath;
+	if (staleLinkDetected) {
+		throw new Error(
+			"Uno o más documentos de la oportunidad fueron modificados o eliminados durante la validación",
+		);
+	}
 }
 
 function errorMessage(error: unknown) {

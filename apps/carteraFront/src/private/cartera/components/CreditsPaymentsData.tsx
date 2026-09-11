@@ -48,7 +48,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { usePaymentAgreements,useTogglePaymentAgreementStatus, usePromesaActivaPorCredito } from "../hooks/paymentagreement";
+import { usePaymentAgreements, usePromesaActivaPorCredito } from "../hooks/paymentagreement";
 import { toast } from "sonner";
 import { ModalCaidoCredit } from "./ModalCaidoCredit";
 
@@ -1088,33 +1088,15 @@ export function ListaCreditosPagos() {
 // 🆕 Componente para mostrar info de convenio
 // 🆕 Componente para mostrar info de convenio
 // 🆕 Componente para mostrar info de convenio
-function ConvenioInfo({ creditId, isAdmin }: { creditId: number; isAdmin: boolean }) {
+// CB-033: ya no recibe `isAdmin` — la tarjeta es de solo consulta y no hay
+// acciones que gatear. Quien decide es el supervisor desde el CRM.
+function ConvenioInfo({ creditId }: { creditId: number }) {
 
   // Usamos el hook para traer los convenios de este crédito
-  const { data, isLoading, refetch } = usePaymentAgreements(
+  const { data, isLoading } = usePaymentAgreements(
     { credit_id: creditId },
     { enabled: !!creditId }
   );
-  console.log("📄 Datos del convenio:", data);
-
-  // 🆕 Hook para toggle del convenio
-  const toggleMutation = useTogglePaymentAgreementStatus();
-
-  // 🆕 Handler para activar convenio
-  const handleActivarConvenio = (convenioId: number) => {
-    toggleMutation.mutate(
-      { convenio_id: convenioId, activo: true },
-      { onSuccess: () => refetch() }
-    );
-  };
-
-  // 🆕 Handler para rechazar/desactivar convenio
-  const handleRechazarConvenio = (convenioId: number) => {
-    toggleMutation.mutate(
-      { convenio_id: convenioId, activo: false },
-      { onSuccess: () => refetch() }
-    );
-  };
 
   if (isLoading) {
     return (
@@ -1135,55 +1117,13 @@ function ConvenioInfo({ creditId, isAdmin }: { creditId: number; isAdmin: boolea
 
   return (
     <div className="bg-orange-50 rounded-2xl p-4">
-      {/* Header con botones */}
+      {/* CB-033: la decisión (activar/rechazar) se quitó de carteraFront —
+          se aprueba/rechaza únicamente desde el CRM (/cobros/convenios).
+          Esta tarjeta queda de solo consulta. */}
       <div className="flex items-center justify-between mb-3">
         <h4 className="text-lg font-extrabold text-orange-800">
           Detalles del Convenio de Pago
         </h4>
-        {/* Solo admin puede ver estos botones */}
-        {isAdmin && (
-          <div className="flex gap-2">
-            {/* Botón Activar - deshabilitado si ya está activo */}
-            <Button
-              variant="outline"
-              size="sm"
-              className={`font-semibold ${
-                convenio.activo
-                  ? "bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed"
-                  : "bg-green-50 hover:bg-green-100 text-green-700 border-green-300"
-              }`}
-              onClick={() => handleActivarConvenio(convenio.convenio_id)}
-              disabled={toggleMutation.isPending || convenio.activo}
-            >
-              {toggleMutation.isPending ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin mr-1" />
-                  ...
-                </>
-              ) : (
-                "✅ Activar"
-              )}
-            </Button>
-
-            {/* Botón Rechazar - siempre habilitado */}
-            <Button
-              variant="outline"
-              size="sm"
-              className="font-semibold bg-red-50 hover:bg-red-100 text-red-700 border-red-300"
-              onClick={() => handleRechazarConvenio(convenio.convenio_id)}
-              disabled={toggleMutation.isPending}
-            >
-              {toggleMutation.isPending ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin mr-1" />
-                  ...
-                </>
-              ) : (
-                "🔴 Rechazar"
-              )}
-            </Button>
-          </div>
-        )}
       </div>
 
       <div className="grid grid-cols-2 gap-3 text-center">
@@ -1533,7 +1473,7 @@ function MobileView({
 
               {/* 🆕 Info de convenio si está EN_CONVENIO */}
               {item.creditos.statusCredit === "EN_CONVENIO" && (
-                <ConvenioInfo creditId={item.creditos.credito_id} isAdmin={user?.role === "ADMIN"} />
+                <ConvenioInfo creditId={item.creditos.credito_id} />
               )}
 
               {/* Mora */}
@@ -1944,7 +1884,7 @@ function DesktopView({
                       {/* 🆕 Info de convenio si está EN_CONVENIO */}
                       {item.creditos.statusCredit === "EN_CONVENIO" && (
                         <div className="col-span-full">
-                          <ConvenioInfo creditId={item.creditos.credito_id} isAdmin={user?.role === "ADMIN"} />
+                          <ConvenioInfo creditId={item.creditos.credito_id} />
                         </div>
                       )}
 

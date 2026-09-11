@@ -218,7 +218,8 @@ export function CreatePaymentAgreementForm() {
                     Cuotas por Pagar
                   </span>
                   <span className="text-gray-900 text-xl font-bold">
-                    {cuotasParaConvenio.length}
+                    {activoData.cuotasPendientes.length +
+                      activoData.cuotasAtrasadas.length}
                   </span>
                 </div>
 

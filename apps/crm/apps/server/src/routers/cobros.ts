@@ -3009,6 +3009,7 @@ export const cobrosRouter = {
 					numeroCreditoSifco: numeroSifco,
 					montoTotal: Number(convenio.monto_total_convenio),
 					creadoPorUserId: context.userId,
+					creadoPorRole: context.userRole,
 				});
 			}
 

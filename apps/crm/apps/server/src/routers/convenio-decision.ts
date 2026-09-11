@@ -247,6 +247,10 @@ export const convenioDecisionRouter = {
 							decision: resultado.decision,
 							motivo: input.motivo,
 							creadoPorUserId: context.userId,
+							// El rol REAL de quien decidió: cobrosSupervisorProcedure
+							// admite ADMIN además de COBROS_SUPERVISOR, y la UI
+							// muestra este rol junto al nombre.
+							creadoPorRole: context.userRole,
 						});
 					}
 				}

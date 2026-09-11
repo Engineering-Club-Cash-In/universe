@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { isImmutableDocumentIntegrityEvidencePath } from "./evidence-path";
+import {
+	isImmutableDocumentIntegrityEvidencePath,
+	originalNameFromDocumentIntegrityPath,
+} from "./evidence-path";
 
 describe("document integrity evidence paths", () => {
 	test("solo preserva snapshots bajo validated de la oportunidad", () => {
@@ -24,5 +27,19 @@ describe("document integrity evidence paths", () => {
 				bankStatementPrefix,
 			}),
 		).toBe(false);
+	});
+
+	test("restaura el nombre original desde uploads y snapshots inmutables", () => {
+		const hash = "a".repeat(64);
+		expect(
+			originalNameFromDocumentIntegrityPath(
+				"bank-statements/opportunity-1/1750000000000-abc123-estado-junio.pdf",
+			),
+		).toBe("estado-junio.pdf");
+		expect(
+			originalNameFromDocumentIntegrityPath(
+				`bank-statements/opportunity-1/validated/validation-1/${hash}-1750000000000-abc123-estado-junio.pdf`,
+			),
+		).toBe("estado-junio.pdf");
 	});
 });

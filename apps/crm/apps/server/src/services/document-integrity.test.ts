@@ -312,7 +312,9 @@ describe("document integrity boundaries", () => {
 		expect(serviceSource).toContain("getLatestReusableDocumentIntegrityRun");
 		expect(serviceSource).toContain('"analisis_capacidad"');
 		expect(serviceSource).toContain("validation.hasLinkedDocuments");
-		expect(serviceSource).toContain("originalNameFromStorageKey");
+		expect(serviceSource).toContain(
+			"originalNameFromDocumentIntegrityPath",
+		);
 		expect(serviceSource).toContain(
 			'run.validationSource !== "analisis_capacidad"',
 		);

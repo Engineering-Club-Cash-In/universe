@@ -100,4 +100,13 @@ describe("document integrity UI contract", () => {
 		expect(historySource).toContain("Nueva validación por oportunidad");
 		expect(historySource).not.toContain("validarDocumentoExistente");
 	});
+
+	test("la nueva validación falla cerrada si no puede consultar el cupo", () => {
+		expect(historySource).toContain(
+			"attemptStatusQuery.data?.canValidate ?? false",
+		);
+		expect(historySource).toContain("attemptStatusQuery.isError");
+		expect(historySource).toContain("Reintentar consulta");
+		expect(historySource).toContain("attemptStatusQuery.refetch()");
+	});
 });

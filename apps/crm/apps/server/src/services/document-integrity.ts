@@ -39,7 +39,10 @@ import {
 	buildDocumentRecommendedAction,
 } from "../lib/document-integrity/decision-evidence";
 import { runDocumentIntegrityEngine } from "../lib/document-integrity/engine";
-import { isImmutableDocumentIntegrityEvidencePath } from "../lib/document-integrity/evidence-path";
+import {
+	isImmutableDocumentIntegrityEvidencePath,
+	originalNameFromDocumentIntegrityPath,
+} from "../lib/document-integrity/evidence-path";
 import {
 	ESTADO_CUENTA_BATCH_PROMPT,
 	estadoCuentaBatchAiSchema,
@@ -1808,11 +1811,6 @@ export async function getDocumentIntegrityAttemptStatus(params: {
 	});
 }
 
-function originalNameFromStorageKey(filePath: string) {
-	const storedName = filePath.split("/").at(-1) ?? "estado-de-cuenta.pdf";
-	return storedName.replace(/^\d{13}-[a-z0-9]{6}-/i, "");
-}
-
 export async function getLatestReusableDocumentIntegrityRun(params: {
 	opportunityId: string;
 	salesUserId?: string;
@@ -1903,12 +1901,12 @@ export async function getLatestReusableDocumentIntegrityRun(params: {
 		attemptNumber: run.attemptNumber,
 		completedAt: run.completedAt,
 		payloads: validations.map((validation) => ({
-			name: originalNameFromStorageKey(validation.filePath),
+			name: originalNameFromDocumentIntegrityPath(validation.filePath),
 			key: validation.filePath,
 			mimeType: "application/pdf",
 		})),
 		results: validations.map((validation) => ({
-			file: originalNameFromStorageKey(validation.filePath),
+			file: originalNameFromDocumentIntegrityPath(validation.filePath),
 			validation: {
 				id: validation.id,
 				result: validation.result,

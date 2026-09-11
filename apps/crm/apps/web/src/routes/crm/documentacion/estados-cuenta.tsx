@@ -484,7 +484,7 @@ function NewValidationDialog({
 		}),
 		enabled: !!opportunityId,
 	});
-	const canValidate = attemptStatusQuery.data?.canValidate ?? true;
+	const canValidate = attemptStatusQuery.data?.canValidate ?? false;
 	const bankDocuments = (documentsQuery.data ?? []).filter(
 		(document) =>
 			[
@@ -574,6 +574,20 @@ function NewValidationDialog({
 								Esta oportunidad alcanzó el límite de validaciones documentales.
 							</p>
 						)}
+					</div>
+				)}
+				{opportunityId && attemptStatusQuery.isError && (
+					<div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
+						<p>No se pudo consultar el cupo de validaciones documentales.</p>
+						<Button
+							className="mt-2"
+							disabled={attemptStatusQuery.isFetching}
+							onClick={() => void attemptStatusQuery.refetch()}
+							size="sm"
+							variant="outline"
+						>
+							{attemptStatusQuery.isFetching ? "Consultando…" : "Reintentar consulta"}
+						</Button>
 					</div>
 				)}
 				{locked ? (

@@ -215,6 +215,12 @@ export const convenioDecisionRouter = {
 					const emailAsesor = credito?.asesor?.emailCashIn
 						?.trim()
 						.toLowerCase();
+					// El destinatario es el asesor que lleva el crédito AHORA, no el
+					// que creó el convenio (el snapshot trae `created_by`, se usa a
+					// propósito el actual): si el crédito se reasignó entre la
+					// creación y la decisión, quien tiene que enterarse del resultado
+					// es quien va a gestionarlo de acá en adelante.
+					//
 					// Se normalizan LOS DOS lados: el CRM no normaliza el email al
 					// crear el usuario, así que uno guardado con mayúsculas o espacios
 					// no casaría contra el de cartera ya normalizado, y el aviso se

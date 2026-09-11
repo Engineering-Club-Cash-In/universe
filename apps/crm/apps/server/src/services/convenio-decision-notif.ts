@@ -13,7 +13,7 @@
 // fallo de notificación NUNCA se reporta como fallo de la decisión (mismo
 // criterio que el etiquetado del caso en crearConvenioDesdeFicha).
 
-import { sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "../db";
 import { notifications } from "../db/schema/notifications";
 import {
@@ -69,10 +69,40 @@ export async function notificarConvenioPendienteAprobacion(params: {
 }
 
 /**
- * Al resolver (aprobar/rechazar): avisa al asesor. `decisionId` es el de
- * cartera (`convenio_decisiones.decision_id`) — en una respuesta idempotente
- * es el de la decisión ORIGINAL, así que un reintento tras un timeout no
- * genera un aviso nuevo: el INSERT con ON CONFLICT lo descarta.
+ * Cierra los avisos `convenio_pendiente_aprobacion` del caso: una vez que
+ * alguien decidió, el resto de supervisores seguía viendo una acción
+ * requerida sobre algo que ya no está pendiente (el contador de no leídas y
+ * la lista se guían por `status`, ver routers/notifications.ts).
+ *
+ * Se resuelven TODOS los del caso, no solo los de otros: quien decidió
+ * tampoco necesita seguir viendo su propio pendiente.
+ *
+ * Best-effort igual que el resto: la decisión ya está commiteada en cartera
+ * y es irreversible desde acá, así que un fallo acá no puede hacerla fallar.
+ */
+async function resolverPendientesDeAprobacion(casoCobroId: string) {
+	await db
+		.update(notifications)
+		.set({ status: "resolved", resolvedAt: new Date(), updatedAt: new Date() })
+		.where(
+			and(
+				eq(notifications.cobrosTipo, "convenio_pendiente_aprobacion"),
+				eq(notifications.relatedEntityId, casoCobroId),
+				eq(notifications.status, "pending"),
+			),
+		);
+}
+
+/**
+ * Al resolver (aprobar/rechazar): cierra los pendientes de aprobación y avisa
+ * al asesor. `decisionId` es el de cartera (`convenio_decisiones.decision_id`)
+ * — en una respuesta idempotente es el de la decisión ORIGINAL, así que un
+ * reintento tras un timeout no genera un aviso nuevo: el INSERT con ON
+ * CONFLICT lo descarta.
+ *
+ * El aviso va al asesor que lleva el crédito AHORA, no al que creó el
+ * convenio: si el crédito se reasignó entremedio, quien tiene que enterarse
+ * del resultado es quien va a gestionarlo.
  */
 export async function notificarConvenioResuelto(params: {
 	casoCobroId: string;
@@ -82,6 +112,17 @@ export async function notificarConvenioResuelto(params: {
 	motivo?: string | null;
 	creadoPorUserId: string;
 }): Promise<void> {
+	// Antes del early return de abajo: los pendientes hay que cerrarlos
+	// aunque no haya asesor a quien avisar — son cosas independientes.
+	try {
+		await resolverPendientesDeAprobacion(params.casoCobroId);
+	} catch (error) {
+		console.warn(
+			"[notificarConvenioResuelto] No se pudieron resolver los pendientes de aprobación (best-effort):",
+			error instanceof Error ? error.message : error,
+		);
+	}
+
 	if (!params.asesorUserId) return; // sin asesor enlazado por correo, no hay a quién avisar
 	try {
 		const titulo =

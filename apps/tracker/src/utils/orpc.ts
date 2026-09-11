@@ -20,6 +20,9 @@ const esErrorDeSesion = (error: Error): boolean => {
 export const esErrorDeAcceso = (error: Error): boolean =>
 	error instanceof ORPCError && (error.status === 401 || error.status === 403);
 
+export const esForbidden = (error: Error): boolean =>
+	error instanceof ORPCError && error.status === 403;
+
 export const queryClient = new QueryClient({
 	queryCache: new QueryCache({
 		onError: (error) => {

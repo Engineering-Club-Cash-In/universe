@@ -1,4 +1,4 @@
-import { Link, useNavigate, useSearch } from "@tanstack/react-router";
+import { Link, useSearch } from "@tanstack/react-router";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -6,7 +6,6 @@ import { authClient } from "@/lib/auth-client";
 import { rutaDeRetorno } from "@/lib/rutas";
 
 export function LoginPage() {
-	const navigate = useNavigate();
 	const search = useSearch({ strict: false }) as { redirect?: string };
 	const { data: session } = authClient.useSession();
 	const [email, setEmail] = useState("");
@@ -14,9 +13,13 @@ export function LoginPage() {
 	const [mostrarPassword, setMostrarPassword] = useState(false);
 	const [cargando, setCargando] = useState(false);
 
+	// Navegación dura, no navigate(): rutaDeRetorno devuelve pathname+query+hash
+	// como un solo string, y navigate({ to }) de TanStack Router lo toma entero
+	// como patrón de ruta en vez de separar query/hash, corrompiendo el $id
+	// dinámico de /caso/$id. window.location.href sí lo interpreta como URL.
 	useEffect(() => {
-		if (session) navigate({ to: rutaDeRetorno(search.redirect) });
-	}, [session, navigate, search.redirect]);
+		if (session) window.location.href = rutaDeRetorno(search.redirect);
+	}, [session, search.redirect]);
 
 	const enviar = async (evento: FormEvent) => {
 		evento.preventDefault();
@@ -32,7 +35,7 @@ export function LoginPage() {
 				throw new Error(error.message || "No se pudo iniciar sesión");
 			}
 
-			navigate({ to: rutaDeRetorno(search.redirect) });
+			window.location.href = rutaDeRetorno(search.redirect);
 		} catch (error) {
 			toast.error(
 				error instanceof Error ? error.message : "No se pudo iniciar sesión",

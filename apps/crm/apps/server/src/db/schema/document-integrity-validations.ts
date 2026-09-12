@@ -125,7 +125,12 @@ export const documentIntegrityValidations = pgTable(
 		index("doc_integrity_val_identifier_normalized_idx").on(
 			sql`upper(regexp_replace(coalesce(${table.aiRawResponse}->>'identificador_detectado', ''), '[^A-Za-z0-9]', '', 'g'))`,
 		),
-		index("doc_integrity_val_signals_gin_idx").using("gin", table.signals),
+		// jsonb_path_ops explícito: es la clase de operadores con la que la
+		// migración 0033 crea el índice, y el default de Drizzle es jsonb_ops.
+		index("doc_integrity_val_signals_gin_idx").using(
+			"gin",
+			table.signals.op("jsonb_path_ops"),
+		),
 	],
 );
 

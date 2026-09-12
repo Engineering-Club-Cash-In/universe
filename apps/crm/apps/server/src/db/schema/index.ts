@@ -10,6 +10,7 @@ export * from "./cobros-send-logs";
 export * from "./crm";
 export * from "./crm-entity-audit";
 export * from "./documents";
+export * from "./document-integrity-validations";
 export * from "./insurance";
 export * from "./investments";
 export * from "./juridico-dashboard";

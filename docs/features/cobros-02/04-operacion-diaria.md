@@ -143,8 +143,30 @@ Pantalla: `/cobros/promesas`.
 **Promesa ≠ convenio (CB-032).** Desde la Ficha 360 el botón "Promesa / Convenio" abre
 uno u otro: la promesa es una gestión del CRM y aplica en cualquier bucket; el convenio
 es una reestructura que se crea en cartera (a partir de B2, sin convenio vigente,
-máximo 6 meses) y queda pendiente de activación en carteraFront. Detalle en
+máximo 6 meses) y queda **pendiente de aprobación** del supervisor. Detalle en
 [Ficha 360 §3.4](./06-ficha-360.md#34-convenio-de-pago-cb-032).
+
+---
+
+## Aprobar convenios de pago (CB-033)
+
+Tarea nueva del supervisor, no del ciclo de apertura: cada convenio que un asesor crea
+desde la Ficha 360 queda pendiente hasta que un `cobros_supervisor` (o `admin`) lo
+resuelve **desde el CRM**, con motivo obligatorio en el rechazo.
+
+- **Aviso**: al crearse, notificación in-app a todos los `cobros_supervisor` (`convenio_pendiente_aprobacion`).
+- **Dónde**: `/cobros/convenios`, filtro "Pendientes de aprobación" — badge ámbar,
+  columna de acciones (✓ aprobar / ✗ rechazar).
+- **Rechazar es destructivo**: elimina el convenio en cartera y recalcula la mora del
+  crédito con las cuotas vencidas reales. El modal lo advierte antes de confirmar.
+- Si la respuesta de una decisión se pierde (timeout, cierre de pestaña), el convenio
+  puede desaparecer del listado sin que quede claro si se aplicó. El banner **"Decisión
+  por confirmar"** recupera esos casos con un botón para reenviar y ver el resultado
+  real, sin duplicar el efecto.
+- El historial completo de decisiones de un crédito (quién, cuándo, motivo) se consulta
+  desde la Ficha 360 — sobrevive aunque el convenio rechazado ya no exista.
+
+Detalle completo: [Ficha 360 §3.5](./06-ficha-360.md#35-aprobación-de-convenios-cb-033).
 
 ---
 

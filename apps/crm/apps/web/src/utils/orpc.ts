@@ -6,6 +6,7 @@ import { QueryCache, QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { logAuthDiagnostic } from "@/lib/auth-session";
 import type { bucketCapacidadRouter } from "../../../server/src/routers/bucket-capacidad";
+import type { convenioDecisionRouter } from "../../../server/src/routers/convenio-decision";
 import type {
 	AppRouter,
 	disbursementRouter,
@@ -88,6 +89,7 @@ type MergedRouter = AppRouter &
 	typeof pagaloGrupoActivoRouter &
 	typeof pagaloLinkActionsRouter &
 	typeof pagaloSupervisionRouter &
+	typeof convenioDecisionRouter &
 	typeof recuperacionVehiculoRouter;
 
 export const client: RouterClient<MergedRouter> = createORPCClient(link);

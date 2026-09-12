@@ -1,14 +1,18 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
+	Check,
 	ChevronLeft,
 	ChevronRight,
 	Handshake,
 	Loader2,
 	Search,
 	UserRound,
+	X,
 } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ConvenioAprobacionModal } from "@/components/cobros/convenio-aprobacion-modal";
+import { DecisionPorConfirmarBanner } from "@/components/cobros/decision-por-confirmar-banner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -40,6 +44,10 @@ import {
 	estiloBucket,
 	useBucketsCatalogo,
 } from "@/lib/cobros/buckets-catalogo";
+import {
+	listarIntentosPendientes,
+	suscribirseAIntentos,
+} from "@/lib/cobros/decision-intentos";
 import { PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
 
@@ -90,14 +98,18 @@ interface AsesorOption {
 	isActive: boolean;
 }
 
-type Estado = "active" | "completed" | "inactive" | "all";
+// CB-033: "pending" reemplaza a "inactive" para la cola de aprobación —
+// activo=false AND completado=false, sin mezclar convenios ya cumplidos
+// (que también quedan activo=false). "inactive" queda fuera de este
+// selector pero el server lo sigue aceptando por compatibilidad.
+type Estado = "active" | "pending" | "completed" | "all";
 
 const PER_PAGE_CONVENIOS = 25;
 
 const ESTADOS: Array<{ value: Estado; label: string }> = [
 	{ value: "active", label: "Activos" },
+	{ value: "pending", label: "Pendientes de aprobación" },
 	{ value: "completed", label: "Cumplidos" },
-	{ value: "inactive", label: "Inactivos" },
 	{ value: "all", label: "Todos" },
 ];
 
@@ -118,11 +130,17 @@ function EstadoBadge({ item }: { item: ConvenioItem }) {
 	if (item.completado) {
 		return <Badge className="bg-green-100 text-green-800">Cumplido</Badge>;
 	}
-	return (
-		<Badge variant={item.activo ? "default" : "secondary"}>
-			{item.activo ? "Activo" : "Inactivo"}
-		</Badge>
-	);
+	// CB-033: activo=false && !completado = pendiente de aprobación del
+	// supervisor (antes decía "Inactivo", que no comunicaba que había algo
+	// por hacer).
+	if (!item.activo) {
+		return (
+			<Badge className="bg-amber-100 text-amber-800">
+				Pendiente de aprobación
+			</Badge>
+		);
+	}
+	return <Badge>Activo</Badge>;
 }
 
 /**
@@ -169,6 +187,35 @@ function ConveniosPage() {
 	const [busqueda, setBusqueda] = useState("");
 	const [page, setPage] = useState(1);
 
+	// CB-033 — modal de aprobar/rechazar (uno solo, parametrizado por decision)
+	const [aprobacionAbierta, setAprobacionAbierta] = useState<{
+		convenioId: number;
+		decision: "aprobar" | "rechazar";
+		resumen: {
+			clienteNombre?: string;
+			numeroCreditoSifco?: string;
+			montoTotalConvenio?: string;
+		};
+	} | null>(null);
+
+	// Intentos pendientes del supervisor actual. localStorage no es reactivo,
+	// así que la lista se recalcula ante cualquier cambio que avise
+	// `suscribirseAIntentos`: los de esta pestaña (guardar antes de disparar,
+	// borrar al confirmar) y los de otras pestañas (evento `storage`). Antes
+	// esto dependía de que cada callback llamara a un `bump` a mano, y el
+	// caso "guardé el intento y la petición falló" no refrescaba nada: la
+	// fila seguía ofreciendo los botones como si no hubiera nada pendiente.
+	const [intentosTick, setIntentosTick] = useState(0);
+	const bumpIntentos = useCallback(() => setIntentosTick((t) => t + 1), []);
+	const userId = session?.user?.id;
+
+	useEffect(() => suscribirseAIntentos(bumpIntentos), [bumpIntentos]);
+
+	const intentosPendientes = useMemo(
+		() => (userId ? listarIntentosPendientes(userId) : []),
+		[userId, intentosTick],
+	);
+
 	const asesorIdInput =
 		esSupervisor && asesorSel !== "todos" ? Number(asesorSel) : undefined;
 
@@ -195,6 +242,34 @@ function ConveniosPage() {
 		enabled: !!session && esSupervisor,
 	});
 
+	const data = conveniosQuery.data as ConveniosResponse | undefined;
+	const items = data?.items ?? [];
+	const total = data?.total ?? 0;
+	const totalPages = data?.totalPages ?? 1;
+	const sinAsesor = !!data?.sinAsesor;
+	const asesorForzado = data?.asesorForzado ?? null;
+
+	// Aprobar o rechazar el último convenio de una página la deja vacía y baja
+	// `totalPages`, pero `page` se queda donde estaba: la tabla sale sin filas
+	// y —como el paginador solo se pinta con `totalPages > 1`— sin forma de
+	// volver, dejando inaccesibles los convenios de las páginas anteriores.
+	// El guard es sobre el resultado, no sobre la mutación: cubre también el
+	// caso en que otro supervisor decide y el refetch trae menos páginas.
+	//
+	// Va ANTES del return de "Acceso Denegado": `session` arranca undefined
+	// mientras carga, así que ese return se toma en el primer render y no en
+	// el siguiente. Un hook después de él cambiaría de cantidad entre renders
+	// y React tumba la pantalla con "Rendered more hooks than during the
+	// previous render".
+	useEffect(() => {
+		if (!conveniosQuery.isFetching && page > totalPages) {
+			// `Math.max(1, ...)`: cartera ya devuelve mínimo 1 (paymentAgreement.ts),
+			// pero si eso cambiara, un `totalPages: 0` dejaría `page` en 0 — que no
+			// es una página válida y volvería a pedir la lista vacía.
+			setPage(Math.max(1, totalPages));
+		}
+	}, [page, totalPages, conveniosQuery.isFetching]);
+
 	if (!userRole || !PERMISSIONS.canAccessCobros(userRole)) {
 		return (
 			<div className="flex min-h-screen items-center justify-center">
@@ -209,13 +284,6 @@ function ConveniosPage() {
 			</div>
 		);
 	}
-
-	const data = conveniosQuery.data as ConveniosResponse | undefined;
-	const items = data?.items ?? [];
-	const total = data?.total ?? 0;
-	const totalPages = data?.totalPages ?? 1;
-	const sinAsesor = !!data?.sinAsesor;
-	const asesorForzado = data?.asesorForzado ?? null;
 
 	const asesores = (
 		(asesoresQuery.data as { asesores?: AsesorOption[] } | undefined)
@@ -247,6 +315,16 @@ function ConveniosPage() {
 
 	return (
 		<div className="container mx-auto space-y-4 p-4 lg:p-6">
+			{esSupervisor && userId && intentosPendientes.length > 0 && (
+				<DecisionPorConfirmarBanner
+					userId={userId}
+					intentos={intentosPendientes}
+					onResuelto={() => {
+						bumpIntentos();
+						conveniosQuery.refetch();
+					}}
+				/>
+			)}
 			<Card>
 				<CardHeader className="pb-4">
 					<div className="flex flex-wrap items-start justify-between gap-3">
@@ -374,7 +452,6 @@ function ConveniosPage() {
 									<TableHeader>
 										<TableRow>
 											<TableHead>Cliente</TableHead>
-											<TableHead>Crédito</TableHead>
 											<TableHead>Monto total</TableHead>
 											<TableHead>Cuota</TableHead>
 											<TableHead>Progreso</TableHead>
@@ -385,53 +462,132 @@ function ConveniosPage() {
 											{esSupervisor && asesorSel === "todos" && (
 												<TableHead>Asesor</TableHead>
 											)}
+											{esSupervisor && <TableHead>Aprobación</TableHead>}
 										</TableRow>
 									</TableHeader>
 									<TableBody>
-										{items.map((item) => (
-											<TableRow
-												key={item.convenio_id}
-												className="cursor-pointer"
-												onClick={() => irAlDetalle(item.numero_credito_sifco)}
-											>
-												<TableCell className="font-medium">
-													{item.cliente_nombre}
-												</TableCell>
-												<TableCell className="max-w-45 truncate font-mono text-muted-foreground text-xs">
-													{item.numero_credito_sifco}
-												</TableCell>
-												<TableCell>
-													{formatMoneda(item.monto_total_convenio)}
-												</TableCell>
-												<TableCell>
-													{formatMoneda(item.cuota_mensual)}
-												</TableCell>
-												<TableCell className="text-sm">
-													{item.pagos_realizados}/{item.numero_meses} (
-													{Number(item.progreso).toFixed(0)}%)
-												</TableCell>
-												<TableCell className="text-red-600 text-sm">
-													{formatMoneda(item.monto_pendiente)}
-												</TableCell>
-												<TableCell className="text-sm">
-													{fechaLegible(item.fecha_convenio)}
-												</TableCell>
-												<TableCell>
-													<EstadoBadge item={item} />
-												</TableCell>
-												<TableCell>
-													<UltimoBucketBadge
-														item={item}
-														catalogo={bucketsCatalogo.data}
-													/>
-												</TableCell>
-												{esSupervisor && asesorSel === "todos" && (
-													<TableCell className="text-sm">
-														{item.asesor_nombre ?? "—"}
+										{items.map((item) => {
+											// CB-033: pendiente = activo=false && !completado (ver
+											// hallazgo 1 del plan — completado=true también deja
+											// activo=false, y no es "pendiente de aprobación").
+											const pendiente = !item.activo && !item.completado;
+											const tieneIntentoPendiente = intentosPendientes.some(
+												(i) => i.convenioId === item.convenio_id,
+											);
+											return (
+												<TableRow
+													key={item.convenio_id}
+													className="cursor-pointer"
+													onClick={() => irAlDetalle(item.numero_credito_sifco)}
+												>
+													<TableCell className="max-w-52">
+														<div
+															className="truncate font-medium"
+															title={item.cliente_nombre}
+														>
+															{item.cliente_nombre}
+														</div>
+														<div className="truncate font-mono text-muted-foreground text-xs">
+															{item.numero_credito_sifco}
+														</div>
 													</TableCell>
-												)}
-											</TableRow>
-										))}
+													<TableCell>
+														{formatMoneda(item.monto_total_convenio)}
+													</TableCell>
+													<TableCell>
+														{formatMoneda(item.cuota_mensual)}
+													</TableCell>
+													<TableCell className="text-sm">
+														{item.pagos_realizados}/{item.numero_meses} (
+														{Number(item.progreso).toFixed(0)}%)
+													</TableCell>
+													<TableCell className="text-red-600 text-sm">
+														{formatMoneda(item.monto_pendiente)}
+													</TableCell>
+													<TableCell className="text-sm">
+														{fechaLegible(item.fecha_convenio)}
+													</TableCell>
+													<TableCell>
+														<EstadoBadge item={item} />
+													</TableCell>
+													<TableCell>
+														<UltimoBucketBadge
+															item={item}
+															catalogo={bucketsCatalogo.data}
+														/>
+													</TableCell>
+													{esSupervisor && asesorSel === "todos" && (
+														<TableCell className="text-sm">
+															{item.asesor_nombre ?? "—"}
+														</TableCell>
+													)}
+													{esSupervisor && (
+														<TableCell onClick={(e) => e.stopPropagation()}>
+															{pendiente ? (
+																<div className="flex gap-1.5">
+																	<Button
+																		size="sm"
+																		variant="outline"
+																		className="h-7 border-green-300 bg-green-50 px-2 text-green-700 hover:bg-green-100"
+																		disabled={tieneIntentoPendiente}
+																		title={
+																			tieneIntentoPendiente
+																				? "Hay una decisión sin confirmar sobre este convenio"
+																				: undefined
+																		}
+																		onClick={() =>
+																			setAprobacionAbierta({
+																				convenioId: item.convenio_id,
+																				decision: "aprobar",
+																				resumen: {
+																					clienteNombre: item.cliente_nombre,
+																					numeroCreditoSifco:
+																						item.numero_credito_sifco,
+																					montoTotalConvenio:
+																						item.monto_total_convenio,
+																				},
+																			})
+																		}
+																	>
+																		<Check className="h-3.5 w-3.5" />
+																	</Button>
+																	<Button
+																		size="sm"
+																		variant="outline"
+																		className="h-7 border-red-300 bg-red-50 px-2 text-red-700 hover:bg-red-100"
+																		disabled={tieneIntentoPendiente}
+																		title={
+																			tieneIntentoPendiente
+																				? "Hay una decisión sin confirmar sobre este convenio"
+																				: undefined
+																		}
+																		onClick={() =>
+																			setAprobacionAbierta({
+																				convenioId: item.convenio_id,
+																				decision: "rechazar",
+																				resumen: {
+																					clienteNombre: item.cliente_nombre,
+																					numeroCreditoSifco:
+																						item.numero_credito_sifco,
+																					montoTotalConvenio:
+																						item.monto_total_convenio,
+																				},
+																			})
+																		}
+																	>
+																		<X className="h-3.5 w-3.5" />
+																	</Button>
+																</div>
+															) : (
+																<span className="text-muted-foreground text-xs">
+																	—
+																</span>
+															)}
+														</TableCell>
+													)}
+												</TableRow>
+											);
+										})}
 									</TableBody>
 								</Table>
 							</div>
@@ -469,6 +625,30 @@ function ConveniosPage() {
 						</CardContent>
 					</Card>
 				)}
+
+			{aprobacionAbierta && userId && (
+				<ConvenioAprobacionModal
+					open={aprobacionAbierta !== null}
+					onOpenChange={(open) => {
+						if (!open) setAprobacionAbierta(null);
+					}}
+					decision={aprobacionAbierta.decision}
+					convenioId={aprobacionAbierta.convenioId}
+					userId={userId}
+					resumen={aprobacionAbierta.resumen}
+					onResuelto={() => {
+						bumpIntentos();
+						setAprobacionAbierta(null);
+						// También tras un error: si otro supervisor decidió primero,
+						// cartera responde `convenio_no_pendiente` y la fila local
+						// queda obsoleta con los botones activos, invitando a
+						// reintentar algo que siempre va a fallar. `onResuelto`
+						// corre en todos los desenlaces del modal, así que la lista
+						// se refresca igual — el éxito ya invalidaba por su cuenta.
+						conveniosQuery.refetch();
+					}}
+				/>
+			)}
 		</div>
 	);
 }

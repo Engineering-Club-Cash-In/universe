@@ -496,8 +496,16 @@ function NewValidationDialog({
 			(document.documentType === "other" &&
 				document.description?.startsWith("Estado de cuenta")),
 	);
+	// Documentos ya subidos y registrados dentro del intento en curso. Se llena
+	// de forma incremental para poder recuperarlos si mutationFn falla antes de
+	// devolver (una subida posterior falla, o validarDocumentosExistentes
+	// rechaza), y así no reintentar subiendo y duplicando lo ya registrado.
+	const committedUploadsRef = useRef<Array<{ file: File; documentId: string }>>(
+		[],
+	);
 	const validationMutation = useMutation({
 		mutationFn: async () => {
+			committedUploadsRef.current = [];
 			if (!opportunityId) throw new Error("Selecciona una oportunidad");
 			if (documentIds.length + newFiles.length === 0)
 				throw new Error("Selecciona al menos un documento");
@@ -519,6 +527,7 @@ function NewValidationDialog({
 						},
 					});
 					if (!document) throw new Error(`No se pudo registrar ${file.name}`);
+					committedUploadsRef.current.push({ file, documentId: document.id });
 					return document.id;
 				}),
 			);
@@ -560,7 +569,24 @@ function NewValidationDialog({
 				queryKey: orpc.getDocumentIntegrityAttemptStatus.key(),
 			});
 		},
-		onError: (error) => toast.error(error.message),
+		onError: (error) => {
+			// mutationFn falló antes de devolver: adopta lo ya subido/registrado
+			// para no volver a subirlo y duplicarlo en un reintento, y deja en
+			// newFiles únicamente lo que de verdad no llegó a registrarse.
+			const committed = committedUploadsRef.current;
+			if (committed.length > 0) {
+				setDocumentIds((current) => [
+					...current,
+					...committed.map((item) => item.documentId),
+				]);
+				setNewFiles((current) =>
+					current.filter(
+						(file) => !committed.some((item) => item.file === file),
+					),
+				);
+			}
+			toast.error(error.message);
+		},
 	});
 	const isBusy = validationMutation.isPending;
 	const selectedCount = documentIds.length + newFiles.length;
@@ -622,6 +648,7 @@ function NewValidationDialog({
 								placeholder="Buscar lead…"
 								popOverWidth="full"
 								isInModal
+								disabled={isBusy}
 							/>
 						</div>
 						<div className="space-y-2">
@@ -633,7 +660,7 @@ function NewValidationDialog({
 									setDocumentIds([]);
 									setNewFiles([]);
 								}}
-								disabled={!leadId}
+								disabled={!leadId || isBusy}
 							>
 								<SelectTrigger>
 									<SelectValue placeholder="Selecciona la oportunidad" />

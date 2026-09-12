@@ -269,6 +269,21 @@ function ConveniosPage() {
 			?.asesores ?? []
 	).filter((a) => a.activo);
 
+	// Aprobar o rechazar el último convenio de una página la deja vacía y baja
+	// `totalPages`, pero `page` se queda donde estaba: la tabla sale sin filas
+	// y —como el paginador solo se pinta con `totalPages > 1`— sin forma de
+	// volver, dejando inaccesibles los convenios de las páginas anteriores.
+	// El guard es sobre el resultado, no sobre la mutación: cubre también el
+	// caso en que otro supervisor decide y el refetch trae menos páginas.
+	useEffect(() => {
+		if (!conveniosQuery.isFetching && page > totalPages) {
+			// `Math.max(1, ...)`: cartera ya devuelve mínimo 1 (paymentAgreement.ts),
+			// pero si eso cambiara, un `totalPages: 0` dejaría `page` en 0 — que no
+			// es una página válida y volvería a pedir la lista vacía.
+			setPage(Math.max(1, totalPages));
+		}
+	}, [page, totalPages, conveniosQuery.isFetching]);
+
 	const cambiarAsesor = (v: string) => {
 		setAsesorSel(v);
 		setPage(1);
@@ -618,6 +633,13 @@ function ConveniosPage() {
 					onResuelto={() => {
 						bumpIntentos();
 						setAprobacionAbierta(null);
+						// También tras un error: si otro supervisor decidió primero,
+						// cartera responde `convenio_no_pendiente` y la fila local
+						// queda obsoleta con los botones activos, invitando a
+						// reintentar algo que siempre va a fallar. `onResuelto`
+						// corre en todos los desenlaces del modal, así que la lista
+						// se refresca igual — el éxito ya invalidaba por su cuenta.
+						conveniosQuery.refetch();
 					}}
 				/>
 			)}

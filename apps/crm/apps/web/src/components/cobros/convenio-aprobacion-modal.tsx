@@ -165,6 +165,10 @@ export function ConvenioAprobacionModal({
 					: "Convenio rechazado: se eliminó y se recalculó la mora del crédito.",
 				{ duration: 6000 },
 			);
+			// Invalida TODAS las instancias del listado (otras pantallas, otros
+			// filtros), no solo la de quien abrió el modal. El `refetch` que hace
+			// `onResuelto` es lo que recarga ESTA vista — son cosas distintas, y
+			// TanStack deduplica si terminan pidiendo lo mismo.
 			queryClient.invalidateQueries({
 				queryKey: orpc.getConveniosListado.key(),
 			});

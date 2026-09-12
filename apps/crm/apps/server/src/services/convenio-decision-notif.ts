@@ -58,7 +58,11 @@ export async function notificarConvenioPendienteAprobacion(params: {
 			: params.numeroCreditoSifco
 				? `El crédito ${params.numeroCreditoSifco}`
 				: "Un cliente";
-		const descripcion = `${quien} tiene un convenio de pago por ${Q(params.montoTotal)} esperando tu aprobación.`;
+		// "esperando aprobación del supervisor", no "tu aprobación": aunque el
+		// aviso se asigna a los supervisores, `getAlertasCaso` lo trae POR CASO
+		// sin filtrar destinatario, así que también lo lee el asesor en la
+		// Ficha 360 — y decidir está reservado a supervisores/admin.
+		const descripcion = `${quien} tiene un convenio de pago por ${Q(params.montoTotal)} esperando aprobación del supervisor.`;
 
 		await db.insert(notifications).values(
 			supervisores.map((supervisorId) => ({
@@ -138,7 +142,7 @@ const ESTADOS_ABIERTOS = ["pending", "read", "in_progress"] as const;
  * Best-effort igual que el resto: la decisión ya está commiteada en cartera
  * y es irreversible desde acá, así que un fallo acá no puede hacerla fallar.
  */
-async function resolverPendientesDeAprobacion(convenioId: number) {
+export async function resolverPendientesDeAprobacion(convenioId: number) {
 	await db
 		.update(notifications)
 		.set({ status: "resolved", resolvedAt: new Date(), updatedAt: new Date() })

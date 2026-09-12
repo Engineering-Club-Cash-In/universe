@@ -19,7 +19,10 @@ import {
 	carteraBackClient,
 } from "../services/cartera-back-client";
 import { isCarteraBackEnabled } from "../services/cartera-back-integration";
-import { notificarConvenioResuelto } from "../services/convenio-decision-notif";
+import {
+	notificarConvenioResuelto,
+	resolverPendientesDeAprobacion,
+} from "../services/convenio-decision-notif";
 import { assertAccesoCasoCobro } from "./cobros";
 
 /**
@@ -34,9 +37,15 @@ import { assertAccesoCasoCobro } from "./cobros";
  * Un código que no esté acá se trata como incierto por definición.
  *
  * El criterio para entrar NO es "es un 4xx" ni "es un error de negocio",
- * sino: **¿cartera consultó `convenio_operaciones` para producirlo?** Solo
- * después de esa consulta el error habla de la operación original; antes,
- * habla únicamente del reenvío.
+ * sino: **¿el error depende del contenido de ESTA petición, de modo que
+ * reenviarla idéntica volvería a fallar igual?** Si sí, la decisión no se
+ * aplicó y no se va a aplicar: el intento ya no sirve.
+ *
+ * Eso incluye validaciones que corren ANTES de tocar la transacción
+ * (`motivo_requerido`, `convenio_id_invalido`): el reenvío manda el payload
+ * congelado, así que un motivo ausente o un id inválido no cambian solos.
+ * Y excluye todo lo que depende del ENTORNO —permisos, configuración, estado
+ * de otra operación en vuelo—, que puede resolverse y volver a intentarse.
  */
 const CODIGOS_NEGOCIO_DEFINITIVOS: Record<string, string> = {
 	convenio_no_pendiente:
@@ -63,6 +72,23 @@ const CODIGOS_NEGOCIO_DEFINITIVOS: Record<string, string> = {
  * que arreglar permisos o configuración), pero como error INCIERTO: el
  * intento sobrevive y se puede reenviar cuando eso se corrija.
  */
+/**
+ * La operación está en vuelo o chocó con otra sobre el MISMO `operacion_id`.
+ * No se decidió nada, pero tampoco es definitivo: la guía correcta es esperar
+ * unos segundos, no "reenviar para verificar". Son los dos códigos que
+ * aparecen justo cuando dos supervisores tocan el mismo id, que es cuando el
+ * mensaje más importa.
+ *
+ * Salen como 5xx igual que los de puerta —el intento sobrevive— pero con su
+ * texto propio.
+ */
+const CODIGOS_DE_REINTENTO: Record<string, string> = {
+	operacion_en_curso:
+		"Esta decisión ya se está procesando. Esperá unos segundos y volvé a consultar antes de reenviar.",
+	operacion_en_conflicto:
+		"La operación chocó con otra sobre el mismo identificador. Esperá unos segundos y reintentá.",
+};
+
 const CODIGOS_DE_PUERTA: Record<string, string> = {
 	convenio_decision_no_autorizado:
 		"No tenés permiso para decidir convenios en cartera. La decisión anterior puede haberse aplicado igual: el aviso de decisiones por confirmar sigue disponible para verificarlo.",
@@ -164,10 +190,15 @@ export const convenioDecisionRouter = {
 				// propaga como INCIERTO —el cliente conserva el intento— pero con
 				// el mensaje real, porque el usuario puede hacer algo al respecto
 				// (pedir permisos, avisar a soporte).
-				const mensajeDePuerta = codigo ? CODIGOS_DE_PUERTA[codigo] : undefined;
-				if (mensajeDePuerta) {
+				// Puerta y reintento comparten desenlace (5xx, el intento
+				// sobrevive) pero no mensaje: uno pide arreglar permisos o
+				// configuración, el otro simplemente esperar.
+				const mensajeAccionable = codigo
+					? (CODIGOS_DE_PUERTA[codigo] ?? CODIGOS_DE_REINTENTO[codigo])
+					: undefined;
+				if (mensajeAccionable) {
 					throw new ORPCError("INTERNAL_SERVER_ERROR", {
-						message: mensajeDePuerta,
+						message: mensajeAccionable,
 					});
 				}
 
@@ -257,6 +288,27 @@ export const convenioDecisionRouter = {
 			} catch (error) {
 				console.warn(
 					"[decidirConvenio] No se pudo notificar al asesor (best-effort):",
+					error instanceof Error ? error.message : error,
+				);
+			}
+
+			// Red de seguridad INCONDICIONAL: el bloque de arriba cierra los
+			// avisos, pero solo si llegó hasta `notificarConvenioResuelto` —
+			// cuelga de `if (numeroSifco)` y `if (caso?.id)`, y un snapshot sin
+			// SIFCO o un fallo leyendo `casos_cobros` dejaba a todos los
+			// supervisores con el aviso abierto para siempre. Acá solo hace
+			// falta `resultado.convenioId`, que siempre viene.
+			//
+			// Va al final, no antes del bloque: la señal `convenio_resuelto` que
+			// usa `reconciliarSiYaSeDecidio` se escribe ahí dentro, y cerrar
+			// antes de que exista deja una ventana en la que un aviso que llegue
+			// tarde no encuentra con qué repararse. Repetir el cierre es
+			// inocuo: el UPDATE no encuentra filas abiertas la segunda vez.
+			try {
+				await resolverPendientesDeAprobacion(resultado.convenioId);
+			} catch (error) {
+				console.warn(
+					"[decidirConvenio] No se pudieron cerrar los avisos de aprobación (best-effort):",
 					error instanceof Error ? error.message : error,
 				);
 			}

@@ -68,6 +68,7 @@ mock.module("../services/cartera-back-integration", () => ({
 }));
 mock.module("../services/convenio-decision-notif", () => ({
 	notificarConvenioResuelto: mock(),
+	resolverPendientesDeAprobacion: mock(),
 }));
 mock.module("./cobros", () => ({
 	assertAccesoCasoCobro: mock(),
@@ -156,6 +157,21 @@ describe("decidirConvenio — qué errores permiten descartar el intento", () =>
 		}
 	});
 
+	test("operación en curso / en conflicto → 5xx con guía de esperar, no de reenviar", async () => {
+		// Son los dos códigos que aparecen cuando dos supervisores tocan el
+		// mismo operacion_id. El intento debe sobrevivir (no se decidió nada),
+		// pero el mensaje correcto es "esperá unos segundos", no el genérico
+		// que invita a reenviar para verificar.
+		for (const codigo of ["operacion_en_curso", "operacion_en_conflicto"]) {
+			const r = await statusQueSaleDelCRM(
+				new CarteraBackHttpError(codigo, 409, { error: codigo }),
+			);
+			expect(r.code).toBe("INTERNAL_SERVER_ERROR");
+			expect(r.message).toContain("segundos");
+			expect(r.message).not.toContain("No se pudo confirmar el resultado");
+		}
+	});
+
 	test("429 de cartera atravesando el CRM → 5xx: el intento sobrevive", async () => {
 		// Rate limit del proxy: <500, pero no dice nada de la petición
 		// original. Va sin `error` en el payload, como lo manda un proxy.
@@ -212,12 +228,28 @@ describe("decidirConvenio — guards de puerta del propio CRM", () => {
 		// 401 está en ESTADOS_4XX_QUE_NO_PRUEBAN_NADA del cliente: habla del
 		// reenvío (sesión vencida), no de la decisión anterior.
 		decidirConvenio.mockClear();
+		// El contexto va DENTRO de `{ context }` — pasando el contenido suelto,
+		// oRPC entrega `context = {}` y el handler falla por la razón
+		// equivocada: el test pasaba incluso con un email válido, así que no
+		// cubría ni el email en blanco ni el `.trim()` del handler.
 		const r = await errorDelHandler({
-			...CONTEXT.context,
-			session: { user: { email: "   " } },
+			context: { ...CONTEXT.context, session: { user: { email: "   " } } },
 		});
 		expect(r.code).toBe("UNAUTHORIZED");
 		expect(decidirConvenio).not.toHaveBeenCalled();
+	});
+
+	test("control: con email válido el handler SÍ llama a cartera", async () => {
+		// Sin este control, el test de arriba pasaba aunque el contexto no
+		// llegara: cualquier fallo daba UNAUTHORIZED. Acá se comprueba que la
+		// diferencia la hace el email y no la forma del contexto.
+		decidirConvenio.mockClear();
+		decidirConvenio.mockImplementationOnce(async () => {
+			throw new CarteraBackHttpError("boom", 500);
+		});
+		const r = await errorDelHandler();
+		expect(r.code).toBe("INTERNAL_SERVER_ERROR");
+		expect(decidirConvenio).toHaveBeenCalled();
 	});
 
 	test("rechazo sin motivo → BAD_REQUEST: definitivo de verdad", async () => {

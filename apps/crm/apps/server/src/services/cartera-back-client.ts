@@ -2152,21 +2152,35 @@ export class CarteraBackClient {
 		convenioId: number,
 		input: DecidirConvenioInput,
 	): Promise<CarteraDecidirConvenioResultado> {
-		const response = await this.request<
-			{
-				success: boolean;
-				message?: string;
-				error?: string;
-			} & Partial<CarteraDecidirConvenioResultado>
-		>(`/payment-agreements/${convenioId}/decidir`, {
-			method: "POST",
-			body: JSON.stringify(input),
-		});
-		this.cache.invalidate("/credito?");
-		this.cache.invalidate("payment-agreements");
-		this.cache.invalidate("getAllCredits");
-		this.cache.invalidate("stats");
-		this.cache.invalidate("/buckets/credito/");
+		// La invalidación va en `finally`, no después del await: si la petición
+		// falla —timeout del AbortSignal, 5xx, corte de red— cartera pudo haber
+		// commiteado la decisión igual. Ese es el escenario central de CB-033,
+		// y dejando la invalidación fuera del finally el CRM se quedaba hasta
+		// 5 minutos sirviendo el crédito PRE-decisión (status, mora, convenio
+		// activo) a getDetallesCreditoCarteraBack y a getDecisionesConvenio.
+		let response: {
+			success: boolean;
+			message?: string;
+			error?: string;
+		} & Partial<CarteraDecidirConvenioResultado>;
+		try {
+			response = await this.request<
+				{
+					success: boolean;
+					message?: string;
+					error?: string;
+				} & Partial<CarteraDecidirConvenioResultado>
+			>(`/payment-agreements/${convenioId}/decidir`, {
+				method: "POST",
+				body: JSON.stringify(input),
+			});
+		} finally {
+			this.cache.invalidate("/credito?");
+			this.cache.invalidate("payment-agreements");
+			this.cache.invalidate("getAllCredits");
+			this.cache.invalidate("stats");
+			this.cache.invalidate("/buckets/credito/");
+		}
 		if (!response?.success || response.decisionId == null) {
 			throw new Error(
 				response?.message ||

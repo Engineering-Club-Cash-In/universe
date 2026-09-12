@@ -2484,6 +2484,13 @@ export const cobrosRouter = {
 					and(
 						eq(notifications.relatedEntityId, input.casoCobroId),
 						eq(notifications.relatedEntityType, "collection_case"),
+						// Las descartadas no son alertas: alguien ya las cerró, o son
+						// marcas internas (CB-033 registra así que un convenio se
+						// decidió, ver services/convenio-decision-notif.ts). Sin este
+						// filtro, la tarjeta de alertas mostraba una entrada
+						// "Convenio aprobado" cuya descripción dice "Registro interno
+						// de la decisión (no se muestra)".
+						ne(notifications.status, "dismissed"),
 					),
 				)
 				.orderBy(desc(notifications.createdAt))

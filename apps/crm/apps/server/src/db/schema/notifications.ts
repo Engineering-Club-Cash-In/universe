@@ -149,15 +149,6 @@ export const notifications = pgTable(
 		uniqueIndex("uq_notifications_convenio_decision")
 			.on(table.convenioDecisionId, table.assignedTo)
 			.where(sql`${table.convenioDecisionId} IS NOT NULL`),
-		// CB-033 — la marca interna de decisión va con `assigned_to` NULL para
-		// no caer en la bandeja de nadie, y en Postgres NULL <> NULL: el índice
-		// de arriba no deduplica esas filas, así que un reintento idempotente
-		// insertaría una nueva cada vez. Este cubre ese hueco.
-		uniqueIndex("uq_notifications_convenio_decision_sin_destinatario")
-			.on(table.convenioDecisionId)
-			.where(
-				sql`${table.convenioDecisionId} IS NOT NULL AND ${table.assignedTo} IS NULL`,
-			),
 		// CB-033 — lo usan el cierre de pendientes y la reconciliación, que
 		// filtran por `convenio_id`. Va DECLARADO acá y no solo en la
 		// migración: `db:push` compara la base contra este schema, así que un

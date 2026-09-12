@@ -2484,13 +2484,14 @@ export const cobrosRouter = {
 					and(
 						eq(notifications.relatedEntityId, input.casoCobroId),
 						eq(notifications.relatedEntityType, "collection_case"),
-						// Las descartadas no son alertas: alguien ya las cerró, o son
-						// marcas internas (CB-033 registra así que un convenio se
-						// decidió, ver services/convenio-decision-notif.ts). Sin este
-						// filtro, la tarjeta de alertas mostraba una entrada
-						// "Convenio aprobado" cuya descripción dice "Registro interno
-						// de la decisión (no se muestra)".
-						ne(notifications.status, "dismissed"),
+						// Solo los estados ABIERTOS son alertas. Las `resolved` y
+						// `dismissed` ya se cerraron —a mano, o por el flujo: CB-033
+						// pasa a `resolved` los "Convenio pendiente de aprobación"
+						// cuando alguien decide— y la UI las pintaba igual en ámbar,
+						// sin mirar `status` ($id.tsx y panel-gestion-rapida.tsx), así
+						// que el asesor seguía viendo "esperando aprobación" sobre un
+						// convenio ya decidido.
+						inArray(notifications.status, ["pending", "read", "in_progress"]),
 					),
 				)
 				.orderBy(desc(notifications.createdAt))

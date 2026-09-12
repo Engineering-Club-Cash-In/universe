@@ -98,10 +98,10 @@ export async function notificarConvenioPendienteAprobacion(params: {
 		// `pending` de un convenio YA decidido.
 		//
 		// No se coordina con un lock ni se consulta cartera —sería una llamada
-		// HTTP extra en un camino best-effort—: toda decisión deja una fila
-		// `convenio_resuelto` con `convenio_id`, así que basta releer después
-		// de insertar. Si la decisión ya ocurrió, estas filas nacen obsoletas
-		// y se cierran acá mismo.
+		// HTTP extra en un camino best-effort—: basta releer después de
+		// insertar, usando como señal el aviso `convenio_resuelto` que deja la
+		// decisión. Si ya ocurrió, estas filas nacen obsoletas y se cierran acá
+		// mismo (ver el límite declarado en `reconciliarSiYaSeDecidio`).
 		await reconciliarSiYaSeDecidio(params.convenioId);
 	} catch (error) {
 		console.warn(
@@ -156,67 +156,22 @@ export async function resolverPendientesDeAprobacion(convenioId: number) {
 }
 
 /**
- * Garantiza que exista la señal "este convenio ya se decidió" que lee
- * `reconciliarSiYaSeDecidio`: una fila `convenio_resuelto` con `convenio_id`.
- *
- * **Es un no-op cuando hay asesor**: esa fila ya la escribe el aviso real
- * unas líneas más abajo, así que una segunda sería ruido sin uso.
- *
- * Sin asesor sí escribe, porque ahí el aviso real no existe y ninguna otra
- * fuente deja rastro: el cleanup solo produce filas `resolved` si encontró
- * avisos abiertos, y la carrera que hay que cubrir es justo cuando la
- * decisión llega ANTES de que el aviso exista.
- *
- * Va con `assigned_to` NULL, que es lo que la mantiene fuera de la vista de
- * cualquiera: `getNotificationsByAssign` filtra por `assigned_to` y NO por
- * status, así que una fila `dismissed` con destinatario sí aparece —en la
- * pestaña "Descartadas" y en su contador—. Sin destinatario no la devuelve
- * ninguna consulta de bandeja.
- *
- * `dismissed` se mantiene igual, por si alguna consulta futura la alcanza:
- * un estado terminal no pide acción a nadie.
- */
-async function marcarConvenioDecidido(params: {
-	casoCobroId: string;
-	convenioId: number;
-	decisionId: number;
-	decision: "aprobado" | "rechazado";
-	creadoPorUserId: string;
-	creadoPorRole?: RolNotificacion;
-	/** Si viene, el aviso real ya deja la señal y esta función no hace nada. */
-	asesorUserId: string | null;
-}) {
-	if (params.asesorUserId) return;
-
-	await db.execute(sql`
-		INSERT INTO notifications (
-			id, titulo, descripcion, status, type, created_by, created_by_role,
-			assigned_to_role, assigned_to, related_entity_type, related_entity_id,
-			redirect_page, cobros_tipo, convenio_decision_id, convenio_id,
-			created_at, updated_at
-		) VALUES (
-			gen_random_uuid(),
-			${`Convenio ${params.decision}`},
-			'Registro interno de la decisión (no se muestra).',
-			'dismissed', 'aviso',
-			${params.creadoPorUserId}, ${params.creadoPorRole ?? "cobros_supervisor"},
-			'cobros_supervisor', NULL,
-			'collection_case', ${params.casoCobroId}, 'cobros_detail', 'convenio_resuelto',
-			${params.decisionId}, ${params.convenioId}, now(), now()
-		)
-		ON CONFLICT (convenio_decision_id)
-			WHERE convenio_decision_id IS NOT NULL AND assigned_to IS NULL
-		DO NOTHING
-	`);
-}
-
-/**
  * Cierra los avisos que acaban de nacer obsoletos porque el convenio se
  * decidió mientras se insertaban (ver la carrera descrita en el caller).
  *
- * La señal es cualquier fila `convenio_resuelto` de este convenio: con asesor
- * la escribe el aviso real, y sin asesor la marca interna de
- * `marcarConvenioDecidido`. Entre las dos cubren toda decisión.
+ * La señal es el aviso `convenio_resuelto` de ese convenio — el que va al
+ * asesor. No se inventa ninguna marca interna: guardarla en `notifications`
+ * se intentó dos veces y se filtró por una consulta distinta cada vez
+ * (`getAlertasCaso` la mostraba en la Ficha 360; con `assigned_to` NULL
+ * pasaba a ser una notificación POR ROL visible para todos los supervisores),
+ * y una tabla propia es demasiado para lo que cubre.
+ *
+ * **Límite conocido**: si la decisión ocurre en esa ventana Y el asesor no se
+ * pudo enlazar por correo, no hay aviso y por lo tanto no hay señal, así que
+ * los avisos quedan abiertos. Requiere las dos cosas a la vez —una carrera de
+ * milisegundos y un correo sin correspondencia en `user` (0 de 97 usuarios
+ * hoy)— y el desenlace es un aviso de más: al abrirlo, cartera responde
+ * `convenio_no_pendiente`. Ver 06-ficha-360.md §3.5.
  *
  * No sirve mirar filas `resolved` de `convenio_pendiente_aprobacion`: el
  * cleanup solo las produce si había avisos abiertos, y esta carrera es justo
@@ -276,15 +231,6 @@ export async function notificarConvenioResuelto(params: {
 	// No pueden convivir: el índice único es (convenio_decision_id,
 	// assigned_to) y, cuando el decisor resulta ser el mismo asesor, la marca
 	// ganaría el ON CONFLICT y el aviso real se perdería en silencio.
-	try {
-		await marcarConvenioDecidido(params);
-	} catch (error) {
-		console.warn(
-			"[notificarConvenioResuelto] No se pudo registrar la decisión (best-effort):",
-			error instanceof Error ? error.message : error,
-		);
-	}
-
 	// El cierre va DESPUÉS de que la señal esté escrita, en los dos caminos:
 	// si cerrara antes, un aviso de pendiente que llegue tarde no encontraría
 	// la señal y quedaría huérfano. Se cierra aunque no haya asesor a quien

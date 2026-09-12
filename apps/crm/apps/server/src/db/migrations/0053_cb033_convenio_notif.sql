@@ -20,12 +20,4 @@ CREATE INDEX IF NOT EXISTS "idx_notifications_convenio_pendiente" ON "notificati
 -- assigned_to porque una misma decisión notifica a varios supervisores —
 -- una fila por (decisión, destinatario), nunca dos. Parcial: solo aplica
 -- cuando hay decisión.
-CREATE UNIQUE INDEX IF NOT EXISTS "uq_notifications_convenio_decision" ON "notifications" USING btree ("convenio_decision_id","assigned_to") WHERE "notifications"."convenio_decision_id" IS NOT NULL;--> statement-breakpoint
--- La marca interna de decisión va con assigned_to NULL para no caer en la
--- bandeja de nadie (getNotificationsByAssign filtra por assigned_to y no por
--- status, así que una fila 'dismissed' con destinatario SÍ se ve). Pero en
--- Postgres NULL <> NULL, así que el índice de arriba no deduplica esas filas
--- y cada reintento idempotente insertaría una nueva: hace falta este índice
--- aparte, sobre convenio_decision_id solo, acotado a las filas sin
--- destinatario.
-CREATE UNIQUE INDEX IF NOT EXISTS "uq_notifications_convenio_decision_sin_destinatario" ON "notifications" USING btree ("convenio_decision_id") WHERE "notifications"."convenio_decision_id" IS NOT NULL AND "notifications"."assigned_to" IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS "uq_notifications_convenio_decision" ON "notifications" USING btree ("convenio_decision_id","assigned_to") WHERE "notifications"."convenio_decision_id" IS NOT NULL;

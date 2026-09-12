@@ -288,6 +288,34 @@ export const puedeAnularRubro = ({
 };
 
 /**
+ * ¿Se puede editar este rubro?
+ *
+ * Un rubro anulado ya no se cobra a propósito: alguien decidió deliberadamente
+ * dejar de cobrarlo, y esa decisión queda escrita en el historial como
+ * evidencia. Editarlo (por ejemplo subirle el monto) lo revive sin que nadie
+ * lo haya vuelto a dar de alta, y encima lo deja en un estado contradictorio:
+ * `activo` vuelve a `true` mientras `anulado` sigue en `true`, dos hechos que
+ * no pueden convivir. La anulación es DEFINITIVA — la salida para un cobro
+ * anulado por error es crear el rubro de nuevo, no resucitar el viejo por la
+ * puerta de la edición.
+ *
+ * Esta regla es SOLO sobre `anulado`, no sobre `completado`: un rubro saldado
+ * por abono (no anulado) sí se sigue editando —`puedeEditarMonto` es quien
+ * decide eso, subir el monto de uno saldado lo revive a propósito, y esa
+ * conducta no cambia acá.
+ */
+export const puedeEditarRubro = ({ anulado }: { anulado: boolean }): Veredicto => {
+  if (anulado) {
+    return {
+      permitido: false,
+      status: 409,
+      motivo: "El rubro está anulado: no se puede editar, hay que dar de alta uno nuevo si corresponde.",
+    };
+  }
+  return { permitido: true };
+};
+
+/**
  * Qué evento de historial deja una edición — o null si no cambió nada.
  *
  * TODO cambio queda auditado, no sólo el de monto: `obligatorio` es justo el

@@ -11,6 +11,7 @@ import {
   puedeAnularRubro,
   puedeCrearRubro,
   puedeEditarMonto,
+  puedeEditarRubro,
   puedeUsarMonto,
   redondearMonto,
   rubroCompletado,
@@ -344,6 +345,24 @@ describe("puedeAnularRubro", () => {
   // cliente ya lo pagó y "dejar de cobrarlo" no significa nada.
   it("rechaza con 409 un rubro ya completado (doble anulación)", () => {
     const r = puedeAnularRubro({ completado: true });
+    expect(r.permitido).toBe(false);
+    expect(r.status).toBe(409);
+    expect(r.motivo).toBeString();
+    expect(r.motivo?.length).toBeGreaterThan(0);
+  });
+});
+
+describe("puedeEditarRubro", () => {
+  it("deja editar un rubro vivo (no anulado)", () => {
+    expect(puedeEditarRubro({ anulado: false })).toEqual({ permitido: true });
+  });
+
+  // Editar un rubro anulado lo revive (activo vuelve a true) mientras
+  // `anulado` se queda en true, un estado contradictorio. La anulación es
+  // definitiva: la salida para el error es dar de alta un rubro nuevo, no
+  // resucitar el viejo por la edición.
+  it("rechaza con 409 un rubro anulado", () => {
+    const r = puedeEditarRubro({ anulado: true });
     expect(r.permitido).toBe(false);
     expect(r.status).toBe(409);
     expect(r.motivo).toBeString();

@@ -507,6 +507,18 @@ export async function crearRubro({
       // Se lee `obligatorio` y `activo`: la naturaleza del cobro vive en el
       // TIPO, no en el body — quien crea el rubro elige el concepto, no si ese
       // concepto se salta los frenos de mora.
+      //
+      // `FOR KEY SHARE` sobre esta fila: sin bloqueo, la lectura era plana y
+      // corría en paralelo con el `FOR UPDATE` de `eliminarTipo` sobre el mismo
+      // tipo. Si el borrado alcanzaba a contar CERO usos (todavía no existe
+      // ningún rubro de ese tipo) mientras este alta ya había leído el tipo
+      // como bueno, el borrado commiteaba y el INSERT de más abajo reventaba
+      // contra la FK de `tipo_id` con un 500 — sobre una petición que era
+      // válida cuando se hizo. `KEY SHARE` es la cerradura mínima que sirve:
+      // no estorba a otro lector ni a otro alta del mismo tipo, pero bloquea
+      // un DELETE (o un cambio de llave) sobre esta fila hasta que esta
+      // transacción termine, así que el borrado queda esperando y cuando le
+      // toca ya cuenta este rubro como uso y se rechaza solo con su propio 409.
       const [tipo] = await tx
         .select({
           tipo_id: rubros_tipos.tipo_id,
@@ -515,7 +527,8 @@ export async function crearRubro({
         })
         .from(rubros_tipos)
         .where(eq(rubros_tipos.tipo_id, tipo_id))
-        .limit(1);
+        .limit(1)
+        .for("key share");
 
       if (!tipo) throw new RubroError(404, "El tipo de rubro no existe.");
 
@@ -586,6 +599,18 @@ export async function crearRubro({
       throw new RubroError(
         409,
         "Este crédito ya tiene un rubro vivo de ese tipo."
+      );
+    }
+    // Red de seguridad, no la defensa principal: el `FOR KEY SHARE` de arriba
+    // ya cierra la ventana con `eliminarTipo`. Pero si algo se cuela por debajo
+    // del bloqueo (o el día de mañana aparece otra vía de borrado del tipo que
+    // no pase por ahí), la FK de `tipo_id` sigue siendo el freno de último
+    // recurso — y sin esto, ese freno se traducía en un 500 crudo para un
+    // asesor que hizo una petición válida. Mismo patrón que `eliminarTipo`.
+    if (esViolacionFk(e)) {
+      throw new RubroError(
+        409,
+        "El tipo de rubro dejó de estar disponible mientras se creaba el cobro. Volvé a intentar eligiendo otro tipo."
       );
     }
     throw e;

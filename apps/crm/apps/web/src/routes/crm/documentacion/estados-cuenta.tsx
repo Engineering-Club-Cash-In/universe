@@ -510,7 +510,12 @@ function NewValidationDialog({
 			if (documentIds.length + newFiles.length === 0)
 				throw new Error("Selecciona al menos un documento");
 
-			const uploadedDocuments = await Promise.all(
+			// allSettled en vez de all: si una subida falla, igual se espera a que
+			// las demás terminen antes de propagar el error, para que
+			// committedUploadsRef quede completo cuando onError lo lea (si no, un
+			// hermano más lento registra su documento después de leído el ref y
+			// ese archivo se reintentaría duplicado).
+			const uploadOutcomes = await Promise.allSettled(
 				newFiles.map(async (file) => {
 					const { key } = await uploadFileToR2WithRetry(file, {
 						resourceType: "opportunity_document",
@@ -530,6 +535,18 @@ function NewValidationDialog({
 					committedUploadsRef.current.push({ file, documentId: document.id });
 					return document.id;
 				}),
+			);
+			const firstRejected = uploadOutcomes.find(
+				(outcome): outcome is PromiseRejectedResult =>
+					outcome.status === "rejected",
+			);
+			if (firstRejected) {
+				throw firstRejected.reason instanceof Error
+					? firstRejected.reason
+					: new Error(String(firstRejected.reason));
+			}
+			const uploadedDocuments = uploadOutcomes.map(
+				(outcome) => (outcome as PromiseFulfilledResult<string>).value,
 			);
 			const results = await client.validarDocumentosExistentes({
 				opportunityDocumentIds: [...documentIds, ...uploadedDocuments],

@@ -239,7 +239,7 @@ describe("document integrity boundaries", () => {
 		expect(serviceSource).toContain(
 			"originalNameFromDocumentIntegrityPath(params.sourceFilePath)",
 		);
-		expect(serviceSource).toContain("set({ documentFilePath: item.filePath })");
+		expect(serviceSource).toContain("set({ documentFilePath: filePath })");
 		expect(serviceSource).toContain(
 			"fileKey: result.validation.documentFilePath",
 		);
@@ -249,11 +249,9 @@ describe("document integrity boundaries", () => {
 			"if (!preserveEvidence) sourceFilePathsToDelete.add(sourceFilePath)",
 		);
 		expect(serviceSource).toContain(
-			"eq(opportunityDocuments.filePath, item.sourceFilePath)",
+			"eq(opportunityDocuments.filePath, sourceFilePath)",
 		);
-		expect(serviceSource).toContain(
-			"set({ linkedFilePath: item.filePath })",
-		);
+		expect(serviceSource).toContain("set({ linkedFilePath: filePath })");
 		const executeStart = serviceSource.indexOf(
 			"async function executeValidationRun",
 		);

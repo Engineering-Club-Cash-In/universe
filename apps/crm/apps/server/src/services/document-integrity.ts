@@ -708,52 +708,44 @@ async function freezeCompletedValidationEvidence(params: {
 	documents: PreparedValidationDocument[];
 	results: PreparedValidationResult[];
 }) {
-	const frozen: Array<{
-		validation: NonNullable<PreparedValidationResult["validation"]>;
-		filePath: string;
-		sourceFilePath: string;
-		opportunityDocumentId?: string;
-	}> = [];
+	// Cada documento se sube a R2 y se persiste de inmediato, dentro de la
+	// misma iteración: si un `uploadBufferToR2` posterior falla, los
+	// documentos ya subidos en esta corrida quedan referenciados en BD en vez
+	// de perderse sin commitear (ver "persist each snapshot before uploading
+	// the next one"). Y cada documento se congela en su propia transacción:
+	// si uno se topa con un vínculo roto (documento borrado/reemplazado a
+	// mitad de la validación), eso no debe deshacer la evidencia ya
+	// confirmada de sus hermanos en el mismo lote (ver "freeze all validated
+	// document evidence").
+	let staleLinkDetected = false;
 	for (const [index, result] of params.results.entries()) {
 		if (!result.validation || result.validation.autoResult === "error") continue;
 		const document = params.documents[index];
 		if (!document?.buffer)
 			throw new Error("Missing source bytes for completed validation evidence");
+		const validation = result.validation;
+		const sourceFilePath = document.filePath;
+		const opportunityDocumentId = document.opportunityDocumentId;
 		const filePath = buildValidationEvidenceFilePath({
 			opportunityId: params.opportunityId,
-			validationId: result.validation.id,
-			contentSha256: result.validation.contentSha256,
-			sourceFilePath: document.filePath,
+			validationId: validation.id,
+			contentSha256: validation.contentSha256,
+			sourceFilePath,
 		});
 		await uploadBufferToR2(filePath, document.buffer);
-		frozen.push({
-			validation: result.validation,
-			filePath,
-			sourceFilePath: document.filePath,
-			opportunityDocumentId: document.opportunityDocumentId,
-		});
-	}
-	if (frozen.length === 0) return;
-
-	// Cada documento se congela en su propia transacción: si uno se topa con
-	// un vínculo roto (documento borrado/reemplazado a mitad de la
-	// validación), eso no debe deshacer la evidencia ya confirmada de sus
-	// hermanos en el mismo lote (ver "freeze all validated document evidence").
-	let staleLinkDetected = false;
-	for (const item of frozen) {
 		await db.transaction(async (tx) => {
 			await tx
 				.update(documentIntegrityValidations)
-				.set({ documentFilePath: item.filePath })
-				.where(eq(documentIntegrityValidations.id, item.validation.id));
-			if (item.opportunityDocumentId) {
+				.set({ documentFilePath: filePath })
+				.where(eq(documentIntegrityValidations.id, validation.id));
+			if (opportunityDocumentId) {
 				const [repointedDocument] = await tx
 					.update(opportunityDocuments)
-					.set({ filePath: item.filePath })
+					.set({ filePath })
 					.where(
 						and(
-							eq(opportunityDocuments.id, item.opportunityDocumentId),
-							eq(opportunityDocuments.filePath, item.sourceFilePath),
+							eq(opportunityDocuments.id, opportunityDocumentId),
+							eq(opportunityDocuments.filePath, sourceFilePath),
 						),
 					)
 					.returning({ id: opportunityDocuments.id });
@@ -768,27 +760,27 @@ async function freezeCompletedValidationEvidence(params: {
 				}
 				await tx
 					.update(documentIntegrityValidationDocuments)
-					.set({ linkedFilePath: item.filePath })
+					.set({ linkedFilePath: filePath })
 					.where(
 						and(
 							eq(
 								documentIntegrityValidationDocuments.validationId,
-								item.validation.id,
+								validation.id,
 							),
 							eq(
 								documentIntegrityValidationDocuments.opportunityDocumentId,
-								item.opportunityDocumentId,
+								opportunityDocumentId,
 							),
 							eq(
 								documentIntegrityValidationDocuments.linkedFilePath,
-								item.sourceFilePath,
+								sourceFilePath,
 							),
 						),
 					);
 			}
 		});
+		validation.documentFilePath = filePath;
 	}
-	for (const item of frozen) item.validation.documentFilePath = item.filePath;
 	if (staleLinkDetected) {
 		throw new Error(
 			"Uno o más documentos de la oportunidad fueron modificados o eliminados durante la validación",

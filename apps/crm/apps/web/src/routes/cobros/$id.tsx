@@ -37,6 +37,7 @@ import {
 } from "server/src/lib/gestion-temprana-b1";
 import { toast } from "sonner";
 import { ActividadBot } from "@/components/cobros/actividad-bot";
+import { ConvenioDecisionesHistorial } from "@/components/cobros/convenio-decisiones-historial";
 import { ConvenioModal } from "@/components/cobros/convenio-modal";
 import { PagaloHistorial } from "@/components/cobros/pagalo-historial";
 import { PagaloLinkDialog } from "@/components/cobros/pagalo-link-dialog";
@@ -3765,6 +3766,14 @@ function RouteComponent() {
 									</CardContent>
 								</Card>
 							)}
+
+						{/* CB-033 — Historial de aprobaciones/rechazos del convenio.
+						    FUERA del `mostrarConvenio` de arriba a propósito: un rechazo
+						    BORRA el convenio, y ese es justo el caso que hay que poder
+						    auditar. El componente se oculta solo si no hay decisiones. */}
+						<ConvenioDecisionesHistorial
+							casoCobroId={casoDetails.data?.id || ""}
+						/>
 						</div>
 					</div>
 				</TabsContent>

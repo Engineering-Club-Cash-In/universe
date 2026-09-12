@@ -77,6 +77,7 @@ import { getTestPhone, isTestModeEnabled } from "./lib/messaging-test-mode";
 import { autenticarNotificacionesCarteraBack } from "./lib/notifications-api-key-auth";
 import { PERMISSIONS } from "./lib/roles";
 import { bucketCapacidadRouter } from "./routers/bucket-capacidad";
+import { convenioDecisionRouter } from "./routers/convenio-decision";
 import {
 	appRouter,
 	disbursementRouter,
@@ -232,6 +233,7 @@ const handler = new RPCHandler(
 		pagaloGrupoActivoRouter,
 		pagaloLinkActionsRouter,
 		pagaloSupervisionRouter,
+		convenioDecisionRouter,
 		recuperacionVehiculoRouter,
 	),
 );

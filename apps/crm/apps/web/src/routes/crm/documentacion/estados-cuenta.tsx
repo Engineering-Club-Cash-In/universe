@@ -832,7 +832,10 @@ function getDocumentLabel(result: ValidationDetails, index: number) {
 }
 
 function getDocumentTabKey(result: ValidationDetails) {
-	return result.opportunityDocumentId ?? result.contentSha256;
+	// El ID de la validación es el único identificador único por fila: el mismo
+	// PDF subido dos veces en un lote genera validaciones distintas con el
+	// mismo contentSha256, y sus pestañas colisionarían.
+	return result.id;
 }
 
 function getAttemptResult(attempt: ValidationAttempt): IntegrityResult {

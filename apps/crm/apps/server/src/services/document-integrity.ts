@@ -40,6 +40,7 @@ import {
 } from "../lib/document-integrity/decision-evidence";
 import { runDocumentIntegrityEngine } from "../lib/document-integrity/engine";
 import {
+	encodeDocumentIntegrityEvidenceName,
 	isImmutableDocumentIntegrityEvidencePath,
 	originalNameFromDocumentIntegrityPath,
 } from "../lib/document-integrity/evidence-path";
@@ -699,7 +700,7 @@ function buildValidationEvidenceFilePath(params: {
 	sourceFilePath: string;
 }) {
 	const sourceName = originalNameFromDocumentIntegrityPath(params.sourceFilePath);
-	const safeName = sourceName.replace(/[^A-Za-z0-9._-]/g, "_");
+	const safeName = encodeDocumentIntegrityEvidenceName(sourceName);
 	return `${buildUploadPrefix("bank_statement", params.opportunityId)}/validated/${params.validationId}/${params.contentSha256}-${safeName}`;
 }
 
@@ -709,83 +710,88 @@ async function freezeCompletedValidationEvidence(params: {
 	results: PreparedValidationResult[];
 }) {
 	// Cada documento se sube a R2 y se persiste de inmediato, dentro de la
-	// misma iteración: si un `uploadBufferToR2` posterior falla, los
-	// documentos ya subidos en esta corrida quedan referenciados en BD en vez
-	// de perderse sin commitear (ver "persist each snapshot before uploading
-	// the next one"). Y cada documento se congela en su propia transacción:
-	// si uno se topa con un vínculo roto (documento borrado/reemplazado a
-	// mitad de la validación), eso no debe deshacer la evidencia ya
-	// confirmada de sus hermanos en el mismo lote (ver "freeze all validated
-	// document evidence").
-	let staleLinkDetected = false;
+	// misma iteración y en su propia transacción, y una falla se aísla al
+	// documento que la produjo: ni un fallo de R2 ni un vínculo roto
+	// (documento borrado/reemplazado a mitad de la validación) deben impedir
+	// que los demás resultados del lote conserven su copia inmutable. La
+	// corrida termina en error solo después de preservar todo lo preservable.
+	let freezeFailure: string | null = null;
 	for (const [index, result] of params.results.entries()) {
 		if (!result.validation || result.validation.autoResult === "error") continue;
 		const document = params.documents[index];
-		if (!document?.buffer)
-			throw new Error("Missing source bytes for completed validation evidence");
 		const validation = result.validation;
-		const sourceFilePath = document.filePath;
-		const opportunityDocumentId = document.opportunityDocumentId;
-		const filePath = buildValidationEvidenceFilePath({
-			opportunityId: params.opportunityId,
-			validationId: validation.id,
-			contentSha256: validation.contentSha256,
-			sourceFilePath,
-		});
-		await uploadBufferToR2(filePath, document.buffer);
-		await db.transaction(async (tx) => {
-			await tx
-				.update(documentIntegrityValidations)
-				.set({ documentFilePath: filePath })
-				.where(eq(documentIntegrityValidations.id, validation.id));
-			if (opportunityDocumentId) {
-				const [repointedDocument] = await tx
-					.update(opportunityDocuments)
-					.set({ filePath })
-					.where(
-						and(
-							eq(opportunityDocuments.id, opportunityDocumentId),
-							eq(opportunityDocuments.filePath, sourceFilePath),
-						),
-					)
-					.returning({ id: opportunityDocuments.id });
-				if (!repointedDocument) {
-					// El documento fue eliminado o su archivo cambió mientras se
-					// validaba: no hay a qué repuntar el vínculo. Los bytes ya
-					// quedaron congelados en `documentIntegrityValidations`, pero
-					// se marca la corrida para que termine en error y no cupo,
-					// sin descartar la evidencia de los demás documentos del lote.
-					staleLinkDetected = true;
-					return;
-				}
+		try {
+			if (!document?.buffer)
+				throw new Error("Missing source bytes for completed validation evidence");
+			const sourceFilePath = document.filePath;
+			const opportunityDocumentId = document.opportunityDocumentId;
+			const filePath = buildValidationEvidenceFilePath({
+				opportunityId: params.opportunityId,
+				validationId: validation.id,
+				contentSha256: validation.contentSha256,
+				sourceFilePath,
+			});
+			await uploadBufferToR2(filePath, document.buffer);
+			let staleLink = false;
+			await db.transaction(async (tx) => {
 				await tx
-					.update(documentIntegrityValidationDocuments)
-					.set({ linkedFilePath: filePath })
-					.where(
-						and(
-							eq(
-								documentIntegrityValidationDocuments.validationId,
-								validation.id,
+					.update(documentIntegrityValidations)
+					.set({ documentFilePath: filePath })
+					.where(eq(documentIntegrityValidations.id, validation.id));
+				if (opportunityDocumentId) {
+					const [repointedDocument] = await tx
+						.update(opportunityDocuments)
+						.set({ filePath })
+						.where(
+							and(
+								eq(opportunityDocuments.id, opportunityDocumentId),
+								eq(opportunityDocuments.filePath, sourceFilePath),
 							),
-							eq(
-								documentIntegrityValidationDocuments.opportunityDocumentId,
-								opportunityDocumentId,
+						)
+						.returning({ id: opportunityDocuments.id });
+					if (!repointedDocument) {
+						// El documento fue eliminado o su archivo cambió mientras se
+						// validaba: no hay a qué repuntar el vínculo. Los bytes ya
+						// quedaron congelados en `documentIntegrityValidations`, así
+						// que se conserva esa parte y solo se marca la corrida.
+						staleLink = true;
+						return;
+					}
+					await tx
+						.update(documentIntegrityValidationDocuments)
+						.set({ linkedFilePath: filePath })
+						.where(
+							and(
+								eq(
+									documentIntegrityValidationDocuments.validationId,
+									validation.id,
+								),
+								eq(
+									documentIntegrityValidationDocuments.opportunityDocumentId,
+									opportunityDocumentId,
+								),
+								eq(
+									documentIntegrityValidationDocuments.linkedFilePath,
+									sourceFilePath,
+								),
 							),
-							eq(
-								documentIntegrityValidationDocuments.linkedFilePath,
-								sourceFilePath,
-							),
-						),
-					);
-			}
-		});
-		validation.documentFilePath = filePath;
+						);
+				}
+			});
+			validation.documentFilePath = filePath;
+			if (staleLink)
+				throw new Error(
+					"El documento de la oportunidad fue modificado o eliminado durante la validación",
+				);
+		} catch (error) {
+			console.error("Could not preserve validation evidence for document", {
+				validationId: validation.id,
+				error: errorMessage(error),
+			});
+			freezeFailure ??= errorMessage(error);
+		}
 	}
-	if (staleLinkDetected) {
-		throw new Error(
-			"Uno o más documentos de la oportunidad fueron modificados o eliminados durante la validación",
-		);
-	}
+	if (freezeFailure) throw new Error(freezeFailure);
 }
 
 function errorMessage(error: unknown) {

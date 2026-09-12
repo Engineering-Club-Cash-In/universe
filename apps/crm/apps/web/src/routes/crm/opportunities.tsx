@@ -4037,11 +4037,19 @@ function DocumentsManager({
 		enabled: !!leadId,
 	});
 	const latestLicenseVerification = licenseVerificationQuery.data?.[0] ?? null;
+	// Mismo alcance que canViewDocumentIntegrityValidationDetail en el servidor:
+	// juridico, contabilidad y cobros reciben FORBIDDEN, así que no se consulta.
+	const canViewDocumentIntegrity = [
+		"admin",
+		"analyst",
+		"sales_supervisor",
+		"sales",
+	].includes(userProfile.data?.role ?? "");
 	const integrityStatusQuery = useQuery({
 		...orpc.getDocumentIntegrityStatus.queryOptions({
 			input: { opportunityId },
 		}),
-		enabled: !!opportunityId,
+		enabled: !!opportunityId && canViewDocumentIntegrity,
 	});
 	const integrityStatusByDocument = useMemo(
 		() =>
@@ -4053,6 +4061,10 @@ function DocumentsManager({
 			),
 		[integrityStatusQuery.data],
 	);
+	// Solo isSuccess: mientras carga, falla o no se consulta, el mapa está vacío
+	// y no se puede afirmar que un documento esté sin validar. Un fallo
+	// transitorio no debe invitar a gastar otro intento de validación.
+	const integrityStatusResolved = integrityStatusQuery.isSuccess;
 	const canReviewDocumentIntegrity = [
 		"admin",
 		"analyst",
@@ -4462,7 +4474,29 @@ function DocumentsManager({
 				</CardContent>
 			</Card>
 
-			{bankDocuments.length > 0 && !integrityStatusQuery.isLoading && (
+			{bankDocuments.length > 0 &&
+				canViewDocumentIntegrity &&
+				integrityStatusQuery.isError && (
+				<div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/30 px-3 py-1.5 text-destructive text-sm">
+					<div className="flex items-center gap-2">
+						<AlertCircle className="h-4 w-4 shrink-0" />
+						No se pudo cargar el estado de integridad de los estados de cuenta.
+					</div>
+					<Button
+						size="sm"
+						variant="outline"
+						className="h-6 px-2 text-xs"
+						disabled={integrityStatusQuery.isFetching}
+						onClick={() => void integrityStatusQuery.refetch()}
+					>
+						{integrityStatusQuery.isFetching
+							? "Consultando…"
+							: "Reintentar consulta"}
+					</Button>
+				</div>
+			)}
+
+			{bankDocuments.length > 0 && integrityStatusResolved && (
 				<div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-slate-800 text-sm">
 					<div className="flex items-center gap-2">
 						<FileCheck2 className="h-4 w-4 shrink-0" />
@@ -4724,6 +4758,7 @@ function DocumentsManager({
 											)?.label || doc.documentType}
 										</Badge>
 										{isBankStatementDocument(doc) &&
+											integrityStatusResolved &&
 											(() => {
 												const status = integrityStatusByDocument.get(doc.id);
 								if (status?.isStale)
@@ -4769,6 +4804,7 @@ function DocumentsManager({
 								<div className="flex flex-shrink-0 items-center gap-2">
 									{isBankStatementDocument(doc) &&
 										canReviewDocumentIntegrity &&
+										integrityStatusResolved &&
 										(!integrityStatusByDocument.has(doc.id) ||
 											integrityStatusByDocument.get(doc.id)?.isStale) && (
 											<Button asChild size="sm" variant="outline">

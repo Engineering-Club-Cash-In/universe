@@ -242,6 +242,34 @@ function ConveniosPage() {
 		enabled: !!session && esSupervisor,
 	});
 
+	const data = conveniosQuery.data as ConveniosResponse | undefined;
+	const items = data?.items ?? [];
+	const total = data?.total ?? 0;
+	const totalPages = data?.totalPages ?? 1;
+	const sinAsesor = !!data?.sinAsesor;
+	const asesorForzado = data?.asesorForzado ?? null;
+
+	// Aprobar o rechazar el último convenio de una página la deja vacía y baja
+	// `totalPages`, pero `page` se queda donde estaba: la tabla sale sin filas
+	// y —como el paginador solo se pinta con `totalPages > 1`— sin forma de
+	// volver, dejando inaccesibles los convenios de las páginas anteriores.
+	// El guard es sobre el resultado, no sobre la mutación: cubre también el
+	// caso en que otro supervisor decide y el refetch trae menos páginas.
+	//
+	// Va ANTES del return de "Acceso Denegado": `session` arranca undefined
+	// mientras carga, así que ese return se toma en el primer render y no en
+	// el siguiente. Un hook después de él cambiaría de cantidad entre renders
+	// y React tumba la pantalla con "Rendered more hooks than during the
+	// previous render".
+	useEffect(() => {
+		if (!conveniosQuery.isFetching && page > totalPages) {
+			// `Math.max(1, ...)`: cartera ya devuelve mínimo 1 (paymentAgreement.ts),
+			// pero si eso cambiara, un `totalPages: 0` dejaría `page` en 0 — que no
+			// es una página válida y volvería a pedir la lista vacía.
+			setPage(Math.max(1, totalPages));
+		}
+	}, [page, totalPages, conveniosQuery.isFetching]);
+
 	if (!userRole || !PERMISSIONS.canAccessCobros(userRole)) {
 		return (
 			<div className="flex min-h-screen items-center justify-center">
@@ -257,32 +285,10 @@ function ConveniosPage() {
 		);
 	}
 
-	const data = conveniosQuery.data as ConveniosResponse | undefined;
-	const items = data?.items ?? [];
-	const total = data?.total ?? 0;
-	const totalPages = data?.totalPages ?? 1;
-	const sinAsesor = !!data?.sinAsesor;
-	const asesorForzado = data?.asesorForzado ?? null;
-
 	const asesores = (
 		(asesoresQuery.data as { asesores?: AsesorOption[] } | undefined)
 			?.asesores ?? []
 	).filter((a) => a.activo);
-
-	// Aprobar o rechazar el último convenio de una página la deja vacía y baja
-	// `totalPages`, pero `page` se queda donde estaba: la tabla sale sin filas
-	// y —como el paginador solo se pinta con `totalPages > 1`— sin forma de
-	// volver, dejando inaccesibles los convenios de las páginas anteriores.
-	// El guard es sobre el resultado, no sobre la mutación: cubre también el
-	// caso en que otro supervisor decide y el refetch trae menos páginas.
-	useEffect(() => {
-		if (!conveniosQuery.isFetching && page > totalPages) {
-			// `Math.max(1, ...)`: cartera ya devuelve mínimo 1 (paymentAgreement.ts),
-			// pero si eso cambiara, un `totalPages: 0` dejaría `page` en 0 — que no
-			// es una página válida y volvería a pedir la lista vacía.
-			setPage(Math.max(1, totalPages));
-		}
-	}, [page, totalPages, conveniosQuery.isFetching]);
 
 	const cambiarAsesor = (v: string) => {
 		setAsesorSel(v);

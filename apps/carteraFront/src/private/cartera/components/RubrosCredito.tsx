@@ -1289,6 +1289,15 @@ function VistaAdminTipos({
       toast.success("Tipo de rubro eliminado");
       setConfirmando(null);
       setBloqueado((b) => (b?.tipoId === tipoId ? null : b));
+      // Mismo defecto que al crear un tipo (ver VistaCrearTipo): esta vista
+      // está montada con [QK_TIPOS, true] y se refresca sola con el
+      // `invalidateQueries` de abajo, pero el desplegable de "crear" —con
+      // [QK_TIPOS, false]— puede estar desmontado y quedarse con el tipo ya
+      // borrado. Se saca a mano de las dos variantes.
+      const sacar = (actuales: TipoRubro[] | undefined) =>
+        actuales?.filter((t) => t.tipo_id !== tipoId);
+      queryClient.setQueryData<TipoRubro[]>([QK_TIPOS, false], sacar);
+      queryClient.setQueryData<TipoRubro[]>([QK_TIPOS, true], sacar);
       await refrescar();
     },
     onError: (e, tipoId) => {
@@ -1313,6 +1322,33 @@ function VistaAdminTipos({
       toast.success(activo ? "Tipo reactivado" : "Tipo desactivado");
       setBloqueado((b) => (b?.tipoId === tipoId ? null : b));
       setError(null);
+      // Misma corrección que en `eliminar`: [QK_TIPOS, true] se refresca solo
+      // por estar montada acá, pero [QK_TIPOS, false] —el desplegable de
+      // "crear"— puede quedar desmontada y con el tipo desactivado como si
+      // siguiera ofrecible. Se actualizan las dos a mano con lo que ya
+      // sabemos de la mutación (no hace falta lo que devuelve el backend,
+      // que es `void`).
+      queryClient.setQueryData<TipoRubro[]>([QK_TIPOS, true], (actuales) =>
+        actuales?.map((t) => (t.tipo_id === tipoId ? { ...t, activo } : t))
+      );
+      queryClient.setQueryData<TipoRubro[]>([QK_TIPOS, false], (actuales) => {
+        if (!actuales) return actuales;
+        if (!activo) return actuales.filter((t) => t.tipo_id !== tipoId);
+        // Reactivar: el tipo ya no está en la lista de solo-activos (se sacó
+        // al desactivarlo), así que se reinserta ordenado por nombre igual
+        // que al crear. Se toma el objeto completo de `tipos` (la lista con
+        // inactivos que ya tenemos en memoria) porque el backend no lo
+        // devuelve.
+        if (actuales.some((t) => t.tipo_id === tipoId)) return actuales;
+        const tipo = tipos.find((t) => t.tipo_id === tipoId);
+        if (!tipo) return actuales;
+        const actualizado = { ...tipo, activo: true };
+        const lista = [...actuales];
+        const idx = lista.findIndex((t) => t.nombre.localeCompare(actualizado.nombre) > 0);
+        if (idx === -1) lista.push(actualizado);
+        else lista.splice(idx, 0, actualizado);
+        return lista;
+      });
       await refrescar();
     },
     onError: (e) => {

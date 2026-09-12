@@ -35,6 +35,7 @@ import {
   puedeAnularRubro,
   puedeCrearRubro,
   puedeEditarMonto,
+  puedeEditarRubro,
   puedeUsarMonto,
   redondearMonto,
   rubroCompletado,
@@ -387,9 +388,17 @@ export async function listarRubrosDeCredito(credito_id: number) {
   return filas.map(({ rubro, tipo_nombre }) => ({
     ...rubro,
     tipo_nombre,
-    abonado: aMonto(
-      new Big(rubro.monto_original ?? 0).minus(new Big(rubro.saldo_pendiente ?? 0))
-    ),
+    // El anulado es un caso aparte: `anularRubro` deja `saldo_pendiente = 0`
+    // para sacarlo del índice de rubros vivos, pero ese cero significa "ya no
+    // se cobra", no "ya se pagó" — son dos hechos distintos que la resta de
+    // abajo colapsaría en el mismo número. En esta fase nada le abona todavía
+    // a un rubro (el consumo del disponible llega en una fase posterior), así
+    // que lo abonado real de un anulado siempre es 0.
+    abonado: rubro.anulado
+      ? aMonto(0)
+      : aMonto(
+          new Big(rubro.monto_original ?? 0).minus(new Big(rubro.saldo_pendiente ?? 0))
+        ),
   }));
 }
 
@@ -662,6 +671,19 @@ export async function editarRubro(
         .for("update");
 
       if (!actual) throw new RubroError(404, "El rubro no existe.");
+
+      // Se juzga ANTES que cualquier otra guarda de esta función: un rubro
+      // anulado no admite ningún cambio, así que no tiene sentido calcular
+      // "qué difiere" o "sube el monto" sobre una fila que de entrada se
+      // rechaza. Editarlo lo reviviría (activo vuelve a true) mientras
+      // `anulado` se queda en true, un estado que no puede existir.
+      const veredictoAnulado = puedeEditarRubro({ anulado: actual.anulado });
+      if (!veredictoAnulado.permitido) {
+        throw new RubroError(
+          veredictoAnulado.status ?? 409,
+          veredictoAnulado.motivo ?? "No se puede editar el rubro."
+        );
+      }
 
       // `updated_at` NO se pone acá: se agrega recién cuando ya se sabe que la
       // edición cambia algo. Si se inicializa el objeto con él, `cambios` nunca

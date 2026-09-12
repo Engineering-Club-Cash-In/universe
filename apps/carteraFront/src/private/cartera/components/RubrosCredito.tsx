@@ -544,7 +544,19 @@ function VistaLista({
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center justify-end gap-2">
-                        {esAdmin && (
+                        {/*
+                          Editar no sobre un rubro ANULADO: anular es la salida
+                          irreversible de un cargo que se dio de baja a
+                          propósito, y el backend lo está cerrando por su lado
+                          (aparte de esta pantalla). Se OCULTA en vez de
+                          deshabilitarse, igual que "Anular" más abajo sobre su
+                          propio criterio: un botón apagado en una fila
+                          terminal no tiene nada que ofrecer. Completado SÍ
+                          sigue editable a propósito (puede hacer falta
+                          corregir un monto ya cobrado), así que el gate es
+                          `!r.anulado` y no `!r.completado`.
+                        */}
+                        {esAdmin && !r.anulado && (
                           <Button
                             size="sm"
                             variant="outline"
@@ -1109,13 +1121,33 @@ function VistaCrearTipo({
         ...(descripcion.trim() ? { descripcion: descripcion.trim() } : {}),
         obligatorio,
       }),
-    onSuccess: async (tipo) => {
+    onSuccess: (tipo) => {
       toast.success("Tipo de rubro creado");
-      // El desplegable de "crear" y el listado de administración leen estas
-      // queries: si no se refrescan, el tipo recién creado no estaría entre las
-      // opciones para preseleccionarlo. La clave raíz invalida las dos
-      // variantes (con y sin inactivos).
-      await queryClient.invalidateQueries({ queryKey: [QK_TIPOS] });
+      // `invalidateQueries` NO alcanza acá: marca la query como obsoleta pero
+      // sólo la vuelve a pedir si está MONTADA en ese momento. El desplegable
+      // de "crear" y el listado de administración pueden estar desmontados en
+      // el instante del POST (por ejemplo, viniendo de "tipos"), así que
+      // esperar el `invalidateQueries` no garantiza tener el tipo nuevo en
+      // caché al volver — hay que sembrarlo a mano con lo que devolvió el
+      // propio POST. El backend siempre crea el tipo activo (no hay forma de
+      // pedirlo inactivo), así que entra en las dos variantes de la query: la
+      // que sólo trae activos (el desplegable de "crear") y la que trae todo
+      // (la administración de tipos). El orden replica el `ORDER BY nombre`
+      // del backend para no desordenar la lista.
+      const insertarOrdenado = (actuales: TipoRubro[] | undefined) => {
+        const lista = actuales ? [...actuales] : [];
+        if (lista.some((t) => t.tipo_id === tipo.tipo_id)) return lista;
+        const idx = lista.findIndex((t) => t.nombre.localeCompare(tipo.nombre) > 0);
+        if (idx === -1) lista.push(tipo);
+        else lista.splice(idx, 0, tipo);
+        return lista;
+      };
+      queryClient.setQueryData<TipoRubro[]>([QK_TIPOS, false], insertarOrdenado);
+      queryClient.setQueryData<TipoRubro[]>([QK_TIPOS, true], insertarOrdenado);
+      // Se deja además por si hay otra pestaña/instancia con la query inactiva
+      // en memoria: no es de lo que depende esta pantalla, pero sirve para
+      // refrescar a los demás.
+      queryClient.invalidateQueries({ queryKey: [QK_TIPOS] });
       onCreado(tipo);
     },
     onError: (e) => {

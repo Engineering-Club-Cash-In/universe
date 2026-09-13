@@ -719,6 +719,52 @@ export const puedeApartarReclamo = ({
 };
 
 /**
+ * Saldo del rubro después de soltar un reclamo YA APLICADO: vuelve lo que ese
+ * pago había descontado.
+ *
+ * La usan los DOS caminos por los que un pago deja de estar aplicado, porque la
+ * aritmética es la misma y la regla del anulado también: la REVERSA
+ * (`revertirRubrosDelPago`, el pago se anula y el reclamo se borra) y la
+ * DESAPLICACIÓN (`desaplicarRubrosDelPago`, "Revertir Especial": el pago sigue
+ * vivo en `pending` y el reclamo se conserva con `aplicado = false`). Lo que
+ * cambia entre las dos es qué pasa con la fila de `rubros_pagos`, no cuánto
+ * saldo vuelve al rubro.
+ *
+ * Salvo que el rubro esté ANULADO. Anular es "dejen de cobrarle esto al
+ * cliente", y devolverle saldo a un cargo cancelado lo reviviría —volvería a
+ * competir por el disponible del próximo pago y a ocupar el índice único de su
+ * tipo— por el camino de atrás, sin que nadie lo decidiera. La reversa igual
+ * queda registrada en `rubros_historial`, que es donde se ve que ese pago se
+ * cayó; si el cargo debe volver a cobrarse, se crea el rubro de nuevo, que es
+ * una decisión explícita y con autor.
+ *
+ * En la DESAPLICACIÓN la regla vale igual, y es la decisión deliberada de
+ * dejar el conflicto A LA VISTA. Como el reclamo no se borra, un rubro anulado
+ * queda en saldo 0 con un reclamo vivo encima: al intentar "Revalidar Pago",
+ * `puedeAplicarReclamo` lo rechaza con un 409 que dice exactamente que el rubro
+ * se anuló con la boleta ya registrada, y la salida es revertir el pago en vez
+ * de revalidarlo. La alternativa —restituir el saldo— sería peor por dos
+ * razones: le volvería a cobrar al cliente un cargo que un admin canceló, y
+ * como el saldo restituido apaga `completado`, el rubro reocuparía el índice
+ * único `rubros_uq_credito_tipo_vivo` y chocaría con el rubro correcto que se
+ * haya creado después de la anulación — o sea un 500 de violación única en
+ * mitad de "Revertir Especial", que es el peor lugar para descubrirlo.
+ */
+export const saldoTrasReversaDeReclamo = ({
+  saldoPendiente,
+  montoAplicado,
+  anulado,
+}: {
+  saldoPendiente: BigInput;
+  montoAplicado: BigInput;
+  anulado: boolean;
+}): Big => {
+  const saldo = new Big(saldoPendiente ?? 0);
+  if (anulado) return saldo;
+  return saldo.plus(new Big(montoAplicado ?? 0));
+};
+
+/**
  * El total cobrado en rubros se suma al campo `otros` de UNA sola fila de la
  * boleta, aunque la boleta escriba varias (cierre de una cuota + parcial de la
  * siguiente + abono a capital).

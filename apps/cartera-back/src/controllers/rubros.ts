@@ -236,14 +236,6 @@ export async function actualizarTipo(
 ) {
   exigirUsuario(patch.usuario_id);
 
-  const [actual] = await db
-    .select({ tipo_id: rubros_tipos.tipo_id })
-    .from(rubros_tipos)
-    .where(eq(rubros_tipos.tipo_id, tipo_id))
-    .limit(1);
-
-  if (!actual) throw new RubroError(404, "El tipo de rubro no existe.");
-
   const cambios: Record<string, unknown> = { updated_at: SELLO_DE_TIEMPO };
   // Vale igual que en el alta, y acá es peor dejarlo pasar: el PUT podía
   // blanquearle el nombre a un tipo YA EN USO, dejando sin etiqueta los rubros
@@ -260,14 +252,46 @@ export async function actualizarTipo(
   if (patch.activo !== undefined) cambios.activo = patch.activo;
 
   try {
-    const [tipo] = await db
-      .update(rubros_tipos)
-      .set(cambios)
-      .where(eq(rubros_tipos.tipo_id, tipo_id))
-      .returning();
+    /**
+     * LEER y ESCRIBIR en la MISMA transacción, con la fila bloqueada.
+     *
+     * Antes la existencia se comprobaba con un `SELECT` suelto, fuera de
+     * transacción y sin bloqueo, y el `UPDATE` venía después. Entre los dos
+     * cabía el `DELETE` de un tipo sin usar: el UPDATE no tocaba ninguna fila,
+     * `.returning()` devolvía vacío, y esta función retornaba `undefined`. El
+     * router no distingue eso de un éxito —`return { success: true, tipo }`—,
+     * así que la pantalla daba por guardado el cambio sobre un tipo que ya no
+     * existía, sin error ni aviso.
+     *
+     * Con el `FOR UPDATE` el borrado espera a que esta transacción termine, y
+     * cuando le toca ya no encuentra nada que borrar. Es el mismo patrón que
+     * usan `editarRubro` y `anularRubro`.
+     */
+    return await db.transaction(async (tx) => {
+      const [actual] = await tx
+        .select({ tipo_id: rubros_tipos.tipo_id })
+        .from(rubros_tipos)
+        .where(eq(rubros_tipos.tipo_id, tipo_id))
+        .limit(1)
+        .for("update");
 
-    return tipo;
+      if (!actual) throw new RubroError(404, "El tipo de rubro no existe.");
+
+      const [tipo] = await tx
+        .update(rubros_tipos)
+        .set(cambios)
+        .where(eq(rubros_tipos.tipo_id, tipo_id))
+        .returning();
+
+      // Cinturón además del bloqueo: si por lo que sea el UPDATE no tocó la
+      // fila, esto es un 404 y no un éxito mudo. Devolver `undefined` acá es
+      // justo lo que hacía que el front creyera que guardó.
+      if (!tipo) throw new RubroError(404, "El tipo de rubro no existe.");
+
+      return tipo;
+    });
   } catch (e) {
+    if (e instanceof RubroError) throw e;
     if (esViolacionUnica(e)) {
       throw new RubroError(409, "Ya existe un tipo de rubro activo con ese nombre.");
     }

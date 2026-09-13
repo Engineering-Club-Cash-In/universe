@@ -1,21 +1,24 @@
 import { describe, expect, it } from "bun:test";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// La escritura del cobro de rubros que no pasa por la policy pura y que mueve
-// plata del cliente:
+// Las DOS escrituras del cobro de rubros que no pasan por la policy pura y que
+// mueven plata del cliente:
 //
 //   * `registrarReclamosDeRubros` — la REVALIDACIÓN del reparto contra el saldo
 //     bloqueado, justo antes de escribir el reclamo. Cierra la carrera entre el
 //     reparto (que `insertPayment` calcula al principio, sin bloqueo) y el
 //     INSERT (que ocurre al final, tras todo el recorrido de cuotas).
+//   * `desaplicarRubrosDelPago` — el "Revertir Especial": el pago vuelve a
+//     `pending` pero SIGUE VIVO, así que el saldo se devuelve y el reclamo se
+//     CONSERVA. Es lo que lo distingue de la reversa, que lo borra.
 //
-// Se prueba con un ejecutor falso y sin base: lo que importa acá es el orden
+// Se prueban con un ejecutor falso y sin base: lo que importa acá es el orden
 // de las consultas, qué se escribe y cuándo se aborta — las reglas de negocio
 // ya viven probadas en `rubrosPolicy.test.ts`.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// A PROPÓSITO sin `mock.module("../database")`: la función recibe el ejecutor
-// por parámetro, así que nunca toca el `db` del módulo, y `mock.module`
+// A PROPÓSITO sin `mock.module("../database")`: las dos funciones reciben el
+// ejecutor por parámetro, así que nunca tocan el `db` del módulo, y `mock.module`
 // es GLOBAL en bun test — un mock de más acá le cambia la base a todos los demás
 // archivos de `src/controllers/` (así se cayó `revertPaymentToPending.test.ts`,
 // que importa `reversePayment.ts` y ese hace `db.transaction.bind(db)` al
@@ -23,7 +26,8 @@ import { describe, expect, it } from "bun:test";
 // se abre ninguna conexión.
 process.env.SUPABASE_DB_URL ??= "postgresql://127.0.0.1:1/synthetic";
 
-const { registrarReclamosDeRubros, RubroError } = await import("./rubros");
+const { registrarReclamosDeRubros, desaplicarRubrosDelPago, RubroError } =
+  await import("./rubros");
 
 /**
  * Ejecutor falso manejado por una COLA: cada `await` de una consulta drizzle
@@ -166,6 +170,107 @@ describe("registrarReclamosDeRubros — revalida el reparto contra el saldo bloq
   it("sin cobros no consulta nada: el pago sin rubros no paga el precio del guard", async () => {
     const ej = ejecutorConCola();
     await registrarReclamosDeRubros(77, [], ej);
+    expect(ej.escrituras).toEqual([]);
+  });
+});
+
+describe("desaplicarRubrosDelPago — el pago vuelve a PENDIENTE pero sigue vivo", () => {
+  // Orden: los reclamos APLICADOS del pago, el rubro (FOR UPDATE), el UPDATE
+  // del rubro, el evento de historial y el UPDATE del reclamo.
+  const cola = (reclamos: unknown[], rubro?: unknown) =>
+    rubro === undefined
+      ? ejecutorConCola(reclamos)
+      : ejecutorConCola(reclamos, [rubro], [], [], []);
+
+  const RECLAMO_APLICADO = {
+    id: 9,
+    rubro_id: 4,
+    monto: "400.00",
+    monto_aplicado: "400.00",
+  };
+
+  it("devuelve el saldo al rubro y lo revive", async () => {
+    // Tras aplicar, el rubro había quedado en 0 y completado.
+    const ej = cola([RECLAMO_APLICADO], {
+      ...RUBRO_VIVO,
+      saldo_pendiente: "0.00",
+    });
+
+    const resultado = await desaplicarRubrosDelPago(30, ej);
+
+    expect(resultado).toEqual([{ rubro_id: 4, devuelto: "400.00" }]);
+    const rubroActualizado = ej.escrituras.find(
+      (e: any) => e.op === "update" && e.valores.saldo_pendiente !== undefined
+    );
+    expect(rubroActualizado.valores.saldo_pendiente).toBe("400.00");
+    expect(rubroActualizado.valores.completado).toBe(false);
+    expect(rubroActualizado.valores.activo).toBe(true);
+  });
+
+  it("CONSERVA el reclamo con aplicado=false: sin él el pago pendiente pierde su reserva", async () => {
+    const ej = cola([RECLAMO_APLICADO], {
+      ...RUBRO_VIVO,
+      saldo_pendiente: "0.00",
+    });
+
+    await desaplicarRubrosDelPago(30, ej);
+
+    // Nada se BORRA: borrar es lo que hace la reversa, donde el pago se anula.
+    // Acá el pago sigue vivo y su reserva —lo que congela el rubro y lo que la
+    // próxima boleta netea— tiene que sobrevivir.
+    expect(ej.escrituras.some((e: any) => e.op === "delete")).toBe(false);
+    const reclamoActualizado = ej.escrituras.find(
+      (e: any) => e.op === "update" && e.valores.aplicado === false
+    );
+    expect(reclamoActualizado).toBeDefined();
+    expect(reclamoActualizado.valores.monto_aplicado).toBeNull();
+  });
+
+  it("deja el evento en el historial: el saldo no se mueve sin rastro", async () => {
+    const ej = cola([RECLAMO_APLICADO], {
+      ...RUBRO_VIVO,
+      saldo_pendiente: "0.00",
+    });
+
+    await desaplicarRubrosDelPago(30, ej);
+
+    const evento = ej.escrituras.find(
+      (e: any) => e.op === "insert" && e.valores?.tipo_evento === "reversa"
+    );
+    expect(evento).toBeDefined();
+    expect(evento.valores.saldo_anterior).toBe("0.00");
+    expect(evento.valores.saldo_nuevo).toBe("400.00");
+    expect(evento.valores.pago_id).toBe(30);
+    expect(evento.valores.motivo).toContain("Revertir Especial");
+  });
+
+  it("NO resucita un rubro anulado: el saldo se queda en 0 y el reclamo igual se suelta", async () => {
+    const ej = cola([RECLAMO_APLICADO], {
+      ...RUBRO_VIVO,
+      saldo_pendiente: "0.00",
+      anulado: true,
+    });
+
+    const resultado = await desaplicarRubrosDelPago(30, ej);
+
+    expect(resultado).toEqual([{ rubro_id: 4, devuelto: "0.00" }]);
+    const rubroActualizado = ej.escrituras.find(
+      (e: any) => e.op === "update" && e.valores.saldo_pendiente !== undefined
+    );
+    expect(rubroActualizado.valores.saldo_pendiente).toBe("0.00");
+    // El reclamo se suelta igual: el pago vuelve a pendiente pase lo que pase
+    // con el rubro. El conflicto se ve recién al revalidar, con el 409 de
+    // `puedeAplicarReclamo` — que es donde queremos verlo.
+    expect(
+      ej.escrituras.some(
+        (e: any) => e.op === "update" && e.valores.aplicado === false
+      )
+    ).toBe(true);
+  });
+
+  it("es idempotente: sin reclamos APLICADOS no toca nada", async () => {
+    const ej = cola([]);
+    expect(await desaplicarRubrosDelPago(30, ej)).toEqual([]);
     expect(ej.escrituras).toEqual([]);
   });
 });

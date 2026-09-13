@@ -49,6 +49,7 @@ import {
   redondearMonto,
   repartirEnRubros,
   rubroCompletado,
+  saldoTrasReversaDeReclamo,
   textoLimpio,
 } from "./rubrosPolicy";
 
@@ -510,7 +511,25 @@ export async function crearRubro({
     );
   }
 
+  /**
+   * El candado del CRÉDITO primero, la transacción después — el mismo orden
+   * que `editarRubro`, `anularRubro` e `insertPayment`. Invertirlo (tomar la
+   * fila y después pedir el lock) es lo que crearía el deadlock.
+   *
+   * `crearRubro` no lo tomaba: el alta era inofensiva frente a una boleta en
+   * vuelo (el rubro nuevo simplemente no entra en el reparto de esa boleta), y
+   * la unicidad de "un vivo por crédito+tipo" la garantizaba el índice
+   * `rubros_uq_credito_tipo_vivo`. Ese índice se cayó en la migración 0038
+   * —afirmaba una invariante permanente que el dominio no sostiene: tras una
+   * reversa legítima existen DE VERDAD dos deudas del mismo concepto— y la
+   * exclusividad se volvió una regla de ALTA, chequeada acá abajo. Un chequeo
+   * "¿ya hay uno vivo?" seguido de un INSERT es exactamente el patrón que dos
+   * altas simultáneas del mismo tipo atraviesan juntas: las dos leen "no hay
+   * ninguno" y las dos entran. El candado es lo que las serializa, y es lo
+   * único que el índice protegía de más.
+   */
   try {
+    return await withPaymentAdvisoryLock(credito_id, async () => {
     /**
      * LEER, DECIDIR Y ESCRIBIR van en la MISMA transacción, con la fila del
      * crédito bloqueada. Mismo patrón que `editarRubro`.
@@ -592,6 +611,53 @@ export async function crearRubro({
         );
       }
 
+      /**
+       * UN SOLO RUBRO VIVO POR CRÉDITO Y TIPO — pero como regla de ALTA.
+       *
+       * Esto lo garantizaba el índice único parcial
+       * `rubros_uq_credito_tipo_vivo`, que la migración 0038 eliminó: la base
+       * afirmaba que dos cobros vivos del mismo concepto no pueden coexistir
+       * NUNCA, y el dominio no lo sostiene. Cuando contabilidad anula la boleta
+       * con que se pagó la tarjeta de circulación 2026, la reversa devuelve el
+       * saldo de ese rubro y apaga su `completado`: ahí existen de verdad dos
+       * deudas, la de 2026 que volvió y la de 2027 que ya se había cargado. El
+       * índice lo leía como duplicado y hacía fallar la reversa entera con un
+       * 500, dejando el pago atascado en `validated`.
+       *
+       * La regla que sí vale es más angosta: no se puede CREAR un segundo rubro
+       * vivo del mismo tipo. Se juzga acá, adentro de la transacción y bajo el
+       * advisory lock del crédito, que es lo que impide que dos altas
+       * simultáneas lean las dos "no hay ninguno".
+       *
+       * `anulado` se excluye aparte de `completado` por prudencia, no porque
+       * hoy haga falta: `anularRubro` deja la fila en `completado = true` y
+       * `anulado = true` a la vez, así que el primer filtro ya la descarta. Pero
+       * el que manda es el hecho —un cobro cancelado no bloquea el alta del
+       * correcto— y no el flag que hoy lo acompaña.
+       */
+      const [vivo] = await tx
+        .select({ rubro_id: rubros.rubro_id })
+        .from(rubros)
+        .where(
+          and(
+            eq(rubros.credito_id, credito_id),
+            eq(rubros.tipo_id, tipo_id),
+            eq(rubros.completado, false),
+            eq(rubros.anulado, false)
+          )
+        )
+        .limit(1);
+
+      if (vivo) {
+        // El MISMO texto que traducía la violación del índice: para quien está
+        // del otro lado de la pantalla no cambió nada, y la salida sigue siendo
+        // cobrar el rubro que ya existe, no crear un duplicado.
+        throw new RubroError(
+          409,
+          "Este crédito ya tiene un rubro vivo de ese tipo."
+        );
+      }
+
       const [rubro] = await tx
         .insert(rubros)
         .values({
@@ -624,23 +690,26 @@ export async function crearRubro({
 
       return rubro;
     });
+  });
   } catch (e) {
     if (e instanceof RubroError) throw e;
-    // `rubros_uq_credito_tipo_vivo`: ya hay un rubro SIN SALDAR de ese tipo en
-    // el crédito. Es un choque de negocio (409), no una caída del servidor —
-    // y la salida es cobrar el que ya existe, no crear un duplicado.
-    if (esViolacionUnica(e)) {
-      throw new RubroError(
-        409,
-        "Este crédito ya tiene un rubro vivo de ese tipo."
-      );
-    }
-    // Red de seguridad, no la defensa principal: el `FOR KEY SHARE` de arriba
-    // ya cierra la ventana con `eliminarTipo`. Pero si algo se cuela por debajo
-    // del bloqueo (o el día de mañana aparece otra vía de borrado del tipo que
-    // no pase por ahí), la FK de `tipo_id` sigue siendo el freno de último
-    // recurso — y sin esto, ese freno se traducía en un 500 crudo para un
-    // asesor que hizo una petición válida. Mismo patrón que `eliminarTipo`.
+    /**
+     * NO hay catch de violación de unicidad, y su ausencia es deliberada.
+     *
+     * El que vivía acá traducía `rubros_uq_credito_tipo_vivo` a un 409, pero
+     * ese índice ya no existe (migración 0038): la exclusividad pasó a ser el
+     * chequeo explícito de más arriba, bajo el candado. De las dos tablas que
+     * esta función escribe, `rubros` se quedó sin ningún índice único y
+     * `rubros_historial` nunca tuvo otro que su PK serial, así que lo único
+     * que podría dar un 23505 acá es una secuencia desincronizada — corrupción
+     * de la base, que merece el 500 crudo y no un 409 diciéndole al usuario
+     * "ya existe ese rubro" sobre algo que no tiene nada que ver.
+     *
+     * La FK de `tipo_id` sí sigue siendo un freno real: el `FOR KEY SHARE` de
+     * arriba cierra la ventana con `eliminarTipo`, pero si algo se colara por
+     * debajo (o mañana apareciera otra vía de borrado del tipo), sin esto el
+     * asesor vería un 500 por una petición que era válida cuando la hizo.
+     */
     if (esViolacionFk(e)) {
       throw new RubroError(
         409,
@@ -750,6 +819,13 @@ export async function editarRubro(
    * deadlock: nadie toma la fila del rubro y después pide el lock del crédito.
    * Invertirlo sí lo crearía.
    *
+   * `crearRubro` también lo toma desde que la unicidad de "un vivo por
+   * crédito+tipo" dejó de ser un índice de la base (0038) y pasó a ser un
+   * chequeo suyo: no por el saldo —crear un rubro durante la ventana sigue
+   * siendo inofensivo, el rubro nuevo simplemente no entra en el reparto de esa
+   * boleta— sino para que dos altas simultáneas del mismo tipo no lean las dos
+   * "no hay ninguno". Todas toman el lock en el MISMO orden, y por eso siguen
+   * sin poder deadlockear entre sí.
    */
   const credito_id = await creditoDeRubro(rubro_id);
 
@@ -893,6 +969,51 @@ export async function editarRubro(
         cambios.monto_original = montoPedido;
         cambios.saldo_pendiente = saldoNuevo;
         cambios.completado = rubroCompletado(saldoNuevo);
+
+        /**
+         * REVIVIR un rubro saldado también está sujeto a la exclusividad.
+         *
+         * Subirle el monto a un rubro que estaba en cero lo devuelve a la vida
+         * (`completado` vuelve a false). Hasta la migración 0038 eso chocaba
+         * contra `rubros_uq_credito_tipo_vivo` y salía como 409; al quitar el
+         * índice, el choque dejó de existir y esta puerta quedó abierta: se
+         * podían terminar con dos rubros vivos del mismo concepto sin que nadie
+         * lo mirara.
+         *
+         * Se chequea acá y no en cualquier edición porque sólo esta revive. Y
+         * la regla es la misma del alta —y por la misma razón—: dos cobros
+         * vivos del mismo concepto en un crédito son un error de captura, y la
+         * salida es cobrar el que ya existe, no duplicarlo.
+         *
+         * Ojo con lo que NO cubre, que es deliberado: la RESTITUCIÓN de saldo
+         * que hacen la reversa y la desaplicación sí puede dejar dos vivos del
+         * mismo tipo, y está bien que lo haga. Ahí no hay nadie capturando un
+         * cobro: el sistema está deshaciendo lo suyo, y las dos deudas que
+         * quedan son reales (la del año pasado que volvió y la de este año).
+         * Esa distinción —persona que captura vs sistema que deshace— es toda
+         * la diferencia entre las dos situaciones.
+         */
+        if (!rubroCompletado(saldoNuevo) && actual.completado) {
+          const [otroVivo] = await tx
+            .select({ rubro_id: rubros.rubro_id })
+            .from(rubros)
+            .where(
+              and(
+                eq(rubros.credito_id, actual.credito_id),
+                eq(rubros.tipo_id, actual.tipo_id),
+                eq(rubros.completado, false),
+                eq(rubros.anulado, false)
+              )
+            )
+            .limit(1);
+
+          if (otroVivo) {
+            throw new RubroError(
+              409,
+              "Este crédito ya tiene un rubro vivo de ese tipo."
+            );
+          }
+        }
       }
 
       /**
@@ -1037,19 +1158,22 @@ export async function editarRubro(
  * no hay DELETE (el historial de un cobro es evidencia y `rubros_historial`
  * cuelga de la fila), editarlo a 0 lo rechaza `puedeUsarMonto` —con razón: un
  * rubro de Q0 no es un rubro—, y `completado` sólo se enciende con un abono,
- * que es fase 2 y todavía no existe. Mientras tanto el índice único
- * `rubros_uq_credito_tipo_vivo` impide crear el rubro CORRECTO de ese mismo
- * tipo, así que un dedazo dejaba el crédito bloqueado para ese concepto para
- * siempre y la única salida era un UPDATE a mano en producción.
+ * que es fase 2 y todavía no existe. Mientras tanto la exclusividad por
+ * crédito+tipo impide crear el rubro CORRECTO de ese mismo tipo, así que un
+ * dedazo dejaba el crédito bloqueado para ese concepto para siempre y la única
+ * salida era un UPDATE a mano en producción. (Esa exclusividad era el índice
+ * único `rubros_uq_credito_tipo_vivo` hasta la migración 0038; hoy es el
+ * chequeo de `crearRubro`. Para esta función da igual: lo que la justifica es
+ * que el tipo quede bloqueado, no quién lo bloquea.)
  *
- * Qué hace: `saldo_pendiente = 0` (ya no se cobra), `completado = true` (sale
- * del índice único y libera el tipo) y `activo = false` (el barrido de la fase
+ * Qué hace: `saldo_pendiente = 0` (ya no se cobra), `completado = true` (libera
+ * el tipo para el cobro del año siguiente) y `activo = false` (el barrido de la fase
  * 2 no lo mira). `monto_original` NO se toca a propósito: es el rastro de
  * cuánto se había llegado a cobrar, y ponerlo en 0 borraría la evidencia del
  * error que la anulación viene a documentar. El evento `anulacion` del
  * historial guarda el saldo anterior y el motivo obligatorio.
  *
- * Sólo ADMIN (lo gatea el router): anular libera el índice y cierra un cobro,
+ * Sólo ADMIN (lo gatea el router): anular libera el tipo y cierra un cobro,
  * que es la misma clase de decisión que corregir un monto ya cobrado.
  */
 export async function anularRubro(
@@ -1206,6 +1330,8 @@ export async function listarHistorial(rubro_id: number) {
 //                                  sólo APARTA.
 //   APLICAR (`/aplicar-pago`)    → `aplicarRubrosDelPago` baja el saldo, marca
 //                                  el reclamo y escribe el historial.
+//   REVERTIR (`reversePayment`)  → `revertirRubrosDelPago` devuelve lo aplicado
+//                                  y suelta el reclamo.
 //
 // Las reglas decidibles (orden de cobro, neteo contra hermanos, guards) están
 // en `rubrosPolicy.ts` como funciones puras; acá sólo se lee la base, se le
@@ -1540,4 +1666,230 @@ export async function aplicarRubrosDelPago(
   }
 
   return aplicados;
+}
+
+/**
+ * REVIERTE los rubros de una boleta que se reversa.
+ *
+ * Dos casos, que no son simétricos porque las dos etapas del pago no lo son:
+ *
+ *   * Reclamo YA APLICADO: el saldo del rubro se había bajado de verdad, así
+ *     que se devuelve `monto_aplicado` y queda el evento `reversa` en el
+ *     historial. La única excepción es el rubro ANULADO, donde el saldo NO se
+ *     restituye: ver `saldoTrasReversaDeReclamo`.
+ *   * Reclamo SIN APLICAR: nunca se descontó nada, así que no hay saldo que
+ *     devolver — sólo se suelta lo apartado.
+ *
+ * En ambos casos el reclamo se BORRA, y eso es el guard de doble reversa: una
+ * segunda reversa del mismo pago no encuentra filas y no devuelve nada. Es el
+ * mismo criterio del convenio, que deja su sello en `pagoConvenio = 0` para que
+ * la segunda pasada lo vea vacío.
+ *
+ * Corre DENTRO de la transacción de la reversa y ANTES de que la rama de pago
+ * parcial borre la fila de `pagos_credito`: ese DELETE se llevaría los reclamos
+ * por cascada sin devolverle el saldo al rubro.
+ */
+export async function revertirRubrosDelPago(
+  pago_id: number,
+  ejecutor: Ejecutor
+): Promise<{ rubro_id: number; devuelto: string }[]> {
+  const reclamos = await ejecutor
+    .select({
+      id: rubros_pagos.id,
+      rubro_id: rubros_pagos.rubro_id,
+      monto: rubros_pagos.monto,
+      monto_aplicado: rubros_pagos.monto_aplicado,
+      aplicado: rubros_pagos.aplicado,
+    })
+    .from(rubros_pagos)
+    .where(eq(rubros_pagos.pago_id, pago_id));
+
+  const revertidos: { rubro_id: number; devuelto: string }[] = [];
+
+  for (const reclamo of reclamos) {
+    if (reclamo.aplicado) {
+      const [rubro] = await ejecutor
+        .select()
+        .from(rubros)
+        .where(eq(rubros.rubro_id, reclamo.rubro_id))
+        .limit(1)
+        .for("update");
+
+      if (rubro) {
+        const saldoNuevo = aMonto(
+          saldoTrasReversaDeReclamo({
+            saldoPendiente: rubro.saldo_pendiente,
+            // Lo que REALMENTE se descontó, no lo apartado: son el mismo número
+            // hoy, pero el que manda es el que movió el saldo.
+            montoAplicado: reclamo.monto_aplicado ?? reclamo.monto ?? 0,
+            anulado: rubro.anulado,
+          })
+        );
+        const completado = rubroCompletado(saldoNuevo);
+
+        await ejecutor
+          .update(rubros)
+          .set({
+            saldo_pendiente: saldoNuevo,
+            completado,
+            activo: !completado,
+            updated_at: SELLO_DE_TIEMPO,
+          })
+          .where(eq(rubros.rubro_id, rubro.rubro_id));
+
+        await ejecutor.insert(rubros_historial).values({
+          rubro_id: rubro.rubro_id,
+          tipo_evento: "reversa",
+          saldo_anterior: aMonto(rubro.saldo_pendiente),
+          saldo_nuevo: saldoNuevo,
+          pago_id,
+          origen: "reversa",
+          motivo: rubro.anulado
+            ? "Reversa de un pago sobre un rubro ANULADO: el saldo no se restituye para no revivir un cargo cancelado."
+            : null,
+        });
+
+        revertidos.push({
+          rubro_id: rubro.rubro_id,
+          devuelto: new Big(saldoNuevo)
+            .minus(new Big(rubro.saldo_pendiente))
+            .toFixed(2),
+        });
+      }
+    }
+
+    // Se borra en los dos casos: es el guard de doble reversa.
+    await ejecutor.delete(rubros_pagos).where(eq(rubros_pagos.id, reclamo.id));
+  }
+
+  return revertidos;
+}
+
+/**
+ * DESAPLICA los rubros de un pago que vuelve de `validated` a `pending`
+ * ("Revertir Especial"), que NO es lo mismo que revertirlos.
+ *
+ * La diferencia está en qué pasa con el RECLAMO, no con el saldo:
+ *
+ *   * `revertirRubrosDelPago` devuelve el saldo y BORRA la fila de
+ *     `rubros_pagos`, porque ahí el pago se anula: deja de existir un cobro que
+ *     reclame nada.
+ *   * acá el pago sigue vivo, sólo retrocedió de etapa. Su reserva tiene que
+ *     seguir existiendo, así que la fila se CONSERVA con `aplicado = false` y
+ *     `monto_aplicado` en null — que es exactamente el estado en el que la dejó
+ *     el registro de la boleta.
+ *
+ * Conservarla no es cosmético: es lo que devuelve el pago a un estado
+ * `pending` legítimo. Sin la fila, `cobrarRubrosParaBoleta` de la siguiente
+ * boleta no netearía nada contra este pago y apartaría un saldo ya
+ * comprometido, y sobre todo el rubro perdía su congelamiento —
+ * `puedeTocarRubroConReclamosVivos` no veía reclamos y dejaba editarlo con 200,
+ * cuando en un pago pendiente normal eso se rechaza con 409.
+ *
+ * Sólo toca los reclamos `aplicado = true`: los que ya estaban apartados sin
+ * aplicar no movieron saldo, así que no hay nada que devolver y la fila ya está
+ * en el estado destino. Eso también lo vuelve idempotente, igual que el borrado
+ * es el guard de doble reversa: una segunda pasada no encuentra aplicados.
+ *
+ * Corre DENTRO de la transacción de la reversión a pendiente: si algo de lo que
+ * sigue falla, el rubro tampoco queda desaplicado.
+ */
+export async function desaplicarRubrosDelPago(
+  pago_id: number,
+  ejecutor: Ejecutor
+): Promise<{ rubro_id: number; devuelto: string }[]> {
+  const reclamos = await ejecutor
+    .select({
+      id: rubros_pagos.id,
+      rubro_id: rubros_pagos.rubro_id,
+      monto: rubros_pagos.monto,
+      monto_aplicado: rubros_pagos.monto_aplicado,
+    })
+    .from(rubros_pagos)
+    .where(
+      and(eq(rubros_pagos.pago_id, pago_id), eq(rubros_pagos.aplicado, true))
+    );
+
+  const desaplicados: { rubro_id: number; devuelto: string }[] = [];
+
+  for (const reclamo of reclamos) {
+    const [rubro] = await ejecutor
+      .select()
+      .from(rubros)
+      .where(eq(rubros.rubro_id, reclamo.rubro_id))
+      .limit(1)
+      .for("update");
+
+    if (rubro) {
+      // MISMA aritmética que la reversa —y el mismo helper puro—, incluida la
+      // regla de que un rubro ANULADO no resucita. Acá esa regla deja el
+      // conflicto a la vista a propósito: el reclamo sobrevive, así que un
+      // rubro anulado queda en saldo 0 con un reclamo vivo encima y "Revalidar
+      // Pago" lo rechaza con el 409 de `puedeAplicarReclamo`, que dice
+      // literalmente que el rubro se anuló con la boleta ya registrada. La
+      // salida correcta ahí es revertir el pago, no revalidarlo. Restituir el
+      // saldo sería volver a cobrarle al cliente un cargo que un admin canceló
+      // —y, como el saldo apaga `completado`, dejar dos cobros vivos del mismo
+      // tipo: el cancelado y el correcto que se creó después de la anulación.
+      // (Antes de la migración 0038 eso además chocaba contra el índice único y
+      // reventaba la revalidación entera; hoy no revienta nada, y por eso el
+      // `anulado` de `saldoTrasReversaDeReclamo` importa MÁS que antes: es lo
+      // único que impide resucitar el cargo cancelado.)
+      const saldoNuevo = aMonto(
+        saldoTrasReversaDeReclamo({
+          saldoPendiente: rubro.saldo_pendiente,
+          // Lo que REALMENTE se descontó, no lo apartado: son el mismo número
+          // hoy, pero el que manda es el que movió el saldo.
+          montoAplicado: reclamo.monto_aplicado ?? reclamo.monto ?? 0,
+          anulado: rubro.anulado,
+        })
+      );
+      const completado = rubroCompletado(saldoNuevo);
+
+      await ejecutor
+        .update(rubros)
+        .set({
+          saldo_pendiente: saldoNuevo,
+          completado,
+          // `activo` se DERIVA del saldo, igual que en el resto del módulo: el
+          // rubro vuelve a estar vivo porque volvió a tener saldo.
+          activo: !completado,
+          updated_at: SELLO_DE_TIEMPO,
+        })
+        .where(eq(rubros.rubro_id, rubro.rubro_id));
+
+      // Evento `reversa` y no uno propio: el enum `rubro_evento` de la base no
+      // tiene un valor para esto y agregarlo pide una migración, que es mucho
+      // más riesgo del que justifica la etiqueta. El motivo dice cuál de las
+      // dos reversas fue, que es lo que hace falta para leer el historial.
+      await ejecutor.insert(rubros_historial).values({
+        rubro_id: rubro.rubro_id,
+        tipo_evento: "reversa",
+        saldo_anterior: aMonto(rubro.saldo_pendiente),
+        saldo_nuevo: saldoNuevo,
+        pago_id,
+        origen: "reversa",
+        motivo: rubro.anulado
+          ? "El pago volvió a PENDIENTE (Revertir Especial) sobre un rubro ANULADO: el saldo no se restituye para no revivir un cargo cancelado."
+          : "El pago volvió a PENDIENTE (Revertir Especial): el saldo se devuelve y la boleta conserva su reserva sobre el rubro.",
+      });
+
+      desaplicados.push({
+        rubro_id: rubro.rubro_id,
+        devuelto: new Big(saldoNuevo)
+          .minus(new Big(rubro.saldo_pendiente))
+          .toFixed(2),
+      });
+    }
+
+    // El reclamo NO se borra: vuelve al estado en que lo dejó el registro de la
+    // boleta. `monto_aplicado` a null y no a 0 por la misma razón que en el
+    // registro: un 0 sería indistinguible de "se aplicó y no descontó nada".
+    await ejecutor
+      .update(rubros_pagos)
+      .set({ aplicado: false, monto_aplicado: null })
+      .where(eq(rubros_pagos.id, reclamo.id));
+  }
+
+  return desaplicados;
 }

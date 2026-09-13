@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, mock } from "bun:test";
 import { createCarteraStructuredLogger } from "../utils/structuredLogger";
 
 const updates: Record<string, unknown>[] = [];
+/** Todo lo insertado, en orden: hoy es el historial de rubros. */
+const inserts: Record<string, unknown>[] = [];
 let selectResults: unknown[][] = [];
 const insertInvestors = mock(() => Promise.resolve());
 const deactivateLateFee = mock(() => Promise.resolve());
@@ -22,11 +24,21 @@ const tx = {
     from: () => ({
       where: () => {
         const rows = selectResults.shift() ?? [];
-        return Object.assign(Promise.resolve(rows), {
-          limit: () => Promise.resolve(rows),
+        // `.for("update")` hace falta desde que revalidar vuelve a APLICAR los
+        // rubros del pago: `aplicarRubrosDelPago` relee cada rubro bloqueado.
+        const chain: any = Object.assign(Promise.resolve(rows), {
+          limit: () => chain,
+          for: () => Promise.resolve(rows),
         });
+        return chain;
       },
     }),
+  })),
+  insert: mock(() => ({
+    values: (values: Record<string, unknown>) => {
+      inserts.push(values);
+      return Promise.resolve();
+    },
   })),
   update: mock(() => ({
     set: (values: Record<string, unknown>) => ({
@@ -122,6 +134,8 @@ const credito = {
 describe("revalidatePayment", () => {
   beforeEach(() => {
     updates.length = 0;
+    inserts.length = 0;
+    // El 4º hueco son los reclamos de rubros del pago: por defecto ninguno.
     selectResults = [[pagoCompletoPendiente], [credito], []];
     tx.execute.mockClear();
     insertInvestors.mockClear();
@@ -152,6 +166,59 @@ describe("revalidatePayment", () => {
       [8765, 10],
     );
     expect(lockRelease).toHaveBeenCalledTimes(1);
+  });
+
+  // "Revalidar Pago" es la vuelta de `pending` a `validated`, o sea la MISMA
+  // transición que `/aplicar-pago`: si no vuelve a aplicar los rubros, el ciclo
+  // validated → pending → validated devuelve el saldo al rubro y no lo cobra
+  // nunca más — el cobro adicional se perdona solo, sin que nadie lo decida.
+  it("vuelve a APLICAR los rubros que el pago había apartado", async () => {
+    selectResults = [
+      [pagoCompletoPendiente],
+      [credito],
+      [], // no hay hermanos vivos en la cuota
+      [{ id: 9, rubro_id: 4, monto: "400.00" }], // el reclamo apartado por el pago
+      [
+        {
+          rubro_id: 4,
+          saldo_pendiente: "400.00",
+          anulado: false,
+          monto_original: "400.00",
+        },
+      ],
+    ];
+    const set = { status: 0 };
+
+    await revalidatePayment({ body: { credito_id: 10, pago_id: 30 }, set });
+
+    expect(set.status).toBe(200);
+    // El saldo del rubro BAJA de verdad y el rubro queda saldado.
+    expect(
+      updates.some(
+        (values) =>
+          values.saldo_pendiente === "0.00" &&
+          values.completado === true &&
+          values.activo === false,
+      ),
+    ).toBeTrue();
+    // Y el reclamo queda marcado, para que una segunda revalidación no lo
+    // vuelva a cobrar.
+    expect(
+      updates.some(
+        (values) =>
+          values.aplicado === true && values.monto_aplicado === "400.00",
+      ),
+    ).toBeTrue();
+    // Con su evento en el historial: el saldo no se mueve sin dejar rastro.
+    expect(
+      inserts.some(
+        (values) =>
+          values.tipo_evento === "abono" &&
+          values.saldo_anterior === "400.00" &&
+          values.saldo_nuevo === "0.00" &&
+          values.pago_id === 30,
+      ),
+    ).toBeTrue();
   });
 
   it("valida un pago parcial sin cerrar la cuota", async () => {

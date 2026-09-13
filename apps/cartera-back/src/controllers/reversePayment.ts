@@ -18,6 +18,7 @@ import {
 import { resetAjusteFechaIdealSiPagoInvalidado } from "./ajusteFechaIdealPago";
 import { processAndReplaceCreditInvestorsReverse } from "./investor";
 import { revertirAbonoCapitalEspejo } from "./abonosCapital";
+import { revertirRubrosDelPago } from "./rubros";
 import { updateMora } from "./latefee";
 import { SATClientService } from "../cofidi/satClientService";
 import { CLUB_CASHIN_CONFIG, SAT_CONFIG } from "../utils/functions/const";
@@ -357,6 +358,24 @@ export function createReversePayment(
           monto_pago: Number(pago.pagoConvenio),
         });
       }
+
+      // ======================================================================
+      // 6️⃣.7️⃣ REVERSAR LOS RUBROS QUE ESTE PAGO COBRÓ
+      // ======================================================================
+      // Los dos casos no son simétricos porque las dos etapas del pago no lo
+      // son: un reclamo YA APLICADO descontó saldo de verdad y hay que
+      // devolvérselo al rubro (con su evento `reversa` en el historial); uno
+      // SIN APLICAR nunca movió nada, así que sólo se suelta lo apartado.
+      //
+      // En ambos casos el reclamo se BORRA, y eso ES el guard de doble reversa:
+      // la segunda pasada no encuentra filas y no devuelve nada — mismo
+      // criterio con el que el convenio se protege dejando `pagoConvenio = 0`.
+      //
+      // 🔴 VA ACÁ Y NO MÁS ABAJO: la rama de pago parcial hace `DELETE FROM
+      // pagos_credito`, y el FK de `rubros_pagos.pago_id` es ON DELETE CASCADE.
+      // Después de ese borrado los reclamos ya no existen y el saldo del rubro
+      // se quedaría descontado para siempre por un pago que se revirtió.
+      await revertirRubrosDelPago(pago_id, tx as unknown as Parameters<typeof revertirRubrosDelPago>[1]);
 
       // ======================================================================
       // 7️⃣ ACTUALIZAR EL CRÉDITO CON LOS NUEVOS VALORES

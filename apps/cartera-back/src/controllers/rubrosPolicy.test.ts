@@ -24,6 +24,7 @@ import {
   puedeTocarRubroConReclamosVivos,
   repartirEnRubros,
   puedeApartarReclamo,
+  saldoTrasReversaDeReclamo,
 } from "./rubrosPolicy";
 
 describe("STATUS_TERMINALES_RUBRO", () => {
@@ -891,6 +892,62 @@ describe("puedeApartarReclamo", () => {
         montoApartado: new Big("0.1").plus("0.2"),
       }).permitido,
     ).toBe(true);
+  });
+});
+
+describe("saldoTrasReversaDeReclamo", () => {
+  it("devuelve al saldo lo que el pago había descontado", () => {
+    expect(
+      saldoTrasReversaDeReclamo({
+        saldoPendiente: "0",
+        montoAplicado: "100",
+        anulado: false,
+      }).toFixed(2),
+    ).toBe("100.00");
+  });
+
+  it("NO resucita un rubro anulado: el cargo se canceló, no vuelve a nacer", () => {
+    expect(
+      saldoTrasReversaDeReclamo({
+        saldoPendiente: "0",
+        montoAplicado: "100",
+        anulado: true,
+      }).toFixed(2),
+    ).toBe("0.00");
+  });
+
+  it("suma sobre el saldo que ya tenía", () => {
+    expect(
+      saldoTrasReversaDeReclamo({
+        saldoPendiente: "25.50",
+        montoAplicado: "74.50",
+        anulado: false,
+      }).toFixed(2),
+    ).toBe("100.00");
+  });
+
+  // La DESAPLICACIÓN ("Revertir Especial": el pago vuelve a `pending` pero sigue
+  // vivo) usa esta misma función: lo que cambia entre reversa y desaplicación es
+  // qué pasa con la fila de `rubros_pagos`, no cuánto saldo vuelve al rubro.
+  it("sirve igual para la desaplicación: el ciclo validated → pending devuelve lo descontado", () => {
+    const saldoTrasAplicar = "0";
+    expect(
+      saldoTrasReversaDeReclamo({
+        saldoPendiente: saldoTrasAplicar,
+        montoAplicado: "400",
+        anulado: false,
+      }).toFixed(2),
+    ).toBe("400.00");
+  });
+
+  it("en la desaplicación el rubro ANULADO tampoco resucita: el 409 al revalidar es deliberado", () => {
+    expect(
+      saldoTrasReversaDeReclamo({
+        saldoPendiente: "0",
+        montoAplicado: "400",
+        anulado: true,
+      }).toFixed(2),
+    ).toBe("0.00");
   });
 });
 

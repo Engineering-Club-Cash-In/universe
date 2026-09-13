@@ -16,6 +16,7 @@ import {
   type CancelacionCredito,
   type Credito,
   type Usuario,
+  type RubroPendiente,
 } from "../services/services";
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -69,6 +70,11 @@ const [resetBuscador, setResetBuscador] = useState(false);
     data?: any;
   } | null>(null);
   const [mora, setMora] = useState<number>(0);
+  // Rubros pendientes de cobro (tarjeta de circulación, placas, etc). A
+  // diferencia de `mora`, `rubrosActual` SIEMPRE viaja como number desde el
+  // back (no hace falta el `Number(x || 0)` defensivo que exige moraActual).
+  const [rubros, setRubros] = useState<RubroPendiente[]>([]);
+  const [rubrosActual, setRubrosActual] = useState<number>(0);
   const [cuotasAtrasadasInfo, setCuotasAtrasadasInfo] = useState<{
     total: number;
     cuotas: any[];
@@ -316,6 +322,8 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
 
       setCuotaSeleccionada(siguienteCuotaPagable?.numero_cuota ?? cuotaActualNumero ?? 0);
       setMora(result.moraActual || 0);
+      setRubros(result.rubros || []);
+      setRubrosActual(result.rubrosActual || 0);
 
       // 👇 AGREGA INFO DE CONVENIO
       if (result.convenioActivo) {
@@ -454,6 +462,9 @@ const saldoAFavor = Number(dataCredito?.usuario?.saldo_a_favor || 0);
 const montoBoleta = Number(monto_boleta || 0);
 const moraNum = Number(mora || 0);
 const cuotaConvenioNum = Number(convenioActivoInfo?.cuotaConvenioAPagar || 0);
+// `rubrosActual` ya viaja como number desde el back, pero el Number() se deja
+// por consistencia defensiva con el resto de montos de este bloque.
+const rubrosNum = Number(rubrosActual || 0);
 
 console.log("=== DEBUG VALORES ===");
 console.log("Saldo a Favor:", saldoAFavor);
@@ -510,7 +521,15 @@ const abonosRealizados = getDisplayedPartialContribution(abonosCuota);
 // de excedente (el modal re-asignaría a capital/otros dinero que el back ya
 // registra como convenio). Mismo umbral efectivo que cuando el front restaba
 // el convenio del disponible.
-const cuotaComparar = Math.max(0, cuota - abonosRealizados) + convenioAplicado;
+// Los rubros se suman con el mismo criterio: el back los cobra ANTES que la
+// cuota (otros → mora → rubros → convenio → cuotas), así que ese monto
+// también es esperado, no excedente. Igual que el convenio, van SUMADOS
+// AFUERA del Math.max(0, ...) porque son independientes del abono parcial de
+// la cuota — si no se suman acá, una boleta que cubre exactamente cuota +
+// rubros dispara el modal de excedente y ese modal reasigna a capital plata
+// que en realidad debía ir a los rubros.
+const cuotaComparar =
+  Math.max(0, cuota - abonosRealizados) + convenioAplicado + rubrosNum;
 
 console.log("=== VALIDACIÓN DE EXCEDENTES ===");
 console.log("Monto boleta real (redondeado):", montoRedondeado);
@@ -882,6 +901,8 @@ async function handleResetCredito(montoIncobrable = 0) {
     resetBuscador,
     setResetBuscador,
     mora,
+    rubros,
+    rubrosActual,
     convenioActivoInfo,
     cuotaSeleccionada,
     abonosCuota

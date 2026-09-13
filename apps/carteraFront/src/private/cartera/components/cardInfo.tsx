@@ -11,6 +11,8 @@ import {
 import { BadgeCheck, AlertTriangle, FileText, ChevronDown, ChevronUp, Calendar, Eye } from "lucide-react";
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
+import type { RubroPendiente } from "../services/services";
+import { sumaQ } from "@/lib/moneda";
 
 export function MiniCardCredito({
   credito,
@@ -24,6 +26,8 @@ export function MiniCardCredito({
   onCuotaSeleccionadaChange,
   cuotasPendientesInfo,
   mora,
+  rubros,
+  rubrosActual,
   convenioActivoInfo,
   cuotaMensualAPagar,
   abonosParciales,
@@ -69,6 +73,11 @@ export function MiniCardCredito({
     }[];
   };
   mora: number;
+  // Rubros pendientes (tarjeta de circulación, placas, traspaso...). Ausentes
+  // en la enorme mayoría de créditos: el desglose solo aparece si hay algo que
+  // desglosar.
+  rubros?: RubroPendiente[];
+  rubrosActual?: number;
  convenioActivoInfo?: {
   convenio_id: number;
   credito_id: number;
@@ -161,6 +170,34 @@ export function MiniCardCredito({
     // Limitado a la cuota pagable más antigua para no saltar deuda anterior.
     .sort((a, b) => a.numero_cuota - b.numero_cuota)
     .slice(0, 1);
+
+  // La mora llega del back como STRING cuando existe y como number 0 cuando no
+  // (defecto conocido del endpoint). Sin este `Number()` sumarla concatenaría
+  // texto en vez de sumar plata.
+  // `mora` viene del endpoint como STRING cuando hay mora y como number 0
+  // cuando no. La prop está declarada `number`, así que TypeScript no avisa,
+  // y `String.prototype.toLocaleString` IGNORA las opciones: una mora de
+  // Q12,345.67 se mostraba "12345.67", sin separador de miles. Todo lo que
+  // muestre o sume mora usa `moraNum`, nunca `mora` crudo.
+  const moraNum = Number(mora || 0);
+  const rubrosNum = Number(rubrosActual ?? 0);
+  const cuotaNum = Number(cuotaMensualAPagar || credito.cuota) || 0;
+  const convenioNum = Number(convenioActivoInfo?.cuotaConvenioAPagar ?? 0) || 0;
+  const abonosNum = abonosParciales?.total ?? 0;
+
+  // El motor de pagos cobra en cascada: otros → mora → RUBROS → convenio →
+  // cuotas. El asesor tiene que ver UNA sola cifra y que esa cifra contemple
+  // todo lo que la boleta se va a llevar; si no, cobra de menos. `sumaQ` suma
+  // en centavos enteros para no descuadrar contra el `Big` del backend.
+  const totalACobrar = Math.max(
+    0,
+    sumaQ([moraNum, rubrosNum, convenioNum, cuotaNum, -abonosNum]),
+  );
+  // Sin mora, sin rubros y sin convenio no hay nada que combinar: la tarjeta
+  // amarilla sigue siendo la de "Abonos Realizados" de siempre (el 99% de la
+  // cartera se ve exactamente igual que antes de este cambio).
+  const mostrarTotalCombinado =
+    !!convenioActivoInfo || moraNum > 0 || rubrosNum > 0;
 
   return (
     <div className="w-full flex flex-col items-center gap-4">
@@ -464,7 +501,7 @@ export function MiniCardCredito({
               {mora > 0 && (
                 <span className="text-xs font-semibold text-red-500">
                   mora(Q
-                  {mora.toLocaleString("es-GT", { minimumFractionDigits: 2 })})
+                  {moraNum.toLocaleString("es-GT", { minimumFractionDigits: 2 })})
                 </span>
               )}
             </div>
@@ -487,7 +524,7 @@ export function MiniCardCredito({
             {mora > 0 && cuotasAtrasadasUnicas.length === 0 && (
               <div className="mt-1 px-2 py-1 bg-red-50 border border-red-300 rounded text-[11px] font-semibold text-red-700">
                 ⚠️ Tiene mora activa de Q
-                {mora.toLocaleString("es-GT", { minimumFractionDigits: 2 })} sin
+                {moraNum.toLocaleString("es-GT", { minimumFractionDigits: 2 })} sin
                 cuotas atrasadas visibles
                 {(cuotasEnValidacionInfo?.total ?? 0) > 0
                   ? " — se generó mientras sus boletas esperan validación de contabilidad; normalmente se libera al validarlas. Si persiste, revisar con contabilidad."
@@ -524,52 +561,161 @@ export function MiniCardCredito({
             )}
           </div>
 
+          {/* Rubros pendientes (tarjeta de circulación, placas, traspaso...).
+              El motor de pagos los cobra ANTES que la cuota, así que el
+              asesor tiene que verlos desglosados: un total combinado sin
+              explicar de qué está hecho oculta que parte de la boleta se va
+              a un cobro que no es la cuota. Si no hay rubros, esta tarjeta
+              no se renderiza y nada cambia (el 99% de la cartera). */}
+          {rubros && rubros.length > 0 && (
+            <div className="flex flex-col bg-white rounded-lg p-4 shadow-sm border border-blue-100 lg:col-span-2">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="font-bold text-blue-700 text-sm">
+                  Rubros ({rubros.length})
+                </span>
+                <span className="px-2 py-0.5 bg-amber-500 text-white text-[10px] font-extrabold rounded-full shadow-md">
+                  💳 COBRO ADICIONAL
+                </span>
+              </div>
+
+              <div className="flex flex-col gap-2 mb-2">
+                {rubros.map((r) => {
+                  // `disponible` es lo que ESTA boleta puede cobrar (el saldo
+                  // menos lo que otras boletas ya apartaron esperando
+                  // contabilidad); puede ser 0 aunque el saldo siga vivo.
+                  const disponibleNum = Number(r.disponible || 0);
+                  const yaApartado = disponibleNum === 0;
+                  return (
+                    <div
+                      key={r.rubro_id}
+                      className="flex flex-col border-b border-gray-100 pb-2 last:border-0 last:pb-0"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs text-gray-800 font-semibold">
+                          · {r.tipo_nombre}
+                          {r.obligatorio && (
+                            <span className="ml-1.5 px-1.5 py-0.5 bg-red-100 text-red-700 text-[9px] font-bold rounded align-middle">
+                              OBLIGATORIO
+                            </span>
+                          )}
+                        </span>
+                        <span
+                          className={
+                            "text-xs font-bold " +
+                            (yaApartado ? "text-gray-400" : "text-amber-700")
+                          }
+                        >
+                          Q
+                          {disponibleNum.toLocaleString("es-GT", {
+                            minimumFractionDigits: 2,
+                          })}
+                        </span>
+                      </div>
+                      {r.descripcion && (
+                        <span className="text-[11px] text-gray-500 pl-3">
+                          {r.descripcion}
+                        </span>
+                      )}
+                      {yaApartado && (
+                        <div className="mt-1 px-2 py-1 bg-amber-50 border border-amber-300 rounded text-[11px] font-semibold text-amber-700 self-start">
+                          ⏳ Ya apartado por otra boleta (esperando validación
+                          de contabilidad)
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Subtotal de rubros, NO el total a cobrar. Esta tarjeta antes
+                  cerraba con un "Total a cobrar" = cuota + rubros que ignoraba
+                  mora y convenio, así que en un crédito con rubros Y convenio
+                  el asesor veía dos cifras distintas presentadas como "el
+                  total" y podía cobrar de menos. El único total vive ahora en
+                  la tarjeta amarilla de abajo, que sí contempla la cascada
+                  completa; acá queda solo el desglose. */}
+              <div className="mt-1 pt-2 border-t border-blue-100 flex items-center justify-between text-xs text-gray-600">
+                <span>Suma de rubros ({rubros.length}):</span>
+                <span className="font-semibold text-amber-700">
+                  Q
+                  {(rubrosActual ?? 0).toLocaleString("es-GT", {
+                    minimumFractionDigits: 2,
+                  })}
+                </span>
+              </div>
+              <div className="mt-1 text-[11px] text-gray-500 italic">
+                Incluido en el total a cobrar de abajo.
+              </div>
+            </div>
+          )}
+
           {/* Total a Pagar */}
           <div className="flex flex-col bg-gradient-to-br from-yellow-50 to-amber-50 rounded-lg p-4 shadow-sm border border-yellow-200">
             <span className="font-bold text-yellow-700 text-sm mb-1">
-              {convenioActivoInfo ? "💰 Total a Pagar" : "Abonos Realizados"}
+              {mostrarTotalCombinado ? "💰 Total a Cobrar" : "Abonos Realizados"}
             </span>
-            
-            {convenioActivoInfo ? (
+
+            {mostrarTotalCombinado ? (
               <>
+                {/* Desglose en el ORDEN de la cascada del backend (mora →
+                    rubros → convenio → cuota). Nunca se muestra el total sin
+                    decir de qué está hecho. */}
                 <div className="flex flex-col gap-2">
-                  {/* Cuota Convenio */}
-                  <div className="flex items-center justify-between pb-2 border-b border-yellow-200">
-                    <span className="text-xs text-gray-600">Convenio:</span>
-                    <span className="text-sm font-bold text-purple-700">
-                      Q{Number(convenioActivoInfo.cuotaConvenioAPagar).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                  
-                  {/* Cuota Normal */}
-                  <div className="flex items-center justify-between pb-2 border-b border-yellow-200">
-                    <span className="text-xs text-gray-600">Normal:</span>
-                    <span className="text-sm font-bold text-indigo-700">
-                      Q{Number(cuotaMensualAPagar || credito.cuota).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                  
-                  {/* Abonos realizados */}
-                  {(abonosParciales?.total ?? 0) > 0 && (
+                  {moraNum > 0 && (
                     <div className="flex items-center justify-between pb-2 border-b border-yellow-200">
-                      <span className="text-xs text-gray-600">Abonos realizados:</span>
-                      <span className="text-sm font-bold text-green-600">
-                        -Q{(abonosParciales?.total ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                      <span className="text-xs text-gray-600">Mora:</span>
+                      <span className="text-sm font-bold text-red-600">
+                        Q{moraNum.toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                       </span>
                     </div>
                   )}
 
-                  {/* Total */}
+                  {/* Los rubros ya apartados por otra boleta valen Q0.00 en
+                      `disponible` y por eso no inflan este renglón. */}
+                  {rubrosNum > 0 && (
+                    <div className="flex items-center justify-between pb-2 border-b border-yellow-200">
+                      <span className="text-xs text-gray-600">
+                        Rubros{rubros && rubros.length > 0 ? ` (${rubros.length})` : ""}:
+                      </span>
+                      <span className="text-sm font-bold text-amber-700">
+                        Q{rubrosNum.toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Cuota Convenio */}
+                  {convenioActivoInfo && (
+                    <div className="flex items-center justify-between pb-2 border-b border-yellow-200">
+                      <span className="text-xs text-gray-600">Convenio:</span>
+                      <span className="text-sm font-bold text-purple-700">
+                        Q{convenioNum.toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Cuota Normal */}
+                  <div className="flex items-center justify-between pb-2 border-b border-yellow-200">
+                    <span className="text-xs text-gray-600">Normal:</span>
+                    <span className="text-sm font-bold text-indigo-700">
+                      Q{cuotaNum.toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+
+                  {/* Abonos realizados */}
+                  {abonosNum > 0 && (
+                    <div className="flex items-center justify-between pb-2 border-b border-yellow-200">
+                      <span className="text-xs text-gray-600">Abonos realizados:</span>
+                      <span className="text-sm font-bold text-green-600">
+                        -Q{abonosNum.toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Total: la ÚNICA cifra de la pantalla presentada como total */}
                   <div className="flex items-center justify-between pt-1">
                     <span className="text-sm font-bold text-gray-700">TOTAL:</span>
                     <span className="text-2xl font-black text-blue-700">
-                      Q{(() => {
-                        const cuotaConvenio = Number(convenioActivoInfo.cuotaConvenioAPagar);
-                        const cuotaNormal = Number(cuotaMensualAPagar || credito.cuota);
-                        const abonosTotal = abonosParciales?.total ?? 0;
-                        const total = cuotaConvenio + cuotaNormal - abonosTotal;
-                        return total.toLocaleString("es-GT", { minimumFractionDigits: 2 });
-                      })()}
+                      Q{totalACobrar.toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                     </span>
                   </div>
                 </div>

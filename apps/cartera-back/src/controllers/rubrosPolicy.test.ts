@@ -925,6 +925,30 @@ describe("saldoTrasReversaDeReclamo", () => {
       }).toFixed(2),
     ).toBe("100.00");
   });
+
+  // La DESAPLICACIÓN ("Revertir Especial": el pago vuelve a `pending` pero sigue
+  // vivo) usa esta misma función: lo que cambia entre reversa y desaplicación es
+  // qué pasa con la fila de `rubros_pagos`, no cuánto saldo vuelve al rubro.
+  it("sirve igual para la desaplicación: el ciclo validated → pending devuelve lo descontado", () => {
+    const saldoTrasAplicar = "0";
+    expect(
+      saldoTrasReversaDeReclamo({
+        saldoPendiente: saldoTrasAplicar,
+        montoAplicado: "400",
+        anulado: false,
+      }).toFixed(2),
+    ).toBe("400.00");
+  });
+
+  it("en la desaplicación el rubro ANULADO tampoco resucita: el 409 al revalidar es deliberado", () => {
+    expect(
+      saldoTrasReversaDeReclamo({
+        saldoPendiente: "0",
+        montoAplicado: "400",
+        anulado: true,
+      }).toFixed(2),
+    ).toBe("0.00");
+  });
 });
 
 describe("crearEstampadorRubros", () => {

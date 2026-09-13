@@ -2290,3 +2290,41 @@
       index("rubros_historial_pago_idx").on(t.pago_id),
     ]
   );
+
+  /**
+   * El vínculo boleta ↔ rubro (migración 0037).
+   *
+   * El pago corre en dos etapas: `POST /newPayment` sólo APARTA (escribe el
+   * reclamo con `aplicado = false` y NO toca `rubros.saldo_pendiente`) y
+   * `/aplicar-pago` es el que baja el saldo cuando contabilidad valida. Esta
+   * tabla es donde vive lo apartado mientras tanto, y por lo mismo es la que
+   * contesta "¿este rubro tiene reclamos vivos?" — la pregunta que congela su
+   * edición y que hace imposible que al aplicar el saldo ya no alcance.
+   */
+  export const rubros_pagos = customSchema.table(
+    "rubros_pagos",
+    {
+      id: serial("id").primaryKey(),
+      // CASCADE: la reversa de un parcial BORRA la fila de pagos_credito, y un
+      // reclamo huérfano congelaría el rubro para siempre. La reversa procesa
+      // los reclamos antes de ese borrado; la cascada es la red, no el camino.
+      pago_id: integer("pago_id")
+        .notNull()
+        .references(() => pagos_credito.pago_id, { onDelete: "cascade" }),
+      rubro_id: integer("rubro_id")
+        .notNull()
+        .references(() => rubros.rubro_id),
+      // Lo APARTADO al registrar la boleta.
+      monto: numeric("monto", { precision: 18, scale: 2 }).notNull(),
+      // Lo REALMENTE descontado al aplicar. Nullable a propósito: un 0 sería
+      // indistinguible de "se aplicó y no descontó nada".
+      monto_aplicado: numeric("monto_aplicado", { precision: 18, scale: 2 }),
+      aplicado: boolean("aplicado").notNull().default(false),
+      created_at: timestamp("created_at").defaultNow(),
+    },
+    (t) => [
+      index("rubros_pagos_pago_idx").on(t.pago_id),
+      // La consulta caliente: "¿tiene reclamos vivos?" en cada edición.
+      index("rubros_pagos_rubro_aplicado_idx").on(t.rubro_id, t.aplicado),
+    ]
+  );

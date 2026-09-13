@@ -57,6 +57,8 @@ export function PagoForm() {
     resetBuscador,
     setResetBuscador,
     mora,
+    rubros,
+    rubrosActual,
     convenioActivoInfo,
     cuotaSeleccionada,
     abonosCuota,
@@ -217,6 +219,9 @@ export function PagoForm() {
         const montoBoleta = Number(formik.values.monto_boleta) || 0;
         const otros = Number(formik.values.otros) || 0;
         const moraMonto = mora || 0;
+        // rubrosActual ya viaja como number (a diferencia de moraActual, que
+        // llega en string cuando hay mora).
+        const rubrosMonto = Number(rubrosActual || 0);
         const cuotaConvenio = Number(convenioActivoInfo?.cuotaConvenioAPagar) || 0;
         const saldoAFavor = Number(dataCredito?.usuario?.saldo_a_favor) || 0;
 
@@ -225,49 +230,106 @@ export function PagoForm() {
 
         const distribucion: { concepto: string; monto: number }[] = [];
 
+        // Los montos aplicados de cada escalón se declaran acá afuera porque el
+        // aviso de "cobro corto" de más abajo tiene que nombrar QUIÉN se llevó
+        // la plata, no solo los rubros.
+        let montoOtrosAplicado = 0;
+        let montoMoraAplicado = 0;
+        let montoConvenioAplicado = 0;
+
         // 1 Otros
         if (otros > 0) {
-          const montoOtros = Math.min(montoRestante, otros);
-          montoRestante -= montoOtros;
+          montoOtrosAplicado = Math.min(montoRestante, otros);
+          montoRestante -= montoOtrosAplicado;
           distribucion.push({
             concepto: "1. Otros",
-            monto: montoOtros,
+            monto: montoOtrosAplicado,
           });
         }
 
         // 2 Mora
         if (moraMonto > 0) {
-          const montoMora = Math.min(montoRestante, moraMonto);
-          montoRestante -= montoMora;
+          montoMoraAplicado = Math.min(montoRestante, Number(moraMonto));
+          montoRestante -= montoMoraAplicado;
           distribucion.push({
             concepto: "2. Mora",
-            monto: montoMora,
+            monto: montoMoraAplicado,
           });
         }
 
-        // 3 Convenio
-        if (cuotaConvenio > 0) {
-          const montoConv = Math.min(montoRestante, cuotaConvenio);
-          montoRestante -= montoConv;
+        // 3 Rubros (tarjeta de circulación, placas, traspaso...). El back los
+        // cobra en este punto exacto de la cascada — otros → mora → rubros →
+        // convenio → cuotas —, antes que el convenio y la cuota. Mostrarlos
+        // en otro orden le mentiría al asesor sobre cómo se aplica la plata.
+        let montoRubrosAplicado = 0;
+        if (rubrosMonto > 0) {
+          montoRubrosAplicado = Math.min(montoRestante, rubrosMonto);
+          montoRestante -= montoRubrosAplicado;
           distribucion.push({
-            concepto: "3. Cuota Convenio",
-            monto: montoConv,
+            concepto: "3. Rubros",
+            monto: montoRubrosAplicado,
           });
         }
 
-        // 4 Cuota Normal (restando abonos ya realizados desde endpoint)
+        // 4 Convenio
+        if (cuotaConvenio > 0) {
+          montoConvenioAplicado = Math.min(montoRestante, cuotaConvenio);
+          montoRestante -= montoConvenioAplicado;
+          distribucion.push({
+            concepto: "4. Cuota Convenio",
+            monto: montoConvenioAplicado,
+          });
+        }
+
+        // 5 Cuota Normal (restando abonos ya realizados desde endpoint)
         const cuotaBase =
           Number(dataCredito?.cuotaMensualAPagar ?? dataCredito?.credito?.cuota) || 0;
         const abonosYaHechos = displayedPartialContribution;
         const cuotaNormal = Math.max(0, cuotaBase - abonosYaHechos);
+        let montoCuotaAplicado = 0;
         if (cuotaNormal > 0 && montoRestante > 0) {
-          const montoCuota = Math.min(montoRestante, cuotaNormal);
-          montoRestante -= montoCuota;
+          montoCuotaAplicado = Math.min(montoRestante, cuotaNormal);
+          montoRestante -= montoCuotaAplicado;
           distribucion.push({
-            concepto: `4. Cuota #${cuotaSeleccionada || "?"}`,
-            monto: montoCuota,
+            concepto: `5. Cuota #${cuotaSeleccionada || "?"}`,
+            monto: montoCuotaAplicado,
           });
         }
+
+        // Aviso de cobro corto: si tras otros + mora + rubros (+ convenio) no
+        // alcanza para la cuota completa, el asesor tiene que enterarse ANTES
+        // de confirmar — no es un bloqueo, un abono parcial es legítimo, pero
+        // no puede pasar que se entere después de que "sobró" o "faltó" sin
+        // saber qué se comió parte de la boleta.
+        //
+        // Acá se arma QUIÉN se llevó la plata antes que la cuota. El aviso antes
+        // culpaba siempre a los rubros ("porque QX se van a rubros"), aunque el
+        // faltante viniera de la mora: con boleta Q1,000 / mora Q800 / rubros
+        // Q100 / cuota Q200, la cuota queda corta por la mora y el aviso
+        // señalaba los Q100. Sobreatribuir la causa le impide al asesor
+        // explicarle al cliente por qué su cuota no quedó cubierta.
+        const causasCobroCorto = [
+          { etiqueta: "otros", monto: montoOtrosAplicado },
+          { etiqueta: "mora", monto: montoMoraAplicado },
+          { etiqueta: "rubros", monto: montoRubrosAplicado },
+          { etiqueta: "el convenio", monto: montoConvenioAplicado },
+        ].filter((c) => c.monto > 0.005);
+
+        const textoCausas = causasCobroCorto
+          .map((c) => `Q${c.monto.toFixed(2)} a ${c.etiqueta}`)
+          .reduce(
+            (acc, txt, i, arr) =>
+              i === 0 ? txt : `${acc}${i === arr.length - 1 ? " y " : ", "}${txt}`,
+            "",
+          );
+
+        // Se avisa solo si algo que va antes que la cuota consumió boleta; un
+        // abono parcial "pelado" (boleta menor a la cuota, sin nada más de por
+        // medio) se sigue mostrando sin aviso, igual que hoy.
+        const cuotaQuedaCorta =
+          causasCobroCorto.length > 0 &&
+          cuotaNormal > 0 &&
+          montoCuotaAplicado < cuotaNormal - 0.005;
 
         return (
           <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl p-5 border-2 border-green-200">
@@ -304,6 +366,23 @@ export function PagoForm() {
                   </div>
                   <p className="text-xs text-yellow-700 italic">
                     Este monto se guardara como saldo a favor para futuros pagos
+                  </p>
+                </div>
+              )}
+
+              {cuotaQuedaCorta && (
+                <div className="flex flex-col gap-1 py-3 px-4 rounded-lg border-2 border-orange-300 bg-orange-50">
+                  <span className="text-orange-800 font-bold flex items-center gap-2">
+                    <span className="text-xl">!</span>
+                    Cobro corto: la cuota queda parcial
+                  </span>
+                  <p className="text-xs text-orange-700">
+                    Con este monto la cuota queda en{" "}
+                    <strong>Q{montoCuotaAplicado.toFixed(2)}</strong> de{" "}
+                    <strong>Q{cuotaNormal.toFixed(2)}</strong>, porque{" "}
+                    <strong>{textoCausas}</strong> se cobran antes que la cuota.
+                    Es un abono parcial válido — confirmá solo si es lo
+                    esperado.
                   </p>
                 </div>
               )}
@@ -348,6 +427,17 @@ export function PagoForm() {
       </span>
       <span className="text-gray-700 font-bold">
         Q{Number(moraMonto).toFixed(2)}
+      </span>
+    </div>
+  )}
+
+  {rubrosMonto > 0 && (
+    <div className="flex justify-between items-center text-sm">
+      <span className="text-gray-600 font-medium">
+        - Rubros:
+      </span>
+      <span className="text-gray-700 font-bold">
+        Q{Number(rubrosMonto).toFixed(2)}
       </span>
     </div>
   )}
@@ -536,6 +626,8 @@ export function PagoForm() {
                 onCuotaSeleccionadaChange={setCuotaSeleccionada}
                 cuotasPendientesInfo={cuotasPendientesInfo ?? { cuotas: [] }}
                 mora={mora || 0}
+                rubros={rubros}
+                rubrosActual={rubrosActual}
                 convenioActivoInfo={convenioActivoInfo}
                 cuotaMensualAPagar={dataCredito.cuotaMensualAPagar}
                 abonosParciales={(() => {

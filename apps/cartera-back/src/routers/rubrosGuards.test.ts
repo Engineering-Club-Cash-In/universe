@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { mock } from "bun:test";
 import { Elysia } from "elysia";
 import jwt from "jsonwebtoken";
+import { lockPoolMock } from "../utils/testMocks";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Gates de rol del módulo de rubros — y la atribución del rol.
@@ -88,9 +89,27 @@ const motorConCola = (...resultados: any[][]) => {
 const SIN_BD = () => motorConCola();
 
 let dbImpl: any = SIN_BD();
+
+/**
+ * El `lockPool` también es intercambiable, por la misma razón que `dbImpl`:
+ * `mock.module` corre UNA vez al cargar el archivo, así que el test que quiera
+ * MIRAR el lock no puede re-mockear el módulo (envenenaría a los demás). El
+ * default sigue siendo el stub mudo de `testMocks`; sólo el test del candado
+ * lo cambia por un espía, y lo devuelve en su `finally`.
+ */
+let lockImpl: any = lockPoolMock;
+
 mock.module("../database", () => ({
   db: new Proxy({}, { get: (_t, p) => dbImpl[p] }),
   client: {},
+  // `lockPool` es obligatorio desde que `editarRubro`/`anularRubro` toman el
+  // advisory lock por crédito (el mismo que `insertPayment`) para no dejar que
+  // una corrección se cuele en la ventana en que una boleta ya decidió su
+  // reparto de rubros pero todavía no escribió el reclamo. Sin esta clave el
+  // mock no exporta lo que `paymentAdvisoryLock.ts` importa y el ARCHIVO
+  // ENTERO revienta al cargarse. El lock acá es un no-op: lo que estos tests
+  // prueban es el cableado de roles, no la serialización.
+  lockPool: new Proxy({}, { get: (_t, p) => lockImpl[p] }),
 }));
 
 const { rubrosRouter } = await import("./rubros");
@@ -287,10 +306,20 @@ describe("POST /rubros/:id/anular — la única salida del cobro cargado por err
     completado: false,
   };
 
-  // Orden de `anularRubro`: resolver al usuario, la fila del rubro (FOR
-  // UPDATE), el UPDATE y el evento de historial.
-  const colaDeAnulacion = (rubro: any) =>
-    motorConCola([{ id: 1 }], [rubro], [{ ...rubro }], []);
+  // Orden de `anularRubro`: resolver al usuario, AVERIGUAR A QUÉ CRÉDITO
+  // pertenece el rubro (lectura sin bloqueo, sólo para saber qué advisory lock
+  // tomar), la fila del rubro (FOR UPDATE, ya bajo el lock), los reclamos
+  // VIVOS de boletas registradas sobre ese rubro, el UPDATE y el evento de
+  // historial. Sin reclamos (`[]`) la anulación procede.
+  const colaDeAnulacion = (rubro: any, reclamos: any[] = []) =>
+    motorConCola(
+      [{ id: 1 }],
+      [{ credito_id: rubro.credito_id }],
+      [rubro],
+      reclamos,
+      [{ ...rubro }],
+      []
+    );
 
   it("anula el rubro vivo: saldo 0, completado y fuera del índice — sin tocar el monto", async () => {
     dbImpl = colaDeAnulacion(RUBRO_VIVO);
@@ -355,6 +384,26 @@ describe("POST /rubros/:id/anular — la única salida del cobro cargado por err
       const res = await post("/rubros/3/anular", "ADMIN", ANULACION);
       expect(res.status).toBe(409);
       expect(((await res.json()) as any).message).toContain("ya está completado");
+    } finally {
+      dbImpl = SIN_BD();
+    }
+  });
+
+  it("409 con una boleta registrada encima: primero se resuelve esa boleta", async () => {
+    // Una boleta ya apartó Q150 de este rubro y espera a contabilidad. Anular
+    // dejaría el saldo en 0 y al validarla no alcanzaría — este 409 es lo que
+    // vuelve imposible ese descuadre.
+    dbImpl = colaDeAnulacion(RUBRO_VIVO, [
+      { rubro_id: 3, pago_id: 77, monto: "150.00" },
+    ]);
+    try {
+      const res = await post("/rubros/3/anular", "ADMIN", ANULACION);
+      expect(res.status).toBe(409);
+      const mensaje = ((await res.json()) as any).message;
+      expect(mensaje).toContain("150.00");
+      expect(mensaje).toContain("77");
+      // Y NADA se escribió: el rubro queda como estaba.
+      expect(dbImpl.valoresEscritos).toEqual([]);
     } finally {
       dbImpl = SIN_BD();
     }

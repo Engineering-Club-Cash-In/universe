@@ -420,3 +420,332 @@ export const nuevoSaldoTrasEdicion = ({
  */
 export const rubroCompletado = (saldoPendiente: BigInput): boolean =>
   new Big(saldoPendiente).lte(0);
+
+// ===========================================================================
+// FASE 2 — COBRO DE RUBROS EN EL FLUJO DE PAGOS
+//
+// El pago corre en DOS ETAPAS y estas reglas viven en la frontera entre ambas:
+//
+//   1. REGISTRAR (`POST /newPayment`): la boleta sólo ESCRIBE filas en
+//      `pagos_credito` con `validationStatus: "pending"`. No mueve plata. Acá
+//      el rubro se APARTA: se escribe un reclamo en `rubros_pagos` con
+//      `aplicado = false` y `rubros.saldo_pendiente` NO se toca.
+//   2. APLICAR (`/aplicar-pago`): contabilidad valida y recién ahí baja el
+//      saldo del rubro. Regla del dueño del dominio: el saldo baja al APLICAR,
+//      registrar sólo aparta.
+//
+// Todo lo decidible de ese flujo vive acá como función pura: el orden de
+// consumo y el neteo contra las boletas hermanas son aritmética de negocio que
+// se tiene que poder probar sin base de datos.
+// ===========================================================================
+
+/** Lo que hace falta saber de un rubro para ordenarlo en la cola de cobro. */
+export type RubroOrdenable = {
+  rubro_id: number;
+  /** Del TIPO (`rubros_tipos.obligatorio`), no del rubro: ver `puedeCrearRubro`. */
+  obligatorio: boolean;
+  created_at: Date | string | null;
+};
+
+/**
+ * La cola de cobro: OBLIGATORIOS primero, y dentro de cada grupo el más VIEJO
+ * primero.
+ *
+ * Las dos mitades responden a cosas distintas. El obligatorio es plata que
+ * Cartera YA desembolsó por el cliente (la tarjeta de circulación, un
+ * traspaso): si la boleta no alcanza para todo, lo que tiene que quedar
+ * pendiente es el cobro opcional, no el gasto ya incurrido. Y a igualdad de
+ * naturaleza cobra primero el más viejo, que es el criterio con el que la
+ * migración 0036 documentó `created_at` ("created_at define el orden de
+ * consumo") y el único que no depende de en qué orden los devuelva Postgres.
+ *
+ * El desempate final por `rubro_id` existe porque dos rubros creados en la
+ * misma transacción comparten `created_at` al microsegundo: sin él, el reparto
+ * de una boleta que no alcanza para ambos dependería del plan de la consulta y
+ * el mismo pago daría resultados distintos en dos corridas.
+ *
+ * Un `created_at` nulo (columna con DEFAULT, no NOT NULL) va al FINAL de su
+ * grupo y no al principio: sin fecha no se puede afirmar que sea el más viejo,
+ * y darle la prioridad máxima por un dato faltante sería inventarla.
+ *
+ * Devuelve un arreglo nuevo: el llamador suele tener la lista que salió de la
+ * consulta y reordenarla en el lugar escondería el criterio.
+ */
+export const ordenarRubrosParaCobro = <T extends RubroOrdenable>(
+  rubros: readonly T[]
+): T[] => {
+  const alMilis = (v: Date | string | null): number => {
+    if (v === null || v === undefined) return Number.POSITIVE_INFINITY;
+    const t = new Date(v).getTime();
+    return Number.isNaN(t) ? Number.POSITIVE_INFINITY : t;
+  };
+
+  return [...rubros].sort((a, b) => {
+    if (a.obligatorio !== b.obligatorio) return a.obligatorio ? -1 : 1;
+    const fecha = alMilis(a.created_at) - alMilis(b.created_at);
+    if (fecha !== 0) return fecha;
+    return a.rubro_id - b.rubro_id;
+  });
+};
+
+/**
+ * Cuánto de este rubro puede cobrar la boleta EN VUELO: su saldo menos lo que
+ * ya apartaron las boletas hermanas todavía sin aplicar.
+ *
+ * Es el mismo criterio que `registerPayment.ts` usa para las cuotas (el bloque
+ * de `pagosHermanos` que alimenta `calcularSaldoNetoCuota`) y por la misma
+ * razón: entre que una boleta se registra y contabilidad la valida pueden
+ * entrar más boletas al mismo crédito, y como el registro NO baja el saldo del
+ * rubro, las tres leerían el saldo completo y apartarían Q100 cada una contra
+ * un rubro de Q100. Netear contra los reclamos vivos es lo que hace que la
+ * suma de lo apartado nunca supere el saldo — y por lo tanto que el guard de
+ * la aplicación (`puedeAplicarReclamo`) no tenga por qué dispararse nunca.
+ *
+ * Nunca negativo: un rubro sobre-reclamado por datos históricos es un rubro
+ * sin disponible, no uno que devuelva plata.
+ */
+export const disponibleDeRubro = ({
+  saldoPendiente,
+  reclamadoVivo,
+}: {
+  saldoPendiente: BigInput;
+  reclamadoVivo: BigInput;
+}): Big => {
+  const disponible = new Big(saldoPendiente).minus(new Big(reclamadoVivo ?? 0));
+  return disponible.gt(0) ? disponible : new Big(0);
+};
+
+export type RubroCobrable = RubroOrdenable & {
+  saldoPendiente: BigInput;
+  /** Σ de los reclamos `aplicado = false` de OTRAS boletas vivas. */
+  reclamadoVivo: BigInput;
+};
+
+export type RepartoRubros = {
+  /** Un reclamo por rubro tocado, en el orden en que se cobraron. */
+  cobros: { rubro_id: number; monto: string }[];
+  /** Lo que la boleta le entrega a los rubros en total. */
+  total: Big;
+  /** Lo que le queda a la boleta para las cuotas. */
+  disponibleRestante: Big;
+};
+
+/**
+ * Reparte el disponible de la boleta entre los rubros vivos del crédito.
+ *
+ * Consume del disponible de cada rubro LO QUE ALCANCE —el abono parcial está
+ * permitido, igual que en la mora—, y a diferencia del convenio lo consumido
+ * SÍ se resta del disponible: el convenio sólo deja rastro de cuánto de la
+ * boleta cuenta como catch-up, mientras que un rubro es un cobro aparte que de
+ * verdad compite con las cuotas por la plata.
+ *
+ * Los montos salen ya redondeados a la escala de la columna (`numeric(18,2)`),
+ * con el mismo `redondearMonto` que valida y guarda el resto del módulo: el
+ * número que se resta del disponible tiene que ser exactamente el que se va a
+ * escribir en `rubros_pagos.monto`, o el descuadre nace en el reparto.
+ *
+ * Un cobro de Q0 no se escribe: un reclamo vivo por cero congela la edición del
+ * rubro (ver `puedeTocarRubroConReclamosVivos`) sin apartar nada.
+ */
+export const repartirEnRubros = ({
+  disponible,
+  rubros,
+}: {
+  disponible: BigInput;
+  rubros: readonly RubroCobrable[];
+}): RepartoRubros => {
+  let restante = new Big(disponible ?? 0);
+  const cobros: { rubro_id: number; monto: string }[] = [];
+  let total = new Big(0);
+
+  if (restante.lte(0)) {
+    return { cobros, total, disponibleRestante: restante.gt(0) ? restante : new Big(0) };
+  }
+
+  for (const rubro of ordenarRubrosParaCobro(rubros)) {
+    if (restante.lte(0)) break;
+
+    const disponibleRubro = disponibleDeRubro({
+      saldoPendiente: rubro.saldoPendiente,
+      reclamadoVivo: rubro.reclamadoVivo,
+    });
+    if (disponibleRubro.lte(0)) continue;
+
+    const cobro = new Big(
+      redondearMonto(restante.lt(disponibleRubro) ? restante : disponibleRubro)
+    );
+    if (cobro.lte(0)) continue;
+
+    cobros.push({ rubro_id: rubro.rubro_id, monto: cobro.toFixed(2) });
+    total = total.plus(cobro);
+    restante = restante.minus(cobro);
+  }
+
+  return { cobros, total, disponibleRestante: restante };
+};
+
+/**
+ * ¿Se puede EDITAR o ANULAR este rubro, o hay una boleta registrada esperando a
+ * contabilidad que ya apartó parte de su saldo?
+ *
+ * Este bloqueo es lo que vuelve imposible el descuadre que el guard de la
+ * aplicación detecta: mientras exista un reclamo con `aplicado = false`, el
+ * saldo del rubro está comprometido, y bajarle el monto (o anularlo, que lo
+ * deja en 0) haría que al validar esa boleta el saldo ya no alcance para lo
+ * apartado. Sin el bloqueo, la salida sería aplicar de menos —o sea perder
+ * plata en silencio—; con él, el conflicto se ve ANTES, con las dos salidas
+ * escritas en el mensaje: aplicar esa boleta o revertirla.
+ *
+ * Se rechaza TODA edición y no sólo la que baja el monto: el reclamo apartó
+ * saldo de un rubro concreto, y cambiarle la descripción mientras una boleta
+ * pendiente lo está cobrando también cambia lo único que el cliente puede leer
+ * cuando reclame ese cargo.
+ */
+export const puedeTocarRubroConReclamosVivos = ({
+  reclamos,
+}: {
+  reclamos: readonly { pago_id: number; monto: BigInput }[];
+}): Veredicto => {
+  if (reclamos.length === 0) return { permitido: true };
+
+  const total = reclamos.reduce(
+    (acc, r) => acc.plus(new Big(r.monto ?? 0)),
+    new Big(0)
+  );
+  const pagos = reclamos.map((r) => `#${r.pago_id}`).join(", ");
+
+  return {
+    permitido: false,
+    status: 409,
+    motivo:
+      `No se puede modificar el rubro: hay ${reclamos.length} boleta(s) registrada(s) ` +
+      `(${pagos}) que ya apartaron Q${total.toFixed(2)} de su saldo y esperan a ` +
+      `contabilidad. Aplique esa(s) boleta(s) o reviértala(s) y vuelva a intentar.`,
+  };
+};
+
+/**
+ * ¿El saldo del rubro alcanza para lo que la boleta apartó?
+ *
+ * Guard RUIDOSO a propósito: si no alcanza, la aplicación FALLA en vez de
+ * abonar de menos. Por diseño esto no debería pasar nunca —el neteo contra los
+ * reclamos hermanos (`disponibleDeRubro`) impide apartar de más y el bloqueo de
+ * edición (`puedeTocarRubroConReclamosVivos`) impide que el saldo se achique por
+ * debajo mientras el reclamo vive—, así que llegar acá significa que uno de los
+ * dos falló. Aplicar el mínimo taparía el agujero justo donde se puede ver;
+ * abortar la transacción deja el pago sin aplicar, el reclamo intacto y el caso
+ * visible. Es la misma filosofía del gate de integridad de cuotas de
+ * `registerPayment.ts`: mejor un 4xx/500 que un descuadre silencioso.
+ */
+export const puedeAplicarReclamo = ({
+  rubro_id,
+  saldoPendiente,
+  montoApartado,
+}: {
+  rubro_id: number;
+  saldoPendiente: BigInput;
+  montoApartado: BigInput;
+}): Veredicto => {
+  const saldo = new Big(saldoPendiente ?? 0);
+  const apartado = new Big(montoApartado ?? 0);
+
+  if (saldo.lt(apartado)) {
+    return {
+      permitido: false,
+      status: 409,
+      motivo:
+        `Inconsistencia de integridad: el rubro ${rubro_id} tiene saldo ` +
+        `Q${saldo.toFixed(2)} pero esta boleta apartó Q${apartado.toFixed(2)}. ` +
+        `El pago NO se aplica: revise si el rubro se editó o se anuló con la ` +
+        `boleta ya registrada.`,
+    };
+  }
+
+  return { permitido: true };
+};
+
+/**
+ * ¿El saldo del rubro TODAVÍA alcanza para lo que esta boleta va a APARTAR?
+ *
+ * Hermano de `puedeAplicarReclamo`, pero una etapa antes: éste se pregunta al
+ * ESCRIBIR el reclamo, aquél al aplicarlo. Existe porque entre las dos hay una
+ * ventana real: `cobrarRubrosParaBoleta` calcula el reparto al principio de
+ * `insertPayment`, con una lectura SIN bloqueo, y el reclamo se escribe recién
+ * al final, después de todo el recorrido de cuotas. Un admin que corrija o
+ * anule el rubro en esa ventana achica el saldo por debajo de un reparto ya
+ * decidido, y sin este guard la boleta se registraba igual con un reclamo
+ * imposible: el 409 saltaba días después, en la validación de contabilidad, y
+ * como ese 409 aborta la transacción que aplica TODO el pago, se caía la boleta
+ * entera (cuota sin cerrar, capital sin tocar, inversionistas sin repartir).
+ *
+ * Fallar acá es mucho mejor: el asesor lo ve en el momento, con la boleta
+ * todavía en la mano, y reintentar recalcula el reparto contra el rubro ya
+ * corregido. Por eso el motivo está escrito para él —sin jerga, diciendo qué
+ * pasó y qué hacer— y no para quien lea un log.
+ *
+ * Se mide contra el DISPONIBLE (saldo − reclamos vivos de otras boletas), no
+ * contra el saldo pelado: es el mismo número con el que `repartirEnRubros`
+ * había decidido el cobro, así que el guard rechaza exactamente cuando el
+ * reparto dejó de ser válido y no antes.
+ */
+export const puedeApartarReclamo = ({
+  rubro_id,
+  saldoPendiente,
+  reclamadoVivo,
+  montoApartado,
+}: {
+  rubro_id: number;
+  saldoPendiente: BigInput;
+  /** Σ de lo apartado por OTRAS boletas vivas y todavía sin aplicar. */
+  reclamadoVivo: BigInput;
+  montoApartado: BigInput;
+}): Veredicto => {
+  const disponible = disponibleDeRubro({ saldoPendiente, reclamadoVivo });
+  const apartado = new Big(montoApartado ?? 0);
+
+  if (disponible.lt(apartado)) {
+    return {
+      permitido: false,
+      status: 409,
+      motivo:
+        `El cobro adicional #${rubro_id} cambió mientras se registraba esta ` +
+        `boleta: ahora quedan Q${disponible.toFixed(2)} por cobrar y la boleta ` +
+        `iba a apartar Q${apartado.toFixed(2)}. La boleta NO se registró. ` +
+        `Vuelva a registrarla: el reparto se recalcula con el cobro ya corregido.`,
+    };
+  }
+
+  return { permitido: true };
+};
+
+/**
+ * El total cobrado en rubros se suma al campo `otros` de UNA sola fila de la
+ * boleta, aunque la boleta escriba varias (cierre de una cuota + parcial de la
+ * siguiente + abono a capital).
+ *
+ * Mismo problema y misma forma que `crearEstampadorPagoConvenio`: el cobro
+ * ocurre una vez por boleta, pero `insertPayment` puede insertar N filas, y si
+ * todas cargaran el monto el cliente vería el cargo repetido N veces en su
+ * estado de cuenta y la reversa lo devolvería N veces. El estampador le entrega
+ * el monto a la PRIMERA fila que lo pide y "0" a las demás.
+ *
+ * `pendiente()` es un peek NO consumidor: el loop de cuotas lo necesita para
+ * decidir si una cuota que no absorbió nada puede saltarse
+ * (`debeInsertarFilaParcialCuota`) sin quemar el sello en la consulta — una
+ * boleta que SÓLO cobró rubros tiene que dejar su fila.
+ */
+export const crearEstampadorRubros = (total: BigInput | null | undefined) => {
+  const monto = new Big(total ?? 0);
+  let estampado = false;
+  return Object.assign(
+    (): string => {
+      if (estampado || monto.lte(0)) return "0";
+      estampado = true;
+      return monto.toString();
+    },
+    {
+      pendiente: (): string =>
+        estampado || monto.lte(0) ? "0" : monto.toString(),
+    }
+  );
+};

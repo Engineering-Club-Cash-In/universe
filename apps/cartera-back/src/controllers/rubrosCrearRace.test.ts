@@ -1,4 +1,5 @@
 import { describe, expect, it, mock } from "bun:test";
+import { lockPoolMock } from "../utils/testMocks";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // `crearRubro` contra la carrera con `eliminarTipo` — hallazgo de Codex en el
@@ -65,6 +66,12 @@ let dbImpl: any = motorConCola();
 mock.module("../database", () => ({
   db: new Proxy({}, { get: (_t, p) => dbImpl[p] }),
   client: {},
+  // `lockPool` va aunque este archivo no lo use. Desde que `rubros.ts` importa
+  // `paymentAdvisoryLock.ts` —que hace `import { lockPool } from "../database"`—
+  // ese archivo revienta al cargarse si el mock no la trae. Sin esta clave el
+  // test pasa SOLO cuando corre junto a `rubrosGuards.test.ts`, cuyo mock global
+  // sí la exporta: verde por accidente de orden, rojo en cuanto corre solo.
+  lockPool: lockPoolMock,
 }));
 
 const { crearRubro, RubroError } = await import("./rubros");

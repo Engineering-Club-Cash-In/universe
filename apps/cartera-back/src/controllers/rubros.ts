@@ -1,9 +1,12 @@
 /**
  * Rubros — cobros adicionales por crédito (tarjeta de circulación, traspaso…).
  *
- * FASE 1: sólo catálogo, alta y corrección manual. El consumo del disponible de
- * cada pago llega después; por eso acá nunca se toca `pagos_credito` ni se
- * escribe `pago_id` en el historial.
+ * Catálogo, alta y corrección manual (arriba), y el COBRO desde el flujo de
+ * pagos (al final del archivo). El cobro respeta las dos etapas del pago:
+ * registrar una boleta sólo APARTA saldo del rubro (`rubros_pagos` con
+ * `aplicado = false`) y aplicarla es lo que de verdad lo baja — por eso la
+ * corrección manual de un rubro con reclamos vivos se rechaza con 409 en vez
+ * de dejar que el saldo se mueva por debajo de una boleta ya registrada.
  *
  * Las REGLAS de negocio no viven en este archivo: están en `rubrosPolicy.ts`
  * como funciones puras (qué crédito admite qué rubro, hasta dónde se puede
@@ -16,28 +19,35 @@
  */
 
 import Big from "big.js";
-import { and, count, desc, eq, sql } from "drizzle-orm";
+import { and, count, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../database";
 import {
   asesores,
   creditos,
   moras_credito,
+  pagos_credito,
   platform_users,
   rubros,
   rubros_historial,
+  rubros_pagos,
   rubros_tipos,
 } from "../database/db";
+import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import {
   eventoDeEdicion,
   nuevoSaldoTrasEdicion,
   origenDeRole,
   puedeActuar,
   puedeAnularRubro,
+  puedeApartarReclamo,
+  puedeAplicarReclamo,
   puedeCrearRubro,
   puedeEditarMonto,
   puedeEditarRubro,
+  puedeTocarRubroConReclamosVivos,
   puedeUsarMonto,
   redondearMonto,
+  repartirEnRubros,
   rubroCompletado,
   textoLimpio,
 } from "./rubrosPolicy";
@@ -641,6 +651,31 @@ export async function crearRubro({
   }
 }
 
+
+/**
+ * A qué crédito pertenece el rubro — lectura previa y DELIBERADAMENTE sin
+ * bloqueo, sólo para saber qué advisory lock tomar.
+ *
+ * `editarRubro` y `anularRubro` reciben `rubro_id`, pero el lock que serializa
+ * los escritores del crédito (el mismo que toma `insertPayment`) se toma por
+ * `credito_id`, así que hay que averiguarlo antes de poder pedirlo. Esta lectura
+ * NO es la autoritativa: la que manda sigue siendo el `SELECT ... FOR UPDATE`
+ * de adentro de la transacción. Y no hace falta que lo sea, porque el rubro no
+ * cambia de crédito nunca: `credito_id` se escribe en el alta y ninguna ruta lo
+ * toca. Lo único que puede pasar entre esta lectura y el lock es que el rubro
+ * deje de existir, y ahí el 404 lo da igual la lectura de adentro.
+ */
+async function creditoDeRubro(rubro_id: number): Promise<number> {
+  const [fila] = await db
+    .select({ credito_id: rubros.credito_id })
+    .from(rubros)
+    .where(eq(rubros.rubro_id, rubro_id))
+    .limit(1);
+
+  if (!fila) throw new RubroError(404, "El rubro no existe.");
+  return fila.credito_id;
+}
+
 export async function editarRubro(
   rubro_id: number,
   {
@@ -697,7 +732,29 @@ export async function editarRubro(
   const montoPedido =
     monto === undefined || monto === null ? null : aMonto(monto);
 
+  /**
+   * 🔒 ADVISORY LOCK POR CRÉDITO — el mismo que toma `insertPayment`.
+   *
+   * El `FOR UPDATE` de acá abajo NO alcanza para serializar contra el registro
+   * de una boleta, y por una razón de tiempos: `insertPayment` calcula el
+   * reparto de rubros al principio (`cobrarRubrosParaBoleta`, lectura sin
+   * bloqueo) y escribe los reclamos recién al final, después de todo el
+   * recorrido de cuotas. En esa ventana ancha la fila del rubro está libre, así
+   * que `puedeTocarRubroConReclamosVivos` la ve sin reclamos —el de la boleta
+   * en vuelo todavía no existe— y deja pasar la edición. El reparto ya decidido
+   * se escribía igual contra un saldo achicado, y el 409 aparecía días después
+   * al validar, tumbando la boleta entera.
+   *
+   * ORDEN DE CANDADOS: primero el advisory lock, DESPUÉS la transacción con el
+   * `FOR UPDATE`. Es exactamente el orden de `insertPayment`, y por eso no hay
+   * deadlock: nadie toma la fila del rubro y después pide el lock del crédito.
+   * Invertirlo sí lo crearía.
+   *
+   */
+  const credito_id = await creditoDeRubro(rubro_id);
+
   try {
+    return await withPaymentAdvisoryLock(credito_id, async () => {
     /**
      * TODO —leer la fila, decidir y escribir— va en UNA transacción, con la
      * fila bloqueada por `FOR UPDATE`. Mismo patrón que `condonarMora`.
@@ -726,11 +783,48 @@ export async function editarRubro(
       // "qué difiere" o "sube el monto" sobre una fila que de entrada se
       // rechaza. Editarlo lo reviviría (activo vuelve a true) mientras
       // `anulado` se queda en true, un estado que no puede existir.
+      //
+      // Va antes que el bloqueo por reclamos vivos de acá abajo por dos
+      // razones. Se resuelve con la fila que el `FOR UPDATE` ya trajo, sin la
+      // consulta extra que pide el otro; y sobre todo porque el mensaje del
+      // otro —"aplique esa boleta o reviértala y vuelva a intentar"— promete
+      // una salida que en un rubro anulado no existe: por mucho que se aplique
+      // la boleta, el rubro va a seguir sin poder editarse. Un rubro anulado
+      // no debería llegar a tener reclamos vivos (anular se bloquea si los
+      // hay), así que en la práctica el orden casi nunca se nota; importa el
+      // día que esa invariante se rompa.
       const veredictoAnulado = puedeEditarRubro({ anulado: actual.anulado });
       if (!veredictoAnulado.permitido) {
         throw new RubroError(
           veredictoAnulado.status ?? 409,
           veredictoAnulado.motivo ?? "No se puede editar el rubro."
+        );
+      }
+
+      /**
+       * El rubro con una boleta registrada encima está CONGELADO.
+       *
+       * Con la fila ya bloqueada por el `FOR UPDATE` de arriba: si hay algún
+       * reclamo `aplicado = false`, hay una boleta que ya apartó parte de este
+       * saldo y espera a contabilidad. Editarla ahora —aunque sea para
+       * subirle el monto— es cambiar el cobro por debajo de un pago en vuelo:
+       * si el monto baja, al validar esa boleta el saldo ya no alcanzaría y la
+       * aplicación fallaría (o, peor, abonaría de menos). Este 409 es lo que
+       * vuelve IMPOSIBLE ese descuadre, y por eso el guard ruidoso de
+       * `aplicarRubrosDelPago` no debería dispararse nunca.
+       *
+       * Se rechaza ANTES de calcular si la edición cambia algo: la respuesta a
+       * "este rubro está tomado" no depende de qué campo se quiso tocar, y
+       * dejar pasar la edición que "no cambia nada" sólo haría que el front
+       * descubra el bloqueo recién cuando el usuario sí cambie algo.
+       */
+      const veredictoReclamos = puedeTocarRubroConReclamosVivos({
+        reclamos: await reclamosVivosDeRubro(rubro_id, tx),
+      });
+      if (!veredictoReclamos.permitido) {
+        throw new RubroError(
+          veredictoReclamos.status ?? 409,
+          veredictoReclamos.motivo ?? "No se puede editar el rubro."
         );
       }
 
@@ -918,6 +1012,7 @@ export async function editarRubro(
       });
 
       return rubro;
+      });
     });
   } catch (e) {
     if (e instanceof RubroError) throw e;
@@ -980,11 +1075,19 @@ export async function anularRubro(
     throw new RubroError(400, "El motivo es obligatorio para anular el rubro.");
   }
 
+  // 🔒 Advisory lock por crédito ANTES de la transacción, por la misma razón y
+  // en el mismo orden que `editarRubro` (ver el comentario largo allá). Acá
+  // pesa todavía más: anular deja el saldo en 0, así que colarse en la ventana
+  // del registro de una boleta garantiza que el reclamo que esa boleta escriba
+  // sea inaplicable.
+  const credito_id = await creditoDeRubro(rubro_id);
+
   // Leer, decidir y escribir en UNA transacción con la fila bloqueada, igual
   // que `editarRubro`: sin el `FOR UPDATE`, dos anulaciones simultáneas —o una
   // anulación contra un abono de la fase 2— escribirían dos eventos sobre el
   // mismo saldo leído.
-  return await db.transaction(async (tx) => {
+  return await withPaymentAdvisoryLock(credito_id, async () =>
+    db.transaction(async (tx) => {
     const [actual] = await tx
       .select()
       .from(rubros)
@@ -993,6 +1096,20 @@ export async function anularRubro(
       .for("update");
 
     if (!actual) throw new RubroError(404, "El rubro no existe.");
+
+    // Mismo bloqueo que la edición, y acá es todavía más claro: anular deja el
+    // saldo en 0, así que hacerlo con una boleta registrada encima garantiza
+    // que al validarla el saldo no alcance. Primero se resuelve esa boleta
+    // —aplicándola o revirtiéndola—, después se anula el rubro.
+    const veredictoReclamos = puedeTocarRubroConReclamosVivos({
+      reclamos: await reclamosVivosDeRubro(rubro_id, tx),
+    });
+    if (!veredictoReclamos.permitido) {
+      throw new RubroError(
+        veredictoReclamos.status ?? 409,
+        veredictoReclamos.motivo ?? "No se puede anular el rubro."
+      );
+    }
 
     const veredicto = puedeAnularRubro({ completado: actual.completado });
     if (!veredicto.permitido) {
@@ -1027,8 +1144,9 @@ export async function anularRubro(
       motivo: motivoStr,
     });
 
-    return rubro;
-  });
+      return rubro;
+    })
+  );
 }
 
 /**
@@ -1074,4 +1192,352 @@ export async function listarHistorial(rubro_id: number) {
     usuario_email: usuario_email ?? null,
     usuario_nombre: usuario_nombre ?? null,
   }));
+}
+
+// ---------------------------------------------------------------------------
+// FASE 2 — COBRO DE RUBROS EN EL FLUJO DE PAGOS
+//
+// El pago corre en DOS ETAPAS y este bloque vive en las dos:
+//
+//   REGISTRAR (`insertPayment`)  → `cobrarRubrosParaBoleta` calcula el reparto
+//                                  y `registrarReclamosDeRubros` lo escribe en
+//                                  `rubros_pagos` con `aplicado = false`. NO se
+//                                  toca `rubros.saldo_pendiente`: registrar
+//                                  sólo APARTA.
+//   APLICAR (`/aplicar-pago`)    → `aplicarRubrosDelPago` baja el saldo, marca
+//                                  el reclamo y escribe el historial.
+//
+// Las reglas decidibles (orden de cobro, neteo contra hermanos, guards) están
+// en `rubrosPolicy.ts` como funciones puras; acá sólo se lee la base, se le
+// pregunta a la policy y se escribe.
+// ---------------------------------------------------------------------------
+
+/**
+ * Σ de lo APARTADO y todavía sin aplicar por las boletas VIVAS, por rubro.
+ *
+ * "Vivas" = `paymentFalse = false`, exactamente el mismo filtro con el que
+ * `registerPayment.ts` arma su set de `pagosHermanos` para netear el saldo de
+ * una cuota. Una boleta anulada dejó de ser un reclamo sobre la plata del
+ * cliente, y contarla seguiría restando disponible del rubro —y congelando su
+ * edición— por un pago que ya no existe.
+ *
+ * Es la consulta que responde "¿este rubro tiene reclamos vivos?", y por eso la
+ * migración 0037 le puso el índice `(rubro_id, aplicado)`.
+ */
+export async function reclamosVivosDeRubros(
+  rubroIds: number[],
+  ejecutor: Ejecutor = db
+): Promise<Map<number, { pago_id: number; monto: string }[]>> {
+  const porRubro = new Map<number, { pago_id: number; monto: string }[]>();
+  if (rubroIds.length === 0) return porRubro;
+
+  const filas = await ejecutor
+    .select({
+      rubro_id: rubros_pagos.rubro_id,
+      pago_id: rubros_pagos.pago_id,
+      monto: rubros_pagos.monto,
+    })
+    .from(rubros_pagos)
+    .innerJoin(pagos_credito, eq(rubros_pagos.pago_id, pagos_credito.pago_id))
+    .where(
+      and(
+        inArray(rubros_pagos.rubro_id, rubroIds),
+        eq(rubros_pagos.aplicado, false),
+        eq(pagos_credito.paymentFalse, false)
+      )
+    );
+
+  for (const fila of filas) {
+    const previos = porRubro.get(fila.rubro_id) ?? [];
+    previos.push({ pago_id: fila.pago_id, monto: fila.monto ?? "0" });
+    porRubro.set(fila.rubro_id, previos);
+  }
+  return porRubro;
+}
+
+/**
+ * Los reclamos vivos de UN rubro — lo que congela su edición.
+ *
+ * Exportado porque `editarRubro`/`anularRubro` lo consultan con la fila ya
+ * bloqueada por `FOR UPDATE`: leer con `db` mientras `tx` la tiene tomada sería
+ * decidir sobre un snapshot distinto al que se está por escribir.
+ */
+async function reclamosVivosDeRubro(
+  rubro_id: number,
+  ejecutor: Ejecutor = db
+): Promise<{ pago_id: number; monto: string }[]> {
+  const mapa = await reclamosVivosDeRubros([rubro_id], ejecutor);
+  return mapa.get(rubro_id) ?? [];
+}
+
+/**
+ * Qué rubros cobra esta boleta y por cuánto — SIN escribir nada.
+ *
+ * Se separa del INSERT porque en el registro el `pago_id` todavía no existe:
+ * `insertPayment` necesita el TOTAL para descontarlo del disponible antes de
+ * repartir el resto entre las cuotas, y recién cuando una fila de
+ * `pagos_credito` quedó persistida se pueden escribir los reclamos (mismo
+ * diferimiento que hace el convenio con `commitConvenio`).
+ *
+ * Trae los rubros VIVOS del crédito —`activo`, no `completado`, no `anulado`—
+ * junto con el `obligatorio` de su TIPO (que es donde vive la naturaleza del
+ * cobro, ver `puedeCrearRubro`) y lo ya apartado por las boletas hermanas. El
+ * orden y el reparto los decide `repartirEnRubros`.
+ */
+export async function cobrarRubrosParaBoleta({
+  credito_id,
+  disponible,
+  ejecutor = db,
+}: {
+  credito_id: number;
+  disponible: Big | string | number;
+  ejecutor?: Ejecutor;
+}): Promise<{ cobros: { rubro_id: number; monto: string }[]; total: Big }> {
+  if (new Big(disponible ?? 0).lte(0)) {
+    return { cobros: [], total: new Big(0) };
+  }
+
+  const vivos = await ejecutor
+    .select({
+      rubro_id: rubros.rubro_id,
+      saldo_pendiente: rubros.saldo_pendiente,
+      created_at: rubros.created_at,
+      obligatorio: rubros_tipos.obligatorio,
+    })
+    .from(rubros)
+    .innerJoin(rubros_tipos, eq(rubros.tipo_id, rubros_tipos.tipo_id))
+    .where(
+      and(
+        eq(rubros.credito_id, credito_id),
+        eq(rubros.activo, true),
+        eq(rubros.completado, false),
+        eq(rubros.anulado, false)
+      )
+    );
+
+  if (vivos.length === 0) return { cobros: [], total: new Big(0) };
+
+  const reclamos = await reclamosVivosDeRubros(
+    vivos.map((r) => r.rubro_id),
+    ejecutor
+  );
+
+  const reparto = repartirEnRubros({
+    disponible,
+    rubros: vivos.map((r) => ({
+      rubro_id: r.rubro_id,
+      obligatorio: r.obligatorio,
+      created_at: r.created_at,
+      saldoPendiente: r.saldo_pendiente ?? "0",
+      // Neteo contra las boletas hermanas: sin esto, tres boletas registradas
+      // antes de que conta valide la primera apartarían el saldo COMPLETO cada
+      // una (el registro no lo baja) y al aplicar la segunda ya no alcanzaría.
+      reclamadoVivo: (reclamos.get(r.rubro_id) ?? []).reduce(
+        (acc, c) => acc.plus(new Big(c.monto ?? 0)),
+        new Big(0)
+      ),
+    })),
+  });
+
+  return { cobros: reparto.cobros, total: reparto.total };
+}
+
+/**
+ * Escribe los reclamos de la boleta: `aplicado = false` y `saldo_pendiente`
+ * INTACTO.
+ *
+ * Acá está la regla del dueño del dominio: el saldo del rubro baja al APLICAR,
+ * no al registrar. Registrar sólo aparta — y lo apartado es lo que
+ * `cobrarRubrosParaBoleta` de la siguiente boleta va a netear, y lo que congela
+ * la edición del rubro hasta que contabilidad se pronuncie.
+ *
+ * No escribe historial: todavía no pasó nada en la cuenta del cliente. El
+ * evento `abono` lo escribe la aplicación, que es cuando el saldo se mueve.
+ *
+ * ANTES DE INSERTAR REVALIDA el reparto contra el saldo actual, con los rubros
+ * releídos `FOR UPDATE` en esta misma transacción. Es defensa en profundidad
+ * sobre el advisory lock que ahora toman `editarRubro`/`anularRubro`: el lock
+ * cierra la carrera, esto se asegura de que si igual se abre —un UPDATE a mano
+ * en producción, una ruta futura que se olvide del lock— el daño se vea acá y
+ * no en la validación. Fallar en el REGISTRO es barato: el asesor tiene la
+ * boleta en la mano y reintenta. Fallar en la VALIDACIÓN no lo es: el 409
+ * aborta la transacción que aplica TODO el pago, así que la boleta entera se
+ * cae —cuota sin cerrar, capital sin tocar, inversionistas sin repartir— y lo
+ * descubre contabilidad días después.
+ */
+export async function registrarReclamosDeRubros(
+  pago_id: number,
+  cobros: { rubro_id: number; monto: string }[],
+  ejecutor: Ejecutor = db
+): Promise<void> {
+  if (cobros.length === 0) return;
+
+  const rubroIds = cobros.map((c) => c.rubro_id);
+
+  // `FOR UPDATE` y no una lectura suelta: el saldo que se juzga tiene que ser
+  // el mismo que quede congelado hasta que este INSERT commitee, o el guard
+  // decide sobre un número que puede cambiar dos líneas más abajo.
+  const actuales = await ejecutor
+    .select({
+      rubro_id: rubros.rubro_id,
+      saldo_pendiente: rubros.saldo_pendiente,
+      anulado: rubros.anulado,
+    })
+    .from(rubros)
+    .where(inArray(rubros.rubro_id, rubroIds))
+    .for("update");
+
+  const porId = new Map(actuales.map((r) => [r.rubro_id, r]));
+
+  // Los reclamos de ESTA boleta todavía no existen (se insertan abajo), así que
+  // lo que cuenta acá son sólo los de las boletas hermanas — exactamente el
+  // mismo neteo con el que `cobrarRubrosParaBoleta` había decidido el reparto.
+  const reclamos = await reclamosVivosDeRubros(rubroIds, ejecutor);
+
+  for (const cobro of cobros) {
+    const actual = porId.get(cobro.rubro_id);
+
+    // Anulado o desaparecido: el reparto se decidió sobre un rubro que ya no se
+    // cobra. Se trata aparte del guard de saldo porque el motivo es otro y la
+    // salida también: no es "quedó menos plata", es "ese cargo se canceló".
+    if (!actual || actual.anulado) {
+      throw new RubroError(
+        409,
+        `El cobro adicional #${cobro.rubro_id} se anuló mientras se registraba esta boleta, así que ya no se cobra. La boleta NO se registró. Vuelva a registrarla: el reparto se recalcula sin ese cobro.`
+      );
+    }
+
+    const veredicto = puedeApartarReclamo({
+      rubro_id: cobro.rubro_id,
+      saldoPendiente: actual.saldo_pendiente,
+      reclamadoVivo: (reclamos.get(cobro.rubro_id) ?? []).reduce(
+        (acc, r) => acc.plus(new Big(r.monto ?? 0)),
+        new Big(0)
+      ),
+      montoApartado: cobro.monto,
+    });
+
+    if (!veredicto.permitido) {
+      throw new RubroError(
+        veredicto.status ?? 409,
+        veredicto.motivo ?? "No se puede apartar el cobro del rubro."
+      );
+    }
+  }
+
+  await ejecutor.insert(rubros_pagos).values(
+    cobros.map((c) => ({
+      pago_id,
+      rubro_id: c.rubro_id,
+      monto: c.monto,
+      // NULL hasta que se aplique: un 0 sería indistinguible de "se aplicó y no
+      // descontó nada".
+      monto_aplicado: null,
+      aplicado: false,
+    }))
+  );
+}
+
+/**
+ * APLICA los rubros que esta boleta había apartado: baja el saldo, recalcula
+ * `completado`/`activo`, escribe el historial y marca el reclamo.
+ *
+ * Corre DENTRO de la transacción de `/aplicar-pago`: si algo de lo que sigue
+ * falla, el rubro tampoco queda cobrado. Cada rubro se relee con `FOR UPDATE`
+ * porque entre el registro de la boleta y esta validación pudo pasar cualquier
+ * cosa, y el saldo que se decrementa tiene que ser el que está bloqueado.
+ *
+ * El guard de `puedeAplicarReclamo` es RUIDOSO a propósito: si el saldo ya no
+ * alcanza, la aplicación FALLA en vez de abonar de menos. Por diseño no debería
+ * pasar —`puedeTocarRubroConReclamosVivos` impide que el saldo se achique
+ * mientras el reclamo vive, y el neteo impide apartar de más—, así que si pasa
+ * es un agujero que queremos ver, no tapar.
+ */
+export async function aplicarRubrosDelPago(
+  pago_id: number,
+  ejecutor: Ejecutor
+): Promise<{ rubro_id: number; monto_aplicado: string }[]> {
+  const reclamos = await ejecutor
+    .select({
+      id: rubros_pagos.id,
+      rubro_id: rubros_pagos.rubro_id,
+      monto: rubros_pagos.monto,
+    })
+    .from(rubros_pagos)
+    .where(
+      and(eq(rubros_pagos.pago_id, pago_id), eq(rubros_pagos.aplicado, false))
+    );
+
+  const aplicados: { rubro_id: number; monto_aplicado: string }[] = [];
+
+  for (const reclamo of reclamos) {
+    const [rubro] = await ejecutor
+      .select()
+      .from(rubros)
+      .where(eq(rubros.rubro_id, reclamo.rubro_id))
+      .limit(1)
+      .for("update");
+
+    if (!rubro) {
+      // El rubro no se borra nunca (se anula), así que esto sólo puede ser un
+      // borrado a mano: mismo criterio ruidoso que el guard de abajo.
+      throw new RubroError(
+        409,
+        `Inconsistencia de integridad: el pago ${pago_id} apartó Q${reclamo.monto} del rubro ${reclamo.rubro_id}, que ya no existe. El pago NO se aplica.`
+      );
+    }
+
+    const veredicto = puedeAplicarReclamo({
+      rubro_id: rubro.rubro_id,
+      saldoPendiente: rubro.saldo_pendiente,
+      montoApartado: reclamo.monto ?? 0,
+    });
+    if (!veredicto.permitido) {
+      throw new RubroError(
+        veredicto.status ?? 409,
+        veredicto.motivo ?? "No se puede aplicar el cobro del rubro."
+      );
+    }
+
+    const montoAplicado = aMonto(reclamo.monto ?? 0);
+    const saldoNuevo = aMonto(
+      new Big(rubro.saldo_pendiente).minus(new Big(montoAplicado))
+    );
+    const completado = rubroCompletado(saldoNuevo);
+
+    await ejecutor
+      .update(rubros)
+      .set({
+        saldo_pendiente: saldoNuevo,
+        completado,
+        // `activo` se DERIVA del saldo, igual que en la edición: está activo
+        // mientras le quede saldo. Así el barrido del próximo pago no vuelve a
+        // ofrecer un rubro ya saldado, y uno que quedó con saldo sigue vivo.
+        activo: !completado,
+        updated_at: SELLO_DE_TIEMPO,
+      })
+      .where(eq(rubros.rubro_id, rubro.rubro_id));
+
+    await ejecutor.insert(rubros_historial).values({
+      rubro_id: rubro.rubro_id,
+      tipo_evento: "abono",
+      // El monto del rubro no cambia con un abono; lo que cambia —y lo que hay
+      // que poder reconstruir— es el saldo.
+      saldo_anterior: aMonto(rubro.saldo_pendiente),
+      saldo_nuevo: saldoNuevo,
+      pago_id,
+      // Sin `usuario_id`: el abono no lo decide una persona, lo produce la
+      // validación de una boleta. El `pago_id` es la trazabilidad real.
+      origen: "pago",
+    });
+
+    await ejecutor
+      .update(rubros_pagos)
+      .set({ aplicado: true, monto_aplicado: montoAplicado })
+      .where(eq(rubros_pagos.id, reclamo.id));
+
+    aplicados.push({ rubro_id: rubro.rubro_id, monto_aplicado: montoAplicado });
+  }
+
+  return aplicados;
 }

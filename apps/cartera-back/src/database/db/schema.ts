@@ -2255,13 +2255,20 @@
     },
     (t) => [
       index("rubros_credito_activo_idx").on(t.credito_id, t.activo),
-      // Un solo rubro VIVO por crédito y tipo: dos "tarjeta de circulación"
-      // pendientes a la vez son un cobro duplicado. El filtro por `completado`
-      // es lo que permite volver a cobrar el mismo concepto más adelante —
-      // cuando el anterior ya se saldó, deja de estorbar el índice.
-      uniqueIndex("rubros_uq_credito_tipo_vivo")
-        .on(t.credito_id, t.tipo_id)
-        .where(sql`${t.completado} = false`),
+      // Acá vivía `rubros_uq_credito_tipo_vivo`, un índice único parcial sobre
+      // (credito_id, tipo_id) con `completado = false`. La migración 0038 lo
+      // borra, y esta declaración se va CON ella: dejarla sería peor que no
+      // haber migrado, porque cualquier entorno aprovisionado o sincronizado
+      // desde este esquema volvería a crear el índice y a reventar la reversa
+      // —que es exactamente el escenario que la 0038 viene a arreglar—, sin que
+      // la migración diera ninguna señal de que el problema volvió.
+      //
+      // El motivo de fondo está en la 0038: la exclusividad de "un solo cobro
+      // vivo por concepto" sigue existiendo, pero como regla de ALTA
+      // (`crearRubro`, y al revivir por edición), no como invariante permanente
+      // de la base. Tras una reversa legítima hay DE VERDAD dos deudas del
+      // mismo tipo —la del año pasado que volvió y la de este año—, y ninguna
+      // restricción de base puede distinguir ese caso de un duplicado.
     ]
   );
 
@@ -2288,5 +2295,43 @@
     (t) => [
       index("rubros_historial_rubro_idx").on(t.rubro_id, t.created_at),
       index("rubros_historial_pago_idx").on(t.pago_id),
+    ]
+  );
+
+  /**
+   * El vínculo boleta ↔ rubro (migración 0037).
+   *
+   * El pago corre en dos etapas: `POST /newPayment` sólo APARTA (escribe el
+   * reclamo con `aplicado = false` y NO toca `rubros.saldo_pendiente`) y
+   * `/aplicar-pago` es el que baja el saldo cuando contabilidad valida. Esta
+   * tabla es donde vive lo apartado mientras tanto, y por lo mismo es la que
+   * contesta "¿este rubro tiene reclamos vivos?" — la pregunta que congela su
+   * edición y que hace imposible que al aplicar el saldo ya no alcance.
+   */
+  export const rubros_pagos = customSchema.table(
+    "rubros_pagos",
+    {
+      id: serial("id").primaryKey(),
+      // CASCADE: la reversa de un parcial BORRA la fila de pagos_credito, y un
+      // reclamo huérfano congelaría el rubro para siempre. La reversa procesa
+      // los reclamos antes de ese borrado; la cascada es la red, no el camino.
+      pago_id: integer("pago_id")
+        .notNull()
+        .references(() => pagos_credito.pago_id, { onDelete: "cascade" }),
+      rubro_id: integer("rubro_id")
+        .notNull()
+        .references(() => rubros.rubro_id),
+      // Lo APARTADO al registrar la boleta.
+      monto: numeric("monto", { precision: 18, scale: 2 }).notNull(),
+      // Lo REALMENTE descontado al aplicar. Nullable a propósito: un 0 sería
+      // indistinguible de "se aplicó y no descontó nada".
+      monto_aplicado: numeric("monto_aplicado", { precision: 18, scale: 2 }),
+      aplicado: boolean("aplicado").notNull().default(false),
+      created_at: timestamp("created_at").defaultNow(),
+    },
+    (t) => [
+      index("rubros_pagos_pago_idx").on(t.pago_id),
+      // La consulta caliente: "¿tiene reclamos vivos?" en cada edición.
+      index("rubros_pagos_rubro_aplicado_idx").on(t.rubro_id, t.aplicado),
     ]
   );

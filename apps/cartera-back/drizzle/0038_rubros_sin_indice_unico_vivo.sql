@@ -1,0 +1,49 @@
+-- NOTA: aplicar a mano en dev y prod (Cartera aplica el SQL a mano, no drizzle-kit).
+--
+-- Se ELIMINA `rubros_uq_credito_tipo_vivo` — el índice único parcial que 0036
+-- creó para que no hubiera dos rubros vivos del mismo tipo en un crédito. No es
+-- un descuido: la regla que ese índice expresaba está MAL PLANTEADA, y la
+-- exclusividad se muda a `crearRubro` (el chequeo explícito de 409 que ahora
+-- vive dentro de su transacción, bajo el advisory lock del crédito).
+--
+-- El escenario que lo obliga, con el flujo normal del negocio y sin nada raro:
+--
+--   1. Se cobra y se PAGA la tarjeta de circulación 2026. El rubro queda en
+--      saldo 0 y `completado = true`, o sea FUERA del índice parcial.
+--   2. Se carga la tarjeta de circulación 2027, del mismo tipo. Entra sin
+--      problema, justamente porque el de 2026 ya salió del índice. Legítimo.
+--   3. Contabilidad anula la boleta con que se pagó la de 2026. La reversa
+--      DEVUELVE el saldo del rubro y apaga `completado` (es lo correcto: esa
+--      deuda volvió a existir), y con eso el rubro de 2026 REENTRA al índice y
+--      choca con el de 2027.
+--
+-- Resultado: 500 con `duplicate key value violates unique constraint` por las
+-- dos rutas de reversa (`reversePayment` y `revertPaymentToPending`), el pago
+-- atascado en `validated` sin forma de deshacerlo por API, y la única salida
+-- disponible era anular una boleta ajena o matar a mano un cobro vivo legítimo.
+--
+-- El diagnóstico es que el índice afirmaba una INVARIANTE PERMANENTE ("nunca
+-- pueden coexistir dos cobros vivos del mismo concepto") que el dominio no
+-- sostiene: después de una reversa legítima existen DE VERDAD dos deudas, la de
+-- 2026 que volvió y la de 2027. La regla verdadera es más angosta y es una
+-- regla de ALTA: "no se puede CREAR un segundo rubro vivo del mismo tipo". Eso
+-- es lo que `crearRubro` chequea ahora, y por eso pasó a tomar el advisory lock
+-- del crédito — sin candado, dos altas simultáneas del mismo tipo leerían las
+-- dos "no hay ninguno" y entrarían las dos, que es lo único que el índice
+-- protegía de más.
+--
+-- Lo que se pierde a cambio, dicho para que quien lea esto dentro de un año no
+-- lo descubra a los golpes: ya NO hay red de la base contra un segundo rubro
+-- vivo. Cualquier camino que resucite o cree un rubro sin pasar por el chequeo
+-- de `crearRubro` puede dejar dos vivos del mismo tipo, y eso ya no lo frena
+-- nadie. En particular `editarRubro` —subirle el monto a un rubro saldado lo
+-- revive— antes chocaba contra el índice y ahora no.
+--
+-- `DROP INDEX IF EXISTS` para que el archivo sea re-ejecutable, y SIN
+-- `CONCURRENTLY` a propósito: este archivo entero tiene que poder aplicarse
+-- dentro de una transacción (`psql -1`, lo prudente en producción), y
+-- `CONCURRENTLY` no corre en bloque de transacción. El DROP toma un lock
+-- exclusivo breve sobre `cartera.rubros`, que es una tabla chica y de escritura
+-- rara.
+
+DROP INDEX IF EXISTS cartera.rubros_uq_credito_tipo_vivo;

@@ -1226,6 +1226,7 @@ export const debeRechazarPagoSinAplicacion = ({
   moraAplicada,
   otrosEspecialAplicado,
   convenioAplicado,
+  rubrosCobrados = 0,
 }: {
   cuotasSaltadas: number;
   cuotasCompletas: number;
@@ -1233,13 +1234,26 @@ export const debeRechazarPagoSinAplicacion = ({
   moraAplicada: BigInput;
   otrosEspecialAplicado: boolean;
   convenioAplicado: BigInput;
+  /**
+   * Lo cobrado en RUBROS por esta boleta. Es acreditación válida igual que la
+   * mora y el convenio: una boleta que sólo cobró rubros SÍ dejó rastro y no
+   * puede caer en el 409 de "no se aplicó nada" — el cobro de un rubro es
+   * exactamente el caso de boleta legítima que no toca ninguna cuota.
+   *
+   * En la práctica el sello ya fuerza una fila (`debeInsertarFilaParcialCuota`
+   * cuenta los rubros pendientes de estampar), así que cuando hay rubros
+   * `cuotasParciales` no es 0; esto lo deja explícito en la regla en vez de
+   * depender de ese encadenamiento.
+   */
+  rubrosCobrados?: BigInput;
 }): boolean =>
   cuotasSaltadas > 0 &&
   cuotasCompletas === 0 &&
   cuotasParciales === 0 &&
   new Big(moraAplicada ?? 0).lte(0) &&
   !otrosEspecialAplicado &&
-  new Big(convenioAplicado ?? 0).lte(0);
+  new Big(convenioAplicado ?? 0).lte(0) &&
+  new Big(rubrosCobrados ?? 0).lte(0);
 
 /**
  * Generalización de lo anterior: capital pedido que se evaporaría porque el
@@ -1304,13 +1318,27 @@ export const debeInsertarFilaParcialCuota = ({
   mora = 0,
   otros = 0,
   pagoConvenio = 0,
+  rubros = 0,
 }: {
   totalPagado: BigInput;
   mora?: BigInput | null;
   otros?: BigInput | null;
   pagoConvenio?: BigInput | null;
+  /**
+   * Lo que esta boleta cobró en RUBROS y todavía no estampó en ninguna fila
+   * (el peek `pendiente()` del estampador, no una llamada consumidora).
+   *
+   * Cuenta como acreditación válida por la misma razón que la mora y el
+   * convenio: es plata de la boleta que ya tiene destino. Una boleta que SÓLO
+   * cobró rubros no absorbe nada en ninguna cuota, así que sin esto todas se
+   * saltarían y el cobro se quedaría sin fila donde vivir — y una fila con
+   * `monto_aplicado = 0` pero `otros > 0` es legítima y validable
+   * (`shouldRejectZeroAppliedNormalValidation` exime a las que traen otros).
+   */
+  rubros?: BigInput | null;
 }): boolean =>
   new Big(totalPagado ?? 0).gt(0) ||
   new Big(mora ?? 0).gt(0) ||
   new Big(otros ?? 0).gt(0) ||
-  new Big(pagoConvenio ?? 0).gt(0);
+  new Big(pagoConvenio ?? 0).gt(0) ||
+  new Big(rubros ?? 0).gt(0);

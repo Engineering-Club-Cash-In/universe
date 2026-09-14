@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { mock } from "bun:test";
 import { Elysia } from "elysia";
 import jwt from "jsonwebtoken";
+import { lockPoolMock } from "../utils/testMocks";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Gates de rol del módulo de rubros — y la atribución del rol.
@@ -39,6 +40,15 @@ const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";
  * de "no se pudo identificar al usuario", indistinguible del 403 del gate de
  * rol, que es justo lo que estos tests tienen que poder distinguir.
  */
+/**
+ * Línea de tiempo COMPARTIDA entre el motor de base y el espía del advisory
+ * lock. Sirve para una sola afirmación, pero es la que el módulo no puede
+ * perder: el candado del crédito se toma ANTES de abrir la transacción. Al
+ * revés —fila primero, candado después— es lo que crearía el deadlock contra
+ * `insertPayment`, que toma los dos en este orden.
+ */
+let bitacora: string[] = [];
+
 const motorConCola = (...resultados: any[][]) => {
   const cola = [...resultados];
   /** Todo lo que el controlador mandó a escribir, en orden. */
@@ -49,6 +59,10 @@ const motorConCola = (...resultados: any[][]) => {
       get: (_t, prop) => {
         // `await` sobre la cadena: entrega el siguiente resultado encolado.
         if (prop === "then") {
+          // Se anota en la bitácora ANTES de resolver: lo que interesa medir es
+          // el instante en que el controlador tocó la base, para poder afirmar
+          // que el advisory lock ya estaba tomado para entonces.
+          bitacora.push("consulta");
           return (ok: any, err: any) =>
             (cola.length
               ? Promise.resolve(cola.shift())
@@ -88,9 +102,44 @@ const motorConCola = (...resultados: any[][]) => {
 const SIN_BD = () => motorConCola();
 
 let dbImpl: any = SIN_BD();
+
+/**
+ * El `lockPool` también es intercambiable, por la misma razón que `dbImpl`:
+ * `mock.module` corre UNA vez al cargar el archivo, así que el test que quiera
+ * MIRAR el lock no puede re-mockear el módulo (envenenaría a los demás). El
+ * default sigue siendo el stub mudo de `testMocks`; sólo el test del candado
+ * lo cambia por un espía, y lo devuelve en su `finally`.
+ */
+let lockImpl: any = lockPoolMock;
+
+/** Espía del advisory lock: anota en la bitácora QUÉ se bloqueó y CUÁNDO. */
+const lockPoolEspia = (bloqueados: number[]) => ({
+  connect: () =>
+    Promise.resolve({
+      query: (_texto: string, valores?: unknown[]) => {
+        // `pg_advisory_lock(ns, credito_id)`; el unlock del `finally` manda los
+        // mismos parámetros, así que sólo se anota la PRIMERA toma.
+        if (bloqueados.length === 0 && Array.isArray(valores)) {
+          bloqueados.push(Number(valores[1]));
+          bitacora.push("lock");
+        }
+        return Promise.resolve();
+      },
+      release: () => {},
+    }),
+});
+
 mock.module("../database", () => ({
   db: new Proxy({}, { get: (_t, p) => dbImpl[p] }),
   client: {},
+  // `lockPool` es obligatorio desde que `editarRubro`/`anularRubro` toman el
+  // advisory lock por crédito (el mismo que `insertPayment`) para no dejar que
+  // una corrección se cuele en la ventana en que una boleta ya decidió su
+  // reparto de rubros pero todavía no escribió el reclamo. Sin esta clave el
+  // mock no exporta lo que `paymentAdvisoryLock.ts` importa y el ARCHIVO
+  // ENTERO revienta al cargarse. El lock acá es un no-op: lo que estos tests
+  // prueban es el cableado de roles, no la serialización.
+  lockPool: new Proxy({}, { get: (_t, p) => lockImpl[p] }),
 }));
 
 const { rubrosRouter } = await import("./rubros");
@@ -287,10 +336,20 @@ describe("POST /rubros/:id/anular — la única salida del cobro cargado por err
     completado: false,
   };
 
-  // Orden de `anularRubro`: resolver al usuario, la fila del rubro (FOR
-  // UPDATE), el UPDATE y el evento de historial.
-  const colaDeAnulacion = (rubro: any) =>
-    motorConCola([{ id: 1 }], [rubro], [{ ...rubro }], []);
+  // Orden de `anularRubro`: resolver al usuario, AVERIGUAR A QUÉ CRÉDITO
+  // pertenece el rubro (lectura sin bloqueo, sólo para saber qué advisory lock
+  // tomar), la fila del rubro (FOR UPDATE, ya bajo el lock), los reclamos
+  // VIVOS de boletas registradas sobre ese rubro, el UPDATE y el evento de
+  // historial. Sin reclamos (`[]`) la anulación procede.
+  const colaDeAnulacion = (rubro: any, reclamos: any[] = []) =>
+    motorConCola(
+      [{ id: 1 }],
+      [{ credito_id: rubro.credito_id }],
+      [rubro],
+      reclamos,
+      [{ ...rubro }],
+      []
+    );
 
   it("anula el rubro vivo: saldo 0, completado y fuera del índice — sin tocar el monto", async () => {
     dbImpl = colaDeAnulacion(RUBRO_VIVO);
@@ -360,6 +419,26 @@ describe("POST /rubros/:id/anular — la única salida del cobro cargado por err
     }
   });
 
+  it("409 con una boleta registrada encima: primero se resuelve esa boleta", async () => {
+    // Una boleta ya apartó Q150 de este rubro y espera a contabilidad. Anular
+    // dejaría el saldo en 0 y al validarla no alcanzaría — este 409 es lo que
+    // vuelve imposible ese descuadre.
+    dbImpl = colaDeAnulacion(RUBRO_VIVO, [
+      { rubro_id: 3, pago_id: 77, monto: "150.00" },
+    ]);
+    try {
+      const res = await post("/rubros/3/anular", "ADMIN", ANULACION);
+      expect(res.status).toBe(409);
+      const mensaje = ((await res.json()) as any).message;
+      expect(mensaje).toContain("150.00");
+      expect(mensaje).toContain("77");
+      // Y NADA se escribió: el rubro queda como estaba.
+      expect(dbImpl.valoresEscritos).toEqual([]);
+    } finally {
+      dbImpl = SIN_BD();
+    }
+  });
+
   it("404 cuando el rubro no existe", async () => {
     dbImpl = motorConCola([{ id: 1 }], []);
     try {
@@ -373,13 +452,16 @@ describe("POST /rubros/:id/anular — la única salida del cobro cargado por err
 
 describe("POST /rubros — el rol del body no pisa al del token", () => {
   // Orden de las consultas de `crearRubro`: resolver al usuario, el crédito
-  // (FOR UPDATE), el tipo y la mora activa.
+  // (FOR UPDATE), el tipo, la mora activa y el RUBRO VIVO del mismo tipo — este
+  // último desde que la exclusividad dejó de ser el índice único de la base
+  // (migración 0038) y pasó a ser un chequeo explícito antes del INSERT.
   const colaDeAlta = (tipo: any, extra: any[][] = []) =>
     motorConCola(
       [{ id: 1 }], // platform_users: el autor existe
       [{ statusCredit: "ACTIVO" }], // crédito vivo: no lo frena el status
       [tipo],
       [{ monto: "0" }], // sin mora activa
+      [], // sin rubro vivo de ese tipo: el alta no choca con nada
       ...extra
     );
 
@@ -438,6 +520,120 @@ describe("POST /rubros — el rol del body no pisa al del token", () => {
       expect(evento.origen).toBe("asesor");
     } finally {
       dbImpl = SIN_BD();
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /rubros — un solo rubro VIVO por crédito y tipo, como regla de ALTA.
+//
+// Esto lo garantizaba el índice único parcial `rubros_uq_credito_tipo_vivo`, y
+// la migración 0038 lo eliminó. El motivo no fue aflojar la regla sino que el
+// índice afirmaba algo que el dominio no sostiene —"nunca pueden coexistir dos
+// cobros vivos del mismo concepto"—: cuando contabilidad anula la boleta con
+// que se pagó la tarjeta de circulación 2026, la reversa devuelve ese saldo y
+// apaga su `completado`, y ahí existen DE VERDAD dos deudas (la de 2026 que
+// volvió y la de 2027 que ya estaba cargada). El índice lo leía como duplicado
+// y reventaba la reversa entera con un 500, dejando el pago atascado en
+// `validated`.
+//
+// Al caerse el índice, lo único que sostiene la exclusividad es el chequeo de
+// `crearRubro`. Estos tests son su red: sin ellos, borrarlo por descuido deja
+// la suite verde y el duplicado entra sin que nada chille — que es justo lo que
+// el índice sí hacía.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("POST /rubros — la exclusividad ya no la pone la base, la pone el alta", () => {
+  const OPCIONAL = { tipo_id: 1, obligatorio: false, activo: true };
+
+  /**
+   * `vivo` es lo que devuelve la consulta "¿este crédito ya tiene un rubro de
+   * este tipo sin saldar?": `[]` si no hay, `[{ rubro_id }]` si hay.
+   *
+   * Va DESPUÉS de la mora y ANTES de las escrituras, que es el orden en que
+   * `crearRubro` las hace. Encolarlo en otro lado no fallaría por sí solo —el
+   * motor sólo cuenta `await`s—, pero desalinearía todo lo que venga después.
+   */
+  const colaConVivo = (vivo: any[]) =>
+    motorConCola(
+      [{ id: 1 }], // el autor existe
+      [{ statusCredit: "ACTIVO" }], // crédito vivo
+      [OPCIONAL], // tipo opcional y activo
+      [{ monto: "0" }], // sin mora
+      vivo,
+      [{ rubro_id: 12 }], // insert del rubro (sólo se consume si el alta procede)
+      [] // insert del historial
+    );
+
+  it("409 con el MISMO mensaje de antes cuando ya hay un rubro vivo de ese tipo", async () => {
+    dbImpl = colaConVivo([{ rubro_id: 5 }]);
+    try {
+      const res = await post("/rubros", "ADMIN", RUBRO_NUEVO);
+      expect(res.status).toBe(409);
+      // El texto se conserva palabra por palabra: para el usuario del otro lado
+      // de la pantalla no cambió nada, sólo cambió quién lo decide.
+      expect(((await res.json()) as any).message).toBe(
+        "Este crédito ya tiene un rubro vivo de ese tipo."
+      );
+    } finally {
+      dbImpl = SIN_BD();
+    }
+  });
+
+  it("y NO escribe nada: ni el rubro duplicado ni su evento de historial", async () => {
+    // El control que vuelve al test de arriba algo más que un status: un 409
+    // devuelto DESPUÉS de haber insertado la fila sería peor que el 500.
+    dbImpl = colaConVivo([{ rubro_id: 5 }]);
+    try {
+      await post("/rubros", "ADMIN", RUBRO_NUEVO);
+      expect(dbImpl.valoresEscritos).toEqual([]);
+    } finally {
+      dbImpl = SIN_BD();
+    }
+  });
+
+  it("201 cuando no hay ninguno vivo: es el alta normal, no quedó bloqueada", async () => {
+    // Control del otro lado. Sin él, el 409 de arriba también pasaría si el
+    // chequeo estuviera invertido y rechazara TODA alta.
+    dbImpl = colaConVivo([]);
+    try {
+      const res = await post("/rubros", "ADMIN", RUBRO_NUEVO);
+      expect(res.status).toBe(201);
+      expect(((await res.json()) as any).rubro.rubro_id).toBe(12);
+    } finally {
+      dbImpl = SIN_BD();
+    }
+  });
+
+  it("el candado del crédito se toma ANTES de tocar la base", async () => {
+    /**
+     * Sin candado, el chequeo no vale: dos altas simultáneas del mismo tipo
+     * leen las dos "no hay ninguno" y entran las dos. Eso lo cubría el índice y
+     * ahora no lo cubre nadie.
+     *
+     * Y se afirma el ORDEN, no sólo que el lock exista: el resto del módulo
+     * —`editarRubro`, `anularRubro`, `insertPayment`— toma primero el advisory
+     * lock y después las filas. Tomarlos al revés acá sería el ciclo que
+     * deadlockea contra un registro de boleta del mismo crédito.
+     */
+    const bloqueados: number[] = [];
+    bitacora = [];
+    lockImpl = lockPoolEspia(bloqueados);
+    dbImpl = colaConVivo([]);
+    try {
+      const res = await post("/rubros", "ADMIN", RUBRO_NUEVO);
+      expect(res.status).toBe(201);
+      // Por el CRÉDITO del body, que es la llave con la que se serializan
+      // todos los escritores de ese crédito.
+      expect(bloqueados).toEqual([RUBRO_NUEVO.credito_id]);
+      // La resolución del autor es una consulta y ocurre antes del lock (no
+      // toca el crédito); lo que importa es que el lock esté tomado para
+      // cuando se abre la transacción, o sea antes de la ÚLTIMA consulta.
+      expect(bitacora.indexOf("lock")).toBeLessThan(bitacora.lastIndexOf("consulta"));
+    } finally {
+      dbImpl = SIN_BD();
+      lockImpl = lockPoolMock;
+      bitacora = [];
     }
   });
 });

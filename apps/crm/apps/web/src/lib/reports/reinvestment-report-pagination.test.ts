@@ -10,7 +10,7 @@ test("todas las tablas extensas de inversión usan paginación compartida y dist
 		["Histórico del ticket", "safeData.ticketInversion.historico"],
 		["Detalle de interés", "data.detalleInteresNeto"],
 		["Detalle de pagos extras", "data.detallePagosExtras"],
-		["Detalle de compras", "data.detalleComprasMes"],
+		["Detalle de movimientos", "data.detalleComprasMes"],
 	]) {
 		const escapedRows = rowsExpression.replaceAll(".", "\\.");
 		expect(source).toMatch(

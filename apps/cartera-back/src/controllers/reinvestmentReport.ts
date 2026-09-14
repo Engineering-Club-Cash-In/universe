@@ -42,7 +42,6 @@ export function normalizeReinvestmentComponents(
     else if (capital.gt(0)) capital = capital.minus(1);
     unclassified = new Big(0);
   }
-
   if (
     [capital, rest, total].some((value) => value.lt(0)) ||
     unclassified.lt(0)
@@ -179,20 +178,17 @@ export function buildLiquidationComposition(input: LiquidationCompositionInput) 
   } as const;
 }
 
-type PurchaseClassification =
-  | "nueva_posicion"
-  | "ampliacion_posicion"
-  | "sin_clasificar";
+type FundingOrigin = "compra_nueva" | "reinversion";
 
 type PurchaseDetail = {
   modalidad_facturacion: string;
   tipo_reinversion: string;
-  tipo_compra: PurchaseClassification;
+  origen_dinero: FundingOrigin;
   monto: number | string;
 };
 
 const purchaseKey = (row: Omit<PurchaseDetail, "monto">) =>
-  `${row.modalidad_facturacion}\u0000${row.tipo_reinversion}\u0000${row.tipo_compra}`;
+  `${row.modalidad_facturacion}\u0000${row.tipo_reinversion}\u0000${row.origen_dinero}`;
 
 export function summarizePurchaseDetails(rows: PurchaseDetail[]) {
   const summaries = new Map<
@@ -204,7 +200,7 @@ export function summarizePurchaseDetails(rows: PurchaseDetail[]) {
     const current = summaries.get(key) ?? {
       modalidad_facturacion: row.modalidad_facturacion,
       tipo_reinversion: row.tipo_reinversion,
-      tipo_compra: row.tipo_compra,
+      origen_dinero: row.origen_dinero,
       cantidad: 0,
       monto: new Big(0),
     };
@@ -218,7 +214,7 @@ export function summarizePurchaseDetails(rows: PurchaseDetail[]) {
   }));
 }
 
-type PurchaseTicketRow = Pick<PurchaseDetail, "tipo_compra" | "monto"> & {
+type PurchaseTicketRow = Pick<PurchaseDetail, "origen_dinero" | "monto"> & {
   periodo: string;
   cantidad?: number;
 };
@@ -236,7 +232,7 @@ export function buildPurchaseTicketHistory(
 ) {
   const months = new Map<string, { cantidad: number; monto: Big }>();
   for (const row of rows) {
-    if (row.tipo_compra !== "nueva_posicion") continue;
+    if (row.origen_dinero !== "compra_nueva") continue;
     const current = months.get(row.periodo) ?? {
       cantidad: 0,
       monto: new Big(0),

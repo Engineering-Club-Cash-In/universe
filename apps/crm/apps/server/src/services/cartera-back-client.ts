@@ -402,9 +402,9 @@ export type FlujoCuotasInversionesResponse = {
 	};
 };
 
-export type ReinversionLiquidacionesResponse = {
+type ReinversionLiquidacionesResponseV4 = {
 	/** Versión runtime del contrato de conciliación por modalidad. */
-	contrato_version: 3;
+	contrato_version: 4;
 	/**
 	 * Distribución mensual por modalidad. `total_cuota` es el pago neto y
 	 * `reinversion_total` el capital que permanece colocado.
@@ -445,11 +445,11 @@ export type ReinversionLiquidacionesResponse = {
 		capital_activo: string;
 		composicion: LiquidationComposition;
 	}[];
-	/** Compras completadas del mes agrupadas por sus snapshots de operación. */
+	/** Movimientos completados del mes agrupados por origen del dinero. */
 	comprasMes: {
 		modalidad_facturacion: string;
 		tipo_reinversion: string;
-		tipo_compra: PurchaseClassification;
+		origen_dinero: FundingOrigin;
 		cantidad: number;
 		monto: string;
 	}[];
@@ -489,7 +489,7 @@ export type ReinversionLiquidacionesResponse = {
 		inversionista: string;
 		modalidad_facturacion: string;
 		tipo_reinversion: string;
-		tipo_compra: PurchaseClassification;
+		origen_dinero: FundingOrigin;
 		monto: string;
 	}[];
 	detalle_estado: {
@@ -498,6 +498,8 @@ export type ReinversionLiquidacionesResponse = {
 	};
 	cantidad_liquidaciones: number;
 };
+
+type FundingOrigin = "compra_nueva" | "reinversion";
 
 type PurchaseClassification =
 	| "nueva_posicion"
@@ -510,6 +512,23 @@ type PurchaseTicketMonth = {
 	monto_total: string;
 	ticket_promedio: string;
 };
+
+export type ReinversionLiquidacionesResponse =
+	| ReinversionLiquidacionesResponseV4
+	| (Omit<
+			ReinversionLiquidacionesResponseV4,
+			"contrato_version" | "comprasMes" | "detalleComprasMes"
+	  > & {
+			contrato_version: 3;
+			comprasMes: (Omit<
+				ReinversionLiquidacionesResponseV4["comprasMes"][number],
+				"origen_dinero"
+			> & { tipo_compra: PurchaseClassification })[];
+			detalleComprasMes: (Omit<
+				ReinversionLiquidacionesResponseV4["detalleComprasMes"][number],
+				"origen_dinero"
+			> & { tipo_compra: PurchaseClassification })[];
+	  });
 
 type CompositionDestination = {
 	capital: string;
@@ -540,6 +559,7 @@ const billingModes = [
 	"factura_cube_pequeno",
 	"sin_modalidad",
 ] as const;
+const fundingOrigins = ["compra_nueva", "reinversion"] as const;
 const purchaseClassifications = [
 	"nueva_posicion",
 	"ampliacion_posicion",
@@ -576,8 +596,8 @@ const modeSummarySchema = z.object({
 	cantidad_liquidaciones: countSchema,
 	composicion: liquidationCompositionSchema,
 });
-const reinversionLiquidacionesSchema = z.object({
-	contrato_version: z.literal(3),
+const reinversionLiquidacionesV4Schema = z.object({
+	contrato_version: z.literal(4),
 	porTipo: z.record(z.enum(reinversionModes), modeSummarySchema),
 	interesNeto: z.object({
 		noVerificado: z.object({ interes: moneySchema }),
@@ -608,7 +628,7 @@ const reinversionLiquidacionesSchema = z.object({
 		z.object({
 			modalidad_facturacion: z.enum(billingModes),
 			tipo_reinversion: z.enum(reinversionModes),
-			tipo_compra: z.enum(purchaseClassifications),
+			origen_dinero: z.enum(fundingOrigins),
 			cantidad: countSchema,
 			monto: moneySchema,
 		}),
@@ -667,7 +687,7 @@ const reinversionLiquidacionesSchema = z.object({
 			inversionista: z.string().trim().min(1),
 			modalidad_facturacion: z.enum(billingModes),
 			tipo_reinversion: z.enum(reinversionModes),
-			tipo_compra: z.enum(purchaseClassifications),
+			origen_dinero: z.enum(fundingOrigins),
 			monto: moneySchema,
 		}),
 	),
@@ -677,6 +697,33 @@ const reinversionLiquidacionesSchema = z.object({
 	]),
 	cantidad_liquidaciones: countSchema,
 });
+const reinversionLiquidacionesV3Schema =
+	reinversionLiquidacionesV4Schema.extend({
+		contrato_version: z.literal(3),
+		comprasMes: z.array(
+			z.object({
+				modalidad_facturacion: z.enum(billingModes),
+				tipo_reinversion: z.enum(reinversionModes),
+				tipo_compra: z.enum(purchaseClassifications),
+				cantidad: countSchema,
+				monto: moneySchema,
+			}),
+		),
+		detalleComprasMes: z.array(
+			z.object({
+				fecha: z.string().trim().min(1),
+				inversionista: z.string().trim().min(1),
+				modalidad_facturacion: z.enum(billingModes),
+				tipo_reinversion: z.enum(reinversionModes),
+				tipo_compra: z.enum(purchaseClassifications),
+				monto: moneySchema,
+			}),
+		),
+	});
+const reinversionLiquidacionesSchema = z.discriminatedUnion(
+	"contrato_version",
+	[reinversionLiquidacionesV3Schema, reinversionLiquidacionesV4Schema],
+);
 
 export type FlujoPorInversionistaRow = {
 	inversionista_id: number;

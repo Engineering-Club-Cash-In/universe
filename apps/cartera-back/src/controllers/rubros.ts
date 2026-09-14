@@ -1764,3 +1764,132 @@ export async function revertirRubrosDelPago(
 
   return revertidos;
 }
+
+/**
+ * DESAPLICA los rubros de un pago que vuelve de `validated` a `pending`
+ * ("Revertir Especial"), que NO es lo mismo que revertirlos.
+ *
+ * La diferencia está en qué pasa con el RECLAMO, no con el saldo:
+ *
+ *   * `revertirRubrosDelPago` devuelve el saldo y BORRA la fila de
+ *     `rubros_pagos`, porque ahí el pago se anula: deja de existir un cobro que
+ *     reclame nada.
+ *   * acá el pago sigue vivo, sólo retrocedió de etapa. Su reserva tiene que
+ *     seguir existiendo, así que la fila se CONSERVA con `aplicado = false` y
+ *     `monto_aplicado` en null — que es exactamente el estado en el que la dejó
+ *     el registro de la boleta.
+ *
+ * Conservarla no es cosmético: es lo que devuelve el pago a un estado
+ * `pending` legítimo. Sin la fila, `cobrarRubrosParaBoleta` de la siguiente
+ * boleta no netearía nada contra este pago y apartaría un saldo ya
+ * comprometido, y sobre todo el rubro perdía su congelamiento —
+ * `puedeTocarRubroConReclamosVivos` no veía reclamos y dejaba editarlo con 200,
+ * cuando en un pago pendiente normal eso se rechaza con 409.
+ *
+ * Sólo toca los reclamos `aplicado = true`: los que ya estaban apartados sin
+ * aplicar no movieron saldo, así que no hay nada que devolver y la fila ya está
+ * en el estado destino. Eso también lo vuelve idempotente, igual que el borrado
+ * es el guard de doble reversa: una segunda pasada no encuentra aplicados.
+ *
+ * Corre DENTRO de la transacción de la reversión a pendiente: si algo de lo que
+ * sigue falla, el rubro tampoco queda desaplicado.
+ */
+export async function desaplicarRubrosDelPago(
+  pago_id: number,
+  ejecutor: Ejecutor
+): Promise<{ rubro_id: number; devuelto: string }[]> {
+  const reclamos = await ejecutor
+    .select({
+      id: rubros_pagos.id,
+      rubro_id: rubros_pagos.rubro_id,
+      monto: rubros_pagos.monto,
+      monto_aplicado: rubros_pagos.monto_aplicado,
+    })
+    .from(rubros_pagos)
+    .where(
+      and(eq(rubros_pagos.pago_id, pago_id), eq(rubros_pagos.aplicado, true))
+    );
+
+  const desaplicados: { rubro_id: number; devuelto: string }[] = [];
+
+  for (const reclamo of reclamos) {
+    const [rubro] = await ejecutor
+      .select()
+      .from(rubros)
+      .where(eq(rubros.rubro_id, reclamo.rubro_id))
+      .limit(1)
+      .for("update");
+
+    if (rubro) {
+      // MISMA aritmética que la reversa —y el mismo helper puro—, incluida la
+      // regla de que un rubro ANULADO no resucita. Acá esa regla deja el
+      // conflicto a la vista a propósito: el reclamo sobrevive, así que un
+      // rubro anulado queda en saldo 0 con un reclamo vivo encima y "Revalidar
+      // Pago" lo rechaza con el 409 de `puedeAplicarReclamo`, que dice
+      // literalmente que el rubro se anuló con la boleta ya registrada. La
+      // salida correcta ahí es revertir el pago, no revalidarlo. Restituir el
+      // saldo sería volver a cobrarle al cliente un cargo que un admin canceló
+      // —y, como el saldo apaga `completado`, dejar dos cobros vivos del mismo
+      // tipo: el cancelado y el correcto que se creó después de la anulación.
+      // (Antes de la migración 0038 eso además chocaba contra el índice único y
+      // reventaba la revalidación entera; hoy no revienta nada, y por eso el
+      // `anulado` de `saldoTrasReversaDeReclamo` importa MÁS que antes: es lo
+      // único que impide resucitar el cargo cancelado.)
+      const saldoNuevo = aMonto(
+        saldoTrasReversaDeReclamo({
+          saldoPendiente: rubro.saldo_pendiente,
+          // Lo que REALMENTE se descontó, no lo apartado: son el mismo número
+          // hoy, pero el que manda es el que movió el saldo.
+          montoAplicado: reclamo.monto_aplicado ?? reclamo.monto ?? 0,
+          anulado: rubro.anulado,
+        })
+      );
+      const completado = rubroCompletado(saldoNuevo);
+
+      await ejecutor
+        .update(rubros)
+        .set({
+          saldo_pendiente: saldoNuevo,
+          completado,
+          // `activo` se DERIVA del saldo, igual que en el resto del módulo: el
+          // rubro vuelve a estar vivo porque volvió a tener saldo.
+          activo: !completado,
+          updated_at: SELLO_DE_TIEMPO,
+        })
+        .where(eq(rubros.rubro_id, rubro.rubro_id));
+
+      // Evento `reversa` y no uno propio: el enum `rubro_evento` de la base no
+      // tiene un valor para esto y agregarlo pide una migración, que es mucho
+      // más riesgo del que justifica la etiqueta. El motivo dice cuál de las
+      // dos reversas fue, que es lo que hace falta para leer el historial.
+      await ejecutor.insert(rubros_historial).values({
+        rubro_id: rubro.rubro_id,
+        tipo_evento: "reversa",
+        saldo_anterior: aMonto(rubro.saldo_pendiente),
+        saldo_nuevo: saldoNuevo,
+        pago_id,
+        origen: "reversa",
+        motivo: rubro.anulado
+          ? "El pago volvió a PENDIENTE (Revertir Especial) sobre un rubro ANULADO: el saldo no se restituye para no revivir un cargo cancelado."
+          : "El pago volvió a PENDIENTE (Revertir Especial): el saldo se devuelve y la boleta conserva su reserva sobre el rubro.",
+      });
+
+      desaplicados.push({
+        rubro_id: rubro.rubro_id,
+        devuelto: new Big(saldoNuevo)
+          .minus(new Big(rubro.saldo_pendiente))
+          .toFixed(2),
+      });
+    }
+
+    // El reclamo NO se borra: vuelve al estado en que lo dejó el registro de la
+    // boleta. `monto_aplicado` a null y no a 0 por la misma razón que en el
+    // registro: un 0 sería indistinguible de "se aplicó y no descontó nada".
+    await ejecutor
+      .update(rubros_pagos)
+      .set({ aplicado: false, monto_aplicado: null })
+      .where(eq(rubros_pagos.id, reclamo.id));
+  }
+
+  return desaplicados;
+}

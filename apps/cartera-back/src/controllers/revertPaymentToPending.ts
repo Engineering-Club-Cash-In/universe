@@ -2,6 +2,7 @@ import { z } from "zod";
 import { eq, and } from "drizzle-orm";
 import Big from "big.js";
 import { db } from "../database";
+import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import { setCapitalSource } from "../utils/withAuditContext";
 import {
   pagos_credito,
@@ -11,6 +12,7 @@ import {
 } from "../database/db";
 import { processAndReplaceCreditInvestorsReverse } from "./investor";
 import { anularFacturaEnCofidi } from "./reversePayment";
+import { desaplicarRubrosDelPago } from "./rubros";
 import { emitPaymentReversalToPending } from "../utils/structuredLogger";
 
 function safeNow(): number {
@@ -69,6 +71,18 @@ export interface RevertPaymentToPendingDependencies {
   readonly voidInvoice: typeof anularFacturaEnCofidi;
   readonly setCapitalSource: typeof setCapitalSource;
   readonly emitTerminal: typeof emitPaymentReversalToPending;
+  /**
+   * Serializa contra los demás escritores del MISMO crédito.
+   *
+   * Esta ruta era la única de la familia que no lo tomaba: `reversePayment` y
+   * `revalidatePayment` sí. Se notaba poco mientras sólo tocaba cuotas y
+   * capital, pero ahora también devuelve saldo a los rubros
+   * (`desaplicarRubrosDelPago`), y ese saldo es justo lo que `insertPayment`
+   * lee sin bloqueo para decidir cuánto apartar. Sin el candado, una reversa
+   * especial corriendo a la par de un registro dejaba al registro decidiendo
+   * sobre un saldo que cambiaba debajo.
+   */
+  readonly withCreditLock: typeof withPaymentAdvisoryLock;
 }
 
 const defaultDependencies: RevertPaymentToPendingDependencies = {
@@ -77,6 +91,7 @@ const defaultDependencies: RevertPaymentToPendingDependencies = {
   voidInvoice: anularFacturaEnCofidi,
   setCapitalSource,
   emitTerminal: emitPaymentReversalToPending,
+  withCreditLock: withPaymentAdvisoryLock,
 };
 
 async function reverseAndCleanInvestors(
@@ -123,8 +138,14 @@ export function createRevertPaymentToPending(
     }
     const { credito_id, pago_id } = parseResult.data;
 
-    // 🔥 INICIAR TRANSACCIÓN ATÓMICA
-    const result = await dependencies.runTransaction(async (tx) => {
+    // 🔥 TRANSACCIÓN ATÓMICA, bajo el candado por crédito. El candado se espera
+    // en el pool DEDICADO y NO dentro de la transacción, por la misma razón que
+    // en `revalidatePayment`: un waiter que retiene una conexión del pool de
+    // trabajo mientras espera puede dejar sin conexión al propio dueño del
+    // candado. Orden: candado primero, transacción después — el mismo que usa
+    // `insertPayment`, y no se debe invertir.
+    const result = await dependencies.withCreditLock(credito_id, () =>
+      dependencies.runTransaction(async (tx) => {
       // 2️⃣ OBTENER DATOS DEL PAGO
       const [pago] = await tx
         .select()
@@ -184,6 +205,26 @@ export function createRevertPaymentToPending(
           },
         };
       }
+
+      // 🧾 RUBROS: el pago vuelve a PENDIENTE, así que sus cobros adicionales
+      // vuelven a estar sólo APARTADOS.
+      //
+      // Se DESAPLICAN, no se revierten: revertir borra el reclamo porque ahí el
+      // pago se anula, y acá el pago sigue vivo — su reserva sobre el rubro
+      // tiene que sobrevivir. Sin esto el rubro se quedaba en saldo 0 y
+      // `completado = true` con el pago en `pending`: la deuda del cliente
+      // desaparecía por una boleta que contabilidad no validó, y el rubro
+      // perdía su congelamiento (editarlo pasaba con 200 en vez del 409 que da
+      // un pago pendiente normal).
+      //
+      // Va ANTES de recalcular el crédito, en el punto espejo de donde
+      // `aplicarPagoAlCredito` aplica los rubros: el cobro del rubro no depende
+      // de lo que pase con la cuota ni con el capital, y si algo de lo que
+      // sigue falla la transacción se lleva esto también.
+      await desaplicarRubrosDelPago(
+        pago_id,
+        tx as unknown as Parameters<typeof desaplicarRubrosDelPago>[1]
+      );
 
       // 4️⃣ RECALCULAR VALORES DEL CRÉDITO
       let nuevoCapital = new Big(creditData.capital ?? 0);
@@ -320,7 +361,8 @@ export function createRevertPaymentToPending(
           localStateFailureCount: localInvoiceStateFailureCount,
         },
       };
-    });
+      })
+    );
 
     if (localInvoiceStateFailureCount === 0) externalInvoiceVoidCount = 0;
     const terminalOutcome = classifyRevertPendingTerminal({

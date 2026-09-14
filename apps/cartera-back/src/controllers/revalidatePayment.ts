@@ -12,6 +12,7 @@ import {
 } from "./registerPaymentPolicy";
 import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import { desactivarMoraSiCreditoAlDia } from "./latefee";
+import { aplicarRubrosDelPago } from "./rubros";
 import {
   carteraStructuredLogger,
   type CarteraStructuredLogger,
@@ -230,6 +231,24 @@ async function handleRevalidatePayment(
         .plus(gps)
         .plus(membresias_pago)
         .round(2);
+
+      // 🧾 RUBROS: acá es donde el saldo del rubro vuelve a BAJAR.
+      //
+      // El pago llega con sus reclamos en `aplicado = false` —así los dejó el
+      // registro de la boleta, o `desaplicarRubrosDelPago` si vino por
+      // "Revertir Especial"—, y revalidar es la misma transición que
+      // `/aplicar-pago`: contabilidad se pronunció, el saldo se descuenta. Sin
+      // esto el ciclo validated → pending → validated devolvía el saldo y no lo
+      // volvía a cobrar nunca, o sea el rubro se perdonaba solo.
+      //
+      // Va ANTES de tocar el crédito, en el mismo punto en que lo hace
+      // `aplicarPagoAlCredito`: el cobro del rubro no depende de que la cuota
+      // cierre. Y si el saldo ya no alcanza, LANZA y la transacción entera se
+      // revierte — preferimos ver el agujero a cobrar de menos.
+      await aplicarRubrosDelPago(
+        pago_id,
+        tx as unknown as Parameters<typeof aplicarRubrosDelPago>[1]
+      );
 
       // 6️⃣ ACTUALIZAR EL CRÉDITO
       if (pago.credito_id !== null) {

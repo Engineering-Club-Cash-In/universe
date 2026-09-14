@@ -351,11 +351,14 @@ export const rubrosRouter = new Elysia({ prefix: "/rubros" })
    * Anula un rubro. ADMIN only y con motivo obligatorio.
    *
    * Es POST y no DELETE porque NO borra: la fila sobrevive con su
-   * `monto_original` intacto, deja de cobrarse y libera el índice único para
-   * que se pueda crear el rubro correcto de ese tipo. Sin esta ruta, un cobro
-   * cargado por error era permanente —no hay DELETE, editarlo a 0 lo rechaza la
-   * policy y `completado` sólo lo enciende un abono, que es fase 2— y la única
-   * salida era un UPDATE a mano en producción.
+   * `monto_original` intacto, deja de cobrarse y libera el tipo para que se
+   * pueda crear el rubro correcto de ese mismo concepto (la exclusividad la
+   * chequea `crearRubro`; el índice único que la garantizaba se cayó en la
+   * migración 0038). Sin esta ruta, un cobro cargado por error era permanente
+   * —no hay DELETE, editarlo a 0 lo rechaza la policy y `completado` se
+   * enciende cuando el cliente termina de pagarlo, que es exactamente lo que no
+   * queremos que pase con un cargo que no correspondía— y la única salida era
+   * un UPDATE a mano en producción.
    */
   .post(
     "/:rubro_id/anular",

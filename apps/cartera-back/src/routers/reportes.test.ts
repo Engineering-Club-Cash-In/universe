@@ -1,6 +1,7 @@
 import { describe, expect, it, mock } from "bun:test";
 import jwt from "jsonwebtoken";
 import { getMoraRecoveryPeriod } from "../controllers/moraRecuperacion";
+import { lockPoolMock } from "../utils/testMocks";
 
 // Mismo secreto que captura midleware.ts al cargarse. Firmar con "supersecreto"
 // a secas rompía apenas el .env local traía un JWT_SECRET propio (401 en vez de
@@ -9,7 +10,16 @@ const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";
 
 const execute = mock(() => Promise.resolve({ rows: [] }));
 
-mock.module("../database", () => ({ db: { execute }, client: {} }));
+// `lockPool` va aunque este archivo no lo use: `mock.module` es GLOBAL en bun
+// test, así que este mock de "../database" es el que ven los demás archivos de
+// `src/routers/` — y `rubrosGuards.test.ts` llega a `paymentAdvisoryLock.ts`,
+// que hace `import { lockPool } from "../database"`. Sin la clave, ESE archivo
+// revienta entero al cargarse con "Export named 'lockPool' not found".
+mock.module("../database", () => ({
+  db: { execute },
+  client: {},
+  lockPool: lockPoolMock,
+}));
 
 const { reportesRouter } = await import("./reportes");
 

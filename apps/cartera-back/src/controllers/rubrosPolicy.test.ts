@@ -16,6 +16,15 @@ import {
   redondearMonto,
   rubroCompletado,
   textoLimpio,
+  // Fase 2: cobro de rubros en el flujo de pagos.
+  crearEstampadorRubros,
+  disponibleDeRubro,
+  ordenarRubrosParaCobro,
+  puedeAplicarReclamo,
+  puedeTocarRubroConReclamosVivos,
+  repartirEnRubros,
+  puedeApartarReclamo,
+  saldoTrasReversaDeReclamo,
 } from "./rubrosPolicy";
 
 describe("STATUS_TERMINALES_RUBRO", () => {
@@ -580,3 +589,461 @@ describe("rubroCompletado", () => {
   });
 });
 
+
+// ===========================================================================
+// FASE 2 — COBRO DE RUBROS EN EL FLUJO DE PAGOS
+// ===========================================================================
+
+describe("ordenarRubrosParaCobro", () => {
+  const r = (
+    rubro_id: number,
+    obligatorio: boolean,
+    created_at: string | null,
+  ) => ({ rubro_id, obligatorio, created_at: created_at ? new Date(created_at) : null });
+
+  it("pone los obligatorios antes que los opcionales aunque sean más nuevos", () => {
+    const orden = ordenarRubrosParaCobro([
+      r(1, false, "2026-01-01"),
+      r(2, true, "2026-09-01"),
+      r(3, false, "2026-02-01"),
+    ]).map((x) => x.rubro_id);
+    expect(orden).toEqual([2, 1, 3]);
+  });
+
+  it("dentro del mismo grupo cobra primero el más viejo", () => {
+    const orden = ordenarRubrosParaCobro([
+      r(1, true, "2026-05-01"),
+      r(2, true, "2026-01-01"),
+      r(3, true, "2026-03-01"),
+    ]).map((x) => x.rubro_id);
+    expect(orden).toEqual([2, 3, 1]);
+  });
+
+  it("desempata por rubro_id para que el orden sea estable", () => {
+    const orden = ordenarRubrosParaCobro([
+      r(9, false, "2026-01-01"),
+      r(4, false, "2026-01-01"),
+    ]).map((x) => x.rubro_id);
+    expect(orden).toEqual([4, 9]);
+  });
+
+  it("el rubro sin created_at va al final de su grupo, no al principio", () => {
+    const orden = ordenarRubrosParaCobro([
+      r(1, false, null),
+      r(2, false, "2026-01-01"),
+    ]).map((x) => x.rubro_id);
+    expect(orden).toEqual([2, 1]);
+  });
+
+  it("no muta el arreglo que recibe", () => {
+    const entrada = [r(1, false, "2026-02-01"), r(2, true, "2026-01-01")];
+    ordenarRubrosParaCobro(entrada);
+    expect(entrada.map((x) => x.rubro_id)).toEqual([1, 2]);
+  });
+});
+
+describe("disponibleDeRubro", () => {
+  it("es el saldo cuando no hay reclamos de otras boletas", () => {
+    expect(
+      disponibleDeRubro({ saldoPendiente: "300", reclamadoVivo: 0 }).toFixed(2),
+    ).toBe("300.00");
+  });
+
+  it("descuenta lo que ya apartaron las boletas hermanas sin aplicar", () => {
+    expect(
+      disponibleDeRubro({ saldoPendiente: "300", reclamadoVivo: "120" }).toFixed(2),
+    ).toBe("180.00");
+  });
+
+  it("nunca es negativo aunque los reclamos superen el saldo", () => {
+    expect(
+      disponibleDeRubro({ saldoPendiente: "100", reclamadoVivo: "250" }).toFixed(2),
+    ).toBe("0.00");
+  });
+
+  it("no arrastra error de punto flotante", () => {
+    expect(
+      disponibleDeRubro({ saldoPendiente: "0.3", reclamadoVivo: "0.1" }).toFixed(2),
+    ).toBe("0.20");
+  });
+});
+
+describe("repartirEnRubros", () => {
+  const rubro = (
+    rubro_id: number,
+    saldoPendiente: string,
+    reclamadoVivo: string = "0",
+    obligatorio = false,
+    created_at = "2026-01-01",
+  ) => ({
+    rubro_id,
+    saldoPendiente,
+    reclamadoVivo,
+    obligatorio,
+    created_at: new Date(created_at),
+  });
+
+  it("sin disponible no cobra nada", () => {
+    const r = repartirEnRubros({ disponible: 0, rubros: [rubro(1, "100")] });
+    expect(r.cobros).toEqual([]);
+    expect(r.total.toFixed(2)).toBe("0.00");
+  });
+
+  it("sin rubros vivos no cobra nada y devuelve el disponible intacto", () => {
+    const r = repartirEnRubros({ disponible: "500", rubros: [] });
+    expect(r.cobros).toEqual([]);
+    expect(r.disponibleRestante.toFixed(2)).toBe("500.00");
+  });
+
+  it("cobra el rubro completo y deja el resto del disponible", () => {
+    const r = repartirEnRubros({ disponible: "500", rubros: [rubro(1, "100")] });
+    expect(r.cobros).toEqual([{ rubro_id: 1, monto: "100.00" }]);
+    expect(r.total.toFixed(2)).toBe("100.00");
+    expect(r.disponibleRestante.toFixed(2)).toBe("400.00");
+  });
+
+  it("permite el abono PARCIAL cuando el disponible no alcanza", () => {
+    const r = repartirEnRubros({ disponible: "40", rubros: [rubro(1, "100")] });
+    expect(r.cobros).toEqual([{ rubro_id: 1, monto: "40.00" }]);
+    expect(r.disponibleRestante.toFixed(2)).toBe("0.00");
+  });
+
+  it("consume en el orden de cobro: obligatorio primero, después el más viejo", () => {
+    const r = repartirEnRubros({
+      disponible: "150",
+      rubros: [
+        rubro(1, "100", "0", false, "2026-01-01"),
+        rubro(2, "100", "0", true, "2026-09-01"),
+      ],
+    });
+    // El obligatorio se lleva sus Q100 aunque sea el más nuevo; al opcional
+    // sólo le quedan Q50.
+    expect(r.cobros).toEqual([
+      { rubro_id: 2, monto: "100.00" },
+      { rubro_id: 1, monto: "50.00" },
+    ]);
+    expect(r.total.toFixed(2)).toBe("150.00");
+    expect(r.disponibleRestante.toFixed(2)).toBe("0.00");
+  });
+
+  it("netea contra los reclamos vivos de las boletas hermanas", () => {
+    const r = repartirEnRubros({
+      disponible: "500",
+      rubros: [rubro(1, "300", "300")],
+    });
+    // Otra boleta ya apartó los Q300 completos: no queda nada que cobrar.
+    expect(r.cobros).toEqual([]);
+    expect(r.disponibleRestante.toFixed(2)).toBe("500.00");
+  });
+
+  it("salta el rubro sin disponible y sigue con el siguiente", () => {
+    const r = repartirEnRubros({
+      disponible: "500",
+      rubros: [
+        rubro(1, "300", "300", true, "2026-01-01"),
+        rubro(2, "120", "0", false, "2026-02-01"),
+      ],
+    });
+    expect(r.cobros).toEqual([{ rubro_id: 2, monto: "120.00" }]);
+  });
+
+  it("no escribe reclamos de Q0", () => {
+    const r = repartirEnRubros({
+      disponible: "100",
+      rubros: [rubro(1, "100"), rubro(2, "50", "0", false, "2026-02-01")],
+    });
+    expect(r.cobros).toEqual([{ rubro_id: 1, monto: "100.00" }]);
+  });
+
+  it("los montos salen en la escala de la columna, sin centavos fantasma", () => {
+    const r = repartirEnRubros({
+      disponible: "0.3",
+      rubros: [rubro(1, "0.1"), rubro(2, "0.2", "0", false, "2026-02-01")],
+    });
+    expect(r.cobros).toEqual([
+      { rubro_id: 1, monto: "0.10" },
+      { rubro_id: 2, monto: "0.20" },
+    ]);
+    expect(r.disponibleRestante.toFixed(2)).toBe("0.00");
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // El restante NUNCA queda negativo.
+  //
+  // El reparto redondeaba el cobro con HALF_UP y DESPUÉS lo restaba, así que un
+  // disponible de tres decimales podía cobrar MÁS de lo que había: 0.005 subía a
+  // 0.01 y el restante quedaba en -0.005. Ese negativo terminaba en
+  // `disponible_restante` de `insertPayment` y se acreditaba como
+  // `usuarios.saldo_a_favor` NEGATIVO (repro en prod-sandbox: boleta de 10.005
+  // sobre un rubro vivo → saldo_a_favor -0.01; con el rubro anulado, 0.00).
+  //
+  // Los montos de tres decimales son los que disparan el caso: con dos decimales
+  // el bug es invisible porque el redondeo es la identidad.
+  // ──────────────────────────────────────────────────────────────────────────
+  describe("la suma de los cobros nunca supera el disponible", () => {
+    it("el sub-centavo no se cobra ni deja el restante negativo", () => {
+      const r = repartirEnRubros({
+        disponible: "0.005",
+        rubros: [rubro(1, "300")],
+      });
+      // Redondeando para arriba esto cobraba "0.01" — un centavo que la boleta
+      // no traía — y dejaba disponibleRestante en -0.005.
+      expect(r.cobros).toEqual([]);
+      expect(r.total.toFixed(2)).toBe("0.00");
+      expect(r.disponibleRestante.gte(0)).toBe(true);
+    });
+
+    it("la boleta de 10.005 que dejaba saldo a favor negativo", () => {
+      const r = repartirEnRubros({
+        disponible: "10.005",
+        rubros: [rubro(1, "300")],
+      });
+      // Se cobra lo que de verdad cabe en centavos; el medio centavo sobrante
+      // sigue disponible para las cuotas en vez de cobrarse de más.
+      expect(r.cobros).toEqual([{ rubro_id: 1, monto: "10.00" }]);
+      expect(r.total.lte(new Big("10.005"))).toBe(true);
+      expect(r.disponibleRestante.gte(0)).toBe(true);
+    });
+
+    it("tampoco se pasa repartiendo entre varios rubros", () => {
+      const disponible = "10.005";
+      const r = repartirEnRubros({
+        disponible,
+        rubros: [
+          rubro(1, "3.335", "0", true, "2026-01-01"),
+          rubro(2, "3.335", "0", false, "2026-02-01"),
+          rubro(3, "3.335", "0", false, "2026-03-01"),
+        ],
+      });
+      const sumaCobros = r.cobros.reduce(
+        (acc, c) => acc.plus(new Big(c.monto)),
+        new Big(0),
+      );
+      // La propiedad, dicha tal cual: lo cobrado no puede superar lo que entró.
+      expect(sumaCobros.lte(new Big(disponible))).toBe(true);
+      expect(sumaCobros.eq(r.total)).toBe(true);
+      expect(r.disponibleRestante.gte(0)).toBe(true);
+      // Y cada monto escrito tiene que caber en `numeric(18,2)`.
+      for (const c of r.cobros) {
+        expect(c.monto).toBe(new Big(c.monto).toFixed(2));
+      }
+    });
+
+    it("el rubro con saldo de tres decimales no cobra el centavo de más", () => {
+      const r = repartirEnRubros({
+        disponible: "500",
+        rubros: [rubro(1, "0.005")],
+      });
+      // El saldo del rubro no llega ni a un centavo: no hay nada que cobrar.
+      // Con HALF_UP se le cobraba 0.01 al cliente contra un saldo de 0.005.
+      expect(r.cobros).toEqual([]);
+      expect(r.disponibleRestante.toFixed(2)).toBe("500.00");
+    });
+  });
+});
+
+describe("puedeTocarRubroConReclamosVivos", () => {
+  it("deja pasar cuando no hay reclamos sin aplicar", () => {
+    expect(puedeTocarRubroConReclamosVivos({ reclamos: [] }).permitido).toBe(true);
+  });
+
+  it("bloquea con 409 y dice cuánto se apartó y qué hacer", () => {
+    const v = puedeTocarRubroConReclamosVivos({
+      reclamos: [{ pago_id: 77, monto: "150" }, { pago_id: 78, monto: "50.50" }],
+    });
+    expect(v.permitido).toBe(false);
+    expect(v.status).toBe(409);
+    // El monto TOTAL apartado, los pagos involucrados y las dos salidas.
+    expect(v.motivo).toContain("200.50");
+    expect(v.motivo).toContain("77");
+    expect(v.motivo).toContain("78");
+    // Las dos salidas que el mensaje tiene que ofrecer.
+    expect(v.motivo?.toLowerCase()).toContain("aplique");
+    expect(v.motivo?.toLowerCase()).toContain("revi");
+  });
+});
+
+describe("puedeAplicarReclamo", () => {
+  it("deja aplicar cuando el saldo alcanza exactamente", () => {
+    expect(
+      puedeAplicarReclamo({
+        rubro_id: 5,
+        saldoPendiente: "100",
+        montoApartado: "100",
+      }).permitido,
+    ).toBe(true);
+  });
+
+  it("falla RUIDOSO cuando el saldo ya no alcanza, en vez de aplicar de menos", () => {
+    const v = puedeAplicarReclamo({
+      rubro_id: 5,
+      saldoPendiente: "40",
+      montoApartado: "100",
+    });
+    expect(v.permitido).toBe(false);
+    expect(v.motivo).toContain("5");
+    expect(v.motivo).toContain("40.00");
+    expect(v.motivo).toContain("100.00");
+  });
+
+  it("compara con Big: 0.1 + 0.2 apartados contra 0.3 de saldo alcanza", () => {
+    expect(
+      puedeAplicarReclamo({
+        rubro_id: 1,
+        saldoPendiente: "0.3",
+        montoApartado: new Big("0.1").plus("0.2"),
+      }).permitido,
+    ).toBe(true);
+  });
+});
+
+describe("puedeApartarReclamo", () => {
+  it("deja apartar cuando el disponible alcanza exactamente", () => {
+    expect(
+      puedeApartarReclamo({
+        rubro_id: 7,
+        saldoPendiente: "100",
+        reclamadoVivo: "0",
+        montoApartado: "100",
+      }).permitido,
+    ).toBe(true);
+  });
+
+  it("rechaza cuando el rubro se achicó entre el reparto y el INSERT del reclamo", () => {
+    const v = puedeApartarReclamo({
+      rubro_id: 7,
+      saldoPendiente: "150",
+      reclamadoVivo: "0",
+      montoApartado: "400",
+    });
+    expect(v.permitido).toBe(false);
+    expect(v.status).toBe(409);
+    // El mensaje es para el asesor que tiene la boleta en la mano: qué pasó,
+    // cuánto queda, y que reintentar recalcula.
+    expect(v.motivo).toContain("#7");
+    expect(v.motivo).toContain("150.00");
+    expect(v.motivo).toContain("400.00");
+    expect(v.motivo).toContain("NO se registró");
+  });
+
+  it("un rubro ANULADO (saldo 0) nunca deja apartar", () => {
+    expect(
+      puedeApartarReclamo({
+        rubro_id: 7,
+        saldoPendiente: "0",
+        reclamadoVivo: "0",
+        montoApartado: "0.01",
+      }).permitido,
+    ).toBe(false);
+  });
+
+  it("mide contra el DISPONIBLE: lo apartado por boletas hermanas no se puede volver a apartar", () => {
+    // Mismo saldo, misma boleta: alcanza sin hermanos y no alcanza con ellos.
+    expect(
+      puedeApartarReclamo({
+        rubro_id: 7,
+        saldoPendiente: "100",
+        reclamadoVivo: "0",
+        montoApartado: "60",
+      }).permitido,
+    ).toBe(true);
+    expect(
+      puedeApartarReclamo({
+        rubro_id: 7,
+        saldoPendiente: "100",
+        reclamadoVivo: "60",
+        montoApartado: "60",
+      }).permitido,
+    ).toBe(false);
+  });
+
+  it("compara con Big: 0.1 + 0.2 apartados contra 0.3 de disponible alcanza", () => {
+    expect(
+      puedeApartarReclamo({
+        rubro_id: 1,
+        saldoPendiente: "0.3",
+        reclamadoVivo: "0",
+        montoApartado: new Big("0.1").plus("0.2"),
+      }).permitido,
+    ).toBe(true);
+  });
+});
+
+describe("saldoTrasReversaDeReclamo", () => {
+  it("devuelve al saldo lo que el pago había descontado", () => {
+    expect(
+      saldoTrasReversaDeReclamo({
+        saldoPendiente: "0",
+        montoAplicado: "100",
+        anulado: false,
+      }).toFixed(2),
+    ).toBe("100.00");
+  });
+
+  it("NO resucita un rubro anulado: el cargo se canceló, no vuelve a nacer", () => {
+    expect(
+      saldoTrasReversaDeReclamo({
+        saldoPendiente: "0",
+        montoAplicado: "100",
+        anulado: true,
+      }).toFixed(2),
+    ).toBe("0.00");
+  });
+
+  it("suma sobre el saldo que ya tenía", () => {
+    expect(
+      saldoTrasReversaDeReclamo({
+        saldoPendiente: "25.50",
+        montoAplicado: "74.50",
+        anulado: false,
+      }).toFixed(2),
+    ).toBe("100.00");
+  });
+
+  // La DESAPLICACIÓN ("Revertir Especial": el pago vuelve a `pending` pero sigue
+  // vivo) usa esta misma función: lo que cambia entre reversa y desaplicación es
+  // qué pasa con la fila de `rubros_pagos`, no cuánto saldo vuelve al rubro.
+  it("sirve igual para la desaplicación: el ciclo validated → pending devuelve lo descontado", () => {
+    const saldoTrasAplicar = "0";
+    expect(
+      saldoTrasReversaDeReclamo({
+        saldoPendiente: saldoTrasAplicar,
+        montoAplicado: "400",
+        anulado: false,
+      }).toFixed(2),
+    ).toBe("400.00");
+  });
+
+  it("en la desaplicación el rubro ANULADO tampoco resucita: el 409 al revalidar es deliberado", () => {
+    expect(
+      saldoTrasReversaDeReclamo({
+        saldoPendiente: "0",
+        montoAplicado: "400",
+        anulado: true,
+      }).toFixed(2),
+    ).toBe("0.00");
+  });
+});
+
+describe("crearEstampadorRubros", () => {
+  it("entrega el total a la PRIMERA fila que lo pide y 0 a las demás", () => {
+    const estampar = crearEstampadorRubros("250");
+    expect(estampar.pendiente()).toBe("250");
+    expect(estampar()).toBe("250");
+    expect(estampar()).toBe("0");
+    expect(estampar.pendiente()).toBe("0");
+  });
+
+  it("el peek NO consume el sello", () => {
+    const estampar = crearEstampadorRubros("10");
+    expect(estampar.pendiente()).toBe("10");
+    expect(estampar.pendiente()).toBe("10");
+    expect(estampar()).toBe("10");
+  });
+
+  it("sin rubros cobrados nunca estampa nada", () => {
+    const estampar = crearEstampadorRubros(0);
+    expect(estampar.pendiente()).toBe("0");
+    expect(estampar()).toBe("0");
+  });
+});

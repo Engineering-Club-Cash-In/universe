@@ -12,7 +12,14 @@ const tx = {
     from: () => ({
       where: () => {
         const rows = selectResults.shift() ?? [];
-        return Object.assign(Promise.resolve(rows), { limit: () => Promise.resolve(rows) });
+        // `.for("update")` hace falta desde que la reversión a pendiente
+        // DESAPLICA los rubros del pago: esa relectura bloquea la fila del
+        // rubro, igual que el resto del módulo de rubros.
+        const chain: any = Object.assign(Promise.resolve(rows), {
+          limit: () => chain,
+          for: () => Promise.resolve(rows),
+        });
+        return chain;
       },
     }),
   })),
@@ -48,6 +55,8 @@ const revertPaymentToPending = createRevertPaymentToPending({
   voidInvoice: voidInvoice as unknown as Dependencies["voidInvoice"],
   setCapitalSource: mock(() => Promise.resolve()) as unknown as Dependencies["setCapitalSource"],
   emitTerminal: (event) => emitted.push(event),
+  withCreditLock: ((_creditoId: number, fn: () => Promise<unknown>) =>
+    fn()) as Dependencies["withCreditLock"],
 });
 
 const credit = {
@@ -150,7 +159,11 @@ describe("revertPaymentToPending observability contract", () => {
 
   test("executes invoice processing and emits only aggregate partial counts", async () => {
     const invoice = { factura_id: 1, uuid: "synthetic-uuid", serie: "S", numero: "1", receptor_nit: "000", fecha_certificacion: null, fecha_emision: null };
-    selectResults = [[{ validationStatus: "validated", abono_capital: "100.00" }], [credit], [[invoice][0]]];
+    // El `[]` del medio son los reclamos de rubros del pago: la reversión a
+    // pendiente ahora los DESAPLICA (devuelve el saldo al rubro pero conserva
+    // la reserva de la boleta, que sigue viva en `pending`). Este pago sintético
+    // no cobró rubros, así que no hay nada que desaplicar.
+    selectResults = [[{ validationStatus: "validated", abono_capital: "100.00" }], [credit], [], [[invoice][0]]];
     cofidiResult = { success: false, anulado: false, error: "PROVIDER", mensaje: "synthetic provider detail" };
     const set = { status: 0 };
     const response = await revertPaymentToPending({ body: { credito_id: 10, pago_id: 30 }, set });

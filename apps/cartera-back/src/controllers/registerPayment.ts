@@ -56,6 +56,13 @@ import {
   cuentaComoHermanoVivo,
 } from "./registerPaymentPolicy";
 import {
+  aplicarRubrosDelPago,
+  cobrarRubrosParaBoleta,
+  registrarReclamosDeRubros,
+  RubroError,
+} from "./rubros";
+import { crearEstampadorRubros } from "./rubrosPolicy";
+import {
   PAYMENT_ADVISORY_LOCK_NAMESPACE,
   withPaymentAdvisoryLock,
   type PaymentAdvisoryLockConnection,
@@ -881,6 +888,73 @@ export const insertPayment = async ({ body, set }: any) => {
       };
     }
 
+    // 🧾 RUBROS — cobros adicionales del crédito (tarjeta de circulación,
+    // traspaso…) que se consumen del disponible aparte de la amortización.
+    //
+    // VA DESPUÉS DE LA MORA Y ANTES DEL AJUSTE POR FECHA IDEAL, y eso importa:
+    // los dos `return` de la mora (arriba) cortan el flujo cuando la boleta no
+    // alcanza a cubrirla entera, así que en ese caso TAMPOCO se cobran rubros.
+    // Es deliberado — la mora siempre manda: mientras el cliente deba mora, la
+    // boleta se va completa a mora y ningún otro cobro se le adelanta.
+    //
+    // Acá SÓLO SE APARTA. `rubros.saldo_pendiente` no se toca: esta etapa
+    // escribe filas `pending` en pagos_credito y no mueve plata, así que el
+    // saldo del rubro baja recién en /aplicar-pago (regla del dueño del
+    // dominio). Lo que sí pasa ya es que el monto se RESTA del disponible —a
+    // diferencia del convenio, que sólo deja rastro—: un rubro es un cobro
+    // aparte que de verdad compite con las cuotas por la plata de la boleta.
+    //
+    // El reparto se calcula acá pero los reclamos se ESCRIBEN al final
+    // (`commitRubros`), porque hasta que no hay una fila de pagos_credito
+    // persistida no existe el `pago_id` al que colgarlos. Mismo diferimiento
+    // que usa el convenio con `commitConvenio`, y con el mismo beneficio: un
+    // rechazo posterior no deja rubros reclamados por una boleta que no existe.
+    const cobroRubros = await cobrarRubrosParaBoleta({
+      credito_id: credito.credito_id,
+      disponible: disponible_restante,
+    });
+    disponible_restante = disponible_restante.minus(cobroRubros.total);
+    // Solo UNA fila de esta boleta carga el total en `otros`, aunque la boleta
+    // escriba varias: mismo problema y mismo patrón que el sello del convenio
+    // (ver `crearEstampadorRubros`).
+    const estamparRubros = crearEstampadorRubros(cobroRubros.total);
+    let rubrosPagoId: number | undefined;
+    /**
+     * Escribe los reclamos y suma el total al `otros` de la fila estampada.
+     *
+     * Se llama SOLO en los returns de éxito, igual que `commitConvenio`: las
+     * dos escrituras van juntas o ninguna, para que no quede un rubro apartado
+     * por una boleta cuyo cobro no se ve en ninguna fila.
+     *
+     * `monto_aplicado` NO se toca: lo cobrado en rubros no amortiza la cuota,
+     * igual que la mora y el "otros" tipeado a mano, que tampoco entran ahí. La
+     * fila queda validable porque `shouldRejectZeroAppliedNormalValidation`
+     * exime a las filas con `otros > 0`.
+     */
+    const commitRubros = async () => {
+      if (cobroRubros.total.lte(0)) return;
+      if (rubrosPagoId === undefined) {
+        throw new Error(
+          "No se puede registrar el cobro de rubros sin una fila de pago persistida"
+        );
+      }
+      const pagoId = rubrosPagoId;
+      await db.transaction(async (tx) => {
+        await registrarReclamosDeRubros(pagoId, cobroRubros.cobros, tx);
+        const [fila] = await tx
+          .select({ otros: pagos_credito.otros })
+          .from(pagos_credito)
+          .where(eq(pagos_credito.pago_id, pagoId))
+          .limit(1);
+        await tx
+          .update(pagos_credito)
+          .set({
+            otros: new Big(fila?.otros ?? 0).plus(cobroRubros.total).toString(),
+          })
+          .where(eq(pagos_credito.pago_id, pagoId));
+      });
+    };
+
     // Ajuste por fecha ideal de pago (ver ajuste_fecha_ideal_pago en schema.ts).
     // Se procesa después de mora: si mora corta el flujo con un return arriba,
     // no debe tocarse. Se resta de disponible_restante, nunca de abonoCapital
@@ -1588,6 +1662,9 @@ export const insertPayment = async ({ body, set }: any) => {
               // `otros` pero el ajuste siga pendiente y se vuelva a cobrar en
               // el siguiente pago.
               const pagoConvenioParaFila = estamparPagoConvenio();
+              // Se consume DENTRO de la rama que sí escribe fila (nunca antes
+              // de decidir si la cuota se salta), igual que el del convenio.
+              const rubrosParaFila = estamparRubros();
               [pagoInsertado] = await db.transaction(async (tx) => {
                 const rows = await tx
                   .update(pagos_credito)
@@ -1628,6 +1705,9 @@ export const insertPayment = async ({ body, set }: any) => {
               }
               if (new Big(pagoConvenioParaFila).gt(0) && pagoInsertado) {
                 pagoConvenioPagoId = pagoInsertado.pago_id;
+              }
+              if (new Big(rubrosParaFila).gt(0) && pagoInsertado) {
+                rubrosPagoId = pagoInsertado.pago_id;
               }
               await db
                 .update(pagos_credito)
@@ -1684,6 +1764,9 @@ export const insertPayment = async ({ body, set }: any) => {
               // `otros` pero el ajuste siga pendiente y se vuelva a cobrar en
               // el siguiente pago.
               const pagoConvenioParaFila = estamparPagoConvenio();
+              // Se consume DENTRO de la rama que sí escribe fila (nunca antes
+              // de decidir si la cuota se salta), igual que el del convenio.
+              const rubrosParaFila = estamparRubros();
               [pagoInsertado] = await db.transaction(async (tx) => {
               const rows = await tx
                 .insert(pagos_credito)
@@ -1783,6 +1866,9 @@ export const insertPayment = async ({ body, set }: any) => {
               if (new Big(pagoConvenioParaFila).gt(0) && pagoInsertado) {
                 pagoConvenioPagoId = pagoInsertado.pago_id;
               }
+              if (new Big(rubrosParaFila).gt(0) && pagoInsertado) {
+                rubrosPagoId = pagoInsertado.pago_id;
+              }
 
               // Marcar TODA la cuota como pagada (igual que la rama UPDATE).
               await db
@@ -1813,6 +1899,12 @@ export const insertPayment = async ({ body, set }: any) => {
                 // cuota debe insertar fila para cargarlo. Una vez estampado
                 // devuelve "0" y las siguientes cuotas sí pueden saltarse.
                 pagoConvenio: estamparPagoConvenio.pendiente(),
+                // Mismo peek para los rubros: una boleta que SÓLO cobró rubros
+                // no absorbe nada en ninguna cuota, así que sin esto se
+                // saltarían todas y el cobro se quedaría sin fila donde
+                // colgarse (y sin boleta, o sea invisible para la detección de
+                // duplicados y sin reversa posible).
+                rubros: estamparRubros.pendiente(),
               })
             ) {
               // ── Cuota que no absorbió NADA (crédito 8717) ─────────────────
@@ -1857,6 +1949,9 @@ export const insertPayment = async ({ body, set }: any) => {
               // `otros` pero el ajuste siga pendiente y se vuelva a cobrar en
               // el siguiente pago.
               const pagoConvenioParaFila = estamparPagoConvenio();
+              // Se consume DENTRO de la rama que sí escribe fila (nunca antes
+              // de decidir si la cuota se salta), igual que el del convenio.
+              const rubrosParaFila = estamparRubros();
               [pagoInsertado] = await db.transaction(async (tx) => {
               const rows = await tx
                 .insert(pagos_credito)
@@ -1952,6 +2047,9 @@ export const insertPayment = async ({ body, set }: any) => {
               }
               if (new Big(pagoConvenioParaFila).gt(0) && pagoInsertado) {
                 pagoConvenioPagoId = pagoInsertado.pago_id;
+              }
+              if (new Big(rubrosParaFila).gt(0) && pagoInsertado) {
+                rubrosPagoId = pagoInsertado.pago_id;
               }
               if (
                 pagoInsertado?.pago_id &&
@@ -2134,6 +2232,10 @@ export const insertPayment = async ({ body, set }: any) => {
       const [month, day, year] = datePart.split("/");
       const fechaGuatemala = new Date(`${year}-${month}-${day}T${timePart}`);
       const pagoConvenioParaFila = estamparPagoConvenio();
+      // Si el loop de cuotas no escribió ninguna fila (típico del crédito sin
+      // cuotas abiertas), esta es la única fila de la boleta: acá se estampa el
+      // cobro de rubros para que no se quede sin dónde vivir.
+      const rubrosParaFila = estamparRubros();
       const pagoData = {
         credito_id,
         cuota: credito.cuota,
@@ -2206,6 +2308,9 @@ export const insertPayment = async ({ body, set }: any) => {
       if (new Big(pagoConvenioParaFila).gt(0)) {
         pagoConvenioPagoId = pagoInsertado.pago_id;
       }
+      if (new Big(rubrosParaFila).gt(0)) {
+        rubrosPagoId = pagoInsertado.pago_id;
+      }
 
 
 
@@ -2240,6 +2345,10 @@ export const insertPayment = async ({ body, set }: any) => {
           .where(eq(usuarios.usuario_id, credito.usuario_id));
 
       }
+
+      // Ídem rubros: la fila ya existe, así que recién acá se escriben los
+      // reclamos y se le suma el cobro a su `otros`.
+      await commitRubros();
 
       // La boleta ya está persistida (fila de capital + boletas): recién acá
       // se acredita el convenio y se estampa esta fila, juntos en la misma
@@ -2331,6 +2440,9 @@ export const insertPayment = async ({ body, set }: any) => {
           moraAplicada: resultadoMora.montoAplicadoMora ?? 0,
           otrosEspecialAplicado: montoBoleta.eq(otrosBig),
           convenioAplicado: montoConvenio,
+          // Una boleta que sólo cobró rubros SÍ acreditó algo: no puede caer
+          // en el 409 de "no se aplicó nada".
+          rubrosCobrados: cobroRubros.total,
         })
       ) {
         set.status = 409;
@@ -2358,8 +2470,16 @@ export const insertPayment = async ({ body, set }: any) => {
       // detección de duplicados y sin reversa posible del convenio. El
       // disponible sigue yendo a saldo a favor: el registro del convenio no
       // consume la boleta.
-      if (new Big(estamparPagoConvenio.pendiente()).gt(0)) {
+      // Ídem para los rubros: si el cobro no llegó a estamparse en ninguna fila
+      // (crédito sin cuotas abiertas, así que el loop nunca corrió), la boleta
+      // necesita su fila-rastro o el rubro quedaría apartado por un pago que no
+      // existe en pagos_credito.
+      if (
+        new Big(estamparPagoConvenio.pendiente()).gt(0) ||
+        new Big(estamparRubros.pendiente()).gt(0)
+      ) {
         const pagoConvenioParaFila = estamparPagoConvenio();
+        const rubrosParaFila = estamparRubros();
         const pagoEspecialInsertado = await insertarPago({
           numero_credito_sifco: credito.numero_credito_sifco,
           numero_cuota: cuotaApagar,
@@ -2380,7 +2500,17 @@ export const insertPayment = async ({ body, set }: any) => {
         if (new Big(pagoConvenioParaFila).gt(0)) {
           pagoConvenioPagoId = pagoEspecialInsertado.pago_id;
         }
+        if (new Big(rubrosParaFila).gt(0)) {
+          rubrosPagoId = pagoEspecialInsertado.pago_id;
+        }
       }
+
+      // Con la fila ya escrita (la del loop o la fila-rastro de arriba), se
+      // registran los reclamos de rubros. Va ANTES del saldo a favor y del
+      // convenio por la misma razón que ellos van al final: los 409 de este
+      // `else` salen antes de este punto, así que un rechazo no deja rubros
+      // apartados por una boleta que nunca se registró.
+      await commitRubros();
 
       const newSaldoAFavor = saldoAFavor
         .plus(disponible_restante)
@@ -2437,6 +2567,26 @@ export const insertPayment = async ({ body, set }: any) => {
       error.message.startsWith(CUOTA_INTEGRITY_ERROR_PREFIX)
     ) {
       set.status = 409;
+      return { success: false, message: error.message };
+    }
+
+    // 🧾 RUBROS: `commitRubros` → `registrarReclamosDeRubros` lanza `RubroError`
+    // cuando el rubro cambió entre el cálculo del reparto y el INSERT del
+    // reclamo (lo anularon, o el saldo ya no alcanza). Es un choque de NEGOCIO
+    // con su propio `status` —casi siempre 409— y un texto que le dice al asesor
+    // qué hacer ("vuelva a registrarla: el reparto se recalcula sin ese cobro"),
+    // no una caída del servidor. Sin esta rama salía 500: el texto igual llegaba
+    // al toast (`extraerDetalle` del front descarta el "Internal server error"
+    // genérico y cae al campo `error`), pero el código HTTP mentía — cualquier
+    // alerta o reintento cableado a 5xx trataba un conflicto previsto como una
+    // caída.
+    //
+    // MISMA forma que en `revalidatePayment.ts` y que `responderError` de
+    // `routers/rubros.ts` (`{ success: false, message }`), que es también la del
+    // 409 de integridad de cuota de acá arriba: el front prioriza `message` al
+    // extraer el detalle.
+    if (error instanceof RubroError) {
+      set.status = error.status;
       return { success: false, message: error.message };
     }
 
@@ -2764,6 +2914,22 @@ async function aplicarPagoAlCreditoSinLock(pago_id: number) {
       };
     }
     if (pago.validationStatus === "capital") {
+      // Un abono directo a capital también puede cargar el cobro de rubros de
+      // su boleta: cuando el crédito no tiene cuotas abiertas, la fila de
+      // capital es la ÚNICA fila que esa boleta escribió, así que es la que
+      // lleva el sello (ver insertPayment). Sin esto el reclamo se quedaría
+      // `aplicado = false` para siempre y congelaría la edición del rubro.
+      //
+      // Corre ANTES de aplicar el capital y en su propia transacción: el flujo
+      // de capital no abre una (reparte a inversionistas por el pool global),
+      // así que si el guard ruidoso de rubros tiene que fallar, conviene que
+      // falle antes de mover capital y no después.
+      await db.transaction(async (tx) =>
+        aplicarRubrosDelPago(
+          pago_id,
+          tx as unknown as Parameters<typeof aplicarRubrosDelPago>[1]
+        )
+      );
       const resultadoCapital = await applyCapitalPaymentAndBuildResponse(
         pago,
         pago_id,
@@ -3007,6 +3173,30 @@ async function aplicarPagoNormalEnTx(
 
       }
     }
+
+    // ─────────────────────────────────────────────────────────────────
+    // 🧾 RUBROS: acá es donde el saldo del rubro BAJA de verdad.
+    //
+    // El registro de la boleta sólo APARTÓ (`rubros_pagos` con
+    // `aplicado = false`, saldo del rubro intacto); recién ahora que
+    // contabilidad validó se descuenta, se escribe el evento `abono` del
+    // historial y se marca el reclamo. Va DENTRO de esta transacción: si algo
+    // de lo que sigue falla, el rubro tampoco queda cobrado.
+    //
+    // Va ANTES de partir en ramas a propósito: una cuota que NO cierra (RAMA A)
+    // igual tiene que aplicar los rubros de su boleta — el cobro del rubro no
+    // depende de que la cuota quede saldada. Ponerlo acá lo cubre en las dos
+    // ramas con un solo llamado.
+    //
+    // Si el saldo del rubro ya no alcanza, `aplicarRubrosDelPago` LANZA y la
+    // transacción entera se revierte: preferimos ver el agujero a aplicar de
+    // menos. No debería poder pasar — el rubro con un reclamo vivo no se puede
+    // editar ni anular (409 en rubros.ts).
+    // ─────────────────────────────────────────────────────────────────
+    await aplicarRubrosDelPago(
+      pago_id,
+      tx as unknown as Parameters<typeof aplicarRubrosDelPago>[1]
+    );
 
     // ─────────────────────────────────────────────────────────────────
     // RAMA A: la cuota AÚN no se cierra con este pago

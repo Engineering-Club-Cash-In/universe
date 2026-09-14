@@ -247,6 +247,75 @@ test("modelo v4 usa snapshots y construye cards de composición, porcentaje, tic
 	});
 });
 
+test("compatibilidad v3 reagrupa compras y no inventa histórico de ticket v4", () => {
+	const base = response();
+	const legacy = {
+		...base,
+		contrato_version: 3,
+		comprasMes: [
+			{
+				modalidad_facturacion: "factura_cube",
+				tipo_reinversion: "sin_reinversion",
+				tipo_compra: "nueva_posicion",
+				cantidad: 1,
+				monto: "80.00",
+			},
+			{
+				modalidad_facturacion: "factura_cube",
+				tipo_reinversion: "sin_reinversion",
+				tipo_compra: "ampliacion_posicion",
+				cantidad: 1,
+				monto: "40.00",
+			},
+		],
+		detalleComprasMes: [
+			{
+				fecha: "2026-07-03",
+				inversionista: "Ana",
+				modalidad_facturacion: "factura_cube",
+				tipo_reinversion: "sin_reinversion",
+				tipo_compra: "nueva_posicion",
+				monto: "80.00",
+			},
+			{
+				fecha: "2026-07-04",
+				inversionista: "Beatriz",
+				modalidad_facturacion: "factura_cube",
+				tipo_reinversion: "sin_reinversion",
+				tipo_compra: "ampliacion_posicion",
+				monto: "40.00",
+			},
+		],
+	};
+
+	const model = buildReinvestmentReportModel(legacy);
+	if (!model.compatible) throw new Error("Contrato v3 incompatible");
+
+	expect(model.reconciliations.purchases).toBe(true);
+	expect(model.data.comprasMes).toEqual([
+		{
+			modalidad_facturacion: "factura_cube",
+			tipo_reinversion: "sin_reinversion",
+			origen_dinero: "compra_nueva",
+			cantidad: 2,
+			monto: "120.00",
+		},
+	]);
+	expect(model.summary.ticket).toEqual({
+		amount: 60,
+		count: 2,
+		variationPercentage: null,
+	});
+	expect(model.data.ticketInversion.historico).toEqual([
+		{
+			periodo: "2026-07",
+			cantidad: 2,
+			monto_total: "120.00",
+			ticket_promedio: "60.00",
+		},
+	]);
+});
+
 test("rechaza deriva entre totales crudos y composición v4", () => {
 	const data = response();
 	data.porTipo.sin_reinversion.total_capital = "100.02";

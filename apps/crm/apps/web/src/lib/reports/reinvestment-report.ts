@@ -64,11 +64,78 @@ export function getCompatibleReportData(
 ): ReinversionLiquidacionesResponse | undefined {
 	if (!isRecord(input)) return undefined;
 	if (input.contrato_version === 3) {
-		const comprasMes = Array.isArray(input.comprasMes)
+		const convertedPurchases = Array.isArray(input.comprasMes)
 			? input.comprasMes.map((row) =>
 					isRecord(row) ? { ...row, origen_dinero: "compra_nueva" } : row,
 				)
 			: input.comprasMes;
+		let comprasMes = convertedPurchases;
+		let ticketInversion = input.ticketInversion;
+		if (
+			Array.isArray(convertedPurchases) &&
+			convertedPurchases.every(
+				(row) =>
+					isRecord(row) &&
+					typeof row.modalidad_facturacion === "string" &&
+					typeof row.tipo_reinversion === "string" &&
+					isNonnegativeInteger(row.cantidad) &&
+					isMoney(row.monto),
+			)
+		) {
+			const grouped = new Map<
+				string,
+				{
+					modalidad_facturacion: string;
+					tipo_reinversion: string;
+					origen_dinero: "compra_nueva";
+					cantidad: number;
+					montoCentavos: number;
+				}
+			>();
+			for (const row of convertedPurchases) {
+				if (!isRecord(row)) continue;
+				const key = `${row.modalidad_facturacion}\u0000${row.tipo_reinversion}`;
+				const current = grouped.get(key);
+				grouped.set(key, {
+					modalidad_facturacion: String(row.modalidad_facturacion),
+					tipo_reinversion: String(row.tipo_reinversion),
+					origen_dinero: "compra_nueva",
+					cantidad: (current?.cantidad ?? 0) + Number(row.cantidad),
+					montoCentavos:
+						(current?.montoCentavos ?? 0) + cents(String(row.monto)),
+				});
+			}
+			comprasMes = [...grouped.values()].map(({ montoCentavos, ...row }) => ({
+				...row,
+				monto: (montoCentavos / 100).toFixed(2),
+			}));
+			const cantidad = [...grouped.values()].reduce(
+				(total, row) => total + row.cantidad,
+				0,
+			);
+			const montoCentavos = [...grouped.values()].reduce(
+				(total, row) => total + row.montoCentavos,
+				0,
+			);
+			const actual = isRecord(input.ticketInversion)
+				? input.ticketInversion.actual
+				: undefined;
+			if (isRecord(actual) && /^\d{4}-\d{2}$/.test(String(actual.periodo))) {
+				const rebuilt = {
+					periodo: String(actual.periodo),
+					cantidad,
+					monto_total: (montoCentavos / 100).toFixed(2),
+					ticket_promedio:
+						cantidad === 0
+							? "0.00"
+							: (montoCentavos / cantidad / 100).toFixed(2),
+				};
+				ticketInversion = {
+					actual: { ...rebuilt, variacion_porcentual: null },
+					historico: [rebuilt],
+				};
+			}
+		}
 		const detalleComprasMes = Array.isArray(input.detalleComprasMes)
 			? input.detalleComprasMes.map((row) =>
 					isRecord(row) ? { ...row, origen_dinero: "compra_nueva" } : row,
@@ -79,6 +146,7 @@ export function getCompatibleReportData(
 			contrato_version: 4,
 			comprasMes,
 			detalleComprasMes,
+			ticketInversion,
 		});
 	}
 	if (input.contrato_version !== 4) return undefined;

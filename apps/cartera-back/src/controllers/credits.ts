@@ -22,6 +22,8 @@ import {
   pagos_credito,
   pagos_credito_inversionistas_espejo,
   platform_users,
+  rubros,
+  rubros_tipos,
   StatusCredit,
   usuarios,
 } from "../database/db/schema";
@@ -59,6 +61,8 @@ import {
   withActiveCancellation,
 } from "./creditDetailPolicy";
 import { buildNameSearchCondition } from "../utils/functions/generalFunctions";
+import { disponibleDeRubro, ordenarRubrosParaCobro } from "./rubrosPolicy";
+import { reclamosVivosDeRubros } from "./rubros";
 
 
 export const getCreditoByNumero = async (numero_credito_sifco: string) => {
@@ -344,6 +348,97 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         )
       );
 
+    // Rubros vivos del crédito (módulo NUEVO `cartera.rubros*` — no confundir
+    // con la tabla vieja `creditos_rubros_otros`, que alimenta el campo
+    // `otros` del pago y no tiene nada que ver con esto). Paralelo a
+    // `moraActual`: una consulta para los rubros vivos + su tipo, otra para lo
+    // que boletas hermanas ya apartaron, y `disponibleDeRubro` neteando cada
+    // uno — así un segundo asesor cobrando el mismo día no ve el rubro
+    // completo si otra boleta ya lo tomó. Envuelto en su propio try/catch: si
+    // esto falla, el endpoint que alimenta la cobranza de toda la empresa NO
+    // se cae, sale en 0/[] y se loguea.
+    let rubrosActual = 0;
+    let rubrosDetalle: {
+      rubro_id: number;
+      tipo_nombre: string;
+      descripcion: string;
+      saldo_pendiente: string;
+      disponible: string;
+      obligatorio: boolean;
+    }[] = [];
+    try {
+      const rubrosVivos = await db
+        .select({
+          rubro_id: rubros.rubro_id,
+          descripcion: rubros.descripcion,
+          saldo_pendiente: rubros.saldo_pendiente,
+          // No se devuelve al front: se selecciona sólo para poder ordenar la
+          // lista con el mismo criterio con que se va a cobrar (ver abajo).
+          created_at: rubros.created_at,
+          tipo_nombre: rubros_tipos.nombre,
+          obligatorio: rubros_tipos.obligatorio,
+        })
+        .from(rubros)
+        .innerJoin(rubros_tipos, eq(rubros.tipo_id, rubros_tipos.tipo_id))
+        .where(
+          and(
+            eq(rubros.credito_id, creditoId),
+            eq(rubros.activo, true),
+            eq(rubros.completado, false),
+            eq(rubros.anulado, false)
+          )
+        );
+
+      if (rubrosVivos.length > 0) {
+        /**
+         * Se ordena con la MISMA función que usa el cobro, no con un `ORDER BY`
+         * propio.
+         *
+         * La pantalla le muestra al asesor la lista en este orden, y una boleta
+         * que no alcanza para todos los rubros los cobra de arriba hacia abajo.
+         * Si la lista viniera en orden arbitrario —que es lo que devuelve la
+         * base sin `ORDER BY`—, el asesor vería un orden y la plata iría en
+         * otro: con una boleta corta terminaría diciéndole al cliente que le
+         * cobró el rubro equivocado. Reusar la función pura en vez de repetir
+         * el criterio en SQL es lo que impide que los dos órdenes se separen
+         * el día que la regla cambie.
+         */
+        const enOrdenDeCobro = ordenarRubrosParaCobro(rubrosVivos);
+
+        const reclamos = await reclamosVivosDeRubros(
+          enOrdenDeCobro.map((r) => r.rubro_id)
+        );
+
+        let totalDisponible = new Big(0);
+        rubrosDetalle = enOrdenDeCobro.map((r) => {
+          const reclamadoVivo = (reclamos.get(r.rubro_id) ?? []).reduce(
+            (acc, c) => acc.plus(new Big(c.monto ?? 0)),
+            new Big(0)
+          );
+          const disponible = disponibleDeRubro({
+            saldoPendiente: r.saldo_pendiente ?? "0",
+            reclamadoVivo,
+          });
+          totalDisponible = totalDisponible.plus(disponible);
+
+          return {
+            rubro_id: r.rubro_id,
+            tipo_nombre: r.tipo_nombre,
+            descripcion: r.descripcion,
+            saldo_pendiente: new Big(r.saldo_pendiente ?? 0).toFixed(2),
+            disponible: disponible.toFixed(2),
+            obligatorio: r.obligatorio,
+          };
+        });
+
+        rubrosActual = totalDisponible.toNumber();
+      }
+    } catch (error) {
+      console.error("[getCreditoByNumero] Error consultando rubros:", error);
+      rubrosActual = 0;
+      rubrosDetalle = [];
+    }
+
     // 6. Consultar si la cuota actual ya fue pagada
     const cuotaActualDataResult = await db
       .select({
@@ -443,6 +538,10 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         pagosConvenio: [],
         ajusteFechaIdeal: ajusteFechaIdeal ?? null,
         cuotaMensualAPagar,
+        // Módulo NUEVO de rubros (`cartera.rubros*`) — no la tabla vieja
+        // `creditos_rubros_otros` que alimenta el campo `otros` del pago.
+        rubrosActual,
+        rubros: rubrosDetalle,
         ...(contractSummary ? { contractSummary } : {}),
       }, cancelacionActiva, currentCredit.creditos.statusCredit);
     }
@@ -579,6 +678,10 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       pagosConvenio,
       ajusteFechaIdeal: ajusteFechaIdeal ?? null,
       cuotaMensualAPagar,
+      // Módulo NUEVO de rubros (`cartera.rubros*`) — no la tabla vieja
+      // `creditos_rubros_otros` que alimenta el campo `otros` del pago.
+      rubrosActual,
+      rubros: rubrosDetalle,
       ...(contractSummary ? { contractSummary } : {}),
     }, cancelacionActiva, currentCredit.creditos.statusCredit);
   } catch (error) {

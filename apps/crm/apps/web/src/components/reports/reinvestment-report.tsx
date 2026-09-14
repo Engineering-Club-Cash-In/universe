@@ -26,10 +26,10 @@ import {
 	buildSecondarySummaryPresentation,
 	canRenderSecondaryDetails,
 	getBillingModeLabel,
+	getFundingOriginLabel,
 	getModePresentation,
 	getMonthlyFooterPresentation,
 	getPublicPartialDetailMessage,
-	getPurchaseClassificationLabel,
 	getReconciliationPresentation,
 	getReinvestmentModeLabel,
 	getReportState,
@@ -162,7 +162,7 @@ export function ReinvestmentReport({
 					<Metric
 						label="Ticket promedio"
 						value={model.summary.ticket.amount}
-						description={`${model.summary.ticket.count} nuevas posiciones${model.summary.ticket.variationPercentage === null ? "" : ` · ${model.summary.ticket.variationPercentage >= 0 ? "+" : ""}${model.summary.ticket.variationPercentage.toFixed(2)}% vs. mes anterior`}`}
+						description={`${model.summary.ticket.count} compras nuevas${model.summary.ticket.variationPercentage === null ? "" : ` · ${model.summary.ticket.variationPercentage >= 0 ? "+" : ""}${model.summary.ticket.variationPercentage.toFixed(2)}% vs. mes anterior`}`}
 					/>
 					<Metric
 						label="Interés registrado"
@@ -480,7 +480,7 @@ export function ReinvestmentReport({
 										</dl>
 									) : (
 										<p className="text-muted-foreground text-sm">
-											Sin compras registradas.
+											Sin movimientos de inversión registrados.
 										</p>
 									)}
 									<div className="flex min-h-11 flex-wrap items-center justify-between gap-2 border-t pt-3">
@@ -549,7 +549,7 @@ export function ReinvestmentReport({
 					id="investment-ticket-history"
 					className="mb-3 font-semibold text-lg"
 				>
-					Histórico del ticket de nuevas posiciones
+					Histórico del ticket de compras nuevas
 				</h3>
 				<PaginatedRows
 					label="Histórico del ticket"
@@ -557,14 +557,12 @@ export function ReinvestmentReport({
 					key={`ticket-${periodLabel}`}
 				>
 					{(ticketRows) => (
-						<TableOverflow label="Histórico del ticket de nuevas posiciones">
+						<TableOverflow label="Histórico del ticket de compras nuevas">
 							<Table className="min-w-[620px] tabular-nums">
 								<TableHeader>
 									<TableRow>
 										<TableHead>Período</TableHead>
-										<TableHead className="text-right">
-											Nuevas posiciones
-										</TableHead>
+										<TableHead className="text-right">Compras nuevas</TableHead>
 										<TableHead className="text-right">Monto total</TableHead>
 										<TableHead className="text-right">
 											Ticket promedio
@@ -889,15 +887,13 @@ function DetailTable({
 			<PaginatedRows label="Detalle de interés" rows={data.detalleInteresNeto}>
 				{(interestRows) => (
 					<TableOverflow label="Detalle de interés registrado">
-						<Table className="min-w-[760px]">
+						<Table className="min-w-[560px]">
 							<TableHeader>
 								<TableRow>
 									<TableHead>Inversionista / referencia</TableHead>
-									<TableHead>Tratamiento fiscal</TableHead>
 									<TableHead className="text-right">Interés</TableHead>
 									<TableHead className="text-right">IVA</TableHead>
 									<TableHead className="text-right">ISR</TableHead>
-									<TableHead className="text-right">Neto derivado</TableHead>
 								</TableRow>
 							</TableHeader>
 							<TableBody>
@@ -909,9 +905,6 @@ function DetailTable({
 												{row.referencia}
 											</span>
 										</TableCell>
-										<TableCell>
-											{row.tratamiento_fiscal.replaceAll("_", " ")}
-										</TableCell>
 										<TableCell className="text-right">
 											{currency(row.interes)}
 										</TableCell>
@@ -920,11 +913,6 @@ function DetailTable({
 										</TableCell>
 										<TableCell className="text-right">
 											{currency(row.isr)}
-										</TableCell>
-										<TableCell className="text-right font-medium">
-											{row.tratamiento_fiscal === "cube"
-												? currency(row.neto)
-												: "—"}
 										</TableCell>
 									</TableRow>
 								))}
@@ -973,9 +961,9 @@ function DetailTable({
 	}
 	if (data.detalleComprasMes.length === 0) return <NoDetail />;
 	return (
-		<PaginatedRows label="Detalle de compras" rows={data.detalleComprasMes}>
+		<PaginatedRows label="Detalle de movimientos" rows={data.detalleComprasMes}>
 			{(purchaseRows) => (
-				<TableOverflow label="Detalle de compras del mes">
+				<TableOverflow label="Detalle de movimientos de inversión del mes">
 					<Table className="min-w-[900px]">
 						<TableHeader>
 							<TableRow>
@@ -983,7 +971,7 @@ function DetailTable({
 								<TableHead>Inversionista</TableHead>
 								<TableHead>Modalidad de facturación</TableHead>
 								<TableHead>Tipo de reinversión</TableHead>
-								<TableHead>Tipo de compra</TableHead>
+								<TableHead>Origen del dinero</TableHead>
 								<TableHead className="text-right">Monto</TableHead>
 							</TableRow>
 						</TableHeader>
@@ -999,7 +987,7 @@ function DetailTable({
 										{getReinvestmentModeLabel(row.tipo_reinversion)}
 									</TableCell>
 									<TableCell>
-										{getPurchaseClassificationLabel(row.tipo_compra)}
+										{getFundingOriginLabel(row.origen_dinero)}
 									</TableCell>
 									<TableCell className="text-right">
 										{currency(row.monto)}

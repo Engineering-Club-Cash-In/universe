@@ -10,7 +10,7 @@ const fetchTransport = (
 ) => Object.assign(handler, { preconnect: globalThis.fetch.preconnect });
 
 const response = (): ReinversionLiquidacionesResponse => ({
-	contrato_version: 3,
+	contrato_version: 4,
 	porTipo: {
 		reinversion_capital: {
 			reinversion_capital: "40.00",
@@ -79,7 +79,7 @@ const response = (): ReinversionLiquidacionesResponse => ({
 		{
 			modalidad_facturacion: "factura_cube",
 			tipo_reinversion: "reinversion_capital",
-			tipo_compra: "nueva_posicion",
+			origen_dinero: "compra_nueva",
 			cantidad: 2,
 			monto: "80.00",
 		},
@@ -119,7 +119,7 @@ const response = (): ReinversionLiquidacionesResponse => ({
 			inversionista: "Ana",
 			modalidad_facturacion: "factura_cube",
 			tipo_reinversion: "reinversion_capital",
-			tipo_compra: "nueva_posicion",
+			origen_dinero: "compra_nueva",
 			monto: "40.00",
 		},
 		{
@@ -127,7 +127,7 @@ const response = (): ReinversionLiquidacionesResponse => ({
 			inversionista: "Ana",
 			modalidad_facturacion: "factura_cube",
 			tipo_reinversion: "reinversion_capital",
-			tipo_compra: "nueva_posicion",
+			origen_dinero: "compra_nueva",
 			monto: "40.00",
 		},
 	],
@@ -162,7 +162,7 @@ test("cliente HTTP propaga íntegro el contrato real de reinversión sin reconst
 	});
 
 	expect(actual).toEqual(expected);
-	expect(actual.contrato_version).toBe(3);
+	expect(actual.contrato_version).toBe(4);
 	expect(actual.porInversionista[0]?.capital_activo).toBe("1000.00");
 	expect(actual.detalle_estado).toEqual(expected.detalle_estado);
 	expect(actual.detalleInteresNeto).toEqual(expected.detalleInteresNeto);
@@ -175,6 +175,27 @@ test("cliente HTTP propaga íntegro el contrato real de reinversión sin reconst
 	expect(requestedMethod).toBe("GET");
 	expect(authorization).toBe("Bearer test-token");
 	expect(requestedBody).toBeUndefined();
+});
+
+test("preview puede reutilizar el reporte mensual sin repetir la consulta pesada", async () => {
+	const expected = response();
+	let requests = 0;
+	const client = new CarteraBackClient({
+		baseUrl: "https://cartera.test",
+		retryAttempts: 0,
+		enableCache: true,
+		cacheTtl: 300_000,
+		accessTokenProvider: async () => "test-token",
+		fetchTransport: fetchTransport(async () => {
+			requests += 1;
+			return Response.json(expected);
+		}),
+	});
+
+	await client.getReinversionLiquidaciones({ mes: 7, anio: 2026 });
+	await client.getReinversionLiquidaciones({ mes: 7, anio: 2026 });
+
+	expect(requests).toBe(1);
 });
 
 test("router CRM devuelve sin pérdida el contrato recibido de cartera-back", async () => {

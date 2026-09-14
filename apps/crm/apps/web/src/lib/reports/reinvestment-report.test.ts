@@ -6,6 +6,7 @@ import {
 	buildReinvestmentReportModel,
 	buildSecondarySummaryPresentation,
 	canRenderSecondaryDetails,
+	getFundingOriginLabel,
 	getModePresentation,
 	getMonthlyFooterPresentation,
 	getPublicPartialDetailMessage,
@@ -60,7 +61,7 @@ const zeroComposition = composition({
 });
 
 const response = (): ReinversionLiquidacionesResponse => ({
-	contrato_version: 3,
+	contrato_version: 4,
 	porTipo: {
 		sin_reinversion: {
 			reinversion_capital: "0.00",
@@ -121,7 +122,7 @@ const response = (): ReinversionLiquidacionesResponse => ({
 		{
 			modalidad_facturacion: "factura_cube",
 			tipo_reinversion: "sin_reinversion",
-			tipo_compra: "nueva_posicion",
+			origen_dinero: "compra_nueva",
 			cantidad: 1,
 			monto: "80.00",
 		},
@@ -183,7 +184,7 @@ const response = (): ReinversionLiquidacionesResponse => ({
 			inversionista: "Ana",
 			modalidad_facturacion: "factura_cube",
 			tipo_reinversion: "sin_reinversion",
-			tipo_compra: "nueva_posicion",
+			origen_dinero: "compra_nueva",
 			monto: "80.00",
 		},
 	],
@@ -212,9 +213,9 @@ test("modelo ejecutivo concilia pagado + reinvertido con flujo liquidado", () =>
 	expect(model.rows.map((row) => row.type)).toContain("reinversion_capital");
 });
 
-test("modelo v3 usa snapshots y construye cards de composición, porcentaje, ticket e interés", () => {
+test("modelo v4 usa snapshots y construye cards de composición, porcentaje, ticket e interés", () => {
 	const model = buildReinvestmentReportModel(response());
-	if (!model.compatible) throw new Error("Contrato v3 incompatible");
+	if (!model.compatible) throw new Error("Contrato v4 incompatible");
 
 	expect(model.rows.every((row) => row.historicalModeVerified)).toBe(true);
 	expect(model.summary).toEqual({
@@ -246,7 +247,7 @@ test("modelo v3 usa snapshots y construye cards de composición, porcentaje, tic
 	});
 });
 
-test("rechaza deriva entre totales crudos y composición v3", () => {
+test("rechaza deriva entre totales crudos y composición v4", () => {
 	const data = response();
 	data.porTipo.sin_reinversion.total_capital = "100.02";
 	data.porTipo.sin_reinversion.cantidad_liquidaciones = 2;
@@ -683,6 +684,73 @@ test("acepta campos monetarios válidos y conserva capital activo sin flujo", ()
 	);
 });
 
+test("capital colocado agrupa únicamente por compra nueva y reinversión", () => {
+	const data = response();
+	data.comprasMes = [
+		{
+			modalidad_facturacion: "factura_cube",
+			tipo_reinversion: "reinversion_capital",
+			origen_dinero: "compra_nueva",
+			cantidad: 2,
+			monto: "80.00",
+		},
+		{
+			modalidad_facturacion: "sin_modalidad",
+			tipo_reinversion: "reinversion_total",
+			origen_dinero: "compra_nueva",
+			cantidad: 1,
+			monto: "20.00",
+		},
+		{
+			modalidad_facturacion: "p2p_directa",
+			tipo_reinversion: "sin_reinversion",
+			origen_dinero: "reinversion",
+			cantidad: 3,
+			monto: "50.00",
+		},
+	];
+	data.detalleComprasMes = [
+		...Array.from({ length: 2 }, () => ({
+			fecha: "2026-07-03",
+			inversionista: "Ana",
+			modalidad_facturacion: "factura_cube",
+			tipo_reinversion: "reinversion_capital",
+			origen_dinero: "compra_nueva" as const,
+			monto: "40.00",
+		})),
+		{
+			fecha: "2026-07-04",
+			inversionista: "Bea",
+			modalidad_facturacion: "sin_modalidad",
+			tipo_reinversion: "reinversion_total",
+			origen_dinero: "compra_nueva",
+			monto: "20.00",
+		},
+		...(["10.00", "20.00", "20.00"] as const).map((monto) => ({
+			fecha: "2026-07-05",
+			inversionista: "Carlos",
+			modalidad_facturacion: "p2p_directa",
+			tipo_reinversion: "sin_reinversion",
+			origen_dinero: "reinversion" as const,
+			monto,
+		})),
+	];
+
+	expect(
+		buildSecondarySummaryPresentation(data).find(
+			(summary) => summary.key === "purchases",
+		),
+	).toEqual({
+		key: "purchases",
+		label: "Capital colocado en el mes por origen",
+		total: 150,
+		items: [
+			{ label: "Compra Nueva", value: 100, meta: "3 movimientos" },
+			{ label: "Reinversión", value: 50, meta: "3 movimientos" },
+		],
+	});
+});
+
 test("presentación restaura los tres subresúmenes canónicos y sus fórmulas", () => {
 	expect(buildSecondarySummaryPresentation(response())).toEqual([
 		{
@@ -691,9 +759,9 @@ test("presentación restaura los tres subresúmenes canónicos y sus fórmulas",
 			total: 15,
 			items: [
 				{
-					label: "Sin asignación fiscal",
+					label: "Interés de inversionistas",
 					value: 15,
-					formula: "Q15.00 interés registrado sin asignación fiscal",
+					formula: "Q15.00 interés de inversionistas registrado",
 				},
 				{
 					label: "CUBE",
@@ -713,13 +781,18 @@ test("presentación restaura los tres subresúmenes canónicos y sus fórmulas",
 		},
 		{
 			key: "purchases",
-			label: "Compras del mes",
+			label: "Capital colocado en el mes por origen",
 			total: 80,
 			items: [
 				{
-					label: "Factura CUBE · Nueva posición",
+					label: "Compra Nueva",
 					value: 80,
-					meta: "Tradicional · 1 compra",
+					meta: "1 movimiento",
+				},
+				{
+					label: "Reinversión",
+					value: 0,
+					meta: "0 movimientos",
 				},
 			],
 		},
@@ -784,7 +857,7 @@ test("dos compras del mismo inversionista, fecha y modalidad concilian como dos 
 		{
 			modalidad_facturacion: "factura_cube",
 			tipo_reinversion: "sin_reinversion",
-			tipo_compra: "nueva_posicion",
+			origen_dinero: "compra_nueva",
 			cantidad: 2,
 			monto: "80.00",
 		},
@@ -795,7 +868,7 @@ test("dos compras del mismo inversionista, fecha y modalidad concilian como dos 
 			inversionista: "Ana",
 			modalidad_facturacion: "factura_cube",
 			tipo_reinversion: "sin_reinversion",
-			tipo_compra: "nueva_posicion",
+			origen_dinero: "compra_nueva",
 			monto: "40.00",
 		},
 		{
@@ -803,7 +876,7 @@ test("dos compras del mismo inversionista, fecha y modalidad concilian como dos 
 			inversionista: "Ana",
 			modalidad_facturacion: "factura_cube",
 			tipo_reinversion: "sin_reinversion",
-			tipo_compra: "nueva_posicion",
+			origen_dinero: "compra_nueva",
 			monto: "40.00",
 		},
 	];
@@ -870,7 +943,12 @@ test("UI y export nombran el capital como posición actual", async () => {
 	);
 });
 
-test("UI v3 usa snapshots, composición inline, ticket y clasificaciones legibles", async () => {
+test("las clasificaciones distinguen dinero nuevo de dinero reinvertido", () => {
+	expect(getFundingOriginLabel("compra_nueva")).toBe("Compra Nueva");
+	expect(getFundingOriginLabel("reinversion")).toBe("Reinversión");
+});
+
+test("UI v4 usa snapshots, composición inline, ticket y orígenes legibles", async () => {
 	const component = await Bun.file(
 		new URL(
 			"../../components/reports/reinvestment-report.tsx",
@@ -884,14 +962,13 @@ test("UI v3 usa snapshots, composición inline, ticket y clasificaciones legible
 	expect(component).toContain("Reinvertido resto");
 	expect(component).toContain("Flujo capital");
 	expect(component).toContain("Ticket promedio");
-	expect(component).toContain("Histórico del ticket de nuevas posiciones");
+	expect(component).toContain("Histórico del ticket de compras nuevas");
+	expect(component).toContain("Origen del dinero");
 	expect(component).toContain("Interés inversionistas");
 	expect(component).toContain("Interés CUBE");
 	expect(component).toContain("colSpan={11}");
 	expect(component).toContain("getBillingModeLabel(row.modalidad_facturacion)");
-	expect(component).toContain(
-		"getPurchaseClassificationLabel(row.tipo_compra)",
-	);
+	expect(component).toContain("getFundingOriginLabel(row.origen_dinero)");
 	expect(component).toContain("getReinvestmentModeLabel(row.tipo_reinversion)");
 	expect(component).not.toContain("row.modalidad}");
 });
@@ -965,12 +1042,12 @@ test("workbook comparte modelos, conserva números y contiene las siete hojas", 
 		"Cobranza",
 		"Modalidades",
 		"Inversionistas",
-		"Compras",
+		"Movimientos",
 		"Interés",
 		"Metadatos",
 	]);
 	const cobranzaSheet = parsed.Sheets.Cobranza;
-	const purchasesSheet = parsed.Sheets.Compras;
+	const purchasesSheet = parsed.Sheets.Movimientos;
 	if (!cobranzaSheet || !purchasesSheet)
 		throw new Error("Faltan hojas del workbook");
 	const cobranzaRows =
@@ -1000,7 +1077,7 @@ test("workbook comparte modelos, conserva números y contiene las siete hojas", 
 		XLSX.utils.sheet_to_json<Record<string, unknown>>(purchasesSheet)[0],
 	).toMatchObject({
 		"Modalidad de facturación": "Factura CUBE",
-		"Tipo de compra": "Nueva posición",
+		"Origen del dinero": "Compra Nueva",
 	});
 });
 
@@ -1254,7 +1331,7 @@ describe("getReportState", () => {
 			{
 				modalidad_facturacion: "factura_cube",
 				tipo_reinversion: "sin_reinversion",
-				tipo_compra: "nueva_posicion",
+				origen_dinero: "compra_nueva",
 				cantidad: 1,
 				monto: "0.00",
 			},
@@ -1267,7 +1344,7 @@ describe("getReportState", () => {
 				inversionista: "Ana",
 				modalidad_facturacion: "factura_cube",
 				tipo_reinversion: "sin_reinversion",
-				tipo_compra: "nueva_posicion",
+				origen_dinero: "compra_nueva",
 				monto: "0.00",
 			},
 		];
@@ -1283,7 +1360,7 @@ describe("getReportState", () => {
 			{
 				modalidad_facturacion: "factura_cube",
 				tipo_reinversion: "sin_reinversion",
-				tipo_compra: "nueva_posicion",
+				origen_dinero: "compra_nueva",
 				cantidad: 1,
 				monto: "0.00",
 			},
@@ -1294,7 +1371,7 @@ describe("getReportState", () => {
 				inversionista: "Ana",
 				modalidad_facturacion: "factura_cube",
 				tipo_reinversion: "sin_reinversion",
-				tipo_compra: "nueva_posicion",
+				origen_dinero: "compra_nueva",
 				monto: "0.00",
 			},
 		];

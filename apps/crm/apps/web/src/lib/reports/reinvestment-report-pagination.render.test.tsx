@@ -49,7 +49,7 @@ const buildRows = (total: number) =>
 	Array.from({ length: total }, (_, index) => index + 1);
 
 const reportFixture = (): ReinversionLiquidacionesResponse => ({
-	contrato_version: 3,
+	contrato_version: 4,
 	porTipo: {
 		sin_reinversion: {
 			reinversion_capital: "0.00",
@@ -91,7 +91,7 @@ const reportFixture = (): ReinversionLiquidacionesResponse => ({
 		{
 			modalidad_facturacion: "factura_cube",
 			tipo_reinversion: "sin_reinversion",
-			tipo_compra: "nueva_posicion",
+			origen_dinero: "compra_nueva",
 			cantidad: 1,
 			monto: "80.00",
 		},
@@ -137,7 +137,7 @@ const reportFixture = (): ReinversionLiquidacionesResponse => ({
 			inversionista: "Ana",
 			modalidad_facturacion: "factura_cube",
 			tipo_reinversion: "sin_reinversion",
-			tipo_compra: "nueva_posicion",
+			origen_dinero: "compra_nueva",
 			monto: "80.00",
 		},
 	],

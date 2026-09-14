@@ -1300,22 +1300,29 @@ export async function getReinversionLiquidaciones({
     }
   ).filter(shouldIncludeInvestorPosition);
 
-  // Compras del mes: solo operación de compra (no reinversión) y solo las
-  // COMPLETADAS (status = 'completado'); las pendientes no se cuentan. La fecha
+  // Movimientos de inversión del mes: distingue dinero nuevo de dinero que ya
+  // estaba dentro y fue reinvertido. Solo incluye operaciones COMPLETADAS; las
+  // pendientes no se cuentan. La fecha
   // efectiva prioriza fecha_completada y cae a updated_at cuando es NULL
   // (columna nueva, registros viejos) — mismo criterio que utils/comprasAjuste.ts.
   const fechaCompra = sql`COALESCE(c.fecha_completada, c.updated_at)`;
   const comprasMesPredicate = sql`
-    c.tipo_operacion = 'compra_cartera'
+    c.tipo_operacion IN ('compra_cartera', 'reinversion')
     AND c.status = 'completado'
     AND (${fechaCompra} AT TIME ZONE 'America/Guatemala')::date >= ${inicioMes}::date
     AND (${fechaCompra} AT TIME ZONE 'America/Guatemala')::date < ${inicioMesSiguiente}::date
+  `;
+  const origenFondos = sql`
+    CASE c.tipo_operacion
+      WHEN 'compra_cartera' THEN 'compra_nueva'
+      WHEN 'reinversion' THEN 'reinversion'
+    END
   `;
   const comprasRows = await db.execute(sql`
     SELECT
       COALESCE(c.modalidad_facturacion::text, 'sin_modalidad') AS modalidad_facturacion,
       COALESCE(c.tipo_reinversion::text, 'sin_reinversion') AS tipo_reinversion,
-      c.tipo_compra::text AS tipo_compra,
+      ${origenFondos} AS origen_dinero,
       c.monto_aportado AS monto
     FROM cartera.compras_credito_inversionista c
     WHERE ${comprasMesPredicate}
@@ -1325,10 +1332,7 @@ export async function getReinversionLiquidaciones({
     (comprasRows.rows as Record<string, unknown>[]).map((r) => ({
       modalidad_facturacion: String(r.modalidad_facturacion ?? "sin_modalidad"),
       tipo_reinversion: String(r.tipo_reinversion ?? "sin_reinversion"),
-      tipo_compra: String(r.tipo_compra ?? "sin_clasificar") as
-        | "nueva_posicion"
-        | "ampliacion_posicion"
-        | "sin_clasificar",
+      origen_dinero: String(r.origen_dinero) as "compra_nueva" | "reinversion",
       monto: String(r.monto ?? 0),
     })),
   );
@@ -1338,22 +1342,19 @@ export async function getReinversionLiquidaciones({
         DATE_TRUNC('month', ${fechaCompra} AT TIME ZONE 'America/Guatemala'),
         'YYYY-MM'
       ) AS periodo,
-      c.tipo_compra::text AS tipo_compra,
+      ${origenFondos} AS origen_dinero,
       COUNT(*)::int AS cantidad,
       COALESCE(SUM(c.monto_aportado::numeric), 0) AS monto
     FROM cartera.compras_credito_inversionista c
-    WHERE c.tipo_operacion = 'compra_cartera'
+    WHERE c.tipo_operacion IN ('compra_cartera', 'reinversion')
       AND c.status = 'completado'
-    GROUP BY periodo, c.tipo_compra
+    GROUP BY periodo, ${origenFondos}
     ORDER BY periodo
   `);
   const ticketInversion = buildPurchaseTicketHistory(
     (ticketRows.rows as Record<string, unknown>[]).map((r) => ({
       periodo: String(r.periodo),
-      tipo_compra: String(r.tipo_compra ?? "sin_clasificar") as
-        | "nueva_posicion"
-        | "ampliacion_posicion"
-        | "sin_clasificar",
+      origen_dinero: String(r.origen_dinero) as "compra_nueva" | "reinversion",
       cantidad: Number(r.cantidad ?? 0),
       monto: String(r.monto ?? 0),
     })),
@@ -1384,7 +1385,7 @@ export async function getReinversionLiquidaciones({
     inversionista: string;
     modalidad_facturacion: string;
     tipo_reinversion: string;
-    tipo_compra: "nueva_posicion" | "ampliacion_posicion" | "sin_clasificar";
+    origen_dinero: "compra_nueva" | "reinversion";
     monto: string;
   }[] = [];
   let detalleEstado: { disponible: boolean; error: string | null } = {
@@ -1497,7 +1498,7 @@ export async function getReinversionLiquidaciones({
       i.nombre AS inversionista,
       COALESCE(c.modalidad_facturacion::text, 'sin_modalidad') AS modalidad_facturacion,
       COALESCE(c.tipo_reinversion::text, 'sin_reinversion') AS tipo_reinversion,
-      c.tipo_compra::text AS tipo_compra,
+      ${origenFondos} AS origen_dinero,
       c.monto_aportado AS monto
     FROM cartera.compras_credito_inversionista c
     JOIN cartera.inversionistas i ON i.inversionista_id = c.inversionista_id
@@ -1510,17 +1511,16 @@ export async function getReinversionLiquidaciones({
           r.modalidad_facturacion ?? "sin_modalidad",
         );
         const tipoReinversion = String(r.tipo_reinversion ?? "sin_reinversion");
-        const tipoCompra = String(r.tipo_compra ?? "sin_clasificar") as
-          | "nueva_posicion"
-          | "ampliacion_posicion"
-          | "sin_clasificar";
+        const origenDinero = String(r.origen_dinero) as
+          | "compra_nueva"
+          | "reinversion";
         return {
         fecha: String(r.fecha),
         inversionista: String(r.inversionista),
         modalidad_facturacion: modalidadFacturacion,
         tipo_reinversion: tipoReinversion,
-        tipo_compra: tipoCompra,
-        modalidad: `${modalidadFacturacion}\u0000${tipoReinversion}\u0000${tipoCompra}`,
+        origen_dinero: origenDinero,
+        modalidad: `${modalidadFacturacion}\u0000${tipoReinversion}\u0000${origenDinero}`,
         monto: String(r.monto ?? 0),
         };
       }),
@@ -1565,7 +1565,7 @@ export async function getReinversionLiquidaciones({
   }
 
   return {
-    contrato_version: 3 as const,
+    contrato_version: 4 as const,
     porTipo,
     porInversionista,
     comprasMes,

@@ -404,7 +404,7 @@ export type FlujoCuotasInversionesResponse = {
 
 export type ReinversionLiquidacionesResponse = {
 	/** Versión runtime del contrato de conciliación por modalidad. */
-	contrato_version: 3;
+	contrato_version: 4;
 	/**
 	 * Distribución mensual por modalidad. `total_cuota` es el pago neto y
 	 * `reinversion_total` el capital que permanece colocado.
@@ -445,11 +445,11 @@ export type ReinversionLiquidacionesResponse = {
 		capital_activo: string;
 		composicion: LiquidationComposition;
 	}[];
-	/** Compras completadas del mes agrupadas por sus snapshots de operación. */
+	/** Movimientos completados del mes agrupados por origen del dinero. */
 	comprasMes: {
 		modalidad_facturacion: string;
 		tipo_reinversion: string;
-		tipo_compra: PurchaseClassification;
+		origen_dinero: FundingOrigin;
 		cantidad: number;
 		monto: string;
 	}[];
@@ -489,7 +489,7 @@ export type ReinversionLiquidacionesResponse = {
 		inversionista: string;
 		modalidad_facturacion: string;
 		tipo_reinversion: string;
-		tipo_compra: PurchaseClassification;
+		origen_dinero: FundingOrigin;
 		monto: string;
 	}[];
 	detalle_estado: {
@@ -499,10 +499,7 @@ export type ReinversionLiquidacionesResponse = {
 	cantidad_liquidaciones: number;
 };
 
-type PurchaseClassification =
-	| "nueva_posicion"
-	| "ampliacion_posicion"
-	| "sin_clasificar";
+type FundingOrigin = "compra_nueva" | "reinversion";
 
 type PurchaseTicketMonth = {
 	periodo: string;
@@ -540,11 +537,7 @@ const billingModes = [
 	"factura_cube_pequeno",
 	"sin_modalidad",
 ] as const;
-const purchaseClassifications = [
-	"nueva_posicion",
-	"ampliacion_posicion",
-	"sin_clasificar",
-] as const;
+const fundingOrigins = ["compra_nueva", "reinversion"] as const;
 const moneySchema = z.string().regex(/^\d+(?:\.\d+)?$/);
 const signedDecimalSchema = z.string().regex(/^-?\d+(?:\.\d+)?$/);
 const countSchema = z.number().int().nonnegative();
@@ -577,7 +570,7 @@ const modeSummarySchema = z.object({
 	composicion: liquidationCompositionSchema,
 });
 const reinversionLiquidacionesSchema = z.object({
-	contrato_version: z.literal(3),
+	contrato_version: z.literal(4),
 	porTipo: z.record(z.enum(reinversionModes), modeSummarySchema),
 	interesNeto: z.object({
 		noVerificado: z.object({ interes: moneySchema }),
@@ -608,7 +601,7 @@ const reinversionLiquidacionesSchema = z.object({
 		z.object({
 			modalidad_facturacion: z.enum(billingModes),
 			tipo_reinversion: z.enum(reinversionModes),
-			tipo_compra: z.enum(purchaseClassifications),
+			origen_dinero: z.enum(fundingOrigins),
 			cantidad: countSchema,
 			monto: moneySchema,
 		}),
@@ -667,7 +660,7 @@ const reinversionLiquidacionesSchema = z.object({
 			inversionista: z.string().trim().min(1),
 			modalidad_facturacion: z.enum(billingModes),
 			tipo_reinversion: z.enum(reinversionModes),
-			tipo_compra: z.enum(purchaseClassifications),
+			origen_dinero: z.enum(fundingOrigins),
 			monto: moneySchema,
 		}),
 	),
@@ -2187,13 +2180,13 @@ export class CarteraBackClient {
 			mes: String(params.mes),
 			anio: String(params.anio),
 		});
-		// Sin cache: el reporte debe reflejar liquidaciones recién creadas/ajustadas.
-		// Con cache activo, tras crear liquidaciones el mes podía seguir devolviendo
-		// los totales previos hasta expirar el TTL.
+		// El cache solo se activa cuando la configuración del cliente lo habilita.
+		// Producción lo mantiene desactivado para reflejar ajustes recientes; el
+		// preview puede habilitarlo para evitar repetir esta consulta pesada.
 		const data = await this.request<unknown>(
 			`/reportes/reinversion-liquidaciones?${qp}`,
 			{ method: "GET" },
-			false,
+			true,
 		);
 		const parsed = reinversionLiquidacionesSchema.safeParse(data);
 		if (!parsed.success) throw new Error("Contrato de reinversión inválido");

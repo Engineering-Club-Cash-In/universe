@@ -734,6 +734,9 @@ export type FlujoPorInversionistaRow = {
 	cash_capital: string;
 	cash_interes: string;
 	cash_total: string;
+	interes_bruto: string;
+	iva: string;
+	isr: string;
 	total: string;
 };
 
@@ -742,9 +745,39 @@ export type FlujoCuotasPorInversionistaResponse = {
 	totales: {
 		reinversion_total: string;
 		cash_total: string;
+		interes_bruto: string;
+		iva: string;
+		isr: string;
 		total: string;
 	};
 };
+
+const flujoCuotasPorInversionistaSchema = z.object({
+	porInversionista: z.array(
+		z.object({
+			inversionista_id: idSchema,
+			nombre: z.string().min(1),
+			reinversion_capital: moneySchema,
+			reinversion_interes: moneySchema,
+			reinversion_total: moneySchema,
+			cash_capital: moneySchema,
+			cash_interes: moneySchema,
+			cash_total: moneySchema,
+			interes_bruto: moneySchema,
+			iva: moneySchema,
+			isr: moneySchema,
+			total: moneySchema,
+		}),
+	),
+	totales: z.object({
+		reinversion_total: moneySchema,
+		cash_total: moneySchema,
+		interes_bruto: moneySchema,
+		iva: moneySchema,
+		isr: moneySchema,
+		total: moneySchema,
+	}),
+});
 
 export type ColocacionPeriodoRow = {
 	bucket: string;
@@ -2255,11 +2288,14 @@ export class CarteraBackClient {
 			fechaInicio: params.fechaInicio,
 			fechaFin: params.fechaFin,
 		});
-		return this.request<FlujoCuotasPorInversionistaResponse>(
+		const data = await this.request<unknown>(
 			`/reportes/flujo-cuotas-inversiones/por-inversionista?${qp}`,
 			{ method: "GET" },
-			true,
+			false,
 		);
+		const parsed = flujoCuotasPorInversionistaSchema.safeParse(data);
+		if (!parsed.success) throw new Error("Contrato de proyección inválido");
+		return parsed.data;
 	}
 
 	// ========================================================================

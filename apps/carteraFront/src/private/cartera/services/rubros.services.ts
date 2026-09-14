@@ -195,8 +195,8 @@ export const editarRubro = async (
  *
  * Es la única salida para un rubro equivocado: no se puede borrar (se llevaría
  * el historial de cobros) ni editar a cero (la política de montos lo rechaza), y
- * mientras siga vivo el índice único impide crear el rubro correcto de ese
- * mismo tipo.
+ * mientras siga vivo bloquea el alta del rubro correcto de ese mismo tipo (el
+ * backend rechaza un segundo rubro vivo del mismo crédito y tipo).
  *
  * Efecto: `saldo_pendiente = 0`, `completado = true`, `activo = false`. El
  * `monto_original` se CONSERVA y queda un evento `anulacion` con el motivo en el

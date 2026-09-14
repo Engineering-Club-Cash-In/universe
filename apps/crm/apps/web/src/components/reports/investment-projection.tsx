@@ -1,4 +1,5 @@
 import { AlertCircle } from "lucide-react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -56,6 +57,10 @@ export function InvestmentProjection({
 	asOfLabel: string;
 	onRetry: () => void;
 }) {
+	const [page, setPage] = useState(1);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: a new period starts on page one
+	useEffect(() => setPage(1), [periodLabel]);
+
 	if (isPending) {
 		return (
 			<div
@@ -92,6 +97,14 @@ export function InvestmentProjection({
 			</div>
 		);
 	}
+
+	const pageSize = 25;
+	const totalPages = Math.ceil(data.porInversionista.length / pageSize);
+	const currentPage = Math.min(page, totalPages);
+	const investors = data.porInversionista.slice(
+		(currentPage - 1) * pageSize,
+		currentPage * pageSize,
+	);
 
 	return (
 		<div className="space-y-6">
@@ -141,7 +154,7 @@ export function InvestmentProjection({
 						</TableRow>
 					</TableHeader>
 					<TableBody>
-						{data.porInversionista.map((investor) => (
+						{investors.map((investor) => (
 							<TableRow key={investor.inversionista_id}>
 								<TableCell className="font-medium">{investor.nombre}</TableCell>
 								<TableCell className="text-right">
@@ -179,6 +192,29 @@ export function InvestmentProjection({
 					</TableBody>
 				</Table>
 			</div>
+			{totalPages > 1 && (
+				<div className="flex items-center justify-between">
+					<p className="text-muted-foreground text-sm">
+						Página {currentPage} de {totalPages}
+					</p>
+					<div className="flex gap-2">
+						<Button
+							variant="outline"
+							disabled={currentPage === 1}
+							onClick={() => setPage(currentPage - 1)}
+						>
+							Anterior
+						</Button>
+						<Button
+							variant="outline"
+							disabled={currentPage === totalPages}
+							onClick={() => setPage(currentPage + 1)}
+						>
+							Siguiente
+						</Button>
+					</div>
+				</div>
+			)}
 		</div>
 	);
 }

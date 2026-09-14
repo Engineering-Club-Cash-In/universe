@@ -9,7 +9,10 @@ const fetchTransport = (
 	) => ReturnType<typeof globalThis.fetch>,
 ) => Object.assign(handler, { preconnect: globalThis.fetch.preconnect });
 
-const response = (): ReinversionLiquidacionesResponse => ({
+const response = (): Extract<
+	ReinversionLiquidacionesResponse,
+	{ contrato_version: 4 }
+> => ({
 	contrato_version: 4,
 	porTipo: {
 		reinversion_capital: {
@@ -177,25 +180,34 @@ test("cliente HTTP propaga íntegro el contrato real de reinversión sin reconst
 	expect(requestedBody).toBeUndefined();
 });
 
-test("preview puede reutilizar el reporte mensual sin repetir la consulta pesada", async () => {
-	const expected = response();
-	let requests = 0;
+test("cliente HTTP conserva contrato v3 durante el despliegue transitorio", async () => {
+	const current = response();
+	const legacy = {
+		...current,
+		contrato_version: 3 as const,
+		comprasMes: current.comprasMes.map(
+			({ origen_dinero: _origen, ...row }) => ({
+				...row,
+				tipo_compra: "nueva_posicion" as const,
+			}),
+		),
+		detalleComprasMes: current.detalleComprasMes.map(
+			({ origen_dinero: _origen, ...row }) => ({
+				...row,
+				tipo_compra: "nueva_posicion" as const,
+			}),
+		),
+	};
 	const client = new CarteraBackClient({
 		baseUrl: "https://cartera.test",
 		retryAttempts: 0,
-		enableCache: true,
-		cacheTtl: 300_000,
 		accessTokenProvider: async () => "test-token",
-		fetchTransport: fetchTransport(async () => {
-			requests += 1;
-			return Response.json(expected);
-		}),
+		fetchTransport: fetchTransport(async () => Response.json(legacy)),
 	});
 
-	await client.getReinversionLiquidaciones({ mes: 7, anio: 2026 });
-	await client.getReinversionLiquidaciones({ mes: 7, anio: 2026 });
-
-	expect(requests).toBe(1);
+	await expect(
+		client.getReinversionLiquidaciones({ mes: 7, anio: 2026 }),
+	).resolves.toEqual(legacy);
 });
 
 test("router CRM devuelve sin pérdida el contrato recibido de cartera-back", async () => {

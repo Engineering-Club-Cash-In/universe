@@ -765,7 +765,7 @@ test("el resumen de movimientos clasifica el origen del dinero por tipo de opera
     new URL("./reportes.ts", import.meta.url),
   ).text();
   const purchasesQuery = source.slice(
-    source.indexOf("const comprasMesPredicate"),
+    source.indexOf("const comprasCompletadasPredicate"),
     source.indexOf("let detalleInteresNeto"),
   );
 
@@ -778,6 +778,7 @@ test("el resumen de movimientos clasifica el origen del dinero por tipo de opera
   expect(purchasesQuery).toContain("c.tipo_operacion IN ('compra_cartera', 'reinversion')");
   expect(purchasesQuery).toContain("WHEN 'compra_cartera' THEN 'compra_nueva'");
   expect(purchasesQuery).toContain("WHEN 'reinversion' THEN 'reinversion'");
+  expect(purchasesQuery).toContain("AND c.revertida_at IS NULL");
   expect(purchasesQuery).not.toContain("c.tipo_compra::text AS origen_dinero");
 });
 

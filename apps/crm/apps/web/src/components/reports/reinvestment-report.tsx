@@ -887,13 +887,15 @@ function DetailTable({
 			<PaginatedRows label="Detalle de interés" rows={data.detalleInteresNeto}>
 				{(interestRows) => (
 					<TableOverflow label="Detalle de interés registrado">
-						<Table className="min-w-[560px]">
+						<Table className="min-w-[760px]">
 							<TableHeader>
 								<TableRow>
 									<TableHead>Inversionista / referencia</TableHead>
+									<TableHead>Tratamiento fiscal</TableHead>
 									<TableHead className="text-right">Interés</TableHead>
 									<TableHead className="text-right">IVA</TableHead>
 									<TableHead className="text-right">ISR</TableHead>
+									<TableHead className="text-right">Neto</TableHead>
 								</TableRow>
 							</TableHeader>
 							<TableBody>
@@ -905,6 +907,11 @@ function DetailTable({
 												{row.referencia}
 											</span>
 										</TableCell>
+										<TableCell>
+											{row.tratamiento_fiscal === "cube"
+												? "CUBE"
+												: "No verificado"}
+										</TableCell>
 										<TableCell className="text-right">
 											{currency(row.interes)}
 										</TableCell>
@@ -913,6 +920,11 @@ function DetailTable({
 										</TableCell>
 										<TableCell className="text-right">
 											{currency(row.isr)}
+										</TableCell>
+										<TableCell className="text-right">
+											{row.tratamiento_fiscal === "cube"
+												? currency(row.neto)
+												: "—"}
 										</TableCell>
 									</TableRow>
 								))}

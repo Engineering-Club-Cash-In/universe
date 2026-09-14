@@ -160,9 +160,12 @@ export function buildAdminReportsWorkbook(input: {
 			model.data.detalleInteresNeto.map((row) => ({
 				Inversionista: row.inversionista,
 				Referencia: row.referencia,
+				"Tratamiento fiscal":
+					row.tratamiento_fiscal === "cube" ? "CUBE" : "No verificado",
 				Interés: Number(row.interes),
 				IVA: Number(row.iva),
 				ISR: Number(row.isr),
+				Neto: row.tratamiento_fiscal === "cube" ? Number(row.neto) : null,
 			})),
 		);
 	} else {
@@ -181,7 +184,7 @@ export function buildAdminReportsWorkbook(input: {
 		{ Campo: "Generado", Valor: input.metadata.generatedAt },
 		{
 			Campo: "Contrato Inversión",
-			Valor: model.compatible ? 3 : "Incompatible",
+			Valor: model.compatible ? model.data.contrato_version : "Incompatible",
 		},
 		{
 			Campo: "Advertencia legacy",

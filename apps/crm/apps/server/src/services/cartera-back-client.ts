@@ -402,7 +402,7 @@ export type FlujoCuotasInversionesResponse = {
 	};
 };
 
-export type ReinversionLiquidacionesResponse = {
+type ReinversionLiquidacionesResponseV4 = {
 	/** Versión runtime del contrato de conciliación por modalidad. */
 	contrato_version: 4;
 	/**
@@ -501,12 +501,34 @@ export type ReinversionLiquidacionesResponse = {
 
 type FundingOrigin = "compra_nueva" | "reinversion";
 
+type PurchaseClassification =
+	| "nueva_posicion"
+	| "ampliacion_posicion"
+	| "sin_clasificar";
+
 type PurchaseTicketMonth = {
 	periodo: string;
 	cantidad: number;
 	monto_total: string;
 	ticket_promedio: string;
 };
+
+export type ReinversionLiquidacionesResponse =
+	| ReinversionLiquidacionesResponseV4
+	| (Omit<
+			ReinversionLiquidacionesResponseV4,
+			"contrato_version" | "comprasMes" | "detalleComprasMes"
+	  > & {
+			contrato_version: 3;
+			comprasMes: (Omit<
+				ReinversionLiquidacionesResponseV4["comprasMes"][number],
+				"origen_dinero"
+			> & { tipo_compra: PurchaseClassification })[];
+			detalleComprasMes: (Omit<
+				ReinversionLiquidacionesResponseV4["detalleComprasMes"][number],
+				"origen_dinero"
+			> & { tipo_compra: PurchaseClassification })[];
+	  });
 
 type CompositionDestination = {
 	capital: string;
@@ -538,6 +560,11 @@ const billingModes = [
 	"sin_modalidad",
 ] as const;
 const fundingOrigins = ["compra_nueva", "reinversion"] as const;
+const purchaseClassifications = [
+	"nueva_posicion",
+	"ampliacion_posicion",
+	"sin_clasificar",
+] as const;
 const moneySchema = z.string().regex(/^\d+(?:\.\d+)?$/);
 const signedDecimalSchema = z.string().regex(/^-?\d+(?:\.\d+)?$/);
 const countSchema = z.number().int().nonnegative();
@@ -569,7 +596,7 @@ const modeSummarySchema = z.object({
 	cantidad_liquidaciones: countSchema,
 	composicion: liquidationCompositionSchema,
 });
-const reinversionLiquidacionesSchema = z.object({
+const reinversionLiquidacionesV4Schema = z.object({
 	contrato_version: z.literal(4),
 	porTipo: z.record(z.enum(reinversionModes), modeSummarySchema),
 	interesNeto: z.object({
@@ -670,6 +697,33 @@ const reinversionLiquidacionesSchema = z.object({
 	]),
 	cantidad_liquidaciones: countSchema,
 });
+const reinversionLiquidacionesV3Schema =
+	reinversionLiquidacionesV4Schema.extend({
+		contrato_version: z.literal(3),
+		comprasMes: z.array(
+			z.object({
+				modalidad_facturacion: z.enum(billingModes),
+				tipo_reinversion: z.enum(reinversionModes),
+				tipo_compra: z.enum(purchaseClassifications),
+				cantidad: countSchema,
+				monto: moneySchema,
+			}),
+		),
+		detalleComprasMes: z.array(
+			z.object({
+				fecha: z.string().trim().min(1),
+				inversionista: z.string().trim().min(1),
+				modalidad_facturacion: z.enum(billingModes),
+				tipo_reinversion: z.enum(reinversionModes),
+				tipo_compra: z.enum(purchaseClassifications),
+				monto: moneySchema,
+			}),
+		),
+	});
+const reinversionLiquidacionesSchema = z.discriminatedUnion(
+	"contrato_version",
+	[reinversionLiquidacionesV3Schema, reinversionLiquidacionesV4Schema],
+);
 
 export type FlujoPorInversionistaRow = {
 	inversionista_id: number;
@@ -2180,13 +2234,13 @@ export class CarteraBackClient {
 			mes: String(params.mes),
 			anio: String(params.anio),
 		});
-		// El cache solo se activa cuando la configuración del cliente lo habilita.
-		// Producción lo mantiene desactivado para reflejar ajustes recientes; el
-		// preview puede habilitarlo para evitar repetir esta consulta pesada.
+		// Sin cache: el reporte debe reflejar liquidaciones recién creadas/ajustadas.
+		// Con cache activo, tras crear liquidaciones el mes podía seguir devolviendo
+		// los totales previos hasta expirar el TTL.
 		const data = await this.request<unknown>(
 			`/reportes/reinversion-liquidaciones?${qp}`,
 			{ method: "GET" },
-			true,
+			false,
 		);
 		const parsed = reinversionLiquidacionesSchema.safeParse(data);
 		if (!parsed.success) throw new Error("Contrato de reinversión inválido");

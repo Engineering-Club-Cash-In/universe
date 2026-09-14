@@ -83,7 +83,7 @@ const reportFixture = (): ReinversionLiquidacionesResponse => ({
 	},
 	interesNeto: {
 		noVerificado: { interes: "10.00" },
-		cube: { interes: "0.00", iva: "0.00", neto: "0.00" },
+		cube: { interes: "10.00", iva: "1.20", neto: "11.20" },
 	},
 	pagosExtras: { abonos_capital: "20.00", cancelaciones: "30.00" },
 	porInversionista: [],
@@ -115,6 +115,16 @@ const reportFixture = (): ReinversionLiquidacionesResponse => ({
 			interes: "10.00",
 			iva: "0.00",
 			isr: "0.00",
+		},
+		{
+			inversionista_id: 2,
+			inversionista: "Beatriz",
+			referencia: "LIQ-2",
+			tratamiento_fiscal: "cube",
+			interes: "10.00",
+			iva: "1.20",
+			isr: "0.00",
+			neto: "11.20",
 		},
 	],
 	detallePagosExtras: [
@@ -240,6 +250,11 @@ describe("detalle secundario compartido", () => {
 		expect(panel?.parentElement?.className).toContain("lg:grid-cols-3");
 		expect(panel?.className).toContain("lg:col-span-3");
 		expect(panel?.textContent).toContain("LIQ-1");
+		expect(panel?.textContent).toContain("Tratamiento fiscal");
+		expect(panel?.textContent).toContain("No verificado");
+		expect(panel?.textContent).toContain("CUBE");
+		expect(panel?.textContent).toContain("Neto");
+		expect(panel?.textContent).toMatch(/Q\s+11\.20/);
 		expect(
 			buttons.map((button) => button.getAttribute("aria-controls")),
 		).toEqual([panelId, panelId, panelId]);

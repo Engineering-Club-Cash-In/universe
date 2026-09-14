@@ -5,25 +5,6 @@
  * lleven un Bearer JWT real (cartera-back valida con jwt.verify).
  */
 
-import { createHmac } from "node:crypto";
-
-function createPreviewToken(secret: string): string {
-	const encode = (value: object) =>
-		Buffer.from(JSON.stringify(value)).toString("base64url");
-	const header = encode({ alg: "HS256", typ: "JWT" });
-	const payload = encode({
-		id: 0,
-		email: "preview@local",
-		role: "ADMIN",
-		exp: Math.floor(Date.now() / 1000) + 3600,
-	});
-	const content = `${header}.${payload}`;
-	const signature = createHmac("sha256", secret)
-		.update(content)
-		.digest("base64url");
-	return `${content}.${signature}`;
-}
-
 interface CarteraLoginResponse {
 	success: boolean;
 	message: string;
@@ -143,15 +124,6 @@ async function refreshCarteraToken(): Promise<string | null> {
 }
 
 export async function getCarteraAccessToken(): Promise<string> {
-	if (
-		process.env.CARTERA_PREVIEW_LOCAL === "true" &&
-		getBaseUrl().startsWith("http://127.0.0.1:")
-	) {
-		return createPreviewToken(
-			process.env.CARTERA_PREVIEW_JWT_SECRET || "preview-local-only",
-		);
-	}
-
 	if (tokenCache.accessToken && Date.now() < tokenCache.expiresAt) {
 		const verified = await verifyCarteraToken(tokenCache.accessToken);
 		if (verified) return verified;

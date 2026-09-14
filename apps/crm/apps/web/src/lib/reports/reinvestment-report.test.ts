@@ -1048,7 +1048,9 @@ test("workbook comparte modelos, conserva números y contiene las siete hojas", 
 	]);
 	const cobranzaSheet = parsed.Sheets.Cobranza;
 	const purchasesSheet = parsed.Sheets.Movimientos;
-	if (!cobranzaSheet || !purchasesSheet)
+	const interestSheet = parsed.Sheets.Interés;
+	const metadataSheet = parsed.Sheets.Metadatos;
+	if (!cobranzaSheet || !purchasesSheet || !interestSheet || !metadataSheet)
 		throw new Error("Faltan hojas del workbook");
 	const cobranzaRows =
 		XLSX.utils.sheet_to_json<Record<string, unknown>>(cobranzaSheet);
@@ -1079,6 +1081,22 @@ test("workbook comparte modelos, conserva números y contiene las siete hojas", 
 		"Modalidad de facturación": "Factura CUBE",
 		"Origen del dinero": "Compra Nueva",
 	});
+	expect(
+		XLSX.utils.sheet_to_json<unknown[]>(interestSheet, { header: 1 })[0],
+	).toEqual([
+		"Inversionista",
+		"Referencia",
+		"Tratamiento fiscal",
+		"Interés",
+		"IVA",
+		"ISR",
+		"Neto",
+	]);
+	const metadataRows =
+		XLSX.utils.sheet_to_json<Record<string, unknown>>(metadataSheet);
+	expect(
+		metadataRows.find((row) => row.Campo === "Contrato Inversión"),
+	).toMatchObject({ Campo: "Contrato Inversión", Valor: 4 });
 });
 
 test("workbook acumulado conserva montos acumulados pero suma cuotas de todos los buckets", () => {

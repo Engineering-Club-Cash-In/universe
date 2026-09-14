@@ -14,7 +14,9 @@ Object.assign(globalThis, {
 	IS_REACT_ACT_ENVIRONMENT: true,
 });
 
-const { cleanup, render, screen } = await import("@testing-library/react");
+const { cleanup, fireEvent, render, screen } = await import(
+	"@testing-library/react"
+);
 const { InvestmentProjection } = await import(
 	"../../components/reports/investment-projection"
 );
@@ -67,4 +69,73 @@ test("muestra la proyección separada con supuestos y desglose", () => {
 	expect(screen.getAllByText("ISR")).toHaveLength(2);
 	expect(screen.getByText(/100% de las cuotas programadas/)).toBeTruthy();
 	expect(screen.queryByText(/liquidado/i)).toBeNull();
+});
+
+test("pagina la tabla de proyección cada 25 inversionistas", () => {
+	const investors = Array.from({ length: 26 }, (_, index) => ({
+		inversionista_id: index + 1,
+		nombre: `Inversionista ${index + 1}`,
+		reinversion_capital: "0.00",
+		reinversion_interes: "0.00",
+		reinversion_total: "0.00",
+		cash_capital: "100.00",
+		cash_interes: "10.00",
+		cash_total: "110.00",
+		interes_bruto: "10.00",
+		iva: "1.20",
+		isr: "0.00",
+		total: "110.00",
+	}));
+	const { rerender } = render(
+		<InvestmentProjection
+			data={{
+				porInversionista: investors,
+				totales: {
+					reinversion_total: "0.00",
+					cash_total: "2860.00",
+					interes_bruto: "260.00",
+					iva: "31.20",
+					isr: "0.00",
+					total: "2860.00",
+				},
+			}}
+			isPending={false}
+			isError={false}
+			periodLabel="octubre de 2026"
+			asOfLabel="14 de septiembre de 2026"
+			onRetry={() => undefined}
+		/>,
+	);
+
+	expect(screen.getByText("Inversionista 25")).toBeTruthy();
+	expect(screen.queryByText("Inversionista 26")).toBeNull();
+	expect(screen.getByText("Página 1 de 2")).toBeTruthy();
+	fireEvent.click(screen.getByRole("button", { name: "Siguiente" }));
+	expect(screen.getByText("Inversionista 26")).toBeTruthy();
+	expect(screen.queryByText("Inversionista 1")).toBeNull();
+	expect(screen.getByText("Página 2 de 2")).toBeTruthy();
+
+	rerender(
+		<InvestmentProjection
+			data={{
+				porInversionista: investors,
+				totales: {
+					reinversion_total: "0.00",
+					cash_total: "2860.00",
+					interes_bruto: "260.00",
+					iva: "31.20",
+					isr: "0.00",
+					total: "2860.00",
+				},
+			}}
+			isPending={false}
+			isError={false}
+			periodLabel="noviembre de 2026"
+			asOfLabel="14 de septiembre de 2026"
+			onRetry={() => undefined}
+		/>,
+	);
+	expect(screen.getByText("Inversionista 1")).toBeTruthy();
+	expect(screen.queryByText("Inversionista 26")).toBeNull();
+	expect(screen.getByText("Página 1 de 2")).toBeTruthy();
 });

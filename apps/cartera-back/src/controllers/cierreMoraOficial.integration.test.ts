@@ -16,6 +16,10 @@ const migrationUrl = new URL(
 	"../../drizzle/0036_add_cierre_mora_oficial.sql",
 	import.meta.url,
 );
+const rateMigrationUrl = new URL(
+	"../../drizzle/0037_add_cierre_mora_porcentaje.sql",
+	import.meta.url,
+);
 
 async function prepareDatabase(pool: Pool) {
 	await pool.query("DROP SCHEMA IF EXISTS cartera CASCADE");
@@ -28,7 +32,10 @@ async function prepareDatabase(pool: Pool) {
     INSERT INTO cartera.asesores VALUES (7, 'Asesora Uno');
   `);
 	const migration = await Bun.file(migrationUrl).text();
+	const rateMigration = await Bun.file(rateMigrationUrl).text();
 	await pool.query(migration);
+	await pool.query(rateMigration);
+	await pool.query(rateMigration);
 	return migration;
 }
 
@@ -74,6 +81,7 @@ integrationTest("importa y consulta un período una sola vez", async () => {
 			periodo: "2026-08-01",
 			fechaCorte: "2026-08-31T23:59:59-06:00",
 			reglaVersion: "finanzas-v1",
+			porcentajeMora: "1.12",
 			fuente: "fixture.xlsx",
 			fuenteHash: "a".repeat(64),
 			rows: [
@@ -102,6 +110,13 @@ integrationTest("importa y consulta un período una sola vez", async () => {
 			{
 				periodo: "2026-08-01",
 				capitalCartera: { total: "150.00" },
+				moraMensual: {
+					porcentaje: "1.12",
+					esperado: "1.01",
+					porAsesor: [
+						{ asesorId: 7, nombre: "Asesora Uno", esperado: "1.01" },
+					],
+				},
 				totales: {
 					mora_30: { cantidad: 1, sumaCapital: "40.00" },
 					mora_60: { cantidad: 1, sumaCapital: "50.00" },
@@ -122,6 +137,9 @@ integrationTest("importa y consulta un período una sola vez", async () => {
 			asesores: 1,
 			imported: false,
 		});
+		await expect(
+			saveOfficialClosure(pool, { ...input, porcentajeMora: "2.00" }),
+		).rejects.toThrow("otra tasa");
 		await expect(
 			saveOfficialClosure(pool, {
 				...input,
@@ -150,6 +168,7 @@ integrationTest("rechaza una fecha de corte fuera del período", async () => {
 				periodo: "2026-08-01",
 				fechaCorte: "2026-09-01T00:00:00-06:00",
 				reglaVersion: "finanzas-v1",
+				porcentajeMora: "1.12",
 				fuente: "fixture.xlsx",
 				fuenteHash: "a".repeat(64),
 				rows: [

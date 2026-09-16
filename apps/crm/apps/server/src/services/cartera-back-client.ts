@@ -897,6 +897,15 @@ export type MoraOfficialClosureResponse = {
 			capital: string;
 		}[];
 	};
+	moraMensual: {
+		porcentaje: string;
+		esperado: string;
+		porAsesor: {
+			asesorId: number;
+			nombre: string;
+			esperado: string;
+		}[];
+	};
 	metadata: { fuente: "oficial"; inmutable: true };
 };
 

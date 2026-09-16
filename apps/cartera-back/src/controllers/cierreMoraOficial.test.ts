@@ -177,7 +177,7 @@ describe("summarizeOfficialAdvisorClosure", () => {
 				cantidadMora90: 1,
 				cantidadMora120: 1,
 			},
-		]);
+		], "1.12");
 
 		expect(summary.capitalCartera.total).toBe("1000.00");
 		expect(summary.totales.mora_30).toMatchObject({
@@ -189,5 +189,87 @@ describe("summarizeOfficialAdvisorClosure", () => {
 			sumaCapital: "75.00",
 		});
 		expect(summary.metadata).toEqual({ fuente: "oficial", inmutable: true });
+	});
+
+	test("calcula el cargo mensual desde capital moroso y tasa congelada", () => {
+		const summary = summarizeOfficialAdvisorClosure(
+			"2026-08-01",
+			[
+				{
+					asesorId: 7,
+					asesorNombre: "Asesora Uno",
+					capital: "1000.00",
+					mora30: "100.00",
+					mora60: "50.00",
+					mora90: "0.00",
+					mora120: "0.00",
+					cantidadMora30: 1,
+					cantidadMora60: 1,
+					cantidadMora90: 0,
+					cantidadMora120: 0,
+				},
+			],
+			"1.12",
+		);
+
+		expect(summary.moraMensual).toEqual({
+			porcentaje: "1.12",
+			esperado: "1.68",
+			porAsesor: [
+				{ asesorId: 7, nombre: "Asesora Uno", esperado: "1.68" },
+			],
+		});
+	});
+
+	test("rechaza tasas que no caben exactamente en numeric(5,2)", () => {
+		const rows = [
+			{
+				asesorId: 7,
+				asesorNombre: "Asesora Uno",
+				capital: "1000",
+				mora30: "1000",
+				mora60: "0",
+				mora90: "0",
+				mora120: "0",
+				cantidadMora30: 1,
+				cantidadMora60: 0,
+				cantidadMora90: 0,
+				cantidadMora120: 0,
+			},
+		];
+
+		expect(() =>
+			summarizeOfficialAdvisorClosure("2026-08-01", rows, "1.125"),
+		).toThrow("máximo dos decimales");
+		expect(() =>
+			summarizeOfficialAdvisorClosure("2026-08-01", rows, "0"),
+		).toThrow("inválido");
+		expect(() =>
+			summarizeOfficialAdvisorClosure("2026-08-01", rows, "101"),
+		).toThrow("inválido");
+	});
+
+	test("distribuye el centavo residual sin romper el total por asesor", () => {
+		const rows = [1, 2].map((asesorId) => ({
+			asesorId,
+			asesorNombre: `Asesora ${asesorId}`,
+			capital: "0.45",
+			mora30: "0.45",
+			mora60: "0",
+			mora90: "0",
+			mora120: "0",
+			cantidadMora30: 1,
+			cantidadMora60: 0,
+			cantidadMora90: 0,
+			cantidadMora120: 0,
+		}));
+
+		const summary = summarizeOfficialAdvisorClosure("2026-08-01", rows, "1.00");
+
+		expect(summary.moraMensual.esperado).toBe("0.01");
+		expect(summary.moraMensual.porAsesor).toEqual([
+			{ asesorId: 1, nombre: "Asesora 1", esperado: "0.01" },
+			{ asesorId: 2, nombre: "Asesora 2", esperado: "0.00" },
+		]);
 	});
 });

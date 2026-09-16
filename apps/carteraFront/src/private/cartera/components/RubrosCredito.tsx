@@ -483,6 +483,7 @@ export default function RubrosCredito({
           <VistaHistorial rubro={rubroSel} onVolver={volver} />
         ) : vista === "tipos" && esAdmin ? (
           <VistaAdminTipos
+            onGuardando={setGuardando}
             onVolver={() => setVista("crear")}
             onCrearTipo={() => {
               setOrigenCrearTipo("tipos");
@@ -1419,10 +1420,13 @@ function VistaAdminTipos({
   onVolver,
   onCrearTipo,
   onEditar,
+  onGuardando,
 }: {
   onVolver: () => void;
   onCrearTipo: () => void;
   onEditar: (tipo: TipoRubro) => void;
+  /** Avisa al modal que hay una escritura en curso, para que no se pueda cerrar. */
+  onGuardando?: (v: boolean) => void;
 }) {
   const queryClient = useQueryClient();
   /** Tipo con el borrado pedido y todavía sin confirmar. */
@@ -1524,9 +1528,32 @@ function VistaAdminTipos({
 
   const mutando = eliminar.isPending || cambiarActivo.isPending;
 
+  /**
+   * Reporta al guard del diálogo, igual que las otras cuatro vistas que
+   * escriben — ésta era la única que no lo hacía.
+   *
+   * Sin esto, con un borrado en vuelo el modal se podía cerrar por la X, Escape
+   * o el clic afuera, y la vista se desmontaba. Los callbacks de la mutación
+   * igual corren después del desmontaje, así que el `setBloqueado` del 409
+   * —el que explica "este tipo tiene N rubros, desactivalo en su lugar" y trae
+   * el botón para hacerlo— se aplicaba sobre un componente muerto y se perdía
+   * en silencio. Y como el ÉXITO sí toastea, la ausencia de toast se lee como
+   * "todavía está trabajando": el administrador se queda creyendo que el tipo
+   * se borró.
+   */
+  useReportarGuardando(mutando, onGuardando);
+
   return (
     <div className="flex flex-col gap-3 text-gray-800">
-      <BotonVolver onClick={onVolver}>Volver a agregar rubro</BotonVolver>
+      {/*
+        Apagados los dos mientras muta, y no es redundante con el guard del
+        diálogo: `useReportarGuardando` suelta el guard AL DESMONTARSE, así que
+        irse por acá adentro lo desactiva solo y deja la X y Escape vivas otra
+        vez. El candado sin esto queda con la llave puesta.
+      */}
+      <BotonVolver onClick={onVolver} disabled={mutando}>
+        Volver a agregar rubro
+      </BotonVolver>
 
       <div className="flex items-start justify-between gap-2 flex-wrap">
         <div>
@@ -1542,6 +1569,7 @@ function VistaAdminTipos({
         <Button
           size="sm"
           onClick={onCrearTipo}
+          disabled={mutando}
           className="bg-purple-600 hover:bg-purple-700 text-white font-semibold"
         >
           <PlusCircle className="w-4 h-4 mr-2" />
@@ -1592,6 +1620,23 @@ function VistaAdminTipos({
             </TableHeader>
             <TableBody>
               {tipos.map((t) => {
+                // `filaOcupada` YA NO gobierna los `disabled`: sólo dice dónde va
+                // el spinner. `ocupado` es un escalar y se repunta a la fila
+                // nueva en el mismo clic, así que con él como candado la fila
+                // anterior se re-habilitaba en el instante en que arrancaba la
+                // siguiente —ni siquiera hacía falta esperar a que settleara— y
+                // se podían disparar dos mutaciones del catálogo a la vez. La
+                // base las serializa con su `FOR UPDATE` y la segunda rebota con
+                // 404, así que no se corrompe nada; lo que quedaba era pantalla
+                // contradictoria: el toast verde de "Tipo eliminado" al lado del
+                // error rojo "El tipo de rubro no existe", sobre la misma acción.
+                //
+                // Se apaga TODO mientras cualquiera de las dos mutaciones corra.
+                // Es un catálogo de una docena de filas con operaciones de
+                // milisegundos: nadie necesita borrar dos tipos a la vez, y
+                // serializar no cuesta nada. Un conjunto de ids en vuelo no
+                // alcanzaría solo: `error`, `bloqueado` y `confirmando` también
+                // son escalares y se pisarían entre filas igual.
                 const filaOcupada = mutando && ocupado === t.tipo_id;
                 const enConfirmacion = confirmando === t.tipo_id;
                 const avisoBloqueo =
@@ -1642,7 +1687,7 @@ function VistaAdminTipos({
                             <Button
                               size="sm"
                               className="bg-red-600 hover:bg-red-700 text-white"
-                              disabled={filaOcupada}
+                              disabled={mutando}
                               onClick={() => {
                                 setOcupado(t.tipo_id);
                                 eliminar.mutate(t.tipo_id);
@@ -1656,7 +1701,7 @@ function VistaAdminTipos({
                             <Button
                               size="sm"
                               variant="outline"
-                              disabled={filaOcupada}
+                              disabled={mutando}
                               onClick={() => setConfirmando(null)}
                             >
                               Cancelar
@@ -1668,7 +1713,7 @@ function VistaAdminTipos({
                               size="sm"
                               variant="outline"
                               className="bg-blue-600 hover:bg-blue-700 text-white border-blue-600"
-                              disabled={filaOcupada}
+                              disabled={mutando}
                               onClick={() => onEditar(t)}
                             >
                               <Pencil className="w-3.5 h-3.5 mr-1" />
@@ -1678,7 +1723,7 @@ function VistaAdminTipos({
                               size="sm"
                               variant="outline"
                               className="bg-gray-600 hover:bg-gray-700 text-white border-gray-600"
-                              disabled={filaOcupada}
+                              disabled={mutando}
                               onClick={() => {
                                 setOcupado(t.tipo_id);
                                 cambiarActivo.mutate({
@@ -1694,7 +1739,7 @@ function VistaAdminTipos({
                               size="sm"
                               variant="outline"
                               className="bg-red-600 hover:bg-red-700 text-white border-red-600"
-                              disabled={filaOcupada}
+                              disabled={mutando}
                               onClick={() => {
                                 setError(null);
                                 setBloqueado(null);
@@ -1718,7 +1763,7 @@ function VistaAdminTipos({
                                 size="sm"
                                 variant="outline"
                                 className="bg-amber-600 hover:bg-amber-700 text-white border-amber-600"
-                                disabled={filaOcupada}
+                                disabled={mutando}
                                 onClick={() => {
                                   setOcupado(t.tipo_id);
                                   cambiarActivo.mutate({

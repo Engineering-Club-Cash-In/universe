@@ -33,6 +33,27 @@ export type InvestmentProjectionData = {
 		iva: string;
 		isr: string;
 		total: string;
+		externos: {
+			reinversion_total: string;
+			cash_total: string;
+			total: string;
+		};
+		cube: {
+			reinversion_total: string;
+			cash_total: string;
+			total: string;
+		};
+	};
+	contexto?: {
+		cancelaciones_pendientes: {
+			cantidad_creditos: number;
+			monto_bruto: string;
+			capital_externo_asociado: string;
+		};
+		cierres_naturales_periodo: {
+			cantidad_creditos: number;
+			capital_externo_asociado: string;
+		};
 	};
 };
 
@@ -41,6 +62,43 @@ const currency = (value: string) =>
 		style: "currency",
 		currency: "GTQ",
 	}).format(Number(value));
+
+function ProjectionContext({
+	contexto,
+}: {
+	contexto: InvestmentProjectionData["contexto"];
+}) {
+	const pending = contexto?.cancelaciones_pendientes;
+	const closures = contexto?.cierres_naturales_periodo;
+
+	return (
+		<>
+			{pending?.cantidad_creditos ? (
+				<div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950 text-sm">
+					<strong>
+						{pending.cantidad_creditos} crédito
+						{pending.cantidad_creditos === 1 ? "" : "s"} pendiente
+						{pending.cantidad_creditos === 1 ? "" : "s"} de cancelación
+					</strong>
+					: {currency(pending.monto_bruto)} bruto registrado y{" "}
+					{currency(pending.capital_externo_asociado)} de capital externo
+					asociado. No tienen fecha efectiva ni distribución confirmada, por eso
+					no se suman al flujo mensual.
+				</div>
+			) : null}
+			{closures?.cantidad_creditos ? (
+				<div className="rounded-md border bg-muted/40 px-4 py-3 text-sm">
+					<strong>
+						{closures.cantidad_creditos} créditos terminan naturalmente en el
+						período
+					</strong>
+					, con {currency(closures.capital_externo_asociado)} de capital externo
+					asociado.
+				</div>
+			) : null}
+		</>
+	);
+}
 
 export function InvestmentProjection({
 	data,
@@ -84,16 +142,29 @@ export function InvestmentProjection({
 		);
 	}
 
-	if (!data || data.porInversionista.length === 0) {
+	if (!data) {
 		return (
 			<div className="space-y-2 py-14 text-center">
 				<p className="font-medium">
 					No hay cuotas programadas para {periodLabel}.
 				</p>
-				<p className="text-muted-foreground text-sm">
-					La proyección no fabrica movimientos cuando no existe calendario
-					vigente.
-				</p>
+			</div>
+		);
+	}
+
+	if (data.porInversionista.length === 0) {
+		return (
+			<div className="space-y-4">
+				<ProjectionContext contexto={data.contexto} />
+				<div className="space-y-2 py-14 text-center">
+					<p className="font-medium">
+						No hay cuotas programadas para {periodLabel}.
+					</p>
+					<p className="text-muted-foreground text-sm">
+						La proyección no fabrica movimientos cuando no existe calendario
+						vigente.
+					</p>
+				</div>
 			</div>
 		);
 	}
@@ -116,17 +187,23 @@ export function InvestmentProjection({
 				<p className="mt-1 text-muted-foreground text-sm">Corte: {asOfLabel}</p>
 			</div>
 
-			<div className="grid gap-3 sm:grid-cols-3">
-				<Metric label="Pago estimado" value={data.totales.cash_total} />
+			<div className="grid gap-3 sm:grid-cols-4">
 				<Metric
-					label="Reinversión estimada"
-					value={data.totales.reinversion_total}
+					label="Por pagar a inversionistas"
+					value={data.totales.externos.cash_total}
 				/>
-				<Metric label="Flujo total proyectado" value={data.totales.total} />
+				<Metric
+					label="Por reinvertir a inversionistas"
+					value={data.totales.externos.reinversion_total}
+				/>
+				<Metric label="Flujo CUBE" value={data.totales.cube.total} />
+				<Metric label="Flujo económico total" value={data.totales.total} />
 				<Metric label="Interés bruto" value={data.totales.interes_bruto} />
 				<Metric label="IVA" value={data.totales.iva} />
 				<Metric label="ISR" value={data.totales.isr} />
 			</div>
+
+			<ProjectionContext contexto={data.contexto} />
 
 			<div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950 text-sm">
 				<strong>Supuestos:</strong> pago puntual del 100% de las cuotas

@@ -265,6 +265,27 @@ test("la proyección al corte no reutiliza una respuesta cacheada", async () => 
 			iva: "0.00",
 			isr: "0.00",
 			total: "0.00",
+			externos: {
+				reinversion_total: "0.00",
+				cash_total: "0.00",
+				total: "0.00",
+			},
+			cube: {
+				reinversion_total: "0.00",
+				cash_total: "0.00",
+				total: "0.00",
+			},
+		},
+		contexto: {
+			cancelaciones_pendientes: {
+				cantidad_creditos: 0,
+				monto_bruto: "0.00",
+				capital_externo_asociado: "0.00",
+			},
+			cierres_naturales_periodo: {
+				cantidad_creditos: 0,
+				capital_externo_asociado: "0.00",
+			},
 		},
 	};
 	let llamadas = 0;

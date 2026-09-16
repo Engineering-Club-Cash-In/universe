@@ -46,6 +46,16 @@ describe("buildProjectedInvestorFlow", () => {
         iva: "1.20",
         isr: "0.00",
         total: "111.20",
+        externos: {
+          reinversion_total: "0.00",
+          cash_total: "111.20",
+          total: "111.20",
+        },
+        cube: {
+          reinversion_total: "0.00",
+          cash_total: "0.00",
+          total: "0.00",
+        },
       },
     });
   });
@@ -500,6 +510,16 @@ describe("buildProjectedInvestorFlow", () => {
     ]);
 
     expect(result.totales.total).toBe("111.20");
+    expect(result.totales.externos).toEqual({
+      cash_total: "54.48",
+      reinversion_total: "0.00",
+      total: "54.48",
+    });
+    expect(result.totales.cube).toEqual({
+      cash_total: "56.72",
+      reinversion_total: "0.00",
+      total: "56.72",
+    });
     expect(
       result.porInversionista.find((row) => row.inversionista_id === 86),
     ).toMatchObject({

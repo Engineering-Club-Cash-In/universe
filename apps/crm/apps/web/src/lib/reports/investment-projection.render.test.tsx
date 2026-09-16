@@ -50,6 +50,27 @@ test("muestra la proyección separada con supuestos y desglose", () => {
 					iva: "1.20",
 					isr: "0.00",
 					total: "111.20",
+					externos: {
+						reinversion_total: "50.00",
+						cash_total: "61.20",
+						total: "111.20",
+					},
+					cube: {
+						reinversion_total: "0.00",
+						cash_total: "0.00",
+						total: "0.00",
+					},
+				},
+				contexto: {
+					cancelaciones_pendientes: {
+						cantidad_creditos: 46,
+						monto_bruto: "4251094.73",
+						capital_externo_asociado: "1148921.24",
+					},
+					cierres_naturales_periodo: {
+						cantidad_creditos: 3,
+						capital_externo_asociado: "11202.02",
+					},
 				},
 			}}
 			isPending={false}
@@ -61,14 +82,71 @@ test("muestra la proyección separada con supuestos y desglose", () => {
 	);
 
 	expect(screen.getByText("Proyección al corte de hoy")).toBeTruthy();
-	expect(screen.getAllByText("Pago estimado")).toHaveLength(2);
-	expect(screen.getAllByText("Reinversión estimada")).toHaveLength(2);
+	expect(screen.getByText("Por pagar a inversionistas")).toBeTruthy();
+	expect(screen.getByText("Por reinvertir a inversionistas")).toBeTruthy();
+	expect(screen.getByText("Flujo CUBE")).toBeTruthy();
+	expect(screen.getByText("Flujo económico total")).toBeTruthy();
+	expect(
+		screen.getByText(/46 créditos pendientes de cancelación/),
+	).toBeTruthy();
+	expect(screen.getByText(/no se suman al flujo mensual/i)).toBeTruthy();
+	expect(screen.getByText(/3 créditos terminan naturalmente/)).toBeTruthy();
+	expect(screen.getAllByText("Pago estimado")).toHaveLength(1);
+	expect(screen.getAllByText("Reinversión estimada")).toHaveLength(1);
 	expect(screen.getByText("Inversionista Ejemplo")).toBeTruthy();
 	expect(screen.getAllByText("Interés bruto")).toHaveLength(2);
 	expect(screen.getAllByText("IVA")).toHaveLength(2);
 	expect(screen.getAllByText("ISR")).toHaveLength(2);
 	expect(screen.getByText(/100% de las cuotas programadas/)).toBeTruthy();
 	expect(screen.queryByText(/liquidado/i)).toBeNull();
+});
+
+test("mantiene visible el contexto cuando no hay cuotas proyectadas", () => {
+	render(
+		<InvestmentProjection
+			data={{
+				porInversionista: [],
+				totales: {
+					reinversion_total: "0.00",
+					cash_total: "0.00",
+					interes_bruto: "0.00",
+					iva: "0.00",
+					isr: "0.00",
+					total: "0.00",
+					externos: {
+						reinversion_total: "0.00",
+						cash_total: "0.00",
+						total: "0.00",
+					},
+					cube: {
+						reinversion_total: "0.00",
+						cash_total: "0.00",
+						total: "0.00",
+					},
+				},
+				contexto: {
+					cancelaciones_pendientes: {
+						cantidad_creditos: 1,
+						monto_bruto: "150.00",
+						capital_externo_asociado: "300.00",
+					},
+					cierres_naturales_periodo: {
+						cantidad_creditos: 0,
+						capital_externo_asociado: "0.00",
+					},
+				},
+			}}
+			isPending={false}
+			isError={false}
+			periodLabel="octubre de 2026"
+			asOfLabel="14 de septiembre de 2026"
+			onRetry={() => undefined}
+		/>,
+	);
+
+	expect(screen.getByText(/1 crédito pendiente de cancelación/)).toBeTruthy();
+	expect(screen.getByText(/no se suman al flujo mensual/i)).toBeTruthy();
+	expect(screen.getByText(/No hay cuotas programadas/)).toBeTruthy();
 });
 
 test("pagina la tabla de proyección cada 25 inversionistas", () => {
@@ -97,6 +175,16 @@ test("pagina la tabla de proyección cada 25 inversionistas", () => {
 					iva: "31.20",
 					isr: "0.00",
 					total: "2860.00",
+					externos: {
+						reinversion_total: "0.00",
+						cash_total: "2860.00",
+						total: "2860.00",
+					},
+					cube: {
+						reinversion_total: "0.00",
+						cash_total: "0.00",
+						total: "0.00",
+					},
 				},
 			}}
 			isPending={false}
@@ -126,6 +214,16 @@ test("pagina la tabla de proyección cada 25 inversionistas", () => {
 					iva: "31.20",
 					isr: "0.00",
 					total: "2860.00",
+					externos: {
+						reinversion_total: "0.00",
+						cash_total: "2860.00",
+						total: "2860.00",
+					},
+					cube: {
+						reinversion_total: "0.00",
+						cash_total: "0.00",
+						total: "0.00",
+					},
 				},
 			}}
 			isPending={false}

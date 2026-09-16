@@ -495,6 +495,7 @@ export default function RubrosCredito({
           />
         ) : vista === "editarTipo" && esAdmin && tipoSel ? (
           <VistaEditarTipo
+            onGuardando={setGuardando}
             tipo={tipoSel}
             onVolver={() => setVista("tipos")}
             onGuardado={() => setVista("tipos")}
@@ -1304,7 +1305,14 @@ function VistaCrearTipo({
 
   return (
     <div className="flex flex-col gap-3 text-gray-800">
-      <BotonVolver onClick={onVolver}>
+      {/*
+        Apagado mientras el POST viaja, igual que el pie. Si se vuelve a mitad
+        del alta, el formulario de crear rubro queda usable y, cuando la
+        petición termina, `onCreado` le REEMPLAZA el tipo seleccionado por el
+        recién creado: alguien que ya había elegido otro tipo se lo ve cambiar
+        solo y da de alta el rubro bajo el concepto equivocado.
+      */}
+      <BotonVolver onClick={onVolver} disabled={crear.isPending}>
         {volverA === "crear" ? "Volver a agregar rubro" : "Volver a los tipos"}
       </BotonVolver>
 
@@ -1736,10 +1744,13 @@ function VistaEditarTipo({
   tipo,
   onVolver,
   onGuardado,
+  onGuardando,
 }: {
   tipo: TipoRubro;
   onVolver: () => void;
   onGuardado: () => void;
+  /** Avisa al modal que hay una escritura en curso, para que no se pueda cerrar. */
+  onGuardando?: (v: boolean) => void;
 }) {
   const queryClient = useQueryClient();
   const [nombre, setNombre] = useState(tipo.nombre);
@@ -1776,6 +1787,8 @@ function VistaEditarTipo({
       setError(getApiErrorMessage(e, "No se pudo editar el tipo de rubro"));
     },
   });
+
+  useReportarGuardando(guardar.isPending, onGuardando);
 
   const submit = () => {
     setError(null);

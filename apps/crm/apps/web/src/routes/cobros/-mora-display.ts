@@ -49,6 +49,11 @@ export function buildCapitalAging(data: CapitalAgingInput) {
 		data.capitalCartera !== undefined && !sinCoberturaHistorica;
 	const capitalCartera = data.capitalCartera ?? { total: "0", porAsesor: [] };
 	const capitalTotal = Number(capitalCartera.total);
+	const bandas = MORA_BUCKET_KEYS.map((key) => ({
+		etapa: key,
+		...capitalMetric(data.totales[key], capitalTotal),
+	}));
+	const capitalMoroso = bandas.reduce((sum, banda) => sum + banda.capital, 0);
 	const acumulados = MORA_BUCKET_KEYS.map((_, index) => {
 		const buckets = MORA_BUCKET_KEYS.slice(index).map(
 			(key) => data.totales[key],
@@ -65,7 +70,11 @@ export function buildCapitalAging(data: CapitalAgingInput) {
 				0,
 			),
 			porcentaje:
-				capitalTotal > 0 ? (capital / capitalTotal) * 100 : capital > 0 ? null : 0,
+				capitalTotal > 0
+					? (capital / capitalTotal) * 100
+					: capital > 0
+						? null
+						: 0,
 		};
 	});
 
@@ -115,9 +124,26 @@ export function buildCapitalAging(data: CapitalAgingInput) {
 		disponible,
 		sinCoberturaHistorica,
 		capitalTotal,
+		resumen: {
+			capitalMoroso,
+			porcentajeCapitalMoroso:
+				capitalTotal > 0
+					? (capitalMoroso / capitalTotal) * 100
+					: capitalMoroso > 0
+						? null
+						: 0,
+			moraMensualEstimada: capitalMoroso * 0.0112,
+		},
+		bandas,
 		acumulados,
 		porAsesor,
 	};
+}
+
+export function getPreviousMonth(mesAnio: string) {
+	const [year, month] = mesAnio.split("-").map(Number);
+	const previous = new Date(year, month - 2, 1);
+	return `${previous.getFullYear()}-${String(previous.getMonth() + 1).padStart(2, "0")}`;
 }
 
 type MoraSnapshotAsesor = {
@@ -147,8 +173,9 @@ export function getMoraSnapshotDate(
 	hoy: string,
 ) {
 	if (modo === "hoy") return undefined;
-	const apertura = `${mesAnio}-05`;
-	return apertura > hoy ? hoy : apertura;
+	if (mesAnio >= hoy.slice(0, 7)) return hoy;
+	const [year, month] = mesAnio.split("-").map(Number);
+	return new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
 }
 
 export function buildMoraDisplayRows(

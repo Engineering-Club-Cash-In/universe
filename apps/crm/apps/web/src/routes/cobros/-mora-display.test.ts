@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import * as moraDisplay from "./-mora-display";
-import { buildMoraDisplayRows, getMoraSnapshotDate } from "./-mora-display";
+import {
+	buildMoraDisplayRows,
+	getMoraSnapshotDate,
+	getPreviousMonth,
+} from "./-mora-display";
 
 describe("buildCapitalAging", () => {
 	test("calcula acumulados globales y bandas exclusivas por asesor", () => {
@@ -84,6 +88,14 @@ describe("buildCapitalAging", () => {
 			}),
 			expect.objectContaining({ asesorId: 8, capitalCartera: 600 }),
 		]);
+		expect(aging.resumen).toEqual({
+			capitalMoroso: 500,
+			porcentajeCapitalMoroso: 50,
+			moraMensualEstimada: 5.6,
+		});
+		expect(aging.bandas.map((banda) => banda.porcentaje)).toEqual([
+			10, 20, 5, 15,
+		]);
 	});
 
 	test("devuelve porcentajes cero sin denominador", () => {
@@ -159,36 +171,44 @@ describe("buildCapitalAging", () => {
 	});
 });
 
-describe("panel de aging de capital", () => {
-	test("se integra como panel adicional y declara la asignación actual en histórico", async () => {
+describe("getPreviousMonth", () => {
+	test("retrocede un mes incluso al cambiar de año", () => {
+		expect(getPreviousMonth("2026-08")).toBe("2026-07");
+		expect(getPreviousMonth("2026-01")).toBe("2025-12");
+	});
+});
+
+describe("jerarquía del reporte de mora", () => {
+	test("prioriza cierre y comparación con términos comprensibles", async () => {
 		const source = await Bun.file(
 			new URL("./reportes.tsx", import.meta.url),
 		).text();
-		expect(source).toContain("Aging de capital");
-		expect(source).toContain("buildCapitalAging");
-		expect(source).toMatch(/capital y asesor\s+según asignación\s+actual/);
+		expect(source).toContain("Cierre de capital en mora");
+		expect(source).toContain("Comparar cierres");
+		expect(source).toContain("Detalle por asesor");
+		expect(source).not.toContain("Aging de capital");
+		expect(source).not.toContain("Bandas exclusivas por asesor");
+		expect(source).toContain("orpc.getCierreMoraOficial.queryOptions");
+		expect(source).toContain("cierre oficial importado");
 		expect(source).toContain('? "N/D"');
 		expect(source).not.toContain('role="progressbar"');
 	});
 });
 
 describe("getMoraSnapshotDate", () => {
-	test("mantiene Hoy en vivo y usa el cierre del día 5 para meses iniciados", () => {
-		expect(getMoraSnapshotDate("hoy", "2026-06", "2026-06-06")).toBeUndefined();
-		expect(getMoraSnapshotDate("mes", "2026-06", "2026-06-06")).toBe(
-			"2026-06-05",
+	test("mantiene Hoy en vivo y cierra meses anteriores al último día", () => {
+		expect(getMoraSnapshotDate("hoy", "2026-06", "2026-09-15")).toBeUndefined();
+		expect(getMoraSnapshotDate("mes", "2026-08", "2026-09-15")).toBe(
+			"2026-08-31",
 		);
 	});
 
-	test("conserva el provisional antes del día 5 y los límites de año", () => {
-		expect(getMoraSnapshotDate("mes", "2026-06", "2026-06-03")).toBe(
-			"2026-06-03",
+	test("usa hoy para el mes abierto y respeta años bisiestos", () => {
+		expect(getMoraSnapshotDate("mes", "2026-09", "2026-09-15")).toBe(
+			"2026-09-15",
 		);
-		expect(getMoraSnapshotDate("mes", "2025-12", "2026-01-06")).toBe(
-			"2025-12-05",
-		);
-		expect(getMoraSnapshotDate("mes", "2026-01", "2026-02-06")).toBe(
-			"2026-01-05",
+		expect(getMoraSnapshotDate("mes", "2024-02", "2024-03-06")).toBe(
+			"2024-02-29",
 		);
 	});
 });

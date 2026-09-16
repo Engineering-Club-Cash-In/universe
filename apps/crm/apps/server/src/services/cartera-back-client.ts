@@ -879,6 +879,27 @@ export type MoraByEtapaYAsesorResponse = {
 	dataDisponibleDesde?: string;
 };
 
+export type MoraOfficialClosureResponse = {
+	periodo: string;
+	totales: Record<
+		"mora_30" | "mora_60" | "mora_90" | "mora_120_plus",
+		MoraBucketResult
+	>;
+	porAsesor: ({ asesorId: number; nombre: string } & Record<
+		"mora_30" | "mora_60" | "mora_90" | "mora_120_plus",
+		MoraBucketResult
+	>)[];
+	capitalCartera: {
+		total: string;
+		porAsesor: {
+			asesorId: number;
+			nombre: string;
+			capital: string;
+		}[];
+	};
+	metadata: { fuente: "oficial"; inmutable: true };
+};
+
 export type MoraCobradaPorAsesorResponse = {
 	periodo: { inicio: string; fin: string };
 	porAsesor: { asesorId: number; nombre: string; cobrado: string }[];
@@ -2358,6 +2379,20 @@ export class CarteraBackClient {
 		const qs = queryParams.size > 0 ? `?${queryParams}` : "";
 		return this.request<MoraByEtapaYAsesorResponse>(
 			`/reportes/mora-por-etapa-asesor${qs}`,
+			{ method: "GET" },
+			true,
+		);
+	}
+
+	async getCierreMoraOficial(params: {
+		periodo: string;
+		asesores?: number[];
+	}) {
+		const queryParams = new URLSearchParams({ periodo: params.periodo });
+		if (params.asesores?.length)
+			queryParams.set("asesores", params.asesores.join(","));
+		return this.request<MoraOfficialClosureResponse | null>(
+			`/reportes/cierre-mora-oficial?${queryParams}`,
 			{ method: "GET" },
 			true,
 		);

@@ -1084,33 +1084,28 @@ export async function editarRubro(
      */
     return await db.transaction(async (tx) => {
       /**
-       * ORDEN DE CANDADOS: el CRÉDITO primero, el rubro después.
+       * ORDEN DE CANDADOS: el CRÉDITO primero, el rubro después — el mismo que
+       * toma `crearRubro` (crédito → tipo → INSERT en `rubros`).
        *
-       * Es el mismo orden que toma `crearRubro` (crédito → tipo → INSERT en
-       * `rubros`), y tomarlo igual no es prolijidad: es lo único que evita un
-       * deadlock entre las dos rutas. Si esta función bloqueara el rubro
-       * primero y el crédito después, las dos pedirían los mismos dos recursos
-       * en orden opuesto. El ciclo concreto: una edición que REVIVE un rubro
-       * completado deja sin commitear su entrada en el índice único
-       * `(credito_id, tipo_id) WHERE completado = false` y se queda esperando
-       * el crédito, mientras un alta simultánea del mismo tipo —que ya tiene el
-       * crédito— espera esa entrada del índice para poder insertar. Postgres
-       * mata a una de las dos y el usuario ve un 500 sin explicación.
+       * OJO, porque esta capa cambió el argumento: cuando este orden se
+       * introdujo, era lo ÚNICO que evitaba un deadlock real entre editar y
+       * crear —reproducido contra Postgres—, porque el ciclo se cerraba por la
+       * entrada sin commitear del índice único `(credito_id, tipo_id) WHERE
+       * completado = false` que dejaba una edición al revivir un rubro
+       * completado.
        *
-       * Por eso hace falta esta lectura previa SIN candado: para bloquear el
-       * crédito primero hay que saber cuál es, y eso sólo lo sabe el rubro. Va
-       * plana a propósito y su único resultado que se usa es `credito_id`, que
-       * no cambia nunca en la vida de un rubro. Todo lo demás —monto, saldo,
-       * anulado— se relee abajo bajo `FOR UPDATE`, que es la lectura que manda.
+       * Hoy ese ciclo ya no puede formarse, y por DOS razones independientes:
+       * la migración 0038 borró ese índice, y las tres escrituras de rubros
+       * (`crearRubro`, `editarRubro`, `anularRubro`) toman el mismo advisory
+       * lock del crédito, así que ni siquiera corren en paralelo.
+       *
+       * El orden se mantiene igual, y a propósito: es defensa en profundidad y
+       * cuesta cero. Que hoy el advisory lock alcance no es motivo para que la
+       * seguridad de esta función DEPENDA de que ese lock siga estando — es
+       * exactamente la clase de invariante a distancia que este módulo ya
+       * aprendió a no cultivar. Lo que NO hay que hacer es invertirlo "porque
+       * total el lock protege".
        */
-      const [duenio] = await tx
-        .select({ credito_id: rubros.credito_id })
-        .from(rubros)
-        .where(eq(rubros.rubro_id, rubro_id))
-        .limit(1);
-
-      if (!duenio) throw new RubroError(404, "El rubro no existe.");
-
       /**
        * `FOR UPDATE` sobre el crédito, y se toma SIEMPRE, no sólo cuando el
        * monto sube.
@@ -1126,18 +1121,24 @@ export async function editarRubro(
        * carrera que `crearRubro` cerró con su propio `FOR UPDATE`, entrando por
        * la puerta de al lado.
        *
-       * Se toma siempre —y no dentro del `if (subeMonto)`— porque si "sube el
-       * monto" recién se sabe DESPUÉS de leer el rubro, y leer el rubro después
-       * del crédito es justamente lo que pide el orden de arriba. Condicionarlo
-       * obligaría a tomar los candados en orden distinto según el patch, que es
-       * el deadlock de vuelta. El costo es una edición que espera si hay un
-       * pago en curso sobre ese crédito: son transacciones cortas y editar un
-       * rubro es una acción manual de administrador, no un camino caliente.
+       * Se toma siempre —y no dentro del `if (subeMonto)`— para que el orden de
+       * adquisición NO dependa de la forma del patch. Condicionarlo haría que
+       * una edición de sólo-descripción tome los candados en otro orden que una
+       * que sube el monto, y ese es el tipo de diferencia que nadie recuerda al
+       * agregar la tercera variante.
+       *
+       * Sí tiene un costo, y conviene decirlo entero: una corrección de sólo la
+       * DESCRIPCIÓN también bloquea la fila del crédito, y el cron de moras
+       * —que escribe `statusCredit` y NO toma el advisory lock— puede quedar
+       * esperándola, o al revés. Son transacciones cortas de un lado y del otro
+       * (el cron escribe en autocommit), y editar un rubro es una acción manual
+       * de administrador, no un camino caliente: el cambio se acepta a
+       * sabiendas.
        */
       const [credito] = await tx
         .select({ statusCredit: creditos.statusCredit })
         .from(creditos)
-        .where(eq(creditos.credito_id, duenio.credito_id))
+        .where(eq(creditos.credito_id, credito_id))
         .limit(1)
         .for("update");
 

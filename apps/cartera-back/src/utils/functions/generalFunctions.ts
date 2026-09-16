@@ -993,7 +993,6 @@ export async function buildInversionistaWorkbook(
       for (const pago of cr.pagos ?? []) {
         row++;
         rowIdx++;
-        hasData = true;
         const rr = ws.getRow(row);
 
         // Para pagos NO_LIQUIDADO el monto_aportado del espejo todavía no
@@ -1007,7 +1006,7 @@ export async function buildInversionistaWorkbook(
         // - Si el pago es NO_LIQUIDADO: el abono a capital del mes aún NO se ha restado del espejo en la BD.
         //   Por lo tanto, 'Capital' (inicial) es el montoBaseCalculo actual, y 'Capital Restante' es el saldo inicial menos el abono que se le pagará.
         // - Si el pago es LIQUIDADO: el abono a capital ya se restó físicamente en la BD.
-        //   Para mostrar el 'Capital' inicial con el que empezó el mes, se lo sumamos de vuelta (montoBaseCalculo + abono). 
+        //   Para mostrar el 'Capital' inicial con el que empezó el mes, se lo sumamos de vuelta (montoBaseCalculo + abono).
         //   El 'Capital Restante' actual post-abono ya es exactamente el valor de montoBaseCalculo.
         const capital = esNoLiquidado
           ? montoBaseCalculo
@@ -1017,6 +1016,30 @@ export async function buildInversionistaWorkbook(
           : montoBaseCalculo;
         const tasaFmt = toN(pago.tasaInteresInvesor) / 100;
         const cuotaMes = `${pago.mes || "-"}${pago.cuota ? ` (Cuota #${pago.cuota})` : ""}`;
+
+        // Créditos ya devueltos/cancelados para este inversionista dejan
+        // monto_aportado en 0, y el proceso de pagos igual genera una fila
+        // mensual con todo en cero. Se omite del reporte por no aportar info.
+        const interesInversor = toN(pago.abono_interes);
+        const iva = toN(pago.abono_iva);
+        const isr = toN(pago.isr);
+        const abonoCapital = toN(pago.abono_capital);
+        const interesNeto = toN(pago.abonoGeneralInteres);
+        const filaEnCeros =
+          capital === 0 &&
+          capitalRestante === 0 &&
+          interesInversor === 0 &&
+          iva === 0 &&
+          isr === 0 &&
+          abonoCapital === 0 &&
+          interesNeto === 0;
+
+        if (filaEnCeros) {
+          row--;
+          rowIdx--;
+          continue;
+        }
+        hasData = true;
 
         rr.values = [
           ...(showId ? [cr.numero_credito_sifco] : []),

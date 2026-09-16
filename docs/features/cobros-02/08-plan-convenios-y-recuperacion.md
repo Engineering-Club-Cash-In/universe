@@ -170,7 +170,7 @@ parcial sobre `(cobros_tipo, cobros_dedup_key, assigned_to)`. La llave es del **
 | Alerta | Llave | Qué la hace cambiar |
 | --- | --- | --- |
 | `convenio_incumplido` | `convenio:<id>:venc:<fecha>` | Pagar la cuota vencida más vieja y seguir debiendo otra |
-| `bot_cliente_escribio` (Fase 1.b) | `bot:sesion:<uuid>` | Una conversación nueva del bot |
+| `bot_cliente_escribio` (Fase 1.b) | `bot:sesion:<uuid>:credito:<sifco>` | Una conversación nueva, o un crédito distinto dentro de ella |
 
 La unicidad la sostiene el índice con `ON CONFLICT DO NOTHING`, **no** un `SELECT` previo
 (que no protege bajo concurrencia). Es genérica a propósito: la siguiente alerta que
@@ -188,7 +188,7 @@ envío → `cobros_send_logs`) sin escribirle a nadie real. Para el envío de ve
 falta dos cosas más, y las dos son **decisión de negocio**: `CONVENIO_WHATSAPP_ENABLED=true`
 en el ambiente y apagar el modo prueba.
 
-### Fase 1.b · Aviso cuando el cliente escribe en el bot
+### Fase 1.b · Aviso cuando el cliente escribe en el bot ✅ implementada
 
 Sale del criterio 1 del ticket (*"si escriben por WhatsApp… el asesor asignado debe
 responder"*) y **no existe nada**: el bot atiende al cliente, deja su historial en la Ficha
@@ -203,7 +203,14 @@ el asesor se entera solo si abre la ficha.
   `referencia` del paso 1 — la fila de `otps`—, que en `bot_cobros_interacciones` vive como
   **`sesion_id`**: es la misma llave por la que la Ficha 360 agrupa y numera ("Referencia 1"
   = la más vieja), y está sin FK a propósito para sobrevivir a la purga del OTP. Una alerta
-  por `sesion_id`, no por mensaje ni por día.
+  por conversación, no por mensaje ni por día.
+- **El crédito entra en la llave**, junto a la conversación. El índice único lleva
+  `assigned_to` (otras alertas de cobros van al asesor *y* a cada supervisor), así que una
+  llave de solo `sesion_id` no garantizaba nada cuando dos peticiones simultáneas de la
+  misma conversación tocaban créditos de **asesores distintos**: las dos insertaban. Con el
+  crédito adentro, lo que la base sostiene es lo que el código promete — y la semántica que
+  queda es la que conviene: diez pantallas del mismo crédito son **un** aviso, y dos
+  créditos de dos asesores son **uno para cada dueño**.
 
 **Mecánica de a quién avisar.** La interacción guarda `numero_sifco`, pero **solo en las
 acciones sobre un crédito**: las primeras de la conversación (`buscar_cliente`,
@@ -214,6 +221,55 @@ crédito de cartera → `asesor_id` → `email_cash_in` → usuario del CRM.
 
 Los `acceso_fallido` quedan fuera solos: no tienen sesión (D-43) ni identidad resuelta, así
 que no hay asesor a quién avisarle.
+
+#### Cómo quedó
+
+- Tipo `bot_cliente_escribio` en `cobros_notif_tipo` (migración **0055**). No hizo falta
+  nada más: reusa la `cobros_dedup_key` de la 0054 con `bot:sesion:<uuid>`.
+- `services/aviso-bot-asesor.ts`, colgado del final de `persistirInteraccion` —no del
+  middleware— porque ahí ya está resuelta la sesión, que es la llave de la dedup.
+- **Corte barato primero**: antes de tocar cartera se consulta si esta conversación ya
+  avisó. Es el caso común (una conversación son varias peticiones) y evita un HTTP por
+  cada pantalla que el cliente abre. No sustituye al índice único —dos peticiones
+  simultáneas pasan el `SELECT`—, solo evita el trabajo.
+- El dueño del crédito se lee de cartera **sin cache** (`getCredito(sifco, false, false)`):
+  el motor pudo reasignarlo anoche y el aviso tiene que llegarle a quien lo lleva hoy. El
+  `useCircuitBreaker=false` es porque esto es best-effort y no debe compartir contador de
+  fallos con las operaciones que sí importan.
+- El texto dice **qué vino a hacer** (`pidió su estado de cuenta`, `subió una boleta`…),
+  que es lo que le dice al asesor si puede esperar o no. Una acción futura del bot sin
+  texto propio avisa igual, con uno genérico — misma filosofía que D-41.
+- **Solo si la interacción probó que el crédito es del cliente.** El `numero_sifco` sale
+  del *body*, así que una sesión válida con el crédito de OTRO cliente llega hasta acá; el
+  endpoint la rechaza pero el historial se escribe igual, y avisar ahí le manda el aviso al
+  asesor del crédito ajeno. Pero exigir que **toda** la operación salga bien es demasiado:
+  un `CARTERA_NO_DISPONIBLE` ocurre *después* de verificar la propiedad, sobre el crédito
+  legítimo — y es justo cuando el cliente más necesita que alguien lo llame, porque el bot
+  no pudo ayudarlo. El filtro es una **lista blanca** de códigos posteriores al control
+  (`CODIGOS_POSTERIORES_AL_CONTROL`): todo lo demás calla.
+
+  > La lista empezó siendo **negra** —enumerar los fallos de acceso y avisar en el resto—
+  > y se rompió por algo invisible desde ese archivo: los controladores **traducen** el
+  > código antes de que el historial lo lea. `CREDITO_NO_ES_DEL_CLIENTE` sale al mundo como
+  > `CREDITO_NO_ENCONTRADO` (a propósito, para que nadie averigüe qué créditos existen
+  > probando números), así que el caso que la lista existía para bloquear pasaba igual. La
+  > moraleja no fue agregar ese código: fue que **no se puede enumerar con confianza todas
+  > las formas en que la propiedad puede fallar**, porque el vocabulario lo define otra capa.
+  > Lo contrario sí se puede enumerar. Con lista blanca, un código nuevo cuesta un
+  > seguimiento perdido; con lista negra, costaba avisarle al asesor de un crédito ajeno.
+  >
+  > Y la lista blanca tiene su propia condición, que tampoco se ve desde ese archivo:
+  > cada código vale como prueba **solo si su camino verifica la propiedad antes de
+  > devolverlo**. `MONTO_DESACTUALIZADO` no lo cumplía — `crearPagoLink` validaba el monto
+  > antes de `armarContexto`, así que un monto basura contra el SIFCO de otro cliente
+  > devolvía un código "posterior al control" sin haber pasado por ninguno. Se invirtió el
+  > orden y se auditaron los 17 códigos: los demás salen después de `armarContexto` o de
+  > una fila acotada a `(otpId, numeroSifco)`. Hay una prueba sobre el orden en la fuente,
+  > porque es exactamente lo que un refactor puede invertir sin que nada más lo note.
+- **Sin caso de cobros también avisa**, pero sin enlace. `sync-casos-cobros` solo mantiene
+  un caso activo cuando `diasMora > 0`, así que exigirlo dejaba justo a los buckets sanos
+  sin aviso — los mismos que la decisión 16 nombra. Un cliente al día que escribe es de
+  los que más vale la pena atender rápido.
 
 ### Fase 2 · Congelar el convenio — invierte la regla vieja
 

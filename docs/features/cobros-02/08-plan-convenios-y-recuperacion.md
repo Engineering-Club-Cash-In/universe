@@ -245,9 +245,18 @@ que no hay asesor a quién avisarle.
   asesor del crédito ajeno. Pero exigir que **toda** la operación salga bien es demasiado:
   un `CARTERA_NO_DISPONIBLE` ocurre *después* de verificar la propiedad, sobre el crédito
   legítimo — y es justo cuando el cliente más necesita que alguien lo llame, porque el bot
-  no pudo ayudarlo. El filtro es una lista de **códigos de acceso**
-  (`CODIGOS_SIN_PROPIEDAD_VERIFICADA`); un fallo sin código se trata como no verificado.
-  Cuando el bot falló, el texto del aviso lo dice.
+  no pudo ayudarlo. El filtro es una **lista blanca** de códigos posteriores al control
+  (`CODIGOS_POSTERIORES_AL_CONTROL`): todo lo demás calla.
+
+  > La lista empezó siendo **negra** —enumerar los fallos de acceso y avisar en el resto—
+  > y se rompió por algo invisible desde ese archivo: los controladores **traducen** el
+  > código antes de que el historial lo lea. `CREDITO_NO_ES_DEL_CLIENTE` sale al mundo como
+  > `CREDITO_NO_ENCONTRADO` (a propósito, para que nadie averigüe qué créditos existen
+  > probando números), así que el caso que la lista existía para bloquear pasaba igual. La
+  > moraleja no fue agregar ese código: fue que **no se puede enumerar con confianza todas
+  > las formas en que la propiedad puede fallar**, porque el vocabulario lo define otra capa.
+  > Lo contrario sí se puede enumerar. Con lista blanca, un código nuevo cuesta un
+  > seguimiento perdido; con lista negra, costaba avisarle al asesor de un crédito ajeno.
 - **Sin caso de cobros también avisa**, pero sin enlace. `sync-casos-cobros` solo mantiene
   un caso activo cuando `diasMora > 0`, así que exigirlo dejaba justo a los buckets sanos
   sin aviso — los mismos que la decisión 16 nombra. Un cliente al día que escribe es de

@@ -82,51 +82,61 @@ export interface AvisoBotParams {
 }
 
 /**
- * Códigos de fallo en los que el bot NUNCA llegó a verificar que el crédito
- * fuera del cliente: o no se identificó, o la sesión no valía, o el SIFCO que
- * mandó es de otra persona.
+ * Códigos de fallo que solo pueden producirse DESPUÉS de que el bot verificó
+ * que el crédito es del cliente.
  *
- * Es la lista que decide si se avisa, y el porqué es asimétrico:
+ * ── Por qué una lista blanca y no una negra ─────────────────────────────────
+ * El primer intento fue enumerar los fallos de acceso y avisar en todo lo
+ * demás. Se rompió por algo que no se ve leyendo este archivo: los
+ * controladores **traducen** el código interno antes de que el historial lo
+ * lea. `CREDITO_NO_ES_DEL_CLIENTE` sale al mundo como `CREDITO_NO_ENCONTRADO`
+ * —a propósito, para que nadie averigüe qué créditos existen probando
+ * números— y ese código público no estaba en la lista negra, así que el caso
+ * que la lista existía para bloquear pasaba igual (review de Codex).
  *
- *  · El `numeroSifco` viene del BODY, así que una sesión válida con el crédito
- *    de OTRO cliente llega hasta acá. Avisar ahí le manda el aviso al asesor
- *    del crédito ajeno y quema la llave de dedup de esa conversación.
- *  · Pero exigir que TODA la operación salga bien es demasiado (review de
- *    Codex, P2): `obtenerInfoCredito` verifica la propiedad ANTES de poder
- *    devolver `CARTERA_NO_DISPONIBLE`, y lo mismo pasa con los flujos de
- *    boleta y de link de pago. Todos esos son fallos POSTERIORES al control,
- *    sobre el crédito legítimo del cliente — y son justo los casos en los que
- *    el cliente MÁS necesita que alguien lo llame, porque el bot no pudo
- *    ayudarlo.
+ * La moraleja no es "agregar CREDITO_NO_ENCONTRADO": es que **no se puede
+ * enumerar con confianza todas las formas en que la propiedad puede fallar**,
+ * porque el vocabulario lo define otra capa y puede crecer. Lo que sí se puede
+ * enumerar es lo contrario: estos fallos concretos ocurren sobre un crédito ya
+ * resuelto y verificado.
  *
- * Un código nuevo que signifique "no pasó el control de acceso" tiene que
- * sumarse acá; si no, el aviso se manda igual.
+ * Con esta forma, lo desconocido **calla**. Un código nuevo posterior al
+ * control no avisa hasta que alguien lo agregue acá — cuesta un seguimiento
+ * perdido. Con la lista negra, un código nuevo de acceso **avisaba al asesor
+ * de un crédito ajeno** y quemaba la llave de dedup. La asimetría manda.
  */
-const CODIGOS_SIN_PROPIEDAD_VERIFICADA = new Set([
-	"CREDITO_NO_ES_DEL_CLIENTE",
-	"CLIENTE_NO_ENCONTRADO",
-	"NO_AUTORIZADO",
-	"OTP_INVALIDO",
-	"OTP_VENCIDO",
-	"OTP_YA_USADO",
-	"OTP_NO_ENVIADO",
-	"REFERENCIA_INVALIDA",
-	"SESION_VENCIDA",
+const CODIGOS_POSTERIORES_AL_CONTROL = new Set([
+	// El crédito es suyo, pero cartera no respondió o no tiene qué mostrar.
+	"CARTERA_NO_DISPONIBLE",
+	"CREDITO_SIN_DATOS",
+	"CREDITO_REQUIERE_REVISION",
+	"SIN_ESTADO_DE_CUENTA",
+	"MORA_POR_CONFIRMAR",
+	// El crédito es suyo, pero no admite esta vía de pago.
+	"CREDITO_NO_ACEPTA_BOLETA",
+	"CREDITO_NO_PAGABLE_POR_LINK",
+	"SIN_CUOTAS_QUE_PAGAR",
+	"SIN_LINKS",
+	"PAGALO_NO_DISPONIBLE",
+	"MONTO_DESACTUALIZADO",
+	// El crédito es suyo y ya hay plata en camino.
+	"PAGO_EN_PROCESO",
+	"PAGO_PARCIAL_EN_CURSO",
+	"PAGO_NO_REGISTRADO",
+	"BOLETA_DUPLICADA",
+	"BOLETA_YA_CONFIRMADA",
+	"CONFIRMACION_EN_CURSO",
 ]);
 
-/**
- * ¿Esta interacción probó que el crédito es del cliente? Exportada para poder
- * testear la regla sin montar todo el servicio.
- */
 export function pruebaPropiedadDelCredito(params: {
 	exito: boolean;
 	codigo?: string | null;
 }): boolean {
 	if (params.exito) return true;
-	// Un fallo SIN código no se puede clasificar: se trata como si no hubiera
-	// pasado el control (el lado seguro).
+	// Todo lo que no esté explícitamente reconocido como posterior al control
+	// se trata como si la propiedad nunca se hubiera verificado.
 	if (!params.codigo) return false;
-	return !CODIGOS_SIN_PROPIEDAD_VERIFICADA.has(params.codigo);
+	return CODIGOS_POSTERIORES_AL_CONTROL.has(params.codigo);
 }
 
 /**

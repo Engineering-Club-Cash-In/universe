@@ -213,6 +213,11 @@ describe("pruebaPropiedadDelCredito", () => {
 
 	it("un fallo de acceso no", () => {
 		for (const codigo of [
+			// El PÚBLICO: los controladores traducen CREDITO_NO_ES_DEL_CLIENTE a
+			// este antes de que el historial lo lea, para que nadie averigüe qué
+			// créditos existen probando números. Es el que se escapaba con la
+			// lista negra (review de Codex).
+			"CREDITO_NO_ENCONTRADO",
 			"CREDITO_NO_ES_DEL_CLIENTE",
 			"OTP_VENCIDO",
 			"SESION_VENCIDA",
@@ -220,6 +225,15 @@ describe("pruebaPropiedadDelCredito", () => {
 		]) {
 			expect(pruebaPropiedadDelCredito({ exito: false, codigo })).toBe(false);
 		}
+	});
+
+	it("un código DESCONOCIDO calla: lo desconocido no prueba propiedad", () => {
+		// La asimetría que justifica la lista blanca: avisar de más manda el
+		// aviso al asesor de un crédito ajeno; avisar de menos cuesta un
+		// seguimiento.
+		expect(
+			pruebaPropiedadDelCredito({ exito: false, codigo: "CODIGO_NUEVO_2027" }),
+		).toBe(false);
 	});
 
 	it("un fallo sin código tampoco (lado seguro)", () => {

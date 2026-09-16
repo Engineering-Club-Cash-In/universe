@@ -356,6 +356,40 @@ un convenio anterior. Si se rechaza un convenio y se firma otro antes de que cor
 de las 23:59, el rechazo no escribe historial de bucket, así que el nuevo se congelaba en el
 bucket del viejo en vez del que le toca por su mora de hoy.
 
+#### El orden importa más que el lock
+
+Con el lock ya cubriendo la lectura, la lectura seguía en el lugar equivocado: **después**
+de borrar la mora activa y de pasar el crédito a `EN_CONVENIO`. Esos dos pasos destruyen
+justo la información con la que se deriva el bucket, así que para un crédito sin historial
+la derivación caía al rango por cuotas, que sin mora da **B0** — el "borrón y cuenta nueva"
+que esta fase existe para impedir. El comentario del código decía "la lectura tiene que ir
+antes"; el código la tenía después.
+
+Ahora es **una sola transacción** con el lock por crédito: *leer → borrar mora → cambiar
+status → congelar*. Los dos pasos que pueden fallar sin que eso deba tumbar el convenio
+(la lectura y el congelamiento) van cada uno en un `SAVEPOINT`: en Postgres un statement
+que falla aborta la transacción entera, y con el savepoint su fallo se descarta solo.
+
+El lector del **vigilante** tenía la misma omisión que ya se había corregido en el de la
+firma: tomaba la última fila de cualquier régimen. Toda fila `EN_CONVENIO` que llegue a ver
+es de un convenio **anterior** —si fuera del vigente, el corte por fecha habría cortado
+antes—, así que si fallaba el congelamiento de un segundo convenio, el vigilante reinsertaba
+el bucket del primero después del corte nuevo y lo dejaba certificado para siempre.
+
+#### Cuándo termina el congelamiento: en el motor, no antes
+
+No hay evento de "salida" al completar, rechazar o deshacer el convenio, y es a propósito
+(se planteó en la review). El crédito vuelve a `ACTIVO`/`MOROSO` y la fila `CONGELADO` sigue
+siendo la última hasta que el motor de las 23:59 deriva el bucket real y escribe la
+transición. La ventana es de horas: el motor recorre **todos** los créditos con cuotas, no
+solo los morosos (en el sandbox hay `BAJADA` a B0 registradas).
+
+Escribir la salida en el momento se ve más correcto y es peor: el motor **solo reasigna
+cuando detecta cambio de bucket**. Una fila eager con el bucket ya correcto se come esa
+transición, y el crédito queda en su bucket nuevo con el asesor de B4/B5 que tenía
+congelado, sin nada que lo vuelva a mover. Soltar el congelamiento y re-hogar el crédito son
+el mismo paso, y ese paso vive en el motor.
+
 #### La trampa de Drizzle que se pagó acá
 
 La medición vivía copiada en el job y en el script. En la copia del script la subconsulta

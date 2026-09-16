@@ -203,3 +203,46 @@ describe("processConvenioPayment", () => {
     expect(transactionCalls).toBe(1);
   });
 });
+
+/**
+ * El ORDEN dentro de `createPaymentAgreement`, que es lo que la Fase 2 promete:
+ * el crédito se queda en el bucket que tenía AL FIRMAR.
+ *
+ * Ese bucket se deriva de la mora activa y del status del crédito, y los dos
+ * pasos que siguen los destruyen —se borra la mora y el status pasa a
+ * EN_CONVENIO—. Con la lectura al final (como estaba, review de Codex P2)
+ * `bucketAntesDelConvenio` se quedaba sin sus dos primeras fuentes y devolvía
+ * B0 para todo crédito sin historial previo: el "borrón y cuenta nueva" que
+ * esta fase existe para impedir.
+ *
+ * Se afirma sobre la fuente porque el daño no se ve en el resultado de la
+ * función —devuelve el convenio igual—, solo en qué bucket quedó escrito.
+ */
+describe("createPaymentAgreement: orden de la salida del régimen normal", () => {
+  const fuente = require("node:fs").readFileSync(
+    new URL("./paymentAgreement.ts", import.meta.url).pathname,
+    "utf8",
+  ) as string;
+  const cuerpo = fuente.slice(
+    fuente.indexOf("export async function createPaymentAgreement("),
+  );
+
+  it("lee el bucket antes de borrar la mora y de cambiar el status", () => {
+    const lectura = cuerpo.indexOf("bucketAntesDelConvenio(");
+    const borrado = cuerpo.indexOf(".delete(moras_credito)");
+    const cambioStatus = cuerpo.indexOf('statusCredit: "EN_CONVENIO"');
+
+    expect(lectura).toBeGreaterThan(-1);
+    expect(borrado).toBeGreaterThan(-1);
+    expect(cambioStatus).toBeGreaterThan(-1);
+    expect(lectura).toBeLessThan(borrado);
+    expect(lectura).toBeLessThan(cambioStatus);
+  });
+
+  it("toma el lock por crédito antes de leer el bucket", () => {
+    const lock = cuerpo.indexOf("pg_advisory_xact_lock");
+    const lectura = cuerpo.indexOf("bucketAntesDelConvenio(");
+    expect(lock).toBeGreaterThan(-1);
+    expect(lock).toBeLessThan(lectura);
+  });
+});

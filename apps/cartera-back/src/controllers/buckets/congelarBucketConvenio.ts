@@ -28,6 +28,25 @@ import { CREDITO_ASESOR_LOCK_NAMESPACE } from "../../lib/buckets-job-locks";
 //     escribe la fila. Es el camino normal y el único que ve el bucket real.
 //  2. Como RED DE SEGURIDAD en el job de convenios, para lo que llegó por otra
 //     puerta (carteraFront, convenios viejos, un fallo del paso 1).
+//
+// ── Cuándo TERMINA el congelamiento ─────────────────────────────────────────
+// No hay evento de salida, y es a propósito (review de Codex, P2). Cuando el
+// convenio se completa, se rechaza o se deshace, el crédito vuelve a
+// ACTIVO/MOROSO y la fila `CONGELADO` sigue siendo la última del historial
+// hasta que el motor de las 23:59 deriva el bucket real y escribe la
+// transición contra ella. La ventana es de horas, no permanente: el motor
+// recorre TODOS los créditos con cuotas —no solo los que tienen mora—, así que
+// un crédito que salió del convenio sin deber nada igual se visita y baja
+// (`BAJADA` a B0 se observa en la bitácora).
+//
+// Escribir el evento de salida en el momento se ve más correcto y es peor. El
+// motor solo reasigna cuando detecta cambio de bucket (`if (bucketNuevo ===
+// bucketAnterior) continue`), así que una fila eager con el bucket ya correcto
+// se COME esa transición: el crédito queda en el bucket que le toca pero con
+// el asesor de B4/B5 que tenía congelado, y nada lo vuelve a mover. Se
+// cambiaría un bucket desactualizado por unas horas por un dueño equivocado
+// para siempre. Soltar el congelamiento y re-hogar el crédito son el mismo
+// paso, y ese paso vive en el motor.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Bucket de re-siembra cuando no hay de dónde deducir el origen (decisión 19). */
@@ -93,13 +112,25 @@ export async function bucketAntesDelConvenio(
  * de la red de seguridad, donde `bucketActualSql` devuelve null por diseño.
  *
  * Orden:
- *  1. La última fila del historial, del régimen que sea. Es literalmente "el
- *     bucket que tenía al firmar": para un convenio que nunca pasó por acá, esa
- *     fila es la de cuando era MOROSO.
+ *  1. La última fila del historial FUERA de todo régimen de convenio. Es
+ *     literalmente "el bucket que tenía al firmar": para un convenio que nunca
+ *     pasó por acá, esa fila es la de cuando era MOROSO.
  *  2. Si no tiene historial —nunca entró al funnel—, no hay origen que
  *     recuperar y se aplica la regla de re-siembra (decisión 19): al día → B2,
  *     atrasado → B4. `mesesAtrasados` lo calcula el caller con el modelo de
  *     siempre (unión de cuotas del crédito no absorbidas + cuotas del convenio).
+ *
+ * POR QUÉ SE EXCLUYE `EN_CONVENIO` (review de Codex, P2). Cualquier fila de ese
+ * régimen que este lector llegue a ver pertenece por fuerza a un convenio
+ * ANTERIOR: si fuera del vigente, `tieneBucketDeConvenio(…, desde)` habría dado
+ * verdadero y el vigilante no habría llamado acá. Sin la exclusión el escenario
+ * se cierra sobre sí mismo: falla el congelamiento de un segundo convenio, el
+ * `CONGELADO` del primero sigue siendo la última fila, el vigilante detecta
+ * correctamente que no hay evento después del corte nuevo… y vuelve a insertar
+ * ESE bucket viejo después del corte. Con eso queda certificado para siempre y
+ * ya no hay forma de repararlo: la próxima corrida ve su propia fila y se da
+ * por satisfecha. Es la misma razón —y la misma línea— que en
+ * `bucketAntesDelConvenio`.
  */
 export async function bucketParaCongelarEnConvenio(
   credito_id: number,
@@ -110,6 +141,7 @@ export async function bucketParaCongelarEnConvenio(
     SELECT h.bucket_nuevo
     FROM ${SQL_CARTERA_SCHEMA}.buckets_historial h
     WHERE h.credito_id = ${credito_id}
+      AND (h.status_credito IS DISTINCT FROM 'EN_CONVENIO')
     ORDER BY h.fecha DESC, h.historial_id DESC
     LIMIT 1
   `);

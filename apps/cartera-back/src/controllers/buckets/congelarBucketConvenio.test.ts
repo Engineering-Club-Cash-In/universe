@@ -65,6 +65,17 @@ describe("bucketParaCongelarEnConvenio", () => {
       BUCKET_CONVENIO_ATRASADO,
     );
   });
+
+  // Toda fila `EN_CONVENIO` que este lector pueda ver es de un convenio
+  // ANTERIOR (si fuera del vigente, `tieneBucketDeConvenio` habría cortado
+  // antes). Sin la exclusión el vigilante reinsertaba ese bucket viejo después
+  // del corte nuevo y lo dejaba certificado para siempre.
+  it("ignora el historial de convenios anteriores", async () => {
+    const registro: string[] = [];
+    const ej = ejecutorFalso([[]], registro);
+    await bucketParaCongelarEnConvenio(1, 0, ej as never);
+    expect(registro[0]).toContain("status_credito IS DISTINCT FROM");
+  });
 });
 
 describe("tieneBucketDeConvenio", () => {

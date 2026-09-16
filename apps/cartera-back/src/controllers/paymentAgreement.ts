@@ -399,32 +399,125 @@ export async function createPaymentAgreement(
     // ============================================
 
     // ============================================
-    // 💸 ELIMINAR MORA ACTIVA (si existe)
+    // 🚪 SALIDA DEL RÉGIMEN NORMAL — UNA SOLA TRANSACCIÓN
     // ============================================
-    console.log("✅ Paso 13: Eliminando mora activa del crédito (si existe)...");
+    // Tres pasos que hasta acá corrían sueltos: borrar la mora activa, pasar
+    // el crédito a EN_CONVENIO y congelar su bucket.
+    //
+    // EL ORDEN ERA EL PROBLEMA (review de Codex, P2). La lectura del bucket
+    // iba al final, después de las dos mutaciones que destruyen la información
+    // con la que se deriva: sin mora activa y con el status ya cambiado,
+    // `bucketAntesDelConvenio` se queda sin sus dos primeras fuentes y cae al
+    // COALESCE por cuotas atrasadas, que sin mora da 0 → B0. Para todo crédito
+    // sin historial previo el convenio se congelaba en B0 — exactamente el
+    // "borrón y cuenta nueva" que esta fase existe para impedir. El comentario
+    // de abajo decía "la lectura tiene que ir ANTES de borrar la mora y de
+    // cambiar el status"; el código la tenía después.
+    //
+    // Ahora el lock se toma UNA vez y adentro va, en este orden: leer →
+    // borrar mora → cambiar status → congelar. De paso las dos mutaciones
+    // quedan atómicas: el crédito ya no puede quedarse sin mora y con el
+    // status viejo si el UPDATE falla.
+    //
+    // Los dos pasos FALIBLES van cada uno en su SAVEPOINT (`tx.transaction`):
+    // en Postgres un statement que falla aborta la transacción entera, y ni la
+    // lectura del bucket ni el congelamiento pueden tumbar la creación de un
+    // convenio —hay plata de por medio—. Con el savepoint su fallo se descarta
+    // solo, el resto commitea y el vigilante repara lo que falte.
+    console.log("✅ Paso 13: Cerrando el régimen normal del crédito...");
+    let morasEliminadasCount = 0;
+    let bucketCongelado: number | null = null;
+    const resultadoUpdate = await db.transaction(async (tx) => {
+      // La llave es la misma que usa la reasignación de asesor
+      // (CREDITO_ASESOR_LOCK_NAMESPACE, credito_id): el congelamiento fija
+      // bucket y dueño, así que pertenece a esa familia de operaciones por
+      // crédito. Cubre también la LECTURA, no solo el INSERT: si el vigilante
+      // arranca en medio, toma el lock primero e inserta su fallback B2/B4, el
+      // firmante encontraría esa fila y descartaría el valor autoritativo que
+      // ya tenía en la mano — el bucket de un crédito sin historial terminaba
+      // decidido por el job en vez de por la firma.
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(${CREDITO_ASESOR_LOCK_NAMESPACE}, ${credit_id})`,
+      );
 
-    const morasEliminadas = await db
-      .delete(moras_credito)
-      .where(
-        and(
-          eq(moras_credito.credito_id, credit_id),
-          eq(moras_credito.activa, true)
+      // 1. EL BUCKET, ANTES DE TOCAR NADA.
+      let bucketAlFirmar: number | null = null;
+      try {
+        bucketAlFirmar = await tx.transaction((sp) =>
+          bucketAntesDelConvenio(credit_id, sp),
+        );
+      } catch (errLectura) {
+        console.error(
+          "🧊 ⚠️ No se pudo leer el bucket al firmar (lo resolverá el vigilante):",
+          errLectura,
+        );
+      }
+
+      // 2. La mora activa se va: el convenio la absorbe.
+      const morasEliminadas = await tx
+        .delete(moras_credito)
+        .where(
+          and(
+            eq(moras_credito.credito_id, credit_id),
+            eq(moras_credito.activa, true)
+          )
         )
-      )
-      .returning();
+        .returning();
+      morasEliminadasCount = morasEliminadas.length;
 
-    if (morasEliminadas.length > 0) {
-      console.log(`✅ Se eliminaron ${morasEliminadas.length} mora(s) activa(s)`);
+      // 3. El crédito sale del funnel normal.
+      const cambio = await tx
+        .update(creditos)
+        .set({
+          statusCredit: "EN_CONVENIO",
+        })
+        .where(eq(creditos.credito_id, credit_id))
+        .returning();
+
+      // 4. CONGELAR EL BUCKET (COBROS-02 Fase 2). El crédito se queda en el
+      //    bucket que tenía al firmar, con su asesor, hasta que pague completo
+      //    o alguien deshaga el convenio (decisión 9).
+      if (bucketAlFirmar === null) {
+        console.warn(
+          "🧊 No se pudo determinar el bucket al firmar; lo resolverá el job de convenios",
+        );
+      } else {
+        try {
+          bucketCongelado = await tx.transaction((sp) =>
+            congelarBucketPorConvenio({
+              credito_id: credit_id,
+              bucket: bucketAlFirmar,
+              convenio_id: agreement.convenio_id,
+              // Acota la idempotencia a ESTE convenio: un crédito que ya tuvo
+              // uno antes conserva su fila vieja en la bitácora (append-only)
+              // y sin el corte nunca se volvía a congelar.
+              desde: agreement.created_at
+                ? new Date(agreement.created_at)
+                : new Date(),
+              // Con ejecutor propio: la transacción y el lock los maneja este
+              // bloque, que es quien necesita que abarquen también la lectura.
+              ejecutor: sp,
+            }),
+          );
+        } catch (errCongelamiento) {
+          console.error(
+            "🧊 ⚠️ No se pudo congelar el bucket del convenio (lo resolverá el vigilante):",
+            errCongelamiento,
+          );
+        }
+      }
+
+      return cambio;
+    });
+
+    if (morasEliminadasCount > 0) {
+      console.log(`✅ Se eliminaron ${morasEliminadasCount} mora(s) activa(s)`);
     } else {
       console.log("ℹ️ No había moras activas para eliminar");
     }
-    const resultadoUpdate = await db
-      .update(creditos)
-      .set({
-        statusCredit: "EN_CONVENIO",
-      })
-      .where(eq(creditos.credito_id, credit_id))
-      .returning();
+    if (bucketCongelado !== null) {
+      console.log(`🧊 Bucket congelado en B${bucketCongelado} por el convenio`);
+    }
 
     console.log("🔥 Resultado del UPDATE:", JSON.stringify(resultadoUpdate, null, 2));
     console.log("🔥 Cantidad de registros actualizados:", resultadoUpdate.length);
@@ -438,61 +531,6 @@ export async function createPaymentAgreement(
     }
 
     console.log("🔥 ========== FIN ACTUALIZACIÓN DE ESTADO ==========");
-
-    // ============================================
-    // 🧊 CONGELAR EL BUCKET (COBROS-02 Fase 2)
-    // ============================================
-    // El crédito se queda en el bucket que tenía al firmar, con su asesor,
-    // hasta que pague completo o alguien deshaga el convenio (decisión 9).
-    //
-    // LEER EL BUCKET Y CONGELARLO VAN JUNTOS, bajo el mismo lock por crédito
-    // (review de Codex, P2). Antes el lock cubría solo la comprobación y el
-    // INSERT, y la lectura del bucket quedaba afuera: el vigilante podía
-    // arrancar en medio, tomar el lock primero e insertar su fallback B2/B4,
-    // y después el firmante encontraba esa fila y descartaba el valor
-    // autoritativo que ya tenía en la mano. El bucket de un crédito sin
-    // historial terminaba decidido por el job en vez de por la firma.
-    //
-    // La lectura tiene que ir ANTES de borrar la mora y de cambiar el status:
-    // los dos pasos que siguen destruyen la información con la que se deriva.
-    //
-    // No lanza y no aborta la creación: el convenio ya existe y tiene plata de
-    // por medio. Si esto falla, el crédito queda sin bucket visible hasta la
-    // siguiente corrida del job de convenios, que lo arregla (red de seguridad).
-    try {
-      await db.transaction(async (tx) => {
-        await tx.execute(
-          sql`SELECT pg_advisory_xact_lock(${CREDITO_ASESOR_LOCK_NAMESPACE}, ${credit_id})`,
-        );
-        const bucketAlFirmar = await bucketAntesDelConvenio(credit_id, tx);
-        if (bucketAlFirmar === null) {
-          console.warn(
-            "🧊 No se pudo determinar el bucket al firmar; lo resolverá el job de convenios",
-          );
-          return;
-        }
-        const congelado = await congelarBucketPorConvenio({
-          credito_id: credit_id,
-          bucket: bucketAlFirmar,
-          convenio_id: agreement.convenio_id,
-          // Acota la idempotencia a ESTE convenio: un crédito que ya tuvo uno
-          // antes conserva su fila vieja en la bitácora (append-only) y sin el
-          // corte nunca se volvía a congelar.
-          desde: agreement.created_at ? new Date(agreement.created_at) : new Date(),
-          // Con ejecutor propio: la transacción y el lock los maneja este
-          // bloque, que es quien necesita que abarquen también la lectura.
-          ejecutor: tx,
-        });
-        if (congelado !== null) {
-          console.log(`🧊 Bucket congelado en B${congelado} por el convenio`);
-        }
-      });
-    } catch (errCongelamiento) {
-      console.error(
-        "🧊 ⚠️ No se pudo congelar el bucket del convenio (lo resolverá el vigilante):",
-        errCongelamiento,
-      );
-    }
 
     // ============================================
     // 🎉 RESPUESTA EXITOSA

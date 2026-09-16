@@ -202,14 +202,17 @@ Se re-siembran por **cómo están pagando hoy**, no por su origen:
 | **Al día** (cumpliendo su convenio) | **B2** |
 | **Atrasado** (debe alguna cuota del convenio) | **B4** |
 
-Aplica igual en el sandbox y en el pase a producción: es un script de **una sola corrida**,
-idempotente, que corre junto con el cambio de regla.
+Es un script de **una sola corrida**, idempotente, que va junto con el cambio de regla.
 
-> ⚠️ **Cómo se mide "al día" acá.** Se reusa el modelo que el job de convenios ya calcula —
-> meses atrasados = fechas de vencimiento distintas, pasadas, con algo impago, uniendo
-> cuotas del crédito no absorbidas por el convenio + cuotas del convenio vencidas. Cero
-> meses atrasados = al día → B2; uno o más → B4. **Confirmar con el PM** que ese es el
-> criterio esperado antes de correrlo en producción.
+> 🔸 **Corre en el sandbox de dev (`cartera_cobros2`), no en producción.** Todo COBROS-02
+> vive en ese schema mientras dure la rama, así que acá se mueve sin clavo: si el reparto
+> no convence, se vuelve a correr. El día que esta versión pase a producción, el criterio
+> se revisa entonces — no es una decisión que frene el desarrollo hoy.
+
+**Cómo se mide "al día" acá.** Se reusa el modelo que el job de convenios ya calcula: meses
+atrasados = fechas de vencimiento distintas, pasadas, con algo impago, uniendo las cuotas
+del crédito no absorbidas por el convenio + las cuotas del convenio vencidas. Cero meses
+atrasados = al día → B2; uno o más → B4.
 
 ### Fase 3 · Ficha 360 — banda roja y acciones
 
@@ -237,9 +240,10 @@ idempotente, que corre junto con el cambio de regla.
 
 ## Lo que sigue sin definirse
 
-**Nada bloqueante para arrancar.** Las tres preguntas que quedaban se cerraron el 15-sep
-(decisiones 16 a 19). Queda una sola cosa por confirmar, y no frena el desarrollo:
+**Nada.** Las tres preguntas que quedaban se cerraron el 15-sep (decisiones 16 a 19).
 
-1. **El criterio de "al día" de la re-siembra** (decisión 19): se propone usar el modelo de
-   meses atrasados que el job de convenios ya calcula. Confirmarlo con el PM **antes de
-   correr el script en producción**, no antes de escribirlo.
+Y una aclaración que evita cautela de más: **este plan se ejecuta contra el sandbox de dev
+(`cartera_cobros2`)**, no contra producción. Los scripts de re-siembra y los cambios de
+regla se prueban ahí y se pueden repetir cuantas veces haga falta. El pase a producción es
+otro momento, con su propio runbook
+([RUNBOOK-refrescar-sandbox.md](./RUNBOOK-refrescar-sandbox.md) es el ensayo).

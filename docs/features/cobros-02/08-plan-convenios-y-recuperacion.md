@@ -141,21 +141,52 @@ nada: ni cuotas vencidas ni mora.
 "Mi día" ya no se pinta para admin/supervisor: en su lugar va **Cola del día**, y
 `/cobros/mi-dia` los redirige en vez de mostrarles un cartel sin salida.
 
-### Fase 1 · Avisos — aditiva, no mueve ningún crédito
+### Fase 1 · Avisos — aditiva, no mueve ningún crédito ✅ implementada
 
 La que más valor da por lo que cuesta. Nada de esto toca un bucket.
 
-- Tipo nuevo en el enum `cobros_notif_tipo` (migración del CRM) para convenio incumplido.
-- Job que detecta cuotas de convenio vencidas e impagas y notifica **al asesor y al
-  supervisor**.
-- Meter `EN_CONVENIO` a la agenda del día, **tomando el monto de `convenioProximos.ts`**
-  (normal + convenio), no la cuota suelta de `cuotasProximas.ts`.
-- Pantalla **Alertas de Convenios**, calcada de `/cobros/promesas`: las mismas cuatro
-  tarjetas (Vencidas · Vencen hoy · Por vencer · Próximas) + ítem en el menú.
-- La señal de convenio vencido/por vencer en la Cola del día.
-- **Encender `CONVENIO_WHATSAPP_ENABLED`** y validar un envío real. El código de los
-  recordatorios D-5/D-3/D-1/D-0 ya existe (`send-convenio-reminders.ts`) pero está apagado:
-  sin esto, el criterio 5 del ticket no se cumple aunque esté implementado.
+- ✅ Tipo nuevo `convenio_incumplido` en `cobros_notif_tipo` (migración **0054** del CRM).
+- ✅ Job `check-convenios-incumplidos.ts`, en la tanda de las 8:00 GT junto a las otras
+  alertas de cobros. Notifica **al asesor y a los `cobros_supervisor`**.
+- ✅ `EN_CONVENIO` entra a la agenda del día (`cuotasProximas.ts`, `solo_al_dia=false`) y
+  `monto_cuota` pasa a ser **cuota normal + lo que resta de la cuota del convenio** del
+  mismo día, con el desglose aparte. Premora (`solo_al_dia=true`) no cambia.
+- ✅ Pantalla **Alertas de Convenios** (`/cobros/alertas-convenios`), calcada de
+  `/cobros/promesas`: las mismas cuatro tarjetas + ítem en el menú (desktop y móvil).
+- ✅ Fuente única de las dos cosas: `GET /convenio/alertas` en cartera-back
+  (`convenioAlertas.ts`), **una fila por convenio** con su cuota impaga más urgente ya
+  clasificada (vencida · vence hoy · por vencer · próxima).
+- ✅ `recordatoriosConvenio` pasa de `false` a `isTestModeEnabled()`.
+
+#### Dedup por episodio, no por ventana de tiempo
+
+Los jobs de alertas viejos deduplican con `created_at > now() - 24h`. Sirve cuando el
+episodio dura un día; **no sirve para un convenio incumplido**, que sigue incumplido
+mañana: la ventana repetiría el aviso cada mañana al asesor y a **cada** supervisor.
+
+La migración 0054 agrega `notifications.cobros_dedup_key` (text) con un índice único
+parcial sobre `(cobros_tipo, cobros_dedup_key, assigned_to)`. La llave es del **episodio**:
+
+| Alerta | Llave | Qué la hace cambiar |
+| --- | --- | --- |
+| `convenio_incumplido` | `convenio:<id>:venc:<fecha>` | Pagar la cuota vencida más vieja y seguir debiendo otra |
+| `bot_cliente_escribio` (Fase 1.b) | `bot:sesion:<uuid>` | Una conversación nueva del bot |
+
+La unicidad la sostiene el índice con `ON CONFLICT DO NOTHING`, **no** un `SELECT` previo
+(que no protege bajo concurrencia). Es genérica a propósito: la siguiente alerta que
+necesite dedup por episodio no necesita una columna nueva.
+
+#### El envío real al cliente sigue apagado, y es a propósito
+
+`recordatoriosConvenio` quedó atado a `isTestModeEnabled()` y **no** a un `true` fijo —
+exactamente el mismo criterio (y la misma razón) que `recordatorioPagalo`. El despliegue
+documentado de esta rama corre contra una **copia de producción**, y con
+`TEST_MESSAGE=false` el emisor le escribe al teléfono real del cliente.
+
+Con el modo prueba activo, el circuito completo queda validado (cartera → plantilla →
+envío → `cobros_send_logs`) sin escribirle a nadie real. Para el envío de verdad hacen
+falta dos cosas más, y las dos son **decisión de negocio**: `CONVENIO_WHATSAPP_ENABLED=true`
+en el ambiente y apagar el modo prueba.
 
 ### Fase 1.b · Aviso cuando el cliente escribe en el bot
 
